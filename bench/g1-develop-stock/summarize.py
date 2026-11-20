@@ -8,11 +8,18 @@ import ast
 import csv
 import hashlib
 import math
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+
 SEEDS = tuple(range(2000, 2012))
+# code_revision on the GMIN arm of bench/gmin-panel/rows.csv.
+GMIN_REVISION = "aac1548a8aec13b53ad12a8d6904625081685d2e"
 SYSTEMS = (
     ("m30r6", 30, 400_000),
     ("m30r14", 30, 400_000),
@@ -62,6 +69,7 @@ SUMMARY_FIELDS = [
     "n",
     "anneal_hits",
     "gmin_hits",
+    "gmin_revision",
     "fisher_p",
     "anneal_calls_median",
     "gmin_calls_median",
@@ -176,11 +184,11 @@ def g1_rows() -> tuple[list[dict[str, str]], list[dict[str, str]]]:
     return measured, paired
 
 
-def g0_rows() -> tuple[list[dict[str, str]], dict[str, list[dict[str, str]]]]:
+def g0_rows() -> list[dict[str, str]]:
     raw = load(ROOT / "bench/g0-lj-stock/rows.csv")
     manifest = load(ROOT / "bench/g0-lj-stock/manifest.csv")
     specs: dict[str, tuple[int, int]] = {}
-    comparison: dict[str, list[dict[str, str]]] = {}
+    manifest_rows: dict[str, int] = {}
     for row in manifest:
         if not row["cell"].startswith("gmin-"):
             continue
@@ -188,15 +196,7 @@ def g0_rows() -> tuple[list[dict[str, str]], dict[str, list[dict[str, str]]]]:
         if name not in G0_CELLS:
             continue
         specs[name] = (int(row["n"]), int(row["budget"]))
-        comparison.setdefault(name, []).append(
-            {
-                "seed": row["seed"],
-                "hit": row["paper_hit"],
-                "evals_to_hit": (
-                    row["paper_calls"] if row["paper_hit"] == "1" else str(row["budget"])
-                ),
-            }
-        )
+        manifest_rows[name] = manifest_rows.get(name, 0) + 1
     out = []
     for row in raw:
         if not row["cell"].startswith("gmin-"):
@@ -228,9 +228,9 @@ def g0_rows() -> tuple[list[dict[str, str]], dict[str, list[dict[str, str]]]]:
     if len(out) != len(G0_CELLS) * len(SEEDS):
         raise SystemExit("reused panel does not contain exactly 156 rows")
     for name in G0_CELLS:
-        if len(comparison.get(name, [])) != 12:
-            raise SystemExit(f"{name}: comparison does not contain 12 rows")
-    return out, comparison
+        if manifest_rows.get(name, 0) != 12:
+            raise SystemExit(f"{name}: manifest does not contain 12 rows")
+    return out
 
 
 def panel_rows(measured: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -265,6 +265,65 @@ def panel_rows(measured: list[dict[str, str]]) -> list[dict[str, str]]:
                 "source": "g1",
             }
         )
+    return out
+
+
+def panel_references() -> dict[str, float]:
+    """Reference energy each anneal comparison row was scored against."""
+    refs: dict[str, float] = {}
+    for row in load(ROOT / "bench/g0-lj-stock/manifest.csv"):
+        if not row["cell"].startswith("gmin-"):
+            continue
+        name = row["cell"][5:]
+        value = float(row["reference"])
+        previous = refs.get(name)
+        if previous is not None and previous != value:
+            raise SystemExit(f"{name}: reference differs across seeds")
+        refs[name] = value
+    return refs
+
+
+def gmin_arm(
+    rows: list[dict[str, str]],
+    references: dict[str, float],
+) -> dict[str, list[dict[str, str]]]:
+    """Latest GMIN row of each seed, with the hit re-derived from best energy.
+
+    A row counts only when its code is ``gmin`` and its code revision is
+    the GMIN revision. The hit uses the same rule as the anneal arm:
+    best energy at or below that system's reference plus the shared
+    tolerance. A miss is entered at the budget. A system with no such
+    row is omitted.
+    """
+    latest: dict[tuple[str, str], dict[str, str]] = {}
+    for row in rows:
+        if row.get("code") != "gmin" or row.get("code_revision") != GMIN_REVISION:
+            continue
+        latest[(row["system"], row["seed"])] = row
+    grouped: dict[str, list[dict[str, str]]] = {}
+    for (name, _seed), row in latest.items():
+        grouped.setdefault(name, []).append(row)
+    out: dict[str, list[dict[str, str]]] = {}
+    for name, group in grouped.items():
+        by_seed = {row["seed"]: row for row in group}
+        if [str(seed) for seed in SEEDS] != sorted(by_seed, key=int) or len(by_seed) != len(SEEDS):
+            raise SystemExit(f"{name}: GMIN rows do not cover seeds 2000-2011")
+        if name not in references:
+            raise SystemExit(f"{name}: anneal reference is missing")
+        reference = references[name]
+        arm: list[dict[str, str]] = []
+        for seed in SEEDS:
+            row = by_seed[str(seed)]
+            hit = energy_hits(float(row["best"]), reference, DEFAULT_HIT_TOL)
+            arm.append(
+                {
+                    "seed": str(seed),
+                    "hit": "1" if hit else "0",
+                    "evals_to_hit": row["evals_to_hit"] if hit else row["budget"],
+                    "revision": row["code_revision"],
+                }
+            )
+        out[name] = arm
     return out
 
 
@@ -340,38 +399,53 @@ def summary(
             (row for row in anneal_rows if row["system"] == name),
             key=lambda row: int(row["seed"]),
         )
-        other = sorted(comparisons[name], key=lambda row: int(row["seed"]))
-        if len(arm) != 12 or len(other) != 12:
+        other = sorted(comparisons.get(name, []), key=lambda row: int(row["seed"]))
+        if len(arm) != 12:
             raise SystemExit(f"{name}: n differs from 12")
         if any(int(row["budget"]) != budget for row in arm):
             raise SystemExit(f"{name}: budget differs from source script")
         arm_hit = [row["hit"] == "1" for row in arm]
-        other_hit = [row["hit"] == "1" for row in other]
         arm_calls = [
             float(row["evals_to_hit"]) if hit else math.inf
             for row, hit in zip(arm, arm_hit, strict=True)
         ]
+        outside = [float(row["outside_s"]) / float(row["charged"]) for row in arm]
+        ah = sum(arm_hit)
+        record = {
+            "system": name,
+            "n": "12",
+            "anneal_hits": str(ah),
+            "gmin_hits": "",
+            "gmin_revision": "",
+            "fisher_p": "",
+            "anneal_calls_median": fmt(type7(arm_calls)),
+            "gmin_calls_median": "",
+            "mannwhitney_u": "",
+            "mannwhitney_p": "",
+            "anneal_outside_s_per_call_median": f"{type7(outside):.12g}",
+        }
+        if not other:
+            out.append(record)
+            continue
+        if len(other) != 12:
+            raise SystemExit(f"{name}: GMIN n differs from 12")
+        revisions = {row["revision"] for row in other}
+        if revisions != {GMIN_REVISION}:
+            raise SystemExit(f"{name}: GMIN revision differs")
+        other_hit = [row["hit"] == "1" for row in other]
         other_calls = [
             float(row["evals_to_hit"]) if hit else math.inf
             for row, hit in zip(other, other_hit, strict=True)
         ]
-        ah, gh = sum(arm_hit), sum(other_hit)
+        gh = sum(other_hit)
         u, mw_p = mann_whitney(arm_calls, other_calls)
-        outside = [float(row["outside_s"]) / float(row["charged"]) for row in arm]
-        out.append(
-            {
-                "system": name,
-                "n": "12",
-                "anneal_hits": str(ah),
-                "gmin_hits": str(gh),
-                "fisher_p": f"{fisher(ah, gh):.6g}",
-                "anneal_calls_median": fmt(type7(arm_calls)),
-                "gmin_calls_median": fmt(type7(other_calls)),
-                "mannwhitney_u": f"{u:.6g}",
-                "mannwhitney_p": f"{mw_p:.6g}",
-                "anneal_outside_s_per_call_median": f"{type7(outside):.12g}",
-            }
-        )
+        record["gmin_hits"] = str(gh)
+        record["gmin_revision"] = GMIN_REVISION
+        record["fisher_p"] = f"{fisher(ah, gh):.6g}"
+        record["gmin_calls_median"] = fmt(type7(other_calls))
+        record["mannwhitney_u"] = f"{u:.6g}"
+        record["mannwhitney_p"] = f"{mw_p:.6g}"
+        out.append(record)
     return out
 
 
@@ -385,19 +459,12 @@ def write(path: Path, fields: list[str], rows: list[dict[str, str]]) -> None:
 def main() -> None:
     check_specs()
     measured, paired = g1_rows()
-    g0, g0_comparison = g0_rows()
-    g1_comparison: dict[str, list[dict[str, str]]] = {}
-    for row in paired:
-        if row["code"] == "gmin":
-            g1_comparison.setdefault(row["system"], []).append(row)
+    g0 = g0_rows()
     combined = [*g0, *({**row, "source": "g1"} for row in measured)]
+    comparisons = gmin_arm(load(ROOT / "bench/gmin-panel/rows.csv"), panel_references())
     write(HERE / "rows.csv", ROW_FIELDS, paired)
     write(HERE / "panel-rows.csv", PANEL_FIELDS, panel_rows(measured))
-    write(
-        HERE / "summary.csv",
-        SUMMARY_FIELDS,
-        summary(combined, {**g0_comparison, **g1_comparison}),
-    )
+    write(HERE / "summary.csv", SUMMARY_FIELDS, summary(combined, comparisons))
 
 
 if __name__ == "__main__":

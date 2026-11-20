@@ -59,3 +59,12 @@ cells followed by the ten added cells. `summary.csv` reports the
 two-sided Fisher exact test, the tie- and continuity-corrected
 Mann-Whitney test, type-7 call medians, and the median anneal outside
 time per charged call.
+
+`gmin_hits` counts only rows with code `gmin` and code revision
+`aac1548a8aec13b53ad12a8d6904625081685d2e` in
+`bench/gmin-panel/rows.csv`, using the latest stored row of each seed.
+The hit is re-derived from that row's best energy against the reference
+in `bench/g0-lj-stock/manifest.csv` plus the shared hit tolerance, the
+same rule used for the anneal arm. `gmin_revision` records that
+revision. A system with no such row has an empty `gmin_hits`, and the
+Fisher and Mann-Whitney columns are empty with it.
