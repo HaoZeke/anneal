@@ -2893,18 +2893,17 @@ def manuscript_new(audit: Audit) -> None:
     audit.said("src/methods/lattice_search.rs", "hollow_cutoff: 1.47 * r,")
     audit.said("src/methods/lattice_search.rs", "clearance: 0.85 * r,")
     audit.said("src/methods/lattice_search.rs", "interior_coordination: 12,")
-    for fragment in ("fcc_cut(n_atoms, centre, nearest)", "binary_geometry::mackay_cut(n_atoms, nearest)",
-                     "binary_geometry::polyicosahedral_cut(n_atoms, join, nearest)"):
-        audit.record(fragment not in hop, "src/methods/cluster_hopping.rs", "template cut proposal is removed", "absent",
-                     "absent" if fragment not in hop else "present")
+    audit.said("src/methods/cluster_hopping.rs", "binary_geometry::packing_candidates(n, nearest)")
     audit.record("&& cfg.prior_core" not in hop, "src/methods/cluster_hopping.rs", "prior_core branch is removed",
                  "absent", "absent" if "&& cfg.prior_core" not in hop else "present")
     audit.record("&& species.len() >= 2" not in hop, "src/methods/cluster_hopping.rs", "binary motif-gated branch is removed",
                  "absent", "absent" if "&& species.len() >= 2" not in hop else "present")
     geom = audit.text("src/methods/cluster_hopping/binary_geometry.rs")
-    audit.record("pub(crate) fn mackay_cap(n: usize, nearest: f64)" not in geom,
-                 "src/methods/cluster_hopping/binary_geometry.rs", "mackay_cap helper is removed", "absent",
-                 "absent" if "pub(crate) fn mackay_cap(n: usize, nearest: f64)" not in geom else "present")
+    for helper in ("fcc_cut", "polyicosahedral_cut", "mackay_cut", "mackay_cap", "axial_spine_cut",
+                   "quench_as_placed"):
+        audit.record(f"fn {helper}" in geom, "src/methods/cluster_hopping/binary_geometry.rs",
+                     "generic packing helper is available", "present",
+                     "present" if f"fn {helper}" in geom else "absent")
 
     # Host and commands.
     receipt = "paper/jctc/logs/cuh2-hardware-receipt.txt"
