@@ -580,8 +580,29 @@ impl HopStop {
     }
 }
 
+/// Calls hidden from a hop by [`Ledger::hold_tail`], owned by the caller
+/// that held them.
+///
+/// Only a ledger builds one, and it can be neither copied nor cloned, so a
+/// caller can restore only the calls it held. [`Ledger::release_tail`] empties
+/// it: a second release of the same hold restores nothing.
+#[derive(Debug)]
+#[must_use = "held calls stay hidden from the hop until the hold is released"]
+pub struct TailHold {
+    ledger: u64,
+    calls: usize,
+}
+
+impl TailHold {
+    /// Calls this hold still keeps hidden.
+    pub fn calls(&self) -> usize {
+        self.calls
+    }
+}
+
 /// Charged objective-work ledger with optional per-relaxation evidence.
 pub struct Ledger {
+    id: u64,
     budget: usize,
     spent: usize,
     /// Fractional debt accumulated by partial-system evaluations, settled
@@ -649,7 +670,9 @@ impl Drop for DiagnosticQuench<'_> {
 impl Ledger {
     /// Creates a ledger with `budget` charged evaluations.
     pub fn new(budget: usize) -> Self {
+        static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         Self {
+            id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             budget,
             spent: 0,
             fract: 0.0,
@@ -693,19 +716,32 @@ impl Ledger {
 
     /// Hide `reserve` calls from the hop so a final polish can spend them.
     ///
-    /// [`Ledger::release_tail`] puts them back. A reserve larger than the
-    /// room left is cut to that room.
-    pub fn hold_tail(&mut self, reserve: usize) {
+    /// A reserve larger than the room left is cut to that room. The returned
+    /// [`TailHold`] is the caller's claim on exactly the calls hidden;
+    /// [`Ledger::release_tail`] puts them back.
+    pub fn hold_tail(&mut self, reserve: usize) -> TailHold {
         let room = self.budget.saturating_sub(self.spent);
         let reserve = reserve.min(room);
         self.budget -= reserve;
         self.held_tail = self.held_tail.saturating_add(reserve);
+        TailHold {
+            ledger: self.id,
+            calls: reserve,
+        }
     }
 
-    /// Restore calls hidden by [`Ledger::hold_tail`].
-    pub fn release_tail(&mut self) {
-        self.budget = self.budget.saturating_add(self.held_tail);
-        self.held_tail = 0;
+    /// Restore the calls `hold` keeps hidden and return how many came back.
+    ///
+    /// Other holds are untouched. A hold already released, or one taken from
+    /// another ledger, restores nothing.
+    pub fn release_tail(&mut self, hold: &mut TailHold) -> usize {
+        if hold.ledger != self.id {
+            return 0;
+        }
+        let released = std::mem::take(&mut hold.calls).min(self.held_tail);
+        self.budget = self.budget.saturating_add(released);
+        self.held_tail -= released;
+        released
     }
 
     /// Charged calls spent tightening recorded answers after the hop.
@@ -2535,7 +2571,7 @@ fn finish_arm(arms: &mut Vec<ArmCount>, name: &str, accepted: bool, improved: bo
 /// the paper preset does not build one. [`ArmSelection::Uniform`] replaces
 /// the depth posterior and the floored Thompson draw with one uniform index
 /// and consumes nothing else from the generator.
-fn choose_arm<R: Rng + ?Sized>(
+fn choose_arm<R, F>(
     cfg: &Config,
     context: Option<ArrayView1<f64>>,
     contextual: &mut ContextualAllocator,
@@ -2543,20 +2579,48 @@ fn choose_arm<R: Rng + ?Sized>(
     allocator: &mut FlooredThompson,
     n_arms: usize,
     rng: &mut R,
-) -> usize {
+    open: F,
+) -> usize
+where
+    R: Rng + ?Sized,
+    F: Fn(usize) -> bool,
+{
+    let unrestricted = (0..n_arms).all(&open);
     if let Some(features) = context {
-        return contextual.select(features, rng);
+        return if unrestricted {
+            contextual.select(features, rng)
+        } else {
+            contextual.select_where(features, rng, &open)
+        };
     }
     if cfg.arm_selection == ArmSelection::Uniform {
-        return rng.random_range(0..n_arms);
+        if unrestricted {
+            return rng.random_range(0..n_arms);
+        }
+        let arms: Vec<_> = (0..n_arms).filter(|&arm| open(arm)).collect();
+        assert!(!arms.is_empty(), "at least one move arm must be open");
+        return arms[rng.random_range(0..arms.len())];
     }
     if cfg.allocate_moves && cfg.depth_reward {
-        return depth_allocator.select(rng);
+        return if unrestricted {
+            depth_allocator.select(rng)
+        } else {
+            depth_allocator.select_where(rng, &open)
+        };
     }
     if cfg.allocate_moves {
-        return allocator.select(rng);
+        return if unrestricted {
+            allocator.select(rng)
+        } else {
+            allocator.select_where(rng, &open)
+        };
     }
-    rng.random_range(0..n_arms)
+    if unrestricted {
+        return rng.random_range(0..n_arms);
+    }
+    let arms: Vec<_> = (0..n_arms).filter(|&arm| open(arm)).collect();
+    assert!(!arms.is_empty(), "at least one move arm must be open");
+    arms[rng.random_range(0..arms.len())]
 }
 
 /// Kernels the chain actually draws, including the energy-lattice arm.
@@ -6766,6 +6830,7 @@ where
             &mut allocator,
             kernels.len(),
             rng,
+            |_| true,
         );
         // One unlike-pair exchange on a cadence read from its acceptance.
         // The depth allocator drops the homotop once geometry moves pay
@@ -7146,6 +7211,7 @@ where
                     &mut allocator,
                     kernels.len(),
                     rng,
+                    |_| true,
                 );
                 if may_idle(&kernels[k2].name()) {
                     continue;
@@ -10290,6 +10356,140 @@ mod tests {
     use super::*;
 
     #[test]
+    fn releasing_a_fork_tail_keeps_the_molecular_reserve() {
+        let mut ledger = Ledger::new(100);
+        let mut polish = ledger.hold_tail(8);
+        assert_eq!(polish.calls(), 8);
+        let mut fork = ledger.hold_tail(24);
+        assert_eq!(fork.calls(), 24);
+        assert_eq!(ledger.held_tail, 32);
+        assert_eq!(ledger.release_tail(&mut fork), 24);
+        assert_eq!(ledger.held_tail, 8, "the molecular reserve was released");
+        assert_eq!(ledger.budget(), 92);
+        assert_eq!(ledger.release_tail(&mut polish), 8);
+        assert_eq!(ledger.held_tail, 0);
+        assert_eq!(ledger.budget(), 100);
+
+        let mut short = Ledger::new(5);
+        assert_eq!(
+            short.hold_tail(9).calls(),
+            5,
+            "a reserve larger than the room was not cut"
+        );
+    }
+
+    #[test]
+    fn releasing_a_fork_tail_twice_keeps_the_molecular_reserve() {
+        let mut ledger = Ledger::new(100);
+        let polish = ledger.hold_tail(8);
+        let mut fork = ledger.hold_tail(24);
+        assert_eq!(ledger.release_tail(&mut fork), 24);
+        assert_eq!(
+            ledger.release_tail(&mut fork),
+            0,
+            "a second release restored calls"
+        );
+        assert_eq!(
+            ledger.held_tail,
+            polish.calls(),
+            "the second release took the molecular reserve"
+        );
+        assert_eq!(ledger.budget(), 92);
+    }
+
+    #[test]
+    fn a_hold_from_another_ledger_restores_nothing() {
+        let mut mine = Ledger::new(50);
+        let mut yours = Ledger::new(50);
+        let mut mine_held = mine.hold_tail(10);
+        let mut yours_held = yours.hold_tail(10);
+        assert_eq!(mine.release_tail(&mut yours_held), 0);
+        assert_eq!(mine.held_tail, 10);
+        assert_eq!(yours_held.calls(), 10, "a foreign release emptied the hold");
+        assert_eq!(yours.release_tail(&mut yours_held), 10);
+        assert_eq!(mine.release_tail(&mut mine_held), 10);
+        assert_eq!(mine.budget(), 50);
+        assert_eq!(yours.budget(), 50);
+    }
+
+    #[test]
+    fn parked_move_arms_are_closed_in_every_selection_mode() {
+        let mut cfg = Config::for_cluster(3);
+        let context = Array1::from(vec![1.0, 0.5, -0.5]);
+        let open = |arm| arm == 0;
+
+        for mode in 0..4 {
+            cfg.contextual_moves = mode == 0;
+            cfg.arm_selection = if mode == 1 {
+                ArmSelection::Uniform
+            } else {
+                ArmSelection::Posterior
+            };
+            cfg.allocate_moves = mode == 2;
+            cfg.depth_reward = false;
+            let mut contextual = ContextualAllocator::new(3, 3, 0.5);
+            let depth = crate::allocate::DepthAllocator::new(3);
+            let mut thompson = FlooredThompson::new(3);
+            let mut rng = StdRng::seed_from_u64(70 + mode);
+            for _ in 0..32 {
+                let selected = choose_arm(
+                    &cfg,
+                    cfg.contextual_moves.then_some(context.view()),
+                    &mut contextual,
+                    &depth,
+                    &mut thompson,
+                    3,
+                    &mut rng,
+                    open,
+                );
+                assert_eq!(selected, 0, "selection mode {mode} used a parked arm");
+            }
+        }
+    }
+
+    #[test]
+    fn an_open_library_draws_an_arm_without_allocating() {
+        let mut cfg = Config::for_cluster(1);
+        cfg.allocate_moves = false;
+        let mut rng = StdRng::seed_from_u64(11);
+        let mut contextual = ContextualAllocator::new(4, 3, 0.0);
+        let depth = crate::allocate::DepthAllocator::new(4);
+        let mut thompson = FlooredThompson::new(4);
+        let allocated = crate::test_alloc::count_allocations(|| {
+            for _ in 0..32 {
+                choose_arm(
+                    &cfg,
+                    None,
+                    &mut contextual,
+                    &depth,
+                    &mut thompson,
+                    4,
+                    &mut rng,
+                    |_| true,
+                );
+            }
+        });
+        assert_eq!(allocated, 0, "a uniform open draw built a vector");
+
+        cfg.allocate_moves = true;
+        let allocated = crate::test_alloc::count_allocations(|| {
+            for _ in 0..32 {
+                choose_arm(
+                    &cfg,
+                    None,
+                    &mut contextual,
+                    &depth,
+                    &mut thompson,
+                    4,
+                    &mut rng,
+                    |_| true,
+                );
+            }
+        });
+        assert_eq!(allocated, 0, "an open Thompson draw built a vector");
+    }
+
+    #[test]
     fn an_ordinary_target_improvement_uses_the_completed_quench_clock() {
         let mut cfg = Config::for_cluster(1);
         cfg.max_hops = Some(3);
@@ -10682,6 +10882,7 @@ mod tests {
                 &mut thompson,
                 n_arms,
                 &mut rng,
+                |_| true,
             );
             let expect = twin.random_range(0..n_arms);
             assert_eq!(got, expect);
@@ -10708,6 +10909,7 @@ mod tests {
                 &mut thompson,
                 n_arms,
                 &mut posterior_rng,
+                |_| true,
             );
             let via_posterior = depth.select(&mut direct_rng);
             assert_eq!(via_preset, via_posterior);
@@ -10730,6 +10932,7 @@ mod tests {
                 &mut thompson,
                 n_arms,
                 &mut left,
+                |_| true,
             ));
             posterior_seq.push(depth.select(&mut right));
         }

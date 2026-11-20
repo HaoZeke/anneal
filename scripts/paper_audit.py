@@ -56,6 +56,23 @@ HOST_COLUMNS = ("host",)
 EXTERNAL_REVISIONS = {"aac1548a8aec13b53ad12a8d6904625081685d2e": "GMIN source/SVNREV"}
 # Local revisions that rows cite, each with the pushed commit it was rebuilt as.
 ALIASES = "bench/revision-aliases.csv"
+# Remote branches the alias table cites, plus develop. A missing one means
+# the clone cannot answer the revision checks, so the audit stops.
+AUDIT_REMOTE_BRANCHES = (
+    "develop",
+    "bench/crest-gaps",
+    "bench/gmin-sc3",
+    "fix/gmin-sc",
+    "fix/gmin-sc2",
+)
+# Tips that still carry row revisions and are not named by the alias table.
+# They join the remote closure when the ref is present. A missing one does
+# not make the clone unauditable: the branch may have been deleted after merge.
+AUDIT_OPTIONAL_REMOTES = (
+    "record/repro-pin",
+    "bench/cov-floor2",
+    "fix/sc-shelf-waypoint",
+)
 # Cited revisions with no pushed equivalent. de22f437 records the ASE and GOFEE
 # panel from five campaign heads and sits on the last, e09e0487, alone. The
 # pushed history before it has one commit, 57735de1, that adds the two-hour
@@ -2463,7 +2480,7 @@ def provenance(audit: Audit) -> dict[str, str]:
     index = alias_index(names, table)
     aliases = verified_aliases(audit, table, index)
     unpushed = set()
-    for name in (n for n in names if not index.exists(n)):
+    for name in (n for n in names if not index.audited_exists(n)):
         if any(local.startswith(name) for local in aliases):
             continue
         unpushed.add(name)
@@ -2499,12 +2516,21 @@ class RevisionIndex:
     def __init__(self, names: tuple[str, ...], texts: tuple[str, ...], tips: tuple[str, ...], patched: tuple[str, ...]) -> None:
         asked = sorted({n for n in names + tips + patched if n})
         out = git("cat-file", "--batch-check", stdin="".join(f"{n}^{{commit}}\n" for n in asked)).stdout.splitlines()
-        self.commit = {n: line.split()[0] for n, line in zip(asked, out) if line.split()[1:2] == ["commit"]}
+        remote_refs = [f"refs/remotes/origin/{branch}" for branch in
+                       (*AUDIT_REMOTE_BRANCHES, *AUDIT_OPTIONAL_REMOTES)]
+        audited_refs = ["HEAD", *(ref for ref in remote_refs
+                                   if git("show-ref", "--verify", "--quiet", ref).returncode == 0),
+                        *git("for-each-ref", "--format=%(refname)", "refs/tags").stdout.split()]
+        audited_heads = git("rev-parse", *audited_refs).stdout.split()
+        self.commit = {n: line.split()[0] for n, line in zip(asked, out)
+                       if line.split()[1:2] == ["commit"]}
         self.parents: dict[str, list[str]] = {}
-        for line in git("rev-list", "--parents", "--all", *sorted(set(self.commit.values()))).stdout.splitlines():
+        roots = sorted({*audited_refs, *self.commit.values()})
+        for line in git("rev-list", "--parents", *roots).stdout.splitlines():
             commit, *parents = line.split()
             self.parents[commit] = parents
-        remote = git("for-each-ref", "--format=%(objectname)", "refs/remotes").stdout.split()
+        self.audited = self.closure(audited_heads)
+        remote = git("for-each-ref", "--format=%(objectname)", *remote_refs).stdout.split()
         self.remote = self.closure(r for r in remote if r in self.parents)
         self.patch_ids: dict[str, str] = {}
         shown = sorted({self.commit[p] for p in patched if p in self.commit})
@@ -2603,6 +2629,10 @@ class RevisionIndex:
     def exists(self, revision: str) -> bool:
         return revision in self.commit
 
+    def audited_exists(self, revision: str) -> bool:
+        """The revision exists in the histories the paper audit accepts."""
+        return self.resolve(revision) in self.audited
+
     def on_remote(self, revision: str) -> bool:
         """The commit is reachable from a ref fetched from the remote."""
         return self.resolve(revision) in self.remote
@@ -2656,12 +2686,12 @@ def verified_aliases(audit: Audit, table: list[dict[str, str]], index: RevisionI
     for row in table:
         local, pushed = row["local_revision"], row["pushed_revision"]
         where = f"{ALIASES} {local[:8]}"
-        checks = [("local revision is not in this repository", not index.exists(local))]
+        checks = [("local revision is not in this repository", not index.audited_exists(local))]
         for column in ("pushed_revision", "branch_revision"):
             revision = row[column]
             if not revision and column == "branch_revision":
                 continue
-            checks.append((f"{column} {revision[:8]} is in this repository", index.exists(revision)))
+            checks.append((f"{column} {revision[:8]} is in this repository", index.audited_exists(revision)))
             checks.append((f"{column} {revision[:8]} is on the remote", index.on_remote(revision)))
             checks.append((f"{column} {revision[:8]} has patch-id {row['patch_id'][:8]}", index.patch_id(revision) == row["patch_id"]))
         rows_commit = row["rows_commit"]
@@ -2697,6 +2727,14 @@ def unauditable() -> list[str]:
     if not git("for-each-ref", "--count=1", "refs/remotes").stdout.strip():
         problems.append("there are no remote-tracking refs; fetch the branches of origin "
                         "(git fetch origin '+refs/heads/*:refs/remotes/origin/*')")
+    version = re.search(r'^version = "([^"]+)"', (ROOT / "Cargo.toml").read_text(), re.M).group(1)
+    tag = f"v{version}"
+    if git("show-ref", "--verify", "--quiet", f"refs/tags/{tag}").returncode != 0:
+        problems.append(f"the release tag {tag} is not present; fetch tags from origin")
+    for branch in AUDIT_REMOTE_BRANCHES:
+        remote_ref = f"refs/remotes/origin/{branch}"
+        if git("show-ref", "--verify", "--quiet", remote_ref).returncode != 0:
+            problems.append(f"the remote ref origin/{branch} is not present; fetch {branch} from origin")
     wanted = [(row[c], row["branch"] if c == "branch_revision" else "develop")
               for row in alias_table() for c in ("pushed_revision", "branch_revision") if row[c]]
     out = git("cat-file", "--batch-check", stdin="".join(f"{rev}^{{commit}}\n" for rev, _ in wanted)).stdout.splitlines()

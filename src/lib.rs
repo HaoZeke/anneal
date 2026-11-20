@@ -335,3 +335,169 @@ pub use tempering::{
 };
 pub use variant::SaVariant;
 pub use version::ANNEAL_VERSION;
+
+/// Counts heap allocations on the test thread while a body runs.
+///
+/// Unit tests use it to show that an open arm draw does not build a vector.
+/// The counter and its enable flag are both thread-local. A concurrent test
+/// that clears its own flag cannot zero a measurement on another thread, and
+/// allocations on other threads are ignored.
+#[cfg(test)]
+mod test_alloc {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::Cell;
+
+    pub struct AllocCount;
+
+    thread_local! {
+        static COUNT: Cell<usize> = const { Cell::new(0) };
+        static WANT: Cell<usize> = const { Cell::new(0) };
+        static ENABLED: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// Allocations made on this thread while `body` runs.
+    pub fn count_allocations(body: impl FnOnce()) -> usize {
+        count_sized(0, body)
+    }
+
+    /// Allocations of exactly `size` bytes on this thread while `body` runs.
+    ///
+    /// A size of zero counts every allocation.
+    pub fn count_sized(size: usize, body: impl FnOnce()) -> usize {
+        WANT.with(|want| want.set(size));
+        ENABLED.with(|enabled| enabled.set(true));
+        COUNT.with(|count| count.set(0));
+        body();
+        let counted = COUNT.with(|count| count.get());
+        ENABLED.with(|enabled| enabled.set(false));
+        WANT.with(|want| want.set(0));
+        counted
+    }
+
+    unsafe impl GlobalAlloc for AllocCount {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            let ptr = unsafe { System.alloc(layout) };
+            note(layout.size(), !ptr.is_null());
+            ptr
+        }
+
+        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+            let ptr = unsafe { System.alloc_zeroed(layout) };
+            note(layout.size(), !ptr.is_null());
+            ptr
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            unsafe { System.dealloc(ptr, layout) };
+        }
+
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            let ptr = unsafe { System.realloc(ptr, layout, new_size) };
+            note(new_size, !ptr.is_null());
+            ptr
+        }
+    }
+
+    fn note(size: usize, live: bool) {
+        if !live || size == 0 || !ENABLED.with(|enabled| enabled.get()) {
+            return;
+        }
+        let want = WANT.with(|want| want.get());
+        if want == 0 || want == size {
+            COUNT.with(|count| count.set(count.get() + 1));
+        }
+    }
+}
+
+#[cfg(test)]
+mod alloc_race {
+    use std::sync::{Arc, Barrier};
+    use std::thread;
+
+    use ndarray::array;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+
+    use crate::allocate::FlooredThompson;
+    use crate::contextual::ContextualAllocator;
+    use crate::test_alloc::{count_allocations, count_sized};
+
+    /// Eight threads, 375 rounds each. A process-global enable flag drops
+    /// the closed-arm count on about one run in two hundred.
+    #[test]
+    fn three_thousand_concurrent_allocation_counts_stay_on_their_thread() {
+        let mut handles = Vec::new();
+        for thread_id in 0..8 {
+            handles.push(thread::spawn(move || {
+                for round in 0..375 {
+                    let mut rng = StdRng::seed_from_u64((thread_id * 1000 + round) as u64);
+                    let mut open = FlooredThompson::new(6);
+                    let allocated = count_allocations(|| {
+                        for _ in 0..4 {
+                            open.select_where(&mut rng, |_| true);
+                        }
+                    });
+                    assert_eq!(allocated, 0, "an open Thompson draw allocated");
+                    let mut closed = FlooredThompson::new(6);
+                    let allocated = count_allocations(|| {
+                        closed.select_where(&mut rng, |arm| arm != 1);
+                    });
+                    assert!(allocated > 0, "a closed Thompson draw did not allocate");
+
+                    let context = array![1.0, 0.0, 0.0];
+                    let arm_vector = 8 * std::mem::size_of::<usize>();
+                    let mut open_context = ContextualAllocator::new(8, 3, 0.0);
+                    let open_allocs = count_sized(arm_vector, || {
+                        open_context.select_where(context.view(), &mut rng, |_| true);
+                    });
+                    assert_eq!(
+                        open_allocs, 0,
+                        "an open context draw allocated an arm vector"
+                    );
+                    let mut closed_context = ContextualAllocator::new(8, 3, 0.0);
+                    let closed_allocs = count_sized(arm_vector, || {
+                        closed_context.select_where(context.view(), &mut rng, |arm| arm != 1);
+                    });
+                    assert!(
+                        closed_allocs > 0,
+                        "a closed context draw did not allocate an arm vector"
+                    );
+                }
+            }));
+        }
+        for handle in handles {
+            handle.join().expect("allocation thread panicked");
+        }
+    }
+
+    /// One thread closing its own count must not hide an allocation on this
+    /// thread. A process-global enable flag does, every time.
+    #[test]
+    fn a_count_closed_on_another_thread_still_counts_here() {
+        let started = Arc::new(Barrier::new(2));
+        let finished = Arc::new(Barrier::new(2));
+        let started_there = Arc::clone(&started);
+        let finished_there = Arc::clone(&finished);
+        let other = thread::spawn(move || {
+            started_there.wait();
+            count_allocations(|| {});
+            finished_there.wait();
+        });
+        let bytes = std::mem::size_of::<u64>();
+        let allocated = count_sized(bytes, || {
+            started.wait();
+            finished.wait();
+            let mut held = Vec::<u64>::new();
+            held.reserve_exact(1);
+        });
+        other.join().expect("counter thread panicked");
+        assert_eq!(
+            allocated, 1,
+            "another thread closing its count hid this thread's allocation"
+        );
+    }
+}
+
+#[cfg(test)]
+#[global_allocator]
+static TEST_ALLOC: test_alloc::AllocCount = test_alloc::AllocCount;
