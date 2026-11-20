@@ -1,4 +1,12 @@
 fn main() {
+    // AVX-512F intrinsics in `std::arch` stabilized in 1.89. The crate's
+    // minimum is 1.88, which still has the four-wide scan.
+    println!("cargo:rustc-check-cfg=cfg(anneal_avx512)");
+    println!("cargo:rerun-if-env-changed=RUSTC");
+    if rustc_has_stable_avx512() {
+        println!("cargo:rustc-cfg=anneal_avx512");
+    }
+
     // The `vesin-nl` feature compiles vesin's own cell-list sources rather
     // than reimplementing them. VESIN_SRC points at a checkout of
     // https://github.com/Luthaf/vesin.
@@ -92,6 +100,22 @@ fn main() {
     // `PYO3_BUILD_EXTENSION_MODULE` and passes the lookup flag itself; linking
     // libpython there would pin the extension to the build interpreter.
     link_libpython_for_macos_tests();
+}
+
+fn rustc_has_stable_avx512() -> bool {
+    let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".to_string());
+    let output = match std::process::Command::new(rustc).arg("-vV").output() {
+        Ok(output) if output.status.success() => output,
+        _ => return false,
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    let Some(release) = text.lines().find_map(|line| line.strip_prefix("release: ")) else {
+        return false;
+    };
+    let mut parts = release.split(['.', '-']);
+    let major: u32 = parts.next().unwrap_or("0").parse().unwrap_or(0);
+    let minor: u32 = parts.next().unwrap_or("0").parse().unwrap_or(0);
+    major > 1 || (major == 1 && minor >= 89)
 }
 
 fn link_libpython_for_macos_tests() {
