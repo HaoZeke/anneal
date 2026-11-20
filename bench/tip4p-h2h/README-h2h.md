@@ -1,34 +1,25 @@
 # TIP4P head-to-head, anneal against GMIN, twelve seeds
 
-Anneal develop `f511db94` against Wales's GMIN on rigid-body TIP4P
-basin-hopping. The timed anneal binary was built from `7da10659`; develop's
-only search change since then, the cov3 ranged-trial reach bound, uses a
-pair's measured reach, which a Coulomb/Lennard-Jones tail like TIP4P does not
-have, so `pair_range` is unset and the rigid trajectory is unchanged. Three
-rows rebuilt on `f511db94` reproduce their `7da10659` best, evaluations and
-hit bit-for-bit, including the (H₂O)₂₅ seed 2010 best of −1113.0346568571.
-Twelve seeds, 2000–2011, a budget of 2_000_000 charged
-evaluations at every size (the paper ceiling for (H₂O)₂₀), serial, `taskset
--c 0`, one session under `sudo unshare --uts` with hostname `bench`, working
-directory `/work`. The driver is `scripts/tip4p_h2h/enter_h2h.sh`, the
-Snakemake rule is `tip4p_h2h`, and the asv suite is
-`bench/tip4p-h2h/benchmarks/tip4p_h2h.py`.
+The head-to-head cited in the manuscript is run r2c, record branch
+`record/tip4p-h2h-r2` (commit `e5932b2e` on `c2a9cc2a`, tree `f7ee9adc`).
+Its per-seed rows are `rows-h2h-r2.csv`. Anneal is `e1a69a57` and GMIN is
+`aac1548a`. Twelve seeds, 2000–2011, a budget of 2_000_000 charged
+evaluations at every size, serial, core 0, one machine. Both arms open the
+same molecular centres. One charged evaluation is one entry to the potential
+on either side. A hit is a quenched energy at or below the Cambridge Cluster
+Database TIP4P header plus 0.001 kJ/mol. The database lists headers for
+n ≤ 21. (H₂O)₂₅ is not in the database, so run r2c leaves it unscored.
 
-Both arms open the same molecular centres: `h2h_seed` writes the start it
-draws for a seed and GMIN reads it as its `coords`. One charged evaluation is
-one entry to the potential on either side. A hit is a quenched energy at or
-below the reference plus 0.001 kJ/mol. The references are the Cambridge
-Cluster Database TIP4P headers, which the database lists for n ≤ 21; (H₂O)₂₅
-is not in the database, so its hit is scored against the lowest energy either
-arm reached in the session and no early stop is armed.
+Fisher's exact test on hits and the Mann–Whitney test on calls to a hit are
+two-sided and Bonferroni-corrected with m = 4, one comparison for each scored
+size. A miss is ranked at the budget in the calls test. The wall-time
+Mann–Whitney test is a per-call cost and is not a search result.
 
 GMIN is built from source by `scripts/gmin_h2h/build_gmin.sh` at revision
 `aac1548a`, gfortran 13.3.0, reference BLAS/LAPACK, with NEWTIP, TIPID 4,
 temperature 2 kJ/mol held fixed, step 0.40 / 0.51 held fixed, and the
-Lennard-Jones container (`examples/h2h_gmin_tip4p.data`). `pot_s` is time
-inside the potential; `scripts/tip4p_h2h/newtip-timer.patch` brackets NEWTIP
-the way the public patch already brackets the Lennard-Jones kernel.
-`outside_s` is the rest of the wall. Medians are Hyndman–Fan type 7.
+Lennard-Jones container (`examples/h2h_gmin_tip4p.data`). Medians are
+Hyndman–Fan type 7. `h2h-summary.csv` is an earlier summary and is not run r2c.
 
 ## Both codes reproduce the Cambridge global minimum
 
@@ -52,35 +43,37 @@ offset never changes which cage a run is scored at.
 
 ## Panel
 
-Rows are `h2h-summary.csv`. `best` is the lowest of the twelve; the median is
-beside it. `p(F)` is the two-sided Fisher exact test on the hit counts; `p(U)`
-is the two-sided Mann–Whitney U test on the per-seed best energies.
+Rows are `rows-h2h-r2.csv`, run r2c. `best` is the lowest of the twelve; the
+median is beside it. `p(F)` is Fisher's exact test on the hit counts and
+`p(calls)` is the exact Mann–Whitney test on calls to a hit, both after the
+Bonferroni correction above. (H₂O)₂₅ is unscored, so its hit and p cells are
+blank. Wall is a per-call cost.
 
-| Size | anneal | GMIN | anneal best / median | GMIN best / median | wall (a/g s) | pot (a/g s) | p(F) | p(U) |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| (H₂O)₈  | 12/12 | 8/12 | −305.5177 / −305.5176 | −305.5189 / −305.5189 | 0.020 / 1.697 | 0.012 / 1.355 | 0.093 | 0.166 |
-| (H₂O)₁₅ | 9/12  | 0/12 | −628.3716 / −628.3714 | −622.859 / −619.933 | 8.01 / 40.81 | 6.12 / 36.97 | 0.00034 | 3.2e-05 |
-| (H₂O)₂₀ | 5/12  | 0/12 | −872.9879 / −864.394 | −860.701 / −851.443 | 22.17 / 71.13 | 17.61 / 66.39 | 0.037 | 5.3e-05 |
-| (H₂O)₂₁ | 0/12  | 0/12 | −915.774 / −914.294 | −903.760 / −895.593 | 24.89 / 76.37 | 19.21 / 71.46 | 1.000 | 3.2e-05 |
-| (H₂O)₂₅ | 1/12  | 0/12 | −1113.035 / −1103.345 | −1087.334 / −1082.127 | 33.86 / 105.23 | 26.23 / 99.89 | 1.000 | 3.2e-05 |
+| Size | anneal | GMIN | anneal best / median | GMIN best / median | wall (a/g s) | p(F) | p(calls) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| (H₂O)₈  | 12/12 | 8/12 | −305.5177 / −305.5176 | −305.5189 / −305.5189 | 0.022 / 1.952 | 0.37 | 3.0e-06 |
+| (H₂O)₁₅ | 7/12  | 0/12 | −628.3716 / −628.3713 | −622.8593 / −619.9326 | 11.667 / 48.016 | 0.018 | 0.018 |
+| (H₂O)₂₀ | 6/12  | 0/12 | −872.9879 / −868.8666 | −860.7014 / −851.4433 | 21.541 / 83.630 | 0.055 | 0.055 |
+| (H₂O)₂₁ | 0/12  | 0/12 | −915.7735 / −914.3685 | −903.7597 / −895.5929 | 26.312 / 81.097 | 1 | 1 |
+| (H₂O)₂₅ | unscored | unscored | −1113.035 / −1103.345 | −1087.334 / −1082.127 | 35.730 / 107.109 | -- | -- |
 
-GMIN beats anneal nowhere. Anneal has at least as many hits at every size and
-a lower per-seed best-energy distribution at every size from 15 up, with the
-Mann–Whitney p at or below 5.3e-05. At (H₂O)₂₁ neither arm reaches the global
-minimum in 2 M calls, but anneal stops 0.93 kJ/mol short of it against GMIN's
-13 kJ/mol; at (H₂O)₂₅ anneal reaches −1113.03 kJ/mol against GMIN's −1087.33.
-Anneal's median wall is 3.1 to 85× shorter, and most of each wall on both
-sides is time inside the potential.
+Run r2c hits (H₂O)₈ on 12 of 12 and GMIN on 8 of 12. The calls-to-hit p is
+3.0e-06 and Fisher's p is 0.37. It hits (H₂O)₁₅ on 7 of 12 against 0 of 12,
+p = 0.018, and (H₂O)₂₀ on 6 of 12 against 0 of 12, p = 0.055, which is not
+significant. Neither arm hits (H₂O)₂₁. On the unscored (H₂O)₂₅ the best and
+median energies are −1113.035 / −1103.345 kJ/mol for anneal and −1087.334 /
+−1082.127 kJ/mol for GMIN.
+
+The median wall is a per-call cost. It is lower for anneal on all five sizes,
+by a factor of 3.00 to 87.1. That factor is not a search result.
 
 At (H₂O)₈ both arms find the same global-minimum cage. GMIN's best reads
 1.2 mJ/mol below anneal's there, which is the potential offset above plus
 GMIN's quench settling past the early-stop energy that anneal halts on; it is
 the same cage, not a lower one. Anneal finds that cage on all twelve seeds and
-GMIN on eight, so anneal wins the size on hits. Because no arm beats anneal,
-there is no accompanying fix.
-
-Per-seed rows and logs stay in `/work`; only the summary and verification
-rows are committed.
+GMIN on eight. Fisher's p on that split is 0.37 after the Bonferroni
+correction, so the size is not a significant hit win. The calls-to-hit p is
+3.0e-06.
 
 ## (H₂O)₂₁ budget sweep
 
@@ -215,6 +208,7 @@ potential, Fisher p and the lost and gained seeds are in
 | (b) | 0/12 −913.767 | 1/12 −864.080 | 8/12 −628.371 | 12/12 | 12/12 | 12/12 | 7/12 |
 | (a)+(b) | 1/12 −913.679 | 2/12 −862.095 | 5/12 −623.877 | 12/12 | 12/12 | 12/12 | 5/12 |
 
+The baseline (H₂O) counts are the anneal arm of run r2c.
 Water cells give hits and the median best in kJ/mol. None of the three is made
 default. (a) and (b) do not raise (H₂O)₂₁, and the median falls. (a)+(b)
 reaches the minimum once (seed 2011) with a lower median. Every variant loses
