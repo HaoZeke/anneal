@@ -2974,6 +2974,13 @@ impl PyClusterConfig {
         self.inner.symmetry_completion_on_new
     }
 
+    /// Whether a chain completes each basin once, instead of every time it
+    /// enters it. Off in every preset.
+    #[getter]
+    fn symmetry_completion_once(&self) -> bool {
+        self.inner.symmetry_completion_once
+    }
+
     /// Shared-history visit policy: `tabu` or `recognition`.
     #[getter]
     fn shared_visit_policy(&self) -> &'static str {
