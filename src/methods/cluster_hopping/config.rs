@@ -679,6 +679,18 @@ pub struct Config {
     /// default; it changes the walk.
     #[serde(skip_serializing_if = "is_false")]
     pub symmetry_completion_once: bool,
+    /// Read the point group a completion applies from the points alone.
+    ///
+    /// With species, [`Config::symmetry_completion_on_new`] reads an operation
+    /// only when it carries every point onto a point of its own species. A
+    /// structure whose positions are close to a point group and whose species
+    /// are placed on them in no particular order has no such operation, and
+    /// the completion finds nothing to do. On, the group is that of the
+    /// framework of positions, and each species is still completed on its
+    /// own sites, so the composition is kept. Without species it changes
+    /// nothing. Off by default; it changes the walk.
+    #[serde(skip_serializing_if = "is_false")]
+    pub symmetry_completion_framework: bool,
     /// Fraction of the points, innermost by distance from the centroid,
     /// whose point group [`Config::symmetry_completion_on_new`] reads. The
     /// outer points are the last to order, and a disordered surface would
@@ -2056,6 +2068,7 @@ impl Config {
             symmetry_merge_radius: LennardJonesPreset::SYMMETRY_MERGE_RADIUS * length_scale,
             symmetry_completion_on_new: false,
             symmetry_completion_once: false,
+            symmetry_completion_framework: false,
             symmetry_core_fraction: 0.6,
             tabu_on_stall: false,
             tabu_capacity: 8,
