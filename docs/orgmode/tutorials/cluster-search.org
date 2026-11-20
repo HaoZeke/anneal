@@ -119,22 +119,22 @@ A binary chart, a rigid chart, and a water-site chart do the same.
 
 * Direct quantum-chemistry profiles
 
-The molecular-cluster and slab examples use the same persistent
-=ProfileEngine=. The adapter loads a conforming potential library once, turns
-each energy-and-force result into the optimizer's value-and-gradient pair, and
-owns the session for the full hop loop. Selecting =nwchemc= calls
-=libnwchemc= in process; no RPC server or result cache participates. Molecular
-requests omit a simulation cell and slab requests carry their periodic cell
-through the same request type.
+=molecular_cluster= evaluates (H2O)m with GFN2-xTB. It opens
+=libxtb_engine.so= from =RGPOT_XTB_ENGINE=, or =./libxtb_engine.so= when
+that variable is unset. The arguments are the number of molecules, the
+call budget and the number of seeds. A fourth token is a comma-separated
+option list. =comm= or =communicating= turns on the communicating
+channel. The example does not read an engine name, =POTENTIAL_CONFIG= or
+=POTENTIAL_LIBRARY=.
 
 #+begin_src bash
-POTENTIAL_CONFIG=/path/to/PotentialConfig.bin \
-POTENTIAL_LIBRARY=/path/to/libnwchemc.so \
+RGPOT_XTB_ENGINE=/path/to/libxtb_engine.so \
 cargo run --locked --release \
   --features rgpot-ex,featomic,bank-rpc \
-  --example molecular_cluster -- 6 1200 8 nwchemc
+  --example molecular_cluster -- 6 1200 8
 #+end_src
 
-The shared adapter is =examples/common/profile_engine.rs=. The molecular and
-periodic consumers are =examples/molecular_cluster.rs= and
-=examples/slab_adsorption.rs=.
+The handle lives in =examples/common/rgpot_eindir.rs=.
+=slab_adsorption= is a separate example. It evaluates a slab with the
+CuH2 library =librgpot_cuh2.so=, from =RGPOT_CUH2_LIBRARY= or from
+=./librgpot_cuh2.so=.

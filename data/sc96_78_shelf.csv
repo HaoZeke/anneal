@@ -16,21 +16,21 @@ energy chains bonds 555 421 422 other coordination(z:count)
 -19054.397655 1 332 4 94 69 165 4:1,6:20,7:10,8:14,9:10,10:4,12:19
 -19052.995717 1 332 4 96 70 162 4:1,5:2,6:16,7:13,8:13,9:10,10:3,11:1,12:19
 -19052.921135 1 332 4 96 70 162 4:1,5:2,6:16,7:13,8:13,9:10,10:3,11:1,12:19"
-iso-hop,spent,49561
-iso-hop,best,-19054.3976551079
+iso-hop,spent,27646
+iso-hop,best,-19054.3976551075
 iso-hop,hit,true
-iso-hop,hit_calls,49561
-iso-hop,surface_hops,85
-iso-hop,surface_descents,5
+iso-hop,hit_calls,27646
+iso-hop,surface_hops,0
+iso-hop,surface_descents,0
 iso-hop,minima_signature,7d6d13bd2eaac63b9bbd156cd516df4ba45fb4ac881cf083f3377c937cd071a5
 iso-hop,temperature,10
 iso-hop,length_scale,0.6299605249
 iso-hop,table,"system: sc9-6-78
-frames: 331
+frames: 203
 chains: 1
-distinct: 172
+distinct: 93
 energy chains bonds 555 421 422 other coordination(z:count)
 -19054.397655 1 332 4 94 69 165 4:1,6:20,7:10,8:14,9:10,10:4,12:19
--19053.987670 1 332 4 94 69 165 4:1,5:2,6:16,7:12,8:14,9:10,10:4,12:19
--19052.995717 1 332 4 96 70 162 4:1,5:2,6:16,7:13,8:13,9:10,10:3,11:1,12:19"
+-19052.995717 1 332 4 96 70 162 4:1,5:2,6:16,7:13,8:13,9:10,10:3,11:1,12:19
+-19052.921135 1 332 4 96 70 162 4:1,5:2,6:16,7:13,8:13,9:10,10:3,11:1,12:19"
 iso,gap_above_reference,-0.000045

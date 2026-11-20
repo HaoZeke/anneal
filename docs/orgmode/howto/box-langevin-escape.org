@@ -207,14 +207,16 @@ cargo run --locked --example box_noise_comparison -- 8 8000 1 16 quench
 #+end_src
 
 The control uses the same seeded start for each allowance and reports actual
-objective/gradient work and the maximum projected gradient. Representative
-seed-zero results are:
+objective/gradient work and the maximum projected gradient. Seed zero
+prints four records. They are stored in
+=data/box_quench_d8_seed0.jsonl=. The gradient column below is rounded.
 
 | Objective allowance | Objectives used | Gradients used | Maximum projected gradient | History certificate |
 |---------------------+-----------------+----------------+----------------------------+---------------------|
 |                  24 |              24 |             21 |                    3.28594 | No                  |
 |                  48 |              48 |             42 |                 0.00379649 | No                  |
 |                  96 |              70 |             59 |                 7.26373e-9 | Yes                 |
+|                 192 |              70 |             59 |                 7.26373e-9 | Yes                 |
 
 The certificate threshold is =1e-3=. These are standalone relaxation
 controls; their budgets are not an ensemble success-rate measurement.
