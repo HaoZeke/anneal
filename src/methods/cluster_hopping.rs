@@ -13397,3 +13397,36 @@ mod call_floor_tests {
         assert!(distance(&x, 0, 2) > floor.pair(0, 2));
     }
 }
+
+#[cfg(test)]
+mod nonfinite_proposal_regression_tests {
+    use super::*;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+
+    #[test]
+    fn nonfinite_proposals_are_refused_before_relaxation() {
+        let mut cfg = Config::for_cluster(4);
+        cfg.move_library = MoveLibrary::Visit;
+        cfg.temperature = f64::NAN;
+        cfg.max_hops = None;
+        let mut rng = StdRng::seed_from_u64(9);
+        let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+        let mut ledger = Ledger::new(7);
+        let mut relax_calls = 0usize;
+        let mut relax = |ledger: &mut Ledger, state: ArrayView1<f64>, _steps: usize| {
+            assert!(ledger.charge());
+            assert!(
+                state.iter().all(|value| value.is_finite()),
+                "relax saw a non-finite proposal"
+            );
+            relax_calls += 1;
+            (0.0, state.to_owned())
+        };
+
+        let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("run");
+        assert_eq!(out.stop, Some(HopStop::Budget));
+        assert!(relax_calls >= 1);
+        assert!(out.hops > 0);
+    }
+}
