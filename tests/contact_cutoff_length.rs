@@ -1,17 +1,22 @@
 // Copyright (c) anneal developers
 
-//! Common-neighbour analysis remains reporting-only and does not inherit a
-//! search-scale-dependent motif cutoff.
+//! The common-neighbour cutoff follows the length the spec is written at.
 
 use anneal_core::soap::{CONTACT_CUTOFF, SoapSpec, contact_cutoff};
 use anneal_core::structure::cna;
 use ndarray::array;
 
 #[test]
-fn the_reporting_cutoff_is_independent_of_the_search_length_scale() {
-    for length in [0.25, 0.5, 1.0, 2.0, 8.0] {
-        assert_eq!(contact_cutoff(SoapSpec::at_length(length)), CONTACT_CUTOFF);
-    }
+fn the_default_spec_gives_the_lennard_jones_cutoff() {
+    assert_eq!(contact_cutoff(SoapSpec::default()), CONTACT_CUTOFF);
+    assert_eq!(contact_cutoff(SoapSpec::at_length(1.0)), CONTACT_CUTOFF);
+}
+
+#[test]
+fn half_the_length_gives_half_the_cutoff() {
+    let half = SoapSpec::at_length(0.5);
+    assert_eq!(half.rcut_nn, SoapSpec::default().rcut_nn * 0.5);
+    assert_eq!(contact_cutoff(half), CONTACT_CUTOFF * 0.5);
 }
 
 #[test]
