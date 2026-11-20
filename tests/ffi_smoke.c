@@ -257,6 +257,27 @@ static void test_a_bad_option_is_refused_before_a_callback(void) {
     CHECK(refused.evals == 0);
 }
 
+static void test_legacy_escape_rejects_unknown_values(void) {
+    anneal_box_config_t config;
+    anneal_box_report_t report;
+    counter_t counter = {0, 0};
+    double x[2] = {3.0, -2.0};
+    int64_t shape[1], strides[1];
+    DLManagedTensorVersioned tensor;
+    const double low[2] = {-5.0, -5.0};
+    const double high[2] = {5.0, 5.0};
+    const char *message;
+
+    point_at(&tensor, x, shape, strides, 2);
+    CHECK(anneal_box_config_default(&config) == ANNEAL_SUCCESS);
+    config.escape = 9;
+    CHECK(anneal_box_minimize(wells, wells_grad, &counter, &tensor, low, high,
+                              &config, &report) == ANNEAL_INVALID_PARAMETER);
+    CHECK(counter.evals == 0);
+    message = anneal_last_error();
+    CHECK(message != NULL && strstr(message, "escape") != NULL);
+}
+
 static void test_struct_size_ignores_what_lies_past_it(void) {
     anneal_box_options_t options = defaults();
     run_t full = run(&options, 0);
@@ -434,6 +455,7 @@ int main(void) {
     test_each_setting_reaches_the_ensemble();
     test_the_same_seed_gives_the_same_run();
     test_a_bad_option_is_refused_before_a_callback();
+    test_legacy_escape_rejects_unknown_values();
     test_struct_size_ignores_what_lies_past_it();
     test_a_callback_can_stop_the_search();
     test_every_coverage_counter_is_reported();

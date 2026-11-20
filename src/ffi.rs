@@ -94,8 +94,8 @@ pub struct anneal_box_config_t {
     pub coverage_height: f64,
     /// Well-tempering factor, finite and greater than one.
     pub well_tempering: f64,
-    /// Escape mechanism of every replica.
-    pub escape: anneal_box_escape_t,
+    /// An `anneal_box_escape_t`.
+    pub escape: i32,
     /// Langevin steps per escape segment (Langevin escape only).
     pub langevin_steps: usize,
     /// Langevin harmonic frequency (Langevin escape only).
@@ -373,8 +373,8 @@ pub extern "C" fn anneal_core_version() -> *const c_char {
     crate::version::ANNEAL_VERSION_NUL.as_ptr() as *const c_char
 }
 
-/// Write the default box configuration: four replicas, a budget of 400
-/// work units, the default coverage field, and Gaussian escapes.
+/// Write the default box configuration: the Rust defaults for one box
+/// ensemble, the default coverage field, and Gaussian escapes.
 ///
 /// # Safety
 ///
@@ -388,17 +388,18 @@ pub unsafe extern "C" fn anneal_box_config_default(
         set_last_error("anneal_box_config_default: null argument");
         return anneal_status_t::ANNEAL_INVALID_PARAMETER;
     }
+    let ensemble = BoxEnsembleConfig::default();
     let coverage = BoxCoverageConfig::default();
     let langevin = GleEscapeConfig::default();
     unsafe {
         *out = anneal_box_config_t {
-            replicas: 4,
-            budget: 400,
+            replicas: ensemble.replicas,
+            budget: ensemble.budget,
             seed: 0,
             coverage_radius: coverage.radius,
             coverage_height: coverage.height,
             well_tempering: coverage.well_tempering,
-            escape: anneal_box_escape_t::ANNEAL_BOX_ESCAPE_GAUSSIAN,
+            escape: anneal_box_escape_t::ANNEAL_BOX_ESCAPE_GAUSSIAN as i32,
             langevin_steps: langevin.steps,
             langevin_omega0: langevin.omega0,
             langevin_dt: langevin.dt,
@@ -603,8 +604,8 @@ fn ensemble_config(
         return Err("well_tempering must be finite and greater than one".into());
     }
     let escape = match cfg.escape {
-        anneal_box_escape_t::ANNEAL_BOX_ESCAPE_GAUSSIAN => BoxEscape::Gaussian,
-        anneal_box_escape_t::ANNEAL_BOX_ESCAPE_LANGEVIN => {
+        0 => BoxEscape::Gaussian,
+        1 => {
             if cfg.langevin_steps == 0
                 || !(cfg.langevin_omega0.is_finite() && cfg.langevin_omega0 > 0.0)
                 || !(cfg.langevin_dt.is_finite() && cfg.langevin_dt > 0.0)
@@ -618,6 +619,7 @@ fn ensemble_config(
                 noise: GleNoise::Colored,
             })
         }
+        other => return Err(format!("escape {other} is not an anneal_box_escape_t")),
     };
     let ensemble = BoxEnsembleConfig {
         replicas: cfg.replicas,
@@ -755,7 +757,7 @@ fn default_options() -> anneal_box_options_t {
     anneal_box_options_t {
         struct_size: std::mem::size_of::<anneal_box_options_t>(),
         replicas: ensemble.replicas,
-        budget: 400,
+        budget: ensemble.budget,
         seed: 0,
         history: anneal_box_history_t::ANNEAL_BOX_HISTORY_SHARED as i32,
         membership: anneal_box_membership_t::ANNEAL_BOX_MEMBERSHIP_ACCEPTED as i32,
@@ -1187,7 +1189,7 @@ mod tests {
             coverage_radius: 0.0,
             coverage_height: 0.0,
             well_tempering: 0.0,
-            escape: anneal_box_escape_t::ANNEAL_BOX_ESCAPE_GAUSSIAN,
+            escape: anneal_box_escape_t::ANNEAL_BOX_ESCAPE_GAUSSIAN as i32,
             langevin_steps: 0,
             langevin_omega0: 0.0,
             langevin_dt: 0.0,
@@ -1477,6 +1479,7 @@ mod tests {
             std::mem::size_of::<anneal_box_options_t>()
         );
         assert_eq!(options.replicas, ensemble.replicas);
+        assert_eq!(options.budget, ensemble.budget);
         assert_eq!(options.identity_tol, ensemble.identity_tol);
         assert_eq!(options.shared_deposits, ensemble.shared_deposits);
         assert_eq!(options.langevin_steps, langevin.steps);
@@ -1499,6 +1502,26 @@ mod tests {
             unsafe { anneal_box_options_default(std::ptr::null_mut()) },
             anneal_status_t::ANNEAL_INVALID_PARAMETER
         );
+    }
+
+    #[test]
+    fn the_legacy_defaults_match_the_rust_defaults() {
+        let cfg = default_config();
+        let ensemble = BoxEnsembleConfig::default();
+        let coverage = BoxCoverageConfig::default();
+        let langevin = GleEscapeConfig::default();
+        assert_eq!(cfg.replicas, ensemble.replicas);
+        assert_eq!(cfg.budget, ensemble.budget);
+        assert_eq!(
+            cfg.escape,
+            anneal_box_escape_t::ANNEAL_BOX_ESCAPE_GAUSSIAN as i32
+        );
+        assert_eq!(cfg.langevin_steps, langevin.steps);
+        assert_eq!(cfg.langevin_omega0, langevin.omega0);
+        assert_eq!(cfg.langevin_dt, langevin.dt);
+        assert_eq!(cfg.coverage_radius, coverage.radius);
+        assert_eq!(cfg.coverage_height, coverage.height);
+        assert_eq!(cfg.well_tempering, coverage.well_tempering);
     }
 
     #[test]
