@@ -19,7 +19,7 @@
 #![allow(clippy::too_many_arguments)]
 
 use ndarray::{Array1, ArrayView1};
-use numpy::{PyArray1, PyReadonlyArray1};
+use numpy::{PyArray1, PyReadonlyArray1, PyReadonlyArray2};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyFloat};
@@ -3287,6 +3287,81 @@ impl PyClusterConfig {
     #[getter]
     fn rigid_body(&self) -> bool {
         self.inner.rigid_body_geometry.is_some()
+    }
+
+    /// True when every atom is the same element.
+    #[getter]
+    fn monoatomic(&self) -> bool {
+        self.inner.monoatomic()
+    }
+
+    /// Whether the CNA 555 and icosahedral packing diagnostics apply: a
+    /// monoatomic cluster, not a molecule, a slab or two elements.
+    #[getter]
+    fn packing_cna_applies(&self) -> bool {
+        self.inner.packing_cna_applies()
+    }
+
+    /// Radius of the initial cluster sphere, in the units of the preset.
+    #[getter]
+    fn start_radius(&self) -> f64 {
+        self.inner.start_radius()
+    }
+
+    /// Number of arms in the proposal mixture.
+    #[getter]
+    fn proposal_arms(&self) -> usize {
+        self.inner.proposal_kernel().len()
+    }
+
+    /// The packing-mutate flags as a dict of four bools: `twin_as_move`,
+    /// `orbit_on_new`, `angular` and `psym_on_new`.
+    fn packing_surface(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        let surface = self.inner.packing_surface();
+        let out = PyDict::new(py);
+        out.set_item("twin_as_move", surface.twin_as_move)?;
+        out.set_item("orbit_on_new", surface.orbit_on_new)?;
+        out.set_item("angular", surface.angular)?;
+        out.set_item("psym_on_new", surface.psym_on_new)?;
+        Ok(out.unbind())
+    }
+
+    /// A copy whose state is rigid bodies: centres, then rotations.
+    /// `sites` holds the body-frame position of every site, one row of
+    /// three numbers each, and `species` the positive label of each site.
+    fn with_rigid_bodies(
+        &self,
+        sites: PyReadonlyArray2<'_, f64>,
+        species: Vec<u32>,
+    ) -> PyResult<Self> {
+        if self.inner.n_points < 2 {
+            return Err(invalid_argument(format!(
+                "a rigid cluster needs at least two bodies, the config has {}",
+                self.inner.n_points
+            )));
+        }
+        let view = sites.as_array();
+        if view.ncols() != 3 {
+            return Err(invalid_argument(format!(
+                "sites must have shape (m, 3), not (m, {})",
+                view.ncols()
+            )));
+        }
+        let rows: Vec<[f64; 3]> = view
+            .rows()
+            .into_iter()
+            .map(|r| [r[0], r[1], r[2]])
+            .collect();
+        let geometry =
+            crate::rigid_body::RigidBodyGeometry::new(rows, species).map_err(|reason| {
+                invalid_argument(format!(
+                    "{reason}: sites need one positive species each and finite coordinates"
+                ))
+            })?;
+        Ok(self.chained(
+            self.inner.clone().with_rigid_bodies(geometry),
+            "with_rigid_bodies(sites, species)".to_owned(),
+        ))
     }
 
     /// How far above the incumbent a screened trial may land.
