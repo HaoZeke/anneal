@@ -248,6 +248,22 @@ def test_a_withdrawn_knockout_in_the_text_is_reported():
     assert [r[2] for r in audit.drifts()] == ["withdrawn knockout text stays out: sec:k-priors"]
 
 
+def test_the_retired_rigid_restart_sentence_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    audit.text_cache[audit_mod.TEX] = tex + "\nIt quenches a new rigid start and stands there.\n"
+    audit_mod.rigid_stall(audit)
+    assert [r[2] for r in audit.drifts()] == ["retired rigid-stall wording stays out: quenches a new rigid start"]
+
+
+def test_a_rigid_stall_constant_that_drifts_is_reported():
+    audit = audit_mod.Audit()
+    path = "src/methods/stall_archive.rs"
+    audit.text_cache[path] = audit.text(path).replace("pub const MEMORY: usize = 4;", "pub const MEMORY: usize = 5;")
+    audit_mod.rigid_stall(audit)
+    assert [r[2] for r in audit.drifts()] == ["barred stall destinations"]
+
+
 def test_every_todo_marker_fails_both_audits():
     clean = audit_mod.Audit()
     for path in (audit_mod.TEX, audit_mod.SI, audit_mod.COVER):
