@@ -46,6 +46,11 @@ mod water_ride;
 #[path = "../../examples/rgpot_minimize.rs"]
 mod rgpot_minimize;
 
+#[cfg(feature = "profile")]
+#[allow(unused_imports)]
+#[path = "../../examples/common/profile_engine.rs"]
+mod profile_engine;
+
 use anneal_core::catalog::lj;
 use anneal_core::catalog::molecular::{GFN2_ACCURACY, HARTREE_EV, VACUUM_BOX};
 use force_sign::{XTB_CLI_ACCURACY, library_file, uniform_lengths};
@@ -100,6 +105,7 @@ fn main() -> ExitCode {
     failures.extend(check_covalent());
     failures.extend(check_quadratic());
     failures.extend(check_pipe());
+    failures.extend(check_petmad_pipe());
     failures.extend(check_profile_engine());
 
     if failures.is_empty() {
@@ -167,6 +173,15 @@ fn check_lj_catalog() -> Vec<String> {
         let slope: Vec<f64> = fresh.forces.into_iter().map(|force| -force).collect();
         Ok((fresh.energy, slope))
     })
+}
+
+/// Forward error of `dim` additions whose absolute total is `|E|`.
+///
+/// The bound is `dim * ε * |E|`, and it is never finer than one ulp of
+/// the returned energy. It is the rounding of a kernel that folds one
+/// contribution from each coordinate into an energy of this size.
+fn coordinate_sum_precision(coordinates: &[f64], energy: f64) -> f64 {
+    force_sign::summed_precision(coordinates.len(), energy.abs(), energy)
 }
 
 fn lj_precision(coordinates: &[f64], energy: f64) -> f64 {
@@ -275,7 +290,7 @@ fn check_rgpot_fresh() -> Vec<String> {
             failures.extend(check_points(
                 "cuh2-fresh",
                 &CUH2,
-                |_, energy| force_sign::unit_in_the_last_place(energy),
+                coordinate_sum_precision,
                 None,
                 |coordinates| {
                     pot.restart();
@@ -399,7 +414,7 @@ fn check_sutton_chen() -> Vec<String> {
         Ok(_) => check_points(
             "sutton-chen",
             &WATER,
-            |_, energy| force_sign::unit_in_the_last_place(energy),
+            coordinate_sum_precision,
             None,
             h2h_sc::sutton_chen_published,
         ),
@@ -442,7 +457,7 @@ fn check_covalent() -> Vec<String> {
     check_points(
         "covalent",
         &WATER,
-        |_, energy| force_sign::unit_in_the_last_place(energy),
+        coordinate_sum_precision,
         None,
         |coordinates| h2h_covalent::covalent_published(&path, coordinates),
     )
@@ -535,6 +550,59 @@ fn check_pipe() -> Vec<String> {
     )
 }
 
+fn petmad_python() -> Result<Option<String>, String> {
+    let python = std::env::var("ASE_PYTHON").unwrap_or_else(|_| "python3".into());
+    let mut command = std::process::Command::new(&python);
+    command.args(["-c", "import pet_mad, ase"]);
+    match command.status() {
+        Ok(status) if status.success() => Ok(Some(python)),
+        Ok(_) if std::env::var_os("ASE_PYTHON").is_some() => {
+            Err(format!("ASE_PYTHON={python} cannot import pet_mad and ase"))
+        }
+        Ok(_) => Ok(None),
+        Err(error) => Err(format!("could not run {python} to import pet_mad: {error}")),
+    }
+}
+
+/// One float32 rounding of the returned energy.
+///
+/// pet-mad 1.4.4 checkpoint 1.0.2 evaluates in float32. `f32::EPSILON`
+/// is the unit roundoff of that value, so the absolute precision is
+/// `ε * |E|`.
+fn petmad_precision(energy: f64) -> f64 {
+    f64::from(f32::EPSILON) * energy.abs()
+}
+
+fn check_petmad_pipe() -> Vec<String> {
+    match petmad_python() {
+        Ok(None) => {
+            println!(
+                "pipe-petmad: skipped, python3 cannot import pet_mad (pip pet-mad==1.4.4). Set ASE_PYTHON to an interpreter that can"
+            );
+            Vec::new()
+        }
+        Err(error) => vec![error],
+        Ok(Some(python)) => {
+            println!("pipe-petmad python {python}");
+            let symbols = vec!["O".to_string(), "H".to_string(), "H".to_string()];
+            let mut pipe = pipe_engine::PipeEngine::start("pet-mad", symbols, None);
+            check_points(
+                "pipe-petmad",
+                &WATER,
+                |_, energy| petmad_precision(energy),
+                None,
+                |coordinates| {
+                    let point = ndarray::ArrayView1::from(coordinates);
+                    let (energy, gradient) = pipe
+                        .eval(point)
+                        .ok_or_else(|| "the PET-MAD helper returned no energy".to_string())?;
+                    Ok((energy, gradient.to_vec()))
+                },
+            )
+        }
+    }
+}
+
 fn profile_library() -> Result<Option<(String, PathBuf)>, String> {
     let mut missing = Vec::new();
     for (variable, prefix) in [
@@ -588,22 +656,78 @@ fn profile_prefix(path: &std::path::Path) -> String {
 }
 
 fn check_profile_engine() -> Vec<String> {
-    // `examples/common/profile_engine.rs` calls `rgpot_core::profile`, which
-    // is behind rgpot-core's `profile` feature. That feature runs capnpc.
-    // This crate does not enable it. The conversion itself is the negation
-    // in `optimizer_value_gradient`. A library that is present still has to
-    // be named rather than ignored.
-    match profile_library() {
-        Ok(None) => {
-            println!(
-                "profile-engine: skipped, libnwchemc.so and libcpmdc.so are absent (POTENTIAL_LIBRARY, RGPOT_NWCHEMC_ENGINE, RGPOT_CPMDC_ENGINE, or ./libnwchemc.so), and rgpot-core profile needs capnpc"
-            );
+    #[cfg(feature = "profile")]
+    {
+        let mut failures = check_profile_negation();
+        match profile_library() {
+            Ok(None) => println!(
+                "profile-engine: skipped, libnwchemc.so and libcpmdc.so are absent (POTENTIAL_LIBRARY, RGPOT_NWCHEMC_ENGINE, RGPOT_CPMDC_ENGINE, or ./libnwchemc.so). NWChem and CPMD are not on this machine, so the live session was not evaluated"
+            ),
+            Ok(Some((prefix, path))) => {
+                failures.push(format!(
+                    "profile-engine: {prefix} library {} is present but this test has no live session runner",
+                    path.display()
+                ));
+            }
+            Err(error) => failures.push(error),
+        }
+        failures
+    }
+    #[cfg(not(feature = "profile"))]
+    {
+        // The profile module runs capnpc. A library that is present still
+        // has to be named rather than ignored.
+        match profile_library() {
+            Ok(None) => {
+                println!(
+                    "profile-engine: skipped, libnwchemc.so and libcpmdc.so are absent (POTENTIAL_LIBRARY, RGPOT_NWCHEMC_ENGINE, RGPOT_CPMDC_ENGINE, or ./libnwchemc.so), and this build has no profile feature (it needs capnpc)"
+                );
+                Vec::new()
+            }
+            Ok(Some((prefix, path))) => vec![format!(
+                "profile-engine: {prefix} library {} is present, but this build has no profile feature (it needs capnpc)",
+                path.display()
+            )],
+            Err(error) => vec![error],
+        }
+    }
+}
+
+#[cfg(feature = "profile")]
+fn check_profile_negation() -> Vec<String> {
+    let geometry = WATER[0];
+    let energy = geometry.iter().map(|value| value * value).sum();
+    let forces: Vec<f64> = geometry.iter().map(|value| -2.0 * value).collect();
+    let (published, slope) =
+        profile_engine::optimizer_value_gradient(rgpot_core::profile::ProfileEvaluation {
+            energy,
+            forces,
+        });
+    let slope = slope.as_slice().unwrap();
+    if published != energy {
+        return vec!["profile-negation changed the energy".into()];
+    }
+    let precision = force_sign::unit_in_the_last_place(energy);
+    println!("profile-negation energy precision {precision:.6e} (one ulp of {energy:.12})");
+    let (lengths, step_limits) = match uniform_lengths(geometry, None) {
+        Ok(limits) => limits,
+        Err(error) => return vec![error],
+    };
+    match force_sign::compare_slope(
+        "profile-negation",
+        0,
+        geometry,
+        slope,
+        energy,
+        precision,
+        &lengths,
+        &step_limits,
+        |point| Ok(point.iter().map(|value| value * value).sum()),
+    ) {
+        Ok(row) => {
+            println!("{row}");
             Vec::new()
         }
-        Ok(Some((prefix, path))) => vec![format!(
-            "profile-engine: {prefix} library {} is present, but rgpot-core's profile feature is not enabled (it needs capnpc)",
-            path.display()
-        )],
         Err(error) => vec![error],
     }
 }

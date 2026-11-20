@@ -70,6 +70,9 @@ python-host = ["python"]
 # libloading). Only those examples link rgpot-core and libloading, so both
 # are dev-dependencies; the library never pulls them.
 rgpot-ex = []
+# rgpot's minimum profile client. Off by default: the feature runs capnpc,
+# and a host without that compiler cannot build the default tests.
+profile = ["rgpot-core/profile"]
 
 [dependencies]
 petgraph = { version = "0.8", optional = true }

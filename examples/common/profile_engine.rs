@@ -86,7 +86,7 @@ impl ProfileEngine {
             Ok(evaluation) => Some(optimizer_value_gradient(evaluation)),
             Err(error) => {
                 self.failures += 1;
-                if self.failures == 1 || self.failures % 500 == 0 {
+                if self.failures == 1 || self.failures.is_multiple_of(500) {
                     eprintln!("  profile failure {}: {error}", self.failures);
                 }
                 None
