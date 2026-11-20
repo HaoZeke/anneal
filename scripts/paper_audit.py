@@ -1489,8 +1489,23 @@ def count_gates(audit: Audit, lj_rev: str) -> None:
                     "equation~\\ref{eq:penalty} is used only below 98 atoms.")
     audit.said(TEX, "The revisions with the structure priors on had a second, the growth hold of "
                     "equation~\\ref{eq:hold}.")
-    audit.said(TEX, "A rigid-body run has a gate of its own: at 10 molecules or fewer its step factor may climb higher, "
-                    "and above 10 its orientation step follows the acceptance rate.")
+    small = re.search(r"fn rigid_factor_cap\(n_bodies: usize\) -> f64 \{\s*if n_bodies > RIGID_HOT_BODIES \{\s*"
+                      r"RIGID_FACTOR_CAP_LARGE\s*\} else \{\s*([0-9.]+)\s*\}", hop)
+    audit.cell("src/methods/cluster_hopping.rs", "rigid factor cap at 10 bodies or fewer", "24",
+               float(small.group(1)) if small else None)
+    large = re.search(r"const RIGID_FACTOR_CAP_LARGE: f64 = ([0-9.]+);", hop)
+    audit.cell("src/methods/cluster_hopping.rs", "rigid factor cap above 10 bodies", "4",
+               float(large.group(1)) if large else None)
+    for fragment in ("rigid_factor_cap(cfg.n_points)\n    } else {\n        1.0",
+                     "rigid_factor = (rigid_factor / 1.5).max(1.0);"):
+        audit.record(fragment in hop, "src/methods/cluster_hopping.rs",
+                     "the rigid factor starts at its cap and falls no lower than 1", fragment,
+                     "present" if fragment in hop else "absent")
+    audit.said(TEX, "A rigid-body run has a gate of its own: at 10 molecules or fewer a factor on its acceptance "
+                    "temperature starts at 24 and moves between 1 and 24 with the share of hops that reach a new "
+                    "minimum, and above 10 that factor stays at 4 and its orientation step follows the acceptance rate.")
+    audit.said(TEX, "The exact assignment inside the symmetry projections also changes algorithm at 98 atoms, and both "
+                    "algorithms return an assignment of the optimal cost.")
     audit.said(TEX, "In the revisions with the structure priors on, lattice growth on a plateau is held when it has "
                     "already failed at the current energy.")
     for phrase in ("two atom-count gates", "Apart from those gates no move reads the atom count"):
@@ -3944,6 +3959,8 @@ TODO_TAG = re.compile(r"\\todo\{([^}]*)\}")
 # Wording that defers a claim to a run not made, or fences off a part of the paper as its limits.
 HEDGES = ("not yet", "will test", "will show", "will allow", "future work", "in future", "remains to be",
           "\\section{Limits}", "\\section{Limitations}", "\\section*{Limits}", "\\subsection{Limits}")
+# Modal words that leave a statement about the code or the rows open.
+MODAL = re.compile(r"\b(may|might|could|perhaps|possibly|likely)\b", re.IGNORECASE)
 
 
 def rerun_claims(audit: Audit) -> None:
@@ -3980,6 +3997,8 @@ def todo_check(audit: Audit, pre_submission: bool = False) -> None:
         for hedge in HEDGES:
             found = flat.lower().count(hedge.lower())
             audit.record(found == 0, path, f"no hedge: {hedge}", "absent", f"{found} found")
+        modal = sorted({m.group(1).lower() for m in MODAL.finditer(flat)})
+        audit.record(not modal, path, "no modal hedge", "absent", " ".join(modal) or "absent")
 
 
 REVISION_MAP = "bench/unreachable-revisions.csv"
