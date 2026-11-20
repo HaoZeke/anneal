@@ -49,9 +49,16 @@ The default =virial="auto"= uses the potential's analytic stress.
 A periodic box whose potential reports no stress raises an error that names the
 potential and says it lacks analytic stress, so =fix npt=, =fix nph= and
 =fix box/relax= are not driven by a guessed pressure.
-A non-periodic box (=boundary f f f=) still passes the box extents as the cell
-to the potential; use a cluster potential such as =rgpot.LJClusterPot= rather
-than a periodic potential that wraps pairs across the box faces.
+A non-periodic box (=boundary f f f=) passes the box extents as the cell to the
+potential.
+A periodic potential wraps pairs across the faces of that cell and returns a
+wrong energy without any warning, so =FixExternal= refuses the combination.
+It raises =ValueError= naming the potential, and the fix is a non-periodic
+potential such as =rgpot.LJClusterPot= in place of =rgpot.LJPot=.
+The check reads the =periodic= entry of the potential's =caps()= dictionary; a
+potential without =caps()=, or whose =caps()= omits =periodic=, is not checked.
+Pass =allow_periodic_on_free_box=True= only when you do want the periodic
+potential evaluated on the box extents.
 A non-periodic box with no stress returns a zero virial.
 Set =virial="none"= when a zero virial is intentional.
 

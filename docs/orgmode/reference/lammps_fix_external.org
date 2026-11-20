@@ -17,6 +17,7 @@ FixExternal(
     create=True,
     comm=None,
     virial="auto",
+    allow_periodic_on_free_box=False,
 )
 #+end_src
 
@@ -63,8 +64,31 @@ All three boundaries must be periodic or all three non-periodic; mixed
 boundaries raise =ValueError=.
 The potential protocol always receives the 3 by 3 cell.
 A free-boundary potential may ignore it; a periodic potential such as =LJPot=
-folds pairs across the cell vectors and should not be used with
-=boundary f f f=.
+folds pairs across the cell vectors, so it is refused with =boundary f f f= (see
+below).
+
+** Free boundaries and periodic potentials
+
+With =boundary f f f= the cell is the box extent, which is not a periodic cell
+of the system.
+A potential that applies periodic boundary conditions to the cell it is given
+would pair atoms through the box faces and return a wrong energy.
+The constructor therefore raises =ValueError= when all three LAMMPS boundaries
+are non-periodic and the potential is periodic.
+The message names the potential and points to =rgpot.LJClusterPot=.
+The check runs before any fix is created, so nothing is left registered in
+LAMMPS.
+
+A potential counts as periodic when its =caps()= method returns a mapping whose
+=periodic= entry is true. rgpot potentials report this as =caps()["periodic"]=;
+=LJPot= reports true and =LJClusterPot= reports false.
+A potential with no =caps()= method, or whose mapping has no =periodic= entry,
+is not classified and is never refused.
+Boxes that are periodic in all three directions are not checked.
+
+=allow_periodic_on_free_box=True= turns the check off.
+The periodic potential is then evaluated on the box extents exactly as before,
+which is only meaningful when that cell is the intended periodic cell.
 
 The evaluation is in increasing atom-ID order.
 Returned forces are mapped back to each rank's local order.

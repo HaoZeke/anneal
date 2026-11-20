@@ -633,6 +633,77 @@ def test_constructor_failure_rolls_back_registered_fixes():
     assert "rgpot" not in lmp.callback
 
 
+FREE_BOX = (0, 0, 0)
+
+
+class CapsPotential(RecordingPotential):
+    def __init__(self, caps):
+        super().__init__()
+        self._caps = caps
+
+    def caps(self):
+        return self._caps
+
+
+def test_periodic_potential_on_free_box_is_refused():
+    lmp = FakeLammps(periodic=FREE_BOX)
+    with pytest.raises(ValueError, match="LJPot.*LJClusterPot") as info:
+        FixExternal(lmp, rgpot.LJPot(), "Ar Ar")
+    assert "allow_periodic_on_free_box" in str(info.value)
+    assert lmp.commands == []
+    assert lmp.callback == {}
+
+
+def test_guard_follows_the_periodic_capability_not_the_class():
+    assert rgpot.LJPot().caps()["periodic"] is True
+    assert rgpot.LJClusterPot().caps()["periodic"] is False
+    with pytest.raises(ValueError, match="CapsPotential is a periodic potential"):
+        FixExternal(
+            FakeLammps(periodic=FREE_BOX), CapsPotential({"periodic": True}), "H He"
+        )
+    for caps in ({"periodic": False}, {}, None):
+        FixExternal(FakeLammps(periodic=FREE_BOX), CapsPotential(caps), "H He")
+    FixExternal(FakeLammps(periodic=FREE_BOX), RecordingPotential(), "H He")
+
+
+def test_guard_leaves_periodic_boxes_alone():
+    FixExternal(FakeLammps(periodic=(1, 1, 1)), rgpot.LJPot(), "Ar Ar")
+    FixExternal(FakeLammps(periodic=(1, 1, 1)), rgpot.LJClusterPot(), "Ar Ar")
+
+
+def test_cluster_potential_on_free_box_matches_direct_evaluation():
+    pot = rgpot.LJClusterPot(cutoff=8.0)
+    lmp = FakeLammps(periodic=FREE_BOX)
+    driver = FixExternal(lmp, pot, "Ar Ar")
+    forces = np.zeros((2, 3))
+    driver._step(2, lmp.tags, lmp.positions, forces)
+
+    rows = box_rows([1.0, 2.0, 3.0], [10.0, 10.5, 12.4], 1.2, 0.9, -0.7)
+    direct = pot.evaluate(lmp.positions, np.array([18, 18], dtype=np.int32), rows)
+    assert lmp.energy == pytest.approx(direct["energy"])
+    np.testing.assert_allclose(forces, direct["forces"])
+    np.testing.assert_array_equal(lmp.virial, np.zeros(6))
+
+
+def test_opt_out_keeps_periodic_potential_on_the_box_extents():
+    pot = rgpot.LJPot(psi=2.5, cutoff=8.0)
+    lmp = FakeLammps(
+        periodic=FREE_BOX, positions=((1.0, 2.0, 3.0), (7.0, 2.0, 3.0))
+    )
+    driver = FixExternal(lmp, pot, "Ar Ar", allow_periodic_on_free_box=True)
+    forces = np.zeros((2, 3))
+    driver._step(2, lmp.tags, lmp.positions, forces)
+
+    rows = box_rows([1.0, 2.0, 3.0], [10.0, 10.5, 12.4], 1.2, 0.9, -0.7)
+    numbers = np.array([18, 18], dtype=np.int32)
+    wrapped = pot.evaluate(lmp.positions, numbers, rows)
+    assert lmp.energy == pytest.approx(wrapped["energy"])
+    np.testing.assert_allclose(forces, wrapped["forces"])
+    cluster = rgpot.LJClusterPot(psi=2.5, cutoff=8.0)
+    isolated = cluster.evaluate(lmp.positions, numbers, rows)
+    assert abs(lmp.energy - isolated["energy"]) > 1e-3
+
+
 def test_real_lammps_smoke():
     """Energy, forces, and virial from fix external match a direct LJ evaluation."""
     lammps = pytest.importorskip("lammps")
@@ -687,6 +758,58 @@ def test_real_lammps_smoke():
         )
     finally:
         lmp.close()
+
+
+FREE_BOX_INPUT = """
+    clear
+    units metal
+    atom_style atomic
+    atom_modify map array sort 0 0
+    boundary f f f
+    region box block 0 6 0 6 0 6
+    create_box 1 box
+    create_atoms 1 single 1 1 1
+    create_atoms 1 single 5.2 1 1
+    mass 1 1
+"""
+
+
+def _free_box_run(pot, **keywords):
+    lammps = pytest.importorskip("lammps")
+    lmp = lammps.lammps(cmdargs=["-log", "none", "-screen", "none", "-nocite"])
+    try:
+        lmp.commands_string(FREE_BOX_INPUT)
+        with FixExternal(lmp, pot, "Ar", **keywords) as driver:
+            driver.run(0)
+            pe = float(lmp.get_thermo("pe"))
+            forces = np.array(lmp.gather_atoms("f", 1, 3), dtype=float).reshape(-1, 3)
+        return pe, forces
+    finally:
+        lmp.close()
+
+
+def test_real_lammps_free_box_guard():
+    pytest.importorskip("lammps")
+    positions = np.array([[1.0, 1.0, 1.0], [5.2, 1.0, 1.0]])
+    numbers = np.array([18, 18], dtype=np.int32)
+    cell = np.diag([6.0, 6.0, 6.0])
+    cutoff = 8.0
+
+    cluster = rgpot.LJClusterPot(cutoff=cutoff)
+    direct = cluster.evaluate(positions, numbers, cell)
+    pe, forces = _free_box_run(cluster)
+    assert pe == pytest.approx(direct["energy"])
+    np.testing.assert_allclose(forces, direct["forces"], atol=1e-12, rtol=1e-12)
+
+    with pytest.raises(ValueError, match="LJClusterPot"):
+        _free_box_run(rgpot.LJPot(cutoff=cutoff))
+
+    periodic = rgpot.LJPot(cutoff=cutoff)
+    wrapped = periodic.evaluate(positions, numbers, cell)
+    pe, forces = _free_box_run(periodic, allow_periodic_on_free_box=True)
+    assert pe == pytest.approx(wrapped["energy"])
+    np.testing.assert_allclose(forces, wrapped["forces"], atol=1e-12, rtol=1e-12)
+    assert pe != pytest.approx(direct["energy"], abs=1e-3)
 
 
 def test_real_lammps_two_rank_mpi():

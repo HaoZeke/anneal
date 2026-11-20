@@ -102,6 +102,21 @@ def _mpi_world(comm: Any, size: int) -> Any:
     return comm if size > 1 else None
 
 
+def _is_periodic_potential(potential: Any) -> bool:
+    """Whether ``potential.caps()`` declares periodic boundary handling.
+
+    A potential with no ``caps`` method, or one that does not report
+    ``periodic``, is not classified.
+    """
+    caps_method = getattr(potential, "caps", None)
+    if not callable(caps_method):
+        return False
+    caps = caps_method()
+    if not isinstance(caps, Mapping):
+        return False
+    return bool(caps.get("periodic", False))
+
+
 def _exception_text(error: BaseException) -> str:
     detail = str(error)
     name = type(error).__name__
@@ -123,6 +138,13 @@ class FixExternal:
     ``virial="auto"`` uses the potential's analytic stress. A periodic box
     whose potential reports no stress is an error. A non-periodic box with
     no stress gets a zero virial. ``virial="none"`` sends a zero virial.
+
+    With ``boundary f f f`` the cell handed to the potential is the box
+    extent, not a periodic cell. A potential whose ``caps()`` reports
+    ``periodic`` then wraps interactions through that box and returns a
+    wrong energy, so ``FixExternal`` raises ``ValueError``; use a
+    non-periodic potential such as :class:`rgpot.LJClusterPot`. Pass
+    ``allow_periodic_on_free_box=True`` to evaluate it on the box anyway.
     """
 
     def __init__(
@@ -135,6 +157,7 @@ class FixExternal:
         create: bool = True,
         comm: Any = None,
         virial: str = "auto",
+        allow_periodic_on_free_box: bool = False,
     ) -> None:
         if not callable(potential) and not callable(getattr(potential, "evaluate", None)):
             raise TypeError("potential must be a Python rgpot potential object")
@@ -160,6 +183,19 @@ class FixExternal:
                 "non-periodic axes: " + ", ".join(names)
             )
         self.periodic = all(periodicity)
+        if (
+            not self.periodic
+            and not allow_periodic_on_free_box
+            and _is_periodic_potential(potential)
+        ):
+            raise ValueError(
+                f"{type(potential).__name__} is a periodic potential, but the "
+                "LAMMPS box is non-periodic in every direction (boundary f f f), "
+                "so the box extents would be passed as a periodic cell and the "
+                "energy would be wrong. Use a non-periodic potential such as "
+                "rgpot.LJClusterPot, or pass allow_periodic_on_free_box=True "
+                "to keep this behavior"
+            )
 
         size = int(lmp.extract_setting("world_size"))
         self._comm = _mpi_world(comm, size)
