@@ -100,12 +100,19 @@ coordinates and raise =InvalidArgumentError= for any other length.
 =cluster_search= and the =Config= presets for rigid TIP4P waters size their
 buffers from =n=. A state of =3 * n= numbers, or =6 * n= for rigid bodies, that
 does not fit in a machine word raises =InvalidArgumentError=. =cluster_search=
-also asks the allocator for its working set before it builds anything: 32
-states and 8 vectors of one number per pair of points, which is the size of
-the pair descriptor that recognises a basin. =MemoryError= means the
-allocator refused it. No largest =n= is built in, so the same call succeeds on
-a machine that can hold the working set. A run that grows its history past the
-working set is still left to the allocator and the operating system.
+also asks the allocator for what its first hop holds before it builds
+anything. =anneal_core::memory::first_hop_bytes= adds up the vectors of one
+state length that the hop keeps (the curvature memory of the quench, the
+occupied, trial and best states, the records of the hop), the vectors of one
+number per pair of points that recognise a basin and fill the table of
+sorted spectra, and the table that the symmetry move sorts, which has an
+entry for every atom and site pair. Each is counted from the types and
+constants of the code that holds it, and
+=tests/first_hop_allocation.rs= fails when the sum is less than the bytes a
+real first hop holds. =MemoryError= means the allocator refused it. No
+largest =n= is built in, so the same call succeeds on a machine that can hold
+the working set. A run that grows its history past the first hop is still
+left to the allocator and the operating system.
 
 =anneal.Bounds(low, high, slack=1e-6)= checks its arrays before it builds the
 box, which is the =Bounds= of the =eindir-core= crate. Sides of different
