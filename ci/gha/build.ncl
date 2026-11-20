@@ -132,6 +132,7 @@ let fast_nlist_off_build_test =
   rustup toolchain install "${msrv}" --profile minimal
   export RUSTUP_TOOLCHAIN="${msrv}"
   rustc -V | grep -F "rustc ${msrv}."
+  uv run --no-project --with pytest pytest -q tests/test_build_rust_core.py
   meson setup bbdir \
     -Dwith_tests=true \
     -Dwith_eam_table=true \
