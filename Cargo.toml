@@ -173,6 +173,11 @@ opt-level = 2
 debug-assertions = true
 overflow-checks = true
 
+[[test]]
+name = "rgpot_force_fd"
+path = "tests/rgpot_force_fd/main.rs"
+harness = false
+
 [[bench]]
 name    = "sa_bench"
 harness = false
