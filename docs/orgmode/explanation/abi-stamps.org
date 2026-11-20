@@ -131,11 +131,11 @@ Covered types:
 
 - =ForceInput=, =ForceOut=, =ForceBatch=, =PotCaps=, =CalculatorGroup=
 - =LJConfig=, =LJClusterConfig=, =MorseConfig=, =ZBLConfig=, =SuttonChenConfig=,
-  =D2Config=, =D2CpmdConfig=, =D4Config=
+  =D2Config=, =D2CpmdConfig=, =D4Config=, =MullerBrownConfig=
 - =Reentrancy= and =PotType=
 - =PotentialBase=, =Potential<Derived>= (through one probe instantiation),
   =LJPot=, =LJClusterPot=, =MorsePot=, =ZBLPot=, =SuttonChenPot=, =SumPot=,
-  =lr::SumPot=, =D2Pot=, =D2CpmdPot=
+  =lr::SumPot=, =D2Pot=, =D2CpmdPot=, =MullerBrownPot=
 - with the cache: =cache::EvalCounts= and =cache::PotentialCache=
 
 The classes of the optional backends are not covered (xtb, tblite, dftd3, dftd4,
@@ -215,4 +215,6 @@ only the field offsets show it.
 gains the virtuals =hessianImpl=, =hessianAdImpl= and =hessianVectorAdImpl=
 after =hessianVectorImpl=.
 The vtable changed, so =kCxxLayoutRevision= is 2.
+It also stamps =MullerBrownConfig= and =MullerBrownPot=.
+The zero-argument =MullerBrownPot= constructor remains its own symbol.
 A program linked against soversion 8 does not load =librgpot.so.9=.
