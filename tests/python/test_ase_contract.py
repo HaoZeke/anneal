@@ -24,12 +24,23 @@ from rgpot.ase import AnnealOptimizer, AnnealRunner, RgpotCalculator
 from support import lj_crystal, lj_dimer, pt7, raw_bytes, si_crystal
 
 
+def _without_source_tree(env: dict[str, str]) -> None:
+    """Drop the checkout's python/ directory so the installed wheel is imported."""
+    source = str(Path(__file__).resolve().parents[2] / "python")
+    parts = [
+        part
+        for part in env.get("PYTHONPATH", "").split(os.pathsep)
+        if part and part != source
+    ]
+    if parts:
+        env["PYTHONPATH"] = os.pathsep.join(parts)
+    else:
+        env.pop("PYTHONPATH", None)
+
+
 def test_import_rgpot_does_not_import_ase() -> None:
     env = os.environ.copy()
-    root = Path(__file__).resolve().parents[2]
-    pythonpath = env.get("PYTHONPATH", "")
-    extra = str(root / "python")
-    env["PYTHONPATH"] = extra if not pythonpath else extra + os.pathsep + pythonpath
+    _without_source_tree(env)
     script = (
         "import sys, rgpot; "
         "assert 'ase' not in sys.modules, sorted(sys.modules); "
@@ -331,11 +342,9 @@ def test_deprecated_rpc_import_path() -> None:
         pytest.skip("RPC shim is not in this tree")
     env = os.environ.copy()
     root = str(shim.parents[0])
+    _without_source_tree(env)
     pythonpath = env.get("PYTHONPATH", "")
-    src = str(Path(__file__).resolve().parents[2] / "python")
-    env["PYTHONPATH"] = os.pathsep.join(
-        part for part in (root, src, pythonpath) if part
-    )
+    env["PYTHONPATH"] = os.pathsep.join(part for part in (root, pythonpath) if part)
     script = """
 import warnings
 warnings.simplefilter("always", DeprecationWarning)

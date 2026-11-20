@@ -24,10 +24,13 @@ _OMP_THREADS = (1, 2, 3, 8)
 
 def _pythonpath() -> str:
     root = Path(__file__).resolve().parents[2]
-    src = str(root / "python")
     tests = str(root / "tests" / "python")
-    pythonpath = os.environ.get("PYTHONPATH", "")
-    return os.pathsep.join(part for part in (src, tests, pythonpath) if part)
+    source = str(root / "python")
+    parts = [tests]
+    for part in os.environ.get("PYTHONPATH", "").split(os.pathsep):
+        if part and part != source:
+            parts.append(part)
+    return os.pathsep.join(parts)
 
 
 def _usable(python: str) -> bool:

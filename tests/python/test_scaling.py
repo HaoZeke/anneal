@@ -182,17 +182,18 @@ def _omp_scaling(tmp_path: Path) -> dict[int, list[float]]:
         encoding="utf-8",
     )
     support = str(Path(__file__).resolve().parent)
-    root = Path(__file__).resolve().parents[2]
-    src = str(root / "python")
+    source = str(Path(__file__).resolve().parents[2] / "python")
     samples: dict[int, list[float]] = {width: [] for width in _WIDTHS}
     reference = None
     for _repeat in range(_REPEATS):
         for width in _WIDTHS:
             env = os.environ.copy()
-            pythonpath = env.get("PYTHONPATH", "")
-            env["PYTHONPATH"] = os.pathsep.join(
-                part for part in (src, support, pythonpath) if part
-            )
+            inherited = [
+                part
+                for part in env.get("PYTHONPATH", "").split(os.pathsep)
+                if part and part != source
+            ]
+            env["PYTHONPATH"] = os.pathsep.join([support, *inherited])
             env["OMP_NUM_THREADS"] = str(width)
             env["RGPOT_SUPPORT"] = support
             proc = subprocess.run(

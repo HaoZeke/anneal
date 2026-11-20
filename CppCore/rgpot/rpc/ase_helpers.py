@@ -22,14 +22,7 @@ this module only needs ASE + numpy.
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 from ase import Atoms
-
-_python = Path(__file__).resolve().parents[3] / "python"
-if _python.is_dir() and str(_python) not in sys.path:
-    sys.path.insert(0, str(_python))
 
 
 def __getattr__(name: str):

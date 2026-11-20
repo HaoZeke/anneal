@@ -7,6 +7,15 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+try:
+    import torch  # noqa: F401
+except ImportError:
+    if "pytest" in sys.modules:
+        import pytest
+
+        pytest.skip("torch is absent", allow_module_level=True)
+    raise SystemExit("torch is required")
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import export_uma_aoti as exp  # noqa: E402
 

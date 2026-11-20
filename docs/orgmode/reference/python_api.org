@@ -194,8 +194,11 @@ LJPot force is undefined for coincident atoms
 
 - Inputs :: none.
 - Units :: none.
-- Outputs :: =True= when the extension was compiled with =RGPOT_HAS_METATOMIC=,
-  so =rgpot.evaluate_metatomic_dlopen= is a function.
+- Outputs :: =True= in every build.
+  =MetatomicDlopen= is linked into every =librgpot=, so
+  =rgpot.evaluate_metatomic_dlopen= is a function.
+  The flag does not follow =RGPOT_HAS_METATOMIC=, which records the torch link.
+  The engine plugin stays optional and is opened at runtime.
 - Errors :: none.
 
 *** =rgpot.has_xckernel=
@@ -320,9 +323,8 @@ evaluate_metatomic(positions, atom_types, box, *, model_path, engine_path=None, 
   =rgpot.evaluate_metatomic_dlopen=.
   The function imports =torch= first when it is installed, so the engine
   resolves the same =libtorch=.
-- Errors :: =RuntimeError= =this build has no MetatomicDlopen frontend= when
-  =rgpot.has_metatomic_dlopen= is false.
-  Otherwise the errors of =rgpot.evaluate_metatomic_dlopen=.
+- Errors :: the errors of =rgpot.evaluate_metatomic_dlopen=.
+  The frontend is present in every build.
 
 *** =rgpot.evaluate_metatomic_dlopen=
 
@@ -344,7 +346,6 @@ evaluate_metatomic_dlopen(positions, atom_types, box, model_path, engine_path=''
 - Outputs :: a tuple =(energy, forces, variance)=: a float, a =(N, 3)= float64
   array and a float.
   Each call builds and drops its own frontend.
-  =None= when =rgpot.has_metatomic_dlopen= is false.
 - Errors :: an empty =model_path= raises =ValueError=.
   No candidate library that opens raises =RuntimeError=
   =MetatomicDlopen: libmetatomic_engine.so not found ...=.
