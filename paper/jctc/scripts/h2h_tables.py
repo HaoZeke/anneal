@@ -5,7 +5,7 @@
 Three blocks, each between a pair of marker comments:
 
     tab:gofee       manuscript.tex  bench/ase-gofee-h2h/summary.csv
-    tab:tip4p-gmin  manuscript.tex  bench/tip4p-h2h/h2h-summary.csv
+    tab:tip4p-gmin  manuscript.tex  bench/tip4p-h2h/rows-h2h-r2.csv  (run r2c)
     tab:gofee-si    si.tex          bench/ase-gofee-h2h/asg2-summary.csv, arms measured there
 
     python3 paper/jctc/scripts/h2h_tables.py            # rewrite the blocks
@@ -15,6 +15,7 @@ Three blocks, each between a pair of marker comments:
 from __future__ import annotations
 
 import csv
+import math
 import sys
 from pathlib import Path
 
@@ -22,7 +23,9 @@ ROOT = Path(__file__).resolve().parents[3]
 MANUSCRIPT = ROOT / "paper" / "jctc" / "manuscript.tex"
 SI = ROOT / "paper" / "jctc" / "si.tex"
 GOFEE = ROOT / "bench" / "ase-gofee-h2h"
-TIP4P = ROOT / "bench" / "tip4p-h2h" / "h2h-summary.csv"
+TIP4P_ROWS = ROOT / "bench" / "tip4p-h2h" / "rows-h2h-r2.csv"
+R2C_UNSCORED = 25
+R2C_M = 4
 
 MARKS = {
     "gofee": ("% gofee table: start", "% gofee table: end"),
@@ -36,6 +39,121 @@ OTHER_LABEL = {"au55": "Au\\(_{55}\\)", "cu38": "Cu\\(_{38}\\)", "cu12au26": "Cu
 TIP4P_LABEL = {"tip4p8": "(H\\(_2\\)O)\\(_8\\)", "tip4p15": "(H\\(_2\\)O)\\(_{15}\\)",
                "tip4p20": "(H\\(_2\\)O)\\(_{20}\\)", "tip4p21": "(H\\(_2\\)O)\\(_{21}\\)",
                "tip4p25": "(H\\(_2\\)O)\\(_{25}\\)"}
+
+
+def type7(values: list[float], p: float = 0.5) -> float:
+    ordered = sorted(values)
+    h = (len(ordered) - 1) * p
+    lo = math.floor(h)
+    hi = min(lo + 1, len(ordered) - 1)
+    return ordered[lo] + (h - lo) * (ordered[hi] - ordered[lo])
+
+
+def fisher_exact(hits_a: int, n_a: int, hits_b: int, n_b: int) -> float:
+    """Two-sided Fisher exact p, the same sum as scripts/paper_audit.py."""
+    hits = hits_a + hits_b
+    ways = math.comb(n_a + n_b, hits)
+
+    def prob(k: int) -> float:
+        return math.comb(n_a, k) * math.comb(n_b, hits - k) / ways
+
+    observed = prob(hits_a)
+    lo, hi = max(0, hits - n_b), min(n_a, hits)
+    return min(1.0, sum(prob(k) for k in range(lo, hi + 1) if prob(k) <= observed * (1 + 1e-7)))
+
+
+def mann_whitney_exact(x: list[float], y: list[float]) -> float:
+    """Two-sided exact Mann-Whitney p by enumerating the rank sum."""
+    n1, n2 = len(x), len(y)
+    pooled = list(x) + list(y)
+    order = sorted(enumerate(pooled), key=lambda item: item[1])
+    ranks = [0.0] * len(pooled)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and order[j + 1][1] == order[i][1]:
+            j += 1
+        rank = (i + 1 + j + 1) / 2.0
+        for k in range(i, j + 1):
+            ranks[order[k][0]] = rank
+        i = j + 1
+    ranks2 = [int(round(rank * 2.0)) for rank in ranks]
+    obs_u2 = sum(ranks2[:n1]) - n1 * (n1 + 1)
+    dp: list[dict[int, int]] = [{0: 1}] + [{} for _ in range(n1)]
+    seen = 0
+    for rank2 in ranks2:
+        seen += 1
+        top = min(seen, n1)
+        for picked in range(top, 0, -1):
+            current = dp[picked]
+            previous = dp[picked - 1]
+            for score, ways in previous.items():
+                current[score + rank2] = current.get(score + rank2, 0) + ways
+    total = math.comb(n1 + n2, n1)
+    low = sum(ways for score, ways in dp[n1].items() if score - n1 * (n1 + 1) <= obs_u2) / total
+    high = sum(ways for score, ways in dp[n1].items() if score - n1 * (n1 + 1) >= obs_u2) / total
+    return min(1.0, 2.0 * min(low, high))
+
+
+def bonferroni(p: float, m: int = R2C_M) -> float:
+    return min(1.0, m * p)
+
+
+def r2c_stats() -> list[dict]:
+    """Run r2c, one record per size, from the per-seed rows.
+
+    Sizes with a Cambridge header are scored. (H2O)25 is not. Fisher and the
+    calls-to-hit Mann-Whitney p are Bonferroni-corrected with m=4. A miss is
+    ranked at its recorded call count, which is the budget. Wall is a cost.
+    """
+    rows = read(TIP4P_ROWS)
+    grouped: dict[int, dict[str, list[dict[str, str]]]] = {}
+    order: list[int] = []
+    for row in rows:
+        size = int(row["molecules"])
+        if size not in grouped:
+            order.append(size)
+            grouped[size] = {}
+        grouped[size].setdefault(row["arm"], []).append(row)
+    stats = []
+    for size in order:
+        anneal = grouped[size]["anneal"]
+        gmin = grouped[size]["gmin"]
+        anneal_s = sorted(anneal, key=lambda row: int(row["seed"]))
+        gmin_s = sorted(gmin, key=lambda row: int(row["seed"]))
+        ah = sum(int(row["hit"]) for row in anneal)
+        gh = sum(int(row["hit"]) for row in gmin)
+        scored = size != R2C_UNSCORED
+        fisher_raw = fisher_exact(ah, len(anneal), gh, len(gmin)) if scored else None
+        calls_raw = mann_whitney_exact(
+            [float(row["calls"]) for row in anneal],
+            [float(row["calls"]) for row in gmin],
+        ) if scored else None
+        energies_a = [float(row["best_energy"]) for row in anneal]
+        energies_g = [float(row["best_energy"]) for row in gmin]
+        walls_a = [float(row["wall_s"]) for row in anneal]
+        walls_g = [float(row["wall_s"]) for row in gmin]
+        stats.append({
+            "molecules": size,
+            "scored": scored,
+            "n": len(anneal),
+            "budget": max(int(row["calls"]) for row in anneal + gmin),
+            "seeds": tuple(int(row["seed"]) for row in anneal_s),
+            "same_start": all(a["start_id"] == g["start_id"] for a, g in zip(anneal_s, gmin_s)),
+            "anneal_hits": ah,
+            "gmin_hits": gh,
+            "fisher_raw": fisher_raw,
+            "calls_raw": calls_raw,
+            "fisher_p": None if fisher_raw is None else bonferroni(fisher_raw),
+            "calls_p": None if calls_raw is None else bonferroni(calls_raw),
+            "anneal_best": min(energies_a),
+            "anneal_median": type7(energies_a),
+            "gmin_best": min(energies_g),
+            "gmin_median": type7(energies_g),
+            "anneal_wall": type7(walls_a),
+            "gmin_wall": type7(walls_g),
+        })
+    return stats
 
 
 def show_s(value: float) -> str:
@@ -106,20 +224,28 @@ def gofee_block() -> str:
 
 def tip4p_block() -> str:
     body = []
-    for row in read(TIP4P):
+    for row in r2c_stats():
+        if row["scored"]:
+            hits_a = f"{row['anneal_hits']}/{row['n']}"
+            hits_g = f"{row['gmin_hits']}/{row['n']}"
+            fisher_p = show_p(row["fisher_p"])
+            calls_p = show_p(row["calls_p"])
+        else:
+            hits_a = hits_g = fisher_p = calls_p = "--"
         body.append(" & ".join([
-            TIP4P_LABEL[row["system"]], budget_tex(row["budget"]),
-            row["anneal_hits"], row["gmin_hits"],
-            show_s(float(row["anneal_wall_median_s"])), show_s(float(row["gmin_wall_median_s"])),
-            show_p(float(row["fisher_p"])), show_p(float(row["mwu_p"])),
+            TIP4P_LABEL[f"tip4p{row['molecules']}"], budget_tex(str(row["budget"])),
+            hits_a, hits_g, show_s(row["anneal_wall"]), show_s(row["gmin_wall"]),
+            fisher_p, calls_p,
         ]) + " \\\\")
     return "\n".join([
         "\\begin{table}",
-        "\\caption{This work against GMIN on rigid TIP4P water clusters.",
+        "\\caption{Run r2c against GMIN on rigid TIP4P water clusters.",
         "Seeds 2000--2011, one core, budget in force calls.",
-        "Wall is the median wall in seconds over the 12 runs.",
-        "\\(p_\\mathrm{F}\\) is the two-sided Fisher exact test on hits and \\(p_\\mathrm{U}\\)",
-        "the two-sided Mann--Whitney test on the best energy of each run.}",
+        "Wall is the median wall in seconds, a per-call cost and not a search result.",
+        "\\(p_\\mathrm{F}\\) is the two-sided Fisher exact test on hits and \\(p_\\mathrm{calls}\\)",
+        "the two-sided exact Mann--Whitney test on calls to a hit, with a miss ranked at the budget.",
+        "Both are Bonferroni-corrected with \\(m=4\\) over the four sizes that have a Cambridge header.",
+        "\\((\\mathrm{H_2O})_{25}\\) is not scored.}",
         "\\label{tab:tip4p-gmin}",
         "\\centering",
         "\\small",
@@ -128,7 +254,7 @@ def tip4p_block() -> str:
         " & & \\multicolumn{2}{c}{Hits} & \\multicolumn{2}{c}{Wall (s)} & & \\\\",
         "\\cmidrule(lr){3-4}\\cmidrule(lr){5-6}",
         "Cluster & Budget & This work & GMIN & This work & GMIN & "
-        "\\(p_\\mathrm{F}\\) & \\(p_\\mathrm{U}\\) \\\\",
+        "\\(p_\\mathrm{F}\\) & \\(p_\\mathrm{calls}\\) \\\\",
         "\\midrule",
         *body,
         "\\bottomrule",

@@ -50,8 +50,8 @@ from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 TEX = "paper/jctc/manuscript.tex"
 SI = "paper/jctc/si.tex"
 
-REVISION_COLUMNS = ("code_revision", "anneal_head", "release_revision", "head", "harness_revision")
-HOST_COLUMNS = ("host",)
+REVISION_COLUMNS = ("code_revision", "anneal_head", "release_revision", "head", "harness_revision", "anneal_sha")
+HOST_COLUMNS = ("host", "machine_id")
 # Revisions of other codes. The GMIN build scripts refuse a tarball whose SVNREV differs.
 EXTERNAL_REVISIONS = {"aac1548a8aec13b53ad12a8d6904625081685d2e": "GMIN source/SVNREV"}
 # Local revisions that rows cite, each with the pushed commit it was rebuilt as.
@@ -2369,28 +2369,142 @@ def ase_gofee(audit: Audit) -> None:
                f"it spent the full {row['charged']} calls in {float(row['wall_s']):.0f} s, best energy {float(row['best']):.6f}")
 
 
+def cite_r2c(audit: Audit) -> None:
+    """The TIP4P versus GMIN head-to-head is run r2c, recomputed from its rows.
+
+    Fisher and the calls-to-hit Mann-Whitney p use a Bonferroni correction with
+    m=4. (H2O)25 is unscored. A wall-time Mann-Whitney p is a per-call cost.
+    """
+    h2h = load_script("h2h_tables_r2c", "paper/jctc/scripts/h2h_tables.py")
+    stats = h2h.r2c_stats()
+    by = {row["molecules"]: row for row in stats}
+    audit.rows("bench/tip4p-h2h/rows-h2h-r2.csv")
+    old = {row["system"]: row for row in audit.rows("bench/tip4p-h2h/h2h-summary.csv")}
+    audit.record(old["tip4p15"]["anneal_hits"] == "9/12" and old["tip4p20"]["anneal_hits"] == "5/12",
+                 "bench/tip4p-h2h/h2h-summary.csv", "the earlier summary keeps the pre-r2c hit counts",
+                 "9/12 5/12", f"{old['tip4p15']['anneal_hits']} {old['tip4p20']['anneal_hits']}")
+    audit.record(all(row["same_start"] for row in stats), TEX, "run r2c uses one start per seed", "same", "same")
+    audit.record(all(row["n"] == 12 and row["seeds"] == tuple(range(2000, 2012)) and row["budget"] == 2_000_000
+                     for row in stats), TEX, "run r2c is twelve seeds 2000-2011 at 2e6", "12 2000-2011 2000000", "holds")
+    for row in stats:
+        if not row["scored"]:
+            continue
+        raw = fisher(row["anneal_hits"], row["n"], row["gmin_hits"], row["n"])
+        audit.record(abs(raw - row["fisher_raw"]) < 1e-12, TEX,
+                     f"run r2c Fisher at n={row['molecules']} matches the audit", f"{raw:.6g}", f"{row['fisher_raw']}")
+        audit.record(abs(h2h.bonferroni(row["fisher_raw"]) - row["fisher_p"]) < 1e-15, TEX,
+                     f"run r2c Fisher at n={row['molecules']} is Bonferroni m=4", "m=4", f"{row['fisher_p']}")
+    abstract_sizes = (8, 15, 20)
+    audit.said(TEX, "Against GMIN at \\(2\\times 10^{6}\\) calls on seeds 2000--2011, run r2c hits "
+                    "\\((\\mathrm{H_2O})_{8}\\), \\((\\mathrm{H_2O})_{15}\\), and \\((\\mathrm{H_2O})_{20}\\) on "
+                    + series(str(by[n]["anneal_hits"]) for n in abstract_sizes) + " of 12 seeds and GMIN on "
+                    + series(str(by[n]["gmin_hits"]) for n in abstract_sizes) + " of 12.")
+    eight, fifteen, twenty, twentyone, twentyfive = (by[n] for n in (8, 15, 20, 21, 25))
+    audit.said(TEX, "Table~\\ref{tab:tip4p-gmin} is run r2c, this setting against GMIN on rigid TIP4P")
+    audit.said(TEX, f"This setting hits \\((\\mathrm{{H_2O}})_{{8}}\\) on {eight['anneal_hits']} of {eight['n']} "
+                    f"and GMIN on {eight['gmin_hits']} of {eight['n']}.")
+    audit.said(TEX, "The calls-to-hit \\(p\\) is " + h2h.show_p(eight["calls_p"]) + " and Fisher's \\(p\\) is "
+                    + h2h.show_p(eight["fisher_p"]) + ".")
+    audit.said(TEX, f"It hits \\((\\mathrm{{H_2O}})_{{15}}\\) on {fifteen['anneal_hits']} of {fifteen['n']} and GMIN on "
+                    f"{fifteen['gmin_hits']} of {fifteen['n']}, with \\(p={h2h.show_p(fifteen['fisher_p'])}\\).")
+    audit.said(TEX, f"It hits \\((\\mathrm{{H_2O}})_{{20}}\\) on {twenty['anneal_hits']} of {twenty['n']} and GMIN on "
+                    f"{twenty['gmin_hits']} of {twenty['n']}, with \\(p={h2h.show_p(twenty['fisher_p'])}\\), "
+                    "which is not significant.")
+    audit.record(twenty["fisher_p"] >= 0.05, TEX, "run r2c (H2O)20 is not significant", "not significant",
+                 f"{twenty['fisher_p']}")
+    audit.said(TEX, "Neither arm hits \\((\\mathrm{H_2O})_{21}\\).")
+    audit.record(twentyone["anneal_hits"] == 0 and twentyone["gmin_hits"] == 0, TEX, "run r2c (H2O)21 is 0 vs 0",
+                 "0 0", f"{twentyone['anneal_hits']} {twentyone['gmin_hits']}")
+    audit.record(not twentyfive["scored"], TEX, "run r2c leaves (H2O)25 unscored", "unscored", "unscored")
+
+    def kj(value: float) -> str:
+        return f"{value:.3f}"
+
+    audit.said(TEX, "On the unscored \\((\\mathrm{H_2O})_{25}\\) the best and the median are "
+                    f"\\({kj(twentyfive['anneal_best'])}\\) and \\({kj(twentyfive['anneal_median'])}\\)~kJ/mol for this "
+                    f"setting, and \\({kj(twentyfive['gmin_best'])}\\) and \\({kj(twentyfive['gmin_median'])}\\)~kJ/mol for GMIN.")
+    for label, value in (("anneal best", twentyfive["anneal_best"]), ("anneal median", twentyfive["anneal_median"]),
+                         ("GMIN best", twentyfive["gmin_best"]), ("GMIN median", twentyfive["gmin_median"])):
+        audit.cell(TEX, f"run r2c (H2O)25 {label}", kj(value), value)
+    audit.said(TEX, "The wall-time Mann--Whitney test is a per-call cost and is not a search result.")
+    audit.said(TEX, "Wall is the median wall in seconds, a per-call cost and not a search result.")
+    audit.said(TEX, "\\caption{Run r2c against GMIN on rigid TIP4P water clusters.")
+    audit.said(TEX, "Both are Bonferroni-corrected with \\(m=4\\) over the four sizes that have a Cambridge header.")
+    audit.said(TEX, "\\((\\mathrm{H_2O})_{25}\\) is not scored.")
+    quicker = [row for row in stats if row["anneal_wall"] < row["gmin_wall"]]
+    audit.said(TEX, f"The median wall is that cost, and it is lower for this setting on all {len(quicker)} sizes.")
+    more = [row for row in stats if row["scored"] and row["anneal_hits"] > row["gmin_hits"]]
+    scored = [row for row in stats if row["scored"]]
+    audit.said(TEX, f"Against GMIN on TIP4P, run r2c hits more seeds on {len(more)} of the {len(scored)} scored sizes")
+    audit.said(TEX, "against GMIN on TIP4P, run r2c hits \\((\\mathrm{H_2O})_{15}\\) on "
+                    f"{fifteen['anneal_hits']} of {fifteen['n']} and GMIN on {fifteen['gmin_hits']} of {fifteen['n']}, "
+                    f"with \\(p={h2h.show_p(fifteen['fisher_p'])}\\).")
+    section = audit.text(TEX).split("\\label{sec:tip4p-gmin}", 1)[1].split("\\subsection{", 1)[0]
+    for stale in ("9 of 12", "5 of 12", "1 of 12 against 0 of 12", "p=0.093", "3.4\\times 10^{-4}",
+                  "scored against the lowest energy"):
+        audit.record(stale not in section, TEX, f"the r2c section drops the earlier figure {stale}", "absent",
+                     "absent" if stale not in section else "present")
+    abstract = audit.text(TEX).split("\\begin{abstract}", 1)[1].split("\\end{abstract}", 1)[0]
+    audit.record("12, 9, and 5" not in abstract and "12, 7, and 6" in abstract, TEX,
+                 "the abstract cites the r2c hit counts", "12, 7, and 6", "present")
+    audit.record("run r2c" in abstract, TEX, "the abstract names run r2c", "run r2c", "present")
+
+
 def tip4p_panel(audit: Audit) -> None:
-    """The TIP4P panel; its per-seed rows were not committed, so p(U) is checked against the summary only."""
+    """Run r2c in README-h2h.md, checked from the per-seed rows."""
     path = "bench/tip4p-h2h/README-h2h.md"
-    summary = {r["system"]: r for r in audit.rows("bench/tip4p-h2h/h2h-summary.csv")}
-    sizes = {"(H₂O)₈": "tip4p8", "(H₂O)₁₅": "tip4p15", "(H₂O)₂₀": "tip4p20", "(H₂O)₂₁": "tip4p21", "(H₂O)₂₅": "tip4p25"}
-    pairs = (("anneal best / median", "anneal_best_kj", "anneal_best_median_kj"),
-             ("GMIN best / median", "gmin_best_kj", "gmin_best_median_kj"),
-             ("wall (a/g s)", "anneal_wall_median_s", "gmin_wall_median_s"),
-             ("pot (a/g s)", "anneal_pot_median_s", "gmin_pot_median_s"))
+    h2h = load_script("h2h_tables_r2c_panel", "paper/jctc/scripts/h2h_tables.py")
+    stats = {row["molecules"]: row for row in h2h.r2c_stats()}
+    audit.rows("bench/tip4p-h2h/rows-h2h-r2.csv")
+    sizes = {"(H₂O)₈": 8, "(H₂O)₁₅": 15, "(H₂O)₂₀": 20, "(H₂O)₂₁": 21, "(H₂O)₂₅": 25}
+    pairs = (("anneal best / median", "anneal_best", "anneal_median"),
+             ("GMIN best / median", "gmin_best", "gmin_median"),
+             ("wall (a/g s)", "anneal_wall", "gmin_wall"))
     for line, row in md_table(audit, path, "Size | anneal | GMIN | anneal best"):
-        s = summary[sizes[row["Size"]]]
-        where = f"{path}:{line} {s['system']}"
-        audit.cell(where, "anneal hits", row["anneal"], s["anneal_hits"])
-        audit.cell(where, "GMIN hits", row["GMIN"], s["gmin_hits"])
+        stat = stats[sizes[row["Size"]]]
+        where = f"{path}:{line} n={stat['molecules']}"
+        if stat["scored"]:
+            audit.cell(where, "anneal hits", row["anneal"], f"{stat['anneal_hits']}/{stat['n']}")
+            audit.cell(where, "GMIN hits", row["GMIN"], f"{stat['gmin_hits']}/{stat['n']}")
+            audit.cell(where, "p(F)", row["p(F)"], stat["fisher_p"])
+            audit.cell(where, "p(calls)", row["p(calls)"], stat["calls_p"])
+        else:
+            audit.record(row["anneal"] == "unscored" and row["GMIN"] == "unscored", where, "unscored hits",
+                         "unscored", f"{row['anneal']} {row['GMIN']}")
+            audit.record(row["p(F)"] == "--" and row["p(calls)"] == "--", where, "unscored p", "--",
+                         f"{row['p(F)']} {row['p(calls)']}")
         for label, left, right in pairs:
             shown_l, shown_r = row[label].split(" / ")
-            audit.cell(where, f"{label} left", shown_l, float(s[left]))
-            audit.cell(where, f"{label} right", shown_r, float(s[right]))
-        ha, na = map(int, s["anneal_hits"].split("/"))
-        hg, ng = map(int, s["gmin_hits"].split("/"))
-        audit.cell(where, "p(F)", row["p(F)"], fisher(ha, na, hg, ng))
-        audit.cell(where, "p(U) (summary)", row["p(U)"], float(s["mwu_p"]))
+            audit.cell(where, f"{label} left", shown_l, stat[left])
+            audit.cell(where, f"{label} right", shown_r, stat[right])
+    audit.said(path, "(H₂O)₂₅ is not in the database, so run r2c leaves it unscored.")
+    audit.said(path, "The head-to-head cited in the manuscript is run r2c, record branch\n`record/tip4p-h2h-r2`")
+    audit.said(path, "The wall-time Mann–Whitney test is a per-call cost and is not a search result.")
+    twentyfive = stats[25]
+
+    def uminus(value: float, places: int) -> str:
+        return "\u2212" + f"{abs(value):.{places}f}"
+
+    audit.said(path, "On the unscored (H₂O)₂₅ the best and median energies are "
+                     f"{uminus(twentyfive['anneal_best'], 3)} / {uminus(twentyfive['anneal_median'], 3)} kJ/mol "
+                     f"for anneal and {uminus(twentyfive['gmin_best'], 3)} / "
+                     f"{uminus(twentyfive['gmin_median'], 3)} kJ/mol for GMIN.")
+    ratios = [stat["gmin_wall"] / stat["anneal_wall"] for stat in stats.values()]
+    audit.said(path, f"by a factor of {min(ratios):.2f} to {max(ratios):.1f}. That factor is not a search result.")
+    audit.said(path, "`h2h-summary.csv` is an earlier summary and is not run r2c.")
+    audit.said(path, "The baseline (H₂O) counts are the anneal arm of run r2c.")
+    audit.said(path, "GMIN's best reads\n1.2 mJ/mol below anneal's there")
+    gap_mj = (stats[8]["anneal_best"] - stats[8]["gmin_best"]) * 1000.0
+    audit.cell(path, "GMIN best at n=8 is 1.2 mJ/mol below anneal", "1.2", gap_mj)
+    for line, row in md_table(audit, path, "Variant | (H₂O)₂₁ | (H₂O)₂₀"):
+        if row["Variant"] != "baseline":
+            continue
+        where = f"{path}:{line} baseline"
+        for label, size in (("(H₂O)₂₁", 21), ("(H₂O)₂₀", 20), ("(H₂O)₁₅", 15)):
+            hits, energy = row[label].split(" ")
+            audit.cell(where, f"{label} hits", hits, f"{stats[size]['anneal_hits']}/12")
+            audit.cell(where, f"{label} median", energy, stats[size]["anneal_median"])
+        audit.cell(where, "(H₂O)₈ hits", row["(H₂O)₈"], f"{stats[8]['anneal_hits']}/12")
 
 
 def bench_prose(audit: Audit) -> None:
@@ -2828,29 +2942,7 @@ def manuscript_new(audit: Audit) -> None:
     audit.cell(SI, "the other panel systems of the GOFEE table", "au55 cu38 cu12au26 sw10 tc10 tip4p8",
                " ".join(dict.fromkeys(r["system"] for r in other)))
 
-    tip = {r["system"]: r for r in audit.rows("bench/tip4p-h2h/h2h-summary.csv")}
-    sizes = ("tip4p8", "tip4p15", "tip4p20")
-    audit.said(TEX, "hits \\((\\mathrm{H_2O})_{8}\\), \\((\\mathrm{H_2O})_{15}\\), and\n\\((\\mathrm{H_2O})_{20}\\) on "
-                    + series(tip[s]["anneal_hits"].split("/")[0] for s in sizes) + " of 12 seeds and GMIN on "
-                    + series(tip[s]["gmin_hits"].split("/")[0] for s in sizes) + "\nof 12.")
-    audit.cell(TEX, "TIP4P against GMIN: seeds and budget", "12 2000000",
-               " ".join(sorted({tip[s]["n"] for s in tip} | {tip[s]["budget"] for s in tip}, key=len)))
-    tp = {s: panel.show_p(float(tip[s]["fisher_p"]), tex=True) for s in tip}
-    audit.said(TEX, f"This setting hits \\((\\mathrm{{H_2O}})_{{8}}\\) on 12 of 12 and GMIN on 8 of 12, with\n\\(p={tp['tip4p8']}\\).")
-    audit.cell(TEX, "TIP4P15 and TIP4P20 p", f"{tp['tip4p15']} {tp['tip4p20']}",
-               "\\(3.4\\times 10^{-4}\\) 0.037")
-    audit.said(TEX, "It hits \\((\\mathrm{H_2O})_{15}\\) on 9 of 12 and \\((\\mathrm{H_2O})_{20}\\) on 5 of\n12, and GMIN hits neither, with \\(p\\) of \\(3.4\\times 10^{-4}\\) and 0.037.")
-    audit.cell(TEX, "GMIN hits neither of TIP4P15 and TIP4P20", "0/12 0/12",
-               f"{tip['tip4p15']['gmin_hits']} {tip['tip4p20']['gmin_hits']}")
-    audit.cell(TEX, "TIP4P21 and TIP4P25 hits", "0/12 0/12 1/12 0/12",
-               f"{tip['tip4p21']['anneal_hits']} {tip['tip4p21']['gmin_hits']} {tip['tip4p25']['anneal_hits']} {tip['tip4p25']['gmin_hits']}")
-    quicker = [s for s in tip if float(tip[s]["anneal_wall_median_s"]) < float(tip[s]["gmin_wall_median_s"])]
-    audit.cell(TEX, "the median wall of this setting is lower on all 5 TIP4P sizes", "5", float(len(quicker)))
-    more = [s for s in tip if int(tip[s]["anneal_hits"].split("/")[0]) > int(tip[s]["gmin_hits"].split("/")[0])]
-    audit.said(TEX, f"Against GMIN on TIP4P, this setting hits more seeds on {len(more)} of the {len(tip)} sizes")
-    audit.said(TEX, "against GMIN on TIP4P this setting hits \\((\\mathrm{H_2O})_{15}\\) on 9 of 12\nand GMIN on 0 of 12.")
-    audit.said("bench/tip4p-h2h/README-h2h.md",
-               "(H₂O)₂₅ is not in the database, so its hit is scored against the lowest energy either arm reached")
+    cite_r2c(audit)
 
     # Constants of the definitions and of the priors, read from the source.
     preset = "src/methods/cluster_hopping/preset.rs"
