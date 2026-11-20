@@ -345,7 +345,11 @@ also needs `LAMMPS_LIB_DIR`, `IRA_LIB_DIR` and `GPR_OPTIM_LIB_DIR`,
 because those features panic when the directory is unset:
 
 ```bash
-VESIN_SRC=/path/to/vesin cargo test --locked --all-features
+VESIN_SRC=/path/to/vesin \
+LAMMPS_LIB_DIR=/path/to/lammps/lib \
+IRA_LIB_DIR=/path/to/ira/lib \
+GPR_OPTIM_LIB_DIR=/path/to/gpr_optim/lib \
+cargo test --locked --all-features
 ```
 
 ## Install
