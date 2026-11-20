@@ -156,17 +156,19 @@ pub fn detected_group_classed(
     read_group(x, n, classes, tolerance, false)
 }
 
-/// [`detected_group_classed`], optionally keeping only the operations that
+/// [`detected_group_classed`], optionally grown only through operations that
 /// are themselves symmetries of `x`.
 ///
 /// The closure of loosely commensurate generators is cut at its cap, and
 /// what it holds are words in the detected operations, not all of which are
 /// operations the structure has: a word of two loose operations can be a
-/// rotation the structure does not carry at all. With `symmetric_only` an
-/// element stays only when its deviation on `x`, measured as detection
-/// measures a candidate, is under `tolerance`. A completion that applies the
-/// elements then applies only operations the structure has to within the
-/// tolerance a detected one was accepted at.
+/// rotation the structure does not carry at all, and such words spend the
+/// cut on elements a completion should not apply. With `symmetric_only` a
+/// product is an element only when its deviation on `x`, measured as
+/// detection measures a candidate, is under `tolerance`, and only elements
+/// are multiplied further. A completion that applies the elements then
+/// applies only operations the structure has to within the tolerance a
+/// detected one was accepted at, and the cut falls on the last of those.
 fn read_group(
     x: ArrayView1<f64>,
     n: usize,
@@ -196,12 +198,14 @@ fn read_group(
     let cap = (4 * highest).max(LARGEST_POLYHEDRAL_GROUP);
     let operations: Vec<Rot> = generators.iter().map(operation).collect();
     let radius = rms_radius(x, n);
-    let mut group = close_group(&operations, radius, rounding_closure(radius, cap), cap);
-    if symmetric_only {
-        group.retain(|g| {
+    let tolerance_of_words = rounding_closure(radius, cap);
+    let group = if symmetric_only {
+        close_group_where(&operations, radius, tolerance_of_words, cap, |g| {
             operation_deviation(x, n, classes, g, tolerance).is_some_and(|d| d < tolerance)
-        });
-    }
+        })
+    } else {
+        close_group(&operations, radius, tolerance_of_words, cap)
+    };
     (group.len() >= 2).then_some(group)
 }
 
@@ -254,22 +258,41 @@ fn operation_gap(a: &Rot, b: &Rot, radius: f64) -> f64 {
 /// less than `tolerance` at `radius`. A closure that passes `cap` elements is
 /// cut there, in the order the elements were reached.
 fn close_group(generators: &[Rot], radius: f64, tolerance: f64, cap: usize) -> Vec<Rot> {
+    close_group_where(generators, radius, tolerance, cap, |_| true)
+}
+
+/// [`close_group`] grown only through the products `keep` accepts: a product
+/// it refuses is not an element and is not multiplied further, so the cut at
+/// `cap` is spent on the operations that pass and not on words that do not.
+/// A refused product is remembered, and met again it is refused without
+/// asking `keep` once more.
+fn close_group_where(
+    generators: &[Rot],
+    radius: f64,
+    tolerance: f64,
+    cap: usize,
+    mut keep: impl FnMut(&Rot) -> bool,
+) -> Vec<Rot> {
     let identity: Rot = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
     let mut group = vec![identity];
+    let mut refused: Vec<Rot> = Vec::new();
     let mut next = 0;
     while next < group.len() {
         let a = group[next];
         next += 1;
         for g in generators {
             let p = mul(&a, g);
-            if !group
-                .iter()
-                .any(|q| operation_gap(q, &p, radius) <= tolerance)
-            {
+            let seen = |q: &Rot| operation_gap(q, &p, radius) <= tolerance;
+            if group.iter().any(seen) || refused.iter().any(seen) {
+                continue;
+            }
+            if keep(&p) {
                 group.push(p);
                 if group.len() >= cap {
                     return group;
                 }
+            } else {
+                refused.push(p);
             }
         }
     }
@@ -1579,9 +1602,9 @@ mod tests {
 
     /// The closure of loosely commensurate generators is cut at its cap, and
     /// some of what it holds are words the core does not carry. The group of
-    /// the fitted reading is the plain group less exactly those: every element
-    /// kept deviates by less than the tolerance, every element dropped by no
-    /// less, and the identity stays first.
+    /// the fitted reading is grown only through operations the core has:
+    /// every element deviates by less than the tolerance, the identity stays
+    /// first, and a structure that is exactly symmetric keeps the whole group.
     #[test]
     fn the_fitted_group_has_only_operations_the_core_carries() {
         for (amplitude, tolerance) in [(0.15, 0.25), (0.3, 0.5)] {
@@ -1594,20 +1617,22 @@ mod tests {
                 LARGEST_POLYHEDRAL_GROUP,
                 "{amplitude}: the cut"
             );
-            assert!(kept.len() < plain.len(), "{amplitude}: nothing was dropped");
             assert_eq!(kept[0], plain[0]);
             let deviation =
                 |g: &Rot| operation_deviation(x.view(), n, None, g, f64::INFINITY).expect("no cap");
-            for g in &plain {
-                let held = kept.contains(g);
-                assert_eq!(
-                    held,
-                    deviation(g) < tolerance,
-                    "{amplitude}: {}",
-                    deviation(g)
-                );
+            assert!(
+                plain.iter().any(|g| deviation(g) >= tolerance),
+                "{amplitude}: the plain closure has only symmetries"
+            );
+            for g in &kept {
+                assert!(deviation(g) < tolerance, "{amplitude}: {}", deviation(g));
             }
         }
+        let exact = icosahedron(1.0);
+        let n = exact.len() / 3;
+        let plain = read_group(exact.view(), n, None, 0.05, false).expect("a group");
+        let kept = read_group(exact.view(), n, None, 0.05, true).expect("a group");
+        assert_eq!(kept.len(), plain.len());
     }
 
     /// A group read about a point the structure is not symmetric about acts
