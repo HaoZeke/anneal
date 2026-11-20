@@ -50,6 +50,8 @@ The function comment calls the draw liquid-like.
 We run one further process at revision \texttt{12e20af5}, on the
 recommended preset of that revision at 38 atoms with the stall exits and the
 Bayes screen turned off, seed 0, budget 30000.
+That revision precedes commit \texttt{1c1b1238}, which removed the structure
+templates, and its search is not the one the article describes.
 We keep the record in \path{logs/lj38-plain-seed0.log}.
 The best energy in that log is \PlainEnergy, after \PlainCalls{} charged
 evaluations.
@@ -143,7 +145,8 @@ from the record branches their \texttt{PROVENANCE} files name, and
 The rows of this code in the first block of the GMIN table are revision
 \texttt{\seqsplit{eeec8e2c216ae1506768bca8e29846c1c039ca3b}}, an ancestor of
 the submitted revision and a descendant of commit \texttt{1c1b1238}, which
-removed the structure templates.
+removed the structure templates, and of commit \texttt{5499be31}, which
+removed their switches.
 They are the four shards of \path{paper/jctc/data/gmin_rerun}, each copied
 from the record branch its \texttt{PROVENANCE} file names.
 The rows of this code in the second block are the submitted revision
@@ -151,8 +154,10 @@ The rows of this code in the second block are the submitted revision
 20261120T072444Z of \path{paper/jctc/data/gmin_develop}, copied from the
 record branch its \texttt{PROVENANCE} file names.
 
-The knockout table is the release pair of the record that runs the parent
-\texttt{\seqsplit{628773d6837ea2d959a27256ff4163b21162fd4d}} and the child
+The knockout table is the release pair of the record that runs the parent,
+the earlier template-assisted revision
+\texttt{\seqsplit{628773d6837ea2d959a27256ff4163b21162fd4d}} (structure
+templates since removed in \texttt{1c1b1238}), and the child
 \texttt{\seqsplit{1c1b12384683485cf820d3a244151b48973dc0f7}}, both ancestors
 of the submitted revision, even seeds parent first and odd seeds child first.
 The trail step has one record, on LJ\(_{75}\), whose two arms ran at

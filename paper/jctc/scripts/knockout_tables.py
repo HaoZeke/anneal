@@ -165,8 +165,13 @@ def knockout_summary(knockout: Knockout) -> dict[str, dict]:
 def knockout_table() -> str:
     lines = [
         "\\begin{table*}",
-        "\\caption{The structure templates run with and without them on the same seeds from the same starts,",
-        "at revision \\texttt{628773d6} and its child \\texttt{1c1b1238}, both ancestors of the submitted revision.",
+        "\\caption{The structure templates run with and without them on the same seeds from the same starts:",
+        "the earlier template-assisted revision \\texttt{628773d6} (structure templates since removed in",
+        "\\texttt{1c1b1238}) against its child \\texttt{1c1b1238}, both ancestors of the submitted revision.",
+        "The With arm is not the method of this article; it is the search before the removal.",
+        "Each arm is \\texttt{Config::recommended}\\((38)\\) of its revision through \\texttt{h2h\\_morse} or",
+        "\\texttt{h2h\\_sc}; at \\(\\rho=6\\) the Morse driver of \\texttt{628773d6} also quenches one",
+        "icosahedral template before the walk, and \\texttt{1c1b1238} removes that line.",
         "With and Without are the hits of the two arms, Only with and Only without the seeds that",
         "one arm alone hits.",
         "\\(p_\\mathrm{M}\\) is the two-sided exact McNemar test on those seeds, and \\(\\Delta\\) the 95\\%",
@@ -238,6 +243,8 @@ def tip4p_table() -> str:
     lines = [
         "\\begin{table}",
         "\\caption{This code against GMIN on rigid TIP4P water clusters, paired by seed.",
+        "This code is \\texttt{Config::recommended\\_tip4p}\\((N)\\) of revision \\texttt{e1a69a57}, after the",
+        "removal of the structure templates, through \\texttt{h2h\\_seed} with the rigid water geometry of GMIN.",
         "Seeds 2000--2011, \\(2\\times 10^{6}\\) force calls, one core, both arms from the same start on each",
         "seed, in alternating order.",
         "Hits, Only, \\(p_\\mathrm{M}\\) and \\(\\Delta\\) are as in Table~\\ref{tab:gmin};",

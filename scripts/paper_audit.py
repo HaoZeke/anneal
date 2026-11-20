@@ -999,8 +999,8 @@ def gmin_develop_data(audit: Audit, panel: object) -> None:
                     "\\cite{darbyCuAu2002} at \\(T=0.1\\)~eV, with the step and the taboo radius scaled by "
                     "\\(r_0/2^{1/6}\\) and GMIN's container radius, and the gold driver of this code applies the basin "
                     "bias of equation~\\ref{eq:delta} on a stride of 8.")
-    audit.said(TEX, "On Au\\(_{55}\\) the gold driver of this code applies the basin bias of equation~\\ref{eq:delta} "
-                    "on a stride of 8.")
+    audit.said(TEX, "\\texttt{Config::recommended}\\((55)\\) with every atom labeled gold through \\texttt{h2h\\_metal}, "
+                    "which applies the basin bias of equation~\\ref{eq:delta} on a stride of 8.")
     refs = {row[0]: row[3] for row in panel.SYSTEMS}
     audit.said(SI, f"\\({refs['au55']:.8f}\\)~eV at Au\\(_{{55}}\\), \\({refs['m55r6']:.6f}\\) and "
                    f"\\({refs['m55r14']:.6f}\\) at M\\(_{{55}}\\) (\\(\\rho=6\\) and 14), and \\({refs['m80r6']:.6f}\\) and "
@@ -1320,7 +1320,8 @@ def manuscript_knockouts(audit: Audit) -> None:
     audit.said(TEX, "revision that switches one part of the search on and off with all else held, on the same seeds "
                     "from the same starts: revision \\texttt{628773d6} against its child \\texttt{1c1b1238}, which "
                     "removes the structure templates.")
-    audit.said(SI, "\\texttt{\\seqsplit{628773d6837ea2d959a27256ff4163b21162fd4d}} and the child "
+    audit.said(SI, "\\texttt{\\seqsplit{628773d6837ea2d959a27256ff4163b21162fd4d}} (structure templates since "
+                   "removed in \\texttt{1c1b1238}), and the child "
                    "\\texttt{\\seqsplit{1c1b12384683485cf820d3a244151b48973dc0f7}}, both ancestors of the submitted "
                    "revision, even seeds parent first and odd seeds child first.")
     audit.said(COVER, "reported as a paired knockout with the exact McNemar test: removing them lowers the hits on a "
@@ -1529,6 +1530,80 @@ def rigid_stall(audit: Audit) -> None:
     for gone in ("quenches a new rigid start", "moves to a lower minimum it has already quenched"):
         audit.record(gone not in collapse(audit.text(TEX)), TEX, f"retired rigid-stall wording stays out: {gone}",
                      "absent", "absent" if gone not in collapse(audit.text(TEX)) else "present")
+
+
+TEMPLATE_AND_SWITCH_REMOVAL = (TEMPLATE_REMOVAL, "5499be31263b4db0217412ee82f3da47e8d0676a")
+BENCHMARK_REVISIONS = {
+    "tab:gmin": ("eeec8e2c216ae1506768bca8e29846c1c039ca3b", SUBMITTED),
+    "tab:tip4p-gmin": ("e1a69a57a8dda1b44fdde9413ae31e3fc3af1889",),
+    "tab:ase": (SUBMITTED,),
+    "tab:ase-morse": ("5eb79cdcb0a986984dc7b487e5a3cc93224246f9",),
+}
+TABLE_PRESETS = {
+    "tab:gmin": ("\\texttt{Config::recommended}\\((N)\\) through \\texttt{h2h\\_gmin\\_proof}",
+                 "through \\texttt{h2h\\_morse} on Morse", "through \\texttt{h2h\\_metal}"),
+    "tab:knockouts": ("the earlier template-assisted revision \\texttt{628773d6} (structure templates since removed in "
+                      "\\texttt{1c1b1238})", "\\texttt{Config::recommended}\\((38)\\) of its revision"),
+    "tab:tip4p-gmin": ("\\texttt{Config::recommended\\_tip4p}\\((N)\\) of revision \\texttt{e1a69a57}",),
+    "tab:ase": ("\\texttt{Config::recommended}\\((N)\\) through \\texttt{examples/ase\\_panel.rs}",
+                "\\texttt{Config::recommended\\_with\\_scales} at the Gupta length and well depth"),
+    "tab:ase-morse": ("\\texttt{Config::recommended\\_with\\_scales} at the length scale",
+                      "\\texttt{examples/ase\\_nonlj.rs}"),
+}
+
+
+def presets_and_templates(audit: Audit) -> None:
+    """Every table names its revision and preset, no benchmark row predates the template removal, and losses are said."""
+    text = collapse(audit.text(TEX))
+    audit.said(TEX, "The search uses no structure templates.")
+    audit.said(TEX, "at the revision that each table names; no table reports \\texttt{Config::default}.")
+    audit.said(TEX, "the one run with them is the With arm of the knockout of Section~\\ref{sec:knockouts}, at the "
+                    "earlier template-assisted revision \\texttt{628773d6}.")
+    tables = {label: chunk for chunk in text.split("\\begin{table") for label in re.findall(r"\\label\{(tab:[^}]+)\}", chunk)}
+    for label, fragments in TABLE_PRESETS.items():
+        for fragment in fragments:
+            audit.record(collapse(fragment) in tables.get(label, ""), TEX, f"{label} names its preset", fragment,
+                         "present" if collapse(fragment) in tables.get(label, "") else "absent")
+    for label, revisions in BENCHMARK_REVISIONS.items():
+        for revision in revisions:
+            audit.record(f"\\texttt{{{revision[:8]}}}" in tables.get(label, "") or
+                         (label == "tab:gmin" and f"\\texttt{{{revision[:8]}}}" in text),
+                         TEX, f"{label} names revision {revision[:8]}", "named", "named")
+            for removal in TEMPLATE_AND_SWITCH_REMOVAL:
+                ancestor_of(audit, label, removal, revision)
+    for gone in ("c2de652d", "default behavior", "default behaviour", "the default preset"):
+        audit.record(gone not in text, TEX, f"no table is presented as {gone}", "absent",
+                     "absent" if gone not in text else "present")
+    hop = git("show", f"{SUBMITTED}:src/methods/cluster_hopping.rs").stdout
+    changed = git("diff", "--name-only", BENCHMARK_REVISIONS["tab:gmin"][0], SUBMITTED, "--", "src").stdout.split()
+    audit.cell("src", "search files changed between the two GMIN blocks",
+               "src/methods/cluster_hopping.rs src/methods/cluster_hopping/config.rs", " ".join(sorted(changed)))
+    audit.record("if cfg.plateau_heat {\n                heat = (heat * 2.0).min(PLATEAU_HEAT_CAP);" in hop
+                 and hop.count("heat = (heat") == 1, f"{SUBMITTED[:8]}:src/methods/cluster_hopping.rs",
+                 "the walk heats only under plateau_heat", "only", "only")
+    config = git("show", f"{SUBMITTED}:src/methods/cluster_hopping/config.rs").stdout
+    audit.record("plateau_heat: false," in config, f"{SUBMITTED[:8]}:src/methods/cluster_hopping/config.rs",
+                 "plateau_heat is off in the preset", "off", "off" if "plateau_heat: false," in config else "on")
+    _, groups = gmin_rerun_groups(audit)
+    develop = [r for r in audit.rows(f"{GMIN_DEVELOP}/rows.csv") if r["system"] == "m80r6" and r["code"] == "anneal"]
+    earlier = {r["seed"]: (r["evals_to_hit"], r["best"]) for r in groups[("m80r6", "anneal")]}
+    later = {r["seed"]: (r["evals_to_hit"], r["best"]) for r in develop}
+    audit.cell(GMIN_DEVELOP, "M80 rho=6 seeds with the same calls and minimum at both revisions", "12",
+               float(sum(earlier.get(seed) == value for seed, value in later.items())))
+    hits = {key: sum(r["hit"] == "1" for r in group) for key, group in groups.items()}
+    for system in ("lj104", "lj150"):
+        audit.record(hits[(system, "gmin")] > hits[(system, "anneal")], GMIN_RERUN, f"GMIN hits more seeds on {system}",
+                     "more", f"{hits[(system, 'gmin')]} against {hits[(system, 'anneal')]}")
+    audit.said(TEX, f"GMIN hits more seeds than this code on LJ\\(_{{104}}\\), {hits[('lj104', 'gmin')]} against "
+                    f"{hits[('lj104', 'anneal')]} of 12, and on LJ\\(_{{150}}\\), {hits[('lj150', 'gmin')]} against "
+                    f"{hits[('lj150', 'anneal')]} of 12.")
+    audit.said(TEX, f"GMIN hits more seeds than the code on LJ\\(_{{104}}\\) and LJ\\(_{{150}}\\), "
+                    f"{hits[('lj104', 'gmin')]} and {hits[('lj150', 'gmin')]} of 12 against {hits[('lj104', 'anneal')]} "
+                    f"and {hits[('lj150', 'anneal')]}, with \\(p=1\\) on both.")
+    audit.said(SI, "the earlier template-assisted revision \\texttt{\\seqsplit{628773d6837ea2d959a27256ff4163b21162fd4d}} "
+                   "(structure templates since removed in \\texttt{1c1b1238})")
+    audit.said(SI, "That revision precedes commit \\texttt{1c1b1238}, which removed the structure templates, and its "
+                   "search is not the one the article describes.")
 
 
 PRIORS = ("soap", "reseed", "growth", "core", "handover", "motif")
@@ -1748,9 +1823,9 @@ def manuscript_ase(audit: Audit) -> None:
         audit.cell(TEX, f"{label} lines", " ".join(shown), " ".join(systems))
 
     lj_rev, morse_rev = ASE_REVISIONS["lj"][:8], ASE_REVISIONS["morse"][:8]
-    audit.said(TEX, f"\\caption{{This code, \\texttt{{Config::recommended}} at revision \\texttt{{{lj_rev}}}, against "
+    audit.said(TEX, f"\\caption{{This code at revision \\texttt{{{lj_rev}}}, against "
                     "the basin hopping (BH) and minima hopping (MH) of ASE 3.29.0 at its constructor defaults, at the "
-                    "effort each run reports.")
+                    "effort each run reports. This code is \\texttt{Config::recommended}\\((N)\\)")
     audit.said(TEX, f"Table~\\ref{{tab:ase}} runs revision \\texttt{{{lj_rev}}} on four Lennard-Jones clusters and "
                     f"Au\\(_{{55}}\\), and Table~\\ref{{tab:ase-morse}} runs revision \\texttt{{{morse_rev}}} on four "
                     "Morse clusters; both are ancestors of the submitted revision.")
@@ -3758,7 +3833,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
     audit = Audit()
     for check in (paired_statistics, manuscript_gmin, withdrawn_benchmarks, supporting_information, release, paper_0120, gad_published, openconf,
                   head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, lj_large, bench_prose,
-                  manuscript_ase, manuscript_knockouts, manuscript_priors, panel_references, generated_tables, supporting_numbers, manuscript_new, manuscript_followups, cover_letter, science_claims, rigid_stall):
+                  manuscript_ase, manuscript_knockouts, manuscript_priors, panel_references, generated_tables, supporting_numbers, manuscript_new, manuscript_followups, cover_letter, science_claims, rigid_stall, presets_and_templates):
         check(audit)
     if write_map:
         (ROOT / REVISION_MAP).write_text(revision_map_text(revision_map_rows(audit)))

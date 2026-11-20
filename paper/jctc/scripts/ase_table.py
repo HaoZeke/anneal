@@ -207,9 +207,12 @@ COMMON = [
 
 def ase_block() -> str:
     caption = [
-        "\\caption{This code, \\texttt{Config::recommended} at revision",
+        "\\caption{This code at revision",
         f"\\texttt{{{LJ_REVISION[:8]}}}, against the basin hopping (BH) and minima hopping",
         f"(MH) of ASE {ASE_VERSION} at its constructor defaults, at the effort each run reports.",
+        "This code is \\texttt{Config::recommended}\\((N)\\) through \\texttt{examples/ase\\_panel.rs} on",
+        "Lennard-Jones and \\texttt{Config::recommended\\_with\\_scales} at the Gupta length and well depth",
+        "on Au\\(_{55}\\), with no species labels, which is not the Au\\(_{55}\\) preset of Table~\\ref{tab:gmin}.",
         *COMMON[:-1],
         COMMON[-1],
         "The rows are \\texttt{paper/jctc/data/ase\\_rerun/*/rows.csv}.}",
@@ -220,7 +223,8 @@ def ase_block() -> str:
 def morse_block() -> str:
     caption = [
         "\\caption{This code, \\texttt{Config::recommended\\_with\\_scales} at the length scale",
-        f"of the Morse pair at revision \\texttt{{{MORSE_REVISION[:8]}}}, against the basin hopping",
+        f"of the Morse pair at revision \\texttt{{{MORSE_REVISION[:8]}}} through \\texttt{{examples/ase\\_nonlj.rs}},",
+        "against the basin hopping",
         f"(BH) and minima hopping (MH) of ASE {ASE_VERSION} on Morse clusters, at the effort each run reports.",
         *COMMON,
         "The rows are \\texttt{paper/jctc/data/ase\\_rerun/morse/rows.csv}.}",
