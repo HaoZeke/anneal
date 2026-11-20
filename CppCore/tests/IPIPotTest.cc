@@ -33,6 +33,7 @@
 #include <catch2/catch_all.hpp>
 
 #include "rgpot/IPIPot/IPIPot.hpp"
+#include "rgpot/IPIPot/IPIWire.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
 #include "rgpot/units.hpp"
 
@@ -380,7 +381,8 @@ TEST_CASE("IPIPot unix driver sequence, units and triclinic cell", "[ipi]") {
     REQUIRE(pot.getType() == rgpot::PotType::IPI);
     REQUIRE(pot.caps().stress);
     REQUIRE(pot.caps().reentrancy == rgpot::Reentrancy::PerInstance);
-    REQUIRE(pot.endpoint().rfind("unix:/tmp/ipi_", 0) == 0);
+    REQUIRE(pot.endpoint().rfind(
+                std::string("unix:") + rgpot::ipi::detail::kUnixPrefix, 0) == 0);
     const std::string endpoint = pot.endpoint();
     worker = std::thread(run_mock, endpoint, Behavior::Ok, reply, &cap);
 
@@ -482,7 +484,7 @@ TEST_CASE("IPIPot tcp transport", "[ipi]") {
 
 TEST_CASE("IPIPot rejects a bad address before listening", "[ipi]") {
   rgpot::IPIConfig cfg;
-  cfg.address = "file:/tmp/nope";
+  cfg.address = "file:nope";
   REQUIRE_THROWS_AS(rgpot::IPIPot(cfg), std::invalid_argument);
   cfg.address = "unix:";
   REQUIRE_THROWS_AS(rgpot::IPIPot(cfg), std::invalid_argument);
@@ -490,7 +492,7 @@ TEST_CASE("IPIPot rejects a bad address before listening", "[ipi]") {
   REQUIRE_THROWS_AS(rgpot::IPIPot(cfg), std::invalid_argument);
   cfg.address = "tcp:127.0.0.1:65536";
   REQUIRE_THROWS_AS(rgpot::IPIPot(cfg), std::invalid_argument);
-  cfg.address = "unix:/tmp/ipi_ok";
+  cfg.address = "unix:ipi_ok";
   cfg.timeout_s = -1.0;
   REQUIRE_THROWS_AS(rgpot::IPIPot(cfg), std::invalid_argument);
 }

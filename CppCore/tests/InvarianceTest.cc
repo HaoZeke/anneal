@@ -4,6 +4,7 @@
 #include <cmath>
 #include <vector>
 
+#include "TestTempDir.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
 #include "rgpot/PotHelpers.hpp"
 #include "rgpot/PotentialCache.hpp"
@@ -25,7 +26,8 @@ void rotate_z(rgpot::types::AtomMatrix &pos, double angle_rad) {
 TEST_CASE("Invariance and Caching Behavior", "[Invariance]") {
 #ifdef RGPOT_HAS_CACHE
   //  Setup Cache
-  std::string db_path = "/tmp/rgpot_test_invariance";
+  rgpot::tests::TestTempDir dir("rgpot-test-invariance");
+  std::string db_path = (dir.path() / "cache-db").string();
   rocksdb::Options opts;
   rocksdb::DestroyDB(db_path, opts);
   auto pcache = rgpot::cache::PotentialCache(db_path);

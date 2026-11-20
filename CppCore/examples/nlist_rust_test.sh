@@ -182,7 +182,7 @@ case "$os" in
     # import library is nlist.lib, which rustc's -lnlist finds.
     # Path conversion stays on for rustc. Only the link.exe line opts out,
     # or Git bash rewrites /WHOLEARCHIVE. rustc is a Windows binary and
-    # creates its metadata dir from TMP; an MSYS /tmp does not exist there.
+    # creates its metadata dir from TMP; the POSIX temp alias is not present there.
     whalf=$(cygpath -w "$half")
     wdir=$(cygpath -w "$dir")
     if [ -n "$core" ]; then

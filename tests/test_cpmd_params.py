@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 import capnp
@@ -15,6 +16,7 @@ SCHEMA_PATH = SCRIPT_DIR / "../CppCore/rgpot/rpc/Potentials.capnp"
 pot_capnp = capnp.load(str(SCHEMA_PATH))
 
 try:
+    from _temp_paths import temp_path_str
     from cpmd_params import (
         configure_cpmd,
         make_cpmd_params,
@@ -22,6 +24,7 @@ try:
     )
 except ImportError:
     sys.path.insert(0, str(SCRIPT_DIR))
+    from _temp_paths import temp_path_str
     from cpmd_params import (
         configure_cpmd,
         make_cpmd_params,
@@ -43,7 +46,7 @@ class FakePotential:
         return Result()
 
 
-def test_make_cpmd_params() -> None:
+def test_make_cpmd_params(tmp_path: Path) -> None:
     os.environ["CPMD_ROOT"] = "/env/cpmd"
     # Explicit engine_path wins over any ambient RGPOT_CPMD_* from the runner.
     params = make_cpmd_params(
@@ -55,8 +58,8 @@ def test_make_cpmd_params() -> None:
         task="energy",
         title="water",
         memory_mb=512,
-        scratch_dir="/tmp/cpmd-scratch",
-        permanent_dir="/tmp/cpmd-perm",
+        scratch_dir=temp_path_str(tmp_path, "cpmd-scratch"),
+        permanent_dir=temp_path_str(tmp_path, "cpmd-perm"),
         engine_path="/env/libcpmdc.so",
         input_blocks=["&CPMD\n  OPTIMIZE WAVEFUNCTION\n&END"],
         system_cell=[9.0, 0.0, 0.0, 0.0, 9.5, 0.0, 0.0, 0.0, 10.0],
@@ -71,8 +74,8 @@ def test_make_cpmd_params() -> None:
     assert params.task == "energy"
     assert params.title == "water"
     assert params.memoryMb == 512
-    assert params.scratchDir == "/tmp/cpmd-scratch"
-    assert params.permanentDir == "/tmp/cpmd-perm"
+    assert params.scratchDir == temp_path_str(tmp_path, "cpmd-scratch")
+    assert params.permanentDir == temp_path_str(tmp_path, "cpmd-perm")
     assert params.cpmdRoot == "/env/cpmd"
     assert params.enginePath == "/env/libcpmdc.so"
     assert list(params.inputBlocks) == ["&CPMD\n  OPTIMIZE WAVEFUNCTION\n&END"]
@@ -316,7 +319,8 @@ def test_configure_cpmd() -> None:
 
 
 if __name__ == "__main__":
-    test_make_cpmd_params()
+    with tempfile.TemporaryDirectory() as tmp:
+        test_make_cpmd_params(Path(tmp))
     test_make_cpmd_params_accepts_all_section_arms()
     test_make_potential_config_cpmd()
     test_configure_cpmd()
