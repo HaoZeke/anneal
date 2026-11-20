@@ -403,3 +403,26 @@ fn the_cap_turn_enters_the_resolved_hash_only_when_on() {
         cfg.resolved_sha256().unwrap()
     );
 }
+
+#[test]
+fn the_once_per_chain_completion_is_absent_unless_asked() {
+    let cfg = Config::recommended(38);
+    assert!(cfg.symmetry_completion_on_new);
+    assert!(!cfg.symmetry_completion_once);
+    assert!(
+        !cfg.resolved_json()
+            .unwrap()
+            .contains("symmetry_completion_once")
+    );
+    let mut once = cfg.clone();
+    once.symmetry_completion_once = true;
+    assert!(
+        once.resolved_json()
+            .unwrap()
+            .contains(r#""symmetry_completion_once":true"#)
+    );
+    assert_ne!(
+        once.resolved_sha256().unwrap(),
+        cfg.resolved_sha256().unwrap()
+    );
+}
