@@ -32,11 +32,15 @@ See =docs/xckernel.md=.
 
 =D3Pot= and =D4Pot= (meson =-Dwith_dftd3= / =-Dwith_dftd4=) are in-process
 =Potential= summands: construct them and evaluate =ForceInput= to energy and
-forces.
+forces, plus stress for periodic =D4Pot=.
 The schema has =PotentialConfig.d3= @12 and =PotentialConfig.d4= @13 arms.
-Nothing applies them yet.
-The =potserv= =D3= and =D4= backends run the default configuration.
-=configure()= refuses both arms by name on every =potserv= backend.
+Nothing applies =d3= yet: the =potserv= =D3= backend runs the default
+configuration and =configure()= refuses =d3= by name on every =potserv= backend.
+On a build with dftd4, =potserv <port> D4= starts with the default =D4Config=
+and =configure()= applies =PotentialConfig.d4= to rebuild its =D4Pot= from
+=D4Params= (including =periodic= for a 3D lattice and stress); =d4= is also a
+builtin composite term, and other =potserv= backends refuse the =d4= arm by
+name.
 A DFT host sums XcKernel + VV10 + D4 itself; dispersion is not folded into
 the XC kernel.
 

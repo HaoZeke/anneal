@@ -175,15 +175,19 @@ The =potserv= =D3= backend runs the default =D3Config=.
 - =D4Pot= (=-Dwith_dftd4=true=) :: Grimme DFT-D4 via the
   [[https://github.com/dftd4/dftd4][dftd4]] ISO C API.
 =D4Config= selects the functional key (default =pbe=), the total charge
-forwarded to =dftd4_new_structure= (default 0), and an =atm= flag for the
-many-body (=mdb=) term (default on).
+forwarded to =dftd4_new_structure= (default 0), an =atm= flag for the many-body
+(=mdb=) term (default on), and a =periodic= flag (default off) that passes the
+box to dftd4 as a 3D lattice and returns the stress from its virial.
 It is an in-process =Potential= summand: it takes a =ForceInput= and returns
-energy and forces.
+energy and forces, plus stress when =periodic= is set.
 It is not an XC kernel term.
-The schema has =PotentialConfig.d4= @13, and its =D4Params= mirror =D4Config=.
-Nothing applies that arm yet.
-The =potserv= =D4= backend runs the default =D4Config=.
-=configure()= refuses the =d4= arm by name on every =potserv= backend.
+The schema has =PotentialConfig.d4= @13, and its =D4Params= (with =periodic=
+from =d4-periodic.diff=) mirror =D4Config=.
+On a build with dftd4, =potserv <port> D4= starts with the default =D4Config=
+and =configure()= applies =PotentialConfig.d4= to rebuild its =D4Pot= (refusing
+unknown functionals with dftd4's message and other arms by name); =d4= is also a
+builtin term in =PotentialConfig.composite= and =libcomposite_engine=.
+Other =potserv= backends refuse the =d4= arm by name.
 
 - =ExprPot= (=-Dwith_expr=true=) :: Energy as an expression over named child
   potentials.
