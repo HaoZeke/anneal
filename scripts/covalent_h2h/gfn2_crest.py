@@ -675,6 +675,7 @@ def main() -> None:
             args.summary,
             revision,
             host,
+            false_hits=args.false_hits,
             superseded=args.superseded,
         )
 
@@ -960,14 +961,39 @@ def self_test() -> None:
             append_rows(
                 panel,
                 fields,
-                [dict(row, system="si20", code="crest", seed=str(seed), hit="false")],
+                [
+                    dict(
+                        row,
+                        system="si20",
+                        code="crest",
+                        seed=str(seed),
+                        hit="true" if seed == 2003 else "false",
+                    )
+                ],
             )
         lines = Path(scratch) / "summary.csv"
         summarise([panel], lines, "", "", systems=["si20"])
         with open(lines, newline="") as handle:
-            runs = {line["code"]: line["runs"] for line in csv.DictReader(handle)}
-        if runs.get("crest") != "1":
-            raise SystemExit(f"a seed outside the panel was summarised: {runs}")
+            summaries = {line["code"]: line for line in csv.DictReader(handle)}
+        if summaries.get("crest", {}).get("runs") != "1":
+            raise SystemExit(f"a seed outside the panel was summarised: {summaries}")
+        false_hits = Path(scratch) / "false-hits.csv"
+        false_hits.write_text(
+            "system,code,code_revision,seed\nsi20,crest,1,2003\n"
+        )
+        corrected = Path(scratch) / "corrected.csv"
+        summarise(
+            [panel],
+            corrected,
+            "",
+            "",
+            systems=["si20"],
+            false_hits=false_hits,
+        )
+        with open(corrected, newline="") as handle:
+            summaries = {line["code"]: line for line in csv.DictReader(handle)}
+        if summaries["crest"]["hits"] != "0":
+            raise SystemExit("a named false hit remained a hit")
         append_rows(
             panel,
             fields,

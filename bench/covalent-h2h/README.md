@@ -1040,10 +1040,11 @@ small-sample Si13 slowdown and does not change Si10 or C20.
 
 ### The Si20 panel
 
-The panel is anneal against CREST on Si20 at the paper budget, 4e5
-calls, serial on core 0 under the `bench` hostname, CREST first, then
+The panel is anneal against CREST on Si20 at its 100,000-call budget,
+serial on core 0 under the `bench` hostname, CREST first, then
 anneal with `H2H_WALL_S` at three times CREST's slowest wall
-(`gfn2/si20-panel.csv`). It is not finished.
+(`gfn2/si20-panel.csv`). The cap was 64,786.423781 s. Ten CREST runs
+completed and two are censored; all twelve anneal runs completed.
 
 - The seeds. On seven of 2000-2011, 2000, 2001, 2002, 2004, 2006, 2007
   and 2011, xtb 6.7.1 at 3000 K does not converge the start's SCC in its
@@ -1069,6 +1070,10 @@ anneal with `H2H_WALL_S` at three times CREST's slowest wall
   process was stopped to recover the full disk. Its xtb log held 1,356
   records. No final energy or exit code exists, so
   `gfn2/si20-censoring.csv` records neither.
+- Seed 2013 is also censored, not a miss or a timeout. CREST was still
+  running after 19,835.549 s and 2,024 xtb log records when
+  `crest_rotamers_0.xyz` crossed the 1 GiB corruption guard. It has no
+  final energy or exit code.
 - Seed 2005 records a hit at call 108,256 (13,710 s) at -959.85629642
   eV, 36.9 eV below the ring, on a planar flake with a shortest pair of
   1.846 Å. xtb at 3000 K does not converge that geometry's SCC from a
@@ -1080,7 +1085,21 @@ anneal with `H2H_WALL_S` at three times CREST's slowest wall
 - Both arms stop at the ring, -922.98227162 eV
   (`gfn2/minima/si20-ring.xyz`). It is the panel's reference only if
   anneal or CREST reaches it on more seeds than the two of the reference
-  search; otherwise the panel reports best energies, not hits.
+  search. Anneal reaches it on all twelve panel seeds, so it is the panel
+  reference.
+
+The final result, after excluding the two censored CREST runs rather than
+turning them into misses and counting CREST seed 2005's non-reproducible
+energy as a miss, is:
+
+| code | hits / 12 | completed | censored | median calls | median wall s | median inside s | median outside s | inside ms/call | outside ms/call | Fisher p | Mann-Whitney p |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| anneal general | 12/12 | 12 | 0 | 4,948.5 | 1,879.698 | 1,879.628 | 0.092 | 435.4741 | 0.0164 | — | — |
+| CREST | 0/12 | 10 | 2 | 117,916.5 | 12,995.712 | 12,948.455 | 23.122 | 98.5552 | 0.1915 | 1.54644e-6 | 3.78992e-5 |
+
+The tests compare CREST's ten completed runs with anneal's twelve runs.
+The Mann-Whitney test is two-sided, asymptotic and tie-corrected, with
+every miss ranked after every hit.
 
 ## Pins
 

@@ -2,3 +2,17 @@ system,code,code_revision,seed,reason
 si20,crest,75a180907784387a0426959bc421decad29135b9,2008,CREST stopped on a topology change; rerun with -noreftopo
 si20,crest,75a180907784387a0426959bc421decad29135b9,2010,CREST stopped on a topology change; rerun with -noreftopo
 si20,crest,35d2292c2b89f1c5269e1f87403539f6c586f166,2012,CREST stopped on a topology change; rerun with -noreftopo
+si20,crest,522e2de71a8940cc1ae00280a859b3ffce974869,2018,CREST exited 2 with a zero-atom crest_best.xyz; corrected to no geometry
+si20,crest,6fff2974b02c3bef48007a73aeae18932b9c0660,2018,clerical revision error in the derived correction; replaced by the reachable parser revision
+si20,anneal-general,5855af269ba1a0fd5a2e81533960aeba3e741a46,2003,rerun after develop changed the cluster-search hit predicate
+si20,anneal-general,5855af269ba1a0fd5a2e81533960aeba3e741a46,2005,rerun after develop changed the cluster-search hit predicate
+si20,anneal-general,5855af269ba1a0fd5a2e81533960aeba3e741a46,2008,rerun after develop changed the cluster-search hit predicate
+si20,anneal-general,5855af269ba1a0fd5a2e81533960aeba3e741a46,2009,rerun after develop changed the cluster-search hit predicate
+si20,anneal-general,5855af269ba1a0fd5a2e81533960aeba3e741a46,2010,rerun after develop changed the cluster-search hit predicate
+si20,anneal-general,5855af269ba1a0fd5a2e81533960aeba3e741a46,2012,rerun after develop changed the cluster-search hit predicate
+si20,anneal-general,5855af269ba1a0fd5a2e81533960aeba3e741a46,2013,rerun after develop changed the cluster-search hit predicate
+si20,anneal-general,5855af269ba1a0fd5a2e81533960aeba3e741a46,2014,rerun after develop changed the cluster-search hit predicate
+si20,anneal-general,5855af269ba1a0fd5a2e81533960aeba3e741a46,2018,rerun after develop changed the cluster-search hit predicate
+si20,anneal-general,5855af269ba1a0fd5a2e81533960aeba3e741a46,2019,rerun after develop changed the cluster-search hit predicate
+si20,anneal-general,5855af269ba1a0fd5a2e81533960aeba3e741a46,2020,rerun after develop changed the cluster-search hit predicate
+si20,anneal-general,5855af269ba1a0fd5a2e81533960aeba3e741a46,2021,rerun after develop changed the cluster-search hit predicate

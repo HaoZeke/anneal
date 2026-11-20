@@ -113,7 +113,7 @@ def summary(args):
 
     def failed(row):
         count = int(row["scc_rejected"])
-        if row["arm"] not in args.doubled:
+        if row["arm"] not in getattr(args, "doubled", []):
             return count
         if count % 2:
             raise SystemExit(f"{row['arm']} {row['system']} {row['seed']}: odd doubled count")
