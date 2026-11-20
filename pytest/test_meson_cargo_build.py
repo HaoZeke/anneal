@@ -283,11 +283,8 @@ def test_encoded_rustflags_with_spaces_are_merged_not_dropped() -> None:
     source = f"{root.resolve()}=/source"
     build = f"{target.resolve()}=/build"
     home = f"{Path(cargo_home).resolve()}=/cargo"
-    assert source in remaps
-    assert build in remaps
-    assert home in remaps
-    # The nested target prefix is longer than the source prefix and has to win.
-    assert remaps.index(build) < remaps.index(source)
+    # rustc applies the last matching prefix, so the nested target comes last.
+    assert remaps == [source, home, build]
 
     spaced_only = MODULE.reproducible_env(
         {
@@ -300,6 +297,130 @@ def test_encoded_rustflags_with_spaces_are_merged_not_dropped() -> None:
     parsed = spaced_only["CARGO_ENCODED_RUSTFLAGS"].split("\x1f")
     assert parsed[:4] == ["-C", "debuginfo=2", "-C", "link-dead-code"]
     assert "" not in parsed
+
+
+def _remap_flags(flags: list[str]) -> list[str]:
+    return [
+        f"--remap-path-prefix={flags[index + 1]}"
+        for index, flag in enumerate(flags[:-1])
+        if flag == "--remap-path-prefix"
+    ]
+
+
+def _rustc_file_path(rustc: str, source: Path, remaps: list[str], out: Path) -> bytes:
+    subprocess.check_call(
+        [rustc, "--crate-type=rlib", "--edition=2021", *remaps, str(source), "-o", str(out)]
+    )
+    return out.read_bytes()
+
+
+def test_nested_target_prefix_is_emitted_last_and_rustc_maps_it_to_build(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "src"
+    target = root / "target"
+    env = MODULE.reproducible_env(
+        {"ANNEAL_REPRODUCIBLE_ARCHIVE": "1", "CARGO_HOME": str(tmp_path / "home")},
+        root,
+        target,
+    )
+    remaps = _remap_flags(env["CARGO_ENCODED_RUSTFLAGS"].split("\x1f"))
+    source = f"--remap-path-prefix={root.resolve()}=/source"
+    build = f"--remap-path-prefix={target.resolve()}=/build"
+    assert remaps.index(source) < remaps.index(build)
+    lengths = [len(flag.split("=", 1)[1].rsplit("=", 1)[0]) for flag in remaps]
+    assert lengths == sorted(lengths)
+
+    rustc = shutil.which("rustc")
+    if rustc is None:
+        pytest.skip("needs rustc")
+    generated = target / "release" / "build" / "out" / "gen.rs"
+    generated.parent.mkdir(parents=True)
+    generated.write_text(
+        "pub fn generated_file() -> &'static str { file!() }\n", encoding="utf-8"
+    )
+    emitted = _rustc_file_path(rustc, generated, remaps, tmp_path / "emitted.rlib")
+    assert b"/build/release/build/out/gen.rs" in emitted
+    assert b"/source/target" not in emitted
+    assert str(root).encode() not in emitted
+    # rustc's rule, not the order of the list: the reversed list maps to /source.
+    reversed_out = _rustc_file_path(
+        rustc, generated, list(reversed(remaps)), tmp_path / "reversed.rlib"
+    )
+    assert b"/source/target/release/build/out/gen.rs" in reversed_out
+    assert b"/build/release/build/out/gen.rs" not in reversed_out
+
+
+def _write_out_dir_crate(directory: Path) -> None:
+    (directory / "src").mkdir(parents=True)
+    (directory / "Cargo.toml").write_text(
+        "\n".join(
+            [
+                "[package]",
+                "name = \"repro_fixture\"",
+                "version = \"0.0.0\"",
+                "edition = \"2021\"",
+                "build = \"build.rs\"",
+                "",
+                "[lib]",
+                "crate-type = [\"staticlib\"]",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (directory / "build.rs").write_text(
+        "\n".join(
+            [
+                "fn main() {",
+                "    let out = std::env::var(\"OUT_DIR\").unwrap();",
+                "    std::fs::write(",
+                "        std::path::Path::new(&out).join(\"gen.rs\"),",
+                "        \"pub fn generated_file() -> &'static str { file!() }\\n\",",
+                "    )",
+                "    .unwrap();",
+                "}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (directory / "src" / "lib.rs").write_text(
+        "\n".join(
+            [
+                "include!(concat!(env!(\"OUT_DIR\"), \"/gen.rs\"));",
+                "",
+                "#[no_mangle]",
+                "pub extern \"C\" fn repro_generated() -> *const u8 {",
+                "    generated_file().as_ptr()",
+                "}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_out_dir_inside_the_source_tree_maps_to_build_not_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cargo = _require_linux_toolchain()
+    root = tmp_path / "src"
+    _write_out_dir_crate(root)
+    _prepare_env(monkeypatch, CARGO_HOME=str(tmp_path / "cargo-home"))
+    monkeypatch.setenv("RUSTFLAGS", "-Cdebuginfo=2")
+    _lock(root, cargo)
+    out = tmp_path / "out" / LIB_NAME
+    out.parent.mkdir()
+    _build(monkeypatch, cargo, root, root / "target", out, opt_in=True)
+    shipped = out.read_bytes()
+    # Cargo names the build-script directory repro_fixture-HASH or
+    # repro_fixture/HASH depending on its version.
+    assert b"/build/release/build/repro_fixture" in shipped
+    assert b"gen.rs" in shipped
+    assert b"/source/target" not in shipped
+    assert str(root).encode() not in shipped
+    _assert_zero_owners(out)
 
 
 def test_normalize_archive_zeros_headers_and_is_idempotent(tmp_path: Path) -> None:

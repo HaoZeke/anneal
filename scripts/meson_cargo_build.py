@@ -67,8 +67,9 @@ def reproducible_env(
         (str(Path(target_dir).resolve()), "/build"),
         (str(_cargo_home(env).resolve()), "/cargo"),
     ]
-    # A target directory inside the source tree has to win over the shorter prefix.
-    prefixes.sort(key=lambda item: len(item[0]), reverse=True)
+    # rustc applies the last matching --remap-path-prefix. Shortest first
+    # puts a target directory inside the source tree after the source prefix.
+    prefixes.sort(key=lambda item: len(item[0]))
     for src, dest in prefixes:
         flags.append("--remap-path-prefix")
         flags.append(f"{src}={dest}")
