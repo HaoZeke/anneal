@@ -919,6 +919,39 @@ pub fn best_order_about(
     best_order
 }
 
+/// Keep a sampled order when it exchanges sites, or use the best valid order.
+///
+/// The fallback remains within the caller's order set. When no requested turn
+/// exchanges sites, the sampled order is returned and the proposal keeps its
+/// previous behaviour.
+pub fn replace_self_mapping_order(
+    x: ArrayView1<f64>,
+    n: usize,
+    axis: [f64; 3],
+    orders: &[usize],
+    sampled: usize,
+) -> usize {
+    let cloud = Cloud::from_view(x, n);
+    if cloud
+        .symmetry_deviation(axis, sampled, f64::INFINITY)
+        .is_some()
+    {
+        return sampled;
+    }
+    let mut best_order = None;
+    let mut best = f64::INFINITY;
+    for &order in orders {
+        let Some(deviation) = cloud.symmetry_deviation(axis, order, f64::INFINITY) else {
+            continue;
+        };
+        if deviation < best {
+            best = deviation;
+            best_order = Some(order);
+        }
+    }
+    best_order.unwrap_or(sampled)
+}
+
 /// Best proper rotation of each requested order.
 ///
 /// One centred cloud and one axis list serve every order. An order whose
@@ -2054,6 +2087,10 @@ mod tests {
             "a fortieth of a turn is a small nearest-image residual, got {rms}"
         );
         assert!(detect(x.view(), 8, &[40], 0.5).is_none());
+        assert_eq!(
+            replace_self_mapping_order(x.view(), 8, [0.0, 0.0, 1.0], &[8, 40], 40),
+            8
+        );
     }
 
     #[test]

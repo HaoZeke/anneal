@@ -1164,7 +1164,9 @@ impl MoveKernel<f64> for Symmetrise {
         }
         let c = centroid(i, n);
         let axis = random_unit(rng);
-        let order = self.orders[rng.random_range(0..self.orders.len())];
+        let sampled = self.orders[rng.random_range(0..self.orders.len())];
+        let order =
+            crate::symmetrise::replace_self_mapping_order(i, n, axis, &self.orders, sampled);
         let angle = 2.0 * std::f64::consts::PI / order.max(1) as f64;
         let blend = 0.3 + 0.4 * rng.random::<f64>();
 
