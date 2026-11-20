@@ -42,9 +42,11 @@ hit, both against anneal; alone when no binaries are given, over
 ``--anneal-revision`` over anneal's rows of that ``code_revision`` only.
 ``--false-hits`` names rows, by system, code, revision and seed, whose hit
 is not the geometry's energy; the summary counts them as misses at their
-budget. ``--rescore SYSTEM ENERGY_EV`` appends to ``--rescored`` CREST's
-hits on that system, over the same files, against another reference;
-anneal stops at its own and is not rescored.
+budget. ``--rescore SYSTEM ENERGY_EV`` appends to ``--rescored`` both
+codes' hits on that system, over the same files, against another
+reference. A hit is the recorded best energy. When the campaign stop
+target is above that reference, both arms stopped short of it and the
+line is marked censored. No p-value is computed.
 Time per call skips a run that made no call.
 Anneal stops at the reference and its miss is the full budget. CREST runs
 to its own end; its energy is the first frame of ``crest_best.xyz``. A
@@ -598,6 +600,7 @@ RESCORE_FIELDS = [
     "reference_eV",
     "runs",
     "hits",
+    "censored",
     "seeds",
     "code_revision",
     "host",
@@ -613,35 +616,50 @@ def rescore(
     revision: str,
     host: str,
 ) -> None:
-    """Append CREST's hits on ``system`` against another reference.
+    """Append each code's hits on ``system`` against ``reference``.
 
-    CREST runs to its own end, so its best energy is scored against any
-    reference after the fact. Anneal stops at the reference it ran with,
-    and its rows are not rescored.
+    A hit is the recorded best energy, not the stored hit flag. When the
+    campaign stop target is above ``reference``, both arms stopped short
+    of it and the line is marked censored. No p-value is computed.
     """
-    runs = []
+    table = []
     for path in paths:
         if path.is_file():
             with open(path, newline="") as handle:
-                runs.extend(
-                    row
-                    for row in csv.DictReader(handle)
-                    if row["system"] == system and row["code"] == "crest"
+                table.extend(
+                    row for row in csv.DictReader(handle) if row["system"] == system
                 )
-    if not runs:
+    stop = REFERENCE.get(system)
+    if stop is not None and stop > reference + HIT_TOL:
+        censored = f"both runs stopped at the {stop:.8f} stop target"
+    else:
+        censored = ""
+    lines = []
+    for code in CODES:
+        runs = [row for row in table if row["code"] == code]
+        if not runs:
+            continue
+        lines.append(
+            {
+                "system": system,
+                "code": code,
+                "reference_eV": f"{reference:.8f}",
+                "runs": len(runs),
+                "hits": sum(
+                    energy_hits(float(row["best"]), reference, HIT_TOL) for row in runs
+                ),
+                "censored": censored,
+                "seeds": " ".join(
+                    str(seed) for seed in sorted(int(row["seed"]) for row in runs)
+                ),
+                "code_revision": revision,
+                "host": host,
+                "date": datetime.date.today().isoformat(),
+            }
+        )
+    if not any(line["code"] == "crest" for line in lines):
         raise SystemExit(f"no CREST rows on {system}")
-    line = {
-        "system": system,
-        "code": "crest",
-        "reference_eV": f"{reference:.8f}",
-        "runs": len(runs),
-        "hits": sum(energy_hits(float(row["best"]), reference, HIT_TOL) for row in runs),
-        "seeds": " ".join(str(seed) for seed in sorted(int(r["seed"]) for r in runs)),
-        "code_revision": revision,
-        "host": host,
-        "date": datetime.date.today().isoformat(),
-    }
-    append_rows(rescored, RESCORE_FIELDS, [line])
+    append_rows(rescored, RESCORE_FIELDS, lines)
 
 
 def self_test() -> None:

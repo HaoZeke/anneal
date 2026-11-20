@@ -1,7 +1,7 @@
 # Copyright (c) anneal developers
 """The same-session gate summaries: an arm short of seeds loses the gate,
-and the committed gates read as their README states. CREST's rescore
-against another reference."""
+and the committed gates read as their README states. A rescore of both
+arms against another reference."""
 
 import argparse
 import csv
@@ -144,12 +144,47 @@ def test_crest_rescore_reproduces_the_committed_row(tmp_path):
     out = tmp_path / "rescore.csv"
     crest.rescore(history, out, "si13", -624.70446339, "0" * 40, "bench")
     crest.rescore(history, out, "si13", crest.REFERENCE["si13"], "0" * 40, "bench")
-    ring, reference = read(out)
+    written = read(out)
+    assert len(written) == 4
     keys = ("system", "code", "reference_eV", "runs", "hits", "seeds")
-    assert {k: ring[k] for k in keys} == {k: read(gfn2 / "rescore.csv")[0][k] for k in keys}
-    assert (reference["runs"], reference["hits"]) == ("6", "4")
+    ring = [{k: row[k] for k in keys} for row in written[:2]]
+    committed = [{k: row[k] for k in keys} for row in read(gfn2 / "rescore.csv")]
+    assert ring == committed
+    at_stop = {row["code"]: row for row in written[2:]}
+    assert (at_stop["crest"]["runs"], at_stop["crest"]["hits"]) == ("6", "4")
+    assert (at_stop["anneal-general"]["runs"], at_stop["anneal-general"]["hits"]) == ("6", "6")
+    assert at_stop["crest"]["censored"] == ""
     with pytest.raises(SystemExit, match="no CREST rows"):
         crest.rescore(history, out, "si20", -922.98227162, "0" * 40, "bench")
+
+
+def test_si13_ring_rescore_is_censored_for_both_arms(tmp_path):
+    pytest.importorskip("scipy.stats")
+    crest = load("gfn2_crest_ring", "scripts/covalent_h2h/gfn2_crest.py")
+    gfn2 = ROOT / "bench" / "covalent-h2h" / "gfn2"
+    minima = {row["system"]: float(row["energy_eV"]) for row in read(gfn2 / "minima.csv")}
+    history = [gfn2 / "seeds.csv", gfn2 / "rows.csv"]
+    out = tmp_path / "rescore.csv"
+    crest.rescore(history, out, "si13", minima["si13"], "0" * 40, "bench")
+    fresh = read(out)
+    assert [row["code"] for row in fresh] == ["anneal-general", "crest"]
+    by_code = {row["code"]: row for row in fresh}
+    assert (by_code["anneal-general"]["runs"], by_code["anneal-general"]["hits"]) == ("6", "1")
+    assert (by_code["crest"]["runs"], by_code["crest"]["hits"]) == ("6", "0")
+    note = f"both runs stopped at the {crest.REFERENCE['si13']:.8f} stop target"
+    assert by_code["anneal-general"]["censored"] == note
+    assert by_code["crest"]["censored"] == note
+    assert "fisher_p" not in fresh[0]
+    assert "mannwhitney_p" not in fresh[0]
+    stored_crest_hits = [
+        row
+        for row in read(gfn2 / "rows.csv")
+        if row["system"] == "si13" and row["code"] == "crest" and row["hit"] == "true"
+    ]
+    assert len(stored_crest_hits) == 4
+    keys = ("system", "code", "reference_eV", "runs", "hits", "censored", "seeds")
+    committed = [{k: row[k] for k in keys} for row in read(gfn2 / "rescore.csv")]
+    assert committed == [{k: row[k] for k in keys} for row in fresh]
 
 
 def test_the_committed_panel_is_the_same_on_every_seed(capsys):
