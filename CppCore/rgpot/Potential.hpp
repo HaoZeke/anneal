@@ -29,6 +29,7 @@
 
 #include "rgpot/ForceStructs.hpp"
 #include "rgpot/PotHelpers.hpp"
+#include "rgpot/Slices.hpp"
 #include "rgpot/pot_caps.hpp"
 #include "rgpot/pot_types.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
@@ -80,7 +81,8 @@ public:
   /// overlap.
   virtual void hessianVectorImpl(const ForceInput &, const double *,
                                  double *) const {
-    throw std::runtime_error("potential has no analytic Hessian-vector product");
+    throw std::runtime_error(
+        "potential has no analytic Hessian-vector product");
   }
 
   /**
@@ -255,12 +257,17 @@ public:
   /**
    * @brief Batched counterpart of @c forceImpl.
    *
-   * The default evaluates the systems one at a time, so every kernel
-   * answers a batch call correctly without writing anything. Override it
-   * where the kernel can do better than a loop -- one model forward pass
-   * over all systems, one device transfer, one neighbour-list build
-   * across a shared topology -- and set @c caps().batched so callers know
-   * the difference.
+   * The default evaluates each system whole. A shared instance whose
+   * systems are all below @c kTeamMinAtoms spreads those systems across
+   * the thread team, because a single system of that size would not
+   * take the team itself. Any larger system, a potential that is not a
+   * shared instance, and a call that is already inside a team stay on
+   * the serial loop, so in-system threading is not nested and
+   * per-instance scratch is not shared. The bits match that loop.
+   * Override it where the kernel can do better than a loop of
+   * @c forceImpl calls, one model forward pass over all systems, one
+   * device transfer, one neighbour-list build across a shared topology,
+   * and set @c caps().batched so callers know the difference.
    *
    * An override must fill @c batch.out[i] for every i from @c batch.in[i]
    * and treat the systems as independent: no ordering, no shared state,
@@ -268,9 +275,19 @@ public:
    * @c batch.out[i] arrives zeroed, as for @c forceImpl.
    */
   virtual void forceBatchImpl(const ForceBatch &batch) const {
-    for (size_t i = 0; i < batch.nSystems; ++i) {
+    auto one = [&](std::size_t i) {
       static_cast<const Derived *>(this)->forceImpl(batch.in[i], &batch.out[i]);
+    };
+    const PotCaps advertised = caps();
+    if (advertised.reentrancy != Reentrancy::SharedInstance ||
+        advertised.perImageInstances || advertised.groupCollective) {
+      for (size_t i = 0; i < batch.nSystems; ++i) {
+        one(i);
+      }
+      return;
     }
+    forEachBatchSystem(
+        batch.nSystems, [&](std::size_t i) { return batch.in[i].nAtoms; }, one);
   }
 
   /**

@@ -610,9 +610,19 @@ void energyAndGradientBatch(std::size_t n_config, const double *positions,
 - Outputs :: =energies= (n_config doubles) and =gradients= (n_config * n_atoms *
   3 doubles, dE/dx per configuration).
   =n_config= of 0 returns without writing.
+  When every configuration has fewer than =rgpot::kTeamMinAtoms= atoms, more
+  than one thread is requested through =OMP_NUM_THREADS=, and the call is not
+  already inside a team, the configurations are spread across that many threads.
+  Each configuration is evaluated whole, on its own neighbour list, and the bits
+  match the one-thread loop and a fresh =energyAndGradient= of that
+  configuration.
+  A configuration at =rgpot::kTeamMinAtoms= atoms or above, or a batch that
+  contains one, stays on the calling thread.
 - Errors :: throws
   =std::invalid_argument= for a null =energies=, or for a null =positions=, =box= or =gradients= when =n_atoms=
   > 0, and the errors of =energyAndGradient= for each configuration.
+  When several slices run, the exception from the lowest numbered slice is the
+  one rethrown, after the team joins.
 
 *** =.config=
 

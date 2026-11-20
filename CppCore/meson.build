@@ -257,14 +257,23 @@ rgpot_minimage = static_library(
     pic: true,
     install: false,
 )
-# threadsRequested lives in Slices.cc. The regions are templates in
-# Slices.hpp, but the thread count is read here, so this archive has to be
-# built with OpenMP or every potential stays on one thread.
+# threadsRequested, teamsOpened, teamSize, teamFor and countTeam live in
+# Slices.cc. Keeping the object inside rgpot_halfshell satisfies
+# --no-undefined links that take halfshell without rgpot_core, while
+# rgpot_core links rgpot_halfshell instead of compiling a second copy.
 _halfshell_omp = dependency('openmp', language: 'cpp', required: false)
+rgpot_slices = static_library(
+    'rgpot_slices',
+    files('rgpot/Slices.cc'),
+    include_directories: _incdirs,
+    cpp_args: _args + _fp_contract_off,
+    dependencies: _halfshell_omp.found() ? [_halfshell_omp] : [],
+    pic: true,
+    install: false,
+)
 rgpot_halfshell = static_library(
     'rgpot_halfshell',
     files(
-        'rgpot/Slices.cc',
         'rgpot/nlist/HalfShell.cc',
         'rgpot/nlist/HalfShellWalk.cc',
         'rgpot/nlist/NeighbourList.cc',
@@ -273,6 +282,8 @@ rgpot_halfshell = static_library(
     include_directories: _incdirs,
     cpp_args: _args,
     dependencies: _halfshell_omp.found() ? [_halfshell_omp] : [],
+    link_whole: [rgpot_slices],
+    link_with: [rgpot_minimage, rgpot_exact_fma],
     pic: true,
     install: false,
 )
@@ -334,6 +345,7 @@ if not get_option('with_rpc_client_only')
         cpp_args: _core_args,
         include_directories: _incdirs,
         link_whole: [rgpot_minimage, rgpot_exact_fma],
+        link_with: [rgpot_halfshell],
         pic: true,
         install: false,
     )
@@ -2067,7 +2079,14 @@ if get_option('with_tests')
             test(_rt[0], _rt_exes[_rt[2][0]], kwargs: _rt_kw[_rt[0]])
         endif
     endforeach
-    _nlist_link = [rgpot_halfshell, rgpot_minimage, rgpot_exact_fma]
+    _nlist_link = [
+        rgpot_halfshell,
+        rgpot_minimage,
+        rgpot_exact_fma,
+    ]
+    if not get_option('with_rpc_client_only')
+        _nlist_link += [rgpot_core]
+    endif
     foreach _rt : _rt_tests
         if _rt[1] == 'nlist'
             test(

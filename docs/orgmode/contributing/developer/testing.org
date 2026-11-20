@@ -139,6 +139,12 @@ OMP_THREAD_LIMIT=1 meson test -C bbdir --print-errorlogs
 OMP_THREAD_LIMIT=2 meson test -C bbdir --print-errorlogs
 #+end_src
 
+=BatchSpreadTest= requires the one-thread bits from a batch of 16 configurations
+of 4 atoms, for =StillingerWeberSi=, =TersoffSiC= and =LJPot=, at 1, 2 and 4
+threads.
+The two and four thread calls each open one team.
+A batch that contains =kTeamMinAtoms= atoms opens none.
+
 =TersoffZblBuildTest= requires those bits from Tersoff and ZBL at 1, 2, 4 and 8
 threads, below and above =kTeamMinAtoms=, on a fresh list, a Verlet reuse and a
 rebuild.

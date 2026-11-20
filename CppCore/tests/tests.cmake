@@ -183,6 +183,8 @@ add_library(rgpot_halfshell STATIC
   CppCore/rgpot/nlist/HalfShellWalk.cc
   CppCore/rgpot/nlist/NeighbourList.cc
   CppCore/rgpot/nlist/Neighbours.cc)
+set_source_files_properties(CppCore/rgpot/Slices.cc
+  PROPERTIES COMPILE_OPTIONS ${_rgpot_fp_contract_off})
 target_link_libraries(rgpot_halfshell PUBLIC Threads::Threads)
 if(OpenMP_CXX_FOUND)
   target_link_libraries(rgpot_halfshell PUBLIC OpenMP::OpenMP_CXX)

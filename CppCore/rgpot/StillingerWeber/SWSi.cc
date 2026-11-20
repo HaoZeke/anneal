@@ -164,7 +164,7 @@ void StillingerWeberSi::forceImpl(const ForceInput &in, ForceOut *out) const {
   }
   double strain[6] = {};
   evaluate(in.pos, in.box, in.nAtoms, &out->energy, out->F, 1.0, nullptr,
-           strain);
+           strain, neighbours_);
   publishCauchyStress(out, strain, cellVolume(in.box));
 }
 
@@ -179,7 +179,8 @@ void StillingerWeberSi::energyAndGradient(
     throw std::invalid_argument("StillingerWeberSi: null energy buffer");
   }
   // Gradient is dE/dx, the negation of the force written by forceImpl.
-  evaluate(positions, box, n_atoms, energy, gradient, -1.0, neighbors, nullptr);
+  evaluate(positions, box, n_atoms, energy, gradient, -1.0, neighbors, nullptr,
+           neighbours_);
 }
 
 void StillingerWeberSi::energyAndGradientBatch(
@@ -195,17 +196,22 @@ void StillingerWeberSi::energyAndGradientBatch(
     throw std::invalid_argument("StillingerWeberSi: null batch buffer");
   }
   const std::size_t stride = n_atoms * 3;
-  for (std::size_t c = 0; c < n_config; ++c) {
-    energyAndGradient(positions + c * stride, atomic_numbers, box, n_atoms,
-                      energies + c, gradients + c * stride);
-  }
+  // One neighbour list per system, on the thread that evaluates it. The
+  // instance list stays with the single-system calls.
+  forEachBatchSystem(
+      n_config, [&](std::size_t) { return n_atoms; },
+      [&](std::size_t c) {
+        nlist::Neighbours cells;
+        evaluate(positions + c * stride, box, n_atoms, energies + c,
+                 gradients + c * stride, -1.0, nullptr, nullptr, cells);
+      });
 }
 
 void StillingerWeberSi::evaluate(const double *positions, const double *box,
                                  std::size_t n_atoms, double *energy,
                                  double *acc, double scale,
-                                 nlist::NeighborList *neighbors,
-                                 double *strain) const {
+                                 nlist::NeighborList *neighbors, double *strain,
+                                 nlist::Neighbours &cells) const {
   *energy = 0.0;
   const std::size_t n3 = n_atoms * 3;
   for (std::size_t i = 0; i < n3; ++i) {
@@ -222,11 +228,11 @@ void StillingerWeberSi::evaluate(const double *positions, const double *box,
   const double skin = (neighbors != nullptr && neighbors->skin > 0.0)
                           ? neighbors->skin
                           : (mode_ == nlist::Mode::Stream ? 0.0 : cut / 5.0);
-  const auto before = neighbours_.builds();
-  nlist::updateCells(neighbours_, positions, n_atoms, box, cut, skin, nlist::Image::Round,
-                     mode_, {true, true, true});
+  const auto before = cells.builds();
+  nlist::updateCells(cells, positions, n_atoms, box, cut, skin,
+                     nlist::Image::Round, mode_, {true, true, true});
   if (neighbors != nullptr && neighbors->skin > 0.0 &&
-      (neighbours_.builds() != before || !neighbors->built)) {
+      (cells.builds() != before || !neighbors->built)) {
     neighbors->ref.assign(positions, positions + 3 * n_atoms);
     std::memcpy(neighbors->box, box, 9 * sizeof(double));
     neighbors->n = n_atoms;
@@ -240,7 +246,8 @@ void StillingerWeberSi::evaluate(const double *positions, const double *box,
   // index row, which is already paid for.
   auto load = [&](int i, std::vector<Bond> &nb) {
     nb.clear();
-    auto take = [&](std::int32_t, std::int32_t j, double dx, double dy, double dz, double r2) {
+    auto take = [&](std::int32_t, std::int32_t j, double dx, double dy,
+                    double dz, double r2) {
       if (!std::isfinite(dx) || !std::isfinite(dy) || !std::isfinite(dz)) {
         throw std::invalid_argument("StillingerWeberSi: non-finite position");
       }
@@ -254,12 +261,13 @@ void StillingerWeberSi::evaluate(const double *positions, const double *box,
       }
       nb.push_back(Bond{static_cast<int>(j), -dx, -dy, -dz, r, t.gexp, t.dgdr});
     };
-    if (neighbours_.streaming()) {
-      neighbours_.forAtom(static_cast<std::int32_t>(i), take);
+    if (cells.streaming()) {
+      cells.forAtom(static_cast<std::int32_t>(i), take);
     } else {
-      nlist::visitDirected(neighbours_, i, static_cast<std::int64_t>(i) + 1, take);
+      nlist::visitDirected(cells, i, static_cast<std::int64_t>(i) + 1, take);
     }
-    std::sort(nb.begin(), nb.end(), [](const Bond &a, const Bond &b) { return a.j < b.j; });
+    std::sort(nb.begin(), nb.end(),
+              [](const Bond &a, const Bond &b) { return a.j < b.j; });
   };
   if (n_atoms < kTeamMinAtoms) {
     std::vector<Bond> nb;

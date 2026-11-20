@@ -667,9 +667,21 @@ virtual void forceBatchImpl(const ForceBatch &batch) const;
 - Inputs :: =batch=, =batch.nSystems= systems with parallel arrays =batch.in=
   and =batch.out=.
 - Units :: as =forceImpl=.
-- Outputs :: fills =batch.out[i]= from =batch.in[i]= for every i; the default
-  calls =forceImpl= once per system.
-- Errors :: the default propagates any exception from =forceImpl=.
+- Outputs :: fills =batch.out[i]= from =batch.in[i]= for every i.
+  The default calls =forceImpl= once per system.
+  A potential whose =caps().reentrancy= is =Reentrancy::SharedInstance=, and
+  whose caps do not set =perImageInstances= or =groupCollective=, spreads those
+  systems across the threads =OMP_NUM_THREADS= requests when every system has
+  fewer than =rgpot::kTeamMinAtoms= atoms and the call is not already inside a
+  team.
+  One requested thread, one system, or any system at that atom count or above
+  keeps the serial loop, so a large system can take the team itself.
+  Each system is evaluated whole, and the bits match that loop.
+  Any other potential keeps the serial loop, so per-instance scratch is not
+  shared.
+- Errors :: the default propagates an exception from =forceImpl=.
+  When several slices run, the exception from the lowest numbered slice is the
+  one rethrown, after the team joins.
 
 An override must treat the systems as independent and set =caps().batched=.
 
@@ -687,6 +699,7 @@ void forceBatch(const ForceBatch &batch) override;
   Every slot is zeroed first.
   With =RGPOT_HAS_CACHE= and a cache set, hits are served from the cache and
   only the misses reach =forceBatchImpl=.
+  The lookup and the miss batch are built on the calling thread.
 - Errors :: propagates any exception from =forceBatchImpl=; the slots stay
   zeroed or partly written.
 
