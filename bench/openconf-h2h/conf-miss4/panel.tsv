@@ -1,0 +1,25 @@
+molecule	arm	n	hits	hits_mirror	calls_to_hit_median	delta_min_median_kcal	invalid_total	wall_median_s	fisher_p_vs_develop	mw_p_vs_develop	fisher_p_vs_openconf	mw_p_vs_openconf
+915	this series	24	15/24	15/24	16888	0.0000	0	1.7	1.0000	1.0000	1.0000	0.0007
+915	develop 61fa67cf	24	15/24	15/24	16888	0.0000	0	1.6	-	-	1.0000	0.0007
+915	openconf	24	14/24	14/24	1432	0.0069	0	2.0	1.0000	0.0007	-	-
+amprenavir	this series	24	3/24	3/24	41826	1.2156	0	5.5	1.0000	1.0000	0.2340	-
+amprenavir	develop 61fa67cf	24	3/24	3/24	41826	1.2156	0	5.4	-	-	0.2340	-
+amprenavir	openconf	24	0/24	0/24	-	4.7351	0	7.9	0.2340	-	-	-
+fluvastatin	this series	24	11/24	11/24	24697	0.1257	0	4.2	1.0000	1.0000	0.0078	0.3744
+fluvastatin	develop 61fa67cf	24	11/24	11/24	24697	0.1257	0	4.2	-	-	0.0078	0.3744
+fluvastatin	openconf	24	2/24	2/24	10544	0.7512	0	5.1	0.0078	0.3744	-	-
+lopinavir	this series	24	4/24	4/24	63083	3.7709	0	10.9	1.0000	1.0000	0.1092	-
+lopinavir	develop 61fa67cf	24	4/24	4/24	63083	3.7709	0	11.0	-	-	0.1092	-
+lopinavir	openconf	24	0/24	0/24	-	8.9301	0	21.9	0.1092	-	-	-
+lorlatinib	this series	24	11/24	11/24	17983	1.2092	1	3.9	1.0000	1.0000	0.0599	0.2149
+lorlatinib	develop 61fa67cf	24	11/24	11/24	17983	1.2092	1	4.0	-	-	0.0599	0.2149
+lorlatinib	openconf	24	4/24	4/24	8024	2.6797	0	8.2	0.0599	0.2149	-	-
+rq3	this series	24	24/24	24/24	8549	0.0000	0	4.4	1.0000	1.0000	0.2340	0.0037
+rq3	develop 61fa67cf	24	24/24	24/24	8549	0.0000	0	4.3	-	-	0.2340	0.0037
+rq3	openconf	24	21/24	23/24	3156	0.0000	0	4.2	0.2340	0.0037	-	-
+xld	this series	24	21/24	24/24	21806	0.0000	0	4.9	1.0000	1.0000	0.0000	0.1560
+xld	develop 61fa67cf	24	21/24	24/24	21806	0.0000	0	4.8	-	-	0.0000	0.1560
+xld	openconf	24	1/24	1/24	1393	2.2610	0	5.4	0.0000	0.1560	-	-
+z34	this series	24	2/24	2/24	23265	0.5288	0	5.8	1.0000	1.0000	0.4894	-
+z34	develop 61fa67cf	24	2/24	2/24	23265	0.5288	0	5.7	-	-	0.4894	-
+z34	openconf	24	0/24	0/24	-	2.0652	0	6.4	0.4894	-	-	-
