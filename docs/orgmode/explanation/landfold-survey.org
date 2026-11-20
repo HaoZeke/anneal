@@ -212,8 +212,6 @@ The fit follows the stages in =utils/sketch-map.sh=, and other points are placed
 can rewrite the table on this page. The numbers are not copied here.
 The =umap_learn= column is the umap-learn version of the run.
 
-| book | method | T | C | Kruskal | sketch-map | runtime (s) |
-
 * References
 
 # snapper:off
