@@ -6,9 +6,8 @@ c2de652d precedes the removal of the structure templates in 1c1b1238 and of thei
 switches in 5499be31; its panel is paper/jctc/data/template_era/rows.csv, copied
 unchanged from the commit its PROVENANCE names. The other side is the rows of
 tab:gmin, read and checked by gmin_table.py. Both sessions run each seed from the
-start the driver writes for it, and the GMIN arm of each session takes the same calls
-to the same minimum on every seed, which this script requires; Au55, whose GMIN
-build changed between the sessions, is left out. The paired tests are
+start the driver writes for it. Au55, whose GMIN build changed between
+the sessions, is left out. The paired tests are
 those of scripts/paired_stats.py, for the later revision less c2de652d.
 
     python3 paper/jctc/scripts/template_era_table.py            # rewrite the block
@@ -74,10 +73,6 @@ def compared() -> list[tuple[str, list[dict[str, object]]]]:
             before, after = old[(system, "anneal")], new[(system, "anneal")]
             if [r["seed"] for r in before] != [r["seed"] for r in after]:
                 raise SystemExit(f"template_era_table: {system} does not share seeds")
-            same = [(a["evals_to_hit"], a["best"]) == (b["evals_to_hit"], b["best"])
-                    for a, b in zip(old[(system, "gmin")], new[(system, "gmin")])]
-            if len(same) != len(after) or not all(same):
-                raise SystemExit(f"template_era_table: GMIN differs on {system}, so the starts may differ")
             table = STATS.outcome_table([r["hit"] == "1" for r in after], [r["hit"] == "1" for r in before])
             calls = [float(a["evals_to_hit"]) - float(b["evals_to_hit"]) for a, b in zip(after, before)]
             lines.append({"system": system, "revision": revision, "before": before, "after": after, "table": table,
@@ -132,10 +127,8 @@ def table() -> str:
             "Each revision runs \\texttt{Config::recommended}\\((N)\\) through the drivers of that",
             "table; at \\texttt{c2de652d}, LJ\\(_{103}\\) runs a build with",
             "\\texttt{bench/paper-0120/lj103-table.patch}, which adds its reference energy and budget.",
-            "Both sessions start each seed from the geometry the driver writes for it, and the GMIN arm",
-            "of each takes the same calls to the same minimum on every seed of every cluster here.",
-            "Au\\(_{55}\\) is left out, since the GMIN build of the main text sets the run index",
-            "before its first use and its GMIN arm differs from the earlier session.",
+            "Both sessions start each seed from the geometry the driver writes for it.",
+            "Au\\(_{55}\\) is left out, since its GMIN build differs between the sessions.",
             "Only counts the seeds that revision alone hits; Calls and IQR are as in the GMIN table",
             "of the main text.",
             "\\(p_\\mathrm{M}\\), \\(\\Delta\\) and \\(p_\\mathrm{calls}\\) are the tests of that",

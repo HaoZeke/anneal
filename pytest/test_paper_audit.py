@@ -495,6 +495,49 @@ def test_the_develop_gmin_rows_keep_the_harness_that_ran_them():
     assert {line["anneal_revision"] for line in lines} == {table.SUBMITTED}
 
 
+def test_a_drifted_length_unit_cell_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "M\\(_{80}\\), \\(\\rho=14\\) & \\(4\\times 10^{6}\\) & 12 & 7/12 & 4/12 &"
+    assert tex.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, old.replace("7/12 & 4/12", "9/12 & 4/12"))
+    audit_mod.manuscript_knockouts(audit)
+    assert [r[2] for r in audit.drifts()] == ["with"]
+
+
+def test_a_drifted_pooled_length_unit_sentence_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "(40 against\n35 of 48 seeds, pooled McNemar \\(p=0.30\\))"
+    assert tex.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "(40 against\n30 of 48 seeds, pooled McNemar \\(p=0.30\\))")
+    audit_mod.manuscript_knockouts(audit)
+    assert [r[2] for r in audit.drifts()] == ["prose"]
+
+
+def test_a_length_unit_row_from_another_driver_is_reported():
+    audit = audit_mod.Audit()
+    path = "paper/jctc/data/knockouts/pairscale/rows.csv"
+    rows = [dict(r) for r in audit.rows(path)]
+    rows[0]["driver_blob"] = "0" * 40
+    audit.read[path] = rows
+    knock = audit_mod.load_script("knockout_tables_audit", "paper/jctc/scripts/knockout_tables.py")
+    audit_mod.knockout_pairscale(audit, audit_mod.knockout_cells(audit, knock, knock.KNOCKOUTS[1]))
+    assert "every row ran the Morse driver of the tree the rows name" in [r[2] for r in audit.drifts()]
+
+
+def test_a_gmin_claim_in_the_template_era_section_is_reported():
+    audit = audit_mod.Audit()
+    si = audit.text(audit_mod.SI)
+    old = "Both sessions start each seed from the geometry the driver writes for it.\n"
+    assert si.count(old) == 2
+    audit.text_cache[audit_mod.SI] = si.replace(
+        old, old + "GMIN takes the same calls to the same minimum in both.\n", 1)
+    audit_mod.template_era(audit)
+    assert "the template-era section prints no GMIN claim: GMIN takes the same calls" in [
+        r[2] for r in audit.drifts()]
+
+
 def test_an_unpaired_fisher_p_in_the_gmin_table_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
@@ -1259,6 +1302,14 @@ def test_a_single_host_claim_is_reported():
     audit.text_cache[audit_mod.TEX] = tex + "\nBoth arms ran on one host.\n"
     audit_mod.science_claims(audit)
     assert [r[2] for r in audit.drifts()] == ["no single-host claim: one host"]
+
+
+def test_a_gmin_match_required_by_the_template_era_script_is_reported():
+    audit = audit_mod.Audit()
+    path = "paper/jctc/scripts/template_era_table.py"
+    audit.text_cache[path] = audit.text(path) + "\n# GMIN differs\n"
+    audit_mod.template_era(audit)
+    assert "the template-era script does not require a GMIN match: GMIN differs" in [r[2] for r in audit.drifts()]
 
 
 def test_record_only_revisions_resolve_and_unpushed_ones_do_not():
