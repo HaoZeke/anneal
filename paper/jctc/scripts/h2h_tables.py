@@ -294,7 +294,7 @@ def gofee_large_block() -> str:
         "\\(p\\) is the two-sided Fisher exact test on the hits.",
         "The anneal rows are from \\texttt{786c1a3b}.",
         "The AGOX harness heads this repository holds are \\texttt{786c1a3b} and \\texttt{4508a253}.",
-        f"The {len(missing_rows)} rows whose harness is unrecoverable are excluded.}}",
+        f"The {len(missing_rows)} AGOX rows are excluded.}}",
         "\\label{tab:gofee}",
         "\\centering",
         "\\small",

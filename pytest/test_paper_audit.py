@@ -2262,9 +2262,123 @@ def test_reachable_panel_numbers_are_not_flagged_as_unheld():
     assert any(row[2] == "a printed number traces to a commit this repository holds" for row in audit.results)
 
 
+def test_a_side_branch_sha_in_the_tip4p_rows_drifts(tmp_path, monkeypatch):
+    side = "e3ed7dadfce4f0c0aa3b9616f6f07dd9b3171e0a"
+    source = (ROOT / "bench/tip4p-h2h/rows-h2h-r2.csv").read_text()
+    current = source.splitlines()[1].split(",")
+    header = source.splitlines()[0].split(",")
+    anneal = current[header.index("anneal_sha")]
+    mutated = tmp_path / "rows-h2h-r2.csv"
+    mutated.write_text(source.replace(anneal, side))
+    real = audit_mod.load_script
+
+    def load(name, path):
+        module = real(name, path)
+        if name == "printed_h2h":
+            module.TIP4P = mutated
+        return module
+
+    monkeypatch.setattr(audit_mod, "load_script", load)
+    audit = audit_mod.Audit()
+    audit_mod.printed_harnesses(audit)
+    drifts = [row for row in audit.drifts() if row[1] == "tab:tip4p-gmin"]
+    assert drifts
+    assert drifts[0][4].startswith("e3ed7dad")
+
+
+def test_a_deadbeef_revision_in_the_morse_rerun_fails(tmp_path, monkeypatch):
+    source = audit_mod.MORSE_RERUN_ROWS.read_text()
+    mutated = tmp_path / "rows.csv"
+    mutated.write_text(source.replace(
+        "eeec8e2c216ae1506768bca8e29846c1c039ca3b",
+        "deadbeef" * 5,
+    ))
+    monkeypatch.setattr(audit_mod, "MORSE_RERUN_ROWS", mutated)
+    audit = audit_mod.Audit()
+    audit_mod.printed_harnesses(audit)
+    drifts = [row for row in audit.drifts() if row[1] == "tab:gmin"]
+    assert drifts
+    assert drifts[0][4].startswith("deadbeef")
+
+
 def test_an_unheld_hash_in_a_paper_script_fails():
     audit = audit_mod.Audit()
     path = "paper/jctc/scripts/replay_v127.py"
     audit.text_cache[path] = audit.text(path) + '\nOLDTIP = "9109df21fbfd9470c16cff37a7a7b5228bb809e0"\n'
     audit_mod.script_commit_hashes(audit)
     assert any(row[0] == "DRIFT" and row[4].startswith("9109df21") for row in audit.results)
+
+
+def test_sc_prose_counts_from_unheld_harness_fail():
+    audit = audit_mod.Audit()
+    audit.text_cache[audit_mod.TEX] = (
+        audit.text(audit_mod.TEX)
+        + "\nOn the twelve Sutton--Chen clusters, this setting is ahead on 8 of 12, behind on 0, and tied on 4.\n"
+    )
+    audit_mod.unheld_bench_quotes(audit)
+    drifts = [row for row in audit.drifts() if row[2] == audit_mod.HELD_NUMBER]
+    assert drifts
+
+
+def test_morse_gmin_cell_anywhere_in_manuscript_fails():
+    audit = audit_mod.Audit()
+    audit.text_cache[audit_mod.TEX] = (
+        audit.text(audit_mod.TEX)
+        + "\nOn M\\(_{55}\\) at \\(\\rho=14\\), GMIN hits 0/12 seeds.\n"
+    )
+    panel = audit_mod.load_script("gmin_panel_morse_test", "scripts/gmin_panel/run_panel.py")
+    rows = panel.read_rows(ROOT / "bench/gmin-panel/rows.csv")
+    audit_mod.unheld_panel_numbers(audit, panel, panel.panel_groups(rows, "latest"))
+    drifts = [row for row in audit.drifts() if row[2] == audit_mod.HELD_NUMBER]
+    assert drifts
+
+
+def test_si_sc_cost_row_without_sha_fails():
+    audit = audit_mod.Audit()
+    audit.text_cache[audit_mod.SI] = (
+        audit.text(audit_mod.SI)
+        + "\nSC(12--6) 80 & 114.68 & 11.38 & 35.32 & 2.70 \\\\\n"
+    )
+    audit_mod.unheld_bench_quotes(audit)
+    drifts = [row for row in audit.drifts() if row[2] == audit_mod.HELD_NUMBER]
+    assert drifts
+
+
+def test_c89653df_is_not_skipped_by_resolve_revisions():
+    audit = audit_mod.Audit()
+    audit.rows("bench/metal-cluster-h2h/sc-n12/seeds.csv")
+    found = audit_mod.resolve_revisions(audit)
+    assert "c89653df3ae107e9814917bc6515e578e6788188" in found.unresolved
+
+
+def test_withholding_narration_in_manuscript_or_si_fails():
+    for doc in (audit_mod.TEX, audit_mod.SI):
+        audit = audit_mod.Audit()
+        audit.text_cache[doc] = audit.text(doc) + "\nThese hit counts are not quoted.\n"
+        audit_mod.sutton_chen(audit)
+        assert any(row[1] == doc and "withholding narration" in row[2] for row in audit.drifts())
+
+
+def test_tuned_gmin_tampered_harness_or_blob_fails(tmp_path, monkeypatch):
+    source = (ROOT / "bench/gmin-tuned/rows-shard2.csv").read_text()
+    real = audit_mod.load_script
+    for bad_old, bad_new in (
+        ("5eb79cdcb0a986984dc7b487e5a3cc93224246f9", "deadbeef" * 5),
+        ("336f5f499ca92f07beb2d621c590fa74cfe9ecc5", "cafebabe" * 5),
+        ("3d71865c78e5ff19866bae2616251929fd08e453", "01234567" * 5),
+    ):
+        replaced = source.replace(bad_old, bad_new)
+        assert replaced != source
+        mutated = tmp_path / f"rows-{bad_new[:8]}.csv"
+        mutated.write_text(replaced)
+
+        def load(name, path, target=mutated):
+            module = real(name, path)
+            if name == "printed_h2h":
+                module.GMIN_TUNED = target
+            return module
+
+        monkeypatch.setattr(audit_mod, "load_script", load)
+        audit = audit_mod.Audit()
+        audit_mod.printed_harnesses(audit)
+        assert any(row[1] == "tab:gmin-tuned" for row in audit.drifts())
