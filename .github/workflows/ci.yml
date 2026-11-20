@@ -86,6 +86,10 @@ jobs:
       - name: cargo fmt
         run: cargo fmt -- --check
 
+      - name: cargo clippy (no default features)
+        if: ${{ !cancelled() }}
+        run: cargo clippy --no-default-features --all-targets -- -D warnings
+
       - name: cargo clippy (default features)
         if: ${{ !cancelled() }}
         run: cargo clippy --all-targets -- -D warnings
@@ -131,6 +135,7 @@ jobs:
             cd "$pkg"
             cargo generate-lockfile
             cargo check --locked
+            cargo check --locked --no-default-features
             cargo check --locked --features rgsaddle,python
           )
 
@@ -512,6 +517,50 @@ jobs:
 
       - name: cargo test
         run: cargo test
+
+  # --no-default-features omits `catalog` (readcon-core, readcon-db, heed,
+  # lmdb-master-sys) so downstream crates linking another readcon-db can
+  # depend on anneal-core without duplicate rkrdb_* symbols.
+  test-no-default:
+    name: Test no default features (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, macos-26]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Free disk space
+        if: runner.os == 'Linux'
+        run: bash scripts/ci_free_disk.sh
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> ../tmp/anneal-target"
+          key: no-default-${{ matrix.os }}
+          save-if: ${{ github.event_name == 'push' }}
+
+      - name: cargo check (--no-default-features)
+        run: cargo check --locked --no-default-features --all-targets
+
+      - name: cargo test (--no-default-features)
+        run: cargo test --locked --no-default-features
+
+      - name: Check no readcon symbols in --no-default-features artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo rustc --locked --lib --no-default-features -- --crate-type=rlib --crate-type=staticlib
+          leaked=$(nm -g --defined-only ../tmp/anneal-target/debug/libanneal_core.rlib ../tmp/anneal-target/debug/libanneal_core.a | grep -E '(_?rkr_|_?rkrdb_|_?mdb_|readcon_core|readcon_db)' || true)
+          if [[ -n "$leaked" ]]; then
+            printf 'Unexpected readcon/lmdb symbols in --no-default-features build:\n%s\n' "$leaked" >&2
+            exit 1
+          fi
 
   # pip builds the release sdist from its own files only. Installing it in a
   # fresh virtualenv catches a path the sdist leaves out. pytest runs from

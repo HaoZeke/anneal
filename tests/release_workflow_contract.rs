@@ -147,6 +147,7 @@ fn ci_lint_reports_every_check_after_a_red_fmt() {
         );
     }
     for set in [
+        "cargo clippy --no-default-features --all-targets -- -D warnings",
         "cargo clippy --all-targets -- -D warnings",
         "cargo clippy --all-targets --features rgpot-ex -- -D warnings",
         "cargo clippy --all-targets --features rgsaddle -- -D warnings",
@@ -156,6 +157,18 @@ fn ci_lint_reports_every_check_after_a_red_fmt() {
         assert!(lint.contains(set), "lint runs {set}");
     }
     assert!(!lint.contains("always()"));
+}
+
+#[test]
+fn ci_tests_no_default_features_and_guards_against_readcon_symbols() {
+    let workflow = include_str!("../.github/workflows/ci.yml");
+    let no_default = workflow_job(workflow, "test-no-default");
+
+    assert!(no_default.contains("os: [ubuntu-latest, macos-15, macos-26]"));
+    assert!(no_default.contains("cargo check --locked --no-default-features --all-targets"));
+    assert!(no_default.contains("cargo test --locked --no-default-features"));
+    assert!(no_default.contains("nm -g --defined-only"));
+    assert!(no_default.contains("rkrdb_"));
 }
 
 #[test]
