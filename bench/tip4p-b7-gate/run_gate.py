@@ -885,7 +885,7 @@ def render_readme(rows: list[dict[str, str]], cells: list[dict[str, object]], sy
     )
     for row in cells:
         lines.append(
-            "| {system} | {hits_a}/{n} | {hits_b}/{n} | {fisher} | {calls_a:.6g} | {calls_b:.6g} | {u:.6g} | {mw:.6g} | {wall_a:.6f} | {wall_b:.6f} | {opc_a:.6g} | {opc_b:.6g} | {ratio} |".format(
+            "| {system} | {hits_a}/{n} | {hits_b}/{n} | {fisher} | {calls_a:.6g} | {calls_b:.6g} | {u:.6g} | {mw} | {wall_a:.6f} | {wall_b:.6f} | {opc_a:.6g} | {opc_b:.6g} | {ratio} |".format(
                 system=row["system"],
                 hits_a=row["hits_a"],
                 hits_b=row["hits_b"],
