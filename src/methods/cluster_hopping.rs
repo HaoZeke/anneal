@@ -9779,9 +9779,10 @@ where
             && history_here
                 .zip(history.as_deref_mut())
                 .is_none_or(|(m, h)| h.claim_completion(m))
-            && let Some(y) = crate::detected_symmetry::complete_detected(
+            && let Some(y) = crate::detected_symmetry::complete_detected_classed(
                 x.view(),
                 n,
+                cfg.species.as_deref(),
                 cfg.symmetry_tolerance,
                 cfg.symmetry_merge_radius,
                 cfg.symmetry_core_fraction,

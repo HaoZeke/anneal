@@ -172,6 +172,19 @@ impl Cloud {
         Self { xs, ys, zs }
     }
 
+    /// The points listed in `members`, centred on `centre`.
+    fn from_members(x: ArrayView1<f64>, members: &[usize], centre: [f64; 3]) -> Self {
+        let mut xs = Vec::with_capacity(members.len());
+        let mut ys = Vec::with_capacity(members.len());
+        let mut zs = Vec::with_capacity(members.len());
+        for &atom in members {
+            xs.push(x[3 * atom] - centre[0]);
+            ys.push(x[3 * atom + 1] - centre[1]);
+            zs.push(x[3 * atom + 2] - centre[2]);
+        }
+        Self { xs, ys, zs }
+    }
+
     fn point(&self, index: usize) -> [f64; 3] {
         [self.xs[index], self.ys[index], self.zs[index]]
     }
@@ -516,11 +529,92 @@ pub fn detect_all(
     orders: &[usize],
     tolerance: f64,
 ) -> Vec<Candidate> {
+    detect_all_classed(x, n, None, orders, tolerance)
+}
+
+/// The class of every point, as a partition into the lists of its members.
+/// `None` when there is one class or none is given.
+pub(crate) fn class_members(classes: Option<&[u32]>, n: usize) -> Option<Vec<Vec<usize>>> {
+    let classes = classes.filter(|z| z.len() >= n)?;
+    let mut labels: Vec<u32> = classes[..n].to_vec();
+    labels.sort_unstable();
+    labels.dedup();
+    if labels.len() < 2 {
+        return None;
+    }
+    Some(
+        labels
+            .iter()
+            .map(|label| (0..n).filter(|&a| classes[a] == *label).collect())
+            .collect(),
+    )
+}
+
+/// The points of each class and their share of all points. A symmetry
+/// operation of a structure with classes takes every point onto a point of
+/// its own class, so each class is matched only against itself.
+struct Matcher {
+    clouds: Vec<(Cloud, f64)>,
+}
+
+impl Matcher {
+    fn new(x: ArrayView1<f64>, n: usize, classes: Option<&[u32]>) -> Self {
+        let clouds = match class_members(classes, n) {
+            None => vec![(Cloud::from_view(x, n), 1.0)],
+            Some(parts) => {
+                let centre = centroid(x, n);
+                parts
+                    .iter()
+                    .map(|members| {
+                        (
+                            Cloud::from_members(x, members, centre),
+                            members.len() as f64 / n as f64,
+                        )
+                    })
+                    .collect()
+            }
+        };
+        Self { clouds }
+    }
+
+    /// Root-mean-square distance of every point from the image of its own
+    /// class, or `None` once it has passed `cap`. A class holding a share
+    /// `w` of the points gives up at `cap / sqrt(w)`, the distance at which
+    /// it alone takes the whole beyond `cap`.
+    fn deviation(
+        &self,
+        cap: f64,
+        mut under: impl FnMut(&Cloud, f64) -> Option<f64>,
+    ) -> Option<f64> {
+        if let [(cloud, _)] = self.clouds.as_slice() {
+            return under(cloud, cap);
+        }
+        let mut total = 0.0;
+        for (cloud, share) in &self.clouds {
+            let d = under(cloud, cap / share.sqrt())?;
+            total += share * d * d;
+        }
+        Some(total.sqrt())
+    }
+}
+
+/// [`detect_all`] where every point must land on a point of its own class.
+/// `classes` is one label per point; with fewer than two labels it is
+/// [`detect_all`].
+pub fn detect_all_classed(
+    x: ArrayView1<f64>,
+    n: usize,
+    classes: Option<&[u32]>,
+    orders: &[usize],
+    tolerance: f64,
+) -> Vec<Candidate> {
     let mut out = Vec::new();
-    let cloud = Cloud::from_view(x, n);
+    let matcher = Matcher::new(x, n, classes);
     for axis in candidate_axes(x, n) {
         for &order in orders {
-            let Some(d) = cloud.rotation_deviation(axis, order, tolerance) else {
+            let Some(d) = matcher.deviation(tolerance, |cloud, cap| {
+                cloud.rotation_deviation(axis, order, cap)
+            }) else {
                 continue;
             };
             if d < tolerance {
@@ -532,7 +626,8 @@ pub fn detect_all(
                 });
             }
         }
-        let Some(d) = cloud.plane_deviation(axis, tolerance) else {
+        let Some(d) = matcher.deviation(tolerance, |cloud, cap| cloud.plane_deviation(axis, cap))
+        else {
             continue;
         };
         if d < tolerance {
