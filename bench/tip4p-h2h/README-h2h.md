@@ -1,14 +1,14 @@
 # TIP4P head-to-head, anneal against GMIN, twelve seeds
 
-The head-to-head cited in the manuscript is run r2c, record branch
-`record/tip4p-h2h-r2` (commit `cdae978c` on `40c5b461`, tree `f7ee9adc`).
-Its per-seed rows are `rows-h2h-r2.csv`. Anneal is `e1a69a57` and GMIN is
-`aac1548a`. Twelve seeds, 2000–2011, a budget of 2_000_000 charged
+The head-to-head cited in the manuscript is the twelve-seed campaign on
+record branch `record/tip4p-h2h-r2` (commit `cdae978c` on `40c5b461`, tree
+`f7ee9adc`). Its per-seed rows are `rows-h2h-r2.csv`. Anneal is `e1a69a57`
+and GMIN is `aac1548a`. Twelve seeds, 2000–2011, a budget of 2_000_000 charged
 evaluations at every size, serial, core 0, one machine. Both arms open the
 same molecular centres. One charged evaluation is one entry to the potential
 on either side. A hit is a quenched energy at or below the Cambridge Cluster
 Database TIP4P header plus 0.001 kJ/mol. The database lists headers for
-n ≤ 21. (H₂O)₂₅ is not in the database, so run r2c leaves it unscored.
+n ≤ 21. (H₂O)₂₅ is not in the database, so the campaign leaves it unscored.
 
 Fisher's exact test on hits and the Mann–Whitney test on calls to a hit are
 two-sided and Bonferroni-corrected with m = 4, one comparison for each scored
@@ -18,7 +18,8 @@ GMIN is built from source by `scripts/gmin_h2h/build_gmin.sh` at revision
 `aac1548a`, gfortran 13.3.0, reference BLAS/LAPACK, with NEWTIP, TIPID 4,
 temperature 2 kJ/mol held fixed, step 0.40 / 0.51 held fixed, and the
 Lennard-Jones container (`examples/h2h_gmin_tip4p.data`). Medians are
-Hyndman–Fan type 7. `h2h-summary.csv` is an earlier summary and is not run r2c.
+Hyndman–Fan type 7. `h2h-summary.csv` is an earlier summary and is not this
+campaign.
 
 ## Both codes reproduce the Cambridge global minimum
 
@@ -42,7 +43,7 @@ offset never changes which cage a run is scored at.
 
 ## Panel
 
-Rows are `rows-h2h-r2.csv`, run r2c. `best` is the lowest of the twelve; the
+Rows are `rows-h2h-r2.csv`. `best` is the lowest of the twelve; the
 median is beside it. `p(F)` is Fisher's exact test on the hit counts and
 `p(calls)` is the exact Mann–Whitney test on calls to a hit, both after the
 Bonferroni correction above. (H₂O)₂₅ is unscored, so its hit and p cells are
@@ -57,7 +58,7 @@ is the median over runs of `wall_s` divided by `calls`.
 | (H₂O)₂₁ | 0/12  | 0/12 | −915.7735 / −914.3685 | −903.7597 / −895.5929 | 26.312 / 81.097 | 13.16 / 40.55 | 1 | 1 |
 | (H₂O)₂₅ | unscored | unscored | −1113.035 / −1103.345 | −1087.334 / −1082.127 | 35.730 / 107.109 | 17.87 / 53.55 | -- | -- |
 
-Run r2c hits (H₂O)₈ on 12 of 12 and GMIN on 8 of 12. The calls-to-hit p is
+Anneal hits (H₂O)₈ on 12 of 12 and GMIN on 8 of 12. The calls-to-hit p is
 3.0e-06 and Fisher's p is 0.37. It hits (H₂O)₁₅ on 7 of 12 against 0 of 12,
 p = 0.018, and (H₂O)₂₀ on 6 of 12 against 0 of 12, p = 0.055, which is not
 significant. Neither arm hits (H₂O)₂₁. On the unscored (H₂O)₂₅ the best and
@@ -212,7 +213,7 @@ potential, Fisher p and the lost and gained seeds are in
 | (b) | 0/12 −913.767 | 1/12 −864.080 | 8/12 −628.371 | 12/12 | 12/12 | 12/12 | 7/12 |
 | (a)+(b) | 1/12 −913.679 | 2/12 −862.095 | 5/12 −623.877 | 12/12 | 12/12 | 12/12 | 5/12 |
 
-The baseline (H₂O) counts are the anneal arm of run r2c.
+The baseline (H₂O) counts are the anneal arm of `rows-h2h-r2.csv`.
 Water cells give hits and the median best in kJ/mol. None of the three is made
 default. (a) and (b) do not raise (H₂O)₂₁, and the median falls. (a)+(b)
 reaches the minimum once (seed 2011) with a lower median. Every variant loses

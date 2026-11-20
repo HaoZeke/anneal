@@ -5,7 +5,7 @@
 Three blocks, each between a pair of marker comments:
 
     tab:gofee       manuscript.tex  bench/ase-gofee-h2h/summary.csv
-    tab:tip4p-gmin  manuscript.tex  bench/tip4p-h2h/rows-h2h-r2.csv  (run r2c)
+    tab:tip4p-gmin  manuscript.tex  bench/tip4p-h2h/rows-h2h-r2.csv
     tab:gofee-si    si.tex          bench/ase-gofee-h2h/asg2-summary.csv, arms measured there
 
     python3 paper/jctc/scripts/h2h_tables.py            # rewrite the blocks
@@ -24,8 +24,8 @@ MANUSCRIPT = ROOT / "paper" / "jctc" / "manuscript.tex"
 SI = ROOT / "paper" / "jctc" / "si.tex"
 GOFEE = ROOT / "bench" / "ase-gofee-h2h"
 TIP4P_ROWS = ROOT / "bench" / "tip4p-h2h" / "rows-h2h-r2.csv"
-R2C_UNSCORED = 25
-R2C_M = 4
+TIP4P_UNSCORED = 25
+TIP4P_M = 4
 
 MARKS = {
     "gofee": ("% gofee table: start", "% gofee table: end"),
@@ -95,12 +95,12 @@ def mann_whitney_exact(x: list[float], y: list[float]) -> float:
     return min(1.0, 2.0 * min(low, high))
 
 
-def bonferroni(p: float, m: int = R2C_M) -> float:
+def bonferroni(p: float, m: int = TIP4P_M) -> float:
     return min(1.0, m * p)
 
 
-def r2c_stats() -> list[dict]:
-    """Run r2c, one record per size, from the per-seed rows.
+def tip4p_stats() -> list[dict]:
+    """The twelve-seed TIP4P head-to-head, one record per size, from the per-seed rows.
 
     Sizes with a Cambridge header are scored. (H2O)25 is not. Fisher and the
     calls-to-hit Mann-Whitney p are Bonferroni-corrected with m=4. A miss is
@@ -126,7 +126,7 @@ def r2c_stats() -> list[dict]:
         gmin_s = sorted(gmin, key=lambda row: int(row["seed"]))
         ah = sum(int(row["hit"]) for row in anneal)
         gh = sum(int(row["hit"]) for row in gmin)
-        scored = size != R2C_UNSCORED
+        scored = size != TIP4P_UNSCORED
         fisher_raw = fisher_exact(ah, len(anneal), gh, len(gmin)) if scored else None
         calls_raw = mann_whitney_exact(
             [float(row["calls"]) for row in anneal],
@@ -233,7 +233,7 @@ def gofee_block() -> str:
 
 def tip4p_block() -> str:
     body = []
-    for row in r2c_stats():
+    for row in tip4p_stats():
         if row["scored"]:
             hits_a = f"{row['anneal_hits']}/{row['n']}"
             hits_g = f"{row['gmin_hits']}/{row['n']}"
@@ -249,7 +249,7 @@ def tip4p_block() -> str:
         ]) + " \\\\")
     return "\n".join([
         "\\begin{table}",
-        "\\caption{Run r2c against GMIN on rigid TIP4P water clusters.",
+        "\\caption{This setting against GMIN on rigid TIP4P water clusters.",
         "Seeds 2000--2011, one core, budget in force calls.",
         "Wall per run is the median total wall time of a run in seconds.",
         "A run stops at a hit, so it depends on both the cost of a call and the calls spent.",
