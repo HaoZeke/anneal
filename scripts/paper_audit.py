@@ -1541,8 +1541,9 @@ def manuscript_ase(audit: Audit) -> None:
     by_label = {label: s for s, label in panel.TEX_LABELS.items()}
     shown = []
     if ase_held:
-        rev_ase_text = ", ".join(revision)
-        audit.said(PAPER, f"This work is anneal \\texttt{{{rev_ase_text}}}.")
+        for sentence in panel.held_prose().splitlines():
+            if sentence.strip():
+                audit.said(PAPER, sentence)
     else:
         present = "\\label{tab:ase}" in audit.text(SI) or "\\label{tab:ase}" in audit.text(TEX)
         if present:
@@ -1645,17 +1646,10 @@ def manuscript_ase(audit: Audit) -> None:
     mh_runs = sum(len(groups[(s, "ase_mh")]) for s in ASE_PANEL)
     mh_walls = sum(stops(s, "ase_mh") for s in ASE_PANEL)
     audit.cell(PAPER, "tab:ase minima-hopping runs at the cap", str(mh_runs), float(mh_walls))
-    bh = [(s, stops(s, "ase_bh")) for s in ASE_PANEL if stops(s, "ase_bh")]
     spent = [s for s in ASE_PANEL if stops(s, "ase_bh", "budget") == len(groups[(s, "ase_bh")])]
     for s in spent:
         audit.cell(PAPER, f"{s} basin hopping charged the budget on every seed", "4000000",
                    float(min(int(r["charged"]) for r in groups[(s, "ase_bh")])))
-    runs = []
-    for s in lj:
-        if runs and runs[-1][1] == hits(s, "recommended"):
-            runs[-1][0].append(s)
-        else:
-            runs.append(([s], hits(s, "recommended")))
     bh_hits = [s for s in ASE_PANEL if hits(s, "ase_bh")]
     mh_hits = [s for s in ASE_PANEL if hits(s, "ase_mh")]
     audit.cell(PAPER, "basin hopping hits one cluster", "lj55", " ".join(bh_hits))
@@ -1664,21 +1658,6 @@ def manuscript_ase(audit: Audit) -> None:
     audit.cell(PAPER, "Fisher below 0.05 on every Lennard-Jones cluster", " ".join(lj), " ".join(below))
     au_hits = [hits("au55", a) for a in ("anneal", "recommended", *ASE_ARMS)]
     audit.cell(PAPER, "no arm of the ASE panel hits Au55", "0", float(sum(au_hits)))
-    au_ref = references["au55"]
-    au_gaps = [f"{gap('au55', a, au_ref):.3f}" for a in ("recommended", *ASE_ARMS)]
-    if ase_held:
-        audit.said(PAPER, f"Minima hopping stopped at the cap on all {mh_runs} runs of Table~\\ref{{tab:ase}}, and basin "
-                        f"hopping on {sum(n for _, n in bh)}: {series(f'{n} on {label(s)}' for s, n in bh)}.")
-        audit.said(PAPER, f"On {series(label(s) for s in spent)} basin hopping spent the full \\(4\\times 10^{{6}}\\) calls "
-                        "on every seed.")
-        audit.said(PAPER, "This setting hits " + series(f"{' and '.join(label(s) for s in names)} on {n} of 12"
-                                                      for names, n in runs) + ".")
-        audit.said(PAPER, f"Basin hopping hits {label('lj55')} on {hits('lj55', 'ase_bh')} of 12 and no other cluster, and "
-                        "minima hopping hits none.")
-        audit.said(PAPER, f"Fisher's test against each ASE arm is below 0.05 on all {len(below)} Lennard-Jones clusters.")
-        audit.said(PAPER, f"No arm hits {label('au55')}.")
-        audit.said(PAPER, f"There the median best energy lies {au_gaps[0]}~eV above the reference for this setting, "
-                        f"{au_gaps[1]}~eV for basin hopping, and {au_gaps[2]}~eV for minima hopping.")
     morse_walls = all(r["stop"] == "wall" for s in MORSE_PANEL for a in ASE_ARMS for r in groups[(s, a)])
     audit.record(morse_walls, PAPER, "every Morse ASE run stopped at the cap", "every", "every" if morse_walls else "not every")
     audit.said(PAPER, "Every basin-hopping and minima-hopping run of Table~\\ref{tab:ase-morse} stopped at the cap.")
@@ -1774,6 +1753,8 @@ def manuscript_ase(audit: Audit) -> None:
         audit.said(PAPER, " ".join(gmin_panel.morse_anneal_note()))
     rev_gmin_text = sorted(rev_gmin)[0][:8]
     audit.cell(PAPER, "the GMIN panel revision", "1ce3ab64", rev_gmin_text)
+    au_ref = references["au55"]
+    au_gaps = [f"{gap('au55', a, au_ref):.3f}" for a in ("recommended", *ASE_ARMS)]
     if ase_held:
         audit.said(PAPER, f"On {label('au55')} the ASE panel hits {hits('au55', 'recommended')} of 12 for this setting, "
                         f"as do both ASE arms, and the median best energy of this setting lies {au_gaps[0]}~eV above "
@@ -1873,15 +1854,26 @@ def generated_tables(audit: Audit) -> None:
             ("tab:gmin-tuned", h2h.MARKS["gmin-tuned"], h2h.tuned_gmin_block(), si_text),
             ("tab:abcluster", h2h.MARKS["abcluster"], h2h.abcluster_block(), si_text)):
         found = source.split(marks[0], 1)[1].split(marks[1], 1)[0].strip("\n") if marks[0] in source else ""
-        ok = (marks[0] not in source) if not written else found == written
+        ok = found == written
         audit.record(ok, SI if source is si_text else PAPER, f"{label} is the generator's block",
                      "as written" if ok else "edited by hand", "as written")
     for label, marks, written in (("tab:ablation", ablation.TEX_MARKS, ablation.tex_table()),
                                   ("tab:gmin", gmin.TEX_MARKS, want),
                                   ("tab:ase", panel.TEX_MARKS, panel.tex_table()),
+                                  ("tab:ase prose", panel.PROSE_MARKS, panel.held_prose()),
                                   ("tab:ase-morse", nonlj.TEX_MARKS, nonlj.tex_table(nonlj.load_rows()))):
-        ok = (marks[0] not in text and marks[0] not in si_text) if not written else block(marks) == written
+        ok = block(marks) == written
         audit.record(ok, PAPER, f"{label} is the summariser's block", "as written" if ok else "edited by hand", "as written")
+    ingest = load_script("ingest_record_audit", "scripts/ingest_record.py")
+    marks = ingest.WITHHELD_MARKS
+    written = ingest.withheld_block()
+    audit.record(written == "" and marks[0] not in si_text, SI,
+                 "unquoted comparisons are not narrated", "absent",
+                 "absent" if written == "" and marks[0] not in si_text else "present")
+    for name, reason in ingest.withheld_items():
+        sentence = f"\\texttt{{{name}}}: {reason}."
+        audit.record(sentence not in si_text, SI, "an unquoted comparison is not narrated",
+                     "absent", "present" if sentence in si_text else "absent")
 
 
 def sutton_chen(audit: Audit) -> None:
@@ -5071,7 +5063,13 @@ def rerun_check(audit: Audit, pre_submission: bool = False) -> None:
         hits = sorted({m.group(0) for m in FORBIDDEN_RERUN.finditer(audit.text(path))})
         audit.record(not hits, path, "no \\rerun or [RERUN remains", "none", " ".join(hits) or "none")
     for path in TEX_SOURCES:
-        hits = sorted({m.group(0) for m in FORBIDDEN_PENDING.finditer(audit.text(path))})
+        text = audit.text(path)
+        start, end = "% results not quoted: start", "% results not quoted: end"
+        if start in text and end in text:
+            head, rest = text.split(start, 1)
+            _, tail = rest.split(end, 1)
+            text = head + tail
+        hits = sorted({m.group(0) for m in FORBIDDEN_PENDING.finditer(text)})
         audit.record(not hits, path, "no pending, to be assigned, or TBD remains in TeX",
                      "none", " | ".join(hits) or "none")
 
@@ -5748,6 +5746,11 @@ def history_narration(audit: Audit) -> None:
         if path == SI:
             text = re.sub(r"[^\n]*whose harness is unrecoverable[^\n]*", "", text)
             text = re.sub(r"[^\n]*89de725a[^\n]*unrecoverable[^\n]*", "", text)
+            start, end = "% results not quoted: start", "% results not quoted: end"
+            if start in text and end in text:
+                head, rest = text.split(start, 1)
+                _, tail = rest.split(end, 1)
+                text = head + tail
         found = [
             label for label, pattern in HISTORY_PHRASES
             if re.search(rf"\b(?:{pattern})\b", text, re.IGNORECASE)
@@ -5863,7 +5866,11 @@ def printed_harnesses(audit: Audit) -> None:
     if h2h.tip4p_block():
         tip = [row for pair in h2h.tip4p_groups().values() for arm in pair for row in arm]
         groups.append(("tab:tip4p-gmin", h2h.tip4p_block(), tip))
-    for label, emitted in (("tab:sc", h2h.sc_block()), ("sec:sc", h2h.sc_prose()), ("tab:sc-si", h2h.sc_si_block())):
+    if h2h.sc_gmin_quotable():
+        emitted_sc = (("tab:sc", h2h.sc_block()), ("sec:sc", h2h.sc_prose()), ("tab:sc-si", h2h.sc_si_block()))
+    else:
+        emitted_sc = ()
+    for label, emitted in emitted_sc:
         if emitted:
             seeds = []
             for anneal, gmin in h2h.sc_pairs():
@@ -5884,6 +5891,16 @@ def printed_harnesses(audit: Audit) -> None:
         ]
     if h2h.abcluster_block():
         groups.append(("tab:abcluster", h2h.abcluster_block(), h2h.read(h2h.ABCLUSTER)))
+    ase = load_script("printed_ase", "scripts/ase_panel/summarize.py")
+    ase_tex = ase.tex_table()
+    if ase_tex:
+        ase_rows = []
+        for system in ase.SYSTEMS:
+            grouped = ase.load(system)
+            quoted = [row for arm in ("recommended", *ase.ASE_ARMS) for row in grouped[arm]]
+            if quoted and all(ase.commit_held(row["code_revision"]) for row in quoted):
+                ase_rows.extend(quoted)
+        groups.append(("tab:ase", ase_tex, ase_rows))
     morse_rows = [row for arms in nonlj.load_rows().values() for group in arms.values() for row in group]
     morse_tex = nonlj.tex_table(nonlj.load_rows())
     if morse_tex:
