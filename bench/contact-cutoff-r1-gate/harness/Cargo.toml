@@ -1,0 +1,17 @@
+[package]
+name = "contact-cutoff-gate-harness"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+publish = false
+build = "build.rs"
+
+[workspace]
+
+[dependencies]
+anneal-core = { path = "../anneal" }
+rgpot-pair = { git = "https://github.com/OmniPotentRPC/rgpot", rev = "8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e" }
+libloading = "0.8"
+ndarray = "0.17"
+rand = "0.9"
+sha2 = "0.10"
