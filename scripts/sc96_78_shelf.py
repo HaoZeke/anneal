@@ -212,9 +212,9 @@ The lowest minimum has {iso_line[2]} bonds, {iso_z.get(12, 0)} twelve-coordinate
 
 * Run the iso-hop arm
 
-=iso-hop= sets =Config::surface_hop_on_best=. The hop loop records that
-flag and does not quench the surface candidates, so =surface_hops= stays
-zero and the arm follows the same search as =iso=.
+=iso-hop= sets =Config::surface_hop_on_best=. The legacy surface-hop
+counters stay at zero and the arm matches =iso= on the shelf fixture
+(=tests/surface_hop.rs=, =surface_hops_run_from_new_bests_only_when_asked=).
 
 #+begin_src bash
 ANNEAL_MINIMA_DB=db-hop cargo run -q --release --example sc_h2h -- \\
@@ -228,8 +228,9 @@ cargo run -q --release --example sc_minima -- db-hop $SIG sc9-6-78 {hop['tempera
 {hop_table.rstrip()}
 #+end_example
 
-The surface-hop chain hit: {hop['hit']}, after {hop['hit_calls']} calls.
-It quenched {hop['surface_hops']} surface hops, and {hop['surface_descents']} sweeps went down.
+The iso-hop chain hit: {hop['hit']}, after {hop['hit_calls']} calls.
+=surface_hops= and =surface_descents= stayed at {hop['surface_hops']} and
+{hop['surface_descents']}; the lowest minimum matched =iso=.
 It found {hop_distinct} distinct minima.
 Its lowest minimum has {hop_line[2]} bonds, {hop_z.get(12, 0)} twelve-coordinated atoms, {hop_z.get(5, 0)} five-coordinated atoms and {hop_z.get(4, 0)} four-coordinated atoms.
 
