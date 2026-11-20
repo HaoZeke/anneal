@@ -14,8 +14,6 @@ import tempfile
 import time
 from pathlib import Path
 
-from scipy.stats import fisher_exact, mannwhitneyu
-
 THREAD_KEYS = (
     "OMP_NUM_THREADS",
     "MKL_NUM_THREADS",
@@ -184,7 +182,8 @@ def run_one(bin_dir: Path, arm: str, system: str, seed: int, rows: Path, session
     env["LC_ALL"] = "C"
     aff = sorted(os.sched_getaffinity(0))
     with tempfile.TemporaryDirectory() as temp:
-        cmd = ["taskset", "-c", "0", *run_cmd(bin_dir, system, seed, Path(temp))]
+        inner = run_cmd(bin_dir, system, seed, Path(temp))
+        cmd = ["taskset", "-c", "0", *inner]
         start = time.time()
         proc = subprocess.run(cmd, env=env, capture_output=True, text=True, check=False)
         elapsed = time.time() - start
@@ -224,7 +223,7 @@ def run_one(bin_dir: Path, arm: str, system: str, seed: int, rows: Path, session
         "affinity": aff,
         "machine_hash": machine_hash(),
         "elapsed_s": round(elapsed, 6),
-        "cmd": cmd[2:5],
+        "binary": Path(inner[0]).name,
     }
     with session.open("a") as handle:
         handle.write(json.dumps(event, separators=(",", ":")) + "\n")
@@ -254,6 +253,43 @@ def median(values: list[float]) -> float:
     return statistics.median(values)
 
 
+def fisher_two_sided(hits_left: int, n_left: int, hits_right: int, n_right: int) -> float:
+    hits = hits_left + hits_right
+    ways = math.comb(n_left + n_right, hits)
+
+    def prob(k: int) -> float:
+        return math.comb(n_left, k) * math.comb(n_right, hits - k) / ways
+
+    observed = prob(hits_left)
+    lo, hi = max(0, hits - n_right), min(n_left, hits)
+    return min(1.0, sum(prob(k) for k in range(lo, hi + 1) if prob(k) <= observed * (1 + 1e-7)))
+
+
+def mann_whitney_two_sided(left: list[float], right: list[float]) -> float:
+    n1, n2 = len(left), len(right)
+    pooled = sorted(left + right)
+    if n1 == 0 or n2 == 0:
+        raise ValueError("mann-whitney needs two groups")
+    rank: dict[float, float] = {}
+    ties = 0.0
+    i = 0
+    n = n1 + n2
+    while i < n:
+        j = i
+        while j + 1 < n and pooled[j + 1] == pooled[i]:
+            j += 1
+        rank[pooled[i]] = (i + j + 2) / 2.0
+        t = j - i + 1
+        ties += t**3 - t
+        i = j + 1
+    u = sum(rank[v] for v in left) - n1 * (n1 + 1) / 2.0
+    var = n1 * n2 / 12.0 * ((n + 1) - ties / (n * (n - 1)))
+    if var <= 0.0:
+        return 1.0
+    dev = max(abs(u - n1 * n2 / 2.0) - 0.5, 0.0)
+    return min(1.0, math.erfc(dev / math.sqrt(var) / math.sqrt(2.0)))
+
+
 def summarize(rows: list[dict[str, str]], a_arm: str, b_arm: str) -> list[dict[str, str]]:
     out = []
     cells = sorted({r["cell"] for r in rows})
@@ -264,13 +300,13 @@ def summarize(rows: list[dict[str, str]], a_arm: str, b_arm: str) -> list[dict[s
             continue
         a_hits = sum(int(r["hit"]) for r in a)
         b_hits = sum(int(r["hit"]) for r in b)
-        fisher_p = float(fisher_exact([[b_hits, len(b) - b_hits], [a_hits, len(a) - a_hits]], alternative="two-sided")[1])
+        fisher_p = fisher_two_sided(b_hits, len(b), a_hits, len(a))
         a_rank = [float(r["charged_rank"]) for r in a]
         b_rank = [float(r["charged_rank"]) for r in b]
         if len(set(a_rank + b_rank)) == 1:
             mw_p = 1.0
         else:
-            mw_p = float(mannwhitneyu(b_rank, a_rank, alternative="two-sided", method="asymptotic", use_continuity=True).pvalue)
+            mw_p = mann_whitney_two_sided(b_rank, a_rank)
         a_out = [float(r["outside_per_charged"]) for r in a]
         b_out = [float(r["outside_per_charged"]) for r in b]
         ratio = median(b_out) / median(a_out) if median(a_out) > 0 else math.inf
