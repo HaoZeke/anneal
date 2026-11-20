@@ -383,9 +383,12 @@ def test_a_hand_edited_tab_ase_recommended_hit_is_reported(monkeypatch):
 def test_a_drifted_morse_ase_table_cell_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.SI)
-    old = "& 54.135 & 0.037 & 0.037 \\\\"
+    old = r"& 11.333 & 47.553 & 47.556 & \(1.3\times 10^{-3}\) & \(1.3\times 10^{-3}\) \\"
     assert tex.count(old) == 1
-    audit.text_cache[audit_mod.SI] = tex.replace(old, "& 54.135 & 0.037 & 0.37 \\\\")
+    audit.text_cache[audit_mod.SI] = tex.replace(
+        old,
+        r"& 11.333 & 47.553 & 47.556 & \(1.3\times 10^{-3}\) & \(1.3\times 10^{-2}\) \\",
+    )
     audit_mod.manuscript_ase(audit)
     audit_mod.generated_tables(audit)
     assert sorted(r[2] for r in audit.drifts()) == ["Fisher p against ase_mh", "tab:ase-morse is the summariser's block"]
@@ -527,7 +530,10 @@ def test_a_gmin_row_left_on_the_old_file_is_reported():
 def test_a_gmin_lead_must_be_stated_as_the_rows_give_it():
     audit = audit_mod.Audit()
     text = audit.text(SC_N12)
-    audit.text_cache[SC_N12] = text.replace("| 0.113 | tie | GMIN, n.s. | GMIN |", "| 0.113 | tie | GMIN, n.s. | anneal |")
+    audit.text_cache[SC_N12] = text.replace(
+        "| 0.349 | tie | anneal, n.s. | GMIN |",
+        "| 0.349 | tie | anneal, n.s. | anneal |",
+    )
     audit_mod.head_to_head(audit)
     assert [r[2] for r in audit.drifts()] == ["Wall ahead"]
 

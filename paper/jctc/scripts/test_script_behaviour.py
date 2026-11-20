@@ -760,3 +760,26 @@ def test_water_h2h_and_repolish_record_rgpot_revision(tmp_path: Path, monkeypatc
     lines = csv_out.read_text().splitlines()
     assert lines[0] == "structure,seed,old_energy_Eh,new_energy_Eh,gap_Eh,code_revision,rgpot_revision,host"
     assert rev in lines[1]
+
+
+def test_cross_labels_counts_longtable_in_table_sequence() -> None:
+    import cross_labels
+
+    tex = (
+        "\\setcounter{secnumdepth}{1}\n"
+        "\\section{Provenance}\n"
+        "\\subsection{Detail}\n"
+        "\\label{sec:detail}\n"
+        "\\begin{longtable}{ll}\n"
+        "\\caption{First.}\n"
+        "\\label{tab:first}\\\\\n"
+        "\\end{longtable}\n"
+        "\\begin{table}\n"
+        "\\caption{Second.}\n"
+        "\\label{tab:second}\n"
+        "\\end{table}\n"
+    )
+    got = cross_labels.numbers(tex, "S")
+    assert got["sec:detail"] == "S1"
+    assert got["tab:first"] == "S1"
+    assert got["tab:second"] == "S2"

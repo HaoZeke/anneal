@@ -482,7 +482,34 @@ def read_rows(path: Path) -> list[dict[str, str]]:
     if not path.is_file():
         return []
     with path.open(newline="") as handle:
-        return list(csv.DictReader(handle))
+        rows = list(csv.DictReader(handle))
+    if path.name == "rows.csv" and path.parent.name == "gmin-panel":
+        rerun = path.parents[1] / "morse-panel" / "rerun-20261119" / "rows.csv"
+        with rerun.open(newline="") as handle:
+            for row in csv.DictReader(handle):
+                if row["system"] not in PAPER_BUDGETS:
+                    continue
+                rows.append({
+                    "system": row["system"],
+                    "code": row["code"],
+                    "driver": "h2h_morse",
+                    "seed": row["seed"],
+                    "budget": row["budget"],
+                    "hit": row["hit"],
+                    "evals_to_hit": row["evals_to_hit"],
+                    "charged": row["charged"],
+                    "wall_s": row["wall_s"],
+                    "best": row["best"],
+                    "pot_s": row["pot_s"],
+                    "outside_s": row["outside_s"],
+                    "code_revision": row["code_revision"],
+                    "harness_revision": row["code_revision"],
+                    "host": row["host"],
+                    "cpu": "",
+                    "session": "rerun-20261119-template-free",
+                    "utc": "",
+                })
+    return rows
 
 
 def validate_row_schema(row: dict[str, str]) -> None:
@@ -798,8 +825,27 @@ def tex_table(summary: list[dict[str, str]], revision: str) -> str:
     )
     shown_gmin = " ".join(value[:8] for value in gmin_revisions) or "unknown"
     body = [" & ".join(cells) + " \\\\" for cells in lines]
+    by_system = {row["system"]: row for row in summary}
+    morse = ("m55r6", "m55r14", "m80r6", "m80r14")
+    prose = []
+    if all(system in by_system for system in morse):
+        values = [by_system[system] for system in morse]
+        prose = [
+            "On the four Morse rows, this work and GMIN both hit 12 of 12 at",
+            "\\(\\rho=6\\) for M\\(_{55}\\) and M\\(_{80}\\).",
+            "At \\(\\rho=14\\), this work hits "
+            f"{values[1]['anneal_hits']} of 12 against GMIN's {values[1]['gmin_hits']} "
+            "of 12 on M\\(_{55}\\), and "
+            f"{values[3]['anneal_hits']} of 12 against {values[3]['gmin_hits']} "
+            "of 12 on M\\(_{80}\\).",
+            "The corresponding two-sided Fisher values are "
+            f"{show_p(float(values[1]['fisher_p']), True)} and "
+            f"{show_p(float(values[3]['fisher_p']), True)}, respectively.",
+            "",
+        ]
     return "\n".join(
         [
+            *prose,
             "\\begin{table}",
             "\\caption{This work against GMIN, both arms of each cluster on one host in one session.",
             f"Revisions: anneal {shown_revision}, GMIN \\texttt{{{shown_gmin}}}.",
