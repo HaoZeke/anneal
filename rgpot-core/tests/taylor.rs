@@ -9,7 +9,7 @@
 //! exact coefficient.
 
 use rgpot_core::jet::JetError;
-use rgpot_core::taylor::{side, Interval, Side, Taylor};
+use rgpot_core::taylor::{side, Interval, Side, Taylor, TaylorExponential};
 
 const ORDER: usize = 12;
 
@@ -57,6 +57,45 @@ fn exp_matches_the_inverse_factorials() {
     let e = Interval::ONE.exp();
     let shifted: Vec<Interval> = want.iter().map(|w| e * *w).collect();
     assert_series(&Taylor::line(1.0, 1.0, ORDER).exp(), &shifted, "exp(1 + t)");
+}
+
+#[test]
+fn incremental_exp_and_supplied_coefficients_use_the_same_recurrences() {
+    let mut recurrence = TaylorExponential::<Interval>::new();
+    recurrence.push(Interval::ONE);
+    recurrence.push(Interval::ZERO);
+    let incremental = recurrence.into_coefficients();
+    let supplied = Taylor::from_coefficients(vec![Interval::ZERO, Interval::ONE, Interval::ZERO])
+        .unwrap()
+        .exp();
+    assert_eq!(incremental, supplied.coefficients());
+
+    let reciprocal = Taylor::constant(Interval::ONE, 2)
+        .div(
+            &Taylor::from_coefficients(vec![Interval::ONE, -Interval::ONE, Interval::ZERO])
+                .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        reciprocal
+            .coefficients()
+            .iter()
+            .map(|coefficient| coefficient.bounds())
+            .collect::<Vec<_>>(),
+        vec![(1.0, 1.0); 3]
+    );
+}
+
+#[test]
+fn supplied_coefficients_refuse_an_empty_series() {
+    assert_eq!(
+        Taylor::from_coefficients(Vec::new()).unwrap_err(),
+        JetError::Shape("Taylor series needs at least its constant coefficient")
+    );
+
+    let constant = Taylor::from_coefficients(vec![Interval::ZERO]).unwrap();
+    assert_eq!(constant.coefficients().len(), 1);
+    assert!(!constant.exp().coefficients()[0].disjoint(Interval::ONE));
 }
 
 #[test]
