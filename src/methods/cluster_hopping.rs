@@ -8469,15 +8469,18 @@ where
             let hit = if accept { 1.0 } else { 0.0 };
             let step = 0.02 / (1.0 + angular_tried as f64 / 500.0).sqrt();
             angular_ratio = (angular_ratio + step * (hit - cfg.angular_target)).clamp(0.05, 0.95);
+        } else if let Some(arm) = morph_action_arm {
+            // A twin or observed trial is not the library's, so it pays
+            // neither the contextual arm nor the allocator arm drawn
+            // alongside it.
+            morph_gate_alloc.update(arm, improved || (accept && !returning));
         } else if let Some(c) = &context {
             // The context is the one the move was chosen in, not the one the
             // chain now stands in: the reward belongs to the decision.
             contextual.update(k, c.view(), if improved || accept { 1.0 } else { 0.0 });
-        } else if let Some(arm) = morph_action_arm
-            && cfg.allocate_moves
-        {
-            let novel_reward = improved || (accept && !returning);
-            morph_gate_alloc.update(arm, novel_reward);
+            if morph_ready {
+                morph_gate_alloc.update(0, improved || (accept && !returning));
+            }
         } else if cfg.allocate_moves {
             // An angular step is not the allocator's, so it does not carry a
             // reward for whichever arm the allocator happened to pick.

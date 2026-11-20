@@ -1,11 +1,11 @@
 // Copyright (c) anneal developers
 //! A stalled monoatomic cluster gates template-free morphology escapes
 //! (`twin` and `observed`) via the search's existing stall counters and
-//! bandit reward bookkeeping (`FlooredThompson`), leaving short walks and
-//! disabled configurations untouched.
+//! bandit reward bookkeeping (`FlooredThompson`), leaving short walks,
+//! disabled configurations, and frozen, labelled or slab systems untouched.
 
 use anneal_core::methods::cluster_hopping::{
-    Config, Ledger, random_cluster_in_radius, run_with_gradient,
+    Config, ContinuousSymmetry, Ledger, random_cluster_in_radius, run_with_gradient,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
@@ -60,6 +60,15 @@ fn run_pair(
     .expect("finite start")
 }
 
+fn morph_draws(outcome: &anneal_core::methods::cluster_hopping::Outcome) -> usize {
+    outcome
+        .proposal_counts
+        .iter()
+        .filter(|c| c.move_type == "twin" || c.move_type == "observed")
+        .map(|c| c.proposed)
+        .sum()
+}
+
 #[test]
 fn stalled_monoatomic_search_escapes_short_range_funnel_without_templates() {
     anneal_core::install_rgpot_kernels!();
@@ -78,14 +87,8 @@ fn stalled_monoatomic_search_escapes_short_range_funnel_without_templates() {
         "expected global minimum near {reference}, got {}",
         outcome.best
     );
-    let morph_draws: usize = outcome
-        .proposal_counts
-        .iter()
-        .filter(|c| c.move_type == "twin" || c.move_type == "observed")
-        .map(|c| c.proposed)
-        .sum();
     assert!(
-        morph_draws > 0,
+        morph_draws(&outcome) > 0,
         "expected twin/observed stall escapes after patience, proposal_counts={:?}",
         outcome.proposal_counts
     );
@@ -96,15 +99,19 @@ fn morphology_escape_respects_disabled_stall_or_displacement_only() {
     anneal_core::install_rgpot_kernels!();
     let potential = PairPotential::lennard_jones(13);
 
+    let stock = run_pair(&Config::recommended(13), &potential, 40_000, 2000, None);
+    assert!(
+        morph_draws(&stock) > 0,
+        "the stock walk must reach the escape for the cases below to test it: {:?}",
+        stock.proposal_counts
+    );
+
     let mut no_stall = Config::recommended(13);
     no_stall.escape_on_stall = false;
     no_stall.trail_on_stall = false;
     let out_no_stall = run_pair(&no_stall, &potential, 40_000, 2000, None);
     assert!(
-        !out_no_stall
-            .proposal_counts
-            .iter()
-            .any(|c| c.move_type == "twin" || c.move_type == "observed"),
+        morph_draws(&out_no_stall) == 0,
         "disabled stall exits must not run morphology escapes: {:?}",
         out_no_stall.proposal_counts
     );
@@ -113,10 +120,7 @@ fn morphology_escape_respects_disabled_stall_or_displacement_only() {
     disp_only.displacement_only = true;
     let out_disp = run_pair(&disp_only, &potential, 40_000, 2000, None);
     assert!(
-        !out_disp
-            .proposal_counts
-            .iter()
-            .any(|c| c.move_type == "twin" || c.move_type == "observed"),
+        morph_draws(&out_disp) == 0,
         "displacement_only must not run morphology escapes: {:?}",
         out_disp.proposal_counts
     );
@@ -125,10 +129,7 @@ fn morphology_escape_respects_disabled_stall_or_displacement_only() {
     zero_restart.restart_patience = 0;
     let out_zero_restart = run_pair(&zero_restart, &potential, 40_000, 2000, None);
     assert!(
-        !out_zero_restart
-            .proposal_counts
-            .iter()
-            .any(|c| c.move_type == "twin" || c.move_type == "observed"),
+        morph_draws(&out_zero_restart) == 0,
         "restart_patience=0 must not run morphology escapes: {:?}",
         out_zero_restart.proposal_counts
     );
@@ -137,11 +138,58 @@ fn morphology_escape_respects_disabled_stall_or_displacement_only() {
     zero_stall.stall_patience = 0;
     let out_zero_stall = run_pair(&zero_stall, &potential, 40_000, 2000, None);
     assert!(
-        !out_zero_stall
-            .proposal_counts
-            .iter()
-            .any(|c| c.move_type == "twin" || c.move_type == "observed"),
+        morph_draws(&out_zero_stall) == 0,
         "stall_patience=0 must not run morphology escapes: {:?}",
         out_zero_stall.proposal_counts
+    );
+}
+
+#[test]
+fn morphology_escape_excludes_frozen_labelled_and_slab_systems() {
+    anneal_core::install_rgpot_kernels!();
+    let n = 13;
+    let potential = PairPotential::lennard_jones(n);
+    let free = || {
+        let mut cfg = Config::recommended(n);
+        cfg.continuous_symmetry = ContinuousSymmetry::Off;
+        cfg
+    };
+
+    let control = run_pair(&free(), &potential, 40_000, 2000, None);
+    assert!(
+        morph_draws(&control) > 0,
+        "the unconstrained walk must reach the escape for the cases below to test it: {:?}",
+        control.proposal_counts
+    );
+
+    let mut frozen = free();
+    frozen.frozen = Some((0..n).map(|i| i == 0).collect());
+    let out_frozen = run_pair(&frozen, &potential, 40_000, 2000, None);
+    assert_eq!(
+        morph_draws(&out_frozen),
+        0,
+        "a frozen frame must not run morphology escapes: {:?}",
+        out_frozen.proposal_counts
+    );
+
+    let mut labelled = free();
+    labelled.species = Some((0..n).map(|i| u32::from(2 * i >= n)).collect());
+    let out_labelled = run_pair(&labelled, &potential, 40_000, 2000, None);
+    assert_eq!(
+        morph_draws(&out_labelled),
+        0,
+        "two labels must not run morphology escapes: {:?}",
+        out_labelled.proposal_counts
+    );
+
+    let mut slab = free();
+    slab.species = Some(vec![0; n]);
+    slab.active_region = Some((vec![0], 1));
+    let out_slab = run_pair(&slab, &potential, 40_000, 2000, None);
+    assert_eq!(
+        morph_draws(&out_slab),
+        0,
+        "an active region must not run morphology escapes: {:?}",
+        out_slab.proposal_counts
     );
 }
