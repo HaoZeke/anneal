@@ -13,7 +13,7 @@ from typing import Any, Callable, Mapping, Sequence, cast
 
 import numpy as np
 
-from rgpot import atomic_number, unit_conversion_factor
+from . import atomic_number, unit_conversion_factor
 
 __all__ = ["UNIT_STYLES", "FixExternal", "box_rows", "type_numbers", "unit_factors"]
 

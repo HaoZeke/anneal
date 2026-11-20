@@ -468,12 +468,23 @@ def test_non_root_pre_collective_failure_reaches_every_rank():
     )
 
 
+def _without_source_tree(env: dict[str, str]) -> None:
+    """Drop the checkout's python/ directory so the installed wheel is imported."""
+    source = str(Path(__file__).resolve().parents[2] / "python")
+    parts = [
+        part
+        for part in env.get("PYTHONPATH", "").split(os.pathsep)
+        if part and part != source
+    ]
+    if parts:
+        env["PYTHONPATH"] = os.pathsep.join(parts)
+    else:
+        env.pop("PYTHONPATH", None)
+
+
 def test_import_rgpot_does_not_import_lammps():
     env = os.environ.copy()
-    root = Path(__file__).resolve().parents[2]
-    pythonpath = env.get("PYTHONPATH", "")
-    extra = str(root / "python")
-    env["PYTHONPATH"] = extra if not pythonpath else extra + os.pathsep + pythonpath
+    _without_source_tree(env)
     script = (
         "import sys, rgpot; "
         "assert 'lammps' not in sys.modules, sorted(sys.modules); "
@@ -835,10 +846,7 @@ def test_real_lammps_two_rank_mpi():
         prefix.append("--oversubscribe")
 
     env = os.environ.copy()
-    root = Path(__file__).resolve().parents[2]
-    pythonpath = env.get("PYTHONPATH", "")
-    extra = str(root / "python")
-    env["PYTHONPATH"] = extra if not pythonpath else extra + os.pathsep + pythonpath
+    _without_source_tree(env)
 
     script = """
 import numpy as np
