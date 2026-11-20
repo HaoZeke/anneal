@@ -1,0 +1,46 @@
+paired statistics from scripts/paired_stats.py
+arm A stock
+arm B H2H_KNOCKOUT=prior_soap
+difference is the stock hit rate minus the knockout hit rate
+mcnemar is the two-sided exact test
+interval is Newcombe method 10
+
+system lj98
+hits_stock 7/12
+hits_knockout 8/12
+paired both 6 only_stock 1 only_knockout 2 neither 3
+mcnemar_p 1.0
+newcombe_low -0.3606998857116622
+newcombe_high 0.21542420407363477
+
+system lj102
+hits_stock 6/12
+hits_knockout 6/12
+paired both 3 only_stock 3 only_knockout 3 neither 3
+mcnemar_p 1.0
+newcombe_low -0.3482054039322486
+newcombe_high 0.3482054039322486
+
+system lj103
+hits_stock 6/12
+hits_knockout 7/12
+paired both 2 only_stock 4 only_knockout 5 neither 1
+mcnemar_p 1.0
+newcombe_low -0.491157967436213
+newcombe_high 0.3595039173077173
+
+system lj104
+hits_stock 5/12
+hits_knockout 4/12
+paired both 2 only_stock 3 only_knockout 2 neither 5
+mcnemar_p 1.0
+newcombe_low -0.271787783320815
+newcombe_high 0.4115257595060283
+
+system lj150
+hits_stock 8/12
+hits_knockout 7/12
+paired both 3 only_stock 5 only_knockout 4 neither 0
+mcnemar_p 1.0
+newcombe_low -0.36367996643090866
+newcombe_high 0.4947533097988408
