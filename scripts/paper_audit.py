@@ -2553,6 +2553,9 @@ def tip4p_panel(audit: Audit) -> None:
             audit.cell(where, f"{label} left from the rows", shown_l, wall[f"anneal_{key}"] * scale)
             audit.cell(where, f"{label} right from the rows", shown_r, wall[f"gmin_{key}"] * scale)
     audit.said(path, "(H₂O)₂₅ is not in the database, so the campaign leaves it unscored.")
+    audit.said(path, "(H₂O)₂₅ is unscored, so its hit cells read\n`unscored` and its p cells read `--`.")
+    audit.record("cells are\nblank" not in audit.text(path), path, "the unscored cells are not called blank",
+                 "absent", "absent" if "cells are\nblank" not in audit.text(path) else "present")
     audit.said(path, "The head-to-head cited in the manuscript is the twelve-seed campaign on\nrecord branch `record/tip4p-h2h-r2`")
     twentyfive = stats[25]
 

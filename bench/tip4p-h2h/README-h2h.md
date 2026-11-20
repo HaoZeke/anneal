@@ -46,8 +46,8 @@ offset never changes which cage a run is scored at.
 Rows are `rows-h2h-r2.csv`. `best` is the lowest of the twelve; the
 median is beside it. `p(F)` is Fisher's exact test on the hit counts and
 `p(calls)` is the exact Mann–Whitney test on calls to a hit, both after the
-Bonferroni correction above. (H₂O)₂₅ is unscored, so its hit and p cells are
-blank. `wall per run` is the median total wall time of a run, and `per call`
+Bonferroni correction above. (H₂O)₂₅ is unscored, so its hit cells read
+`unscored` and its p cells read `--`. `wall per run` is the median total wall time of a run, and `per call`
 is the median over runs of `wall_s` divided by `calls`.
 
 | Size | anneal | GMIN | anneal best / median | GMIN best / median | wall per run (a/g s) | per call (a/g µs) | p(F) | p(calls) |
