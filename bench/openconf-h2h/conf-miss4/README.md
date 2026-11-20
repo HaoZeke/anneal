@@ -5,7 +5,7 @@ this series against its own base, develop
 `61fa67cf380e46876b569da45e7cc091647a775b`, and against openconf, plus a
 guard and pins record for the same two anneal revisions. Every number
 below is read from `rows.csv`, `panel.tsv`, `paired.tsv`,
-`local_step.csv`, `guard.csv` or `pins.txt`.
+`local_step.csv`, `guard.csv`, `rescore.tsv` or `pins.txt`.
 
 The series changes no search behaviour (see "What the series changes"),
 so the question this panel asks of it is whether anything moved. Nothing
@@ -14,12 +14,19 @@ time.
 
 ## Revisions and host
 
-- this series: anneal `373c7817b29bcfeb001afba62e772a9f57e7ee17`, the
-  revision the wheel was built from. The next commit of the series,
-  `02e6d90aa492d06cabac5a52891ec479102f67dc`, adds only
+- this series: anneal `259befae8221961d2249aa27d19ca426064af57b`, tree
+  `b1369a7edccdb56002f9667acff4f9c122083bb0`, the commit whose tree the
+  wheel was built from; the `anneal` rows cite it. The next commit,
+  `5c40c711f6f49ce0950d6025349adcde7f17cdce`, tree
+  `89078345063859912c378bb5344b959b365331c6`, adds only
   `scripts/openconf_h2h/paired_stats.py` and `pytest/test_paired_stats.py`,
   neither of which is in the wheel; the guard examples were built from
-  `02e6d90a`. The records commit adds only this directory.
+  its tree and the harness ran from it, so the `openconf` rows and the
+  guard rows cite it. Both commits are ancestors of this record on this
+  branch. The commits after them change the scorer, the statistics and
+  the documentation, not the code that ran. `provenance.tsv` lists the
+  three commits the rows cite with their trees; the audit checks each
+  tree against the repository.
 - develop: `61fa67cf380e46876b569da45e7cc091647a775b`, built into its
   own wheel, the `develop` rows. The series is built on this revision.
 - openconf: rowansci/openconf `e32c5fa7b6e6aac944bda31c851be42e14340235`
@@ -39,23 +46,43 @@ time.
 - `rows.csv` was scored by `scripts/openconf_h2h/paired_score.py` after
   every candidate was polished; `hit` is its strict test (heavy-atom
   RMSD below 0.25 A and energy within 0.5 kcal/mol of the reference)
-  and `hit_mirror` also accepts the reflected candidate.
+  and `hit_mirror` also accepts the reflected candidate, but only when
+  the reflected geometry keeps the reference stereo key: for a molecule
+  with no stereocentre or a meso one, not for a chiral molecule, whose
+  reflection is the other enantiomer.
 - `local_step.csv` is read from each anneal and develop `job.json`: the
-  resolved local step and, for this series, the budget ledger. Develop
-  has no ledger, so its ledger columns are empty.
+  resolved local step and, for this series, the `ledger` that
+  `cluster_search` returns, whose keys are defined in its docstring.
+  Develop has no ledger, so its ledger columns are empty.
 
 ## What the series changes
 
 It adds a test that pins which double bonds the torsion move leaves
 alone, a `ledger` entry in the Python search result, a mirror-aware hit
-score, the host label above and a paired-statistics script. The search
-code is not touched, which the panel and the guard both confirm below.
-No tuned constant is introduced.
+score that respects stereo, the host label above and a paired-statistics
+script. The `ledger` is assembled in `src/python.rs` after the search has
+ended, from counters the search already keeps; nothing in the search
+loop changes, which the panel and the guard both confirm below. No tuned
+constant is introduced.
 
 ## Panel
 
 Hits (strict) over the 192 runs of each arm: this series 91, develop
 91, openconf 42. With `hit_mirror`: 94, 94 and 44.
+
+The mirror rule was corrected after the first record of this panel: a
+mirror match counts only when the reflected geometry keeps the reference
+stereo key. `rescore.tsv` compares the earlier scoring of these rows
+(the `rows.csv` of commit `2235db00`) with the one in this directory,
+per molecule and arm, and `rescore-cells.tsv` lists every differing
+cell of `hit`, `hit_mirror`, `calls_to_hit`, `delta_min_kcal`,
+`candidates` and `invalid`. It has no row: no hit or mirror hit of any
+of the 576 runs moved. The 8 runs that count only as a mirror hit are
+xld (3 anneal, 3 develop) and rq3 (2 openconf). Neither molecule has a
+stereocentre, so reflection keeps its key and the rule lets them stand.
+The earlier rule counted no run of this panel that the corrected rule
+rejects. The corrected rule is tested on ethanol-1-d, chiral by its
+deuterium alone (`pytest/test_h2h_mirror.py`).
 
 Per-seed outcome (hit, calls to the hit, energy above the reference,
 calls, candidates, invalid) is identical between this series and
@@ -80,7 +107,10 @@ that case.
 `paired.tsv` compares, per seed, the time outside the potential per
 call, `outside_s / calls`, of this series with develop. The medians in
 microseconds per call, this series then develop, the median of the
-per-seed ratio, and the two-sided Wilcoxon signed-rank p:
+per-seed ratio, and the two-sided Wilcoxon signed-rank p. The p is
+exact; pairs with equal values are dropped first, and none of the 192
+pairs is equal or ties another in absolute difference, so scipy's
+automatic choice gives the same p here:
 
 | molecule    | series | develop | ratio  | p      |
 |-------------|--------|---------|--------|--------|
@@ -95,9 +125,11 @@ per-seed ratio, and the two-sided Wilcoxon signed-rank p:
 
 The ratio is above 1 on seven molecules, by 0.2 to 2.4 per cent, and
 the p values are not corrected for eight tests; two are below 0.05 and
-none is below 0.05 / 8. The ledger adds counters to the search, and the
-host was shared, so this is consistent with a cost of about a per cent
-and does not establish one.
+none is below 0.05 / 8. Both arms run the same search code, so a ratio
+here is not a cost of this series. The host was shared, and anneal ran
+before develop on each seed; neither effect was separated from the
+other, so the table does not say why the ratio is above 1 on seven
+molecules.
 
 ## Guard
 
