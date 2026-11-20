@@ -17,39 +17,17 @@ enum DevicePolicy {
 
 impl DevicePolicy {
     fn new(preset: Preset) -> PyResult<Self> {
-        fn positive(value: f64, name: &str) -> PyResult<()> {
-            if value.is_finite() && value > 0.0 {
-                Ok(())
-            } else {
-                Err(invalid_argument(format!(
-                    "{name} must be positive and finite"
-                )))
-            }
-        }
+        preset.validate()?;
         Ok(match preset {
             Preset::Boltzmann(p) => {
-                positive(p.t_init, "t_init")?;
-                positive(p.sigma, "sigma")?;
                 Self::Boltzmann(LogCool::new(p.t_init, 2.0), Gaussian::new(p.sigma))
             }
-            Preset::Fast(p) => {
-                positive(p.t_init, "t_init")?;
-                positive(p.gamma, "gamma")?;
-                Self::Fast(ReciprocalCool::new(p.t_init), Cauchy::new(p.gamma))
-            }
-            Preset::Gsa(p) => {
-                positive(p.t_init, "t_init")?;
-                if !(p.q_v > 1.0 && p.q_v < 3.0 && p.q_a.is_finite()) {
-                    return Err(invalid_argument(
-                        "q_v must lie in (1, 3) and q_a must be finite",
-                    ));
-                }
-                Self::Gsa(
-                    TsallisCool::new(p.t_init, p.q_v),
-                    TsallisVisit::new(p.q_v),
-                    TsallisAccept::new(p.q_a),
-                )
-            }
+            Preset::Fast(p) => Self::Fast(ReciprocalCool::new(p.t_init), Cauchy::new(p.gamma)),
+            Preset::Gsa(p) => Self::Gsa(
+                TsallisCool::new(p.t_init, p.q_v),
+                TsallisVisit::new(p.q_v),
+                TsallisAccept::new(p.q_a),
+            ),
         })
     }
 

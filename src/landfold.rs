@@ -268,6 +268,14 @@ impl LandfoldConfig {
         if !(self.sigma_scale.is_finite() && self.sigma_scale > 0.0) {
             return Err(LandfoldError::Config("sigma_scale must be positive".into()));
         }
+        if self
+            .sigma
+            .is_some_and(|sigma| !(sigma.is_finite() && sigma > 0.0))
+        {
+            return Err(LandfoldError::Config(
+                "sigma must be positive and finite".into(),
+            ));
+        }
         if !(self.weight_power.is_finite() && self.weight_power >= 0.0) {
             return Err(LandfoldError::Config(
                 "weight_power must be non-negative".into(),

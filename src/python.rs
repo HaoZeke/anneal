@@ -141,6 +141,54 @@ fn check_start_length(name: &str, values: &[f64], dim: usize) -> PyResult<()> {
     }
 }
 
+/// Refuses a scalar that is not finite and strictly positive. Written as
+/// a finiteness test, since a comparison such as `x <= 0.0` passes NaN.
+fn positive_finite(name: &str, value: f64) -> PyResult<()> {
+    if value.is_finite() && value > 0.0 {
+        Ok(())
+    } else {
+        Err(invalid_argument(format!(
+            "{name} must be positive and finite (got {value})"
+        )))
+    }
+}
+
+/// Refuses a scalar that is not finite and non-negative.
+fn non_negative_finite(name: &str, value: f64) -> PyResult<()> {
+    if value.is_finite() && value >= 0.0 {
+        Ok(())
+    } else {
+        Err(invalid_argument(format!(
+            "{name} must be non-negative and finite (got {value})"
+        )))
+    }
+}
+
+/// Refuses a fraction outside `[0, 1]`, NaN included.
+fn unit_fraction(name: &str, value: f64) -> PyResult<()> {
+    if (0.0..=1.0).contains(&value) {
+        Ok(())
+    } else {
+        Err(invalid_argument(format!(
+            "{name} must lie in [0, 1] (got {value})"
+        )))
+    }
+}
+
+/// Refuses a request whose working set cannot be allocated, as
+/// `MemoryError`, before the native code would abort on it. `elements`
+/// is `None` when the count already overflowed `usize`.
+fn reservable(what: &str, elements: Option<usize>) -> PyResult<()> {
+    let fits = elements.is_some_and(|n| Vec::<f64>::new().try_reserve_exact(n).is_ok());
+    if fits {
+        Ok(())
+    } else {
+        Err(pyo3::exceptions::PyMemoryError::new_err(format!(
+            "{what} is too large to allocate"
+        )))
+    }
+}
+
 /// Refuses a point with a NaN or infinite coordinate.
 fn check_finite(name: &str, values: &[f64]) -> PyResult<()> {
     match values.iter().position(|value| !value.is_finite()) {
@@ -228,6 +276,7 @@ fn parse_box_search(
         return Err(invalid_argument("replicas must be positive"));
     }
     let (bounds, dim, x0) = parse_box_domain(low, high, x0, true)?;
+    reservable("a replica state per replica", replicas.checked_mul(dim))?;
     let history = match history {
         "none" | "no" => crate::methods::ensemble::HistoryMode::None,
         "private" => crate::methods::ensemble::HistoryMode::Private,
@@ -349,7 +398,10 @@ impl PyBasinBias {
         if n_points < 2 {
             return Err(invalid_argument("n_points must be at least 2"));
         }
-        if !(gamma > 1.0) || !(w0 > 0.0) || !(merge_radius > 0.0) {
+        if !(gamma.is_finite() && gamma > 1.0)
+            || !(w0.is_finite() && w0 > 0.0)
+            || !(merge_radius.is_finite() && merge_radius > 0.0)
+        {
             return Err(invalid_argument(
                 "require gamma > 1, w0 > 0, merge_radius > 0",
             ));
@@ -379,8 +431,8 @@ impl PyBasinBias {
     /// Raise the bias on the basin containing `x`, registering it if unseen.
     fn deposit(&mut self, x: numpy::PyReadonlyArray1<f64>, temp: f64) -> PyResult<()> {
         use crate::bias::Bias;
-        if !(temp > 0.0) {
-            return Err(invalid_argument("temp must be > 0"));
+        if !(temp.is_finite() && temp > 0.0) {
+            return Err(invalid_argument("temp must be > 0 and finite"));
         }
         let v = self.state(&x)?;
         let s = self.inner.cv(v);
@@ -913,6 +965,14 @@ fn run_hmc(
     let high_vec = high.as_slice()?.to_vec();
     validate_box_bounds(&low_vec, &high_vec)?;
     let dim = low_vec.len();
+    positive_finite("t_init", t_init)?;
+    positive_finite("epsilon", epsilon)?;
+    if l_steps < 1 {
+        return Err(invalid_argument("l_steps must be at least 1"));
+    }
+    if !q.is_finite() {
+        return Err(invalid_argument(format!("q must be finite (got {q})")));
+    }
     let q_max = 1.0 + 2.0 / dim as f64;
     if q > 1.0 && q >= q_max {
         return Err(invalid_argument(format!(
@@ -989,12 +1049,8 @@ fn polish(
     if max_fevals < 1 {
         return Err(invalid_argument("max_fevals must be positive"));
     }
-    if step0 <= 0.0 {
-        return Err(invalid_argument("step0 must be positive"));
-    }
-    if grad_tol < 0.0 {
-        return Err(invalid_argument("grad_tol must be non-negative"));
-    }
+    positive_finite("step0", step0)?;
+    non_negative_finite("grad_tol", grad_tol)?;
 
     let dim = low_vec.len();
     let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
@@ -1047,12 +1103,8 @@ fn qmc_polish(
     if max_fevals_per_start < 1 {
         return Err(invalid_argument("max_fevals_per_start must be positive"));
     }
-    if step0 <= 0.0 {
-        return Err(invalid_argument("step0 must be positive"));
-    }
-    if grad_tol < 0.0 {
-        return Err(invalid_argument("grad_tol must be non-negative"));
-    }
+    positive_finite("step0", step0)?;
+    non_negative_finite("grad_tol", grad_tol)?;
 
     let dim = low_vec.len();
     let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
@@ -1127,12 +1179,8 @@ fn qmc_polish_objective(
     if max_fevals_per_start < 1 {
         return Err(invalid_argument("max_fevals_per_start must be positive"));
     }
-    if step0 <= 0.0 {
-        return Err(invalid_argument("step0 must be positive"));
-    }
-    if grad_tol < 0.0 {
-        return Err(invalid_argument("grad_tol must be non-negative"));
-    }
+    positive_finite("step0", step0)?;
+    non_negative_finite("grad_tol", grad_tol)?;
 
     let obj = objective.callable(py);
     let errors = obj.errors();
@@ -1493,12 +1541,8 @@ fn shifted_qmc_polish(
     if n_replicates < 1 {
         return Err(invalid_argument("n_replicates must be positive"));
     }
-    if step0 <= 0.0 {
-        return Err(invalid_argument("step0 must be positive"));
-    }
-    if grad_tol < 0.0 {
-        return Err(invalid_argument("grad_tol must be non-negative"));
-    }
+    positive_finite("step0", step0)?;
+    non_negative_finite("grad_tol", grad_tol)?;
 
     let dim = low_vec.len();
     let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
@@ -1565,12 +1609,31 @@ fn additive_independence(
     if degree < 1 {
         return Err(invalid_argument("degree must be positive"));
     }
+    unit_fraction("local_frac", local_frac)?;
+    let dim = low_vec.len();
+    let block = max_fevals / n_epochs.clamp(1, max_fevals);
+    reservable(
+        "a max_fevals / n_epochs block of proposals",
+        block.checked_mul(dim),
+    )?;
+    reservable(
+        "a degree this high",
+        degree
+            .checked_add(1)
+            .and_then(|terms| terms.checked_mul(dim)),
+    )?;
+    reservable(
+        "a grid_m this fine",
+        grid_m
+            .checked_add(1)
+            .and_then(|cells| cells.checked_mul(dim)),
+    )?;
     // The backfitting fit reuses every pilot point across all coordinates, so
     // the pilot scales with the per-coordinate degree, not the dimension. A
     // dimension-scaled pilot would swallow the whole budget on high-dimensional
     // CUTEst problems and leave nothing to sample.
     let pilot = if n_pilot == 0 {
-        (32 * degree).max(256)
+        degree.saturating_mul(32).max(256)
     } else {
         n_pilot
     };
@@ -1631,10 +1694,11 @@ fn gle_langevin_x0(
     Ok(Some(Array1::from_vec(values)))
 }
 
-fn validate_gle_args(max_fevals: usize, omega0: Option<f64>) -> PyResult<()> {
+fn validate_gle_args(max_fevals: usize, omega0: Option<f64>, dt: f64) -> PyResult<()> {
     if max_fevals < 1 {
         return Err(invalid_argument("max_fevals must be positive"));
     }
+    positive_finite("dt", dt)?;
     if omega0.is_some_and(|omega| !omega.is_finite() || omega <= 0.0) {
         return Err(invalid_argument("omega0 must be positive"));
     }
@@ -1682,7 +1746,7 @@ fn gle_langevin(
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     check_box(&low_vec, &high_vec, true)?;
-    validate_gle_args(max_fevals, omega0)?;
+    validate_gle_args(max_fevals, omega0, dt)?;
     let dim = low_vec.len();
     let x0 = gle_langevin_x0(x0, dim)?;
     let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
@@ -1722,7 +1786,7 @@ fn gle_langevin_preconditioned(
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     check_box(&low_vec, &high_vec, true)?;
-    validate_gle_args(max_fevals, omega0)?;
+    validate_gle_args(max_fevals, omega0, dt)?;
     let dim = low_vec.len();
     let x0 = gle_langevin_x0(x0, dim)?;
     let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
@@ -1763,7 +1827,7 @@ fn gle_langevin_objective(
     n_epochs: usize,
     x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
-    validate_gle_args(max_fevals, omega0)?;
+    validate_gle_args(max_fevals, omega0, dt)?;
     let x0 = gle_langevin_x0(x0, objective.dims())?;
     let obj = objective.callable(py);
     let errors = obj.errors();
@@ -1794,7 +1858,7 @@ fn gle_langevin_preconditioned_objective(
     x0: Option<PyReadonlyArray1<'_, f64>>,
     preconditioner_probes: Option<usize>,
 ) -> PyResult<Py<PyDict>> {
-    validate_gle_args(max_fevals, omega0)?;
+    validate_gle_args(max_fevals, omega0, dt)?;
     let x0 = gle_langevin_x0(x0, objective.dims())?;
     let obj = objective.callable(py);
     let errors = obj.errors();
@@ -2734,6 +2798,7 @@ fn low_discrepancy_points(
 ) -> PyResult<Vec<Vec<f64>>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
+    reservable("n points", n.checked_mul(low_vec.len()))?;
     let bounds = checked_bounds(low_vec, high_vec, 0.0)?;
     let points = eindir_core::low_discrepancy_points(&bounds, n, skip);
     Ok(points.outer_iter().map(|row| row.to_vec()).collect())
@@ -2743,6 +2808,7 @@ fn low_discrepancy_points(
 #[pyfunction]
 #[pyo3(signature = (n, seed = 42))]
 fn pilot_draws_qmc(n: usize, seed: u64) -> PyResult<Vec<Vec<f64>>> {
+    reservable("n draws", n.checked_mul(3))?;
     let prior = crate::methods::PilotPrior::default();
     let draws = crate::methods::pilot_draws_qmc(&prior, n, seed);
     Ok(draws
@@ -2843,11 +2909,14 @@ fn osa_acceptance_rate(
     c_star: f64,
     seed: u64,
 ) -> PyResult<(f64, f64)> {
-    if temp.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
-        return Err(invalid_argument("temp must be positive"));
-    }
-    if sigma.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
-        return Err(invalid_argument("sigma must be positive"));
+    positive_finite("temp", temp)?;
+    positive_finite("sigma", sigma)?;
+    for (name, value) in [("delta", delta), ("c_star", c_star)] {
+        if !value.is_finite() {
+            return Err(invalid_argument(format!(
+                "{name} must be finite (got {value})"
+            )));
+        }
     }
     let osa = crate::noise_accept::OsaAccept::with_params(c_star, 100_000);
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
@@ -4533,6 +4602,7 @@ fn quench(
     if !gtol.is_finite() || gtol <= 0.0 {
         return Err(invalid_argument("gtol must be finite and positive"));
     }
+    check_finite("x0", x0.as_slice()?)?;
     let start = Array1::from_vec(x0.as_slice()?.to_vec());
     let dim = start.len();
     let tric = match (method, species) {
