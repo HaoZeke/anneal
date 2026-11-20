@@ -18,6 +18,7 @@
 #include <catch2/catch_all.hpp>
 
 #include "RestoreEnv.hpp"
+#include "lsan_libomp.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
 #include "rgpot/Slices.hpp"
 #include "rgpot/StillingerWeber/SWSi.hpp"
@@ -69,7 +70,11 @@ Grad runGradient(const std::vector<double> &pos, const int *species,
                  const char *threads, Run &&run) {
   rgpot::test_support::RestoreEnv env("OMP_NUM_THREADS");
   env.set(threads);
+#if defined(_OPENMP)
   REQUIRE(rgpot::threadsRequested() == std::stoi(threads));
+#else
+  REQUIRE(rgpot::threadsRequested() == 1);
+#endif
   Pot pot;
   Grad out;
   out.energy.assign(kSystems, 0.0);
@@ -85,7 +90,11 @@ Grad runGradient(const std::vector<double> &pos, const int *species,
 
 void requireTeams(const Grad &one, const Grad &more) {
   REQUIRE(one.teams == 0);
+#if defined(_OPENMP)
   REQUIRE(more.teams == 1);
+#else
+  REQUIRE(more.teams == 0);
+#endif
   requireBits(more.energy, one.energy);
   requireBits(more.gradient, one.gradient);
 }
@@ -193,7 +202,11 @@ TEST_CASE("small default-path batches match across thread counts", "[batch]") {
   auto run = [](const std::vector<double> &coordinates, const char *threads) {
     rgpot::test_support::RestoreEnv env("OMP_NUM_THREADS");
     env.set(threads);
+#if defined(_OPENMP)
     REQUIRE(rgpot::threadsRequested() == std::stoi(threads));
+#else
+    REQUIRE(rgpot::threadsRequested() == 1);
+#endif
     std::vector<int> species(kAtoms, 18);
     const std::array<double, 9> box = {250.0, 0.0, 0.0, 0.0,  250.0,
                                        0.0,   0.0, 0.0, 250.0};
@@ -253,8 +266,13 @@ TEST_CASE("small default-path batches match across thread counts", "[batch]") {
     const auto two = run(*coordinates, "2");
     const auto four = run(*coordinates, "4");
     REQUIRE(one.teams == 0);
+#if defined(_OPENMP)
     REQUIRE(two.teams == 1);
     REQUIRE(four.teams == 1);
+#else
+    REQUIRE(two.teams == 0);
+    REQUIRE(four.teams == 0);
+#endif
     requireBits(two.energy, one.energy);
     requireBits(four.energy, one.energy);
     requireBits(two.force, one.force);
@@ -297,7 +315,11 @@ TEST_CASE("small default-path batches match across thread counts", "[batch]") {
 TEST_CASE("batch spread stops at the in-system crossover", "[batch]") {
   rgpot::test_support::RestoreEnv env("OMP_NUM_THREADS");
   env.set("4");
+#if defined(_OPENMP)
   REQUIRE(rgpot::threadsRequested() == 4);
+#else
+  REQUIRE(rgpot::threadsRequested() == 1);
+#endif
 
   std::size_t calls = 0;
   const auto largeBefore = rgpot::teamsOpened();
@@ -312,7 +334,11 @@ TEST_CASE("batch spread stops at the in-system crossover", "[batch]") {
   rgpot::forEachBatchSystem(
       kSystems, [](std::size_t) { return rgpot::kTeamMinAtoms - 1; },
       [&](std::size_t i) { seen[i] += 1; });
+#if defined(_OPENMP)
   REQUIRE(rgpot::teamsOpened() == smallBefore + 1);
+#else
+  REQUIRE(rgpot::teamsOpened() == smallBefore);
+#endif
   for (int hit : seen) {
     REQUIRE(hit == 1);
   }
