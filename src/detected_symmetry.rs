@@ -243,6 +243,22 @@ fn within_cutoff(d2: f64, cutoff: f64) -> bool {
     d2.sqrt() <= cutoff
 }
 
+/// Index of the first site within `cutoff` of `w`.
+///
+/// A site whose first coordinate alone is farther than the cutoff, with room
+/// for the rounding [`within_cutoff`] allows, cannot be within it, so it is
+/// passed over without forming the distance.
+fn first_site_within(sites: &[([f64; 3], usize)], w: [f64; 3], cutoff: f64) -> Option<usize> {
+    let reach = cutoff * (1.0 + 1e-9);
+    sites.iter().position(|(p, _)| {
+        if (w[0] - p[0]).abs() > reach {
+            return false;
+        }
+        let d2 = (w[0] - p[0]).powi(2) + (w[1] - p[1]).powi(2) + (w[2] - p[2]).powi(2);
+        within_cutoff(d2, cutoff)
+    })
+}
+
 fn apply(g: &Rot, v: [f64; 3]) -> [f64; 3] {
     [
         g[0][0] * v[0] + g[0][1] * v[1] + g[0][2] * v[2],
@@ -306,11 +322,7 @@ pub fn complete_orbits_classed(
             let r = rel(a);
             for g in group {
                 let w = apply(g, r);
-                let hit = sites.iter().position(|(p, _)| {
-                    let d2 = (w[0] - p[0]).powi(2) + (w[1] - p[1]).powi(2) + (w[2] - p[2]).powi(2);
-                    within_cutoff(d2, pair_cutoff)
-                });
-                match hit {
+                match first_site_within(&sites, w, pair_cutoff) {
                     Some(i) => {
                         let (p, count) = &mut sites[i];
                         let c = *count as f64;
@@ -894,5 +906,50 @@ mod tests {
             "pooled classes completed"
         );
         assert_eq!(with, without);
+    }
+
+    /// The first-coordinate shortcut never changes which site is found: it
+    /// is the first within the cutoff by the distance, among sites strewn
+    /// across the cutoff boundary in every coordinate.
+    #[test]
+    fn the_site_scan_finds_the_first_site_the_distance_finds() {
+        let cutoff = 0.3;
+        let mut sites: Vec<([f64; 3], usize)> = Vec::new();
+        for i in 0..400 {
+            let t = i as f64;
+            sites.push((
+                [
+                    cutoff * 4.0 * (t * 0.37).sin(),
+                    cutoff * 4.0 * (t * 0.73).cos(),
+                    cutoff * 4.0 * (t * 0.11).sin(),
+                ],
+                1,
+            ));
+        }
+        // A site exactly the cutoff away along the first coordinate, and
+        // one a rounding step beyond it.
+        sites.push(([cutoff, 0.0, 0.0], 1));
+        sites.push(([-cutoff * (1.0 + 4.0 * f64::EPSILON), 0.0, 0.0], 1));
+        let mut found = 0;
+        for k in 0..500 {
+            let t = k as f64;
+            let w = [
+                cutoff * 3.0 * (t * 0.21).cos(),
+                cutoff * 3.0 * (t * 0.59).sin(),
+                cutoff * 3.0 * (t * 0.31).cos(),
+            ];
+            let want = sites.iter().position(|(p, _)| {
+                let d2 = (w[0] - p[0]).powi(2) + (w[1] - p[1]).powi(2) + (w[2] - p[2]).powi(2);
+                within_cutoff(d2, cutoff)
+            });
+            assert_eq!(first_site_within(&sites, w, cutoff), want);
+            found += want.is_some() as usize;
+        }
+        assert!(found > 50 && found < 450, "{found}");
+        let at_the_cutoff = [0.0, 0.0, 0.0];
+        assert_eq!(
+            first_site_within(&sites[400..], at_the_cutoff, cutoff),
+            Some(0)
+        );
     }
 }

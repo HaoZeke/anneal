@@ -56,12 +56,13 @@ pub(crate) fn centroid(x: ArrayView1<f64>, n: usize) -> [f64; 3] {
     c
 }
 
-/// Rotates `v` about a unit `axis` by `angle`, by Rodrigues' formula.
-fn rotate(v: [f64; 3], axis: [f64; 3], angle: f64) -> [f64; 3] {
-    // Host `sin` and `cos` of the same angle are not one function on glibc
-    // and libSystem, and this rotation places the symmetrised points.
-    let s = libm::sin(angle);
-    let co = libm::cos(angle);
+/// Rotates `v` about a unit `axis` by Rodrigues' formula, given the sine and
+/// cosine of the angle.
+///
+/// Callers take both with `libm`: host `sin` and `cos` of the same angle are
+/// not one function on glibc and libSystem, and this rotation places the
+/// symmetrised points.
+fn rotate_by(v: [f64; 3], axis: [f64; 3], s: f64, co: f64) -> [f64; 3] {
     let dot = v[0] * axis[0] + v[1] * axis[1] + v[2] * axis[2];
     let cross = [
         axis[1] * v[2] - axis[2] * v[1],
@@ -180,68 +181,6 @@ impl Cloud {
         best
     }
 
-    /// # Safety
-    ///
-    /// AVX2 must be enabled.
-    #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "avx2")]
-    unsafe fn nearest_squared_avx2(&self, image: [f64; 3]) -> f64 {
-        use std::arch::x86_64::{
-            _mm256_add_pd, _mm256_loadu_pd, _mm256_min_pd, _mm256_mul_pd, _mm256_set1_pd,
-            _mm256_storeu_pd, _mm256_sub_pd,
-        };
-        let ix = _mm256_set1_pd(image[0]);
-        let iy = _mm256_set1_pd(image[1]);
-        let iz = _mm256_set1_pd(image[2]);
-        let n = self.xs.len();
-        let mut index = 0usize;
-        let mut best_lanes = _mm256_set1_pd(f64::INFINITY);
-        while index + 4 <= n {
-            unsafe {
-                let dx = _mm256_sub_pd(_mm256_loadu_pd(self.xs.as_ptr().add(index)), ix);
-                let dy = _mm256_sub_pd(_mm256_loadu_pd(self.ys.as_ptr().add(index)), iy);
-                let dz = _mm256_sub_pd(_mm256_loadu_pd(self.zs.as_ptr().add(index)), iz);
-                let distance = _mm256_add_pd(
-                    _mm256_add_pd(_mm256_mul_pd(dx, dx), _mm256_mul_pd(dy, dy)),
-                    _mm256_mul_pd(dz, dz),
-                );
-                best_lanes = _mm256_min_pd(best_lanes, distance);
-            }
-            index += 4;
-        }
-        let mut lane = [0.0; 4];
-        unsafe { _mm256_storeu_pd(lane.as_mut_ptr(), best_lanes) };
-        let mut best = lane[0];
-        if lane[1] < best {
-            best = lane[1];
-        }
-        if lane[2] < best {
-            best = lane[2];
-        }
-        if lane[3] < best {
-            best = lane[3];
-        }
-        while index < n {
-            let dx = image[0] - self.xs[index];
-            let dy = image[1] - self.ys[index];
-            let dz = image[2] - self.zs[index];
-            let distance = dx * dx + dy * dy + dz * dz;
-            if distance < best {
-                best = distance;
-            }
-            index += 1;
-        }
-        best
-    }
-
-    fn nearest_one(&self, image: [f64; 3]) -> f64 {
-        #[cfg(target_arch = "x86_64")]
-        if std::is_x86_feature_detected!("avx2") {
-            return unsafe { self.nearest_squared_avx2(image) };
-        }
-        self.nearest_squared_scalar(image)
-    }
-
     /// Nearest squared distance of every image.
     ///
     /// Each image keeps a four-wide minimum, then the lowest lane, then the
@@ -353,26 +292,14 @@ impl Cloud {
             return None;
         }
         let angle = 2.0 * std::f64::consts::PI / order as f64;
+        let (s, co) = (libm::sin(angle), libm::cos(angle));
         let mut total = 0.0;
-        let stop = cap.is_finite();
-        if stop {
-            for index in 0..n {
-                total += self.nearest_one(rotate(self.point(index), axis, angle));
-                if total > cap * cap * n as f64 {
-                    let partial = (total / n as f64).sqrt();
-                    if partial >= cap * (1.0 + 1.0e-6) {
-                        return None;
-                    }
-                }
-            }
-            return Some((total / n as f64).sqrt());
-        }
         let mut index = 0usize;
         let mut stored = [[0.0; 3]; 4];
         while index < n {
             let width = (n - index).min(4);
             for lane in 0..width {
-                stored[lane] = rotate(self.point(index + lane), axis, angle);
+                stored[lane] = rotate_by(self.point(index + lane), axis, s, co);
             }
             if !self.accumulate(&stored[..width], cap, &mut total) {
                 return None;
@@ -389,24 +316,6 @@ impl Cloud {
         }
         let m = mirror_matrix(axis);
         let mut total = 0.0;
-        let stop = cap.is_finite();
-        if stop {
-            for index in 0..n {
-                let v = self.point(index);
-                total += self.nearest_one([
-                    m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
-                    m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
-                    m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
-                ]);
-                if total > cap * cap * n as f64 {
-                    let partial = (total / n as f64).sqrt();
-                    if partial >= cap * (1.0 + 1.0e-6) {
-                        return None;
-                    }
-                }
-            }
-            return Some((total / n as f64).sqrt());
-        }
         let mut index = 0usize;
         let mut stored = [[0.0; 3]; 4];
         while index < n {
@@ -766,6 +675,73 @@ mod tests {
         for (image, got) in images.iter().zip(wide_batched) {
             assert_eq!(wide.nearest_squared_scalar(*image).to_bits(), got.to_bits());
         }
+    }
+
+    /// The deviation under `image` as a scan atom by atom, taking the sine
+    /// and cosine afresh for every atom, stopping where a running sum is past
+    /// `cap`: the definition the batched scan has to agree with bit for bit.
+    fn atom_by_atom(cloud: &Cloud, cap: f64, image: impl Fn([f64; 3]) -> [f64; 3]) -> Option<f64> {
+        let n = cloud.xs.len();
+        let mut total = 0.0;
+        for index in 0..n {
+            total += cloud.nearest_squared_scalar(image(cloud.point(index)));
+            if total > cap * cap * n as f64 && (total / n as f64).sqrt() >= cap * (1.0 + 1.0e-6) {
+                return None;
+            }
+        }
+        Some((total / n as f64).sqrt())
+    }
+
+    /// A finite cap changes nothing about a deviation that stays under it
+    /// and returns `None` exactly where an atom-by-atom scan does, for every
+    /// order and axis, on a cloud long enough for a vector body and a tail.
+    #[test]
+    fn a_capped_deviation_is_the_atom_by_atom_one() {
+        let x = jitter(&octahedron(1.3), 0.07);
+        let mut y = Array1::<f64>::zeros(3 * 11);
+        for i in 0..11 {
+            let a = 0.9 * i as f64;
+            y[3 * i] = (0.6 + 0.1 * i as f64) * a.cos();
+            y[3 * i + 1] = (0.6 + 0.1 * i as f64) * a.sin();
+            y[3 * i + 2] = 0.4 * (i % 3) as f64;
+        }
+        let mut accepted = 0;
+        let mut refused = 0;
+        for cloud in [
+            Cloud::from_view(x.view(), 6),
+            Cloud::from_view(y.view(), 11),
+        ] {
+            let axes = [[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.6, 0.0, 0.8]];
+            for axis in axes {
+                for order in 2..=7 {
+                    let angle = 2.0 * std::f64::consts::PI / order as f64;
+                    for cap in [0.02, 0.1, 0.3, 0.8, 5.0] {
+                        let want = atom_by_atom(&cloud, cap, |v| {
+                            rotate_by(v, axis, libm::sin(angle), libm::cos(angle))
+                        });
+                        let got = cloud.rotation_deviation(axis, order, cap);
+                        assert_eq!(got.map(f64::to_bits), want.map(f64::to_bits));
+                        accepted += got.is_some() as usize;
+                        refused += got.is_none() as usize;
+                    }
+                }
+                let m = mirror_matrix(axis);
+                for cap in [0.02, 0.1, 0.3, 0.8, 5.0] {
+                    let want = atom_by_atom(&cloud, cap, |v| {
+                        [
+                            m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
+                            m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
+                            m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
+                        ]
+                    });
+                    let got = cloud.plane_deviation(axis, cap);
+                    assert_eq!(got.map(f64::to_bits), want.map(f64::to_bits));
+                    accepted += got.is_some() as usize;
+                    refused += got.is_none() as usize;
+                }
+            }
+        }
+        assert!(accepted > 20 && refused > 20, "{accepted} {refused}");
     }
 
     fn octahedron(scale: f64) -> Array1<f64> {
