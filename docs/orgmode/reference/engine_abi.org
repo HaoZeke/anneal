@@ -708,7 +708,10 @@ int rgpot_engine_set_callbacks(RgpotEnginePot *pot,
 
 Optional symbol.
 =ctx= must outlive the handle or the next call that replaces it.
-A learning engine requires an oracle before the first evaluation.
+=rgpot_engine_create= takes no callbacks, so they can be registered only on a
+handle it has already returned. A learning engine therefore creates without an
+oracle and requires one before the first evaluation; an evaluation that needs
+the oracle before one is registered fails with a nonzero code.
 Must not run concurrently with another call on the same handle.
 
 *** =rgpot_engine_hint=

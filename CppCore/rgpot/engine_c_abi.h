@@ -242,8 +242,11 @@ typedef struct {
  * On success the struct is copied, and ctx must outlive the potential or a
  * successful subsequent call replacing or clearing it. On nonzero return the
  * previous registration remains unchanged and the engine must not retain the
- * supplied struct or ctx. Learning engines require an oracle before the first
- * evaluation and fail create-time validation without one.
+ * supplied struct or ctx. rgpot_engine_create takes no callbacks, so a host
+ * can register them only on a handle that create has already returned. A
+ * learning engine therefore creates without an oracle and requires one before
+ * its first evaluation: an evaluation that needs the oracle before one is
+ * registered fails with a nonzero code.
  */
 RGPOT_ENGINE_API int rgpot_engine_set_callbacks(
     RgpotEnginePot *pot, const RgpotEngineCallbacks *callbacks);

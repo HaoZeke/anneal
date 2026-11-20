@@ -1260,6 +1260,11 @@ pub struct EngineSession {
 impl EngineSession {
     /// Load a version-compatible engine and create one session.
     ///
+    /// The engine is created before any callback can be registered, because
+    /// `rgpot_engine_create` takes none. Register an oracle afterwards with
+    /// [`Self::set_callbacks`]; a learning engine that needs one fails its
+    /// evaluations until then.
+    ///
     /// # Safety
     ///
     /// The library is trusted to run initializers safely and to implement the
