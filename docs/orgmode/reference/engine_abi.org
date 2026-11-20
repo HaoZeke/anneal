@@ -114,8 +114,10 @@ new optional symbol, or a new field at the end of a size-prefixed structure.
 The layout revision increments when an existing structure changes size or field
 order.
 A host built against minor N runs against an engine of the same major and layout
-revision whose minor is at least N. An engine without =rgpot_engine_abi_stamp=
-is minor 0, layout 1.
+revision whose minor is at most N; a plugin with a newer minor than the host's
+is refused, while an older plugin whose newer optional exports are absent still
+loads.
+An engine without =rgpot_engine_abi_stamp= is minor 0, layout 1.
 Minor 1 added the stamp, =rgpot_engine_caps=,
 =rgpot_engine_last_error=, =rgpot_engine_set_num_threads= and =rgpot_engine_set_charge_spin=.
 Minor 2 added =rgpot_engine_name=, =rgpot_engine_version=,
