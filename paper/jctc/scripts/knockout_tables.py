@@ -8,9 +8,9 @@ PROVENANCE file beside them, and the blob of the copy is that of the record. The
 pair by seed: the paired outcome table, the exact McNemar test and the 95% interval of
 method 10 of Newcombe, all from scripts/paired_stats.py. The TIP4P table pairs this
 code with GMIN by seed in the same way and adds the exact Wilcoxon test on calls and wall.
-Both arms of the template block are revisions that are ancestors of HEAD. Both arms of the
-length-unit block ran the tree its rows name. That tree is the submitted revision's search
-source plus the knockout switches, and the Morse driver is that tree's.
+Both arms of the template block are revisions that are ancestors of HEAD. The length-unit
+block and the move-choice block ran the tree their rows name. That tree is the submitted
+revision's search source plus the knockout switches, and each driver blob is that tree's.
 
     python3 paper/jctc/scripts/knockout_tables.py            # rewrite both blocks
     python3 paper/jctc/scripts/knockout_tables.py --check    # exit 1 if either is stale
@@ -70,7 +70,15 @@ KNOCKOUTS = (
              "arm", "stock", "H2H_PAIR_SCALE=1", lambda r: r["pair"] == "pairscale-length-unit", "hit",
              ("m55r6", "m55r14", "m80r6", "m80r14"), ancestors=("dd6ff9273be30ab317bfd5508596f4beb19cb3a4",),
              tree="b12293b9d637dd32417be3aa482302e0f30dd594", driver="examples/h2h_morse.rs"),
+    Knockout("move-a", "Choice among the moves, equation~\\ref{eq:thompson} against equation~\\ref{eq:uniform}, "
+             "tree \\texttt{b12293b9}", "arm", "stock", "H2H_KNOCKOUT=move_choice", lambda r: r["pair"] == "move-a",
+             "hit", ("lj38", "lj55", "lj75", "au55", "m55r6", "m55r14", "m80r6", "m80r14"),
+             ancestors=("dd6ff9273be30ab317bfd5508596f4beb19cb3a4",), tree="b12293b9d637dd32417be3aa482302e0f30dd594",
+             driver="drivers"),
 )
+# The driver of each system in the blocks that run more than one.
+DRIVERS = {"lj38": "examples/h2h_gmin_proof.rs", "lj55": "examples/h2h_gmin_proof.rs",
+           "lj75": "examples/h2h_gmin_proof.rs", "au55": "examples/h2h_metal.rs"}
 # The search source of the tree the rows name, compared with the submitted revision.
 SEARCH_SOURCE = ("src", "examples", "Cargo.toml", "Cargo.lock")
 SUBMITTED = "61fa67cf380e46876b569da45e7cc091647a775b"
@@ -160,9 +168,10 @@ def check_source(knockout: Knockout, rows: list[dict]) -> None:
     if sorted(changed) != sorted(KNOCKOUT_SWITCH_FILES):
         raise SystemExit(f"knockout_tables: {knockout.tree[:8]} is not the submitted revision's "
                          f"search source plus the knockout switches")
-    blob = git("rev-parse", f"{knockout.tree}:{knockout.driver}").stdout.strip()
-    if {r["driver_blob"] for r in rows} != {blob}:
-        raise SystemExit(f"knockout_tables: {knockout.key} rows ran another {knockout.driver}")
+    for row in rows:
+        driver = DRIVERS.get(row["system"], "examples/h2h_morse.rs") if knockout.driver == "drivers" else knockout.driver
+        if row["driver_blob"] != git("rev-parse", f"{knockout.tree}:{driver}").stdout.strip():
+            raise SystemExit(f"knockout_tables: {knockout.key} {row['system']} ran another {driver}")
 
 
 def check_order(knockout: Knockout, rows: list[dict]) -> None:
@@ -221,7 +230,7 @@ def knockout_summary(knockout: Knockout) -> dict[str, dict]:
 def knockout_table() -> str:
     lines = [
         "\\begin{table*}",
-        "\\caption{Two parts of the search run with and without them on the same seeds.",
+        "\\caption{Three parts of the search run with and without them on the same seeds.",
         "The structure templates, from the same starts: the earlier template-assisted revision",
         "\\texttt{628773d6} (structure templates since removed in \\texttt{1c1b1238}) against its child",
         "\\texttt{1c1b1238}, both ancestors of the submitted revision.",
@@ -235,13 +244,19 @@ def knockout_table() -> str:
         "With is \\texttt{Config::recommended}\\((N)\\) in the Lennard-Jones diameter it was measured in, the",
         "method of this article, and Without is \\texttt{Config::recommended\\_for\\_pair}\\((N)\\), every preset",
         "length rescaled to the Morse pair minimum.",
+        "The choice among the moves: both arms run the same tree and binaries, through \\texttt{h2h\\_gmin\\_proof},",
+        "\\texttt{h2h\\_metal} and \\texttt{h2h\\_morse}, from one start per seed, in alternating order by seed;",
+        "With is \\texttt{Config::recommended}\\((N)\\), and Without the same preset with",
+        "\\texttt{H2H\\_KNOCKOUT=move\\_choice}, which draws each move from equation~\\ref{eq:uniform} in place of",
+        "equation~\\ref{eq:thompson}.",
         "With and Without are the hits of the two arms, Only with and Only without the seeds that",
         "one arm alone hits.",
         "\\(p_\\mathrm{M}\\) is the two-sided exact McNemar test on those seeds, and \\(\\Delta\\) the 95\\%",
         "interval of Newcombe's method 10 for paired data, for the hit rate of With less that of Without.",
         "A budget counts one call per combined energy and gradient pass.",
-        "The rows are \\texttt{paper/jctc/data/knockouts/templates/rows.csv} and",
-        "\\texttt{paper/jctc/data/knockouts/pairscale/rows.csv}, copied from the records their",
+        "The rows are \\texttt{paper/jctc/data/knockouts/templates/rows.csv},",
+        "\\texttt{paper/jctc/data/knockouts/pairscale/rows.csv} and",
+        "\\texttt{paper/jctc/data/knockouts/move-a/rows.csv}, copied from the records their",
         "\\texttt{PROVENANCE} files name.}",
         "\\label{tab:knockouts}",
         "\\centering",
