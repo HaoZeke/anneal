@@ -105,10 +105,15 @@ jobs:
         run: cbindgen --config cbindgen.toml --crate anneal-core --output anneal-core.h
 
       # anneal-core.h includes <dlpack/dlpack.h>, so the archive carries that
-      # header beside it and every copied file is checked in the archive.
+      # header beside it and every copied file is checked in the archive. The
+      # licence text and the README section on licensing travel with the
+      # binaries they cover.
       - name: Package artifacts
         run: |
           mkdir -p staging/include/dlpack staging/lib
+          cp LICENSE.txt staging/
+          awk '/^## /{f=($0=="## License and citation")} f' README.md > staging/README-licensing.md
+          test -s staging/README-licensing.md
           cp anneal-core.h staging/include/
           cp include/anneal-version.h staging/include/
           cp include/anneal-core.hpp staging/include/
@@ -116,6 +121,8 @@ jobs:
           cp target/${{ matrix.target }}/release/${{ matrix.static_lib }} staging/lib/
           cp target/${{ matrix.target }}/release/${{ matrix.shared_lib }} staging/lib/
           tar czf ${{ matrix.artifact }}.tar.gz -C staging .
+          tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./LICENSE.txt"
+          tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./README-licensing.md"
           tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./include/anneal-core.h"
           tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./include/anneal-version.h"
           tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./include/anneal-core.hpp"

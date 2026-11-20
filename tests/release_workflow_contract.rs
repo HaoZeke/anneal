@@ -400,18 +400,24 @@ fn packaged_and_checked(package: &Value) -> (BTreeSet<String>, BTreeSet<String>)
             let to = words[2]
                 .strip_prefix("staging/")
                 .unwrap_or_else(|| panic!("{line} copies outside staging"));
+            let file = words[1].rsplit('/').next().unwrap();
             let entry = match to.strip_suffix('/') {
                 Some(dir) => {
                     assert!(
                         made_dirs.contains(format!("staging/{dir}").as_str()),
                         "{line} copies into a directory no mkdir made"
                     );
-                    let file = words[1].rsplit('/').next().unwrap();
                     format!("./{dir}/{file}")
                 }
+                None if to.is_empty() => format!("./{file}"),
                 None => format!("./{to}"),
             };
             copied.insert(entry);
+        } else if let Some(at) = words.iter().position(|word| *word == ">") {
+            let to = words[at + 1]
+                .strip_prefix("staging/")
+                .unwrap_or_else(|| panic!("{line} writes outside staging"));
+            copied.insert(format!("./{to}"));
         }
     }
     let prefix = r#"tar tzf ${{matrix.artifact}}.tar.gz | grep -Fq ""#;
@@ -468,6 +474,71 @@ fn the_native_archive_holds_every_header_its_headers_include() {
         included.contains("dlpack/dlpack.h") && shipped >= 3,
         "{included:?}"
     );
+}
+
+#[test]
+fn the_native_archive_carries_the_licence_and_its_readme_section() {
+    let workflow = release();
+    let (_, package) = step(job(&workflow, "native-libs"), "Package artifacts");
+    let (copied, checked) = packaged_and_checked(package);
+    for entry in ["./LICENSE.txt", "./README-licensing.md"] {
+        assert!(copied.contains(entry), "the archive is not given {entry}");
+        assert!(
+            checked.contains(entry),
+            "the archive is not checked for {entry}"
+        );
+    }
+
+    let lines = script(package);
+    assert!(lines.contains(&"cp LICENSE.txt staging/"), "{lines:?}");
+    assert!(
+        lines.contains(&"test -s staging/README-licensing.md"),
+        "an empty excerpt must fail the step"
+    );
+
+    // Run the workflow's own extraction against the repository README. The
+    // excerpt is the licensing section and nothing else.
+    let extract = lines
+        .iter()
+        .find(|line| line.ends_with("> staging/README-licensing.md"))
+        .expect("a line writes the licensing excerpt");
+    let scratch = std::env::temp_dir().join(format!("anneal-licensing-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(scratch.join("staging")).unwrap();
+    let output = Command::new("bash")
+        .args(["--noprofile", "--norc", "-eo", "pipefail", "-c", extract])
+        .current_dir(&scratch)
+        .env("PATH", std::env::var_os("PATH").unwrap())
+        .output()
+        .expect("run bash");
+    // The step reads README.md from the repository root.
+    assert!(
+        !output.status.success(),
+        "no README.md in the scratch directory"
+    );
+    std::fs::copy(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md"),
+        scratch.join("README.md"),
+    )
+    .unwrap();
+    let output = Command::new("bash")
+        .args(["--noprofile", "--norc", "-eo", "pipefail", "-c", extract])
+        .current_dir(&scratch)
+        .env("PATH", std::env::var_os("PATH").unwrap())
+        .output()
+        .expect("run bash");
+    assert!(output.status.success(), "{output:?}");
+    let excerpt = std::fs::read_to_string(scratch.join("staging/README-licensing.md")).unwrap();
+    std::fs::remove_dir_all(&scratch).unwrap();
+
+    let headings: Vec<&str> = excerpt.lines().filter(|l| l.starts_with("## ")).collect();
+    assert_eq!(headings, ["## License and citation"], "{excerpt}");
+    assert!(excerpt.contains("MIT") && excerpt.contains("LICENSE.txt"));
+    let readme = include_str!("../README.md");
+    assert!(readme.contains(excerpt.trim_end()));
+
+    // The licence file the archive ships is the repository's MIT text.
+    assert!(include_str!("../LICENSE.txt").starts_with("MIT License"));
 }
 
 #[test]
