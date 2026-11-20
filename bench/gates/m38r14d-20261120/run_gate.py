@@ -82,7 +82,10 @@ REFERENCES = {
     "tip4p21": -916.7074302940,
 }
 
-PRIORITY = (
+AA_CELLS = ("lj75", "m55r14", "tip4p20")
+P1_AB_CELLS = ("lj75", "lj98", "lj102", "lj103", "lj104", "m55r14", "m80r6", "m80r14")
+
+FULL_ORDER = (
     "lj75",
     "lj98",
     "lj102",
@@ -91,8 +94,42 @@ PRIORITY = (
     "m55r14",
     "m80r6",
     "m80r14",
+    "lj38",
+    "lj55",
+    "lj150",
+    "au55",
+    "m55r6",
+    "sc126-38",
+    "sc126-55",
+    "sc126-80",
+    "sc108-38",
+    "sc108-55",
+    "sc108-80",
+    "sc96-38",
+    "sc96-55",
+    "sc96-80",
+    "tip4p8",
+    "tip4p12",
+    "tip4p16",
+    "tip4p20",
+    "tip4p21",
 )
-AA_CELLS = ("lj75", "m55r14", "tip4p20")
+
+ROW_FIELDS = [
+    "cell",
+    "band",
+    "arm",
+    "seed",
+    "budget",
+    "reference",
+    "best",
+    "hit",
+    "charged",
+    "charged_rank",
+    "outside_s",
+    "outside_per_charged",
+    "wall_s",
+]
 
 
 def machine_hash() -> str:
@@ -104,6 +141,7 @@ def env_one_thread() -> dict[str, str]:
     env = os.environ.copy()
     for key in THREAD_KEYS:
         env[key] = "1"
+    env["LC_ALL"] = "C"
     return env
 
 
@@ -147,12 +185,13 @@ def parse_stdout(system: str, seed: int, text: str) -> dict[str, float | int]:
                 row = dict(part.split("=", 1) for part in line.split()[1:])
         if not row:
             raise RuntimeError(f"{system} {seed}: no h2h_row")
-        best = float(row["best"])
-        charged = int(row["charged"])
-        evals = int(row["evals_to_hit"])
-        wall = float(row["wall_s"])
-        outside = float(row["outside_s"])
-        return {"best": best, "charged": charged, "evals_to_hit": evals, "wall_s": wall, "outside_s": outside}
+        return {
+            "best": float(row["best"]),
+            "charged": int(row["charged"]),
+            "evals_to_hit": int(row["evals_to_hit"]),
+            "wall_s": float(row["wall_s"]),
+            "outside_s": float(row["outside_s"]),
+        }
     header = None
     data = None
     for line in text.splitlines():
@@ -167,90 +206,120 @@ def parse_stdout(system: str, seed: int, text: str) -> dict[str, float | int]:
         raise RuntimeError(f"{system} {seed}: budget mismatch")
     wall = float(row["wall_s"])
     pot = float(row["pot_s"])
-    outside = float(row.get("outside_s", wall - pot))
     return {
         "best": float(row["best"]),
         "charged": int(row["charged"]),
         "evals_to_hit": int(row["evals_to_hit"]),
         "wall_s": wall,
-        "outside_s": outside,
+        "outside_s": float(row.get("outside_s", wall - pot)),
     }
 
 
-def run_one(bin_dir: Path, arm: str, system: str, seed: int, rows: Path, session: Path) -> None:
+def read_rows(path: Path) -> list[dict[str, str]]:
+    if not path.is_file():
+        return []
+    with path.open(newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def append_row(path: Path, row: dict[str, str]) -> None:
+    fresh = not path.is_file() or path.stat().st_size == 0
+    with path.open("a", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS, lineterminator="\n")
+        if fresh:
+            writer.writeheader()
+        writer.writerow(row)
+
+
+def append_session(path: Path, event: dict) -> None:
+    with path.open("a") as handle:
+        handle.write(json.dumps(event, separators=(",", ":")) + "\n")
+
+
+def abba_pair(a: str, b: str, seed: int) -> tuple[str, str]:
+    return (a, b) if seed % 2 == 0 else (b, a)
+
+
+def seeds_for(cell: str, aa: bool) -> list[int]:
+    if aa:
+        return list(range(2000, 2012))
+    if cell in {"lj38", "lj98"}:
+        return list(range(2000, 2024))
+    return list(range(2000, 2012))
+
+
+def jobs(mode: str) -> list[tuple[str, str, str, int]]:
+    out: list[tuple[str, str, str, int]] = []
+    for cell in AA_CELLS:
+        for seed in seeds_for(cell, aa=True):
+            left, right = abba_pair("A1", "A2", seed)
+            out.append(("AA", cell, left, seed))
+            out.append(("AA", cell, right, seed))
+
+    if mode == "p1":
+        cells = list(P1_AB_CELLS)
+    else:
+        cells = list(FULL_ORDER)
+    for cell in cells:
+        for seed in seeds_for(cell, aa=False):
+            left, right = abba_pair("A", "B", seed)
+            out.append(("AB", cell, left, seed))
+            out.append(("AB", cell, right, seed))
+    return out
+
+
+def done_set(rows: list[dict[str, str]]) -> set[tuple[str, str, str, str]]:
+    return {(r["band"], r["cell"], r["arm"], r["seed"]) for r in rows}
+
+
+def run_one(bin_a: Path, bin_b: Path, rows_path: Path, session_path: Path, band: str, cell: str, arm: str, seed: int) -> None:
+    bin_dir = bin_a if arm.startswith("A") else bin_b
     env = env_one_thread()
-    env["LC_ALL"] = "C"
-    aff = sorted(os.sched_getaffinity(0))
-    with tempfile.TemporaryDirectory() as temp:
-        inner = run_cmd(bin_dir, system, seed, Path(temp))
+    affinity = sorted(os.sched_getaffinity(0))
+    with tempfile.TemporaryDirectory() as tmp:
+        inner = run_cmd(bin_dir, cell, seed, Path(tmp))
         cmd = ["taskset", "-c", "0", *inner]
         start = time.time()
         proc = subprocess.run(cmd, env=env, capture_output=True, text=True, check=False)
         elapsed = time.time() - start
     if proc.returncode != 0:
-        raise RuntimeError(f"{system} {arm} {seed} failed: {proc.returncode}")
-    parsed = parse_stdout(system, seed, proc.stdout)
+        raise RuntimeError(f"{band} {cell} {arm} {seed}: exit {proc.returncode}")
+    parsed = parse_stdout(cell, seed, proc.stdout)
     best = float(parsed["best"])
-    hit = 1 if best <= REFERENCES[system] + 0.001 else 0
+    hit = 1 if best <= REFERENCES[cell] + 0.001 else 0
     charged = int(parsed["charged"])
     outside = float(parsed["outside_s"])
     row = {
-        "cell": system,
+        "cell": cell,
+        "band": band,
         "arm": arm,
         "seed": str(seed),
-        "budget": str(PAPER_BUDGETS[system]),
-        "reference": f"{REFERENCES[system]:.10f}",
+        "budget": str(PAPER_BUDGETS[cell]),
+        "reference": f"{REFERENCES[cell]:.10f}",
         "best": f"{best:.10f}",
         "hit": str(hit),
         "charged": str(charged),
-        "charged_rank": str(charged if hit == 1 else PAPER_BUDGETS[system]),
+        "charged_rank": str(charged if hit == 1 else PAPER_BUDGETS[cell]),
         "outside_s": f"{outside:.6f}",
         "outside_per_charged": f"{outside / max(charged, 1):.9f}",
         "wall_s": f"{float(parsed['wall_s']):.6f}",
     }
-    fresh = not rows.is_file() or rows.stat().st_size == 0
-    with rows.open("a", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(row.keys()), lineterminator="\n")
-        if fresh:
-            writer.writeheader()
-        writer.writerow(row)
-    event = {
-        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "cell": system,
-        "arm": arm,
-        "seed": seed,
-        "core": 0,
-        "affinity": aff,
-        "machine_hash": machine_hash(),
-        "elapsed_s": round(elapsed, 6),
-        "binary": Path(inner[0]).name,
-    }
-    with session.open("a") as handle:
-        handle.write(json.dumps(event, separators=(",", ":")) + "\n")
-
-
-def abba_pairs(a: str, b: str, seed: int) -> tuple[str, str]:
-    return (a, b) if seed % 2 == 0 else (b, a)
-
-
-def run_band(bin_a: Path, bin_b: Path, cells: list[str], seeds: list[int], rows: Path, session: Path, aa: bool) -> None:
-    for cell in cells:
-        for seed in seeds:
-            left, right = abba_pairs("A", "B", seed)
-            if aa:
-                left, right = abba_pairs("A1", "A2", seed)
-            for arm in (left, right):
-                bind = bin_a if arm.startswith("A") else bin_b
-                run_one(bind, arm, cell, seed, rows, session)
-
-
-def read_rows(path: Path) -> list[dict[str, str]]:
-    with path.open(newline="") as handle:
-        return list(csv.DictReader(handle))
-
-
-def median(values: list[float]) -> float:
-    return statistics.median(values)
+    append_row(rows_path, row)
+    append_session(
+        session_path,
+        {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "band": band,
+            "cell": cell,
+            "arm": arm,
+            "seed": seed,
+            "core": 0,
+            "affinity": affinity,
+            "machine_hash": machine_hash(),
+            "elapsed_s": round(elapsed, 6),
+            "binary": Path(inner[0]).name,
+        },
+    )
 
 
 def fisher_two_sided(hits_left: int, n_left: int, hits_right: int, n_right: int) -> float:
@@ -267,9 +336,9 @@ def fisher_two_sided(hits_left: int, n_left: int, hits_right: int, n_right: int)
 
 def mann_whitney_two_sided(left: list[float], right: list[float]) -> float:
     n1, n2 = len(left), len(right)
-    pooled = sorted(left + right)
     if n1 == 0 or n2 == 0:
         raise ValueError("mann-whitney needs two groups")
+    pooled = sorted(left + right)
     rank: dict[float, float] = {}
     ties = 0.0
     i = 0
@@ -290,48 +359,60 @@ def mann_whitney_two_sided(left: list[float], right: list[float]) -> float:
     return min(1.0, math.erfc(dev / math.sqrt(var) / math.sqrt(2.0)))
 
 
-def summarize(rows: list[dict[str, str]], a_arm: str, b_arm: str) -> list[dict[str, str]]:
+def median(values: list[float]) -> float:
+    return statistics.median(values)
+
+
+def verdict(rows: list[dict[str, str]], band: str, left_arm: str, right_arm: str) -> list[dict[str, str]]:
     out = []
-    cells = sorted({r["cell"] for r in rows})
+    cells = sorted({r["cell"] for r in rows if r["band"] == band})
     for cell in cells:
-        a = [r for r in rows if r["cell"] == cell and r["arm"] == a_arm]
-        b = [r for r in rows if r["cell"] == cell and r["arm"] == b_arm]
-        if not a or not b:
+        left = [r for r in rows if r["band"] == band and r["cell"] == cell and r["arm"] == left_arm]
+        right = [r for r in rows if r["band"] == band and r["cell"] == cell and r["arm"] == right_arm]
+        if not left or not right:
             continue
-        a_hits = sum(int(r["hit"]) for r in a)
-        b_hits = sum(int(r["hit"]) for r in b)
-        fisher_p = fisher_two_sided(b_hits, len(b), a_hits, len(a))
-        a_rank = [float(r["charged_rank"]) for r in a]
-        b_rank = [float(r["charged_rank"]) for r in b]
-        if len(set(a_rank + b_rank)) == 1:
-            mw_p = 1.0
-        else:
-            mw_p = mann_whitney_two_sided(b_rank, a_rank)
-        a_out = [float(r["outside_per_charged"]) for r in a]
-        b_out = [float(r["outside_per_charged"]) for r in b]
-        ratio = median(b_out) / median(a_out) if median(a_out) > 0 else math.inf
-        fail = (b_hits < a_hits and fisher_p < 0.05) or (median(b_rank) > median(a_rank) and mw_p < 0.05) or ratio > 1.1
+        l_hits = sum(int(r["hit"]) for r in left)
+        r_hits = sum(int(r["hit"]) for r in right)
+        fisher_p = fisher_two_sided(r_hits, len(right), l_hits, len(left))
+        l_rank = [float(r["charged_rank"]) for r in left]
+        r_rank = [float(r["charged_rank"]) for r in right]
+        mw_p = 1.0 if len(set(l_rank + r_rank)) == 1 else mann_whitney_two_sided(r_rank, l_rank)
+        l_out = [float(r["outside_per_charged"]) for r in left]
+        r_out = [float(r["outside_per_charged"]) for r in right]
+        ratio = median(r_out) / median(l_out) if median(l_out) > 0 else math.inf
+        fail = (r_hits < l_hits and fisher_p < 0.05) or (median(r_rank) > median(l_rank) and mw_p < 0.05) or ratio > 1.1
         out.append(
             {
+                "band": band,
                 "cell": cell,
-                "hits_a": f"{a_hits}/{len(a)}",
-                "hits_b": f"{b_hits}/{len(b)}",
+                "hits_a": f"{l_hits}/{len(left)}",
+                "hits_b": f"{r_hits}/{len(right)}",
                 "fisher_p": f"{fisher_p:.6g}",
-                "mw_p_charged": f"{mw_p:.6g}",
-                "outside_ratio_b_over_a": f"{ratio:.6f}",
+                "mw_p": f"{mw_p:.6g}",
+                "outside_ratio": f"{ratio:.6f}",
                 "status": "FAIL" if fail else "PASS",
             }
         )
     return out
 
 
-def write_table(path: Path, rows: list[dict[str, str]]) -> None:
-    if not rows:
+def write_verdict(path: Path, rows: list[dict[str, str]]) -> None:
+    merged = verdict(rows, "AA", "A1", "A2") + verdict(rows, "AB", "A", "B")
+    if not merged:
         return
     with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()), lineterminator="\n")
+        writer = csv.DictWriter(handle, fieldnames=list(merged[0].keys()), lineterminator="\n")
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(merged)
+
+
+def summarize_progress(rows: list[dict[str, str]], mode: str) -> dict[str, int]:
+    required = jobs(mode)
+    done = done_set(rows)
+    total = len(required)
+    complete = sum(1 for j in required if j in done)
+    missing = total - complete
+    return {"total": total, "complete": complete, "missing": missing}
 
 
 def main() -> int:
@@ -342,27 +423,25 @@ def main() -> int:
     parser.add_argument("--session-jsonl", type=Path, required=True)
     parser.add_argument("--verdict", type=Path, required=True)
     parser.add_argument("--mode", choices=("p1", "full"), default="p1")
+    parser.add_argument("--progress-json", type=Path)
     args = parser.parse_args()
 
-    seeds12 = list(range(2000, 2012))
-    seeds24 = list(range(2000, 2024))
+    all_jobs = jobs(args.mode)
+    rows = read_rows(args.rows)
+    done = done_set(rows)
 
-    run_band(args.bin_a, args.bin_a, list(AA_CELLS), seeds12, args.rows, args.session_jsonl, aa=True)
-
-    if args.mode == "p1":
-        cells = list(PRIORITY)
-    else:
-        all_cells = list(PAPER_BUDGETS)
-        rest = [c for c in all_cells if c not in PRIORITY]
-        cells = list(PRIORITY) + rest
-
-    for cell in cells:
-        seeds = seeds24 if cell in {"lj38", "lj98"} else seeds12
-        run_band(args.bin_a, args.bin_b, [cell], seeds, args.rows, args.session_jsonl, aa=False)
+    for band, cell, arm, seed in all_jobs:
+        key = (band, cell, arm, str(seed))
+        if key in done:
+            continue
+        run_one(args.bin_a, args.bin_b, args.rows, args.session_jsonl, band, cell, arm, seed)
+        done.add(key)
 
     rows = read_rows(args.rows)
-    verdict = summarize(rows, "A", "B")
-    write_table(args.verdict, verdict)
+    write_verdict(args.verdict, rows)
+    if args.progress_json is not None:
+        status = summarize_progress(rows, args.mode)
+        args.progress_json.write_text(json.dumps(status, separators=(",", ":")) + "\n")
     return 0
 
 
