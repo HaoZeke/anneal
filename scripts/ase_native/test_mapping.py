@@ -123,10 +123,18 @@ def test_schedule_is_balanced() -> None:
     jobs = schedule()
     assert balance_ok(jobs)
     assert len(jobs) == sum(12 for _ in SYSTEMS) * len(ARMS)
-    # Counting (local slot residue, arm) is what balance_ok checks.
-    # Also require the global (slot, arm) pairs to be unique.
     pairs = [(job["slot"], job["arm"]) for job in jobs]
     assert len(pairs) == len(set(pairs))
+    forward = ("anneal", "ase_bh", "ase_mh")
+    reverse = tuple(reversed(forward))
+    counts = {forward: 0, reverse: 0}
+    for system in SYSTEMS:
+        block = [job for job in jobs if job["system"] == system]
+        for index, seed in enumerate(range(2000, 2012)):
+            order = tuple(job["arm"] for job in block[index * 3 : (index + 1) * 3])
+            assert order == (forward if seed % 2 == 0 else reverse)
+            counts[order] += 1
+    assert counts[forward] == counts[reverse] == len(SYSTEMS) * 6
 
 
 def test_fisher_and_mann_whitney_match_scipy() -> None:

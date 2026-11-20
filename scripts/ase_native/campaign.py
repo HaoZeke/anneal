@@ -22,8 +22,8 @@ if str(_HERE) not in sys.path:
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA = ROOT / "bench" / "ase-native"
-ROWS = DATA / "rows.csv"
-SESSIONS = DATA / "sessions.csv"
+ROWS: Path
+SESSIONS: Path
 
 THREAD_VARS = (
     "OMP_NUM_THREADS",
@@ -100,9 +100,11 @@ _pin()
 import numpy as np  # noqa: E402
 from ase import __version__ as ASE_VERSION  # noqa: E402
 
-from mapping import BASE_SHA, SYSTEMS, balance_ok, schedule  # noqa: E402
-from report import render  # noqa: E402
+from mapping import BASE_SHA, SYSTEMS, balance_counts, balance_ok, schedule  # noqa: E402
 from search import run_anneal, run_ase  # noqa: E402
+
+ROWS = DATA / f"rows-{BASE_SHA[:8]}.csv"
+SESSIONS = DATA / f"sessions-{BASE_SHA[:8]}.csv"
 from test_agree import check_agreement  # noqa: E402
 
 
@@ -222,11 +224,10 @@ def run_campaign() -> int:
         ]
         if len(match) != 1 or str(match[0]["slot"]) != row["slot"]:
             raise RuntimeError("an existing row does not match the schedule")
-    counts: dict[str, int] = {}
-    for job in jobs:
-        key = f"{job['slot'] % len(set(job['arm'] for job in jobs))}:{job['arm']}"
-        counts[key] = counts.get(key, 0) + 1
-    balance = ",".join(f"{key}={counts[key]}" for key in sorted(counts))
+    order_counts = balance_counts(jobs)
+    balance = ",".join(
+        f"{'>'.join(order)}={count}" for order, count in sorted(order_counts.items())
+    )
     seeds = ",".join(f"{name}:{len(set(job['seed'] for job in jobs if job['system'] == name))}" for name in SYSTEMS)
     _session("start", ident, {"seeds": seeds, "balance": balance})
     log = _log_dir() / "campaign.log"
@@ -278,8 +279,6 @@ def run_campaign() -> int:
             handle.write(line)
         done.add(key)
     _session("end", ident, {"seeds": seeds, "balance": balance})
-    report = DATA / "report.md"
-    report.write_text(render())
     return 0
 
 
@@ -292,6 +291,8 @@ def _number(value: object) -> str:
 
 def main() -> int:
     if len(sys.argv) > 1 and sys.argv[1] == "report":
+        from report import render
+
         sys.stdout.write(render())
         return 0
     return run_campaign()

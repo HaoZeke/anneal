@@ -126,7 +126,7 @@ if str(_SCRIPTS) not in sys.path:
 from target_tol import energy_hits
 
 ROOT = Path(__file__).resolve().parents[2]
-BASE_SHA = "5eb79cdcb0a986984dc7b487e5a3cc93224246f9"
+BASE_SHA = "61fa67cf380e46876b569da45e7cc091647a775b"
 
 # Preset coefficients. These are the values Config::with_scales and
 # WarmLbfgs::default actually install; the formulas below are the map.
@@ -262,63 +262,62 @@ def seeds_for(system: str) -> tuple[int, ...]:
     return tuple(range(SEED0, SEED0 + n))
 
 
-def schedule(systems: tuple[str, ...] | None = None) -> list[dict[str, int | str]]:
-    """Interleave arms inside each system and rotate the arm order by seed.
+def arm_order(seed: int) -> tuple[str, ...]:
+    """ABBA block: an even seed runs forward and an odd seed runs reversed."""
+    if seed % 2 == 0:
+        return ARMS
+    return tuple(reversed(ARMS))
 
-    Consecutive slots of one system cycle through the arms. The rotation
-    by seed index makes each arm equally often the one in a given
-    ``slot % len(arms)`` residue.
+
+def schedule(systems: tuple[str, ...] | None = None) -> list[dict[str, int | str]]:
+    """One ABBA seed block per seed.
+
+    Even seeds run anneal, basin hopping, minima hopping.
+    Odd seeds run that order reversed.
     """
     chosen = tuple(SYSTEMS) if systems is None else systems
     jobs: list[dict[str, int | str]] = []
     slot = 0
-    n_arms = len(ARMS)
     for system in chosen:
-        for index, seed in enumerate(seeds_for(system)):
-            start = index % n_arms
-            order = ARMS[start:] + ARMS[:start]
-            for arm in order:
+        for seed in seeds_for(system):
+            for arm in arm_order(seed):
                 jobs.append({"slot": slot, "system": system, "arm": arm, "seed": seed})
                 slot += 1
     return jobs
 
 
-def balance_counts(jobs: list[dict[str, int | str]]) -> dict[tuple[int, str], int]:
-    counts: dict[tuple[int, str], int] = {}
-    n_arms = len(ARMS)
+def balance_counts(jobs: list[dict[str, int | str]]) -> dict[tuple[str, ...], int]:
+    """How many seed blocks use each arm order."""
+    counts: dict[tuple[str, ...], int] = {}
+    by_system: dict[str, list[dict[str, int | str]]] = {}
     for job in jobs:
-        key = (int(job["slot"]) % n_arms, str(job["arm"]))
-        counts[key] = counts.get(key, 0) + 1
+        by_system.setdefault(str(job["system"]), []).append(job)
+    width = len(ARMS)
+    for rows in by_system.values():
+        for start in range(0, len(rows), width):
+            order = tuple(str(job["arm"]) for job in rows[start : start + width])
+            counts[order] = counts.get(order, 0) + 1
     return counts
 
 
 def balance_ok(jobs: list[dict[str, int | str]]) -> bool:
-    """Each system gives every arm the same number of seeds, in every slot residue."""
-    n_arms = len(ARMS)
+    """Each seed is one ABBA block and every arm is run once in that block."""
     grouped: dict[str, list[dict[str, int | str]]] = {}
     for job in jobs:
         grouped.setdefault(str(job["system"]), []).append(job)
     if not grouped:
         return False
+    width = len(ARMS)
     for system, rows in grouped.items():
-        expected = len(seeds_for(system))
-        if expected % n_arms != 0 or len(rows) != expected * n_arms:
+        seeds = seeds_for(system)
+        if len(rows) != len(seeds) * width:
             return False
-        arm_counts = {arm: 0 for arm in ARMS}
-        residue_counts: dict[tuple[int, str], int] = {}
-        for local, job in enumerate(rows):
-            arm = str(job["arm"])
-            if arm not in arm_counts:
+        for index, seed in enumerate(seeds):
+            block = rows[index * width : (index + 1) * width]
+            if any(int(job["seed"]) != seed for job in block):
                 return False
-            arm_counts[arm] += 1
-            key = (local % n_arms, arm)
-            residue_counts[key] = residue_counts.get(key, 0) + 1
-        if any(count != expected for count in arm_counts.values()):
-            return False
-        for arm in ARMS:
-            for residue in range(n_arms):
-                if residue_counts.get((residue, arm), 0) != expected // n_arms:
-                    return False
+            if tuple(str(job["arm"]) for job in block) != arm_order(seed):
+                return False
     return True
 
 
