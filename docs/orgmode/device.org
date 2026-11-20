@@ -24,6 +24,8 @@ history = run_device(objective, low, high, Boltzmann(t_init=5.0, sigma=0.5),
 # history.best_pos is a CuPy array on device 0
 #+end_src
 
+The objective returns a CuPy array, not a Python =float=, and the call raises =ValueError= otherwise.
+
 * Batched ensemble runner
 
 A single chain underuses a GPU: one vector per step is kernel-launch bound.

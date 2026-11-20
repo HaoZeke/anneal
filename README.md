@@ -372,7 +372,7 @@ Pass `x0=` (a point inside the box) to start from known parameters; it is the fi
 Runnable copies:
 
 - Script: [`examples/quickstart_portfolio.py`](examples/quickstart_portfolio.py)
-- Notebook: [`examples/notebooks/01_quickstart.ipynb`](examples/notebooks/01_quickstart.ipynb)
+- Notebook: [`examples/notebooks/01_quickstart.md`](examples/notebooks/01_quickstart.md) (MyST; `uvx jupytext --to ipynb` makes a notebook)
 - Website quickstart + four tutorials: https://anneal.rgoswami.me
 
 ## Classical presets (same driver, different slots)

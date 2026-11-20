@@ -1,0 +1,104 @@
+#+TITLE: Run the single-seed panel examples
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+
+#+begin_export rst
+==================================
+Run the single-seed panel examples
+==================================
+#+end_export
+
+Each example below runs one seed of the cluster search and prints one result line.
+A panel is a set of such runs over systems and seeds, scored against a reference energy.
+A hit is a recorded energy at or below the reference plus the tolerance (see [[file:../reference/presets-and-advanced.org][target hits]]).
+
+* Lennard-Jones and gold clusters
+
+=ase_panel= runs one seed of =Config::for_cluster= or =Config::recommended=.
+
+#+begin_src sh
+cargo run --release --example ase_panel -- <system> <budget> <seed> [for_cluster|recommended] [wall_cap_s]
+#+end_src
+
+=system= is =lj38=, =lj55=, =lj98=, =lj104=, =lj150= or =au55=.
+Lennard-Jones uses =PairPotential::lennard_jones=, and gold uses =Gupta::copper_gold(0, 55)=, with scales taken from that pair's length and well depth.
+=for_cluster= is the plain basin hop and =recommended= is the headline preset.
+The optional wall cap, in seconds, stops the walk.
+
+The run prints one line:
+
+#+begin_example
+system=lj38 arm=recommended seed=1 budget=3000 hit=0 best=-170.07034050 first_calls=- charged=3000 wall_s=0.017813 inside_s=0.007579 outside_s=0.010234 reference=-173.92842700 tol=0.001 stop=budget
+#+end_example
+
+=hit= is 1 when the best energy is at or below =reference + tol=, and =first_calls= is then the charged call that first reached it, or =-=.
+=stop= is =hit=, =budget= or =wall=.
+=inside_s= is the time inside the potential and =outside_s= is the rest of the wall time.
+
+* Morse clusters
+
+=ase_nonlj= does the same on the Cambridge Morse clusters.
+
+#+begin_src sh
+cargo run --release --example ase_nonlj -- run <system> <budget> <seed> [for_cluster|recommended] [wall_cap_s]
+cargo run --release --example ase_nonlj -- eval <system> <seed>
+#+end_src
+
+=system= is =m38r6=, =m38r14=, =m55r6= or =m55r14=: the size, then the range =rho=.
+Both presets scale their lengths by =PairKind::length_scale()=, so the steps, the neighbour cutoffs and the starting sphere match the Morse pair minimum at 1.
+=run= prints the same line as =ase_panel=.
+=eval= prints the energy, coordinates and gradient of the seed's start and exits.
+
+* GFN2 silicon and carbon clusters
+
+The GFN2 examples below need the =rgpot-ex= feature and an xtb engine library, which this repository does not ship.
+
+=gfn2_covalent_h2h= runs one seed on a GFN2-xTB cluster of silicon or carbon.
+=RGPOT_XTB_ENGINE= names the engine library.
+
+#+begin_src sh
+RGPOT_XTB_ENGINE=/path/to/libxtb_engine.so \
+cargo run --release --features rgpot-ex --example gfn2_covalent_h2h -- \
+  <si10|si13|si20|c10|c20> <seed> <budget> [target_eV] [best.xyz]
+#+end_src
+
+The energy and gradient are in eV and angstrom.
+Silicon clusters have a vanishing gap, so set =RGPOT_XTB_ETEMP= to the electronic temperature the SCC needs.
+Every call starts from a fresh self-consistent-charge (SCC) solution.
+
+The search runs on scales from the potential's own dimer, and the dimer probe is charged to the same ledger.
+It declares =call_floor= as the handle's 0.90 angstrom and =call_floor_elements= for the cluster's element, so a pair at or inside 1.55 angstrom for Si-Si, or 1.06 for C-C, is opened before the objective sees it.
+A hit is a recorded energy at or below =target_eV= plus 1e-3 eV.
+
+- =H2H_WALL_S= closes the ledger that many seconds after the start, and the search returns its best so far.
+  =charged= is then the number of calls made before it closed.
+- =H2H_START_ONLY=1= writes the start geometry to the =best.xyz= path and exits, so another code can be given the same geometry.
+
+The program prints a CSV header and one row with the hit, the calls to the hit, the charged calls, the wall time, and the time inside and outside the potential.
+
+* GFN2 water clusters
+
+=gfn2_water_h2h= runs one (H2O)m seed on the same engine.
+
+#+begin_src sh
+cargo run --release --features rgpot-ex --example gfn2_water_h2h -- \
+  <m_molecules> <budget> <seed> <outdir> [target_energy]
+#+end_src
+
+=target_energy=, or =H2O_TARGET_EV= when the argument is omitted, is an optional stop in eV.
+The objective is the GFN2 handle plus the O-H wall of the hexamer driver, which is zero inside 1.15 angstrom.
+=run.txt= in =outdir= reports =objective_calls= and =first_hit_call=, the first call that reached the target, or =none=.
+=H2H_START_ONLY=1= writes the start and exits before any energy call, and =H2H_START_XYZ=<file>= starts from that geometry instead.
+
+=gfn2_water_crest_driver= serves the same objective, with its O-H wall, to =xtb --driver= through a Unix socket, so CREST and anneal run on one objective:
+
+#+begin_src sh
+cargo build --release --features rgpot-ex --example gfn2_water_crest_driver
+driver=target/release/examples/gfn2_water_crest_driver   # under the cargo target directory
+$driver serve <socket> <rundir> <m_molecules> <budget> <target_eV>
+$driver call <socket>
+$driver stop <socket>
+#+end_src
+
+=serve= holds one GFN2 handle and counts every request as one energy and gradient call.
+It writes =<rundir>/stop= after the call that reaches the target or spends the budget, and refuses every later request.
+=call= is the program xtb runs for =--driver=, and =stop= ends the server and writes =<rundir>/driver.txt= and =<rundir>/best.xyz=.
