@@ -19,7 +19,7 @@ the full call budget, so its call count is right-censored at `charged`.
 | basin hopping | 1/12 | 9.61483e-06 | not estimated | not estimated | -271.21690949 | 8.03156051 | 4.220457 | 5.356450 | 0.186691 | 1.652929 | 2.564113 |
 | minima hopping | 0/12 | 7.39602e-07 | not estimated | not estimated | -266.05409411 | 13.19437588 | 4.442467 | 5.638218 | 0.177361 | 0.178083 | 4.261282 |
 
-Basin hopping stopped at the wall cap on 11/12 seeds; those rows charged 75,325-245,800 calls.
+Basin hopping stopped at the wall cap on 11/12 seeds; those rows charged 200,184-245,800 calls.
 Minima hopping stopped at the wall cap on 12/12 seeds; those rows charged 18,558-24,077 calls.
 
 Fisher and Mann-Whitney below compare recommended with each ASE arm.

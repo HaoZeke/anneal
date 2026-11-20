@@ -254,10 +254,14 @@ def render(system: str) -> tuple[str, str]:
                 cap, found, host,
             ])
         )
+        wall_charged = [int(row["charged"]) for row in group if row["stop"] == "wall"]
+        if wall_charged:
+            low_charged, high_charged = min(wall_charged), max(wall_charged)
+        else:
+            low_charged = high_charged = 0
         reports.append(
             (arm, hits, best, wall, inside, outside, over, back, fisher_p, u_text, mw_text,
-             wall_stops, cap, min(int(row["charged"]) for row in group),
-             max(int(row["charged"]) for row in group), versus)
+             wall_stops, cap, low_charged, high_charged, versus)
         )
     cap_details = []
     for arm in ARMS:
