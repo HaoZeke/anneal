@@ -633,7 +633,7 @@ jobs:
              ${{ steps.pcfg.outputs.cflags }} \
              tests/ffi_smoke.c \
              -Wl,-rpath,${{ steps.pcfg.outputs.libdir }} \
-             ${{ steps.pcfg.outputs.libs }} \
+             ${{ steps.pcfg.outputs.libs }} -lm \
              -o ffi_smoke
           ./ffi_smoke
 
