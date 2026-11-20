@@ -393,4 +393,3 @@ def test_cluster_search_refuses_bad_groups_before_any_call(groups, species, mess
     with pytest.raises(anneal.InvalidArgumentError, match=message):
         cluster_search(energy, grad, 6, 200, start=WATER_DIMER, species=species, groups=groups, seed=2)
     assert calls == []
-
