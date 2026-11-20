@@ -108,6 +108,7 @@ static run_t run(const anneal_box_options_t *options, size_t stop_after) {
 static anneal_box_options_t defaults(void) {
     anneal_box_options_t options;
     memset(&options, 0, sizeof options);
+    options.struct_size = sizeof options;
     CHECK(anneal_box_options_default(&options) == ANNEAL_SUCCESS);
     CHECK(options.struct_size == sizeof options);
     options.seed = 4;
@@ -273,6 +274,69 @@ static void test_struct_size_ignores_what_lies_past_it(void) {
     CHECK(run(&options, 0).status == ANNEAL_INVALID_PARAMETER);
 }
 
+static void test_the_defaults_fill_only_the_callers_struct_size(void) {
+    union {
+        anneal_box_options_t options;
+        unsigned char bytes[sizeof(anneal_box_options_t) + 16];
+    } storage;
+    size_t least = offsetof(anneal_box_options_t, history);
+    size_t i;
+    int untouched = 1;
+
+    memset(&storage, 0xA5, sizeof storage);
+    storage.options.struct_size = least;
+    CHECK(anneal_box_options_default(&storage.options) == ANNEAL_SUCCESS);
+    CHECK(storage.options.struct_size == least);
+    CHECK(storage.options.budget == 400);
+    for (i = least; i < sizeof storage; i++) {
+        untouched = untouched && storage.bytes[i] == 0xA5;
+    }
+    CHECK(untouched);
+
+    memset(&storage, 0xA5, sizeof storage);
+    storage.options.struct_size = 8;
+    CHECK(anneal_box_options_default(&storage.options) ==
+          ANNEAL_INVALID_PARAMETER);
+    CHECK(strstr(anneal_last_error(), "struct_size") != NULL);
+    untouched = 1;
+    for (i = sizeof(size_t); i < sizeof storage; i++) {
+        untouched = untouched && storage.bytes[i] == 0xA5;
+    }
+    CHECK(untouched);
+}
+
+static void test_a_box_or_start_that_is_not_finite_is_refused(void) {
+    anneal_box_options_t options = defaults();
+    double x[2] = {0.0, 0.0};
+    int64_t shape[1], strides[1];
+    DLManagedTensorVersioned tensor;
+    const double wide_low[2] = {-1e308, -1.0};
+    const double wide_high[2] = {1e308, 1.0};
+    const double low[2] = {-5.0, -5.0};
+    const double high[2] = {5.0, 5.0};
+    counter_t counter = {0, 0};
+
+    point_at(&tensor, x, shape, strides, 2);
+    CHECK(anneal_box_minimize_ex(wells, wells_grad, &counter, &tensor,
+                                 wide_low, wide_high, &options, NULL) ==
+          ANNEAL_INVALID_PARAMETER);
+    CHECK(strstr(anneal_last_error(), "finite width") != NULL);
+
+    x[1] = NAN;
+    CHECK(anneal_box_minimize_ex(wells, wells_grad, &counter, &tensor, low,
+                                 high, &options, NULL) ==
+          ANNEAL_INVALID_PARAMETER);
+    CHECK(strstr(anneal_last_error(), "not finite") != NULL);
+
+    x[1] = 0.0;
+    shape[0] = -1;
+    CHECK(anneal_box_minimize_ex(wells, wells_grad, &counter, &tensor, low,
+                                 high, &options, NULL) ==
+          ANNEAL_INVALID_PARAMETER);
+    CHECK(strstr(anneal_last_error(), "shape") != NULL);
+    CHECK(counter.evals == 0);
+}
+
 static void test_a_callback_can_stop_the_search(void) {
     anneal_box_options_t options = defaults();
     run_t stopped;
@@ -311,6 +375,8 @@ int main(void) {
     test_the_same_seed_gives_the_same_run();
     test_a_bad_option_is_refused_before_a_callback();
     test_struct_size_ignores_what_lies_past_it();
+    test_the_defaults_fill_only_the_callers_struct_size();
+    test_a_box_or_start_that_is_not_finite_is_refused();
     test_a_callback_can_stop_the_search();
     test_null_arguments_are_refused();
     if (failures != 0) {

@@ -496,13 +496,60 @@ unsafe fn cpu_f64_slice_mut<'a>(
         ));
         return Err(anneal_status_t::ANNEAL_INVALID_PARAMETER);
     }
-    let len = unsafe { *t.shape } as usize;
+    let shape = unsafe { *t.shape };
+    let fits = usize::try_from(shape).ok().filter(|&len| {
+        len.checked_mul(std::mem::size_of::<f64>())
+            .is_some_and(|bytes| bytes <= isize::MAX as usize)
+    });
+    let Some(len) = fits else {
+        set_last_error(&format!(
+            "anneal_box_minimize: {what} has shape {shape}, not a length"
+        ));
+        return Err(anneal_status_t::ANNEAL_INVALID_PARAMETER);
+    };
     if !t.strides.is_null() && unsafe { *t.strides } != 1 && len > 1 {
         set_last_error(&format!("anneal_box_minimize: {what} must be contiguous"));
         return Err(anneal_status_t::ANNEAL_INVALID_PARAMETER);
     }
+    let start = usize::try_from(t.byte_offset)
+        .ok()
+        .and_then(|offset| (t.data as usize).checked_add(offset));
+    if !start.is_some_and(|address| address % std::mem::align_of::<f64>() == 0) {
+        set_last_error(&format!(
+            "anneal_box_minimize: {what} data plus byte_offset must be aligned for float64"
+        ));
+        return Err(anneal_status_t::ANNEAL_INVALID_PARAMETER);
+    }
     let data = unsafe { t.data.cast::<u8>().add(t.byte_offset as usize) }.cast::<f64>();
     Ok(unsafe { std::slice::from_raw_parts_mut(data, len) })
+}
+
+/// Copy a caller's `anneal_box_config_t` field by field. `escape` is read
+/// as the `int32_t` a C enum is, since a value outside
+/// `anneal_box_escape_t` must not become a Rust enum.
+const _: () = assert!(std::mem::size_of::<anneal_box_escape_t>() == std::mem::size_of::<i32>());
+
+unsafe fn read_config(cfg: *const anneal_box_config_t) -> Result<anneal_box_config_t, String> {
+    let escape = unsafe { std::ptr::addr_of!((*cfg).escape).cast::<i32>().read() };
+    let escape = match escape {
+        0 => anneal_box_escape_t::ANNEAL_BOX_ESCAPE_GAUSSIAN,
+        1 => anneal_box_escape_t::ANNEAL_BOX_ESCAPE_LANGEVIN,
+        other => return Err(format!("escape {other} is not an anneal_box_escape_t")),
+    };
+    unsafe {
+        Ok(anneal_box_config_t {
+            replicas: std::ptr::addr_of!((*cfg).replicas).read(),
+            budget: std::ptr::addr_of!((*cfg).budget).read(),
+            seed: std::ptr::addr_of!((*cfg).seed).read(),
+            coverage_radius: std::ptr::addr_of!((*cfg).coverage_radius).read(),
+            coverage_height: std::ptr::addr_of!((*cfg).coverage_height).read(),
+            well_tempering: std::ptr::addr_of!((*cfg).well_tempering).read(),
+            escape,
+            langevin_steps: std::ptr::addr_of!((*cfg).langevin_steps).read(),
+            langevin_omega0: std::ptr::addr_of!((*cfg).langevin_omega0).read(),
+            langevin_dt: std::ptr::addr_of!((*cfg).langevin_dt).read(),
+        })
+    }
 }
 
 fn ensemble_config(
@@ -561,6 +608,29 @@ struct Resolved {
     seed: u64,
 }
 
+/// Every axis finite and ordered, with a reflection period `2 (h - l)`
+/// and a sum of widths that stay finite: the rule the Python drivers
+/// apply, so an overflowing width is refused, not folded into NaN.
+fn check_box(low: &[f64], high: &[f64]) -> Result<(), String> {
+    let mut total_width = 0.0;
+    for (i, (&lo, &hi)) in low.iter().zip(high).enumerate() {
+        if !(lo.is_finite() && hi.is_finite() && (2.0 * (hi - lo)).is_finite()) {
+            return Err(format!(
+                "bounds must be finite, with a finite width, at dimension {i}"
+            ));
+        }
+        if lo > hi {
+            return Err(format!("bounds must have low <= high at dimension {i}"));
+        }
+        total_width += hi - lo;
+    }
+    if total_width.is_finite() {
+        Ok(())
+    } else {
+        Err("the box is too wide: the sum of its widths is not finite".into())
+    }
+}
+
 /// The box search behind both entry points.
 ///
 /// Returns the status and, for `ANNEAL_SUCCESS` and for `ANNEAL_STOPPED`
@@ -586,11 +656,13 @@ unsafe fn minimize_core(
     }
     let low = unsafe { std::slice::from_raw_parts(low, dim) };
     let high = unsafe { std::slice::from_raw_parts(high, dim) };
-    for (l, h) in low.iter().zip(high) {
-        if !(l.is_finite() && h.is_finite() && l <= h) {
-            set_last_error(&format!("{name}: bounds must be finite with low <= high"));
-            return (anneal_status_t::ANNEAL_INVALID_PARAMETER, None);
-        }
+    if let Err(message) = check_box(low, high) {
+        set_last_error(&format!("{name}: {message}"));
+        return (anneal_status_t::ANNEAL_INVALID_PARAMETER, None);
+    }
+    if let Some(i) = start.iter().position(|value| !value.is_finite()) {
+        set_last_error(&format!("{name}: x[{i}] is not finite"));
+        return (anneal_status_t::ANNEAL_INVALID_PARAMETER, None);
     }
     let Resolved {
         ensemble,
@@ -603,6 +675,14 @@ unsafe fn minimize_core(
             return (anneal_status_t::ANNEAL_INVALID_PARAMETER, None);
         }
     };
+    let replica_states = ensemble.replicas.checked_mul(dim);
+    if !replica_states.is_some_and(|n| Vec::<f64>::new().try_reserve_exact(n).is_ok()) {
+        set_last_error(&format!(
+            "{name}: {} replicas of dimension {dim} are too many to allocate",
+            ensemble.replicas
+        ));
+        return (anneal_status_t::ANNEAL_INVALID_PARAMETER, None);
+    }
     let stop = Arc::new(AtomicBool::new(false));
     let _caller_stop = crate::caller_stop::Bind::new(Arc::clone(&stop));
     let objective = CallbackObjective {
@@ -855,10 +935,17 @@ fn stats_of(result: &BoxEnsembleResult) -> anneal_box_stats_t {
 /// and deposits, the tabu visit policy, colored Langevin noise, and coverage
 /// that follows the history.
 ///
+/// Set `out->struct_size` to `sizeof(anneal_box_options_t)` first. The
+/// library writes the defaults into the first `struct_size` bytes only,
+/// keeps `struct_size` as the caller set it, and leaves the bytes of a
+/// newer, larger structure alone. A size below the oldest layout returns
+/// `ANNEAL_INVALID_PARAMETER` and writes nothing.
+///
 /// # Safety
 ///
-/// `out` must be null, or aligned and writable for one
-/// `anneal_box_options_t`. A null pointer returns `ANNEAL_INVALID_PARAMETER`.
+/// `out` must be null, or aligned, with `struct_size` readable, and
+/// writable for its own `struct_size` bytes. A null pointer returns
+/// `ANNEAL_INVALID_PARAMETER`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn anneal_box_options_default(
     out: *mut anneal_box_options_t,
@@ -867,7 +954,25 @@ pub unsafe extern "C" fn anneal_box_options_default(
         set_last_error("anneal_box_options_default: null argument");
         return anneal_status_t::ANNEAL_INVALID_PARAMETER;
     }
-    unsafe { *out = default_options() };
+    let size = unsafe { std::ptr::addr_of!((*out).struct_size).read() };
+    let least = std::mem::offset_of!(anneal_box_options_t, history);
+    if size < least {
+        set_last_error(&format!(
+            "anneal_box_options_default: options.struct_size is {size}, below the \
+             {least} bytes of the oldest layout; set it to sizeof(anneal_box_options_t)"
+        ));
+        return anneal_status_t::ANNEAL_INVALID_PARAMETER;
+    }
+    let mut defaults = default_options();
+    defaults.struct_size = size;
+    let take = size.min(std::mem::size_of::<anneal_box_options_t>());
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            (&defaults as *const anneal_box_options_t).cast::<u8>(),
+            out.cast::<u8>(),
+            take,
+        );
+    }
     anneal_status_t::ANNEAL_SUCCESS
 }
 
@@ -954,7 +1059,9 @@ pub unsafe extern "C" fn anneal_box_minimize_ex(
 /// `x` is left at its start. A callback that returns `ANNEAL_STOPPED`
 /// ends the search at once: the best point found is written to `x` and
 /// the call returns `ANNEAL_STOPPED`. `low` and `high` have `dim` entries
-/// each and must be finite with `low <= high`. The settings that
+/// each and must be finite with `low <= high`, a finite `2 (high - low)`
+/// and a finite sum of widths, and `x` must be finite. An `escape` outside
+/// `anneal_box_escape_t` is refused. The settings that
 /// `anneal_box_config_t` lacks are in `anneal_box_minimize_ex`.
 ///
 /// # Safety
@@ -981,7 +1088,14 @@ pub unsafe extern "C" fn anneal_box_minimize(
             set_last_error("anneal_box_minimize: null argument");
             return anneal_status_t::ANNEAL_INVALID_PARAMETER;
         }
-        let cfg = unsafe { &*cfg };
+        let cfg = match unsafe { read_config(cfg) } {
+            Ok(cfg) => cfg,
+            Err(message) => {
+                set_last_error(&format!("{NAME}: {message}"));
+                return anneal_status_t::ANNEAL_INVALID_PARAMETER;
+            }
+        };
+        let cfg = &cfg;
         let (status, result) = unsafe {
             minimize_core(eval, grad, user, x, low, high, NAME, || {
                 ensemble_config(cfg).map(|(ensemble, coverage)| Resolved {
@@ -1690,5 +1804,210 @@ mod tests {
             assert_eq!(status, anneal_status_t::ANNEAL_INVALID_PARAMETER);
         }
         assert_eq!(wells.evals, 0);
+    }
+
+    fn run_on(
+        x: &mut [f64],
+        low: &[f64],
+        high: &[f64],
+        options: &anneal_box_options_t,
+        tamper: impl FnOnce(*mut DLManagedTensorVersioned),
+    ) -> (anneal_status_t, usize) {
+        let mut wells = Wells { evals: 0 };
+        let mut shell = StandingShell::new();
+        let tensor = shell.point_at(x.as_mut_ptr(), x.len());
+        tamper(tensor);
+        let status = unsafe {
+            anneal_box_minimize_ex(
+                wells_value,
+                wells_grad,
+                (&mut wells as *mut Wells).cast(),
+                tensor,
+                low.as_ptr(),
+                high.as_ptr(),
+                options,
+                std::ptr::null_mut(),
+            )
+        };
+        (status, wells.evals)
+    }
+
+    #[test]
+    fn the_default_options_fill_only_the_callers_struct_size() {
+        let full = std::mem::size_of::<anneal_box_options_t>();
+        let least = std::mem::offset_of!(anneal_box_options_t, history);
+        let fill = |size: usize| -> (anneal_status_t, Vec<u8>) {
+            let mut bytes = vec![0xA5_u8; full + 16];
+            let out = bytes.as_mut_ptr().cast::<anneal_box_options_t>();
+            assert_eq!(
+                out as usize % std::mem::align_of::<anneal_box_options_t>(),
+                0
+            );
+            unsafe { std::ptr::addr_of_mut!((*out).struct_size).write(size) };
+            let status = unsafe { anneal_box_options_default(out) };
+            (status, bytes)
+        };
+
+        let (status, bytes) = fill(least);
+        assert_eq!(status, anneal_status_t::ANNEAL_SUCCESS);
+        assert!(
+            bytes[least..].iter().all(|&b| b == 0xA5),
+            "wrote past struct_size"
+        );
+        let mut older = default_options();
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                bytes.as_ptr(),
+                (&mut older as *mut anneal_box_options_t).cast::<u8>(),
+                least,
+            );
+        }
+        assert_eq!(older.struct_size, least);
+        assert_eq!(older.replicas, default_options().replicas);
+        assert_eq!(older.budget, default_options().budget);
+
+        let (status, bytes) = fill(full + 16);
+        assert_eq!(status, anneal_status_t::ANNEAL_SUCCESS);
+        assert!(
+            bytes[full..].iter().all(|&b| b == 0xA5),
+            "wrote a newer caller's tail"
+        );
+        let mut newer = default_options();
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                bytes.as_ptr(),
+                (&mut newer as *mut anneal_box_options_t).cast::<u8>(),
+                full,
+            );
+        }
+        assert_eq!(newer.struct_size, full + 16);
+        assert_eq!(
+            anneal_box_options_t {
+                struct_size: full,
+                ..newer
+            },
+            default_options()
+        );
+
+        for size in [0, 8, least - 1] {
+            let (status, bytes) = fill(size);
+            assert_eq!(status, anneal_status_t::ANNEAL_INVALID_PARAMETER, "{size}");
+            assert!(
+                bytes[std::mem::size_of::<usize>()..]
+                    .iter()
+                    .all(|&b| b == 0xA5),
+                "{size}: wrote a refused structure"
+            );
+            assert!(last_error().contains("struct_size"));
+        }
+    }
+
+    #[test]
+    fn a_box_the_python_drivers_refuse_is_refused_here_too() {
+        let options = wells_options();
+        for (low, high, words) in [
+            ([-1e308, -1.0], [1e308, 1.0], "finite width"),
+            ([-5e307, -5e307], [5e307, 5e307], "finite width"),
+            ([f64::NEG_INFINITY, -1.0], [1.0, 1.0], "finite"),
+            ([0.0, 1.0], [1.0, f64::NAN], "finite"),
+            ([1.0, -1.0], [-1.0, 1.0], "low <= high"),
+        ] {
+            let mut x = [0.0, 0.0];
+            let (status, evals) = run_on(&mut x, &low, &high, &options, |_| {});
+            assert_eq!(status, anneal_status_t::ANNEAL_INVALID_PARAMETER, "{low:?}");
+            assert_eq!(evals, 0);
+            assert!(last_error().contains(words), "{low:?}: {}", last_error());
+        }
+    }
+
+    #[test]
+    fn a_start_that_is_not_finite_is_refused() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut x = [0.0, bad];
+            let (status, evals) =
+                run_on(&mut x, &[-5.0, -5.0], &[5.0, 5.0], &wells_options(), |_| {});
+            assert_eq!(status, anneal_status_t::ANNEAL_INVALID_PARAMETER);
+            assert_eq!(evals, 0);
+            assert!(
+                last_error().contains("x[1] is not finite"),
+                "{}",
+                last_error()
+            );
+        }
+    }
+
+    #[test]
+    fn a_tensor_with_a_bad_shape_or_alignment_is_refused() {
+        let options = wells_options();
+        for shape in [-1_i64, -2, i64::MIN, i64::MAX] {
+            let mut x = [0.0, 0.0];
+            let (status, evals) =
+                run_on(&mut x, &[-5.0, -5.0], &[5.0, 5.0], &options, |t| unsafe {
+                    *(*t).dl_tensor.shape = shape;
+                });
+            assert_eq!(status, anneal_status_t::ANNEAL_INVALID_PARAMETER, "{shape}");
+            assert_eq!(evals, 0);
+            assert!(last_error().contains("shape"), "{}", last_error());
+        }
+        let mut x = [0.0, 0.0, 0.0];
+        let (status, evals) = run_on(&mut x, &[-5.0, -5.0], &[5.0, 5.0], &options, |t| unsafe {
+            *(*t).dl_tensor.shape = 2;
+            (*t).dl_tensor.byte_offset = 4;
+        });
+        assert_eq!(status, anneal_status_t::ANNEAL_INVALID_PARAMETER);
+        assert_eq!(evals, 0);
+        assert!(last_error().contains("aligned"), "{}", last_error());
+    }
+
+    #[test]
+    fn replicas_past_memory_are_refused_before_a_callback() {
+        for replicas in [usize::MAX, usize::MAX / 2, 1 << 62] {
+            let mut options = wells_options();
+            options.replicas = replicas;
+            let mut x = [0.0, 0.0];
+            let (status, evals) = run_on(&mut x, &[-5.0, -5.0], &[5.0, 5.0], &options, |_| {});
+            assert_eq!(
+                status,
+                anneal_status_t::ANNEAL_INVALID_PARAMETER,
+                "{replicas}"
+            );
+            assert_eq!(evals, 0);
+            assert!(last_error().contains("replicas"), "{}", last_error());
+        }
+    }
+
+    #[test]
+    fn an_escape_outside_the_enum_is_refused_not_undefined() {
+        for escape in [2_i32, -1, i32::MAX] {
+            let mut cfg = default_config();
+            unsafe {
+                std::ptr::addr_of_mut!(cfg.escape)
+                    .cast::<i32>()
+                    .write(escape)
+            };
+            let mut counter = Counter { evals: 0, grads: 0 };
+            let mut x = vec![0.0, 0.0];
+            let mut shell = StandingShell::new();
+            let mut report = anneal_box_report_t::default();
+            let status = unsafe {
+                anneal_box_minimize(
+                    rastrigin,
+                    rastrigin_grad,
+                    (&mut counter as *mut Counter).cast(),
+                    shell.point_at(x.as_mut_ptr(), 2),
+                    [-1.0, -1.0].as_ptr(),
+                    [1.0, 1.0].as_ptr(),
+                    std::ptr::addr_of!(cfg),
+                    &mut report,
+                )
+            };
+            assert_eq!(
+                status,
+                anneal_status_t::ANNEAL_INVALID_PARAMETER,
+                "{escape}"
+            );
+            assert_eq!(counter.evals, 0);
+            assert!(last_error().contains("escape"), "{}", last_error());
+        }
     }
 }

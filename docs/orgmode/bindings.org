@@ -41,6 +41,7 @@ step for step. =anneal_box_minimize_ex= takes it, and an optional
 anneal_box_options_t options;
 anneal_box_stats_t stats;
 
+options.struct_size = sizeof options;
 anneal_box_options_default(&options);
 options.seed = 4;
 options.identity_tol = 1e-3;
@@ -53,10 +54,17 @@ status = anneal_box_minimize_ex(eval, grad, NULL, &tensor, low, high,
 The enum-valued fields are =int32_t=, so a value the library does not know
 is refused with =ANNEAL_INVALID_PARAMETER= and a message in
 =anneal_last_error()=, before any callback runs. Both structures start
-with =struct_size=. The library reads only the bytes the caller's
-structure has and takes the default for the rest, and writes only the
-statistics that fit, so a newer library can add fields at the end without
-breaking a program built against this header. =tests/ffi_smoke.c= builds
+with =struct_size=, which the caller sets before any call, including
+=anneal_box_options_default=. The library reads only the bytes the
+caller's structure has and takes the default for the rest, and writes
+only the defaults and statistics that fit, so a newer library can add
+fields at the end without breaking a program built against this header.
+A size below the oldest layout is refused. The box follows the rule of
+the Python drivers: every side finite, a finite width and sum of widths,
+and =low <= high=; the start must be finite, and a DLPack shape that is
+negative or a data pointer not aligned for =double= is refused. The
+legacy =anneal_box_config_t= reads its =escape= as an =int32_t=, so an
+unknown value is refused there too. =tests/ffi_smoke.c= builds
 against the installed header, and =scripts/ffi_smoke.sh= runs it from a
 checkout.
 
