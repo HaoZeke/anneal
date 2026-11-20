@@ -697,15 +697,15 @@ GMIN_PANEL_OUT=/work/gmin-panel/output \
 # ASE: rewrite the tables from the committed rows, with no new search
 ASE_PANEL_OUT=/work/ase-panel/output \
   bash scripts/ase_panel/enter_bench.sh --system lj38
-ASE_NONLJ_REVISION=9a30f3190b3bb7040c675a904f8388eb68224151 \
+ASE_NONLJ_REVISION=5eb79cdcb0a986984dc7b487e5a3cc93224246f9 \
   ASE_NONLJ_OUT=/work/ase-nonlj/output \
   pixi run --locked --frozen bash scripts/ase_nonlj/enter_bench.sh
 
 # ASE, Morse: search again at the revision of the rows, into a new file
-git fetch origin record/repro-pin
-git worktree add /work/ase-9a30f319 9a30f3190b3bb7040c675a904f8388eb68224151
+git fetch origin record/ase-nonlj-rerun-20261119
+git worktree add /work/ase-5eb79cdc 5eb79cdcb0a986984dc7b487e5a3cc93224246f9
 cargo build --release --example ase_nonlj \
-  --manifest-path /work/ase-9a30f319/Cargo.toml --target-dir /work/target-panel
+  --manifest-path /work/ase-5eb79cdc/Cargo.toml --target-dir /work/target-panel
 export ASE_NONLJ_ROWS=/work/ase-nonlj-again.csv
 for s in $(seq 2000 2011); do bash scripts/ase_nonlj/enter_bench.sh \
   --system m38r6 --arm for_cluster --seed $s; done
@@ -742,8 +742,8 @@ writes a new search into a new rows file, so the committed rows stay as
 they are.
 The three Snakemake rules run the Sutton--Chen, TIP4P--GMIN, and GOFEE
 campaigns in full.
-The Morse rows of Table~\ref{tab:ase-morse} are revision \texttt{9a30f319},
-which the branch \texttt{record/repro-pin} holds, so the commands above build
+The Morse rows of Table~\ref{tab:ase-morse} are revision \texttt{5eb79cdc},
+which the branch \texttt{record/ase-nonlj-rerun-20261119} holds, so the commands above build
 that revision and repeat any seed of any arm under it.
 \path{scripts/ase_nonlj/enter_bench.sh} takes the revision in
 \texttt{ASE\_NONLJ\_REVISION}, refuses one that the checkout does not hold,
@@ -754,6 +754,96 @@ first.
 \path{scripts/ase_panel/enter_bench.sh} writes the search at the revision
 in \texttt{ASE\_PANEL\_REVISION}, a full commit SHA, into the rows file in
 \texttt{ASE\_PANEL\_ROWS}, with the same cap rule.
+
+\section{Claim provenance}
+Table~\ref{tab:provenance} names the committed rows and the script that
+recomputes each numerical comparison.  A source commit is the commit on the
+named branch that contains the rows, not necessarily the harness revision
+recorded inside each row.
+
+\begingroup
+\tiny
+\sloppy
+\setlength{\emergencystretch}{10em}
+\setlength{\tabcolsep}{2pt}
+\begin{longtable}{@{}p{0.16\textwidth}p{0.34\textwidth}p{0.25\textwidth}p{0.20\textwidth}@{}}
+\caption{Provenance of the numerical comparison claims.}
+\label{tab:provenance}\\
+\toprule
+Claim & Rows file & Source commit and branch & Recomputing script \\
+\midrule
+\endfirsthead
+\toprule
+Claim & Rows file & Source commit and branch & Recomputing script \\
+\midrule
+\endhead
+Lennard--Jones against GMIN &
+\path{bench/gmin-panel/rows.csv} &
+\texttt{\seqsplit{61fa67cf380e46876b569da45e7cc091647a775b}} on \texttt{develop} &
+\path{scripts/gmin_panel/run_panel.py} \\
+Morse against GMIN &
+\path{bench/gmin-panel/rows.csv};
+\path{bench/morse-panel/rerun-20261119/rows.csv} &
+\texttt{\seqsplit{229c4385e32dbbb6d8aa79cc905971ecfe6315fa}} on
+\texttt{\seqsplit{record/panel-rerun-20261119-template-free}}, with the GMIN arm on
+\texttt{develop} &
+\path{scripts/gmin_panel/run_panel.py} \\
+Morse against ASE &
+\path{bench/ase-nonlj/rerun-20261119/rows.csv} &
+\texttt{\seqsplit{4f852a6802ce61c917e83f7d82da037811d3e816}} on
+\texttt{record/ase-nonlj-rerun-20261119} &
+\path{scripts/ase_nonlj/summarize.py} \\
+Sutton--Chen against GMIN &
+\path{bench/metal-cluster-h2h/sc-n12/seeds.csv} &
+\texttt{\seqsplit{41ed91893deb50952b5cc666581d4bcb5a3354a3}} on
+\texttt{bench/sc-n12-dev} &
+\path{scripts/metal_h2h/sc_n12_pvalues.py};
+\path{paper/jctc/scripts/h2h_tables.py} \\
+TIP4P against GMIN &
+\path{bench/tip4p-h2h/rows-h2h-r2.csv} &
+\texttt{\seqsplit{cdae978c748db560fa3ac75eea3f0e0f07039653}} on
+\texttt{record/tip4p-h2h-r2} &
+\path{paper/jctc/scripts/h2h_tables.py} \\
+Tuned GMIN shard 2 &
+\path{bench/gmin-tuned/rows-shard2.csv} &
+\texttt{\seqsplit{d2e385639f074149bb3f63f63caf6c88a8b87a39}} on
+\texttt{record/gmin-tuned-shard2} &
+\path{paper/jctc/scripts/h2h_tables.py} \\
+Au\(_{55}\) against ABCluster &
+\path{bench/abcluster-template-free/rerun-20261119/rows.csv} &
+\texttt{\seqsplit{229c4385e32dbbb6d8aa79cc905971ecfe6315fa}} on
+\texttt{\seqsplit{record/panel-rerun-20261119-template-free}} &
+\path{paper/jctc/scripts/h2h_tables.py} \\
+Large-cluster GOFEE &
+\path{bench/ase-gofee-h2h/lj-large-seeds.csv} &
+\texttt{\seqsplit{de6c3d0d99504b60a1fa0ff694b3165501874344}} on
+\texttt{record/agox-n12} &
+\path{paper/jctc/scripts/h2h_tables.py} \\
+Equal-call CREST &
+\path{bench/crest-equal/rows.csv} &
+\texttt{\seqsplit{b698add43bb2900d07b2d81955fed11e9c7bf216}} on
+\texttt{bench/crest-equal} &
+\path{scripts/crest_equal/run_panel.py} \\
+Depth-posterior ablation &
+\path{bench/depth-posterior-ablation/results.csv};
+\path{results/size-tiered-selection.csv} &
+\texttt{\seqsplit{61fa67cf380e46876b569da45e7cc091647a775b}} on \texttt{develop} &
+\path{paper/jctc/scripts/ablation_table.py} \\
+\bottomrule
+\end{longtable}
+\endgroup
+
+Ten AGOX rows in the large-cluster GOFEE file name harness commit
+\texttt{\seqsplit{89de725a337b6e37daef05877796ae8192fbf8e1}}.
+That harness commit cannot be reached in this repository.
+The 50 retained AGOX rows name held harness commits
+\texttt{\seqsplit{786c1a3b87fc948be5823927bee83027570e3223}}, tree
+\texttt{\seqsplit{5f746b218dee3774616745b2a84cced311ec4f10}}, and
+\texttt{\seqsplit{4508a253b8bd41dbba19ccf61278b3080249e400}}, tree
+\texttt{\seqsplit{2b9fb9be520d21bd365211b8e9a67b4686d1c05b}}.
+The rows are listed separately in Table~\ref{tab:gofee-untraceable} and are
+excluded from every reported comparison and aggregate.
+This provenance gap is not resolved by the source commit that records the CSV.
 
 \section{Depth posterior against a uniform draw}
 \label{sec:si-ablation}
@@ -815,7 +905,7 @@ seeds 6400--6405 at the end of Section~\msref{sec:ablation}.
 They are the baseline in Section~\ref{sec:cross-field}.
 They are not a new comparison with GMIN.
 
-The ASE panel's 12 hits at M\(_{55}\) and \(\rho=6\) come at 2266 to 47255 calls.
+The ASE panel's 12 hits at M\(_{55}\) and \(\rho=6\) come at 2266 to 34953 calls.
 
 The panel uses three GMIN inputs.
 The Lennard-Jones rows run the Wales-group LJ\(_{38}\) introduction file at every Lennard-Jones size, with \(T=1.0\), \texttt{NEWRESTART 40}, and an energy difference of 0.003, with no symmetrization keyword, from the start that this code writes for the seed.
@@ -825,6 +915,73 @@ In the panel GMIN hits LJ\(_{98}\) and LJ\(_{75}\) on 0 of 12 seeds.
 Eleven of its 12 LJ\(_{98}\) runs end at \(-543.6429\) and one at \(-540.7447\), and all 12 of its LJ\(_{75}\) runs end at \(-396.2822\).
 So the Lennard-Jones rows measure GMIN under one setting at every size, and not GMIN tuned to each cluster.
 No run of the panel's GMIN with a per-size Lennard-Jones input exists.
+
+\subsection{Tuned-GMIN shard 2}
+\label{sec:gmin-tuned}
+The shard-two rows compare this setting with per-size GMIN inputs on the same
+starts, budgets, machine, and core.  The \texttt{lj98aa} rows in the file are
+GMIN A/A diagnostics and are not branch comparisons.
+% gmin-tuned table: start
+On LJ\(_{98}\), this work hits 7 of 12 and tuned GMIN
+hits 1 of 12; the two-test-corrected Fisher value is
+\(0.054\),
+which is not below 0.05.
+On LJ\(_{104}\), tuned GMIN hits 10 of 12 against
+5 of 12 for this work; the corrected value is
+\(0.18\).
+This is a GMIN advantage in the observed counts, is not significant,
+and is not a win for this work.
+
+\begin{table}
+\caption{This work against tuned GMIN in shard 2.
+Seeds 2000--2011; equal force-call budgets; one core.
+Calls and wall are medians over 12 runs, with misses charged at the budget.
+\(p_\mathrm{F}\) is the two-sided Fisher exact test on hits and
+\(p_{\mathrm{F},2}\) its Bonferroni value for these two clusters.}
+\label{tab:gmin-tuned}
+\centering
+\small
+\begin{tabular}{@{}lrrrrrrrr@{}}
+\toprule
+ & \multicolumn{2}{c}{Hits} & \multicolumn{2}{c}{Calls} & \multicolumn{2}{c}{Wall (s)} & & \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}
+Cluster & This work & GMIN & This work & GMIN & This work & GMIN & \(p_\mathrm{F}\) & \(p_{\mathrm{F},2}\) \\
+\midrule
+LJ\(_{98}\) & 7/12 & 1/12 & 3166811.5 & 4000000 & 78.001 & 177.4 & 0.027 & 0.054 \\
+LJ\(_{104}\) & 5/12 & 10/12 & 4000000 & 1314269 & 105.8 & 70.300 & 0.089 & 0.18 \\
+\bottomrule
+\end{tabular}
+\end{table}
+% gmin-tuned table: end
+
+\subsection{Gold against ABCluster}
+\label{sec:abcluster}
+The template-free Au\(_{55}\) rerun uses the published target
+\(-191.03085280\)~eV with the inclusive 0.001~eV tolerance.
+% abcluster table: start
+This work hits the Au\(_{55}\) target on 4 of 12 seeds and ABCluster
+on 0 of 12.  The two-sided Fisher value is \(0.093\),
+so the observed advantage is not significant.
+The same-code \texttt{anneal-cluster} arm in the rows is a preset diagnostic,
+not a comparison with another code, and is excluded.
+
+\begin{table}
+\caption{This work against ABCluster on Au\(_{55}\).
+Seeds 2000--2011; one-million-call budget; one core.
+Calls and wall are medians over the 12 runs, with misses charged at the budget.}
+\label{tab:abcluster}
+\centering
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Arm & Hits & Calls & Wall (s) \\
+\midrule
+This work & 4/12 & 1000000 & 36.862 \\
+ABCluster & 0/12 & 1000000 & 63.151 \\
+\bottomrule
+\end{tabular}
+\end{table}
+% abcluster table: end
 
 \section{Sutton--Chen panel}
 \label{sec:si-sc}
@@ -843,15 +1000,15 @@ form, 30 for 12-6, 5 for 10-8, and 10 for 9-6, a step of 0.251984~\(a\),
 the container that GMIN sizes for the cluster, and \texttt{SLOPPYCONV}
 \(10^{-4}\) and \texttt{TIGHTCONV} \(10^{-5}\).
 The runs are one at a time on core 0 of one host.
-\path{bench/metal-cluster-h2h/sc-n12/seeds.csv} holds the 324 seed rows:
-108 of this setting, 108 of GMIN with the Doye--Wales Sutton--Chen data
-file, and 108 unused GMIN rows with Lennard-Jones step
-and temperature; \path{scripts/metal_h2h/run_sc_n12.py} writes
+\path{bench/metal-cluster-h2h/sc-n12/seeds.csv} holds the template-free rows
+used here together with the superseded this-work rows and the unused GMIN
+rows that used Lennard-Jones step and temperature.
+\path{scripts/metal_h2h/run_sc_n12.py} writes
 \path{results.csv} from them and
 \path{paper/jctc/scripts/h2h_tables.py} writes the table.
 
 Table~\ref{tab:sc-si} gives the reference energy of each cluster of the main
-text's Sutton--Chen table and the cost of one force call for this setting.
+text's Sutton--Chen table and the cost of one force call for both arms.
 Inside is the median over the 12 runs of the time inside the energy and
 gradient divided by the calls, and Outside the rest of the wall divided by
 the calls.
@@ -868,27 +1025,30 @@ The command \texttt{bash scripts/metal\_h2h/enter\_sc\_n12.sh} runs seeds
 
 % sc-si table: start
 \begin{table}
-\caption{Reference energies and the cost per force call of this setting on Sutton--Chen.
+\caption{Reference energies and the cost per force call of the Sutton--Chen panel.
 The reference is the Doye--Wales global minimum in reduced units.
 Inside is the median time per call inside the energy and gradient, and
 Outside the median time per call spent elsewhere, in microseconds.
-Every row is harness \texttt{e3ed7dad}.}
+Harness is the revision of the GMIN Sutton--Chen data file; every anneal row is
+harness \texttt{c89653df}.}
 \label{tab:sc-si}
 \centering
 \small
-\begin{tabular}{@{}lrrr@{}}
+\begin{tabular}{@{}lrrrrrl@{}}
 \toprule
-Form, \(N\) & Reference & Inside (\(\mu\)s) & Outside (\(\mu\)s) \\
+ & & \multicolumn{2}{c}{Inside (\(\mu\)s)} & \multicolumn{2}{c}{Outside (\(\mu\)s)} & \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}
+Form, \(N\) & Reference & This work & GMIN & This work & GMIN & Harness \\
 \midrule
-12-6, 38 & \(-35419.9804\) & 39.97 & 4.85 \\
-10-8, 38 & \(-10117.2454\) & 38.61 & 4.64 \\
-9-6, 38 & \(-8917.7056\) & 36.86 & 4.55 \\
-12-6, 55 & \(-52884.6806\) & 70.70 & 8.34 \\
-10-8, 55 & \(-14814.5225\) & 72.84 & 11.18 \\
-9-6, 55 & \(-13217.8963\) & 65.34 & 7.83 \\
-12-6, 80 & \(-78414.6271\) & 127.14 & 20.49 \\
-10-8, 80 & \(-21819.9952\) & 136.26 & 21.02 \\
-9-6, 80 & \(-19560.8966\) & 131.05 & 19.91 \\
+12-6, 38 & \(-35419.9804\) & 33.65 & 8.10 & 2.61 & 1.55 & f9d1ac05 \\
+10-8, 38 & \(-10117.2454\) & 33.96 & 9.23 & 2.93 & 1.53 & f9d1ac05 \\
+9-6, 38 & \(-8917.7056\) & 34.28 & 8.62 & 3.01 & 1.57 & 9149d1b0 \\
+12-6, 55 & \(-52884.6806\) & 58.77 & 16.75 & 4.79 & 2.12 & a50f4b02 \\
+10-8, 55 & \(-14814.5225\) & 59.26 & 19.10 & 5.75 & 2.09 & a50f4b02 \\
+9-6, 55 & \(-13217.8963\) & 60.30 & 17.95 & 4.91 & 2.16 & a50f4b02 \\
+12-6, 80 & \(-78414.6271\) & 114.68 & 35.32 & 11.38 & 2.69 & a50f4b02 \\
+10-8, 80 & \(-21819.9952\) & 116.27 & 40.23 & 11.41 & 2.65 & a50f4b02 \\
+9-6, 80 & \(-19560.8966\) & 117.00 & 37.65 & 10.96 & 2.70 & a50f4b02 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -928,20 +1088,19 @@ test on calls or on wall.
 
 Every basin-hopping and minima-hopping run of
 Table~\ref{tab:ase-morse} stopped at the cap.
-This setting hits M\(_{38}\) at \(\rho=6\) and \(\rho=14\) and
-M\(_{55}\) at \(\rho=6\) on 12 of 12, and M\(_{55}\) at \(\rho=14\) on
-5 of 12.
+This setting hits M\(_{38}\) at \(\rho=6\) on 12 of 12 and at
+\(\rho=14\) on 9 of 12, and M\(_{55}\) at \(\rho=6\) on 12 of 12 and
+at \(\rho=14\) on 8 of 12.
 Both ASE arms hit 0 of 12 on all 4.
-Fisher's \(p\) against each ASE arm is \(7.4\times 10^{-7}\) on the
-first three and 0.037 on M\(_{55}\) at \(\rho=14\).
-Under Holm's correction for those 8 tests, M\(_{55}\) at \(\rho=14\) does not
-stay below 0.05.
+Fisher's \(p\) against each ASE arm is \(7.4\times 10^{-7}\),
+\(3.4\times 10^{-4}\), \(7.4\times 10^{-7}\), and 0.0013 in table order.
+All 8 comparisons stay below 0.05 under Holm's correction.
 
 % ase-nonlj table: start
 \begin{table}
 \caption{This work against the basin hopping (BH) and minima hopping
 (MH) of ASE 3.29.0 on Morse clusters.
-This work is anneal \texttt{9a30f319} at the length
+This work is anneal \texttt{5eb79cdc} at the length
 scale of the Morse pair.
 Seeds 2000--2011, one core, budget in force calls.
 Cap is the wall in seconds at which a BH or MH run stops, three times
@@ -962,10 +1121,10 @@ exact test on hits against each ASE arm.}
 \cmidrule(lr){4-6}\cmidrule(lr){7-9}
 Cluster & Budget & Cap & This work & BH & MH & This work & BH & MH & \(p_\mathrm{BH}\) & \(p_\mathrm{MH}\) \\
 \midrule
-M\(_{38}\), \(\rho=6\) & \(4\times 10^{5}\) & 10.465 & 12/12 & 0/12 & 0/12 & 0.265 & 10.466 & 10.466 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
-M\(_{38}\), \(\rho=14\) & \(4\times 10^{5}\) & 11.143 & 12/12 & 0/12 & 0/12 & 0.201 & 11.143 & 11.144 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
-M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & 15.804 & 12/12 & 0/12 & 0/12 & 0.286 & 15.805 & 15.806 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
-M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & 54.130 & 5/12 & 0/12 & 0/12 & 17.183 & 54.132 & 54.135 & 0.037 & 0.037 \\
+M\(_{38}\), \(\rho=6\) & \(4\times 10^{5}\) & 10.186 & 12/12 & 0/12 & 0/12 & 0.502 & 10.186 & 10.188 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
+M\(_{38}\), \(\rho=14\) & \(4\times 10^{5}\) & 9.516 & 9/12 & 0/12 & 0/12 & 2.136 & 9.517 & 9.518 & \(3.4\times 10^{-4}\) & \(3.4\times 10^{-4}\) \\
+M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & 15.637 & 12/12 & 0/12 & 0/12 & 0.226 & 15.638 & 15.642 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
+M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & 47.552 & 8/12 & 0/12 & 0/12 & 11.333 & 47.553 & 47.556 & \(1.3\times 10^{-3}\) & \(1.3\times 10^{-3}\) \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -979,19 +1138,19 @@ The versions are ASE 3.29.0 and AGOX 3.11.1.
 A surrogate replaces force calls with model fits, so the cost of a run is not in its force calls alone.
 Table~\ref{tab:gofee} scores this setting against AGOX GOFEE on
 LJ\(_{98}\), LJ\(_{102}\), LJ\(_{103}\), LJ\(_{104}\) and LJ\(_{150}\).
-This setting hits LJ\(_{98}\) on 7 of 12 seeds, LJ\(_{102}\) on 6 of 12, LJ\(_{103}\) on 6 of 12, LJ\(_{104}\) on 5 of 12 and LJ\(_{150}\) on 8 of 12, and GOFEE hits none.
 % gofee table: start
+This setting hits LJ\(_{98}\) on 5 of 10 seeds, LJ\(_{102}\) on 5 of 11, LJ\(_{103}\) on 6 of 9, LJ\(_{104}\) on 3 of 10 and LJ\(_{150}\) on 6 of 10, and GOFEE hits none.
+
 \begin{table}
 \caption{This work against AGOX GOFEE on LJ\(_{98}\), LJ\(_{102}\),
 LJ\(_{103}\), LJ\(_{104}\) and LJ\(_{150}\).
-Seeds 2000--2011, twelve per cluster, one core.
+Only seed pairs whose AGOX harness commit is held are included; one core.
 The budget is \(4\times 10^{6}\) force calls.
-AGOX stopped on the 2~h wall cap at a median of \(9.59\times 10^{5}\) calls, against this work's \(4\times 10^{6}\)-call budget.
+AGOX stopped on the 2~h wall cap at a median of \(9.46\times 10^{5}\) calls, against this work's \(4\times 10^{6}\)-call budget.
 \(p\) is the two-sided Fisher exact test on the hits.
 The anneal rows are from \texttt{786c1a3b}.
 The AGOX harness heads this repository holds are \texttt{786c1a3b} and \texttt{4508a253}.
-10 AGOX rows name a harness head listed in
-\texttt{bench/unreachable-revisions.csv}, and the hits count those rows.}
+The 10 rows whose harness is unrecoverable are excluded.}
 \label{tab:gofee}
 \centering
 \small
@@ -999,14 +1158,41 @@ The AGOX harness heads this repository holds are \texttt{786c1a3b} and \texttt{4
 \toprule
 Cluster & This work & GOFEE & \(p\) \\
 \midrule
-LJ\(_{98}\) & 7/12 & 0/12 & \(4.6\times 10^{-3}\) \\
-LJ\(_{102}\) & 6/12 & 0/12 & 0.014 \\
-LJ\(_{103}\) & 6/12 & 0/12 & 0.014 \\
-LJ\(_{104}\) & 5/12 & 0/12 & 0.037 \\
-LJ\(_{150}\) & 8/12 & 0/12 & \(1.3\times 10^{-3}\) \\
+LJ\(_{98}\) & 5/10 & 0/10 & 0.033 \\
+LJ\(_{102}\) & 5/11 & 0/11 & 0.035 \\
+LJ\(_{103}\) & 6/9 & 0/9 & \(9.0\times 10^{-3}\) \\
+LJ\(_{104}\) & 3/10 & 0/10 & 0.21 \\
+LJ\(_{150}\) & 6/10 & 0/10 & 0.011 \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+\begin{table}
+\caption{AGOX rows excluded from Table~\ref{tab:gofee}.
+Their harness commit \texttt{89de725a} is unrecoverable.
+Calls is the recorded charged-call count and is not used in any result.}
+\label{tab:gofee-untraceable}
+\centering
+\small
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Cluster & Seed & Calls \\
+\midrule
+LJ\(_{102}\) & 2007 & 1146355 \\
+LJ\(_{103}\) & 2007 & 1022294 \\
+LJ\(_{103}\) & 2009 & 1206372 \\
+LJ\(_{103}\) & 2010 & 971924 \\
+LJ\(_{104}\) & 2006 & 715912 \\
+LJ\(_{104}\) & 2007 & 1317378 \\
+LJ\(_{150}\) & 2010 & 582948 \\
+LJ\(_{150}\) & 2011 & 448988 \\
+LJ\(_{98}\) & 2006 & 1283398 \\
+LJ\(_{98}\) & 2008 & 1019400 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The excluded calls lie inside the held-row range except LJ\(_{98}\) seed 2006, whose 1283398 calls exceed the held-row maximum of 1278138.
 % gofee table: end
 
 \section{Structure plates, sketch-maps, and landfold}

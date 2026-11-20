@@ -38,6 +38,7 @@ SPEC = {
 ROW_FIELDS = (
     "system", "arm", "seed", "budget", "hit", "evals_to_hit", "charged", "best",
     "wall_s", "inside_s", "outside_s", "code_revision", "host", "stop", "cap_s",
+    "harness_revision",
 )
 HIT_TOL = DEFAULT_HIT_TOL
 TEX_LABELS = {
@@ -49,7 +50,7 @@ TEX_LABELS = {
 DOCUMENT = ROOT / "paper" / "jctc" / "si.tex"
 TEX_MARKS = ("% ase-nonlj table: start", "% ase-nonlj table: end")
 ASE_VERSION = "3.29.0"
-REVISION = "9a30f3190b3bb7040c675a904f8388eb68224151"
+REVISION = "5eb79cdcb0a986984dc7b487e5a3cc93224246f9"
 
 
 def type7(ordered: list[float], probability: float) -> float:
@@ -156,7 +157,7 @@ def against(group: list[dict[str, str]], other: list[dict[str, str]]) -> tuple[s
 
 
 def load_rows() -> dict[str, dict[str, list[dict[str, str]]]]:
-    path = ROOT / "bench" / "ase-nonlj" / "rows.csv"
+    path = ROOT / "bench" / "ase-nonlj" / "rerun-20261119" / "rows.csv"
     with path.open(newline="") as handle:
         reader = csv.DictReader(handle)
         if tuple(reader.fieldnames or ()) != ROW_FIELDS:

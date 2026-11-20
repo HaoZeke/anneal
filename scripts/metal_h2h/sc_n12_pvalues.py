@@ -1,10 +1,10 @@
 # Copyright (c) anneal developers
 """Anneal against GMIN p-values of the twelve-seed Sutton-Chen panel.
 
-The p-values on the anneal rows of results.csv test the anneal seeds against
-the GMIN rows of the anneal harness, e3ed7dad, whose data file used the
-Lennard-Jones container, temperature and step. This script tests the same
-anneal seeds against the GMIN rows of the corrected harness only, with the
+The p-values on the earlier anneal rows of results.csv test those seeds against
+the GMIN rows of the same harness, whose data file used the Lennard-Jones
+container, temperature and step. This script tests the newest appended anneal
+rows against the GMIN rows of the corrected harness only, with the
 Fisher and Mann-Whitney tests of run_sc_n12.py, and appends one row per
 system to pvalues.csv. Each row names, in supersedes, the results.csv row
 whose p-values it replaces. Existing rows are left as they are.
@@ -58,9 +58,15 @@ def compute(seed_rows: list[dict[str, str]]) -> list[dict[str, str]]:
     out = []
     for system in list(EIGHTY) + list(SMALLER):
         rows = [r for r in seed_rows if r["system"] == system]
-        anneal = [r for r in rows if r["arm"] == "anneal"]
+        anneal_rows = [r for r in rows if r["arm"] == "anneal"]
+        latest = anneal_rows[-1]["harness_revision"]
+        anneal = [r for r in anneal_rows if r["harness_revision"] == latest]
         own = one(anneal, "harness_revision")
-        gmin = [r for r in rows if r["arm"] == "gmin" and r["harness_revision"] != own]
+        anneal_harnesses = {r["harness_revision"] for r in anneal_rows}
+        gmin = [
+            r for r in rows
+            if r["arm"] == "gmin" and r["harness_revision"] not in anneal_harnesses
+        ]
         harness = one(gmin, "harness_revision")
         hits_a = sum(r["hit"] == "1" for r in anneal)
         hits_g = sum(r["hit"] == "1" for r in gmin)
@@ -93,7 +99,7 @@ def load(path: Path) -> list[dict[str, str]]:
 def main(argv: list[str]) -> int:
     computed = compute(load(SEEDS))
     stored = load(OUT)
-    key = ("system", "harness_revision")
+    key = ("system", "code_revision", "harness_revision")
     have = {tuple(r[k] for k in key): r for r in stored}
     missing = [r for r in computed if tuple(r[k] for k in key) not in have]
     differs = [r for r in computed if tuple(r[k] for k in key) in have and have[tuple(r[k] for k in key)] != r]

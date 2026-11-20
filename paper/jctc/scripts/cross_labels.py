@@ -19,7 +19,8 @@ from pathlib import Path
 
 JCTC = Path(__file__).resolve().parent.parent
 DOCUMENTS = {"manuscript": ("ms", ""), "si": ("si", "S")}
-TOKEN = re.compile(r"\\(sub)?section(\*?)\{|\\(begin|end)\{(equation|figure|table)\*?\}|\\label\{([^}]*)\}")
+TOKEN = re.compile(r"\\(sub)?section(\*?)\{|\\(begin|end)\{(equation|figure|table|longtable)\*?\}|\\label\{([^}]*)\}")
+SEC_DEPTH = re.compile(r"\\setcounter\{secnumdepth\}\{(-?\d+)\}")
 
 
 def uncomment(text: str) -> str:
@@ -28,24 +29,30 @@ def uncomment(text: str) -> str:
 
 def numbers(text: str, prefix: str) -> dict[str, str]:
     """Each label and the number achemso prints for it: a float or equation it sits in, else its section."""
+    clean = uncomment(text)
+    depth_match = SEC_DEPTH.search(clean)
+    secnumdepth = int(depth_match.group(1)) if depth_match else 2
     section = subsection = 0
     counters = {"equation": 0, "figure": 0, "table": 0}
     current, inside, labels = "", [], {}
-    for m in TOKEN.finditer(uncomment(text)):
+    for m in TOKEN.finditer(clean):
         sub, star, edge, environment, label = m.groups()
         if label is not None:
             labels[label] = f"{prefix}{counters[inside[-1]]}" if inside else current
         elif edge == "begin":
-            counters[environment] += 1
-            inside.append(environment)
+            counter = "table" if environment == "longtable" else environment
+            counters[counter] += 1
+            inside.append(counter)
         elif edge == "end":
             inside.pop()
         elif not star:
             if sub:
-                subsection += 1
+                if secnumdepth >= 2:
+                    subsection += 1
+                    current = f"{prefix}{section}.{subsection}"
             else:
                 section, subsection = section + 1, 0
-            current = f"{prefix}{section}.{subsection}" if sub else f"{prefix}{section}"
+                current = f"{prefix}{section}"
     return labels
 
 

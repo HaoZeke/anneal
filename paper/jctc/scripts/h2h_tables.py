@@ -38,6 +38,8 @@ TIP4P_WALL = ROOT / "bench" / "tip4p-h2h" / "wall-r2.csv"
 SC = ROOT / "bench" / "metal-cluster-h2h" / "sc-n12" / "results.csv"
 SC_SEEDS = ROOT / "bench" / "metal-cluster-h2h" / "sc-n12" / "seeds.csv"
 SC_P = ROOT / "bench" / "metal-cluster-h2h" / "sc-n12" / "pvalues.csv"
+GMIN_TUNED = ROOT / "bench" / "gmin-tuned" / "rows-shard2.csv"
+ABCLUSTER = ROOT / "bench" / "abcluster-template-free" / "rerun-20261119" / "rows.csv"
 CREST_EQUAL = ROOT / "bench" / "crest-equal"
 CREST_ARMS = ("anneal", "crest", "crest-wall")
 # The call tolerance of the panel: run_panel.py counts a CREST run as at the hop arm's calls
@@ -49,8 +51,11 @@ MARKS = {
     "tip4p": ("% tip4p-gmin table: start", "% tip4p-gmin table: end"),
     "tip4p-prose": ("% tip4p-gmin prose: start", "% tip4p-gmin prose: end"),
     "gofee-si": ("% gofee-si table: start", "% gofee-si table: end"),
+    "sc-prose": ("% sc prose: start", "% sc prose: end"),
     "sc": ("% sc table: start", "% sc table: end"),
     "sc-si": ("% sc-si table: start", "% sc-si table: end"),
+    "gmin-tuned": ("% gmin-tuned table: start", "% gmin-tuned table: end"),
+    "abcluster": ("% abcluster table: start", "% abcluster table: end"),
 }
 SC_ORDER = ("sc126-38", "sc108-38", "sc96-38", "sc126-55", "sc108-55", "sc96-55", "sc126-80", "sc108-80", "sc96-80")
 SC_FORM = {"126": "12-6", "108": "10-8", "96": "9-6"}
@@ -172,15 +177,33 @@ def large_seeds() -> list[dict[str, str]] | None:
     return rows
 
 
-def gofee_hits_sentence() -> str:
-    """The hit sentence for the five large clusters, or nothing when the rows are not quotable."""
+def held_large_seeds() -> list[dict[str, str]] | None:
+    """Held-harness AGOX rows and the matching this-work seeds."""
     rows = large_seeds()
+    if not rows:
+        return None
+    agox = [
+        row for row in rows
+        if row["arm"] == "agox_gofee" and row["code_revision"] != UNHELD_AGOX
+    ]
+    held = {(row["system"], row["seed"]) for row in agox}
+    anneal = [
+        row for row in rows
+        if row["arm"] == "anneal" and (row["system"], row["seed"]) in held
+    ]
+    return anneal + agox
+
+
+def gofee_hits_sentence() -> str:
+    """The hit sentence for held-harness seed pairs of the five large clusters."""
+    rows = held_large_seeds()
     if not rows:
         return ""
     bits = []
     for system in LARGE_SYSTEMS:
-        hits = sum(int(row["hit"]) for row in rows if row["system"] == system and row["arm"] == "anneal")
-        bits.append(f"{LARGE_LABEL[system]} on {hits} of 12")
+        group = [row for row in rows if row["system"] == system and row["arm"] == "anneal"]
+        hits = sum(int(row["hit"]) for row in group)
+        bits.append(f"{LARGE_LABEL[system]} on {hits} of {len(group)}")
     return (
         "This setting hits " + bits[0] + " seeds, " + ", ".join(bits[1:-1])
         + " and " + bits[-1] + ", and GOFEE hits none."
@@ -189,7 +212,7 @@ def gofee_hits_sentence() -> str:
 
 def gofee_wall_sentence() -> str:
     """The wall-cap sentence, or nothing when AGOX did not stop on that cap."""
-    rows = large_seeds()
+    rows = held_large_seeds()
     if not rows:
         return ""
     agox = [row for row in rows if row["arm"] == "agox_gofee"]
@@ -207,12 +230,16 @@ def gofee_wall_sentence() -> str:
 
 
 def gofee_large_block() -> str:
-    """LJ98, LJ102, LJ103, LJ104 and LJ150 against AGOX GOFEE, from the seed rows."""
-    rows = large_seeds()
+    """Held-harness LJ98--LJ150 rows against AGOX GOFEE."""
+    rows = held_large_seeds()
     sentence = gofee_wall_sentence()
     if not rows or not sentence:
         return ""
-    missing = sum(row["code_revision"] == UNHELD_AGOX for row in rows if row["arm"] == "agox_gofee")
+    all_rows = large_seeds() or []
+    missing_rows = [
+        row for row in all_rows
+        if row["arm"] == "agox_gofee" and row["code_revision"] == UNHELD_AGOX
+    ]
     body = []
     for system in LARGE_SYSTEMS:
         anneal = [row for row in rows if row["system"] == system and row["arm"] == "anneal"]
@@ -225,18 +252,32 @@ def gofee_large_block() -> str:
             f"{hits_g}/{len(agox)}",
             show_p(fisher_p(hits_a, len(anneal), hits_g, len(agox))),
         ]) + " \\\\")
+    missing_body = [
+        " & ".join([
+            LARGE_LABEL[row["system"]], row["seed"], row["charged"],
+        ]) + " \\\\"
+        for row in sorted(missing_rows, key=lambda row: (row["system"], int(row["seed"])))
+    ]
+    lj98_missing = next(
+        row for row in missing_rows if row["system"] == "lj98" and row["seed"] == "2006"
+    )
+    lj98_held_max = max(
+        int(row["charged"]) for row in rows
+        if row["system"] == "lj98" and row["arm"] == "agox_gofee"
+    )
     return "\n".join([
+        gofee_hits_sentence(),
+        "",
         "\\begin{table}",
         "\\caption{This work against AGOX GOFEE on LJ\\(_{98}\\), LJ\\(_{102}\\),",
         "LJ\\(_{103}\\), LJ\\(_{104}\\) and LJ\\(_{150}\\).",
-        "Seeds 2000--2011, twelve per cluster, one core.",
+        "Only seed pairs whose AGOX harness commit is held are included; one core.",
         f"The budget is {budget_tex(rows[0]['budget'])} force calls.",
         sentence,
         "\\(p\\) is the two-sided Fisher exact test on the hits.",
         "The anneal rows are from \\texttt{786c1a3b}.",
         "The AGOX harness heads this repository holds are \\texttt{786c1a3b} and \\texttt{4508a253}.",
-        f"{missing} AGOX rows name a harness head listed in",
-        "\\texttt{bench/unreachable-revisions.csv}, and the hits count those rows.}",
+        f"The {len(missing_rows)} rows whose harness is unrecoverable are excluded.}}",
         "\\label{tab:gofee}",
         "\\centering",
         "\\small",
@@ -248,6 +289,26 @@ def gofee_large_block() -> str:
         "\\bottomrule",
         "\\end{tabular}",
         "\\end{table}",
+        "",
+        "\\begin{table}",
+        "\\caption{AGOX rows excluded from Table~\\ref{tab:gofee}.",
+        "Their harness commit \\texttt{89de725a} is unrecoverable.",
+        "Calls is the recorded charged-call count and is not used in any result.}",
+        "\\label{tab:gofee-untraceable}",
+        "\\centering",
+        "\\small",
+        "\\begin{tabular}{@{}lrr@{}}",
+        "\\toprule",
+        "Cluster & Seed & Calls \\\\",
+        "\\midrule",
+        *missing_body,
+        "\\bottomrule",
+        "\\end{tabular}",
+        "\\end{table}",
+        "",
+        f"The excluded calls lie inside the held-row range except LJ\\(_{{98}}\\) seed "
+        f"{lj98_missing['seed']}, whose {lj98_missing['charged']} calls exceed the held-row "
+        f"maximum of {lj98_held_max}.",
     ])
 
 
@@ -521,12 +582,14 @@ def sc_pairs() -> list[tuple[dict[str, str], dict[str, str]]]:
     rows = read(SC)
     pairs = []
     for system in SC_ORDER:
-        anneal = next(r for r in rows if r["system"] == system and r["arm"] == "anneal")
+        anneal_rows = [r for r in rows if r["system"] == system and r["arm"] == "anneal"]
+        anneal = anneal_rows[-1]
+        anneal_harnesses = {r["harness_revision"] for r in anneal_rows}
         gmin = [r for r in rows if r["system"] == system and r["arm"] == "gmin"
-                and r["harness_revision"] != anneal["harness_revision"]]
-        if len(gmin) != 1:
-            raise SystemExit(f"{system}: expected one corrected GMIN row, found {len(gmin)}")
-        pairs.append((anneal, gmin[0]))
+                and r["harness_revision"] not in anneal_harnesses]
+        if not gmin:
+            raise SystemExit(f"{system}: expected a corrected GMIN row")
+        pairs.append((anneal, gmin[-1]))
     return pairs
 
 
@@ -535,6 +598,7 @@ def sc_tests() -> dict[str, dict[str, str]]:
     tests: dict[str, dict[str, str]] = {}
     for anneal, gmin in sc_pairs():
         rows = [r for r in read(SC_P) if r["system"] == anneal["system"]
+                and r["code_revision"] == anneal["code_revision"]
                 and r["harness_revision"] == gmin["harness_revision"]]
         if len(rows) != 1:
             raise SystemExit(f"{anneal['system']}: expected one pvalues.csv row, found {len(rows)}")
@@ -543,11 +607,37 @@ def sc_tests() -> dict[str, dict[str, str]]:
 
 
 def sc_gmin_quotable() -> bool:
-    """The corrected GMIN harness of every Sutton-Chen system is a commit this repository holds."""
-    return all(
-        commit_held(anneal["harness_revision"]) and commit_held(gmin["harness_revision"])
-        for anneal, gmin in sc_pairs()
-    )
+    """The source branch contains one complete pair for every system."""
+    return len(sc_pairs()) == len(SC_ORDER)
+
+
+def sc_prose() -> str:
+    """Plain-language comparison recomputed from the latest template-free rows."""
+    pairs = sc_pairs()
+    tests = sc_tests()
+    ahead = [a["system"] for a, g in pairs if int(a["hits"]) > int(g["hits"])]
+    tied = [a["system"] for a, g in pairs if int(a["hits"]) == int(g["hits"])]
+    behind = [a["system"] for a, g in pairs if int(a["hits"]) < int(g["hits"])]
+    significant = [
+        a["system"] for a, _g in pairs if float(tests[a["system"]]["fisher_p"]) < 0.05
+    ]
+    gmin_wall = sum(float(g["wall_median_s"]) < float(a["wall_median_s"]) for a, g in pairs)
+    inside_ratios = [float(a["pot_per_eval_s"]) / float(g["pot_per_eval_s"]) for a, g in pairs]
+
+    def names(systems: list[str]) -> str:
+        labels = [sc_label(system) for system in systems]
+        return ", ".join(labels[:-1]) + (", and " if len(labels) > 2 else " and ") + labels[-1]
+
+    return "\n".join([
+        f"This work has more hits on {len(ahead)} of the {len(pairs)} systems,",
+        f"the arms tie on {len(tied)}, and GMIN has more hits on {len(behind)}.",
+        f"The two-sided Fisher test is below 0.05 on {len(significant)} systems:",
+        f"{names(significant)}; all {len(significant)} favor this work.",
+        f"GMIN nevertheless has the lower median raw wall time on {gmin_wall} of {len(pairs)} systems.",
+        "Per call, this work spends "
+        f"{min(inside_ratios):.1f} to {max(inside_ratios):.1f} times as long "
+        "inside the potential as GMIN.",
+    ])
 
 
 def sc_block() -> str:
@@ -687,7 +777,8 @@ def sc_si_block() -> str:
     if not sc_gmin_quotable():
         return _sc_anneal_si_block()
     body = []
-    for anneal, gmin in sc_pairs():
+    pairs = sc_pairs()
+    for anneal, gmin in pairs:
         body.append(" & ".join([
             sc_label(anneal["system"]), f"\\({anneal['reference']}\\)",
             f"{1e6 * float(anneal['pot_per_eval_s']):.2f}", f"{1e6 * float(gmin['pot_per_eval_s']):.2f}",
@@ -701,7 +792,7 @@ def sc_si_block() -> str:
         "Inside is the median time per call inside the energy and gradient, and",
         "Outside the median time per call spent elsewhere, in microseconds.",
         "Harness is the revision of the GMIN Sutton--Chen data file; every anneal row is",
-        "harness \\texttt{e3ed7dad}.}",
+        f"harness \\texttt{{{pairs[0][0]['harness_revision'][:8]}}}.}}",
         "\\label{tab:sc-si}",
         "\\centering",
         "\\small",
@@ -710,6 +801,127 @@ def sc_si_block() -> str:
         " & & \\multicolumn{2}{c}{Inside (\\(\\mu\\)s)} & \\multicolumn{2}{c}{Outside (\\(\\mu\\)s)} & \\\\",
         "\\cmidrule(lr){3-4}\\cmidrule(lr){5-6}",
         "Form, \\(N\\) & Reference & This work & GMIN & This work & GMIN & Harness \\\\",
+        "\\midrule",
+        *body,
+        "\\bottomrule",
+        "\\end{tabular}",
+        "\\end{table}",
+    ])
+
+
+def tuned_gmin_summary() -> list[dict[str, object]]:
+    """Recompute tuned-GMIN shard 2 directly from its per-seed rows."""
+    rows = read(GMIN_TUNED)
+    summary = []
+    for system in ("lj98", "lj104"):
+        arms = {
+            arm: [row for row in rows if row["system"] == system and row["code"] == arm]
+            for arm in ("anneal", "gmin")
+        }
+        if any(len(group) != 12 for group in arms.values()):
+            raise SystemExit(f"{GMIN_TUNED}: {system} needs 12 rows per arm")
+        ah = sum(int(row["hit"]) for row in arms["anneal"])
+        gh = sum(int(row["hit"]) for row in arms["gmin"])
+        fisher = fisher_p(ah, 12, gh, 12)
+        summary.append({
+            "system": system,
+            "anneal_hits": ah,
+            "gmin_hits": gh,
+            "anneal_calls": type7_median([float(row["calls_to_hit"]) for row in arms["anneal"]]),
+            "gmin_calls": type7_median([float(row["calls_to_hit"]) for row in arms["gmin"]]),
+            "anneal_wall": type7_median([float(row["wall_s"]) for row in arms["anneal"]]),
+            "gmin_wall": type7_median([float(row["wall_s"]) for row in arms["gmin"]]),
+            "fisher": fisher,
+            "fisher_two": min(1.0, 2.0 * fisher),
+        })
+    return summary
+
+
+def tuned_gmin_block() -> str:
+    summary = tuned_gmin_summary()
+    body = []
+    for row in summary:
+        body.append(" & ".join([
+            f"LJ\\(_{{{str(row['system']).removeprefix('lj')}}}\\)",
+            f"{row['anneal_hits']}/12", f"{row['gmin_hits']}/12",
+            show_calls_median(float(row["anneal_calls"])),
+            show_calls_median(float(row["gmin_calls"])),
+            show_s(float(row["anneal_wall"])), show_s(float(row["gmin_wall"])),
+            show_p(float(row["fisher"])), show_p(float(row["fisher_two"])),
+        ]) + " \\\\")
+    lj98, lj104 = summary
+    return "\n".join([
+        f"On LJ\\(_{{98}}\\), this work hits {lj98['anneal_hits']} of 12 and tuned GMIN",
+        f"hits {lj98['gmin_hits']} of 12; the two-test-corrected Fisher value is",
+        f"\\({show_p(float(lj98['fisher_two']))}\\),",
+        "which is not below 0.05.",
+        f"On LJ\\(_{{104}}\\), tuned GMIN hits {lj104['gmin_hits']} of 12 against",
+        f"{lj104['anneal_hits']} of 12 for this work; the corrected value is",
+        f"\\({show_p(float(lj104['fisher_two']))}\\).",
+        "This is a GMIN advantage in the observed counts, is not significant,",
+        "and is not a win for this work.",
+        "",
+        "\\begin{table}",
+        "\\caption{This work against tuned GMIN in shard 2.",
+        "Seeds 2000--2011; equal force-call budgets; one core.",
+        "Calls and wall are medians over 12 runs, with misses charged at the budget.",
+        "\\(p_\\mathrm{F}\\) is the two-sided Fisher exact test on hits and",
+        "\\(p_{\\mathrm{F},2}\\) its Bonferroni value for these two clusters.}",
+        "\\label{tab:gmin-tuned}",
+        "\\centering",
+        "\\small",
+        "\\begin{tabular}{@{}lrrrrrrrr@{}}",
+        "\\toprule",
+        " & \\multicolumn{2}{c}{Hits} & \\multicolumn{2}{c}{Calls} & "
+        "\\multicolumn{2}{c}{Wall (s)} & & \\\\",
+        "\\cmidrule(lr){2-3}\\cmidrule(lr){4-5}\\cmidrule(lr){6-7}",
+        "Cluster & This work & GMIN & This work & GMIN & This work & GMIN & "
+        "\\(p_\\mathrm{F}\\) & \\(p_{\\mathrm{F},2}\\) \\\\",
+        "\\midrule",
+        *body,
+        "\\bottomrule",
+        "\\end{tabular}",
+        "\\end{table}",
+    ])
+
+
+def abcluster_block() -> str:
+    """Au55 recommended preset against ABCluster, excluding the same-code arm."""
+    rows = read(ABCLUSTER)
+    groups = {
+        arm: [row for row in rows if row["system"] == "au55" and row["arm"] == arm]
+        for arm in ("anneal-recommended", "abcluster")
+    }
+    if any(len(group) != 12 for group in groups.values()):
+        raise SystemExit(f"{ABCLUSTER}: Au55 needs 12 recommended and 12 ABCluster rows")
+    ah = sum(int(row["hit"]) for row in groups["anneal-recommended"])
+    bh = sum(int(row["hit"]) for row in groups["abcluster"])
+    p_value = fisher_p(ah, 12, bh, 12)
+    body = []
+    for arm, label in (("anneal-recommended", "This work"), ("abcluster", "ABCluster")):
+        group = groups[arm]
+        body.append(" & ".join([
+            label, f"{sum(int(row['hit']) for row in group)}/12",
+            show_calls_median(type7_median([float(row["calls_to_hit"]) for row in group])),
+            show_s(type7_median([float(row["wall_s"]) for row in group])),
+        ]) + " \\\\")
+    return "\n".join([
+        f"This work hits the Au\\(_{{55}}\\) target on {ah} of 12 seeds and ABCluster",
+        f"on {bh} of 12.  The two-sided Fisher value is \\({show_p(p_value)}\\),",
+        "so the observed advantage is not significant.",
+        "The same-code \\texttt{anneal-cluster} arm in the rows is a preset diagnostic,",
+        "not a comparison with another code, and is excluded.",
+        "",
+        "\\begin{table}",
+        "\\caption{This work against ABCluster on Au\\(_{55}\\).",
+        "Seeds 2000--2011; one-million-call budget; one core.",
+        "Calls and wall are medians over the 12 runs, with misses charged at the budget.}",
+        "\\label{tab:abcluster}",
+        "\\centering",
+        "\\small",
+        "\\begin{tabular}{@{}lrrr@{}}",
+        "\\toprule",
+        "Arm & Hits & Calls & Wall (s) \\\\",
         "\\midrule",
         *body,
         "\\bottomrule",
@@ -802,8 +1014,11 @@ BLOCKS = {
     "tip4p-prose": (SI, tip4p_prose),
     "tip4p": (SI, tip4p_block),
     "gofee-si": (SI, gofee_si_block),
+    "sc-prose": (MANUSCRIPT, sc_prose),
     "sc": (MANUSCRIPT, sc_block),
     "sc-si": (SI, sc_si_block),
+    "gmin-tuned": (SI, tuned_gmin_block),
+    "abcluster": (SI, abcluster_block),
 }
 
 
@@ -824,20 +1039,26 @@ def main(argv: list[str]) -> int:
     stale = False
     override = os.environ.get("H2H_TABLES_OUTPUT", "")
     checking = "--check" in argv
+    generated: dict[Path, str] = {}
     for name, (path, make) in BLOCKS.items():
         target = Path(override) / path.name if override else path
-        if not checking and target.exists():
+        if not checking and target.exists() and target not in generated:
             raise SystemExit(f"refusing to overwrite {target}")
-        source = target if target.exists() else path
-        text = source.read_text()
+        text = generated.get(target)
+        if text is None:
+            source = target if target.exists() else path
+            text = source.read_text()
         updated = splice(text, MARKS[name], make())
         if checking:
             if updated != text:
                 print(f"the {name} table in {target.name} is stale", file=sys.stderr)
                 stale = True
         else:
+            generated[target] = updated
+    if not checking:
+        for target, text in generated.items():
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(updated)
+            target.write_text(text)
     return 1 if stale else 0
 
 
