@@ -659,6 +659,7 @@ fn batch_is_the_same_answer_as_one_call_per_system() {
 
 #[cfg(feature = "cpmd-fixture")]
 #[test]
+#[ignore = "needs RGPOT_ENGINE_CPMD_FIXTURE and RGPOT_ENGINE_CPMD_PARAMS; run with --ignored"]
 fn cpmd_fixture_batch_preserves_single_call_bits_and_order() -> Result<(), CpmdFixtureError> {
     let engine_path = std::env::var_os("RGPOT_ENGINE_CPMD_FIXTURE").ok_or(
         CpmdFixtureError::MissingEnvironment("RGPOT_ENGINE_CPMD_FIXTURE"),
