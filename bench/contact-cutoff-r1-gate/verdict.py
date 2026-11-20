@@ -205,7 +205,12 @@ def part2(rows: list[dict[str, str]]):
             "aa_bits_same": same(sb, sr, "best_bits"),
             "aa_charged_same": same(sb, sr, "charged"),
             "per_seed": [
-                (s, sb[s]["best_bits"] == sc[s]["best_bits"], sb[s]["charged"] == sc[s]["charged"])
+                (
+                    s,
+                    sb[s]["best_bits"] == sc[s]["best_bits"],
+                    sb[s]["charged"] == sc[s]["charged"],
+                    sb[s]["trace"] == sc[s]["trace"],
+                )
                 for s in sorted(sb)
             ],
         }
@@ -242,6 +247,19 @@ def main(argv: list[str]) -> int:
     p2_fail = [f"{c['system']} ({', '.join(c['fails'])})" for c in cells if c["fails"]]
     p2_gain = [f"{c['system']} ({', '.join(c['gains'])})" for c in cells if c["gains"]]
     verdict = "PASS" if not p1_fail and not p2_fail else "FAIL"
+    seeds = sum(c["n"] for c in cells)
+    identical = sum(
+        bits and charged and trace for c in cells for _s, bits, charged, trace in c["per_seed"]
+    )
+    if identical == seeds:
+        reach = (
+            f" On part 2, CC equals DEVELOP in best_bits, charged and trace on all {seeds} "
+            "cell-seeds, so the hit and calls columns are equal and the cost ratios are timing "
+            "of identical work. The gate saw no change in behaviour on these cells, which is "
+            "what the reach analysis under Cells predicts. It does not exercise the new cutoff."
+        )
+    else:
+        reach = ""
 
     text = [
         "# contact-cutoff-r1 gate",
@@ -340,7 +358,7 @@ def main(argv: list[str]) -> int:
         "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for c in cells:
-        differ = [str(s) for s, bits, charged in c["per_seed"] if not (bits and charged)]
+        differ = [str(s) for s, bits, charged, _t in c["per_seed"] if not (bits and charged)]
         text.append(
             f"| {c['system']} | {c['bits_same']}/{c['n']} | {c['charged_same']}/{c['n']} | "
             f"{c['trace_same']}/{c['n']} | {c['aa_bits_same']}/{c['n']} | {c['aa_charged_same']}/{c['n']} | "
@@ -360,7 +378,8 @@ def main(argv: list[str]) -> int:
         "## Result",
         "",
         f"{verdict}."
-        + (" Failing cases: " + "; ".join(p1_fail + p2_fail) + "." if verdict == "FAIL" else " No failing case."),
+        + (" Failing cases: " + "; ".join(p1_fail + p2_fail) + "." if verdict == "FAIL" else " No failing case.")
+        + reach,
         "",
         "## Files",
         "",
