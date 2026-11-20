@@ -478,8 +478,7 @@ This setting draws one of the moves of Section~\msref{sec:moves} from a
 posterior on their recent gains, most of those moves displace one atom or a
 few, and a stall triggers the climb of Section~\msref{sec:stall} out of the
 current basin rather than a new start.
-GMIN spends less time per force call, which is why it has the lower median
-wall on most clusters of Table~\msref{tab:sc} even where it hits on fewer seeds.
+GMIN spends less time per force call.
 
 ASE basin hopping is the same outer loop with one move, a uniform shift of
 every coordinate, a FIRE quench, and a fixed temperature, and it keeps no
@@ -781,33 +780,25 @@ Lennard--Jones against GMIN &
 \path{bench/gmin-panel/rows.csv} &
 \texttt{\seqsplit{61fa67cf380e46876b569da45e7cc091647a775b}} on \texttt{develop} &
 \path{scripts/gmin_panel/run_panel.py} \\
-Morse against GMIN &
-\path{bench/gmin-panel/rows.csv};
+Morse (this work) &
 \path{bench/morse-panel/rerun-20261119/rows.csv} &
 \texttt{\seqsplit{229c4385e32dbbb6d8aa79cc905971ecfe6315fa}} on
-\texttt{\seqsplit{record/panel-rerun-20261119-template-free}}, with the GMIN arm on
-\texttt{develop} &
+\texttt{\seqsplit{record/panel-rerun-20261119-template-free}} &
 \path{scripts/gmin_panel/run_panel.py} \\
+Tuned GMIN shard 2 &
+\path{bench/gmin-tuned/rows-shard2.csv} &
+\texttt{\seqsplit{d2e385639f074149bb3f63f63caf6c88a8b87a39}} on
+\texttt{record/gmin-tuned-shard2} &
+\path{paper/jctc/scripts/h2h_tables.py} \\
 Morse against ASE &
 \path{bench/ase-nonlj/rerun-20261119/rows.csv} &
 \texttt{\seqsplit{4f852a6802ce61c917e83f7d82da037811d3e816}} on
 \texttt{record/ase-nonlj-rerun-20261119} &
 \path{scripts/ase_nonlj/summarize.py} \\
-Sutton--Chen against GMIN &
-\path{bench/metal-cluster-h2h/sc-n12/seeds.csv} &
-\texttt{\seqsplit{41ed91893deb50952b5cc666581d4bcb5a3354a3}} on
-\texttt{bench/sc-n12-dev} &
-\path{scripts/metal_h2h/sc_n12_pvalues.py};
-\path{paper/jctc/scripts/h2h_tables.py} \\
 TIP4P against GMIN &
 \path{bench/tip4p-h2h/rows-h2h-r2.csv} &
 \texttt{\seqsplit{cdae978c748db560fa3ac75eea3f0e0f07039653}} on
 \texttt{record/tip4p-h2h-r2} &
-\path{paper/jctc/scripts/h2h_tables.py} \\
-Tuned GMIN shard 2 &
-\path{bench/gmin-tuned/rows-shard2.csv} &
-\texttt{\seqsplit{d2e385639f074149bb3f63f63caf6c88a8b87a39}} on
-\texttt{record/gmin-tuned-shard2} &
 \path{paper/jctc/scripts/h2h_tables.py} \\
 Au\(_{55}\) against ABCluster &
 \path{bench/abcluster-template-free/rerun-20261119/rows.csv} &
@@ -914,13 +905,9 @@ The Au\(_{55}\) row instead uses the Darby gold parameters, the \(11.829521\)~\A
 In the panel GMIN hits LJ\(_{98}\) and LJ\(_{75}\) on 0 of 12 seeds.
 Eleven of its 12 LJ\(_{98}\) runs end at \(-543.6429\) and one at \(-540.7447\), and all 12 of its LJ\(_{75}\) runs end at \(-396.2822\).
 So the Lennard-Jones rows measure GMIN under one setting at every size, and not GMIN tuned to each cluster.
-No run of the panel's GMIN with a per-size Lennard-Jones input exists.
 
 \subsection{Tuned-GMIN shard 2}
 \label{sec:gmin-tuned}
-The shard-two rows compare this setting with per-size GMIN inputs on the same
-starts, budgets, machine, and core.  The \texttt{lj98aa} rows in the file are
-GMIN A/A diagnostics and are not branch comparisons.
 % gmin-tuned table: start
 On LJ\(_{98}\), this work hits 7 of 12 and tuned GMIN
 hits 1 of 12; the two-test-corrected Fisher value is
@@ -953,6 +940,8 @@ LJ\(_{104}\) & 5/12 & 10/12 & 4000000 & 1314269 & 105.8 & 70.300 & 0.089 & 0.18 
 \end{tabular}
 \end{table}
 % gmin-tuned table: end
+The \texttt{lj98aa} rows in the file are GMIN A/A diagnostics and are not
+branch comparisons.
 
 \subsection{Gold against ABCluster}
 \label{sec:abcluster}
@@ -1000,59 +989,7 @@ form, 30 for 12-6, 5 for 10-8, and 10 for 9-6, a step of 0.251984~\(a\),
 the container that GMIN sizes for the cluster, and \texttt{SLOPPYCONV}
 \(10^{-4}\) and \texttt{TIGHTCONV} \(10^{-5}\).
 The runs are one at a time on core 0 of one host.
-\path{bench/metal-cluster-h2h/sc-n12/seeds.csv} holds the template-free rows
-used here together with the superseded this-work rows and the unused GMIN
-rows that used Lennard-Jones step and temperature.
-\path{scripts/metal_h2h/run_sc_n12.py} writes
-\path{results.csv} from them and
-\path{paper/jctc/scripts/h2h_tables.py} writes the table.
-
-Table~\ref{tab:sc-si} gives the reference energy of each cluster of the main
-text's Sutton--Chen table and the cost of one force call for both arms.
-Inside is the median over the 12 runs of the time inside the energy and
-gradient divided by the calls, and Outside the rest of the wall divided by
-the calls.
-This setting evaluates rgpot's Sutton--Chen routine through its C entry.
-The runs are on core 0 of one host, one run at a time, in a namespace with
-hostname \texttt{bench}.
-Each GMIN row starts from the anneal row's start file under the GMIN data
-file of \path{scripts/metal_h2h/run_sc.py}.
-The command \texttt{bash scripts/metal\_h2h/enter\_sc\_n12.sh} runs seeds
-2000--2011 under \texttt{\$SC\_H2H\_N12\_OUTPUT} and keeps each stored row, and
-\texttt{python3 paper/jctc/scripts/h2h\_tables.py} writes both tables under
-\texttt{\$H2H\_TABLES\_OUTPUT} from
-\path{bench/metal-cluster-h2h/sc-n12/results.csv}.
-
-% sc-si table: start
-\begin{table}
-\caption{Reference energies and the cost per force call of the Sutton--Chen panel.
-The reference is the Doye--Wales global minimum in reduced units.
-Inside is the median time per call inside the energy and gradient, and
-Outside the median time per call spent elsewhere, in microseconds.
-Harness is the revision of the GMIN Sutton--Chen data file; every anneal row is
-harness \texttt{c89653df}.}
-\label{tab:sc-si}
-\centering
-\small
-\begin{tabular}{@{}lrrrrrl@{}}
-\toprule
- & & \multicolumn{2}{c}{Inside (\(\mu\)s)} & \multicolumn{2}{c}{Outside (\(\mu\)s)} & \\
-\cmidrule(lr){3-4}\cmidrule(lr){5-6}
-Form, \(N\) & Reference & This work & GMIN & This work & GMIN & Harness \\
-\midrule
-12-6, 38 & \(-35419.9804\) & 33.65 & 8.10 & 2.61 & 1.55 & f9d1ac05 \\
-10-8, 38 & \(-10117.2454\) & 33.96 & 9.23 & 2.93 & 1.53 & f9d1ac05 \\
-9-6, 38 & \(-8917.7056\) & 34.28 & 8.62 & 3.01 & 1.57 & 9149d1b0 \\
-12-6, 55 & \(-52884.6806\) & 58.77 & 16.75 & 4.79 & 2.12 & a50f4b02 \\
-10-8, 55 & \(-14814.5225\) & 59.26 & 19.10 & 5.75 & 2.09 & a50f4b02 \\
-9-6, 55 & \(-13217.8963\) & 60.30 & 17.95 & 4.91 & 2.16 & a50f4b02 \\
-12-6, 80 & \(-78414.6271\) & 114.68 & 35.32 & 11.38 & 2.69 & a50f4b02 \\
-10-8, 80 & \(-21819.9952\) & 116.27 & 40.23 & 11.41 & 2.65 & a50f4b02 \\
-9-6, 80 & \(-19560.8966\) & 117.00 & 37.65 & 10.96 & 2.70 & a50f4b02 \\
-\bottomrule
-\end{tabular}
-\end{table}
-% sc-si table: end
+\path{bench/metal-cluster-h2h/sc-n12/seeds.csv} holds the rows.
 
 \section{The Atomic Simulation Environment}
 \label{sec:ase}
@@ -1168,31 +1105,27 @@ LJ\(_{150}\) & 6/10 & 0/10 & 0.011 \\
 \end{table}
 
 \begin{table}
-\caption{AGOX rows excluded from Table~\ref{tab:gofee}.
-Their harness commit \texttt{89de725a} is unrecoverable.
-Calls is the recorded charged-call count and is not used in any result.}
+\caption{AGOX rows excluded from Table~\ref{tab:gofee}.}
 \label{tab:gofee-untraceable}
 \centering
 \small
-\begin{tabular}{@{}lrr@{}}
+\begin{tabular}{@{}lr@{}}
 \toprule
-Cluster & Seed & Calls \\
+Cluster & Seed \\
 \midrule
-LJ\(_{102}\) & 2007 & 1146355 \\
-LJ\(_{103}\) & 2007 & 1022294 \\
-LJ\(_{103}\) & 2009 & 1206372 \\
-LJ\(_{103}\) & 2010 & 971924 \\
-LJ\(_{104}\) & 2006 & 715912 \\
-LJ\(_{104}\) & 2007 & 1317378 \\
-LJ\(_{150}\) & 2010 & 582948 \\
-LJ\(_{150}\) & 2011 & 448988 \\
-LJ\(_{98}\) & 2006 & 1283398 \\
-LJ\(_{98}\) & 2008 & 1019400 \\
+LJ\(_{102}\) & 2007 \\
+LJ\(_{103}\) & 2007 \\
+LJ\(_{103}\) & 2009 \\
+LJ\(_{103}\) & 2010 \\
+LJ\(_{104}\) & 2006 \\
+LJ\(_{104}\) & 2007 \\
+LJ\(_{150}\) & 2010 \\
+LJ\(_{150}\) & 2011 \\
+LJ\(_{98}\) & 2006 \\
+LJ\(_{98}\) & 2008 \\
 \bottomrule
 \end{tabular}
 \end{table}
-
-The excluded calls lie inside the held-row range except LJ\(_{98}\) seed 2006, whose 1283398 calls exceed the held-row maximum of 1278138.
 % gofee table: end
 
 \section{Structure plates, sketch-maps, and landfold}

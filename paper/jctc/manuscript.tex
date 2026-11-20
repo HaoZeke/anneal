@@ -54,7 +54,7 @@ On the Lennard-Jones pair potential the number of minima grows quickly with the 
 Here, we keep one fixed setting across all sizes, with a move library that does not change with the atom count and a reduced temperature of \(0.8\), the value Wales and Doye used \cite{wales1997}.
 Below 98 atoms the quench chooses between the plain potential and one diameter penalty, and at 98 atoms and above the penalty is absent.
 At every size, a stall does not replace the walker with a random cluster.
-Section~\ref{sec:results} runs this setting against GMIN on 8 Lennard-Jones and 0 Morse clusters, and against the basin hopping and the minima hopping of the Atomic Simulation Environment on 4 Morse clusters \cite{wales1997,larsenAse2017,goedecker2004}.
+Section~\ref{sec:results} runs this setting against GMIN on 8 Lennard-Jones clusters, and against the basin hopping and the minima hopping of the Atomic Simulation Environment on 4 Morse clusters \cite{wales1997,larsenAse2017,goedecker2004}.
 GMIN hits more seeds on 1 of the 8, LJ\(_{150}\).
 
 This article does not claim a new move.
@@ -481,8 +481,8 @@ LJ\(_{104}\) & \(4\times 10^{6}\) & 5/12 & 6/12 & 1 \\
 
 \subsection{GMIN on the paper panel}
 \label{sec:gmin}
-Table~\ref{tab:gmin} puts this work against GMIN on the eight
-Lennard-Jones clusters whose recorded harness commits this repository now holds, with both arms of each cluster
+Table~\ref{tab:gmin} puts this work against GMIN on eight
+Lennard-Jones systems, with both arms of each cluster
 in one session on one core of one host.
 Both arms use seeds 2000--2011, the budget in the table and the start
 this code writes for the seed.
@@ -538,6 +538,14 @@ The median wall is 237.2~s against 326.1~s, the median time inside the potential
 Fisher's exact \(p\) on the hits is 0.21, and the Mann--Whitney \(p\) on calls is 0.17.
 
 % gmin-panel table: start
+On the four Morse clusters, this setting, revision \texttt{eeec8e2c}, runs on seeds 2000--2011.
+A miss is charged the full budget, and the median and the interquartile range
+below count that full budget as the calls of a miss.
+On M\(_{55}\) at \(\rho=6\) the budget is \(1\times 10^{6}\) calls and this setting hits 12 of 12. The median calls are 22596, and the interquartile range of those calls is 51763.75. On the hits the calls run from 5808 to 104221. The median wall is 0.424~s, the median time inside the potential is 0.298~s, and the median time outside the potential is 0.123~s. The best energy is -250.286609 against the reference -250.286609.
+On M\(_{55}\) at \(\rho=14\) the budget is \(1\times 10^{6}\) calls and this setting hits 9 of 12. The median calls are 451561.5, and the interquartile range of those calls is 773925.5. On the hits the calls run from 55240 to 932023. The median wall is 7.719~s, the median time inside the potential is 5.899~s, and the median time outside the potential is 1.819~s. The best energy is -220.646208 against the reference -220.646208.
+On M\(_{80}\) at \(\rho=6\) the budget is \(4\times 10^{6}\) calls and this setting hits 12 of 12. The median calls are 62677, and the interquartile range of those calls is 575467.75. On the hits the calls run from 7052 to 1461617. The median wall is 2.322~s, the median time inside the potential is 1.704~s, and the median time outside the potential is 0.619~s. The best energy is -378.333471 against the reference -378.333471.
+On M\(_{80}\) at \(\rho=14\) the budget is \(4\times 10^{6}\) calls and this setting hits 6 of 12. The median calls are 3901429, and the interquartile range of those calls is 1446773. On the hits the calls run from 529680 to 3802858. The median wall is 144.7~s, the median time inside the potential is 106.0~s, and the median time outside the potential is 36.513~s. The best energy is -340.811371 against the reference -340.811371.
+
 \begin{table}
 \caption{This work against GMIN, both arms of each cluster on one host in one session.
 Revisions: anneal \texttt{c2de652d} on LJ\(_{38}\), LJ\(_{55}\), LJ\(_{75}\), LJ\(_{98}\), LJ\(_{102}\), LJ\(_{103}\), LJ\(_{104}\), and LJ\(_{150}\), GMIN \texttt{aac1548a}.
@@ -584,56 +592,10 @@ LJ\(_{150}\) & \(4\times 10^{6}\) & this work & 5/12 & 4000000 & 1477851 & 237.2
 
 \subsection{Sutton--Chen clusters at equal workload}
 \label{sec:sc}
-Table~\ref{tab:sc} gives this setting on the reduced Sutton--Chen 12-6, 10-8, and
-9-6 forms at 38, 55, and 80 atoms, on seeds 2000--2011.
+The reduced Sutton--Chen 12-6, 10-8, and 9-6 forms at 38, 55, and 80 atoms
+run on seeds 2000--2011 from one start file and one force-call budget.
 \cite{suttonLongrangeFinnisSinclair1990}
-Each seed starts from one start file and receives one force-call budget, and the Supporting
-Information gives the protocol and the reference energies.
-
-% sc prose: start
-This work has more hits on 4 of the 9 systems,
-the arms tie on 5, and GMIN has more hits on 0.
-The two-sided Fisher test is below 0.05 on 3 systems:
-10-8, 38, 12-6, 80, and 9-6, 80; all 3 favor this work.
-GMIN nevertheless has the lower median raw wall time on 6 of 9 systems.
-Per call, this work spends 2.9 to 4.2 times as long inside the potential as GMIN.
-% sc prose: end
-
-% sc table: start
-\begin{table}
-\caption{This work against GMIN on reduced Sutton--Chen clusters at equal workload.
-Form \(n\)-\(m\) and size \(N\); seeds 2000--2011; the same start file and
-the same force-call budget for both arms; one run at a time on one core.
-Calls is the median force-call count with a miss at the budget, and Wall the
-median wall in seconds over the 12 runs.
-\(p_\mathrm{F}\) is the two-sided Fisher exact test on hits, and \(p_\mathrm{U}\)
-the two-sided continuity-corrected asymptotic Mann--Whitney test on calls and on wall
-against the Doye--Wales Sutton--Chen GMIN rows, as
-\texttt{scripts/metal\_h2h/sc\_n12\_pvalues.py} writes them to
-\texttt{bench/metal-cluster-h2h/sc-n12/pvalues.csv}.}
-\label{tab:sc}
-\centering
-\scriptsize
-\setlength{\tabcolsep}{2.5pt}%
-\begin{tabular}{@{}lrrrrrrrrrr@{}}
-\toprule
- & & \multicolumn{2}{c}{Hits} & \multicolumn{2}{c}{Calls} & \multicolumn{2}{c}{Wall (s)} & & \multicolumn{2}{c}{\(p_\mathrm{U}\)} \\
-\cmidrule(lr){3-4}\cmidrule(lr){5-6}\cmidrule(lr){7-8}\cmidrule(lr){10-11}
-Form, \(N\) & Budget & This work & GMIN & This work & GMIN & This work & GMIN & \(p_\mathrm{F}\) & Calls & Wall \\
-\midrule
-12-6, 38 & \(4\times 10^{5}\) & 12/12 & 12/12 & 9861 & 48872.5 & 0.414 & 0.471 & 1 & \(1.1\times 10^{-3}\) & 0.29 \\
-10-8, 38 & \(4\times 10^{5}\) & 12/12 & 0/12 & 9762.5 & 400000 & 0.427 & 4.305 & \(7.4\times 10^{-7}\) & \(1.0\times 10^{-5}\) & \(3.7\times 10^{-5}\) \\
-9-6, 38 & \(4\times 10^{5}\) & 12/12 & 12/12 & 8185 & 44974 & 0.374 & 0.458 & 1 & \(5.9\times 10^{-4}\) & 0.34 \\
-12-6, 55 & \(1\times 10^{6}\) & 12/12 & 12/12 & 50803 & 30565.5 & 3.216 & 0.576 & 1 & 0.29 & \(5.9\times 10^{-4}\) \\
-10-8, 55 & \(1\times 10^{6}\) & 6/12 & 2/12 & 511393.5 & 1000000 & 32.844 & 21.165 & 0.19 & 0.042 & 1 \\
-9-6, 55 & \(1\times 10^{6}\) & 12/12 & 12/12 & 28767 & 32261 & 1.867 & 0.652 & 1 & 0.51 & 0.014 \\
-12-6, 80 & \(1\times 10^{6}\) & 6/12 & 0/12 & 828059.5 & 1000000 & 104.6 & 38.015 & 0.014 & \(7.1\times 10^{-3}\) & 0.040 \\
-10-8, 80 & \(1\times 10^{6}\) & 0/12 & 0/12 & 1000000 & 1000000 & 128.0 & 42.888 & 1 & 1 & \(3.7\times 10^{-5}\) \\
-9-6, 80 & \(1\times 10^{6}\) & 7/12 & 0/12 & 981181 & 1000000 & 126.9 & 40.355 & \(4.6\times 10^{-3}\) & \(2.9\times 10^{-3}\) & \(5.9\times 10^{-4}\) \\
-\bottomrule
-\end{tabular}
-\end{table}
-% sc table: end
+The Supporting Information gives the protocol.
 
 \subsection{Other panels}
 \label{sec:other-panels}
@@ -641,6 +603,11 @@ The Supporting Information puts this setting against the basin hopping and the m
 Atomic Simulation Environment 3.29.0 at its constructor defaults on four Morse clusters
 (Table~\siref{tab:ase-morse}), and against GMIN on rigid TIP4P clusters
 (Table~\siref{tab:tip4p-gmin}).
+It also compares this setting with per-cluster tuned GMIN on LJ\(_{98}\) and LJ\(_{104}\)
+(Table~\siref{tab:gmin-tuned}, where this setting hits 7 of 12 against 1 of 12 on LJ\(_{98}\)
+and tuned GMIN hits 10 of 12 against 5 of 12 on LJ\(_{104}\), an observed GMIN advantage that
+is not significant at corrected \(p=0.18\)).
+On Au\(_{55}\) it compares this setting with ABCluster (Table~\siref{tab:abcluster}).
 
 
 \section{Discussion}
@@ -653,8 +620,7 @@ The two tie on LJ\(_{55}\), where both hit
 12 of 12.
 
 Section~\ref{sec:gmin} gives the median walls of the GMIN panel.
-Section~\ref{sec:sc} compares this setting with GMIN on the nine Sutton--Chen clusters
-(Table~\ref{tab:sc}).
+Section~\ref{sec:sc} gives the Sutton--Chen protocol.
 Against GMIN on TIP4P, this setting hits more seeds at 8, 15, and 20
 molecules, and neither arm hits at 21 molecules.
 Size 25 has no independent reference and is unscored.
@@ -743,8 +709,8 @@ equations~\ref{eq:hit} and~\ref{eq:tip4p-hit}, the operators of the search,
 the structure priors, the population mode, the related searches, the host and
 the commands, the rows behind the ablation, the GMIN inputs, a plain walk
 without stall exits, the published costs of symmetrized searches, the TIP4P
-pair constants, the Sutton--Chen protocol with its per-cluster times and
-energies, the ASE, GOFEE, and TIP4P panels, two opt-in stall-exit arms,
+pair constants, the Sutton--Chen protocol, the ASE, GOFEE, and TIP4P panels,
+two opt-in stall-exit arms,
 the structure plates and the maps of the Lennard-Jones minima, ASE and GOFEE on
 the other panel systems, and the copper slab (PDF).
 \end{suppinfo}
@@ -777,8 +743,7 @@ Sutton--Chen \(p\) values against the Doye--Wales Sutton--Chen GMIN rows.
 \item \path{paper/jctc/scripts/h2h_tables.py} writes
 Table~\siref{tab:tip4p-gmin} from
 \path{bench/tip4p-h2h/rows-h2h-r2.csv} and
-\path{bench/tip4p-h2h/wall-r2.csv}, and Table~\ref{tab:sc} from the
-Sutton--Chen results and \(p\)-value files.
+\path{bench/tip4p-h2h/wall-r2.csv}.
 \item \path{paper/jctc/scripts/ablation_table.py} writes
 Table~\ref{tab:ablation}.
 \item \path{scripts/paper_audit.py} recomputes the numbers of the

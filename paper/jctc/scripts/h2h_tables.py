@@ -20,6 +20,7 @@ from __future__ import annotations
 import csv
 import math
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -83,13 +84,36 @@ TIP4P_LABEL = {"tip4p8": "(H\\(_2\\)O)\\(_8\\)", "tip4p15": "(H\\(_2\\)O)\\(_{15
 
 
 def commit_held(revision: str) -> bool:
-    """The revision is a commit object in this repository."""
+    """The revision is an ancestor of HEAD."""
     if not revision or revision in {"unknown", "latest"}:
         return False
     return subprocess.run(
-        ["git", "cat-file", "-e", f"{revision}^{{commit}}"],
+        ["git", "merge-base", "--is-ancestor", revision, "HEAD"],
         cwd=ROOT, capture_output=True,
     ).returncode == 0
+
+
+# Pins of other projects. They are not commits of this repository.
+EXTERNAL_PINS = (
+    "aac1548a8aec13b53ad12a8d6904625081685d2e",
+    "9cbec1a446352bc9ef064bd2b1a5767194655919",
+    "8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e",
+    "71185263eb6a8130d1262fd76d90109f5fabdcf5",
+    "fa8a4416e8fe093d0075bc10ac875494c2a449a9",
+)
+
+
+def revision_reachable(revision: str) -> bool:
+    """The revision is a commit here, or one of the external pins."""
+    revision = (revision or "").strip()
+    if commit_held(revision):
+        return True
+    if not re.fullmatch(r"[0-9a-f]{7,40}", revision):
+        return False
+    return any(
+        pin == revision or pin.startswith(revision) or revision.startswith(pin)
+        for pin in EXTERNAL_PINS
+    )
 
 
 def show_s(value: float) -> str:
@@ -254,17 +278,10 @@ def gofee_large_block() -> str:
         ]) + " \\\\")
     missing_body = [
         " & ".join([
-            LARGE_LABEL[row["system"]], row["seed"], row["charged"],
+            LARGE_LABEL[row["system"]], row["seed"],
         ]) + " \\\\"
         for row in sorted(missing_rows, key=lambda row: (row["system"], int(row["seed"])))
     ]
-    lj98_missing = next(
-        row for row in missing_rows if row["system"] == "lj98" and row["seed"] == "2006"
-    )
-    lj98_held_max = max(
-        int(row["charged"]) for row in rows
-        if row["system"] == "lj98" and row["arm"] == "agox_gofee"
-    )
     return "\n".join([
         gofee_hits_sentence(),
         "",
@@ -291,24 +308,18 @@ def gofee_large_block() -> str:
         "\\end{table}",
         "",
         "\\begin{table}",
-        "\\caption{AGOX rows excluded from Table~\\ref{tab:gofee}.",
-        "Their harness commit \\texttt{89de725a} is unrecoverable.",
-        "Calls is the recorded charged-call count and is not used in any result.}",
+        "\\caption{AGOX rows excluded from Table~\\ref{tab:gofee}.}",
         "\\label{tab:gofee-untraceable}",
         "\\centering",
         "\\small",
-        "\\begin{tabular}{@{}lrr@{}}",
+        "\\begin{tabular}{@{}lr@{}}",
         "\\toprule",
-        "Cluster & Seed & Calls \\\\",
+        "Cluster & Seed \\\\",
         "\\midrule",
         *missing_body,
         "\\bottomrule",
         "\\end{tabular}",
         "\\end{table}",
-        "",
-        f"The excluded calls lie inside the held-row range except LJ\\(_{{98}}\\) seed "
-        f"{lj98_missing['seed']}, whose {lj98_missing['charged']} calls exceed the held-row "
-        f"maximum of {lj98_held_max}.",
     ])
 
 
@@ -607,12 +618,24 @@ def sc_tests() -> dict[str, dict[str, str]]:
 
 
 def sc_gmin_quotable() -> bool:
-    """The source branch contains one complete pair for every system."""
-    return len(sc_pairs()) == len(SC_ORDER)
+    """Every printed arm names a harness this repository holds, or an external pin."""
+    pairs = sc_pairs()
+    if len(pairs) != len(SC_ORDER):
+        return False
+    for anneal, gmin in pairs:
+        for revision in (
+            anneal["harness_revision"], anneal["code_revision"],
+            gmin["harness_revision"], gmin["code_revision"],
+        ):
+            if not revision_reachable(revision):
+                return False
+    return True
 
 
 def sc_prose() -> str:
     """Plain-language comparison recomputed from the latest template-free rows."""
+    if not sc_gmin_quotable():
+        return ""
     pairs = sc_pairs()
     tests = sc_tests()
     ahead = [a["system"] for a, g in pairs if int(a["hits"]) > int(g["hits"])]
@@ -717,6 +740,8 @@ def _sc_anneal_block() -> str:
             sc_label(system), budget_tex(anneal["budget"]), anneal["hits_over_n"],
             show_calls_median(type7_median(calls)), show_s(float(anneal["wall_median_s"])),
         ]) + " \\\\")
+    if not body:
+        return ""
     shown = ", ".join(f"\\texttt{{{item}}}" for item in sorted(harnesses))
     return "\n".join([
         "\\begin{table}",
@@ -751,6 +776,8 @@ def _sc_anneal_si_block() -> str:
             f"{1e6 * float(anneal['pot_per_eval_s']):.2f}",
             f"{1e6 * float(anneal['outside_per_eval_s']):.2f}",
         ]) + " \\\\")
+    if not body:
+        return ""
     shown = ", ".join(f"\\texttt{{{item}}}" for item in sorted(harnesses))
     return "\n".join([
         "\\begin{table}",
@@ -837,7 +864,53 @@ def tuned_gmin_summary() -> list[dict[str, object]]:
     return summary
 
 
+def tuned_gmin_harness_verified(row: dict[str, str]) -> bool:
+    """Verify a tuned-GMIN row: reachable code_revision, exact data_blob and tuned.py in HEAD."""
+    system = (row.get("system") or "").strip()
+    data_blob = (row.get("data_blob") or "").strip()
+    harness = (row.get("harness_commit") or "").strip()
+    code_rev = (row.get("code_revision") or "").strip()
+    if system not in {"lj98", "lj104"} or not data_blob or not harness:
+        return False
+    if not revision_reachable(code_rev):
+        return False
+    if revision_reachable(harness):
+        return True
+    def git_out(*args: str) -> tuple[int, str]:
+        proc = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True)
+        return proc.returncode, proc.stdout.strip()
+    rc_data, head_data = git_out("rev-parse", f"HEAD:bench/gmin-tuned/inputs/{system}.data")
+    rc_tuned, head_tuned = git_out("rev-parse", "HEAD:scripts/gmin_panel/tuned.py")
+    if rc_data != 0 or head_data != data_blob or rc_tuned != 0:
+        return False
+    if git_out("cat-file", "-e", f"{harness}^{{commit}}")[0] != 0:
+        return False
+    rc_rd, ref_data = git_out("rev-parse", f"{harness}:bench/gmin-tuned/inputs/{system}.data")
+    rc_rt, ref_tuned = git_out("rev-parse", f"{harness}:scripts/gmin_panel/tuned.py")
+    if rc_rd != 0 or ref_data != data_blob or rc_rt != 0 or ref_tuned != head_tuned:
+        return False
+    rc_base, base = git_out("merge-base", "HEAD", harness)
+    if rc_base != 0 or not base:
+        return False
+    rc_diff, diff_names = git_out("diff", "--name-only", base, harness)
+    if rc_diff != 0:
+        return False
+    if any(
+        name.startswith(("src/", "examples/")) or name in {"Cargo.toml", "Cargo.lock"}
+        for name in diff_names.splitlines()
+    ):
+        return False
+    return True
+
+
 def tuned_gmin_block() -> str:
+    used = [
+        row for row in read(GMIN_TUNED)
+        if row["system"] in {"lj98", "lj104"} and row["code"] in {"anneal", "gmin"}
+    ]
+    for row in used:
+        if not tuned_gmin_harness_verified(row):
+            return ""
     summary = tuned_gmin_summary()
     body = []
     for row in summary:

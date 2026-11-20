@@ -424,8 +424,9 @@ def test_every_alias_is_verified_and_clears_the_sc_n12_rows(tmp_path, monkeypatc
     audit, gaps = aliased_audit(tmp_path, monkeypatch, lambda table: table)
     assert not audit.drifts()
     table = [line for line in (ROOT / audit_mod.ALIASES).read_text().splitlines() if line[:1] not in ("#", "l")]
-    assert {r[1] for r in audit.results} == {f"{audit_mod.ALIASES} {line[:8]}" for line in table}
-    assert gaps == {}
+    expected_places = {f"{audit_mod.ALIASES} {line[:8]}" for line in table} | {", ".join(SC_N12_ROWS)}
+    assert {r[1] for r in audit.results} == expected_places
+    assert gaps == {path: "revision c89653df is not in this repository" for path in SC_N12_ROWS}
 
 
 def test_an_alias_off_the_rows_commit_parent_is_held_to_its_paths(tmp_path, monkeypatch):
@@ -548,7 +549,10 @@ def test_an_alias_with_another_patch_id_is_reported(tmp_path, monkeypatch):
     assert {r[2] for r in audit.drifts()} == {"pushed_revision bc3e0cb1 has patch-id d4c75b44",
                                                "branch_revision 6e425a39 has patch-id d4c75b44",
                                                "unpushed revision f9d1ac05"}
-    assert gaps == {path: "revision f9d1ac05 is not in this repository" for path in SC_N12_ROWS}
+    assert gaps == {
+        path: "revision c89653df is not in this repository; revision f9d1ac05 is not in this repository"
+        for path in SC_N12_ROWS
+    }
 
 
 def test_an_alias_to_an_unknown_commit_is_reported(tmp_path, monkeypatch):
@@ -558,7 +562,10 @@ def test_an_alias_to_an_unknown_commit_is_reported(tmp_path, monkeypatch):
                                                "pushed_revision 79ec1b7f has patch-id debc2a84",
                                                "rows commit ba7c3b45 sits on 79ec1b7f",
                                                "unpushed revision a50f4b02"}
-    assert gaps == {path: "revision a50f4b02 is not in this repository" for path in SC_N12_ROWS}
+    assert gaps == {
+        path: "revision a50f4b02 is not in this repository; revision c89653df is not in this repository"
+        for path in SC_N12_ROWS
+    }
 
 
 def test_an_alias_whose_rows_commit_is_elsewhere_is_reported(tmp_path, monkeypatch):
@@ -567,7 +574,10 @@ def test_an_alias_whose_rows_commit_is_elsewhere_is_reported(tmp_path, monkeypat
     assert {r[2] for r in audit.drifts()} == {"rows commit ba7c3b45 sits on 016b6911",
                                                "rows commit ba7c3b45 first cites 9149d1b0",
                                                "unpushed revision 9149d1b0"}
-    assert gaps == {path: "revision 9149d1b0 is not in this repository" for path in SC_N12_ROWS}
+    assert gaps == {
+        path: "revision 9149d1b0 is not in this repository; revision c89653df is not in this repository"
+        for path in SC_N12_ROWS
+    }
 
 
 def git(*args, stdin=None):

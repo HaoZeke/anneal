@@ -730,12 +730,12 @@ HEADER = ["System", "Budget", "Arm", "Hits", "Median calls", "IQR", "Wall (s)", 
 
 
 def _commit_held(revision: str) -> bool:
-    """The revision is a commit object in this repository."""
+    """The revision is an ancestor of HEAD."""
     if not revision or revision == "latest":
         return False
     root = Path(__file__).resolve().parents[2]
     return subprocess.run(
-        ["git", "cat-file", "-e", f"{revision}^{{commit}}"],
+        ["git", "merge-base", "--is-ancestor", revision, "HEAD"],
         cwd=root, capture_output=True,
     ).returncode == 0
 
@@ -770,6 +770,57 @@ def revision_note(summary: list[dict[str, str]]) -> str:
     return "; ".join(parts)
 
 
+def morse_anneal_note() -> list[str]:
+    """Anneal Morse results whose commits this repository holds.
+
+    The GMIN arm of the same systems names a harness commit that is not
+    in this repository, so those hit counts stay out of the note.
+    """
+    root = Path(__file__).resolve().parents[2]
+    groups = panel_groups(read_rows(root / "bench" / "gmin-panel" / "rows.csv"), "latest")
+    order = ("m55r6", "m55r14", "m80r6", "m80r14")
+    if any((system, "anneal") not in groups for system in order):
+        return []
+    revisions = {groups[(system, "anneal")][0]["code_revision"] for system in order}
+    if len(revisions) != 1 or not _commit_held(next(iter(revisions))):
+        return []
+    lines = [
+        "On the four Morse clusters, this setting, revision "
+        f"\\texttt{{{next(iter(revisions))[:8]}}}, runs on seeds 2000--2011.",
+        "A miss is charged the full budget, and the median and the interquartile range",
+        "below count that full budget as the calls of a miss.",
+    ]
+    for system in order:
+        group = groups[(system, "anneal")]
+        name = LABELS[system][1].replace(", \\(\\rho=", " at \\(\\rho=")
+        calls = [float(row["evals_to_hit"]) for row in group]
+        hits = [float(row["evals_to_hit"]) for row in group if row["hit"] == "1"]
+        walls = [float(row["wall_s"]) for row in group]
+        pots = [float(row["pot_s"]) for row in group]
+        outs = [float(row["outside_s"]) for row in group]
+        best = min(float(row["best"]) for row in group)
+        reference = spec(system)[3]
+        budget = PAPER_BUDGETS[system]
+        hit_span = ""
+        if hits:
+            hit_span = (
+                f" On the hits the calls run from {show_calls(min(hits))} to {show_calls(max(hits))}."
+            )
+        lines.append(
+            f"On {name} the budget is {show_budget(budget, True)} calls and this setting hits "
+            f"{sum(row['hit'] == '1' for row in group)} of {len(group)}."
+            f" The median calls are {show_calls(type7(calls, 0.5))},"
+            f" and the interquartile range of those calls is "
+            f"{show_calls(type7(calls, 0.75) - type7(calls, 0.25))}."
+            f"{hit_span}"
+            f" The median wall is {show_s(type7(walls, 0.5))}~s,"
+            f" the median time inside the potential is {show_s(type7(pots, 0.5))}~s,"
+            f" and the median time outside the potential is {show_s(type7(outs, 0.5))}~s."
+            f" The best energy is {best:.6f} against the reference {reference:.6f}."
+        )
+    return lines
+
+
 def tex_table(summary: list[dict[str, str]], revision: str) -> str:
     lines = table_lines(summary, tex=True)
     shown_revision = f"\\texttt{{{revision[:8]}}}" if revision != "latest" else revision_note(summary)
@@ -792,6 +843,8 @@ def tex_table(summary: list[dict[str, str]], revision: str) -> str:
             f"{show_p(float(values[3]['fisher_p']), True)}, respectively.",
             "",
         ]
+    elif not any(system in by_system for system in morse):
+        prose = [*morse_anneal_note(), ""]
     return "\n".join(
         [
             *prose,
