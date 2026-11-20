@@ -304,6 +304,39 @@ fn read_x0(
     Ok(Some(Array1::from_vec(values)))
 }
 
+/// Reads an optional starting point and clips it into `[low, high]`.
+///
+/// The global optimizer surface documents clipping, while still refusing
+/// non-finite coordinates or a mismatched length.
+fn read_x0_clipped(
+    x0: Option<PyReadonlyArray1<'_, f64>>,
+    low: &[f64],
+    high: &[f64],
+) -> PyResult<Option<Array1<f64>>> {
+    let Some(x0) = x0 else {
+        return Ok(None);
+    };
+    let values = x0.as_slice()?.to_vec();
+    if values.len() != low.len() {
+        return Err(invalid_argument(format!(
+            "x0 has length {} but low and high have length {}",
+            values.len(),
+            low.len()
+        )));
+    }
+    let clipped = values
+        .into_iter()
+        .enumerate()
+        .map(|(i, value)| {
+            if !value.is_finite() {
+                return Err(invalid_argument(format!("x0[{i}] is not finite")));
+            }
+            Ok(value.clamp(low[i], high[i]))
+        })
+        .collect::<PyResult<Vec<f64>>>()?;
+    Ok(Some(Array1::from_vec(clipped)))
+}
+
 // ---------------------------------------------------------------------------
 // Preset parameter holders.
 // ---------------------------------------------------------------------------
@@ -1325,7 +1358,7 @@ fn qmc_gsa_global_search(
     }
     validate_box_bounds(&low_vec, &high_vec)?;
     validate_qmc_gsa_global_search_args(max_evals, n_chains, t_init, q_v, q_a)?;
-    let start = read_x0(x0, &low_vec, &high_vec)?;
+    let start = read_x0_clipped(x0, &low_vec, &high_vec)?;
 
     let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
@@ -1361,7 +1394,7 @@ fn qmc_gsa_global_search_objective(
 ) -> PyResult<Py<PyDict>> {
     validate_qmc_gsa_global_search_args(max_evals, n_chains, t_init, q_v, q_a)?;
     let bounds = <PyObjective as Objective<f64>>::bounds(&objective);
-    let start = read_x0(
+    let start = read_x0_clipped(
         x0,
         bounds.low.as_slice().expect("contiguous bounds"),
         bounds.high.as_slice().expect("contiguous bounds"),
@@ -2526,7 +2559,7 @@ fn global_optimize(
     if budget == 0 {
         return Err(invalid_argument("budget must be positive"));
     }
-    let start = read_x0(x0, &low_vec, &high_vec)?;
+    let start = read_x0_clipped(x0, &low_vec, &high_vec)?;
     let dim = low_vec.len();
     let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
@@ -2621,7 +2654,7 @@ fn global_optimize_objective(
         return Err(invalid_argument("noise_sigma must be positive and finite"));
     }
     let bounds = <PyObjective as Objective<f64>>::bounds(&objective);
-    let start = read_x0(
+    let start = read_x0_clipped(
         x0,
         bounds.low.as_slice().expect("contiguous bounds"),
         bounds.high.as_slice().expect("contiguous bounds"),
