@@ -317,6 +317,22 @@ M\(_{80}\), \(\rho=10\) & \(4\times 10^{6}\) & 6/12 & 3539041.5 & 2092257.25 & 1
 \end{table}
 % morse-g1 table: end
 
+\section{A traced session}
+\label{sec:si-g3}
+Commit \texttt{\seqsplit{e578f267b3826cfd7e0f1737515bc45f1b8a72c6}} of
+\path{record/g3-funnel} runs this code on LJ\(_{38}\), LJ\(_{75}\),
+LJ\(_{98}\), LJ\(_{150}\), and M\(_{80}\) at \(\rho=6\), seeds
+2000--2011, through the drivers and at the budgets of the GMIN table, in one
+session on machine \texttt{3b11c160}, at revision \texttt{0cc3814c}.
+That revision adds to the submitted revision an optional record of the
+accepted minima in \path{src/methods/cluster_hopping.rs} and the two drivers,
+removes no line of \path{src}, and runs with the record on.
+On all 60 seeds this code takes the same calls to the same lowest energy as
+its rows in the GMIN table, and a replay of each of the 60 runs gives the same
+record of accepted minima and the same lowest energy.
+The rows are copied from that commit, as
+\path{paper/jctc/data/g3_funnel/PROVENANCE} names.
+
 \section{Outside time in a second session}
 \label{sec:si-outside}
 Table~\ref{tab:si-outside} times the work of this code outside the potential
