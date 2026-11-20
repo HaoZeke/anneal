@@ -127,6 +127,11 @@ in
 
 let fast_nlist_off_build_test =
   S.run_pixi m%"
+  msrv=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)
+  export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:${PATH}"
+  rustup toolchain install "${msrv}" --profile minimal
+  export RUSTUP_TOOLCHAIN="${msrv}"
+  rustc -V | grep -F "rustc ${msrv}."
   meson setup bbdir \
     -Dwith_tests=true \
     -Dwith_eam_table=true \
@@ -244,7 +249,8 @@ in
     # Cargo is present on this runner. The option still has to build and
     # test the C++ pair scan, which is what wheels and conda get.
     # with_rust_core is on, so the plain rgpot-core archive is built and
-    # linked, and the rust core tests run.
+    # linked, and the rust core tests run. The build uses rustup's
+    # toolchain for the workspace rust-version, not pixi's newer rust.
     build_fast_nlist_off = {
       name = "meson / ubuntu [fast nlist off]",
       "runs-on" = P.ubuntu,

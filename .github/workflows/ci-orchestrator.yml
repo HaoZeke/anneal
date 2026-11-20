@@ -444,7 +444,9 @@ jobs:
   # This leg forces that fallback on a runner that does have cargo, so the
   # C++ scan is what the tests exercise. with_rust_core is on here, so the
   # plain rgpot-core archive (no pair list to share a runtime with) is built
-  # and linked, and the rust core tests run.
+  # and linked, and the rust core tests run. Pixi's rust is newer than the
+  # workspace rust-version, so this leg puts rustup's toolchain for that
+  # version first on PATH: rgpot-core alone must build on it.
   build_fast_nlist_off:
     name: meson / ubuntu [fast nlist off]
     needs: [prepare]
@@ -462,6 +464,11 @@ jobs:
       - name: Build and test without the fast pair list
         shell: pixi run bash -e {0}
         run: |
+          msrv=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)
+          export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:${PATH}"
+          rustup toolchain install "${msrv}" --profile minimal
+          export RUSTUP_TOOLCHAIN="${msrv}"
+          rustc -V | grep -F "rustc ${msrv}."
           meson setup bbdir \
             -Dwith_tests=true \
             -Dwith_eam_table=true \
