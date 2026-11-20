@@ -646,3 +646,31 @@ def test_public_core_symbols_are_reexported_by_anneal() -> None:
         assert _runtime_params(getattr(anneal, fn_name), drop_self=False) == _runtime_params(
             getattr(core, core_name), drop_self=False
         )
+
+
+def test_python_api_reference_docs_list_every_public_name() -> None:
+    import importlib
+    import pkgutil
+    import re
+
+    ref_doc = ROOT / "docs" / "orgmode" / "reference" / "presets-and-advanced.org"
+    text = ref_doc.read_text(encoding="utf-8")
+    documented = set(
+        re.findall(r"^- =([A-Za-z_][A-Za-z0-9_]*)(?:[=(])", text, re.MULTILINE)
+    )
+
+    modules = ["anneal", "anneal._core"] + [
+        m.name for m in pkgutil.walk_packages(anneal.__path__, prefix="anneal.")
+    ]
+    missing: dict[str, list[str]] = {}
+    for modname in modules:
+        mod = importlib.import_module(modname)
+        if hasattr(mod, "__all__"):
+            raw_names = list(mod.__all__)
+        else:
+            raw_names = dir(mod)
+        names = [n for n in raw_names if not n.startswith("_") or n == "__version__"]
+        mod_missing = [n for n in names if n not in documented]
+        if mod_missing:
+            missing[modname] = mod_missing
+    assert not missing, f"Public Python exports missing from {ref_doc}: {missing}"
