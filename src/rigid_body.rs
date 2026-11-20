@@ -13,6 +13,7 @@ use ndarray::{Array1, ArrayView1};
 pub struct RigidBodyGeometry {
     sites: Vec<[f64; 3]>,
     species: Vec<u32>,
+    bonds: Vec<[usize; 2]>,
     #[serde(skip)]
     block_keys: Vec<(u32, u32)>,
     #[serde(skip)]
@@ -22,13 +23,30 @@ pub struct RigidBodyGeometry {
 impl RigidBodyGeometry {
     /// Declare actual site positions and chemical identities in the body frame.
     pub fn new(sites: Vec<[f64; 3]>, species: Vec<u32>) -> Result<Self, &'static str> {
+        Self::new_bonded(sites, species, Vec::new())
+    }
+
+    /// Declare site positions, chemical identities, and intrabody bonds.
+    pub fn new_bonded(
+        sites: Vec<[f64; 3]>,
+        species: Vec<u32>,
+        mut bonds: Vec<[usize; 2]>,
+    ) -> Result<Self, &'static str> {
         if sites.is_empty()
             || sites.len() != species.len()
             || species.contains(&0)
             || sites.iter().flatten().any(|value| !value.is_finite())
+            || bonds
+                .iter()
+                .any(|bond| bond[0] >= sites.len() || bond[1] >= sites.len() || bond[0] == bond[1])
         {
             return Err("invalid rigid-body site geometry");
         }
+        for bond in &mut bonds {
+            bond.sort_unstable();
+        }
+        bonds.sort_unstable();
+        bonds.dedup();
         let mut block_keys = Vec::new();
         for &a in &species {
             for &b in &species {
@@ -50,6 +68,7 @@ impl RigidBodyGeometry {
         Ok(Self {
             sites,
             species,
+            bonds,
             block_keys,
             block_of_pair,
         })
@@ -103,6 +122,11 @@ impl RigidBodyGeometry {
     /// Atomic number of each site, in declaration order.
     pub fn species(&self) -> &[u32] {
         &self.species
+    }
+
+    /// Intrabody bonds as pairs of site indices.
+    pub fn bonds(&self) -> &[[usize; 2]] {
+        &self.bonds
     }
 
     /// Largest body-frame site distance from the centre.

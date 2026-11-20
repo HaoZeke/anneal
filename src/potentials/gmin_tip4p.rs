@@ -190,8 +190,12 @@ pub fn reference_sites() -> [[f64; 3]; 4] {
 /// O, H, H geometry used to key rigid basins. The M site is not an atom.
 pub fn gmin_water_geometry() -> crate::rigid_body::RigidBodyGeometry {
     let sites = reference_sites();
-    crate::rigid_body::RigidBodyGeometry::new(sites[..3].to_vec(), vec![8, 1, 1])
-        .expect("water O-H-H geometry is finite")
+    crate::rigid_body::RigidBodyGeometry::new_bonded(
+        sites[..3].to_vec(),
+        vec![8, 1, 1],
+        vec![[0, 1], [0, 2]],
+    )
+    .expect("water O-H-H geometry is finite")
 }
 
 /// Block Rodrigues coordinates from Cartesian O, H, H triples.

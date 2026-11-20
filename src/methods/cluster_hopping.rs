@@ -90,6 +90,7 @@ mod general;
 mod moves;
 mod packing_bank;
 mod preset;
+mod stall_bridge;
 mod torsion;
 pub(crate) use torsion::HeldHands;
 
@@ -3239,14 +3240,6 @@ const RIGID_FACTOR_CAP_LARGE: f64 = 4.0;
 const RIGID_ACCEPT_TARGET: f64 = 0.5;
 /// Quenched trials between orientation-amplitude updates.
 const RIGID_ACCEPT_BLOCK: usize = 50;
-/// Patience windows with no new lowest minimum before a second rigid chain
-/// walks another oxygen cage.
-///
-/// The main walker is not moved and its generator is not advanced. Forty
-/// windows is a quiet stretch long enough to be a stalled cage, and the
-/// walk itself is capped at the same length so the main chain resumes.
-const RIGID_CAGE_WINDOWS: usize = 40;
-
 /// Seats in a rigid basin index.
 ///
 /// The lookup walks every seat the triangle test cannot skip, so an open
@@ -3419,7 +3412,15 @@ fn rigid_step_scale(scale: f64, accepted: usize, trials: usize) -> f64 {
 
 #[cfg(test)]
 mod rigid_step_tests {
-    use super::rigid_step_scale;
+    use super::cycles::tests::{bond_sets, tadpole};
+    use super::{ClusterMove, Config, Ledger, MoveLibrary, rigid_step_scale, run, stall_bridge};
+    use super::{
+        RIGID_BRIDGE_ENTRIES, RIGID_CHAIN_SCANS, RIGID_STALL_HOP_NOTES, RIGID_STALL_OPENING_COPIES,
+    };
+    use ndarray::{Array1, ArrayView1};
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+    use std::collections::BTreeSet;
 
     #[test]
     fn a_low_acceptance_shrinks_the_orientation_step_and_a_high_one_grows_it() {
@@ -3441,6 +3442,207 @@ mod rigid_step_tests {
         assert!(
             (rigid_step_scale(0.9, 25, 50) - 0.9).abs() < 1e-12,
             "an acceptance of one half moved the step"
+        );
+    }
+
+    #[test]
+    fn stalled_rigid_walk_rewires_and_records_the_deeper_cage() {
+        let n = 5;
+        let start = tadpole();
+        let target = BTreeSet::from([(0, 1), (0, 4), (1, 0), (2, 1), (3, 2), (4, 3)]);
+        let mut cfg = Config::recommended_tip4p(n);
+        cfg.restart_patience = 1;
+        cfg.relax_steps = 1;
+        cfg.move_library = MoveLibrary::RigidBody {
+            n_molecules: n,
+            translate_step: 1.0e-4,
+            rotate_step: 1.0e-4,
+            local: false,
+            reverse_cycles: true,
+            relocate: false,
+        };
+        let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _| {
+            let _ = ledger.charge();
+            let candidate = x.to_owned();
+            let (directed, _) = bond_sets(n, &candidate);
+            if directed == target {
+                (-20.0, candidate)
+            } else {
+                (-10.0, start.clone())
+            }
+        };
+        let mut ledger = Ledger::new(320);
+        let mut rng = StdRng::seed_from_u64(7);
+        let outcome = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("valid");
+        assert_eq!(outcome.best, -20.0);
+    }
+
+    #[test]
+    fn a_short_hop_copies_the_stall_opening_once_and_not_per_step() {
+        fn drive(cfg: &Config, start: Array1<f64>, budget: usize) {
+            let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _| {
+                let _ = ledger.charge();
+                (-1.0, x.to_owned())
+            };
+            let mut ledger = Ledger::new(budget);
+            let mut rng = StdRng::seed_from_u64(11);
+            run(cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("valid");
+        }
+        RIGID_STALL_OPENING_COPIES.with(|n| n.set(0));
+        RIGID_STALL_HOP_NOTES.with(|n| n.set(0));
+        let molecular = Config::for_molecular(
+            vec![8, 1, 1, 8, 1, 1],
+            vec![vec![0, 1, 2], vec![3, 4, 5]],
+            1.0,
+        );
+        drive(&molecular, Array1::zeros(18), 24);
+        assert_eq!(
+            RIGID_STALL_OPENING_COPIES.with(|n| n.get()),
+            0,
+            "a molecular hop copied an opening geometry for a rigid stall"
+        );
+        assert_eq!(
+            RIGID_STALL_HOP_NOTES.with(|n| n.get()),
+            0,
+            "a molecular hop consulted the rigid stall book"
+        );
+        RIGID_STALL_OPENING_COPIES.with(|n| n.set(0));
+        RIGID_STALL_HOP_NOTES.with(|n| n.set(0));
+        let mut rigid = Config::recommended_tip4p(6);
+        rigid.restart_patience = 10_000;
+        rigid.relax_steps = 1;
+        drive(&rigid, Array1::zeros(36), 24);
+        let copies = RIGID_STALL_OPENING_COPIES.with(|n| n.get());
+        let notes = RIGID_STALL_HOP_NOTES.with(|n| n.get());
+        assert_eq!(copies, 1, "opening copies {copies}");
+        assert!(notes > 1, "the rigid hop never reached the stall note");
+        assert!(
+            copies < notes,
+            "opening copies {copies} tracked hop notes {notes}"
+        );
+    }
+
+    #[test]
+    fn an_unarmed_hop_does_not_enter_the_rigid_bridge() {
+        RIGID_STALL_OPENING_COPIES.with(|n| n.set(0));
+        RIGID_STALL_HOP_NOTES.with(|n| n.set(0));
+        RIGID_BRIDGE_ENTRIES.with(|n| n.set(0));
+        RIGID_CHAIN_SCANS.with(|n| n.set(0));
+        let molecular = Config::for_molecular(
+            vec![8, 1, 1, 8, 1, 1],
+            vec![vec![0, 1, 2], vec![3, 4, 5]],
+            1.0,
+        );
+        let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _| {
+            let _ = ledger.charge();
+            (-1.0, x.to_owned())
+        };
+        let mut ledger = Ledger::new(24);
+        let mut rng = StdRng::seed_from_u64(11);
+        run(
+            &molecular,
+            Array1::zeros(18).view(),
+            &mut ledger,
+            &mut relax,
+            &mut rng,
+        )
+        .expect("valid");
+        assert_eq!(
+            RIGID_STALL_OPENING_COPIES.with(|n| n.get()),
+            0,
+            "an unarmed hop copied an opening geometry"
+        );
+        assert_eq!(
+            RIGID_STALL_HOP_NOTES.with(|n| n.get()),
+            0,
+            "an unarmed hop noted a rigid stall"
+        );
+        assert_eq!(
+            RIGID_BRIDGE_ENTRIES.with(|n| n.get()),
+            0,
+            "an unarmed hop entered the rigid bridge"
+        );
+        assert_eq!(
+            RIGID_CHAIN_SCANS.with(|n| n.get()),
+            0,
+            "an unarmed hop scanned a hydrogen-bond stem"
+        );
+    }
+
+    #[test]
+    fn a_side_quench_is_stamped_with_the_count_that_found_it() {
+        let mut cfg = Config::recommended_tip4p(4);
+        cfg.restart_patience = 1;
+        cfg.relax_steps = 1;
+        let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _| {
+            let _ = ledger.charge();
+            (-(ledger.spent() as f64), x.to_owned())
+        };
+        let mut ledger = Ledger::new(80);
+        let mut rng = StdRng::seed_from_u64(5);
+        run(
+            &cfg,
+            Array1::zeros(24).view(),
+            &mut ledger,
+            &mut relax,
+            &mut rng,
+        )
+        .expect("valid");
+        assert!(
+            ledger.encounters().len() > 1,
+            "the side walk recorded nothing"
+        );
+        for &(step, energy) in ledger.encounters() {
+            assert_eq!(
+                step,
+                (-energy) as usize,
+                "encounter {energy} was stamped at {step}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_archive_walk_stops_at_the_run_bound() {
+        let mut cfg = Config::recommended_tip4p(4);
+        cfg.relax_steps = 1;
+        let kernels = vec![ClusterMove::RigidRotate {
+            n_molecules: 4,
+            step: 0.01,
+        }];
+        let mut cage_archive = crate::methods::stall_archive::StallArchive::new(4, 4);
+        let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _| {
+            let _ = ledger.charge();
+            (-1.0, x.to_owned())
+        };
+        let mut ledger = Ledger::new(40);
+        let mut e = 0.0;
+        let mut x = Array1::zeros(24);
+        let propose: fn(&ClusterMove, ArrayView1<f64>, f64, f64, &mut StdRng) -> Array1<f64> =
+            ClusterMove::propose_scaled;
+        let archive_end = 5usize;
+        stall_bridge::walk_armed_rigid_archive(
+            &cfg,
+            &mut ledger,
+            &mut relax,
+            &mut cage_archive,
+            &kernels,
+            propose,
+            &mut e,
+            &mut x,
+            0,
+            cfg.min_separation / 50.0,
+            1.0,
+            1.0e-8,
+            archive_end,
+        );
+        assert_eq!(
+            ledger.spent(),
+            archive_end,
+            "the walk ran past the patience derived from the run"
+        );
+        assert!(
+            ledger.remaining() > 0,
+            "the walk consumed the budget instead of returning"
         );
     }
 }
@@ -4180,6 +4382,82 @@ fn lengths_of_quenched_cluster(cfg: &Config, x: ArrayView1<f64>) -> Option<Confi
     scaled.container *= factor;
     scaled.neighbour_cutoff *= factor;
     Some(scaled)
+}
+
+/// Bookkeeping for a stalled rigid-body walk.
+///
+/// The fields live in one heap box. The hop loop holds the box, not the
+/// opening geometry, so an inactive path keeps it out of potential calls.
+struct RigidStallBook {
+    archive_best_seen: f64,
+    charged_at_archive_best: usize,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Times a rigid stall book was armed.
+    ///
+    /// A molecular search stays at zero.
+    pub(crate) static RIGID_STALL_OPENING_COPIES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Times the hop loop consulted the stall book. Molecular hops do not.
+    pub(crate) static RIGID_STALL_HOP_NOTES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Due-checks of the stalled rigid bridge. A molecular search stays at zero.
+    pub(crate) static RIGID_BRIDGE_ENTRIES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Hydrogen-bond stem scans. Armed rigid walks only.
+    pub(crate) static RIGID_CHAIN_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn count_opening_copy() {
+    RIGID_STALL_OPENING_COPIES.with(|n| n.set(n.get().saturating_add(1)));
+}
+
+#[cfg(test)]
+fn count_hop_note() {
+    RIGID_STALL_HOP_NOTES.with(|n| n.set(n.get().saturating_add(1)));
+}
+
+#[cfg(test)]
+fn count_bridge_entry() {
+    RIGID_BRIDGE_ENTRIES.with(|n| n.set(n.get().saturating_add(1)));
+}
+
+#[cfg(test)]
+pub(crate) fn count_chain_scan() {
+    RIGID_CHAIN_SCANS.with(|n| n.set(n.get().saturating_add(1)));
+}
+
+/// Record a lower ledger minimum for the stalled walk.
+///
+/// Not inlined: the book's fields must not be live across the quench.
+#[inline(never)]
+fn note_rigid_stall_best(book: &mut RigidStallBook, best: f64, spent: usize, new_lowest: f64) {
+    #[cfg(test)]
+    count_hop_note();
+    if best < book.archive_best_seen - new_lowest {
+        book.archive_best_seen = best;
+        book.charged_at_archive_best = spent;
+    }
+}
+
+/// Calls in one quiet sweep over each rigid coordinate for each body.
+fn rigid_cage_patience(cfg: &Config) -> usize {
+    let generalized_coordinates = cfg.n_points.saturating_mul(6);
+    cfg.restart_patience
+        .saturating_mul(generalized_coordinates)
+        .saturating_mul(cfg.n_points)
+        .max(1)
+}
+
+/// Whether the stalled archive walk should start.
+///
+/// Not inlined, for the same reason as [`note_rigid_stall_best`].
+#[inline(never)]
+fn rigid_archive_due(book: &RigidStallBook, cfg: &Config, spent: usize) -> bool {
+    #[cfg(test)]
+    count_bridge_entry();
+    let archive_patience = rigid_cage_patience(cfg);
+    spent.saturating_sub(book.charged_at_archive_best) >= archive_patience
 }
 
 fn run_full<'g, R, H>(
@@ -5005,6 +5283,16 @@ where
     let cage_quantum = cfg.min_separation / 50.0;
     let mut cage_walked = false;
     let mut archive_walked = false;
+    // Armed only for a rigid library. Other charts never clone the opening
+    // geometry and never read this book.
+    let mut stall_book = cfg.move_library.is_rigid_body().then(|| {
+        #[cfg(test)]
+        count_opening_copy();
+        Box::new(RigidStallBook {
+            archive_best_seen: ledger.best,
+            charged_at_archive_best: ledger.spent(),
+        })
+    });
     if cfg.move_library.is_rigid_body() {
         stall_archive.offer(e, x.view());
         cage_archive.offer_cage(
@@ -5062,6 +5350,11 @@ where
             hops_at_lowest = hops;
             cage_edit = false;
             new_incumbent = true;
+        }
+        if cfg.move_library.is_rigid_body()
+            && let Some(book) = stall_book.as_mut()
+        {
+            note_rigid_stall_best(book, ledger.best, ledger.spent(), new_lowest);
         }
         // Every unlike pair, quenched, kept when it is lower. One random
         // exchange every fourth hop does not finish the ordering. Absent
@@ -5282,16 +5575,20 @@ where
             }
         }
         // The main walker stays put and its generator is not advanced.
-        // After many patience windows with no new lowest minimum, the calls
+        // After a quiet sweep over each chart coordinate and move, the calls
         // that remain are spent on another cage the chain already quenched.
         // A chain that is still descending never enters, so its proposals
         // and its evaluation count stay what they were.
-        let cage_patience = cfg
-            .restart_patience
-            .saturating_mul(RIGID_CAGE_WINDOWS)
-            .max(1);
+        let archive_due = cfg.move_library.is_rigid_body()
+            && !archive_walked
+            && !kernels.is_empty()
+            && stall_book
+                .as_ref()
+                .is_some_and(|book| rigid_archive_due(book, cfg, ledger.spent()));
+        let cage_patience = rigid_cage_patience(cfg);
         if cfg.move_library.is_rigid_body()
             && !cage_walked
+            && !archive_due
             && !kernels.is_empty()
             && ledger.spent().saturating_sub(charged_at_best) >= cage_patience
         {
@@ -5324,6 +5621,7 @@ where
                         contain_trial(cfg, &mut trial, cfg.n_points);
                         let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
                         if quenched.is_finite() && relaxed.len() == $state.len() {
+                            ledger.record(quenched, relaxed.view());
                             let rise = (quenched - $energy) / cfg.temperature.max(1e-12);
                             if rise <= 0.0 || $rng.random::<f64>() < (-rise).exp() {
                                 $energy = quenched;
@@ -5363,6 +5661,7 @@ where
                 if let Some((energy, state)) = turned
                     && (energy - side_energy).abs() > 1.0e-3
                 {
+                    ledger.record(energy, state.view());
                     side_energy = energy;
                     side_state = state;
                     let twist_end = ledger.spent().saturating_add(cage_patience);
@@ -5440,6 +5739,7 @@ where
                     if let Some((energy, state)) = turned
                         && (energy - side_energy).abs() > 1.0e-3
                     {
+                        ledger.record(energy, state.view());
                         side_energy = energy;
                         side_state = state;
                         let twist_end = ledger.spent().saturating_add(cage_patience);
@@ -5453,78 +5753,39 @@ where
             // The calls just spent are not a new lowest of the main chain.
             // Leaving them on the quiet clock would start the later walk
             // before the main chain has actually stalled.
-            charged_at_best =
-                charged_at_best.saturating_add(ledger.spent().saturating_sub(shell_mark));
+            let shell_spent = ledger.spent().saturating_sub(shell_mark);
+            charged_at_best = charged_at_best.saturating_add(shell_spent);
+            if let Some(book) = stall_book.as_mut() {
+                book.charged_at_archive_best =
+                    book.charged_at_archive_best.saturating_add(shell_spent);
+            }
         }
         // The shell turn above is the early leave. A longer walk on a stored
         // cage is what reaches the minimum when the shell lands short of it,
         // and it waits out a longer quiet stretch so a chain that is still
         // descending is not spent here.
-        let archive_patience = cfg
-            .restart_patience
-            .saturating_mul(RIGID_CAGE_WINDOWS.saturating_mul(4))
-            .max(1);
-        if cfg.move_library.is_rigid_body()
-            && !archive_walked
-            && !kernels.is_empty()
-            && ledger.spent().saturating_sub(charged_at_best) >= archive_patience
+        if cfg.move_library.is_rigid_body() && !archive_walked && !kernels.is_empty() && archive_due
         {
             archive_walked = true;
-            let key = rigid_cage_key(x.view(), cfg.n_points, cage_quantum);
-            cage_archive.offer_cage(e, x.view(), key);
-            if let Some(best) = ledger.best_state.as_ref() {
-                cage_archive.offer_cage(
-                    ledger.best,
-                    best.view(),
-                    rigid_cage_key(best.view(), cfg.n_points, cage_quantum),
-                );
-            }
-            let (mut side_energy, mut side_state) = match cage_archive.escape_other_cage(key) {
-                Some((energy, state)) if state.len() == x.len() => (energy, state),
-                _ => (e, x.clone()),
-            };
-            // A fresh generator, not a draw on the walker's.
-            let mut side_rng = StdRng::seed_from_u64(
-                (hops as u64)
-                    .wrapping_mul(0x9E37_79B9_7F4A_7C15)
-                    .wrapping_add(key)
-                    .wrapping_add(side_energy.to_bits()),
-            );
-            let side_scale = orient_scale;
-            let mut side_hops = 0usize;
+            let propose: fn(&ClusterMove, ArrayView1<f64>, f64, f64, &mut StdRng) -> Array1<f64> =
+                ClusterMove::propose_scaled;
+            let archive_patience = rigid_cage_patience(cfg);
             let archive_end = ledger.spent().saturating_add(archive_patience);
-            while ledger.spent() < archive_end && ledger.remaining() > 0 && !ledger.stopped() {
-                if side_hops > 0
-                    && side_hops.is_multiple_of(crate::methods::rigid_quench::STAGNATION_HOPS)
-                {
-                    let next_key = rigid_cage_key(side_state.view(), cfg.n_points, cage_quantum);
-                    if let Some((energy, state)) = cage_archive.escape_other_cage(next_key)
-                        && state.len() == side_state.len()
-                    {
-                        side_energy = energy;
-                        side_state = state;
-                    }
-                }
-                side_hops += 1;
-                let arm = side_rng.random_range(0..kernels.len());
-                let mut trial = kernels[arm].propose_scaled(
-                    side_state.view(),
-                    cfg.temperature,
-                    side_scale,
-                    &mut side_rng,
-                );
-                recentre(&mut trial, cfg.n_points);
-                contain_trial(cfg, &mut trial, cfg.n_points);
-                let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
-                if !quenched.is_finite() || relaxed.len() != side_state.len() {
-                    break;
-                }
-                let rise = (quenched - side_energy) / cfg.temperature.max(1e-12);
-                if rise <= 0.0 || side_rng.random::<f64>() < (-rise).exp() {
-                    side_energy = quenched;
-                    side_state = relaxed;
-                }
-            }
+            stall_bridge::walk_armed_rigid_archive(
+                cfg,
+                ledger,
+                relax,
+                &mut cage_archive,
+                &kernels,
+                propose,
+                &mut e,
+                &mut x,
+                hops,
+                cage_quantum,
+                orient_scale,
+                new_lowest,
+                archive_end,
+            );
         }
         if cfg.move_library.is_rigid_body()
             && crate::methods::rigid_quench::stalled(hops, hops_at_lowest)
