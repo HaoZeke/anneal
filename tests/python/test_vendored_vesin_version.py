@@ -1,5 +1,7 @@
 """Keep vendored vesin source and wheel constraints in lockstep."""
 
+# Copyright 2023--present rgpot developers
+
 import re
 from pathlib import Path
 
@@ -7,6 +9,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 VESIN = ROOT / "third_party" / "vesin"
 POTCTL_CI = ROOT / "potctl" / "src" / "ci.rs"
+
+
+def _read_vendored_version() -> str:
+    versions = [
+        line.strip()
+        for line in (VESIN / "VERSION").read_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    assert len(versions) == 1
+    return versions[0]
 
 
 def _read_ci_spec(name: str) -> str:
@@ -17,7 +29,7 @@ def _read_ci_spec(name: str) -> str:
 
 
 def test_vendored_vesin_version_matches_source() -> None:
-    declared = (VESIN / "VERSION").read_text().strip()
+    declared = _read_vendored_version()
     header = (VESIN / "vesin-single-build.cpp").read_text()
     match = re.search(r"^// vesin version: (\S+)$", header, re.MULTILINE)
     assert match is not None
@@ -25,7 +37,7 @@ def test_vendored_vesin_version_matches_source() -> None:
 
 
 def test_potctl_vesin_specs_match_vendored_minor_series() -> None:
-    vendored = (VESIN / "VERSION").read_text().strip()
+    vendored = _read_vendored_version()
     major, minor, *_ = vendored.split(".")
     next_minor = f"{major}.{int(minor) + 1}"
     for name in ("VESIN_SPEC", "VESIN_TORCH_SPEC"):
