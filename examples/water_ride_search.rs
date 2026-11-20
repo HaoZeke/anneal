@@ -132,6 +132,16 @@ impl PesSurface for WaterSurface {
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn gfn2_surface_published(
+    atomic_numbers: &[i32],
+    coordinates: &[f64],
+) -> Result<(f64, Vec<f64>), String> {
+    let surface = WaterSurface::new(atomic_numbers);
+    let (energy, gradient) = surface.evaluate(ArrayView1::from(coordinates))?;
+    Ok((energy, gradient.to_vec()))
+}
+
 fn required_environment(name: &str) -> Result<String, io::Error> {
     std::env::var(name).map_err(|_| io::Error::other(format!("{name} is required")))
 }

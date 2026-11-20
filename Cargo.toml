@@ -178,6 +178,11 @@ name = "rgpot_force_fd"
 path = "tests/rgpot_force_fd/main.rs"
 harness = false
 
+[[test]]
+name = "force_gradient_fd"
+path = "tests/force_gradient_fd/main.rs"
+harness = false
+
 [[bench]]
 name    = "sa_bench"
 harness = false

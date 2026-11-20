@@ -145,13 +145,17 @@ impl Potential {
     fn open(kind: Kind) -> Self {
         let path = std::env::var("RGPOT_COVALENT_LIB")
             .unwrap_or_else(|_| "/work/covalent-h2h/lib/librgpot_covalent.so".to_string());
-        let lib = unsafe { libloading::Library::new(&path) }
-            .unwrap_or_else(|err| panic!("rgpot covalent library {path}: {err}"));
+        Self::open_from(kind, &path).unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    fn open_from(kind: Kind, path: &str) -> Result<Self, String> {
+        let lib = unsafe { libloading::Library::new(path) }
+            .map_err(|error| format!("rgpot covalent library {path}: {error}"))?;
         let (length, energy) = match kind {
             Kind::StillingerWeber => {
                 let units: libloading::Symbol<Units> = unsafe {
                     lib.get(b"rgpot_covalent_sw_units\0")
-                        .expect("rgpot_covalent_sw_units")
+                        .map_err(|error| format!("rgpot_covalent_sw_units: {error}"))?
                 };
                 let (mut sigma, mut epsilon) = (0.0, 0.0);
                 unsafe { units(&mut sigma, &mut epsilon) };
@@ -161,15 +165,15 @@ impl Potential {
         };
         let eval = unsafe {
             *lib.get::<Eval>(b"rgpot_covalent_energy_gradient\0")
-                .expect("rgpot_covalent_energy_gradient")
+                .map_err(|error| format!("rgpot_covalent_energy_gradient: {error}"))?
         };
-        Self {
+        Ok(Self {
             _lib: lib,
             eval,
             kind,
             length,
             energy,
-        }
+        })
     }
 
     /// Energy and dE/dx in the system's units.
@@ -210,6 +214,19 @@ impl Potential {
             self.evaluate(Array1::from_vec(vec![0.0, 0.0, 0.0, r, 0.0, 0.0]).view());
         energy == 0.0 && gradient.iter().all(|g| *g == 0.0)
     }
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn covalent_published(
+    path: &str,
+    coordinates: &[f64],
+) -> Result<(f64, Vec<f64>), String> {
+    let potential = Potential::open_from(Kind::StillingerWeber, path)?;
+    let (energy, gradient) = potential.evaluate(ArrayView1::from(coordinates));
+    if !energy.is_finite() || gradient.iter().any(|component| !component.is_finite()) {
+        return Err("covalent energy or gradient is not finite".into());
+    }
+    Ok((energy, gradient.to_vec()))
 }
 
 /// Bond length and well depth of the dimer.

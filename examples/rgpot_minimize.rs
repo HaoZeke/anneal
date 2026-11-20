@@ -25,6 +25,8 @@ use anneal_core::run_rs_qmc_variant;
 use anneal_core::variant::boltzmann;
 use eindir_core::Objective;
 use eindir_core::ffi::{EindirObjectiveWrapper, eindir_core_abi_compatible, eindir_objective_t};
+use eindir_core::gradient::DifferentiableObjective;
+use ndarray::ArrayView1;
 
 use rgpot_core::eindir::{
     rgpot_eindir_abi_stamp, rgpot_potential_free_eindir, rgpot_potential_new_eindir,
@@ -130,6 +132,43 @@ fn minimize_rgpot_with_anneal(
     result
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn quadratic_published(coordinates: &[f64]) -> (f64, Vec<f64>) {
+    assert_eq!(coordinates.len(), TARGET.len());
+    let n_atoms = 3usize;
+    let dim = n_atoms * 3;
+    let atmnrs = [1i32; 3];
+    let box_ = [10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0];
+    let low = vec![-5.0f64; dim];
+    let high = vec![5.0f64; dim];
+    let pot = unsafe {
+        rgpot_potential_new_eindir(
+            quadratic_pes,
+            &TARGET as *const [f64; 9] as *mut c_void,
+            None,
+            n_atoms,
+            atmnrs.as_ptr(),
+            box_.as_ptr(),
+            low.as_ptr(),
+            high.as_ptr(),
+        )
+    };
+    assert!(!pot.is_null(), "rgpot potential construction failed");
+    let published = {
+        let abi = rgpot_eindir_abi_stamp();
+        assert_eq!(unsafe { eindir_core_abi_compatible(&abi) }, 1);
+        let obj_ptr = pot as *mut eindir_objective_t;
+        unsafe { validate_eindir_objective(obj_ptr, dim) }
+            .expect("rgpot objective failed the anneal boundary contract");
+        let objective = unsafe { EindirObjectiveWrapper::new(&*obj_ptr) };
+        let (energy, gradient) =
+            DifferentiableObjective::value_and_gradient(&objective, ArrayView1::from(coordinates));
+        (energy, gradient.to_vec())
+    };
+    unsafe { rgpot_potential_free_eindir(pot) };
+    published
+}
+
 fn main() {
     anneal_core::install_rgpot_kernels!();
     // Moderate budget for the standalone demo (runs in a few seconds).
@@ -156,6 +195,37 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[allow(dead_code)]
+    mod force_sign {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/examples/common/force_sign.rs"
+        ));
+    }
+
+    #[test]
+    fn the_quadratic_force_matches_the_energy_slope() {
+        let geometry = [0.20, 0.15, 0.05, 1.12, 0.28, -0.10, -0.18, 1.02, 0.22];
+        let (energy, gradient) = quadratic_published(&geometry);
+        let precision = force_sign::unit_in_the_last_place(energy);
+        println!("quadratic-rgpot energy precision {precision:.6e} (one ulp of {energy:.12})");
+        let (lengths, step_limits) =
+            force_sign::uniform_lengths(&geometry, None).unwrap_or_else(|error| panic!("{error}"));
+        let row = force_sign::compare_slope(
+            "quadratic-rgpot",
+            0,
+            &geometry,
+            &gradient,
+            energy,
+            precision,
+            &lengths,
+            &step_limits,
+            |point| Ok(quadratic_published(point).0),
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        println!("{row}");
+    }
 
     #[test]
     fn anneal_minimizes_rgpot_potential() {

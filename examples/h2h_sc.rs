@@ -162,6 +162,17 @@ fn library() -> Result<libloading::Library, String> {
     ))
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn sutton_chen_published(coordinates: &[f64]) -> Result<(f64, Vec<f64>), String> {
+    let lib = library()?;
+    let family = family("96").ok_or_else(|| "the 9-6 Sutton-Chen row is missing".to_string())?;
+    let (energy, gradient) = evaluate(&lib, &family, ArrayView1::from(coordinates));
+    if !energy.is_finite() || gradient.iter().any(|component| !component.is_finite()) {
+        return Err("Sutton-Chen returned a non-finite energy or gradient".into());
+    }
+    Ok((energy, gradient.to_vec()))
+}
+
 fn evaluate(lib: &libloading::Library, family: &Family, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
     let n = x.len() / 3;
     let cfg = ScConfig {

@@ -428,3 +428,88 @@ where
         }),
     }
 }
+
+#[cfg(test)]
+mod force_sign_fd {
+    use super::{BudgetedSurface, stationary_candidate};
+    use crate::descriptor_space::{
+        DescriptorBlockKind, DescriptorBlockSpec, DescriptorSchema, DescriptorSpace,
+    };
+    use crate::pes_exploration::PesSurface;
+    use ndarray::{Array1, ArrayView1};
+
+    #[allow(dead_code)]
+    mod force_sign {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/examples/common/force_sign.rs"
+        ));
+    }
+
+    const GEOMETRY: [f64; 9] = [0.20, 0.15, 0.05, 1.12, 0.28, -0.10, -0.18, 1.02, 0.22];
+
+    struct Bowl;
+
+    impl PesSurface for Bowl {
+        type Error = String;
+
+        fn evaluate(
+            &self,
+            coordinates: ArrayView1<f64>,
+        ) -> Result<(f64, Array1<f64>), Self::Error> {
+            let energy = coordinates.iter().map(|value| value * value).sum();
+            Ok((energy, coordinates.mapv(|value| 2.0 * value)))
+        }
+    }
+
+    fn published(coordinates: &[f64]) -> Result<(f64, Vec<f64>), String> {
+        let bowl = Bowl;
+        let counted = BudgetedSurface::new(&bowl, 10_000);
+        let space = DescriptorSpace::new(
+            DescriptorSchema::new(
+                "force-sign",
+                1,
+                vec![
+                    DescriptorBlockSpec::new(DescriptorBlockKind::SoapMean, 2, 2, 3.5)
+                        .expect("soap block"),
+                ],
+            )
+            .expect("schema"),
+        );
+        let species = [8, 1, 1];
+        let candidate = stationary_candidate(
+            &counted,
+            &space,
+            ArrayView1::from(coordinates),
+            &species,
+            0,
+            None,
+            1,
+            0,
+            0,
+        )
+        .map_err(|error| error.to_string())?;
+        let slope: Vec<f64> = candidate.forces.into_iter().map(|force| -force).collect();
+        Ok((candidate.energy, slope))
+    }
+
+    #[test]
+    fn the_catalog_forces_match_the_energy() {
+        let (energy, slope) = published(&GEOMETRY).expect("candidate");
+        let precision = force_sign::unit_in_the_last_place(energy);
+        let (lengths, step_limits) = force_sign::uniform_lengths(&GEOMETRY, None).expect("lengths");
+        let row = force_sign::compare_slope(
+            "catalog-forces",
+            0,
+            &GEOMETRY,
+            &slope,
+            energy,
+            precision,
+            &lengths,
+            &step_limits,
+            |point| published(point).map(|(energy, _)| energy),
+        )
+        .expect("finite difference");
+        println!("{row}");
+    }
+}

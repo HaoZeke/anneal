@@ -1332,6 +1332,19 @@ fn load_petmad(atomic_numbers: Vec<i32>, n_atoms: usize) -> Result<ForceObjectiv
     }))
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn petmad_published(
+    atomic_numbers: &[i32],
+    coordinates: &[f64],
+) -> Result<(f64, Vec<f64>), String> {
+    let objective = load_petmad(atomic_numbers.to_vec(), coordinates.len() / 3)?;
+    let (energy, gradient) = objective.value_and_gradient(ArrayView1::from(coordinates));
+    if !energy.is_finite() || gradient.iter().any(|component| !component.is_finite()) {
+        return Err("pet-mad returned a non-finite energy or gradient".into());
+    }
+    Ok((energy, gradient.to_vec()))
+}
+
 fn vacuum_box() -> [f64; 9] {
     [
         VACUUM_BOX, 0.0, 0.0, 0.0, VACUUM_BOX, 0.0, 0.0, 0.0, VACUUM_BOX,
