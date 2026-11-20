@@ -29,7 +29,29 @@ import subprocess
 import threading
 from pathlib import Path
 
-REFERENCE = {"si13": -599.34546694, "c20": -1148.85383633}
+
+def read_minima(path):
+    """Every system's reference energy. A row with no cited source is refused."""
+    with open(path, newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    reference = {}
+    for row in rows:
+        system = row["system"]
+        if not system or system in reference:
+            raise SystemExit(f"duplicate or blank system in {path}")
+        if not row.get("source", "").strip():
+            raise SystemExit(f"{system} has no reference source in {path}")
+        if row.get("energy_eV", "") == "":
+            raise SystemExit(f"{system} has no reference energy in {path}")
+        reference[system] = float(row["energy_eV"])
+    if not reference:
+        raise SystemExit(f"no references in {path}")
+    return reference
+
+
+REFERENCE = read_minima(
+    Path(__file__).resolve().parents[2] / "bench/covalent-h2h/gfn2/minima.csv"
+)
 EXAMPLE_FIELDS = [
     "system", "code", "seed", "budget", "hit", "evals_to_hit", "charged",
     "probe_calls", "wall_s", "best", "pot_s", "outside_s", "pot_per_eval_s",

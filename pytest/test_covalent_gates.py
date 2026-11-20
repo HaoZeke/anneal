@@ -85,6 +85,36 @@ def test_a_panel_system_one_arm_left_out_or_short_of_a_seed_loses(tmp_path, caps
     assert verdict(capsys) == "floor loses: lj38 h2h_gmin_proof seeds, lj55 h2h_gmin_proof seeds"
 
 
+def test_the_floor_gate_reference_matches_minima():
+    pytest.importorskip("scipy.stats")
+    crest = load("gfn2_crest_ref", "scripts/covalent_h2h/gfn2_crest.py")
+    minima = ROOT / "bench" / "covalent-h2h" / "gfn2" / "minima.csv"
+    rows = read(minima)
+    expect = {}
+    for row in rows:
+        assert row["source"].strip()
+        expect[row["system"]] = float(row["energy_eV"])
+    assert floor_gate.REFERENCE == expect
+    assert set(expect) == {"si10", "c10", "c20", "si13", "si20"}
+    campaign = {"si10": -460.68373809, "c10": -571.32273783, "c20": -1148.85383633}
+    cited = {row["system"]: row["source"] for row in rows}
+    for system, energy in campaign.items():
+        assert expect[system] == energy == crest.REFERENCE[system]
+        assert "scripts/covalent_h2h/gfn2_crest.py" in cited[system]
+    assert expect["si13"] == -624.70446339
+    assert expect["si20"] == -922.98227162
+    assert expect["si13"] != crest.REFERENCE["si13"]
+    assert "minima/si13-ring.xyz" in cited["si13"]
+    assert "minima/si20-ring.xyz" in cited["si20"]
+
+
+def test_a_reference_without_a_source_is_refused(tmp_path):
+    path = tmp_path / "minima.csv"
+    path.write_text("system,energy_eV,source\nc20,-1148.85383633,\n", encoding="utf-8")
+    with pytest.raises(SystemExit, match="no reference source"):
+        floor_gate.read_minima(path)
+
+
 def test_crest_rescore_reproduces_the_committed_row(tmp_path):
     pytest.importorskip("scipy.stats")
     crest = load("gfn2_crest", "scripts/covalent_h2h/gfn2_crest.py")
