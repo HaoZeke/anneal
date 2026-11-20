@@ -50,8 +50,10 @@ eleven other clusters reported for it unchanged.
 A restart from a diverse population on a plateau and a Thompson choice among
 the moves change no cluster at \(p<0.05\).
 Paired by seed against GMIN, the code hits LJ\(_{98}\) on 7 of 12 seeds and
-GMIN on none (\(p=0.016\)), and rigid TIP4P (H\(_2\)O)\(_{15}\) and
-(H\(_2\)O)\(_{20}\) on 7 and 6 of 12 against none (\(p=0.016\) and 0.031).
+GMIN on none (\(p=0.016\)), Morse M\(_{55}\) and M\(_{80}\) at \(\rho=14\) on 9
+and 6 of 12 against none (\(p=3.9\times 10^{-3}\) and 0.031), and rigid
+TIP4P (H\(_2\)O)\(_{15}\) and (H\(_2\)O)\(_{20}\) on 7 and 6 of 12 against
+none (\(p=0.016\) and 0.031).
 On the GFN2-xTB water hexamer, with both codes stopped at 4000 energy and
 gradient calls, it hits 121 of 192 seeds and CREST 94
 (\(p=8.0\times 10^{-3}\)).
@@ -734,16 +736,25 @@ Pooled &  & 37/48 & 39/48 & 33 & 4 & 6 & 5 & 0.75 & \(-\)0.18 to 0.10 \\
 \label{sec:gmin}
 GMIN is the Wales-group basin-hopping program and the reference code for
 these clusters \cite{wales1997,oakley2013}.
-Table~\ref{tab:gmin} runs revision \texttt{eeec8e2c} of this code, an
-ancestor of the submitted revision with the structure templates removed, and
-GMIN on eight Lennard-Jones sizes and Morse M\(_{80}\) at \(\rho=6\), with
-both arms of each cluster on one core of one host, on seeds 2000--2011 in
-alternating order, at the budget in the table, from the start this code
-writes for the seed.
-GMIN runs one input at every size, the Wales-group LJ\(_{38}\) introduction
-file: \(T=1.0\), step \(0.40\), a taboo list of the last \(20\) minima within
-\(4.0\), and a restart after \(40\) steps without a new lowest minimum; the
-Morse row adds GMIN's native \texttt{MORSE} keyword and \(\rho\).
+Table~\ref{tab:gmin} runs GMIN against this code at two revisions:
+revision \texttt{eeec8e2c}, an ancestor of the submitted revision with the
+structure templates removed, on eight Lennard-Jones sizes and Morse
+M\(_{80}\) at \(\rho=6\), and the submitted revision \texttt{61fa67cf} on
+Gupta Au\(_{55}\) and on Morse M\(_{55}\) and M\(_{80}\) at \(\rho=6\) and
+14.
+Each block runs both arms of each cluster on one core of one host, on seeds
+2000--2011 in alternating order, at the budget in the table, from the start
+this code writes for the seed.
+GMIN runs one input at every Lennard-Jones and Morse size, the Wales-group
+LJ\(_{38}\) introduction file: \(T=1.0\), step \(0.40\), a taboo list of the
+last \(20\) minima within \(4.0\), and a restart after \(40\) steps without a
+new lowest minimum; the Morse rows add GMIN's native \texttt{MORSE} keyword
+and \(\rho\).
+On Au\(_{55}\) GMIN runs the Gupta potential with the gold parameters of
+Darby et al.\ \cite{darbyCuAu2002} at \(T=0.1\)~eV, with the step and the
+taboo radius scaled by \(r_0/2^{1/6}\) and GMIN's container radius, and the
+gold driver of this code applies the basin bias of
+equation~\ref{eq:delta} on a stride of 8.
 With symmetrization and the published LJ\(_{75}\) input, from other starts,
 GMIN hit LJ\(_{75}\) on 200 of 200 seeds in a median of 33122 force calls, so
 the table compares these two configurations as run.
@@ -763,12 +774,22 @@ The median wall of a run is lower for this code on all nine clusters, and
 the paired Wilcoxon test on the walls is below 0.05 on six of them: from
 0.640~s against 3.427~s on LJ\(_{38}\) to 66.725~s against 341.6~s on
 LJ\(_{150}\).
+At the submitted revision, this code alone hits 9 seeds of M\(_{55}\) at
+\(\rho=14\) and GMIN alone none, with \(p=3.9\times 10^{-3}\) and an interval
+from 0.38 to 0.91, and 6 seeds of M\(_{80}\) at \(\rho=14\) against none, with
+\(p=0.031\) and an interval from 0.15 to 0.75.
+On Au\(_{55}\) this code alone hits 4 seeds and GMIN alone 1, with
+\(p=0.375\).
+Both arms hit M\(_{55}\) and M\(_{80}\) at \(\rho=6\) on every seed, and on
+M\(_{80}\) at \(\rho=6\) this code takes the same median of 62677 calls at both
+revisions.
 
 % gmin-panel table: start
 \begin{table}
-\caption{This code at revision \texttt{eeec8e2c}, an ancestor of the submitted revision, against
-GMIN with the inputs of Section~\ref{sec:protocol}, both arms of each cluster on one host,
-in alternating order by seed.
+\caption{This code at the revision each block names against GMIN with the inputs of
+Section~\ref{sec:protocol}, both arms of each cluster on one host, in alternating order by seed.
+On Au\(_{55}\) the gold driver of this code applies the basin bias of
+equation~\ref{eq:delta} on a stride of 8.
 GMIN is the snapshot of SVNREV \texttt{9cbec1a4} built with three patches,
 \texttt{bench/lj104-lattice/v2/h2h-gmin.patch}, \texttt{scripts/morse\_h2h/morse-timer.patch},
 and \texttt{bench/metal-cluster-h2h/gmin-bgupta.patch}, which cap the force calls, time the
@@ -787,7 +808,8 @@ of this code less that of GMIN;
 \(p_\mathrm{calls}\) and \(p_\mathrm{wall}\) are the two-sided exact Wilcoxon
 signed-rank test on the per-seed differences in calls, with a miss at the budget, and in
 the wall of the run.
-The rows are \texttt{paper/jctc/data/gmin\_rerun/*/rows.csv}.}
+The rows are \texttt{paper/jctc/data/gmin\_rerun/*/rows.csv} and
+\texttt{paper/jctc/data/gmin\_develop/rows.csv}.}
 \label{tab:gmin}
 \centering
 \scriptsize
@@ -797,6 +819,7 @@ The rows are \texttt{paper/jctc/data/gmin\_rerun/*/rows.csv}.}
 \toprule
 Cluster & Budget & Arm & Hits & Only & Both & Neither & Calls & IQR & Wall & In & Out & \(p_\mathrm{M}\) & \(\Delta\), 95\% & \(p_\mathrm{calls}\) & \(p_\mathrm{wall}\) \\
 \midrule
+\multicolumn{16}{@{}l}{\emph{Revision \texttt{eeec8e2c}, an ancestor of the submitted revision}} \\
 LJ\(_{38}\) & \(4\times 10^{5}\) & this work & 12/12 & 5 & 7 & 0 & 127839.5 & 139245.25 & 0.640 & 0.303 & 0.337 & 0.0625 & 0.09 to 0.68 & 0.021 & \(4.9\times 10^{-4}\) \\
  &  & GMIN & 7/12 & 0 &  &  & 389399 & 173127.75 & 3.427 & 2.507 & 0.916 &  &  &  &  \\
 LJ\(_{55}\) & \(1\times 10^{6}\) & this work & 12/12 & 0 & 12 & 0 & 5722 & 5372.5 & 0.052 & 0.026 & 0.027 & 1 & \(-\)0.24 to 0.24 & 0.092 & \(2.4\times 10^{-3}\) \\
@@ -815,6 +838,18 @@ LJ\(_{150}\) & \(4\times 10^{6}\) & this work & 8/12 & 1 & 7 & 2 & 1129381.5 & 3
  &  & GMIN & 9/12 & 2 &  &  & 3129518.5 & 3240050.5 & 341.6 & 316.8 & 24.713 &  &  &  &  \\
 M\(_{80}\), \(\rho=6\) & \(4\times 10^{6}\) & this work & 12/12 & 0 & 12 & 0 & 62677 & 575467.75 & 2.456 & 1.812 & 0.653 & 1 & \(-\)0.24 to 0.24 & 0.73 & 0.85 \\
  &  & GMIN & 12/12 & 0 &  &  & 268934 & 268091.5 & 9.977 & 8.943 & 1.033 &  &  &  &  \\
+\midrule
+\multicolumn{16}{@{}l}{\emph{The submitted revision \texttt{61fa67cf}}} \\
+Au\(_{55}\) & \(1\times 10^{6}\) & this work & 4/12 & 4 & 0 & 7 & 1000000 & 736743.75 & 36.578 & 27.155 & 9.462 & 0.375 & \(-\)0.12 to 0.55 & 0.62 & 0.012 \\
+ &  & GMIN & 1/12 & 1 &  &  & 1000000 & 0 & 62.055 & 58.738 & 3.317 &  &  &  &  \\
+M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & this work & 12/12 & 0 & 12 & 0 & 22596 & 51763.75 & 0.409 & 0.287 & 0.122 & 1 & \(-\)0.24 to 0.24 & 0.68 & 0.57 \\
+ &  & GMIN & 12/12 & 0 &  &  & 37047.5 & 37358.75 & 0.677 & 0.574 & 0.103 &  &  &  &  \\
+M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & this work & 9/12 & 9 & 0 & 3 & 451561.5 & 773925.5 & 7.444 & 5.699 & 1.745 & \(3.9\times 10^{-3}\) & 0.38 to 0.91 & \(3.9\times 10^{-3}\) & \(4.9\times 10^{-4}\) \\
+ &  & GMIN & 0/12 & 0 &  &  & 1000000 & 0 & 17.967 & 15.508 & 2.461 &  &  &  &  \\
+M\(_{80}\), \(\rho=6\) & \(4\times 10^{6}\) & this work & 12/12 & 0 & 12 & 0 & 62677 & 575467.75 & 2.417 & 1.777 & 0.640 & 1 & \(-\)0.24 to 0.24 & 0.73 & 0.91 \\
+ &  & GMIN & 12/12 & 0 &  &  & 268934 & 268091.5 & 10.632 & 9.523 & 1.109 &  &  &  &  \\
+M\(_{80}\), \(\rho=14\) & \(4\times 10^{6}\) & this work & 6/12 & 6 & 0 & 6 & 3901429 & 1446773 & 145.0 & 107.5 & 37.389 & 0.031 & 0.15 to 0.75 & 0.031 & 0.034 \\
+ &  & GMIN & 0/12 & 0 &  &  & 4000000 & 0 & 148.9 & 134.9 & 14.081 &  &  &  &  \\
 \bottomrule
 \end{tabular}
 }
@@ -1044,9 +1079,10 @@ The length unit of the pair minimum carries 6 of 12 seeds on M\(_{80}\) at
 \(\rho=6\) against none.
 A restart from a diverse population and a Thompson choice among the moves
 change no cluster at that level.
-At a revision with the templates removed, the code hits more seeds than GMIN
-run with one input file on LJ\(_{98}\), 7 of 12 against none, and on rigid
-TIP4P (H\(_2\)O)\(_{15}\) and (H\(_2\)O)\(_{20}\); at equal calls it hits more seeds of the GFN2-xTB water
+With the templates removed, the code hits more seeds than GMIN on
+LJ\(_{98}\), 7 of 12 against none, on Morse M\(_{55}\) and M\(_{80}\) at
+\(\rho=14\) at the submitted revision, 9 and 6 of 12 against none, and on
+rigid TIP4P (H\(_2\)O)\(_{15}\) and (H\(_2\)O)\(_{20}\); at equal calls it hits more seeds of the GFN2-xTB water
 hexamer than CREST, 121 of 192 against 94.
 
 \appendix
