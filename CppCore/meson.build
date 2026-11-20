@@ -199,7 +199,6 @@ if _mpi_dep.found()
     )
 endif
 _rgpot_srcs += files('rgpot/PotHelpers.cc')
-_rgpot_srcs += files('rgpot/Slices.cc')
 _rgpot_srcs += files('rgpot/units.cc')
 _rgpot_srcs += files('rgpot/abi/CxxLayout.cc')
 _rgpot_srcs += files(
@@ -258,9 +257,20 @@ rgpot_minimage = static_library(
     pic: true,
     install: false,
 )
-# Neighbour-list sources instantiate the slice templates, so they still need
-# OpenMP even though the non-template team helpers now live in rgpot_core.
+# threadsRequested, teamsOpened, teamSize, teamFor and countTeam live in
+# Slices.cc. Keeping the object inside rgpot_halfshell satisfies
+# --no-undefined links that take halfshell without rgpot_core, while
+# rgpot_core links rgpot_halfshell instead of compiling a second copy.
 _halfshell_omp = dependency('openmp', language: 'cpp', required: false)
+rgpot_slices = static_library(
+    'rgpot_slices',
+    files('rgpot/Slices.cc'),
+    include_directories: _incdirs,
+    cpp_args: _args + _fp_contract_off,
+    dependencies: _halfshell_omp.found() ? [_halfshell_omp] : [],
+    pic: true,
+    install: false,
+)
 rgpot_halfshell = static_library(
     'rgpot_halfshell',
     files(
@@ -272,6 +282,8 @@ rgpot_halfshell = static_library(
     include_directories: _incdirs,
     cpp_args: _args,
     dependencies: _halfshell_omp.found() ? [_halfshell_omp] : [],
+    link_whole: [rgpot_slices],
+    link_with: [rgpot_minimage, rgpot_exact_fma],
     pic: true,
     install: false,
 )
@@ -333,6 +345,7 @@ if not get_option('with_rpc_client_only')
         cpp_args: _core_args,
         include_directories: _incdirs,
         link_whole: [rgpot_minimage, rgpot_exact_fma],
+        link_with: [rgpot_halfshell],
         pic: true,
         install: false,
     )
@@ -2065,10 +2078,12 @@ if get_option('with_tests')
     endforeach
     _nlist_link = [
         rgpot_halfshell,
-        rgpot_core,
         rgpot_minimage,
         rgpot_exact_fma,
     ]
+    if not get_option('with_rpc_client_only')
+        _nlist_link += [rgpot_core]
+    endif
     foreach _rt : _rt_tests
         if _rt[1] == 'nlist'
             test(
