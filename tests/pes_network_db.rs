@@ -1,4 +1,4 @@
-#![cfg(feature = "rgsaddle")]
+#![cfg(all(feature = "rgsaddle", feature = "catalog"))]
 
 use std::collections::BTreeMap;
 use std::convert::Infallible;

@@ -175,8 +175,10 @@ pub mod md_engine;
 /// MCMC-style multi-chain SA with Gelman-Rubin termination, Bayesian
 /// pilot adaptation, parallel tempering, etc.
 pub mod methods;
-/// Action-outcome models for cost-aware global-minimum information.
+/// Durable readcon-db corpus of quenched minima.
+#[cfg(feature = "catalog")]
 pub mod minima_db;
+/// Action-outcome models for cost-aware global-minimum information.
 pub mod minimum_information;
 pub mod model_hessian;
 /// Morphology collective variables: Steinhardt bond order, a SOAP projection
@@ -201,6 +203,7 @@ pub mod packing;
 /// Multi-step paths between minima, where one hop cannot cross.
 pub mod path;
 /// Durable readcon-db snapshots of exact minimum--saddle networks.
+#[cfg(feature = "catalog")]
 pub mod pes_db;
 /// rgmin quenches and rgsaddle minimum--saddle--minimum connections.
 pub mod pes_exploration;

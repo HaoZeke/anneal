@@ -1139,6 +1139,7 @@ impl PesNetwork {
         &self.unresolved_saddles
     }
 
+    #[cfg(any(test, feature = "catalog"))]
     pub(crate) fn from_records(minima: Vec<MinimumRecord>, saddles: Vec<SaddleConnection>) -> Self {
         Self {
             minima,

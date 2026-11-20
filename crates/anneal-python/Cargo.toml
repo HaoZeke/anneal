@@ -12,11 +12,16 @@ name = "anneal_python"
 crate-type = ["cdylib"]
 
 [features]
+default = ["catalog"]
+# Readcon CON/LMDB minima and PES network corpora (`minima_db` and `pes_db`).
+# Kept in `default` for parity with `anneal-core`; `--no-default-features`
+# builds the Python extension without `readcon-core` or `readcon-db`.
+catalog = ["anneal-core/catalog"]
 # maturin and CI pass `--features python`; the module is always the
 # Python build of anneal-core.
 python = []
 
 [dependencies]
-anneal-core = { path = "../..", features = ["python-host"] }
+anneal-core = { path = "../..", default-features = false, features = ["python-host"] }
 pyo3 = { version = "0.26", features = ["extension-module", "abi3-py310"] }
 rgpot-pair = { git = "https://github.com/OmniPotentRPC/rgpot", rev = "8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e" }
