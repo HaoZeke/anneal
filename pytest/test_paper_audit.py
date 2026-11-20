@@ -312,6 +312,49 @@ def test_a_record_that_names_another_relaxation_script_is_reported():
     assert [(r[1], r[2]) for r in audit.drifts()] == [(path, "blob of the relaxation script")]
 
 
+def test_a_claim_that_the_template_era_rows_hold_is_reported():
+    audit = audit_mod.Audit()
+    si = audit.text(audit_mod.SI)
+    old = "The comparison spans every change between the revisions, not the templates\nalone."
+    assert si.count(old) == 1
+    audit.text_cache[audit_mod.SI] = si.replace(old, old + "\nThe later code reproduces the template-assisted rows.")
+    audit_mod.template_era(audit)
+    assert [(r[1], r[2]) for r in audit.drifts()] == [
+        (audit_mod.SI, "no sentence says the later code matches the template-assisted rows")]
+
+
+def test_a_drifted_template_era_cell_is_reported():
+    audit = audit_mod.Audit()
+    si = audit.text(audit_mod.SI)
+    old = "& \\texttt{c2de652d} & 2/12 & 0 & 2 & 0 & 4000000 & 0 &"
+    assert si.count(old) == 2
+    audit.text_cache[audit_mod.SI] = si.replace(old, "& \\texttt{c2de652d} & 12/12 & 0 & 2 & 0 & 4000000 & 0 &", 1)
+    audit_mod.generated_tables(audit)
+    assert [r[2] for r in audit.drifts()] == ["tab:si-template-era is the summariser's block"]
+
+
+def test_c2de652d_in_the_manuscript_fails():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "\\section{Conclusions}"
+    assert tex.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "Revision \\texttt{c2de652d} hits M\\(_{80}\\) on 2 of 12.\n\n" + old)
+    audit_mod.template_era(audit)
+    audit_mod.science_claims(audit)
+    assert sorted(r[2] for r in audit.drifts()) == ["no row is labelled c2de652d",
+                                                    "the template-era comparison stays in the SI: c2de652d"]
+
+
+def test_c2de652d_in_the_si_outside_its_section_fails():
+    audit = audit_mod.Audit()
+    si = audit.text(audit_mod.SI)
+    old = "\\section{Earlier template-assisted revision}"
+    assert si.count(old) == 1
+    audit.text_cache[audit_mod.SI] = si.replace(old, "Revision \\texttt{c2de652d}.\n\n" + old)
+    audit_mod.science_claims(audit)
+    assert [(r[1], r[2]) for r in audit.drifts()] == [(audit_mod.SI, "no row is labelled c2de652d")]
+
+
 def test_every_todo_marker_fails_both_audits():
     clean = audit_mod.Audit()
     for path in (audit_mod.TEX, audit_mod.SI, audit_mod.COVER):

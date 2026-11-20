@@ -178,6 +178,96 @@ M\(_{38}\) and M\(_{55}\) at \(\rho=6\) and 14 in the order of the Morse table.
 The TIP4P rows of the GMIN comparison were recorded by revision
 \texttt{e1a69a57}, an ancestor of the submitted revision.
 
+\section{Earlier template-assisted revision}
+\label{sec:si-template-era}
+Table~\ref{tab:si-template-era} pairs the rows of this code in the GMIN table
+of the main text with the GMIN panel of the earlier template-assisted
+revision \texttt{c2de652d} (structure templates since removed in
+\texttt{1c1b1238}), on seeds 2000--2011 at the same budgets.
+Both sessions start each seed from the geometry the driver writes for it,
+and GMIN takes the same calls to the same minimum on every seed of every
+cluster of the table in both.
+Au\(_{55}\) is left out: the GMIN build of the main text sets the run index
+before its first use, and its GMIN arm differs from the earlier session, so
+the shared start cannot be shown.
+Against \texttt{c2de652d}, the later revisions hit M\(_{80}\) at \(\rho=6\)
+on 12 of 12 seeds against 2, with \(p=2.0\times 10^{-3}\) and an interval
+from 0.46 to 0.95, and M\(_{55}\) at \(\rho=14\) and LJ\(_{150}\) on 9 and 8
+against 7 and 5.
+They hit LJ\(_{75}\) on 5 of 12 against 12, with \(p=0.016\), LJ\(_{98}\),
+LJ\(_{102}\), LJ\(_{103}\), and LJ\(_{104}\) on 7, 6, 6, and 5 against 10,
+9, 8, and 9, and M\(_{80}\) at \(\rho=14\) on 6 against 9.
+LJ\(_{38}\), LJ\(_{55}\), and M\(_{55}\) at \(\rho=6\) are hit on every seed
+at both, with medians of 127839.5 against 10615.5, 5722 against 12242, and
+22596 against 563 calls.
+Apart from M\(_{80}\) at \(\rho=6\) and LJ\(_{75}\), every McNemar \(p\) is
+above 0.2.
+The comparison spans every change between the revisions, not the templates
+alone.
+The rows of \texttt{c2de652d} are \path{paper/jctc/data/template_era/rows.csv},
+copied from commit \texttt{63ee8033} as its \texttt{PROVENANCE} file names,
+and \path{paper/jctc/scripts/template_era_table.py} writes the table.
+
+% template-era table: start
+\begin{table}
+\caption{This code at the earlier template-assisted revision \texttt{c2de652d} (structure
+templates since removed in \texttt{1c1b1238}) against the rows of this code in the GMIN
+table of the main text, paired by seed.
+Each revision runs \texttt{Config::recommended}\((N)\) through the drivers of that
+table; at \texttt{c2de652d}, LJ\(_{103}\) runs a build with
+\texttt{bench/paper-0120/lj103-table.patch}, which adds its reference energy and budget.
+Both sessions start each seed from the geometry the driver writes for it, and the GMIN arm
+of each takes the same calls to the same minimum on every seed of every cluster here.
+Au\(_{55}\) is left out, since the GMIN build of the main text sets the run index
+before its first use and its GMIN arm differs from the earlier session.
+Only counts the seeds that revision alone hits; Calls and IQR are as in the GMIN table
+of the main text.
+\(p_\mathrm{M}\), \(\Delta\) and \(p_\mathrm{calls}\) are the tests of that
+table, for the later revision less \texttt{c2de652d}.
+The comparison spans every change between the revisions, not the templates alone.
+The rows of \texttt{c2de652d} are \texttt{paper/jctc/data/template\_era/rows.csv}.}
+\label{tab:si-template-era}
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lrlrrrrrrrcr@{}}
+\toprule
+Cluster & Budget & Revision & Hits & Only & Both & Neither & Calls & IQR & \(p_\mathrm{M}\) & \(\Delta\), 95\% & \(p_\mathrm{calls}\) \\
+\midrule
+\multicolumn{12}{@{}l}{\emph{\texttt{c2de652d} against \texttt{eeec8e2c}}} \\
+LJ\(_{38}\) & \(4\times 10^{5}\) & \texttt{c2de652d} & 12/12 & 0 & 12 & 0 & 10615.5 & 3591.25 &  &  &  \\
+ &  & \texttt{eeec8e2c} & 12/12 & 0 &  &  & 127839.5 & 139245.25 & 1 & \(-\)0.24 to 0.24 & \(4.9\times 10^{-4}\) \\
+LJ\(_{55}\) & \(1\times 10^{6}\) & \texttt{c2de652d} & 12/12 & 0 & 12 & 0 & 12242 & 22988.5 &  &  &  \\
+ &  & \texttt{eeec8e2c} & 12/12 & 0 &  &  & 5722 & 5372.5 & 1 & \(-\)0.24 to 0.24 & 0.25 \\
+LJ\(_{75}\) & \(4\times 10^{6}\) & \texttt{c2de652d} & 12/12 & 7 & 5 & 0 & 1409229.5 & 983622 &  &  &  \\
+ &  & \texttt{eeec8e2c} & 5/12 & 0 &  &  & 4000000 & 962776.75 & 0.016 & \(-\)0.81 to \(-\)0.22 & \(6.8\times 10^{-3}\) \\
+LJ\(_{98}\) & \(4\times 10^{6}\) & \texttt{c2de652d} & 10/12 & 5 & 5 & 0 & 1511030.5 & 1985194.5 &  &  &  \\
+ &  & \texttt{eeec8e2c} & 7/12 & 2 &  &  & 3166811.5 & 2726730.25 & 0.45 & \(-\)0.58 to 0.17 & 0.42 \\
+LJ\(_{102}\) & \(4\times 10^{6}\) & \texttt{c2de652d} & 9/12 & 4 & 5 & 2 & 894801 & 3401143.75 &  &  &  \\
+ &  & \texttt{eeec8e2c} & 6/12 & 1 &  &  & 3256052.5 & 2043827.25 & 0.375 & \(-\)0.54 to 0.12 & 0.027 \\
+LJ\(_{103}\) & \(4\times 10^{6}\) & \texttt{c2de652d} & 8/12 & 4 & 4 & 2 & 2293133 & 2608443.75 &  &  &  \\
+ &  & \texttt{eeec8e2c} & 6/12 & 2 &  &  & 3905072.5 & 3160779.25 & 0.6875 & \(-\)0.48 to 0.20 & 1 \\
+LJ\(_{104}\) & \(4\times 10^{6}\) & \texttt{c2de652d} & 9/12 & 5 & 4 & 2 & 2328723 & 2947098 &  &  &  \\
+ &  & \texttt{eeec8e2c} & 5/12 & 1 &  &  & 4000000 & 2271734 & 0.22 & \(-\)0.61 to 0.05 & 0.19 \\
+LJ\(_{150}\) & \(4\times 10^{6}\) & \texttt{c2de652d} & 5/12 & 2 & 3 & 2 & 4000000 & 1477851 &  &  &  \\
+ &  & \texttt{eeec8e2c} & 8/12 & 5 &  &  & 1129381.5 & 3842161.25 & 0.45 & \(-\)0.15 to 0.56 & 0.074 \\
+M\(_{80}\), \(\rho=6\) & \(4\times 10^{6}\) & \texttt{c2de652d} & 2/12 & 0 & 2 & 0 & 4000000 & 0 &  &  &  \\
+ &  & \texttt{eeec8e2c} & 12/12 & 10 &  &  & 62677 & 575467.75 & \(2.0\times 10^{-3}\) & 0.46 to 0.95 & \(4.9\times 10^{-4}\) \\
+\midrule
+\multicolumn{12}{@{}l}{\emph{\texttt{c2de652d} against \texttt{61fa67cf}}} \\
+M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & \texttt{c2de652d} & 12/12 & 0 & 12 & 0 & 563 & 128.75 &  &  &  \\
+ &  & \texttt{61fa67cf} & 12/12 & 0 &  &  & 22596 & 51763.75 & 1 & \(-\)0.24 to 0.24 & \(4.9\times 10^{-4}\) \\
+M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & \texttt{c2de652d} & 7/12 & 2 & 5 & 1 & 730604 & 623707.5 &  &  &  \\
+ &  & \texttt{61fa67cf} & 9/12 & 4 &  &  & 451561.5 & 773925.5 & 0.6875 & \(-\)0.21 to 0.49 & 0.32 \\
+M\(_{80}\), \(\rho=6\) & \(4\times 10^{6}\) & \texttt{c2de652d} & 2/12 & 0 & 2 & 0 & 4000000 & 0 &  &  &  \\
+ &  & \texttt{61fa67cf} & 12/12 & 10 &  &  & 62677 & 575467.75 & \(2.0\times 10^{-3}\) & 0.46 to 0.95 & \(4.9\times 10^{-4}\) \\
+M\(_{80}\), \(\rho=14\) & \(4\times 10^{6}\) & \texttt{c2de652d} & 9/12 & 4 & 5 & 2 & 1338932.5 & 3064673 &  &  &  \\
+ &  & \texttt{61fa67cf} & 6/12 & 1 &  &  & 3901429 & 1446773 & 0.375 & \(-\)0.54 to 0.12 & 0.020 \\
+\bottomrule
+\end{tabular}
+\end{table}
+% template-era table: end
+
 \section{Protocol of the ASE comparison}
 \label{sec:si-ase}
 The ASE arms are the basin hopping and the minima hopping of the Atomic
