@@ -171,10 +171,13 @@ def _resolve(data: Path, name: str) -> Path:
 
 
 def _read(data: Path, digests: dict[str, str], name: str) -> str:
-    fetch_paper_data()
     if name not in digests:
         die(f"provenance.txt records no digest of {name}")
     path = _resolve(data, name)
+    if not path.is_file() or digest_of(path) != digests[name]:
+        repo = ROOT.parents[1]
+        if path.resolve().is_relative_to(repo):
+            fetch_paper_data([path.resolve().relative_to(repo).as_posix()])
     if not path.is_file() or digest_of(path) != digests[name]:
         die(f"{name} does not match the digest provenance.txt records")
     return path.read_text()
