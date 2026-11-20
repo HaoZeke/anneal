@@ -9753,13 +9753,14 @@ where
                     // different minimum. The chain has already shown it
                     // cannot improve from where it is, so the value of the
                     // new structure is that it is somewhere else. The same
-                    // minimum is the shelf: it is not a leave, so the stall
-                    // clock stays and the depth score stays with the arms
-                    // that actually left. The chain still stands on the
-                    // requenched landing. Keeping the pre-climb coordinates
-                    // leaves the walk off the funnel the climb returned to.
-                    // A neighbour inside the escape step is kept when its
-                    // energy is not that minimum.
+                    // minimum is the shelf: it is not a leave, so it carries
+                    // no depth score. The climb arm cleared the stall clock
+                    // before activation; a shelf return does not clear it a
+                    // second time. The chain still stands on the requenched
+                    // landing. Keeping the pre-climb coordinates leaves the
+                    // walk off the funnel the climb returned to. A neighbour
+                    // inside the escape step is kept when its energy is not
+                    // that minimum.
                     let climb_home = stall_landing_on_shelf(cfg, &shelf, &bias, xe.view(), ee);
                     if !finish_stall_leave("climb", climb_home, &mut quiet, &mut longest_quiet) {
                         tabu_hits += 1;
@@ -12496,7 +12497,7 @@ mod tests {
     }
 
     #[test]
-    fn a_climb_onto_the_shelf_keeps_the_stall_clock() {
+    fn a_climb_onto_the_shelf_uses_the_already_cleared_clock() {
         let n = 4;
         let shelf = Array1::from(vec![
             0.0, 0.0, 0.0, 1.2, 0.0, 0.0, 0.6, 1.0, 0.0, 0.6, 0.4, 0.9,
@@ -12560,10 +12561,10 @@ mod tests {
             HOME_STALL_CLOCKS.with(|values| {
                 let values = values.borrow();
                 values.iter().any(|(arm, landed_home, before, after)| {
-                    *arm == "climb" && *landed_home && before == after
+                    *arm == "climb" && *landed_home && *before == 0 && *after == 0
                 })
             }),
-            "a climb onto the shelf did not preserve the stall clock"
+            "a climb onto the shelf changed the already cleared stall clock"
         );
     }
 
