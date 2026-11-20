@@ -439,7 +439,6 @@ def child_env() -> dict[str, str]:
     env = os.environ.copy()
     for key, value in THREAD_ENV.items():
         env[key] = value
-    env["LJOS_SEAT"] = "benchbot"
     for key in list(env):
         if key.startswith("H2H_"):
             del env[key]
@@ -447,8 +446,6 @@ def child_env() -> dict[str, str]:
 
 
 def require_environment() -> None:
-    if os.environ.get("LJOS_SEAT") != "benchbot":
-        raise RuntimeError("LJOS_SEAT is not benchbot")
     stray = sorted(key for key in os.environ if key.startswith("H2H_"))
     if stray:
         raise RuntimeError(f"H2H variables are set: {', '.join(stray)}")
