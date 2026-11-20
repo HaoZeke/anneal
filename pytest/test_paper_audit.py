@@ -843,6 +843,101 @@ def test_a_reachable_revision_ends_the_carry():
     assert prose_flags("Rows at e3ed7dad. Rows at 61fa67cf reach a median of 9 calls.") == []
 
 
+def bench_flags(tmp_path, monkeypatch, files):
+    for name, text in files.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text)
+    monkeypatch.setattr(audit_mod, "ROOT", tmp_path)
+    monkeypatch.setattr(audit_mod, "_verified_aliases", lambda: (), raising=False)
+    return sorted((w.split(":")[0], rev, number) for w, rev, number in
+                  audit_mod._printed_readme_numbers(audit_mod.Audit(), []))
+
+
+def test_a_revision_inside_a_table_cell_is_read(tmp_path, monkeypatch):
+    readme = "| System | Code | Hits | Calls median |\n|---|---|---|---|\n| lj38 | anneal at `0badc0de51` (rerun) | 3/12 | 812 |\n"
+    assert bench_flags(tmp_path, monkeypatch, {"bench/x/README.md": readme}) == [
+        ("bench/x/README.md", "0badc0de51", "lj38 Calls median=812"),
+        ("bench/x/README.md", "0badc0de51", "lj38 Hits=3/12"),
+    ]
+
+
+@pytest.mark.parametrize("shown", ["1,974.5", "2.5 s", "18.4 µs", "−13.79658 eV", "**12/12**", "41%"])
+def test_a_number_with_commas_or_units_is_read(tmp_path, monkeypatch, shown):
+    readme = f"| System | Harness | Calls median |\n|---|---|---|\n| lj38 | 0badc0de52 | {shown} |\n"
+    assert bench_flags(tmp_path, monkeypatch, {"bench/x/README.md": readme}) == [
+        ("bench/x/README.md", "0badc0de52", f"lj38 Calls median={shown}")]
+
+
+CSV_README = "Rows are in `rows.csv`.\n\n| System | Arm | Hits |\n|---|---|---|\n| LJ38 | anneal | 3/12 |\n|  | GMIN | 1/12 |\n"
+
+
+@pytest.mark.parametrize("field", ["code_revision", "anneal_head", "anneal_revision", "release_revision"])
+def test_a_csv_revision_reaches_its_readme_table(tmp_path, monkeypatch, field):
+    rows = f"system,arm,hits,{field}\nlj38,anneal,3,0badc0de53\nlj38,gmin,1,0badc0de54\nlj55,anneal,1,0badc0de55\n"
+    assert bench_flags(tmp_path, monkeypatch, {"bench/x/README.md": CSV_README, "bench/x/rows.csv": rows}) == [
+        ("bench/x/README.md", "0badc0de53", "LJ38 anneal Hits=3/12"),
+        ("bench/x/README.md", "0badc0de54", "GMIN Hits=1/12"),
+    ]
+
+
+def test_a_table_without_a_system_column_reaches_its_csv(tmp_path, monkeypatch):
+    readme = "| arm | hits | median wall s |\n| --- | --- | --- |\n| anneal | 10/12 | 0.98 |\n| basin hopping | 0/12 | 4.65 |\n"
+    rows = "system,arm,hit,code_revision\nlj38,anneal,1,0badc0de56\nlj38,ase_bh,0,0badc0de57\n"
+    assert bench_flags(tmp_path, monkeypatch, {"bench/x/README.md": readme, "bench/x/rows.csv": rows}) == [
+        ("bench/x/README.md", "0badc0de56", "anneal hits=10/12"),
+        ("bench/x/README.md", "0badc0de56", "anneal median wall s=0.98"),
+        ("bench/x/README.md", "0badc0de56", "basin hopping hits=0/12"),
+        ("bench/x/README.md", "0badc0de56", "basin hopping median wall s=4.65"),
+        ("bench/x/README.md", "0badc0de57", "basin hopping hits=0/12"),
+        ("bench/x/README.md", "0badc0de57", "basin hopping median wall s=4.65"),
+    ]
+
+
+def test_a_csv_in_a_subdirectory_reaches_its_readme_table(tmp_path, monkeypatch):
+    readme = "Rows are in `gfn2/rows.csv`.\n\n| system | code | hits |\n|---|---|---|\n| Si10 | anneal G | 6/6 |\n"
+    rows = "system,code,hit,code_revision\nsi10,anneal G,1,0badc0de58\nsi13,anneal G,1,0badc0de59\n"
+    assert bench_flags(tmp_path, monkeypatch, {"bench/x/README.md": readme, "bench/x/gfn2/rows.csv": rows}) == [
+        ("bench/x/README.md", "0badc0de58", "Si10 anneal G hits=6/6")]
+
+
+def test_a_csv_backs_only_the_tables_of_its_section(tmp_path, monkeypatch):
+    readme = ("## Before\n\n| system | code | hits |\n|---|---|---|\n| Si10 | anneal G | 6/6 |\n\n"
+              "## Gate\n\nRows are in `gate.csv`.\n\n| system | code | hits |\n|---|---|---|\n| Si10 | anneal G | 5/6 |\n")
+    rows = "system,code,hit,code_revision\nsi10,anneal G,1,0badc0de5a\n"
+    assert bench_flags(tmp_path, monkeypatch, {"bench/x/README.md": readme, "bench/x/gate.csv": rows}) == [
+        ("bench/x/README.md", "0badc0de5a", "Si10 anneal G hits=5/6")]
+
+
+def readme_revisions():
+    found = audit_mod._printed_readme_numbers(audit_mod.Audit(), [])
+    return {(where.split(":")[0], revision[:8]) for where, revision, _number in found}
+
+
+def test_unreachable_revisions_in_the_bench_readmes_are_found():
+    found = readme_revisions()
+    assert {
+        ("bench/gmin-panel/README.md", "1ce3ab64"),
+        ("bench/ase-au55/README.md", "1ce3ab64"),
+        ("bench/ase-au55/README.md", "fc1af066"),
+        ("bench/ase-lj38/README.md", "5a7f629d"),
+        ("bench/ase-lj38/README.md", "b49341e3"),
+        ("bench/ase-lj55/README.md", "36548663"),
+        ("bench/ase-nonlj/README.md", "90b88235"),
+        ("bench/covalent-h2h/README.md", "ce1e7a46"),
+        ("bench/covalent-h2h/README.md", "eb7f8999"),
+        ("bench/covalent-h2h/README.md", "a52726af"),
+    } <= found
+
+
+def test_openconf_local_revisions_are_read_through_their_aliases(monkeypatch):
+    local = {("bench/openconf-h2h/conf-fix3/README.md", "cf660e19"),
+             ("bench/openconf-h2h/conf-fix4/README.md", "2a5b4553"),
+             ("bench/openconf-h2h/paired/README.md", "d178bd15")}
+    assert not local & readme_revisions()
+    monkeypatch.setattr(audit_mod, "_verified_aliases", lambda: (), raising=False)
+    assert local <= readme_revisions()
+
+
 def test_printed_revisions_are_ancestors_or_qualified():
     audit = audit_mod.Audit()
     audit_mod.printed_harnesses(audit)
