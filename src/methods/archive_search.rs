@@ -137,8 +137,9 @@ fn symmetry_polish(
         return None;
     }
     let n = x.len() / 3;
+    let orders = crate::symmetrise::orders_held(n);
     let mut cands: Vec<crate::symmetrise::Candidate> = Vec::new();
-    for order in [2usize, 3, 4, 5, 6] {
+    for &order in &orders {
         if let Some(c) = crate::symmetrise::detect(x, n, &[order], cfg.symmetry_tolerance) {
             cands.push(c);
         }
@@ -150,7 +151,7 @@ fn symmetry_polish(
         crate::symmetrise::symmetrise_detected(
             x,
             n,
-            &[2, 3, 4, 5, 6],
+            &orders,
             cfg.symmetry_tolerance,
             cfg.merge_radius.max(0.5),
         )
