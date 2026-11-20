@@ -32,6 +32,8 @@
 use ndarray::{Array1, Array2, ArrayView1};
 use rand::Rng;
 
+use crate::allocate::highest_draw;
+
 /// A conjugate Bayesian linear model with a Gaussian likelihood.
 ///
 /// Kept separate from the one in [`crate::screen`] because this one is sampled
@@ -176,36 +178,22 @@ impl ContextualAllocator {
             } else {
                 open_arms[rng.random_range(0..open_arms.len())]
             }
-        } else if unrestricted {
-            let mut best = 0usize;
-            let mut best_score = f64::NEG_INFINITY;
-            for a in 0..self.arms.len() {
-                let sd = (self.shared.variance(context) + self.arms[a].variance(context)).sqrt()
-                    * self.exploration;
-                let score = self.value(a, context) + sd * standard_normal(rng);
-                if score > best_score {
-                    best_score = score;
-                    best = a;
-                }
-            }
-            best
         } else {
-            let mut best = open_arms[0];
-            let mut best_score = f64::NEG_INFINITY;
-            for a in open_arms {
-                // Sampled value: posterior mean plus a normal draw scaled by
-                // the posterior standard deviation at this context. A move
-                // never tried in this region has a wide posterior and can win
-                // on the draw, which is the exploration Thompson supplies.
+            // Sampled value: posterior mean plus a normal draw scaled by
+            // the posterior standard deviation at this context. A move
+            // never tried in this region has a wide posterior and can win
+            // on the draw, which is the exploration Thompson supplies.
+            let mut score = |a: usize| {
                 let sd = (self.shared.variance(context) + self.arms[a].variance(context)).sqrt()
                     * self.exploration;
-                let score = self.value(a, context) + sd * standard_normal(rng);
-                if score > best_score {
-                    best_score = score;
-                    best = a;
-                }
+                self.value(a, context) + sd * standard_normal(rng)
+            };
+            if unrestricted {
+                highest_draw(0, 0..self.arms.len(), &mut score)
+            } else {
+                let start = open_arms[0];
+                highest_draw(start, open_arms, &mut score)
             }
-            best
         };
         self.picks[k] += 1;
         k
@@ -284,6 +272,45 @@ mod tests {
     use ndarray::array;
     use rand::SeedableRng;
     use rand::rngs::StdRng;
+
+    /// The joined helper draws the same moves as the split loops.
+    ///
+    /// Recorded from those loops before they were joined. Seed
+    /// `0x1810_0118`, 32 draws, floor 0.2, context `[1, 0.5, -0.25]`. The
+    /// mask cycles through every move, every move but 0, every move but 1,
+    /// the even moves, and move 3. `tail` is the next `u64` from the
+    /// generator.
+    #[test]
+    fn a_fixed_seed_matches_the_split_loops() {
+        let context = array![1.0, 0.5, -0.25];
+        let masks: [fn(usize) -> bool; 5] = [
+            |_| true,
+            |arm| arm != 0,
+            |arm| arm != 1,
+            |arm| arm % 2 == 0,
+            |arm| arm == 3,
+        ];
+        let mut alloc = ContextualAllocator::new(5, 3, 0.2);
+        let mut rng = StdRng::seed_from_u64(0x1810_0118);
+        let mut seen = Vec::new();
+        for step in 0..32 {
+            let open = masks[step % masks.len()];
+            let arm = alloc.select_where(context.view(), &mut rng, open);
+            seen.push(arm);
+            let reward = if step % 3 != 0 { 1.0 } else { 0.0 };
+            alloc.update(arm, context.view(), reward);
+        }
+        assert_eq!(
+            seen,
+            [
+                0, 4, 4, 2, 3, 4, 4, 3, 2, 3, 1, 4, 4, 4, 3, 1, 1, 4, 0, 3, 4, 3, 4, 2, 3, 4, 3, 4,
+                0, 3, 3, 3,
+            ]
+        );
+        assert_eq!(rng.random::<u64>(), 4_040_181_878_137_857_269);
+        assert_eq!(alloc.forced, 5);
+        assert_eq!(alloc.picks, vec![3, 3, 3, 11, 12]);
+    }
 
     #[test]
     fn an_open_context_draw_allocates_no_arm_vector() {
