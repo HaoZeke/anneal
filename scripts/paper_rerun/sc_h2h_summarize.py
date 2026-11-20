@@ -152,7 +152,7 @@ def calls_text(value: str) -> str:
     number = float(value)
     if number.is_integer():
         return str(int(number))
-    return f"{number:.6g}"
+    return f"{number:.6f}".rstrip("0").rstrip(".")
 
 
 def show(value: float) -> str:
