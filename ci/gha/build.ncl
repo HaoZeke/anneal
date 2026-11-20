@@ -309,14 +309,14 @@ in
           uses = P.install_action,
           with = { tool = "cargo-nextest" },
         },
-        { name = "potctl unit tests", run = "cargo test -p potctl" },
+        { name = "potctl unit tests", run = "cargo test --locked -p potctl" },
         S.run_pixi m%"
-          cargo nextest run -p rgpot-core
-          cargo nextest run -p rgpot-core --all-features
+          cargo nextest run --locked -p rgpot-core
+          cargo nextest run --locked -p rgpot-core --all-features
         "%
         & { name = "Run Rust tests (nextest)" },
         S.run_pixi m%"
-          cargo test --doc -p rgpot-core
+          cargo test --locked --doc -p rgpot-core
         "%
         & { name = "Run Rust doc-tests" },
         S.run_pixi "bash tools/check_header_drift.sh"
