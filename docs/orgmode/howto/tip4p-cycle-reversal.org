@@ -27,7 +27,7 @@ if let MoveLibrary::RigidBody { reverse_cycles, .. } = &mut cfg.move_library {
 }
 #+end_src
 
-The library then offers =rtrans= and =rrot= only.
+The library then offers =rkick=, =rtrans=, =rrot=, =rtrans1=, =rreor= and =rreloc= only.
 The Python =Config= has no switch for this move.
 
 * Count accepted hops per move
@@ -73,15 +73,14 @@ It prints:
 
 #+begin_example
 reverse_cycles: true
-best: -479.316795
-accepted: {"rcycle": 578, "rrot": 48, "rtrans": 27}
+best: -492.908254
+accepted: {"rcycle": 165, "rkick": 427, "rreloc": 12, "rreor": 222, "rrot": 488, "rtrans": 427, "rtrans1": 302}
 reverse_cycles: false
-best: -488.323527
-accepted: {"rrot": 110, "rtrans": 94}
+best: -492.908254
+accepted: {"rkick": 592, "rreloc": 12, "rreor": 241, "rrot": 508, "rtrans": 465, "rtrans1": 288}
 #+end_example
 
-With the move on, most accepted hops come from =rcycle=.
-On this start the search without the move still ends lower.
+Both runs reach the global minimum on this single start.
 One start cannot rank two settings.
 Run many seeds and pair the runs by seed.
 [[file:../explanation/water-cycle-reversal.org][Hydrogen-bond cycle reversal]] does that over 288 pairs.
