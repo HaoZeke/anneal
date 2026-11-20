@@ -157,9 +157,9 @@ fn cmd_run(args: &[String]) -> i32 {
         return 2;
     }
     let mut cfg = Config::recommended(spec.n);
-    // `1` rescales preset lengths to this pair's minimum. Unset keeps the
-    // Lennard-Jones diameter the preset was measured in. Lennard-Jones
-    // itself is unchanged by that rescaling; Morse is not.
+    // `1` selects `recommended_for_pair`: preset lengths follow the pair
+    // minimum, and the lattice arm ranks with that pair. Unset keeps
+    // `recommended`, the Lennard-Jones diameter and its lattice.
     if std::env::var("H2H_PAIR_SCALE").is_ok_and(|value| value == "1") {
         cfg = Config::recommended_for_pair(
             spec.n,

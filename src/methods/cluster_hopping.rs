@@ -2592,7 +2592,7 @@ fn energy_lattice_proposal<R: Rng + ?Sized>(
     heat: f64,
 ) -> Array1<f64> {
     let reduced = heat * cfg.temperature / cfg.energy_scale.max(1e-12);
-    let lattice = crate::methods::lattice_search::Lattice::default();
+    let lattice = crate::methods::lattice_search::Lattice::for_pair(cfg.lattice_kind);
     let coords = x.to_vec();
     if let Some(y) = lattice.propose_energy_exchange(&coords, ledger, reduced, rng) {
         return Array1::from(y);
@@ -10288,6 +10288,95 @@ mod group_move_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recommended_lattice_matches_the_historical_default() {
+        let coords = Array1::from(vec![
+            1.0,
+            0.0,
+            0.0,
+            -0.5,
+            0.8660254037844386,
+            0.0,
+            -0.5,
+            -0.8660254037844386,
+            0.0,
+            0.0,
+            0.0,
+            1.8,
+        ]);
+        for cfg in [
+            Config::recommended(4),
+            Config::recommended_for_pair(4, crate::potentials::PairKind::LennardJones),
+        ] {
+            assert_eq!(cfg.lattice_kind, crate::potentials::PairKind::LennardJones);
+            let temperature = cfg.temperature / cfg.energy_scale;
+            let mut rng = StdRng::seed_from_u64(11);
+            let mut ledger = Ledger::new(100);
+            let drawn = energy_lattice_proposal(&cfg, &mut ledger, coords.view(), &mut rng, 1.0);
+            let mut rng = StdRng::seed_from_u64(11);
+            let mut ledger = Ledger::new(100);
+            let historical = crate::methods::lattice_search::Lattice::default()
+                .propose_energy_exchange(
+                    coords.as_slice().unwrap(),
+                    &mut ledger,
+                    temperature,
+                    &mut rng,
+                )
+                .expect("historical exchange");
+            assert_eq!(drawn.as_slice().unwrap(), historical.as_slice());
+        }
+    }
+
+    #[test]
+    fn the_energy_lattice_arm_ranks_with_the_configured_pair() {
+        let morse = crate::potentials::PairKind::Morse { rho: 14.0 };
+        let cfg = Config::recommended_for_pair(4, morse);
+        assert_eq!(cfg.lattice_kind, morse);
+        // Equilateral triangle of side 1, and a fourth atom held far enough
+        // that a Lennard-Jones well still binds it and a rho=14 Morse well
+        // does not. The vacant site the triangle defines is one bond from
+        // three atoms, so the two ranges disagree on the best exchange.
+        let coords = Array1::from(vec![
+            1.0,
+            0.0,
+            0.0,
+            -0.5,
+            0.8660254037844386,
+            0.0,
+            -0.5,
+            -0.8660254037844386,
+            0.0,
+            0.0,
+            0.0,
+            1.8,
+        ]);
+        let temperature = cfg.temperature / cfg.energy_scale;
+        let lj_offers = crate::methods::lattice_search::Lattice::default()
+            .exchange_probabilities(coords.as_slice().unwrap(), temperature)
+            .expect("lennard-jones offers");
+        let morse_offers = crate::methods::lattice_search::Lattice::for_pair(morse)
+            .exchange_probabilities(coords.as_slice().unwrap(), temperature)
+            .expect("morse offers");
+        assert_ne!(
+            lj_offers, morse_offers,
+            "the two ranges ranked the same exchange"
+        );
+        let mut rng = StdRng::seed_from_u64(11);
+        let mut ledger = Ledger::new(100);
+        let drawn = energy_lattice_proposal(&cfg, &mut ledger, coords.view(), &mut rng, 1.0);
+        let mut rng = StdRng::seed_from_u64(11);
+        let mut ledger = Ledger::new(100);
+        let direct = crate::methods::lattice_search::Lattice::for_pair(morse)
+            .propose_energy_exchange(
+                coords.as_slice().unwrap(),
+                &mut ledger,
+                temperature,
+                &mut rng,
+            )
+            .expect("morse exchange");
+        assert_eq!(drawn.as_slice().unwrap(), direct.as_slice());
+    }
 
     #[test]
     fn an_ordinary_target_improvement_uses_the_completed_quench_clock() {

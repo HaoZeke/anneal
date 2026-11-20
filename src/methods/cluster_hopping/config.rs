@@ -1400,6 +1400,15 @@ pub struct Config {
     /// current geometry and ranks them by pair energy. It does not move
     /// the least-coordinated atom onto a random surface point.
     pub energy_lattice: bool,
+    /// Pair whose energy ranks an [`Config::energy_lattice`] exchange.
+    ///
+    /// Site positions follow the structure's own bond. The weight is
+    /// this pair, with the well shifted onto that bond. [`Config::recommended`]
+    /// keeps Lennard-Jones, the lattice the arm was measured with.
+    /// [`Config::recommended_for_pair`] passes the pair the search is
+    /// running, so the range is the curvature at that minimum.
+    #[serde(skip)]
+    pub lattice_kind: crate::potentials::PairKind,
     /// Learned portfolio of relaxation surfaces: the plain surface plus every
     /// transform listed, one drawn per hop by depth-rewarded Thompson
     /// sampling. Empty leaves the choice to `two_phase`.
@@ -1795,17 +1804,24 @@ impl Config {
     /// unit-depth pair potential.
     ///
     /// The same rule is used for every pair form. Lennard-Jones is
-    /// bit-identical to [`Config::recommended`]; Morse rescales every length
-    /// from the Lennard-Jones diameter to its own pair minimum.
+    /// bit-identical to [`Config::recommended`]. Morse rescales every length
+    /// from the Lennard-Jones diameter to its own pair minimum, and the
+    /// lattice arm ranks an exchange with that pair. The well sits on the
+    /// pair minimum; the range is the curvature there.
     ///
     /// ```
     /// use anneal_core::methods::cluster_hopping::Config;
     /// use anneal_core::potentials::PairKind;
     /// let lj = Config::recommended_for_pair(13, PairKind::LennardJones);
     /// assert_eq!(lj.length_scale, Config::recommended(13).length_scale);
+    /// assert_eq!(lj.lattice_kind, PairKind::LennardJones);
+    /// let morse = Config::recommended_for_pair(13, PairKind::Morse { rho: 14.0 });
+    /// assert_eq!(morse.lattice_kind, PairKind::Morse { rho: 14.0 });
     /// ```
     pub fn recommended_for_pair(n_points: usize, kind: crate::potentials::PairKind) -> Self {
-        Self::recommended_with_scales(n_points, kind.length_scale(), 1.0)
+        let mut cfg = Self::recommended_with_scales(n_points, kind.length_scale(), 1.0);
+        cfg.lattice_kind = kind;
+        cfg
     }
 
     /// [`Config::recommended`] with every length in `length_scale` and every
@@ -2270,6 +2286,7 @@ impl Config {
             reoccupy: None,
             reoccupy_interval: 5_000,
             energy_lattice: false,
+            lattice_kind: crate::potentials::PairKind::LennardJones,
             surfaces: Vec::new(),
             // Calibrated against published minima: the largest atomic distance
             // from the centre of mass divides by N^(1/3) to between 0.46 and
