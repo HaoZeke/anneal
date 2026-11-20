@@ -3671,23 +3671,6 @@ fn shelf_holds(
         .any(|(held, stored)| same_shelf(held.view(), *stored, landing, energy, length))
 }
 
-/// Whether `landing` is a quarantined shelf distinct from the standing minimum.
-///
-/// A self-return leaves the chain on the same minimum; refusing it or
-/// withholding its depth score perturbs the allocator and orbit completion
-/// without blocking a cross-basin return onto a previously left shelf.
-fn cross_basin_shelf_return(
-    shelf: &[(Array1<f64>, f64)],
-    standing: ArrayView1<f64>,
-    standing_energy: f64,
-    landing: ArrayView1<f64>,
-    landing_energy: f64,
-    length: f64,
-) -> bool {
-    shelf_holds(shelf, landing, landing_energy, length)
-        && !same_shelf(standing, standing_energy, landing, landing_energy, length)
-}
-
 /// Shared refusal gate for every learned stall-response arm.
 fn stall_landing_on_shelf(
     cfg: &Config,
@@ -3802,7 +3785,6 @@ fn decay_all_shelves(
 enum ShelfDecaySite {
     LoopHead,
     BeforeProposal,
-    BeforeVeto,
     BeforeStall,
 }
 
@@ -8736,49 +8718,9 @@ where
         // A quarantined funnel is refused whatever the energy. Checked after
         // the acceptance test rather than instead of it, so the veto is
         // visible as a veto rather than folded into the rule.
-        // A full quench can fall back onto a geometry the call plateau has
-        // already named. The partial-relaxation screen misses it when the
-        // screened point is still outside the merge radius, the energy
-        // change is then zero, and the hop is accepted. Refusing that
-        // geometry before a plateau has named it would move the short
-        // searches that never reach the plateau.
-        // Empty shelf: the test is the one the short searches take, and it
-        // must not describe the landing. A fresh fingerprint would move the
-        // pair cache and the trajectory with it.
-        decay_shelves_at(
-            ShelfDecaySite::BeforeVeto,
-            &mut shelf,
-            &mut parked_shelves,
-            &chains,
-            ledger.best,
-            e,
-        );
-        if accept && !shelf.is_empty() && !improved && effective_keying(cfg) == Keying::Distances {
-            let veto = if skip_basin {
-                let landing = bias.cv(x_new.view());
-                shelf_holds(&shelf, landing.view(), e_new, cfg.escape_epsilon)
-                    && !same_shelf(
-                        bias.cv(x.view()).view(),
-                        e,
-                        landing.view(),
-                        e_new,
-                        cfg.escape_epsilon,
-                    )
-            } else {
-                cross_basin_shelf_return(
-                    &shelf,
-                    s_old.view(),
-                    e,
-                    s_new.view(),
-                    e_new,
-                    cfg.escape_epsilon,
-                )
-            };
-            if veto {
-                accept = false;
-                tabu_hits += 1;
-            }
-        }
+        // Shelf quarantines govern stall responses only; ordinary hops remain
+        // subject to Metropolis/lattice acceptance, basin bias, and hop-stall
+        // funnel tabu so a chain can still descend back to its incumbent best.
         if !tabu.is_empty() && accept && tabu_covers(&tabu, s_new.view(), bias.merge_radius()) {
             accept = false;
             tabu_hits += 1;
@@ -8932,37 +8874,7 @@ where
                 // How close the move brought the chain to the best it knows.
                 // Dense, because every hop produces one, and informative,
                 // because its size says how deep rather than merely whether.
-                // A quench back onto a geometry the plateau has already
-                // named scores zero, and zero is the best an arm can earn
-                // without beating the record, so the arm that falls onto
-                // that shelf takes the later draws. That landing is not a
-                // depth. Before a plateau has named anything, every hop
-                // still scores, which is what the short pinned searches do.
-                let home = !shelf.is_empty()
-                    && effective_keying(cfg) == Keying::Distances
-                    && if skip_basin {
-                        let landing = bias.cv(x_new.view());
-                        shelf_holds(&shelf, landing.view(), e_new, cfg.escape_epsilon)
-                            && !same_shelf(
-                                bias.cv(x.view()).view(),
-                                e,
-                                landing.view(),
-                                e_new,
-                                cfg.escape_epsilon,
-                            )
-                    } else {
-                        cross_basin_shelf_return(
-                            &shelf,
-                            s_old.view(),
-                            e,
-                            s_new.view(),
-                            e_new,
-                            cfg.escape_epsilon,
-                        )
-                    };
-                if !home || improved {
-                    depth_allocator.update(k, -(e_new - ledger.best));
-                }
+                depth_allocator.update(k, -(e_new - ledger.best));
             }
             // A rigid accept that only moves centres, or only turns a
             // hydrogen-bond cycle, is not evidence the arm is useful.
@@ -11936,17 +11848,12 @@ mod tests {
     }
 
     #[test]
-    fn shelves_decay_before_a_tabu_veto() {
-        assert_decay_site_is_wired(ShelfDecaySite::BeforeVeto);
-    }
-
-    #[test]
     fn shelves_decay_before_a_stall_response() {
         assert_decay_site_is_wired(ShelfDecaySite::BeforeStall);
     }
 
     /// A shelf beaten by a non-adopting record improvement must actually be
-    /// evicted by `decay_shelves_at` before the next acceptance veto, not
+    /// evicted by `decay_shelves_at` before the next stall refusal, not
     /// merely have the decay site visited.
     #[test]
     fn a_beaten_shelf_evicts_before_the_next_veto() {
@@ -11956,19 +11863,21 @@ mod tests {
         ]);
         let mut other_well = shelf_well.clone();
         other_well[0] += 0.35;
+        let mut third_well = shelf_well.clone();
+        third_well[1] += 2.5;
         let mut deep_well = shelf_well.clone();
         deep_well[0] += 0.75;
 
         let mut cfg = Config::recommended(n);
         cfg.restart_patience = 40;
         cfg.escape_stall_patience = 1_000_000;
-        cfg.escape_on_stall = true;
-        cfg.restart_on_stall = false;
+        cfg.escape_on_stall = false;
+        cfg.restart_on_stall = true;
         cfg.relax_steps = 80;
         cfg.screen_steps = 1;
-        cfg.polish_records = 10;
-        cfg.max_hops = Some(4);
-        cfg.temperature = 100.0;
+        cfg.polish_records = 20;
+        cfg.max_hops = Some(6);
+        cfg.temperature = 1.0;
         cfg.bias_height = 0.0;
         cfg.bayes_screen = false;
         cfg.screen_margin = f64::INFINITY;
@@ -11986,18 +11895,20 @@ mod tests {
         let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
             let before = led.spent();
             let (well, offset) = if steps == cfg.polish_records {
-                if quench_calls == 4 {
+                if quench_calls == 5 {
                     (&deep_well, -5.0)
                 } else {
                     (&shelf_well, -1.0)
                 }
             } else if steps <= 1 {
-                (&shelf_well, -1.0)
+                (&other_well, -0.5)
             } else {
                 quench_calls += 1;
                 match quench_calls {
                     1..=3 => (&shelf_well, -1.0),
                     4 => (&other_well, -0.5),
+                    5 => (&third_well, -0.4),
+                    6 => (&third_well, 1000.0),
                     _ => (&shelf_well, -1.0),
                 }
             };
@@ -12033,26 +11944,33 @@ mod tests {
         );
         assert_eq!(
             out.tabu.1, 0,
-            "beaten shelf was not evicted by decay_shelves_at and vetoed a cross-basin move: {:?}",
+            "beaten shelf was not evicted by decay_shelves_at and refused a stall restart: {:?}",
             out.tabu
         );
         assert!(
             out.accepted_transitions.iter().any(|step| {
-                (step.from_energy - (-0.5)).abs() < 1e-3
+                step.action == "restart"
+                    && (step.from_energy - (-0.4)).abs() < 1e-3
                     && (step.to_energy - (-1.0)).abs() < 1e-3
                     && step.adopted
             }),
-            "cross-basin return onto the evicted shelf was not adopted: {:?}",
+            "stall restart onto the evicted shelf was not adopted: {:?}",
             out.accepted_transitions
                 .iter()
-                .map(|step| (step.hop, step.from_energy, step.to_energy, step.adopted))
+                .map(|step| (
+                    step.hop,
+                    step.action.as_str(),
+                    step.from_energy,
+                    step.to_energy,
+                    step.adopted
+                ))
                 .collect::<Vec<_>>()
         );
     }
 
     /// The hop stall that used to fill the fingerprint tabu does not fall
     /// inside this run: its patience stays past the last hop. The call plateau
-    /// names the occupied shelf, and a later cross-basin return onto that
+    /// names the occupied shelf, and a call-plateau redraw onto that
     /// quarantined geometry is refused.
     #[test]
     fn a_call_plateau_quarantines_a_repeated_shelf() {
@@ -12060,6 +11978,8 @@ mod tests {
         let mut cfg = Config::recommended(n);
         cfg.restart_patience = 40;
         cfg.escape_stall_patience = 1_000_000;
+        cfg.escape_on_stall = false;
+        cfg.restart_on_stall = true;
         cfg.relax_steps = 80;
         cfg.screen_steps = 1;
         cfg.max_hops = Some(30);
@@ -12088,9 +12008,9 @@ mod tests {
                 (&target, 0.0)
             } else {
                 quench_calls += 1;
-                if quench_calls <= 3 {
+                if quench_calls <= 4 {
                     (&target, 0.0)
-                } else if quench_calls == 4 {
+                } else if quench_calls == 5 {
                     (&away, 0.1)
                 } else {
                     (&target, 0.0)
@@ -12119,25 +12039,161 @@ mod tests {
         );
         assert!(
             out.tabu.1 >= 1,
-            "a return to the quarantined well was never refused: {:?}",
+            "a restart onto the quarantined well was never refused: {:?}",
             out.tabu
         );
         assert!(
             out.accepted_transitions
                 .iter()
                 .all(|step| step.action != "restart" || !step.adopted),
-            "a restart onto the quarantined well was adopted"
+            "a restart onto the quarantined well was adopted: {:?}",
+            out.accepted_transitions
+                .iter()
+                .map(|step| (step.hop, step.action.as_str(), step.to_energy, step.adopted))
+                .collect::<Vec<_>>()
         );
         let shelf_accepts = out
             .accepted_transitions
             .iter()
-            .filter(|step| step.to_energy < 1e-8)
+            .filter(|step| step.adopted && step.to_energy < 1e-8)
             .count();
         assert!(
             shelf_accepts < out.hops,
             "the well was accepted on {shelf_accepts} of {} hops",
             out.hops
         );
+    }
+
+    /// A cross-basin ordinary hop returning downhill to a quarantined incumbent
+    /// best must not be vetoed or lose its depth update: shelf quarantines
+    /// govern stall responses, not ordinary basin-hopping acceptance.
+    #[test]
+    fn a_cross_basin_return_to_a_quarantined_best_is_not_vetoed_on_ordinary_hops() {
+        struct CountingRng {
+            inner: StdRng,
+            u32_draws: usize,
+            u64_draws: usize,
+        }
+
+        impl rand::RngCore for CountingRng {
+            fn next_u32(&mut self) -> u32 {
+                self.u32_draws += 1;
+                self.inner.next_u32()
+            }
+
+            fn next_u64(&mut self) -> u64 {
+                self.u64_draws += 1;
+                self.inner.next_u64()
+            }
+
+            fn fill_bytes(&mut self, dest: &mut [u8]) {
+                self.inner.fill_bytes(dest);
+            }
+        }
+
+        let n = 4;
+        let best_well = Array1::from(vec![
+            0.0, 0.0, 0.0, 1.2, 0.0, 0.0, 0.6, 1.0, 0.0, 0.6, 0.4, 0.9,
+        ]);
+        let mut higher_well = best_well.clone();
+        higher_well[0] += 0.35;
+
+        let run_case = |tabu_capacity: usize| {
+            let mut cfg = Config::recommended(n);
+            cfg.tabu_capacity = tabu_capacity;
+            cfg.restart_patience = 40;
+            cfg.escape_stall_patience = 1_000_000;
+            cfg.escape_on_stall = true;
+            cfg.restart_on_stall = false;
+            cfg.relax_steps = 80;
+            cfg.screen_steps = 1;
+            cfg.max_hops = Some(12);
+            cfg.temperature = 100.0;
+            cfg.bias_height = 0.0;
+            cfg.bayes_screen = false;
+            cfg.screen_margin = f64::INFINITY;
+            cfg.continuous_symmetry = ContinuousSymmetry::Off;
+            cfg.orbit_complete_on_new = false;
+            cfg.energy_lattice = false;
+            cfg.surfaces.clear();
+            cfg.symmetrise_on_stall = false;
+            cfg.trail_on_stall = false;
+            cfg.return_screen = false;
+            let mut quench_calls = 0usize;
+            let mut rng = CountingRng {
+                inner: StdRng::seed_from_u64(2000),
+                u32_draws: 0,
+                u64_draws: 0,
+            };
+            let mut ledger = Ledger::new(8_000);
+            let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+                let before = led.spent();
+                let (well, offset) = if steps <= 1 {
+                    (&best_well, -1.0)
+                } else {
+                    quench_calls += 1;
+                    match quench_calls {
+                        1..=3 => (&best_well, -1.0),
+                        4 => (&higher_well, -0.5),
+                        _ => (&best_well, -1.0),
+                    }
+                };
+                let mut cur = x.to_owned();
+                for _ in 0..steps {
+                    if !led.charge() {
+                        break;
+                    }
+                    cur = well + &((&cur - well) * 0.85);
+                }
+                let d = &cur - well;
+                let e = offset + d.iter().map(|v| v * v).sum::<f64>();
+                if steps > 1 {
+                    led.record_quench_boundary(before, e, cur.clone(), Some(2.0 * d));
+                }
+                (e, cur)
+            };
+            let out = run_with_gradient(
+                &cfg,
+                best_well.view(),
+                &mut ledger,
+                &mut relax,
+                None,
+                &mut rng,
+            )
+            .expect("finite start");
+            (out, (rng.u32_draws, rng.u64_draws), last_allocator_state())
+        };
+
+        let (base_out, base_draws, base_alloc) = run_case(0);
+        let (quar_out, quar_draws, quar_alloc) = run_case(8);
+
+        assert!(
+            quar_out.tabu.0 >= 1,
+            "directed_leave never quarantined the incumbent best: {:?}",
+            quar_out.tabu
+        );
+        assert_eq!(
+            quar_out.tabu.1, 0,
+            "ordinary cross-basin return to quarantined best was vetoed: {:?}",
+            quar_out.tabu
+        );
+        assert!(
+            quar_out.accepted_transitions.iter().any(|step| {
+                (step.from_energy - (-0.5)).abs() < 1e-3
+                    && (step.to_energy - (-1.0)).abs() < 1e-3
+                    && step.adopted
+            }),
+            "downhill cross-basin return to quarantined best was not adopted"
+        );
+        assert_eq!(
+            quar_draws, base_draws,
+            "ordinary cross-basin return changed RNG draw counts"
+        );
+        assert_eq!(
+            quar_alloc, base_alloc,
+            "ordinary cross-basin return changed allocator state"
+        );
+        assert_eq!(quar_out.hops, base_out.hops);
     }
 
     /// A self-return onto a quarantined standing minimum follows the exact
