@@ -181,7 +181,7 @@ def score_runs(runs: Path, rows_path: Path, workers: int) -> None:
                     "error": info.get("error"),
                     "openconf_revision": info.get("openconf_revision"),
                     "code_revision": info.get("code_revision"),
-                    "host": info["hostname"],
+                    "host": info["host"],
                 }
             )
     fresh = not rows_path.is_file()

@@ -168,8 +168,8 @@ def score(runs: Path, seeds_out: Path, summary_out: Path, polish_cache: Path) ->
                 "seed": seed,
                 "candidates": int(len(es)),
                 "invalid": int((~ok).sum()) if len(es) else 0,
-                **{k: info.get(k) for k in ("wall_s", "pot_s", "outside_s", "grad_calls", "energy_calls", "embed_s", "budget", "hostname", "openconf_revision", "code_revision")},
-                "host": info.get("hostname"),
+                **{k: info.get(k) for k in ("wall_s", "pot_s", "outside_s", "grad_calls", "energy_calls", "embed_s", "budget", "openconf_revision", "code_revision")},
+                "host": info.get("host"),
             }
         )
     references = {}
@@ -197,7 +197,7 @@ def score(runs: Path, seeds_out: Path, summary_out: Path, polish_cache: Path) ->
     fields = [
         "molecule", "arm", "seed", "delta_min_kcal", "n_3kcal", "reference_3kcal", "coverage",
         "candidates", "invalid", "grad_calls", "energy_calls", "budget", "wall_s", "pot_s",
-        "outside_s", "embed_s", "e_ref_kcal", "hostname", "openconf_revision", "code_revision", "host",
+        "outside_s", "embed_s", "e_ref_kcal", "openconf_revision", "code_revision", "host",
     ]
     with seeds_out.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore", lineterminator="\n")

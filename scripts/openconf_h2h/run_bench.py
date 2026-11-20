@@ -71,8 +71,8 @@ def job(arm: str, molecule: str, seed: int, out: Path, args, budget: int = 0) ->
     if proc.returncode != 0:
         raise RuntimeError(f"{arm} {molecule} {seed} exited {proc.returncode}; see {out / 'job.log'}")
     info = json.loads((out / "job.json").read_text())
-    if info["hostname"] != "bench" and not args.any_host:
-        raise RuntimeError(f"hostname was {info['hostname']}")
+    if info["host"] != "bench" and not args.any_host:
+        raise RuntimeError(f"host was {info['host']}")
     return info
 
 
@@ -227,7 +227,7 @@ def main() -> int:
     parser.add_argument("--local-step", choices=["lbfgs", "tric", "auto"], help="anneal quench; default the preset's")
     parser.add_argument("--only", nargs=3, metavar=("MOLECULE", "SEED", "ARM"))
     parser.add_argument("--pair", nargs=2, metavar=("MOLECULE", "SEED"), help="one paired job into asv-paired")
-    parser.add_argument("--any-host", action="store_true", help="allow a hostname other than bench")
+    parser.add_argument("--any-host", action="store_true", help="allow a host label other than bench")
     parser.add_argument("--baseline", type=Path, help="anneal install of the develop arm (paired)")
     parser.add_argument("--results", type=Path, default=BENCH / "paired", help="paired-score output directory")
     parser.add_argument("--tree", default="paired", help="paired runs directory under --work")
