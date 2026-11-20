@@ -19,6 +19,10 @@
 //! `H2H_CAP_TWIST=1` adds the cap-turn stall response,
 //! `Config::cap_twist`. `[coords]` receives the start `run` quenches, one
 //! Cartesian line per atom.
+//! `H2H_NOSTOP=1` runs the whole budget after a hit, and `H2H_COMPLETION=off`
+//! runs without the symmetry completion of a new basin. `run` prints the
+//! bits of the best energy and the charged count on stderr, so two builds
+//! can be compared exactly.
 //!
 //! `coords` writes the start that `run` quenches, one Cartesian line per
 //! atom, so another code can open the same geometry.
@@ -51,6 +55,14 @@ fn main() {
         }
     };
     std::process::exit(status);
+}
+
+/// `H2H_COMPLETION=off` turns the symmetry completion of a new basin off, so
+/// a run can be compared with and without it. Unset leaves the preset.
+fn switch_completion(cfg: &mut Config) {
+    if std::env::var("H2H_COMPLETION").is_ok_and(|value| value == "off") {
+        cfg.symmetry_completion_on_new = false;
+    }
 }
 
 fn cmd_run(args: &[String]) -> i32 {
@@ -86,6 +98,7 @@ fn cmd_run(args: &[String]) -> i32 {
     if std::env::var("H2H_CAP_TWIST").is_ok_and(|value| value == "1") {
         cfg.cap_twist = true;
     }
+    switch_completion(&mut cfg);
     let start = start_of(&cfg, spec.n, seed);
     if let Some(path) = args.get(3)
         && let Err(err) = write_coords(path, &start)
@@ -101,6 +114,11 @@ fn cmd_run(args: &[String]) -> i32 {
         .find(|(_, _, _, energy)| anneal_core::energy_hits(*energy, spec.reference, HIT_TOL))
         .map(|(_, spent, _, _)| *spent);
     let evals = evals_to_hit(hit, at_hit.or(hit.then_some(outcome.charged)), budget);
+    eprintln!(
+        "BITS best={:016x} charged={}",
+        outcome.best.to_bits(),
+        outcome.charged
+    );
     println!(
         "system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,head,tree,cpu,pins,pot_s"
     );
@@ -297,7 +315,11 @@ fn search(
 ) -> (Outcome, f64, f64) {
     let potential = PairPotential::lennard_jones(n);
     let mut ledger = Ledger::new(budget);
-    ledger.stop_below(reference + HIT_TOL);
+    // `H2H_NOSTOP` runs the whole budget, so two builds can be compared call
+    // for call after the first hit.
+    if std::env::var("H2H_NOSTOP").is_err() {
+        ledger.stop_below(reference + HIT_TOL);
+    }
     let mut optimiser = WarmLbfgs::default();
     let pot_ns = std::sync::atomic::AtomicU64::new(0);
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
