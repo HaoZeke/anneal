@@ -1553,13 +1553,27 @@ TABLE_PRESETS = {
 }
 
 
+TEMPLATE_ERA = ("\\label{sec:si-template-era}", "\\section{")
+
+
+def outside_template_era(text: str) -> str:
+    """The SI without its section that pairs the template-assisted c2de652d with the later rows."""
+    start, end = TEMPLATE_ERA
+    if start not in text:
+        return text
+    before, rest = text.split(start, 1)
+    return before + (end + rest.split(end, 1)[1] if end in rest else "")
+
+
 def presets_and_templates(audit: Audit) -> None:
     """Every table names its revision and preset, no benchmark row predates the template removal, and losses are said."""
     text = collapse(audit.text(TEX))
     audit.said(TEX, "The search uses no structure templates.")
     audit.said(TEX, "at the revision that each table names; no table reports \\texttt{Config::default}.")
-    audit.said(TEX, "the one run with them is the With arm of the knockout of Section~\\ref{sec:knockouts}, at the "
-                    "earlier template-assisted revision \\texttt{628773d6}.")
+    audit.said(TEX, "Every revision of the tables of this article against other codes follows the removal of the "
+                    "structure templates in commit \\texttt{1c1b1238}; the one run with them in this article is the "
+                    "With arm of the knockout of Section~\\ref{sec:knockouts}, at the earlier template-assisted "
+                    "revision \\texttt{628773d6}.")
     tables = {label: chunk for chunk in text.split("\\begin{table") for label in re.findall(r"\\label\{(tab:[^}]+)\}", chunk)}
     for label, fragments in TABLE_PRESETS.items():
         for fragment in fragments:
@@ -1673,6 +1687,77 @@ def hexamer_provenance(audit: Audit) -> None:
     audit.record("relaxed at GFN2-xTB with xtb 6.7.1" not in collapse(audit.text(TEX)), TEX,
                  "the unrecorded relaxation caption stays out", "absent",
                  "absent" if "relaxed at GFN2-xTB with xtb 6.7.1" not in collapse(audit.text(TEX)) else "present")
+
+
+TEMPLATE_ERA_DATA = "paper/jctc/data/template_era"
+TEMPLATE_ERA_PROSE = (
+    "Table~\\ref{tab:si-template-era} pairs the rows of this code in the GMIN table of the main text with the GMIN "
+    "panel of the earlier template-assisted revision \\texttt{c2de652d} (structure templates since removed in "
+    "\\texttt{1c1b1238}), on seeds 2000--2011 at the same budgets.",
+    "Au\\(_{55}\\) is left out: the GMIN build of the main text sets the run index before its first use, and its "
+    "GMIN arm differs from the earlier session, so the shared start cannot be shown.",
+    "Against \\texttt{c2de652d}, the later revisions hit M\\(_{80}\\) at \\(\\rho=6\\) on 12 of 12 seeds against 2, "
+    "with \\(p=2.0\\times 10^{-3}\\) and an interval from 0.46 to 0.95, and M\\(_{55}\\) at \\(\\rho=14\\) and "
+    "LJ\\(_{150}\\) on 9 and 8 against 7 and 5.",
+    "They hit LJ\\(_{75}\\) on 5 of 12 against 12, with \\(p=0.016\\), LJ\\(_{98}\\), LJ\\(_{102}\\), "
+    "LJ\\(_{103}\\), and LJ\\(_{104}\\) on 7, 6, 6, and 5 against 10, 9, 8, and 9, and M\\(_{80}\\) at "
+    "\\(\\rho=14\\) on 6 against 9.",
+    "LJ\\(_{38}\\), LJ\\(_{55}\\), and M\\(_{55}\\) at \\(\\rho=6\\) are hit on every seed at both, with medians "
+    "of 127839.5 against 10615.5, 5722 against 12242, and 22596 against 563 calls.",
+    "Apart from M\\(_{80}\\) at \\(\\rho=6\\) and LJ\\(_{75}\\), every McNemar \\(p\\) is above 0.2.",
+)
+TEMPLATE_ERA_GONE = ("c2de652d", "template-era", "template-assisted rows", "instead of 2", "instead of 12",
+                     "from 2 to 12", "from 12 to 5")
+TEMPLATE_ERA_HITS = {"m80r6": (2, 12), "lj75": (12, 5), "lj38": (12, 12), "lj98": (10, 7), "lj102": (9, 6),
+                     "lj103": (8, 6), "lj104": (9, 5), "m80r14": (9, 6), "lj150": (5, 8), "m55r14": (7, 9)}
+MATCH_CLAIM = re.compile(r"\b(match\w*|reproduc\w*|recover\w*|same as|as well as|equal\w*)\b", re.IGNORECASE)
+
+
+def template_era(audit: Audit) -> None:
+    """tab:si-template-era pairs c2de652d, before the template removal, with the rows of tab:gmin, in the SI only."""
+    path = imported(audit, TEMPLATE_ERA_DATA)
+    era = load_script("template_era_table_audit", "paper/jctc/scripts/template_era_table.py")
+    ancestor_of(audit, path, era.TEMPLATES)
+    after = git("merge-base", "--is-ancestor", TEMPLATE_REMOVAL, era.TEMPLATES).returncode == 0
+    audit.record(not after, path, "c2de652d precedes the template removal", "precedes", "follows" if after else "precedes")
+    audit.cell(path, "revision of every row of this code", era.TEMPLATES,
+               " ".join(sorted({r["code_revision"] for r in audit.rows(path) if r["code"] == "anneal"})))
+    lines = {}
+    for revision, block in era.compared():
+        for line in block:
+            lines.setdefault(line["system"], line)
+    audit.cell(path, "clusters compared", " ".join(sorted([*TEMPLATE_ERA_HITS, "lj55", "m55r6"])),
+               " ".join(sorted(lines)))
+    for system, (before, now) in TEMPLATE_ERA_HITS.items():
+        line = lines[system]
+        audit.cell(path, f"{system} hits at c2de652d", str(before), float(sum(r["hit"] == "1" for r in line["before"])))
+        audit.cell(path, f"{system} hits later", str(now), float(sum(r["hit"] == "1" for r in line["after"])))
+    for system, wanted in (("m80r6", "2.0e-3"), ("lj75", "0.016")):
+        audit.cell(path, f"{system} McNemar p", wanted, lines[system]["mcnemar_p"])
+    low, high = lines["m80r6"]["newcombe"]
+    audit.cell(path, "m80r6 Newcombe interval", "0.46", low)
+    audit.cell(path, "m80r6 Newcombe interval", "0.95", high)
+    for system in ("lj98", "lj102", "lj103", "lj104", "m80r14", "lj150", "m55r14"):
+        audit.record(lines[system]["mcnemar_p"] > 0.2, path, f"{system} McNemar p is above 0.2", "above",
+                     f"{lines[system]['mcnemar_p']:.3g}")
+    for system, before, now in (("m80r6", "4000000", "62677"), ("lj38", "10615.5", "127839.5"),
+                                ("lj55", "12242", "5722"), ("m55r6", "563", "22596")):
+        audit.cell(path, f"{system} median calls at c2de652d", before, era.calls(lines[system]["before"], 0.5))
+        audit.cell(path, f"{system} median calls later", now, era.calls(lines[system]["after"], 0.5))
+    for fragment in TEMPLATE_ERA_PROSE:
+        audit.said(SI, fragment)
+    for path_ in (TEX, COVER):
+        flat = collapse(audit.text(path_))
+        for gone in TEMPLATE_ERA_GONE:
+            audit.record(gone not in flat, path_, f"the template-era comparison stays in the SI: {gone}", "absent",
+                         "absent" if gone not in flat else "present")
+    audit.said(TEX, "This code takes a median of 127839.5 calls to the LJ\\(_{38}\\) minimum, and GMIN 389399.")
+    for path_ in (TEX, SI, COVER):
+        sentences = re.split(r"(?<=[.;])\s+", collapse(audit.text(path_)))
+        claims = [s[:80] for s in sentences if re.search(r"templat", s, re.I) and MATCH_CLAIM.search(s)
+                  and not re.search(r"\bnot\b", s)]
+        audit.record(not claims, path_, "no sentence says the later code matches the template-assisted rows",
+                     "none", "; ".join(claims) or "none")
 
 
 RESTART_DRIVERS = ("examples/h2h_gmin_proof.rs", "examples/h2h_morse.rs", "examples/h2h_metal.rs",
@@ -2093,6 +2178,7 @@ def generated_tables(audit: Audit) -> None:
     gmin = load_script("gmin_table_tex", "paper/jctc/scripts/gmin_table.py")
     knock = load_script("knockout_tables_tex", "paper/jctc/scripts/knockout_tables.py")
     ase = load_script("ase_table_tex", "paper/jctc/scripts/ase_table.py")
+    era = load_script("template_era_table_tex", "paper/jctc/scripts/template_era_table.py")
     for marks, path in ((("% gofee table: start", "% gofee table: end"), TEX),
                         (("% gofee-si table: start", "% gofee-si table: end"), SI)):
         audit.record(marks[0] not in audit.text(path), path, "the GOFEE table is not printed", "absent",
@@ -2106,6 +2192,12 @@ def generated_tables(audit: Audit) -> None:
                                   ("tab:ase-morse", ase.MARKS["ase-morse"], ase.morse_block())):
         ok = block(marks) == written
         audit.record(ok, TEX, f"{label} is the summariser's block", "as written" if ok else "edited by hand", "as written")
+    si = audit.text(SI)
+    era_block = si.split(era.MARKS[0], 1)[1].split(era.MARKS[1], 1)[0].strip("\n") if si.count(era.MARKS[0]) == 1 else ""
+    audit.record(era_block == era.table(), SI, "tab:si-template-era is the summariser's block",
+                 "as written" if era_block == era.table() else "edited by hand", "as written")
+    audit.record(era.MARKS[0] not in text, TEX, "the template-era table is not in the manuscript", "absent",
+                 "absent" if era.MARKS[0] not in text else "present")
     for marks in (("% gmin-panel table: start", "% gmin-panel table: end"),):
         audit.record(text.count(marks[0]) == 1, TEX, "one GMIN block", "1", str(text.count(marks[0])))
     audit.record("% trap table: start" not in text, TEX, "the endpoint-energy trap table is not printed", "absent",
@@ -3597,8 +3689,9 @@ def science_claims(audit: Audit) -> None:
 
     for word in ("prior-on", "template-free", "c2de652d"):
         for path in (TEX, SI, COVER):
-            audit.record(word not in audit.text(path), path, f"no row is labelled {word}", "absent",
-                         "absent" if word not in audit.text(path) else "present")
+            text = outside_template_era(audit.text(path)) if path == SI and word == "c2de652d" else audit.text(path)
+            audit.record(word not in text, path, f"no row is labelled {word}", "absent",
+                         "absent" if word not in text else "present")
 
 
 def manuscript_new(audit: Audit) -> None:
@@ -3931,7 +4024,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
     audit = Audit()
     for check in (paired_statistics, manuscript_gmin, withdrawn_benchmarks, supporting_information, release, paper_0120, gad_published, openconf,
                   head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, lj_large, bench_prose,
-                  manuscript_ase, manuscript_knockouts, manuscript_priors, panel_references, generated_tables, supporting_numbers, manuscript_new, manuscript_followups, cover_letter, science_claims, rigid_stall, presets_and_templates, no_anneal_restart, hexamer_provenance):
+                  manuscript_ase, manuscript_knockouts, manuscript_priors, panel_references, generated_tables, supporting_numbers, manuscript_new, manuscript_followups, cover_letter, science_claims, rigid_stall, presets_and_templates, no_anneal_restart, hexamer_provenance, template_era):
         check(audit)
     if write_map:
         (ROOT / REVISION_MAP).write_text(revision_map_text(revision_map_rows(audit)))

@@ -111,10 +111,11 @@ The preset is \texttt{Config::recommended} for atomic clusters and
 that each table names; no table reports \texttt{Config::default}.
 The caption of each table names its revision, its preset, and the driver
 settings beyond the preset.
-Every revision of the benchmark tables follows the removal of the structure
-templates in commit \texttt{1c1b1238}; the one run with them is the With arm
-of the knockout of Section~\ref{sec:knockouts}, at the earlier
-template-assisted revision \texttt{628773d6}.
+Every revision of the tables of this article against other codes follows the
+removal of the structure templates in commit \texttt{1c1b1238}; the one run
+with them in this article is the With arm of the knockout of
+Section~\ref{sec:knockouts}, at the earlier template-assisted revision
+\texttt{628773d6}.
 One part of the search, the structure templates (Section~\ref{sec:priors}),
 has a run with and without it at two revisions in the history of the submitted
 revision, and Section~\ref{sec:knockouts} reports it.
@@ -627,6 +628,8 @@ On LJ\(_{38}\) and LJ\(_{75}\) this code alone hits 5 seeds and GMIN alone
 none, with \(p=0.0625\), the smallest value the exact test can reach with
 five discordant seeds; this code hits LJ\(_{38}\) on 12 and LJ\(_{75}\) on 5
 of 12, and GMIN on 7 and 0.
+This code takes a median of 127839.5 calls to the LJ\(_{38}\) minimum, and
+GMIN 389399.
 On LJ\(_{102}\), LJ\(_{103}\), LJ\(_{104}\), and LJ\(_{150}\) the seeds
 that one arm alone hits are 4 to 3, 4 to 1, 3 to 4, and 1 to 2, with \(p\) of
 1, 0.375, 1, and 1.
