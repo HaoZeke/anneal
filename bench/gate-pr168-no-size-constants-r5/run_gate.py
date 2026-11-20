@@ -484,12 +484,22 @@ class Running:
             value = vmhwm(self.proc.pid)
             if value is not None:
                 self.peak = max(self.peak, value)
-            if not self.affinity:
-                self.affinity = affinity_of(self.proc.pid)
+            self.note_affinity(affinity_of(self.proc.pid))
             self.stop.wait(0.02)
         value = vmhwm(self.proc.pid)
         if value is not None:
             self.peak = max(self.peak, value)
+        self.note_affinity(affinity_of(self.proc.pid))
+
+    def note_affinity(self, affinity: str) -> None:
+        # The first read can land before taskset has called
+        # sched_setaffinity, while the mask is still every core.
+        if not affinity:
+            return
+        if "-" not in affinity and "," not in affinity:
+            self.affinity = affinity
+        elif not self.affinity:
+            self.affinity = affinity
 
     def finish(self, timed_out: bool) -> tuple[str, str, int, int, str]:
         if timed_out:
