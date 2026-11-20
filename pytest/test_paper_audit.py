@@ -568,6 +568,16 @@ def test_a_g1_row_of_another_revision_is_reported():
     assert "the paired rows of the record carry these anneal rows" in labels
 
 
+def test_a_gmin_row_without_a_machine_is_reported():
+    audit = audit_mod.Audit()
+    path = "paper/jctc/data/gmin_develop/rows.csv"
+    rows = [dict(r) for r in audit.rows(path)]
+    next(r for r in rows if r["code"] == "gmin")["host"] = ""
+    audit.read[path] = rows
+    audit_mod.gmin_sources(audit)
+    assert [(r[1], r[2]) for r in audit.drifts()] == [(path, "every GMIN row names its machine")]
+
+
 def test_a_gmin_claim_in_the_template_era_section_is_reported():
     audit = audit_mod.Audit()
     si = audit.text(audit_mod.SI)
