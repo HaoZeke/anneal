@@ -1,0 +1,38 @@
+Copyright (c) anneal developers
+
+Au55, seeds 2000-2011, maximum budget 1,000,000, host 3b11c160088e7af5c4f7ebd9da95e0bfe019a34698416701bb057c15fea10873, one core.
+The reference minimum is -191.03085280; a hit is at most 0.001 above it.
+Anneal uses the cluster preset. Recommended uses Config::recommended.
+ASE basin hopping and minima hopping use
+the ASE 3.29.0 constructor defaults.
+Rows carry code_revision 61fa67cf380e46876b569da45e7cc091647a775b.
+Rows carry harness_blob 7d084438b8bf626895204067126d06e96a994db9.
+Rows carry ase_version 3.29.0.
+Rows carry session 0a08925987e7463fa8f02067ad2881a9.
+The recorded wall caps are recommended 107.929842 s; basin hopping 107.929842 s; minima hopping 107.929842 s. A wall-stopped row did not receive
+the full call budget, so its call count is right-censored at `charged`.
+
+| arm | hits | Fisher p vs anneal | Mann-Whitney U vs anneal | Mann-Whitney p vs anneal | median best | gap to -191.03085280 | median wall s | over anneal | anneal over | median inside s | median outside s |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| anneal | 0/12 | 1 | 72 | 1 | -190.81083051 | 0.22002228 | 33.279924 | 1.000000 | 1.000000 | 27.704543 | 5.575382 |
+| recommended | 0/12 | 1 | 72 | 1 | -190.98001732 | 0.05083548 | 36.000117 | 1.081737 | 0.924439 | 28.228509 | 7.807164 |
+| basin hopping | 0/12 | 1 | not estimated | not estimated | -189.79900994 | 1.23184286 | 107.930215 | 3.243103 | 0.308347 | 15.963161 | 91.967020 |
+| minima hopping | 0/12 | 1 | not estimated | not estimated | -190.29395447 | 0.73689833 | 110.328913 | 3.315179 | 0.301643 | 2.350913 | 107.935484 |
+
+Basin hopping stopped at the wall cap on 12/12 seeds; those rows charged 522,329-590,386 calls.
+Minima hopping stopped at the wall cap on 12/12 seeds; those rows charged 72,762-86,949 calls.
+
+Fisher and Mann-Whitney below compare recommended with each ASE arm.
+
+| comparison | hits | Fisher p | Mann-Whitney U | Mann-Whitney p | median wall ratio | inverse ratio |
+| --- | --- | --- | --- | --- | --- | --- |
+| recommended against basin hopping | 0/12 vs 0/12 | 1 | not estimated | not estimated | 0.333550 | 2.998052 |
+| recommended against minima hopping | 0/12 vs 0/12 | 1 | not estimated | not estimated | 0.326298 | 3.064682 |
+
+Fisher is the two-sided exact test on hits under the recorded stopping rule.
+Mann-Whitney is two-sided with tie and continuity corrections. It is not
+estimated for an arm with wall-censored misses; imputing those misses at the
+larger paper budget would manufacture observations that were never run.
+Medians are type 7. Wall ratios are ratios of arm medians. The Rust and
+NumPy random generators do not make a shared starting geometry from the
+same numeric seed, so the report does not treat seed labels as pairs.
