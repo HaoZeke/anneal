@@ -1,0 +1,1 @@
+Corrected the ``communication`` explanation: the ChemFit bridges drive single-replica ``global_optimize`` / ``run`` rather than ``minimize(..., jac=False)``, and multi-replica communicating runs with ``store`` persistence use ``anneal.minimize(..., jac=None, replicas=...)``.

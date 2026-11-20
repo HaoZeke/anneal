@@ -140,8 +140,11 @@ assert len(result["replicas"]) == 4
 The portfolio requires finite positive-width intervals. Fixed-axis box search
 uses the separate convenience domain mapping described below. A caller-owned
 native objective handle passed to =global_optimize_objective= retains its
-single-portfolio interface. ChemFit's =fit_anneal(jac=False)= calls =minimize=;
-it does not implicitly select the portfolio ensemble shown here.
+single-portfolio interface. The ChemFit bridges (=fit_anneal=, =fit_chemfit=,
+=run_benchmark=, =run_fitter=) call the single-replica =global_optimize= or
+=run= interface; they do not implicitly select the portfolio ensemble shown here
+(for multi-replica communicating search with =store= persistence, call
+=anneal.minimize(..., jac=None, replicas=...)= directly).
 
 At arm checkpoints, replicas publish paid feasible positions and receive peers'
 bounded sample clouds. Each chain freezes its received cloud for a slice and
