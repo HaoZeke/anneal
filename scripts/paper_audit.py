@@ -100,6 +100,7 @@ UNPUSHED = {
 KNOWN_GAPS = {
     "data/sc96_78_hits.csv": "code_revision unrecorded on some rows; harness_revision unrecorded on some rows; host "
                              "empty or unknown on some rows",
+    "paper/jctc/data/hosts/3b11c160/hosts.csv": "revision unrecorded (no revision column)",
     "paper/jctc/data/system_visuals/references.csv": "revision and host unrecorded (no revision or host column)",
     "bench/gad-published/summary.csv": "revision recorded; no host column",
     "bench/morse-panel/seeds.csv": "revision and host unrecorded (no revision or host column)",
@@ -892,7 +893,9 @@ def gmin_rerun_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[
     for system in GMIN_RERUN_SYSTEMS:
         audit.cell(f"{GMIN_RERUN} {system}", "machine id", lj150 if system == "lj150" else main_host, ids.get(system))
     audit.said(SI, f"LJ\\(_{{104}}\\), and M\\(_{{80}}\\) of the first block ran on\n"
-                   f"\\texttt{{\\seqsplit{{{main_host}}}}},\nLJ\\(_{{150}}\\) on\n\\texttt{{\\seqsplit{{{lj150}}}}},")
+                   f"\\texttt{{\\seqsplit{{{main_host}}}}},")
+    audit.said(SI, f"LJ\\(_{{150}}\\) on\n\\texttt{{\\seqsplit{{{lj150}}}}},\nwhose record names no processor, memory, "
+                   "or kernel;")
     audit.said(SI, "pinned to core 0, in alternating order by seed: six seeds with this code\nfirst and six with GMIN first.")
     for shard in GMIN_SHARDS:
         commit = dict(line.split(" ", 1) for line in audit.text(f"{GMIN_RERUN}/{shard}/PROVENANCE").splitlines())["commit"]
@@ -1002,7 +1005,8 @@ def gmin_develop_data(audit: Audit, panel: object) -> None:
     audit.said(SI, f"\\({refs['au55']:.8f}\\)~eV at Au\\(_{{55}}\\), \\({refs['m55r6']:.6f}\\) and "
                    f"\\({refs['m55r14']:.6f}\\) at M\\(_{{55}}\\) (\\(\\rho=6\\) and 14), and \\({refs['m80r6']:.6f}\\) and "
                    f"\\({refs['m80r14']:.6f}\\) at M\\(_{{80}}\\) (\\(\\rho=6\\) and 14).")
-    audit.said(SI, f"and every cluster of the second block on\n\\texttt{{\\seqsplit{{{GMIN_DEVELOP_HOST}}}}}.")
+    audit.said(SI, f"and every cluster of the second block on\n\\texttt{{\\seqsplit{{{GMIN_DEVELOP_HOST}}}}},\nwhose rows "
+                   "name an Intel Xeon processor and no memory or kernel.")
     audit.said(SI, "and for the second by the same script at the record commit \\texttt{f009acc9} on the submitted "
                    "revision, which only sets the number of parallel build jobs,")
     audit.said(SI, f"The rows of this code in the second block are the submitted revision "
@@ -3317,6 +3321,11 @@ def science_claims(audit: Audit) -> None:
                      "absent" if word not in visible else "present")
     audit.record("hypothes" not in text.lower(), TEX, "the manuscript states no hypothesis", "absent",
                  "absent" if "hypothes" not in text.lower() else "present")
+    for path in (TEX, SI, COVER):
+        for word in ("candidate", "unrecorded", "missing"):
+            found = re.search(rf"\b{word}", audit.text(path), re.IGNORECASE)
+            audit.record(found is None, path, f"the text does not say {word}", "absent",
+                         "absent" if found is None else "present")
     audit.said(TEX, "One part of the search, the structure templates (Section~\\ref{sec:priors}), has a run with and "
                     "without it at two revisions in the history of the submitted revision, and "
                     "Section~\\ref{sec:knockouts} reports it.")
@@ -3481,6 +3490,21 @@ def manuscript_new(audit: Audit) -> None:
                  "absent", "absent" if "gfortran" not in sessions else "present")
     audit.said(SI, "GMIN is built by \\path{scripts/gmin_panel/build_gmin.sh} with ALIGN, MPI, and OpenMP off, against "
                    "the system BLAS and LAPACK; the record does not give the compiler version.")
+    hosts = audit.rows(imported(audit, "paper/jctc/data/hosts/3b11c160", "hosts.csv"))
+    first = next(r for r in hosts if r["machine_id_sha256"].startswith("3b11c160"))
+    arch = first["arch"].replace("_", "\\_")
+    audit.said(SI, f"an {arch} machine with an Intel Xeon processor, {first['cpu_count']} "
+                   f"logical CPUs, {first['mem_kib']}~KiB of memory, and Linux kernel {first['kernel']}, as its host "
+                   "record in \\path{paper/jctc/data/hosts/3b11c160} gives;")
+    audit.cell(SI, "the 3b11c160 processor", "Intel(R) Xeon(R) Processor", first["cpu_model"])
+    for folder in ("paper/jctc/data/gmin_rerun/a", "paper/jctc/data/gmin_rerun/c", "paper/jctc/data/gmin_rerun/d"):
+        named = {r.get("cpu", "") for r in audit.rows(f"{folder}/rows.csv")} - {""}
+        audit.record(not any("Xeon" in c or "AMD" in c for c in named), f"{folder}/rows.csv",
+                     "the rows name no processor beyond the machine id", "none", " ".join(sorted(named)) or "none")
+    develop = {r["cpu"] for r in audit.rows("paper/jctc/data/gmin_develop/rows.csv")}
+    audit.cell("paper/jctc/data/gmin_develop/rows.csv", "the e06d886d processor", "Intel(R) Xeon(R) Processor",
+               " ".join(sorted(develop)))
+    audit.said(SI, "whose rows name an Intel Xeon processor and no memory or kernel.")
     audit.record("13.3.0" not in text.split("\\label{sec:host}", 1)[1].split("\\section", 1)[0], SI,
                  "the host paragraph prints no compiler version", "absent", "checked")
     commands = {
