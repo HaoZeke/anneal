@@ -1,0 +1,235 @@
+Related-work watch queries run 2026-11-20
+
+Crossref searched 2026-11-01 through 2026-11-20 and widened to 2026-09-01
+through 2026-11-20 across all target topics; arXiv results were sorted by
+submittedDate or lastUpdatedDate descending and screened over the same window.
+Release endpoints and Cambridge/FACCTs headers were checked on 2026-11-20.
+
+# arXiv search queries
+GET https://export.arxiv.org/api/query?search_query=all%3A%22cluster%20global%20optimization%22%20OR%20all%3A%22cluster%20global%20optimisation%22&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=%28all%3Acluster%20AND%20%28all%3A%22global%20optimization%22%20OR%20all%3A%22global%20optimisation%22%20OR%20all%3A%22structure%20search%22%20OR%20all%3A%22basin%20hopping%22%20OR%20all%3A%22minima%20hopping%22%29%29&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=%28all%3A%22basin%20hopping%22%20OR%20all%3A%22basin-hopping%22%20OR%20all%3A%22minima%20hopping%22%20OR%20all%3A%22minima-hopping%22%29&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=%28all%3A%22Lennard-Jones%22%20AND%20all%3Acluster%29&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=%28all%3A%22Morse%20cluster%22%20OR%20%28all%3AMorse%20AND%20all%3Acluster%20AND%20%28all%3Aoptimization%20OR%20all%3Aoptimisation%20OR%20all%3Aglobal%20OR%20all%3Aminima%29%29%20OR%20all%3A%22binary%20Lennard-Jones%22%29&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=%28all%3Awater%20AND%20all%3Acluster%20AND%20%28all%3Asearch%20OR%20all%3Aoptimization%20OR%20all%3Aoptimisation%20OR%20all%3ATIP4P%20OR%20all%3Ahexamer%20OR%20all%3Aminima%29%29&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=%28%28all%3Aconformer%20OR%20all%3Aconformational%29%20AND%20%28all%3Asearch%20OR%20all%3Asampling%20OR%20all%3Ageneration%20OR%20all%3Aensemble%29%29&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=%28%28all%3ACREST%20AND%20%28all%3Aconformer%20OR%20all%3Acluster%20OR%20all%3AGFN2%20OR%20all%3Axtb%29%29%20OR%20%28all%3AGOAT%20AND%20%28all%3Aconformer%20OR%20all%3Acluster%20OR%20all%3AORCA%29%29%20OR%20all%3AAGOX%20OR%20all%3AGOFEE%20OR%20all%3AGMIN%29&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=%28cat%3Aphysics.chem-ph%20OR%20cat%3Aphysics.atm-clus%20OR%20cat%3Aphysics.comp-ph%20OR%20cat%3Acond-mat.mtrl-sci%20OR%20cat%3Acond-mat.soft%20OR%20cat%3Aq-bio.BM%29%20AND%20%28%28all%3Aconformer%20OR%20all%3Aconformational%29%20AND%20%28all%3Asearch%20OR%20all%3Asampling%20OR%20all%3Ageneration%20OR%20all%3Aensemble%29%29&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=%28cat%3Aphysics.chem-ph%20OR%20cat%3Aphysics.atm-clus%20OR%20cat%3Aphysics.comp-ph%20OR%20cat%3Acond-mat.mtrl-sci%20OR%20cat%3Acond-mat.stat-mech%20OR%20cat%3Amath-ph%20OR%20cat%3Amath.OC%29%20AND%20%28all%3Acluster%20AND%20%28all%3A%22global%20optimization%22%20OR%20all%3A%22global%20optimisation%22%20OR%20all%3A%22basin%20hopping%22%20OR%20all%3A%22minima%20hopping%22%20OR%20all%3A%22structure%20search%22%20OR%20all%3A%22global%20minimum%22%20OR%20all%3A%22global%20minima%22%29%29&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=%28all%3A%22Morse%20cluster%22%20OR%20%28all%3AMorse%20AND%20all%3Acluster%20AND%20%28all%3Aoptimization%20OR%20all%3Aoptimisation%20OR%20all%3Aglobal%20OR%20all%3Aminimum%20OR%20all%3Aminima%29%29%20OR%20all%3A%22binary%20Lennard-Jones%22%29&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=%28all%3ATIP4P%20AND%20%28all%3Acluster%20OR%20all%3Ahexamer%20OR%20all%3Aglobal%20OR%20all%3Aminima%20OR%20all%3Aoptimization%20OR%20all%3Aoptimisation%29%29&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=%28all%3A%22water%20hexamer%22%20OR%20all%3A%22water%20cluster%22%20OR%20all%3A%22water%20clusters%22%29&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=%28%28all%3A%22Lennard-Jones%22%20AND%20all%3Acluster%29%20AND%20%28all%3Aoptimization%20OR%20all%3Aoptimisation%20OR%20all%3Aminimum%20OR%20all%3Aminima%20OR%20all%3A%22basin%20hopping%22%20OR%20all%3ALJ38%20OR%20all%3ALJ55%20OR%20all%3ALJ75%20OR%20all%3ALJ98%29%29&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=%28%28all%3Aconformer%20OR%20all%3Aconformational%29%20AND%20%28all%3Asearch%20OR%20all%3Asampling%20OR%20all%3Ageneration%20OR%20all%3Aensemble%29%20AND%20%28all%3Amolecule%20OR%20all%3Amolecular%20OR%20all%3Achemical%29%29&start=0&max_results=200&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=%28%28all%3Acluster%20OR%20all%3Aclusters%29%20AND%20%28all%3A%22global%20optimization%22%20OR%20all%3A%22global%20optimisation%22%20OR%20all%3A%22global%20minimum%22%20OR%20all%3A%22global%20minima%22%29%20AND%20%28all%3Aatom%20OR%20all%3Aatomic%20OR%20all%3Amolecular%20OR%20all%3Apotential%20OR%20all%3Ananocluster%29%29&start=0&max_results=200&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=%28all%3Apele%20AND%20%28all%3A%22basin%20hopping%22%20OR%20all%3AWales%20OR%20all%3ALennard-Jones%20OR%20all%3A%22energy%20landscape%22%29%29&start=0&max_results=200&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=%28submittedDate%3A%5B202611010000%20TO%20202611202359%5D%20AND%20%28all%3A%22basin%20hopping%22%20OR%20all%3A%22basin-hopping%22%20OR%20all%3A%22minima%20hopping%22%20OR%20all%3A%22Lennard-Jones%22%20OR%20all%3ATIP4P%20OR%20all%3A%22water%20cluster%22%20OR%20all%3A%22water%20hexamer%22%20OR%20all%3Aconformer%20OR%20all%3Aconformational%20OR%20all%3A%22global%20optimization%22%20OR%20all%3A%22global%20optimisation%22%29%29&start=0&max_results=200&sortBy=lastUpdatedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=%28lastUpdatedDate%3A%5B202611010000%20TO%20202611202359%5D%20AND%20%28all%3A%22basin%20hopping%22%20OR%20all%3A%22basin-hopping%22%20OR%20all%3A%22minima%20hopping%22%20OR%20all%3A%22Lennard-Jones%22%20OR%20all%3ATIP4P%20OR%20all%3A%22water%20cluster%22%20OR%20all%3A%22water%20hexamer%22%20OR%20all%3ACREST%20OR%20all%3AAGOX%20OR%20all%3AGOFEE%20OR%20all%3AGMIN%29%29&start=0&max_results=200&sortBy=lastUpdatedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=submittedDate%3A%5B202611170000%20TO%20202611210000%5D%20AND%20%28cat%3Aphysics.chem-ph%20OR%20cat%3Aphysics.atm-clus%20OR%20cat%3Acond-mat.mtrl-sci%20OR%20cat%3Acond-mat.stat-mech%20OR%20cat%3Acond-mat.soft%29&start=0&max_results=200&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=cat%3Aphysics.chem-ph&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=cat%3Aphysics.atm-clus&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=cat%3Acond-mat.mtrl-sci&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=cat%3Acond-mat.stat-mech&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=cat%3Aphysics.comp-ph&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=cat%3Acond-mat.soft&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=au%3AKuznetsov%20AND%20au%3ASahinidis&start=0&max_results=10&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=au%3AKirov%20AND%20all%3Awater&start=0&max_results=10&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=all%3A%22Lennard-Jones-Gauss%22%20OR%20all%3A%22Lennard-Jones%E2%80%93Gauss%22&start=0&max_results=10&sortBy=submittedDate&sortOrder=descending
+
+# arXiv id_list resolutions
+GET https://export.arxiv.org/api/query?id_list=2611.24188,2611.15806,2611.24744,2611.25008,2611.22813,2611.17514,2611.17513,2611.10378,2611.00875,2611.03679,2610.39793,2610.36280,2610.29058,2610.29163,2610.16599,2609.39773,2609.34690,2609.31277,2609.18524,2609.17823,2609.16527,2609.05709,2609.05233&max_results=50
+GET https://export.arxiv.org/api/query?id_list=2609.05709%2C2610.36280%2C2611.03679%2C2611.24188%2C2610.16599%2C2609.16527%2C2610.29163%2C2610.29058%2C2609.31277%2C2611.00875%2C2611.15806%2C2611.24744%2C2609.17823%2C2610.39793&max_results=50
+GET https://export.arxiv.org/api/query?id_list=2611.24188,2611.24744,2610.39793,2610.16599,2610.36280,2611.00875,2609.16527,2609.17823,2609.31277,2611.15806,2610.29163,2610.29058,2609.05709&max_results=50
+
+# Crossref bibliographic/title queries
+GET https://api.crossref.org/works?query.bibliographic=cluster%20global%20optimization&filter=from-pub-date:2026-11-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=cluster%20global%20optimization&filter=from-pub-date:2026-11-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=basin%20hopping%20cluster&filter=from-pub-date:2026-11-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=Lennard-Jones%20cluster&filter=from-pub-date:2026-11-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=Lennard-Jones%20cluster&filter=from-pub-date:2026-11-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=Morse%20cluster%20global%20optimization&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=binary%20Lennard-Jones%20cluster&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=water%20cluster%20TIP4P&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=water%20cluster%20global%20optimization&filter=from-pub-date:2026-11-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=conformer%20search&filter=from-pub-date:2026-11-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=conformer%20search&filter=from-pub-date:2026-11-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=CREST%20conformer%20GFN2-xTB&filter=from-pub-date:2026-11-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=GOAT%20global%20optimization%20conformer&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=AGOX%20GOFEE%20atomic%20cluster&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=GMIN%20basin%20hopping%20Wales&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22basin%20hopping%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22basin-hopping%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22minima%20hopping%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22Lennard-Jones%20cluster%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22Lennard-Jones%20clusters%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22binary%20Lennard-Jones%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22Morse%20cluster%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22Morse%20clusters%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22water%20cluster%22%20%22global%20optimization%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22water%20hexamer%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22TIP4P%22%20cluster&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22conformer%20search%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22conformational%20search%22&filter=from-pub-date:2026-11-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22CREST%22%20conformer&filter=from-pub-date:2026-11-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22GOAT%22%20%22ORCA%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22GOAT%22%20conformer&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22AGOX%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22GOFEE%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22GMIN%22%20Wales&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22ABCluster%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22basin%20hopping%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22minima%20hopping%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22Lennard-Jones%20cluster%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22Lennard-Jones%22%20global%20optimization%20cluster&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22binary%20Lennard-Jones%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22Morse%22%20cluster%20global%20optimization&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22water%20cluster%22%20global%20optimization&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22water%20hexamer%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22TIP4P%22%20water%20cluster&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22conformer%20search%22&filter=from-pub-date:2026-11-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22conformational%20search%22%20molecule&filter=from-pub-date:2026-11-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22CREST%22%20GFN2-xTB%20conformer&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22GOAT%22%20ORCA%20conformer&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22AGOX%22%20cluster&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22GOFEE%22%20cluster&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22GMIN%22%20Wales%20cluster&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=atomic%20cluster%20global%20minimum&filter=from-pub-date:2026-11-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=atomic%20cluster%20global%20minimum&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22basin%20hopping%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22basin-hopping%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22minima%20hopping%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22Lennard-Jones%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22Morse%22%20cluster&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22water%20cluster%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22water%20clusters%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22water%20hexamer%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22TIP4P%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22conformer%22&filter=from-pub-date:2026-11-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22conformational%22&filter=from-pub-date:2026-11-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22global%20optimization%22%20cluster&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22global%20optimisation%22%20cluster&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22CREST%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22GOAT%22%20conformer&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22AGOX%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22GOFEE%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22ABCluster%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22GMIN%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22global%20optimization%22%20%22cluster%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22Lennard-Jones%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&offset=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22basin-hopping%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&offset=0&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22minima%20hopping%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&offset=0&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22water%20cluster%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&offset=0&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22water%20hexamer%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&offset=0&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22Morse%22%20cluster&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&offset=0&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22conformer%22%20search&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&offset=0&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22conformational%20search%22&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&offset=0&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=GOAT%20ORCA%20conformer&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&offset=0&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=AGOX%20energy%20landscape%20surface%20cluster&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&offset=0&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=GOFEE%20global%20optimization&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&offset=0&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=ABCluster%20global%20optimization&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&offset=0&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=basin-hopping%20Lennard-Jones&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&offset=0&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=basin%20hopping%20cluster%20global%20minimum&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&offset=0&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=CREST%20conformer%20ensemble%20GFN2&filter=from-pub-date:2026-11-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&offset=0&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=minima%20hopping%20global%20optimization&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&offset=0&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22basin-hopping%22&filter=from-pub-date:2026-11-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22minima%20hopping%22&filter=from-pub-date:2026-11-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22Lennard-Jones%22&filter=from-pub-date:2026-11-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22water%20cluster%22&filter=from-pub-date:2026-11-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22water%20clusters%22&filter=from-pub-date:2026-11-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22water%20hexamer%22&filter=from-pub-date:2026-11-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22TIP4P%22&filter=from-pub-date:2026-11-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22conformer%22%20search&filter=from-pub-date:2026-11-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22CREST%22&filter=from-pub-date:2026-11-01,until-pub-date:2026-11-20&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.title=%22Morse%22%20cluster&filter=from-pub-date:2026-11-01,until-pub-date:2026-11-20&sort=score&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=Morse+cluster+global+optimization&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=relevance&order=desc&rows=25&select=DOI,title,author,published,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=binary+Lennard-Jones+cluster&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=relevance&order=desc&rows=25&select=DOI,title,author,published,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=TIP4P+water+cluster&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=relevance&order=desc&rows=25&select=DOI,title,author,published,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=GOAT+ORCA+conformer&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=relevance&order=desc&rows=20&select=DOI,title,author,published,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=GMIN+basin-hopping+cluster&filter=from-pub-date:2026-09-01,until-pub-date:2026-11-20&sort=relevance&order=desc&rows=20&select=DOI,title,author,published,container-title,abstract
+
+# Crossref DOI resolutions
+GET https://api.crossref.org/works/10.1039/d6dd00356g
+GET https://api.crossref.org/works/10.1016/j.chemphys.2026.113289
+GET https://api.crossref.org/works/10.1016/j.comptc.2026.115987
+GET https://api.crossref.org/works/10.1021/acs.jpcb.6c05733
+GET https://api.crossref.org/works/10.1021/acs.jpca.6c05875
+GET https://api.crossref.org/works/10.26434/chemrxiv.15011915/v1
+GET https://api.crossref.org/works/10.26434/chemrxiv.15012459/v1
+GET https://api.crossref.org/works/10.1063/5.0354679
+GET https://api.crossref.org/works/10.1002/chir.70156
+GET https://api.crossref.org/works/10.1016/j.engappai.2026.115183
+GET https://api.crossref.org/works/10.1088/2632-2153/ae94e1
+GET https://api.crossref.org/works/10.1016/j.dam.2026.05.015
+GET https://api.crossref.org/works/10.1038/s41467-026-79241-x
+GET https://api.crossref.org/works/10.21203/rs.3.rs-11175345/v1
+GET https://api.crossref.org/works/10.26434/chemrxiv.15011222/v1
+GET https://api.crossref.org/works/10.1007/s10822-026-00943-x
+GET https://api.crossref.org/works/10.1016/j.taml.2026.100682
+GET https://api.crossref.org/works/10.1021/acs.iecr.5c04139
+GET https://api.crossref.org/works/10.1103/s5l1-b3jm
+GET https://api.crossref.org/works/10.1016/j.compchemeng.2026.109559
+GET https://api.crossref.org/works/10.1016/j.calphad.2026.102978
+GET https://api.crossref.org/works/10.21203/rs.3.rs-10706694/v1
+GET https://api.crossref.org/works/10.1021/acs.jctc.6c01034
+
+# Release, commit, PyPI, Cambridge, and landing-page checks
+GET https://api.github.com/repos/crest-lab/crest/releases?per_page=10
+GET https://api.github.com/repos/crest-lab/crest/tags?per_page=10
+GET https://api.github.com/repos/crest-lab/crest/commits?per_page=5
+GET https://api.github.com/repos/crest-lab/crest/commits?per_page=3
+GET https://api.github.com/repos/grimme-lab/xtb/releases?per_page=10
+GET https://api.github.com/repos/grimme-lab/xtb/tags?per_page=10
+GET https://api.github.com/repos/grimme-lab/xtb/commits?per_page=3
+GET https://api.github.com/repos/pele-python/pele/releases?per_page=10
+GET https://api.github.com/repos/pele-python/pele/tags?per_page=10
+GET https://api.github.com/repos/pele-python/pele/commits?per_page=3
+GET https://api.github.com/repos/ksags/GOFEE/releases?per_page=10
+GET https://api.github.com/repos/ksags/GOFEE/tags?per_page=10
+GET https://api.github.com/repos/au-agox/gofee/releases?per_page=10
+GET https://api.github.com/repos/Mads-Peter/GOFEE/releases?per_page=10
+GET https://api.github.com/repos/mkb-au/GOFEE/releases?per_page=10
+GET https://api.github.com/repos/rkmadsen/GOFEE/releases?per_page=10
+GET https://api.github.com/repos/Energy-Materials/GOFEE/releases?per_page=10
+GET https://api.github.com/search/repositories?q=GOFEE%20in%3Aname&per_page=20
+GET https://api.github.com/search/repositories?q=GOFEE+in:name,description
+GET https://api.github.com/search/repositories?q=GOAT%20global%20optimization%20chemistry&per_page=20
+GET https://api.github.com/search/repositories?q=GOAT+conformer+ORCA
+GET https://api.github.com/search/repositories?q=GMIN%20Wales%20cluster&per_page=20
+GET https://gitlab.com/api/v4/projects/agox%2Fagox/releases?per_page=10
+GET https://gitlab.com/api/v4/projects/agox%2Fagox/repository/tags?per_page=10
+GET https://gitlab.com/api/v4/projects/agox%2Fagox/repository/commits?per_page=5
+GET https://gitlab.com/api/v4/projects/agox%2Fagox/repository/commits?ref_name=dev&per_page=3
+GET https://gitlab.com/api/v4/projects/ase%2Fase/releases?per_page=10
+GET https://gitlab.com/api/v4/projects/ase%2Fase/repository/tags?per_page=10
+GET https://gitlab.com/api/v4/projects/ase%2Fase/repository/commits?per_page=5
+GET https://gitlab.com/api/v4/projects/ase%2Fase/repository/commits?ref_name=master&per_page=3
+GET https://gitlab.com/api/v4/projects/au-agox%2Fgofee/releases?per_page=10
+GET https://gitlab.com/api/v4/projects/au-agox%2Fgofee/repository/tags?per_page=10
+GET https://gitlab.com/api/v4/projects?search=GOAT%20global%20optimization&simple=true&per_page=20
+GET https://gitlab.com/api/v4/projects?search=GMIN%20Wales&simple=true&per_page=20
+GET https://gitlab.com/api/v4/projects?search=GMIN&simple=true&per_page=10
+GET https://gitlab.com/api/v4/projects?search=GOFEE&simple=true&per_page=20
+GET https://gitlab.com/api/v4/projects?search=GOFEE&simple=true&per_page=10
+GET https://pypi.org/pypi/agox/json
+GET https://pypi.org/pypi/ase/json
+GET https://pypi.org/pypi/pele/json
+HEAD https://www-wales.ch.cam.ac.uk/GMIN/
+HEAD https://www-wales.ch.cam.ac.uk/software.html
+HEAD https://www-wales.ch.cam.ac.uk/svn.tar.bz2
+HEAD https://doye.chem.ox.ac.uk/jon/structures/LJ/tables.150.html
+HEAD https://www-wales.ch.cam.ac.uk/~wales/CCD/TIP4P-water.html
+GET https://www.faccts.de/orca/
+GET https://www.faccts.de/docs/orca/6.1/manual/
+GET https://orcaforum.kofo.mpg.de/app.php/dlext/
+GET https://www.researchsquare.com/article/rs-11175345/v1
+GET https://www.nature.com/articles/s41467-026-79241-x
+GET https://iopscience.iop.org/article/10.1088/2632-2153/ae94e1
+GET https://pubs.aip.org/aip/adv/article/doi/10.1063/5.0354679
+
+Release result: CREST remains v3.0.2 (master tip cfdc301f, 2026-06-16);
+xtb remains v6.8.0 (2026-11-05); AGOX remains v3.11.1 (dev tip 22d94a6f,
+2026-05-05) with GOFEE integrated and no standalone release found; ASE remains
+3.29.0 (untagged master tip moved to 3ee253f9 on 2026-11-18); pele remains
+v0.1.2 (2026-10-12); FACCTs documentation shows ORCA 6.1.1 with no new GOAT
+repository or release; Cambridge GMIN retains Last-Modified 17 Mar 2022
+(svn.tar.bz2 snapshot 19 Nov 2026, matching scripts/gmin_panel/build_gmin.sh).
