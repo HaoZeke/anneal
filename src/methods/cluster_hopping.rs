@@ -4963,6 +4963,10 @@ where
     let mut reorder_misses = 0u32;
     let mut reorder_from = 0usize;
     let mut charged_at_best = ledger.spent();
+    let mut true_best_spent = ledger.spent();
+    let mut morph_latched = false;
+    let mut morph_ticks = 0usize;
+    let mut morph_arm_step = 0usize;
     // Multiple of the preset temperature the walk hops at. It stays one
     // unless `plateau_heat` is on.
     let mut heat = 1.0_f64;
@@ -5058,6 +5062,9 @@ where
         if ledger.best < best_seen - new_lowest {
             best_seen = ledger.best;
             charged_at_best = ledger.spent();
+            true_best_spent = ledger.spent();
+            morph_latched = false;
+            morph_ticks = 0;
             heat = 1.0;
             hops_at_lowest = hops;
             cage_edit = false;
@@ -5817,6 +5824,9 @@ where
             let fresh = random_cluster(x.len() / 3, 0.7, cfg.min_separation, rng);
             let (energy, relaxed) = relax(ledger, fresh.view(), cfg.relax_steps);
             charged_at_best = ledger.spent();
+            true_best_spent = ledger.spent();
+            morph_latched = false;
+            morph_ticks = 0;
             best_seen = ledger.best;
             if energy.is_finite() && relaxed.len() == x.len() {
                 internal_action = Some(CheckpointAction::ExternalAdopt {
@@ -6490,6 +6500,9 @@ where
         // head has passed. The proposal below then uses the preset.
         if ledger.best < best_seen - 1e-9 {
             best_seen = ledger.best;
+            true_best_spent = ledger.spent();
+            morph_latched = false;
+            morph_ticks = 0;
             heat = 1.0;
         }
         // Gap to the incumbent, which is what the law scales the window by.
@@ -6803,6 +6816,25 @@ where
                 cfg.energy_scale,
             )
             .is_some();
+        let morph_patience = cfg.restart_patience.max(5_000).saturating_mul(6);
+        if cfg.restart_patience > 0
+            && (cfg.escape_on_stall || cfg.trail_on_stall)
+            && ledger.spent().saturating_sub(true_best_spent) >= morph_patience
+        {
+            morph_latched = true;
+        }
+        let morph_gate = morph_latched
+            && cfg.packing_cna_applies()
+            && !cfg.displacement_only
+            && !matches!(cfg.move_library, MoveLibrary::Twin);
+        let morph_fire = if morph_gate && !angular && !cage_edit {
+            let tick = morph_ticks;
+            morph_ticks = morph_ticks.wrapping_add(1);
+            tick % 2 == 0
+        } else {
+            false
+        };
+        let mut morph_action: Option<&'static str> = None;
         // The soft-subspace arm competes uniformly with the library's arms.
         // The subspace is cached per incumbent and recomputed when the chain
         // moves, since it is a property of the point the chain stands on.
@@ -7099,6 +7131,22 @@ where
                 }
             }
             t
+        } else if morph_fire && !species_escape_trial {
+            let use_twin = morph_arm_step % 2 == 0;
+            morph_arm_step = morph_arm_step.wrapping_add(1);
+            if use_twin {
+                let cand = crate::twin::propose(x.view(), n, rng);
+                if hop_is_identity(x.view(), cand.view()) {
+                    morph_action = Some("observed");
+                    crate::lattice::candidate(crate::lattice::Source::Observed, x.view(), n, rng)
+                } else {
+                    morph_action = Some("twin");
+                    cand
+                }
+            } else {
+                morph_action = Some("observed");
+                crate::lattice::candidate(crate::lattice::Source::Observed, x.view(), n, rng)
+            }
         } else if angular {
             // The criterion decides this is the right move, so it takes the
             // step rather than competing as one arm among many.
@@ -7133,6 +7181,7 @@ where
             && !cov_fire
             && !soft_fire
             && !angular
+            && morph_action.is_none()
             && may_idle(&kernels[k].name())
             && hop_is_identity(x.view(), trial.view())
         {
@@ -7268,6 +7317,8 @@ where
             "covariance".to_owned()
         } else if soft_fire && soft_cache.is_some() {
             "soft_mode".to_owned()
+        } else if let Some(action) = morph_action {
+            action.to_owned()
         } else if angular {
             "angular".to_owned()
         } else {
@@ -8427,6 +8478,9 @@ where
             // The context is the one the move was chosen in, not the one the
             // chain now stands in: the reward belongs to the decision.
             contextual.update(k, c.view(), if improved || accept { 1.0 } else { 0.0 });
+        } else if morph_action.is_some() {
+            // Morphology escape moves are gated on stall rather than chosen
+            // by the displacement allocator, so do not reward kernels[k].
         } else if cfg.allocate_moves {
             // An angular step is not the allocator's, so it does not carry a
             // reward for whichever arm the allocator happened to pick.
