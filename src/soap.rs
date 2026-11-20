@@ -3188,33 +3188,77 @@ fn tesseral_al(u: [f64; 3], l_max: usize) -> (Vec<f64>, Vec<[f64; 3]>) {
     (y, dy)
 }
 
+/// Normalisation of the real harmonic `(l, m)`, `m >= 0`, for `l` below the
+/// table size. Larger `l` computes it on the spot, with the same arithmetic.
+fn harmonic_norm(l: usize, m: usize) -> f64 {
+    const TABLE: usize = 16;
+    fn direct(l: usize, m: usize) -> f64 {
+        let n0 = ((2.0 * l as f64 + 1.0) / (4.0 * PI)).sqrt();
+        if m == 0 {
+            n0
+        } else {
+            n0 * (fact_ratio(l - m, l + m) * 2.0).sqrt()
+        }
+    }
+    static NORMS: std::sync::OnceLock<Vec<f64>> = std::sync::OnceLock::new();
+    if l >= TABLE {
+        return direct(l, m);
+    }
+    let table = NORMS.get_or_init(|| {
+        (0..TABLE * TABLE)
+            .map(|at| {
+                let (l, m) = (at / TABLE, at % TABLE);
+                if m <= l { direct(l, m) } else { 0.0 }
+            })
+            .collect()
+    });
+    table[l * TABLE + m]
+}
+
 fn ylm_real(u: [f64; 3], l_max: usize) -> Vec<f64> {
     let n_lm = (l_max + 1) * (l_max + 1);
     let mut y = vec![0.0; n_lm];
     let (x, yy, z) = (u[0], u[1], u[2]);
     let rho2 = x * x + yy * yy;
     let rho = rho2.sqrt();
+    let side = l_max + 1;
     // Associated Legendre P_l^m(z) on the unit sphere, sinθ = ρ.
-    let mut p = vec![vec![0.0; l_max + 1]; l_max + 1];
-    p[0][0] = 1.0;
+    let mut p_stack = [0.0; 256];
+    let mut p_heap = Vec::new();
+    let p: &mut [f64] = if n_lm <= p_stack.len() {
+        &mut p_stack[..n_lm]
+    } else {
+        p_heap.resize(n_lm, 0.0);
+        &mut p_heap
+    };
+    p[0] = 1.0;
     for m in 1..=l_max {
-        p[m][m] = -(2.0 * m as f64 - 1.0) * rho * p[m - 1][m - 1];
+        p[m * side + m] = -(2.0 * m as f64 - 1.0) * rho * p[(m - 1) * side + m - 1];
     }
     for m in 0..l_max {
-        if m < l_max {
-            p[m + 1][m] = z * (2.0 * m as f64 + 1.0) * p[m][m];
-        }
+        p[(m + 1) * side + m] = z * (2.0 * m as f64 + 1.0) * p[m * side + m];
     }
     for l in 2..=l_max {
         for m in 0..=l.saturating_sub(2) {
             let a = 2.0 * l as f64 - 1.0;
             let b = (l + m - 1) as f64;
             let d = (l - m) as f64;
-            p[l][m] = (a * z * p[l - 1][m] - b * p[l - 2][m]) / d;
+            p[l * side + m] = (a * z * p[(l - 1) * side + m] - b * p[(l - 2) * side + m]) / d;
         }
     }
-    let mut cosph = vec![1.0; l_max + 1];
-    let mut sinph = vec![0.0; l_max + 1];
+    let mut phase_stack = [[0.0; 16]; 2];
+    let mut phase_heap = [Vec::new(), Vec::new()];
+    let [cosph, sinph]: [&mut [f64]; 2] = if side <= 16 {
+        let [c, s] = &mut phase_stack;
+        [&mut c[..side], &mut s[..side]]
+    } else {
+        let [c, s] = &mut phase_heap;
+        c.resize(side, 0.0);
+        s.resize(side, 0.0);
+        [&mut c[..], &mut s[..]]
+    };
+    cosph.fill(1.0);
+    sinph.fill(0.0);
     if rho > 1e-14 {
         cosph[1] = x / rho;
         sinph[1] = yy / rho;
@@ -3224,13 +3268,11 @@ fn ylm_real(u: [f64; 3], l_max: usize) -> Vec<f64> {
         }
     }
     for l in 0..=l_max {
-        let n0 = ((2.0 * l as f64 + 1.0) / (4.0 * PI)).sqrt();
-        y[lm_index(l, 0)] = n0 * p[l][0];
+        y[lm_index(l, 0)] = harmonic_norm(l, 0) * p[l * side];
         for m in 1..=l {
-            let nf = fact_ratio(l - m, l + m);
-            let nlm = n0 * (nf * 2.0).sqrt();
-            y[lm_index(l, m as i32)] = nlm * p[l][m] * cosph[m];
-            y[lm_index(l, -(m as i32))] = nlm * p[l][m] * sinph[m];
+            let nlm = harmonic_norm(l, m);
+            y[lm_index(l, m as i32)] = nlm * p[l * side + m] * cosph[m];
+            y[lm_index(l, -(m as i32))] = nlm * p[l * side + m] * sinph[m];
         }
     }
     y
@@ -3671,6 +3713,75 @@ mod tests {
             sparse_products * 2 < dense_products,
             "sparse {sparse_products} dense {dense_products}"
         );
+    }
+
+    fn ylm_reference(u: [f64; 3], l_max: usize) -> Vec<f64> {
+        let n_lm = (l_max + 1) * (l_max + 1);
+        let mut y = vec![0.0; n_lm];
+        let (x, yy, z) = (u[0], u[1], u[2]);
+        let rho = (x * x + yy * yy).sqrt();
+        let mut p = vec![vec![0.0; l_max + 1]; l_max + 1];
+        p[0][0] = 1.0;
+        for m in 1..=l_max {
+            p[m][m] = -(2.0 * m as f64 - 1.0) * rho * p[m - 1][m - 1];
+        }
+        for m in 0..l_max {
+            p[m + 1][m] = z * (2.0 * m as f64 + 1.0) * p[m][m];
+        }
+        for l in 2..=l_max {
+            for m in 0..=l.saturating_sub(2) {
+                let a = 2.0 * l as f64 - 1.0;
+                let b = (l + m - 1) as f64;
+                let d = (l - m) as f64;
+                p[l][m] = (a * z * p[l - 1][m] - b * p[l - 2][m]) / d;
+            }
+        }
+        let mut cosph = vec![1.0; l_max + 1];
+        let mut sinph = vec![0.0; l_max + 1];
+        if rho > 1e-14 {
+            cosph[1] = x / rho;
+            sinph[1] = yy / rho;
+            for m in 2..=l_max {
+                cosph[m] = cosph[1] * cosph[m - 1] - sinph[1] * sinph[m - 1];
+                sinph[m] = sinph[1] * cosph[m - 1] + cosph[1] * sinph[m - 1];
+            }
+        }
+        for l in 0..=l_max {
+            let n0 = ((2.0 * l as f64 + 1.0) / (4.0 * PI)).sqrt();
+            y[lm_index(l, 0)] = n0 * p[l][0];
+            for m in 1..=l {
+                let nlm = n0 * (fact_ratio(l - m, l + m) * 2.0).sqrt();
+                y[lm_index(l, m as i32)] = nlm * p[l][m] * cosph[m];
+                y[lm_index(l, -(m as i32))] = nlm * p[l][m] * sinph[m];
+            }
+        }
+        y
+    }
+
+    #[test]
+    fn the_harmonics_match_the_allocating_form_bit_for_bit() {
+        let mut state = 0x2545_f491_u64;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (state >> 11) as f64 / ((1u64 << 53) as f64) - 0.5
+        };
+        let mut directions = vec![[0.0, 0.0, 1.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]];
+        for _ in 0..24 {
+            let v = [next(), next(), next()];
+            let norm = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+            directions.push([v[0] / norm, v[1] / norm, v[2] / norm]);
+        }
+        for l_max in [1, 4, 6, 7, 15, 16, 17] {
+            for u in &directions {
+                let fast = ylm_real(*u, l_max);
+                let slow = ylm_reference(*u, l_max);
+                assert_eq!(
+                    fast.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                    slow.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                    "l_max {l_max}"
+                );
+            }
+        }
     }
 
     #[test]
