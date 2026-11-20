@@ -1,10 +1,11 @@
 // MIT License
 // Copyright 2023--present rgpot developers
 //
-// Dense Hessians (Potential.hpp hooks hessianImpl and hessianAdImpl): each
-// against central differences of the forces, their symmetry, their product
-// against hessianVectorImpl, the dual-number Hessian against the analytic
-// one, and the templated pair energy against the force kernel.
+// Dense Hessians (Potential.hpp hooks hessianImpl and hessianAdImpl) of
+// LJPot and MorsePot: each against central differences of the forces, their
+// symmetry, their product against hessianVectorImpl, the dual-number
+// Hessian against the analytic one, and the templated pair energy against
+// the force kernel.
 
 #include <algorithm>
 #include <array>
@@ -19,11 +20,14 @@
 #include "rgpot/Dual.hpp"
 #include "rgpot/LennardJones/LJPairEnergy.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
+#include "rgpot/Morse/MorsePot.hpp"
 
 using rgpot::ForceInput;
 using rgpot::ForceOut;
 using rgpot::LJConfig;
 using rgpot::LJPot;
+using rgpot::MorseConfig;
+using rgpot::MorsePot;
 
 namespace {
 
@@ -49,8 +53,9 @@ double wobble(std::size_t k) {
 }
 
 /// A 13-atom cuboctahedron with nearest neighbours at @a spacing, every
-/// coordinate pushed off its site, far from its periodic images. At a
-/// spacing of 1.12 no pair distance lies in [1.24, 1.50] or beyond 2.31.
+/// coordinate pushed off its site, far from its periodic images. Pair
+/// distances scale with @a spacing: at 1.12 none lies in [1.24, 1.50] or
+/// beyond 2.31, at 2.9 none in [3.21, 3.89] or beyond 5.98.
 Geometry cluster(double spacing) {
   const double s = spacing / std::sqrt(2.0);
   Geometry g;
@@ -87,6 +92,17 @@ Geometry lattice() {
   }
   g.z.assign(64, 1);
   g.box = cubic(6.0);
+  return g;
+}
+
+/// @a g with positions and cell scaled by @a f.
+Geometry scaled(Geometry g, double f) {
+  for (double &x : g.x) {
+    x *= f;
+  }
+  for (double &l : g.box) {
+    l *= f;
+  }
   return g;
 }
 
@@ -168,6 +184,26 @@ std::vector<LjCase> ljCases() {
       {"periodic lattice, shifted", lattice(), LJConfig{.cutoff = 2.35}},
       {"periodic lattice, switched", lattice(),
        LJConfig{.cutoff = 2.36, .switch_width = 0.56}},
+  };
+}
+
+struct MorseCase {
+  const char *name;
+  Geometry geometry;
+  MorseConfig config;
+};
+
+/// Near the Morse minimum at 2.897. The lattice is scaled to spacing 2.9,
+/// where no pair distance lies in [3.10, 3.83] or [4.38, 4.77].
+std::vector<MorseCase> morseCases() {
+  const Geometry lat = scaled(lattice(), 2.9 / 1.5);
+  return {
+      {"cluster, shifted", cluster(2.9), MorseConfig{.cutoff = 7.0}},
+      {"cluster, switched", cluster(2.9),
+       MorseConfig{.cutoff = 7.0, .switch_width = 3.5}},
+      {"periodic lattice, shifted", lat, MorseConfig{.cutoff = 4.6}},
+      {"periodic lattice, switched", lat,
+       MorseConfig{.cutoff = 4.6, .switch_width = 1.1}},
   };
 }
 
@@ -306,4 +342,51 @@ TEST_CASE("A single atom has a zero dense Hessian", "[Hessian]") {
   g.box = cubic(30.0);
   CHECK(analyticHessian(pot, g) == std::vector<double>(9, 0.0));
   CHECK(dualHessian(pot, g) == std::vector<double>(9, 0.0));
+}
+
+TEST_CASE("MorsePot advertises an analytic Hessian and no dual numbers",
+          "[Hessian]") {
+  const auto caps = MorsePot().caps();
+  CHECK(caps.analyticHessian);
+  CHECK_FALSE(caps.adHessian);
+  CHECK_FALSE(caps.adHvp);
+}
+
+TEST_CASE("MorsePot hessianImpl matches central differences of the forces",
+          "[Hessian]") {
+  for (const auto &c : morseCases()) {
+    INFO(c.name);
+    const MorsePot pot(c.config);
+    const auto h = analyticHessian(pot, c.geometry);
+    const auto fd = richardsonHessian(pot, c.geometry.x, c.geometry.z,
+                                      c.geometry.box);
+    CHECK(largestDifference(h, fd) <= 1e-9 * largestMagnitude(h));
+    CHECK(largestMagnitude(h) > 0.1);
+  }
+}
+
+TEST_CASE("MorsePot hessianImpl is symmetric and agrees with hessianVectorImpl",
+          "[Hessian]") {
+  for (const auto &c : morseCases()) {
+    INFO(c.name);
+    const MorsePot pot(c.config);
+    const auto h = analyticHessian(pot, c.geometry);
+    CHECK(exactlySymmetric(h, c.geometry.dim()));
+    const auto v = direction(c.geometry.dim());
+    std::vector<double> hv(v.size());
+    pot.hessianVectorImpl(c.geometry.input(), v.data(), hv.data());
+    CHECK(largestDifference(multiply(h, v), hv) <= 1e-12 * largestMagnitude(hv));
+  }
+}
+
+TEST_CASE("MorsePot refuses the dual-number hooks it does not advertise",
+          "[Hessian]") {
+  const MorsePot pot;
+  const Geometry g = cluster(2.9);
+  std::vector<double> h(g.dim() * g.dim());
+  std::vector<double> v(g.dim(), 0.5);
+  std::vector<double> hv(g.dim());
+  CHECK_THROWS_AS(pot.hessianAdImpl(g.input(), h.data()), std::runtime_error);
+  CHECK_THROWS_AS(pot.hessianVectorAdImpl(g.input(), v.data(), hv.data()),
+                  std::runtime_error);
 }
