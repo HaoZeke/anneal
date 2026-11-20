@@ -52,7 +52,7 @@ are set to 1 for `OMP_NUM_THREADS`, `OMP_THREAD_LIMIT`,
 `TBB_NUM_THREADS`, `JULIA_NUM_THREADS`, and `POLARS_MAX_THREADS`.
 `OMP_DYNAMIC` and `MKL_DYNAMIC` are `FALSE`. `machine_id_sha256` is
 the sha256 of the raw bytes of the machine-id file. The row does not
-record a hostname or a path.
+record a machine name or a filesystem location.
 
 `best` is the driver's printed field (eight digits after the decimal).
 `best_bits` is the big-endian IEEE-754 binary64 of that parsed decimal,
