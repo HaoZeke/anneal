@@ -25,9 +25,9 @@
 //! [`PotentialImpl`], the handle the rest of the crate evaluates through, so
 //! an engine library takes part in everything that takes a potential.
 //!
-//! The library stays mapped for the life of the process, as for
-//! [`crate::profile`]: a backend may own threads or MPI state that does not
-//! survive `dlclose`.
+//! Dropping the handle destroys the engine instance before unloading its
+//! library. Engine implementations must therefore release library-owned
+//! callbacks, threads, and other process state from `rgpot_engine_destroy`.
 
 use std::ffi::{c_char, c_int, c_long, c_uint, c_ushort, c_void};
 use std::fmt;
@@ -385,7 +385,7 @@ pub struct EnginePotential {
     stamp: RgpotEngineAbiStamp,
     handle: NonNull<RgpotEnginePot>,
     fatal: OnceLock<Poisoned>,
-    _library: Option<ManuallyDrop<Library>>,
+    library: Option<ManuallyDrop<Library>>,
 }
 
 // The instance is used by one caller at a time through `&mut self`. The
@@ -406,7 +406,7 @@ impl EnginePotential {
             .map_err(|why| EngineError::Load(format!("{}: {why}", path.display())))?;
         let symbols = unsafe { resolve(&library)? };
         let mut engine = unsafe { Self::from_symbols(symbols, config)? };
-        engine._library = Some(ManuallyDrop::new(library));
+        engine.library = Some(ManuallyDrop::new(library));
         Ok(engine)
     }
 
@@ -464,7 +464,7 @@ impl EnginePotential {
                 stamp,
                 handle,
                 fatal: OnceLock::new(),
-                _library: None,
+                library: None,
             }),
             None => Err(EngineError::Create(text_of(&errbuf))),
         }
@@ -799,6 +799,12 @@ impl EnginePotential {
 impl Drop for EnginePotential {
     fn drop(&mut self) {
         unsafe { (self.symbols.destroy)(self.handle.as_ptr()) };
+        if let Some(library) = &mut self.library {
+            // SAFETY: the engine instance has been destroyed, and no vtable,
+            // callback, or function pointer from the library is used after
+            // this point. The remaining fields contain only host-owned data.
+            unsafe { ManuallyDrop::drop(library) };
+        }
     }
 }
 
