@@ -1,50 +1,140 @@
 #[cfg(not(feature = "catalog"))]
 mod without_catalog {
+    use std::collections::{BTreeMap, BTreeSet, VecDeque};
     use std::path::Path;
     use std::process::Command;
 
-    fn run_cargo_tree(package: &str, extra_args: &[&str]) -> String {
+    /// Crates that must not appear once `catalog` is left off.
+    const READCON_CRATES: &[&str] = &["readcon-core", "readcon-db", "heed", "lmdb-master-sys"];
+
+    /// `--offline` cargo tree fails on a cold registry cache: the
+    /// no-default job never fetches the python feature set, so crates
+    /// such as bytemuck are not on disk. `cargo metadata` resolves that
+    /// set and downloads what it needs. The walk then reads the resolved
+    /// graph instead of a text tree.
+    fn cargo_metadata(extra_args: &[&str]) -> serde_json::Value {
         let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
         let output = Command::new(cargo)
             .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .env("CARGO_TERM_COLOR", "never")
             .args([
-                "tree",
-                "--offline",
+                "metadata",
+                "--format-version",
+                "1",
+                "--locked",
                 "--no-default-features",
-                "--prefix",
-                "none",
-                "-p",
-                package,
             ])
             .args(extra_args)
             .output()
-            .expect("invoke cargo tree");
+            .expect("invoke cargo metadata");
         assert!(
             output.status.success(),
-            "cargo tree failed for {package}: {}",
+            "cargo metadata failed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
-        String::from_utf8(output.stdout).expect("utf-8 cargo tree output")
+        serde_json::from_slice(&output.stdout).expect("cargo metadata json")
+    }
+
+    fn json_array<'a>(value: &'a serde_json::Value, key: &str) -> &'a [serde_json::Value] {
+        value
+            .get(key)
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    /// Normal edges of one workspace member, including transitive and
+    /// target-specific edges. Dev and build edges are not the link graph.
+    /// A null `kind` is a normal edge in the format-version 1 resolve.
+    fn normal_dependencies_of(metadata: &serde_json::Value, root: &str) -> BTreeSet<String> {
+        let mut name_of: BTreeMap<&str, &str> = BTreeMap::new();
+        for package in metadata["packages"].as_array().expect("packages") {
+            let id = package["id"].as_str().expect("package id");
+            let name = package["name"].as_str().expect("package name");
+            name_of.insert(id, name);
+        }
+        let root_id = metadata["workspace_members"]
+            .as_array()
+            .expect("workspace_members")
+            .iter()
+            .filter_map(|member| member.as_str())
+            .find(|id| name_of.get(id) == Some(&root))
+            .unwrap_or_else(|| panic!("workspace member {root} is missing from the resolve"));
+
+        let mut edges: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for node in metadata["resolve"]["nodes"]
+            .as_array()
+            .expect("resolve nodes")
+        {
+            let id = node["id"].as_str().expect("node id");
+            let mut deps = Vec::new();
+            for dep in json_array(node, "deps") {
+                let kinds = json_array(dep, "dep_kinds");
+                let normal = kinds.is_empty()
+                    || kinds.iter().any(|kind| {
+                        matches!(
+                            kind.get("kind").and_then(|value| value.as_str()),
+                            None | Some("normal")
+                        )
+                    });
+                if normal && let Some(pkg) = dep["pkg"].as_str() {
+                    deps.push(pkg);
+                }
+            }
+            edges.insert(id, deps);
+        }
+
+        let mut names = BTreeSet::new();
+        let mut seen = BTreeSet::new();
+        let mut queue = VecDeque::from([root_id]);
+        while let Some(id) = queue.pop_front() {
+            if !seen.insert(id) {
+                continue;
+            }
+            let name = name_of
+                .get(id)
+                .copied()
+                .unwrap_or_else(|| panic!("resolve id {id} has no package"));
+            names.insert(name.to_string());
+            queue.extend(edges.get(id).into_iter().flatten().copied());
+        }
+        names
+    }
+
+    fn assert_readcon_absent(root: &str, names: &BTreeSet<String>, required: &[&str]) {
+        assert!(
+            names.contains(root),
+            "{root} was not walked; the resolve check would pass vacuously"
+        );
+        for crate_name in required {
+            assert!(
+                names.contains(*crate_name),
+                "{root} resolve did not reach {crate_name}, so the readcon check is not looking at the dependency tree"
+            );
+        }
+        for crate_name in READCON_CRATES {
+            assert!(
+                !names.contains(*crate_name),
+                "{root} with --no-default-features still depends on {crate_name}"
+            );
+        }
     }
 
     #[test]
     fn no_default_features_drops_readcon_and_lmdb_from_dependency_tree() {
-        for (package, extra) in [
-            ("anneal-core", &[][..]),
-            ("anneal-python", &["--features", "python"][..]),
-        ] {
-            let tree = run_cargo_tree(package, extra);
-            for line in tree.lines() {
-                let crate_name = line.split_whitespace().next().unwrap_or_default();
-                assert!(
-                    !matches!(
-                        crate_name,
-                        "readcon-core" | "readcon-db" | "heed" | "lmdb-master-sys"
-                    ),
-                    "{package} with --no-default-features still depends on {crate_name}:\n{tree}"
-                );
-            }
-        }
+        // `--features python` is the feature set whose cold-cache fetch
+        // failed. Both workspace roots are walked in that resolve.
+        let metadata = cargo_metadata(&["--features", "python"]);
+        assert_readcon_absent(
+            "anneal-core",
+            &normal_dependencies_of(&metadata, "anneal-core"),
+            &["ndarray", "eindir-core", "digest"],
+        );
+        assert_readcon_absent(
+            "anneal-python",
+            &normal_dependencies_of(&metadata, "anneal-python"),
+            &["anneal-core", "pyo3", "rgsaddle"],
+        );
     }
 
     #[cfg(unix)]

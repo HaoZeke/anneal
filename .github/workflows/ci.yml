@@ -551,12 +551,62 @@ jobs:
       - name: cargo test (--no-default-features)
         run: cargo test --locked --no-default-features
 
+      # A failing test must not skip the symbol guard. nm reads the rlib
+      # and staticlib this build just wrote. A missing artefact fails the
+      # step; it does not look like a clean library.
       - name: Check no readcon symbols in --no-default-features artifacts
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           set -euo pipefail
-          cargo rustc --locked --lib --no-default-features -- --crate-type=rlib --crate-type=staticlib
-          leaked=$(nm -g --defined-only ../tmp/anneal-target/debug/libanneal_core.rlib ../tmp/anneal-target/debug/libanneal_core.a | grep -E '(_?rkr_|_?rkrdb_|_?mdb_|readcon_core|readcon_db)' || true)
+          list=$(mktemp)
+          cargo rustc --locked --lib --no-default-features --message-format=json \
+            -- --crate-type=rlib --crate-type=staticlib \
+            | python3 -c '
+          import json, sys
+          rlib = None
+          static = None
+          for line in sys.stdin:
+              line = line.strip()
+              if not line.startswith("{"):
+                  continue
+              msg = json.loads(line)
+              if msg.get("reason") != "compiler-artifact":
+                  continue
+              target = msg.get("target") or {}
+              if target.get("name") != "anneal_core":
+                  continue
+              if "lib" not in (target.get("kind") or []):
+                  continue
+              for name in msg.get("filenames") or []:
+                  if name.endswith(".rlib"):
+                      rlib = name
+                  elif name.endswith(".a"):
+                      static = name
+          missing = [
+              label
+              for label, path in (("rlib", rlib), ("staticlib", static))
+              if not path
+          ]
+          if missing:
+              sys.stderr.write(
+                  "compiler-artifact did not name the built %s\n"
+                  % " and ".join(missing)
+              )
+              sys.exit(1)
+          print(rlib)
+          print(static)
+          ' > "$list"
+          leaked=""
+          while IFS= read -r artifact; do
+            test -f "$artifact"
+            printf 'nm -g --defined-only %s\n' "$artifact"
+            symbols=$(nm -g --defined-only "$artifact")
+            hit=$(printf '%s\n' "$symbols" | grep -E '(_?rkr_|_?rkrdb_|_?mdb_|readcon_core|readcon_db)' || true)
+            if [[ -n "$hit" ]]; then
+              leaked="${leaked}${artifact}"$'\n'"${hit}"$'\n'
+            fi
+          done < "$list"
           if [[ -n "$leaked" ]]; then
             printf 'Unexpected readcon/lmdb symbols in --no-default-features build:\n%s\n' "$leaked" >&2
             exit 1

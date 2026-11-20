@@ -167,7 +167,24 @@ fn ci_tests_no_default_features_and_guards_against_readcon_symbols() {
     assert!(no_default.contains("os: [ubuntu-latest, macos-15, macos-26]"));
     assert!(no_default.contains("cargo check --locked --no-default-features --all-targets"));
     assert!(no_default.contains("cargo test --locked --no-default-features"));
-    assert!(no_default.contains("nm -g --defined-only"));
+    let test_at = no_default
+        .find("cargo test --locked --no-default-features")
+        .expect("no-default test step");
+    let guard_at = no_default
+        .find("nm -g --defined-only")
+        .expect("nm symbol guard");
+    assert!(
+        test_at < guard_at,
+        "the nm symbol guard runs after the no-default test"
+    );
+    let guard = &no_default[test_at..];
+    assert!(
+        guard.contains("if: ${{ !cancelled() }}"),
+        "a failing test skips the nm symbol guard"
+    );
+    assert!(guard.contains("--message-format=json"));
+    assert!(guard.contains("compiler-artifact"));
+    assert!(guard.contains("test -f \"$artifact\""));
     assert!(no_default.contains("rkrdb_"));
 }
 
