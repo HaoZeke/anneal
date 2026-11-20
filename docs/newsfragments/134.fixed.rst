@@ -1,0 +1,1 @@
+The generated C header holds the four ``anneal_*`` exports and the types they use, without redefined constants or declarations of symbols the crate does not export, the Meson static archive links into a C program, and the CMake import enables the ``capi`` feature so the library carries the ``anneal_*`` symbols.

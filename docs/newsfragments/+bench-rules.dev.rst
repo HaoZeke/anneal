@@ -1,0 +1,2 @@
+The Snakemake workflow has rules for the ASE panels (``ase_lj38``, ``ase_lj55``, ``ase_lj75``, ``ase_lj98``, ``ase_lj104``, ``ase_lj150``, ``ase_au55``, ``ase_recommended`` and ``ase_nonlj``), the AGOX comparisons (``agox_lj75`` and ``agox_gofee_lj_large``), ``occat_h2h``, ``gmin_panel``, ``paper_0120``, ``covalent_gfn2_crest_si10_n12``, ``h2o16_crest_capped`` and ``branch_gate``.
+Each is listed in ``bench/h2h.json`` and checked by ``pytest/test_h2h_coverage.py``.

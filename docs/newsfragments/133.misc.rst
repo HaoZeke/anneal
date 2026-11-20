@@ -1,0 +1,1 @@
+``paper/related-work.md`` records three November conformer-search papers (xTBloom, Nahual and Cremer-Pople ring puckering), with the queries behind the notes in ``paper/related-work-watch-queries-2026-11-19.txt``.

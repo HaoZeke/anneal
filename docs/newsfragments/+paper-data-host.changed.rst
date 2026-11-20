@@ -1,0 +1,1 @@
+``scripts/data/fetch_data.py``, ``scripts/data/stage_for_hf.sh``, the Snakemake workflow and ``paper/jctc/scripts/paper_data.py`` read the paper dataset from ``HaoZeke/anneal-paper-data`` on Hugging Face.
