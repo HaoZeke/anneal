@@ -71,13 +71,13 @@ REQUIRED = {
 }
 
 
-def call(name, low, high):
+def call(name, low, high, **extra):
     function = getattr(core, name)
     kwargs = {}
     for parameter in inspect.signature(function).parameters.values():
         if parameter.default is inspect.Parameter.empty and parameter.name not in ("low", "high"):
             kwargs[parameter.name] = REQUIRED[parameter.name]
-    kwargs.update(low=low, high=high)
+    kwargs.update(low=low, high=high, **extra)
     if name in NEEDS_GRADIENT:
         kwargs["grad_fn"] = g
     return function(**kwargs)
@@ -112,6 +112,47 @@ def test_a_valid_box_is_accepted(name):
 def test_an_unordered_box_raises_bounds_error(name, case, low, high):
     with pytest.raises(anneal.BoundsError):
         call(name, low, high)
+
+
+@pytest.mark.parametrize("name", DRIVERS)
+@pytest.mark.parametrize(
+    "case, low, high",
+    [
+        ("infinite sides", np.array([-np.inf, -1.0]), np.array([np.inf, 1.0])),
+        ("infinite high", LOW, np.array([1.0, np.inf])),
+        ("width overflows", np.array([-1e308, -1.0]), np.array([1e308, 1.0])),
+        ("reflection period overflows", np.full(2, -5e307), np.full(2, 5e307)),
+    ],
+)
+def test_a_box_without_a_finite_width_raises_bounds_error(name, case, low, high):
+    with pytest.raises(anneal.BoundsError, match="finite|wide"):
+        call(name, low, high)
+
+
+def test_low_discrepancy_points_refuses_an_unbounded_box():
+    with pytest.raises(anneal.BoundsError):
+        core.low_discrepancy_points(np.array([-np.inf]), np.array([np.inf]), 2)
+    with pytest.raises(anneal.BoundsError):
+        core.low_discrepancy_points(np.array([-1e308]), np.array([1e308]), 2)
+    points = core.low_discrepancy_points(np.array([-1e307]), np.array([1e307]), 4)
+    assert np.isfinite(points).all()
+
+
+STARTS = sorted(
+    name
+    for name in DRIVERS
+    if "x0" in inspect.signature(getattr(core, name)).parameters
+    or "center" in inspect.signature(getattr(core, name)).parameters
+)
+
+
+@pytest.mark.parametrize("name", STARTS)
+@pytest.mark.parametrize("bad", [np.nan, np.inf, -np.inf])
+def test_a_start_that_is_not_finite_raises_a_typed_error(name, bad):
+    parameters = inspect.signature(getattr(core, name)).parameters
+    key = "center" if "center" in parameters else "x0"
+    with pytest.raises(anneal.InvalidArgumentError, match="finite"):
+        call(name, LOW, HIGH, **{key: np.array([0.0, bad])})
 
 
 @pytest.mark.parametrize("name", DRIVERS)

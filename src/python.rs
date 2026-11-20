@@ -67,13 +67,18 @@ fn validate_box_domain(low: &[f64], high: &[f64], allow_fixed: bool) -> PyResult
     if low.is_empty() {
         return Err(bounds_error("bounds must have at least one dimension"));
     }
+    check_box_axes(low, high, allow_fixed)
+}
+
+/// Every axis finite and ordered, with a width that reflection can fold.
+fn check_box_axes(low: &[f64], high: &[f64], allow_fixed: bool) -> PyResult<()> {
     let mut total_width = 0.0;
     for (i, (&lo, &hi)) in low.iter().zip(high.iter()).enumerate() {
         // Reflection folds with period 2 (hi - lo), and the drivers average
         // widths across axes, so both must stay finite.
         if !lo.is_finite() || !hi.is_finite() || !(2.0 * (hi - lo)).is_finite() {
             return Err(bounds_error(format!(
-                "bounds must be finite, with a finite width, at dimension {i}"
+                "bounds must be finite, with a finite width, at dimension {i} (got {lo}, {hi})"
             )));
         }
         total_width += hi - lo;
@@ -97,22 +102,33 @@ fn validate_box_domain(low: &[f64], high: &[f64], allow_fixed: bool) -> PyResult
 }
 
 /// Build a box for a driver, rejecting the inputs that make `Bounds::new`
-/// panic. A panic would surface as `PanicException`, a `BaseException`.
+/// panic, as `PanicException`, and the infinite or overflowing widths that
+/// make a reflected or uniform draw NaN.
 fn checked_bounds(low: Vec<f64>, high: Vec<f64>, slack: f64) -> PyResult<Bounds<f64>> {
     if low.len() != high.len() {
-        return Err(bounds_error("low and high must have the same length"));
-    }
-    if let Some(i) = low.iter().zip(&high).position(|(&lo, &hi)| !(lo <= hi)) {
         return Err(bounds_error(format!(
-            "low[{i}] must not exceed high[{i}] (got {}, {})",
-            low[i], high[i]
+            "low and high must have the same length (got {} and {})",
+            low.len(),
+            high.len()
         )));
     }
+    check_box_axes(&low, &high, true)?;
     Ok(Bounds::new(
         Array1::from_vec(low),
         Array1::from_vec(high),
         slack,
     ))
+}
+
+/// Refuses a point with a NaN or infinite coordinate.
+fn check_finite(name: &str, values: &[f64]) -> PyResult<()> {
+    match values.iter().position(|value| !value.is_finite()) {
+        Some(i) => Err(invalid_argument(format!(
+            "{name}[{i}] is not finite (got {})",
+            values[i]
+        ))),
+        None => Ok(()),
+    }
 }
 
 fn py_view1<'py>(py: Python<'py>, x: ArrayView1<f64>) -> Bound<'py, PyArray1<f64>> {
@@ -158,6 +174,7 @@ fn parse_box_domain(
                 dim
             )));
         }
+        check_finite("x0", sl)?;
         Some(Array1::from_vec(sl.to_vec()))
     } else {
         None
@@ -889,6 +906,7 @@ fn run_hmc(
                 "x0 must have the same length as low and high",
             ));
         }
+        check_finite("x0", &values)?;
         Some(Array1::from_vec(values))
     } else {
         None
@@ -948,6 +966,7 @@ fn polish(
     if low_vec.len() != high_vec.len() || low_vec.len() != x0_vec.len() {
         return Err(bounds_error("low, high, and x0 must have the same length"));
     }
+    check_finite("x0", &x0_vec)?;
     if max_fevals < 1 {
         return Err(invalid_argument("max_fevals must be positive"));
     }
@@ -1355,6 +1374,7 @@ fn qmc_trust_region_poll(
     if low_vec.is_empty() {
         return Err(bounds_error("bounds must have at least one dimension"));
     }
+    check_finite("center", &center_vec)?;
     if max_evals < 1 {
         return Err(invalid_argument("max_evals must be positive"));
     }
@@ -1403,6 +1423,7 @@ fn qmc_trust_region_poll_objective(
             "center dimension must match objective bounds",
         ));
     }
+    check_finite("center", &center_vec)?;
     if max_evals < 1 {
         return Err(invalid_argument("max_evals must be positive"));
     }
