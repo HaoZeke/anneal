@@ -102,8 +102,8 @@ and the choice among the moves.
 Section~\ref{sec:benchmarks} then compares the code with GMIN on
 Lennard-Jones, Morse, and rigid TIP4P clusters, paired by seed, with CREST on
 the water hexamer at equal calls, and with the Atomic Simulation Environment
-and AGOX GOFEE at the effort each run reports
-\cite{wales1997,prachtCrestProgramExploration2024,larsenAse2017,christiansenAgox2022}.
+at the effort each run reports
+\cite{wales1997,prachtCrestProgramExploration2024,larsenAse2017}.
 
 \section{The search}
 \label{sec:search}
@@ -923,65 +923,50 @@ agree within \(10^{-7}\)~Eh on five seeds at xtb 6.7.1 and on all six at xtb
 6.8.0; those six comparisons are reported at that effort, and the Supporting
 Information gives the counters, the polish, and the gaps.
 
-\subsection{Against ASE and AGOX GOFEE, at the effort each run reports}
+\subsection{Against ASE, at the effort each run reports}
 \label{sec:ase}
 The Atomic Simulation Environment provides a basin-hopping optimizer and a
 minima-hopping optimizer \cite{larsenAse2017,goedecker2004}.
 At its constructor defaults ASE basin hopping displaces every atom at random,
 and minima hopping escapes by short molecular dynamics.
 These runs do not share a start with this code, so their hits are compared by
-Fisher's test, and their effort is not equal: each ASE run stopped at a hit,
-at the budget, or at a wall cap of three times the slowest wall of another
-configuration of this code on that cluster.
-The rows of this code are revisions \texttt{1ce3ab64} and \texttt{b49341e3}
-in Table~\ref{tab:ase} and revision \texttt{9a30f319} in
-Table~\ref{tab:ase-morse}, none of them an ancestor of the submitted revision.
-Minima hopping reached the cap on every run, basin hopping on 35 of the 72
-runs of Table~\ref{tab:ase} and on every run of Table~\ref{tab:ase-morse},
-and no run of this code reached it.
+Fisher's test, and their effort is not equal: every run stopped at a hit, at
+the budget, or at a wall cap of three times the slowest wall of the cluster
+preset of this code on that cluster.
+Table~\ref{tab:ase} runs revision \texttt{61fa67cf} on four Lennard-Jones
+clusters and Au\(_{55}\), and Table~\ref{tab:ase-morse} runs revision
+\texttt{5eb79cdc} on four Morse clusters; both are ancestors of the
+submitted revision.
+ASE minima hopping is wall-capped: every one of its runs in both tables
+ended at the cap with fewer calls than the budget.
+Basin hopping reached the cap on 35 of the 60 runs of Table~\ref{tab:ase}
+and on every run of Table~\ref{tab:ase-morse}, and no run of this code
+reached it.
 Under that policy this code hits LJ\(_{38}\) and LJ\(_{55}\) on 12 of 12,
-LJ\(_{98}\) on 10 of 12, LJ\(_{104}\) on 9 of 12, and LJ\(_{150}\) on 5 of
-12, while ASE basin hopping hits LJ\(_{55}\) on 1 of 12 and no other
-cluster, and ASE minima hopping hits none; no arm hits Au\(_{55}\).
-Within the calls each minima-hopping run had spent on the same seed label
-when it stopped, this code had reached the minimum on 12, 8, 0, 1, and 1 of
-the 12 seeds of the five Lennard-Jones clusters; within the calls of each
-basin-hopping run it had done so on 12, 12, 10, 9, and 5.
-On the four Morse clusters every ASE run stopped at the cap after a median of
-4173 to 11769 calls; this code hits M\(_{38}\) at \(\rho=6\) and
-\(\rho=14\) and M\(_{55}\) at \(\rho=6\) on 12 of 12 and M\(_{55}\) at
-\(\rho=14\) on 5 of 12, both ASE arms hit none, and within the calls the ASE
-runs had spent this code had reached the minimum on 0, 0, 4, and 0 of those
-seeds.
-
-Table~\ref{tab:gofee} runs the same three codes and AGOX GOFEE, which
-replaces most force calls with a surrogate model
-\cite{christiansenAgox2022,bisboEfficientGlobalStructure2020}, on
-LJ\(_{38}\) and LJ\(_{55}\), on seeds 2000--2005, with no wall cap; every
-run that missed spent the budget.
-This code hits both clusters on 6 of 6 seeds, ASE basin hopping and GOFEE
-none, and ASE minima hopping LJ\(_{38}\) on 1 of 6 and LJ\(_{55}\) on 6 of
-6, in median walls of 1037.8~s and 410.4~s, far beyond the caps of 4.654
-and 4.425~s of Table~\ref{tab:ase}.
-The median wall of a GOFEE run is 499.4~s on LJ\(_{38}\) and 3453.6~s on
-LJ\(_{55}\), against 0.081~s and 0.154~s for this code.
+LJ\(_{98}\) on 7 of 12, and LJ\(_{104}\) on 5 of 12, while ASE basin hopping
+hits LJ\(_{55}\) on 1 of 12 and no other cluster, and ASE minima hopping hits
+none; no arm hits Au\(_{55}\).
+On the Morse clusters this code hits M\(_{38}\) and M\(_{55}\) at
+\(\rho=6\) on 12 of 12 and at \(\rho=14\) on 9 and 8 of 12, and neither ASE
+arm hits any; each ASE run there stopped at the cap after 3933 to 20950
+force calls.
 
 % ase-panel table: start
 \begin{table}
-\caption{This code against the basin hopping (BH) and minima hopping
+\caption{This code, \texttt{Config::recommended} at revision
+\texttt{61fa67cf}, against the basin hopping (BH) and minima hopping
 (MH) of ASE 3.29.0 at its constructor defaults, at the effort each run reports.
-The rows of this code are revisions \texttt{1ce3ab64} and \texttt{b49341e3} of this code.
-Seeds 2000--2011, one core, budget in force calls.
-Cap is the wall in seconds at which a BH or MH run stops, three times
-the slowest wall of the cluster-preset arm of the panel.
+Seeds 2000--2011, one core of one host, budget in force calls.
+Cap is the wall in seconds at which a run of this code or of BH or MH stops, three times
+the slowest wall of the cluster preset of this code on that cluster.
 Stops counts the BH and MH runs that ended at the cap; those runs
-are misses with fewer calls than the budget.
-No run of this code ended at a cap.
+are misses with fewer calls than the budget, and no run of this code ended at the cap.
 Wall is the median over the 12 runs of the seconds each run took;
 a BH or MH run that ended at the cap is counted at its wall.
 \(p_\mathrm{BH}\) and \(p_\mathrm{MH}\) are the two-sided Fisher
 exact test on hits against each ASE arm; the test is unpaired because the random
-generators of the two codes do not make a shared start from one seed.}
+generators of the two codes do not make a shared start from one seed.
+The rows are \texttt{paper/jctc/data/ase\_rerun/*/rows.csv}.}
 \label{tab:ase}
 \centering
 \scriptsize
@@ -992,12 +977,11 @@ generators of the two codes do not make a shared start from one seed.}
 \cmidrule(lr){4-6}\cmidrule(lr){7-8}\cmidrule(lr){9-11}
 Cluster & Budget & Cap & This code & BH & MH & BH & MH & This code & BH & MH & \(p_\mathrm{BH}\) & \(p_\mathrm{MH}\) \\
 \midrule
-LJ\(_{38}\) & \(4\times 10^{5}\) & 4.654 & 12/12 & 0/12 & 0/12 & 12 & 12 & 0.067 & 4.654 & 4.864 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
-LJ\(_{55}\) & \(1\times 10^{6}\) & 4.425 & 12/12 & 1/12 & 0/12 & 11 & 12 & 0.128 & 4.425 & 4.488 & \(9.6\times 10^{-6}\) & \(7.4\times 10^{-7}\) \\
-LJ\(_{98}\) & \(4\times 10^{6}\) & 246.5 & 10/12 & 0/12 & 0/12 & 0 & 12 & 37.017 & 118.3 & 254.8 & \(6.7\times 10^{-5}\) & \(6.7\times 10^{-5}\) \\
-LJ\(_{104}\) & \(4\times 10^{6}\) & 280.9 & 9/12 & 0/12 & 0/12 & 0 & 12 & 65.136 & 127.2 & 287.9 & \(3.4\times 10^{-4}\) & \(3.4\times 10^{-4}\) \\
-LJ\(_{150}\) & \(4\times 10^{6}\) & 544.4 & 5/12 & 0/12 & 0/12 & 0 & 12 & 216.0 & 213.5 & 571.3 & 0.037 & 0.037 \\
-Au\(_{55}\) & \(1\times 10^{6}\) & 122.7 & 0/12 & 0/12 & 0/12 & 12 & 12 & 36.069 & 122.7 & 126.8 & 1 & 1 \\
+LJ\(_{38}\) & \(4\times 10^{5}\) & 4.645 & 12/12 & 0/12 & 0/12 & 12 & 12 & 0.605 & 4.645 & 4.858 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
+LJ\(_{55}\) & \(1\times 10^{6}\) & 4.220 & 12/12 & 1/12 & 0/12 & 11 & 12 & 0.051 & 4.220 & 4.442 & \(9.6\times 10^{-6}\) & \(7.4\times 10^{-7}\) \\
+LJ\(_{98}\) & \(4\times 10^{6}\) & 289.0 & 7/12 & 0/12 & 0/12 & 0 & 12 & 78.919 & 123.0 & 299.2 & \(4.6\times 10^{-3}\) & \(4.6\times 10^{-3}\) \\
+LJ\(_{104}\) & \(4\times 10^{6}\) & 291.0 & 5/12 & 0/12 & 0/12 & 0 & 12 & 101.7 & 128.5 & 305.2 & 0.037 & 0.037 \\
+Au\(_{55}\) & \(1\times 10^{6}\) & 107.9 & 0/12 & 0/12 & 0/12 & 12 & 12 & 36.000 & 107.9 & 110.3 & 1 & 1 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1005,68 +989,38 @@ Au\(_{55}\) & \(1\times 10^{6}\) & 122.7 & 0/12 & 0/12 & 0/12 & 12 & 12 & 36.069
 
 % ase-nonlj table: start
 \begin{table}
-\caption{This code against the basin hopping (BH) and minima hopping
-(MH) of ASE 3.29.0 on Morse clusters, at the effort each run reports.
-The rows of this code are revision \texttt{9a30f319}, at the length scale of the Morse pair.
-Seeds 2000--2011, one core, budget in force calls.
-Cap is the wall in seconds at which a BH or MH run stops, three times
-the slowest wall of the cluster-preset arm of the panel.
-Every BH and MH run ended at the cap, as a miss with fewer calls than
-the budget, and no run of this code did.
+\caption{This code, \texttt{Config::recommended\_with\_scales} at the length scale
+of the Morse pair at revision \texttt{5eb79cdc}, against the basin hopping
+(BH) and minima hopping (MH) of ASE 3.29.0 on Morse clusters, at the effort each run reports.
+Seeds 2000--2011, one core of one host, budget in force calls.
+Cap is the wall in seconds at which a run of this code or of BH or MH stops, three times
+the slowest wall of the cluster preset of this code on that cluster.
+Stops counts the BH and MH runs that ended at the cap; those runs
+are misses with fewer calls than the budget, and no run of this code ended at the cap.
 Wall is the median over the 12 runs of the seconds each run took;
-a BH or MH run is counted at its wall, which lies at the cap.
+a BH or MH run that ended at the cap is counted at its wall.
 \(p_\mathrm{BH}\) and \(p_\mathrm{MH}\) are the two-sided Fisher
 exact test on hits against each ASE arm; the test is unpaired because the random
-generators of the two codes do not make a shared start from one seed.}
+generators of the two codes do not make a shared start from one seed.
+The rows are \texttt{paper/jctc/data/ase\_rerun/morse/rows.csv}.}
 \label{tab:ase-morse}
 \centering
-\footnotesize
+\scriptsize
 \setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}lrrrrrrrrrr@{}}
+\begin{tabular}{@{}lrrrrrrrrrrrr@{}}
 \toprule
- & & & \multicolumn{3}{c}{Hits} & \multicolumn{3}{c}{Wall (s)} & & \\
-\cmidrule(lr){4-6}\cmidrule(lr){7-9}
-Cluster & Budget & Cap & This code & BH & MH & This code & BH & MH & \(p_\mathrm{BH}\) & \(p_\mathrm{MH}\) \\
+ & & & \multicolumn{3}{c}{Hits} & \multicolumn{2}{c}{Stops} & \multicolumn{3}{c}{Wall (s)} & & \\
+\cmidrule(lr){4-6}\cmidrule(lr){7-8}\cmidrule(lr){9-11}
+Cluster & Budget & Cap & This code & BH & MH & BH & MH & This code & BH & MH & \(p_\mathrm{BH}\) & \(p_\mathrm{MH}\) \\
 \midrule
-M\(_{38}\), \(\rho=6\) & \(4\times 10^{5}\) & 10.465 & 12/12 & 0/12 & 0/12 & 0.265 & 10.466 & 10.466 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
-M\(_{38}\), \(\rho=14\) & \(4\times 10^{5}\) & 11.143 & 12/12 & 0/12 & 0/12 & 0.201 & 11.143 & 11.144 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
-M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & 15.804 & 12/12 & 0/12 & 0/12 & 0.286 & 15.805 & 15.806 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
-M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & 54.130 & 5/12 & 0/12 & 0/12 & 17.183 & 54.132 & 54.135 & 0.037 & 0.037 \\
+M\(_{38}\), \(\rho=6\) & \(4\times 10^{5}\) & 10.186 & 12/12 & 0/12 & 0/12 & 12 & 12 & 0.502 & 10.186 & 10.188 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
+M\(_{38}\), \(\rho=14\) & \(4\times 10^{5}\) & 9.516 & 9/12 & 0/12 & 0/12 & 12 & 12 & 2.136 & 9.517 & 9.518 & \(3.4\times 10^{-4}\) & \(3.4\times 10^{-4}\) \\
+M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & 15.637 & 12/12 & 0/12 & 0/12 & 12 & 12 & 0.226 & 15.638 & 15.642 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
+M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & 47.552 & 8/12 & 0/12 & 0/12 & 12 & 12 & 11.333 & 47.553 & 47.556 & \(1.3\times 10^{-3}\) & \(1.3\times 10^{-3}\) \\
 \bottomrule
 \end{tabular}
 \end{table}
 % ase-nonlj table: end
-
-% gofee table: start
-\begin{table}
-\caption{This code against ASE basin hopping (BH), ASE minima hopping (MH)
-and AGOX GOFEE on the same two Lennard-Jones clusters, at the effort each run reports.
-The rows of this code ran at the repository heads that \texttt{bench/ase-gofee-h2h/results.csv}
-records on each row.
-Seeds 2000--2005, one core, budget in force calls; no run on these two clusters had a wall cap,
-and every run that missed spent the budget.
-Calls is the median force-call count of the runs that hit, and Wall is the median
-wall in seconds of all six runs.}
-\label{tab:gofee}
-\centering
-\small
-\begin{tabular}{@{}llrrrr@{}}
-\toprule
-Cluster & Arm & Budget & Hits & Calls & Wall (s) \\
-\midrule
-LJ\(_{38}\) & This code & \(4\times 10^{5}\) & 6/6 & 10190 & 0.081 \\
- & ASE BH &  & 0/6 & -- & 7.506 \\
- & ASE MH &  & 1/6 & 342831 & 1037.8 \\
- & GOFEE &  & 0/6 & -- & 499.4 \\
-\addlinespace
-LJ\(_{55}\) & This code & \(1\times 10^{6}\) & 6/6 & 11246 & 0.154 \\
- & ASE BH &  & 0/6 & -- & 23.287 \\
- & ASE MH &  & 6/6 & 129854 & 410.4 \\
- & GOFEE &  & 0/6 & -- & 3453.6 \\
-\bottomrule
-\end{tabular}
-\end{table}
-% gofee table: end
 
 \section{Conclusions}
 Of the five parts of this basin-hopping search that have been run with and

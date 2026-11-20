@@ -161,10 +161,8 @@ python3 paper/jctc/scripts/gmin_table.py
 # Knockouts and TIP4P: rewrite both tables from the imported rows
 python3 paper/jctc/scripts/knockout_tables.py
 
-# ASE: rewrite the tables from the committed rows, with no new search
-bash scripts/ase_panel/enter_bench.sh --system lj38
-ASE_NONLJ_REVISION=9a30f3190b3bb7040c675a904f8388eb68224151 \
-  pixi run --locked --frozen bash scripts/ase_nonlj/enter_bench.sh
+# ASE: rewrite both tables from the imported rows
+python3 paper/jctc/scripts/ase_table.py
 
 # CREST: the 192-seed receipts, then one uncapped draw and the polish
 python3 paper/jctc/scripts/water_rerun.py
@@ -180,13 +178,9 @@ text is written from the imported rows of the 2026-11-19 shards and the
 2026-11-20 session by
 \path{paper/jctc/scripts/gmin_table.py}, and the summarizers of each other panel
 rewrite its table from the committed rows without a new search.
-The ASE rows cannot be searched again from this repository.
-They come from builds whose commits are not in it, and
-\path{bench/unreachable-revisions.csv} lists each revision with the rows that cite it.
-The Lennard-Jones script reruns a seed only under
-\texttt{ASE\_PANEL\_REVISION}, a full commit SHA, and a new rows file in
-\texttt{ASE\_PANEL\_ROWS}, and the Morse script keeps every stored seed.
-The rows themselves are what the main text reports.
+The ASE rows are copied unchanged into \path{paper/jctc/data/ase_rerun}
+from the record branches their \texttt{PROVENANCE} files name, and
+\path{paper/jctc/scripts/ase_table.py} writes both ASE tables from them.
 \texttt{paper/jctc/scripts/selector\_fisher.py} reads the two result
 files of the move-selection comparison and checks each hit flag against its
 energy, and \texttt{paper/jctc/scripts/ablation\_table.py} writes the
@@ -205,9 +199,6 @@ The rows of this code in the second block are the submitted revision
 \texttt{\seqsplit{61fa67cf380e46876b569da45e7cc091647a775b}}, session
 20261120T072444Z of \path{paper/jctc/data/gmin_develop}, copied from the
 record branch its \texttt{PROVENANCE} file names.
-Earlier versions of the table carried Morse and gold rows of revision
-\texttt{1ce3ab64}, which is not in the repository; the second block
-replaces them with rows of the submitted revision.
 
 The blocks of the knockout table ran at the revisions their headings name.
 The structure-prior block is the last row of each system, arm, and seed at
@@ -233,32 +224,23 @@ The trail step has one record, on LJ\(_{75}\), whose two arms ran at
 \texttt{666591a0}, a commit outside the history of the submitted revision, so
 the knockout table has no trail block.
 
-The anneal arm of the Lennard-Jones and gold ASE table is revisions
-\texttt{\seqsplit{1ce3ab64493196afd25e8690648e21157d91b882}} and
-\texttt{\seqsplit{b49341e308e6e98e39a2ea7bcc7fbf743f6c45ac}}, neither in the
-repository.
-The anneal arm of the Morse ASE table is revision \texttt{9a30f319}, at the
-length scale of the Morse pair, which is in the repository and is not an
-ancestor of the submitted revision.
-The cap of each ASE run is three times the slowest wall of the panel's
-cluster-preset arm on that cluster.
-That arm is not a configuration of the main-text tables.
-Its hits are 10, 12, 4, 0, 0, and 0 of 12 on LJ\(_{38}\), LJ\(_{55}\),
-LJ\(_{98}\), LJ\(_{104}\), LJ\(_{150}\), and Au\(_{55}\).
+The rows of this code in the Lennard-Jones and gold ASE table are revision
+\texttt{\seqsplit{61fa67cf380e46876b569da45e7cc091647a775b}}, and those of
+the Morse ASE table revision
+\texttt{\seqsplit{5eb79cdcb0a986984dc7b487e5a3cc93224246f9}}, at the length
+scale of the Morse pair; both are ancestors of the submitted revision.
+The cap of each run is three times the slowest wall of the cluster preset of
+this code on that cluster.
+That preset is not a configuration of the main-text tables.
+Its hits are 10, 12, 4, 0, and 0 of 12 on LJ\(_{38}\), LJ\(_{55}\),
+LJ\(_{98}\), LJ\(_{104}\), and Au\(_{55}\), and 5, 0, 12, and 0 of 12 on
+M\(_{38}\) and M\(_{55}\) at \(\rho=6\) and 14 in the order of the Morse table.
 The move-selection rows were recorded by commit \texttt{07092af2}, and the
 TIP4P rows of the GMIN comparison by revision \texttt{e1a69a57}, both
 ancestors of the submitted revision.
-The preset of \texttt{9a30f319}, behind the Morse ASE table, has the six
-priors on, and the parent of \texttt{07092af2} has no prior switch.
+The parent of \texttt{07092af2} has no prior switch.
 The anneal arm of the 192-seed hexamer run is source \texttt{36086e98}, which
 is not in the repository, recorded at revision \texttt{9a30f319}.
-
-The rows of the GOFEE table were collected at 5 repository heads, which
-\texttt{results.csv} records for each row, with the head unrecorded on 3 rows.
-The versions are ASE 3.29.0 and AGOX 3.11.1.
-The record also holds LJ\(_{75}\) rows, and the table leaves that cluster
-out, because no row of this code there ran at an ancestor of the submitted
-revision.
 
 \section{Protocol of the ASE comparison}
 \label{sec:si-ase}
@@ -266,33 +248,22 @@ The ASE arms are the basin hopping and the minima hopping of the Atomic
 Simulation Environment 3.29.0 at its constructor defaults, run on seeds
 2000--2011, at \(4\times 10^{5}\) calls for 38 atoms, \(1\times 10^{6}\) for
 55, and \(4\times 10^{6}\) for 98 atoms and above, on one core of one host.
-Each run stops at a hit, at the budget, or at a wall cap.
-The cap of the basin-hopping and minima-hopping runs is three times the
-slowest wall of the panel's cluster-preset arm on that cluster.
+Each run stops at a hit, at the budget, or at a wall cap of three times the
+slowest wall of the cluster preset of this code on that cluster.
 No run of this code reached its cap.
-On LJ\(_{98}\), LJ\(_{104}\), and LJ\(_{150}\) basin hopping spent the full
-\(4\times 10^{6}\) calls on every seed.
 The ASE arms do not start from the start of this code, because the random
 generators of the two codes do not make a shared start from one seed, so
 their tests are unpaired.
-Fisher's test against each ASE arm is below 0.05 on all 5 Lennard-Jones
+Fisher's test against each ASE arm is below 0.05 on all 4 Lennard-Jones
 clusters.
-On LJ\(_{38}\) the median wall of this code is 0.067~s, and every ASE run
-stops at the cap of 4.654~s.
+Minima hopping reached its cap on every run of both tables, and basin hopping
+on every run of LJ\(_{38}\), Au\(_{55}\), and the Morse clusters and on 11
+of 12 on LJ\(_{55}\).
+On LJ\(_{98}\) and LJ\(_{104}\) basin hopping spent the full
+\(4\times 10^{6}\) calls on every seed and missed on every seed.
 On Au\(_{55}\) the median best energy lies 0.051~eV above the reference for
-this code, 1.196~eV for basin hopping, and 0.737~eV for minima hopping.
-On the Morse clusters ASE evaluates its own Morse calculator, which
-agrees with this code at the seed-2000 start to \(6.8\times 10^{-12}\) in
-energy and \(3.6\times 10^{-12}\) in force.
-Every basin-hopping and minima-hopping run of the Morse ASE table stopped at
-the cap.
-Fisher's \(p\) against each ASE arm is \(7.4\times 10^{-7}\) on the first
-three and 0.037 on M\(_{55}\) at \(\rho=14\).
-Minima hopping reached its cap on every run, and basin hopping on every run of
-LJ\(_{38}\), Au\(_{55}\), and the Morse clusters and on 11 of 12 on
-LJ\(_{55}\).
-On LJ\(_{98}\), LJ\(_{104}\), and LJ\(_{150}\) basin hopping spent the budget
-before the cap and missed on every seed.
+this code, 1.232~eV for basin hopping, and 0.737~eV for minima hopping.
+On the Morse clusters ASE evaluates its own Morse calculator.
 
 \section{Statistical methods}
 \label{sec:si-stats}
@@ -394,16 +365,6 @@ There are 2000 replicates, and the interval runs from the type-7 quantile at
 
 No equivalence margin was set before any run, so no table supports a claim
 that two arms are equivalent.
-
-The equal-call comparison with the Atomic Simulation Environment reads the
-stored rows only.
-For each seed it takes the calls that the ASE run had charged when it stopped
-and asks whether the run of this code on the same seed had reached the minimum
-within that many calls.
-The seeds are matched by label only, because the two codes do not start from
-the same geometry.
-It runs no search, so it says what this code had found by that call, not
-what an ASE run would find with more of them.
 
 \section{Pentagonal retry}
 \label{sec:si-retry}
@@ -796,59 +757,6 @@ ends \(0.022\) above the Leary minimum and that of basin hopping \(0.119\)
 above it.}
 \label{fig:occ-lj98}
 \end{figure}
-
-\section{ASE and GOFEE on the other panel systems}
-\label{sec:si-gofee}
-Table~\ref{tab:gofee-si} gives the ASE basin hopping, the ASE minima hopping, and
-AGOX GOFEE on the panel systems that are not Lennard-Jones.
-The potential is that of this code, through \texttt{asg\_eval} for the Gupta
-systems.
-The rows are the arms measured in \path{bench/ase-gofee-h2h/asg2-summary.csv}.
-The other arms of that file are rows recorded in other campaigns, and they are not
-repeated here.
-
-% gofee-si table: start
-\begin{table}
-\caption{ASE basin hopping (BH), ASE minima hopping (MH) and AGOX GOFEE on the
-non-Lennard-Jones panel systems, on the potential of this code.
-Six seeds, one core, budget in force calls, and a wall cap of 2 hours per run.
-Capped counts the runs stopped by the cap, which are misses.
-Calls is the median force-call count of the runs that hit, and Wall is the median
-wall in seconds of all six runs.}
-\label{tab:gofee-si}
-\centering
-\small
-\begin{tabular}{@{}llrrrrr@{}}
-\toprule
-System & Arm & Budget & Hits & Capped & Calls & Wall (s) \\
-\midrule
-Au\(_{55}\) & ASE BH & \(1\times 10^{6}\) & 0/6 & 0 & -- & 197.7 \\
- & ASE MH &  & 0/6 & 6 & -- & 7219.2 \\
- & GOFEE &  & 0/6 & 0 & -- & 3982.8 \\
-\addlinespace
-Cu\(_{38}\) & ASE BH & \(4\times 10^{5}\) & 0/6 & 0 & -- & 56.825 \\
- & ASE MH &  & 0/6 & 0 & -- & 2045.2 \\
- & GOFEE &  & 0/6 & 0 & -- & 568.4 \\
-\addlinespace
-Cu\(_{12}\)Au\(_{26}\) & ASE BH & \(4\times 10^{5}\) & 0/6 & 0 & -- & 56.154 \\
- & ASE MH &  & 0/6 & 0 & -- & 368.8 \\
- & GOFEE &  & 0/6 & 0 & -- & 433.2 \\
-\addlinespace
-Si\(_{10}\) & ASE BH & \(1\times 10^{5}\) & 2/6 & 0 & 49119 & 6.236 \\
- & ASE MH &  & 6/6 & 0 & 6834 & 0.817 \\
- & GOFEE &  & 6/6 & 0 & 7017 & 2.880 \\
-\addlinespace
-C\(_{10}\) & ASE BH & \(1\times 10^{5}\) & 0/6 & 0 & -- & 6.483 \\
- & ASE MH &  & 0/6 & 0 & -- & 48.165 \\
- & GOFEE &  & 0/6 & 0 & -- & 23.545 \\
-\addlinespace
-(H\(_2\)O)\(_8\) & ASE BH & \(2\times 10^{6}\) & 4/6 & 0 & 852121 & 110.0 \\
- & ASE MH &  & 1/6 & 5 & 104019 & 7201.5 \\
- & GOFEE &  & 0/6 & 0 & -- & 604.8 \\
-\bottomrule
-\end{tabular}
-\end{table}
-% gofee-si table: end
 
 \section{Copper slab}
 The hit tolerance is 0.001~eV.

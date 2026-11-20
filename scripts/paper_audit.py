@@ -101,20 +101,8 @@ UNPUSHED = {
                                                 "Si10 and C10 floor rows; the fix was pushed on another base",
     "5351f272370dc8c0d18b06149753effc99aeabd5": "eae26977 with the call floor and the C20 example, a local build head of "
                                                 "the GFN2 C20 rows; b4ddad0d on bench/covalent-cov6b has its tree",
-    "b49341e308e6e98e39a2ea7bcc7fbf743f6c45ac": "the build head of the recommended arm of the ASE panel, first cited by "
-                                                "70c0ad6c; no pushed branch holds it",
-    "5a7f629d79be88b9d3f0cb2c6665062bda4ac625": "the build head of the cluster-preset and ASE arms of the Lennard-Jones "
-                                                "ASE panel, first cited by b70e3269; no pushed branch holds it",
-    "3654866310baf4ef63853130608ab65392429ff6": "the build head of the LJ55 ASE arms, first cited by 887764a2; no pushed "
-                                                "branch holds it",
-    "33bed75ff4e49af3628e7156e31c6e53e2fde32c": "the build head of the first Au55 ASE rows, first cited by edb2a088; no "
-                                                "pushed branch holds it",
-    "fc1af066a915a80eb46a3bc478caaf155cc9b29f": "the build head of the Au55 cluster-preset rerun and its ASE arms, first "
-                                                "cited by 0f69a6b1; no pushed branch holds it",
     "1ce3ab64493196afd25e8690648e21157d91b882": "the template-free landing head for the GMIN panel and the Au55 ASE "
                                                 "reruns, first cited by 93e17b69; no pushed branch holds it",
-    "90b88235fe54abace3bde32789582eb6573ed40a": "the build head of the Morse ASE panel, first cited by c3bcdc01; no pushed "
-                                                "branch holds it",
 }
 
 KNOWN_GAPS = {
@@ -150,28 +138,9 @@ KNOWN_GAPS = {
                                        "0f988569 is not in this repository; revision 349523d3 is not in this "
                                        "repository; revision befbc3e8 is not in this repository; revision bf09f7a2 is "
                                        "not in this repository",
-    "bench/ase-gofee-h2h/summary.csv": "revision and host unrecorded (no revision or host column)",
-    "bench/ase-gofee-h2h/asg2-summary.csv": "revision and host unrecorded (no revision or host column)",
     "bench/growpal-h2h/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "bench/metal-cluster-h2h/ptcu-b3d03061/icosa-23.csv": "revision and host unrecorded (no revision or host column)",
     "bench/nh3-octamer/ladder.csv": "revision and host unrecorded (no revision or host column)",
-    "bench/ase-au55/rows-for-cluster.csv": "revision 1ce3ab64 is not in this repository; revision fc1af066 is not in this "
-                                           "repository",
-    "bench/ase-au55/superseded.csv": "revision 33bed75f is not in this repository",
-    "bench/ase-au55/rows.csv": "revision 1ce3ab64 is not in this repository; revision 33bed75f is not in this repository; "
-                               "revision b49341e3 is not in this repository",
-    "bench/ase-lj104/rows.csv": "revision 5a7f629d is not in this repository; revision b49341e3 is not in this repository",
-    "bench/ase-lj150/rows.csv": "revision 5a7f629d is not in this repository; revision b49341e3 is not in this repository",
-    "bench/ase-lj38/rows.csv": "revision 5a7f629d is not in this repository; revision b49341e3 is not in this repository",
-    "bench/ase-lj55/rows.csv": "revision 36548663 is not in this repository; revision 5a7f629d is not in this "
-                               "repository; revision b49341e3 is not in this repository",
-    "bench/ase-lj98/rows.csv": "revision 5a7f629d is not in this repository; revision b49341e3 is not in this repository",
-    "bench/ase-nonlj/rows.csv": "revision 90b88235 is not in this repository",
-    "bench/ase-nonlj/identity.csv": "revision and host unrecorded (no revision or host column)",
-    "bench/ase-nonlj/summary.csv": "revision 90b88235 is not in this repository",
-    "bench/ase-recommended/summary.csv": "revision 1ce3ab64 is not in this repository; revision 36548663 is not in this "
-                                         "repository; revision 5a7f629d is not in this repository; revision b49341e3 is "
-                                         "not in this repository",
     "bench/gmin-panel/rows.csv": "revision 1ce3ab64 is not in this repository",
     "bench/gmin-panel/summary.csv": "revision 1ce3ab64 is not in this repository",
     "bench/morse-panel/template-free-rows.csv": "revision 1ce3ab64 is not in this repository",
@@ -877,10 +846,9 @@ def paired_stats_module():
 
 PAPER_CHAIN = (
     "paper/jctc/manuscript.tex", "paper/jctc/si.tex", "paper/jctc/cover-letter.tex",
-    "scripts/paired_stats.py", "scripts/gmin_panel/run_panel.py", "scripts/ase_panel/summarize.py",
-    "scripts/ase_nonlj/summarize.py", "scripts/h2o16_crest/summarize.py",
-    "paper/jctc/scripts/ablation_table.py",
-    "paper/jctc/scripts/h2h_tables.py", "paper/jctc/scripts/water_rerun.py",
+    "scripts/paired_stats.py", "scripts/gmin_panel/run_panel.py", "paper/jctc/scripts/ase_table.py",
+    "scripts/h2o16_crest/summarize.py",
+    "paper/jctc/scripts/ablation_table.py", "paper/jctc/scripts/water_rerun.py",
     "paper/jctc/scripts/fig_water_crest.py", "paper/jctc/scripts/water_results_table.py",
     "paper/jctc/scripts/water_significance.py", "paper/jctc/scripts/lj75_gmin_table.py",
 )
@@ -899,9 +867,8 @@ def paired_statistics(audit: Audit) -> None:
     audit.cell(where, "Wilcoxon with a tie and a zero: pairs, T+", "3 1.5",
                " ".join(f"{x:g}" for x in wilcoxon_signed_rank([0.0, 1.0, -1.0, -2.0])[:2]))
     audit.said(SI, "with a relative tolerance\nof \\(10^{-12}\\) on that comparison so that ties to rounding count.")
-    for path in ("scripts/ase_panel/summarize.py", "scripts/ase_nonlj/summarize.py"):
-        audit.said(path, "from paired_stats import fisher_exact")
-        audit.said(path, "return fisher_exact(hits, 12, base, 12)")
+    audit.said("paper/jctc/scripts/ase_table.py", "from paired_stats import fisher_exact  # noqa: E402")
+    audit.said("paper/jctc/scripts/ase_table.py", '"p": {arm: fisher_exact(hits["recommended"], 12, hits[arm], 12)')
     audit.said("scripts/paired_stats.py", "if probability(value) <= observed * (1.0 + 1.0e-12)")
     audit.said("scripts/paired_stats.py", "Z95 = NormalDist().inv_cdf(0.975)")
     audit.said(SI, "\\qquad z = \\Phi^{-1}(0.975),")
@@ -1195,8 +1162,6 @@ def gmin_develop_data(audit: Audit, panel: object) -> None:
                    f"\\texttt{{\\seqsplit{{{SUBMITTED}}}}}, session {GMIN_DEVELOP_SESSION} of "
                    "\\path{paper/jctc/data/gmin_develop}, copied from the record branch its \\texttt{PROVENANCE} file "
                    "names.")
-    audit.said(SI, "Earlier versions of the table carried Morse and gold rows of revision \\texttt{1ce3ab64}, which is "
-                   "not in the repository; the second block replaces them with rows of the submitted revision.")
     audit.said(SI, "The GMIN table of the main text uses three GMIN inputs.")
 
 
@@ -1747,8 +1712,7 @@ def table_priors(audit: Audit, removal: str) -> None:
         guard = hop[hop.rindex("if ", 0, at):hop.index("{", at)]
         audit.record("!cfg.move_library.is_rigid_body()" in guard, SI, f"3129d1ec^ keeps rigid runs out of {switch}",
                      "guarded", "guarded" if "!cfg.move_library.is_rigid_body()" in guard else "unguarded")
-    audit.said(SI, "The preset of \\texttt{9a30f319}, behind the Morse ASE table, has the six priors on, and the "
-                   "parent of \\texttt{07092af2} has no prior switch.")
+    audit.said(SI, "The parent of \\texttt{07092af2} has no prior switch.")
 
 
 PRIORS = ("soap", "reseed", "growth", "core", "handover", "motif")
@@ -1861,10 +1825,12 @@ def gmin_patches(audit: Audit) -> None:
                  "absent", "absent" if "Mackay cap" not in audit.text(TEX) else "present")
 
 
-ASE_PANEL = ("lj38", "lj55", "lj98", "lj104", "lj150", "au55")
+ASE_PANEL = ("lj38", "lj55", "lj98", "lj104", "au55")
 MORSE_PANEL = ("m38r6", "m38r14", "m55r6", "m55r14")
-MORSE_REVISION = "9a30f3190b3bb7040c675a904f8388eb68224151"
 ASE_ARMS = ("ase_bh", "ase_mh")
+ASE_DATA = "paper/jctc/data/ase_rerun"
+ASE_REVISIONS = {"lj": "61fa67cf380e46876b569da45e7cc091647a775b",
+                 "morse": "5eb79cdcb0a986984dc7b487e5a3cc93224246f9"}
 PANEL_SEEDS = " ".join(str(s) for s in range(2000, 2012))
 
 
@@ -1877,92 +1843,44 @@ def load_script(name: str, path: str) -> object:
 
 
 def ase_groups(audit: Audit) -> dict[tuple[str, str], list[dict[str, str]]]:
-    """The rows of each system and arm of the two ASE panels, in seed order.
-
-    Au55 takes the recommended rows of rows.csv and the other arms of
-    rows-for-cluster.csv, the rerun of the corrected cluster preset."""
+    """The rows of each system and arm of the two ASE tables, in seed order."""
     groups = {}
-
-    def campaign(rows: list[dict[str, str]], system: str, arm: str) -> list[dict[str, str]]:
-        rows = [r for r in rows if r["system"] == system and r["arm"] == arm]
-        grouped: dict[tuple[str, str], tuple[int, dict[int, dict[str, str]]]] = {}
-        for index, row in enumerate(rows):
-            key = (row.get("code_revision", ""), row.get("cap_s", ""))
-            last, seeds = grouped.get(key, (-1, {}))
-            seeds[int(row["seed"])] = row
-            grouped[key] = (index, seeds)
-        full = [(last, seeds) for last, seeds in grouped.values() if tuple(sorted(seeds)) == tuple(range(2000, 2012))]
-        if full:
-            _last, seeds = max(full, key=lambda item: item[0])
-            return [seeds[s] for s in range(2000, 2012)]
-        latest: dict[int, dict[str, str]] = {}
-        for row in rows:
-            latest[int(row["seed"])] = row
-        return [latest[s] for s in sorted(latest)]
-
-    for system in ASE_PANEL:
-        rows = audit.rows(f"bench/ase-{system}/rows.csv")
-        others = audit.rows("bench/ase-au55/rows-for-cluster.csv") if system == "au55" else rows
-        for arm in ("anneal", "recommended", *ASE_ARMS):
-            source = rows if arm == "recommended" else others
-            groups[(system, arm)] = campaign(source, system, arm)
-    morse = pick(audit.rows("bench/ase-nonlj/rows.csv"), code_revision=MORSE_REVISION)
-    for system in MORSE_PANEL:
-        for arm in ("for_cluster", "recommended", *ASE_ARMS):
-            groups[(system, arm)] = pick(morse, system=system, arm=arm)
-    for (system, arm), group in groups.items():
-        group.sort(key=lambda r: int(r["seed"]))
-        where = f"ase panel {system} {arm}"
-        audit.cell(where, "seeds", " ".join(r["seed"] for r in group), PANEL_SEEDS)
-        audit.cell(where, "host", " ".join(sorted({r["host"] for r in group})), "bench")
+    folders = [(s, (s,), ("anneal", "recommended", *ASE_ARMS), "lj") for s in ASE_PANEL]
+    folders.append(("morse", MORSE_PANEL, ("for_cluster", "recommended", *ASE_ARMS), "morse"))
+    for folder, systems, arms, kind in folders:
+        rows = audit.rows(f"{ASE_DATA}/{folder}/rows.csv")
+        for system in systems:
+            for arm in arms:
+                group = sorted(pick(rows, system=system, arm=arm), key=lambda r: int(r["seed"]))
+                where = f"ase panel {system} {arm}"
+                audit.cell(where, "seeds", " ".join(r["seed"] for r in group), PANEL_SEEDS)
+                audit.cell(where, "revision", " ".join(sorted({r["code_revision"] for r in group})),
+                           ASE_REVISIONS[kind])
+                groups[(system, arm)] = group
     return groups
 
 
 def ase_cap(audit: Audit, groups: dict, system: str) -> float:
-    """The one wall cap of both ASE arms, checked to be three times the slowest cluster-preset wall."""
+    """The one wall cap of a cluster, checked to be three times the slowest cluster-preset wall."""
     base = "for_cluster" if system in MORSE_PANEL else "anneal"
-    caps = sorted({r["cap_s"] for arm in ASE_ARMS for r in groups[(system, arm)]})
+    caps = sorted({r["cap_s"] for arm in ("recommended", *ASE_ARMS) for r in groups[(system, arm)]})
     slowest = max(float(r["wall_s"]) for r in groups[(system, base)])
-    audit.cell(f"ase panel {system}", "one ASE wall cap", "1", float(len(caps)))
-    audit.record(abs(float(caps[0]) - 3.0 * slowest) <= 1e-6, f"ase panel {system}", "cap is three times the slowest "
+    audit.cell(f"ase panel {system}", "one wall cap", "1", float(len(caps)))
+    audit.record(abs(float(caps[0]) - 3.0 * slowest) <= 1e-5, f"ase panel {system}", "cap is three times the slowest "
                  f"{base} wall", caps[0], f"{3.0 * slowest:.6f}")
     return float(caps[0])
 
 
-def ase_equal_calls(audit: Audit, groups: dict, label) -> None:
-    """The equal-call counts: seeds on which this code had hit within the calls the ASE run on that seed charged."""
-    def within(system: str, arm: str) -> int:
-        ours = {r["seed"]: r for r in groups[(system, "recommended")]}
-        return sum(ours[r["seed"]]["hit"] == "1" and float(ours[r["seed"]]["evals_to_hit"]) <= float(r["charged"])
-                   for r in groups[(system, arm)])
-
-    lj = ASE_PANEL[:5]
-    mh = [within(s, "ase_mh") for s in lj]
-    bh = [within(s, "ase_bh") for s in lj]
-    audit.cell(TEX, "equal calls against minima hopping", "12 8 0 1 1", " ".join(map(str, mh)))
-    audit.cell(TEX, "equal calls against basin hopping", "12 12 10 9 5", " ".join(map(str, bh)))
-    wide = ("lj98", "lj104", "lj150")
-    bh_hits = [sum(r["hit"] == "1" for r in groups[(s, "ase_bh")]) for s in wide]
-    audit.cell(TEX, "ASE basin hopping hits none of LJ98, LJ104, LJ150", "0 0 0", " ".join(map(str, bh_hits)))
-    audit.said(TEX, f"this code had reached the minimum on {series(map(str, mh))} of the 12 seeds of the five "
-                    f"Lennard-Jones clusters; within the calls of each basin-hopping run it had done so on "
-                    f"{series(map(str, bh))}.")
-    audit.cell(TEX, "equal calls on Au55", "0 0", f"{within('au55', 'ase_bh')} {within('au55', 'ase_mh')}")
-    morse = [{within(s, a) for a in ASE_ARMS} for s in MORSE_PANEL]
-    audit.cell(TEX, "Morse equal calls agree against both arms", "1 1 1 1", " ".join(str(len(m)) for m in morse))
-    counts = [str(m.pop()) for m in morse]
-    audit.cell(TEX, "Morse equal calls", "0 0 4 0", " ".join(counts))
-    audit.said(TEX, f"runs had spent this code had reached the minimum on {series(counts)} of those seeds.")
-    calls = [median([float(r["charged"]) for r in groups[(s, a)]]) for s in MORSE_PANEL for a in ASE_ARMS]
-    audit.said(TEX, f"On the four Morse clusters every ASE run stopped at the cap after a median of {min(calls):.0f} to "
-                    f"{max(calls):.0f} calls;")
-
-
 def manuscript_ase(audit: Audit) -> None:
-    """Tables tab:ase and tab:ase-morse, the summaries they come from, and every sentence that reads them."""
-    panel = load_script("ase_panel_summary", "scripts/ase_panel/summarize.py")
-    nonlj = load_script("ase_nonlj_summary", "scripts/ase_nonlj/summarize.py")
-    gmin_panel, gmin = gmin_panel_groups(audit)
+    """Tables tab:ase and tab:ase-morse, the imported rows they come from, and every sentence that reads them."""
+    table = load_script("ase_table_audit", "paper/jctc/scripts/ase_table.py")
+    for folder in (*ASE_PANEL, "morse"):
+        path = imported(audit, f"{ASE_DATA}/{folder}")
+        fields = dict(line.split(" ", 1) for line in audit.text(f"{ASE_DATA}/{folder}/PROVENANCE").splitlines())
+        ancestor_of(audit, path, fields["ancestor"])
+        audit.cell(path, "every row is the PROVENANCE ancestor", fields["ancestor"],
+                   " ".join(sorted({r["code_revision"] for r in audit.rows(path)})))
+    audit.record(not (ROOT / ASE_DATA / "lj150").exists(), ASE_DATA, "LJ150 has no imported rows", "absent", "checked")
     groups = ase_groups(audit)
 
     def hits(system: str, arm: str) -> int:
@@ -1975,243 +1893,152 @@ def manuscript_ase(audit: Audit) -> None:
         a, b = groups[(system, "recommended")], groups[(system, arm)]
         return fisher(hits_of(a), len(a), hits_of(b), len(b))
 
-    def gap(system: str, arm: str, reference: float) -> float:
-        return median([float(r["best"]) for r in groups[(system, arm)]]) - reference
-
-    def show_p(value: float) -> str:
-        return gmin_panel.show_p(value, tex=True)
-
-    references = {s: v[2] for s, v in panel.SYSTEMS.items()} | {s: v[3] for s, v in nonlj.SPEC.items()}
-    budgets = {s: v[1] for s, v in panel.SYSTEMS.items()} | {s: int(v[2]) for s, v in nonlj.SPEC.items()}
-    for system, group in groups.items():
-        audit.cell(f"ase panel {system[0]} {system[1]}", "budget",
-                   " ".join(sorted({r["budget"] for r in group})), str(budgets[system[0]]))
+    budgets = {s: v[1] for s, v in (table.LJ | table.MORSE).items()}
+    references = {s: v[2] for s, v in (table.LJ | table.MORSE).items()}
     by_atoms = {38: 400_000, 55: 1_000_000}
-    for system in (*ASE_PANEL, *MORSE_PANEL):
-        atoms = panel.SYSTEMS[system][0] if system in panel.SYSTEMS else nonlj.SPEC[system][0]
-        audit.cell(f"ase panel {system}", "budget by atom count", str(by_atoms.get(atoms, 4_000_000)),
+    atoms = {"lj38": 38, "lj55": 55, "lj98": 98, "lj104": 104, "au55": 55,
+             "m38r6": 38, "m38r14": 38, "m55r6": 55, "m55r14": 55}
+    for (system, arm), group in groups.items():
+        audit.cell(f"ase panel {system} {arm}", "budget", " ".join(sorted({r["budget"] for r in group})),
+                   str(budgets[system]))
+        audit.cell(f"ase panel {system} {arm}", "budget by atom count", str(by_atoms.get(atoms[system], 4_000_000)),
                    float(budgets[system]))
-    audit.said(SI, "on seeds 2000--2011, at \\(4\\times 10^{5}\\) calls for 38 atoms, \\(1\\times 10^{6}\\) for 55, "
-                    "and \\(4\\times 10^{6}\\) for 98 atoms and above, on one core of one host.")
-    audit.said("scripts/ase_panel/run_one.py", 'ASE_VERSION = "3.29.0"')
-    audit.said("bench/ase-nonlj/README.md", "ASE basin hopping and minima hopping use the ASE 3.29 constructor defaults")
-    audit.said(SI, "Environment 3.29.0 at its constructor defaults")
-    audit.said(TEX, "(MH) of ASE 3.29.0 at its constructor defaults, at the effort each run reports.")
-    audit.said("scripts/ase_panel/run_one.py", "Au55 is Gupta::copper_gold through asg_eval serve, the same potential "
-                                               "the anneal arms evaluate.")
-
-    # tab:ase and the combined recommended summary.
-    revision = sorted({r["code_revision"] for s in ASE_PANEL for r in groups[(s, "recommended")]})
-    audit.record(len(revision) >= 1, TEX, "tab:ase recommended revisions", "at least one", str(len(revision)))
-    rev_ase_text = ", ".join(revision)
-    audit.said(SI, "The anneal arm of the Lennard-Jones and gold ASE table is revisions "
-                   + " and ".join(f"\\texttt{{\\seqsplit{{{r}}}}}" for r in revision) + ", neither in the\nrepository.")
-    for r in revision:
-        audit.record(not git("cat-file", "-e", f"{r}^{{commit}}").returncode == 0, SI,
-                     f"ASE revision {r[:8]} is not in the repository", "absent", "checked")
-    shorts = [r[:8] for r in revision]
-    audit.said(TEX, f"\\texttt{{{shorts[0]}}} and \\texttt{{{shorts[1]}}} of this code.")
-    by_label = {label: s for s, label in panel.TEX_LABELS.items()}
-    shown = []
-    for cells in tex_table(audit, TEX, "tab:ase"):
-        system = by_label.get(cells[0])
-        where = f"{TEX} tab:ase {system}"
-        if system is None or len(cells) != 13:
-            audit.record(False, where, "table line", " & ".join(cells), "an ASE panel system")
-            continue
-        shown.append(system)
-        audit.cell(where, "budget", cells[1], float(budgets[system]))
-        audit.cell(where, "cap", cells[2], ase_cap(audit, groups, system))
-        for cell, arm in zip(cells[3:6], ("recommended", *ASE_ARMS)):
-            audit.cell(where, f"{arm} hits", cell, frac(groups[(system, arm)]))
-        for cell, arm in zip(cells[6:8], ASE_ARMS):
-            audit.cell(where, f"{arm} wall stops", cell, float(stops(system, arm)))
-        for cell, arm in zip(cells[8:11], ("recommended", *ASE_ARMS)):
-            audit.cell(where, f"{arm} median wall", cell,
-                       median([float(r["wall_s"]) for r in groups[(system, arm)]]))
-        for cell, arm in zip(cells[11:13], ASE_ARMS):
-            audit.cell(where, f"Fisher p against {arm}", cell, p(system, arm))
-    audit.cell(TEX, "tab:ase lines", " ".join(shown), " ".join(ASE_PANEL))
-    summary = "bench/ase-recommended/summary.csv"
-    for line in audit.rows(summary):
-        system, arm = line["system"], line["arm"]
-        where = f"{summary} {system} {arm}"
-        audit.cell(where, "hits", line["hits"], float(hits(system, arm)))
-        audit.cell(where, "median best", line["median_best"], gap(system, arm, 0.0))
-        audit.cell(where, "gap", line["gap_to_reference"], gap(system, arm, references[system]))
-        if arm == "recommended":
-            audit.cell(where, "fisher_p_bh", line["fisher_p_bh"], p(system, "ase_bh"))
-            audit.cell(where, "fisher_p_mh", line["fisher_p_mh"], p(system, "ase_mh"))
-
-    # tab:ase-morse and the Morse summary.
-    revision = sorted({r["code_revision"] for s in MORSE_PANEL for r in groups[(s, "recommended")]})
-    audit.record(len(revision) >= 1, TEX, "tab:ase-morse recommended revisions", "at least one", str(len(revision)))
-    rev_morse_short = revision[0][:8]
-    audit.said(SI, f"The anneal arm of the Morse ASE table is revision \\texttt{{{rev_morse_short}}}, at the length scale "
-                   "of the Morse pair, which is in the repository and is not an ancestor of the submitted revision.")
-    morse_ancestor = git("merge-base", "--is-ancestor", revision[0], SUBMITTED).returncode == 0
-    audit.record(not morse_ancestor, SI, f"{rev_morse_short} is not an ancestor of the submitted revision", "not",
-                 "ancestor" if morse_ancestor else "not")
-    audit.said(TEX, f"The rows of this code are revisions \\texttt{{{shorts[0]}}} and \\texttt{{{shorts[1]}}}\nin "
-                    f"Table~\\ref{{tab:ase}} and revision \\texttt{{{rev_morse_short}}} in\nTable~\\ref{{tab:ase-morse}}, "
-                    "none of them an ancestor of the submitted revision.")
-    audit.said(TEX, f"The rows of this code are revision \\texttt{{{rev_morse_short}}}, at the length scale of the Morse pair.")
-    audit.said("bench/ase-nonlj/README.md",
-               "Anneal `recommended` uses `Config::recommended_with_scales` at `PairKind::length_scale()`.")
-    audit.said("examples/ase_panel.rs", "Config::recommended_with_scales(n, length, well)")
-    by_label = {label: s for s, label in nonlj.TEX_LABELS.items()}
-    shown = []
-    for cells in tex_table(audit, TEX, "tab:ase-morse"):
-        system = by_label.get(cells[0])
-        where = f"{TEX} tab:ase-morse {system}"
-        if system is None or len(cells) != 11:
-            audit.record(False, where, "table line", " & ".join(cells), "a Morse panel system")
-            continue
-        shown.append(system)
-        audit.cell(where, "budget", cells[1], float(budgets[system]))
-        audit.cell(where, "cap", cells[2], ase_cap(audit, groups, system))
-        for cell, arm in zip(cells[3:6], ("recommended", *ASE_ARMS)):
-            audit.cell(where, f"{arm} hits", cell, frac(groups[(system, arm)]))
-        for cell, arm in zip(cells[6:9], ("recommended", *ASE_ARMS)):
-            audit.cell(where, f"{arm} median wall", cell,
-                       median([float(r["wall_s"]) for r in groups[(system, arm)]]))
-        for cell, arm in zip(cells[9:11], ASE_ARMS):
-            audit.cell(where, f"Fisher p against {arm}", cell, p(system, arm))
-    audit.cell(TEX, "tab:ase-morse lines", " ".join(shown), " ".join(MORSE_PANEL))
-    summary = "bench/ase-nonlj/summary.csv"
-    for line in pick(audit.rows(summary), code_revision=MORSE_REVISION):
-        system, arm = line["system"], line["arm"]
-        where = f"{summary} {system} {arm}"
-        audit.cell(where, "hits", line["hits"], float(hits(system, arm)))
-        audit.cell(where, "gap", line["gap_to_reference"], gap(system, arm, references[system]))
-        if arm == "recommended":
-            audit.cell(where, "fisher_p_bh", line["fisher_p_bh"], p(system, "ase_bh"))
-            audit.cell(where, "fisher_p_mh", line["fisher_p_mh"], p(system, "ase_mh"))
-    identity = audit.rows("bench/ase-nonlj/identity.csv")
-    energy = max(float(r["abs_energy_diff"]) for r in identity)
-    force = max(float(r["max_force_diff"]) for r in identity)
-    audit.cell(SI, "Morse energy agreement", "6.8e-12", energy)
-    audit.cell(SI, "Morse force agreement", "3.6e-12", force)
-    audit.cell(SI, "Morse agreement at the seed-2000 start", "2000", " ".join(sorted({r["seed"] for r in identity})))
-    audit.said(SI, "agrees with this code at the seed-2000 start to \\(6.8\\times 10^{-12}\\) in energy and "
-                    "\\(3.6\\times 10^{-12}\\) in force.")
-
-    # Stops: no run of this code at a cap, the caps of each ASE arm.
+        worst = max((abs(float(r["best"]) - references[system]) for r in group if r["hit"] == "1"), default=0.0)
+        audit.record(worst < DEFAULT_HIT_TOL, f"ase panel {system} {arm}", "every hit within 1e-3 of its reference",
+                     f"{worst:.3g}", "below 0.001")
     for system in (*ASE_PANEL, *MORSE_PANEL):
         audit.cell(f"ase panel {system}", "recommended wall stops", "0", float(stops(system, "recommended")))
-        uncapped = sum(not r["cap_s"] for a in ("recommended", *ASE_ARMS) for r in groups[(system, a)])
-        audit.cell(f"ase panel {system}", "table runs without a cap", "0", float(uncapped))
-    audit.said(SI, "Each run stops at a hit, at the budget, or at a wall cap. The cap of the basin-hopping and "
-                    "minima-hopping runs is three times the slowest wall of the panel's cluster-preset arm on that "
-                    "cluster.")
-    audit.said(SI, "No run of this code reached its cap.")
+
+    for label, systems, labels in (("tab:ase", ASE_PANEL, table.LJ), ("tab:ase-morse", MORSE_PANEL, table.MORSE)):
+        by_label = {v[3]: s for s, v in labels.items()}
+        shown = []
+        for cells in tex_table(audit, TEX, label):
+            system = by_label.get(cells[0])
+            where = f"{TEX} {label} {system}"
+            if system is None or len(cells) != 13:
+                audit.record(False, where, "table line", " & ".join(cells), "a panel system")
+                continue
+            shown.append(system)
+            audit.cell(where, "budget", cells[1], float(budgets[system]))
+            audit.cell(where, "cap", cells[2], ase_cap(audit, groups, system))
+            for cell, arm in zip(cells[3:6], ("recommended", *ASE_ARMS)):
+                audit.cell(where, f"{arm} hits", cell, frac(groups[(system, arm)]))
+            for cell, arm in zip(cells[6:8], ASE_ARMS):
+                audit.cell(where, f"{arm} wall stops", cell, float(stops(system, arm)))
+            for cell, arm in zip(cells[8:11], ("recommended", *ASE_ARMS)):
+                audit.cell(where, f"{arm} median wall", cell, median([float(r["wall_s"]) for r in groups[(system, arm)]]))
+            for cell, arm in zip(cells[11:13], ASE_ARMS):
+                audit.cell(where, f"Fisher p against {arm}", cell, p(system, arm))
+        audit.cell(TEX, f"{label} lines", " ".join(shown), " ".join(systems))
+
+    lj_rev, morse_rev = ASE_REVISIONS["lj"][:8], ASE_REVISIONS["morse"][:8]
+    audit.said(TEX, f"\\caption{{This code, \\texttt{{Config::recommended}} at revision \\texttt{{{lj_rev}}}, against "
+                    "the basin hopping (BH) and minima hopping (MH) of ASE 3.29.0 at its constructor defaults, at the "
+                    "effort each run reports.")
+    audit.said(TEX, f"Table~\\ref{{tab:ase}} runs revision \\texttt{{{lj_rev}}} on four Lennard-Jones clusters and "
+                    f"Au\\(_{{55}}\\), and Table~\\ref{{tab:ase-morse}} runs revision \\texttt{{{morse_rev}}} on four "
+                    "Morse clusters; both are ancestors of the submitted revision.")
     audit.said(TEX, "These runs do not share a start with this code, so their hits are compared by Fisher's test, and "
-                    "their effort is not equal: each ASE run stopped at a hit, at the budget, or at a wall cap of three "
-                    "times the slowest wall of another configuration of this code on that cluster.")
-    lj = ASE_PANEL[:5]
-
-    def label(system: str) -> str:
-        if system in panel.TEX_LABELS:
-            return panel.TEX_LABELS[system]
-        return nonlj.TEX_LABELS[system].replace(", \\(\\rho=", " at \\(\\rho=")
-
-    mh_runs = sum(len(groups[(s, "ase_mh")]) for s in ASE_PANEL)
-    mh_walls = sum(stops(s, "ase_mh") for s in ASE_PANEL)
-    audit.cell(TEX, "tab:ase minima-hopping runs at the cap", str(mh_runs), float(mh_walls))
-    bh = [(s, stops(s, "ase_bh")) for s in ASE_PANEL if stops(s, "ase_bh")]
-    morse_bh = all(r["stop"] == "wall" for s in MORSE_PANEL for r in groups[(s, "ase_bh")])
-    audit.record(morse_bh, TEX, "basin hopping reached the cap on every Morse run", "every", "every" if morse_bh else "not")
-    audit.said(TEX, f"Minima hopping reached the cap on every run, basin hopping on {sum(n for _, n in bh)} of the "
-                    f"{mh_runs}\nruns of Table~\\ref{{tab:ase}} and on every run of Table~\\ref{{tab:ase-morse}},\nand no "
-                    "run of this code reached it.")
-    spent = [s for s in ASE_PANEL if stops(s, "ase_bh", "budget") == len(groups[(s, "ase_bh")])]
-    for s in spent:
-        audit.cell(TEX, f"{s} basin hopping charged the budget on every seed", "4000000",
-                   float(min(int(r["charged"]) for r in groups[(s, "ase_bh")])))
-    audit.said(SI, f"On {series(label(s) for s in spent)} basin hopping spent the full \\(4\\times 10^{{6}}\\) calls "
-                    "on every seed.")
-    runs = []
-    for s in lj:
-        if runs and runs[-1][1] == hits(s, "recommended"):
-            runs[-1][0].append(s)
-        else:
-            runs.append(([s], hits(s, "recommended")))
-    lj_runs = series(f"{' and '.join(label(s) for s in names)} on {n} of 12" for names, n in runs)
+                    "their effort is not equal: every run stopped at a hit, at the budget, or at a wall cap of three "
+                    "times the slowest wall of the cluster preset of this code on that cluster.")
+    mh_all = all(r["stop"] == "wall" for s in (*ASE_PANEL, *MORSE_PANEL) for r in groups[(s, "ase_mh")])
+    audit.record(mh_all, TEX, "every ASE minima-hopping run ended at the cap", "every", "every" if mh_all else "not")
+    audit.said(TEX, "ASE minima hopping is wall-capped: every one of its runs in both tables ended at the cap with "
+                    "fewer calls than the budget.")
+    bh_lj = sum(stops(s, "ase_bh") for s in ASE_PANEL)
+    runs_lj = sum(len(groups[(s, "ase_bh")]) for s in ASE_PANEL)
+    bh_morse = all(r["stop"] == "wall" for s in MORSE_PANEL for r in groups[(s, "ase_bh")])
+    audit.record(bh_morse, TEX, "basin hopping reached the cap on every Morse run", "every", "every" if bh_morse else "not")
+    audit.said(TEX, f"Basin hopping reached the cap on {bh_lj} of the {runs_lj} runs of Table~\\ref{{tab:ase}} and on "
+                    "every run of Table~\\ref{tab:ase-morse}, and no run of this code reached it.")
+    r = {s: hits(s, "recommended") for s in (*ASE_PANEL, *MORSE_PANEL)}
+    audit.said(TEX, f"Under that policy this code hits LJ\\(_{{38}}\\) and LJ\\(_{{55}}\\) on {r['lj38']} of 12, "
+                    f"LJ\\(_{{98}}\\) on {r['lj98']} of 12, and LJ\\(_{{104}}\\) on {r['lj104']} of 12, while ASE basin "
+                    f"hopping hits LJ\\(_{{55}}\\) on {hits('lj55', 'ase_bh')} of 12 and no other cluster, and ASE "
+                    "minima hopping hits none; no arm hits Au\\(_{55}\\).")
+    audit.cell(TEX, "LJ38 and LJ55 share one count", "12 12", f"{r['lj38']} {r['lj55']}")
     bh_hits = [s for s in ASE_PANEL if hits(s, "ase_bh")]
-    mh_hits = [s for s in ASE_PANEL if hits(s, "ase_mh")]
     audit.cell(TEX, "basin hopping hits one cluster", "lj55", " ".join(bh_hits))
-    audit.cell(TEX, "minima hopping hits none", "", " ".join(mh_hits))
-    audit.said(TEX, f"Under that policy this code hits {lj_runs}, while ASE basin hopping hits {label('lj55')} on "
-                    f"{hits('lj55', 'ase_bh')} of 12 and no other\ncluster, and ASE minima hopping hits none; no arm hits "
-                    f"{label('au55')}.")
-    below = [s for s in lj if max(p(s, a) for a in ASE_ARMS) < 0.05]
-    audit.said(SI, f"Fisher's test against each ASE arm is below 0.05 on all {len(below)} Lennard-Jones clusters.")
-    audit.cell(TEX, "Fisher below 0.05 on every Lennard-Jones cluster", " ".join(lj), " ".join(below))
-    au_hits = [hits("au55", a) for a in ("anneal", "recommended", *ASE_ARMS)]
-    audit.cell(TEX, "no arm of the ASE panel hits Au55", "0", float(sum(au_hits)))
-    au_ref = references["au55"]
-    au_gaps = [f"{gap('au55', a, au_ref):.3f}" for a in ("recommended", *ASE_ARMS)]
-    audit.said(SI, f"On {label('au55')} the median best energy lies {au_gaps[0]}~eV above the reference for this code, "
-                    f"{au_gaps[1]}~eV for basin hopping, and {au_gaps[2]}~eV for minima hopping.")
-    morse_walls = all(r["stop"] == "wall" for s in MORSE_PANEL for a in ASE_ARMS for r in groups[(s, a)])
-    audit.record(morse_walls, TEX, "every Morse ASE run stopped at the cap", "every", "every" if morse_walls else "not every")
-    audit.said(SI, "Every basin-hopping and minima-hopping run of the Morse ASE table stopped at the cap.")
-    m = [hits(s, "recommended") for s in MORSE_PANEL]
-    audit.cell(TEX, "M38 at both ranges and M55 at rho=6 share one count", "1", float(len(set(m[:3]))))
-    morse_sentence = (f"{label('m38r6').split(' at ')[0]} at \\(\\rho=6\\) and \\(\\rho=14\\) and {label('m55r6')} on "
-                      f"{m[0]} of 12")
-    audit.said(TEX, f"this code hits {morse_sentence} and {label('m55r14')} on {m[3]} of 12, both ASE arms hit none,")
-    morse_ase = {hits(s, a) for s in MORSE_PANEL for a in ASE_ARMS}
-    audit.cell(TEX, "Morse ASE hits", "0", float(max(morse_ase)))
-    morse_p = [{show_p(p(s, a)) for a in ASE_ARMS} for s in MORSE_PANEL]
-    audit.cell(TEX, "one Fisher p on the first three Morse clusters", "1", float(len(set.union(*morse_p[:3]))))
-    audit.said(SI, f"Fisher's \\(p\\) against each ASE arm is {next(iter(morse_p[0]))} on the first three and "
-                    f"{next(iter(morse_p[3]))} on {label('m55r14')}.")
-    section = audit.text(TEX).split("\\label{sec:ase}", 1)[1].split("% gofee table: start", 1)[0]
-    audit.record("Mann" not in section, TEX, "sec:ase reports Fisher only", "no rank test", "no rank test"
-                 if "Mann" not in section else "a rank test")
-    conclusions = audit.text(TEX).split("\\section{Conclusions}", 1)[1].split("\\appendix", 1)[0]
-    audit.record("Mann" not in conclusions, TEX, "the conclusions report no rank test", "no rank test", "no rank test"
-                 if "Mann" not in conclusions else "a rank test")
+    audit.cell(TEX, "minima hopping hits none", "0", float(sum(hits(s, "ase_mh") for s in ASE_PANEL)))
+    audit.cell(TEX, "no arm hits Au55", "0", float(sum(hits_of(groups[("au55", a)]) for a in
+                                                       ("anneal", "recommended", *ASE_ARMS))))
+    audit.cell(TEX, "Morse at rho=6 on 12 of 12", "12 12", f"{r['m38r6']} {r['m55r6']}")
+    morse_ase = [r_ for s in MORSE_PANEL for a in ASE_ARMS for r_ in groups[(s, a)]]
+    audit.cell(TEX, "Morse ASE hits", "0", float(hits_of(morse_ase)))
+    charged = [int(r_["charged"]) for r_ in morse_ase]
+    audit.said(TEX, f"On the Morse clusters this code hits M\\(_{{38}}\\) and M\\(_{{55}}\\) at \\(\\rho=6\\) on "
+                    f"{r['m38r6']} of 12 and at \\(\\rho=14\\) on {r['m38r14']} and {r['m55r14']} of 12, and neither "
+                    f"ASE arm hits any; each ASE run there stopped at the cap after {min(charged)} to {max(charged)} "
+                    "force calls.")
 
-    # Abstract, introduction, discussion and conclusions.
-    lj_hits = [str(hits(s, "recommended")) for s in lj]
-    ase_max = max(hits(s, a) for s in lj for a in ASE_ARMS)
-    audit.cell(TEX, "the ASE arms hit at most one LJ seed", "1", float(ase_max))
+    # The Supporting Information.
+    audit.said(SI, "on seeds 2000--2011, at \\(4\\times 10^{5}\\) calls for 38 atoms, \\(1\\times 10^{6}\\) for 55, "
+                    "and \\(4\\times 10^{6}\\) for 98 atoms and above, on one core of one host.")
+    audit.said(SI, "Environment 3.29.0 at its constructor defaults")
+    audit.said(SI, "\\texttt{\\seqsplit{" + ASE_REVISIONS["lj"] + "}}, and those of the Morse ASE table revision "
+                   "\\texttt{\\seqsplit{" + ASE_REVISIONS["morse"] + "}}, at the length scale of the Morse pair; both "
+                   "are ancestors of the submitted revision.")
+    preset = [str(hits(s, "anneal")) for s in ASE_PANEL]
+    morse_preset = [str(hits(s, "for_cluster")) for s in MORSE_PANEL]
+    audit.said(SI, f"Its hits are {series(preset)} of 12 on LJ\\(_{{38}}\\), LJ\\(_{{55}}\\), LJ\\(_{{98}}\\), "
+                   f"LJ\\(_{{104}}\\), and Au\\(_{{55}}\\), and {series(morse_preset)} of 12 on M\\(_{{38}}\\) and "
+                   "M\\(_{55}\\) at \\(\\rho=6\\) and 14 in the order of the Morse table.")
+    below = [s for s in ASE_PANEL[:4] if max(p(s, a) for a in ASE_ARMS) < 0.05]
+    audit.said(SI, f"Fisher's test against each ASE arm is below 0.05 on all {len(below)} Lennard-Jones clusters.")
+    audit.cell(SI, "Fisher below 0.05 on every Lennard-Jones cluster", " ".join(ASE_PANEL[:4]), " ".join(below))
+    bh_all = [s for s in (*ASE_PANEL, *MORSE_PANEL) if stops(s, "ase_bh") == 12]
+    audit.cell(SI, "basin hopping at the cap on every run", "lj38 au55 m38r6 m38r14 m55r6 m55r14", " ".join(bh_all))
+    audit.said(SI, f"Minima hopping reached its cap on every run of both tables, and basin hopping on every run of "
+                   f"LJ\\(_{{38}}\\), Au\\(_{{55}}\\), and the Morse clusters and on {stops('lj55', 'ase_bh')} of 12 on "
+                   "LJ\\(_{55}\\).")
+    spent = [s for s in ASE_PANEL if stops(s, "ase_bh", "budget") == 12]
+    audit.cell(SI, "basin hopping spent the budget on every seed", "lj98 lj104", " ".join(spent))
+    audit.said(SI, "On LJ\\(_{98}\\) and LJ\\(_{104}\\) basin hopping spent the full \\(4\\times 10^{6}\\) calls on "
+                   "every seed and missed on every seed.")
+    gaps = [f"{median([float(r_['best']) for r_ in groups[('au55', a)]]) - references['au55']:.3f}"
+            for a in ("recommended", *ASE_ARMS)]
+    audit.said(SI, f"On Au\\(_{{55}}\\) the median best energy lies {gaps[0]}~eV above the reference for this code, "
+                   f"{gaps[1]}~eV for basin hopping, and {gaps[2]}~eV for minima hopping.")
+    audit.said(SI, "No run of this code reached its cap.")
+    audit.said(SI, "the random generators of the two codes do not make a shared start from one seed")
+    audit.said(SI, "\\path{paper/jctc/scripts/ase_table.py} writes both ASE tables from them.")
+    audit.said(SI, "# ASE: rewrite both tables from the imported rows\npython3 paper/jctc/scripts/ase_table.py")
+
+    # Fisher only where arms do not pair, and no rank test.
+    text = audit.text(TEX)
+    section = text.split("\\label{sec:ase}", 1)[1].split("% ase-nonlj table: end", 1)[0]
+    audit.record("Mann" not in section, TEX, "sec:ase reports Fisher only", "no rank test",
+                 "no rank test" if "Mann" not in section else "a rank test")
+    conclusions = text.split("\\section{Conclusions}", 1)[1].split("\\appendix", 1)[0]
+    audit.record("Mann" not in conclusions, TEX, "the conclusions report no rank test", "no rank test",
+                 "no rank test" if "Mann" not in conclusions else "a rank test")
     audit.said(TEX, "Arms that do not share a start, the ASE arms, are compared on hits by the two-sided Fisher exact "
                     "test \\cite{fisherLogicInductiveInference1935}.")
-    audit.said(TEX, "Within the calls each minima-hopping run had spent on the same seed label when it stopped,")
-    for path in ("scripts/ase_panel/summarize.py", "scripts/ase_nonlj/summarize.py"):
-        audit.said(path, "the test is unpaired because the random\",\n"
-                         "        \"generators of the two codes do not make a shared start from one seed.}\",")
     audit.said(TEX, "the test is unpaired because the random generators of the two codes do not make a shared start "
-                    "from one seed.}")
-    audit.said(SI, "the random generators of the two codes do not make a shared start from one seed")
-    tex_ase = audit.text(TEX).split("\\label{sec:ase}", 1)[1].split("% ase-nonlj table: end", 1)[0]
-    stats = audit.text(TEX).split("\\label{sec:stats}", 1)[1].split("\\section{", 1)[0]
-    outside = audit.text(TEX).replace(tex_ase, "").replace(stats, "")
+                    "from one seed.")
+    stats = text.split("\\label{sec:stats}", 1)[1].split("\\section{", 1)[0]
+    outside = text.replace(section, "").replace(stats, "")
     audit.record("Fisher" not in outside.split("\\begin{suppinfo}")[0], TEX,
                  "the Fisher test appears only in the unpaired ASE comparisons", "only there",
                  "only there" if "Fisher" not in outside.split("\\begin{suppinfo}")[0] else "elsewhere too")
-    ase_equal_calls(audit, groups, label)
+    for path in ("scripts/ase_panel/summarize.py", "scripts/ase_nonlj/summarize.py"):
+        source = audit.text(path)
+        audit.record("mann_whitney" not in source and "continuity" not in source, path,
+                     "no continuity-corrected rank test", "absent",
+                     "absent" if "mann_whitney" not in source else "present")
+    for gone in ("gofee", "AGOX", "1ce3ab64", "b49341e3", "equal-call"):
+        found = [path for path in (TEX, SI, "paper/jctc/cover-letter.tex") if gone in audit.text(path)]
+        audit.record(not found, " ".join(found) or TEX, f"no {gone} in the paper", "absent", " ".join(found) or "absent")
     step = 1e-4
 
     def curvature(pair) -> float:
         return (pair(1.0 + step) - 2.0 * pair(1.0) + pair(1.0 - step)) / step**2
 
-    morse6 = curvature(lambda r: morse_pair(6.0, r))
-    lennard_jones = curvature(lambda r: r**-12 - 2.0 * r**-6)
+    morse6 = curvature(lambda x: morse_pair(6.0, x))
+    lennard_jones = curvature(lambda x: x**-12 - 2.0 * x**-6)
     audit.record(abs(morse6 - lennard_jones) < 1e-3, TEX, "Morse rho=6 curvature at the pair minimum",
                  f"{lennard_jones:.3f}", f"{morse6:.3f}")
-    ahead_lj = [s for s in lj if hits(s, "recommended") > max(hits(s, a) for a in ASE_ARMS)]
-    ahead_morse = [s for s in MORSE_PANEL if hits(s, "recommended") > max(hits(s, a) for a in ASE_ARMS)]
-    audit.cell(TEX, "ahead of both ASE arms on every Lennard-Jones and Morse cluster",
-               " ".join((*lj, *MORSE_PANEL)), " ".join((*ahead_lj, *ahead_morse)))
-    within = sum(r["hit"] == "1" and float(r["evals_to_hit"]) <= min(
-        float(b["charged"]) for a in ASE_ARMS for b in groups[(s, a)] if b["seed"] == r["seed"])
-        for s in MORSE_PANEL for r in groups[(s, "recommended")])
-    total = sum(len(groups[(s, "recommended")]) for s in MORSE_PANEL)
-    audit.cell(TEX, "Morse seeds hit within the ASE calls", "4 48", f"{within} {total}")
+    gmin_panel, gmin = gmin_panel_groups(audit)
     lj75 = gmin[("lj75", "anneal")], gmin[("lj75", "gmin")]
     audit.said("paper/jctc/NUMBERS_TODO.md", f"In tab:gmin, seeds 2000-2011, the recommended preset hits "
                                              f"{hits_of(lj75[0])} of {len(lj75[0])}.")
@@ -2226,22 +2053,18 @@ GMIN_SHARDS = ("a", "b", "c", "d")
 def panel_references(audit: Audit) -> None:
     """The panel references of Section sec:hit, and every panel hit inside the window of equation eq:abs."""
     gmin = load_script("gmin_panel_refs", "scripts/gmin_panel/run_panel.py")
-    panel = load_script("ase_panel_refs", "scripts/ase_panel/summarize.py")
-    nonlj = load_script("ase_nonlj_refs", "scripts/ase_nonlj/summarize.py")
+    ase = load_script("ase_table_refs", "paper/jctc/scripts/ase_table.py")
     refs: dict[str, set[float]] = defaultdict(set)
     for row in gmin.SYSTEMS:
         refs[row[0]].add(row[3])
-    for system, spec in panel.SYSTEMS.items():
+    for system, spec in (ase.LJ | ase.MORSE).items():
         refs[system].add(spec[2])
-    for system, spec in nonlj.SPEC.items():
-        refs[system].add(spec[3])
     for system, values in sorted(refs.items()):
         audit.cell("panel references", f"{system} one reference", "1", float(len(values)))
     ref = {s: next(iter(v)) for s, v in refs.items()}
     for path, rows in (("bench/gmin-panel/rows.csv", audit.rows("bench/gmin-panel/rows.csv")),
-                       ("bench/ase-nonlj/rows.csv", audit.rows("bench/ase-nonlj/rows.csv")),
-                       *((f"bench/ase-{s}/rows.csv", audit.rows(f"bench/ase-{s}/rows.csv")) for s in ASE_PANEL),
-                       ("bench/ase-au55/rows-for-cluster.csv", audit.rows("bench/ase-au55/rows-for-cluster.csv")),
+                       *((f"{ASE_DATA}/{s}/rows.csv", audit.rows(f"{ASE_DATA}/{s}/rows.csv"))
+                         for s in (*ASE_PANEL, "morse")),
                        *((f"{GMIN_RERUN}/{shard}/rows.csv", audit.rows(f"{GMIN_RERUN}/{shard}/rows.csv"))
                          for shard in GMIN_SHARDS)):
         worst = max((abs(float(r["best"]) - ref[r["system"]]) for r in rows if hits_of([r])), default=0.0)
@@ -2280,24 +2103,18 @@ def generated_tables(audit: Audit) -> None:
 
     gmin = load_script("gmin_table_tex", "paper/jctc/scripts/gmin_table.py")
     knock = load_script("knockout_tables_tex", "paper/jctc/scripts/knockout_tables.py")
-    panel = load_script("ase_panel_tex", "scripts/ase_panel/summarize.py")
-    nonlj = load_script("ase_nonlj_tex", "scripts/ase_nonlj/summarize.py")
+    ase = load_script("ase_table_tex", "paper/jctc/scripts/ase_table.py")
     ablation = load_script("ablation_tex", "paper/jctc/scripts/ablation_table.py")
-    h2h = load_script("h2h_tables_tex", "paper/jctc/scripts/h2h_tables.py")
-    si_text = audit.text(SI)
-    for label, marks, written, source in (
-            ("tab:gofee", h2h.MARKS["gofee"], h2h.gofee_block(), text),
-            ("tab:gofee-si", h2h.MARKS["gofee-si"], h2h.gofee_si_block(), si_text)):
-        found = source.split(marks[0], 1)[1].split(marks[1], 1)[0].strip("\n") if marks[0] in source else ""
-        ok = found == written
-        audit.record(ok, SI if source is si_text else TEX, f"{label} is the generator's block",
-                     "as written" if ok else "edited by hand", "as written")
+    for marks, path in ((("% gofee table: start", "% gofee table: end"), TEX),
+                        (("% gofee-si table: start", "% gofee-si table: end"), SI)):
+        audit.record(marks[0] not in audit.text(path), path, "the GOFEE table is not printed", "absent",
+                     "absent" if marks[0] not in audit.text(path) else "present")
     for label, marks, written in (("tab:ablation", ablation.TEX_MARKS, ablation.tex_table()),
                                   ("tab:gmin", gmin.MARKS, gmin.table()),
                                   ("tab:knockouts", knock.KNOCKOUT_MARKS, knock.knockout_table()),
                                   ("tab:tip4p-gmin", knock.TIP4P_MARKS, knock.tip4p_table()),
-                                  ("tab:ase", panel.TEX_MARKS, panel.tex_table()),
-                                  ("tab:ase-morse", nonlj.TEX_MARKS, nonlj.tex_table(nonlj.load_rows()))):
+                                  ("tab:ase", ase.MARKS["ase"], ase.ase_block()),
+                                  ("tab:ase-morse", ase.MARKS["ase-morse"], ase.morse_block())):
         ok = block(marks) == written
         audit.record(ok, TEX, f"{label} is the summariser's block", "as written" if ok else "edited by hand", "as written")
     for marks in (("% gmin-panel table: start", "% gmin-panel table: end"),):
@@ -3934,8 +3751,8 @@ def cover_letter(audit: Audit) -> None:
                      "absent" if word not in audit.text(COVER) else "present")
     audit.said(COVER, "Parts of the search with no such run are described as design, with no claim about their "
                       "effect.")
-    audit.said(COVER, "The comparisons with the Atomic Simulation Environment and AGOX GOFEE are reported at the "
-                      "effort each run spent.")
+    audit.said(COVER, "The comparisons with the Atomic Simulation Environment are reported at the effort each run "
+                      "spent.")
     audit.said(COVER, "Every printed number is computed from rows committed to the repository.")
 
 
@@ -4037,7 +3854,6 @@ def science_claims(audit: Audit) -> None:
 def manuscript_new(audit: Audit) -> None:
     """The abstract split, the added panels, the definitions, the priors, and the host paragraph."""
     panel, groups = gmin_panel_groups(audit)
-    ase = ase_groups(audit)
 
     def name(system: str) -> str:
         return panel.LABELS[system][1].replace(", \\(\\rho=", " at \\(\\rho=")
@@ -4050,53 +3866,6 @@ def manuscript_new(audit: Audit) -> None:
 
     def wall(system: str, arm: str) -> float:
         return median([float(r["wall_s"]) for r in groups[(system, arm)]])
-
-    s_ = panel.show_s
-    lj38 = ase[("lj38", "recommended")]
-    cap = ase_cap(audit, ase, "lj38")
-    capped = all(r["stop"] == "wall" for a in ASE_ARMS for r in ase[("lj38", a)])
-    audit.record(capped, SI, "every ASE run on LJ38 stops at the cap", "every", "every" if capped else "not every")
-    audit.said(SI, f"On LJ\\(_{{38}}\\) the median wall of this code is "
-                    f"{s_(median([float(r['wall_s']) for r in lj38]))}~s, and every ASE run stops at the cap of "
-                    f"{s_(cap)}~s.")
-
-    gofee_dir = "bench/ase-gofee-h2h"
-    summary = {(r["system"], r["arm"]): r for r in audit.rows(f"{gofee_dir}/summary.csv")}
-    lj = ("lj38", "lj55")
-    audit.cell(TEX, "this code hits both clusters on 6 of 6", "6/6 6/6",
-               " ".join(f"{summary[(s, 'paper')]['hits']}/{summary[(s, 'paper')]['n']}" for s in lj))
-    audit.cell(TEX, "ASE basin hopping and GOFEE hit none of the two", "0 0 0 0",
-               " ".join(summary[(s, a)]["hits"] for a in ("ase_bh", "agox_gofee") for s in lj))
-    mh = [summary[(s, "ase_mh")]["hits"] for s in lj]
-    mw = [s_(float(summary[(s, "ase_mh")]["wall_median_s"])) for s in lj]
-    audit.said(TEX, f"This code hits both clusters on 6 of 6 seeds, ASE basin hopping and GOFEE none, and ASE minima "
-                    f"hopping LJ\\(_{{38}}\\) on {mh[0]} of 6 and LJ\\(_{{55}}\\) on {mh[1]} of 6, in median walls of "
-                    f"{mw[0]}~s and {mw[1]}~s,")
-    g = [float(summary[(s, "agox_gofee")]["wall_median_s"]) for s in lj]
-    a = [float(summary[(s, "paper")]["wall_median_s"]) for s in lj]
-    audit.said(TEX, f"The median wall of a GOFEE run is {s_(g[0])}~s on LJ\\(_{{38}}\\) and {s_(g[1])}~s on "
-                    f"LJ\\(_{{55}}\\), against {s_(a[0])}~s and {s_(a[1])}~s for this code.")
-    lj_rows = [r for r in audit.rows(f"{gofee_dir}/results.csv") if r["system"] in lj]
-    spent = all(r["stop"] == "budget" and int(float(r["charged"])) >= int(r["budget"]) for r in lj_rows if r["hit"] != "1")
-    audit.record(spent, TEX, "every LJ38 and LJ55 miss of the GOFEE table spent the budget", "spent",
-                 "spent" if spent else "stopped early")
-    audit.record({r["stop"] for r in lj_rows} <= {"hit", "budget"}, TEX, "no LJ38 or LJ55 run stopped at a wall cap",
-                 "hit budget", " ".join(sorted({r["stop"] for r in lj_rows})))
-    audit.said(TEX, "with no wall cap; every run that missed spent the budget.")
-    audit.said(TEX, "no run on these two clusters had a wall cap, and every run that missed spent the budget.")
-    rows = audit.rows(f"{gofee_dir}/results.csv")
-    heads = {r["head"][:8] for r in rows if r["head"] != "unknown"}
-    unknown = sum(r["head"] == "unknown" for r in rows)
-    audit.said(SI, f"were collected at {len(heads)} repository heads, which")
-    audit.said(SI, f"with the head unrecorded on {unknown} rows.")
-    versions = dict(line.split("=", 1) for line in audit.text(f"{gofee_dir}/versions.txt").split() if "=" in line)
-    audit.said(SI, f"The versions are ASE {versions['ase']} and AGOX {versions['agox']}.")
-    audit.said(f"{gofee_dir}/README.md", "use the same three arms and the same two-hour wall cap on every seed.")
-    audit.said(SI, "Six seeds, one core, budget in force calls, and a wall cap of 2 hours per run.")
-    other = [r for r in audit.rows(f"{gofee_dir}/asg2-summary.csv") if r["source"] == "measured"]
-    audit.cell(SI, "the other panel systems of the GOFEE table", "au55 cu38 cu12au26 sw10 tc10 tip4p8",
-               " ".join(dict.fromkeys(r["system"] for r in other)))
-
 
     # Constants of the definitions and of the priors, read from the source.
     preset = "src/methods/cluster_hopping/preset.rs"
@@ -4187,21 +3956,13 @@ def manuscript_new(audit: Audit) -> None:
         "python3 paper/jctc/scripts/gmin_table.py": "paper/jctc/scripts/gmin_table.py",
         "python3 paper/jctc/scripts/knockout_tables.py": "paper/jctc/scripts/knockout_tables.py",
         "python3 paper/jctc/scripts/water_rerun.py": "paper/jctc/scripts/water_rerun.py",
-        "bash scripts/ase_panel/enter_bench.sh --system lj38\n": "scripts/ase_panel/enter_bench.sh",
-        "bash scripts/ase_nonlj/enter_bench.sh\n": "scripts/ase_nonlj/enter_bench.sh",
+        "python3 paper/jctc/scripts/ase_table.py": "paper/jctc/scripts/ase_table.py",
         "python3 paper/jctc/scripts/water_h2h.py": "paper/jctc/scripts/water_h2h.py",
     }
     for command, path in commands.items():
         audit.record(command in text and (ROOT / path).exists(), SI, "the command names a script that exists",
                      command, path)
     audit.said("workflow/Snakefile", "rule gmin_panel:")
-    audit.said("scripts/ase_panel/enter_bench.sh", "lj38|lj55|lj98|lj104|lj150|au55")
-    audit.said("scripts/ase_nonlj/enter_bench.sh", "m38r6")
-    audit.said("scripts/ase_panel/enter_bench.sh", ': "${ASE_PANEL_REVISION:?')
-    audit.said("scripts/ase_panel/enter_bench.sh", "ROWS=${ASE_PANEL_ROWS:-$DEFAULT_ROWS}")
-    audit.said("scripts/ase_nonlj/enter_bench.sh", 'echo "keep existing $SYSTEM $ARM seed $SEED"')
-    audit.said(SI, "The ASE rows cannot be searched again from this repository.")
-    audit.said(SI, "\\path{bench/unreachable-revisions.csv} lists each revision with the rows that cite it.")
     audit.said("paper/jctc/scripts/water_h2h.py", 'command = f"gfn2_water_h2h {MOLECULES} {budget} {seed} {outdir.name}"')
     audit.said("paper/jctc/scripts/water_h2h.py", 'paper_dir = LOGS / f"anneal-paper4000-seed{seed}"')
     audit.said("paper/jctc/logs/water/crest-hexamer-seed0.log", "$ path start.xyz -T 1")
@@ -4364,25 +4125,6 @@ def revision_map_text(rows: list[dict[str, str]]) -> str:
     return buffer.getvalue()
 
 
-def au55_superseded(audit: Audit) -> None:
-    """Each row of rows.csv that rows-for-cluster.csv replaces is listed, and no other row is."""
-    old = audit.rows("bench/ase-au55/rows.csv")
-    new = {
-        (r["arm"], r["seed"]): r
-        for r in audit.rows("bench/ase-au55/rows-for-cluster.csv")
-        if r["code_revision"].startswith("fc1af066")
-    }
-    listed = audit.rows("bench/ase-au55/superseded.csv")
-    want = {(r["system"], r["arm"], r["seed"], r["code_revision"], "bench/ase-au55/rows-for-cluster.csv",
-             new[(r["arm"], r["seed"])]["code_revision"]) for r in old
-            if r["arm"] != "recommended" and not r["code_revision"].startswith("1ce3ab64")}
-    got = {(r["system"], r["arm"], r["seed"], r["code_revision"], r["superseded_by_file"], r["superseded_by_revision"])
-           for r in listed if r["host"] == "bench"}
-    audit.record(got == want, "bench/ase-au55/superseded.csv", "the superseded rows are the replaced ones",
-                 f"{len(want)} rows", f"{len(got)} rows")
-    audit.said("bench/ase-au55/README.md", "`superseded.csv` lists each of them.")
-
-
 def revision_map(audit: Audit) -> None:
     """The committed map from each unreachable revision to its panel rows equals the rows."""
     rows = revision_map_rows(audit)
@@ -4400,29 +4142,6 @@ BRITISH = re.compile(r"\b\w*(?:optimis|neighbour|initialis|symmetris|normalis|mi
 
 def manuscript_followups(audit: Audit) -> None:
     """The cluster-preset hits, the wall-cap reconciliation, the GMIN settings, and the M55 disclosures."""
-    ase = ase_groups(audit)
-    _panel, gmin = gmin_panel_groups(audit)
-    names = {"lj38": "LJ\\(_{38}\\)", "lj55": "LJ\\(_{55}\\)", "lj98": "LJ\\(_{98}\\)", "lj104": "LJ\\(_{104}\\)",
-             "lj150": "LJ\\(_{150}\\)", "au55": "Au\\(_{55}\\)"}
-    hits = [hits_of(ase[(system, "anneal")]) for system in ASE_PANEL]
-    audit.said(SI, f"Its hits are {', '.join(map(str, hits[:-1]))}, and {hits[-1]} of 12 on "
-                    f"{', '.join(names[s] for s in ASE_PANEL[:-1])}, and {names['au55']}.")
-    audit.cell(SI, "cluster-preset arm rows per system", "12", float(len(ase[("lj38", "anneal")])))
-
-    summary = audit.rows("bench/ase-recommended/summary.csv")
-    caps = {r["system"]: float(r["wall_cap_s"]) for r in summary if r["arm"] == "recommended"}
-    gofee = {(r["system"], r["arm"]): r for r in audit.rows("bench/ase-gofee-h2h/summary.csv")}
-    mh38, mh55 = gofee[("lj38", "ase_mh")], gofee[("lj55", "ase_mh")]
-    audit.said(TEX, f"and ASE minima hopping LJ\\(_{{38}}\\) on {mh38['hits']} of {mh38['n']} and LJ\\(_{{55}}\\) on "
-                    f"{mh55['hits']} of {mh55['n']}, in median walls of {float(mh38['wall_median_s']):.1f}~s and "
-                    f"{float(mh55['wall_median_s']):.1f}~s, far beyond the caps of {caps['lj38']:.3f} and "
-                    f"{caps['lj55']:.3f}~s of Table~\\ref{{tab:ase}}.")
-    audit.cell(TEX, "gofee ASE MH LJ38 and LJ55 are uncapped", "0 0", f"{mh38['capped']} {mh55['capped']}")
-    audit.cell(TEX, "gofee walls exceed the panel caps", "1", float(float(mh38["wall_median_s"]) > caps["lj38"]
-                                                                  and float(mh55["wall_median_s"]) > caps["lj55"]))
-    for system in ("lj38", "lj55"):
-        audit.cell(TEX, f"tab:ase ASE MH {system} hits", "0", float(hits_of(ase[(system, "ase_mh")])))
-
     sym = audit.rows("paper/jctc/data/lj75_gmin/gmin-lj75-sym-starts-1-200.csv")
     calls = sorted(int(float(r["force_to_hit"])) for r in sym if r["hit"].strip().lower() in ("1", "true", "yes"))
     audit.record(len(calls) == len(sym), TEX, "symmetrized GMIN hits LJ75 on every seed", f"{len(sym)}", f"{len(calls)}")
@@ -4450,7 +4169,7 @@ def manuscript_followups(audit: Audit) -> None:
     audit.record(not (ROOT / "src/methods/cluster_hopping/mackay_cap_tests.rs").exists(),
                  "src/methods/cluster_hopping/mackay_cap_tests.rs", "Mackay cap test module is removed",
                  "absent", "present" if (ROOT / "src/methods/cluster_hopping/mackay_cap_tests.rs").exists() else "absent")
-    audit.said("bench/ase-nonlj/README.md", "Anneal `recommended` uses `Config::recommended_with_scales`")
+    audit.said("paper/jctc/data/ase_rerun/morse/PROVENANCE", "source bench/ase-nonlj/rerun-20261119/rows.csv")
     audit.record("two-shell icosahedron" not in audit.text(TEX), TEX, "cap-disclosure prose is removed",
                  "absent", "present" if "two-shell icosahedron" in audit.text(TEX) else "absent")
     audit.record("largest cap" not in audit.text(TEX), TEX, "cap-size prose is removed",
@@ -4467,7 +4186,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
     for check in (paired_statistics, manuscript_ablation, selection_tables, manuscript_retry, manuscript_gmin, manuscript_tip4p, manuscript_hexamer,
                   manuscript_cross_field, supporting_information, release, paper_0120, gad_published, openconf,
                   head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, lj_large, bench_prose,
-                  manuscript_ase, manuscript_knockouts, manuscript_priors, panel_references, generated_tables, supporting_gmin, supporting_numbers, au55_superseded, manuscript_new, manuscript_followups, cover_letter, science_claims):
+                  manuscript_ase, manuscript_knockouts, manuscript_priors, panel_references, generated_tables, supporting_gmin, supporting_numbers, manuscript_new, manuscript_followups, cover_letter, science_claims):
         check(audit)
     if write_map:
         (ROOT / REVISION_MAP).write_text(revision_map_text(revision_map_rows(audit)))

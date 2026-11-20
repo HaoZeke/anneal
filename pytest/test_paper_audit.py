@@ -45,7 +45,6 @@ CHECKS = (
     audit_mod.generated_tables,
     audit_mod.supporting_gmin,
     audit_mod.supporting_numbers,
-    audit_mod.au55_superseded,
     audit_mod.manuscript_new,
     audit_mod.manuscript_followups,
     audit_mod.cover_letter,
@@ -175,11 +174,22 @@ def test_a_drifted_table_cell_is_reported():
     assert [r[2] for r in audit.drifts()] == ["median calls"]
 
 
+def test_ase_rows_of_a_non_ancestor_are_reported(monkeypatch):
+    audit = audit_mod.Audit()
+    path = f"{audit_mod.ASE_DATA}/lj98/rows.csv"
+    rows = [dict(r) for r in audit.rows(path)]
+    rows[0]["code_revision"] = "9a30f3190b3bb7040c675a904f8388eb68224151"
+    audit.read[path] = rows
+    audit_mod.manuscript_ase(audit)
+    assert "every row is the PROVENANCE ancestor" in {r[2] for r in audit.drifts()}
+
+
 def test_a_drifted_ase_table_cell_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "& 246.5 & 10/12 & 0/12 & 0/12 & 0 & 12 &"
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, "& 246.5 & 11/12 & 0/12 & 0/12 & 0 & 12 &")
+    old = "& 289.0 & 7/12 & 0/12 & 0/12 & 0 & 12 &"
+    assert tex.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "& 289.0 & 8/12 & 0/12 & 0/12 & 0 & 12 &")
     audit_mod.manuscript_ase(audit)
     audit_mod.generated_tables(audit)
     assert sorted(r[2] for r in audit.drifts()) == ["recommended hits", "tab:ase is the summariser's block"]
@@ -188,8 +198,9 @@ def test_a_drifted_ase_table_cell_is_reported():
 def test_a_drifted_morse_ase_table_cell_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "& 54.135 & 0.037 & 0.037 \\\\"
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, "& 54.135 & 0.037 & 0.37 \\\\")
+    old = "& 47.556 & \\(1.3\\times 10^{-3}\\) & \\(1.3\\times 10^{-3}\\) \\\\"
+    assert tex.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "& 47.556 & \\(1.3\\times 10^{-3}\\) & 0.37 \\\\")
     audit_mod.manuscript_ase(audit)
     audit_mod.generated_tables(audit)
     assert sorted(r[2] for r in audit.drifts()) == ["Fisher p against ase_mh", "tab:ase-morse is the summariser's block"]
@@ -198,7 +209,7 @@ def test_a_drifted_morse_ase_table_cell_is_reported():
 def test_a_rank_test_in_the_ase_section_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "Minima hopping reached the cap on every run"
+    old = "ASE minima hopping is wall-capped"
     assert old in tex
     audit.text_cache[audit_mod.TEX] = tex.replace(old, "A Mann--Whitney test is not run. " + old)
     audit_mod.manuscript_ase(audit)
@@ -934,12 +945,12 @@ def test_a_process_note_in_the_cover_letter_is_reported():
     assert [r[2] for r in audit.drifts()] == ["the cover letter carries no process note (being run)"]
 
 
-def test_a_drifted_equal_call_count_is_reported():
+def test_a_drifted_ase_call_range_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "this code had reached the minimum on 12, 8, 0, 1, and 1 of the 12"
+    old = "stopped at the cap after 3933 to 20950 force calls"
     assert old in audit_mod.collapse(tex)
-    audit.text_cache[audit_mod.TEX] = audit_mod.collapse(tex).replace(old, old.replace("12, 8,", "12, 9,"))
+    audit.text_cache[audit_mod.TEX] = audit_mod.collapse(tex).replace(old, old.replace("3933", "3934"))
     audit_mod.manuscript_ase(audit)
     assert [r[2] for r in audit.drifts()] == ["prose"]
 
