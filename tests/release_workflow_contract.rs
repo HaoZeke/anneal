@@ -7,6 +7,16 @@ fn crate_publication_keeps_cargo_verification_enabled() {
 }
 
 #[test]
+fn crate_publication_uses_the_canonical_version_and_explicit_package() {
+    let workflow = include_str!("../.github/workflows/release.yml");
+    let publish = workflow_job(workflow, "publish-crate");
+
+    assert!(publish.contains("anneal_version.package_version()"));
+    assert!(publish.contains("cargo publish --locked -p anneal-core"));
+    assert!(!publish.contains("grep -m1 '^version'"));
+}
+
+#[test]
 fn crate_publication_has_a_registry_fallback_for_git_dependencies() {
     let manifest = include_str!("../Cargo.toml");
     let workflow = include_str!("../.github/workflows/ci.yml");
