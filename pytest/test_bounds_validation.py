@@ -39,7 +39,8 @@ DRIVERS = [
 ]
 
 # landfold takes the bounds of a sketch-map embedding, not of a search box.
-NOT_BOXES = {"landfold", "landfold_book"}
+# make_bounds builds the box and is covered by the Bounds constructor tests.
+NOT_BOXES = {"landfold", "landfold_book", "make_bounds"}
 NEEDS_GRADIENT = {"box_ensemble_optimize"}
 
 LOW = np.full(2, -1.0)
@@ -133,3 +134,44 @@ def test_basin_bias_rejects_a_state_of_the_wrong_length(n_points):
         with pytest.raises(anneal.InvalidArgumentError, match="length"):
             bias.deposit(bad, 1.0)
     assert bias.n_basins == 1
+
+
+BOUNDS_CASES = [
+    ("sides of different lengths", LOW, np.ones(3), 1e-6, "length"),
+    ("an inverted pair", HIGH, LOW, 1e-6, r"low\[0\]"),
+    ("a nan low", np.array([-1.0, np.nan]), HIGH, 1e-6, r"low\[1\]"),
+    ("a nan high", LOW, np.array([np.nan, 1.0]), 1e-6, r"high\[0\]"),
+    ("a negative slack", LOW, HIGH, -1e-9, "slack"),
+    ("a nan slack", LOW, HIGH, float("nan"), "slack"),
+]
+
+
+@pytest.mark.parametrize(
+    ("low", "high", "slack", "message"),
+    [case[1:] for case in BOUNDS_CASES],
+    ids=[case[0] for case in BOUNDS_CASES],
+)
+def test_the_bounds_constructor_raises_bounds_error(low, high, slack, message):
+    with pytest.raises(anneal.BoundsError, match=message) as caught:
+        anneal.Bounds(low, high, slack)
+    assert isinstance(caught.value, ValueError)
+
+
+def test_a_valid_box_is_the_class_the_objective_takes():
+    box = anneal.Bounds(LOW, HIGH, 1e-9)
+    assert isinstance(box, anneal.Bounds)
+    assert isinstance(box, core.Bounds)
+    assert issubclass(core.Bounds, anneal.Bounds)
+    assert box.dims == 2
+    assert box.slack == 1e-9
+    assert box.contains(np.zeros(2))
+    assert not box.contains(np.full(2, 2.0))
+    objective = core.PyObjective(f, box)
+    assert objective.dim == 2
+
+
+def test_a_box_of_zero_width_and_an_infinite_side_are_built():
+    box = anneal.Bounds(np.array([0.0, -np.inf]), np.array([0.0, np.inf]))
+    assert box.dims == 2
+    assert box.slack == 1e-6
+    assert box.contains(np.array([0.0, 1e300]))

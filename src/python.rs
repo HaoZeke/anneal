@@ -96,23 +96,71 @@ fn validate_box_domain(low: &[f64], high: &[f64], allow_fixed: bool) -> PyResult
     Ok(())
 }
 
-/// Build a box for a driver, rejecting the inputs that make `Bounds::new`
-/// panic. A panic would surface as `PanicException`, a `BaseException`.
-fn checked_bounds(low: Vec<f64>, high: Vec<f64>, slack: f64) -> PyResult<Bounds<f64>> {
+/// Reject the inputs that make `Bounds::new` panic, in the order it checks
+/// them, and a coordinate that is not a number, which it accepts. A panic
+/// would surface as `PanicException`, a `BaseException`.
+fn check_bounds_arrays(low: &[f64], high: &[f64], slack: f64) -> PyResult<()> {
     if low.len() != high.len() {
-        return Err(bounds_error("low and high must have the same length"));
+        return Err(bounds_error(format!(
+            "low and high must have the same length (got {} and {})",
+            low.len(),
+            high.len()
+        )));
     }
-    if let Some(i) = low.iter().zip(&high).position(|(&lo, &hi)| !(lo <= hi)) {
+    if slack.is_nan() || slack < 0.0 {
+        return Err(bounds_error(format!(
+            "slack must be a number that is not negative (got {slack})"
+        )));
+    }
+    if let Some(i) = low
+        .iter()
+        .zip(high)
+        .position(|(&lo, &hi)| lo.is_nan() || hi.is_nan())
+    {
+        return Err(bounds_error(format!(
+            "low[{i}] and high[{i}] must be numbers (got {}, {})",
+            low[i], high[i]
+        )));
+    }
+    if let Some(i) = low.iter().zip(high).position(|(&lo, &hi)| lo > hi) {
         return Err(bounds_error(format!(
             "low[{i}] must not exceed high[{i}] (got {}, {})",
             low[i], high[i]
         )));
     }
+    Ok(())
+}
+
+/// Build a box for a driver.
+fn checked_bounds(low: Vec<f64>, high: Vec<f64>, slack: f64) -> PyResult<Bounds<f64>> {
+    check_bounds_arrays(&low, &high, slack)?;
     Ok(Bounds::new(
         Array1::from_vec(low),
         Array1::from_vec(high),
         slack,
     ))
+}
+
+/// Build the `Bounds` that `anneal.Bounds(low, high, slack)` returns.
+///
+/// `eindir-core` 0.6.0 builds a box with an assertion, so the arrays are
+/// checked here and the class is called only with arrays it accepts.
+#[pyfunction]
+#[pyo3(signature = (low, high, slack = 1e-6))]
+fn make_bounds<'py>(
+    py: Python<'py>,
+    low: &Bound<'py, PyAny>,
+    high: &Bound<'py, PyAny>,
+    slack: f64,
+) -> PyResult<Bound<'py, PyAny>> {
+    let low_view: PyReadonlyArray1<'_, f64> = low.extract()?;
+    let high_view: PyReadonlyArray1<'_, f64> = high.extract()?;
+    check_bounds_arrays(
+        &low_view.as_array().to_vec(),
+        &high_view.as_array().to_vec(),
+        slack,
+    )?;
+    py.get_type::<EindirPyBounds>().call1((low, high, slack))
 }
 
 fn py_view1<'py>(py: Python<'py>, x: ArrayView1<f64>) -> Bound<'py, PyArray1<f64>> {
@@ -4666,6 +4714,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyClusterConfig>()?;
     m.add_class::<PyLedger>()?;
     m.add_class::<EindirPyBounds>()?;
+    m.add_function(wrap_pyfunction!(make_bounds, m)?)?;
     m.add_class::<PyObjective>()?;
     m.add_function(wrap_pyfunction!(cluster_search, m)?)?;
     m.add_function(wrap_pyfunction!(quench, m)?)?;

@@ -97,10 +97,14 @@ derives from =BaseException= and skips =except Exception=.
 =BasinBias.potential= and =BasinBias.deposit= take a state of =3 * n_points=
 coordinates and raise =InvalidArgumentError= for any other length.
 
-The =Bounds= class is built by the =eindir-core= crate. Its constructor still
-panics on sides of different lengths, an inverted pair or a negative =slack=.
-Check the arrays before you build one, or pass =low= and =high= to the
-search functions, which check them.
+=anneal.Bounds(low, high, slack=1e-6)= checks its arrays before it builds the
+box, which is the =Bounds= of the =eindir-core= crate. Sides of different
+lengths, an inverted pair, a coordinate that is not a number and a negative or
+NaN =slack= raise =BoundsError=. A pair of equal values is a face of zero
+width, and an infinite side is allowed. =eindir-core= 0.6.0 asserts instead,
+so =anneal._core.Bounds= called directly still panics on those inputs.
+=anneal.Bounds= is a class for =isinstance= and =issubclass=, and its value
+is what =PyObjective= takes.
 
 #+begin_src python
 import numpy as np
@@ -119,6 +123,13 @@ except anneal.BoundsError:
     pass
 else:
     raise AssertionError("an inverted box must raise")
+
+try:
+    anneal.Bounds(np.ones(2), np.zeros(2))
+except anneal.BoundsError:
+    pass
+else:
+    raise AssertionError("an inverted Bounds must raise")
 
 bias = anneal.BasinBias(3)
 try:

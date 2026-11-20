@@ -53,6 +53,7 @@ __all__ = [
     "LandfoldMap",
     "Ledger",
     "low_discrepancy_points",
+    "make_bounds",
     "NoFiniteStartError",
     "osa_acceptance_rate",
     "pilot_draws_qmc",
@@ -175,6 +176,8 @@ class Bounds:
     def dims(self) -> int: ...
     @property
     def slack(self) -> float: ...
+
+def make_bounds(low: _Vector, high: _Vector, slack: float = 1e-6) -> Bounds: ...
 
 @final
 class PyObjective:

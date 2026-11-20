@@ -35,6 +35,7 @@ Exception is scored as the worst value.
 """
 
 import json
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -42,7 +43,7 @@ from anneal._core import (
     AnnealError,
     BasinBias,
     Boltzmann,
-    Bounds,
+    Bounds as _CoreBounds,
     BoundsError,
     Config,
     ConfigError,
@@ -61,6 +62,7 @@ from anneal._core import (
     __version__,
     cluster_search as _core_cluster_search,
     energy_hits,
+    make_bounds as _make_bounds,
     low_discrepancy_points as _core_low_discrepancy_points,
     pilot_draws_qmc as _core_pilot_draws_qmc,
     polish as _core_polish,
@@ -100,6 +102,34 @@ from anneal.tvm_ffi import (
     tvm_ffi_tensor_metadata,
     tvm_ffi_tensors_from_history,
 )
+
+
+if TYPE_CHECKING:
+    from anneal._core import Bounds as Bounds
+else:
+
+    class _BoundsMeta(type):
+        """Build the box through ``make_bounds`` and stay the class it returns."""
+
+        def __call__(cls, low, high, slack=1e-6):
+            return _make_bounds(low, high, slack)
+
+        def __instancecheck__(cls, instance):
+            return isinstance(instance, _CoreBounds)
+
+        def __subclasscheck__(cls, subclass):
+            return issubclass(subclass, _CoreBounds)
+
+    class Bounds(metaclass=_BoundsMeta):
+        """A box ``low <= x <= high`` with a ``slack`` on its faces.
+
+        A pair of different lengths, an inverted pair, a coordinate that is
+        not a number or a negative or NaN ``slack`` raises ``BoundsError``.
+        The value is the ``Bounds`` of the ``eindir-core`` crate, so it is
+        what ``PyObjective`` takes.
+        """
+
+        __slots__ = ()
 
 
 def _flat(value):
