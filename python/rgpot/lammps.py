@@ -190,7 +190,7 @@ class FixExternal:
         ):
             raise ValueError(
                 f"{type(potential).__name__} is a periodic potential, but the "
-                "LAMMPS box is non-periodic in every direction (boundary f f f), "
+                "LAMMPS box is non-periodic in every direction (e.g. boundary f f f), "
                 "so the box extents would be passed as a periodic cell and the "
                 "energy would be wrong. Use a non-periodic potential such as "
                 "rgpot.LJClusterPot, or pass allow_periodic_on_free_box=True "
