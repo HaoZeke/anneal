@@ -116,6 +116,7 @@ def build(tree: Path, destination: Path) -> dict[str, object]:
     checked(
         [
             "cargo",
+            "+1.88.0",
             "build",
             "--release",
             "--locked",
