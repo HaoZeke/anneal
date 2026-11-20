@@ -17,26 +17,20 @@ American Chemical Society
 \vspace{1em}
 \noindent Dear Editor,
 
-We ask you to consider the enclosed manuscript, ``Seed-paired knockouts of
-a basin-hopping search: structure priors, templates, stall rules, and the
-length unit, with comparisons to GMIN, CREST, and the Atomic Simulation
-Environment,'' as a Full Article.
+We ask you to consider the enclosed manuscript, ``Removing the structure
+templates of a basin-hopping search: a seed-paired knockout, with comparisons
+to GMIN, CREST, and the Atomic Simulation Environment,'' as a Full Article.
 
 This submission replaces the preprint arXiv:2302.02811, deposited in 2023
 under the title ``Unified Software Design Patterns for Simulated Annealing.''
 The title and the content have changed.
 
-The manuscript asks which parts of one basin-hopping code change how many
-seeds reach the global minimum.
-Each part that has been run with and without it, on the same seeds from the
-same starts, is reported as a paired knockout with the exact McNemar test:
-the structure priors, the structure templates, a restart on a plateau, the
-length unit of the preset, and the choice among the moves.
-Switching off the structure priors lowers the hits on six Cu--Au and Pt--Cu
-Gupta alloys, removing the structure templates lowers them on a Morse
-cluster, and measuring lengths in units of the pair minimum raises them on
-another; a restart on a plateau and a Thompson choice among the moves change
-no cluster significantly.
+The manuscript asks whether one part of a basin-hopping code changes how
+many seeds reach the global minimum.
+The structure templates, run with and without them at a revision and its
+child in the history of the code, on the same seeds from the same starts, are
+reported as a paired knockout with the exact McNemar test: removing them
+lowers the hits on a Morse cluster.
 Parts of the search with no such run are described as design, with no claim
 about their effect.
 
