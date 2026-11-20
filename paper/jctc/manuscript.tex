@@ -278,9 +278,16 @@ The walker has stalled when
 h - h_{\star} > 1000.
 \label{eq:rigid}
 \end{equation}
-It then moves to a lower minimum it has already quenched.
-If the archive holds nothing lower, it quenches a new rigid start and
-stands there.
+Its archive keeps the eight lowest distinct minima among its start and the
+quenched minima it has accepted, and the lowest minimum of the run joins it
+at every stall.
+At a stall the walker moves to the lowest archived minimum that is neither
+the one it stands on nor one of its last four stall destinations.
+If no archived minimum qualifies, the walker stays where it is; no new
+start is drawn.
+In either case \(h_\star\) becomes \(h\), and the next hop that draws from
+the move library proposes, once, the relocation of one molecule onto a
+vacant contact, unless a new lowest minimum comes first.
 
 \subsection{Basin bias, tabu, and screens}
 \label{sec:accept}

@@ -1496,6 +1496,41 @@ def count_gates(audit: Audit, lj_rev: str) -> None:
                      "absent", "absent" if phrase not in collapse(audit.text(TEX)) else "present")
 
 
+def rigid_stall(audit: Audit) -> None:
+    """The rigid-walker stall of the Methods against rigid_quench.rs, stall_archive.rs and the hop loop."""
+    quench = audit.text("src/methods/rigid_quench.rs")
+    archive = audit.text("src/methods/stall_archive.rs")
+    hop = audit.text("src/methods/cluster_hopping.rs")
+    for path, label, pattern, shown in (
+        ("src/methods/rigid_quench.rs", "rigid stall hops", r"const STAGNATION_HOPS: usize = (\d+);", "1000"),
+        ("src/methods/stall_archive.rs", "stall archive seats", r"pub const SEATS: usize = (\d+);", "8"),
+        ("src/methods/stall_archive.rs", "barred stall destinations", r"pub const MEMORY: usize = (\d+);", "4"),
+    ):
+        found = re.search(pattern, quench if path.endswith("rigid_quench.rs") else archive)
+        audit.cell(path, label, shown, float(found.group(1)) if found else None)
+    for path, fragment in (
+        ("src/methods/rigid_quench.rs", "hops.saturating_sub(hops_at_lowest) > STAGNATION_HOPS"),
+        ("src/methods/stall_archive.rs", "A `None` result means every kept minimum is the walker's own or\n    /// barred, so the walker stays put."),
+        ("src/methods/stall_archive.rs", ".filter(|seat| !same_minimum(seat.energy, here))"),
+        ("src/methods/cluster_hopping.rs", "if let Some((energy, state)) = stall_archive.escape(e)"),
+        ("src/methods/cluster_hopping.rs", "MoveLibrary::RigidBody { relocate: true, .. }"),
+        ("src/methods/cluster_hopping.rs", "trial = ClusterMove::RigidRelocate {"),
+    ):
+        text = {"src/methods/rigid_quench.rs": quench, "src/methods/stall_archive.rs": archive}.get(path, hop)
+        audit.record(fragment in text, path, "the rigid stall reads as the Methods say", fragment,
+                     "present" if fragment in text else "absent")
+    audit.said(TEX, "\\begin{equation} h - h_{\\star} > 1000. \\label{eq:rigid} \\end{equation}")
+    audit.said(TEX, "Its archive keeps the eight lowest distinct minima among its start and the quenched minima it "
+                    "has accepted, and the lowest minimum of the run joins it at every stall.")
+    audit.said(TEX, "nor one of its last four stall destinations.")
+    audit.said(TEX, "If no archived minimum qualifies, the walker stays where it is; no new start is drawn.")
+    audit.said(TEX, "proposes, once, the relocation of one molecule onto a vacant contact, unless a new lowest "
+                    "minimum comes first.")
+    for gone in ("quenches a new rigid start", "moves to a lower minimum it has already quenched"):
+        audit.record(gone not in collapse(audit.text(TEX)), TEX, f"retired rigid-stall wording stays out: {gone}",
+                     "absent", "absent" if gone not in collapse(audit.text(TEX)) else "present")
+
+
 PRIORS = ("soap", "reseed", "growth", "core", "handover", "motif")
 PRIOR_CONFIG = "src/methods/cluster_hopping/config.rs"
 
@@ -3723,7 +3758,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
     audit = Audit()
     for check in (paired_statistics, manuscript_gmin, withdrawn_benchmarks, supporting_information, release, paper_0120, gad_published, openconf,
                   head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, lj_large, bench_prose,
-                  manuscript_ase, manuscript_knockouts, manuscript_priors, panel_references, generated_tables, supporting_numbers, manuscript_new, manuscript_followups, cover_letter, science_claims):
+                  manuscript_ase, manuscript_knockouts, manuscript_priors, panel_references, generated_tables, supporting_numbers, manuscript_new, manuscript_followups, cover_letter, science_claims, rigid_stall):
         check(audit)
     if write_map:
         (ROOT / REVISION_MAP).write_text(revision_map_text(revision_map_rows(audit)))
