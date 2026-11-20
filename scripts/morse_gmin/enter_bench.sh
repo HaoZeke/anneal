@@ -12,6 +12,5 @@ if ! grep -Eq '(^|[[:space:]])bench([[:space:]]|$)' /etc/hosts; then
   echo '127.0.0.1 bench' | sudo -n tee -a /etc/hosts >/dev/null
 fi
 
-export LJOS_SEAT=anneal-paper
 exec sudo -n unshare --uts sh -c \
-  'hostname bench; export LJOS_SEAT=anneal-paper; exec sudo -u ubuntu /usr/bin/python3 -u '"$HERE"'/run_panel.py --root '"$ROOT"' "$@"' _ "$@"
+  'hostname bench; exec sudo -u ubuntu /usr/bin/python3 -u '"$HERE"'/run_panel.py --root '"$ROOT"' "$@"' _ "$@"
