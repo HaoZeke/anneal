@@ -149,10 +149,7 @@ jobs:
         run: |
           python -m venv .sdist-venv
           .sdist-venv/bin/python -m pip install dist/anneal-*.tar.gz
-          test "$(.sdist-venv/bin/python -c \
-            'import anneal, os; print(os.path.relpath(anneal.__file__))')" \
-            != python/anneal/__init__.py
-          .sdist-venv/bin/python -c 'import anneal, anneal._core; print(anneal.__version__)'
+          .sdist-venv/bin/python scripts/check_installed_anneal.py .sdist-venv
 
       - uses: actions/upload-artifact@v4
         with:
@@ -221,7 +218,9 @@ jobs:
 
   publish-crate:
     name: Publish anneal-core to crates.io
-    needs: [native-libs]
+    # A crates.io upload cannot be undone. It waits for the Python artifacts
+    # so that no release publishes there while PyPI cannot.
+    needs: [native-libs, sdist, wheels]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:

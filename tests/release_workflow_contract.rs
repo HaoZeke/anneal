@@ -1,19 +1,206 @@
-#[test]
-fn crate_publication_keeps_cargo_verification_enabled() {
-    let workflow = include_str!("../.github/workflows/release.yml");
+use serde_yaml_ng::Value;
+use std::collections::BTreeSet;
+use std::process::Command;
 
-    assert!(workflow.contains("cargo publish"));
-    assert!(!workflow.contains("--no-verify"));
+/// The release workflow, parsed. Every release contract below reads this
+/// tree, so a step that moves, gains an `if:` or swallows its exit status
+/// is seen as that and not as a string that happens to remain.
+fn release() -> Value {
+    serde_yaml_ng::from_str(include_str!("../.github/workflows/release.yml"))
+        .expect("release.yml parses as YAML")
+}
+
+fn job<'a>(workflow: &'a Value, name: &str) -> &'a Value {
+    workflow["jobs"]
+        .get(name)
+        .unwrap_or_else(|| panic!("release.yml has no job {name}"))
+}
+
+fn steps(job: &Value) -> &[Value] {
+    job["steps"].as_sequence().expect("job steps")
+}
+
+/// The one step called `name` and its position in the job.
+fn step<'a>(job: &'a Value, name: &str) -> (usize, &'a Value) {
+    let found: Vec<_> = steps(job)
+        .iter()
+        .enumerate()
+        .filter(|(_, step)| step["name"].as_str() == Some(name))
+        .collect();
+    assert_eq!(found.len(), 1, "exactly one step named {name:?}");
+    found[0]
+}
+
+/// The position of the first step that runs the action `prefix`.
+fn first_use(job: &Value, prefix: &str) -> usize {
+    steps(job)
+        .iter()
+        .position(|step| {
+            step["uses"]
+                .as_str()
+                .is_some_and(|uses| uses.starts_with(prefix))
+        })
+        .unwrap_or_else(|| panic!("no step uses {prefix}"))
+}
+
+/// The non-blank lines of a step's script, trimmed.
+fn script(step: &Value) -> Vec<&str> {
+    step["run"]
+        .as_str()
+        .unwrap_or_else(|| panic!("step {:?} has no run", step["name"]))
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+/// A step that cannot be skipped, and whose failure fails the job.
+fn assert_binding(step: &Value) {
+    let name = &step["name"];
+    for key in ["if", "continue-on-error"] {
+        assert!(step.get(key).is_none(), "step {name:?} sets {key}");
+    }
+}
+
+/// A job whose failure fails every job that needs it.
+fn assert_blocking(workflow: &Value, name: &str) {
+    for key in ["if", "continue-on-error"] {
+        assert!(
+            job(workflow, name).get(key).is_none(),
+            "job {name} sets {key}"
+        );
+    }
+}
+
+fn needs(job: &Value) -> BTreeSet<&str> {
+    match &job["needs"] {
+        Value::String(one) => BTreeSet::from([one.as_str()]),
+        Value::Sequence(many) => many.iter().filter_map(Value::as_str).collect(),
+        other => panic!("needs is {other:?}"),
+    }
+}
+
+/// Every line of every script in the workflow, with its job.
+fn every_script_line(workflow: &Value) -> Vec<(String, String)> {
+    let mut lines = Vec::new();
+    for (name, job) in workflow["jobs"].as_mapping().expect("jobs") {
+        for step in steps(job) {
+            if step["run"].is_string() {
+                for line in script(step) {
+                    lines.push((name.as_str().unwrap().to_owned(), line.to_owned()));
+                }
+            }
+        }
+    }
+    lines
 }
 
 #[test]
-fn crate_publication_uses_the_canonical_version_and_explicit_package() {
-    let workflow = include_str!("../.github/workflows/release.yml");
-    let publish = workflow_job(workflow, "publish-crate");
+fn crate_publication_keeps_cargo_verification_enabled() {
+    let workflow = release();
+    let lines = every_script_line(&workflow);
 
-    assert!(publish.contains("anneal_version.package_version()"));
-    assert!(publish.contains("cargo publish --locked -p anneal-core"));
-    assert!(!publish.contains("grep -m1 '^version'"));
+    assert!(
+        lines
+            .iter()
+            .any(|(_, line)| line.starts_with("cargo publish"))
+    );
+    for (name, line) in lines {
+        assert!(!line.contains("--no-verify"), "job {name}: {line}");
+    }
+}
+
+#[test]
+fn crate_publication_publishes_anneal_core_alone_at_the_canonical_version() {
+    let workflow = release();
+    let publish = job(&workflow, "publish-crate");
+    let (_, upload) = step(publish, "cargo publish");
+    let lines = script(upload);
+
+    // One cargo publish in the job, and it is the last command of the step,
+    // so nothing before it can stand in for it or add a second package.
+    let publishes: Vec<_> = steps(publish)
+        .iter()
+        .filter(|step| step["run"].is_string())
+        .flat_map(script)
+        .filter(|line| line.contains("cargo publish"))
+        .collect();
+    assert_eq!(publishes, ["cargo publish --locked -p anneal-core"]);
+    assert_eq!(lines.last().copied(), publishes.first().copied());
+
+    // The probe asks crates.io for the same crate it then publishes.
+    let probe = lines
+        .iter()
+        .position(|line| line.contains("curl"))
+        .expect("crates.io probe");
+    assert!(
+        lines[probe].contains("https://crates.io/api/v1/crates/anneal-core/${ver}"),
+        "{}",
+        lines[probe]
+    );
+    assert!(probe < lines.len() - 1, "probe runs before the publish");
+
+    // The version both use is what the repository says, not what the text
+    // of the command looks like.
+    let ver = lines
+        .iter()
+        .find(|line| line.starts_with("ver=$("))
+        .expect("ver assignment");
+    assert!(
+        ver.contains("anneal_version.package_version()"),
+        "the version comes from the canonical module: {ver}"
+    );
+    let output = Command::new("bash")
+        .arg("-c")
+        .arg(format!("set -euo pipefail; {ver}; printf %s \"$ver\""))
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("bash runs the version command");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        env!("CARGO_PKG_VERSION")
+    );
+}
+
+#[test]
+fn release_tags_match_every_public_package_version() {
+    let workflow = release();
+    let (_, validate) = step(
+        job(&workflow, "validate-release"),
+        "Validate release metadata",
+    );
+    let lines = script(validate);
+
+    assert_binding(validate);
+    assert!(lines.contains(&"set -euo pipefail"));
+    for check in [
+        r#"test "$cargo_version" = "$python_version""#,
+        r#"test "$cargo_version" = "$citation_version""#,
+        r#"test "${GITHUB_REF_NAME#v}" = "$cargo_version""#,
+    ] {
+        assert!(lines.contains(&check), "validation lacks {check}");
+    }
+    assert!(lines.iter().any(|line| line.starts_with("cargo_version=")
+        && line.contains("anneal_version.package_version()")));
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.starts_with("python_version=") && line.contains("pyproject.toml"))
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.starts_with("citation_version=") && line.contains("CITATION.cff"))
+    );
+    assert_blocking(&workflow, "validate-release");
+    for dependent in ["native-libs", "sdist", "wheels"] {
+        assert!(needs(job(&workflow, dependent)).contains("validate-release"));
+    }
 }
 
 #[test]
@@ -50,46 +237,182 @@ fn crate_publication_has_a_registry_fallback_for_git_dependencies() {
 }
 
 #[test]
-fn release_tags_match_every_public_package_version() {
-    let workflow = include_str!("../.github/workflows/release.yml");
-
-    assert!(workflow.contains("Validate release metadata"));
-    assert!(workflow.contains("${GITHUB_REF_NAME#v}"));
-    assert!(workflow.contains("Cargo.toml"));
-    assert!(workflow.contains("pyproject.toml"));
-    assert!(workflow.contains("CITATION.cff"));
-}
-
-#[test]
 fn native_release_builds_where_artifact_packaging_reads() {
-    let workflow = include_str!("../.github/workflows/release.yml");
-    let native = workflow_job(workflow, "native-libs");
+    let workflow = release();
+    let native = job(&workflow, "native-libs");
+    let (build_at, build) = step(native, "Build static + shared library");
+    let (package_at, package) = step(native, "Package artifacts");
+    let upload_at = first_use(native, "actions/upload-artifact");
 
-    assert!(native.contains(
-        "cargo build --release --features capi --target ${{ matrix.target }} --target-dir target"
-    ));
-    assert!(native.contains("target/${{ matrix.target }}/release/${{ matrix.static_lib }}"));
-    assert!(native.contains("target/${{ matrix.target }}/release/${{ matrix.shared_lib }}"));
+    assert_binding(build);
+    assert_binding(package);
+    assert!(build_at < package_at && package_at < upload_at);
+    assert_blocking(&workflow, "native-libs");
+
+    let build = script(build);
+    assert_eq!(build.len(), 1);
+    let compact = build[0].replace("${{ ", "${{").replace(" }}", "}}");
+    let words: Vec<&str> = compact.split_whitespace().collect();
+    assert_eq!(&words[..3], ["cargo", "build", "--release"]);
+    let value_of = |flag: &str| {
+        let at = words
+            .iter()
+            .position(|word| *word == flag)
+            .unwrap_or_else(|| panic!("{flag}"));
+        words[at + 1]
+    };
+    assert_eq!(value_of("--features"), "capi");
+    assert_eq!(value_of("--target"), "${{matrix.target}}");
+    let target_dir = value_of("--target-dir");
+
+    // The packager copies from the directory the build wrote to.
+    let package = script(package);
+    for library in ["static_lib", "shared_lib"] {
+        let from = format!(
+            "cp {target_dir}/${{{{ matrix.target }}}}/release/${{{{ matrix.{library} }}}} staging/lib/"
+        );
+        assert!(package.contains(&from.as_str()), "packaging lacks {from}");
+    }
 }
 
 #[test]
 fn release_installs_and_imports_the_built_sdist() {
-    let workflow = include_str!("../.github/workflows/release.yml");
-    let sdist = workflow_job(workflow, "sdist");
+    let workflow = release();
+    let sdist = job(&workflow, "sdist");
+    let (built_at, _) = step(sdist, "Build sdist");
+    let (install_at, install) = step(sdist, "Install and import sdist");
+    let upload_at = first_use(sdist, "actions/upload-artifact");
 
-    assert!(sdist.contains("python -m venv .sdist-venv"));
-    assert!(sdist.contains("pip install dist/anneal-*.tar.gz"));
-    assert!(sdist.contains("import anneal, anneal._core"));
-    assert!(sdist.contains("os.path.relpath(anneal.__file__)"));
+    assert_binding(install);
+    assert_blocking(&workflow, "sdist");
+    assert!(
+        built_at < install_at,
+        "the sdist is built before it is installed"
+    );
+    assert!(
+        install_at < upload_at,
+        "the sdist is installed before it is uploaded"
+    );
+
+    assert_eq!(
+        script(install),
+        [
+            "python -m venv .sdist-venv",
+            ".sdist-venv/bin/python -m pip install dist/anneal-*.tar.gz",
+            ".sdist-venv/bin/python scripts/check_installed_anneal.py .sdist-venv",
+        ]
+    );
+}
+
+/// The guard the sdist step runs, against stand-ins for an installed package
+/// and for the places an import could wrongly come from.
+#[test]
+fn the_sdist_guard_accepts_only_a_package_installed_in_the_venv() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let venv = temp.path().join(".sdist-venv");
+    let site = venv.join("lib/python3/site-packages");
+    let loose = venv.join("lib/python3/loose");
+    let source = temp.path().join("checkout/python");
+    for dir in [&site, &loose, &source] {
+        let package = dir.join("anneal");
+        std::fs::create_dir_all(&package).expect("package dir");
+        std::fs::write(package.join("__init__.py"), "__version__ = '9.9.9'\n").expect("init");
+        std::fs::write(package.join("_core.py"), "").expect("core");
+    }
+    let guard = |from: &std::path::Path| {
+        Command::new("python3")
+            .args(["scripts/check_installed_anneal.py"])
+            .arg(&venv)
+            .env("PYTHONPATH", from)
+            .env_remove("PYTHONHOME")
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .output()
+            .expect("python3 runs the guard")
+    };
+
+    let installed = guard(&site);
+    assert!(
+        installed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&installed.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&installed.stdout).trim(), "9.9.9");
+    for (name, from) in [
+        ("a source tree", &source),
+        ("a venv path outside site-packages", &loose),
+    ] {
+        let output = guard(from);
+        assert!(!output.status.success(), "the guard accepted {name}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("was imported from"));
+    }
 }
 
 #[test]
 fn release_validates_every_built_wheel() {
-    let workflow = include_str!("../.github/workflows/release.yml");
-    let wheels = workflow_job(workflow, "wheels");
+    let workflow = release();
+    let wheels = job(&workflow, "wheels");
+    let (built_at, _) = step(wheels, "Build wheels");
+    let (validate_at, validate) = step(wheels, "Validate wheels");
+    let upload_at = first_use(wheels, "actions/upload-artifact");
 
-    assert!(wheels.contains("pipx run twine check --strict dist/*"));
-    assert!(!wheels.contains("matrix.target != 'aarch64'"));
+    assert_binding(validate);
+    assert_blocking(&workflow, "wheels");
+    assert!(built_at < validate_at && validate_at < upload_at);
+    assert_eq!(script(validate), ["pipx run twine check --strict dist/*"]);
+}
+
+#[test]
+fn the_wheel_matrix_covers_every_supported_platform() {
+    let workflow = release();
+    let cells: BTreeSet<(&str, &str)> = job(&workflow, "wheels")["strategy"]["matrix"]["include"]
+        .as_sequence()
+        .expect("wheel matrix")
+        .iter()
+        .map(|cell| {
+            (
+                cell["os"].as_str().unwrap(),
+                cell["target"].as_str().unwrap(),
+            )
+        })
+        .collect();
+
+    assert_eq!(
+        cells,
+        BTreeSet::from([
+            ("macos-15", "aarch64"),
+            ("macos-15", "x86_64"),
+            ("ubuntu-22.04", "aarch64"),
+            ("ubuntu-latest", "x86_64"),
+        ])
+    );
+}
+
+#[test]
+fn every_publish_job_waits_for_the_artifacts_it_publishes() {
+    let workflow = release();
+
+    assert!(
+        needs(job(&workflow, "publish-pypi")).is_superset(&BTreeSet::from(["sdist", "wheels"]))
+    );
+    // A crates.io upload cannot be undone, so it needs everything PyPI and
+    // the GitHub release need and cannot happen while either is impossible.
+    for irreversible in ["publish-crate", "github-release"] {
+        assert!(
+            needs(job(&workflow, irreversible)).is_superset(&BTreeSet::from([
+                "native-libs",
+                "sdist",
+                "wheels"
+            ])),
+            "{irreversible} does not wait for the native libraries, the sdist and every wheel"
+        );
+    }
+    for publish in ["publish-pypi", "publish-crate", "github-release"] {
+        assert_eq!(
+            job(&workflow, publish)["if"].as_str(),
+            Some("startsWith(github.ref, 'refs/tags/v')"),
+            "{publish} runs on tags only"
+        );
+    }
 }
 
 #[test]
@@ -265,12 +588,21 @@ fn rgpot_pair_stays_out_of_the_published_dependencies() {
 }
 
 #[test]
-fn packaged_wheel_crate_has_a_versioned_path_dependency() {
-    let version = env!("CARGO_PKG_VERSION");
-    let manifest = include_str!("../crates/anneal-python/Cargo.toml");
-    assert!(manifest.contains(&format!(
-        "anneal-core = {{ version = \"{version}\", path = \"../..\""
-    )));
+fn wheel_crate_depends_on_anneal_core_at_the_workspace_version() {
+    let wheel: toml::Table = include_str!("../crates/anneal-python/Cargo.toml")
+        .parse()
+        .expect("wheel manifest parses");
+    let root: toml::Table = include_str!("../Cargo.toml")
+        .parse()
+        .expect("root manifest parses");
+    let workspace_version = root["workspace"]["package"]["version"]
+        .as_str()
+        .expect("version");
+    let core = &wheel["dependencies"]["anneal-core"];
+
+    assert_eq!(workspace_version, env!("CARGO_PKG_VERSION"));
+    assert_eq!(core["version"].as_str(), Some(workspace_version));
+    assert_eq!(core["path"].as_str(), Some("../.."));
 }
 
 // An example that skips the installation runs Lennard-Jones and Morse on the

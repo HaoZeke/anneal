@@ -36,7 +36,8 @@ dependencies = [
     "numpy>=1.24.1",
 ]
 
-# Python 3.10 has no tomllib. scripts/anneal_version.py falls back to tomli.
+# Python 3.10 has no tomllib. load_toml uses tomli from this group.
+# package_version also runs when neither library is installed.
 # https://peps.python.org/pep-0735/
 [dependency-groups]
 dev = ["tomli>=2; python_version < '3.11'"]
