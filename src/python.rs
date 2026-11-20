@@ -33,6 +33,7 @@ use crate::variant::{boltzmann_in_box, fast_in_box, gsa_in_box};
 
 use errors::{bounds_error, config_error, invalid_argument, search_error};
 
+mod config_fields;
 mod device;
 mod errors;
 mod landfold;
@@ -2822,15 +2823,73 @@ fn osa_acceptance_rate(
 
 /// Driver settings for the cluster-search layer.
 ///
-/// Construct with `Config.recommended`, `Config.derived`, or
-/// `Config.for_cluster`. The recommended stack is the measured
-/// default: composed surface relocations, depth-rewarded move
-/// allocation, and tabu on stall.
+/// Build one with a preset such as `Config.recommended(n)`,
+/// `Config.derived(n)` or `Config.for_cluster(n)`; `Config.field_names()`
+/// lists every setting. `get`, `to_dict` and `replace` read and change the
+/// scalar ones. `recommended` is the measured default: composed surface
+/// relocations, depth-rewarded move allocation and tabu on stall.
 #[pyclass(name = "Config")]
 #[derive(Clone)]
 pub struct PyClusterConfig {
     inner: crate::methods::cluster_hopping::Config,
-    recommended: bool,
+    origin: String,
+}
+
+fn check_points(n: usize) -> PyResult<()> {
+    if n < 2 {
+        return Err(invalid_argument("n must be at least 2"));
+    }
+    Ok(())
+}
+
+fn check_scales(length_scale: f64, energy_scale: f64) -> PyResult<()> {
+    if !(length_scale.is_finite() && length_scale > 0.0) {
+        return Err(invalid_argument("length_scale must be finite and positive"));
+    }
+    if !(energy_scale.is_finite() && energy_scale > 0.0) {
+        return Err(invalid_argument("energy_scale must be finite and positive"));
+    }
+    Ok(())
+}
+
+fn check_molecules(species: &[u32], groups: &[Vec<usize>], energy_scale: f64) -> PyResult<()> {
+    if species.is_empty() {
+        return Err(invalid_argument("species must not be empty"));
+    }
+    if !(energy_scale.is_finite() && energy_scale > 0.0) {
+        return Err(invalid_argument("energy_scale must be finite and positive"));
+    }
+    if species
+        .iter()
+        .copied()
+        .map(crate::methods::cluster_hopping::covalent_radius)
+        .fold(0.0_f64, f64::max)
+        <= 0.0
+    {
+        return Err(invalid_argument("species must have known covalent radii"));
+    }
+    if groups.iter().any(|group| group.is_empty()) {
+        return Err(invalid_argument("a group must name at least one atom"));
+    }
+    if groups.iter().flatten().any(|&atom| atom >= species.len()) {
+        return Err(invalid_argument(
+            "a group names an atom past the last species label",
+        ));
+    }
+    Ok(())
+}
+
+impl PyClusterConfig {
+    fn new(inner: crate::methods::cluster_hopping::Config, origin: String) -> Self {
+        Self { inner, origin }
+    }
+
+    fn chained(&self, inner: crate::methods::cluster_hopping::Config, step: String) -> Self {
+        Self {
+            inner,
+            origin: format!("{}.{step}", self.origin),
+        }
+    }
 }
 
 #[pymethods]
@@ -2838,74 +2897,315 @@ impl PyClusterConfig {
     /// Measured configuration for `n` points.
     #[staticmethod]
     fn recommended(n: usize) -> PyResult<Self> {
-        if n < 2 {
-            return Err(invalid_argument("n must be at least 2"));
-        }
-        Ok(Self {
-            inner: crate::methods::cluster_hopping::Config::recommended(n),
-            recommended: true,
-        })
+        check_points(n)?;
+        Ok(Self::new(
+            crate::methods::cluster_hopping::Config::recommended(n),
+            format!("recommended({n})"),
+        ))
     }
 
     /// Communicating paper arm: orbit kernel plus recognition, not recommended.
     #[staticmethod]
     fn communicating(n: usize) -> PyResult<Self> {
-        if n < 2 {
-            return Err(invalid_argument("n must be at least 2"));
-        }
-        Ok(Self {
-            inner: crate::methods::cluster_hopping::Config::communicating(n),
-            recommended: false,
-        })
+        check_points(n)?;
+        Ok(Self::new(
+            crate::methods::cluster_hopping::Config::communicating(n),
+            format!("communicating({n})"),
+        ))
     }
 
     /// Recommended flags with the cost-asymmetric screen and budget-window
     /// temperature. Not the measured configuration.
     #[staticmethod]
     fn derived(n: usize) -> PyResult<Self> {
-        if n < 2 {
-            return Err(invalid_argument("n must be at least 2"));
-        }
-        Ok(Self {
-            inner: crate::methods::cluster_hopping::Config::derived(n),
-            recommended: true,
-        })
+        check_points(n)?;
+        Ok(Self::new(
+            crate::methods::cluster_hopping::Config::derived(n),
+            format!("derived({n})"),
+        ))
     }
 
     /// Plain Wales-Doye protocol for `n` points (comparison baseline).
     #[staticmethod]
     fn for_cluster(n: usize) -> PyResult<Self> {
-        if n < 2 {
-            return Err(invalid_argument("n must be at least 2"));
-        }
-        Ok(Self {
-            inner: crate::methods::cluster_hopping::Config::for_cluster(n),
-            recommended: false,
-        })
+        check_points(n)?;
+        Ok(Self::new(
+            crate::methods::cluster_hopping::Config::for_cluster(n),
+            format!("for_cluster({n})"),
+        ))
     }
 
     /// The communicating arm on `n` rigid TIP4P waters.
     #[staticmethod]
     fn communicating_tip4p(n: usize) -> PyResult<Self> {
-        if n < 2 {
-            return Err(invalid_argument("n must be at least 2"));
-        }
-        Ok(Self {
-            inner: crate::methods::cluster_hopping::Config::communicating_tip4p(n),
-            recommended: false,
-        })
+        check_points(n)?;
+        Ok(Self::new(
+            crate::methods::cluster_hopping::Config::communicating_tip4p(n),
+            format!("communicating_tip4p({n})"),
+        ))
     }
 
     /// The recommended arm on `n` rigid TIP4P waters.
     #[staticmethod]
     fn recommended_tip4p(n: usize) -> PyResult<Self> {
-        if n < 2 {
-            return Err(invalid_argument("n must be at least 2"));
+        check_points(n)?;
+        Ok(Self::new(
+            crate::methods::cluster_hopping::Config::recommended_tip4p(n),
+            format!("recommended_tip4p({n})"),
+        ))
+    }
+
+    /// The plain protocol on `n` rigid TIP4P waters.
+    #[staticmethod]
+    fn for_tip4p(n: usize) -> PyResult<Self> {
+        check_points(n)?;
+        Ok(Self::new(
+            crate::methods::cluster_hopping::Config::for_tip4p(n),
+            format!("for_tip4p({n})"),
+        ))
+    }
+
+    /// Plain protocol with every length in `length_scale` and every energy in
+    /// `energy_scale`.
+    #[staticmethod]
+    fn with_scales(n: usize, length_scale: f64, energy_scale: f64) -> PyResult<Self> {
+        check_points(n)?;
+        check_scales(length_scale, energy_scale)?;
+        Ok(Self::new(
+            crate::methods::cluster_hopping::Config::with_scales(n, length_scale, energy_scale),
+            format!("with_scales({n}, {length_scale:?}, {energy_scale:?})"),
+        ))
+    }
+
+    /// `recommended` in declared units.
+    #[staticmethod]
+    fn recommended_with_scales(n: usize, length_scale: f64, energy_scale: f64) -> PyResult<Self> {
+        check_points(n)?;
+        check_scales(length_scale, energy_scale)?;
+        Ok(Self::new(
+            crate::methods::cluster_hopping::Config::recommended_with_scales(
+                n,
+                length_scale,
+                energy_scale,
+            ),
+            format!("recommended_with_scales({n}, {length_scale:?}, {energy_scale:?})"),
+        ))
+    }
+
+    /// `for_cluster` in declared units.
+    #[staticmethod]
+    fn for_cluster_with_scales(n: usize, length_scale: f64, energy_scale: f64) -> PyResult<Self> {
+        check_points(n)?;
+        check_scales(length_scale, energy_scale)?;
+        Ok(Self::new(
+            crate::methods::cluster_hopping::Config::for_cluster_with_scales(
+                n,
+                length_scale,
+                energy_scale,
+            ),
+            format!("for_cluster_with_scales({n}, {length_scale:?}, {energy_scale:?})"),
+        ))
+    }
+
+    /// `recommended` for a pair potential: `"lennard_jones"`, or `"morse"`
+    /// with its range parameter `rho`.
+    #[staticmethod]
+    #[pyo3(signature = (n, pair, rho = None))]
+    fn recommended_for_pair(n: usize, pair: &str, rho: Option<f64>) -> PyResult<Self> {
+        use crate::potentials::PairKind;
+        check_points(n)?;
+        let kind = match (pair, rho) {
+            ("lennard_jones", None) => PairKind::LennardJones,
+            ("lennard_jones", Some(_)) => {
+                return Err(invalid_argument("lennard_jones takes no rho"));
+            }
+            ("morse", Some(rho)) if rho.is_finite() && rho > 0.0 => PairKind::Morse { rho },
+            ("morse", _) => {
+                return Err(invalid_argument("morse needs a finite positive rho"));
+            }
+            (other, _) => {
+                return Err(invalid_argument(format!(
+                    "pair must be \"lennard_jones\" or \"morse\", got {other:?}"
+                )));
+            }
+        };
+        Ok(Self::new(
+            crate::methods::cluster_hopping::Config::recommended_for_pair(n, kind),
+            match rho {
+                Some(rho) => format!("recommended_for_pair({n}, {pair:?}, rho={rho:?})"),
+                None => format!("recommended_for_pair({n}, {pair:?})"),
+            },
+        ))
+    }
+
+    /// Plain protocol with the dual orbit core, opt-in.
+    #[staticmethod]
+    fn for_cluster_dual_core(n: usize) -> PyResult<Self> {
+        check_points(n)?;
+        Ok(Self::new(
+            crate::methods::cluster_hopping::Config::for_cluster_dual_core(n),
+            format!("for_cluster_dual_core({n})"),
+        ))
+    }
+
+    /// Superbasin occupancy preset for packing harvests.
+    #[staticmethod]
+    fn packing_superbasin(n: usize) -> PyResult<Self> {
+        check_points(n)?;
+        Ok(Self::new(
+            crate::methods::cluster_hopping::Config::packing_superbasin(n),
+            format!("packing_superbasin({n})"),
+        ))
+    }
+
+    /// Plain protocol over molecules: one species label per atom and the atom
+    /// indices of each rigid-or-flexible group.
+    #[staticmethod]
+    #[pyo3(signature = (species, groups, energy_scale = 1.0))]
+    fn for_molecular(
+        species: Vec<u32>,
+        groups: Vec<Vec<usize>>,
+        energy_scale: f64,
+    ) -> PyResult<Self> {
+        check_molecules(&species, &groups, energy_scale)?;
+        let origin = format!(
+            "for_molecular({} atoms, {} groups, energy_scale={energy_scale:?})",
+            species.len(),
+            groups.len()
+        );
+        Ok(Self::new(
+            crate::methods::cluster_hopping::Config::for_molecular(species, groups, energy_scale),
+            origin,
+        ))
+    }
+
+    /// `for_molecular` with the measured allocation and stall controls.
+    #[staticmethod]
+    #[pyo3(signature = (species, groups, energy_scale = 1.0))]
+    fn recommended_molecular(
+        species: Vec<u32>,
+        groups: Vec<Vec<usize>>,
+        energy_scale: f64,
+    ) -> PyResult<Self> {
+        check_molecules(&species, &groups, energy_scale)?;
+        let origin = format!(
+            "recommended_molecular({} atoms, {} groups, energy_scale={energy_scale:?})",
+            species.len(),
+            groups.len()
+        );
+        Ok(Self::new(
+            crate::methods::cluster_hopping::Config::recommended_molecular(
+                species,
+                groups,
+                energy_scale,
+            ),
+            origin,
+        ))
+    }
+
+    /// A copy with the dual orbit core.
+    fn with_dual_orbit_core(&self) -> Self {
+        self.chained(
+            self.inner.clone().with_dual_orbit_core(),
+            "with_dual_orbit_core()".to_owned(),
+        )
+    }
+
+    /// A copy that carries species labels and optional per-atom diameters.
+    #[pyo3(signature = (species, sigma = None))]
+    fn with_species(&self, species: Vec<u32>, sigma: Option<Vec<f64>>) -> PyResult<Self> {
+        let n = self.inner.n_points;
+        if species.len() != n {
+            return Err(invalid_argument(format!(
+                "species has {} labels but the config has {n} points",
+                species.len()
+            )));
         }
-        Ok(Self {
-            inner: crate::methods::cluster_hopping::Config::recommended_tip4p(n),
-            recommended: true,
-        })
+        if let Some(values) = sigma.as_ref() {
+            if values.len() != n {
+                return Err(invalid_argument(format!(
+                    "sigma has {} entries but the config has {n} points",
+                    values.len()
+                )));
+            }
+            if !values.iter().all(|value| value.is_finite() && *value > 0.0) {
+                return Err(invalid_argument("sigma must be finite and positive"));
+            }
+        }
+        let step = if sigma.is_some() {
+            "with_species(labels, sigma)"
+        } else {
+            "with_species(labels)"
+        };
+        Ok(self.chained(
+            self.inner.clone().with_species(species, sigma),
+            step.to_owned(),
+        ))
+    }
+
+    /// A copy that merges the groups of each covalent fragment of `start`, or
+    /// `None` when the groups already stand.
+    fn with_flexible_molecules(&self, start: PyReadonlyArray1<'_, f64>) -> PyResult<Option<Self>> {
+        let slice = start.as_slice()?;
+        Ok(self
+            .inner
+            .with_flexible_molecules(ArrayView1::from(slice))
+            .map(|inner| self.chained(inner, "with_flexible_molecules(start)".to_owned())))
+    }
+
+    /// Every setting name, sorted.
+    #[staticmethod]
+    fn field_names() -> Vec<&'static str> {
+        config_fields::field_names()
+    }
+
+    /// The value of one setting. A structured setting comes back as plain
+    /// Python data. `reoccupy` and `hmc` hold native objects, so they report
+    /// whether they are set.
+    fn get(&self, py: Python<'_>, name: &str) -> PyResult<Py<PyAny>> {
+        config_fields::get(py, &self.inner, name)
+    }
+
+    /// Every setting as a dict, as `get` returns them.
+    fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        let dict = PyDict::new(py);
+        for name in config_fields::field_names() {
+            dict.set_item(name, config_fields::get(py, &self.inner, name)?)?;
+        }
+        Ok(dict.into())
+    }
+
+    /// A copy with scalar settings changed: `cfg.replace(relax_steps=500)`.
+    /// A structured setting, and `n_points`, come from a preset instead.
+    #[pyo3(signature = (**fields))]
+    fn replace(&self, fields: Option<&Bound<'_, PyDict>>) -> PyResult<Self> {
+        let mut inner = self.inner.clone();
+        let mut steps = Vec::new();
+        if let Some(fields) = fields {
+            for (key, value) in fields.iter() {
+                let name: String = key.extract()?;
+                config_fields::set(&mut inner, &name, &value)?;
+                steps.push(format!("{name}={}", value.repr()?));
+            }
+        }
+        if steps.is_empty() {
+            return Ok(self.clone());
+        }
+        Ok(self.chained(inner, format!("replace({})", steps.join(", "))))
+    }
+
+    /// Canonical versioned JSON of the resolved configuration.
+    fn resolved_json(&self) -> PyResult<String> {
+        self.inner
+            .resolved_json()
+            .map_err(|err| errors::anneal_error(err.to_string()))
+    }
+
+    /// SHA-256 of `resolved_json`, lowercase hexadecimal.
+    fn resolved_sha256(&self) -> PyResult<String> {
+        self.inner
+            .resolved_sha256()
+            .map_err(|err| errors::anneal_error(err.to_string()))
     }
 
     /// Points in a state; the state length is `3 * n_points`, or `6 *
@@ -3009,21 +3309,7 @@ impl PyClusterConfig {
     }
 
     fn __repr__(&self) -> String {
-        if self.inner.bayes_screen && self.inner.budget_window {
-            format!("Config.derived({})", self.inner.n_points)
-        } else if !self.inner.surfaces.is_empty()
-            && self.inner.orbit_complete_on_new
-            && matches!(
-                self.inner.shared_visit_policy,
-                crate::methods::minima_hopping::SharedVisitPolicy::Recognition
-            )
-        {
-            format!("Config.communicating({})", self.inner.n_points)
-        } else if self.recommended {
-            format!("Config.recommended({})", self.inner.n_points)
-        } else {
-            format!("Config.for_cluster({})", self.inner.n_points)
-        }
+        format!("Config.{}", self.origin)
     }
 }
 

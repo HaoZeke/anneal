@@ -38,7 +38,11 @@ def _arguments(node, drop_self):
     positional = [*args.posonlyargs, *args.args]
     defaults = [None] * (len(positional) - len(args.defaults)) + list(args.defaults)
     out = [(a.arg, "pos", d is not None) for a, d in zip(positional, defaults)]
+    if args.vararg:
+        out.append((f"*{args.vararg.arg}", "var", False))
     out += [(a.arg, "kw", d is not None) for a, d in zip(args.kwonlyargs, args.kw_defaults)]
+    if args.kwarg:
+        out.append((f"**{args.kwarg.arg}", "var", False))
     if drop_self and out and out[0][0] in ("self", "cls"):
         out = out[1:]
     return out
@@ -47,8 +51,13 @@ def _arguments(node, drop_self):
 def _runtime_arguments(callable_, drop_self):
     out = []
     for p in inspect.signature(callable_).parameters.values():
-        kind = "kw" if p.kind is inspect.Parameter.KEYWORD_ONLY else "pos"
-        out.append((p.name, kind, p.default is not inspect.Parameter.empty))
+        if p.kind is inspect.Parameter.VAR_POSITIONAL:
+            out.append((f"*{p.name}", "var", False))
+        elif p.kind is inspect.Parameter.VAR_KEYWORD:
+            out.append((f"**{p.name}", "var", False))
+        else:
+            kind = "kw" if p.kind is inspect.Parameter.KEYWORD_ONLY else "pos"
+            out.append((p.name, kind, p.default is not inspect.Parameter.empty))
     if drop_self and out and out[0][0] == "self":
         out = out[1:]
     return out
@@ -218,6 +227,7 @@ def test_stub_covers_every_name_the_package_re_exports():
         (("class Ledger:\n    def __new__(cls, budget: int) -> Self: ...", "class Ledger:"), "Ledger() is constructible"),
         (("class EpochLine:", "class EpochLine:\n    def __new__(cls, epoch: int) -> Self: ..."), "EpochLine(): stub arguments"),
         (('    "Gsa",\n', ""), "__all__ differs"),
+        (("    def replace(self, **fields: Any) -> Config: ...", "    def replace(self, fields: Any) -> Config: ..."), "Config.replace: stub arguments"),
         (("class BoundsError(InvalidArgumentError)", "class BoundsError(AnnealError)"), "BoundsError: stub bases"),
         (("    @property\n    def remaining(self) -> int: ...\n", ""), "Ledger.remaining is in the module"),
     ],

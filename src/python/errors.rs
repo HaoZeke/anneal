@@ -59,6 +59,10 @@ pub(crate) fn invalid_argument(msg: impl Into<String>) -> PyErr {
     InvalidArgumentError::new_err(msg.into())
 }
 
+pub(crate) fn anneal_error(msg: impl Into<String>) -> PyErr {
+    AnnealError::new_err(msg.into())
+}
+
 pub(crate) fn bounds_error(msg: impl Into<String>) -> PyErr {
     BoundsError::new_err(msg.into())
 }

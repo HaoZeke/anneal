@@ -128,3 +128,63 @@ except anneal.InvalidArgumentError as err:
 else:
     raise AssertionError("a state of the wrong length must raise")
 #+end_src
+
+* Configuration
+
+=anneal.Config= wraps the Rust =cluster_hopping::Config=. A preset builds
+one; =field_names()=, =get=, =to_dict= and =replace= read and change its
+settings; =resolved_json= and =resolved_sha256= give the canonical record
+that a run log can store.
+
+** Presets
+
+| Constructor                                       | Builds                                              |
+|---------------------------------------------------+-----------------------------------------------------|
+| =recommended(n)=                                  | the measured default                                |
+| =recommended_with_scales(n, length, energy)=      | the same in declared units                          |
+| =recommended_for_pair(n, pair, rho=None)=         | the same for ="lennard_jones"= or ="morse"=         |
+| =derived(n)=                                      | the cost-asymmetric screen and budget-window heat   |
+| =communicating(n)=                                | orbit completion and recognition                    |
+| =for_cluster(n)=, =for_cluster_with_scales(...)=  | the plain Wales-Doye protocol                       |
+| =for_cluster_dual_core(n)=                        | the plain protocol plus the dual orbit core         |
+| =with_scales(n, length, energy)=                  | the bare scaled configuration                       |
+| =packing_superbasin(n)=                           | the occupancy preset for packing harvests           |
+| =for_tip4p(n)=, =communicating_tip4p(n)=,         | rigid TIP4P waters                                  |
+| =recommended_tip4p(n)=                            |                                                     |
+| =for_molecular(species, groups, energy_scale)=,   | molecules with groups of atoms                      |
+| =recommended_molecular(...)=                      |                                                     |
+
+A preset returns a new =Config=. =with_dual_orbit_core()=, =with_species=
+and =with_flexible_molecules= return a changed copy. A constructor that
+Rust would answer with a panic raises =InvalidArgumentError= instead.
+=repr= names the call chain, for example
+=Config.recommended(13).replace(relax_steps=500)=.
+
+** Settings
+
+=Config.field_names()= lists every setting by name. =get(name)= returns a
+number, a flag or a name as a Python value, and a structured setting as plain
+lists and dicts. =reoccupy= and =hmc= hold native objects, so =get= reports
+whether they are set. =replace(**settings)= changes the scalar ones: flags,
+finite numbers, whole numbers and the two optional numbers. It refuses
+=n_points=, which sets the state length, and the structured settings, which
+a preset sets. =pytest/test_config_fields.py= reads =config.rs= and fails
+when a field of the struct has no entry.
+
+#+begin_src python
+import anneal
+
+cfg = anneal.Config.recommended(13)
+assert "relax_steps" in anneal.Config.field_names()
+assert cfg.get("relax_steps") == 1000
+assert cfg.get("move_library") == "lean_burst"
+
+short = cfg.replace(relax_steps=500)
+assert short.get("relax_steps") == 500
+assert cfg.get("relax_steps") == 1000
+assert repr(short) == "Config.recommended(13).replace(relax_steps=500)"
+assert short.resolved_sha256() != cfg.resolved_sha256()
+
+morse = anneal.Config.recommended_for_pair(13, "morse", rho=6.0)
+assert morse.get("length_scale") < 1.0
+#+end_src
