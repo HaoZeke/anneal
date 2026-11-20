@@ -134,7 +134,7 @@ def printed_table(path: Path) -> list[dict[str, str]]:
         if not line.startswith("| sc"):
             continue
         cells = [part.strip() for part in line.strip().strip("|").split("|")]
-        if len(cells) < 5:
+        if len(cells) < 5 or cells[1] not in {"anneal", "gmin"} or "/" not in cells[3]:
             continue
         found.append(
             {
@@ -146,6 +146,13 @@ def printed_table(path: Path) -> list[dict[str, str]]:
             }
         )
     return found
+
+
+def calls_text(value: str) -> str:
+    number = float(value)
+    if number.is_integer():
+        return str(int(number))
+    return f"{number:.6g}"
 
 
 def show(value: float) -> str:
@@ -245,7 +252,7 @@ def readme(rows: list[dict[str, str]], summary: list[dict[str, str]], printed: l
                 hits=cell["hits"],
                 calls=cell["calls"],
                 new_hits="" if new is None else new["hits_over_n"],
-                new_calls="" if new is None else f"{float(new['calls_median']):.6g}",
+                new_calls="" if new is None else calls_text(new["calls_median"]),
             )
         )
     lines.append("")
