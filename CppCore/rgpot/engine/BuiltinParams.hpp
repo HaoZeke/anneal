@@ -9,7 +9,6 @@
  */
 
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <optional>
 #include <stdexcept>
@@ -19,25 +18,20 @@
 #include <capnp/serialize.h>
 #include <kj/io.h>
 
+#include "rgpot/Models/ModelPots.hpp"
+#include "rgpot/rpc/PotentialConfigArm.hpp"
 #include "rgpot/rpc/Potentials.capnp.h"
 #include "rgpot/XTBPot/XTBConfig.hpp"
 
 namespace rgpot::engine {
 
 struct Builtin {
-  struct MullerBrown {
-    std::array<double, 4> amplitude{-200.0, -100.0, -170.0, 15.0};
-    std::array<double, 4> a{-1.0, -1.0, -6.5, 0.7};
-    std::array<double, 4> b{0.0, 0.0, 11.0, 0.6};
-    std::array<double, 4> c{-10.0, -10.0, -6.5, 0.7};
-    std::array<double, 4> x0{1.0, 0.0, -0.5, -1.0};
-    std::array<double, 4> y0{0.0, 0.5, 1.5, 1.0};
-  };
-
   std::string name;    ///< Lowercased.
   std::string library; ///< Optional explicit engine library path.
   std::optional<rgpot::XTBConfig> xtb; ///< Present for the XTB config arm.
-  std::optional<MullerBrown> mullerBrown;
+  /// Present for the Muller-Brown config arm. Empty lists keep the published
+  /// defaults carried by MullerBrownConfig.
+  std::optional<rgpot::MullerBrownConfig> mullerBrown;
 };
 
 inline Builtin read_builtin(const void *config, std::size_t config_len) {
@@ -95,6 +89,11 @@ inline Builtin read_builtin(const void *config, std::size_t config_len) {
     copy(wire.getC(), out.mullerBrown->c, "c");
     copy(wire.getX0(), out.mullerBrown->x0, "x0");
     copy(wire.getY0(), out.mullerBrown->y0, "y0");
+  } else if (native.which() != ::PotentialConfig::NONE &&
+             native.which() != ::PotentialConfig::XTB) {
+    throw std::invalid_argument(
+        "BuiltinParams.config arm " + rgpot::rpc::potentialConfigArm(native) +
+        " does not match a builtin potential");
   }
   return out;
 }

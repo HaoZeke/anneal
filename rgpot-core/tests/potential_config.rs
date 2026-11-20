@@ -71,9 +71,72 @@ fn muller_brown_lists_are_empty_unless_set() {
     assert_eq!(params.get_y0().expect("y0").len(), 0);
 }
 
+#[test]
+fn muller_brown_lists_round_trip() {
+    let amplitude = [-400.0_f64, -200.0, -340.0, 30.0];
+    let a = [-1.0_f64, -2.0, -6.5, 0.7];
+    let b = [0.0_f64, 0.0, 11.0, 0.6];
+    let c = [-10.0_f64, -10.0, -6.5, 0.7];
+    let x0 = [1.0_f64, 0.25, -0.5, -1.0];
+    let y0 = [0.0_f64, 0.5, 1.5, 1.25];
+    let mut message = Builder::new_default();
+    {
+        let config = message.init_root::<potential_config::Builder>();
+        let mut params = config.init_muller_brown();
+        let mut out = params.reborrow().init_amplitude(4);
+        for (index, value) in amplitude.iter().enumerate() {
+            out.set(index as u32, *value);
+        }
+        let mut out = params.reborrow().init_a(4);
+        for (index, value) in a.iter().enumerate() {
+            out.set(index as u32, *value);
+        }
+        let mut out = params.reborrow().init_b(4);
+        for (index, value) in b.iter().enumerate() {
+            out.set(index as u32, *value);
+        }
+        let mut out = params.reborrow().init_c(4);
+        for (index, value) in c.iter().enumerate() {
+            out.set(index as u32, *value);
+        }
+        let mut out = params.reborrow().init_x0(4);
+        for (index, value) in x0.iter().enumerate() {
+            out.set(index as u32, *value);
+        }
+        let mut out = params.reborrow().init_y0(4);
+        for (index, value) in y0.iter().enumerate() {
+            out.set(index as u32, *value);
+        }
+    }
+    let encoded = serialize::write_message_to_words(&message);
+    let mut bytes = encoded.as_slice();
+    let reader = serialize::read_message_from_flat_slice(&mut bytes, ReaderOptions::new())
+        .expect("read PotentialConfig");
+    let config = reader
+        .get_root::<potential_config::Reader>()
+        .expect("PotentialConfig root");
+    let potential_config::Which::MullerBrown(params) = config.which().expect("known arm") else {
+        panic!("PotentialConfig decoded to another arm");
+    };
+    let params = params.expect("mullerBrown arm");
+    let check = |list: capnp::Result<capnp::primitive_list::Reader<'_, f64>>, want: &[f64]| {
+        let list = list.expect("list");
+        assert_eq!(list.len() as usize, want.len());
+        for (index, value) in want.iter().enumerate() {
+            assert_eq!(list.get(index as u32), *value);
+        }
+    };
+    check(params.get_amplitude(), &amplitude);
+    check(params.get_a(), &a);
+    check(params.get_b(), &b);
+    check(params.get_c(), &c);
+    check(params.get_x0(), &x0);
+    check(params.get_y0(), &y0);
+}
+
 /// potentials-schema's arm ordinals, shared with gpridge and every other
 /// consumer. A renumbered arm would decode as another backend on the wire.
-const CONFIG_ARMS: [(&str, u16); 18] = [
+const CONFIG_ARMS: [(&str, u16); 17] = [
     ("none", 0),
     ("nwchem", 1),
     ("cpmd", 2),
@@ -91,11 +154,15 @@ const CONFIG_ARMS: [(&str, u16); 18] = [
     ("skala", 15),
     ("expr", 16),
     ("cp2k", 17),
-    ("mullerBrown", 18),
 ];
 
 /// The arms rgpot adds in CppCore/rgpot/rpc/local, after the upstream ones.
-const LOCAL_ARMS: [(&str, u16); 3] = [("composite", 18), ("d2", 19), ("d2cpmd", 20)];
+const LOCAL_ARMS: [(&str, u16); 4] = [
+    ("composite", 18),
+    ("d2", 19),
+    ("d2cpmd", 20),
+    ("mullerBrown", 21),
+];
 
 #[test]
 fn union_arms_keep_the_upstream_ordinals() {

@@ -88,9 +88,11 @@ class MpiPefSession;
 #define RGPOT_OWN_ARM_TAIL "D2 and D2Cpmd"
 #endif
 #ifdef RGPOT_HAS_CP2K
-constexpr const char *kOwnArmBackends = "NWChem, CPMD, CP2K, Morse, Composite, " RGPOT_OWN_ARM_TAIL;
+constexpr const char *kOwnArmBackends =
+    "NWChem, CPMD, CP2K, Morse, Composite, MullerBrown, " RGPOT_OWN_ARM_TAIL;
 #else
-constexpr const char *kOwnArmBackends = "NWChem, CPMD, Morse, Composite, " RGPOT_OWN_ARM_TAIL;
+constexpr const char *kOwnArmBackends =
+    "NWChem, CPMD, Morse, Composite, MullerBrown, " RGPOT_OWN_ARM_TAIL;
 #endif
 #undef RGPOT_OWN_ARM_TAIL
 #ifdef RGPOT_POTSERV_MPI
@@ -485,6 +487,11 @@ public:
  * ./potserv <port> <PotentialType>
  * @endcode
  *
+ * PotentialType is one of LJ, LJCluster, Morse, ZBL, Eckart, MullerBrown,
+ * ModifiedMullerBrown, LEPS-HH2, LEPS-HCl2, LEPS-FH2, DoubleWell,
+ * CoupledProtonWell, Composite, D2 and D2Cpmd, plus the backends this build
+ * compiled in. The printed usage line is the same list.
+ *
  * @param argc Argument count.
  * @param argv Argument vector.
  * @return 0 on success, 1 on initialization failure.
@@ -496,7 +503,9 @@ int runServer(int argc, char *argv[]
 ) {
   if (argc < 3) {
     std::cerr << "Usage: " << argv[0] << " <port> <PotentialType>" << std::endl;
-    std::cerr << "  Available PotentialTypes: LJ, LJCluster, Morse, ZBL, Composite, D2, D2Cpmd"
+    std::cerr << "  Available PotentialTypes: LJ, LJCluster, Morse, ZBL, Eckart, "
+                 "MullerBrown, ModifiedMullerBrown, LEPS-HH2, LEPS-HCl2, "
+                 "LEPS-FH2, Composite, D2, D2Cpmd"
 #ifdef RGPOT_HAS_FORTRAN_POTS
               << ", CuH2"
 #endif

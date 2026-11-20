@@ -480,3 +480,17 @@ TEST_CASE("external CBE frontend evaluates force and analytic product") {
   }
 }
 #endif
+
+TEST_CASE("Muller-Brown paramsKey follows the parameter lists") {
+  const rgpot::MullerBrownPot published;
+  const rgpot::MullerBrownPot same(rgpot::MullerBrownConfig{});
+  rgpot::MullerBrownConfig scaled;
+  for (double &value : scaled.amplitude)
+    value *= 2.0;
+  const rgpot::MullerBrownPot other(scaled);
+  REQUIRE(published.paramsKey() != 0);
+  REQUIRE(published.paramsKey() == same.paramsKey());
+  REQUIRE(published.paramsKey() != other.paramsKey());
+  REQUIRE(published.config().amplitude == same.config().amplitude);
+  REQUIRE(other.config().amplitude[0] == -400.0);
+}

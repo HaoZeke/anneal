@@ -2,6 +2,7 @@
 // Copyright 2023--present rgpot developers
 
 #include "rgpot/Models/ModelPots.hpp"
+#include "rgpot/ParamHash.hpp"
 #include "rgpot/units.hpp"
 
 #include <algorithm>
@@ -246,6 +247,8 @@ EckartPot::EckartPot(double v0, double width)
                      (width * width) * v[0]}};
               }})) {}
 
+MullerBrownPot::MullerBrownPot() : MullerBrownPot(MullerBrownConfig{}) {}
+
 MullerBrownPot::MullerBrownPot(MullerBrownConfig config)
     : AnalyticModelPot(
           PotType::MullerBrown,
@@ -266,6 +269,22 @@ MullerBrownPot::MullerBrownPot(MullerBrownConfig config)
 
 const MullerBrownConfig &MullerBrownPot::config() const noexcept {
   return impl_->mullerConfig;
+}
+
+uint64_t MullerBrownPot::paramsKey() const noexcept {
+  Fnv1a fp;
+  const MullerBrownConfig &config = impl_->mullerConfig;
+  const auto mix = [&](const std::array<double, 4> &values) {
+    for (double value : values)
+      fp.f64(value);
+  };
+  mix(config.amplitude);
+  mix(config.a);
+  mix(config.b);
+  mix(config.c);
+  mix(config.x0);
+  mix(config.y0);
+  return fp.h;
 }
 
 ModifiedMullerBrownPot::ModifiedMullerBrownPot(double amplitude,

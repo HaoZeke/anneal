@@ -19,6 +19,11 @@ Created create(const void *config, std::size_t config_len) {
                   builtin.name + "'";
       return out;
     }
+    if (builtin.mullerBrown) {
+      throw std::invalid_argument(
+          "BuiltinParams.config arm mullerBrown does not match potential "
+          "'xtb'");
+    }
     auto backend = std::make_unique<Backend>();
     backend->pot =
         std::make_unique<XTBPot>(builtin.xtb.value_or(XTBConfig{}));

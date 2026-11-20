@@ -360,6 +360,32 @@ TEST_CASE("classical engine reads empty Muller-Brown lists as the defaults",
   e.destroy(empty);
 }
 
+TEST_CASE("classical engine rejects a PotentialConfig arm that does not match",
+          "[engine][classical][muller-brown]") {
+  Engine e;
+  if (!open_engine("CLASSICAL", e)) {
+    SKIP("no classical engine in this build");
+  }
+  capnp::MallocMessageBuilder morseOnMuller;
+  auto morse = morseOnMuller.initRoot<::BuiltinParams>();
+  morse.setName("muller_brown");
+  morse.initConfig().initMorse();
+  std::string error;
+  REQUIRE(create(e, capnp::messageToFlatArray(morseOnMuller), &error) ==
+          nullptr);
+  REQUIRE(error.find("morse") != std::string::npos);
+  REQUIRE(error.find("does not match") != std::string::npos);
+
+  capnp::MallocMessageBuilder mullerOnLj;
+  auto lj = mullerOnLj.initRoot<::BuiltinParams>();
+  lj.setName("lj");
+  lj.initConfig().initMullerBrown();
+  error.clear();
+  REQUIRE(create(e, capnp::messageToFlatArray(mullerOnLj), &error) == nullptr);
+  REQUIRE(error.find("mullerBrown") != std::string::npos);
+  REQUIRE(error.find("lj") != std::string::npos);
+}
+
 TEST_CASE("classical engine LJPot analytic HVP rejects in-place aliasing",
           "[engine][classical][hvp]") {
   Engine e;

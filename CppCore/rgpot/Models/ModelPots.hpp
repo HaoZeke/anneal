@@ -57,8 +57,12 @@ public:
 
 class MullerBrownPot final : public AnalyticModelPot {
 public:
-  explicit MullerBrownPot(MullerBrownConfig config = {});
+  /// Zero-argument constructor. Kept as its own symbol so a caller built
+  /// against the published-default surface still links.
+  MullerBrownPot();
+  explicit MullerBrownPot(MullerBrownConfig config);
   [[nodiscard]] const MullerBrownConfig &config() const noexcept;
+  [[nodiscard]] uint64_t paramsKey() const noexcept override;
 };
 
 class ModifiedMullerBrownPot final : public AnalyticModelPot {
