@@ -1,0 +1,4 @@
+panel,systems,runs_a,runs_b,hits_a,hits_b,p_hits,p_calls,van_elteren_z,calls_direction,wall_sum_a,wall_sum_b,wall_ratio,inside_sum_a,inside_sum_b,inside_ratio,outside_sum_a,outside_sum_b,outside_ratio,outside_per_call_us_a,outside_per_call_us_b,outside_per_call_ratio,outside_per_call_median_us_a,outside_per_call_median_us_b,outside_per_call_median_ratio,identical_runs,failed_a,failed_b,lost_systems,verdict
+Sutton-Chen,9,108,108,75,75,1,1,0.000000,equal,4771.997,4785.392,1.0028,4400.188,4412.006,1.0027,371.809,373.387,1.0042,8.2732,8.3083,1.0042,4.4865,4.4980,1.0026,108,0,0,,PASS
+BLJ,7,84,84,46,46,1,1,0.000000,equal,2852.536,2843.423,0.9968,1513.726,1518.670,1.0033,1338.810,1324.754,0.9895,17.1653,16.9850,0.9895,10.6532,10.3610,0.9726,84,0,0,,PASS
+water/TIP4P rigid,14,168,168,113,113,1,1,0.000000,equal,1289.015,1285.411,0.9972,976.868,973.717,0.9968,312.147,311.694,0.9985,2.2772,2.2739,0.9985,1.9247,1.9123,0.9936,168,0,0,,PASS
