@@ -39,7 +39,8 @@ def test_quoted_summary_drops_a_system_whose_commit_is_absent(tmp_path):
     summary_path = tmp_path / "summary.csv"
     module.write_tables(ROOT, rows, "latest", True, summary_path, readme, manuscript)
     spliced = manuscript.read_text()
-    assert "LJ\\(_{38}\\)" in spliced
+    table = spliced.split("\\begin{tabular}", 1)[1]
+    assert "LJ\\(_{38}\\)" in table
     assert "Au\\(_{55}\\)" not in spliced
-    assert "M\\(_{80}\\)" not in spliced
+    assert "M\\(_{80}\\)" not in table
     assert hashlib.sha256(ROWS.read_bytes()).hexdigest() == before

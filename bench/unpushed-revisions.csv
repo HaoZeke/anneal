@@ -24,3 +24,4 @@ fc1af066a915a80eb46a3bc478caaf155cc9b29f,"the build head of the Au55 cluster-pre
 1ce3ab64493196afd25e8690648e21157d91b882,"the template-free landing head for the GMIN panel and the Au55 ASE reruns, first cited by 93e17b69; no pushed branch holds it and its rows record no tree"
 90b88235fe54abace3bde32789582eb6573ed40a,"the build head of the Morse ASE panel, first cited by c3bcdc01; no pushed branch holds it and its rows record no tree"
 89de725a337b6e37daef05877796ae8192fbf8e1,the local harness head of the LJ98-LJ150 AGOX seeds 2006 onward; it was not pushed
+c89653df3ae107e9814917bc6515e578e6788188,"the anneal harness head of the 12-seed Sutton-Chen panel in bench/metal-cluster-h2h/sc-n12; no pushed branch holds it and its rows record no tree"
