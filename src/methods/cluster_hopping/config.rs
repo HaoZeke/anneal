@@ -2799,14 +2799,14 @@ impl Config {
             && !(floor.is_finite() && floor > 0.0)
         {
             return Err(InvalidConfig(format!(
-                "call_floor must be a finite positive distance, not {floor}"
+                "the call floor must be a finite positive distance, not {floor}"
             )));
         }
         if let Some(elements) = self.call_floor_elements.as_ref()
             && elements.len() != self.n_points
         {
             return Err(InvalidConfig(format!(
-                "call_floor_elements has {} entries but the config has {} points",
+                "the call-floor elements name {} points but the config has {}",
                 elements.len(),
                 self.n_points
             )));

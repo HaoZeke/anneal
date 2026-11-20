@@ -48,6 +48,9 @@ PLUMBING = {
     "parse_prior_switches": "reads the H2H_PRIORS text of the Rust binaries",
     "check_removed_env_vars": "screens the environment variables of the Rust binaries",
     "check_removed_env": "screens the environment variables of the Rust binaries",
+    "try_for_molecular": "the fallible form behind for_molecular",
+    "try_recommended_molecular": "the fallible form behind recommended_molecular",
+    "validate": "runs in every Config constructor and in replace",
 }
 
 SITES = np.array([[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]])

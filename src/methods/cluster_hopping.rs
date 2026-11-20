@@ -1606,7 +1606,7 @@ impl<'a> CallFloor<'a> {
             && (0..n).all(|a| ((a + 1)..n).all(|b| pair_distance(x, a, b) > self.pair(a, b)))
     }
 
-    /// Opens every pair at or inside its floor to [`CALL_FLOOR_OPENING`]
+    /// Opens every pair at or inside its floor to `CALL_FLOOR_OPENING`
     /// times that floor, as [`open_call_floor`] does for a single one.
     pub fn open(&self, x: &mut Array1<f64>, frozen: Option<&[bool]>) -> bool {
         if self.elements.is_none() {
@@ -13256,18 +13256,7 @@ mod call_floor_tests {
         assert_eq!(seen[1], (0, inside));
     }
 
-    #[test]
-    #[should_panic(expected = "call floor")]
-    fn a_floor_that_is_not_a_positive_distance_is_refused() {
-        let _ = starts_inside_the_floor(Some(f64::NAN));
-    }
-
-    #[test]
-    #[should_panic(expected = "call-floor elements")]
-    fn call_floor_elements_must_name_every_point() {
-        let mut cfg = Config::for_cluster(POINTS);
-        cfg.call_floor = Some(FLOOR);
-        cfg.call_floor_elements = Some(vec![14; POINTS - 1]);
+    fn refusal(cfg: &Config) -> String {
         let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _: usize| {
             let _ = led.charge();
             (0.0, x.to_owned())
@@ -13275,13 +13264,31 @@ mod call_floor_tests {
         let mut rng = StdRng::seed_from_u64(3);
         let start =
             random_cluster_in_radius(POINTS, cfg.start_radius(), cfg.min_separation, &mut rng);
-        let _ = run(
-            &cfg,
-            start.view(),
-            &mut Ledger::new(10),
-            &mut relax,
-            &mut rng,
-        );
+        let mut ledger = Ledger::new(10);
+        match run(cfg, start.view(), &mut ledger, &mut relax, &mut rng) {
+            Err(SearchError::InvalidConfig(reason)) => {
+                assert_eq!(ledger.spent(), 0, "{reason}");
+                reason.0
+            }
+            other => panic!("expected an InvalidConfig refusal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_floor_that_is_not_a_positive_distance_is_refused() {
+        for floor in [f64::NAN, f64::INFINITY, 0.0, -1.0] {
+            let mut cfg = Config::for_cluster(POINTS);
+            cfg.call_floor = Some(floor);
+            assert!(refusal(&cfg).contains("call floor"), "{floor}");
+        }
+    }
+
+    #[test]
+    fn call_floor_elements_must_name_every_point() {
+        let mut cfg = Config::for_cluster(POINTS);
+        cfg.call_floor = Some(FLOOR);
+        cfg.call_floor_elements = Some(vec![14; POINTS - 1]);
+        assert!(refusal(&cfg).contains("call-floor elements"));
     }
 
     #[test]
