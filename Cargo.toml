@@ -337,6 +337,10 @@ required-features = ["bank-rpc"]
 name = "lj_board_row"
 required-features = []
 
+[[example]]
+name = "g0_lj_stock"
+path = "bench/g0-lj-stock/harness.rs"
+
 # featomic's static metatensor core is built by cmake, and that cmake runs
 # `cargo rustc` while the parent cargo still holds the target-directory lock.
 # The crates.io build script inherits the lock. This copy gives the nested
