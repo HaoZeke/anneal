@@ -110,19 +110,34 @@ class Molecule:
     def same(self, a, b) -> bool:
         return abs(a[1] - b[1]) < ENERGY_TIE and self.rmsd(a[0], b[0]) < RMSD
 
-    def same_or_mirror(self, a, b) -> bool:
-        """``same``, or ``b`` is the mirror image of ``a``.
+    def perceived_key(self, x: np.ndarray) -> str:
+        """The stereo key RDKit reads off the geometry ``x``."""
+        mol = Chem.Mol(self.mol)
+        conf = Chem.Conformer(mol.GetNumAtoms())
+        for i, (a, b, c) in enumerate(np.asarray(x).reshape(-1, 3)):
+            conf.SetAtomPosition(i, (float(a), float(b), float(c)))
+        mol.RemoveAllConformers()
+        mol.AddConformer(conf, assignId=True)
+        Chem.AssignStereochemistryFrom3D(mol)
+        return _stereo_key(mol)
 
-        A polished geometry has passed the stereo check, so a mirror image of
-        a conformer that passes it too belongs to a molecule with no net
-        handedness: the enantiomeric conformer is the same species with the
-        same energy. The fit in ``rmsd`` keeps proper rotations, so a mirror
-        image never matches under ``same``.
+    def same_or_mirror(self, a, b) -> bool:
+        """``same``, or the mirror image of ``b`` is the same conformer as ``a``.
+
+        The fit in ``rmsd`` keeps proper rotations, so a mirror image never
+        matches under ``same``. A mirror image is the same species only when
+        reflecting keeps the stereo of the input SMILES: the molecule has no
+        handedness, or the reflected geometry still reads as the reference
+        stereo key (a meso compound). For a chiral molecule the reflected
+        geometry is the other enantiomer, which the stereo check rejects, so
+        a near match to it is a miss and is never counted as a hit.
         """
         if self.same(a, b):
             return True
+        if abs(a[1] - b[1]) >= ENERGY_TIE:
+            return False
         flipped = np.asarray(b[0]).reshape(-1, 3) * np.array([1.0, 1.0, -1.0])
-        return abs(a[1] - b[1]) < ENERGY_TIE and self.rmsd(a[0], flipped) < RMSD
+        return self.rmsd(a[0], flipped) < RMSD and self.perceived_key(flipped) == self.reference
 
     def dedupe(self, items: list[tuple[np.ndarray, float]]) -> list[tuple[np.ndarray, float]]:
         kept: list[tuple[np.ndarray, float]] = []

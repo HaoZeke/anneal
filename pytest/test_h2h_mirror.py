@@ -10,7 +10,7 @@ import pytest
 pytest.importorskip("rdkit")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "openconf_h2h"))
 
-from h2h_score import Molecule  # noqa: E402
+from h2h_score import ENERGY_TIE, Molecule  # noqa: E402
 from rdkit.Chem import rdMolTransforms  # noqa: E402
 
 
@@ -40,6 +40,45 @@ def test_the_mirror_image_of_a_conformer_matches_only_when_asked():
     assert m.same_or_mirror(left, right)
     assert m.same_or_mirror(left, left)
     assert not m.same_or_mirror(left, anti)
+
+
+def turned(smiles: str, quad: tuple[int, int, int, int], angle: float):
+    import h2h_common as hc
+
+    m = Molecule({"smiles": smiles})
+    hc.embed(m.mol, 7)
+    conf = m.mol.GetConformer()
+    rdMolTransforms.SetDihedralDeg(conf, *quad, angle)
+    px, pe, valid = m.polish(np.asarray(conf.GetPositions()))
+    assert valid
+    return m, (px, float(pe))
+
+
+def reflected(conformer):
+    return conformer[0] * np.array([1.0, 1.0, -1.0]), conformer[1]
+
+
+def test_a_mirror_match_of_a_chiral_molecule_is_a_miss():
+    # Ethanol-1-d is chiral by its deuterium alone, which the potential and the heavy-atom fit
+    # cannot see. The two gauche conformers of one enantiomer differ in the heavy-atom fit, and
+    # the reflection of one is the other with the hydrogen and the deuterium exchanged.
+    smiles, quad = "C[C@H]([2H])CO", (0, 1, 3, 4)
+    m, left = turned(smiles, quad, 62.0)
+    _, right = turned(smiles, quad, -62.0)
+    assert abs(left[1] - right[1]) < ENERGY_TIE
+    assert not m.same(left, right)
+    assert m.rmsd(left[0], reflected(right)[0]) < 0.05
+    assert m.perceived_key(reflected(right)[0]) != m.reference
+    assert not m.same_or_mirror(left, right)
+    assert m.same_or_mirror(left, left)
+
+
+def test_a_mirror_match_of_a_meso_molecule_is_a_hit():
+    m, left = turned("C[C@H](F)[C@@H](C)F", (0, 1, 3, 4), 62.0)
+    _, right = turned("C[C@H](F)[C@@H](C)F", (0, 1, 3, 4), -62.0)
+    assert not m.same(left, right)
+    assert m.perceived_key(reflected(right)[0]) == m.reference
+    assert m.same_or_mirror(left, right)
 
 
 def test_mirror_hits_stay_blank_for_rows_written_before_the_column(tmp_path):
