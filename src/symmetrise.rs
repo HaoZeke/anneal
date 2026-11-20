@@ -981,13 +981,82 @@ pub fn detect_generators_in(
     out
 }
 
+/// One geometry's [`detect_all`] answer.
+///
+/// The key is the coordinate bits, the orders and the tolerance bits. A
+/// hash of the geometry is not an identity: a collision would return
+/// another structure's operations. One slot is enough, because a proposal
+/// asks about the geometry it is holding and the next different geometry
+/// replaces the slot.
+struct DetectAllMemo {
+    bits: Vec<u64>,
+    orders: Vec<usize>,
+    tolerance_bits: u64,
+    found: Vec<Candidate>,
+}
+
+std::thread_local! {
+    static DETECT_ALL_MEMO: std::cell::RefCell<Option<DetectAllMemo>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn recall_detect_all(
+    x: ArrayView1<f64>,
+    orders: &[usize],
+    tolerance: f64,
+) -> Option<Vec<Candidate>> {
+    DETECT_ALL_MEMO.with(|slot| {
+        let slot = slot.borrow();
+        let memo = slot.as_ref()?;
+        let same = memo.tolerance_bits == tolerance.to_bits()
+            && memo.orders == orders
+            && memo.bits.len() == x.len()
+            && memo
+                .bits
+                .iter()
+                .zip(x.iter())
+                .all(|(bits, value)| *bits == value.to_bits());
+        same.then(|| memo.found.clone())
+    })
+}
+
+fn store_detect_all(x: ArrayView1<f64>, orders: &[usize], tolerance: f64, found: &[Candidate]) {
+    DETECT_ALL_MEMO.with(|slot| {
+        *slot.borrow_mut() = Some(DetectAllMemo {
+            bits: x.iter().map(|value| value.to_bits()).collect(),
+            orders: orders.to_vec(),
+            tolerance_bits: tolerance.to_bits(),
+            found: found.to_vec(),
+        });
+    });
+}
+
 /// All approximate symmetries of `x`, proper and improper.
 ///
 /// [`detect`] returns only the best one, which is enough to symmetrise toward a
 /// single operation and not enough to build a group: a tetrahedral structure
 /// needs a three-fold axis and a plane together, and either alone generates a
 /// subgroup that is not the answer.
+///
+/// A repeated call on the same coordinate bits, orders and tolerance returns
+/// the candidates already computed. The slot holds one geometry, so it
+/// answers the second call inside a proposal and nothing after the geometry
+/// changes.
 pub fn detect_all(
+    x: ArrayView1<f64>,
+    n: usize,
+    orders: &[usize],
+    tolerance: f64,
+) -> Vec<Candidate> {
+    if let Some(found) = recall_detect_all(x, orders, tolerance) {
+        return found;
+    }
+    let out = detect_all_scan(x, n, orders, tolerance);
+    store_detect_all(x, orders, tolerance, &out);
+    out
+}
+
+fn detect_all_scan(
     x: ArrayView1<f64>,
     n: usize,
     orders: &[usize],
@@ -2829,5 +2898,36 @@ mod shell_tests {
             });
             assert!(on_principal, "{candidate:?}");
         }
+    }
+
+    /// The same bits, orders and tolerance return the stored candidates.
+    /// A different order list or a moved coordinate does not.
+    #[test]
+    fn the_same_geometry_reuses_its_detected_operations() {
+        let x = Array1::from_vec(vec![
+            2.0, 1.0, 0.0, -2.0, 1.0, 0.0, -2.0, -1.0, 0.0, 2.0, -1.0, 0.0,
+        ]);
+        let orders = [2usize, 4];
+        let first = detect_all(x.view(), 4, &orders, 1e-6);
+        let second = detect_all(x.view(), 4, &orders, 1e-6);
+        assert_eq!(first, second);
+        assert!(
+            first
+                .iter()
+                .any(|candidate| candidate.order == 2 && !candidate.improper)
+        );
+        let half_only = detect_all(x.view(), 4, &[2], 1e-6);
+        assert!(
+            half_only
+                .iter()
+                .all(|candidate| candidate.order == 2 || candidate.improper)
+        );
+        let again = detect_all(x.view(), 4, &orders, 1e-6);
+        assert_eq!(again, first);
+        let mut moved = x.clone();
+        moved[0] += 0.5;
+        let _changed = detect_all(moved.view(), 4, &orders, 1e-6);
+        let restored = detect_all(x.view(), 4, &orders, 1e-6);
+        assert_eq!(restored, first);
     }
 }
