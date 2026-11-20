@@ -4450,7 +4450,7 @@ where
         && !kernels
             .iter()
             .any(|m| matches!(m, ClusterMove::Twin { .. } | ClusterMove::Reseed { .. }));
-    let mut morph_gate_alloc = FlooredThompson::new(3);
+    let mut morph_gate_alloc = FlooredThompson::new(4);
     let mut observed_growth = crate::lattice::Growth::default();
     let mut general_taboo = general::FingerprintTaboo::default();
     let mut collective = general::CollectiveShare::default();
@@ -7147,6 +7147,18 @@ where
                 n,
                 rng,
             )
+        } else if morph_gate_arm == 3 && !species_escape_trial && !angular && !cage_edit {
+            morph_action_arm = Some(3);
+            match crate::lattice::drawn_site(x.view(), rng) {
+                Some(site) => crate::lattice::candidate_reusing(
+                    &mut observed_growth,
+                    crate::lattice::Source::Site(site),
+                    x.view(),
+                    n,
+                    rng,
+                ),
+                None => x.to_owned(),
+            }
         } else if angular {
             // The criterion decides this is the right move, so it takes the
             // step rather than competing as one arm among many.
@@ -7321,6 +7333,8 @@ where
             "twin".to_owned()
         } else if morph_action_arm == Some(2) {
             "observed".to_owned()
+        } else if morph_action_arm == Some(3) {
+            "site".to_owned()
         } else if angular {
             "angular".to_owned()
         } else {

@@ -1,6 +1,6 @@
 // Copyright (c) anneal developers
 //! A stalled monoatomic cluster gates template-free morphology escapes
-//! (`twin` and `observed`) via the search's existing stall counters and
+//! (`twin`, `observed` and `site`) via the search's existing stall counters and
 //! bandit reward bookkeeping (`FlooredThompson`), leaving short walks and
 //! disabled configurations untouched.
 
@@ -12,6 +12,10 @@ use anneal_core::potentials::PairPotential;
 use ndarray::ArrayView1;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
+
+fn is_morph(move_type: &str) -> bool {
+    matches!(move_type, "twin" | "observed" | "site")
+}
 
 fn run_pair(
     cfg: &Config,
@@ -81,12 +85,12 @@ fn stalled_monoatomic_search_escapes_short_range_funnel_without_templates() {
     let morph_draws: usize = outcome
         .proposal_counts
         .iter()
-        .filter(|c| c.move_type == "twin" || c.move_type == "observed")
+        .filter(|c| is_morph(&c.move_type))
         .map(|c| c.proposed)
         .sum();
     assert!(
         morph_draws > 0,
-        "expected twin/observed stall escapes after patience, proposal_counts={:?}",
+        "expected twin/observed/site stall escapes after patience, proposal_counts={:?}",
         outcome.proposal_counts
     );
 }
@@ -104,7 +108,7 @@ fn morphology_escape_respects_disabled_stall_or_displacement_only() {
         !out_no_stall
             .proposal_counts
             .iter()
-            .any(|c| c.move_type == "twin" || c.move_type == "observed"),
+            .any(|c| is_morph(&c.move_type)),
         "disabled stall exits must not run morphology escapes: {:?}",
         out_no_stall.proposal_counts
     );
@@ -116,7 +120,7 @@ fn morphology_escape_respects_disabled_stall_or_displacement_only() {
         !out_disp
             .proposal_counts
             .iter()
-            .any(|c| c.move_type == "twin" || c.move_type == "observed"),
+            .any(|c| is_morph(&c.move_type)),
         "displacement_only must not run morphology escapes: {:?}",
         out_disp.proposal_counts
     );
@@ -128,7 +132,7 @@ fn morphology_escape_respects_disabled_stall_or_displacement_only() {
         !out_zero_restart
             .proposal_counts
             .iter()
-            .any(|c| c.move_type == "twin" || c.move_type == "observed"),
+            .any(|c| is_morph(&c.move_type)),
         "restart_patience=0 must not run morphology escapes: {:?}",
         out_zero_restart.proposal_counts
     );
@@ -140,7 +144,7 @@ fn morphology_escape_respects_disabled_stall_or_displacement_only() {
         !out_zero_stall
             .proposal_counts
             .iter()
-            .any(|c| c.move_type == "twin" || c.move_type == "observed"),
+            .any(|c| is_morph(&c.move_type)),
         "stall_patience=0 must not run morphology escapes: {:?}",
         out_zero_stall.proposal_counts
     );
