@@ -38,6 +38,7 @@ import numpy as np
 from rdkit import Chem
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from bench_host import run_host  # noqa: E402
 import h2h_common as hc  # noqa: E402
 
 RMSD = 0.25
@@ -169,7 +170,7 @@ def score(runs: Path, seeds_out: Path, summary_out: Path, polish_cache: Path) ->
                 "candidates": int(len(es)),
                 "invalid": int((~ok).sum()) if len(es) else 0,
                 **{k: info.get(k) for k in ("wall_s", "pot_s", "outside_s", "grad_calls", "energy_calls", "embed_s", "budget", "openconf_revision", "code_revision")},
-                "host": info.get("host"),
+                "host": run_host(info),
             }
         )
     references = {}

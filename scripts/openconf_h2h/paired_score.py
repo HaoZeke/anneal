@@ -39,6 +39,7 @@ import numpy as np
 from scipy.stats import fisher_exact, mannwhitneyu
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from bench_host import run_host  # noqa: E402
 import h2h_common as hc  # noqa: E402
 from h2h_score import WINDOW, Molecule, _fmt  # noqa: E402
 
@@ -181,7 +182,7 @@ def score_runs(runs: Path, rows_path: Path, workers: int) -> None:
                     "error": info.get("error"),
                     "openconf_revision": info.get("openconf_revision"),
                     "code_revision": info.get("code_revision"),
-                    "host": info["host"],
+                    "host": run_host(info),
                 }
             )
     fresh = not rows_path.is_file()

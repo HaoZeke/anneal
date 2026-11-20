@@ -16,3 +16,13 @@ def host_label() -> str:
     if label:
         return label
     return "bench" if os.uname().nodename == "bench" else "unlabelled"
+
+
+def run_host(info: dict) -> str:
+    """The host label a ``job.json`` recorded.
+
+    A job written before the label was recorded has no ``host`` key; its row
+    reads ``unlabelled``. The machine name such a file may hold under another
+    key is never copied into a row.
+    """
+    return str(info.get("host") or "").strip() or "unlabelled"
