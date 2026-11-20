@@ -61,6 +61,21 @@ impl Default for Expectation {
     }
 }
 
+/// One leading `0x`, in either case, is not part of the hex digits.
+fn without_hex_prefix(id: &str) -> &str {
+    let bytes = id.as_bytes();
+    if bytes.len() >= 2 && bytes[0] == b'0' && (bytes[1] == b'x' || bytes[1] == b'X') {
+        &id[2..]
+    } else {
+        id
+    }
+}
+
+/// Cap'n Proto file ids match after an optional `0x` prefix and ASCII case.
+fn schema_ids_match(reported: &str, expected: &str) -> bool {
+    without_hex_prefix(reported).eq_ignore_ascii_case(without_hex_prefix(expected))
+}
+
 fn text(result: capnp::Result<capnp::text::Reader<'_>>, field: &str) -> Result<String, String> {
     result
         .map_err(|e| format!("capabilities.{field} unreadable: {e}"))?
@@ -94,7 +109,7 @@ pub fn check_capabilities(caps: Reader<'_>, want: &Expectation) -> Result<(), St
         }
     }
     let schema_id = text(caps.get_schema_id(), "schemaId")?;
-    if !schema_id.is_empty() && schema_id != want.schema_id {
+    if !schema_id.is_empty() && !schema_ids_match(&schema_id, want.schema_id) {
         return Err(format!("schema id {schema_id} is not {}", want.schema_id));
     }
     if caps.get_bridge_abi_major() != 0 {
@@ -366,6 +381,28 @@ mod tests {
             (1, 0, 1, 1, 0, 0x3),
             "update Expectation in CppCore/rgpot/abi/Compat.hpp with these"
         );
+    }
+
+    #[test]
+    fn schema_id_ignores_an_optional_0x_prefix_and_case() {
+        let want = Expectation::default();
+        let bare = SCHEMA_ID
+            .strip_prefix("0x")
+            .expect("the stored file id has an 0x prefix");
+        assert_ne!(bare, want.schema_id);
+        assert_eq!(verdict(|caps| caps.set_schema_id(bare), &want), Ok(()));
+        let upper = bare.to_ascii_uppercase();
+        assert_eq!(
+            verdict(|caps| caps.set_schema_id(upper.as_str()), &want),
+            Ok(())
+        );
+        let prefixed = format!("0X{upper}");
+        assert_eq!(
+            verdict(|caps| caps.set_schema_id(prefixed.as_str()), &want),
+            Ok(())
+        );
+        let err = verdict(|caps| caps.set_schema_id("deadbeef"), &want).unwrap_err();
+        assert!(err.contains("schema id"), "{err}");
     }
 
     #[test]
