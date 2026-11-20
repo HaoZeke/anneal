@@ -331,11 +331,15 @@ impl Cloud {
     }
 
     fn plane_deviation(&self, axis: [f64; 3], cap: f64) -> Option<f64> {
+        self.matrix_deviation(&mirror_matrix(axis), cap)
+    }
+
+    /// Deviation of the cloud under the orthogonal map `m` about its centre.
+    fn matrix_deviation(&self, m: &Rot, cap: f64) -> Option<f64> {
         let n = self.xs.len();
         if n == 0 {
             return None;
         }
-        let m = mirror_matrix(axis);
         let mut total = 0.0;
         let mut index = 0usize;
         let mut stored = [[0.0; 3]; 4];
@@ -356,6 +360,37 @@ impl Cloud {
         }
         Some((total / n as f64).sqrt())
     }
+}
+
+/// How far `x` is from being symmetric under the orthogonal map `g`, about
+/// the centroid, class by class: the root-mean-square distance of every
+/// point from the nearest image of a point of its own class, as
+/// [`deviation`] measures a rotation. `None` once the running value is past
+/// `cap`, and a value kept strictly below `cap` is the same either way.
+pub fn operation_deviation(
+    x: ArrayView1<f64>,
+    n: usize,
+    classes: Option<&[u32]>,
+    g: &Rot,
+    cap: f64,
+) -> Option<f64> {
+    if n == 0 {
+        return None;
+    }
+    Matcher::new(x, n, classes).deviation(cap, |cloud, cap| cloud.matrix_deviation(g, cap))
+}
+
+/// [`operation_deviation`] about `centre` instead of the centroid, with no
+/// classes: the whole of `x` is one cloud.
+pub fn operation_deviation_about(
+    x: ArrayView1<f64>,
+    n: usize,
+    g: &Rot,
+    centre: [f64; 3],
+    cap: f64,
+) -> Option<f64> {
+    let members: Vec<usize> = (0..n).collect();
+    Cloud::from_members(x, &members, centre).matrix_deviation(g, cap)
 }
 
 /// Axes worth testing, taken from the structure rather than at random.
@@ -1005,6 +1040,73 @@ mod tests {
         let x = octahedron(1.0);
         let d = deviation(x.view(), 6, [0.0, 0.0, 1.0], 4);
         assert!(d < 1e-12, "a four-fold axis of an octahedron gave {d}");
+    }
+
+    /// The deviation of a matrix is the deviation of the operation it is: a
+    /// rotation gives the rotation's, a mirror gives the plane's bit for bit,
+    /// and a map the structure lacks gives a large one.
+    #[test]
+    fn the_deviation_of_a_matrix_is_that_of_the_operation() {
+        let x = jitter(&octahedron(1.3), 0.04);
+        for axis in [[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.6, 0.0, 0.8]] {
+            for order in 2..=7 {
+                let angle = 2.0 * std::f64::consts::PI / order as f64;
+                let want = deviation(x.view(), 6, axis, order);
+                let got =
+                    operation_deviation(x.view(), 6, None, &rot_matrix(axis, angle), f64::INFINITY)
+                        .expect("no cap, so a value");
+                assert!((want - got).abs() < 1e-12, "{axis:?} {order}: {want} {got}");
+            }
+            let want = plane_deviation(x.view(), 6, axis);
+            let got = operation_deviation(x.view(), 6, None, &mirror_matrix(axis), f64::INFINITY);
+            assert_eq!(got.map(f64::to_bits), Some(want.to_bits()));
+        }
+        let exact = octahedron(1.0);
+        let quarter = rot_matrix([0.0, 0.0, 1.0], std::f64::consts::FRAC_PI_2);
+        let eighth = rot_matrix([0.0, 0.0, 1.0], std::f64::consts::FRAC_PI_4);
+        let kept = operation_deviation(exact.view(), 6, None, &quarter, f64::INFINITY).unwrap();
+        let lost = operation_deviation(exact.view(), 6, None, &eighth, f64::INFINITY).unwrap();
+        assert!(kept < 1e-12 && lost > 0.1, "{kept} {lost}");
+        assert_eq!(
+            operation_deviation(exact.view(), 6, None, &eighth, 0.01),
+            None
+        );
+    }
+
+    /// With classes an operation must take a point onto a point of its own
+    /// class: the half turn that swaps the two ends of a pair of unlike
+    /// points deviates by the length of the pair when the classes are told
+    /// apart and by nothing when they are not.
+    #[test]
+    fn a_class_blind_symmetry_can_deviate_when_classes_are_read() {
+        let x = octahedron(1.0);
+        let classes = [0u32, 1, 0, 0, 0, 0];
+        let half = rot_matrix([0.0, 0.0, 1.0], std::f64::consts::PI);
+        let blind = operation_deviation(x.view(), 6, None, &half, f64::INFINITY).unwrap();
+        let classed =
+            operation_deviation(x.view(), 6, Some(&classes), &half, f64::INFINITY).unwrap();
+        assert!(blind < 1e-12, "{blind}");
+        assert!(classed > 0.3, "{classed}");
+    }
+
+    /// The same operation about the point it fixes has no deviation, and
+    /// about a point it does not, a large one.
+    #[test]
+    fn a_deviation_about_a_centre_is_smallest_at_the_centre_of_the_symmetry() {
+        let shift = [0.4, -0.2, 0.1];
+        let mut y = octahedron(1.0);
+        for a in 0..6 {
+            for k in 0..3 {
+                y[3 * a + k] += shift[k];
+            }
+        }
+        let quarter = rot_matrix([0.0, 0.0, 1.0], std::f64::consts::FRAC_PI_2);
+        let at = operation_deviation_about(y.view(), 6, &quarter, shift, f64::INFINITY).unwrap();
+        let off = operation_deviation_about(y.view(), 6, &quarter, [0.0, 0.0, 0.0], f64::INFINITY)
+            .unwrap();
+        let mean = operation_deviation(y.view(), 6, None, &quarter, f64::INFINITY).unwrap();
+        assert!(at < 1e-12 && off > 0.1, "{at} {off}");
+        assert!((at - mean).abs() < 1e-12, "{at} {mean}");
     }
 
     #[test]
