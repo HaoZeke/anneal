@@ -1,10 +1,10 @@
 //! Native preset control with backend-owned Array API storage and random draws.
 
-use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 
 use super::Preset;
+use super::errors::invalid_argument;
 use crate::accept::{Metropolis, ProbabilityArithmetic, TsallisAccept};
 use crate::cool::{Cooling, LogCool, ReciprocalCool, TsallisCool};
 use crate::movekernel::{Cauchy, Gaussian, TsallisVisit};
@@ -21,7 +21,7 @@ impl DevicePolicy {
             if value.is_finite() && value > 0.0 {
                 Ok(())
             } else {
-                Err(PyValueError::new_err(format!(
+                Err(invalid_argument(format!(
                     "{name} must be positive and finite"
                 )))
             }
@@ -40,7 +40,7 @@ impl DevicePolicy {
             Preset::Gsa(p) => {
                 positive(p.t_init, "t_init")?;
                 if !(p.q_v > 1.0 && p.q_v < 3.0 && p.q_a.is_finite()) {
-                    return Err(PyValueError::new_err(
+                    return Err(invalid_argument(
                         "q_v must lie in (1, 3) and q_a must be finite",
                     ));
                 }
@@ -280,7 +280,7 @@ fn run_native<'py>(
     start: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Bound<'py, PyAny>> {
     if n_epochs == 0 || steps_per_epoch == 0 || n_chains == Some(0) {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "n_epochs, steps_per_epoch and n_chains must be positive",
         ));
     }
@@ -289,7 +289,7 @@ fn run_native<'py>(
         .checked_mul(steps_per_epoch)
         .and_then(|n| n.checked_add(1))
         .and_then(|n| n.checked_mul(chains))
-        .ok_or_else(|| PyValueError::new_err("evaluation count overflows usize"))?;
+        .ok_or_else(|| invalid_argument("evaluation count overflows usize"))?;
     let policy = DevicePolicy::new(preset)?;
     let arrays = DeviceArrays::new(py, low)?;
     let low = arrays.array(low)?;
@@ -297,14 +297,12 @@ fn run_native<'py>(
     let low_shape: Vec<usize> = low.getattr("shape")?.extract()?;
     let high_shape: Vec<usize> = high.getattr("shape")?.extract()?;
     if low_shape != high_shape || low_shape.len() != 1 {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "low and high must be one-dimensional arrays of equal shape",
         ));
     }
     if low_shape[0] == 0 {
-        return Err(PyValueError::new_err(
-            "bounds must have at least one dimension",
-        ));
+        return Err(invalid_argument("bounds must have at least one dimension"));
     }
     let finite_bounds = arrays.binary(
         "logical_and",
@@ -319,9 +317,7 @@ fn run_native<'py>(
     // Domain validation reads one reduction scalar before drawing or evaluating
     // points. Bound arrays and all per-transition decisions stay on the device.
     if !arrays.unary("all", &valid_bounds)?.is_truthy()? {
-        return Err(PyValueError::new_err(
-            "bounds must be finite with low <= high",
-        ));
+        return Err(invalid_argument("bounds must be finite with low <= high"));
     }
     let batched = n_chains.is_some();
     let shape = if batched {
@@ -340,7 +336,7 @@ fn run_native<'py>(
         Some(start) => {
             let start = arrays.array(start)?;
             if start.getattr("shape")?.extract::<Vec<usize>>()? != low_shape {
-                return Err(PyValueError::new_err(
+                return Err(invalid_argument(
                     "start must have the same shape as low and high",
                 ));
             }
@@ -348,7 +344,7 @@ fn run_native<'py>(
                 .unary("all", &arrays.unary("isfinite", &start)?)?
                 .is_truthy()?
             {
-                return Err(PyValueError::new_err("start coordinates must be finite"));
+                return Err(invalid_argument("start coordinates must be finite"));
             }
             start
         }

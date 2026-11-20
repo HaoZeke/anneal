@@ -20,13 +20,16 @@ _Result = dict[str, Any]
 __all__ = [
     "additive_independence",
     "amsa_optimize",
+    "AnnealError",
     "BasinBias",
     "bfwt_optimize",
     "Boltzmann",
     "Bounds",
+    "BoundsError",
     "box_ensemble_optimize",
     "cluster_search",
     "Config",
+    "ConfigError",
     "DEFAULT_HIT_TOL",
     "dmc_population_optimize",
     "energy_hits",
@@ -34,6 +37,7 @@ __all__ = [
     "EpochLine",
     "estimate_gle_omega0",
     "Fast",
+    "FeatureUnavailableError",
     "gle_langevin",
     "gle_langevin_objective",
     "gle_langevin_preconditioned",
@@ -43,11 +47,13 @@ __all__ = [
     "gpmd_optimize",
     "Gsa",
     "History",
+    "InvalidArgumentError",
     "landfold",
     "landfold_book",
     "LandfoldMap",
     "Ledger",
     "low_discrepancy_points",
+    "NoFiniteStartError",
     "osa_acceptance_rate",
     "pilot_draws_qmc",
     "polish",
@@ -61,6 +67,7 @@ __all__ = [
     "qmc_trust_region_poll",
     "qmc_trust_region_poll_objective",
     "quench",
+    "RemovedConfigKeyError",
     "run",
     "_run_device",
     "_run_device_ensemble",
@@ -74,6 +81,18 @@ __all__ = [
 __version__: Final[str]
 DEFAULT_HIT_TOL: Final[float]
 SEARCH_HIT_TOL: Final[float]
+
+class AnnealError(ValueError): ...
+class InvalidArgumentError(AnnealError): ...
+class BoundsError(InvalidArgumentError): ...
+class ConfigError(AnnealError):
+    key: str
+
+class RemovedConfigKeyError(ConfigError): ...
+class FeatureUnavailableError(AnnealError): ...
+
+class NoFiniteStartError(AnnealError):
+    attempts: int
 
 @final
 class Boltzmann:

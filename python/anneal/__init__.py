@@ -39,18 +39,25 @@ import json
 import numpy as np
 
 from anneal._core import (
+    AnnealError,
     BasinBias,
     Boltzmann,
     Bounds,
+    BoundsError,
     Config,
+    ConfigError,
     DEFAULT_HIT_TOL,
     SEARCH_HIT_TOL,
     EpochLine,
     Fast,
+    FeatureUnavailableError,
     Gsa,
     History,
+    InvalidArgumentError,
     Ledger,
+    NoFiniteStartError,
     PyObjective,
+    RemovedConfigKeyError,
     __version__,
     cluster_search as _core_cluster_search,
     energy_hits,
@@ -105,11 +112,11 @@ def _flat_or_none(value):
 
 
 def _count(name, value, minimum):
-    """A whole number of at least ``minimum``, or a ValueError naming it."""
+    """A whole number of at least ``minimum``, or an InvalidArgumentError naming it."""
     count = int(value)
     if count != value or count < minimum:
         msg = f"{name} must be a whole number of at least {minimum}, got {value!r}"
-        raise ValueError(msg)
+        raise InvalidArgumentError(msg)
     return count
 
 
@@ -120,7 +127,7 @@ def _max_evals(value):
     count = int(value)
     if count != value or count < 1:
         msg = f"max_evals must be a whole number of calls, at least 1, got {value!r}"
-        raise ValueError(msg)
+        raise InvalidArgumentError(msg)
     return count
 
 
@@ -1201,11 +1208,11 @@ def _scipy_bounds_to_low_high(bounds, dim):
         if arr.ndim == 2 and arr.shape == (dim, 2):
             low, high = arr[:, 0].copy(), arr[:, 1].copy()
         elif arr.ndim == 1 and arr.size == dim:
-            raise ValueError("bounds must be pairs (low, high) per coordinate")
+            raise BoundsError("bounds must be pairs (low, high) per coordinate")
         else:
-            raise ValueError(f"bounds shape {arr.shape} does not match dimension {dim}")
+            raise BoundsError(f"bounds shape {arr.shape} does not match dimension {dim}")
     if low.size != dim or high.size != dim:
-        raise ValueError(f"bounds length {low.size} does not match x0 length {dim}")
+        raise BoundsError(f"bounds length {low.size} does not match x0 length {dim}")
     return low, high
 
 
@@ -1260,12 +1267,12 @@ def minimize(
     x0_arr = np.asarray(x0, dtype=np.float64).reshape(-1)
     dim = int(x0_arr.size)
     if dim < 1:
-        raise ValueError("x0 must be nonempty")
+        raise InvalidArgumentError("x0 must be nonempty")
     low, high = _scipy_bounds_to_low_high(bounds, dim)
     if budget is None:
         budget = max(32, 80 * dim)
     if replicas < 1:
-        raise ValueError("replicas must be positive")
+        raise InvalidArgumentError("replicas must be positive")
     archive = open_parameter_store(store)
     if archive is not None:
         observed = [
@@ -1553,21 +1560,28 @@ def global_optimize_objective(
 
 
 __all__ = [
+    "AnnealError",
     "BasinBias",
     "Boltzmann",
     "Bounds",
+    "BoundsError",
     "Config",
+    "ConfigError",
     "DEFAULT_HIT_TOL",
     "SEARCH_HIT_TOL",
     "DeviceHistory",
     "EnsembleHistory",
     "EpochLine",
     "Fast",
+    "FeatureUnavailableError",
     "Gsa",
     "History",
+    "InvalidArgumentError",
     "LandfoldMap",
     "Ledger",
+    "NoFiniteStartError",
     "PyObjective",
+    "RemovedConfigKeyError",
     "Anneal",
     "cluster_search",
     "energy_hits",

@@ -133,6 +133,12 @@ def stub_problems(text, module):
         if name not in present:
             continue
         cls = getattr(module, name)
+        if issubclass(cls, BaseException):
+            stub_bases = [ast.unparse(base) for base in node.bases]
+            run_bases = [base.__name__ for base in cls.__bases__]
+            if stub_bases != run_bases:
+                problems.append(f"{name}: stub bases {stub_bases} != module bases {run_bases}")
+            continue
         members = _class_members(node)
         init = members.pop("__new__", None)
         runtime_members = {
@@ -212,6 +218,7 @@ def test_stub_covers_every_name_the_package_re_exports():
         (("class Ledger:\n    def __new__(cls, budget: int) -> Self: ...", "class Ledger:"), "Ledger() is constructible"),
         (("class EpochLine:", "class EpochLine:\n    def __new__(cls, epoch: int) -> Self: ..."), "EpochLine(): stub arguments"),
         (('    "Gsa",\n', ""), "__all__ differs"),
+        (("class BoundsError(InvalidArgumentError)", "class BoundsError(AnnealError)"), "BoundsError: stub bases"),
         (("    @property\n    def remaining(self) -> int: ...\n", ""), "Ledger.remaining is in the module"),
     ],
 )

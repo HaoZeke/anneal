@@ -20,7 +20,7 @@
 
 use ndarray::{Array1, ArrayView1};
 use numpy::{PyArray1, PyReadonlyArray1};
-use pyo3::exceptions::{PyTypeError, PyValueError};
+use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyFloat};
 use rand::SeedableRng;
@@ -31,7 +31,10 @@ use eindir_core::{Bounds, Objective};
 use crate::history::History;
 use crate::variant::{boltzmann_in_box, fast_in_box, gsa_in_box};
 
+use errors::{bounds_error, config_error, invalid_argument, search_error};
+
 mod device;
+mod errors;
 mod landfold;
 mod portfolio_peers;
 
@@ -56,27 +59,23 @@ fn validate_box_bounds(low: &[f64], high: &[f64]) -> PyResult<()> {
 /// Fixed coordinates are valid only for drivers that preserve those axes.
 fn validate_box_domain(low: &[f64], high: &[f64], allow_fixed: bool) -> PyResult<()> {
     if low.len() != high.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
+        return Err(bounds_error("low and high must have the same length"));
     }
     if low.is_empty() {
-        return Err(PyValueError::new_err(
-            "bounds must have at least one dimension",
-        ));
+        return Err(bounds_error("bounds must have at least one dimension"));
     }
     let mut total_width = 0.0;
     for (i, (&lo, &hi)) in low.iter().zip(high.iter()).enumerate() {
         // Reflection folds with period 2 (hi - lo), and the drivers average
         // widths across axes, so both must stay finite.
         if !lo.is_finite() || !hi.is_finite() || !(2.0 * (hi - lo)).is_finite() {
-            return Err(PyValueError::new_err(format!(
+            return Err(bounds_error(format!(
                 "bounds must be finite, with a finite width, at dimension {i}"
             )));
         }
         total_width += hi - lo;
         if !total_width.is_finite() {
-            return Err(PyValueError::new_err(
+            return Err(bounds_error(
                 "the box is too wide: the sum of its widths is not finite",
             ));
         }
@@ -86,7 +85,7 @@ fn validate_box_domain(low: &[f64], high: &[f64], allow_fixed: bool) -> PyResult
             } else {
                 "strictly less than"
             };
-            return Err(PyValueError::new_err(format!(
+            return Err(bounds_error(format!(
                 "low[{i}] must be {relation} high[{i}] (got {lo}, {hi})"
             )));
         }
@@ -103,7 +102,7 @@ fn py_view1<'py>(py: Python<'py>, x: ArrayView1<f64>) -> Bound<'py, PyArray1<f64
 
 fn require_positive_budget(budget: usize) -> PyResult<()> {
     if budget == 0 {
-        Err(PyValueError::new_err("budget must be positive"))
+        Err(invalid_argument("budget must be positive"))
     } else {
         Ok(())
     }
@@ -131,7 +130,7 @@ fn parse_box_domain(
     let x0 = if let Some(x0) = x0 {
         let sl = x0.as_slice()?;
         if sl.len() != dim {
-            return Err(PyValueError::new_err(format!(
+            return Err(invalid_argument(format!(
                 "x0 length {} does not match dimension {}",
                 sl.len(),
                 dim
@@ -167,7 +166,7 @@ fn parse_box_search(
 ) -> PyResult<ParsedBoxSearch> {
     require_positive_budget(budget)?;
     if replicas == 0 {
-        return Err(PyValueError::new_err("replicas must be positive"));
+        return Err(invalid_argument("replicas must be positive"));
     }
     let (bounds, dim, x0) = parse_box_domain(low, high, x0, true)?;
     let history = match history {
@@ -175,13 +174,13 @@ fn parse_box_search(
         "private" => crate::methods::ensemble::HistoryMode::Private,
         "shared" => crate::methods::ensemble::HistoryMode::Shared,
         other => {
-            return Err(PyValueError::new_err(format!(
+            return Err(invalid_argument(format!(
                 "history must be none, private, or shared, got {other:?}"
             )));
         }
     };
     let membership = crate::methods::minima_hopping::HistoryMembership::parse(Some(membership))
-        .map_err(PyValueError::new_err)?;
+        .map_err(invalid_argument)?;
     Ok(ParsedBoxSearch {
         bounds,
         dim,
@@ -193,7 +192,7 @@ fn parse_box_search(
 
 fn validate_max_evals(max_evals: Option<usize>) -> PyResult<()> {
     if max_evals == Some(0) {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "max_evals must be at least 1: the start costs one evaluation",
         ));
     }
@@ -212,7 +211,7 @@ fn read_x0(
     };
     let values = x0.as_slice()?.to_vec();
     if values.len() != low.len() {
-        return Err(PyValueError::new_err(format!(
+        return Err(invalid_argument(format!(
             "x0 has length {} but low and high have length {}",
             values.len(),
             low.len()
@@ -220,10 +219,10 @@ fn read_x0(
     }
     for (i, &v) in values.iter().enumerate() {
         if !v.is_finite() {
-            return Err(PyValueError::new_err(format!("x0[{i}] is not finite")));
+            return Err(invalid_argument(format!("x0[{i}] is not finite")));
         }
         if v < low[i] || v > high[i] {
-            return Err(PyValueError::new_err(format!(
+            return Err(invalid_argument(format!(
                 "x0[{i}] = {v} lies outside [{}, {}]",
                 low[i], high[i]
             )));
@@ -267,12 +266,10 @@ impl PyBasinBias {
     #[pyo3(signature = (n_points, merge_radius = 1e-2, w0 = 0.25, gamma = 5.0))]
     fn new(n_points: usize, merge_radius: f64, w0: f64, gamma: f64) -> PyResult<Self> {
         if n_points < 2 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "n_points must be at least 2",
-            ));
+            return Err(invalid_argument("n_points must be at least 2"));
         }
         if !(gamma > 1.0) || !(w0 > 0.0) || !(merge_radius > 0.0) {
-            return Err(pyo3::exceptions::PyValueError::new_err(
+            return Err(invalid_argument(
                 "require gamma > 1, w0 > 0, merge_radius > 0",
             ));
         }
@@ -294,7 +291,7 @@ impl PyBasinBias {
         use crate::bias::Bias;
         let slice = x
             .as_slice()
-            .map_err(|_| pyo3::exceptions::PyValueError::new_err("x must be contiguous"))?;
+            .map_err(|_| invalid_argument("x must be contiguous"))?;
         let v = ndarray::ArrayView1::from(slice);
         let s = self.inner.cv(v);
         Ok(self.inner.potential(s.view()))
@@ -304,11 +301,11 @@ impl PyBasinBias {
     fn deposit(&mut self, x: numpy::PyReadonlyArray1<f64>, temp: f64) -> PyResult<()> {
         use crate::bias::Bias;
         if !(temp > 0.0) {
-            return Err(pyo3::exceptions::PyValueError::new_err("temp must be > 0"));
+            return Err(invalid_argument("temp must be > 0"));
         }
         let slice = x
             .as_slice()
-            .map_err(|_| pyo3::exceptions::PyValueError::new_err("x must be contiguous"))?;
+            .map_err(|_| invalid_argument("x must be contiguous"))?;
         let v = ndarray::ArrayView1::from(slice);
         let s = self.inner.cv(v);
         self.inner.deposit(s.view(), temp);
@@ -842,14 +839,14 @@ fn run_hmc(
     let dim = low_vec.len();
     let q_max = 1.0 + 2.0 / dim as f64;
     if q > 1.0 && q >= q_max {
-        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+        return Err(invalid_argument(format!(
             "q-Gaussian momentum requires q < 1 + 2/dim = {q_max} for dim = {dim}; got q = {q}"
         )));
     }
     let x0_arr = if let Some(arr) = x0 {
         let values = arr.as_slice()?.to_vec();
         if values.len() != dim {
-            return Err(pyo3::exceptions::PyValueError::new_err(
+            return Err(invalid_argument(
                 "x0 must have the same length as low and high",
             ));
         }
@@ -910,18 +907,18 @@ fn polish(
     let high_vec = high.as_slice()?.to_vec();
     let x0_vec = x0.as_slice()?.to_vec();
     if low_vec.len() != high_vec.len() || low_vec.len() != x0_vec.len() {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "low, high, and x0 must have the same length",
         ));
     }
     if max_fevals < 1 {
-        return Err(PyValueError::new_err("max_fevals must be positive"));
+        return Err(invalid_argument("max_fevals must be positive"));
     }
     if step0 <= 0.0 {
-        return Err(PyValueError::new_err("step0 must be positive"));
+        return Err(invalid_argument("step0 must be positive"));
     }
     if grad_tol < 0.0 {
-        return Err(PyValueError::new_err("grad_tol must be non-negative"));
+        return Err(invalid_argument("grad_tol must be non-negative"));
     }
 
     let dim = low_vec.len();
@@ -969,23 +966,19 @@ fn qmc_polish(
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     if low_vec.len() != high_vec.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
+        return Err(invalid_argument("low and high must have the same length"));
     }
     if n_starts < 1 {
-        return Err(PyValueError::new_err("n_starts must be positive"));
+        return Err(invalid_argument("n_starts must be positive"));
     }
     if max_fevals_per_start < 1 {
-        return Err(PyValueError::new_err(
-            "max_fevals_per_start must be positive",
-        ));
+        return Err(invalid_argument("max_fevals_per_start must be positive"));
     }
     if step0 <= 0.0 {
-        return Err(PyValueError::new_err("step0 must be positive"));
+        return Err(invalid_argument("step0 must be positive"));
     }
     if grad_tol < 0.0 {
-        return Err(PyValueError::new_err("grad_tol must be non-negative"));
+        return Err(invalid_argument("grad_tol must be non-negative"));
     }
 
     let dim = low_vec.len();
@@ -1056,18 +1049,16 @@ fn qmc_polish_objective(
     top_k: usize,
 ) -> PyResult<Py<PyDict>> {
     if n_starts < 1 {
-        return Err(PyValueError::new_err("n_starts must be positive"));
+        return Err(invalid_argument("n_starts must be positive"));
     }
     if max_fevals_per_start < 1 {
-        return Err(PyValueError::new_err(
-            "max_fevals_per_start must be positive",
-        ));
+        return Err(invalid_argument("max_fevals_per_start must be positive"));
     }
     if step0 <= 0.0 {
-        return Err(PyValueError::new_err("step0 must be positive"));
+        return Err(invalid_argument("step0 must be positive"));
     }
     if grad_tol < 0.0 {
-        return Err(PyValueError::new_err("grad_tol must be non-negative"));
+        return Err(invalid_argument("grad_tol must be non-negative"));
     }
 
     let result = crate::qmc_projected_gradient_polish(
@@ -1101,38 +1092,34 @@ fn qmc_best1bin_scout(
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     if low_vec.len() != high_vec.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
+        return Err(invalid_argument("low and high must have the same length"));
     }
     if low_vec.is_empty() {
-        return Err(PyValueError::new_err(
-            "bounds must have at least one dimension",
-        ));
+        return Err(invalid_argument("bounds must have at least one dimension"));
     }
     if max_evals < 1 {
-        return Err(PyValueError::new_err("max_evals must be positive"));
+        return Err(invalid_argument("max_evals must be positive"));
     }
     if population_size < 4 {
-        return Err(PyValueError::new_err("population_size must be at least 4"));
+        return Err(invalid_argument("population_size must be at least 4"));
     }
     if max_evals < population_size {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "max_evals must cover the initial population",
         ));
     }
     if !weight_min.is_finite() || weight_min < 0.0 {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "weight_min must be finite and non-negative",
         ));
     }
     if !weight_span.is_finite() || weight_span < 0.0 {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "weight_span must be finite and non-negative",
         ));
     }
     if !crossover_rate.is_finite() || !(0.0..=1.0).contains(&crossover_rate) {
-        return Err(PyValueError::new_err("crossover_rate must be in [0, 1]"));
+        return Err(invalid_argument("crossover_rate must be in [0, 1]"));
     }
 
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
@@ -1166,28 +1153,28 @@ fn qmc_best1bin_scout_objective(
     crossover_rate: f64,
 ) -> PyResult<Py<PyDict>> {
     if max_evals < 1 {
-        return Err(PyValueError::new_err("max_evals must be positive"));
+        return Err(invalid_argument("max_evals must be positive"));
     }
     if population_size < 4 {
-        return Err(PyValueError::new_err("population_size must be at least 4"));
+        return Err(invalid_argument("population_size must be at least 4"));
     }
     if max_evals < population_size {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "max_evals must cover the initial population",
         ));
     }
     if !weight_min.is_finite() || weight_min < 0.0 {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "weight_min must be finite and non-negative",
         ));
     }
     if !weight_span.is_finite() || weight_span < 0.0 {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "weight_span must be finite and non-negative",
         ));
     }
     if !crossover_rate.is_finite() || !(0.0..=1.0).contains(&crossover_rate) {
-        return Err(PyValueError::new_err("crossover_rate must be in [0, 1]"));
+        return Err(invalid_argument("crossover_rate must be in [0, 1]"));
     }
 
     let result = crate::qmc_best1bin_scout(
@@ -1210,19 +1197,19 @@ fn validate_qmc_gsa_global_search_args(
     q_a: f64,
 ) -> PyResult<()> {
     if max_evals < 1 {
-        return Err(PyValueError::new_err("max_evals must be positive"));
+        return Err(invalid_argument("max_evals must be positive"));
     }
     if n_chains < 1 {
-        return Err(PyValueError::new_err("n_chains must be positive"));
+        return Err(invalid_argument("n_chains must be positive"));
     }
     if !t_init.is_finite() || t_init <= 0.0 {
-        return Err(PyValueError::new_err("t_init must be finite and positive"));
+        return Err(invalid_argument("t_init must be finite and positive"));
     }
     if !(q_v > 1.0 && q_v < 3.0) {
-        return Err(PyValueError::new_err("q_v must lie in (1, 3)"));
+        return Err(invalid_argument("q_v must lie in (1, 3)"));
     }
     if !q_a.is_finite() {
-        return Err(PyValueError::new_err("q_a must be finite"));
+        return Err(invalid_argument("q_a must be finite"));
     }
     Ok(())
 }
@@ -1246,9 +1233,7 @@ fn qmc_gsa_global_search(
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     if low_vec.len() != high_vec.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
+        return Err(invalid_argument("low and high must have the same length"));
     }
     validate_box_bounds(&low_vec, &high_vec)?;
     validate_qmc_gsa_global_search_args(max_evals, n_chains, t_init, q_v, q_a)?;
@@ -1326,25 +1311,23 @@ fn qmc_trust_region_poll(
     let high_vec = high.as_slice()?.to_vec();
     let center_vec = center.as_slice()?.to_vec();
     if low_vec.len() != high_vec.len() || low_vec.len() != center_vec.len() {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "low, high, and center must have the same length",
         ));
     }
     if low_vec.is_empty() {
-        return Err(PyValueError::new_err(
-            "bounds must have at least one dimension",
-        ));
+        return Err(invalid_argument("bounds must have at least one dimension"));
     }
     if max_evals < 1 {
-        return Err(PyValueError::new_err("max_evals must be positive"));
+        return Err(invalid_argument("max_evals must be positive"));
     }
     if !radius_fraction.is_finite() || radius_fraction < 0.0 {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "radius_fraction must be finite and non-negative",
         ));
     }
     if n_levels < 1 {
-        return Err(PyValueError::new_err("n_levels must be positive"));
+        return Err(invalid_argument("n_levels must be positive"));
     }
 
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
@@ -1379,20 +1362,20 @@ fn qmc_trust_region_poll_objective(
 ) -> PyResult<Py<PyDict>> {
     let center_vec = center.as_slice()?.to_vec();
     if center_vec.len() != objective.dim() {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "center dimension must match objective bounds",
         ));
     }
     if max_evals < 1 {
-        return Err(PyValueError::new_err("max_evals must be positive"));
+        return Err(invalid_argument("max_evals must be positive"));
     }
     if !radius_fraction.is_finite() || radius_fraction < 0.0 {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "radius_fraction must be finite and non-negative",
         ));
     }
     if n_levels < 1 {
-        return Err(PyValueError::new_err("n_levels must be positive"));
+        return Err(invalid_argument("n_levels must be positive"));
     }
 
     let result = crate::qmc_trust_region_poll(
@@ -1427,26 +1410,22 @@ fn shifted_qmc_polish(
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     if low_vec.len() != high_vec.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
+        return Err(invalid_argument("low and high must have the same length"));
     }
     if n_starts < 1 {
-        return Err(PyValueError::new_err("n_starts must be positive"));
+        return Err(invalid_argument("n_starts must be positive"));
     }
     if max_fevals_per_start < 1 {
-        return Err(PyValueError::new_err(
-            "max_fevals_per_start must be positive",
-        ));
+        return Err(invalid_argument("max_fevals_per_start must be positive"));
     }
     if n_replicates < 1 {
-        return Err(PyValueError::new_err("n_replicates must be positive"));
+        return Err(invalid_argument("n_replicates must be positive"));
     }
     if step0 <= 0.0 {
-        return Err(PyValueError::new_err("step0 must be positive"));
+        return Err(invalid_argument("step0 must be positive"));
     }
     if grad_tol < 0.0 {
-        return Err(PyValueError::new_err("grad_tol must be non-negative"));
+        return Err(invalid_argument("grad_tol must be non-negative"));
     }
 
     let dim = low_vec.len();
@@ -1508,15 +1487,13 @@ fn additive_independence(
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     if low_vec.len() != high_vec.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
+        return Err(invalid_argument("low and high must have the same length"));
     }
     if max_fevals < 1 {
-        return Err(PyValueError::new_err("max_fevals must be positive"));
+        return Err(invalid_argument("max_fevals must be positive"));
     }
     if degree < 1 {
-        return Err(PyValueError::new_err("degree must be positive"));
+        return Err(invalid_argument("degree must be positive"));
     }
     // The backfitting fit reuses every pilot point across all coordinates, so
     // the pilot scales with the per-coordinate degree, not the dimension. A
@@ -1554,9 +1531,7 @@ fn estimate_gle_omega0(
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     if low_vec.len() != high_vec.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
+        return Err(invalid_argument("low and high must have the same length"));
     }
     let dim = low_vec.len();
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
@@ -1578,22 +1553,22 @@ fn gle_langevin_x0(
     };
     let values = x0.as_slice()?.to_vec();
     if values.len() != dim {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "x0 must have the same length as the bounds",
         ));
     }
     if values.iter().any(|value| !value.is_finite()) {
-        return Err(PyValueError::new_err("x0 must contain only finite values"));
+        return Err(invalid_argument("x0 must contain only finite values"));
     }
     Ok(Some(Array1::from_vec(values)))
 }
 
 fn validate_gle_args(max_fevals: usize, omega0: Option<f64>) -> PyResult<()> {
     if max_fevals < 1 {
-        return Err(PyValueError::new_err("max_fevals must be positive"));
+        return Err(invalid_argument("max_fevals must be positive"));
     }
     if omega0.is_some_and(|omega| !omega.is_finite() || omega <= 0.0) {
-        return Err(PyValueError::new_err("omega0 must be positive"));
+        return Err(invalid_argument("omega0 must be positive"));
     }
     Ok(())
 }
@@ -1639,9 +1614,7 @@ fn gle_langevin(
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     if low_vec.len() != high_vec.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
+        return Err(invalid_argument("low and high must have the same length"));
     }
     validate_gle_args(max_fevals, omega0)?;
     let dim = low_vec.len();
@@ -1683,9 +1656,7 @@ fn gle_langevin_preconditioned(
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     if low_vec.len() != high_vec.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
+        return Err(invalid_argument("low and high must have the same length"));
     }
     validate_gle_args(max_fevals, omega0)?;
     let dim = low_vec.len();
@@ -2040,7 +2011,7 @@ fn box_ensemble_optimize(
         ..crate::methods::box_hopping::BoxEnsembleConfig::default()
     };
     let Some(grad_fn) = grad_fn else {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "box_ensemble_optimize requires grad_fn; use ensemble_optimize without a gradient",
         ));
     };
@@ -2153,7 +2124,7 @@ fn ensemble_optimize(
 ) -> PyResult<Py<PyDict>> {
     let parsed = parse_box_search(low, high, budget, replicas, x0, history, membership)?;
     if coverage_radius.is_some_and(|radius| !radius.is_finite() || radius <= 0.0) {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "coverage radius must be finite and positive",
         ));
     }
@@ -2304,7 +2275,7 @@ fn bfwt_optimize(
 ) -> PyResult<Py<PyDict>> {
     require_positive_budget(budget)?;
     if !barrier_hat.is_finite() || barrier_hat < 0.0 {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "barrier_hat must be a finite non-negative float",
         ));
     }
@@ -2402,7 +2373,7 @@ fn global_optimize(
     let high_vec = high.as_slice()?.to_vec();
     validate_box_bounds(&low_vec, &high_vec)?;
     if budget == 0 {
-        return Err(PyValueError::new_err("budget must be positive"));
+        return Err(invalid_argument("budget must be positive"));
     }
     let start = read_x0(x0, &low_vec, &high_vec)?;
     let dim = low_vec.len();
@@ -2413,24 +2384,22 @@ fn global_optimize(
     if let Some(sigma) = noise_sigma
         && (sigma <= 0.0 || !sigma.is_finite())
     {
-        return Err(PyValueError::new_err(
-            "noise_sigma must be positive and finite",
-        ));
+        return Err(invalid_argument("noise_sigma must be positive and finite"));
     }
     let pol = match policy {
         "auto" | "Auto" | "" => crate::PortfolioPolicy::Auto,
         "legacy" | "Legacy" => crate::PortfolioPolicy::Legacy,
         other => {
-            return Err(PyValueError::new_err(format!(
+            return Err(invalid_argument(format!(
                 "policy must be 'auto' or 'legacy', got {other:?}"
             )));
         }
     };
     if replicas == 0 {
-        return Err(PyValueError::new_err("replicas must be positive"));
+        return Err(invalid_argument("replicas must be positive"));
     }
     if !coverage_radius.is_finite() || coverage_radius <= 0.0 {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "coverage_radius must be positive and finite",
         ));
     }
@@ -2493,14 +2462,12 @@ fn global_optimize_objective(
     x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
     if budget == 0 {
-        return Err(PyValueError::new_err("budget must be positive"));
+        return Err(invalid_argument("budget must be positive"));
     }
     if let Some(sigma) = noise_sigma
         && (sigma <= 0.0 || !sigma.is_finite())
     {
-        return Err(PyValueError::new_err(
-            "noise_sigma must be positive and finite",
-        ));
+        return Err(invalid_argument("noise_sigma must be positive and finite"));
     }
     let bounds = <PyObjective as Objective<f64>>::bounds(&objective);
     let start = read_x0(
@@ -2559,24 +2526,24 @@ impl Preset {
             Preset::Gsa(p) => (p.t_init, 1.0, "scale"),
         };
         if !(t_init.is_finite() && t_init > 0.0) {
-            return Err(PyValueError::new_err(format!(
+            return Err(invalid_argument(format!(
                 "t_init must be positive and finite, got {t_init}"
             )));
         }
         if !(scale.is_finite() && scale > 0.0) {
-            return Err(PyValueError::new_err(format!(
+            return Err(invalid_argument(format!(
                 "{scale_name} must be positive and finite, got {scale}"
             )));
         }
         if let Preset::Gsa(p) = self {
             if !(p.q_v > 1.0 && p.q_v < 3.0) {
-                return Err(PyValueError::new_err(format!(
+                return Err(invalid_argument(format!(
                     "q_v must lie in (1, 3), got {}",
                     p.q_v
                 )));
             }
             if !p.q_a.is_finite() {
-                return Err(PyValueError::new_err("q_a must be finite"));
+                return Err(invalid_argument("q_a must be finite"));
             }
         }
         Ok(())
@@ -2633,17 +2600,17 @@ fn run(
     let history = match preset {
         Preset::Boltzmann(p) => {
             let v = boltzmann_in_box(obj, p.t_init, p.sigma)
-                .map_err(|e| PyValueError::new_err(format!("{e}")))?;
+                .map_err(|e| invalid_argument(format!("{e}")))?;
             crate::runner::run_rs_variant_from(v, n_epochs, steps_per_epoch, seed, start, max_evals)
         }
         Preset::Fast(p) => {
             let v = fast_in_box(obj, p.t_init, p.gamma)
-                .map_err(|e| PyValueError::new_err(format!("{e}")))?;
+                .map_err(|e| invalid_argument(format!("{e}")))?;
             crate::runner::run_rs_variant_from(v, n_epochs, steps_per_epoch, seed, start, max_evals)
         }
         Preset::Gsa(p) => {
             let v = gsa_in_box(obj, p.t_init, p.q_v, p.q_a)
-                .map_err(|e| PyValueError::new_err(format!("{e}")))?;
+                .map_err(|e| invalid_argument(format!("{e}")))?;
             crate::runner::run_rs_variant_from(v, n_epochs, steps_per_epoch, seed, start, max_evals)
         }
     };
@@ -2663,21 +2630,17 @@ fn low_discrepancy_points(
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     if low_vec.len() != high_vec.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
+        return Err(invalid_argument("low and high must have the same length"));
     }
     if low_vec.is_empty() {
-        return Err(PyValueError::new_err(
-            "bounds must have at least one dimension",
-        ));
+        return Err(invalid_argument("bounds must have at least one dimension"));
     }
     if low_vec
         .iter()
         .zip(high_vec.iter())
         .any(|(&lo, &hi)| hi < lo)
     {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "each upper bound must be greater than or equal to the lower bound",
         ));
     }
@@ -2724,14 +2687,10 @@ fn run_qmc(
     let high_vec = high.as_slice()?.to_vec();
     validate_max_evals(max_evals)?;
     if low_vec.len() != high_vec.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
+        return Err(invalid_argument("low and high must have the same length"));
     }
     if low_vec.is_empty() {
-        return Err(PyValueError::new_err(
-            "bounds must have at least one dimension",
-        ));
+        return Err(invalid_argument("bounds must have at least one dimension"));
     }
     if low_vec.iter().zip(high_vec.iter()).any(|(&lo, &hi)| {
         !lo.is_finite() || !hi.is_finite() || !(2.0 * (hi - lo)).is_finite() || hi < lo
@@ -2742,7 +2701,7 @@ fn run_qmc(
         .sum::<f64>()
         .is_finite()
     {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "each bound must be finite and each upper bound must be greater than or equal to the lower bound",
         ));
     }
@@ -2755,7 +2714,7 @@ fn run_qmc(
     let history = match preset {
         Preset::Boltzmann(p) => {
             let v = boltzmann_in_box(obj, p.t_init, p.sigma)
-                .map_err(|e| PyValueError::new_err(format!("{e}")))?;
+                .map_err(|e| invalid_argument(format!("{e}")))?;
             crate::runner::run_rs_qmc_variant_from(
                 v,
                 n_starts,
@@ -2768,7 +2727,7 @@ fn run_qmc(
         }
         Preset::Fast(p) => {
             let v = fast_in_box(obj, p.t_init, p.gamma)
-                .map_err(|e| PyValueError::new_err(format!("{e}")))?;
+                .map_err(|e| invalid_argument(format!("{e}")))?;
             crate::runner::run_rs_qmc_variant_from(
                 v,
                 n_starts,
@@ -2781,7 +2740,7 @@ fn run_qmc(
         }
         Preset::Gsa(p) => {
             let v = gsa_in_box(obj, p.t_init, p.q_v, p.q_a)
-                .map_err(|e| PyValueError::new_err(format!("{e}")))?;
+                .map_err(|e| invalid_argument(format!("{e}")))?;
             crate::runner::run_rs_qmc_variant_from(
                 v,
                 n_starts,
@@ -2813,10 +2772,10 @@ fn osa_acceptance_rate(
     seed: u64,
 ) -> PyResult<(f64, f64)> {
     if temp.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
-        return Err(PyValueError::new_err("temp must be positive"));
+        return Err(invalid_argument("temp must be positive"));
     }
     if sigma.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
-        return Err(PyValueError::new_err("sigma must be positive"));
+        return Err(invalid_argument("sigma must be positive"));
     }
     let osa = crate::noise_accept::OsaAccept::with_params(c_star, 100_000);
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
@@ -2846,7 +2805,7 @@ impl PyClusterConfig {
     #[staticmethod]
     fn recommended(n: usize) -> PyResult<Self> {
         if n < 2 {
-            return Err(PyValueError::new_err("n must be at least 2"));
+            return Err(invalid_argument("n must be at least 2"));
         }
         Ok(Self {
             inner: crate::methods::cluster_hopping::Config::recommended(n),
@@ -2858,7 +2817,7 @@ impl PyClusterConfig {
     #[staticmethod]
     fn communicating(n: usize) -> PyResult<Self> {
         if n < 2 {
-            return Err(PyValueError::new_err("n must be at least 2"));
+            return Err(invalid_argument("n must be at least 2"));
         }
         Ok(Self {
             inner: crate::methods::cluster_hopping::Config::communicating(n),
@@ -2871,7 +2830,7 @@ impl PyClusterConfig {
     #[staticmethod]
     fn derived(n: usize) -> PyResult<Self> {
         if n < 2 {
-            return Err(PyValueError::new_err("n must be at least 2"));
+            return Err(invalid_argument("n must be at least 2"));
         }
         Ok(Self {
             inner: crate::methods::cluster_hopping::Config::derived(n),
@@ -2883,7 +2842,7 @@ impl PyClusterConfig {
     #[staticmethod]
     fn for_cluster(n: usize) -> PyResult<Self> {
         if n < 2 {
-            return Err(PyValueError::new_err("n must be at least 2"));
+            return Err(invalid_argument("n must be at least 2"));
         }
         Ok(Self {
             inner: crate::methods::cluster_hopping::Config::for_cluster(n),
@@ -2895,7 +2854,7 @@ impl PyClusterConfig {
     #[staticmethod]
     fn communicating_tip4p(n: usize) -> PyResult<Self> {
         if n < 2 {
-            return Err(PyValueError::new_err("n must be at least 2"));
+            return Err(invalid_argument("n must be at least 2"));
         }
         Ok(Self {
             inner: crate::methods::cluster_hopping::Config::communicating_tip4p(n),
@@ -2907,7 +2866,7 @@ impl PyClusterConfig {
     #[staticmethod]
     fn recommended_tip4p(n: usize) -> PyResult<Self> {
         if n < 2 {
-            return Err(PyValueError::new_err("n must be at least 2"));
+            return Err(invalid_argument("n must be at least 2"));
         }
         Ok(Self {
             inner: crate::methods::cluster_hopping::Config::recommended_tip4p(n),
@@ -3005,14 +2964,14 @@ impl PyClusterConfig {
     #[staticmethod]
     fn validate_json(text: &str) -> PyResult<()> {
         crate::methods::cluster_hopping::Config::validate_json_keys(text)
-            .map_err(|err| PyValueError::new_err(err.to_string()))
+            .map_err(|err| config_error(&err))
     }
 
     /// Reject TOML configurations that set removed structure-prior keys.
     #[staticmethod]
     fn validate_toml(text: &str) -> PyResult<()> {
         crate::methods::cluster_hopping::Config::validate_toml_keys(text)
-            .map_err(|err| PyValueError::new_err(err.to_string()))
+            .map_err(|err| config_error(&err))
     }
 
     fn __repr__(&self) -> String {
@@ -3209,7 +3168,7 @@ fn cluster_gradient_scale(
         }
     };
     if at.is_none() && probe.len() != 3 * cfg.n_points {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "could not construct a gradient-orientation probe",
         ));
     }
@@ -3356,7 +3315,7 @@ fn cluster_archive_search(
     _ledger: &mut crate::methods::cluster_hopping::Ledger,
     _seed: u64,
 ) -> PyResult<Py<PyDict>> {
-    Err(PyValueError::new_err(
+    Err(errors::feature_unavailable(
         "ras=True requires building with the graphkey feature",
     ))
 }
@@ -3608,110 +3567,106 @@ fn cluster_search(
         None => None,
         Some("lbfgs") => Some(LocalStep::Lbfgs),
         Some(name @ ("tric" | "auto")) if groups.is_none() => {
-            return Err(PyValueError::new_err(format!(
+            return Err(invalid_argument(format!(
                 "local_step={name:?} needs groups"
             )));
         }
         Some("tric") => Some(LocalStep::Tric),
         Some("auto") => Some(LocalStep::Auto),
         Some(other) => {
-            return Err(PyValueError::new_err(format!(
+            return Err(invalid_argument(format!(
                 "local_step must be \"lbfgs\", \"tric\" or \"auto\", got {other:?}"
             )));
         }
     };
 
     if ring_moves.is_some() && groups.is_none() {
-        return Err(PyValueError::new_err("ring_moves needs groups"));
+        return Err(invalid_argument("ring_moves needs groups"));
     }
     if hold_stereocentres.is_some() && groups.is_none() {
-        return Err(PyValueError::new_err("hold_stereocentres needs groups"));
+        return Err(invalid_argument("hold_stereocentres needs groups"));
     }
     if measured_energy_scale.is_some() && groups.is_none() {
-        return Err(PyValueError::new_err("measured_energy_scale needs groups"));
+        return Err(invalid_argument("measured_energy_scale needs groups"));
     }
     if let Some(groups) = groups.as_ref() {
         if ras || derived || communicating || length_scale.is_some() {
-            return Err(PyValueError::new_err(
+            return Err(invalid_argument(
                 "groups excludes ras, derived, communicating and length_scale",
             ));
         }
         if rigid || sigmas.is_some() || water_sites.is_some() || layout != "block" {
-            return Err(PyValueError::new_err(
+            return Err(invalid_argument(
                 "groups excludes rigid, sigmas, water_sites and a non-block layout",
             ));
         }
         if species.as_ref().is_none_or(|labels| labels.len() != n) {
-            return Err(PyValueError::new_err(
-                "groups needs one species label per atom",
-            ));
+            return Err(invalid_argument("groups needs one species label per atom"));
         }
         if start.is_none() {
-            return Err(PyValueError::new_err("groups needs a start"));
+            return Err(invalid_argument("groups needs a start"));
         }
         if groups.iter().flatten().any(|&atom| atom >= n) {
-            return Err(PyValueError::new_err("a group names an atom past n"));
+            return Err(invalid_argument("a group names an atom past n"));
         }
     }
     if n < 2 {
-        return Err(PyValueError::new_err("n must be at least 2"));
+        return Err(invalid_argument("n must be at least 2"));
     }
     if budget < 1 {
-        return Err(PyValueError::new_err("budget must be positive"));
+        return Err(invalid_argument("budget must be positive"));
     }
     if let Some(scale) = length_scale
         && (!scale.is_finite() || scale <= 0.0)
     {
-        return Err(PyValueError::new_err(
-            "length_scale must be finite and positive",
-        ));
+        return Err(invalid_argument("length_scale must be finite and positive"));
     }
     if rigid && species.is_some() {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "rigid bodies and species swaps are different charts",
         ));
     }
     if sigmas.is_some() && species.is_none() {
-        return Err(PyValueError::new_err("sigmas require species"));
+        return Err(invalid_argument("sigmas require species"));
     }
     if layout != "block" && layout != "interleaved" {
-        return Err(PyValueError::new_err("layout must be block or interleaved"));
+        return Err(invalid_argument("layout must be block or interleaved"));
     }
     if !rigid && layout != "block" {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "interleaved layout is the rigid-body chart",
         ));
     }
     if ras && (rigid || species.is_some()) {
-        return Err(PyValueError::new_err("ras is the cartesian archive search"));
+        return Err(invalid_argument("ras is the cartesian archive search"));
     }
     let water = match water_sites {
         None => None,
         Some(sites) => {
             let sl = sites.as_slice()?;
             if sl.len() != 9 {
-                return Err(PyValueError::new_err(format!(
+                return Err(invalid_argument(format!(
                     "water_sites length {} must be 9 (O, H, H)",
                     sl.len()
                 )));
             }
             if ras || derived || length_scale.is_some() {
-                return Err(PyValueError::new_err(
+                return Err(invalid_argument(
                     "water_sites excludes ras, derived and length_scale",
                 ));
             }
             if rigid || species.is_some() || sigmas.is_some() || layout != "block" {
-                return Err(PyValueError::new_err(
+                return Err(invalid_argument(
                     "water_sites excludes rigid, species, sigmas and a non-block layout",
                 ));
             }
             if start.is_none() {
-                return Err(PyValueError::new_err("water_sites needs a start"));
+                return Err(invalid_argument("water_sites needs a start"));
             }
             let sites = sl.chunks(3).map(|c| [c[0], c[1], c[2]]).collect();
             Some(
                 crate::rigid_body::RigidBodyGeometry::new(sites, vec![8, 1, 1])
-                    .map_err(PyValueError::new_err)?,
+                    .map_err(invalid_argument)?,
             )
         }
     };
@@ -3722,7 +3677,7 @@ fn cluster_search(
         Some(start) => {
             let sl = start.as_slice()?;
             if sl.len() != dim {
-                return Err(PyValueError::new_err(format!(
+                return Err(invalid_argument(format!(
                     "start length {} must be {} = {}",
                     sl.len(),
                     if rigid_chart { "6*n" } else { "3*n" },
@@ -3807,7 +3762,7 @@ fn cluster_search(
         crate::methods::cluster_hopping::Ledger::with_stop(budget, errors.abort_flag());
     if let Some(limit) = target {
         if !limit.is_finite() {
-            return Err(PyValueError::new_err("target must be finite"));
+            return Err(invalid_argument("target must be finite"));
         }
         ledger.stop_below(limit);
     }
@@ -3885,7 +3840,7 @@ fn cluster_search(
     } else {
         crate::methods::cluster_search::search(&obj, &cfg, &mut ledger, seed)
     }
-    .map_err(|err| PyValueError::new_err(err.to_string()))?;
+    .map_err(|err| search_error(&err))?;
     errors.finish(py)?;
     let best_block = out
         .best_state
@@ -3931,7 +3886,7 @@ fn quench(
     species: Option<Vec<u32>>,
 ) -> PyResult<Py<PyDict>> {
     if !gtol.is_finite() || gtol <= 0.0 {
-        return Err(PyValueError::new_err("gtol must be finite and positive"));
+        return Err(invalid_argument("gtol must be finite and positive"));
     }
     let start = Array1::from_vec(x0.as_slice()?.to_vec());
     let dim = start.len();
@@ -3943,12 +3898,12 @@ fn quench(
             Some(tric)
         }
         ("tric", _) => {
-            return Err(PyValueError::new_err(
+            return Err(invalid_argument(
                 "method=\"tric\" needs one species label per atom of x0",
             ));
         }
         (other, _) => {
-            return Err(PyValueError::new_err(format!(
+            return Err(invalid_argument(format!(
                 "method must be \"lbfgs\" or \"tric\", got {other:?}"
             )));
         }
@@ -3969,7 +3924,7 @@ fn quench(
         match out {
             Ok((e, g)) if g.len() == dim => Some((e, Array1::from_vec(g))),
             Ok(_) => {
-                failure = Some(PyValueError::new_err(format!(
+                failure = Some(invalid_argument(format!(
                     "fg_fn must return a gradient of {dim} numbers"
                 )));
                 None
@@ -4018,6 +3973,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("DEFAULT_HIT_TOL", crate::DEFAULT_HIT_TOL)?;
     m.add("SEARCH_HIT_TOL", crate::SEARCH_HIT_TOL)?;
     m.add_function(wrap_pyfunction!(energy_hits, m)?)?;
+    errors::register(m)?;
     device::register(m)?;
     landfold::register(m)?;
     m.add_class::<PyBasinBias>()?;

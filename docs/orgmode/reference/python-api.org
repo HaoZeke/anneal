@@ -35,3 +35,53 @@ assert stub.is_file()
 assert "def cluster_search(" in stub.read_text()
 assert set(core.__all__) >= {"cluster_search", "Config", "Ledger"}
 #+end_src
+
+* Errors
+
+Every error that =anneal= raises for rejected input derives from
+=anneal.AnnealError=, which derives from =ValueError=. An =except ValueError=
+clause that worked before keeps working. The classes name what to fix.
+
+- =AnnealError= :: the base class.
+- =InvalidArgumentError= :: an argument has a value, length or combination
+  the call cannot use. Most checks raise this class.
+- =BoundsError= :: a kind of =InvalidArgumentError= for a box that is empty,
+  has sides of different lengths, or has a bound that is not finite or not
+  ordered.
+- =ConfigError= :: =Config.validate_json= or =Config.validate_toml= could not
+  read the text. The =key= attribute is =<json>= or =<toml>=.
+- =RemovedConfigKeyError= :: a kind of =ConfigError= for a key that a past
+  release removed. The =key= attribute holds the dotted path of the key.
+- =NoFiniteStartError= :: =cluster_search= found no finite start. The
+  =attempts= attribute counts the quenches it tried.
+- =FeatureUnavailableError= :: the call needs a Cargo feature that this
+  build lacks, such as =ras=True= without =graphkey=.
+
+A wrong type still raises =TypeError=. An exception that an objective raises
+passes through unchanged. A missing file raises =OSError=.
+
+#+begin_src python
+import numpy as np
+
+import anneal
+
+
+def f(x):
+    return float(np.sum(np.asarray(x) ** 2))
+
+
+try:
+    anneal.run(f, np.ones(1), np.zeros(1), anneal.Boltzmann())
+except anneal.BoundsError as err:
+    assert isinstance(err, ValueError)
+    assert "strictly less" in str(err)
+else:
+    raise AssertionError("an inverted box must raise")
+
+try:
+    anneal.Config.validate_json('{"ring": {"reseed_hops": 1}}')
+except anneal.RemovedConfigKeyError as err:
+    assert err.key == "ring.reseed_hops"
+else:
+    raise AssertionError("a removed key must raise")
+#+end_src
