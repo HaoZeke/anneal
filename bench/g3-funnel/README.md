@@ -93,6 +93,47 @@ were rebuilt for the replay (`h2h_gmin_proof`
   2b0ef3b9b0088f12c52617163450c0635c3b00d7a5f0060cb7637eef974d33a5
   (645,769,319 bytes). Each trace's sha256 is in `rows.csv`.
 
+## Plain funnel tables
+
+Regenerate the uncompressed tables from the repository root with Python 3
+and the `zstandard` package:
+
+```console
+python3 bench/g3-funnel/derive_plain_csv.py
+```
+
+The command reads `rows.csv`, `minima.csv.zst`, and the existing classified
+`misses.csv`. It writes these deterministic, LF-terminated files:
+
+- `funnel_occupancy_runs.csv`: one row per method, system, and seed.
+- `funnel_occupancy_summary.csv`: the run table summed per method and system.
+- `funnel_transitions_runs.csv`: directional crossing counts per method,
+  system, seed, producing move, source funnel, and destination funnel.
+- `funnel_transitions_summary.csv`: the crossing table summed per method and
+  system.
+- `funnel_misses.csv`: one row per miss with its final energy, point group,
+  CNA class, combined miss class, structure identifier, and committed
+  `.con` path.
+
+In the occupancy tables, `accepted_minima_*` counts trace frames in each
+funnel. `force_calls_*` assigns the interval from an accepted minimum's
+force-call index to the next accepted minimum, or to the run's `charged`
+total for the last minimum. `force_calls_before_first` is the unlabelled
+opening interval. `observed_hop_steps_*` assigns differences between
+successive accepted-minimum hop indices to the earlier minimum's funnel;
+`observed_hop_steps_before_first` is the first accepted minimum's hop index.
+The corresponding `*_total` columns include all reported funnels and the
+opening interval.
+
+Transition tables contain one zero-count row with blank crossing fields when
+a run or method-system panel has no inter-funnel crossing. This keeps every
+run and every summary panel explicit without inventing a funnel or move.
+
+The trace has no elapsed-time field and `rows.csv` has no final hop count.
+Elapsed-time occupancy is therefore omitted, and observed hop-step occupancy
+ends at the last accepted minimum rather than filling an unknown terminal
+interval. No value is inferred for either missing quantity.
+
 ## Reading the traces
 
 The trace records accepted minima. When a quench reaches the reference the
