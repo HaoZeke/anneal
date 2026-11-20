@@ -1,7 +1,9 @@
 #!/bin/bash
 # Reduced meson build of the Python extension: Fortran pots on, torch off.
-# Source this file. It exports LD_LIBRARY_PATH and PYTHONPATH, and appends
-# the same variables to GITHUB_ENV when that file is set.
+# The build is installed into the site-packages of PY, so the tests import
+# the installed rgpot and never the python/ source tree. Source this file.
+# It exports PYTHONPATH, and appends the same variable to GITHUB_ENV when
+# that file is set.
 # PY selects the interpreter (default: python). ROOT is the repository
 # root (default: GITHUB_WORKSPACE, else the working directory).
 set -euo pipefail
@@ -25,6 +27,7 @@ python = '${EXE}'
 EOF
 
 BUILD=/tmp/rgpot-reduced-build
+PREFIX=/tmp/rgpot-reduced-prefix
 SANITIZE=()
 if printf '%s' "${CFLAGS:-} ${CXXFLAGS:-} ${LDFLAGS:-}" | grep -q 'fsanitize=thread'; then
   # CFLAGS already instrument the objects. b_sanitize puts libtsan on the
@@ -33,6 +36,9 @@ if printf '%s' "${CFLAGS:-} ${CXXFLAGS:-} ${LDFLAGS:-}" | grep -q 'fsanitize=thr
 fi
 "${BIN}/meson" setup "${BUILD}" \
   --native-file /tmp/rgpot-native.ini \
+  --prefix "${PREFIX}" \
+  -Dpython.platlibdir="${SITE}" \
+  -Dpython.purelibdir="${SITE}" \
   -Dwith_python=true \
   -Dwith_fortran_pots=enabled \
   -Dwith_metatomic=false \
@@ -51,20 +57,9 @@ fi
   "${SANITIZE[@]}"
 "${BIN}/meson" compile -C "${BUILD}"
 
-shopt -s nullglob
-found=0
-for core in "${BUILD}"/python/_core*.so; do
-  ln -sfn "${core}" "${ROOT}/python/rgpot/$(basename "${core}")"
-  found=$((found + 1))
-done
-test "${found}" -ge 1
+"${BIN}/meson" install -C "${BUILD}" --skip-subprojects
 
-LIBDIR="${BUILD}/CppCore"
-export LD_LIBRARY_PATH="${LIBDIR}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
-export PYTHONPATH="${ROOT}/python:${ROOT}/tests/python:${SITE}${PYTHONPATH:+:${PYTHONPATH}}"
+export PYTHONPATH="${ROOT}/tests/python:${SITE}${PYTHONPATH:+:${PYTHONPATH}}"
 if [ -n "${GITHUB_ENV:-}" ]; then
-  {
-    echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
-    echo "PYTHONPATH=${PYTHONPATH}"
-  } >> "${GITHUB_ENV}"
+  echo "PYTHONPATH=${PYTHONPATH}" >> "${GITHUB_ENV}"
 fi

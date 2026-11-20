@@ -104,8 +104,11 @@ jobs:
           /tmp/rgpot-ci/bin/pip install 'nanobind==3.1.0' 'numpy' 'ase>=3.23' \
             pytest pytest-timeout hypothesis
           site=$(/tmp/rgpot-ci/bin/python -c 'import site; print(site.getsitepackages()[0])')
-          export PYTHONPATH="${site}:${PWD}/python:${PWD}/tests/python"
+          export PYTHONPATH="${site}:${PWD}/tests/python"
           meson setup /tmp/rgpot-ci-build \
+            --prefix /tmp/rgpot-ci-prefix \
+            -Dpython.platlibdir="${site}" \
+            -Dpython.purelibdir="${site}" \
             -Dwith_python=true \
             -Dwith_fortran_pots=enabled \
             -Dwith_metatomic=false \
@@ -122,8 +125,7 @@ jobs:
             -Dwith_tblite=false \
             --buildtype=release
           meson compile -C /tmp/rgpot-ci-build
-          ln -sfn /tmp/rgpot-ci-build/python/_core*.so python/rgpot/
-          export LD_LIBRARY_PATH="/tmp/rgpot-ci-build/CppCore${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          meson install -C /tmp/rgpot-ci-build --skip-subprojects
           /tmp/rgpot-ci/bin/python -m pytest -q tests/python \
             --timeout=180 -o faulthandler_timeout=120
 
