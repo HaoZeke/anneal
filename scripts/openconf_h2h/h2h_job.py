@@ -279,7 +279,7 @@ def run_crest(row: dict, seed: int, out: Path, crest: str) -> dict:
         for sym, x, comment in hc.read_xyz(ensemble):
             if sym != want:
                 raise RuntimeError("CREST reordered atoms")
-            frames.append((x, float(comment.split()[0]) * 627.509474))
+            frames.append((x, float(comment.split()[0]) * hc.HARTREE_KCAL))
         hc.write_xyz(out / "candidates.xyz", want, frames)
     for name in ("MDFILES", "crest_dynamics.trj", "crest_rotamers_0.xyz", "crest_rotamers_1.xyz"):
         path = out / name

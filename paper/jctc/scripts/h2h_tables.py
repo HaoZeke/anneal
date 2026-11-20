@@ -2,11 +2,13 @@
 # Copyright (c) anneal developers
 """Write the head-to-head tables of the manuscript and the SI from the committed summaries.
 
-Three blocks, each between a pair of marker comments:
+Five blocks, each between a pair of marker comments:
 
-    tab:gofee       manuscript.tex  bench/ase-gofee-h2h/summary.csv
-    tab:tip4p-gmin  manuscript.tex  bench/tip4p-h2h/h2h-summary.csv
+    tab:gofee       si.tex          bench/ase-gofee-h2h/summary.csv
+    tab:tip4p-gmin  si.tex          bench/tip4p-h2h/rows-h2h-r2.csv, wall-r2.csv
     tab:gofee-si    si.tex          bench/ase-gofee-h2h/asg2-summary.csv, arms measured there
+    tab:sc          manuscript.tex  bench/metal-cluster-h2h/sc-n12/results.csv, pvalues.csv
+    tab:sc-si       si.tex          bench/metal-cluster-h2h/sc-n12/results.csv
 
     python3 paper/jctc/scripts/h2h_tables.py            # rewrite the blocks
     python3 paper/jctc/scripts/h2h_tables.py --check    # exit 1 if one is stale
@@ -19,16 +21,35 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT / "scripts" / "tip4p_h2h"))
+sys.path.insert(0, str(ROOT / "bench" / "tip4p-h2h"))
+from run_h2h_r2 import mann_whitney_u_two_sided_exact  # noqa: E402
+
 MANUSCRIPT = ROOT / "paper" / "jctc" / "manuscript.tex"
 SI = ROOT / "paper" / "jctc" / "si.tex"
 GOFEE = ROOT / "bench" / "ase-gofee-h2h"
-TIP4P = ROOT / "bench" / "tip4p-h2h" / "h2h-summary.csv"
+TIP4P = ROOT / "bench" / "tip4p-h2h" / "rows-h2h-r2.csv"
+TIP4P_WALL = ROOT / "bench" / "tip4p-h2h" / "wall-r2.csv"
+SC = ROOT / "bench" / "metal-cluster-h2h" / "sc-n12" / "results.csv"
+SC_SEEDS = ROOT / "bench" / "metal-cluster-h2h" / "sc-n12" / "seeds.csv"
+SC_P = ROOT / "bench" / "metal-cluster-h2h" / "sc-n12" / "pvalues.csv"
+CREST_EQUAL = ROOT / "bench" / "crest-equal"
+CREST_ARMS = ("anneal", "crest", "crest-wall")
+# The call tolerance of the panel: run_panel.py counts a CREST run as at the hop arm's calls
+# when it lies within 5 percent of them.
+CREST_CALL_TOLERANCE = 0.05
 
 MARKS = {
     "gofee": ("% gofee table: start", "% gofee table: end"),
     "tip4p": ("% tip4p-gmin table: start", "% tip4p-gmin table: end"),
+    "tip4p-prose": ("% tip4p-gmin prose: start", "% tip4p-gmin prose: end"),
     "gofee-si": ("% gofee-si table: start", "% gofee-si table: end"),
+    "sc": ("% sc table: start", "% sc table: end"),
+    "sc-si": ("% sc-si table: start", "% sc-si table: end"),
 }
+SC_ORDER = ("sc126-38", "sc108-38", "sc96-38", "sc126-55", "sc108-55", "sc96-55", "sc126-80", "sc108-80", "sc96-80")
+SC_FORM = {"126": "12-6", "108": "10-8", "96": "9-6"}
 ARM_LABEL = {"paper": "This work", "ase_bh": "ASE BH", "ase_mh": "ASE MH", "agox_gofee": "GOFEE"}
 LJ_LABEL = {"lj38": "LJ\\(_{38}\\)", "lj55": "LJ\\(_{55}\\)", "lj75": "LJ\\(_{75}\\)"}
 OTHER_LABEL = {"au55": "Au\\(_{55}\\)", "cu38": "Cu\\(_{38}\\)", "cu12au26": "Cu\\(_{12}\\)Au\\(_{26}\\)",
@@ -46,6 +67,18 @@ def show_s(value: float) -> str:
 
 def show_calls(value: str) -> str:
     return f"{float(value):.0f}" if value else "--"
+
+
+def type7_median(values: list[float]) -> float:
+    ordered = sorted(values)
+    h = 0.5 * (len(ordered) - 1)
+    lo = int(h)
+    hi = min(lo + 1, len(ordered) - 1)
+    return ordered[lo] + (h - lo) * (ordered[hi] - ordered[lo])
+
+
+def show_calls_median(value: float) -> str:
+    return f"{value:.2f}".rstrip("0").rstrip(".")
 
 
 def show_p(value: float) -> str:
@@ -89,7 +122,7 @@ def gofee_block() -> str:
         "Seeds 2000--2005, one core, budget in force calls.",
         "Capped counts the runs stopped by a wall cap of 2 hours, which are misses.",
         "Calls is the median force-call count of the runs that hit, and Wall is the median",
-        "wall in seconds of all six runs.~\\rerun{5}}",
+        "wall in seconds of all six runs.}",
         "\\label{tab:gofee}",
         "\\centering",
         "\\small",
@@ -104,31 +137,162 @@ def gofee_block() -> str:
     ])
 
 
+def tip4p_groups() -> dict[int, tuple[list[dict[str, str]], list[dict[str, str]]]]:
+    rows = read(TIP4P)
+    sizes = sorted({int(row["molecules"]) for row in rows})
+    groups = {}
+    for size in sizes:
+        anneal = [row for row in rows if row["molecules"] == str(size) and row["arm"] == "anneal"]
+        gmin = [row for row in rows if row["molecules"] == str(size) and row["arm"] == "gmin"]
+        if len(anneal) != 12 or len(gmin) != 12:
+            raise ValueError(f"TIP4P {size}: expected 12 rows per arm")
+        a_starts = {row["seed"]: row["start_id"] for row in anneal}
+        g_starts = {row["seed"]: row["start_id"] for row in gmin}
+        if a_starts != g_starts:
+            raise ValueError(f"TIP4P {size}: arm starts differ")
+        groups[size] = (anneal, gmin)
+    return groups
+
+
+def tip4p_wall() -> dict[int, dict[str, str]]:
+    rows = {int(row["molecules"]): row for row in read(TIP4P_WALL)}
+    if set(rows) != {8, 15, 20, 21, 25}:
+        raise ValueError("TIP4P wall summary has the wrong sizes")
+    if any(row["mwu_method"] != "exact-rank-enumeration"
+           for row in rows.values()):
+        raise ValueError("TIP4P wall summary is not exact")
+    raw = read(TIP4P)
+    for size, row in rows.items():
+        anneal = [
+            float(item["wall_s"]) for item in raw
+            if item["molecules"] == str(size) and item["arm"] == "anneal"
+        ]
+        gmin = [
+            float(item["wall_s"]) for item in raw
+            if item["molecules"] == str(size) and item["arm"] == "gmin"
+        ]
+        p_value, method = mann_whitney_u_two_sided_exact(anneal, gmin)
+        if method != row["mwu_method"] or abs(
+            p_value - float(row["wall_mwu_p"])
+        ) > 5.0e-13:
+            raise ValueError(f"TIP4P {size}: stale wall summary")
+    return rows
+
+
+def tip4p_prose() -> str:
+    groups = tip4p_groups()
+    wall = tip4p_wall()
+    seeds = sorted({int(row["seed"]) for arms in groups.values() for arm in arms for row in arm})
+    hit = {
+        size: tuple(sum(int(row["hit"]) for row in arm) for arm in arms)
+        for size, arms in groups.items()
+    }
+    all_rows = [row for arms in groups.values() for arm in arms for row in arm]
+    if len({row["machine_id"] for row in all_rows}) != 1:
+        raise ValueError("the TIP4P ABBA comparison used more than one machine")
+    if {row["core"] for row in all_rows} != {"0"}:
+        raise ValueError("the TIP4P ABBA comparison was not pinned to core 0")
+    expected_order = ("anneal,gmin", "gmin,anneal")
+    for arms in groups.values():
+        rows_by_seed = {row["seed"]: row for row in arms[0]}
+        orders = [
+            rows_by_seed[str(seed)]["arm_order"]
+            for seed in seeds
+        ]
+        if any(order != expected_order[index % 2]
+               for index, order in enumerate(orders)):
+            raise ValueError("the TIP4P comparison does not use ABBA arm order")
+    shown = {
+        size: show_p(float(row["wall_mwu_p"]))
+        .removeprefix("\\(").removesuffix("\\)")
+        for size, row in wall.items() if size != 25
+    }
+    repeated = set(shown.values())
+    if len(repeated) != 1:
+        raise ValueError("TIP4P scored sizes do not share one wall-time p")
+    exhausted_cost = {
+        size: (
+            float(wall[size]["anneal_wall_median_s"]) * 1.0e6
+            / float(wall[size]["anneal_calls_median"]),
+            float(wall[size]["gmin_wall_median_s"]) * 1.0e6
+            / float(wall[size]["gmin_calls_median"]),
+        )
+        for size in (21,)
+    }
+    unscored = wall[25]
+    return "\n".join([
+        "Table~\\ref{tab:tip4p-gmin} puts this setting against GMIN on rigid TIP4P",
+        "clusters of 8, 15, 20, 21, and 25 molecules.",
+        "The hit tolerance for the scored sizes is 0.001~kJ/mol.",
+        f"The 120-run ABBA comparison uses seeds {seeds[0]}--{seeds[-1]} on one machine pinned to core 0,",
+        "with the arm order alternating across seeds.",
+        f"This setting hits \\((\\mathrm{{H_2O}})_{{8}}\\) on {hit[8][0]} of 12 against GMIN on {hit[8][1]} of 12,",
+        f"\\((\\mathrm{{H_2O}})_{{15}}\\) on {hit[15][0]} of 12 against {hit[15][1]} of 12, and",
+        f"\\((\\mathrm{{H_2O}})_{{20}}\\) on {hit[20][0]} of 12 against {hit[20][1]} of 12.",
+        "Neither arm hits \\((\\mathrm{H_2O})_{21}\\).",
+        "Size 25 has no independent reference and is unscored.",
+        "This setting's best and median final energies are "
+        f"{unscored['anneal_energy_best_kj_mol']} and "
+        f"{unscored['anneal_energy_median_kj_mol']}~kJ/mol, and its median wall "
+        f"is {unscored['anneal_wall_median_s']}~s.",
+        "GMIN's corresponding values are "
+        f"{unscored['gmin_energy_best_kj_mol']} and "
+        f"{unscored['gmin_energy_median_kj_mol']}~kJ/mol and "
+        f"{unscored['gmin_wall_median_s']}~s.",
+        "Median walls for this setting and GMIN are",
+        f"{float(wall[8]['anneal_wall_median_s']):.6f} and "
+        f"{float(wall[8]['gmin_wall_median_s']):.6f}~s at 8 molecules,",
+        f"{float(wall[15]['anneal_wall_median_s']):.6f} and "
+        f"{float(wall[15]['gmin_wall_median_s']):.6f}~s at 15 molecules, and",
+        f"{float(wall[20]['anneal_wall_median_s']):.6f} and "
+        f"{float(wall[20]['gmin_wall_median_s']):.6f}~s at 20 molecules.",
+        "At 21 molecules every run exhausts the two-million-call budget;",
+        "the median costs per call for this setting and GMIN are",
+        f"{exhausted_cost[21][0]:.6f} and {exhausted_cost[21][1]:.6f}~"
+        "\\(\\mu\\)s at 21 molecules.",
+        "The two-sided exact rank-enumeration Mann--Whitney test on wall time",
+        f"gives \\(p={next(iter(repeated))}\\) at sizes 8, 15, 20, and 21.",
+    ])
+
+
 def tip4p_block() -> str:
     body = []
-    for row in read(TIP4P):
+    wall = tip4p_wall()
+    for size, (anneal, gmin) in tip4p_groups().items():
+        if size == 25:
+            continue
+        a_best = [float(row["best_energy"]) for row in anneal]
+        g_best = [float(row["best_energy"]) for row in gmin]
+        hits = (
+            f"{sum(int(row['hit']) for row in anneal)}/12",
+            f"{sum(int(row['hit']) for row in gmin)}/12",
+        )
         body.append(" & ".join([
-            TIP4P_LABEL[row["system"]], budget_tex(row["budget"]),
-            row["anneal_hits"], row["gmin_hits"],
-            show_s(float(row["anneal_wall_median_s"])), show_s(float(row["gmin_wall_median_s"])),
-            show_p(float(row["fisher_p"])), show_p(float(row["mwu_p"])),
+            TIP4P_LABEL[f"tip4p{size}"],
+            *hits,
+            show_calls_median(type7_median([float(row["calls"]) for row in anneal])),
+            show_calls_median(type7_median([float(row["calls"]) for row in gmin])),
+            f"{type7_median(a_best):.6f}",
+            f"{type7_median(g_best):.6f}",
+            show_p(float(wall[size]["wall_mwu_p"])),
         ]) + " \\\\")
     return "\n".join([
         "\\begin{table}",
         "\\caption{This work against GMIN on rigid TIP4P water clusters.",
-        "Seeds 2000--2011, one core, budget in force calls.",
-        "Wall is the median wall in seconds over the 12 runs.",
-        "\\(p_\\mathrm{F}\\) is the two-sided Fisher exact test on hits and \\(p_\\mathrm{U}\\)",
-        "the two-sided Mann--Whitney test on the best energy of each run.}",
+        "The 120-run ABBA comparison uses seeds 2000--2011 on one machine pinned to core 0,",
+        "with the arm order alternating across seeds. Calls and Best are the medians over the 12 runs.",
+        "\\(p_\\mathrm{wall}\\) is the two-sided exact rank-enumeration",
+        "Mann--Whitney test on the per-run wall times.}",
         "\\label{tab:tip4p-gmin}",
         "\\centering",
-        "\\small",
+        "\\scriptsize",
         "\\begin{tabular}{@{}lrrrrrrr@{}}",
         "\\toprule",
-        " & & \\multicolumn{2}{c}{Hits} & \\multicolumn{2}{c}{Wall (s)} & & \\\\",
-        "\\cmidrule(lr){3-4}\\cmidrule(lr){5-6}",
-        "Cluster & Budget & This work & GMIN & This work & GMIN & "
-        "\\(p_\\mathrm{F}\\) & \\(p_\\mathrm{U}\\) \\\\",
+        " & \\multicolumn{2}{c}{Hits} & \\multicolumn{2}{c}{Calls} & "
+        "\\multicolumn{2}{c}{Best energy (kJ/mol)} & \\\\",
+        "\\cmidrule(lr){2-3}\\cmidrule(lr){4-5}\\cmidrule(lr){6-7}",
+        "Cluster & This work & GMIN & This work & GMIN & This work & GMIN & "
+        "\\(p_\\mathrm{wall}\\) \\\\",
         "\\midrule",
         *body,
         "\\bottomrule",
@@ -175,10 +339,216 @@ def gofee_si_block() -> str:
     ])
 
 
+def sc_label(system: str) -> str:
+    form, size = system.removeprefix("sc").split("-")
+    return f"{SC_FORM[form]}, {size}"
+
+
+def sc_pairs() -> list[tuple[dict[str, str], dict[str, str]]]:
+    """The anneal row of each system and the GMIN row of the corrected data file.
+
+    The corrected file is the GMIN harness that differs from the anneal one;
+    the anneal harness's own GMIN rows ran with Lennard-Jones step and
+    temperature and are not shown."""
+    rows = read(SC)
+    pairs = []
+    for system in SC_ORDER:
+        anneal = next(r for r in rows if r["system"] == system and r["arm"] == "anneal")
+        gmin = [r for r in rows if r["system"] == system and r["arm"] == "gmin"
+                and r["harness_revision"] != anneal["harness_revision"]]
+        if len(gmin) != 1:
+            raise SystemExit(f"{system}: expected one corrected GMIN row, found {len(gmin)}")
+        pairs.append((anneal, gmin[0]))
+    return pairs
+
+
+def sc_tests() -> dict[str, dict[str, str]]:
+    """The p-values of each system against its corrected GMIN rows, from pvalues.csv."""
+    tests: dict[str, dict[str, str]] = {}
+    for anneal, gmin in sc_pairs():
+        rows = [r for r in read(SC_P) if r["system"] == anneal["system"]
+                and r["harness_revision"] == gmin["harness_revision"]]
+        if len(rows) != 1:
+            raise SystemExit(f"{anneal['system']}: expected one pvalues.csv row, found {len(rows)}")
+        tests[anneal["system"]] = rows[0]
+    return tests
+
+
+def sc_block() -> str:
+    body = []
+    tests = sc_tests()
+    seed_rows = read(SC_SEEDS)
+    for anneal, gmin in sc_pairs():
+        system = anneal["system"]
+        test = tests[system]
+        a_seeds = [float(r["evals_to_hit"]) for r in seed_rows
+                   if r["system"] == system and r["arm"] == "anneal"
+                   and r["harness_revision"] == anneal["harness_revision"]]
+        g_seeds = [float(r["evals_to_hit"]) for r in seed_rows
+                   if r["system"] == system and r["arm"] == "gmin"
+                   and r["harness_revision"] == gmin["harness_revision"]]
+        if len(a_seeds) != 12 or len(g_seeds) != 12:
+            raise SystemExit(f"{system}: expected 12 seed rows per arm, found {len(a_seeds)} and {len(g_seeds)}")
+        a_med = type7_median(a_seeds)
+        g_med = type7_median(g_seeds)
+        body.append(" & ".join([
+            sc_label(system), budget_tex(anneal["budget"]),
+            anneal["hits_over_n"], gmin["hits_over_n"],
+            show_calls_median(a_med), show_calls_median(g_med),
+            show_s(float(anneal["wall_median_s"])), show_s(float(gmin["wall_median_s"])),
+            show_p(float(test["fisher_p"])), show_p(float(test["mannwhitney_p_evals"])),
+            show_p(float(test["mannwhitney_p_wall"])),
+        ]) + " \\\\")
+    return "\n".join([
+        "\\begin{table}",
+        "\\caption{This work against GMIN on reduced Sutton--Chen clusters at equal workload.",
+        "Form \\(n\\)-\\(m\\) and size \\(N\\); seeds 2000--2011; the same start file and",
+        "the same force-call budget for both arms; one run at a time on one core.",
+        "Calls is the median force-call count with a miss at the budget, and Wall the",
+        "median wall in seconds over the 12 runs.",
+        "\\(p_\\mathrm{F}\\) is the two-sided Fisher exact test on hits, and \\(p_\\mathrm{U}\\)",
+        "the two-sided continuity-corrected asymptotic Mann--Whitney test on calls and on wall",
+        "against the Doye--Wales Sutton--Chen GMIN rows, as",
+        "\\texttt{scripts/metal\\_h2h/sc\\_n12\\_pvalues.py} writes them to",
+        "\\texttt{bench/metal-cluster-h2h/sc-n12/pvalues.csv}.}",
+        "\\label{tab:sc}",
+        "\\centering",
+        "\\scriptsize",
+        "\\setlength{\\tabcolsep}{2.5pt}%",
+        "\\begin{tabular}{@{}lrrrrrrrrrr@{}}",
+        "\\toprule",
+        " & & \\multicolumn{2}{c}{Hits} & \\multicolumn{2}{c}{Calls} & \\multicolumn{2}{c}{Wall (s)} & & "
+        "\\multicolumn{2}{c}{\\(p_\\mathrm{U}\\)} \\\\",
+        "\\cmidrule(lr){3-4}\\cmidrule(lr){5-6}\\cmidrule(lr){7-8}\\cmidrule(lr){10-11}",
+        "Form, \\(N\\) & Budget & This work & GMIN & This work & GMIN & This work & GMIN & "
+        "\\(p_\\mathrm{F}\\) & Calls & Wall \\\\",
+        "\\midrule",
+        *body,
+        "\\bottomrule",
+        "\\end{tabular}",
+        "\\end{table}",
+    ])
+
+
+def sc_si_block() -> str:
+    body = []
+    for anneal, gmin in sc_pairs():
+        body.append(" & ".join([
+            sc_label(anneal["system"]), f"\\({anneal['reference']}\\)",
+            f"{1e6 * float(anneal['pot_per_eval_s']):.2f}", f"{1e6 * float(gmin['pot_per_eval_s']):.2f}",
+            f"{1e6 * float(anneal['outside_per_eval_s']):.2f}", f"{1e6 * float(gmin['outside_per_eval_s']):.2f}",
+            gmin["harness_revision"][:8],
+        ]) + " \\\\")
+    return "\n".join([
+        "\\begin{table}",
+        "\\caption{Reference energies and the cost per force call of the Sutton--Chen panel.",
+        "The reference is the Doye--Wales global minimum in reduced units.",
+        "Inside is the median time per call inside the energy and gradient, and",
+        "Outside the median time per call spent elsewhere, in microseconds.",
+        "Harness is the revision of the GMIN Sutton--Chen data file; every anneal row is",
+        "harness \\texttt{e3ed7dad}.}",
+        "\\label{tab:sc-si}",
+        "\\centering",
+        "\\small",
+        "\\begin{tabular}{@{}lrrrrrl@{}}",
+        "\\toprule",
+        " & & \\multicolumn{2}{c}{Inside (\\(\\mu\\)s)} & \\multicolumn{2}{c}{Outside (\\(\\mu\\)s)} & \\\\",
+        "\\cmidrule(lr){3-4}\\cmidrule(lr){5-6}",
+        "Form, \\(N\\) & Reference & This work & GMIN & This work & GMIN & Harness \\\\",
+        "\\midrule",
+        *body,
+        "\\bottomrule",
+        "\\end{tabular}",
+        "\\end{table}",
+    ])
+
+
+def crest_equal_summary() -> dict[str, dict[str, str]]:
+    """The summary row of each arm at the revision of the latest rows, checked against the rows."""
+    rows = read(CREST_EQUAL / "rows.csv")
+    revision = rows[-1]["code_revision"]
+    rows = [r for r in rows if r["code_revision"] == revision]
+    summary = {r["arm"]: r for r in read(CREST_EQUAL / "summary.csv") if r["code_revision"] == revision}
+    if set(summary) != set(CREST_ARMS):
+        raise SystemExit(f"crest-equal: summary arms at {revision[:8]} are {sorted(summary)}")
+    for arm, row in summary.items():
+        runs = [r for r in rows if r["arm"] == arm]
+        hits = sum(r["hit"] == "true" for r in runs)
+        if (len(runs), hits) != (int(row["n"]), int(row["hits"])):
+            raise SystemExit(f"crest-equal {arm}: rows give {hits}/{len(runs)}, summary {row['hits']}/{row['n']}")
+    return summary
+
+
+def crest_p(value: str) -> str:
+    """Three decimals down to 0.001, then two significant figures."""
+    if not value:
+        return "--"
+    number = float(value)
+    if number >= 0.999:
+        return "1"
+    if number >= 0.001:
+        return f"{number:.3f}"
+    return show_p(number)
+
+
+def crest_equal_block() -> str:
+    summary = crest_equal_summary()
+    label = {"anneal": "This work", "crest": "CREST", "crest-wall": "CREST"}
+    body = []
+    for arm in CREST_ARMS:
+        row = summary[arm]
+        body.append(" & ".join([
+            label[arm], row["crest_len_ps"] or "--", f"{row['hits']}/{row['n']}",
+            f"{float(row['calls_median']):.1f}".removesuffix(".0"), f"{row['calls_min']}--{row['calls_max']}",
+            row["within_5pct"], f"{float(row['wall_median_s']):.1f}", f"{float(row['pot_median_s']):.2f}",
+            f"{float(row['outside_median_s']):.2f}", crest_p(row["fisher_p"]),
+            crest_p(row["mannwhitney_calls_p"]), crest_p(row["mannwhitney_inside_p"]),
+            crest_p(row["mannwhitney_wall_p"]),
+        ]) + " \\\\")
+    return "\n".join([
+        "\\begin{table*}",
+        "\\caption{This work against CREST 3.0.2 on the water hexamer at equal GFN2 calls.",
+        "Both arms evaluate GFN2-xTB through xtb 6.7.1 at accuracy 0.01 plus the one-sided O--H",
+        "wall; seeds 2000--2011; one run at a time on one core.",
+        "Length is the \\texttt{-mquick} length of CREST in picoseconds.",
+        "Calls is the GFN2 energy and gradient count served by the driver, the median",
+        "and the range; the CREST rows had a driver ceiling of 50000 calls, and their",
+        "4000 budget field is a label rather than a cap.",
+        "\\(\\pm5\\%\\)",
+        f"counts the runs within {100 * CREST_CALL_TOLERANCE:.0f}\\% of the {float(summary['anneal']['calls_median']):.0f} "
+        "calls of this work.",
+        "Wall, Inside, and Outside are medians in seconds of the whole run, of the time inside the",
+        "potential, and of the rest.",
+        "A hit is a vtight polish of the best structure within \\(10^{-7}\\)~Eh of the prism.",
+        "\\(p_\\mathrm{F}\\) is the two-sided Fisher exact test on hits and \\(p_\\mathrm{U}\\) the",
+        "two-sided Mann--Whitney test, each against this work, as",
+        "\\texttt{scripts/crest\\_equal/run\\_panel.py} writes them to",
+        "\\texttt{bench/crest-equal/summary.csv}.}",
+        "\\label{tab:crest-equal}",
+        "\\centering",
+        "\\scriptsize",
+        "\\setlength{\\tabcolsep}{3.5pt}%",
+        "\\begin{tabular}{@{}lrrrrrrrrrrrr@{}}",
+        "\\toprule",
+        " & & & \\multicolumn{3}{c}{Calls} & & & & & \\multicolumn{3}{c}{\\(p_\\mathrm{U}\\)} \\\\",
+        "\\cmidrule(lr){4-6}\\cmidrule(lr){11-13}",
+        "Arm & Length & Hits & Median & Range & \\(\\pm5\\%\\) & Wall & Inside & Outside & "
+        "\\(p_\\mathrm{F}\\) & Calls & Inside & Wall \\\\",
+        "\\midrule",
+        *body,
+        "\\bottomrule",
+        "\\end{tabular}",
+        "\\end{table*}",
+    ])
+
+
 BLOCKS = {
-    "gofee": (MANUSCRIPT, gofee_block),
-    "tip4p": (MANUSCRIPT, tip4p_block),
+    "gofee": (SI, gofee_block),
+    "tip4p-prose": (SI, tip4p_prose),
+    "tip4p": (SI, tip4p_block),
     "gofee-si": (SI, gofee_si_block),
+    "sc": (MANUSCRIPT, sc_block),
+    "sc-si": (SI, sc_si_block),
 }
 
 

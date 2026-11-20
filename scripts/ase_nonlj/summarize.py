@@ -47,7 +47,7 @@ TEX_LABELS = {
     "m55r6": "M\\(_{55}\\), \\(\\rho=6\\)",
     "m55r14": "M\\(_{55}\\), \\(\\rho=14\\)",
 }
-MANUSCRIPT = ROOT / "paper" / "jctc" / "manuscript.tex"
+DOCUMENT = ROOT / "paper" / "jctc" / "si.tex"
 TEX_MARKS = ("% ase-nonlj table: start", "% ase-nonlj table: end")
 ASE_VERSION = "3.29.0"
 REVISION = "9a30f3190b3bb7040c675a904f8388eb68224151"
@@ -308,7 +308,7 @@ def tex_table(grouped: dict[str, dict[str, list[dict[str, str]]]]) -> str:
 def splice(text: str, block: str) -> str:
     start, end = TEX_MARKS
     if text.count(start) != 1 or text.count(end) != 1:
-        raise SystemExit(f"{MANUSCRIPT} needs one '{start}' and one '{end}'")
+        raise SystemExit(f"{DOCUMENT} needs one '{start}' and one '{end}'")
     head, rest = text.split(start, 1)
     _old, tail = rest.split(end, 1)
     return f"{head}{start}\n{block}\n{end}{tail}"
@@ -490,7 +490,7 @@ def main() -> None:
         out / "README.md": "\n".join(readme),
     }
     if "--tex" in flags:
-        outputs[MANUSCRIPT] = splice(MANUSCRIPT.read_text(), tex_table(grouped))
+        outputs[DOCUMENT] = splice(DOCUMENT.read_text(), tex_table(grouped))
     if "--check" in flags:
         stale = [
             str(path.relative_to(ROOT))

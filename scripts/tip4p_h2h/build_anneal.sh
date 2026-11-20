@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Copyright (c) anneal developers
 # Release build of the counted head-to-head seed example.
-# Paths in the binary are remapped so the timed run is not labelled
+# Paths in the binary are remapped so the timed run is not labeled
 # with this checkout.
 set -euo pipefail
 

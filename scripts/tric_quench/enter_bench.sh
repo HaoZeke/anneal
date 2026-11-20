@@ -3,7 +3,7 @@
 # Gradients per quench on GFN2-xTB: anneal L-BFGS, anneal TRIC, geomeTRIC
 # TRIC and Cartesian. One UTS namespace, hostname bench, working directory
 # /work, one core.
-#   enter_bench.sh [run options]   replay the quenches, then summarise
+#   enter_bench.sh [run options]   replay the quenches, then summarize
 #                                  (TRIC_QUENCH_ROWS, TRIC_QUENCH_SUMMARY)
 #   enter_bench.sh search          whole searches with each anneal quench
 set -euo pipefail

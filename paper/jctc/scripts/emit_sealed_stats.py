@@ -15,7 +15,6 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import lj75_gmin_table
-import water_results_table
 
 
 def iqr(values: np.ndarray) -> tuple[float, float]:
@@ -35,19 +34,6 @@ def main() -> int:
         print(f"lj75 par2 mean {arm.sealed_par2}")
         print(f"lj75 call median {call_median:.6f} iqr {call_iqr:.6f}")
         print(f"lj75 wall median {wall_median:.6f} iqr {wall_iqr:.6f}")
-    _, water, _ = water_results_table.load(water_results_table.DATA)
-    for arm in water:
-        print(f"water label {arm.label}")
-        print(f"water hits {arm.summary['hits']} of {arm.summary['n']}")
-        if arm.contrast is not None:
-            p = arm.contrast["mcnemar_exact_p"]
-            print(f"water mcnemar p {p}")
-            print(f"water mcnemar p3 {water_results_table._p3(p)}")
-            low, high = arm.contrast["newcombe_95"]
-            print(f"water newcombe {low:.6f} {high:.6f}")
-    fair = water_results_table.polish_vs_crest_fair(water)
-    print(f"water polish vs crest_fair p {fair['mcnemar_exact_p']}")
-    print(f"water polish vs crest_fair p3 {water_results_table._p3(fair['mcnemar_exact_p'])}")
     return 0
 
 

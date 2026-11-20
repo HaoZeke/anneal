@@ -55,7 +55,7 @@ FIELDS = [
 
 
 def lj_container(n: int) -> float:
-    # io1.f90 with RADIUS unset; NATOMS counts centre and angle-axis rows.
+    # io1.f90 with RADIUS unset; NATOMS counts center and angle-axis rows.
     return (2.0 + (3.0 * 2 * n / 17.77153175) ** (1.0 / 3.0)) * 2.0 ** (1.0 / 6.0)
 
 

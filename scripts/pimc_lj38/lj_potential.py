@@ -10,8 +10,15 @@ that ``LJ_getall`` adds after the pair sum.
 from __future__ import annotations
 
 import math
+import sys
+from pathlib import Path
 
 import numpy as np
+
+_SCRIPTS = Path(__file__).resolve().parents[1]
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+from codata2018 import BOHR_ANGSTROM  # noqa: E402
 
 # run.sh of examples/features/quantum_annealing/RPQA/LJ_cluster
 SIGMA = 5.270446
@@ -19,8 +26,8 @@ EPSILON = 0.00367493
 CUTOFF = 7.0 * SIGMA
 # 8 * pi / 3, the literal in LJ.f90
 FOUR_TAU_BY_3 = 8.3775804095727811
-# i-PI UnitMap length factor: angstrom times this is bohr
-ANGSTROM_TO_BOHR = 1.8897261
+# angstrom times this is bohr
+ANGSTROM_TO_BOHR = 1.0 / BOHR_ANGSTROM
 SIGMA_ANGSTROM = SIGMA / ANGSTROM_TO_BOHR
 
 
@@ -106,8 +113,12 @@ def dimer_well() -> float:
         raise RuntimeError("dimer pair is not -epsilon")
     if abs(pot - (pair + pot_lr)) > 1e-12:
         raise RuntimeError("dimer evaluator missed the tail")
-    # Repulsive inside the well: atom 1 is pushed to +x.
-    if forces[1, 0] >= 0.0:
+    # Repulsive inside the well: atom 1 is pushed to +x. The force at the
+    # minimum itself is zero up to rounding, so the sign is read at 0.9 r.
+    inside = pos.copy()
+    inside[1, 0] = 0.9 * r
+    _pot_inside, forces_inside, _virial_inside = evaluate(cell, inside)
+    if forces_inside[1, 0] <= 0.0 or abs(forces[1, 0]) > 1e-12:
         raise RuntimeError("dimer force sign")
     return pot
 

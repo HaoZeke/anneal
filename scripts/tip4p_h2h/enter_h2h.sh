@@ -7,6 +7,7 @@ set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 WORK=/work/tip4p-h2h
+OUTPUT=${TIP4P_H2H_OUTPUT:-$WORK/output}
 
 bash "$HERE/build_anneal.sh"
 
@@ -14,7 +15,7 @@ bash "$HERE/build_anneal.sh"
 # build only brackets LJ, so pot_s would be empty for the water arm.
 bash "$ROOT/scripts/gmin_h2h/build_gmin.sh" --extra-patch "$HERE/newtip-timer.patch"
 
-mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs" "$WORK/gm"
+mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs" "$WORK/gm" "$OUTPUT"
 cp -a "$HERE/run_h2h.py" "$ROOT/scripts/target_tol.py" \
   "$ROOT/scripts/gmin_pin.py" "$ROOT/scripts/machine_provenance.py" "$WORK/bin/"
 cp -a "$ROOT/examples/h2h_gmin_tip4p.data" "$WORK/bin/h2h_gmin_tip4p.data"
@@ -46,17 +47,21 @@ export OMP_PROC_BIND=TRUE
 export OMP_PLACES=cores
 export RAYON_NUM_THREADS=1
 cd /work
-exec /usr/bin/python3 -u $WORK/bin/run_h2h.py \\
+taskset -c 0 /usr/bin/python3 $ROOT/scripts/session_metadata.py \\
+  --output $OUTPUT/sessions.jsonl \\
+  --campaign tip4p-gmin --root $ROOT -- \\
+  snakemake -s workflow/Snakefile tip4p_h2h --cores 1 --force
+exec taskset -c 0 /usr/bin/python3 -u $WORK/bin/run_h2h.py \\
   --binary $WORK/bin/h2h_seed \\
   --point $WORK/bin/h2h_tip4p_point \\
   --gmin $WORK/bin/GMIN \\
   --data $WORK/bin/h2h_gmin_tip4p.data \\
   --verify-data $WORK/bin/h2h_gmin_tip4p_verify.data \\
   --gm-dir $WORK/gm \\
-  --verify-out $WORK/verify.csv \\
+  --verify-out $OUTPUT/verify.csv \\
   --work $WORK/runs \\
-  --rows $WORK/rows.csv \\
-  --summary $ROOT/bench/tip4p-h2h/h2h-summary.csv \\
+  --rows $OUTPUT/rows-h2h.csv \\
+  --summary $OUTPUT/h2h-summary.csv \\
   --head-file $WORK/anneal-head \\
   --gmin-source $WORK/gmin-source.txt \\
   --svnrev /work/gmin-h2h/src/wales/GMIN/source/SVNREV \\

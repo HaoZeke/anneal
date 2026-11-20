@@ -24,7 +24,7 @@ export IRA_LIB_DIR=$HOME/ira/lib
 export LD_LIBRARY_PATH=$HOME/ira/lib:${LD_LIBRARY_PATH:-}
 # The campaign TOML is the only source for replicas/wave/slice/hop
 # cap/census interval/channels/seed base -- see the sibling c48
-# script's comment for why this script no longer duplicates them.
+# script's comment for why this script does not duplicate them.
 export CATALOG_CONFIG=$LJ_ROOT/scripts/campaigns/lj75-occ-c48f.toml
 export LJ_OUT=$HOME/ljwork/c48f
 mkdir -p "$LJ_OUT/$CATALOG_CAMPAIGN"

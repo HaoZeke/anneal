@@ -11,9 +11,9 @@ reference.
   stall controls. 15 molecules run at 5e5 calls and 20 at 2e6.
 - `rates-a24ba760.csv`: the rows of a24ba760, every size at 5e5 calls,
   with the stall controls still on. b47d442a overwrote them in
-  `rates.csv`; this file is that blob unchanged. The TIP4P subsection of
-  `paper/jctc/manuscript.tex` reports these rows, and its cross-field
-  section and conclusions compare them with `rates.csv`.
+  `rates.csv`; this file is that blob unchanged. The TIP4P section of
+  `paper/jctc/si.tex` reports these rows, and its section on the arms
+  that were not kept compares them with `rates.csv`.
 
 Neither file has a `code_revision` or `host` column. The hostname is bench
 by the runner's check; the rows name no revision for the tree that the runner built.

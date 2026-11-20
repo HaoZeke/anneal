@@ -2,7 +2,7 @@
 # Copyright (c) anneal developers
 """Serial TIP4P head-to-head, anneal against GMIN, one core, twelve seeds.
 
-Both arms open the same molecular centres: ``h2h_seed`` writes the start it
+Both arms open the same molecular centers: ``h2h_seed`` writes the start it
 draws for a seed, and GMIN reads it as its ``coords``. Each run is capped at
 2_000_000 charged gradient evaluations: one ``value_and_gradient`` pass in
 anneal and one ``GRADT=true`` entry to ``POTENTIAL`` (``gradient_passes``) in
@@ -356,9 +356,8 @@ def main() -> int:
         verify(args.point, args.gmin, args.verify_data, args.gm_dir, args.verify_out, args.work)
     sizes = (args.size,) if args.size else SIZES
     seeds = (args.seed,) if args.seed is not None else SEEDS
+    # The rows file is append-only; the summary reads this session's rows only.
     rows: list[dict[str, str]] = []
-    if args.rows.is_file() and whole:
-        args.rows.unlink()
     for n in sizes:
         for seed in seeds:
             print(f"anneal n={n} seed={seed}", flush=True)

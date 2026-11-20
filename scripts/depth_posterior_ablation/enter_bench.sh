@@ -2,7 +2,9 @@
 # Copyright (c) anneal developers
 # Depth-posterior ablation from /work, hostname bench.
 # The release binary is built with --remap-path-prefix. The search itself
-# runs inside one UTS namespace, one seed at a time.
+# runs inside one UTS namespace, one seed at a time. --held-out appends the
+# posterior and uniform rows of seeds 7000-7005 to
+# results/size-tiered-selection.csv and their provenance to its sidecar.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -46,6 +48,16 @@ fi
 
 mkdir -p "$WORK/home" "$WORK/tmp" "$LOGS"
 cd "$WORK"
+if [[ "${1:-}" == "--held-out" ]]; then
+  REVISION=$(git -C "$ROOT" rev-parse HEAD)
+  exec python3 -u "$INNER" \
+    --binary "$BIN" \
+    --log-dir "$LOGS/held-out" \
+    --results "$ROOT/results/size-tiered-selection.csv" \
+    --provenance "$ROOT/results/size-tiered-selection-provenance.csv" \
+    --code-revision "$REVISION" \
+    "$@"
+fi
 exec python3 -u "$INNER" \
   --binary "$BIN" \
   --log-dir "$LOGS" \

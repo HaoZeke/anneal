@@ -23,7 +23,6 @@ STEPS = (
     ("fig_rec_arms.py", ("figs/rec_arms.pdf",)),
     ("fig_lj75_ecdf.py", ("figs/lj75_ecdf.pdf",)),
     ("fig_summary_rates.py", ("figs/summary_rates.pdf",)),
-    ("fig_water_crest.py", ("figs/water_crest.pdf",)),
     ("fig_landfold_maps.py", ("figs/landfold_maps.pdf",)),
     ("fig_systems.py", ("figs/systems.pdf",)),
     ("fig_si_structures.py", ("figs/si_structures.pdf",)),

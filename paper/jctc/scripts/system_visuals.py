@@ -68,7 +68,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data" / "system_visuals"
 XYZRENDER = "0.3.8"
 CAIROSVG = "2.9.1"
-# Nearest neighbours of a Lennard-Jones minimum, in sigma, drawn as sticks.
+# Nearest neighbors of a Lennard-Jones minimum, in sigma, drawn as sticks.
 LJ_NEIGHBOUR = 1.35
 # The pictures of a one-species model: for each style, the renderer, the longest pair in
 # sigma it joins (0 joins none), and its settings. xyzrender takes command-line flags;
@@ -116,9 +116,9 @@ TIP4P_C6 = 2552.24
 TIP4P_COULOMB = 1389.354848
 TIP4P_QH = 0.52
 TIP4P_M = 0.15
-# The lengths of each one-species model, scaled so that its nearest neighbours stand as
+# The lengths of each one-species model, scaled so that its nearest neighbors stand as
 # far apart as those of Lennard-Jones, 2^(1/6) sigma: r_e of Morse and a/sqrt(2), the
-# neighbour distance of the fcc lattice, of Sutton--Chen.
+# neighbor distance of the fcc lattice, of Sutton--Chen.
 DRAWN_SCALE = {"Lennard-Jones": 1.0, "Morse": 2 ** (1 / 6), "Sutton--Chen": 2 ** (1 / 6) * math.sqrt(2)}
 ENERGY_DIGITS = {"Lennard-Jones": 6, "Morse": 6, "Sutton--Chen": 4, "TIP4P water": 4}
 VIEWS = {"lj38_fcc": "tilt", "lj98_gm": "pair", "lj13": "tilt", "lj26": "tilt", "lj55": "tilt"}
@@ -586,7 +586,7 @@ def viewed(structure: Structure):
 
     axis looks down the unique axis of the second moments, the five-fold axis of a
     decahedron; pair down the longest sum of the lines to two of the atoms farthest from
-    the centre, the first such pair in file order, which sets the lattice of the Leary
+    the center, the first such pair in file order, which sets the lattice of the Leary
     tetrahedron in rows; tilt turns the principal axes by 25 and 15 degrees.
     """
     import numpy as np
@@ -669,7 +669,7 @@ def render(structure: Structure, style: str = ONE_SPECIES_STYLE) -> bytes:
     with tempfile.TemporaryDirectory() as scratch:
         xyz = Path(scratch) / f"{structure.key}.xyz"
         svg = Path(scratch) / f"{structure.key}.svg"
-        # Ruhi element colours for water: JSON color_overrides, not the NCI CPK palette.
+        # Ruhi element colors for water: JSON color_overrides, not the NCI CPK palette.
         cfg = Path(scratch) / "ruhi_water.json"
         if not lj:
             cfg.write_text(

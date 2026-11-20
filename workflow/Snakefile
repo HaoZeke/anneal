@@ -82,7 +82,7 @@ rule sc_h2h:
 
 # Twelve-seed Sutton–Chen against GMIN. Appends rows. The six-seed
 # table above is left as it is. Not part of `rule all`.
-#   snakemake -s workflow/Snakefile sc_h2h_n12
+#   snakemake -s workflow/Snakefile sc_h2h_n12 --cores 1 --force
 rule sc_h2h_n12:
     shell:
         """
@@ -400,7 +400,7 @@ rule morse14_h2h:
         """
 
 
-# Gupta Au55, twelve seeds, paper budget. The sphere and the neighbour
+# Gupta Au55, twelve seeds, paper budget. The sphere and the neighbor
 # shell follow a physical opening quench. Not part of `rule all`.
 #   snakemake -s workflow/Snakefile au55_scale
 rule au55_scale:
@@ -430,14 +430,14 @@ rule covalent_h2h:
         """
 
 
-# GFN2-xTB Si10, C10 and C20, anneal's general arm against CREST 3.0.2,
-# twelve seeds, 1e5 calls, 3000 K electronic temperature; Si13 and Si20
-# run once they have a reference. Needs xtb 6.7.1, CREST and rgpot's
+# GFN2-xTB Si10 and C10 at twelve seeds, and Si13 and C20 at six seeds:
+# anneal's general arm against CREST 3.0.2, 1e5 calls, 3000 K electronic
+# temperature. Si20 runs once it has a reference. Needs xtb 6.7.1, CREST and rgpot's
 # libxtb_engine.so (paths in the script). Not part of `rule all`.
 # Rows and summaries are appended to bench/covalent-h2h/gfn2/rows.csv and
 # summaries.csv; the output is a stamp under /work, because Snakemake
 # deletes declared outputs before a job and would take the rows with it.
-#   snakemake -s workflow/Snakefile covalent_gfn2_crest
+#   snakemake -s workflow/Snakefile covalent_gfn2_crest --cores 1 --force
 rule covalent_gfn2_crest:
     output:
         touch("/work/covalent-h2h/gfn2/stamps/panel.stamp"),
@@ -445,6 +445,42 @@ rule covalent_gfn2_crest:
         """
         set -euo pipefail
         bash scripts/covalent_h2h/gfn2_enter_bench.sh
+        """
+
+
+# Serial recommended CuH2 slab on the FCC fixture, budget 2500, seeds 0-7.
+# Writes /work/cuh2-fcc-rec/cuh2_fcc_rec_*.out and its hardware receipt.
+# Not part of `rule all`.
+#   snakemake -s workflow/Snakefile cuh2_fcc_rec --cores 1 --force
+rule cuh2_fcc_rec:
+    output:
+        touch("/work/cuh2-fcc-rec/stamps/rec.stamp"),
+    shell:
+        """
+        set -euo pipefail
+        mkdir -p /work/cuh2-fcc-rec/stamps
+        bash scripts/run_cuh2_fcc_rec.sh
+        """
+
+
+# Full 192-seed water-hexamer CREST comparison in the sealed anneal_repro
+# workflow. The runner verifies workflow commit 56160f2d and its tree before
+# invoking its locked Pixi environment. ANNEAL_REPRO_ROOT, or
+# --config anneal_repro=PATH, names the checkout; the default is the sibling
+# directory ../anneal_repro. Not part of `rule all`.
+#   ANNEAL_REPRO_ROOT=../anneal_repro snakemake -s workflow/Snakefile water_crest_fair --cores 8 --force
+rule water_crest_fair:
+    output:
+        touch("/work/anneal-repro/stamps/water-crest-fair-n192.stamp"),
+    threads: 8
+    params:
+        repro=config.get("anneal_repro", ""),
+    shell:
+        """
+        set -euo pipefail
+        mkdir -p /work/anneal-repro/stamps
+        if [ -n {params.repro:q} ]; then export ANNEAL_REPRO_ROOT={params.repro:q}; fi
+        WATER_CREST_CORES={threads} bash scripts/water_crest_fair.sh
         """
 
 
@@ -605,6 +641,23 @@ rule depth_posterior_ablation:
         """
 
 
+# The posterior and uniform arms of the held-out panel, seeds 7000-7005 on
+# LJ75, LJ98 and LJ104, appended to results/size-tiered-selection.csv, with
+# code_revision and host appended to its provenance sidecar. The tiered arm
+# has no committed code and is not run.
+# Not part of `rule all`.
+#   snakemake -s workflow/Snakefile size_tiered_selection --cores 1 --force
+rule size_tiered_selection:
+    output:
+        "/work/depth-posterior-ablation/held-out.stamp",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/depth_posterior_ablation/enter_bench.sh --held-out
+        touch {output}
+        """
+
+
 # Lennard-Jones head-to-head against the published bonobo initialiser.
 # Not part of `rule all`. Run it by name:
 #   snakemake -s workflow/Snakefile lj_bonobo_h2h
@@ -657,7 +710,7 @@ rule fetch_paper_data:
 # Cambridge sizes (H2O)8, 15, 20, 21 and, scored against the pooled best,
 # (H2O)25. Twelve seeds, 2_000_000 charged evaluations, one serial session,
 # sudo unshare --uts with hostname bench. Not part of `rule all`:
-#   snakemake -s workflow/Snakefile tip4p_h2h
+#   snakemake -s workflow/Snakefile tip4p_h2h --cores 1 --force
 rule tip4p_h2h:
     shell:
         """
@@ -791,7 +844,7 @@ rule occat_h2h:
         """
 
 
-#   snakemake -s workflow/Snakefile agox_gofee_h2h
+#   snakemake -s workflow/Snakefile agox_gofee_h2h --cores 1 --force
 rule agox_gofee_h2h:
     shell:
         """
@@ -1115,4 +1168,41 @@ rule gmin_losses2:
         set -euo pipefail
         export OUTPUT=/work/gmin-losses2
         bash scripts/gmin_panel/enter_losses2.sh
+        """
+
+
+# Current-code regeneration of the six landfold panels whose v7 source
+# tables were not deposited. The runner is resumable in /work and publishes
+# landscape.ld and fes.csv only after every declared seed has finished.
+# Not part of `rule all`.
+#   snakemake -s workflow/Snakefile landfold_maps_current --cores 1
+rule landfold_maps_current:
+    input:
+        "examples/landfold_campaign.rs",
+        "paper/jctc/scripts/run_landfold_campaign.py",
+    output:
+        touch("/work/anneal-landfold-current/complete.stamp"),
+    threads: 1
+    resources:
+        mem_mb=16000,
+    shell:
+        """
+        set -euo pipefail
+        python3 paper/jctc/scripts/run_landfold_campaign.py \\
+          --work /work/anneal-landfold-current \\
+          --publish paper/jctc/data/landfold_maps_v7
+        """
+
+
+# (H2O)6 at GFN2 plus the O-H wall. Anneal at the 4000-call ledger,
+# CREST 3.0.2 at -mquick -len 0.90 ps and at -len 0.11 ps, seeds 2000-2011.
+# Rows are appended under bench/crest-equal. Not part of `rule all`.
+#   snakemake -s workflow/Snakefile crest_equal --cores 1 --force
+rule crest_equal:
+    output:
+        "bench/crest-equal/panel.stamp",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/crest_equal/enter_bench.sh
         """

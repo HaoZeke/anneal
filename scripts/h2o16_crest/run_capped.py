@@ -16,8 +16,8 @@ from it. CREST is
 after one xtb ``--opt`` of the start through the same driver. ``-shake 1``
 constrains every X-H bond, which for water is every covalent bond; the
 driver supplies no Wiberg bond orders, which ``-shake 2`` reads. CREST's
-first optimisation and CREGEN compare a distance topology that the
-driver's optimisation changes, so the start is optimised first and CREGEN
+first optimization and CREGEN compare a distance topology that the
+driver's optimization changes, so the start is optimized first and CREGEN
 runs with ``-notopo``.
 
 Both arms are capped at ``BUDGET`` objective calls, the anneal (H2O)16
@@ -55,14 +55,15 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
     if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
         sys.path.insert(0, str(_candidate))
         break
+from codata2018 import HARTREE_EV  # noqa: E402
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 
 MOLECULES = 16
 BUDGET = 280305
 SEEDS = tuple(range(2000, 2012))
 ARMS = ("anneal", "crest")
-# wdbase-1, -81.396292669509 Eh, at xtb 6.7.1's 27.21138505 eV per Hartree.
-REFERENCE_EV = -81.396292669509 * 27.21138505
+# wdbase-1, -81.396292669509 Eh, evaluated with the CODATA 2018 conversion.
+REFERENCE_EV = -81.396292669509 * HARTREE_EV
 HIT_TOL = DEFAULT_HIT_TOL
 DRIVER_PATH_MAX = 64
 SCHEDULE_SEED = 20261115
@@ -85,6 +86,7 @@ ROW_FIELDS = [
     "crest_sha256",
     "xtb_sha256",
     "engine_sha256",
+    "rgpot_revision",
 ]
 SUMMARY_FIELDS = [
     "system",
@@ -444,6 +446,25 @@ def self_test() -> None:
     print("ok")
 
 
+def rgpot_revision_of(engine: Path, override: str | None = None) -> str:
+    if override:
+        return override.strip()
+    env_rev = os.environ.get("RGPOT_REVISION", "").strip()
+    if env_rev:
+        return env_rev
+    engine_dir = engine.resolve().parent
+    for name in ("RGPOT_SOURCE_COMMIT", "rgpot.sha"):
+        candidate = engine_dir / name
+        if candidate.is_file():
+            text = candidate.read_text().strip()
+            if text:
+                return text
+    root = os.environ.get("RGPOT_ROOT", "").strip()
+    if root:
+        return subprocess.check_output(["git", "-C", root, "rev-parse", "HEAD"], text=True).strip()
+    raise SystemExit("missing rgpot revision: pass --rgpot-revision, set RGPOT_REVISION/RGPOT_ROOT, or place rgpot.sha beside --engine")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--self-test", action="store_true")
@@ -456,6 +477,7 @@ def main() -> None:
     ap.add_argument("--rows", type=Path)
     ap.add_argument("--summary", type=Path)
     ap.add_argument("--head-file", type=Path)
+    ap.add_argument("--rgpot-revision")
     ap.add_argument("--core", default="0")
     ap.add_argument("--budget", type=int, default=BUDGET)
     ap.add_argument("--seed", type=int, action="append")
@@ -488,6 +510,7 @@ def main() -> None:
         "crest_sha256": sha256(args.crest),
         "xtb_sha256": sha256(args.xtb),
         "engine_sha256": sha256(args.engine),
+        "rgpot_revision": rgpot_revision_of(args.engine, args.rgpot_revision),
     }
     starts = args.out / "starts"
     starts.mkdir(parents=True, exist_ok=True)

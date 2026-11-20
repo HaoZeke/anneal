@@ -20,7 +20,6 @@ paper/jctc/scripts/fig_si_structures.py
 paper/jctc/scripts/fig_si_water.py
 paper/jctc/scripts/fig_summary_rates.py
 paper/jctc/scripts/fig_systems.py
-paper/jctc/scripts/fig_water_crest.py
 paper/jctc/scripts/figstyle.py
 paper/jctc/scripts/figure_provenance.py
 paper/jctc/scripts/hexamer_numbers.py
@@ -44,10 +43,8 @@ paper/jctc/scripts/tip4p_constants.py
 paper/jctc/scripts/toc_graphic.py
 paper/jctc/scripts/watch_crest_steps.py
 paper/jctc/scripts/water_census.py
-paper/jctc/scripts/water_crest_figure.py
 paper/jctc/scripts/water_h2h.py
 paper/jctc/scripts/water_host_relabel.py
-paper/jctc/scripts/water_results_table.py
 pytest/test_cluster_search.py
 python/anneal/__init__.py
 scripts/build_librgpot_cuh2.sh
