@@ -3493,8 +3493,9 @@ fn returns_to_best<F: Fingerprint>(
     }
 }
 
-/// Stuck means stuck for longer than this chain has ever been stuck before,
-/// not stuck for some number someone chose. On a 75-point trace, a
+/// Stuck means the silence since the last record has outlasted the stretch
+/// already answered in that silence. The floor is the configured patience,
+/// used when nothing has been answered yet. On a 75-point trace, a
 /// successful run goes tens of thousands of hops between improvements on its
 /// way to the crossing, so a fixed patience of 400 fires about 180 climbs
 /// into a healthy search.
@@ -3505,9 +3506,54 @@ fn stalled(cfg: &Config, quiet: usize, longest_quiet: usize) -> bool {
             .max((cfg.escape_stall_factor * longest_quiet as f64) as usize)
 }
 
+/// Hops since the last real record, and the longest such stretch already answered.
+///
+/// `quiet` counts hops since a minimum beat the incumbent by [`STRICT_IMPROVEMENT`].
+/// A leave that does not beat it must not clear that count: the next response is
+/// due when the stretch is `escape_stall_factor` times the one just answered,
+/// the same test as [`stalled`]. A new record ends the stretch. The symmetry
+/// latch is released with either update so the next firing can symmetrise
+/// once; it is not a clock and it is not a threshold.
+fn note_silence(
+    found_best: bool,
+    quiet: &mut usize,
+    longest_quiet: &mut usize,
+    symmetry_answered: &mut bool,
+) {
+    if found_best {
+        *quiet = 0;
+        *longest_quiet = 0;
+    } else {
+        *longest_quiet = (*longest_quiet).max(*quiet);
+    }
+    *symmetry_answered = false;
+}
+
+/// A call plateau is due once per patience window of the record gap, then
+/// again one window after each leave that did not set a new record.
+///
+/// The record gap (`spent - charged_at_best`) stays on the last real record.
+/// `last_plateau_spent` only spaces the leaves, so a run that never goes
+/// quiet still leaves on the same calls.
+fn call_plateau_due(
+    hops: usize,
+    spent: usize,
+    charged_at_best: usize,
+    last_plateau_spent: usize,
+    patience: usize,
+) -> bool {
+    let window = patience.max(1);
+    hops > 0
+        && spent.saturating_sub(charged_at_best) >= window
+        && spent.saturating_sub(last_plateau_spent) >= window
+}
+
 #[cfg(test)]
 mod biased_metropolis_tests {
-    use super::{Config, biased_metropolis, returns_to_best, returns_to_deposit, stalled};
+    use super::{
+        Config, biased_metropolis, call_plateau_due, note_silence, returns_to_best,
+        returns_to_deposit, stalled,
+    };
     use crate::bias::{BasinBias, Bias, SortedPairs};
     use ndarray::Array1;
     use rand::SeedableRng;
@@ -3611,6 +3657,43 @@ mod biased_metropolis_tests {
         assert!(stalled(&cfg, patience, 0));
         assert!(!stalled(&cfg, 2 * patience - 1, patience));
         assert!(stalled(&cfg, 2 * patience, patience));
+    }
+
+    #[test]
+    fn a_failed_leave_keeps_the_silence_and_the_record_gap() {
+        let cfg = Config::with_scales(STALL_POINTS, 1.0, 1.0);
+        let patience = cfg.escape_stall_patience;
+        let mut quiet = patience;
+        let mut longest = 0usize;
+        let mut symmetry_answered = true;
+        assert!(stalled(&cfg, quiet, longest));
+        // A miss keeps the silence running and records the stretch, so the
+        // next response waits until it is twice as long.
+        note_silence(false, &mut quiet, &mut longest, &mut symmetry_answered);
+        assert_eq!(quiet, patience);
+        assert_eq!(longest, patience);
+        assert!(!symmetry_answered);
+        assert!(!stalled(&cfg, quiet, longest));
+        assert!(stalled(&cfg, quiet.saturating_mul(2), longest));
+        // A new record is the only thing that ends it.
+        symmetry_answered = true;
+        note_silence(true, &mut quiet, &mut longest, &mut symmetry_answered);
+        assert_eq!(quiet, 0);
+        assert_eq!(longest, 0);
+        assert!(!symmetry_answered);
+        // The call gap stays on the record. The leave only spaces the next one.
+        let record = 0usize;
+        let first = patience + 200;
+        assert!(call_plateau_due(1, first, record, record, patience));
+        assert!(!call_plateau_due(2, first + 100, record, first, patience));
+        assert!(call_plateau_due(
+            3,
+            first + patience,
+            record,
+            first,
+            patience
+        ));
+        assert!(first.saturating_sub(record) > patience);
     }
 }
 
@@ -4654,6 +4737,10 @@ where
     let mut continuous_symmetry_gain = 0.0_f64;
     let mut quiet = 0usize;
     let mut longest_quiet = 0usize;
+    // Point-group symmetrisation of one silence. Cleared only by a record.
+    // Without it a stuck chain symmetrises on every hop: measured at 98
+    // points, 57989 firings, and the seed came back above the target.
+    let mut symmetry_answered = false;
     let mut stall_escapes = 0usize;
     let mut stall_escape_gain = 0.0_f64;
     let mut trail_escapes = 0usize;
@@ -4963,6 +5050,8 @@ where
     let mut reorder_misses = 0u32;
     let mut reorder_from = 0usize;
     let mut charged_at_best = ledger.spent();
+    // Spaces plateau leaves. The record gap above is not moved by a miss.
+    let mut last_plateau_spent = charged_at_best;
     // Multiple of the preset temperature the walk hops at. It stays one
     // unless `plateau_heat` is on.
     let mut heat = 1.0_f64;
@@ -5453,8 +5542,9 @@ where
             // The calls just spent are not a new lowest of the main chain.
             // Leaving them on the quiet clock would start the later walk
             // before the main chain has actually stalled.
-            charged_at_best =
-                charged_at_best.saturating_add(ledger.spent().saturating_sub(shell_mark));
+            let side_calls = ledger.spent().saturating_sub(shell_mark);
+            charged_at_best = charged_at_best.saturating_add(side_calls);
+            last_plateau_spent = last_plateau_spent.saturating_add(side_calls);
         }
         // The shell turn above is the early leave. A longer walk on a stored
         // cage is what reaches the minimum when the shell lands short of it,
@@ -5726,6 +5816,7 @@ where
                 let cost = ledger.spent().saturating_sub(before);
                 branch_spent = branch_spent.saturating_add(cost);
                 charged_at_best = charged_at_best.saturating_add(cost);
+                last_plateau_spent = last_plateau_spent.saturating_add(cost);
                 last_polish_spent = last_polish_spent.saturating_add(cost);
                 next_reoccupy = next_reoccupy.saturating_add(cost);
                 reorder_wait = reorder_wait.saturating_add(cost);
@@ -5762,8 +5853,13 @@ where
         // the same clock is one directed leave, not that redraw. The hop
         // patience is thousands of hops and does not fall inside a paper
         // force budget, so this call plateau is the leave that runs.
-        let call_due = hops > 0
-            && ledger.spent().saturating_sub(charged_at_best) >= cfg.restart_patience.max(1);
+        let call_due = call_plateau_due(
+            hops,
+            ledger.spent(),
+            charged_at_best,
+            last_plateau_spent,
+            cfg.restart_patience,
+        );
         let mut directed_leave = false;
         if cfg.general_collective
             && !cfg.move_library.is_rigid_body()
@@ -5816,7 +5912,7 @@ where
         {
             let fresh = random_cluster(x.len() / 3, 0.7, cfg.min_separation, rng);
             let (energy, relaxed) = relax(ledger, fresh.view(), cfg.relax_steps);
-            charged_at_best = ledger.spent();
+            last_plateau_spent = ledger.spent();
             best_seen = ledger.best;
             if energy.is_finite() && relaxed.len() == x.len() {
                 internal_action = Some(CheckpointAction::ExternalAdopt {
@@ -5829,7 +5925,7 @@ where
         let leave_due = internal_action.is_none() && cfg.escape_on_stall && call_due;
         if leave_due {
             if !cfg.retry_noop_stall_leave {
-                charged_at_best = ledger.spent();
+                last_plateau_spent = ledger.spent();
             }
             directed_leave = true;
             if cfg.plateau_heat {
@@ -6457,7 +6553,11 @@ where
                     );
                     soft_cache = None;
                     basin_entry = None;
-                    quiet = 0;
+                    // An adopted projection that misses the record is not a
+                    // new silence. Only the new best ends the one in progress.
+                    if improved {
+                        note_silence(true, &mut quiet, &mut longest_quiet, &mut symmetry_answered);
+                    }
                     if improved && improvements.len() < 512 {
                         improvements.push((
                             hops,
@@ -8838,8 +8938,10 @@ where
         // just crossed, which is the same feedback law on a quantity that can
         // actually leave a basin.
         if improved {
-            longest_quiet = longest_quiet.max(quiet);
-            quiet = 0;
+            // A record ends the silence. The next one is measured from here.
+            // Keeping the closed gap would make the twice-longest test ask
+            // the following silence to outlast the gap that found the record.
+            note_silence(true, &mut quiet, &mut longest_quiet, &mut symmetry_answered);
         } else {
             quiet += 1;
         }
@@ -8868,6 +8970,7 @@ where
             }
             let (ej, xj) = relax(ledger, y.view(), cfg.relax_steps);
             if ej.is_finite() && xj.len() == x.len() && quench_is_sane(cfg, ej, xj.view()) {
+                let found_best = ej < ledger.best - STRICT_IMPROVEMENT;
                 let jump_gradient = record_quenched_answer(
                     cfg,
                     ledger,
@@ -8888,8 +8991,12 @@ where
                     Some("stall-jump"),
                     hops
                 );
-                longest_quiet = longest_quiet.max(quiet);
-                quiet = 0;
+                note_silence(
+                    found_best,
+                    &mut quiet,
+                    &mut longest_quiet,
+                    &mut symmetry_answered,
+                );
             }
         }
         // Where the chain stands after the acceptance test, computed once for
@@ -8928,12 +9035,15 @@ where
         // instead of decaying by one factor per stage
         // (Hop.cloning_dominates). The jump replaces the state and its
         // energy and nothing else; Metropolis continues raw.
-        if quiet >= seam_patience
+        if seam_patience > 0
+            && quiet >= seam_patience
+            && quiet.is_multiple_of(seam_patience)
             && let Some(bank) = seam.as_ref()
             && let Some((_, frontier_energy, frontier_state)) =
                 bank.restart(0.25, rng.random::<f64>())
             && frontier_state.len() == x.len()
         {
+            let found_best = frontier_energy < ledger.best - STRICT_IMPROVEMENT;
             adopt_minimum!(
                 frontier_energy,
                 Array1::from(frontier_state.to_vec()),
@@ -8944,29 +9054,28 @@ where
                 Some("seam-frontier"),
                 hops
             );
-            quiet = 0;
-            longest_quiet = 0;
+            note_silence(
+                found_best,
+                &mut quiet,
+                &mut longest_quiet,
+                &mut symmetry_answered,
+            );
             restarts += 1;
             continue;
         }
-        if cfg.symmetrise_on_stall && stuck && hop_room(hops) {
+        let best_before_silence = ledger.best;
+        let mut symmetrise_entered = false;
+        if cfg.symmetrise_on_stall && stuck && !symmetry_answered && hop_room(hops) {
+            symmetry_answered = true;
+            symmetrise_entered = true;
             let withhold = cfg.active_region.is_some() || cfg.frozen.is_some();
             if withhold {
                 // Withhold Ih-preserving symmetrise on a packing cluster,
                 // and never run CNA or point-group symmetrise on a slab.
                 // A molecule without a frozen frame still uses the branch
                 // below. The 555 fraction is an observation, not a hop
-                // target.
-                quiet = 0;
-                longest_quiet = 0;
+                // target. Missing the record does not clear the silence.
             } else {
-                // The stall counter is cleared here, not only in the escape
-                // branches below. Without it a stuck chain satisfies the condition
-                // on every subsequent hop and symmetrises on every one: measured at
-                // 98 points, 57989 firings in a single run, about one hop in seven,
-                // and the seed came back at -539.81 against a target of -543.67.
-                quiet = 0;
-                longest_quiet = 0;
                 // The structure is pushed onto whatever approximate symmetry it
                 // has and quenched. Taken only when it improves: unlike a funnel
                 // escape, this is a guess about where the answer is, not a way out
@@ -9087,8 +9196,6 @@ where
         let stalled_from = e;
         let mut stall_outcome: Option<f64> = None;
         if stall_response.map(|arm| stall_arms[arm] == "restart") == Some(true) {
-            quiet = 0;
-            longest_quiet = 0;
             let fresh = if let Some(groups) = cfg.move_library.declared_groups() {
                 // Keep each rigid group's internal geometry; only the
                 // packing is redrawn. An atomic redraw overlaps waters.
@@ -9122,8 +9229,6 @@ where
         if stall_response.map(|arm| stall_arms[arm] == "trail") == Some(true)
             && let Some(x_entry) = basin_entry.take()
         {
-            quiet = 0;
-            longest_quiet = 0;
             // Outward is from the minimum toward the entry, continued past it
             // with noise, so the restart leans toward the ridge the chain
             // crossed on the way in rather than back down the funnel.
@@ -9172,8 +9277,6 @@ where
             stall_outcome = Some(stalled_from - e);
         }
         if stall_response.map(|arm| stall_arms[arm] == "climb") == Some(true) {
-            quiet = 0;
-            longest_quiet = 0;
             // A plateau return through the screen bank is only for a true
             // multi-label chain. A one-label run, even with frozen atoms or an
             // active region, stays on the ordinary activation path below.
@@ -9287,7 +9390,22 @@ where
             }
         }
         if cfg.retry_noop_stall_leave && leave_due && stall_outcome.is_some() {
-            charged_at_best = ledger.spent();
+            last_plateau_spent = ledger.spent();
+        }
+        // A directed plateau that misses does not touch the clocks. The
+        // silence response does not either, except to record the stretch it
+        // answered: quiet keeps counting from the last record, and stalled()
+        // waits until that count is escape_stall_factor times this stretch.
+        let allocator_ran = stall_response.is_some() && !directed_leave;
+        if ledger.best < best_before_silence - STRICT_IMPROVEMENT {
+            note_silence(true, &mut quiet, &mut longest_quiet, &mut symmetry_answered);
+        } else if allocator_ran || symmetrise_entered {
+            note_silence(
+                false,
+                &mut quiet,
+                &mut longest_quiet,
+                &mut symmetry_answered,
+            );
         }
         if let (Some(arm), Some(gain)) = (stall_response, stall_outcome) {
             stall_allocator.update(arm, gain);
@@ -9369,8 +9487,10 @@ where
                 // a case where jumping would push the chain out of a region it
                 // has not finished.
                 if let Ok(j) = sb.propose(from, rng) {
-                    quiet = 0;
-                    longest_quiet = 0;
+                    // A jump that misses the record is not a new silence.
+                    if j.energy < ledger.best - STRICT_IMPROVEMENT {
+                        note_silence(true, &mut quiet, &mut longest_quiet, &mut symmetry_answered);
+                    }
                     // No charged evaluations and no hop. The structure was
                     // quenched and recorded when the run first reached it, so
                     // the ledger has already paid for it, and counting a hop
