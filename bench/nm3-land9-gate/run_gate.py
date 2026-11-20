@@ -401,17 +401,27 @@ def run_checked(command: list[str], cwd: Path, env: dict[str, str], log: Path) -
         text=True,
     )
     affinity = ""
+    threads_ok = False
     try:
-        for _ in range(100):
-            affinity = affinity_of(proc.pid) or affinity
-            try:
-                child_threads_are_one(proc.pid)
+        # The mask is the parent's until taskset applies it. Keep the latest
+        # reading and accept it only after it settles on CPU 0.
+        for _ in range(200):
+            current = affinity_of(proc.pid)
+            if current:
+                affinity = current
+            if not threads_ok:
+                try:
+                    child_threads_are_one(proc.pid)
+                    threads_ok = True
+                except RuntimeError:
+                    if proc.poll() is not None:
+                        raise
+            if threads_ok and affinity == "0":
                 break
-            except RuntimeError:
-                if proc.poll() is not None:
-                    raise
-                time.sleep(0.01)
-        else:
+            if proc.poll() is not None:
+                break
+            time.sleep(0.005)
+        if not threads_ok:
             child_threads_are_one(proc.pid)
         stdout, stderr = proc.communicate()
     except Exception:
