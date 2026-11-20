@@ -128,33 +128,6 @@ def load(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
-def printed_table(path: Path) -> list[dict[str, str]]:
-    found = []
-    for line in path.read_text().splitlines():
-        if not line.startswith("| sc"):
-            continue
-        cells = [part.strip() for part in line.strip().strip("|").split("|")]
-        if len(cells) < 5 or cells[1] not in {"anneal", "gmin"} or "/" not in cells[3]:
-            continue
-        found.append(
-            {
-                "system": cells[0],
-                "arm": cells[1],
-                "harness": cells[2],
-                "hits": cells[3],
-                "calls": cells[4],
-            }
-        )
-    return found
-
-
-def calls_text(value: str) -> str:
-    number = float(value)
-    if number.is_integer():
-        return str(int(number))
-    return f"{number:.6f}".rstrip("0").rstrip(".")
-
-
 def show(value: float) -> str:
     if math.isnan(value):
         return ""
@@ -206,14 +179,21 @@ def summarise(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     return out
 
 
-def readme(rows: list[dict[str, str]], summary: list[dict[str, str]], printed: list[dict[str, str]]) -> str:
-    by_key = {(row["system"], row["arm"]): row for row in summary}
+def trim(text: str) -> str:
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text
+
+
+def readme(rows: list[dict[str, str]], summary: list[dict[str, str]]) -> str:
+    revision = rows[0]["code_revision"][:8] if rows else ""
     lines = [
         "# Sutton-Chen head-to-head rerun",
         "",
         "Anneal against GMIN on the printed cells: reduced Sutton-Chen 12-6, 10-8 and 9-6",
         "at 38, 55 and 80 atoms, seeds 2000-2011, at `PAPER_BUDGETS` in",
         "`scripts/metal_h2h/run_sc.py`. One session, serial, ABBA by seed, cpu 0.",
+        f"Code revision `{revision}`.",
         "",
         "A hit is best <= reference + 0.001 (`scripts/target_tol.py`, `DEFAULT_HIT_TOL`).",
         "Fisher is two-sided exact on hits. Mann-Whitney is two-sided on calls with the",
@@ -223,36 +203,22 @@ def readme(rows: list[dict[str, str]], summary: list[dict[str, str]], printed: l
         "The GMIN data file is `scripts/metal_h2h/run_sc.py` `data_text`: the container",
         "left to GMIN, the Doye-Wales temperature, and the step 0.40 sigma in units of a.",
         "",
-        "| System | Arm | Hits | Calls median | Fisher p | Mann-Whitney p calls |",
-        "|---|---|---|---|---|---|",
+        "Earlier numbers whose revision is not reachable were removed. They remain on",
+        "`origin/fix/sc-shelf-waypoint` and `origin/record/bench-sc-h2h-n12`.",
+        "",
+        "| System | Arm | Code revision | Hits | Calls median | Fisher p | Mann-Whitney p calls |",
+        "|---|---|---|---|---|---|---|",
     ]
     for row in summary:
         lines.append(
-            "| {system} | {arm} | {hits_over_n} | {calls_median} | {fisher_p_vs_gmin} | {mannwhitney_p_calls} |".format(
-                **row
-            )
-        )
-    lines.extend(
-        [
-            "",
-            "Printed counts are the cells in `bench/metal-cluster-h2h/sc-n12/README.md`.",
-            "Two GMIN rows are printed for each system: the earlier data file and the corrected file.",
-            "",
-            "| System | Arm | Printed harness | Printed hits | Printed calls | New hits | New calls |",
-            "|---|---|---|---|---|---|---|",
-        ]
-    )
-    for cell in printed:
-        new = by_key.get((cell["system"], cell["arm"]))
-        lines.append(
-            "| {system} | {arm} | {harness} | {hits} | {calls} | {new_hits} | {new_calls} |".format(
-                system=cell["system"],
-                arm=cell["arm"],
-                harness=cell["harness"],
-                hits=cell["hits"],
-                calls=cell["calls"],
-                new_hits="" if new is None else new["hits_over_n"],
-                new_calls="" if new is None else calls_text(new["calls_median"]),
+            "| {system} | {arm} | {revision} | {hits} | {calls} | {fisher} | {calls_p} |".format(
+                system=row["system"],
+                arm=row["arm"],
+                revision=revision,
+                hits=row["hits_over_n"],
+                calls=trim(row["calls_median"]),
+                fisher=trim(row["fisher_p_vs_gmin"]),
+                calls_p=trim(row["mannwhitney_p_calls"]),
             )
         )
     lines.append("")
@@ -265,13 +231,12 @@ def readme(rows: list[dict[str, str]], summary: list[dict[str, str]], printed: l
 def main() -> int:
     rows = load(ROWS)
     summary = summarise(rows)
-    printed = printed_table(PRINTED)
     SUMMARY.parent.mkdir(parents=True, exist_ok=True)
     with SUMMARY.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=FIELDS, lineterminator="\n")
         writer.writeheader()
         writer.writerows(summary)
-    README.write_text(readme(rows, summary, printed))
+    README.write_text(readme(rows, summary))
     print(f"wrote {SUMMARY}")
     print(f"wrote {README}")
     return 0

@@ -261,33 +261,33 @@ def test_a_retired_rerun_sentence_is_reported():
 def test_an_old_sutton_chen_gmin_cell_is_reported():
     audit = audit_mod.Audit()
     text = audit.text(SC_N12)
-    audit.text_cache[SC_N12] = text.replace("| sc126-38 | gmin | f9d1ac05 | 12/12 |", "| sc126-38 | gmin | f9d1ac05 | 1/12 |")
+    audit.text_cache[SC_N12] = text.replace("| sc126-38 | gmin | 61fa67cf | 12/12 |", "| sc126-38 | gmin | 61fa67cf | 1/12 |")
     audit_mod.head_to_head(audit)
-    assert [(r[1].split()[-3:], r[2]) for r in audit.drifts()] == [(["sc126-38", "gmin", "f9d1ac05"], "hits")]
+    assert [(r[1].split()[-2:], r[2]) for r in audit.drifts()] == [(["sc126-38", "gmin"], "hits")]
 
 
 def test_a_dropped_sutton_chen_rerun_row_is_reported():
     audit = audit_mod.Audit()
     text = audit.text(SC_N12)
-    audit.text_cache[SC_N12] = text.replace("| sc108-38 | gmin | f9d1ac05 | 0/12 | 400000 | 4.305 |\n", "")
+    old = "| sc108-38 | gmin | 61fa67cf | 3/12 | 400000 |  |  |\n"
+    assert old in text
+    audit.text_cache[SC_N12] = text.replace(old, "")
     audit_mod.head_to_head(audit)
-    assert [r[2] for r in audit.drifts()] == ["table row sc108-38 gmin f9d1ac05"]
+    assert [r[2] for r in audit.drifts()] == ["table row sc108-38 gmin"]
 
 
 def test_a_rerun_missing_from_the_sutton_chen_readme_is_reported():
     audit = audit_mod.Audit()
-    summary = audit.rows("bench/metal-cluster-h2h/sc-n12/results.csv")
-    row = dict([r for r in summary if r["system"] == "sc96-55" and r["arm"] == "gmin"][-1])
-    summary.append({**row, "harness_revision": "0" * 40})
+    summary = audit.rows(audit_mod.SC_RERUN_SUMMARY)
+    summary.append({**summary[0], "system": "sc96-99", "arm": "gmin", "hits_over_n": "0/12"})
     audit_mod.head_to_head(audit)
-    labels = {r[2] for r in audit.drifts() if r[1] == SC_N12}
-    assert {"table row sc96-55 gmin 00000000", "test row sc96-55", "prose"} <= labels
+    assert "table row sc96-99 gmin" in {r[2] for r in audit.drifts()}
 
 
 def test_a_rerun_without_its_tests_is_reported():
     audit = audit_mod.Audit()
-    summary = audit.rows("bench/metal-cluster-h2h/sc-n12/results.csv")
-    row = [r for r in summary if r["system"] == "sc96-55" and r["arm"] == "gmin"][-1]
+    summary = audit.rows(audit_mod.SC_RERUN_SUMMARY)
+    row = next(r for r in summary if r["system"] == "sc126-38" and r["arm"] == "anneal")
     row["fisher_p_vs_gmin"] = ""
     audit_mod.head_to_head(audit)
     assert ("Fisher p", "1") in [(r[2], r[3]) for r in audit.drifts()]
@@ -306,9 +306,10 @@ def test_a_gmin_row_left_on_the_old_file_is_reported():
 def test_a_gmin_lead_must_be_stated_as_the_rows_give_it():
     audit = audit_mod.Audit()
     text = audit.text(SC_N12)
-    audit.text_cache[SC_N12] = text.replace("| 0.113 | tie | GMIN, n.s. | GMIN |", "| 0.113 | tie | GMIN, n.s. | anneal |")
+    audit.text_cache[SC_N12] = text.replace("| sc126-55 | anneal | 61fa67cf | 12/12 | 25529 |",
+                                            "| sc126-55 | anneal | 61fa67cf | 12/12 | 25530 |")
     audit_mod.head_to_head(audit)
-    assert [r[2] for r in audit.drifts()] == ["Wall ahead"]
+    assert [r[2] for r in audit.drifts()] == ["calls median"]
 
 
 def test_a_drifted_readme_p_value_is_reported():
