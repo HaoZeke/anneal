@@ -84,3 +84,20 @@ f421 and f422 the shares of bonds labelled 555, 421 and 422:
 
 A miss writes `misses/<cell>-s<seed>.con` through readcon-core, and
 one row of `misses.csv`.
+
+## Comparison
+
+`summary.csv` compares `rows.csv` with the manifest. A cell is
+marked changed when the hit counts differ, or when the Fisher or
+Mann-Whitney p-value is below 0.05. Misses rank at positive
+infinity. Medians are type 7.
+
+gmin-lj55 and ase-lj55 keep the hit count and both tests. Every
+other cell changes. The hit count moves for gmin-lj75, lj98, lj102,
+lj103, lj104, lj150, au55, m55r14, m80r6 and m80r14, and for the
+ASE copies of lj98, lj104 and lj150. The hit count stays 12 of 12
+and the calls move on gmin-lj38, ase-lj38 and gmin-m55r6.
+
+Au55 is compared with the later stored session at the paper
+revision, 6 of 12. The ASE cells are compared with their recorded
+recommended rows, not with that revision.
