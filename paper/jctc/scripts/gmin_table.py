@@ -2,12 +2,14 @@
 # Copyright (c) anneal developers
 """Write the GMIN table of the manuscript from the imported rerun rows.
 
-The rows are the four shards of the 2026-11-19 GMIN panel rerun, copied unchanged
-from the records their PROVENANCE files name. Every row of this code is revision
-eeec8e2c, an ancestor of develop, and every GMIN row is the pinned snapshot. The
-summary and the paired tests are those of scripts/gmin_panel/run_panel.py, which
-validates each row against its reference and budget and takes the paired outcome
-table, McNemar, Newcombe and Wilcoxon from scripts/paired_stats.py.
+The first block is the four shards of the 2026-11-19 GMIN panel rerun, whose rows of
+this code are revision eeec8e2c, an ancestor of develop. The second block is the
+2026-11-20 session at the submitted revision 61fa67cf on gold and Morse. Every row is
+copied unchanged from the record its PROVENANCE file names, and every GMIN row is the
+pinned snapshot. The summary and the paired tests are those of
+scripts/gmin_panel/run_panel.py, which validates each row against its reference and
+budget and takes the paired outcome table, McNemar, Newcombe and Wilcoxon from
+scripts/paired_stats.py.
 
     python3 paper/jctc/scripts/gmin_table.py            # rewrite the block
     python3 paper/jctc/scripts/gmin_table.py --check    # exit 1 if it is stale
@@ -32,16 +34,20 @@ _SPEC.loader.exec_module(PANEL)
 
 MANUSCRIPT = ROOT / "paper" / "jctc" / "manuscript.tex"
 DATA = ROOT / "paper" / "jctc" / "data" / "gmin_rerun"
+DEVELOP = ROOT / "paper" / "jctc" / "data" / "gmin_develop"
 SHARDS = ("a", "b", "c", "d")
 REVISION = "eeec8e2c216ae1506768bca8e29846c1c039ca3b"
+SUBMITTED = "61fa67cf380e46876b569da45e7cc091647a775b"
+DEVELOP_HARNESS = "f009acc96bb95023eeb6e394e863630c752a5d05"
+DEVELOP_SYSTEMS = ("au55", "m55r6", "m55r14", "m80r6", "m80r14")
 GMIN_SNAPSHOT = "9cbec1a446352bc9ef064bd2b1a5767194655919"
 SYSTEMS = ("lj38", "lj55", "lj75", "lj98", "lj102", "lj103", "lj104", "lj150", "m80r6")
 MARKS = PANEL.TEX_MARKS
 
 
-def provenance(shard: str) -> dict[str, str]:
+def provenance(shard: str, folder: Path = DATA) -> dict[str, str]:
     fields = {}
-    for line in (DATA / shard / "PROVENANCE").read_text().splitlines():
+    for line in (folder / shard / "PROVENANCE").read_text().splitlines():
         key, value = line.split(" ", 1)
         fields[key] = value
     return fields
@@ -75,21 +81,53 @@ def rows() -> list[dict[str, str]]:
     return out
 
 
+def develop_rows() -> list[dict[str, str]]:
+    path = DEVELOP / "rows.csv"
+    if git("hash-object", str(path)) != provenance("", DEVELOP)["blob"]:
+        raise SystemExit(f"gmin_table: {path} is not the blob its PROVENANCE names")
+    out = list(csv.DictReader(path.open()))
+    if not is_ancestor(SUBMITTED):
+        raise SystemExit(f"gmin_table: {SUBMITTED[:8]} is not an ancestor of HEAD")
+    for row in out:
+        want = SUBMITTED if row["code"] == "anneal" else GMIN_SNAPSHOT
+        if row["code_revision"] != want or row["harness_revision"] != DEVELOP_HARNESS:
+            raise SystemExit(f"gmin_table: {row['system']} {row['code']} {row['seed']} is not at the pinned revisions")
+    keys = [(r["system"], r["code"], r["seed"]) for r in out]
+    if len(keys) != len(set(keys)) or sorted({r["system"] for r in out}) != sorted(DEVELOP_SYSTEMS):
+        raise SystemExit("gmin_table: the develop session does not cover each cell once")
+    return [dict(r, harness_revision=SUBMITTED) for r in out]
+
+
 def summary() -> tuple[list[dict[str, str]], dict[str, dict[str, object]]]:
     PANEL.GMIN_REV = GMIN_SNAPSHOT
     data = rows()
     return PANEL.summarise(data, REVISION), PANEL.paired_summary(data, REVISION)
 
 
+def develop_summary() -> tuple[list[dict[str, str]], dict[str, dict[str, object]]]:
+    PANEL.GMIN_REV = GMIN_SNAPSHOT
+    data = develop_rows()
+    return PANEL.summarise(data, SUBMITTED), PANEL.paired_summary(data, SUBMITTED)
+
+
+def heading(text: str) -> str:
+    return f"\\multicolumn{{16}}{{@{{}}l}}{{\\emph{{{text}}}}} \\\\"
+
+
 def table() -> str:
     lines, paired = summary()
-    body = [" & ".join(cells) + " \\\\" for cells in PANEL.paired_lines(lines, paired)]
+    later, later_paired = develop_summary()
+    body = [heading("Revision \\texttt{eeec8e2c}, an ancestor of the submitted revision")]
+    body += [" & ".join(cells) + " \\\\" for cells in PANEL.paired_lines(lines, paired)]
+    body += ["\\midrule", heading("The submitted revision \\texttt{61fa67cf}")]
+    body += [" & ".join(cells) + " \\\\" for cells in PANEL.paired_lines(later, later_paired)]
     return "\n".join(
         [
             "\\begin{table}",
-            "\\caption{This code at revision \\texttt{eeec8e2c}, an ancestor of the submitted revision, against",
-            "GMIN with the inputs of Section~\\ref{sec:protocol}, both arms of each cluster on one host,",
-            "in alternating order by seed.",
+            "\\caption{This code at the revision each block names against GMIN with the inputs of",
+            "Section~\\ref{sec:protocol}, both arms of each cluster on one host, in alternating order by seed.",
+            "On Au\\(_{55}\\) the gold driver of this code applies the basin bias of",
+            "equation~\\ref{eq:delta} on a stride of 8.",
             "GMIN is the snapshot of SVNREV \\texttt{9cbec1a4} built with three patches,",
             "\\texttt{bench/lj104-lattice/v2/h2h-gmin.patch}, \\texttt{scripts/morse\\_h2h/morse-timer.patch},",
             "and \\texttt{bench/metal-cluster-h2h/gmin-bgupta.patch}, which cap the force calls, time the",
@@ -108,7 +146,8 @@ def table() -> str:
             "\\(p_\\mathrm{calls}\\) and \\(p_\\mathrm{wall}\\) are the two-sided exact Wilcoxon",
             "signed-rank test on the per-seed differences in calls, with a miss at the budget, and in",
             "the wall of the run.",
-            "The rows are \\texttt{paper/jctc/data/gmin\\_rerun/*/rows.csv}.}",
+            "The rows are \\texttt{paper/jctc/data/gmin\\_rerun/*/rows.csv} and",
+            "\\texttt{paper/jctc/data/gmin\\_develop/rows.csv}.}",
             "\\label{tab:gmin}",
             "\\centering",
             "\\scriptsize",
