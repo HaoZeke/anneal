@@ -42,7 +42,7 @@ def main():
         done = {(r["cell"], r["arm"], r["seed"]) for r in csv.DictReader(rows_path.open())}
     else:
         with rows_path.open("w", newline="") as f:
-            csv.writer(f).writerow(FIELDS)
+            csv.writer(f, lineterminator="\n").writerow(FIELDS)
     host = "machine-" + hashlib.sha256(Path("/etc/machine-id").read_bytes()).hexdigest()[:16]
     shas = {(a, d): hashlib.sha256(Path(ARMS[a][0], d).read_bytes()).hexdigest()
             for a in ARMS for d in ("h2h_morse", "h2h_gmin_proof")}
@@ -70,7 +70,7 @@ def main():
                        r["charged"], r["best"], bits, f"{wall:.6f}", f"{pot:.6f}", f"{out:.6f}",
                        ARMS[arm][1], shas[(arm, driver)], host, 0]
                 with rows_path.open("a", newline="") as f:
-                    csv.writer(f).writerow(row)
+                    csv.writer(f, lineterminator="\n").writerow(row)
                 print(time.strftime("%H:%M:%S"), cell, seed, arm, int(hit), row[5], f"{wall:.1f}s", flush=True)
 
 
