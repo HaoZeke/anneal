@@ -81,9 +81,15 @@ h1 = run_device(rastrigin, low, high, Boltzmann(t_init=10.0, sigma=1.0),
                 n_epochs=8, steps_per_epoch=40, seed=9)
 print("Device (host) best:", h1.best_val)
 
-# Batched ensemble (same kernel, extra batch axis)
-h2 = run_ensemble(rastrigin, low, high, Boltzmann(t_init=10.0, sigma=1.0),
-                  n_chains=256, n_epochs=4, steps_per_epoch=25, seed=9)
+# The ensemble calls the objective on (n_chains, dim) and wants
+# one value per chain.
+def rastrigin_batch(x):
+    x = np.asarray(x)
+    per = x * x - 10.0 * np.cos(2.0 * np.pi * x)
+    return 10.0 * x.shape[-1] + np.sum(per, axis=-1)
+
+h2 = run_ensemble(rastrigin_batch, low, high, Boltzmann(t_init=10.0, sigma=1.0),
+                  n_chains=4, n_epochs=2, steps_per_epoch=5, seed=9)
 print("Ensemble global best:", h2.global_best_val)
 #+end_src
 
