@@ -4,12 +4,21 @@
 # structures/.
 
 # is copied byte for byte from tests/fixtures/ of anneal at
-# anneal_commit; the test of anneal named by each check holds it to its
-# reference energy.
+# structures_commit; the test of anneal named by each check holds it to
+# its reference energy.
+
+# hexamer_gfn2/ holds the.
+
+# lowest GFN2-xTB hexamer of each class after relaxation with xtb
+# 6.7.1, written by paper/jctc/scripts/hexamer_gfn2_relax.py from the
+# archived minima of hq_sci_h2o6/ and w6gofee4k/ below; its RECORD gives
+# the xtb build, the command, the base commit, the script blob and
+# each source.
 
 # landfold/ is the output of the.
 
-# occupancy_landfold_book example of that commit on the dumps each map
+# occupancy_landfold_book example of landfold_book_commit, which is not in
+# this repository, on the dumps each map
 # names, run from the folder of those dumps with its stdout to the json:
 # occupancy_landfold_book --label LJ<size> --dump-hist <hist> <inputs> >
 # <json> The water folds are the same command on the hexamer dumps of
@@ -38,19 +47,25 @@
 
 anneal_repository https://github.com/HaoZeke/anneal
 
-anneal_commit 36086e988c5a71c156ffcbde152bf321a6f5ef25
+landfold_book_commit 36086e988c5a71c156ffcbde152bf321a6f5ef25
 
-anneal_build CC=gcc CXX=g++ cargo +1.99.1 build --release --features featomic --example occupancy_landfold_book
+landfold_book_commit_note not in this repository; only landfold/ comes from it, and fig:systems reads none of it
 
-anneal_toolchain rustc 1.99.1 (58cf8f9c3 2026-10-13); gcc 13.3.0
+structures_commit 61fa67cf380e46876b569da45e7cc091647a775b
+
+structures_fixtures each file of structures/ is byte for byte tests/fixtures/ of structures_commit, the submitted revision
+
+landfold_build CC=gcc CXX=g++ cargo +1.99.1 build --release --features featomic --example occupancy_landfold_book
+
+landfold_toolchain rustc 1.99.1 (58cf8f9c3 2026-10-13); gcc 13.3.0
 
 occupancy_landfold_book_sha256 da04c9b4f7b0d77fcf1ccc278108fa0fb2fe54c43882bae5e3818c0751c24c0f
 
 lj_check the 12-6 energy of the coordinates of each lj*.xyz is the e= of its header, to 1e-5 epsilon; system_visuals.py recomputes it
 
-tip4p_check cargo test --release --lib gmin_tip4p at anneal_commit: cartesian_minima_match_the_reference_energies holds each tip4p-*.xyz to the published energy of its header
+tip4p_check cargo test --release --lib gmin_tip4p at structures_commit with cargo 1.100.0 and rustc 1.100.0 (0ef1bc386 2026-11-09): cartesian_minima_match_the_reference_energies holds each tip4p-*.xyz to the published energy of its header
 
-tip4p_source the Cambridge Cluster Database geometries of (H2O)10, (H2O)15 and (H2O)20, added to anneal in 8a1bbf6e, with the published energy in kJ/mol in each header
+tip4p_source the Cambridge Cluster Database geometries of (H2O)10, (H2O)15 and (H2O)20, added to tests/fixtures/ of this repository in 3b631690, with the published energy in kJ/mol in each header
 
 landfold_lj38_inputs landscapes_7695255/lj38_bh_s0.min landscapes_7695255/lj38_recommended_s0.min landscapes_7695255/lj38_rss_s0.min
 
@@ -64,6 +79,14 @@ landfold_w6_pbe_inputs w6nwpbe/w6_nwpbe_*.min
 
 renderer xyzrender 0.3.8, --config paton -t --no-orient; water --nci; one-species style thin, sticks under 1.2 sigma, -a 1.6 -b 0.6 --bond-color #7a7a7a --fog -F 1.0 --grad --mol-color #1E88E5; cairosvg 2.9.1; pymupdf places the pictures, all vector
 
+hexamer_gfn2_xtb xtb version 6.7.1 (edcfbbe), the release xtb-6.7.1-linux-x86_64.tar.xz of sha256 62a8d18778286e815292ee53d76ce447daf460a4dea3782c0f25cbac7019b5df
+
+hexamer_gfn2_command xtb input.xyz --gfn 2 --opt vtight, one thread
+
+hexamer_gfn2_script paper/jctc/scripts/hexamer_gfn2_relax.py blob 2f115107b986669f6d43758c82641f51dd38aa8d
+
+hexamer_gfn2_record system_visuals/hexamer_gfn2/RECORD
+
 ccd_base https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/
 
 ccd_tip4p https://www-wales.ch.cam.ac.uk/~wales/CCD/
@@ -76,7 +99,7 @@ morse_check each Morse file, stored at the range rho_0 of its first line, relaxe
 
 sutton_chen_check the Sutton--Chen energy of each Pt file, at the epsilon, c, a, n, m of its first line, 1, 34.408, 1, 10, 8, is its energy in references.csv, to 1e-4 epsilon
 
-tip4p_ccd_check the TIP4P energy of GMIN DEFTIP4 of each (H2O)n file is within 5e-3 kJ/mol of its energy in references.csv and no more than 1e-3 above it, the criterion of cartesian_minima_match_the_reference_energies at anneal_commit
+tip4p_ccd_check the TIP4P energy of GMIN DEFTIP4 of each (H2O)n file is within 5e-3 kJ/mol of its energy in references.csv and no more than 1e-3 above it, the criterion of cartesian_minima_match_the_reference_energies at structures_commit
 
 sketchmap_repository https://github.com/lab-cosmo/sketchmap
 
@@ -301,3 +324,13 @@ a9b6f8fc105ba8c3f94ca08c2a5dad2ebb2b3e0534b42dbb19b655509dc0153b w6nwpbe/w6_nwpb
 fdceb9ee9fed1a5a23ff4fa6d5b9230d9db10204b524311117e46ba5d2198b93 w6nwpbe/w6_nwpbe_6.min
 
 41203962c3668b3f963b81f10569ad16f49667c157e6319c53f4ea885a470d75 w6nwpbe/w6_nwpbe_7.min
+
+4f26b23eb5d7f5d64a12c20db1b296c8942c15f3f9a90e1c542e89ab28351d90 system_visuals/hexamer_gfn2/prism.xyz
+
+e524b9da7dc20df4a7d89b6b9e66b1a8170f3d9fa317e0b457d5b5ac716c8eb2 system_visuals/hexamer_gfn2/cage.xyz
+
+c25c2c71429d92e2e71cebf522fb1bf70fadaa2b8ba78b889452baab05d2a50c system_visuals/hexamer_gfn2/book.xyz
+
+50e2c97819c5cd31144ce12a527fb7f99ef890c8a9a0bf92499dfa45d2aca2e7 system_visuals/hexamer_gfn2/ring.xyz
+
+69dba8e06c55dbb3d44cf3d53a2e2faee495c668e2bbad799b57647a262cfc77 system_visuals/hexamer_gfn2/RECORD

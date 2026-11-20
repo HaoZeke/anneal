@@ -30,6 +30,7 @@ import argparse
 import csv
 import datetime
 import functools
+import hashlib
 import importlib.util
 import math
 import os
@@ -1604,6 +1605,74 @@ def presets_and_templates(audit: Audit) -> None:
                    "(structure templates since removed in \\texttt{1c1b1238})")
     audit.said(SI, "That revision precedes commit \\texttt{1c1b1238}, which removed the structure templates, and its "
                    "search is not the one the article describes.")
+
+
+VISUALS = "paper/jctc/data/system_visuals"
+HEXAMER_XTB = "xtb version 6.7.1 (edcfbbe) compiled by 'albert@albert-system' on 2024-07-22"
+
+
+def hexamer_provenance(audit: Audit) -> None:
+    """The hexamers of fig:systems are the xtb 6.7.1 relaxations RECORD describes, and its provenance names commits here."""
+    keys, digests = {}, {}
+    for line in audit.text(f"{VISUALS}/provenance.txt").splitlines():
+        first, _, rest = line.partition(" ")
+        if not line or line.startswith("#"):
+            continue
+        if re.fullmatch(r"[0-9a-f]{64}", first):
+            digests[rest.strip()] = first
+        else:
+            keys[first] = rest.strip()
+    record = {}
+    for line in audit.text(f"{VISUALS}/hexamer_gfn2/RECORD").splitlines():
+        first, _, rest = line.partition(" ")
+        record[first] = rest
+    audit.cell(f"{VISUALS}/hexamer_gfn2/RECORD", "xtb build", HEXAMER_XTB, record.get("xtb_version"))
+    audit.cell(f"{VISUALS}/hexamer_gfn2/RECORD", "xtb command", "xtb input.xyz --gfn 2 --opt vtight", record.get("command"))
+    audit.cell(f"{VISUALS}/hexamer_gfn2/RECORD", "xtb release sha256",
+               "62a8d18778286e815292ee53d76ce447daf460a4dea3782c0f25cbac7019b5df", record.get("xtb_release_sha256"))
+    base = record.get("base_commit", "")
+    ancestor_of(audit, f"{VISUALS}/hexamer_gfn2/RECORD", base)
+    script = "paper/jctc/scripts/hexamer_gfn2_relax.py"
+    blob = git("hash-object", script).stdout.strip()
+    shown = record.get("script", "").split()
+    audit.cell(f"{VISUALS}/hexamer_gfn2/RECORD", "blob of the relaxation script", blob, shown[-1] if shown else None)
+    audit.cell(f"{VISUALS}/provenance.txt", "blob of the relaxation script", blob,
+               (keys.get("hexamer_gfn2_script") or " ").split()[-1])
+    for cls in ("prism", "cage", "book", "ring"):
+        name = f"system_visuals/hexamer_gfn2/{cls}.xyz"
+        path = ROOT / VISUALS / "hexamer_gfn2" / f"{cls}.xyz"
+        body = path.read_bytes() if path.is_file() else b""
+        audit.cell(f"{VISUALS}/provenance.txt", f"digest of {cls}.xyz", digests.get(name), hashlib.sha256(body).hexdigest())
+        header = body.decode().splitlines()[1].split() if body else []
+        shown = record.get(cls, "").split()
+        energy = shown[shown.index("relaxed_energy_Eh") + 1] if "relaxed_energy_Eh" in shown else None
+        written = header[header.index("energy:") + 1] if "energy:" in header else None
+        audit.record(energy is not None and written is not None and float(energy) == float(written),
+                     f"{VISUALS}/hexamer_gfn2/{cls}.xyz", "energy is the one RECORD gives", energy, written)
+        audit.record("xtb: 6.7.1 (edcfbbe)" in " ".join(header), f"{VISUALS}/hexamer_gfn2/{cls}.xyz",
+                     "written by xtb 6.7.1", "6.7.1", "6.7.1" if "xtb: 6.7.1 (edcfbbe)" in " ".join(header) else "other")
+    structures = keys.get("structures_commit", "")
+    ancestor_of(audit, f"{VISUALS}/provenance.txt", structures)
+    for path in sorted((ROOT / VISUALS / "structures").iterdir()):
+        for revision in dict.fromkeys((structures, SUBMITTED)):
+            fixture = git_bytes("show", f"{revision}:tests/fixtures/{path.name}")
+            audit.record(fixture == path.read_bytes(), f"{VISUALS}/structures/{path.name}",
+                         f"byte for byte tests/fixtures/ of {revision[:8]}", "identical",
+                         "identical" if fixture == path.read_bytes() else "differs")
+    for key in ("anneal_commit", "hexamer_gfn2_commit"):
+        audit.record(key not in keys, f"{VISUALS}/provenance.txt", f"no {key} key names a commit for every file",
+                     "absent", "absent" if key not in keys else "present")
+    audit.cell(f"{VISUALS}/provenance.txt", "the landfold commit is said to be outside this repository",
+               "not in this repository", keys.get("landfold_book_commit_note", "")[:22])
+    absent = git("cat-file", "-t", keys.get("landfold_book_commit", "")).returncode != 0
+    audit.record(absent, f"{VISUALS}/provenance.txt", "landfold_book_commit is indeed outside this repository",
+                 "absent", "absent" if absent else "present")
+    audit.said(TEX, "for each class, the lowest of the archived GFN2-xTB water hexamers after relaxation with xtb 6.7.1 "
+                    "(\\texttt{-{}-gfn 2 -{}-opt vtight}), as \\texttt{paper/jctc/data/system\\_visuals/hexamer\\_gfn2/RECORD} "
+                    "records.}")
+    audit.record("relaxed at GFN2-xTB with xtb 6.7.1" not in collapse(audit.text(TEX)), TEX,
+                 "the unrecorded relaxation caption stays out", "absent",
+                 "absent" if "relaxed at GFN2-xTB with xtb 6.7.1" not in collapse(audit.text(TEX)) else "present")
 
 
 RESTART_DRIVERS = ("examples/h2h_gmin_proof.rs", "examples/h2h_morse.rs", "examples/h2h_metal.rs",
@@ -3862,7 +3931,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
     audit = Audit()
     for check in (paired_statistics, manuscript_gmin, withdrawn_benchmarks, supporting_information, release, paper_0120, gad_published, openconf,
                   head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, lj_large, bench_prose,
-                  manuscript_ase, manuscript_knockouts, manuscript_priors, panel_references, generated_tables, supporting_numbers, manuscript_new, manuscript_followups, cover_letter, science_claims, rigid_stall, presets_and_templates, no_anneal_restart):
+                  manuscript_ase, manuscript_knockouts, manuscript_priors, panel_references, generated_tables, supporting_numbers, manuscript_new, manuscript_followups, cover_letter, science_claims, rigid_stall, presets_and_templates, no_anneal_restart, hexamer_provenance):
         check(audit)
     if write_map:
         (ROOT / REVISION_MAP).write_text(revision_map_text(revision_map_rows(audit)))

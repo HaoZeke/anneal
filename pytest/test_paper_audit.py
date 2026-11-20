@@ -290,6 +290,28 @@ def test_a_restart_of_this_code_in_the_text_is_reported():
     assert [(r[1], r[2]) for r in audit.drifts()] == [(audit_mod.TEX, "every restart the text names is GMIN's")]
 
 
+def test_a_hexamer_whose_energy_leaves_its_record_is_reported():
+    audit = audit_mod.Audit()
+    audit_mod.hexamer_provenance(audit)
+    assert not audit.drifts()
+    path = f"{audit_mod.VISUALS}/hexamer_gfn2/RECORD"
+    audit = audit_mod.Audit()
+    audit.text_cache[path] = audit.text(path).replace("relaxed_energy_Eh -30.49650686764", "relaxed_energy_Eh -30.5")
+    audit_mod.hexamer_provenance(audit)
+    assert [(r[1], r[2]) for r in audit.drifts()] == [
+        (f"{audit_mod.VISUALS}/hexamer_gfn2/prism.xyz", "energy is the one RECORD gives")]
+
+
+def test_a_record_that_names_another_relaxation_script_is_reported():
+    path = f"{audit_mod.VISUALS}/hexamer_gfn2/RECORD"
+    audit = audit_mod.Audit()
+    record = audit.text(path)
+    blob = record.split("hexamer_gfn2_relax.py blob ")[1].split()[0]
+    audit.text_cache[path] = record.replace(blob, "0" * 40)
+    audit_mod.hexamer_provenance(audit)
+    assert [(r[1], r[2]) for r in audit.drifts()] == [(path, "blob of the relaxation script")]
+
+
 def test_every_todo_marker_fails_both_audits():
     clean = audit_mod.Audit()
     for path in (audit_mod.TEX, audit_mod.SI, audit_mod.COVER):
