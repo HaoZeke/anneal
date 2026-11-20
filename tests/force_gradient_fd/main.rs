@@ -367,7 +367,7 @@ fn check_petmad() -> Vec<String> {
             check_points(
                 "petmad",
                 &WATER,
-                |_, energy| force_sign::unit_in_the_last_place(energy),
+                |_, energy| metatomic_precision(energy),
                 None,
                 |coordinates| water_hexamer::petmad_published(&WATER_SPECIES, coordinates),
             )
@@ -573,6 +573,19 @@ fn petmad_precision(energy: f64) -> f64 {
     f64::from(f32::EPSILON) * energy.abs()
 }
 
+/// Float32 unit roundoff when the returned energy is an f32 value.
+///
+/// PET-MAD v1.0.2 exports `dtype = float32`. An energy that survives a
+/// round trip through f32 was produced at that precision, so the bound
+/// uses `f32::EPSILON * |E|`. A value that is not an f32 keeps one ulp.
+fn metatomic_precision(energy: f64) -> f64 {
+    if f64::from(energy as f32) == energy {
+        petmad_precision(energy)
+    } else {
+        force_sign::unit_in_the_last_place(energy)
+    }
+}
+
 fn check_petmad_pipe() -> Vec<String> {
     match petmad_python() {
         Ok(None) => {
@@ -664,10 +677,14 @@ fn check_profile_engine() -> Vec<String> {
                 "profile-engine: skipped, libnwchemc.so and libcpmdc.so are absent (POTENTIAL_LIBRARY, RGPOT_NWCHEMC_ENGINE, RGPOT_CPMDC_ENGINE, or ./libnwchemc.so). NWChem and CPMD are not on this machine, so the live session was not evaluated"
             ),
             Ok(Some((prefix, path))) => {
-                failures.push(format!(
-                    "profile-engine: {prefix} library {} is present but this test has no live session runner",
-                    path.display()
-                ));
+                if prefix == "cpmdc" {
+                    failures.extend(check_cpmd_session(&path));
+                } else {
+                    failures.push(format!(
+                        "profile-engine: {prefix} library {} is present but this test has no live session runner",
+                        path.display()
+                    ));
+                }
             }
             Err(error) => failures.push(error),
         }
@@ -691,6 +708,145 @@ fn check_profile_engine() -> Vec<String> {
             Err(error) => vec![error],
         }
     }
+}
+
+#[cfg(feature = "profile")]
+/// `CONVERGENCE ORBITALS` on the water deck, in Hartree.
+///
+/// OpenCPMD reads the first number as the wavefunction-gradient
+/// threshold. The optional second number is the total-energy
+/// difference, and this deck leaves it unset. The noise term uses the
+/// threshold the deck does set.
+const CPMD_ORBITAL_THRESHOLD_HARTREE: f64 = 1.0e-5;
+
+#[cfg(feature = "profile")]
+const CPMD_WATER: [f64; 9] = [
+    0.0, 0.0, 0.1173, 0.0, 0.7572, -0.4692, 0.0, -0.7572, -0.4692,
+];
+
+#[cfg(feature = "profile")]
+const CPMD_BOX: [f64; 9] = [10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0];
+
+#[cfg(feature = "profile")]
+fn cpmd_precision(energy: f64) -> f64 {
+    let threshold = CPMD_ORBITAL_THRESHOLD_HARTREE * HARTREE_EV;
+    threshold.max(force_sign::unit_in_the_last_place(energy))
+}
+
+#[cfg(feature = "profile")]
+fn cpmd_water_config(pseudo_dir: &std::path::Path) -> Result<Vec<u8>, String> {
+    use rgpot_core::Potentials_capnp::potential_config;
+    let mut message = capnp20::message::Builder::new_default();
+    {
+        let config = message.init_root::<potential_config::Builder>();
+        let mut params = config.init_cpmd();
+        params.set_functional("BLYP");
+        params.set_cut_off_ry(50.0);
+        params.set_charge(0);
+        params.set_multiplicity(1);
+        params.set_task("gradient");
+        let mut sections = params.reborrow().init_input_sections(4);
+        {
+            let section = sections.reborrow().get(0);
+            let mut cpmd = section.init_cpmd();
+            cpmd.set_optimize_wavefunction(true);
+            cpmd.set_convergence_orbitals(CPMD_ORBITAL_THRESHOLD_HARTREE);
+            cpmd.set_max_step(40);
+            cpmd.set_center_molecule_off(true);
+        }
+        {
+            let section = sections.reborrow().get(1);
+            let mut dft = section.init_dft();
+            dft.set_functional("BLYP");
+            dft.set_lsd(false);
+            dft.set_old_code(true);
+        }
+        {
+            let section = sections.reborrow().get(2);
+            let mut system = section.init_system();
+            system.set_symmetry(0);
+            system.set_angstrom(true);
+            system.set_cut_off_ry(50.0);
+            let mut cell = system.reborrow().init_cell(6);
+            for (index, value) in [10.0, 1.0, 1.0, 0.0, 0.0, 0.0].iter().enumerate() {
+                cell.set(index as u32, *value);
+            }
+            system.set_poisson_solver("HOCKNEY");
+        }
+        {
+            let section = sections.reborrow().get(3);
+            let mut atoms = section.init_atoms();
+            let mut pseudopotentials = atoms.reborrow().init_pseudopotentials(2);
+            let oxygen = pseudo_dir.join("O_MT_BLYP.psp");
+            let hydrogen = pseudo_dir.join("H_CVB_BLYP.psp");
+            let oxygen = oxygen
+                .to_str()
+                .ok_or_else(|| "the oxygen pseudopotential path is not utf-8".to_string())?;
+            let hydrogen = hydrogen
+                .to_str()
+                .ok_or_else(|| "the hydrogen pseudopotential path is not utf-8".to_string())?;
+            {
+                let mut entry = pseudopotentials.reborrow().get(0);
+                entry.set_element("O");
+                entry.set_path(oxygen);
+                entry.set_lmax(1);
+            }
+            {
+                let mut entry = pseudopotentials.reborrow().get(1);
+                entry.set_element("H");
+                entry.set_path(hydrogen);
+                entry.set_lmax(0);
+            }
+        }
+    }
+    let mut bytes = Vec::new();
+    capnp20::serialize::write_message(&mut bytes, &message)
+        .map_err(|error| format!("could not write the CPMD config: {error}"))?;
+    Ok(bytes)
+}
+
+#[cfg(feature = "profile")]
+fn check_cpmd_session(library: &std::path::Path) -> Vec<String> {
+    let pseudo_dir = match std::env::var("CPMDC_PSEUDO_DIR") {
+        Ok(dir) if std::path::Path::new(&dir).is_dir() => std::path::PathBuf::from(dir),
+        _ => {
+            return vec![
+                "profile-engine: libcpmdc.so is present but CPMDC_PSEUDO_DIR is not a directory"
+                    .into(),
+            ];
+        }
+    };
+    let bytes = match cpmd_water_config(&pseudo_dir) {
+        Ok(bytes) => bytes,
+        Err(error) => return vec![error],
+    };
+    let config = match tempfile::NamedTempFile::new() {
+        Ok(file) => file,
+        Err(error) => return vec![format!("could not create the CPMD config file: {error}")],
+    };
+    if let Err(error) = std::fs::write(config.path(), &bytes) {
+        return vec![format!("could not write the CPMD config: {error}")];
+    }
+    // SAFETY: the process is single threaded here. The profile loader
+    // reads these variables once, when the session is created.
+    unsafe {
+        std::env::set_var("POTENTIAL_LIBRARY", library);
+        std::env::set_var("CPMDC_CONFIG", config.path());
+    }
+    let mut engine = profile_engine::ProfileEngine::load("cpmdc", vec![8, 1, 1], Some(CPMD_BOX));
+    check_points(
+        "cpmd",
+        &[&CPMD_WATER],
+        |_, energy| cpmd_precision(energy),
+        None,
+        |coordinates| {
+            let point = ndarray::ArrayView1::from(coordinates);
+            let (energy, gradient) = engine
+                .eval(point)
+                .ok_or_else(|| "the CPMD session returned no energy".to_string())?;
+            Ok((energy, gradient.to_vec()))
+        },
+    )
 }
 
 #[cfg(feature = "profile")]
