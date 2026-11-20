@@ -43,13 +43,18 @@ The fixed lines are =system=, =n=, =rho=, =seed=, =arm=, =budget=,
 =basins=, and =visits=.
 It then prints =wall_seconds=, =pot_s=, =outside_s=, one line per arm,
 and an =h2h_row=.
-The three times depend on the machine.
-The search is deterministic for a seed, so the other lines repeat on
-the same build.
+=wall_seconds=, =pot_s=, and =outside_s= depend on the machine.
+On a fixed seed and build, =h2h_seed= repeats the search counters,
+the trace, and =lowest=; see =bench/generic-alloy/trace-identity.txt=
+for tip4p trace hashes pinned across builds.
+=geometry_energy= is a GMIN-style recheck on the written O, H, H
+sites and can differ slightly from =lowest= even on one run
+(=docs/orgmode/reference/rigid-water-moves.org=).
 
 =lowest= is the lowest energy in kJ/mol over the budget.
-The Cambridge Cluster Database lists -492.90824 for twelve TIP4P
-molecules.
+The Cambridge Cluster Database header is -492.9082357122 kJ/mol for
+twelve TIP4P molecules (=scripts/tip4p_h2h/run_water_gmin.py=,
+=bench/water-gmin/verify.csv=).
 A hit is within 0.01 of that value.
 Read the trace for whether this seed hit. The summary above is not a
 record of one run.
@@ -69,7 +74,7 @@ import csv
 
 import matplotlib.pyplot as plt
 
-cambridge = -492.90824
+cambridge = -492.9082357122
 calls, gap = [], []
 with open("tip4p_n12_s100.trace.csv") as f:
     for row in csv.DictReader(f):
