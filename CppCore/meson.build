@@ -218,6 +218,7 @@ endif
 _fp_contract_off = cppc.get_supported_arguments(
     ['-ffp-contract=off', '/fp:precise'],
 )
+_c99_args = cc.get_supported_arguments(['-std=gnu99'])
 # Lets GCC if-convert the exp clamps and use sqrtpd: neither flag changes a
 # computed value (no errno from sqrt, no FP traps assumed), and the vector
 # loops then run the scalar body's operations lane by lane. GCC's -O2 cost

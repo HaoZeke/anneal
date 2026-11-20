@@ -65,6 +65,9 @@ option(RGPOT_BUILD_TESTS "Build tests" ${RGPOT_IS_TOP_LEVEL})
 option(RGPOT_WITH_CP2K
        "CP2KPot, the potserv CP2K backend and libcp2kc_rgpot against libcp2k (pkg-config libcp2k)" OFF)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS ON)
 
 # librgpot's ELF soversion is kCxxSoversion in CxxLayout.hpp, the same
 # constant Meson reads. The C ABI macros in rgpot.h are a different stamp

@@ -8,7 +8,7 @@ morse = static_library(
     'cambridge_morse.c',
     dependencies: _deps,
     cpp_args: _args + _fp_contract_off + _vector_loops,
-    c_args: _fp_contract_off,
+    c_args: _fp_contract_off + _c99_args,
     include_directories: ['../../', '.'],
     pic: true,
     install: false,
