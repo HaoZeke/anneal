@@ -429,3 +429,71 @@ def test_a_fit_with_every_parameter_fixed_evaluates_the_start_once(entry):
     assert fitter.calls[0] == "init" and fitter.calls[-1] == "finish"
     assert fitter.calls.count("ask") == 1
     assert same_params(out, fitter.evaluated[0])
+
+
+@pytest.mark.parametrize("entry", ["fit_anneal", "fit_chemfit"])
+def test_one_sided_bounds_fall_back_on_the_missing_side(entry):
+    fitter = ReleasedFitter(
+        {"a": 0.0, "b": 0.0},
+        {"a": (None, 1.5), "b": (-1.5, None)},
+    )
+    drive(entry, fitter, 40)
+    for params in fitter.evaluated:
+        assert -3.0 <= params["a"] <= 1.5
+        assert -1.5 <= params["b"] <= 3.0
+
+
+def test_bound_and_leaf_validation_edge_cases():
+    fitter_bad_bounds = ReleasedFitter({"x": 0.0}, bounds=[(-1.0, 1.0)])
+    with pytest.raises(TypeError, match="mapping"):
+        fit_anneal(fitter_bad_bounds, 20)
+
+    fitter_bad_shape = ReleasedFitter(
+        {"positions": np.zeros((2, 3))},
+        {"positions": (np.zeros(4), np.ones(4))},
+    )
+    with pytest.raises(ValueError, match="does not fit"):
+        fit_anneal(fitter_bad_shape, 20)
+
+    fitter_complex = ReleasedFitter({"x": np.zeros(2)}, {"x": (-1.0, 1.0)})
+    with pytest.raises(ValueError, match="not real-numeric"):
+        fit_anneal(fitter_complex, 20, x0=np.array([1.0 + 0j, 0.0]))
+
+    fitter_sum_overflow = ReleasedFitter(
+        {"a": 0.0, "b": 0.0, "c": 0.0},
+        {"a": (-4e307, 4e307), "b": (-4e307, 4e307), "c": (-4e307, 4e307)},
+    )
+    with pytest.raises(ValueError, match="sum of its widths"):
+        fit_anneal(fitter_sum_overflow, 20)
+
+    for empty in ({}, {"nested": {}}, None):
+        with pytest.raises(ValueError, match="non-empty dict"):
+            fit_anneal(ReleasedFitter(empty, {}), 20)
+
+    fitter_one_x0 = ReleasedFitter(
+        {"x": np.zeros((2, 2))},
+        {"x": (-1.0, 1.0)},
+    )
+    with pytest.raises(ValueError, match="must be finite"):
+        fit_anneal(fitter_one_x0, 20, x0={"x": float("nan")})
+
+    het_fitter = ReleasedFitter({"x": [np.float32(0.5), 0.25]}, {"x": (-1.0, 1.0)})
+    out = fit_anneal(het_fitter, 25)
+    assert isinstance(out["x"], list) and len(out["x"]) == 2
+    assert isinstance(out["x"][1], float)
+
+    class PlainObj:
+        pass
+
+    class BadDtypeObj:
+        dtype = object()
+
+    class BadFloatObj:
+        def __float__(self):
+            raise RuntimeError("cannot convert")
+
+    for weird in (PlainObj(), BadDtypeObj(), BadFloatObj()):
+        bad_loss_fitter = ReleasedFitter({"x": 0.0}, {"x": (-1.0, 1.0)}, loss=lambda p, w=weird: w)
+        with pytest.raises(TypeError, match="loss"):
+            fit_anneal(bad_loss_fitter, 20)
+        assert "finish" not in bad_loss_fitter.calls
