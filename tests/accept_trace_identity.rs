@@ -3,7 +3,15 @@
 //! the sink off and on, `Config::recommended` reaches bit-identical best
 //! energies, best states and charged counts on three seeds of each
 //! double-funnel cluster: Lennard-Jones 38, 75, 98 and 150 and Morse 80 at
-//! rho 6.
+//! rho 6. Each run stops at the Cambridge energy plus the hit tolerance, as
+//! the `h2h_gmin_proof` and `h2h_morse` runs do.
+//!
+//! The default tests spend 40000 calls. The ignored test spends the paper
+//! budgets, 4e5 calls at 38 atoms and 4e6 above:
+//!
+//! ```text
+//! cargo test --release --test accept_trace_identity -- --ignored --nocapture
+//! ```
 
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, Outcome, random_cluster_in_radius, run_with_gradient,
@@ -15,7 +23,53 @@ use rand::rngs::StdRng;
 use std::sync::{Arc, Mutex};
 
 const SEEDS: [u64; 3] = [2000, 2001, 2002];
-const BUDGET: usize = 40_000;
+const SHORT_BUDGET: usize = 40_000;
+
+struct System {
+    name: &'static str,
+    n: usize,
+    rho: Option<f64>,
+    reference: f64,
+    paper_budget: usize,
+}
+
+const SYSTEMS: [System; 5] = [
+    System {
+        name: "lj38",
+        n: 38,
+        rho: None,
+        reference: -173.928427,
+        paper_budget: 400_000,
+    },
+    System {
+        name: "lj75",
+        n: 75,
+        rho: None,
+        reference: -397.492331,
+        paper_budget: 4_000_000,
+    },
+    System {
+        name: "lj98",
+        n: 98,
+        rho: None,
+        reference: -543.665361,
+        paper_budget: 4_000_000,
+    },
+    System {
+        name: "lj150",
+        n: 150,
+        rho: None,
+        reference: -893.310258,
+        paper_budget: 4_000_000,
+    },
+    System {
+        name: "m80r6",
+        n: 80,
+        rho: Some(6.0),
+        reference: -378.333471,
+        paper_budget: 4_000_000,
+    },
+];
 
 #[derive(Debug, Clone, PartialEq)]
 struct Event {
@@ -27,15 +81,21 @@ struct Event {
 }
 
 fn search(
-    pair: &PairPotential,
-    n: usize,
+    system: &System,
+    budget: usize,
     seed: u64,
     events: Option<Arc<Mutex<Vec<Event>>>>,
 ) -> Outcome {
+    let n = system.n;
+    let pair = match system.rho {
+        Some(rho) => PairPotential::morse(n, rho),
+        None => PairPotential::lennard_jones(n),
+    };
     let cfg = Config::recommended(n);
     let mut rng = StdRng::seed_from_u64(seed);
     let start = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, &mut rng);
-    let mut ledger = Ledger::new(BUDGET);
+    let mut ledger = Ledger::new(budget);
+    ledger.stop_below(system.reference + anneal_core::DEFAULT_HIT_TOL);
     if let Some(events) = events {
         ledger.trace_accepted(move |m| {
             events.lock().unwrap().push(Event {
@@ -84,11 +144,13 @@ fn state_bits(outcome: &Outcome) -> Vec<u64> {
         .unwrap_or_default()
 }
 
-fn check(name: &str, pair: PairPotential, n: usize) {
+fn check(name: &str, budget_of: impl Fn(&System) -> usize) {
+    let system = SYSTEMS.iter().find(|s| s.name == name).expect("system");
+    let budget = budget_of(system);
     for seed in SEEDS {
-        let off = search(&pair, n, seed, None);
+        let off = search(system, budget, seed, None);
         let events = Arc::new(Mutex::new(Vec::new()));
-        let on = search(&pair, n, seed, Some(Arc::clone(&events)));
+        let on = search(system, budget, seed, Some(Arc::clone(&events)));
         assert_eq!(
             off.best.to_bits(),
             on.best.to_bits(),
@@ -109,7 +171,7 @@ fn check(name: &str, pair: PairPotential, n: usize) {
         );
         assert_eq!(events[0].action, "start", "{name} seed {seed}");
         assert!(
-            events.iter().all(|event| event.atoms == n),
+            events.iter().all(|event| event.atoms == system.n),
             "{name} seed {seed}: atoms"
         );
         assert!(
@@ -125,10 +187,16 @@ fn check(name: &str, pair: PairPotential, n: usize) {
                     && f64::from_bits(event.energy_bits).is_finite()),
             "{name} seed {seed}: trace past the ledger"
         );
+        let unattributed = events
+            .iter()
+            .filter(|event| event.action == "unattributed")
+            .count();
         println!(
-            "{name} seed {seed} best_bits {:016x} calls {} adopted {} identical",
+            "{name} seed {seed} budget {budget} best_bits {:016x} calls {} hops {} adopted {} \
+             unattributed {unattributed} identical",
             on.best.to_bits(),
             on.charged,
+            on.hops,
             events.len()
         );
     }
@@ -136,27 +204,37 @@ fn check(name: &str, pair: PairPotential, n: usize) {
 
 #[test]
 fn tracing_leaves_lj38_unchanged() {
-    check("lj38", PairPotential::lennard_jones(38), 38);
+    check("lj38", |_| SHORT_BUDGET);
 }
 
 #[test]
 fn tracing_leaves_lj75_unchanged() {
-    check("lj75", PairPotential::lennard_jones(75), 75);
+    check("lj75", |_| SHORT_BUDGET);
 }
 
 #[test]
 fn tracing_leaves_lj98_unchanged() {
-    check("lj98", PairPotential::lennard_jones(98), 98);
+    check("lj98", |_| SHORT_BUDGET);
 }
 
 #[test]
 fn tracing_leaves_lj150_unchanged() {
-    check("lj150", PairPotential::lennard_jones(150), 150);
+    check("lj150", |_| SHORT_BUDGET);
 }
 
 #[test]
 fn tracing_leaves_m80_rho6_unchanged() {
-    check("m80r6", PairPotential::morse(80, 6.0), 80);
+    check("m80r6", |_| SHORT_BUDGET);
+}
+
+#[test]
+#[ignore = "paper budgets; minutes per seed"]
+fn tracing_leaves_paper_budget_runs_unchanged() {
+    std::thread::scope(|scope| {
+        for system in &SYSTEMS {
+            scope.spawn(|| check(system.name, |s| s.paper_budget));
+        }
+    });
 }
 
 #[test]
