@@ -11,3 +11,4 @@ docs/source/conf.py
 rgpot-core/include/rgpot.h
 rgpot-core/README.md
 rgpot-core/README.org
+rgpot-bundle/Cargo.lock

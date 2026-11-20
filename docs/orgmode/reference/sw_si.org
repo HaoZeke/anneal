@@ -112,8 +112,8 @@ In Python, =evaluate= on =StillingerWeberSi= or =SWPot= returns the stress as a
 reach of 2, so the copies a host must hold go out to twice the cutoff.
 =densityStage= writes nothing.
 =forceStage= evaluates owned centres on that full list.
-A two-body term is counted from the atom whose partner sits strictly above it
-in z, then y, then x.
+A two-body term is counted from the atom whose partner sits strictly above it in
+z, then y, then x.
 A three-body term is counted at each owned centre.
 With newton on, the host adds the forces written on copies back to their owners
 and sums the owned energies.

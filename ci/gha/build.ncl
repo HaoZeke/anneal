@@ -127,9 +127,15 @@ in
 
 let fast_nlist_off_build_test =
   S.run_pixi m%"
+  msrv=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)
+  export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:${PATH}"
+  rustup toolchain install "${msrv}" --profile minimal
+  export RUSTUP_TOOLCHAIN="${msrv}"
+  rustc -V | grep -F "rustc ${msrv}."
   meson setup bbdir \
     -Dwith_tests=true \
     -Dwith_eam_table=true \
+    -Dwith_rust_core=true \
     -Dwith_examples=false \
     -Dwith_xtensor=false \
     -Dwith_eigen=false \
@@ -147,6 +153,7 @@ let thread_limit_build =
   S.run_pixi m%"
   meson setup bbdir \
     -Dwith_tests=true \
+    -Dwith_rust_core=true \
     -Dwith_examples=false \
     -Dwith_xtensor=false \
     -Dwith_eigen=false \
@@ -241,6 +248,9 @@ in
     },
     # Cargo is present on this runner. The option still has to build and
     # test the C++ pair scan, which is what wheels and conda get.
+    # with_rust_core is on, so the plain rgpot-core archive is built and
+    # linked, and the rust core tests run. The build uses rustup's
+    # toolchain for the workspace rust-version, not pixi's newer rust.
     build_fast_nlist_off = {
       name = "meson / ubuntu [fast nlist off]",
       "runs-on" = P.ubuntu,
@@ -253,6 +263,8 @@ in
     },
     # Under OMP_THREAD_LIMIT every region gets fewer threads than it asks
     # for. One build, then the suite at a limit of one and of two.
+    # with_rust_core is on next to the fast pair list, so rgpot-bundle, the
+    # one archive that carries both, is what links.
     thread_limit = {
       name = "meson / ubuntu [OMP_THREAD_LIMIT 1, 2]",
       "runs-on" = P.ubuntu,

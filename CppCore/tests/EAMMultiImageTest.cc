@@ -153,6 +153,11 @@ Eval supercell_reference(const rgpot::EAMTablePot &pot,
                          const std::vector<int> &z, const double *box,
                          const std::array<int, 3> &rep);
 
+// BruteForceEam on Cu_u3, defined with the brute force sum below. It has its
+// own interpolation and image enumeration, so it uses neither the production
+// kernel nor the neighbour search under test.
+Eval brute_force_cu(const std::vector<double> &pos, const double *box);
+
 Eval supercell_reference(const rgpot::EAMTablePot &pot,
                          const std::vector<double> &pos,
                          const std::vector<int> &z, const double *box) {
@@ -265,9 +270,11 @@ TEST_CASE("EAM multi-image matches an independent supercell reference",
     REQUIRE(face_spacing(box, 0) < pot.locality().cutoff);
     const Eval got = eval_full(pot, pos, z, box);
     const Eval want = supercell_reference(pot, pos, z, box, {3, 3, 3});
-    REQUIRE_THAT(want.energy, WithinAbs(-0.802510540848, 5e-10));
-    REQUIRE_THAT(want.stress[0], WithinAbs(0.0321577087, 5e-10));
-    REQUIRE(std::abs(want.energy) > 1e-6);
+    const Eval brute = brute_force_cu(pos, box);
+    REQUIRE(std::abs(brute.energy) > 1e-6);
+    REQUIRE(std::abs(brute.stress[0]) > 1e-6);
+    REQUIRE_THAT(want.energy, WithinAbs(brute.energy, 5e-10));
+    REQUIRE_THAT(want.stress[0], WithinAbs(brute.stress[0], 5e-10));
     REQUIRE(got.has_stress == 1);
     REQUIRE(want.has_stress == 1);
     REQUIRE_THAT(got.energy, WithinAbs(want.energy, 1e-8));
@@ -298,9 +305,11 @@ TEST_CASE("EAM multi-image matches an independent supercell reference",
     REQUIRE(face_spacing(box, 0) < pot.locality().cutoff);
     const Eval got = eval_full(pot, pos, z, box);
     const Eval want = supercell_reference(pot, pos, z, box, {4, 4, 4});
-    REQUIRE_THAT(want.energy, WithinAbs(-1.941358963766, 5e-10));
-    REQUIRE_THAT(want.stress[0], WithinAbs(0.0855559087, 5e-10));
-    REQUIRE(std::abs(want.energy) > 1e-6);
+    const Eval brute = brute_force_cu(pos, box);
+    REQUIRE(std::abs(brute.energy) > 1e-6);
+    REQUIRE(std::abs(brute.stress[0]) > 1e-6);
+    REQUIRE_THAT(want.energy, WithinAbs(brute.energy, 5e-10));
+    REQUIRE_THAT(want.stress[0], WithinAbs(brute.stress[0], 5e-10));
     REQUIRE(got.has_stress == 1);
     REQUIRE(want.has_stress == 1);
     REQUIRE_THAT(got.energy, WithinAbs(want.energy, 2e-8));
@@ -588,6 +597,10 @@ rgpot::EAMTable cu_table() {
 rgpot::EAMTable pair_table_data() {
   std::istringstream in(pair_table());
   return rgpot::read_eam_table(in, EAMTableFormat::Setfl);
+}
+
+Eval brute_force_cu(const std::vector<double> &pos, const double *box) {
+  return BruteForceEam(cu_table()).evaluate(pos, box);
 }
 
 std::size_t multi_image_pairs(const std::vector<Image> &images, std::size_t n) {

@@ -96,8 +96,8 @@ public:
    *        The library force is the negation of this gradient.
    * @param neighbors Optional Verlet list. Null uses the internal list,
    *        with a skin of one fifth of the cutoff (none in Stream mode). A list
-   * is reused while each atom has moved by at most half its skin and the cell
-   * is unchanged.
+   *        is reused while each atom has moved by at most half its skin and
+   *        the cell is unchanged.
    */
   void energyAndGradient(const double *positions, const int *atomic_numbers,
                          const double *box, std::size_t n_atoms, double *energy,

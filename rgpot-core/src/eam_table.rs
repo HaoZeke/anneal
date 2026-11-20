@@ -794,10 +794,30 @@ fn nearest_image(d: [f64; 3], cell: &[f64; 9], inverse: &[f64; 9]) -> [f64; 3] {
     out
 }
 
+/// Drops the `Box<T>` behind `user_data`. A panic in the drop is caught and
+/// recorded in the last-error slot: the entry points that return a status
+/// have the same guard, and a free function has no status to carry it.
+///
+/// # Safety
+///
+/// `user_data` is null, or it came from `Box::<T>::into_raw` and has not
+/// been freed.
+unsafe fn drop_boxed<T>(user_data: *mut c_void) {
+    use crate::status::catch_unwind;
+
+    if user_data.is_null() {
+        return;
+    }
+    let _ = catch_unwind(std::panic::AssertUnwindSafe(|| {
+        drop(unsafe { Box::from_raw(user_data.cast::<T>()) });
+        rgpot_status_t::RGPOT_SUCCESS
+    }));
+}
+
 /// Frees the potential of [`EamTablePotential::into_potential`] and of
 /// `rgpot_potential_new_eam_table`.
 pub(crate) unsafe extern "C" fn drop_eam_table(user_data: *mut c_void) {
-    drop(unsafe { Box::from_raw(user_data.cast::<EamTablePotential>()) });
+    unsafe { drop_boxed::<EamTablePotential>(user_data) };
 }
 
 /// The `PotentialCallback` of a handle made from an [`EamTablePotential`].
@@ -960,6 +980,41 @@ mod tests {
         let flat = [0.0; 9];
         let err = pot.force(&positions, &[13, 13], &flat).unwrap_err();
         assert!(err.to_string().contains("needs a cell"), "{err}");
+    }
+
+    struct PanicsOnDrop;
+
+    impl Drop for PanicsOnDrop {
+        fn drop(&mut self) {
+            panic!("drop panicked");
+        }
+    }
+
+    fn last_error() -> String {
+        let ptr = unsafe { crate::status::rgpot_last_error() };
+        unsafe { std::ffi::CStr::from_ptr(ptr) }
+            .to_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    #[test]
+    fn a_panic_in_the_drop_is_caught_and_recorded() {
+        crate::status::set_last_error("");
+        let user_data = Box::into_raw(Box::new(PanicsOnDrop)).cast::<c_void>();
+        unsafe { drop_boxed::<PanicsOnDrop>(user_data) };
+        assert_eq!(last_error(), "drop panicked");
+    }
+
+    #[test]
+    fn freeing_null_or_a_potential_does_not_touch_the_error() {
+        crate::status::set_last_error("untouched");
+        unsafe { drop_eam_table(std::ptr::null_mut()) };
+        let table = EamTable::from_text(&two_element_fs(), EamTableFormat::FinnisSinclair).unwrap();
+        let pot = EamTablePotential::new(table, false).unwrap();
+        let user_data = Box::into_raw(Box::new(pot)).cast::<c_void>();
+        unsafe { drop_eam_table(user_data) };
+        assert_eq!(last_error(), "untouched");
     }
 
     #[test]

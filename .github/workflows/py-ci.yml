@@ -110,6 +110,7 @@ jobs:
             -Dpython.platlibdir="${site}" \
             -Dpython.purelibdir="${site}" \
             -Dwith_python=true \
+            -Dwith_eam_table=true \
             -Dwith_fortran_pots=enabled \
             -Dwith_metatomic=false \
             -Dwith_rpc=false \
