@@ -9,6 +9,7 @@ for the same cell and seed is left in place.
 from __future__ import annotations
 
 import csv
+import json
 import os
 import subprocess
 import sys
@@ -16,7 +17,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
-BINARY = ROOT / "target" / "release" / "examples" / "g0_lj_stock"
 ROWS = HERE / "rows.csv"
 MISSES = HERE / "misses.csv"
 STARTS = HERE / "starts"
@@ -68,10 +68,10 @@ THREAD_KEYS = (
 
 
 def child_env() -> dict[str, str]:
-    env = os.environ.copy()
-    for key in list(env):
-        if key.startswith("H2H_"):
-            del env[key]
+    env = {"LC_ALL": "C"}
+    for key in ("PATH", "HOME", "LD_LIBRARY_PATH"):
+        if key in os.environ:
+            env[key] = os.environ[key]
     for key in THREAD_KEYS:
         env[key] = "1"
     env["OMP_DYNAMIC"] = "FALSE"
@@ -97,9 +97,21 @@ def append(path: Path, fields: list[str], row: dict[str, str]) -> None:
         os.fsync(handle.fileno())
 
 
-def jobs() -> list[tuple[str, str]]:
+def release_binary() -> Path:
     proc = subprocess.run(
-        [str(BINARY), "list"],
+        ["rustup", "run", "1.88.0", "cargo", "metadata", "--format-version", "1", "--no-deps"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    target = json.loads(proc.stdout)["target_directory"]
+    return Path(target) / "release" / "examples" / "g0_lj_stock"
+
+
+def jobs(binary: Path) -> list[tuple[str, str]]:
+    proc = subprocess.run(
+        [str(binary), "list"],
         cwd=ROOT,
         env=child_env(),
         check=True,
@@ -115,13 +127,13 @@ def jobs() -> list[tuple[str, str]]:
     return out
 
 
-def run_one(cell: str, seed: str, session: str, sequence: str) -> None:
+def run_one(binary: Path, cell: str, seed: str, session: str, sequence: str) -> None:
     start = STARTS / f"{cell}-{seed}.txt"
     command = [
         "taskset",
         "-c",
         "0",
-        str(BINARY),
+        str(binary),
         "run",
         cell,
         seed,
@@ -169,16 +181,17 @@ def main() -> None:
     if len(sys.argv) != 2:
         raise SystemExit("usage: run_panel.py SESSION")
     session = sys.argv[1]
-    if not BINARY.is_file():
+    binary = release_binary()
+    if not binary.is_file():
         raise SystemExit("release binary is missing")
     MISS_DIR.mkdir(parents=True, exist_ok=True)
     done = {(row["cell"], row["seed"]) for row in read_rows(ROWS)}
     sequence = len(done)
-    for cell, seed in jobs():
+    for cell, seed in jobs(binary):
         if (cell, seed) in done:
             continue
         sequence += 1
-        run_one(cell, seed, session, str(sequence))
+        run_one(binary, cell, seed, session, str(sequence))
         done.add((cell, seed))
 
 
