@@ -340,6 +340,15 @@ def test_the_sutton_chen_code_revision_comes_from_the_rows():
     assert labels.count("code revision") == 36
 
 
+@pytest.mark.parametrize("shown", ["61fa67cfNOT_A_COMMIT", "61fa67cf0", "61fa", "develop"])
+def test_a_sutton_chen_code_revision_must_name_the_commit(shown):
+    audit = audit_mod.Audit()
+    path = "bench/paper-rerun/sc-h2h/README.md"
+    audit.text_cache[path] = audit.text(path).replace("| sc126-38 | anneal | 61fa67cf |", f"| sc126-38 | anneal | {shown} |")
+    audit_mod.head_to_head(audit)
+    assert [(r[1], r[2], r[3]) for r in audit.drifts()] == [(f"{path}:21 sc126-38 anneal", "code revision", shown)]
+
+
 def test_the_sutton_chen_rerun_rows_are_provenance_checked():
     audit = audit_mod.Audit()
     audit_mod.head_to_head(audit)

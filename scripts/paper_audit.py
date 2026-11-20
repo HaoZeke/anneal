@@ -1984,8 +1984,8 @@ def sc_develop_table(audit: Audit, path: str, code: str) -> None:
             continue
         line, cell = got
         where = f"{path}:{line} {row['system']} {row['arm']}"
-        audit.record(cell["Code revision"].startswith(code[:8]), where, "code revision",
-                     cell["Code revision"], code[:8])
+        audit.record(bool(code) and commit_of(cell["Code revision"].strip().strip("`")) == code, where,
+                     "code revision", cell["Code revision"], code[:8])
         audit.cell(where, "hits", cell["Hits"], row["hits_over_n"])
         audit.cell(where, "calls median", cell["Calls median"], float(row["calls_median"]))
         if row["fisher_p_vs_gmin"] or cell["Fisher p"].strip():
