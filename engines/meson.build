@@ -692,6 +692,44 @@ test(
     depends: standalone_engine_plugins,
     timeout: 30,
 )
+# The Rust loader opens the Lennard-Jones plugin built above. native_lj_engine
+# is not a candidate: it serves the native-unit GROMACS and OpenMM constructors
+# through rgpot_md_native_force and exports no rgpot_engine_force. cargo gets
+# its own target directory, apart from the one with_rust_core builds in. A
+# build with the address, thread or memory sanitizer leaves the plugin needing
+# a runtime the cargo test binary does not carry, so that build skips this test.
+engine_test_cargo = find_program('cargo', required: false)
+engine_test_sanitized = false
+foreach sanitizer : ['address', 'thread', 'memory']
+    if sanitizer in get_option('b_sanitize')
+        engine_test_sanitized = true
+    endif
+endforeach
+if engine_test_cargo.found() and not engine_test_sanitized
+    test(
+        'engine_abi_stamp_rust_loader',
+        engine_test_cargo,
+        args: [
+            'test',
+            '--locked',
+            '--manifest-path',
+            project_root / 'rgpot-core' / 'Cargo.toml',
+            '--target-dir',
+            meson.project_build_root() / 'cargo-engine-test-target',
+            '--features',
+            'engine',
+            '--test',
+            'engine',
+            'configured_external_engine_passes_the_abi_check',
+            '--',
+            '--ignored',
+            '--exact',
+        ],
+        env: {'RGPOT_TEST_ENGINE': lj_engine.full_path()},
+        depends: lj_engine,
+        timeout: 900,
+    )
+endif
 
 gromacs_inc = ''
 if python3_engines.found()
