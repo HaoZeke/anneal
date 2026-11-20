@@ -1,0 +1,6 @@
+branch record/rerun-tuned-gmin-r2
+tip 679871e41ef15b5b155f293e4bca0030e6d45697
+commit 7631ce24d64a5eb8fe8ce053fd3ddf232e6c4d34
+ancestor 61fa67cf380e46876b569da45e7cc091647a775b
+source bench/paper-rerun/tuned-gmin/rows-r2.csv
+blob 29e99fc3edbea92e915754b5ba8322dac77740ed
