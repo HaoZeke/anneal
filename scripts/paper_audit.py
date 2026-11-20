@@ -157,6 +157,7 @@ KNOWN_GAPS = {
     "bench/gmin-panel/summary.csv": "revision 1ce3ab64 is not in this repository",
     "bench/morse-panel/template-free-rows.csv": "revision 1ce3ab64 is not in this repository",
     "paper/jctc/data/literature.tsv": "revision and host unrecorded (no revision or host column)",
+    "bench/copper-slab/rows.csv": "revision and host unrecorded (no revision or host column)",
 }
 
 UNTRACED = []
@@ -2386,13 +2387,34 @@ def supporting_numbers(audit: Audit) -> None:
     )
     tally = "paper/jctc/scripts/hq_sci_tally.py"
     tally_text = audit.text(tally)
-    tally_reference = float(re.search(r"^REFERENCE_EV = ([-+0-9.eE]+)$", tally_text, re.M).group(1))
+    copper_rows = audit.rows("bench/copper-slab/rows.csv")
+    copper_targets = {row["target_eV"] for row in copper_rows}
+    copper_commands = {row["command"] for row in copper_rows}
+    if len(copper_targets) != 1 or len(copper_commands) != 1 or len(copper_rows) != 8:
+        audit.record(False, "bench/copper-slab/rows.csv", "eight copper rows, one target, one command",
+                     "8 1 1", f"{len(copper_rows)} {len(copper_targets)} {len(copper_commands)}")
+        target_from_rows = None
+    else:
+        target_from_rows = float(next(iter(copper_targets)))
+        audit.cell("bench/copper-slab/rows.csv", "producing command", "scripts/run_cuh2_fcc_rec.sh",
+                   next(iter(copper_commands)))
+        for row in copper_rows:
+            audit.cell("bench/copper-slab/rows.csv", f"seed {row['seed']} gap", row["gap_eV"],
+                       float(row["best_eV"]) - float(row["target_eV"]))
+    tally_mod = load_script("hq_sci_tally_ref", tally)
+    tally_reference = tally_mod.REFERENCE_EV
     tally_tol_match = re.search(r"^REFERENCE_TOL_EV = (.+)$", tally_text, re.M)
     tally_tolerance = (
         resolve_named_hit_tol(tally_tol_match.group(1), names) if tally_tol_match else None
     )
-    audit.cell(SI, "TARGET_ENERGY value", "-415.971529", target_energy)
-    audit.cell(SI, "TARGET_ENERGY matches tally reference", f"{tally_reference}", target_energy)
+    if target_from_rows is None:
+        audit.record(False, SI, "TARGET_ENERGY value", "-415.971529", "no copper rows")
+        audit.record(False, SI, "TARGET_ENERGY matches tally reference", "unresolved", "no copper rows")
+        audit.record(False, script, "TARGET_ENERGY matches the copper rows", "unresolved", f"{target_energy}")
+    else:
+        audit.cell(SI, "TARGET_ENERGY value", "-415.971529", target_from_rows)
+        audit.cell(SI, "TARGET_ENERGY matches tally reference", f"{tally_reference}", target_from_rows)
+        audit.cell(script, "TARGET_ENERGY matches the copper rows", f"{target_from_rows:.6f}", target_energy)
     if target_tol is None:
         audit.record(False, SI, "TARGET_TOL value", "unresolved", "0.001")
     else:
@@ -2428,15 +2450,21 @@ def supporting_numbers(audit: Audit) -> None:
         audit.cell(tally, "the jcc script's target line", str(claimed_line), float(jcc_target_line))
     if jcc_target_line is not None:
         audit.said(tally, f"scripts/elja_jcc_molslab_ensemble.sh line {jcc_target_line} sets that target.")
-    bests = []
-    for index in range(8):
-        found = re.search(r"seed \d+: best (\S+) eV", audit.text(f"paper/jctc/logs/cuh2_fcc_rec_{index}.out"))
-        bests.append(float(found.group(1)))
-    gaps = [b + 415.971529 for b in bests]
-    audit.cell(SI, "smallest copper gap", "8e-6", min(gaps))
-    audit.cell(SI, "largest copper gap", "3.68e-4", max(gaps))
-    audit.cell(SI, "copper seeds inside the tolerance", "8", float(sum(energy_hits(b, -415.971529, DEFAULT_HIT_TOL) for b in bests)))
-    audit.cell(SI, "copper seeds inside 1e-6 eV", "0", float(sum(g < 1e-6 for g in gaps)))
+    if target_from_rows is None:
+        audit.record(False, SI, "smallest copper gap", "8e-6", "no copper rows")
+        audit.record(False, SI, "largest copper gap", "3.68e-4", "no copper rows")
+        audit.record(False, SI, "copper seeds inside the tolerance", "8", "no copper rows")
+        audit.record(False, SI, "copper seeds inside 1e-6 eV", "0", "no copper rows")
+    else:
+        bests = [float(row["best_eV"]) for row in copper_rows]
+        gaps = [float(row["gap_eV"]) for row in copper_rows]
+        audit.cell(SI, "smallest copper gap", "8e-6", min(gaps))
+        audit.cell(SI, "largest copper gap", "3.68e-4", max(gaps))
+        audit.cell(SI, "copper seeds inside the tolerance", "8",
+                   float(sum(energy_hits(b, target_from_rows, DEFAULT_HIT_TOL) for b in bests)))
+        audit.cell(SI, "copper seeds inside 1e-6 eV", "0", float(sum(g < 1e-6 for g in gaps)))
+    audit.said(SI, "The eight bests and their gaps are the rows of \\path{bench/copper-slab/rows.csv},")
+    audit.said(SI, "produced by \\path{scripts/run_cuh2_fcc_rec.sh}.")
     audit.said(SI, "The per-seed gaps run from \\(8\\times 10^{-6}\\)~eV to \\(3.68\\times 10^{-4}\\)~eV above that reference.")
     audit.said(SI, "No seed reached the reference within \\(10^{-6}\\)~eV.")
     audit.said(SI, "Eight seeds lie inside the 0.001~eV tolerance.")
