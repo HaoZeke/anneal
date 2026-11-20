@@ -95,8 +95,9 @@ pub(crate) use torsion::HeldHands;
 
 pub use crate::methods::minima_hopping::SharedVisitPolicy;
 pub use config::{
-    ArmSelection, Config, ContinuousSymmetry, Keying, LadderMode, OrbitCore, PairRange,
-    PriorSwitches, REMOVED_PRIOR_KEYS, RemovedConfigKeyError, SoapProposalMode,
+    ArmSelection, Config, ContinuousSymmetry, InvalidConfig, Keying, LadderMode, OrbitCore,
+    PairRange, PriorSwitches, REMOVED_PRIOR_KEYS, RemovedConfigKeyError, SoapProposalMode,
+    check_molecular_groups,
 };
 pub use moves::*;
 
@@ -507,7 +508,7 @@ impl QuenchBoundary {
 /// first-encounter statistic the list exists to report.
 const IMPROVEMENT_CAP: usize = 512;
 
-/// A search stopped because no initial quench was finite.
+/// Why a search returned no [`Outcome`].
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SearchError {
     /// The initial evaluation was non-finite on every attempt.
@@ -516,6 +517,10 @@ pub enum SearchError {
         /// Quenches tried before the search stopped.
         attempts: usize,
     },
+    /// [`Config::validate`] refused the configuration; nothing was
+    /// evaluated.
+    #[error(transparent)]
+    InvalidConfig(#[from] InvalidConfig),
 }
 
 /// Why a search returned an [`Outcome`].
@@ -4205,19 +4210,7 @@ where
         relax_off_call_floor(cfg, &mut *relax, led, x, steps)
     };
     let relax: Relax<'_> = &mut floored;
-    if let Some(floor) = cfg.call_floor {
-        assert!(
-            floor.is_finite() && floor > 0.0,
-            "call floor must be a positive distance, not {floor}"
-        );
-    }
-    if let Some(elements) = cfg.call_floor_elements.as_ref() {
-        assert_eq!(
-            elements.len(),
-            cfg.n_points,
-            "call-floor elements must name every point"
-        );
-    }
+    cfg.validate()?;
     // A target on the configuration is the same stop a caller can raise
     // on the ledger. A ledger target already set is left alone, so an
     // explicit `stop_below` still wins.
@@ -4261,12 +4254,6 @@ where
     // measured that way an LJ38 run registered 18 basins instead of about 200.
     let n_rep = cfg.replicas.max(1);
     let ratios = rung_ratios(n_rep, cfg.ladder_top);
-    assert!(
-        !(cfg.delayed_acceptance && n_rep > 1),
-        "delayed acceptance needs a single chain: a hop its surrogate decides \
-         weighs the bare energy and one it abstains on weighs the biases, so \
-         no swap between rungs can be balanced"
-    );
     // The first quench supplies a stable canonical reference before the bias
     // is built. Reporting it as a minimum additionally requires the same
     // geometry and gradient contract as every subsequent quench.

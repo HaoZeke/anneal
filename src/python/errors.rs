@@ -10,7 +10,9 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
-use crate::methods::cluster_hopping::{RemovedConfigKeyError as RemovedKey, SearchError};
+use crate::methods::cluster_hopping::{
+    InvalidConfig, RemovedConfigKeyError as RemovedKey, SearchError,
+};
 
 pyo3::create_exception!(
     anneal,
@@ -96,7 +98,14 @@ pub(crate) fn search_error(err: &SearchError) -> PyErr {
             });
             py_err
         }
+        SearchError::InvalidConfig(reason) => invalid_config(reason),
     }
+}
+
+/// A configuration [`crate::methods::cluster_hopping::Config::validate`]
+/// refuses, as `InvalidArgumentError`.
+pub(crate) fn invalid_config(reason: &InvalidConfig) -> PyErr {
+    InvalidArgumentError::new_err(reason.to_string())
 }
 
 pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {

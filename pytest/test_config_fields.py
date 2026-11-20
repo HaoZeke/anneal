@@ -339,3 +339,47 @@ def test_with_flexible_molecules_keeps_a_config_it_does_not_change():
     )
     assert cfg.with_flexible_molecules(start) is None
     assert Config.recommended(4).with_flexible_molecules(np.zeros(12)) is None
+
+
+@pytest.mark.parametrize(
+    "groups, message",
+    [
+        ([[2, 1, 0]], "increasing"),
+        ([[0, 2, 1]], "increasing"),
+        ([[0, 0, 1]], "repeats"),
+        ([[0, 1, 2], [5, 4, 3]], "increasing"),
+    ],
+)
+def test_a_group_out_of_order_is_refused_not_a_panic(groups, message):
+    species = [8, 1, 1] * len(groups)
+    for preset in (Config.for_molecular, Config.recommended_molecular):
+        with pytest.raises(anneal.InvalidArgumentError, match=message):
+            preset(species, groups)
+
+
+@pytest.mark.parametrize("scale", [float("nan"), float("inf"), -1.0])
+def test_a_molecular_energy_scale_must_be_finite_and_positive(scale):
+    with pytest.raises(anneal.InvalidArgumentError, match="energy_scale"):
+        Config.for_molecular(*WATER, energy_scale=scale)
+
+
+def test_delayed_acceptance_with_replicas_is_refused_up_front():
+    cfg = Config.recommended(4)
+    assert cfg.replace(delayed_acceptance=True).get("delayed_acceptance") is True
+    assert cfg.replace(replicas=2).get("replicas") == 2
+    with pytest.raises(anneal.InvalidArgumentError, match="delayed_acceptance"):
+        cfg.replace(delayed_acceptance=True, replicas=2)
+    with pytest.raises(anneal.InvalidArgumentError, match="delayed_acceptance"):
+        cfg.replace(delayed_acceptance=True).replace(replicas=2)
+
+
+def test_with_flexible_molecules_checks_the_start():
+    import numpy as np
+
+    cfg = Config.for_molecular(*WATER)
+    with pytest.raises(anneal.InvalidArgumentError, match="18"):
+        cfg.with_flexible_molecules(np.zeros(9))
+    bad = np.zeros(18)
+    bad[4] = np.nan
+    with pytest.raises(anneal.InvalidArgumentError, match="finite"):
+        cfg.with_flexible_molecules(bad)

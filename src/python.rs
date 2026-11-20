@@ -2931,43 +2931,21 @@ fn check_scales(length_scale: f64, energy_scale: f64) -> PyResult<()> {
     Ok(())
 }
 
-fn check_molecules(species: &[u32], groups: &[Vec<usize>], energy_scale: f64) -> PyResult<()> {
-    if species.is_empty() {
-        return Err(invalid_argument("species must not be empty"));
-    }
-    if !(energy_scale.is_finite() && energy_scale > 0.0) {
-        return Err(invalid_argument("energy_scale must be finite and positive"));
-    }
-    if species
-        .iter()
-        .copied()
-        .map(crate::methods::cluster_hopping::covalent_radius)
-        .fold(0.0_f64, f64::max)
-        <= 0.0
-    {
-        return Err(invalid_argument("species must have known covalent radii"));
-    }
-    if groups.iter().any(|group| group.is_empty()) {
-        return Err(invalid_argument("a group must name at least one atom"));
-    }
-    if groups.iter().flatten().any(|&atom| atom >= species.len()) {
-        return Err(invalid_argument(
-            "a group names an atom past the last species label",
-        ));
-    }
-    Ok(())
-}
-
 impl PyClusterConfig {
-    fn new(inner: crate::methods::cluster_hopping::Config, origin: String) -> Self {
-        Self { inner, origin }
+    /// A config the search can run; see `Config::validate`.
+    fn new(inner: crate::methods::cluster_hopping::Config, origin: String) -> PyResult<Self> {
+        inner
+            .validate()
+            .map_err(|err| errors::invalid_config(&err))?;
+        Ok(Self { inner, origin })
     }
 
-    fn chained(&self, inner: crate::methods::cluster_hopping::Config, step: String) -> Self {
-        Self {
-            inner,
-            origin: format!("{}.{step}", self.origin),
-        }
+    fn chained(
+        &self,
+        inner: crate::methods::cluster_hopping::Config,
+        step: String,
+    ) -> PyResult<Self> {
+        Self::new(inner, format!("{}.{step}", self.origin))
     }
 }
 
@@ -2977,20 +2955,20 @@ impl PyClusterConfig {
     #[staticmethod]
     fn recommended(n: usize) -> PyResult<Self> {
         check_points(n)?;
-        Ok(Self::new(
+        Self::new(
             crate::methods::cluster_hopping::Config::recommended(n),
             format!("recommended({n})"),
-        ))
+        )
     }
 
     /// Communicating paper arm: orbit kernel plus recognition, not recommended.
     #[staticmethod]
     fn communicating(n: usize) -> PyResult<Self> {
         check_points(n)?;
-        Ok(Self::new(
+        Self::new(
             crate::methods::cluster_hopping::Config::communicating(n),
             format!("communicating({n})"),
-        ))
+        )
     }
 
     /// Recommended flags with the cost-asymmetric screen and budget-window
@@ -2998,50 +2976,50 @@ impl PyClusterConfig {
     #[staticmethod]
     fn derived(n: usize) -> PyResult<Self> {
         check_points(n)?;
-        Ok(Self::new(
+        Self::new(
             crate::methods::cluster_hopping::Config::derived(n),
             format!("derived({n})"),
-        ))
+        )
     }
 
     /// Plain Wales-Doye protocol for `n` points (comparison baseline).
     #[staticmethod]
     fn for_cluster(n: usize) -> PyResult<Self> {
         check_points(n)?;
-        Ok(Self::new(
+        Self::new(
             crate::methods::cluster_hopping::Config::for_cluster(n),
             format!("for_cluster({n})"),
-        ))
+        )
     }
 
     /// The communicating arm on `n` rigid TIP4P waters.
     #[staticmethod]
     fn communicating_tip4p(n: usize) -> PyResult<Self> {
         check_points(n)?;
-        Ok(Self::new(
+        Self::new(
             crate::methods::cluster_hopping::Config::communicating_tip4p(n),
             format!("communicating_tip4p({n})"),
-        ))
+        )
     }
 
     /// The recommended arm on `n` rigid TIP4P waters.
     #[staticmethod]
     fn recommended_tip4p(n: usize) -> PyResult<Self> {
         check_points(n)?;
-        Ok(Self::new(
+        Self::new(
             crate::methods::cluster_hopping::Config::recommended_tip4p(n),
             format!("recommended_tip4p({n})"),
-        ))
+        )
     }
 
     /// The plain protocol on `n` rigid TIP4P waters.
     #[staticmethod]
     fn for_tip4p(n: usize) -> PyResult<Self> {
         check_points(n)?;
-        Ok(Self::new(
+        Self::new(
             crate::methods::cluster_hopping::Config::for_tip4p(n),
             format!("for_tip4p({n})"),
-        ))
+        )
     }
 
     /// Plain protocol with every length in `length_scale` and every energy in
@@ -3050,10 +3028,10 @@ impl PyClusterConfig {
     fn with_scales(n: usize, length_scale: f64, energy_scale: f64) -> PyResult<Self> {
         check_points(n)?;
         check_scales(length_scale, energy_scale)?;
-        Ok(Self::new(
+        Self::new(
             crate::methods::cluster_hopping::Config::with_scales(n, length_scale, energy_scale),
             format!("with_scales({n}, {length_scale:?}, {energy_scale:?})"),
-        ))
+        )
     }
 
     /// `recommended` in declared units.
@@ -3061,14 +3039,14 @@ impl PyClusterConfig {
     fn recommended_with_scales(n: usize, length_scale: f64, energy_scale: f64) -> PyResult<Self> {
         check_points(n)?;
         check_scales(length_scale, energy_scale)?;
-        Ok(Self::new(
+        Self::new(
             crate::methods::cluster_hopping::Config::recommended_with_scales(
                 n,
                 length_scale,
                 energy_scale,
             ),
             format!("recommended_with_scales({n}, {length_scale:?}, {energy_scale:?})"),
-        ))
+        )
     }
 
     /// `for_cluster` in declared units.
@@ -3076,14 +3054,14 @@ impl PyClusterConfig {
     fn for_cluster_with_scales(n: usize, length_scale: f64, energy_scale: f64) -> PyResult<Self> {
         check_points(n)?;
         check_scales(length_scale, energy_scale)?;
-        Ok(Self::new(
+        Self::new(
             crate::methods::cluster_hopping::Config::for_cluster_with_scales(
                 n,
                 length_scale,
                 energy_scale,
             ),
             format!("for_cluster_with_scales({n}, {length_scale:?}, {energy_scale:?})"),
-        ))
+        )
     }
 
     /// `recommended` for a pair potential: `"lennard_jones"`, or `"morse"`
@@ -3108,33 +3086,33 @@ impl PyClusterConfig {
                 )));
             }
         };
-        Ok(Self::new(
+        Self::new(
             crate::methods::cluster_hopping::Config::recommended_for_pair(n, kind),
             match rho {
                 Some(rho) => format!("recommended_for_pair({n}, {pair:?}, rho={rho:?})"),
                 None => format!("recommended_for_pair({n}, {pair:?})"),
             },
-        ))
+        )
     }
 
     /// Plain protocol with the dual orbit core, opt-in.
     #[staticmethod]
     fn for_cluster_dual_core(n: usize) -> PyResult<Self> {
         check_points(n)?;
-        Ok(Self::new(
+        Self::new(
             crate::methods::cluster_hopping::Config::for_cluster_dual_core(n),
             format!("for_cluster_dual_core({n})"),
-        ))
+        )
     }
 
     /// Superbasin occupancy preset for packing harvests.
     #[staticmethod]
     fn packing_superbasin(n: usize) -> PyResult<Self> {
         check_points(n)?;
-        Ok(Self::new(
+        Self::new(
             crate::methods::cluster_hopping::Config::packing_superbasin(n),
             format!("packing_superbasin({n})"),
-        ))
+        )
     }
 
     /// Plain protocol over molecules: one species label per atom and the atom
@@ -3146,16 +3124,18 @@ impl PyClusterConfig {
         groups: Vec<Vec<usize>>,
         energy_scale: f64,
     ) -> PyResult<Self> {
-        check_molecules(&species, &groups, energy_scale)?;
         let origin = format!(
             "for_molecular({} atoms, {} groups, energy_scale={energy_scale:?})",
             species.len(),
             groups.len()
         );
-        Ok(Self::new(
-            crate::methods::cluster_hopping::Config::for_molecular(species, groups, energy_scale),
-            origin,
-        ))
+        let inner = crate::methods::cluster_hopping::Config::try_for_molecular(
+            species,
+            groups,
+            energy_scale,
+        )
+        .map_err(|err| errors::invalid_config(&err))?;
+        Self::new(inner, origin)
     }
 
     /// `for_molecular` with the measured allocation and stall controls.
@@ -3166,24 +3146,22 @@ impl PyClusterConfig {
         groups: Vec<Vec<usize>>,
         energy_scale: f64,
     ) -> PyResult<Self> {
-        check_molecules(&species, &groups, energy_scale)?;
         let origin = format!(
             "recommended_molecular({} atoms, {} groups, energy_scale={energy_scale:?})",
             species.len(),
             groups.len()
         );
-        Ok(Self::new(
-            crate::methods::cluster_hopping::Config::recommended_molecular(
-                species,
-                groups,
-                energy_scale,
-            ),
-            origin,
-        ))
+        let inner = crate::methods::cluster_hopping::Config::try_recommended_molecular(
+            species,
+            groups,
+            energy_scale,
+        )
+        .map_err(|err| errors::invalid_config(&err))?;
+        Self::new(inner, origin)
     }
 
     /// A copy with the dual orbit core.
-    fn with_dual_orbit_core(&self) -> Self {
+    fn with_dual_orbit_core(&self) -> PyResult<Self> {
         self.chained(
             self.inner.clone().with_dual_orbit_core(),
             "with_dual_orbit_core()".to_owned(),
@@ -3216,20 +3194,33 @@ impl PyClusterConfig {
         } else {
             "with_species(labels)"
         };
-        Ok(self.chained(
+        self.chained(
             self.inner.clone().with_species(species, sigma),
             step.to_owned(),
-        ))
+        )
     }
 
     /// A copy that merges the groups of each covalent fragment of `start`, or
     /// `None` when the groups already stand.
     fn with_flexible_molecules(&self, start: PyReadonlyArray1<'_, f64>) -> PyResult<Option<Self>> {
         let slice = start.as_slice()?;
-        Ok(self
-            .inner
+        let molecular = matches!(
+            self.inner.move_library,
+            crate::methods::cluster_hopping::MoveLibrary::Molecular { .. }
+        );
+        let expected = 3 * self.inner.n_points;
+        if molecular && slice.len() != expected {
+            return Err(invalid_argument(format!(
+                "start has length {} but the config needs 3 * {} = {expected}",
+                slice.len(),
+                self.inner.n_points
+            )));
+        }
+        check_finite("start", slice)?;
+        self.inner
             .with_flexible_molecules(ArrayView1::from(slice))
-            .map(|inner| self.chained(inner, "with_flexible_molecules(start)".to_owned())))
+            .map(|inner| self.chained(inner, "with_flexible_molecules(start)".to_owned()))
+            .transpose()
     }
 
     /// Every setting name, sorted.
@@ -3272,7 +3263,7 @@ impl PyClusterConfig {
         if steps.is_empty() {
             return Ok(self.clone());
         }
-        Ok(self.chained(inner, format!("replace({})", steps.join(", "))))
+        self.chained(inner, format!("replace({})", steps.join(", ")))
     }
 
     /// Canonical versioned JSON of the resolved configuration.
@@ -3371,10 +3362,10 @@ impl PyClusterConfig {
                     "{reason}: sites need one positive species each and finite coordinates"
                 ))
             })?;
-        Ok(self.chained(
+        self.chained(
             self.inner.clone().with_rigid_bodies(geometry),
             "with_rigid_bodies(sites, species)".to_owned(),
-        ))
+        )
     }
 
     /// How far above the incumbent a screened trial may land.
@@ -4291,9 +4282,8 @@ fn cluster_search(
         if start.is_none() {
             return Err(invalid_argument("groups needs a start"));
         }
-        if groups.iter().flatten().any(|&atom| atom >= n) {
-            return Err(invalid_argument("a group names an atom past n"));
-        }
+        crate::methods::cluster_hopping::check_molecular_groups(groups, n)
+            .map_err(|err| errors::invalid_config(&err))?;
     }
     if n < 2 {
         return Err(invalid_argument("n must be at least 2"));
@@ -4382,10 +4372,11 @@ fn cluster_search(
     } else if let Some(groups) = groups {
         let labels = species.clone().unwrap_or_default();
         let mut cfg = if recommended {
-            Config::recommended_molecular(labels, groups, 1.0)
+            Config::try_recommended_molecular(labels, groups, 1.0)
         } else {
-            Config::for_molecular(labels, groups, 1.0)
-        };
+            Config::try_for_molecular(labels, groups, 1.0)
+        }
+        .map_err(|err| errors::invalid_config(&err))?;
         if let Some(step) = local_step {
             cfg.local_step = step;
         }
@@ -4443,6 +4434,7 @@ fn cluster_search(
             cfg = cfg.with_species(labels, sigmas);
         }
     }
+    cfg.validate().map_err(|err| errors::invalid_config(&err))?;
     let errors: std::sync::Arc<CallbackErrors> = std::sync::Arc::default();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let mut ledger =
