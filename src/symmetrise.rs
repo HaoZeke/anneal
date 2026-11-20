@@ -110,6 +110,28 @@ fn rotate_by(v: [f64; 3], axis: [f64; 3], turn: Turn) -> [f64; 3] {
     ]
 }
 
+fn squared_offset(image: [f64; 3], x: f64, y: f64, z: f64) -> f64 {
+    let dx = image[0] - x;
+    let dy = image[1] - y;
+    let dz = image[2] - z;
+    dx * dx + dy * dy + dz * dz
+}
+
+/// Squared displacement when the image lies strictly inside half the gap.
+///
+/// The nearest other atom is `gap` away. An image closer than half that is
+/// closer to the source atom than to any other, and this squared length is
+/// the one the nearest-image scan records for the source. A tie, or a
+/// displacement that only meets the half gap, falls through to the scan,
+/// which keeps the earlier index.
+fn image_on_self(here: [f64; 3], image: [f64; 3], gap: f64) -> Option<f64> {
+    if !gap.is_finite() || gap <= 0.0 {
+        return None;
+    }
+    let self_d2 = squared_offset(image, here[0], here[1], here[2]);
+    (self_d2 < gap * 0.25).then_some(self_d2)
+}
+
 fn normalise(v: [f64; 3]) -> Option<[f64; 3]> {
     let n = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
     if n < 1e-9 {
@@ -268,14 +290,51 @@ impl Cloud {
         (0..self.xs.len()).any(|index| index != far && can_leave(index))
     }
 
+    /// Nearest atom, eight coordinates at a time.
+    ///
+    /// Strict `<` keeps the earlier index on a tie. The distances in a
+    /// chunk do not depend on each other, so the compiler can autovectorise
+    /// them. The index update stays in program order, then the tail.
     fn nearest_index(&self, image: [f64; 3]) -> (usize, f64) {
+        let n = self.xs.len();
+        let mut index = 0usize;
+        let mut best_index = 0usize;
+        let mut best = f64::INFINITY;
+        while index + 8 <= n {
+            let mut dist = [0.0; 8];
+            for lane in 0..8 {
+                dist[lane] = squared_offset(
+                    image,
+                    self.xs[index + lane],
+                    self.ys[index + lane],
+                    self.zs[index + lane],
+                );
+            }
+            for lane in 0..8 {
+                if dist[lane] < best {
+                    best = dist[lane];
+                    best_index = index + lane;
+                }
+            }
+            index += 8;
+        }
+        while index < n {
+            let distance = squared_offset(image, self.xs[index], self.ys[index], self.zs[index]);
+            if distance < best {
+                best = distance;
+                best_index = index;
+            }
+            index += 1;
+        }
+        (best_index, best)
+    }
+
+    #[cfg(test)]
+    fn nearest_index_scalar(&self, image: [f64; 3]) -> (usize, f64) {
         let mut best_index = 0usize;
         let mut best = f64::INFINITY;
         for index in 0..self.xs.len() {
-            let dx = image[0] - self.xs[index];
-            let dy = image[1] - self.ys[index];
-            let dz = image[2] - self.zs[index];
-            let distance = dx * dx + dy * dy + dz * dz;
+            let distance = squared_offset(image, self.xs[index], self.ys[index], self.zs[index]);
             if distance < best {
                 best = distance;
                 best_index = index;
@@ -321,31 +380,59 @@ impl Cloud {
         if self.identity_stays_under(axis, order, cap) && !self.any_atom_can_leave(axis, order) {
             return None;
         }
-        let deviation = self.rotation_deviation(axis, order, cap)?;
-        self.permutation_moves(axis, order).then_some(deviation)
+        self.exchange_residual(axis, order, cap)
     }
 
-    fn permutation_moves(&self, axis: [f64; 3], order: usize) -> bool {
+    /// Residual and the off-axis exchange, from one nearest-image pass.
+    ///
+    /// The distance sum is the residual. An atom that can leave its site and
+    /// whose nearest image is itself is not a permutation of the cloud, and
+    /// neither is a turn that lands every atom on itself. The cap stops the
+    /// pass at the same threshold as the distance scan. Sine and cosine of
+    /// the turn are computed once.
+    fn exchange_residual(&self, axis: [f64; 3], order: usize, cap: f64) -> Option<f64> {
+        let n = self.xs.len();
+        if n == 0 || order < 2 {
+            return None;
+        }
         let angle = 2.0 * std::f64::consts::PI / order as f64;
         let sine = libm::sin(std::f64::consts::PI / order as f64);
         let scale = 4.0 * sine * sine;
+        let s = libm::sin(angle);
+        let co = libm::cos(angle);
         let gaps = self.gaps();
+        let mut total = 0.0;
         let mut moved = false;
-        for index in 0..self.xs.len() {
+        let limit = cap * cap * n as f64;
+        let stop = cap.is_finite();
+        for index in 0..n {
             let gap = gaps[index];
             let chord_sq = scale * self.perp_sq_at(index, axis);
             // chord^2 < (gap / 2)^2. An atom that close to the axis has no
             // other site it can reach, so staying put is the permutation.
             let axial = !gap.is_finite() || gap <= 0.0 || chord_sq < gap * 0.25;
-            let (partner, _) = self.nearest_index(rotate(self.point(index), axis, angle));
+            let here = self.point(index);
+            let image = rotate_by(here, axis, Turn { s, co });
+            let (partner, distance) = if let Some(self_d2) = image_on_self(here, image, gap) {
+                (index, self_d2)
+            } else {
+                self.nearest_index(image)
+            };
+            total += distance;
             if !axial && partner == index {
-                return false;
+                return None;
             }
             if partner != index {
                 moved = true;
             }
+            if stop && total > limit {
+                let partial = (total / n as f64).sqrt();
+                if partial >= cap * (1.0 + 1.0e-6) {
+                    return None;
+                }
+            }
         }
-        moved
+        moved.then_some((total / n as f64).sqrt())
     }
 
     fn point(&self, index: usize) -> [f64; 3] {
@@ -2571,5 +2658,200 @@ mod shell_tests {
             ..spec
         };
         assert!(shell_core_group(x.view(), n, &spec).is_some());
+    }
+
+    /// Residual and the exchange come from one nearest image. The split
+    /// scan measures the residual, then walks the cloud again.
+    #[test]
+    fn one_pass_residual_matches_the_image_that_supplies_the_exchange() {
+        let mut state = 0x1234_5678_9abc_def0_u64;
+        let mut unit = || {
+            state = state
+                .wrapping_mul(0x9e37_79b9_7f4a_7c15)
+                .wrapping_add(0x6a09_e667_f3bc_c909);
+            (state >> 11) as f64 / ((1u64 << 53) as f64) - 0.5
+        };
+        let mut mismatches = 0u32;
+        let mut example = String::new();
+        for n in [2usize, 3, 5, 7, 9, 17] {
+            let mut coords = Vec::with_capacity(3 * n);
+            for _ in 0..3 * n {
+                coords.push(unit() * 2.0);
+            }
+            if n >= 4 {
+                coords[3] = coords[0];
+                coords[4] = coords[1];
+                coords[5] = coords[2];
+            }
+            let x = Array1::from(coords);
+            let cloud = Cloud::from_view(x.view(), n);
+            for order in 2..=n.min(8) {
+                for cap in [0.05_f64, 0.2, 1.0, f64::INFINITY] {
+                    let axis = normalise([unit(), unit(), unit()]).unwrap_or([0.0, 0.0, 1.0]);
+                    let got = cloud.symmetry_deviation(axis, order, cap);
+                    let scalar = scalar_exchange(&cloud, axis, order, cap);
+                    if got != scalar {
+                        mismatches += 1;
+                        if example.is_empty() {
+                            example = format!(
+                                "n={n} order={order} cap={cap} got={got:?} scalar={scalar:?}"
+                            );
+                        }
+                    }
+                    let split = split_exchange(&cloud, axis, order, cap);
+                    if got != split {
+                        mismatches += 1;
+                        if example.is_empty() {
+                            example = format!(
+                                "split n={n} order={order} cap={cap} got={got:?} split={split:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(mismatches, 0, "{example}");
+    }
+
+    fn scalar_exchange(cloud: &Cloud, axis: [f64; 3], order: usize, cap: f64) -> Option<f64> {
+        let n = cloud.xs.len();
+        if n == 0 || order < 2 {
+            return None;
+        }
+        if cloud.identity_stays_under(axis, order, cap) && !cloud.any_atom_can_leave(axis, order) {
+            return None;
+        }
+        let angle = 2.0 * std::f64::consts::PI / order as f64;
+        let sine = libm::sin(std::f64::consts::PI / order as f64);
+        let scale = 4.0 * sine * sine;
+        let gaps = cloud.gaps();
+        let mut total = 0.0;
+        let mut moved = false;
+        let limit = cap * cap * n as f64;
+        let stop = cap.is_finite();
+        for index in 0..n {
+            let gap = gaps[index];
+            let chord_sq = scale * cloud.perp_sq_at(index, axis);
+            let axial = !gap.is_finite() || gap <= 0.0 || chord_sq < gap * 0.25;
+            let (partner, distance) =
+                cloud.nearest_index_scalar(rotate(cloud.point(index), axis, angle));
+            total += distance;
+            if !axial && partner == index {
+                return None;
+            }
+            if partner != index {
+                moved = true;
+            }
+            if stop && total > limit {
+                let partial = (total / n as f64).sqrt();
+                if partial >= cap * (1.0 + 1.0e-6) {
+                    return None;
+                }
+            }
+        }
+        moved.then_some((total / n as f64).sqrt())
+    }
+
+    /// Distance-only residual, then a second walk for the exchange.
+    fn split_exchange(cloud: &Cloud, axis: [f64; 3], order: usize, cap: f64) -> Option<f64> {
+        if order < 2 || cloud.xs.is_empty() {
+            return None;
+        }
+        if cloud.identity_stays_under(axis, order, cap) && !cloud.any_atom_can_leave(axis, order) {
+            return None;
+        }
+        let deviation = cloud.rotation_deviation(axis, order, cap)?;
+        let angle = 2.0 * std::f64::consts::PI / order as f64;
+        let sine = libm::sin(std::f64::consts::PI / order as f64);
+        let scale = 4.0 * sine * sine;
+        let gaps = cloud.gaps();
+        let mut moved = false;
+        for index in 0..cloud.xs.len() {
+            let gap = gaps[index];
+            let chord_sq = scale * cloud.perp_sq_at(index, axis);
+            let axial = !gap.is_finite() || gap <= 0.0 || chord_sq < gap * 0.25;
+            let (partner, _) = cloud.nearest_index_scalar(rotate(cloud.point(index), axis, angle));
+            if !axial && partner == index {
+                return None;
+            }
+            if partner != index {
+                moved = true;
+            }
+        }
+        moved.then_some(deviation)
+    }
+
+    #[test]
+    fn wide_nearest_image_matches_the_scalar_scan() {
+        let mut state = 0x1234_5678_u64;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (state >> 33) as f64 / (1u32 << 31) as f64
+        };
+        for n in [1usize, 3, 7, 8, 9, 17, 33, 55] {
+            let mut coords = Vec::with_capacity(3 * n);
+            for _ in 0..3 * n {
+                coords.push(next() * 4.0 - 2.0);
+            }
+            if n >= 4 {
+                coords[3] = coords[0];
+                coords[4] = coords[1];
+                coords[5] = coords[2];
+            }
+            let x = Array1::from(coords);
+            let cloud = Cloud::from_view(x.view(), n);
+            for _ in 0..24 {
+                let image = [next() * 6.0 - 3.0, next() * 6.0 - 3.0, next() * 6.0 - 3.0];
+                let scalar = cloud.nearest_index_scalar(image);
+                let chosen = cloud.nearest_index(image);
+                assert_eq!(chosen.0, scalar.0, "n={n}");
+                assert_eq!(chosen.1.to_bits(), scalar.1.to_bits(), "n={n}");
+            }
+        }
+    }
+
+    #[test]
+    fn an_image_inside_half_the_gap_is_the_source_atom() {
+        let mut state = 0x9e37_79b9_u64;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (state >> 33) as f64 / (1u32 << 31) as f64
+        };
+        for n in [4usize, 12, 33, 55] {
+            let mut coords = Vec::with_capacity(3 * n);
+            for _ in 0..3 * n {
+                coords.push(next() * 3.0 - 1.5);
+            }
+            let x = Array1::from(coords);
+            let cloud = Cloud::from_view(x.view(), n);
+            let gaps = cloud.gaps().clone();
+            let axes = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 1.0, 1.0]];
+            for axis in axes {
+                let axis = normalise(axis).expect("axis");
+                for order in [2usize, 3, 4, 6, 12] {
+                    let angle = 2.0 * std::f64::consts::PI / order as f64;
+                    for index in 0..n {
+                        let here = cloud.point(index);
+                        let image = rotate(here, axis, angle);
+                        let Some(self_d2) = image_on_self(here, image, gaps[index]) else {
+                            continue;
+                        };
+                        let (partner, distance) = cloud.nearest_index_scalar(image);
+                        assert_eq!(partner, index, "n={n} order={order}");
+                        assert_eq!(distance.to_bits(), self_d2.to_bits());
+                    }
+                }
+            }
+        }
+        let x = Array1::from(vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0]);
+        let cloud = Cloud::from_view(x.view(), 2);
+        let here = cloud.point(0);
+        let image = [here[0] + 0.999, here[1], here[2]];
+        let self_d2 = image_on_self(here, image, 4.0).expect("inside half the gap");
+        let (partner, distance) = cloud.nearest_index_scalar(image);
+        assert_eq!(partner, 0);
+        assert_eq!(distance.to_bits(), self_d2.to_bits());
+        let outside = [here[0] + 1.001, here[1], here[2]];
+        assert!(image_on_self(here, outside, 4.0).is_none());
     }
 }
