@@ -1126,10 +1126,37 @@ fn native_release_compiles_a_consumer_against_the_archive() {
     // The pkg-config builds take every flag from the archive's .pc file:
     // no -I, -L or -l of their own, and the search path is the extracted
     // archive's alone.
+    // The flags reach the compiler as quoted arrays that read fills from
+    // pkg-config's output, never as an unquoted $(pkg-config ...), which
+    // the shell would also glob. Each assignment stands alone, so a failing
+    // pkg-config fails the step.
+    let cflags_query = at("pc_cflags=$(pkg-config --cflags anneal-core)");
+    let libs_query = at("pc_libs=$(pkg-config --libs anneal-core)");
+    let cflags = at(r#"read -ra cflags <<< "$pc_cflags""#);
+    let libs = at(r#"read -ra libs <<< "$pc_libs""#);
+    assert!(exists < cflags_query && cflags_query < cflags && cflags < pc_syntax);
+    assert!(exists < libs_query && libs_query < libs && libs < pc_link);
+    for line in &lines {
+        if line.contains("cflags=") || line.contains("libs=") || line.contains("-ra ") {
+            assert!(
+                [cflags_query, libs_query, cflags, libs]
+                    .iter()
+                    .any(|&i| lines[i] == *line),
+                "{line} sets the flags again"
+            );
+        }
+    }
+    let cflags_words = r#""${cflags[@]}""#;
+    let libs_words = r#""${libs[@]}""#;
     for compile in [pc_syntax, pc_link] {
         let words: Vec<&str> = lines[compile].split_whitespace().collect();
         assert!(words.contains(&"tests/ffi_smoke.c"), "{}", lines[compile]);
-        assert!(words.contains(&"$(pkg-config"), "{}", lines[compile]);
+        assert!(words.contains(&cflags_words), "{}", lines[compile]);
+        assert!(
+            !lines[compile].contains("$(pkg-config"),
+            "{}",
+            lines[compile]
+        );
         for word in &words {
             assert!(
                 !word.starts_with("-I") && !word.starts_with("-L") && !word.starts_with("-l"),
@@ -1138,9 +1165,12 @@ fn native_release_compiles_a_consumer_against_the_archive() {
             );
         }
     }
-    assert!(lines[pc_syntax].contains("$(pkg-config --cflags anneal-core)"));
-    assert!(lines[pc_link].contains("$(pkg-config --cflags anneal-core)"));
-    assert!(lines[pc_link].contains("$(pkg-config --libs anneal-core)"));
+    assert!(!lines[pc_syntax].contains(libs_words));
+    assert!(
+        lines[pc_link]
+            .split_whitespace()
+            .any(|word| word == libs_words)
+    );
     for line in &lines {
         for name in [
             "PKG_CONFIG_LIBDIR",

@@ -191,14 +191,20 @@ jobs:
           fi
           export PKG_CONFIG_PATH="$PWD/consumer/lib/pkgconfig"
           pkg-config --exists anneal-core
-          cc -std=c99 -Wall -Wextra -fsyntax-only $(pkg-config --cflags anneal-core) tests/ffi_smoke.c
+          # read splits pkg-config's output into words without globbing them.
+          # A bare assignment fails the step when pkg-config fails.
+          pc_cflags=$(pkg-config --cflags anneal-core)
+          pc_libs=$(pkg-config --libs anneal-core)
+          read -ra cflags <<< "$pc_cflags"
+          read -ra libs <<< "$pc_libs"
+          cc -std=c99 -Wall -Wextra -fsyntax-only "${cflags[@]}" tests/ffi_smoke.c
           if [[ "${{ matrix.os }}" == linux ]]; then
             ${{ matrix.consumer_cc }} -std=c99 -Wall -Wextra -Iconsumer/include tests/ffi_smoke.c \
               -Lconsumer/lib -lanneal_core -Wl,-rpath,"$PWD/consumer/lib" \
               -o consumer/ffi_smoke
             ${{ matrix.emulator }} ./consumer/ffi_smoke
-            ${{ matrix.consumer_cc }} -std=c99 -Wall -Wextra $(pkg-config --cflags anneal-core) tests/ffi_smoke.c \
-              $(pkg-config --libs anneal-core) -Wl,-rpath,"$PWD/consumer/lib" \
+            ${{ matrix.consumer_cc }} -std=c99 -Wall -Wextra "${cflags[@]}" tests/ffi_smoke.c \
+              "${libs[@]}" -Wl,-rpath,"$PWD/consumer/lib" \
               -o consumer/ffi_pkgconfig
             test "$(${{ matrix.emulator }} ./consumer/ffi_pkgconfig)" = "$(pkg-config --modversion anneal-core)"
           fi
