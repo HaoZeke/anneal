@@ -1,0 +1,64 @@
+[
+ {
+  "binary_sha256": {
+   "CC": {
+    "ase_nonlj": "6746a2b485a7b6a4e092dd80961a23beea3e90d1c366e8996dfd04ce1be8d5ee",
+    "ase_panel": "2b642b0b9461cfbb8807ed3da0d9d07b87e2a07de145b8406bbcfca1ed239b3b",
+    "h2h_gmin_proof": "a1dbe265dc2ebeb3b0474a604d1328b19f60a3def501b16b622373414d22794c",
+    "h2h_metal": "1da5b6b3fbe6ccc1efc3969e438bf6d962f7f420ffbe4c3b8b5553ef26c39ed4",
+    "h2h_morse": "1e1a5d8b10bee1edc2281f105fdbe01d6b4b58848e29b61f9f406383402449bf",
+    "h2h_sc": "0a26c87fa94de4eef2ec7b375c6f7f8ea554a13a65209b856d620374bbc6cb57",
+    "h2h_seed": "7c5c5b96a4fd11956aa18fab7aeb896d853d9cea2c72bd629ad2487db59fc556"
+   },
+   "DEVELOP": {
+    "ase_nonlj": "c5b1adb736c06db44b0ab878899e2cf6b9a94d97f2781a9f09a8610fdebcab86",
+    "ase_panel": "c7ae6c6df66a16c5d768c7c2f8565721b58e535d2600387123c235ba6b97e66f",
+    "h2h_gmin_proof": "df707ca1cba36f0ebccad3f12e9c528b5122179731cfc75f7e58848bf229d284",
+    "h2h_metal": "c6baadf2cc4aaed08dc3f48f62cd6887df73d39eeb9eb3dc106f4bafde29cac2",
+    "h2h_morse": "3104704f821967604e97b160ccdbc0c88652f38e84394411e1e2fb843e7680df",
+    "h2h_sc": "06a7332b1da76a69bbe808ac57d2eb2417566b2e5a99996d1865e03a7692cef7",
+    "h2h_seed": "d7146020a769153bfd956b941daa62827512e7ea77bffdbee969a30fe1e0e0d2"
+   },
+   "DEVELOP2": {
+    "ase_nonlj": "c5b1adb736c06db44b0ab878899e2cf6b9a94d97f2781a9f09a8610fdebcab86",
+    "ase_panel": "c7ae6c6df66a16c5d768c7c2f8565721b58e535d2600387123c235ba6b97e66f",
+    "h2h_gmin_proof": "df707ca1cba36f0ebccad3f12e9c528b5122179731cfc75f7e58848bf229d284",
+    "h2h_metal": "c6baadf2cc4aaed08dc3f48f62cd6887df73d39eeb9eb3dc106f4bafde29cac2",
+    "h2h_morse": "3104704f821967604e97b160ccdbc0c88652f38e84394411e1e2fb843e7680df",
+    "h2h_sc": "06a7332b1da76a69bbe808ac57d2eb2417566b2e5a99996d1865e03a7692cef7",
+    "h2h_seed": "d7146020a769153bfd956b941daa62827512e7ea77bffdbee969a30fe1e0e0d2"
+   }
+  },
+  "core": "0",
+  "harness_blob": "a3f7e22457e705fa69a63c364ae9b287cf76e85e",
+  "hit_tol": 0.001,
+  "machine_id": "3b11c160088e7af5c4f7ebd9da95e0bfe019a34698416701bb057c15fea10873",
+  "parts": [
+   "1",
+   "2"
+  ],
+  "rgpot_sha256": "08815bf0f25cb0f05f17af35d9bc564f773345f9a42e0a3949b8d43b032ae967",
+  "session": "38b48fe2ab8d52b4",
+  "thread_vars": [
+   "OMP_NUM_THREADS",
+   "OMP_THREAD_LIMIT",
+   "MKL_NUM_THREADS",
+   "MKL_DOMAIN_NUM_THREADS",
+   "OPENBLAS_NUM_THREADS",
+   "GOTO_NUM_THREADS",
+   "NUMBA_NUM_THREADS",
+   "VECLIB_MAXIMUM_THREADS",
+   "BLIS_NUM_THREADS",
+   "RAYON_NUM_THREADS",
+   "NUMEXPR_NUM_THREADS",
+   "TBB_NUM_THREADS",
+   "JULIA_NUM_THREADS",
+   "KMP_NUM_THREADS"
+  ],
+  "trees": {
+   "CC": "c5b961b7e51e83ae54d3f748f166ed74f0d5a432",
+   "DEVELOP": "cff796c507a8fa1d0bfb28888c3570b61988055e",
+   "DEVELOP2": "cff796c507a8fa1d0bfb28888c3570b61988055e"
+  }
+ }
+]
