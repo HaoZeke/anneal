@@ -355,13 +355,18 @@ fn every_publish_job_waits_for_the_artifacts_it_publishes() {
     assert!(
         needs(job(&workflow, "publish-pypi")).is_superset(&BTreeSet::from(["sdist", "wheels"]))
     );
-    assert!(
-        needs(job(&workflow, "github-release")).is_superset(&BTreeSet::from([
-            "native-libs",
-            "sdist",
-            "wheels"
-        ]))
-    );
+    // A crates.io upload cannot be undone, so it needs everything PyPI and
+    // the GitHub release need and cannot happen while either is impossible.
+    for irreversible in ["publish-crate", "github-release"] {
+        assert!(
+            needs(job(&workflow, irreversible)).is_superset(&BTreeSet::from([
+                "native-libs",
+                "sdist",
+                "wheels"
+            ])),
+            "{irreversible} does not wait for the native libraries, the sdist and every wheel"
+        );
+    }
     for publish in ["publish-pypi", "publish-crate", "github-release"] {
         assert_eq!(
             job(&workflow, publish)["if"].as_str(),
