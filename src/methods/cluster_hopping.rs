@@ -1237,8 +1237,8 @@ pub struct Outcome {
     pub trail_escapes: usize,
     /// Energy gained by those that landed lower than where they left.
     pub stall_escape_gain: f64,
-    #[cfg(test)]
-    pub(crate) stall_non_leaves: Vec<usize>,
+    /// Stall responses attempted that stayed on the current shelf.
+    pub stall_non_leaves: usize,
     /// Mean softest eigenvalue over those proposals.
     pub soft_lambda: f64,
     /// Per-rung temperature, basin count and the energy the rung ends on.
@@ -10172,8 +10172,7 @@ where
         stall_escapes,
         trail_escapes,
         stall_escape_gain,
-        #[cfg(test)]
-        stall_non_leaves,
+        stall_non_leaves: stall_non_leaves.iter().sum(),
         soft_lambda: if soft_escapes > 0 {
             soft_lambda / soft_escapes as f64
         } else {
@@ -12210,7 +12209,7 @@ mod tests {
         )
         .expect("finite start");
         assert!(
-            out.stall_non_leaves.first().copied().unwrap_or(0) >= 1,
+            out.stall_non_leaves >= 1,
             "a failed climb stayed in the allocator's untried state"
         );
     }
