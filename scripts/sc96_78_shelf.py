@@ -155,7 +155,8 @@ One Sutton-Chen chain on the stored 78-atom start
 =================================================
 #+end_export
 
-This page runs one 9-6 N=78 chain from the stored start, then the same chain with surface hops.
+This page runs one 9-6 N=78 chain from the stored start, then the
+iso-hop arm on the same start.
 =scripts/sc96_78_shelf.py= writes =data/sc96_78_shelf.csv= and the blocks below.
 
 The Cambridge Cluster Database lists the global minimum at {reference}.
@@ -209,10 +210,11 @@ The chain found {distinct} distinct minima.
 The columns 555, 421 and 422 count bonded pairs by their common-neighbour signature.
 The lowest minimum has {iso_line[2]} bonds, {iso_z.get(12, 0)} twelve-coordinated atoms, {iso_z.get(5, 0)} five-coordinated atoms and {iso_z.get(4, 0)} four-coordinated atoms.
 
-* Run the chain again with surface hops
+* Run the iso-hop arm
 
-=iso-hop= is that chain with surface hops.
-Each time the record falls, it tries every least-bound atom on every empty hollow site where the atom keeps its neighbours.
+=iso-hop= sets =Config::surface_hop_on_best=. The hop loop records that
+flag and does not quench the surface candidates, so =surface_hops= stays
+zero and the arm follows the same search as =iso=.
 
 #+begin_src bash
 ANNEAL_MINIMA_DB=db-hop cargo run -q --release --example sc_h2h -- \\

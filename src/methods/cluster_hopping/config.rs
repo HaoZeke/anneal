@@ -687,12 +687,10 @@ pub struct Config {
     /// Core symmetrisation keeps the fraction core whatever this is.
     #[serde(skip_serializing_if = "OrbitCore::is_fraction")]
     pub orbit_core: OrbitCore,
-    /// Surface hops from each new lowest structure: every least-bound atom
-    /// is tried on every vacant hollow site where it keeps its neighbour
-    /// count ([`crate::packing::surface_hops`]), and each is quenched. The
-    /// lowest product is taken when it is below the structure it came from,
-    /// and the hops repeat from it. Neighbours are pairs inside
-    /// [`crate::soap::contact_cutoff`] at [`Config::length_scale`].
+    /// Stored on the resolved configuration. The hop loop does not quench
+    /// surface candidates, so the outcome count stays zero whether this is
+    /// set or not. [`crate::packing::surface_hops`] still lists the
+    /// candidates for a caller that quenches them itself.
     #[serde(skip_serializing_if = "is_false")]
     pub surface_hop_on_best: bool,
     /// Add the population-repulsion SOAP step ([`ClusterMove::SoapRepel`])

@@ -37,7 +37,11 @@ cargo check --locked --features featomic
 
 * =vesin-nl=
 
-Neighbour construction through the vesin cell lists. The build script reads =VESIN_SRC=, a checkout of vesin.
+Neighbour construction through the vesin cell lists. The build script
+reads =VESIN_SRC=. It compiles =vesin/src/vesin.cpp=,
+=cpu_cell_list.cpp=, =verlet.cpp=, =shared_libraries.cpp=,
+=threadpool.cpp= and =vesin_cuda_stub.cpp=. That is the layout of vesin
+0.6.2. A later checkout moved those files.
 
 #+begin_src sh
 VESIN_SRC=/path/to/vesin cargo check --locked --features vesin-nl
