@@ -104,20 +104,41 @@ jobs:
       - name: Generate C header
         run: cbindgen --config cbindgen.toml --crate anneal-core --output anneal-core.h
 
+      # anneal-core.h includes <dlpack/dlpack.h>, so the archive carries that
+      # header beside it and every copied file is checked in the archive.
       - name: Package artifacts
         run: |
-          mkdir -p staging/include staging/lib
+          mkdir -p staging/include/dlpack staging/lib
           cp anneal-core.h staging/include/
           cp include/anneal-version.h staging/include/
           cp include/anneal-core.hpp staging/include/
+          cp include/dlpack/dlpack.h staging/include/dlpack/
           cp target/${{ matrix.target }}/release/${{ matrix.static_lib }} staging/lib/
           cp target/${{ matrix.target }}/release/${{ matrix.shared_lib }} staging/lib/
           tar czf ${{ matrix.artifact }}.tar.gz -C staging .
           tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./include/anneal-core.h"
           tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./include/anneal-version.h"
           tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./include/anneal-core.hpp"
+          tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./include/dlpack/dlpack.h"
           tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./lib/${{ matrix.static_lib }}"
           tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./lib/${{ matrix.shared_lib }}"
+
+      # A consumer sees only what the archive holds. The header must parse
+      # on every target. Where the runner can run the target's code, a
+      # Linux consumer also links the shared library and runs.
+      - name: Compile a consumer against the archive
+        shell: bash
+        run: |
+          rm -rf consumer
+          mkdir consumer
+          tar xzf ${{ matrix.artifact }}.tar.gz -C consumer
+          cc -std=c99 -Wall -Wextra -fsyntax-only -Iconsumer/include tests/ffi_smoke.c
+          if [[ "${{ matrix.os }}" == linux ]]; then
+            cc -std=c99 -Wall -Wextra -Iconsumer/include tests/ffi_smoke.c \
+              -Lconsumer/lib -lanneal_core -Wl,-rpath,"$PWD/consumer/lib" \
+              -o consumer/ffi_smoke
+            ./consumer/ffi_smoke
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
