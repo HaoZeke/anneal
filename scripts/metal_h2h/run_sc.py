@@ -70,6 +70,16 @@ BASIN_HOPPING_TEMPERATURE = {"126": 30.0, "108": 5.0, "96": 10.0}
 # so the same displacement per neighbor distance is this many a per sigma.
 SC_LENGTH_PER_LJ = 2.0**-0.5 / 2.0 ** (1.0 / 6.0)
 LJ_STEP = 0.40
+
+
+def sc_step() -> float:
+    """GMIN STEP in units of a: the LJ step times the Sutton-Chen length per sigma.
+
+    LJ_STEP is the displacement in Lennard-Jones sigma. SC_LENGTH_PER_LJ is a
+    nearest-neighbor distance, a/sqrt(2), divided by the Lennard-Jones one,
+    2**(1/6) sigma.
+    """
+    return LJ_STEP * SC_LENGTH_PER_LJ
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
 ARMS = ("anneal", "gmin")
 SCHEDULE_SEED = 20261115
@@ -158,7 +168,7 @@ def data_text(system: str, steps: int) -> str:
         "CENTRE",
         f"TEMPERATURE {BASIN_HOPPING_TEMPERATURE[family]}",
         f"STEPS {steps} 1.0",
-        f"STEP {LJ_STEP * SC_LENGTH_PER_LJ:.6f} 0.51",
+        f"STEP {sc_step():.6f} 0.51",
         "NEWRESTART 40",
         "",
     ]

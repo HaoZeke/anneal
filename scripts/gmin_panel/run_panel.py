@@ -906,8 +906,11 @@ def self_test() -> None:
     au_data = gmin_data("au55", 2000, "", "")
     if not au_data.startswith(f"BGUPTAT 55 {GOLD_ROW}\n"):
         raise SystemExit("gupta data")
-    if "RADIUS 11.829521\n" not in au_data or "TEMPERATURE 0.1\n" not in au_data \
-            or "STEP 1.027741 0.51\n" not in au_data or "AVOID 10.277408 20 F\n" not in au_data:
+    radius = f"{gmin_gupta_radius(55):.6f}"
+    step = f"{LJ_STEP * GOLD_LENGTH_PER_LJ:.6f}"
+    avoid = f"{LJ_AVOID * GOLD_LENGTH_PER_LJ:.6f}"
+    if f"RADIUS {radius}\n" not in au_data or "TEMPERATURE 0.1\n" not in au_data \
+            or f"STEP {step} 0.51\n" not in au_data or f"AVOID {avoid} 20 F\n" not in au_data:
         raise SystemExit(f"gupta scale {au_data}")
     try:
         bad = "h2h_row system=m80r6 code=gmin seed=2001 budget=4000000 hit=0 evals_to_hit=4000000 " \
