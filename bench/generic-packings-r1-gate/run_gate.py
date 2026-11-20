@@ -242,7 +242,7 @@ def run(args) -> int:
     cpu = panel.cpu_model()
     harness = sha256_file(Path(__file__))
     session = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    done = {(r["system"], r["arm"], r["seed"]) for r in read_rows(args.rows)}
+    done = {(r["system"], r["arm"], r["seed"]) for r in read_rows(Path(args.rows))}
     print(f"session {session} arms {' '.join(names)} systems {' '.join(systems)}", flush=True)
     for name in names:
         print(f"arm {name} revision {provenance[name][0]} tree {provenance[name][1]}", flush=True)
