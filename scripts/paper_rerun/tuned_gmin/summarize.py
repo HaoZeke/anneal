@@ -5,7 +5,11 @@
 Medians are Hyndman-Fan type 7 of ``evals_to_hit``. A miss is stored at
 the budget, which is the call column of the printed table. The hit rule
 is ``scripts/target_tol.py`` ``energy_hits`` with ``DEFAULT_HIT_TOL``
-0.001: best <= reference + 0.001.
+0.001: best <= reference + 0.001. ``rows-r2.csv`` is the paired session
+when it exists. Fisher p is the panel's two-sided exact test. Mann-Whitney
+p ranks a miss after every hit, using the panel's tie-corrected normal
+approximation. ``outside_per_charged_median`` is the type 7 median of
+``outside_s / charged``.
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 MANIFEST = Path(__file__).resolve().parent / "manifest.csv"
 ROWS = ROOT / "bench" / "paper-rerun" / "tuned-gmin" / "rows.csv"
+ROWS_R2 = ROOT / "bench" / "paper-rerun" / "tuned-gmin" / "rows-r2.csv"
 SUMMARY = ROOT / "bench" / "paper-rerun" / "tuned-gmin" / "summary.csv"
 README = ROOT / "bench" / "paper-rerun" / "tuned-gmin" / "README.md"
 
@@ -29,6 +34,9 @@ SUMMARY_FIELDS = [
     "hits",
     "n",
     "calls_median",
+    "outside_per_charged_median",
+    "fisher_p",
+    "mannwhitney_p",
     "printed_hits",
     "printed_n",
     "printed_calls_median",
@@ -72,10 +80,46 @@ def median_calls(panel, group: list[dict[str, str]]) -> str:
     return f"{panel.type7([float(row['evals_to_hit']) for row in group], 0.5):.10g}"
 
 
+def outside_per_charged(panel, group: list[dict[str, str]]) -> str:
+    if not group:
+        return ""
+    ratios = []
+    for row in group:
+        charged = float(row["charged"])
+        if charged <= 0.0:
+            raise SystemExit(f"{row['system']} {row['code']} seed {row['seed']}: charged is {row['charged']}")
+        ratios.append(float(row["outside_s"]) / charged)
+    return f"{panel.type7(ratios, 0.5):.10g}"
+
+
+def comparisons(panel, grouped: dict[tuple[str, str], list[dict[str, str]]]) -> dict[str, tuple[str, str]]:
+    found: dict[str, tuple[str, str]] = {}
+    systems: list[str] = []
+    for system, _code in grouped:
+        if system not in systems:
+            systems.append(system)
+    for system in systems:
+        anneal = grouped.get((system, "anneal"), [])
+        gmin = grouped.get((system, "gmin"), [])
+        if not anneal or not gmin:
+            continue
+        budget = int(anneal[0]["budget"])
+        left = panel.ranked_calls(anneal, budget)
+        right = panel.ranked_calls(gmin, budget)
+        if left is None or right is None:
+            mannwhitney = ""
+        else:
+            mannwhitney = f"{panel.mann_whitney(left, right)[1]:.6g}"
+        fisher_p = f"{panel.fisher(hits_of(anneal), len(anneal), hits_of(gmin), len(gmin)):.6g}"
+        found[system] = (fisher_p, mannwhitney)
+    return found
+
+
 def summarise(panel, manifest: list[dict[str, str]], rows: list[dict[str, str]]) -> list[dict[str, str]]:
     grouped: dict[tuple[str, str], list[dict[str, str]]] = {}
     for row in rows:
         grouped.setdefault((row["system"], row["code"]), []).append(row)
+    compared = comparisons(panel, grouped)
     out = []
     for cell in manifest:
         group = grouped.get((cell["system"], cell["code"]), [])
@@ -88,11 +132,16 @@ def summarise(panel, manifest: list[dict[str, str]], rows: list[dict[str, str]])
             hits = str(hits_of(group))
             count = str(len(group))
             calls = median_calls(panel, group)
+            ratio = outside_per_charged(panel, group)
+            fisher_p, mannwhitney = compared.get(cell["system"], ("", ""))
         else:
             code_revision = ""
             hits = ""
             count = ""
             calls = ""
+            ratio = ""
+            fisher_p = ""
+            mannwhitney = ""
         out.append(
             {
                 "cell": cell["cell"],
@@ -102,6 +151,9 @@ def summarise(panel, manifest: list[dict[str, str]], rows: list[dict[str, str]])
                 "hits": hits,
                 "n": count,
                 "calls_median": calls,
+                "outside_per_charged_median": ratio,
+                "fisher_p": fisher_p,
+                "mannwhitney_p": mannwhitney,
                 "printed_hits": cell["printed_hits"],
                 "printed_n": cell["printed_n"],
                 "printed_calls_median": cell["printed_calls_median"],
@@ -114,7 +166,7 @@ def summarise(panel, manifest: list[dict[str, str]], rows: list[dict[str, str]])
     return out
 
 
-def readme(panel, summary: list[dict[str, str]], rows: list[dict[str, str]]) -> str:
+def readme(panel, summary: list[dict[str, str]], rows: list[dict[str, str]], source: Path) -> str:
     hosts = sorted({row["host"] for row in rows})
     sessions = sorted({row["session"] for row in rows})
     blobs = sorted({row["harness_blob"] for row in rows})
@@ -132,6 +184,15 @@ def readme(panel, summary: list[dict[str, str]], rows: list[dict[str, str]]) -> 
         "A hit is energy_hits in scripts/target_tol.py: best <= reference + 0.001.",
         "DEFAULT_HIT_TOL is 0.001. A miss is stored at the budget.",
         "calls_median is the Hyndman-Fan type 7 median of evals_to_hit.",
+        "outside_per_charged_median is the type 7 median of outside_s/charged.",
+        "fisher_p is the two-sided exact test on the hit counts.",
+        "mannwhitney_p ranks a full-budget miss after every hit.",
+        f"Measured rows are {source.name}.",
+        *(
+            ["rows.csv is the earlier anneal-only pass."]
+            if source.name == "rows-r2.csv"
+            else []
+        ),
         "",
         "GMIN is the build in scripts/gmin_panel/build_gmin.sh.",
         f"The pin is SVNREV {panel.GMIN_PIN}.",
@@ -145,8 +206,8 @@ def readme(panel, summary: list[dict[str, str]], rows: list[dict[str, str]]) -> 
         f"harness_revision {', '.join(harnesses) if harnesses else 'none'}",
         f"harness_blob {', '.join(blobs) if blobs else 'none'}",
         "",
-        "| cell | code | status | hits/n | calls median | printed hits/n | printed calls |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
+        "| cell | code | status | hits/n | calls median | outside/charged | fisher p | mann-whitney p | printed hits/n | printed calls |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for row in summary:
         measured = f"{row['hits']}/{row['n']}" if row["hits"] else ""
@@ -160,6 +221,9 @@ def readme(panel, summary: list[dict[str, str]], rows: list[dict[str, str]]) -> 
                     row["status"],
                     measured,
                     row["calls_median"],
+                    row["outside_per_charged_median"],
+                    row["fisher_p"],
+                    row["mannwhitney_p"],
                     printed,
                     row["printed_calls_median"],
                 ]
@@ -170,10 +234,8 @@ def readme(panel, summary: list[dict[str, str]], rows: list[dict[str, str]]) -> 
         [
             "",
             "status run was executed. status unrunnable was not executed.",
-            "lj75-sym and lj98-early have no keyword file or start generator",
-            "in this tree. The per-cluster GMIN arms record their keywords,",
-            "and the pinned tarball named by build_gmin.sh was not reachable,",
-            "so those arms were not substituted.",
+            "lj75-sym is missing the OptBench LJ75 SYMMETRISE keyword file and coords.1 through coords.200.",
+            "lj98-early is missing the GMIN keyword file and the start generator for seeds 0-63.",
             "status not_tuned is a printed GMIN count under one shared input,",
             "which the manuscript separates from a per-cluster input.",
             "",
@@ -182,13 +244,20 @@ def readme(panel, summary: list[dict[str, str]], rows: list[dict[str, str]]) -> 
     return "\n".join(lines)
 
 
+def measurement_path() -> Path:
+    if ROWS_R2.is_file() and ROWS_R2.stat().st_size > 0:
+        return ROWS_R2
+    return ROWS
+
+
 def main() -> int:
     panel = load_panel()
     manifest = read_csv(MANIFEST)
-    rows = read_csv(ROWS)
+    source = measurement_path()
+    rows = read_csv(source)
     summary = summarise(panel, manifest, rows)
     write_csv(SUMMARY, SUMMARY_FIELDS, summary)
-    README.write_text(readme(panel, summary, rows))
+    README.write_text(readme(panel, summary, rows, source))
     return 0
 
 
