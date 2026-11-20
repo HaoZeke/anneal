@@ -463,6 +463,16 @@ def test_a_drifted_paired_wall_p_is_reported():
     assert [r[2] for r in audit.drifts()] == ["Wilcoxon p wall"]
 
 
+def test_the_develop_gmin_rows_keep_the_harness_that_ran_them():
+    table = audit_mod.load_script("gmin_table", "paper/jctc/scripts/gmin_table.py")
+    rows = table.develop_rows()
+    assert {r["harness_revision"] for r in rows} == {table.DEVELOP_HARNESS}
+    lines, paired = table.develop_summary()
+    assert lines and paired
+    assert {line["harness_revision"] for line in lines} == {table.DEVELOP_HARNESS}
+    assert {line["anneal_revision"] for line in lines} == {table.SUBMITTED}
+
+
 def test_an_unpaired_fisher_p_in_the_gmin_table_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)

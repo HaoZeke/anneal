@@ -48,9 +48,10 @@ def template_rows() -> list[dict[str, str]]:
     return list(csv.DictReader(path.open()))
 
 
-def groups(rows: list[dict[str, str]], revision: str, gmin: str) -> dict[tuple[str, str], list[dict[str, str]]]:
+def groups(rows: list[dict[str, str]], revision: str, gmin: str,
+           harness: str | None = None) -> dict[tuple[str, str], list[dict[str, str]]]:
     PANEL.GMIN_REV = gmin
-    out = PANEL.panel_groups(rows, revision)
+    out = PANEL.panel_groups(rows, revision, harness)
     for (system, code), group in out.items():
         PANEL.validate_group(group, system, code)
     return out
@@ -58,8 +59,8 @@ def groups(rows: list[dict[str, str]], revision: str, gmin: str) -> dict[tuple[s
 
 def blocks() -> list[tuple[str, str, dict[tuple[str, str], list[dict[str, str]]]]]:
     later = [(TABLE.REVISION, TABLE.rows()), (TABLE.SUBMITTED, TABLE.develop_rows())]
-    return [(revision, harness, groups(rows, harness, TABLE.GMIN_SNAPSHOT))
-            for (revision, rows), harness in zip(later, (TABLE.REVISION, TABLE.SUBMITTED))]
+    return [(revision, harness, groups(rows, revision, TABLE.GMIN_SNAPSHOT, harness))
+            for (revision, rows), harness in zip(later, (TABLE.REVISION, TABLE.DEVELOP_HARNESS))]
 
 
 def compared() -> list[tuple[str, list[dict[str, object]]]]:

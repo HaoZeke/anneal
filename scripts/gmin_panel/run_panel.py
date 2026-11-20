@@ -505,16 +505,19 @@ def row_key(row: dict[str, str]) -> tuple[str, str, str, str, str]:
     return (row["system"], row["code"], row["seed"], row["code_revision"], row["harness_revision"])
 
 
-def panel_groups(rows: list[dict[str, str]], revision: str) -> dict[tuple[str, str], list[dict[str, str]]]:
-    """The latest stored row per seed of each system and code at this revision."""
+def panel_groups(rows: list[dict[str, str]], revision: str,
+                 harness: str | None = None) -> dict[tuple[str, str], list[dict[str, str]]]:
+    """The latest stored row per seed of each system and code at this revision, run by the harness of
+    that revision unless another is named."""
     wanted = {"anneal": revision, "gmin": GMIN_REV}
+    harness = harness or revision
     groups: dict[tuple[str, str], dict[int, dict[str, str]]] = {}
     for row in rows:
         if revision == "latest":
             if row["code"] == "gmin" and row["code_revision"] != GMIN_REV:
                 continue
         else:
-            if row["harness_revision"] != revision or wanted.get(row["code"]) != row["code_revision"]:
+            if row["harness_revision"] != harness or wanted.get(row["code"]) != row["code_revision"]:
                 continue
         groups.setdefault((row["system"], row["code"]), {})[int(row["seed"])] = row
     return {key: [group[s] for s in sorted(group)] for key, group in groups.items()}
@@ -568,9 +571,9 @@ def ranked_wall(left: list[dict[str, str]], right: list[dict[str, str]]) -> tupl
     )
 
 
-def summarise(rows: list[dict[str, str]], revision: str) -> list[dict[str, str]]:
+def summarise(rows: list[dict[str, str]], revision: str, harness: str | None = None) -> list[dict[str, str]]:
     out = []
-    groups = panel_groups(rows, revision)
+    groups = panel_groups(rows, revision, harness)
     for system, _kind, _n, reference, _rho, _driver, _binary in SYSTEMS:
         anneal = groups.get((system, "anneal"), [])
         gmin = groups.get((system, "gmin"), [])
@@ -638,9 +641,10 @@ def summarise(rows: list[dict[str, str]], revision: str) -> list[dict[str, str]]
     return out
 
 
-def paired_summary(rows: list[dict[str, str]], revision: str) -> dict[str, dict[str, object]]:
+def paired_summary(rows: list[dict[str, str]], revision: str,
+                   harness: str | None = None) -> dict[str, dict[str, object]]:
     """Per system, the two arms paired by seed: outcome table, McNemar, and Wilcoxon on calls and wall."""
-    groups = panel_groups(rows, revision)
+    groups = panel_groups(rows, revision, harness)
     out: dict[str, dict[str, object]] = {}
     for system in PAPER_BUDGETS:
         anneal, gmin = groups.get((system, "anneal"), []), groups.get((system, "gmin"), [])
