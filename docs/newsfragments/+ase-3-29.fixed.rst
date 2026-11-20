@@ -1,0 +1,3 @@
+The ``ase`` extra now allows 3.29 and stops before 3.30.
+``scripts/ase_nonlj/run_one.py`` raises when the installed ASE is not
+``ASE_VERSION``, before the agreement check and before each ASE arm.
