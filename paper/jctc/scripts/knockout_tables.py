@@ -8,7 +8,9 @@ PROVENANCE file beside them, and the blob of the copy is that of the record. The
 pair by seed: the paired outcome table, the exact McNemar test and the 95% interval of
 method 10 of Newcombe, all from scripts/paired_stats.py. The TIP4P table pairs this
 code with GMIN by seed in the same way and adds the exact Wilcoxon test on calls and wall.
-Both arms of a block are revisions that are ancestors of HEAD.
+Both arms of the template block are revisions that are ancestors of HEAD. Both arms of the
+length-unit block ran the tree its rows name. That tree is the submitted revision's search
+source plus the knockout switches, and the Morse driver is that tree's.
 
     python3 paper/jctc/scripts/knockout_tables.py            # rewrite both blocks
     python3 paper/jctc/scripts/knockout_tables.py --check    # exit 1 if either is stale
@@ -54,12 +56,30 @@ class Knockout:
     hit: str = "hit"
     systems: tuple[str, ...] = ()
     omitted: tuple[str, ...] = ()
+    ancestors: tuple[str, ...] = ()
+    tree: str = ""
+    driver: str = ""
 
 
 KNOCKOUTS = (
     Knockout("templates", "Structure templates, \\texttt{628773d6} against \\texttt{1c1b1238}", "revision",
              "628773d6837ea2d959a27256ff4163b21162fd4d", "1c1b12384683485cf820d3a244151b48973dc0f7",
-             lambda r: r["pair"] == "release", "hit", ("m38r6", "m38r14", "sc126-38", "sc108-38")),
+             lambda r: r["pair"] == "release", "hit", ("m38r6", "m38r14", "sc126-38", "sc108-38"),
+             ancestors=("628773d6837ea2d959a27256ff4163b21162fd4d", "1c1b12384683485cf820d3a244151b48973dc0f7")),
+    Knockout("pairscale", "Length unit, the Lennard-Jones diameter against the Morse minimum, tree \\texttt{b12293b9}",
+             "arm", "stock", "H2H_PAIR_SCALE=1", lambda r: r["pair"] == "pairscale-length-unit", "hit",
+             ("m55r6", "m55r14", "m80r6", "m80r14"), ancestors=("dd6ff9273be30ab317bfd5508596f4beb19cb3a4",),
+             tree="b12293b9d637dd32417be3aa482302e0f30dd594", driver="examples/h2h_morse.rs"),
+)
+# The search source of the tree the rows name, compared with the submitted revision.
+SEARCH_SOURCE = ("src", "examples", "Cargo.toml", "Cargo.lock")
+SUBMITTED = "61fa67cf380e46876b569da45e7cc091647a775b"
+KNOCKOUT_SWITCH_FILES = (
+    "examples/h2h_gmin_proof.rs",
+    "examples/h2h_metal.rs",
+    "examples/h2h_morse.rs",
+    "src/methods/cluster_hopping.rs",
+    "src/methods/cluster_hopping/config.rs",
 )
 
 NAMES = {
@@ -123,15 +143,51 @@ def is_ancestor(revision: str) -> bool:
                           cwd=ROOT).returncode == 0
 
 
+def git(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], capture_output=True, text=True, cwd=ROOT)
+
+
+def check_source(knockout: Knockout, rows: list[dict]) -> None:
+    """The rows name the block's tree.
+
+    That tree is the submitted revision's search source plus the knockout
+    switches, and the driver blob is that tree's. Later commits may change
+    the search source of HEAD. The rows still name the tree they ran.
+    """
+    if {r["revision"] for r in rows} != {knockout.tree}:
+        raise SystemExit(f"knockout_tables: {knockout.key} rows do not all name {knockout.tree[:8]}")
+    changed = git("diff", "--name-only", SUBMITTED, knockout.tree, "--", *SEARCH_SOURCE).stdout.split()
+    if sorted(changed) != sorted(KNOCKOUT_SWITCH_FILES):
+        raise SystemExit(f"knockout_tables: {knockout.tree[:8]} is not the submitted revision's "
+                         f"search source plus the knockout switches")
+    blob = git("rev-parse", f"{knockout.tree}:{knockout.driver}").stdout.strip()
+    if {r["driver_blob"] for r in rows} != {blob}:
+        raise SystemExit(f"knockout_tables: {knockout.key} rows ran another {knockout.driver}")
+
+
+def check_order(knockout: Knockout, rows: list[dict]) -> None:
+    """Even seeds run the With arm first and odd seeds the Without arm first."""
+    first: dict[tuple[str, str], str] = {}
+    for row in rows:
+        first.setdefault((row["system"], row["seed"]), row[knockout.column])
+    for (system, seed), arm in first.items():
+        if arm != (knockout.with_arm if int(seed) % 2 == 0 else knockout.without_arm):
+            raise SystemExit(f"knockout_tables: {knockout.key} {system} seed {seed} out of alternating order")
+
+
 def pairs(knockout: Knockout) -> dict[str, list[tuple[dict, dict]]]:
     folder = DATA / "knockouts" / knockout.key
     check_blob(folder)
-    for revision in (knockout.with_arm, knockout.without_arm):
+    for revision in knockout.ancestors:
         if not is_ancestor(revision):
             raise SystemExit(f"knockout_tables: {revision[:8]} is not an ancestor of HEAD")
+    kept = [row for row in read(folder / "rows.csv") if knockout.keep(row)]
+    if knockout.tree:
+        check_source(knockout, kept)
+        check_order(knockout, kept)
     arms: dict[tuple[str, str], dict[str, dict]] = {}
-    for row in read(folder / "rows.csv"):
-        if not knockout.keep(row) or row[knockout.column] not in (knockout.with_arm, knockout.without_arm):
+    for row in kept:
+        if row[knockout.column] not in (knockout.with_arm, knockout.without_arm):
             continue
         seeds = arms.setdefault((row["system"], row[knockout.column]), {})
         if row["seed"] in seeds:
@@ -165,20 +221,28 @@ def knockout_summary(knockout: Knockout) -> dict[str, dict]:
 def knockout_table() -> str:
     lines = [
         "\\begin{table*}",
-        "\\caption{The structure templates run with and without them on the same seeds from the same starts:",
-        "the earlier template-assisted revision \\texttt{628773d6} (structure templates since removed in",
-        "\\texttt{1c1b1238}) against its child \\texttt{1c1b1238}, both ancestors of the submitted revision.",
-        "The With arm is not the method of this article; it is the search before the removal.",
+        "\\caption{Two parts of the search run with and without them on the same seeds.",
+        "The structure templates, from the same starts: the earlier template-assisted revision",
+        "\\texttt{628773d6} (structure templates since removed in \\texttt{1c1b1238}) against its child",
+        "\\texttt{1c1b1238}, both ancestors of the submitted revision.",
+        "Their With arm is not the method of this article; it is the search before the removal.",
         "Each arm is \\texttt{Config::recommended}\\((38)\\) of its revision through \\texttt{h2h\\_morse} or",
         "\\texttt{h2h\\_sc}; at \\(\\rho=6\\) the Morse driver of \\texttt{628773d6} also quenches one",
         "icosahedral template before the walk, and \\texttt{1c1b1238} removes that line.",
+        "The length unit: both arms run tree \\texttt{b12293b9}, the search source of the submitted revision",
+        "with the default-off knockout switches of the drivers, through \\texttt{h2h\\_morse}, in alternating",
+        "order by seed.",
+        "With is \\texttt{Config::recommended}\\((N)\\) in the Lennard-Jones diameter it was measured in, the",
+        "method of this article, and Without is \\texttt{Config::recommended\\_for\\_pair}\\((N)\\), every preset",
+        "length rescaled to the Morse pair minimum.",
         "With and Without are the hits of the two arms, Only with and Only without the seeds that",
         "one arm alone hits.",
         "\\(p_\\mathrm{M}\\) is the two-sided exact McNemar test on those seeds, and \\(\\Delta\\) the 95\\%",
-        "interval of Newcombe's method 10 for paired data, for the hit rate with the templates less that without them.",
+        "interval of Newcombe's method 10 for paired data, for the hit rate of With less that of Without.",
         "A budget counts one call per combined energy and gradient pass.",
-        "The rows are \\texttt{paper/jctc/data/knockouts/templates/rows.csv}, copied from the",
-        "record their \\texttt{PROVENANCE} names.}",
+        "The rows are \\texttt{paper/jctc/data/knockouts/templates/rows.csv} and",
+        "\\texttt{paper/jctc/data/knockouts/pairscale/rows.csv}, copied from the records their",
+        "\\texttt{PROVENANCE} files name.}",
         "\\label{tab:knockouts}",
         "\\centering",
         "\\scriptsize",

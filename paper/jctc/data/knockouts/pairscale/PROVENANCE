@@ -1,0 +1,7 @@
+branch record/knockout-pairscale
+tip 5c37c840ed2e9f9a2d881105363b33762b5cca31
+commit 5c37c840ed2e9f9a2d881105363b33762b5cca31
+tree 7b6c047d6e1033405c86bf40cd55272aeb49f99f
+ancestor dd6ff9273be30ab317bfd5508596f4beb19cb3a4
+source paper/jctc/data/knockouts/pairscale/rows.csv
+blob 6d9791fcd9fe92f0361685759dbb82d82704c378

@@ -159,6 +159,14 @@ the earlier template-assisted revision
 templates since removed in \texttt{1c1b1238}), and the child
 \texttt{\seqsplit{1c1b12384683485cf820d3a244151b48973dc0f7}}, both ancestors
 of the submitted revision, even seeds parent first and odd seeds child first.
+The length-unit block of the knockout table is the record
+\texttt{\seqsplit{5c37c840ed2e9f9a2d881105363b33762b5cca31}} of
+\path{record/knockout-pairscale}, on develop
+\texttt{\seqsplit{dd6ff9273be30ab317bfd5508596f4beb19cb3a4}}.
+Its rows name tree \texttt{\seqsplit{b12293b9d637dd32417be3aa482302e0f30dd594}}.
+That tree is the submitted revision's search source plus the knockout
+switches, and the Morse driver is the driver of that tree; even seeds run
+the Lennard-Jones diameter first and odd seeds the Morse minimum first.
 The trail step has one record, on LJ\(_{75}\), whose two arms ran at
 \texttt{666591a0}, a commit outside the history of the submitted revision, so
 the knockout table has no trail block.
@@ -183,12 +191,8 @@ Table~\ref{tab:si-template-era} pairs the rows of this code in the GMIN table
 of the main text with the GMIN panel of the earlier template-assisted
 revision \texttt{c2de652d} (structure templates since removed in
 \texttt{1c1b1238}), on seeds 2000--2011 at the same budgets.
-Both sessions start each seed from the geometry the driver writes for it,
-and GMIN takes the same calls to the same minimum on every seed of every
-cluster of the table in both.
-Au\(_{55}\) is left out: the GMIN build of the main text sets the run index
-before its first use, and its GMIN arm differs from the earlier session, so
-the shared start cannot be shown.
+Both sessions start each seed from the geometry the driver writes for it.
+Au\(_{55}\) is left out, since its GMIN build differs between the sessions.
 Against \texttt{c2de652d}, the later revisions hit M\(_{80}\) at \(\rho=6\)
 on 12 of 12 seeds against 2, with \(p=2.0\times 10^{-3}\) and an interval
 from 0.46 to 0.95, and M\(_{55}\) at \(\rho=14\) and LJ\(_{150}\) on 9 and 8
@@ -215,10 +219,8 @@ table of the main text, paired by seed.
 Each revision runs \texttt{Config::recommended}\((N)\) through the drivers of that
 table; at \texttt{c2de652d}, LJ\(_{103}\) runs a build with
 \texttt{bench/paper-0120/lj103-table.patch}, which adds its reference energy and budget.
-Both sessions start each seed from the geometry the driver writes for it, and the GMIN arm
-of each takes the same calls to the same minimum on every seed of every cluster here.
-Au\(_{55}\) is left out, since the GMIN build of the main text sets the run index
-before its first use and its GMIN arm differs from the earlier session.
+Both sessions start each seed from the geometry the driver writes for it.
+Au\(_{55}\) is left out, since its GMIN build differs between the sessions.
 Only counts the seeds that revision alone hits; Calls and IQR are as in the GMIN table
 of the main text.
 \(p_\mathrm{M}\), \(\Delta\) and \(p_\mathrm{calls}\) are the tests of that

@@ -58,6 +58,8 @@ HOST_COLUMNS = ("host", "machine_id", "machine_id_sha256")
 # Revisions of other codes. The GMIN build scripts refuse a tarball whose SVNREV differs.
 EXTERNAL_REVISIONS = {"aac1548a8aec13b53ad12a8d6904625081685d2e": "GMIN source/SVNREV",
                       "9cbec1a446352bc9ef064bd2b1a5767194655919": "GMIN source/SVNREV of the eeec8e2c rerun"}
+# Trees that rows cite in place of a commit, each with the record commit whose parent has that tree.
+RECORD_TREES = {"b12293b9d637dd32417be3aa482302e0f30dd594": "5c37c840ed2e9f9a2d881105363b33762b5cca31"}
 # Local revisions that rows cite, each with the pushed commit it was rebuilt as.
 ALIASES = "bench/revision-aliases.csv"
 # Remote branches the alias table cites, plus develop. A missing one means
@@ -1194,9 +1196,16 @@ KNOCKOUT_DATA = "paper/jctc/data/knockouts"
 # The commits whose code each arm of a knockout block ran, with and without the switch.
 KNOCKOUT_CODE = {
     "templates": ("628773d6837ea2d959a27256ff4163b21162fd4d", "1c1b12384683485cf820d3a244151b48973dc0f7"),
+    "pairscale": (SUBMITTED, SUBMITTED),
 }
 # How the rows of each block name the revision of an arm.
-KNOCKOUT_REVISION = {"templates": ("revision", "628773d6", "1c1b1238")}
+KNOCKOUT_REVISION = {"templates": ("revision", "628773d6", "1c1b1238"),
+                     "pairscale": ("revision", "b12293b9", "b12293b9")}
+PAIRSCALE_TREE = "b12293b9d637dd32417be3aa482302e0f30dd594"
+SEARCH_SOURCE = ("src", "examples", "Cargo.toml", "Cargo.lock")
+# The files the default-off knockout switches add to the search source of the submitted revision.
+KNOCKOUT_SWITCH_FILES = ("examples/h2h_gmin_proof.rs", "examples/h2h_metal.rs", "examples/h2h_morse.rs",
+                         "src/methods/cluster_hopping.rs", "src/methods/cluster_hopping/config.rs")
 WITHDRAWN_KNOCKOUTS = ("priors", "restart", "pair-scale")
 
 
@@ -1251,6 +1260,74 @@ def knockout_cells(audit: Audit, knock: object, knockout: object) -> dict[str, d
     return out
 
 
+def knockout_pairscale(audit: Audit, cells: dict[str, dict]) -> None:
+    """The length-unit block: its record, the tree its rows ran, the driver, the order, and its prose."""
+    folder = f"{KNOCKOUT_DATA}/pairscale"
+    fields = dict(line.split(" ", 1) for line in audit.text(f"{folder}/PROVENANCE").splitlines())
+    audit.cell(f"{folder}/PROVENANCE", "tree of the record commit", fields.get("tree"),
+               git("rev-parse", f"{fields['commit']}^{{tree}}").stdout.strip())
+    audit.cell(f"{folder}/PROVENANCE", "the rows ran the tree of the record commit's parent", PAIRSCALE_TREE,
+               git("rev-parse", f"{fields['commit']}^^{{tree}}").stdout.strip())
+    ancestor_of(audit, f"{folder}/PROVENANCE", fields.get("ancestor", ""))
+    ancestor_of(audit, f"{folder}/PROVENANCE", fields.get("ancestor", ""), fields["commit"])
+    changed = git("diff", "--name-only", SUBMITTED, PAIRSCALE_TREE, "--", *SEARCH_SOURCE).stdout.split()
+    audit.cell(folder, "the rows' tree is the submitted revision's search source with the knockout switches",
+               " ".join(KNOCKOUT_SWITCH_FILES), " ".join(sorted(changed)))
+    rows = audit.rows(f"{folder}/rows.csv")
+    driver = git("rev-parse", f"{PAIRSCALE_TREE}:examples/h2h_morse.rs").stdout.strip()
+    audit.cell(f"{folder}/rows.csv", "every row ran the Morse driver of the tree the rows name", driver,
+               " ".join(sorted({r["driver_blob"] for r in rows})))
+    audit.cell(f"{folder}/rows.csv", "every row names the tree", PAIRSCALE_TREE,
+               " ".join(sorted({r["revision"] for r in rows})))
+    first: dict[tuple[str, str], str] = {}
+    for r in rows:
+        first.setdefault((r["system"], r["seed"]), r["arm"])
+    order = [f"{s}/{seed}" for (s, seed), arm in first.items()
+             if arm != ("stock" if int(seed) % 2 == 0 else "H2H_PAIR_SCALE=1")]
+    audit.cell(f"{folder}/rows.csv", "even seeds stock first, odd seeds rescaled first", "none", " ".join(order) or "none")
+
+    def hits(c: dict) -> tuple[int, int]:
+        both, only_with, only_without, _ = c["table"]
+        return both + only_with, both + only_without
+
+    def show_signed(x: float) -> str:
+        return f"\\(-\\){abs(x):.2f}" if x < 0 else f"{x:.2f}"
+
+    pooled = [0, 0, 0, 0]
+    for c in cells.values():
+        pooled = [a + b for a, b in zip(pooled, c["table"])]
+    pooled_p = mcnemar(pooled[1], pooled[2])
+    low, high = newcombe_paired_interval(*pooled)
+    n = sum(c["n"] for c in cells.values())
+    below = [s for s, c in cells.items() if c["p"] < 0.05]
+    audit.cell(TEX, "length unit: clusters whose arms differ at p<0.05", "none", " ".join(below) or "none")
+    audit.record(pooled_p >= 0.05, TEX, "length unit: the pooled arms do not differ at p<0.05", ">= 0.05", pp(pooled_p))
+    m55, m80 = cells["m55r14"], cells["m80r14"]
+    audit.cell(TEX, "length unit: both arms hit M55 and M80 at rho 6 on every seed", "12 12 12 12",
+               " ".join(str(x) for s in ("m55r6", "m80r6") for x in hits(cells[s])))
+    audit.said(TEX, f"At \\(\\rho=14\\) the preset in the Lennard-Jones diameter hits M\\(_{{55}}\\) on "
+                    f"{hits(m55)[0]} of 12 seeds against {hits(m55)[1]} (\\(p={pp(m55['p'])}\\)) and M\\(_{{80}}\\) on "
+                    f"{hits(m80)[0]} against {hits(m80)[1]} (\\(p={pp(m80['p'])}\\)), and pooled over the four clusters "
+                    f"it hits {pooled[0] + pooled[1]} of {n} against {pooled[0] + pooled[2]} (pooled McNemar "
+                    f"\\(p={pp(pooled_p)}\\), interval {show_signed(low)} to {show_signed(high)}).")
+    audit.said(TEX, f"four Morse clusters show no difference in hits at \\(p<0.05\\), each or pooled "
+                    f"({pooled[0] + pooled[1]} against {pooled[0] + pooled[2]} of {n} seeds, pooled McNemar "
+                    f"\\(p={pp(pooled_p)}\\)).")
+    audit.said(COVER, "rescaling the preset lengths from the Lennard-Jones diameter to the Morse pair minimum changes "
+                      "the hits on none of the Morse clusters tested")
+    audit.said(TEX, "Rescaling the preset lengths to the Morse pair minimum changes the hits on no cluster at "
+                    "\\(p<0.05\\).")
+    audit.said(TEX, "The second runs tree \\texttt{b12293b9}, whose search source is that of the submitted revision "
+                    "with the default-off knockout switches of the drivers, on four Morse clusters:")
+    audit.said(SI, "\\texttt{\\seqsplit{5c37c840ed2e9f9a2d881105363b33762b5cca31}} of "
+                   "\\path{record/knockout-pairscale}, on develop "
+                   "\\texttt{\\seqsplit{dd6ff9273be30ab317bfd5508596f4beb19cb3a4}}.")
+    audit.said(SI, "even seeds run the Lennard-Jones diameter first and odd seeds the Morse minimum first.")
+    audit.record("the length unit, the" not in collapse(audit.text(TEX)), TEX,
+                 "the length unit is not listed among the parts with no run", "absent",
+                 "absent" if "the length unit, the" not in collapse(audit.text(TEX)) else "present")
+
+
 def manuscript_knockouts(audit: Audit) -> None:
     """tab:knockouts and tab:tip4p-gmin recomputed from the imported rows, the LJ75 rule, and their prose."""
     knock = load_script("knockout_tables_audit", "paper/jctc/scripts/knockout_tables.py")
@@ -1292,6 +1369,7 @@ def manuscript_knockouts(audit: Audit) -> None:
         for system in knockout.omitted:
             audit.record(system == "lj75" and not ancestors, TEX, f"{knockout.key}: {system} is left out only for the "
                          "LJ75 rule", "lj75 outside history", f"{system} {'ancestors' if ancestors else 'outside'}")
+    knockout_pairscale(audit, cells_of["pairscale"])
     tem = cells_of["templates"]
     for rev in KNOCKOUT_CODE["templates"]:
         ancestor_of(audit, f"{KNOCKOUT_DATA}/templates", rev, SUBMITTED)
@@ -1324,7 +1402,7 @@ def manuscript_knockouts(audit: Audit) -> None:
                     f"of 12 (\\(p={pp(m38['p'])}\\)), at a revision and its child in the history of the code.")
     audit.said(TEX, f"lowers the hits on Morse M\\(_{{38}}\\) at \\(\\rho=14\\) from {fall(m38)[0]} of 12 to "
                     f"{fall(m38)[1]}, the one cluster of that run whose arms differ at \\(p<0.05\\).")
-    audit.said(TEX, "revision that switches one part of the search on and off with all else held, on the same seeds "
+    audit.said(TEX, "The first, and the one such run in the history of the submitted revision, is on the same seeds "
                     "from the same starts: revision \\texttt{628773d6} against its child \\texttt{1c1b1238}, which "
                     "removes the structure templates.")
     audit.said(SI, "\\texttt{\\seqsplit{628773d6837ea2d959a27256ff4163b21162fd4d}} (structure templates since "
@@ -1715,8 +1793,8 @@ TEMPLATE_ERA_PROSE = (
     "Table~\\ref{tab:si-template-era} pairs the rows of this code in the GMIN table of the main text with the GMIN "
     "panel of the earlier template-assisted revision \\texttt{c2de652d} (structure templates since removed in "
     "\\texttt{1c1b1238}), on seeds 2000--2011 at the same budgets.",
-    "Au\\(_{55}\\) is left out: the GMIN build of the main text sets the run index before its first use, and its "
-    "GMIN arm differs from the earlier session, so the shared start cannot be shown.",
+    "Both sessions start each seed from the geometry the driver writes for it.",
+    "Au\\(_{55}\\) is left out, since its GMIN build differs between the sessions.",
     "Against \\texttt{c2de652d}, the later revisions hit M\\(_{80}\\) at \\(\\rho=6\\) on 12 of 12 seeds against 2, "
     "with \\(p=2.0\\times 10^{-3}\\) and an interval from 0.46 to 0.95, and M\\(_{55}\\) at \\(\\rho=14\\) and "
     "LJ\\(_{150}\\) on 9 and 8 against 7 and 5.",
@@ -1765,6 +1843,15 @@ def template_era(audit: Audit) -> None:
                                 ("lj55", "12242", "5722"), ("m55r6", "563", "22596")):
         audit.cell(path, f"{system} median calls at c2de652d", before, era.calls(lines[system]["before"], 0.5))
         audit.cell(path, f"{system} median calls later", now, era.calls(lines[system]["after"], 0.5))
+    section = audit.text(SI).split(TEMPLATE_ERA[0], 1)[1].split(TEMPLATE_ERA[1], 1)[0]
+    for said in ("GMIN takes the same calls", "GMIN arm", "one host", "one machine", "single machine"):
+        audit.record(said not in collapse(section), SI, f"the template-era section prints no GMIN claim: {said}",
+                     "absent", "absent" if said not in collapse(section) else "present")
+    source = audit.text("paper/jctc/scripts/template_era_table.py")
+    for said in ("takes the same calls", "GMIN differs"):
+        audit.record(said not in source, "paper/jctc/scripts/template_era_table.py",
+                     f"the template-era script does not require a GMIN match: {said}", "absent",
+                     "absent" if said not in source else "present")
     for fragment in TEMPLATE_ERA_PROSE:
         audit.said(SI, fragment)
     for path_ in (TEX, COVER):
@@ -3337,11 +3424,18 @@ def provenance(audit: Audit) -> dict[str, str]:
             if any(r[column].strip() in ("", "unknown") for r in rows):
                 what = "unrecorded" if column in revs else "empty or unknown"
                 problems.append(f"{column} {what} on some rows")
+        trees = set()
         for column in revs:
             for r in rows:
                 value = r[column].strip()
-                if re.fullmatch(r"[0-9a-f]{7,40}", value) and value not in EXTERNAL_REVISIONS:
+                if value in RECORD_TREES:
+                    trees.add(value)
+                elif re.fullmatch(r"[0-9a-f]{7,40}", value) and value not in EXTERNAL_REVISIONS:
                     revisions[value].add(path)
+        for value in sorted(trees):
+            held = git("rev-parse", f"{RECORD_TREES[value]}^^{{tree}}").stdout.strip()
+            audit.record(held == value, path, f"tree {value[:8]} is the parent tree of record {RECORD_TREES[value][:8]}",
+                         value[:8], held[:8] or "absent")
         if problems:
             gaps[path] = "; ".join(problems)
     names = sorted(revisions)
@@ -3701,11 +3795,11 @@ def science_claims(audit: Audit) -> None:
             found = re.search(rf"\b{word}", audit.text(path), re.IGNORECASE)
             audit.record(found is None, path, f"the text does not say {word}", "absent",
                          "absent" if found is None else "present")
-    audit.said(TEX, "One part of the search, the structure templates (Section~\\ref{sec:priors}), has a run with and "
-                    "without it at two revisions in the history of the submitted revision, and "
-                    "Section~\\ref{sec:knockouts} reports it.")
+    audit.said(TEX, "Two parts of the search have a run with and without them, and Section~\\ref{sec:knockouts} "
+                    "reports both: the structure templates (Section~\\ref{sec:priors}), at two revisions in the history "
+                    "of the submitted revision, and the length unit, on the search source of the submitted revision.")
     audit.said(TEX, "The packing moves, the symmetry proposals, the stall rules, the basin bias, the tabu list, the "
-                    "screens, the choice among the moves, the length unit, the remaining structure prior, and the "
+                    "screens, the choice among the moves, the remaining structure prior, and the "
                     "atom-count gates have no such run, and the trail step has one only on LJ\\(_{75}\\) at a revision "
                     "outside the history of the submitted revision, which the article does not print.")
     audit.said(TEX, "They are described here as the design of the search, and the article makes no claim about what "
