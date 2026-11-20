@@ -366,6 +366,27 @@ def test_c2de652d_in_the_si_outside_its_section_fails():
     assert [(r[1], r[2]) for r in audit.drifts()] == [(audit_mod.SI, "no row is labelled c2de652d")]
 
 
+def test_an_outside_provenance_with_another_tree_is_reported():
+    audit = audit_mod.Audit()
+    audit_mod.outside_session(audit)
+    assert not audit.drifts()
+    path = f"{audit_mod.OUTSIDE_DATA}/PROVENANCE"
+    audit = audit_mod.Audit()
+    audit.text_cache[path] = audit.text(path).replace("tree c6096c4a", "tree 06096c4a")
+    audit_mod.outside_session(audit)
+    assert [r[2] for r in audit.drifts()] == ["tree of the record commit"]
+
+
+def test_a_drifted_outside_cell_is_reported():
+    audit = audit_mod.Audit()
+    si = audit.text(audit_mod.SI)
+    old = "& 38.987 & 37.806 &"
+    assert si.count(old) == 1
+    audit.text_cache[audit_mod.SI] = si.replace(old, "& 38.987 & 30.806 &")
+    audit_mod.outside_session(audit)
+    assert [r[2] for r in audit.drifts()] == ["tab:si-outside is the summariser's block"]
+
+
 def test_every_todo_marker_fails_both_audits():
     clean = audit_mod.Audit()
     for path in (audit_mod.TEX, audit_mod.SI, audit_mod.COVER):

@@ -268,6 +268,45 @@ M\(_{80}\), \(\rho=14\) & \(4\times 10^{6}\) & \texttt{c2de652d} & 9/12 & 4 & 5 
 \end{table}
 % template-era table: end
 
+\section{Outside time in a second session}
+\label{sec:si-outside}
+Table~\ref{tab:si-outside} times the work of this code outside the potential
+at the submitted revision again, in a session separate from the GMIN table of
+the main text, with two builds of that source.
+Both builds take the same calls to the same minimum on every seed, and their
+median outside seconds differ by at most 3.0\% on each cluster, with every
+\(p\) at or above 0.23.
+The rows are copied from commit \texttt{9178884e} of
+\texttt{record/outside-perf3-r2}, as \path{paper/jctc/data/outside_perf/PROVENANCE}
+names, and \path{paper/jctc/scripts/outside_table.py} writes the table.
+
+% outside table: start
+\begin{table}
+\caption{Outside time of the submitted revision \texttt{61fa67cf} in one session of
+\texttt{record/outside-perf3-r2} (commit \texttt{9178884e}): the arms \texttt{develop} and
+\texttt{develop\_prime} are two builds of that source, with the same binary digest, run on
+seeds 2000--2011 on core 0 of one host, alternating in blocks of four seeds.
+Both arms take the same calls to the same minimum on every seed.
+Hits are those of either arm; the next two columns are the median seconds outside the
+potential, Change is the second median over the first less one, and \(p\) is the
+two-sided exact Wilcoxon signed-rank test on the per-seed outside seconds.
+The rows are \texttt{paper/jctc/data/outside\_perf/rows.csv}.}
+\label{tab:si-outside}
+\centering
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+Cluster & Budget & Hits & \texttt{develop} (s) & \texttt{develop\_prime} (s) & Change (\%) & \(p\) \\
+\midrule
+LJ\(_{104}\) & \(4\times 10^{6}\) & 5/12 & 38.987 & 37.806 & \(-\)3.0 & 0.85 \\
+LJ\(_{150}\) & \(4\times 10^{6}\) & 8/12 & 21.603 & 21.588 & \(-\)0.1 & 0.42 \\
+M\(_{80}\), \(\rho=6\) & \(4\times 10^{6}\) & 12/12 & 0.620 & 0.607 & \(-\)2.1 & 0.79 \\
+M\(_{80}\), \(\rho=14\) & \(4\times 10^{6}\) & 6/12 & 34.759 & 34.537 & \(-\)0.6 & 1 \\
+Au\(_{55}\) & \(1\times 10^{6}\) & 4/12 & 9.047 & 9.066 & +0.2 & 0.23 \\
+\bottomrule
+\end{tabular}
+\end{table}
+% outside table: end
+
 \section{Protocol of the ASE comparison}
 \label{sec:si-ase}
 The ASE arms are the basin hopping and the minima hopping of the Atomic
