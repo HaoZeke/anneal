@@ -174,3 +174,43 @@ def test_basin_bias_rejects_a_state_of_the_wrong_length(n_points):
         with pytest.raises(anneal.InvalidArgumentError, match="length"):
             bias.deposit(bad, 1.0)
     assert bias.n_basins == 1
+
+
+ONE_RULE = [
+    ("empty", np.zeros(0), np.zeros(0), "at least one dimension"),
+    ("mismatched", LOW, np.ones(3), "same length"),
+    ("positive infinity", np.array([0.0]), np.array([np.inf]), "finite"),
+    ("negative infinity", np.array([-np.inf]), np.array([0.0]), "finite"),
+    ("inverted", np.array([1.0]), np.array([-1.0]), "out of order"),
+    ("too wide", np.array([-1e308]), np.array([1e308]), "finite width"),
+]
+
+
+@pytest.mark.parametrize("name", DRIVERS)
+@pytest.mark.parametrize("case, low, high, message", ONE_RULE, ids=[c[0] for c in ONE_RULE])
+def test_every_driver_applies_the_one_bounds_rule(name, case, low, high, message):
+    with pytest.raises(anneal.BoundsError, match=message):
+        call(name, low, high)
+
+
+@pytest.mark.parametrize("case, low, high, message", ONE_RULE, ids=[c[0] for c in ONE_RULE])
+def test_the_bounds_class_applies_the_one_bounds_rule(case, low, high, message):
+    with pytest.raises(anneal.BoundsError, match=message):
+        anneal.Bounds(low, high)
+
+
+@pytest.mark.parametrize("batched", [False, True])
+@pytest.mark.parametrize("case, low, high, message", ONE_RULE, ids=[c[0] for c in ONE_RULE])
+def test_the_device_drivers_raise_the_host_bounds_error(case, low, high, message, batched):
+    def objective(x):
+        raise AssertionError("invalid bounds must be rejected before objective work")
+
+    kwargs = {"n_epochs": 1, "steps_per_epoch": 1}
+    if batched:
+        kwargs["n_chains"] = 2
+    entry = anneal.run_ensemble if batched else anneal.run_device
+    with pytest.raises(anneal.BoundsError, match=message) as device:
+        entry(objective, low, high, anneal.Boltzmann(), **kwargs)
+    with pytest.raises(anneal.BoundsError) as host:
+        anneal.Bounds(low, high)
+    assert str(device.value) == str(host.value)

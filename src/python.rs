@@ -57,22 +57,23 @@ where
 
 /// Validate a box for methods that sample every coordinate uniformly.
 fn validate_box_bounds(low: &[f64], high: &[f64]) -> PyResult<()> {
-    validate_box_domain(low, high, false)
+    check_box(low, high, false)
 }
 
-/// Fixed coordinates are valid only for drivers that preserve those axes.
-fn validate_box_domain(low: &[f64], high: &[f64], allow_fixed: bool) -> PyResult<()> {
+/// The one rule for a box from Python, raising `BoundsError`: equal
+/// lengths, at least one axis, every side finite with a finite width, and
+/// each low at most its high, or strictly less unless `allow_fixed`.
+pub(crate) fn check_box(low: &[f64], high: &[f64], allow_fixed: bool) -> PyResult<()> {
     if low.len() != high.len() {
-        return Err(bounds_error("low and high must have the same length"));
+        return Err(bounds_error(format!(
+            "low and high must have the same length (got {} and {})",
+            low.len(),
+            high.len()
+        )));
     }
     if low.is_empty() {
         return Err(bounds_error("bounds must have at least one dimension"));
     }
-    check_box_axes(low, high, allow_fixed)
-}
-
-/// Every axis finite and ordered, with a width that reflection can fold.
-fn check_box_axes(low: &[f64], high: &[f64], allow_fixed: bool) -> PyResult<()> {
     let mut total_width = 0.0;
     for (i, (&lo, &hi)) in low.iter().zip(high.iter()).enumerate() {
         // Reflection folds with period 2 (hi - lo), and the drivers average
@@ -95,30 +96,49 @@ fn check_box_axes(low: &[f64], high: &[f64], allow_fixed: bool) -> PyResult<()> 
                 "strictly less than"
             };
             return Err(bounds_error(format!(
-                "low[{i}] must be {relation} high[{i}] (got {lo}, {hi})"
+                "bounds out of order: low[{i}] must be {relation} high[{i}] (got {lo}, {hi})"
             )));
         }
     }
     Ok(())
 }
 
-/// Build a box for a driver, rejecting the inputs that make `Bounds::new`
-/// panic, as `PanicException`, and the infinite or overflowing widths that
-/// make a reflected or uniform draw NaN.
-fn checked_bounds(low: Vec<f64>, high: Vec<f64>, slack: f64) -> PyResult<Bounds<f64>> {
-    if low.len() != high.len() {
+/// Build a box through [`check_box`], so `Bounds::new` never sees the
+/// inputs it asserts on and no draw or reflection becomes NaN.
+fn checked_box(
+    low: Vec<f64>,
+    high: Vec<f64>,
+    slack: f64,
+    allow_fixed: bool,
+) -> PyResult<Bounds<f64>> {
+    check_box(&low, &high, allow_fixed)?;
+    if !slack.is_finite() || slack < 0.0 {
         return Err(bounds_error(format!(
-            "low and high must have the same length (got {} and {})",
-            low.len(),
-            high.len()
+            "slack must be finite and non-negative (got {slack})"
         )));
     }
-    check_box_axes(&low, &high, true)?;
     Ok(Bounds::new(
         Array1::from_vec(low),
         Array1::from_vec(high),
         slack,
     ))
+}
+
+/// A box that may hold fixed axes, for the drivers that keep them.
+fn checked_bounds(low: Vec<f64>, high: Vec<f64>, slack: f64) -> PyResult<Bounds<f64>> {
+    checked_box(low, high, slack, true)
+}
+
+/// Refuses a start whose length is not the box dimension.
+fn check_start_length(name: &str, values: &[f64], dim: usize) -> PyResult<()> {
+    if values.len() == dim {
+        Ok(())
+    } else {
+        Err(invalid_argument(format!(
+            "{name} length {} does not match dimension {dim}",
+            values.len()
+        )))
+    }
 }
 
 /// Refuses a point with a NaN or infinite coordinate.
@@ -162,10 +182,13 @@ fn parse_box_domain(
     x0: Option<PyReadonlyArray1<'_, f64>>,
     allow_fixed: bool,
 ) -> PyResult<(Bounds<f64>, usize, Option<Array1<f64>>)> {
-    let low_vec = low.as_slice()?.to_vec();
-    let high_vec = high.as_slice()?.to_vec();
-    validate_box_domain(&low_vec, &high_vec, allow_fixed)?;
-    let dim = low_vec.len();
+    let bounds = checked_box(
+        low.as_slice()?.to_vec(),
+        high.as_slice()?.to_vec(),
+        1e-9,
+        allow_fixed,
+    )?;
+    let dim = bounds.dims;
     let x0 = if let Some(x0) = x0 {
         let sl = x0.as_slice()?;
         if sl.len() != dim {
@@ -180,11 +203,7 @@ fn parse_box_domain(
     } else {
         None
     };
-    Ok((
-        Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9),
-        dim,
-        x0,
-    ))
+    Ok((bounds, dim, x0))
 }
 
 struct ParsedBoxSearch {
@@ -964,9 +983,8 @@ fn polish(
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     let x0_vec = x0.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() || low_vec.len() != x0_vec.len() {
-        return Err(bounds_error("low, high, and x0 must have the same length"));
-    }
+    check_box(&low_vec, &high_vec, true)?;
+    check_start_length("x0", &x0_vec, low_vec.len())?;
     check_finite("x0", &x0_vec)?;
     if max_fevals < 1 {
         return Err(invalid_argument("max_fevals must be positive"));
@@ -1022,9 +1040,7 @@ fn qmc_polish(
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() {
-        return Err(bounds_error("low and high must have the same length"));
-    }
+    check_box(&low_vec, &high_vec, true)?;
     if n_starts < 1 {
         return Err(invalid_argument("n_starts must be positive"));
     }
@@ -1153,12 +1169,7 @@ fn qmc_best1bin_scout(
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() {
-        return Err(bounds_error("low and high must have the same length"));
-    }
-    if low_vec.is_empty() {
-        return Err(bounds_error("bounds must have at least one dimension"));
-    }
+    check_box(&low_vec, &high_vec, true)?;
     if max_evals < 1 {
         return Err(invalid_argument("max_evals must be positive"));
     }
@@ -1298,9 +1309,6 @@ fn qmc_gsa_global_search(
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() {
-        return Err(bounds_error("low and high must have the same length"));
-    }
     validate_box_bounds(&low_vec, &high_vec)?;
     validate_qmc_gsa_global_search_args(max_evals, n_chains, t_init, q_v, q_a)?;
     let start = read_x0(x0, &low_vec, &high_vec)?;
@@ -1376,14 +1384,8 @@ fn qmc_trust_region_poll(
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     let center_vec = center.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() || low_vec.len() != center_vec.len() {
-        return Err(bounds_error(
-            "low, high, and center must have the same length",
-        ));
-    }
-    if low_vec.is_empty() {
-        return Err(bounds_error("bounds must have at least one dimension"));
-    }
+    check_box(&low_vec, &high_vec, true)?;
+    check_start_length("center", &center_vec, low_vec.len())?;
     check_finite("center", &center_vec)?;
     if max_evals < 1 {
         return Err(invalid_argument("max_evals must be positive"));
@@ -1481,9 +1483,7 @@ fn shifted_qmc_polish(
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() {
-        return Err(bounds_error("low and high must have the same length"));
-    }
+    check_box(&low_vec, &high_vec, true)?;
     if n_starts < 1 {
         return Err(invalid_argument("n_starts must be positive"));
     }
@@ -1558,9 +1558,7 @@ fn additive_independence(
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() {
-        return Err(bounds_error("low and high must have the same length"));
-    }
+    check_box(&low_vec, &high_vec, true)?;
     if max_fevals < 1 {
         return Err(invalid_argument("max_fevals must be positive"));
     }
@@ -1602,9 +1600,7 @@ fn estimate_gle_omega0(
 ) -> PyResult<f64> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() {
-        return Err(bounds_error("low and high must have the same length"));
-    }
+    check_box(&low_vec, &high_vec, true)?;
     let dim = low_vec.len();
     let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
@@ -1685,9 +1681,7 @@ fn gle_langevin(
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() {
-        return Err(bounds_error("low and high must have the same length"));
-    }
+    check_box(&low_vec, &high_vec, true)?;
     validate_gle_args(max_fevals, omega0)?;
     let dim = low_vec.len();
     let x0 = gle_langevin_x0(x0, dim)?;
@@ -1727,9 +1721,7 @@ fn gle_langevin_preconditioned(
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() {
-        return Err(bounds_error("low and high must have the same length"));
-    }
+    check_box(&low_vec, &high_vec, true)?;
     validate_gle_args(max_fevals, omega0)?;
     let dim = low_vec.len();
     let x0 = gle_langevin_x0(x0, dim)?;
@@ -2742,21 +2734,6 @@ fn low_discrepancy_points(
 ) -> PyResult<Vec<Vec<f64>>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() {
-        return Err(bounds_error("low and high must have the same length"));
-    }
-    if low_vec.is_empty() {
-        return Err(bounds_error("bounds must have at least one dimension"));
-    }
-    if low_vec
-        .iter()
-        .zip(high_vec.iter())
-        .any(|(&lo, &hi)| !(lo <= hi))
-    {
-        return Err(bounds_error(
-            "each upper bound must be greater than or equal to the lower bound",
-        ));
-    }
     let bounds = checked_bounds(low_vec, high_vec, 0.0)?;
     let points = eindir_core::low_discrepancy_points(&bounds, n, skip);
     Ok(points.outer_iter().map(|row| row.to_vec()).collect())
@@ -2799,25 +2776,7 @@ fn run_qmc(
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     validate_max_evals(max_evals)?;
-    if low_vec.len() != high_vec.len() {
-        return Err(bounds_error("low and high must have the same length"));
-    }
-    if low_vec.is_empty() {
-        return Err(bounds_error("bounds must have at least one dimension"));
-    }
-    if low_vec.iter().zip(high_vec.iter()).any(|(&lo, &hi)| {
-        !lo.is_finite() || !hi.is_finite() || !(2.0 * (hi - lo)).is_finite() || hi < lo
-    }) || !low_vec
-        .iter()
-        .zip(high_vec.iter())
-        .map(|(&lo, &hi)| hi - lo)
-        .sum::<f64>()
-        .is_finite()
-    {
-        return Err(bounds_error(
-            "each bound must be finite and each upper bound must be greater than or equal to the lower bound",
-        ));
-    }
+    check_box(&low_vec, &high_vec, true)?;
     preset.validate()?;
     let start = read_x0(x0, &low_vec, &high_vec)?;
     let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;

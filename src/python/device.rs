@@ -296,28 +296,45 @@ fn run_native<'py>(
     let high = arrays.array(high)?;
     let low_shape: Vec<usize> = low.getattr("shape")?.extract()?;
     let high_shape: Vec<usize> = high.getattr("shape")?.extract()?;
-    if low_shape != high_shape || low_shape.len() != 1 {
-        return Err(bounds_error(
-            "low and high must be one-dimensional arrays of equal shape",
-        ));
+    if low_shape.len() != 1 || high_shape.len() != 1 {
+        return Err(bounds_error("low and high must be one-dimensional arrays"));
     }
-    if low_shape[0] == 0 {
-        return Err(bounds_error("bounds must have at least one dimension"));
-    }
-    let finite_bounds = arrays.binary(
-        "logical_and",
-        &arrays.unary("isfinite", &low)?,
-        &arrays.unary("isfinite", &high)?,
-    )?;
-    let valid_bounds = arrays.binary(
-        "logical_and",
-        &finite_bounds,
-        &arrays.binary("less_equal", &low, &high)?,
-    )?;
+    let valid =
+        |valid: Bound<'py, PyAny>| -> PyResult<bool> { arrays.unary("all", &valid)?.is_truthy() };
+    let width = || arrays.binary("subtract", &high, &low);
     // Domain validation reads one reduction scalar before drawing or evaluating
     // points. Bound arrays and all per-transition decisions stay on the device.
-    if !arrays.unary("all", &valid_bounds)?.is_truthy()? {
-        return Err(invalid_argument("bounds must be finite with low <= high"));
+    // A refusal reads the sides back so the message is the host one.
+    let accepted = low_shape == high_shape
+        && low_shape[0] > 0
+        && valid(arrays.binary(
+            "logical_and",
+            &arrays.binary(
+                "logical_and",
+                &arrays.unary("isfinite", &low)?,
+                &arrays.unary("isfinite", &high)?,
+            )?,
+            &arrays.binary(
+                "logical_and",
+                &arrays.unary("isfinite", &arrays.binary("add", &width()?, &width()?)?)?,
+                &arrays.binary("less_equal", &low, &high)?,
+            )?,
+        )?)?
+        && valid(arrays.unary("isfinite", &arrays.unary("sum", &width()?)?)?)?;
+    if !accepted {
+        let host = |side: &Bound<'py, PyAny>, len: usize| -> PyResult<Vec<f64>> {
+            (0..len)
+                .map(|i| side.get_item(i)?.call_method0("__float__")?.extract())
+                .collect()
+        };
+        super::check_box(
+            &host(&low, low_shape[0])?,
+            &host(&high, high_shape[0])?,
+            true,
+        )?;
+        return Err(bounds_error(
+            "the box is too wide for the dtype of low and high",
+        ));
     }
     let batched = n_chains.is_some();
     let shape = if batched {
