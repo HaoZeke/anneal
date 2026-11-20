@@ -31,22 +31,61 @@ def arms_in_report(text: str) -> set[str]:
     return names
 
 
-def resolved_commit_tree(repo: Path, arm: str, sha: str) -> str:
-    commit = subprocess.run(
-        ["git", "rev-parse", "--verify", f"{sha}^{{commit}}"],
+def has_git(repo: Path) -> bool:
+    if not (repo / ".git").exists():
+        return False
+    probe = subprocess.run(
+        ["git", "rev-parse", "--git-dir"],
         cwd=repo,
         text=True,
         capture_output=True,
     )
-    if commit.returncode != 0:
+    return probe.returncode == 0
+
+
+def recorded_commit_trees(record: list[dict]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for arm in record:
+        sha = arm.get("commit_sha")
+        commit_tree = arm.get("commit_tree")
+        if sha and commit_tree and sha not in out:
+            out[sha] = commit_tree
+    return out
+
+
+def recorded_tree_thresholds(record: list[dict]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for arm in record:
+        tree = arm.get("commit_tree") or arm.get("tree")
+        threshold = arm.get("tree_threshold")
+        if tree and threshold is not None and tree not in out:
+            out[tree] = int(threshold)
+    return out
+
+
+def resolved_commit_tree(
+    repo: Path, arm: str, sha: str, fallback_trees: dict[str, str]
+) -> str:
+    if has_git(repo):
+        commit = subprocess.run(
+            ["git", "rev-parse", "--verify", f"{sha}^{{commit}}"],
+            cwd=repo,
+            text=True,
+            capture_output=True,
+        )
+        if commit.returncode == 0:
+            return subprocess.run(
+                ["git", "rev-parse", f"{sha}^{{tree}}"],
+                cwd=repo,
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout.strip()
         raise SystemExit(f"{arm}: commit does not resolve: {sha}")
-    return subprocess.run(
-        ["git", "rev-parse", f"{sha}^{{tree}}"],
-        cwd=repo,
-        check=True,
-        text=True,
-        capture_output=True,
-    ).stdout.strip()
+    actual = fallback_trees.get(sha)
+    if not actual:
+        raise SystemExit(f"{arm}: commit does not resolve: {sha}")
+    return actual
 
 
 def tree_file(repo: Path, tree: str, path: str) -> str:
@@ -59,19 +98,26 @@ def tree_file(repo: Path, tree: str, path: str) -> str:
     return result.stdout if result.returncode == 0 else ""
 
 
-def tree_threshold(repo: Path, arm: str, tree: str) -> int:
-    options = tree_file(repo, tree, "meson_options.txt")
-    match = re.search(
-        r"option\(\s*'team_min_atoms'.*?value:\s*([0-9]+)",
-        options,
-        flags=re.DOTALL,
-    )
-    if match is None:
-        slices = tree_file(repo, tree, "CppCore/rgpot/Slices.hpp")
-        match = re.search(r"kTeamMinAtoms\s*=\s*([0-9]+)", slices)
-    if match is None:
+def tree_threshold(
+    repo: Path, arm: str, tree: str, fallback_thresholds: dict[str, int]
+) -> int:
+    if has_git(repo):
+        options = tree_file(repo, tree, "meson_options.txt")
+        match = re.search(
+            r"option\(\s*'team_min_atoms'.*?value:\s*([0-9]+)",
+            options,
+            flags=re.DOTALL,
+        )
+        if match is None:
+            slices = tree_file(repo, tree, "CppCore/rgpot/Slices.hpp")
+            match = re.search(r"kTeamMinAtoms\s*=\s*([0-9]+)", slices)
+        if match is None:
+            raise SystemExit(f"{arm}: tree {tree} has no kTeamMinAtoms value")
+        return int(match.group(1))
+    actual = fallback_thresholds.get(tree)
+    if actual is None:
         raise SystemExit(f"{arm}: tree {tree} has no kTeamMinAtoms value")
-    return int(match.group(1))
+    return actual
 
 
 def check_provenance(repo: Path, payload: dict, report_text: str) -> None:
@@ -84,15 +130,17 @@ def check_provenance(repo: Path, payload: dict, report_text: str) -> None:
         missing_text = ", ".join(missing) if missing else "(none)"
         extra_text = ", ".join(extra) if extra else "(none)"
         raise SystemExit(f"arm set mismatch: missing {missing_text}; extra {extra_text}")
+    fallback_trees = recorded_commit_trees(record)
+    fallback_thresholds = recorded_tree_thresholds(record)
     for arm in record:
         name = arm["name"] if isinstance(arm.get("name"), str) and arm.get("name") else "<unnamed>"
         if "sha" not in arm:
             raise SystemExit(f"{name}: arm record is missing required key sha")
         recorded = arm.get("tree")
-        actual = resolved_commit_tree(repo, name, arm["sha"])
+        actual = resolved_commit_tree(repo, name, arm["sha"], fallback_trees)
         if recorded != actual:
             raise SystemExit(f"{name}: recorded tree {recorded} does not match commit tree {actual}")
-        actual_threshold = tree_threshold(repo, name, recorded)
+        actual_threshold = tree_threshold(repo, name, recorded, fallback_thresholds)
         if arm["threshold"] != actual_threshold:
             raise SystemExit(
                 f"{name}: recorded threshold {arm['threshold']} "

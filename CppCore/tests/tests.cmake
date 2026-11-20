@@ -2,7 +2,14 @@
 # holds their options, and meson reads the same file. CMakeLists.txt
 # includes this file in its own directory, so the test executables sit
 # beside librgpot_mpi, where CalculatorGroup.cc looks for it.
+# A test name may hold spaces ("CuH2 Utils Test"). The functions below keep
+# the policies set here, and the loops that read RGPOT_REGISTRY_ENTRIES in
+# the caller's scope need CMP0110 so foreach(IN LISTS) does not split an
+# entry on whitespace.
 include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/RgpotTestRegistry.cmake")
+if(POLICY CMP0110)
+  cmake_policy(SET CMP0110 NEW)
+endif()
 
 enable_testing()
 find_package(Threads REQUIRED)
