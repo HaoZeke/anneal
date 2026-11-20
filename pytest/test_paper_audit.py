@@ -526,6 +526,48 @@ def test_a_length_unit_row_from_another_driver_is_reported():
     assert "every row ran the Morse driver of the tree the rows name" in [r[2] for r in audit.drifts()]
 
 
+def test_a_drifted_g1_cell_is_reported():
+    audit = audit_mod.Audit()
+    si = audit.text(audit_mod.SI)
+    old = "M\\(_{38}\\), \\(\\rho=14\\) & \\(4\\times 10^{5}\\) & 4/12 &"
+    assert si.count(old) == 1
+    audit.text_cache[audit_mod.SI] = si.replace(old, old.replace("4/12", "5/12"))
+    audit_mod.morse_g1(audit)
+    assert [r[2] for r in audit.drifts()] == ["tab:si-morse-g1 is the summariser's block"]
+
+
+def test_a_drifted_g1_sentence_is_reported():
+    audit = audit_mod.Audit()
+    si = audit.text(audit_mod.SI)
+    old = "and 4 of 12 on M\\(_{38}\\)"
+    assert si.count(old) == 1
+    audit.text_cache[audit_mod.SI] = si.replace(old, "and 5 of 12 on M\\(_{38}\\)")
+    audit_mod.morse_g1(audit)
+    assert [r[2] for r in audit.drifts()] == ["prose"]
+
+
+def test_a_stored_g1_gmin_count_in_si_is_reported():
+    audit = audit_mod.Audit()
+    si = audit.text(audit_mod.SI)
+    old = "the article prints this code alone here."
+    assert si.count(old) == 1
+    audit.text_cache[audit_mod.SI] = si.replace(old, old + " They take other calls on all 24 hits.")
+    audit_mod.morse_g1(audit)
+    assert [r[2] for r in audit.drifts()] == ["the SI prints no count from the stored GMIN rows of G1"]
+
+
+def test_a_g1_row_of_another_revision_is_reported():
+    audit = audit_mod.Audit()
+    path = "paper/jctc/data/gmin_g1/rows.csv"
+    rows = [dict(r) for r in audit.rows(path)]
+    rows[5]["code_revision"] = "dd6ff9273be30ab317bfd5508596f4beb19cb3a4"
+    audit.read[path] = rows
+    audit_mod.morse_g1(audit)
+    labels = [r[2] for r in audit.drifts()]
+    assert "rows off the stock preset, the budget or the reference of the run script" in labels
+    assert "the paired rows of the record carry these anneal rows" in labels
+
+
 def test_a_gmin_claim_in_the_template_era_section_is_reported():
     audit = audit_mod.Audit()
     si = audit.text(audit_mod.SI)
