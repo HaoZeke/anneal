@@ -462,12 +462,7 @@ fn compare_geometry(
         let fine = central(&objective, geometry, component, step * 0.5)
             .map_err(|error| format!("{backend} geometry {index} {error}"))?;
         let gap = (coarse - fine).abs();
-        // `gap / 3` is the fine truncation. The measured gap is uncertain
-        // by the coarse noise `δ/h` plus the fine noise `2δ/h`, and a
-        // third of that uncertainty is `δ/h`.
-        let gap_noise = precision / step;
-        let fine_noise = 2.0 * precision / step;
-        let bound = gap / 3.0 + gap_noise + fine_noise;
+        let bound = force_sign::fd_error_bound(coarse, fine, precision, step);
         let miss = (slope - fine).abs();
         if !bound.is_finite() || bound >= magnitude {
             if component == largest {

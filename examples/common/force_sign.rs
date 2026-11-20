@@ -163,6 +163,36 @@ impl std::fmt::Display for Row {
     }
 }
 
+/// Sharp error bound for the half-step central difference `D_{h/2}`.
+///
+/// Suppose each energy evaluation has additive error bounded by `δ`
+/// (`precision`), and let `D_h` (`coarse`) and `D_{h/2}` (`fine`) be the
+/// central differences at steps `h` and `h/2` respectively:
+///
+/// - `D_h = g + τ_h + η_h`, with `|η_h| <= 2δ / (2h) = δ / h`,
+/// - `D_{h/2} = g + τ_{h/2} + η_{h/2}`, with `|η_{h/2}| <= 2δ / h`.
+///
+/// For leading quadratic truncation error (`τ_h = 4 τ_{h/2}`):
+///
+///   `D_h - D_{h/2} = 3 τ_{h/2} + η_h - η_{h/2}`
+///   `τ_{h/2} = (D_h - D_{h/2}) / 3 - η_h / 3 + η_{h/2} / 3`
+///   `D_{h/2} - g = (D_h - D_{h/2}) / 3 - η_h / 3 + (4 / 3) η_{h/2}`.
+///
+/// Taking absolute values gives the sharp bound used by both the Rust
+/// checks and `pytest/test_force_gradient_fd.py`:
+///
+///   `|g - D_{h/2}| <= |D_h - D_{h/2}| / 3 + (1/3)(δ / h) + (4/3)(2δ / h)`
+///                  `= |D_h - D_{h/2}| / 3 + 3δ / h`.
+///
+/// Equality is attained on a cubic with `τ_{h/2} = δ / h`, `η_h = -δ / h`,
+/// and `η_{h/2} = +2δ / h`, where `D_h - D_{h/2} = 0` and
+/// `|g - D_{h/2}| = 3δ / h`. Using `2δ / h` omits the gap uncertainty and
+/// under-bounds that case.
+pub(crate) fn fd_error_bound(coarse: f64, fine: f64, precision: f64, step: f64) -> f64 {
+    let gap = (coarse - fine).abs();
+    gap / 3.0 + 3.0 * precision / step
+}
+
 /// `lengths` is the model length of each coordinate. `step_limits` is the
 /// largest step that stays inside that coordinate's pair.
 #[allow(clippy::too_many_arguments)]
@@ -235,12 +265,7 @@ pub(crate) fn compare_slope(
         let fine = central(&mut energy_at, geometry, component, step * 0.5)
             .map_err(|error| format!("{backend} geometry {index} {error}"))?;
         let gap = (coarse - fine).abs();
-        // `gap / 3` is the fine truncation. The measured gap is uncertain
-        // by the coarse noise `δ/h` plus the fine noise `2δ/h`, and a
-        // third of that uncertainty is `δ/h`.
-        let gap_noise = precision / step;
-        let fine_noise = 2.0 * precision / step;
-        let bound = gap / 3.0 + gap_noise + fine_noise;
+        let bound = fd_error_bound(coarse, fine, precision, step);
         let miss = (component_slope - fine).abs();
         if bound >= magnitude || !bound.is_finite() {
             if component == largest {

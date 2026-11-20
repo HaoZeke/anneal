@@ -48,6 +48,22 @@ def model_step(precision: float, length: float, slope: float) -> float:
     return (3.0 * precision * length * length / abs(slope)) ** (1.0 / 3.0)
 
 
+def fd_error_bound(coarse: float, fine: float, precision: float, step: float) -> float:
+    """Sharp error bound for ``D_{h/2}`` matching ``examples/common/force_sign.rs``.
+
+    With ``|eta_h| <= delta/h``, ``|eta_{h/2}| <= 2*delta/h``, and leading
+    quadratic truncation ``tau_h = 4*tau_{h/2}``:
+
+        D_{h/2} - g = (D_h - D_{h/2})/3 - eta_h/3 + (4/3)*eta_{h/2}
+        |g - D_{h/2}| <= |D_h - D_{h/2}|/3 + (1/3)(delta/h) + (4/3)(2*delta/h)
+                       = |D_h - D_{h/2}|/3 + 3*delta/h.
+
+    See ``fd_error_bound`` in ``examples/common/force_sign.rs`` for the full
+    derivation shared by the Rust and Python checks.
+    """
+    return abs(coarse - fine) / 3.0 + 3.0 * precision / step
+
+
 def shortest_pair(coords: np.ndarray) -> float:
     points = np.asarray(coords, dtype=np.float64).reshape(-1, 3)
     shortest = math.inf
@@ -97,7 +113,7 @@ def compare(
         minus[component] = geometry[component] - 0.5 * step
         # The finer step is h/2, so its denominator is h.
         fine = (energy_at(plus) - energy_at(minus)) / step
-        bound = abs(coarse - fine) / 3.0 + 2.0 * precision / step
+        bound = fd_error_bound(coarse, fine, precision, step)
         miss = abs(float(component_slope) - fine)
         if not bound < magnitude:
             if component == largest:
@@ -130,6 +146,7 @@ def load_module(name: str, path: Path):
 
 
 def test_ase_callbacks_match_the_energy():
+    injected_stub = False
     try:
         import anneal  # noqa: F401
     except Exception:
@@ -137,7 +154,12 @@ def test_ase_callbacks_match_the_energy():
         stub.cluster_search = None
         stub.polish = None
         sys.modules["anneal"] = stub
-    ase_adapter = load_module("anneal_ase_local", ROOT / "python" / "anneal" / "ase.py")
+        injected_stub = True
+    try:
+        ase_adapter = load_module("anneal_ase_local", ROOT / "python" / "anneal" / "ase.py")
+    finally:
+        if injected_stub:
+            sys.modules.pop("anneal", None)
 
     class Triangle:
         def __init__(self):
@@ -350,3 +372,34 @@ def test_cluster_search_orients_a_force_callback():
         raise AssertionError(
             f"cluster-search best {found['best_energy']} did not descend from {start_energy}"
         )
+
+
+def test_fd_error_bound_is_sharp_at_3_delta_over_h():
+    """Worst-case +/-delta noise on a cubic attains 3*delta/h and breaks 2*delta/h."""
+    slope = 2.5
+    delta = 1.0e-6
+    step = 1.0e-2
+    # Exact cubic E(x) = slope * x + (c / 6) * x^3 with tau_{h/2} = delta / h.
+    cubic = 24.0 * delta / (step**3)
+
+    def noisy_energy(x: float) -> float:
+        exact = slope * x + (cubic / 6.0) * (x**3)
+        if math.isclose(x, step):
+            return exact - delta
+        if math.isclose(x, -step):
+            return exact + delta
+        if math.isclose(x, 0.5 * step):
+            return exact + delta
+        if math.isclose(x, -0.5 * step):
+            return exact - delta
+        raise AssertionError(f"unexpected evaluation point {x}")
+
+    coarse = (noisy_energy(step) - noisy_energy(-step)) / (2.0 * step)
+    fine = (noisy_energy(0.5 * step) - noisy_energy(-0.5 * step)) / step
+    miss = abs(slope - fine)
+    old_python_bound = abs(coarse - fine) / 3.0 + 2.0 * delta / step
+    unified_bound = fd_error_bound(coarse, fine, delta, step)
+
+    assert math.isclose(coarse, fine, rel_tol=1e-12, abs_tol=1e-15)
+    assert miss > old_python_bound
+    assert math.isclose(miss, unified_bound, rel_tol=1e-12, abs_tol=1e-15)
