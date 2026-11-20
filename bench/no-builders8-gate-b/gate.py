@@ -367,6 +367,7 @@ def query_budget(binary: Path, tree: Path, system: str, env: dict[str, str], log
 
 
 def write_start(binary: Path, tree: Path, system: str, seed: int, dest: Path, env: dict[str, str], log: Path) -> str:
+    dest.parent.mkdir(parents=True, exist_ok=True)
     run_command([str(binary), "coords", system, str(seed), str(dest)], tree, env, log, 120)
     data = dest.read_bytes()
     if not data:
