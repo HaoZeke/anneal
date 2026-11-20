@@ -138,7 +138,7 @@ if [[ ! -x $WORK/bin/GMIN ]]; then
       -DWITH_PYTHON=OFF \
       -DWITH_MYBLAS=OFF \
       -DWITH_MYLAPACK=OFF
-    make -j"$(nproc)" GMIN
+    make -j"${GMIN_PANEL_JOBS:-$(nproc)}" GMIN
   )
   cp -a "$build/GMIN" "$WORK/bin/GMIN"
   chmod +x "$WORK/bin/GMIN"
