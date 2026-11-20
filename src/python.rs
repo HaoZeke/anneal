@@ -2981,6 +2981,14 @@ impl PyClusterConfig {
         self.inner.symmetry_completion_once
     }
 
+    /// Whether the completion reads the point group of the positions alone,
+    /// ignoring species, and still completes each species on its own sites.
+    /// Off in every preset.
+    #[getter]
+    fn symmetry_completion_framework(&self) -> bool {
+        self.inner.symmetry_completion_framework
+    }
+
     /// Shared-history visit policy: `tabu` or `recognition`.
     #[getter]
     fn shared_visit_policy(&self) -> &'static str {

@@ -21,7 +21,8 @@
 //! Cartesian line per atom.
 //! `H2H_NOSTOP=1` runs the whole budget after a hit, and `H2H_COMPLETION=off`
 //! runs without the symmetry completion of a new basin, `once` completes
-//! each basin once per chain. `run` prints the
+//! each basin once per chain, `framework` reads its group from the
+//! positions alone. `run` prints the
 //! bits of the best energy and the charged count on stderr, so two builds
 //! can be compared exactly.
 //!
@@ -60,11 +61,13 @@ fn main() {
 
 /// `H2H_COMPLETION=off` turns the symmetry completion of a new basin off, so
 /// a run can be compared with and without it, and `once` completes each
-/// basin once per chain. Unset leaves the preset.
+/// basin once per chain, and `framework` reads the group of the positions
+/// alone. Unset leaves the preset.
 fn switch_completion(cfg: &mut Config) {
     match std::env::var("H2H_COMPLETION").as_deref() {
         Ok("off") => cfg.symmetry_completion_on_new = false,
         Ok("once") => cfg.symmetry_completion_once = true,
+        Ok("framework") => cfg.symmetry_completion_framework = true,
         _ => {}
     }
 }
