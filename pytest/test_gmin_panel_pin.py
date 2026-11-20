@@ -12,6 +12,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "scripts" / "gmin_panel" / "build_gmin.sh"
+SOURCE = ROOT / "bench" / "gmin-panel" / "gmin-source.txt"
 sys.path.insert(0, str(ROOT / "scripts"))
 from gmin_pin import REVISION, TARBALL_SHA256, read_svnrev
 from morse_gmin.run_panel import gmin_line
@@ -43,6 +44,13 @@ def test_fake_built_svnrev_flows_into_code_revision(tmp_path: Path) -> None:
         revision,
     )
     assert row["code_revision"] == REVISION
+
+
+def test_the_committed_gmin_source_matches_the_build_pin() -> None:
+    source = dict(line.split("=", 1) for line in SOURCE.read_text().splitlines() if "=" in line)
+    assert source["revision"] == REVISION
+    assert source["svnrev"] == REVISION
+    assert source["tarball_sha256"] == TARBALL_SHA256
 
 
 def test_the_build_normalizes_paths_and_stamps() -> None:
