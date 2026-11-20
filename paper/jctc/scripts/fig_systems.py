@@ -4,7 +4,7 @@
 
 (a) The Lennard-Jones minima LJ38, LJ75, LJ98 and LJ104 that the tests of anneal hold to
 the Cambridge Cluster Database, in the style of system_visuals.py. (b) The TIP4P minima of
-10, 15 and 20 molecules, and the lowest archived GFN2-xTB minimum of each hexamer class,
+10, 15 and 20 molecules, and the lowest GFN2-xTB minimum of each hexamer class relaxed with xtb 6.7.1,
 drawn by xyzrender with their hydrogen bonds dotted. Every structure is read by
 system_visuals.py, which holds its files to their digests.
 
