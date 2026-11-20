@@ -2,8 +2,9 @@
 # unless an [[allow]] names that symbol or the auditor proves the function
 # is a dispatched clone (ci/isa-audit/dispatch.py): a local function that
 # is entered only behind a __cpu_model test or from a target_clones
-# resolver. Those clones (the AVX2 Lennard-Jones, Morse and Gupta bodies,
-# the exp_fixed_n clones) need no entry here.
+# resolver. The exp_fixed_n clones need no entry here. The C cluster
+# clones use a cached CPUID/XGETBV result instead, which the binary proof
+# deliberately does not infer.
 #
 # The entries below are the bodies the proof cannot see. The Highway
 # target("fma") helpers are exported, and they and the FMA fold are
@@ -19,6 +20,16 @@ baseline = "x86-64"
 symbol = "^rgpot::simd::(?:accept_row_hw|eam_fma|eam_hw|exact_fma_hw|exp2_hw|exp_hw_n|lj_hw_span|lj_hw|morse8_hw|morse_hw|r2_hw_n|r2_hw)(?:\\(|$)"
 features = ["avx", "fma"]
 reason = "target(\"fma\") bodies, entered only after fma_hw_active()"
+
+[[allow]]
+symbol = "^(?:morse_avx2|lj_avx2|gupta_avx2)$"
+features = ["sse3", "ssse3", "sse4_1", "sse4_2", "popcnt", "avx", "avx2", "fma", "xsave"]
+reason = "AVX2/FMA cluster bodies entered only after the cached CPUID and XGETBV probe"
+
+[[allow]]
+symbol = "^rgpot_detect_avx2_fma$"
+features = ["xsave"]
+reason = "xgetbv runs only after CPUID reports OSXSAVE"
 
 [[allow]]
 symbol = "^__cpu_indicator_init(?:\\(|$)"
