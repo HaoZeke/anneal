@@ -63,6 +63,17 @@ fn native_release_builds_where_artifact_packaging_reads() {
 }
 
 #[test]
+fn release_installs_and_imports_the_built_sdist() {
+    let workflow = include_str!("../.github/workflows/release.yml");
+    let sdist = workflow_job(workflow, "sdist");
+
+    assert!(sdist.contains("python -m venv .sdist-venv"));
+    assert!(sdist.contains("pip install dist/anneal-*.tar.gz"));
+    assert!(sdist.contains("import anneal, anneal._core"));
+    assert!(sdist.contains("os.path.relpath(anneal.__file__)"));
+}
+
+#[test]
 fn scientific_tests_optimize_kernels_without_disabling_debug_checks() {
     let manifest = include_str!("../Cargo.toml");
 
