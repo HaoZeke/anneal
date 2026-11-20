@@ -768,6 +768,7 @@ fn check_profile_config_precedence() -> Vec<String> {
 
 fn check_profile_engine() -> Vec<String> {
     let mut failures = check_profile_config_precedence();
+    failures.extend(check_cpmd_energy_precision());
     let (libraries, missing) = profile_libraries();
     #[cfg(feature = "profile")]
     {
@@ -820,17 +821,53 @@ fn check_profile_engine() -> Vec<String> {
     }
 }
 
-#[cfg(feature = "profile")]
-/// `CONVERGENCE ORBITALS` on the water deck, in Hartree.
+/// `CONVERGENCE ORBITALS` (`tolog`) on the CPMD water deck, in atomic units.
 ///
-/// OpenCPMD reads the first number as the wavefunction-gradient
-/// threshold. The optional second number is the total-energy
-/// difference, and this deck leaves it unset. The step and the noise
-/// term are this threshold. It is tighter than 1e-5 Hartree so the
-/// nonzero components are compared at the smaller step that threshold
-/// implies. Four components of this water are zero by symmetry, and a
-/// zero slope is not counted.
-const CPMD_ORBITAL_THRESHOLD_HARTREE: f64 = 1.0e-7;
+/// Per the CPMD Manual (CPMD Consortium, *CPMD Manual*, Version 4.3,
+/// Section `&CPMD`, keyword `CONVERGENCE ORBITALS`), the first argument
+/// `tolog` (default `1.0e-5`) is the convergence criterion on the largest
+/// wavefunction (orbital) gradient element `GNMAX = max |dE/dc|` in atomic
+/// units, not a total-energy tolerance in Hartree. The optional second
+/// argument (`DELE`, total-energy change in Hartree) is not exposed by
+/// `rgpot`'s `CPMDCpmdSection::set_convergence_orbitals`.
+///
+/// Because the Kohn-Sham energy is variational at converged orbitals, a
+/// residual orbital gradient `g` shifts the energy quadratically as
+/// `(1/2) g^T H^{-1} g` via the unknown electronic Hessian `H`; `tolog`
+/// therefore cannot be converted into a Hartree energy uncertainty without
+/// spectral information that the profile interface does not provide. The
+/// orbital threshold is kept tight (`1.0e-7` a.u.) so wavefunctions are
+/// well converged, while the energy-precision term uses only the floating-
+/// point floor (`cpmd_energy_precision`).
+const CPMD_ORBITAL_GRADIENT_THRESHOLD: f64 = 1.0e-7;
+
+/// Energy precision floor for the CPMD finite-difference check.
+///
+/// Drops any `CONVERGENCE ORBITALS` Hartree term because `CONVERGENCE
+/// ORBITALS` bounds the orbital gradient `GNMAX` (a.u.), not the total
+/// energy (see [`CPMD_ORBITAL_GRADIENT_THRESHOLD`]).
+fn cpmd_energy_precision(energy: f64) -> f64 {
+    force_sign::unit_in_the_last_place(energy)
+}
+
+fn check_cpmd_energy_precision() -> Vec<String> {
+    let mut failures = Vec::new();
+    let sample_energy_ev = -467.746;
+    let precision = cpmd_energy_precision(sample_energy_ev);
+    let ulp = force_sign::unit_in_the_last_place(sample_energy_ev);
+    let bogus_hartree_term = CPMD_ORBITAL_GRADIENT_THRESHOLD * HARTREE_EV;
+    if precision != ulp {
+        failures.push(format!(
+            "cpmd-energy-precision: expected one ulp ({ulp:.3e}), got {precision:.3e}"
+        ));
+    }
+    if !precision.is_finite() || precision >= bogus_hartree_term {
+        failures.push(format!(
+            "cpmd-energy-precision: {precision:.3e} must not include the orbital-gradient threshold {bogus_hartree_term:.3e}"
+        ));
+    }
+    failures
+}
 
 #[cfg(feature = "profile")]
 /// DFT `convergence energy` on the water deck, in Hartree.
@@ -845,7 +882,7 @@ const NWCHEM_ENERGY_THRESHOLD_HARTREE: f64 = 1.0e-6;
 ///
 /// The three x slopes and the oxygen y slope are zero. A component
 /// is counted only when the derived bound is smaller than the slope,
-/// so those four stay uncounted at any orbital threshold.
+/// so those four stay uncounted.
 const CPMD_WATER: [f64; 9] = [
     0.0, 0.0, 0.1173, 0.0, 0.7572, -0.4692, 0.0, -0.7572, -0.4692,
 ];
@@ -875,7 +912,7 @@ fn cpmd_water_config(pseudo_dir: &std::path::Path) -> Result<Vec<u8>, String> {
             let section = sections.reborrow().get(0);
             let mut cpmd = section.init_cpmd();
             cpmd.set_optimize_wavefunction(true);
-            cpmd.set_convergence_orbitals(CPMD_ORBITAL_THRESHOLD_HARTREE);
+            cpmd.set_convergence_orbitals(CPMD_ORBITAL_GRADIENT_THRESHOLD);
             cpmd.set_max_step(40);
             cpmd.set_center_molecule_off(true);
         }
@@ -962,7 +999,7 @@ fn check_cpmd_session(library: &std::path::Path) -> Vec<String> {
     check_points(
         "cpmd",
         &[&CPMD_WATER],
-        |_, energy| hartree_threshold(CPMD_ORBITAL_THRESHOLD_HARTREE, energy),
+        |_, energy| cpmd_energy_precision(energy),
         None,
         |coordinates| {
             let point = ndarray::ArrayView1::from(coordinates);
