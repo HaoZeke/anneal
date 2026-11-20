@@ -57,9 +57,10 @@ impl ProfileEngine {
         let config = std::fs::read(&config_path).expect("PotentialConfig message");
         let explicit_library = std::env::var("POTENTIAL_LIBRARY").ok();
         let mut expectation = rgpot_core::compat::Expectation::default();
-        // cpmdc reports the Potentials.capnp file id without the 0x
-        // prefix rgpot-core stores. Both strings are that same id.
-        if prefix == "cpmdc" {
+        // cpmdc and nwchemc report the Potentials.capnp file id
+        // without the 0x prefix rgpot-core stores. The strings name
+        // that same id.
+        if prefix == "cpmdc" || prefix == "nwchemc" {
             expectation.schema_id = "bd1f89fa17369103";
         }
         let session = unsafe {

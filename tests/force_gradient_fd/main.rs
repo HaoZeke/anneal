@@ -566,9 +566,9 @@ fn petmad_python() -> Result<Option<String>, String> {
 
 /// One float32 rounding of the returned energy.
 ///
-/// pet-mad 1.4.4 checkpoint 1.0.2 evaluates in float32. `f32::EPSILON`
-/// is the unit roundoff of that value, so the absolute precision is
-/// `ε * |E|`.
+/// The check loads `pet-mad-1.0.2.pt`, the cited checkpoint. pet-mad
+/// 1.4.4 evaluates that file in float32. `f32::EPSILON` is the unit
+/// roundoff of that value, so the absolute precision is `ε * |E|`.
 fn petmad_precision(energy: f64) -> f64 {
     f64::from(f32::EPSILON) * energy.abs()
 }
@@ -616,8 +616,10 @@ fn check_petmad_pipe() -> Vec<String> {
     }
 }
 
-fn profile_library() -> Result<Option<(String, PathBuf)>, String> {
+fn profile_libraries() -> (Vec<(String, PathBuf)>, Vec<String>) {
+    let mut found = Vec::new();
     let mut missing = Vec::new();
+    let mut seen = Vec::new();
     for (variable, prefix) in [
         ("POTENTIAL_LIBRARY", ""),
         ("RGPOT_NWCHEMC_ENGINE", "nwchemc"),
@@ -635,25 +637,23 @@ fn profile_library() -> Result<Option<(String, PathBuf)>, String> {
                 } else {
                     prefix.to_string()
                 };
-                return Ok(Some((prefix, path)));
+                if !seen.contains(&prefix) {
+                    seen.push(prefix.clone());
+                    found.push((prefix, path));
+                }
+            } else {
+                missing.push(format!("{variable}={}", path.display()));
             }
-            missing.push(format!("{variable}={}", path.display()));
         }
     }
     for (file_name, prefix) in [("libnwchemc.so", "nwchemc"), ("libcpmdc.so", "cpmdc")] {
         let path = PathBuf::from(file_name);
-        if path.is_file() {
-            return Ok(Some((prefix.to_string(), path)));
+        if path.is_file() && !seen.iter().any(|name| name == prefix) {
+            seen.push(prefix.to_string());
+            found.push((prefix.to_string(), path));
         }
     }
-    if missing.is_empty() {
-        Ok(None)
-    } else {
-        Err(format!(
-            "{} and libnwchemc.so is absent",
-            missing.join(", ")
-        ))
-    }
+    (found, missing)
 }
 
 fn profile_prefix(path: &std::path::Path) -> String {
@@ -669,24 +669,29 @@ fn profile_prefix(path: &std::path::Path) -> String {
 }
 
 fn check_profile_engine() -> Vec<String> {
+    let (libraries, missing) = profile_libraries();
     #[cfg(feature = "profile")]
     {
         let mut failures = check_profile_negation();
-        match profile_library() {
-            Ok(None) => println!(
+        for gap in &missing {
+            failures.push(format!(
+                "profile-engine: {gap} is not a file, and the named library was not evaluated"
+            ));
+        }
+        if libraries.is_empty() && missing.is_empty() {
+            println!(
                 "profile-engine: skipped, libnwchemc.so and libcpmdc.so are absent (POTENTIAL_LIBRARY, RGPOT_NWCHEMC_ENGINE, RGPOT_CPMDC_ENGINE, or ./libnwchemc.so). NWChem and CPMD are not on this machine, so the live session was not evaluated"
-            ),
-            Ok(Some((prefix, path))) => {
-                if prefix == "cpmdc" {
-                    failures.extend(check_cpmd_session(&path));
-                } else {
-                    failures.push(format!(
-                        "profile-engine: {prefix} library {} is present but this test has no live session runner",
-                        path.display()
-                    ));
-                }
+            );
+        }
+        for (prefix, path) in &libraries {
+            match prefix.as_str() {
+                "cpmdc" => failures.extend(check_cpmd_session(path)),
+                "nwchemc" => failures.extend(check_nwchem_session(path)),
+                _ => failures.push(format!(
+                    "profile-engine: {prefix} library {} is present but this test has no live session runner",
+                    path.display()
+                )),
             }
-            Err(error) => failures.push(error),
         }
         failures
     }
@@ -694,18 +699,23 @@ fn check_profile_engine() -> Vec<String> {
     {
         // The profile module runs capnpc. A library that is present still
         // has to be named rather than ignored.
-        match profile_library() {
-            Ok(None) => {
-                println!(
-                    "profile-engine: skipped, libnwchemc.so and libcpmdc.so are absent (POTENTIAL_LIBRARY, RGPOT_NWCHEMC_ENGINE, RGPOT_CPMDC_ENGINE, or ./libnwchemc.so), and this build has no profile feature (it needs capnpc)"
-                );
-                Vec::new()
+        if libraries.is_empty() && missing.is_empty() {
+            println!(
+                "profile-engine: skipped, libnwchemc.so and libcpmdc.so are absent (POTENTIAL_LIBRARY, RGPOT_NWCHEMC_ENGINE, RGPOT_CPMDC_ENGINE, or ./libnwchemc.so), and this build has no profile feature (it needs capnpc)"
+            );
+            Vec::new()
+        } else {
+            let mut failures = missing
+                .iter()
+                .map(|gap| format!("profile-engine: {gap} is not a file"))
+                .collect::<Vec<_>>();
+            for (prefix, path) in &libraries {
+                failures.push(format!(
+                    "profile-engine: {prefix} library {} is present, but this build has no profile feature (it needs capnpc)",
+                    path.display()
+                ));
             }
-            Ok(Some((prefix, path))) => vec![format!(
-                "profile-engine: {prefix} library {} is present, but this build has no profile feature (it needs capnpc)",
-                path.display()
-            )],
-            Err(error) => vec![error],
+            failures
         }
     }
 }
@@ -715,11 +725,27 @@ fn check_profile_engine() -> Vec<String> {
 ///
 /// OpenCPMD reads the first number as the wavefunction-gradient
 /// threshold. The optional second number is the total-energy
-/// difference, and this deck leaves it unset. The noise term uses the
-/// threshold the deck does set.
-const CPMD_ORBITAL_THRESHOLD_HARTREE: f64 = 1.0e-5;
+/// difference, and this deck leaves it unset. The step and the noise
+/// term are this threshold. It is tighter than 1e-5 Hartree so the
+/// nonzero components are compared at the smaller step that threshold
+/// implies. Four components of this water are zero by symmetry, and a
+/// zero slope is not counted.
+const CPMD_ORBITAL_THRESHOLD_HARTREE: f64 = 1.0e-7;
 
 #[cfg(feature = "profile")]
+/// DFT `convergence energy` on the water deck, in Hartree.
+///
+/// NWChem 7.3 `dft_rdinput` stores an unset `dft:e_conv` as 1e-6
+/// Hartree. The deck sets that value. The step and the noise term are
+/// that threshold.
+const NWCHEM_ENERGY_THRESHOLD_HARTREE: f64 = 1.0e-6;
+
+#[cfg(feature = "profile")]
+/// Water in the yz plane, with the hydrogens mirrored in y.
+///
+/// The three x slopes and the oxygen y slope are zero. A component
+/// is counted only when the derived bound is smaller than the slope,
+/// so those four stay uncounted at any orbital threshold.
 const CPMD_WATER: [f64; 9] = [
     0.0, 0.0, 0.1173, 0.0, 0.7572, -0.4692, 0.0, -0.7572, -0.4692,
 ];
@@ -728,9 +754,8 @@ const CPMD_WATER: [f64; 9] = [
 const CPMD_BOX: [f64; 9] = [10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0];
 
 #[cfg(feature = "profile")]
-fn cpmd_precision(energy: f64) -> f64 {
-    let threshold = CPMD_ORBITAL_THRESHOLD_HARTREE * HARTREE_EV;
-    threshold.max(force_sign::unit_in_the_last_place(energy))
+fn hartree_threshold(threshold_ha: f64, energy: f64) -> f64 {
+    (threshold_ha * HARTREE_EV).max(force_sign::unit_in_the_last_place(energy))
 }
 
 #[cfg(feature = "profile")]
@@ -837,13 +862,114 @@ fn check_cpmd_session(library: &std::path::Path) -> Vec<String> {
     check_points(
         "cpmd",
         &[&CPMD_WATER],
-        |_, energy| cpmd_precision(energy),
+        |_, energy| hartree_threshold(CPMD_ORBITAL_THRESHOLD_HARTREE, energy),
         None,
         |coordinates| {
             let point = ndarray::ArrayView1::from(coordinates);
             let (energy, gradient) = engine
                 .eval(point)
                 .ok_or_else(|| "the CPMD session returned no energy".to_string())?;
+            Ok((energy, gradient.to_vec()))
+        },
+    )
+}
+
+#[cfg(feature = "profile")]
+fn nwchem_water_config(nwchem_top: &str, scratch: &std::path::Path) -> Result<Vec<u8>, String> {
+    use rgpot_core::Potentials_capnp::n_w_chem_input_stanza;
+    use rgpot_core::Potentials_capnp::potential_config;
+    let block = format!(
+        "dft\n  xc b3lyp\n  direct\n  convergence energy {NWCHEM_ENERGY_THRESHOLD_HARTREE:.0e}\n  iterations 40\nend\n"
+    );
+    let scratch = scratch
+        .to_str()
+        .ok_or_else(|| "the NWChem scratch path is not utf-8".to_string())?;
+    let mut message = capnp20::message::Builder::new_default();
+    {
+        let config = message.init_root::<potential_config::Builder>();
+        let mut params = config.init_nwchem();
+        params.set_basis("sto-3g");
+        params.set_theory("dft");
+        params.set_scf_type("rhf");
+        params.set_charge(0);
+        params.set_multiplicity(1);
+        params.set_task("gradient");
+        params.set_memory_mb(400);
+        params.set_nwchem_root(nwchem_top);
+        params.set_scratch_dir(scratch);
+        params.set_permanent_dir(scratch);
+        {
+            let mut stanzas = params.reborrow().init_input_stanzas(1);
+            let mut stanza = stanzas.reborrow().get(0);
+            stanza.set_kind(n_w_chem_input_stanza::Kind::Dft);
+            let mut dft = stanza.reborrow().init_dft();
+            dft.set_xc("b3lyp");
+            dft.set_direct(true);
+            dft.set_iterations(40);
+            dft.set_energy_conv(NWCHEM_ENERGY_THRESHOLD_HARTREE);
+        }
+        let mut blocks = params.reborrow().init_input_blocks(1);
+        blocks.set(0, block.as_str());
+    }
+    let mut bytes = Vec::new();
+    capnp20::serialize::write_message(&mut bytes, &message)
+        .map_err(|error| format!("could not write the NWChem config: {error}"))?;
+    Ok(bytes)
+}
+
+#[cfg(feature = "profile")]
+fn check_nwchem_session(library: &std::path::Path) -> Vec<String> {
+    let nwchem_top = match std::env::var("NWCHEM_TOP") {
+        Ok(dir)
+            if std::path::Path::new(&dir)
+                .join("src/basis/libraries")
+                .is_dir() =>
+        {
+            dir
+        }
+        _ => {
+            return vec![
+                "profile-engine: libnwchemc.so is present but NWCHEM_TOP does not contain src/basis/libraries"
+                    .into(),
+            ];
+        }
+    };
+    let scratch = match tempfile::tempdir() {
+        Ok(dir) => dir,
+        Err(error) => {
+            return vec![format!(
+                "could not create the NWChem scratch directory: {error}"
+            )];
+        }
+    };
+    let bytes = match nwchem_water_config(&nwchem_top, scratch.path()) {
+        Ok(bytes) => bytes,
+        Err(error) => return vec![error],
+    };
+    let config = match tempfile::NamedTempFile::new() {
+        Ok(file) => file,
+        Err(error) => return vec![format!("could not create the NWChem config file: {error}")],
+    };
+    if let Err(error) = std::fs::write(config.path(), &bytes) {
+        return vec![format!("could not write the NWChem config: {error}")];
+    }
+    // SAFETY: the process is single threaded here. The profile loader
+    // reads these variables once, when the session is created.
+    unsafe {
+        std::env::set_var("POTENTIAL_LIBRARY", library);
+        std::env::set_var("NWCHEMC_CONFIG", config.path());
+    }
+    let mut engine = profile_engine::ProfileEngine::load("nwchemc", vec![8, 1, 1], None);
+    check_points(
+        "nwchem",
+        &[&CPMD_WATER],
+        |_, energy| hartree_threshold(NWCHEM_ENERGY_THRESHOLD_HARTREE, energy),
+        None,
+        |coordinates| {
+            let point = ndarray::ArrayView1::from(coordinates);
+            let (energy, gradient) = engine
+                .eval(point)
+                .ok_or_else(|| "the NWChem session returned no energy".to_string())?;
             Ok((energy, gradient.to_vec()))
         },
     )
