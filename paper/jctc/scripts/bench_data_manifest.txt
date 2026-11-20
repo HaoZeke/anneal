@@ -123,7 +123,6 @@ paper/jctc/logs/REDACTION.txt
 paper/jctc/logs/WATER-REDACTION.txt
 paper/jctc/logs/archive/figure-provenance-v128.txt
 paper/jctc/logs/assert.log
-paper/jctc/logs/attribution-grep.txt
 paper/jctc/logs/cargo-build-receipt-map.txt
 paper/jctc/logs/cargo-build-receipt.txt
 paper/jctc/logs/commit-msg.txt
