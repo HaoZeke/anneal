@@ -5887,3 +5887,53 @@ fn rejected(
         reason,
     }
 }
+
+#[cfg(test)]
+mod force_sign_fd {
+    use super::ReceivingRideSurface;
+    use crate::catalog::FreshEvaluation;
+    use crate::pes_exploration::PesSurface;
+    use ndarray::ArrayView1;
+
+    #[allow(dead_code)]
+    mod force_sign {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/examples/common/force_sign.rs"
+        ));
+    }
+
+    const GEOMETRY: [f64; 9] = [0.20, 0.15, 0.05, 1.12, 0.28, -0.10, -0.18, 1.02, 0.22];
+
+    fn published(coordinates: &[f64]) -> Result<(f64, Vec<f64>), String> {
+        let bowl = |point: &[f64]| -> Result<FreshEvaluation, String> {
+            Ok(FreshEvaluation {
+                energy: point.iter().map(|value| value * value).sum(),
+                forces: point.iter().map(|value| -2.0 * value).collect(),
+            })
+        };
+        let surface = ReceivingRideSurface(&bowl);
+        let (energy, gradient) = PesSurface::evaluate(&surface, ArrayView1::from(coordinates))?;
+        Ok((energy, gradient.to_vec()))
+    }
+
+    #[test]
+    fn the_receiving_surface_gradient_matches_the_energy() {
+        let (energy, slope) = published(&GEOMETRY).expect("surface");
+        let precision = force_sign::unit_in_the_last_place(energy);
+        let (lengths, step_limits) = force_sign::uniform_lengths(&GEOMETRY, None).expect("lengths");
+        let row = force_sign::compare_slope(
+            "receiving-surface",
+            0,
+            &GEOMETRY,
+            &slope,
+            energy,
+            precision,
+            &lengths,
+            &step_limits,
+            |point| published(point).map(|(energy, _)| energy),
+        )
+        .expect("finite difference");
+        println!("{row}");
+    }
+}

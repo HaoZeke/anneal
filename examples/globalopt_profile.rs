@@ -113,7 +113,7 @@ fn gmin_rotate(w: [f64; 3], p: [f64; 3]) -> ([f64; 3], [[f64; 3]; 3]) {
 }
 
 #[allow(clippy::needless_range_loop)]
-fn tip4p_energy_gradient(sites: &[[f64; 3]; 4], x: &[f64]) -> (f64, Vec<f64>) {
+fn tip4p_energy_gradient(sites: &[[f64; 3]; 4], x: &[f64]) -> (f64, Vec<f64>, usize, f64) {
     let n = x.len() / 6;
     let mut placed = vec![[[0.0; 3]; 4]; n];
     let mut deriv = vec![[[[0.0; 3]; 3]; 4]; n];
@@ -133,13 +133,19 @@ fn tip4p_energy_gradient(sites: &[[f64; 3]; 4], x: &[f64]) -> (f64, Vec<f64>) {
     }
     let mut site_grad = vec![[[0.0; 3]; 4]; n];
     let mut e = 0.0;
+    let mut terms = 0usize;
+    let mut absolute = 0.0;
     for l in 0..n {
         for r in (l + 1)..n {
             let d: [f64; 3] = std::array::from_fn(|a| placed[l][0][a] - placed[r][0][a]);
             let inv = 1.0 / (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
             let r6 = inv * inv * inv;
             let r12 = r6 * r6;
-            e += TIP4P_C12 * r12 - TIP4P_C6 * r6;
+            let repulsion = TIP4P_C12 * r12;
+            let attraction = TIP4P_C6 * r6;
+            e += repulsion - attraction;
+            terms += 2;
+            absolute += repulsion.abs() + attraction.abs();
             let slope = (-12.0 * TIP4P_C12 * r12 + 6.0 * TIP4P_C6 * r6) * inv;
             for (a, component) in d.iter().enumerate() {
                 site_grad[l][0][a] += slope * *component;
@@ -151,6 +157,8 @@ fn tip4p_energy_gradient(sites: &[[f64; 3]; 4], x: &[f64]) -> (f64, Vec<f64>) {
                     let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
                     let pair = TIP4P_COULOMB * *charge_a * *charge_b / r2.sqrt();
                     e += pair;
+                    terms += 1;
+                    absolute += pair.abs();
                     let slope = -pair / r2;
                     for (a, component) in d.iter().enumerate() {
                         site_grad[l][sa][a] += slope * *component;
@@ -175,7 +183,7 @@ fn tip4p_energy_gradient(sites: &[[f64; 3]; 4], x: &[f64]) -> (f64, Vec<f64>) {
             g[3 * n + 3 * m + k] = -total;
         }
     }
-    (e, g)
+    (e, g, terms, absolute)
 }
 
 struct Counted {
@@ -191,7 +199,7 @@ impl Counted {
     fn energy_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
         let x = x.to_vec();
         if let Model::Tip4p(sites) = &self.model {
-            let (e, g) = tip4p_energy_gradient(sites, &x);
+            let (e, g, _, _) = tip4p_energy_gradient(sites, &x);
             return (e, Array1::from(g));
         }
         let (sigma, cutoff2) = match &self.model {
@@ -456,4 +464,97 @@ fn main() {
         "preset={preset} starts={} hits={hits} par2={par2:.2} median_hit={median}",
         rows.len()
     );
+}
+
+#[allow(dead_code)]
+pub(crate) struct Tip4pPublished {
+    pub energy: f64,
+    pub gradient: Vec<f64>,
+    pub lengths: Vec<f64>,
+    pub step_limits: Vec<f64>,
+    pub terms: usize,
+    pub absolute: f64,
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn tip4p_published(coordinates: &[f64]) -> Result<Tip4pPublished, String> {
+    if coordinates.len() < 12 || !coordinates.len().is_multiple_of(6) {
+        return Err("a TIP4P state is six coordinates per molecule".into());
+    }
+    let sites = tip4p_sites();
+    let (energy, gradient, terms, absolute) = tip4p_energy_gradient(&sites, coordinates);
+    let (lengths, step_limits) = tip4p_lengths(&sites, coordinates)?;
+    Ok(Tip4pPublished {
+        energy,
+        gradient,
+        lengths,
+        step_limits,
+        terms,
+        absolute,
+    })
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn tip4p_energy_at(coordinates: &[f64]) -> f64 {
+    tip4p_energy_gradient(&tip4p_sites(), coordinates).0
+}
+
+fn tip4p_lengths(
+    body: &[[f64; 3]; 4],
+    coordinates: &[f64],
+) -> Result<(Vec<f64>, Vec<f64>), String> {
+    let molecules = coordinates.len() / 6;
+    let mut placed = vec![[[0.0; 3]; 4]; molecules];
+    for molecule in 0..molecules {
+        let angle = [
+            -coordinates[3 * molecules + 3 * molecule],
+            -coordinates[3 * molecules + 3 * molecule + 1],
+            -coordinates[3 * molecules + 3 * molecule + 2],
+        ];
+        for (site, body_site) in body.iter().enumerate() {
+            let (rotated, _) = gmin_rotate(angle, *body_site);
+            for axis in 0..3 {
+                placed[molecule][site][axis] = coordinates[3 * molecule + axis] + rotated[axis];
+            }
+        }
+    }
+    let mut shortest = f64::INFINITY;
+    for left in 0..molecules {
+        for right in (left + 1)..molecules {
+            for left_site in 0..4 {
+                for right_site in 0..4 {
+                    let mut square = 0.0;
+                    for axis in 0..3 {
+                        let delta = placed[left][left_site][axis] - placed[right][right_site][axis];
+                        square += delta * delta;
+                    }
+                    shortest = shortest.min(square.sqrt());
+                }
+            }
+        }
+    }
+    let mut arm = 0.0_f64;
+    for site in body {
+        let square = site[0] * site[0] + site[1] * site[1] + site[2] * site[2];
+        arm = arm.max(square.sqrt());
+    }
+    if !shortest.is_finite()
+        || shortest <= 0.0
+        || !matches!(arm.partial_cmp(&0.0), Some(std::cmp::Ordering::Greater))
+    {
+        return Err("the TIP4P geometry has no pair length".into());
+    }
+    // A rotation of one radian moves a site by about `arm`. The model length
+    // of an angle is the Cartesian pair length measured in those radians.
+    let angular = shortest / arm;
+    let mut lengths = vec![shortest; coordinates.len()];
+    let mut step_limits = vec![shortest; coordinates.len()];
+    for molecule in 0..molecules {
+        for axis in 0..3 {
+            let index = 3 * molecules + 3 * molecule + axis;
+            lengths[index] = angular;
+            step_limits[index] = angular;
+        }
+    }
+    Ok((lengths, step_limits))
 }
