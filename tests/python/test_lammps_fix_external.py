@@ -180,11 +180,11 @@ def test_tag_order_cache_is_reused_and_invalidated(monkeypatch):
     forces = np.zeros((2, 3))
     driver._step(2, lmp.tags, lmp.positions, forces)
     driver._step(2, lmp.tags, lmp.positions, forces)
-    assert calls == 1
+    assert calls == 0
 
     lmp.tags = lmp.tags[::-1].copy()
     driver._step(2, lmp.tags, lmp.positions, forces)
-    assert calls == 2
+    assert calls == 1
 
 
 @pytest.mark.parametrize("style", ["metal", "real", "electron"])
@@ -662,3 +662,58 @@ def test_real_lammps_smoke():
         )
     finally:
         lmp.close()
+
+
+def test_ids_in_order_reach_the_potential_without_a_permutation():
+    pot = RecordingPotential(np.zeros((3, 3)))
+    lmp = FakeLammps(tags=(1, 2), types=(2, 1))
+    driver = FixExternal(lmp, pot, "O H")
+    forces = np.zeros((2, 3))
+    driver._step(2, lmp.tags, lmp.positions, forces)
+
+    received, numbers, _ = pot.calls[0]
+    np.testing.assert_array_equal(received, lmp.positions)
+    np.testing.assert_array_equal(numbers, [1, 8])
+    np.testing.assert_array_equal(forces, [[1, 2, 3], [8, 9, 10]])
+
+
+def test_reversed_ids_are_permuted_both_ways():
+    pot = RecordingPotential(np.zeros((3, 3)))
+    lmp = FakeLammps(
+        tags=(3, 2, 1),
+        types=(1, 2, 1),
+        positions=((1.0, 0.0, 0.0), (2.0, 0.0, 0.0), (3.0, 0.0, 0.0)),
+    )
+    driver = FixExternal(lmp, pot, "O H")
+    forces = np.zeros((3, 3))
+    driver._step(3, lmp.tags, lmp.positions, forces)
+
+    received, numbers, _ = pot.calls[0]
+    np.testing.assert_array_equal(received[:, 0], [3.0, 2.0, 1.0])
+    np.testing.assert_array_equal(numbers, [8, 1, 8])
+    np.testing.assert_array_equal(forces, [[8, 9, 10], [1, 2, 3], [8, 9, 10]])
+
+
+@pytest.mark.parametrize("tags", [(1, 3), (2, 3), (0, 1)])
+def test_ids_that_are_not_one_to_n_are_refused(tags):
+    lmp = FakeLammps(tags=tags, types=(1, 1))
+    driver = FixExternal(lmp, RecordingPotential(np.zeros((3, 3))), "H He")
+    with pytest.raises(RuntimeError, match="atom IDs 1..N"):
+        driver._step(2, lmp.tags, lmp.positions, np.zeros((2, 3)))
+
+
+def test_a_potential_that_edits_its_inputs_leaves_lammps_untouched():
+    class Greedy:
+        def evaluate(self, positions, numbers, cell):
+            positions += 1.0
+            numbers += 1
+            cell += 1.0
+            return {"energy": 0.0, "forces": np.zeros_like(positions), "stress": np.eye(3)}
+
+    lmp = FakeLammps(tags=(1, 2))
+    before = lmp.positions.copy()
+    driver = FixExternal(lmp, Greedy(), "H He")
+    driver._step(2, lmp.tags, lmp.positions, np.zeros((2, 3)))
+    np.testing.assert_array_equal(lmp.positions, before)
+    box = box_rows([1.0, 2.0, 3.0], [10.0, 10.5, 12.4], 1.2, 0.9, -0.7)
+    np.testing.assert_allclose(lmp.virial[:3], -abs(np.linalg.det(box)) * np.ones(3))

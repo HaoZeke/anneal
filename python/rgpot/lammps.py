@@ -145,6 +145,9 @@ class FixExternal:
         self.virial = virial
         self.units = str(lmp.extract_global("units"))
         self.length_per_angstrom, self.energy_per_ev = unit_factors(self.units)
+        self._scale_length = self.length_per_angstrom != 1.0
+        self._scale_energy = self.energy_per_ev != 1.0
+        self._force_factor = self.energy_per_ev / self.length_per_angstrom
         self.type_numbers = type_numbers(elements, int(lmp.extract_global("ntypes")))
 
         periodicity = list(lmp.extract_box()[5])
@@ -259,8 +262,10 @@ class FixExternal:
             or self._cached_tags.shape != tags.shape
             or not np.array_equal(self._cached_tags, tags)
         ):
-            if natoms == 0 or not np.array_equal(
-                np.sort(tags), np.arange(1, natoms + 1)
+            ids = np.arange(1, natoms + 1, dtype=np.int64)
+            in_order = natoms and np.array_equal(tags, ids)
+            if not in_order and (
+                natoms == 0 or not np.array_equal(np.sort(tags), ids)
             ):
                 low = int(tags.min()) if natoms else "-"
                 high = int(tags.max()) if natoms else "-"
@@ -269,14 +274,26 @@ class FixExternal:
                     f"with IDs {low}..{high}"
                 )
             self._cached_tags = tags.copy()
-            self._cached_index = tags - 1
-        assert self._cached_index is not None
+            self._cached_index = None if in_order else tags - 1
         index = self._cached_index
-        positions = np.empty((natoms, 3), dtype=float)
-        positions[index] = xu / self.length_per_angstrom
-        ordered = np.empty(natoms, dtype=np.int32)
-        ordered[index] = numbers
-        native_rows = np.ascontiguousarray(rows / self.length_per_angstrom)
+        if index is None:
+            positions = xu / self.length_per_angstrom if self._scale_length else xu
+            ordered = numbers
+        else:
+            positions = np.empty((natoms, 3), dtype=float)
+            positions[index] = (
+                xu / self.length_per_angstrom if self._scale_length else xu
+            )
+            ordered = np.empty(natoms, dtype=np.int32)
+            ordered[index] = numbers
+        native_rows = (
+            np.ascontiguousarray(rows / self.length_per_angstrom)
+            if self._scale_length
+            else rows
+        )
+        # LAMMPS' restricted triclinic cell is lower triangular, so its
+        # determinant is the product of the diagonal.
+        volume = abs(float(native_rows[0, 0] * native_rows[1, 1] * native_rows[2, 2]))
 
         energy, forces, stress = self._raw(positions, ordered, native_rows)
         if not self.periodic or self.virial == "none":
@@ -287,14 +304,15 @@ class FixExternal:
                 "on a periodic LAMMPS box"
             )
         else:
-            virial = -abs(float(np.linalg.det(native_rows))) * stress
+            virial = -volume * stress
 
-        force_factor = self.energy_per_ev / self.length_per_angstrom
-        return (
-            energy * self.energy_per_ev,
-            forces[index] * force_factor,
-            virial * self.energy_per_ev,
-        )
+        if index is not None:
+            forces = forces[index]
+        if self._scale_energy or self._scale_length:
+            forces = forces * self._force_factor
+        if self._scale_energy:
+            return energy * self.energy_per_ev, forces, virial * self.energy_per_ev
+        return energy, forces, virial
 
     def _collective_problem(
         self, error: BaseException | None, phase: str
@@ -373,17 +391,17 @@ class FixExternal:
             forces = comm.scatter(shares, root=0)
 
         f[:nlocal] = forces
-        sym = 0.5 * (virial + virial.T)
+        v = virial.tolist()
         lmp.fix_external_set_energy_global(self.fix_id, float(energy))
         lmp.fix_external_set_virial_global(
             self.fix_id,
             [
-                sym[0, 0],
-                sym[1, 1],
-                sym[2, 2],
-                sym[0, 1],
-                sym[0, 2],
-                sym[1, 2],
+                v[0][0],
+                v[1][1],
+                v[2][2],
+                0.5 * (v[0][1] + v[1][0]),
+                0.5 * (v[0][2] + v[2][0]),
+                0.5 * (v[1][2] + v[2][1]),
             ],
         )
         self.energy = float(energy)
