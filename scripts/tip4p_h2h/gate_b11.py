@@ -37,6 +37,10 @@ TREES = {
 }
 SIZES = tuple(range(8, 22)) + (25,)
 SEEDS = tuple(range(2000, 2012))
+SECOND_SEEDS = tuple(range(2012, 2024))
+SECOND_SIZES = tuple(range(15, 22))
+PROBE_SIZES = (9, 15, 17)
+LABELS = {"A": "develop", "A2": "develop-2", "B": "b11", "C": "b6", "P": "probe"}
 NONRIGID_SEEDS = (2000, 2001, 2002)
 BUDGET = 2_000_000
 CORE = "0"
@@ -60,10 +64,13 @@ THREAD_KEYS = (
 )
 FIELDS = [
     "campaign",
+    "seed_set",
     "driver",
     "cell",
     "seed",
     "arm",
+    "label",
+    "probe",
     "round",
     "slot",
     "commit",
@@ -80,6 +87,7 @@ FIELDS = [
     "pot_s",
     "outside_s",
     "best",
+    "search_best",
     "lowest",
     "geometry_energy",
     "hops",
@@ -156,7 +164,7 @@ class Arm:
         self.worktree = Path(worktree)
         self.commit = (Path(bin_dir) / "commit").read_text().strip()
         self.tree = (Path(bin_dir) / "tree").read_text().strip()
-        if self.tree != TREES[name]:
+        if name in TREES and self.tree != TREES[name]:
             raise SystemExit(f"STOP: arm {name} tree {self.tree} is not {TREES[name]}")
         live = git(self.worktree, "rev-parse", "HEAD^{tree}")
         if live != self.tree or git(self.worktree, "status", "--porcelain"):
@@ -221,7 +229,8 @@ def seed_run(
         "wall_s": f"{wall:.6f}",
         "pot_s": f"{pot:.6f}",
         "outside_s": f"{wall - pot:.6f}",
-        "best": field(text, "best"),
+        "best": row["best"],
+        "search_best": field(text, "best"),
         "lowest": field(text, "lowest"),
         "geometry_energy": field(text, "geometry_energy"),
         "hops": field(text, "hops"),
@@ -308,8 +317,11 @@ def nonrigid_jobs(panel) -> list[tuple[str, int, int, int, str]]:
 
 
 def base_row(campaign: str, cell: str, seed: int, block: int, slot: int, arm: Arm, budget: int, ref: str) -> dict:
+    seed_set = "primary" if seed in SEEDS else "second" if seed in SECOND_SEEDS else ""
     return {
         "campaign": campaign,
+        "seed_set": "" if campaign == "nonrigid" else seed_set,
+        "label": LABELS[arm.name],
         "cell": cell,
         "seed": str(seed),
         "arm": arm.name,
@@ -363,6 +375,35 @@ def cmd_run(args: argparse.Namespace) -> int:
             rows.append(row)
             check_starts(rows)
             print(f"done rigid {cell} s{seed} {name} hit {row['hit']} calls {row['calls']} wall {row['wall_s']}", flush=True)
+    elif args.campaign in ("second", "probe"):
+        if args.campaign == "second":
+            names, sizes, seeds, stop_on = ("A", "B"), SECOND_SIZES, SECOND_SEEDS, False
+        else:
+            names, sizes, seeds, stop_on = ("A", "P"), PROBE_SIZES, SEEDS, True
+        if set(arms) != set(names):
+            raise SystemExit(f"{args.campaign} campaign needs arms {names}")
+        probe = arms["P"].commit if "P" in arms else ""
+        for n in sizes:
+            ref = refs[n]
+            cell = f"tip4p{n}"
+            for block, seed in enumerate(seeds):
+                for slot, name in enumerate(arm_order(seed, names), start=1):
+                    if ("h2h_seed", cell, str(seed), name) in done:
+                        continue
+                    stop = repr(ref + DEFAULT_HIT_TOL) if stop_on else "-"
+                    row = base_row(args.campaign, cell, seed, block, slot, arms[name], BUDGET, f"{ref:.10f}")
+                    row["probe"] = probe
+                    row.update(seed_run(arms[name], "tip4p", n, 0.0, BUDGET, seed, stop, cell, args.work))
+                    hit = energy_hits(float(row["best"]), ref, DEFAULT_HIT_TOL)
+                    if stop_on and hit != (row["hit"] == "1"):
+                        raise SystemExit(f"hit flag disagrees for {cell} {seed} {name}")
+                    if not stop_on:
+                        row["hit"] = "1" if hit else "0"
+                        row["evals_to_hit"] = ""
+                    append_row(journal, row)
+                    rows.append(row)
+                    check_starts(rows)
+                    print(f"done {args.campaign} {cell} s{seed} {name} hit {row['hit']} calls {row['calls']} wall {row['wall_s']}", flush=True)
     elif args.campaign == "nonrigid":
         if set(arms) != {"A", "B"}:
             raise SystemExit("nonrigid campaign needs arms A and B")
@@ -405,13 +446,14 @@ def score_size25(rows: list[dict[str, str]]) -> float:
     return reference
 
 
-IDENTITY = ("hit", "calls", "charged", "best", "basins", "trace_sha", "geometry_sha")
+IDENTITY = ("hit", "calls", "charged", "best", "search_best", "basins", "trace_sha", "geometry_sha")
 NONRIGID_IDENTITY = (
     "hit",
     "evals_to_hit",
     "calls",
     "charged",
     "best",
+    "search_best",
     "lowest",
     "geometry_energy",
     "hops",
@@ -586,7 +628,7 @@ def self_test() -> None:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=("self-test", "build", "run", "score"))
-    parser.add_argument("--campaign", choices=("rigid", "nonrigid"))
+    parser.add_argument("--campaign", choices=("rigid", "second", "probe", "nonrigid"))
     parser.add_argument("--arm", action="append", default=[], help="NAME=BUILD_DIR:WORKTREE")
     parser.add_argument("--journal", type=Path)
     parser.add_argument("--work", type=Path)
