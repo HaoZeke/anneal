@@ -1226,8 +1226,8 @@ hvp(positions, atom_types, box, direction, step=0.0, scheme='auto')
   The kernel runs with the interpreter released.
 - Errors :: =direction= not of shape =(N, 3)= raises =ValueError=
   =direction: expected shape (N, 3), got ...=.
-  An unknown =scheme=, ="analytic"=, ="ad"= or ="exact"= on a class without
-  what it needs, a negative or non-finite =step=, or non-finite positions or
+  An unknown =scheme=, ="analytic"=, ="ad"= or ="exact"= on a class without what
+  it needs, a negative or non-finite =step=, or non-finite positions or
   direction raise =ValueError=.
   A non-finite energy, force or product raises =rgpot.NumericalError=.
   The conventions list the other input errors.
@@ -1309,8 +1309,8 @@ hessian(positions, atom_types, box, scheme, step=0.0)
   =step= is that displacement; 0 means 1e-3 Angstrom.
 - Units :: positions, box and =step= in Angstrom; the Hessian in eV/Angstrom^2.
 - Outputs :: a tuple =(hessian, scheme)=: a new float64 array of shape
-  =(3N, 3N)=, row and column =3 i + k= for axis =k= of atom =i=, and the name
-  of the scheme that computed it, ="exact"= reporting ="analytic"= or ="ad"=.
+  =(3N, 3N)=, row and column =3 i + k= for axis =k= of atom =i=, and the name of
+  the scheme that computed it, ="exact"= reporting ="analytic"= or ="ad"=.
   ="central"= makes =6 N= force calls, which bypass the centre of =hvp= and are
   counted in =derivative_counts()=, and returns a symmetric matrix.
   The kernel runs with the interpreter released.
@@ -1437,11 +1437,11 @@ derivative_caps()
   rgpot.SumPot
 - Inputs :: none.
 - Units :: none; flags and counts of force calls.
-- Outputs :: a dict with the flags =hvp_analytic=, =hvp_ad=, =hvp_fd=,
-  =hessian_analytic=, =hessian_ad= and =hessian_fd=, the schemes =hvp= and
-  =hessian= have for this kernel, and the costs =hvp_forward_force_calls= (1,
-  plus 1 for a new centre), =hvp_central_force_calls= (2) and
-  =hessian_central_force_calls_per_atom= (6).
+- Outputs :: a dict with the flags =hvp_analytic=, =hvp_ad=,
+  =hvp_fd=, =hessian_analytic=, =hessian_ad= and =hessian_fd=, the schemes =hvp=
+  and =hessian= have for this kernel, and the costs
+  =hvp_forward_force_calls= (1, plus 1 for a new centre), =hvp_central_force_calls=
+  (2) and =hessian_central_force_calls_per_atom= (6).
   The finite-difference flags are always =True=; an analytic or dual-number
   scheme makes no force call.
   The query is read-only and reads =primary().caps()=, as for =caps()=.
@@ -1461,9 +1461,10 @@ derivative_counts()
   rgpot.SumPot
 - Inputs :: none.
 - Units :: none; the values are counts.
-- Outputs :: a dict with =hvp_forward=, =hvp_central=, =hvp_analytic= and
-  =hvp_ad=, the products each scheme answered, a zero direction under the
-  scheme its request resolved to; =hessian_central=, =hessian_analytic= and
+- Outputs :: a dict with =hvp_forward=, =hvp_central=,
+  =hvp_analytic= and =hvp_ad=, the products each scheme answered, a zero
+  direction under the scheme its request resolved to;
+  =hessian_central=, =hessian_analytic= and
   =hessian_ad=, the Hessians each scheme answered; and =hessian_force_calls=,
   the force calls of central Hessians.
   A refused request counts nowhere.
