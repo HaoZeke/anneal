@@ -67,3 +67,93 @@ All budgets follow `PAPER_BUDGETS` (`400000` for 38 atoms, `1000000` for 55 atom
 - `sessions.jsonl`: Session provenance with SHA-256 hashed machine identifier.
 - `summary.csv`: Per `(system, arm)` summary statistics and knockout-vs-recommended p-values.
 - `survival.csv`: Per `(system, arm)` Kaplan-Meier survival curves.
+
+## Results
+
+Session `20261120T102829Z` completed all 972 rows (`9` systems × `9` arms × `12` seeds) serially on core `0` with `0` errors and `0` timeouts. Statistics are computed from raw `rows.csv` only (`72` knockout-vs-`recommended` tests per statistic family; raw two-sided p-values reported with no multiple-comparison claims). On `lj98` and `lj150` (`n >= 98`), `e_no_surfaces` is identical to `recommended` and reproduced `24/24` bit-identical outcomes (`hit`, `calls`, `charged`, `best_bits`).
+
+<!-- g1-knockout table: start -->
+| System | Budget | Arm | Hits | Fisher p | Log-rank p | MW p | Median calls | Median outside/charged (us) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| LJ38 | 400000 | `recommended` | 12/12 | - | - | - | 6436.5 | 4.001 |
+|  |  | `a_restart_on_stall` | 12/12 | 1 | 0.51 | 0.86 | 6436.5 | 4.254 |
+|  |  | `b_no_orbit` | 12/12 | 1 | 0.38 | 0.75 | 5989.5 | 4.849 |
+|  |  | `c_no_symmetry` | 12/12 | 1 | 0.89 | 1 | 5925 | 3.855 |
+|  |  | `d_no_screens` | 12/12 | 1 | 0.64 | 0.84 | 7424 | 4.343 |
+|  |  | `e_no_surfaces` | 11/12 | 1 | 3.07e-05 | 3.43e-04 | 93403 | 4.301 |
+|  |  | `f_no_energy_lattice` | 12/12 | 1 | 0.56 | 0.77 | 7300 | 3.882 |
+|  |  | `g_no_priors` | 12/12 | 1 | 0.78 | 0.89 | 5138 | 4.156 |
+|  |  | `h_no_basin_bias` | 12/12 | 1 | 0.80 | 0.95 | 6117.5 | 4.422 |
+| LJ55 | 1000000 | `recommended` | 12/12 | - | - | - | 2245 | 7.172 |
+|  |  | `a_restart_on_stall` | 12/12 | 1 | 0.83 | 1 | 2245 | 7.166 |
+|  |  | `b_no_orbit` | 12/12 | 1 | 0.28 | 0.40 | 4429 | 8.223 |
+|  |  | `c_no_symmetry` | 12/12 | 1 | 0.94 | 0.86 | 2479 | 6.047 |
+|  |  | `d_no_screens` | 12/12 | 1 | 0.86 | 0.89 | 1966 | 8.845 |
+|  |  | `e_no_surfaces` | 12/12 | 1 | 0.43 | 0.31 | 3413.5 | 9.029 |
+|  |  | `f_no_energy_lattice` | 12/12 | 1 | 7.10e-04 | 2.01e-03 | 13892 | 7.709 |
+|  |  | `g_no_priors` | 12/12 | 1 | 0.77 | 0.54 | 2289.5 | 8.326 |
+|  |  | `h_no_basin_bias` | 12/12 | 1 | 0.42 | 0.58 | 2578.5 | 8.423 |
+| LJ75 | 4000000 | `recommended` | 12/12 | - | - | - | 45040 | 11.810 |
+|  |  | `a_restart_on_stall` | 12/12 | 1 | 0.64 | 0.75 | 34656 | 11.067 |
+|  |  | `b_no_orbit` | 12/12 | 1 | 0.99 | 0.93 | 34369 | 10.289 |
+|  |  | `c_no_symmetry` | 12/12 | 1 | 0.23 | 0.21 | 15532 | 8.970 |
+|  |  | `d_no_screens` | 12/12 | 1 | 0.45 | 0.80 | 44942 | 11.259 |
+|  |  | `e_no_surfaces` | 8/12 | 0.093 | 2.31e-07 | 3.52e-05 | 3497741.5 | 10.387 |
+|  |  | `f_no_energy_lattice` | 12/12 | 1 | 0.47 | 0.58 | 31214.5 | 10.876 |
+|  |  | `g_no_priors` | 12/12 | 1 | 0.31 | 0.24 | 20329.5 | 8.918 |
+|  |  | `h_no_basin_bias` | 12/12 | 1 | 0.22 | 0.27 | 24019 | 11.738 |
+| LJ98 | 4000000 | `recommended` | 10/12 | - | - | - | 1336507 | 15.457 |
+|  |  | `a_restart_on_stall` | 11/12 | 1 | 0.13 | 0.088 | 608864.5 | 16.103 |
+|  |  | `b_no_orbit` | 5/12 | 0.089 | 0.080 | 0.22 | 4000000 | 15.845 |
+|  |  | `c_no_symmetry` | 11/12 | 1 | 0.69 | 0.71 | 1514397.5 | 14.934 |
+|  |  | `d_no_screens` | 12/12 | 0.48 | 0.47 | 0.79 | 1375020 | 14.553 |
+|  |  | `e_no_surfaces` | 10/12 | 1 | 1 | 1 | 1336507 | 15.605 |
+|  |  | `f_no_energy_lattice` | 12/12 | 0.48 | 0.017 | 0.046 | 654846.5 | 14.237 |
+|  |  | `g_no_priors` | 11/12 | 1 | 0.88 | 0.75 | 1367544.5 | 12.899 |
+|  |  | `h_no_basin_bias` | 4/12 | 0.036 | 0.025 | 0.068 | 4000000 | 16.683 |
+| LJ150 | 4000000 | `recommended` | 9/12 | - | - | - | 656409 | 36.627 |
+|  |  | `a_restart_on_stall` | 12/12 | 0.22 | 2.85e-03 | 0.018 | 152388 | 39.504 |
+|  |  | `b_no_orbit` | 7/12 | 0.67 | 0.48 | 0.64 | 1381559.5 | 34.483 |
+|  |  | `c_no_symmetry` | 8/12 | 1 | 0.64 | 0.70 | 1087149 | 31.212 |
+|  |  | `d_no_screens` | 10/12 | 1 | 0.66 | 0.62 | 522142 | 36.464 |
+|  |  | `e_no_surfaces` | 9/12 | 1 | 1 | 1 | 656409 | 37.142 |
+|  |  | `f_no_energy_lattice` | 12/12 | 0.22 | 0.19 | 0.40 | 385707.5 | 33.673 |
+|  |  | `g_no_priors` | 10/12 | 1 | 0.71 | 0.66 | 435932.5 | 27.784 |
+|  |  | `h_no_basin_bias` | 10/12 | 1 | 0.27 | 0.17 | 179490 | 38.105 |
+| M55 rho=14 | 1000000 | `recommended` | 3/12 | - | - | - | 1000000 | 5.792 |
+|  |  | `a_restart_on_stall` | 3/12 | 1 | 0.96 | 0.94 | 1000000 | 5.859 |
+|  |  | `b_no_orbit` | 3/12 | 1 | 0.99 | 1 | 1000000 | 5.462 |
+|  |  | `c_no_symmetry` | 1/12 | 0.59 | 0.32 | 0.37 | 1000000 | 5.675 |
+|  |  | `d_no_screens` | 1/12 | 0.59 | 0.27 | 0.29 | 1000000 | 5.718 |
+|  |  | `e_no_surfaces` | 10/12 | 0.012 | 2.36e-03 | 6.28e-03 | 256530.5 | 6.192 |
+|  |  | `f_no_energy_lattice` | 0/12 | 0.22 | 0.070 | 0.079 | 1000000 | 5.421 |
+|  |  | `g_no_priors` | 1/12 | 0.59 | 0.27 | 0.29 | 1000000 | 5.358 |
+|  |  | `h_no_basin_bias` | 0/12 | 0.22 | 0.070 | 0.079 | 1000000 | 5.131 |
+| M80 rho=6 | 4000000 | `recommended` | 12/12 | - | - | - | 240209.5 | 11.845 |
+|  |  | `a_restart_on_stall` | 12/12 | 1 | 0.25 | 0.64 | 204610.5 | 11.854 |
+|  |  | `b_no_orbit` | 12/12 | 1 | 0.37 | 0.84 | 190075 | 10.551 |
+|  |  | `c_no_symmetry` | 12/12 | 1 | 0.22 | 0.44 | 217070 | 10.462 |
+|  |  | `d_no_screens` | 12/12 | 1 | 0.18 | 0.40 | 214240 | 12.914 |
+|  |  | `e_no_surfaces` | 12/12 | 1 | 5.22e-04 | 8.59e-03 | 31131 | 18.664 |
+|  |  | `f_no_energy_lattice` | 0/12 | 7.40e-07 | 2.31e-07 | 1.03e-05 | 4000000 | 11.639 |
+|  |  | `g_no_priors` | 12/12 | 1 | 0.38 | 0.40 | 258607.5 | 9.240 |
+|  |  | `h_no_basin_bias` | 12/12 | 1 | 0.62 | 0.95 | 160744 | 11.320 |
+| M80 rho=14 | 4000000 | `recommended` | 8/12 | - | - | - | 3516411 | 12.470 |
+|  |  | `a_restart_on_stall` | 2/12 | 0.036 | 0.014 | 0.022 | 4000000 | 10.652 |
+|  |  | `b_no_orbit` | 4/12 | 0.22 | 0.14 | 0.18 | 4000000 | 11.020 |
+|  |  | `c_no_symmetry` | 5/12 | 0.41 | 0.45 | 0.74 | 4000000 | 12.278 |
+|  |  | `d_no_screens` | 3/12 | 0.100 | 0.083 | 0.16 | 4000000 | 11.973 |
+|  |  | `e_no_surfaces` | 9/12 | 1 | 0.34 | 0.23 | 2563682.5 | 12.120 |
+|  |  | `f_no_energy_lattice` | 0/12 | 1.35e-03 | 5.70e-04 | 1.08e-03 | 4000000 | 11.395 |
+|  |  | `g_no_priors` | 5/12 | 0.41 | 0.30 | 0.38 | 4000000 | 11.136 |
+|  |  | `h_no_basin_bias` | 2/12 | 0.036 | 0.027 | 0.057 | 4000000 | 11.204 |
+| Au55 | 1000000 | `recommended` | 2/12 | - | - | - | 1000000 | 8.109 |
+|  |  | `a_restart_on_stall` | 1/12 | 1 | 0.51 | 0.51 | 1000000 | 8.548 |
+|  |  | `b_no_orbit` | 4/12 | 0.64 | 0.36 | 0.38 | 1000000 | 7.736 |
+|  |  | `c_no_symmetry` | 1/12 | 1 | 0.58 | 0.65 | 1000000 | 8.139 |
+|  |  | `d_no_screens` | 0/12 | 0.48 | 0.15 | 0.17 | 1000000 | 5.148 |
+|  |  | `e_no_surfaces` | 6/12 | 0.19 | 0.078 | 0.079 | 991482 | 12.049 |
+|  |  | `f_no_energy_lattice` | 0/12 | 0.48 | 0.15 | 0.17 | 1000000 | 8.045 |
+|  |  | `g_no_priors` | 2/12 | 1 | 0.96 | 0.96 | 1000000 | 6.923 |
+|  |  | `h_no_basin_bias` | 2/12 | 1 | 0.96 | 0.96 | 1000000 | 7.987 |
+<!-- g1-knockout table: end -->
