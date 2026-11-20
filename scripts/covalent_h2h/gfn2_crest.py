@@ -44,9 +44,11 @@ hit, both against anneal; alone when no binaries are given, over
 is not the geometry's energy; the summary counts them as misses at their
 budget. ``--rescore SYSTEM ENERGY_EV`` appends to ``--rescored`` both
 codes' hits on that system, over the same files, against another
-reference. A hit is the recorded best energy. When the campaign stop
-target is above that reference, both arms stopped short of it and the
-line is marked censored. No p-value is computed.
+reference. A hit is the recorded best energy. Each line gives that
+arm's call budgets and charged calls, per row and the median, and how
+those rows stopped. An arm that reached the campaign stop target with
+calls still left stopped there. An arm whose budget is the calls it
+made ran to its own end. No p-value is computed.
 Time per call skips a run that made no call.
 Anneal stops at the reference and its miss is the full budget. CREST runs
 to its own end; its energy is the first frame of ``crest_best.xyz``. A
@@ -600,12 +602,56 @@ RESCORE_FIELDS = [
     "reference_eV",
     "runs",
     "hits",
+    "budgets",
+    "median_budget",
+    "charged",
+    "median_charged",
     "censored",
     "seeds",
     "code_revision",
     "host",
     "date",
 ]
+
+
+def _count_text(values: list[float]) -> str:
+    return " ".join(str(int(value)) if value.is_integer() else f"{value:.8f}" for value in values)
+
+
+def arm_calls(runs: list[dict], stop: float | None) -> dict[str, str]:
+    """Per-row budgets and charged calls, and how those rows stopped.
+
+    Anneal is given a call budget and stops on the campaign stop target,
+    so charged stays below budget. CREST records the calls it made as its
+    budget and does not stop on that target.
+    """
+    ordered = sorted(runs, key=lambda row: int(row["seed"]))
+    budgets = [float(row["budget"]) for row in ordered]
+    charged = [float(row["charged"]) for row in ordered]
+    budgets_text = _count_text(budgets)
+    charged_text = _count_text(charged)
+    median_budget = f"{type7(budgets, 0.5):.1f}"
+    median_charged = f"{type7(charged, 0.5):.1f}"
+    at_stop = stop is not None and all(
+        energy_hits(float(row["best"]), stop, HIT_TOL) and made < cap
+        for row, cap, made in zip(ordered, budgets, charged)
+    )
+    if at_stop:
+        how = f"stopped at the {stop:.8f} stop target"
+    elif budgets == charged:
+        how = "ran to its own end"
+    else:
+        how = "stopped short of its recorded budget"
+    return {
+        "budgets": budgets_text,
+        "median_budget": median_budget,
+        "charged": charged_text,
+        "median_charged": median_charged,
+        "censored": (
+            f"{how}; budgets {budgets_text} median {median_budget}; "
+            f"charged {charged_text} median {median_charged}"
+        ),
+    }
 
 
 def rescore(
@@ -618,9 +664,9 @@ def rescore(
 ) -> None:
     """Append each code's hits on ``system`` against ``reference``.
 
-    A hit is the recorded best energy, not the stored hit flag. When the
-    campaign stop target is above ``reference``, both arms stopped short
-    of it and the line is marked censored. No p-value is computed.
+    A hit is the recorded best energy, not the stored hit flag. The line
+    records that arm's budgets and charged calls from the rows, per row
+    and the median, and how that arm stopped. No p-value is computed.
     """
     table = []
     for path in paths:
@@ -630,15 +676,12 @@ def rescore(
                     row for row in csv.DictReader(handle) if row["system"] == system
                 )
     stop = REFERENCE.get(system)
-    if stop is not None and stop > reference + HIT_TOL:
-        censored = f"both runs stopped at the {stop:.8f} stop target"
-    else:
-        censored = ""
     lines = []
     for code in CODES:
         runs = [row for row in table if row["code"] == code]
         if not runs:
             continue
+        calls = arm_calls(runs, stop)
         lines.append(
             {
                 "system": system,
@@ -648,7 +691,11 @@ def rescore(
                 "hits": sum(
                     energy_hits(float(row["best"]), reference, HIT_TOL) for row in runs
                 ),
-                "censored": censored,
+                "budgets": calls["budgets"],
+                "median_budget": calls["median_budget"],
+                "charged": calls["charged"],
+                "median_charged": calls["median_charged"],
+                "censored": calls["censored"],
                 "seeds": " ".join(
                     str(seed) for seed in sorted(int(row["seed"]) for row in runs)
                 ),

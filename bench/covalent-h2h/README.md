@@ -865,9 +865,11 @@ energy from a fresh SCC to 1e-10 eV, but Si13 and Si20 minima do not
   the lowest Si13 minimum any run has reached, recorded in
   `gfn2/minima.csv` with its structure in `gfn2/minima/si13-ring.xyz`.
   Against it both arms are scored in `gfn2/rescore.csv`: anneal hits on
-  one of six seeds and CREST on none. Both runs stopped at the
-  -599.34546694 stop target, so that comparison is right-censored and
-  has no p-value. The 6/6 and 4/6 above are the stop-target score.
+  one of six seeds and CREST on none. No p-value is computed. The 6/6
+  and 4/6 above are the stop-target score. Each arm's call budgets are
+  its recorded rows:
+  anneal-general: stopped at the -599.34546694 stop target; budgets 100000 100000 100000 100000 100000 100000 median 100000.0; charged 1469 2487 2108 1841 683 2481 median 1974.5
+  crest: ran to its own end; budgets 0 143630 95213 113947 112396 0 median 103804.5; charged 0 143630 95213 113947 112396 0 median 103804.5
 - Si20 has no panel reference yet. With the engine reusing the previous
   wavefunction, the Si13 and Si20 minima had energies a fresh SCC does
   not reproduce: an Si13 minimum at -601.12421 eV is -593.51232 eV fresh,

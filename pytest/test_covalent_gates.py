@@ -149,19 +149,23 @@ def test_crest_rescore_reproduces_the_committed_row(tmp_path):
     crest.rescore(history, out, "si13", crest.REFERENCE["si13"], "0" * 40, "bench")
     written = read(out)
     assert len(written) == 4
-    keys = ("system", "code", "reference_eV", "runs", "hits", "seeds")
+    keys = (
+        "system", "code", "reference_eV", "runs", "hits", "budgets",
+        "median_budget", "charged", "median_charged", "censored", "seeds",
+    )
     ring = [{k: row[k] for k in keys} for row in written[:2]]
     committed = [{k: row[k] for k in keys} for row in read(gfn2 / "rescore.csv")]
     assert ring == committed
     at_stop = {row["code"]: row for row in written[2:]}
     assert (at_stop["crest"]["runs"], at_stop["crest"]["hits"]) == ("6", "4")
     assert (at_stop["anneal-general"]["runs"], at_stop["anneal-general"]["hits"]) == ("6", "6")
-    assert at_stop["crest"]["censored"] == ""
+    assert at_stop["crest"]["censored"] == written[1]["censored"]
+    assert at_stop["anneal-general"]["censored"] == written[0]["censored"]
     with pytest.raises(SystemExit, match="no CREST rows"):
         crest.rescore(history, out, "si20", -922.98227162, "0" * 40, "bench")
 
 
-def test_si13_ring_rescore_is_censored_for_both_arms(tmp_path):
+def test_si13_ring_rescore_records_how_each_arm_stopped(tmp_path):
     pytest.importorskip("scipy.stats")
     crest = load("gfn2_crest_ring", "scripts/covalent_h2h/gfn2_crest.py")
     gfn2 = ROOT / "bench" / "covalent-h2h" / "gfn2"
@@ -174,18 +178,40 @@ def test_si13_ring_rescore_is_censored_for_both_arms(tmp_path):
     by_code = {row["code"]: row for row in fresh}
     assert (by_code["anneal-general"]["runs"], by_code["anneal-general"]["hits"]) == ("6", "1")
     assert (by_code["crest"]["runs"], by_code["crest"]["hits"]) == ("6", "0")
-    note = f"both runs stopped at the {crest.REFERENCE['si13']:.8f} stop target"
-    assert by_code["anneal-general"]["censored"] == note
-    assert by_code["crest"]["censored"] == note
+    stop = f"{crest.REFERENCE['si13']:.8f}"
+    assert by_code["anneal-general"]["censored"].startswith(f"stopped at the {stop} stop target")
+    assert by_code["crest"]["censored"].startswith("ran to its own end")
+    assert "both runs stopped" not in by_code["anneal-general"]["censored"]
+    assert "stopped at the" not in by_code["crest"]["censored"]
+    recorded = read(gfn2 / "rows.csv")
+    for code, row in by_code.items():
+        arm = sorted(
+            (item for item in recorded if item["system"] == "si13" and item["code"] == code),
+            key=lambda item: int(item["seed"]),
+        )
+        budgets = [float(item["budget"]) for item in arm]
+        charged = [float(item["charged"]) for item in arm]
+        assert row["budgets"] == " ".join(str(int(value)) for value in budgets)
+        assert row["charged"] == " ".join(str(int(value)) for value in charged)
+        assert row["median_budget"] == f"{crest.type7(budgets, 0.5):.1f}"
+        assert row["median_charged"] == f"{crest.type7(charged, 0.5):.1f}"
+        assert row["budgets"] in row["censored"] and row["charged"] in row["censored"]
     assert "fisher_p" not in fresh[0]
     assert "mannwhitney_p" not in fresh[0]
     stored_crest_hits = [
         row
-        for row in read(gfn2 / "rows.csv")
+        for row in recorded
         if row["system"] == "si13" and row["code"] == "crest" and row["hit"] == "true"
     ]
     assert len(stored_crest_hits) == 4
-    keys = ("system", "code", "reference_eV", "runs", "hits", "censored", "seeds")
+    readme = (ROOT / "bench" / "covalent-h2h" / "README.md").read_text()
+    assert "both runs stopped" not in readme
+    for row in fresh:
+        assert row["censored"] in readme
+    keys = (
+        "system", "code", "reference_eV", "runs", "hits", "budgets",
+        "median_budget", "charged", "median_charged", "censored", "seeds",
+    )
     committed = [{k: row[k] for k in keys} for row in read(gfn2 / "rescore.csv")]
     assert committed == [{k: row[k] for k in keys} for row in fresh]
 
