@@ -324,6 +324,9 @@ impl MoveLibrary {
                         n_molecules: *n_molecules,
                         min_separation: cfg.min_separation,
                     });
+                    kernels.push(ClusterMove::RigidCloseGap {
+                        n_molecules: *n_molecules,
+                    });
                 }
                 if *reverse_cycles
                     && let Some(geometry) = cfg.rigid_body_geometry.as_ref()
@@ -705,6 +708,11 @@ pub enum ClusterMove {
         n_molecules: usize,
         /// Minimum centre-centre distance of the new site, in length units.
         min_separation: f64,
+    },
+    /// Close one missing centre contact at the observed nearest-neighbour scale.
+    RigidCloseGap {
+        /// Rigid bodies in the state.
+        n_molecules: usize,
     },
     /// Translate one rigid-body centre, leaving the others and every orientation fixed.
     RigidTranslateOne {
@@ -1954,6 +1962,7 @@ impl ClusterMove {
             ClusterMove::RigidKick { .. } => "rkick".into(),
             ClusterMove::RigidRotate { .. } => "rrot".into(),
             ClusterMove::RigidRelocate { .. } => "rreloc".into(),
+            ClusterMove::RigidCloseGap { .. } => "rclose".into(),
             ClusterMove::RigidTranslateOne { .. } => "rtrans1".into(),
             ClusterMove::RigidRotateOne { .. } => "rrot1".into(),
             ClusterMove::RigidReorient { .. } => "rreor".into(),
@@ -2521,6 +2530,76 @@ impl ClusterMove {
                         y[base + k] = spun[k];
                     }
                 }
+                y
+            }
+            ClusterMove::RigidCloseGap { n_molecules } => {
+                let mut y = x.to_owned();
+                let n = *n_molecules;
+                if n >= 2 && y.len() >= 6 * n {
+                    let distance = |a: usize, b: usize| {
+                        (0..3)
+                            .map(|axis| {
+                                let delta = y[3 * a + axis] - y[3 * b + axis];
+                                delta * delta
+                            })
+                            .sum::<f64>()
+                            .sqrt()
+                    };
+                    let mut nearest: Vec<f64> = (0..n)
+                        .map(|body| {
+                            (0..n)
+                                .filter(|&other| other != body)
+                                .map(|other| distance(body, other))
+                                .min_by(f64::total_cmp)
+                                .unwrap_or(0.0)
+                        })
+                        .collect();
+                    nearest.sort_by(f64::total_cmp);
+                    let contact = nearest[n / 2];
+                    let coordination: Vec<usize> = (0..n)
+                        .map(|body| {
+                            (0..n)
+                                .filter(|&other| other != body)
+                                .filter(|&other| distance(body, other) <= contact)
+                                .count()
+                        })
+                        .collect();
+                    let fewest = coordination.iter().copied().min().unwrap_or(0);
+                    let loose: Vec<usize> = (0..n)
+                        .filter(|&body| coordination[body] == fewest)
+                        .collect();
+                    let mut centre = [0.0; 3];
+                    for body in 0..n {
+                        for axis in 0..3 {
+                            centre[axis] += y[3 * body + axis] / n as f64;
+                        }
+                    }
+                    let radial2 = |body: usize| {
+                        (0..3)
+                            .map(|axis| {
+                                let delta = y[3 * body + axis] - centre[axis];
+                                delta * delta
+                            })
+                            .sum::<f64>()
+                    };
+                    let body = loose
+                        .into_iter()
+                        .max_by(|&a, &b| radial2(a).total_cmp(&radial2(b)))
+                        .unwrap_or(0);
+                    let partner = (0..n)
+                        .filter(|&other| other != body)
+                        .map(|other| (other, distance(body, other)))
+                        .filter(|(_, separation)| *separation > contact)
+                        .min_by(|a, b| a.1.total_cmp(&b.1));
+                    if let Some((partner, separation)) = partner {
+                        let shift = (separation - contact) / separation;
+                        for axis in 0..3 {
+                            let delta = y[3 * partner + axis] - y[3 * body + axis];
+                            y[3 * body + axis] += shift * delta;
+                        }
+                    }
+                }
+                let _ = (t, scale);
                 y
             }
             ClusterMove::RigidTranslateOne { n_molecules, step } => {
@@ -3308,7 +3387,7 @@ mod move_scaling_tests {
         assert_eq!(
             names,
             [
-                "rkick", "rtrans", "rrot", "rtrans1", "rreor", "rreloc", "rcycle"
+                "rkick", "rtrans", "rrot", "rtrans1", "rreor", "rreloc", "rclose", "rcycle"
             ]
         );
         assert!(cfg.move_library.is_rigid_body());
@@ -3360,6 +3439,26 @@ mod move_scaling_tests {
         }
         assert_eq!(moved, 1);
         assert!(far, "the molecule did not leave its site");
+    }
+
+    #[test]
+    fn close_gap_moves_only_the_most_peripheral_loose_body() {
+        let mv = ClusterMove::RigidCloseGap { n_molecules: 4 };
+        let mut x = Array1::zeros(24);
+        x[0] = -4.0;
+        x[6] = 1.0;
+        x[10] = 1.0;
+        for index in 12..24 {
+            x[index] = index as f64;
+        }
+        let mut rng = StdRng::seed_from_u64(3);
+
+        let y = mv.propose(x.view(), 2.0, &mut rng);
+
+        assert!((y[0] + 1.0).abs() < 1.0e-12);
+        for index in 1..24 {
+            assert_eq!(y[index], x[index], "coordinate {index} moved");
+        }
     }
 
     /// The escape scale has to reach the step, which is the whole mechanism.
