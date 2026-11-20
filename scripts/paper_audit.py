@@ -1760,6 +1760,34 @@ def template_era(audit: Audit) -> None:
                      "none", "; ".join(claims) or "none")
 
 
+OUTSIDE_DATA = "paper/jctc/data/outside_perf"
+
+
+def outside_session(audit: Audit) -> None:
+    """tab:si-outside is the two builds of 61fa67cf in record/outside-perf3-r2, recomputed from its per-seed rows."""
+    path = imported(audit, OUTSIDE_DATA)
+    fields = dict(line.split(" ", 1) for line in audit.text(f"{OUTSIDE_DATA}/PROVENANCE").splitlines())
+    audit.cell(f"{OUTSIDE_DATA}/PROVENANCE", "tree of the record commit", fields["tree"],
+               git("rev-parse", f"{fields['commit']}^{{tree}}").stdout.strip())
+    ancestor_of(audit, path, fields["ancestor"])
+    ancestor_of(audit, path, fields["ancestor"], fields["commit"])
+    era = load_script("outside_table_audit", "paper/jctc/scripts/outside_table.py")
+    si = audit.text(SI)
+    block = si.split(era.MARKS[0], 1)[1].split(era.MARKS[1], 1)[0].strip("\n") if si.count(era.MARKS[0]) == 1 else ""
+    audit.record(block == era.table(), SI, "tab:si-outside is the summariser's block",
+                 "as written" if block == era.table() else "edited by hand", "as written")
+    lines = era.lines()
+    worst = max(abs(line["change"]) for line in lines)
+    audit.cell(path, "largest change between the builds, percent", "3.0", 100.0 * worst)
+    audit.cell(path, "smallest Wilcoxon p between the builds", "0.23", min(line["p"] for line in lines))
+    audit.said(SI, "Both builds take the same calls to the same minimum on every seed, and their median outside "
+                   "seconds differ by at most 3.0\\% on each cluster, with every \\(p\\) at or above 0.23.")
+    flat = collapse(si)
+    for word in ("new_outside", "\\texttt{new}", "blj", "BLJ"):
+        audit.record(word not in flat, SI, f"the outside table prints no {word} arm or system", "absent",
+                     "absent" if word not in flat else "present")
+
+
 RESTART_DRIVERS = ("examples/h2h_gmin_proof.rs", "examples/h2h_morse.rs", "examples/h2h_metal.rs",
                    "examples/h2h_seed.rs", "examples/h2h_sc.rs", "examples/ase_panel.rs", "examples/ase_nonlj.rs")
 
@@ -4024,7 +4052,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
     audit = Audit()
     for check in (paired_statistics, manuscript_gmin, withdrawn_benchmarks, supporting_information, release, paper_0120, gad_published, openconf,
                   head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, lj_large, bench_prose,
-                  manuscript_ase, manuscript_knockouts, manuscript_priors, panel_references, generated_tables, supporting_numbers, manuscript_new, manuscript_followups, cover_letter, science_claims, rigid_stall, presets_and_templates, no_anneal_restart, hexamer_provenance, template_era):
+                  manuscript_ase, manuscript_knockouts, manuscript_priors, panel_references, generated_tables, supporting_numbers, manuscript_new, manuscript_followups, cover_letter, science_claims, rigid_stall, presets_and_templates, no_anneal_restart, hexamer_provenance, template_era, outside_session):
         check(audit)
     if write_map:
         (ROOT / REVISION_MAP).write_text(revision_map_text(revision_map_rows(audit)))
