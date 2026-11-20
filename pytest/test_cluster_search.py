@@ -43,6 +43,7 @@ def test_config_recommended_and_for_cluster():
     assert rec.tabu_on_stall
     assert rec.shared_visit_policy == "tabu"
     assert rec.symmetry_completion_on_new
+    assert not rec.symmetry_completion_once
     assert rec.calibrated_screen
     assert rec.finish_improving
     assert base.finish_improving
