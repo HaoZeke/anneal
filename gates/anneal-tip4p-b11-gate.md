@@ -90,6 +90,12 @@ These are tested and reported, not gated.
    on hit, calls, charged calls, best energy, basins, trace digest and
    geometry digest.
 
+## Extensions
+
+The b6 report, the second seed set (2012 to 2023) and the bisect are
+pre-registered in `gates/anneal-tip4p-b11/README.md`. The pass rules for
+B above are unchanged by them.
+
 ## Results
 
 Pending.
