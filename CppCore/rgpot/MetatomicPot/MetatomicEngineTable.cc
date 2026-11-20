@@ -84,6 +84,10 @@ Created create(const void *config, std::size_t config_len) {
     backend->model_path = c.model_path;
     if (raw->readsCharge() || raw->readsSpin()) {
       backend->set_charge_spin = [raw](int charge, int spin) {
+        if (spin < 1) {
+          throw Unsupported("metatomic spin multiplicity must be >= 1; got " +
+                            std::to_string(spin));
+        }
         const std::string reason = unread_charge_spin(*raw, charge, spin);
         if (!reason.empty()) {
           throw Unsupported(reason);

@@ -135,6 +135,34 @@ TEST_CASE("UmaPot paramsKey changes with charge and path", "[UmaPot]") {
   REQUIRE(b.paramsKey() != k0);
 }
 
+TEST_CASE("UmaPot validates spin per task without rewriting spin 0",
+          "[UmaPot][spin]") {
+  rgpot::UmaConfig omat;
+  omat.model_path = "unused.pt2";
+  omat.task_name = "omat";
+  omat.spin = 0;
+  rgpot::UmaPot periodic(omat);
+  REQUIRE(periodic.config().spin == 0);
+  REQUIRE_NOTHROW(periodic.setChargeSpin(0, 0));
+  REQUIRE(periodic.config().spin == 0);
+  REQUIRE_THROWS_AS(periodic.setChargeSpin(0, -1), std::invalid_argument);
+  REQUIRE(periodic.config().spin == 0);
+
+  rgpot::UmaConfig bad_omol;
+  bad_omol.model_path = "unused.pt2";
+  bad_omol.task_name = "omol";
+  bad_omol.spin = 0;
+  REQUIRE_THROWS_AS(rgpot::UmaPot(bad_omol), std::invalid_argument);
+
+  rgpot::UmaConfig ok_omol;
+  ok_omol.model_path = "unused.pt2";
+  ok_omol.task_name = "omol";
+  ok_omol.spin = 1;
+  rgpot::UmaPot mol(ok_omol);
+  REQUIRE_THROWS_AS(mol.setChargeSpin(0, 0), std::invalid_argument);
+  REQUIRE(mol.config().spin == 1);
+}
+
 // Metadata as scripts/export_uma_aoti.py embeds it for Baker HCN.
 static std::unordered_map<std::string, std::string> hcn_metadata() {
   return {{"task_name", "omol"},  {"charge", "0"},

@@ -695,6 +695,7 @@ CPP_TYPE_HEADERS = (
 CPP_FUNCTION_HEADERS = (
     "CppCore/rgpot/ExternalPot/ExternalPot.hpp",
     "CppCore/rgpot/CalculatorGroup.hpp",
+    "CppCore/rgpot/UmaPot/UmaConfig.hpp",
 )
 # Classes outside the potential hierarchy whose public members are part of
 # the surface: the frontends that open the Metatomic and XTB engine tables,

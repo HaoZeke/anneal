@@ -96,12 +96,12 @@ std::string last_error(const Engine &e, const RgpotEnginePot *pot) {
 /// capnp flat array of UmaParams.
 kj::Array<capnp::word> uma_params(const std::string &model, int charge = 0,
                                   int spin = 1, int intra_op = 1,
-                                  int inter_op = 1,
-                                  bool deterministic = false) {
+                                  int inter_op = 1, bool deterministic = false,
+                                  const std::string &task = "omol") {
   capnp::MallocMessageBuilder msg;
   auto params = msg.initRoot<::UmaParams>();
   params.setModelPath(model);
-  params.setTaskName("omol");
+  params.setTaskName(task);
   params.setDevice("cpu");
   params.setCharge(charge);
   params.setSpin(spin);
@@ -242,9 +242,38 @@ TEST_CASE("an instance reports capabilities and rejects bad calls",
   REQUIRE(full > sizeof(small_buf) - 1);
   REQUIRE(std::strlen(small_buf) == sizeof(small_buf) - 1);
 
-  REQUIRE(e.set_charge_spin(pot, 0, 0) == 1); // spin multiplicity is >= 1
+  REQUIRE(e.set_charge_spin(pot, 0, -1) == 1); // negative spin is invalid
+  REQUIRE(e.set_charge_spin(pot, 0, 0) == 3);  // omol requires spin >= 1
+  REQUIRE(last_error(e, pot).find("positive multiplicity") !=
+          std::string::npos);
+  REQUIRE(e.set_charge_spin(pot, 0, 101) == 3);
   REQUIRE(e.set_charge_spin(pot, 1, 2) == 0);
   e.destroy(pot);
+
+  // omol rejects spin 0 at create; non-omol (omat) accepts spin 0 at create
+  // and through set_charge_spin.
+  {
+    auto bad = uma_params("nonexistent-uma.pt2", 0, 0, 1, 1, false, "omol");
+    auto bad_bytes = bad.asBytes();
+    char bad_err[256] = {0};
+    REQUIRE(e.create(bad_bytes.begin(), bad_bytes.size(), bad_err,
+                     sizeof(bad_err)) == nullptr);
+    REQUIRE(std::string(bad_err).find("positive multiplicity") !=
+            std::string::npos);
+  }
+  {
+    auto omat = uma_params("nonexistent-uma.pt2", 0, 0, 1, 1, false, "omat");
+    auto omat_bytes = omat.asBytes();
+    char omat_err[256] = {0};
+    RgpotEnginePot *omat_pot = e.create(omat_bytes.begin(), omat_bytes.size(),
+                                        omat_err, sizeof(omat_err));
+    INFO(omat_err);
+    REQUIRE(omat_pot != nullptr);
+    REQUIRE(e.set_charge_spin(omat_pot, 0, 0) == 0);
+    REQUIRE(e.set_charge_spin(omat_pot, 0, -1) == 1);
+    REQUIRE(e.set_charge_spin(omat_pot, 0, 101) == 3);
+    e.destroy(omat_pot);
+  }
 }
 
 TEST_CASE("the engine evaluates like the directly compiled UmaPot",

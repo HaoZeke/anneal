@@ -89,6 +89,9 @@ Created create(const void *config, std::size_t) {
       if (charge == 99) {
         throw rgpot::engine::Unsupported("charge 99 refused");
       }
+      if (spin == 101) {
+        throw rgpot::engine::Unsupported("spin 101 refused");
+      }
       g_charge = charge;
       g_spin = spin;
     };

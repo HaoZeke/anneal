@@ -1,9 +1,46 @@
 #pragma once
 // MIT License — config POD for UmaPot (vesin neighbor list + AOTI .pt2)
 
+#include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace rgpot {
+
+/// Upper bound of fairchem's SPIN_RANGE (`[0, 100]`).
+inline constexpr int kUmaSpinMax = 100;
+
+/**
+ * Validate a UMA spin value for @p task_name.
+ *
+ * The `omol` head requires a positive spin multiplicity in `[1, kUmaSpinMax]`.
+ * Every other task (periodic and materials heads such as `omat`, `oc20`,
+ * `oc25`, `odac`, `omc`) accepts `[0, kUmaSpinMax]`, including `0`. Accepted
+ * values are not rewritten. Throws `std::invalid_argument` on violation.
+ */
+inline void validate_uma_spin_for_task(std::string_view task_name, int spin,
+                                       std::string_view where = "UmaPot");
+
+inline void validate_uma_spin_for_task(std::string_view task_name, int spin,
+                                       std::string_view where) {
+  const std::string prefix =
+      where.empty() ? std::string{} : std::string(where) + ": ";
+  if (task_name == "omol") {
+    if (spin < 1 || spin > kUmaSpinMax) {
+      throw std::invalid_argument(
+          prefix +
+          "omol spin must be a positive multiplicity (an integer from 1 to " +
+          std::to_string(kUmaSpinMax) + "); got " + std::to_string(spin));
+    }
+    return;
+  }
+  if (spin < 0 || spin > kUmaSpinMax) {
+    throw std::invalid_argument(prefix + "UMA task '" + std::string(task_name) +
+                                "' spin must be an integer from 0 to " +
+                                std::to_string(kUmaSpinMax) + "; got " +
+                                std::to_string(spin));
+  }
+}
 
 /**
  * UMA / OMol calculator configuration.

@@ -414,7 +414,7 @@ int rgpot_engine_set_num_threads(RgpotEnginePot *pot, int intra_op,
 }
 
 int rgpot_engine_set_charge_spin(RgpotEnginePot *pot, int charge, int spin) {
-  if (!pot || !pot->backend || spin < 1) {
+  if (!pot || !pot->backend || spin < 0) {
     return 1;
   }
   if (!pot->backend->set_charge_spin) {

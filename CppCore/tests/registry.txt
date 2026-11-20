@@ -173,6 +173,7 @@ FastNlistTest | tests core | unit fast_nlist_test FastNlistTest.cc fp_contract=o
 IsaDispatchTest | tests core | unit isa_dispatch_test IsaDispatchTest.cc |
 FmaExactTest | tests core | unit fma_exact_test FmaExactTest.cc |
 MinimumImageTest | tests core | unit minimum_image_test MinimumImageTest.cc |
+UmaSpinTest | tests core | unit uma_spin_test UmaSpinTest.cc |
 FoldDegenerateTest | tests core | unit fold_degenerate_test FoldDegenerateTest.cc timeout=60 |
 IPIPotTest | tests core ipi | unit ipi_pot_test IPIPotTest.cc |
 IPIDriverTest | tests core ipi | unit ipi_driver_test IPIDriverTest.cc |

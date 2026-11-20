@@ -9,6 +9,7 @@
 #include <capnp/message.h>
 #include <capnp/serialize.h>
 #include <kj/io.h>
+#include <stdexcept>
 
 #include "rgpot/rpc/Potentials.capnp.h"
 
@@ -36,7 +37,8 @@ Created create(const void *config, std::size_t config_len) {
     if (params.getDevice().size() > 0)
       c.device = params.getDevice().cStr();
     c.charge = params.getCharge();
-    c.spin = params.getSpin() > 0 ? params.getSpin() : 1;
+    c.spin = params.getSpin();
+    validate_uma_spin_for_task(c.task_name, c.spin, "rgpot_engine_create(uma)");
     if (params.getCutoff() > 0.0)
       c.cutoff = params.getCutoff();
     if (params.getMaxNeighbors() > 0)
@@ -53,6 +55,12 @@ Created create(const void *config, std::size_t config_len) {
     backend->pot = std::move(pot);
     backend->model_path = c.model_path;
     backend->set_charge_spin = [raw](int charge, int spin) {
+      try {
+        validate_uma_spin_for_task(raw->config().task_name, spin,
+                                   "rgpot_engine_set_charge_spin(uma)");
+      } catch (const std::invalid_argument &e) {
+        throw Unsupported(e.what());
+      }
       raw->setChargeSpin(charge, spin);
     };
     backend->set_num_threads = [](int intra_op, int inter_op) {

@@ -385,17 +385,19 @@ Must not run concurrently with another call on the same handle.
 int rgpot_engine_set_charge_spin(RgpotEnginePot *pot, int charge, int spin);
 #+end_src
 
-- Inputs :: =pot=, a handle; =charge=, the total charge; =spin=, the spin
-  multiplicity (1 is a singlet).
+- Inputs :: =pot=, a handle; =charge=, the total charge; =spin=, the spin value
+  (multiplicity for =omol=, Metatomic and Skala; non-negative integer for other
+  UMA tasks).
 - Units :: =charge= in elementary charges; =spin= none.
 - Outputs :: 0 on success; the next evaluations use the new values.
-- Errors :: returns 1 for a null =pot= or =spin= below 1 (no message).
+- Errors :: returns 1 for a null =pot= or negative =spin= (no message).
   Returns 3 for a backend without a charge or spin, with
   =backend has no charge or spin to change= in =rgpot_engine_last_error=: the
   classical, MOPAC, NWChem and XTB libraries, and Metatomic with a model that
   reads neither.
-  Returns 3 for a value the backend cannot take, with the reason in
-  =rgpot_engine_last_error=; the values in force do not change.
+  Returns 3 for a value the backend or task cannot take (for example =spin= 0 on
+  UMA =omol=, Metatomic or Skala, or =spin= above 100 on UMA), with the reason
+  in =rgpot_engine_last_error=; the values in force do not change.
   For Metatomic the reason is
   =the model reads no charge (rgpot::charge), so charge <n> cannot reach it= or
   the same sentence for the spin multiplicity.
@@ -763,10 +765,10 @@ Declarations may change after =on_model_update=, so hosts query again there.
 
 ** Charge and spin
 
-=rgpot_engine_set_charge_spin= sets the total charge and the spin multiplicity
-of the next calls on a handle, and a multiplicity below 1 returns 1.
-A value the backend cannot take returns 3, keeps the values in force and leaves
-the reason in =rgpot_engine_last_error=.
+=rgpot_engine_set_charge_spin= sets the total charge and the spin of the next
+calls on a handle, and a negative spin returns 1.
+A value the backend or task cannot take returns 3, keeps the values in force and
+leaves the reason in =rgpot_engine_last_error=.
 No engine returns 0 for a value its model does not receive.
 
 | library | charge and multiplicity |

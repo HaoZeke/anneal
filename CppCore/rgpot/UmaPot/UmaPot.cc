@@ -382,6 +382,7 @@ UmaPot::UmaPot(const UmaConfig &config)
         "UmaPot: model_path must be an AOTI .pt2 from "
         "scripts/export_uma_aoti.py (not a metatomic/torchscript .pt)");
   }
+  validate_uma_spin_for_task(m_config.task_name, m_config.spin, "UmaPot");
   recomputeParamsKey();
   m_impl = std::make_unique<Impl>();
   m_impl->device = parse_device(m_config.device);
@@ -394,6 +395,7 @@ UmaPot::UmaPot(const UmaConfig &config)
 UmaPot::~UmaPot() = default;
 
 void UmaPot::setChargeSpin(int charge, int spin) {
+  validate_uma_spin_for_task(m_config.task_name, spin, "UmaPot::setChargeSpin");
   m_config.charge = charge;
   m_config.spin = spin;
   recomputeParamsKey();
