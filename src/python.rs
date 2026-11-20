@@ -2956,6 +2956,49 @@ fn check_points(n: usize) -> PyResult<()> {
     Ok(())
 }
 
+/// `n` rigid waters. The preset builds the water's box, two vectors of `6n`
+/// numbers, so a size that overflows is a bad argument and a size the
+/// allocator refuses is `MemoryError`.
+fn check_waters(n: usize) -> PyResult<()> {
+    check_points(n)?;
+    let len = state_length(n, 6)?;
+    crate::memory::reserve_vectors(len, 2).map_err(|err| {
+        memory_error(format!(
+            "n = {n} waters need two vectors of {len} numbers: {err}"
+        ))
+    })
+}
+
+/// Length of a state of `n` points. A length that overflows is a bad
+/// argument, not an allocation that failed.
+fn state_length(n: usize, per_point: usize) -> PyResult<usize> {
+    crate::memory::state_len(n, per_point).map_err(|_| {
+        invalid_argument(format!(
+            "n = {n} is too large: {per_point}*n does not fit in a machine word"
+        ))
+    })
+}
+
+/// Ask the allocator for the working set of a search over `n` points with a
+/// state of `len` numbers. A refusal is `MemoryError`. No `n` is too large unless the
+/// allocator says so.
+fn reserve_working_set_for(n: usize, len: usize) -> PyResult<()> {
+    use crate::memory::{SizeError, reserve_working_set};
+
+    reserve_working_set(n, len).map_err(|err| match err {
+        SizeError::Overflow => memory_error(format!(
+            "n = {n} is too large: its working set does not fit in a machine word"
+        )),
+        SizeError::Unavailable { bytes } => memory_error(format!(
+            "n = {n} needs a working set of {bytes} bytes and the allocator refused it"
+        )),
+    })
+}
+
+fn memory_error(message: String) -> PyErr {
+    pyo3::exceptions::PyMemoryError::new_err(message)
+}
+
 fn check_scales(length_scale: f64, energy_scale: f64) -> PyResult<()> {
     if !(length_scale.is_finite() && length_scale > 0.0) {
         return Err(invalid_argument("length_scale must be finite and positive"));
@@ -3052,7 +3095,7 @@ impl PyClusterConfig {
     /// The communicating arm on `n` rigid TIP4P waters.
     #[staticmethod]
     fn communicating_tip4p(n: usize) -> PyResult<Self> {
-        check_points(n)?;
+        check_waters(n)?;
         Ok(Self::new(
             crate::methods::cluster_hopping::Config::communicating_tip4p(n),
             format!("communicating_tip4p({n})"),
@@ -3062,7 +3105,7 @@ impl PyClusterConfig {
     /// The recommended arm on `n` rigid TIP4P waters.
     #[staticmethod]
     fn recommended_tip4p(n: usize) -> PyResult<Self> {
-        check_points(n)?;
+        check_waters(n)?;
         Ok(Self::new(
             crate::methods::cluster_hopping::Config::recommended_tip4p(n),
             format!("recommended_tip4p({n})"),
@@ -3072,7 +3115,7 @@ impl PyClusterConfig {
     /// The plain protocol on `n` rigid TIP4P waters.
     #[staticmethod]
     fn for_tip4p(n: usize) -> PyResult<Self> {
-        check_points(n)?;
+        check_waters(n)?;
         Ok(Self::new(
             crate::methods::cluster_hopping::Config::for_tip4p(n),
             format!("for_tip4p({n})"),
@@ -4392,7 +4435,7 @@ fn cluster_search(
     };
     let interleaved = rigid && layout == "interleaved";
     let rigid_chart = water.is_some() || rigid;
-    let dim = if rigid_chart { 6 * n } else { 3 * n };
+    let dim = state_length(n, if rigid_chart { 6 } else { 3 })?;
     let start = match start {
         Some(start) => {
             let sl = start.as_slice()?;
@@ -4408,6 +4451,7 @@ fn cluster_search(
         }
         None => None,
     };
+    reserve_working_set_for(n, dim)?;
     let scale = length_scale.unwrap_or(1.0);
     let molecular = groups.is_some() || molecular_config;
     let stock = (species.is_some() || rigid) && !molecular && !from_config;
@@ -4574,8 +4618,10 @@ fn cluster_search(
     let best_block = out
         .best_state
         .as_ref()
-        .map(|value| value.to_vec())
-        .unwrap_or_else(|| vec![0.0; dim]);
+        .map(|value| Ok(value.to_vec()))
+        .unwrap_or_else(|| {
+            crate::memory::try_zeros(dim).map_err(|err| memory_error(err.to_string()))
+        })?;
     let dict = PyDict::new(py);
     dict.set_item("best", PyArray1::from_vec(py, to_layout(best_block)))?;
     if full {
