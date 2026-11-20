@@ -269,6 +269,54 @@ M\(_{80}\), \(\rho=14\) & \(4\times 10^{6}\) & \texttt{c2de652d} & 9/12 & 4 & 5 
 \end{table}
 % template-era table: end
 
+\section{Ten more Morse clusters}
+\label{sec:si-morse-g1}
+Table~\ref{tab:si-morse-g1} runs the submitted revision alone on the Morse
+clusters of 30, 38, 70 and 80 atoms that the GMIN table of the main text does
+not run, in a session of its own with the preset of that table.
+It hits every seed of M\(_{30}\) and M\(_{38}\) at \(\rho=6\) and of
+M\(_{80}\) at \(\rho=3\), and 4 of 12 on M\(_{38}\) at \(\rho=14\), the
+fewest of the ten.
+The record pairs these rows with stored GMIN rows of earlier sessions, which
+name no machine for any cluster and no GMIN revision for five of the ten, so
+the article prints this code alone here.
+The rows are copied from commit \texttt{\seqsplit{4256269394435f77787d2bfdbead2321e08340a6}}
+of \path{record/g1-develop-stock}, as \path{paper/jctc/data/gmin_g1/PROVENANCE}
+names, and \path{paper/jctc/scripts/morse_g1_table.py} writes the table.
+
+% morse-g1 table: start
+\begin{table}
+\caption{The submitted revision \texttt{61fa67cf} alone on ten Morse clusters that
+the GMIN table of the main text does not run, from commit \texttt{42562693} of
+\texttt{record/g1-develop-stock}: \texttt{Config::recommended}\((N)\) through
+\texttt{h2h\_morse} with no driver variable but the budget, in the Lennard-Jones length
+unit, seeds 2000--2011.
+A hit is a lowest energy within \(10^{-3}\) of the reference of the run script.
+Calls and IQR are the median and the interquartile range of the calls to the minimum,
+with a miss at the full budget; Wall, In and Out are the median seconds of the run,
+inside the potential and outside it.
+The rows are \texttt{paper/jctc/data/gmin\_g1/rows.csv}.}
+\label{tab:si-morse-g1}
+\centering
+\begin{tabular}{@{}lrrrrrrr@{}}
+\toprule
+Cluster & Budget & Hits & Calls & IQR & Wall & In & Out \\
+\midrule
+M\(_{30}\), \(\rho=6\) & \(4\times 10^{5}\) & 12/12 & 5184.5 & 6983 & 0.035 & 0.021 & 0.014 \\
+M\(_{30}\), \(\rho=14\) & \(4\times 10^{5}\) & 8/12 & 195880 & 263076.5 & 1.170 & 0.806 & 0.365 \\
+M\(_{38}\), \(\rho=6\) & \(4\times 10^{5}\) & 12/12 & 49438.5 & 64724 & 0.470 & 0.320 & 0.150 \\
+M\(_{38}\), \(\rho=14\) & \(4\times 10^{5}\) & 4/12 & 400000 & 206426.25 & 3.447 & 2.442 & 0.998 \\
+M\(_{70}\), \(\rho=3\) & \(1\times 10^{6}\) & 11/12 & 374226 & 305850.75 & 10.566 & 7.526 & 3.040 \\
+M\(_{70}\), \(\rho=6\) & \(1\times 10^{6}\) & 11/12 & 65359 & 201438.75 & 1.812 & 1.341 & 0.471 \\
+M\(_{70}\), \(\rho=10\) & \(1\times 10^{6}\) & 6/12 & 995598 & 614298 & 27.886 & 20.681 & 7.155 \\
+M\(_{70}\), \(\rho=14\) & \(1\times 10^{6}\) & 10/12 & 368941 & 571343.5 & 10.231 & 7.546 & 2.685 \\
+M\(_{80}\), \(\rho=3\) & \(4\times 10^{6}\) & 12/12 & 916054 & 508540.75 & 34.719 & 25.055 & 9.664 \\
+M\(_{80}\), \(\rho=10\) & \(4\times 10^{6}\) & 6/12 & 3539041.5 & 2092257.25 & 130.5 & 94.434 & 33.529 \\
+\bottomrule
+\end{tabular}
+\end{table}
+% morse-g1 table: end
+
 \section{Outside time in a second session}
 \label{sec:si-outside}
 Table~\ref{tab:si-outside} times the work of this code outside the potential

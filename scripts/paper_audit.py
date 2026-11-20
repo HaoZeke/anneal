@@ -32,6 +32,7 @@ import datetime
 import functools
 import hashlib
 import importlib.util
+import io
 import math
 import os
 import random
@@ -1894,6 +1895,75 @@ def outside_session(audit: Audit) -> None:
     for word in ("new_outside", "\\texttt{new}", "blj", "BLJ"):
         audit.record(word not in flat, SI, f"the outside table prints no {word} arm or system", "absent",
                      "absent" if word not in flat else "present")
+
+
+G1_DATA = "paper/jctc/data/gmin_g1"
+G1_STORED = ("bench/morse-gmin/seeds.csv", "bench/morse-panel/seeds.csv")
+
+
+def morse_g1(audit: Audit) -> None:
+    """tab:si-morse-g1 is the anneal rows of record/g1-develop-stock, checked row by row and recomputed."""
+    path = imported(audit, G1_DATA)
+    fields = dict(line.split(" ", 1) for line in audit.text(f"{G1_DATA}/PROVENANCE").splitlines())
+    commit = fields["commit"]
+    audit.cell(f"{G1_DATA}/PROVENANCE", "tree of the record commit", fields["tree"],
+               git("rev-parse", f"{commit}^{{tree}}").stdout.strip())
+    audit.cell(f"{G1_DATA}/PROVENANCE", "the record ancestor is the submitted revision", SUBMITTED, fields["ancestor"])
+    ancestor_of(audit, path, SUBMITTED, commit)
+    same = git("diff", "--quiet", SUBMITTED, commit, "--", "src", "examples", "Cargo.lock").returncode == 0
+    audit.record(same, path, "the record commit holds the search source of the submitted revision", "same",
+                 "same" if same else "differs")
+    era = load_script("morse_g1_table_audit", "paper/jctc/scripts/morse_g1_table.py")
+    specs = era.specs()
+    rows = audit.rows(path)
+    bad = [f"{r['system']} {r['seed']}" for r in rows
+           if (r["code"], r["code_revision"], r["config"]) != ("anneal", SUBMITTED, "recommended")
+           or int(r["budget"]) != specs[r["system"]][2]
+           or (r["hit"] == "1") != energy_hits(float(r["best"]), specs[r["system"]][3], DEFAULT_HIT_TOL)]
+    audit.cell(path, "rows off the stock preset, the budget or the reference of the run script", "none",
+               ", ".join(bad) or "none")
+    audit.cell(path, "hosts", "1", float(len({r["host"] for r in rows})))
+    seeds = defaultdict(list)
+    for r in rows:
+        seeds[r["system"]].append(int(r["seed"]))
+    audit.cell(path, "clusters with seeds 2000-2011 once each", "10",
+               float(sum(sorted(v) == list(range(2000, 2012)) for v in seeds.values())))
+    record = list(csv.DictReader(io.StringIO(git("show", f"{commit}:bench/g1-develop-stock/rows.csv").stdout)))
+    paired = [{k: v for k, v in r.items() if k != "source"} for r in record if r["code"] == "anneal"]
+    audit.record(paired == [dict(r) for r in rows], path, "the paired rows of the record carry these anneal rows",
+                 "same", "same" if paired == [dict(r) for r in rows] else "differs")
+    stored = [r for r in record if r["code"] == "gmin"]
+    sources = {path_: [r for r in csv.DictReader(io.StringIO(audit.text(path_))) if r["code"] == "gmin"]
+               for path_ in G1_STORED}
+    labels = {r["system"]: {x.get("host", "") for x in sources[r["source"]] if x["system"] == r["system"]}
+              for r in stored}
+    machines = sorted({r["system"] for r in stored
+                       if any(re.fullmatch(r"[0-9a-f]{64}", h) for h in labels[r["system"]])})
+    audit.cell(path, "clusters whose stored GMIN rows name a machine", "none", ", ".join(machines) or "none")
+    audit.cell(path, "clusters whose stored GMIN rows name no GMIN revision", "5",
+               float(len({r["system"] for r in stored if not r["code_revision"]})))
+    gone = [w for w in ("24 hits", "of the 24 misses", "other calls") if w in collapse(audit.text(SI))]
+    audit.cell(SI, "the SI prints no count from the stored GMIN rows of G1", "none", ", ".join(gone) or "none")
+    si = audit.text(SI)
+    block = si.split(era.MARKS[0], 1)[1].split(era.MARKS[1], 1)[0].strip("\n") if si.count(era.MARKS[0]) == 1 else ""
+    audit.record(block == era.table(), SI, "tab:si-morse-g1 is the summariser's block",
+                 "as written" if block == era.table() else "edited by hand", "as written")
+    count = {name: sum(r["hit"] == "1" for r in rows if r["system"] == name) for name in seeds}
+    for name in ("m30r6", "m38r6", "m80r3"):
+        audit.cell(path, f"{name} hits", "12", float(count[name]))
+    audit.cell(path, "fewest hits, M38 at rho 14", "4", float(count["m38r14"]))
+    audit.record(min(count, key=count.get) == "m38r14" and sorted(count.values())[1] > 4, path,
+                 "M38 at rho 14 alone has the fewest hits", "m38r14", min(count, key=count.get))
+    audit.cell(path, "most hits", "12", float(max(count.values())))
+    audit.said(SI, "It hits every seed of M\\(_{30}\\) and M\\(_{38}\\) at \\(\\rho=6\\) and of M\\(_{80}\\) at "
+                   "\\(\\rho=3\\), and 4 of 12 on M\\(_{38}\\) at \\(\\rho=14\\), the fewest of the ten.")
+    audit.said(SI, "The record pairs these rows with stored GMIN rows of earlier sessions, which name no machine for "
+                   "any cluster and no GMIN revision for five of the ten, so the article prints this code alone here.")
+    audit.said(SI, "The rows are copied from commit \\texttt{\\seqsplit{4256269394435f77787d2bfdbead2321e08340a6}} "
+                   "of \\path{record/g1-develop-stock}")
+    audit.said(TEX, "The Supporting Information runs the submitted revision alone on ten more Morse clusters, of 30, "
+                    "38, 70 and 80 atoms at \\(\\rho\\) from 3 to 14, where it hits from 4 to 12 of 12 seeds.")
+    audit.cell(f"{G1_DATA}/PROVENANCE", "the cited record commit", "4256269394435f77787d2bfdbead2321e08340a6", commit)
 
 
 MOVE_CHOICE = re.compile(r"Thompson|move choice|choice among the moves|choosing among the moves|posterior", re.I)
@@ -4201,7 +4271,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
     audit = Audit()
     for check in (paired_statistics, manuscript_gmin, withdrawn_benchmarks, supporting_information, release, paper_0120, gad_published, openconf,
                   head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, lj_large, bench_prose,
-                  manuscript_ase, manuscript_knockouts, manuscript_priors, panel_references, generated_tables, supporting_numbers, manuscript_new, manuscript_followups, cover_letter, science_claims, rigid_stall, presets_and_templates, no_anneal_restart, hexamer_provenance, template_era, outside_session, no_move_choice_claim):
+                  manuscript_ase, manuscript_knockouts, manuscript_priors, panel_references, generated_tables, supporting_numbers, manuscript_new, manuscript_followups, cover_letter, science_claims, rigid_stall, presets_and_templates, no_anneal_restart, hexamer_provenance, template_era, outside_session, morse_g1, no_move_choice_claim):
         check(audit)
     if write_map:
         (ROOT / REVISION_MAP).write_text(revision_map_text(revision_map_rows(audit)))
