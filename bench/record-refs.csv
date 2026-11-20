@@ -1,0 +1,7 @@
+# Record branches on origin whose commits printed numbers may rest on. A
+# row counts only when origin holds the ref at this SHA, git fetch origin
+# brings it, and the commit has this tree. A row with no tree is expected
+# and fails until the ref is pushed and its tree recorded.
+ref,sha,tree
+record/repro-pin,9a30f3190b3bb7040c675a904f8388eb68224151,4cf101da6fe8f4d1069f5cb472413bd7e232d69c
+record/sc-h2h-harness,d59b0b6cf02fc300ff618f79d65da365128eed5a,

@@ -4,6 +4,7 @@ matches its committed rows, and the audit notices a drifted cell."""
 
 import importlib.util
 import math
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -849,6 +850,7 @@ def bench_flags(tmp_path, monkeypatch, files):
         (tmp_path / name).write_text(text)
     monkeypatch.setattr(audit_mod, "ROOT", tmp_path)
     monkeypatch.setattr(audit_mod, "_verified_aliases", lambda: (), raising=False)
+    monkeypatch.setattr(audit_mod, "_verified_record_refs", lambda: (), raising=False)
     return sorted((w.split(":")[0], rev, number) for w, rev, number in
                   audit_mod._printed_readme_numbers(audit_mod.Audit(), []))
 
@@ -936,6 +938,77 @@ def test_openconf_local_revisions_are_read_through_their_aliases(monkeypatch):
     assert not local & readme_revisions()
     monkeypatch.setattr(audit_mod, "_verified_aliases", lambda: (), raising=False)
     assert local <= readme_revisions()
+
+
+REPRO_PIN = "9a30f3190b3bb7040c675a904f8388eb68224151"
+
+
+def need_origin():
+    """The record tests read origin. Off CI an unreachable origin skips them; on CI it fails them."""
+    out = git("ls-remote", "origin", "refs/heads/record/repro-pin")
+    if out.returncode != 0 or not out.stdout.strip():
+        if os.environ.get("CI"):
+            pytest.fail(f"origin is unreachable on CI: {out.stderr.strip()}")
+        pytest.skip("origin is unreachable")
+
+
+def registry(tmp_path, monkeypatch, rows):
+    path = tmp_path / "record-refs.csv"
+    path.write_text("ref,sha,tree\n" + "".join(f"{ref},{sha},{tree}\n" for ref, sha, tree in rows))
+    monkeypatch.setattr(audit_mod, "RECORD_REFS", str(path), raising=False)
+
+
+def record_drifts():
+    audit = audit_mod.Audit()
+    audit_mod.printed_harnesses(audit)
+    return {r[2] for r in audit.drifts() if r[1].endswith("record-refs.csv")}
+
+
+def test_a_revision_on_a_registered_record_ref_is_reachable(tmp_path, monkeypatch):
+    need_origin()
+    assert git("merge-base", "--is-ancestor", REPRO_PIN, "HEAD").returncode == 1
+    assert audit_mod.harness_reachable("9a30f319")
+    registry(tmp_path, monkeypatch, [])
+    assert not audit_mod.harness_reachable("9a30f319")
+
+
+@pytest.mark.parametrize("revision", [SIDE_COMMIT, "c1c02d1646a7"])
+def test_a_revision_on_no_registered_record_ref_is_flagged(revision):
+    # e3ed7dad is on origin/record/bench-sc-h2h-n12, which is not registered;
+    # c1c02d16 is on origin/bench/cov-floor2, which is not a record ref.
+    need_origin()
+    assert audit_mod.commit_of(revision)
+    assert not audit_mod.harness_reachable(revision)
+
+
+def test_a_registry_row_off_origin_is_flagged(tmp_path, monkeypatch):
+    need_origin()
+    parent = git("rev-parse", f"{REPRO_PIN}^").stdout.strip()
+    tree = git("rev-parse", f"{parent}^{{tree}}").stdout.strip()
+    registry(tmp_path, monkeypatch, [("record/repro-pin", parent, tree)])
+    assert record_drifts() == {f"record/repro-pin is on origin at {parent[:8]}"}
+    assert not audit_mod.harness_reachable("9a30f319")
+
+
+def test_a_registry_row_with_another_tree_is_flagged(tmp_path, monkeypatch):
+    need_origin()
+    registry(tmp_path, monkeypatch, [("record/repro-pin", REPRO_PIN, "0" * 40)])
+    assert record_drifts() == {"record/repro-pin has tree 00000000"}
+    assert not audit_mod.harness_reachable("9a30f319")
+
+
+def test_a_registry_row_origin_does_not_hold_is_flagged(tmp_path, monkeypatch):
+    need_origin()
+    registry(tmp_path, monkeypatch, [("record/no-such-ref-r184", "1" * 40, "2" * 40)])
+    assert record_drifts() == {"record/no-such-ref-r184 is on origin at 11111111", "record/no-such-ref-r184 fetches",
+                               "record/no-such-ref-r184 has tree 22222222"}
+
+
+def test_a_registry_row_that_is_not_a_record_ref_is_flagged(tmp_path, monkeypatch):
+    need_origin()
+    head = git("rev-parse", "origin/develop").stdout.strip()
+    registry(tmp_path, monkeypatch, [("develop", head, git("rev-parse", f"{head}^{{tree}}").stdout.strip())])
+    assert "develop is a record ref with a full SHA" in record_drifts()
 
 
 def test_printed_revisions_are_ancestors_or_qualified():

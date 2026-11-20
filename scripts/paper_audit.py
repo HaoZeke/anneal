@@ -15,9 +15,11 @@ Every row file read here is checked for a code revision and a host. A file
 without them, or whose revision is not in this repository, must be listed in
 ``KNOWN_GAPS``. A revision that was rebuilt on push is read through its alias
 in ``ALIASES`` once the pushed equivalent is verified; one with no pushed
-equivalent is listed in ``UNPUSHED`` with the reason. Printed numbers no
-committed row backs are listed in ``UNTRACED``; their text must still be where
-the list says. The revision checks need the full history and the remote
+equivalent is listed in ``UNPUSHED`` with the reason. A printed number may
+rest on a commit off HEAD only when that commit is on a record branch listed
+in ``RECORD_REFS`` that origin holds at the listed SHA and tree. Printed
+numbers no committed row backs are listed in ``UNTRACED``; their text must
+still be where the list says. The revision checks need the full history and the remote
 branches; a clone without them is refused, with exit status 2.
 
     python3 scripts/paper_audit.py            # exit 1 on any drift
@@ -73,6 +75,8 @@ AUDIT_OPTIONAL_REMOTES = (
     "bench/cov-floor2",
     "fix/sc-shelf-waypoint",
 )
+# Push-only record branches whose commits printed numbers may rest on, each with its SHA and tree.
+RECORD_REFS = "bench/record-refs.csv"
 # Cited revisions with no pushed equivalent. de22f437 records the ASE and GOFEE
 # panel from five campaign heads and sits on the last, e09e0487, alone. The
 # pushed history before it has one commit, 57735de1, that adds the two-hour
@@ -2456,6 +2460,7 @@ def bench_prose(audit: Audit) -> None:
 
 
 def provenance(audit: Audit) -> dict[str, str]:
+    record_ref_status(RECORD_REFS)
     gaps: dict[str, str] = {}
     revisions: dict[str, set[str]] = defaultdict(set)
     for path, rows in audit.read.items():
@@ -3337,11 +3342,67 @@ def _verified_aliases() -> tuple[tuple[str, str], ...]:
     return tuple(verified_aliases(Audit(), table, index).items())
 
 
+@functools.cache
+def origin_record_heads() -> dict[str, str]:
+    """The record/* branches on origin, by name. Empty when origin cannot be reached, so every registry row fails."""
+    out = git("ls-remote", "origin", "refs/heads/record/*")
+    if out.returncode != 0:
+        return {}
+    return {ref.removeprefix("refs/heads/"): sha for sha, ref in (line.split("\t") for line in out.stdout.splitlines())}
+
+
+@functools.cache
+def record_ref_status(path: str) -> tuple[tuple[str, str, tuple[tuple[str, bool, str, str], ...]], ...]:
+    """Each registered record ref with its checks: it is a record ref named by a full SHA, origin holds it at
+    that SHA, git fetch origin brings it here, and its tree is the registered one."""
+    with (ROOT / path).open(newline="") as handle:
+        table = list(csv.DictReader(line for line in handle if not line.startswith("#")))
+    heads = origin_record_heads()
+    out = []
+    for row in table:
+        ref, sha, tree = row["ref"].strip(), row["sha"].strip(), row["tree"].strip()
+        named = ref.startswith("record/") and bool(re.fullmatch(r"[0-9a-f]{40}", sha))
+        fetch = git("fetch", "--quiet", "--no-tags", "origin", f"refs/heads/{ref}") if named else None
+        present = git("cat-file", "-e", f"{sha}^{{commit}}").returncode == 0 if named else False
+        fetched = bool(fetch) and fetch.returncode == 0 and present
+        actual = git("rev-parse", "--verify", "--quiet", f"{sha}^{{tree}}").stdout.strip() if present else ""
+        out.append((ref, sha, (
+            (f"{ref} is a record ref with a full SHA", named, f"{ref} {sha}", "record/<name> and 40 hex digits"),
+            (f"{ref} is on origin at {sha[:8]}", heads.get(ref) == sha, heads.get(ref, "absent"), sha),
+            (f"{ref} fetches", fetched, "fetched" if fetched else "fails", "fetched"),
+            (f"{ref} has tree {tree[:8] or 'unrecorded'}", bool(tree) and actual == tree, actual or "absent",
+             tree or "unrecorded"),
+        )))
+    commit_of.cache_clear()
+    _ANCESTOR_OF_HEAD.clear()
+    return tuple(out)
+
+
+def _verified_record_refs() -> tuple[str, ...]:
+    return tuple(sha for _ref, sha, checks in record_ref_status(RECORD_REFS) if all(ok for _, ok, _, _ in checks))
+
+
+def record_ref_checks(audit: Audit) -> None:
+    for _ref, _sha, checks in record_ref_status(RECORD_REFS):
+        for label, ok, shown, value in checks:
+            audit.record(ok, RECORD_REFS, label, shown, value)
+
+
+@functools.cache
+def _on_record_ref(commit: str, refs: tuple[str, ...]) -> bool:
+    return any(git("merge-base", "--is-ancestor", commit, sha).returncode == 0 for sha in refs)
+
+
 def harness_reachable(rev: str) -> bool:
-    """A printed revision is an ancestor of HEAD, a verified alias of one, a recorded external pin, or a qualified form."""
+    """A printed revision is an ancestor of HEAD or of a verified record ref, a verified alias of an ancestor of
+    HEAD, a recorded external pin, or a qualified form."""
     if external_form(rev) is True or external_pin(rev):
         return True
+    refs = _verified_record_refs()
     if ancestor_of_head(rev):
+        return True
+    full = commit_of(rev)
+    if full and _on_record_ref(full, refs):
         return True
     rev = (rev or "").strip()
     return len(rev) >= 7 and any(local.startswith(rev) and ancestor_of_head(pushed) for local, pushed in _verified_aliases())
@@ -3657,11 +3718,12 @@ def _check_external_source(audit: Audit, path: str) -> None:
 
 
 def printed_harnesses(audit: Audit) -> None:
-    """Fail when a printed number rests on a revision that is not an ancestor of HEAD.
+    """Fail when a printed number rests on a revision that is not an ancestor of HEAD or of a verified record ref.
 
     A qualified external revision is a repository URL plus a full SHA. Each one is
     checked. A short SHA in that position fails. There is no allowlist.
     """
+    record_ref_checks(audit)
     forms: list[tuple[str, str]] = []
     flagged = _printed_readme_numbers(audit, forms)
     for where, revision, number in flagged:
