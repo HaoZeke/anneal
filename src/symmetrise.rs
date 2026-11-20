@@ -709,6 +709,15 @@ impl Cloud {
     }
 }
 
+/// Axes worth testing, with how many of them are principal and the moments.
+struct AxisList {
+    axes: Vec<[f64; 3]>,
+    /// Leading entries of `axes` are the principal axes, in moment order.
+    principal: usize,
+    /// Principal moments, ascending, as Jacobi left them.
+    moments: [f64; 3],
+}
+
 /// Axes worth testing, taken from the structure rather than at random.
 ///
 /// Two families. The principal axes of the inertia tensor, which is where a
@@ -716,9 +725,9 @@ impl Cloud {
 /// centroid to each point and to each pair midpoint, which is where an axis
 /// through a vertex or an edge lies. That covers the axes of the point groups
 /// clusters actually adopt without enumerating directions blindly.
-fn candidate_axes(x: ArrayView1<f64>, n: usize) -> Vec<[f64; 3]> {
+fn candidate_axes(x: ArrayView1<f64>, n: usize) -> AxisList {
     let c = centroid(x, n);
-    let mut out: Vec<[f64; 3]> = Vec::with_capacity(3 + n + n);
+    let mut axes: Vec<[f64; 3]> = Vec::with_capacity(3 + n);
     // Inertia tensor about the centroid, then its eigenvectors.
     let mut t = ndarray::Array2::<f64>::zeros((3, 3));
     for a in 0..n {
@@ -730,19 +739,68 @@ fn candidate_axes(x: ArrayView1<f64>, n: usize) -> Vec<[f64; 3]> {
             }
         }
     }
-    let (_, vecs) = crate::spectral::symmetric_eigen(t.view(), 64);
+    let (vals, vecs) = crate::spectral::symmetric_eigen(t.view(), 64);
+    let moments = [vals[0], vals[1], vals[2]];
     for j in 0..3 {
         if let Some(u) = normalise([vecs[[0, j]], vecs[[1, j]], vecs[[2, j]]]) {
-            out.push(u);
+            axes.push(u);
         }
     }
+    let principal = axes.len();
     // Through each point.
     for a in 0..n {
         if let Some(u) = normalise([x[3 * a] - c[0], x[3 * a + 1] - c[1], x[3 * a + 2] - c[2]]) {
-            out.push(u);
+            axes.push(u);
         }
     }
-    out
+    AxisList {
+        axes,
+        principal,
+        moments,
+    }
+}
+
+/// Three principal moments are a nondegenerate top when no two are equal.
+///
+/// Equality is the value Jacobi returned. A gap test would be a threshold,
+/// and a body that is only approximately symmetric is not a symmetric top
+/// until its moments actually repeat.
+fn nondegenerate_top(moments: [f64; 3]) -> bool {
+    moments[0] != moments[1] && moments[1] != moments[2] && moments[0] != moments[2]
+}
+
+/// How many atoms carry each species label.
+///
+/// A missing or mismatched label slice is one species: every atom is
+/// equivalent, and the only count is `n`.
+fn species_counts(n: usize, species: &[u32]) -> Vec<usize> {
+    if species.len() != n {
+        return vec![n];
+    }
+    let mut counts: Vec<(u32, usize)> = Vec::new();
+    for &label in species {
+        if let Some((_, count)) = counts.iter_mut().find(|(have, _)| *have == label) {
+            *count += 1;
+        } else {
+            counts.push((label, 1));
+        }
+    }
+    counts.into_iter().map(|(_, count)| count).collect()
+}
+
+/// `c = q k + f` for a species of `c` atoms under a `C_k` action.
+///
+/// Off-axis orbits have size `k`. The axis is the fixed set, so `f` is the
+/// number of atoms of that species on the axis and the remainder `c % k` is
+/// `f % k`. The scan keeps an order only when that remainder is 0 or 1 for
+/// every species: either the axis misses the species, or it holds one atom
+/// and no further multiple of `k`.
+fn order_fixes_at_most_one(counts: &[usize], order: usize) -> bool {
+    order >= 2
+        && counts.iter().all(|&count| {
+            let remainder = count % order;
+            remainder == 0 || remainder == 1
+        })
 }
 
 /// The best approximate rotational symmetry of `x`, over the given orders.
@@ -758,7 +816,7 @@ pub fn detect(x: ArrayView1<f64>, n: usize, orders: &[usize], tolerance: f64) ->
     let mut best: Option<Candidate> = None;
     let mut cap = tolerance;
     let cloud = Cloud::from_view(x, n);
-    for axis in candidate_axes(x, n) {
+    for axis in candidate_axes(x, n).axes {
         for &order in orders {
             let Some(d) = cloud.symmetry_deviation(axis, order, cap) else {
                 continue;
@@ -808,22 +866,52 @@ pub fn best_order_about(
 /// One centred cloud and one axis list serve every order. An order whose
 /// rotation cannot exchange atoms is omitted. The survivors are in the
 /// order they were requested, which is the order a later group closure sees.
+///
+/// The set is unlabelled: every atom is one species. [`detect_orders_in`]
+/// is the same scan with a species label per atom.
 pub fn detect_orders(
     x: ArrayView1<f64>,
     n: usize,
     orders: &[usize],
     tolerance: f64,
 ) -> Vec<Candidate> {
+    detect_orders_in(x, n, orders, tolerance, &[])
+}
+
+/// Best proper rotation of each requested order the counts and the inertia allow.
+///
+/// `species` has one label per atom. An empty slice, or any other length,
+/// is one species. An order is scanned only when every species count `c`
+/// has `c % k` in `{0, 1}`, and a nondegenerate inertia tensor is scanned
+/// only for `k <= 2` about its principal axes. Orders that survive those
+/// tests still have to exchange atoms inside the tolerance.
+pub fn detect_orders_in(
+    x: ArrayView1<f64>,
+    n: usize,
+    orders: &[usize],
+    tolerance: f64,
+    species: &[u32],
+) -> Vec<Candidate> {
     let cloud = Cloud::from_view(x, n);
     let axes = candidate_axes(x, n);
+    let counts = species_counts(n, species);
+    let nondegenerate = nondegenerate_top(axes.moments);
+    let axis_limit = if nondegenerate {
+        axes.principal
+    } else {
+        axes.axes.len()
+    };
     // One slot per requested order. The cap tightens to the best residual of
     // that order, so a later axis stops when it cannot win.
     let mut caps = vec![tolerance; orders.len()];
     let mut best: Vec<Option<Candidate>> = vec![None; orders.len()];
-    for &axis in &axes {
+    for &axis in axes.axes.iter().take(axis_limit) {
         let highest = cloud.highest_exchange_order(axis);
         for (slot, &order) in orders.iter().enumerate() {
-            if order > highest {
+            if order > highest || !order_fixes_at_most_one(&counts, order) {
+                continue;
+            }
+            if nondegenerate && order > 2 {
                 continue;
             }
             let Some(d) = cloud.symmetry_deviation(axis, order, caps[slot]) else {
@@ -855,11 +943,25 @@ pub fn detect_generators(
     orders: &[usize],
     tolerance: f64,
 ) -> Vec<Candidate> {
-    let mut out = detect_orders(x, n, orders, tolerance);
+    detect_generators_in(x, n, orders, tolerance, &[])
+}
+
+/// As [`detect_generators`], with one species label per atom.
+///
+/// The labels restrict the rotational orders through [`detect_orders_in`].
+/// A mirror is not a `C_k` and is not held to that count.
+pub fn detect_generators_in(
+    x: ArrayView1<f64>,
+    n: usize,
+    orders: &[usize],
+    tolerance: f64,
+    species: &[u32],
+) -> Vec<Candidate> {
+    let mut out = detect_orders_in(x, n, orders, tolerance, species);
     let cloud = Cloud::from_view(x, n);
     let mut cap = tolerance;
     let mut plane: Option<Candidate> = None;
-    for axis in candidate_axes(x, n) {
+    for axis in candidate_axes(x, n).axes {
         let Some(d) = cloud.plane_deviation(axis, cap) else {
             continue;
         };
@@ -893,7 +995,7 @@ pub fn detect_all(
 ) -> Vec<Candidate> {
     let mut out = Vec::new();
     let cloud = Cloud::from_view(x, n);
-    for axis in candidate_axes(x, n) {
+    for axis in candidate_axes(x, n).axes {
         let highest = cloud.highest_exchange_order(axis);
         for &order in orders {
             if order > highest {
@@ -2663,5 +2765,69 @@ mod shell_tests {
             ..spec
         };
         assert!(shell_core_group(x.view(), n, &spec).is_some());
+    }
+
+    /// A regular pentagon has one species of five atoms, so orders 2 and 5
+    /// are admissible and 3 and 4 are not. The body is a symmetric top, so
+    /// the five-fold axis is still scanned.
+    #[test]
+    fn a_pentagon_keeps_only_orders_the_count_allows() {
+        let mut coords = Vec::with_capacity(15);
+        for step in 0..5 {
+            let angle = std::f64::consts::TAU * step as f64 / 5.0;
+            coords.extend([angle.cos(), angle.sin(), 0.0]);
+        }
+        let x = Array1::from(coords);
+        let found = detect_orders(x.view(), 5, &[2, 3, 4, 5], 1e-6);
+        let orders: Vec<usize> = found.iter().map(|candidate| candidate.order).collect();
+        assert!(orders.contains(&5), "{orders:?}");
+        assert!(orders.contains(&2), "{orders:?}");
+        assert!(!orders.contains(&3), "{orders:?}");
+        assert!(!orders.contains(&4), "{orders:?}");
+    }
+
+    /// Six atoms admit a three-fold order. Splitting them into species of
+    /// four and two does not: the pair leaves a remainder of 2.
+    #[test]
+    fn a_species_with_remainder_two_drops_that_order() {
+        let height = 3.0_f64.sqrt() / 2.0;
+        let x = Array1::from_vec(vec![
+            1.0, 0.0, 0.0, -0.5, height, 0.0, -0.5, -height, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+            0.0, 0.0, -1.0,
+        ]);
+        let found = detect_orders_in(x.view(), 6, &[3], 1e-8, &[0, 0, 0, 0, 1, 1]);
+        assert!(found.is_empty(), "{found:?}");
+        let unlabelled = detect_orders(x.view(), 6, &[3], 1e-8);
+        assert!(
+            unlabelled.iter().any(|candidate| candidate.order == 3),
+            "{unlabelled:?}"
+        );
+    }
+
+    /// Three distinct principal moments admit only a half turn, and only
+    /// about those axes. The tolerance is wide enough that a quarter turn
+    /// would be reported if the scan still tried it.
+    #[test]
+    fn a_nondegenerate_top_is_only_a_half_turn_about_its_principal_axes() {
+        let x = Array1::from_vec(vec![
+            2.0, 1.0, 0.0, -2.0, 1.0, 0.0, -2.0, -1.0, 0.0, 2.0, -1.0, 0.0,
+        ]);
+        let found = detect_orders(x.view(), 4, &[2, 3, 4], 100.0);
+        assert!(!found.is_empty(), "a half turn should still be tested");
+        assert!(
+            found.iter().all(|candidate| candidate.order == 2),
+            "{found:?}"
+        );
+        let axes = candidate_axes(x.view(), 4);
+        assert!(nondegenerate_top(axes.moments), "{:?}", axes.moments);
+        for candidate in &found {
+            let on_principal = axes.axes[..axes.principal].iter().any(|axis| {
+                let dot = axis[0] * candidate.axis[0]
+                    + axis[1] * candidate.axis[1]
+                    + axis[2] * candidate.axis[2];
+                dot.abs() > 1.0 - 1e-12
+            });
+            assert!(on_principal, "{candidate:?}");
+        }
     }
 }

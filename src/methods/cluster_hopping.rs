@@ -8982,8 +8982,21 @@ where
                     continue;
                 }
                 let orders: Vec<usize> = (2..=n).collect();
-                let cands =
-                    crate::symmetrise::detect_orders(x.view(), n, &orders, cfg.symmetry_tolerance);
+                let cands = match cfg.species.as_deref() {
+                    Some(species) if species.len() == n => crate::symmetrise::detect_orders_in(
+                        x.view(),
+                        n,
+                        &orders,
+                        cfg.symmetry_tolerance,
+                        species,
+                    ),
+                    _ => crate::symmetrise::detect_orders(
+                        x.view(),
+                        n,
+                        &orders,
+                        cfg.symmetry_tolerance,
+                    ),
+                };
                 let group = crate::symmetrise::close_symmetries(
                     &cands,
                     x.view(),

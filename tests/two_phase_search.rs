@@ -79,12 +79,13 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
             plain_mask |= 1 << seed;
         }
     }
-    // The template-free walk is deterministic: cutoff 0xffff, plain
-    // 0xd851 (7 seeds). Refusing a self-mapping turn moved the plain
-    // mask to 0x5051 (5 seeds). Closing only products that are still
-    // symmetries, and testing each rotation in one nearest-image pass,
-    // moved it again; the cutoff mask did not move.
-    let plain_exact = 0xd851;
+    // The template-free walk is deterministic: cutoff 0xffff. Closing
+    // only products that are still symmetries, and testing each
+    // rotation in one nearest-image pass, left the plain mask at
+    // 0xd851 (7 seeds). Pruning orders by the species remainder and a
+    // nondegenerate inertia tensor moves that mask to 0xe808 (5
+    // seeds). The cutoff mask stays 0xffff.
+    let plain_exact = 0xe808;
     assert_eq!(
         compact_mask, 0xffff,
         "the cutoff walk reached the octahedron on {compact_hits} of {SEEDS} seeds (mask {compact_mask:#06x})"

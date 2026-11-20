@@ -1,6 +1,7 @@
 // Copyright (c) anneal developers
 //! `plateau_heat` is an acceptance temperature. Each test pins a walk
-//! that moves when one heated site is reverted.
+//! that moves when one heated site is reverted. The order prune moves
+//! the two long preset walks and leaves the short ones.
 
 use anneal_core::methods::cluster_hopping::{
     Config, ContinuousSymmetry, Ledger, Outcome, random_cluster_in_radius, run_with_gradient,
@@ -95,8 +96,8 @@ fn metropolis_heat_follows_the_plateau() {
     let cold_fp = fingerprint(&cold);
     let hot_fp = fingerprint(&hot);
     assert_ne!(hot_fp, cold_fp, "temperature *= heat");
-    assert_eq!(cold_fp, 0x2e47c0207dbc66e1, "preset walk");
-    assert_eq!(hot_fp, 0xf77ce07575e0803c, "PLATEAU_HEAT_CAP");
+    assert_eq!(cold_fp, 0x4b5dea1c114b24aa, "preset walk");
+    assert_eq!(hot_fp, 0xef6e52f7ce112474, "PLATEAU_HEAT_CAP");
 }
 
 #[test]
@@ -104,10 +105,10 @@ fn lattice_exchange_follows_the_plateau() {
     let mut cfg = Config::recommended(ATOMS);
     cfg.restart_patience = 2_000;
     let (cold, hot) = pair(&cfg, 30_000, 2000);
-    assert_eq!(fingerprint(&cold), 0x6a4e7aad709a68fa, "preset walk");
+    assert_eq!(fingerprint(&cold), 0xed094558d0664471, "preset walk");
     assert_eq!(
         fingerprint(&hot),
-        0x9e0a142057f56021,
+        0x87b174dc9a8c3400,
         "heat * cfg.temperature"
     );
 }

@@ -16,6 +16,9 @@
 //! Removing the fixed fivefold openings and the order cap on detected
 //! symmetry moves both short records. Refusing a turn that maps every
 //! atom to itself moves them again: the high orders were not symmetries.
+//! Keeping only orders the species count and a nondegenerate inertia
+//! tensor allow moves the 38-point hop count. The quenched energy and
+//! the 98-point record stay.
 
 use anneal_core::methods::cluster_hopping::{Config, Ledger};
 use anneal_core::methods::cluster_search::search;
@@ -26,7 +29,7 @@ fn lj38_and_lj98_short_searches_stay_put() {
     anneal_core::install_rgpot_kernels!();
     // (n, seed, budget, best, hops, converged, capped)
     let cases: &[(usize, u64, usize, f64, usize, usize, usize)] = &[
-        (38, 1, 2500, -170.713_100_825_251_98, 20, 21, 16),
+        (38, 1, 2500, -170.713_100_825_251_98, 23, 22, 19),
         (98, 7, 2500, -520.107_879_491_539_2, 12, 11, 9),
     ];
     let mut records = Vec::new();
@@ -62,7 +65,7 @@ fn lj38_and_lj98_short_searches_stay_put() {
         assert_eq!(stats.capped, *capped);
     }
     let expected = "\
-LJ38 -170.7131008252519848 20 21 16 2500
+LJ38 -170.7131008252519848 23 22 19 2500
 LJ98 -520.1078794915391654 12 11 9 2500";
     assert_eq!(records.join("\n"), expected);
 }
