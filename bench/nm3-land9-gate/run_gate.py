@@ -18,6 +18,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 GATE = Path(__file__).resolve().parent
@@ -399,18 +400,29 @@ def run_checked(command: list[str], cwd: Path, env: dict[str, str], log: Path) -
         stderr=subprocess.PIPE,
         text=True,
     )
-    affinity = affinity_of(proc.pid)
-    child_threads_are_one(proc.pid)
-    stdout, stderr = proc.communicate()
+    affinity = ""
+    try:
+        for _ in range(100):
+            affinity = affinity_of(proc.pid) or affinity
+            try:
+                child_threads_are_one(proc.pid)
+                break
+            except RuntimeError:
+                if proc.poll() is not None:
+                    raise
+                time.sleep(0.01)
+        else:
+            child_threads_are_one(proc.pid)
+        stdout, stderr = proc.communicate()
+    except Exception:
+        proc.kill()
+        proc.communicate()
+        raise
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text(stdout + stderr)
     if proc.returncode != 0:
         raise RuntimeError(f"exit {proc.returncode}\n{(stdout + stderr)[-2000:]}")
     if affinity != "0":
-        pins = ""
-        for line in stdout.splitlines():
-            if line.startswith("system,code,seed,"):
-                pins = "header"
         raise RuntimeError(f"affinity {affinity!r}")
     return stdout, affinity
 
