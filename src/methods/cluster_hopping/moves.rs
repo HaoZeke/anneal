@@ -63,10 +63,9 @@ pub enum MoveLibrary {
         /// [`Config::for_tip4p`] leaves this off and keeps the separate
         /// `rtrans` and `rrot` arms. [`Config::with_rigid_bodies`] turns it on.
         local: bool,
-        /// Offer reversal of a directed contact cycle as one more arm.
-        /// It needs a rigid geometry with declared intrabody bonds, or an
-        /// undeclared water. [`Config::for_tip4p`] turns it on. With it
-        /// off, a stalled archive walk still reverses contact chains.
+        /// Offer the reversal of a directed hydrogen-bond cycle as one more
+        /// arm. It needs a site geometry with one oxygen and two hydrogens.
+        /// [`Config::for_tip4p`] turns it on.
         reverse_cycles: bool,
         /// Move one body onto a vacant contact.
         ///
@@ -328,7 +327,7 @@ impl MoveLibrary {
                 }
                 if *reverse_cycles
                     && let Some(geometry) = cfg.rigid_body_geometry.as_ref()
-                    && super::cycles::has_contact_cycles(geometry)
+                    && super::cycles::water_sites(geometry).is_some()
                 {
                     kernels.push(ClusterMove::RigidReverseCycle {
                         n_molecules: *n_molecules,
@@ -743,15 +742,15 @@ pub enum ClusterMove {
         /// Maximum angle of the draw, in radians.
         step: f64,
     },
-    /// Reverse a directed contact cycle between bonded rigid bodies.
+    /// Reverse a directed cycle of hydrogen bonds between rigid waters.
     ///
-    /// Each body turns about the most-connected site in its declared bond
-    /// graph, so the cycle points the other way while the anchor network
-    /// stays. A cluster with no cycle comes back unchanged.
+    /// Each molecule on the cycle turns about its oxygen, so the cycle
+    /// points the other way and the oxygen network stays. A cluster with no
+    /// cycle comes back unchanged.
     RigidReverseCycle {
         /// Rigid bodies in the state.
         n_molecules: usize,
-        /// Site geometry and intrabody bonds of one rigid body.
+        /// Site geometry of one water: one oxygen, two hydrogens.
         geometry: crate::rigid_body::RigidBodyGeometry,
     },
     /// Reverse a directed H-bond cycle in Cartesian water coordinates.
@@ -1918,11 +1917,6 @@ impl ClusterMove {
             source: crate::lattice::Source::Observed,
         });
         v
-    }
-
-    /// True when this arm reverses a directed contact cycle.
-    pub(crate) fn reverses_directed_cycle(&self) -> bool {
-        matches!(self, ClusterMove::RigidReverseCycle { .. })
     }
 
     /// Short name, for per-arm reporting.
