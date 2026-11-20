@@ -369,6 +369,151 @@ fn native_release_builds_where_artifact_packaging_reads() {
     }
 }
 
+/// A script line with the spaces inside `${{ }}` removed, so it splits into
+/// shell words.
+fn compact_expressions(line: &str) -> String {
+    line.replace("${{ ", "${{").replace(" }}", "}}")
+}
+
+/// The archive entries the packaging step creates with `cp`, and the ones it
+/// checks for with `tar tzf`.
+fn packaged_and_checked(package: &Value) -> (BTreeSet<String>, BTreeSet<String>) {
+    let lines: Vec<String> = script(package)
+        .into_iter()
+        .map(compact_expressions)
+        .collect();
+    let mut made_dirs = BTreeSet::new();
+    let mut copied = BTreeSet::new();
+    for line in &lines {
+        let words: Vec<&str> = line.split_whitespace().collect();
+        if words.starts_with(&["mkdir", "-p"]) {
+            for dir in &words[2..] {
+                // `mkdir -p` makes every parent as well.
+                let dir = dir.trim_end_matches('/');
+                for (at, _) in dir.match_indices('/') {
+                    made_dirs.insert(&dir[..at]);
+                }
+                made_dirs.insert(dir);
+            }
+        } else if words.first() == Some(&"cp") {
+            assert_eq!(words.len(), 3, "{line}");
+            let to = words[2]
+                .strip_prefix("staging/")
+                .unwrap_or_else(|| panic!("{line} copies outside staging"));
+            let entry = match to.strip_suffix('/') {
+                Some(dir) => {
+                    assert!(
+                        made_dirs.contains(format!("staging/{dir}").as_str()),
+                        "{line} copies into a directory no mkdir made"
+                    );
+                    let file = words[1].rsplit('/').next().unwrap();
+                    format!("./{dir}/{file}")
+                }
+                None => format!("./{to}"),
+            };
+            copied.insert(entry);
+        }
+    }
+    let prefix = r#"tar tzf ${{matrix.artifact}}.tar.gz | grep -Fq ""#;
+    let checked = lines
+        .iter()
+        .filter_map(|line| line.strip_prefix(prefix)?.strip_suffix('"'))
+        .map(str::to_owned)
+        .collect();
+    (copied, checked)
+}
+
+#[test]
+fn the_native_archive_holds_every_header_its_headers_include() {
+    let workflow = release();
+    let (_, package) = step(job(&workflow, "native-libs"), "Package artifacts");
+    let (copied, checked) = packaged_and_checked(package);
+
+    // Each file the packager copies is looked up in the finished archive,
+    // and nothing is looked up that was not copied.
+    assert_eq!(copied, checked);
+
+    // The headers that ship include these files. Whatever one of them
+    // names that lives in include/ ships too, and anneal-core.h is the
+    // generated header.
+    let config: toml::Table = include_str!("../cbindgen.toml")
+        .parse()
+        .expect("cbindgen.toml");
+    let generated_includes = config["after_includes"].as_str().expect("after_includes");
+    let sources = [
+        generated_includes,
+        include_str!("../include/anneal-core.hpp"),
+        include_str!("../include/anneal-version.h"),
+    ];
+    let mut included = BTreeSet::new();
+    for source in sources {
+        for line in source.lines() {
+            if let Some(rest) = line.trim().strip_prefix("#include") {
+                included.insert(rest.trim().trim_matches(['<', '>', '"']).to_owned());
+            }
+        }
+    }
+    let include_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("include");
+    let mut shipped = 0;
+    for header in &included {
+        if include_dir.join(header).is_file() || header == "anneal-core.h" {
+            shipped += 1;
+            assert!(
+                copied.contains(&format!("./include/{header}")),
+                "a shipped header includes {header}, and the archive lacks it"
+            );
+        }
+    }
+    assert!(
+        included.contains("dlpack/dlpack.h") && shipped >= 3,
+        "{included:?}"
+    );
+}
+
+#[test]
+fn native_release_compiles_a_consumer_against_the_archive() {
+    let workflow = release();
+    let native = job(&workflow, "native-libs");
+    let (package_at, _) = step(native, "Package artifacts");
+    let (consumer_at, consumer) = step(native, "Compile a consumer against the archive");
+    let upload_at = first_use(native, "actions/upload-artifact");
+
+    assert_binding(consumer);
+    assert_eq!(consumer["shell"].as_str(), Some("bash"));
+    assert!(package_at < consumer_at && consumer_at < upload_at);
+
+    let lines = logical_lines(consumer);
+    let at = |wanted: &str| {
+        lines
+            .iter()
+            .position(|line| line == wanted)
+            .unwrap_or_else(|| panic!("the consumer step lacks {wanted:?}: {lines:?}"))
+    };
+    let extract = at("tar xzf ${{ matrix.artifact }}.tar.gz -C consumer");
+    let compiles: Vec<usize> = (0..lines.len())
+        .filter(|&i| lines[i].starts_with("cc "))
+        .collect();
+    assert_eq!(compiles.len(), 2, "{lines:?}");
+    let (syntax, link) = (compiles[0], compiles[1]);
+    let linux_only = at(r#"if [[ "${{ matrix.os }}" == linux ]]; then"#);
+    let run = at("./consumer/ffi_smoke");
+    assert!(extract < syntax && syntax < linux_only && linux_only < link && link < run);
+    assert!(lines[syntax].contains("-fsyntax-only"));
+    assert!(lines[link].contains("-Lconsumer/lib") && lines[link].contains("-lanneal_core"));
+    assert!(lines[link].contains("-o consumer/ffi_smoke"));
+
+    // The consumer reads headers from the extracted archive and nowhere
+    // else, so a file the archive lacks is an error.
+    for compile in [syntax, link] {
+        assert!(lines[compile].contains("tests/ffi_smoke.c"));
+        let include_dirs: Vec<&str> = lines[compile]
+            .split_whitespace()
+            .filter_map(|word| word.strip_prefix("-I"))
+            .collect();
+        assert_eq!(include_dirs, ["consumer/include"], "{}", lines[compile]);
+    }
+}
+
 #[test]
 fn release_installs_and_imports_the_built_sdist() {
     let workflow = release();
