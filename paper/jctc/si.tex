@@ -109,16 +109,19 @@ The hexamer wall-time medians are in \path{logs/hexamer-walls.txt}.
 
 \section{GMIN inputs and the two fairness campaigns}
 \label{sec:si-gmin}
-The GMIN table of the main text uses two GMIN inputs.
+The GMIN table of the main text uses three GMIN inputs.
 The Lennard-Jones rows run the Wales-group LJ\(_{38}\) introduction file at every Lennard-Jones size, with \(T=1.0\), \texttt{NEWRESTART 40}, and an energy difference of 0.003, with no symmetrization keyword, from the start that this code writes for the seed.
-The Morse row adds GMIN's native \texttt{MORSE} keyword and \(\rho\) to the same numerical settings.
-GMIN is the public snapshot of SVNREV \texttt{9cbec1a446352bc9ef064bd2b1a5767194655919}, tarball sha256 \texttt{\seqsplit{ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776}}, built by \path{scripts/gmin_panel/build_gmin.sh} at revision \texttt{eeec8e2c} with three patches, \path{bench/lj104-lattice/v2/h2h-gmin.patch}, \path{scripts/morse_h2h/morse-timer.patch}, and \path{bench/metal-cluster-h2h/gmin-bgupta.patch}, which cap the force calls, time the potential, and, in the serial build, set the run index before its first use; no other line of GMIN changes.
+The Morse rows add GMIN's native \texttt{MORSE} keyword and \(\rho\) to the same numerical settings.
+The Au\(_{55}\) row runs GMIN's Gupta potential with the gold row of Darby et al., \(A=0.2061\)~eV, \(p=10.229\), \(q=4.036\), \(\xi=1.79\)~eV, and \(r_0=2.884\)~\AA, at \(T=0.1\)~eV, with step 0.40 and taboo radius 4.0 multiplied by \(r_0/2^{1/6}\), GMIN's container radius, \texttt{NEWRESTART 40}, and an energy difference of 0.003.
+\cite{darbyCuAu2002}
+GMIN is the public snapshot of SVNREV \texttt{9cbec1a446352bc9ef064bd2b1a5767194655919}, tarball sha256 \texttt{\seqsplit{ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776}}, built by \path{scripts/gmin_panel/build_gmin.sh} at revision \texttt{eeec8e2c} for the first block of the table, and for the second by the same script at the record commit \texttt{f009acc9} on the submitted revision, which only sets the number of parallel build jobs, with three patches, \path{bench/lj104-lattice/v2/h2h-gmin.patch}, \path{scripts/morse_h2h/morse-timer.patch}, and \path{bench/metal-cluster-h2h/gmin-bgupta.patch}, which cap the force calls, time the potential, and, in the serial build, set the run index before its first use; no other line of GMIN changes.
 The recipe stamps the wall clock and the build directory into the binary, so the three shard binaries differ in their sha256 and share one \texttt{.text} section.
 The hit is a quenched energy at or below the Cambridge Cluster Database
 minimum plus 0.001: besides the five Lennard-Jones references above,
 \(-569.363652\) at LJ\(_{102}\), \(-575.766131\) at LJ\(_{103}\),
-\(-893.310258\) at LJ\(_{150}\), and \(-378.333471\) at M\(_{80}\)
-(\(\rho=6\)).
+\(-893.310258\) at LJ\(_{150}\), \(-191.03085280\)~eV at Au\(_{55}\),
+\(-250.286609\) and \(-220.646208\) at M\(_{55}\) (\(\rho=6\) and 14), and
+\(-378.333471\) and \(-340.811371\) at M\(_{80}\) (\(\rho=6\) and 14).
 \cite{walesCambridgeClusterDatabase}
 
 The committed \path{paper/jctc/data/lj75_gmin/gmin-lj75-sym-starts-1-200.csv}
@@ -135,10 +138,12 @@ pinned to core 0, in alternating order by seed: six seeds with this code
 first and six with GMIN first.
 The machine is recorded by the sha256 of its machine id: LJ\(_{38}\),
 LJ\(_{55}\), LJ\(_{75}\), LJ\(_{98}\), LJ\(_{102}\), LJ\(_{103}\),
-LJ\(_{104}\), and M\(_{80}\) ran on
+LJ\(_{104}\), and M\(_{80}\) of the first block ran on
 \texttt{\seqsplit{3b11c160088e7af5c4f7ebd9da95e0bfe019a34698416701bb057c15fea10873}},
-and LJ\(_{150}\) on
-\texttt{\seqsplit{9eb296774121518feb1b187b0f6a109a42de7a5dd39e62ccd37d6e7d329604b8}}.
+LJ\(_{150}\) on
+\texttt{\seqsplit{9eb296774121518feb1b187b0f6a109a42de7a5dd39e62ccd37d6e7d329604b8}},
+and every cluster of the second block on
+\texttt{\seqsplit{e06d886d760e0a59870126b963636ff6408201594f2686f72deb66816fccadb3}}.
 GMIN is built by \path{scripts/gmin_panel/build_gmin.sh} with ALIGN, MPI,
 and OpenMP off, against the system BLAS and LAPACK; the record does not
 give the compiler version.
@@ -171,7 +176,8 @@ python3 paper/jctc/scripts/water_h2h.py
 \end{verbatim}
 \end{footnotesize}
 The GMIN script writes \texttt{bench/gmin-panel/rows.csv}; the table of the main
-text is written from the imported rows of the 2026-11-19 shards by
+text is written from the imported rows of the 2026-11-19 shards and the
+2026-11-20 session by
 \path{paper/jctc/scripts/gmin_table.py}, and the summarizers of each other panel
 rewrite its table from the committed rows without a new search.
 The ASE rows cannot be searched again from this repository.
@@ -189,16 +195,19 @@ paired by seed.
 
 \section{Code revisions behind the tables}
 \label{sec:si-revisions}
-Every row of this code in the GMIN table is revision
+The rows of this code in the first block of the GMIN table are revision
 \texttt{\seqsplit{eeec8e2c216ae1506768bca8e29846c1c039ca3b}}, an ancestor of
 the submitted revision and a descendant of commit \texttt{1c1b1238}, which
 removed the structure templates.
-The rows are the four shards of \path{paper/jctc/data/gmin_rerun}, each copied
+They are the four shards of \path{paper/jctc/data/gmin_rerun}, each copied
 from the record branch its \texttt{PROVENANCE} file names.
+The rows of this code in the second block are the submitted revision
+\texttt{\seqsplit{61fa67cf380e46876b569da45e7cc091647a775b}}, session
+20261120T072444Z of \path{paper/jctc/data/gmin_develop}, copied from the
+record branch its \texttt{PROVENANCE} file names.
 Earlier versions of the table carried Morse and gold rows of revision
-\texttt{1ce3ab64}, which is not in the repository; no committed row of an
-ancestor revision covers M\(_{55}\), M\(_{80}\) at \(\rho=14\), or
-Au\(_{55}\) against GMIN, and the table leaves those clusters out.
+\texttt{1ce3ab64}, which is not in the repository; the second block
+replaces them with rows of the submitted revision.
 
 The blocks of the knockout table ran at the revisions their headings name.
 The structure-prior block is the last row of each system, arm, and seed at
