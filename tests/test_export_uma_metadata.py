@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
+import os
 import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -334,6 +337,28 @@ class _ReverseViewGradient(torch.nn.Module):
         return gradient.sum(), buffer + restored
 
 
+def _package_identical_graph_worker(args):
+    out_path, box_value, shared_cache_dir = args
+    os.environ["TORCHINDUCTOR_CACHE_DIR"] = str(shared_cache_dir)
+    x = torch.ones((4, 3), dtype=torch.float64)
+    program = torch.export.export(torch.nn.Identity(), (x,), strict=False)
+    exp.aoti_package(
+        program,
+        Path(out_path),
+        metadata={"molecular_box": box_value, "task_name": f"box-{box_value}"},
+    )
+    assert os.environ.get("TORCHINDUCTOR_CACHE_DIR") == str(shared_cache_dir)
+    with zipfile.ZipFile(out_path) as archive:
+        meta_entries = [
+            name for name in archive.namelist() if name.endswith("_metadata.json")
+        ]
+        assert meta_entries
+        zip_metas = [
+            json.loads(archive.read(name).decode("utf-8")) for name in meta_entries
+        ]
+    return exp.load_aoti(out_path).get_metadata(), zip_metas
+
+
 def test_aoti_package_preserves_reverse_view_gradient(tmp_path):
     gradient = torch.arange(12 * 128, dtype=torch.float32).reshape(12, 1, 128) / 128
     expected = torch.zeros((12, 9, 128), dtype=gradient.dtype)
@@ -343,3 +368,25 @@ def test_aoti_package_preserves_reverse_view_gradient(tmp_path):
     energy, restored = exp.run_aoti(exp.load_aoti(package), (gradient,))
     torch.testing.assert_close(energy, gradient.sum(), rtol=0, atol=0)
     torch.testing.assert_close(restored, expected, rtol=0, atol=0)
+
+
+def test_aoti_package_isolates_concurrent_metadata_writes(tmp_path, monkeypatch):
+    shared_cache = tmp_path / "shared-inductor-cache"
+    shared_cache.mkdir()
+    monkeypatch.delenv("TORCHINDUCTOR_CACHE_DIR", raising=False)
+    # Reproduce concurrent packaging of identical graphs whose only difference
+    # is embedded aot_inductor.metadata (e.g. line-box.pt2 vs line-float64.pt2).
+    boxes = [f"{i}.0" for i in range(6)]
+    tasks = [
+        (tmp_path / f"pkg-{i}.pt2", box, shared_cache)
+        for i, box in enumerate(boxes)
+    ]
+    with concurrent.futures.ProcessPoolExecutor(max_workers=6) as pool:
+        results = list(pool.map(_package_identical_graph_worker, tasks))
+    for box, (loaded_meta, zip_metas) in zip(boxes, results):
+        assert loaded_meta["molecular_box"] == box
+        assert loaded_meta["task_name"] == f"box-{box}"
+        for embedded in zip_metas:
+            assert embedded["molecular_box"] == box
+            assert embedded["task_name"] == f"box-{box}"
+    assert "TORCHINDUCTOR_CACHE_DIR" not in os.environ

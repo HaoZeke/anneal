@@ -1,0 +1,1 @@
+`scripts/export_uma_aoti.py` now compiles each `.pt2` archive inside an isolated `TORCHINDUCTOR_CACHE_DIR`, preventing concurrent exports of identical AOTInductor graphs from overwriting each other's embedded package metadata.
