@@ -55,6 +55,7 @@ from anneal._core import (
     cluster_search as _core_cluster_search,
     energy_hits,
     low_discrepancy_points as _core_low_discrepancy_points,
+    osa_acceptance_rate,
     pilot_draws_qmc as _core_pilot_draws_qmc,
     polish as _core_polish,
     quench as _core_quench,
@@ -415,8 +416,8 @@ def quench(fg_fn, x0, gtol: float, max_iter: int = 10000, *, method: str = "lbfg
         np.asarray(x0, dtype=np.float64).reshape(-1),
         float(gtol),
         int(max_iter),
-        str(method),
-        labels,
+        method=str(method),
+        species=labels,
     )
     out["x"] = np.asarray(out["x"], dtype=np.float64)
     return out
@@ -771,7 +772,7 @@ def gle_langevin(
     estimated from local gradient curvature over the provided bounds. This
     handles ill-conditioning the way the
     ``1/sqrt(D)`` scale handles dimension. Returns ``{best_pos, best_val,
-    n_evals, omega0, dt}``.
+    n_evals, omega0, dt, preconditioner_diag, n_preconditioner_grads}``.
     """
     omega_arg = None if omega0 is None else float(omega0)
     out = _core_gle_langevin(
@@ -1580,6 +1581,7 @@ __all__ = [
     "TvmFfiTensorMetadata",
     "__version__",
     "low_discrepancy_points",
+    "osa_acceptance_rate",
     "pilot_draws_qmc",
     "polish",
     "quench",

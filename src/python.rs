@@ -256,7 +256,7 @@ fn read_x0(
 /// States are flattened `(n_points, 3)` point sets, fingerprinted by sorted
 /// pairwise distances, which is invariant to permutation, translation and
 /// rotation.
-#[pyclass(name = "BasinBias")]
+#[pyclass(name = "BasinBias", module = "anneal._core")]
 pub struct PyBasinBias {
     inner: crate::bias::BasinBias<crate::bias::SortedPairs>,
 }
@@ -345,7 +345,7 @@ impl PyBasinBias {
 }
 
 /// Boltzmann preset parameters: initial temperature and Gaussian step size.
-#[pyclass(name = "Boltzmann")]
+#[pyclass(name = "Boltzmann", module = "anneal._core")]
 #[derive(Clone, Copy, Debug)]
 pub struct PyBoltzmann {
     /// Initial temperature `T_0`.
@@ -373,7 +373,7 @@ impl PyBoltzmann {
 }
 
 /// Fast SA preset parameters: initial temperature and Cauchy scale.
-#[pyclass(name = "Fast")]
+#[pyclass(name = "Fast", module = "anneal._core")]
 #[derive(Clone, Copy, Debug)]
 pub struct PyFast {
     /// Initial temperature `T_0`.
@@ -398,7 +398,7 @@ impl PyFast {
 }
 
 /// GSA preset parameters: initial temperature and Tsallis indices.
-#[pyclass(name = "Gsa")]
+#[pyclass(name = "Gsa", module = "anneal._core")]
 #[derive(Clone, Copy, Debug)]
 pub struct PyGsa {
     /// Initial temperature `T_0`.
@@ -433,7 +433,7 @@ impl PyGsa {
 // ---------------------------------------------------------------------------
 
 /// Per-epoch summary line exposed to Python.
-#[pyclass(name = "EpochLine")]
+#[pyclass(name = "EpochLine", module = "anneal._core")]
 #[derive(Clone, Debug)]
 pub struct PyEpochLine {
     /// Zero-based epoch index.
@@ -454,7 +454,7 @@ pub struct PyEpochLine {
 }
 
 /// Run history exposed to Python.
-#[pyclass(name = "History")]
+#[pyclass(name = "History", module = "anneal._core")]
 #[derive(Clone, Debug)]
 pub struct PyHistory {
     /// Per-epoch summary lines, in epoch order.
@@ -1618,7 +1618,8 @@ fn gle_langevin_result_to_dict(
 
 /// GLE-thermostatted Langevin annealing: gradient-driven BAB dynamics with a
 /// colored-noise (generalized Langevin) thermostat that flattens the sampling
-/// efficiency across the curvature band. Returns `{best_pos, best_val, n_evals}`.
+/// efficiency across the curvature band. Returns `{best_pos, best_val,
+/// n_evals, omega0, dt, preconditioner_diag, n_preconditioner_grads}`.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, grad_fn, low, high, max_fevals, seed=0,
                     omega0=None, dt=0.2, n_epochs=40, x0=None))]
@@ -2833,7 +2834,7 @@ fn osa_acceptance_rate(
 /// `Config.for_cluster`. The recommended stack is the measured
 /// default: composed surface relocations, depth-rewarded move
 /// allocation, and tabu on stall.
-#[pyclass(name = "Config")]
+#[pyclass(name = "Config", module = "anneal._core")]
 #[derive(Clone)]
 pub struct PyClusterConfig {
     inner: crate::methods::cluster_hopping::Config,
@@ -3035,7 +3036,7 @@ impl PyClusterConfig {
 }
 
 /// Work ledger: every objective or gradient evaluation is one charged unit.
-#[pyclass(name = "Ledger")]
+#[pyclass(name = "Ledger", module = "anneal._core")]
 pub struct PyLedger {
     inner: crate::methods::cluster_hopping::Ledger,
 }
@@ -3467,7 +3468,8 @@ fn rigid_probe(
 /// `Config.communicating(n)` and overrides both. A charged central-difference
 /// probe distinguishes gradients from force-valued callbacks when the budget
 /// can cover it. Every objective or gradient evaluation is charged to a ledger
-/// of `budget` units. Returns `{best, best_energy, hops, nve_unavailable}`.
+/// of `budget` units. Returns `{best, best_energy, hops, accepted,
+/// nve_unavailable, local_step, quench_seconds}`.
 /// `nve_unavailable` is set when a constant-energy escape was requested and
 /// the `rgsaddle` feature is off. The `python` feature enables it.
 /// `ras=True` runs residual archive search on `Config.recommended(n)` and
@@ -3920,7 +3922,7 @@ fn cluster_search(
 /// `(energy, gradient)`; each call is one evaluation. Returns
 /// `{x, energy, calls}`.
 #[pyfunction]
-#[pyo3(signature = (fg_fn, x0, gtol, max_iter = 10000, method = "lbfgs", species = None))]
+#[pyo3(signature = (fg_fn, x0, gtol, max_iter = 10000, *, method = "lbfgs", species = None))]
 fn quench(
     py: Python<'_>,
     fg_fn: Py<PyAny>,
@@ -3994,9 +3996,11 @@ fn quench(
     Ok(out.into())
 }
 
+const _: () = assert!(crate::DEFAULT_HIT_TOL == 1e-3);
+
 /// One-sided target-energy hit predicate (`energy <= target + tol`).
 #[pyfunction]
-#[pyo3(signature = (energy, target, tol = crate::DEFAULT_HIT_TOL))]
+#[pyo3(signature = (energy, target, tol = 1e-3))]
 fn energy_hits(energy: f64, target: f64, tol: f64) -> bool {
     crate::energy_hits(energy, target, tol)
 }
