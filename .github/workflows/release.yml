@@ -99,7 +99,7 @@ jobs:
           tool: cbindgen
 
       - name: Build static + shared library
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --target ${{ matrix.target }} --target-dir target
 
       - name: Generate C header
         run: cbindgen --config cbindgen.toml --crate anneal-core --output anneal-core.h

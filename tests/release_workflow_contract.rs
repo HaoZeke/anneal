@@ -51,6 +51,18 @@ fn release_tags_match_every_public_package_version() {
 }
 
 #[test]
+fn native_release_builds_where_artifact_packaging_reads() {
+    let workflow = include_str!("../.github/workflows/release.yml");
+    let native = workflow_job(workflow, "native-libs");
+
+    assert!(
+        native.contains("cargo build --release --target ${{ matrix.target }} --target-dir target")
+    );
+    assert!(native.contains("target/${{ matrix.target }}/release/${{ matrix.static_lib }}"));
+    assert!(native.contains("target/${{ matrix.target }}/release/${{ matrix.shared_lib }}"));
+}
+
+#[test]
 fn scientific_tests_optimize_kernels_without_disabling_debug_checks() {
     let manifest = include_str!("../Cargo.toml");
 
