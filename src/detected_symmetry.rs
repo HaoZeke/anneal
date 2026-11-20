@@ -14,7 +14,9 @@
 //! [`crate::movekernel::Symmetrise`], with the group read from the structure
 //! instead of one random axis.
 
-use crate::symmetrise::{Candidate, Rot, centroid, detect_all, mirror_matrix, mul, rot_matrix};
+use crate::symmetrise::{
+    Candidate, Rot, centroid, class_members, detect_all_classed, mirror_matrix, mul, rot_matrix,
+};
 use ndarray::{Array1, ArrayView1};
 
 /// Cosine of the angle within which two detected axes count as one.
@@ -138,6 +140,18 @@ pub fn order_bound(x: ArrayView1<f64>, n: usize) -> usize {
 /// refusing it would leave exactly the loosely symmetric structures, the
 /// ones a completion has most to do for, with no candidate.
 pub fn detected_group(x: ArrayView1<f64>, n: usize, tolerance: f64) -> Option<Vec<Rot>> {
+    detected_group_classed(x, n, None, tolerance)
+}
+
+/// [`detected_group`] of a structure whose points have classes: an operation
+/// must take every point onto a point of its own class, as a point group of a
+/// structure with two species does.
+pub fn detected_group_classed(
+    x: ArrayView1<f64>,
+    n: usize,
+    classes: Option<&[u32]>,
+    tolerance: f64,
+) -> Option<Vec<Rot>> {
     if n < 4 {
         return None;
     }
@@ -146,7 +160,7 @@ pub fn detected_group(x: ArrayView1<f64>, n: usize, tolerance: f64) -> Option<Ve
         return None;
     }
     let orders: Vec<usize> = (2..=bound).collect();
-    let found = detect_all(x, n, &orders, tolerance);
+    let found = detect_all_classed(x, n, classes, &orders, tolerance);
     let mut generators: Vec<Candidate> = Vec::new();
     for candidate in &found {
         let seen = generators.iter().any(|g| {
@@ -253,9 +267,28 @@ pub fn complete_orbits(
     pair_cutoff: f64,
     min_separation: f64,
 ) -> Option<Array1<f64>> {
+    complete_orbits_classed(x, n, None, group, centre, pair_cutoff, min_separation)
+}
+
+/// [`complete_orbits`] where each class has its own sites. The images of the
+/// atoms of one class are merged into the sites of that class, the class
+/// takes the sites it has most support for that are clear of every site
+/// already chosen, and its atoms are assigned among them. No atom is seated
+/// on a site made of another class's images, so the composition of the
+/// structure is kept.
+pub fn complete_orbits_classed(
+    x: ArrayView1<f64>,
+    n: usize,
+    classes: Option<&[u32]>,
+    group: &[Rot],
+    centre: [f64; 3],
+    pair_cutoff: f64,
+    min_separation: f64,
+) -> Option<Array1<f64>> {
     if n == 0 || group.len() < 2 || x.len() != 3 * n {
         return None;
     }
+    let parts = class_members(classes, n).unwrap_or_else(|| vec![(0..n).collect()]);
     let rel = |a: usize| -> [f64; 3] {
         [
             x[3 * a] - centre[0],
@@ -263,81 +296,87 @@ pub fn complete_orbits(
             x[3 * a + 2] - centre[2],
         ]
     };
-    let mut sites: Vec<([f64; 3], usize)> = Vec::new();
-    for a in 0..n {
-        let r = rel(a);
-        for g in group {
-            let w = apply(g, r);
-            let hit = sites.iter().position(|(p, _)| {
-                let d2 = (w[0] - p[0]).powi(2) + (w[1] - p[1]).powi(2) + (w[2] - p[2]).powi(2);
-                within_cutoff(d2, pair_cutoff)
-            });
-            match hit {
-                Some(i) => {
-                    let (p, count) = &mut sites[i];
-                    let m = *count as f64;
-                    for k in 0..3 {
-                        p[k] = (p[k] * m + w[k]) / (m + 1.0);
-                    }
-                    *count += 1;
-                }
-                None => sites.push((w, 1)),
-            }
-        }
-    }
-    sites.sort_by(|p, q| {
-        q.1.cmp(&p.1).then_with(|| {
-            let rp = p.0.iter().map(|v| v * v).sum::<f64>();
-            let rq = q.0.iter().map(|v| v * v).sum::<f64>();
-            rp.partial_cmp(&rq).unwrap_or(std::cmp::Ordering::Equal)
-        })
-    });
-    let mut chosen: Vec<[f64; 3]> = Vec::with_capacity(n);
-    for (p, _) in &sites {
-        if chosen.len() == n {
-            break;
-        }
-        let clear = chosen.iter().all(|q| {
-            ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt()
-                >= min_separation
-        });
-        if clear {
-            chosen.push(*p);
-        }
-    }
-    if chosen.len() < n {
-        return None;
-    }
-    let mut pairs: Vec<(f64, usize, usize)> = Vec::with_capacity(n * n);
-    for a in 0..n {
-        let r = rel(a);
-        for (i, p) in chosen.iter().enumerate() {
-            let d2 = (r[0] - p[0]).powi(2) + (r[1] - p[1]).powi(2) + (r[2] - p[2]).powi(2);
-            pairs.push((d2, a, i));
-        }
-    }
-    pairs.sort_by(|p, q| p.0.partial_cmp(&q.0).unwrap_or(std::cmp::Ordering::Equal));
-    let mut atom_done = vec![false; n];
-    let mut site_done = vec![false; n];
+    let mut taken: Vec<[f64; 3]> = Vec::with_capacity(n);
     let mut out = x.to_owned();
     let mut moved = false;
-    let mut assigned = 0;
-    for (d, a, i) in pairs {
-        if atom_done[a] || site_done[i] {
-            continue;
+    for members in &parts {
+        let m = members.len();
+        let mut sites: Vec<([f64; 3], usize)> = Vec::new();
+        for &a in members {
+            let r = rel(a);
+            for g in group {
+                let w = apply(g, r);
+                let hit = sites.iter().position(|(p, _)| {
+                    let d2 = (w[0] - p[0]).powi(2) + (w[1] - p[1]).powi(2) + (w[2] - p[2]).powi(2);
+                    within_cutoff(d2, pair_cutoff)
+                });
+                match hit {
+                    Some(i) => {
+                        let (p, count) = &mut sites[i];
+                        let c = *count as f64;
+                        for k in 0..3 {
+                            p[k] = (p[k] * c + w[k]) / (c + 1.0);
+                        }
+                        *count += 1;
+                    }
+                    None => sites.push((w, 1)),
+                }
+            }
         }
-        atom_done[a] = true;
-        site_done[i] = true;
-        assigned += 1;
-        for k in 0..3 {
-            out[3 * a + k] = centre[k] + chosen[i][k];
+        sites.sort_by(|p, q| {
+            q.1.cmp(&p.1).then_with(|| {
+                let rp = p.0.iter().map(|v| v * v).sum::<f64>();
+                let rq = q.0.iter().map(|v| v * v).sum::<f64>();
+                rp.partial_cmp(&rq).unwrap_or(std::cmp::Ordering::Equal)
+            })
+        });
+        let mut chosen: Vec<[f64; 3]> = Vec::with_capacity(m);
+        for (p, _) in &sites {
+            if chosen.len() == m {
+                break;
+            }
+            let clear = chosen.iter().chain(taken.iter()).all(|q| {
+                ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt()
+                    >= min_separation
+            });
+            if clear {
+                chosen.push(*p);
+            }
         }
-        if d.sqrt() > 1e-9 {
-            moved = true;
+        if chosen.len() < m {
+            return None;
         }
-        if assigned == n {
-            break;
+        let mut pairs: Vec<(f64, usize, usize)> = Vec::with_capacity(m * m);
+        for (k, &a) in members.iter().enumerate() {
+            let r = rel(a);
+            for (i, p) in chosen.iter().enumerate() {
+                let d2 = (r[0] - p[0]).powi(2) + (r[1] - p[1]).powi(2) + (r[2] - p[2]).powi(2);
+                pairs.push((d2, k, i));
+            }
         }
+        pairs.sort_by(|p, q| p.0.partial_cmp(&q.0).unwrap_or(std::cmp::Ordering::Equal));
+        let mut atom_done = vec![false; m];
+        let mut site_done = vec![false; m];
+        let mut assigned = 0;
+        for (d, k, i) in pairs {
+            if atom_done[k] || site_done[i] {
+                continue;
+            }
+            atom_done[k] = true;
+            site_done[i] = true;
+            assigned += 1;
+            let a = members[k];
+            for c in 0..3 {
+                out[3 * a + c] = centre[c] + chosen[i][c];
+            }
+            if d.sqrt() > 1e-9 {
+                moved = true;
+            }
+            if assigned == m {
+                break;
+            }
+        }
+        taken.extend(chosen);
     }
     moved.then_some(out)
 }
@@ -360,18 +399,33 @@ pub fn complete_detected(
     core_fraction: f64,
     min_separation: f64,
 ) -> Option<Array1<f64>> {
+    complete_detected_classed(
+        x,
+        n,
+        None,
+        tolerance,
+        merge_radius,
+        core_fraction,
+        min_separation,
+    )
+}
+
+/// [`complete_detected`] of a structure whose points have classes (species):
+/// the core's group takes every point onto a point of its own class, and each
+/// class is completed on its own sites.
+pub fn complete_detected_classed(
+    x: ArrayView1<f64>,
+    n: usize,
+    classes: Option<&[u32]>,
+    tolerance: f64,
+    merge_radius: f64,
+    core_fraction: f64,
+    min_separation: f64,
+) -> Option<Array1<f64>> {
     if n < 4 || x.len() != 3 * n {
         return None;
     }
-    let mut c = [0.0; 3];
-    for i in 0..n {
-        for k in 0..3 {
-            c[k] += x[3 * i + k];
-        }
-    }
-    for v in &mut c {
-        *v /= n as f64;
-    }
+    let c = centroid(x, n);
     let mut radii: Vec<(f64, usize)> = (0..n)
         .map(|a| {
             let v = [x[3 * a] - c[0], x[3 * a + 1] - c[1], x[3 * a + 2] - c[2]];
@@ -381,18 +435,23 @@ pub fn complete_detected(
     radii.sort_by(|p, q| p.0.partial_cmp(&q.0).unwrap_or(std::cmp::Ordering::Equal));
     let m = (((n as f64) * core_fraction.clamp(0.0, 1.0)).round() as usize).clamp(4, n);
     let mut core = Array1::<f64>::zeros(3 * m);
+    let mut core_classes: Vec<u32> = Vec::with_capacity(m);
     let mut centre = [0.0; 3];
     for (k, &(_, a)) in radii[..m].iter().enumerate() {
         for d in 0..3 {
             core[3 * k + d] = x[3 * a + d];
             centre[d] += x[3 * a + d];
         }
+        if let Some(z) = classes.filter(|z| z.len() >= n) {
+            core_classes.push(z[a]);
+        }
     }
     for v in &mut centre {
         *v /= m as f64;
     }
-    let group = detected_group(core.view(), m, tolerance)?;
-    complete_orbits(x, n, &group, centre, merge_radius, min_separation)
+    let core_classes = (core_classes.len() == m).then_some(core_classes.as_slice());
+    let group = detected_group_classed(core.view(), m, core_classes, tolerance)?;
+    complete_orbits_classed(x, n, classes, &group, centre, merge_radius, min_separation)
 }
 
 #[cfg(test)]
@@ -745,5 +804,95 @@ mod tests {
         }
         assert!(within_cutoff(cutoff * cutoff, cutoff));
         assert!(!within_cutoff(4.0 * cutoff * cutoff, cutoff));
+    }
+
+    /// Eight cube corners with two classes on alternate corners, the
+    /// zincblende arrangement: its point group is the tetrahedral group of
+    /// the corners of one class, half the cube's.
+    fn zincblende() -> (Array1<f64>, Vec<u32>) {
+        let mut x = Vec::new();
+        let mut classes = Vec::new();
+        for sx in [-1.0, 1.0] {
+            for sy in [-1.0, 1.0] {
+                for sz in [-1.0, 1.0] {
+                    x.extend([sx, sy, sz]);
+                    classes.push(u32::from(sx * sy * sz < 0.0));
+                }
+            }
+        }
+        (Array1::from(x), classes)
+    }
+
+    /// A group read without the classes carries a corner of one class onto
+    /// a corner of the other, which no operation of the structure does.
+    #[test]
+    fn a_group_read_with_classes_keeps_every_class_on_its_own_sites() {
+        let (x, classes) = zincblende();
+        let blind = detected_group(x.view(), 8, 0.3).expect("the cube has a group");
+        let read = detected_group_classed(x.view(), 8, Some(&classes), 0.3)
+            .expect("the corners have a group");
+        assert!(read.len() < blind.len(), "{} {}", read.len(), blind.len());
+        for g in &read {
+            for a in 0..8 {
+                let v = [x[3 * a], x[3 * a + 1], x[3 * a + 2]];
+                let w = apply(g, v);
+                let landed = (0..8)
+                    .min_by(|&p, &q| {
+                        let d =
+                            |b: usize| (0..3).map(|k| (w[k] - x[3 * b + k]).powi(2)).sum::<f64>();
+                        d(p).total_cmp(&d(q))
+                    })
+                    .unwrap();
+                assert_eq!(classes[landed], classes[a], "class changed under {g:?}");
+            }
+        }
+    }
+
+    /// A completion with the classes puts every atom back on a site of its
+    /// own class. The merge radius here is wider than the distance between
+    /// a corner and the corners of the other class, so images of the two
+    /// classes pooled into one set of sites merge into too few and no
+    /// completion is found; kept apart by class they do not, and with one
+    /// class for every atom the completion is the one without classes.
+    #[test]
+    fn a_completion_with_classes_keeps_the_composition() {
+        let (ideal, classes) = zincblende();
+        let mut y = ideal.clone();
+        y[0] += 0.12;
+        y[1] -= 0.1;
+        let z = complete_detected_classed(y.view(), 8, Some(&classes), 0.3, 2.5, 1.0, 0.5)
+            .expect("an atom was off its site");
+        let mut centroid = [0.0_f64; 3];
+        for a in 0..8 {
+            for k in 0..3 {
+                centroid[k] += z[3 * a + k] / 8.0;
+            }
+        }
+        for a in 0..8 {
+            let own = (0..8)
+                .filter(|&b| classes[b] == classes[a])
+                .map(|b| {
+                    (0..3)
+                        .map(|k| (z[3 * a + k] - centroid[k] - ideal[3 * b + k]).powi(2))
+                        .sum::<f64>()
+                })
+                .fold(f64::INFINITY, f64::min);
+            assert!(
+                own.sqrt() < 0.2,
+                "atom {a} is {} from its class's sites",
+                own.sqrt()
+            );
+        }
+        let one = vec![0_u32; 8];
+        let (x, _) = zincblende();
+        let jittered = jitter(&x, 0.05);
+        let with = complete_detected_classed(jittered.view(), 8, Some(&one), 0.3, 0.4, 1.0, 0.5);
+        let without = complete_detected(jittered.view(), 8, 0.3, 0.4, 1.0, 0.5);
+        assert!(without.is_some(), "the jittered corners did not move");
+        assert!(
+            complete_detected(y.view(), 8, 0.3, 2.5, 1.0, 0.5).is_none(),
+            "pooled classes completed"
+        );
+        assert_eq!(with, without);
     }
 }
