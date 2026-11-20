@@ -275,6 +275,144 @@ fn first_site_within(sites: &[([f64; 3], usize)], w: [f64; 3], cutoff: f64) -> O
     })
 }
 
+/// Sorts the pairs of atom, site and squared distance by distance, equal
+/// distances in generation order, as a stable sort on the distance does.
+///
+/// The bits of a non-negative finite number order as the number does, so a
+/// pair packs into one integer, distance first and then atom and site, which
+/// are the generation order. Sorting those is the stable sort on the
+/// distance, and an integer sort is much cheaper than one that compares
+/// pairs. Anything else, a distance that is not a number or an atom or site
+/// past 32 bits, is sorted as a stable sort on the distance does.
+fn sort_pairs(pairs: &mut Vec<(f64, usize, usize)>) {
+    let packable = pairs.iter().all(|&(d, k, i)| {
+        d.is_finite() && d.is_sign_positive() && k <= u32::MAX as usize && i <= u32::MAX as usize
+    });
+    if !packable {
+        pairs.sort_by(|p, q| p.0.partial_cmp(&q.0).unwrap_or(std::cmp::Ordering::Equal));
+        return;
+    }
+    let mut keys: Vec<u128> = pairs
+        .iter()
+        .map(|&(d, k, i)| (u128::from(d.to_bits()) << 64) | ((k as u128) << 32) | i as u128)
+        .collect();
+    keys.sort_unstable();
+    pairs.clear();
+    pairs.extend(keys.into_iter().map(|key| {
+        (
+            f64::from_bits((key >> 64) as u64),
+            ((key >> 32) & u128::from(u32::MAX)) as usize,
+            (key & u128::from(u32::MAX)) as usize,
+        )
+    }));
+}
+
+/// The sites of a completion, opened in order, each the average of the images
+/// merged into it.
+///
+/// [`SiteSet::first_within`] is [`first_site_within`] over them. A site whose
+/// first or second coordinate alone is farther than the reach cannot pass the
+/// distance test, so four sites at a time are cleared on those two
+/// coordinates and only the ones left are measured, in order. The coordinates
+/// are kept apart from the sites for that.
+struct SiteSet {
+    sites: Vec<([f64; 3], usize)>,
+    first: Vec<f64>,
+    second: Vec<f64>,
+}
+
+impl SiteSet {
+    fn new() -> Self {
+        Self {
+            sites: Vec::new(),
+            first: Vec::new(),
+            second: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, w: [f64; 3]) {
+        self.sites.push((w, 1));
+        self.first.push(w[0]);
+        self.second.push(w[1]);
+    }
+
+    /// Averages the image `w` into site `i`.
+    fn merge(&mut self, i: usize, w: [f64; 3]) {
+        let (p, count) = &mut self.sites[i];
+        let c = *count as f64;
+        for k in 0..3 {
+            p[k] = (p[k] * c + w[k]) / (c + 1.0);
+        }
+        *count += 1;
+        self.first[i] = p[0];
+        self.second[i] = p[1];
+    }
+
+    fn first_within(&self, w: [f64; 3], cutoff: f64) -> Option<usize> {
+        #[cfg(target_arch = "x86_64")]
+        if std::is_x86_feature_detected!("avx2") {
+            return unsafe { self.first_within_avx2(w, cutoff) };
+        }
+        first_site_within(&self.sites, w, cutoff)
+    }
+
+    /// # Safety
+    ///
+    /// AVX2 must be enabled.
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    unsafe fn first_within_avx2(&self, w: [f64; 3], cutoff: f64) -> Option<usize> {
+        use std::arch::x86_64::{
+            _CMP_LE_OQ, _mm256_and_pd, _mm256_andnot_pd, _mm256_cmp_pd, _mm256_loadu_pd,
+            _mm256_movemask_pd, _mm256_set1_pd, _mm256_sub_pd,
+        };
+        let reach = cutoff * (1.0 + 1e-9);
+        let count = self.sites.len();
+        let mut at = 0usize;
+        unsafe {
+            let sign = _mm256_set1_pd(-0.0);
+            let limit = _mm256_set1_pd(reach);
+            let wx = _mm256_set1_pd(w[0]);
+            let wy = _mm256_set1_pd(w[1]);
+            while at + 4 <= count {
+                let dx = _mm256_andnot_pd(
+                    sign,
+                    _mm256_sub_pd(wx, _mm256_loadu_pd(self.first.as_ptr().add(at))),
+                );
+                let dy = _mm256_andnot_pd(
+                    sign,
+                    _mm256_sub_pd(wy, _mm256_loadu_pd(self.second.as_ptr().add(at))),
+                );
+                let near = _mm256_and_pd(
+                    _mm256_cmp_pd::<_CMP_LE_OQ>(dx, limit),
+                    _mm256_cmp_pd::<_CMP_LE_OQ>(dy, limit),
+                );
+                let mut mask = _mm256_movemask_pd(near) as u32;
+                while mask != 0 {
+                    let lane = mask.trailing_zeros() as usize;
+                    mask &= mask - 1;
+                    if site_within(&self.sites[at + lane].0, w, cutoff) {
+                        return Some(at + lane);
+                    }
+                }
+                at += 4;
+            }
+        }
+        (at..count).find(|&i| site_within(&self.sites[i].0, w, cutoff))
+    }
+}
+
+/// Whether the site `p` is within `cutoff` of `w`, as [`first_site_within`]
+/// decides it.
+fn site_within(p: &[f64; 3], w: [f64; 3], cutoff: f64) -> bool {
+    let reach = cutoff * (1.0 + 1e-9);
+    if (w[0] - p[0]).abs() > reach {
+        return false;
+    }
+    let d2 = (w[0] - p[0]).powi(2) + (w[1] - p[1]).powi(2) + (w[2] - p[2]).powi(2);
+    within_cutoff(d2, cutoff)
+}
+
 fn apply(g: &Rot, v: [f64; 3]) -> [f64; 3] {
     [
         g[0][0] * v[0] + g[0][1] * v[1] + g[0][2] * v[2],
@@ -333,24 +471,18 @@ pub fn complete_orbits_classed(
     let mut moved = false;
     for members in &parts {
         let m = members.len();
-        let mut sites: Vec<([f64; 3], usize)> = Vec::new();
+        let mut set = SiteSet::new();
         for &a in members {
             let r = rel(a);
             for g in group {
                 let w = apply(g, r);
-                match first_site_within(&sites, w, pair_cutoff) {
-                    Some(i) => {
-                        let (p, count) = &mut sites[i];
-                        let c = *count as f64;
-                        for k in 0..3 {
-                            p[k] = (p[k] * c + w[k]) / (c + 1.0);
-                        }
-                        *count += 1;
-                    }
-                    None => sites.push((w, 1)),
+                match set.first_within(w, pair_cutoff) {
+                    Some(i) => set.merge(i, w),
+                    None => set.push(w),
                 }
             }
         }
+        let mut sites = set.sites;
         sites.sort_by(|p, q| {
             q.1.cmp(&p.1).then_with(|| {
                 let rp = p.0.iter().map(|v| v * v).sum::<f64>();
@@ -382,7 +514,7 @@ pub fn complete_orbits_classed(
                 pairs.push((d2, k, i));
             }
         }
-        pairs.sort_by(|p, q| p.0.partial_cmp(&q.0).unwrap_or(std::cmp::Ordering::Equal));
+        sort_pairs(&mut pairs);
         let mut atom_done = vec![false; m];
         let mut site_done = vec![false; m];
         let mut assigned = 0;
@@ -925,6 +1057,234 @@ mod tests {
             }
         }
         assert!(refused > 0, "no test was refused, so nothing was checked");
+    }
+
+    /// The four-at-a-time scan over the sites finds the site the scan in order
+    /// finds, through merges that move sites, with images at the reach and a
+    /// rounding step beyond it, and with coordinates that are not numbers.
+    #[test]
+    fn the_cleared_scan_finds_the_site_the_scan_in_order_finds() {
+        let cutoff = 0.3;
+        for poisoned in [false, true] {
+            let mut set = SiteSet::new();
+            let mut merged = 0;
+            let mut opened = 0;
+            for k in 0..2500 {
+                let t = k as f64;
+                let mut w = [
+                    cutoff * 5.0 * (t * 0.37).sin(),
+                    cutoff * 5.0 * (t * 0.73).cos(),
+                    cutoff * 5.0 * (t * 0.11).sin(),
+                ];
+                if k % 7 == 0 {
+                    w[0] = (k % 5) as f64 * cutoff;
+                }
+                if k % 11 == 0 {
+                    w[1] = (k % 5) as f64 * cutoff * (1.0 + 4.0 * f64::EPSILON);
+                }
+                if poisoned && k % 97 == 3 {
+                    w[k % 3] = [f64::NAN, f64::INFINITY, f64::NEG_INFINITY][k % 3];
+                }
+                let want = first_site_within(&set.sites, w, cutoff);
+                assert_eq!(set.first_within(w, cutoff), want, "image {k}");
+                match want {
+                    Some(i) => {
+                        set.merge(i, w);
+                        merged += 1;
+                    }
+                    None => {
+                        set.push(w);
+                        opened += 1;
+                    }
+                }
+            }
+            assert!(merged > 100 && opened > 100, "{merged} {opened}");
+        }
+    }
+
+    /// The pairs come out as a stable sort on the distance gives them, with
+    /// many equal distances and with a distance that is not a number.
+    #[test]
+    fn the_pairs_come_in_the_order_of_a_stable_sort() {
+        for (m, quantum) in [(1usize, 0.0), (7, 3.0), (30, 5.0), (30, 0.0)] {
+            let mut pairs = Vec::new();
+            for k in 0..m {
+                for i in 0..m {
+                    let t = (k * 31 + i * 17 + 5) as f64;
+                    let d = (t * 0.618).fract() * 10.0;
+                    pairs.push((
+                        if quantum > 0.0 {
+                            (d / quantum).floor()
+                        } else {
+                            d
+                        },
+                        k,
+                        i,
+                    ));
+                }
+            }
+            let mut stable = pairs.clone();
+            stable.sort_by(|p, q| p.0.partial_cmp(&q.0).unwrap_or(std::cmp::Ordering::Equal));
+            sort_pairs(&mut pairs);
+            assert_eq!(pairs, stable);
+        }
+        let mut pairs = vec![(2.0, 0, 0), (f64::NAN, 0, 1), (1.0, 1, 0), (2.0, 1, 1)];
+        let mut stable = pairs.clone();
+        stable.sort_by(|p, q| p.0.partial_cmp(&q.0).unwrap_or(std::cmp::Ordering::Equal));
+        sort_pairs(&mut pairs);
+        for (g, w) in pairs.iter().zip(&stable) {
+            assert_eq!((g.1, g.2), (w.1, w.2));
+        }
+    }
+
+    /// The completion is the one that scans the sites in order and sorts
+    /// every pair, bit for bit, on structures whose sites merge a lot and
+    /// whose assignment has to look past the first pairs.
+    #[test]
+    fn the_completion_is_the_one_the_plain_scan_and_sort_give() {
+        let mut checked = 0;
+        for (x, classes) in [
+            (jitter(&icosahedron(1.0), 0.02), None),
+            (jitter(&icosahedron(1.0), 0.12), None),
+            (jitter(&octahedron(), 0.1), None),
+            (jitter(&zincblende().0, 0.08), Some(zincblende().1)),
+        ] {
+            let n = x.len() / 3;
+            let centre = centroid(x.view(), n);
+            for tolerance in [0.1, 0.3, 0.6] {
+                let Some(group) =
+                    detected_group_classed(x.view(), n, classes.as_deref(), tolerance)
+                else {
+                    continue;
+                };
+                for cutoff in [0.1, 0.3, 0.8] {
+                    let got = complete_orbits_classed(
+                        x.view(),
+                        n,
+                        classes.as_deref(),
+                        &group,
+                        centre,
+                        cutoff,
+                        0.05,
+                    );
+                    let want = plain_completion(
+                        x.view(),
+                        n,
+                        classes.as_deref(),
+                        &group,
+                        centre,
+                        cutoff,
+                        0.05,
+                    );
+                    assert_eq!(
+                        got.as_ref()
+                            .map(|v| v.iter().map(|a| a.to_bits()).collect::<Vec<_>>()),
+                        want.as_ref()
+                            .map(|v| v.iter().map(|a| a.to_bits()).collect::<Vec<_>>())
+                    );
+                    checked += usize::from(got.is_some());
+                }
+            }
+        }
+        assert!(checked > 5, "{checked}");
+    }
+
+    fn plain_completion(
+        x: ArrayView1<f64>,
+        n: usize,
+        classes: Option<&[u32]>,
+        group: &[Rot],
+        centre: [f64; 3],
+        pair_cutoff: f64,
+        min_separation: f64,
+    ) -> Option<Array1<f64>> {
+        let parts = class_members(classes, n).unwrap_or_else(|| vec![(0..n).collect()]);
+        let rel = |a: usize| -> [f64; 3] {
+            [
+                x[3 * a] - centre[0],
+                x[3 * a + 1] - centre[1],
+                x[3 * a + 2] - centre[2],
+            ]
+        };
+        let mut taken: Vec<[f64; 3]> = Vec::with_capacity(n);
+        let mut out = x.to_owned();
+        let mut moved = false;
+        for members in &parts {
+            let m = members.len();
+            let mut sites: Vec<([f64; 3], usize)> = Vec::new();
+            for &a in members {
+                let r = rel(a);
+                for g in group {
+                    let w = apply(g, r);
+                    match first_site_within(&sites, w, pair_cutoff) {
+                        Some(i) => {
+                            let (p, count) = &mut sites[i];
+                            let c = *count as f64;
+                            for k in 0..3 {
+                                p[k] = (p[k] * c + w[k]) / (c + 1.0);
+                            }
+                            *count += 1;
+                        }
+                        None => sites.push((w, 1)),
+                    }
+                }
+            }
+            sites.sort_by(|p, q| {
+                q.1.cmp(&p.1).then_with(|| {
+                    let rp = p.0.iter().map(|v| v * v).sum::<f64>();
+                    let rq = q.0.iter().map(|v| v * v).sum::<f64>();
+                    rp.partial_cmp(&rq).unwrap_or(std::cmp::Ordering::Equal)
+                })
+            });
+            let mut chosen: Vec<[f64; 3]> = Vec::with_capacity(m);
+            for (p, _) in &sites {
+                if chosen.len() == m {
+                    break;
+                }
+                let clear = chosen.iter().chain(taken.iter()).all(|q| {
+                    ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt()
+                        >= min_separation
+                });
+                if clear {
+                    chosen.push(*p);
+                }
+            }
+            if chosen.len() < m {
+                return None;
+            }
+            let mut pairs: Vec<(f64, usize, usize)> = Vec::with_capacity(m * m);
+            for (k, &a) in members.iter().enumerate() {
+                let r = rel(a);
+                for (i, p) in chosen.iter().enumerate() {
+                    let d2 = (r[0] - p[0]).powi(2) + (r[1] - p[1]).powi(2) + (r[2] - p[2]).powi(2);
+                    pairs.push((d2, k, i));
+                }
+            }
+            pairs.sort_by(|p, q| p.0.partial_cmp(&q.0).unwrap_or(std::cmp::Ordering::Equal));
+            let mut atom_done = vec![false; m];
+            let mut site_done = vec![false; m];
+            let mut assigned = 0;
+            for (d, k, i) in pairs {
+                if atom_done[k] || site_done[i] {
+                    continue;
+                }
+                atom_done[k] = true;
+                site_done[i] = true;
+                assigned += 1;
+                let a = members[k];
+                for c in 0..3 {
+                    out[3 * a + c] = centre[c] + chosen[i][c];
+                }
+                if d.sqrt() > 1e-9 {
+                    moved = true;
+                }
+                if assigned == m {
+                    break;
+                }
+            }
+            taken.extend(chosen);
+        }
+        moved.then_some(out)
     }
 
     /// A completion with the classes puts every atom back on a site of its
