@@ -648,7 +648,8 @@ rgpot.EAMTablePot(file, format, periodic=True, stress=False, skin=1.0)
 rgpot.MullerBrownPot(amplitude=[-200, -100, -170, 15], a=[-1, -1, -6.5, 0.7], b=[0, 0, 11, 0.6], c=[-10, -10, -6.5, 0.7], x0=[1, 0, -0.5, -1], y0=[0, 0.5, 1.5, 1])
 #+end_src
 
-- Inputs :: each parameter is a sequence of four finite numbers.
+- Inputs :: each parameter is four finite numbers or an empty sequence.
+  An empty sequence selects that parameter's published default.
   Positions need at least one atom; only its x and y coordinates are active.
   Defaults are =amplitude=(-200, -100, -170, 15)=, =a=(-1, -1, -6.5, 0.7)=,
   =b=(0, 0, 11, 0.6)=, =c=(-10, -10, -6.5, 0.7)=, =x0=(1, 0, -0.5, -1)= and
@@ -658,7 +659,7 @@ rgpot.MullerBrownPot(amplitude=[-200, -100, -170, 15], a=[-1, -1, -6.5, 0.7], b=
 - Outputs :: the standard Muller-Brown surface.
   The first atom's z force and every force on later atoms are zero.
   =hvp= uses the analytic product.
-- Errors :: another length raises =ValueError=.
+- Errors :: a length other than 0 or 4 raises =ValueError=.
   So does a non-finite value.
 
 *** =rgpot.SWPot=

@@ -110,6 +110,8 @@ rgpot::EAMTableFormat eam_table_format(const std::string &name) {
 template <typename Array>
 void copy_model_parameter(const std::vector<double> &source, Array &target,
                           const char *name) {
+  if (source.empty())
+    return;
   if (source.size() != target.size())
     throw std::invalid_argument(std::string("Muller-Brown ") + name +
                                 " must contain four values");

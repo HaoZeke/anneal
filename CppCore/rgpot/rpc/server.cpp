@@ -431,7 +431,7 @@ public:
       return kj::READY_NOW;
     }
     if (m_muller_brown) {
-      auto applied = rgpot::rpc::configureMullerBrown(cfg, *m_muller_brown);
+      auto applied = rgpot::rpc::configureMullerBrown(cfg);
       if (applied.replacement) {
         m_muller_brown = applied.replacement.get();
         m_potential = std::move(applied.replacement);

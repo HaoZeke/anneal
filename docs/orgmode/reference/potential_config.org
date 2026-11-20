@@ -58,15 +58,18 @@ width gets =ok=false= and leaves the pot as it was.
 
 With =potserv <port> MullerBrown=, the =mullerBrown= arm rebuilds the surface.
 The six list fields are =amplitude=, =a=, =b=, =c=, =x0= and =y0=.
-Each is empty to retain its published default.
-Otherwise it holds exactly four finite values.
+Each is empty or holds exactly four finite values.
+An empty list selects that parameter's published default.
+It never keeps a value from an earlier =configure=.
+Every call describes the whole surface.
+Any other length, or a non-finite value, gets =ok=false=.
+The pot then stays as it was.
 Their schema names are =MullerBrownParams.amplitude=, =MullerBrownParams.a=,
 =MullerBrownParams.b=, =MullerBrownParams.c=, =MullerBrownParams.x0= and
 =MullerBrownParams.y0=.
 The =libclassical_engine= takes the same arm in =BuiltinParams.config=.
 It does so when =name= is =muller_brown=.
-A list of any other length is refused.
-A non-finite value is refused.
+It reads an empty list the same way.
 Any other arm gets =ok=false= and leaves the surface as it was.
 
 ** Composite arm (=PotentialConfig.composite= / =CompositeParams=)

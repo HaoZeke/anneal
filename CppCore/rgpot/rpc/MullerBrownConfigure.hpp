@@ -24,16 +24,19 @@ inline void readMullerBrownParameter(const capnp::List<double>::Reader &source,
   std::copy(source.begin(), source.end(), target.begin());
 }
 
+/// Every field is on the wire, so the result never depends on the pot being
+/// replaced: an empty list is the published default, four values override it.
 [[nodiscard]] inline MullerBrownConfig
-mullerBrownConfigFrom(const ::MullerBrownParams::Reader &params,
-                      MullerBrownConfig base = {}) {
-  readMullerBrownParameter(params.getAmplitude(), base.amplitude, "amplitude");
-  readMullerBrownParameter(params.getA(), base.a, "a");
-  readMullerBrownParameter(params.getB(), base.b, "b");
-  readMullerBrownParameter(params.getC(), base.c, "c");
-  readMullerBrownParameter(params.getX0(), base.x0, "x0");
-  readMullerBrownParameter(params.getY0(), base.y0, "y0");
-  return base;
+mullerBrownConfigFrom(const ::MullerBrownParams::Reader &params) {
+  MullerBrownConfig config;
+  readMullerBrownParameter(params.getAmplitude(), config.amplitude,
+                           "amplitude");
+  readMullerBrownParameter(params.getA(), config.a, "a");
+  readMullerBrownParameter(params.getB(), config.b, "b");
+  readMullerBrownParameter(params.getC(), config.c, "c");
+  readMullerBrownParameter(params.getX0(), config.x0, "x0");
+  readMullerBrownParameter(params.getY0(), config.y0, "y0");
+  return config;
 }
 
 struct MullerBrownConfigureResult {
@@ -42,8 +45,8 @@ struct MullerBrownConfigureResult {
   std::string message;
 };
 
-[[nodiscard]] inline MullerBrownConfigureResult configureMullerBrown(
-    const ::PotentialConfig::Reader &cfg, const MullerBrownPot &current) {
+[[nodiscard]] inline MullerBrownConfigureResult
+configureMullerBrown(const ::PotentialConfig::Reader &cfg) {
   MullerBrownConfigureResult result;
   if (cfg.which() == ::PotentialConfig::NONE) {
     result.ok = true;
@@ -57,7 +60,7 @@ struct MullerBrownConfigureResult {
   }
   try {
     result.replacement = std::make_unique<MullerBrownPot>(
-        mullerBrownConfigFrom(cfg.getMullerBrown(), current.config()));
+        mullerBrownConfigFrom(cfg.getMullerBrown()));
     result.ok = true;
     result.message = "rgpot params applied (mullerBrown arm)";
   } catch (const std::invalid_argument &error) {

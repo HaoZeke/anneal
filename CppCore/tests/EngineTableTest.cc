@@ -155,6 +155,20 @@ kj::Array<capnp::word> muller_brown_params(double first_amplitude) {
   return capnp::messageToFlatArray(msg);
 }
 
+kj::Array<capnp::word> muller_brown_empty_lists_params() {
+  capnp::MallocMessageBuilder msg;
+  auto params = msg.initRoot<::BuiltinParams>();
+  params.setName("muller_brown");
+  auto config = params.initConfig().initMullerBrown();
+  config.initAmplitude(0);
+  config.initA(0);
+  config.initB(0);
+  config.initC(0);
+  config.initX0(0);
+  config.initY0(0);
+  return capnp::messageToFlatArray(msg);
+}
+
 RgpotEnginePot *create(const Engine &e, const kj::Array<capnp::word> &words,
                        std::string *error = nullptr) {
   auto bytes = words.asBytes();
@@ -316,6 +330,34 @@ TEST_CASE("classical engine applies Muller-Brown constructor config",
   REQUIRE(force[1] == expectedForce(0, 1));
   REQUIRE(force[2] == 0.0);
   e.destroy(pot);
+}
+
+TEST_CASE("classical engine reads empty Muller-Brown lists as the defaults",
+          "[engine][classical][muller-brown]") {
+  Engine e;
+  if (!open_engine("CLASSICAL", e)) {
+    SKIP("no classical engine in this build");
+  }
+  RgpotEnginePot *plain = create(e, builtin_params("muller_brown"));
+  RgpotEnginePot *empty = create(e, muller_brown_empty_lists_params());
+  REQUIRE(plain != nullptr);
+  REQUIRE(empty != nullptr);
+  const std::array<double, 3> position{0.23, -0.17, 4.0};
+  const std::array<int, 1> atomicNumbers{1};
+  std::array<double, 3> plainForce{};
+  std::array<double, 3> emptyForce{};
+  double plainEnergy = 0.0;
+  double emptyEnergy = 0.0;
+  REQUIRE(e.force(plain, 1, position.data(), atomicNumbers.data(),
+                  plainForce.data(), &plainEnergy, nullptr, kBox.data(),
+                  nullptr, nullptr) == 0);
+  REQUIRE(e.force(empty, 1, position.data(), atomicNumbers.data(),
+                  emptyForce.data(), &emptyEnergy, nullptr, kBox.data(),
+                  nullptr, nullptr) == 0);
+  REQUIRE(emptyEnergy == plainEnergy);
+  REQUIRE(emptyForce == plainForce);
+  e.destroy(plain);
+  e.destroy(empty);
 }
 
 TEST_CASE("classical engine LJPot analytic HVP rejects in-place aliasing",

@@ -367,6 +367,23 @@ TEST_CASE("Muller-Brown C constructor accepts overridden parameters") {
   rgpot_builtin_model_free(model);
 }
 
+TEST_CASE("Muller-Brown C constructor with a NULL config uses the defaults") {
+  rgpot_builtin_model *model = rgpot_builtin_muller_brown_new(nullptr);
+  REQUIRE(model != nullptr);
+  const std::array<double, 2> coordinates{0.23, -0.17};
+  std::array<double, 2> force{};
+  double energy = 0.0;
+  REQUIRE(rgpot_builtin_model_calculate(model, 1, coordinates.data(), &energy,
+                                        force.data()) == 0);
+  const rgpot::MullerBrownPot direct;
+  const std::array<double, 2> zero{};
+  const auto expected = direct.evaluateCoordinates(coordinates, zero);
+  close(energy, expected.energy, 200.0);
+  close(force[0], -expected.gradient[0], 200.0);
+  close(force[1], -expected.gradient[1], 200.0);
+  rgpot_builtin_model_free(model);
+}
+
 TEST_CASE("atom carrier preserves force sign and analytic product") {
   rgpot::EckartPot pot(2.0, 1.5);
   const std::array<double, 3> x{0.4, 0.0, 0.0};

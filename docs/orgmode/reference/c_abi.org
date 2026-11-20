@@ -1431,6 +1431,7 @@ rgpot_builtin_model *rgpot_builtin_muller_brown_new(
 #+end_src
 
 - Inputs :: =config=, or NULL for the published defaults.
+  The arrays have a fixed length of four, so there is no empty form.
 - Units :: coordinates in Angstrom, energy in eV and forces in eV/Angstrom.
 - Outputs :: a two-coordinate model handle.
   The coordinates map to the first atom's x and y values in the atom interface.

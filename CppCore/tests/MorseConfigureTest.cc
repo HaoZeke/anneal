@@ -210,13 +210,67 @@ TEST_CASE("MullerBrownParams defaults and overrides rebuild the surface",
   amplitude.set(1, -100.0);
   amplitude.set(2, -170.0);
   amplitude.set(3, 15.0);
-  const rgpot::MullerBrownPot current;
+  const rgpot::MullerBrownConfig defaults;
   auto applied = rgpot::rpc::configureMullerBrown(
-      builder.getRoot<::PotentialConfig>().asReader(), current);
+      builder.getRoot<::PotentialConfig>().asReader());
   REQUIRE(applied.ok);
   REQUIRE(applied.replacement != nullptr);
   REQUIRE(applied.replacement->config().amplitude[0] == -123.0);
-  REQUIRE(applied.replacement->config().a == current.config().a);
+  REQUIRE(applied.replacement->config().a == defaults.a);
+}
+
+TEST_CASE("MullerBrownParams empty lists select the published defaults",
+          "[muller-brown][rpc]") {
+  capnp::MallocMessageBuilder builder;
+  auto params = builder.initRoot<::PotentialConfig>().initMullerBrown();
+  params.initAmplitude(0);
+  params.initA(0);
+  params.initB(0);
+  params.initC(0);
+  params.initX0(0);
+  params.initY0(0);
+  auto applied = rgpot::rpc::configureMullerBrown(
+      builder.getRoot<::PotentialConfig>().asReader());
+  REQUIRE(applied.ok);
+  REQUIRE(applied.replacement != nullptr);
+  const rgpot::MullerBrownConfig defaults;
+  const auto &got = applied.replacement->config();
+  REQUIRE(got.amplitude == defaults.amplitude);
+  REQUIRE(got.a == defaults.a);
+  REQUIRE(got.b == defaults.b);
+  REQUIRE(got.c == defaults.c);
+  REQUIRE(got.x0 == defaults.x0);
+  REQUIRE(got.y0 == defaults.y0);
+}
+
+TEST_CASE("MullerBrownParams with no lists set selects the published defaults",
+          "[muller-brown][rpc]") {
+  capnp::MallocMessageBuilder builder;
+  builder.initRoot<::PotentialConfig>().initMullerBrown();
+  auto applied = rgpot::rpc::configureMullerBrown(
+      builder.getRoot<::PotentialConfig>().asReader());
+  REQUIRE(applied.ok);
+  REQUIRE(applied.replacement != nullptr);
+  const rgpot::MullerBrownConfig defaults;
+  REQUIRE(applied.replacement->config().amplitude == defaults.amplitude);
+  REQUIRE(applied.replacement->config().y0 == defaults.y0);
+}
+
+TEST_CASE("MullerBrownParams overrides only the lists that are not empty",
+          "[muller-brown][rpc]") {
+  capnp::MallocMessageBuilder builder;
+  auto params = builder.initRoot<::PotentialConfig>().initMullerBrown();
+  params.initAmplitude(0);
+  auto x0 = params.initX0(4);
+  for (unsigned i = 0; i < 4; ++i)
+    x0.set(i, 0.5 * i);
+  auto applied = rgpot::rpc::configureMullerBrown(
+      builder.getRoot<::PotentialConfig>().asReader());
+  REQUIRE(applied.ok);
+  const rgpot::MullerBrownConfig defaults;
+  const auto &got = applied.replacement->config();
+  REQUIRE(got.amplitude == defaults.amplitude);
+  REQUIRE(got.x0 == std::array<double, 4>{0.0, 0.5, 1.0, 1.5});
 }
 
 TEST_CASE("MullerBrownParams rejects parameter lists of the wrong length",
@@ -224,8 +278,7 @@ TEST_CASE("MullerBrownParams rejects parameter lists of the wrong length",
   capnp::MallocMessageBuilder builder;
   builder.initRoot<::PotentialConfig>().initMullerBrown().initA(3);
   auto applied = rgpot::rpc::configureMullerBrown(
-      builder.getRoot<::PotentialConfig>().asReader(),
-      rgpot::MullerBrownPot{});
+      builder.getRoot<::PotentialConfig>().asReader());
   REQUIRE_FALSE(applied.ok);
   REQUIRE(applied.replacement == nullptr);
   REQUIRE_THAT(applied.message, ContainsSubstring("four values"));
