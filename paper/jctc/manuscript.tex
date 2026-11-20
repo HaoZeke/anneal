@@ -56,6 +56,7 @@ Below 98 atoms the quench chooses between the plain potential and one diameter p
 At every size, a stall does not replace the walker with a random cluster.
 Section~\ref{sec:results} runs this setting against GMIN on 8 Lennard-Jones clusters, and against the basin hopping and the minima hopping of the Atomic Simulation Environment on 4 Morse clusters \cite{wales1997,larsenAse2017,goedecker2004}.
 GMIN hits more seeds on 1 of the 8, LJ\(_{150}\).
+GMIN used the Wales-group LJ\(_{38}\) data file at every Lennard-Jones size.
 
 This article does not claim a new move.
 Displacement moves, relocation of a surface atom, symmetrization, tabu
@@ -486,7 +487,7 @@ Lennard-Jones systems, with both arms of each cluster
 in one session on one core of one host.
 Both arms use seeds 2000--2011, the budget in the table and the start
 this code writes for the seed.
-GMIN runs the Wales LJ\(_{38}\) input in reduced units, and the Supporting Information gives its
+GMIN uses the Wales-group LJ\(_{38}\) data file at every Lennard-Jones size, and the Supporting Information gives its
 settings, the references, and the drivers of this setting.
 This setting hits more seeds than GMIN on 6 of the 8 clusters.
 GMIN hits more on LJ\(_{150}\), 9 of 12 against 5 of 12.
@@ -538,7 +539,7 @@ The median wall is 237.2~s against 326.1~s, the median time inside the potential
 Fisher's exact \(p\) on the hits is 0.21, and the Mann--Whitney \(p\) on calls is 0.17.
 
 % gmin-panel table: start
-On the four Morse clusters, this setting, revision \texttt{eeec8e2c}, runs on seeds 2000--2011.
+The Morse anneal rows use revision \texttt{eeec8e2c}, on seeds 2000--2011.
 A miss is charged the full budget, and the median and the interquartile range
 below count that full budget as the calls of a miss.
 On M\(_{55}\) at \(\rho=6\) the budget is \(1\times 10^{6}\) calls and this setting hits 12 of 12. The median calls are 22596, and the interquartile range of those calls is 51763.75. On the hits the calls run from 5808 to 104221. The median wall is 0.424~s, the median time inside the potential is 0.298~s, and the median time outside the potential is 0.123~s. The best energy is -250.286609 against the reference -250.286609.
@@ -616,6 +617,7 @@ On Au\(_{55}\) it compares this setting with ABCluster (Table~\siref{tab:abclust
 
 \section{Discussion}
 \label{sec:discussion}
+GMIN used the Wales-group LJ\(_{38}\) data file at every Lennard-Jones size.
 GMIN hits more seeds than this setting on 1 of the 8 clusters of
 Table~\ref{tab:gmin}.
 On LJ\(_{150}\) GMIN hits 9 of 12 and this setting 5 of 12, and
@@ -660,6 +662,7 @@ against 6 of 12.
 These counts do not show that the depth posterior improves on a uniform draw.
 Against GMIN on seeds 2000--2011, this setting hits more seeds on 6 of
 8 clusters, and GMIN hits more on LJ\(_{150}\), 9 of 12 against 5 of 12.
+GMIN used the Wales-group LJ\(_{38}\) data file at every Lennard-Jones size.
 Against the basin hopping and the minima hopping of the Atomic
 Simulation Environment, scored by Fisher's test on hits, this setting
 hits more seeds on all 4 Morse clusters, and

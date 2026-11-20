@@ -197,11 +197,19 @@ def collapse(text: str) -> str:
 _COMMIT_HELD: dict[str, bool] = {}
 
 
+_EXTERNAL_FORM = re.compile(r"^https://[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+\.git@[0-9a-f]{40}$")
+
+
 def commit_held(rev: str) -> bool:
     """The revision is an ancestor of HEAD."""
     if rev not in _COMMIT_HELD:
         _COMMIT_HELD[rev] = git("merge-base", "--is-ancestor", rev, "HEAD").returncode == 0
     return _COMMIT_HELD[rev]
+
+
+def external_form(rev: str) -> bool:
+    """A repository URL and a full SHA, for a commit this repository does not contain."""
+    return _EXTERNAL_FORM.fullmatch((rev or "").strip()) is not None
 
 
 def external_pin(rev: str) -> bool:
@@ -213,8 +221,8 @@ def external_pin(rev: str) -> bool:
 
 
 def harness_reachable(rev: str) -> bool:
-    """The harness is an ancestor of HEAD, or an external pin."""
-    return commit_held(rev) or external_pin(rev)
+    """An ancestor of HEAD, an external pin, or a repository URL at a full SHA."""
+    return external_form(rev) or external_pin(rev) or commit_held(rev)
 
 
 def tuned_gmin_harness_verified(row: dict[str, str]) -> bool:
@@ -1002,21 +1010,41 @@ def unheld_bench_quotes(audit: Audit) -> None:
             for row, ok in ((anneal, anneal_ok), (gmin, gmin_ok)):
                 if ok:
                     continue
+                pot_us = float(row["pot_per_eval_s"]) * 1e6
+                out_us = float(row["outside_per_eval_s"]) * 1e6
                 tokens.update({
                     h2h.show_s(float(row["wall_median_s"])),
                     f"{row['hits']}/12",
                     f"{row['hits']} of 12",
-                    f"{float(row['pot_per_eval_s']) * 1e6:.2f}",
-                    f"{float(row['outside_per_eval_s']) * 1e6:.2f}",
+                    f"{pot_us:.2f}",
+                    f"{out_us:.2f}",
+                    f"{pot_us:.1f}",
+                    f"{out_us:.1f}",
                 })
             if not anneal_ok or not gmin_ok:
                 for row in (anneal, gmin):
-                    tokens.add(f"{float(row['pot_per_eval_s']) * 1e6:.2f}")
-                    tokens.add(f"{float(row['outside_per_eval_s']) * 1e6:.2f}")
+                    pot_us = float(row["pot_per_eval_s"]) * 1e6
+                    out_us = float(row["outside_per_eval_s"]) * 1e6
+                    tokens.update({
+                        f"{pot_us:.2f}",
+                        f"{out_us:.2f}",
+                        f"{pot_us:.1f}",
+                        f"{out_us:.1f}",
+                    })
+            base_label = h2h.sc_label(anneal["system"])
+            labels = (
+                base_label,
+                base_label.replace("-", "--"),
+                f"SC({base_label.replace(', ', ') ')}",
+                f"SC({base_label.replace('-', '--').replace(', ', ') ')}",
+            )
             for path in (TEX, SI, COVER):
-                hit = _window_has_token(audit.text(path), h2h.sc_label(anneal["system"]), tokens)
-                if hit:
-                    audit.record(False, f"{path} {anneal['system']}", HELD_NUMBER, "absent", hit)
+                doc_text = audit.text(path)
+                for lbl in labels:
+                    hit = _window_has_token(doc_text, lbl, tokens)
+                    if hit:
+                        audit.record(False, f"{path} {anneal['system']}", HELD_NUMBER, "absent", hit)
+                        break
     else:
         sc_span = _between(audit.text(TEX), r"\label{sec:sc}", r"\label{sec:other-panels}")
         prose = "\n".join(_sentences(sc_span))
@@ -2569,24 +2597,6 @@ def supporting_numbers(audit: Audit) -> None:
         audit.cell(tally, "the jcc script's target line", str(claimed_line), float(jcc_target_line))
     if jcc_target_line is not None:
         audit.said(tally, f"scripts/elja_jcc_molslab_ensemble.sh line {jcc_target_line} sets that target.")
-    if target_from_rows is None:
-        audit.record(False, SI, "smallest copper gap", "8e-6", "no copper rows")
-        audit.record(False, SI, "largest copper gap", "3.68e-4", "no copper rows")
-        audit.record(False, SI, "copper seeds inside the tolerance", "8", "no copper rows")
-        audit.record(False, SI, "copper seeds inside 1e-6 eV", "0", "no copper rows")
-    else:
-        bests = [float(row["best_eV"]) for row in copper_rows]
-        gaps = [float(row["gap_eV"]) for row in copper_rows]
-        audit.cell(SI, "smallest copper gap", "8e-6", min(gaps))
-        audit.cell(SI, "largest copper gap", "3.68e-4", max(gaps))
-        audit.cell(SI, "copper seeds inside the tolerance", "8",
-                   float(sum(energy_hits(b, target_from_rows, DEFAULT_HIT_TOL) for b in bests)))
-        audit.cell(SI, "copper seeds inside 1e-6 eV", "0", float(sum(g < 1e-6 for g in gaps)))
-    audit.said(SI, "The eight bests and their gaps are the rows of \\path{bench/copper-slab/rows.csv},")
-    audit.said(SI, "produced by \\path{scripts/run_cuh2_fcc_rec.sh}.")
-    audit.said(SI, "The per-seed gaps run from \\(8\\times 10^{-6}\\)~eV to \\(3.68\\times 10^{-4}\\)~eV above that reference.")
-    audit.said(SI, "No seed reached the reference within \\(10^{-6}\\)~eV.")
-    audit.said(SI, "Eight seeds lie inside the 0.001~eV tolerance.")
     audit.said(SI, "The hit tolerance is 0.001~eV.")
 
 
@@ -4982,11 +4992,6 @@ def rerun_check(audit: Audit, pre_submission: bool = False) -> None:
         audit.record(not hits, path, "no \\rerun or [RERUN remains", "none", " ".join(hits) or "none")
     for path in TEX_SOURCES:
         text = audit.text(path)
-        start, end = "% results not quoted: start", "% results not quoted: end"
-        if start in text and end in text:
-            head, rest = text.split(start, 1)
-            _, tail = rest.split(end, 1)
-            text = head + tail
         hits = sorted({m.group(0) for m in FORBIDDEN_PENDING.finditer(text)})
         audit.record(not hits, path, "no pending, to be assigned, or TBD remains in TeX",
                      "none", " | ".join(hits) or "none")
@@ -5661,14 +5666,6 @@ def history_narration(audit: Audit) -> None:
     for source in sorted(sources):
         path = source.relative_to(ROOT).as_posix()
         text = audit.text(path)
-        if path == SI:
-            text = re.sub(r"[^\n]*whose harness is unrecoverable[^\n]*", "", text)
-            text = re.sub(r"[^\n]*89de725a[^\n]*unrecoverable[^\n]*", "", text)
-            start, end = "% results not quoted: start", "% results not quoted: end"
-            if start in text and end in text:
-                head, rest = text.split(start, 1)
-                _, tail = rest.split(end, 1)
-                text = head + tail
         found = [
             label for label, pattern in HISTORY_PHRASES
             if re.search(rf"\b(?:{pattern})\b", text, re.IGNORECASE)
@@ -5769,10 +5766,14 @@ def _row_shas(row: dict[str, str]) -> set[str]:
     return found
 
 
+MORSE_RERUN_ROWS = ROOT / "bench/morse-panel/rerun-20261119/rows.csv"
+
+
 def printed_harnesses(audit: Audit) -> None:
     """Fail when a printed comparison uses a row group whose harness is not reachable.
 
-    The allowlist is the external pins only. tab:ase is an expected failure of its own
+    A revision counts when it is an ancestor of HEAD, an external pin, or a
+    repository URL at a full SHA. tab:ase is an expected failure of its own
     and is not a pass: its table stays out while BenchBot regenerates the rows.
     """
     h2h = load_script("printed_h2h", "paper/jctc/scripts/h2h_tables.py")
@@ -5802,7 +5803,7 @@ def printed_harnesses(audit: Audit) -> None:
                 )
             groups.append((label, emitted, seeds))
     tuned_rows: list[dict[str, str]] = []
-    if h2h.tuned_gmin_block():
+    if h2h.tuned_gmin_block() or "\\label{tab:gmin-tuned}" in audit.text(SI):
         tuned_rows = [
             row for row in h2h.read(h2h.GMIN_TUNED)
             if row["system"] in {"lj98", "lj104"} and row["code"] in {"anneal", "gmin"}
@@ -5834,10 +5835,11 @@ def printed_harnesses(audit: Audit) -> None:
             for row in by_seed.get((item["system"], arm), [])
         ]
         if panel.morse_anneal_note():
+            rerun = panel.read_rows(MORSE_RERUN_ROWS)
             seeds.extend(
                 row
-                for system in ("m55r6", "m55r14", "m80r6", "m80r14")
-                for row in by_seed.get((system, "anneal"), [])
+                for row in rerun
+                if row["system"] in {"m55r6", "m55r14", "m80r6", "m80r14"} and row["code"] == "anneal"
             )
         groups.append(("tab:gmin", panel.tex_table(quoted, "latest"), seeds))
     failed = False

@@ -159,6 +159,99 @@ def test_the_si_does_not_narrate_unquoted_comparisons():
     assert ase.tex_table() == ""
 
 
+def test_a_fetch_into_the_same_repo_does_not_hold_a_side_commit(tmp_path: Path):
+    module = ingest()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "fixture@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Fixture"], cwd=repo, check=True)
+    (repo / "README").write_text("anchor\n")
+    subprocess.run(["git", "add", "README"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "anchor"], cwd=repo, check=True, capture_output=True)
+    remote = tmp_path / "remote"
+    remote.mkdir()
+    subprocess.run(["git", "init", "-b", BRANCH], cwd=remote, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "fixture@example.com"], cwd=remote, check=True)
+    subprocess.run(["git", "config", "user.name", "Fixture"], cwd=remote, check=True)
+    (remote / "note").write_text("side\n")
+    subprocess.run(["git", "add", "note"], cwd=remote, check=True)
+    subprocess.run(["git", "commit", "-m", "side"], cwd=remote, check=True, capture_output=True)
+    side = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=remote, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    row = remote / ROW
+    row.parent.mkdir(parents=True)
+    row.write_text(f"system,host,code_revision\nfixture,{TOKEN},{side}\n")
+    subprocess.run(["git", "add", ROW], cwd=remote, check=True)
+    subprocess.run(["git", "commit", "-m", "rows"], cwd=remote, check=True, capture_output=True)
+    tip = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=remote, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    with pytest.raises(SystemExit, match="not reachable"):
+        module.ingest(
+            BRANCH, tip, remote=str(remote), root=repo, git_dir=repo,
+            catalog=catalog(module), reachable_repo=repo,
+        )
+    assert not (repo / ROW).exists()
+    present = subprocess.run(
+        ["git", "cat-file", "-e", f"{side}^{{commit}}"], cwd=repo, capture_output=True,
+    )
+    assert present.returncode != 0
+
+
+def test_named_remote_fetches_via_scratch_repo_with_default_reachable_repo(tmp_path: Path, monkeypatch):
+    module = ingest()
+    bare = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", str(bare)], check=True, capture_output=True)
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "fixture@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Fixture"], cwd=repo, check=True)
+    (repo / "README").write_text("anchor\n")
+    subprocess.run(["git", "add", "README"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "anchor"], cwd=repo, check=True, capture_output=True)
+    held = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    subprocess.run(["git", "remote", "add", "origin", str(bare)], cwd=repo, check=True)
+
+    producer = tmp_path / "producer"
+    producer.mkdir()
+    subprocess.run(["git", "init", "-b", BRANCH], cwd=producer, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "fixture@example.com"], cwd=producer, check=True)
+    subprocess.run(["git", "config", "user.name", "Fixture"], cwd=producer, check=True)
+    row = producer / ROW
+    row.parent.mkdir(parents=True)
+    row.write_text(f"system,host,code_revision\nfixture,{TOKEN},{held}\n")
+    subprocess.run(["git", "add", ROW], cwd=producer, check=True)
+    subprocess.run(["git", "commit", "-m", "rows"], cwd=producer, check=True, capture_output=True)
+    tip = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=producer, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    subprocess.run(["git", "push", str(bare), f"HEAD:refs/heads/{BRANCH}"], cwd=producer, check=True, capture_output=True)
+
+    refreshed: list[Path] = []
+    custom_catalog = {
+        BRANCH: module.Record(
+            key="fixture-never-print",
+            paths=(ROW,),
+            reason="rerun pending",
+            refresh=refreshed.append,
+        ),
+    }
+    monkeypatch.setattr(module, "REPO", repo)
+    module.ingest(BRANCH, tip, catalog=custom_catalog)
+    assert (repo / ROW).read_text() == f"system,host,code_revision\nfixture,{TOKEN},{held}\n"
+    assert refreshed == [repo]
+    present = subprocess.run(
+        ["git", "cat-file", "-e", f"{tip}^{{commit}}"], cwd=repo, capture_output=True,
+    )
+    assert present.returncode != 0
+
+
 def test_pins_and_harness_fields_match_the_audit():
     module = ingest()
     audit = load("paper_audit_pins", "scripts/paper_audit.py")

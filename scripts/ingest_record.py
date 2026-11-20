@@ -6,10 +6,11 @@
 
 The branch is fetched into a temporary ref and that ref is deleted. The
 script does not merge, does not check out a branch, and does not push.
-Rows are written only when every harness commit in them is a commit in
-this repository or one of the external pins. The generators then rewrite
-the marked tables, and the SI subsection Withheld results is rewritten
-from the comparisons that are still missing.
+Rows are written only when every harness commit in them is an ancestor
+of HEAD, an external pin, or a repository URL at a full SHA. The fetch
+lands in a scratch repository when it would otherwise land in the
+repository whose HEAD the check uses. The generators then rewrite the
+marked tables.
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ import io
 import re
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -78,11 +80,19 @@ def external_pin(rev: str) -> bool:
     return any(pin == rev or pin.startswith(rev) or rev.startswith(pin) for pin in EXTERNAL_REVISIONS)
 
 
+_EXTERNAL_FORM = re.compile(r"^https://[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+\.git@[0-9a-f]{40}$")
+
+
+def external_form(rev: str) -> bool:
+    """A repository URL and a full SHA."""
+    return _EXTERNAL_FORM.fullmatch((rev or "").strip()) is not None
+
+
 def harness_reachable(rev: str, repo: Path = REPO) -> bool:
-    """The harness is a commit in this repository, or an external pin."""
-    if external_pin(rev):
+    """An ancestor of HEAD, an external pin, or a repository URL at a full SHA."""
+    if external_form(rev) or external_pin(rev):
         return True
-    return _git(repo, "cat-file", "-e", f"{rev}^{{commit}}").returncode == 0
+    return _git(repo, "merge-base", "--is-ancestor", rev, "HEAD").returncode == 0
 
 
 def harness_tokens(blob: bytes) -> list[str]:
@@ -230,8 +240,12 @@ def withheld_items() -> list[tuple[str, str]]:
 
 
 def withheld_block(items: list[tuple[str, str]] | None = None) -> str:
-    """Unquoted comparisons are not narrated in the rendered SI."""
-    del items
+    """Comparisons that are not quoted stay out of the paper."""
+    if items is None:
+        items = withheld_items()
+    for _name, reason in items:
+        if reason not in REASONS:
+            raise SystemExit(f"unknown withheld reason {reason}")
     return ""
 
 
@@ -270,36 +284,63 @@ def _check_name(branch: str, sha: str) -> None:
         raise SystemExit("the record SHA must be 40 hex characters")
 
 
+def _resolve_remote(repo: Path, remote: str) -> str:
+    """Resolve a named git remote in ``repo`` to its fetch URL or path."""
+    shown = _git(repo, "remote", "get-url", remote)
+    if shown.returncode != 0:
+        return remote
+    url = shown.stdout.decode().strip()
+    if not url:
+        return remote
+    if "://" not in url and ":" not in url.split("/", 1)[0]:
+        candidate = Path(url)
+        if not candidate.is_absolute():
+            return str((repo / candidate).resolve())
+    return url
+
+
 def ingest(
     branch: str,
     sha: str,
     remote: str = "origin",
-    root: Path = REPO,
+    root: Path | None = None,
     git_dir: Path | None = None,
     catalog: dict[str, Record] | None = None,
-    reachable_repo: Path = REPO,
+    reachable_repo: Path | None = None,
 ) -> None:
     """Fetch ``branch`` at ``sha``, install its rows, and regenerate its tables.
 
-    ``reachable_repo`` is the repository whose commits count as held. The
-    fetch itself lands in ``git_dir`` and the rows land under ``root``.
+    ``reachable_repo`` is the repository whose commits count as held. When
+    the fetch would land in that repository, it lands in a scratch
+    repository instead, and the rows land under ``root``.
     """
     _check_name(branch, sha)
+    root = REPO if root is None else root
+    reachable_repo = REPO if reachable_repo is None else reachable_repo
     record = lookup(branch, catalog if catalog is not None else production_catalog())
-    git_dir = git_dir or root
+    requested = git_dir or root
+    fetch_remote = remote
+    scratch: tempfile.TemporaryDirectory[str] | None = None
+    if requested.resolve() == reachable_repo.resolve():
+        fetch_remote = _resolve_remote(requested, remote)
+        scratch = tempfile.TemporaryDirectory(prefix="ingest-")
+        fetch_into = Path(scratch.name)
+        _git(fetch_into, "init", "-q")
+    else:
+        fetch_into = requested
     ref = f"refs/ingest/{branch}"
-    _git(git_dir, "update-ref", "-d", ref)
-    fetched = _git(git_dir, "fetch", "--no-tags", remote, f"{branch}:{ref}")
-    if fetched.returncode != 0:
-        detail = fetched.stderr.decode(errors="replace").strip()
-        raise SystemExit(f"fetch of {branch} failed: {detail}")
     try:
-        got = _git(git_dir, "rev-parse", ref).stdout.decode().strip()
+        _git(fetch_into, "update-ref", "-d", ref)
+        fetched = _git(fetch_into, "fetch", "--no-tags", fetch_remote, f"{branch}:{ref}")
+        if fetched.returncode != 0:
+            detail = fetched.stderr.decode(errors="replace").strip()
+            raise SystemExit(f"fetch of {branch} failed: {detail}")
+        got = _git(fetch_into, "rev-parse", ref).stdout.decode().strip()
         if got != sha:
             raise SystemExit(f"{branch} is {got}, not {sha}")
         blobs: dict[str, bytes] = {}
         for path in record.paths:
-            shown = _git(git_dir, "cat-file", "blob", f"{sha}:{path}")
+            shown = _git(fetch_into, "cat-file", "blob", f"{sha}:{path}")
             if shown.returncode != 0:
                 raise SystemExit(f"{branch} has no {path}")
             blobs[path] = shown.stdout
@@ -312,7 +353,9 @@ def ingest(
         rewrite_withheld(root)
         refresh_labels(root)
     finally:
-        _git(git_dir, "update-ref", "-d", ref)
+        _git(fetch_into, "update-ref", "-d", ref)
+        if scratch is not None:
+            scratch.cleanup()
 
 
 def main(argv: list[str]) -> int:

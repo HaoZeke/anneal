@@ -785,8 +785,8 @@ def morse_anneal_note() -> list[str]:
     if len(revisions) != 1 or not _commit_held(next(iter(revisions))):
         return []
     lines = [
-        "On the four Morse clusters, this setting, revision "
-        f"\\texttt{{{next(iter(revisions))[:8]}}}, runs on seeds 2000--2011.",
+        "The Morse anneal rows use revision "
+        f"\\texttt{{{next(iter(revisions))[:8]}}}, on seeds 2000--2011.",
         "A miss is charged the full budget, and the median and the interquartile range",
         "below count that full budget as the calls of a miss.",
     ]
