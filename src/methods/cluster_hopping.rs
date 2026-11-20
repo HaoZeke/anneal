@@ -652,6 +652,8 @@ pub struct Ledger {
     /// Chain at the start of the block whose relaxation found the
     /// incumbent a later failed restraint block could not beat.
     before_gain: Option<(f64, Array1<f64>)>,
+    /// Speculative quenches must not publish a minimum the chain does not walk.
+    pub(crate) suspend_record: bool,
 }
 
 struct DiagnosticQuench<'a> {
@@ -708,6 +710,7 @@ impl Ledger {
             block_opened: false,
             block_chain: None,
             before_gain: None,
+            suspend_record: false,
         }
     }
 
@@ -934,6 +937,9 @@ impl Ledger {
     /// improvement. The charged count has to be the one at this call: a
     /// later push would time the minimum after work that did not find it.
     pub fn record(&mut self, value: f64, state: ArrayView1<f64>) {
+        if self.suspend_record {
+            return;
+        }
         if value.is_finite() && value < self.best {
             self.best = value;
             self.best_state = Some(state.to_owned());

@@ -1167,9 +1167,13 @@ where
         } else {
             (f, xr)
         };
-        // The restraint is one candidate for this proposal. The same
-        // proposal is also relaxed with no penalty. The chain walks from
-        // whichever minimum is lower.
+        // The restraint is the minimum the chain walks. The same proposal
+        // is also relaxed with no penalty, and that minimum replaces the
+        // restraint only when it lowers the incumbent. A plain minimum
+        // that is merely lower than the restraint does not: taking it is
+        // what leaves the path that still reaches the global minimum, and
+        // what walks a chain back onto an incumbent the restraint could
+        // not beat.
         let restrained_energy = f;
         if surface.is_some() {
             let kept_early = early;
@@ -1187,6 +1191,7 @@ where
             opening = prior.clone();
             call_seconds = 0.0;
             timed_calls = 0;
+            led.suspend_record = true;
             let x = bare.view();
             let preconditioner = species.and_then(|z| BondPreconditioner::new(x, z));
             let quench_tric = tric
@@ -1337,14 +1342,18 @@ where
             } else {
                 (f2, xr2)
             };
-            if restrained_energy < f2 {
+            // `target` is the incumbent before either quench of this hop.
+            let plain_lowers = f2 < target && f2 < restrained_energy;
+            led.suspend_record = false;
+            if plain_lowers {
+                led.record(f2, xr2.view());
+                f = f2;
+                xr = xr2;
+            } else {
                 early = kept_early;
                 *last.borrow_mut() = kept_last;
                 *best_physical.borrow_mut() = kept_best;
                 stats.refused = kept_refused;
-            } else {
-                f = f2;
-                xr = xr2;
             }
         }
         if let Some(portfolio) = surfaces.as_mut() {
