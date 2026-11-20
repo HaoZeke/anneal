@@ -1,0 +1,19 @@
+! Per-size Lennard-Jones input.
+! Keyword lines match examples/h2h_gmin_lj.data.
+! RADIUS follows bench/gmin-panel/lj-datafile-rule.md.
+! The driver appends one RANSEED line per run.
+
+SLOPPYCONV 5.0D-3
+TIGHTCONV 1.0D-3
+EDIFF 0.003
+MAXIT 600 500
+SAVE 2
+CENTRE
+SORT
+
+TEMPERATURE 1.0
+STEPS 90000000 1.0
+STEP 0.40 0.51
+NEWRESTART 40
+AVOID 4.0 20 F
+RADIUS 5.1622273524

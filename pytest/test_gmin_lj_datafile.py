@@ -37,6 +37,13 @@ def panel():
     return _load("gmin_run_panel", PANEL)
 
 
+def test_a_copied_radius_is_rejected() -> None:
+    lj = _load("gmin_lj_datafile", ROOT / "scripts" / "gmin_panel" / "lj_datafile.py")
+    text = (ROOT / "bench" / "gmin-panel" / "lj-data" / "lj38.data").read_text()
+    with pytest.raises(RuntimeError, match="radius"):
+        lj.check("lj75", text)
+
+
 def test_each_lj_size_gets_its_own_data_file_and_radius(panel) -> None:
     shared = BASE.read_text()
     if not shared.endswith("\n"):
