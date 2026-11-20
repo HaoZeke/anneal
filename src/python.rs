@@ -25,19 +25,20 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyFloat};
 use rand::SeedableRng;
 
-use eindir_core::py_objective::{PyBounds as EindirPyBounds, PyObjective};
 use eindir_core::{Bounds, Objective};
 
 use crate::history::History;
 use crate::variant::{boltzmann_in_box, fast_in_box, gsa_in_box};
 
 use errors::{bounds_error, config_error, invalid_argument, search_error};
+use objective::{PyBounds, PyObjective};
 
 mod box_tuning;
 mod config_fields;
 mod device;
 mod errors;
 mod landfold;
+mod objective;
 mod outcome;
 mod portfolio_peers;
 
@@ -1091,7 +1092,7 @@ fn qmc_polish_result_to_dict(
     Ok(out.into())
 }
 
-/// Refines QMC starts using an `eindir` native objective/gradient handle.
+/// Refines QMC starts over a `PyObjective` built with `grad_fn`.
 #[pyfunction]
 #[pyo3(signature = (objective, n_starts, max_fevals_per_start, seed = 0, step0 = 1.0, grad_tol = 1e-8, top_k = 0))]
 fn qmc_polish_objective(
@@ -1117,9 +1118,13 @@ fn qmc_polish_objective(
         return Err(invalid_argument("grad_tol must be non-negative"));
     }
 
+    let obj = objective.callable(py);
+    let errors = obj.errors();
+    let grad = objective.gradient(py, &errors, "qmc_polish_objective")?;
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let result = crate::qmc_projected_gradient_polish(
-        &*objective,
-        &*objective,
+        &obj,
+        &grad,
         n_starts,
         max_fevals_per_start,
         seed,
@@ -1127,6 +1132,7 @@ fn qmc_polish_objective(
         grad_tol,
         top_k,
     );
+    errors.finish(py)?;
     qmc_polish_result_to_dict(py, result)
 }
 
@@ -1195,7 +1201,7 @@ fn qmc_best1bin_scout(
     qmc_polish_result_to_dict(py, result)
 }
 
-/// Runs a QMC best/1/bin scout using an `eindir` native objective handle.
+/// Runs a QMC best/1/bin scout over a `PyObjective`.
 #[pyfunction]
 #[pyo3(signature = (objective, max_evals, seed = 0, population_size = 30, weight_min = 0.5, weight_span = 0.5, crossover_rate = 0.7))]
 fn qmc_best1bin_scout_objective(
@@ -1233,8 +1239,11 @@ fn qmc_best1bin_scout_objective(
         return Err(invalid_argument("crossover_rate must be in [0, 1]"));
     }
 
+    let obj = objective.callable(py);
+    let errors = obj.errors();
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let result = crate::qmc_best1bin_scout(
-        &*objective,
+        &obj,
         max_evals,
         seed,
         population_size,
@@ -1242,6 +1251,7 @@ fn qmc_best1bin_scout_objective(
         weight_span,
         crossover_rate,
     );
+    errors.finish(py)?;
     qmc_polish_result_to_dict(py, result)
 }
 
@@ -1313,7 +1323,7 @@ fn qmc_gsa_global_search(
     qmc_polish_result_to_dict(py, result)
 }
 
-/// Runs bounded QMC-initialized GSA using a native objective handle.
+/// Runs bounded QMC-initialized GSA over a `PyObjective`.
 #[pyfunction]
 #[pyo3(signature = (objective, max_evals, seed = 0, n_chains = 30, t_init = 1.0, q_v = 2.62, q_a = 1.7, x0 = None))]
 fn qmc_gsa_global_search_objective(
@@ -1328,15 +1338,14 @@ fn qmc_gsa_global_search_objective(
     x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
     validate_qmc_gsa_global_search_args(max_evals, n_chains, t_init, q_v, q_a)?;
-    let bounds = <PyObjective as Objective<f64>>::bounds(&objective);
-    let start = read_x0(
-        x0,
-        bounds.low.as_slice().expect("contiguous bounds"),
-        bounds.high.as_slice().expect("contiguous bounds"),
-    )?;
+    let bounds = objective.box_bounds();
+    let start = read_x0(x0, &bounds.low.to_vec(), &bounds.high.to_vec())?;
 
+    let obj = objective.callable(py);
+    let errors = obj.errors();
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let result = crate::qmc_gsa_global_search_from(
-        &*objective,
+        &obj,
         max_evals,
         seed,
         n_chains,
@@ -1345,6 +1354,7 @@ fn qmc_gsa_global_search_objective(
         q_a,
         start.as_ref().map(|x| x.view()),
     );
+    errors.finish(py)?;
     qmc_polish_result_to_dict(py, result)
 }
 
@@ -1404,7 +1414,7 @@ fn qmc_trust_region_poll(
     qmc_polish_result_to_dict(py, result)
 }
 
-/// Runs a local shifted-QMC trust-region poll using a native objective handle.
+/// Runs a local shifted-QMC trust-region poll over a `PyObjective`.
 #[pyfunction]
 #[pyo3(signature = (objective, center, max_evals, seed = 0, radius_fraction = 0.0, n_levels = 3, points_per_level = 0))]
 fn qmc_trust_region_poll_objective(
@@ -1418,7 +1428,7 @@ fn qmc_trust_region_poll_objective(
     points_per_level: usize,
 ) -> PyResult<Py<PyDict>> {
     let center_vec = center.as_slice()?.to_vec();
-    if center_vec.len() != objective.dim() {
+    if center_vec.len() != objective.dims() {
         return Err(invalid_argument(
             "center dimension must match objective bounds",
         ));
@@ -1436,8 +1446,11 @@ fn qmc_trust_region_poll_objective(
         return Err(invalid_argument("n_levels must be positive"));
     }
 
+    let obj = objective.callable(py);
+    let errors = obj.errors();
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let result = crate::qmc_trust_region_poll(
-        &*objective,
+        &obj,
         Array1::from_vec(center_vec),
         max_evals,
         seed,
@@ -1445,6 +1458,7 @@ fn qmc_trust_region_poll_objective(
         n_levels,
         points_per_level,
     );
+    errors.finish(py)?;
     qmc_polish_result_to_dict(py, result)
 }
 
@@ -1742,7 +1756,7 @@ fn gle_langevin_preconditioned(
     gle_langevin_result_to_dict(py, result)
 }
 
-/// GLE-Langevin annealing using an `eindir` native objective/gradient handle.
+/// GLE-Langevin annealing over a `PyObjective` built with `grad_fn`.
 #[pyfunction]
 #[pyo3(signature = (objective, max_fevals, seed=0, omega0=None, dt=0.2,
                     n_epochs=40, x0=None))]
@@ -1758,33 +1772,21 @@ fn gle_langevin_objective(
     x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
     validate_gle_args(max_fevals, omega0)?;
-    let x0 = gle_langevin_x0(x0, objective.dim())?;
+    let x0 = gle_langevin_x0(x0, objective.dims())?;
+    let obj = objective.callable(py);
+    let errors = obj.errors();
+    let grad = objective.gradient(py, &errors, "gle_langevin_objective")?;
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let result = if let Some(omega0) = omega0 {
-        crate::methods::gle_langevin_sa(
-            &*objective,
-            &*objective,
-            seed,
-            max_fevals,
-            omega0,
-            dt,
-            n_epochs,
-            x0,
-        )
+        crate::methods::gle_langevin_sa(&obj, &grad, seed, max_fevals, omega0, dt, n_epochs, x0)
     } else {
-        crate::methods::gle_langevin_adaptive_sa(
-            &*objective,
-            &*objective,
-            seed,
-            max_fevals,
-            dt,
-            n_epochs,
-            x0,
-        )
+        crate::methods::gle_langevin_adaptive_sa(&obj, &grad, seed, max_fevals, dt, n_epochs, x0)
     };
+    errors.finish(py)?;
     gle_langevin_result_to_dict(py, result)
 }
 
-/// Preconditioned GLE-Langevin annealing using a native objective/gradient handle.
+/// Preconditioned GLE-Langevin annealing over a `PyObjective` built with `grad_fn`.
 #[pyfunction]
 #[pyo3(signature = (objective, max_fevals, seed=0, omega0=None, dt=0.2,
                     n_epochs=40, x0=None, preconditioner_probes=None))]
@@ -1801,22 +1803,17 @@ fn gle_langevin_preconditioned_objective(
     preconditioner_probes: Option<usize>,
 ) -> PyResult<Py<PyDict>> {
     validate_gle_args(max_fevals, omega0)?;
-    let x0 = gle_langevin_x0(x0, objective.dim())?;
+    let x0 = gle_langevin_x0(x0, objective.dims())?;
+    let obj = objective.callable(py);
+    let errors = obj.errors();
+    let grad = objective.gradient(py, &errors, "gle_langevin_preconditioned_objective")?;
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let result = if let Some(omega0) = omega0 {
-        crate::methods::gle_langevin_sa(
-            &*objective,
-            &*objective,
-            seed,
-            max_fevals,
-            omega0,
-            dt,
-            n_epochs,
-            x0,
-        )
+        crate::methods::gle_langevin_sa(&obj, &grad, seed, max_fevals, omega0, dt, n_epochs, x0)
     } else {
         crate::methods::gle_langevin_preconditioned_sa(
-            &*objective,
-            &*objective,
+            &obj,
+            &grad,
             seed,
             max_fevals,
             dt,
@@ -1825,6 +1822,7 @@ fn gle_langevin_preconditioned_objective(
             preconditioner_probes,
         )
     };
+    errors.finish(py)?;
     gle_langevin_result_to_dict(py, result)
 }
 
@@ -2570,7 +2568,8 @@ fn global_optimize(
     portfolio_result_to_dict(py, result)
 }
 
-/// Runs the portfolio global optimizer with a native objective handle.
+/// Runs the portfolio global optimizer over a `PyObjective`. With
+/// `use_gradient`, the `PyObjective` must have a `grad_fn`.
 #[pyfunction]
 #[pyo3(signature = (objective, budget, seed = 0, use_gradient = true, noise_sigma = None, x0 = None))]
 fn global_optimize_objective(
@@ -2590,35 +2589,28 @@ fn global_optimize_objective(
     {
         return Err(invalid_argument("noise_sigma must be positive and finite"));
     }
-    let bounds = <PyObjective as Objective<f64>>::bounds(&objective);
-    let start = read_x0(
-        x0,
-        bounds.low.as_slice().expect("contiguous bounds"),
-        bounds.high.as_slice().expect("contiguous bounds"),
-    )?;
+    let bounds = objective.box_bounds();
+    let start = read_x0(x0, &bounds.low.to_vec(), &bounds.high.to_vec())?;
+    let obj = objective.callable(py);
+    let errors = obj.errors();
+    let grad = if use_gradient {
+        Some(objective.gradient(py, &errors, "global_optimize_objective with use_gradient")?)
+    } else {
+        None
+    };
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let x0_view = start.as_ref().map(|x| x.view());
     let policy = crate::PortfolioPolicy::Auto;
-    let result = if use_gradient {
-        crate::portfolio_optimize_from(
-            &*objective,
-            Some(&*objective),
-            budget,
-            seed,
-            noise_sigma,
-            policy,
-            x0_view,
-        )
-    } else {
-        crate::portfolio_optimize_from::<_, PyObjective>(
-            &*objective,
-            None,
-            budget,
-            seed,
-            noise_sigma,
-            policy,
-            x0_view,
-        )
-    };
+    let result = crate::portfolio_optimize_from(
+        &obj,
+        grad.as_ref(),
+        budget,
+        seed,
+        noise_sigma,
+        policy,
+        x0_view,
+    );
+    errors.finish(py)?;
     portfolio_result_to_dict(py, result)
 }
 
@@ -4686,7 +4678,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyHistory>()?;
     m.add_class::<PyClusterConfig>()?;
     m.add_class::<PyLedger>()?;
-    m.add_class::<EindirPyBounds>()?;
+    m.add_class::<PyBounds>()?;
     m.add_class::<PyObjective>()?;
     m.add_function(wrap_pyfunction!(cluster_search, m)?)?;
     m.add_function(wrap_pyfunction!(quench, m)?)?;
