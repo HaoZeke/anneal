@@ -87,6 +87,18 @@ fn incremental_exp_and_supplied_coefficients_use_the_same_recurrences() {
 }
 
 #[test]
+fn supplied_coefficients_refuse_an_empty_series() {
+    assert_eq!(
+        Taylor::from_coefficients(Vec::new()).unwrap_err(),
+        JetError::Shape("Taylor series needs at least its constant coefficient")
+    );
+
+    let constant = Taylor::from_coefficients(vec![Interval::ZERO]).unwrap();
+    assert_eq!(constant.coefficients().len(), 1);
+    assert!(!constant.exp().coefficients()[0].disjoint(Interval::ONE));
+}
+
+#[test]
 fn sqrt_and_quotient_match_the_binomial_series() {
     let binomial = [
         (1, 1),
