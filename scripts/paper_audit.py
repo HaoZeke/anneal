@@ -1606,6 +1606,35 @@ def presets_and_templates(audit: Audit) -> None:
                    "search is not the one the article describes.")
 
 
+RESTART_DRIVERS = ("examples/h2h_gmin_proof.rs", "examples/h2h_morse.rs", "examples/h2h_metal.rs",
+                   "examples/h2h_seed.rs", "examples/h2h_sc.rs", "examples/ase_panel.rs", "examples/ase_nonlj.rs")
+
+
+def no_anneal_restart(audit: Audit) -> None:
+    """The paper claims no restart of this code, and no printed revision restarts a walk under its preset."""
+    for path in (TEX, SI, COVER):
+        sentences = re.split(r"(?<=[.;])\s+", collapse(audit.text(path)))
+        loose = [s[:80] for s in sentences if re.search(r"restart", s, re.I) and not re.search(r"GMIN|NEWRESTART", s)]
+        audit.cell(path, "every restart the text names is GMIN's", "none", " | ".join(loose) or "none")
+    knockout = KNOCKOUT_CODE["templates"]
+    for revision in sorted({r for rs in BENCHMARK_REVISIONS.values() for r in rs} | set(knockout)):
+        where = f"{revision[:8]}:{PRIOR_CONFIG}"
+        config = git("show", f"{revision}:{PRIOR_CONFIG}").stdout
+        code = "\n".join(line for line in config.splitlines() if not line.lstrip().startswith("//"))
+        audit.record("restart_on_stall: false," in code, where, "restart_on_stall is off in Config::default",
+                     "off", "off" if "restart_on_stall: false," in code else "not off")
+        setters = re.findall(r"^.*\.restart_on_stall = true;", code, re.M)
+        audit.cell(where, "restart_on_stall is turned on only by with_dual_orbit_core", "1", float(len(setters)))
+        users = [line.strip() for line in code.splitlines() if ".with_dual_orbit_core()" in line]
+        audit.cell(where, "only the opt-in dual-core preset builds on with_dual_orbit_core",
+                   "Self::for_cluster(n_points).with_dual_orbit_core()", " | ".join(users))
+        for driver in RESTART_DRIVERS:
+            text = git("show", f"{revision}:{driver}").stdout
+            hit = bool(re.search(r"restart_on_stall\s*=\s*true|with_dual_orbit_core\(|for_cluster_dual_core\(", text))
+            audit.record(not hit, f"{revision[:8]}:{driver}", "the driver turns on no restart", "none",
+                         "sets one" if hit else "none")
+
+
 PRIORS = ("soap", "reseed", "growth", "core", "handover", "motif")
 PRIOR_CONFIG = "src/methods/cluster_hopping/config.rs"
 
@@ -3833,7 +3862,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
     audit = Audit()
     for check in (paired_statistics, manuscript_gmin, withdrawn_benchmarks, supporting_information, release, paper_0120, gad_published, openconf,
                   head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, lj_large, bench_prose,
-                  manuscript_ase, manuscript_knockouts, manuscript_priors, panel_references, generated_tables, supporting_numbers, manuscript_new, manuscript_followups, cover_letter, science_claims, rigid_stall, presets_and_templates):
+                  manuscript_ase, manuscript_knockouts, manuscript_priors, panel_references, generated_tables, supporting_numbers, manuscript_new, manuscript_followups, cover_letter, science_claims, rigid_stall, presets_and_templates, no_anneal_restart):
         check(audit)
     if write_map:
         (ROOT / REVISION_MAP).write_text(revision_map_text(revision_map_rows(audit)))
