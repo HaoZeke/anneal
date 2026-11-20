@@ -718,6 +718,19 @@ pub struct Config {
     /// is read from the structure alone; the preset names no group, order,
     /// size or species.
     pub symmetry_completion_on_new: bool,
+    /// Complete each basin once per chain, as a shared history already does.
+    ///
+    /// Off, a chain without a shared history runs [`Config::symmetry_completion_on_new`]
+    /// each time an accepted hop enters a basin it was not in, which includes
+    /// a basin it has completed before: the completion is a function of the
+    /// minimum and not of the way the chain reached it. On, the chain keeps
+    /// the basins it has attempted, by the same region identity the chain's
+    /// controller uses ([`Config::merge_radius`]), and skips the completion of
+    /// one it has attempted. A chain under a shared history is unaffected,
+    /// since the history claims each minimum for one chain already. Off by
+    /// default; it changes the walk.
+    #[serde(skip_serializing_if = "is_false")]
+    pub symmetry_completion_once: bool,
     /// Fraction of the points, innermost by distance from the centroid,
     /// whose point group [`Config::symmetry_completion_on_new`] reads. The
     /// outer points are the last to order, and a disordered surface would
@@ -2114,6 +2127,7 @@ impl Config {
             symmetry_tolerance: LennardJonesPreset::SYMMETRY_TOLERANCE * length_scale,
             symmetry_merge_radius: LennardJonesPreset::SYMMETRY_MERGE_RADIUS * length_scale,
             symmetry_completion_on_new: false,
+            symmetry_completion_once: false,
             symmetry_core_fraction: 0.6,
             tabu_on_stall: false,
             tabu_capacity: 8,

@@ -5958,6 +5958,9 @@ where
         ClusterFingerprint::of_config(cfg, &canonical_reference),
         cfg.merge_radius,
     );
+    // Regions whose symmetry completion this chain has attempted, under
+    // `Config::symmetry_completion_once`.
+    let mut completed_regions: std::collections::HashSet<usize> = std::collections::HashSet::new();
     if RIGID {
         identity.set_cap(RIGID_BASIN_CAP);
         bias.cap_basins(RIGID_BASIN_CAP);
@@ -9927,6 +9930,9 @@ where
             && history_here
                 .zip(history.as_deref_mut())
                 .is_none_or(|(m, h)| h.claim_completion(m))
+            && (!cfg.symmetry_completion_once
+                || history.is_some()
+                || completed_regions.insert(identity.basin_of(x.view())))
             && let Some(y) = crate::detected_symmetry::complete_detected_classed(
                 x.view(),
                 n,
@@ -15431,6 +15437,102 @@ mod tests {
             .map(|(_, _, _, energy)| *energy)
             .expect("shelf row");
         assert!(!crate::energy_hits(shelf_energy, TARGET, hit_tol));
+    }
+
+    /// A chain that goes back and forth between two basins completes each
+    /// once when asked to, and every time it enters one when not. The walk
+    /// is scripted: every quench of a proposal gives the basin the chain is
+    /// not in, at equal energy so every hop is accepted, and the completion
+    /// product quenches back to the basin it was made from.
+    #[test]
+    fn a_basin_is_completed_once_per_chain_when_asked() {
+        let n = 6;
+        let octahedron = |scale: f64| {
+            let mut x = Array1::from(vec![
+                1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0,
+                0.0, -1.0,
+            ]);
+            for (i, value) in x.iter_mut().enumerate() {
+                *value = scale * (*value + 0.08 * (((i * 37 + 11) % 17) as f64 / 8.0 - 1.0));
+            }
+            x
+        };
+        let basins = [octahedron(1.0), octahedron(1.35)];
+        let mut cfg = Config::for_cluster(n);
+        cfg.max_hops = Some(14);
+        cfg.bayes_screen = false;
+        cfg.calibrated_screen = false;
+        cfg.finish_improving = false;
+        cfg.return_screen = false;
+        cfg.screen_margin = f64::INFINITY;
+        cfg.screen_steps = 1;
+        cfg.relax_steps = 1;
+        cfg.polish_records = 3;
+        cfg.symmetry_completion_on_new = true;
+        let products: Vec<Array1<f64>> = basins
+            .iter()
+            .map(|b| {
+                crate::detected_symmetry::complete_detected(
+                    b.view(),
+                    n,
+                    cfg.symmetry_tolerance,
+                    cfg.symmetry_merge_radius,
+                    cfg.symmetry_core_fraction,
+                    cfg.min_separation,
+                )
+                .expect("a jittered octahedron completes")
+            })
+            .collect();
+        let completions = |once: bool| {
+            let mut cfg = cfg.clone();
+            cfg.symmetry_completion_once = once;
+            let at = std::sync::atomic::AtomicUsize::new(0);
+            let near = |state: ArrayView1<f64>, of: &Array1<f64>| {
+                state
+                    .iter()
+                    .zip(of.iter())
+                    .all(|(a, b)| (a - b).abs() <= 1e-8)
+            };
+            let mut relax = |ledger: &mut Ledger, state: ArrayView1<f64>, steps: usize| {
+                assert!(ledger.charge());
+                if steps == cfg.polish_records {
+                    return (
+                        -1.0,
+                        basins[at.load(std::sync::atomic::Ordering::Relaxed)].clone(),
+                    );
+                }
+                for (k, product) in products.iter().enumerate() {
+                    if near(state, product) {
+                        return (-1.0, basins[k].clone());
+                    }
+                }
+                let next = 1 - at.load(std::sync::atomic::Ordering::Relaxed);
+                at.store(next, std::sync::atomic::Ordering::Relaxed);
+                (-1.0, basins[next].clone())
+            };
+            let mut gradient = |ledger: &mut Ledger, state: ArrayView1<f64>| {
+                assert!(ledger.charge());
+                Some(Array1::zeros(state.len()))
+            };
+            let mut ledger = Ledger::new(10_000);
+            let mut rng = StdRng::seed_from_u64(5);
+            run_with_gradient(
+                &cfg,
+                basins[0].view(),
+                &mut ledger,
+                &mut relax,
+                Some(&mut gradient),
+                &mut rng,
+            )
+            .expect("finite start")
+            .symmetry_completions
+            .0
+        };
+        let every = completions(false);
+        let once = completions(true);
+        assert!(every >= 4, "{every}");
+        assert!((1..=2).contains(&once), "{once}");
+        assert!(once < every, "{once} {every}");
     }
 }
 
