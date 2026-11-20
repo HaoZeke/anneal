@@ -3397,7 +3397,8 @@ impl PyLedger {
         }
     }
 
-    /// Charged evaluations the ledger was created with.
+    /// Charged evaluations the ledger may spend: the budget it was created
+    /// with, plus whatever `grant` added.
     #[getter]
     fn budget(&self) -> usize {
         self.inner.budget()
@@ -3419,6 +3420,160 @@ impl PyLedger {
     #[getter]
     fn best(&self) -> f64 {
         self.inner.best
+    }
+
+    /// A copy of the state that attains `best`, or `None`.
+    #[getter]
+    fn best_state<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f64>>> {
+        self.inner
+            .best_state
+            .as_ref()
+            .map(|state| PyArray1::from_vec(py, state.to_vec()))
+    }
+
+    /// The `(spent, energy)` pair at each new incumbent, in order. At most
+    /// 512 are kept.
+    #[getter]
+    fn encounters(&self) -> Vec<(usize, f64)> {
+        self.inner.encounters().to_vec()
+    }
+
+    /// The energy `stop_below` installed, or `None`.
+    #[getter]
+    fn target(&self) -> Option<f64> {
+        self.inner.target()
+    }
+
+    /// Whether `best` has reached `target`.
+    #[getter]
+    fn target_reached(&self) -> bool {
+        self.inner.target_reached()
+    }
+
+    /// Whether `energy` has reached `target`.
+    fn below_target(&self, energy: f64) -> bool {
+        self.inner.below_target(energy)
+    }
+
+    /// Stop a search once a recorded energy is at or below `energy`. A
+    /// threshold that is not finite raises `InvalidArgumentError`.
+    fn stop_below(&mut self, energy: f64) -> PyResult<()> {
+        if !energy.is_finite() {
+            return Err(invalid_argument(format!(
+                "the threshold must be finite, got {energy}"
+            )));
+        }
+        self.inner.stop_below(energy);
+        Ok(())
+    }
+
+    /// Charge one evaluation. Returns `False` when the budget is gone.
+    fn charge(&mut self) -> bool {
+        self.inner.charge()
+    }
+
+    /// Charge `n` evaluations at once. Returns `False` when the budget ran
+    /// out partway; what fits is still charged.
+    fn charge_many(&mut self, n: usize) -> bool {
+        self.inner.charge_many(n)
+    }
+
+    /// Charge a fraction of an evaluation. Fractions add up, and one whole
+    /// evaluation is charged each time the sum crosses one. A fraction that
+    /// is not positive and finite charges nothing. Returns `False` when the
+    /// budget is gone.
+    fn charge_frac(&mut self, frac: f64) -> bool {
+        self.inner.charge_frac(frac)
+    }
+
+    /// Record `value` at `state`. It becomes `best` when it is finite and
+    /// lower, and then adds an entry to `encounters`. When `ANNEAL_MIN_DUMP`
+    /// names a file, every finite value is also appended to it.
+    fn record(&mut self, value: f64, state: PyReadonlyArray1<'_, f64>) -> PyResult<()> {
+        self.inner
+            .record(value, ArrayView1::from(state.as_slice()?));
+        Ok(())
+    }
+
+    /// Replace `best` and its state together, as a reoptimized geometry
+    /// does. A value or state that is not finite raises
+    /// `InvalidArgumentError`.
+    fn replace_best(&mut self, value: f64, state: PyReadonlyArray1<'_, f64>) -> PyResult<()> {
+        let view = ArrayView1::from(state.as_slice()?);
+        if !value.is_finite() || view.iter().any(|component| !component.is_finite()) {
+            return Err(invalid_argument(
+                "replace_best needs a finite value and a finite state",
+            ));
+        }
+        self.inner.replace_best(value, view);
+        Ok(())
+    }
+
+    /// Add `extra` evaluations to the budget, for work after the ceiling.
+    fn grant(&mut self, extra: usize) {
+        self.inner.grant(extra);
+    }
+
+    /// Record one relaxation that started when `spent` was `charged_before`
+    /// and ended at `energy` and `state`. `gradient` is the fresh check of
+    /// the minimum. Without a finite gradient of the state's length, or with
+    /// a non-finite energy or state, the boundary is `"rejected"`, and it
+    /// keeps its charged work. Returns `False`, and records nothing, when no
+    /// evaluation was charged since `charged_before`.
+    #[pyo3(signature = (charged_before, energy, state, gradient = None))]
+    fn record_quench_boundary(
+        &mut self,
+        charged_before: usize,
+        energy: f64,
+        state: PyReadonlyArray1<'_, f64>,
+        gradient: Option<PyReadonlyArray1<'_, f64>>,
+    ) -> PyResult<bool> {
+        let state = Array1::from_vec(state.as_slice()?.to_vec());
+        let gradient = match gradient {
+            Some(values) => Some(Array1::from_vec(values.as_slice()?.to_vec())),
+            None => None,
+        };
+        Ok(self
+            .inner
+            .record_quench_boundary(charged_before, energy, state, gradient))
+    }
+
+    /// The relaxation boundaries recorded so far, in order. Each is a dict
+    /// with `status` (`"validated"` or `"rejected"`), `charged_calls`,
+    /// `energy`, `state` and `gradient` (`None` unless validated).
+    #[getter]
+    fn quench_boundaries<'py>(&self, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict>>> {
+        use crate::methods::cluster_hopping::QuenchStatus;
+        self.inner
+            .quench_boundaries()
+            .iter()
+            .map(|boundary| {
+                let item = PyDict::new(py);
+                let status = match boundary.status() {
+                    QuenchStatus::Validated => "validated",
+                    QuenchStatus::Rejected => "rejected",
+                };
+                item.set_item("status", status)?;
+                item.set_item("charged_calls", boundary.charged_calls())?;
+                item.set_item("energy", boundary.energy())?;
+                item.set_item("state", PyArray1::from_vec(py, boundary.state().to_vec()))?;
+                item.set_item(
+                    "gradient",
+                    boundary
+                        .gradient()
+                        .map(|values| PyArray1::from_vec(py, values.to_vec())),
+                )?;
+                Ok(item)
+            })
+            .collect()
+    }
+
+    /// A ledger with its own spend and `budget`, for work that is settled
+    /// back with `charge_many`.
+    fn slice(&self, budget: usize) -> Self {
+        Self {
+            inner: self.inner.slice(budget),
+        }
     }
 
     fn __repr__(&self) -> String {

@@ -176,6 +176,51 @@ assert out["charged"] == out["n_evals"] + out["n_grads"] <= 600
 assert out["shared_deposits"] == 0
 #+end_src
 
+* Ledger
+
+=anneal.Ledger(budget)= is the charged-work account of a search. Beside
+=budget=, =spent=, =remaining= and =best= it reads =best_state= (a copy),
+=encounters= (the =(spent, energy)= pair at each new incumbent, at most 512)
+and =target=, and it takes charges and records:
+
+| Member                              | Does                                                        |
+|-------------------------------------+-------------------------------------------------------------|
+| =charge()=                          | one evaluation; =False= when the budget is gone             |
+| =charge_many(n)=                    | =n= at once; what fits is charged, =False= if some did not  |
+| =charge_frac(f)=                    | a fraction; a whole unit each time the sum crosses one      |
+| =record(value, state)=              | keeps the lowest finite value and its state                 |
+| =replace_best(value, state)=        | moves both together, as a reoptimized geometry does         |
+| =stop_below(e)=, =below_target(e)=, | the target a search stops at                                |
+| =target_reached=                    |                                                             |
+| =record_quench_boundary(...)=       | one relaxation: validated with a fresh gradient, else rejected |
+| =quench_boundaries=                 | the recorded boundaries, as dicts                           |
+| =grant(extra)=                      | adds evaluations to the budget for work after the ceiling   |
+| =slice(budget)=                     | a ledger with its own spend, settled back with =charge_many= |
+
+=stop_below= and =replace_best= raise =InvalidArgumentError= for a value that
+Rust would ignore without a word. =record= appends every finite value to the
+file that =ANNEAL_MIN_DUMP= names, when it is set.
+=pytest/test_ledger.py= reads the Rust =impl Ledger= and fails when a public
+method is neither reached here nor named there as belonging to a search
+driver.
+
+#+begin_src python
+import numpy as np
+import anneal
+
+ledger = anneal.Ledger(10)
+ledger.charge_many(3)
+ledger.record(4.0, np.zeros(2))
+ledger.charge_many(2)
+ledger.record(1.5, np.ones(2))
+assert ledger.encounters == [(3, 4.0), (5, 1.5)]
+assert ledger.best == 1.5 and ledger.remaining == 5
+child = ledger.slice(3)
+child.charge_many(3)
+ledger.charge_many(child.spent)
+assert ledger.spent == 8
+#+end_src
+
 * Configuration
 
 =anneal.Config= wraps the Rust =cluster_hopping::Config=. A preset builds
