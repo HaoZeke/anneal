@@ -1,0 +1,1 @@
+Documented the remaining Python ``anneal`` and ``anneal.chemfit`` exports and every ``anneal_core`` crate-root re-export in the reference pages, fixed broken and private intra-doc rustdoc links, added missing Python docstrings, and exposed ``noise_sigma`` on ``global_optimize_objective``.

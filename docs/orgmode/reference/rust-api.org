@@ -18,3 +18,69 @@ See also:
 - `eindir documentation <https://eindir.rgoswami.me/>`__ for the Objective,
   low-discrepancy, GLE, and surrogate layer used by these drivers.
 #+end_export
+
+* Crate-root re-exports (=anneal_core=)
+
+Every symbol re-exported at =src/lib.rs= is grouped below by role and documented in detail by the generated Rustdoc pages linked at the bottom of this page.
+
+** Typed algebra, exchange, and free energy
+
+- =AcceptRule= :: acceptance probability trait =(delta_e, T) -> p=.
+- =Adapter=, =IdentityAdapter= :: Stan-style windowed step/parameter adaptation trait and no-op adapter.
+- =Bias=, =WellTemperedBias= :: cost-augmenting bias trait and Gaussian/collective-variable well-tempered bias.
+- =Cooling= :: temperature schedule trait =epoch -> T=.
+- =Neighborhood= :: proposal domain symmetry trait.
+- =MoveKernel=, =Reflected= :: temperature-indexed proposal trait and box-reflection wrapper.
+- =Sampler= :: single-step Markov transition trait over an objective.
+- =SaVariant= :: certified L1--L4 simulated-annealing component tuple.
+- =Exchange=, =MetropolisExchange=, =TsallisExchange= :: replica-exchange swap trait and Boltzmann/Tsallis swap operators.
+- =BarEstimator= :: Bennett acceptance ratio free-energy estimator.
+- =LawViolation= :: diagnostic witness returned by algebra law checks.
+
+** Objectives, gradients, history, and noise acceptance
+
+- =DifferentiableObjective=, =AnalyticGradient=, =FiniteDiffGradient=, =Gradient= :: first-derivative objective and gradient helpers re-exported with =Error=.
+- =History=, =State=, =EpochLine=, =trajectory_stationarity_flags= :: per-epoch trace records and stationarity diagnostics.
+- =OsaAccept=, =OsaResult= :: sequential Ball--Branke--Meisel noise-aware acceptance rule and result.
+- =DEFAULT_HIT_TOL=, =SEARCH_HIT_TOL=, =energy_hits= :: shared one-sided inclusive target-hit predicate and tolerances.
+- =ANNEAL_VERSION= :: crate semantic version string.
+
+** HMC and NUTS integrators
+
+- =HmcIntegrator=, =LeapfrogIntegrator=, =OmelyanIntegrator=, =LeapfrogResult=, =OMELYAN_LAMBDA= :: symplectic integrators for Hamiltonian Monte Carlo moves.
+- =HmcSaSampler=, =NutsSaSampler=, =NutsTransition= :: HMC and No-U-Turn samplers plugged into =run_rs= and =MultiChainSampler=.
+
+** Drivers, portfolios, and method results
+
+- =run_rs=, =run_rs_variant=, =run_rs_variant_at=, =run_rs_variant_start=, =run_rs_variant_from=, =run_rs_variant_from_position=, =run_rs_variant_resumed= :: deterministic Rust SA driver entry points.
+- =run_rs_qmc_variant=, =run_rs_qmc_variant_start=, =run_rs_qmc_variant_from=, =run_rs_qmc_variant_from_position=, =qmc_skip_from_seed= :: Sobol/QMC-driven SA entry points and seed-to-skip helper.
+- =portfolio_optimize=, =portfolio_optimize_from=, =portfolio_optimize_seeded=, =portfolio_optimize_with_policy=, =portfolio_ensemble_optimize=, =portfolio_values_ensemble_optimize= :: budget-only and ensemble portfolio drivers (=PortfolioPolicy=, =PortfolioResult=, =PortfolioEnsembleConfig=, =PortfolioEnsembleResult=, =ArmStat=).
+- =box_ensemble_optimize=, =ensemble_hop_optimize=, =BoxEnsembleConfig=, =BoxEnsembleResult=, =EnsembleHopResult= :: multi-replica box hopping drivers and results.
+- =amsa_optimize=, =AmsaResult= :: whitened BFWT annealed descent and result.
+- =dmc_population_optimize=, =run_dmc_population=, =population_control=, =walker_weight=, =diffusion_displace=, =Walker=, =Population=, =DmcPopulationResult=, =DEFAULT_ALPHA=, =DEFAULT_BETA0=, =DEFAULT_GAMMA=, =DEFAULT_STEPS_PER_CONTROL=, =DEFAULT_TARGET_WALKERS= :: entropy-controlled population diffusion search.
+- =gle_langevin_sa=, =gle_langevin_adaptive_sa=, =gle_langevin_preconditioned_sa=, =estimate_gle_omega0=, =estimate_gle_preconditioner=, =GleLangevinResult=, =GlePreconditioner= :: generalized Langevin colored-noise drivers and frequency/diagonal estimators.
+- =projected_gradient_polish=, =qmc_projected_gradient_polish=, =shifted_qmc_projected_gradient_polish=, =qmc_best1bin_scout=, =qmc_gsa_global_search=, =qmc_gsa_global_search_from=, =qmc_trust_region_poll=, =LocalPolishResult=, =QmcPolishResult= :: projected-gradient local polish and QMC global/local scouts.
+- =BayesianMixingSampler=, =BayesianMixingResult=, =MultiChainSampler=, =MultiChainState=, =MultiChainResult=, =GelmanRubin= :: multi-chain mixing and Gelman--Rubin convergence diagnostics.
+- =ParallelTemperingSampler=, =PtChainState=, =PtResult=, =geometric_ladder= :: classical SA parallel tempering sampler and ladder constructor.
+- =PilotObservation=, =PilotPrior=, =LaplacePosterior=, =fit_laplace=, =pilot_draws=, =pilot_draws_qmc=, =Q_V_MIN=, =Q_V_MAX=, =TARGET_ACCEPT_RATE=, =default_sigma= :: Bayesian pilot parameter estimation.
+- =OptimizationRegime=, =ProblemFeatures=, =RegimeError=, =select_regime=, =arm_prior_boost=, =arm_slice_multiplier=, =order_arms=, =preferred_arm_tail=, =regime_exploit_prob=, =regime_exploit_width=, =check_accept_path=, =exact_accept_allowed=, =require_accept_compatible= :: regime classification and portfolio arm priors.
+- =TpeCategorical=, =TpeContinuous1d=, =ShootDirection= :: tree-structured Parzen estimators and transition-path shooting helpers.
+
+** Replica-exchange and barrier tempering
+
+- =IndexProcess=, =Ladder=, =ReplicaMove=, =ReplicaTarget=, =SwapScheme=, =TARGET_SWAP_ACCEPT=, =beta_step_for_acceptance=, =biased_swap_log_ratio=, =swap_log_ratio=, =swap_probability= :: bias-aware replica exchange, non-reversible sweep indexing, and barrier-calibrated temperature ladders.
+
+#+begin_src rust
+use anneal_core::{
+    ANNEAL_VERSION, DEFAULT_HIT_TOL, Ladder, SwapScheme, TARGET_SWAP_ACCEPT,
+    beta_step_for_acceptance, energy_hits, qmc_skip_from_seed,
+};
+
+assert!(!ANNEAL_VERSION.is_empty());
+let ladder = Ladder::from_temperatures(&[1.0, 2.0, 4.0], SwapScheme::DeterministicEvenOdd);
+assert_eq!(ladder.len(), 3);
+assert!(energy_hits(-10.0 + DEFAULT_HIT_TOL, -10.0, DEFAULT_HIT_TOL));
+assert!(qmc_skip_from_seed(7) > 0);
+assert!(beta_step_for_acceptance(2.0, TARGET_SWAP_ACCEPT) > 0.0);
+#+end_src
+```

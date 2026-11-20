@@ -396,3 +396,99 @@ Gradient support is provided by =eindir=; see the [[https://eindir.rgoswami.me/h
 - =run_hmc=, =run_qmc= (see =python/anneal/__init__.py= and the tests for the signatures).
 
 All return dicts with =best_pos=, =best_val=, =n_evals= (or the rich =History= / =DeviceHistory= / =EnsembleHistory= objects from =run= / =run_device=).
+
+* Additional Python exports (=anneal=)
+
+** Native handles, bias, and metadata
+
+- =__version__= :: installed =anneal= package version string.
+- =Bounds(low, high, slack=1e-06)= :: PyO3 wrapper around =eindir= box bounds.
+- =PyObjective(fn_, bounds, grad_fn=None)= :: native objective handle bridging Python callables to Rust =Objective<f64>=.
+- =EpochLine()= :: per-epoch summary record attached to =History.trace=.
+- =BasinBias(n_points, merge_radius=0.01, w0=0.25, gamma=5.0)= :: well-tempered metadynamics bias keyed on structural basin identity.
+
+** QMC scouts and native-objective drivers
+
+- =qmc_best1bin_scout(obj_fn, low, high, max_evals, seed=0, population_size=30, weight_min=0.5, weight_span=0.5, crossover_rate=0.7)= :: QMC-seeded DE/best/1/bin global scout.
+- =qmc_best1bin_scout_objective(objective, max_evals, seed=0, ...)= :: native =PyObjective= variant of =qmc_best1bin_scout=.
+- =qmc_gsa_global_search(obj_fn, low, high, max_evals, seed=0, n_chains=30, t_init=1.0, q_v=2.62, q_a=1.7, x0=None)= :: bounded QMC-initialized generalized simulated annealing.
+- =qmc_gsa_global_search_objective(objective, max_evals, ...)= :: native =PyObjective= variant of =qmc_gsa_global_search=.
+- =qmc_polish_objective(objective, n_starts, max_fevals_per_start, seed=0, step0=1.0, grad_tol=1e-8, top_k=0)= :: native =PyObjective= gradient polish from QMC starts.
+- =qmc_trust_region_poll(obj_fn, low, high, center, max_evals, seed=0, radius_fraction=0.0, n_levels=3, points_per_level=0)= :: local shifted-QMC trust-region poll around =center=.
+- =qmc_trust_region_poll_objective(objective, center, max_evals, ...)= :: native =PyObjective= variant of =qmc_trust_region_poll=.
+- =estimate_gle_omega0(obj_fn, grad_fn, low, high)= :: estimate local curvature frequency for GLE colored noise.
+- =gle_langevin_objective(objective, max_fevals, seed=0, omega0=None, dt=0.2, n_epochs=40, x0=None)= :: native =PyObjective= variant of =gle_langevin=.
+- =gle_langevin_preconditioned_objective(objective, max_fevals, seed=0, omega0=None, dt=0.2, n_epochs=40, x0=None, preconditioner_probes=None)= :: native =PyObjective= variant of =gle_langevin_preconditioned=.
+- =global_optimize_objective(objective, budget, seed=0, use_gradient=True, x0=None, *, noise_sigma=None)= :: native =PyObjective= variant of =global_optimize= with optional =noise_sigma=.
+
+** Population, standalone, and SciPy archive helpers
+
+- =dmc_population_optimize(obj_fn, low, high, budget, seed=0, grad_fn=None, target_n=16, steps_per_control=4, x0=None)= :: population-controlled diffusion search on a classical objective.
+- =gpmd_optimize(obj_fn, low, high, budget, seed=0, grad_fn=None, x0=None)= :: local Metropolis walk with adaptive energy-gap temperature.
+- =amsa_optimize(obj_fn, low, high, budget, seed=0, grad_fn=None, x0=None)= :: whitened BFWT annealed descent.
+- =bfwt_optimize(obj_fn, low, high, budget, seed=0, barrier_hat=0.0, grad_fn=None, x0=None)= :: local Metropolis with budget-feasible window temperature.
+- =MinimizeResult(x, fun, nfev, success, message, *, njev=0, diagnostics=None)= :: SciPy-compatible result container returned by =minimize=.
+- =JsonlParameterStore(path)= :: JSON lines parameter archive (requires no extra dependencies).
+- =Hdf5ParameterStore(path)= :: HDF5 parameter archive storing =x= and =f= datasets.
+- =open_parameter_store(store)= :: open an archive from a path, =JsonlParameterStore=, or =Hdf5ParameterStore=.
+
+** Landscape projection, ASE, and TVM-FFI helpers
+
+- =LandfoldMap= :: fitted landmark map exposing =project= for out-of-sample descriptor rows.
+- =landfold(rows, **kwargs)= :: project descriptor rows onto a 2D sketch-map plane.
+- =landfold_book(paths, **kwargs)= :: load minima books and project their DECAF rows.
+- =Anneal(atoms, ..., seed=0, budget=None, mode="local")= :: ASE =Optimizer= wrapper running local quench or global cluster search.
+- =TvmFfiTensorMetadata(shape, dtype, device, dlpack_device)= :: metadata record returned by =tvm_ffi_tensor_metadata=.
+- =tvm_ffi_tensor(array, *, tvm_ffi=None)= :: export a DLPack-capable array through =tvm_ffi.from_dlpack=.
+- =tvm_ffi_tensor_metadata(array)= :: inspect shape, dtype, device, and DLPack device of an array.
+- =tvm_ffi_tensors_from_history(history, *, tvm_ffi=None)= :: export tensor fields of a =DeviceHistory= via =tvm_ffi=.
+
+#+begin_src python
+import numpy as np
+from anneal import (
+    Bounds,
+    MinimizeResult,
+    PyObjective,
+    dmc_population_optimize,
+    global_optimize_objective,
+    qmc_best1bin_scout,
+    tvm_ffi_tensor_metadata,
+)
+
+def sphere(x):
+    return float(np.sum(x * x))
+
+bounds = Bounds(np.array([-2.0, -2.0]), np.array([2.0, 2.0]))
+obj = PyObjective(sphere, bounds)
+out = global_optimize_objective(obj, budget=60, seed=1, use_gradient=False)
+assert isinstance(out["best_val"], float) and out["best_val"] >= 0.0
+scout = qmc_best1bin_scout(sphere, [-2.0, -2.0], [2.0, 2.0], max_evals=40, seed=1)
+pop = dmc_population_optimize(sphere, [-2.0, -2.0], [2.0, 2.0], budget=40, seed=1)
+meta = tvm_ffi_tensor_metadata(np.zeros(2))
+assert meta.shape == (2,)
+res = MinimizeResult(x=scout["best_pos"], fun=scout["best_val"], nfev=40, success=True, message="ok")
+assert res.success and pop["n_evals"] <= 40
+#+end_src
+
+* ChemFit bridge (=anneal.chemfit=)
+
+- =ChemFitVector(template)= :: flattened parameter view over nested ChemFit parameter dictionaries.
+- =flatten_parameters(params)= :: flatten a nested parameter dictionary to =(vector, spec)=.
+- =unflatten_parameters(vector, spec, template)= :: reconstruct a nested parameter dictionary from =(vector, spec)=.
+- =chemfit_box(fitter, vector, default_span=3.0)= :: construct finite =(low, high)= arrays from ChemFit fitter bounds.
+- =fit_anneal(fitter, budget, *, driver="portfolio", seed=0, ...)= :: optimize a ChemFit =Fitter= with an =anneal= gradient-free driver.
+- =fit_chemfit(fitter, budget, method="portfolio", seed=0, ...)= :: optimize ChemFit parameters with optional checkpoint persistence.
+- =run_fitter(fitter, budget, method="global_optimize", preset=None, seed=42, **kwargs)= :: run a ChemFit fitter through the gradient-free bridges.
+- =run_benchmark(benchmark_context, *, method="portfolio", seed=0, ...)= :: run a ChemFit benchmark dictionary end to end.
+
+#+begin_src python
+import numpy as np
+from anneal.chemfit import ChemFitVector, flatten_parameters, unflatten_parameters
+
+template = {"pair": {"alpha": np.array([1.2, 0.4])}, "shift": 0.1}
+vec, spec = flatten_parameters(template)
+restored = unflatten_parameters(vec, spec, template)
+view = ChemFitVector(template)
+assert view.dim == 3
+assert np.allclose(restored["pair"]["alpha"], template["pair"]["alpha"])
+#+end_src
