@@ -2,10 +2,33 @@
 """Build the anneal-core static archive with its C ABI and localize foreign C symbols."""
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+
+def reproducible_env(
+    environment: dict[str, str], root: Path, target_dir: Path
+) -> dict[str, str]:
+    """Opt in to deterministic Cargo archives for reproducibility checks."""
+    env = environment.copy()
+    if env.get("ANNEAL_REPRODUCIBLE_ARCHIVE") != "1":
+        return env
+    env["CARGO_INCREMENTAL"] = "0"
+    flags = env.get("RUSTFLAGS", "").split()
+    flags.extend(
+        [
+            "--remap-path-prefix",
+            f"{root}=/source",
+            "--remap-path-prefix",
+            f"{target_dir}=/build",
+            "-Ccodegen-units=1",
+        ]
+    )
+    env["RUSTFLAGS"] = " ".join(flags)
+    return env
 
 
 def main(argv: list[str]) -> int:
@@ -32,9 +55,12 @@ def main(argv: list[str]) -> int:
     if features.strip():
         cmd.extend(["--features", features.strip()])
     cmd.extend(["--", "--crate-type=staticlib"])
-    subprocess.check_call(cmd, cwd=root)
+    env = reproducible_env(os.environ, root, Path(target_dir))
+    subprocess.check_call(cmd, cwd=root, env=env)
     built = Path(target_dir) / "release" / lib_name
     shutil.copy2(built, out)
+    if env.get("ANNEAL_REPRODUCIBLE_ARCHIVE") == "1":
+        subprocess.check_call(["ar", "sD", out])
     if not objcopy or not nm:
         return 0
     # eindir-core, rgmin and rgsaddle also export C symbols, and a consumer
