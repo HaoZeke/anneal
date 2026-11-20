@@ -5,7 +5,8 @@
 * Hessian-vector products
 
 This page explains why a potential handle computes Hessian-vector products
-itself and keeps a cached centre.
+itself and keeps a cached centre, how it reports the scheme that answered, and
+when a caller should ask for the dense Hessian instead.
 The functions, their arguments and their errors are in the
 [[file:../reference/c_abi.org][C ABI reference]].
 
@@ -17,11 +18,12 @@ A potential handle answers =H v= itself and keeps the forces of that centre.
 
 ** Cost and error
 
-| Scheme               | Force calls per product        | Error          |
-|----------------------+--------------------------------+----------------|
-| =RGPOT_HVP_FORWARD=  | 1, plus 1 for each new centre  | =O(h)=         |
-| =RGPOT_HVP_CENTRAL=  | 2                              | =O(h^2)=       |
-| =RGPOT_HVP_ANALYTIC= | 0                              | the callback's |
+| Scheme               | Force calls per product        | Error                 |
+|----------------------+--------------------------------+-----------------------|
+| =RGPOT_HVP_FORWARD=  | 1, plus 1 for each new centre  | =O(h)=                |
+| =RGPOT_HVP_CENTRAL=  | 2                              | =O(h^2)=              |
+| =RGPOT_HVP_ANALYTIC= | 0                              | the callback's        |
+| =RGPOT_HVP_AD=       | 0                              | rounding of the duals |
 
 The forward scheme reuses the forces of the centre.
 =k= forward products at one centre therefore cost =k + 1= force calls instead of
@@ -68,18 +70,107 @@ that the search makes at the centre is the one the forward products reuse.
 The handle holds one centre, which matches a search that stays at one geometry
 for many products and then moves.
 
-** Analytic products
+** Analytic and dual-number products
 
 A potential that knows its Hessian registers the product with
 =rgpot_potential_set_hvp_callback=.
 =RGPOT_HVP_AUTO= then uses it and makes no force call.
-In C++, =rgpot::PotentialHandle::from_impl= registers it for a potential with a
-member
-=void hessianVectorImpl(const ForceInput &, const double *, double *) const=;
-=MorsePot=, =LJPot= and the Fortran =CuH2Pot= have one.
+A potential whose energy kernel is written over a scalar template can instead
+evaluate it on second-order dual numbers, which carry a value, a first and a
+second directional derivative through every operation.
+The second derivative along =v= is exact up to the rounding of that arithmetic,
+with no step to choose;
+=rgpot_potential_set_ad_hvp_callback= registers that product, and =RGPOT_HVP_AD=
+asks for it.
+=RGPOT_HVP_AUTO= never takes the dual-number product, so a potential that has
+both keeps its closed form.
+
+In C++, =rgpot::PotentialHandle::from_impl= registers each hook a potential
+advertises in =caps()=: =hessianVectorImpl= for =analyticHvp=,
+=hessianVectorAdImpl= for =adHvp=, =hessianImpl= for =analyticHessian= and
+=hessianAdImpl= for =adHessian=.
+=MorsePot=, =LJPot= and the Fortran =CuH2Pot= have an analytic product,
+=MorsePot= and =LJPot= an analytic Hessian, and =LJPot= both dual-number hooks.
+
+** The scheme that ran
+
+=RGPOT_HVP_AUTO= takes the analytic product when there is one and forward
+differences otherwise.
+That fallback is kept, but it is never silent:
+=rgpot_potential_hvp_resolved= writes the scheme that ran, =rgpot::PotentialHandle::hvp= and the Python =hvp_resolved=
+return it, and =rgpot_potential_derivative_counts= counts every product under
+it.
+A caller for which a finite-difference stand-in would be a wrong answer, rather
+than a slower one, asks for =RGPOT_HVP_EXACT=: the analytic product, else the
+dual-number one, and =RGPOT_INVALID_PARAMETER= before any call when the handle
+has neither.
+=RGPOT_HVP_ANALYTIC= and =RGPOT_HVP_AD= are refused the same way when their
+callback is missing.
+
+** Dense Hessians
+
+=rgpot_potential_hessian= writes the =3N= square Hessian, row-major.
+It has no automatic scheme, so a dense Hessian is differenced only when the
+caller names =RGPOT_HESSIAN_CENTRAL=.
+
+| Scheme                   | Force calls  | Error                 |
+|--------------------------+--------------+-----------------------|
+| =RGPOT_HESSIAN_ANALYTIC= | 0            | the callback's        |
+| =RGPOT_HESSIAN_AD=       | 0            | rounding of the duals |
+| =RGPOT_HESSIAN_EXACT=    | 0            | that of the one taken |
+| =RGPOT_HESSIAN_CENTRAL=  | =6N=         | =O(h^2)=              |
+
+The central scheme displaces each coordinate by =+-h=, so column =c= is
+=(F(x - h e_c) - F(x + h e_c)) / (2 h)=, and it writes the symmetric part of the
+differenced matrix.
+Its calls bypass the cached centre and are counted apart from those of the
+products.
+=RGPOT_HESSIAN_EXACT= reports the scheme it took, like =RGPOT_HVP_EXACT=.
+
+** Capabilities
+
+=rgpot_potential_derivative_caps= reports, in one plain struct, which schemes a
+handle has for the product and for the Hessian: an analytic and a dual-number
+flag for each, set by the registered callbacks, and a finite-difference flag
+that every handle sets.
+It also gives the force calls the differenced schemes cost: one per forward
+product at the cached centre, two per central product and six per atom for a
+central Hessian.
+The analytic and dual-number schemes make no force call, and their cost is that
+of the potential, which the struct does not guess.
+
+** Products or a dense Hessian
+
+A caller that needs =k= products at one geometry pays
+=t_hvp= for the first, which includes the centre or any other preparation, and =t_apply=
+for each further one, against =t_dense= for the Hessian, after which every
+product is a matrix-vector multiply.
+The products are cheaper while =k < k*=, with
+\[
+k^* = \frac{t_\mathrm{dense} - t_\mathrm{hvp}}{t_\mathrm{apply}} + 1 .
+\]
+With finite differences only, counted in force calls,
+=t_dense = 6N=, =t_hvp = 2= and =t_apply = 1=, so =k* = 6N - 1=: a dimer
+rotation or a Lanczos search of a few tens of products stays on the products for
+any but the smallest system.
+With analytic or dual-number hooks the three times are those of the potential;
+for a pair potential the product and the Hessian both cost a pass over the
+pairs, so =k*= is small and a search that needs more than a handful of products
+at one geometry, or the full spectrum, should take the Hessian.
+The rule counts each multiply by the stored Hessian as free.
+That multiply reads all =(3N)^2= entries, which for a pair potential with every
+pair in range costs a large fraction of a product, so a caller near =k*= should
+time it too: with
+=t_mv= per multiply, the products are cheaper while =k < (t_dense - t_hvp + t_apply) / (t_apply - t_mv)=,
+and always when =t_mv >= t_apply=.
+No scheme is chosen for the caller: the handle reports the schemes and their
+force-call costs, and the caller applies the rule to its own timings.
 
 ** Without the Rust core
 
 =CppCore/rgpot/HessianVector.hpp= gives the same schemes, default step, centre
 cache and counters to C++ potentials used without the Rust core.
+=rgpot::HessianVectorCache::apply= returns the scheme that ran,
+=rgpot::HessianVectorCache::hessian= takes an explicit =rgpot::HessianScheme=,
+and =rgpot::derivativeCaps= reads the =caps()= bits of a potential.
 The Python module uses it.
