@@ -1299,6 +1299,47 @@ fn ci_runs_default_everywhere_and_gates_macos_python() {
     assert_eq!(all, ["ubuntu-latest", "macos-15", "macos-26"]);
 }
 
+// The feature suite runs these contract tests under every matrix Python,
+// and some of them run the TOML-reading scripts with it. Python 3.10 has
+// no tomllib, so the cell installs tomli, under the dev group's own
+// marker, before either cargo test step.
+#[test]
+fn ci_installs_tomli_for_python_3_10_before_the_feature_tests() {
+    let workflow = ci();
+    let features = job(&workflow, "test");
+    assert!(strings(&features["strategy"]["matrix"]["python-version"]).contains(&"3.10"));
+
+    let python_at = first_use(features, "actions/setup-python");
+    let (install_at, install) = step(features, "Install tomli (Python 3.10)");
+    assert_binding(install);
+    let pyproject: toml::Table = include_str!("../pyproject.toml").parse().unwrap();
+    let dev = pyproject["dependency-groups"]["dev"]
+        .as_array()
+        .expect("the dev dependency group");
+    let tomli = dev
+        .iter()
+        .filter_map(|item| item.as_str())
+        .find(|item| item.starts_with("tomli"))
+        .expect("the dev group names tomli");
+    assert_eq!(tomli, "tomli>=2; python_version < '3.11'");
+    assert_eq!(
+        script(install),
+        [format!(r#"python -m pip install "{tomli}""#)]
+    );
+
+    assert!(python_at < install_at);
+    for name in [
+        "cargo test (all satisfiable features)",
+        "cargo test (all satisfiable features, macOS)",
+    ] {
+        let (test_at, _) = step(features, name);
+        assert!(
+            install_at < test_at,
+            "{name} runs before tomli is installed"
+        );
+    }
+}
+
 #[test]
 fn ci_may_trim_debuginfo_never_optimisation_or_checks() {
     let workflow = ci();
