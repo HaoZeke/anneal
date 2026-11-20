@@ -15,7 +15,7 @@
 //! instead of one random axis.
 
 use crate::symmetrise::{
-    Candidate, Rot, centroid, class_members, detect_all_classed, mirror_matrix, mul, rot_matrix,
+    Candidate, Rot, centroid, class_members, detect_leading_classed, mirror_matrix, mul, rot_matrix,
 };
 use ndarray::{Array1, ArrayView1};
 
@@ -160,9 +160,30 @@ pub fn detected_group_classed(
         return None;
     }
     let orders: Vec<usize> = (2..=bound).collect();
-    let found = detect_all_classed(x, n, classes, &orders, tolerance);
+    let found = detect_leading_classed(
+        x,
+        n,
+        classes,
+        &orders,
+        tolerance,
+        PARALLEL_COSINE,
+        GENERATORS,
+    );
+    let generators = generators_of(&found);
+    let highest = generators.iter().map(|g| g.order).max().unwrap_or(2).max(2);
+    let cap = (4 * highest).max(LARGEST_POLYHEDRAL_GROUP);
+    let operations: Vec<Rot> = generators.iter().map(operation).collect();
+    let radius = rms_radius(x, n);
+    let group = close_group(&operations, radius, rounding_closure(radius, cap), cap);
+    (group.len() >= 2).then_some(group)
+}
+
+/// The generators of the group the detected operations in `found` (least
+/// deviant first) give: the first [`GENERATORS`] whose axes are not parallel
+/// to an earlier one of the same kind.
+fn generators_of(found: &[Candidate]) -> Vec<Candidate> {
     let mut generators: Vec<Candidate> = Vec::new();
-    for candidate in &found {
+    for candidate in found {
         let seen = generators.iter().any(|g| {
             let dot = g.axis[0] * candidate.axis[0]
                 + g.axis[1] * candidate.axis[1]
@@ -176,12 +197,7 @@ pub fn detected_group_classed(
             break;
         }
     }
-    let highest = generators.iter().map(|g| g.order).max().unwrap_or(2).max(2);
-    let cap = (4 * highest).max(LARGEST_POLYHEDRAL_GROUP);
-    let operations: Vec<Rot> = generators.iter().map(operation).collect();
-    let radius = rms_radius(x, n);
-    let group = close_group(&operations, radius, rounding_closure(radius, cap), cap);
-    (group.len() >= 2).then_some(group)
+    generators
 }
 
 fn rotation(axis: [f64; 3], order: usize) -> Rot {
@@ -469,6 +485,7 @@ pub fn complete_detected_classed(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::symmetrise::detect_all_classed;
     use ndarray::array;
 
     /// Points of the centred icosahedron.
@@ -858,6 +875,56 @@ mod tests {
                 assert_eq!(classes[landed], classes[a], "class changed under {g:?}");
             }
         }
+    }
+
+    /// The scan that stops testing once it holds the generators the reader
+    /// takes gives the generators of the scan that tests everything, on
+    /// structures from exact to loosely symmetric and at tolerances from
+    /// tight to loose, with and without classes, and it does refuse tests
+    /// the full scan carries out.
+    #[test]
+    fn the_leading_scan_gives_the_generators_of_the_whole_scan() {
+        let grid = |side: usize| {
+            let mut x = Vec::new();
+            for i in 0..side {
+                for j in 0..side {
+                    for k in 0..side {
+                        x.extend([i as f64, j as f64, k as f64]);
+                    }
+                }
+            }
+            Array1::from(x)
+        };
+        let (zinc, zinc_classes) = zincblende();
+        let mut cases: Vec<(Array1<f64>, Option<Vec<u32>>)> = vec![(zinc, Some(zinc_classes))];
+        for amplitude in [0.0, 0.03, 0.1, 0.25] {
+            cases.push((jitter(&grid(4), amplitude), None));
+            cases.push((jitter(&icosahedron(1.0), amplitude), None));
+            cases.push((jitter(&octahedron(), amplitude), None));
+        }
+        let mut refused = 0usize;
+        for (x, classes) in &cases {
+            let n = x.len() / 3;
+            let bound = order_bound(x.view(), n).max(2);
+            let orders: Vec<usize> = (2..=bound).collect();
+            for tolerance in [0.05, 0.15, 0.3, 0.6] {
+                let whole = detect_all_classed(x.view(), n, classes.as_deref(), &orders, tolerance);
+                let leading = detect_leading_classed(
+                    x.view(),
+                    n,
+                    classes.as_deref(),
+                    &orders,
+                    tolerance,
+                    PARALLEL_COSINE,
+                    GENERATORS,
+                );
+                assert_eq!(generators_of(&whole), generators_of(&leading));
+                assert!(leading.len() <= whole.len());
+                assert!(leading.iter().all(|c| whole.contains(c)));
+                refused += whole.len() - leading.len();
+            }
+        }
+        assert!(refused > 0, "no test was refused, so nothing was checked");
     }
 
     /// A completion with the classes puts every atom back on a site of its
