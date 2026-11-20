@@ -41,6 +41,8 @@ exclude = [
   "theory.cm.utexas.edu",
   # Prefer github.com/dmlc/dlpack in prose; old site 404s.
   "dmlc.github.io/dlpack",
+  # Grimme D2 DOI redirects to onlinelibrary.wiley.com, which returns 403 to automated link checkers.
+  "^https://doi\\.org/10\\.1002/jcc\\.20495$",
 ]
 
 include_mail = false
