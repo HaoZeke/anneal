@@ -145,8 +145,11 @@ jobs:
       # anneal-core.h includes <dlpack/dlpack.h>, so the archive carries that
       # header beside it and every copied file is checked in the archive. The
       # licence text and the README section on licensing travel with the
-      # binaries they cover.
+      # binaries they cover. The archive is listed to a file once: under
+      # pipefail, `tar tzf | grep -q` fails when grep exits early and tar
+      # takes SIGPIPE. -x matches whole entries, so .h does not match .hpp.
       - name: Package artifacts
+        shell: bash
         run: |
           mkdir -p staging/include/dlpack staging/lib
           cp LICENSE.txt staging/
@@ -160,15 +163,16 @@ jobs:
           cp target/${{ matrix.target }}/release/${{ matrix.static_lib }} staging/lib/
           cp target/${{ matrix.target }}/release/${{ matrix.shared_lib }} staging/lib/
           tar czf ${{ matrix.artifact }}.tar.gz -C staging .
-          tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./LICENSE.txt"
-          tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./README-licensing.md"
-          tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./include/anneal-core.h"
-          tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./include/anneal-version.h"
-          tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./include/anneal-core.hpp"
-          tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./include/dlpack/dlpack.h"
-          tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./lib/pkgconfig/anneal-core.pc"
-          tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./lib/${{ matrix.static_lib }}"
-          tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./lib/${{ matrix.shared_lib }}"
+          tar tzf ${{ matrix.artifact }}.tar.gz > archive-entries.txt
+          grep -Fxq "./LICENSE.txt" archive-entries.txt
+          grep -Fxq "./README-licensing.md" archive-entries.txt
+          grep -Fxq "./include/anneal-core.h" archive-entries.txt
+          grep -Fxq "./include/anneal-version.h" archive-entries.txt
+          grep -Fxq "./include/anneal-core.hpp" archive-entries.txt
+          grep -Fxq "./include/dlpack/dlpack.h" archive-entries.txt
+          grep -Fxq "./lib/pkgconfig/anneal-core.pc" archive-entries.txt
+          grep -Fxq "./lib/${{ matrix.static_lib }}" archive-entries.txt
+          grep -Fxq "./lib/${{ matrix.shared_lib }}" archive-entries.txt
 
       # A consumer sees only what the archive holds. The header must parse
       # on every target, by hand and through the archive's .pc file. On

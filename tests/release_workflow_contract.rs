@@ -375,8 +375,18 @@ fn compact_expressions(line: &str) -> String {
     line.replace("${{ ", "${{").replace(" }}", "}}")
 }
 
+/// The line of the packaging step that lists the finished archive once.
+const LIST_ARCHIVE: &str = "tar tzf ${{matrix.artifact}}.tar.gz > archive-entries.txt";
+
+/// The entry a packaging line checks for in the archive listing, if it is
+/// such a check.
+fn checked_entry(line: &str) -> Option<&str> {
+    line.strip_prefix(r#"grep -Fxq ""#)?
+        .strip_suffix(r#"" archive-entries.txt"#)
+}
+
 /// The archive entries the packaging step creates with `cp`, and the ones it
-/// checks for with `tar tzf`.
+/// checks for in the archive listing.
 fn packaged_and_checked(package: &Value) -> (BTreeSet<String>, BTreeSet<String>) {
     let lines: Vec<String> = script(package)
         .into_iter()
@@ -415,6 +425,8 @@ fn packaged_and_checked(package: &Value) -> (BTreeSet<String>, BTreeSet<String>)
             copied.insert(entry);
         } else if words.starts_with(&["python3", "scripts/native_pkgconfig.py", "staging"]) {
             copied.insert("./lib/pkgconfig/anneal-core.pc".to_owned());
+        } else if line == LIST_ARCHIVE {
+            // The listing is written beside the archive, not into it.
         } else if let Some(at) = words.iter().position(|word| *word == ">") {
             let to = words[at + 1]
                 .strip_prefix("staging/")
@@ -422,13 +434,111 @@ fn packaged_and_checked(package: &Value) -> (BTreeSet<String>, BTreeSet<String>)
             copied.insert(format!("./{to}"));
         }
     }
-    let prefix = r#"tar tzf ${{matrix.artifact}}.tar.gz | grep -Fq ""#;
-    let checked = lines
+    // The step runs under pipefail, and the archive is listed once to a
+    // file after it is written. No check reads tar through a pipe, where an
+    // early grep exit would kill tar with SIGPIPE, and each check matches
+    // a whole entry.
+    assert_eq!(package["shell"].as_str(), Some("bash"));
+    let archive = "tar czf ${{matrix.artifact}}.tar.gz -C staging .";
+    let written = lines
         .iter()
-        .filter_map(|line| line.strip_prefix(prefix)?.strip_suffix('"'))
+        .position(|line| line == archive)
+        .unwrap_or_else(|| panic!("the packaging step lacks {archive:?}: {lines:?}"));
+    let listings: Vec<usize> = (0..lines.len())
+        .filter(|&i| lines[i].contains("tar tzf"))
+        .collect();
+    assert_eq!(listings.len(), 1, "{lines:?}");
+    let listed = listings[0];
+    assert_eq!(lines[listed], LIST_ARCHIVE);
+    assert!(written < listed);
+    let mut checked = BTreeSet::new();
+    for (at, line) in lines.iter().enumerate() {
+        assert!(
+            !line.contains('|'),
+            "{line} pipes inside the packaging step"
+        );
+        if line.starts_with("grep") || line.contains(" grep ") {
+            let entry = checked_entry(line)
+                .unwrap_or_else(|| panic!("{line} is not an exact check of the listing"));
+            assert!(listed < at, "{line} runs before the archive is listed");
+            assert!(checked.insert(entry.to_owned()), "{line} repeats a check");
+        }
+    }
+    (copied, checked)
+}
+
+/// The packaging step's own listing and checks, run under the shell the
+/// step uses, against an archive of the entries it copies.
+#[test]
+fn the_archive_checks_survive_pipefail_and_match_whole_entries() {
+    let workflow = release();
+    let (_, package) = step(job(&workflow, "native-libs"), "Package artifacts");
+    let (copied, checked) = packaged_and_checked(package);
+    assert_eq!(copied, checked);
+    let cell = |line: &str| {
+        line.replace("${{matrix.artifact}}", "anneal-core-test")
+            .replace("${{matrix.static_lib}}", "libanneal_core.a")
+            .replace("${{matrix.shared_lib}}", "libanneal_core.so")
+    };
+    let lines: Vec<String> = script(package)
+        .into_iter()
+        .map(compact_expressions)
+        .filter(|line| line == LIST_ARCHIVE || checked_entry(line).is_some())
+        .map(|line| cell(&line))
+        .collect();
+    assert_eq!(lines.len(), checked.len() + 1);
+    let checks = lines.join("\n");
+
+    let scratch = std::env::temp_dir().join(format!("anneal-archive-{}", std::process::id()));
+    let run = |entries: &[String], padding: usize| {
+        let _ = std::fs::remove_dir_all(&scratch);
+        let staging = scratch.join("staging");
+        std::fs::create_dir_all(&staging).unwrap();
+        // Enough entries that the listing outgrows a pipe buffer.
+        for i in 0..padding {
+            let pad = staging.join(format!("pad/{i:05}-{}", "x".repeat(80)));
+            std::fs::create_dir_all(pad.parent().unwrap()).unwrap();
+            std::fs::write(pad, "").unwrap();
+        }
+        for entry in entries {
+            let path = staging.join(entry.strip_prefix("./").unwrap());
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "").unwrap();
+        }
+        let tar = Command::new("tar")
+            .args(["czf", "anneal-core-test.tar.gz", "-C", "staging", "."])
+            .current_dir(&scratch)
+            .status()
+            .expect("run tar");
+        assert!(tar.success());
+        Command::new("bash")
+            .args(["--noprofile", "--norc", "-eo", "pipefail", "-c", &checks])
+            .current_dir(&scratch)
+            .env("PATH", std::env::var_os("PATH").unwrap())
+            .output()
+            .expect("run bash")
+    };
+    let every: Vec<String> = cell(&copied.iter().cloned().collect::<Vec<_>>().join("\n"))
+        .lines()
         .map(str::to_owned)
         .collect();
-    (copied, checked)
+
+    let output = run(&every, 2000);
+    assert!(output.status.success(), "{output:?}");
+    // Without anneal-core.h the archive still holds anneal-core.hpp, whose
+    // name begins with it, so a check that is not anchored would pass.
+    for missing in &every {
+        let rest: Vec<String> = every.iter().filter(|e| *e != missing).cloned().collect();
+        let output = run(&rest, 0);
+        assert_eq!(
+            output.status.code(),
+            Some(1),
+            "{missing} is missing: {output:?}"
+        );
+    }
+    assert!(every.contains(&"./include/anneal-core.h".to_owned()));
+    assert!(every.contains(&"./include/anneal-core.hpp".to_owned()));
+    std::fs::remove_dir_all(&scratch).unwrap();
 }
 
 /// Every workflow under .github/workflows, parsed, with its file name.
