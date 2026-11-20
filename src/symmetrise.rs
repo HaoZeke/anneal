@@ -349,10 +349,10 @@ impl Cloud {
 
     /// Nearest atom and its squared distance, four coordinates at a time.
     ///
-    /// Each lane keeps its own minimum and the earlier index that reached
-    /// it. Strict `<` is the same test as a scalar walk, and the lanes are
-    /// reduced in order, so a tie keeps the earlier atom. The distance-only
-    /// miss path does not use this walk.
+    /// Each lane keeps the minimum a scalar walk would keep: a smaller
+    /// distance, or the same distance at an earlier index. The tail is
+    /// reduced with the lanes under that same order, so a tie keeps the
+    /// earlier atom. The distance-only miss path does not use this walk.
     fn nearest_index(&self, image: [f64; 3]) -> (usize, f64) {
         let mut lane = [f64::INFINITY; 4];
         let mut who = [0usize; 4];
@@ -363,12 +363,22 @@ impl Cloud {
         for ((x, y), z) in xs.by_ref().zip(ys.by_ref()).zip(zs.by_ref()) {
             for offset in 0..4 {
                 let distance = squared_offset(image, x[offset], y[offset], z[offset]);
-                if distance < lane[offset] {
+                let candidate = base + offset;
+                if distance < lane[offset] || (distance == lane[offset] && candidate < who[offset])
+                {
                     lane[offset] = distance;
-                    who[offset] = base + offset;
+                    who[offset] = candidate;
                 }
             }
             base += 4;
+        }
+        let mut best = f64::INFINITY;
+        let mut index = 0usize;
+        for offset in 0..4 {
+            if lane[offset] < best || (lane[offset] == best && who[offset] < index) {
+                best = lane[offset];
+                index = who[offset];
+            }
         }
         for ((&x, &y), &z) in xs
             .remainder()
@@ -377,25 +387,11 @@ impl Cloud {
             .zip(zs.remainder())
         {
             let distance = squared_offset(image, x, y, z);
-            if distance < lane[0] {
-                lane[0] = distance;
-                who[0] = base;
+            if distance < best || (distance == best && base < index) {
+                best = distance;
+                index = base;
             }
             base += 1;
-        }
-        let mut best = lane[0];
-        let mut index = who[0];
-        if lane[1] < best {
-            best = lane[1];
-            index = who[1];
-        }
-        if lane[2] < best {
-            best = lane[2];
-            index = who[2];
-        }
-        if lane[3] < best {
-            best = lane[3];
-            index = who[3];
         }
         (index, best)
     }
@@ -2976,6 +2972,89 @@ mod shell_tests {
                 assert_eq!(chosen.1.to_bits(), scalar.1.to_bits(), "n={n}");
                 let wide = cloud.nearest_squared_wide(image);
                 assert_eq!(wide.to_bits(), scalar.1.to_bits(), "n={n}");
+            }
+        }
+    }
+
+    /// Indices 1 and 4 are the same distance from the origin. The scalar
+    /// walk returns the earlier one.
+    #[test]
+    fn a_tie_keeps_the_earliest_index() {
+        let coords = vec![
+            10.0, 0.0, 0.0, 1.0, 0.0, 0.0, 20.0, 0.0, 0.0, -30.0, 0.0, 0.0, -1.0, 0.0, 0.0,
+        ];
+        let cloud = Cloud::from_view(Array1::from(coords).view(), 5);
+        let image = [0.0, 0.0, 0.0];
+        let scalar = cloud.nearest_index_scalar(image);
+        let chosen = cloud.nearest_index(image);
+        assert_eq!(scalar.0, 1);
+        assert_eq!(scalar.1.to_bits(), 1.0_f64.to_bits());
+        assert_eq!(chosen.0, scalar.0);
+        assert_eq!(chosen.1.to_bits(), scalar.1.to_bits());
+    }
+
+    /// Equal distances in two chunks and the tail keep the earliest index.
+    ///
+    /// Nine atoms: two groups of four and a tail atom. Index 1, index 4
+    /// and index 8 are the same site.
+    #[test]
+    fn a_cross_chunk_tie_keeps_the_earliest_index() {
+        let mut coords = Vec::with_capacity(27);
+        for index in 0..9 {
+            coords.extend_from_slice(&[index as f64 + 2.0, 3.0, -2.0]);
+        }
+        for index in [1usize, 4, 8] {
+            let at = 3 * index;
+            coords[at] = 0.25;
+            coords[at + 1] = -0.5;
+            coords[at + 2] = 0.75;
+        }
+        let cloud = Cloud::from_view(Array1::from(coords).view(), 9);
+        let image = cloud.point(1);
+        let scalar = cloud.nearest_index_scalar(image);
+        let chosen = cloud.nearest_index(image);
+        assert_eq!(scalar.0, 1);
+        assert_eq!(chosen.0, 1);
+        assert_eq!(chosen.1.to_bits(), 0.0_f64.to_bits());
+        assert_eq!(chosen.1.to_bits(), scalar.1.to_bits());
+    }
+
+    proptest::proptest! {
+        /// Random clouds with copies forced into a later chunk and the tail.
+        #[test]
+        fn tied_sites_match_the_scalar_nearest_index(
+            coords in proptest::collection::vec(-4.0f64..4.0, 15usize..73),
+        ) {
+            let n = coords.len() / 3;
+            let mut coords = coords;
+            coords.truncate(3 * n);
+            let copy_site = |coords: &mut Vec<f64>, from: usize, to: usize| {
+                coords[3 * to] = coords[3 * from];
+                coords[3 * to + 1] = coords[3 * from + 1];
+                coords[3 * to + 2] = coords[3 * from + 2];
+            };
+            if n > 4 {
+                copy_site(&mut coords, 1, 4);
+            }
+            if n % 4 != 0 && n - 1 != 1 {
+                copy_site(&mut coords, 1, n - 1);
+            }
+            if n > 7 {
+                copy_site(&mut coords, 2, 6);
+            }
+            let cloud = Cloud::from_view(Array1::from(coords).view(), n);
+            let images = [
+                [0.0, 0.0, 0.0],
+                cloud.point(0),
+                cloud.point(1),
+                cloud.point(4),
+                cloud.point(n - 1),
+            ];
+            for image in images {
+                let scalar = cloud.nearest_index_scalar(image);
+                let chosen = cloud.nearest_index(image);
+                proptest::prop_assert_eq!(chosen.0, scalar.0);
+                proptest::prop_assert_eq!(chosen.1.to_bits(), scalar.1.to_bits());
             }
         }
     }
