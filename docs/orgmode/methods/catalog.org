@@ -803,7 +803,13 @@ every atom is
 re-seated on the group's site set. The result is quenched, recorded and
 offered to the acceptance rule like any hop. No group, order, size or
 species is named: a structure with no approximate symmetry gives no
-candidate. The mechanism is the incumbent's own symmetry, not a target.
+candidate. A structure with species (=Config::species=) is read and
+completed per species: an operation must carry every point onto a point
+of its own species, and each species is re-seated on sites made of its
+own images, so the composition is kept and a binary structure is not
+completed as if its two species were one. Without species, or with one,
+the read and the completion are the ones above bit for bit. The
+mechanism is the incumbent's own symmetry, not a target.
 
 ** Census calibration
 
