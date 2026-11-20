@@ -115,7 +115,15 @@ fn cmd_run(args: &[String]) -> i32 {
     }
     let pot = potential(&spec);
     let (outcome, wall, pot_s) = search(&pot, &cfg, &spec, &start, seed, budget);
-    report(&args[1], seed, budget, &outcome, wall, pot_s, spec.reference);
+    report(
+        &args[1],
+        seed,
+        budget,
+        &outcome,
+        wall,
+        pot_s,
+        spec.reference,
+    );
     0
 }
 
