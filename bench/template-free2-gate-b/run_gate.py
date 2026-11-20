@@ -75,7 +75,7 @@ SUMMARY_FIELDS = [
     "bit_identical",
     "verdict",
 ]
-MISSING_CELLS = ("blj105n38", "blj105n55", "blj115n38", "blj115n55")
+MISSING_CELLS: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -99,6 +99,14 @@ def cells(root: Path) -> list[Cell]:
         for n in range(8, 22)
     ]
     out.append(Cell("au55", "au", "h2h_metal", "au55", 1_000_000, -191.03085280))
+    out.extend(
+        (
+            Cell("blj105n38", "blj", "h2h_blj", "blj105n38", 400_000, -177.2090846748),
+            Cell("blj105n55", "blj", "h2h_blj", "blj105n55", 1_000_000, -283.1545313810),
+            Cell("blj115n38", "blj", "h2h_blj", "blj115n38", 400_000, -187.3676867453),
+            Cell("blj115n55", "blj", "h2h_blj", "blj115n55", 1_000_000, -289.2931853058),
+        )
+    )
     out.extend(
         (
             Cell("si10", "si", "h2h_covalent", "sw10", 100_000, -13.79658026),
@@ -567,7 +575,7 @@ def self_test(root: Path) -> None:
         for slot, arm in enumerate(arm_order(seed), start=1):
             counts[(slot, arm)] += 1
     assert set(counts.values()) == {4}
-    assert len(cells(root)) == 18
+    assert len(cells(root)) == 22
     assert abs(fisher_loss(12, 0) - 1.0 / math.comb(24, 12)) < 1.0e-15
     assert mann_whitney_worse([1.0] * 12, [2.0] * 12) < 0.05
     print("ok")

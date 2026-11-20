@@ -40,7 +40,6 @@ The committed gate definitions provide TIP4P sizes 8 through 21.  The
 committed paper panel provides Au55 and Stillinger-Weber Si10, Si13, and
 Si20.
 
-The reused gate names four BLJ controls, but neither that gate nor the
-base tree contains their driver source.  They are therefore marked
-missing rather than reconstructed.  A missing requested cell makes the
-overall verdict fail.
+The four BLJ controls use the upstream example with Git blob
+`af5a39e318f177c1d54738e2ef8ceb904a2612bd`.  The same byte-identical
+source is built once against each arm.
