@@ -388,13 +388,13 @@ def main(argv: list[str]) -> int:
         if arm == "anneal":
             parsed = run_anneal(binary, system, seed, budget, coords, log, runs)
             diag = parsed.pop("_diag")
-            code = CODE_REVISION
         else:
             assert gmin is not None
             parsed = run_gmin(gmin, system, seed, budget, coords, runs / f"gmin-{seed}", log)
             diag = {name: "" for name in ("final_e", "hops", "stall_escapes", "trail_escapes", "restarts", "paths", "path_improvements")}
-            code = GMIN_PIN
-        written = as_row(system, arm, parsed, diag, host, harness_revision, harness_blob, session, code)
+        written = as_row(
+            system, arm, parsed, diag, host, harness_revision, harness_blob, session, CODE_REVISION
+        )
         if written["budget"] != row["budget"] or written["seed"] != row["seed"]:
             raise SystemExit(f"row does not match the manifest {system} {arm} {seed}")
         append_row(rows_path, written)
