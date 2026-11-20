@@ -119,6 +119,7 @@ ROW_FIELDS = [
     "cell",
     "band",
     "arm",
+    "session_id",
     "seed",
     "budget",
     "reference",
@@ -272,7 +273,17 @@ def done_set(rows: list[dict[str, str]]) -> set[tuple[str, str, str, str]]:
     return {(r["band"], r["cell"], r["arm"], r["seed"]) for r in rows}
 
 
-def run_one(bin_a: Path, bin_b: Path, rows_path: Path, session_path: Path, band: str, cell: str, arm: str, seed: int) -> None:
+def run_one(
+    bin_a: Path,
+    bin_b: Path,
+    rows_path: Path,
+    session_path: Path,
+    session_id: str,
+    band: str,
+    cell: str,
+    arm: str,
+    seed: int,
+) -> None:
     bin_dir = bin_a if arm.startswith("A") else bin_b
     env = env_one_thread()
     affinity = sorted(os.sched_getaffinity(0))
@@ -293,6 +304,7 @@ def run_one(bin_a: Path, bin_b: Path, rows_path: Path, session_path: Path, band:
         "cell": cell,
         "band": band,
         "arm": arm,
+        "session_id": session_id,
         "seed": str(seed),
         "budget": str(PAPER_BUDGETS[cell]),
         "reference": f"{REFERENCES[cell]:.10f}",
@@ -312,6 +324,7 @@ def run_one(bin_a: Path, bin_b: Path, rows_path: Path, session_path: Path, band:
             "band": band,
             "cell": cell,
             "arm": arm,
+            "session_id": session_id,
             "seed": seed,
             "core": 0,
             "affinity": affinity,
@@ -410,7 +423,7 @@ def summarize_progress(rows: list[dict[str, str]], mode: str) -> dict[str, int]:
     required = jobs(mode)
     done = done_set(rows)
     total = len(required)
-    complete = sum(1 for j in required if j in done)
+    complete = sum(1 for band, cell, arm, seed in required if (band, cell, arm, str(seed)) in done)
     missing = total - complete
     return {"total": total, "complete": complete, "missing": missing}
 
@@ -423,6 +436,7 @@ def main() -> int:
     parser.add_argument("--session-jsonl", type=Path, required=True)
     parser.add_argument("--verdict", type=Path, required=True)
     parser.add_argument("--mode", choices=("p1", "full"), default="p1")
+    parser.add_argument("--session-id", required=True)
     parser.add_argument("--progress-json", type=Path)
     args = parser.parse_args()
 
@@ -434,7 +448,7 @@ def main() -> int:
         key = (band, cell, arm, str(seed))
         if key in done:
             continue
-        run_one(args.bin_a, args.bin_b, args.rows, args.session_jsonl, band, cell, arm, seed)
+        run_one(args.bin_a, args.bin_b, args.rows, args.session_jsonl, args.session_id, band, cell, arm, seed)
         done.add(key)
 
     rows = read_rows(args.rows)
