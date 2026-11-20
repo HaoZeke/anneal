@@ -12,7 +12,7 @@ gradient calls for that same start.
 The start geometry is the anneal rigid repack for that seed.
 A third anneal uses the named paper budget of 4000 evaluations.
 
-Scoring follows the Papers B' bar. Every final, CREST and anneal alike,
+Scoring needs a clean exit, an energy and a force. Every final, CREST and anneal alike,
 is relaxed with the same xtb --opt vtight before the energies are
 compared, and the comparison uses a symmetric 1e-8 Eh window on the
 polished pair. An anneal minimum more than the window below CREST is a
@@ -786,7 +786,7 @@ def write_numbers(rows):
     lines = [
         f"# n={seeds} serial same host no best-of",
         "# quartile=Hyndman-Fan type 7",
-        "# bar=Papers B': success = exit + energy + force; force is the reported answer's maximum force at 0.001 Eh/bohr",
+        "# bar=exit, energy and force: success = exit + energy + force; force is the reported answer's maximum force at 0.001 Eh/bohr",
         "# polish=xtb " + " ".join(POLISH_ARGS) + " on every final, CREST and anneal alike",
         "# score=xtb --gfn 2 --sp --acc 0.01 --iterations 500 on the raw and on the polished final",
         f"# window={WINDOW_EH:g} Eh symmetric on the polished pair; anneal more than the window below CREST polished is a lower minimum found by anneal and passes",
@@ -954,7 +954,7 @@ def main():
             fair = anneal_raw(fair_log, fair_dir / "best.xyz", best_xyz, crest["energy"], LOGS / f"anneal-sp-seed{seed}.txt")
             if not finished_log(paper_log, "FORCE_AUDIT"):
                 status, pwall = anneal_run(binary, seed, PAPER_BUDGET, paper_dir, paper_log, "paper4000")
-                print(f"anneal paper seed {seed} exit {status} budget {PAPER_BUDGET} wall {pwall:.1f}", flush=True)
+                print(f"anneal named-budget seed {seed} exit {status} budget {PAPER_BUDGET} wall {pwall:.1f}", flush=True)
             paper = anneal_raw(
                 paper_log, paper_dir / "best.xyz", best_xyz, crest["energy"], LOGS / f"anneal-paper-sp-seed{seed}.txt"
             )
