@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 <!-- towncrier release notes start -->
 
+## Unreleased
+
+### Changed
+
+- ``Outcome::tabu.0`` now counts quarantined shelves on every replica
+  rung as well as the fingerprint tabu.
+- ``DepthAllocator::select_leaving`` is public so callers can gate
+  unavailable arms and account for attempts that do not leave a shelf.
+
 ## [0.12.0](https://github.com/HaoZeke/anneal/tree/v0.12.0) - 2026-11-16
 
 ### Added
