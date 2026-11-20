@@ -33,7 +33,7 @@ sys.modules["run_panel"] = PANEL
 _SPEC.loader.exec_module(PANEL)
 
 MANUSCRIPT = ROOT / "paper" / "jctc" / "manuscript.tex"
-DATA = ROOT / "paper" / "jctc" / "data" / "gmin_rerun"
+DATA = ROOT / "paper" / "jctc" / "data" / "gmin_eeec8e2c"
 DEVELOP = ROOT / "paper" / "jctc" / "data" / "gmin_develop"
 SHARDS = ("a", "b", "c", "d")
 REVISION = "eeec8e2c216ae1506768bca8e29846c1c039ca3b"
@@ -158,7 +158,7 @@ def table() -> str:
             "\\(p_\\mathrm{calls}\\) and \\(p_\\mathrm{wall}\\) are the two-sided exact Wilcoxon",
             "signed-rank test on the per-seed differences in calls, with a miss at the budget, and in",
             "the wall of the run.",
-            "The rows are \\texttt{paper/jctc/data/gmin\\_rerun/*/rows.csv} and",
+            "The rows are \\texttt{paper/jctc/data/gmin\\_eeec8e2c/*/rows.csv} and",
             "\\texttt{paper/jctc/data/gmin\\_develop/rows.csv}.}",
             "\\label{tab:gmin}",
             "\\centering",

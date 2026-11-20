@@ -408,6 +408,17 @@ def test_a_modal_hedge_fails_both_audits():
         assert [(r[1], r[2], r[4]) for r in audit.drifts()] == [(audit_mod.TEX, "no modal hedge", "may")]
 
 
+def test_a_rendered_rerun_fails_both_audits():
+    for strict in (False, True):
+        audit = audit_mod.Audit()
+        si = audit.text(audit_mod.SI)
+        old = "\\path{paper/jctc/data/gmin_eeec8e2c}"
+        assert si.count(old) == 1
+        audit.text_cache[audit_mod.SI] = si.replace(old, "\\path{paper/jctc/data/gmin_rerun}")
+        audit_mod.todo_check(audit, pre_submission=strict)
+        assert [(r[1], r[2]) for r in audit.drifts()] == [(audit_mod.SI, "no rendered rerun")]
+
+
 def test_every_todo_marker_fails_both_audits():
     clean = audit_mod.Audit()
     for path in (audit_mod.TEX, audit_mod.SI, audit_mod.COVER):
@@ -439,8 +450,8 @@ def test_a_rerun_tag_in_the_manuscript_is_reported():
     audit.text_cache[audit_mod.TEX] = tex.replace(old, old[:-1] + "~\\rerun{5}\n", 1)
     audit_mod.todo_check(audit)
     audit_mod.rerun_check(audit)
-    assert sorted(r[2] for r in audit.drifts()) == ["[RERUN: item 5] remains (unknown)", "rerun tags",
-                                                   "the tag names an item that waits on a rerun"]
+    assert sorted(r[2] for r in audit.drifts()) == ["[RERUN: item 5] remains (unknown)", "no rendered rerun",
+                                                   "rerun tags", "the tag names an item that waits on a rerun"]
 
 
 def test_a_cover_sentence_off_the_abstract_is_reported():

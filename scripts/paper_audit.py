@@ -1959,7 +1959,7 @@ def gmin_patches(audit: Audit) -> None:
 ASE_PANEL = ("lj38", "lj55", "lj98", "lj104", "au55")
 MORSE_PANEL = ("m38r6", "m38r14", "m55r6", "m55r14")
 ASE_ARMS = ("ase_bh", "ase_mh")
-ASE_DATA = "paper/jctc/data/ase_rerun"
+ASE_DATA = "paper/jctc/data/ase_panel"
 ASE_REVISIONS = {"lj": "61fa67cf380e46876b569da45e7cc091647a775b",
                  "morse": "5eb79cdcb0a986984dc7b487e5a3cc93224246f9"}
 PANEL_SEEDS = " ".join(str(s) for s in range(2000, 2012))
@@ -2177,7 +2177,7 @@ def manuscript_ase(audit: Audit) -> None:
                                              f"of {len(lj75[1])}.")
 
 
-GMIN_RERUN = "paper/jctc/data/gmin_rerun"
+GMIN_RERUN = "paper/jctc/data/gmin_eeec8e2c"
 GMIN_SHARDS = ("a", "b", "c", "d")
 
 
@@ -3855,7 +3855,7 @@ def manuscript_new(audit: Audit) -> None:
                    f"logical CPUs, {first['mem_kib']}~KiB of memory, and Linux kernel {first['kernel']}, as its host "
                    "record in \\path{paper/jctc/data/hosts/3b11c160} gives;")
     audit.cell(SI, "the 3b11c160 processor", "Intel(R) Xeon(R) Processor", first["cpu_model"])
-    for folder in ("paper/jctc/data/gmin_rerun/a", "paper/jctc/data/gmin_rerun/c", "paper/jctc/data/gmin_rerun/d"):
+    for folder in ("paper/jctc/data/gmin_eeec8e2c/a", "paper/jctc/data/gmin_eeec8e2c/c", "paper/jctc/data/gmin_eeec8e2c/d"):
         named = {r.get("cpu", "") for r in audit.rows(f"{folder}/rows.csv")} - {""}
         audit.record(not any("Xeon" in c or "AMD" in c for c in named), f"{folder}/rows.csv",
                      "the rows name no processor beyond the machine id", "none", " ".join(sorted(named)) or "none")
@@ -3961,6 +3961,8 @@ HEDGES = ("not yet", "will test", "will show", "will allow", "future work", "in 
           "\\section{Limits}", "\\section{Limitations}", "\\section*{Limits}", "\\subsection{Limits}")
 # Modal words that leave a statement about the code or the rows open.
 MODAL = re.compile(r"\b(may|might|could|perhaps|possibly|likely)\b", re.IGNORECASE)
+# Every printed row is the run itself, so no rendered text or path calls one a rerun.
+RERUN_WORD = re.compile(r"re-?run", re.IGNORECASE)
 
 
 def rerun_claims(audit: Audit) -> None:
@@ -3999,6 +4001,8 @@ def todo_check(audit: Audit, pre_submission: bool = False) -> None:
             audit.record(found == 0, path, f"no hedge: {hedge}", "absent", f"{found} found")
         modal = sorted({m.group(1).lower() for m in MODAL.finditer(flat)})
         audit.record(not modal, path, "no modal hedge", "absent", " ".join(modal) or "absent")
+        reruns = len(RERUN_WORD.findall(flat))
+        audit.record(not reruns, path, "no rendered rerun", "absent", f"{reruns} found" if reruns else "absent")
 
 
 REVISION_MAP = "bench/unreachable-revisions.csv"
@@ -4069,7 +4073,7 @@ def manuscript_followups(audit: Audit) -> None:
     audit.record(not (ROOT / "src/methods/cluster_hopping/mackay_cap_tests.rs").exists(),
                  "src/methods/cluster_hopping/mackay_cap_tests.rs", "Mackay cap test module is removed",
                  "absent", "present" if (ROOT / "src/methods/cluster_hopping/mackay_cap_tests.rs").exists() else "absent")
-    audit.said("paper/jctc/data/ase_rerun/morse/PROVENANCE", "source bench/ase-nonlj/rerun-20261119/rows.csv")
+    audit.said("paper/jctc/data/ase_panel/morse/PROVENANCE", "source bench/ase-nonlj/rerun-20261119/rows.csv")
     audit.record("two-shell icosahedron" not in audit.text(TEX), TEX, "cap-disclosure prose is removed",
                  "absent", "present" if "two-shell icosahedron" in audit.text(TEX) else "absent")
     audit.record("largest cap" not in audit.text(TEX), TEX, "cap-size prose is removed",
