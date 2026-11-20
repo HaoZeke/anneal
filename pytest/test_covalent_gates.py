@@ -85,20 +85,40 @@ def test_a_panel_system_one_arm_left_out_or_short_of_a_seed_loses(tmp_path, caps
     assert verdict(capsys) == "floor loses: lj38 h2h_gmin_proof seeds, lj55 h2h_gmin_proof seeds"
 
 
+def test_minima_table_sets_every_system_target(tmp_path):
+    pytest.importorskip("scipy.stats")
+    crest = load("gfn2_crest_targets", "scripts/covalent_h2h/gfn2_crest.py")
+    table = tmp_path / "minima.csv"
+    table.write_text("system,energy_eV\none,-3.5\ntwo,-4.25\n")
+    loaded = crest.load_targets(table)
+    assert loaded == {"one": -3.5, "two": -4.25}
+    committed = ROOT / "bench" / "covalent-h2h" / "gfn2" / "minima.csv"
+    from_file = {
+        row["system"]: float(row["energy_eV"]) for row in read(committed)
+    }
+    assert crest.load_targets(committed) == from_file
+    table.write_text("system,energy_eV\none,-1\none,-2\n")
+    with pytest.raises(SystemExit, match="more than once"):
+        crest.load_targets(table)
+
+
 def test_crest_rescore_reproduces_the_committed_row(tmp_path):
     pytest.importorskip("scipy.stats")
     crest = load("gfn2_crest", "scripts/covalent_h2h/gfn2_crest.py")
     gfn2 = ROOT / "bench" / "covalent-h2h" / "gfn2"
     history = [gfn2 / "seeds.csv", gfn2 / "rows.csv"]
     out = tmp_path / "rescore.csv"
-    crest.rescore(history, out, "si13", -624.70446339, "0" * 40, "bench")
-    crest.rescore(history, out, "si13", crest.REFERENCE["si13"], "0" * 40, "bench")
+    targets = crest.load_targets(gfn2 / "minima.csv")
+    crest.rescore(history, out, "si13", targets["si13"], "0" * 40, "bench")
+    # The rows were stopped at the compact minimum, which is not the
+    # minima.csv target. Rescore accepts that other reference as an argument.
+    crest.rescore(history, out, "si13", -599.34546694, "0" * 40, "bench")
     ring, reference = read(out)
     keys = ("system", "code", "reference_eV", "runs", "hits", "seeds")
     assert {k: ring[k] for k in keys} == {k: read(gfn2 / "rescore.csv")[0][k] for k in keys}
     assert (reference["runs"], reference["hits"]) == ("6", "4")
     with pytest.raises(SystemExit, match="no CREST rows"):
-        crest.rescore(history, out, "si20", -922.98227162, "0" * 40, "bench")
+        crest.rescore(history, out, "si20", targets["si20"], "0" * 40, "bench")
 
 
 def test_the_committed_panel_is_the_same_on_every_seed(capsys):

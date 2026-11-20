@@ -43,6 +43,9 @@ is not the geometry's energy; the summary counts them as misses at their
 budget. ``--rescore SYSTEM ENERGY_EV`` appends to ``--rescored`` CREST's
 hits on that system, over the same files, against another reference;
 anneal stops at its own and is not rescored.
+Each system's stop target is its ``energy_eV`` in ``minima.csv`` (the
+file beside this panel, or ``--minima``). A system the file does not
+name is refused. The number is read when the run starts.
 Time per call skips a run that made no call.
 Anneal stops at the reference and its miss is the full budget. CREST runs
 to its own end; its energy is the first frame of ``crest_best.xyz``. A
@@ -93,21 +96,10 @@ ETEMP = 3000.0
 HIT_TOL = DEFAULT_HIT_TOL
 # eV per Hartree in xtb 6.7.1.
 AUTOEV = 27.21138505
-# The lowest minimum any run of either code reached at these settings,
-# each reproduced by xtb from a fresh SCC. Si10 and C10: anneal at 30000
-# calls on six seeds each; the C10 minimum is the cumulenic ring, every
-# bond 1.285 angstrom. C20: the cage, every atom three-coordinated, from
-# one anneal run without the call floor (seed 2006 at 1e5 calls); no
-# other run of either code has reached it. Si13: anneal from a fresh SCC
-# on every call at 30000 calls, reached by seeds 3002-3005. Si20 has none
-# yet.
-REFERENCE = {
-    "si10": -460.68373809,
-    "c10": -571.32273783,
-    "si13": -599.34546694,
-    "c20": -1148.85383633,
-}
 SCHEDULE_SEED = 20261114
+MINIMA_CSV = (
+    Path(__file__).resolve().parents[2] / "bench" / "covalent-h2h" / "gfn2" / "minima.csv"
+)
 
 ROW_FIELDS = [
     "system",
@@ -179,11 +171,36 @@ exit $rc
 """
 
 
-def run_anneal(binary: Path, system: str, seed: int, out: Path) -> dict:
+def load_targets(path: Path) -> dict[str, float]:
+    """Stop target of every system named in a minima table.
+
+    The target is the ``energy_eV`` cell. The system column decides which
+    row applies, so a new system is a new row and not a branch in this
+    file. A repeated system name is refused.
+    """
+    if not path.is_file():
+        raise SystemExit(f"missing minima table {path}")
+    targets: dict[str, float] = {}
+    with open(path, newline="") as handle:
+        reader = csv.DictReader(handle)
+        fields = reader.fieldnames or []
+        if "system" not in fields or "energy_eV" not in fields:
+            raise SystemExit(f"{path} needs system and energy_eV columns")
+        for row in reader:
+            system = row["system"].strip()
+            if not system:
+                raise SystemExit(f"{path} has a row with no system")
+            if system in targets:
+                raise SystemExit(f"{path} names {system} more than once")
+            targets[system] = float(row["energy_eV"])
+    return targets
+
+
+def run_anneal(binary: Path, system: str, seed: int, out: Path, target: float) -> dict:
     out.mkdir(parents=True, exist_ok=True)
-    target = f"{REFERENCE[system]:.8f}"
+    target_text = f"{target:.8f}"
     proc = subprocess.run(
-        [str(binary), system, str(seed), str(BUDGET), target, str(out / "best.xyz")],
+        [str(binary), system, str(seed), str(BUDGET), target_text, str(out / "best.xyz")],
         capture_output=True,
         text=True,
         check=True,
@@ -214,7 +231,14 @@ def first_frame_energy(path: Path) -> float:
 
 
 def run_crest(
-    crest: Path, xtb: Path, python: str, system: str, seed: int, start: Path, out: Path
+    crest: Path,
+    xtb: Path,
+    python: str,
+    system: str,
+    seed: int,
+    start: Path,
+    out: Path,
+    target: float,
 ) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     log = out / "xtb-calls.log"
@@ -270,7 +294,7 @@ def run_crest(
         calls += int(count)
     best_file = out / "crest_best.xyz"
     best = first_frame_energy(best_file) if best_file.is_file() else float("inf")
-    hit = energy_hits(best, REFERENCE[system], HIT_TOL)
+    hit = energy_hits(best, target, HIT_TOL)
     return {
         "system": system,
         "code": "crest",
@@ -321,9 +345,8 @@ def main() -> None:
     ap.add_argument("--out", type=Path)
     ap.add_argument("--rows", type=Path)
     ap.add_argument("--history", type=Path, nargs="*", default=[])
-    ap.add_argument(
-        "--systems", nargs="*", default=[s for s in SYSTEMS if s in REFERENCE]
-    )
+    ap.add_argument("--systems", nargs="*")
+    ap.add_argument("--minima", type=Path, default=MINIMA_CSV)
     ap.add_argument("--seeds", nargs="*", type=int)
     ap.add_argument("--crest-seeds", nargs="*", type=int)
     ap.add_argument("--codes", nargs="*", default=list(CODES))
@@ -375,9 +398,11 @@ def main() -> None:
         raise SystemExit(
             "--anneal, --crest, --xtb, --engine, --head-file and --out run the panel"
         )
-    for system in args.systems:
-        if system not in REFERENCE:
-            raise SystemExit(f"{system} has no reference")
+    targets = load_targets(args.minima)
+    systems = args.systems if args.systems is not None else [s for s in SYSTEMS if s in targets]
+    for system in systems:
+        if system not in targets:
+            raise SystemExit(f"{system} has no row in {args.minima}")
     if host != "bench":
         raise SystemExit("hostname is not bench")
     os.environ["RGPOT_XTB_ETEMP"] = f"{ETEMP}"
@@ -391,7 +416,7 @@ def main() -> None:
         "engine_sha256": sha256(args.engine),
     }
     rng = random.Random(SCHEDULE_SEED)
-    for system in args.systems:
+    for system in systems:
         seeds = SEEDS[system] if args.seeds is None else args.seeds
         starts = args.out / system / "starts"
         starts.mkdir(parents=True, exist_ok=True)
@@ -433,9 +458,10 @@ def main() -> None:
                     seed,
                     starts / f"{seed}.xyz",
                     where,
+                    targets[system],
                 )
             else:
-                row = run_anneal(args.anneal, system, seed, where)
+                row = run_anneal(args.anneal, system, seed, where, targets[system])
             row.update(pins, date=datetime.date.today().isoformat())
             append_rows(args.rows, ROW_FIELDS + PROVENANCE_FIELDS, [row])
             print(
@@ -639,6 +665,32 @@ def rescore(
 def self_test() -> None:
     import tempfile
 
+    with tempfile.TemporaryDirectory() as scratch:
+        table = Path(scratch) / "minima.csv"
+        table.write_text(
+            "system,energy_eV,note\n"
+            "alpha,-1.25,first\n"
+            "beta,-2.50,second\n"
+        )
+        loaded = load_targets(table)
+        if set(loaded) != {"alpha", "beta"}:
+            raise SystemExit("minima systems")
+        if abs(loaded["alpha"] + 1.25) > 1e-12 or abs(loaded["beta"] + 2.5) > 1e-12:
+            raise SystemExit("minima energies")
+        table.write_text("system,energy_eV\nalpha,-1.0\nalpha,-2.0\n")
+        try:
+            load_targets(table)
+        except SystemExit:
+            pass
+        else:
+            raise SystemExit("repeated system")
+        table.write_text("system,other\nalpha,1\n")
+        try:
+            load_targets(table)
+        except SystemExit:
+            pass
+        else:
+            raise SystemExit("minima columns")
     if abs(type7([1.0, 2.0, 3.0, 4.0], 0.5) - 2.5) > 1e-12:
         raise SystemExit("type 7")
     if two_sided_mw([5.0, 5.0], [5.0, 5.0]) != 1.0:
