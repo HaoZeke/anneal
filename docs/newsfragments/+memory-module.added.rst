@@ -1,0 +1,2 @@
+The ``anneal_core::memory`` module checks the size of a buffer whose length the caller chooses before it is built.
+``state_len`` and ``pair_count`` return a ``SizeError`` where the product overflows a machine word, ``try_zeros``, ``reserve_vectors`` and ``reserve_working_set`` ask the allocator with ``try_reserve_exact`` and return a ``SizeError`` when it refuses, and ``first_hop_bytes`` adds up what the first hop of ``cluster_search`` holds for ``n`` points.
