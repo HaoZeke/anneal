@@ -578,6 +578,18 @@ def test_a_gmin_row_without_a_machine_is_reported():
     assert [(r[1], r[2]) for r in audit.drifts()] == [(path, "every GMIN row names its machine")]
 
 
+def test_a_g3_row_with_other_calls_is_reported():
+    audit = audit_mod.Audit()
+    path = "paper/jctc/data/g3_funnel/rows.csv"
+    rows = [dict(r) for r in audit.rows(path)]
+    row = next(r for r in rows if r["method"] == "anneal" and r["hit"] == "1")
+    row["evals_to_hit"] = str(int(row["evals_to_hit"]) + 1)
+    audit.read[path] = rows
+    audit_mod.g3_session(audit)
+    labels = [r[2] for r in audit.drifts()]
+    assert any(label.startswith("seeds with the calls and lowest energy of the GMIN table") for label in labels)
+
+
 def test_a_gmin_claim_in_the_template_era_section_is_reported():
     audit = audit_mod.Audit()
     si = audit.text(audit_mod.SI)

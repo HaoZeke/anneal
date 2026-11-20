@@ -55,7 +55,7 @@ SI = "paper/jctc/si.tex"
 
 REVISION_COLUMNS = ("code_revision", "anneal_head", "release_revision", "head", "harness_revision", "revision",
                     "anneal_sha")
-HOST_COLUMNS = ("host", "machine_id", "machine_id_sha256")
+HOST_COLUMNS = ("host", "machine", "machine_id", "machine_id_sha256")
 # Revisions of other codes. The GMIN build scripts refuse a tarball whose SVNREV differs.
 EXTERNAL_REVISIONS = {"aac1548a8aec13b53ad12a8d6904625081685d2e": "GMIN source/SVNREV",
                       "9cbec1a446352bc9ef064bd2b1a5767194655919": "GMIN source/SVNREV of the eeec8e2c rerun"}
@@ -1964,6 +1964,61 @@ def morse_g1(audit: Audit) -> None:
     audit.said(TEX, "The Supporting Information runs the submitted revision alone on ten more Morse clusters, of 30, "
                     "38, 70 and 80 atoms at \\(\\rho\\) from 3 to 14, where it hits from 4 to 12 of 12 seeds.")
     audit.cell(f"{G1_DATA}/PROVENANCE", "the cited record commit", "4256269394435f77787d2bfdbead2321e08340a6", commit)
+
+
+G3_DATA = "paper/jctc/data/g3_funnel"
+G3_REVISION = "0cc3814c053c2f5a709f0f375ebae07e5373c171"
+G3_TRACE_FILES = ("examples/h2h_gmin_proof.rs", "examples/h2h_morse.rs", "src/methods/cluster_hopping.rs")
+
+
+def g3_session(audit: Audit) -> None:
+    """The traced session of record/g3-funnel reproduces the rows of this code in the GMIN table seed by seed."""
+    path = imported(audit, G3_DATA)
+    fields = dict(line.split(" ", 1) for line in audit.text(f"{G3_DATA}/PROVENANCE").splitlines())
+    commit = fields["commit"]
+    audit.cell(f"{G3_DATA}/PROVENANCE", "tree of the record commit", fields["tree"],
+               git("rev-parse", f"{commit}^{{tree}}").stdout.strip())
+    ancestor_of(audit, path, SUBMITTED, G3_REVISION)
+    ancestor_of(audit, path, G3_REVISION, commit)
+    changed = git("diff", "--name-only", SUBMITTED, G3_REVISION, "--", "src", "examples", "Cargo.toml",
+                  "Cargo.lock").stdout.split()
+    audit.cell(path, "files the traced revision changes in the search source", " ".join(G3_TRACE_FILES),
+               " ".join(sorted(changed)))
+    removed = [line for line in git("diff", SUBMITTED, G3_REVISION, "--", "src").stdout.splitlines()
+               if line.startswith("-") and not line.startswith("---")]
+    audit.cell(path, "lines of src the traced revision removes", "0", float(len(removed)))
+    rows = [r for r in audit.rows(path) if r["method"] == "anneal"]
+    audit.cell(path, "anneal rows", "60", float(len(rows)))
+    audit.cell(path, "revision of every anneal row", G3_REVISION, " ".join(sorted({r["code_revision"] for r in rows})))
+    machines = sorted({r["machine"] for r in rows})
+    audit.cell(path, "machine", "3b11c160", " ".join(m[:8] for m in machines))
+    replayed = sum(r["replay_trace_match"] == "1" and r["replay_best_match"] == "1" for r in rows)
+    audit.cell(path, "anneal runs whose replay gives the same record and lowest energy", "60", float(replayed))
+    panel = load_script("g3_gmin_panel", "scripts/gmin_panel/run_panel.py")
+    refs = {row[0]: row[3] for row in panel.SYSTEMS}
+    bad = [f"{r['system']} {r['seed']}" for r in rows
+           if (r["hit"] == "1") != energy_hits(float(r["best"]), refs[r["system"]], DEFAULT_HIT_TOL)]
+    audit.cell(path, "hits off the reference of the GMIN panel", "none", ", ".join(bad) or "none")
+    table = {}
+    for shard in GMIN_SHARDS:
+        for r in audit.rows(f"{GMIN_RERUN}/{shard}/rows.csv"):
+            if r["code"] == "anneal":
+                table[(r["system"], r["seed"])] = r
+    develop = {(r["system"], r["seed"]): r for r in audit.rows(f"{GMIN_DEVELOP}/rows.csv") if r["code"] == "anneal"}
+    keys = ("hit", "budget", "evals_to_hit", "charged")
+    for label, other in (("first block", table), ("second block", develop)):
+        shared = [r for r in rows if (r["system"], r["seed"]) in other]
+        same = sum(all(r[k] == other[(r["system"], r["seed"])][k] for k in keys)
+                   and float(r["best"]) == float(other[(r["system"], r["seed"])]["best"]) for r in shared)
+        audit.cell(path, f"seeds with the calls and lowest energy of the GMIN table, {label}",
+                   "60" if label == "first block" else "12", float(same))
+        audit.cell(path, f"seeds shared with the GMIN table, {label}",
+                   "60" if label == "first block" else "12", float(len(shared)))
+    audit.said(SI, "On all 60 seeds this code takes the same calls to the same lowest energy as its rows in the GMIN "
+                   "table, and a replay of each of the 60 runs gives the same record of accepted minima and the same "
+                   "lowest energy.")
+    audit.said(SI, "Commit \\texttt{\\seqsplit{e578f267b3826cfd7e0f1737515bc45f1b8a72c6}} of \\path{record/g3-funnel}")
+    audit.said(SI, "removes no line of \\path{src}, and runs with the record on.")
 
 
 TIP4P_GMIN = "aac1548a8aec13b53ad12a8d6904625081685d2e"
@@ -4294,7 +4349,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
     audit = Audit()
     for check in (paired_statistics, manuscript_gmin, withdrawn_benchmarks, supporting_information, release, paper_0120, gad_published, openconf,
                   head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, lj_large, bench_prose,
-                  manuscript_ase, manuscript_knockouts, manuscript_priors, panel_references, generated_tables, supporting_numbers, manuscript_new, manuscript_followups, cover_letter, science_claims, rigid_stall, presets_and_templates, no_anneal_restart, hexamer_provenance, template_era, outside_session, morse_g1, gmin_sources, no_move_choice_claim):
+                  manuscript_ase, manuscript_knockouts, manuscript_priors, panel_references, generated_tables, supporting_numbers, manuscript_new, manuscript_followups, cover_letter, science_claims, rigid_stall, presets_and_templates, no_anneal_restart, hexamer_provenance, template_era, outside_session, morse_g1, gmin_sources, g3_session, no_move_choice_claim):
         check(audit)
     if write_map:
         (ROOT / REVISION_MAP).write_text(revision_map_text(revision_map_rows(audit)))
