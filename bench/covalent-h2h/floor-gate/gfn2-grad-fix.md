@@ -30,7 +30,11 @@ stored lines were kept as recorded.
 
 Seeds 2002 and 2003 match the stored best and differ in `evals_to_hit`.
 
-## Geometry check
+## Geometry check of the rerun finals
+
+This section describes the five rerun finals only. The stored
+structures were not saved. Their geometry is unchecked, and these
+verdicts say nothing about the stored rows.
 
 A structure is broken if the single-point SCC fails to converge at
 300 K or at 3000 K, it is not one fragment, any pair is under 1.0
@@ -69,9 +73,36 @@ The per-seed table is `si13-geometry-check/geometry-check.csv`.
   at 300 K and in 22 iterations at 3000 K. The 300 K relaxed energy is
   -597.1589389942 eV. The structure is not broken.
 
+The 300 K relaxed energies of rerun seeds 2001 (-823.4410036118 eV)
+and 2008 (-2357.8823610488 eV) lie far below the ring reference.
+
 ## Hit counts
 
-A script counted unique seeds from `gfn2.csv` and treated every broken
-seed in the geometry check as a miss. C20 is 0/12, as stored. Si13 is
-12/12 as stored. Seeds 2001 and 2008 are broken, so the Si13 count is
-10/12.
+A script counted unique seeds in `gfn2.csv` against the stop target.
+C20 is 0/12, as stored. Si13 is 12/12, as stored against the stop
+target. The stored structures are unavailable and their geometry is
+unchecked.
+
+The code at the recorded revision does not reproduce its own rows at
+the same seed and settings. Of the five reruns, 0 match on both best
+and `evals_to_hit`. Seeds 2002 and 2003 match the stored best only.
+
+The search is drawn from `StdRng` seeded by the seed. A wall-clock stop
+runs only when `H2H_WALL_S` is set, and it was not set. Each SCC starts
+from xtb's own guess, with the warm move at 0. The rerun held the
+thread counts at 1. A second run of seed 2000 reproduced the first
+rerun's best, `evals_to_hit`, `probe_calls`, SCC rejection count and
+final structure. Every stored Si13 seed has `probe_calls` 59, and every
+rerun has `probe_calls` 45. That count is the dimer scale probe, taken
+before the seed is used. The code and the logs do not show an unseeded
+RNG, a thread-count change, a warm SCC start, or a wall-clock stop as
+the cause. The source of the disagreement is unknown.
+
+The same script compared each stored Si13 best with the ring reference
+-624.70446339 eV. Stored seed 2000's best, -641.40367700 eV, is 16.70 eV
+below that reference. The difference is 16.69921361 eV. It is the only
+stored Si13 best below the ring.
+
+| seed | stored best (eV) | below the ring (eV) |
+|---|---:|---:|
+| 2000 | -641.40367700 | 16.69921361 |
