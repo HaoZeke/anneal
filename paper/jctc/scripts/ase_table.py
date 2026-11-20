@@ -2,7 +2,7 @@
 # Copyright (c) anneal developers
 """Write the two ASE tables of the manuscript from the imported rerun rows.
 
-Every row file under paper/jctc/data/ase_rerun is copied unchanged from the
+Every row file under paper/jctc/data/ase_panel is copied unchanged from the
 record its PROVENANCE file names, and every row of this code is a revision
 that is an ancestor of HEAD. Hits, stops, caps, median walls and the Fisher
 tests are recomputed here from the rows; nothing is read from a summary.
@@ -27,7 +27,7 @@ from paired_stats import fisher_exact  # noqa: E402
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
 MANUSCRIPT = ROOT / "paper" / "jctc" / "manuscript.tex"
-DATA = ROOT / "paper" / "jctc" / "data" / "ase_rerun"
+DATA = ROOT / "paper" / "jctc" / "data" / "ase_panel"
 SEEDS = tuple(range(2000, 2012))
 ASE_VERSION = "3.29.0"
 ASE_ARMS = ("ase_bh", "ase_mh")
@@ -215,7 +215,7 @@ def ase_block() -> str:
         "on Au\\(_{55}\\), with no species labels, which is not the Au\\(_{55}\\) preset of Table~\\ref{tab:gmin}.",
         *COMMON[:-1],
         COMMON[-1],
-        "The rows are \\texttt{paper/jctc/data/ase\\_rerun/*/rows.csv}.}",
+        "The rows are \\texttt{paper/jctc/data/ase\\_panel/*/rows.csv}.}",
     ]
     return table(caption, "tab:ase", body(LJ, lj_panel()))
 
@@ -227,7 +227,7 @@ def morse_block() -> str:
         "against the basin hopping",
         f"(BH) and minima hopping (MH) of ASE {ASE_VERSION} on Morse clusters, at the effort each run reports.",
         *COMMON,
-        "The rows are \\texttt{paper/jctc/data/ase\\_rerun/morse/rows.csv}.}",
+        "The rows are \\texttt{paper/jctc/data/ase\\_panel/morse/rows.csv}.}",
     ]
     return table(caption, "tab:ase-morse", body(MORSE, morse_panel()))
 
