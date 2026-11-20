@@ -49,22 +49,49 @@ sink off and on and asserts the best energy bits, the charged calls, the hops
 and the best state bits are identical. The short tests (40,000 calls) run by
 default; the ignored one repeats it at the paper budgets with the
 `reference + 0.001` stop of the harness. Both passed (15/15 paper-budget
-pairs identical; 0 unattributed minima).
+pairs identical; 0 unattributed minima). The test now runs the traced arm
+with the incumbent sink (`Ledger::trace_incumbent`) installed as well and
+checks that its last frame carries the best's energy and state bits; it
+passed again, short and paper-budget (15/15).
+
+## Replay
+
+`scripts/g3_funnel/replay.py` reran all 120 rows after the session:
+anneal with the same seeds, minima hopping with `run_mh.py --calls
+<charged>`. Replays are deterministic and untimed, so they ran in parallel.
+Every replay reproduced its row: the accepted-minimum trace has the sha256
+stored on the row and the printed best is the same text (120/120;
+`replay_trace_match`, `replay_best_match`). The rows did not store energy
+bits, so the check is that bit-identical trace plus the printed best;
+`best_bits` is the replay's best, the last incumbent frame. The examples
+were rebuilt for the replay (`h2h_gmin_proof`
+8414a65e2a0fefed5272626fd92ca77bea745def6b383aa8e414f15584bbbc73,
+`h2h_morse` 1d604b7bd694df4e02f27c81397ad9155ff67ad4d07dd8e4a63510aa9ad465c2,
+`xyz_to_con` 87f887c1188f32b62ac009ecaa890ddbae8ad80c56ec976168aff0ef84d42a4c).
 
 ## Files
 
-- `rows.csv`: one row per run.
+- `rows.csv`: one row per run, with `best_bits`, `hop_first_best` and the
+  replay checks appended.
 - `minima.csv.zst` (sha256 43dc009c61fbe22bdc9482786c8ed981148c09c3b14127d76aaffe3f600fd35d):
   every accepted minimum with its run, force-call index, move, energy, CNA
   shares and funnel.
-- `occupancy.csv`, `transitions.csv`, `misses.csv`: written by
+- `occupancy.csv`, `transitions.csv`: written by
   `scripts/g3_funnel/derive.py` from the rows and the classified traces.
+- `misses/`: the final structure of every miss as `.con` (readcon-core).
+- `misses.csv`, `traps.csv`: written by `scripts/g3_funnel/misses.py` from
+  those files: point group, CNA class, miss class and structure per miss,
+  and per system and miss class the counts per method.
 - `classify-rules.md`: cutoffs and thresholds, committed before any trace.
+- `misses-rules.md`: point group tolerances, structure identity, the
+  dominant-trap and `hop_first_best` rules, committed before any miss
+  structure was written.
 - The raw traces (extended XYZ, one frame per accepted minimum), the per-run
   logs, minima hopping's own `hop.log` and `minima.traj`, the per-run
-  classified CSVs and the identity-test log are in the logs archive, sha256
-  d987a03518eb4cc53dafca8fcc2fd2b940cc35a29841fd6ab189c694618c2d41
-  (635,852,172 bytes). Each trace's sha256 is in `rows.csv`.
+  classified CSVs, the replay's incumbent traces and logs and both
+  identity-test logs are in the logs archive, sha256
+  2b0ef3b9b0088f12c52617163450c0635c3b00d7a5f0060cb7637eef974d33a5
+  (645,769,319 bytes). Each trace's sha256 is in `rows.csv`.
 
 ## Reading the traces
 
@@ -72,8 +99,7 @@ The trace records accepted minima. When a quench reaches the reference the
 run stops at once, so the hitting minimum appears in the trace only if it
 was accepted before the stop: 15 of the 44 anneal hits (column "trace has
 the hit minimum"). Occupancy and transitions are therefore those of the
-search before the stop. For misses the terminal minimum is the lowest
-accepted minimum of the trace.
+search before the stop.
 
 The polyicosahedral, disordered minima early in a run have few 421 and 422
 bonds and fall under `other` by rule 1; the LJ98 Leary tetrahedron is
@@ -128,20 +154,82 @@ The five moves with the most transitions per method and system (all funnel pairs
 | ase_mh | lj150 | 2 | md (2) |
 | ase_mh | m80r6 | 4 | md (4) |
 
-## Misses: funnel of the terminal lowest accepted minimum
+## hop_first_best
 
-| method | system | misses | icosahedral | decahedral | fcc | other | energies of the lowest accepted minima |
+The hop at which each run first reached the basin of its final best
+(`misses-rules.md`): completed hops for anneal, minima hopping steps for
+minima hopping. Medians and ranges over 12 seeds; hits and misses apart.
+
+| method | system | median (all) | hits | misses |
+|---|---|---|---|---|
+| anneal | lj38 | 1118 | 1118 (351-4334) |  |
+| anneal | lj75 | 1871 | 26204 (2113-33908) | 927 (318-2051) |
+| anneal | lj98 | 13189.5 | 13945 (666-38435) | 12434 (517-18275) |
+| anneal | lj150 | 1652 | 884.5 (37-31500) | 10245.5 (312-36658) |
+| anneal | m80r6 | 450 | 450 (39-30289) |  |
+| ase_mh | lj38 | 31 |  | 31 (18-35) |
+| ase_mh | lj75 | 60 |  | 60 (47-99) |
+| ase_mh | lj98 | 57 |  | 57 (51-66) |
+| ase_mh | lj150 | 48.5 |  | 48.5 (31-56) |
+| ase_mh | m80r6 | 94.5 |  | 94.5 (48-118) |
+
+anneal's LJ75 misses reached their final basin by hop 2,051 and stayed
+there; seeds 2000 and 2002, both misses, ran 39,993 and 38,760 hops in all
+(identity-test log).
+
+## Traps: miss classes
+
+Every miss's final structure, classified by point group and CNA class
+(`misses-rules.md`). `structures` counts distinct structures by the
+distance-list test; energies are the rows' best, shown for context only.
+The dominant trap is the most frequent class pooled over methods.
+
+| system | miss class | misses | anneal | minima hopping | structures | best range | dominant |
 |---|---|---|---|---|---|---|---|
-| anneal | lj38 | 0 | | | | | |
-| anneal | lj75 | 7 | 7 | 0 | 0 | 0 | -396.2822 to -396.2822 |
-| anneal | lj98 | 5 | 5 | 0 | 0 | 0 | -543.6430 to -543.6430 |
-| anneal | lj150 | 4 | 0 | 3 | 1 | 0 | -884.9486 to -881.4081 |
-| anneal | m80r6 | 0 | | | | | |
-| ase_mh | lj38 | 12 | 9 | 1 | 0 | 2 | -172.2307 to -168.3453 |
-| ase_mh | lj75 | 12 | 9 | 3 | 0 | 0 | -396.2385 to -385.6678 |
-| ase_mh | lj98 | 12 | 12 | 0 | 0 | 0 | -540.2478 to -524.2014 |
-| ase_mh | lj150 | 12 | 12 | 0 | 0 | 0 | -877.6731 to -847.5678 |
-| ase_mh | m80r6 | 12 | 10 | 1 | 1 | 0 | -375.5013 to -366.8128 |
+| lj150 | icosahedral C1 | 12 | 0 | 12 | 12 | -877.6731 to -849.0784 | yes |
+| lj150 | decahedral Cs | 3 | 3 | 0 | 2 | -884.9486 to -884.6407 |  |
+| lj150 | fcc C3h | 1 | 1 | 0 | 1 | -881.4081 to -881.4081 |  |
+| lj38 | icosahedral C1 | 6 | 0 | 6 | 6 | -171.1804 to -168.8617 | yes |
+| lj38 | other C1 | 3 | 0 | 3 | 3 | -170.7131 to -168.3455 |  |
+| lj38 | icosahedral Cs | 2 | 0 | 2 | 2 | -173.1343 to -169.9556 |  |
+| lj38 | decahedral C1 | 1 | 0 | 1 | 1 | -169.7357 to -169.7357 |  |
+| lj75 | icosahedral C1 | 15 | 7 | 8 | 9 | -396.2822 to -385.6678 | yes |
+| lj75 | decahedral C1 | 3 | 0 | 3 | 3 | -391.7770 to -388.9632 |  |
+| lj75 | icosahedral Cs | 1 | 0 | 1 | 1 | -396.2385 to -396.2385 |  |
+| lj98 | icosahedral C1 | 12 | 0 | 12 | 12 | -540.2478 to -524.7604 | yes |
+| lj98 | icosahedral Cs | 5 | 5 | 0 | 1 | -543.6430 to -543.6430 |  |
+| m80r6 | icosahedral C1 | 10 | 0 | 10 | 10 | -375.5013 to -366.8880 | yes |
+| m80r6 | fcc C1 | 1 | 0 | 1 | 1 | -371.0573 to -371.0573 |  |
+| m80r6 | decahedral C1 | 1 | 0 | 1 | 1 | -368.4206 to -368.4206 |  |
+
+Structures shared by more than one miss:
+
+| system | structure | misses | methods | miss class | best |
+|---|---|---|---|---|---|
+| lj75 | S1 | 7 | anneal | icosahedral C1 | -396.28224883 |
+| lj98 | S1 | 5 | anneal | icosahedral Cs | -543.64295724 |
+| lj150 | S2 | 2 | anneal | decahedral Cs | -884.64066360 |
+
+Every other miss is a structure of its own. All 7 anneal misses at LJ75 end
+in one structure (S1, icosahedral C1) and all 5 at LJ98 in one structure (S1,
+icosahedral Cs). Minima hopping's 12 misses per system are 12 distinct
+structures. At LJ98 the pooled rule therefore makes minima hopping's 12
+distinct C1 endpoints the dominant class, while the most frequent single
+structure is anneal's S1.
+
+## Saddle path from the dominant trap to the global minimum
+
+Not computed. The lowest saddle path from an LJ75 icosahedral trap to the
+Marks decahedron, or from the LJ98 icosahedral trap to the Leary
+tetrahedron, runs through many intermediate minima; finding the lowest one
+takes a search over a database of minima and transition states (discrete
+path sampling), which nothing in this panel's stack does in-run. One
+nudged elastic band or dimer chain between the two endpoints, the tool that
+is available (rgsaddle 0.3.0), returns one connected path whose highest
+saddle bounds the barrier from above; it is not the lowest path and its
+length depends on the interpolation, so it would be an estimate. The
+permutational alignment that chain needs is IRA (anneal's `ira` feature),
+whose library is not installed here. No barrier or path length is reported.
 
 ## Not available
 
@@ -156,3 +244,5 @@ The five moves with the most transitions per method and system (all funnel pairs
   (`workflow/lj_csm/gmin/lj75/data`, sha256
   0be0216d19761517af47b0b1227353804cf54182596479248a063c06a7d69512); LJ38,
   LJ98, LJ150 and M80 rho 6: no published input.
+- Miss structures, traps and `hop_first_best` exist for anneal and minima
+  hopping only; the two GMIN arms have no rows.
