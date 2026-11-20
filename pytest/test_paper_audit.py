@@ -680,3 +680,54 @@ def test_the_british_spelling_of_labeled_is_caught():
     for word in ("labelled", "labelling", "modelled", "travelled"):
         assert audit_mod.BRITISH.search(word)
     assert not audit_mod.BRITISH.search("labeled")
+
+
+IPI_FORM = "https://github.com/afiorent/i-pi.git@4e86f5fdc1583ef21f105fc2bed96a279b2430c1"
+
+
+def test_a_side_branch_revision_is_not_an_ancestor():
+    assert audit_mod.git("cat-file", "-t", "e3ed7dad").stdout.strip() == "commit"
+    assert not audit_mod.ancestor_of_head("e3ed7dad")
+    assert not audit_mod.harness_reachable("e3ed7dad")
+
+
+def test_the_develop_revision_is_an_ancestor():
+    assert audit_mod.ancestor_of_head("61fa67cf")
+    assert audit_mod.harness_reachable("61fa67cf")
+
+
+def test_a_qualified_external_revision_is_a_repo_url_and_a_full_sha():
+    assert audit_mod.external_form(IPI_FORM) is True
+    assert audit_mod.external_form("https://github.com/afiorent/i-pi.git@4e86f5fd") is False
+    assert audit_mod.external_form("4e86f5fd") is None
+    assert not audit_mod.harness_reachable("4e86f5fd")
+    assert audit_mod.harness_reachable(IPI_FORM)
+    assert audit_mod.external_pin("aac1548a")
+    assert audit_mod.harness_reachable("aac1548a")
+
+
+def test_printed_revisions_are_ancestors_or_qualified():
+    audit = audit_mod.Audit()
+    audit_mod.printed_harnesses(audit)
+    assert audit.drifts() == []
+    assert any(row[2] == "qualified external revision" and row[3] == IPI_FORM for row in audit.results)
+    assert any(row[1] == "scripts/pimc_lj38/run_campaign.py" for row in audit.results)
+
+
+def test_a_short_external_revision_is_reported():
+    audit = audit_mod.Audit()
+    path = "bench/pimc-lj38/README.md"
+    text = audit.text(path)
+    short = "https://github.com/afiorent/i-pi.git@4e86f5fd"
+    audit.text_cache[path] = text.replace(IPI_FORM, short)
+    audit_mod.printed_harnesses(audit)
+    assert any(row[2] == "qualified external revision" and row[3] == short for row in audit.drifts())
+
+
+def test_an_unreachable_printed_revision_is_reported():
+    audit = audit_mod.Audit()
+    path = "bench/metal-cluster-h2h/sc-n12/README.md"
+    text = audit.text(path)
+    audit.text_cache[path] = text.replace("| sc126-38 | anneal | 61fa67cf |", "| sc126-38 | anneal | e3ed7dad |")
+    audit_mod.printed_harnesses(audit)
+    assert any(row[4].startswith("e3ed7dad") for row in audit.drifts())
