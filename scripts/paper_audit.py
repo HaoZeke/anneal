@@ -2464,6 +2464,23 @@ def cite_tip4p_gmin(audit: Audit) -> None:
                 + series(str(by[n]["gmin_hits"]) for n in abstract_sizes) + " of 12.")
     audit.said(TEX, headline)
     audit.said("paper/jctc/cover-letter.tex", headline)
+    headline_p = ("The two-sided Fisher exact test on hits, Bonferroni-corrected over the four sizes with a "
+                  "reference, gives " + series(f"\\(p={h2h.show_p(by[n]['fisher_p'])}\\)" if i == 0
+                                               else f"\\({h2h.show_p(by[n]['fisher_p'])}\\)"
+                                               for i, n in enumerate(abstract_sizes)) + ".")
+    significant = [n for n in abstract_sizes if by[n]["fisher_p"] < 0.05]
+    not_significant = [n for n in abstract_sizes if by[n]["fisher_p"] >= 0.05]
+    audit.record(significant == [15] and not_significant == [8, 20], TEX,
+                 "the headline sizes significant at 0.05 by Fisher", "15 | 8 20",
+                 f"{' '.join(map(str, significant))} | {' '.join(map(str, not_significant))}")
+    headline_sig = ("Only \\((\\mathrm{H_2O})_{15}\\) is significant at 0.05, and "
+                    "\\((\\mathrm{H_2O})_{8}\\) and \\((\\mathrm{H_2O})_{20}\\) are not.")
+    for path in (TEX, "paper/jctc/cover-letter.tex"):
+        audit.said(path, headline_p)
+        audit.said(path, headline_sig)
+    abstract_text = audit.text(TEX).split("\\begin{abstract}", 1)[1].split("\\end{abstract}", 1)[0]
+    audit.record(collapse(headline_p) in collapse(abstract_text), TEX, "the abstract gives the Fisher p per size",
+                 "present", "present" if collapse(headline_p) in collapse(abstract_text) else "absent")
     eight, fifteen, twenty, twentyone, twentyfive = (by[n] for n in (8, 15, 20, 21, 25))
     audit.said(TEX, "Table~\\ref{tab:tip4p-gmin} sets this setting against GMIN on rigid TIP4P")
     audit.said(TEX, "The Supporting Information gives the record branch and the per-seed rows.")
