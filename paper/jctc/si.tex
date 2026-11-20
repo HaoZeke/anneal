@@ -1468,6 +1468,8 @@ The script is \path{scripts/elja_hq_sci_molslab_bank.sh}.
 Its line 121 sets \texttt{TARGET\_ENERGY} to \(-415.971529\) and its line 122
 sets \texttt{TARGET\_TOL} from \texttt{DEFAULT\_HIT\_TOL} (\(10^{-3}\)~eV).
 The reference is that energy, in eV.
+The eight bests and their gaps are the rows of \path{bench/copper-slab/rows.csv},
+produced by \path{scripts/run_cuh2_fcc_rec.sh}.
 The per-seed gaps run from \(8\times 10^{-6}\)~eV to
 \(3.68\times 10^{-4}\)~eV above that reference.
 No seed reached the reference within \(10^{-6}\)~eV.
