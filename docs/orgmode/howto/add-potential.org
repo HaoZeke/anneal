@@ -115,14 +115,13 @@ int main(void) {
 
 *** Meson
 
-The =with_rust_core= option (default =false=) adds a =custom_target= in
-=meson.build= that runs =cargo build= through =scripts/build_rust_core.py=.
+The =with_rust_core= option (default =false=) adds a
+=custom_target= in =meson.build= that runs =cargo build= through =scripts/build_rust_core.py=.
 Cargo writes to =<builddir>/cargo-target/debug=, or to
 =<builddir>/cargo-target/release= when =buildtype= is =release=.
-The script copies the archive to the build directory, and Meson links that
-copy.
-Ninja builds the archive before anything that links it, so a fresh
-=meson setup= and =meson compile= need no earlier cargo run:
+The script copies the archive to the build directory, and Meson links that copy.
+Ninja builds the archive before anything that links it, so a fresh =meson setup=
+and =meson compile= need no earlier cargo run:
 
 #+attr_rgpot: syntax
 #+begin_src bash
