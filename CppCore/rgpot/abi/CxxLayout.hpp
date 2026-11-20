@@ -158,7 +158,7 @@ namespace rgpot::abi {
 /// C++ ABI: reordering virtuals without changing their count, changing the
 /// meaning of a field, changing a base class of a covered type. Any change to
 /// size, alignment or a field offset moves the hash by itself.
-inline constexpr std::uint32_t kCxxLayoutRevision = 1;
+inline constexpr std::uint32_t kCxxLayoutRevision = 2;
 
 /// ELF soversion of librgpot (`librgpot.so.N`, `librgpot.N.dylib`).
 /// Meson and CMake read this constant. The SONAME is not the layout hash.
@@ -196,6 +196,10 @@ inline constexpr std::uint32_t kCxxLayoutRevision = 1;
 /// `D4Config` is stamped too, from a header of its own. Its new `periodic`
 /// field fits the padding after `atm`, so only the field offsets show it.
 /// `D2CpmdConfig` gains `symmetry`.
+/// `PotCaps` gains `analyticHessian`, `adHessian` and `adHvp`, and
+/// `PotentialBase` the virtuals `hessianImpl`, `hessianAdImpl` and
+/// `hessianVectorAdImpl` after `hessianVectorImpl`, so `kCxxLayoutRevision`
+/// is 2.
 inline constexpr std::uint32_t kCxxSoversion = 9;
 
 /// One recorded no-cache layout hash. `tag` is `kCxxPlatformTag`.
@@ -209,7 +213,7 @@ struct CxxSoversionEntry {
 /// platform still compiles. How to update the table:
 /// docs/orgmode/contributing/developer/abi-bump.org.
 inline constexpr std::array<CxxSoversionEntry, 1> kCxxSoversionTable{{
-    {"linux-x86_64-libstdc++-lp64", 0xf7ebab6b64626bf2ull},
+    {"linux-x86_64-libstdc++-lp64", 0x2adb802dd0f378d1ull},
 }};
 
 /// This translation unit's platform tag (`os-arch-stdlib-datamodel`).
@@ -252,7 +256,7 @@ static_assert(soversion_tags_unique(), "kCxxSoversionTable tags must be unique")
 /// The cache hook @c setCache adds one when @c RGPOT_HAS_CACHE is defined.
 /// A test counts the @c virtual declarations in Potential.hpp and fails when
 /// this and the header disagree.
-inline constexpr std::uint32_t kPotentialBaseVirtuals = 6;
+inline constexpr std::uint32_t kPotentialBaseVirtuals = 9;
 inline constexpr std::uint32_t kPotentialBaseCacheVirtuals = 1;
 /// Virtual functions @c Potential<Derived> declares itself (@c forceImpl and
 /// @c forceBatchImpl).
@@ -321,6 +325,9 @@ constexpr std::uint64_t compute_hash() {
   f.add(offsetof(PotCaps, groupCollective));
   f.add(offsetof(PotCaps, stress));
   f.add(offsetof(PotCaps, analyticHvp));
+  f.add(offsetof(PotCaps, analyticHessian));
+  f.add(offsetof(PotCaps, adHessian));
+  f.add(offsetof(PotCaps, adHvp));
   f.type<CalculatorGroup>();
   f.add(offsetof(CalculatorGroup, index));
   f.add(offsetof(CalculatorGroup, ranks));

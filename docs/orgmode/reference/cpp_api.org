@@ -552,8 +552,9 @@ explicit PotentialBase(PotType inp_type);
 - Inputs :: none.
 - Units :: none.
 - Outputs :: a =PotCaps= with the reentrancy, per-image, batched, periodic,
-  group-collective, stress and analytic-HVP flags; the default is a
-  value-initialised =PotCaps= (=SharedInstance=, periodic, nothing else set).
+  group-collective, stress, analytic-HVP, analytic-Hessian, dual-number
+  Hessian and dual-number HVP flags; the default is a value-initialised
+  =PotCaps= (=SharedInstance=, periodic, nothing else set).
 - Errors :: none; the method is =noexcept=.
 
 *** =rgpot::PotentialBase::hessianVectorImpl=
@@ -570,6 +571,51 @@ virtual void hessianVectorImpl(const ForceInput &, const double *,
 - Outputs :: =product= receives =H direction=.
 - Errors :: the base throws =std::runtime_error=.
   Potentials whose =caps().analyticHvp= is true override this method.
+
+*** =rgpot::PotentialBase::hessianImpl=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+virtual void hessianImpl(const ForceInput &, double *) const;
+#+end_src
+
+- Inputs :: =in=, a geometry of =in.nAtoms= atoms.
+- Units :: the energy Hessian, eV/Angstrom^2 when the coordinates are in
+  Angstrom.
+- Outputs :: =hessian= receives the dense =3 * in.nAtoms= by
+  =3 * in.nAtoms= matrix, row-major, with coordinate =3 * i + k= for axis
+  =k= of atom =i=. It is written symmetric.
+- Errors :: the base throws =std::runtime_error=.
+  Potentials whose =caps().analyticHessian= is true override this method.
+
+*** =rgpot::PotentialBase::hessianAdImpl=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+virtual void hessianAdImpl(const ForceInput &, double *) const;
+#+end_src
+
+- Inputs :: as for =hessianImpl=.
+- Units :: as for =hessianImpl=.
+- Outputs :: the dense Hessian of =hessianImpl=, computed by evaluating the
+  energy kernel on dual numbers instead of from closed-form derivatives.
+- Errors :: the base throws =std::runtime_error=.
+  Potentials whose =caps().adHessian= is true override this method.
+
+*** =rgpot::PotentialBase::hessianVectorAdImpl=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+virtual void hessianVectorAdImpl(const ForceInput &, const double *,
+                                 double *) const;
+#+end_src
+
+- Inputs :: as for =hessianVectorImpl=.
+- Units :: as for =hessianVectorImpl=.
+- Outputs :: =product= receives =H direction=, computed by evaluating the
+  energy kernel on dual numbers.
+- Errors :: the base throws =std::runtime_error=.
+  Potentials whose =caps().adHvp= is true override this method.
 
 *** =rgpot::PotentialBase::forceBatch=
 

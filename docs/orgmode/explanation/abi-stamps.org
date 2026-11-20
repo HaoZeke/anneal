@@ -189,4 +189,8 @@ It also stamps =D2CpmdConfig=, =D2CpmdPot= and =PotType::D2Cpmd=.
 =D4Config= gains =periodic= in the padding after =atm=, so it keeps its size and
 only the field offsets show it.
 =D2CpmdConfig= gains =symmetry=.
+=PotCaps= gains =analyticHessian=, =adHessian= and =adHvp=, and
+=PotentialBase= gains the virtuals =hessianImpl=, =hessianAdImpl= and
+=hessianVectorAdImpl= after =hessianVectorImpl=.
+The vtable changed, so =kCxxLayoutRevision= is 2.
 A program linked against soversion 8 does not load =librgpot.so.9=.
