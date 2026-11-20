@@ -4441,6 +4441,16 @@ where
     );
 
     let mut kernels = search_kernels(cfg);
+    let morph_ready = cfg.packing_cna_applies()
+        && !cfg.displacement_only
+        && cfg.allocate_moves
+        && cfg.stall_patience > 0
+        && cfg.restart_patience > 0
+        && (cfg.escape_on_stall || cfg.trail_on_stall)
+        && !kernels
+            .iter()
+            .any(|m| matches!(m, ClusterMove::Twin { .. } | ClusterMove::Reseed { .. }));
+    let mut morph_gate_alloc = FlooredThompson::new(3);
     let mut general_taboo = general::FingerprintTaboo::default();
     let mut collective = general::CollectiveShare::default();
     let mut regrow_share = general::CollectiveShare::patient();
@@ -4655,6 +4665,9 @@ where
     let mut quiet = 0usize;
     let mut longest_quiet = 0usize;
     let mut stall_escapes = 0usize;
+    let mut true_best_spent = ledger.spent();
+    let mut escapes_at_true_best = 0usize;
+    let mut morph_latched = false;
     let mut stall_escape_gain = 0.0_f64;
     let mut trail_escapes = 0usize;
     // Evaluated screen state of the trial that entered the current basin,
@@ -5058,6 +5071,9 @@ where
         if ledger.best < best_seen - new_lowest {
             best_seen = ledger.best;
             charged_at_best = ledger.spent();
+            true_best_spent = ledger.spent();
+            escapes_at_true_best = stall_escapes + restarts;
+            morph_latched = false;
             heat = 1.0;
             hops_at_lowest = hops;
             cage_edit = false;
@@ -5817,6 +5833,9 @@ where
             let fresh = random_cluster(x.len() / 3, 0.7, cfg.min_separation, rng);
             let (energy, relaxed) = relax(ledger, fresh.view(), cfg.relax_steps);
             charged_at_best = ledger.spent();
+            true_best_spent = ledger.spent();
+            escapes_at_true_best = stall_escapes + restarts;
+            morph_latched = false;
             best_seen = ledger.best;
             if energy.is_finite() && relaxed.len() == x.len() {
                 internal_action = Some(CheckpointAction::ExternalAdopt {
@@ -6490,6 +6509,9 @@ where
         // head has passed. The proposal below then uses the preset.
         if ledger.best < best_seen - 1e-9 {
             best_seen = ledger.best;
+            true_best_spent = ledger.spent();
+            escapes_at_true_best = stall_escapes + restarts;
+            morph_latched = false;
             heat = 1.0;
         }
         // Gap to the incumbent, which is what the law scales the window by.
@@ -6758,6 +6780,19 @@ where
             soft_cache = None;
             current_validation_gradient = None;
         }
+        if morph_ready
+            && quiet >= cfg.stall_patience
+            && ledger.spent().saturating_sub(true_best_spent) >= cfg.restart_patience
+            && (stall_escapes + restarts) > escapes_at_true_best
+        {
+            morph_latched = true;
+        }
+        let morph_gate_arm = if morph_ready && morph_latched {
+            morph_gate_alloc.select(rng)
+        } else {
+            0
+        };
+        let mut morph_action_arm: Option<usize> = None;
         let mut k = choose_arm(
             cfg,
             context.as_ref().map(|value| value.view()),
@@ -7099,6 +7134,12 @@ where
                 }
             }
             t
+        } else if morph_gate_arm == 1 && !species_escape_trial && !angular && !cage_edit {
+            morph_action_arm = Some(1);
+            crate::twin::propose(x.view(), n, rng)
+        } else if morph_gate_arm == 2 && !species_escape_trial && !angular && !cage_edit {
+            morph_action_arm = Some(2);
+            crate::lattice::candidate(crate::lattice::Source::Observed, x.view(), n, rng)
         } else if angular {
             // The criterion decides this is the right move, so it takes the
             // step rather than competing as one arm among many.
@@ -7133,6 +7174,7 @@ where
             && !cov_fire
             && !soft_fire
             && !angular
+            && morph_action_arm.is_none()
             && may_idle(&kernels[k].name())
             && hop_is_identity(x.view(), trial.view())
         {
@@ -7268,6 +7310,10 @@ where
             "covariance".to_owned()
         } else if soft_fire && soft_cache.is_some() {
             "soft_mode".to_owned()
+        } else if morph_action_arm == Some(1) {
+            "twin".to_owned()
+        } else if morph_action_arm == Some(2) {
+            "observed".to_owned()
         } else if angular {
             "angular".to_owned()
         } else {
@@ -8427,6 +8473,11 @@ where
             // The context is the one the move was chosen in, not the one the
             // chain now stands in: the reward belongs to the decision.
             contextual.update(k, c.view(), if improved || accept { 1.0 } else { 0.0 });
+        } else if let Some(arm) = morph_action_arm
+            && cfg.allocate_moves
+        {
+            let novel_reward = improved || (accept && !returning);
+            morph_gate_alloc.update(arm, novel_reward);
         } else if cfg.allocate_moves {
             // An angular step is not the allocator's, so it does not carry a
             // reward for whichever arm the allocator happened to pick.
@@ -8445,6 +8496,9 @@ where
             } else {
                 improved || (accept && !(cfg.novel_reward && returning))
             };
+            if morph_ready {
+                morph_gate_alloc.update(0, improved || (accept && !returning));
+            }
             allocator.update(k, reward);
             arm_draws[k] += 1;
             if accept {
