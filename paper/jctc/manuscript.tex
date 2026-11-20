@@ -7,8 +7,8 @@
 \input{macros}
 
 \title{Removing the structure templates of a basin-hopping search: a
-seed-paired knockout, with comparisons to GMIN, CREST, and the Atomic
-Simulation Environment}
+seed-paired knockout, with comparisons to GMIN and the Atomic Simulation
+Environment}
 
 \author{Rohit Goswami}
 \affiliation{SURF B.V., Amsterdam}
@@ -50,9 +50,6 @@ GMIN on none (\(p=0.016\)), Morse M\(_{55}\) and M\(_{80}\) at \(\rho=14\) on 9
 and 6 of 12 against none (\(p=3.9\times 10^{-3}\) and 0.031), and rigid
 TIP4P (H\(_2\)O)\(_{15}\) and (H\(_2\)O)\(_{20}\) on 7 and 6 of 12 against
 none (\(p=0.016\) and 0.031).
-On the GFN2-xTB water hexamer, with both codes stopped at 4000 energy and
-gradient calls, it hits 121 of 192 seeds and CREST 94
-(\(p=8.0\times 10^{-3}\)).
 \end{abstract}
 
 \section{Introduction}
@@ -96,10 +93,9 @@ has such a run.
 Section~\ref{sec:knockouts} gives that knockout, the removal of the
 structure templates.
 Section~\ref{sec:benchmarks} then compares the code with GMIN on
-Lennard-Jones, Morse, and rigid TIP4P clusters, paired by seed, with CREST on
-the water hexamer at equal calls, and with the Atomic Simulation Environment
-at the effort each run reports
-\cite{wales1997,prachtCrestProgramExploration2024,larsenAse2017}.
+Lennard-Jones, Morse, and rigid TIP4P clusters, paired by seed, and with the
+Atomic Simulation Environment at the effort each run reports
+\cite{wales1997,larsenAse2017}.
 
 \section{The search}
 \label{sec:search}
@@ -503,13 +499,10 @@ in the tables and figures, and the Supporting Information defines each one.
 
 \section{Landscapes of the test clusters}
 \label{sec:landscape}
-Figure~\ref{fig:systems} shows the published minima, and
-Figure~\ref{fig:disconnectivity} joins landmark LJ\(_{38}\) minima of an
-earlier campaign.
+Figure~\ref{fig:systems} shows the published minima.
 Every miss on LJ\(_{75}\) in Table~\ref{tab:gmin}, of either code, ends at
 the icosahedral competitor at \(-396.2822\), \(1.210\) above the
 published decahedral minimum at \(-397.492331\).
-The search stores no transition states, so the joining shows no barrier.
 
 \begin{figure}
 \centering
@@ -520,17 +513,6 @@ and LJ\(_{104}\).
 (b) TIP4P reference minima of 10, 15, and 20 molecules, and the lowest
 hexamer of each class relaxed at GFN2-xTB with xtb 6.7.1.}
 \label{fig:systems}
-\end{figure}
-
-\begin{figure}
-\centering
-\includegraphics[width=\linewidth]{disconnectivity.pdf}
-\caption{Nearest-neighbor joining of the LJ\(_{38}\) minima in the
-coordination descriptor.
-Minima closer than \(0.15\) are merged.
-The stems are colored by five spectral basins.
-No join is a barrier.}
-\label{fig:disconnectivity}
 \end{figure}
 
 \section{Knockouts}
@@ -613,9 +595,6 @@ Darby et al.\ \cite{darbyCuAu2002} at \(T=0.1\)~eV, with the step and the
 taboo radius scaled by \(r_0/2^{1/6}\) and GMIN's container radius, and the
 gold driver of this code applies the basin bias of
 equation~\ref{eq:delta} on a stride of 8.
-With symmetrization and the published LJ\(_{75}\) input, from other starts,
-GMIN hit LJ\(_{75}\) on 200 of 200 seeds in a median of 33122 force calls, so
-the table compares these two configurations as run.
 The Supporting Information gives the inputs, the host, and the commands.
 
 Paired by seed, this code alone hits 7 seeds of LJ\(_{98}\) and GMIN alone
@@ -759,28 +738,6 @@ Cluster & This work & GMIN & Only, this work & Only, GMIN & \(p_\mathrm{M}\) & \
 \end{table}
 % tip4p-gmin table: end
 
-\subsection{Against CREST on the water hexamer}
-\label{sec:crest}
-On the water hexamer at GFN2-xTB, the comparison is CREST 3.0.2, which samples
-a molecular ensemble by metadynamics \cite{prachtCrestProgramExploration2024}.
-Both codes evaluate GFN2-xTB through tblite 0.7.0, and each run on seeds
-0--191 stops at 4000 energy and gradient calls: CREST reached that cap on
-every seed, and this code spent 4000 force calls on every seed.
-A hit is a structure that one classifier, the hexamer binary of this code for
-both arms, places inside an isomer gate of 0.784112~\AA\ around the lowest
-hexamer; a CREST run hits when any of the 180 frames it scores lies inside the
-gate.
-This code hits 121 of 192 seeds and CREST 94.
-Paired by seed, both hit 59 seeds, this code alone 62, CREST alone 35, and
-neither 36, with an exact McNemar \(p\) of \(8.0\times 10^{-3}\) and a paired
-95\% interval of the difference in hit rate from 0.041 to 0.236.
-The median walls are 16.973~s for this code and 13.882~s for CREST.
-Run without the cap on six seeds, CREST spends 142110 to 209931 energy and
-gradient calls, and the polished energies of the two codes on those seeds
-agree within \(10^{-7}\)~Eh on five seeds at xtb 6.7.1 and on all six at xtb
-6.8.0; those six comparisons are reported at that effort, and the Supporting
-Information gives the counters, the polish, and the gaps.
-
 \subsection{Against ASE, at the effort each run reports}
 \label{sec:ase}
 The Atomic Simulation Environment provides a basin-hopping optimizer and a
@@ -888,8 +845,7 @@ at \(p<0.05\).
 With the templates removed, the code hits more seeds than GMIN on
 LJ\(_{98}\), 7 of 12 against none, on Morse M\(_{55}\) and M\(_{80}\) at
 \(\rho=14\) at the submitted revision, 9 and 6 of 12 against none, and on
-rigid TIP4P (H\(_2\)O)\(_{15}\) and (H\(_2\)O)\(_{20}\); at equal calls it hits more seeds of the GFN2-xTB water
-hexamer than CREST, 121 of 192 against 94.
+rigid TIP4P (H\(_2\)O)\(_{15}\) and (H\(_2\)O)\(_{20}\).
 
 \appendix
 \section{Definitions}
@@ -1069,9 +1025,9 @@ The authors declare no competing financial interest.
 
 \begin{suppinfo}
 The Supporting Information gives the reference energies, the GMIN inputs, the
-host and the commands, the revision behind every table, the statistical
-methods, the water hexamer counters and gaps, the arms that were measured and
-not kept, and the searches that report no comparable rate.
+host and the commands, the revision behind every table, the protocol of the
+comparison with the Atomic Simulation Environment, the statistical methods,
+and the searches that report no comparable rate.
 \end{suppinfo}
 
 \section*{Data and software availability}
@@ -1085,9 +1041,9 @@ The newest released tag is v0.12.0, which is the crate version.
 Each imported row file under \path{paper/jctc/data} carries a
 \texttt{PROVENANCE} file that names the record branch, the commit, and the
 blob it was copied from.
-Several revisions that produced rows are not in the repository, and the
-Supporting Information lists them; their rows can be audited and cannot be
-rerun from the repository.
+The rows of this code behind every table were recorded at revisions in the
+history of the submitted revision, and the Supporting Information names each
+one.
 
 \bibliography{refs,refs-stats}
 
