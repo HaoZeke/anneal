@@ -387,6 +387,16 @@ def test_a_drifted_outside_cell_is_reported():
     assert [r[2] for r in audit.drifts()] == ["tab:si-outside is the summariser's block"]
 
 
+def test_a_move_choice_success_claim_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "\\section{Conclusions}"
+    assert tex.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "The Thompson draw drives the hits on LJ\\(_{98}\\).\n\n" + old)
+    audit_mod.no_move_choice_claim(audit)
+    assert [(r[1], r[2]) for r in audit.drifts()] == [(audit_mod.TEX, "no sentence credits the move choice with success")]
+
+
 def test_every_todo_marker_fails_both_audits():
     clean = audit_mod.Audit()
     for path in (audit_mod.TEX, audit_mod.SI, audit_mod.COVER):

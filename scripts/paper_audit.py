@@ -1788,6 +1788,20 @@ def outside_session(audit: Audit) -> None:
                      "absent" if word not in flat else "present")
 
 
+MOVE_CHOICE = re.compile(r"Thompson|move choice|choice among the moves|choosing among the moves|posterior", re.I)
+MOVE_CHOICE_CLAIM = re.compile(r"\b(drives?|driven|driving|improv\w*|help\w*|responsib\w*|key to|enabl\w*|boost\w*|explain\w*|"
+                               r"account\w* for|behind the|leads? to|raises?|lifts?|increas\w*)\b", re.I)
+
+
+def no_move_choice_claim(audit: Audit) -> None:
+    """No sentence credits the adaptive choice among the moves with a hit or a gain."""
+    for path in (TEX, SI, COVER):
+        sentences = re.split(r"(?<=[.;])\s+", collapse(audit.text(path)))
+        claims = [s[:80] for s in sentences if MOVE_CHOICE.search(s) and MOVE_CHOICE_CLAIM.search(s)]
+        audit.record(not claims, path, "no sentence credits the move choice with success", "none",
+                     "; ".join(claims) or "none")
+
+
 RESTART_DRIVERS = ("examples/h2h_gmin_proof.rs", "examples/h2h_morse.rs", "examples/h2h_metal.rs",
                    "examples/h2h_seed.rs", "examples/h2h_sc.rs", "examples/ase_panel.rs", "examples/ase_nonlj.rs")
 
@@ -4052,7 +4066,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
     audit = Audit()
     for check in (paired_statistics, manuscript_gmin, withdrawn_benchmarks, supporting_information, release, paper_0120, gad_published, openconf,
                   head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, lj_large, bench_prose,
-                  manuscript_ase, manuscript_knockouts, manuscript_priors, panel_references, generated_tables, supporting_numbers, manuscript_new, manuscript_followups, cover_letter, science_claims, rigid_stall, presets_and_templates, no_anneal_restart, hexamer_provenance, template_era, outside_session):
+                  manuscript_ase, manuscript_knockouts, manuscript_priors, panel_references, generated_tables, supporting_numbers, manuscript_new, manuscript_followups, cover_letter, science_claims, rigid_stall, presets_and_templates, no_anneal_restart, hexamer_provenance, template_era, outside_session, no_move_choice_claim):
         check(audit)
     if write_map:
         (ROOT / REVISION_MAP).write_text(revision_map_text(revision_map_rows(audit)))
