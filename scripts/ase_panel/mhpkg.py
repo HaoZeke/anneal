@@ -241,6 +241,13 @@ def fisher(hits_a: int, n_a: int, hits_b: int, n_b: int) -> float:
     return min(1.0, total)
 
 
+def ranked_calls(row: dict[str, str]) -> float:
+    """A miss, including an optimizer abort, ranks worse than every hit."""
+    if row["hit"] != "true":
+        return math.inf
+    return float(row["calls"])
+
+
 def mann_whitney(left: list[float], right: list[float]) -> tuple[float, float]:
     """U of ``left`` and the two-sided p, normal approximation with the tie
     and continuity corrections. Every value tied gives p = 1."""
@@ -1103,7 +1110,9 @@ def write_report(args: argparse.Namespace) -> None:
             "",
             "A hit is a quenched energy at or below the Cambridge minimum plus 0.001.",
             "Medians and quartiles are Hyndman-Fan type 7.",
-            "Calls and wall used below are the stored values, including a capped seed at the calls and wall it reached.",
+            "Call medians and wall times are the stored values, including a capped seed at the calls and wall it reached.",
+            "The Mann-Whitney test on calls ranks every miss, including stop=error, as positive infinity.",
+            "The Mann-Whitney test on wall uses the stored wall.",
             "Fisher p is the two-sided exact test on hit counts.",
             "Mann-Whitney p is the two-sided normal approximation with the tie and continuity corrections, anneal as the left sample.",
             f"Bonferroni uses m={m}, the number of complete head-to-head cells, separately for each test.",
@@ -1162,8 +1171,8 @@ def write_report(args: argparse.Namespace) -> None:
             hits_b = sum(row["hit"] == "true" for row in right)
             fp = fisher(hits_a, len(left), hits_b, len(right))
             u_calls, p_calls = mann_whitney(
-                [float(row["calls"]) for row in left],
-                [float(row["calls"]) for row in right],
+                [ranked_calls(row) for row in left],
+                [ranked_calls(row) for row in right],
             )
             u_wall, p_wall = mann_whitney(
                 [float(row["wall_s"]) for row in left],
@@ -1290,6 +1299,8 @@ def selfcheck() -> None:
     _u, tied = mann_whitney([1.0, 1.0], [1.0, 1.0])
     if tied != 1.0:
         die("mann-whitney ties")
+    if mann_whitney([10.0], [math.inf])[0] >= mann_whitney([math.inf], [10.0])[0]:
+        die("a miss must rank worse than a hit")
     if abs(iqr(sample)[3] - (type7(sample, 0.75) - type7(sample, 0.25))) > 1e-12:
         die("iqr")
     record = pin()

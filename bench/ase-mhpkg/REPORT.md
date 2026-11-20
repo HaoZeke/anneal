@@ -11,7 +11,7 @@ The project name minimahopping is not on PyPI. The same HTTP 404 is returned for
 Release 1.1.3 calls MaxwellBoltzmannDistribution with communicator='serial'. That keyword is accepted through ASE 3.28.0 and removed in ASE 3.29.0. This harness pins ASE 3.29.0 and rewrites the keyword to comm=DummyMPI(), the replacement ASE 3.28 applies for communicator='serial'.
 
 Base `5eb79cdcb0a986984dc7b487e5a3cc93224246f9` tree `7a2ba49b37241a8fe42b2c45c226374de6d92274`.
-Rows revision `1260a7c35d0acb43bf8d25f9108ca384115e9d2a` tree `c75e763805a1a458f83231fd5e621b505afebd70`.
+Rows revision `d1def53122d913304825c490d516b4adad705ab7` tree `53dc6574b0af3183a48a9f3226c4e945df8b9b29`.
 Harness revision `34bd3b2215e056a45c02633669ae99e842c0d7ed` tree `9c065caac5f36a4ab4a1e264bb95586d41597166`.
 Harness revision `37987b38d5c557794a999cff0b47f4bf728f37c6` tree `b9574174d997e43e9d4323f05051fc3acd21daf5`.
 
@@ -25,7 +25,9 @@ Locked stack:
 
 A hit is a quenched energy at or below the Cambridge minimum plus 0.001.
 Medians and quartiles are Hyndman-Fan type 7.
-Calls and wall used below are the stored values, including a capped seed at the calls and wall it reached.
+Call medians and wall times are the stored values, including a capped seed at the calls and wall it reached.
+The Mann-Whitney test on calls ranks every miss, including stop=error, as positive infinity.
+The Mann-Whitney test on wall uses the stored wall.
 Fisher p is the two-sided exact test on hit counts.
 Mann-Whitney p is the two-sided normal approximation with the tie and continuity corrections, anneal as the left sample.
 Bonferroni uses m=4, the number of complete head-to-head cells, separately for each test.
@@ -37,7 +39,7 @@ The same-binary Lennard-Jones 38 pair is the noise band and is not in that famil
 
 anneal: n=12 hits=9 calls median 292454 IQR 114694 wall median 5.02915 IQR 2.05075 inside median 3.68178 outside median 1.35049 outside per call median 4.711e-06.
 mhpkg: n=12 hits=0 calls median 400000 IQR 0 wall median 286.712 IQR 5.50435 inside median 5.59831 outside median 281.098 outside per call median 0.000703556.
-Fisher p 0.000336519 adjusted 0.00134608. Mann-Whitney calls U 32 p 0.0129299 adjusted 0.0517196. Mann-Whitney wall U 11 p 0.000477682 adjusted 0.00191073.
+Fisher p 0.000336519 adjusted 0.00134608. Mann-Whitney calls U 18 p 0.000383392 adjusted 0.00153357. Mann-Whitney wall U 11 p 0.000477682 adjusted 0.00191073.
 Arm order counts: slot 0 anneal 6, slot 0 mhpkg 6, slot 1 anneal 6, slot 1 mhpkg 6.
 
 ### lj38
@@ -72,7 +74,6 @@ Paired aa1 minus aa0 wall median 0.0015785 IQR 0.00251925 max abs 0.007633.
 
 The minimahopping package moves Cartesian ASE atoms. Its documented constraint support is ASE FixAtoms, with an explicit warning that other ASE constraints are untested. biomode is imported by the softening step and never called, and it does not integrate a rigid body. Rigid TIP4P in this repository is a 6-coordinate angle-axis chart per molecule (GminTip4p). There is no supported rigid-molecule interface, so the cell is not run.
 
-
 ## Shard
 
 Au38 package seeds 2003 and 2006 stopped because the geometry optimizer raised `LinAlgError: Eigenvalues did not converge`. Those rows have `stop=error` and `hit=false`, at 294781 and 1769 calls. The other ten Au38 package seeds used the 400000-call budget. The medians above use the stored calls.
@@ -81,4 +82,4 @@ Au38 seeds 2003 through 2011 were measured with harness `37987b38d5c557794a999cf
 
 `git format-patch 5eb79cdcb0a986984dc7b487e5a3cc93224246f9..34bd3b2215e056a45c02633669ae99e842c0d7ed` has sha256 `a542ced35eea1cabff90ac65be84a5d75844ee820cd8574f54221ce8db87de54`.
 
-Calls in the tests are the charged counts. `calls_to_hit` is the first quenched record at the threshold and can be smaller than the charged count.
+Call medians above are the charged counts. `calls_to_hit` is the first quenched record at the threshold and can be smaller than the charged count.
