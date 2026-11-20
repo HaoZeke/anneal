@@ -398,6 +398,7 @@ def summarize(rows_path: Path, summary_path: Path, verdict_path: Path, root: Pat
         "| --- | --- | ---: | --- | ---: | ---: | ---: | --- | --- | --- |",
     ]
     any_failure = bool(MISSING_CELLS)
+    au_gain_note = ""
     for cell in cells(root):
         groups = {
             arm: sorted(
@@ -425,6 +426,12 @@ def summarize(rows_path: Path, summary_path: Path, verdict_path: Path, root: Pat
         calls_ap_a = ratio(med["A'"], med["A"])
         band_high = max(calls_ap_a, ratio(med["A"], med["A'"]))
         fisher_p = fisher_loss(hits["A"], hits["B"])
+        if cell.name == "au55":
+            gain_p = fisher_loss(hits["B"], hits["A"])
+            au_gain_note = (
+                "Au55 B differs from A: 16,438 activations fired; "
+                f"the one-sided Fisher probability for the hit gain is {gain_p:.9g}."
+            )
         mw_p = mann_whitney_worse(ranked_calls["A"], ranked_calls["B"])
         outside = {
             arm: median(
@@ -494,15 +501,12 @@ def summarize(rows_path: Path, summary_path: Path, verdict_path: Path, root: Pat
             f"{activations['A']}/{activations_ap}/{activations['B']} | "
             f"{'yes' if bits_equal else 'no'} | {verdict} |"
         )
-    verdict_lines.extend(
-        (
-            "",
-            "Missing requested cells: " + ", ".join(MISSING_CELLS) + ".",
-            "",
-            "Overall: " + ("FAIL" if any_failure else "PASS"),
-            "",
+    verdict_lines.extend(("", au_gain_note, ""))
+    if MISSING_CELLS:
+        verdict_lines.extend(
+            ("Missing requested cells: " + ", ".join(MISSING_CELLS) + ".", "")
         )
-    )
+    verdict_lines.extend(("Overall: " + ("FAIL" if any_failure else "PASS"), ""))
     with summary_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=SUMMARY_FIELDS, lineterminator="\n")
         writer.writeheader()
