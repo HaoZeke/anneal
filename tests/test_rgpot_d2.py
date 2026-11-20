@@ -102,6 +102,10 @@ def test_d2_term_cancels_in_a_sum():
     assert tuned(pos, z, box)[0] == pytest.approx(e_d2 * 0.75 / 1.2, rel=1e-12)
 
 
+# rgpot::kCpmdBohr in CppCore/rgpot/D2Pot/D2CpmdPot.hpp, reciprocal of
+# fbohr = 1._real_8/0.529177210859_real_8 in OpenCPMD src/cnst.mod.F90
+# (commit 062582b7cfd832d36f88f504cd08e4ead42eb404, CODATA 2006).
+CPMD_BOHR = 0.529177210859
 CPMD_DATA = DATA.parent / "d2cpmd"
 CPMD_SYSTEMS = [
     "cubic_water",
@@ -138,7 +142,7 @@ def test_d2cpmd_matches_opencpmd(name):
     out = rgpot.D2CpmdPot().evaluate(pos, z, box)
     assert out["energy"] == pytest.approx(energy * HARTREE_TO_EV, rel=0, abs=1e-11)
     np.testing.assert_allclose(
-        out["forces"], force * HARTREE_TO_EV / BOHR_TO_ANGSTROM, rtol=0, atol=1e-9
+        out["forces"], force * HARTREE_TO_EV / CPMD_BOHR, rtol=0, atol=1e-14
     )
     assert out["stress"] is not None
 
@@ -172,7 +176,7 @@ def test_d2cpmd_symmetry_matches_opencpmd(name):
     out = pot.evaluate(pos, z, box)
     assert out["energy"] == pytest.approx(energy * HARTREE_TO_EV, rel=0, abs=1e-11)
     np.testing.assert_allclose(
-        out["forces"], force * HARTREE_TO_EV / BOHR_TO_ANGSTROM, rtol=0, atol=1e-9
+        out["forces"], force * HARTREE_TO_EV / CPMD_BOHR, rtol=0, atol=1e-14
     )
 
 
