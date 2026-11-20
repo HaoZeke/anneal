@@ -7,7 +7,9 @@ Reads ``manifest.csv``. Rows with status ``run`` execute at
 ``seed_first`` through ``seed_last``. When both codes of a system are
 ``run``, the seed order is ABBA. A system with one ``run`` code executes
 that code on every seed. Status ``unrunnable`` and ``not_tuned`` are
-not executed.
+not executed. ``--tarball`` or ``GMIN_TARBALL`` is a local copy of the
+pinned snapshot. Its sha256 and SVNREV are checked, then
+``scripts/gmin_panel/build_gmin.sh`` builds it with one make job.
 
 A hit is ``scripts/target_tol.py`` ``energy_hits``: best <= reference + 0.001.
 GMIN keywords come from ``run_panel.gmin_data`` and the committed data
@@ -171,6 +173,62 @@ def check_budgets(panel, bin_dir: Path, root: Path, systems: list[str]) -> None:
             raise SystemExit(f"{system}: binary budget {budget} reference {reference}")
 
 
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def tarball_svnrev(path: Path) -> str:
+    proc = subprocess.run(
+        ["tar", "-xjf", str(path), "-O", "./wales/GMIN/source/SVNREV"],
+        check=False,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        raise SystemExit(f"tarball {path} has no GMIN SVNREV")
+    return proc.stdout.decode().strip()
+
+
+def resolve_tarball(arg: Path | None) -> Path | None:
+    if arg is not None:
+        return arg
+    env = os.environ.get("GMIN_TARBALL", "")
+    if env:
+        return Path(env)
+    return None
+
+
+def build_pinned_gmin(panel, root: Path, tarball: Path, work: Path, log: Path, timeout: int) -> tuple[Path, Path]:
+    if not tarball.is_file():
+        raise SystemExit(f"tarball {tarball} is missing")
+    digest = file_sha256(tarball)
+    if digest != panel.GMIN_TARBALL_SHA256:
+        raise SystemExit(f"tarball sha256 {digest} is not {panel.GMIN_TARBALL_SHA256}")
+    got = tarball_svnrev(tarball)
+    if got != panel.GMIN_PIN:
+        raise SystemExit(f"GMIN SVNREV {got} is not {panel.GMIN_PIN}")
+    env = thread_env()
+    env["GMIN_PANEL_WORK"] = str(work)
+    env["GMIN_PANEL_JOBS"] = "1"
+    env["GMIN_TARBALL"] = str(tarball)
+    run_command(
+        ["taskset", "-c", "0", "bash", str(root / "scripts" / "gmin_panel" / "build_gmin.sh"), "--tarball", str(tarball)],
+        root,
+        env,
+        timeout,
+        log,
+    )
+    binary = work / "bin" / "GMIN"
+    source = work / "gmin-source.txt"
+    if not binary.is_file() or not source.is_file():
+        raise SystemExit("GMIN build did not write the binary")
+    check_gmin_source(panel, source)
+    return binary, source
+
+
 def check_gmin_source(panel, source_path: Path) -> None:
     source = dict(
         line.split("=", 1) for line in source_path.read_text().splitlines() if "=" in line
@@ -261,8 +319,9 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--rows", type=Path, required=True)
     parser.add_argument("--bin", type=Path, required=True)
-    parser.add_argument("--gmin", type=Path, required=True)
-    parser.add_argument("--gmin-source", type=Path, required=True)
+    parser.add_argument("--tarball", type=Path)
+    parser.add_argument("--gmin", type=Path)
+    parser.add_argument("--gmin-source", type=Path)
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--logs", type=Path, required=True)
     parser.add_argument("--timeout", type=int, default=21600)
@@ -284,7 +343,15 @@ def main(argv: list[str]) -> int:
     head = check_ancestor(root)
     planned = jobs(manifest, panel)
     if any(code == "gmin" for _system, _seed, code in planned):
-        check_gmin_source(panel, args.gmin_source)
+        tarball = resolve_tarball(args.tarball)
+        if tarball is not None:
+            args.gmin, args.gmin_source = build_pinned_gmin(
+                panel, root, tarball, args.work / "gmin-build", args.logs / "gmin-build.log", max(args.timeout, 7200)
+            )
+        elif args.gmin is None or args.gmin_source is None:
+            raise SystemExit("GMIN arms need --tarball, GMIN_TARBALL, or both --gmin and --gmin-source")
+        else:
+            check_gmin_source(panel, args.gmin_source)
     check_budgets(panel, args.bin, root, systems)
     lj_data = (root / "examples" / "h2h_gmin_lj.data").read_text()
     morse_data = (root / "examples" / "h2h_gmin_morse.data").read_text()
