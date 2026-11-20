@@ -361,6 +361,7 @@ def render(rows: list[dict[str, str]], scored: list[dict[str, str]], balance: di
             f"- Core {base['core']}; ABBA slot counts: "
             + ", ".join(f"slot {slot} {arm}={count}" for (slot, arm), count in sorted(balance.items())),
             f"- git cat-file -e resolved {objects - len(missing)}/{objects} recorded ids",
+            "- Hit is the driver's full-precision comparison against the reference plus 1e-3. Sutton-Chen best is the eight-decimal printed value, TIP4P best is the ten-decimal printed value, and the binary Lennard-Jones best is the round-trip value together with its bits.",
             "",
             "## Systems",
             "",
