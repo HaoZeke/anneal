@@ -161,8 +161,8 @@ fn detected_ops(x: ArrayView1<'_, f64>) -> Vec<[[f64; 3]; 3]> {
     // Filling that gap with the least-bad rotation kept a high order whose
     // turn maps every atom to itself, then closed it into a long cyclic
     // group and assigned every element.
-    let candidates = crate::symmetrise::detect_all(x, n, &orders, 0.25);
-    let group = crate::symmetrise::generate_group(&candidates, 64);
+    let candidates = crate::symmetrise::detect_generators(x, n, &orders, 0.25);
+    let group = crate::symmetrise::close_symmetries(&candidates, x, n, 0.25, 64);
     if group.is_empty() {
         vec![identity()]
     } else {
