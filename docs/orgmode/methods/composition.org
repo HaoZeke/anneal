@@ -40,7 +40,7 @@ minima into the featomic packing archive) and =CATALOG_SHARED_BIAS=
 drives the ordinary perturb-quench chain against a =BasinBias= keyed on
 =ClusterFingerprint= (examples/lj_cluster_search.rs:2077-2082), calling
 back into the closure below every =checkpoint_interval= charged
-evaluations (default 500, or ~CATALOG_SLICE=/=BANK_SLICE~,
+evaluations (default 500, or =CATALOG_SLICE= / =BANK_SLICE=,
 examples/lj_cluster_search.rs:2058-2064). Inside each hop, before the
 checkpoint fires:
 
@@ -85,8 +85,8 @@ checkpoint. It runs, in order:
 
 2. *Register local-topology evidence.* =adaptive_catalog_operations=
    (examples/lj_cluster_search.rs:2149-2157) turns the snapshot's
-   accepted transitions into ~RegisterCurrent=/=Adopt~ operations fed
-   to ~CooperativeRun::record_current=/=record_transition~
+   accepted transitions into =RegisterCurrent= / =Adopt= operations fed
+   to =CooperativeRun::record_current= / =record_transition=
    (examples/lj_cluster_search.rs:2161-2190), building the same
    append-only transition evidence
    =crate::transition_graph::TransitionGraph= consumes elsewhere.
@@ -148,12 +148,12 @@ checkpoint. It runs, in order:
    =ActiveCatalogRelation=.
 
 7. *Act on the policy decision.* =ContinueLocal= does nothing further
-   this checkpoint. ~Exploit=/=Explore=/=Leave~ all route through
+   this checkpoint. =Exploit= / =Explore= / =Leave= all route through
    =CooperativeRun::boundary_crossing=
    (examples/lj_cluster_search.rs:2477-2479): the coordinator returns
    either a =Crossing= (an observed boundary transport target, catalog.org
    "boundary transport") or nothing, and if a crossing is returned the
-   same ~CATALOG_SHARED_BIAS=/=CATALOG_COOP_WELLS~ side effects as step
+   same =CATALOG_SHARED_BIAS= / =CATALOG_COOP_WELLS= side effects as step
    5 may fire before =boundary_crossing_trial= constructs the proposal
    and the checkpoint returns =CheckpointAction::BoundaryProposal=.
 
@@ -181,8 +181,8 @@ leaves ~polish_records = 0~ and never pays this cost.
 
 When enough replicas have joined a population epoch
 (=SynchronousPopulation=, catalog.org "Feynman-Kac population epochs"),
-the coordinator ranks the submitted ~PopulationMember=s
-(=rank_population~), builds the bounded log-weight selection potential
+the coordinator ranks the submitted =PopulationMember= entries
+(=rank_population=), builds the bounded log-weight selection potential
 from =SelectionCoefficients=, draws parents by systematic resampling at
 a replayable per-epoch offset (=epoch_systematic_offset=), and caps
 family sizes (=cap_families=). The resulting =PopulationEpochPlan= is
@@ -308,7 +308,7 @@ temperature-indexed proposal kernel, law L2: support contained in the
 neighborhood), =Accept : R x R_>0 -> [0,1]= (src/accept.rs:1,
 acceptance rule, law L3: downhill always accepted, law L4: acceptance
 non-decreasing in temperature), plus the implicit objective (Obj).
-~SaVariant::checked=/=checked_with_sweep~ (src/laws.rs:1-7) validate a
+=SaVariant::checked= / =checked_with_sweep= (src/laws.rs:1-7) validate a
 concrete tuple of components against all four composition laws, the
 first three as Boolean witnesses and all four as executable proptest
 sweeps. This is the README's "same five-component algebra (Obj / Cool
@@ -322,8 +322,8 @@ the journal. What is actually there:
 
 - Transport: two-party Cap'n Proto RPC on TCP. =Catalog.capnp=
   defines =Coordinator=, =Session=, and =Subscriber=. A replica
-  ~attach=es with its identity and a subscriber capability, then
-  =Session.call~ carries the existing =CatalogRequest= /
+  calls =attach= with its identity and a subscriber capability, then
+  =Session.call= carries the existing =CatalogRequest= /
   =CatalogReply= payload so journal identity and every operation
   handler stay unchanged. =Coordinator.observe= needs no identity.
 - Coordination: =CatalogServer::start= binds one socket and runs a
@@ -334,7 +334,7 @@ the journal. What is actually there:
   =CoordinatorEvent= values to every attached subscriber when an
   epoch closes, when the roster changes, and when a replica retires.
 - Durability: a single append-only request journal
-  (~append_journal=/=replay_journal~), replayed at startup and keyed
+  (=append_journal= / =replay_journal=), replayed at startup and keyed
   by =(replica, event_sequence)= so a restarted coordinator recovers
   the same state a live one would have, and a resent request after a
   dropped reply is a no-op rather than a double-charge. This is crash
