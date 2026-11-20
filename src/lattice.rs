@@ -499,7 +499,9 @@ fn distance2(a: &[f64; 3], b: &[f64; 3]) -> f64 {
 
 /// Parameter-free contact graph: two points are neighbours when their
 /// diameter sphere contains no third point. This Gabriel rule obtains its
-/// complete scale from the incumbent's pair distances.
+/// complete scale from the incumbent's pair distances. `distances` stores
+/// squared distances: `d2(i, k) + d2(j, k) < d2(i, j)` is exactly the test
+/// that `k` lies inside the sphere with `ij` as its diameter.
 fn observed_contact_graph(x: ArrayView1<f64>) -> Vec<Vec<usize>> {
     let n = x.len() / 3;
     let mut distances = vec![vec![0.0; n]; n];
@@ -526,6 +528,31 @@ fn observed_contact_graph(x: ArrayView1<f64>) -> Vec<Vec<usize>> {
         }
     }
     graph
+}
+
+fn basis_is_well_conditioned(basis: &[[f64; 3]; 3]) -> bool {
+    let norms = basis.map(|vector| vector[0].hypot(vector[1]).hypot(vector[2]));
+    if norms.iter().any(|norm| !norm.is_finite() || *norm == 0.0) {
+        return false;
+    }
+    let unit: [[f64; 3]; 3] = std::array::from_fn(|vector| {
+        std::array::from_fn(|axis| basis[vector][axis] / norms[vector])
+    });
+    let cross = [
+        unit[1][1] * unit[2][2] - unit[1][2] * unit[2][1],
+        unit[1][2] * unit[2][0] - unit[1][0] * unit[2][2],
+        unit[1][0] * unit[2][1] - unit[1][1] * unit[2][0],
+    ];
+    let normalized_determinant = unit[0]
+        .iter()
+        .zip(cross)
+        .map(|(component, cofactor)| component * cofactor)
+        .sum::<f64>()
+        .abs();
+    // Inverting a basis amplifies roundoff by the reciprocal normalized
+    // determinant. Requiring it above sqrt(epsilon) keeps that amplification
+    // below 1/sqrt(epsilon), leaving at least half the significand reliable.
+    normalized_determinant > f64::EPSILON.sqrt()
 }
 
 fn lattice_point(site: [i32; 3], basis: &[[f64; 3]; 3]) -> [f64; 3] {
@@ -644,6 +671,9 @@ pub fn observed_basis_candidate(
                 }
                 let basis =
                     [a, b, c].map(|point| [0, 1, 2].map(|axis| x[3 * point + axis] - origin[axis]));
+                if !basis_is_well_conditioned(&basis) {
+                    continue;
+                }
                 let cross = [
                     basis[1][1] * basis[2][2] - basis[1][2] * basis[2][1],
                     basis[1][2] * basis[2][0] - basis[1][0] * basis[2][2],
@@ -1055,10 +1085,52 @@ mod tests {
     }
 
     #[test]
-    fn observed_growth_requires_local_three_dimensional_order() {
+    fn observed_growth_rejects_degenerate_order() {
         let line = Array1::from_vec(vec![
             0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 3.0, 0.0, 0.0,
         ]);
         assert!(observed_basis_candidate(line.view(), true).is_none());
+    }
+
+    #[test]
+    fn observed_growth_rejects_coplanar_and_ill_conditioned_cliques() {
+        let square = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0,
+        ]);
+        assert!(observed_basis_candidate(square.view(), false).is_none());
+
+        let mut nearly_coplanar = square;
+        nearly_coplanar[11] = f64::EPSILON;
+        assert!(observed_basis_candidate(nearly_coplanar.view(), false).is_none());
+    }
+
+    #[test]
+    fn observed_contacts_match_a_brute_force_gabriel_graph() {
+        let points = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.2, 0.9, 0.1],
+            [0.8, 0.7, 0.6],
+            [-0.4, 0.3, 0.8],
+        ];
+        let x = Array1::from_iter(points.into_iter().flatten());
+        let actual = observed_contact_graph(x.view());
+        let mut expected = vec![Vec::new(); points.len()];
+        for i in 0..points.len() {
+            for j in (i + 1)..points.len() {
+                let midpoint = [0, 1, 2].map(|axis| (points[i][axis] + points[j][axis]) / 2.0);
+                let radius2 = distance2(&points[i], &points[j]) / 4.0;
+                let blocked = points
+                    .iter()
+                    .enumerate()
+                    .filter(|(k, _)| *k != i && *k != j)
+                    .any(|(_, point)| distance2(point, &midpoint) < radius2);
+                if !blocked {
+                    expected[i].push(j);
+                    expected[j].push(i);
+                }
+            }
+        }
+        assert_eq!(actual, expected);
     }
 }
