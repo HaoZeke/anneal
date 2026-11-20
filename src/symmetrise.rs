@@ -73,8 +73,15 @@ fn centroid(x: ArrayView1<f64>, n: usize) -> [f64; 3] {
 fn rotate(v: [f64; 3], axis: [f64; 3], angle: f64) -> [f64; 3] {
     // Host `sin` and `cos` of the same angle are not one function on glibc
     // and libSystem, and this rotation places the symmetrised points.
-    let s = libm::sin(angle);
-    let co = libm::cos(angle);
+    rotate_trig(v, axis, libm::sin(angle), libm::cos(angle))
+}
+
+/// [`rotate`] with the sine and cosine of the angle already in hand.
+///
+/// The arithmetic is the Rodrigues formula, one sine and one cosine for the
+/// whole turn. A scan that builds an image per atom was calling `sin` and
+/// `cos` once per atom on the same angle.
+fn rotate_trig(v: [f64; 3], axis: [f64; 3], s: f64, co: f64) -> [f64; 3] {
     let dot = v[0] * axis[0] + v[1] * axis[1] + v[2] * axis[2];
     let cross = [
         axis[1] * v[2] - axis[2] * v[1],
@@ -86,6 +93,74 @@ fn rotate(v: [f64; 3], axis: [f64; 3], angle: f64) -> [f64; 3] {
         v[1] * co + cross[1] * s + axis[1] * dot * (1.0 - co),
         v[2] * co + cross[2] * s + axis[2] * dot * (1.0 - co),
     ]
+}
+
+/// Squared displacement when the image lies strictly inside half the gap.
+///
+/// The nearest other atom is `gap` away. An image closer than half that is
+/// closer to the source atom than to any other, and this squared length is
+/// the one the nearest-image scan records for the source.
+fn image_on_self(here: [f64; 3], image: [f64; 3], gap: f64) -> Option<f64> {
+    if !gap.is_finite() || gap <= 0.0 {
+        return None;
+    }
+    let dx = image[0] - here[0];
+    let dy = image[1] - here[1];
+    let dz = image[2] - here[2];
+    let self_d2 = (dx * dx + dy * dy) + dz * dz;
+    (self_d2 < gap * 0.25).then_some(self_d2)
+}
+
+/// Scalar tail of a vector nearest-image scan.
+///
+/// Kept out of the AVX-512 function so the multiply-add is not contracted
+/// into an FMA. The vector lanes use the same two operations, and a tie
+/// keeps the earlier index.
+#[inline(never)]
+fn nearest_tail(
+    xs: &[f64],
+    ys: &[f64],
+    zs: &[f64],
+    mut index: usize,
+    image: [f64; 3],
+    mut best: f64,
+    mut best_index: usize,
+) -> (usize, f64) {
+    while index < xs.len() {
+        let dx = image[0] - xs[index];
+        let dy = image[1] - ys[index];
+        let dz = image[2] - zs[index];
+        let distance = (dx * dx + dy * dy) + dz * dz;
+        if distance < best {
+            best = distance;
+            best_index = index;
+        }
+        index += 1;
+    }
+    (best_index, best)
+}
+
+/// Scalar tail of a distance-only nearest-image scan. See [`nearest_tail`].
+#[inline(never)]
+fn distance_tail(
+    xs: &[f64],
+    ys: &[f64],
+    zs: &[f64],
+    mut index: usize,
+    image: [f64; 3],
+    mut best: f64,
+) -> f64 {
+    while index < xs.len() {
+        let dx = image[0] - xs[index];
+        let dy = image[1] - ys[index];
+        let dz = image[2] - zs[index];
+        let distance = (dx * dx + dy * dy) + dz * dz;
+        if distance < best {
+            best = distance;
+        }
+        index += 1;
+    }
+    best
 }
 
 fn normalise(v: [f64; 3]) -> Option<[f64; 3]> {
@@ -291,7 +366,60 @@ impl Cloud {
         (best_index, best)
     }
 
+    /// # Safety
+    ///
+    /// AVX-512F must be enabled. The minimum is the scalar scan's minimum:
+    /// strict `<`, so a tie keeps the earlier index. Lanes that are not
+    /// strictly closer are not stored.
+    ///
+    /// Compiled only when rustc is 1.89 or newer. Those intrinsics are not
+    /// in the 1.88 standard library, so the allow covers the crate minimum.
+    #[cfg(all(target_arch = "x86_64", anneal_avx512))]
+    #[allow(clippy::incompatible_msrv)]
+    #[target_feature(enable = "avx512f")]
+    unsafe fn nearest_index_avx512(&self, image: [f64; 3]) -> (usize, f64) {
+        use std::arch::x86_64::{
+            _CMP_LT_OQ, _mm512_add_pd, _mm512_cmp_pd_mask, _mm512_loadu_pd, _mm512_mul_pd,
+            _mm512_set1_pd, _mm512_storeu_pd, _mm512_sub_pd,
+        };
+        let ix = _mm512_set1_pd(image[0]);
+        let iy = _mm512_set1_pd(image[1]);
+        let iz = _mm512_set1_pd(image[2]);
+        let n = self.xs.len();
+        let mut index = 0usize;
+        let mut best = f64::INFINITY;
+        let mut best_index = 0usize;
+        while index + 8 <= n {
+            let distance = unsafe {
+                let dx = _mm512_sub_pd(_mm512_loadu_pd(self.xs.as_ptr().add(index)), ix);
+                let dy = _mm512_sub_pd(_mm512_loadu_pd(self.ys.as_ptr().add(index)), iy);
+                let dz = _mm512_sub_pd(_mm512_loadu_pd(self.zs.as_ptr().add(index)), iz);
+                _mm512_add_pd(
+                    _mm512_add_pd(_mm512_mul_pd(dx, dx), _mm512_mul_pd(dy, dy)),
+                    _mm512_mul_pd(dz, dz),
+                )
+            };
+            let closer = _mm512_cmp_pd_mask(distance, _mm512_set1_pd(best), _CMP_LT_OQ);
+            if closer != 0 {
+                let mut lane = [0.0; 8];
+                unsafe { _mm512_storeu_pd(lane.as_mut_ptr(), distance) };
+                for lane_index in 0..8 {
+                    if lane[lane_index] < best {
+                        best = lane[lane_index];
+                        best_index = index + lane_index;
+                    }
+                }
+            }
+            index += 8;
+        }
+        nearest_tail(&self.xs, &self.ys, &self.zs, index, image, best, best_index)
+    }
+
     fn nearest_index(&self, image: [f64; 3]) -> (usize, f64) {
+        #[cfg(all(target_arch = "x86_64", anneal_avx512))]
+        if std::is_x86_feature_detected!("avx512f") {
+            return unsafe { self.nearest_index_avx512(image) };
+        }
         #[cfg(target_arch = "x86_64")]
         if std::is_x86_feature_detected!("avx2") {
             return unsafe { self.nearest_index_avx2(image) };
@@ -375,6 +503,8 @@ impl Cloud {
         let angle = 2.0 * std::f64::consts::PI / order as f64;
         let sine = libm::sin(std::f64::consts::PI / order as f64);
         let scale = 4.0 * sine * sine;
+        let s = libm::sin(angle);
+        let co = libm::cos(angle);
         let gaps = self.gaps();
         let mut total = 0.0;
         let mut moved = false;
@@ -384,8 +514,16 @@ impl Cloud {
             let gap = gaps[index];
             let chord_sq = scale * self.perp_sq_at(index, axis);
             let axial = !gap.is_finite() || gap <= 0.0 || chord_sq < gap * 0.25;
-            let image = rotate(self.point(index), axis, angle);
-            let (partner, distance) = self.nearest_index(image);
+            let here = self.point(index);
+            let image = rotate_trig(here, axis, s, co);
+            // An image inside half the nearest-neighbour gap is closer to its
+            // own atom than to any other, which is the answer the scan would
+            // return. The squared length is the same multiply-add.
+            let (partner, distance) = if let Some(self_d2) = image_on_self(here, image, gap) {
+                (index, self_d2)
+            } else {
+                self.nearest_index(image)
+            };
             total += distance;
             if !axial && partner == index {
                 return None;
@@ -412,6 +550,8 @@ impl Cloud {
         let sine = libm::sin(std::f64::consts::PI / order as f64);
         let scale = 4.0 * sine * sine;
         let angle = 2.0 * std::f64::consts::PI / order as f64;
+        let s = libm::sin(angle);
+        let co = libm::cos(angle);
         let gaps = self.gaps();
         for index in 0..self.xs.len() {
             let gap = gaps[index];
@@ -419,7 +559,7 @@ impl Cloud {
             if !gap.is_finite() || gap <= 0.0 || chord_sq < gap * 0.25 {
                 continue;
             }
-            let (partner, _) = self.nearest_index(rotate(self.point(index), axis, angle));
+            let (partner, _) = self.nearest_index(rotate_trig(self.point(index), axis, s, co));
             if partner != index {
                 return true;
             }
@@ -499,7 +639,53 @@ impl Cloud {
         best
     }
 
+    /// # Safety
+    ///
+    /// AVX-512F must be enabled. The minimum matches the scalar scan.
+    ///
+    /// Compiled only when rustc is 1.89 or newer. See
+    /// [`Self::nearest_index_avx512`].
+    #[cfg(all(target_arch = "x86_64", anneal_avx512))]
+    #[allow(clippy::incompatible_msrv)]
+    #[target_feature(enable = "avx512f")]
+    unsafe fn nearest_squared_avx512(&self, image: [f64; 3]) -> f64 {
+        use std::arch::x86_64::{
+            _mm512_add_pd, _mm512_loadu_pd, _mm512_mul_pd, _mm512_set1_pd, _mm512_storeu_pd,
+            _mm512_sub_pd,
+        };
+        let ix = _mm512_set1_pd(image[0]);
+        let iy = _mm512_set1_pd(image[1]);
+        let iz = _mm512_set1_pd(image[2]);
+        let n = self.xs.len();
+        let mut index = 0usize;
+        let mut best = f64::INFINITY;
+        while index + 8 <= n {
+            let distance = unsafe {
+                let dx = _mm512_sub_pd(_mm512_loadu_pd(self.xs.as_ptr().add(index)), ix);
+                let dy = _mm512_sub_pd(_mm512_loadu_pd(self.ys.as_ptr().add(index)), iy);
+                let dz = _mm512_sub_pd(_mm512_loadu_pd(self.zs.as_ptr().add(index)), iz);
+                _mm512_add_pd(
+                    _mm512_add_pd(_mm512_mul_pd(dx, dx), _mm512_mul_pd(dy, dy)),
+                    _mm512_mul_pd(dz, dz),
+                )
+            };
+            let mut lane = [0.0; 8];
+            unsafe { _mm512_storeu_pd(lane.as_mut_ptr(), distance) };
+            for value in lane {
+                if value < best {
+                    best = value;
+                }
+            }
+            index += 8;
+        }
+        distance_tail(&self.xs, &self.ys, &self.zs, index, image, best)
+    }
+
     fn nearest_one(&self, image: [f64; 3]) -> f64 {
+        #[cfg(all(target_arch = "x86_64", anneal_avx512))]
+        if std::is_x86_feature_detected!("avx512f") {
+            return unsafe { self.nearest_squared_avx512(image) };
+        }
         #[cfg(target_arch = "x86_64")]
         if std::is_x86_feature_detected!("avx2") {
             return unsafe { self.nearest_squared_avx2(image) };
@@ -618,13 +804,15 @@ impl Cloud {
             return None;
         }
         let angle = 2.0 * std::f64::consts::PI / order as f64;
+        let s = libm::sin(angle);
+        let co = libm::cos(angle);
         let mut total = 0.0;
         // A finite cap usually dies on the first image that misses. Measuring
         // that image alone stops there. A cap that stays open, or no cap,
         // scans several images per pass over the coordinates.
         if cap.is_finite() {
             for index in 0..n {
-                total += self.nearest_one(rotate(self.point(index), axis, angle));
+                total += self.nearest_one(rotate_trig(self.point(index), axis, s, co));
                 if total > cap * cap * n as f64 {
                     let partial = (total / n as f64).sqrt();
                     if root_is_past_cap(partial, cap, n) {
@@ -639,7 +827,7 @@ impl Cloud {
         while index < n {
             let width = (n - index).min(4);
             for lane in 0..width {
-                stored[lane] = rotate(self.point(index + lane), axis, angle);
+                stored[lane] = rotate_trig(self.point(index + lane), axis, s, co);
             }
             if !self.accumulate(&stored[..width], cap, &mut total) {
                 return None;
@@ -2924,5 +3112,83 @@ mod shell_tests {
             }
         }
         moved.then_some(deviation)
+    }
+
+    #[test]
+    fn wide_nearest_image_matches_the_scalar_scan() {
+        let mut state = 0x1234_5678_u64;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (state >> 33) as f64 / (1u32 << 31) as f64
+        };
+        for n in [1usize, 3, 7, 8, 9, 17, 33, 55] {
+            let mut coords = Vec::with_capacity(3 * n);
+            for _ in 0..3 * n {
+                coords.push(next() * 4.0 - 2.0);
+            }
+            if n >= 4 {
+                coords[3] = coords[0];
+                coords[4] = coords[1];
+                coords[5] = coords[2];
+            }
+            let x = Array1::from(coords);
+            let cloud = Cloud::from_view(x.view(), n);
+            for _ in 0..24 {
+                let image = [next() * 6.0 - 3.0, next() * 6.0 - 3.0, next() * 6.0 - 3.0];
+                let scalar = cloud.nearest_index_scalar(image);
+                let chosen = cloud.nearest_index(image);
+                assert_eq!(chosen.0, scalar.0, "n={n}");
+                assert_eq!(chosen.1.to_bits(), scalar.1.to_bits(), "n={n}");
+                let wide = cloud.nearest_one(image);
+                assert_eq!(wide.to_bits(), scalar.1.to_bits(), "n={n}");
+            }
+        }
+    }
+
+    #[test]
+    fn an_image_inside_half_the_gap_is_the_source_atom() {
+        let mut state = 0x9e37_79b9_u64;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (state >> 33) as f64 / (1u32 << 31) as f64
+        };
+        for n in [4usize, 12, 33, 55] {
+            let mut coords = Vec::with_capacity(3 * n);
+            for _ in 0..3 * n {
+                coords.push(next() * 3.0 - 1.5);
+            }
+            let x = Array1::from(coords);
+            let cloud = Cloud::from_view(x.view(), n);
+            let gaps = cloud.gaps().clone();
+            let axes = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 1.0, 1.0]];
+            for axis in axes {
+                let axis = normalise(axis).expect("axis");
+                for order in [2usize, 3, 4, 6, 12] {
+                    let angle = 2.0 * std::f64::consts::PI / order as f64;
+                    for index in 0..n {
+                        let here = cloud.point(index);
+                        let image = rotate(here, axis, angle);
+                        let Some(self_d2) = image_on_self(here, image, gaps[index]) else {
+                            continue;
+                        };
+                        let (partner, distance) = cloud.nearest_index_scalar(image);
+                        assert_eq!(partner, index, "n={n} order={order}");
+                        assert_eq!(distance.to_bits(), self_d2.to_bits());
+                    }
+                }
+            }
+        }
+        // Centering puts the atoms at -1 and +1, so the squared gap is 4.
+        // A step of 0.999 from the source stays inside half that gap.
+        let x = Array1::from(vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0]);
+        let cloud = Cloud::from_view(x.view(), 2);
+        let here = cloud.point(0);
+        let image = [here[0] + 0.999, here[1], here[2]];
+        let self_d2 = image_on_self(here, image, 4.0).expect("inside half the gap");
+        let (partner, distance) = cloud.nearest_index_scalar(image);
+        assert_eq!(partner, 0);
+        assert_eq!(distance.to_bits(), self_d2.to_bits());
+        let outside = [here[0] + 1.001, here[1], here[2]];
+        assert!(image_on_self(here, outside, 4.0).is_none());
     }
 }
