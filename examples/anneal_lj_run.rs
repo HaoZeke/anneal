@@ -13,8 +13,9 @@
 //! the whole budget so two builds can be compared call for call after a hit.
 //! `H2H_BUDGET` replaces the budget. `H2H_COMPLETION=off` runs without
 //! the symmetry completion of a new basin, `once` completes each basin
-//! once per chain. `BITS` on stderr gives the bits of the best energy
-//! and the charged count, so two builds can be compared exactly.
+//! once per chain and `framework` reads the group from the positions
+//! alone. `BITS` on stderr gives the bits of the best energy and the
+//! charged count, so two builds can be compared exactly.
 
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, Outcome, random_cluster_in_radius, run_with_gradient,
@@ -55,6 +56,7 @@ fn switch(cfg: &mut Config) {
     match std::env::var("H2H_COMPLETION").as_deref() {
         Ok("off") => cfg.symmetry_completion_on_new = false,
         Ok("once") => cfg.symmetry_completion_once = true,
+        Ok("framework") => cfg.symmetry_completion_framework = true,
         _ => {}
     }
 }

@@ -582,6 +582,61 @@ pub fn complete_detected_classed(
     core_fraction: f64,
     min_separation: f64,
 ) -> Option<Array1<f64>> {
+    complete_detected_reading(
+        x,
+        n,
+        classes,
+        true,
+        tolerance,
+        merge_radius,
+        core_fraction,
+        min_separation,
+    )
+}
+
+/// [`complete_detected_classed`] with the group read off the points alone.
+///
+/// A structure with two species is a framework of positions with a decoration
+/// on it. The framework can be close to a point group that the decoration
+/// breaks, and the group that carries every point onto a point of its own
+/// class is then trivial or absent, while the framework's is not. This reads
+/// the group of the framework, as if every point were of one class, and
+/// completes with it as [`complete_detected_classed`] does: each class keeps
+/// its own sites, so no atom is seated on a site made of another class's
+/// images and the composition is kept. Without classes the two are the same
+/// call.
+pub fn complete_detected_framework(
+    x: ArrayView1<f64>,
+    n: usize,
+    classes: Option<&[u32]>,
+    tolerance: f64,
+    merge_radius: f64,
+    core_fraction: f64,
+    min_separation: f64,
+) -> Option<Array1<f64>> {
+    complete_detected_reading(
+        x,
+        n,
+        classes,
+        false,
+        tolerance,
+        merge_radius,
+        core_fraction,
+        min_separation,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn complete_detected_reading(
+    x: ArrayView1<f64>,
+    n: usize,
+    classes: Option<&[u32]>,
+    read_classes: bool,
+    tolerance: f64,
+    merge_radius: f64,
+    core_fraction: f64,
+    min_separation: f64,
+) -> Option<Array1<f64>> {
     if n < 4 || x.len() != 3 * n {
         return None;
     }
@@ -602,7 +657,7 @@ pub fn complete_detected_classed(
             core[3 * k + d] = x[3 * a + d];
             centre[d] += x[3 * a + d];
         }
-        if let Some(z) = classes.filter(|z| z.len() >= n) {
+        if let Some(z) = classes.filter(|z| read_classes && z.len() >= n) {
             core_classes.push(z[a]);
         }
     }
@@ -1285,6 +1340,87 @@ mod tests {
             taken.extend(chosen);
         }
         moved.then_some(out)
+    }
+
+    /// A framework whose species are all different has no operation that
+    /// keeps every point on a point of its own species, so the group read by
+    /// species is trivial and nothing is completed. Read from the points it
+    /// is the framework's, and each species still has its own sites: every
+    /// atom of a class of one point is seated within the merge radius of an
+    /// image of itself under the group, and no two atoms overlap.
+    #[test]
+    fn the_framework_reading_completes_what_the_species_reading_cannot() {
+        for amplitude in [0.02, 0.05] {
+            let x = jitter(&icosahedron(1.0), amplitude);
+            let n = x.len() / 3;
+            let classes: Vec<u32> = (0..n as u32).collect();
+            let tolerance = 0.25;
+            let merge = 0.3;
+            assert!(
+                complete_detected_classed(x.view(), n, Some(&classes), tolerance, merge, 1.0, 0.1)
+                    .is_none()
+            );
+            let y = complete_detected_framework(
+                x.view(),
+                n,
+                Some(&classes),
+                tolerance,
+                merge,
+                1.0,
+                0.1,
+            )
+            .expect("the framework of a jittered icosahedron completes");
+            let group = detected_group_classed(x.view(), n, None, tolerance)
+                .expect("the framework has a group");
+            let centre = centroid(x.view(), n);
+            for a in 0..n {
+                let r = [
+                    x[3 * a] - centre[0],
+                    x[3 * a + 1] - centre[1],
+                    x[3 * a + 2] - centre[2],
+                ];
+                let near_an_image = group.iter().any(|g| {
+                    let w = apply(g, r);
+                    (0..3)
+                        .map(|k| (centre[k] + w[k] - y[3 * a + k]).powi(2))
+                        .sum::<f64>()
+                        .sqrt()
+                        <= merge
+                });
+                assert!(near_an_image, "{amplitude} atom {a}");
+            }
+            for a in 0..n {
+                for b in (a + 1)..n {
+                    let gap: f64 = (0..3)
+                        .map(|k| (y[3 * a + k] - y[3 * b + k]).powi(2))
+                        .sum::<f64>()
+                        .sqrt();
+                    assert!(gap >= 0.1, "{a} {b} {gap}");
+                }
+            }
+        }
+    }
+
+    /// Without species, and with all the points of one species, the framework
+    /// reading and the species reading are one call.
+    #[test]
+    fn the_framework_reading_is_the_species_reading_without_species() {
+        let (zinc, _) = zincblende();
+        for x in [
+            jitter(&icosahedron(1.0), 0.03),
+            jitter(&octahedron(), 0.08),
+            zinc,
+        ] {
+            let n = x.len() / 3;
+            let one = vec![7u32; n];
+            for classes in [None, Some(one.as_slice())] {
+                let by_species =
+                    complete_detected_classed(x.view(), n, classes, 0.25, 0.3, 0.6, 0.1);
+                let by_points =
+                    complete_detected_framework(x.view(), n, classes, 0.25, 0.3, 0.6, 0.1);
+                assert_eq!(by_species, by_points);
+            }
+        }
     }
 
     /// A completion with the classes puts every atom back on a site of its
