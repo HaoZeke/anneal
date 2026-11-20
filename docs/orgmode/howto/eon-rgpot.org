@@ -58,10 +58,11 @@ The =configure= arms are a separate list, on
 The fake engines and =potserv= are built with
 =-Dwith_rpc=true -Dwith_tests=true=.
 =tests/test_rpc_e2e_c_abi.py= needs =RGPOT_POTSERV= and one engine variable per
-backend. =pixi run -e rpctest rpctest= and =potctl ci rpc-integ= export those
-variables, so the two end to end tests run there. A direct run outside that
-task skips, and prints the reason, when =potserv= or an engine library is
-absent.
+backend.
+Both =pixi run -e rpctest rpctest= and =potctl ci rpc-integ= export them.
+The two end to end tests run there.
+Outside those tasks, a run skips when =potserv= or an engine library is absent.
+It prints the reason.
 
 #+attr_rgpot: syntax
 #+begin_src bash

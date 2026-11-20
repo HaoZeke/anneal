@@ -194,10 +194,11 @@ LJPot force is undefined for coincident atoms
 
 - Inputs :: none.
 - Units :: none.
-- Outputs :: =True= in every build. =MetatomicDlopen= is linked into every
-  =librgpot=, so =rgpot.evaluate_metatomic_dlopen= is a function. The flag
-  does not follow =RGPOT_HAS_METATOMIC=, which records the torch link. The
-  engine plugin stays optional and is opened at runtime.
+- Outputs :: =True= in every build.
+  =MetatomicDlopen= is linked into every =librgpot=, so
+  =rgpot.evaluate_metatomic_dlopen= is a function.
+  The flag does not follow =RGPOT_HAS_METATOMIC=, which records the torch link.
+  The engine plugin stays optional and is opened at runtime.
 - Errors :: none.
 
 *** =rgpot.has_xckernel=
