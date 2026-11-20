@@ -2080,10 +2080,19 @@ Options:
             String::new()
         };
         assert!(value("RGPOT_POTSERV").ends_with("bbdir/CppCore/potserv"));
-        assert!(value("NWCHEMC_LIBRARY").ends_with("libnwchemc_fake_engine.so"));
-        assert!(value("RGPOT_NWCHEM_ENGINE").ends_with("libnwchemc_fake_engine.so"));
-        assert!(value("CPMDC_LIBRARY").ends_with("libcpmdc_fake_engine.so"));
-        assert!(value("RGPOT_CPMD_ENGINE").ends_with("libcpmdc_fake_engine.so"));
+        let library = |stem: &str| {
+            format!(
+                "{}{stem}{}",
+                std::env::consts::DLL_PREFIX,
+                std::env::consts::DLL_SUFFIX
+            )
+        };
+        let nwchem = library("nwchemc_fake_engine");
+        let cpmd = library("cpmdc_fake_engine");
+        assert!(value("NWCHEMC_LIBRARY").ends_with(&nwchem));
+        assert!(value("RGPOT_NWCHEM_ENGINE").ends_with(&nwchem));
+        assert!(value("CPMDC_LIBRARY").ends_with(&cpmd));
+        assert!(value("RGPOT_CPMD_ENGINE").ends_with(&cpmd));
         assert_eq!(value("RGPOT_RPC_E2E_REQUIRED"), "1");
         let joined = plan
             .e2e_args
