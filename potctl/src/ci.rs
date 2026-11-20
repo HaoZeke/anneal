@@ -15,8 +15,8 @@ pub const TORCH_CPU_SPEC: &str = "torch>=2.10,<2.11";
 pub const TORCH_CPU_INDEX: &str = "https://download.pytorch.org/whl/cpu";
 pub const METATENSOR_TORCH_SPEC: &str = "metatensor-torch>=0.8.4,<0.9";
 pub const METATOMIC_TORCH_SPEC: &str = "metatomic-torch>=0.1.9,<0.2";
-pub const VESIN_SPEC: &str = "vesin>=0.5.2,<0.6";
-pub const VESIN_TORCH_SPEC: &str = "vesin-torch>=0.5.2,<0.6";
+pub const VESIN_SPEC: &str = "vesin>=0.6.0,<0.7";
+pub const VESIN_TORCH_SPEC: &str = "vesin-torch>=0.6.0,<0.7";
 
 pub type Result<T> = std::result::Result<T, String>;
 
@@ -1593,6 +1593,27 @@ mod tests {
     use super::*;
     use std::path::Path;
 
+    fn specs_match_vendored_minor(
+        vendored: &str,
+        vesin_spec: &str,
+        vesin_torch_spec: &str,
+    ) -> bool {
+        let mut parts = vendored.split('.');
+        let (Some(maj), Some(min)) = (parts.next(), parts.next()) else {
+            return false;
+        };
+        let min_num = match min.parse::<u64>() {
+            Ok(v) => v,
+            Err(_) => return false,
+        };
+        let lower = format!(">={maj}.{min}");
+        let upper = format!("<{maj}.{}", min_num + 1);
+        vesin_spec.contains(&lower)
+            && vesin_spec.contains(&upper)
+            && vesin_torch_spec.contains(&lower)
+            && vesin_torch_spec.contains(&upper)
+    }
+
     #[test]
     fn required_paths_are_under_root() {
         let root = Path::new("/tmp/rgpot-fake");
@@ -1820,6 +1841,24 @@ Options:
         assert!(paths
             .iter()
             .any(|p| p.ends_with("metatomic/torch/torch-2.10/include")));
+    }
+
+    #[test]
+    fn vesin_specs_match_vendored_minor() {
+        assert!(specs_match_vendored_minor(
+            "0.6.0",
+            "vesin>=0.6.0,<0.7",
+            "vesin-torch>=0.6.0,<0.7"
+        ));
+    }
+
+    #[test]
+    fn vesin_spec_mismatch_is_detected() {
+        assert!(!specs_match_vendored_minor(
+            "0.6.0",
+            "vesin>=0.5.2,<0.6",
+            "vesin-torch>=0.5.2,<0.6"
+        ));
     }
 
     #[test]
