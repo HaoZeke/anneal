@@ -476,6 +476,13 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
     list(APPEND RGPOT_SOURCES CppCore/rgpot/CBEPot/CBEPot.cc)
   endif()
   add_library(rgpot ${RGPOT_SOURCES})
+  # A static rgpot passes rgpot_nlist's OpenMP::OpenMP_CXX to its consumers
+  # as a link-only dependency, so the installed package has to define it.
+  get_target_property(_rgpot_type rgpot TYPE)
+  set(RGPOT_CONFIG_FIND_OPENMP OFF)
+  if(OpenMP_CXX_FOUND AND _rgpot_type STREQUAL "STATIC_LIBRARY")
+    set(RGPOT_CONFIG_FIND_OPENMP ON)
+  endif()
   target_compile_definitions(rgpot PRIVATE RGPOT_MODEL_BUILD)
   if(RGPOT_WITH_HIGHWAY)
     target_link_libraries(rgpot PRIVATE hwy)

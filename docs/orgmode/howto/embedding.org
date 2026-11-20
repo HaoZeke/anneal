@@ -161,6 +161,12 @@ add_subdirectory(external/rgpot)
 target_link_libraries(my_target PRIVATE rgpot::rgpot)
 #+end_src
 
+=rgpot::rgpot= keeps OpenMP private: its consumers compile without the OpenMP
+flag.
+A static =rgpot= links them with the OpenMP runtime library that =FindOpenMP=
+found, not with =-fopenmp=, and the installed =rgpotConfig.cmake= finds OpenMP
+for that.
+
 =rgpot::rgpot= exists only when =RGPOT_RPC_CLIENT_ONLY= is =OFF=.
 A client-only build defines the =ptlrpc= and =rgpot_client_bridge= targets
 instead.

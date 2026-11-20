@@ -1,0 +1,1 @@
+The installed CMake package of a static rgpot built with OpenMP now finds OpenMP itself. `find_package(rgpot)` used to fail at generate time because `rgpot_nlist` named `OpenMP::OpenMP_CXX` and nothing defined it. A consumer links the runtime library and is not compiled or linked with `-fopenmp`.

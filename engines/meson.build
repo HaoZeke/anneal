@@ -514,7 +514,23 @@ if (
         ],
         env: nested_meson_env,
         timeout: 1200,
+        is_parallel: false,
     )
+    _cmake_prog = find_program('cmake', required: false)
+    if _cmake_prog.found() and _nested_ninja.found()
+        test(
+            'cmake_consumer_openmp',
+            python3_engines,
+            args: [
+                files('test_cmake_consumer_openmp.py'),
+                meson.project_source_root(),
+                _cmake_prog.full_path(),
+            ],
+            env: nested_meson_env,
+            timeout: 1200,
+            is_parallel: false,
+        )
+    endif
     test(
         'gromacs_include_prefix',
         python3_engines,
