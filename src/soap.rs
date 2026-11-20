@@ -909,7 +909,413 @@ pub fn pullback_z(
 }
 
 /// Pullback of a stacked SOAP+ν=3 residual through the stacked analytic `J`.
+///
+/// `J` is formed row by row as its nonzeros and never as a dense matrix.
+/// It is the same matrix as [`jacobian_nu3`], entry for entry and in the
+/// order each entry is summed, so the step is the dense step to the bit.
+/// A non-finite entry, or a structure with no neighbour table to speak
+/// of, takes the dense route.
 pub fn pullback_nu3(
+    x: ArrayView1<f64>,
+    target: ArrayView1<f64>,
+    spec: SoapSpec,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+) -> Array1<f64> {
+    let n_at = x.len() / 3;
+    let dim = spec.feat_dim(species) + spec.nu3_feat_dim(species);
+    let degenerate = n_at < 2 || !(spec.rcut_nn > 0.0) || spec.n_max == 0 || spec.nu3_dim() == 0;
+    if degenerate || target.len() != n_at * dim {
+        return pullback_nu3_dense(x, target, spec, species, mobile);
+    }
+    let loc = local_nu3_z(x, spec, species);
+    let mut dp = Array1::zeros(n_at * dim);
+    for i in 0..n_at {
+        for t in 0..dim {
+            dp[i * dim + t] = target[i * dim + t] - loc[[i, t]];
+        }
+    }
+    let keep = mobile_mask(n_at, mobile);
+    let all_mobile = keep.iter().all(|&b| b);
+    if !all_mobile {
+        for i in 0..n_at {
+            if !keep[i] {
+                for t in 0..dim {
+                    dp[i * dim + t] = 0.0;
+                }
+            }
+        }
+    }
+    if !dp.iter().all(|value| value.is_finite()) {
+        return pullback_nu3_dense(x, target, spec, species, mobile);
+    }
+    let columns = (!all_mobile).then_some(keep.as_slice());
+    let Some(mut dr) = normal_solve_nu3(x, spec, species, columns, dp.view(), 1e-3) else {
+        return pullback_nu3_dense(x, target, spec, species, mobile);
+    };
+    if all_mobile {
+        strip_rigid(x, &mut dr);
+    } else {
+        for i in 0..n_at {
+            if !keep[i] {
+                dr[3 * i] = 0.0;
+                dr[3 * i + 1] = 0.0;
+                dr[3 * i + 2] = 0.0;
+            }
+        }
+    }
+    dr
+}
+
+/// The rows of one centre of the stacked Jacobian.
+///
+/// The rows of a centre read only its own coordinates and those of its
+/// neighbours, so they fit in a block of `3 * atoms.len()` columns of
+/// `dim` rows. `block` holds that block column by column, and the columns
+/// of an atom are the rows of `atoms` in ascending atom order.
+struct CentreBlock<'a> {
+    centre: usize,
+    atoms: &'a [usize],
+    channels: &'a [usize],
+    own: usize,
+    block: &'a [f64],
+    dim: usize,
+}
+
+/// How one radial index feeds the SOAP power spectrum: the packed row of
+/// the pair `(n, n')` that reads it, and the radial index whose coefficient
+/// multiplies the change in `c_{n lm}`.
+struct PowerRow {
+    pair: usize,
+    other: usize,
+    doubled: bool,
+}
+
+fn power_rows(n_max: usize) -> Vec<Vec<PowerRow>> {
+    let mut rows: Vec<Vec<PowerRow>> = (0..n_max).map(|_| Vec::new()).collect();
+    let mut pair = 0usize;
+    for na in 0..n_max {
+        for np in na..n_max {
+            if na == np {
+                rows[na].push(PowerRow {
+                    pair,
+                    other: na,
+                    doubled: true,
+                });
+            } else {
+                rows[na].push(PowerRow {
+                    pair,
+                    other: np,
+                    doubled: false,
+                });
+                rows[np].push(PowerRow {
+                    pair,
+                    other: na,
+                    doubled: false,
+                });
+            }
+            pair += 1;
+        }
+    }
+    rows
+}
+
+/// Hands each centre's rows of [`jacobian_nu3`] to `visit`, in centre order.
+///
+/// Every entry is summed over the neighbours, radial and angular indices in
+/// the order [`jacobian_z`] and [`jacobian_ace`] sum it, with the same
+/// harmonics and radial values, so each value is the dense entry.
+fn for_each_centre_block(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    species: Option<&[u32]>,
+    mut visit: impl FnMut(CentreBlock<'_>),
+) {
+    let n_at = x.len() / 3;
+    let channels = neighbor_channels(species);
+    let n_chan = channels.len();
+    let (n_max, l_max, rcut) = (spec.n_max, spec.l_max, spec.rcut_nn);
+    let n_lm = (l_max + 1) * (l_max + 1);
+    let dim1 = spec.dim();
+    let ace1 = spec.nu3_dim();
+    let d0 = dim1 * n_chan;
+    let dim = d0 + ace1 * n_chan;
+    let triples = ace1 / n_max;
+    let n_c = n_max * n_lm;
+    let table = crate::neighbors::NeighborTable::build(x, n_at, rcut);
+    let power = power_rows(n_max);
+    let l_of: Vec<usize> = (0..n_lm).map(lm_to_l).collect();
+    let mut block: Vec<f64> = Vec::new();
+    let mut transposed: Vec<Vec<f64>> = vec![Vec::new(); n_chan];
+    let mut neighbours: Vec<(usize, usize)> = Vec::new();
+    let mut atoms: Vec<usize> = Vec::new();
+    let mut slot_channel: Vec<usize> = Vec::new();
+    let mut tangent = vec![0.0; n_lm * 3];
+    let mut factor: Vec<f64> = Vec::new();
+    for i in 0..n_at {
+        let xi = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
+        let (_, ci) = atom_expand(x, i, n_at, rcut, spec, species, &table);
+        for ch in 0..n_chan {
+            let c0 = ch * n_c;
+            let db = crate::ace::d_from_c(&ci[c0..c0 + n_c], n_max, l_max);
+            let flat = &mut transposed[ch];
+            flat.clear();
+            flat.resize(n_c * ace1, 0.0);
+            for t in 0..ace1 {
+                for col_c in 0..n_c {
+                    flat[col_c * ace1 + t] = db[[t, col_c]];
+                }
+            }
+        }
+        neighbours.clear();
+        for jj in 0..n_at {
+            if jj == i {
+                continue;
+            }
+            let d = [
+                x[3 * jj] - xi[0],
+                x[3 * jj + 1] - xi[1],
+                x[3 * jj + 2] - xi[2],
+            ];
+            let r = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+            if r >= rcut || r < 1e-12 {
+                continue;
+            }
+            neighbours.push((jj, neighbor_channel(species, jj, &channels)));
+        }
+        let own = neighbours.partition_point(|&(jj, _)| jj < i);
+        atoms.clear();
+        slot_channel.clear();
+        for &(jj, ch) in &neighbours[..own] {
+            atoms.push(jj);
+            slot_channel.push(ch);
+        }
+        atoms.push(i);
+        slot_channel.push(0);
+        for &(jj, ch) in &neighbours[own..] {
+            atoms.push(jj);
+            slot_channel.push(ch);
+        }
+        block.clear();
+        block.resize(3 * atoms.len() * dim, 0.0);
+        for (k, &(jj, ch)) in neighbours.iter().enumerate() {
+            let slot = if k < own { k } else { k + 1 };
+            let d = [
+                x[3 * jj] - xi[0],
+                x[3 * jj + 1] - xi[1],
+                x[3 * jj + 2] - xi[2],
+            ];
+            let r = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+            let u = [d[0] / r, d[1] / r, d[2] / r];
+            let (ylm, dylm) = tesseral(u, l_max);
+            let fc = fcut(r, rcut);
+            let dfc = dfcut(r, rcut);
+            let mut proj = [[0.0; 3]; 3];
+            for a in 0..3 {
+                for b in 0..3 {
+                    proj[a][b] = if a == b { 1.0 } else { 0.0 } - u[b] * u[a];
+                }
+            }
+            for lm in 0..n_lm {
+                for a in 0..3 {
+                    let mut s = 0.0;
+                    for b in 0..3 {
+                        s += dylm[lm][b] * proj[a][b];
+                    }
+                    tangent[lm * 3 + a] = s / r;
+                }
+            }
+            let c_ch = &ci[ch * n_c..(ch + 1) * n_c];
+            let db_t = &transposed[ch];
+            for n in 0..n_max {
+                let g = radial(n, r, rcut);
+                let dg = dradial(n, r, rcut);
+                let w = g * fc;
+                let dw = dg * fc + g * dfc;
+                for lm in 0..n_lm {
+                    let yv = ylm[lm];
+                    let l = l_of[lm];
+                    let col_c = n * n_lm + lm;
+                    factor.clear();
+                    factor.extend(power[n].iter().map(|row| {
+                        let c = c_ch[row.other * n_lm + lm];
+                        if row.doubled { 2.0 * c } else { c }
+                    }));
+                    let db_col =
+                        &db_t[col_c * ace1 + n * triples..col_c * ace1 + (n + 1) * triples];
+                    for a in 0..3 {
+                        let dc = dw * u[a] * yv + w * tangent[lm * 3 + a];
+                        let pos = (3 * slot + a) * dim;
+                        let own_col = (3 * own + a) * dim;
+                        for (row, f) in power[n].iter().zip(&factor) {
+                            let at = ch * dim1 + row.pair * (l_max + 1) + l;
+                            let value = f * dc;
+                            block[pos + at] += value;
+                            block[own_col + at] -= value;
+                        }
+                        let at = d0 + ch * ace1 + n * triples;
+                        for (cell, b) in block[pos + at..pos + at + triples].iter_mut().zip(db_col)
+                        {
+                            *cell += b * dc;
+                        }
+                        for (cell, b) in block[own_col + at..own_col + at + triples]
+                            .iter_mut()
+                            .zip(db_col)
+                        {
+                            *cell -= b * dc;
+                        }
+                    }
+                }
+            }
+        }
+        visit(CentreBlock {
+            centre: i,
+            atoms: &atoms,
+            channels: &slot_channel,
+            own,
+            block: &block,
+            dim,
+        });
+    }
+}
+
+/// The row ranges of a centre's block that a neighbour channel can touch.
+fn channel_rows(spec: SoapSpec, n_chan: usize, channel: usize) -> [std::ops::Range<usize>; 2] {
+    let (dim1, ace1) = (spec.dim(), spec.nu3_dim());
+    let d0 = dim1 * n_chan;
+    [
+        channel * dim1..(channel + 1) * dim1,
+        d0 + channel * ace1..d0 + (channel + 1) * ace1,
+    ]
+}
+
+/// Adds `Σ_rows left[row] ⊗ right[row]` onto the 3 x 3 block of `a` at
+/// `(3p, 3q)`, one row after another as the dense products would add.
+fn accumulate_block(
+    a: &mut [f64],
+    ncoord: usize,
+    (p, q): (usize, usize),
+    left: [&[f64]; 3],
+    right: [&[f64]; 3],
+    rows: &[std::ops::Range<usize>],
+) {
+    let mut cell = [[0.0; 3]; 3];
+    for (alpha, line) in cell.iter_mut().enumerate() {
+        line.copy_from_slice(&a[(3 * p + alpha) * ncoord + 3 * q..][..3]);
+    }
+    for range in rows {
+        for row in range.clone() {
+            let vp = [left[0][row], left[1][row], left[2][row]];
+            let vq = [right[0][row], right[1][row], right[2][row]];
+            for alpha in 0..3 {
+                for beta in 0..3 {
+                    cell[alpha][beta] += vp[alpha] * vq[beta];
+                }
+            }
+        }
+    }
+    for (alpha, line) in cell.iter().enumerate() {
+        a[(3 * p + alpha) * ncoord + 3 * q..][..3].copy_from_slice(line);
+    }
+}
+
+/// `(JᵀJ + λI) dr = Jᵀ dp` for the stacked Jacobian, or `None` when a
+/// value is not finite.
+///
+/// Each element of `JᵀJ` and `Jᵀdp` is summed centre by centre and row by
+/// row, as [`tikhonov_jtj`] sums it. A product with a structural zero is
+/// not formed when it is a whole block, and is formed as a signed zero
+/// otherwise, which adds nothing to a sum that cannot be `-0.0`. The
+/// products above the diagonal of an atom's own block are overwritten by
+/// the symmetrising copy. `columns` names the atoms whose coordinates move.
+fn normal_solve_nu3(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    species: Option<&[u32]>,
+    columns: Option<&[bool]>,
+    dp: ArrayView1<f64>,
+    lambda: f64,
+) -> Option<Array1<f64>> {
+    let ncoord = x.len();
+    let n_chan = neighbor_channels(species).len();
+    let mut a = vec![0.0; ncoord * ncoord];
+    let mut rhs = vec![0.0; ncoord];
+    let mut finite = true;
+    for_each_centre_block(x, spec, species, |centre| {
+        finite = finite && centre.block.iter().all(|value| value.is_finite());
+        if !finite {
+            return;
+        }
+        let dim = centre.dim;
+        let target: Vec<f64> = (0..dim).map(|row| dp[centre.centre * dim + row]).collect();
+        let column = |slot: usize, alpha: usize| {
+            &centre.block[(3 * slot + alpha) * dim..(3 * slot + alpha + 1) * dim]
+        };
+        let triple = |slot: usize| [column(slot, 0), column(slot, 1), column(slot, 2)];
+        let rows_of = |slot: usize| -> [std::ops::Range<usize>; 2] {
+            if slot == centre.own {
+                [0..dim, 0..0]
+            } else {
+                channel_rows(spec, n_chan, centre.channels[slot])
+            }
+        };
+        for (slot, &atom) in centre.atoms.iter().enumerate() {
+            if columns.is_some_and(|keep| !keep[atom]) {
+                continue;
+            }
+            let rows = rows_of(slot);
+            for alpha in 0..3 {
+                let mut sum = rhs[3 * atom + alpha];
+                for range in &rows {
+                    for row in range.clone() {
+                        sum += column(slot, alpha)[row] * target[row];
+                    }
+                }
+                rhs[3 * atom + alpha] = sum;
+            }
+            for (other, &partner) in centre.atoms[..slot].iter().enumerate() {
+                if columns.is_some_and(|keep| !keep[partner]) {
+                    continue;
+                }
+                let shared = if slot == centre.own {
+                    rows_of(other)
+                } else if other == centre.own || centre.channels[other] == centre.channels[slot] {
+                    rows.clone()
+                } else {
+                    continue;
+                };
+                accumulate_block(
+                    &mut a,
+                    ncoord,
+                    (atom, partner),
+                    triple(slot),
+                    triple(other),
+                    &shared,
+                );
+            }
+            let (left, right) = (triple(slot), triple(slot));
+            accumulate_block(&mut a, ncoord, (atom, atom), left, right, &rows);
+        }
+    });
+    if !finite {
+        return None;
+    }
+    for c in 0..ncoord {
+        for d in 0..c {
+            a[d * ncoord + c] = a[c * ncoord + d];
+        }
+    }
+    for c in 0..ncoord {
+        a[c * ncoord + c] += lambda.max(1e-12);
+    }
+    Some(match chol_solve_flat(&a, &rhs, ncoord) {
+        Some(step) => Array1::from(step),
+        None => Array1::zeros(ncoord),
+    })
+}
+
+/// The dense route of [`pullback_nu3`].
+fn pullback_nu3_dense(
     x: ArrayView1<f64>,
     target: ArrayView1<f64>,
     spec: SoapSpec,
@@ -3449,38 +3855,47 @@ fn tikhonov_jtj(j: &Array2<f64>, dp: ArrayView1<f64>, lambda: f64) -> Array1<f64
 
 fn chol_solve(a: &Array2<f64>, b: &Array1<f64>) -> Option<Array1<f64>> {
     let n = b.len();
-    let mut l = Array2::<f64>::zeros((n, n));
+    let flat: Vec<f64> = a.iter().copied().collect();
+    let rhs: Vec<f64> = b.iter().copied().collect();
+    chol_solve_flat(&flat, &rhs, n).map(Array1::from)
+}
+
+/// Cholesky solve of a row-major `n x n` system, summing in the order of
+/// the indexed loops it replaces.
+fn chol_solve_flat(a: &[f64], b: &[f64], n: usize) -> Option<Vec<f64>> {
+    let mut l = vec![0.0; n * n];
     for i in 0..n {
         for j in 0..=i {
-            let mut s = a[[i, j]];
-            for k in 0..j {
-                s -= l[[i, k]] * l[[j, k]];
+            let mut s = a[i * n + j];
+            let (row_i, row_j) = (&l[i * n..i * n + j], &l[j * n..j * n + j]);
+            for (li, lj) in row_i.iter().zip(row_j) {
+                s -= li * lj;
             }
             if i == j {
                 if s <= 0.0 {
                     return None;
                 }
-                l[[i, j]] = s.sqrt();
+                l[i * n + j] = s.sqrt();
             } else {
-                l[[i, j]] = s / l[[j, j]];
+                l[i * n + j] = s / l[j * n + j];
             }
         }
     }
-    let mut y = Array1::<f64>::zeros(n);
+    let mut y = vec![0.0; n];
     for i in 0..n {
         let mut s = b[i];
         for k in 0..i {
-            s -= l[[i, k]] * y[k];
+            s -= l[i * n + k] * y[k];
         }
-        y[i] = s / l[[i, i]];
+        y[i] = s / l[i * n + i];
     }
-    let mut z = Array1::<f64>::zeros(n);
+    let mut z = vec![0.0; n];
     for i in (0..n).rev() {
         let mut s = y[i];
         for k in (i + 1)..n {
-            s -= l[[k, i]] * z[k];
+            s -= l[k * n + i] * z[k];
         }
-        z[i] = s / l[[i, i]];
+        z[i] = s / l[i * n + i];
     }
     Some(z)
 }
@@ -3783,6 +4198,107 @@ mod tests {
                 );
             }
         }
+    }
+
+    fn bits(values: &Array1<f64>) -> Vec<u64> {
+        values.iter().map(|value| value.to_bits()).collect()
+    }
+
+    fn leftover(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) -> Array1<f64> {
+        let loc = local_nu3_z(x, spec, species);
+        let mut target = Array1::zeros(loc.len());
+        for (slot, value) in target.iter_mut().zip(loc.iter()) {
+            *slot = 0.9 * value;
+        }
+        target
+    }
+
+    #[test]
+    fn the_rows_of_the_stacked_jacobian_are_its_nonzeros() {
+        let n = 31;
+        let cfg = Config::recommended(n);
+        let mut rng = StdRng::seed_from_u64(2001);
+        let x = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, &mut rng);
+        let species: Vec<u32> = (0..n).map(|atom| 1 + (atom % 3 == 0) as u32).collect();
+        let spec = SoapSpec {
+            n_max: 3,
+            l_max: 6,
+            rcut_nn: cfg.neighbour_cutoff,
+        };
+        for labels in [None, Some(species.as_slice())] {
+            let dense = jacobian_nu3(x.view(), spec, labels);
+            let sparse = sparse_rows(&dense);
+            let mut seen = 0;
+            for_each_centre_block(x.view(), spec, labels, |centre| {
+                for row in 0..centre.dim {
+                    let mut stored = Vec::new();
+                    for (slot, &atom) in centre.atoms.iter().enumerate() {
+                        for a in 0..3 {
+                            let v = centre.block[(3 * slot + a) * centre.dim + row];
+                            if v != 0.0 {
+                                stored.push((3 * atom + a, v.to_bits()));
+                            }
+                        }
+                    }
+                    let expect: Vec<(usize, u64)> = sparse[centre.centre * centre.dim + row]
+                        .iter()
+                        .map(|&(column, value)| (column, value.to_bits()))
+                        .collect();
+                    assert_eq!(stored, expect, "centre {} row {row}", centre.centre);
+                }
+                seen += 1;
+            });
+            assert_eq!(seen, n);
+        }
+    }
+
+    #[test]
+    fn the_sparse_pullback_is_the_dense_pullback_to_the_bit() {
+        let n = 31;
+        let cfg = Config::recommended(n);
+        let spec = SoapSpec {
+            n_max: 3,
+            l_max: 6,
+            rcut_nn: cfg.neighbour_cutoff,
+        };
+        let species: Vec<u32> = (0..n).map(|atom| 1 + (atom % 3 == 0) as u32).collect();
+        let mobile: Vec<usize> = (0..n).filter(|atom| atom % 4 != 1).collect();
+        for seed in 0..3u64 {
+            let mut rng = StdRng::seed_from_u64(3000 + seed);
+            let x = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, &mut rng);
+            for labels in [None, Some(species.as_slice())] {
+                for frozen in [None, Some(mobile.as_slice())] {
+                    let target = leftover(x.view(), spec, labels);
+                    let fast = pullback_nu3(x.view(), target.view(), spec, labels, frozen);
+                    let slow = pullback_nu3_dense(x.view(), target.view(), spec, labels, frozen);
+                    assert!(fast.iter().any(|value| *value != 0.0));
+                    assert_eq!(bits(&fast), bits(&slow), "seed {seed}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_sparse_pullback_falls_back_on_a_non_finite_structure() {
+        let n = 12;
+        let cfg = Config::recommended(n);
+        let spec = SoapSpec {
+            n_max: 3,
+            l_max: 6,
+            rcut_nn: cfg.neighbour_cutoff,
+        };
+        let mut rng = StdRng::seed_from_u64(3100);
+        let mut x = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, &mut rng);
+        let target = leftover(x.view(), spec, None);
+        x[4] = f64::NAN;
+        let fast = pullback_nu3(x.view(), target.view(), spec, None, None);
+        let slow = pullback_nu3_dense(x.view(), target.view(), spec, None, None);
+        assert_eq!(bits(&fast), bits(&slow));
+        let lone = Array1::from_vec(vec![0.0, 0.0, 0.0]);
+        let target = Array1::zeros(spec.feat_dim(None) + spec.nu3_feat_dim(None));
+        let fast = pullback_nu3(lone.view(), target.view(), spec, None, None);
+        let slow = pullback_nu3_dense(lone.view(), target.view(), spec, None, None);
+        assert_eq!(bits(&fast), bits(&slow));
     }
 
     #[test]
