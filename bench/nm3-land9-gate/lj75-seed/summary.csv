@@ -1,0 +1,2 @@
+cell,n,budget,reference,hits_a,hits_b,evals_median_a,evals_median_b,fisher_p,mannwhitney_p,outside_per_call_median_a,outside_per_call_median_b,outside_ratio,aa_n,aa_outside_per_call_median_a1,aa_outside_per_call_median_a2,aa_outside_ratio,verdict,reasons
+lj75-seed,12,4000000,-397.492331,12,12,44176.0,16136.5,1,0.92952239,1.1434417e-05,1.6668428e-05,1.4577418,,,,,FAIL,outside
