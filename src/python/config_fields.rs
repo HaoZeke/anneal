@@ -11,7 +11,7 @@ use pyo3::IntoPyObjectExt;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
-use super::errors::invalid_argument;
+use super::errors::{feature_unavailable, invalid_argument};
 use crate::methods::cluster_hopping::Config;
 
 fn unknown_field(name: &str) -> PyErr {
@@ -68,15 +68,47 @@ fn whole<'py, T: FromPyObject<'py>>(name: &str, value: &Bound<'py, PyAny>) -> Py
     })
 }
 
+/// A finite number inside the range the search asserts on. Outside it the
+/// Rust constructor that reads the setting panics, and a panic reaches
+/// Python as `PanicException`.
 fn finite(name: &str, value: &Bound<'_, PyAny>) -> PyResult<f64> {
     let number: f64 = value.extract()?;
-    if number.is_finite() {
+    if !number.is_finite() {
+        return Err(invalid_argument(format!(
+            "{name} must be finite, got {number}"
+        )));
+    }
+    let (inside, rule) = match name {
+        "theta" => (number > 0.0 && number < 2.0, "lie strictly between 0 and 2"),
+        "calibrate_quantile" | "bayes_threshold" => ((0.0..1.0).contains(&number), "lie in [0, 1)"),
+        "contextual_floor" | "bayes_exploration" => {
+            ((0.0..=1.0).contains(&number), "lie in [0, 1]")
+        }
+        "diversity_floor" => (number > 0.0 && number <= 1.0, "lie in (0, 1]"),
+        "height_revisits" | "length_scale" | "merge_radius" | "call_floor" => {
+            (number > 0.0, "be positive")
+        }
+        "bias_gamma" => (number > 1.0, "exceed 1"),
+        "bias_height" => (number >= 0.0, "be at least 0"),
+        _ => (true, ""),
+    };
+    if inside {
         Ok(number)
     } else {
         Err(invalid_argument(format!(
-            "{name} must be finite, got {number}"
+            "{name} must {rule}, got {number}"
         )))
     }
+}
+
+fn flag(name: &str, value: &Bound<'_, PyAny>) -> PyResult<bool> {
+    let on: bool = value.extract()?;
+    if name == "shape_keyed" && on && !cfg!(feature = "ira") {
+        return Err(feature_unavailable(
+            "shape_keyed needs the ira feature, which this build lacks",
+        ));
+    }
+    Ok(on)
 }
 
 macro_rules! config_fields {
@@ -121,7 +153,7 @@ macro_rules! config_fields {
         /// length, or is a structure, is set by a constructor instead.
         pub(super) fn set(cfg: &mut Config, name: &str, value: &Bound<'_, PyAny>) -> PyResult<()> {
             match name {
-                $(stringify!($b) => cfg.$b = value.extract::<bool>()?,)*
+                $(stringify!($b) => cfg.$b = flag(name, value)?,)*
                 $(stringify!($f) => cfg.$f = finite(name, value)?,)*
                 $(stringify!($u) => {
                     if name == "n_points" {

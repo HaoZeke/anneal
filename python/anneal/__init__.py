@@ -270,6 +270,8 @@ def cluster_search(
     ring_moves: bool | None = None,
     hold_stereocentres: bool | None = None,
     measured_energy_scale: bool | None = None,
+    config: Config | None = None,
+    full: bool = False,
 ):
     """Run the measured cluster-search layer.
 
@@ -348,18 +350,45 @@ def cluster_search(
         deposit height from the median quenched energy change of its opening
         hops instead of an energy scale of one. ``None`` keeps the preset's:
         on for ``recommended=True``, off otherwise.
+      config: a ``Config`` to run as it stands, from any preset and any
+        ``replace``. ``n`` must equal ``config.n_points``. The config carries
+        what ``derived``, ``communicating``, ``rigid``, ``length_scale``,
+        ``species``, ``sigmas``, ``water_sites``, ``groups``, ``local_step``,
+        ``ring_moves``, ``hold_stereocentres`` and ``measured_energy_scale``
+        would set, so passing any of them with ``config`` raises
+        ``InvalidArgumentError``, and ``recommended`` is not read. A config
+        with rigid bodies searches the ``6 * n`` chart and starts from a
+        compact placement when ``start`` is ``None``. A molecular config
+        needs ``start``.
+      full: return every field of the Rust ``Outcome`` instead of the short
+        result below.
 
     A callback raising a ``BaseException`` that is not an ``Exception``, such
     as ``KeyboardInterrupt`` or a harness stop, ends the search at once.
     The best geometry found is kept, and the exception is re-raised here.
 
-    Returns a dict with ``best`` (flat coordinates in the state layout),
-    ``best_energy``, ``hops``, ``accepted``, ``nve_unavailable``,
-    ``local_step`` and ``quench_seconds``. ``accepted`` counts the hops the
-    acceptance rule took. ``nve_unavailable`` is true when a constant-energy
-    (NVE) escape was requested and that escape is not compiled; the
-    ``python`` feature compiles it. ``quench_seconds`` is ``None`` unless
-    ``local_step="auto"`` timed a potential call and a TRIC step, in seconds.
+    Returns a dict. The short result has ``best`` (flat coordinates in the
+    state layout), ``best_energy``, ``hops``, ``accepted`` (the hops the
+    acceptance rule took), ``nve_unavailable`` (true when a constant-energy
+    escape was requested and is not compiled; the ``python`` feature compiles
+    it), ``local_step`` and ``quench_seconds`` (``None`` unless
+    ``local_step="auto"`` timed a potential call and a TRIC step, in
+    seconds).
+
+    With ``full=True`` the dict also has one key for every other field of the
+    Rust ``Outcome``: ``final_state``, ``final_energy``, ``charged``,
+    ``basins``, ``returned``, the ``accepted_transitions`` list of dicts,
+    ``proposal_counts``, the counters of each move family, and the optional
+    reports ``superbasin``, ``superbasin_counts``, ``superbasin_archive``,
+    ``energy_trace``, ``funnel``, ``transport``, ``delayed``, ``hmc`` and
+    ``energy_bias``, which are ``None`` or empty when their feature was off.
+    A tuple field of the struct is a tuple, and a structured report is a dict
+    of its fields. ``stop`` is the lower-case code of the reason the search
+    ended (``budget``, ``target``, ``caller_stop``, ``retired``,
+    ``nve_unavailable``, ``max_hops`` or ``no_trajectory``), and
+    ``stop_reason`` is the text a checkpoint gave when ``stop`` is
+    ``retired``. In the Outcome the struct's ``best_state`` is ``best`` and
+    its ``best`` is ``best_energy``.
     """
     start_arr = None if start is None else np.asarray(start, dtype=np.float64).reshape(-1)
     args = (
@@ -395,6 +424,10 @@ def cluster_search(
         kwargs["hold_stereocentres"] = bool(hold_stereocentres)
     if measured_energy_scale is not None:
         kwargs["measured_energy_scale"] = bool(measured_energy_scale)
+    if config is not None:
+        kwargs["config"] = config
+    if full:
+        kwargs["full"] = True
     out = _core_cluster_search(*args, **kwargs)
     out["best"] = np.asarray(out["best"], dtype=np.float64)
     return out

@@ -102,7 +102,20 @@ def test_every_default_scalar_is_finite_so_replace_can_demand_it():
                 assert value is None or math.isfinite(value), name
 
 
-def changed(value):
+CONSTRAINED = {
+    "theta": 0.75,
+    "calibrate_quantile": 0.25,
+    "bayes_threshold": 0.25,
+    "bayes_exploration": 0.25,
+    "contextual_floor": 0.25,
+    "diversity_floor": 0.5,
+    "bias_gamma": 3.0,
+}
+
+
+def changed(name, value):
+    if name in CONSTRAINED:
+        return CONSTRAINED[name]
     if isinstance(value, bool):
         return not value
     if isinstance(value, float):
@@ -115,8 +128,12 @@ def test_replace_sets_one_scalar_and_leaves_the_original(name, rust_type):
     base = Config.recommended(13)
     before = base.resolved_sha256()
     old = base.get(name)
-    new = changed(0 if old is None else old)
-    edited = base.replace(**{name: new})
+    new = changed(name, 0 if old is None else old)
+    try:
+        edited = base.replace(**{name: new})
+    except anneal.FeatureUnavailableError:
+        assert name == "shape_keyed" and new is True
+        return
     assert edited.get(name) == new
     assert base.get(name) == old
     assert base.resolved_sha256() == before
@@ -125,10 +142,10 @@ def test_replace_sets_one_scalar_and_leaves_the_original(name, rust_type):
     assert others == {key: value for key, value in base.to_dict().items() if key != name}
 
 
-@pytest.mark.parametrize("name", ["target_energy", "call_floor"])
-def test_an_optional_float_takes_none_and_a_number(name):
-    cfg = Config.recommended(13).replace(**{name: -3.5})
-    assert cfg.get(name) == -3.5
+@pytest.mark.parametrize("name, value", [("target_energy", -3.5), ("call_floor", 3.5)])
+def test_an_optional_float_takes_none_and_a_number(name, value):
+    cfg = Config.recommended(13).replace(**{name: value})
+    assert cfg.get(name) == value
     assert cfg.replace(**{name: None}).get(name) is None
 
 
@@ -210,6 +227,7 @@ def test_the_class_docstring_describes_the_current_surface():
     doc = Config.__doc__
     assert "field_names" in doc
     assert "replace" in doc
+    assert "cluster_search(config=" in doc
 
 
 def test_scaled_presets_take_declared_units():

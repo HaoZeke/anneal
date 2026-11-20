@@ -648,6 +648,8 @@ def cluster_search(
     ring_moves: bool | None = None,
     hold_stereocentres: bool | None = None,
     measured_energy_scale: bool | None = None,
+    config: Config | None = None,
+    full: bool = False,
 ) -> _Result: ...
 def quench(
     fg_fn: Callable[[_Vector], tuple[float, ArrayLike]],

@@ -67,7 +67,6 @@ pub(crate) fn bounds_error(msg: impl Into<String>) -> PyErr {
     BoundsError::new_err(msg.into())
 }
 
-#[cfg(not(feature = "graphkey"))]
 pub(crate) fn feature_unavailable(msg: impl Into<String>) -> PyErr {
     FeatureUnavailableError::new_err(msg.into())
 }

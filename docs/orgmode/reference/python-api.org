@@ -171,6 +171,22 @@ finite numbers, whole numbers and the two optional numbers. It refuses
 a preset sets. =pytest/test_config_fields.py= reads =config.rs= and fails
 when a field of the struct has no entry.
 
+A setting that the search asserts on is checked where it is set, and a value
+outside its range raises =InvalidArgumentError= naming the setting. Without
+this check the Rust assert would reach Python as =PanicException=.
+
+| Setting                                              | Accepted values       |
+|------------------------------------------------------+-----------------------|
+| =theta=                                              | strictly in (0, 2)    |
+| =calibrate_quantile=, =bayes_threshold=              | in [0, 1)             |
+| =contextual_floor=, =bayes_exploration=              | in [0, 1]             |
+| =diversity_floor=                                    | in (0, 1]             |
+| =bias_gamma=                                         | above 1               |
+| =bias_height=                                        | at least 0            |
+| =height_revisits=, =length_scale=, =merge_radius=,   | positive              |
+| =call_floor=                                         |                       |
+| =shape_keyed=                                        | =True= needs the =ira= build feature, else =FeatureUnavailableError= |
+
 #+begin_src python
 import anneal
 
@@ -187,4 +203,45 @@ assert short.resolved_sha256() != cfg.resolved_sha256()
 
 morse = anneal.Config.recommended_for_pair(13, "morse", rho=6.0)
 assert morse.get("length_scale") < 1.0
+#+end_src
+
+** Searching with a Config
+
+=cluster_search(..., config=cfg)= runs the search a =Config= describes, so
+that every setting above reaches the search, not only the few that have a
+keyword. The config fixes the cluster size, the move library, the species
+and the scales, so =n= must equal =cfg.n_points= and the keywords that
+describe them (=recommended=False=, =derived=, =communicating=, =rigid=,
+=length_scale=, =species=, =sigmas=, =water_sites=, =groups=, =local_step=,
+=ring_moves=, =hold_stereocentres=, =measured_energy_scale=) raise
+=InvalidArgumentError= beside it. A molecular config also needs =start=.
+
+The result is short by default: =best=, =best_energy=, =hops=, =accepted=,
+=nve_unavailable=, =local_step= and =quench_seconds=. With =full=True= it
+is the whole Rust =Outcome=: every field has a key, with
+=best_energy= for the lowest value, =best= for its state and =final_state=
+for the live chain. =stop= is the code for why the run ended
+(="budget"=, ="target"=, ="max_hops"=, ="retired"= with =stop_reason=, or
+=None=). The optional reports (=superbasin=, =superbasin_counts=,
+=superbasin_archive=, =energy_bias=, =delayed=, =energy_trace=, =hmc=) are
+empty unless the config asks for them. =pytest/test_cluster_search_config.py=
+reads the =Outcome= struct and fails when a field has no key.
+
+#+begin_src python
+import numpy as np
+import anneal
+
+def energy(x):
+    return float(np.sum(x ** 2))
+
+def gradient(x):
+    return 2.0 * x
+
+cfg = anneal.Config.recommended(4).replace(max_hops=3)
+out = anneal.cluster_search(
+    energy, gradient, n=4, budget=2000, seed=1, config=cfg, full=True
+)
+assert out["stop"] == "max_hops" and out["hops"] <= 3
+assert out["final_state"].shape == (12,)
+assert len(out["visit_counts"]) == 3
 #+end_src

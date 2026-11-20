@@ -37,6 +37,7 @@ mod config_fields;
 mod device;
 mod errors;
 mod landfold;
+mod outcome;
 mod portfolio_peers;
 
 /// Drop the GIL before native search that may call back into Python.
@@ -2827,7 +2828,8 @@ fn osa_acceptance_rate(
 /// `Config.derived(n)` or `Config.for_cluster(n)`; `Config.field_names()`
 /// lists every setting. `get`, `to_dict` and `replace` read and change the
 /// scalar ones. `recommended` is the measured default: composed surface
-/// relocations, depth-rewarded move allocation and tabu on stall.
+/// relocations, depth-rewarded move allocation and tabu on stall. Pass the
+/// result to `cluster_search(config=...)`.
 #[pyclass(name = "Config")]
 #[derive(Clone)]
 pub struct PyClusterConfig {
@@ -3176,7 +3178,9 @@ impl PyClusterConfig {
     }
 
     /// A copy with scalar settings changed: `cfg.replace(relax_steps=500)`.
-    /// A structured setting, and `n_points`, come from a preset instead.
+    /// A structured setting, and `n_points`, come from a preset instead. A
+    /// value outside the range the search asserts on raises
+    /// `InvalidArgumentError`.
     #[pyo3(signature = (**fields))]
     fn replace(&self, fields: Option<&Bound<'_, PyDict>>) -> PyResult<Self> {
         let mut inner = self.inner.clone();
@@ -3825,6 +3829,11 @@ fn rigid_probe(
 ///     search, the temperature and deposit height are read from the opening
 ///     hops. Unset keeps the preset's: on for `recommended=True`, off
 ///     otherwise.
+///   config: a `Config` to run as it stands. `n` must equal its `n_points`,
+///     and a keyword that it already decides is refused.
+///   full: return every field of `Outcome`, not only `best`, `best_energy`,
+///     `hops`, `accepted`, `nve_unavailable`, `local_step` and
+///     `quench_seconds`.
 ///
 /// A callback raising `BaseException` that is not an `Exception`, such as
 /// `KeyboardInterrupt`, stops the search at once. The best state found is
@@ -3854,6 +3863,8 @@ fn rigid_probe(
     ring_moves = None,
     hold_stereocentres = None,
     measured_energy_scale = None,
+    config = None,
+    full = false,
 ))]
 fn cluster_search(
     py: Python<'_>,
@@ -3879,9 +3890,56 @@ fn cluster_search(
     ring_moves: Option<bool>,
     hold_stereocentres: Option<bool>,
     measured_energy_scale: Option<bool>,
+    config: Option<PyRef<'_, PyClusterConfig>>,
+    full: bool,
 ) -> PyResult<Py<PyDict>> {
-    use crate::methods::cluster_hopping::Config;
+    use crate::methods::cluster_hopping::{Config, MoveLibrary};
     use crate::methods::tric_opt::LocalStep;
+
+    let config = config.map(|held| held.inner.clone());
+    if let Some(cfg) = config.as_ref() {
+        if cfg.n_points != n {
+            return Err(invalid_argument(format!(
+                "n is {n} but the config has {} points",
+                cfg.n_points
+            )));
+        }
+        let carried = [
+            ("recommended=False", !recommended),
+            ("derived", derived),
+            ("communicating", communicating),
+            ("rigid", rigid),
+            ("length_scale", length_scale.is_some()),
+            ("species", species.is_some()),
+            ("sigmas", sigmas.is_some()),
+            ("water_sites", water_sites.is_some()),
+            ("groups", groups.is_some()),
+            ("local_step", local_step.is_some()),
+            ("ring_moves", ring_moves.is_some()),
+            ("hold_stereocentres", hold_stereocentres.is_some()),
+            ("measured_energy_scale", measured_energy_scale.is_some()),
+        ];
+        let clashing: Vec<&str> = carried
+            .iter()
+            .filter_map(|(name, given)| given.then_some(*name))
+            .collect();
+        if !clashing.is_empty() {
+            return Err(invalid_argument(format!(
+                "config carries {}; set them on the Config instead",
+                clashing.join(", ")
+            )));
+        }
+    }
+    let rigid = config
+        .as_ref()
+        .map_or(rigid, |cfg| cfg.rigid_body_geometry.is_some());
+    let from_config = config.is_some();
+    let molecular_config = config
+        .as_ref()
+        .is_some_and(|cfg| matches!(cfg.move_library, MoveLibrary::Molecular { .. }));
+    if molecular_config && start.is_none() {
+        return Err(invalid_argument("a molecular config needs a start"));
+    }
 
     let local_step = match local_step {
         None => None,
@@ -4009,10 +4067,12 @@ fn cluster_search(
         None => None,
     };
     let scale = length_scale.unwrap_or(1.0);
-    let molecular = groups.is_some();
-    let stock = (species.is_some() || rigid) && !molecular;
+    let molecular = groups.is_some() || molecular_config;
+    let stock = (species.is_some() || rigid) && !molecular && !from_config;
     let has_water = water.is_some();
-    let mut cfg = if let Some(groups) = groups {
+    let mut cfg = if let Some(cfg) = config {
+        cfg
+    } else if let Some(groups) = groups {
         let labels = species.clone().unwrap_or_default();
         let mut cfg = if recommended {
             Config::recommended_molecular(labels, groups, 1.0)
@@ -4118,7 +4178,7 @@ fn cluster_search(
             Array1::from_elem(dim, extent),
             0.0,
         )
-    } else if molecular {
+    } else if molecular || from_config {
         cluster_bounds(n, dim, cfg.length_scale)
     } else {
         cluster_bounds(n, dim, scale)
@@ -4162,21 +4222,28 @@ fn cluster_search(
     }
     .map_err(|err| search_error(&err))?;
     errors.finish(py)?;
+    let to_layout = |block: Vec<f64>| {
+        if interleaved {
+            crate::potentials::interleaved_gmin_from_block(&block)
+        } else {
+            block
+        }
+    };
     let best_block = out
         .best_state
+        .as_ref()
         .map(|value| value.to_vec())
         .unwrap_or_else(|| vec![0.0; dim]);
-    let best = if interleaved {
-        crate::potentials::interleaved_gmin_from_block(&best_block)
-    } else {
-        best_block
-    };
     let dict = PyDict::new(py);
-    dict.set_item("best", PyArray1::from_vec(py, best))?;
-    dict.set_item("best_energy", out.best)?;
-    dict.set_item("hops", out.hops)?;
-    dict.set_item("accepted", out.accepted)?;
-    dict.set_item("nve_unavailable", out.nve_unavailable)?;
+    dict.set_item("best", PyArray1::from_vec(py, to_layout(best_block)))?;
+    if full {
+        outcome::fill(py, &dict, &out, &to_layout)?;
+    } else {
+        dict.set_item("best_energy", out.best)?;
+        dict.set_item("hops", out.hops)?;
+        dict.set_item("accepted", out.accepted)?;
+        dict.set_item("nve_unavailable", out.nve_unavailable)?;
+    }
     let quench = match stats.local_step {
         LocalStep::Tric => "tric",
         _ => "lbfgs",
