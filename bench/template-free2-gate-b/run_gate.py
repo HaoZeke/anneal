@@ -530,10 +530,15 @@ def run(args: argparse.Namespace, root: Path) -> int:
         raise RuntimeError("session mismatch")
     sequence = max((int(row["sequence"]) for row in existing), default=0)
     machine_hash = machine_id_sha256()
-    binary_hashes = {
-        (arm, cell.driver): sha256_file(bins[arm] / cell.driver)
-        for arm in ARMS
+    pending_drivers = {
+        cell.driver
         for cell in cells(root)
+        if any((cell.name, arm, seed) not in done for arm in ARMS for seed in SEEDS)
+    }
+    binary_hashes = {
+        (arm, driver): sha256_file(bins[arm] / driver)
+        for arm in ARMS
+        for driver in pending_drivers
     }
     total = len(cells(root)) * len(SEEDS) * len(ARMS)
     for cell in cells(root):
