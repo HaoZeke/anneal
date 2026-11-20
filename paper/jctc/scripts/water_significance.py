@@ -13,7 +13,9 @@ import random
 import sys
 from pathlib import Path
 
-Z = 1.959963984540054
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
+from paired_stats import Z95 as Z  # noqa: E402
+
 ARMS = ("crest", "driver-count budget", "paper4000", "engrad_matched")
 
 
