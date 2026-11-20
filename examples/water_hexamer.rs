@@ -1224,7 +1224,7 @@ fn load_gfn2(atomic_numbers: &[i32], n_atoms: usize) -> Result<ForceObjective, S
 fn load_pbe(_atomic_numbers: Vec<i32>, _n_atoms: usize) -> Result<ForceObjective, String> {
     let library = engine_file("POTENTIAL_LIBRARY", "libnwchemc.so")
         .or_else(|| engine_file("RGPOT_NWCHEMC_ENGINE", "libnwchemc.so"));
-    let config = env_file("POTENTIAL_CONFIG").or_else(|| env_file("NWCHEMC_CONFIG"));
+    let config = env_file("NWCHEMC_CONFIG").or_else(|| env_file("POTENTIAL_CONFIG"));
     let library_state = match &library {
         Some(path) => format!("library present at {}", path.display()),
         None => "libnwchemc.so not found".to_owned(),

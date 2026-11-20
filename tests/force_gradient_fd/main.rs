@@ -46,7 +46,6 @@ mod water_ride;
 #[path = "../../examples/rgpot_minimize.rs"]
 mod rgpot_minimize;
 
-#[cfg(feature = "profile")]
 #[allow(unused_imports)]
 #[path = "../../examples/common/profile_engine.rs"]
 mod profile_engine;
@@ -682,11 +681,97 @@ fn profile_prefix(path: &std::path::Path) -> String {
     }
 }
 
+fn check_profile_config_precedence() -> Vec<String> {
+    let mut failures = Vec::new();
+    let check_case = |label: &str,
+                      prefix: &str,
+                      vars: &[(&str, &str)],
+                      expected: Option<&str>,
+                      failures: &mut Vec<String>| {
+        let result = profile_engine::resolve_config_path(prefix, |name| {
+            vars.iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| (*value).to_string())
+        });
+        match (expected, result) {
+            (Some(want), Ok(got)) if got == want => {}
+            (Some(want), Ok(got)) => {
+                failures.push(format!(
+                    "profile-config {label}: expected {want}, got {got}"
+                ));
+            }
+            (Some(want), Err(error)) => {
+                failures.push(format!(
+                    "profile-config {label}: expected {want}, got error: {error}"
+                ));
+            }
+            (None, Ok(got)) => {
+                failures.push(format!("profile-config {label}: expected error, got {got}"));
+            }
+            (None, Err(error)) => {
+                let engine_var = format!("{}_CONFIG", prefix.to_ascii_uppercase());
+                if !error.contains(&engine_var) || !error.contains("POTENTIAL_CONFIG") {
+                    failures.push(format!(
+                        "profile-config {label}: error '{error}' must name {engine_var} and POTENTIAL_CONFIG"
+                    ));
+                }
+            }
+        }
+    };
+    check_case(
+        "cpmdc-beats-generic",
+        "cpmdc",
+        &[
+            ("POTENTIAL_CONFIG", "/ambient/generic.bin"),
+            ("CPMDC_CONFIG", "/generated/cpmd.bin"),
+        ],
+        Some("/generated/cpmd.bin"),
+        &mut failures,
+    );
+    check_case(
+        "nwchemc-beats-generic",
+        "nwchemc",
+        &[
+            ("POTENTIAL_CONFIG", "/ambient/generic.bin"),
+            ("NWCHEMC_CONFIG", "/generated/nwchem.bin"),
+        ],
+        Some("/generated/nwchem.bin"),
+        &mut failures,
+    );
+    check_case(
+        "generic-fallback",
+        "cpmdc",
+        &[("POTENTIAL_CONFIG", "/ambient/generic.bin")],
+        Some("/ambient/generic.bin"),
+        &mut failures,
+    );
+    check_case(
+        "empty-engine-falls-back",
+        "cpmdc",
+        &[
+            ("CPMDC_CONFIG", ""),
+            ("POTENTIAL_CONFIG", "/ambient/generic.bin"),
+        ],
+        Some("/ambient/generic.bin"),
+        &mut failures,
+    );
+    check_case("both-missing", "nwchemc", &[], None, &mut failures);
+    check_case(
+        "both-empty",
+        "nwchemc",
+        &[("NWCHEMC_CONFIG", ""), ("POTENTIAL_CONFIG", "")],
+        None,
+        &mut failures,
+    );
+    failures
+}
+
 fn check_profile_engine() -> Vec<String> {
+    let mut failures = check_profile_config_precedence();
     let (libraries, missing) = profile_libraries();
     #[cfg(feature = "profile")]
     {
-        let mut failures = check_profile_negation();
+        failures.extend(check_profile_negation());
         for gap in &missing {
             failures.push(format!(
                 "profile-engine: {gap} is not a file, and the named library was not evaluated"
@@ -717,12 +802,13 @@ fn check_profile_engine() -> Vec<String> {
             println!(
                 "profile-engine: skipped, libnwchemc.so and libcpmdc.so are absent (POTENTIAL_LIBRARY, RGPOT_NWCHEMC_ENGINE, RGPOT_CPMDC_ENGINE, or ./libnwchemc.so), and this build has no profile feature (it needs capnpc)"
             );
-            Vec::new()
+            failures
         } else {
-            let mut failures = missing
-                .iter()
-                .map(|gap| format!("profile-engine: {gap} is not a file"))
-                .collect::<Vec<_>>();
+            failures.extend(
+                missing
+                    .iter()
+                    .map(|gap| format!("profile-engine: {gap} is not a file")),
+            );
             for (prefix, path) in &libraries {
                 failures.push(format!(
                     "profile-engine: {prefix} library {} is present, but this build has no profile feature (it needs capnpc)",
