@@ -545,6 +545,58 @@ jobs:
             MorsePotTest ThreadTeamTest
           bash tools/check_lsan_libomp.sh
 
+  # Release (-O3) with GCC 13 (when available on the Ubuntu runner) covering the
+  # inline xxHash cache-key path in Potential<Derived>::cacheKey under strict
+  # aliasing and IPA-CP.
+  release_gcc13_cache:
+    name: meson / ubuntu [Release -O3 GCC 13 cache]
+    needs: [prepare]
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: prefix-dev/setup-pixi@ad1da6449d9e506fd127fd67ab2d054a769f6a94 # v0.11.2
+        with:
+          pixi-version: v0.70.2
+          cache: true
+          environments: devbld
+          activate-environment: true
+      - name: Install GCC 13 if available
+        run: |
+          if apt-cache show gcc-13 g++-13 >/dev/null 2>&1; then
+            bash ci/gha/apt-install.sh --no-install-recommends gcc-13 g++-13
+            dpkg-query -W gcc-13 g++-13
+          fi
+      - name: Build Release (-O3) and run cache tests
+        shell: pixi run -e devbld bash -e {0}
+        run: |
+          if [ -x /usr/bin/gcc-13 ] && [ -x /usr/bin/g++-13 ]; then
+            export CC=/usr/bin/gcc-13
+            export CXX=/usr/bin/g++-13
+          else
+            export CC=/usr/bin/gcc
+            export CXX=/usr/bin/g++
+          fi
+          "$CXX" --version
+          export LD=/usr/bin/ld
+          export CFLAGS="-B/usr/bin"
+          export CXXFLAGS="-B/usr/bin"
+          export LDFLAGS="-B/usr/bin -Wl,-rpath,$CONDA_PREFIX/lib"
+          unset CPPFLAGS DEBUG_CFLAGS DEBUG_CXXFLAGS
+          meson setup bbdir-release-gcc13 \
+            --buildtype=release \
+            -Db_ndebug=true \
+            -Dwith_tests=true \
+            -Dwith_cache=true \
+            -Dwith_rpc=false \
+            -Dwith_examples=false \
+            -Dwith_fortran_pots=disabled
+          meson compile -C bbdir-release-gcc13 \
+            cache_test d2_pot_test d2_cpmd_pot_test
+          meson test -C bbdir-release-gcc13 --print-errorlogs \
+            CacheTest D2PotTest D2CpmdPotTest
+
   # The suite on short OpenMP teams. Under OMP_THREAD_LIMIT every region gets
   # fewer threads than it asks for, and results must keep the bits of their
   # slice count. One build, two test runs. Linux only: the macOS legs build
@@ -1022,6 +1074,7 @@ jobs:
       - build_fast_nlist_off
       - cxx_layout_ubsan
       - lsan_libomp_18
+      - release_gcc13_cache
       - thread_limit
       - test_parity
       - rust_tests
@@ -1062,6 +1115,7 @@ jobs:
             "build_fast_nlist_off:${{ needs.build_fast_nlist_off.result }}" \
             "cxx_layout_ubsan:${{ needs.cxx_layout_ubsan.result }}" \
             "lsan_libomp_18:${{ needs.lsan_libomp_18.result }}" \
+            "release_gcc13_cache:${{ needs.release_gcc13_cache.result }}" \
             "thread_limit:${{ needs.thread_limit.result }}" \
             "test_parity:${{ needs.test_parity.result }}" \
             "rust_tests:${{ needs.rust_tests.result }}" \

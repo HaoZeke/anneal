@@ -105,6 +105,12 @@ let P = S.pins in
       role = "OpenMP tests and injected-leak proof with ASan and libomp 18",
     },
     {
+      id = "release_gcc13_cache",
+      runs_on = P.ubuntu,
+      needs = ["prepare"],
+      role = "meson Release (-O3) with GCC 13 running CacheTest, D2PotTest and D2CpmdPotTest",
+    },
+    {
       id = "thread_limit",
       runs_on = P.ubuntu,
       needs = ["prepare"],
@@ -192,6 +198,7 @@ let P = S.pins in
         "build_fast_nlist_off",
         "cxx_layout_ubsan",
         "lsan_libomp_18",
+        "release_gcc13_cache",
         "thread_limit",
         "test_parity",
         "rust_tests",
