@@ -20,9 +20,13 @@ import sys
 import time
 from pathlib import Path
 
-import capnp
 import numpy as np
 import pytest
+
+if os.environ.get("RGPOT_RPC_E2E_REQUIRED", "").strip() == "1":
+    import capnp
+else:
+    capnp = pytest.importorskip("capnp", reason="pycapnp is not installed")
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SCHEMA_PATH = SCRIPT_DIR / "../CppCore/rgpot/rpc/Potentials.capnp"
