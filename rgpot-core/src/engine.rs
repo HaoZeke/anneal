@@ -39,6 +39,7 @@
 use std::ffi::{c_char, c_int, c_long, c_uint, c_ushort, c_void};
 use std::fmt;
 use std::mem::ManuallyDrop;
+use std::num::NonZeroU32;
 use std::path::Path;
 use std::ptr::NonNull;
 use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -63,31 +64,86 @@ pub const ENGINE_ERR_UNSUPPORTED: c_int = 3;
 
 const ERROR_CAPACITY: usize = 1024;
 
+/// Status recorded when a host callback or transform panics.
+const PANIC_STATUS: EngineStatus = EngineStatus::from_code(-1);
+/// Status recorded when a host callback hands back something the ABI cannot carry.
+const INVALID_STATUS: EngineStatus = EngineStatus::from_code(ENGINE_ERR_INVALID);
+
 /// Three-valued status of an engine ABI call.
+///
+/// The payload of each failure variant is the magnitude of the C return code,
+/// so a recoverable failure is always positive and a fatal one is always
+/// negative on the wire, and no failure can encode as zero. Magnitudes beyond
+/// the range of `c_int` saturate to `c_int::MAX` and `c_int::MIN`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EngineStatus {
+    /// Return code zero.
     Success,
-    RecoverableInputFailure(c_int),
-    FatalInstanceFailure(c_int),
+    /// A positive return code of this magnitude: the call failed at this input.
+    RecoverableInputFailure(NonZeroU32),
+    /// A negative return code of this magnitude: the instance is unusable.
+    FatalInstanceFailure(NonZeroU32),
 }
 
 impl EngineStatus {
-    /// Classify an engine return code without inspecting its error text.
-    pub const fn from_code(code: c_int) -> Self {
-        if code == 0 {
-            Self::Success
-        } else if code > 0 {
-            Self::RecoverableInputFailure(code)
+    /// A recoverable failure with the positive `code`, or `None` when `code`
+    /// is not positive.
+    pub const fn recoverable(code: c_int) -> Option<Self> {
+        if code > 0 {
+            Some(Self::from_code(code))
         } else {
-            Self::FatalInstanceFailure(code)
+            None
         }
     }
 
-    /// The C ABI return code.
+    /// A fatal failure with the negative `code`, or `None` when `code` is not
+    /// negative.
+    pub const fn fatal(code: c_int) -> Option<Self> {
+        if code < 0 {
+            Some(Self::from_code(code))
+        } else {
+            None
+        }
+    }
+
+    /// Classify an engine return code without inspecting its error text.
+    pub const fn from_code(code: c_int) -> Self {
+        let magnitude = code.unsigned_abs();
+        match NonZeroU32::new(magnitude) {
+            None => Self::Success,
+            Some(magnitude) if code > 0 => Self::RecoverableInputFailure(magnitude),
+            Some(magnitude) => Self::FatalInstanceFailure(magnitude),
+        }
+    }
+
+    /// The C ABI return code. Its sign is the class of the status, so
+    /// `from_code(status.code())` is the same status.
     pub const fn code(self) -> c_int {
         match self {
             Self::Success => 0,
-            Self::RecoverableInputFailure(code) | Self::FatalInstanceFailure(code) => code,
+            Self::RecoverableInputFailure(magnitude) => {
+                if magnitude.get() > c_int::MAX as u32 {
+                    c_int::MAX
+                } else {
+                    magnitude.get() as c_int
+                }
+            }
+            Self::FatalInstanceFailure(magnitude) => {
+                if magnitude.get() > c_int::MIN.unsigned_abs() {
+                    c_int::MIN
+                } else {
+                    (magnitude.get() as c_int).wrapping_neg()
+                }
+            }
+        }
+    }
+
+    /// The same status with a failure's code guaranteed nonzero: a success
+    /// becomes the recoverable [`ENGINE_ERR_INVALID`].
+    pub const fn or_invalid(self) -> Self {
+        match self {
+            Self::Success => Self::from_code(ENGINE_ERR_INVALID),
+            failure => failure,
         }
     }
 }
@@ -465,8 +521,8 @@ impl EngineError {
     /// The engine ABI status when this error came from an engine call.
     pub const fn engine_status(&self) -> Option<EngineStatus> {
         match self {
-            Self::Recoverable { code, .. } => Some(EngineStatus::RecoverableInputFailure(*code)),
-            Self::Fatal { code, .. } => Some(EngineStatus::FatalInstanceFailure(*code)),
+            Self::Recoverable { code, .. } => EngineStatus::recoverable(*code),
+            Self::Fatal { code, .. } => EngineStatus::fatal(*code),
             _ => None,
         }
     }
@@ -565,7 +621,7 @@ unsafe extern "C" fn transform_trampoline(
         Err(_) => {
             if state.failure.is_none() {
                 state.failure = Some(EngineFailure {
-                    status: EngineStatus::FatalInstanceFailure(-1),
+                    status: PANIC_STATUS,
                     message: "coordinate transform panicked".into(),
                 });
             }
@@ -1035,10 +1091,12 @@ impl EnginePotential {
             EngineStatus::Success => Err(EngineError::Invalid(
                 "a host failure was reported with success status".into(),
             )),
-            EngineStatus::RecoverableInputFailure(code) => {
-                Err(EngineError::Recoverable { code, message })
-            }
-            EngineStatus::FatalInstanceFailure(code) => {
+            EngineStatus::RecoverableInputFailure(_) => Err(EngineError::Recoverable {
+                code: status.code(),
+                message,
+            }),
+            EngineStatus::FatalInstanceFailure(_) => {
+                let code = status.code();
                 let _ = self.fatal.set(Poisoned {
                     code,
                     message: message.clone(),
@@ -1131,7 +1189,7 @@ unsafe extern "C" fn oracle_trampoline(
         }
         Ok(Ok(_)) => {
             let failure = EngineFailure {
-                status: EngineStatus::RecoverableInputFailure(ENGINE_ERR_INVALID),
+                status: INVALID_STATUS,
                 message: "oracle returned the wrong force length".into(),
             };
             state.record(failure.clone());
@@ -1144,7 +1202,7 @@ unsafe extern "C" fn oracle_trampoline(
         }
         Err(_) => {
             let failure = EngineFailure {
-                status: EngineStatus::FatalInstanceFailure(-1),
+                status: PANIC_STATUS,
                 message: "oracle callback panicked".into(),
             };
             state.record(failure.clone());
@@ -1167,7 +1225,7 @@ unsafe extern "C" fn acquire_trampoline(ctx: *mut c_void, reason: c_int) {
     }));
     if result.is_err() {
         state.record(EngineFailure {
-            status: EngineStatus::FatalInstanceFailure(-1),
+            status: PANIC_STATUS,
             message: "acquisition callback panicked".into(),
         });
     }
@@ -1187,7 +1245,7 @@ unsafe extern "C" fn model_update_trampoline(ctx: *mut c_void, model_state: u64)
     }));
     if result.is_err() {
         state.record(EngineFailure {
-            status: EngineStatus::FatalInstanceFailure(-1),
+            status: PANIC_STATUS,
             message: "model-update callback panicked".into(),
         });
     }

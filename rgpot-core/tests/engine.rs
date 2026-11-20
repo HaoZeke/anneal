@@ -8,7 +8,7 @@ use rgpot_core::engine::{
     AcquireReason, CoordinateTransform, EngineCallbacks, EngineError, EngineEvaluation,
     EngineFailure, EnginePotential, EngineRequest, EngineSession, EngineStatus,
     RgpotEngineAbiStamp, RgpotEngineCaps, RgpotEngineComponent, ENGINE_ABI_LAYOUT_REVISION,
-    ENGINE_ABI_MINOR, ENGINE_ABI_VERSION, ENGINE_ERR_UNSUPPORTED,
+    ENGINE_ABI_MINOR, ENGINE_ABI_VERSION, ENGINE_ERR_INVALID, ENGINE_ERR_UNSUPPORTED,
 };
 use rgpot_core::hvp::rgpot_hvp_scheme_t;
 use rgpot_core::status::rgpot_status_t;
@@ -454,10 +454,7 @@ fn assert_poisoned_without_an_extra_force(session: &mut EngineSession, path: &Pa
             None,
         )
         .expect_err("fatal session remains poisoned");
-    assert_eq!(
-        error.engine_status(),
-        Some(EngineStatus::FatalInstanceFailure(-1))
-    );
+    assert_eq!(error.engine_status(), Some(EngineStatus::from_code(-1)));
     assert_eq!(observer.native_calls(), before);
 }
 
@@ -586,14 +583,14 @@ fn native_fatal_status_poisons_an_engine_session() {
 #[test]
 fn typed_status_does_not_retry_from_error_text() {
     assert_eq!(EngineStatus::from_code(0), EngineStatus::Success);
-    assert_eq!(
+    assert!(matches!(
         EngineStatus::from_code(2),
-        EngineStatus::RecoverableInputFailure(2)
-    );
-    assert_eq!(
+        EngineStatus::RecoverableInputFailure(magnitude) if magnitude.get() == 2
+    ));
+    assert!(matches!(
         EngineStatus::from_code(-2),
-        EngineStatus::FatalInstanceFailure(-2)
-    );
+        EngineStatus::FatalInstanceFailure(magnitude) if magnitude.get() == 2
+    ));
 
     let path = build("harmonic_session_no_retry", &[]);
     let observer = FixtureObserver::open(&path);
@@ -609,10 +606,7 @@ fn typed_status_does_not_retry_from_error_text() {
             None,
         )
         .expect_err("recoverable input");
-    assert_eq!(
-        error.engine_status(),
-        Some(EngineStatus::RecoverableInputFailure(1))
-    );
+    assert_eq!(error.engine_status(), Some(EngineStatus::from_code(1)));
     assert_eq!(observer.native_calls() - before, 2);
 }
 
@@ -1764,4 +1758,77 @@ fn transform_failure_with_success_status_is_an_error() {
         Some(&mut SuccessStatusFailure),
     );
     assert!(matches!(answer, Err(EngineError::Invalid(_))), "{answer:?}");
+}
+
+#[test]
+fn status_encoding_has_one_sign_per_class_and_round_trips() {
+    let samples = [
+        c_int::MIN,
+        c_int::MIN + 1,
+        -1000,
+        -7,
+        -2,
+        -1,
+        0,
+        1,
+        2,
+        3,
+        7,
+        1000,
+        c_int::MAX - 1,
+        c_int::MAX,
+    ];
+    for code in samples {
+        let status = EngineStatus::from_code(code);
+        assert_eq!(status.code(), code, "code {code}");
+        assert_eq!(EngineStatus::from_code(status.code()), status);
+        match status {
+            EngineStatus::Success => assert_eq!(code, 0),
+            EngineStatus::RecoverableInputFailure(magnitude) => {
+                assert!(code > 0, "code {code}");
+                assert_eq!(magnitude.get(), code.unsigned_abs());
+            }
+            EngineStatus::FatalInstanceFailure(magnitude) => {
+                assert!(code < 0, "code {code}");
+                assert_eq!(magnitude.get(), code.unsigned_abs());
+            }
+        }
+    }
+
+    assert_eq!(
+        EngineStatus::recoverable(2),
+        Some(EngineStatus::from_code(2))
+    );
+    assert_eq!(EngineStatus::recoverable(0), None);
+    assert_eq!(EngineStatus::recoverable(-2), None);
+    assert_eq!(EngineStatus::fatal(-2), Some(EngineStatus::from_code(-2)));
+    assert_eq!(EngineStatus::fatal(0), None);
+    assert_eq!(EngineStatus::fatal(2), None);
+    assert_eq!(
+        EngineStatus::Success.or_invalid().code(),
+        ENGINE_ERR_INVALID
+    );
+    assert_eq!(EngineStatus::from_code(-4).or_invalid().code(), -4);
+}
+
+#[test]
+fn engine_errors_report_a_status_of_their_own_class() {
+    let recoverable = EngineError::Recoverable {
+        code: 5,
+        message: String::new(),
+    };
+    let fatal = EngineError::Fatal {
+        code: -5,
+        message: String::new(),
+    };
+    assert_eq!(
+        recoverable.engine_status(),
+        Some(EngineStatus::from_code(5))
+    );
+    assert_eq!(fatal.engine_status(), Some(EngineStatus::from_code(-5)));
+    let contradictory = EngineError::Recoverable {
+        code: -5,
+        message: String::new(),
+    };
+    assert_eq!(contradictory.engine_status(), None);
 }
