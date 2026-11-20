@@ -167,6 +167,9 @@ jobs:
           cmake --build .ci/ira/build --parallel 2
           test -f .ci/ira/lib/libira.so
           test -f /usr/lib/x86_64-linux-gnu/liblammps.so
+          # The contract tests read each variable's own line, here and in
+          # the test job.
+          # shellcheck disable=SC2129
           echo "VESIN_SRC=$GITHUB_WORKSPACE/.ci/vesin" >> "$GITHUB_ENV"
           echo "IRA_LIB_DIR=$GITHUB_WORKSPACE/.ci/ira/lib" >> "$GITHUB_ENV"
           echo "LAMMPS_LIB_DIR=/usr/lib/x86_64-linux-gnu" >> "$GITHUB_ENV"
