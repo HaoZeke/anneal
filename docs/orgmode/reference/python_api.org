@@ -1205,7 +1205,8 @@ hvp(positions, atom_types, box, direction, step=0.0, scheme='auto')
   =direction= is a float64 C-contiguous =(N, 3)= array.
   =step= is the length of the displacement along the unit direction; 0 means
   1e-3 Angstrom.
-  =scheme= is ="forward"=, ="central"=, ="analytic"= or ="auto"=.
+  =scheme= is ="forward"=, ="central"=, ="analytic"=, ="ad"=, ="exact"= or
+  ="auto"=.
   ="forward"= displaces once and reuses the forces of the centre, the last
   geometry this object evaluated through =hvp= or =hvp_centre=; it is first
   order in =step=.
@@ -1213,8 +1214,10 @@ hvp(positions, atom_types, box, direction, step=0.0, scheme='auto')
   =step=.
   ="analytic"= uses the kernel's own product, available for =MorsePot=, =LJPot=
   and =CuH2Pot=.
+  ="ad"= uses the kernel's dual-number product, available for =LJPot=.
+  ="exact"= is ="analytic"=, else ="ad"=, and never differences.
   ="auto"= is ="analytic"= when =has_analytic_hvp()= is true and ="forward"=
-  otherwise.
+  otherwise; =hvp_resolved= reports which ran.
 - Units :: positions, box and =step= in Angstrom.
   The product is linear in =direction=: H is
   eV/Angstrom^2, so a direction in Angstrom gives eV/Angstrom.
@@ -1223,9 +1226,9 @@ hvp(positions, atom_types, box, direction, step=0.0, scheme='auto')
   The kernel runs with the interpreter released.
 - Errors :: =direction= not of shape =(N, 3)= raises =ValueError=
   =direction: expected shape (N, 3), got ...=.
-  An unknown =scheme=, ="analytic"= on a class without the analytic product, a
-  negative or non-finite =step=, or non-finite positions or direction raise
-  =ValueError=.
+  An unknown =scheme=, ="analytic"=, ="ad"= or ="exact"= on a class without
+  what it needs, a negative or non-finite =step=, or non-finite positions or
+  direction raise =ValueError=.
   A non-finite energy, force or product raises =rgpot.NumericalError=.
   The conventions list the other input errors.
 
@@ -1264,6 +1267,61 @@ print(pot.has_analytic_hvp(), rgpot.MorsePot().has_analytic_hvp())
 {'products': 1, 'force_calls': 2, 'centre_reused': 0, 'analytic': 0}
 True True
 #+end_example
+
+*** =.hvp_resolved=
+
+#+attr_rgpot: signature
+#+begin_src python
+hvp_resolved(positions, atom_types, box, direction, step=0.0, scheme='auto')
+#+end_src
+
+- Applies to :: rgpot.LJPot, rgpot.LJClusterPot, rgpot.MorsePot, rgpot.D2Pot,
+  rgpot.D2CpmdPot, rgpot.SWPot, rgpot.EDIPPot, rgpot.LenoskyPot,
+  rgpot.TersoffPot, rgpot.EAMAlPot, rgpot.EAMTablePot, rgpot.FeHePot,
+  rgpot.CuH2Pot, rgpot.WaterHPot, rgpot.D3Pot, rgpot.D4Pot, rgpot.ExprPot,
+  rgpot.SumPot
+- Inputs :: those of =hvp=.
+- Units :: those of =hvp=.
+- Outputs :: a tuple =(product, scheme)=: the product of =hvp=, and the name of
+  the scheme that computed it.
+  ="auto"= reports ="analytic"= or ="forward"=, ="exact"= reports ="analytic"=
+  or ="ad"=, and any other scheme reports itself.
+  The product is counted under that scheme in =derivative_counts()=.
+- Errors :: those of =hvp=.
+
+*** =.hessian=
+
+#+attr_rgpot: signature
+#+begin_src python
+hessian(positions, atom_types, box, scheme, step=0.0)
+#+end_src
+
+- Applies to :: rgpot.LJPot, rgpot.LJClusterPot, rgpot.MorsePot, rgpot.D2Pot,
+  rgpot.D2CpmdPot, rgpot.SWPot, rgpot.EDIPPot, rgpot.LenoskyPot,
+  rgpot.TersoffPot, rgpot.EAMAlPot, rgpot.EAMTablePot, rgpot.FeHePot,
+  rgpot.CuH2Pot, rgpot.WaterHPot, rgpot.D3Pot, rgpot.D4Pot, rgpot.ExprPot,
+  rgpot.SumPot
+- Inputs :: =positions=, =atom_types= and =box= as in the conventions.
+  =scheme= has no default: ="analytic"= uses the kernel's closed-form Hessian,
+  available for =LJPot= and =MorsePot=; ="ad"= its dual-number Hessian,
+  available for =LJPot=; ="exact"= is ="analytic"=, else ="ad"=; ="central"=
+  differences the forces at =x +- step= along every coordinate.
+  =step= is that displacement; 0 means 1e-3 Angstrom.
+- Units :: positions, box and =step= in Angstrom; the Hessian in eV/Angstrom^2.
+- Outputs :: a tuple =(hessian, scheme)=: a new float64 array of shape
+  =(3N, 3N)=, row and column =3 i + k= for axis =k= of atom =i=, and the name
+  of the scheme that computed it, ="exact"= reporting ="analytic"= or ="ad"=.
+  ="central"= makes =6 N= force calls, which bypass the centre of =hvp= and are
+  counted in =derivative_counts()=, and returns a symmetric matrix.
+  The kernel runs with the interpreter released.
+- Errors :: an unknown =scheme=, ="analytic"=, ="ad"= or ="exact"= on a class
+  without what it needs, or a negative or non-finite =step= raise =ValueError=
+  before any force call; a missing =scheme= raises =TypeError=.
+  A non-finite energy, force or Hessian raises =rgpot.NumericalError=.
+  The conventions list the other input errors.
+
+The Hessians follow =rgpot_potential_hessian=; see the
+[[file:c_abi.org][C ABI reference]].
 
 *** =.hvp_centre=
 
@@ -1340,7 +1398,8 @@ reset_hvp_counts()
   rgpot.SumPot
 - Inputs :: none.
 - Units :: none.
-- Outputs :: =None=; every =hvp_counts()= value becomes 0.
+- Outputs :: =None=; every =hvp_counts()= and =derivative_counts()= value
+  becomes 0.
   The centre stays.
 - Errors :: none.
 
@@ -1362,6 +1421,52 @@ has_analytic_hvp()
   =scheme='auto'= uses it.
   Of these classes =MorsePot=, =LJPot= and =CuH2Pot= return =True=.
   The query is read-only and reads =primary().caps()=, as for =caps()=.
+- Errors :: none.
+
+*** =.derivative_caps=
+
+#+attr_rgpot: signature
+#+begin_src python
+derivative_caps()
+#+end_src
+
+- Applies to :: rgpot.LJPot, rgpot.LJClusterPot, rgpot.MorsePot, rgpot.D2Pot,
+  rgpot.D2CpmdPot, rgpot.SWPot, rgpot.EDIPPot, rgpot.LenoskyPot,
+  rgpot.TersoffPot, rgpot.EAMAlPot, rgpot.EAMTablePot, rgpot.FeHePot,
+  rgpot.CuH2Pot, rgpot.WaterHPot, rgpot.D3Pot, rgpot.D4Pot, rgpot.ExprPot,
+  rgpot.SumPot
+- Inputs :: none.
+- Units :: none; flags and counts of force calls.
+- Outputs :: a dict with the flags =hvp_analytic=, =hvp_ad=, =hvp_fd=,
+  =hessian_analytic=, =hessian_ad= and =hessian_fd=, the schemes =hvp= and
+  =hessian= have for this kernel, and the costs =hvp_forward_force_calls= (1,
+  plus 1 for a new centre), =hvp_central_force_calls= (2) and
+  =hessian_central_force_calls_per_atom= (6).
+  The finite-difference flags are always =True=; an analytic or dual-number
+  scheme makes no force call.
+  The query is read-only and reads =primary().caps()=, as for =caps()=.
+- Errors :: none.
+
+*** =.derivative_counts=
+
+#+attr_rgpot: signature
+#+begin_src python
+derivative_counts()
+#+end_src
+
+- Applies to :: rgpot.LJPot, rgpot.LJClusterPot, rgpot.MorsePot, rgpot.D2Pot,
+  rgpot.D2CpmdPot, rgpot.SWPot, rgpot.EDIPPot, rgpot.LenoskyPot,
+  rgpot.TersoffPot, rgpot.EAMAlPot, rgpot.EAMTablePot, rgpot.FeHePot,
+  rgpot.CuH2Pot, rgpot.WaterHPot, rgpot.D3Pot, rgpot.D4Pot, rgpot.ExprPot,
+  rgpot.SumPot
+- Inputs :: none.
+- Units :: none; the values are counts.
+- Outputs :: a dict with =hvp_forward=, =hvp_central=, =hvp_analytic= and
+  =hvp_ad=, the products each scheme answered, a zero direction under the
+  scheme its request resolved to; =hessian_central=, =hessian_analytic= and
+  =hessian_ad=, the Hessians each scheme answered; and =hessian_force_calls=,
+  the force calls of central Hessians.
+  A refused request counts nowhere.
 - Errors :: none.
 
 *** =.energy_gradient=
