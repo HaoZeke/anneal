@@ -53,6 +53,8 @@ BLAS and LAPACK. `build.txt` records the compiler, the cmake flags
 and the sha256 of the binary. The anneal examples are release builds
 of 5eb79cdcb0a986984dc7b487e5a3cc93224246f9, locked.
 
+The tuning rows and the shard 2 rows name different GMIN file hashes. `tuning_gmin_binary_sha256` is the binary the tuning rows used, and `eval_gmin_binary_sha256` is the binary every GMIN row in `rows-shard2.csv` and `aa-shard2.csv` records. Both come from tarball 9cbec1a4 with the same patches and the same cmake flags. Two clean rebuilds of that recipe, in directories of equal length, produced different file hashes and byte-identical `.text` sections. Of the dumpable sections, only the build-id note and `.rodata` differ, and `.rodata` matches after the build-directory name and the compilation-time string are substituted. The evaluation binary was built in a directory whose name has a different length. Its `.text` has the same length; apart from rip-relative displacements, the instruction listing differs in 108 instructions, all in `rotamer_step`, `ambermut_step` and `template_step`, and each of those is a length of a string that contains the build directory or a stack offset of such a string. The sources match, the link line matches, and the linked BLAS and LAPACK are the same libraries. The file hash changes with the build directory and the compilation time.
+
 ## Grid
 
 Every cell is scored on the same relative scales, 0.5, 1 and 2, for the
