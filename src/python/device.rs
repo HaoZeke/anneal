@@ -484,6 +484,10 @@ fn run_native<'py>(
     arrays.helpers.getattr(history)?.call((), Some(&result))
 }
 
+/// Run a single-chain preset controller with device-resident Array API arrays.
+///
+/// Returns an `anneal.device.DeviceHistory` holding arrays in the namespace
+/// and on the device of `low`.
 #[pyfunction(name = "_run_device")]
 #[pyo3(signature = (obj_fn, low, high, preset, *, n_epochs = 100, steps_per_epoch = 200, seed = 42, start = None))]
 fn run_device<'py>(
@@ -511,6 +515,10 @@ fn run_device<'py>(
     )
 }
 
+/// Run `n_chains` independent preset chains as a batch of device arrays.
+///
+/// Returns an `anneal.device.EnsembleHistory` holding per-chain and reduced
+/// global-best arrays in the namespace and on the device of `low`.
 #[pyfunction(name = "_run_device_ensemble")]
 #[pyo3(signature = (obj_fn, low, high, preset, *, n_chains, n_epochs = 100, steps_per_epoch = 200, seed = 42))]
 fn run_ensemble<'py>(

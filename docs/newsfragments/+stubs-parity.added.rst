@@ -1,0 +1,1 @@
+Added ``python/anneal/_core.pyi`` type stubs and the ``python/anneal/py.typed`` PEP 561 marker with a bidirectional parity test suite against the compiled ``anneal._core`` module, aligned ``_core`` signatures, defaults, docstrings, and ``anneal.osa_acceptance_rate`` re-export, and listed every public Python symbol in the API reference.

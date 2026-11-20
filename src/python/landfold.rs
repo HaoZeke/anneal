@@ -131,21 +131,34 @@ fn fold_dict<'py>(py: Python<'py>, fold: Landfold) -> PyResult<Bound<'py, PyDict
     Ok(out)
 }
 
+const _: () = {
+    assert!(lf::DEFAULT_LANDMARKS == 400);
+    assert!(lf::DEFAULT_SIGMA_SCALE == 0.5);
+    assert!(lf::DEFAULT_HIGH[0] == 2.0 && lf::DEFAULT_HIGH[1] == 4.0);
+    assert!(lf::DEFAULT_LOW[0] == 2.0 && lf::DEFAULT_LOW[1] == 4.0);
+    assert!(lf::DEFAULT_GRID == 21);
+    assert!(lf::DEFAULT_ITERATIONS == 200);
+    assert!(lf::DEFAULT_WEIGHT_POWER == 0.5);
+};
+
 /// Fold an `(n, D)` array of descriptor rows onto the plane.
 ///
 /// Returns a dict with `xy` `(n, 2)`, `landmarks` (row indices), `sigma`,
 /// `sigma_low`, `high`, `low`, `stress`, `spectrum` (lambda1, lambda2 of the
 /// landmark MDS start) and `map`, a `LandfoldMap` for held-out rows.
 #[pyfunction(name = "landfold")]
-#[pyo3(signature = (
-    rows, *, landmarks = lf::DEFAULT_LANDMARKS, seed = 0, sigma = None,
-    sigma_scale = lf::DEFAULT_SIGMA_SCALE, sigma_low = None,
-    high = (lf::DEFAULT_HIGH[0], lf::DEFAULT_HIGH[1]),
-    low = (lf::DEFAULT_LOW[0], lf::DEFAULT_LOW[1]),
-    grid = lf::DEFAULT_GRID, iterations = lf::DEFAULT_ITERATIONS,
-    mix = None, weight_power = lf::DEFAULT_WEIGHT_POWER, metric = "l1",
-    threads = None,
-))]
+#[pyo3(
+    signature = (
+        rows, *, landmarks = 400, seed = 0, sigma = None,
+        sigma_scale = 0.5, sigma_low = None,
+        high = (2.0, 4.0),
+        low = (2.0, 4.0),
+        grid = 21, iterations = 200,
+        mix = None, weight_power = 0.5, metric = "l1",
+        threads = None,
+    ),
+    text_signature = "(rows, *, landmarks=400, seed=0, sigma=None, sigma_scale=0.5, sigma_low=None, high=(2.0, 4.0), low=(2.0, 4.0), grid=21, iterations=200, mix=None, weight_power=0.5, metric='l1', threads=None)"
+)]
 fn fold_rows<'py>(
     py: Python<'py>,
     rows: PyReadonlyArray2<'py, f64>,
@@ -191,14 +204,17 @@ fn fold_rows<'py>(
 /// order. The dict of `landfold` gains `energy`, `rows` (the descriptors),
 /// `family` and `community` (-1 where a minimum has no community).
 #[pyfunction]
-#[pyo3(signature = (
-    paths, *, landmarks = lf::DEFAULT_LANDMARKS, seed = 0, sigma = None,
-    sigma_scale = lf::DEFAULT_SIGMA_SCALE, sigma_low = None,
-    high = (lf::DEFAULT_HIGH[0], lf::DEFAULT_HIGH[1]),
-    low = (lf::DEFAULT_LOW[0], lf::DEFAULT_LOW[1]),
-    grid = lf::DEFAULT_GRID, iterations = lf::DEFAULT_ITERATIONS,
-    mix = None, weight_power = lf::DEFAULT_WEIGHT_POWER, threads = None,
-))]
+#[pyo3(
+    signature = (
+        paths, *, landmarks = 400, seed = 0, sigma = None,
+        sigma_scale = 0.5, sigma_low = None,
+        high = (2.0, 4.0),
+        low = (2.0, 4.0),
+        grid = 21, iterations = 200,
+        mix = None, weight_power = 0.5, threads = None,
+    ),
+    text_signature = "(paths, *, landmarks=400, seed=0, sigma=None, sigma_scale=0.5, sigma_low=None, high=(2.0, 4.0), low=(2.0, 4.0), grid=21, iterations=200, mix=None, weight_power=0.5, threads=None)"
+)]
 fn landfold_book<'py>(
     py: Python<'py>,
     paths: Vec<std::path::PathBuf>,

@@ -338,7 +338,7 @@ except ValueError as err:
 - =quench(fg_fn, x0, gtol, max_iter=10000, *, method="lbfgs", species=None)= :: local relaxation matching =cluster_search= (Cartesian L-BFGS or TRIC over =species=).
 - =ensemble_optimize(obj_fn, low, high, budget, seed=0, grad_fn=None, x0=None, replicas=4, history="shared", membership="accepted", *, coverage_shared=None, coverage_radius=None, coverage_neighbors=None)= :: design box. Gradient → hop and quench; no gradient → portfolio (1 replica) or values-only hop chains.
 - =minimize(fun, x0, bounds, jac=None, *, budget=None, seed=0, replicas=4, history="shared", membership="accepted", store=None, coverage_shared=None, coverage_radius=None, coverage_neighbors=None)= :: SciPy-shaped wrapper over =ensemble_optimize= with optional HDF5/JSONL =store=.
-- =box_ensemble_optimize(...)= :: hop primitive. Requires =grad_fn=.
+- =box_ensemble_optimize(obj_fn, low, high, budget, seed=0, grad_fn=None, x0=None, replicas=4, history="shared", membership="accepted")= :: hop primitive. Requires =grad_fn=.
 - =global_optimize(obj_fn, low, high, budget, seed=0, grad_fn=None, noise_sigma=None, policy="auto", x0=None, *, replicas=1, coverage_shared=True, coverage_radius=0.05, coverage_neighbors=0)= :: portfolio arms when the caller does not want hops.
 
 A callback that raises =BaseException= other than =Exception= (a harness
@@ -352,11 +352,11 @@ See [[file:../howto/choose-driver.org][choose a driver]].
 
 * Classical (values only)
 
-- =Boltzmann(t_init, sigma)= :: Logarithmic cooling + Gaussian + Metropolis.
-- =Fast(t_init, gamma)= :: Reciprocal cooling + Cauchy + Metropolis.
-- =Gsa(t_init, q_v, q_a)= :: =Tsallis= cooling + =Tsallis= visit + =Tsallis= accept.
+- =Boltzmann(t_init=1.0, sigma=0.5)= :: Logarithmic cooling + Gaussian + Metropolis.
+- =Fast(t_init=1.0, gamma=0.5)= :: Reciprocal cooling + Cauchy + Metropolis.
+- =Gsa(t_init=1.0, q_v=2.62, q_a=1.7)= :: =Tsallis= cooling + =Tsallis= visit + =Tsallis= accept.
+- =run(obj_fn, low, high, preset, n_epochs=100, steps_per_epoch=200, seed=42, x0=None, max_evals=None)= :: run any of the three classical presets inside =[low, high]=, returning =History=.
 
-All called via =run(obj_fn, low, high, preset, n_epochs=100, steps_per_epoch=200, seed=42, x0=None, max_evals=None)=.
 Each move is mirror-reflected into =[low, high]= and the neighbourhood is the
 box, so =obj_fn= is only evaluated inside it. =x0= starts the walk at a given
 point; without it the start is a uniform draw. The start costs one
@@ -368,7 +368,7 @@ worse than every number, =+inf= included, so it is never kept as the best.
 
 * Pilot and low-discrepancy
 
-- =pilot_draws_qmc(n, seed)= -> (n,3) array of (T0, sigma, =q_v=).
+- =pilot_draws_qmc(n, seed=0)= -> (n,3) array of (T0, sigma, =q_v=).
 - =low_discrepancy_points(low, high, n, skip=1)= .
 
 * Polish
@@ -388,14 +388,17 @@ Gradient support is provided by =eindir=; see the [[https://eindir.rgoswami.me/h
 
 * Device and ensemble (same kernel)
 
-- =run_device= (single chain, NumPy or CuPy bounds)
-- =run_ensemble= (batched, =n_chains=, same kernel)
+- =run_device(obj_fn, low, high, preset, *, n_epochs=100, steps_per_epoch=200, seed=42, start=None)= :: single chain, NumPy, PyTorch, or CuPy bounds, returning =DeviceHistory=.
+- =run_ensemble(obj_fn, low, high, preset, *, n_chains, n_epochs=100, steps_per_epoch=200, seed=42)= :: batched, =n_chains=, same kernel, returning =EnsembleHistory=.
+- =DeviceHistory= :: immutable device-resident history returned by =run_device=.
+- =EnsembleHistory= :: immutable batched history returned by =run_ensemble=.
 
 * Hamiltonian Monte Carlo (HMC) / quasi-Monte Carlo (QMC) variants (also exposed)
 
-- =run_hmc=, =run_qmc= (see =python/anneal/__init__.py= and the tests for the signatures).
+- =run_hmc(obj_fn, grad_fn, low, high, t_init=5.0, epsilon=0.05, l_steps=5, q=1.0, n_epochs=100, steps_per_epoch=50, seed=42, x0=None)= :: HMC-driven simulated annealing inside =[low, high]=.
+- =run_qmc(obj_fn, low, high, preset, n_starts=8, n_epochs=100, steps_per_epoch=200, seed=42, x0=None, max_evals=None)= :: =run= from a low-discrepancy multistart design inside =[low, high]=.
 
-All return dicts with =best_pos=, =best_val=, =n_evals= (or the rich =History= / =DeviceHistory= / =EnsembleHistory= objects from =run= / =run_device=).
+All return dicts with =best_pos=, =best_val=, =n_evals= (or the rich =History= / =DeviceHistory= / =EnsembleHistory= objects from =run= / =run_device= / =run_ensemble=).
 
 * Additional Python exports (=anneal=)
 
@@ -404,8 +407,12 @@ All return dicts with =best_pos=, =best_val=, =n_evals= (or the rich =History= /
 - =__version__= :: installed =anneal= package version string.
 - =Bounds(low, high, slack=1e-06)= :: PyO3 wrapper around =eindir= box bounds.
 - =PyObjective(fn_, bounds, grad_fn=None)= :: native objective handle bridging Python callables to Rust =Objective<f64>=.
-- =EpochLine()= :: per-epoch summary record attached to =History.trace=.
+- =History= :: run history returned by =run=, =run_qmc=, and =run_hmc=, exposing =epochs=, =best_pos=, =best_val=, =stationarity_flags=, =total_accepted=, and =total_rejected=.
+- =EpochLine= :: per-epoch summary record attached to =History.epochs=.
+- =Config= :: cluster-search preset handle constructed via =Config.recommended(n)=, =Config.communicating(n)=, =Config.derived(n)=, =Config.for_cluster(n)=, =Config.communicating_tip4p(n)=, or =Config.recommended_tip4p(n)=, with =validate_json= and =validate_toml= checks.
+- =Ledger(budget)= :: evaluation ledger tracking =budget=, =spent=, =remaining=, and =best=.
 - =BasinBias(n_points, merge_radius=0.01, w0=0.25, gamma=5.0)= :: well-tempered metadynamics bias keyed on structural basin identity.
+- =osa_acceptance_rate(delta, temp, sigma, trials=20000, c_star=0.0, seed=0)= :: empirical OSA acceptance rate and mean samples per decision under Gaussian evaluation noise.
 
 ** QMC scouts and native-objective drivers
 
