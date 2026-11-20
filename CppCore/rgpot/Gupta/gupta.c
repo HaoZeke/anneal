@@ -14,6 +14,10 @@
 
 #if defined(_MSC_VER) && !defined(__clang__)
 #define RGPOT_THREAD_LOCAL __declspec(thread)
+#elif defined(__GNUC__)
+// GCC and Clang spell it __thread. GCC 4.8, the manylinux2014 cross compiler,
+// has no C11 _Thread_local.
+#define RGPOT_THREAD_LOCAL __thread
 #else
 #define RGPOT_THREAD_LOCAL _Thread_local
 #endif
