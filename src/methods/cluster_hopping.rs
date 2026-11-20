@@ -176,6 +176,21 @@ pub struct AcceptedMinimum<'a> {
 
 type AcceptSink = Box<dyn FnMut(&AcceptedMinimum<'_>) + Send>;
 
+/// One lowering of [`Ledger::best`], as handed to [`Ledger::trace_incumbent`].
+#[derive(Debug, Clone, Copy)]
+pub struct IncumbentImprovement<'a> {
+    /// Completed hop index when the incumbent was lowered.
+    pub hop: usize,
+    /// [`Ledger::spent`] at the record.
+    pub spent: usize,
+    /// New incumbent energy.
+    pub energy: f64,
+    /// Coordinates of the new incumbent.
+    pub state: ArrayView1<'a, f64>,
+}
+
+type IncumbentSink = Box<dyn FnMut(&IncumbentImprovement<'_>) + Send>;
+
 /// Coordinates and their paid evidence travel together through adoption and
 /// ladder scheduling. A shared identity belongs only to this exact occupancy.
 struct OccupiedMinimum {
@@ -642,6 +657,10 @@ pub struct Ledger {
     accept_sink: Option<AcceptSink>,
     /// Energy and coordinate bits of the minimum last handed to the sink.
     traced_bits: Vec<u64>,
+    /// Receiver of every lowering of [`Ledger::best`]. `None` skips it.
+    incumbent_sink: Option<IncumbentSink>,
+    /// Completed hops of the search loop, as last reported by it.
+    hop: usize,
 }
 
 struct DiagnosticQuench<'a> {
@@ -694,6 +713,8 @@ impl Ledger {
             encounters: Vec::new(),
             accept_sink: None,
             traced_bits: Vec::new(),
+            incumbent_sink: None,
+            hop: 0,
         }
     }
 
@@ -709,6 +730,21 @@ impl Ledger {
     {
         self.accept_sink = Some(Box::new(sink));
         self.traced_bits.clear();
+    }
+
+    /// Hand every lowering of [`Ledger::best`] to `sink`, in order.
+    ///
+    /// Off by default. Like [`Ledger::trace_accepted`], the sink cannot
+    /// charge the ledger or draw from the chain's random stream.
+    pub fn trace_incumbent<F>(&mut self, sink: F)
+    where
+        F: FnMut(&IncumbentImprovement<'_>) + Send + 'static,
+    {
+        self.incumbent_sink = Some(Box::new(sink));
+    }
+
+    fn at_hop(&mut self, hop: usize) {
+        self.hop = hop;
     }
 
     /// Whether [`Ledger::trace_accepted`] installed a sink.
@@ -963,6 +999,14 @@ impl Ledger {
             self.best_state = Some(state.to_owned());
             if self.encounters.len() < IMPROVEMENT_CAP {
                 self.encounters.push((self.spent, value));
+            }
+            if let Some(sink) = self.incumbent_sink.as_mut() {
+                sink(&IncumbentImprovement {
+                    hop: self.hop,
+                    spent: self.spent,
+                    energy: value,
+                    state,
+                });
             }
         }
         if self.answer_limit > 0 {
@@ -5105,6 +5149,7 @@ where
     let mut held_seat: Option<usize> = None;
     let mut held_count: usize = 0;
     let stop = loop {
+        ledger.at_hop(hops);
         if ledger.traces_accepted() {
             ledger.note_if_moved("unattributed", hops, e, x.view());
         }

@@ -1,6 +1,6 @@
 // Copyright (c) anneal developers
-//! `Ledger::trace_accepted` observes the chain without steering it. With
-//! the sink off and on, `Config::recommended` reaches bit-identical best
+//! `Ledger::trace_accepted` and `Ledger::trace_incumbent` observe the chain
+//! without steering it. With both sinks off and on, `Config::recommended` reaches bit-identical best
 //! energies, best states and charged counts on three seeds of each
 //! double-funnel cluster: Lennard-Jones 38, 75, 98 and 150 and Morse 80 at
 //! rho 6. Each run stops at the Cambridge energy plus the hit tolerance, as
@@ -80,12 +80,17 @@ struct Event {
     atoms: usize,
 }
 
-fn search(
-    system: &System,
-    budget: usize,
-    seed: u64,
-    events: Option<Arc<Mutex<Vec<Event>>>>,
-) -> Outcome {
+#[derive(Debug, Clone, PartialEq)]
+struct Improvement {
+    hop: usize,
+    spent: usize,
+    energy_bits: u64,
+    state_bits: Vec<u64>,
+}
+
+type Sinks = (Arc<Mutex<Vec<Event>>>, Arc<Mutex<Vec<Improvement>>>);
+
+fn search(system: &System, budget: usize, seed: u64, sinks: Option<Sinks>) -> Outcome {
     let n = system.n;
     let pair = match system.rho {
         Some(rho) => PairPotential::morse(n, rho),
@@ -96,7 +101,15 @@ fn search(
     let start = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, &mut rng);
     let mut ledger = Ledger::new(budget);
     ledger.stop_below(system.reference + anneal_core::DEFAULT_HIT_TOL);
-    if let Some(events) = events {
+    if let Some((events, improvements)) = sinks {
+        ledger.trace_incumbent(move |m| {
+            improvements.lock().unwrap().push(Improvement {
+                hop: m.hop,
+                spent: m.spent,
+                energy_bits: m.energy.to_bits(),
+                state_bits: m.state.iter().map(|v| v.to_bits()).collect(),
+            });
+        });
         ledger.trace_accepted(move |m| {
             events.lock().unwrap().push(Event {
                 hop: m.hop,
@@ -150,7 +163,13 @@ fn check(name: &str, budget_of: impl Fn(&System) -> usize) {
     for seed in SEEDS {
         let off = search(system, budget, seed, None);
         let events = Arc::new(Mutex::new(Vec::new()));
-        let on = search(system, budget, seed, Some(Arc::clone(&events)));
+        let improvements = Arc::new(Mutex::new(Vec::new()));
+        let on = search(
+            system,
+            budget,
+            seed,
+            Some((Arc::clone(&events), Arc::clone(&improvements))),
+        );
         assert_eq!(
             off.best.to_bits(),
             on.best.to_bits(),
@@ -187,17 +206,41 @@ fn check(name: &str, budget_of: impl Fn(&System) -> usize) {
                     && f64::from_bits(event.energy_bits).is_finite()),
             "{name} seed {seed}: trace past the ledger"
         );
+        let improvements = improvements.lock().unwrap();
+        let last = improvements.last().expect("an incumbent");
+        assert!(
+            improvements.windows(2).all(|w| w[0].hop <= w[1].hop
+                && w[0].spent <= w[1].spent
+                && f64::from_bits(w[1].energy_bits) < f64::from_bits(w[0].energy_bits)),
+            "{name} seed {seed}: incumbents out of order"
+        );
+        assert!(
+            last.hop <= on.hops,
+            "{name} seed {seed}: incumbent past the hops"
+        );
+        assert_eq!(
+            last.energy_bits,
+            on.best.to_bits(),
+            "{name} seed {seed}: last incumbent"
+        );
+        assert_eq!(
+            last.state_bits,
+            state_bits(&on),
+            "{name} seed {seed}: last incumbent state"
+        );
         let unattributed = events
             .iter()
             .filter(|event| event.action == "unattributed")
             .count();
         println!(
             "{name} seed {seed} budget {budget} best_bits {:016x} calls {} hops {} adopted {} \
-             unattributed {unattributed} identical",
+             unattributed {unattributed} incumbents {} last at hop {} identical",
             on.best.to_bits(),
             on.charged,
             on.hops,
-            events.len()
+            events.len(),
+            improvements.len(),
+            last.hop
         );
     }
 }
@@ -243,4 +286,17 @@ fn the_sink_is_off_by_default() {
     let mut ledger = Ledger::new(10);
     ledger.trace_accepted(|_| {});
     assert!(ledger.traces_accepted());
+}
+
+#[test]
+fn the_incumbent_sink_sees_each_lowering() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&seen);
+    let mut ledger = Ledger::new(10);
+    ledger.trace_incumbent(move |m| sink.lock().unwrap().push((m.hop, m.energy)));
+    let state = ndarray::Array1::<f64>::zeros(3);
+    for value in [1.0, 2.0, -1.0, -1.0, -3.0] {
+        ledger.record(value, state.view());
+    }
+    assert_eq!(*seen.lock().unwrap(), vec![(0, 1.0), (0, -1.0), (0, -3.0)]);
 }
