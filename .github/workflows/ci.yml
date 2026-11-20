@@ -103,14 +103,17 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo clippy --all-targets --features rgsaddle -- -D warnings
 
-      # `cargo package` writes anneal-core-${version}.crate and verifies
-      # it. The next step extracts that crate, drops the development
-      # cargo config and the lockfile, and checks the default features
-      # plus `rgsaddle,python` against crates.io.
+      # `cargo package` writes anneal-core-${version}.crate and the
+      # anneal-bridge crate it depends on. Packaging the workspace lets
+      # the core resolve that bridge before it is on crates.io. anneal-python
+      # stays out: it is a git dependency and is not published. The next
+      # step extracts both crates, drops the development cargo config and
+      # the lockfile, and checks the default features plus
+      # `rgsaddle,python` against the packaged bridge.
       - name: Package the crate
         id: package
         if: ${{ !cancelled() }}
-        run: cargo package
+        run: cargo package --workspace --exclude anneal-python
 
       - name: Check packaged default features against crates.io
         if: ${{ !cancelled() && steps.package.outcome == 'success' }}
@@ -120,18 +123,24 @@ jobs:
           meta=$(cargo metadata --format-version 1 --no-deps)
           read -r target version < <(python3 -c 'import json,sys; m=json.loads(sys.argv[1]); pkg=next(p for p in m["packages"] if p["name"]=="anneal-core"); print(m["target_directory"], pkg["version"])' "$meta")
           crate="${target}/package/anneal-core-${version}.crate"
+          bridge="${target}/package/anneal-bridge-${version}.crate"
           test -f "$crate"
+          test -f "$bridge"
           work=$(mktemp -d)
           tar -xzf "$crate" -C "$work"
-          pkg=$(find "$work" -mindepth 1 -maxdepth 1 -type d)
+          tar -xzf "$bridge" -C "$work"
+          pkg=$(find "$work" -mindepth 1 -maxdepth 1 -type d -name 'anneal-core-*')
+          bridge_src=$(find "$work" -mindepth 1 -maxdepth 1 -type d -name 'anneal-bridge-*')
           test -d "$pkg"
+          test -d "$bridge_src"
           rm -rf "$pkg/.cargo"
           rm -f "$pkg/Cargo.lock"
           (
             cd "$pkg"
-            cargo generate-lockfile
-            cargo check --locked
-            cargo check --locked --features rgsaddle,python
+            patch=(--config "patch.crates-io.anneal-bridge.path=${bridge_src}")
+            cargo generate-lockfile "${patch[@]}"
+            cargo check --locked "${patch[@]}"
+            cargo check --locked --features rgsaddle,python "${patch[@]}"
           )
 
       - name: Checkout Vesin

@@ -40,7 +40,6 @@ checksum = "4b46cbb362ab8752921c97e041f5e366ee6297bd428a31275b9fcf1e380f7299"
 name = "anneal-bridge"
 version = "0.12.0"
 dependencies = [
- "libm",
  "ndarray 0.17.2",
  "rand 0.9.5",
 ]

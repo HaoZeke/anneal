@@ -216,6 +216,14 @@ fn rgpot_pair_stays_out_of_the_published_dependencies() {
         .expect("[dependencies] table");
     assert!(!dependencies.contains("git ="));
     assert!(manifest.contains("members = [\"crates/anneal-python\", \"crates/anneal-bridge\"]"));
+    let bridge = dependencies
+        .lines()
+        .find(|line| line.contains("anneal-bridge"))
+        .expect("anneal-bridge dependency");
+    assert!(
+        bridge.contains("version = \"0.12.0\""),
+        "anneal-bridge must carry a version so cargo package can publish it: {bridge}"
+    );
     let pyproject = include_str!("../pyproject.toml");
     assert!(pyproject.contains("manifest-path = \"crates/anneal-python/Cargo.toml\""));
     let wheel = include_str!("../crates/anneal-python/src/lib.rs");

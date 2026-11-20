@@ -148,6 +148,9 @@ def main() -> int:
             fail(errors, f"crates/{member_name}/Cargo.toml does not inherit the workspace version")
         if re.search(r'(?m)^version = "[0-9]+\.[0-9]+\.[0-9]+"', member):
             fail(errors, f"crates/{member_name}/Cargo.toml has its own version")
+    dep_table = cargo_text.split("[dependencies]", 1)[-1]
+    if f'version = "{version}"' not in dep_table.split("anneal-bridge", 1)[-1][:80]:
+        fail(errors, "anneal-bridge path dependency does not carry the canonical version")
     handwritten = [
         line
         for line in cargo_text.splitlines()

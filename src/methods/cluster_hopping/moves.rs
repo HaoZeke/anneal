@@ -1919,6 +1919,11 @@ impl ClusterMove {
         v
     }
 
+    /// True when this arm reverses a directed hydrogen-bond cycle.
+    pub(crate) fn reverses_directed_cycle(&self) -> bool {
+        matches!(self, ClusterMove::RigidReverseCycle { .. })
+    }
+
     /// Short name, for per-arm reporting.
     pub fn name(&self) -> String {
         match self {

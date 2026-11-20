@@ -7,51 +7,39 @@
 use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
 
-use super::{ClusterMove, Config, Ledger, MoveLibrary, RigidStallBook};
+use super::{ClusterMove, Config, Ledger};
 use crate::allocate::FlooredThompson;
 use anneal_bridge::Ops;
 
 static OPS: Ops = Ops {
-    count_entry: super::count_bridge_entry,
     offer,
     remaining,
     stopped,
+    spent,
     best_energy,
     has_best,
     copy_best,
-    has_side,
-    side_energy,
-    copy_side,
-    initial_energy,
-    copy_initial,
     cage_key: super::rigid_cage_key,
     recentre: super::recentre,
-    shell_turn: super::rigid_shell_turn,
-    centres_clear: super::rigid_centres_clear,
-    centres_parted: super::rigid_centres_parted,
     identity: super::hop_is_identity,
-    random_cluster,
     contain,
     has_geometry,
-    count_scan: super::count_chain_scan,
+    reverses_cycle,
     water_sites,
     lab_sites,
     donations: super::cycles::donations,
     frame_rotation: super::cycles::frame_rotation,
     compose_rotation: crate::potentials::compose_rotation,
-    rewire_oo_max,
+    stem_window,
     propose,
     relax: relax_point,
     record,
     reset_bandit,
     bandit_select,
     bandit_update,
-    name_is,
     n_points,
     temperature,
-    min_separation,
     relax_steps,
-    shell_angle,
     n_kernels,
 };
 
@@ -64,7 +52,6 @@ pub(super) fn walk_armed_rigid_archive(
     cfg: &Config,
     ledger: &mut Ledger,
     relax: &mut (dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + Send),
-    book: &mut RigidStallBook,
     cage_archive: &mut crate::methods::stall_archive::StallArchive,
     kernels: &[ClusterMove],
     propose: ProposeStd,
@@ -74,12 +61,12 @@ pub(super) fn walk_armed_rigid_archive(
     cage_quantum: f64,
     orient_scale: f64,
     new_lowest: f64,
+    archive_end: usize,
 ) {
     let mut ctx = Ctx {
         cfg,
         ledger,
         relax,
-        book,
         cage_archive,
         kernels,
         propose,
@@ -94,6 +81,7 @@ pub(super) fn walk_armed_rigid_archive(
         cage_quantum,
         orient_scale,
         new_lowest,
+        archive_end,
     ) {
         *e = next_e;
         *x = next_x;
@@ -104,7 +92,6 @@ struct Ctx<'a> {
     cfg: &'a Config,
     ledger: &'a mut Ledger,
     relax: &'a mut (dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + Send),
-    book: &'a mut RigidStallBook,
     cage_archive: &'a mut crate::methods::stall_archive::StallArchive,
     kernels: &'a [ClusterMove],
     propose: ProposeStd,
@@ -129,8 +116,8 @@ fn offer(raw: *mut u8, energy: f64, x: ArrayView1<f64>, key: u64) {
 }
 
 #[cold]
-fn name_is(raw: *mut u8, arm: usize, name: &str) -> bool {
-    call::<fn(&ClusterMove) -> String>(ClusterMove::name)(&ctx(raw).kernels[arm]) == name
+fn reverses_cycle(raw: *mut u8, arm: usize) -> bool {
+    ctx(raw).kernels[arm].reverses_directed_cycle()
 }
 
 #[cold]
@@ -154,31 +141,6 @@ fn copy_best(raw: *mut u8) -> Array1<f64> {
 }
 
 #[cold]
-fn has_side(raw: *mut u8) -> bool {
-    ctx(raw).book.side_lowest_state.is_some()
-}
-
-#[cold]
-fn side_energy(raw: *mut u8) -> f64 {
-    ctx(raw).book.side_lowest
-}
-
-#[cold]
-fn copy_side(raw: *mut u8) -> Array1<f64> {
-    copy_point(ctx(raw).book.side_lowest_state.as_ref().unwrap())
-}
-
-#[cold]
-fn initial_energy(raw: *mut u8) -> f64 {
-    ctx(raw).book.initial_e
-}
-
-#[cold]
-fn copy_initial(raw: *mut u8) -> Array1<f64> {
-    copy_point(&ctx(raw).book.initial_x)
-}
-
-#[cold]
 fn remaining(raw: *mut u8) -> usize {
     call::<fn(&Ledger) -> usize>(Ledger::remaining)(ctx(raw).ledger)
 }
@@ -189,14 +151,13 @@ fn stopped(raw: *mut u8) -> bool {
 }
 
 #[cold]
-fn best_energy(raw: *mut u8) -> f64 {
-    ctx(raw).ledger.best
+fn spent(raw: *mut u8) -> usize {
+    ctx(raw).ledger.spent()
 }
 
 #[cold]
-fn random_cluster(n: usize, separation: f64, rng: &mut StdRng) -> Array1<f64> {
-    let fold: fn(usize, &mut [f64]) = crate::potentials::fold_rotation_vectors;
-    anneal_bridge::rigid_draw(n, separation, rng, call(fold))
+fn best_energy(raw: *mut u8) -> f64 {
+    ctx(raw).ledger.best
 }
 
 #[cold]
@@ -226,8 +187,11 @@ fn lab_sites(raw: *mut u8, x: ArrayView1<f64>) -> Vec<Vec<[f64; 3]>> {
 }
 
 #[cold]
-fn rewire_oo_max() -> f64 {
-    super::cycles::REWIRE_OO_MAX
+fn stem_window(raw: *mut u8) -> f64 {
+    let Some(geometry) = ctx(raw).cfg.rigid_body_geometry.as_ref() else {
+        return 0.0;
+    };
+    super::cycles::stem_window(geometry)
 }
 
 #[cold]
@@ -293,21 +257,8 @@ fn temperature(raw: *mut u8) -> f64 {
 }
 
 #[cold]
-fn min_separation(raw: *mut u8) -> f64 {
-    ctx(raw).cfg.min_separation
-}
-
-#[cold]
 fn relax_steps(raw: *mut u8) -> usize {
     ctx(raw).cfg.relax_steps
-}
-
-#[cold]
-fn shell_angle(raw: *mut u8) -> f64 {
-    match ctx(raw).cfg.move_library {
-        MoveLibrary::RigidBody { rotate_step, .. } => super::RIGID_SHELL_STEPS * rotate_step,
-        _ => 0.0,
-    }
 }
 
 #[cold]

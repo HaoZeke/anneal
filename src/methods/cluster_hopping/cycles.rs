@@ -152,8 +152,8 @@ pub(crate) fn reverse_cycle<R: Rng + ?Sized>(
     true
 }
 
-/// Reverses a directed hydrogen-bond cycle, including any stem donor within
-/// [`REWIRE_OO_MAX`] of the closing molecule.
+/// Reverses a directed hydrogen-bond cycle, including any stem donor inside
+/// [`stem_window`] of the closing molecule.
 ///
 /// The walk itself is compiled in `anneal-bridge`. This wrapper exists so the
 /// cycle tests call that walk, and it is absent from a release build.
@@ -169,15 +169,23 @@ fn reverse_chain(
     let mut pack = ChainPack { geometry, n };
     let ctx = (&mut pack as *mut ChainPack).cast::<u8>();
     let fns = anneal_bridge::ChainFns {
-        count_scan: super::count_chain_scan,
         water_sites: chain_water,
         lab_sites: chain_sites,
         donations,
         frame_rotation,
         compose_rotation: crate::potentials::compose_rotation,
-        rewire_oo_max: || REWIRE_OO_MAX,
+        stem_window: chain_window,
     };
+    super::count_chain_scan();
     anneal_bridge::reverse_directed(&fns, ctx, n, x, rng)
+}
+
+#[cfg(test)]
+fn chain_window(raw: *mut u8) -> f64 {
+    // SAFETY: the caller passes the pack pointer from this module and does not
+    // hold it across another call.
+    let pack = unsafe { &*raw.cast::<ChainPack>() };
+    stem_window(pack.geometry)
 }
 
 #[cfg(test)]
@@ -385,6 +393,26 @@ pub(crate) fn reverse_cycle_cartesian<R: rand::Rng + ?Sized>(
 /// neighbour inside that window is an acceptor a hydrogen can be turned onto.
 const REWIRE_OO_MIN: f64 = 2.4;
 pub(crate) const REWIRE_OO_MAX: f64 = 3.5;
+
+/// Heavy-atom separation at which a hydrogen of `geometry` can just reach
+/// [`BOND`] from the other heavy atom.
+///
+/// The reach is the longest distance in `geometry` from the heavy site to a
+/// hydrogen site. Adding the donation cutoff gives the heavy–heavy distance
+/// of a straight contact. A body that is not one oxygen and two hydrogens
+/// has no such contact.
+pub(crate) fn stem_window(geometry: &RigidBodyGeometry) -> f64 {
+    let Some((heavy, hydrogens)) = water_sites(geometry) else {
+        return 0.0;
+    };
+    let sites = geometry.sites();
+    let origin = sites[heavy];
+    let reach = hydrogens
+        .into_iter()
+        .map(|site| norm(sub(sites[site], origin)))
+        .fold(0.0_f64, f64::max);
+    reach + BOND
+}
 
 /// Smallest turn, in radians, that is not the half-radian group shake.
 ///
@@ -865,7 +893,88 @@ pub(crate) mod tests {
         }
         assert!(
             bridged,
-            "stem donor within REWIRE_OO_MAX must bridge onto the cycle end"
+            "stem donor inside the derived window must bridge onto the cycle end"
         );
+    }
+
+    #[test]
+    fn a_stem_donor_outside_the_window_is_not_bridged() {
+        let n = 5;
+        let mut x = tadpole();
+        // Move the stem oxygen far past the derived window, still donating to 1.
+        let far = [stem_window(&geometry()) + 2.0, 0.0, 0.0];
+        place_water(&mut x, n, 0, [-far[0], 0.0, 0.0], [0.0, 0.0, 0.0]);
+        let mut bridged = false;
+        for seed in 0..32 {
+            let mut trial = x.clone();
+            let mut rng = StdRng::seed_from_u64(seed);
+            if reverse_chain(&geometry(), n, &mut trial, &mut rng) {
+                let (after, _) = bond_sets(n, &trial);
+                if after.contains(&(0, 4)) {
+                    bridged = true;
+                }
+            }
+        }
+        assert!(!bridged, "a donor outside the window must not close onto 4");
+    }
+
+    #[test]
+    fn a_longer_stem_bridges_only_the_donor_inside_the_window() {
+        let n = 6;
+        let g = geometry();
+        let window = stem_window(&g);
+        let o1 = [0.0, 0.0, 0.0];
+        let o2 = [2.8, 0.0, 0.0];
+        let o3 = [2.8, 2.8, 0.0];
+        let o4 = [0.0, 2.8, 0.0];
+        // Molecule 5 sits inside the window of 4. Molecule 0 donates to 5
+        // from outside that window.
+        let o5 = [0.0, 2.8 - (window - 0.4), 0.0];
+        let o0 = [0.0, o5[1] - (window + 1.0), 0.0];
+        let mut x = Array1::zeros(6 * n);
+        place_water(&mut x, n, 0, o0, o5);
+        place_water(&mut x, n, 5, o5, o1);
+        place_water(&mut x, n, 1, o1, o2);
+        place_water(&mut x, n, 2, o2, o3);
+        place_water(&mut x, n, 3, o3, o4);
+        place_water(&mut x, n, 4, o4, o1);
+        let mut included = false;
+        let mut outer = false;
+        for seed in 0..64 {
+            let mut trial = x.clone();
+            let mut rng = StdRng::seed_from_u64(seed);
+            if reverse_chain(&g, n, &mut trial, &mut rng) {
+                let (after, _) = bond_sets(n, &trial);
+                if after.contains(&(5, 4)) {
+                    included = true;
+                }
+                if after.contains(&(0, 4)) {
+                    outer = true;
+                }
+            }
+        }
+        assert!(included, "the inner stem donor must bridge onto 4");
+        assert!(!outer, "the outer stem donor is outside the window");
+    }
+
+    #[test]
+    fn the_bridge_matches_reverse_cycle_when_no_stem_is_in_range() {
+        let n = 4;
+        let start = ring(n);
+        let mut matched = false;
+        for seed in 0..16 {
+            let mut cycle = start.clone();
+            let mut bridged = start.clone();
+            let mut rng_cycle = StdRng::seed_from_u64(seed);
+            let mut rng_bridge = StdRng::seed_from_u64(seed);
+            let cycle_ok = reverse_cycle(&geometry(), n, &mut cycle, &mut rng_cycle);
+            let bridge_ok = reverse_chain(&geometry(), n, &mut bridged, &mut rng_bridge);
+            assert_eq!(cycle_ok, bridge_ok, "seed {seed}");
+            if cycle_ok {
+                assert_eq!(cycle, bridged, "seed {seed}");
+                matched = true;
+            }
+        }
+        assert!(matched, "a bare cycle should reverse for some seed");
     }
 }

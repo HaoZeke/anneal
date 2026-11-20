@@ -226,6 +226,11 @@ jobs:
             echo "anneal-core ${ver} already on crates.io; nothing to upload."
             exit 0
           fi
+          if ! curl -fsS -A 'anneal-release-ci' "https://crates.io/api/v1/crates/anneal-bridge/${ver}" >/dev/null 2>&1; then
+            cargo publish --locked --manifest-path crates/anneal-bridge/Cargo.toml
+          else
+            echo "anneal-bridge ${ver} already on crates.io."
+          fi
           cargo publish --locked
 
   github-release:
