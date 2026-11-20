@@ -183,8 +183,8 @@ class.
 - Inputs :: =path= (the table file, no default), =format=
   (=EAMTableFormat::Funcfl=, =Setfl= or =FinnisSinclair=, default =Setfl=),
   =periodic= (sum over periodic images, default true), =stress= (write the
-  stress, default false), =skin= (Verlet skin of the potential's own pair
-  list, default 1.0).
+  stress, default false), =skin= (Verlet skin of the potential's own pair list,
+  default 1.0).
 - Units :: none; the table carries its own units, eV and Angstrom for the LAMMPS
   metal files.
   =skin= is in the length unit of the table.
@@ -401,8 +401,7 @@ and 0 when the cutoff is 0 or less.
 many-body range with =densities= 1.
 =rgpot::SuttonChenPot= returns 0 when its cutoff is 0 or less, since it then
 keeps every pair.
-=rgpot::StillingerWeberSi= returns =kCut * kSigma= with =full= set and =reach=
-2.
+=rgpot::StillingerWeberSi= returns =kCut * kSigma= with =full= set and =reach= 2.
 =rgpot::TersoffSiC= returns the silicon outer cutoff, 3 Angstrom, with =full=
 set and =reach= 2.
 Both have =densities= 0, and =ghostReach()= is twice the cutoff.
@@ -1123,8 +1122,8 @@ StillingerWeberSi();
   Atomic numbers are not read.
   The cell is periodic in every direction.
   The force call writes the stress.
-  =locality=, =densityStage= and =forceStage= evaluate one host's owned atoms
-  on a full neighbour list; see those entries.
+  =locality=, =densityStage= and =forceStage= evaluate one host's owned atoms on
+  a full neighbour list; see those entries.
   This is not the kernel behind =PotType::SWSi=; see =rgpot::fortranpots::SWPot=
   and [[file:sw_si.org][Stillinger-Weber silicon (1985)]].
 - Errors :: the force call throws =std::invalid_argument= for a null =ForceOut=,
@@ -1156,8 +1155,8 @@ void forceStage(const HalfList &list, const double *densities, double *forces,
 - Inputs :: =list= with =full= and =newton= set, =densities= (not read),
   =forces= of length 3 * nAtoms, and =tally= or null.
   The rows are the owned centres.
-  A copy's row, when the host fills it, is that neighbour's full list and is
-  not a centre.
+  A copy's row, when the host fills it, is that neighbour's full list and is not
+  a centre.
 - Units :: the units of =forceImpl=.
 - Outputs :: adds the forces of each owned centre.
   A two-body term on the full list is counted from the atom whose partner sits
@@ -1166,8 +1165,8 @@ void forceStage(const HalfList &list, const double *densities, double *forces,
   A three-body term is counted at each owned centre.
   Pairs at or beyond =kCut * kSigma= are skipped, so a list built out to
   =ghostReach()= works.
-  With a tally the host's energy is added, and the virial W = -dE/dε is added
-  in the order xx, yy, zz, yz, xz, xy.
+  With a tally the host's energy is added, and the virial W = -dE/dε is added in
+  the order xx, yy, zz, yz, xz, xy.
   Forces written on copies are for the host to add back to their owners.
   =Staged3BodyTest= splits a periodic silicon cell into 2, 4 and 8 slabs, and
   repeats the check on a triclinic cell and on a slab thinner than two cutoffs.
@@ -1194,8 +1193,8 @@ TersoffSiC();
   Angstrom for carbon; a mixed pair takes the geometric mean of each.
   The cell is periodic in every direction.
   The force call writes the stress.
-  =locality=, =densityStage= and =forceStage= evaluate one host's owned atoms
-  on a full neighbour list; see those entries.
+  =locality=, =densityStage= and =forceStage= evaluate one host's owned atoms on
+  a full neighbour list; see those entries.
   See [[file:tersoff_sic.org][Tersoff Si-C]].
 - Errors :: the force call throws =std::invalid_argument= for a null =ForceOut=,
   for a null position, atomic number, cell or force buffer when =nAtoms= > 0,
@@ -1240,8 +1239,8 @@ void forceStage(const HalfList &list, const double *densities, double *forces,
 - Inputs :: =list= with =full= and =newton= set, =densities= (not read),
   =forces= of length 3 * nAtoms, and =tally= or null.
   The rows are the owned centres.
-  A copy's row, when the host fills it, is that neighbour's full list and is
-  not a centre.
+  A copy's row, when the host fills it, is that neighbour's full list and is not
+  a centre.
   Atomic numbers are read for every atom, copies included.
 - Units :: the units of =forceImpl=.
 - Outputs :: adds the forces of each owned centre.
@@ -1249,8 +1248,8 @@ void forceStage(const HalfList &list, const double *densities, double *forces,
   the partner's owner counts the bond that leaves the partner.
   Pairs at or beyond the silicon outer cutoff, and pairs beyond a pair's own
   outer cutoff, are skipped, so a list built out to =ghostReach()= works.
-  With a tally the host's energy is added, and the virial W = -dE/dε is added
-  in the order xx, yy, zz, yz, xz, xy.
+  With a tally the host's energy is added, and the virial W = -dE/dε is added in
+  the order xx, yy, zz, yz, xz, xy.
   Forces written on copies are for the host to add back to their owners.
   =Staged3BodyTest= splits a periodic silicon carbide cell into 2, 4 and 8
   slabs, and repeats the check on a triclinic cell and on a slab thinner than

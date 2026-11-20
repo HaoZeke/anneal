@@ -113,20 +113,19 @@ The =eam/he= and =eam/cd= layouts are not read.
 Periodic evaluation sums every image of a pair that lies inside the cutoff.
 When every face spacing is greater than twice the cutoff, that image is the
 minimum image, and =forceImpl= walks the stored neighbour list.
-When a face spacing is at most twice the cutoff, a pair can have several
-images inside the cutoff, and an atom can see a translation of itself.
-=forceImpl= then walks those images directly and does not build the stored
-list.
+When a face spacing is at most twice the cutoff, a pair can have several images
+inside the cutoff, and an atom can see a translation of itself.
+=forceImpl= then walks those images directly and does not build the stored list.
 The walk refuses a cell whose image extent on one axis would pass 1024, and a
-cell whose three axes together would visit more than 262144 lattice shifts
-for one pair.
+cell whose three axes together would visit more than 262144 lattice shifts for
+one pair.
 The constructor does not check the cutoff against a cell.
 It throws =std::invalid_argument= for a file it cannot open or parse.
 =forceImpl= throws =std::invalid_argument= when the image extent or the image
-count is past that limit, for a periodic call without a cell, for an
-atomic number that is in no element line, when a fractional separation is
-not finite, and when the nearest integer to that separation plus the image
-extent does not fit in an =int= lattice index.
+count is past that limit, for a periodic call without a cell, for an atomic
+number that is in no element line, when a fractional separation is not finite,
+and when the nearest integer to that separation plus the image extent does not
+fit in an =int= lattice index.
 
 * Stress
 

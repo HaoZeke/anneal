@@ -407,10 +407,10 @@ The concept =rgpot::LocalPotential= tells whether a potential type declares one,
 and =rgpot::spec::Built::locality= carries it for a potential built by name.
 
 The stages are the non-virtual members =densityStage= and =forceStage= of the
-same classes, in =rgpot/Staged.hpp=; :doc:`../reference/cpp_potentials`
-gives their signatures.
-=HalfList= is a host's neighbour list over its own atoms and their copies,
-in the layout of a LAMMPS =NeighList=, with or without =newton=.
+same classes, in =rgpot/Staged.hpp=; :doc:`../reference/cpp_potentials` gives
+their signatures.
+=HalfList= is a host's neighbour list over its own atoms and their copies, in
+the layout of a LAMMPS =NeighList=, with or without =newton=.
 The host zeroes the densities and runs the density stage.
 It then completes them: with =newton= it adds the entries of the copies to their
 owners, and it copies the values of each owner to its copies.
