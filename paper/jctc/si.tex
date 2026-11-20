@@ -1,18 +1,17 @@
 % Copyright (c) anneal developers
 \documentclass[journal=jctcce,manuscript=suppinfo]{achemso}
-\usepackage{booktabs,longtable,siunitx}
+\usepackage{amsmath,booktabs,longtable,siunitx}
 \usepackage{url,seqsplit}
 \urlstyle{tt}
 \setlength{\emergencystretch}{3em}
 \sisetup{scientific-notation=true,exponent-product=\times}
 \graphicspath{{figs/}}
 \input{macros}
-\title{One basin-hopping setting for Lennard-Jones,
-Morse, gold, and water clusters}
+\title{Seed-paired knockouts of a basin-hopping search: structure priors,
+templates, stall rules, and the length unit, with comparisons to GMIN,
+CREST, and the Atomic Simulation Environment}
 \author{Rohit Goswami}
 \affiliation{SURF B.V., Amsterdam}
-\alsoaffiliation{Science Institute, University of Iceland,
-Reykjavik, Iceland}
 \alsoaffiliation{TurtleTech ehf., Reykjavik, Iceland}
 \author{Ruhila Goswami}
 \affiliation{Faculty of Life and Environmental Sciences,
@@ -84,17 +83,16 @@ rule.
 The full arm hits 24 of 64.
 Its call PAR-2 median is 2000000 and its type-7 interquartile range is
 1513982.75.
-The GMIN arm hits 64 of 64.~\rerun{5}
+The GMIN arm hits 64 of 64.
 Its call PAR-2 median is 158540.5 and its type-7 interquartile range is
 201463.5.
 Those GMIN rows use seeds 0--63, the starts of that campaign, and a
 ceiling of 1000000 calls.
 They are not the same-session panel of the main text, where GMIN hits
-LJ\(_{98}\) on 0 of 12 seeds at \(4\times 10^{6}\) calls.~\rerun{5}
+LJ\(_{98}\) on 0 of 12 seeds at \(4\times 10^{6}\) calls.
 \path{logs/paired_bootstrap_lj98.txt} records the paired-bootstrap
 interval of the median ratio for the 24-of-64 hop, 12.62 with endpoints
 8.52 and 15.22, from 2000 resamples.
-None of those rows is the LJ\(_{75}\) campaign of 200 seeds.
 OGOLEM, cited as Dieterich and Hartke, is in the campaign file at 6 of
 64 on LJ\(_{104}\).
 \cite{dieterich2010} ABCluster, cited as Zhang and Dolg, is in the same
@@ -103,73 +101,621 @@ file.
 medians.
 
 \section{Hardware and reproduction}
-We keep the LJ75 receipt in \path{logs/lj75-hardware-receipt.txt}.
-We run \path{scripts/lj75_hardware_capture.sh}, which writes that
-file from the live process.
-The 200-seed binary was built from tree
-\texttt{\seqsplit{37535ec1a6e99d47a2afe0752072a33af64dccb3}}, the tree of the
-unpublished build commit.
-A public reader gets the archived blob-hash check only.
-That tree has the \#56 copies of \texttt{bias.rs}, \texttt{neighbors.rs}
-and \texttt{potentials.rs}, the hot-path bench file, the newsfragment
-and \texttt{precision-policy.org}.
-It lacks the \texttt{cluster\_hopping.rs} and \texttt{tip4p.rs} parts of
-\#56 and the bench entry in \texttt{Cargo.toml}.
-Its \texttt{rigid\_body.rs} is a third version.
-Main's sealed LJ75 counts used restart on stall and an empty surface
-list.
-They are not the result of the preset in this article.
-The encounter-curve figure draws that earlier campaign: the recommended
-hop, the derived hop, and the Wales-group basin-hopping program (GMIN),
-on 200 seeds.
-The panel prints that run's PAR-2 values.
-Figure~\ref{fig:si-lj75-ecdf} draws it.
-Its GMIN arm ran the published LJ\(_{75}\) input with symmetrization, from
-the OptBench starts, and hit on 200 of 200 seeds.
-The same-session panel of the main text hit LJ\(_{75}\) on 0 of 12 seeds
-with one input at every size and the start that this code writes.~\rerun{5}
-We keep the source archive at \path{logs/lj75-source-37535ec1.tar.xz}.
-It includes \texttt{LICENSE.txt}.
-The notice reads Copyright (c) 2023 anneal core developers.
-\path{scripts/lj75_rebuild_from_archive.sh} rebuilds the example
-with the bank-rpc feature.
-We keep the build receipt in \path{logs/cargo-build-receipt.txt}.
-Against commit \texttt{ce80337b}, \path{cluster_hopping.rs} differs by 218
-insertions and 2 deletions, \texttt{tip4p.rs} by 93 and 15, \texttt{rigid\_body.rs}
-by 52 and 14, \path{examples/molecular_cluster.rs} by 1 insertion,
-\texttt{Cargo.toml} by 4 insertions and 1 deletion, and
-\texttt{Cargo.lock} by 55 deletions.
-On the recommended LJ\(_{75}\) path the hop reuses a pure distance
-descriptor.
-The added tests require a second call on the same coordinates to match
-bit for bit.
-The smooth overlap of atomic positions (SOAP) key still recomputes,
-because its basis learns.
 The hexamer engine digest is the \texttt{engine\_sha256} line of
 \path{water/VERSIONS} inside \path{logs/logs-water.tar.xz}.
 That digest is
 \texttt{\seqsplit{4836648ee77203e9462d51e25a1970b3f0df3a3bcd126f9a7454f6896ac66df8}}.
 The hexamer wall-time medians are in \path{logs/hexamer-walls.txt}.
 
+\section{GMIN inputs and the two fairness campaigns}
+\label{sec:si-gmin}
+The GMIN table of the main text uses two GMIN inputs.
+The Lennard-Jones rows run the Wales-group LJ\(_{38}\) introduction file at every Lennard-Jones size, with \(T=1.0\), \texttt{NEWRESTART 40}, and an energy difference of 0.003, with no symmetrization keyword, from the start that this code writes for the seed.
+The Morse row adds GMIN's native \texttt{MORSE} keyword and \(\rho\) to the same numerical settings.
+GMIN is the public snapshot of SVNREV \texttt{9cbec1a446352bc9ef064bd2b1a5767194655919}, tarball sha256 \texttt{\seqsplit{ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776}}, built by \path{scripts/gmin_panel/build_gmin.sh} at revision \texttt{eeec8e2c} with three patches, \path{bench/lj104-lattice/v2/h2h-gmin.patch}, \path{scripts/morse_h2h/morse-timer.patch}, and \path{bench/metal-cluster-h2h/gmin-bgupta.patch}, which cap the force calls, time the potential, and, in the serial build, set the run index before its first use; no other line of GMIN changes.
+The recipe stamps the wall clock and the build directory into the binary, so the three shard binaries differ in their sha256 and share one \texttt{.text} section.
+The hit is a quenched energy at or below the Cambridge Cluster Database
+minimum plus 0.001: besides the five Lennard-Jones references above,
+\(-569.363652\) at LJ\(_{102}\), \(-575.766131\) at LJ\(_{103}\),
+\(-893.310258\) at LJ\(_{150}\), and \(-378.333471\) at M\(_{80}\)
+(\(\rho=6\)).
+\cite{walesCambridgeClusterDatabase}
+
+The committed \path{paper/jctc/data/lj75_gmin/gmin-lj75-sym-starts-1-200.csv}
+campaign gave GMIN the published LJ\(_{75}\) input with symmetrization
+and the OptBench starts.
+That campaign and the 64-seed campaign of the previous section are the
+two runs in this repository where GMIN is given more than the one input
+of the table.
+
+\section{Host and commands}
+\label{sec:host}
+Each cell of the GMIN table ran both arms on one virtual machine, one thread
+pinned to core 0, in alternating order by seed: six seeds with this code
+first and six with GMIN first.
+The machine is recorded by the sha256 of its machine id: LJ\(_{38}\),
+LJ\(_{55}\), LJ\(_{75}\), LJ\(_{98}\), LJ\(_{102}\), LJ\(_{103}\),
+LJ\(_{104}\), and M\(_{80}\) ran on
+\texttt{\seqsplit{3b11c160088e7af5c4f7ebd9da95e0bfe019a34698416701bb057c15fea10873}},
+and LJ\(_{150}\) on
+\texttt{\seqsplit{9eb296774121518feb1b187b0f6a109a42de7a5dd39e62ccd37d6e7d329604b8}}.
+GMIN is built by \path{scripts/gmin_panel/build_gmin.sh} with ALIGN, MPI,
+and OpenMP off, against the system BLAS and LAPACK; the record does not
+give the compiler version.
+Wall times are compared only within a cell.
+
+The commands that reproduce the three comparisons are these, run from the
+repository root.
+\begin{footnotesize}
+\begin{verbatim}
+# GMIN: LJ/Morse use TEMPERATURE 1.0 and NEWRESTART 40
+bash scripts/gmin_panel/build_gmin.sh
+snakemake -s workflow/Snakefile gmin_panel
+python3 paper/jctc/scripts/gmin_table.py
+
+# Knockouts and TIP4P: rewrite both tables from the imported rows
+python3 paper/jctc/scripts/knockout_tables.py
+
+# ASE: rewrite the tables from the committed rows, with no new search
+bash scripts/ase_panel/enter_bench.sh --system lj38
+ASE_NONLJ_REVISION=9a30f3190b3bb7040c675a904f8388eb68224151 \
+  pixi run --locked --frozen bash scripts/ase_nonlj/enter_bench.sh
+
+# CREST: the 192-seed receipts, then one uncapped draw and the polish
+python3 paper/jctc/scripts/water_rerun.py
+tar -xJf paper/jctc/logs/logs-water.tar.xz -O water/anneal-paper4000-seed0/start.xyz > start.xyz
+crest start.xyz -T 1
+xtb --gfn 2 --opt vtight --acc 0.01 --iterations 500
+gfn2_water_h2h 6 4000 0 anneal-paper4000-seed0
+python3 paper/jctc/scripts/water_h2h.py
+\end{verbatim}
+\end{footnotesize}
+The GMIN script writes \texttt{bench/gmin-panel/rows.csv}; the table of the main
+text is written from the imported rows of the 2026-11-19 shards by
+\path{paper/jctc/scripts/gmin_table.py}, and the summarizers of each other panel
+rewrite its table from the committed rows without a new search.
+The ASE rows cannot be searched again from this repository.
+They come from builds whose commits are not in it, and
+\path{bench/unreachable-revisions.csv} lists each revision with the rows that cite it.
+The Lennard-Jones script reruns a seed only under
+\texttt{ASE\_PANEL\_REVISION}, a full commit SHA, and a new rows file in
+\texttt{ASE\_PANEL\_ROWS}, and the Morse script keeps every stored seed.
+The rows themselves are what the main text reports.
+\texttt{paper/jctc/scripts/selector\_fisher.py} reads the two result
+files of the move-selection comparison and checks each hit flag against its
+energy, and \texttt{paper/jctc/scripts/ablation\_table.py} writes the
+ablation table of the main text from the same files, with the two arms
+paired by seed.
+
+\section{Code revisions behind the tables}
+\label{sec:si-revisions}
+Every row of this code in the GMIN table is revision
+\texttt{\seqsplit{eeec8e2c216ae1506768bca8e29846c1c039ca3b}}, an ancestor of
+the submitted revision and a descendant of commit \texttt{1c1b1238}, which
+removed the structure templates.
+The rows are the four shards of \path{paper/jctc/data/gmin_rerun}, each copied
+from the record branch its \texttt{PROVENANCE} file names.
+Earlier versions of the table carried Morse and gold rows of revision
+\texttt{1ce3ab64}, which is not in the repository; no committed row of an
+ancestor revision covers M\(_{55}\), M\(_{80}\) at \(\rho=14\), or
+Au\(_{55}\) against GMIN, and the table leaves those clusters out.
+
+The blocks of the knockout table ran at the revisions their headings name.
+The structure-prior block is the last row of each system, arm, and seed at
+\texttt{f2a628c0} in the record of the prior switch, whose binaries are the
+switch of commit \texttt{4f5ec0c5} built on develop \texttt{f2a628c0}; with
+the switch on, that build gives the trajectory pins of develop.
+The record also ran LJ\(_{75}\), and the table leaves it out of this block,
+because the arm without the priors is not the code of an ancestor of the
+submitted revision.
+The template block is the release pair of the record that runs the parent
+\texttt{628773d6} and the child \texttt{1c1b1238}, even seeds parent first and
+odd seeds child first.
+The restart block is the session of \texttt{d12f8825} against develop
+\texttt{7192e9f8}, and the length-unit block the gate of \texttt{e5883055}
+against \texttt{628773d6} with the patch of sha256 \texttt{1c5575a2} that
+removes the structure templates, tree \texttt{a9cef902}.
+Revisions \texttt{d12f8825} and \texttt{e5883055} are not in the repository;
+their records are.
+Both records also ran LJ\(_{75}\), and the table leaves that cluster out of
+both blocks, because the arm with the switch did not run at an ancestor of the
+submitted revision.
+The trail step has one record, on LJ\(_{75}\), whose two arms ran at
+\texttt{666591a0}, a commit outside the history of the submitted revision, so
+the knockout table has no trail block.
+
+The anneal arm of the Lennard-Jones and gold ASE table is revisions
+\texttt{\seqsplit{1ce3ab64493196afd25e8690648e21157d91b882}} and
+\texttt{\seqsplit{b49341e308e6e98e39a2ea7bcc7fbf743f6c45ac}}, neither in the
+repository.
+The anneal arm of the Morse ASE table is revision \texttt{9a30f319}, at the
+length scale of the Morse pair, which is in the repository and is not an
+ancestor of the submitted revision.
+The cap of each ASE run is three times the slowest wall of the panel's
+cluster-preset arm on that cluster.
+That arm is not a configuration of the main-text tables.
+Its hits are 10, 12, 4, 0, 0, and 0 of 12 on LJ\(_{38}\), LJ\(_{55}\),
+LJ\(_{98}\), LJ\(_{104}\), LJ\(_{150}\), and Au\(_{55}\).
+The move-selection rows were recorded by commit \texttt{07092af2}, and the
+TIP4P rows of the GMIN comparison by revision \texttt{e1a69a57}, both
+ancestors of the submitted revision.
+The preset of \texttt{9a30f319}, behind the Morse ASE table, has the six
+priors on, and the parent of \texttt{07092af2} has no prior switch.
+The anneal arm of the 192-seed hexamer run is source \texttt{36086e98}, which
+is not in the repository, recorded at revision \texttt{9a30f319}.
+
+The rows of the GOFEE table were collected at 5 repository heads, which
+\texttt{results.csv} records for each row, with the head unrecorded on 3 rows.
+The versions are ASE 3.29.0 and AGOX 3.11.1.
+The record also holds LJ\(_{75}\) rows, and the table leaves that cluster
+out, because no row of this code there ran at an ancestor of the submitted
+revision.
+
+\section{Protocol of the ASE comparison}
+\label{sec:si-ase}
+The ASE arms are the basin hopping and the minima hopping of the Atomic
+Simulation Environment 3.29.0 at its constructor defaults, run on seeds
+2000--2011, at \(4\times 10^{5}\) calls for 38 atoms, \(1\times 10^{6}\) for
+55, and \(4\times 10^{6}\) for 98 atoms and above, on one core of one host.
+Each run stops at a hit, at the budget, or at a wall cap.
+The cap of the basin-hopping and minima-hopping runs is three times the
+slowest wall of the panel's cluster-preset arm on that cluster.
+No run of this code reached its cap.
+On LJ\(_{98}\), LJ\(_{104}\), and LJ\(_{150}\) basin hopping spent the full
+\(4\times 10^{6}\) calls on every seed.
+The ASE arms do not start from the start of this code, because the random
+generators of the two codes do not make a shared start from one seed, so
+their tests are unpaired.
+Fisher's test against each ASE arm is below 0.05 on all 5 Lennard-Jones
+clusters.
+On LJ\(_{38}\) the median wall of this code is 0.067~s, and every ASE run
+stops at the cap of 4.654~s.
+On Au\(_{55}\) the median best energy lies 0.051~eV above the reference for
+this code, 1.196~eV for basin hopping, and 0.737~eV for minima hopping.
+On the Morse clusters ASE evaluates its own Morse calculator, which
+agrees with this code at the seed-2000 start to \(6.8\times 10^{-12}\) in
+energy and \(3.6\times 10^{-12}\) in force.
+Every basin-hopping and minima-hopping run of the Morse ASE table stopped at
+the cap.
+Fisher's \(p\) against each ASE arm is \(7.4\times 10^{-7}\) on the first
+three and 0.037 on M\(_{55}\) at \(\rho=14\).
+Minima hopping reached its cap on every run, and basin hopping on every run of
+LJ\(_{38}\), Au\(_{55}\), and the Morse clusters and on 11 of 12 on
+LJ\(_{55}\).
+On LJ\(_{98}\), LJ\(_{104}\), and LJ\(_{150}\) basin hopping spent the budget
+before the cap and missed on every seed.
+
+\section{Statistical methods}
+\label{sec:si-stats}
+Every test below is two-sided.
+\path{scripts/paired_stats.py} implements the paired tests, and the
+generators of the tables call it.
+
+\emph{Paired outcome table.}
+Two arms run on the same seeds from the same start give a pair of hit flags
+on each seed.
+The paired outcome table counts \(a\) seeds that both arms hit, \(b\) that
+only the first arm hits, \(c\) that only the second hits, and \(d\) that
+neither hits, with \(n=a+b+c+d\).
+The GMIN table, the move-selection table, and the water hexamer pair their
+arms in this way.
+
+\emph{Exact McNemar test.}
+Under the null hypothesis that the two arms hit at the same rate, each of the
+\(m=b+c\) discordant seeds favors the first arm with probability \(1/2\), so
+\(b\) is binomial with \(m\) trials and probability \(1/2\)
+\cite{mcnemarNoteSamplingError1947}.
+The two-sided \(p\) is twice the smaller tail, capped at 1,
+\begin{equation}
+p = \min\Bigl(1,\ 2^{1-m}\sum_{k=0}^{\min(b,c)} \binom{m}{k}\Bigr),
+\label{eq:mcnemar}
+\end{equation}
+and \(p=1\) when \(m=0\).
+The smallest \(p\) that \(m\) discordant seeds can give is \(2^{1-m}\), which
+is 0.0625 at \(m=5\) and 0.03125 at \(m=6\).
+
+\emph{Interval of a paired difference in hit rate.}
+The interval of \(\theta=p_1-p_2=(b-c)/n\) is method 10 of Newcombe for
+paired data \cite{newcombeImprovedConfidenceIntervals1998}.
+Let \(p_1=(a+b)/n\) and \(p_2=(a+c)/n\), and let \((l_i,u_i)\) be the Wilson
+score interval \cite{wilsonProbableInferenceLaw1927} of \(p_i\),
+\begin{equation}
+\frac{p_i + z^2/(2n) \mp z\sqrt{p_i(1-p_i)/n + z^2/(4n^2)}}{1+z^2/n},
+\qquad z = \Phi^{-1}(0.975),
+\label{eq:wilson}
+\end{equation}
+clipped to \([0,1]\), where \(\Phi\) is the standard normal distribution function.
+With \(A=ad-bc\) and \(M=(a+b)(c+d)(a+c)(b+d)\), the correlation is
+\(\phi=0\) when \(M=0\), and otherwise
+\(\phi=A^{\ast}/\sqrt{M}\), where \(A^{\ast}=\max(A-n/2,\,0)\) when \(A>0\)
+and \(A^{\ast}=A\) when \(A\le 0\).
+The interval is
+\begin{equation}
+\Bigl(\theta - \sqrt{\delta_1^2 - 2\phi\,\delta_1\varepsilon_2 + \varepsilon_2^2},\ \
+\theta + \sqrt{\varepsilon_1^2 - 2\phi\,\varepsilon_1\delta_2 + \delta_2^2}\Bigr),
+\label{eq:newcombe}
+\end{equation}
+with \(\delta_i=p_i-l_i\) and \(\varepsilon_i=u_i-p_i\).
+The interval of a single hit rate is equation~\ref{eq:wilson} alone.
+
+\emph{Exact Wilcoxon signed-rank test.}
+For calls and wall, the test takes the per-seed difference of the first arm
+less the second \cite{wilcoxonIndividualComparisons1945}.
+Calls are the calls to the minimum, with a miss counted at the budget, and
+wall is the wall of the whole run, which ends at the hit or at the budget, so
+neither is censored.
+Zero differences are dropped, leaving \(m\) pairs; the absolute differences
+get mid-ranks, and \(T^{+}\) is the sum of the ranks of the positive
+differences.
+The null distribution of \(T^{+}\) is the exact one over all \(2^m\)
+assignments of signs to the \(m\) ranks, which holds with tied ranks, and the
+two-sided \(p\) is the share of those assignments whose \(T^{+}\) lies at
+least as far from the null mean \(m(m+1)/4\) as the one seen.
+No normal approximation is used.
+
+\emph{Fisher exact test, for unpaired arms only.}
+The ASE arms do not start from the start of this code, so their seeds do not
+pair, and their tables compare hits by the two-sided Fisher exact test
+\cite{fisherLogicInductiveInference1935}.
+Conditional on the margins of the \(2\times 2\) table, the hits of the first
+arm are hypergeometric, and the two-sided \(p\) sums the probabilities of
+every table no more probable than the one observed, with a relative tolerance
+of \(10^{-12}\) on that comparison so that ties to rounding count.
+No calls or wall test is given for the ASE arms, and no interval of the
+difference.
+
+\emph{Medians and quantiles.}
+Medians, interquartile ranges, and the bootstrap quantiles below are type-7
+sample quantiles \cite{hyndmanSampleQuantiles1996}: for sorted values
+\(x_{(1)}\le\cdots\le x_{(n)}\) and a probability \(q\), with
+\(h=(n-1)q\), the quantile is
+\(x_{(\lfloor h\rfloor+1)}+(h-\lfloor h\rfloor)\bigl(x_{(\lfloor h\rfloor+2)}-x_{(\lfloor h\rfloor+1)}\bigr)\).
+
+\emph{Bootstrap of a median ratio.}
+The interval of the median ratio in the earlier 64-seed campaign is a paired
+percentile bootstrap \cite{efronBootstrap1979}.
+The statistic is the type-7 median of the PAR-2 calls of the full arm over
+that of the GMIN arm, where a hit counts at its calls and a miss at twice
+the ceiling.
+The resampling unit is the seed: each replicate draws 64 seed indices with
+replacement, with Python's \texttt{random.Random(2)}, and takes the same
+indices for both arms.
+There are 2000 replicates, and the interval runs from the type-7 quantile at
+0.025 to the one at 0.975 of the replicate ratios, with no bias correction.
+
+No equivalence margin was set before any run, so no table supports a claim
+that two arms are equivalent.
+
+The equal-call comparison with the Atomic Simulation Environment reads the
+stored rows only.
+For each seed it takes the calls that the ASE run had charged when it stopped
+and asks whether the run of this code on the same seed had reached the minimum
+within that many calls.
+The seeds are matched by label only, because the two codes do not start from
+the same geometry.
+It runs no search, so it says what this code had found by that call, not
+what an ASE run would find with more of them.
+
+\section{Pentagonal retry}
+\label{sec:si-retry}
+At 98 atoms and above, the stall rules hold a lattice growth that has
+failed at the current energy for at most eight plateau leaves, and the
+next leave proposes the crossing growth again, including the pentagonal
+order.
+On seeds 6400--6405, with that pentagonal retry, LJ\(_{98}\) hits on 6 of 6 inside
+\(4\times 10^{6}\) calls.
+On those seeds, holding a failed lattice growth without the eighth-leave retry hits 5 of 6.
+Seed 6404 stays at a gap of \(0.022404\) above \(-543.665361\).
+The retry is off below 98 atoms.
+On seeds 6400--6405 that configuration hits LJ\(_{38}\) and LJ\(_{55}\) on
+6 of 6.
+The retry rows stored for that leave hit 3 of 6 on LJ\(_{104}\) and
+6 of 6 on LJ\(_{98}\).
+They are the baseline in the last section on arms not kept.
+They are not a new comparison with GMIN.
+
+\section{TIP4P on six seeds}
+\label{sec:si-tip4p}
+Ten, fifteen, and twenty TIP4P molecules were run for six seeds,
+0 through 5, at \(5\times 10^{5}\) force calls, with the TIP4P hit of the
+main text.
+\((\mathrm{H_2O})_{10}\) hits on 6 of 6 seeds.
+In seed order the calls to the first hit are 13899, 18441, 5156,
+6699, 8526, and 28702.
+\((\mathrm{H_2O})_{15}\) hits on 0 of 6.
+\((\mathrm{H_2O})_{20}\) hits on 0 of 6.
+The best fifteen-molecule energies lie \(5.3497747446\) to
+\(11.8637176934\)~kJ/mol above the Wales--Hodges reference.
+The best twenty-molecule energies lie \(7.5374382441\) to
+\(18.5741117570\)~kJ/mol above their reference.
+The rate file records 1 of 6 for 15 molecules at that budget and 1 of 6
+for 20 molecules at \(2\times 10^{6}\) calls.
+The TIP4P comparison with GMIN in the main text uses other seeds and a
+budget of \(2\times 10^{6}\) calls.
+
+\section{Water hexamer against CREST}
+\label{sec:hexamer}
+CREST here is release 3.0.2.
+\cite{prachtCrestProgramExploration2024}
+Its metadynamics is stochastic for a fixed start geometry, and this
+build exposes no seed.
+The six rows are six single draws from one start geometry.
+Each final is polished with xtb 6.7.1 at GFN2, the vtight setting,
+accuracy \(0.01\), and an iteration limit of 500.
+\cite{bannwarthGfn2xtbanAccurateBroadly2019}
+The same eighteen finals, from CREST, the 4000-call arm, and the
+old-counter arm on seeds 0--5, were optimized again and evaluated as
+single points with xtb 6.8.0 at GFN2, the same vtight setting, and
+accuracy \(0.01\).
+Seventeen of the eighteen totals moved by \(0.9\times 10^{-8}\) to
+\(2.0\times 10^{-8}\)~Eh, and the CREST final of seed 1 by
+\(1.08\times 10^{-7}\)~Eh.
+The vtight energy threshold is \(1\times 10^{-7}\)~Eh.
+A row is kept when the run exits cleanly, the polished energy is
+finite, and the maximum force is at or below \(0.001\)~Eh/bohr.
+The 192-seed run of the main text is a rerun of the committed workflow at
+\texttt{56160f2d}, recorded at revision \texttt{9a30f319} with its 384
+receipts in \path{paper/jctc/data/water_v45b/rerun-9a30f319} and their
+sha256 sums.
+Both codes evaluate GFN2-xTB method 3 through tblite 0.7.0, commit
+\texttt{fa8a4416}, and no xtb 6.x executable enters it.
+Each arm runs seeds 0--191 from one start structure with a budget of 4000
+calls; CREST stops at 4000 energy and gradient calls on every seed, and this
+code spends 4000 force calls on every seed.
+The hit is the isomer gate of the main text, applied by one classifier to
+both arms.
+\path{paper/jctc/scripts/water_rerun.py} checks the sums, the starts, the
+budgets, and the cap, and recomputes the counts and the tests:
+121 of 192 against 94, both 59, this code alone 62, CREST alone 35, neither
+36, McNemar \(p=0.00796\), and the paired interval 0.041 to 0.236.
+Figure~\ref{fig:water-crest} draws the two arms.
+
 \begin{figure}
 \centering
-\includegraphics[width=0.8\textwidth]{lj75_ecdf.pdf}
-\caption{The share of the 200 LJ\(_{75}\) runs that have hit against the force
-calls spent, for the recommended hop, the derived hop, and GMIN with
-core-orbit symmetrization.
-A miss never steps the curve.
-A dotted line marks each arm's call PAR-2.}
-\label{fig:si-lj75-ecdf}
+\includegraphics[width=0.8\textwidth]{water_crest.pdf}
+\caption{The water hexamer against CREST on 192 seeds, both codes stopped at
+4000 energy and gradient calls.
+(a) The share of the seeds that hit for each arm, with the 95\% Wilson
+interval \cite{wilsonProbableInferenceLaw1927}.
+(b) The hit rate of this code less that of CREST, with the paired Newcombe
+interval \cite{newcombeImprovedConfidenceIntervals1998} and the exact McNemar
+\(p\) \cite{mcnemarNoteSamplingError1947}.}
+\label{fig:water-crest}
 \end{figure}
 
-\section{Structure plates, sketch-maps, and landfold}
+The six single draws below run CREST without the cap, so they are compared at
+the effort each code reports; each final is polished with xtb and the pairs
+are matched by iterative rotations and assignments.
+\cite{gundeIraShapeMatching2021}
+
+Table~\ref{tab:crest-counters} lists two CREST counters.
+The old counter sums the dynamics steps and the optimization steps.
+CREST prints a second total, the energy and gradient calls.
+The old counter is smaller on every seed.
+The 4000-call arm spends 4000 evaluations.
+A second arm uses a cap equal to that seed's old counter, from 32112
+to 50063 evaluations.
+CREST's energy and gradient totals run from 142110 to 209931.
+The old counter is not equal effort against those totals.
+
+\begin{table}
+\caption{CREST 3.0.2 effort on the water hexamer.
+The old counter is dynamics steps plus optimization steps.
+The energy and gradient column is CREST's own summary line.
+CREST 3.0.2 counted those calls in its tblite library.}
+\label{tab:crest-counters}
+\centering
+\begin{tabular}{crr}
+\toprule
+Seed & Old counter & Energy+gradient \\
+\midrule
+0 & 32112 & 151074 \\
+1 & 50026 & 191132 \\
+2 & 32155 & 142110 \\
+3 & 46062 & 172468 \\
+4 & 50063 & 157643 \\
+5 & 32170 & 209931 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:hexamer-gaps} gives the polished gap on each seed at
+GFN2-xTB with xtb 6.7.1.
+The gap is the anneal energy minus the CREST energy.
+A negative value means the anneal energy is lower.
+Five seeds lie within \(1\times 10^{-7}\)~Eh on both ledgers.
+Seed 1 lies outside that line, at \(-1.3509\times 10^{-7}\)~Eh on the
+4000-call ledger and \(-1.3505\times 10^{-7}\)~Eh on the ledger whose
+cap equals the old counter.
+The label-free root-mean-square deviation of each polished pair is at
+most \(0.00212\)~\AA.
+On xtb 6.8.0 the gaps hold.
+Both the 4000-call arm and the old-counter arm lie within
+\(1\times 10^{-7}\)~Eh on 6 of 6 seeds.
+Seed 1, outside the line at xtb 6.7.1, lies inside it at
+\(-4.35\times 10^{-8}\)~Eh on the 4000-call ledger and
+\(-4.34\times 10^{-8}\)~Eh on the ledger whose cap equals the old
+counter.
+The logs name the processor as Intel Xeon, family 6, model 207.
+Each CREST run used one thread.
+The wall-time medians are \(544.0\)~s for CREST, \(18.8\)~s for the
+4000-call arm, and \(195.5\)~s for the arm whose cap equals the old
+counter.
+The CREST polish converged in one iteration on all 18 finals.
+No CREST structure dissociated.
+
+\begin{table}
+\caption{Polished gap and label-free deviation on the water hexamer
+at GFN2-xTB with xtb 6.7.1.
+The gap is anneal minus CREST, in hartree.
+The deviation is in angstroms.}
+\label{tab:hexamer-gaps}
+\centering
+\small
+\setlength{\tabcolsep}{3pt}%
+\begin{tabular}{crrrr}
+\toprule
+Seed & Gap, 4000 calls & Gap, old-counter cap &
+Deviation, 4000 calls & Deviation, old-counter cap \\
+\midrule
+0 & $-1.1214\times 10^{-8}$ &
+$-1.1210\times 10^{-8}$ & 0.001004 & 0.000987 \\
+1 & $-1.3509\times 10^{-7}$ &
+$-1.3505\times 10^{-7}$ & 0.002023 & 0.001964 \\
+2 & $-2.5460\times 10^{-9}$ &
+$-2.5850\times 10^{-9}$ & 0.000532 & 0.000477 \\
+3 & $-4.1510\times 10^{-9}$ &
+$-4.1430\times 10^{-9}$ & 0.000322 & 0.000308 \\
+4 & $-6.8980\times 10^{-8}$ &
+$-6.9022\times 10^{-8}$ & 0.002116 & 0.002068 \\
+5 & $-2.1900\times 10^{-9}$ &
+$-2.2000\times 10^{-9}$ & 0.000157 & 0.000134 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Arms that were measured and not kept}
+\label{sec:cross-field}
+We kept the recommended preset unchanged and evaluated two alternative mechanisms serially on a single host against the pentagonal-retry baseline and the saved TIP4P benchmark on the same seeds, charging any missed seed with the full force-call budget when computing medians.
+
+The first alternative scales the all-atom step after a failed directed exit attempt using a BIPOP schedule.
+\cite{hansenBipop2009}
+The large regime spends the population ratio as that multiplier,
+because the chain is one walker.
+The small regime uses the reduced step.
+The planner does not draw on the chain's random stream.
+On seeds 6400--6405 and \(4\times 10^{6}\) force calls, LJ\(_{98}\)
+hit on 6 of 6.
+In seed order the calls to the first hit are 242295, 217610, 3911207,
+1878578, 3724410, and 771118.
+The median is 1324848.
+By comparison, the pentagonal-retry baseline also hits 6 of 6 on LJ\(_{98}\) with a lower median of 813591 calls, and on LJ\(_{104}\) reaches 3 of 6 seeds (6402, 6404, and 6405) versus 2 of 6 (6401 and 6405, at 247319 and 3034389 calls) for the BIPOP variant.
+
+The second arm, after a rigid stall, chooses a missing-contact site
+by Thompson sampling from a streaming ridge model inside a trust
+region.
+\cite{erikssonTurbo2019}
+The region grows after a lower quenched energy and shrinks after a
+failure.
+On seeds 0--5, \((\mathrm{H_2O})_{15}\) hit on 0 of 6 at
+\(5\times 10^{5}\) calls, and \((\mathrm{H_2O})_{20}\) hit on 0 of 6
+at \(2\times 10^{6}\) calls.
+The saved TIP4P benchmark records 1 of 6 hits at each budget (seed 3 at 15 molecules and seed 2 at 20 molecules), both missed by the trust-region variant.
+The best twenty-molecule energy under the arm is
+\(-869.439249\)~kJ/mol, which is \(3.550\)~kJ/mol above the
+Wales--Hodges reference.
+Sep-CMA was not added, because the hop already learns a low-rank
+covariance of accepted moves and leaves that arm off the recommended
+preset.
+\cite{rosSepCma2008}
+Neither arm is part of the recommended preset.
+
+\section{Searches that report no comparable rate}
+\label{sec:si-related}
+The main text compares searches by one measure: for one cluster and one
+published minimum, how many seeds reach it within a stated number of force
+calls, and how many seconds that takes.
+A report that gives an energy table, an iteration count, or a free energy
+does not answer it, and the reports below are left out for that reason.
+
+The published GOFEE curves count local optimizations on LJ\(_{75}\), and a
+local optimization is not a force call; a later GOFEE run puts a
+spectral-graph and Voronoi filter in front of the sampling step.
+\cite{slavenskyClassifier2024}
+The same group has used a deliberately incomplete machine-learned
+landscape to propose candidates, a universal potential as a Gaussian-process
+prior, fractional existence variables, an on-the-fly potential in a
+grand-canonical search, and a delta model on silver--sulfur systems.
+\cite{slavenskyComplementary2023,lyngbyUniversalPrior2024,larsenFractional2023,quinlivanGrandCanonical2026,pitfieldActiveDelta2026}
+The minima hopping of Krummenacher and co-workers on the Atomic
+Simulation Environment is a separate package from the optimizer scored in
+the main text, with a corrigendum and a deposit dated 7 November 2026.
+\cite{krummenacherMinimaHopping2024,krummenacherAseMh2026,goedecker2004}
+
+Durand reports the best-known energies from 6 to 150 atoms, which fixes the
+targets and says nothing about cost.
+\cite{durandLennardJones2026}
+A tabu initializer in front of a bonobo optimizer is reported to reach
+the LJ\(_{38}\) minimum, at one size.
+\cite{chakrabortyBonobo2026}
+A tensor-train encoding is reported on clusters from 5 to 45 atoms,
+and the journal version carries the same Lennard-Jones account.
+\cite{sozykinTensorTrain2026}
+Hyperspatial relaxation and a TETRIS initializer are reported on
+LJ\(_{37}\), LJ\(_{38}\), LJ\(_{39}\), LJ\(_{47}\), and LJ\(_{55}\).
+\cite{gochitashviliGosh2025}
+Minima-hopping escape directions are benchmarked on 60 to 74 atoms.
+\cite{schaerfMinimaHopping2026}
+A fingerprint bias during local optimization is reported on LJ\(_{38}\)
+and LJ\(_{75}\).
+\cite{taoFingerprint2024}
+Population annealing has been used to estimate the free energy of
+LJ\(_{38}\), and nested sampling of the 7-atom and 36-atom clusters
+recovers known phase transitions; both estimate thermodynamics rather than
+search under a call budget.
+\cite{kowaguchiLj382026,maillardNested2025}
+BEACON searches for novelty rather than for the reference energy.
+\cite{tangBeaconNovelty2026}
+An adaptive genetic algorithm prints known energies through 20 atoms at
+higher precision.
+\cite{willneckerGenetic2024}
+A Python basin-hopping code with an adaptive step is reported to find
+the LJ\(_{38}\) truncated octahedron within a few hundred iterations, and
+an iteration count is not a force-call budget.
+\cite{carmonaBasinHopping2025}
+Schneider argues from symmetry that a global minimum sits on a
+symmetric stratum, and he attributes the census of symmetric global
+minima to Wales and Doye; that is an argument for symmetrization moves
+and gives no rate.
+\cite{schneiderSymmetry2026,wales1997}
+Olivier reports energies below two Cambridge tables that are not the
+Lennard-Jones table, for the modified Dzugutov potential and the Z1
+potential.
+\cite{olivierPairTables2026}
+Amore and Wales search Thomson clusters of thousands of particles.
+\cite{amoreThomson2026}
+Other Lennard-Jones calculations score a Wasserstein error, an
+adsorbed layer on the 38-atom cluster, or a test function with no named
+size.
+\cite{yallupNested2026,chatbiphoAdsorbate2025,gargLennardJones2025}
+
+GOAT is a global optimization method for molecules and atomic clusters,
+and its paper compares it with CREST.
+\cite{deSouzaGoat2025}
+A bio-inspired Goat Optimization Algorithm on analytic test functions
+is a different method, and so is a proximal basin-hopping guarantee on
+synthetic functions.
+\cite{nozariGoatAlgorithm2025,laugaProximal2026}
+g-xTB is a tight-binding method aimed at a hybrid density functional, and it is
+distinct from the GFN2-xTB surface of the hexamer comparison.
+\cite{froitzheimGxtb2025}
+MARS samples conformers on machine-learned force fields, and a GFN2-xTB
+audit of the GEOM-DRUGS ensemble finds structures below the released set.
+\cite{suarezDouMars2026,vahediahmarGeomDrugs2026}
+Water clusters have been searched with AIMNet2 under a tabu search and a
+genetic algorithm, with an artificial bee colony on TIP4P reoptimized at
+HCTH, and with random-phase-approximation forces, which do not reorder the
+hexamer.
+\cite{giriAimnetClusters2025,zhangGmmlp2026,bhattWaterClusters2024,tahirRpaWater2024}
+One argon atom, and hydrophobic guests, reorder hexamer-sized water
+topologies on electronic-structure surfaces, and COMPLAX holds a rigid
+solute and compares CREST with other microsolvation tools.
+\cite{rockArgonHexamer2026,baruahWaterSix2026,lauriaComplax2026}
+A note on geometry optimization separates a tighter convergence inside
+one basin from a jump into another isomer.
+\cite{doustMohammadiBasins2026}
+Further basin-hopping searches sit on other potentials: adaptive
+basin hopping on surfaces from density functional theory,
+Stillinger--Weber silicon, surface-supported clusters, a firefly search,
+minima hopping on ionized gold, and doped boron clusters.
+\cite{carmonaAbhDft2026,shuklaSilicon2026,zhangSgmsc2026,leeNara2026,safaGoldIons2026,rodriguezKesslerYttrium2026,rodriguezKesslerB18ca2026,rodriguezKesslerB7ca2026,rodriguezKesslerB18ag2026}
+
+\section{Structure plates, sketch-maps, and occupancy folds}
 Reference plates: \ref{fig:si-structures} and \ref{fig:si-water}.
 Sketch-map of LJ\(_{38}\): \ref{fig:lj38-sketchmap}.
 Landscape of that size: \ref{fig:lj38-landscape}.
-LJ\(_{75}\) panel: \ref{fig:lj75-landscape}.
 LJ\(_{98}\) panel: \ref{fig:lj98-landscape}.
-Fold plots: \ref{fig:occ-landfold}, \ref{fig:occ-lj38},
-\ref{fig:occ-lj75}, \ref{fig:occ-lj98}.
+Fold plots: \ref{fig:occ-lj38} and \ref{fig:occ-lj98}.
 
 \begin{figure}
 \centering
@@ -196,11 +742,12 @@ Those constants give the committed \(-197.7750\)~kJ/mol reported here.}
 \begin{figure}
 \centering
 \includegraphics[width=0.48\textwidth]{lj38_sketchmap.pdf}
-\caption{LJ\(_{38}\) sketch-map of the sealed landmarks.
+\caption{LJ\(_{38}\) sketch-map of the sealed landmarks of an earlier campaign.
 Color is the quenched energy.
-The 600 landmarks pool basin hopping, the recommended hop, random
-structure search and two references.
-The darkest point is the fcc minimum, which the recommended hop reaches.}
+The 600 landmarks pool basin hopping, the hop of this code labeled recommended
+in that campaign, random structure search, and two references.
+The darkest point is the fcc minimum, which the best-so-far energy of the
+seed-0 recommended run reaches.}
 \label{fig:lj38-sketchmap}
 \end{figure}
 \begin{figure}
@@ -208,60 +755,36 @@ The darkest point is the fcc minimum, which the recommended hop reaches.}
 \includegraphics[width=0.48\textwidth]{lj38_landscape.pdf}
 \caption{LJ\(_{38}\) landscape on that sketch-map.
 Color is the energy above the published global minimum.
-Basin hopping sits \(2.429\) above it.
-Random structure search sits \(3.051\) above it.}
+The best-so-far energy of the seed-0 basin-hopping run ends \(2.429\) above it,
+and that of the seed-0 random structure search \(3.051\) above it.}
 \label{fig:lj38-landscape}
-\end{figure}
-\begin{figure}
-\centering
-\includegraphics[width=0.48\textwidth]{lj75_landscape.pdf}
-\caption{LJ\(_{75}\) landscape on its sketch-map.
-Color is the energy above the Marks decahedron.
-Basin hopping and the recommended hop both sit \(1.210\) above it.}
-\label{fig:lj75-landscape}
 \end{figure}
 \begin{figure}
 \centering
 \includegraphics[width=0.48\textwidth]{lj98_landscape.pdf}
 \caption{LJ\(_{98}\) landscape on its sketch-map.
 Color is the energy above the Leary minimum.
-The recommended hop sits \(0.022\) above it.
-Basin hopping sits \(0.119\) above it.}
+The best-so-far energy of the seed-0 recommended run ends \(0.022\) above it,
+and that of the seed-0 basin-hopping run \(0.119\) above it.}
 \label{fig:lj98-landscape}
-\end{figure}
-\begin{figure}
-\centering
-\includegraphics[width=0.48\textwidth]{occupancy_landfold.pdf}
-\caption{Occupancy folds of (a) LJ\(_{38}\), (b) LJ\(_{75}\), and (c) LJ\(_{98}\).
-Each panel is energy above the lowest minimum, against the fold
-coordinate.}
-\label{fig:occ-landfold}
 \end{figure}
 \begin{figure}
 \centering
 \includegraphics[width=0.48\textwidth]{occupancy_landfold_lj38.pdf}
 \caption{LJ\(_{38}\) occupancy fold.
 The arms are not marked.
-In the sealed table, the recommended hop reaches the fcc minimum and
-basin hopping stops \(2.429\) above it.}
+In the sealed table, the best-so-far energy of the seed-0 recommended run
+reaches the fcc minimum and that of basin hopping ends \(2.429\) above it.}
 \label{fig:occ-lj38}
-\end{figure}
-\begin{figure}
-\centering
-\includegraphics[width=0.48\textwidth]{occupancy_landfold_lj75.pdf}
-\caption{LJ\(_{75}\) occupancy fold.
-The arms are not marked.
-In the sealed table, both arms stop \(1.210\) above the Marks
-decahedron.}
-\label{fig:occ-lj75}
 \end{figure}
 \begin{figure}
 \centering
 \includegraphics[width=0.48\textwidth]{occupancy_landfold_lj98.pdf}
 \caption{LJ\(_{98}\) occupancy fold.
 The arms are not marked.
-In the sealed table, the recommended hop stops \(0.022\) above the Leary
-minimum and basin hopping \(0.119\) above it.}
+In the sealed table, the best-so-far energy of the seed-0 recommended run
+ends \(0.022\) above the Leary minimum and that of basin hopping \(0.119\)
+above it.}
 \label{fig:occ-lj98}
 \end{figure}
 
@@ -330,6 +853,6 @@ No seed reached the reference within \(10^{-6}\)~eV.
 These are not exact hits.
 Eight seeds lie inside the 0.001~eV tolerance.
 
-\bibliography{refs}
+\bibliography{refs,refs-stats}
 
 \end{document}

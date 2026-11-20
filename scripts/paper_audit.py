@@ -35,6 +35,7 @@ import math
 import os
 import random
 import re
+import statistics
 import subprocess
 import tarfile
 import sys
@@ -50,10 +51,12 @@ from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 TEX = "paper/jctc/manuscript.tex"
 SI = "paper/jctc/si.tex"
 
-REVISION_COLUMNS = ("code_revision", "anneal_head", "release_revision", "head", "harness_revision")
-HOST_COLUMNS = ("host",)
+REVISION_COLUMNS = ("code_revision", "anneal_head", "release_revision", "head", "harness_revision", "revision",
+                    "anneal_sha")
+HOST_COLUMNS = ("host", "machine_id", "machine_id_sha256")
 # Revisions of other codes. The GMIN build scripts refuse a tarball whose SVNREV differs.
-EXTERNAL_REVISIONS = {"aac1548a8aec13b53ad12a8d6904625081685d2e": "GMIN source/SVNREV"}
+EXTERNAL_REVISIONS = {"aac1548a8aec13b53ad12a8d6904625081685d2e": "GMIN source/SVNREV",
+                      "9cbec1a446352bc9ef064bd2b1a5767194655919": "GMIN source/SVNREV of the eeec8e2c rerun"}
 # Local revisions that rows cite, each with the pushed commit it was rebuilt as.
 ALIASES = "bench/revision-aliases.csv"
 # Remote branches the alias table cites, plus develop. A missing one means
@@ -78,6 +81,14 @@ AUDIT_OPTIONAL_REMOTES = (
 # pushed history before it has one commit, 57735de1, that adds the two-hour
 # cap, yet three heads ran capped, so the heads are not its commits one to one.
 UNPUSHED = {
+    "d12f8825f83bfceb507376555f1c7550da027aa6": "the plateau-restart arm of record/lj150d-restart, run against develop "
+                                                "7192e9f8, with no pushed commit of its own",
+    "3e2b19b70dced1e50330b13cc8ae96c72021f4e3": "an earlier plateau-restart arm of record/lj150d-restart; no table "
+                                                "prints its rows",
+    "423d01a571bcf6069cd5247324c197e60b4dcb4f": "an earlier plateau-restart arm of record/lj150d-restart; no table "
+                                                "prints its rows",
+    "e588305571ae6ee41895fd68af9328379888a1ff": "the pair-scaled arm of record/gmin-losses, run against 628773d6 with "
+                                                "the templates patched out, with no pushed commit of its own",
     "0f988569b49afe162e2f5ffd71b2ab45d0b3afec": "an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own",
     "349523d3f5f42b748f3af1573166fd17155ac461": "an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own",
     "befbc3e8": "an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own; the row gives eight digits",
@@ -103,6 +114,9 @@ UNPUSHED = {
 }
 
 KNOWN_GAPS = {
+    "paper/jctc/data/knockouts/restart/rows.csv": "revision 3e2b19b7 is not in this repository; revision 423d01a5 is not "
+                                                  "in this repository; revision d12f8825 is not in this repository",
+    "paper/jctc/data/knockouts/pair-scale/rows.csv": "revision e5883055 is not in this repository",
     "data/sc96_78_hits.csv": "code_revision unrecorded on some rows; harness_revision unrecorded on some rows; host "
                              "empty or unknown on some rows",
     "bench/depth-posterior-ablation/results.csv": "revision unrecorded (no revision column)",
@@ -113,7 +127,6 @@ KNOWN_GAPS = {
     "bench/tip4p-water-rates/rates.csv": "revision unrecorded (no revision column)",
     "paper/jctc/logs/water/NUMBERS.tsv": "revision and host unrecorded (no revision or host column)",
     "paper/jctc/data/hexamer-xtb680-repolish.csv": "revision unrecorded (no revision column)",
-    "paper/jctc/data/water_v45b/water-v45b-perseed.csv": "revision and host unrecorded (no revision or host column)",
     "paper/jctc/data/campaign-scores.csv": "revision and host unrecorded (no revision or host column)",
     "paper/jctc/data/system_visuals/references.csv": "revision and host unrecorded (no revision or host column)",
     "bench/gad-published/summary.csv": "revision recorded; no host column",
@@ -162,10 +175,6 @@ KNOWN_GAPS = {
     "paper/jctc/data/literature.tsv": "revision and host unrecorded (no revision or host column)",
     "paper/jctc/data/lj75_gmin/gmin-lj75-sym-starts-1-200.csv": "revision and host unrecorded (no revision or host "
                                                                 "column)",
-    "paper/jctc/data/lj75_gmin/lj75-derived-seeds-2000-2199.csv": "revision and host unrecorded (no revision or host "
-                                                                  "column)",
-    "paper/jctc/data/lj75_gmin/lj75-recommended-seeds-2000-2199.csv": "revision and host unrecorded (no revision or "
-                                                                      "host column)",
 }
 
 UNTRACED = [
@@ -245,6 +254,112 @@ def fisher(hits_a: int, n_a: int, hits_b: int, n_b: int) -> float:
     observed = prob(hits_a)
     lo, hi = max(0, hits - n_b), min(n_a, hits)
     return min(1.0, sum(prob(k) for k in range(lo, hi + 1) if prob(k) <= observed * (1 + 1e-7)))
+
+
+def wilson_interval(hits: int, n: int) -> tuple[float, float]:
+    z = statistics.NormalDist().inv_cdf(0.975)
+    p = hits / n
+    half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))
+    centre = p + z * z / (2 * n)
+    scale = 1 + z * z / n
+    return (centre - half) / scale, (centre + half) / scale
+
+
+def newcombe_interval(h1: int, n1: int, h2: int, n2: int) -> tuple[float, float]:
+    """Newcombe's hybrid score interval for p1 - p2 of independent samples.
+
+    Method 10 of Newcombe, Stat. Med. 17, 873 (1998); his worked example,
+    56/70 against 48/80, gives 0.0524 to 0.3339."""
+    p1, p2 = h1 / n1, h2 / n2
+    l1, u1 = wilson_interval(h1, n1)
+    l2, u2 = wilson_interval(h2, n2)
+    d = p1 - p2
+    return d - math.hypot(p1 - l1, u2 - p2), d + math.hypot(u1 - p1, p2 - l2)
+
+
+def mcnemar(only_a: int, only_b: int) -> float:
+    """Two-sided exact McNemar p: twice the smaller binomial(m, 1/2) tail of the discordant seeds, capped at 1."""
+    m = only_a + only_b
+    if m == 0:
+        return 1.0
+    return min(1.0, 2.0 * sum(math.comb(m, k) for k in range(min(only_a, only_b) + 1)) / 2.0**m)
+
+
+def newcombe_paired_interval(both: int, only_a: int, only_b: int, neither: int) -> tuple[float, float]:
+    """Method 10 of Newcombe, Stat. Med. 17, 2635 (1998), for the paired difference p_a - p_b.
+
+    His worked example, 36, 12, 2, 0, gives 0.0569 to 0.3404."""
+    n = both + only_a + only_b + neither
+    pa, pb = (both + only_a) / n, (both + only_b) / n
+    la, ua = wilson_interval(both + only_a, n)
+    lb, ub = wilson_interval(both + only_b, n)
+    product = (both + only_a) * (only_b + neither) * (both + only_b) * (only_a + neither)
+    a_ = both * neither - only_a * only_b
+    if a_ > 0:
+        a_ = max(a_ - n / 2.0, 0.0)
+    phi = a_ / math.sqrt(product) if product else 0.0
+    d = pa - pb
+    lower = d - math.sqrt(max((pa - la) ** 2 - 2 * phi * (pa - la) * (ub - pb) + (ub - pb) ** 2, 0.0))
+    upper = d + math.sqrt(max((ua - pa) ** 2 - 2 * phi * (ua - pa) * (pb - lb) + (pb - lb) ** 2, 0.0))
+    return lower, upper
+
+
+def wilcoxon_signed_rank(differences: list[float]) -> tuple[int, float, float]:
+    """Nonzero pairs, T+, and the two-sided exact p over all sign assignments, by counting sums of doubled ranks."""
+    nonzero = sorted((abs(d), d > 0) for d in differences if d != 0)
+    m = len(nonzero)
+    if m == 0:
+        return 0, 0.0, 1.0
+    doubled: list[int] = []
+    i = 0
+    while i < m:
+        j = i
+        while j + 1 < m and nonzero[j + 1][0] == nonzero[i][0]:
+            j += 1
+        doubled += [i + j + 2] * (j - i + 1)
+        i = j + 1
+    t_plus = sum(r for r, (_, positive) in zip(doubled, nonzero) if positive) / 2.0
+    counts = {0: 1}
+    for r in doubled:
+        nxt = dict(counts)
+        for total, ways in counts.items():
+            nxt[total + r] = nxt.get(total + r, 0) + ways
+        counts = nxt
+    center = m * (m + 1) / 4.0
+    seen = abs(t_plus - center)
+    far = sum(ways for total, ways in counts.items() if abs(total / 2.0 - center) >= seen - 1e-9)
+    return m, t_plus, min(1.0, far / 2.0**m)
+
+
+def paired_table(first: dict[str, bool], second: dict[str, bool]) -> tuple[int, int, int, int]:
+    """Both, first only, second only, neither, over the seeds both arms ran; the seed sets must match."""
+    if set(first) != set(second):
+        raise SystemExit("paired arms do not share their seeds")
+    keys = sorted(first)
+    both = sum(first[k] and second[k] for k in keys)
+    only_a = sum(first[k] and not second[k] for k in keys)
+    only_b = sum(second[k] and not first[k] for k in keys)
+    return both, only_a, only_b, len(keys) - both - only_a - only_b
+
+
+def pp(p: float) -> str:
+    """A p in prose, inside math: exact when four decimals hold it, else two significant figures."""
+    if p >= 1.0:
+        return "1"
+    four = f"{p:.4f}".rstrip("0")
+    if p >= 0.01 and abs(float(four) - p) < 1e-12:
+        return four
+    if p >= 0.01:
+        return f"{p:.2f}" if p >= 0.1 else f"{p:.3f}"
+    mantissa, exponent = f"{p:.1e}".split("e")
+    return f"{mantissa}\\times 10^{{{int(exponent)}}}"
+
+
+def interval_text(lo: float, hi: float) -> str:
+    def one(x: float) -> str:
+        x = round(x, 2) + 0.0
+        return f"\\(-\\){-x:.2f}" if x < 0 else f"{x:.2f}"
+    return f"{one(lo)} to {one(hi)}"
 
 
 def mann_whitney(a: list[float], b: list[float], continuity: bool, degenerate: float | None = 1.0) -> float | None:
@@ -347,33 +462,87 @@ CLUSTER = {"LJ\\(_{38}\\)": 38, "LJ\\(_{55}\\)": 55, "LJ\\(_{75}\\)": 75, "LJ\\(
 
 
 def manuscript_ablation(audit: Audit) -> None:
+    """tab:ablation pairs the posterior and the uniform draw by seed, as both arms start from the seed's geometry."""
     first = audit.rows("bench/depth-posterior-ablation/results.csv")
     second = audit.rows("results/size-tiered-selection.csv")
     budgets = {38: 400000, 55: 1000000, 75: 4000000, 98: 4000000, 104: 4000000}
-    counts = {}
-    for row in tex_table(audit, TEX, "tab:ablation"):
+    tables = {}
+    table = tex_table(audit, TEX, "tab:ablation")
+    pooled_row = [c.strip() for c in table[-1]]
+    pooled_row[0] = pooled_row[0].replace("\\midrule", "").strip()
+    audit.cell(f"{TEX} tab:ablation", "last row is the pooled row", pooled_row[0], "Pooled")
+    for row in table[:-1]:
         size = CLUSTER[row[0]]
         arms = {}
         for arm in ("posterior", "uniform"):
-            group = pick(first, system=f"lj{size}", arm=arm)
+            group = {f"a{r['seed']}": r for r in pick(first, system=f"lj{size}", arm=arm)}
             if size >= 75:
-                group += pick(second, n=str(size), arm=arm)
+                group.update({f"b{r['seed']}": r for r in pick(second, n=str(size), arm=arm)})
             arms[arm] = group
-            for r in group:
+            for r in group.values():
                 audit.cell(TEX, f"ablation lj{size} {arm} seed {r['seed']} budget", str(budgets[size]), float(r.get("budget") or budgets[size]))
+        hit = {arm: {k: r["hit"] == "1" for k, r in arms[arm].items()} for arm in arms}
+        t = paired_table(hit["posterior"], hit["uniform"])
+        tables[size] = t
         where = f"{TEX} tab:ablation lj{size}"
+        n = sum(t)
         audit.cell(where, "budget", row[1], budgets[size])
-        audit.cell(where, "posterior", row[2], frac(arms["posterior"]))
-        audit.cell(where, "uniform", row[3], frac(arms["uniform"]))
-        p = fisher(hits_of(arms["posterior"]), len(arms["posterior"]), hits_of(arms["uniform"]), len(arms["uniform"]))
-        audit.cell(where, "Fisher p", row[4], p)
-        counts[size] = (hits_of(arms["posterior"]), len(arms["posterior"]), hits_of(arms["uniform"]), len(arms["uniform"]))
-    p75, p98, p104 = counts[75], counts[98], counts[104]
-    audit.said(TEX, f"the posterior hits LJ\\(_{{75}}\\) on {p75[0]} of {p75[1]} and the uniform draw hits {p75[2]} of {p75[3]}.")
-    audit.said(TEX, f"Both hit LJ\\(_{{98}}\\) on {p98[0]} of {p98[1]}.")
-    audit.said(TEX, f"The posterior hits LJ\\(_{{104}}\\) on {p104[0]} of {p104[1]} and the uniform draw hits {p104[2]} of {p104[3]}.")
-    audit.said(TEX, f"LJ\\(_{{75}}\\) is {p75[0]} of {p75[1]} against {p75[2]} of {p75[3]},")
-    audit.said(TEX, f"LJ\\(_{{104}}\\) is {p104[0]} of {p104[1]} against {p104[2]} of {p104[3]}.")
+        audit.cell(where, "posterior", row[2], f"{t[0] + t[1]}/{n}")
+        audit.cell(where, "uniform", row[3], f"{t[0] + t[2]}/{n}")
+        for label, cell, value in zip(("both", "posterior only", "uniform only", "neither"), row[4:8], t):
+            audit.cell(where, label, cell, float(value))
+        audit.cell(where, "exact McNemar p", row[8], mcnemar(t[1], t[2]))
+        audit.cell(where, "paired Newcombe 95% interval", row[9], interval_text(*newcombe_paired_interval(*t)))
+    audit.cell(f"{TEX} tab:ablation", "sizes in the table", str(len(tables)), 5)
+    pooled = tuple(sum(t[i] for t in tables.values()) for i in range(4))
+    lo, hi = newcombe_paired_interval(*pooled)
+    p_pooled = mcnemar(pooled[1], pooled[2])
+    n = sum(pooled)
+    where = f"{TEX} tab:ablation pooled"
+    audit.cell(where, "posterior", pooled_row[2], f"{pooled[0] + pooled[1]}/{n}")
+    audit.cell(where, "uniform", pooled_row[3], f"{pooled[0] + pooled[2]}/{n}")
+    for label, cell, value in zip(("both", "posterior only", "uniform only", "neither"), pooled_row[4:8], pooled):
+        audit.cell(where, label, cell, float(value))
+    audit.cell(where, "exact McNemar p", pooled_row[8], p_pooled)
+    audit.cell(where, "paired Newcombe 95% interval", pooled_row[9], interval_text(lo, hi))
+    audit.cell(TEX, "ablation: the reviewed pooled outcome table", "33 4 6 5", " ".join(map(str, pooled)))
+    widths = [newcombe_paired_interval(*t) for t in tables.values()]
+    narrowest = min(round(b - a, 2) for a, b in widths)
+    audit.cell(TEX, "ablation: narrowest per-size interval width", "0.52", narrowest)
+    audit.said(TEX, f"spans {narrowest:.2f} or more at every size.")
+    audit.said(TEX, f"Pooled over the five sizes the posterior hits {pooled[0] + pooled[1]} of {n} and the uniform draw "
+                    f"{pooled[0] + pooled[2]} of {n}, the posterior alone hits {pooled[1]} seeds and the uniform draw "
+                    f"alone {pooled[2]}, and the exact McNemar \\(p\\) is {pp(p_pooled)}, with an interval from "
+                    f"\\({lo:.2f}\\) to {hi:.2f}.")
+    audit.cell(TEX, "ablation: the pooled interval", "-0.18 0.10", f"{lo:.2f} {hi:.2f}")
+    audit.said(TEX, "No equivalence margin was set before the runs, so the table supports no claim that the two "
+                    "draws are equivalent.")
+    audit.said(TEX, "Both arms of a seed start from the same geometry.")
+    audit.said(TEX, "Table~\\ref{tab:ablation} pairs the two arms by seed.")
+    audit.said(TEX, "a Thompson choice among the moves change no cluster at \\(p<0.05\\).")
+    for fragment in ("let start = start_of(&cfg, spec.n, seed);", "let mut rng = StdRng::seed_from_u64(seed);",
+                     "cfg.arm_selection = ArmSelection::Uniform;"):
+        audit.said("examples/depth_ablation.rs", fragment)
+    t75, t98, t104 = tables[75], tables[98], tables[104]
+    audit.said(TEX, f"the posterior hits LJ\\(_{{75}}\\) on {t75[0] + t75[1]} of {sum(t75)} and the uniform draw hits "
+                    f"{t75[0] + t75[2]} of {sum(t75)}.")
+    audit.cell(TEX, "ablation: each arm alone hits LJ98 on the same number of seeds", "1", float(t98[1] == t98[2]))
+    audit.said(TEX, f"Each arm hits LJ\\(_{{98}}\\) on {t98[0] + t98[1]} of {sum(t98)}: both hit {t98[0]} seeds, "
+                    f"each arm alone hits {t98[1]}, and neither hits {t98[3]}.")
+    audit.said(TEX, f"The posterior hits LJ\\(_{{104}}\\) on {t104[0] + t104[1]} of {sum(t104)} and the uniform draw "
+                    f"hits {t104[0] + t104[2]} of {sum(t104)}.")
+    for size in (38, 55):
+        t = tables[size]
+        audit.cell(TEX, f"ablation: both arms hit lj{size} on 6 of 6", "6 0 0 0", " ".join(map(str, t)))
+    audit.said(TEX, "On the first list both arms hit LJ\\(_{38}\\) and LJ\\(_{55}\\) on 6 of 6 seeds.")
+    ps = {mcnemar(t[1], t[2]) for t in tables.values()}
+    audit.cell(TEX, "ablation: the McNemar probability is 1 at every size", "1", ps.pop() if len(ps) == 1 else ps)
+    audit.said(TEX, "The two-sided exact McNemar probability is 1 at each size in")
+    tex = audit.text(TEX)
+    ablation = tex.split("\\label{sec:ablation}", 1)[1].split("\\subsection{", 1)[0]
+    for word in ("Fisher", "independent"):
+        audit.record(word not in ablation, TEX, f"the move-selection section does not use {word} inference",
+                     "absent", "absent" if word not in ablation else "present")
 
 
 def selection_tables(audit: Audit) -> None:
@@ -406,16 +575,16 @@ def manuscript_retry(audit: Audit) -> None:
     rows = audit.rows("results/lj-funnel-stalls.csv")
     retry98 = pick(rows, phase="retry", n="98")
     after98 = pick(rows, phase="after", n="98")
-    audit.said(TEX, f"LJ\\(_{{98}}\\) hits on {frac(retry98).replace('/', ' of ')} inside \\(4\\times 10^{{6}}\\) calls.")
-    audit.said(TEX, f"the eighth-leave retry hits {frac(after98).replace('/', ' of ')}.")
+    audit.said(SI, f"LJ\\(_{{98}}\\) hits on {frac(retry98).replace('/', ' of ')} inside \\(4\\times 10^{{6}}\\) calls.")
+    audit.said(SI, f"the eighth-leave retry hits {frac(after98).replace('/', ' of ')}.")
     miss = [r for r in after98 if r["hit"] == "0"]
-    audit.cell(TEX, "retry: the hold-only miss is seed 6404", "6404", miss[0]["seed"] if len(miss) == 1 else None)
-    audit.said(TEX, f"Seed 6404 stays at a gap of \\({miss[0]['gap']}\\) above \\(-543.665361\\).")
+    audit.cell(SI, "retry: the hold-only miss is seed 6404", "6404", miss[0]["seed"] if len(miss) == 1 else None)
+    audit.said(SI, f"Seed 6404 stays at a gap of \\({miss[0]['gap']}\\) above \\(-543.665361\\).")
     for size in ("38", "55", "75"):
-        audit.cell(TEX, f"retry off below 98: lj{size} on 6400-6405", "6/6", frac(pick(rows, phase="after", n=size)))
+        audit.cell(SI, f"retry off below 98: lj{size} on 6400-6405", "6/6", frac(pick(rows, phase="after", n=size)))
     retry104 = pick(rows, phase="retry", n="104")
-    audit.said(TEX, f"The retry rows stored for that leave hit {hits_of(retry104)} of {len(retry104)} on LJ\\(_{{104}}\\)")
-    audit.said(TEX, f"{frac(retry98).replace('/', ' of ')} on LJ\\(_{{98}}\\).")
+    audit.said(SI, f"The retry rows stored for that leave hit {hits_of(retry104)} of {len(retry104)} on LJ\\(_{{104}}\\)")
+    audit.said(SI, f"{frac(retry98).replace('/', ' of ')} on LJ\\(_{{98}}\\).")
 
 
 GMIN_PANEL_REVISION = "c2de652dca0bc75e2b0cb4afffac91fd656404e4"
@@ -592,6 +761,53 @@ def gmin_panel_line(audit: Audit, where: str, cells: list[str], groups: dict, sy
             audit.cell(where, label, cell, None)
 
 
+def gmin_paired(groups: dict, system: str) -> dict[str, object]:
+    """Both arms of a GMIN panel cluster paired by seed: outcome table, McNemar, Newcombe, Wilcoxon on calls and wall."""
+    a = {r["seed"]: r for r in groups[(system, "anneal")]}
+    g = {r["seed"]: r for r in groups[(system, "gmin")]}
+    table = paired_table({k: r["hit"] == "1" for k, r in a.items()}, {k: r["hit"] == "1" for k, r in g.items()})
+    seeds = sorted(a)
+    return {
+        "table": table,
+        "mcnemar": mcnemar(table[1], table[2]),
+        "interval": newcombe_paired_interval(*table),
+        "calls": wilcoxon_signed_rank([float(a[k]["evals_to_hit"]) - float(g[k]["evals_to_hit"]) for k in seeds]),
+        "wall": wilcoxon_signed_rank([float(a[k]["wall_s"]) - float(g[k]["wall_s"]) for k in seeds]),
+    }
+
+
+def gmin_tex_line(audit: Audit, where: str, cells: list[str], groups: dict, system: str, arm: str,
+                  budget: int) -> None:
+    """One tab:gmin line: Budget, Arm, Hits, Only, Both, Neither, Calls, IQR, Wall, In, Out, McNemar p, paired
+    Newcombe interval, Wilcoxon p on calls, Wilcoxon p on wall."""
+    group = groups[(system, arm)]
+    stats = gmin_paired(groups, system)
+    both, only_a, only_g, neither = stats["table"]
+
+    def col(key: str) -> list[float]:
+        return [float(r[key]) for r in group]
+
+    audit.cell(where, "hits", cells[2], frac(group))
+    audit.cell(where, "seeds this arm alone hits", cells[3], float(only_a if arm == "anneal" else only_g))
+    audit.cell(where, "median calls", cells[6], median(col("evals_to_hit")))
+    audit.cell(where, "IQR calls", cells[7], iqr(col("evals_to_hit")))
+    audit.cell(where, "wall median", cells[8], median(col("wall_s")))
+    audit.cell(where, "inside median", cells[9], median(col("pot_s")))
+    audit.cell(where, "outside median", cells[10], median(col("outside_s")))
+    if arm == "anneal":
+        audit.cell(where, "budget", cells[0], float(budget))
+        audit.cell(where, "both hit", cells[4], float(both))
+        audit.cell(where, "neither hits", cells[5], float(neither))
+        audit.cell(where, "exact McNemar p", cells[11], stats["mcnemar"])
+        audit.cell(where, "paired Newcombe 95% interval", cells[12], interval_text(*stats["interval"]))
+        audit.cell(where, "Wilcoxon p calls", cells[13], stats["calls"][2])
+        audit.cell(where, "Wilcoxon p wall", cells[14], stats["wall"][2])
+    else:
+        for label, cell in zip(("budget", "both", "neither", "McNemar p", "interval", "Wilcoxon p calls",
+                                "Wilcoxon p wall"), (cells[0], cells[4], cells[5], *cells[11:])):
+            audit.cell(where, label, cell, None)
+
+
 def gmin_panel_readme(audit: Audit, panel: object, groups: dict) -> None:
     rows = audit.rows("bench/gmin-panel/rows.csv")
     first_session = "20261117T035457Z"
@@ -637,127 +853,343 @@ def gmin_panel_readme(audit: Audit, panel: object, groups: dict) -> None:
                    f"right after the third resume took {float(post['wall_s']):.1f} s (inside {float(post['pot_s']):.1f} s)")
 
 
+def bisected_z975() -> float:
+    low, high = 0.0, 5.0
+    for _ in range(200):
+        mid = (low + high) / 2
+        if 0.5 * math.erfc(-mid / math.sqrt(2)) < 0.975:
+            low = mid
+        else:
+            high = mid
+    return (low + high) / 2
+
+
+def paired_stats_module():
+    spec = importlib.util.spec_from_file_location("paired_stats", ROOT / "scripts/paired_stats.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+PAPER_CHAIN = (
+    "paper/jctc/manuscript.tex", "paper/jctc/si.tex", "paper/jctc/cover-letter.tex",
+    "scripts/paired_stats.py", "scripts/gmin_panel/run_panel.py", "scripts/ase_panel/summarize.py",
+    "scripts/ase_nonlj/summarize.py", "scripts/h2o16_crest/summarize.py",
+    "paper/jctc/scripts/ablation_table.py",
+    "paper/jctc/scripts/h2h_tables.py", "paper/jctc/scripts/water_rerun.py",
+    "paper/jctc/scripts/fig_water_crest.py", "paper/jctc/scripts/water_results_table.py",
+    "paper/jctc/scripts/water_significance.py", "paper/jctc/scripts/lj75_gmin_table.py",
+)
+
+
+def paired_statistics(audit: Audit) -> None:
+    """The paired tests of the audit against known answers, and against the generators' module on the panel."""
+    where = "scripts/paper_audit.py paired statistics"
+    audit.cell(where, "McNemar, five discordant seeds one way", "0.0625", mcnemar(5, 0))
+    audit.cell(where, "McNemar, 1 against 4", "0.375", mcnemar(1, 4))
+    audit.cell(where, "McNemar, 12 against 0", "0.00048828125", mcnemar(12, 0))
+    audit.cell(where, "Newcombe's paired worked example, 36 12 2 0", "0.0569 0.3404",
+               " ".join(f"{x:.4f}" for x in newcombe_paired_interval(36, 12, 2, 0)))
+    audit.cell(where, "Wilcoxon on 1 to 5: pairs, T+, p", "5 15 0.0625",
+               " ".join(f"{x:g}" for x in wilcoxon_signed_rank([1.0, 2.0, 3.0, 4.0, 5.0])))
+    audit.cell(where, "Wilcoxon with a tie and a zero: pairs, T+", "3 1.5",
+               " ".join(f"{x:g}" for x in wilcoxon_signed_rank([0.0, 1.0, -1.0, -2.0])[:2]))
+    audit.said(SI, "with a relative tolerance\nof \\(10^{-12}\\) on that comparison so that ties to rounding count.")
+    for path in ("scripts/ase_panel/summarize.py", "scripts/ase_nonlj/summarize.py"):
+        audit.said(path, "from paired_stats import fisher_exact")
+        audit.said(path, "return fisher_exact(hits, 12, base, 12)")
+    audit.said("scripts/paired_stats.py", "if probability(value) <= observed * (1.0 + 1.0e-12)")
+    audit.said("scripts/paired_stats.py", "Z95 = NormalDist().inv_cdf(0.975)")
+    audit.said(SI, "\\qquad z = \\Phi^{-1}(0.975),")
+    shared = paired_stats_module()
+    audit.cell(where, "shared z against the bisected 0.975 normal quantile", f"{bisected_z975():.12f}",
+               f"{shared.Z95:.12f}")
+    worst = max(abs(shared.fisher_exact(a, 12, b, 12) - fisher(a, 12, b, 12)) for a in range(13) for b in range(13))
+    audit.record(worst < 1e-9, where, "the audit and scripts/paired_stats.py agree on Fisher at 12 against 12",
+                 "< 1e-9", f"{worst:.1e}")
+    literal = re.compile(r"(?<![\\d.])1\\.9(?:6|59)\\d*")
+    for path in PAPER_CHAIN:
+        found = sorted({m.group(0) for m in literal.finditer(audit.text(path))})
+        audit.cell(path, "literal normal quantile", "none", " ".join(found) or "none")
+    audit.said(SI, "is 0.0625 at \\(m=5\\) and 0.03125 at \\(m=6\\).")
+    audit.cell(SI, "the McNemar floor at five and six discordant seeds", "0.0625 0.03125",
+               f"{mcnemar(5, 0)} {mcnemar(6, 0)}")
+    audit.said(SI, "There are 2000 replicates, and the interval runs from the type-7 quantile at\n0.025 to the one at "
+                   "0.975 of the replicate ratios, with no bias correction.")
+    audit.said(SI, "each replicate draws 64 seed indices with\nreplacement, with Python's \\texttt{random.Random(2)}, "
+                   "and takes the same\nindices for both arms.")
+    rows = audit.rows("bench/gmin-panel/rows.csv")
+    budgets = gmin_panel_groups(audit)[0].PAPER_BUDGETS
+    misses = [r for r in rows if r["hit"] != "1" and r["system"] in budgets]
+    audit.record(all(int(float(r["evals_to_hit"])) == int(r["budget"]) for r in misses), "bench/gmin-panel/rows.csv",
+                 "every miss carries the budget as its calls, as the Wilcoxon test counts it", "budget",
+                 "budget" if all(int(float(r["evals_to_hit"])) == int(r["budget"]) for r in misses) else "other")
+    spec = importlib.util.spec_from_file_location("paired_stats", ROOT / "scripts/paired_stats.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    panel, groups = gmin_panel_groups(audit)
+    worst = 0.0
+    for system in panel.PAPER_BUDGETS:
+        mine = gmin_paired(groups, system)
+        a = {r["seed"]: r for r in groups[(system, "anneal")]}
+        g = {r["seed"]: r for r in groups[(system, "gmin")]}
+        seeds = sorted(a)
+        table = module.outcome_table([a[k]["hit"] == "1" for k in seeds], [g[k]["hit"] == "1" for k in seeds])
+        audit.cell(where, f"{system} outcome table agrees", " ".join(map(str, mine["table"])), " ".join(map(str, table)))
+        theirs = [float(module.mcnemar_exact(table[1], table[2])), *module.newcombe_paired(*table)]
+        for key in ("calls", "wall"):
+            column = "evals_to_hit" if key == "calls" else "wall_s"
+            theirs.append(module.wilcoxon_exact([float(a[k][column]) - float(g[k][column]) for k in seeds])[2])
+        ours = [mine["mcnemar"], *mine["interval"], mine["calls"][2], mine["wall"][2]]
+        worst = max(worst, *(abs(x - y) for x, y in zip(ours, theirs)))
+    audit.record(worst < 1e-12, where, "the audit and scripts/paired_stats.py agree on every panel cluster", "< 1e-12",
+                 f"{worst:.1e}")
+    _, rerun = gmin_rerun_groups(audit)
+    worst = 0.0
+    for system in GMIN_RERUN_SYSTEMS:
+        mine = gmin_paired(rerun, system)
+        a = {r["seed"]: r for r in rerun[(system, "anneal")]}
+        g = {r["seed"]: r for r in rerun[(system, "gmin")]}
+        seeds = sorted(a)
+        table = module.outcome_table([a[k]["hit"] == "1" for k in seeds], [g[k]["hit"] == "1" for k in seeds])
+        theirs = [float(module.mcnemar_exact(table[1], table[2])), *module.newcombe_paired(*table)]
+        for column in ("evals_to_hit", "wall_s"):
+            theirs.append(module.wilcoxon_exact([float(a[k][column]) - float(g[k][column]) for k in seeds])[2])
+        ours = [mine["mcnemar"], *mine["interval"], mine["calls"][2], mine["wall"][2]]
+        worst = max(worst, *(abs(x - y) for x, y in zip(ours, theirs)))
+    audit.record(worst < 1e-12, where, "the audit and scripts/paired_stats.py agree on every rerun cluster", "< 1e-12",
+                 f"{worst:.1e}")
+
+
 def manuscript_gmin(audit: Audit) -> None:
+    """The bench README of the earlier panel against its rows, and tab:gmin against the imported rerun."""
     panel, groups = gmin_panel_groups(audit)
     gmin_panel_summary(audit, panel, groups)
-    arms = {"this work": "anneal", "anneal": "anneal", "GMIN": "gmin"}
-    for path, label_index, lines in (
-        (TEX, 1, [(None, row) for row in tex_table(audit, TEX, "tab:gmin")]),
-        (GMIN_PANEL_README, 0,
-         [(n, list(row.values())) for n, row in md_table(audit, GMIN_PANEL_README, "System | Budget | Arm")]),
-    ):
-        by_label = {labels[label_index]: system for system, labels in panel.LABELS.items()}
-        shown = []
-        system = None
-        for line, cells in lines:
-            if cells[0]:
-                system = by_label.get(cells[0])
-            arm = arms.get(cells[2])
-            where = f"{path}:{line} {cells[0] or system} {cells[2]}" if line else f"{path} tab:gmin {system} {cells[2]}"
-            if system is None or arm is None or len(cells) != 12:
-                audit.record(False, where, "table line", " & ".join(cells), "a panel system and arm")
-                continue
-            shown.append((system, arm))
-            gmin_panel_line(audit, where, cells[1:], groups, system, arm, panel.PAPER_BUDGETS[system])
-        want = [(system, arm) for system in panel.PAPER_BUDGETS for arm in ("anneal", "gmin")]
-        audit.cell(path, "gmin panel lines", " ".join(f"{s}/{a}" for s, a in shown), " ".join(f"{s}/{a}" for s, a in want))
+    arms = {"anneal": "anneal", "GMIN": "gmin"}
+    by_label = {labels[0]: system for system, labels in panel.LABELS.items()}
+    shown = []
+    system = None
+    for line, row in md_table(audit, GMIN_PANEL_README, "System | Budget | Arm"):
+        cells = list(row.values())
+        if cells[0]:
+            system = by_label.get(cells[0])
+        arm = arms.get(cells[2])
+        where = f"{GMIN_PANEL_README}:{line} {cells[0] or system} {cells[2]}"
+        if system is None or arm is None or len(cells) != 12:
+            audit.record(False, where, "table line", " | ".join(cells), "a panel system and arm")
+            continue
+        shown.append((system, arm))
+        gmin_panel_line(audit, where, cells[1:], groups, system, arm, panel.PAPER_BUDGETS[system])
+    want = [(system, arm) for system in panel.PAPER_BUDGETS for arm in ("anneal", "gmin")]
+    audit.cell(GMIN_PANEL_README, "gmin panel lines", " ".join(f"{s}/{a}" for s, a in shown),
+               " ".join(f"{s}/{a}" for s, a in want))
     gmin_panel_readme(audit, panel, groups)
-    gmin_panel_prose(audit, panel, groups)
+    gmin_rerun(audit)
 
 
-def gmin_panel_prose(audit: Audit, panel: object, groups: dict) -> None:
-    def name(system: str) -> str:
-        label = panel.LABELS[system][1]
-        return label.replace(", \\(\\rho=", " at \\(\\rho=")
+GMIN_RERUN_REVISION = "eeec8e2c216ae1506768bca8e29846c1c039ca3b"
+GMIN_RERUN_SNAPSHOT = "9cbec1a446352bc9ef064bd2b1a5767194655919"
+GMIN_RERUN_SYSTEMS = ("lj38", "lj55", "lj75", "lj98", "lj102", "lj103", "lj104", "lj150", "m80r6")
+TEMPLATE_REMOVAL = "1c1b12384683485cf820d3a244151b48973dc0f7"
+SUBMITTED = "61fa67cf380e46876b569da45e7cc091647a775b"
 
-    def of(system: str, arm: str) -> str:
-        return f"{hits_of(groups[(system, arm)])} of {len(groups[(system, arm)])}"
 
+def imported(audit: Audit, folder: str, name: str = "rows.csv", keys: tuple[str, str] = ("source", "blob")) -> str:
+    """An imported row file is the blob its PROVENANCE names, at that path of a commit on that record branch."""
+    fields = dict(line.split(" ", 1) for line in audit.text(f"{folder}/PROVENANCE").splitlines())
+    path = f"{folder}/{name}"
+    source, blob = fields[keys[0]], fields[keys[1]]
+    local = git("hash-object", str(ROOT / path)).stdout.strip()
+    audit.cell(path, "blob of the copy", blob, local)
+    audit.cell(path, "blob at the record commit", blob, git("rev-parse", f"{fields['commit']}:{source}").stdout.strip())
+    on_branch = git("merge-base", "--is-ancestor", fields["commit"], f"refs/remotes/origin/{fields['branch']}").returncode == 0
+    audit.record(on_branch, path, "the record commit is on the record branch of origin", fields["branch"],
+                 "on it" if on_branch else "not on it")
+    return path
+
+
+def ancestor_of(audit: Audit, where: str, revision: str, of: str = "HEAD") -> bool:
+    ok = git("merge-base", "--is-ancestor", revision, of).returncode == 0
+    audit.record(ok, where, f"{revision[:8]} is an ancestor of {of[:8]}", "ancestor", "ancestor" if ok else "not")
+    return ok
+
+
+def gmin_rerun_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[dict[str, str]]]]:
+    """The four imported shards of the eeec8e2c rerun, checked row by row, grouped by cluster and code in seed order."""
+    panel = load_script("gmin_rerun_panel", "scripts/gmin_panel/run_panel.py")
     references = {row[0]: row[3] for row in panel.SYSTEMS}
-    systems = list(panel.PAPER_BUDGETS)
-    ahead = [s for s in systems if hits_of(groups[(s, "anneal")]) > hits_of(groups[(s, "gmin")])]
-    behind = [s for s in systems if hits_of(groups[(s, "anneal")]) < hits_of(groups[(s, "gmin")])]
-    tied = [s for s in systems if s not in ahead and s not in behind]
-    significant = [s for s in systems if fisher(hits_of(groups[(s, "anneal")]), len(groups[(s, "anneal")]),
-                                                hits_of(groups[(s, "gmin")]), len(groups[(s, "gmin")])) < 0.05]
-    total = len(systems)
-    audit.said(TEX, f"this setting hits more seeds on {len(ahead)} of {total}, the two tie on {len(tied)}, and GMIN hits "
-                    f"more on {len(behind)}.")
+    rows, bad, first = [], [], defaultdict(lambda: defaultdict(int))
+    for shard in GMIN_SHARDS:
+        path = imported(audit, f"{GMIN_RERUN}/{shard}")
+        seen = set()
+        for index, r in enumerate(audit.rows(path), start=2):
+            key = (r["system"], r["seed"])
+            if key not in seen:
+                first[r["system"]][r["code"]] += 1
+                seen.add(key)
+            budget, ref = panel.PAPER_BUDGETS.get(r["system"]), references.get(r["system"])
+            want = GMIN_RERUN_REVISION if r["code"] == "anneal" else GMIN_RERUN_SNAPSHOT
+            hit, best = r["hit"] == "1", float(r["best"])
+            evals, charged = int(r["evals_to_hit"]), int(r["charged"])
+            wall, pot, outside = float(r["wall_s"]), float(r["pot_s"]), float(r["outside_s"])
+            ok = (budget is not None and int(r["budget"]) == budget and r["hit"] in ("0", "1")
+                  and r["code_revision"] == want and r["harness_revision"] == GMIN_RERUN_REVISION
+                  and hit == energy_hits(best, ref, panel.HIT_TOL)
+                  and (not hit or 0 < evals <= charged <= budget) and (hit or evals == charged == budget)
+                  and 0.0 <= pot <= wall + 2e-6 and abs(max(wall - pot, 0.0) - outside) <= 2e-6)
+            if not ok:
+                bad.append(f"{shard}:{index}")
+            rows.append(r)
+    audit.cell(GMIN_RERUN, "row invariants and pinned revisions", " ".join(bad) or "ok", "ok")
+    keys = [(r["system"], r["code"], r["seed"]) for r in rows]
+    audit.cell(GMIN_RERUN, "each cluster, code and seed once", str(len(keys)), float(len(set(keys))))
+    groups = {}
+    for system in GMIN_RERUN_SYSTEMS:
+        for code in ("anneal", "gmin"):
+            group = sorted((r for r in rows if r["system"] == system and r["code"] == code), key=lambda r: int(r["seed"]))
+            audit.cell(f"{GMIN_RERUN} {system} {code}", "seeds", " ".join(r["seed"] for r in group), PANEL_SEEDS)
+            groups[(system, code)] = group
+        audit.cell(f"{GMIN_RERUN} {system}", "seeds with this code first and with GMIN first", "6 6",
+                   f"{first[system]['anneal']} {first[system]['gmin']}")
+    audit.cell(GMIN_RERUN, "clusters", " ".join(GMIN_RERUN_SYSTEMS), " ".join(sorted({r["system"] for r in rows},
+               key=GMIN_RERUN_SYSTEMS.index)))
+    ancestor_of(audit, GMIN_RERUN, GMIN_RERUN_REVISION)
+    ancestor_of(audit, GMIN_RERUN, TEMPLATE_REMOVAL, GMIN_RERUN_REVISION)
+    hosts = imported(audit, f"{GMIN_RERUN}/b", "host.csv", ("host_source", "host_blob"))
+    machine = {r["system"]: {x["machine_id_sha256"] for x in audit.rows(hosts) if x["system"] == r["system"]}
+               for r in audit.rows(hosts)}
+    for r in rows:
+        for column in ("machine_id_sha256", "machine_id"):
+            if column in r:
+                machine.setdefault(r["system"], set()).add(r[column])
+    ids = {system: " ".join(sorted(v)) for system, v in machine.items()}
+    lj150 = "9eb296774121518feb1b187b0f6a109a42de7a5dd39e62ccd37d6e7d329604b8"
+    main_host = "3b11c160088e7af5c4f7ebd9da95e0bfe019a34698416701bb057c15fea10873"
+    for system in GMIN_RERUN_SYSTEMS:
+        audit.cell(f"{GMIN_RERUN} {system}", "machine id", lj150 if system == "lj150" else main_host, ids.get(system))
+    audit.said(SI, f"\\texttt{{\\seqsplit{{{main_host}}}}},\nand LJ\\(_{{150}}\\) on\n\\texttt{{\\seqsplit{{{lj150}}}}}.")
+    audit.said(SI, "pinned to core 0, in alternating order by seed: six seeds with this code\nfirst and six with GMIN first.")
+    for shard in GMIN_SHARDS:
+        commit = dict(line.split(" ", 1) for line in audit.text(f"{GMIN_RERUN}/{shard}/PROVENANCE").splitlines())["commit"]
+        for patch in ("bench/lj104-lattice/v2/h2h-gmin.patch", "scripts/morse_h2h/morse-timer.patch",
+                      "bench/metal-cluster-h2h/gmin-bgupta.patch", "scripts/gmin_panel/build_gmin.sh",
+                      "examples/h2h_gmin_lj.data", "examples/h2h_gmin_morse.data"):
+            audit.cell(f"{GMIN_RERUN}/{shard}", f"{patch} at the record commit is the one at HEAD",
+                       git("rev-parse", f"HEAD:{patch}").stdout.strip(),
+                       git("rev-parse", f"{commit}:{patch}").stdout.strip())
+    snapshot = {r.get("svnrev", GMIN_RERUN_SNAPSHOT) for r in rows if r["code"] == "gmin"}
+    audit.cell(GMIN_RERUN, "GMIN SVNREV", GMIN_RERUN_SNAPSHOT, " ".join(sorted(snapshot)))
+    tarballs = {r["tarball_sha256"] for r in rows if r.get("tarball_sha256")}
+    audit.cell(GMIN_RERUN, "GMIN tarball", "ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776",
+               " ".join(sorted(tarballs)))
+    audit.said(SI, f"SVNREV \\texttt{{{GMIN_RERUN_SNAPSHOT}}}, tarball sha256 "
+                   "\\texttt{\\seqsplit{ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776}}")
+    return panel, groups
 
-    def ps(system: str) -> str:
-        a, g = groups[(system, "anneal")], groups[(system, "gmin")]
-        return panel.show_p(fisher(hits_of(a), len(a), hits_of(g), len(g)), tex=True).replace("\\(", "").replace("\\)", "")
 
-    audit.said(TEX, "GMIN hits " + ", and ".join(
-        f"{name(s)} on {of(s, 'gmin')} against {of(s, 'anneal')}, with \\(p={ps(s)}\\)" for s in behind) + ".")
-    audit.said(TEX, f"This setting hits more seeds than GMIN on {len(ahead)} of the {total} clusters.")
-    seed_span = f"{panel.SEEDS[0]}--{panel.SEEDS[-1]}"
-    rad = (2.0 + (3.0 * 55 / 17.77153175) ** (1.0 / 3.0)) * 2.884
-    anneal_revs = {r["code_revision"] for s in systems for r in groups[(s, "anneal")]}
-    shown_rev = sorted(anneal_revs)[0][:8] if len(anneal_revs) == 1 else "mixed"
-    audit.said(TEX, f"Revisions: anneal \\texttt{{{shown_rev}}}, GMIN \\texttt{{{panel.GMIN_REV[:8]}}}.")
-    audit.said(TEX, f"Seeds {seed_span}, one core, budget in force calls.")
-    audit.said(TEX, f"Both arms use seeds {seed_span}, the budget in the table and the start this code writes for the seed.")
-    audit.said(TEX, f"GMIN's nearest-neighbor container \\({rad:.6f}\\)~\\AA, step and taboo distances scaled by "
-                    "\\(r_0/2^{1/6}\\) (\\(r_0=2.884\\)~\\AA), and \\(T=0.1\\)~eV from the Wales Gupta example.")
-    audit.said(TEX,
-               f"\\({references['lj102']:.6f}\\) at LJ\\(_{{102}}\\), "
-               f"\\({references['lj103']:.6f}\\) at LJ\\(_{{103}}\\), "
-               f"\\({references['lj150']:.6f}\\) at LJ\\(_{{150}}\\), "
-               f"\\({references['au55']:.8f}\\)~eV at Au\\(_{{55}}\\), "
-               f"\\({references['m55r6']:.6f}\\) and \\({references['m55r14']:.6f}\\) at M\\(_{{55}}\\) (\\(\\rho=6,14\\)), "
-               f"and \\({references['m80r6']:.6f}\\) and \\({references['m80r14']:.6f}\\) at M\\(_{{80}}\\) (\\(\\rho=6,14\\)).")
-    audit.said(
-        TEX,
-        "The hit is a quenched energy at or below the Cambridge Cluster Database minimum plus 0.001:",
-    )
-    audit.said(TEX, "GMIN hits more on " + ", and on ".join(f"{name(s)}, {of(s, 'gmin')} against {of(s, 'anneal')}"
-                                                       for s in behind) + ".")
-    audit.said(TEX, f"The two tie on {' and '.join(name(s) for s in tied)}.")
-    ours = [s for s in significant if s in ahead]
-    theirs = [s for s in significant if s in behind]
-    audit.said(TEX, f"Fisher's test on hits is below 0.05 on {len(significant)} clusters: {len(ours)} for this work "
-                    f"and {' and '.join(name(s) for s in theirs)} for GMIN.")
-    counts = " and ".join(f"{of(s, 'gmin')} against {of(s, 'anneal')}" for s in behind)
-    audit.said(TEX, f"Against GMIN on seeds {seed_span}, this setting hits more seeds on {len(ahead)} of {total} clusters, "
-                    f"and GMIN hits more on {' and on '.join(name(s) for s in behind)}, {counts}.")
-    audit.said(TEX, "Section~\\ref{sec:gmin} scores it on the clusters of Table~\\ref{tab:gmin}.")
-    audit.said(TEX, f"GMIN hits more seeds on {len(behind)} of the {total}, {series(name(s) for s in behind)}.")
+def gmin_rerun(audit: Audit) -> None:
+    """tab:gmin and its prose, recomputed from the four imported shards of the eeec8e2c rerun."""
+    panel, groups = gmin_rerun_groups(audit)
+    by_label = {labels[1]: system for system, labels in panel.LABELS.items()}
+    shown, system = [], None
+    for row in tex_table(audit, TEX, "tab:gmin"):
+        cells = [c.strip() for c in row]
+        if cells[0]:
+            system = by_label.get(cells[0])
+        arm = {"this work": "anneal", "GMIN": "gmin"}.get(cells[2])
+        where = f"{TEX} tab:gmin {system} {cells[2]}"
+        if system is None or arm is None or len(cells) != 16 or (system, arm) not in groups:
+            audit.record(False, where, "table line", " & ".join(cells), "a rerun cluster and arm")
+            continue
+        shown.append((system, arm))
+        gmin_tex_line(audit, where, cells[1:], groups, system, arm, panel.PAPER_BUDGETS[system])
+    want = [(s, a) for s in GMIN_RERUN_SYSTEMS for a in ("anneal", "gmin")]
+    audit.cell(TEX, "tab:gmin lines", " ".join(f"{s}/{a}" for s, a in shown), " ".join(f"{s}/{a}" for s, a in want))
+    paired = {s: gmin_paired(groups, s) for s in GMIN_RERUN_SYSTEMS}
+    t = {s: paired[s]["table"] for s in GMIN_RERUN_SYSTEMS}
+    p = {s: pp(paired[s]["mcnemar"]) for s in GMIN_RERUN_SYSTEMS}
 
-    def show_p(p: float) -> str:
-        return panel.show_p(p, tex=True)
+    def hits(system: str, arm: str) -> int:
+        return hits_of(groups[(system, arm)])
 
-    def p_of(system: str) -> float:
-        a, g = groups[(system, "anneal")], groups[(system, "gmin")]
-        return fisher(hits_of(a), len(a), hits_of(g), len(g))
+    def walls(system: str, arm: str) -> float:
+        return median([float(r["wall_s"]) for r in groups[(system, arm)]])
 
-    def col(system: str, arm: str, key: str) -> float:
-        return median([float(r[key]) for r in groups[(system, arm)]])
-
-    for system in behind:
-        budget = panel.PAPER_BUDGETS[system]
-        audit.cell(TEX, f"{system}: this setting's median calls are the full budget", str(budget),
-                   col(system, "anneal", "evals_to_hit"))
-        audit.cell(TEX, f"{system}: the full budget is 4e6", "4000000", float(budget))
-    m80, lj150 = "m80r6", "lj150"
-    audit.cell(TEX, "the GMIN losses are M80 rho=6 and LJ150", f"{lj150} {m80}", " ".join(behind))
-    audit.said(TEX, f"On {name(m80)} GMIN reaches the minimum in a median of "
-                    f"{panel.show_calls(col(m80, 'gmin', 'evals_to_hit'))} calls and "
-                    f"{panel.show_s(col(m80, 'gmin', 'wall_s'))}~s, and this setting spends the full "
-                    f"\\(4\\times 10^{{6}}\\) calls in a median of {panel.show_s(col(m80, 'anneal', 'wall_s'))}~s.")
-    audit.said(TEX, f"On {name(lj150)} the median calls are {panel.show_calls(col(lj150, 'gmin', 'evals_to_hit'))} for "
-                    f"GMIN and the full \\(4\\times 10^{{6}}\\) for this setting, and Fisher's \\(p\\) is "
-                    f"{show_p(p_of(lj150))}.")
-    audit.said(TEX, f"GMIN hits more seeds than this setting on {len(behind)} of the {total} clusters of "
-                    "Table~\\ref{tab:gmin}.")
-    for system in behind:
-        audit.said(TEX, f"On {name(system)} GMIN hits {of(system, 'gmin')} and this setting {of(system, 'anneal')}, "
-                        f"and Fisher's \\(p\\) is {show_p(p_of(system))}.")
-    both = {f"{hits_of(groups[(s, 'anneal')])}/{len(groups[(s, 'anneal')])}" for s in tied}
-    audit.cell(TEX, "the tied clusters share one count", "1", float(len(both)))
-    audit.said(TEX, f"The two tie on {' and '.join(name(s) for s in tied)}, where both hit "
-                    f"{next(iter(both)).replace('/', ' of ')}.")
-    gmin_panel_drivers(audit)
+    lo, hi = paired["lj98"]["interval"]
+    audit.said(TEX, f"Paired by seed, this code alone hits {t['lj98'][1]} seeds of LJ\\(_{{98}}\\) and GMIN alone "
+                    f"{'none' if t['lj98'][2] == 0 else t['lj98'][2]}, with \\(p={p['lj98']}\\) and an interval from {lo:.2f} to {hi:.2f}.")
+    audit.cell(TEX, "LJ38 and LJ75: discordant seeds", "5 0 5 0",
+               f"{t['lj38'][1]} {t['lj38'][2]} {t['lj75'][1]} {t['lj75'][2]}")
+    audit.said(TEX, f"On LJ\\(_{{38}}\\) and LJ\\(_{{75}}\\) this code alone hits {t['lj38'][1]} seeds and GMIN alone "
+                    f"{'none' if t['lj38'][2] == 0 else t['lj38'][2]}, with \\(p={p['lj38']}\\), the smallest value the exact test can "
+                    f"reach with five discordant seeds; this code hits LJ\\(_{{38}}\\) on {hits('lj38', 'anneal')} and "
+                    f"LJ\\(_{{75}}\\) on {hits('lj75', 'anneal')} of 12, and GMIN on {hits('lj38', 'gmin')} and "
+                    f"{hits('lj75', 'gmin')}.")
+    audit.cell(TEX, "LJ38 and LJ75 p is the five-seed floor", "0.0625 0.0625",
+               f"{paired['lj38']['mcnemar']} {paired['lj75']['mcnemar']}")
+    big = ("lj102", "lj103", "lj104", "lj150")
+    audit.said(TEX, "On LJ\\(_{102}\\), LJ\\(_{103}\\), LJ\\(_{104}\\), and LJ\\(_{150}\\) the seeds that one arm "
+                    "alone hits are " + series(f"{t[s][1]} to {t[s][2]}" for s in big) + ", with \\(p\\) of "
+                    + series(p[s] for s in big) + ".")
+    audit.cell(TEX, "both arms hit LJ55 and M80 at rho 6 on every seed", "12 0 0 0 12 0 0 0",
+               " ".join(map(str, t["lj55"] + t["m80r6"])))
+    audit.said(TEX, "Both arms hit LJ\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=6\\) on every seed.")
+    lower = [s for s in GMIN_RERUN_SYSTEMS if walls(s, "anneal") < walls(s, "gmin")]
+    audit.cell(TEX, "clusters where the median wall of this code is lower", str(len(GMIN_RERUN_SYSTEMS)),
+               float(len(lower)))
+    faster = [s for s in GMIN_RERUN_SYSTEMS if paired[s]["wall"][2] < 0.05]
+    favor = all(paired[s]["wall"][1] < paired[s]["wall"][0] * (paired[s]["wall"][0] + 1) / 4 for s in faster)
+    audit.record(favor, TEX, "every paired wall test below 0.05 favors this code", "this code",
+                 "this code" if favor else "GMIN on one")
+    audit.said(TEX, f"The median wall of a run is lower for this code on all {NUMBER_WORDS[len(lower)]} clusters, and "
+                    f"the paired Wilcoxon test on the walls is below 0.05 on {NUMBER_WORDS[len(faster)]} of them: from "
+                    f"{panel.show_s(walls('lj38', 'anneal'))}~s against {panel.show_s(walls('lj38', 'gmin'))}~s on "
+                    f"LJ\\(_{{38}}\\) to {panel.show_s(walls('lj150', 'anneal'))}~s against "
+                    f"{panel.show_s(walls('lj150', 'gmin'))}~s on LJ\\(_{{150}}\\).")
+    audit.said(TEX, f"hits LJ\\(_{{98}}\\) on {hits('lj98', 'anneal')} of 12 seeds and GMIN on none")
+    ahead = [x for x in GMIN_RERUN_SYSTEMS if hits(x, "anneal") > hits(x, "gmin") and paired[x]["mcnemar"] < 0.05]
+    audit.cell(COVER, "Lennard-Jones clusters where the code hits more than GMIN at p<0.05", "lj98", " ".join(ahead))
+    audit.said(COVER, "Paired by seed, the code hits more seeds than GMIN on a Lennard-Jones cluster and on two rigid "
+                      "TIP4P water clusters,")
+    audit.said(TEX, f"(\\(p={p['lj98']}\\)), and rigid TIP4P")
+    audit.said(TEX, f"run with one input file on LJ\\(_{{98}}\\), {hits('lj98', 'anneal')} of 12 against none")
+    audit.said(TEX, "Table~\\ref{tab:gmin} runs revision \\texttt{eeec8e2c} of this code, an ancestor of the submitted "
+                    "revision with the structure templates removed, and GMIN on eight Lennard-Jones sizes and Morse "
+                    "M\\(_{80}\\) at \\(\\rho=6\\), with both arms of each cluster on one core of one host, on seeds "
+                    "2000--2011 in alternating order, at the budget in the table, from the start this code writes "
+                    "for the seed.")
+    misses = [float(r["best"]) for s in ("lj75",) for a in ("anneal", "gmin") for r in groups[(s, a)] if r["hit"] == "0"]
+    lj75_ref = {row[0]: row[3] for row in panel.SYSTEMS}["lj75"]
+    audit.cell(TEX, "every LJ75 miss of tab:gmin ends at -396.2822", "-396.2822",
+               f"{min(misses):.4f}" if f"{min(misses):.4f}" == f"{max(misses):.4f}" else f"{min(misses)} to {max(misses)}")
+    audit.cell(TEX, "the LJ75 miss gap", "1.210", max(misses) - lj75_ref)
+    audit.said(TEX, "Every miss on LJ\\(_{75}\\) in Table~\\ref{tab:gmin}, of either code, ends at the icosahedral "
+                    "competitor at \\(-396.2822\\), \\(1.210\\) above the published decahedral minimum at "
+                    f"\\({lj75_ref:.6f}\\).")
+    lj_data = audit.text("examples/h2h_gmin_lj.data")
+    for line in ("TEMPERATURE 1.0", "STEP 0.40 0.51", "NEWRESTART 40", "AVOID 4.0 20 F", "EDIFF 0.003"):
+        audit.record(line in lj_data and line in audit.text("examples/h2h_gmin_morse.data"), "examples/h2h_gmin_lj.data",
+                     f"both GMIN inputs set {line}", line, "set" if line in lj_data else "absent")
+    audit.said(TEX, "file: \\(T=1.0\\), step \\(0.40\\), a taboo list of the last \\(20\\) minima within \\(4.0\\), and a "
+                    "restart after \\(40\\) steps without a new lowest minimum; the Morse row adds GMIN's native "
+                    "\\texttt{MORSE} keyword and \\(\\rho\\).")
+    for path in (TEX, SI):
+        part = audit.text(path)
+        if path == TEX:
+            part = part.split("\\label{sec:protocol}", 1)[1].split("\\label{sec:transfer}", 1)[0]
+        else:
+            part = part.split("\\label{sec:si-gmin}", 1)[1].split("\\section{Host and commands}", 1)[0]
+        for word in ("1ce3ab64", "c2de652d", "Au\\(_{55}\\)", "M\\(_{55}\\)", "prior-on", "template-free",
+                     "Fisher", "Mann--Whitney"):
+            audit.record(word not in part, path, f"the GMIN comparison does not print {word}", "absent",
+                         "absent" if word not in part else "present")
+    audit.said(SI, "Earlier versions of the table carried Morse and gold rows of revision \\texttt{1ce3ab64}, which is "
+                   "not in the repository; no committed row of an ancestor revision covers M\\(_{55}\\), M\\(_{80}\\) "
+                   "at \\(\\rho=14\\), or Au\\(_{55}\\) against GMIN, and the table leaves those clusters out.")
+    for path in (TEX, SI):
+        audit.record("Mann--Whitney" not in audit.text(path), path, "no Mann--Whitney test is reported", "absent",
+                     "absent" if "Mann--Whitney" not in audit.text(path) else "present")
+    gmin_patches(audit)
 
 
 def series(items) -> str:
@@ -772,6 +1204,428 @@ def morse_pair(rho: float, r: float) -> float:
     return e * (e - 2.0)
 
 
+def trap_minima(energies: list[float], tol: float) -> list[tuple[float, int]]:
+    """Sorted best energies, split wherever two neighbors differ by the hit tolerance or more."""
+    groups: list[list[float]] = []
+    for energy in sorted(energies):
+        if groups and energy - groups[-1][-1] < tol:
+            groups[-1].append(energy)
+        else:
+            groups.append([energy])
+    return [(g[0], len(g)) for g in groups]
+
+
+KNOCKOUT_DATA = "paper/jctc/data/knockouts"
+PRIOR_SWITCH = "4f5ec0c56779e02b7627b7d3693fbb319f631176"
+# The commits whose code each arm of a knockout block ran, with and without the switch.
+KNOCKOUT_CODE = {
+    "priors": (PRIOR_SWITCH, PRIOR_SWITCH),
+    "templates": ("628773d6837ea2d959a27256ff4163b21162fd4d", "1c1b12384683485cf820d3a244151b48973dc0f7"),
+    "restart": ("d12f8825", "7192e9f8d5fff6e581c00b4b1e30aa883dad00de"),
+    "pair-scale": ("e5883055", "628773d6837ea2d959a27256ff4163b21162fd4d"),
+}
+# How the rows of each block name the revision of an arm.
+KNOCKOUT_REVISION = {"priors": ("code_revision", "f2a628c0", "f2a628c0"),
+                     "templates": ("revision", "628773d6", "1c1b1238"),
+                     "restart": ("code_revision", "d12f8825", "7192e9f8"),
+                     "pair-scale": ("code_revision", "e5883055", "628773d6")}
+
+
+def interval_of(cell: str) -> tuple[str, str]:
+    low, _, high = cell.replace("\\(-\\)", "-").partition(" to ")
+    return low.strip(), high.strip()
+
+
+def knockout_blocks(audit: Audit) -> list[tuple[str, list[list[str]]]]:
+    """The heading and the lines of each block of tab:knockouts."""
+    blocks: list[tuple[str, list[list[str]]]] = []
+    for cells in tex_table(audit, TEX, "tab:knockouts"):
+        cells = [c.replace("\\midrule", "").strip() for c in cells]
+        if cells[0].startswith("\\multicolumn"):
+            blocks.append((re.search(r"\\emph\{(.*)\}\}", cells[0]).group(1), []))
+        elif blocks:
+            blocks[-1][1].append(cells)
+    return blocks
+
+
+def knockout_cells(audit: Audit, knock: object, knockout: object) -> dict[str, dict]:
+    """Each system of a block recomputed from its imported rows: budget, seeds, the paired table, p, interval."""
+    path = imported(audit, f"{KNOCKOUT_DATA}/{knockout.key}")
+    column, with_rev, without_rev = KNOCKOUT_REVISION[knockout.key]
+    arms: dict[tuple[str, str], dict[str, dict]] = defaultdict(dict)
+    twice = []
+    for r in audit.rows(path):
+        if not knockout.keep(r) or r[knockout.column] not in (knockout.with_arm, knockout.without_arm):
+            continue
+        if r["seed"] in arms[(r["system"], r[knockout.column])]:
+            twice.append(f"{r['system']}/{r['seed']}")
+        arms[(r["system"], r[knockout.column])][r["seed"]] = r
+        want = with_rev if r[knockout.column] == knockout.with_arm else without_rev
+        if not r[column].startswith(want):
+            twice.append(f"{r['system']}/{r['seed']} at {r[column][:8]}")
+    audit.cell(path, f"{knockout.key}: rows at the block revisions, one per system, arm, and seed", "none",
+               " ".join(twice) or "none")
+    out = {}
+    for system in sorted({s for s, _ in arms}):
+        first, second = arms.get((system, knockout.with_arm), {}), arms.get((system, knockout.without_arm), {})
+        if not first or not second:
+            continue
+        if sorted(first) != sorted(second):
+            audit.record(False, path, f"{knockout.key} {system}: both arms ran the same seeds", "same", "different")
+            continue
+        hit = knockout.hit
+        table = paired_table({k: first[k][hit].strip().lower() in ("1", "true") for k in first},
+                             {k: second[k][hit].strip().lower() in ("1", "true") for k in second})
+        budgets = {r["budget"] for r in (*first.values(), *second.values())}
+        out[system] = {"budget": budgets.pop() if len(budgets) == 1 else "mixed", "n": len(first), "table": table,
+                       "p": mcnemar(table[1], table[2]), "interval": newcombe_paired_interval(*table)}
+    return out
+
+
+def manuscript_knockouts(audit: Audit) -> None:
+    """tab:knockouts and tab:tip4p-gmin recomputed from the imported rows, the LJ75 rule, and their prose."""
+    knock = load_script("knockout_tables_audit", "paper/jctc/scripts/knockout_tables.py")
+    blocks = knockout_blocks(audit)
+    audit.cell(TEX, "knockout blocks", " | ".join(k.title for k in knock.KNOCKOUTS), " | ".join(t for t, _ in blocks))
+    cells_of = {}
+    for knockout, (title, lines) in zip(knock.KNOCKOUTS, blocks):
+        cells = knockout_cells(audit, knock, knockout)
+        cells_of[knockout.key] = cells
+        by_name = {knock.name(system): system for system in cells}
+        printed = []
+        for line in lines:
+            system = by_name.get(line[0])
+            where = f"{TEX} tab:knockouts {knockout.key} {line[0]}"
+            if system is None or len(line) != 9:
+                audit.record(False, where, "a system the rows hold", " & ".join(line), "not in the rows")
+                continue
+            printed.append(system)
+            c = cells[system]
+            both, only_with, only_without, _ = c["table"]
+            audit.cell(where, "budget", line[1], float(c["budget"]) if c["budget"] != "mixed" else "mixed")
+            audit.cell(where, "seeds", line[2], float(c["n"]))
+            audit.cell(where, "with", line[3], f"{both + only_with}/{c['n']}")
+            audit.cell(where, "without", line[4], f"{both + only_without}/{c['n']}")
+            audit.cell(where, "only with", line[5], float(only_with))
+            audit.cell(where, "only without", line[6], float(only_without))
+            audit.cell(where, "exact McNemar p", line[7], c["p"])
+            low, high = interval_of(line[8])
+            audit.cell(where, "Newcombe lower", low, c["interval"][0])
+            audit.cell(where, "Newcombe upper", high, c["interval"][1])
+        code = KNOCKOUT_CODE[knockout.key]
+        ancestors = all(git("merge-base", "--is-ancestor", rev, SUBMITTED).returncode == 0 for rev in code)
+        audit.record(("lj75" in printed) == (ancestors and "lj75" in cells), TEX,
+                     f"{knockout.key}: LJ75 is printed only where both arms ran the code of ancestors",
+                     "printed" if ancestors and "lj75" in cells else "left out",
+                     "printed" if "lj75" in printed else "left out")
+        audit.cell(TEX, f"{knockout.key}: printed systems are the systems of the rows less the left-out ones",
+                   " ".join(sorted(set(cells) - set(knockout.omitted))), " ".join(sorted(printed)))
+        for system in knockout.omitted:
+            audit.record(system == "lj75" and not ancestors, TEX, f"{knockout.key}: {system} is left out only for the "
+                         "LJ75 rule", "lj75 outside history", f"{system} {'ancestors' if ancestors else 'outside'}")
+    audit.said(TEX, "LJ\\(_{75}\\) is printed only in a block whose two arms ran the code of ancestors of the "
+                    "submitted revision.")
+    base = git("show", "7bdf0d86c327dd1da8a5065d3e4e965669565148:bench/gmin-losses2/baseline-source.txt").stdout
+    for line in ("revision=628773d6837ea2d959a27256ff4163b21162fd4d", "template_ablation_patch_sha256=1c5575a2",
+                 "patched_tree=a9cef902"):
+        audit.record(line in base, "record/gmin-losses bench/gmin-losses2/baseline-source.txt",
+                     "the length-unit baseline", line, "present" if line in base else "absent")
+    audit.said(TEX, "\\texttt{e5883055} against \\texttt{628773d6} with a patch that removes the structure templates "
+                    "(tree \\texttt{a9cef902}), raises the hits on M\\(_{80}\\) at")
+    audit.said(SI, "the length-unit block the gate of \\texttt{e5883055} against \\texttt{628773d6} with the patch of "
+                   "sha256 \\texttt{1c5575a2} that removes the structure templates, tree \\texttt{a9cef902}.")
+    readme = git("show", "7bdf0d86c327dd1da8a5065d3e4e965669565148:bench/gmin-losses2/README.md").stdout
+    audit.record("(`baseline` at `628773d6` vs `fix2` at `e5883055`)" in readme, "record/gmin-losses",
+                 "the gate names e5883055", "named", "checked")
+    session = git("show", "486ef2f6e8150b6cc37e0944c65c8d283cf54852", "--format=%B", "--no-patch").stdout
+    audit.record("The deciding session is develop\n7192e9f8 against d12f8825" in session, "record/lj150d-restart",
+                 "the restart session is d12f8825 against develop 7192e9f8", "named", "checked")
+    audit.said(SI, "The restart block is the session of \\texttt{d12f8825} against develop \\texttt{7192e9f8},")
+    audit.said(SI, "Revisions \\texttt{d12f8825} and \\texttt{e5883055} are not in the repository; their records are.")
+
+    pri, tem, res, uni = (cells_of[k] for k in ("priors", "templates", "restart", "pair-scale"))
+
+    def fall(c: dict) -> tuple[int, int]:
+        both, only_with, only_without, _ = c["table"]
+        return both + only_with, both + only_without
+
+    alloys = ("cu6au32", "cu19au19", "cu27au28", "cu10au45", "cu30au8", "pt12cu11")
+    lowered = [a for a in alloys if fall(pri[a])[1] < fall(pri[a])[0] and pri[a]["p"] < 0.05]
+    audit.cell(TEX, "alloys whose hits fall at p<0.05 without the priors", " ".join(alloys), " ".join(lowered))
+    audit.cell(TEX, "every lowered alloy hits 12 of 12 with the priors", "12", float(min(fall(pri[a])[0] for a in alloys)))
+    audit.cell(TEX, "lowest and highest hits without the priors", "0 5",
+               f"{min(fall(pri[a])[1] for a in alloys)} {max(fall(pri[a])[1] for a in alloys)}")
+    audit.cell(TEX, "largest alloy p", "0.016", max(pri[a]["p"] for a in alloys))
+    audit.cell(TEX, "Cu12Au26 is hit by neither arm", "0 0", " ".join(map(str, fall(pri["cu12au26"]))))
+    p_ = {s: pp(c["p"]) for s, c in pri.items()}
+    audit.said(TEX, f"Cu\\(_6\\)Au\\(_{{32}}\\) and Cu\\(_{{19}}\\)Au\\(_{{19}}\\) fall from 12 of 12 to "
+                    f"{fall(pri['cu6au32'])[1]} of 12 (\\(p={p_['cu6au32']}\\)), Cu\\(_{{27}}\\)Au\\(_{{28}}\\) and "
+                    f"Pt\\(_{{12}}\\)Cu\\(_{{11}}\\) to {fall(pri['cu27au28'])[1]} of 12 (\\(p={p_['cu27au28']}\\)), "
+                    f"Cu\\(_{{10}}\\)Au\\(_{{45}}\\) to {fall(pri['cu10au45'])[1]} of 12 (\\(p={p_['cu10au45']}\\)), "
+                    f"and Cu\\(_{{30}}\\)Au\\(_8\\) to {fall(pri['cu30au8'])[1]} of 12 (\\(p={p_['cu30au8']}\\)); "
+                    "neither arm hits Cu\\(_{12}\\)Au\\(_{26}\\).")
+    audit.cell(TEX, "Cu6Au32 and Cu19Au19 agree", p_["cu6au32"], p_["cu19au19"])
+    audit.cell(TEX, "Cu27Au28 and Pt12Cu11 agree", p_["cu27au28"], p_["pt12cu11"])
+    audit.said(TEX, f"On Au\\(_{{55}}\\) the hits fall from {fall(pri['au55'])[0]} to {fall(pri['au55'])[1]} of 12 "
+                    f"(\\(p={p_['au55']}\\)), and on LJ\\(_{{150}}\\) they rise from {fall(pri['lj150'])[0]} to "
+                    f"{fall(pri['lj150'])[1]} of 12, with \\(p={p_['lj150']}\\).")
+    audit.said(TEX, f"to between 0 and 5 of 12 (\\(p\\le {pp(max(pri[a]['p'] for a in alloys))}\\)); on "
+                    f"LJ\\(_{{150}}\\) the hits rise from {fall(pri['lj150'])[0]} to {fall(pri['lj150'])[1]} of 12 "
+                    f"(\\(p={p_['lj150']}\\)).")
+    audit.said(TEX, "With the switch built on develop \\texttt{f2a628c0}, turning the structure priors off lowers the "
+                    "hits on six of the seven Gupta alloys.")
+
+    m38 = tem["m38r14"]
+    lo, hi = m38["interval"]
+    audit.said(TEX, f"the hits on M\\(_{{38}}\\) at \\(\\rho=14\\) fall from {fall(m38)[0]} to {fall(m38)[1]} of 12 "
+                    f"(\\(p={pp(m38['p'])}\\), interval {lo:.2f} to {hi:.2f}), and on the Sutton--Chen 10--8 cluster of "
+                    f"38 atoms from {fall(tem['sc108-38'])[0]} to {fall(tem['sc108-38'])[1]} of 12 "
+                    f"(\\(p={pp(tem['sc108-38']['p'])}\\)).")
+    audit.cell(TEX, "both revisions hit M38 at rho 6 and SC 12-6 on every seed", "12 12 12 12",
+               " ".join(str(x) for s in ("m38r6", "sc126-38") for x in fall(tem[s])))
+    audit.said(TEX, f"Removing the structure templates lowers the hits on Morse M\\(_{{38}}\\) at \\(\\rho=14\\) from "
+                    f"{fall(m38)[0]} to {fall(m38)[1]} of 12 (\\(p={pp(m38['p'])}\\)).")
+
+    audit.cell(TEX, "the restart block changes no cluster at p<0.05", "none",
+               " ".join(s for s, c in res.items() if c["p"] < 0.05) or "none")
+    audit.cell(TEX, "clusters of the restart block", "12", float(len(set(res) - {"lj75"})))
+    audit.cell(TEX, "restart seeds per cluster", "12 24", " ".join(sorted({str(c["n"]) for c in res.values()})))
+    audit.said(TEX, "\\(p<0.05\\) on the twelve clusters of that block of Table~\\ref{tab:knockouts}, with 12 or 24 seeds "
+                    "each.")
+    gaps = sorted((abs(fall(c)[0] - fall(c)[1]), s) for s, c in res.items() if s != "lj75")[::-1][:3]
+    audit.cell(TEX, "the three largest restart differences", "lj150 lj98 m55r14", " ".join(sorted(s for _, s in gaps)))
+    audit.said(TEX, f"The largest differences are on LJ\\(_{{150}}\\), {fall(res['lj150'])[0]} against "
+                    f"{fall(res['lj150'])[1]} of 24 (\\(p={pp(res['lj150']['p'])}\\)), on LJ\\(_{{98}}\\), "
+                    f"{fall(res['lj98'])[0]} against {fall(res['lj98'])[1]} of 24 (\\(p={pp(res['lj98']['p'])}\\)), and "
+                    f"on M\\(_{{55}}\\) at \\(\\rho=14\\), {fall(res['m55r14'])[0]} against {fall(res['m55r14'])[1]} of "
+                    f"24 (\\(p={pp(res['m55r14']['p'])}\\)).")
+    audit.said(TEX, "The restart is off in the preset.")
+    config = audit.text("src/methods/cluster_hopping/config.rs")
+    audit.record("restart_on_plateau" not in config or "restart_on_plateau: false" in config, PRIOR_CONFIG,
+                 "the preset has no plateau restart on", "off", "checked")
+
+    m80 = uni["m80r6"]
+    lo, hi = m80["interval"]
+    audit.said(TEX, f"raises the hits on M\\(_{{80}}\\) at \\(\\rho=6\\) from {fall(m80)[1]} to {fall(m80)[0]} of 12 "
+                    f"(\\(p={pp(m80['p'])}\\), interval {lo:.2f} to {hi:.2f}).")
+    same = [s for s, c in uni.items() if s not in ("m80r6", "lj75") and c["table"][1] == c["table"][2] == 0]
+    audit.cell(TEX, "the other clusters of the length-unit block hit the same seeds", "11", float(len(same)))
+    audit.cell(TEX, "Lennard-Jones, gold, and Morse among them", "7 1 3",
+               f"{sum(s.startswith('lj') for s in same)} {sum(s == 'au55' for s in same)} "
+               f"{sum(s.startswith('m') for s in same)}")
+    audit.said(TEX, "The other eleven clusters of that block of Table~\\ref{tab:knockouts}, seven Lennard-Jones sizes, "
+                    "Au\\(_{55}\\), and three Morse clusters, hit the same seeds in both arms.")
+    audit.said(TEX, f"at \\(\\rho=6\\) from {fall(m80)[1]} to {fall(m80)[0]} of 12 (\\(p={pp(m80['p'])}\\)) and leaves "
+                    "the hits on the eleven other clusters reported for it unchanged.")
+    audit.said(TEX, "A restart from a diverse population on a plateau and a Thompson choice among the moves change no "
+                    "cluster at \\(p<0.05\\).")
+    audit.said(COVER, "Switching off the structure priors lowers the hits on six Cu--Au and Pt--Cu Gupta alloys, "
+                      "removing the structure templates lowers them on a Morse cluster, and measuring lengths in units "
+                      "of the pair minimum raises them on another; a restart on a plateau and a Thompson choice among "
+                      "the moves change no cluster significantly.")
+
+    # TIP4P against GMIN, paired by seed and start.
+    path = imported(audit, "paper/jctc/data/tip4p_gmin")
+    rows = audit.rows(path)
+    arms: dict[tuple[int, str], dict[str, dict]] = defaultdict(dict)
+    for r in rows:
+        arms[(int(r["molecules"]), r["arm"])][r["seed"]] = r
+    revisions = {r["anneal_sha"] for r in rows}
+    audit.cell(path, "TIP4P rows of this code are revision e1a69a57", "e1a69a57a8dda1b44fdde9413ae31e3fc3af1889",
+               revisions.pop() if len(revisions) == 1 else " ".join(sorted(revisions)))
+    ancestor_of(audit, path, "e1a69a57a8dda1b44fdde9413ae31e3fc3af1889", SUBMITTED)
+    audit.cell(path, "TIP4P rows per arm and size", "12", float(min(len(v) for v in arms.values())))
+    shared = all(arms[(n, "anneal")][k]["start_id"] == arms[(n, "gmin")][k]["start_id"]
+                 for n in {n for n, _ in arms} for k in arms[(n, "anneal")])
+    audit.record(shared, path, "both TIP4P arms of a seed share the start", "shared", "shared" if shared else "not")
+    sizes = {"(H\\(_2\\)O)\\(_{8}\\)": 8, "(H\\(_2\\)O)\\(_{15}\\)": 15, "(H\\(_2\\)O)\\(_{20}\\)": 20,
+             "(H\\(_2\\)O)\\(_{21}\\)": 21, "(H\\(_2\\)O)\\(_{25}\\)": 25}
+    stats = {}
+    for line in tex_table(audit, TEX, "tab:tip4p-gmin"):
+        n = sizes.get(line[0])
+        where = f"{TEX} tab:tip4p-gmin {line[0]}"
+        if n is None:
+            audit.record(False, where, "a TIP4P size the rows hold", line[0], "unknown")
+            continue
+        a, g = arms[(n, "anneal")], arms[(n, "gmin")]
+        seeds = sorted(a, key=int)
+        if n == 25:
+            text = " & ".join(line[1:])
+            for arm, label in ((a, "this work"), (g, "GMIN")):
+                energies = [float(arm[k]["best_energy"]) for k in seeds]
+                audit.record(f"{label} \\({min(energies):.3f}\\), median \\({median(energies):.3f}\\)" in text, where,
+                             f"{label} lowest and median best energy", f"{min(energies):.3f} {median(energies):.3f}",
+                             text[:80])
+            continue
+        table = paired_table({k: a[k]["hit"] == "1" for k in seeds}, {k: g[k]["hit"] == "1" for k in seeds})
+        calls = wilcoxon_signed_rank([float(a[k]["calls"]) - float(g[k]["calls"]) for k in seeds])
+        walls = wilcoxon_signed_rank([float(a[k]["wall_s"]) - float(g[k]["wall_s"]) for k in seeds])
+        stats[n] = (table, mcnemar(table[1], table[2]))
+        lo, hi = newcombe_paired_interval(*table)
+        audit.cell(where, "this work", line[1], f"{table[0] + table[1]}/12")
+        audit.cell(where, "GMIN", line[2], f"{table[0] + table[2]}/12")
+        audit.cell(where, "only this work", line[3], float(table[1]))
+        audit.cell(where, "only GMIN", line[4], float(table[2]))
+        audit.cell(where, "exact McNemar p", line[5], stats[n][1])
+        audit.cell(where, "Newcombe lower", interval_of(line[6])[0], lo)
+        audit.cell(where, "Newcombe upper", interval_of(line[6])[1], hi)
+        audit.cell(where, "Wilcoxon p on calls", line[7], calls[2])
+        audit.cell(where, "Wilcoxon p on wall", line[8], walls[2])
+    audit.cell(TEX, "tab:tip4p-gmin sizes", "8 15 20 21", " ".join(map(str, sorted(stats))))
+    t = {n: stats[n][0] for n in stats}
+    audit.said(TEX, f"Paired by seed, this code alone hits {t[15][1]} seeds of (H\\(_2\\)O)\\(_{{15}}\\) and {t[20][1]} of "
+                    f"(H\\(_2\\)O)\\(_{{20}}\\) and GMIN alone none, with \\(p={pp(stats[15][1])}\\) and "
+                    f"{pp(stats[20][1])}.")
+    audit.cell(TEX, "GMIN alone hits no seed of 15 or 20", "0 0", f"{t[15][2]} {t[20][2]}")
+    audit.said(TEX, f"On (H\\(_2\\)O)\\(_8\\) this code hits {t[8][0] + t[8][1]} of 12 and GMIN {t[8][0] + t[8][2]}, "
+                    f"with \\(p={pp(stats[8][1])}\\), and neither arm hits (H\\(_2\\)O)\\(_{{21}}\\).")
+    audit.cell(TEX, "neither arm hits 21", "0 0 0", " ".join(map(str, t[21][:3])))
+    a25 = [float(r["best_energy"]) for r in arms[(25, "anneal")].values()]
+    g25 = [float(r["best_energy"]) for r in arms[(25, "gmin")].values()]
+    audit.said(TEX, f"lowest energy of this code there is \\({min(a25):.3f}\\)~kJ/mol and that of GMIN "
+                    f"\\({min(g25):.3f}\\)~kJ/mol.")
+    audit.said(TEX, f"(H\\(_2\\)O)\\(_{{20}}\\) on {t[15][0] + t[15][1]} and {t[20][0] + t[20][1]} of 12 against none "
+                    f"(\\(p={pp(stats[15][1])}\\) and {pp(stats[20][1])}).")
+    two = [n for n in stats if t[n][1] > t[n][2] and stats[n][1] < 0.05]
+    audit.cell(COVER, "TIP4P sizes where the code hits more than GMIN at p<0.05", "15 20", " ".join(map(str, two)))
+    audit.said(TEX, "Table~\\ref{tab:tip4p-gmin} puts revision \\texttt{e1a69a57} of this code against GMIN on rigid "
+                    "TIP4P clusters of 8, 15, 20, 21, and 25 molecules, at \\(2\\times 10^{6}\\) calls on seeds "
+                    "2000--2011, both arms from the same start on each seed in alternating order.")
+    orders = {r["arm_order"] for r in rows}
+    audit.cell(path, "TIP4P arm orders", "anneal,gmin gmin,anneal", " ".join(sorted(orders)))
+
+
+def manuscript_priors(audit: Audit) -> None:
+    """Section sec:priors read against the source of the removal commit, its parent, and the current preset."""
+    removal, lj_rev = "1c1b1238", "c2de652dca0bc75e2b0cb4afffac91fd656404e4"
+    subject = git("log", "-1", "--format=%s", removal).stdout.strip()
+    audit.cell(TEX, "the removal commit", "fix: remove structure templates from cluster search", subject)
+    removed = git("show", removal).stdout
+    for switch in ("prior_reseed", "prior_growth", "prior_core", "prior_handover", "prior_motif"):
+        audit.record(f"-            && cfg.{switch}" in removed or f"cfg.{switch}" in "".join(
+            line for line in removed.splitlines() if line.startswith("-")), TEX,
+            f"{removal} removes the {switch} code path", "removed", "removed")
+    on = priors_on(f"{removal}^") or []
+    audit.cell(TEX, "the six priors are on in the parent of the removal", " ".join(PRIORS), " ".join(on))
+    audit.said(TEX, "Up to commit \\texttt{1c1b1238} the preset carried six switches that use the structure of "
+                    "close-packed clusters, all on.")
+    config = git("show", f"{removal}^:{PRIOR_CONFIG}").stdout
+    audit.record("reseed_hops: 5," in config, TEX, "the reseed interval is five hops before the removal", "5",
+                 "5" if "reseed_hops: 5," in config else "other")
+    audit.said(TEX, "at most once every five hops, closed its core orbits, and adopted the quench as the walker.")
+    current = audit.text(PRIOR_CONFIG)
+    audit.record("prior_soap" in current, PRIOR_CONFIG, "prior_soap remains in the code", "present",
+                 "present" if "prior_soap" in current else "absent")
+    audit.said(TEX, "positions, and it remains in the code.")
+    switch = "4f5ec0c56779e02b7627b7d3693fbb319f631176"
+    added = git("show", switch, "--", PRIOR_CONFIG).stdout
+    audit.record("+    pub structural_priors: bool," in added, PRIOR_CONFIG, f"{switch[:8]} adds the structural_priors switch",
+                 "added", "added" if "+    pub structural_priors: bool," in added else "absent")
+    audit.record(git("merge-base", "--is-ancestor", switch, SUBMITTED).returncode != 0, PRIOR_CONFIG,
+                 "the switch is not in the history of the submitted revision", "not", "checked")
+    readme = git("show", "refs/remotes/origin/record/review6-on-7192:bench/priors-ablation/README.md").stdout
+    audit.record("Develop `f2a628c0` and this series on it give identical pins" in readme, "record/review6-on-7192",
+                 "with the switch on, the build gives the pins of develop f2a628c0", "identical pins", "checked")
+    audit.said(TEX, "The knockout of Section~\\ref{sec:k-priors} builds one switch, \\texttt{Config::structural\\_priors}, "
+                    "on develop \\texttt{f2a628c0}; it turns off every path that builds a structure from a known packing "
+                    "or chooses a move by classifying one, \\texttt{prior\\_soap} included, and with the switch on that "
+                    "build gives the trajectory pins of develop \\texttt{f2a628c0}.")
+    audit.said(SI, "whose binaries are the switch of commit \\texttt{4f5ec0c5} built on develop \\texttt{f2a628c0};")
+    audit.said(TEX, "Commit \\texttt{1c1b1238} removed the structure templates, the builders of face-centered cubic, "
+                    "polyicosahedral, Mackay, and axial-spine cuts behind the last five priors;")
+    table_priors(audit, removal)
+    count_gates(audit, lj_rev)
+
+
+def count_gates(audit: Audit, lj_rev: str) -> None:
+    """The atom- and body-count gates the methods name, read from the current source and from c2de652d."""
+    config = audit.text(PRIOR_CONFIG)
+    tests = re.findall(r"if n_points\s*(<|<=|>|>=|==)\s*(\d+)\s*\{([^}]*)\}", config)
+    shown = " ".join(f"{op} {n} {'surfaces' if 'cfg.surfaces = ' in body else 'other'}" for op, n, body in tests)
+    audit.cell(PRIOR_CONFIG, "the atom-count tests of the presets", "< 98 surfaces < 98 surfaces", shown)
+    audit.cell(PRIOR_CONFIG, "every n_points test is one of those", str(len(tests)),
+               float(len(re.findall(r"(?<!self\.)\bn_points\s*(?:<|<=|>|>=|==)\s*\d", config))))
+    audit.record("self.n_points >= 2," in config, PRIOR_CONFIG, "the other n_points test is the validation of the size",
+                 "present", "present" if "self.n_points >= 2," in config else "absent")
+    hop = audit.text("src/methods/cluster_hopping.rs")
+    audit.record("n_points < 98" not in hop, "src/methods/cluster_hopping.rs", "the growth hold gate is gone",
+                 "absent", "absent" if "n_points < 98" not in hop else "present")
+    old = git("show", f"{lj_rev}:src/methods/cluster_hopping.rs").stdout
+    audit.record("stall_growth_waits(held, incumbent) && (n_points < 98 || skipped < GROWTH_RETRY_LEAVES)" in old,
+                 f"{lj_rev[:8]}:src/methods/cluster_hopping.rs", "the prior-on growth hold releases at 98 atoms",
+                 "present", "present")
+    bodies = re.search(r"const RIGID_HOT_BODIES: usize = (\d+);", hop)
+    audit.cell("src/methods/cluster_hopping.rs", "rigid body-count gate", "10", float(bodies.group(1)) if bodies else None)
+    for fragment in ("cfg.move_library.is_rigid_body() && cfg.n_points > RIGID_HOT_BODIES",
+                     "&& cfg.n_points <= RIGID_HOT_BODIES"):
+        audit.record(fragment in hop, "src/methods/cluster_hopping.rs", "the rigid gate reads the body count",
+                     fragment, "present" if fragment in hop else "absent")
+    assignment = audit.text("src/assignment.rs")
+    audit.record("const SHORTEST_PATH_FROM: usize = 98;" in assignment and "the same optimum" in assignment,
+                 "src/assignment.rs", "the assignment switches algorithm at 98 for the same optimum", "98", "98")
+    audit.record("minimum_cost_assignment" in audit.text("src/continuous_symmetry.rs"), "src/continuous_symmetry.rs",
+                 "the symmetry projections use that assignment", "used", "used")
+    audit.said(TEX, "For atomic clusters the preset has one atom-count gate: the diameter penalty of "
+                    "equation~\\ref{eq:penalty} is used only below 98 atoms.")
+    audit.said(TEX, "The revisions with the structure priors on had a second, the growth hold of "
+                    "equation~\\ref{eq:hold}.")
+    audit.said(TEX, "A rigid-body run has a gate of its own: at 10 molecules or fewer its step factor may climb higher, "
+                    "and above 10 its orientation step follows the acceptance rate.")
+    audit.said(TEX, "In the revisions with the structure priors on, lattice growth on a plateau is held when it has "
+                    "already failed at the current energy.")
+    for phrase in ("two atom-count gates", "Apart from those gates no move reads the atom count"):
+        audit.record(phrase not in collapse(audit.text(TEX)), TEX, f"retired gate wording stays out: {phrase}",
+                     "absent", "absent" if phrase not in collapse(audit.text(TEX)) else "present")
+
+
+def table_priors(audit: Audit, removal: str) -> None:
+    """The prior state behind each table that the SI gives, read from the source of each revision."""
+    for revision, want in (("9a30f319", " ".join(PRIORS)), ("70c0ad6c^", " ".join(PRIORS)),
+                           ("3129d1ec^", "soap reseed growth core motif"), ("07092af2^", "")):
+        audit.cell(SI, f"priors on in the preset at {revision}", want or "none", " ".join(priors_on(revision) or []) or "none")
+        ancestor = git("merge-base", "--is-ancestor", removal, revision).returncode == 0
+        audit.record(not ancestor, SI, f"{revision} predates the removal", "not an ancestor",
+                     "ancestor" if ancestor else "not an ancestor")
+    for revision, absent in (("3129d1ec^", "prior_handover"), ("07092af2^", "prior_")):
+        audit.record(absent not in git("show", f"{revision}:{PRIOR_CONFIG}").stdout, SI,
+                     f"{revision} has no {absent} switch", "absent", "absent")
+    hop = git("show", "3129d1ec^:src/methods/cluster_hopping.rs").stdout
+    for switch in ("prior_core", "prior_motif"):
+        at = hop.index(f"&& cfg.{switch}")
+        guard = hop[hop.rindex("if ", 0, at):hop.index("{", at)]
+        audit.record("!cfg.move_library.is_rigid_body()" in guard, SI, f"3129d1ec^ keeps rigid runs out of {switch}",
+                     "guarded", "guarded" if "!cfg.move_library.is_rigid_body()" in guard else "unguarded")
+    audit.said(SI, "The preset of \\texttt{9a30f319}, behind the Morse ASE table, has the six priors on, and the "
+                   "parent of \\texttt{07092af2} has no prior switch.")
+
+
+PRIORS = ("soap", "reseed", "growth", "core", "handover", "motif")
+PRIOR_CONFIG = "src/methods/cluster_hopping/config.rs"
+
+
+def priors_on(revision: str) -> list[str] | None:
+    """The structure priors the preset at ``revision`` sets on, or None when the revision is not here."""
+    shown = git("show", f"{revision}:{PRIOR_CONFIG}")
+    if shown.returncode != 0:
+        return None
+    return [p for p in PRIORS if f"prior_{p}: true," in shown.stdout]
+
+
+def configuration_of(rows: list[dict[str, str]]) -> str:
+    """The name the manuscript gives the configuration of this code behind ``rows``.
+
+    A revision in the repository is prior-on when its preset sets all six priors on;
+    one that is not is named by its entry in the list of unreachable revisions."""
+    revisions = {r["code_revision"] for r in rows}
+    if len(revisions) != 1:
+        return "mixed revisions"
+    revision = revisions.pop()
+    on = priors_on(revision)
+    if on is not None:
+        return "prior-on" if len(on) == len(PRIORS) else f"{len(on)} priors on"
+    return "template-free" if "template-free" in UNPUSHED.get(revision, "") else "unknown"
+
+
 def gmin_panel_drivers(audit: Audit) -> None:
     """The driver settings Section sec:gmin names, read from the driver sources."""
     metal = audit.text("examples/h2h_metal.rs")
@@ -783,9 +1637,74 @@ def gmin_panel_drivers(audit: Audit) -> None:
     audit.record("second_neighbour_energy() <" not in morse, "examples/h2h_morse.rs",
                  "long-ranged threshold gate is removed", "absent",
                  "absent" if "second_neighbour_energy() <" not in morse else "present")
-    audit.said(TEX, "The gold driver gives it the copper--gold species list with no copper atom, applies the basin "
-                    "bias of equation~\\ref{eq:delta} to every downhill or accepted proposal and to one other proposal "
-                    f"in {stride.group(1) if stride else '?'}, and decides the rest on the bare energy.")
+    audit.said(TEX, "The gold driver of this code gives the template-free configuration the copper--gold species "
+                    "list with no copper atom and applies the basin bias of equation~\\ref{eq:delta} on a stride of "
+                    f"{stride.group(1) if stride else '?'}; it does not touch the GMIN arm.")
+    audit.said(TEX, f"On Au\\(_{{55}}\\) the gold driver of this code applies the basin bias of equation~\\ref{{eq:delta}} "
+                    f"to this code on a stride of {stride.group(1) if stride else '?'}.")
+    audit.said(SI, "The gold driver \\path{examples/h2h_metal.rs} configures only the arm of this code.")
+    strides = re.findall(r"(\S*)basin_stride\s*=", metal)
+    audit.cell("examples/h2h_metal.rs", "the basin stride is set only on the config of this code", "cfg.",
+               " ".join(sorted(set(strides))))
+    audit.record("Config::recommended(spec.n)" in metal and "gmin" not in metal.lower(), "examples/h2h_metal.rs",
+                 "the gold driver builds a config of this code and never runs GMIN", "this code only",
+                 "this code only" if "gmin" not in metal.lower() else "mentions GMIN")
+    gmin_patches(audit)
+
+
+def gmin_patches(audit: Audit) -> None:
+    """The GMIN of the panel carries the cap and timer patches and nothing else of substance."""
+    build = audit.text("scripts/gmin_panel/build_gmin.sh")
+    listed = re.search(r"PATCHES=\((.*?)\)", build, re.S)
+    names = re.findall(r'"\$ROOT/([^"]+)"', listed.group(1)) if listed else []
+    want = ["bench/lj104-lattice/v2/h2h-gmin.patch", "scripts/morse_h2h/morse-timer.patch",
+            "bench/metal-cluster-h2h/gmin-bgupta.patch"]
+    audit.cell("scripts/gmin_panel/build_gmin.sh", "GMIN patches", " ".join(want), " ".join(names))
+    audit.said(SI, ", ".join(f"\\path{{{n}}}" for n in want[:2]) + f", and \\path{{{want[2]}}}")
+    shown = [f"\\texttt{{{n.replace('_', chr(92) + '_')}}}" for n in want]
+    audit.said(TEX, "GMIN is the snapshot of SVNREV \\texttt{9cbec1a4} built with three patches, " + ", ".join(shown[:2]) + f", and {shown[2]}, "
+                    "which cap the force calls, time the potential, and, in the serial build, set the run index "
+                    "(\\texttt{JP=1}) before its first use.")
+    audit.record("JP=1" in audit.text(want[0]), want[0], "the first patch sets the serial run index", "JP=1",
+                 "JP=1" if "JP=1" in audit.text(want[0]) else "absent")
+    audit.record("patched only" not in audit.text(TEX), TEX, "the GMIN caption names every patch", "absent",
+                 "absent" if "patched only" not in audit.text(TEX) else "present")
+    allowed = {"#ifndef GMIN_MPI", "JP=1", "#endif", "IF (SAVECT) COMPRESST=.TRUE."}
+    # What a capped call does instead of evaluating: return a refused energy and stop the quench.
+    refusal = {"RETURN", "MFLAG=.FALSE.", "NPCALL = NPCALL - 1", "EREAL = 1.0D20", "IF (GRADT) GRAD(:) = 0.0D0",
+               "IF (ENERGY.GT.1.0D19) ENERGY=1.0D6"}
+    for name in names:
+        text = audit.text(name)
+        removed = {line[1:].strip() for line in text.splitlines() if line.startswith("-") and not line.startswith("---")}
+        target = ""
+        stray = []
+        block: list[str] | None = None
+        for line in text.splitlines():
+            if line.startswith("+++ "):
+                target = line[4:]
+                continue
+            if not line.startswith("+") or target == "b/source/h2h_cap.f90":
+                continue
+            body = line[1:].strip()
+            if block is not None:
+                if body != "END IF":
+                    block.append(body)
+                    continue
+                head, rest = block[0], block[1:]
+                guarded = "H2H" in head or any("H2H" in b for b in rest)
+                rewritten = head.endswith(" THEN") and head[:-len(" THEN")] + " RETURN" in removed
+                plain = [b for b in rest if "H2H" not in b]
+                if not (guarded and (rewritten or "H2H" in head) and set(plain) <= refusal):
+                    stray.append(" / ".join(block))
+                block = None
+                continue
+            if re.fullmatch(r"IF \(.*\) THEN", body):
+                block = [body]
+            elif body and "H2H" not in body and body not in allowed:
+                stray.append(body)
+        audit.cell(name, "added GMIN lines outside the cap and timers", "none", "; ".join(stray) or "none")
+    audit.said(SI, "which cap the force calls, time the potential, and, in the serial build, set the run index before "
+                   "its first use; no other line of GMIN changes.")
     audit.record("Mackay cap" not in audit.text(TEX), TEX, "Mackay-cap driver prose is removed",
                  "absent", "absent" if "Mackay cap" not in audit.text(TEX) else "present")
 
@@ -800,6 +1719,7 @@ PANEL_SEEDS = " ".join(str(s) for s in range(2000, 2012))
 def load_script(name: str, path: str) -> object:
     spec = importlib.util.spec_from_file_location(name, ROOT / path)
     module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -857,6 +1777,35 @@ def ase_cap(audit: Audit, groups: dict, system: str) -> float:
     return float(caps[0])
 
 
+def ase_equal_calls(audit: Audit, groups: dict, label) -> None:
+    """The equal-call counts: seeds on which this code had hit within the calls the ASE run on that seed charged."""
+    def within(system: str, arm: str) -> int:
+        ours = {r["seed"]: r for r in groups[(system, "recommended")]}
+        return sum(ours[r["seed"]]["hit"] == "1" and float(ours[r["seed"]]["evals_to_hit"]) <= float(r["charged"])
+                   for r in groups[(system, arm)])
+
+    lj = ASE_PANEL[:5]
+    mh = [within(s, "ase_mh") for s in lj]
+    bh = [within(s, "ase_bh") for s in lj]
+    audit.cell(TEX, "equal calls against minima hopping", "12 8 0 1 1", " ".join(map(str, mh)))
+    audit.cell(TEX, "equal calls against basin hopping", "12 12 10 9 5", " ".join(map(str, bh)))
+    wide = ("lj98", "lj104", "lj150")
+    bh_hits = [sum(r["hit"] == "1" for r in groups[(s, "ase_bh")]) for s in wide]
+    audit.cell(TEX, "ASE basin hopping hits none of LJ98, LJ104, LJ150", "0 0 0", " ".join(map(str, bh_hits)))
+    audit.said(TEX, f"this code had reached the minimum on {series(map(str, mh))} of the 12 seeds of the five "
+                    f"Lennard-Jones clusters; within the calls of each basin-hopping run it had done so on "
+                    f"{series(map(str, bh))}.")
+    audit.cell(TEX, "equal calls on Au55", "0 0", f"{within('au55', 'ase_bh')} {within('au55', 'ase_mh')}")
+    morse = [{within(s, a) for a in ASE_ARMS} for s in MORSE_PANEL]
+    audit.cell(TEX, "Morse equal calls agree against both arms", "1 1 1 1", " ".join(str(len(m)) for m in morse))
+    counts = [str(m.pop()) for m in morse]
+    audit.cell(TEX, "Morse equal calls", "0 0 4 0", " ".join(counts))
+    audit.said(TEX, f"runs had spent this code had reached the minimum on {series(counts)} of those seeds.")
+    calls = [median([float(r["charged"]) for r in groups[(s, a)]]) for s in MORSE_PANEL for a in ASE_ARMS]
+    audit.said(TEX, f"On the four Morse clusters every ASE run stopped at the cap after a median of {min(calls):.0f} to "
+                    f"{max(calls):.0f} calls;")
+
+
 def manuscript_ase(audit: Audit) -> None:
     """Tables tab:ase and tab:ase-morse, the summaries they come from, and every sentence that reads them."""
     panel = load_script("ase_panel_summary", "scripts/ase_panel/summarize.py")
@@ -890,11 +1839,12 @@ def manuscript_ase(audit: Audit) -> None:
         atoms = panel.SYSTEMS[system][0] if system in panel.SYSTEMS else nonlj.SPEC[system][0]
         audit.cell(f"ase panel {system}", "budget by atom count", str(by_atoms.get(atoms, 4_000_000)),
                    float(budgets[system]))
-    audit.said(TEX, "on seeds 2000--2011, at \\(4\\times 10^{5}\\) calls for 38 atoms, \\(1\\times 10^{6}\\) for 55, "
+    audit.said(SI, "on seeds 2000--2011, at \\(4\\times 10^{5}\\) calls for 38 atoms, \\(1\\times 10^{6}\\) for 55, "
                     "and \\(4\\times 10^{6}\\) for 98 atoms and above, on one core of one host.")
     audit.said("scripts/ase_panel/run_one.py", 'ASE_VERSION = "3.29.0"')
     audit.said("bench/ase-nonlj/README.md", "ASE basin hopping and minima hopping use the ASE 3.29 constructor defaults")
-    audit.said(TEX, "Environment 3.29.0 at its constructor defaults")
+    audit.said(SI, "Environment 3.29.0 at its constructor defaults")
+    audit.said(TEX, "(MH) of ASE 3.29.0 at its constructor defaults, at the effort each run reports.")
     audit.said("scripts/ase_panel/run_one.py", "Au55 is Gupta::copper_gold through asg_eval serve, the same potential "
                                                "the anneal arms evaluate.")
 
@@ -902,7 +1852,13 @@ def manuscript_ase(audit: Audit) -> None:
     revision = sorted({r["code_revision"] for s in ASE_PANEL for r in groups[(s, "recommended")]})
     audit.record(len(revision) >= 1, TEX, "tab:ase recommended revisions", "at least one", str(len(revision)))
     rev_ase_text = ", ".join(revision)
-    audit.said(TEX, f"This work is anneal \\texttt{{{rev_ase_text}}}.")
+    audit.said(SI, "The anneal arm of the Lennard-Jones and gold ASE table is revisions "
+                   + " and ".join(f"\\texttt{{\\seqsplit{{{r}}}}}" for r in revision) + ", neither in the\nrepository.")
+    for r in revision:
+        audit.record(not git("cat-file", "-e", f"{r}^{{commit}}").returncode == 0, SI,
+                     f"ASE revision {r[:8]} is not in the repository", "absent", "checked")
+    shorts = [r[:8] for r in revision]
+    audit.said(TEX, f"\\texttt{{{shorts[0]}}} and \\texttt{{{shorts[1]}}} of this code.")
     by_label = {label: s for s, label in panel.TEX_LABELS.items()}
     shown = []
     for cells in tex_table(audit, TEX, "tab:ase"):
@@ -939,7 +1895,15 @@ def manuscript_ase(audit: Audit) -> None:
     revision = sorted({r["code_revision"] for s in MORSE_PANEL for r in groups[(s, "recommended")]})
     audit.record(len(revision) >= 1, TEX, "tab:ase-morse recommended revisions", "at least one", str(len(revision)))
     rev_morse_short = revision[0][:8]
-    audit.said(TEX, f"This work is anneal \\texttt{{{rev_morse_short}}} at the length scale of the Morse pair.")
+    audit.said(SI, f"The anneal arm of the Morse ASE table is revision \\texttt{{{rev_morse_short}}}, at the length scale "
+                   "of the Morse pair, which is in the repository and is not an ancestor of the submitted revision.")
+    morse_ancestor = git("merge-base", "--is-ancestor", revision[0], SUBMITTED).returncode == 0
+    audit.record(not morse_ancestor, SI, f"{rev_morse_short} is not an ancestor of the submitted revision", "not",
+                 "ancestor" if morse_ancestor else "not")
+    audit.said(TEX, f"The rows of this code are revisions \\texttt{{{shorts[0]}}} and \\texttt{{{shorts[1]}}}\nin "
+                    f"Table~\\ref{{tab:ase}} and revision \\texttt{{{rev_morse_short}}} in\nTable~\\ref{{tab:ase-morse}}, "
+                    "none of them an ancestor of the submitted revision.")
+    audit.said(TEX, f"The rows of this code are revision \\texttt{{{rev_morse_short}}}, at the length scale of the Morse pair.")
     audit.said("bench/ase-nonlj/README.md",
                "Anneal `recommended` uses `Config::recommended_with_scales` at `PairKind::length_scale()`.")
     audit.said("examples/ase_panel.rs", "Config::recommended_with_scales(n, length, well)")
@@ -974,21 +1938,24 @@ def manuscript_ase(audit: Audit) -> None:
     identity = audit.rows("bench/ase-nonlj/identity.csv")
     energy = max(float(r["abs_energy_diff"]) for r in identity)
     force = max(float(r["max_force_diff"]) for r in identity)
-    audit.cell(TEX, "Morse energy agreement", "6.8e-12", energy)
-    audit.cell(TEX, "Morse force agreement", "3.6e-12", force)
-    audit.cell(TEX, "Morse agreement at the seed-2000 start", "2000", " ".join(sorted({r["seed"] for r in identity})))
-    audit.said(TEX, "agrees with this code at the seed-2000 start to \\(6.8\\times 10^{-12}\\) in energy and "
+    audit.cell(SI, "Morse energy agreement", "6.8e-12", energy)
+    audit.cell(SI, "Morse force agreement", "3.6e-12", force)
+    audit.cell(SI, "Morse agreement at the seed-2000 start", "2000", " ".join(sorted({r["seed"] for r in identity})))
+    audit.said(SI, "agrees with this code at the seed-2000 start to \\(6.8\\times 10^{-12}\\) in energy and "
                     "\\(3.6\\times 10^{-12}\\) in force.")
 
-    # Stops: no run of this setting at a cap, the caps of each ASE arm.
+    # Stops: no run of this code at a cap, the caps of each ASE arm.
     for system in (*ASE_PANEL, *MORSE_PANEL):
         audit.cell(f"ase panel {system}", "recommended wall stops", "0", float(stops(system, "recommended")))
         uncapped = sum(not r["cap_s"] for a in ("recommended", *ASE_ARMS) for r in groups[(system, a)])
         audit.cell(f"ase panel {system}", "table runs without a cap", "0", float(uncapped))
-    audit.said(TEX, "Each run stops at a hit, at the budget, or at a wall cap. The cap of the basin-hopping and "
+    audit.said(SI, "Each run stops at a hit, at the budget, or at a wall cap. The cap of the basin-hopping and "
                     "minima-hopping runs is three times the slowest wall of the panel's cluster-preset arm on that "
                     "cluster.")
-    audit.said(TEX, "No run of this setting reached its cap.")
+    audit.said(SI, "No run of this code reached its cap.")
+    audit.said(TEX, "These runs do not share a start with this code, so their hits are compared by Fisher's test, and "
+                    "their effort is not equal: each ASE run stopped at a hit, at the budget, or at a wall cap of three "
+                    "times the slowest wall of another configuration of this code on that cluster.")
     lj = ASE_PANEL[:5]
 
     def label(system: str) -> str:
@@ -1000,13 +1967,16 @@ def manuscript_ase(audit: Audit) -> None:
     mh_walls = sum(stops(s, "ase_mh") for s in ASE_PANEL)
     audit.cell(TEX, "tab:ase minima-hopping runs at the cap", str(mh_runs), float(mh_walls))
     bh = [(s, stops(s, "ase_bh")) for s in ASE_PANEL if stops(s, "ase_bh")]
-    audit.said(TEX, f"Minima hopping stopped at the cap on all {mh_runs} runs of Table~\\ref{{tab:ase}}, and basin "
-                    f"hopping on {sum(n for _, n in bh)}: {series(f'{n} on {label(s)}' for s, n in bh)}.")
+    morse_bh = all(r["stop"] == "wall" for s in MORSE_PANEL for r in groups[(s, "ase_bh")])
+    audit.record(morse_bh, TEX, "basin hopping reached the cap on every Morse run", "every", "every" if morse_bh else "not")
+    audit.said(TEX, f"Minima hopping reached the cap on every run, basin hopping on {sum(n for _, n in bh)} of the "
+                    f"{mh_runs}\nruns of Table~\\ref{{tab:ase}} and on every run of Table~\\ref{{tab:ase-morse}},\nand no "
+                    "run of this code reached it.")
     spent = [s for s in ASE_PANEL if stops(s, "ase_bh", "budget") == len(groups[(s, "ase_bh")])]
     for s in spent:
         audit.cell(TEX, f"{s} basin hopping charged the budget on every seed", "4000000",
                    float(min(int(r["charged"]) for r in groups[(s, "ase_bh")])))
-    audit.said(TEX, f"On {series(label(s) for s in spent)} basin hopping spent the full \\(4\\times 10^{{6}}\\) calls "
+    audit.said(SI, f"On {series(label(s) for s in spent)} basin hopping spent the full \\(4\\times 10^{{6}}\\) calls "
                     "on every seed.")
     runs = []
     for s in lj:
@@ -1014,108 +1984,64 @@ def manuscript_ase(audit: Audit) -> None:
             runs[-1][0].append(s)
         else:
             runs.append(([s], hits(s, "recommended")))
-    audit.said(TEX, "This setting hits " + series(f"{' and '.join(label(s) for s in names)} on {n} of 12"
-                                                  for names, n in runs) + ".")
+    lj_runs = series(f"{' and '.join(label(s) for s in names)} on {n} of 12" for names, n in runs)
     bh_hits = [s for s in ASE_PANEL if hits(s, "ase_bh")]
     mh_hits = [s for s in ASE_PANEL if hits(s, "ase_mh")]
     audit.cell(TEX, "basin hopping hits one cluster", "lj55", " ".join(bh_hits))
     audit.cell(TEX, "minima hopping hits none", "", " ".join(mh_hits))
-    audit.said(TEX, f"Basin hopping hits {label('lj55')} on {hits('lj55', 'ase_bh')} of 12 and no other cluster, and "
-                    "minima hopping hits none.")
+    audit.said(TEX, f"Under that policy this code hits {lj_runs}, while ASE basin hopping hits {label('lj55')} on "
+                    f"{hits('lj55', 'ase_bh')} of 12 and no other\ncluster, and ASE minima hopping hits none; no arm hits "
+                    f"{label('au55')}.")
     below = [s for s in lj if max(p(s, a) for a in ASE_ARMS) < 0.05]
-    audit.said(TEX, f"Fisher's test against each ASE arm is below 0.05 on all {len(below)} Lennard-Jones clusters.")
+    audit.said(SI, f"Fisher's test against each ASE arm is below 0.05 on all {len(below)} Lennard-Jones clusters.")
     audit.cell(TEX, "Fisher below 0.05 on every Lennard-Jones cluster", " ".join(lj), " ".join(below))
     au_hits = [hits("au55", a) for a in ("anneal", "recommended", *ASE_ARMS)]
     audit.cell(TEX, "no arm of the ASE panel hits Au55", "0", float(sum(au_hits)))
-    audit.said(TEX, f"No arm hits {label('au55')}.")
     au_ref = references["au55"]
     au_gaps = [f"{gap('au55', a, au_ref):.3f}" for a in ("recommended", *ASE_ARMS)]
-    audit.said(TEX, f"There the median best energy lies {au_gaps[0]}~eV above the reference for this setting, "
+    audit.said(SI, f"On {label('au55')} the median best energy lies {au_gaps[0]}~eV above the reference for this code, "
                     f"{au_gaps[1]}~eV for basin hopping, and {au_gaps[2]}~eV for minima hopping.")
     morse_walls = all(r["stop"] == "wall" for s in MORSE_PANEL for a in ASE_ARMS for r in groups[(s, a)])
     audit.record(morse_walls, TEX, "every Morse ASE run stopped at the cap", "every", "every" if morse_walls else "not every")
-    audit.said(TEX, "Every basin-hopping and minima-hopping run of Table~\\ref{tab:ase-morse} stopped at the cap.")
+    audit.said(SI, "Every basin-hopping and minima-hopping run of the Morse ASE table stopped at the cap.")
     m = [hits(s, "recommended") for s in MORSE_PANEL]
     audit.cell(TEX, "M38 at both ranges and M55 at rho=6 share one count", "1", float(len(set(m[:3]))))
     morse_sentence = (f"{label('m38r6').split(' at ')[0]} at \\(\\rho=6\\) and \\(\\rho=14\\) and {label('m55r6')} on "
                       f"{m[0]} of 12")
-    audit.said(TEX, f"This setting hits {morse_sentence}, and {label('m55r14')} on {m[3]} of 12.")
+    audit.said(TEX, f"this code hits {morse_sentence} and {label('m55r14')} on {m[3]} of 12, both ASE arms hit none,")
     morse_ase = {hits(s, a) for s in MORSE_PANEL for a in ASE_ARMS}
     audit.cell(TEX, "Morse ASE hits", "0", float(max(morse_ase)))
-    audit.said(TEX, f"Both ASE arms hit {max(morse_ase)} of 12 on all {len(MORSE_PANEL)}.")
     morse_p = [{show_p(p(s, a)) for a in ASE_ARMS} for s in MORSE_PANEL]
     audit.cell(TEX, "one Fisher p on the first three Morse clusters", "1", float(len(set.union(*morse_p[:3]))))
-    audit.said(TEX, f"Fisher's \\(p\\) against each ASE arm is {next(iter(morse_p[0]))} on the first three and "
+    audit.said(SI, f"Fisher's \\(p\\) against each ASE arm is {next(iter(morse_p[0]))} on the first three and "
                     f"{next(iter(morse_p[3]))} on {label('m55r14')}.")
-    section = audit.text(TEX).split("\\label{sec:ase}", 1)[1].split("\\subsection{TIP4P clusters}", 1)[0]
+    section = audit.text(TEX).split("\\label{sec:ase}", 1)[1].split("% gofee table: start", 1)[0]
     audit.record("Mann" not in section, TEX, "sec:ase reports Fisher only", "no rank test", "no rank test"
                  if "Mann" not in section else "a rank test")
-    discussion = audit.text(TEX).split("\\label{sec:discussion}", 1)[1].split("\\section{Conclusions}", 1)[0]
-    audit.record("Mann" not in discussion, TEX, "the discussion reports Fisher only", "no rank test", "no rank test"
-                 if "Mann" not in discussion else "a rank test")
+    conclusions = audit.text(TEX).split("\\section{Conclusions}", 1)[1].split("\\appendix", 1)[0]
+    audit.record("Mann" not in conclusions, TEX, "the conclusions report no rank test", "no rank test", "no rank test"
+                 if "Mann" not in conclusions else "a rank test")
 
     # Abstract, introduction, discussion and conclusions.
     lj_hits = [str(hits(s, "recommended")) for s in lj]
     ase_max = max(hits(s, a) for s in lj for a in ASE_ARMS)
-    audit.said(TEX, f"this setting hits {series(label(s) for s in lj)} on {series(lj_hits)} of 12 seeds, and neither "
-                    f"ASE arm hits more than {ase_max} of 12 on any of them.")
-    gmin_au = gmin[("au55", "anneal")], gmin[("au55", "gmin")]
-    rev_gmin = {r["code_revision"] for r in gmin_au[0]}
-    rev_ase = {r["code_revision"] for r in groups[("au55", "recommended")]}
-    rev_ase_short = sorted(rev_ase)[0][:8]
-    overlap = rev_ase.intersection(rev_gmin)
-    audit.record(bool(overlap), TEX, "the two Au55 counts share a revision",
-                 "overlap", "overlap" if overlap else "disjoint")
-    au_gmin = f"{hits_of(gmin_au[0])} of {len(gmin_au[0])}", f"{hits_of(gmin_au[1])} of {len(gmin_au[1])}"
-    audit.said(TEX, f"it hits {series(str(n) for n in m)} of 12, and both ASE arms hit {max(morse_ase)} of 12.")
-    audit.said(TEX, f"and against the basin hopping and the minima hopping of the Atomic Simulation Environment on "
-                    f"{len(lj)} Lennard-Jones clusters, Gupta {label('au55')}, and {len(MORSE_PANEL)} Morse clusters "
-                    "\\cite{wales1997,larsenAse2017,goedecker2004}.")
-    audit.said(TEX, f"Section~\\ref{{sec:results}} runs this setting against GMIN on {len(gmin_panel.PAPER_BUDGETS)} "
-                    "Lennard-Jones, Gupta, and Morse clusters,")
-    mh_all = all(r["stop"] == "wall" for s in (*ASE_PANEL, *MORSE_PANEL) for r in groups[(s, "ase_mh")])
-    audit.record(mh_all, TEX, "minima hopping reached its cap on every run", "every", "every" if mh_all else "not every")
-    def partial(system: str) -> str:
-        return f"on {stops(system, 'ase_bh')} of 12 on {label(system)}"
-
-    full = [s for s in ASE_PANEL if stops(s, "ase_bh") == len(groups[(s, "ase_bh")])]
-    part = [s for s in ASE_PANEL if 0 < stops(s, "ase_bh") < len(groups[(s, "ase_bh")])]
-    audit.said(TEX, "Minima hopping reached its cap on every run, and basin hopping on every run of "
-                    f"{series([*(label(s) for s in full), 'the Morse clusters'])} and "
-                    f"{' and '.join(partial(s) for s in part)}.")
-    missed = [s for s in spent if hits(s, "ase_bh") == 0]
-    audit.cell(TEX, "basin hopping spent the budget and missed", " ".join(spent), " ".join(missed))
-    audit.said(TEX, f"On {series(label(s) for s in spent)} basin hopping spent the budget before the cap and missed on "
-                    "every seed.")
-    audit.said(TEX, f"Against the Atomic Simulation Environment this setting hits {morse_sentence} and "
-                    f"{label('m55r14')} on {m[3]} of 12, where neither ASE arm hits.")
-
-    def of(system: str, arm: str) -> str:
-        return f"{hits_of(gmin[(system, arm)])} of {len(gmin[(system, arm)])}"
-
-    def name(system: str) -> str:
-        return gmin_panel.LABELS[system][1].replace(", \\(\\rho=", " at \\(\\rho=")
-
-    morse_gmin = [s for s in gmin_panel.PAPER_BUDGETS if s.startswith("m")]
-    behind = [s for s in morse_gmin if hits_of(gmin[(s, "anneal")]) < hits_of(gmin[(s, "gmin")])]
-    level = [s for s in morse_gmin if s not in behind]
-    def ours(system: str) -> str:
-        return f"{name(system)} on {of(system, 'anneal')}"
-
-    audit.said(TEX, f"Against GMIN it hits {series(ours(s) for s in level)}, where "
-                    f"GMIN hits {series(str(hits_of(gmin[(s, 'gmin')])) for s in level)}, and it hits "
-                    f"{series(ours(s) for s in behind)}, where GMIN hits "
-                    f"{series(str(hits_of(gmin[(s, 'gmin')])) for s in behind)}.")
-    rev_gmin_text = sorted(rev_gmin)[0][:8]
-    audit.cell(TEX, "the GMIN panel revision", "1ce3ab64", rev_gmin_text)
-    audit.said(TEX, f"{name('m55r14')} is in both panels: {hits('m55r14', 'recommended')} of 12 on revision "
-                    f"\\texttt{{{rev_morse_short}}} and {of('m55r14', 'anneal')} on \\texttt{{{rev_gmin_text}}}.")
-    p_au = fisher(hits_of(gmin_au[0]), len(gmin_au[0]), hits_of(gmin_au[1]), len(gmin_au[1]))
-    audit.said(TEX, f"In the ASE panel it hits {hits('au55', 'recommended')} of 12, as do both ASE arms, and its median "
-                    f"best energy lies {au_gaps[0]}~eV above the reference.")
-    audit.said(TEX, f"Those two {label('au55')} counts come from revision \\texttt{{{rev_gmin_text}}} with the gold "
-                    f"driver of Section~\\ref{{sec:gmin}} and from revision \\texttt{{{rev_ase_short}}} with the preset "
-                    "scaled to the Gupta length and well depth.")
+    audit.cell(TEX, "the ASE arms hit at most one LJ seed", "1", float(ase_max))
+    audit.said(TEX, "Arms that do not share a start, the ASE arms, are compared on hits by the two-sided Fisher exact "
+                    "test \\cite{fisherLogicInductiveInference1935}.")
+    audit.said(TEX, "Within the calls each minima-hopping run had spent on the same seed label when it stopped,")
+    for path in ("scripts/ase_panel/summarize.py", "scripts/ase_nonlj/summarize.py"):
+        audit.said(path, "the test is unpaired because the random\",\n"
+                         "        \"generators of the two codes do not make a shared start from one seed.}\",")
+    audit.said(TEX, "the test is unpaired because the random generators of the two codes do not make a shared start "
+                    "from one seed.}")
+    audit.said(SI, "the random generators of the two codes do not make a shared start from one seed")
+    tex_ase = audit.text(TEX).split("\\label{sec:ase}", 1)[1].split("% ase-nonlj table: end", 1)[0]
+    stats = audit.text(TEX).split("\\label{sec:stats}", 1)[1].split("\\section{", 1)[0]
+    outside = audit.text(TEX).replace(tex_ase, "").replace(stats, "")
+    audit.record("Fisher" not in outside.split("\\begin{suppinfo}")[0], TEX,
+                 "the Fisher test appears only in the unpaired ASE comparisons", "only there",
+                 "only there" if "Fisher" not in outside.split("\\begin{suppinfo}")[0] else "elsewhere too")
+    ase_equal_calls(audit, groups, label)
     step = 1e-4
 
     def curvature(pair) -> float:
@@ -1125,19 +2051,24 @@ def manuscript_ase(audit: Audit) -> None:
     lennard_jones = curvature(lambda r: r**-12 - 2.0 * r**-6)
     audit.record(abs(morse6 - lennard_jones) < 1e-3, TEX, "Morse rho=6 curvature at the pair minimum",
                  f"{lennard_jones:.3f}", f"{morse6:.3f}")
-    audit.said(TEX, "the Morse pair at \\(\\rho=6\\), whose well has the curvature of the Lennard-Jones well, and at "
-                    "the shorter range \\(\\rho=14\\), and the many-body Gupta potential of gold.")
     ahead_lj = [s for s in lj if hits(s, "recommended") > max(hits(s, a) for a in ASE_ARMS)]
     ahead_morse = [s for s in MORSE_PANEL if hits(s, "recommended") > max(hits(s, a) for a in ASE_ARMS)]
     audit.cell(TEX, "ahead of both ASE arms on every Lennard-Jones and Morse cluster",
                " ".join((*lj, *MORSE_PANEL)), " ".join((*ahead_lj, *ahead_morse)))
-    audit.said(TEX, f"this setting hits more seeds on all {len(ahead_lj)} Lennard-Jones clusters and all "
-                    f"{len(ahead_morse)} Morse clusters, and no arm hits {label('au55')}.")
+    within = sum(r["hit"] == "1" and float(r["evals_to_hit"]) <= min(
+        float(b["charged"]) for a in ASE_ARMS for b in groups[(s, a)] if b["seed"] == r["seed"])
+        for s in MORSE_PANEL for r in groups[(s, "recommended")])
+    total = sum(len(groups[(s, "recommended")]) for s in MORSE_PANEL)
+    audit.cell(TEX, "Morse seeds hit within the ASE calls", "4 48", f"{within} {total}")
     lj75 = gmin[("lj75", "anneal")], gmin[("lj75", "gmin")]
     audit.said("paper/jctc/NUMBERS_TODO.md", f"In tab:gmin, seeds 2000-2011, the recommended preset hits "
                                              f"{hits_of(lj75[0])} of {len(lj75[0])}.")
     audit.said("paper/jctc/NUMBERS_TODO.md", f"And the Wales-group basin-hopping program (GMIN) hits {hits_of(lj75[1])} "
                                              f"of {len(lj75[1])}.")
+
+
+GMIN_RERUN = "paper/jctc/data/gmin_rerun"
+GMIN_SHARDS = ("a", "b", "c", "d")
 
 
 def panel_references(audit: Audit) -> None:
@@ -1158,7 +2089,9 @@ def panel_references(audit: Audit) -> None:
     for path, rows in (("bench/gmin-panel/rows.csv", audit.rows("bench/gmin-panel/rows.csv")),
                        ("bench/ase-nonlj/rows.csv", audit.rows("bench/ase-nonlj/rows.csv")),
                        *((f"bench/ase-{s}/rows.csv", audit.rows(f"bench/ase-{s}/rows.csv")) for s in ASE_PANEL),
-                       ("bench/ase-au55/rows-for-cluster.csv", audit.rows("bench/ase-au55/rows-for-cluster.csv"))):
+                       ("bench/ase-au55/rows-for-cluster.csv", audit.rows("bench/ase-au55/rows-for-cluster.csv")),
+                       *((f"{GMIN_RERUN}/{shard}/rows.csv", audit.rows(f"{GMIN_RERUN}/{shard}/rows.csv"))
+                         for shard in GMIN_SHARDS)):
         worst = max((abs(float(r["best"]) - ref[r["system"]]) for r in rows if hits_of([r])), default=0.0)
         audit.record(
             worst < DEFAULT_HIT_TOL,
@@ -1171,7 +2104,7 @@ def panel_references(audit: Audit) -> None:
     def f6(system: str) -> str:
         return f"\\({ref[system]:.6f}\\)"
 
-    audit.said(TEX, f"The panels of Sections~\\ref{{sec:gmin}} and~\\ref{{sec:ase}} add {f6('lj102')} at 102 atoms, "
+    audit.said(TEX, f"The other tables add {f6('lj102')} at 102 atoms, "
                     f"{f6('lj103')} at 103, and {f6('lj150')} at 150, \\({ref['au55']:.7f}\\)~eV for gold at 55 atoms "
                     f"in the copper--gold Gupta archive, and from the Morse table {f6('m38r6')} and {f6('m38r14')} for "
                     f"M\\(_{{38}}\\) at \\(\\rho=6\\) and \\(14\\), {f6('m55r6')} and {f6('m55r14')} for M\\(_{{55}}\\), "
@@ -1193,9 +2126,8 @@ def generated_tables(audit: Audit) -> None:
             return ""
         return text.split(start, 1)[1].split(end, 1)[0].strip("\n")
 
-    gmin = load_script("gmin_panel_tex", "scripts/gmin_panel/run_panel.py")
-    rows = gmin.read_rows(ROOT / "bench/gmin-panel/rows.csv")
-    want = gmin.tex_table(gmin.summarise(rows, "latest"), "latest")
+    gmin = load_script("gmin_table_tex", "paper/jctc/scripts/gmin_table.py")
+    knock = load_script("knockout_tables_tex", "paper/jctc/scripts/knockout_tables.py")
     panel = load_script("ase_panel_tex", "scripts/ase_panel/summarize.py")
     nonlj = load_script("ase_nonlj_tex", "scripts/ase_nonlj/summarize.py")
     ablation = load_script("ablation_tex", "paper/jctc/scripts/ablation_table.py")
@@ -1203,18 +2135,23 @@ def generated_tables(audit: Audit) -> None:
     si_text = audit.text(SI)
     for label, marks, written, source in (
             ("tab:gofee", h2h.MARKS["gofee"], h2h.gofee_block(), text),
-            ("tab:tip4p-gmin", h2h.MARKS["tip4p"], h2h.tip4p_block(), text),
             ("tab:gofee-si", h2h.MARKS["gofee-si"], h2h.gofee_si_block(), si_text)):
         found = source.split(marks[0], 1)[1].split(marks[1], 1)[0].strip("\n") if marks[0] in source else ""
         ok = found == written
         audit.record(ok, SI if source is si_text else TEX, f"{label} is the generator's block",
                      "as written" if ok else "edited by hand", "as written")
     for label, marks, written in (("tab:ablation", ablation.TEX_MARKS, ablation.tex_table()),
-                                  ("tab:gmin", gmin.TEX_MARKS, want),
+                                  ("tab:gmin", gmin.MARKS, gmin.table()),
+                                  ("tab:knockouts", knock.KNOCKOUT_MARKS, knock.knockout_table()),
+                                  ("tab:tip4p-gmin", knock.TIP4P_MARKS, knock.tip4p_table()),
                                   ("tab:ase", panel.TEX_MARKS, panel.tex_table()),
                                   ("tab:ase-morse", nonlj.TEX_MARKS, nonlj.tex_table(nonlj.load_rows()))):
         ok = block(marks) == written
         audit.record(ok, TEX, f"{label} is the summariser's block", "as written" if ok else "edited by hand", "as written")
+    for marks in (("% gmin-panel table: start", "% gmin-panel table: end"),):
+        audit.record(text.count(marks[0]) == 1, TEX, "one GMIN block", "1", str(text.count(marks[0])))
+    audit.record("% trap table: start" not in text, TEX, "the endpoint-energy trap table is not printed", "absent",
+                 "absent" if "% trap table: start" not in text else "present")
 
 
 def supporting_gmin(audit: Audit) -> None:
@@ -1228,9 +2165,9 @@ def supporting_gmin(audit: Audit) -> None:
                    f"of {ceilings[0]} calls.")
     audit.cell(SI, "64 consecutive seeds", " ".join(map(str, range(numbers[0], numbers[0] + len(numbers)))),
                " ".join(map(str, numbers)))
-    _panel, groups = gmin_panel_groups(audit)
+    _panel, groups = gmin_rerun_groups(audit)
     g = groups[("lj98", "gmin")]
-    audit.cell(SI, "panel LJ98 GMIN budget", "4000000", float(g[0]["budget"]))
+    audit.cell(SI, "rerun LJ98 GMIN budget", "4000000", float(g[0]["budget"]))
     audit.said(SI, f"where GMIN hits LJ\\(_{{98}}\\) on {hits_of(g)} of {len(g)} seeds at \\(4\\times 10^{{6}}\\) calls.")
 
 
@@ -1420,37 +2357,13 @@ def supporting_numbers(audit: Audit) -> None:
     audit.cell(SI, "bootstrap lower endpoint", "8.52", type7(ratios, 0.025))
     audit.cell(SI, "bootstrap upper endpoint", "15.22", type7(ratios, 0.975))
     audit.said(SI, "interval of the median ratio for the 24-of-64 hop, 12.62 with endpoints 8.52 and 15.22, from 2000 resamples.")
-    lj75 = {name: len(audit.rows(f"paper/jctc/data/lj75_gmin/{name}.csv")) for name in
-            ("gmin-lj75-sym-starts-1-200", "lj75-recommended-seeds-2000-2199", "lj75-derived-seeds-2000-2199")}
-    audit.cell(SI, "the LJ75 campaign has 200 seeds in each arm", "200", float(min(lj75.values())))
-    audit.cell(SI, "campaign-scores LJ75 seeds", "64", float(max(int(r["seeds"]) for r in scores if r["board"] == "lj75")))
-    audit.said(SI, "None of those rows is the LJ\\(_{75}\\) campaign of 200 seeds.")
+    si_text = audit.text(SI)
+    for gone in ("campaign of 200 seeds", "lj75-source-", "lj75_ecdf", "lj75_landscape", "occupancy_landfold_lj75",
+                 "anneal core developers"):
+        audit.record(gone not in si_text, SI, f"the SI leaves out {gone}", "absent",
+                     "absent" if gone not in si_text else "present")
 
     # Hardware and reproduction.
-    receipt = audit.text("paper/jctc/logs/lj75-hardware-receipt.txt")
-    tree = re.search(r"^TREE ([0-9a-f]{40})$", receipt, re.M).group(1)
-    audit.said(SI, f"\\texttt{{\\seqsplit{{{tree}}}}}, the tree of the unpublished build commit.")
-    audit.said(SI, f"We keep the source archive at \\path{{logs/lj75-source-{tree[:8]}.tar.xz}}.")
-    with tarfile.open(ROOT / SI_ARCHIVE) as archive:
-        def member(name: str) -> bytes:
-            return archive.extractfile(name).read()
-
-        audit.record(b"Copyright (c) 2023 anneal core developers" in member("LICENSE.txt"), SI,
-                     "the archive notice", "Copyright (c) 2023 anneal core developers", "present")
-        audit.said(SI, "The notice reads Copyright (c) 2023 anneal core developers.")
-        listing = audit.text("paper/jctc/logs/lj75-source-37535ec1.lst")
-        audit.record("\tLICENSE.txt" in listing, SI, "the archive includes LICENSE.txt", "present", "present")
-        want = {"src/methods/cluster_hopping.rs": (218, 2), "src/potentials/tip4p.rs": (93, 15),
-                "src/rigid_body.rs": (52, 14), "examples/molecular_cluster.rs": (1, 0),
-                "Cargo.toml": (4, 1), "Cargo.lock": (0, 55)}
-        for path, shown in want.items():
-            new = git_bytes("show", f"{SI_TIP}:{path}")
-            got = numstat(member(path), new)
-            audit.record(got == shown, SI, f"{path} against {SI_TIP[:8]}", f"+{shown[0]} -{shown[1]}", f"+{got[0]} -{got[1]}")
-    audit.said(SI, "Against commit \\texttt{ce80337b}, \\path{cluster_hopping.rs} differs by 218 insertions and 2 "
-                   "deletions, \\texttt{tip4p.rs} by 93 and 15, \\texttt{rigid\\_body.rs} by 52 and 14, "
-                   "\\path{examples/molecular_cluster.rs} by 1 insertion, \\texttt{Cargo.toml} by 4 insertions and "
-                   "1 deletion, and \\texttt{Cargo.lock} by 55 deletions.")
     with tarfile.open(ROOT / "paper/jctc/logs/logs-water.tar.xz") as water:
         versions = water.extractfile("water/VERSIONS").read().decode()
     digest = re.search(r"^engine_sha256=([0-9a-f]{64})$", versions, re.M).group(1)
@@ -1467,16 +2380,13 @@ def supporting_numbers(audit: Audit) -> None:
     gap = {k: f"{v:.3f}" for k, v in best.items()}
     audit.record(abs(best["lj38_recommended_s0"]) < 1e-3, SI, "LJ38 recommended reaches the fcc minimum",
                  "within 0.001", f"{best['lj38_recommended_s0']:.2e}")
-    audit.said(SI, f"Basin hopping sits \\({gap['lj38_bh_s0']}\\) above it. Random structure search sits "
-                   f"\\({gap['lj38_rss_s0']}\\) above it.")
-    audit.said(SI, f"Basin hopping and the recommended hop both sit \\({gap['lj75_bh_s0']}\\) above it.")
-    audit.cell(SI, "LJ75 arms agree", gap["lj75_bh_s0"], best["lj75_recommended_s0"])
-    audit.said(SI, f"The recommended hop sits \\({gap['lj98_recommended_s0']}\\) above it. Basin hopping sits "
+    audit.said(SI, f"The best-so-far energy of the seed-0 basin-hopping run ends \\({gap['lj38_bh_s0']}\\) above it, "
+                   f"and that of the seed-0 random structure search \\({gap['lj38_rss_s0']}\\) above it.")
+    audit.said(SI, f"The best-so-far energy of the seed-0 recommended run ends \\({gap['lj98_recommended_s0']}\\) "
+                   f"above it, and that of the seed-0 basin-hopping run \\({gap['lj98_bh_s0']}\\) above it.")
+    audit.said(SI, f"reaches the fcc minimum and that of basin hopping ends \\({gap['lj38_bh_s0']}\\) above it.")
+    audit.said(SI, f"ends \\({gap['lj98_recommended_s0']}\\) above the Leary minimum and that of basin hopping "
                    f"\\({gap['lj98_bh_s0']}\\) above it.")
-    audit.said(SI, f"basin hopping stops \\({gap['lj38_bh_s0']}\\) above it.")
-    audit.said(SI, f"both arms stop \\({gap['lj75_bh_s0']}\\) above the Marks decahedron.")
-    audit.said(SI, f"the recommended hop stops \\({gap['lj98_recommended_s0']}\\) above the Leary minimum and basin "
-                   f"hopping \\({gap['lj98_bh_s0']}\\) above it.")
     report = "paper/jctc/REPORT.md"
     audit.said(report, f"Basin hopping stops {gap['lj38_bh_s0']} above it.")
 
@@ -1563,15 +2473,53 @@ def supporting_numbers(audit: Audit) -> None:
 def manuscript_tip4p(audit: Audit) -> None:
     rows = audit.rows("bench/tip4p-water-rates/rates-a24ba760.csv")
     ten = sorted(pick(rows, n="10", budget="500000"), key=lambda r: int(r["seed"]))
-    audit.said(TEX, f"\\((\\mathrm{{H_2O}})_{{10}}\\) hits on {frac(ten).replace('/', ' of ')} seeds.")
+    audit.said(SI, f"\\((\\mathrm{{H_2O}})_{{10}}\\) hits on {frac(ten).replace('/', ' of ')} seeds.")
     calls = [r["calls_to_first_hit"] for r in ten]
-    audit.said(TEX, "In seed order the calls to the first hit are " + ", ".join(calls[:-1]) + f", and {calls[-1]}.")
+    audit.said(SI, "In seed order the calls to the first hit are " + ", ".join(calls[:-1]) + f", and {calls[-1]}.")
     for n in ("15", "20"):
         group = pick(rows, n=n, budget="500000")
-        audit.cell(TEX, f"tip4p ({n}) hits at 5e5", "0/6", frac(group))
+        audit.cell(SI, f"tip4p ({n}) hits at 5e5", "0/6", frac(group))
         gaps = [float(r["best_kj"]) - float(r["reference_kj"]) for r in group]
         word = {"15": "fifteen", "20": "twenty"}[n]
-        audit.said(TEX, f"The best {word}-molecule energies lie \\({min(gaps):.10f}\\) to \\({max(gaps):.10f}\\)~kJ/mol above")
+        audit.said(SI, f"The best {word}-molecule energies lie \\({min(gaps):.10f}\\) to \\({max(gaps):.10f}\\)~kJ/mol above")
+
+
+def sci(p: float) -> str:
+    """A p below 0.01 as the manuscript prints it, two significant figures times a power of ten."""
+    mantissa, exponent = f"{p:.1e}".split("e")
+    return f"{mantissa}\\times 10^{{{int(exponent)}}}"
+
+
+WATER_RERUN = "paper/jctc/data/water_v45b/rerun-9a30f319"
+
+
+def water_receipts(audit: Audit) -> dict[str, dict[int, dict]]:
+    """The 384 receipts of the hexamer rerun, each held to SHA256SUMS, paired by seed and start."""
+    import hashlib
+    import json
+    base = ROOT / WATER_RERUN
+    sums = {}
+    for line in (base / "SHA256SUMS").read_text().splitlines():
+        digest, name = line.split(maxsplit=1)
+        sums[name.lstrip("*").removeprefix("./")] = digest
+    out: dict[str, dict[int, dict]] = {}
+    for arm in ("anneal", "crest"):
+        out[arm] = {}
+        for path in sorted((base / arm).glob("seed-*.json")):
+            name = f"{arm}/{path.name}"
+            audit.record(sums.get(name) == hashlib.sha256(path.read_bytes()).hexdigest(), WATER_RERUN,
+                         f"{name} matches SHA256SUMS", sums.get(name, "absent"), "checked")
+            row = json.loads(path.read_text())
+            out[arm][row["seed"]] = row
+    audit.cell(WATER_RERUN, "receipts in SHA256SUMS", "384", float(len(sums)))
+    audit.cell(WATER_RERUN, "seeds paired on one start", "192",
+               float(sum(out["anneal"][s]["start_sha256"] == out["crest"][s]["start_sha256"]
+                         for s in out["anneal"] if s in out["crest"])))
+    readme = f"{WATER_RERUN}/README.md"
+    audit.said(readme, "`9a30f3190b3bb7040c675a904f8388eb68224151`")
+    audit.record(git("cat-file", "-e", "9a30f3190b3bb7040c675a904f8388eb68224151^{commit}").returncode == 0, readme,
+                 "the record revision is in this repository", "9a30f319", "checked")
+    return out
 
 
 def manuscript_hexamer(audit: Audit) -> None:
@@ -1582,55 +2530,97 @@ def manuscript_hexamer(audit: Audit) -> None:
     seeds = [dict(zip(header, cells)) for cells in lines if cells[0].isdigit()]
     audit.read[numbers] = seeds
     by = {(r["seed"], r["arm"]): r for r in seeds}
-    for row in tex_table(audit, TEX, "tab:crest-counters"):
+    for row in tex_table(audit, SI, "tab:crest-counters"):
         seed = row[0]
         log = ROOT / f"paper/jctc/logs/water/crest-hexamer-seed{seed}.log"
         engrad = re.search(r"Total number of energy\+grad calls:\s*(\d+)", log.read_text()).group(1)
-        audit.cell(f"{TEX} tab:crest-counters seed {seed}", "old counter", row[1], float(by[(seed, "crest")]["pes_calls"]))
-        audit.cell(f"{TEX} tab:crest-counters seed {seed}", "energy+gradient", row[2], float(engrad))
-        audit.cell(f"{TEX} tab:crest-counters seed {seed}", "fair cap = old counter", row[1], float(by[(seed, "fair")]["pes_calls"]))
-    for row in tex_table(audit, TEX, "tab:hexamer-gaps"):
+        audit.cell(f"{SI} tab:crest-counters seed {seed}", "old counter", row[1], float(by[(seed, "crest")]["pes_calls"]))
+        audit.cell(f"{SI} tab:crest-counters seed {seed}", "energy+gradient", row[2], float(engrad))
+        audit.cell(f"{SI} tab:crest-counters seed {seed}", "fair cap = old counter", row[1], float(by[(seed, "fair")]["pes_calls"]))
+    for row in tex_table(audit, SI, "tab:hexamer-gaps"):
         seed = row[0]
-        where = f"{TEX} tab:hexamer-gaps seed {seed}"
+        where = f"{SI} tab:hexamer-gaps seed {seed}"
         audit.cell(where, "gap 4000", row[1], float(by[(seed, "paper4000")]["signed_dE_polished_Eh"]))
         audit.cell(where, "gap old-counter cap", row[2], float(by[(seed, "fair")]["signed_dE_polished_Eh"]))
         audit.cell(where, "deviation 4000", row[3], float(by[(seed, "paper4000")]["rmsd_label_free_A"]))
         audit.cell(where, "deviation old-counter cap", row[4], float(by[(seed, "fair")]["rmsd_label_free_A"]))
     old = [float(by[(str(s), "crest")]["pes_calls"]) for s in range(6)]
-    audit.said(TEX, f"from {min(old):.0f} to {max(old):.0f} evaluations.")
+    audit.said(SI, f"from {min(old):.0f} to {max(old):.0f} evaluations.")
     engrads = [float(re.search(r"energy\+grad calls:\s*(\d+)", (ROOT / f"paper/jctc/logs/water/crest-hexamer-seed{s}.log").read_text()).group(1)) for s in range(6)]
-    audit.said(TEX, f"CREST's energy and gradient totals run from {min(engrads):.0f} to {max(engrads):.0f}.")
-    audit.cell(TEX, "the old counter is smaller on every seed", "6", float(sum(o < e for o, e in zip(old, engrads))))
-    audit.cell(TEX, "the 4000-call arm spends 4000", "4000", max(float(by[(str(s), "paper4000")]["pes_calls"]) for s in range(6)))
+    audit.said(SI, f"CREST's energy and gradient totals run from {min(engrads):.0f} to {max(engrads):.0f}.")
+    audit.cell(SI, "the old counter is smaller on every seed", "6", float(sum(o < e for o, e in zip(old, engrads))))
+    audit.cell(SI, "the 4000-call arm spends 4000", "4000", max(float(by[(str(s), "paper4000")]["pes_calls"]) for s in range(6)))
     within = [s for s in range(6) if all(abs(float(by[(str(s), a)]["signed_dE_polished_Eh"])) <= 1e-7 for a in ("paper4000", "fair"))]
-    audit.cell(TEX, "seeds within 1e-7 Eh on both ledgers", "5", float(len(within)))
-    audit.cell(TEX, "the seed outside 1e-7 Eh", "1", float(next(s for s in range(6) if s not in within)))
+    audit.cell(SI, "seeds within 1e-7 Eh on both ledgers", "5", float(len(within)))
+    audit.cell(SI, "the seed outside 1e-7 Eh", "1", float(next(s for s in range(6) if s not in within)))
     dev = max(float(by[(str(s), a)]["rmsd_label_free_A"]) for s in range(6) for a in ("paper4000", "fair"))
-    audit.said(TEX, f"most \\({dev:.5f}\\)~\\AA.")
+    audit.said(SI, f"most \\({dev:.5f}\\)~\\AA.")
     for arm, text in (("crest", "\\(544.0\\)~s for CREST"), ("paper4000", "\\(18.8\\)~s for the 4000-call arm"), ("fair", "\\(195.5\\)~s for the arm")):
-        audit.cell(TEX, f"{arm} wall median", re.search(r"\\\((\d+\.\d)\\\)", text).group(1), median([float(by[(str(s), arm)]["wall_s"]) for s in range(6)]))
-        audit.said(TEX, text)
+        audit.cell(SI, f"{arm} wall median", re.search(r"\\\((\d+\.\d)\\\)", text).group(1), median([float(by[(str(s), arm)]["wall_s"]) for s in range(6)]))
+        audit.said(SI, text)
 
     repolish = audit.rows("paper/jctc/data/hexamer-xtb680-repolish.csv")
     shifts = sorted((abs(float(r["new_energy_Eh"]) - float(r["old_energy_Eh"])), r["structure"], r["seed"]) for r in repolish)
-    audit.cell(TEX, "xtb 6.8.0 finals", "18", float(len(shifts)))
-    audit.cell(TEX, "largest xtb 6.8.0 shift", "1.08e-7", shifts[-1][0])
-    audit.cell(TEX, "largest shift is the CREST final of seed 1", "crest 1", f"{shifts[-1][1]} {shifts[-1][2]}")
-    audit.cell(TEX, "smallest of the other seventeen shifts", "0.9e-8", shifts[0][0])
-    audit.cell(TEX, "largest of the other seventeen shifts", "2.0e-8", shifts[-2][0])
+    audit.cell(SI, "xtb 6.8.0 finals", "18", float(len(shifts)))
+    audit.cell(SI, "largest xtb 6.8.0 shift", "1.08e-7", shifts[-1][0])
+    audit.cell(SI, "largest shift is the CREST final of seed 1", "crest 1", f"{shifts[-1][1]} {shifts[-1][2]}")
+    audit.cell(SI, "smallest of the other seventeen shifts", "0.9e-8", shifts[0][0])
+    audit.cell(SI, "largest of the other seventeen shifts", "2.0e-8", shifts[-2][0])
     gap = {(r["structure"], r["seed"]): float(r["gap_Eh"]) for r in repolish}
-    audit.cell(TEX, "xtb 6.8.0 seed 1 gap, 4000 calls", "-4.35e-8", gap[("paper4000", "1")])
-    audit.cell(TEX, "xtb 6.8.0 seed 1 gap, old counter", "-4.34e-8", gap[("fair", "1")])
+    audit.cell(SI, "xtb 6.8.0 seed 1 gap, 4000 calls", "-4.35e-8", gap[("paper4000", "1")])
+    audit.cell(SI, "xtb 6.8.0 seed 1 gap, old counter", "-4.34e-8", gap[("fair", "1")])
     for arm in ("paper4000", "fair"):
         inside = sum(abs(gap[(arm, str(s))]) <= 1e-7 for s in range(6))
-        audit.cell(TEX, f"xtb 6.8.0 {arm} seeds within 1e-7 Eh", "6", float(inside))
-    for text in ("\\(-4.35\\times 10^{-8}\\)~Eh on the 4000-call ledger", "\\(-4.34\\times 10^{-8}\\)~Eh on the old-counter ledger",
+        audit.cell(SI, f"xtb 6.8.0 {arm} seeds within 1e-7 Eh", "6", float(inside))
+    for text in ("\\(-4.35\\times 10^{-8}\\)~Eh on the 4000-call ledger", "\\(-4.34\\times 10^{-8}\\)~Eh on the ledger whose cap equals the old",
                  "\\(1.08\\times 10^{-7}\\)~Eh.", "\\(0.9\\times 10^{-8}\\) to \\(2.0\\times 10^{-8}\\)~Eh"):
-        audit.said(TEX, text)
+        audit.said(SI, text)
 
-    campaign = audit.rows("paper/jctc/data/water_v45b/water-v45b-perseed.csv")
-    audit.said(TEX, f"hits {hits_of(campaign, 'anneal_hit')} of {len(campaign)} seeds for the default hop and {hits_of(campaign, 'crest_hit')} of {len(campaign)} for CREST")
-    audit.said(TEX, f"The motif match remains {hits_of(campaign, 'anneal_hit')} of {len(campaign)} for the default hop and {hits_of(campaign, 'crest_hit')} of {len(campaign)}")
+    receipts = water_receipts(audit)
+    flags = {arm: {seed: bool(r["hit"]) for seed, r in receipts[arm].items()} for arm in ("anneal", "crest")}
+    hits = {arm: sum(flags[arm].values()) for arm in flags}
+    n = len(receipts["anneal"])
+    audit.cell(TEX, "hexamer rerun seeds", "192", float(n))
+    hex_table = paired_table(flags["anneal"], flags["crest"])
+    lo, hi = newcombe_paired_interval(*hex_table)
+    p_hex = mcnemar(hex_table[1], hex_table[2])
+    audit.cell(TEX, "hexamer rerun paired outcome table", "59 62 35 36", " ".join(map(str, hex_table)))
+    audit.cell(TEX, "hexamer rerun McNemar p", "0.00796", p_hex)
+    walls = {arm: median([float(r["wall_seconds"]) for r in receipts[arm].values()]) for arm in receipts}
+    frames = {r["frames_scored"] for r in receipts["crest"].values()}
+    gates = {r["isomer_gate_A"] for arm in receipts for r in receipts[arm].values()}
+    classifier = {r["classifier_sha256"] for r in receipts["crest"].values()}
+    binary = {r["binary_sha256"] for r in receipts["anneal"].values()}
+    audit.cell(TEX, "hexamer rerun: one classifier, the anneal binary, for both arms", "1",
+               float(len(classifier) == 1 and classifier == binary))
+    audit.cell(TEX, "hexamer rerun: CREST frames scored", "180", frames.pop() if len(frames) == 1 else frames)
+    audit.cell(TEX, "hexamer rerun: isomer gate", "0.784112", gates.pop() if len(gates) == 1 else gates)
+    audit.cell(TEX, "hexamer rerun: CREST runs at the cap", str(n),
+               float(sum(r["calls"] == 4000 and r["engrad_cap_reached"] for r in receipts["crest"].values())))
+    audit.cell(TEX, "hexamer rerun: anneal runs spending 4000", str(n),
+               float(sum(r["force_count"] == 4000 for r in receipts["anneal"].values())))
+    audit.said(TEX, f"it hits {hits['anneal']} of {n} seeds and CREST {hits['crest']}")
+    audit.record(hits["anneal"] > hits["crest"] and p_hex < 0.05, COVER, "the code hits more hexamer seeds than CREST",
+                 "more, p<0.05", f"{hits['anneal']} {hits['crest']} {p_hex}")
+    audit.said(COVER, "and more than CREST on the GFN2-xTB water hexamer with both codes stopped at the same number of "
+                      "energy and gradient calls.")
+    audit.said(TEX, f"This code hits {hits['anneal']} of {n} seeds and CREST {hits['crest']}.")
+    audit.said(TEX, f"Paired by seed, both hit {hex_table[0]} seeds, this code alone {hex_table[1]}, CREST alone "
+                    f"{hex_table[2]}, and neither {hex_table[3]}, with an exact McNemar \\(p\\) of "
+                    f"\\({sci(p_hex)}\\) and a paired 95\\% interval of the difference in hit rate from "
+                    f"{lo:.3f} to {hi:.3f}.")
+    audit.said(TEX, f"(\\(p={sci(p_hex)}\\)).")
+    audit.said(TEX, f"The median walls are {walls['anneal']:.3f}~s for this code and {walls['crest']:.3f}~s for CREST.")
+    audit.said(TEX, "places inside an isomer gate of 0.784112~\\AA\\ around the lowest hexamer; a CREST run hits "
+                    "when any of the 180 frames it scores lies inside the gate.")
+    audit.said(TEX, f"more seeds of the GFN2-xTB water hexamer than CREST, {hits['anneal']} of {n} against {hits['crest']}.")
+    audit.said(SI, f"{hits['anneal']} of {n} against {hits['crest']}, both {hex_table[0]}, this code alone "
+                   f"{hex_table[1]}, CREST alone {hex_table[2]}, neither {hex_table[3]}, McNemar \\(p={p_hex:.5f}\\), "
+                   f"and the paired interval {lo:.3f} to {hi:.3f}.")
+    audit.said(TEX, f"Run without the cap on six seeds, CREST spends {min(engrads):.0f} to {max(engrads):.0f} energy and "
+                    "gradient calls")
+    six = sum(all(abs(gap[(arm, str(s))]) <= 1e-7 for arm in ("paper4000", "fair")) for s in range(6))
+    audit.said(TEX, f"\\(10^{{-7}}\\)~Eh on {NUMBER_WORDS[len(within)]} seeds at xtb 6.7.1 and on all {NUMBER_WORDS[six]} at xtb 6.8.0;")
 
 
 def manuscript_cross_field(audit: Audit) -> None:
@@ -1639,38 +2629,35 @@ def manuscript_cross_field(audit: Audit) -> None:
     rates = audit.rows("bench/tip4p-water-rates/rates.csv")
     lj98 = sorted(pick(rows, system="lj", n="98", arm="bipop-leave"), key=lambda r: int(r["seed"]))
     calls = [r["calls_to_first_hit"] for r in lj98]
-    audit.said(TEX, f"LJ\\(_{{98}}\\) hit on {frac(lj98).replace('/', ' of ')}.")
-    audit.said(TEX, "In seed order the calls to the first hit are " + ", ".join(calls[:-1]) + f", and {calls[-1]}.")
-    audit.said(TEX, f"The median is {median([float(c) for c in calls]):.0f}.")
+    audit.said(SI, f"LJ\\(_{{98}}\\) hit on {frac(lj98).replace('/', ' of ')}.")
+    audit.said(SI, "In seed order the calls to the first hit are " + ", ".join(calls[:-1]) + f", and {calls[-1]}.")
+    audit.said(SI, f"The median is {median([float(c) for c in calls]):.0f}.")
     retry98 = pick(stalls, phase="retry", n="98")
     lj104 = sorted(pick(rows, system="lj", n="104", arm="bipop-leave"), key=lambda r: int(r["seed"]))
     hit104 = [r for r in lj104 if r["hit"] == "1"]
     retry104 = sorted((r["seed"] for r in pick(stalls, phase="retry", n="104") if r["hit"] == "1"), key=int)
     retry_median = median([float(r["calls_to_hit"]) for r in retry98])
     arm_median = median([float(c) for c in calls])
-    audit.record(retry_median < arm_median, TEX, "the retry median on LJ98 is lower than the arm median",
+    audit.record(retry_median < arm_median, SI, "the retry median on LJ98 is lower than the arm median",
                  "lower", "lower" if retry_median < arm_median else "not lower")
-    audit.said(TEX, f"By comparison, the pentagonal-retry baseline also hits {frac(retry98).replace('/', ' of ')} on "
+    audit.said(SI, f"By comparison, the pentagonal-retry baseline also hits {frac(retry98).replace('/', ' of ')} on "
                     f"LJ\\(_{{98}}\\) with a lower median of {retry_median:.0f} calls, and on LJ\\(_{{104}}\\) reaches "
                     f"{len(retry104)} of 6 seeds ({retry104[0]}, {retry104[1]}, and {retry104[2]}) versus "
                     f"{len(hit104)} of {len(lj104)} ({hit104[0]['seed']} and {hit104[1]['seed']}, at "
                     f"{hit104[0]['calls_to_first_hit']} and {hit104[1]['calls_to_first_hit']} calls) for the BIPOP variant.")
     only_arm = sorted({r["seed"] for r in hit104} - set(retry104))
     only_retry = sorted(set(retry104) - {r["seed"] for r in hit104})
-    audit.cell(TEX, "the hit the retry rows miss", "6401", " ".join(only_arm))
-    audit.cell(TEX, "hits the retry rows record and this arm misses", "6402 6404", " ".join(only_retry))
-    audit.said(TEX, f"and the rescaled arm hit {len(hit104)} of 6 and was not kept.")
+    audit.cell(SI, "the hit the retry rows miss", "6401", " ".join(only_arm))
+    audit.cell(SI, "hits the retry rows record and this arm misses", "6402 6404", " ".join(only_retry))
     for n, budget in (("15", "500000"), ("20", "2000000")):
         trust = pick(rows, system="tip4p", n=n, arm="cage-trust")
-        audit.cell(TEX, f"cage-trust ({n}) hits", "0/6", frac(trust))
-        audit.cell(TEX, f"cage-trust ({n}) budget", budget, float(trust[0]["budget"]))
+        audit.cell(SI, f"cage-trust ({n}) hits", "0/6", frac(trust))
+        audit.cell(SI, f"cage-trust ({n}) budget", budget, float(trust[0]["budget"]))
         rate = pick(rates, n=n, budget=budget)
-        audit.cell(TEX, f"rate file ({n}) at {budget}", "1/6", frac(rate))
-        audit.cell(TEX, f"rate file ({n}) hit seed", {"15": "3", "20": "2"}[n], " ".join(r["seed"] for r in rate if r["hit"] == "1"))
+        audit.cell(SI, f"rate file ({n}) at {budget}", "1/6", frac(rate))
+        audit.cell(SI, f"rate file ({n}) hit seed", {"15": "3", "20": "2"}[n], " ".join(r["seed"] for r in rate if r["hit"] == "1"))
     best = min(pick(rows, system="tip4p", n="20", arm="cage-trust"), key=lambda r: float(r["best"]))
-    audit.said(TEX, f"\\({float(best['best']):.6f}\\)~kJ/mol, which is \\({float(best['best']) - float(best['reference']):.3f}\\)~kJ/mol above")
-    ten = pick(audit.rows("bench/tip4p-water-rates/rates-a24ba760.csv"), n="10")
-    audit.said(TEX, f"On TIP4P, 10 molecules hit on {frac(ten).replace('/', ' of ')} seeds.")
+    audit.said(SI, f"\\({float(best['best']):.6f}\\)~kJ/mol, which is \\({float(best['best']) - float(best['reference']):.3f}\\)~kJ/mol above")
 
 
 def supporting_information(audit: Audit) -> None:
@@ -2110,7 +3097,8 @@ def sc96_78_howto(audit: Audit) -> None:
 STALE_GMIN = re.compile(r"\b0/32\b|\b0 of 32\b|\bp\s*[<≤]\s*\$?(?:1e-4|10\^\{?-4\}?|0\.0001)|(?<![\d.])0\.0000\b")
 RETIRED = ("Only 9-6 at N=38 has been rerun", "a rerun of 9-6 at 38 atoms", "from the old file, and are not rerun",
            "This article reports no force-call count for that optimiser",
-           "hits more seeds on 9 of 13 and GMIN hits more on 2")
+           "hits more seeds on 9 of 13 and GMIN hits more on 2", "168.9~s", "6 of the 9 wins",
+           "lower for this code on 12 of the 13 clusters", "12/13")
 # Sentences that cite the old rows as old rows; each is derived from the rows elsewhere.
 HISTORICAL = {
     (SC96_78_HOWTO, "The earlier GMIN rows, with temperature 0.8, step 0.40 and a container radius of 30, hit 0 of 32 seeds."),
@@ -2761,7 +3749,8 @@ def collapsed(text: str) -> str:
 def cover_letter(audit: Audit) -> None:
     """A cover-letter sentence that carries a number is an abstract sentence, word for word."""
     letter = collapsed(audit.text(COVER))
-    manuscript = collapsed(audit.text(TEX))
+    manuscript = collapsed(re.sub(r"~?\\todo\{[^}]*\}", "", audit.text(TEX).split("\\begin{abstract}", 1)[1]
+                                  .split("\\end{abstract}", 1)[0]))
     body = letter.split("Dear Editor,")[1].split("\\vspace{1em} \\noindent Sincerely")[0]
     sentences = re.split(r"(?<=\.)(?:''|\\\\)?\s+(?=[A-Z`\\])", body)
     checked = 0
@@ -2774,15 +3763,123 @@ def cover_letter(audit: Audit) -> None:
             audit.record(True, COVER, "the cover-letter sentence is the preprint line", sentence[:60], sentence[:60])
             continue
         found = sentence in manuscript
-        audit.record(found, COVER, "a cover-letter sentence with a number is an abstract sentence",
+        audit.record(found, COVER, "a cover-letter sentence with a number is a sentence of the abstract",
                      sentence[:70], sentence[:70] if found else "not in the manuscript")
-    audit.record(checked >= 8, COVER, "the cover letter carries the abstract numbers", ">= 8", str(checked))
+    audit.record(checked == len(COVER_OTHER), COVER,
+                 "the only cover-letter sentences with a number are the preprint and graphic lines",
+                 str(len(COVER_OTHER)), str(checked))
+    for word in ("\\rerun", "Zenodo", "DOI", "pending", "being run", "rerun"):
+        audit.record(word not in audit.text(COVER), COVER, f"the cover letter carries no process note ({word})",
+                     "absent", "absent" if word not in audit.text(COVER) else "present")
     toc = audit.text(COVER_TOC)
     audit.record("paperwidth=3.25in,paperheight=1.75in" in toc, COVER_TOC, "the graphic slot is 3.25 in by 1.75 in",
                  "3.25in 1.75in", "3.25in 1.75in")
     audit.said(COVER, "A table of contents graphic at 3.25~in by 1.75~in accompanies the submission.")
     for word in ("TODO", "\\todo"):
         audit.record(word not in audit.text(COVER), COVER, f"the cover letter has no {word}", "none", "none")
+    for word in ("Science Institute", "University of Iceland, Reykjavik, Iceland\\\\"):
+        audit.record(word not in audit.text(COVER), COVER, f"the cover letter does not list {word}", "absent",
+                     "absent" if word not in audit.text(COVER) else "present")
+    audit.said(COVER, "Parts of the search with no such run are described as design, with no claim about their "
+                      "effect.")
+    audit.said(COVER, "The comparisons with the Atomic Simulation Environment and AGOX GOFEE are reported at the "
+                      "effort each run spent.")
+    audit.said(COVER, "Every printed number is computed from rows committed to the repository.")
+
+
+REFS_BLOB = "d646763ac2b4a1f8b7aab78452616c4400d53d10"
+# Wording the review of the first rewrite showed to overclaim; none may come back.
+OVERCLAIMS = ("same trap", "confined to one funnel", "cannot become the stored best", "cannot win",
+              "basin-hopping setting", "one setting", "adds nothing", "does no better", "this setting",
+              "crosses funnels more often", "the setting of", "that setting", "does not come from choosing among the moves", "rebuilds a facet",
+              "completes the patch", "never restarts", "is equivalent to", "across funnels")
+
+
+def science_claims(audit: Audit) -> None:
+    """Overclaiming wording stays out, endpoint prose stays on energies, and every citation resolves."""
+    for path in (TEX, SI, COVER):
+        flat = collapse(audit.text(path)).lower()
+        for phrase in OVERCLAIMS:
+            audit.record(phrase not in flat, path, f"no overclaim: {phrase}", "absent",
+                         "absent" if phrase not in flat else "present")
+    text = audit.text(TEX)
+    audit.record("\\label{sec:endpoints}" not in text, TEX, "the endpoint-energy section is not printed", "absent",
+                 "absent" if "\\label{sec:endpoints}" not in text else "present")
+    results = text.split("\\label{sec:results}", 1)[1].split("\\begin{acknowledgement}", 1)[0]
+    visible = re.sub(r"\\(?:label|ref)\{[^}]*\}", "", re.sub(r"(?m)^%.*$", "", results)).lower()
+    for word in ("funnel", "trap", "confin", "hypothes"):
+        audit.record(word not in visible, TEX, f"the results and conclusions do not say {word}", "absent",
+                     "absent" if word not in visible else "present")
+    audit.record("hypothes" not in text.lower(), TEX, "the manuscript states no hypothesis", "absent",
+                 "absent" if "hypothes" not in text.lower() else "present")
+    audit.said(TEX, "Five parts of the search have a run with and without them, and Section~\\ref{sec:knockouts} reports "
+                    "those runs: the structure priors and the structure templates (Section~\\ref{sec:priors}), the "
+                    "restart on a plateau (Section~\\ref{sec:stall}), the length unit (Section~\\ref{sec:units}), and "
+                    "the choice among the moves (Section~\\ref{sec:posterior}).")
+    audit.said(TEX, "The packing moves, the symmetry proposals, the basin bias, the tabu list, the screens, and the "
+                    "atom-count gates have no such run, and the trail step has one only on LJ\\(_{75}\\) at a revision "
+                    "outside the history of the submitted revision, which the article does not print.")
+    audit.said(TEX, "They are described here as the design of the search, and the article makes no claim about what "
+                    "any of them contributes.")
+    trail = "666591a0"
+    audit.record(git("merge-base", "--is-ancestor", trail, SUBMITTED).returncode != 0, TEX,
+                 "the trail record is outside the history of the submitted revision", "outside", "checked")
+    audit.record(bool(git("branch", "-r", "--contains", trail).stdout.strip()), TEX, "the trail record is on origin",
+                 "present", "checked")
+    audit.said(TEX, "Every test is two-sided and exact, so no continuity correction enters any of them.")
+    audit.said(TEX, "No adjustment for multiple comparisons is made: every \\(p\\) is that of one cluster and one pair of "
+                    "arms, every cluster run is reported, and a difference in hits is called significant only when its "
+                    "own exact test is below 0.05.")
+    audit.said(TEX, "No equivalence margin was set before the runs, so the table supports no claim that the two draws "
+                    "are equivalent.")
+    audit.said(SI, "No equivalence margin was set before any run, so no table supports a claim that two arms are "
+                   "equivalent.")
+
+    # Citations: the frozen bibliography, the statistics file, and every key.
+    blob = git("hash-object", "paper/jctc/refs.bib").stdout.strip()
+    audit.cell("paper/jctc/refs.bib", "blob", REFS_BLOB, blob)
+    keys = {}
+    for bib in ("paper/jctc/refs.bib", "paper/jctc/refs-stats.bib"):
+        keys[bib] = set(re.findall(r"^@\w+\{([^,\s]+),", audit.text(bib), re.M))
+    both = keys["paper/jctc/refs.bib"] & keys["paper/jctc/refs-stats.bib"]
+    audit.cell("paper/jctc/refs-stats.bib", "keys also in refs.bib", "none", " ".join(sorted(both)) or "none")
+    known = set.union(*keys.values())
+    for path in (TEX, SI):
+        audit.said(path, "\\bibliography{refs,refs-stats}")
+        cited = {k.strip() for group in re.findall(r"\\cite[pt]?\{([^}]*)\}", audit.text(path)) for k in group.split(",")}
+        missing = sorted(cited - known)
+        audit.cell(path, "cited keys without an entry", "none", " ".join(missing) or "none")
+    unused = sorted(keys["paper/jctc/refs-stats.bib"] - {
+        k.strip() for path in (TEX, SI) for group in re.findall(r"\\cite[pt]?\{([^}]*)\}", audit.text(path))
+        for k in group.split(",")})
+    audit.cell("paper/jctc/refs-stats.bib", "entries no text cites", "none", " ".join(unused) or "none")
+    audit.said(TEX, "two-sided Fisher exact test \\cite{fisherLogicInductiveInference1935}.")
+    audit.said(TEX, "\\cite{newcombeImprovedConfidenceIntervals1998}, built from Wilson intervals "
+                    "\\cite{wilsonProbableInferenceLaw1927}.")
+    audit.said(TEX, "The exact McNemar test \\cite{mcnemarNoteSamplingError1947}")
+    audit.said(TEX, "the exact Wilcoxon signed-rank test\n\\cite{wilcoxonIndividualComparisons1945}")
+    for key, doi in (("mcnemarNoteSamplingError1947", "10.1007/bf02295996"),
+                     ("wilcoxonIndividualComparisons1945", "10.2307/3001968"),
+                     ("newcombeImprovedConfidenceIntervals1998",
+                      "10.1002/(sici)1097-0258(19981130)17:22<2635::aid-sim954>3.0.co;2-c"),
+                     ("fisherLogicInductiveInference1935", "10.2307/2342435"),
+                     ("hyndmanSampleQuantiles1996", "10.1080/00031305.1996.10473566"),
+                     ("efronBootstrap1979", "10.1214/aos/1176344552")):
+        bib = "paper/jctc/refs-stats.bib" if key in audit.text("paper/jctc/refs-stats.bib") else "paper/jctc/refs.bib"
+        entry = audit.text(bib).split("{" + key + ",", 1)[-1].split("\n}", 1)[0].lower()
+        audit.record(doi in entry, bib, f"{key} carries its Crossref DOI", doi,
+                     doi if doi in entry else "missing")
+    audit.said(TEX, "spirit of the compression of Doye \\cite{doye2000}.")
+    for key in ("wilsonProbableInferenceLaw1927", "newcombeImprovedConfidenceIntervals1998",
+                "mcnemarNoteSamplingError1947", "wilcoxonIndividualComparisons1945", "hyndmanSampleQuantiles1996",
+                "efronBootstrap1979", "fisherLogicInductiveInference1935"):
+        audit.record(key in audit.text(SI), SI, f"the statistical methods cite {key}", "cited",
+                     "cited" if key in audit.text(SI) else "uncited")
+
+    for word in ("prior-on", "template-free", "c2de652d"):
+        for path in (TEX, SI, COVER):
+            audit.record(word not in audit.text(path), path, f"no row is labelled {word}", "absent",
+                         "absent" if word not in audit.text(path) else "present")
 
 
 def manuscript_new(audit: Audit) -> None:
@@ -2797,98 +3894,57 @@ def manuscript_new(audit: Audit) -> None:
         return f"{hits_of(groups[(system, arm)])} of {len(groups[(system, arm)])}"
 
     def p_of(system: str) -> float:
-        a, g = groups[(system, "anneal")], groups[(system, "gmin")]
-        return fisher(hits_of(a), len(a), hits_of(g), len(g))
+        return gmin_paired(groups, system)["mcnemar"]
 
     def wall(system: str, arm: str) -> float:
         return median([float(r["wall_s"]) for r in groups[(system, arm)]])
 
-    systems = list(panel.PAPER_BUDGETS)
-    ahead = [s for s in systems if hits_of(groups[(s, "anneal")]) > hits_of(groups[(s, "gmin")])]
-    ours = [s for s in ahead if p_of(s) < 0.05]
-    rest = [s for s in ahead if s not in ours]
-    audit.cell(TEX, "the significant wins of this setting", "lj38 lj75 lj98 m55r14 m80r14", " ".join(ours))
-    audit.cell(TEX, "the wins that are not significant", "lj102 lj103 lj104 au55", " ".join(rest))
-    lower = [s for s in systems if wall(s, "anneal") < wall(s, "gmin")]
-    slower = [s for s in systems if s not in lower]
-    audit.cell(TEX, "the two clusters where this setting is slower", "m55r6 m80r6", " ".join(slower))
-    audit.said(TEX, f"The median wall of a run is lower for this setting on {len(lower)} of the {len(systems)} "
-                    f"clusters and higher on {name('m55r6')} and {name('m80r6')}.")
-    audit.said(TEX, f"Its median wall is lower on {len(lower)} of the {len(systems)} clusters of "
-                    "Table~\\ref{tab:gmin}, and it is higher where GMIN hits 12 of 12.")
-    audit.cell(TEX, "GMIN hits 12 of 12 where it is faster", "12", float(hits_of(groups[("m80r6", "gmin")])))
     s_ = panel.show_s
-    audit.said(TEX, f"The median wall of a run is {s_(wall('lj38', 'anneal'))}~s for this setting against "
-                    f"{s_(wall('lj38', 'gmin'))}~s for GMIN on LJ\\(_{{38}}\\), and {s_(wall('lj75', 'anneal'))}~s "
-                    f"against {s_(wall('lj75', 'gmin'))}~s on LJ\\(_{{75}}\\).")
-    audit.said(TEX, f"On {name('m80r6')} it is {s_(wall('m80r6', 'anneal'))}~s against {s_(wall('m80r6', 'gmin'))}~s.")
-
     lj38 = ase[("lj38", "recommended")]
     cap = ase_cap(audit, ase, "lj38")
     capped = all(r["stop"] == "wall" for a in ASE_ARMS for r in ase[("lj38", a)])
-    audit.record(capped, TEX, "every ASE run on LJ38 stops at the cap", "every", "every" if capped else "not every")
-    audit.said(TEX, f"On LJ\\(_{{38}}\\) the median wall of this setting is "
+    audit.record(capped, SI, "every ASE run on LJ38 stops at the cap", "every", "every" if capped else "not every")
+    audit.said(SI, f"On LJ\\(_{{38}}\\) the median wall of this code is "
                     f"{s_(median([float(r['wall_s']) for r in lj38]))}~s, and every ASE run stops at the cap of "
                     f"{s_(cap)}~s.")
 
     gofee_dir = "bench/ase-gofee-h2h"
     summary = {(r["system"], r["arm"]): r for r in audit.rows(f"{gofee_dir}/summary.csv")}
-    lj = ("lj38", "lj55", "lj75")
-    audit.cell(TEX, "this setting hits the three clusters on 6 of 6", "6/6 6/6 6/6",
+    lj = ("lj38", "lj55")
+    audit.cell(TEX, "this code hits both clusters on 6 of 6", "6/6 6/6",
                " ".join(f"{summary[(s, 'paper')]['hits']}/{summary[(s, 'paper')]['n']}" for s in lj))
-    audit.cell(TEX, "ASE basin hopping and GOFEE hit none of the three", "0 0 0 0 0 0",
+    audit.cell(TEX, "ASE basin hopping and GOFEE hit none of the two", "0 0 0 0",
                " ".join(summary[(s, a)]["hits"] for a in ("ase_bh", "agox_gofee") for s in lj))
     mh = [summary[(s, "ase_mh")]["hits"] for s in lj]
-    audit.said(TEX, "ASE basin hopping hits none of them, and GOFEE hits none.")
-    audit.cell(TEX, "ASE minima hopping hits none of LJ75", "0", float(mh[2]))
-    audit.said(TEX, f"ASE minima hopping hits LJ\\(_{{38}}\\) on {mh[0]} of 6, LJ\\(_{{55}}\\) on {mh[1]} of 6, and "
-                    "LJ\\(_{75}\\) on none.")
-    audit.said(TEX, "This setting hits all three clusters on 6 of 6 seeds.")
+    mw = [s_(float(summary[(s, "ase_mh")]["wall_median_s"])) for s in lj]
+    audit.said(TEX, f"This code hits both clusters on 6 of 6 seeds, ASE basin hopping and GOFEE none, and ASE minima "
+                    f"hopping LJ\\(_{{38}}\\) on {mh[0]} of 6 and LJ\\(_{{55}}\\) on {mh[1]} of 6, in median walls of "
+                    f"{mw[0]}~s and {mw[1]}~s,")
     g = [float(summary[(s, "agox_gofee")]["wall_median_s"]) for s in lj]
     a = [float(summary[(s, "paper")]["wall_median_s"]) for s in lj]
-    audit.said(TEX, f"The median wall of a GOFEE run is {s_(g[0])}~s on LJ\\(_{{38}}\\), {s_(g[1])}~s on "
-                    f"LJ\\(_{{55}}\\), and {s_(g[2])}~s on LJ\\(_{{75}}\\), against {s_(a[0])}~s, {s_(a[1])}~s, "
-                    f"and {s_(a[2])}~s for this setting.")
-    audit.said(TEX, f"the median wall of a GOFEE run on LJ\\(_{{38}}\\) is {s_(g[0])}~s against {s_(a[0])}~s.")
-    audit.record(all(x > y for x, y in zip(g, a)), TEX, "the GOFEE median wall is higher on all three",
-                 "higher", "higher" if all(x > y for x, y in zip(g, a)) else "not")
-    audit.said(TEX, "its median wall is higher than that of this setting on all three")
+    audit.said(TEX, f"The median wall of a GOFEE run is {s_(g[0])}~s on LJ\\(_{{38}}\\) and {s_(g[1])}~s on "
+                    f"LJ\\(_{{55}}\\), against {s_(a[0])}~s and {s_(a[1])}~s for this code.")
+    lj_rows = [r for r in audit.rows(f"{gofee_dir}/results.csv") if r["system"] in lj]
+    spent = all(r["stop"] == "budget" and int(float(r["charged"])) >= int(r["budget"]) for r in lj_rows if r["hit"] != "1")
+    audit.record(spent, TEX, "every LJ38 and LJ55 miss of the GOFEE table spent the budget", "spent",
+                 "spent" if spent else "stopped early")
+    audit.record({r["stop"] for r in lj_rows} <= {"hit", "budget"}, TEX, "no LJ38 or LJ55 run stopped at a wall cap",
+                 "hit budget", " ".join(sorted({r["stop"] for r in lj_rows})))
+    audit.said(TEX, "with no wall cap; every run that missed spent the budget.")
+    audit.said(TEX, "no run on these two clusters had a wall cap, and every run that missed spent the budget.")
     rows = audit.rows(f"{gofee_dir}/results.csv")
     heads = {r["head"][:8] for r in rows if r["head"] != "unknown"}
     unknown = sum(r["head"] == "unknown" for r in rows)
-    audit.said(TEX, f"were collected at {len(heads)} repository heads, which")
-    audit.said(TEX, f"with the head unrecorded on {unknown} rows.")
+    audit.said(SI, f"were collected at {len(heads)} repository heads, which")
+    audit.said(SI, f"with the head unrecorded on {unknown} rows.")
     versions = dict(line.split("=", 1) for line in audit.text(f"{gofee_dir}/versions.txt").split() if "=" in line)
-    audit.said(TEX, f"The versions are ASE {versions['ase']} and AGOX {versions['agox']}.")
-    audit.cell(TEX, "the GOFEE and minima-hopping wall cap on LJ75 is 2 hours", "2", float(versions["lj75_mh_gofee_wall_cap_s"]) / 3600)
-    audit.said(TEX, "ASE minima hopping and GOFEE on LJ\\(_{75}\\) also stop at a wall cap of 2 hours")
+    audit.said(SI, f"The versions are ASE {versions['ase']} and AGOX {versions['agox']}.")
+    audit.said(f"{gofee_dir}/README.md", "use the same three arms and the same two-hour wall cap on every seed.")
+    audit.said(SI, "Six seeds, one core, budget in force calls, and a wall cap of 2 hours per run.")
     other = [r for r in audit.rows(f"{gofee_dir}/asg2-summary.csv") if r["source"] == "measured"]
     audit.cell(SI, "the other panel systems of the GOFEE table", "au55 cu38 cu12au26 sw10 tc10 tip4p8",
                " ".join(dict.fromkeys(r["system"] for r in other)))
 
-    tip = {r["system"]: r for r in audit.rows("bench/tip4p-h2h/h2h-summary.csv")}
-    sizes = ("tip4p8", "tip4p15", "tip4p20")
-    audit.said(TEX, "hits \\((\\mathrm{H_2O})_{8}\\), \\((\\mathrm{H_2O})_{15}\\), and\n\\((\\mathrm{H_2O})_{20}\\) on "
-                    + series(tip[s]["anneal_hits"].split("/")[0] for s in sizes) + " of 12 seeds and GMIN on "
-                    + series(tip[s]["gmin_hits"].split("/")[0] for s in sizes) + "\nof 12.")
-    audit.cell(TEX, "TIP4P against GMIN: seeds and budget", "12 2000000",
-               " ".join(sorted({tip[s]["n"] for s in tip} | {tip[s]["budget"] for s in tip}, key=len)))
-    tp = {s: panel.show_p(float(tip[s]["fisher_p"]), tex=True) for s in tip}
-    audit.said(TEX, f"This setting hits \\((\\mathrm{{H_2O}})_{{8}}\\) on 12 of 12 and GMIN on 8 of 12, with\n\\(p={tp['tip4p8']}\\).")
-    audit.cell(TEX, "TIP4P15 and TIP4P20 p", f"{tp['tip4p15']} {tp['tip4p20']}",
-               "\\(3.4\\times 10^{-4}\\) 0.037")
-    audit.said(TEX, "It hits \\((\\mathrm{H_2O})_{15}\\) on 9 of 12 and \\((\\mathrm{H_2O})_{20}\\) on 5 of\n12, and GMIN hits neither, with \\(p\\) of \\(3.4\\times 10^{-4}\\) and 0.037.")
-    audit.cell(TEX, "GMIN hits neither of TIP4P15 and TIP4P20", "0/12 0/12",
-               f"{tip['tip4p15']['gmin_hits']} {tip['tip4p20']['gmin_hits']}")
-    audit.cell(TEX, "TIP4P21 and TIP4P25 hits", "0/12 0/12 1/12 0/12",
-               f"{tip['tip4p21']['anneal_hits']} {tip['tip4p21']['gmin_hits']} {tip['tip4p25']['anneal_hits']} {tip['tip4p25']['gmin_hits']}")
-    quicker = [s for s in tip if float(tip[s]["anneal_wall_median_s"]) < float(tip[s]["gmin_wall_median_s"])]
-    audit.cell(TEX, "the median wall of this setting is lower on all 5 TIP4P sizes", "5", float(len(quicker)))
-    more = [s for s in tip if int(tip[s]["anneal_hits"].split("/")[0]) > int(tip[s]["gmin_hits"].split("/")[0])]
-    audit.said(TEX, f"Against GMIN on TIP4P, this setting hits more seeds on {len(more)} of the {len(tip)} sizes")
-    audit.said(TEX, "against GMIN on TIP4P this setting hits \\((\\mathrm{H_2O})_{15}\\) on 9 of 12\nand GMIN on 0 of 12.")
-    audit.said("bench/tip4p-h2h/README-h2h.md",
-               "(H₂O)₂₅ is not in the database, so its hit is scored against the lowest energy either arm reached")
 
     # Constants of the definitions and of the priors, read from the source.
     preset = "src/methods/cluster_hopping/preset.rs"
@@ -2954,69 +4010,97 @@ def manuscript_new(audit: Audit) -> None:
     audit.said(receipt, "Ubuntu 13.3.0-6ubuntu2~24.04.1")
     audit.said(receipt, "rustc 1.88.0")
     audit.said(receipt, "2400.000")
-    audit.said("bench/gmin-panel/gmin-source.txt", "gfortran=13.3.0")
-    audit.said("bench/gmin-panel/gmin-source.txt", "/usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3.12.0")
-    audit.said("bench/gmin-panel/README.md", "(`taskset -c 0`, one thread, every other process moved\nto cores 1-7)")
-    audit.said("paper/jctc/logs/water/HOST-TOPOLOGY", "cpu=Intel Xeon Processor, family 6, model 207")
-    text = audit.text(TEX)
-    for needle in ("host name\n\\texttt{bench}", "8 cores of an Intel Xeon Processor, family 6, model 207",
-                   "2400~MHz under KVM", "Ubuntu 24.04", "Rust 1.88.0 and gfortran 13.3.0",
-                   "reference BLAS and LAPACK 3.12.0", "no log records the\nmemory size or the kernel"):
-        audit.record(needle in text, TEX, "the host paragraph says", needle.replace("\n", " "), "present")
+    text = audit.text(SI)
+    build = audit.text("scripts/gmin_panel/build_gmin.sh")
+    for flag in ("-DWITH_ALIGN=OFF", "-DWITH_MPI=OFF", "-DWITH_OPENMP=OFF", "-DWITH_MYBLAS=OFF", "-DWITH_MYLAPACK=OFF"):
+        audit.record(flag in build, "scripts/gmin_panel/build_gmin.sh", f"the GMIN build sets {flag}", "set",
+                     "set" if flag in build else "absent")
+    sessions = ""
+    for shard in GMIN_SHARDS:
+        prov = dict(line.split(" ", 1) for line in audit.text(f"{GMIN_RERUN}/{shard}/PROVENANCE").splitlines()
+                    if " " in line)
+        session = prov["source"].rsplit("/", 1)[0] + "/session.txt"
+        sessions += git("show", f"{prov['commit']}:{session}").stdout
+        audit.record(bool(git("show", f"{prov['commit']}:{session}").stdout), session, "the shard session is committed",
+                     "present", "present" if sessions else "absent")
+    audit.record("gfortran" not in sessions, "bench/gmin-panel/rerun-20261119", "the rerun sessions give no compiler",
+                 "absent", "absent" if "gfortran" not in sessions else "present")
+    audit.said(SI, "GMIN is built by \\path{scripts/gmin_panel/build_gmin.sh} with ALIGN, MPI, and OpenMP off, against "
+                   "the system BLAS and LAPACK; the record does not give the compiler version.")
+    audit.record("13.3.0" not in text.split("\\label{sec:host}", 1)[1].split("\\section", 1)[0], SI,
+                 "the host paragraph prints no compiler version", "absent", "checked")
     commands = {
         "bash scripts/gmin_panel/build_gmin.sh": "scripts/gmin_panel/build_gmin.sh",
         "snakemake -s workflow/Snakefile gmin_panel": "workflow/Snakefile",
-        "bash scripts/gmin_panel/enter_bench.sh --summarize --tex": "scripts/gmin_panel/enter_bench.sh",
+        "python3 paper/jctc/scripts/gmin_table.py": "paper/jctc/scripts/gmin_table.py",
+        "python3 paper/jctc/scripts/knockout_tables.py": "paper/jctc/scripts/knockout_tables.py",
+        "python3 paper/jctc/scripts/water_rerun.py": "paper/jctc/scripts/water_rerun.py",
         "bash scripts/ase_panel/enter_bench.sh --system lj38\n": "scripts/ase_panel/enter_bench.sh",
         "bash scripts/ase_nonlj/enter_bench.sh\n": "scripts/ase_nonlj/enter_bench.sh",
         "python3 paper/jctc/scripts/water_h2h.py": "paper/jctc/scripts/water_h2h.py",
     }
     for command, path in commands.items():
-        audit.record(command in text and (ROOT / path).exists(), TEX, "the command names a script that exists",
+        audit.record(command in text and (ROOT / path).exists(), SI, "the command names a script that exists",
                      command, path)
     audit.said("workflow/Snakefile", "rule gmin_panel:")
-    audit.said("scripts/gmin_panel/enter_bench.sh", "--summarize")
     audit.said("scripts/ase_panel/enter_bench.sh", "lj38|lj55|lj98|lj104|lj150|au55")
     audit.said("scripts/ase_nonlj/enter_bench.sh", "m38r6")
     audit.said("scripts/ase_panel/enter_bench.sh", ': "${ASE_PANEL_REVISION:?')
     audit.said("scripts/ase_panel/enter_bench.sh", "ROWS=${ASE_PANEL_ROWS:-$DEFAULT_ROWS}")
     audit.said("scripts/ase_nonlj/enter_bench.sh", 'echo "keep existing $SYSTEM $ARM seed $SEED"')
-    audit.said(TEX, "The ASE rows cannot be searched again from this repository.")
-    audit.said(TEX, "\\path{bench/unreachable-revisions.csv} lists each revision with the rows that cite it.")
+    audit.said(SI, "The ASE rows cannot be searched again from this repository.")
+    audit.said(SI, "\\path{bench/unreachable-revisions.csv} lists each revision with the rows that cite it.")
     audit.said("paper/jctc/scripts/water_h2h.py", 'command = f"gfn2_water_h2h {MOLECULES} {budget} {seed} {outdir.name}"')
     audit.said("paper/jctc/scripts/water_h2h.py", 'paper_dir = LOGS / f"anneal-paper4000-seed{seed}"')
     audit.said("paper/jctc/logs/water/crest-hexamer-seed0.log", "$ path start.xyz -T 1")
     audit.said("paper/jctc/logs/water/VERSIONS", "polish=xtb --gfn 2 --opt vtight --acc 0.01 --iterations 500")
-    audit.said(TEX, "crest start.xyz -T 1\nxtb --gfn 2 --opt vtight --acc 0.01 --iterations 500\ngfn2_water_h2h 6 4000 0 anneal-paper4000-seed0")
-    audit.said(TEX, "\\texttt{paper/jctc/scripts/ablation\\_table.py} writes Table~\\ref{tab:ablation}")
-    audit.record((ROOT / "paper/jctc/scripts/ablation_table.py").exists(), TEX, "ablation_table.py exists", "exists", "exists")
+    audit.said(SI, "crest start.xyz -T 1\nxtb --gfn 2 --opt vtight --acc 0.01 --iterations 500\ngfn2_water_h2h 6 4000 0 anneal-paper4000-seed0")
+    audit.said(SI, "\\texttt{paper/jctc/scripts/ablation\\_table.py} writes the ablation table of the main text")
+    for script in ("ablation_table.py",):
+        audit.record((ROOT / "paper/jctc/scripts" / script).exists(), SI, f"{script} exists", "exists", "exists")
+    for path in (TEX, SI):
+        audit.record("\\section{Several chains}" not in audit.text(path) and "eq:rank" not in audit.text(path), path,
+                     "the dropped several-chains section stays out", "absent", "absent")
 
     # Title, affiliation, spelling, and the pending DOI.
     cover = "paper/jctc/cover-letter.tex"
-    title = "One basin-hopping setting for Lennard-Jones,\nMorse, gold, and water clusters"
+    title = ("Seed-paired knockouts of a basin-hopping search: structure priors, templates, stall rules, and the "
+             "length unit, with comparisons to GMIN, CREST, and the Atomic Simulation Environment")
     audit.said(TEX, "\\title{" + title + "}")
-    audit.said(SI, "One basin-hopping setting for Lennard-Jones,\nMorse, gold, and water clusters")
+    audit.said(SI, "\\title{" + title + "}")
+    audit.said(cover, "``" + title)
+    for path in (TEX, SI, cover):
+        audit.record("Packing moves, symmetry proposals" not in audit.text(path), path, "the r3 title is gone", "absent",
+                     "absent" if "Packing moves, symmetry proposals" not in audit.text(path) else "present")
+    for path in (TEX, SI, cover):
+        audit.record("basin-hopping setting" not in audit.text(path), path, "the old title is gone", "absent",
+                     "absent" if "basin-hopping setting" not in audit.text(path) else "present")
     for path in (TEX, SI):
         audit.said(path, "\\affiliation{SURF B.V., Amsterdam}")
         audit.record("SURF BV" not in audit.text(path), path, "the affiliation is spelled one way", "SURF B.V.", "SURF B.V.")
-    audit.record("\\todo{" not in audit.text(TEX), TEX, "no \\todo remains in the manuscript", "none", "none")
-    audit.said(TEX, "The Zenodo record for this submission is pending, and it has no DOI yet.")
+        audit.record("Science Institute" not in audit.text(path), path, "the affiliations are SURF B.V. and TurtleTech ehf.",
+                     "absent", "absent" if "Science Institute" not in audit.text(path) else "present")
+        audit.said(path, "\\affiliation{SURF B.V., Amsterdam}\n\\alsoaffiliation{TurtleTech ehf., Reykjavik, Iceland}")
+    availability = audit.text(TEX).split("\\section*{Data and software availability}", 1)[1]
+    audit.said(TEX, "Each imported row file under \\path{paper/jctc/data} carries a \\texttt{PROVENANCE} file that names "
+                    "the record branch, the commit, and the blob it was copied from.")
+    audit.said(TEX, "Several revisions that produced rows are not in the repository, and the Supporting Information "
+                    "lists them; their rows can be audited and cannot be rerun from the repository.")
+    audit.record("not yet" not in availability and "\\todo" not in availability, TEX,
+                 "the data statement carries no pending item", "absent", "checked")
+    audit.record("Zenodo record for this submission" not in availability, TEX,
+                 "the data statement carries no pending-record note", "absent",
+                 "absent" if "Zenodo record for this submission" not in availability else "present")
     for path in (TEX, SI, cover):
         found = sorted({m.group(0) for m in BRITISH.finditer(audit.text(path))})
         audit.record(not found, path, "American spelling", "none", " ".join(found) or "none")
-    lf = load_script("landfold_panels_tex", "paper/jctc/scripts/landfold_panels.py")
-    audit.said(TEX, lf.caption_tex())
-    raster = lf.raster_letters()
-    audit.said(TEX, f"Panels (a) to ({chr(ord(raster[0]) - 1)}) are drawn as vectors from the landscape tables.")
-    audit.said(TEX, f"Panels ({raster[0]}) to ({raster[-1]}) show the sealed raster maps of the campaigns, because "
-                    "their landscape tables are not in the repository.")
-    audit.record(raster == "".join(chr(c) for c in range(ord(raster[0]), ord(raster[-1]) + 1)), TEX,
-                 "the raster panels of the landfold figure are one run of letters", "contiguous", raster)
+    for figure in ("landscapes.pdf", "landfold_maps", "fig:minima-maps"):
+        audit.record(figure not in audit.text(TEX), TEX, f"the main text leaves out {figure}", "absent",
+                     "absent" if figure not in audit.text(TEX) else "present")
 
 
-RERUN_ITEMS = {"5": "GMIN and ASE caps and tuning", "7": "the GFN2 sign and rerun"}
+RERUN_ITEMS: dict[str, str] = {}
 RERUN_TAG = re.compile(r"\\rerun\{([^}]*)\}")
-
 
 
 def rerun_tags(text: str) -> list[tuple[int, str]]:
@@ -3025,62 +4109,74 @@ def rerun_tags(text: str) -> list[tuple[int, str]]:
             for found in RERUN_TAG.finditer(line) if not line.lstrip().startswith("%")]
 
 
-# Results that a rerun replaces. Each sentence that holds one of these fragments must end in its tag,
-# so a replaced claim cannot sit in the text without the fence that --pre-submission reads.
-RERUN_CLAIMS = (
-    (TEX, "5", ("Fisher's test on hits is below 0.05 on 6 of the 9 wins", "It is not below 0.05 on the other 3",
-                "GMIN hits LJ\\(_{150}\\) on 9 of 12 against 5 of 12, with \\(p=0.21\\)",
-                "The median wall of a run is 0.075~s for this setting", "On M\\(_{80}\\) at \\(\\rho=6\\) it is 168.9~s against 10.691~s",
-                "neither ASE arm hits more than 1 of 12 on any of them",
-                "Fisher's test on hits is below 0.05 on 6 clusters", "The 5 are LJ\\(_{38}\\)",
-                "The other 4 wins of this setting are", "is not significant either",
-                "9 of 12 against 5 of 12 and 12 of 12 against 2 of 12",
-                "hits more seeds on all 5 Lennard-Jones clusters and all 4 Morse clusters, and no arm hits",
-                "6 are significant by Fisher's test", "This setting hits more seeds than GMIN on 9 of the 13 clusters",
-                "minima hopping hits none", "Fisher's test against each ASE arm is below 0.05 on all 5 Lennard-Jones clusters",
-                "Both ASE arms hit 0 of 12 on all 4", "ASE minima hopping hits LJ\\(_{38}\\) on 1 of 6, LJ\\(_{55}\\) on 6 of 6",
-                "Wall is the median wall in seconds of all six runs", "Minima hopping reached its cap on every run")),
-    (SI, "5", ("The GMIN arm hits 64 of 64", "where GMIN hits LJ\\(_{98}\\) on 0 of 12 seeds",
-               "hit LJ\\(_{75}\\) on 0 of 12 seeds")),
-    ("paper/jctc/cover-letter.tex", "5", ("this setting hits more seeds on 9 of 13", "Fisher's test on hits is below 0.05 on 6 of the 9 wins",
-                                         "GMIN hits LJ\\(_{150}\\) on 9 of 12", "The median wall of a run is 0.075~s",
-                                         "On M\\(_{80}\\) at \\(\\rho=6\\) it is 168.9~s")),
+# Results of the third rewrite that a rerun replaced. None may come back, fenced or not.
+REPLACED_CLAIMS = (
+    (SI, ("hit LJ\\(_{75}\\) on 0 of 12 seeds", "this code hits more seeds on 9 of 13 clusters",
+          "Paired by seed, the exact McNemar test is below 0.05 on 5 clusters", "The 4 are LJ\\(_{75}\\)",
+          "The other 5 wins of this code are", "9 of 12 against 5 of 12 and 12 of 12 against 2 of 12",
+          "In the panel GMIN hits LJ\\(_{75}\\) and LJ\\(_{98}\\) on 0 of 12 seeds",
+          "Minima hopping stopped at the cap on all 72 runs", "Both ASE arms hit 0 of 12 on all 4 Morse clusters",
+          "ASE minima hopping hits LJ\\(_{38}\\) on 1 of 6, LJ\\(_{55}\\) on 6 of 6",
+          "hits 121 of 192 seeds for the default hop and 97 of 192 for CREST",
+          "CREST with the polish under the same budget",
+          "\\section{Results that wait on reruns}")),
+    (TEX, ("so the data do not attribute the hits to any single mechanism",
+           "it does not yet test any of the four hypotheses separately",
+           "No row was run with the shell and lattice moves switched off",
+           "No row of this code was run with its symmetry projections switched off",
+           "No row was run with the stall rules replaced by a random restart",
+           "No row was run with the basin bias or the tabu list switched off",
+           "Which component carries them, if any single one does, is not yet measured",
+           "does not separate the methods from their settings",
+           "Whether they hold against GMIN with symmetrization and an input for each size is not yet measured",
+           "needs the endpoint structures and the occupancy along each run",
+           "the occupancy trajectories will test it",
+           "No Lennard-Jones row was run at the current preset, which has no structure template",
+           "Whether the Lennard-Jones gains hold at the current preset, without the structure priors, is not yet measured",
+           "is not yet deposited", "the per-seed rows of a rerun will allow the paired test",
+           "and the results that wait on reruns.")),
 )
-SENTENCE_END = re.compile(r"[.?!](?![\d])")
-
-
-def untagged_claims(text: str, fragment: str, item: str) -> tuple[int, int]:
-    """The occurrences of a fragment, and how many of them end their sentence in the tag of that item."""
-    flat, found, tagged, start = collapse(text), 0, 0, 0
-    while (at := flat.find(collapse(fragment), start)) >= 0:
-        found += 1
-        end = SENTENCE_END.search(flat, at + len(collapse(fragment)))
-        tagged += bool(end and flat.startswith(f"~\\rerun{{{item}}}", end.end()))
-        start = at + 1
-    return found, tagged
+TODO_ITEMS: dict[str, str] = {}
+TODO_TAG = re.compile(r"\\todo\{([^}]*)\}")
+# Wording that defers a claim to a run not made, or fences off a part of the paper as its limits.
+HEDGES = ("not yet", "will test", "will show", "will allow", "future work", "in future", "remains to be",
+          "\\section{Limits}", "\\section{Limitations}", "\\section*{Limits}", "\\subsection{Limits}")
 
 
 def rerun_claims(audit: Audit) -> None:
-    """Every replaced result is present and fenced with the tag of its item."""
-    for path, item, fragments in RERUN_CLAIMS:
+    """No result that a rerun replaced is printed again, fenced or not."""
+    for path, fragments in REPLACED_CLAIMS:
+        flat = collapse(audit.text(path))
         for fragment in fragments:
-            found, tagged = untagged_claims(audit.text(path), fragment, item)
-            audit.record(found > 0 and tagged == found, path, f"a result of item {item} ends its sentence in its tag",
-                         fragment, f"{found} found, {tagged} tagged")
+            found = flat.count(collapse(fragment))
+            audit.record(found == 0, path, "a replaced result is not printed", fragment, f"{found} found")
 
 
 def rerun_check(audit: Audit, pre_submission: bool = False) -> None:
-    """Every tag names an item that waits on a rerun; under --pre-submission a tag is a failure."""
-    macro = audit.text("paper/jctc/macros.tex")
-    audit.record("\\newcommand{\\rerun}[1]{\\textbf{[RERUN: item #1]}}" in macro, "paper/jctc/macros.tex",
-                 "the rerun tag macro is defined", "defined", "defined")
+    """No source carries a rerun tag; every tag names an item that waits on a rerun, and none does."""
     for path in RERUN_FILES:
         for number, item in rerun_tags(audit.text(path)):
             audit.record(item in RERUN_ITEMS, f"{path}:{number}", "the tag names an item that waits on a rerun",
-                         " ".join(RERUN_ITEMS), item)
-            if pre_submission:
-                audit.record(False, f"{path}:{number}", f"[RERUN: item {item}] remains ({RERUN_ITEMS.get(item, 'unknown')})",
-                             "no tag", "tag present")
+                         " ".join(RERUN_ITEMS) or "none", item)
+            audit.record(False, f"{path}:{number}", f"[RERUN: item {item}] remains ({RERUN_ITEMS.get(item, 'unknown')})",
+                         "no tag", "tag present")
+
+
+def todo_check(audit: Audit, pre_submission: bool = False) -> None:
+    """No source carries a todo marker or a hedge that defers a claim to a run not made."""
+    for path in (TEX, SI, COVER):
+        text = audit.text(path)
+        live = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("%"))
+        for m in TODO_TAG.finditer(live):
+            number = live[:m.start()].count("\n") + 1
+            audit.record(False, f"{path}:{number}", f"[TODO: {m.group(1)}] remains "
+                         f"({TODO_ITEMS.get(m.group(1), 'unknown')})", "no marker", "marker present")
+        audit.cell(path, "todo markers", "0", float(len(TODO_TAG.findall(live))))
+        audit.cell(path, "rerun tags", "0", float(len(rerun_tags(text))))
+        flat = collapse(live)
+        for hedge in HEDGES:
+            found = flat.lower().count(hedge.lower())
+            audit.record(found == 0, path, f"no hedge: {hedge}", "absent", f"{found} found")
 
 
 REVISION_MAP = "bench/unreachable-revisions.csv"
@@ -3157,90 +4253,57 @@ def manuscript_followups(audit: Audit) -> None:
     names = {"lj38": "LJ\\(_{38}\\)", "lj55": "LJ\\(_{55}\\)", "lj98": "LJ\\(_{98}\\)", "lj104": "LJ\\(_{104}\\)",
              "lj150": "LJ\\(_{150}\\)", "au55": "Au\\(_{55}\\)"}
     hits = [hits_of(ase[(system, "anneal")]) for system in ASE_PANEL]
-    audit.said(TEX, f"Its hits are {', '.join(map(str, hits[:-1]))}, and {hits[-1]} of 12 on "
+    audit.said(SI, f"Its hits are {', '.join(map(str, hits[:-1]))}, and {hits[-1]} of 12 on "
                     f"{', '.join(names[s] for s in ASE_PANEL[:-1])}, and {names['au55']}.")
-    audit.cell(TEX, "cluster-preset arm rows per system", "12", float(len(ase[("lj38", "anneal")])))
+    audit.cell(SI, "cluster-preset arm rows per system", "12", float(len(ase[("lj38", "anneal")])))
 
     summary = audit.rows("bench/ase-recommended/summary.csv")
     caps = {r["system"]: float(r["wall_cap_s"]) for r in summary if r["arm"] == "recommended"}
     gofee = {(r["system"], r["arm"]): r for r in audit.rows("bench/ase-gofee-h2h/summary.csv")}
     mh38, mh55 = gofee[("lj38", "ase_mh")], gofee[("lj55", "ase_mh")]
-    audit.said(TEX, f"ASE minima hopping on 0 of 12 seeds at LJ\\(_{{38}}\\) and LJ\\(_{{55}}\\), because its runs stop at wall caps "
-                    f"of {caps['lj38']:.3f} and {caps['lj55']:.3f}~s.")
-    audit.said(TEX, f"They hit LJ\\(_{{38}}\\) on {mh38['hits']} of {mh38['n']} seeds in a median wall of "
-                    f"{float(mh38['wall_median_s']):.1f}~s and LJ\\(_{{55}}\\) on {mh55['hits']} of {mh55['n']} in "
-                    f"{float(mh55['wall_median_s']):.1f}~s, both far beyond those caps.")
+    audit.said(TEX, f"and ASE minima hopping LJ\\(_{{38}}\\) on {mh38['hits']} of {mh38['n']} and LJ\\(_{{55}}\\) on "
+                    f"{mh55['hits']} of {mh55['n']}, in median walls of {float(mh38['wall_median_s']):.1f}~s and "
+                    f"{float(mh55['wall_median_s']):.1f}~s, far beyond the caps of {caps['lj38']:.3f} and "
+                    f"{caps['lj55']:.3f}~s of Table~\\ref{{tab:ase}}.")
     audit.cell(TEX, "gofee ASE MH LJ38 and LJ55 are uncapped", "0 0", f"{mh38['capped']} {mh55['capped']}")
     audit.cell(TEX, "gofee walls exceed the panel caps", "1", float(float(mh38["wall_median_s"]) > caps["lj38"]
                                                                   and float(mh55["wall_median_s"]) > caps["lj55"]))
     for system in ("lj38", "lj55"):
         audit.cell(TEX, f"tab:ase ASE MH {system} hits", "0", float(hits_of(ase[(system, "ase_mh")])))
 
-    g98, g75 = gmin[("lj98", "gmin")], gmin[("lj75", "gmin")]
-    near98 = sum(abs(float(r["best"]) + 543.6429) < 1e-3 for r in g98)
-    other98 = [float(r["best"]) for r in g98 if abs(float(r["best"]) + 543.6429) >= 1e-3]
-    near75 = sum(abs(float(r["best"]) + 396.2822) < 1e-3 for r in g75)
-    audit.cell(TEX, "panel GMIN LJ98 hits and LJ75 hits", "0 0", f"{hits_of(g98)} {hits_of(g75)}")
-    audit.cell(TEX, "panel GMIN LJ98 stuck runs", "11", float(near98))
-    audit.cell(TEX, "panel GMIN LJ98 other run", "-540.7447", f"{other98[0]:.4f}")
-    audit.cell(TEX, "panel GMIN LJ75 stuck runs", "12", float(near75))
-    audit.said(TEX, "& GMIN & 0/12~\\rerun{5} & 4000000 & 0 & 119.9")
-    audit.said(TEX, "& GMIN & 0/12~\\rerun{5} & 4000000 & 0 & 182.5")
-    audit.said(TEX, "Eleven of its 12 LJ\\(_{98}\\) runs end at \\(-543.6429\\) and one at \\(-540.7447\\), and all 12 of its "
-                    "LJ\\(_{75}\\) runs end at \\(-396.2822\\).")
     sym = audit.rows("paper/jctc/data/lj75_gmin/gmin-lj75-sym-starts-1-200.csv")
     calls = sorted(int(float(r["force_to_hit"])) for r in sym if r["hit"].strip().lower() in ("1", "true", "yes"))
-    audit.said(TEX, f"GMIN hit LJ\\(_{{75}}\\) on {len(calls)} of {len(sym)} seeds in a median of "
-                    f"{int(median(calls))} force calls.")
-    audit.said(TEX, "The committed \\path{paper/jctc/data/lj75_gmin/gmin-lj75-sym-starts-1-200.csv} campaign")
-    audit.said(TEX, "GMIN hit LJ\\(_{98}\\) on 64 of 64, as the Supporting Information records.")
-    audit.said(SI, "and hit on 200 of 200 seeds.")
-    audit.cell(SI, "the sym-starts rows hit", "200", float(len(calls)))
-    audit.said(TEX, "The panel uses three GMIN inputs.")
-    audit.said(TEX, "The Lennard-Jones rows run the Wales-group LJ\\(_{38}\\) introduction file at every Lennard-Jones size,")
-    audit.said(TEX, "The Morse rows add GMIN's native \\texttt{MORSE} keyword and \\(\\rho\\) to the same numerical settings.")
-    audit.said(TEX, "The Au\\(_{55}\\) row instead uses the Darby gold parameters, the \\(11.829521\\)~\\AA\\ "
-                    "nearest-neighbor container, \\(T=0.1\\)~eV, and the LJ step and taboo distances scaled by "
-                    "\\(r_0/2^{1/6}\\).")
-    audit.said(TEX, "# GMIN: LJ/Morse use TEMPERATURE 1.0 and NEWRESTART 40;")
-    audit.said(TEX, "# Au55 Gupta uses TEMPERATURE 0.1, NEWRESTART 40 and scaled RADIUS/STEP/AVOID")
-    audit.said(TEX, "with \\(T=1.0\\), \\texttt{NEWRESTART 40}, and an energy difference of 0.003")
+    audit.record(len(calls) == len(sym), TEX, "symmetrized GMIN hits LJ75 on every seed", f"{len(sym)}", f"{len(calls)}")
+    audit.said(TEX, f"With symmetrization and the published LJ\\(_{{75}}\\) input, from other starts, GMIN hit "
+                    f"LJ\\(_{{75}}\\) on {len(calls)} of {len(sym)} seeds in a median of {int(median(calls))} force calls, "
+                    "so the table compares these two configurations as run.")
+    audit.said("paper/jctc/data/lj75_gmin/provenance.txt", "SYMMETRISE")
+    audit.said(SI, "The committed \\path{paper/jctc/data/lj75_gmin/gmin-lj75-sym-starts-1-200.csv} campaign gave GMIN "
+                   "the published LJ\\(_{75}\\) input with symmetrization and the OptBench starts.")
+    audit.said(SI, "The Lennard-Jones rows run the Wales-group LJ\\(_{38}\\) introduction file at every Lennard-Jones size,")
+    audit.said(SI, "The GMIN table of the main text uses two GMIN inputs.")
+    audit.said(SI, "The Morse row adds GMIN's native \\texttt{MORSE} keyword and \\(\\rho\\) to the same numerical settings.")
+    audit.said(SI, "# GMIN: LJ/Morse use TEMPERATURE 1.0 and NEWRESTART 40")
+    audit.said(SI, "with \\(T=1.0\\), \\texttt{NEWRESTART 40}, and an energy difference of 0.003")
     data = "examples/h2h_gmin_lj.data"
     for fragment in ("TEMPERATURE 1.0", "NEWRESTART 40", "EDIFF 0.003"):
         audit.said(data, fragment)
-    audit.record("SYMMETRISE" not in audit.text(data), data, "the panel input has no symmetrization keyword", "absent",
+    audit.record("SYMMETRISE" not in audit.text(data), data, "the table input has no symmetrization keyword", "absent",
                  "absent" if "SYMMETRISE" not in audit.text(data) else "present")
-    audit.said("paper/jctc/data/lj75_gmin/provenance.txt", "SYMMETRISE")
-    audit.said("bench/gmin-panel/gmin-source.txt", "-DWITH_ALIGN=OFF")
-    audit.said("bench/gmin-panel/gmin-source.txt", "-DWITH_MPI=OFF")
-    audit.said("bench/gmin-panel/gmin-source.txt", "-DWITH_OPENMP=OFF")
-    audit.said(TEX, "GMIN is built without ALIGN, MPI, or OpenMP and linked against the reference BLAS and LAPACK 3.12.0.")
-
-    cap = [int(r["evals_to_hit"]) for r in gmin[("m55r6", "anneal")] if r["hit"] == "1"]
-    gm = [int(r["evals_to_hit"]) for r in gmin[("m55r6", "gmin")] if r["hit"] == "1"]
-    ar = [int(r["evals_to_hit"]) for r in ase[("m55r6", "recommended")] if r["hit"] == "1"]
-    audit.said(TEX, f"At M\\(_{{55}}\\) and \\(\\rho=6\\), this setting hits 12 of 12 and the 12 hits come at "
-                    f"{min(cap)} to {max(cap)} evaluations.")
-    audit.said(TEX, f"GMIN hits the same cluster in {min(gm)} to {max(gm)} calls.")
-    audit.said(TEX, f"its {len(ar)} hits at the same cluster come at {min(ar)} to {max(ar)} calls.")
-    audit.said(TEX, "M\\(_{55}\\), \\(\\rho=6\\) & \\(1\\times 10^{6}\\) & this work & 12/12")
+    for gone in ("Au55 Gupta uses TEMPERATURE", "template-free", "Darby gold parameters"):
+        for path in (TEX, SI):
+            audit.record(gone not in audit.text(path), path, f"{gone} is not printed", "absent",
+                         "absent" if gone not in audit.text(path) else "present")
     audit.record("Mackay cap" not in audit.text(TEX), TEX, "Mackay-cap disclosure prose is removed",
                  "absent", "absent" if "Mackay cap" not in audit.text(TEX) else "present")
     audit.record(not (ROOT / "src/methods/cluster_hopping/mackay_cap_tests.rs").exists(),
                  "src/methods/cluster_hopping/mackay_cap_tests.rs", "Mackay cap test module is removed",
                  "absent", "present" if (ROOT / "src/methods/cluster_hopping/mackay_cap_tests.rs").exists() else "absent")
-    audit.said("examples/h2h_morse.rs", "let cfg = Config::recommended(spec.n);")
     audit.said("bench/ase-nonlj/README.md", "Anneal `recommended` uses `Config::recommended_with_scales`")
-    audit.cell(TEX, "the M55 rho=14 revisions", "5 7", " ".join(str(hits_of(g)) for g in (
-        ase[("m55r14", "recommended")], gmin[("m55r14", "anneal")])))
-    audit.said(TEX, "The two panels differ in that scaling, and no run separates the two, so we do not assign the difference "
-                    "to it.")
-    audit.said(TEX, "Recommended is the preset of this article.")
     audit.record("two-shell icosahedron" not in audit.text(TEX), TEX, "cap-disclosure prose is removed",
                  "absent", "present" if "two-shell icosahedron" in audit.text(TEX) else "absent")
     audit.record("largest cap" not in audit.text(TEX), TEX, "cap-size prose is removed",
                  "absent", "present" if "largest cap" in audit.text(TEX) else "absent")
-    audit.said(TEX, "Derived adds the budget window and the Bayes screen of")
 
 
 def run(report: bool = False, write_map: bool = False, pre_submission: bool = False) -> int:
@@ -3250,16 +4313,17 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
             print(f"paper_audit: cannot check revisions: {problem}", file=sys.stderr)
         return 2
     audit = Audit()
-    for check in (manuscript_ablation, selection_tables, manuscript_retry, manuscript_gmin, manuscript_tip4p, manuscript_hexamer,
+    for check in (paired_statistics, manuscript_ablation, selection_tables, manuscript_retry, manuscript_gmin, manuscript_tip4p, manuscript_hexamer,
                   manuscript_cross_field, supporting_information, release, paper_0120, gad_published, openconf,
                   head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, lj_large, bench_prose,
-                  manuscript_ase, panel_references, generated_tables, supporting_gmin, supporting_numbers, au55_superseded, manuscript_new, manuscript_followups, cover_letter):
+                  manuscript_ase, manuscript_knockouts, manuscript_priors, panel_references, generated_tables, supporting_gmin, supporting_numbers, au55_superseded, manuscript_new, manuscript_followups, cover_letter, science_claims):
         check(audit)
     if write_map:
         (ROOT / REVISION_MAP).write_text(revision_map_text(revision_map_rows(audit)))
     revision_map(audit)
     rerun_claims(audit)
     rerun_check(audit, pre_submission)
+    todo_check(audit, pre_submission)
     for path, fragment, _why in UNTRACED:
         audit.said(path, fragment)
     gaps = provenance(audit)
@@ -3290,7 +4354,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--report", action="store_true", help="print every check, not only the drifted ones")
     parser.add_argument("--write-revision-map", action="store_true", help=f"rewrite {REVISION_MAP} from the rows")
     parser.add_argument("--pre-submission", action="store_true",
-                        help="fail while any [RERUN: item N] tag remains in the manuscript, the SI or the cover letter")
+                        help="fail while any [RERUN: item N] tag or [TODO: Gn] marker remains")
     args = parser.parse_args(argv)
     return run(args.report, args.write_revision_map, args.pre_submission)
 

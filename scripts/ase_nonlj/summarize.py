@@ -16,6 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
+from paired_stats import fisher_exact  # noqa: E402
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
 SEEDS = tuple(range(2000, 2012))
@@ -89,22 +90,7 @@ def seed_list(rows: list[dict[str, str]]) -> str:
 
 
 def fisher(hits: int, base: int) -> float:
-    row = 12
-    col = hits + base
-    total = 24
-
-    def probability(value: int) -> float:
-        return math.comb(row, value) * math.comb(row, col - value) / math.comb(total, col)
-
-    observed = probability(hits)
-    return min(
-        1.0,
-        sum(
-            probability(value)
-            for value in range(max(0, col - row), min(row, col) + 1)
-            if probability(value) <= observed * (1.0 + 1.0e-12)
-        ),
-    )
+    return fisher_exact(hits, 12, base, 12)
 
 
 def mann_whitney(left: list[float], right: list[float]) -> tuple[float, float]:
@@ -272,19 +258,19 @@ def tex_table(grouped: dict[str, dict[str, list[dict[str, str]]]]) -> str:
         ]) + " \\\\")
     return "\n".join([
         "\\begin{table}",
-        "\\caption{This work against the basin hopping (BH) and minima hopping",
-        f"(MH) of ASE {ASE_VERSION} on Morse clusters.",
-        f"This work is anneal \\texttt{{{revisions.pop()[:8]}}} at the length",
-        "scale of the Morse pair.",
+        "\\caption{This code against the basin hopping (BH) and minima hopping",
+        f"(MH) of ASE {ASE_VERSION} on Morse clusters, at the effort each run reports.",
+        f"The rows of this code are revision \\texttt{{{REVISION[:8]}}}, at the length scale of the Morse pair.",
         "Seeds 2000--2011, one core, budget in force calls.",
         "Cap is the wall in seconds at which a BH or MH run stops, three times",
         "the slowest wall of the cluster-preset arm of the panel.",
         "Every BH and MH run ended at the cap, as a miss with fewer calls than",
-        "the budget, and no run of this work did.",
+        "the budget, and no run of this code did.",
         "Wall is the median over the 12 runs of the seconds each run took;",
         "a BH or MH run is counted at its wall, which lies at the cap.",
         "\\(p_\\mathrm{BH}\\) and \\(p_\\mathrm{MH}\\) are the two-sided Fisher",
-        "exact test on hits against each ASE arm.}",
+        "exact test on hits against each ASE arm; the test is unpaired because the random",
+        "generators of the two codes do not make a shared start from one seed.}",
         "\\label{tab:ase-morse}",
         "\\centering",
         "\\footnotesize",
@@ -293,7 +279,7 @@ def tex_table(grouped: dict[str, dict[str, list[dict[str, str]]]]) -> str:
         "\\toprule",
         " & & & \\multicolumn{3}{c}{Hits} & \\multicolumn{3}{c}{Wall (s)} & & \\\\",
         "\\cmidrule(lr){4-6}\\cmidrule(lr){7-9}",
-        "Cluster & Budget & Cap & This work & BH & MH & This work & BH & MH & "
+        "Cluster & Budget & Cap & This code & BH & MH & This code & BH & MH & "
         "\\(p_\\mathrm{BH}\\) & \\(p_\\mathrm{MH}\\) \\\\",
         "\\midrule",
         *body,
