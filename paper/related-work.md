@@ -1444,7 +1444,7 @@ Camarillo, Oller-Iscar, Conde, Ramírez, Blazquez, and Sanz, Physical Review E 1
 
 Alizadeh, Pototschnig, Seidler, Ehlert, and Kühne, Journal of Chemical Theory and Computation 22, 9688--9699 (8 September 2026), doi:10.1021/acs.jctc.6c01034, implement periodic `GFN2-xTB` with multipolar Ewald electrostatics in `CP2K`, cutting the `DMC-ICE13` ice polymorph ranking MAE from 8.01 to 3.46 kJ/mol relative to `GFN1-xTB`. Xu, Shen, Zhai, Zhu, and Zeng, arXiv:2611.24744 (18 November 2026), release `GenerativeQC`, benchmarking GPU-accelerated Hartree--Fock and DFT analytic forces on water clusters up to 96 atoms alongside GPU `CCSD(T)/CBS` forces.
 
-Bulk liquid compressibilities, `TIP4P/Ice` ice-nucleation trajectories, graphene-confined proton transfer, periodic ice polymorph rankings, and GPU gradient kernels leave the 1998 Wales--Hodges gas-phase `TIP4P` cluster targets and the bare `(H2O)6` GFN2-xTB hexamer counts (`121` of `192` vs `97` of `192` at `xtb` 6.7.1 / 6.8.0) unchanged and warrant no new head-to-head.
+Bulk liquid compressibilities, `TIP4P/Ice` ice-nucleation trajectories, graphene-confined proton transfer, periodic ice polymorph rankings, and GPU gradient kernels leave the 1998 Wales--Hodges gas-phase `TIP4P` cluster targets and the bare `(H2O)6` GFN2-xTB hexamer counts (`121` of `192` vs `97` of `192` pinned to `xtb` 6.7.1; 6.8.0 not re-run) unchanged and warrant no new head-to-head.
 
 Cite `jorgensenCompressibility2026`, `jinWaterHexamerGraphene2026`, `camarilloTip4pIce2026`, `kirovSurfaceWater2026`, `alizadehPeriodicGfn22026`, and `xuGenerativeQc2026`.
 
