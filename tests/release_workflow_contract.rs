@@ -413,6 +413,8 @@ fn packaged_and_checked(package: &Value) -> (BTreeSet<String>, BTreeSet<String>)
                 None => format!("./{to}"),
             };
             copied.insert(entry);
+        } else if words.starts_with(&["python3", "scripts/native_pkgconfig.py", "staging"]) {
+            copied.insert("./lib/pkgconfig/anneal-core.pc".to_owned());
         } else if let Some(at) = words.iter().position(|word| *word == ">") {
             let to = words[at + 1]
                 .strip_prefix("staging/")
@@ -541,6 +543,201 @@ fn the_native_archive_carries_the_licence_and_its_readme_section() {
     assert!(include_str!("../LICENSE.txt").starts_with("MIT License"));
 }
 
+fn pkg_config(search: &std::path::Path, args: &[&str]) -> String {
+    let output = Command::new("pkg-config")
+        .args(args)
+        .env_remove("PKG_CONFIG_LIBDIR")
+        .env_remove("PKG_CONFIG_SYSROOT_DIR")
+        .env("PKG_CONFIG_PATH", search)
+        .output()
+        .expect("pkg-config must be installed to check the archive's .pc file");
+    assert!(output.status.success(), "pkg-config {args:?}: {output:?}");
+    String::from_utf8(output.stdout).unwrap().trim().to_owned()
+}
+
+#[test]
+fn the_native_archive_ships_a_prefix_relative_pkg_config_file() {
+    let workflow = release();
+    let native = job(&workflow, "native-libs");
+    let (build_at, build) = step(native, "Build static + shared library");
+    let (list_at, list) = step(native, "List the libraries the static library needs");
+    let (package_at, package) = step(native, "Package artifacts");
+    assert_binding(list);
+    assert_eq!(list["shell"].as_str(), Some("bash"));
+    assert!(build_at < list_at && list_at < package_at);
+
+    // The list comes from rustc for the same crate, target and features the
+    // build used, and an empty list fails the step.
+    let list = logical_lines(list);
+    let flags = |line: &str| -> Vec<String> {
+        compact_expressions(line)
+            .split_whitespace()
+            .map(str::to_owned)
+            .collect()
+    };
+    let words = flags(&list[0]);
+    let build_words = flags(script(build)[0]);
+    assert_eq!(words[..3], ["cargo", "rustc", "--release"], "{list:?}");
+    for flag in ["--features", "--target", "--target-dir"] {
+        let value = |all: &[String]| {
+            let at = all.iter().position(|word| word == flag).unwrap();
+            all[at + 1].clone()
+        };
+        assert_eq!(value(&words), value(&build_words), "{flag}");
+    }
+    assert!(words.iter().any(|word| word == "--lib"), "{list:?}");
+    let after = words.iter().position(|w| w == "--").expect("rustc flags");
+    assert_eq!(
+        words[after + 1..],
+        [
+            "--print",
+            "native-static-libs",
+            "2>&1",
+            "|",
+            "tee",
+            "rustc-native-libs.log"
+        ]
+    );
+    assert!(list.contains(&"test -s native-static-libs.txt".to_owned()));
+    assert!(
+        list.iter().any(|l| l
+            .contains("sed -n 's/^note: native-static-libs: //p' rustc-native-libs.log")
+            && l.ends_with("| tail -n 1 > native-static-libs.txt")),
+        "{list:?}"
+    );
+
+    // The .pc file is generated in the staging tree and checked in the
+    // archive.
+    let (copied, checked) = packaged_and_checked(package);
+    let entry = "./lib/pkgconfig/anneal-core.pc";
+    assert!(copied.contains(entry) && checked.contains(entry));
+    let generate = script(package)
+        .into_iter()
+        .position(|line| line.starts_with("python3 scripts/native_pkgconfig.py"))
+        .expect("the packaging step generates the .pc file");
+    assert_eq!(
+        script(package)[generate],
+        "python3 scripts/native_pkgconfig.py staging --private-libs-file native-static-libs.txt"
+    );
+
+    // What the .pc file names is what the archive holds: the library
+    // cargo-c names, in lib/, and headers in include/.
+    let manifest: toml::Table = include_str!("../Cargo.toml").parse().unwrap();
+    let capi = &manifest["package"]["metadata"]["capi"];
+    let library = capi["library"]["name"].as_str().unwrap();
+    let cells = native["strategy"]["matrix"]["include"]
+        .as_sequence()
+        .unwrap();
+    assert!(cells.len() >= 3);
+    for cell in cells {
+        assert_eq!(
+            cell["static_lib"].as_str().unwrap(),
+            format!("lib{library}.a")
+        );
+        let shared = cell["shared_lib"].as_str().unwrap();
+        assert!(shared.starts_with(&format!("lib{library}.")), "{shared}");
+    }
+
+    // Run the generator and read what it wrote.
+    let scratch = std::env::temp_dir().join(format!("anneal-pc-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    let root = scratch.join("one");
+    std::fs::create_dir_all(root.join("include/dlpack")).unwrap();
+    std::fs::create_dir_all(root.join("lib")).unwrap();
+    std::fs::write(scratch.join("libs.txt"), "-lgcc_s -lm\n-ldl\n").unwrap();
+    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let run = Command::new("python3")
+        .arg(repo.join("scripts/native_pkgconfig.py"))
+        .arg(&root)
+        .arg("--private-libs-file")
+        .arg(scratch.join("libs.txt"))
+        .output()
+        .expect("run python3");
+    assert!(run.status.success(), "{run:?}");
+    let pc = std::fs::read_to_string(root.join("lib/pkgconfig/anneal-core.pc")).unwrap();
+
+    let version = manifest["workspace"]["package"]["version"]
+        .as_str()
+        .unwrap();
+    let description = capi["pkg_config"]["description"].as_str().unwrap();
+    let field = |key: &str| {
+        pc.lines()
+            .find_map(|line| line.strip_prefix(key))
+            .unwrap_or_else(|| panic!("the .pc file has no {key}: {pc}"))
+    };
+    assert_eq!(field("prefix="), "${pcfiledir}/../..");
+    assert_eq!(field("libdir="), "${prefix}/lib");
+    assert_eq!(field("includedir="), "${prefix}/include");
+    assert_eq!(field("Name: "), "anneal-core");
+    assert_eq!(field("Version: "), version);
+    assert_eq!(field("Description: "), description);
+    assert_eq!(field("Cflags: "), "-I${includedir}");
+    assert_eq!(field("Libs: "), format!("-L${{libdir}} -l{library}"));
+    assert_eq!(field("Libs.private: "), "-lgcc_s -lm -ldl");
+    for line in pc.lines() {
+        assert!(
+            !line.contains(scratch.to_str().unwrap()) && !line.contains("/home/"),
+            "an absolute path in {line:?}"
+        );
+    }
+
+    // pkg-config reads it. The same tree answers from where it is moved to.
+    let moved = scratch.join("two");
+    for tree in [&root, &moved] {
+        if tree == &moved {
+            std::fs::rename(&root, &moved).unwrap();
+        }
+        let search = tree.join("lib/pkgconfig");
+        let canonical = |text: &str, flag: &str| -> Vec<std::path::PathBuf> {
+            text.split_whitespace()
+                .filter_map(|w| w.strip_prefix(flag))
+                .map(|dir| std::fs::canonicalize(dir).unwrap())
+                .collect()
+        };
+        let cflags = pkg_config(&search, &["--cflags", "anneal-core"]);
+        assert_eq!(
+            canonical(&cflags, "-I"),
+            [std::fs::canonicalize(tree.join("include")).unwrap()]
+        );
+        let libs = pkg_config(&search, &["--libs", "anneal-core"]);
+        assert_eq!(
+            canonical(&libs, "-L"),
+            [std::fs::canonicalize(tree.join("lib")).unwrap()]
+        );
+        assert!(
+            libs.split_whitespace().any(|w| w == "-lanneal_core"),
+            "{libs}"
+        );
+        assert!(!libs.contains("-lgcc_s"), "{libs}");
+        let statics = pkg_config(&search, &["--static", "--libs", "anneal-core"]);
+        assert!(
+            statics.ends_with("-lanneal_core -lgcc_s -lm -ldl"),
+            "{statics}"
+        );
+        assert_eq!(
+            pkg_config(&search, &["--modversion", "anneal-core"]),
+            version
+        );
+    }
+    std::fs::remove_dir_all(&scratch).unwrap();
+
+    // Without the list the generator still writes a .pc file, and an empty
+    // list file is an error, not a silently incomplete static link line.
+    let empty = std::env::temp_dir().join(format!("anneal-pc-empty-{}", std::process::id()));
+    std::fs::create_dir_all(empty.join("include")).unwrap();
+    std::fs::create_dir_all(empty.join("lib")).unwrap();
+    std::fs::write(empty.join("none.txt"), "\n").unwrap();
+    let run = Command::new("python3")
+        .arg(repo.join("scripts/native_pkgconfig.py"))
+        .arg(&empty)
+        .arg("--private-libs-file")
+        .arg(empty.join("none.txt"))
+        .output()
+        .unwrap();
+    assert!(!run.status.success(), "an empty libs file was accepted");
+    std::fs::remove_dir_all(&empty).unwrap();
+}
+
 #[test]
 fn native_release_compiles_a_consumer_against_the_archive() {
     let workflow = release();
@@ -564,14 +761,34 @@ fn native_release_compiles_a_consumer_against_the_archive() {
     let compiles: Vec<usize> = (0..lines.len())
         .filter(|&i| lines[i].starts_with("cc "))
         .collect();
-    assert_eq!(compiles.len(), 2, "{lines:?}");
-    let (syntax, link) = (compiles[0], compiles[1]);
+    assert_eq!(compiles.len(), 4, "{lines:?}");
+    let [syntax, pc_syntax, link, pc_link] = compiles[..] else {
+        unreachable!()
+    };
     let linux_only = at(r#"if [[ "${{ matrix.os }}" == linux ]]; then"#);
+    let path = at(r#"export PKG_CONFIG_PATH="$PWD/consumer/lib/pkgconfig""#);
+    let exists = at("pkg-config --exists anneal-core");
     let run = at("./consumer/ffi_smoke");
-    assert!(extract < syntax && syntax < linux_only && linux_only < link && link < run);
+    let version =
+        at(r#"test "$(./consumer/ffi_pkgconfig)" = "$(pkg-config --modversion anneal-core)""#);
+    assert!(extract < syntax && syntax < path && path < exists && exists < pc_syntax);
+    assert!(pc_syntax < linux_only && linux_only < link && link < run && run < pc_link);
+    assert!(pc_link < version);
     assert!(lines[syntax].contains("-fsyntax-only"));
+    assert!(lines[pc_syntax].contains("-fsyntax-only"));
     assert!(lines[link].contains("-Lconsumer/lib") && lines[link].contains("-lanneal_core"));
     assert!(lines[link].contains("-o consumer/ffi_smoke"));
+    assert!(lines[pc_link].contains("-o consumer/ffi_pkgconfig"));
+    assert!(!lines[pc_link].contains("-fsyntax-only"));
+
+    // Where the cell needs pkg-config installed, that comes before it is used.
+    let install = at("command -v pkg-config >/dev/null || brew install pkgconf");
+    assert!(extract < install && install < path);
+    assert_eq!(
+        lines[install - 1],
+        r#"if [[ "${{ matrix.os }}" == macos ]]; then"#
+    );
+    assert_eq!(lines[install + 1], "fi");
 
     // The consumer reads headers from the extracted archive and nowhere
     // else, so a file the archive lacks is an error.
@@ -582,6 +799,34 @@ fn native_release_compiles_a_consumer_against_the_archive() {
             .filter_map(|word| word.strip_prefix("-I"))
             .collect();
         assert_eq!(include_dirs, ["consumer/include"], "{}", lines[compile]);
+    }
+
+    // The pkg-config builds take every flag from the archive's .pc file:
+    // no -I, -L or -l of their own, and the search path is the extracted
+    // archive's alone.
+    for compile in [pc_syntax, pc_link] {
+        let words: Vec<&str> = lines[compile].split_whitespace().collect();
+        assert!(words.contains(&"tests/ffi_smoke.c"), "{}", lines[compile]);
+        assert!(words.contains(&"$(pkg-config"), "{}", lines[compile]);
+        for word in &words {
+            assert!(
+                !word.starts_with("-I") && !word.starts_with("-L") && !word.starts_with("-l"),
+                "{} adds {word} by hand",
+                lines[compile]
+            );
+        }
+    }
+    assert!(lines[pc_syntax].contains("$(pkg-config --cflags anneal-core)"));
+    assert!(lines[pc_link].contains("$(pkg-config --cflags anneal-core)"));
+    assert!(lines[pc_link].contains("$(pkg-config --libs anneal-core)"));
+    for line in &lines {
+        for name in [
+            "PKG_CONFIG_LIBDIR",
+            "PKG_CONFIG_SYSROOT_DIR",
+            "PKG_CONFIG_ALLOW",
+        ] {
+            assert!(!line.contains(name), "{line}");
+        }
     }
 }
 

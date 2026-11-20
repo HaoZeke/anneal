@@ -88,6 +88,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -104,6 +108,16 @@ jobs:
       - name: Generate C header
         run: cbindgen --config cbindgen.toml --crate anneal-core --output anneal-core.h
 
+      # rustc names the system libraries a static anneal_core needs. They go
+      # into the .pc file as Libs.private. This rebuilds the library with
+      # that flag, so the archive holds this build and not the one above.
+      - name: List the libraries the static library needs
+        shell: bash
+        run: |
+          cargo rustc --release --features capi --target ${{ matrix.target }} --target-dir target --lib -- --print native-static-libs 2>&1 | tee rustc-native-libs.log
+          sed -n 's/^note: native-static-libs: //p' rustc-native-libs.log | tail -n 1 > native-static-libs.txt
+          test -s native-static-libs.txt
+
       # anneal-core.h includes <dlpack/dlpack.h>, so the archive carries that
       # header beside it and every copied file is checked in the archive. The
       # licence text and the README section on licensing travel with the
@@ -118,6 +132,7 @@ jobs:
           cp include/anneal-version.h staging/include/
           cp include/anneal-core.hpp staging/include/
           cp include/dlpack/dlpack.h staging/include/dlpack/
+          python3 scripts/native_pkgconfig.py staging --private-libs-file native-static-libs.txt
           cp target/${{ matrix.target }}/release/${{ matrix.static_lib }} staging/lib/
           cp target/${{ matrix.target }}/release/${{ matrix.shared_lib }} staging/lib/
           tar czf ${{ matrix.artifact }}.tar.gz -C staging .
@@ -127,12 +142,14 @@ jobs:
           tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./include/anneal-version.h"
           tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./include/anneal-core.hpp"
           tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./include/dlpack/dlpack.h"
+          tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./lib/pkgconfig/anneal-core.pc"
           tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./lib/${{ matrix.static_lib }}"
           tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./lib/${{ matrix.shared_lib }}"
 
       # A consumer sees only what the archive holds. The header must parse
-      # on every target. Where the runner can run the target's code, a
-      # Linux consumer also links the shared library and runs.
+      # on every target, by hand and through the archive's .pc file. Where
+      # the runner can run the target's code, a Linux consumer also links
+      # the shared library, by hand and through pkg-config, and runs.
       - name: Compile a consumer against the archive
         shell: bash
         run: |
@@ -140,11 +157,21 @@ jobs:
           mkdir consumer
           tar xzf ${{ matrix.artifact }}.tar.gz -C consumer
           cc -std=c99 -Wall -Wextra -fsyntax-only -Iconsumer/include tests/ffi_smoke.c
+          if [[ "${{ matrix.os }}" == macos ]]; then
+            command -v pkg-config >/dev/null || brew install pkgconf
+          fi
+          export PKG_CONFIG_PATH="$PWD/consumer/lib/pkgconfig"
+          pkg-config --exists anneal-core
+          cc -std=c99 -Wall -Wextra -fsyntax-only $(pkg-config --cflags anneal-core) tests/ffi_smoke.c
           if [[ "${{ matrix.os }}" == linux ]]; then
             cc -std=c99 -Wall -Wextra -Iconsumer/include tests/ffi_smoke.c \
               -Lconsumer/lib -lanneal_core -Wl,-rpath,"$PWD/consumer/lib" \
               -o consumer/ffi_smoke
             ./consumer/ffi_smoke
+            cc -std=c99 -Wall -Wextra $(pkg-config --cflags anneal-core) tests/ffi_smoke.c \
+              $(pkg-config --libs anneal-core) -Wl,-rpath,"$PWD/consumer/lib" \
+              -o consumer/ffi_pkgconfig
+            test "$(./consumer/ffi_pkgconfig)" = "$(pkg-config --modversion anneal-core)"
           fi
 
       - uses: actions/upload-artifact@v4
