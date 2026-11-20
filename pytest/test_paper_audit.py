@@ -17,11 +17,8 @@ SPEC.loader.exec_module(audit_mod)
 
 CHECKS = (
     audit_mod.paired_statistics,
-    audit_mod.manuscript_retry,
     audit_mod.manuscript_gmin,
-    audit_mod.manuscript_tip4p,
-    audit_mod.manuscript_hexamer,
-    audit_mod.manuscript_cross_field,
+    audit_mod.withdrawn_benchmarks,
     audit_mod.supporting_information,
     audit_mod.release,
     audit_mod.paper_0120,
@@ -41,7 +38,6 @@ CHECKS = (
     audit_mod.manuscript_priors,
     audit_mod.panel_references,
     audit_mod.generated_tables,
-    audit_mod.supporting_gmin,
     audit_mod.supporting_numbers,
     audit_mod.manuscript_new,
     audit_mod.manuscript_followups,
@@ -860,7 +856,8 @@ def test_copper_tolerance_and_jcc_line_link_the_sources():
     audit_mod.supporting_numbers(audit)
     tolerance = [row for row in audit.results if row[2] == "TARGET_TOL matches tally tolerance"]
     jcc = [row for row in audit.results if row[2] == "the jcc script's target line"]
-    assert tolerance == [("OK", audit_mod.SI, "TARGET_TOL matches tally tolerance", "0.001", "0.001")]
+    assert tolerance == [("OK", "paper/jctc/scripts/hq_sci_tally.py", "TARGET_TOL matches tally tolerance", "0.001",
+                          "0.001")]
     assert jcc and jcc[0][0] == "OK"
     claimed, actual = audit_mod.jcc_target_lines(
         (ROOT / "paper/jctc/scripts/hq_sci_tally.py").read_text(),
@@ -1047,6 +1044,22 @@ def test_a_second_gate_claim_is_reported():
         old, "For atomic clusters the preset has two atom-count gates, both at 98 atoms:")
     audit_mod.count_gates(audit, "c2de652dca0bc75e2b0cb4afffac91fd656404e4")
     assert sorted(r[2] for r in audit.drifts()) == ["prose", "retired gate wording stays out: two atom-count gates"]
+
+
+def test_a_withdrawn_benchmark_in_the_text_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    audit.text_cache[audit_mod.TEX] = tex.replace("\\end{abstract}", "It hits 121 of 192 seeds.\n\\end{abstract}", 1)
+    audit_mod.withdrawn_benchmarks(audit)
+    assert [r[2] for r in audit.drifts()] == ["the water hexamer against CREST is not printed: 121 of 192"]
+
+
+def test_crest_outside_the_related_searches_is_reported():
+    audit = audit_mod.Audit()
+    si = audit.text(audit_mod.SI)
+    audit.text_cache[audit_mod.SI] = si.replace("\\section{Statistical methods}", "CREST.\n\\section{Statistical methods}", 1)
+    audit_mod.withdrawn_benchmarks(audit)
+    assert [r[2] for r in audit.drifts()] == ["CREST is named only among the searches that report no comparable rate"]
 
 
 def test_record_only_revisions_resolve_and_unpushed_ones_do_not():
