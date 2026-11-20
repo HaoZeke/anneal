@@ -128,18 +128,34 @@ fn configured_external_engine_passes_the_abi_check() {
     }
 }
 
-fn destroyed(path: &Path) -> c_int {
-    let library = unsafe { libloading::Library::new(path) }.expect("reopen the fixture");
-    let count: libloading::Symbol<unsafe extern "C" fn() -> c_int> =
-        unsafe { library.get(b"fixture_destroy_count\0") }.expect("count symbol");
-    unsafe { count() }
+struct FixtureObserver(libloading::Library);
+
+impl FixtureObserver {
+    fn open(path: &Path) -> Self {
+        Self(unsafe { libloading::Library::new(path) }.expect("open the fixture observer"))
+    }
+
+    fn destroyed(&self) -> c_int {
+        let count: libloading::Symbol<unsafe extern "C" fn() -> c_int> =
+            unsafe { self.0.get(b"fixture_destroy_count\0") }.expect("count symbol");
+        unsafe { count() }
+    }
+
+    fn native_calls(&self) -> c_int {
+        let count: libloading::Symbol<unsafe extern "C" fn() -> c_int> =
+            unsafe { self.0.get(b"fixture_native_call_count\0") }
+                .expect("native call count symbol");
+        unsafe { count() }
+    }
 }
 
-fn native_calls(path: &Path) -> c_int {
-    let library = unsafe { libloading::Library::new(path) }.expect("reopen the fixture");
-    let count: libloading::Symbol<unsafe extern "C" fn() -> c_int> =
-        unsafe { library.get(b"fixture_native_call_count\0") }.expect("native call count symbol");
-    unsafe { count() }
+#[cfg(target_os = "linux")]
+fn library_is_mapped(path: &Path) -> bool {
+    let canonical = path.canonicalize().expect("canonical fixture path");
+    let maps = std::fs::read_to_string("/proc/self/maps").expect("read /proc/self/maps");
+    maps.lines()
+        .filter_map(|line| line.split_whitespace().last())
+        .any(|mapped| Path::new(mapped) == canonical)
 }
 
 fn unsupported_code(path: &Path) -> c_int {
@@ -269,7 +285,8 @@ fn positive_code_is_recoverable_and_negative_is_fatal() {
 #[test]
 fn fatal_status_poisons_the_handle_and_makes_zero_later_native_calls() {
     let path = build("harmonic_fatal_once", &["FATAL_ONCE"]);
-    let before_destroy = destroyed(&path);
+    let observer = FixtureObserver::open(&path);
+    let before_destroy = observer.destroyed();
     let mut engine = load(&path);
     let expected = EngineError::Fatal {
         code: -7,
@@ -282,7 +299,7 @@ fn fatal_status_poisons_the_handle_and_makes_zero_later_native_calls() {
     };
 
     assert_eq!(engine.force(&valid).unwrap_err(), expected);
-    let after_fatal = native_calls(&path);
+    let after_fatal = observer.native_calls();
     assert!(after_fatal > 0);
 
     // The fixture returns -7 only once and 0 thereafter, so an unpoisoned
@@ -306,11 +323,11 @@ fn fatal_status_poisons_the_handle_and_makes_zero_later_native_calls() {
     );
     assert_eq!(engine.hvp(&valid, &[1.0, 0.0, 0.0]).unwrap_err(), expected);
     assert_eq!(engine.caps().unwrap_err(), expected);
-    assert_eq!(native_calls(&path), after_fatal);
+    assert_eq!(observer.native_calls(), after_fatal);
 
     let potential = engine.into_potential();
     assert!(!potential.as_handle().has_hessian_vector_callback());
-    assert_eq!(native_calls(&path), after_fatal);
+    assert_eq!(observer.native_calls(), after_fatal);
     let mut positions = vec![1.0, 0.0, 0.0];
     let mut numbers = vec![1];
     let mut cell = CELL;
@@ -328,20 +345,21 @@ fn fatal_status_poisons_the_handle_and_makes_zero_later_native_calls() {
         unsafe { potential.calculate(&input, &mut output) },
         rgpot_status_t::RGPOT_INTERNAL_ERROR
     );
-    assert_eq!(native_calls(&path), after_fatal);
+    assert_eq!(observer.native_calls(), after_fatal);
     unsafe {
         rgpot_tensor_free(input.positions);
         rgpot_tensor_free(input.atomic_numbers);
         rgpot_tensor_free(input.box_matrix);
     }
     drop(potential);
-    assert_eq!(destroyed(&path), before_destroy + 1);
+    assert_eq!(observer.destroyed(), before_destroy + 1);
 }
 
 #[test]
 fn fatal_hvp_poisons_a_live_potential_handle_without_reentering_native_code() {
     let path = build("harmonic_fatal_hvp_handle", &["FATAL_ONCE"]);
-    let before_destroy = destroyed(&path);
+    let observer = FixtureObserver::open(&path);
+    let before_destroy = observer.destroyed();
     let potential = load(&path).into_potential();
     assert!(potential.as_handle().has_hessian_vector_callback());
 
@@ -365,7 +383,7 @@ fn fatal_hvp_poisons_a_live_potential_handle_without_reentering_native_code() {
     }
     .unwrap_err();
     assert_eq!(err.status(), rgpot_status_t::RGPOT_INTERNAL_ERROR);
-    let after_fatal = native_calls(&path);
+    let after_fatal = observer.native_calls();
 
     let err_again = unsafe {
         potential.as_handle().hessian_vector(
@@ -387,7 +405,7 @@ fn fatal_hvp_poisons_a_live_potential_handle_without_reentering_native_code() {
         unsafe { potential.calculate(&input, &mut output) },
         rgpot_status_t::RGPOT_INTERNAL_ERROR
     );
-    assert_eq!(native_calls(&path), after_fatal);
+    assert_eq!(observer.native_calls(), after_fatal);
 
     unsafe {
         rgpot_tensor_free(input.positions);
@@ -395,7 +413,7 @@ fn fatal_hvp_poisons_a_live_potential_handle_without_reentering_native_code() {
         rgpot_tensor_free(input.box_matrix);
     }
     drop(potential);
-    assert_eq!(destroyed(&path), before_destroy + 1);
+    assert_eq!(observer.destroyed(), before_destroy + 1);
 }
 
 #[test]
@@ -669,15 +687,69 @@ fn a_request_that_does_not_fit_is_refused_before_the_engine() {
 #[test]
 fn dropping_the_instance_destroys_the_engine() {
     let path = build("harmonic_drop", &[]);
-    let before = destroyed(&path);
+    let observer = FixtureObserver::open(&path);
+    let before = observer.destroyed();
     drop(load(&path));
-    assert_eq!(destroyed(&path), before + 1);
+    assert_eq!(observer.destroyed(), before + 1);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn dropping_the_instance_unloads_the_library() {
+    let path = build("harmonic_unload", &[]);
+    assert!(!library_is_mapped(&path));
+
+    for iteration in 0..200 {
+        let engine = load(&path);
+        assert!(
+            library_is_mapped(&path),
+            "fixture is not mapped while iteration {iteration} is alive"
+        );
+        drop(engine);
+        assert!(
+            !library_is_mapped(&path),
+            "fixture remains mapped after iteration {iteration}"
+        );
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn load_failures_unload_the_library() {
+    let failures = [
+        (
+            build("harmonic_unload_missing", &["NO_FORCE", "NO_BATCH"]),
+            config().to_vec(),
+        ),
+        (
+            build("harmonic_unload_abi", &["FIXTURE_ABI=2"]),
+            config().to_vec(),
+        ),
+        (
+            build("harmonic_unload_stamp", &["FIXTURE_ABI_LAYOUT=2"]),
+            config().to_vec(),
+        ),
+        (build("harmonic_unload_create", &[]), vec![1, 2, 3]),
+    ];
+
+    for (path, config) in failures {
+        assert!(!library_is_mapped(&path));
+        unsafe { EnginePotential::load(&path, &config) }
+            .err()
+            .expect("fixture must fail to load");
+        assert!(
+            !library_is_mapped(&path),
+            "{} remains mapped after load failed",
+            path.display()
+        );
+    }
 }
 
 #[test]
 fn the_potential_handle_evaluates_and_destroys_the_engine() {
     let path = build("harmonic_handle", &[]);
-    let before = destroyed(&path);
+    let observer = FixtureObserver::open(&path);
+    let before = observer.destroyed();
     let potential = load(&path).into_potential();
     assert!(potential.as_handle().has_hessian_vector_callback());
     let mut positions = vec![0.5, -1.0, 2.0, 0.0, 3.0, -0.25];
@@ -731,7 +803,7 @@ fn the_potential_handle_evaluates_and_destroys_the_engine() {
         rgpot_tensor_free(input.box_matrix);
     }
     drop(potential);
-    assert_eq!(destroyed(&path), before + 1);
+    assert_eq!(observer.destroyed(), before + 1);
 }
 
 #[test]
