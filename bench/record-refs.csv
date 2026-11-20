@@ -4,4 +4,4 @@
 # and fails until the ref is pushed and its tree recorded.
 ref,sha,tree
 record/repro-pin,9a30f3190b3bb7040c675a904f8388eb68224151,4cf101da6fe8f4d1069f5cb472413bd7e232d69c
-record/sc-h2h-harness,d59b0b6cf02fc300ff618f79d65da365128eed5a,
+record/sc-h2h-harness,d59b0b6cf02fc300ff618f79d65da365128eed5a,16f50956905ca7fc7f51459ef36fb336eebb1d1b
