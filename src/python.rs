@@ -93,6 +93,25 @@ fn validate_box_domain(low: &[f64], high: &[f64], allow_fixed: bool) -> PyResult
     Ok(())
 }
 
+/// Build a box for a driver, rejecting the inputs that make `Bounds::new`
+/// panic. A panic would surface as `PanicException`, a `BaseException`.
+fn checked_bounds(low: Vec<f64>, high: Vec<f64>, slack: f64) -> PyResult<Bounds<f64>> {
+    if low.len() != high.len() {
+        return Err(bounds_error("low and high must have the same length"));
+    }
+    if let Some(i) = low.iter().zip(&high).position(|(&lo, &hi)| !(lo <= hi)) {
+        return Err(bounds_error(format!(
+            "low[{i}] must not exceed high[{i}] (got {}, {})",
+            low[i], high[i]
+        )));
+    }
+    Ok(Bounds::new(
+        Array1::from_vec(low),
+        Array1::from_vec(high),
+        slack,
+    ))
+}
+
 fn py_view1<'py>(py: Python<'py>, x: ArrayView1<f64>) -> Bound<'py, PyArray1<f64>> {
     match x.as_slice() {
         Some(sl) => PyArray1::from_slice(py, sl),
@@ -258,6 +277,28 @@ fn read_x0(
 #[pyclass(name = "BasinBias")]
 pub struct PyBasinBias {
     inner: crate::bias::BasinBias<crate::bias::SortedPairs>,
+    n_points: usize,
+}
+
+impl PyBasinBias {
+    fn state<'a>(
+        &self,
+        x: &'a numpy::PyReadonlyArray1<f64>,
+    ) -> PyResult<ndarray::ArrayView1<'a, f64>> {
+        let slice = x
+            .as_slice()
+            .map_err(|_| invalid_argument("x must be contiguous"))?;
+        if slice.len() != 3 * self.n_points {
+            return Err(invalid_argument(format!(
+                "x has length {}, but {} points need 3 * {} = {}",
+                slice.len(),
+                self.n_points,
+                self.n_points,
+                3 * self.n_points
+            )));
+        }
+        Ok(ndarray::ArrayView1::from(slice))
+    }
 }
 
 #[pymethods]
@@ -280,6 +321,7 @@ impl PyBasinBias {
                 w0,
                 gamma,
             ),
+            n_points,
         })
     }
 
@@ -289,10 +331,7 @@ impl PyBasinBias {
     /// core is built against, so the buffer is reborrowed through a slice.
     fn potential(&self, x: numpy::PyReadonlyArray1<f64>) -> PyResult<f64> {
         use crate::bias::Bias;
-        let slice = x
-            .as_slice()
-            .map_err(|_| invalid_argument("x must be contiguous"))?;
-        let v = ndarray::ArrayView1::from(slice);
+        let v = self.state(&x)?;
         let s = self.inner.cv(v);
         Ok(self.inner.potential(s.view()))
     }
@@ -303,10 +342,7 @@ impl PyBasinBias {
         if !(temp > 0.0) {
             return Err(invalid_argument("temp must be > 0"));
         }
-        let slice = x
-            .as_slice()
-            .map_err(|_| invalid_argument("x must be contiguous"))?;
-        let v = ndarray::ArrayView1::from(slice);
+        let v = self.state(&x)?;
         let s = self.inner.cv(v);
         self.inner.deposit(s.view(), temp);
         Ok(())
@@ -854,7 +890,7 @@ fn run_hmc(
     } else {
         None
     };
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
@@ -907,9 +943,7 @@ fn polish(
     let high_vec = high.as_slice()?.to_vec();
     let x0_vec = x0.as_slice()?.to_vec();
     if low_vec.len() != high_vec.len() || low_vec.len() != x0_vec.len() {
-        return Err(invalid_argument(
-            "low, high, and x0 must have the same length",
-        ));
+        return Err(bounds_error("low, high, and x0 must have the same length"));
     }
     if max_fevals < 1 {
         return Err(invalid_argument("max_fevals must be positive"));
@@ -922,7 +956,7 @@ fn polish(
     }
 
     let dim = low_vec.len();
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
@@ -966,7 +1000,7 @@ fn qmc_polish(
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     if low_vec.len() != high_vec.len() {
-        return Err(invalid_argument("low and high must have the same length"));
+        return Err(bounds_error("low and high must have the same length"));
     }
     if n_starts < 1 {
         return Err(invalid_argument("n_starts must be positive"));
@@ -982,7 +1016,7 @@ fn qmc_polish(
     }
 
     let dim = low_vec.len();
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
@@ -1092,10 +1126,10 @@ fn qmc_best1bin_scout(
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     if low_vec.len() != high_vec.len() {
-        return Err(invalid_argument("low and high must have the same length"));
+        return Err(bounds_error("low and high must have the same length"));
     }
     if low_vec.is_empty() {
-        return Err(invalid_argument("bounds must have at least one dimension"));
+        return Err(bounds_error("bounds must have at least one dimension"));
     }
     if max_evals < 1 {
         return Err(invalid_argument("max_evals must be positive"));
@@ -1122,7 +1156,7 @@ fn qmc_best1bin_scout(
         return Err(invalid_argument("crossover_rate must be in [0, 1]"));
     }
 
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
@@ -1233,13 +1267,13 @@ fn qmc_gsa_global_search(
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     if low_vec.len() != high_vec.len() {
-        return Err(invalid_argument("low and high must have the same length"));
+        return Err(bounds_error("low and high must have the same length"));
     }
     validate_box_bounds(&low_vec, &high_vec)?;
     validate_qmc_gsa_global_search_args(max_evals, n_chains, t_init, q_v, q_a)?;
     let start = read_x0(x0, &low_vec, &high_vec)?;
 
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
@@ -1311,12 +1345,12 @@ fn qmc_trust_region_poll(
     let high_vec = high.as_slice()?.to_vec();
     let center_vec = center.as_slice()?.to_vec();
     if low_vec.len() != high_vec.len() || low_vec.len() != center_vec.len() {
-        return Err(invalid_argument(
+        return Err(bounds_error(
             "low, high, and center must have the same length",
         ));
     }
     if low_vec.is_empty() {
-        return Err(invalid_argument("bounds must have at least one dimension"));
+        return Err(bounds_error("bounds must have at least one dimension"));
     }
     if max_evals < 1 {
         return Err(invalid_argument("max_evals must be positive"));
@@ -1330,7 +1364,7 @@ fn qmc_trust_region_poll(
         return Err(invalid_argument("n_levels must be positive"));
     }
 
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
@@ -1410,7 +1444,7 @@ fn shifted_qmc_polish(
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     if low_vec.len() != high_vec.len() {
-        return Err(invalid_argument("low and high must have the same length"));
+        return Err(bounds_error("low and high must have the same length"));
     }
     if n_starts < 1 {
         return Err(invalid_argument("n_starts must be positive"));
@@ -1429,7 +1463,7 @@ fn shifted_qmc_polish(
     }
 
     let dim = low_vec.len();
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
@@ -1487,7 +1521,7 @@ fn additive_independence(
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     if low_vec.len() != high_vec.len() {
-        return Err(invalid_argument("low and high must have the same length"));
+        return Err(bounds_error("low and high must have the same length"));
     }
     if max_fevals < 1 {
         return Err(invalid_argument("max_fevals must be positive"));
@@ -1504,7 +1538,7 @@ fn additive_independence(
     } else {
         n_pilot
     };
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
@@ -1531,10 +1565,10 @@ fn estimate_gle_omega0(
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     if low_vec.len() != high_vec.len() {
-        return Err(invalid_argument("low and high must have the same length"));
+        return Err(bounds_error("low and high must have the same length"));
     }
     let dim = low_vec.len();
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
@@ -1614,12 +1648,12 @@ fn gle_langevin(
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     if low_vec.len() != high_vec.len() {
-        return Err(invalid_argument("low and high must have the same length"));
+        return Err(bounds_error("low and high must have the same length"));
     }
     validate_gle_args(max_fevals, omega0)?;
     let dim = low_vec.len();
     let x0 = gle_langevin_x0(x0, dim)?;
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
@@ -1656,12 +1690,12 @@ fn gle_langevin_preconditioned(
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     if low_vec.len() != high_vec.len() {
-        return Err(invalid_argument("low and high must have the same length"));
+        return Err(bounds_error("low and high must have the same length"));
     }
     validate_gle_args(max_fevals, omega0)?;
     let dim = low_vec.len();
     let x0 = gle_langevin_x0(x0, dim)?;
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
@@ -2377,7 +2411,7 @@ fn global_optimize(
     }
     let start = read_x0(x0, &low_vec, &high_vec)?;
     let dim = low_vec.len();
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
@@ -2593,7 +2627,7 @@ fn run(
     preset.validate()?;
     validate_max_evals(max_evals)?;
     let start = read_x0(x0, &low_vec, &high_vec)?;
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
@@ -2630,21 +2664,21 @@ fn low_discrepancy_points(
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     if low_vec.len() != high_vec.len() {
-        return Err(invalid_argument("low and high must have the same length"));
+        return Err(bounds_error("low and high must have the same length"));
     }
     if low_vec.is_empty() {
-        return Err(invalid_argument("bounds must have at least one dimension"));
+        return Err(bounds_error("bounds must have at least one dimension"));
     }
     if low_vec
         .iter()
         .zip(high_vec.iter())
-        .any(|(&lo, &hi)| hi < lo)
+        .any(|(&lo, &hi)| !(lo <= hi))
     {
-        return Err(invalid_argument(
+        return Err(bounds_error(
             "each upper bound must be greater than or equal to the lower bound",
         ));
     }
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 0.0);
+    let bounds = checked_bounds(low_vec, high_vec, 0.0)?;
     let points = eindir_core::low_discrepancy_points(&bounds, n, skip);
     Ok(points.outer_iter().map(|row| row.to_vec()).collect())
 }
@@ -2687,10 +2721,10 @@ fn run_qmc(
     let high_vec = high.as_slice()?.to_vec();
     validate_max_evals(max_evals)?;
     if low_vec.len() != high_vec.len() {
-        return Err(invalid_argument("low and high must have the same length"));
+        return Err(bounds_error("low and high must have the same length"));
     }
     if low_vec.is_empty() {
-        return Err(invalid_argument("bounds must have at least one dimension"));
+        return Err(bounds_error("bounds must have at least one dimension"));
     }
     if low_vec.iter().zip(high_vec.iter()).any(|(&lo, &hi)| {
         !lo.is_finite() || !hi.is_finite() || !(2.0 * (hi - lo)).is_finite() || hi < lo
@@ -2701,13 +2735,13 @@ fn run_qmc(
         .sum::<f64>()
         .is_finite()
     {
-        return Err(invalid_argument(
+        return Err(bounds_error(
             "each bound must be finite and each upper bound must be greater than or equal to the lower bound",
         ));
     }
     preset.validate()?;
     let start = read_x0(x0, &low_vec, &high_vec)?;
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());

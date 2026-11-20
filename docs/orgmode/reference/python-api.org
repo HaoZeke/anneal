@@ -85,3 +85,46 @@ except anneal.RemovedConfigKeyError as err:
 else:
     raise AssertionError("a removed key must raise")
 #+end_src
+
+* Boxes and states
+
+Every function that takes =low= and =high= checks the box before it searches.
+Sides of different lengths raise =InvalidArgumentError=, a bound that is NaN
+or a =low= above =high= raises =BoundsError=. Neither case reaches Rust
+code that would panic: a panic arrives in Python as =PanicException=, which
+derives from =BaseException= and skips =except Exception=.
+
+=BasinBias.potential= and =BasinBias.deposit= take a state of =3 * n_points=
+coordinates and raise =InvalidArgumentError= for any other length.
+
+The =Bounds= class is built by the =eindir-core= crate. Its constructor still
+panics on sides of different lengths, an inverted pair or a negative =slack=.
+Check the arrays before you build one, or pass =low= and =high= to the
+search functions, which check them.
+
+#+begin_src python
+import numpy as np
+
+import anneal
+
+try:
+    anneal.polish(
+        lambda x: float(np.sum(x**2)),
+        lambda x: 2 * x,
+        np.ones(2),
+        np.zeros(2),
+        np.zeros(2),
+    )
+except anneal.BoundsError:
+    pass
+else:
+    raise AssertionError("an inverted box must raise")
+
+bias = anneal.BasinBias(3)
+try:
+    bias.potential(np.zeros(8))
+except anneal.InvalidArgumentError as err:
+    assert "3 * 3 = 9" in str(err)
+else:
+    raise AssertionError("a state of the wrong length must raise")
+#+end_src

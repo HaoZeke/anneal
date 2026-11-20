@@ -4,7 +4,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 
 use super::Preset;
-use super::errors::invalid_argument;
+use super::errors::{bounds_error, invalid_argument};
 use crate::accept::{Metropolis, ProbabilityArithmetic, TsallisAccept};
 use crate::cool::{Cooling, LogCool, ReciprocalCool, TsallisCool};
 use crate::movekernel::{Cauchy, Gaussian, TsallisVisit};
@@ -297,12 +297,12 @@ fn run_native<'py>(
     let low_shape: Vec<usize> = low.getattr("shape")?.extract()?;
     let high_shape: Vec<usize> = high.getattr("shape")?.extract()?;
     if low_shape != high_shape || low_shape.len() != 1 {
-        return Err(invalid_argument(
+        return Err(bounds_error(
             "low and high must be one-dimensional arrays of equal shape",
         ));
     }
     if low_shape[0] == 0 {
-        return Err(invalid_argument("bounds must have at least one dimension"));
+        return Err(bounds_error("bounds must have at least one dimension"));
     }
     let finite_bounds = arrays.binary(
         "logical_and",
