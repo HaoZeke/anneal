@@ -1,0 +1,36 @@
+key,value
+base_ref,5eb79cdcb0a986984dc7b487e5a3cc93224246f9
+base_tree,7a2ba49b37241a8fe42b2c45c226374de6d92274
+b_tree,2ca02a84d3a5ed6452263d23c0cb810d6a0d3dcc
+kit_sha256,8e5600c1070c8d98d2d9936a4c9d70f5afa46f10d35beb61c7f723171cd5fd85
+harness_blobs,run_gate.py:4b0c45fe273bb8d91258710b7c77f3e78c362255 guard_trace.rs:56f354180171104420b2ffc4bb19027f3884d710
+machine_id,3b11c160088e7af5c4f7ebd9da95e0bfe019a34698416701bb057c15fea10873
+seeds,2000-2023
+n,24
+core,0
+threads,1
+family,29
+alpha,0.05
+build_a,45a1f5ea5097ed6f0a6112ca3ef92d4e56ffa62e5dba963f30aff971d61d1d7f
+build_b,df49b50cd72e4a3b9480a86558a1928cc91d2f88f6865309918f9d190bce55e6
+build_ap,40be2432a787ef6273f49aafd9dd1e96594699e3a6e46f0d291a2077a1d754a1
+balance_rq3,0:A=12 1:B=12 2:Ap=12 3:Ap=12 4:B=12 5:A=12
+balance_915,0:A=12 1:B=12 2:B=12 3:A=12
+balance_xld,0:A=12 1:B=12 2:Ap=12 3:Ap=12 4:B=12 5:A=12
+balance_fluvastatin,0:A=12 1:B=12 2:B=12 3:A=12
+balance_z34,0:A=12 1:B=12 2:B=12 3:A=12
+balance_amprenavir,0:A=12 1:B=12 2:B=12 3:A=12
+balance_lopinavir,0:A=12 1:B=12 2:B=12 3:A=12
+balance_lorlatinib,0:A=12 1:B=12 2:B=12 3:A=12
+balance_lj38,0:A=12 1:B=12 2:Ap=12 3:Ap=12 4:B=12 5:A=12
+balance_lj75,0:A=12 1:B=12 2:B=12 3:A=12
+balance_m80r6,0:A=12 1:B=12 2:B=12 3:A=12
+balance_au55,0:A=12 1:B=12 2:B=12 3:A=12
+balance_hexamer,0:A=12 1:B=12 2:Ap=12 3:Ap=12 4:B=12 5:A=12
+budget_lj38,400000
+budget_lj75,4000000
+budget_m80r6,4000000
+budget_au55,1000000
+budget_hexamer,500000
+a_tree,7a2ba49b37241a8fe42b2c45c226374de6d92274
+placement,none
