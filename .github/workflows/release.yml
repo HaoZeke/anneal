@@ -149,10 +149,7 @@ jobs:
         run: |
           python -m venv .sdist-venv
           .sdist-venv/bin/python -m pip install dist/anneal-*.tar.gz
-          test "$(.sdist-venv/bin/python -c \
-            'import anneal, os; print(os.path.relpath(anneal.__file__))')" \
-            != python/anneal/__init__.py
-          .sdist-venv/bin/python -c 'import anneal, anneal._core; print(anneal.__version__)'
+          .sdist-venv/bin/python scripts/check_installed_anneal.py .sdist-venv
 
       - uses: actions/upload-artifact@v4
         with:

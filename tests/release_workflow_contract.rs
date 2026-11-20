@@ -294,18 +294,57 @@ fn release_installs_and_imports_the_built_sdist() {
         "the sdist is installed before it is uploaded"
     );
 
-    let lines = script(install);
-    assert_eq!(lines[0], "python -m venv .sdist-venv");
     assert_eq!(
-        lines[1],
-        ".sdist-venv/bin/python -m pip install dist/anneal-*.tar.gz"
+        script(install),
+        [
+            "python -m venv .sdist-venv",
+            ".sdist-venv/bin/python -m pip install dist/anneal-*.tar.gz",
+            ".sdist-venv/bin/python scripts/check_installed_anneal.py .sdist-venv",
+        ]
     );
+}
+
+/// The guard the sdist step runs, against stand-ins for an installed package
+/// and for the places an import could wrongly come from.
+#[test]
+fn the_sdist_guard_accepts_only_a_package_installed_in_the_venv() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let venv = temp.path().join(".sdist-venv");
+    let site = venv.join("lib/python3/site-packages");
+    let loose = venv.join("lib/python3/loose");
+    let source = temp.path().join("checkout/python");
+    for dir in [&site, &loose, &source] {
+        let package = dir.join("anneal");
+        std::fs::create_dir_all(&package).expect("package dir");
+        std::fs::write(package.join("__init__.py"), "__version__ = '9.9.9'\n").expect("init");
+        std::fs::write(package.join("_core.py"), "").expect("core");
+    }
+    let guard = |from: &std::path::Path| {
+        Command::new("python3")
+            .args(["scripts/check_installed_anneal.py"])
+            .arg(&venv)
+            .env("PYTHONPATH", from)
+            .env_remove("PYTHONHOME")
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .output()
+            .expect("python3 runs the guard")
+    };
+
+    let installed = guard(&site);
     assert!(
-        lines[2..]
-            .iter()
-            .any(|line| line.starts_with(".sdist-venv/bin/python") && line.contains("anneal._core")),
-        "the venv interpreter imports the compiled extension"
+        installed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&installed.stderr)
     );
+    assert_eq!(String::from_utf8_lossy(&installed.stdout).trim(), "9.9.9");
+    for (name, from) in [
+        ("a source tree", &source),
+        ("a venv path outside site-packages", &loose),
+    ] {
+        let output = guard(from);
+        assert!(!output.status.success(), "the guard accepted {name}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("was imported from"));
+    }
 }
 
 #[test]
