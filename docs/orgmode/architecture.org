@@ -167,7 +167,7 @@ Source: =src/methods/local_polish.rs= and =python/anneal/__init__.py= wrappers.
 ** Observed-cloud SOAP/ACE residual hop (soap.rs)
 
 Slots: Move proposes an ambient analytic-Jacobian pullback of the stacked
-SOAP plus ACE =nu=3= leftover and scales it to the caller's Cartesian cap.
+SOAP plus ACE ~nu=3~ leftover and scales it to the caller's Cartesian cap.
 Atomic packing systems use the fivefold residual instead.  For molecular and
 surface systems, every declared movable molecule is retracted by its nearest
 finite proper rigid motion after scaling; ungrouped atoms keep the ambient
@@ -184,8 +184,8 @@ Source: =src/soap.rs= and
 Slots: the molecular hop on a *clone* of the caller's config. Turns on
 =return_screen= and =symmetrise_on_stall= on the clone; never writes
 =Config::recommended=. CLI token =ras= / =pair= (not FFS =archive=).
-At =cap >= 50000=, =N >= 70= is one hop that polishes every returning
-trial (=return_polish = R/4=, =return_polish_after = 0=); smaller =N=
+At ~cap >= 50000~, ~N >= 70~ is one hop that polishes every returning
+trial (~return_polish = R/4~, ~return_polish_after = 0~); smaller =N=
 is 30 percent skip-return then polish from the same start. Under
 =cap < 50000= the molecular and slab examples keep their own walks.
 Paired 400000 x 8 on HaoZeke/anneal =0937483=: LJ75 1/8 vs rec 0/8

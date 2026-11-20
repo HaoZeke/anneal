@@ -7,7 +7,10 @@
 A Morse pair has its minimum at 1, at every range.
 On reduced units, every length in the preset is 12% too wide for Morse.
 
-Pass the pair's own length scale instead:
+=Config::recommended_for_pair(n, kind)= is that rescaling at energy scale 1.
+Lennard-Jones stays =recommended=.
+Morse takes the pair minimum.
+The same call by hand:
 
 #+begin_src rust
 use anneal_core::methods::cluster_hopping::Config;

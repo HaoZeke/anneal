@@ -31,7 +31,7 @@ families, use =experiments/scripts/demo_bgsa.py=.
 ** When to supply a gradient
 
 - Point set (\(3N\)): =cluster_search= (always needs a gradient or force).
-- Design box, gradient: =ensemble_optimize(..., grad_fn=...)=.
+- Design box, gradient: ~ensemble_optimize(..., grad_fn=...)~.
 - Design box, values only: =ensemble_optimize= without =grad_fn=, or =global_optimize=.
 - Ill-conditioned spectrum: =gle_langevin=.
 - Last-mile accuracy: =polish= / =qmc_polish= (bounded L-BFGS).
