@@ -1051,10 +1051,10 @@ def gmin_panel_readme(audit: Audit, panel: object, groups: dict) -> None:
     audit.said(GMIN_PANEL_README, GMIN_PANEL_REVISION)
     audit.said(GMIN_PANEL_README, gmin_revision(groups))
     audit.said(GMIN_PANEL_README, f"adds the energy {dict((r[0], r[3]) for r in panel.SYSTEMS)['lj103']:.6f}")
-    r0 = 2.884
-    scale = r0 / 2.0 ** (1.0 / 6.0)
-    rad = (2.0 + (3.0 * 55 / 17.77153175) ** (1.0 / 3.0)) * r0
-    audit.said(GMIN_PANEL_README, f"(`RADIUS {rad:.6f}`), `STEP {0.40 * scale:.6f} 0.51` and `AVOID {4.0 * scale:.6f} 20 F`")
+    rad = panel.gmin_gupta_radius(55)
+    step = panel.LJ_STEP * panel.GOLD_LENGTH_PER_LJ
+    avoid = panel.LJ_AVOID * panel.GOLD_LENGTH_PER_LJ
+    audit.said(GMIN_PANEL_README, f"(`RADIUS {rad:.6f}`), `STEP {step:.6f} 0.51` and `AVOID {avoid:.6f} 20 F`")
     audit.said(GMIN_PANEL_README, "`TEMPERATURE 0.1` eV from Wales's `examples/GMIN/MGupta.tar.bz2`")
     audit.said(GMIN_PANEL_README,
                f"The earlier Au55 rows of session `{first_session}` ran the alloy block of "
@@ -1749,6 +1749,13 @@ def generated_tables(audit: Audit) -> None:
 
 def sutton_chen(audit: Audit) -> None:
     """The Sutton-Chen counts in the prose, from the rows the table is written from."""
+    sc_run = load_script("run_sc_step", "scripts/metal_h2h/run_sc.py")
+    step = f"{sc_run.sc_step():.6f}"
+    audit.said(SI, f"a step of {step}~\\(a\\)")
+    audit.said("bench/metal-cluster-h2h/sc-n12/README.md", f"the step 0.40 σ in units of a, {step}")
+    hits = load_script("sc96_step", "scripts/sc96_78_hits.py")
+    audit.record(step in hits.result_paragraph([], "harness"), "scripts/sc96_78_hits.py",
+                 "the Sutton-Chen step is derived", step, "present")
     h2h = load_script("h2h_tables_sc", "paper/jctc/scripts/h2h_tables.py")
     pairs = h2h.sc_pairs()
     ahead = sum(int(a["hits"]) > int(g["hits"]) for a, g in pairs)
@@ -5065,9 +5072,12 @@ def manuscript_followups(audit: Audit) -> None:
     audit.said(PAPER, "The panel uses three GMIN inputs.")
     audit.said(PAPER, "The Lennard-Jones rows run the Wales-group LJ\\(_{38}\\) introduction file at every Lennard-Jones size,")
     audit.said(PAPER, "The Morse rows add GMIN's native \\texttt{MORSE} keyword and \\(\\rho\\) to the same numerical settings.")
-    audit.said(PAPER, "The Au\\(_{55}\\) row instead uses the Darby gold parameters, the \\(11.829521\\)~\\AA\\ "
-                    "nearest-neighbor container, \\(T=0.1\\)~eV, and the LJ step and taboo distances scaled by "
-                    "\\(r_0/2^{1/6}\\).")
+    gmin_src = load_script("gmin_radius_prose", "scripts/gmin_panel/run_panel.py")
+    radius = f"{gmin_src.gmin_gupta_radius(55):.6f}"
+    audit.said(PAPER, "The Au\\(_{55}\\) row instead uses the Darby gold parameters, the "
+                    f"\\({radius}\\)~\\AA\\ nearest-neighbor container, \\(T=0.1\\)~eV, and the LJ step and taboo "
+                    "distances scaled by \\(r_0/2^{1/6}\\).")
+    audit.said(SI, f"GMIN's nearest-neighbor container \\({radius}\\)~\\AA")
     audit.said(PAPER, "# GMIN: LJ/Morse use TEMPERATURE 1.0 and NEWRESTART 40;")
     audit.said(PAPER, "# Au55 Gupta uses TEMPERATURE 0.1, NEWRESTART 40 and scaled RADIUS/STEP/AVOID")
     audit.said(PAPER, "with \\(T=1.0\\), \\texttt{NEWRESTART 40}, and an energy difference of 0.003")
