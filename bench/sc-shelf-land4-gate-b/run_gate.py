@@ -170,7 +170,6 @@ def child_env() -> dict[str, str]:
     env["OMP_PROC_BIND"] = "TRUE"
     env["OMP_PLACES"] = "cores"
     env["PYTHONHASHSEED"] = "0"
-    env["LJOS_SEAT"] = "benchbot"
     return env
 
 
