@@ -290,7 +290,9 @@ fn check_rgpot_fresh() -> Vec<String> {
             failures.extend(check_points(
                 "cuh2-fresh",
                 &CUH2,
-                coordinate_sum_precision,
+                |coordinates, energy| {
+                    force_sign::cuh2_precision(&CUH2_SPECIES, coordinates, energy)
+                },
                 None,
                 |coordinates| {
                     pot.restart();

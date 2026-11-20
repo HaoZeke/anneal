@@ -9,8 +9,10 @@
 //! `1.d-6 * acc` Hartree (`scfconv` in `src/scf_module.F90`). The callback
 //! passes `GFN2_ACCURACY`, and rgpot publishes the energy in eV, so the
 //! absolute precision `δ` is that threshold times `HARTREE_EV`. An
-//! analytic backend returns an f64, and `δ` is one unit in the last place
-//! of that energy.
+//! analytic backend that returns one rounded value uses one unit in the
+//! last place of that energy. The CuH2 embedding polynomial is degree 8,
+//! so its precision is Horner's `γ_{16}` times the sum of the absolute
+//! terms, and one ulp is only the floor.
 //!
 //! A central difference at step `h` has noise `δ / h`. The shortest pair
 //! distance `L` is the length on which a pair slope changes by its own
@@ -18,14 +20,20 @@
 //! is `|g| h² / (6 L²)`. The step minimises the sum of noise and
 //! truncation. The compared value is the finer difference, at `h/2`.
 //! When the error is quadratic in `h`, its truncation is one third of the
-//! gap between the two differences, and its noise is `2δ / h`. A component
-//! counts only when that bound is smaller than `|g|` and `h` stays inside
-//! the pair, off the overlap wall. The largest component has to count, and
-//! every counted component has to fall inside its bound.
+//! gap between the two differences. That gap is noisy by `3δ / h`, so the
+//! third is uncertain by `δ / h`, and the fine difference adds its own
+//! `2δ / h`. A component counts only when that bound is smaller than `|g|`
+//! and `h` stays inside the pair, off the overlap wall. The largest
+//! component has to count, and every counted component has to fall inside
+//! its bound.
 //!
 //! A missing engine library is named and skipped. A library that is
 //! present has to resolve each distorted geometry. The callback list is
 //! checked either way, so a new force publisher does not pass unseen.
+
+#[allow(dead_code)]
+#[path = "../../examples/common/force_sign.rs"]
+mod force_sign;
 
 #[allow(unused_imports)]
 #[path = "../../examples/common/rgpot_eindir.rs"]
@@ -150,7 +158,7 @@ fn scalene(label: &str, coords: &[f64]) -> Result<(), String> {
             "{label} pair distances {distances:?} are not distinct"
         ));
     }
-    if !(triangle_area(coords) > 0.0) {
+    if !strictly_positive(triangle_area(coords)) {
         return Err(format!("{label} is flat"));
     }
     Ok(())
@@ -171,6 +179,10 @@ fn pair_distances(coords: &[f64]) -> [f64; 3] {
         }
     }
     distances
+}
+
+fn strictly_positive(value: f64) -> bool {
+    matches!(value.partial_cmp(&0.0), Some(std::cmp::Ordering::Greater))
 }
 
 fn triangle_area(coords: &[f64]) -> f64 {
@@ -265,7 +277,7 @@ fn check_cuh2(box_: &[f64; 9]) -> Vec<String> {
                 "cuh2",
                 &mut pot,
                 &CUH2,
-                EnergyPrecision::UnitInTheLastPlace,
+                EnergyPrecision::Cuh2Embedding,
                 None,
             )
         }
@@ -301,8 +313,8 @@ fn library_file(var: &str, file_name: &str) -> Result<Option<PathBuf>, String> {
 enum EnergyPrecision {
     /// The same absolute precision at every geometry.
     Fixed(f64),
-    /// One unit in the last place of the energy just returned.
-    UnitInTheLastPlace,
+    /// Horner bound on the degree-8 CuH2 embedding, floored at one ulp.
+    Cuh2Embedding,
 }
 
 fn check_pot(
@@ -382,15 +394,15 @@ fn compare_geometry(
     }
     let precision = match precision {
         EnergyPrecision::Fixed(precision) => precision,
-        EnergyPrecision::UnitInTheLastPlace => {
-            let precision = unit_in_the_last_place(energy);
+        EnergyPrecision::Cuh2Embedding => {
+            let precision = force_sign::cuh2_precision(&CUH2_SPECIES, geometry, energy);
             println!(
-                "{backend} geometry {index} energy precision {precision:.6e} eV (one ulp of {energy:.12})"
+                "{backend} geometry {index} energy precision {precision:.6e} eV (degree-8 embedding, energy {energy:.12})"
             );
             precision
         }
     };
-    if !(precision > 0.0) {
+    if !strictly_positive(precision) {
         return Err(format!(
             "{backend} geometry {index} energy precision {precision} is not positive"
         ));
@@ -403,7 +415,7 @@ fn compare_geometry(
         Some(limit) => (length - limit).min(length),
         None => length,
     };
-    if !(step_limit > 0.0) {
+    if !strictly_positive(step_limit) {
         return Err(format!(
             "{backend} geometry {index} has no room for a step inside the pair"
         ));
@@ -440,11 +452,14 @@ fn compare_geometry(
         let fine = central(&objective, geometry, component, step * 0.5)
             .map_err(|error| format!("{backend} geometry {index} {error}"))?;
         let gap = (coarse - fine).abs();
-        // Finer denominator is `h`, so an energy error of `2δ` is `2δ/h`.
-        let noise = 2.0 * precision / step;
-        let bound = gap / 3.0 + noise;
+        // `gap / 3` is the fine truncation. The measured gap is uncertain
+        // by the coarse noise `δ/h` plus the fine noise `2δ/h`, and a
+        // third of that uncertainty is `δ/h`.
+        let gap_noise = precision / step;
+        let fine_noise = 2.0 * precision / step;
+        let bound = gap / 3.0 + gap_noise + fine_noise;
         let miss = (slope - fine).abs();
-        if !(bound < magnitude) {
+        if !bound.is_finite() || bound >= magnitude {
             if component == largest {
                 return Err(format!(
                     "{backend} geometry {index} largest component {component} slope {slope:.6e} is not resolved (fine {fine:.6e}, gap {gap:.6e}, bound {bound:.6e}, step {step:.6e})"

@@ -8,7 +8,8 @@
 // third derivative on a length `L` is `|g| / L²`, so the step that
 // minimises noise plus truncation is `(3 δ L² / |g|)^(1/3)`. The compared
 // slope is the difference at `h/2`. Its truncation is one third of the gap
-// between the two differences, and its noise is `2δ / h`.
+// between the two differences. The gap is noisy by `3δ / h`, so that third
+// is uncertain by `δ / h`, and the fine difference adds `2δ / h`.
 
 use std::path::PathBuf;
 
@@ -234,8 +235,12 @@ pub(crate) fn compare_slope(
         let fine = central(&mut energy_at, geometry, component, step * 0.5)
             .map_err(|error| format!("{backend} geometry {index} {error}"))?;
         let gap = (coarse - fine).abs();
-        let noise = 2.0 * precision / step;
-        let bound = gap / 3.0 + noise;
+        // `gap / 3` is the fine truncation. The measured gap is uncertain
+        // by the coarse noise `δ/h` plus the fine noise `2δ/h`, and a
+        // third of that uncertainty is `δ/h`.
+        let gap_noise = precision / step;
+        let fine_noise = 2.0 * precision / step;
+        let bound = gap / 3.0 + gap_noise + fine_noise;
         let miss = (component_slope - fine).abs();
         if bound >= magnitude || !bound.is_finite() {
             if component == largest {
@@ -303,6 +308,120 @@ fn central(
         ));
     }
     Ok(slope)
+}
+
+/// Absolute energy error of the eOn CuH2 potential.
+///
+/// The Cu embedding polynomial has degree 8 and the H polynomial degree 5
+/// (`f_cu` and `f_h` in rgpot's `rgpot_cuh2`, the eOn `pot.par` set).
+/// Horner's rule bounds a degree-n evaluation by `γ_{2n}` times the sum of
+/// the absolute terms, so the factor here is `γ_16`. The sum also includes
+/// the two exponentials in each pair and the cutoff shift. One ulp of
+/// `energy` is the floor. The distances are the direct ones: the vacuum
+/// cell is 60 Å and the cutoff is 6.1 Å, so a periodic image of these
+/// clusters does not enter the sum.
+pub(crate) fn cuh2_precision(species: &[i32], coordinates: &[f64], energy: f64) -> f64 {
+    summed_precision(
+        CUH2_HORNER_STAGES,
+        cuh2_absolute_terms(species, coordinates),
+        energy,
+    )
+}
+
+const CU_Z: i32 = 29;
+const H_Z: i32 = 1;
+const CUH2_CUTOFF_A: f64 = 6.1;
+const CUH2_HORNER_STAGES: usize = 16;
+const CU_CU: [f64; 4] = [2862.3, 3.51236, -109.107, 1.75618];
+const H_H: [f64; 4] = [79.5013, 2.47961, -107.555, 2.99918];
+const H_CU: [f64; 4] = [86.1495, 4.21154, 15355.5, 6.07604];
+const CU_EMBEDDING: [f64; 8] = [
+    -112.945,
+    8510.04,
+    -261_734.0,
+    4_780_090.0,
+    -52_341_900.0,
+    339_124_000.0,
+    -1_201_500_000.0,
+    1_796_190_000.0,
+];
+const H_EMBEDDING: [f64; 5] = [-81.7537, 838.668, -3952.35, 8767.87, -6599.37];
+
+fn cuh2_absolute_terms(species: &[i32], coordinates: &[f64]) -> f64 {
+    let atoms = species.len();
+    if coordinates.len() != 3 * atoms {
+        return f64::NAN;
+    }
+    let mut density = vec![0.0; atoms];
+    let mut absolute = 0.0;
+    for i in 0..atoms {
+        for j in (i + 1)..atoms {
+            let distance = direct_distance(coordinates, i, j);
+            if !distance.is_finite() || distance >= CUH2_CUTOFF_A {
+                continue;
+            }
+            let pair = match (species[i], species[j]) {
+                (CU_Z, CU_Z) => CU_CU,
+                (H_Z, H_Z) => H_H,
+                (CU_Z, H_Z) | (H_Z, CU_Z) => H_CU,
+                _ => continue,
+            };
+            absolute += pair_absolute(pair, distance);
+            density[i] += deposited_density(species[j], distance);
+            density[j] += deposited_density(species[i], distance);
+        }
+    }
+    for (atom, z) in species.iter().copied().enumerate() {
+        let coeffs: &[f64] = match z {
+            CU_Z => &CU_EMBEDDING,
+            H_Z => &H_EMBEDDING,
+            _ => continue,
+        };
+        absolute += polynomial_absolute(coeffs, density[atom]);
+    }
+    absolute
+}
+
+fn pair_absolute(coeff: [f64; 4], distance: f64) -> f64 {
+    let terms = |r: f64| {
+        let first = coeff[0] * (-coeff[1] * r).exp();
+        let second = coeff[2] * (-coeff[3] * r).exp();
+        first.abs() + second.abs()
+    };
+    // The cutoff shift is the same pair evaluated at `rcut`.
+    terms(distance) + terms(CUH2_CUTOFF_A)
+}
+
+fn deposited_density(neighbour: i32, distance: f64) -> f64 {
+    let shifted = |scale: f64, power: i32, beta_a: f64, beta_b: f64, gamma: f64| {
+        let at =
+            |r: f64| scale * r.powi(power) * ((-beta_a * r).exp() + gamma * (-beta_b * r).exp());
+        at(distance) - at(CUH2_CUTOFF_A)
+    };
+    match neighbour {
+        CU_Z => shifted(0.273072, 6, 3.69051, 7.38101, 512.0),
+        H_Z => shifted(2.14389, 0, 3.77701, 0.0, 0.0),
+        _ => 0.0,
+    }
+}
+
+fn polynomial_absolute(coeffs: &[f64], rho: f64) -> f64 {
+    let mut power = 1.0;
+    let mut absolute = 0.0;
+    for coeff in coeffs {
+        power *= rho;
+        absolute += (coeff * power).abs();
+    }
+    absolute
+}
+
+fn direct_distance(coordinates: &[f64], left: usize, right: usize) -> f64 {
+    let mut acc = 0.0;
+    for axis in 0..3 {
+        let delta = coordinates[3 * left + axis] - coordinates[3 * right + axis];
+        acc += delta * delta;
+    }
+    acc.sqrt()
 }
 
 pub(crate) fn uniform_lengths(
