@@ -1385,8 +1385,13 @@ Neither arm hits \((\mathrm{H_2O})_{21}\).
 On the unscored \((\mathrm{H_2O})_{25}\) the best and the median are
 \(-1113.035\) and \(-1103.345\)~kJ/mol for this setting, and \(-1087.334\) and
 \(-1082.127\)~kJ/mol for GMIN.
-The wall-time Mann--Whitney test is a per-call cost and is not a search result.
-The median wall is that cost, and it is lower for this setting on all 5 sizes.
+The median total wall time per run is lower for this setting on all 5 sizes,
+by a factor of 3.00 to 87.1.
+A run stops at a hit, so that factor combines the cost of a call with the
+number of calls the search spent.
+The median over runs of wall time per call is lower for this setting on all 5
+sizes, by a factor of 2.28 to 3.18, and measures the cost of a call alone.
+At 21 and 25 molecules every run spends the full budget, so the two factors agree.
 These budgets and seeds are not those of the previous subsection, in which
 \((\mathrm{H_2O})_{15}\) and \((\mathrm{H_2O})_{20}\) hit on 0 of 6 at
 \(5\times 10^{5}\) calls.
@@ -1395,7 +1400,9 @@ These budgets and seeds are not those of the previous subsection, in which
 \begin{table}
 \caption{Run r2c against GMIN on rigid TIP4P water clusters.
 Seeds 2000--2011, one core, budget in force calls.
-Wall is the median wall in seconds, a per-call cost and not a search result.
+Wall per run is the median total wall time of a run in seconds.
+A run stops at a hit, so it depends on both the cost of a call and the calls spent.
+Per call is the median over runs of wall time over calls in \(\mu\)s, the cost of a call alone.
 \(p_\mathrm{F}\) is the two-sided Fisher exact test on hits and \(p_\mathrm{calls}\)
 the two-sided exact Mann--Whitney test on calls to a hit, with a miss ranked at the budget.
 Both are Bonferroni-corrected with \(m=4\) over the four sizes that have a Cambridge header.
@@ -1403,17 +1410,17 @@ Both are Bonferroni-corrected with \(m=4\) over the four sizes that have a Cambr
 \label{tab:tip4p-gmin}
 \centering
 \small
-\begin{tabular}{@{}lrrrrrrr@{}}
+\begin{tabular}{@{}lrrrrrrrrr@{}}
 \toprule
- & & \multicolumn{2}{c}{Hits} & \multicolumn{2}{c}{Wall (s)} & & \\
-\cmidrule(lr){3-4}\cmidrule(lr){5-6}
-Cluster & Budget & This work & GMIN & This work & GMIN & \(p_\mathrm{F}\) & \(p_\mathrm{calls}\) \\
+ & & \multicolumn{2}{c}{Hits} & \multicolumn{2}{c}{Wall per run (s)} & \multicolumn{2}{c}{Per call (\(\mu\)s)} & & \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}\cmidrule(lr){7-8}
+Cluster & Budget & This work & GMIN & This work & GMIN & This work & GMIN & \(p_\mathrm{F}\) & \(p_\mathrm{calls}\) \\
 \midrule
-(H\(_2\)O)\(_8\) & \(2\times 10^{6}\) & 12/12 & 8/12 & 0.022 & 1.952 & 0.37 & \(3.0\times 10^{-6}\) \\
-(H\(_2\)O)\(_{15}\) & \(2\times 10^{6}\) & 7/12 & 0/12 & 11.667 & 48.016 & 0.018 & 0.018 \\
-(H\(_2\)O)\(_{20}\) & \(2\times 10^{6}\) & 6/12 & 0/12 & 21.541 & 83.630 & 0.055 & 0.055 \\
-(H\(_2\)O)\(_{21}\) & \(2\times 10^{6}\) & 0/12 & 0/12 & 26.312 & 81.097 & 1 & 1 \\
-(H\(_2\)O)\(_{25}\) & \(2\times 10^{6}\) & -- & -- & 35.730 & 107.1 & -- & -- \\
+(H\(_2\)O)\(_8\) & \(2\times 10^{6}\) & 12/12 & 8/12 & 0.022 & 1.952 & 3.53 & 8.04 & 0.37 & \(3.0\times 10^{-6}\) \\
+(H\(_2\)O)\(_{15}\) & \(2\times 10^{6}\) & 7/12 & 0/12 & 11.667 & 48.016 & 8.23 & 24.01 & 0.018 & 0.018 \\
+(H\(_2\)O)\(_{20}\) & \(2\times 10^{6}\) & 6/12 & 0/12 & 21.541 & 83.630 & 13.16 & 41.82 & 0.055 & 0.055 \\
+(H\(_2\)O)\(_{21}\) & \(2\times 10^{6}\) & 0/12 & 0/12 & 26.312 & 81.097 & 13.16 & 40.55 & 1 & 1 \\
+(H\(_2\)O)\(_{25}\) & \(2\times 10^{6}\) & -- & -- & 35.730 & 107.1 & 17.87 & 53.55 & -- & -- \\
 \bottomrule
 \end{tabular}
 \end{table}

@@ -104,7 +104,10 @@ def r2c_stats() -> list[dict]:
 
     Sizes with a Cambridge header are scored. (H2O)25 is not. Fisher and the
     calls-to-hit Mann-Whitney p are Bonferroni-corrected with m=4. A miss is
-    ranked at its recorded call count, which is the budget. Wall is a cost.
+    ranked at its recorded call count, which is the budget. Wall is the median
+    total wall time per run. A run that hits stops early, so it also depends on
+    the calls the search spent. Per call is the median over runs of wall_s over
+    calls, which leaves only the cost of a call.
     """
     rows = read(TIP4P_ROWS)
     grouped: dict[int, dict[str, list[dict[str, str]]]] = {}
@@ -152,6 +155,8 @@ def r2c_stats() -> list[dict]:
             "gmin_median": type7(energies_g),
             "anneal_wall": type7(walls_a),
             "gmin_wall": type7(walls_g),
+            "anneal_per_call": type7([float(row["wall_s"]) / int(row["calls"]) for row in anneal]),
+            "gmin_per_call": type7([float(row["wall_s"]) / int(row["calls"]) for row in gmin]),
         })
     return stats
 
@@ -160,6 +165,10 @@ def show_s(value: float) -> str:
     if value < 100.0:
         return f"{value:.3f}"
     return f"{value:.1f}"
+
+
+def show_us(seconds: float) -> str:
+    return f"{seconds * 1e6:.2f}"
 
 
 def show_calls(value: str) -> str:
@@ -235,13 +244,16 @@ def tip4p_block() -> str:
         body.append(" & ".join([
             TIP4P_LABEL[f"tip4p{row['molecules']}"], budget_tex(str(row["budget"])),
             hits_a, hits_g, show_s(row["anneal_wall"]), show_s(row["gmin_wall"]),
+            show_us(row["anneal_per_call"]), show_us(row["gmin_per_call"]),
             fisher_p, calls_p,
         ]) + " \\\\")
     return "\n".join([
         "\\begin{table}",
         "\\caption{Run r2c against GMIN on rigid TIP4P water clusters.",
         "Seeds 2000--2011, one core, budget in force calls.",
-        "Wall is the median wall in seconds, a per-call cost and not a search result.",
+        "Wall per run is the median total wall time of a run in seconds.",
+        "A run stops at a hit, so it depends on both the cost of a call and the calls spent.",
+        "Per call is the median over runs of wall time over calls in \\(\\mu\\)s, the cost of a call alone.",
         "\\(p_\\mathrm{F}\\) is the two-sided Fisher exact test on hits and \\(p_\\mathrm{calls}\\)",
         "the two-sided exact Mann--Whitney test on calls to a hit, with a miss ranked at the budget.",
         "Both are Bonferroni-corrected with \\(m=4\\) over the four sizes that have a Cambridge header.",
@@ -249,11 +261,12 @@ def tip4p_block() -> str:
         "\\label{tab:tip4p-gmin}",
         "\\centering",
         "\\small",
-        "\\begin{tabular}{@{}lrrrrrrr@{}}",
+        "\\begin{tabular}{@{}lrrrrrrrrr@{}}",
         "\\toprule",
-        " & & \\multicolumn{2}{c}{Hits} & \\multicolumn{2}{c}{Wall (s)} & & \\\\",
-        "\\cmidrule(lr){3-4}\\cmidrule(lr){5-6}",
-        "Cluster & Budget & This work & GMIN & This work & GMIN & "
+        " & & \\multicolumn{2}{c}{Hits} & \\multicolumn{2}{c}{Wall per run (s)} & "
+        "\\multicolumn{2}{c}{Per call (\\(\\mu\\)s)} & & \\\\",
+        "\\cmidrule(lr){3-4}\\cmidrule(lr){5-6}\\cmidrule(lr){7-8}",
+        "Cluster & Budget & This work & GMIN & This work & GMIN & This work & GMIN & "
         "\\(p_\\mathrm{F}\\) & \\(p_\\mathrm{calls}\\) \\\\",
         "\\midrule",
         *body,

@@ -12,8 +12,7 @@ n ≤ 21. (H₂O)₂₅ is not in the database, so run r2c leaves it unscored.
 
 Fisher's exact test on hits and the Mann–Whitney test on calls to a hit are
 two-sided and Bonferroni-corrected with m = 4, one comparison for each scored
-size. A miss is ranked at the budget in the calls test. The wall-time
-Mann–Whitney test is a per-call cost and is not a search result.
+size. A miss is ranked at the budget in the calls test.
 
 GMIN is built from source by `scripts/gmin_h2h/build_gmin.sh` at revision
 `aac1548a`, gfortran 13.3.0, reference BLAS/LAPACK, with NEWTIP, TIPID 4,
@@ -47,15 +46,16 @@ Rows are `rows-h2h-r2.csv`, run r2c. `best` is the lowest of the twelve; the
 median is beside it. `p(F)` is Fisher's exact test on the hit counts and
 `p(calls)` is the exact Mann–Whitney test on calls to a hit, both after the
 Bonferroni correction above. (H₂O)₂₅ is unscored, so its hit and p cells are
-blank. Wall is a per-call cost.
+blank. `wall per run` is the median total wall time of a run, and `per call`
+is the median over runs of `wall_s` divided by `calls`.
 
-| Size | anneal | GMIN | anneal best / median | GMIN best / median | wall (a/g s) | p(F) | p(calls) |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| (H₂O)₈  | 12/12 | 8/12 | −305.5177 / −305.5176 | −305.5189 / −305.5189 | 0.022 / 1.952 | 0.37 | 3.0e-06 |
-| (H₂O)₁₅ | 7/12  | 0/12 | −628.3716 / −628.3713 | −622.8593 / −619.9326 | 11.667 / 48.016 | 0.018 | 0.018 |
-| (H₂O)₂₀ | 6/12  | 0/12 | −872.9879 / −868.8666 | −860.7014 / −851.4433 | 21.541 / 83.630 | 0.055 | 0.055 |
-| (H₂O)₂₁ | 0/12  | 0/12 | −915.7735 / −914.3685 | −903.7597 / −895.5929 | 26.312 / 81.097 | 1 | 1 |
-| (H₂O)₂₅ | unscored | unscored | −1113.035 / −1103.345 | −1087.334 / −1082.127 | 35.730 / 107.109 | -- | -- |
+| Size | anneal | GMIN | anneal best / median | GMIN best / median | wall per run (a/g s) | per call (a/g µs) | p(F) | p(calls) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| (H₂O)₈  | 12/12 | 8/12 | −305.5177 / −305.5176 | −305.5189 / −305.5189 | 0.022 / 1.952 | 3.53 / 8.04 | 0.37 | 3.0e-06 |
+| (H₂O)₁₅ | 7/12  | 0/12 | −628.3716 / −628.3713 | −622.8593 / −619.9326 | 11.667 / 48.016 | 8.23 / 24.01 | 0.018 | 0.018 |
+| (H₂O)₂₀ | 6/12  | 0/12 | −872.9879 / −868.8666 | −860.7014 / −851.4433 | 21.541 / 83.630 | 13.16 / 41.82 | 0.055 | 0.055 |
+| (H₂O)₂₁ | 0/12  | 0/12 | −915.7735 / −914.3685 | −903.7597 / −895.5929 | 26.312 / 81.097 | 13.16 / 40.55 | 1 | 1 |
+| (H₂O)₂₅ | unscored | unscored | −1113.035 / −1103.345 | −1087.334 / −1082.127 | 35.730 / 107.109 | 17.87 / 53.55 | -- | -- |
 
 Run r2c hits (H₂O)₈ on 12 of 12 and GMIN on 8 of 12. The calls-to-hit p is
 3.0e-06 and Fisher's p is 0.37. It hits (H₂O)₁₅ on 7 of 12 against 0 of 12,
@@ -64,8 +64,12 @@ significant. Neither arm hits (H₂O)₂₁. On the unscored (H₂O)₂₅ the b
 median energies are −1113.035 / −1103.345 kJ/mol for anneal and −1087.334 /
 −1082.127 kJ/mol for GMIN.
 
-The median wall is a per-call cost. It is lower for anneal on all five sizes,
-by a factor of 3.00 to 87.1. That factor is not a search result.
+The median total wall time per run is lower for anneal on all five sizes, by
+a factor of 3.00 to 87.1. A run stops at a hit, so that factor combines the
+cost of a call with the number of calls the search spent. The median over runs
+of wall time per call is lower for anneal on all five sizes, by a factor of
+2.28 to 3.18, and measures the cost of a call alone. At (H₂O)₂₁ and (H₂O)₂₅
+every run spends the full budget, so the two factors agree.
 
 At (H₂O)₈ both arms find the same global-minimum cage. GMIN's best reads
 1.2 mJ/mol below anneal's there, which is the potential offset above plus
@@ -83,13 +87,13 @@ evaluations, the same twelve seeds and the same serial arm. The driver is
 `scripts/tip4p_h2h/enter_budget.sh`, the Snakemake rule is
 `tip4p21_budget_h2h`, and the asv class is `Tip4p21BudgetHeadToHead`. GMIN at
 a (budget, seed) pair is deterministic: the 2 M GMIN rows repeat the panel's
-best and median energies, and their median wall is 75.15 s against the
-panel's 81.097 s. Summary rows are `summary-budget21.csv`
+best and median energies, and their median total wall time per run is
+75.15 s against the panel's 81.097 s. Summary rows are `summary-budget21.csv`
 and per-seed rows are `rows-budget21.csv`. `p(U)` is the two-sided
 Mann–Whitney U test on the per-seed best energies; the hit counts are 0/12 on
 both arms at every budget, so the Fisher exact p is 1.000 throughout.
 
-| Budget | anneal | GMIN | anneal best / median | GMIN best / median | wall (a/g s) | p(U) |
+| Budget | anneal | GMIN | anneal best / median | GMIN best / median | wall per run (a/g s) | p(U) |
 | --- | --- | --- | --- | --- | --- | --- |
 | 2 M | 0/12 | 0/12 | −915.774 / −914.368 | −903.760 / −895.593 | 24.70 / 75.15 | 3.2e-05 |
 | 4 M | 0/12 | 0/12 | −915.774 / −914.889 | −905.330 / −897.861 | 49.48 / 150.16 | 3.2e-05 |
@@ -103,8 +107,8 @@ leave it. The median does climb,
 from −914.37 to −915.14, as the slower seeds reach that plateau. GMIN's best
 improves from −903.76 to −905.33 and then holds, 11.4 kJ/mol short. Anneal's
 per-seed best distribution stays below GMIN's at every budget, Mann–Whitney p
-3.2e-05, at a third of the wall. Lifting (H₂O)₂₁ is left to later work; the
-default preset is unchanged here.
+3.2e-05, at a third of the median total wall time per run. Lifting (H₂O)₂₁
+is left to later work; the default preset is unchanged here.
 
 ## (H₂O)₂₁ misses at 2 M
 Each of the twelve 2 M rows above is rerun with the panel's stop target and

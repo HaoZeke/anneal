@@ -2369,16 +2369,79 @@ def ase_gofee(audit: Audit) -> None:
                f"it spent the full {row['charged']} calls in {float(row['wall_s']):.0f} s, best energy {float(row['best']):.6f}")
 
 
+def r2c_walls(audit: Audit) -> dict[int, dict[str, float]]:
+    """Run r2c wall statistics per size, straight from the per-seed rows.
+
+    ``wall`` is the median total wall_s of a run and ``per_call`` the median
+    over runs of wall_s / calls, both per arm. ``full`` counts the runs of both
+    arms that spent the whole budget.
+    """
+    rows = audit.rows("bench/tip4p-h2h/rows-h2h-r2.csv")
+    out: dict[int, dict[str, float]] = {}
+    for size in sorted({int(r["molecules"]) for r in rows}):
+        group = pick(rows, molecules=str(size))
+        budget = max(int(r["calls"]) for r in group)
+        stat: dict[str, float] = {"runs": float(len(group)),
+                                  "full": float(sum(int(r["calls"]) == budget for r in group))}
+        for arm in ("anneal", "gmin"):
+            runs = pick(group, arm=arm)
+            stat[f"{arm}_wall"] = median([float(r["wall_s"]) for r in runs])
+            stat[f"{arm}_per_call"] = median([float(r["wall_s"]) / int(r["calls"]) for r in runs])
+        out[size] = stat
+    return out
+
+
+def r2c_wall_ratios(walls: dict[int, dict[str, float]]) -> tuple[list[float], list[float]]:
+    """GMIN over anneal for the median wall per run and for the median wall per call."""
+    total = [w["gmin_wall"] / w["anneal_wall"] for w in walls.values()]
+    per_call = [w["gmin_per_call"] / w["anneal_per_call"] for w in walls.values()]
+    return total, per_call
+
+
 def cite_r2c(audit: Audit) -> None:
     """The TIP4P versus GMIN head-to-head is run r2c, recomputed from its rows.
 
     Fisher and the calls-to-hit Mann-Whitney p use a Bonferroni correction with
-    m=4. (H2O)25 is unscored. A wall-time Mann-Whitney p is a per-call cost.
+    m=4. (H2O)25 is unscored. Wall is the median total wall time per run, and
+    per call is the median over runs of wall_s / calls.
     """
     h2h = load_script("h2h_tables_r2c", "paper/jctc/scripts/h2h_tables.py")
     stats = h2h.r2c_stats()
     by = {row["molecules"]: row for row in stats}
     audit.rows("bench/tip4p-h2h/rows-h2h-r2.csv")
+    walls = r2c_walls(audit)
+    for size, wall in walls.items():
+        for key in ("anneal_wall", "gmin_wall", "anneal_per_call", "gmin_per_call"):
+            audit.record(abs(by[size][key] - wall[key]) <= 1e-12 * abs(wall[key]), TEX,
+                         f"run r2c {key} at n={size} is the audit's median of the rows", f"{by[size][key]}",
+                         f"{wall[key]}")
+    label_size = {h2h.TIP4P_LABEL[f"tip4p{n}"]: n for n in walls}
+    for cells in tex_table(audit, TEX, "tab:tip4p-gmin"):
+        size = label_size[cells[0]]
+        where = f"{TEX} tab:tip4p-gmin n={size}"
+        wall = walls[size]
+        audit.cell(where, "this work wall per run (s)", cells[4], wall["anneal_wall"])
+        audit.cell(where, "GMIN wall per run (s)", cells[5], wall["gmin_wall"])
+        audit.cell(where, "this work wall per call (us)", cells[6], wall["anneal_per_call"] * 1e6)
+        audit.cell(where, "GMIN wall per call (us)", cells[7], wall["gmin_per_call"] * 1e6)
+    total, per_call = r2c_wall_ratios(walls)
+    lower_total = sum(w["anneal_wall"] < w["gmin_wall"] for w in walls.values())
+    lower_call = sum(w["anneal_per_call"] < w["gmin_per_call"] for w in walls.values())
+    audit.said(TEX, f"The median total wall time per run is lower for this setting on all {lower_total} sizes, "
+                    f"by a factor of {min(total):.2f} to {max(total):.1f}.")
+    audit.said(TEX, "A run stops at a hit, so that factor combines the cost of a call with the "
+                    "number of calls the search spent.")
+    audit.said(TEX, f"The median over runs of wall time per call is lower for this setting on all {lower_call} "
+                    f"sizes, by a factor of {min(per_call):.2f} to {max(per_call):.2f}, and measures the cost of a "
+                    "call alone.")
+    full = [n for n, w in walls.items() if w["full"] == w["runs"]]
+    audit.record(full == [21, 25], TEX, "every run of both arms spends the full budget only at n=21 and 25",
+                 "21 25", " ".join(map(str, full)))
+    audit.record(all(abs(total[i] - per_call[i]) <= 1e-9 * total[i] for i, n in enumerate(walls) if n in full),
+                 TEX, "the two wall factors agree where every run spends the budget", "agree", "agree")
+    audit.said(TEX, "At 21 and 25 molecules every run spends the full budget, so the two factors agree.")
+    audit.said(TEX, "Wall per run is the median total wall time of a run in seconds.")
+    audit.said(TEX, "Per call is the median over runs of wall time over calls in \\(\\mu\\)s, the cost of a call alone.")
     old = {row["system"]: row for row in audit.rows("bench/tip4p-h2h/h2h-summary.csv")}
     audit.record(old["tip4p15"]["anneal_hits"] == "9/12" and old["tip4p20"]["anneal_hits"] == "5/12",
                  "bench/tip4p-h2h/h2h-summary.csv", "the earlier summary keeps the pre-r2c hit counts",
@@ -2426,13 +2489,9 @@ def cite_r2c(audit: Audit) -> None:
     for label, value in (("anneal best", twentyfive["anneal_best"]), ("anneal median", twentyfive["anneal_median"]),
                          ("GMIN best", twentyfive["gmin_best"]), ("GMIN median", twentyfive["gmin_median"])):
         audit.cell(TEX, f"run r2c (H2O)25 {label}", kj(value), value)
-    audit.said(TEX, "The wall-time Mann--Whitney test is a per-call cost and is not a search result.")
-    audit.said(TEX, "Wall is the median wall in seconds, a per-call cost and not a search result.")
     audit.said(TEX, "\\caption{Run r2c against GMIN on rigid TIP4P water clusters.")
     audit.said(TEX, "Both are Bonferroni-corrected with \\(m=4\\) over the four sizes that have a Cambridge header.")
     audit.said(TEX, "\\((\\mathrm{H_2O})_{25}\\) is not scored.")
-    quicker = [row for row in stats if row["anneal_wall"] < row["gmin_wall"]]
-    audit.said(TEX, f"The median wall is that cost, and it is lower for this setting on all {len(quicker)} sizes.")
     more = [row for row in stats if row["scored"] and row["anneal_hits"] > row["gmin_hits"]]
     scored = [row for row in stats if row["scored"]]
     audit.said(TEX, f"Against GMIN on TIP4P, run r2c hits more seeds on {len(more)} of the {len(scored)} scored sizes")
@@ -2441,7 +2500,8 @@ def cite_r2c(audit: Audit) -> None:
                     f"with \\(p={h2h.show_p(fifteen['fisher_p'])}\\).")
     section = audit.text(TEX).split("\\label{sec:tip4p-gmin}", 1)[1].split("\\subsection{", 1)[0]
     for stale in ("9 of 12", "5 of 12", "1 of 12 against 0 of 12", "p=0.093", "3.4\\times 10^{-4}",
-                  "scored against the lowest energy"):
+                  "scored against the lowest energy", "per-call cost", "not a search result",
+                  "wall-time Mann"):
         audit.record(stale not in section, TEX, f"the r2c section drops the earlier figure {stale}", "absent",
                      "absent" if stale not in section else "present")
     abstract = audit.text(TEX).split("\\begin{abstract}", 1)[1].split("\\end{abstract}", 1)[0]
@@ -2459,7 +2519,8 @@ def tip4p_panel(audit: Audit) -> None:
     sizes = {"(H₂O)₈": 8, "(H₂O)₁₅": 15, "(H₂O)₂₀": 20, "(H₂O)₂₁": 21, "(H₂O)₂₅": 25}
     pairs = (("anneal best / median", "anneal_best", "anneal_median"),
              ("GMIN best / median", "gmin_best", "gmin_median"),
-             ("wall (a/g s)", "anneal_wall", "gmin_wall"))
+             ("wall per run (a/g s)", "anneal_wall", "gmin_wall"))
+    walls = r2c_walls(audit)
     for line, row in md_table(audit, path, "Size | anneal | GMIN | anneal best"):
         stat = stats[sizes[row["Size"]]]
         where = f"{path}:{line} n={stat['molecules']}"
@@ -2477,9 +2538,14 @@ def tip4p_panel(audit: Audit) -> None:
             shown_l, shown_r = row[label].split(" / ")
             audit.cell(where, f"{label} left", shown_l, stat[left])
             audit.cell(where, f"{label} right", shown_r, stat[right])
+        wall = walls[stat["molecules"]]
+        for label, scale in (("wall per run (a/g s)", 1.0), ("per call (a/g µs)", 1e6)):
+            key = "wall" if scale == 1.0 else "per_call"
+            shown_l, shown_r = row[label].split(" / ")
+            audit.cell(where, f"{label} left from the rows", shown_l, wall[f"anneal_{key}"] * scale)
+            audit.cell(where, f"{label} right from the rows", shown_r, wall[f"gmin_{key}"] * scale)
     audit.said(path, "(H₂O)₂₅ is not in the database, so run r2c leaves it unscored.")
     audit.said(path, "The head-to-head cited in the manuscript is run r2c, record branch\n`record/tip4p-h2h-r2`")
-    audit.said(path, "The wall-time Mann–Whitney test is a per-call cost and is not a search result.")
     twentyfive = stats[25]
 
     def uminus(value: float, places: int) -> str:
@@ -2489,8 +2555,19 @@ def tip4p_panel(audit: Audit) -> None:
                      f"{uminus(twentyfive['anneal_best'], 3)} / {uminus(twentyfive['anneal_median'], 3)} kJ/mol "
                      f"for anneal and {uminus(twentyfive['gmin_best'], 3)} / "
                      f"{uminus(twentyfive['gmin_median'], 3)} kJ/mol for GMIN.")
-    ratios = [stat["gmin_wall"] / stat["anneal_wall"] for stat in stats.values()]
-    audit.said(path, f"by a factor of {min(ratios):.2f} to {max(ratios):.1f}. That factor is not a search result.")
+    total, per_call = r2c_wall_ratios(walls)
+    audit.said(path, "The median total wall time per run is lower for anneal on all five sizes, by a factor of "
+                     f"{min(total):.2f} to {max(total):.1f}. A run stops at a hit, so that factor combines the cost "
+                     "of a call with the number of calls the search spent.")
+    audit.said(path, "The median over runs of wall time per call is lower for anneal on all five sizes, by a factor "
+                     f"of {min(per_call):.2f} to {max(per_call):.2f}, and measures the cost of a call alone. At "
+                     "(H₂O)₂₁ and (H₂O)₂₅ every run spends the full budget, so the two factors agree.")
+    audit.record(all(w["anneal_wall"] < w["gmin_wall"] and w["anneal_per_call"] < w["gmin_per_call"]
+                     for w in walls.values()) and len(walls) == 5, path,
+                 "anneal is lower on all five sizes for both wall statistics", "5", str(len(walls)))
+    for stale in ("per-call cost", "not a search result", "wall-time Mann"):
+        audit.record(stale not in audit.text(path), path, f"README-h2h.md drops {stale}", "absent",
+                     "absent" if stale not in audit.text(path) else "present")
     audit.said(path, "`h2h-summary.csv` is an earlier summary and is not run r2c.")
     audit.said(path, "The baseline (H₂O) counts are the anneal arm of run r2c.")
     audit.said(path, "GMIN's best reads\n1.2 mJ/mol below anneal's there")
