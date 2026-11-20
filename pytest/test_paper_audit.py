@@ -11,6 +11,7 @@ import math
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -1088,6 +1089,8 @@ def test_previously_unreported_is_not_history_narration():
     r"\cite*{missingCitationKey}",
     r"\citep*{missingCitationKey}",
     r"\citet*{missingCitationKey}",
+    r"\citeauthor{missingCitationKey}",
+    r"\citeauthor*{missingCitationKey}",
 ])
 def test_an_unresolved_cite_key_is_rejected(citation):
     path = "paper/jctc/manuscript.tex"
@@ -1285,6 +1288,105 @@ def test_reproduce_rules_never_declare_tracked_record_outputs():
             f"{rule} declares tracked records as outputs: "
             f"{sorted(declared & records)}"
         )
+
+
+def _stub_snakefile(text: str, stamp_root: Path) -> str:
+    text = text.replace('"/work/', f'"{stamp_root.as_posix()}/')
+    shell = (
+        '    shell:\n'
+        '        """\n'
+        "        set -euo pipefail\n"
+        '        if [ -n "{output}" ]; then\n'
+        "          for target in {output}; do\n"
+        '            mkdir -p "$(dirname "$target")"\n'
+        '            touch "$target"\n'
+        "          done\n"
+        "        fi\n"
+        '        """\n'
+    )
+    return re.sub(r'(?ms)^    shell:\n        """\n.*?"""\n', shell, text)
+
+
+def _concrete_rules(text: str) -> list[str]:
+    rules = []
+    for name, body in re.findall(r"(?ms)^rule (\w+):\n(.*?)(?=^rule \w+:|\Z)", text):
+        if name == "all":
+            continue
+        output = re.search(r"(?ms)^    output:\n(.*?)(?=^    \w|\Z)", body)
+        if output and "{" in output.group(1):
+            continue
+        rules.append(name)
+    return rules
+
+
+def _tracked_status() -> str:
+    return subprocess.check_output(
+        ["git", "status", "--porcelain=v1", "--untracked-files=no"],
+        cwd=ROOT,
+        text=True,
+    )
+
+
+def _stamp_env(stamp_root: Path) -> dict[str, str]:
+    env = os.environ.copy()
+    env["ANNEAL_STAMP_ROOT"] = str(stamp_root)
+    return env
+
+
+def test_stubbed_snakemake_force_leaves_tracked_files_unchanged(tmp_path):
+    pytest.importorskip("snakemake")
+    stamp_root = tmp_path / "stamps"
+    stamp_root.mkdir()
+    source = (ROOT / "workflow/Snakefile").read_text()
+    tracked = set(subprocess.check_output(["git", "ls-files"], cwd=ROOT, text=True).splitlines())
+    for name, body in re.findall(r"(?ms)^rule (\w+):\n(.*?)(?=^rule \w+:|\Z)", source):
+        output = re.search(r"(?ms)^    output:\n(.*?)(?=^    \w|\Z)", body)
+        declared = re.findall(r"""["']([^"']+)["']""", output.group(1) if output else "")
+        assert not set(declared) & tracked, f"{name} declares tracked outputs"
+    stub = tmp_path / "Snakefile"
+    stub.write_text(_stub_snakefile(source, stamp_root))
+    before = _tracked_status()
+    completed = subprocess.run(
+        [
+            sys.executable, "-m", "snakemake", "-s", str(stub),
+            *_concrete_rules(source), "--cores", "1", "--force", "-k", "--nocolor",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        env=_stamp_env(stamp_root),
+    )
+    assert completed.returncode == 0, completed.stderr[-4000:]
+    assert _tracked_status() == before
+
+
+def test_a_tracked_snakemake_output_is_deleted_on_force(tmp_path):
+    pytest.importorskip("snakemake")
+    stamp_root = tmp_path / "stamps"
+    stamp_root.mkdir()
+    target = ROOT / "bench/gmin-panel/summary.csv"
+    original = target.read_bytes()
+    source = (ROOT / "workflow/Snakefile").read_text().replace(
+        'touch(STAMP_ROOT + "/gmin_panel.stamp")',
+        '"bench/gmin-panel/summary.csv"',
+    )
+    stub = tmp_path / "Snakefile"
+    stub.write_text(_stub_snakefile(source, stamp_root))
+    try:
+        subprocess.run(
+            [
+                sys.executable, "-m", "snakemake", "-s", str(stub), "gmin_panel",
+                "--cores", "1", "--force", "--nocolor",
+            ],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            env=_stamp_env(stamp_root),
+        )
+        assert target.read_bytes() != original
+    finally:
+        target.write_bytes(original)
 
 
 def test_a_tip4p_unscored_reference_is_rejected():

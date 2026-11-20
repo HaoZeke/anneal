@@ -37,7 +37,7 @@ The wall is those full quenches. Shortening one is the quench-convergence work a
 
 The recommended water arm now pays the allocator only when a hop improves the incumbent, starts the hydrogen-bond rewire with a prior of three improvements, and after 32 hops without a new lowest minimum leaves from another stored basin for eight hops. Quench convergence is unchanged. A binary homotop polish was quenching every oxygen–hydrogen swap and spending the budget before a hop; that polish now stays on an atomic library. The search below is that binary, not the warm GFN2 calculator.
 
-Anneal walls are the in-process clock around the 28000 calls. The shell clock ran longer on some seeds; those gaps are not search time. CREST walls are CREST's own total where it printed one. Seeds 15002 and 15004 aborted in CREST's structure crossing (`confcross_0.xyz` missing, exit 1). Their energies are the vtight score of the geometry CREST had already written, not a finished ensemble.
+Anneal walls are the in-process clock around the 28000 calls. The shell clock ran longer on some seeds; those gaps are not search time. CREST walls are CREST's own total where it printed one. Seeds 15002 and 15004 stopped in CREST's structure crossing at exit 1 before `confcross_0.xyz` was written. Their energies are the vtight score of the geometry CREST had already written, not a finished ensemble.
 
 The anneal mean wall is 1185.3 s. The four CREST runs that finished average 782.7 s, and the anneal mean on those same four seeds is 1192.8 s, ratio 1.52. Anneal's scored energy is lower on all six seeds. Anneal hits three seeds and CREST hits none. Seed 15005, a miss in the table above, is now inside the window. Seed 15003 is 0.015 eV short of the reference. `target_energy` was off.
 

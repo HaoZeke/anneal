@@ -14,7 +14,7 @@ WORK=/work/tip4p-rates
 BUDGET=500000
 # 0.001 kcal/mol. The thermochemical calorie is 4.184 kJ.
 TOL_KJ=0.004184
-CSV="$ROOT/bench/tip4p-water-rates/rates.csv"
+CSV="${TIP4P_RATES_CSV:-$ROOT/bench/tip4p-water-rates/rates.csv}"
 
 SIZE_ARG=
 SEED_ARG=

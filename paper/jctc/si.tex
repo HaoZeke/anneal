@@ -690,12 +690,19 @@ repository root.
 # GMIN: LJ/Morse use TEMPERATURE 1.0 and NEWRESTART 40;
 # Au55 Gupta uses TEMPERATURE 0.1, NEWRESTART 40 and scaled RADIUS/STEP/AVOID
 bash scripts/gmin_panel/build_gmin.sh
-snakemake -s workflow/Snakefile gmin_panel
-bash scripts/gmin_panel/enter_bench.sh --summarize --tex
+GMIN_PANEL_OUT=/work/gmin-panel/output \
+  snakemake -s workflow/Snakefile gmin_panel
+GMIN_PANEL_OUT=/work/gmin-panel/output \
+  bash scripts/gmin_panel/enter_bench.sh --summarize --tex \
+  --summary /work/gmin-panel/output/summary.csv \
+  --readme /work/gmin-panel/output/README.md \
+  --manuscript /work/gmin-panel/output/manuscript.tex
 
 # ASE: rewrite the tables from the committed rows, with no new search
-bash scripts/ase_panel/enter_bench.sh --system lj38
+ASE_PANEL_OUT=/work/ase-panel/output \
+  bash scripts/ase_panel/enter_bench.sh --system lj38
 ASE_NONLJ_REVISION=9a30f3190b3bb7040c675a904f8388eb68224151 \
+  ASE_NONLJ_OUT=/work/ase-nonlj/output \
   pixi run --locked --frozen bash scripts/ase_nonlj/enter_bench.sh
 
 # ASE, Morse: search again at the revision of the rows, into a new file
@@ -716,18 +723,24 @@ for s in $(seq 2000 2011); do bash scripts/ase_panel/enter_bench.sh \
   --system lj38 --arm anneal --seed $s; done
 bash scripts/ase_panel/enter_bench.sh --system lj38 --arm ase_bh --seed 2000
 
-# Sutton-Chen: run any missing seed, then rewrite both tables
-bash scripts/metal_h2h/enter_sc_n12.sh
-python3 paper/jctc/scripts/h2h_tables.py
+# Sutton-Chen: run seeds 2000-2011 under $SC_H2H_N12_OUTPUT
+SC_H2H_N12_OUTPUT=/work/metal-sc/output \
+  bash scripts/metal_h2h/enter_sc_n12.sh
+H2H_TABLES_OUTPUT=/work/h2h-tables \
+  python3 paper/jctc/scripts/h2h_tables.py
 
 # Full campaigns, each a new search with a session receipt
-snakemake -s workflow/Snakefile sc_h2h_n12 --cores 1 --force
-snakemake -s workflow/Snakefile tip4p_h2h --cores 1 --force
-snakemake -s workflow/Snakefile agox_gofee_h2h --cores 1 --force
+SC_H2H_N12_OUTPUT=/work/metal-sc/output \
+  snakemake -s workflow/Snakefile sc_h2h_n12 --cores 1 --force
+TIP4P_H2H_OUTPUT=/work/tip4p-h2h/output \
+  snakemake -s workflow/Snakefile tip4p_h2h --cores 1 --force
+AGOX_GOFEE_OUTPUT=/work/ase-gofee/output \
+  snakemake -s workflow/Snakefile agox_gofee_h2h --cores 1 --force
 \end{verbatim}
 \end{footnotesize}
-The GMIN script writes \texttt{bench/gmin-panel/rows.csv}, and the summarizers
-of each panel rewrite its table from the committed rows without a new search.
+The GMIN script writes its fresh rows and summary under
+\texttt{/work/gmin-panel/output}, and the summarizers of each panel write
+a fresh table there from the committed rows without a new search.
 Both ASE panels can be searched again from this repository, and each script
 writes a new search into a new rows file, so the committed rows stay as
 they are.
@@ -860,9 +873,10 @@ Both run on core 0 of the same host, one run at a time, in a namespace with
 hostname \texttt{bench}.
 Each GMIN row starts from the anneal row's start file under the GMIN data
 file of \path{scripts/metal_h2h/run_sc.py}.
-The command \texttt{bash scripts/metal\_h2h/enter\_sc\_n12.sh} runs any
-missing seed and keeps the stored ones, and
-\texttt{python3 paper/jctc/scripts/h2h\_tables.py} rewrites both tables from
+The command \texttt{bash scripts/metal\_h2h/enter\_sc\_n12.sh} runs seeds
+2000--2011 under \texttt{\$SC\_H2H\_N12\_OUTPUT} and keeps each stored row, and
+\texttt{python3 paper/jctc/scripts/h2h\_tables.py} writes both tables under
+\texttt{\$H2H\_TABLES\_OUTPUT} from
 \path{bench/metal-cluster-h2h/sc-n12/results.csv}.
 
 % sc-si table: start

@@ -18,6 +18,11 @@ def load_registry(root: Path) -> dict:
     for number, line in enumerate(additions.read_text().splitlines(), start=1):
         operation = json.loads(line)
         kind, key, value = operation["kind"], operation["key"], operation["value"]
+        if kind == "missing_outputs":
+            if key not in h2h or not isinstance(value, dict):
+                raise ValueError(f"{additions}:{number}: invalid missing_outputs update for {key!r}")
+            h2h[key] = {**h2h[key], "missing_outputs": value}
+            continue
         if key in h2h or key in not_h2h:
             raise ValueError(f"{additions}:{number}: {key} is already classified")
         if kind == "h2h":

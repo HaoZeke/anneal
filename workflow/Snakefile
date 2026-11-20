@@ -7,8 +7,14 @@
 configfile: "config/elja_lj.yaml"
 
 
+import os
+
 SIZES = [s.strip() for s in str(config.get("sizes", "")).split(",") if s.strip()]
 SEEDS = [s.strip() for s in str(config.get("seeds", "")).split(",") if s.strip()]
+
+# Default campaign stamps stay under /work. ANNEAL_STAMP_ROOT points a test
+# or a second run at an empty directory so host stamps are not missing outputs.
+STAMP_ROOT = os.environ.get("ANNEAL_STAMP_ROOT", "/work/anneal-snakemake")
 
 
 rule all:
@@ -47,10 +53,11 @@ rule lj_seed:
 #   snakemake -s workflow/Snakefile metal_h2h
 rule metal_h2h:
     output:
-        "bench/metal-cluster-h2h/results.csv",
+        touch(STAMP_ROOT + "/metal_h2h.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/metal_h2h/enter_bench.sh
         """
 
@@ -59,10 +66,11 @@ rule metal_h2h:
 #   snakemake -s workflow/Snakefile metal_darby_h2h
 rule metal_darby_h2h:
     output:
-        "bench/metal-cluster-h2h/darby.csv",
+        touch(STAMP_ROOT + "/metal_darby_h2h.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/metal_h2h/enter_darby.sh
         """
 
@@ -71,11 +79,11 @@ rule metal_darby_h2h:
 #   snakemake -s workflow/Snakefile sc_h2h
 rule sc_h2h:
     output:
-        "bench/metal-cluster-h2h/sc-8e076b7f/results.csv",
-        "bench/metal-cluster-h2h/sc-8e076b7f/seeds.csv",
+        touch(STAMP_ROOT + "/sc_h2h.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/metal_h2h/enter_sc.sh
         """
 
@@ -96,11 +104,11 @@ rule sc_h2h_n12:
 #   snakemake -s workflow/Snakefile sc_search_rows
 rule sc_search_rows:
     output:
-        "bench/metal-cluster-h2h/sc-restart/rows.csv",
-        "bench/metal-cluster-h2h/sc-pop/rows.csv",
+        touch(STAMP_ROOT + "/sc_search_rows.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/metal_h2h/enter_sc_rows.sh restart pop
         """
 
@@ -114,10 +122,11 @@ rule sc_restart_summary:
         "bench/metal-cluster-h2h/sc-n12/seeds.csv",
         "bench/metal-cluster-h2h/sc-restart/rows.csv",
     output:
-        "bench/metal-cluster-h2h/sc-restart/summary.csv",
+        touch(STAMP_ROOT + "/sc_restart_summary.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         python3 scripts/metal_h2h/summarise_sc_restart.py
         """
 
@@ -131,10 +140,11 @@ rule sc_pop_summary:
         "bench/metal-cluster-h2h/sc-n12/seeds.csv",
         "bench/metal-cluster-h2h/sc-pop/rows.csv",
     output:
-        "bench/metal-cluster-h2h/sc-pop/summary.csv",
+        touch(STAMP_ROOT + "/sc_pop_summary.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         python3 scripts/metal_h2h/summarise_sc_pop.py
         """
 
@@ -147,10 +157,11 @@ rule sc_chain_summary:
         "bench/metal-cluster-h2h/sc-n12/seeds.csv",
         "bench/metal-cluster-h2h/sc-chain/rows.csv",
     output:
-        "bench/metal-cluster-h2h/sc-chain/summary.csv",
+        touch(STAMP_ROOT + "/sc_chain_summary.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         python3 scripts/metal_h2h/summarise_sc_chain.py
         """
 
@@ -164,10 +175,11 @@ rule sc_portfolio_summary:
         "bench/metal-cluster-h2h/sc-n12/seeds.csv",
         "bench/metal-cluster-h2h/sc-portfolio/rows.csv",
     output:
-        "bench/metal-cluster-h2h/sc-portfolio/summary.csv",
+        touch(STAMP_ROOT + "/sc_portfolio_summary.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         python3 scripts/metal_h2h/summarise_sc_portfolio.py
         """
 
@@ -181,11 +193,11 @@ rule openconf_h2h:
         "bench/openconf-h2h/molecules.csv",
         "bench/openconf-h2h/budgets.csv",
     output:
-        "bench/openconf-h2h/results.csv",
-        "bench/openconf-h2h/seeds.csv",
+        touch(STAMP_ROOT + "/openconf_h2h.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/openconf_h2h/enter_bench.sh campaign
         OPENCONF_H2H_SKIP_BUILD=1 bash scripts/openconf_h2h/enter_bench.sh score
         """
@@ -199,11 +211,11 @@ rule openconf_h2h_n12:
     input:
         "bench/openconf-h2h/molecules.csv",
     output:
-        "bench/openconf-h2h/paired/summary.csv",
-        "bench/openconf-h2h/paired/stats.csv",
+        touch(STAMP_ROOT + "/openconf_h2h_n12.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         OPENCONF_H2H_CREST=0 bash scripts/openconf_h2h/enter_bench.sh paired
         OPENCONF_H2H_SKIP_BUILD=1 bash scripts/openconf_h2h/enter_bench.sh paired-score
         """
@@ -216,12 +228,11 @@ rule openconf_h2h_conf_fix:
     input:
         "bench/openconf-h2h/molecules.csv",
     output:
-        "bench/openconf-h2h/conf-fix/summary.csv",
-        "bench/openconf-h2h/conf-fix/stats.csv",
-        "bench/openconf-h2h/conf-fix/stats-develop.csv",
+        touch(STAMP_ROOT + "/openconf_h2h_conf_fix.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         OPENCONF_H2H_CREST=0 OPENCONF_H2H_BASELINE=92bc5805b476b529c90ab3b2c1db4b48c97ab93a \
             bash scripts/openconf_h2h/enter_bench.sh paired --tree conf-fix \
             --baseline /work/openconf-h2h/baseline
@@ -238,13 +249,11 @@ rule openconf_h2h_conf_fix3:
     input:
         "bench/openconf-h2h/molecules.csv",
     output:
-        "bench/openconf-h2h/conf-fix3/summary.csv",
-        "bench/openconf-h2h/conf-fix3/stats.csv",
-        "bench/openconf-h2h/conf-fix3/stats-develop.csv",
-        "bench/openconf-h2h/conf-fix3/xld24/stats-develop.csv",
+        touch(STAMP_ROOT + "/openconf_h2h_conf_fix3.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         OPENCONF_H2H_CREST=0 OPENCONF_H2H_BASELINE=7d8fa6ea6ec819a197b5390d87abab28423fd967 \
             bash scripts/openconf_h2h/enter_bench.sh paired --tree conf-fix3 \
             --baseline /work/openconf-h2h/baseline
@@ -267,12 +276,11 @@ rule openconf_h2h_conf_fix4:
     input:
         "bench/openconf-h2h/molecules.csv",
     output:
-        "bench/openconf-h2h/conf-fix4/summary.csv",
-        "bench/openconf-h2h/conf-fix4/stats.csv",
-        "bench/openconf-h2h/conf-fix4/stats-develop.csv",
+        touch(STAMP_ROOT + "/openconf_h2h_conf_fix4.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         OPENCONF_H2H_CREST=0 OPENCONF_H2H_BASELINE=7d8fa6ea6ec819a197b5390d87abab28423fd967 \
             bash scripts/openconf_h2h/enter_bench.sh paired --tree conf-fix4 \
             --baseline /work/openconf-h2h/baseline
@@ -290,12 +298,11 @@ rule openconf_h2h_conf_fix4_n24:
     input:
         "bench/openconf-h2h/conf-fix4/stats-develop.csv",
     output:
-        "bench/openconf-h2h/conf-fix4/n24/summary.csv",
-        "bench/openconf-h2h/conf-fix4/n24/stats.csv",
-        "bench/openconf-h2h/conf-fix4/n24/stats-develop.csv",
+        touch(STAMP_ROOT + "/openconf_h2h_conf_fix4_n24.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         OPENCONF_H2H_CREST=0 OPENCONF_H2H_BASELINE=7d8fa6ea6ec819a197b5390d87abab28423fd967 \
             bash scripts/openconf_h2h/enter_bench.sh paired --tree conf-fix4-n24 \
             --baseline /work/openconf-h2h/baseline \
@@ -310,10 +317,11 @@ rule openconf_h2h_conf_fix4_n24:
 #   snakemake -s workflow/Snakefile tric_quench
 rule tric_quench:
     output:
-        "bench/tric-quench/results.csv",
+        touch(STAMP_ROOT + "/tric_quench.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/tric_quench/enter_bench.sh
         """
 
@@ -322,11 +330,11 @@ rule tric_quench:
 #   snakemake -s workflow/Snakefile ptcu_h2h
 rule ptcu_h2h:
     output:
-        "bench/metal-cluster-h2h/ptcu-b3d03061/results.csv",
-        "bench/metal-cluster-h2h/ptcu-b3d03061/seeds.csv",
+        touch(STAMP_ROOT + "/ptcu_h2h.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/metal_h2h/enter_ptcu.sh
         """
 
@@ -336,10 +344,11 @@ rule ptcu_h2h:
 #   snakemake -s workflow/Snakefile morse_h2h
 rule morse_h2h:
     output:
-        "bench/morse-h2h/results.csv",
+        touch(STAMP_ROOT + "/morse_h2h.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/morse_h2h/enter_bench.sh
         """
 
@@ -349,11 +358,11 @@ rule morse_h2h:
 #   snakemake -s workflow/Snakefile morse_panel
 rule morse_panel:
     output:
-        "bench/morse-panel/seeds.csv",
-        "bench/morse-panel/summary.csv",
+        touch(STAMP_ROOT + "/morse_panel.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/morse_panel/enter_bench.sh
         """
 
@@ -362,10 +371,11 @@ rule morse_panel:
 #   snakemake -s workflow/Snakefile morse_hop
 rule morse_hop:
     output:
-        "bench/morse-hop/summary.csv",
+        touch(STAMP_ROOT + "/morse_hop.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/morse_hop/enter_bench.sh
         """
 
@@ -376,11 +386,11 @@ rule morse_hop:
 #   snakemake -s workflow/Snakefile morse_gmin
 rule morse_gmin:
     output:
-        "bench/morse-gmin/seeds.csv",
-        "bench/morse-gmin/summary.csv",
+        touch(STAMP_ROOT + "/morse_gmin.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/morse_gmin/enter_bench.sh
         """
 
@@ -391,11 +401,11 @@ rule morse_gmin:
 #   snakemake -s workflow/Snakefile morse14_h2h
 rule morse14_h2h:
     output:
-        "bench/morse14-h2h/seeds.csv",
-        "bench/morse14-h2h/summary.csv",
+        touch(STAMP_ROOT + "/morse14_h2h.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/morse14_h2h/enter_bench.sh
         """
 
@@ -405,11 +415,11 @@ rule morse14_h2h:
 #   snakemake -s workflow/Snakefile au55_scale
 rule au55_scale:
     output:
-        "bench/au55-scale/seeds.csv",
-        "bench/au55-scale/summary.csv",
+        touch(STAMP_ROOT + "/au55_scale.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/au55_scale/enter_bench.sh
         """
 
@@ -421,11 +431,11 @@ rule au55_scale:
 #   snakemake -s workflow/Snakefile covalent_h2h
 rule covalent_h2h:
     output:
-        "bench/covalent-h2h/v3/seeds.csv",
-        "bench/covalent-h2h/v3/results.csv",
+        touch(STAMP_ROOT + "/covalent_h2h.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         BENCH_OUT=v3 BEFORE_REV=7da10659 bash scripts/covalent_h2h/enter_bench.sh
         """
 
@@ -503,10 +513,11 @@ rule covalent_gfn2_crest_si10_n12:
 #   snakemake -s workflow/Snakefile gold_gupta_h2h
 rule gold_gupta_h2h:
     output:
-        "bench/gold-gupta/seeds.csv",
+        touch(STAMP_ROOT + "/gold_gupta_h2h.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/metal_h2h/enter_gold.sh
         """
 
@@ -516,10 +527,11 @@ rule gold_gupta_h2h:
 #   snakemake -s workflow/Snakefile gmin_h2h
 rule gmin_h2h:
     output:
-        "bench/gmin-h2h/results.csv",
+        touch(STAMP_ROOT + "/gmin_h2h.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/gmin_h2h/enter_bench.sh
         """
 
@@ -535,22 +547,24 @@ rule branch_gate:
     params:
         develop=config.get("develop_rev", "c2de652dca0bc75e2b0cb4afffac91fd656404e4"),
     output:
-        "bench/branch-gate/compare.csv",
+        touch(STAMP_ROOT + "/branch_gate.stamp"),
     shell:
         """
         set -euo pipefail
-        DEVELOP_REV={params.develop} bash scripts/branch_gate/enter_bench.sh
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/branch_gate
+        BRANCH_GATE_OUT=${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/branch_gate \
+          DEVELOP_REV={params.develop} bash scripts/branch_gate/enter_bench.sh
         """
 # Fiorentino and Marzari RPQA against the paper preset on LJ38.
 # Not part of `rule all`. One serial session, both arms, core 0:
 #   snakemake -s workflow/Snakefile pimc_lj38
 rule pimc_lj38:
     output:
-        "bench/pimc-lj38/results.csv",
-        "bench/pimc-lj38/seeds.csv",
+        touch(STAMP_ROOT + "/pimc_lj38.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/pimc_lj38/enter_bench.sh
         """
 
@@ -560,27 +574,11 @@ rule pimc_lj38:
 #   snakemake -s workflow/Snakefile pimc_lj38_paper
 rule pimc_lj38_paper:
     output:
-        "bench/pimc-lj38/rows/lj38/rpqa_paper-2000.row",
-        "bench/pimc-lj38/rows/lj38/rpqa_paper-2001.row",
-        "bench/pimc-lj38/rows/lj38/rpqa_paper-2002.row",
-        "bench/pimc-lj38/rows/lj38/rpqa_paper-2003.row",
-        "bench/pimc-lj38/rows/lj38/rpqa_paper-2004.row",
-        "bench/pimc-lj38/rows/lj38/rpqa_paper-2005.row",
-        "bench/pimc-lj38/rows/lj55/rpqa_paper-2000.row",
-        "bench/pimc-lj38/rows/lj55/rpqa_paper-2001.row",
-        "bench/pimc-lj38/rows/lj55/rpqa_paper-2002.row",
-        "bench/pimc-lj38/rows/lj55/rpqa_paper-2003.row",
-        "bench/pimc-lj38/rows/lj55/rpqa_paper-2004.row",
-        "bench/pimc-lj38/rows/lj55/rpqa_paper-2005.row",
-        "bench/pimc-lj38/rows/lj75/rpqa_paper-2000.row",
-        "bench/pimc-lj38/rows/lj75/rpqa_paper-2001.row",
-        "bench/pimc-lj38/rows/lj75/rpqa_paper-2002.row",
-        "bench/pimc-lj38/rows/lj75/rpqa_paper-2003.row",
-        "bench/pimc-lj38/rows/lj75/rpqa_paper-2004.row",
-        "bench/pimc-lj38/rows/lj75/rpqa_paper-2005.row",
+        touch(STAMP_ROOT + "/pimc_lj38_paper.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/pimc_lj38/enter_bench.sh paper
         """
 
@@ -590,11 +588,11 @@ rule pimc_lj38_paper:
 #   snakemake -s workflow/Snakefile growpal_h2h
 rule growpal_h2h:
     output:
-        "bench/growpal-h2h/results.csv",
-        "bench/growpal-h2h/seeds.csv",
+        touch(STAMP_ROOT + "/growpal_h2h.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/growpal_h2h/enter_bench.sh
         """
 
@@ -605,12 +603,11 @@ rule growpal_h2h:
 #   snakemake -s workflow/Snakefile growpal_h2h_v2
 rule growpal_h2h_v2:
     output:
-        "bench/growpal-h2h-v2/results.csv",
-        "bench/growpal-h2h-v2/seeds.csv",
-        "bench/growpal-h2h-v2/identity.csv",
+        touch(STAMP_ROOT + "/growpal_h2h_v2.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/growpal_h2h_v2/enter_bench.sh
         """
 
@@ -620,10 +617,11 @@ rule growpal_h2h_v2:
 #   snakemake -s workflow/Snakefile growpal_h2h_v2_uncapped
 rule growpal_h2h_v2_uncapped:
     output:
-        "bench/growpal-h2h-v2/uncapped.csv",
+        touch(STAMP_ROOT + "/growpal_h2h_v2_uncapped.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/growpal_h2h_v2/enter_bench.sh --uncapped
         """
 
@@ -631,12 +629,14 @@ rule growpal_h2h_v2_uncapped:
 # Depth-posterior ablation on LJ38, LJ55, LJ75, LJ98, and LJ104.
 # Not part of `rule all`. One serial session, both arms, paper budgets:
 #   snakemake -s workflow/Snakefile depth_posterior_ablation
+# Rows are appended to bench/depth-posterior-ablation/results.csv.
 rule depth_posterior_ablation:
     output:
-        "bench/depth-posterior-ablation/results.csv",
+        touch(STAMP_ROOT + "/depth_posterior_ablation.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/depth_posterior_ablation/enter_bench.sh
         """
 
@@ -663,11 +663,11 @@ rule size_tiered_selection:
 #   snakemake -s workflow/Snakefile lj_bonobo_h2h
 rule lj_bonobo_h2h:
     output:
-        "bench/lj-bonobo-h2h/summary.tsv",
-        "bench/lj-bonobo-h2h/seeds.tsv",
+        touch(STAMP_ROOT + "/lj_bonobo_h2h.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/lj_bonobo_h2h/enter_bench.sh
         """
 
@@ -681,10 +681,11 @@ rule water_h2o20_goat:
     input:
         "bench/water-h2o20-goat/reference.csv",
     output:
-        "bench/water-h2o20-goat/results.csv",
+        touch(STAMP_ROOT + "/water_h2o20_goat.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/h2o20_goat_campaign.sh
         """
 
@@ -728,11 +729,11 @@ rule tip4p_h2h:
 #   snakemake -s workflow/Snakefile water_gmin
 rule water_gmin:
     output:
-        "bench/water-gmin/summary.csv",
-        "bench/water-gmin/verify.csv",
+        touch(STAMP_ROOT + "/water_gmin.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/tip4p_h2h/enter_water_gmin.sh
         """
 
@@ -746,11 +747,11 @@ rule water_gmin:
 #   snakemake -s workflow/Snakefile tip4p21_budget_h2h
 rule tip4p21_budget_h2h:
     output:
-        "bench/tip4p-h2h/rows-budget21.csv",
-        "bench/tip4p-h2h/summary-budget21.csv",
+        touch(STAMP_ROOT + "/tip4p21_budget_h2h.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/tip4p_h2h/enter_budget.sh
         """
 
@@ -759,11 +760,13 @@ rule tip4p21_budget_h2h:
 #   snakemake -s workflow/Snakefile tip4p_rates
 rule tip4p_rates:
     output:
-        "bench/tip4p-water-rates/rates.csv",
+        touch(STAMP_ROOT + "/tip4p_rates.stamp"),
     shell:
         """
         set -euo pipefail
-        bash scripts/tip4p_rates/enter_bench.sh
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/tip4p_rates
+        TIP4P_RATES_CSV=${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/tip4p_rates/rates.csv \
+          bash scripts/tip4p_rates/enter_bench.sh
         """
 
 
@@ -771,10 +774,11 @@ rule tip4p_rates:
 #   snakemake -s workflow/Snakefile ase_bh_h2h
 rule ase_bh_h2h:
     output:
-        "bench/ase-gofee-h2h/ase_bh.csv",
+        touch(STAMP_ROOT + "/ase_bh_h2h.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/ase_gofee_h2h/enter_bench.sh --comparison ase_bh
         """
 
@@ -783,10 +787,11 @@ rule ase_bh_h2h:
 #   snakemake -s workflow/Snakefile ase_mh_h2h
 rule ase_mh_h2h:
     output:
-        "bench/ase-gofee-h2h/ase_mh.csv",
+        touch(STAMP_ROOT + "/ase_mh_h2h.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/ase_gofee_h2h/enter_bench.sh --comparison ase_mh
         """
 
@@ -820,10 +825,11 @@ rule gad_published:
 #   snakemake -s workflow/Snakefile asg2_h2h
 rule asg2_h2h:
     output:
-        "bench/ase-gofee-h2h/asg2-summary.csv",
+        touch(STAMP_ROOT + "/asg2_h2h.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/ase_gofee_h2h/enter_bench.sh --panel asg2
         """
 
@@ -835,11 +841,11 @@ rule asg2_h2h:
 #   snakemake -s workflow/Snakefile occat_h2h
 rule occat_h2h:
     output:
-        "bench/occat-h2h/summary.csv",
-        "bench/occat-h2h/seeds.csv",
+        touch(STAMP_ROOT + "/occat_h2h.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/occat_h2h/enter_bench.sh
         """
 
@@ -861,10 +867,11 @@ rule agox_lj98:
     input:
         "bench/agox-lj98/rows.csv",
     output:
-        "bench/agox-lj98/summary.csv",
+        touch(STAMP_ROOT + "/agox_lj98.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/agox_lj98/enter_bench.sh
         """
 
@@ -878,10 +885,11 @@ rule agox_lj75:
     input:
         "bench/agox-lj75/rows.csv",
     output:
-        "bench/agox-lj75/summary.csv",
+        touch(STAMP_ROOT + "/agox_lj75.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/agox_lj75/enter_bench.sh
         """
 
@@ -896,10 +904,11 @@ rule ase_lj75:
     input:
         "bench/ase-lj75/rows.csv",
     output:
-        "bench/ase-lj75/summary.csv",
+        touch(STAMP_ROOT + "/ase_lj75.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/ase_lj75/enter_bench.sh
         """
 
@@ -913,12 +922,13 @@ rule ase_lj38:
         "bench/ase-lj38/rows.csv",
         "scripts/ase_panel/summarize.py",
     output:
-        "bench/ase-lj38/summary.csv",
-        "bench/ase-lj38/README.md",
+        touch(STAMP_ROOT + "/ase_lj38.stamp"),
     shell:
         """
         set -euo pipefail
-        bash scripts/ase_panel/enter_bench.sh --system lj38
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/ase-panel
+        ASE_PANEL_OUT=${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/ase-panel \
+          bash scripts/ase_panel/enter_bench.sh --system lj38
         """
 
 
@@ -931,12 +941,13 @@ rule ase_lj55:
         "bench/ase-lj55/rows.csv",
         "scripts/ase_panel/summarize.py",
     output:
-        "bench/ase-lj55/summary.csv",
-        "bench/ase-lj55/README.md",
+        touch(STAMP_ROOT + "/ase_lj55.stamp"),
     shell:
         """
         set -euo pipefail
-        bash scripts/ase_panel/enter_bench.sh --system lj55
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/ase-panel
+        ASE_PANEL_OUT=${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/ase-panel \
+          bash scripts/ase_panel/enter_bench.sh --system lj55
         """
 
 
@@ -949,12 +960,13 @@ rule ase_lj98:
         "bench/ase-lj98/rows.csv",
         "scripts/ase_panel/summarize.py",
     output:
-        "bench/ase-lj98/summary.csv",
-        "bench/ase-lj98/README.md",
+        touch(STAMP_ROOT + "/ase_lj98.stamp"),
     shell:
         """
         set -euo pipefail
-        bash scripts/ase_panel/enter_bench.sh --system lj98
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/ase-panel
+        ASE_PANEL_OUT=${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/ase-panel \
+          bash scripts/ase_panel/enter_bench.sh --system lj98
         """
 
 
@@ -967,12 +979,13 @@ rule ase_lj104:
         "bench/ase-lj104/rows.csv",
         "scripts/ase_panel/summarize.py",
     output:
-        "bench/ase-lj104/summary.csv",
-        "bench/ase-lj104/README.md",
+        touch(STAMP_ROOT + "/ase_lj104.stamp"),
     shell:
         """
         set -euo pipefail
-        bash scripts/ase_panel/enter_bench.sh --system lj104
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/ase-panel
+        ASE_PANEL_OUT=${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/ase-panel \
+          bash scripts/ase_panel/enter_bench.sh --system lj104
         """
 
 
@@ -985,12 +998,13 @@ rule ase_lj150:
         "bench/ase-lj150/rows.csv",
         "scripts/ase_panel/summarize.py",
     output:
-        "bench/ase-lj150/summary.csv",
-        "bench/ase-lj150/README.md",
+        touch(STAMP_ROOT + "/ase_lj150.stamp"),
     shell:
         """
         set -euo pipefail
-        bash scripts/ase_panel/enter_bench.sh --system lj150
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/ase-panel
+        ASE_PANEL_OUT=${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/ase-panel \
+          bash scripts/ase_panel/enter_bench.sh --system lj150
         """
 
 
@@ -1005,12 +1019,13 @@ rule ase_au55:
         "bench/ase-au55/rows-for-cluster.csv",
         "scripts/ase_panel/summarize.py",
     output:
-        "bench/ase-au55/summary.csv",
-        "bench/ase-au55/README.md",
+        touch(STAMP_ROOT + "/ase_au55.stamp"),
     shell:
         """
         set -euo pipefail
-        bash scripts/ase_panel/enter_bench.sh --system au55
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/ase-panel
+        ASE_PANEL_OUT=${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/ase-panel \
+          bash scripts/ase_panel/enter_bench.sh --system au55
         """
 
 
@@ -1030,11 +1045,14 @@ rule ase_recommended:
         "bench/ase-au55/rows-for-cluster.csv",
         "scripts/ase_panel/summarize.py",
     output:
-        "bench/ase-recommended/summary.csv",
+        touch(STAMP_ROOT + "/ase_recommended.stamp"),
     shell:
         """
         set -euo pipefail
-        python3 scripts/ase_panel/summarize.py --all --tex
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/ase-panel
+        ASE_PANEL_OUT=${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/ase-panel \
+          ASE_PANEL_TEX=${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/ase-panel/manuscript.tex \
+          python3 scripts/ase_panel/summarize.py --all --tex
         """
 
 
@@ -1049,13 +1067,16 @@ rule ase_nonlj:
         "bench/ase-nonlj/identity.csv",
         "scripts/ase_nonlj/summarize.py",
     output:
-        "bench/ase-nonlj/summary.csv",
-        "bench/ase-nonlj/README.md",
+        touch(STAMP_ROOT + "/ase_nonlj.stamp"),
     shell:
         """
         set -euo pipefail
-        bash scripts/ase_nonlj/enter_bench.sh
-        python3 scripts/ase_nonlj/summarize.py --tex
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/ase-nonlj
+        ASE_NONLJ_OUT=${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/ase-nonlj \
+          bash scripts/ase_nonlj/enter_bench.sh
+        ASE_NONLJ_OUT=${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/ase-nonlj \
+          ASE_NONLJ_TEX=${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/ase-nonlj/si.tex \
+          python3 scripts/ase_nonlj/summarize.py --tex
         """
 
 
@@ -1069,11 +1090,11 @@ rule ase_nonlj:
 #   snakemake -s workflow/Snakefile paper_0120
 rule paper_0120:
     output:
-        "bench/paper-0120/summary.csv",
-        "bench/paper-0120/compare.csv",
+        touch(STAMP_ROOT + "/paper_0120.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/paper_0120/enter_bench.sh
         """
 
@@ -1096,12 +1117,18 @@ rule gmin_panel:
         "examples/h2h_gmin_lj.data",
         "examples/h2h_gmin_morse.data",
     output:
-        "bench/gmin-panel/summary.csv",
+        touch(STAMP_ROOT + "/gmin_panel.stamp"),
     shell:
         """
         set -euo pipefail
-        bash scripts/gmin_panel/enter_bench.sh
-        bash scripts/gmin_panel/enter_bench.sh --summarize --tex
+        mkdir -p /work/gmin-panel/output
+        GMIN_PANEL_OUT=/work/gmin-panel/output \
+          bash scripts/gmin_panel/enter_bench.sh
+        GMIN_PANEL_OUT=/work/gmin-panel/output \
+          bash scripts/gmin_panel/enter_bench.sh --summarize --tex \
+          --summary /work/gmin-panel/output/summary.csv \
+          --readme /work/gmin-panel/output/README.md \
+          --manuscript /work/gmin-panel/output/manuscript.tex
         """
 
 
@@ -1112,11 +1139,13 @@ rule h2o16_crest:
     input:
         "bench/h2o16-crest/seeds.csv",
     output:
-        "bench/h2o16-crest/summary.csv",
+        touch(STAMP_ROOT + "/h2o16_crest.stamp"),
     shell:
         """
         set -euo pipefail
-        python3 scripts/h2o16_crest/summarize.py
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/h2o16_crest
+        H2O16_CREST_SUMMARY=${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/h2o16_crest/summary.csv \
+          python3 scripts/h2o16_crest/summarize.py
         """
 
 
@@ -1200,9 +1229,10 @@ rule landfold_maps_current:
 #   snakemake -s workflow/Snakefile crest_equal --cores 1 --force
 rule crest_equal:
     output:
-        "bench/crest-equal/panel.stamp",
+        touch(STAMP_ROOT + "/crest_equal.stamp"),
     shell:
         """
         set -euo pipefail
+        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}
         bash scripts/crest_equal/enter_bench.sh
         """

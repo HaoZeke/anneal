@@ -6,8 +6,8 @@ The scripts check chemparseplot 1.11.0.
 They also check xyzrender 0.3.8, cairosvg 2.9.1 and pymupdf 1.28.2.
 The dumps they read come from `HaoZeke/anneal-paper-data` at
 `71185263eb6a8130d1262fd76d90109f5fabdcf5`; a script that needs one runs
-`scripts/data/fetch_data.py paper/jctc/`, which downloads the missing files
-of `data/hf-files.csv` from that commit and checks each sha256.
+`scripts/data/fetch_data.py paper/jctc/`, which downloads each file named
+in `data/hf-files.csv` from that commit and checks each sha256.
 
 ## Building the papers
 

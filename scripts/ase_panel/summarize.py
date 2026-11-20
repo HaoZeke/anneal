@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import math
+import os
 import re
 import sys
 from pathlib import Path
@@ -530,23 +531,32 @@ def main() -> None:
     aggregate = []
     for system in selected:
         summary, report = render(system)
-        directory = ROOT / "bench" / f"ase-{system}"
+        root = Path(os.environ["ASE_PANEL_OUT"]) if os.environ.get("ASE_PANEL_OUT") else ROOT / "bench"
+        directory = root / f"ase-{system}"
         outputs[directory / "summary.csv"] = summary
         outputs[directory / "README.md"] = report
         aggregate.extend(aggregate_rows(system, summary))
     if selected == list(SYSTEMS):
         aggregate.insert(0, aggregate_header(aggregate))
-        outputs[ROOT / "bench" / "ase-recommended" / "summary.csv"] = (
-            "\n".join(aggregate) + "\n"
-        )
+        recommended = root / "ase-recommended" / "summary.csv"
+        outputs[recommended] = "\n".join(aggregate) + "\n"
     if "--tex" in flags:
-        outputs[DOCUMENT] = splice(DOCUMENT.read_text(), tex_table())
+        document = Path(os.environ["ASE_PANEL_TEX"]) if os.environ.get("ASE_PANEL_TEX") else DOCUMENT
+        if document != DOCUMENT and not document.exists():
+            document.parent.mkdir(parents=True, exist_ok=True)
+            document.write_text(DOCUMENT.read_text())
+        outputs[document] = splice(document.read_text(), tex_table())
     if "--check" in flags:
-        stale = [str(path.relative_to(ROOT)) for path, text in outputs.items() if path.read_text() != text]
+        stale = [
+            str(path.relative_to(ROOT)) if path.is_relative_to(ROOT) else str(path)
+            for path, text in outputs.items()
+            if not path.exists() or path.read_text() != text
+        ]
         if stale:
             raise SystemExit("stale generated report: " + ", ".join(stale))
     else:
         for path, text in outputs.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text)
 
 
