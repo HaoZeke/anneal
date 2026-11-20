@@ -546,8 +546,7 @@ jobs:
       - name: pytest against the installed sdist
         shell: bash
         run: |
-          test "$(.sdist-venv/bin/python -c 'import anneal, os; print(os.path.relpath(anneal.__file__))')" \
-            != python/anneal/__init__.py
+          .sdist-venv/bin/python scripts/check_installed_anneal.py .sdist-venv
           .sdist-venv/bin/python -m pytest pytest/test_cluster_search.py
 
   ffi-smoke:
