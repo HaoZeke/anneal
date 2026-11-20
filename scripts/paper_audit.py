@@ -1380,6 +1380,11 @@ BRITISH = re.compile(
 )
 
 
+def british_words(text: str) -> list[str]:
+    """British stems in text. The noun plural analyses is the American plural of analysis."""
+    return [match.group(0) for match in BRITISH.finditer(text) if match.group(0).lower() != "analyses"]
+
+
 def british_spellings(audit: Audit, root: Path = ROOT) -> None:
     """US spelling in every TeX source and every string a paper script can typeset, cite keys aside.
 
@@ -1400,7 +1405,7 @@ def british_spellings(audit: Audit, root: Path = ROOT) -> None:
             strings = [s for s in strings if not s.startswith("# ")]
         else:
             strings = [text]
-        found += [f"{path}:{m.group(0)}" for s in strings for m in BRITISH.finditer(re.sub(r"\\cite\{[^}]*\}", "", s))]
+        found += [f"{path}:{word}" for s in strings for word in british_words(re.sub(r"\\cite\{[^}]*\}", "", s))]
     audit.record(not found, TEX, "US spelling in everything that reaches a PDF", "none", " ".join(found) or "none")
 
 
@@ -4058,13 +4063,42 @@ def manuscript_new(audit: Audit) -> None:
                  "SURF B.V.; TurtleTech ehf",
                  zenodo_rohit.get("affiliation", "missing"))
     audit.record("\\todo{" not in audit.text(PAPER), PAPER, "no \\todo remains in the manuscript", "none", "none")
+    notes = audit.text(TEX).split("\\section*{Notes}", 1)[-1].split("\\begin{suppinfo}", 1)[0]
+    interest = "The authors declare no competing financial interest."
+    decl_len = 345
+    decl_sha256 = "c187850a0ee54424df627c2b652f6a8c956865e13698f9a6308a506917c5fbfa"
+    notes_flat = collapse(notes)
+    audit.said(TEX, interest)
+    decl_present = any(
+        hashlib.sha256(notes_flat[i:i + decl_len].encode("utf-8")).hexdigest() == decl_sha256
+        for i in range(max(0, len(notes_flat) - decl_len + 1))
+    )
+    audit.record(
+        decl_present,
+        TEX,
+        "the Notes declaration matches the sealed text",
+        decl_sha256[:12],
+        decl_sha256[:12] if decl_present else "changed",
+    )
+    after = notes_flat[len(interest):].lstrip() if notes_flat.startswith(interest) else ""
+    placed = (
+        len(after) >= decl_len
+        and hashlib.sha256(after[:decl_len].encode("utf-8")).hexdigest() == decl_sha256
+    )
+    audit.record(
+        placed,
+        TEX,
+        "the declaration follows the competing-interest sentence",
+        "immediately after",
+        "immediately after" if placed else "elsewhere",
+    )
     for path in (TEX, COVER):
         audit.said(path, "The concept DOI of the \\texttt{anneal\\_repro} reproducibility archive is \\DOI{}.")
     avail = audit.text(TEX).split("\\section*{Data and software availability}", 1)[-1]
     for script in re.findall(r"\\path\{([^}]+)\}", avail):
         audit.record((ROOT / script).is_file(), PAPER, f"availability names an existing script {script}", "present", "present" if (ROOT / script).is_file() else "missing")
     for path in (PAPER, SI, cover):
-        found = sorted({m.group(0) for m in BRITISH.finditer(audit.text(path))})
+        found = sorted(set(british_words(audit.text(path))))
         audit.record(not found, path, "American spelling", "none", " ".join(found) or "none")
     lf = load_script("landfold_panels_tex", "paper/jctc/scripts/landfold_panels.py")
     audit.said(PAPER, lf.caption_tex())

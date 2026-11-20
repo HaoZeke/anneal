@@ -1780,6 +1780,46 @@ def test_rewriting_or_truncating_a_record_line_fails_the_audit(target):
     assert any(r[1] == target and "truncated" in r[4] for r in truncated.drifts())
 
 
+def test_the_noun_analyses_is_american_and_the_verb_analyse_is_not():
+    assert audit_mod.british_words("all code, analyses and text") == []
+    assert audit_mod.british_words("they analyse the cluster") == ["analyse"]
+
+
+def test_a_changed_declaration_is_rejected():
+    audit = audit_mod.Audit()
+    text = audit.text(audit_mod.TEX)
+    interest = "The authors declare no competing financial interest."
+    notes = text.split("\\section*{Notes}", 1)[1].split("\\begin{suppinfo}", 1)[0]
+    assert interest in notes
+    declaration = notes.split(interest, 1)[1].strip()
+    assert declaration
+    mutated_decl = declaration.replace("publication.", "manuscript.", 1)
+    assert mutated_decl != declaration
+    audit.text_cache[audit_mod.TEX] = text.replace(declaration, mutated_decl, 1)
+    audit_mod.manuscript_new(audit)
+    assert any(
+        row[2] == "the Notes declaration matches the sealed text"
+        and row[4] == "changed"
+        for row in audit.drifts()
+    )
+
+
+def test_a_declaration_away_from_the_competing_interest_sentence_is_rejected():
+    audit = audit_mod.Audit()
+    text = audit.text(audit_mod.TEX)
+    audit.text_cache[audit_mod.TEX] = text.replace(
+        "The authors declare no competing financial interest.\n",
+        "The authors declare no competing financial interest.\nThe archive is public.\n",
+        1,
+    )
+    audit_mod.manuscript_new(audit)
+    assert any(
+        row[2] == "the declaration follows the competing-interest sentence"
+        and row[4] == "elsewhere"
+        for row in audit.drifts()
+    )
+
+
 def test_a_removed_row_of_a_record_absent_at_head_fails_the_audit(monkeypatch):
     real_git = audit_mod.git
 
