@@ -22,6 +22,7 @@
 //! | [`status`] | Status codes, thread-local error message, panic safety |
 //! | [`potential`] | Callback-based potential dispatch (opaque handle) |
 //! | [`hvp`] | Hessian-vector products with a cached centre or an analytic callback |
+//! | [`hessian`] | Dense Hessians, and the derivative capabilities and counts of a handle |
 //! | [`fused`] | One cache of the outcome of a fused energy-and-gradient evaluation |
 //! | [`jet`] | Validated Taylor jets along a line, with typed refusals |
 //! | [`taylor`] | Interval Taylor series that implement a jet |
@@ -60,6 +61,7 @@ pub mod ch5_2008;
 pub mod eam_table;
 pub mod eindir;
 pub mod fused;
+pub mod hessian;
 pub mod hvp;
 pub mod jet;
 pub mod potential;

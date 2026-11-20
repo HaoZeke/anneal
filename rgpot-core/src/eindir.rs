@@ -25,6 +25,7 @@ use dlpk::sys::DLManagedTensorVersioned;
 use crate::fused::{
     lock, rgpot_fused_error_kind_t, FusedCache, FusedError, FusedSettings, FusedValue,
 };
+use crate::hessian::HessianState;
 use crate::hvp::HvpState;
 use crate::jet::JetState;
 use crate::potential::PotentialCallback;
@@ -121,6 +122,11 @@ impl rgpot_potential_t {
     /// Hessian-vector state: the analytic callback and its counters.
     pub(crate) fn hvp_state(&self) -> &HvpState {
         &self.fused_cache.hvp
+    }
+
+    /// Dense-Hessian state: the Hessian callbacks and their counters.
+    pub(crate) fn hessian_state(&self) -> &HessianState {
+        &self.fused_cache.hessian
     }
 
     /// The cache every fused request of this handle goes through.
@@ -222,6 +228,7 @@ pub struct rgpot_fused_cache_t {
     /// Lives here, behind the pointer, so `rgpot_potential_t` keeps its C
     /// layout.
     hvp: HvpState,
+    hessian: HessianState,
     jet: JetState,
 }
 
@@ -231,6 +238,7 @@ impl rgpot_fused_cache_t {
             fused: FusedCache::new(),
             peer_refusal: Mutex::new(None),
             hvp: HvpState::default(),
+            hessian: HessianState::default(),
             jet: JetState::default(),
         }
     }

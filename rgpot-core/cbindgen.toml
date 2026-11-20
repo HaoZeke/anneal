@@ -24,9 +24,10 @@ documentation_style = "doxy"
 
 [export]
 # Named by the documentation of rgpot_potential_hvp,
-# rgpot_potential_set_hvp_callback and rgpot_potential_set_taylor_jet, not
-# by a signature.
-include = ["rgpot_hvp_scheme_t", "HessianVectorCallback", "rgpot_taylor_jet_fn", "rgpot_interval_t"]
+# rgpot_potential_set_hvp_callback, rgpot_potential_hessian,
+# rgpot_potential_set_hessian_callback and rgpot_potential_set_taylor_jet,
+# not by a signature.
+include = ["rgpot_hvp_scheme_t", "HessianVectorCallback", "rgpot_hessian_scheme_t", "HessianCallback", "rgpot_taylor_jet_fn", "rgpot_interval_t"]
 exclude = []
 
 [export.rename]
