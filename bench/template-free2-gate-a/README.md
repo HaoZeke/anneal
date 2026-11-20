@@ -114,3 +114,52 @@ These are recorded here so the check is not chosen after the runs.
 - m80r6 hits go from 7/12 on A to 9/12 on B.
 - Nothing loses: no cell has fewer hits on B than on A, and no cell
   fails the rule above.
+
+## Results
+
+Shard verdict: FAIL. `m80r14` and `lj98` fail clause (c). No cell
+fails (a) or (b). The only hit drop is `m55r14`, 9/12 to 8/12, with
+one-sided Fisher p = 0.5.
+
+A and A' reproduced the same hit bit and the same calls on every
+seed, so the calls ratio A'/A is 1 on every cell. The outside A'/A
+column is the timing band of two clean builds.
+
+Median calls rank a miss as +infinity. Fisher p is the one-sided
+probability that B has this few hits or fewer. Mann-Whitney p is
+the one-sided probability that B's calls are larger. Activations
+are the sum of `twin` and `observed` proposals on B.
+
+| Cell | Hits A/A'/B | Fisher p | Median calls A/A'/B | MW p | Outside B/A | Outside A'/A | B activations | Verdict |
+| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | --- |
+| m38r6 | 12/12/12 | 1 | 49438.5/49438.5/49438.5 | 0.5575 | 0.9649 | 0.9922 | 195 | PASS |
+| m38r14 | 4/4/12 | 1 | inf/inf/138184 | 0.9873 | 0.9550 | 1.0190 | 3045 | PASS |
+| m55r6 | 12/12/12 | 1 | 22596/22596/22596 | 0.5 | 1.0046 | 0.9887 | 501 | PASS |
+| m55r14 | 9/9/8 | 0.5 | 451561.5/451561.5/506548 | 0.4534 | 1.0307 | 0.9592 | 16369 | PASS |
+| m80r6 | 12/12/12 | 1 | 62677/62677/62677 | 0.5689 | 1.0016 | 0.9913 | 11490 | PASS |
+| m80r14 | 6/6/11 | 0.9977 | inf/inf/2486485 | 0.9521 | 1.2373 | 0.9995 | 76867 | FAIL |
+| sc126-38 | 12/12/12 | 1 | 113504.5/113504.5/58095 | 0.9080 | 1.0212 | 0.9947 | 2502 | PASS |
+| sc126-55 | 12/12/12 | 1 | 18379.5/18379.5/18379.5 | 0.4769 | 0.9568 | 1.0697 | 292 | PASS |
+| lj38 | 12/12/12 | 1 | 127839.5/127839.5/126456 | 0.7184 | 0.9886 | 0.9945 | 1917 | PASS |
+| lj55 | 12/12/12 | 1 | 5722/5722/5722 | 0.5115 | 0.9910 | 1.0880 | 0 | PASS |
+| lj75 | 5/5/7 | 0.8898 | inf/inf/3596765 | 0.6671 | 1.0714 | 0.9785 | 61865 | PASS |
+| lj98 | 7/7/11 | 0.9931 | 3166811.5/3166811.5/2558250.5 | 0.8315 | 1.2027 | 1.0188 | 40305 | FAIL |
+| lj102 | 6/6/7 | 0.7932 | inf/inf/2551083.5 | 0.7760 | 1.0968 | 1.0055 | 37587 | PASS |
+| lj103 | 6/6/10 | 0.9864 | inf/inf/880801 | 0.8971 | 1.0373 | 0.9850 | 24716 | PASS |
+| lj104 | 5/5/8 | 0.9502 | inf/inf/3118832.5 | 0.6534 | 1.0861 | 1.0009 | 44819 | PASS |
+| lj150 | 8/8/9 | 0.8146 | 1129381.5/1129381.5/230913.5 | 0.6590 | 1.0316 | 0.9817 | 20028 | PASS |
+
+`m80r14` outside B/A is 1.237 with A'/A at 0.9995. `lj98` outside
+B/A is 1.203 with A'/A at 1.019. Both sit above 1.10 while the
+clean-build band is inside [0.95, 1.05]. `lj102` reaches 1.097 and
+stays under the line.
+
+Claims, checked against these rows:
+
+- m38r14 from 4/12 to 12/12: confirmed (A 4/12, A' 4/12, B 12/12).
+- sc126-38 median gets better: confirmed (113504.5 to 58095).
+- m80r6 from 7 to 9: not confirmed. This tree hits 12/12 on A and
+  on B, so the stated 7/12 baseline is not what ran.
+- Nothing loses: not confirmed. `m55r14` drops from 9/12 to 8/12
+  (Fisher p = 0.5, so clause (a) does not fire) and `m80r14` and
+  `lj98` fail clause (c).
