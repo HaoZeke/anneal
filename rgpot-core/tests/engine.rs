@@ -570,7 +570,10 @@ fn minor_4_plugin_is_served_without_component_exports_minor_5_gets_them_and_newe
     assert!(minor5.symbols().last_components.is_some());
     assert!(minor5.symbols().component_name.is_some());
     assert_eq!(minor5.component_name(0).expect("component 0"), "harmonic");
-    assert_eq!(minor5.component_name(1).expect("out-of-range component"), "");
+    assert_eq!(
+        minor5.component_name(1).expect("out-of-range component"),
+        ""
+    );
     assert_eq!(
         minor5.last_components().expect("components before force"),
         vec![RgpotEngineComponent {
