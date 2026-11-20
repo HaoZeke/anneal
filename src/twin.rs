@@ -799,18 +799,141 @@ fn push_translations(
 /// restricted to the top few rather than taken uniformly, and randomised
 /// within them so repeated draws are different proposals.
 pub fn propose<R: Rng + ?Sized>(x: ArrayView1<f64>, n: usize, rng: &mut R) -> Array1<f64> {
-    let planes = dense_planes(x, n, 0.25);
+    propose_with(x, n, rng, |plane, layer| {
+        twin(x.view(), n, plane, Mode::Rotate, layer)
+    })
+}
+
+/// As [`propose`], with the rotation's order read off the boundary layer
+/// rather than fixed at a fifth of a turn.
+///
+/// The plane draw and the choice between mirror and rotation are those of
+/// [`propose`]. The rotation is [`rotate_by_layer_order`], so a five-fold
+/// turn is proposed only where the layer itself shows five-fold order.
+pub fn propose_observed_order<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    n: usize,
+    rng: &mut R,
+) -> Array1<f64> {
+    propose_with(x, n, rng, |plane, layer| {
+        rotate_by_layer_order(x, n, plane, layer)
+    })
+}
+
+fn propose_with<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    n: usize,
+    rng: &mut R,
+    rotate: impl FnOnce(&Plane, f64) -> Array1<f64>,
+) -> Array1<f64> {
+    let layer = 0.25;
+    let planes = dense_planes(x, n, layer);
     if planes.is_empty() {
         return x.to_owned();
     }
     let top = planes.len().min(8);
     let p = planes[rng.random_range(0..top)];
-    let mode = if rng.random::<f64>() < 0.5 {
-        Mode::Reflect
+    if rng.random::<f64>() < 0.5 {
+        twin(x.view(), n, &p, Mode::Reflect, layer)
     } else {
-        Mode::Rotate
+        rotate(&p, layer)
+    }
+}
+
+/// Rotational order of `plane`'s own layer, and the point it is read at.
+///
+/// Each point of the layer counts the layer points at its nearest in-plane
+/// distance, to within the layer tolerance. The best-coordinated point's
+/// count is the order: six on a close-packed sheet, four on a square one,
+/// five where five sheets meet. `None` when the layer holds no point with
+/// a neighbour in it.
+pub fn layer_order(
+    x: ArrayView1<f64>,
+    n: usize,
+    plane: &Plane,
+    layer: f64,
+) -> Option<(usize, usize)> {
+    let c = centroid(x, n);
+    let tol = layer * spacing(x, n);
+    let m = plane.normal;
+    let signed =
+        |i: usize| (0..3).map(|k| (x[3 * i + k] - c[k]) * m[k]).sum::<f64>() - plane.offset;
+    let members: Vec<usize> = (0..n).filter(|&i| signed(i).abs() <= tol).collect();
+    let inplane = |i: usize, j: usize| {
+        let d = [
+            x[3 * j] - x[3 * i],
+            x[3 * j + 1] - x[3 * i + 1],
+            x[3 * j + 2] - x[3 * i + 2],
+        ];
+        let along: f64 = (0..3).map(|k| d[k] * m[k]).sum();
+        (0..3)
+            .map(|k| (d[k] - along * m[k]).powi(2))
+            .sum::<f64>()
+            .sqrt()
     };
-    twin(x.view(), n, &p, mode, 0.25)
+    let mut best: Option<(usize, usize)> = None;
+    for &i in &members {
+        let distances: Vec<f64> = members
+            .iter()
+            .filter(|&&j| j != i)
+            .map(|&j| inplane(i, j))
+            .collect();
+        let nearest = distances.iter().copied().fold(f64::INFINITY, f64::min);
+        if !nearest.is_finite() {
+            continue;
+        }
+        let count = distances.iter().filter(|&&d| d - nearest <= tol).count();
+        if best.is_none_or(|(_, held)| count > held) {
+            best = Some((i, count));
+        }
+    }
+    best.map(|(i, count)| (count, i))
+}
+
+/// Rotates the far side of `plane` by one step of the layer's own order.
+///
+/// The axis is the plane normal through the best-coordinated layer point,
+/// so the turn carries that point's in-plane shell onto itself and the
+/// boundary keeps its registry while the stacking beyond it changes. A
+/// layer whose order is no rotation at all falls back to the mirror twin.
+pub fn rotate_by_layer_order(
+    x: ArrayView1<f64>,
+    n: usize,
+    plane: &Plane,
+    layer: f64,
+) -> Array1<f64> {
+    let Some((order, pivot)) = layer_order(x, n, plane, layer).filter(|(order, _)| *order > 1)
+    else {
+        return twin(x, n, plane, Mode::Reflect, layer);
+    };
+    let c = centroid(x, n);
+    let tol = layer * spacing(x, n);
+    let m = plane.normal;
+    let (sa, ca) = (std::f64::consts::TAU / order as f64).sin_cos();
+    let o = [x[3 * pivot], x[3 * pivot + 1], x[3 * pivot + 2]];
+    let mut y = x.to_owned();
+    for i in 0..n {
+        let d: f64 = (0..3).map(|k| (x[3 * i + k] - c[k]) * m[k]).sum::<f64>() - plane.offset;
+        if d <= tol {
+            continue;
+        }
+        let v = [x[3 * i] - o[0], x[3 * i + 1] - o[1], x[3 * i + 2] - o[2]];
+        let along: f64 = (0..3).map(|k| v[k] * m[k]).sum();
+        let inplane = [
+            v[0] - along * m[0],
+            v[1] - along * m[1],
+            v[2] - along * m[2],
+        ];
+        let cross = [
+            m[1] * inplane[2] - m[2] * inplane[1],
+            m[2] * inplane[0] - m[0] * inplane[2],
+            m[0] * inplane[1] - m[1] * inplane[0],
+        ];
+        for k in 0..3 {
+            y[3 * i + k] = o[k] + inplane[k] * ca + cross[k] * sa + along * m[k];
+        }
+    }
+    y
 }
 
 #[cfg(test)]
@@ -961,6 +1084,118 @@ mod tests {
             .sum::<f64>()
             .sqrt();
         assert!(diff > 1.0, "the two operations differ by only {diff}");
+    }
+
+    /// A sheet in the `z = 0` plane with `above` stacked over it, and the
+    /// plane through the sheet in the centroid frame the twin reads.
+    fn sheet(points: &[[f64; 3]], above: &[[f64; 3]]) -> (Array1<f64>, usize, Plane) {
+        let all: Vec<f64> = points.iter().chain(above).flatten().copied().collect();
+        let n = points.len() + above.len();
+        let x = Array1::from(all);
+        let c = centroid(x.view(), n);
+        let plane = Plane {
+            normal: [0.0, 0.0, 1.0],
+            offset: -c[2],
+            population: points.len(),
+        };
+        (x, n, plane)
+    }
+
+    fn triangular() -> Vec<[f64; 3]> {
+        let h = 3.0_f64.sqrt() / 2.0;
+        let mut out = Vec::new();
+        for i in -2i32..=2 {
+            for j in -2i32..=2 {
+                if (i + j).abs() <= 2 {
+                    out.push([i as f64 + 0.5 * j as f64, h * j as f64, 0.0]);
+                }
+            }
+        }
+        out
+    }
+
+    fn square() -> Vec<[f64; 3]> {
+        let mut out = Vec::new();
+        for i in -2i32..=2 {
+            for j in -2i32..=2 {
+                out.push([i as f64, j as f64, 0.0]);
+            }
+        }
+        out
+    }
+
+    /// The order is read off the layer: six on a close-packed sheet, four
+    /// on a square one, five on a pentagonal one, from the same code.
+    #[test]
+    fn the_layer_order_is_the_layer_s_own() {
+        let hollow = [0.5, 3.0_f64.sqrt() / 6.0, (2.0_f64 / 3.0).sqrt()];
+        let (x, n, plane) = sheet(&triangular(), &[hollow]);
+        assert_eq!(layer_order(x.view(), n, &plane, 0.25).map(|o| o.0), Some(6));
+
+        let (x, n, plane) = sheet(&square(), &[[0.5, 0.5, 0.5_f64.sqrt()]]);
+        assert_eq!(layer_order(x.view(), n, &plane, 0.25).map(|o| o.0), Some(4));
+
+        let mut pentagon = vec![[0.0, 0.0, 0.0]];
+        for k in 0..5 {
+            let t = k as f64 * std::f64::consts::TAU / 5.0;
+            pentagon.push([t.cos(), t.sin(), 0.0]);
+        }
+        let (x, n, plane) = sheet(&pentagon, &[[0.0, 0.0, 0.8]]);
+        assert_eq!(layer_order(x.view(), n, &plane, 0.25).map(|o| o.0), Some(5));
+    }
+
+    /// One step of the observed order about the pivot: a square sheet turns
+    /// the atom above it by a quarter turn, not a fifth, and leaves the
+    /// sheet where it was.
+    #[test]
+    fn the_rotation_turns_by_the_observed_order() {
+        let above = [0.5, 0.5, 0.5_f64.sqrt()];
+        let (x, n, plane) = sheet(&square(), &[above]);
+        let (order, pivot) = layer_order(x.view(), n, &plane, 0.25).expect("a square sheet");
+        assert_eq!(order, 4);
+        let y = rotate_by_layer_order(x.view(), n, &plane, 0.25);
+        for i in 0..n - 1 {
+            for k in 0..3 {
+                assert_eq!(y[3 * i + k], x[3 * i + k], "sheet point {i} moved");
+            }
+        }
+        let o = [x[3 * pivot], x[3 * pivot + 1]];
+        let before = [above[0] - o[0], above[1] - o[1]];
+        let after = [y[3 * (n - 1)] - o[0], y[3 * (n - 1) + 1] - o[1]];
+        let quarter = [-before[1], before[0]];
+        for k in 0..2 {
+            assert!(
+                (after[k] - quarter[k]).abs() < 1e-12,
+                "turned to {after:?}, a quarter turn is {quarter:?}"
+            );
+        }
+        assert!((y[3 * (n - 1) + 2] - above[2]).abs() < 1e-12);
+    }
+
+    /// The derived rotation keeps the packing free of overlaps, as the
+    /// fixed one does.
+    #[test]
+    fn an_observed_order_twin_produces_no_coincident_points() {
+        let mut r = StdRng::seed_from_u64(4);
+        for n in [38, 55, 98] {
+            let x = packed(n);
+            for _ in 0..12 {
+                let y = propose_observed_order(x.view(), n, &mut r);
+                let s = spacing(y.view(), n);
+                for i in 0..n {
+                    for j in (i + 1)..n {
+                        let d: f64 = (0..3)
+                            .map(|k| (y[3 * i + k] - y[3 * j + k]).powi(2))
+                            .sum::<f64>()
+                            .sqrt();
+                        assert!(
+                            d > 0.35 * s,
+                            "n={n}: points {i},{j} at {d} with spacing {s}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     /// A structure with no dense plane must come back unchanged rather than

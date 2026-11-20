@@ -7136,7 +7136,7 @@ where
             t
         } else if morph_gate_arm == 1 && !species_escape_trial && !angular && !cage_edit {
             morph_action_arm = Some(1);
-            crate::twin::propose(x.view(), n, rng)
+            crate::twin::propose_observed_order(x.view(), n, rng)
         } else if morph_gate_arm == 2 && !species_escape_trial && !angular && !cage_edit {
             morph_action_arm = Some(2);
             crate::lattice::candidate(crate::lattice::Source::Observed, x.view(), n, rng)
