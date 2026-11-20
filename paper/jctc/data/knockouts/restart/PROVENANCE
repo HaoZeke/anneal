@@ -1,0 +1,6 @@
+branch record/lj150d-restart
+tip 486ef2f6e8150b6cc37e0944c65c8d283cf54852
+commit 486ef2f6e8150b6cc37e0944c65c8d283cf54852
+ancestor 22110d77784e6a9e8282c2f0758ec980f55ea9eb
+source bench/lj150d/seeds.csv
+blob 3d0597488adb9657f59221276fc60066b64ea9c1
