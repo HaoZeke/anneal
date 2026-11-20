@@ -1,0 +1,123 @@
+{
+  "alpha": 0.05,
+  "b_kit_sha256": "14d0cf394fa5146bd1f769f5e8ab5a26a9afc7d8fe7dbba3e9cd118698a7288d",
+  "b_tree": "70871f7307271806926b2aec9870e838dffbe924",
+  "base_commit": "5eb79cdcb0a986984dc7b487e5a3cc93224246f9",
+  "base_tree": "7a2ba49b37241a8fe42b2c45c226374de6d92274",
+  "bin_sha256": {
+    "A": "18815b91ded9f800e7743780c1610292326c87e375cc4e27bee55c0680d22ea5",
+    "AP": "18815b91ded9f800e7743780c1610292326c87e375cc4e27bee55c0680d22ea5",
+    "B": "65bfd95394b8a7a4c042feddb8e1f7c18d1f86778ab8bc17a40c332e359d6efe"
+  },
+  "budget": 4000,
+  "core": 0,
+  "engine_revision": "edcfbbe",
+  "engine_rgpot": "8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e",
+  "engine_sha256": "475822cbf8ea720dc59b3418dec5b3a292e60f5cb340e12e571a427906c149f1",
+  "engine_version": "6.7.1",
+  "harness_blob": "e6ddd21e1ef575dda1a70729f61ea5b233fb9676",
+  "hit_tol": 0.001,
+  "machine_id_sha256": "3b11c160088e7af5c4f7ebd9da95e0bfe019a34698416701bb057c15fea10873",
+  "measured_slot_arm": {
+    "0,A": 4,
+    "0,AP": 4,
+    "0,B": 4,
+    "1,A": 4,
+    "1,AP": 4,
+    "1,B": 4,
+    "2,A": 4,
+    "2,AP": 4,
+    "2,B": 4
+  },
+  "n_rows": 36,
+  "order": [
+    [
+      "A",
+      "AP",
+      "B"
+    ],
+    [
+      "AP",
+      "B",
+      "A"
+    ],
+    [
+      "AP",
+      "B",
+      "A"
+    ],
+    [
+      "A",
+      "AP",
+      "B"
+    ],
+    [
+      "A",
+      "B",
+      "AP"
+    ],
+    [
+      "B",
+      "A",
+      "AP"
+    ],
+    [
+      "B",
+      "A",
+      "AP"
+    ],
+    [
+      "A",
+      "B",
+      "AP"
+    ],
+    [
+      "AP",
+      "A",
+      "B"
+    ],
+    [
+      "B",
+      "AP",
+      "A"
+    ],
+    [
+      "B",
+      "AP",
+      "A"
+    ],
+    [
+      "AP",
+      "A",
+      "B"
+    ]
+  ],
+  "order_slot_arm": {
+    "0,A": 4,
+    "0,AP": 4,
+    "0,B": 4,
+    "1,A": 4,
+    "1,AP": 4,
+    "1,B": 4,
+    "2,A": 4,
+    "2,AP": 4,
+    "2,B": 4
+  },
+  "panel": "1",
+  "reference": "-829.8522275088",
+  "seeds": [
+    2000,
+    2001,
+    2002,
+    2003,
+    2004,
+    2005,
+    2006,
+    2007,
+    2008,
+    2009,
+    2010,
+    2011
+  ],
+  "system": "water_hexamer"
+}
