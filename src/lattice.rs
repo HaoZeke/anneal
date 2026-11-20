@@ -197,11 +197,14 @@ pub fn nearest_neighbour_scale(x: ArrayView1<f64>) -> f64 {
 /// the structure's order is expressed most completely: a surface point's shell
 /// is a fragment, and propagating a fragment grows a fragment.
 pub fn observed_order(x: ArrayView1<f64>, cutoff: f64) -> Vec<[f64; 3]> {
+    observed_order_at(x, cutoff, nearest_neighbour_scale(x))
+}
+
+fn observed_order_at(x: ArrayView1<f64>, cutoff: f64, scale: f64) -> Vec<[f64; 3]> {
     let n = x.len() / 3;
     if n < 2 {
         return Vec::new();
     }
-    let scale = nearest_neighbour_scale(x);
     let reach = cutoff * scale;
     let mut best = (0usize, 0usize);
     let mut shells: Vec<Vec<[f64; 3]>> = Vec::with_capacity(n);
@@ -254,18 +257,19 @@ pub fn grow_from(seed: &[[f64; 3]], offsets: &[[f64; 3]], want: usize) -> Vec<[f
     if offsets.is_empty() {
         return Vec::new();
     }
-    let mut sites: Vec<[f64; 3]> = if seed.is_empty() {
+    let start = if seed.is_empty() {
         vec![[0.0, 0.0, 0.0]]
     } else {
         seed.to_vec()
     };
+    let mut sites = Cells::new(start);
     let mut head = 0usize;
     while sites.len() < want && head < sites.len() {
-        let s = sites[head];
+        let s = sites.points[head];
         head += 1;
         for o in offsets {
             let c = [s[0] + o[0], s[1] + o[1], s[2] + o[2]];
-            if !sites.iter().any(|t| sq(t, &c) < 0.25) {
+            if !sites.any_within(&c, SAME_SITE, |_| true) {
                 sites.push(c);
                 if sites.len() >= want {
                     break;
@@ -273,11 +277,355 @@ pub fn grow_from(seed: &[[f64; 3]], offsets: &[[f64; 3]], want: usize) -> Vec<[f
             }
         }
     }
-    sites
+    sites.points
 }
+
+/// Squared distance below which a grown site is one already placed.
+const SAME_SITE: f64 = 0.25;
+
+/// Squared distance below which two grown sites are neighbours.
+const BONDED: f64 = 1.44;
+
+/// Largest coordinate whose cell index converts to and from `f64` exactly.
+const CELL_RANGE: f64 = (1u64 << 52) as f64;
 
 fn sq(a: &[f64; 3], b: &[f64; 3]) -> f64 {
     (a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)
+}
+
+/// Points binned in unit cubes, the length the growth frame is measured in.
+///
+/// A cell index times the unit is exact, so a point lies in cell `k` exactly
+/// when `k <= p < k + 1`. A query widens its range one cell at a time while
+/// the next face is nearer than the cutoff under the same rounded square
+/// that [`sq`] takes, so every cell it leaves out is already too far for
+/// any point inside it. It therefore applies the all-pairs test to every
+/// point that test could accept, for any cutoff.
+///
+/// Bins are kept only while they cost no more than one all-pairs pass over
+/// the points they hold, and only for finite coordinates in exact index
+/// range. Otherwise the table scans every point, which is the same answer.
+struct Cells {
+    points: Vec<[f64; 3]>,
+    next: Vec<usize>,
+    lo: [i64; 3],
+    dim: [i64; 3],
+    head: Vec<usize>,
+    binned: bool,
+    retry_at: usize,
+}
+
+impl Cells {
+    fn new(points: Vec<[f64; 3]>) -> Self {
+        let mut cells = Self {
+            points,
+            next: Vec::new(),
+            lo: [0; 3],
+            dim: [0; 3],
+            head: Vec::new(),
+            binned: false,
+            retry_at: 0,
+        };
+        cells.rebin();
+        cells
+    }
+
+    fn len(&self) -> usize {
+        self.points.len()
+    }
+
+    fn holds(p: &[f64; 3]) -> bool {
+        p.iter().all(|v| v.abs() < CELL_RANGE)
+    }
+
+    fn cell(p: &[f64; 3]) -> [i64; 3] {
+        let mut c = [0i64; 3];
+        for k in 0..3 {
+            let mut i = p[k] as i64;
+            while i as f64 > p[k] {
+                i -= 1;
+            }
+            while (i + 1) as f64 <= p[k] {
+                i += 1;
+            }
+            c[k] = i;
+        }
+        c
+    }
+
+    fn slot(&self, c: [i64; 3]) -> Option<usize> {
+        let mut s = 0i64;
+        for k in 0..3 {
+            let o = c[k] - self.lo[k];
+            if o < 0 || o >= self.dim[k] {
+                return None;
+            }
+            s = s * self.dim[k] + o;
+        }
+        Some(s as usize)
+    }
+
+    /// Bins every point, with as much room again on each axis to grow into.
+    fn rebin(&mut self) {
+        self.binned = false;
+        self.retry_at = 2 * self.points.len().max(1);
+        self.head.clear();
+        self.next.clear();
+        if !self.points.iter().all(Self::holds) {
+            return;
+        }
+        let mut lo = [0i64; 3];
+        let mut hi = [0i64; 3];
+        for (id, p) in self.points.iter().enumerate() {
+            let c = Self::cell(p);
+            for k in 0..3 {
+                if id == 0 || c[k] < lo[k] {
+                    lo[k] = c[k];
+                }
+                if id == 0 || c[k] > hi[k] {
+                    hi[k] = c[k];
+                }
+            }
+        }
+        let budget = (self.points.len() as u128).pow(2);
+        let mut total = 1u128;
+        for k in 0..3 {
+            let span = hi[k] - lo[k] + 1;
+            self.lo[k] = lo[k] - span / 2 - 1;
+            self.dim[k] = 2 * span + 2;
+            total *= self.dim[k] as u128;
+        }
+        if total > budget {
+            return;
+        }
+        self.head.resize(total as usize, usize::MAX);
+        self.next.resize(self.points.len(), usize::MAX);
+        for id in 0..self.points.len() {
+            let s = self
+                .slot(Self::cell(&self.points[id]))
+                .expect("bounds cover every point");
+            self.next[id] = self.head[s];
+            self.head[s] = id;
+        }
+        self.binned = true;
+    }
+
+    fn push(&mut self, p: [f64; 3]) {
+        self.points.push(p);
+        if !self.binned {
+            if self.points.len() >= self.retry_at {
+                self.rebin();
+            }
+            return;
+        }
+        let id = self.points.len() - 1;
+        self.next.push(usize::MAX);
+        match Self::holds(&p).then(|| self.slot(Self::cell(&p))).flatten() {
+            Some(s) => {
+                self.next[id] = self.head[s];
+                self.head[s] = id;
+            }
+            None => self.rebin(),
+        }
+    }
+
+    /// Whether `hit` accepts some point with `sq < limit` from `c`, offering
+    /// it each such point until it does.
+    fn any_within(&self, c: &[f64; 3], limit: f64, mut hit: impl FnMut(usize) -> bool) -> bool {
+        if !(self.binned && Self::holds(c)) {
+            return (0..self.points.len()).any(|id| sq(&self.points[id], c) < limit && hit(id));
+        }
+        let home = Self::cell(c);
+        let mut from = home;
+        let mut to = home;
+        for k in 0..3 {
+            while from[k] > self.lo[k] && (c[k] - from[k] as f64).powi(2) < limit {
+                from[k] -= 1;
+            }
+            while to[k] < self.lo[k] + self.dim[k] - 1
+                && ((to[k] + 1) as f64 - c[k]).powi(2) < limit
+            {
+                to[k] += 1;
+            }
+        }
+        for a in from[0]..=to[0] {
+            for b in from[1]..=to[1] {
+                for z in from[2]..=to[2] {
+                    let Some(s) = self.slot([a, b, z]) else {
+                        continue;
+                    };
+                    let mut id = self.head[s];
+                    while id != usize::MAX {
+                        if sq(&self.points[id], c) < limit && hit(id) {
+                            return true;
+                        }
+                        id = self.next[id];
+                    }
+                }
+            }
+        }
+        false
+    }
+}
+
+/// Removes the least-coordinated site until `n` remain, returning survivors.
+///
+/// Ties go to the site furthest from the centre, then to the lowest index.
+/// The jitter in the centre is what makes repeated draws from one source
+/// different structures: a body peeled about a site and one peeled about a
+/// hole are different clusters, and both are minima of the packing at some
+/// size. The buckets remove exactly the site a scan of every survivor picks;
+/// a NaN distance, which no order agrees with that scan on, takes the scan.
+fn peel(adj: &[Vec<usize>], centre_distance: &[f64], n: usize) -> Vec<bool> {
+    let m = adj.len();
+    let mut count: Vec<usize> = adj.iter().map(|a| a.len()).collect();
+    let mut alive = vec![true; m];
+    let mut live = m;
+    if centre_distance.iter().any(|d| d.is_nan()) {
+        while live > n {
+            let mut worst = usize::MAX;
+            for i in 0..m {
+                if !alive[i] {
+                    continue;
+                }
+                if worst == usize::MAX
+                    || count[i] < count[worst]
+                    || (count[i] == count[worst] && centre_distance[i] > centre_distance[worst])
+                {
+                    worst = i;
+                }
+            }
+            alive[worst] = false;
+            live -= 1;
+            for &j in &adj[worst] {
+                if alive[j] {
+                    count[j] -= 1;
+                }
+            }
+        }
+        return alive;
+    }
+    // Survivors by neighbour count. Only the lowest occupied count is ever
+    // searched, and a removal lowers its neighbours by one each.
+    let top = count.iter().copied().max().unwrap_or(0);
+    let mut bucket: Vec<Vec<usize>> = vec![Vec::new(); top + 1];
+    let mut slot = vec![0usize; m];
+    for i in 0..m {
+        slot[i] = bucket[count[i]].len();
+        bucket[count[i]].push(i);
+    }
+    fn take(bucket: &mut [Vec<usize>], slot: &mut [usize], c: usize, i: usize) {
+        let at = slot[i];
+        bucket[c].swap_remove(at);
+        if let Some(&moved) = bucket[c].get(at) {
+            slot[moved] = at;
+        }
+    }
+    let mut low = 0usize;
+    while live > n {
+        while bucket[low].is_empty() {
+            low += 1;
+        }
+        let mut worst = bucket[low][0];
+        for &i in &bucket[low][1..] {
+            let (d, w) = (centre_distance[i], centre_distance[worst]);
+            if d > w || (d == w && i < worst) {
+                worst = i;
+            }
+        }
+        take(&mut bucket, &mut slot, low, worst);
+        alive[worst] = false;
+        live -= 1;
+        for &j in &adj[worst] {
+            if alive[j] {
+                take(&mut bucket, &mut slot, count[j], j);
+                count[j] -= 1;
+                slot[j] = bucket[count[j]].len();
+                bucket[count[j]].push(j);
+                low = low.min(count[j]);
+            }
+        }
+    }
+    alive
+}
+
+/// Neighbours of every site, `1e-9 < sq < BONDED`, in no particular order.
+///
+/// The sites are sorted by unit cell, so a row of cells along the last axis is
+/// one contiguous run, and each site's search covers the rows the face test
+/// of [`Cells`] admits. Unbinnable input takes the all-pairs loop.
+fn bonded_neighbours(sites: &[[f64; 3]]) -> Vec<Vec<usize>> {
+    let m = sites.len();
+    let mut adj: Vec<Vec<usize>> = vec![Vec::new(); m];
+    let link = |adj: &mut Vec<Vec<usize>>, i: usize, j: usize| {
+        let d = sq(&sites[i], &sites[j]);
+        if d < BONDED && d > 1e-9 {
+            adj[i].push(j);
+            adj[j].push(i);
+        }
+    };
+    let cells: Vec<[i64; 3]> = sites.iter().map(Cells::cell).collect();
+    let mut lo = [0i64; 3];
+    let mut dim = [0i64; 3];
+    let mut total = 0u128;
+    if m > 0 && sites.iter().all(Cells::holds) {
+        total = 1;
+        for k in 0..3 {
+            lo[k] = cells.iter().map(|c| c[k]).min().unwrap_or(0);
+            dim[k] = cells.iter().map(|c| c[k]).max().unwrap_or(0) - lo[k] + 1;
+            total *= dim[k] as u128;
+        }
+    }
+    if total == 0 || total > (m as u128).pow(2) {
+        for i in 0..m {
+            for j in (i + 1)..m {
+                link(&mut adj, i, j);
+            }
+        }
+        return adj;
+    }
+    let slot = |c: [i64; 3]| {
+        (((c[0] - lo[0]) * dim[1] + (c[1] - lo[1])) * dim[2] + (c[2] - lo[2])) as usize
+    };
+    let mut start = vec![0usize; total as usize + 1];
+    for c in &cells {
+        start[slot(*c) + 1] += 1;
+    }
+    for s in 0..total as usize {
+        start[s + 1] += start[s];
+    }
+    let mut fill = start.clone();
+    let mut order = vec![0usize; m];
+    for (i, c) in cells.iter().enumerate() {
+        let s = slot(*c);
+        order[fill[s]] = i;
+        fill[s] += 1;
+    }
+    for i in 0..m {
+        let (p, home) = (&sites[i], cells[i]);
+        let mut from = home;
+        let mut to = home;
+        for k in 0..3 {
+            while from[k] > lo[k] && (p[k] - from[k] as f64).powi(2) < BONDED {
+                from[k] -= 1;
+            }
+            while to[k] < lo[k] + dim[k] - 1 && ((to[k] + 1) as f64 - p[k]).powi(2) < BONDED {
+                to[k] += 1;
+            }
+        }
+        for a in from[0]..=to[0] {
+            for b in from[1]..=to[1] {
+                let first = start[slot([a, b, from[2]])];
+                let last = start[slot([a, b, to[2]]) + 1];
+                for &j in &order[first..last] {
+                    if j > i {
+                        link(&mut adj, i, j);
+                    }
+                }
+            }
+        }
+    }
+    adj
 }
 
 /// Builds an `n`-point candidate carrying `source`'s local order at the length
@@ -319,14 +667,68 @@ pub fn candidate_keeping<R: Rng + ?Sized>(
     keep: f64,
     rng: &mut R,
 ) -> Array1<f64> {
+    match grow_body(source, x, n, keep) {
+        Some(body) => cut(&body, n, rng),
+        None => x.to_owned(),
+    }
+}
+
+/// As [`candidate`], keeping the growth in `growth` across calls.
+///
+/// The growth depends on the structure alone and the cut on the random draws
+/// alone, so a call on the same structure, bit for bit, reuses the growth and
+/// draws exactly what [`candidate`] draws. A stalled chain proposes from one
+/// structure many times, which is when this move is drawn.
+pub fn candidate_reusing<R: Rng + ?Sized>(
+    growth: &mut Growth,
+    source: Source,
+    x: ArrayView1<f64>,
+    n: usize,
+    rng: &mut R,
+) -> Array1<f64> {
+    let bits: Vec<u64> = x.iter().map(|v| v.to_bits()).collect();
+    let same = growth
+        .key
+        .as_ref()
+        .is_some_and(|(held, held_n, held_bits)| {
+            *held == source && *held_n == n && *held_bits == bits
+        });
+    if !same {
+        growth.body = grow_body(source, x, n, 0.0);
+        growth.key = Some((source, n, bits));
+    }
+    match &growth.body {
+        Some(body) => cut(body, n, rng),
+        None => x.to_owned(),
+    }
+}
+
+/// The part of a candidate that the random draws do not touch.
+#[derive(Debug, Clone)]
+struct Body {
+    scale: f64,
+    sites: Vec<[f64; 3]>,
+    adj: Vec<Vec<usize>>,
+}
+
+/// A growth held between calls of [`candidate_reusing`].
+#[derive(Debug, Clone, Default)]
+pub struct Growth {
+    key: Option<(Source, usize, Vec<u64>)>,
+    body: Option<Body>,
+}
+
+/// Grows the wide body a candidate is cut from, or `None` when the candidate
+/// is the input itself.
+fn grow_body(source: Source, x: ArrayView1<f64>, n: usize, keep: f64) -> Option<Body> {
     let scale = nearest_neighbour_scale(x);
     let offsets = match source {
-        Source::Observed => observed_order(x, 1.35),
+        Source::Observed => observed_order_at(x, 1.35, scale),
         Source::Named(t) => t.points(),
         Source::Pentagonal => pentagonal_shell(),
     };
     if offsets.is_empty() || n == 0 {
-        return x.to_owned();
+        return None;
     }
 
     // The kept core, in units of the spacing and centred, which is the frame
@@ -369,8 +771,17 @@ pub fn candidate_keeping<R: Rng + ?Sized>(
 
     let sites = grow_from(&seed, &offsets, (n * 6).max(n + 32));
     if sites.len() < n {
-        return x.to_owned();
+        return None;
     }
+    let adj = bonded_neighbours(&sites);
+    Some(Body { scale, sites, adj })
+}
+
+/// Peels `body` to `n` points about a jittered centre, then turns and jitters
+/// the result.
+fn cut<R: Rng + ?Sized>(body: &Body, n: usize, rng: &mut R) -> Array1<f64> {
+    let Body { scale, sites, adj } = body;
+    let scale = *scale;
     let _centre = [
         rng.random::<f64>() - 0.5,
         rng.random::<f64>() - 0.5,
@@ -399,18 +810,6 @@ pub fn candidate_keeping<R: Rng + ?Sized>(
     // facet weighted equally, and it needs nothing but neighbour counting, so
     // it stays as general as the growth it cuts.
     let m = sites.len();
-    let mut adj: Vec<Vec<usize>> = vec![Vec::new(); m];
-    for i in 0..m {
-        for j in (i + 1)..m {
-            let d = sq(&sites[i], &sites[j]);
-            if d < 1.44 && d > 1e-9 {
-                adj[i].push(j);
-                adj[j].push(i);
-            }
-        }
-    }
-    let mut count: Vec<usize> = adj.iter().map(|a| a.len()).collect();
-    let mut alive = vec![true; m];
     let centre = [
         rng.random::<f64>() - 0.5,
         rng.random::<f64>() - 0.5,
@@ -419,33 +818,7 @@ pub fn candidate_keeping<R: Rng + ?Sized>(
     // The centre is fixed for the peel, so each site's squared distance is
     // one number. Recomputing it on every comparison picked the same site.
     let centre_distance: Vec<f64> = sites.iter().map(|site| sq(site, &centre)).collect();
-    let mut live = m;
-    while live > n {
-        // The least-coordinated survivor, ties going to the one furthest from a
-        // jittered centre. The jitter is what makes repeated draws from one
-        // source different structures: a body peeled about a site and one
-        // peeled about a hole are different clusters, and both are minima of
-        // the packing at some size.
-        let mut worst = usize::MAX;
-        for i in 0..m {
-            if !alive[i] {
-                continue;
-            }
-            if worst == usize::MAX
-                || count[i] < count[worst]
-                || (count[i] == count[worst] && centre_distance[i] > centre_distance[worst])
-            {
-                worst = i;
-            }
-        }
-        alive[worst] = false;
-        live -= 1;
-        for &j in &adj[worst] {
-            if alive[j] {
-                count[j] -= 1;
-            }
-        }
-    }
+    let alive = peel(adj, &centre_distance, n);
     let sites: Vec<[f64; 3]> = (0..m).filter(|&i| alive[i]).map(|i| sites[i]).collect();
 
     let rot = random_rotation(rng);
@@ -759,6 +1132,216 @@ mod tests {
             diff < 2.0,
             "observed order gave a structure {diff} from the packing it was read from"
         );
+    }
+
+    /// The all-pairs growth the binned one has to reproduce.
+    fn grow_by_scan(seed: &[[f64; 3]], offsets: &[[f64; 3]], want: usize) -> Vec<[f64; 3]> {
+        if offsets.is_empty() {
+            return Vec::new();
+        }
+        let mut sites: Vec<[f64; 3]> = if seed.is_empty() {
+            vec![[0.0, 0.0, 0.0]]
+        } else {
+            seed.to_vec()
+        };
+        let mut head = 0usize;
+        while sites.len() < want && head < sites.len() {
+            let s = sites[head];
+            head += 1;
+            for o in offsets {
+                let c = [s[0] + o[0], s[1] + o[1], s[2] + o[2]];
+                if !sites.iter().any(|t| sq(t, &c) < 0.25) {
+                    sites.push(c);
+                    if sites.len() >= want {
+                        break;
+                    }
+                }
+            }
+        }
+        sites
+    }
+
+    /// The all-pairs peel the bucketed one has to reproduce.
+    fn peel_by_scan(sites: &[[f64; 3]], centre: [f64; 3], n: usize) -> Vec<bool> {
+        let m = sites.len();
+        let mut adj: Vec<Vec<usize>> = vec![Vec::new(); m];
+        for i in 0..m {
+            for j in (i + 1)..m {
+                let d = sq(&sites[i], &sites[j]);
+                if d < 1.44 && d > 1e-9 {
+                    adj[i].push(j);
+                    adj[j].push(i);
+                }
+            }
+        }
+        let mut count: Vec<usize> = adj.iter().map(|a| a.len()).collect();
+        let mut alive = vec![true; m];
+        let centre_distance: Vec<f64> = sites.iter().map(|site| sq(site, &centre)).collect();
+        let mut live = m;
+        while live > n {
+            let mut worst = usize::MAX;
+            for i in 0..m {
+                if !alive[i] {
+                    continue;
+                }
+                if worst == usize::MAX
+                    || count[i] < count[worst]
+                    || (count[i] == count[worst] && centre_distance[i] > centre_distance[worst])
+                {
+                    worst = i;
+                }
+            }
+            alive[worst] = false;
+            live -= 1;
+            for &j in &adj[worst] {
+                if alive[j] {
+                    count[j] -= 1;
+                }
+            }
+        }
+        alive
+    }
+
+    fn bits(p: &[[f64; 3]]) -> Vec<[u64; 3]> {
+        p.iter().map(|q| q.map(f64::to_bits)).collect()
+    }
+
+    /// Shells read off perturbed packings, ideal shells, and shells with
+    /// offsets near the duplicate radius, which is where a cell boundary
+    /// would show if the binned test missed a neighbour.
+    fn shells(r: &mut StdRng) -> Vec<Vec<[f64; 3]>> {
+        let mut out = vec![
+            Template::FaceCentredCubic.points(),
+            Template::Icosahedral.points(),
+            pentagonal_shell(),
+        ];
+        for n in [13usize, 38, 55, 80] {
+            let mut x = packed(n);
+            for v in x.iter_mut() {
+                *v += 0.15 * (r.random::<f64>() - 0.5);
+            }
+            out.push(observed_order(x.view(), 1.35));
+        }
+        let near: Vec<[f64; 3]> = (0..10)
+            .map(|_| {
+                let u = [
+                    r.random::<f64>() - 0.5,
+                    r.random::<f64>() - 0.5,
+                    r.random::<f64>() - 0.5,
+                ];
+                let l = sq(&u, &[0.0; 3]).sqrt().max(1e-6);
+                let len = 0.5 + 0.01 * (r.random::<f64>() - 0.5);
+                [u[0] / l * len, u[1] / l * len, u[2] / l * len]
+            })
+            .collect();
+        out.push(near);
+        out
+    }
+
+    #[test]
+    fn binned_growth_reproduces_the_all_pairs_growth_bit_for_bit() {
+        let mut r = rng();
+        for offsets in shells(&mut r) {
+            for want in [1usize, 2, 17, 228, 480, 900] {
+                let a = grow_from(&[], &offsets, want);
+                let b = grow_by_scan(&[], &offsets, want);
+                assert_eq!(bits(&a), bits(&b), "want={want}");
+                let seed: Vec<[f64; 3]> = a
+                    .iter()
+                    .take(7)
+                    .map(|p| [p[0] + 0.3, p[1], p[2] - 0.2])
+                    .collect();
+                assert_eq!(
+                    bits(&grow_from(&seed, &offsets, want)),
+                    bits(&grow_by_scan(&seed, &offsets, want))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn unbinnable_growth_reproduces_the_all_pairs_growth() {
+        let far = [
+            [1e300, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [f64::NAN, 0.0, 0.0],
+        ];
+        assert_eq!(
+            bits(&grow_from(&[], &far, 40)),
+            bits(&grow_by_scan(&[], &far, 40))
+        );
+        let seed = [[0.0, 0.0, 0.0], [1e15, 0.0, 0.0], [f64::INFINITY, 0.0, 0.0]];
+        let unit = Template::FaceCentredCubic.points();
+        assert_eq!(
+            bits(&grow_from(&seed, &unit, 60)),
+            bits(&grow_by_scan(&seed, &unit, 60))
+        );
+    }
+
+    #[test]
+    fn binned_neighbours_are_the_all_pairs_neighbours() {
+        let mut r = rng();
+        for offsets in shells(&mut r) {
+            let sites = grow_from(&[], &offsets, 400);
+            let adj = bonded_neighbours(&sites);
+            for i in 0..sites.len() {
+                let mut got = adj[i].clone();
+                got.sort_unstable();
+                let want: Vec<usize> = (0..sites.len())
+                    .filter(|&j| {
+                        let (a, b) = if i < j { (i, j) } else { (j, i) };
+                        let d = sq(&sites[a], &sites[b]);
+                        j != i && d < 1.44 && d > 1e-9
+                    })
+                    .collect();
+                assert_eq!(got, want, "site {i}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_bucketed_peel_removes_what_the_scan_removes() {
+        let mut r = rng();
+        for offsets in shells(&mut r) {
+            let sites = grow_from(&[], &offsets, 300);
+            let adj = bonded_neighbours(&sites);
+            for n in [1usize, 38, 55, 150, sites.len()] {
+                let n = n.min(sites.len());
+                for centre in [
+                    [0.0, 0.0, 0.0],
+                    [
+                        r.random::<f64>() - 0.5,
+                        r.random::<f64>() - 0.5,
+                        r.random::<f64>() - 0.5,
+                    ],
+                ] {
+                    let cd: Vec<f64> = sites.iter().map(|s| sq(s, &centre)).collect();
+                    assert_eq!(peel(&adj, &cd, n), peel_by_scan(&sites, centre, n), "n={n}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_reused_growth_draws_the_candidate_a_fresh_one_draws() {
+        let mut growth = Growth::default();
+        let mut x = packed(80);
+        let mut first = rng();
+        let mut second = rng();
+        for step in 0..6 {
+            if step % 3 == 2 {
+                x[5] += 0.01;
+            }
+            let a = candidate(Source::Observed, x.view(), 80, &mut first);
+            let b = candidate_reusing(&mut growth, Source::Observed, x.view(), 80, &mut second);
+            assert_eq!(a.mapv(f64::to_bits), b.mapv(f64::to_bits), "step {step}");
+        }
+        let y = Array1::from(vec![0.0; 9]);
+        let a = candidate(Source::Observed, y.view(), 3, &mut first);
+        let b = candidate_reusing(&mut growth, Source::Observed, y.view(), 3, &mut second);
+        assert_eq!(a.mapv(f64::to_bits), b.mapv(f64::to_bits));
+        assert_eq!(first.random::<u64>(), second.random::<u64>());
     }
 
     /// An empty or degenerate input must return the input rather than a
