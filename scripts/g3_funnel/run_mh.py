@@ -2,7 +2,7 @@
 # Copyright (c) anneal developers
 """One traced ASE minima hopping seed for the G3 funnel panel.
 
-Usage: run_mh.py SYSTEM SEED CAP_S WORKDIR TRACE
+Usage: run_mh.py SYSTEM SEED CAP_S WORKDIR TRACE [--calls N] [--incumbents PATH]
 
 The search is the committed ASE harness unchanged: the start from its
 ``place``, its metered calculator (``LjCalculator`` for Lennard-Jones,
@@ -14,6 +14,13 @@ the first force call, after the previous minimum's, that returned its energy
 bit for bit, and written to TRACE in the format ``classify.py`` reads with
 move ``start`` for the first and ``md`` for the rest. The row goes to stdout
 as ``key=value`` pairs.
+
+``--calls N`` replays a stored seed: the wall cap is dropped and the
+search stops when the next call would exceed N, which is where a wall-capped
+seed that charged N calls stopped. ``--incumbents`` writes every lowering of
+the best quenched energy (peak force at most the harness ``fmax``) with the
+minima hopping step it happened in (0 for the opening quench), the energy
+bits and round-trip coordinates; its last frame is the reported best.
 """
 
 from __future__ import annotations
@@ -51,18 +58,21 @@ gmin_panel = load("g3_gmin_panel", SCRIPTS / "gmin_panel" / "run_panel.py")
 FMAX = ase_panel.FMAX["ase_mh"]
 
 
-def log_energies(calc) -> array:
+def log_energies(calc, on_best=None) -> array:
     energies = array("d")
     base = type(calc)
 
     class Logged(base):
         def calculate(self, atoms=None, properties=None, system_changes=None):
             before = self.calls
+            best = self.best_quenched
             try:
                 base.calculate(self, atoms, properties, system_changes)
             finally:
                 if self.calls > before:
                     energies.append(float(self.results["energy"]))
+                    if on_best is not None and self.best_quenched < best:
+                        on_best(self.calls, self.best_quenched, atoms.get_positions())
 
     calc.__class__ = Logged
     return energies
@@ -118,9 +128,16 @@ def write_trace(minima_traj: Path, energies: array, energy_of, trace: Path) -> t
 
 
 def main() -> int:
-    if len(sys.argv) != 6:
+    args = sys.argv[1:]
+    options = {}
+    for flag in ("--calls", "--incumbents"):
+        if flag in args:
+            at = args.index(flag)
+            options[flag] = args[at + 1]
+            del args[at : at + 2]
+    if len(args) != 5:
         sys.exit(__doc__)
-    system, seed_text, cap_text, work_text, trace_text = sys.argv[1:]
+    system, seed_text, cap_text, work_text, trace_text = args
     seed = int(seed_text)
     cap_s = float(cap_text)
     work = Path(work_text).resolve()
@@ -133,6 +150,9 @@ def main() -> int:
         raise RuntimeError(f"ASE {ase_panel.ASE_VERSION} required, found {ase.__version__}")
     _name, kind, n, reference, rho, _driver, _binary = gmin_panel.spec(system)
     budget = gmin_panel.PAPER_BUDGETS[system]
+    replay = "--calls" in options
+    if replay:
+        budget = min(budget, int(options["--calls"]))
     work.mkdir(parents=True, exist_ok=True)
     os.chdir(work)
     if kind == "lj":
@@ -143,22 +163,38 @@ def main() -> int:
         raise RuntimeError(f"{system}: no ASE harness")
     atoms = Atoms(f"Ar{n}", positions=positions, pbc=False)
     started = time.perf_counter()
+    deadline = None if replay else started + cap_s
     if kind == "lj":
         warmup()
-        calc = LjCalculator(budget, reference, DEFAULT_HIT_TOL, FMAX, deadline=started + cap_s)
+        calc = LjCalculator(budget, reference, DEFAULT_HIT_TOL, FMAX, deadline=deadline)
     else:
-        calc = ase_nonlj.make_morse_calculator(rho, budget, reference, FMAX, started + cap_s)
-    energies = log_energies(calc)
+        calc = ase_nonlj.make_morse_calculator(rho, budget, reference, FMAX, deadline)
+    hopping = {}
+    incumbents = open(options["--incumbents"], "w") if "--incumbents" in options else None
+
+    def on_best(call, energy, positions):
+        hop = hopping["mh"]._counter if "mh" in hopping else 0
+        incumbents.write(
+            f"{len(positions)}\ncall={call} hop={hop} energy_bits={np.float64(energy).view(np.uint64):016x} "
+            f"energy={float(energy)!r}\n"
+        )
+        for x, y, z in positions:
+            incumbents.write(f"X {float(x)!r} {float(y)!r} {float(z)!r}\n")
+
+    energies = log_energies(calc, on_best if incumbents is not None else None)
     atoms.calc = calc
     np.random.seed(seed)
     stop = "budget"
     try:
-        MinimaHopping(atoms)(totalsteps=10**9)
+        hopping["mh"] = MinimaHopping(atoms)
+        hopping["mh"](totalsteps=10**9)
     except CapReached:
         stop = "wall"
     except (BudgetReached, HitReached):
         stop = "budget"
     wall = time.perf_counter() - started
+    if incumbents is not None:
+        incumbents.close()
     best = calc.best_quenched if calc.best_quenched < 1.0e299 else calc.best
     hit = calc.hit_calls is not None
     minima, unmatched = write_trace(work / "minima.traj", energies, uncharged_energy(kind, rho), trace)
