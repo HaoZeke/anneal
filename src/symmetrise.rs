@@ -2674,7 +2674,7 @@ mod shell_tests {
                     let axis = normalise([unit(), unit(), unit()]).unwrap_or([0.0, 0.0, 1.0]);
                     let got = cloud.symmetry_deviation(axis, order, cap);
                     let scalar = scalar_exchange(&cloud, axis, order, cap);
-                    if got != scalar {
+                    if !same_option_bits(got, scalar) {
                         mismatches += 1;
                         if example.is_empty() {
                             example = format!(
@@ -2683,7 +2683,7 @@ mod shell_tests {
                         }
                     }
                     let split = split_exchange(&cloud, axis, order, cap);
-                    if got != split {
+                    if !same_option_bits(got, split) {
                         mismatches += 1;
                         if example.is_empty() {
                             example = format!(
@@ -2861,5 +2861,295 @@ mod shell_tests {
             assert!(got.is_none(), "n={n} {got:?}");
             assert!(cloud.gaps.borrow().is_none(), "n={n}");
         }
+    }
+
+    /// `detect`, `detect_all` and `detect_orders` keep the base split's bits.
+    ///
+    /// The reference is the distance residual followed by the exchange walk,
+    /// and the scalar mirror for a plane. Accepted deviations match by
+    /// `to_bits`, including a ring that is symmetric, duplicated sites, and
+    /// the random clouds the microbench times.
+    #[test]
+    fn detection_matches_the_base_split_on_the_corpus() {
+        let mut clouds: Vec<(String, Array1<f64>, usize)> = Vec::new();
+        for (name, n, seed) in [
+            ("random33", 33usize, 1u64),
+            ("random55", 55, 2),
+            ("random38", 38, 7),
+        ] {
+            clouds.push((name.to_string(), bench_cloud(n, seed), n));
+        }
+        clouds.push(("ring12".to_string(), bench_ring(12, 2.2), 12));
+        let (lattice, lattice_n) = bench_lattice(2);
+        clouds.push(("lattice".to_string(), lattice, lattice_n));
+        let mut duplicated = bench_cloud(6, 3).to_vec();
+        duplicated.extend_from_within(..);
+        clouds.push(("duplicated".to_string(), Array1::from(duplicated), 12));
+
+        let orders: Vec<usize> = (2..=12).collect();
+        let high: Vec<usize> = (2..=38).collect();
+        let tolerance = 0.1;
+        for (name, x, n) in &clouds {
+            let orders = if name == "random38" { &high } else { &orders };
+            assert_detection_bits(name, x.view(), *n, orders, tolerance);
+        }
+    }
+
+    fn same_option_bits(left: Option<f64>, right: Option<f64>) -> bool {
+        match (left, right) {
+            (None, None) => true,
+            (Some(left), Some(right)) => left.to_bits() == right.to_bits(),
+            _ => false,
+        }
+    }
+
+    fn assert_candidate_bits(label: &str, got: &Candidate, expect: &Candidate) {
+        assert_eq!(got.order, expect.order, "{label} order");
+        assert_eq!(got.improper, expect.improper, "{label} improper");
+        for axis in 0..3 {
+            assert_eq!(
+                got.axis[axis].to_bits(),
+                expect.axis[axis].to_bits(),
+                "{label} axis {axis}"
+            );
+        }
+        assert_eq!(
+            got.deviation.to_bits(),
+            expect.deviation.to_bits(),
+            "{label} deviation"
+        );
+    }
+
+    fn assert_detection_bits(
+        name: &str,
+        x: ArrayView1<f64>,
+        n: usize,
+        orders: &[usize],
+        tolerance: f64,
+    ) {
+        let cloud = Cloud::from_view(x, n);
+        let axes = candidate_axes(x, n);
+        for &axis in &axes {
+            for &order in orders {
+                let got = cloud.symmetry_deviation(axis, order, tolerance);
+                let split = split_exchange(&cloud, axis, order, tolerance);
+                assert!(
+                    same_option_bits(got, split),
+                    "{name} order={order} got={got:?} split={split:?}"
+                );
+            }
+            let plane = cloud.plane_deviation(axis, tolerance);
+            let scalar = scalar_plane(&cloud, axis, tolerance);
+            assert!(
+                same_option_bits(plane, scalar),
+                "{name} plane got={plane:?} scalar={scalar:?}"
+            );
+        }
+
+        let expect_best = base_detect(x, n, orders, tolerance);
+        match (detect(x, n, orders, tolerance), expect_best) {
+            (None, None) => {}
+            (Some(got), Some(expect)) => {
+                assert_candidate_bits(&format!("{name} detect"), &got, &expect)
+            }
+            (got, expect) => panic!("{name} detect got={got:?} expect={expect:?}"),
+        }
+
+        let got_orders = detect_orders(x, n, orders, tolerance);
+        let expect_orders = base_detect_orders(x, n, orders, tolerance);
+        assert_eq!(
+            got_orders.len(),
+            expect_orders.len(),
+            "{name} detect_orders"
+        );
+        for (index, (got, expect)) in got_orders.iter().zip(&expect_orders).enumerate() {
+            assert_candidate_bits(&format!("{name} detect_orders {index}"), got, expect);
+        }
+
+        let got_all = detect_all(x, n, orders, tolerance);
+        let expect_all = base_detect_all(x, n, orders, tolerance);
+        assert_eq!(got_all.len(), expect_all.len(), "{name} detect_all");
+        for (index, (got, expect)) in got_all.iter().zip(&expect_all).enumerate() {
+            assert_candidate_bits(&format!("{name} detect_all {index}"), got, expect);
+        }
+    }
+
+    fn base_detect(
+        x: ArrayView1<f64>,
+        n: usize,
+        orders: &[usize],
+        tolerance: f64,
+    ) -> Option<Candidate> {
+        let cloud = Cloud::from_view(x, n);
+        let mut best: Option<Candidate> = None;
+        for axis in candidate_axes(x, n) {
+            for &order in orders {
+                let Some(deviation) = split_exchange(&cloud, axis, order, tolerance) else {
+                    continue;
+                };
+                if deviation < tolerance
+                    && best
+                        .as_ref()
+                        .map(|found| deviation < found.deviation)
+                        .unwrap_or(true)
+                {
+                    best = Some(Candidate {
+                        axis,
+                        order,
+                        improper: false,
+                        deviation,
+                    });
+                }
+            }
+        }
+        best
+    }
+
+    fn base_detect_orders(
+        x: ArrayView1<f64>,
+        n: usize,
+        orders: &[usize],
+        tolerance: f64,
+    ) -> Vec<Candidate> {
+        let cloud = Cloud::from_view(x, n);
+        let axes = candidate_axes(x, n);
+        let mut out = Vec::new();
+        for &order in orders {
+            let mut best: Option<Candidate> = None;
+            for &axis in &axes {
+                let Some(deviation) = split_exchange(&cloud, axis, order, tolerance) else {
+                    continue;
+                };
+                if deviation < tolerance
+                    && best
+                        .as_ref()
+                        .map(|found| deviation < found.deviation)
+                        .unwrap_or(true)
+                {
+                    best = Some(Candidate {
+                        axis,
+                        order,
+                        improper: false,
+                        deviation,
+                    });
+                }
+            }
+            if let Some(candidate) = best {
+                out.push(candidate);
+            }
+        }
+        out
+    }
+
+    fn base_detect_all(
+        x: ArrayView1<f64>,
+        n: usize,
+        orders: &[usize],
+        tolerance: f64,
+    ) -> Vec<Candidate> {
+        let cloud = Cloud::from_view(x, n);
+        let mut out = Vec::new();
+        for axis in candidate_axes(x, n) {
+            for &order in orders {
+                let Some(deviation) = split_exchange(&cloud, axis, order, tolerance) else {
+                    continue;
+                };
+                if deviation < tolerance {
+                    out.push(Candidate {
+                        axis,
+                        order,
+                        improper: false,
+                        deviation,
+                    });
+                }
+            }
+            let Some(deviation) = scalar_plane(&cloud, axis, tolerance) else {
+                continue;
+            };
+            if deviation < tolerance {
+                out.push(Candidate {
+                    axis,
+                    order: 1,
+                    improper: true,
+                    deviation,
+                });
+            }
+        }
+        out.sort_by(|left, right| {
+            left.deviation
+                .partial_cmp(&right.deviation)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        out
+    }
+
+    fn scalar_plane(cloud: &Cloud, axis: [f64; 3], cap: f64) -> Option<f64> {
+        let n = cloud.xs.len();
+        if n == 0 {
+            return None;
+        }
+        let mirror = mirror_matrix(axis);
+        let mut total = 0.0;
+        let limit = cap * cap * n as f64;
+        for index in 0..n {
+            let point = cloud.point(index);
+            let image = [
+                mirror[0][0] * point[0] + mirror[0][1] * point[1] + mirror[0][2] * point[2],
+                mirror[1][0] * point[0] + mirror[1][1] * point[1] + mirror[1][2] * point[2],
+                mirror[2][0] * point[0] + mirror[2][1] * point[1] + mirror[2][2] * point[2],
+            ];
+            total += cloud.nearest_squared_scalar(image);
+            if cap.is_finite() && total > limit {
+                let partial = (total / n as f64).sqrt();
+                if partial >= cap * (1.0 + 1.0e-6) {
+                    return None;
+                }
+            }
+        }
+        Some((total / n as f64).sqrt())
+    }
+
+    fn bench_cloud(n: usize, seed: u64) -> Array1<f64> {
+        let mut state = seed;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / ((1u64 << 53) as f64) - 0.5
+        };
+        let radius = 1.15 * (n as f64).cbrt();
+        Array1::from(
+            (0..3 * n)
+                .map(|_| 2.0 * radius * next())
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    fn bench_ring(n: usize, radius: f64) -> Array1<f64> {
+        let mut coords = vec![0.0; 3 * n];
+        for atom in 0..n {
+            let angle = 2.0 * std::f64::consts::PI * (atom as f64) / (n as f64);
+            coords[3 * atom] = radius * angle.cos();
+            coords[3 * atom + 1] = radius * angle.sin();
+        }
+        Array1::from(coords)
+    }
+
+    fn bench_lattice(max_r2: i32) -> (Array1<f64>, usize) {
+        let mut coords = Vec::new();
+        for i in -2..=2 {
+            for j in -2..=2 {
+                for k in -2..=2 {
+                    let r2 = i * i + j * j + k * k;
+                    if r2 > 0 && r2 <= max_r2 {
+                        coords.push(i as f64);
+                        coords.push(j as f64);
+                        coords.push(k as f64);
+                    }
+                }
+            }
+        }
+        let n = coords.len() / 3;
+        (Array1::from(coords), n)
     }
 }
