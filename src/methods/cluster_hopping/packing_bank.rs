@@ -15,12 +15,15 @@ struct Seat {
     state: Array1<f64>,
 }
 
+/// Diagnostic archive holding up to `SEATS` quenched minima separated
+/// by their common-neighbour triplet order `[f555, f421, f422]`.
 #[derive(Default)]
 pub struct PackingBank {
     seats: Vec<Seat>,
 }
 
 impl PackingBank {
+    /// Create an empty diagnostic packing bank.
     pub fn new() -> Self {
         Self { seats: Vec::new() }
     }
@@ -34,6 +37,9 @@ impl PackingBank {
         [f555, f421, f422]
     }
 
+    /// Record `state` under its common-neighbour triplet order, updating
+    /// the closest seat within `GAP` or replacing the highest-energy seat
+    /// once full.
     pub fn offer(&mut self, energy: f64, state: ArrayView1<f64>, cutoff: f64) {
         if !energy.is_finite() {
             return;
