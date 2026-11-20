@@ -322,14 +322,6 @@ int rgpot_engine_force_batch(RgpotEnginePot *pot, long nSystems, long nAtoms,
   }
 }
 
-RgpotEngineAbiStamp rgpot_engine_abi_stamp(void) {
-  RgpotEngineAbiStamp stamp;
-  stamp.abi_major = RGPOT_ENGINE_ABI_VERSION;
-  stamp.abi_minor = RGPOT_ENGINE_ABI_MINOR;
-  stamp.layout_revision = RGPOT_ENGINE_ABI_LAYOUT_REVISION;
-  return stamp;
-}
-
 int rgpot_engine_abi_compatible(const RgpotEngineAbiStamp *stamp) {
   if (!stamp) {
     return 0;

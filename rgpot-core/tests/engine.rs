@@ -87,6 +87,46 @@ fn load(path: &Path) -> EnginePotential {
     unsafe { EnginePotential::load(path, &config()) }.expect("load the harmonic engine")
 }
 
+/// Opens the engine library named by `RGPOT_TEST_ENGINE` with an empty
+/// configuration and checks that the host accepts its ABI stamp.
+///
+/// Whether `rgpot_engine_create` then accepts the empty message is the
+/// engine's own choice: the Lennard-Jones plugin builds its documented default
+/// potential, while a backend that needs a params message refuses with
+/// `EngineError::Create`. Any other error means the loader rejected the library
+/// before create, which is the failure this test exists to catch.
+///
+/// The meson test `engine_abi_stamp_rust_loader` runs it with
+/// `--ignored` against the Lennard-Jones plugin built in the same tree.
+#[test]
+#[ignore = "needs RGPOT_TEST_ENGINE to name a generic engine library"]
+fn configured_external_engine_passes_the_abi_check() {
+    let path = std::env::var_os("RGPOT_TEST_ENGINE")
+        .expect("RGPOT_TEST_ENGINE names the engine library to open");
+    let path = Path::new(&path);
+    assert_eq!(
+        RgpotEngineAbiStamp::HOST,
+        RgpotEngineAbiStamp {
+            abi_major: 1,
+            abi_minor: 4,
+            layout_revision: 1,
+        }
+    );
+    match unsafe { EnginePotential::load(path, &[]) } {
+        Ok(engine) => assert_eq!(
+            engine.abi_stamp(),
+            RgpotEngineAbiStamp::HOST,
+            "{} reports another ABI stamp",
+            path.display()
+        ),
+        Err(EngineError::Create(_)) => {}
+        Err(error) => panic!(
+            "rgpot host rejected {} before create: {error}",
+            path.display()
+        ),
+    }
+}
+
 fn destroyed(path: &Path) -> c_int {
     let library = unsafe { libloading::Library::new(path) }.expect("reopen the fixture");
     let count: libloading::Symbol<unsafe extern "C" fn() -> c_int> =

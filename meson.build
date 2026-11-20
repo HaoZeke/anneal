@@ -1040,6 +1040,9 @@ endif
 
 # --------------------- Projects
 _incdirs += [include_directories('CppCore'), include_directories('include')]
+# One implementation of the generic engine ABI identity. Every engine plugin
+# adds this source through its target's source list.
+engine_abi_stamp_source = files('CppCore/rgpot/engine/EngineAbiStamp.cc')
 subdir('CppCore')
 rgpot_has_rpc = _rpc_stack
 if get_option('with_rpc_client_only')

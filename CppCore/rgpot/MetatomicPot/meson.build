@@ -84,6 +84,7 @@ if has_metatomic
         _metatomic_engine_srcs += [
             'MetatomicEngineTable.cc',
             '../engine/EngineTable.cc',
+            engine_abi_stamp_source,
         ]
         _engine_table_deps = [capnp_rpc_dep, ptlrpc_dep]
         _engine_table_args = [

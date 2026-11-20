@@ -156,6 +156,7 @@ TEST_CASE("the table identifies the engine", "[engine][adapter]") {
   const RgpotEngineAbiStamp stamp = s.stamp();
   REQUIRE(stamp.abi_major == RGPOT_ENGINE_ABI_VERSION);
   REQUIRE(stamp.abi_minor == RGPOT_ENGINE_ABI_MINOR);
+  REQUIRE(stamp.layout_revision == RGPOT_ENGINE_ABI_LAYOUT_REVISION);
   REQUIRE(RGPOT_ENGINE_ABI_MINOR >= 3);
 }
 

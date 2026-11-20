@@ -28,7 +28,11 @@ To open, build and test an engine, see
 ** Libraries
 
 =CppCore/rgpot/engine/EngineTable.cc= implements every function the engine
-libraries export, for any =PotentialBase=.
+libraries export except =rgpot_engine_abi_stamp=, for any =PotentialBase=.
+=CppCore/rgpot/engine/EngineAbiStamp.cc= defines =rgpot_engine_abi_stamp=.
+Every engine plugin, including the standalone ones that do not use the table,
+adds that file, so all of them report the same ABI major, minor and layout
+revision.
 Each library adds one file that defines =rgpot::engine::create= (build the
 potential from the params message) and =rgpot::engine::backend_name=.
 

@@ -8,7 +8,8 @@
  * @c PotentialBase.
  *
  * `EngineTable.cc` exports every `rgpot_engine_*` symbol of
- * `engine_c_abi.h` for an engine library. The library supplies what only the
+ * `engine_c_abi.h` for an engine library except `rgpot_engine_abi_stamp`,
+ * which `EngineAbiStamp.cc` defines. The library supplies what only the
  * backend knows by defining `rgpot::engine::create` and
  * `rgpot::engine::backend_name`; the adapter does argument validation, the
  * coordinate transform, batching, the error text, the thread-safety policy,

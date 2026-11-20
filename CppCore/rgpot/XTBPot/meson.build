@@ -48,6 +48,7 @@ if has_xtb
         _xtb_engine_srcs += [
             '../engine/XtbEngine.cc',
             '../engine/EngineTable.cc',
+            engine_abi_stamp_source,
         ]
         _xtb_engine_deps = [capnp_rpc_dep, ptlrpc_dep]
         _xtb_engine_args = [
