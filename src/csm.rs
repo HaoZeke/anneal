@@ -157,12 +157,11 @@ fn detected_ops(x: ArrayView1<'_, f64>) -> Vec<[[f64; 3]; 3]> {
         return vec![identity()];
     }
     let orders: Vec<usize> = (2..=n).collect();
-    let mut candidates = crate::symmetrise::detect_all(x, n, &orders, 0.25);
-    if candidates.is_empty()
-        && let Some(candidate) = crate::symmetrise::detect(x, n, &orders, f64::INFINITY)
-    {
-        candidates.push(candidate);
-    }
+    // Operations outside the tolerance are not a group of this structure.
+    // Filling that gap with the least-bad rotation kept a high order whose
+    // turn maps every atom to itself, then closed it into a long cyclic
+    // group and assigned every element.
+    let candidates = crate::symmetrise::detect_all(x, n, &orders, 0.25);
     let group = crate::symmetrise::generate_group(&candidates, 64);
     if group.is_empty() {
         vec![identity()]
