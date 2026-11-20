@@ -95,3 +95,12 @@ between -19560.0322 and -19531.9554, against -19560.8966.
 
 GMIN still quenches to an RMS force of 1e-4 (`SLOPPYCONV`) and 1e-5
 (`TIGHTCONV`). Anneal stops its quench at its own default.
+
+The p-values on the anneal rows of `results.csv` test the anneal seeds
+against the e3ed7dad GMIN rows, so they are not the comparison the table
+makes. `scripts/metal_h2h/sc_n12_pvalues.py` recomputes them from
+`seeds.csv` against the corrected GMIN rows only and appends one row per
+system to `pvalues.csv`, whose `supersedes` field names the `results.csv`
+row it replaces. The superseded rows stay in `results.csv`. The paper's
+Sutton-Chen table reads its p-values from `pvalues.csv`, and
+`scripts/paper_audit.py` recomputes each of them from the seeds.

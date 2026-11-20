@@ -3,7 +3,7 @@
 """(H2O)21 head-to-head, anneal against GMIN, across a budget sweep.
 
 Same serial arm as ``run_h2h.py`` -- one core, hostname bench, working
-directory /work, both codes from the same molecular centres -- but for one
+directory /work, both codes from the same molecular centers -- but for one
 size at several charged-evaluation budgets. anneal runs ``recommended``, the
 develop default preset, with no replica ladder. GMIN is the fixed step. A hit
 is a quenched energy at or below the Cambridge header plus ``HIT_TOL``; a miss

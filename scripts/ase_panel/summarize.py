@@ -43,7 +43,7 @@ TEX_LABELS = {
     "lj150": "LJ\\(_{150}\\)",
     "au55": "Au\\(_{55}\\)",
 }
-MANUSCRIPT = ROOT / "paper" / "jctc" / "manuscript.tex"
+DOCUMENT = ROOT / "paper" / "jctc" / "si.tex"
 TEX_MARKS = ("% ase-panel table: start", "% ase-panel table: end")
 ASE_VERSION = "3.29.0"
 HIT_TOL = DEFAULT_HIT_TOL
@@ -447,7 +447,7 @@ def tex_table() -> str:
     rev_text = ", ".join(sorted(revisions))
     return "\n".join([
         "\\begin{table}",
-        "\\caption{This work against the basin hopping (BH) and minima hopping",
+        "\\caption{\\raggedright This work against the basin hopping (BH) and minima hopping",
         f"(MH) of ASE {ASE_VERSION} at its constructor defaults.",
         f"This work is anneal \\texttt{{{rev_text}}}.",
         "Seeds 2000--2011, one core, budget in force calls.",
@@ -482,7 +482,7 @@ def tex_table() -> str:
 def splice(text: str, block: str) -> str:
     start, end = TEX_MARKS
     if text.count(start) != 1 or text.count(end) != 1:
-        raise SystemExit(f"{MANUSCRIPT} needs one '{start}' and one '{end}'")
+        raise SystemExit(f"{DOCUMENT} needs one '{start}' and one '{end}'")
     head, rest = text.split(start, 1)
     _old, tail = rest.split(end, 1)
     return f"{head}{start}\n{block}\n{end}{tail}"
@@ -512,7 +512,7 @@ def main() -> None:
             "\n".join(aggregate) + "\n"
         )
     if "--tex" in flags:
-        outputs[MANUSCRIPT] = splice(MANUSCRIPT.read_text(), tex_table())
+        outputs[DOCUMENT] = splice(DOCUMENT.read_text(), tex_table())
     if "--check" in flags:
         stale = [str(path.relative_to(ROOT)) for path, text in outputs.items() if path.read_text() != text]
         if stale:

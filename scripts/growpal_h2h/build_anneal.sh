@@ -2,7 +2,7 @@
 # Copyright (c) anneal developers
 # Release build of the GMIN head-to-head example.
 # Its paper_budget map is the shared evaluation ceiling. Paths in the
-# binary are remapped so the timed run is not labelled with this checkout.
+# binary are remapped so the timed run is not labeled with this checkout.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)

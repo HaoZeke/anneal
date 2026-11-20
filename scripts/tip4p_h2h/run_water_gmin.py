@@ -3,7 +3,7 @@
 """(H2O)n head-to-head, anneal's default preset against GMIN's rigid-body
 TIP4P basin-hopping, at n = 8, 12, 16, 20 and 21, twelve seeds, one core.
 
-Both arms open the same molecular centres (``h2h_seed`` writes the start, GMIN
+Both arms open the same molecular centers (``h2h_seed`` writes the start, GMIN
 reads it as ``coords``) and stop at 2_000_000 charged evaluations or at the
 Cambridge Cluster Database header plus 0.001 kJ/mol, whichever is first.
 

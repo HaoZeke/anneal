@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""Tally LJ75 against GMIN with core-orbit symmetrisation, one run per CSV row.
+"""Tally LJ75 against GMIN with core-orbit symmetrization, one run per CSV row.
 
 Reads rewrite_2026/data/lj75_gmin/: the recommended and derived hops of anneal
 on seeds 2000 to 2199, and GMIN on the OptBench starts 1 to 200, each row one
@@ -366,12 +366,12 @@ def main_table(keys: dict[str, str], arms: tuple[Arm, ...]) -> str:
     tolerance = rf"\({keys['tolerance']}\)"
     host = keys["audit_host"].split(", ")
     caption = (
-        r"LJ\(_{75}\) against GMIN with core-orbit symmetrisation~"
+        r"LJ\(_{75}\) against GMIN with core-orbit symmetrization~"
         r"\cite{oakleySymmetrisationSchemesGlobal2013}. Every run stops at the first minimum "
         rf"within {tolerance} of the Cambridge reference~"
         rf"\cite{{walesCambridgeClusterDatabase}} or at a cap of {cap(keys)} force calls, each code "
         rf"counting its own. anneal ran seeds {first} to {last} from random "
-        rf"starts, and GMIN the minimised OptBench starts {ARMS[2][3]} to "
+        rf"starts, and GMIN the minimized OptBench starts {ARMS[2][3]} to "
         rf"{ARMS[2][3] + RUNS - 1}. The interval is the Wilson score interval "
         r"\eqref{eq:wilson}. Call PAR-2 is \eqref{eq:par2} counted in force calls, a miss "
         r"costing twice the cap, and the wall time is the median of the wall\_seconds column "

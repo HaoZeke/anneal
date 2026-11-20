@@ -20,42 +20,31 @@ American Chemical Society
 We ask you to consider the enclosed manuscript, ``One basin-hopping setting for
 Lennard-Jones, Morse, gold, and water clusters,'' as a Full Article.
 
-This submission replaces the preprint arXiv:2302.02811, deposited in 2023
-under the title ``Unified Software Design Patterns for Simulated Annealing.''
-The title and the content have changed.
-The manuscript now reports one basin-hopping setting and the search machinery
-it runs on, and it compares that setting with GMIN, with the Atomic
-Simulation Environment, with AGOX GOFEE, and with CREST.
-
-The manuscript reports one basin-hopping setting for atomic and rigid-molecule
-clusters.
-It has a fixed library of six moves, a reduced temperature of \(0.8\), and a
-depth posterior that chooses the move, and none of the three changes with the
-size of the cluster.
+We present one setting for atomic and rigid-molecule clusters whose moves,
+temperature, and move choice do not change with size: six moves, a reduced
+temperature of \(0.8\), and a depth posterior that chooses the move.
+Only the quench changes, at 98 atoms, and structure priors propose
+close-packed motifs.
 The manuscript does not claim a new move.
 The claim is the combination, in which one normal-gamma posterior per move
 chooses among six moves from the depth each reaches and a stall never restarts
 the walker at random, and the way the combination is tested.
-The preset also carries structure priors.
+The tables do not separate the effect of those priors from that of the moves.
 
-Against the Wales-group program GMIN, on seeds 2000--2011 of thirteen Lennard-Jones, Gupta, and Morse clusters in one session, this setting hits more seeds on 9 of 13, the two tie on 2, and GMIN hits more on 2.
-Fisher's test on hits is below 0.05 on 6 of the 9 wins: LJ\(_{38}\), LJ\(_{75}\), LJ\(_{98}\), Au\(_{55}\), and M\(_{55}\) and M\(_{80}\) at \(\rho=14\).
-GMIN hits LJ\(_{150}\) on 9 of 12 against 5 of 12, with \(p=0.21\), and M\(_{80}\) at \(\rho=6\) on 12 of 12 against 2 of 12, with \(p=6.7\times 10^{-5}\).
-The median wall of a run is 0.075~s for this setting against 3.658~s for GMIN on LJ\(_{38}\), and 27.019~s against 119.9~s on LJ\(_{75}\).
-On M\(_{80}\) at \(\rho=6\) it is 168.9~s against 10.691~s.
+Against GMIN on Lennard-Jones, Gupta, and Morse clusters, this setting hits
+more seeds on 9 of 13 and GMIN hits more on two.
+On nine Sutton--Chen clusters, this setting hits at least as many seeds as
+GMIN on each, while GMIN has the lower median wall on seven.
 The losses and the ties stay in the text and in the tables.
 
-The molecular test is the water hexamer at the GFN2-xTB model, and the
-manuscript also reports TIP4P clusters against GMIN.
-On the water hexamer the motif match hits 121 of 192 seeds for the default hop and 97 of 192 for CREST, both at GFN2-xTB with xtb 6.7.1.
-The six CREST rows are single draws from one start geometry, and the text
-does not read them as a success rate.
+The manuscript also reports TIP4P clusters against GMIN.
 
 Journal of Chemical Theory and Computation publishes software for molecular
 simulation.
-This article belongs in that journal because the tables of the GMIN, ASE, GOFEE, and
-TIP4P comparisons are generated from the committed rows by committed scripts.
-The Zenodo record for the submission has no DOI yet.
+This article belongs in that journal because committed scripts generate the
+GMIN, ASE, GOFEE, and Sutton--Chen tables from committed row or seed files and
+the TIP4P table from its committed per-seed rows.
+The concept DOI of the \texttt{anneal\_repro} reproducibility archive is \DOI{}.
 
 A table of contents graphic at 3.25~in by 1.75~in accompanies the submission.
 The suggested reviewers are listed in the submission form.

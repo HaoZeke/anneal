@@ -32,5 +32,16 @@
 \newcommand{\PlainEnergy}{-173.928427}
 \newcommand{\PlainCalls}{30000}
 \newcommand{\MinimaMapFile}{landscapes.pdf}
-% A sentence whose number waits on a code rerun carries the tag; paper_audit --pre-submission refuses a tag.
-\newcommand{\rerun}[1]{\textbf{[RERUN: item #1]}}
+% Concept DOI of the anneal_repro reproducibility archive (from CITATION.cff).
+\newcommand{\DOI}{\url{https://doi.org/10.5281/zenodo.20672620}}
+% The two documents are built apart: \siref and \msref print the number of a label of the
+% other one from labels-si.tex and labels-manuscript.tex, which scripts/cross_labels.py writes.
+\newcommand{\siref}[1]{\ifcsname si@#1\endcsname\csname si@#1\endcsname\else\textbf{S??}\typeout{Undefined SI label #1}\fi}
+\newcommand{\msref}[1]{\ifcsname ms@#1\endcsname\csname ms@#1\endcsname\else\textbf{??}\typeout{Undefined manuscript label #1}\fi}
+\InputIfFileExists{labels-si}{}{}
+\InputIfFileExists{labels-manuscript}{}{}
+
+% generated paper constants: start
+\newcommand{\TIPFourPHitToleranceKJ}{0.001}
+\newcommand{\RgpotRevision}{8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e}
+% generated paper constants: end

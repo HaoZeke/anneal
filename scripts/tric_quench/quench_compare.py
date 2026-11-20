@@ -46,10 +46,10 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "scripts" / "openconf_h2h"))
+from codata2018 import BOHR_ANGSTROM as BOHR, HARTREE_EV as HARTREE  # noqa: E402
 
-BOHR = 0.529177210903
-HARTREE = 27.211386245988
 EV_PER_HB = HARTREE / BOHR
 SEARCH_GATE = 5e-2
 WATER_GATE = 2e-4 * EV_PER_HB
@@ -200,7 +200,7 @@ class Gfn2:
 
 
 def pack(template, count, spacing, seed):
-    """Molecules at random orientations in a sphere, centres ``spacing`` apart."""
+    """Molecules at random orientations in a sphere, centers ``spacing`` apart."""
     coords, numbers = template
     rng = np.random.default_rng(seed)
     radius = spacing * (count / 0.6) ** (1 / 3) * 0.5
@@ -214,7 +214,7 @@ def pack(template, count, spacing, seed):
         else:
             misses += 1
             if misses == 10_000:
-                # The first centres can leave no room for the rest.
+                # The first centers can leave no room for the rest.
                 centres, misses = [], 0
     out = []
     for c in centres:

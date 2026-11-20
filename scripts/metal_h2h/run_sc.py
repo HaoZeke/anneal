@@ -66,8 +66,8 @@ SC_ROWS = {
 # Doye and Wales's basin-hopping kT/eps for each row, New J. Chem. 22, 733 (1998).
 BASIN_HOPPING_TEMPERATURE = {"126": 30.0, "108": 5.0, "96": 10.0}
 # The STEP line of examples/h2h_gmin_lj.data is in sigma. A Lennard-Jones
-# nearest neighbour is 2**(1/6) sigma and a Sutton-Chen one is a/sqrt(2),
-# so the same displacement per neighbour distance is this many a per sigma.
+# nearest neighbor is 2**(1/6) sigma and a Sutton-Chen one is a/sqrt(2),
+# so the same displacement per neighbor distance is this many a per sigma.
 SC_LENGTH_PER_LJ = 2.0**-0.5 / 2.0 ** (1.0 / 6.0)
 LJ_STEP = 0.40
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)

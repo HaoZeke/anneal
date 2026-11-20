@@ -7,20 +7,18 @@ pair's measured reach, which a Coulomb/Lennard-Jones tail like TIP4P does not
 have, so `pair_range` is unset and the rigid trajectory is unchanged. Three
 rows rebuilt on `f511db94` reproduce their `7da10659` best, evaluations and
 hit bit-for-bit, including the (H₂O)₂₅ seed 2010 best of −1113.0346568571.
-Twelve seeds, 2000–2011, a budget of 2_000_000 charged
-evaluations at every size (the paper ceiling for (H₂O)₂₀), serial, `taskset
--c 0`, one session under `sudo unshare --uts` with hostname `bench`, working
-directory `/work`. The driver is `scripts/tip4p_h2h/enter_h2h.sh`, the
+Twelve seeds, 2000–2011, use a budget of 2_000_000 charged
+evaluations at every size (the paper ceiling for (H₂O)₂₀). The driver is
+`scripts/tip4p_h2h/enter_h2h.sh`, the
 Snakemake rule is `tip4p_h2h`, and the asv suite is
 `bench/tip4p-h2h/benchmarks/tip4p_h2h.py`.
 
 Both arms open the same molecular centres: `h2h_seed` writes the start it
 draws for a seed and GMIN reads it as its `coords`. One charged evaluation is
-one entry to the potential on either side. A hit is a quenched energy at or
-below the reference plus 0.001 kJ/mol. The references are the Cambridge
-Cluster Database TIP4P headers, which the database lists for n ≤ 21; (H₂O)₂₅
-is not in the database, so its hit is scored against the lowest energy either
-arm reached in the session and no early stop is armed.
+one entry to the potential on either side. Sizes 8, 15, 20, and 21 are scored
+at a quenched energy at or below their Cambridge Cluster Database TIP4P
+reference plus 0.001 kJ/mol. Size 25 has no independent reference and is
+unscored.
 
 GMIN is built from source by `scripts/gmin_h2h/build_gmin.sh` at revision
 `aac1548a`, gfortran 13.3.0, reference BLAS/LAPACK, with NEWTIP, TIPID 4,
@@ -52,25 +50,26 @@ offset never changes which cage a run is scored at.
 
 ## Panel
 
-Rows are `h2h-summary.csv`. `best` is the lowest of the twelve; the median is
-beside it. `p(F)` is the two-sided Fisher exact test on the hit counts; `p(U)`
-is the two-sided Mann–Whitney U test on the per-seed best energies.
+Rows are `rows-h2h-r2.csv`. `best` is the lowest of the twelve and the median is
+beside it. Calls is the median per run. `p(U)` is the two-sided asymptotic
+Mann–Whitney U test without continuity correction on the per-seed best
+energies.
 
-| Size | anneal | GMIN | anneal best / median | GMIN best / median | wall (a/g s) | pot (a/g s) | p(F) | p(U) |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| (H₂O)₈  | 12/12 | 8/12 | −305.5177 / −305.5176 | −305.5189 / −305.5189 | 0.020 / 1.697 | 0.012 / 1.355 | 0.093 | 0.166 |
-| (H₂O)₁₅ | 9/12  | 0/12 | −628.3716 / −628.3714 | −622.859 / −619.933 | 8.01 / 40.81 | 6.12 / 36.97 | 0.00034 | 3.2e-05 |
-| (H₂O)₂₀ | 5/12  | 0/12 | −872.9879 / −864.394 | −860.701 / −851.443 | 22.17 / 71.13 | 17.61 / 66.39 | 0.037 | 5.3e-05 |
-| (H₂O)₂₁ | 0/12  | 0/12 | −915.774 / −914.294 | −903.760 / −895.593 | 24.89 / 76.37 | 19.21 / 71.46 | 1.000 | 3.2e-05 |
-| (H₂O)₂₅ | 1/12  | 0/12 | −1113.035 / −1103.345 | −1087.334 / −1082.127 | 33.86 / 105.23 | 26.23 / 99.89 | 1.000 | 3.2e-05 |
+| Size | anneal | GMIN | calls (a/g) | anneal best / median | GMIN best / median | p(U) |
+| --- | --- | --- | --- | --- | --- | --- |
+| (H₂O)₈  | 12/12 | 8/12 | 6339 / 240163 | −305.5177 / −305.5176 | −305.5189 / −305.5189 | 0.166 |
+| (H₂O)₁₅ | 7/12  | 0/12 | 1481619.5 / 2000000 | −628.3716 / −628.3713 | −622.859 / −619.933 | 3.2e-05 |
+| (H₂O)₂₀ | 6/12  | 0/12 | 1686249.5 / 2000000 | −872.9879 / −868.8666 | −860.701 / −851.443 | 3.2e-05 |
+| (H₂O)₂₁ | 0/12  | 0/12 | 2000000 / 2000000 | −915.774 / −914.368 | −903.760 / −895.593 | 3.2e-05 |
 
-GMIN beats anneal nowhere. Anneal has at least as many hits at every size and
-a lower per-seed best-energy distribution at every size from 15 up, with the
-Mann–Whitney p at or below 5.3e-05. At (H₂O)₂₁ neither arm reaches the global
+GMIN beats anneal nowhere. Anneal has at least as many hits at every scored
+size and a lower per-seed best-energy distribution at scored sizes 15, 20,
+and 21, with the Mann–Whitney p at \(3.2\times 10^{-5}\). At (H₂O)₂₁ neither arm reaches the global
 minimum in 2 M calls, but anneal stops 0.93 kJ/mol short of it against GMIN's
-13 kJ/mol; at (H₂O)₂₅ anneal reaches −1113.03 kJ/mol against GMIN's −1087.33.
-Anneal's median wall is 3.1 to 85× shorter, and most of each wall on both
-sides is time inside the potential.
+13 kJ/mol. For size 25, anneal's best and median final energies are
+−1113.0346568571 and −1103.3447313609 kJ/mol and its median wall is
+35.730266 s. GMIN's corresponding values are −1087.3344641800 and
+−1082.1265516750 kJ/mol and 107.109000 s.
 
 At (H₂O)₈ both arms find the same global-minimum cage. GMIN's best reads
 1.2 mJ/mol below anneal's there, which is the potential offset above plus
@@ -79,8 +78,12 @@ the same cage, not a lower one. Anneal finds that cage on all twelve seeds and
 GMIN on eight, so anneal wins the size on hits. Because no arm beats anneal,
 there is no accompanying fix.
 
-Per-seed rows and logs stay in `/work`; only the summary and verification
-rows are committed.
+The r2 wall comparison is in `wall-r2.csv`; it records the one-machine,
+core-0 ABBA protocol and the exact rank-enumeration wall-time test.
+Per-seed rows and session receipts are committed here. Original raw logs are in
+`HaoZeke/anneal-paper-data` at revision
+`71185263eb6a8130d1262fd76d90109f5fabdcf5` under
+`bench/tip4p-h2h/logs/`.
 
 ## (H₂O)₂₁ budget sweep
 
@@ -110,8 +113,7 @@ leave it. The median does climb,
 from −914.37 to −915.14, as the slower seeds reach that plateau. GMIN's best
 improves from −903.76 to −905.33 and then holds, 11.4 kJ/mol short. Anneal's
 per-seed best distribution stays below GMIN's at every budget, Mann–Whitney p
-3.2e-05, at a third of the wall. Lifting (H₂O)₂₁ is left to later work; the
-default preset is unchanged here.
+3.2e-05, at a third of the wall. The default preset is unchanged here.
 
 ## (H₂O)₂₁ misses at 2 M
 Each of the twelve 2 M rows above is rerun with the panel's stop target and

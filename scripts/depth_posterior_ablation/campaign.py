@@ -5,18 +5,28 @@
 Both arms share the seed list and PAPER_BUDGETS. The schedule is one
 shuffled list, so the arms are interleaved rather than run as two blocks.
 One process at a time. A hit is within 0.001 of the Cambridge minimum;
-force calls to first hit are summarised with the type-7 median and IQR
+force calls to first hit are summarized with the type-7 median and IQR
 on the hits only.
+
+``--held-out`` runs the same two arms on seeds 7000-7005 of LJ75, LJ98 and
+LJ104 and appends rows in the schema of results/size-tiered-selection.csv,
+with a miss charged the full budget and the gap to the Cambridge energy.
+The code revision and the host go in the sidecar
+results/size-tiered-selection-provenance.csv, not in that CSV. The third
+arm of the result file, the tiered selector, has no committed code and is
+not run.
 """
 
 from __future__ import annotations
 
 import argparse
 import math
+import os
 import random
 import socket
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 SIZES = (38, 55, 75, 98, 104)
@@ -32,12 +42,90 @@ PAPER_BUDGETS = {
 SCHEDULE_SEED = 20261111
 HEADER = "order,system,arm,seed,budget,hit,force_calls_to_hit,charged,best,wall_s"
 SYSTEM = {38: "lj38", 55: "lj55", 75: "lj75", 98: "lj98", 104: "lj104"}
+HELD_OUT_SIZES = (75, 98, 104)
+HELD_OUT_SEEDS = (7000, 7001, 7002, 7003, 7004, 7005)
+HELD_OUT_SCHEDULE_SEED = 712801
+HELD_OUT_HEADER = "arm,n,seed,hit,calls_to_hit,best,gap,charged,wall_s"
+PROVENANCE_HEADER = "arm,n,seed,code_revision,host"
+# The references of examples/depth_ablation.rs.
+CAMBRIDGE = {75: -397.492331, 98: -543.665361, 104: -582.086642}
 
 
 def schedule() -> list[tuple[int, int, str]]:
     jobs = [(size, seed, arm) for size in SIZES for seed in SEEDS for arm in ARMS]
     random.Random(SCHEDULE_SEED).shuffle(jobs)
     return jobs
+
+
+def held_out_schedule() -> list[tuple[int, int, str]]:
+    jobs = [(size, seed, arm) for size in HELD_OUT_SIZES for seed in HELD_OUT_SEEDS for arm in ARMS]
+    random.Random(HELD_OUT_SCHEDULE_SEED).shuffle(jobs)
+    return jobs
+
+
+def held_out_line(row: dict[str, str], size: int) -> str:
+    """One row of results/size-tiered-selection.csv from a campaign row."""
+    calls = row["force_calls_to_hit"] if row["hit"] == "1" else row["budget"]
+    gap = float(row["best"]) - CAMBRIDGE[size]
+    return ",".join([row["arm"], str(size), row["seed"], row["hit"], calls, row["best"], f"{gap:.8f}", row["charged"],
+                     row["wall_s"]])
+
+
+def provenance_line(row: dict[str, str], size: int, revision: str, host: str) -> str:
+    """The provenance sidecar row for one held-out result."""
+    return ",".join([row["arm"], str(size), row["seed"], revision, host])
+
+
+def held_out_done(path: Path, revision: str) -> set[tuple[int, int, str]]:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if lines[0] != PROVENANCE_HEADER:
+        raise SystemExit(f"{path} does not have the header {PROVENANCE_HEADER}")
+    fields = [line.split(",") for line in lines[1:]]
+    return {(int(f[1]), int(f[2]), f[0]) for f in fields if f[3] == revision}
+
+
+def stage_line(path: Path, line: str) -> Path:
+    """Write path plus one line to a temporary file in the same directory."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing_lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+    existing = "\n".join(existing_lines) + "\n" if existing_lines else ""
+    mode = path.stat().st_mode & 0o777 if path.is_file() else 0o644
+    fd, name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    tmp = Path(name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(existing)
+            handle.write(line if line.endswith("\n") else line + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp, mode)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    return tmp
+
+
+def run_held_out(binary: Path, log_dir: Path, results: Path, provenance: Path, revision: str) -> None:
+    host = socket.gethostname()
+    done = held_out_done(provenance, revision)
+    jobs = held_out_schedule()
+    for order, (size, seed, arm) in enumerate(jobs, start=1):
+        if (size, seed, arm) in done:
+            print(f"skip {order}/{len(jobs)} LJ{size} seed {seed} {arm}", flush=True)
+            continue
+        row = run_job(binary, log_dir, order, size, seed, arm)
+        result_tmp = stage_line(results, held_out_line(row, size))
+        try:
+            side_tmp = stage_line(provenance, provenance_line(row, size, revision, host))
+            try:
+                os.replace(result_tmp, results)
+                os.replace(side_tmp, provenance)
+            except BaseException:
+                side_tmp.unlink(missing_ok=True)
+                raise
+        finally:
+            result_tmp.unlink(missing_ok=True)
+        print(f"done {order}/{len(jobs)} LJ{size} seed {seed} {arm} hit={row['hit']}", flush=True)
 
 
 def type7(sorted_values: list[float], p: float) -> float:
@@ -151,13 +239,21 @@ def main() -> None:
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--log-dir", type=Path, required=True)
     parser.add_argument("--results", type=Path, required=True)
+    parser.add_argument("--provenance", type=Path)
     parser.add_argument("--size", type=int)
     parser.add_argument("--seed", type=int)
     parser.add_argument("--arm", choices=ARMS)
+    parser.add_argument("--held-out", action="store_true", help="seeds 7000-7005, appended to --results")
+    parser.add_argument("--code-revision", help="the revision the binary was built from, for --held-out rows")
     args = parser.parse_args()
     if args.binary.is_file() is False:
         raise SystemExit(f"missing binary {args.binary}")
     args.log_dir.mkdir(parents=True, exist_ok=True)
+    if args.held_out:
+        if not args.code_revision or not args.provenance:
+            raise SystemExit("--held-out needs --code-revision and --provenance")
+        run_held_out(args.binary, args.log_dir, args.results, args.provenance, args.code_revision)
+        return
     single = (args.size, args.seed, args.arm)
     if any(value is not None for value in single) and any(value is None for value in single):
         raise SystemExit("pass size, seed, and arm together")

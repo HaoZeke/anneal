@@ -19,7 +19,7 @@ evaluator cap and a timer inside the Lennard-Jones, Morse and binary
 Gupta potentials. Its inputs are ``examples/h2h_gmin_lj.data``,
 ``examples/h2h_gmin_morse.data`` plus ``MORSE <rho>``, and for Au55 the
 same quench and taboo block on ``BGUPTAT`` with the Darby gold row,
-GMIN's ``io1.f90`` nearest-neighbour container radius, step and avoid
+GMIN's ``io1.f90`` nearest-neighbor container radius, step and avoid
 distances converted from ``sigma`` by ``r0 / 2**(1/6)``, and the 0.1 eV
 temperature of Wales's ``examples/GMIN/MGupta.tar.bz2``.
 
@@ -111,7 +111,7 @@ GOLD_ROW = f"0.2061 10.229 4.036 1.79 {GOLD_R0}"
 # Wales group public Gupta example (examples/GMIN/MGupta.tar.bz2): 0.1 eV.
 GUPTA_TEMPERATURE_EV = 0.1
 # examples/h2h_gmin_lj.data step and avoid distances in sigma, converted by
-# nearest-neighbour distance r0 / (2**(1/6) sigma), as in scripts/metal_h2h/run_sc.py.
+# nearest-neighbor distance r0 / (2**(1/6) sigma), as in scripts/metal_h2h/run_sc.py.
 GOLD_LENGTH_PER_LJ = GOLD_R0 / 2.0 ** (1.0 / 6.0)
 LJ_STEP = 0.40
 LJ_AVOID = 4.0
@@ -378,7 +378,7 @@ def gmin_result(text: str, system: str, seed: int, budget: int) -> dict[str, str
 
 
 def gmin_gupta_radius(n: int, r0: float = GOLD_R0) -> float:
-    """GMIN's io1.f90 container radius in units of nearest-neighbour distance r0."""
+    """GMIN's io1.f90 container radius in units of nearest-neighbor distance r0."""
     return (2.0 + (3.0 * n / 17.77153175) ** (1.0 / 3.0)) * r0
 
 
@@ -708,20 +708,25 @@ def readme_table(summary: list[dict[str, str]]) -> str:
     return "\n".join(rows)
 
 
+def revision_note(summary: list[dict[str, str]]) -> str:
+    """The anneal revision of each group of clusters, in table order."""
+    groups: dict[str, list[str]] = {}
+    for row in summary:
+        groups.setdefault(row["anneal_revision"][:8], []).append(LABELS[row["system"]][1].replace(", ", " at "))
+    parts = [f"\\texttt{{{rev}}} on {', '.join(names[:-1]) + (',' if len(names) > 2 else '') + ' and ' + names[-1] if len(names) > 1 else names[0]}"
+             for rev, names in groups.items()]
+    return "; ".join(parts)
+
+
 def tex_table(summary: list[dict[str, str]], revision: str) -> str:
     lines = table_lines(summary, tex=True)
-    for index, cells in enumerate(lines):
-        system = summary[index // 2]["system"]
-        arm = "anneal" if index % 2 == 0 else "gmin"
-        if arm == "gmin" and system in ("lj75", "lj98"):
-            cells[3] += "~\\rerun{5}"
-    shown_revision = revision[:8] if revision != "latest" else "mixed"
+    shown_revision = f"\\texttt{{{revision[:8]}}}" if revision != "latest" else revision_note(summary)
     body = [" & ".join(cells) + " \\\\" for cells in lines]
     return "\n".join(
         [
             "\\begin{table}",
             "\\caption{This work against GMIN, both arms of each cluster on one host in one session.",
-            f"Revisions: anneal \\texttt{{{shown_revision}}}, GMIN \\texttt{{{GMIN_REV[:8]}}}.",
+            f"Revisions: anneal {shown_revision}, GMIN \\texttt{{{GMIN_REV[:8]}}}.",
             "Seeds 2000--2011, one core, budget in force calls.",
             "Calls and IQR are the median and the interquartile range of the",
             "calls to the minimum, with a miss at the full budget.",
@@ -729,8 +734,9 @@ def tex_table(summary: list[dict[str, str]], revision: str) -> str:
             "potential and outside it.",
             "\\(p_\\mathrm{F}\\) is the two-sided Fisher exact test on hits;",
             "\\(p_\\mathrm{calls}\\) and \\(p_\\mathrm{wall}\\) are the two-sided",
-            "Mann--Whitney test on calls and on wall to the minimum (`--' where",
-            "call-capped misses leave cross-arm wall times censored at unequal horizons).}",
+            "continuity-corrected asymptotic Mann--Whitney test on calls and on wall to the",
+            "minimum (`--' where call-capped misses leave cross-arm wall times censored at",
+            "unequal horizons).}",
             "\\label{tab:gmin}",
             "\\centering",
             "\\scriptsize",

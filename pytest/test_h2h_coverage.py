@@ -25,12 +25,16 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-REGISTRY = json.loads((ROOT / "bench" / "h2h.json").read_text())
+sys.path.insert(0, str(ROOT / "scripts"))
+from h2h_registry import load_registry  # noqa: E402
+
+REGISTRY = load_registry(ROOT)
 ENTRIES = REGISTRY["h2h"]
 RULES = [entry["rule"] for entry in ENTRIES]
 MIN_SEEDS = 6

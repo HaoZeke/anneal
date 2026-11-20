@@ -3,7 +3,7 @@
 Seeds 2000–2011, budget 4e6, one core, hostname `bench`. A hit is within
 0.001 of −378.333471. Medians are Hyndman–Fan type 7. `priors=off` is
 `H2H_PRIORS=0`: the fivefold SOAP move, the icosahedral reseed, lattice
-regrowth, the labelled core, the motif reseed, stall symmetrisation and
+regrowth, the labeled core, the motif reseed, stall symmetrisation and
 the continuous-symmetry reseed are off. Unset, they stay at the preset.
 
 | revision | priors | hits | median calls | median wall (s) | median inside (s) | median outside (s) |
@@ -21,7 +21,7 @@ Fisher exact on the hits, priors off against priors on: `fef007ed` 1.00,
 structure priors are already on at `fef007ed`, and that commit hits
 12/12. They are not what arrived between the two.
 
-What arrived, for an unlabelled Morse cluster, is `3c45b899`: the
+What arrived, for an unlabeled Morse cluster, is `3c45b899`: the
 recommended full quench runs 1000 steps instead of 200. On the merge
 itself (`9abb056e`, still pinned to rgpot `1c1b4ed`), seed 2000 misses
 inside 4e6 calls at 1000 steps. Putting that one assignment back to 200,

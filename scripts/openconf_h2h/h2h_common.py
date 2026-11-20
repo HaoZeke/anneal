@@ -7,12 +7,17 @@ import csv
 import ctypes
 from pathlib import Path
 
+import sys
 import numpy as np
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
-KCAL_PER_EV = 23.060547830619026
 ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+from codata2018 import HARTREE_EV, KCAL_PER_EV  # noqa: E402
+
+HARTREE_KCAL = HARTREE_EV * KCAL_PER_EV
 MOLECULES = ROOT / "bench" / "openconf-h2h" / "molecules.csv"
 
 # Lipinski's strict rotatable bond, without the acyclic condition. The ring

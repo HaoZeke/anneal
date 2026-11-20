@@ -51,6 +51,9 @@ export LD_LIBRARY_PATH=$LIB
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 RAYON_NUM_THREADS=1
 export PANEL_PYTHON=$PY
 cd $WORK
+taskset -c $CORE $PY $ROOT/scripts/session_metadata.py \\
+  --output $OUT/sessions.jsonl --campaign gfn2-crest-full --root $ROOT -- \\
+  snakemake -s workflow/Snakefile covalent_gfn2_crest --cores 1 --force
 exec taskset -c $CORE $PY -u $HERE/gfn2_crest.py \\
   --anneal $WORK/bin/gfn2_covalent_h2h --crest $CREST --xtb $XTB \\
   --engine $ENGINE --head-file $WORK/anneal-head \\

@@ -695,13 +695,15 @@ def lj_large_line(fields: list[str]) -> str:
     return ",".join(fields)
 
 
-def write_lj_large(rows: list[dict], repo: Path, systems: list[str]) -> None:
+def write_lj_large(
+    rows: list[dict], repo: Path, output_dir: Path, systems: list[str]
+) -> None:
     """Append missing system/arm rows. A row already in the file stays as written."""
     panel = load_n12(repo)
     grouped: dict[tuple[str, str], list[dict]] = {}
     for row in rows:
         grouped.setdefault((row["system"], row["arm"]), []).append(row)
-    out = repo / "bench" / "ase-gofee-h2h" / "lj-large.csv"
+    out = output_dir / "lj-large.csv"
     out.parent.mkdir(parents=True, exist_ok=True)
     present: set[tuple[str, str]] = set()
     if out.is_file() and out.read_text().strip():
@@ -775,8 +777,8 @@ def write_lj_large(rows: list[dict], repo: Path, systems: list[str]) -> None:
     out.write_text(text + "\n".join(extra) + "\n")
 
 
-def write_tables(rows: list[dict], repo: Path, comparison: str | None) -> None:
-    out = repo / "bench" / "ase-gofee-h2h"
+def write_tables(rows: list[dict], output_dir: Path, comparison: str | None) -> None:
+    out = output_dir
     out.mkdir(parents=True, exist_ok=True)
     summary = summarise(rows)
     if comparison is None:
@@ -799,6 +801,7 @@ def main() -> int:
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--runs", type=Path, required=True)
+    parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--comparison", choices=["ase_bh", "ase_mh", "agox_gofee"])
     parser.add_argument("--panel", choices=["asg2"])
     parser.add_argument("--system")
@@ -870,9 +873,9 @@ def main() -> int:
             flush=True,
         )
     if systems:
-        write_lj_large(rows, args.repo, systems)
+        write_lj_large(rows, args.repo, args.output_dir, systems)
     else:
-        write_tables(rows, args.repo, args.comparison)
+        write_tables(rows, args.output_dir, args.comparison)
     print(summarise(rows), end="", flush=True)
     return 0
 

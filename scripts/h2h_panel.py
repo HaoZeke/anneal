@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""Summarise a seed-matched Lennard-Jones panel.
+"""Summarize a seed-matched Lennard-Jones panel.
 
 Reads the row file written by ``h2h_gmin_proof`` and prints one row per
 system and phase. The median and the interquartile range use Hyndman and

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""Fetch HaoZeke/anneal-paper-data once before a script reads the dumps."""
+"""Fetch the paper/jctc rows of HaoZeke/anneal-paper-data once before a script reads the dumps."""
 
 from __future__ import annotations
 
@@ -18,5 +18,5 @@ def fetch_paper_data() -> None:
         return
     repo = Path(__file__).resolve().parents[3]
     script = repo / "scripts" / "data" / "fetch_data.py"
-    subprocess.run([sys.executable, str(script)], check=True)
+    subprocess.run([sys.executable, str(script), "paper/jctc/"], check=True)
     _DONE = True

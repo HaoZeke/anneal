@@ -15,7 +15,7 @@ esac
 export RUSTUP_TOOLCHAIN=$tool
 lib=${1:-engines/librgpot_cuh2.so}
 con=examples/fixtures/cuh2_fcc_slab.con
-outdir=paper/jctc/logs
+outdir=${CUH2_FCC_REC_OUTPUT:-/work/cuh2-fcc-rec}
 receipt=$outdir/cuh2-hardware-receipt.txt
 
 if [[ ! -s $lib ]]; then
