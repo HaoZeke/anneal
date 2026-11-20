@@ -8,7 +8,7 @@ PROVENANCE file beside them, and the blob of the copy is that of the record. The
 pair by seed: the paired outcome table, the exact McNemar test and the 95% interval of
 method 10 of Newcombe, all from scripts/paired_stats.py. The TIP4P table pairs this
 code with GMIN by seed in the same way and adds the exact Wilcoxon test on calls and wall.
-A LJ75 row is printed only where both arms ran the code of an ancestor of develop.
+Both arms of a block are revisions that are ancestors of HEAD.
 
     python3 paper/jctc/scripts/knockout_tables.py            # rewrite both blocks
     python3 paper/jctc/scripts/knockout_tables.py --check    # exit 1 if either is stale
@@ -57,23 +57,9 @@ class Knockout:
 
 
 KNOCKOUTS = (
-    Knockout("priors", "Structure priors, a switch built on develop \\texttt{f2a628c0}", "arm", "default",
-             "priors_off", lambda r: r["code_revision"].startswith("f2a628c0"), "hit_binary",
-             ("lj38", "lj98", "lj104", "lj150", "m55r6", "m80r6", "m55r14", "m80r14", "au55",
-              "cu6au32", "cu19au19", "cu27au28", "cu10au45", "cu30au8", "cu12au26", "pt12cu11",
-              "tip4p4", "tip4p8", "tip4p15"), ("lj75",)),
     Knockout("templates", "Structure templates, \\texttt{628773d6} against \\texttt{1c1b1238}", "revision",
              "628773d6837ea2d959a27256ff4163b21162fd4d", "1c1b12384683485cf820d3a244151b48973dc0f7",
              lambda r: r["pair"] == "release", "hit", ("m38r6", "m38r14", "sc126-38", "sc108-38")),
-    Knockout("restart", "Restart from a diverse population on a plateau, \\texttt{d12f8825} against \\texttt{7192e9f8}", "arm", "v1",
-             "develop", lambda r: r["code_revision"][:8] in ("7192e9f8", "d12f8825"), "hit",
-             ("lj38", "lj55", "lj76", "lj77", "lj98", "lj102", "lj103", "lj104", "lj150", "au55",
-              "m55r14", "tip4p15"), ("lj75",)),
-    Knockout("pair-scale", "Length unit of the pair minimum, \\texttt{e5883055} against \\texttt{628773d6} with the "
-             "templates patched out", "code", "fix2", "baseline",
-             lambda r: True, "hit",
-             ("lj38", "lj55", "lj98", "lj102", "lj103", "lj104", "lj150", "au55", "m55r6", "m80r6",
-              "m55r14", "m80r14"), ("lj75",)),
 )
 
 NAMES = {
@@ -132,9 +118,17 @@ def check_blob(folder: Path) -> None:
         raise SystemExit(f"knockout_tables: {folder} is not the record's blob")
 
 
+def is_ancestor(revision: str) -> bool:
+    return subprocess.run(["git", "merge-base", "--is-ancestor", revision, "HEAD"], capture_output=True,
+                          cwd=ROOT).returncode == 0
+
+
 def pairs(knockout: Knockout) -> dict[str, list[tuple[dict, dict]]]:
     folder = DATA / "knockouts" / knockout.key
     check_blob(folder)
+    for revision in (knockout.with_arm, knockout.without_arm):
+        if not is_ancestor(revision):
+            raise SystemExit(f"knockout_tables: {revision[:8]} is not an ancestor of HEAD")
     arms: dict[tuple[str, str], dict[str, dict]] = {}
     for row in read(folder / "rows.csv"):
         if not knockout.keep(row) or row[knockout.column] not in (knockout.with_arm, knockout.without_arm):
@@ -171,15 +165,14 @@ def knockout_summary(knockout: Knockout) -> dict[str, dict]:
 def knockout_table() -> str:
     lines = [
         "\\begin{table*}",
-        "\\caption{Each search switch run with and without it on the same seeds from the same starts, at the",
-        "revision named in its heading.",
+        "\\caption{The structure templates run with and without them on the same seeds from the same starts,",
+        "at revision \\texttt{628773d6} and its child \\texttt{1c1b1238}, both ancestors of the submitted revision.",
         "With and Without are the hits of the two arms, Only with and Only without the seeds that",
         "one arm alone hits.",
         "\\(p_\\mathrm{M}\\) is the two-sided exact McNemar test on those seeds, and \\(\\Delta\\) the 95\\%",
-        "interval of Newcombe's method 10 for paired data, for the hit rate with the switch less that without it.",
+        "interval of Newcombe's method 10 for paired data, for the hit rate with the templates less that without them.",
         "Budgets are in force calls.",
-        "LJ\\(_{75}\\) is printed only in a block whose two arms ran the code of ancestors of the submitted revision.",
-        "The rows of each block are \\texttt{paper/jctc/data/knockouts/*/rows.csv}, copied from the",
+        "The rows are \\texttt{paper/jctc/data/knockouts/templates/rows.csv}, copied from the",
         "record their \\texttt{PROVENANCE} names.}",
         "\\label{tab:knockouts}",
         "\\centering",
