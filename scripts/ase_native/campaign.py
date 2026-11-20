@@ -48,6 +48,7 @@ BLOB_PATHS = (
     "scripts/ase_native/report.py",
     "scripts/ase_native/test_mapping.py",
     "scripts/ase_native/test_agree.py",
+    "scripts/ase_native/gate.py",
     "examples/ase_native_eval.rs",
     "examples/ase_panel.rs",
     "examples/ase_nonlj.rs",
