@@ -249,6 +249,23 @@ def test_reproducible_env_is_opt_in() -> None:
     assert disabled == {"RUSTFLAGS": "-C opt-level=1"}
     enabled = MODULE.reproducible_env({}, root, target)
     assert enabled == {}
+    for value in ("0", "", "true", "yes", " 1"):
+        off = {"ANNEAL_REPRODUCIBLE_ARCHIVE": value, "RUSTFLAGS": "-Copt-level=1"}
+        assert MODULE.reproducible_env(off, root, target) == off
+
+
+def test_reproducible_env_does_not_mutate_its_input() -> None:
+    caller = {
+        "ANNEAL_REPRODUCIBLE_ARCHIVE": "1",
+        "RUSTFLAGS": "-Copt-level=1",
+        "CARGO_HOME": "/opt/cargo",
+    }
+    snapshot = dict(caller)
+    env = MODULE.reproducible_env(caller, Path("/work/source"), Path("/work/build"))
+    assert caller == snapshot
+    assert env is not caller
+    assert "RUSTFLAGS" not in env
+    assert env["CARGO_INCREMENTAL"] == "0"
 
 
 def test_encoded_rustflags_with_spaces_are_merged_not_dropped() -> None:
