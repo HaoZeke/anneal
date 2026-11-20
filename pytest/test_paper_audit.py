@@ -160,6 +160,51 @@ def test_a_merged_branch_that_no_alias_names_is_not_required(monkeypatch, tmp_pa
     assert not with_tip.on_remote(unnamed), "an unnamed remote branch joined the closure"
 
 
+def test_an_annotated_tag_joins_the_audit_closure(monkeypatch, tmp_path):
+    """A commit that only an annotated tag can reach is in the closure.
+
+    ``git rev-parse`` of an annotated tag names the tag object. The parent
+    walk lists commits, so that object never leads to the commit it peels
+    to unless the parse asks for ``^{commit}``.
+    """
+    repo = tmp_path / "clone"
+    repo.mkdir()
+
+    def run_git(*args):
+        done = subprocess.run(
+            ["git", "-c", "user.name=audit", "-c", "user.email=audit@example.invalid",
+             "-c", "commit.gpgsign=false", "-c", "tag.gpgSign=false",
+             "-c", "core.hooksPath=/dev/null", *args],
+            cwd=repo, capture_output=True, text=True, check=True)
+        return done.stdout.strip()
+
+    def commit(message):
+        run_git("commit", "--allow-empty", "-m", message)
+        return run_git("rev-parse", "HEAD")
+
+    run_git("init", "--quiet")
+    root = commit("root")
+    run_git("checkout", "--quiet", "--detach")
+    tagged = commit("reachable only from an annotated tag")
+    run_git("tag", "-a", "only-annotated", tagged, "-m", "annotated")
+    run_git("checkout", "--quiet", "--detach", root)
+
+    assert run_git("cat-file", "-t", "refs/tags/only-annotated") == "tag"
+    assert run_git("rev-parse", "refs/tags/only-annotated") != tagged
+    assert run_git("rev-parse", "refs/tags/only-annotated^{commit}") == tagged
+    run_git("checkout", "--quiet", "--detach")
+    light = commit("reachable only from a lightweight tag")
+    run_git("tag", "only-lightweight", light)
+    run_git("checkout", "--quiet", "--detach", root)
+    assert run_git("cat-file", "-t", "refs/tags/only-lightweight") == "commit"
+
+    monkeypatch.setattr(audit_mod, "ROOT", repo)
+    index = audit_mod.RevisionIndex((root, tagged, light), (), (), ())
+    assert index.audited_exists(root)
+    assert index.audited_exists(tagged), "an annotated tag did not join the closure"
+    assert index.audited_exists(light), "a lightweight tag did not join the closure"
+
+
 def test_a_drifted_table_cell_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
