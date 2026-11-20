@@ -17,7 +17,7 @@ Prints the table tbl:lj75 of the main text, or with --supplement the per-run
 table tbl:lj75-seeds of the Supporting Information, or with --values every
 number the draft may quote from these runs, one a line.
 
-Hits carry the Wilson score interval at z = 1.959963984540054. Call PAR-2 is
+Hits carry the Wilson score interval at the z of paired_stats.Z95. Call PAR-2 is
 the mean over the runs of the force calls to the first hit, twice the cap for
 a run that misses; the recount must equal the sealed row, whose string is printed.
 The wall time is the median of the wall_seconds column of each arm's committed CSV
@@ -58,13 +58,13 @@ if str(REPO_ROOT / "scripts") not in sys.path:
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import results_jcc
+from paired_stats import Z95 as Z
 from target_tol import energy_hits
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data" / "lj75_gmin"
 TABLE = "tbl:lj75"
 SEEDS = "tbl:lj75-seeds"
-Z = 1.959963984540054
 # A printed energy this close to the bar may sit on either side of it once rounded.
 PRINTED = 1e-6
 # The audit writes its means and interval bounds as floats of its own summation.

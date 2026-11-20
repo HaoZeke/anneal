@@ -16,6 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
+from paired_stats import fisher_exact  # noqa: E402
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
 SEEDS = tuple(range(2000, 2012))
@@ -181,22 +182,7 @@ def load(system: str) -> dict[str, list[dict[str, str]]]:
 
 
 def fisher(hits: int, base: int) -> float:
-    row = 12
-    col = hits + base
-    total = 24
-
-    def probability(value: int) -> float:
-        return math.comb(row, value) * math.comb(row, col - value) / math.comb(total, col)
-
-    observed = probability(hits)
-    return min(
-        1.0,
-        sum(
-            probability(value)
-            for value in range(max(0, col - row), min(row, col) + 1)
-            if probability(value) <= observed * (1.0 + 1.0e-12)
-        ),
-    )
+    return fisher_exact(hits, 12, base, 12)
 
 
 def mann_whitney(left: list[float], right: list[float]) -> tuple[float, float]:
@@ -444,22 +430,23 @@ def tex_table() -> str:
         ]) + " \\\\")
     if not revisions:
         raise SystemExit("no recommended revisions found")
-    rev_text = ", ".join(sorted(revisions))
     return "\n".join([
         "\\begin{table}",
-        "\\caption{This work against the basin hopping (BH) and minima hopping",
-        f"(MH) of ASE {ASE_VERSION} at its constructor defaults.",
-        f"This work is anneal \\texttt{{{rev_text}}}.",
+        "\\caption{This code against the basin hopping (BH) and minima hopping",
+        f"(MH) of ASE {ASE_VERSION} at its constructor defaults, at the effort each run reports.",
+        "The rows of this code are revisions "
+        + " and ".join(f"\\texttt{{{r[:8]}}}" for r in sorted(revisions)) + " of this code.",
         "Seeds 2000--2011, one core, budget in force calls.",
         "Cap is the wall in seconds at which a BH or MH run stops, three times",
         "the slowest wall of the cluster-preset arm of the panel.",
         "Stops counts the BH and MH runs that ended at the cap; those runs",
         "are misses with fewer calls than the budget.",
-        "No run of this work ended at a cap.",
+        "No run of this code ended at a cap.",
         "Wall is the median over the 12 runs of the seconds each run took;",
         "a BH or MH run that ended at the cap is counted at its wall.",
         "\\(p_\\mathrm{BH}\\) and \\(p_\\mathrm{MH}\\) are the two-sided Fisher",
-        "exact test on hits against each ASE arm.}",
+        "exact test on hits against each ASE arm; the test is unpaired because the random",
+        "generators of the two codes do not make a shared start from one seed.}",
         "\\label{tab:ase}",
         "\\centering",
         "\\scriptsize",
@@ -469,7 +456,7 @@ def tex_table() -> str:
         " & & & \\multicolumn{3}{c}{Hits} & \\multicolumn{2}{c}{Stops} & "
         "\\multicolumn{3}{c}{Wall (s)} & & \\\\",
         "\\cmidrule(lr){4-6}\\cmidrule(lr){7-8}\\cmidrule(lr){9-11}",
-        "Cluster & Budget & Cap & This work & BH & MH & BH & MH & This work & BH & MH & "
+        "Cluster & Budget & Cap & This code & BH & MH & BH & MH & This code & BH & MH & "
         "\\(p_\\mathrm{BH}\\) & \\(p_\\mathrm{MH}\\) \\\\",
         "\\midrule",
         *body,
