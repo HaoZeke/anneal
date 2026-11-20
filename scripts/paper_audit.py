@@ -2521,7 +2521,9 @@ class RevisionIndex:
         audited_refs = ["HEAD", *(ref for ref in remote_refs
                                    if git("show-ref", "--verify", "--quiet", ref).returncode == 0),
                         *git("for-each-ref", "--format=%(refname)", "refs/tags").stdout.split()]
-        audited_heads = git("rev-parse", *audited_refs).stdout.split()
+        # An annotated tag's id is the tag object. rev-list lists the commit
+        # it peels to, so the closure has to start from that commit.
+        audited_heads = git("rev-parse", *(f"{ref}^{{commit}}" for ref in audited_refs)).stdout.split()
         self.commit = {n: line.split()[0] for n, line in zip(asked, out)
                        if line.split()[1:2] == ["commit"]}
         self.parents: dict[str, list[str]] = {}
