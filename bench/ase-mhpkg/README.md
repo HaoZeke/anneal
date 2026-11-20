@@ -129,7 +129,7 @@ At this revision both resolve to Ne. Gold uses Au.
 Release binaries, `cargo +1.88.0 build --release --locked` of
 `h2h_gmin_proof`, `h2h_morse`, `h2h_metal`, and `mhpkg_eval`. The
 process is confined to cpu 0 with `taskset -c 0`. The thread variables
-listed in the stored command are 1, and `LJOS_SEAT=benchbot`.
+listed in the stored command are 1.
 
 The anneal arm is one example process. `H2H_WALL_S` is 7200 and
 `H2H_COORDS` is the shared start. Unset, those variables leave the

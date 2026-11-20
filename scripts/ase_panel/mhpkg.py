@@ -174,9 +174,6 @@ def machine_hash() -> str:
 
 def ensure_seat() -> None:
     changed = False
-    if os.environ.get("LJOS_SEAT") != "benchbot":
-        os.environ["LJOS_SEAT"] = "benchbot"
-        changed = True
     for key, value in THREADS.items():
         if os.environ.get(key) != value:
             os.environ[key] = value
@@ -198,7 +195,6 @@ def child_env(extra: dict[str, str] | None = None) -> dict[str, str]:
         if key.startswith(("H2H_", "ANNEAL_")):
             del env[key]
     env.update(THREADS)
-    env["LJOS_SEAT"] = "benchbot"
     if extra:
         env.update(extra)
     return env
@@ -436,7 +432,7 @@ def reproduce_command(cell: str, panel: str, arm: str, seed: int, revision: str)
         "--example h2h_morse --example h2h_metal --example mhpkg_eval && "
         "python3 -m venv .mhpkg-venv && "
         ".mhpkg-venv/bin/pip install -r scripts/ase_panel/mhpkg-requirements.txt && "
-        f"export {thread} LJOS_SEAT=benchbot && "
+        f"export {thread} && "
         "taskset -c 0 .mhpkg-venv/bin/python scripts/ase_panel/mhpkg.py run "
         f"--cells {cell} --seeds {seed} --panel {panel} --arms {arm}"
     )
