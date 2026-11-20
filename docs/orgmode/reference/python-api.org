@@ -1,0 +1,37 @@
+#+TITLE: Python API
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+
+#+begin_export rst
+==========
+Python API
+==========
+#+end_export
+
+The package is =anneal=. The compiled module underneath it is
+=anneal._core=; =python/anneal/__init__.py= re-exports its classes and wraps
+most of its functions. Install it with =maturin develop --features python=
+(see [[file:../bindings.org][Bindings]]).
+
+* Type stubs
+
+=python/anneal/_core.pyi= describes every class, function and constant of
+=anneal._core=, and =python/anneal/py.typed= marks the package as typed. The
+stubs are checked against the compiled module by =pytest/test_stubs.py=, which
+reads the stub with =ast= and compares it with the module's names, argument
+kinds, defaults and class members. The same file runs =mypy.stubtest= when mypy
+is installed.
+
+A binding added to =src/python.rs= without a matching stub entry fails that
+test. Add the entry in the same commit.
+
+#+begin_src python
+from pathlib import Path
+
+import anneal
+import anneal._core as core
+
+stub = Path(anneal.__file__).with_name("_core.pyi")
+assert stub.is_file()
+assert "def cluster_search(" in stub.read_text()
+assert set(core.__all__) >= {"cluster_search", "Config", "Ledger"}
+#+end_src

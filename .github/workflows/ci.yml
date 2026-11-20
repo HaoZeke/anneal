@@ -440,6 +440,14 @@ jobs:
       - name: pytest
         run: .venv/bin/python -m pytest pytest/
 
+      # pytest/test_stubs.py compares the stubs with the module on every
+      # version. stubtest is the reference check, so one version runs it.
+      - name: stubtest (anneal._core)
+        if: matrix.python-version == '3.12'
+        run: |
+          .venv/bin/python -m pip install mypy
+          .venv/bin/python -m mypy.stubtest anneal._core
+
       - name: Execute quickstart notebook (MyST source)
         if: runner.os != 'macOS' && matrix.python-version == '3.12'
         run: |
