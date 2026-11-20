@@ -134,7 +134,11 @@ listed in the stored command are 1, and `LJOS_SEAT=benchbot`.
 The anneal arm is one example process. `H2H_WALL_S` is 7200 and
 `H2H_COORDS` is the shared start. Unset, those variables leave the
 example on its existing path. A run that reaches the cap is a miss; the
-row keeps the calls, the best energy, and the wall.
+row keeps the calls, the best energy, and the wall. If the package's
+geometry optimizer raises, that seed stops there. The row keeps the
+calls made, the best energy, and the wall, with `stop` set to `error`
+and `hit` false. The exception type and message are printed and written
+beside the run.
 
 The package arm is one Python process with `use_MPI=False`, and the MPI
 world size must be 1. The package still calls `MPI_Init` when it is
