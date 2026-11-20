@@ -7274,6 +7274,19 @@ where
             kernels[k].name().to_owned()
         };
         begin_arm(&mut arm_counts, &proposal_action);
+        // A move that cannot define its step on this geometry must not hand
+        // the objective a coordinate it cannot read. The proposal is refused
+        // as an overlapping one is: it costs a hop and no energy call, and a
+        // run that proposes nothing else is stopped by the same bound.
+        if trial.iter().any(|value| !value.is_finite()) {
+            proposal_overlaps += 1;
+            hops += 1;
+            bias.deposit(x.view(), temperature);
+            if proposal_overlaps > ledger.budget().saturating_mul(4) {
+                break HopStop::Budget;
+            }
+            continue;
+        }
         // Stage one of the staged quench: settle the moved atoms against the
         // frozen environment at fractional price, before recentring shifts
         // every coordinate and hides which atoms the move touched.
