@@ -266,12 +266,12 @@ typedef struct {
 RGPOT_ENGINE_API RgpotEngineAbiStamp rgpot_engine_abi_stamp(void);
 
 /**
- * Nonzero when the loaded engine serves a host built against `stamp`: equal
- * major, equal layout revision, engine minor at least the host's. NULL
- * returns 0.
+ * Nonzero when this plugin serves the host described by `host_stamp`: equal
+ * major, equal layout revision, and a plugin minor no newer than the host's.
+ * NULL returns 0.
  */
 RGPOT_ENGINE_API int rgpot_engine_abi_compatible(
-    const RgpotEngineAbiStamp *stamp);
+    const RgpotEngineAbiStamp *host_stamp);
 
 /**
  * Concurrency and evaluation capabilities, the engine-side image of rgpot's

@@ -12,6 +12,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -210,17 +211,27 @@ TEST_CASE("D4Pot paramsKey separates distinct configurations", "[d4][params]") {
   std::vector<int> atmtypes;
   std::array<std::array<double, 3>, 3> box{};
   fill_water(positions, atmtypes, box);
-  const std::string db_path = "/tmp/rgpot_test_rocksdb_d4_params";
-  rocksdb::DestroyDB(db_path, rocksdb::Options());
-  rgpot::cache::PotentialCache cache(db_path);
-  a.setCache(&cache);
-  b.setCache(&cache);
-  (void)a(positions, atmtypes, box);
-  (void)b(positions, atmtypes, box);
-  REQUIRE(cache.counts().computed == 2);
-  (void)a(positions, atmtypes, box);
-  (void)b(positions, atmtypes, box);
-  REQUIRE(cache.counts().served == 2);
+  const auto path_template =
+      std::filesystem::temp_directory_path() / "rgpot_d4_params_XXXXXX";
+  const std::string path_pattern = path_template.string();
+  std::vector<char> mutable_path(path_pattern.begin(), path_pattern.end());
+  mutable_path.push_back('\0');
+  REQUIRE(mkdtemp(mutable_path.data()) != nullptr);
+  const std::string db_path(mutable_path.data());
+  {
+    rgpot::cache::PotentialCache cache(db_path);
+    a.setCache(&cache);
+    b.setCache(&cache);
+    (void)a(positions, atmtypes, box);
+    (void)b(positions, atmtypes, box);
+    REQUIRE(cache.counts().computed == 2);
+    (void)a(positions, atmtypes, box);
+    (void)b(positions, atmtypes, box);
+    REQUIRE(cache.counts().served == 2);
+    a.setCache(nullptr);
+    b.setCache(nullptr);
+  }
+  REQUIRE(rocksdb::DestroyDB(db_path, rocksdb::Options()).ok());
 #endif
 }
 

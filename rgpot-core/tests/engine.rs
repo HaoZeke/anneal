@@ -109,7 +109,7 @@ fn configured_external_engine_passes_the_abi_check() {
         RgpotEngineAbiStamp::HOST,
         RgpotEngineAbiStamp {
             abi_major: 1,
-            abi_minor: 4,
+            abi_minor: 5,
             layout_revision: 1,
         }
     );
@@ -431,6 +431,24 @@ fn an_abi_major_other_than_the_loader_is_refused() {
             found: 2
         }
     );
+}
+
+#[test]
+fn abi_stamp_serves_equal_and_older_plugin_minors() {
+    let host = RgpotEngineAbiStamp::HOST;
+    assert!(host.serves(host));
+
+    let older = RgpotEngineAbiStamp {
+        abi_minor: host.abi_minor - 1,
+        ..host
+    };
+    assert!(older.serves(host));
+
+    let newer = RgpotEngineAbiStamp {
+        abi_minor: host.abi_minor + 1,
+        ..host
+    };
+    assert!(!newer.serves(host));
 }
 
 #[test]

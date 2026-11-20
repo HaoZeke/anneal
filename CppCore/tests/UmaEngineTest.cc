@@ -164,10 +164,10 @@ TEST_CASE("the engine reports its ABI identity", "[uma][engine]") {
   RgpotEngineAbiStamp host = stamp;
   REQUIRE(e.compatible(&host) == 1);
   host.abi_minor = static_cast<unsigned short>(stamp.abi_minor - 1);
-  REQUIRE(e.compatible(&host) == 1); // an older host minor is served
+  REQUIRE(e.compatible(&host) == 0); // plugin is newer than the host
   host = stamp;
   host.abi_minor += 1;
-  REQUIRE(e.compatible(&host) == 0);
+  REQUIRE(e.compatible(&host) == 1); // plugin is older than the host
   host = stamp;
   host.abi_major += 1;
   REQUIRE(e.compatible(&host) == 0);

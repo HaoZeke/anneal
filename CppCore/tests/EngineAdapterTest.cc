@@ -41,6 +41,7 @@ struct Stub {
                      double *, double *, double *, const double *,
                      rgpot_engine_coord_transform, void *) = nullptr;
   RgpotEngineAbiStamp (*stamp)() = nullptr;
+  int (*compatible)(const RgpotEngineAbiStamp *) = nullptr;
   int (*caps)(const RgpotEnginePot *, RgpotEngineCaps *) = nullptr;
   size_t (*last_error)(const RgpotEnginePot *, char *, size_t) = nullptr;
   size_t (*digest)(const RgpotEnginePot *, char *, size_t) = nullptr;
@@ -81,6 +82,8 @@ Stub &stub() {
     out.hvp = sym<decltype(out.hvp)>(h, "rgpot_engine_hvp");
     out.force_batch = sym<decltype(out.force_batch)>(h, "rgpot_engine_force_batch");
     out.stamp = sym<decltype(out.stamp)>(h, "rgpot_engine_abi_stamp");
+    out.compatible =
+        sym<decltype(out.compatible)>(h, "rgpot_engine_abi_compatible");
     out.caps = sym<decltype(out.caps)>(h, "rgpot_engine_caps");
     out.last_error = sym<decltype(out.last_error)>(h, "rgpot_engine_last_error");
     out.digest = sym<decltype(out.digest)>(h, "rgpot_engine_model_digest");
@@ -166,6 +169,23 @@ TEST_CASE("the table identifies the engine", "[engine][adapter]") {
   REQUIRE(stamp.abi_minor == RGPOT_ENGINE_ABI_MINOR);
   REQUIRE(stamp.layout_revision == RGPOT_ENGINE_ABI_LAYOUT_REVISION);
   REQUIRE(RGPOT_ENGINE_ABI_MINOR >= 5);
+}
+
+TEST_CASE("the ABI check serves equal and older plugin minors",
+          "[engine][adapter][abi]") {
+  Stub &s = stub();
+  const RgpotEngineAbiStamp plugin = s.stamp();
+  RgpotEngineAbiStamp host = plugin;
+  REQUIRE(s.compatible(&host) == 1);
+
+  // The fixed plugin is one minor older than this host.
+  ++host.abi_minor;
+  REQUIRE(s.compatible(&host) == 1);
+
+  // The fixed plugin is one minor newer than this host.
+  host = plugin;
+  --host.abi_minor;
+  REQUIRE(s.compatible(&host) == 0);
 }
 
 TEST_CASE("create refuses a missing or ragged configuration",

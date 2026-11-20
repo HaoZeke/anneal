@@ -148,14 +148,14 @@ Optional symbol.
 
 #+attr_rgpot: signature
 #+begin_src c
-int rgpot_engine_abi_compatible(const RgpotEngineAbiStamp *stamp);
+int rgpot_engine_abi_compatible(const RgpotEngineAbiStamp *host_stamp);
 #+end_src
 
-- Inputs :: =stamp=, the stamp the host was built against.
+- Inputs :: =host_stamp=, the stamp the host was built against.
 - Units :: none.
 - Outputs :: 1 when the major and the layout revision equal the engine's and the
-  host's minor is at most the engine's; 0 otherwise.
-- Errors :: a null =stamp= returns 0.
+  engine's minor is at most the host's; 0 otherwise.
+- Errors :: a null =host_stamp= returns 0.
 
 Optional symbol.
 

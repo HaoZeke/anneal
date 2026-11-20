@@ -328,13 +328,14 @@ int rgpot_engine_force_batch(RgpotEnginePot *pot, long nSystems, long nAtoms,
   }
 }
 
-int rgpot_engine_abi_compatible(const RgpotEngineAbiStamp *stamp) {
-  if (!stamp) {
+int rgpot_engine_abi_compatible(const RgpotEngineAbiStamp *host_stamp) {
+  if (!host_stamp) {
     return 0;
   }
-  return stamp->abi_major == RGPOT_ENGINE_ABI_VERSION &&
-                 stamp->layout_revision == RGPOT_ENGINE_ABI_LAYOUT_REVISION &&
-                 stamp->abi_minor <= RGPOT_ENGINE_ABI_MINOR
+  return host_stamp->abi_major == RGPOT_ENGINE_ABI_VERSION &&
+                 host_stamp->layout_revision ==
+                     RGPOT_ENGINE_ABI_LAYOUT_REVISION &&
+                 RGPOT_ENGINE_ABI_MINOR <= host_stamp->abi_minor
              ? 1
              : 0;
 }
