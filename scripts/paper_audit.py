@@ -3622,7 +3622,7 @@ def science_claims(audit: Audit) -> None:
     audit.record("hypothes" not in text.lower(), TEX, "the manuscript states no hypothesis", "absent",
                  "absent" if "hypothes" not in text.lower() else "present")
     for path in (TEX, SI, COVER):
-        for word in ("candidate", "unrecorded", "missing"):
+        for word in ("candidate", "unrecorded", "missing", "pending", "TBD", "TODO", "placeholder"):
             found = re.search(rf"\b{word}", audit.text(path), re.IGNORECASE)
             audit.record(found is None, path, f"the text does not say {word}", "absent",
                          "absent" if found is None else "present")

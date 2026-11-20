@@ -312,6 +312,17 @@ def test_a_record_that_names_another_relaxation_script_is_reported():
     assert [(r[1], r[2]) for r in audit.drifts()] == [(path, "blob of the relaxation script")]
 
 
+def test_a_placeholder_in_the_text_is_reported():
+    for word in ("rerun pending", "TBD", "TODO"):
+        audit = audit_mod.Audit()
+        tex = audit.text(audit_mod.TEX)
+        audit.text_cache[audit_mod.TEX] = tex.replace("\\section{Conclusions}", f"LJ\\(_{{75}}\\): {word}.\n\n"
+                                                      "\\section{Conclusions}")
+        audit_mod.science_claims(audit)
+        said = word.split()[-1]
+        assert [r[2] for r in audit.drifts()] == [f"the text does not say {said}"]
+
+
 def test_a_claim_that_the_template_era_rows_hold_is_reported():
     audit = audit_mod.Audit()
     si = audit.text(audit_mod.SI)
