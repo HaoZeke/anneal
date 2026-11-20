@@ -1,7 +1,10 @@
 # Copyright (c) anneal developers
 """Serial A/r4 pairs on one core, n=12, the drivers' paper budgets."""
-import csv, hashlib, math, os, struct, subprocess, sys, tempfile, time
+import csv, hashlib, os, struct, subprocess, sys, tempfile, time
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+from target_tol import energy_hits  # noqa: E402
 
 CELLS = [
     ("m55r6", "h2h_morse", -250.286609),
@@ -59,7 +62,7 @@ def main():
                 line = [l for l in p.stdout.splitlines() if l.startswith(f"{cell},anneal,{seed},")][0]
                 r = dict(zip(hdr, line.split(",")))
                 best = float(r["best"])
-                hit = math.isfinite(best) and best <= ref + 1e-3
+                hit = energy_hits(best, ref)
                 wall, pot = float(r["wall_s"]), float(r["pot_s"])
                 out = float(r["outside_s"]) if r.get("outside_s") else max(wall - pot, 0.0)
                 bits = "0x%016x" % struct.unpack(">Q", struct.pack(">d", best))[0]
