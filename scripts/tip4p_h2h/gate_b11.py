@@ -254,7 +254,13 @@ def panel_run(arm: Arm, panel, system: str, seed: int, work: Path) -> dict[str, 
     best.unlink(missing_ok=True)
     log = work / "logs" / f"panel-{system}-s{seed}-{arm.name}.log"
     extra = {"H2H_BEST": str(best)} if binary == "h2h_metal" else None
-    text = execute([str(arm.bin / binary), "run", system, str(seed), str(coords)], log, arm.worktree, extra)
+    argv = [str(arm.bin / binary), "run", system, str(seed)]
+    if binary == "h2h_morse":
+        # Its run reads a start from this argument instead of writing one.
+        execute([str(arm.bin / binary), "coords", system, str(seed), str(coords)], log, arm.worktree)
+    else:
+        argv.append(str(coords))
+    text = execute(argv, log, arm.worktree, extra)
     budget = panel.PAPER_BUDGETS[system]
     row = panel.anneal_result(text, system, seed, budget)
     if row["head"] and row["head"] != arm.commit:
