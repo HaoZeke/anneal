@@ -36,11 +36,16 @@ wrote the starts.
 
 ``--summarize`` reads the rows and writes ``summary.csv`` and the table in
 ``bench/gmin-panel/README.md``; with ``--tex`` also table ``tab:gmin``
-in ``paper/jctc/manuscript.tex``. The tables carry Fisher's exact test
-on hits and the two-sided Mann-Whitney test, normal approximation with
-the tie and continuity corrections, on calls to the minimum (full-budget
-misses ranked above every hit) and, when call-cap censoring leaves every
-cross-arm pair order observed, on wall time to the minimum.
+in ``paper/jctc/manuscript.tex``. The summary and the README carry
+Fisher's exact test on hits and the two-sided Mann-Whitney test, normal
+approximation with the tie and continuity corrections, on calls to the
+minimum (full-budget misses ranked above every hit) and, when call-cap
+censoring leaves every cross-arm pair order observed, on wall time to
+the minimum. Both arms of a seed start from the same geometry, so
+``tab:gmin`` pairs them by seed instead: the paired outcome table, the
+exact McNemar test on hits, and the exact Wilcoxon signed-rank test on
+the calls of each run (a miss at the budget) and on its wall, from
+``scripts/paired_stats.py``.
 Medians and interquartile ranges are Hyndman-Fan type 7.
 
 This process refuses to run unless the UTS hostname is bench and it is
@@ -64,6 +69,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+import paired_stats  # noqa: E402
 
 SEEDS = tuple(range(2000, 2012))
 HIT_TOL = DEFAULT_HIT_TOL
@@ -632,6 +638,37 @@ def summarise(rows: list[dict[str, str]], revision: str) -> list[dict[str, str]]
     return out
 
 
+def paired_summary(rows: list[dict[str, str]], revision: str) -> dict[str, dict[str, object]]:
+    """Per system, the two arms paired by seed: outcome table, McNemar, and Wilcoxon on calls and wall."""
+    groups = panel_groups(rows, revision)
+    out: dict[str, dict[str, object]] = {}
+    for system in PAPER_BUDGETS:
+        anneal, gmin = groups.get((system, "anneal"), []), groups.get((system, "gmin"), [])
+        if not anneal or not gmin:
+            continue
+        if [r["seed"] for r in anneal] != [r["seed"] for r in gmin]:
+            raise RuntimeError(f"{system}: the arms do not share seeds")
+        table = paired_stats.outcome_table([r["hit"] == "1" for r in anneal], [r["hit"] == "1" for r in gmin])
+        calls = [float(a["evals_to_hit"]) - float(g["evals_to_hit"]) for a, g in zip(anneal, gmin)]
+        wall = [float(a["wall_s"]) - float(g["wall_s"]) for a, g in zip(anneal, gmin)]
+        out[system] = {
+            "table": table,
+            "mcnemar_p": paired_stats.mcnemar_exact(table[1], table[2]),
+            "newcombe": paired_stats.newcombe_paired(*table),
+            "wilcoxon_calls": paired_stats.wilcoxon_exact(calls),
+            "wilcoxon_wall": paired_stats.wilcoxon_exact(wall),
+        }
+    return out
+
+
+def show_exact_p(p: float, tex: bool) -> str:
+    """An exact test's p as it is when four decimals hold it, else as show_p."""
+    four = f"{p:.4f}".rstrip("0")
+    if 0.01 <= p < 1.0 and abs(float(four) - p) < 1e-12:
+        return four
+    return show_p(p, tex)
+
+
 def show_p(p: float, tex: bool) -> str:
     """Two significant figures; 1 only when p is exactly 1."""
     if p >= 1.0:
@@ -671,13 +708,28 @@ def show_s(value: float) -> str:
     return f"{value:.3f}" if value < 100.0 else f"{value:.1f}"
 
 
+# The manuscript names the configuration of each anneal row, not the code.
+CONFIGURATIONS = {
+    "c2de652dca0bc75e2b0cb4afffac91fd656404e4": "prior-on",
+    "1ce3ab64493196afd25e8690648e21157d91b882": "template-free",
+}
+
+
+def arm_label(line: dict[str, str], arm: str, tex: bool) -> str:
+    if not tex:
+        return "anneal" if arm == "anneal" else "GMIN"
+    if arm == "anneal":
+        return CONFIGURATIONS.get(line["anneal_revision"], "this work")
+    return "GMIN"
+
+
 def table_lines(summary: list[dict[str, str]], tex: bool) -> list[list[str]]:
     """One line per system and arm. Fisher and Mann-Whitney sit on the anneal line."""
     out = []
     for line in summary:
         name = LABELS[line["system"]][1 if tex else 0]
         for arm in ("anneal", "gmin"):
-            label = ("this work" if tex else "anneal") if arm == "anneal" else "GMIN"
+            label = arm_label(line, arm, tex)
             first = arm == "anneal"
             out.append(
                 [
@@ -708,37 +760,86 @@ def readme_table(summary: list[dict[str, str]]) -> str:
     return "\n".join(rows)
 
 
-def tex_table(summary: list[dict[str, str]], revision: str) -> str:
-    lines = table_lines(summary, tex=True)
-    for index, cells in enumerate(lines):
-        system = summary[index // 2]["system"]
-        arm = "anneal" if index % 2 == 0 else "gmin"
-        if arm == "gmin" and system in ("lj75", "lj98"):
-            cells[3] += "~\\rerun{5}"
-    shown_revision = revision[:8] if revision != "latest" else "mixed"
+def show_interval(low: float, high: float) -> str:
+    def one(v: float) -> str:
+        text = f"{v:.2f}"
+        return "0.00" if text == "-0.00" else text.replace("-", "\\(-\\)")
+    return f"{one(low)} to {one(high)}"
+
+
+def paired_lines(summary: list[dict[str, str]], paired: dict[str, dict[str, object]]) -> list[list[str]]:
+    """The lines of tab:gmin. Only counts the seeds that arm alone hits; Both, Neither and the paired
+    tests sit on the line of this code."""
+    out = []
+    for line in summary:
+        system = line["system"]
+        stats = paired[system]
+        both, only_anneal, only_gmin, neither = stats["table"]
+        for arm, only in (("anneal", only_anneal), ("gmin", only_gmin)):
+            first = arm == "anneal"
+            out.append(
+                [
+                    LABELS[system][1] if first else "",
+                    show_budget(int(line["budget"]), True) if first else "",
+                    arm_label(line, arm, True),
+                    f"{line[f'{arm}_hits']}/{line[f'{arm}_n']}",
+                    str(only),
+                    str(both) if first else "",
+                    str(neither) if first else "",
+                    show_calls(float(line[f"{arm}_evals_median"])),
+                    show_calls(float(line[f"{arm}_evals_iqr"])),
+                    show_s(float(line[f"{arm}_wall_median_s"])),
+                    show_s(float(line[f"{arm}_pot_median_s"])),
+                    show_s(float(line[f"{arm}_outside_median_s"])),
+                    show_exact_p(stats["mcnemar_p"], True) if first else "",
+                    show_interval(*stats["newcombe"]) if first else "",
+                    show_p(stats["wilcoxon_calls"][2], True) if first else "",
+                    show_p(stats["wilcoxon_wall"][2], True) if first else "",
+                ]
+            )
+    return out
+
+
+def tex_table(summary: list[dict[str, str]], paired: dict[str, dict[str, object]]) -> str:
+    lines = paired_lines(summary, paired)
     body = [" & ".join(cells) + " \\\\" for cells in lines]
     return "\n".join(
         [
             "\\begin{table}",
-            "\\caption{This work against GMIN, both arms of each cluster on one host in one session.",
-            f"Revisions: anneal \\texttt{{{shown_revision}}}, GMIN \\texttt{{{GMIN_REV[:8]}}}.",
-            "Seeds 2000--2011, one core, budget in force calls.",
+            "\\caption{The exact configurations of this code named under Arm against GMIN with the inputs",
+            "of Section~\\ref{sec:protocol}, both arms of each cluster on one host in one session.",
+            "Prior-on is revision \\texttt{c2de652d} of this code with the six structure",
+            "priors of Section~\\ref{sec:priors} on; template-free is revision \\texttt{1ce3ab64},",
+            "without the five that were removed.",
+            "On Au\\(_{55}\\) the gold driver of this code applies the basin bias of",
+            "equation~\\ref{eq:delta} to this code on a stride of 8.",
+            "GMIN is built with three patches on every row,",
+            "\\texttt{bench/lj104-lattice/v2/h2h-gmin.patch}, \\texttt{scripts/morse\\_h2h/morse-timer.patch},",
+            "and \\texttt{bench/metal-cluster-h2h/gmin-bgupta.patch}, which cap the force calls, time the",
+            "potential, and, in the serial build, set the run index (\\texttt{JP=1}) before its first use.",
+            "Seeds 2000--2011, one core, budget in force calls; both arms of a seed start from the",
+            "same geometry.",
+            "The column Only counts the seeds that arm alone hits, and Both and Neither the seeds",
+            "both arms and neither arm hit.",
             "Calls and IQR are the median and the interquartile range of the",
             "calls to the minimum, with a miss at the full budget.",
             "Wall, In and Out are the median seconds of the run, inside the",
             "potential and outside it.",
-            "\\(p_\\mathrm{F}\\) is the two-sided Fisher exact test on hits;",
-            "\\(p_\\mathrm{calls}\\) and \\(p_\\mathrm{wall}\\) are the two-sided",
-            "Mann--Whitney test on calls and on wall to the minimum (`--' where",
-            "call-capped misses leave cross-arm wall times censored at unequal horizons).}",
+            "\\(p_\\mathrm{M}\\) is the two-sided exact McNemar test on the seeds only one arm hits,",
+            "and \\(\\Delta\\) the 95\\% interval of Newcombe's method 10 for paired data, for the hit rate",
+            "of this code less that of GMIN;",
+            "\\(p_\\mathrm{calls}\\) and \\(p_\\mathrm{wall}\\) are the two-sided exact Wilcoxon",
+            "signed-rank test on the per-seed differences in calls, with a miss at the budget, and in",
+            "the wall of the run.}",
             "\\label{tab:gmin}",
             "\\centering",
             "\\scriptsize",
             "\\setlength{\\tabcolsep}{2pt}",
             "\\resizebox{\\textwidth}{!}{%",
-            "\\begin{tabular}{@{}lrlrrrrrrrrr@{}}",
+            "\\begin{tabular}{@{}lrlrrrrrrrrrrcrr@{}}",
             "\\toprule",
-            "Cluster & Budget & Arm & Hits & Calls & IQR & Wall & In & Out & \\(p_\\mathrm{F}\\) & \\(p_\\mathrm{calls}\\) & \\(p_\\mathrm{wall}\\) \\\\",
+            "Cluster & Budget & Arm & Hits & Only & Both & Neither & Calls & IQR & Wall & In & Out & "
+            "\\(p_\\mathrm{M}\\) & \\(\\Delta\\), 95\\% & \\(p_\\mathrm{calls}\\) & \\(p_\\mathrm{wall}\\) \\\\",
             "\\midrule",
             *body,
             "\\bottomrule",
@@ -772,7 +873,7 @@ def write_tables(root: Path, rows: list[dict[str, str]], revision: str, tex: boo
     write_csv(out or (root / "bench" / "gmin-panel" / "summary.csv"), SUMMARY_FIELDS, summary)
     splice(root / README, README_MARKS, readme_table(summary))
     if tex:
-        splice(root / MANUSCRIPT, TEX_MARKS, tex_table(summary, revision))
+        splice(root / MANUSCRIPT, TEX_MARKS, tex_table(summary, paired_summary(rows, revision)))
 
 
 def self_test() -> None:
@@ -849,10 +950,12 @@ def self_test() -> None:
         raise SystemExit("latest row wins")
     if show_p(7.39602e-07, tex=False) != "7.4e-7" or show_p(1.0, tex=True) != "1" or show_p(0.2105, False) != "0.21" \
             or show_p(0.0341, False) != "0.034" or show_p(0.0995327, False) != "0.10" \
-            or show_p(0.00996, False) != "0.010" or show_p(0.9999, False) != "0.9999":
+            or show_p(0.00996, False) != "0.010" or show_p(0.9999, False) != "0.9999" \
+            or show_exact_p(0.0625, False) != "0.0625" or show_exact_p(0.21875, False) != "0.22":
         raise SystemExit("p format")
     if show_opt_p("", tex=False) != "-" or show_opt_p("", tex=True) != "--":
         raise SystemExit("opt p format")
+    paired_stats.self_test()
     if show_budget(400_000, tex=True) != "\\(4\\times 10^{5}\\)" or show_budget(1_000_000, tex=False) != "1000000":
         raise SystemExit("budget format")
     if any(arm_sequence("anneal-gmin", seed) != ("anneal", "gmin") for seed in SEEDS):
