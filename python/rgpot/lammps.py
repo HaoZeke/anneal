@@ -1,3 +1,5 @@
+# Copyright 2023--present rgpot developers
+
 """Run a Python rgpot potential through LAMMPS ``fix external``.
 
 The module imports neither LAMMPS nor mpi4py.  :class:`FixExternal` accepts an
@@ -96,6 +98,18 @@ def _mpi_world(comm: Any, size: int) -> Any:
     return comm
 
 
+def _exception_text(error: BaseException) -> str:
+    detail = str(error)
+    name = type(error).__name__
+    return f"{name}: {detail}" if detail else name
+
+
+class _CollectiveError(RuntimeError):
+    def __init__(self, message: str, original: BaseException | None) -> None:
+        super().__init__(message)
+        self.original = original
+
+
 class FixExternal:
     """Evaluate any Python rgpot potential from ``fix external pf/callback``.
 
@@ -144,6 +158,7 @@ class FixExternal:
 
         size = int(lmp.extract_setting("world_size"))
         self._comm = _mpi_world(comm, size) if size > 1 else None
+        self._size = size
         self._root = self._comm is None or self._comm.Get_rank() == 0
         self._imgmask = int(lmp.extract_setting("IMGMASK"))
         self._imgmax = int(lmp.extract_setting("IMGMAX"))
@@ -153,28 +168,44 @@ class FixExternal:
         self.energy = 0.0
         self.evaluations = 0
         self._flag = f"{fix_id}_failed"
-        self._created = create
+        self._halt_registered = False
+        self._fix_registered = False
+        self._callback_registered = False
+        self._cached_tags: np.ndarray | None = None
+        self._cached_index: np.ndarray | None = None
 
         if create:
             lmp.command(f"fix {fix_id} all external pf/callback 1 1")
             lmp.command(f"fix_modify {fix_id} energy yes virial yes")
+        self._fix_registered = True
         lmp.command(f"variable {self._flag} internal 0")
         lmp.command(
             f"fix {fix_id}_halt all halt 1 v_{self._flag} "
             "> 0.5 error hard message yes"
         )
+        self._halt_registered = True
         lmp.set_fix_external_callback(fix_id, self._callback, None)
+        self._callback_registered = True
 
     def _callback(
         self, _caller: Any, _step: int, nlocal: int, tag: Any, x: Any, f: Any
     ) -> None:
         try:
             self._step(int(nlocal), tag, x, f)
-        except Exception as exc:
+        except BaseException as exc:
             if self.error is None:
                 self.error = exc
-            f[:nlocal] = 0.0
-            self._lmp.set_internal_variable(self._flag, 1.0)
+            try:
+                f[:nlocal] = 0.0
+            except BaseException as recovery_error:
+                if self.error is None:
+                    self.error = recovery_error
+            try:
+                if self._lmp is not None:
+                    self._lmp.set_internal_variable(self._flag, 1.0)
+            except BaseException as recovery_error:
+                if self.error is None:
+                    self.error = recovery_error
 
     def _unwrapped(self, nlocal: int, x: Any, rows: np.ndarray) -> np.ndarray:
         xu = np.array(x[:nlocal], dtype=float).reshape(nlocal, 3)
@@ -223,14 +254,24 @@ class FixExternal:
     ) -> tuple[float, np.ndarray, np.ndarray]:
         """Energy, local-order forces, and virial in LAMMPS units."""
         natoms = tags.size
-        if natoms == 0 or not np.array_equal(np.sort(tags), np.arange(1, natoms + 1)):
-            low = int(tags.min()) if natoms else "-"
-            high = int(tags.max()) if natoms else "-"
-            raise RuntimeError(
-                f"rgpot needs atom IDs 1..N; LAMMPS holds {natoms} atoms "
-                f"with IDs {low}..{high}"
-            )
-        index = tags - 1
+        if (
+            self._cached_tags is None
+            or self._cached_tags.shape != tags.shape
+            or not np.array_equal(self._cached_tags, tags)
+        ):
+            if natoms == 0 or not np.array_equal(
+                np.sort(tags), np.arange(1, natoms + 1)
+            ):
+                low = int(tags.min()) if natoms else "-"
+                high = int(tags.max()) if natoms else "-"
+                raise RuntimeError(
+                    f"rgpot needs atom IDs 1..N; LAMMPS holds {natoms} atoms "
+                    f"with IDs {low}..{high}"
+                )
+            self._cached_tags = tags.copy()
+            self._cached_index = tags - 1
+        assert self._cached_index is not None
+        index = self._cached_index
         positions = np.empty((natoms, 3), dtype=float)
         positions[index] = xu / self.length_per_angstrom
         ordered = np.empty(natoms, dtype=np.int32)
@@ -255,25 +296,59 @@ class FixExternal:
             virial * self.energy_per_ev,
         )
 
+    def _collective_problem(
+        self, error: BaseException | None, phase: str
+    ) -> str | None:
+        comm = self._comm
+        assert comm is not None
+        successes = comm.allreduce(int(error is None))
+        if successes == self._size:
+            return None
+        report = None if error is None else _exception_text(error)
+        reports = comm.gather(report, root=0)
+        problem = None
+        if self._root:
+            assert reports is not None
+            for rank, item in enumerate(reports):
+                if item is not None:
+                    problem = f"rank {rank} failed while {phase}: {item}"
+                    break
+            assert problem is not None
+        return comm.bcast(problem, root=0)
+
     def _step(self, nlocal: int, tag: Any, x: Any, f: Any) -> None:
-        lmp = self._lmp
-        boxlo, boxhi, xy, yz, xz = lmp.extract_box()[:5]
-        rows = box_rows(boxlo, boxhi, xy, yz, xz)
-        tags = np.asarray(tag[:nlocal], dtype=np.int64)
-        types = np.asarray(lmp.numpy.extract_atom("type")[:nlocal], dtype=np.int64)
-        numbers = self.type_numbers[types - 1]
-        xu = self._unwrapped(nlocal, x, rows)
+        local_error: BaseException | None = None
+        try:
+            lmp = self._lmp
+            if lmp is None:
+                raise RuntimeError("FixExternal is closed")
+            boxlo, boxhi, xy, yz, xz = lmp.extract_box()[:5]
+            rows = box_rows(boxlo, boxhi, xy, yz, xz)
+            tags = np.asarray(tag[:nlocal], dtype=np.int64)
+            types = np.asarray(
+                lmp.numpy.extract_atom("type")[:nlocal], dtype=np.int64
+            )
+            numbers = self.type_numbers[types - 1]
+            xu = self._unwrapped(nlocal, x, rows)
+        except BaseException as exc:
+            local_error = exc
 
         if self._comm is None:
+            if local_error is not None:
+                raise local_error
             energy, forces, virial = self._evaluate(tags, xu, numbers, rows)
         else:
             comm = self._comm
+            problem = self._collective_problem(local_error, "preparing local atoms")
+            if problem is not None:
+                raise _CollectiveError(problem, local_error)
             parts = comm.gather((tags, xu, numbers), root=0)
-            outcome: tuple[Any, ...]
+            outcome: tuple[float, np.ndarray] | None = None
             shares: list[Any] | None = None
             caught: BaseException | None = None
             if self._root:
                 try:
+                    assert parts is not None
                     all_tags = np.concatenate([part[0] for part in parts])
                     energy, ordered, virial = self._evaluate(
                         all_tags,
@@ -281,29 +356,21 @@ class FixExternal:
                         np.concatenate([part[2] for part in parts]),
                         rows,
                     )
-                    outcome = ("", energy, virial)
+                    outcome = (energy, virial)
                     shares = []
                     start = 0
                     for part in parts:
                         stop = start + part[0].size
                         shares.append(ordered[start:stop])
                         start = stop
-                except Exception as exc:
+                except BaseException as exc:
                     caught = exc
-                    outcome = (
-                        str(exc) or type(exc).__name__,
-                        0.0,
-                        np.zeros((3, 3)),
-                    )
-                    shares = [np.zeros((part[0].size, 3)) for part in parts]
-            problem, energy, virial = comm.bcast(
-                outcome if self._root else None, root=0
-            )
+            problem = self._collective_problem(caught, "evaluating the potential")
+            if problem is not None:
+                raise _CollectiveError(problem, caught)
+            assert outcome is not None or not self._root
+            energy, virial = comm.bcast(outcome, root=0)
             forces = comm.scatter(shares, root=0)
-            if caught is not None:
-                raise caught
-            if problem:
-                raise RuntimeError(problem)
 
         f[:nlocal] = forces
         sym = 0.5 * (virial + virial.T)
@@ -324,10 +391,12 @@ class FixExternal:
 
     def run(self, steps: int, *keywords: str) -> None:
         """Issue ``run`` and re-raise a callback failure in Python."""
+        if self._lmp is None:
+            raise RuntimeError("FixExternal is closed")
         command = " ".join(["run", str(int(steps)), *keywords])
         try:
             self._lmp.command(command)
-        except Exception as exc:
+        except BaseException as exc:
             if self.error is not None:
                 raise self._take_error() from exc
             raise
@@ -341,16 +410,22 @@ class FixExternal:
         return error
 
     def close(self) -> None:
-        """Remove the halt fix and a ``fix external`` created here."""
-        lmp, self._lmp = self._lmp, None
+        """Remove the fixes and callback, then release the LAMMPS object."""
+        lmp = self._lmp
         if lmp is None:
             return
-        try:
+        if self._halt_registered:
             lmp.command(f"unfix {self.fix_id}_halt")
-            if self._created:
-                lmp.command(f"unfix {self.fix_id}")
-        except Exception:
-            return
+            self._halt_registered = False
+        if self._fix_registered:
+            lmp.command(f"unfix {self.fix_id}")
+            self._fix_registered = False
+        if self._callback_registered:
+            callbacks = getattr(lmp, "callback", None)
+            if callbacks is not None:
+                callbacks.pop(self.fix_id, None)
+            self._callback_registered = False
+        self._lmp = None
 
     def __enter__(self) -> FixExternal:
         return self

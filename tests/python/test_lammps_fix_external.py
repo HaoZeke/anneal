@@ -1,8 +1,12 @@
+# Copyright 2023--present rgpot developers
+
 from __future__ import annotations
 
+import concurrent.futures
 import os
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -43,7 +47,8 @@ class FakeLammps:
         self.variables = {}
         self.energy = None
         self.virial = None
-        self.callback = None
+        self.callback = {}
+        self.fail_command = None
         self.numpy = SimpleNamespace(extract_atom=self._extract_atom)
 
     def _extract_atom(self, name):
@@ -74,11 +79,13 @@ class FakeLammps:
 
     def command(self, command):
         self.commands.append(command)
+        if command == self.fail_command:
+            raise RuntimeError(f"failed command: {command}")
         if command.startswith("run ") and self.variables.get("rgpot_failed"):
             raise RuntimeError("fix halt")
 
-    def set_fix_external_callback(self, _fix_id, callback, _caller):
-        self.callback = callback
+    def set_fix_external_callback(self, fix_id, callback, _caller):
+        self.callback[fix_id] = callback
 
     def set_internal_variable(self, name, value):
         self.variables[name] = value
@@ -158,6 +165,28 @@ def test_triclinic_cell_unwrapping_id_order_and_virial():
     )
 
 
+def test_tag_order_cache_is_reused_and_invalidated(monkeypatch):
+    calls = 0
+    original_sort = np.sort
+
+    def counted_sort(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original_sort(*args, **kwargs)
+
+    monkeypatch.setattr(np, "sort", counted_sort)
+    lmp = FakeLammps()
+    driver = FixExternal(lmp, RecordingPotential(np.eye(3)), "H He")
+    forces = np.zeros((2, 3))
+    driver._step(2, lmp.tags, lmp.positions, forces)
+    driver._step(2, lmp.tags, lmp.positions, forces)
+    assert calls == 1
+
+    lmp.tags = lmp.tags[::-1].copy()
+    driver._step(2, lmp.tags, lmp.positions, forces)
+    assert calls == 2
+
+
 @pytest.mark.parametrize("style", ["metal", "real", "electron"])
 def test_lammps_unit_conversion(style):
     pot = RecordingPotential(np.eye(3))
@@ -226,8 +255,13 @@ class RootComm:
     def Get_rank(self):
         return 0
 
-    def gather(self, _part, root=0):
+    def allreduce(self, value):
+        return value + 1
+
+    def gather(self, part, root=0):
         assert root == 0
+        if not isinstance(part, tuple):
+            return [part, None]
         return self.parts
 
     def bcast(self, value, root=0):
@@ -239,6 +273,80 @@ class RootComm:
         assert root == 0
         self.shares = shares
         return shares[0]
+
+
+class CollectiveWorld:
+    def __init__(self, size=2):
+        self.size = size
+        self.condition = threading.Condition()
+        self.calls = {}
+
+    def exchange(self, index, rank, kind, value, root):
+        with self.condition:
+            call = self.calls.setdefault(
+                index,
+                {"kind": kind, "root": root, "values": {}, "reads": 0},
+            )
+            assert call["kind"] == kind
+            assert call["root"] == root
+            call["values"][rank] = value
+            self.condition.notify_all()
+            ready = self.condition.wait_for(
+                lambda: len(call["values"]) == self.size,
+                timeout=2,
+            )
+            if not ready:
+                raise TimeoutError(f"{kind} collective did not complete")
+            values = call["values"]
+            if kind == "allreduce":
+                result = sum(values.values())
+            elif kind == "gather":
+                result = [values[item] for item in range(self.size)] if rank == root else None
+            elif kind == "bcast":
+                result = values[root]
+            elif kind == "scatter":
+                result = values[root][rank]
+            else:
+                raise AssertionError(kind)
+            call["reads"] += 1
+            if call["reads"] == self.size:
+                del self.calls[index]
+            return result
+
+
+class ThreadComm:
+    def __init__(self, world, rank):
+        self.world = world
+        self.rank = rank
+        self.index = 0
+
+    def _exchange(self, kind, value, root=0):
+        index, self.index = self.index, self.index + 1
+        return self.world.exchange(index, self.rank, kind, value, root)
+
+    def Get_size(self):
+        return self.world.size
+
+    def Get_rank(self):
+        return self.rank
+
+    def allreduce(self, value):
+        return self._exchange("allreduce", value)
+
+    def gather(self, value, root=0):
+        return self._exchange("gather", value, root)
+
+    def bcast(self, value, root=0):
+        return self._exchange("bcast", value, root)
+
+    def scatter(self, value, root=0):
+        return self._exchange("scatter", value, root)
+
+
+def run_rank(driver, lmp):
+    forces = np.zeros((len(lmp.tags), 3))
+    driver._step(len(lmp.tags), lmp.tags, lmp.positions, forces)
+    return forces
 
 
 def test_duplicate_ids_are_refused():
@@ -266,9 +374,88 @@ def test_rank_zero_reraises_the_original_error():
         world_size=2,
     )
     driver = FixExternal(lmp, Boom(), "H He", comm=comm)
-    with pytest.raises(ValueError, match="evaluation failed"):
+    with pytest.raises(
+        RuntimeError,
+        match="rank 0 failed while evaluating the potential: "
+        "ValueError: evaluation failed",
+    ):
         driver._step(1, lmp.tags, lmp.positions, np.zeros((1, 3)))
-    assert comm.outcome[0] == "evaluation failed"
+    assert comm.outcome == (
+        "rank 0 failed while evaluating the potential: "
+        "ValueError: evaluation failed"
+    )
+
+
+@pytest.mark.timeout(5)
+def test_non_root_rank_runs_collectives_and_receives_forces():
+    world = CollectiveWorld()
+    lmps = [
+        FakeLammps(
+            tags=(1,),
+            types=(1,),
+            positions=((1.0, 0.0, 0.0),),
+            world_size=2,
+        ),
+        FakeLammps(
+            tags=(2,),
+            types=(2,),
+            positions=((2.0, 0.0, 0.0),),
+            world_size=2,
+        ),
+    ]
+    potential = RecordingPotential(np.zeros((3, 3)))
+    drivers = [
+        FixExternal(lmps[rank], potential, "H He", comm=ThreadComm(world, rank))
+        for rank in range(2)
+    ]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [
+            pool.submit(run_rank, drivers[rank], lmps[rank]) for rank in range(2)
+        ]
+        forces = [future.result(timeout=3) for future in futures]
+    np.testing.assert_array_equal(forces[0], [[1, 2, 3]])
+    np.testing.assert_array_equal(forces[1], [[2, 3, 4]])
+
+
+@pytest.mark.timeout(5)
+def test_non_root_pre_collective_failure_reaches_every_rank():
+    world = CollectiveWorld()
+    lmps = [
+        FakeLammps(
+            tags=(1,),
+            types=(1,),
+            positions=((1.0, 0.0, 0.0),),
+            world_size=2,
+        ),
+        FakeLammps(
+            tags=(2,),
+            types=(3,),
+            positions=((2.0, 0.0, 0.0),),
+            world_size=2,
+        ),
+    ]
+    drivers = [
+        FixExternal(
+            lmps[rank],
+            RecordingPotential(np.zeros((3, 3))),
+            "H He",
+            comm=ThreadComm(world, rank),
+        )
+        for rank in range(2)
+    ]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [
+            pool.submit(run_rank, drivers[rank], lmps[rank]) for rank in range(2)
+        ]
+        errors = []
+        for future in futures:
+            with pytest.raises(RuntimeError) as caught:
+                future.result(timeout=3)
+            errors.append(str(caught.value))
+    assert errors == [errors[0], errors[0]]
+    assert errors[0].startswith(
+        "rank 1 failed while preparing local atoms: IndexError:"
+    )
 
 
 def test_import_rgpot_does_not_import_lammps():
@@ -334,6 +521,91 @@ def test_callback_failure_stops_run_and_reraises_original_error():
         driver.run(5)
     assert driver.error is None
     assert lmp.variables["rgpot_failed"] == 0.0
+
+
+def test_callback_catches_base_exception_until_run_returns():
+    class Interrupted:
+        def __call__(self, *_args):
+            raise KeyboardInterrupt("stopped")
+
+    lmp = FakeLammps()
+    driver = FixExternal(lmp, Interrupted(), "H He")
+    forces = np.ones((2, 3))
+    driver._callback(None, 0, 2, lmp.tags, lmp.positions, forces)
+    np.testing.assert_array_equal(forces, 0.0)
+    with pytest.raises(KeyboardInterrupt, match="stopped"):
+        driver.run(1)
+
+
+def test_root_evaluation_catches_base_exception_until_run_returns():
+    parts = [
+        (np.array([1]), np.zeros((1, 3)), np.array([1])),
+        (np.array([2]), np.zeros((1, 3)), np.array([2])),
+    ]
+
+    class Interrupted:
+        def __call__(self, *_args):
+            raise KeyboardInterrupt("root stopped")
+
+    lmp = FakeLammps(
+        tags=(1,),
+        types=(1,),
+        positions=((0.0, 0.0, 0.0),),
+        world_size=2,
+    )
+    driver = FixExternal(lmp, Interrupted(), "H He", comm=RootComm(parts))
+    forces = np.ones((1, 3))
+    driver._callback(None, 0, 1, lmp.tags, lmp.positions, forces)
+    np.testing.assert_array_equal(forces, 0.0)
+    with pytest.raises(
+        RuntimeError,
+        match="rank 0 failed while evaluating the potential: "
+        "KeyboardInterrupt: root stopped",
+    ):
+        driver.run(1)
+
+
+def test_create_false_close_removes_callback_and_prevents_later_run():
+    lmp = FakeLammps()
+    driver = FixExternal(
+        lmp,
+        RecordingPotential(np.eye(3)),
+        "H He",
+        create=False,
+    )
+    assert "fix rgpot all external pf/callback 1 1" not in lmp.commands
+    assert "rgpot" in lmp.callback
+
+    driver.close()
+    assert "unfix rgpot_halt" in lmp.commands
+    assert "unfix rgpot" in lmp.commands
+    assert "rgpot" not in lmp.callback
+    forces = np.ones((2, 3))
+    for callback in lmp.callback.values():
+        callback(None, 0, 2, lmp.tags, lmp.positions, forces)
+    np.testing.assert_array_equal(forces, 1.0)
+    with pytest.raises(RuntimeError, match="FixExternal is closed"):
+        driver.run(1)
+
+    commands = list(lmp.commands)
+    driver.close()
+    assert lmp.commands == commands
+
+
+def test_close_preserves_state_and_reraises_unfix_failure():
+    lmp = FakeLammps()
+    driver = FixExternal(lmp, RecordingPotential(np.eye(3)), "H He")
+    lmp.fail_command = "unfix rgpot"
+    with pytest.raises(RuntimeError, match="failed command: unfix rgpot"):
+        driver.close()
+    assert driver._lmp is lmp
+    assert "rgpot" in lmp.callback
+
+    lmp.fail_command = None
+    driver.close()
+    assert lmp.commands.count("unfix rgpot_halt") == 1
+    assert "rgpot" not in lmp.callback
+    assert driver._lmp is None
 
 
 def test_real_lammps_smoke():

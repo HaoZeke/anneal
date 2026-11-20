@@ -1,3 +1,4 @@
+#+COMMENT: Copyright 2023--present rgpot developers
 #+TITLE: LAMMPS Python frontend reference
 #+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
 
@@ -19,14 +20,15 @@ FixExternal(
 )
 #+end_src
 
-=lmp= is an initialized object from LAMMPS' Python module.  =potential= is a
-Python rgpot potential object: an =evaluate(positions, numbers, cell)= method
-returns a dictionary with =energy=, =forces= and optional =stress=, or a
-callable returns =(energy, forces, variance)=.  A callable =stress()= method,
-when present, supplies the stress after a call.
+=lmp= is an initialized object from LAMMPS' Python module.
+=potential= is a Python rgpot potential object: an
+=evaluate(positions, numbers, cell)= method returns a dictionary with =energy=,
+=forces= and optional =stress=, or a callable returns
+=(energy, forces, variance)=.
+A callable =stress()= method, when present, supplies the stress after a call.
 
 =elements= is one symbol or atomic number per LAMMPS atom type, in type order;
-it may be a whitespace-separated string or a sequence.  rgpot's element table
+it may be a whitespace-separated string or a sequence. rgpot's element table
 resolves symbols.
 
 ** Units
@@ -44,7 +46,8 @@ Any other style raises =ValueError= before the fix is created.
 
 ** Cell, positions and atom order
 
-The cell has one vector per row.  For LAMMPS' restricted triclinic box it is
+The cell has one vector per row.
+For LAMMPS' restricted triclinic box it is
 
 #+attr_rgpot: skip the triclinic cell rows, not code
 #+begin_example
@@ -53,43 +56,53 @@ The cell has one vector per row.  For LAMMPS' restricted triclinic box it is
  (xz,       yz,      zhi-zlo))
 #+end_example
 
-The origin is not subtracted.  With periodic boundaries, image flags unwrap
-each Cartesian position as =x + ix*a + iy*b + iz*c=.  All three boundaries
-must be periodic or all three non-periodic; mixed boundaries raise
-=ValueError=.  The potential protocol always receives the 3 by 3 cell.  A
-free-boundary potential may ignore it.
+The origin is not subtracted.
+With periodic boundaries, image flags unwrap each Cartesian position as
+=x + ix*a + iy*b + iz*c=.
+All three boundaries must be periodic or all three non-periodic; mixed
+boundaries raise =ValueError=.
+The potential protocol always receives the 3 by 3 cell.
+A free-boundary potential may ignore it.
 
-The evaluation is in increasing atom-ID order.  Returned forces are mapped
-back to each rank's local order.  IDs must be the integers =1..N= without
-duplicates.
+The evaluation is in increasing atom-ID order.
+Returned forces are mapped back to each rank's local order.
+IDs must be the integers =1..N= without duplicates.
 
 ** Virial and pressure
 
-An rgpot stress is the Cauchy tensor =sigma = V^-1 dE/depsilon=.  LAMMPS'
-external-fix virial is =W = -dE/depsilon=, so the frontend returns
-=-V sigma=, symmetrized, in LAMMPS order =xx yy zz xy xz yz= and in the
-LAMMPS energy unit.
+An rgpot stress is the Cauchy tensor =sigma = V^-1 dE/depsilon=.
+LAMMPS' external-fix virial is =W = -dE/depsilon=, so the frontend returns
+=-V sigma=, symmetrized, in LAMMPS order =xx yy zz xy xz yz= and in the LAMMPS
+energy unit.
 
 With =virial="auto"=, a missing stress on a periodic box raises =RuntimeError=
-naming the potential and saying it lacks analytic stress.  A non-periodic box
-with no stress returns a zero virial.  =virial="none"= returns zeros.
+naming the potential and saying it lacks analytic stress.
+A non-periodic box with no stress returns a zero virial.
+=virial="none"= returns zeros.
 
 ** MPI and errors
 
-For one LAMMPS rank, mpi4py is not imported.  For several ranks, =comm= or
-=MPI.COMM_WORLD= must have the same size as LAMMPS.  Rank zero gathers
-=(IDs, positions, atomic numbers)=, evaluates once, broadcasts energy and
-virial, and scatters forces in each rank's local atom order.
+For one LAMMPS rank, mpi4py is not imported.
+For several ranks, =comm= or =MPI.COMM_WORLD= must have the same size as LAMMPS.
+Rank zero gathers =(IDs, positions, atomic numbers)=, evaluates once, broadcasts
+energy and virial, and scatters forces in each rank's local atom order.
+Collective status checks before the gather and after the rank-zero evaluation
+turn a failure on any one rank into the same error on every rank.
 
-A Python exception cannot cross LAMMPS' C callback.  The callback stores the
-first exception in =driver.error=, writes zero forces, and sets an internal
-variable watched by =fix halt=.  =driver.run(steps, *keywords)= clears the
-flag and re-raises that exception after LAMMPS stops.  On several ranks,
-rank zero re-raises the original exception.  Every other rank raises
-=RuntimeError= with the same message, because the exception object is not
-sent across the communicator.  Calling
-=lmp.command("run ...")= directly instead exposes LAMMPS' halt error; the
-stored Python exception remains in =driver.error=.
+A Python exception cannot cross LAMMPS' C callback.
+The callback stores the first exception in =driver.error=, writes zero forces,
+and sets an internal variable watched by =fix halt=.
+=driver.run(steps, *keywords)= clears the flag and re-raises that exception
+after LAMMPS stops.
+A collective failure raises =RuntimeError= with the same rank, phase, exception
+type, and message on every rank.
+Calling =lmp.command("run ...")= directly instead exposes LAMMPS' halt error;
+the stored Python exception remains in =driver.error=.
 
-=close()= removes the halt fix and, when =create=True=, the external fix.  It
-does not close the potential object supplied by the caller.
+=close()= removes the halt fix and external fix, deregisters the callback, and
+releases the LAMMPS object.
+This also applies with =create=False=: the caller supplies the fix but transfers
+its teardown to =FixExternal=.
+Closing twice is harmless; an =unfix= failure is raised and teardown can be
+retried.
+=close()= does not close the potential object supplied by the caller.
