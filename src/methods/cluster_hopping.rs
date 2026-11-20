@@ -11866,6 +11866,111 @@ mod tests {
         assert_decay_site_is_wired(ShelfDecaySite::BeforeStall);
     }
 
+    /// A shelf beaten by a non-adopting record improvement must actually be
+    /// evicted by `decay_shelves_at` before the next acceptance veto, not
+    /// merely have the decay site visited.
+    #[test]
+    fn a_beaten_shelf_evicts_before_the_next_veto() {
+        let n = 4;
+        let shelf_well = Array1::from(vec![
+            0.0, 0.0, 0.0, 1.2, 0.0, 0.0, 0.6, 1.0, 0.0, 0.6, 0.4, 0.9,
+        ]);
+        let mut other_well = shelf_well.clone();
+        other_well[0] += 0.35;
+        let mut deep_well = shelf_well.clone();
+        deep_well[0] += 0.75;
+
+        let mut cfg = Config::recommended(n);
+        cfg.restart_patience = 40;
+        cfg.escape_stall_patience = 1_000_000;
+        cfg.escape_on_stall = true;
+        cfg.restart_on_stall = false;
+        cfg.relax_steps = 80;
+        cfg.screen_steps = 1;
+        cfg.polish_records = 10;
+        cfg.max_hops = Some(4);
+        cfg.temperature = 100.0;
+        cfg.bias_height = 0.0;
+        cfg.bayes_screen = false;
+        cfg.screen_margin = f64::INFINITY;
+        cfg.continuous_symmetry = ContinuousSymmetry::Off;
+        cfg.orbit_complete_on_new = false;
+        cfg.energy_lattice = false;
+        cfg.surfaces.clear();
+        cfg.symmetrise_on_stall = false;
+        cfg.trail_on_stall = false;
+        cfg.return_screen = false;
+
+        let mut quench_calls = 0usize;
+        let mut rng = StdRng::seed_from_u64(2000);
+        let mut ledger = Ledger::new(20_000);
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            let before = led.spent();
+            let (well, offset) = if steps == cfg.polish_records {
+                if quench_calls == 4 {
+                    (&deep_well, -5.0)
+                } else {
+                    (&shelf_well, -1.0)
+                }
+            } else if steps <= 1 {
+                (&shelf_well, -1.0)
+            } else {
+                quench_calls += 1;
+                match quench_calls {
+                    1..=3 => (&shelf_well, -1.0),
+                    4 => (&other_well, -0.5),
+                    _ => (&shelf_well, -1.0),
+                }
+            };
+            let mut cur = x.to_owned();
+            for _ in 0..steps {
+                if !led.charge() {
+                    break;
+                }
+                cur = well + &((&cur - well) * 0.85);
+            }
+            let d = &cur - well;
+            let e = offset + d.iter().map(|v| v * v).sum::<f64>();
+            if steps > 1 {
+                led.record_quench_boundary(before, e, cur.clone(), Some(2.0 * d));
+            }
+            (e, cur)
+        };
+
+        let out = run_with_gradient(
+            &cfg,
+            shelf_well.view(),
+            &mut ledger,
+            &mut relax,
+            None,
+            &mut rng,
+        )
+        .expect("finite start");
+
+        assert!(
+            out.best < -4.9,
+            "polish record did not lower ledger.best below the quarantined shelf: best={}",
+            out.best
+        );
+        assert_eq!(
+            out.tabu.1, 0,
+            "beaten shelf was not evicted by decay_shelves_at and vetoed a cross-basin move: {:?}",
+            out.tabu
+        );
+        assert!(
+            out.accepted_transitions.iter().any(|step| {
+                (step.from_energy - (-0.5)).abs() < 1e-3
+                    && (step.to_energy - (-1.0)).abs() < 1e-3
+                    && step.adopted
+            }),
+            "cross-basin return onto the evicted shelf was not adopted: {:?}",
+            out.accepted_transitions
+                .iter()
+                .map(|step| (step.hop, step.from_energy, step.to_energy, step.adopted))
+                .collect::<Vec<_>>()
+        );
+    }
+
     /// The hop stall that used to fill the fingerprint tabu does not fall
     /// inside this run: its patience stays past the last hop. Every quench
     /// falls back onto one well. The call plateau is what names that well,
