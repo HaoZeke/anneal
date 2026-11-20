@@ -772,6 +772,45 @@ def test_a_qualified_external_revision_is_a_repo_url_and_a_full_sha():
     assert audit_mod.harness_reachable("aac1548a")
 
 
+IPI_PIN = IPI_FORM.split("@")[1]
+
+
+@pytest.mark.parametrize("form", [
+    "https://example.com/fake/code.git@" + "0" * 40,
+    "https://github.com/afiorent/i-pi.git@" + "0" * 40,
+    "https://github.com/someone/i-pi.git@" + IPI_PIN,
+])
+def test_an_unpinned_external_revision_is_rejected(form):
+    assert audit_mod.external_form(form) is False
+    assert not audit_mod.harness_reachable(form)
+    audit = audit_mod.Audit()
+    path = "bench/pimc-lj38/README.md"
+    audit.text_cache[path] = audit.text(path).replace(IPI_FORM, form)
+    audit_mod.printed_harnesses(audit)
+    assert ("qualified external revision", form) in {(r[2], r[3]) for r in audit.drifts()}
+
+
+def test_a_41_digit_external_revision_is_rejected():
+    long = IPI_FORM + "0"
+    assert audit_mod.external_form(long) is False
+    audit = audit_mod.Audit()
+    path = "bench/pimc-lj38/README.md"
+    audit.text_cache[path] = audit.text(path).replace(IPI_FORM, long)
+    audit_mod.printed_harnesses(audit)
+    assert ("qualified external revision", long) in {(r[2], r[3]) for r in audit.drifts()}
+    assert not [r for r in audit.results if r[1].startswith(path) and r[2] == "qualified external revision" and r[0] == "OK"]
+
+
+def test_an_inline_external_revision_is_stripped_from_prose():
+    line = f"Rows at `{IPI_FORM}` hit at a median of 12 calls."
+    assert IPI_PIN not in audit_mod._EXTERNAL_FORM.sub(" ", line)
+    audit = audit_mod.Audit()
+    path = "bench/pimc-lj38/README.md"
+    audit.text_cache[path] = audit.text(path) + f"\n{line}\n"
+    audit_mod.printed_harnesses(audit)
+    assert audit.drifts() == []
+
+
 def test_printed_revisions_are_ancestors_or_qualified():
     audit = audit_mod.Audit()
     audit_mod.printed_harnesses(audit)

@@ -3249,8 +3249,8 @@ def manuscript_followups(audit: Audit) -> None:
 
 
 _ANCESTOR_OF_HEAD: dict[str, bool] = {}
-_EXTERNAL_FORM = re.compile(r"^https://[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+\.git@[0-9a-f]{40}$")
-_FORM_ATTEMPT = re.compile(r"https://[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+\.git@[0-9a-f]{7,40}")
+_EXTERNAL_FORM = re.compile(r"https://[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+\.git@[0-9a-f]{40}(?![0-9A-Za-z])")
+_FORM_ATTEMPT = re.compile(r"https://[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+\.git@[0-9a-f]+")
 _REVISION_HEADER = re.compile(r"harness|revision|commit|\bsha\b", re.I)
 _RESULT_HEADER = re.compile(
     r"hit|call|wall|fisher|mann|median|inside|outside|ratio|gap|\bpot\b|eval|ahead|energy",
@@ -3269,14 +3269,34 @@ EXTERNAL_FORM_SOURCES = (
 )
 
 
+# Install scripts that pin another code, each with a URL= and a PIN= line.
+EXTERNAL_PIN_SOURCES = ("scripts/pimc_lj38/install_rpqa.sh",)
+
+
+@functools.cache
+def external_pins() -> frozenset[tuple[str, str]]:
+    """The (repository URL, full SHA) pairs the install scripts check out."""
+    pins = set()
+    for path in EXTERNAL_PIN_SOURCES:
+        text = (ROOT / path).read_text()
+        urls = re.findall(r"^URL=(\S+)$", text, re.M)
+        shas = re.findall(r"^PIN=([0-9a-f]{40})$", text, re.M)
+        if len(urls) == 1 and len(shas) == 1:
+            pins.add((urls[0], shas[0]))
+    return frozenset(pins)
+
+
 def external_form(text: str) -> bool | None:
-    """A repo URL plus a full SHA. A short SHA on that URL is rejected, not skipped."""
+    """A repo URL plus a full SHA that an install script pins.
+
+    Any other URL@hex, a short or long SHA, or a pair no script pins, is
+    rejected, not skipped. None when the text is not a URL@hex at all.
+    """
     token = (text or "").strip().strip("`")
-    if _EXTERNAL_FORM.fullmatch(token):
-        return True
-    if re.fullmatch(r"https://[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+\.git@[0-9a-f]{7,39}", token):
-        return False
-    return None
+    if not _FORM_ATTEMPT.fullmatch(token):
+        return None
+    url, sha = token.rsplit("@", 1)
+    return len(sha) == 40 and (url, sha) in external_pins()
 
 
 def external_pin(rev: str) -> bool:
@@ -3496,7 +3516,7 @@ def _printed_readme_numbers(audit: Audit, forms: list[tuple[str, str]]) -> list[
                 continue
             for match in _FORM_ATTEMPT.finditer(line):
                 forms.append((f"{rel}:{line_no}", match.group(0)))
-            line = _EXTERNAL_FORM.sub(" ", line)
+            line = _FORM_ATTEMPT.sub(" ", line)
             carried: list[str] = []
             for sentence in re.split(r"(?<=\.)\s+", line):
                 local = []
@@ -3524,9 +3544,11 @@ def _check_external_source(audit: Audit, path: str) -> None:
         return
     for token in attempts:
         audit.record(external_form(token) is True, path, "qualified external revision", token, "repo URL @ full SHA")
-    stripped = _EXTERNAL_FORM.sub(" ", text)
-    if re.search(r"(?<![0-9a-f])4e86f5fd(?![0-9a-f])", stripped):
-        audit.record(False, path, "qualified external revision", "4e86f5fd", "repo URL @ full SHA")
+    stripped = _FORM_ATTEMPT.sub(" ", text)
+    for _url, sha in sorted(external_pins()):
+        for bare in re.findall(rf"(?<![0-9a-f])({sha[:7]}[0-9a-f]*)(?![0-9a-f])", stripped):
+            if sha.startswith(bare):
+                audit.record(False, path, "qualified external revision", bare, "repo URL @ full SHA")
 
 
 def printed_harnesses(audit: Audit) -> None:
