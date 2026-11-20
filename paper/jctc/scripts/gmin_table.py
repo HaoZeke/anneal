@@ -95,7 +95,7 @@ def develop_rows() -> list[dict[str, str]]:
     keys = [(r["system"], r["code"], r["seed"]) for r in out]
     if len(keys) != len(set(keys)) or sorted({r["system"] for r in out}) != sorted(DEVELOP_SYSTEMS):
         raise SystemExit("gmin_table: the develop session does not cover each cell once")
-    return [dict(r, harness_revision=SUBMITTED) for r in out]
+    return out
 
 
 def summary() -> tuple[list[dict[str, str]], dict[str, dict[str, object]]]:
@@ -107,7 +107,8 @@ def summary() -> tuple[list[dict[str, str]], dict[str, dict[str, object]]]:
 def develop_summary() -> tuple[list[dict[str, str]], dict[str, dict[str, object]]]:
     PANEL.GMIN_REV = GMIN_SNAPSHOT
     data = develop_rows()
-    return PANEL.summarise(data, SUBMITTED), PANEL.paired_summary(data, SUBMITTED)
+    return (PANEL.summarise(data, SUBMITTED, DEVELOP_HARNESS),
+            PANEL.paired_summary(data, SUBMITTED, DEVELOP_HARNESS))
 
 
 def heading(text: str) -> str:
