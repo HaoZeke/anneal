@@ -69,6 +69,28 @@ SUMMARY_FIELDS = [
     "mannwhitney_p",
     "anneal_outside_s_per_call_median",
 ]
+PANEL_FIELDS = [
+    "cell",
+    "seed",
+    "start",
+    "hit",
+    "calls_to_hit",
+    "charged",
+    "best",
+    "best_bits",
+    "wall_s",
+    "pot_s",
+    "outside_s",
+    "hop_first_best",
+    "preset_hash",
+    "revision",
+    "core",
+    "affinity",
+    "machine_id_sha256",
+    "session",
+    "sequence",
+    "source",
+]
 
 
 def load(path: Path) -> list[dict[str, str]]:
@@ -211,6 +233,41 @@ def g0_rows() -> tuple[list[dict[str, str]], dict[str, list[dict[str, str]]]]:
     return out, comparison
 
 
+def panel_rows(measured: list[dict[str, str]]) -> list[dict[str, str]]:
+    old = load(ROOT / "bench/g0-lj-stock/rows.csv")
+    out = [
+        {**row, "source": "g0"}
+        for row in old
+        if row["cell"].startswith("gmin-") and row["cell"][5:] in G0_CELLS
+    ]
+    for sequence, row in enumerate(measured, start=1):
+        out.append(
+            {
+                "cell": f"gmin-{row['system']}",
+                "seed": row["seed"],
+                "start": "",
+                "hit": row["hit"],
+                "calls_to_hit": row["evals_to_hit"] if row["hit"] == "1" else "",
+                "charged": row["charged"],
+                "best": row["best"],
+                "best_bits": "",
+                "wall_s": row["wall_s"],
+                "pot_s": row["pot_s"],
+                "outside_s": row["outside_s"],
+                "hop_first_best": "",
+                "preset_hash": "",
+                "revision": row["code_revision"],
+                "core": "0",
+                "affinity": "0",
+                "machine_id_sha256": row["host"],
+                "session": "",
+                "sequence": str(sequence),
+                "source": "g1",
+            }
+        )
+    return out
+
+
 def type7(values: list[float]) -> float:
     values = sorted(values)
     position = 1.0 + (len(values) - 1) * 0.5
@@ -335,7 +392,7 @@ def main() -> None:
             g1_comparison.setdefault(row["system"], []).append(row)
     combined = [*g0, *({**row, "source": "g1"} for row in measured)]
     write(HERE / "rows.csv", ROW_FIELDS, paired)
-    write(HERE / "panel-rows.csv", ROW_FIELDS, combined)
+    write(HERE / "panel-rows.csv", PANEL_FIELDS, panel_rows(measured))
     write(
         HERE / "summary.csv",
         SUMMARY_FIELDS,
