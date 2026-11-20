@@ -397,6 +397,17 @@ def test_a_move_choice_success_claim_is_reported():
     assert [(r[1], r[2]) for r in audit.drifts()] == [(audit_mod.TEX, "no sentence credits the move choice with success")]
 
 
+def test_a_modal_hedge_fails_both_audits():
+    for strict in (False, True):
+        audit = audit_mod.Audit()
+        tex = audit.text(audit_mod.TEX)
+        old = "and both algorithms return an assignment of the optimal cost."
+        assert tex.count(old) == 1
+        audit.text_cache[audit_mod.TEX] = tex.replace(old, old + "\nA tie may break differently.")
+        audit_mod.todo_check(audit, pre_submission=strict)
+        assert [(r[1], r[2], r[4]) for r in audit.drifts()] == [(audit_mod.TEX, "no modal hedge", "may")]
+
+
 def test_every_todo_marker_fails_both_audits():
     clean = audit_mod.Audit()
     for path in (audit_mod.TEX, audit_mod.SI, audit_mod.COVER):

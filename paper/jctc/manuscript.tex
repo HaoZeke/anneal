@@ -412,12 +412,12 @@ For atomic clusters the preset has one atom-count gate: the diameter penalty
 of equation~\ref{eq:penalty} is used only below 98 atoms.
 The revisions with the structure priors on had a second, the growth hold of
 equation~\ref{eq:hold}.
-A rigid-body run has a gate of its own: at 10 molecules or fewer its step
-factor may climb higher, and above 10 its orientation step follows the
-acceptance rate.
+A rigid-body run has a gate of its own: at 10 molecules or fewer a factor on
+its acceptance temperature starts at 24 and moves between 1 and 24 with the
+share of hops that reach a new minimum, and above 10 that factor stays at 4
+and its orientation step follows the acceptance rate.
 The exact assignment inside the symmetry projections also changes algorithm
-at 98 atoms, without changing the optimal cost, though a tie between
-optimal permutations may break differently.
+at 98 atoms, and both algorithms return an assignment of the optimal cost.
 No constant was refitted for a size.
 
 \subsection{Structure priors and templates}
