@@ -47,6 +47,37 @@ def test_discordant_seeds_and_per_call_ratio():
     assert float(out["wilcoxon_p"]) < 0.05
 
 
+def test_wilcoxon_is_exact_and_drops_equal_pairs():
+    ranks = [1.0, 2.0, 3.0, 4.0, 5.0]
+    assert ps.wilcoxon_p([10.0 + r for r in ranks], [10.0] * 5) == pytest.approx(2 / 32)
+    assert ps.wilcoxon_p([10.0 + r for r in ranks] + [7.0], [10.0] * 5 + [7.0]) == pytest.approx(2 / 32)
+    assert ps.wilcoxon_p([3.0, 4.0], [3.0, 4.0]) == 1.0
+    assert ps.wilcoxon_p([], []) is None
+
+
+def test_wilcoxon_at_24_seeds_with_an_equal_pair_is_not_the_normal_approximation():
+    from scipy.stats import wilcoxon
+
+    base = [100.0] * 24
+    arm = [100.0 + (i + 1) * (1 if i % 5 else -1) for i in range(24)]
+    arm[0] = base[0]
+    diffs = [a - b for a, b in zip(arm, base) if a != b]
+    exact = float(wilcoxon(diffs, method="exact").pvalue)
+    approx = float(wilcoxon(arm, base, method="auto").pvalue)
+    assert exact != pytest.approx(approx, rel=1e-3)
+    assert ps.wilcoxon_p(arm, base) == pytest.approx(exact)
+
+
+def test_wilcoxon_falls_back_to_the_normal_approximation_past_the_exact_limit():
+    from scipy.stats import wilcoxon
+
+    n = ps.EXACT_WILCOXON_LIMIT + 10
+    base = [50.0] * n
+    arm = [50.0 + (i + 1) * (1 if i % 4 else -1) + i / 1000 for i in range(n)]
+    expected = float(wilcoxon([a - b for a, b in zip(arm, base)], method="approx").pvalue)
+    assert ps.wilcoxon_p(arm, base) == pytest.approx(expected)
+
+
 def test_only_seeds_of_both_arms_pair_up_and_local_steps_are_counted():
     rows = [row("anneal", 0, 1), row("anneal", 1, 0), row("develop", 1, 1)]
     steps = {("m", "anneal", "1"): "tric", ("m", "develop", "1"): "lbfgs"}

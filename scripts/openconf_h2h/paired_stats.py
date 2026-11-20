@@ -11,7 +11,8 @@ molecule the table gives:
 - the median per-call time outside the potential, ``outside_s`` over
   ``calls`` in microseconds, of each arm, the median over seeds of the
   arm-to-base ratio, and the two-sided Wilcoxon signed-rank test of the
-  paired per-call times (1 when every pair is equal)
+  paired per-call times, exact with equal pairs dropped (see ``wilcoxon_p``;
+  1 when every pair is equal)
 - the local step each arm resolved to, as ``step:count`` pairs
 
 ``-`` marks a value that does not exist, such as a ratio with no base time.
@@ -50,12 +51,30 @@ def per_call_us(row: dict) -> float | None:
     return 1e6 * float(outside) / calls
 
 
+EXACT_WILCOXON_LIMIT = 50
+
+
 def wilcoxon_p(arm: list[float], base: list[float]) -> float | None:
+    """Two-sided Wilcoxon signed-rank p of the paired values ``arm`` and ``base``.
+
+    Pairs whose values are equal carry no sign and are dropped before the test
+    (the ``wilcox`` zero method), so the result does not depend on which zero
+    method a scipy release defaults to. The p is the exact one, from the
+    distribution of the signed-rank statistic over all sign assignments, while
+    at most ``EXACT_WILCOXON_LIMIT`` pairs remain; with more it is the normal
+    approximation. scipy's ``auto`` would switch to the normal approximation
+    as soon as one pair was equal, which at 24 seeds shifts the p by a few
+    per cent for no reason in the data. The exact distribution takes the
+    differences as untied; equal absolute differences are rare in measured
+    times and are ranked by their mean rank. 1 when no pair is left.
+    """
     if not arm:
         return None
-    if all(a == b for a, b in zip(arm, base)):
+    diffs = [a - b for a, b in zip(arm, base, strict=True) if a != b]
+    if not diffs:
         return 1.0
-    return float(wilcoxon(arm, base).pvalue)
+    method = "exact" if len(diffs) <= EXACT_WILCOXON_LIMIT else "approx"
+    return float(wilcoxon(diffs, zero_method="wilcox", method=method).pvalue)
 
 
 def steps(rows: list[dict], local_steps: dict) -> str:
