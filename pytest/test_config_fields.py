@@ -367,9 +367,9 @@ def test_delayed_acceptance_with_replicas_is_refused_up_front():
     cfg = Config.recommended(4)
     assert cfg.replace(delayed_acceptance=True).get("delayed_acceptance") is True
     assert cfg.replace(replicas=2).get("replicas") == 2
-    with pytest.raises(anneal.InvalidArgumentError, match="delayed_acceptance"):
+    with pytest.raises(anneal.InvalidArgumentError, match="delayed acceptance"):
         cfg.replace(delayed_acceptance=True, replicas=2)
-    with pytest.raises(anneal.InvalidArgumentError, match="delayed_acceptance"):
+    with pytest.raises(anneal.InvalidArgumentError, match="delayed acceptance"):
         cfg.replace(delayed_acceptance=True).replace(replicas=2)
 
 

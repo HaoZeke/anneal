@@ -98,7 +98,10 @@ fn delayed_acceptance_needs_one_chain() {
     assert_eq!(cfg.validate(), Ok(()));
     cfg.replicas = 2;
     let err = cfg.validate().unwrap_err();
-    assert!(err.0.contains("delayed_acceptance"), "{err}");
+    assert!(
+        err.0.starts_with("delayed acceptance needs a single chain"),
+        "{err}"
+    );
     let (out, spent) = run(&cfg);
     assert_eq!(out, Err(SearchError::InvalidConfig(err)));
     assert_eq!(spent, 0);

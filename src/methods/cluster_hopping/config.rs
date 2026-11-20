@@ -2786,7 +2786,7 @@ impl Config {
     pub fn validate(&self) -> Result<(), InvalidConfig> {
         if self.delayed_acceptance && self.replicas > 1 {
             return Err(InvalidConfig(format!(
-                "delayed_acceptance needs a single chain, not replicas={}: a hop its \
+                "delayed acceptance needs a single chain, not replicas={}: a hop its \
                  surrogate decides weighs the bare energy and one it abstains on weighs \
                  the biases, so no swap between rungs can be balanced",
                 self.replicas
