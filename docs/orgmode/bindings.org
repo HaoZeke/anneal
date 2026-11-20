@@ -25,6 +25,16 @@ in the generated =anneal-core.h=.
 
 The install also places =dlpack/dlpack.h= (DLPack 1.3, the header =dlpk= 0.1.5 was translated from) on that include prefix. =anneal-core.h= includes it, so =pkg-config --cflags anneal-core= is enough to compile a consumer. Meson and CMake install the same header.
 
+The native library archives on the GitHub release (=anneal-core-linux-x86_64=, =anneal-core-linux-aarch64=, =anneal-core-macos-aarch64= and =anneal-core-macos-x86_64=) hold =include/=, =lib/=, =LICENSE.txt= and =lib/pkgconfig/anneal-core.pc=. The =.pc= file is relative to its own location, so an extracted archive works from any directory:
+
+#+BEGIN_SRC bash
+tar xzf anneal-core-linux-x86_64.tar.gz -C anneal-core
+export PKG_CONFIG_PATH=$PWD/anneal-core/lib/pkgconfig
+cc main.c $(pkg-config --cflags --libs anneal-core) -o main
+#+END_SRC
+
+=pkg-config --static --libs anneal-core= adds the system libraries the static library needs.
+
 * Build-system glue
 
 ** Meson
