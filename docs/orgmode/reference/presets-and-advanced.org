@@ -116,14 +116,14 @@ The block under the constructor is the example =cargo test --doc= runs.
   assert!(!cfg.ring_moves);
   #+end_src
 
-- =recommended_molecular(species, groups, energy)= :: the measured molecular controls, including ring crankshafts, held stereocentres, a measured energy scale, and =LocalStep::Auto=.
+- =recommended_molecular(species, groups, energy)= :: the measured molecular controls, including ring crankshafts, held stereocentres, a measured energy scale, and Cartesian =LocalStep::Lbfgs= (with =LocalStep::Auto= opt-in).
 
   #+begin_src rust
   use anneal_core::methods::cluster_hopping::Config;
   use anneal_core::methods::tric_opt::LocalStep;
   let cfg = Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0);
   assert!(cfg.ring_moves && cfg.hold_stereocentres && cfg.measured_energy_scale);
-  assert_eq!(cfg.local_step, LocalStep::Auto);
+  assert_eq!(cfg.local_step, LocalStep::Lbfgs);
   #+end_src
 
 * Search surfaces
