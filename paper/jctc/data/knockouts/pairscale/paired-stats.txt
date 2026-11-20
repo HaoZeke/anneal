@@ -1,0 +1,7 @@
+pairscale length-unit shard summary
+base_commit: dd6ff9273be30ab317bfd5508596f4beb19cb3a4
+revision_tree: b12293b9d637dd32417be3aa482302e0f30dd594
+m55r6: hits_A=12/12 hits_B=12/12 table(both,onlyA,onlyB,neither)=(12,0,0,0) mcnemar_p=1 newcombe95=(-0.242494,0.242494)
+m55r14: hits_A=9/12 hits_B=7/12 table(both,onlyA,onlyB,neither)=(5,4,2,1) mcnemar_p=0.6875 newcombe95=(-0.210051,0.488901)
+m80r6: hits_A=12/12 hits_B=12/12 table(both,onlyA,onlyB,neither)=(12,0,0,0) mcnemar_p=1 newcombe95=(-0.242494,0.242494)
+m80r14: hits_A=7/12 hits_B=4/12 table(both,onlyA,onlyB,neither)=(1,6,3,2) mcnemar_p=0.5078125 newcombe95=(-0.214153,0.610166)
