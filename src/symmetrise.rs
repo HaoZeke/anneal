@@ -374,9 +374,18 @@ impl Cloud {
     /// neither is a turn that lands every atom on itself. The cap stops the
     /// pass at the same threshold as the distance scan. Sine and cosine of
     /// the turn are computed once.
+    ///
+    /// A finite cap that the distances already exceed returns before the
+    /// neighbour list is built. The list is only needed for the exchange.
     fn exchange_residual(&self, axis: [f64; 3], order: usize, cap: f64) -> Option<f64> {
         let n = self.xs.len();
         if n == 0 || order < 2 {
+            return None;
+        }
+        if cap.is_finite()
+            && self.gaps.borrow().is_none()
+            && self.residual_past_cap(axis, order, cap)
+        {
             return None;
         }
         let angle = 2.0 * std::f64::consts::PI / order as f64;
@@ -417,6 +426,93 @@ impl Cloud {
             }
         }
         moved.then_some((total / n as f64).sqrt())
+    }
+
+    /// Whether the nearest-image sum is already past `cap`.
+    ///
+    /// Distances only: no neighbour list and no partner index. Each chunk's
+    /// squared lengths do not depend on each other, so the compiler can
+    /// autovectorise them. The minimum uses the same `<` as the index scan,
+    /// so a tie has the same squared length and the partial sum matches the
+    /// one-pass residual. A turn that stays under the cap is not decided
+    /// here.
+    fn residual_past_cap(&self, axis: [f64; 3], order: usize, cap: f64) -> bool {
+        let n = self.xs.len();
+        if n == 0 || order < 2 || !cap.is_finite() {
+            return false;
+        }
+        let angle = 2.0 * std::f64::consts::PI / order as f64;
+        let s = libm::sin(angle);
+        let co = libm::cos(angle);
+        let mut total = 0.0;
+        let limit = cap * cap * n as f64;
+        for index in 0..n {
+            let image = rotate_trig(self.point(index), axis, s, co);
+            total += self.nearest_squared_wide(image);
+            if total > limit {
+                let partial = (total / n as f64).sqrt();
+                if partial >= cap * (1.0 + 1.0e-6) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Smallest squared distance, four coordinates at a time.
+    ///
+    /// Each lane keeps its own minimum, so the four lengths in a chunk do
+    /// not depend on each other and the compiler can autovectorise them.
+    /// Strict `<` makes the lane minimum the squared length the index scan
+    /// keeps. The tail joins the first lane.
+    #[inline(never)]
+    fn nearest_squared_wide(&self, image: [f64; 3]) -> f64 {
+        let mut lane0 = f64::INFINITY;
+        let mut lane1 = f64::INFINITY;
+        let mut lane2 = f64::INFINITY;
+        let mut lane3 = f64::INFINITY;
+        let mut xs = self.xs.chunks_exact(4);
+        let mut ys = self.ys.chunks_exact(4);
+        let mut zs = self.zs.chunks_exact(4);
+        for ((x, y), z) in xs.by_ref().zip(ys.by_ref()).zip(zs.by_ref()) {
+            let d0 = squared_offset(image, x[0], y[0], z[0]);
+            let d1 = squared_offset(image, x[1], y[1], z[1]);
+            let d2 = squared_offset(image, x[2], y[2], z[2]);
+            let d3 = squared_offset(image, x[3], y[3], z[3]);
+            if d0 < lane0 {
+                lane0 = d0;
+            }
+            if d1 < lane1 {
+                lane1 = d1;
+            }
+            if d2 < lane2 {
+                lane2 = d2;
+            }
+            if d3 < lane3 {
+                lane3 = d3;
+            }
+        }
+        for ((&x, &y), &z) in xs
+            .remainder()
+            .iter()
+            .zip(ys.remainder())
+            .zip(zs.remainder())
+        {
+            let distance = squared_offset(image, x, y, z);
+            if distance < lane0 {
+                lane0 = distance;
+            }
+        }
+        if lane1 < lane0 {
+            lane0 = lane1;
+        }
+        if lane2 < lane0 {
+            lane0 = lane2;
+        }
+        if lane3 < lane0 {
+            lane0 = lane3;
+        }
+        lane0
     }
 
     fn point(&self, index: usize) -> [f64; 3] {
@@ -2694,6 +2790,8 @@ mod shell_tests {
                 let chosen = cloud.nearest_index(image);
                 assert_eq!(chosen.0, scalar.0, "n={n}");
                 assert_eq!(chosen.1.to_bits(), scalar.1.to_bits(), "n={n}");
+                let wide = cloud.nearest_squared_wide(image);
+                assert_eq!(wide.to_bits(), scalar.1.to_bits(), "n={n}");
             }
         }
     }
@@ -2741,5 +2839,27 @@ mod shell_tests {
         assert_eq!(distance.to_bits(), self_d2.to_bits());
         let outside = [here[0] + 1.001, here[1], here[2]];
         assert!(image_on_self(here, outside, 4.0).is_none());
+    }
+
+    /// A turn the distances already reject never builds the neighbour list.
+    #[test]
+    fn a_miss_leaves_the_neighbour_list_unbuilt() {
+        let mut state = 0x1234_5678_u64;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (state >> 33) as f64 / (1u32 << 31) as f64
+        };
+        for n in [8usize, 17, 33] {
+            let mut coords = Vec::with_capacity(3 * n);
+            for _ in 0..3 * n {
+                coords.push(next() * 4.0 - 2.0);
+            }
+            let x = Array1::from(coords);
+            let cloud = Cloud::from_view(x.view(), n);
+            let axis = normalise([0.2, -0.4, 0.9]).expect("axis");
+            let got = cloud.symmetry_deviation(axis, 2, 0.05);
+            assert!(got.is_none(), "n={n} {got:?}");
+            assert!(cloud.gaps.borrow().is_none(), "n={n}");
+        }
     }
 }
