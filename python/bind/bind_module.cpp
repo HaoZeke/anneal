@@ -12,6 +12,7 @@
 #include <cstring>
 #include <map>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -20,6 +21,7 @@
 
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
+#include <nanobind/stl/optional.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/tuple.h>
 #include <nanobind/stl/vector.h>
@@ -28,11 +30,14 @@
 
 #include "pot_holder.hpp"
 
+#include "rgpot/D2Pot/D2CpmdPot.hpp"
+#include "rgpot/D2Pot/D2Pot.hpp"
 #include "rgpot/ExternalPot/ExternalPot.hpp"
 #include "rgpot/LennardJones/LJClusterPot.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
 #include "rgpot/Morse/MorsePot.hpp"
 #include "rgpot/StillingerWeber/SWSi.hpp"
+#include "rgpot/SumPot/SumPot.hpp"
 #include "rgpot/Tersoff/TersoffSiC.hpp"
 #include "rgpot/XcKernel/XcKernel.hpp"
 #include "rgpot/nlist/NeighbourList.hpp"
@@ -114,7 +119,6 @@ rgpot::D3Damping d3_damping(const std::string &name) {
 }
 #endif
 
-#ifdef RGPOT_HAS_EXPR
 struct ChildSpec {
   std::string name;
   std::string kind;
@@ -122,6 +126,7 @@ struct ChildSpec {
   std::string damping = "bj";
   bool atm = true;
   double charge = 0.0;
+  bool periodic = false; // d4: the box as a 3D lattice, with the stress.
   // LJ and Morse dict fields. Absent keys keep the C++ config defaults,
   // which differ (LJ cutoff is 15 A, Morse cutoff is 9.5 A).
   bool has_u0 = false;
@@ -138,6 +143,21 @@ struct ChildSpec {
   double a = 0.0;
   bool has_re = false;
   double re = 0.0;
+  // D2 dict fields; a functional names s6 and d from dftd3's table.
+  bool has_functional = false;
+  bool has_s6 = false;
+  double s6 = 0.0;
+  bool has_d = false;
+  double d = 0.0;
+  bool has_sr = false;
+  double sr = 0.0;
+  // d2cpmd dict fields, beside s6 and functional.
+  bool has_alpha = false;
+  double alpha = 0.0;
+  bool has_vdweps = false;
+  double vdweps = 0.0;
+  bool has_symmetry = false;
+  int symmetry = 0;
 };
 
 std::string child_kind(nb::handle spec) {
@@ -154,7 +174,7 @@ std::string child_kind(nb::handle spec) {
     }
   }
   throw nb::value_error(
-      "ExprPot child spec must be a kind string or a dict with 'kind'");
+      "a child spec must be a kind string or a dict with 'kind'");
 }
 
 ChildSpec child_spec_from(const std::string &name, nb::handle spec) {
@@ -164,7 +184,32 @@ ChildSpec child_spec_from(const std::string &name, nb::handle spec) {
   if (nb::isinstance<nb::dict>(spec)) {
     auto d = nb::cast<nb::dict>(spec);
     if (d.contains("functional")) {
+      out.has_functional = true;
       out.functional = nb::cast<std::string>(d["functional"]);
+    }
+    if (d.contains("s6")) {
+      out.has_s6 = true;
+      out.s6 = nb::cast<double>(d["s6"]);
+    }
+    if (d.contains("d")) {
+      out.has_d = true;
+      out.d = nb::cast<double>(d["d"]);
+    }
+    if (d.contains("sr")) {
+      out.has_sr = true;
+      out.sr = nb::cast<double>(d["sr"]);
+    }
+    if (d.contains("alpha")) {
+      out.has_alpha = true;
+      out.alpha = nb::cast<double>(d["alpha"]);
+    }
+    if (d.contains("vdweps")) {
+      out.has_vdweps = true;
+      out.vdweps = nb::cast<double>(d["vdweps"]);
+    }
+    if (d.contains("symmetry")) {
+      out.has_symmetry = true;
+      out.symmetry = nb::cast<int>(d["symmetry"]);
     }
     if (d.contains("atm")) {
       out.atm = nb::cast<bool>(d["atm"]);
@@ -174,6 +219,9 @@ ChildSpec child_spec_from(const std::string &name, nb::handle spec) {
     }
     if (d.contains("charge")) {
       out.charge = nb::cast<double>(d["charge"]);
+    }
+    if (d.contains("periodic")) {
+      out.periodic = nb::cast<bool>(d["periodic"]);
     }
     if (d.contains("u0")) {
       out.has_u0 = true;
@@ -243,6 +291,40 @@ std::unique_ptr<rgpot::PotentialBase> child_from_spec(const ChildSpec &spec) {
     }
     return std::make_unique<rgpot::MorsePot>(cfg);
   }
+  if (spec.kind == "d2") {
+    rgpot::D2Config cfg =
+        spec.has_functional ? rgpot::d2_config_for(spec.functional) : rgpot::D2Config{};
+    if (spec.has_s6) {
+      cfg.s6 = spec.s6;
+    }
+    if (spec.has_d) {
+      cfg.d = spec.d;
+    }
+    if (spec.has_sr) {
+      cfg.sr = spec.sr;
+    }
+    if (spec.has_cutoff) {
+      cfg.cutoff = spec.cutoff;
+    }
+    return std::make_unique<rgpot::D2Pot>(cfg);
+  }
+  if (spec.kind == "d2cpmd") {
+    rgpot::D2CpmdConfig cfg = spec.has_functional ? rgpot::d2_cpmd_config_for(spec.functional)
+                                                  : rgpot::D2CpmdConfig{};
+    if (spec.has_s6) {
+      cfg.s6 = spec.s6;
+    }
+    if (spec.has_alpha) {
+      cfg.alpha = spec.alpha;
+    }
+    if (spec.has_vdweps) {
+      cfg.vdweps = spec.vdweps;
+    }
+    if (spec.has_symmetry) {
+      cfg.symmetry = spec.symmetry;
+    }
+    return std::make_unique<rgpot::D2CpmdPot>(cfg);
+  }
 #ifdef RGPOT_HAS_DFTD3
   if (spec.kind == "d3") {
     rgpot::D3Config cfg;
@@ -258,12 +340,76 @@ std::unique_ptr<rgpot::PotentialBase> child_from_spec(const ChildSpec &spec) {
     cfg.functional = spec.functional;
     cfg.charge = spec.charge;
     cfg.atm = spec.atm;
+    cfg.periodic = spec.periodic;
     return std::make_unique<rgpot::D4Pot>(cfg);
   }
 #endif
-  throw std::invalid_argument("unknown ExprPot child kind: " + spec.kind);
+  throw std::invalid_argument("unknown child kind: " + spec.kind);
 }
 
+/// SumPot terms: a list of child specs, each with an optional name (term<i>
+/// by default), weight (1) and enabled (true).
+struct SumSpec {
+  rgpot::SumTerm term;
+  ChildSpec child;
+};
+
+std::vector<SumSpec> sum_specs_from(const nb::list &terms) {
+  std::vector<SumSpec> out;
+  out.reserve(terms.size());
+  for (std::size_t i = 0; i < terms.size(); ++i) {
+    nb::handle item = terms[i];
+    SumSpec spec;
+    spec.term.name = "term" + std::to_string(i);
+    if (nb::isinstance<nb::dict>(item)) {
+      auto d = nb::cast<nb::dict>(item);
+      if (d.contains("name")) {
+        spec.term.name = nb::cast<std::string>(d["name"]);
+      }
+      if (d.contains("weight")) {
+        spec.term.weight = nb::cast<double>(d["weight"]);
+      }
+      if (d.contains("enabled")) {
+        spec.term.enabled = nb::cast<bool>(d["enabled"]);
+      }
+    }
+    spec.child = child_spec_from(spec.term.name, item);
+    out.push_back(std::move(spec));
+  }
+  return out;
+}
+
+std::unique_ptr<rgpot::SumPot> sum_from_specs(const std::vector<SumSpec> &specs) {
+  auto sum = std::make_unique<rgpot::SumPot>();
+  for (const SumSpec &spec : specs) {
+    sum->add(spec.term,
+             spec.term.enabled ? child_from_spec(spec.child) : nullptr);
+  }
+  return sum;
+}
+
+nb::list sum_components(const rgpot::SumPot &pot) {
+  nb::list out;
+  for (const rgpot::SumComponent &c : pot.lastComponents()) {
+    nb::dict d;
+    d["name"] = c.name;
+    d["weight"] = c.weight;
+    d["enabled"] = c.enabled;
+    d["evaluated"] = c.evaluated;
+    d["energy"] = c.energy;
+    d["variance"] = c.variance;
+    d["forces"] = rgpot::pybind::vector_to_numpy(c.forces, {c.forces.size() / 3, 3});
+    if (c.has_stress) {
+      d["stress"] = rgpot::pybind::stress_to_numpy(c.stress.data());
+    } else {
+      d["stress"] = nb::none();
+    }
+    out.append(d);
+  }
+  return out;
+}
+
+#ifdef RGPOT_HAS_EXPR
 std::unique_ptr<rgpot::ExprPot>
 expr_from_specs(const std::string &expression,
                 const std::vector<ChildSpec> &specs) {
@@ -721,6 +867,75 @@ NB_MODULE(_core, m) {
   });
   rgpot::pybind::bind_calls(morse_cls);
 
+  auto d2_cls = nb::class_<PotHolder<rgpot::D2Pot>>(m, "D2Pot");
+  d2_cls.def(
+      "__init__",
+      [](PotHolder<rgpot::D2Pot> *self, double s6, double d, double sr, double cutoff,
+         std::optional<std::string> functional) {
+        rgpot::D2Config cfg =
+            functional ? rgpot::d2_config_for(*functional) : rgpot::D2Config{};
+        if (!functional) {
+          cfg.s6 = s6;
+          cfg.d = d;
+        }
+        cfg.sr = sr;
+        cfg.cutoff = cutoff;
+        new (self) PotHolder<rgpot::D2Pot>(
+            [cfg] { return std::make_unique<rgpot::D2Pot>(cfg); });
+      },
+      nb::arg("s6") = 1.2, nb::arg("d") = 20.0, nb::arg("sr") = 1.1,
+      nb::arg("cutoff") = rgpot::D2Config{}.cutoff, nb::arg("functional") = nb::none(),
+      "Grimme's DFT-D2 (J. Comput. Chem. 27, 1787 (2006)) as a lattice sum "
+      "over every periodic image within cutoff (Angstrom), in eV. The "
+      "defaults are BLYP. A functional takes s6 and d from dftd3's D2 table "
+      "in place of the arguments.");
+  d2_cls.def("config", [](const PotHolder<rgpot::D2Pot> &self) {
+    const rgpot::D2Config &cfg = self.primary().config();
+    nb::dict out;
+    out["s6"] = cfg.s6;
+    out["d"] = cfg.d;
+    out["sr"] = cfg.sr;
+    out["cutoff"] = cfg.cutoff;
+    return out;
+  });
+  rgpot::pybind::bind_calls(d2_cls);
+
+  auto d2cpmd_cls = nb::class_<PotHolder<rgpot::D2CpmdPot>>(m, "D2CpmdPot");
+  d2cpmd_cls.def(
+      "__init__",
+      [](PotHolder<rgpot::D2CpmdPot> *self, double s6, double alpha, double vdweps,
+         std::optional<std::string> functional, int symmetry) {
+        rgpot::D2CpmdConfig cfg =
+            functional ? rgpot::d2_cpmd_config_for(*functional) : rgpot::D2CpmdConfig{};
+        if (!functional) {
+          cfg.s6 = s6;
+        }
+        cfg.alpha = alpha;
+        cfg.vdweps = vdweps;
+        cfg.symmetry = symmetry;
+        new (self) PotHolder<rgpot::D2CpmdPot>(
+            [cfg] { return std::make_unique<rgpot::D2CpmdPot>(cfg); });
+      },
+      nb::arg("s6") = rgpot::D2CpmdConfig{}.s6, nb::arg("alpha") = rgpot::D2CpmdConfig{}.alpha,
+      nb::arg("vdweps") = rgpot::D2CpmdConfig{}.vdweps, nb::arg("functional") = nb::none(),
+      nb::arg("symmetry") = rgpot::D2CpmdConfig{}.symmetry,
+      "OpenCPMD's built-in empirical D2 (EMPIRICAL CORRECTION, ALL DFT-D2) "
+      "with its tables, damping, truncation and minimum image, in eV, to "
+      "subtract from a CPMD run that had it on. The defaults are CPMD's for "
+      "BLYP; a functional takes s6 from CPMD's set_s6. symmetry is the "
+      "run's SYMMETRY code, which picks the branch of CPMD's pbc3 (-1 reads "
+      "it from the box, which cannot name 12).");
+  d2cpmd_cls.def("config", [](const PotHolder<rgpot::D2CpmdPot> &self) {
+    const rgpot::D2CpmdConfig &cfg = self.primary().config();
+    nb::dict out;
+    out["s6"] = cfg.s6;
+    out["alpha"] = cfg.alpha;
+    out["vdweps"] = cfg.vdweps;
+    out["symmetry"] = cfg.symmetry;
+    return out;
+  });
+  rgpot::pybind::bind_calls(d2cpmd_cls);
+
 #ifdef RGPOT_HAS_EAM_TABLE
   auto eam_table =
       nb::class_<PotHolder<rgpot::EAMTablePot>>(m, "EAMTablePot");
@@ -856,19 +1071,53 @@ NB_MODULE(_core, m) {
   d4.def(
       "__init__",
       [](PotHolder<rgpot::D4Pot> *self, const std::string &functional,
-         double charge, bool atm) {
+         double charge, bool atm, bool periodic) {
         new (self) PotHolder<rgpot::D4Pot>([=] {
           rgpot::D4Config cfg;
           cfg.functional = functional;
           cfg.charge = charge;
           cfg.atm = atm;
+          cfg.periodic = periodic;
           return std::make_unique<rgpot::D4Pot>(cfg);
         });
       },
       nb::arg("functional") = "pbe", nb::arg("charge") = 0.0,
-      nb::arg("atm") = true);
+      nb::arg("atm") = true, nb::arg("periodic") = false,
+      "Grimme D4 through dftd4, in eV. functional is a dftd4 method key "
+      "whose rational damping parameters dftd4 supplies. periodic passes "
+      "the box as a 3D lattice and returns the stress; off, the box is "
+      "ignored.");
+  d4.def("config", [](const PotHolder<rgpot::D4Pot> &self) {
+    const rgpot::D4Config &cfg = self.primary().config();
+    nb::dict out;
+    out["functional"] = cfg.functional;
+    out["charge"] = cfg.charge;
+    out["atm"] = cfg.atm;
+    out["periodic"] = cfg.periodic;
+    return out;
+  });
   rgpot::pybind::bind_calls(d4);
 #endif
+
+  auto sum = nb::class_<PotHolder<rgpot::SumPot>>(m, "SumPot");
+  sum.def(
+      "__init__",
+      [](PotHolder<rgpot::SumPot> *self, const nb::list &terms) {
+        const std::vector<SumSpec> specs = sum_specs_from(terms);
+        new (self) PotHolder<rgpot::SumPot>([=] { return sum_from_specs(specs); });
+      },
+      nb::arg("terms"),
+      "Weighted sum of child potentials. terms is a list of kind strings or "
+      "dicts with kind, name (term<i>), weight (1.0, sign allowed), enabled "
+      "(True) and the kind's fields as for ExprPot. A disabled term is "
+      "never built or evaluated.");
+  sum.def(
+      "components",
+      [](PotHolder<rgpot::SumPot> &self) { return sum_components(self.slot()); },
+      "Per-term record of this thread's last call: name, weight, enabled, "
+      "evaluated, energy (eV, before the weight), forces (N, 3), variance and "
+      "stress (3, 3, or None).");
+  rgpot::pybind::bind_calls(sum);
 
 #ifdef RGPOT_HAS_EXPR
   auto expr = nb::class_<PotHolder<rgpot::ExprPot>>(m, "ExprPot");

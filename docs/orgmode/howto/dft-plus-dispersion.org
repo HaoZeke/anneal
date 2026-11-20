@@ -1,0 +1,146 @@
+#+TITLE: Add dispersion to a DFT engine
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Add dispersion to a DFT engine
+
+A DFT engine run without its own dispersion correction, such as cpmdc with BLYP,
+can take a dispersion term from rgpot instead.
+The composite potential, =rgpot::SumPot=, adds the engine and the dispersion
+term with a weight each, so the host sees one potential, and it records every
+term's energy and forces on each call.
+The same sum is reachable from C++, from Python, through =PotentialConfig= on
+=potserv=, and through =libcomposite_engine=.
+
+** Pick the dispersion term
+
+| term | builtin name | what it is |
+|------+--------------+------------|
+| =rgpot::D2Pot= | =d2= | Grimme's D2 (2006) summed over every periodic image within a cutoff; energy, forces and stress |
+| =rgpot::D2CpmdPot= | =d2cpmd= | OpenCPMD's built-in empirical D2, minimum image, to subtract from runs that had it on |
+| =rgpot::D4Pot= | =d4= | Grimme's D4 through dftd4, molecular or periodic with =periodic= set; needs =-Dwith_dftd4=true= |
+
+=D2Pot= takes BLYP's =s6=, =d= and =sr= by default, from the paper and the dftd3
+program; a functional name takes another set from dftd3's table.
+Its default 150 Angstrom cutoff converges the lattice sum to sqrt(eps) Ha per
+atom; [[file:../reference/cpp_potentials.org][the C++ reference]] lists the
+convergence test.
+=D4Pot= with =functional = "blyp"= uses dftd4's own BLYP damping parameters.
+
+Keep the engine's own dispersion off.
+For CPMD that is the default: the deck rgpot writes has no =VDW CORRECTION= line
+unless one is passed in =inputBlocks= or =inputSections=.
+
+** In process, from Python
+
+=rgpot.SumPot= takes a list of terms, each a kind string or a dict with =kind=,
+=name=, =weight=, =enabled= and that kind's fields.
+=components()= returns the record of the last call.
+
+#+attr_rgpot: run
+#+begin_src python
+import numpy as np
+import rgpot
+
+positions = np.array([[0.0, 0.0, 0.1178], [0.0, 0.75545, -0.47116],
+                      [0.0, -0.75545, -0.47116], [3.0, 0.2, 0.1]])
+numbers = np.array([8, 1, 1, 8], dtype=np.int32)
+box = np.diag([9.0, 9.5, 10.0])
+
+pot = rgpot.SumPot([
+    {"kind": "lj", "name": "host"},
+    {"kind": "d2", "name": "dispersion", "functional": "b-lyp"},
+])
+out = pot.evaluate(positions, numbers, box)
+host, dispersion = pot.components()
+assert dispersion["name"] == "dispersion" and dispersion["energy"] < 0.0
+assert abs(out["energy"] - host["energy"] - dispersion["energy"]) < 1e-12
+assert out["stress"] is not None
+#+end_src
+
+With dftd4 built, a periodic D4 term goes in the same way:
+
+#+attr_rgpot: run requires=has_dftd4
+#+begin_src python
+import numpy as np
+import rgpot
+
+positions = np.array([[0.0, 0.0, 0.1178], [0.0, 0.75545, -0.47116],
+                      [0.0, -0.75545, -0.47116], [3.0, 0.2, 0.1]])
+numbers = np.array([8, 1, 1, 8], dtype=np.int32)
+box = np.diag([40.0, 38.0, 39.0])
+
+pot = rgpot.SumPot([
+    {"kind": "lj", "name": "host"},
+    {"kind": "d4", "name": "d4", "functional": "blyp", "periodic": True},
+])
+out = pot.evaluate(positions, numbers, box)
+assert pot.components()[1]["stress"] is not None
+#+end_src
+
+** Through =PotentialConfig= on =potserv=
+
+=potserv <port> Composite= starts with an empty sum; =configure= with the
+=composite= arm builds it.
+Each =CompositeTerm= names its child with a =PotentialSpec=: the =cpmd= arm for
+the engine and a =builtin= with its =config= arm for the dispersion term.
+A disabled term is recorded and never built, so a sum can carry a term that is
+switched on later.
+
+#+attr_rgpot: syntax needs a running potserv Composite and libcpmdc
+#+begin_src python
+cfg = schema.PotentialConfig.new_message()
+terms = cfg.init("composite").init("terms", 2)
+
+terms[0].name = "blyp"
+cpmd = terms[0].init("pot").init("cpmd")
+cpmd.functional = "BLYP"
+cpmd.cutOffRy = 70.0
+
+terms[1].name = "d4"
+d4 = terms[1].init("pot").init("builtin")
+d4.name = "d4"
+params = d4.init("config").init("d4")
+params.functional = "blyp"
+params.periodic = True
+
+reply = await pot.configure(cfg)
+assert reply.ok, reply.message
+#+end_src
+
+=libcomposite_engine= takes the same =CompositeParams= through =rgpot_engine_create=, and =rgpot_engine_last_components=
+returns the per-term record; see
+[[file:../reference/engine_abi.org][the engine ABI]].
+Set =RGPOT_SUM_LOG= to any value but empty or =0= to have each call log every
+term's weight, energy and largest force to standard error; =SumPot::setLogSink=
+sends the same lines to a host's own logger.
+
+** Correct existing CPMD D2 results
+
+Data computed with CPMD's own =EMPIRICAL CORRECTION= / =ALL DFT-D2= carries
+CPMD's minimum-image D2, whose forces jump when a pair crosses half the cell.
+=d2cpmd= reproduces that term to machine precision, so adding =d2= minus
+=d2cpmd= to the stored energies and forces puts the periodic lattice sum in its
+place.
+A sum of the two with weights 1 and -1 gives that correction in one call; in a
+live run the same two terms go beside the =cpmd= term.
+
+#+attr_rgpot: run
+#+begin_src python
+import numpy as np
+import rgpot
+
+positions = np.array([[0.0, 0.0, 0.1178], [0.0, 0.75545, -0.47116],
+                      [0.0, -0.75545, -0.47116], [3.0, 0.2, 0.1]])
+numbers = np.array([8, 1, 1, 8], dtype=np.int32)
+box = np.diag([9.0, 9.5, 10.0])
+
+correction = rgpot.SumPot([
+    {"kind": "d2cpmd", "name": "undo cpmd d2", "weight": -1.0},
+    {"kind": "d2", "name": "d2"},
+])
+out = correction.evaluate(positions, numbers, box)
+d2 = rgpot.D2Pot().evaluate(positions, numbers, box)["energy"]
+cpmd = rgpot.D2CpmdPot().evaluate(positions, numbers, box)["energy"]
+assert abs(out["energy"] - (d2 - cpmd)) < 1e-12
+#+end_src

@@ -42,7 +42,7 @@ layout revision; an engine without it counts as minor 0, layout 1.
 A host that only calls =rgpot_engine_abi_version= keeps working across a minor
 bump.
 =rgpot_engine_abi_compatible= returns nonzero only for an equal major, an equal
-layout revision, and an engine minor at least the host's.
+layout revision, and an engine minor no newer than the host's.
 A null stamp returns 0.
 
 ** Charge and spin

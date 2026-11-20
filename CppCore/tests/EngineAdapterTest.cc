@@ -41,6 +41,7 @@ struct Stub {
                      double *, double *, double *, const double *,
                      rgpot_engine_coord_transform, void *) = nullptr;
   RgpotEngineAbiStamp (*stamp)() = nullptr;
+  int (*compatible)(const RgpotEngineAbiStamp *) = nullptr;
   int (*caps)(const RgpotEnginePot *, RgpotEngineCaps *) = nullptr;
   size_t (*last_error)(const RgpotEnginePot *, char *, size_t) = nullptr;
   size_t (*digest)(const RgpotEnginePot *, char *, size_t) = nullptr;
@@ -48,6 +49,10 @@ struct Stub {
   int (*set_charge_spin)(RgpotEnginePot *, int, int) = nullptr;
   int (*select_orbitals)(RgpotEnginePot *, long long) = nullptr;
   int (*copy_orbitals)(RgpotEnginePot *, long long, long long) = nullptr;
+  long (*last_components)(const RgpotEnginePot *, RgpotEngineComponent *,
+                          double *, long) = nullptr;
+  size_t (*component_name)(const RgpotEnginePot *, long, char *,
+                           size_t) = nullptr;
   int (*max_concurrent)() = nullptr;
   void (*reset)() = nullptr;
   int (*charge)() = nullptr;
@@ -77,6 +82,8 @@ Stub &stub() {
     out.hvp = sym<decltype(out.hvp)>(h, "rgpot_engine_hvp");
     out.force_batch = sym<decltype(out.force_batch)>(h, "rgpot_engine_force_batch");
     out.stamp = sym<decltype(out.stamp)>(h, "rgpot_engine_abi_stamp");
+    out.compatible =
+        sym<decltype(out.compatible)>(h, "rgpot_engine_abi_compatible");
     out.caps = sym<decltype(out.caps)>(h, "rgpot_engine_caps");
     out.last_error = sym<decltype(out.last_error)>(h, "rgpot_engine_last_error");
     out.digest = sym<decltype(out.digest)>(h, "rgpot_engine_model_digest");
@@ -88,6 +95,10 @@ Stub &stub() {
         sym<decltype(out.select_orbitals)>(h, "rgpot_engine_select_orbitals");
     out.copy_orbitals =
         sym<decltype(out.copy_orbitals)>(h, "rgpot_engine_copy_orbitals");
+    out.last_components = sym<decltype(out.last_components)>(
+        h, "rgpot_engine_last_components");
+    out.component_name =
+        sym<decltype(out.component_name)>(h, "rgpot_engine_component_name");
     out.max_concurrent = sym<int (*)()>(h, "stub_max_concurrent");
     out.reset = sym<void (*)()>(h, "stub_reset");
     out.charge = sym<int (*)()>(h, "stub_charge");
@@ -157,7 +168,24 @@ TEST_CASE("the table identifies the engine", "[engine][adapter]") {
   REQUIRE(stamp.abi_major == RGPOT_ENGINE_ABI_VERSION);
   REQUIRE(stamp.abi_minor == RGPOT_ENGINE_ABI_MINOR);
   REQUIRE(stamp.layout_revision == RGPOT_ENGINE_ABI_LAYOUT_REVISION);
-  REQUIRE(RGPOT_ENGINE_ABI_MINOR >= 3);
+  REQUIRE(RGPOT_ENGINE_ABI_MINOR >= 5);
+}
+
+TEST_CASE("the ABI check serves equal and older plugin minors",
+          "[engine][adapter][abi]") {
+  Stub &s = stub();
+  const RgpotEngineAbiStamp plugin = s.stamp();
+  RgpotEngineAbiStamp host = plugin;
+  REQUIRE(s.compatible(&host) == 1);
+
+  // The fixed plugin is one minor older than this host.
+  ++host.abi_minor;
+  REQUIRE(s.compatible(&host) == 1);
+
+  // The fixed plugin is one minor newer than this host.
+  host = plugin;
+  --host.abi_minor;
+  REQUIRE(s.compatible(&host) == 0);
 }
 
 TEST_CASE("create refuses a missing or ragged configuration",
@@ -407,6 +435,26 @@ TEST_CASE("orbital hooks report success and adapter errors",
   REQUIRE(error_of(s, pot).find("failed") != std::string::npos);
   REQUIRE(s.copy_orbitals(pot, 7, 8) == 0);
   REQUIRE(error_of(s, pot).empty());
+  s.destroy(pot);
+}
+
+TEST_CASE("a backend that is not a sum has no components",
+          "[engine][adapter]") {
+  Stub &s = stub();
+  RgpotEnginePot *pot = make(s, 0);
+  const double pos[6] = {1, 2, 3, 4, 5, 6};
+  double forces[6], energy = 0.0;
+  REQUIRE(s.force(pot, 2, pos, kZ.data(), forces, &energy, nullptr,
+                  kBox.data(), nullptr, nullptr) == 0);
+  RgpotEngineComponent rec[2];
+  double term_forces[12];
+  REQUIRE(s.last_components(pot, nullptr, nullptr, 0) == 0);
+  REQUIRE(s.last_components(pot, rec, term_forces, 2) == 0);
+  REQUIRE(s.last_components(nullptr, rec, term_forces, 2) == -1);
+  char name[8] = {'x', 0};
+  REQUIRE(s.component_name(pot, 0, name, sizeof(name)) == 0);
+  REQUIRE(name[0] == '\0');
+  REQUIRE(s.component_name(nullptr, 0, name, sizeof(name)) == 0);
   s.destroy(pot);
 }
 

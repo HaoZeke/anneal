@@ -1,0 +1,11 @@
+diff --git a/Potentials.capnp b/Potentials.capnp
+--- a/Potentials.capnp
++++ b/Potentials.capnp
+@@ -2684,6 +2684,7 @@
+   alpha @1 :Float64 = 20.0;  # Damping exponent.
+   vdweps @2 :Float64 = 0.01; # Pairs with |alpha (r/R0 - 1)| >= 1/vdweps drop.
+   functional @3 :Text;       # CPMD functional name; empty keeps s6.
++  symmetry @4 :Int32 = -1;   # CPMD SYMMETRY code (ibrav); -1 reads it from the box.
+ }
+ 
+ # @struct PotentialConfig

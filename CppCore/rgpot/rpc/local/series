@@ -18,3 +18,25 @@ uma-cache-dir.diff
 # hessian-vector.diff: Capabilities.Operation.hessianVector @10 and
 # Potential.calculateHvp @14.
 hessian-vector.diff
+#
+# composite.diff: PotentialConfig.composite @18 and the CompositeParams and
+# CompositeTerm structs, a weighted sum of PotentialSpec children that
+# rgpot::SumPot evaluates.
+composite.diff
+#
+# d2.diff: PotentialConfig.d2 @19 and the D2Params struct, the Grimme
+# 2006 lattice sum rgpot::D2Pot evaluates.
+d2.diff
+#
+# d2cpmd.diff: PotentialConfig.d2cpmd @20 and the D2CpmdParams struct,
+# the minimum-image empirical D2 of OpenCPMD that rgpot::D2CpmdPot
+# reproduces.
+d2cpmd.diff
+#
+# d4-periodic.diff: D4Params.periodic @3, which passes the box to dftd4
+# as a 3D lattice so rgpot::D4Pot returns the stress.
+d4-periodic.diff
+#
+# d2cpmd-symmetry.diff: D2CpmdParams.symmetry @4, the CPMD SYMMETRY code
+# that picks the branch of pbc3 for a box that does not name it (12).
+d2cpmd-symmetry.diff

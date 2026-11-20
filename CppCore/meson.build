@@ -200,6 +200,8 @@ if _mpi_dep.found()
 endif
 _rgpot_srcs += files('rgpot/PotHelpers.cc')
 _rgpot_srcs += files('rgpot/units.cc')
+_rgpot_srcs += files('rgpot/SumPot/SumPot.cc')
+_rgpot_srcs += files('rgpot/D2Pot/D2CpmdPot.cc', 'rgpot/D2Pot/D2Pot.cc')
 _rgpot_srcs += files('rgpot/abi/CxxLayout.cc')
 _rgpot_srcs += files(
     'rgpot/simd/dispatch.cc',
@@ -609,6 +611,26 @@ if not get_option('with_rpc_client_only')
             dependencies: _engine_deps,
             link_with: [rgpot_core],
             link_whole: _classical_whole,
+            cpp_args: _engine_args,
+            include_directories: _incdirs,
+            gnu_symbol_visibility: 'default',
+            install: not meson.is_subproject(),
+        )
+        _composite_whole = [lennard_jones, morse, zbl, cpmdpot]
+        if has_dftd4
+            _composite_whole += [d4pot]
+        endif
+        composite_engine = shared_library(
+            'composite_engine',
+            [_engine_common, files('rgpot/engine/CompositeEngine.cc')],
+            dependencies: _engine_deps + [cpmd_dl_dep],
+            link_with: [
+                rgpot_core,
+                rgpot_halfshell,
+                rgpot_minimage,
+                rgpot_exact_fma,
+            ],
+            link_whole: _composite_whole,
             cpp_args: _engine_args,
             include_directories: _incdirs,
             gnu_symbol_visibility: 'default',
@@ -1522,6 +1544,22 @@ if get_option('with_tests')
             kwargs: _rt_kw['CPMDPotGradientStressTest'],
         )
         test(
+            'CompositeCpmdDispersionTest',
+            executable(
+                'composite_cpmd_dispersion_test',
+                sources: ['tests/CompositeCpmdDispersionTest.cc'],
+                dependencies: test_deps + [ptlrpc_dep],
+                include_directories: _incdirs + ['.'],
+                cpp_args: test_args,
+                link_with: _linkto,
+                link_language: 'cpp',
+                build_rpath: _metatomic_build_rpath,
+            ),
+            env: cpmdc_gradient_env,
+            depends: cpmdc_gradient_engine,
+            kwargs: _rt_kw['CompositeCpmdDispersionTest'],
+        )
+        test(
             'CPMDPotMessageAbiTest',
             executable(
                 'cpmd_pot_message_abi_test',
@@ -2396,15 +2434,20 @@ if get_option('with_tests')
         endif
         if _rpc_stack and host_system != 'windows'
             engine_table_env = environment()
-            engine_table_expect = ['CLASSICAL', 'MOPAC', 'NWCHEM']
+            engine_table_expect = ['CLASSICAL', 'COMPOSITE', 'MOPAC', 'NWCHEM']
             engine_table_depends = [
                 classical_engine,
+                composite_engine,
                 mopac_engine,
                 nwchem_engine,
             ]
             engine_table_env.set(
                 'RGPOT_ENGINE_CLASSICAL',
                 classical_engine.full_path(),
+            )
+            engine_table_env.set(
+                'RGPOT_ENGINE_COMPOSITE',
+                composite_engine.full_path(),
             )
             engine_table_env.set('RGPOT_ENGINE_MOPAC', mopac_engine.full_path())
             engine_table_env.set(

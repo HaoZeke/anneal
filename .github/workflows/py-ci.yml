@@ -113,7 +113,7 @@ jobs:
             -Dwith_tests=false \
             -Dwith_examples=false \
             -Dwith_dftd3=false \
-            -Dwith_dftd4=false \
+            -Dwith_dftd4=true \
             -Dwith_expr=false \
             -Dwith_xckernel=false \
             -Dwith_cache=false \
@@ -125,6 +125,8 @@ jobs:
           ln -sfn /tmp/rgpot-ci-build/python/_core*.so python/rgpot/
           export LD_LIBRARY_PATH="/tmp/rgpot-ci-build/CppCore${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           /tmp/rgpot-ci/bin/python -m pytest -q tests/python \
+            tests/test_rgpot_d2.py tests/test_rgpot_d4.py \
+            tests/test_rgpot_sumpot.py \
             --timeout=180 -o faulthandler_timeout=120
 
   wheels:

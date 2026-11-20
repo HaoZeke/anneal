@@ -88,6 +88,7 @@ meson compile -C bbdir && meson test -C bbdir
    howto/uma-export
    howto/embedding
    howto/exprpot
+   howto/dft-plus-dispersion
    howto/ipi
    howto/integration
    howto/add-potential

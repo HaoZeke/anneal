@@ -48,6 +48,9 @@ STRUCTS = (
     ("CppCore/rgpot/Morse/MorsePot.hpp", "MorseConfig"),
     ("CppCore/rgpot/ZBL/ZBLPot.hpp", "ZBLConfig"),
     ("CppCore/rgpot/SuttonChen/SuttonChenPot.hpp", "SuttonChenConfig"),
+    ("CppCore/rgpot/D2Pot/D2Pot.hpp", "D2Config"),
+    ("CppCore/rgpot/D2Pot/D2CpmdPot.hpp", "D2CpmdConfig"),
+    ("CppCore/rgpot/D4Pot/D4Config.hpp", "D4Config"),
 )
 
 # Classes whose sizeof the stamp folds. Only instance data members are
@@ -60,6 +63,9 @@ CLASSES = (
     ("CppCore/rgpot/Morse/MorsePot.hpp", "MorsePot"),
     ("CppCore/rgpot/ZBL/ZBLPot.hpp", "ZBLPot"),
     ("CppCore/rgpot/SuttonChen/SuttonChenPot.hpp", "SuttonChenPot"),
+    ("CppCore/rgpot/SumPot/SumPot.hpp", "SumPot"),
+    ("CppCore/rgpot/D2Pot/D2Pot.hpp", "D2Pot"),
+    ("CppCore/rgpot/D2Pot/D2CpmdPot.hpp", "D2CpmdPot"),
     ("CppCore/rgpot/nlist/Neighbours.hpp", "Neighbours"),
     ("CppCore/rgpot/simd/from_cache.hpp", "CachedPairs"),
 )

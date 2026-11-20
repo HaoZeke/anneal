@@ -41,6 +41,11 @@
 #include "rgpot/Potential.hpp"
 #include "rgpot/SuttonChen/SuttonChenPot.hpp"
 #include "rgpot/ZBL/ZBLPot.hpp"
+#include "rgpot/D2Pot/D2Pot.hpp"
+#include "rgpot/D2Pot/D2CpmdPot.hpp"
+#include "rgpot/D4Pot/D4Config.hpp"
+#include "rgpot/LongRange/SumPot.hpp"
+#include "rgpot/SumPot/SumPot.hpp"
 #include "rgpot/pot_caps.hpp"
 #include "rgpot/pot_types.hpp"
 
@@ -183,7 +188,15 @@ inline constexpr std::uint32_t kCxxLayoutRevision = 1;
 /// open Lennard-Jones cluster a neighbour member. The pair term runs on
 /// the shared walk, so CachedPairs is no longer part of those objects.
 /// 8 stamps SuttonChenConfig, PotType::SuttonChen and SuttonChenPot.
-inline constexpr std::uint32_t kCxxSoversion = 8;
+/// 9 stamps `SumPot`, `lr::SumPot` and `PotType::LrSum`. `lr::SumPot`
+/// derives from `SumPot` now: it is 120 bytes where it was 56, and its
+/// old constructor and `add` symbols are gone.
+/// It also stamps `D2Config`, `D2Pot` and `PotType::D2`.
+/// It also stamps `D2CpmdConfig`, `D2CpmdPot` and `PotType::D2Cpmd`.
+/// `D4Config` is stamped too, from a header of its own. Its new `periodic`
+/// field fits the padding after `atm`, so only the field offsets show it.
+/// `D2CpmdConfig` gains `symmetry`.
+inline constexpr std::uint32_t kCxxSoversion = 9;
 
 /// One recorded no-cache layout hash. `tag` is `kCxxPlatformTag`.
 struct CxxSoversionEntry {
@@ -196,7 +209,7 @@ struct CxxSoversionEntry {
 /// platform still compiles. How to update the table:
 /// docs/orgmode/contributing/developer/abi-bump.org.
 inline constexpr std::array<CxxSoversionEntry, 1> kCxxSoversionTable{{
-    {"linux-x86_64-libstdc++-lp64", 0x0a33f3aa4b4e5162ull},
+    {"linux-x86_64-libstdc++-lp64", 0xf7ebab6b64626bf2ull},
 }};
 
 /// This translation unit's platform tag (`os-arch-stdlib-datamodel`).
@@ -341,6 +354,21 @@ constexpr std::uint64_t compute_hash() {
   f.add(offsetof(SuttonChenConfig, cutoff));
   f.add(offsetof(SuttonChenConfig, periodic));
   f.add(offsetof(SuttonChenConfig, stress));
+  f.type<D2Config>();
+  f.add(offsetof(D2Config, s6));
+  f.add(offsetof(D2Config, d));
+  f.add(offsetof(D2Config, sr));
+  f.add(offsetof(D2Config, cutoff));
+  f.type<D2CpmdConfig>();
+  f.add(offsetof(D2CpmdConfig, s6));
+  f.add(offsetof(D2CpmdConfig, alpha));
+  f.add(offsetof(D2CpmdConfig, vdweps));
+  f.add(offsetof(D2CpmdConfig, symmetry));
+  f.type<D4Config>();
+  f.add(offsetof(D4Config, functional));
+  f.add(offsetof(D4Config, charge));
+  f.add(offsetof(D4Config, atm));
+  f.add(offsetof(D4Config, periodic));
 
   // Enumerations: underlying width and the values consumers switch on.
   f.type<Reentrancy>();
@@ -355,6 +383,7 @@ constexpr std::uint64_t compute_hash() {
   f.add(static_cast<std::uint64_t>(PotType::LJCluster));
   f.add(static_cast<std::uint64_t>(PotType::ZBL));
   f.add(static_cast<std::uint64_t>(PotType::SuttonChen));
+  f.add(static_cast<std::uint64_t>(PotType::LrSum));
   f.add(static_cast<std::uint64_t>(PotType::Eckart));
   f.add(static_cast<std::uint64_t>(PotType::MullerBrown));
   f.add(static_cast<std::uint64_t>(PotType::ModifiedMullerBrown));
@@ -364,6 +393,8 @@ constexpr std::uint64_t compute_hash() {
   f.add(static_cast<std::uint64_t>(PotType::DoubleWell));
   f.add(static_cast<std::uint64_t>(PotType::CoupledProtonWell));
   f.add(static_cast<std::uint64_t>(PotType::CBE));
+  f.add(static_cast<std::uint64_t>(PotType::D2));
+  f.add(static_cast<std::uint64_t>(PotType::D2Cpmd));
 
   // Polymorphic classes: size, alignment and the virtual-function counts.
   // offsetof is not defined for them.
@@ -377,6 +408,10 @@ constexpr std::uint64_t compute_hash() {
   f.type<MorsePot>();
   f.type<ZBLPot>();
   f.type<SuttonChenPot>();
+  f.type<SumPot>();
+  f.type<lr::SumPot>();
+  f.type<D2Pot>();
+  f.type<D2CpmdPot>();
 #ifdef RGPOT_HAS_CACHE
   f.type<cache::EvalCounts>();
   f.add(offsetof(cache::EvalCounts, computed));

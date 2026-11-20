@@ -8,6 +8,11 @@
 #include <memory>
 #include <random>
 
+#include "rgpot/D2Pot/D2CpmdPot.hpp"
+#include "rgpot/D2Pot/D2Pot.hpp"
+#ifdef RGPOT_HAS_DFTD4
+#include "rgpot/D4Pot/D4Pot.hpp"
+#endif
 #include "rgpot/LennardJones/LJPot.hpp"
 #include "rgpot/PotentialCache.hpp"
 
@@ -452,4 +457,78 @@ TEST_CASE("Cache counters split computed from served evaluations",
     pot.setCache(nullptr);
   }
   REQUIRE(rocksdb::DestroyDB(path, rocksdb::Options()).ok());
+}
+
+namespace {
+template <typename Pot> void checkCachedNullBox(Pot &pot) {
+  const double pos[] = {
+      0.00000000, 0.00000000,  0.11779000,  // O
+      0.00000000, 0.75545000,  -0.47116000, // H
+      0.00000000, -0.75545000, -0.47116000  // H
+  };
+  const int z[] = {8, 1, 1};
+  const double zero_box[9] = {};
+  const double cell[9] = {8.0, 0.0, 0.0, 0.0, 8.0, 0.0, 0.0, 0.0, 8.0};
+
+  auto eval = [&](const double *box) {
+    std::array<double, 9> f{};
+    const rgpot::ForceInput in{3, pos, z, box};
+    rgpot::ForceOut out{};
+    out.F = f.data();
+    pot.forceBatch(rgpot::ForceBatch{.nSystems = 1, .in = &in, .out = &out});
+    return std::make_tuple(out.energy, f, out.has_stress != 0);
+  };
+
+  const auto uncached = eval(nullptr);
+  REQUIRE_FALSE(std::get<2>(uncached));
+
+  const std::string path = resultCachePath();
+  {
+    rgpot::cache::PotentialCache cache(path);
+    pot.setCache(&cache);
+
+    const auto cold = eval(nullptr);
+    REQUIRE(cache.counts().computed == 1);
+    REQUIRE(cache.counts().served == 0);
+    REQUIRE(std::get<0>(cold) == std::get<0>(uncached));
+    REQUIRE(std::get<1>(cold) == std::get<1>(uncached));
+    REQUIRE_FALSE(std::get<2>(cold));
+
+    const auto warm = eval(nullptr);
+    REQUIRE(cache.counts().computed == 1);
+    REQUIRE(cache.counts().served == 1);
+    REQUIRE(std::get<0>(warm) == std::get<0>(uncached));
+    REQUIRE(std::get<1>(warm) == std::get<1>(uncached));
+    REQUIRE_FALSE(std::get<2>(warm));
+
+    // A null box is distinct in the key from any real 9-double box,
+    // including an all-zero box and a periodic cell.
+    const auto with_zero = eval(zero_box);
+    REQUIRE(cache.counts().computed == 2);
+    REQUIRE(cache.counts().served == 1);
+    REQUIRE(std::get<0>(with_zero) == std::get<0>(uncached));
+    REQUIRE(std::get<1>(with_zero) == std::get<1>(uncached));
+
+    (void)eval(cell);
+    REQUIRE(cache.counts().computed == 3);
+    REQUIRE(cache.counts().served == 1);
+
+    pot.setCache(nullptr);
+  }
+  REQUIRE(rocksdb::DestroyDB(path, rocksdb::Options()).ok());
+}
+} // namespace
+
+TEST_CASE("Molecular dispersion forceBatch caches a null box without colliding with a real box",
+          "[Potential][cache][d2][d2cpmd][d4]") {
+  rgpot::D2Pot d2;
+  checkCachedNullBox(d2);
+
+  rgpot::D2CpmdPot d2_cpmd;
+  checkCachedNullBox(d2_cpmd);
+
+#ifdef RGPOT_HAS_DFTD4
+  rgpot::D4Pot d4;
+  checkCachedNullBox(d4);
+#endif
 }

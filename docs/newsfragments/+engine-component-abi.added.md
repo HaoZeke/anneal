@@ -1,0 +1,1 @@
+The generic engine C ABI adds `RgpotEngineComponent`, `rgpot_engine_last_components` and `rgpot_engine_component_name` for the per-term record of a composite engine, and bumps `RGPOT_ENGINE_ABI_MINOR` to 5.

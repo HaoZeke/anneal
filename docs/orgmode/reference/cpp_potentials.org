@@ -222,10 +222,47 @@ class.
   =std::invalid_argument= for an empty =functional=, and =std::runtime_error=
   when s-dftd3 cannot load damping parameters for it.
 
+*** =rgpot::D2Config=
+
+- Inputs :: =s6= (global scaling, default 1.2), =d= (steepness of the damping,
+  default 20.0), =sr= (scale on the tabulated R0, default 1.1), =cutoff= (pair
+  cutoff over all periodic images, default 150.0).
+  The defaults are BLYP; =rgpot::d2_config_for= gives the set of another
+  functional.
+- Units :: =cutoff= in Angstrom; the others are dimensionless.
+- Outputs :: the parameters of =rgpot::D2Pot=.
+- Errors :: the constructor throws =std::invalid_argument= unless =cutoff= is
+  positive and finite, =sr= is positive and finite and =s6= and =d= are finite.
+
+*** =rgpot::D2CpmdConfig=
+
+- Inputs :: =s6= (CPMD's =S6GRIMME=, default 1.2), =alpha= (the damping
+  exponent, default 20.0), =vdweps= (default 0.01; a pair with
+  \(\lvert\alpha(r/R_r-1)\rvert\ge\frac{1}{\mathrm{vdweps}}\) is dropped).
+  The defaults are CPMD's for BLYP; =rgpot::d2_cpmd_config_for= gives the =s6=
+  of another functional.
+  =symmetry= is the =SYMMETRY= code of the CPMD run, which picks the branch of
+  =pbc3=: 1 and 8 fold per axis, 2 is face centred cubic, 4 and 14 with alpha
+  and beta at 90 degrees take the shear branch, 12 the monoclinic branch, and 3,
+  5, 6 and 7 the nearest integer image.
+  The default, =kCpmdInferSymmetry= (-1), reads the branch from the box, which
+  has the shape of 14 for a cell of 12 and cannot name it.
+- Units :: none.
+- Outputs :: the parameters of =rgpot::D2CpmdPot=.
+- Errors :: the constructor throws =std::invalid_argument= unless =s6= and
+  =alpha= are finite, =vdweps= is positive and finite and =symmetry= is -1, 1 to
+  8, 12 or 14 (9, 10, 11 and 13 are codes =latgen= does not build).
+  A call throws =std::invalid_argument= when the box of a periodic system does
+  not have the shape of the code (a cube for 1, orthogonal vectors for 8,
+  =latgen='s face centred vectors for 2, the hexagonal vectors for 4, a1 along x
+  and a2 in the xy plane for 12).
+
 *** =rgpot::D4Config=
 
-- Inputs :: =functional= (the dftd4 method key, default ="pbe"=), =charge=
-  (total charge, default 0.0), =atm= (the many-body term, default true).
+- Inputs :: =functional= (the dftd4 method key, default ="pbe"=, ="blyp"= for
+  BLYP), =charge= (total charge, default 0.0), =atm= (the many-body term,
+  default true), =periodic= (pass the box as a lattice periodic along all three
+  vectors, default false).
 - Units :: =charge= in elementary charges.
 - Outputs :: the parameters of =rgpot::D4Pot=.
 - Errors :: the constructor throws
@@ -297,11 +334,12 @@ A sentence after the fields names a class whose behaviour differs in detail.
 [[nodiscard]] uint64_t paramsKey() const noexcept override;
 #+end_src
 
-- Applies to :: rgpot::EAMPot, rgpot::EAMTablePot, rgpot::EMTPot,
-  rgpot::ExprPot, rgpot::LJClusterPot, rgpot::LJPot, rgpot::MorsePot,
-  rgpot::SPCEPot, rgpot::StillingerWeberSi, rgpot::SuttonChenPot,
-  rgpot::TIP4PPot, rgpot::TIP4PPtPot, rgpot::TersoffSiC, rgpot::ZBLPot,
-  rgpot::lr::CoulombPot, rgpot::lr::DispersionPot, rgpot::lr::NlhPot
+- Applies to :: rgpot::D2CpmdPot, rgpot::D2Pot, rgpot::EAMPot,
+  rgpot::EAMTablePot, rgpot::EMTPot, rgpot::ExprPot, rgpot::LJClusterPot,
+  rgpot::LJPot, rgpot::MorsePot, rgpot::SPCEPot, rgpot::StillingerWeberSi,
+  rgpot::SuttonChenPot, rgpot::TIP4PPot, rgpot::TIP4PPtPot, rgpot::TersoffSiC,
+  rgpot::ZBLPot, rgpot::lr::CoulombPot, rgpot::lr::DispersionPot,
+  rgpot::lr::NlhPot
 - Inputs :: none.
 - Units :: none.
 - Outputs :: a 64-bit FNV-1a hash of the parameters and a kernel version,
@@ -1333,14 +1371,172 @@ explicit TIP4PPtPot(const WaterConfig &config);
   numbers, when the hydrogen pairs run past the last atom, and when the atom
   count is smaller than the water atoms.
 
+** Grimme D2
+
+=rgpot::D2Pot= is Grimme's DFT-D2
+[[https://doi.org/10.1002/jcc.20495][(J. Comput. Chem. 27, 1787 (2006))]]
+written in rgpot, with no library to link:
+
+\[
+E = -s_6 \sum_{i<j} \sum_{\mathbf T} \frac{C_6^{ij}}{r_{ij,\mathbf T}^6}
+\frac{1}{1 + e^{-d (r_{ij,\mathbf T} / (s_R R_0^{ij}) - 1)}},
+\quad C_6^{ij} = \sqrt{C_6^i C_6^j},\ R_0^{ij} = R_0^i + R_0^j .
+\]
+
+The C6 and R0 tables, the unit conversions and the per-functional s6 and d are
+those of the reference dftd3 program (V3.1, =loadoldpar= and =setfuncpar=),
+which reproduces the paper for H to Xe and extends it to Rn.
+In a cell, \(\mathbf T\) runs over every lattice vector that brings a pair
+within =cutoff=, including the images of an atom with itself at weight one half,
+so the sum is the periodic energy of any cell, sheared or not.
+An all-zero box sums the pairs of the molecule.
+The force call writes the stress, \(\sigma = V^{-1}\,\partial
+E/\partial \varepsilon\) in eV/Angstrom^3.
+
+The pair energy falls as \(r^{-6}\), so the lattice sum beyond \(r_c\) falls as
+\(r_c^{-3}\).
+The default cutoff of 150 Angstrom is where doubling it moves the energy of
+liquid water (the 24-atom cubic and sheared boxes of =D2PotTest=) by less than
+\(\sqrt{\epsilon}\) Hartree per atom, the gradient threshold of the s-dftd3 and
+dftd4 tests:
+
+The images come from the neighbour walk (=nlist::Walk=), which streams every
+image within the cutoff, so no image list is held.
+A cutoff that reaches more than =d2::detail::kMaxImagesPerAxis= (256) lattice
+images along a cell vector throws =std::invalid_argument=: that many images
+along each of three vectors is already of the order of 10^8 per atom pair, and a
+count past the range of an =int= would otherwise wrap.
+| cutoff (Angstrom) | \(\lvert\Delta E\rvert\) per atom (Ha) | max \(\lvert\Delta F\rvert\) (Ha/bohr) |
+|-------------------+---------------------------------+-------------------------------|
+|              37.5 | 5.1e-7                          | 2.7e-10                       |
+|                75 | 6.3e-8                          | 2.0e-12                       |
+|               150 | 7.0e-9                          | 4.3e-14                       |
+
+The differences are against a 300 Angstrom sum.
+The forces converge far sooner than the energy, so a relaxation or dynamics that
+only needs forces can pass a smaller =cutoff=. dftd3's own =-pbc= default
+(\(\sqrt{9000}\) bohr, about 50 Angstrom) leaves an energy error near 2e-7 Ha
+per atom.
+
+*** =rgpot::D2Pot=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+explicit D2Pot(D2Config cfg = {});
+#+end_src
+
+- Inputs :: a =rgpot::D2Config=.
+- Units :: energy in eV, forces in eV/Angstrom, stress in eV/Angstrom^3.
+- Outputs :: the D2 energy, forces and stress, periodic or molecular.
+- Errors :: the errors of =rgpot::D2Config=.
+  The force call throws =std::invalid_argument= when the atomic numbers are
+  missing or one is outside 1 to 86, and when a non-zero cell is singular.
+
+*** =rgpot::D2Pot::config=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] const D2Config &config() const noexcept { return cfg_; }
+#+end_src
+
+- Inputs :: none.
+- Units :: as in =rgpot::D2Config=.
+- Outputs :: the =rgpot::D2Config= the instance was built with.
+- Errors :: none.
+
+Two free functions in =rgpot/D2Pot/D2Pot.hpp= expose the parameters.
+=rgpot::d2_config_for(functional)= returns a =rgpot::D2Config= with the =s6= and
+=d= dftd3 uses for a =-func= name (=b-lyp=, =b-p=, =b97-d=, =revpbe=, =pbe=,
+=tpss=, =b3-lyp=, =pbe0=, =pw6b95=, =tpss0=, =b2-plyp=, =b2gp-plyp=, =dsd-blyp=,
+or the aliases =blyp=, =bp86= and =b3lyp=, in any case) and the default =sr= and
+=cutoff=; any other name throws =std::invalid_argument=.
+=rgpot::d2_c6(z)= and =rgpot::d2_r0(z)= return the tabulated C6 (J nm^6 mol^-1)
+and R0 (Angstrom) of atomic number =z= and throw =std::invalid_argument= outside
+1 to 86.
+
+** CPMD's empirical D2
+
+=rgpot::D2CpmdPot= is the D2 term OpenCPMD adds with =VDW CORRECTION ON= and
+=EMPIRICAL CORRECTION= / =ALL DFT-D2=, reproduced from the source cpmdc builds
+against (OpenCPMD 062582b, =vdw= in
+=src/vdw_utils.mod.F90=, the tables of =empvdwin= in =src/vdwin_utils.mod.F90= and =pbc3= in =src/pbc_utils.mod.F90=).
+It exists to subtract that term from a CPMD BLYP-D2 run, for example to put
+=rgpot::D2Pot= or =rgpot::D4Pot= in its place, so it keeps every CPMD detail:
+
+- CPMD's own C6 and R0 tables (Grimme 2006, Table 1, as CPMD types them, boron's
+  C6 of 3.31 included), =convfac= 17.33979 for the C6 and CPMD's bohr,
+  0.529177210859, for R0, positions and cell, as cpmdc converts them.
+- \(R_r = R_0^i + R_0^j\) with the paper's radii, the damping
+  \(1/(1 + e^{-\alpha (r/R_r - 1)})\) with \(\alpha = 20\), and the =S6GRIMME= of CPMD's =set_s6=
+  (BLYP 1.2, B3LYP 1.05, BP86 1.05, TPSS 1.0, PBE 0.75, REVPBE 1.25, PBE0 0.6).
+- One image per pair, the one =pbc3= picks: per axis in an orthorhombic cell
+  (off-diagonal box entries exactly zero), the nearest integer fractional shift
+  otherwise, none for an all-zero box.
+  This is CPMD's default single cell
+  (=VAN DER WAALS SUM IN REAL SPACE OVER 1* 1* 1 CELLS=).
+- A pair is dropped when
+  \(\lvert\alpha(r/R_r-1)\rvert\ge\frac{1}{\mathrm{vdweps}}\), so at \(r \ge 6 R_r\)
+  by default, and below 0.01 bohr; elements 87 to 99 give nothing.
+
+The results go back to eV with rgpot's units, as cpmdc and =rgpot::CPMDPot=
+convert CPMD's, so the term cancels a CPMD run's to the last bits;
+=D2CpmdPotTest= matches OpenCPMD's own D2 energy and forces to 100 eps Ha and
+sqrt(eps) Ha/bohr on water and methane in cubic, orthorhombic and triclinic
+cells.
+
+The minimum image has a cusp.
+When a pair crosses half a cell the image on the other side takes over: the
+energy is continuous, but the force on the pair changes sign, and the 6 \(R_r\)
+truncation adds a step in the energy wherever a pair crosses it.
+A geometry optimisation or dynamics in a cell under twice the truncation radius
+sees both.
+=rgpot::D2Pot= sums every image within its cutoff and has neither, so for
+anything but undoing CPMD's term use it instead.
+
+*** =rgpot::D2CpmdPot=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+explicit D2CpmdPot(D2CpmdConfig cfg = {});
+#+end_src
+
+- Inputs :: a =rgpot::D2CpmdConfig=.
+- Units :: energy in eV, forces in eV/Angstrom, stress in eV/Angstrom^3.
+- Outputs :: CPMD's empirical D2 energy, forces and stress.
+- Errors :: the errors of =rgpot::D2CpmdConfig=.
+  The force call throws =std::invalid_argument= when the atomic numbers are
+  missing or one is outside 1 to 99, and when a non-zero cell is singular.
+
+*** =rgpot::D2CpmdPot::config=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] const D2CpmdConfig &config() const noexcept { return cfg_; }
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: the =rgpot::D2CpmdConfig= the instance was built with.
+- Errors :: none.
+
+=rgpot::d2_cpmd_config_for(functional)= returns a =rgpot::D2CpmdConfig= with the =s6= CPMD's =set_s6=
+gives one of the seven names above, in any case, and throws
+=std::invalid_argument= for any other.
+
 ** Dispersion libraries
 
 =rgpot::D3Pot= needs
 =-Dwith_dftd3=true= and =rgpot::D4Pot= needs =-Dwith_dftd4=true=.
 Both convert positions to bohr for the library and convert the result back to eV
 and eV/Angstrom.
-Both evaluate the molecule without periodicity, need a non-null cell, and write
-no stress.
+=D3Pot= needs a non-null cell and evaluates the molecule without periodicity and
+writes no stress.
+=D4Pot= reads the box only when =D4Config::periodic= is set, so a molecule may
+come with a null box; then dftd4 gets the box as a 3D lattice and returns its
+virial, which =D4Pot= divides by the cell volume for the stress, and a null box
+throws =std::invalid_argument=. dftd4 cuts the pair, three-body and coordination
+sums off at 60, 40 and 30 bohr without smoothing, so a periodic energy steps
+when a strain carries an image pair across one of them.
 The structure is built on the first call and rebuilt when the atom count or any
 atomic number changes; other calls only update the positions and the cell.
 
@@ -1384,18 +1580,28 @@ D4Pot();
 explicit D4Pot(const D4Config &config);
 #+end_src
 
-- Inputs :: a =rgpot::D4Config=; the damping is always rational.
-- Units :: energy in eV, forces in eV/Angstrom.
-- Outputs :: Grimme DFT-D4 dispersion through the dftd4 C API.
+- Inputs :: a =rgpot::D4Config=; the damping is always rational, with the
+  parameters dftd4 tabulates for the functional.
+- Units :: energy in eV, forces in eV/Angstrom, stress in eV/Angstrom^3.
+- Outputs :: Grimme DFT-D4 dispersion through the dftd4 C API, and the stress
+  when =periodic= is set; =caps()= then reports =periodic= and =stress=.
   Parameter source: Caldeweyher et al., J. Chem.
   Phys. 150, 154122 (2019), doi:10.1063/1.5090222.
-  The default is rational damping, the =pbe= parameters, charge 0 and the
-  many-body term.
+  The default is rational damping, the =pbe= parameters, charge 0, the many-body
+  term and a molecule without periodicity.
   =D4PotTest= checks a fresh call against a reused structure.
 - Errors :: the errors of =rgpot::D4Config=.
+  A periodic force call throws =std::invalid_argument= for a null box or a box
+  of zero volume.
   The force call throws =std::runtime_error= with the dftd4 message when
   building the structure or model, updating it, or computing the dispersion
   fails.
+- Tests :: =CppCore/tests/D4BlypTest.cc= compares BLYP against the dftd4 program
+  (4.2.0, =dftd4 coord --func blyp --grad=) on a water dimer, benzene and an
+  eight-water box in a cubic and a sheared cell: energies within 100 eps Ha,
+  gradients within sqrt(eps) Ha/bohr and virials within sqrt(eps) Ha/bohr times
+  the cube root of the cell volume.
+  =scripts/regen_d4_references.py= writes the references.
 
 *** =rgpot::D4Pot::config=
 
@@ -1407,6 +1613,20 @@ explicit D4Pot(const D4Config &config);
 - Inputs :: none.
 - Units :: =charge= in elementary charges.
 - Outputs :: the =rgpot::D4Config= the instance was built with.
+- Errors :: none.
+
+*** =rgpot::D4Pot::paramsKey=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] uint64_t paramsKey() const noexcept override;
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: an FNV-1a digest over the D4 functional key, charge, ATM switch and
+  periodic switch.
+  The result separates cache entries for distinct D4 parameter sets.
 - Errors :: none.
 
 ** Expression of potentials
@@ -1488,6 +1708,172 @@ The constructor throws =std::invalid_argument= before any force call when:
 - =ParsedExpression::differentiate(name)= fails
 
 Python raises =ValueError= with the same message.
+
+** Weighted sums
+
+*** =rgpot::SumPot=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+SumPot();
+#+end_src
+
+- Inputs :: none; terms are added with =add=.
+  Each term is a =rgpot::SumTerm=: =name= (the label in the record and the log),
+  =weight= (any finite value, the sign allowed, default 1) and =enabled=
+  (default true).
+- Units :: the sum keeps the units of its terms: eV,
+  eV/Angstrom and eV/Angstrom^3.
+- Outputs :: E = sum of weight times energy over the enabled terms, and the same
+  weights on the forces and the stress; the variance takes the square of each
+  weight.
+  A disabled term is not evaluated.
+  The stress is the weighted sum when every evaluated term reports one, and
+  =has_stress= is 0 otherwise or when no term ran.
+  An empty sum, or one whose terms are all disabled, gives zero energy and
+  forces.
+  =caps()= intersects the enabled terms: periodic only when every one has it,
+  stress only when at least one term is enabled and every one has it, per-image
+  instances and group collectives when any one needs them, never batched, and a
+  reentrancy that is the weakest of the terms and =PerInstance=, because the
+  component record belongs to the instance.
+  Setting =RGPOT_SUM_LOG= to anything but empty or =0= writes one line per term
+  and call, and a total, to standard error.
+- Errors :: a term that throws stops the call; the exception reaches the caller
+  unchanged after a line naming the term is logged, so a failing child's status
+  (a NumericalError, a refused geometry) is the sum's status.
+
+*** =rgpot::SumPot::add=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void add(std::unique_ptr<PotentialBase> term);
+void add(SumTerm spec, std::unique_ptr<PotentialBase> term);
+#+end_src
+
+- Inputs :: =term=, a potential the sum takes ownership of; =spec=, its name,
+  weight and switch.
+  The first form names the term =term<i>= with weight 1, enabled.
+- Units :: =weight= has no unit.
+- Outputs :: appends the term.
+  A disabled =spec= may come with a null =term=: the term is recorded, shows in
+  the component record, and is never built, so switching off a DFT engine term
+  does not load the engine.
+- Errors :: throws =std::invalid_argument= for a null =term= on an enabled term
+  and for a weight that is not finite.
+
+*** =rgpot::SumPot::setEnabled=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void setEnabled(std::size_t index, bool enabled);
+#+end_src
+
+- Inputs :: =index=, a term index; =enabled=, its new switch.
+- Units :: none.
+- Outputs :: switches the term on or off for the following calls.
+- Errors :: throws =std::out_of_range= for an index past the last term and
+  =std::logic_error= when enabling a term that was added without a potential.
+
+*** =rgpot::SumPot::setWeight=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void setWeight(std::size_t index, double weight);
+#+end_src
+
+- Inputs :: =index=, a term index; =weight=, its new weight.
+- Units :: none.
+- Outputs :: the weight of the following calls.
+- Errors :: throws =std::out_of_range= for an index past the last term and
+  =std::invalid_argument= for a weight that is not finite.
+
+*** =rgpot::SumPot::size=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] std::size_t size() const noexcept;
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: the number of terms, enabled or not.
+- Errors :: none.
+
+*** =rgpot::SumPot::term=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] const SumTerm &term(std::size_t index) const;
+#+end_src
+
+- Inputs :: =index=, a term index.
+- Units :: none.
+- Outputs :: the name, weight and switch of that term.
+- Errors :: throws =std::out_of_range= for an index past the last term.
+
+*** =rgpot::SumPot::child=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] PotentialBase *child(std::size_t index) const;
+#+end_src
+
+- Inputs :: =index=, a term index.
+- Units :: none.
+- Outputs :: the potential of that term, owned by the sum, or null for a term
+  added disabled without one.
+- Errors :: throws =std::out_of_range= for an index past the last term.
+
+*** =rgpot::SumPot::lastComponents=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] const std::vector<SumComponent> &lastComponents() const noexcept;
+#+end_src
+
+- Inputs :: none.
+- Units :: =energy= in eV, =forces= in
+  eV/Angstrom (3 per atom), =stress= in eV/Angstrom^3 row-major, each the term's
+  own value before its weight.
+- Outputs :: one =rgpot::SumComponent= per term in the order they were added,
+  from the last force call on this instance: =name=, =weight=, =enabled=,
+  =evaluated= (false for a disabled term and before the first call), =energy=,
+  =forces= (empty when not evaluated), =variance=, =has_stress= and =stress=.
+  A call that throws keeps the record of the last successful call.
+- Errors :: none.
+
+*** =rgpot::SumPot::setLogSink=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void setLogSink(LogSink sink);
+#+end_src
+
+- Inputs :: =sink=, a =std::function<void(std::string_view)>=.
+- Units :: the lines give energies in eV and the largest force component in
+  eV/Angstrom.
+- Outputs :: the per-term lines go to =sink= instead of standard error, whether
+  or not =RGPOT_SUM_LOG= is set:
+  =rgpot sum: NAME weight=W energy=E eV fmax=F eV/A stress=0|1=,
+  =rgpot sum: NAME disabled=, =rgpot sum: NAME failed: WHAT= and
+  =rgpot sum: total energy=E eV=.
+  An empty sink restores the default.
+- Errors :: none.
+
+*** =rgpot::SumPot::paramsKey=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] uint64_t paramsKey() const noexcept override;
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: a hash of every term's name, weight, switch, and its potential's
+  type and =paramsKey=, so a cache entry is not reused across a change of any of
+  them.
+- Errors :: none.
 
 ** Long-range summands
 
@@ -1581,59 +1967,17 @@ explicit NlhPot(NlhConfig cfg = {});
   The force call throws =std::invalid_argument= for null atomic numbers and for
   an atomic number outside 1 to 92.
 
-*** =rgpot::lr::SumPot=
+*** Shared pair list for summands
 
-#+attr_rgpot: signature
-#+begin_src cpp
-SumPot();
-#+end_src
-
-- Inputs :: none; terms are added with =add=.
-- Units :: the sum keeps the units of its terms: eV,
-  eV/Angstrom and eV/Angstrom^3.
-- Outputs :: the sum of the energies, forces and variances of every term.
-  The stress is the sum over the terms that report one, and =has_stress= is 1
-  when any term reports one.
-  An empty sum gives zero energy and forces.
-- Errors :: the force call passes on the exceptions of its terms.
-
-*** =rgpot::lr::SumPot::add=
-
-#+attr_rgpot: signature
-#+begin_src cpp
-void add(std::unique_ptr<PotentialBase> term);
-#+end_src
-
-- Inputs :: =term=, a potential the sum takes ownership of.
-- Units :: none.
-- Outputs :: appends =term=.
-- Errors :: throws =std::invalid_argument= for a null =term=.
-
-*** =rgpot::lr::SumPot::shareNeighbours=
-
-#+attr_rgpot: signature
-#+begin_src cpp
-void shareNeighbours(std::shared_ptr<DualList> lists);
-#+end_src
-
-- Inputs :: =lists=, one pair list.
-- Units :: none.
-- Outputs :: calls =setNeighbours(lists)= on every term added so far that is a
-  =rgpot::lr::CoulombPot=, =rgpot::lr::DispersionPot= or =rgpot::lr::NlhPot=.
-  Other terms and terms added later keep their own lists.
-- Errors :: none.
-
-*** =rgpot::lr::SumPot::size=
-
-#+attr_rgpot: signature
-#+begin_src cpp
-[[nodiscard]] std::size_t size() const noexcept;
-#+end_src
-
-- Inputs :: none.
-- Units :: none.
-- Outputs :: the number of terms.
-- Errors :: none.
+=rgpot::lr::SumPot= is the weighted sum =rgpot::SumPot= with one more member,
+=void shareNeighbours(std::shared_ptr<DualList> lists)=.
+It calls =setNeighbours(lists)= on every term added so far that is a
+=rgpot::lr::CoulombPot=, =rgpot::lr::DispersionPot= or =rgpot::lr::NlhPot=, so
+they share one pair list.
+Other terms, disabled terms added without a potential, and terms added later
+keep their own lists.
+Everything else, the weights, switches, component record, capabilities and
+errors, is that of =rgpot::SumPot=.
 
 ** Fortran kernels
 

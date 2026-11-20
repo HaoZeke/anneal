@@ -13,18 +13,21 @@ Backend options for a live =Potential= go in =PotentialConfig=
 (=CppCore/rgpot/rpc/Potentials.capnp=, a copy of the pinned potentials-schema).
 It is a union whose arms and ordinals are =none= @0, =nwchem= @1, =cpmd= @2,
 =metatomic= @4, =lammps= @5, =xtb= @6, =tblite= @7, =uma= @8, =lj= @9, =morse=
-@10, =zbl= @11, =d3= @12, =d4= @13, =mopac= @14, =skala= @15, =expr= @16 and
-=cp2k= @17.
+@10, =zbl= @11, =d3= @12, =d4= @13, =mopac= @14, =skala= @15, =expr= @16, =cp2k=
+@17, =composite= @18, =d2= @19 and =d2cpmd= @20.
+=composite=, =d2= and =d2cpmd= are local additions
+(=CppCore/rgpot/rpc/local/composite.diff=, =d2.diff= and =d2cpmd.diff=) to the
+pinned schema, as is =D4Params.periodic= (=d4-periodic.diff=).
 Outside the union, =common= @3 is a =CommonMethodSpec= overlay.
 Geometry stays on =ForceInput=; =configure(config)= applies method and backend
 setup only.
-=potserv= applies =nwchem=, =cpmd= and =morse= on the matching backend, and
-=cp2k= on a build with CP2K.
+=potserv= applies =nwchem=, =cpmd=, =morse=, =composite=, =d2= and =d2cpmd= on
+the matching backend, =cp2k= on a build with CP2K and =d4= on a build with
+dftd4.
 =none= is a no-op on every backend.
 Every other arm gets =ok=false= with a message that names the arm.
 An arm from a newer schema is named by its discriminant.
-=D3Pot= and =D4Pot= stay in-process =Potential= summands; =potserv= refuses the
-=d3= and =d4= arms.
+=D3Pot= stays an in-process =Potential= summand; =potserv= refuses the =d3= arm.
 
 ** NWChem arm (=PotentialConfig.nwchem= / =NWChemParams=)
 
@@ -49,6 +52,91 @@ so the next =calculate= uses them.
 A non-finite value, a cutoff that is not positive, or a cutoff below the switch
 width gets =ok=false= and leaves the pot as it was.
 =tests/rpc_integ.py= doubles =de= and checks that the energy at =re= doubles.
+
+** Composite arm (=PotentialConfig.composite= / =CompositeParams=)
+
+With =potserv <port> Composite=, pass =configure= with the =composite= arm set.
+The server starts with an empty sum, whose energy is 0.
+=CompositeParams.terms= is a list of =CompositeTerm=, summed in order:
+
+| field | type | default | meaning |
+|-------+------+---------+---------|
+| =CompositeTerm.name= | Text | empty | label in the component record and the log; empty becomes =term<i>= |
+| =CompositeTerm.enabled= | Bool | true | a disabled term is recorded and never built or evaluated |
+| =CompositeTerm.weight= | Float64 | 1.0 | multiplies the term's energy, forces and stress; the sign is allowed |
+| =CompositeTerm.pot= | =PotentialSpec= | unset | the child backend |
+
+The =builtin= arm of =PotentialSpec= builds =lj=, =morse=, =zbl=, =d2=, =d2cpmd=
+and, on a build with dftd4, =d4= with the parameters of its =config= arm (=lj=,
+=morse=, =zbl=, =d2=, =d2cpmd=, =d4=, or =none= for the defaults) and
+=composite= (or =sum=) for a nested sum.
+The =cpmd= arm builds a =CPMDPot= from its =CPMDParams=, which loads =libcpmdc=.
+Other =PotentialSpec= arms, an unknown builtin name, a builtin config arm that
+belongs to another backend, an enabled term without a =pot= and a weight that is
+not finite get =ok=false= with a message that names the term, and leave the
+previous sum in place.
+=CppCore/rgpot/rpc/CompositeConfigure.hpp= holds the mapping, which
+=libcomposite_engine= also uses.
+=tests/rpc_integ.py= checks that a weight of -1 cancels a term, that a weight
+scales one, that a disabled term with an unknown name is not built, that an LJ
+plus D2 sum is the sum of the two and loses the D2 again under a second D2 term
+at weight -1, and that every other arm is refused.
+
+** D2 arm (=PotentialConfig.d2= / =D2Params=)
+
+With =potserv <port> D2=, pass =configure= with the =d2= arm set; the same
+struct is the =config= of a =d2= builtin in a composite term.
+The server starts with the BLYP defaults and rebuilds its =D2Pot= from the arm.
+
+| field | type | default | meaning |
+|-------+------+---------+---------|
+| =D2Params.s6= | Float64 | 1.2 | global scaling (BLYP) |
+| =D2Params.d= | Float64 | 20.0 | steepness of the damping |
+| =D2Params.sr= | Float64 | 1.1 | scale on the tabulated R0 |
+| =D2Params.cutoff= | Float64 | 150.0 | pair cutoff over all images, Angstrom |
+| =D2Params.functional= | Text | empty | a dftd3 =-func= name; when set, its =s6= and =d= replace the two fields |
+
+An unknown functional, a cutoff that is not positive and finite, or an =sr= that
+is not positive gets =ok=false= and leaves the pot as it was.
+=tests/rpc_integ.py= switches the functional to PBE and checks that the energy
+scales by the ratio of the two =s6=.
+
+** CPMD D2 arm (=PotentialConfig.d2cpmd= / =D2CpmdParams=)
+
+With =potserv <port> D2Cpmd=, pass =configure= with the =d2cpmd= arm set; the
+same struct is the =config= of a =d2cpmd= builtin in a composite term, where a
+weight of -1 takes CPMD's built-in D2 back out of a =cpmd= term.
+
+| field | type | default | meaning |
+|-------+------+---------+---------|
+| =D2CpmdParams.s6= | Float64 | 1.2 | CPMD's =S6GRIMME= (BLYP) |
+| =D2CpmdParams.alpha= | Float64 | 20.0 | damping exponent |
+| =D2CpmdParams.vdweps= | Float64 | 0.01 | pairs with \(\lvert\alpha (r/R_r - 1)\rvert \ge 1/\mathrm{vdweps}\) drop |
+| =D2CpmdParams.functional= | Text | empty | a CPMD functional name; when set, its =set_s6= value replaces =s6= |
+| =D2CpmdParams.symmetry= | Int32 | -1 | the =SYMMETRY= code of the run, which picks the branch of CPMD's =pbc3=; -1 reads it from the box, which cannot name 12 |
+
+An unknown functional, a =vdweps= that is not positive or a =symmetry= that is
+not -1, 1 to 8, 12 or 14 gets =ok=false= and leaves the pot as it was.
+=tests/rpc_integ.py= checks the PBE switch as for =d2= and that a composite of
+=d2cpmd= at weight -1 and =d2= is the difference of the two.
+
+** D4 arm (=PotentialConfig.d4= / =D4Params=)
+
+With =potserv <port> D4= on a build with dftd4, pass =configure= with the =d4=
+arm set; the same struct is the =config= of a =d4= builtin in a composite term.
+The server starts with the defaults below and rebuilds its =D4Pot= from the arm.
+
+| field | type | default | meaning |
+|-------+------+---------+---------|
+| =D4Params.functional= | Text | ="pbe"= | dftd4 method key; dftd4 supplies its rational damping parameters (="blyp"= for BLYP) |
+| =D4Params.charge= | Float64 | 0.0 | total charge, elementary charges |
+| =D4Params.atm= | Bool | true | the three-body (ATM) term |
+| =D4Params.periodic= | Bool | false | pass the box as a 3D lattice and return the stress; off, the box is ignored |
+
+A functional dftd4 has no parameters for gets =ok=false= with dftd4's message
+and leaves the pot as it was.
+=tests/rpc_integ.py= switches to periodic BLYP and checks the refusals when
+=potserv= lists =D4=.
 
 ** CPMD arm (=PotentialConfig.cpmd= / =CPMDParams=)
 

@@ -158,6 +158,9 @@ CalculatorAbortFlagTest | tests core | unit calculator_abort_flag_test Calculato
 LJClusterPotTest | tests core | unit ljcluster_pot_test LJClusterPotTest.cc |
 LJPotThreadsTest | tests core | unit lj_pot_threads_test LJPotThreadsTest.cc timeout=120 |
 ZBLPotTest | tests core | unit zbl_pot_test ZBLPotTest.cc |
+SumPotTest | tests core | unit sum_pot_test SumPotTest.cc |
+D2PotTest | tests core | unit d2_pot_test D2PotTest.cc timeout=300 |
+D2CpmdPotTest | tests core | unit d2_cpmd_pot_test D2CpmdPotTest.cc |
 PerAtomTest | tests core | unit per_atom_test PerAtomTest.cc |
 LocalityTest | tests core | unit locality_test LocalityTest.cc |
 StagedTest | tests core | unit staged_test StagedTest.cc |
@@ -239,6 +242,7 @@ schema-ordinal-ledger | rpc probe | custom suite=schema | @meson
 RPCSchemaSync | tests core rpc | custom suite=rpc |
 CapabilitiesWire | tests core rpc | py CppCore/tests/test_capabilities_wire.py @root@ @capnp@ suite=rpc |
 MorseConfigureTest | tests core rpc | unit morse_configure_test MorseConfigureTest.cc |
+CompositeConfigureTest | tests core rpc | unit composite_configure_test CompositeConfigureTest.cc |
 ProfileLoaderTest | tests core rpc | custom suite=abi workdir=. |
 NWChemPotLifetime-ordinary | tests core rpc | custom suite=nwchem |
 NWChemPotLifetime-probe | tests core rpc | custom suite=nwchem |
@@ -248,6 +252,7 @@ test_nwchem_abi | tests core rpc | custom suite=nwchem |
 NWChemDlopenContract | tests core rpc | py CppCore/tests/test_nwchem_dlopen_contract.py @root@ suite=nwchem |
 CPMDPotGradientStressTest | tests core rpc | custom suite=cpmd workdir=. |
 CPMDPotMessageAbiTest | tests core rpc | custom suite=cpmd workdir=. |
+CompositeCpmdDispersionTest | tests core rpc | custom suite=cpmd workdir=. |
 test_cpmd_abi | tests core rpc | custom suite=cpmd |
 CPMDDlopenContract | tests core rpc | py CppCore/tests/test_cpmd_dlopen_contract.py @root@ suite=cpmd |
 CP2KPotFakeEngineTest | tests core rpc cp2k | custom suite=cp2k workdir=. |
@@ -296,6 +301,7 @@ WaterPotTest | tests core water | unit water_pot_test WaterPotTest.cc | @water
 TBLitetest | tests tblite | unit tblite_test TBLitePotTest.cc env=OMP_NUM_THREADS=1 | @tblite
 D3test | tests dftd3 | unit d3_test D3PotTest.cc | @dftd
 D4test | tests dftd4 | unit d4_test D4PotTest.cc | @dftd
+D4BlypTest | tests dftd4 | unit d4_blyp_test D4BlypTest.cc env=OMP_NUM_THREADS=1 | @dftd
 DftdGoldens | tests dftd3,dftd4 | custom suite=dftd workdir=. | @dftd
 XcKernelGoldens | tests xckernel | custom suite=xckernel workdir=. | @xckernel
 XTBtest | tests xtb | custom timeout=120 suite=xtb workdir=. | @xtb

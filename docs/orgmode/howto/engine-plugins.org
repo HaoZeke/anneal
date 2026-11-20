@@ -46,7 +46,7 @@ int main(int argc, char **argv) {
   const RgpotEngineAbiStamp mine = {RGPOT_ENGINE_ABI_VERSION, RGPOT_ENGINE_ABI_MINOR,
                                     RGPOT_ENGINE_ABI_LAYOUT_REVISION};
   if (compatible && !compatible(&mine)) {
-    fprintf(stderr, "engine is older than this host\n");
+    fprintf(stderr, "engine is newer than this host\n");
     return 1;
   }
   const char *(*name)(void) = (const char *(*)(void))dlsym(h, "rgpot_engine_name");

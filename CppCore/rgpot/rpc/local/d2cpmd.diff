@@ -1,0 +1,31 @@
+diff --git a/Potentials.capnp b/Potentials.capnp
+--- a/Potentials.capnp
++++ b/Potentials.capnp
+@@ -2672,6 +2672,19 @@
+   functional @4 :Text;        # dftd3 -func name; empty keeps s6 and d.
+ }
+ 
++# @struct D2CpmdParams
++# @brief CPMD's built-in empirical D2, minimum image (rgpot::D2CpmdPot).
++#
++# The term OpenCPMD adds with EMPIRICAL CORRECTION / ALL DFT-D2, with its
++# tables, damping and truncation, so a composite can subtract it from a run
++# that had it on. A non-empty functional takes s6 from CPMD's set_s6.
++struct D2CpmdParams {
++  s6 @0 :Float64 = 1.2;      # CPMD's S6GRIMME (BLYP).
++  alpha @1 :Float64 = 20.0;  # Damping exponent.
++  vdweps @2 :Float64 = 0.01; # Pairs with |alpha (r/R0 - 1)| >= 1/vdweps drop.
++  functional @3 :Text;       # CPMD functional name; empty keeps s6.
++}
++
+ # @struct PotentialConfig
+ # @brief **rgpot user parameters (extensible, in/out via Cap'n Proto only).**
+ #
+@@ -2704,6 +2717,7 @@
+     cp2k      @17 :CP2KParams;    # CP2KPot / libcp2k shim
+     composite @18 :CompositeParams; # rgpot::SumPot over PotentialSpec terms
+     d2 @19 :D2Params;               # rgpot::D2Pot, Grimme 2006 lattice sum
++    d2cpmd @20 :D2CpmdParams;       # rgpot::D2CpmdPot, CPMD's minimum-image D2
+   }
+   # Normalized overlay applied BEFORE the native arm; native settings win.
+   common @3 :CommonMethodSpec;

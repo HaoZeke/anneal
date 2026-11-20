@@ -10,7 +10,10 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <array>
+#include <chrono>
 #include <cmath>
+#include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <regex>
@@ -21,6 +24,10 @@
 
 #include "rgpot/D4Pot/D4Pot.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
+#ifdef RGPOT_HAS_CACHE
+#include "rgpot/PotentialCache.hpp"
+#include <rocksdb/options.h>
+#endif
 
 using rgpot::types::AtomMatrix;
 using Catch::Matchers::WithinAbs;
@@ -174,6 +181,60 @@ TEST_CASE("D4Pot warm update_structure path is stable", "[d4][capi]") {
   REQUIRE(e1 != e2);
 }
 
+TEST_CASE("D4Pot paramsKey separates distinct configurations", "[d4][params]") {
+  rgpot::D4Config pbe;
+  pbe.functional = "pbe";
+  pbe.charge = 0.0;
+  pbe.atm = true;
+  pbe.periodic = false;
+  rgpot::D4Config blyp = pbe;
+  blyp.functional = "blyp";
+  rgpot::D4Config charged = pbe;
+  charged.charge = 1.0;
+  rgpot::D4Config no_atm = pbe;
+  no_atm.atm = false;
+  rgpot::D4Config periodic = pbe;
+  periodic.periodic = true;
+
+  rgpot::D4Pot a(pbe);
+  rgpot::D4Pot b(blyp);
+  rgpot::D4Pot c(charged);
+  rgpot::D4Pot d(no_atm);
+  rgpot::D4Pot e(periodic);
+  REQUIRE(a.paramsKey() != b.paramsKey());
+  REQUIRE(a.paramsKey() != c.paramsKey());
+  REQUIRE(a.paramsKey() != d.paramsKey());
+  REQUIRE(a.paramsKey() != e.paramsKey());
+
+#ifdef RGPOT_HAS_CACHE
+  AtomMatrix positions(3, 3);
+  std::vector<int> atmtypes;
+  std::array<std::array<double, 3>, 3> box{};
+  fill_water(positions, atmtypes, box);
+  const auto path_template =
+      std::filesystem::temp_directory_path() / "rgpot_d4_params_XXXXXX";
+  const std::string path_pattern = path_template.string();
+  std::vector<char> mutable_path(path_pattern.begin(), path_pattern.end());
+  mutable_path.push_back('\0');
+  REQUIRE(mkdtemp(mutable_path.data()) != nullptr);
+  const std::string db_path(mutable_path.data());
+  {
+    rgpot::cache::PotentialCache cache(db_path);
+    a.setCache(&cache);
+    b.setCache(&cache);
+    (void)a(positions, atmtypes, box);
+    (void)b(positions, atmtypes, box);
+    REQUIRE(cache.counts().computed == 2);
+    (void)a(positions, atmtypes, box);
+    (void)b(positions, atmtypes, box);
+    REQUIRE(cache.counts().served == 2);
+    a.setCache(nullptr);
+    b.setCache(nullptr);
+  }
+  REQUIRE(rocksdb::DestroyDB(db_path, rocksdb::Options()).ok());
+#endif
+}
+
 TEST_CASE("D4Pot reads the species again when only the species change",
           "[d4]") {
   AtomMatrix positions(3, 3);
@@ -195,4 +256,65 @@ TEST_CASE("D4Pot reads the species again when only the species change",
       REQUIRE_THAT(f_reused(i, k), WithinAbs(f_fresh(i, k), 1e-12));
     }
   }
+}
+
+TEST_CASE("D4Pot of a molecule reads no box", "[d4][box]") {
+  const std::vector<double> pos(kWaterPos, kWaterPos + 9);
+  auto run = [&](rgpot::D4Pot &pot, const double *box) {
+    std::vector<double> forces(9, 0.0);
+    const rgpot::ForceInput in{3, pos.data(), kWaterZ, box};
+    rgpot::ForceOut out{};
+    out.F = forces.data();
+    pot.forceBatch(rgpot::ForceBatch{.nSystems = 1, .in = &in, .out = &out});
+    return std::make_pair(out.energy, forces);
+  };
+  const double wide[9] = {100.0, 0.0, 0.0, 0.0, 100.0, 0.0, 0.0, 0.0, 100.0};
+
+  rgpot::D4Pot boxed;
+  const auto with_box = run(boxed, wide);
+
+  // The first call builds the structure, the second updates it; neither
+  // may read a box that was not passed.
+  rgpot::D4Pot open;
+  const auto first = run(open, nullptr);
+  const auto warm = run(open, nullptr);
+  REQUIRE(first.first == with_box.first);
+  REQUIRE(first.second == with_box.second);
+  REQUIRE(warm.first == with_box.first);
+  REQUIRE(warm.second == with_box.second);
+
+#ifdef RGPOT_HAS_CACHE
+  const std::string db_path =
+      (std::filesystem::temp_directory_path() /
+       ("rgpot_d4_null_box_" +
+        std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count())))
+          .string();
+  {
+    rgpot::cache::PotentialCache cache(db_path);
+    open.setCache(&cache);
+    const auto cached_cold = run(open, nullptr);
+    const auto cached_warm = run(open, nullptr);
+    REQUIRE(cache.counts().computed == 1);
+    REQUIRE(cache.counts().served == 1);
+    REQUIRE(cached_cold.first == with_box.first);
+    REQUIRE(cached_cold.second == with_box.second);
+    REQUIRE(cached_warm.first == with_box.first);
+    REQUIRE(cached_warm.second == with_box.second);
+    const double zero_box[9] = {};
+    (void)run(open, zero_box);
+    REQUIRE(cache.counts().computed == 2);
+    REQUIRE(cache.counts().served == 1);
+    (void)run(open, wide);
+    REQUIRE(cache.counts().computed == 3);
+    REQUIRE(cache.counts().served == 1);
+    open.setCache(nullptr);
+  }
+  REQUIRE(rocksdb::DestroyDB(db_path, rocksdb::Options()).ok());
+#endif
+
+  rgpot::D4Config lattice_config;
+  lattice_config.periodic = true;
+  rgpot::D4Pot lattice(lattice_config);
+  REQUIRE_THROWS_AS(run(lattice, nullptr), std::invalid_argument);
 }
