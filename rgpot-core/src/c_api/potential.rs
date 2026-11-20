@@ -180,10 +180,14 @@ mod tests {
         rgpot_status_t::RGPOT_SUCCESS
     }
 
-    fn make_test_input() -> ([f64; 6], [i32; 2], [f64; 9], rgpot_force_input_t) {
-        let mut pos = [0.0_f64, 0.0, 0.0, 1.0, 0.0, 0.0];
-        let mut atmnrs = [1_i32, 1];
-        let mut box_ = [10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0];
+    /// The input borrows `pos`, `atmnrs` and `box_`, which are returned with
+    /// it. They live on the heap so moving them out of this function keeps
+    /// the pointers in the input valid; fixed-size arrays would be copied
+    /// and leave the input pointing at this frame.
+    fn make_test_input() -> (Vec<f64>, Vec<i32>, Vec<f64>, rgpot_force_input_t) {
+        let mut pos = vec![0.0_f64, 0.0, 0.0, 1.0, 0.0, 0.0];
+        let mut atmnrs = vec![1_i32, 1];
+        let mut box_ = vec![10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0];
         let input = unsafe {
             crate::c_api::types::rgpot_force_input_create(
                 2,
