@@ -2945,6 +2945,20 @@ fn directed_stall_source(
         .flatten()
 }
 
+fn claim_observed_basis_probe(
+    cfg: &Config,
+    ledger: &Ledger,
+    evidence: usize,
+    basin: usize,
+    seen: &mut std::collections::HashSet<usize>,
+) -> bool {
+    !cfg.move_library.is_rigid_body()
+        && cfg.active_region.is_none()
+        && cfg.frozen.is_none()
+        && ledger.remaining() >= evidence
+        && seen.insert(basin)
+}
+
 /// Each rung's temperature as a multiple of the one a single chain would hop
 /// at: `ladder_top^(k/(R-1))` for rung `k` of `R`, and exactly one for a
 /// single chain.
@@ -9235,11 +9249,16 @@ where
                 directed_leave,
                 ledger.best_state.as_ref(),
             );
-            if directed_leave && hop_room(hops) && ledger.budget() >= basis_evidence {
+            if directed_leave && hop_room(hops) {
                 let source_basin = *here.get_or_insert_with(|| identity.basin_of(x.view()));
-                if observed_basis_seen.insert(source_basin)
-                    && let Some(candidate) =
-                        crate::lattice::observed_basis_candidate(x.view(), true)
+                if claim_observed_basis_probe(
+                    cfg,
+                    ledger,
+                    basis_evidence,
+                    source_basin,
+                    &mut observed_basis_seen,
+                ) && let Some(candidate) =
+                    crate::lattice::observed_basis_candidate(x.view(), true)
                 {
                     let mut side_ledger = Ledger::new(ledger.remaining());
                     side_ledger.stop = ledger.stop.clone();
@@ -10587,6 +10606,50 @@ mod tests {
         assert!(directed_stall_source(false, true, Some(&best)).is_none());
         assert!(directed_stall_source(true, false, Some(&best)).is_none());
         assert!(directed_stall_source(true, true, None).is_none());
+    }
+
+    #[test]
+    fn an_observed_basis_is_probed_once_per_basin() {
+        let cfg = Config::recommended(6);
+        let ledger = Ledger::new(20);
+        let mut seen = std::collections::HashSet::new();
+        assert!(claim_observed_basis_probe(&cfg, &ledger, 10, 7, &mut seen));
+        assert!(!claim_observed_basis_probe(&cfg, &ledger, 10, 7, &mut seen));
+        assert!(claim_observed_basis_probe(&cfg, &ledger, 10, 8, &mut seen));
+    }
+
+    #[test]
+    fn an_observed_basis_probe_needs_remaining_budget() {
+        let cfg = Config::recommended(6);
+        let mut ledger = Ledger::new(20);
+        assert!(ledger.charge_many(11));
+        let mut seen = std::collections::HashSet::new();
+        assert!(!claim_observed_basis_probe(&cfg, &ledger, 10, 7, &mut seen));
+        assert!(seen.is_empty(), "a deferred basin must remain eligible");
+    }
+
+    #[test]
+    fn rigid_and_constrained_configs_skip_observed_basis_probes() {
+        let ledger = Ledger::new(20);
+        let mut seen = std::collections::HashSet::new();
+        let rigid =
+            Config::recommended(6).with_rigid_bodies(crate::potentials::gmin_water_geometry());
+        assert!(!claim_observed_basis_probe(
+            &rigid, &ledger, 10, 1, &mut seen
+        ));
+
+        let mut frozen = Config::recommended(6);
+        frozen.frozen = Some(vec![false; 6]);
+        assert!(!claim_observed_basis_probe(
+            &frozen, &ledger, 10, 2, &mut seen
+        ));
+
+        let mut active = Config::recommended(6);
+        active.active_region = Some((vec![0], 0));
+        assert!(!claim_observed_basis_probe(
+            &active, &ledger, 10, 3, &mut seen
+        ));
+        assert!(seen.is_empty());
     }
 
     #[test]
