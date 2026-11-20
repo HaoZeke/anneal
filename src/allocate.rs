@@ -1033,6 +1033,18 @@ mod depth_allocator_tests {
         allocator.select_where(&mut rng, |_| false);
     }
 
+    /// `select` on an allocator with no arms is the call the old code had.
+    ///
+    /// The loop did not run, so the draw came back as arm 0. The panic is
+    /// that result failing at run time.
+    #[test]
+    #[should_panic(expected = "at least one arm must be open")]
+    fn an_empty_depth_allocator_select_is_rejected() {
+        let allocator = DepthAllocator::new(0);
+        let mut rng = StdRng::seed_from_u64(5);
+        let _ = allocator.select(&mut rng);
+    }
+
     #[test]
     fn a_single_open_depth_arm_is_always_the_draw() {
         let allocator = DepthAllocator::new(4);
