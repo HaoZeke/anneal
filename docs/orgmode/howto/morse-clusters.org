@@ -23,8 +23,8 @@ assert_eq!(cfg.resolved_json().unwrap(), same.resolved_json().unwrap());
 Lennard-Jones resolves to the same configuration as =recommended=.
 
 The measurements below are at rho = 6.
-On short-range Morse (rho = 14) a serial test of the pair scale found the minimum less often than the default did, so the pair scale is not a free improvement.
-Check the range of your pair before adopting it.
+A 24-seed serial test on Morse 55 and Morse 80 at rho = 14 found no significant difference in hits either way.
+The pair scale stays opt-in and =Config::recommended= is the default.
 
 =PairKind::length_scale= is =r_min / 2^(1/6)=: 1 for Lennard-Jones and 0.891 for Morse.
 

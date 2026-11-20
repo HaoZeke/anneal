@@ -1,5 +1,5 @@
 ``Config::recommended_for_pair(n, kind)`` is ``Config::recommended`` in the length unit of a unit-depth pair potential, taken from ``PairKind::length_scale()``.
 Lennard-Jones resolves to the same configuration as ``Config::recommended(n)``.
 Morse moves every length from the Lennard-Jones diameter onto its own pair minimum.
-It is opt-in: ``Config::recommended`` stays the default, and on short-range Morse (rho = 14) a serial test found the minimum less often with the pair scale than without it.
+It is opt-in: ``Config::recommended`` stays the default, and a 24-seed serial test on Morse 55 and Morse 80 at rho = 14 found no significant difference in hits either way.
 ``h2h_morse`` applies it when ``H2H_PAIR_SCALE=1`` is set and otherwise keeps the preset.

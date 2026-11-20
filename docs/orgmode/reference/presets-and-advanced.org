@@ -29,7 +29,7 @@ The block under the constructor is the example =cargo test --doc= runs.
   The same rule serves every pair form.
   Lennard-Jones resolves to the same configuration as =recommended(n)=, and Morse moves every length from the Lennard-Jones diameter onto its own pair minimum.
   It is opt-in: =recommended= stays the default.
-  On short-range Morse (rho = 14) a serial test of the pair scale found the minimum less often than the default did, so check the range of the pair you search before choosing it.
+  A 24-seed serial test on Morse 55 and Morse 80 at rho = 14 found no significant difference in hits either way, so =recommended= remains the default.
 
   #+begin_src rust
   use anneal_core::methods::cluster_hopping::Config;
