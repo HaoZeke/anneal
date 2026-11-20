@@ -1,4 +1,8 @@
 // Copyright (c) anneal developers
+
+#![warn(missing_docs)]
+#![cfg_attr(doc, deny(missing_docs))]
+
 //! `anneal._core`: anneal-core's Python module with the rgpot kernels.
 
 use pyo3::prelude::*;
