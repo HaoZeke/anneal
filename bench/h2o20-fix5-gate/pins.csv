@@ -1,0 +1,7 @@
+component,version,source,sha256
+xtb,6.7.1 (edcfbbe),conda-forge xtb-6.7.1-h8876d29_4 from the rgpot 8efdd246 xtbbld lock,481a1e7d8151fc08e0341b8e06ab60ac09cf1c2628738eeb83346271274bf8f4
+crest,3.0.2 (6914a25),conda-forge crest-3.0.2-h8876d29_1,16c5de4578000dfd8ea5758da9f5c497778be0dd7a6a1c1e8933030479d0e56e
+libxtb_engine.so,rgpot 8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e,meson release with_xtb with_fortran_pots in the locked xtbbld env,f7e5a40140cac0c67863f4dce998408f288b098aad0c7efd0c3fc1fca1ac4de4
+librgpot.so,rgpot 8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e,same build; Sutton-Chen for h2h_sc,53eba6d99d28d3f7f9704ea77922897db7760fb6e4108416bd50343938aac5ed
+gfn2_water_h2h,tree b04621fd81776cfb78626162c5b3e746acb9859f,cargo 1.88.0 release --locked --features rgpot-ex,edf5215f6da97f70370b4207dbac15b72fd3ff6640a4d9792b75b0b5bb66391b
+gfn2_water_crest_driver,tree b04621fd81776cfb78626162c5b3e746acb9859f,cargo 1.88.0 release --locked --features rgpot-ex,261cdfaff865b00232b0844eb0958b568b3a2642bfed4772b95843cb79721adf
