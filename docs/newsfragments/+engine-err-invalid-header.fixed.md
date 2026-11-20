@@ -1,0 +1,1 @@
+The generated C header `rgpot-core/include/rgpot.h` now declares `ENGINE_ERR_INVALID`, the engine code for an invalid argument, next to `ENGINE_ERR_UNSUPPORTED`, so C hosts can name the code that the Rust loader returns.
