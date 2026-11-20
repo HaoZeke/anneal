@@ -404,3 +404,26 @@ fn the_once_per_chain_completion_is_absent_unless_asked() {
         cfg.resolved_sha256().unwrap()
     );
 }
+
+#[test]
+fn the_framework_reading_is_absent_unless_asked() {
+    let cfg = Config::recommended(38);
+    assert!(!cfg.symmetry_completion_framework);
+    assert!(
+        !cfg.resolved_json()
+            .unwrap()
+            .contains("symmetry_completion_framework")
+    );
+    let mut framework = cfg.clone();
+    framework.symmetry_completion_framework = true;
+    assert!(
+        framework
+            .resolved_json()
+            .unwrap()
+            .contains(r#""symmetry_completion_framework":true"#)
+    );
+    assert_ne!(
+        framework.resolved_sha256().unwrap(),
+        cfg.resolved_sha256().unwrap()
+    );
+}
