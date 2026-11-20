@@ -73,8 +73,14 @@ fn centroid(x: ArrayView1<f64>, n: usize) -> [f64; 3] {
 fn rotate(v: [f64; 3], axis: [f64; 3], angle: f64) -> [f64; 3] {
     // Host `sin` and `cos` of the same angle are not one function on glibc
     // and libSystem, and this rotation places the symmetrised points.
-    let s = libm::sin(angle);
-    let co = libm::cos(angle);
+    rotate_trig(v, axis, libm::sin(angle), libm::cos(angle))
+}
+
+/// [`rotate`] with the sine and cosine of the angle already in hand.
+///
+/// The arithmetic is the Rodrigues formula. A scan that builds one image
+/// per atom used to call `sin` and `cos` on that same angle every time.
+fn rotate_trig(v: [f64; 3], axis: [f64; 3], s: f64, co: f64) -> [f64; 3] {
     let dot = v[0] * axis[0] + v[1] * axis[1] + v[2] * axis[2];
     let cross = [
         axis[1] * v[2] - axis[2] * v[1],
@@ -86,6 +92,81 @@ fn rotate(v: [f64; 3], axis: [f64; 3], angle: f64) -> [f64; 3] {
         v[1] * co + cross[1] * s + axis[1] * dot * (1.0 - co),
         v[2] * co + cross[2] * s + axis[2] * dot * (1.0 - co),
     ]
+}
+
+fn squared_offset(image: [f64; 3], x: f64, y: f64, z: f64) -> f64 {
+    let dx = image[0] - x;
+    let dy = image[1] - y;
+    let dz = image[2] - z;
+    dx * dx + dy * dy + dz * dz
+}
+
+/// Sine and cosine of one order, from the same `libm` calls as a direct scan.
+///
+/// `sin(pi / order)` and `sin`/`cos` of `2 pi / order` are computed once.
+/// The double-angle formulas are not those calls, so they are not used.
+#[derive(Clone, Copy)]
+struct OrderTurn {
+    order: usize,
+    /// `4 * sin(pi / order)^2`, the squared-chord scale.
+    chord_scale: f64,
+    /// `16 * sin(pi / order)^2`, the leave-the-site scale.
+    leave_scale: f64,
+    /// `sin(2 pi / order)`.
+    sine: f64,
+    /// `cos(2 pi / order)`.
+    cosine: f64,
+}
+
+impl OrderTurn {
+    fn new(order: usize) -> Option<Self> {
+        if order < 2 {
+            return None;
+        }
+        let half = libm::sin(std::f64::consts::PI / order as f64);
+        let angle = 2.0 * std::f64::consts::PI / order as f64;
+        Some(Self {
+            order,
+            chord_scale: 4.0 * half * half,
+            leave_scale: 16.0 * half * half,
+            sine: libm::sin(angle),
+            cosine: libm::cos(angle),
+        })
+    }
+}
+
+/// Whether `sqrt(total / n) >= cap * (1 + 1e-6)` after `total > cap^2 * n`.
+///
+/// The square of that gate is `edge`. The computed square root does not
+/// decrease as `total` grows, and every sum strictly above `edge` is
+/// already on the reject side of the comparison. Sums between `cap^2 * n`
+/// and `edge`, including `edge` itself, keep the square root.
+fn sum_past_cap(total: f64, n: usize, cap: f64) -> bool {
+    let limit = cap * cap * (n as f64);
+    if !(total > limit) {
+        return false;
+    }
+    let gate = cap * (1.0 + 1.0e-6);
+    let edge = gate * gate * (n as f64);
+    if total > edge {
+        return true;
+    }
+    (total / n as f64).sqrt() >= gate
+}
+
+/// Squared displacement when the image lies strictly inside half the gap.
+///
+/// The nearest other atom is `gap` away. An image closer than half that is
+/// closer to the source atom than to any other, and this squared length is
+/// the one the nearest-image scan records for the source. A tie, or a
+/// displacement that only meets the half gap, falls through to the scan,
+/// which keeps the earlier index.
+fn image_on_self(here: [f64; 3], image: [f64; 3], gap: f64) -> Option<f64> {
+    if !gap.is_finite() || gap <= 0.0 {
+        return None;
+    }
+    let self_d2 = squared_offset(image, here[0], here[1], here[2]);
+    (self_d2 < gap * 0.25).then_some(self_d2)
 }
 
 fn normalise(v: [f64; 3]) -> Option<[f64; 3]> {
@@ -218,14 +299,13 @@ impl Cloud {
     /// The farthest atom is tested first. A low order moves that atom, so
     /// the scan of the rest does not run. A high order whose turn is shorter
     /// than every gap fails here and never reaches the residual scan.
-    fn any_atom_can_leave(&self, axis: [f64; 3], order: usize) -> bool {
-        if order < 2 || self.xs.is_empty() {
+    fn any_atom_can_leave(&self, axis: [f64; 3], turn: &OrderTurn) -> bool {
+        if turn.order < 2 || self.xs.is_empty() {
             return false;
         }
-        let sine = libm::sin(std::f64::consts::PI / order as f64);
         // chord^2 = 4 * r_perp^2 * sin^2, and (gap / 2)^2 = gap^2 / 4,
         // so chord >= gap / 2 is 16 * r_perp^2 * sin^2 >= gap^2.
-        let scale = 16.0 * sine * sine;
+        let scale = turn.leave_scale;
         let gaps = self.gaps();
         let can_leave = |index: usize| {
             let gap = gaps[index];
@@ -246,14 +326,51 @@ impl Cloud {
         (0..self.xs.len()).any(|index| index != far && can_leave(index))
     }
 
+    /// Nearest atom, eight coordinates at a time.
+    ///
+    /// Strict `<` keeps the earlier index on a tie. The distances in a
+    /// chunk do not depend on each other, so the compiler can autovectorise
+    /// them. The index update stays in program order, then the tail.
     fn nearest_index(&self, image: [f64; 3]) -> (usize, f64) {
+        let n = self.xs.len();
+        let mut index = 0usize;
+        let mut best_index = 0usize;
+        let mut best = f64::INFINITY;
+        while index + 8 <= n {
+            let mut dist = [0.0; 8];
+            for lane in 0..8 {
+                dist[lane] = squared_offset(
+                    image,
+                    self.xs[index + lane],
+                    self.ys[index + lane],
+                    self.zs[index + lane],
+                );
+            }
+            for lane in 0..8 {
+                if dist[lane] < best {
+                    best = dist[lane];
+                    best_index = index + lane;
+                }
+            }
+            index += 8;
+        }
+        while index < n {
+            let distance = squared_offset(image, self.xs[index], self.ys[index], self.zs[index]);
+            if distance < best {
+                best = distance;
+                best_index = index;
+            }
+            index += 1;
+        }
+        (best_index, best)
+    }
+
+    #[cfg(test)]
+    fn nearest_index_scalar(&self, image: [f64; 3]) -> (usize, f64) {
         let mut best_index = 0usize;
         let mut best = f64::INFINITY;
         for index in 0..self.xs.len() {
-            let dx = image[0] - self.xs[index];
-            let dy = image[1] - self.ys[index];
-            let dz = image[2] - self.zs[index];
-            let distance = dx * dx + dy * dy + dz * dz;
+            let distance = squared_offset(image, self.xs[index], self.ys[index], self.zs[index]);
             if distance < best {
                 best = distance;
                 best_index = index;
@@ -275,12 +392,11 @@ impl Cloud {
     /// neighbour list is not needed. A turn that stays under the cap cannot
     /// be rejected that way, so it is kept only when some atom can reach a
     /// different atom.
-    fn identity_stays_under(&self, axis: [f64; 3], order: usize, cap: f64) -> bool {
+    fn identity_stays_under(&self, axis: [f64; 3], turn: &OrderTurn, cap: f64) -> bool {
         if !cap.is_finite() {
             return true;
         }
-        let sine = libm::sin(std::f64::consts::PI / order as f64);
-        let scale = 4.0 * sine * sine;
+        let scale = turn.chord_scale;
         let limit = cap * cap * self.xs.len() as f64;
         let mut total = 0.0;
         for index in 0..self.xs.len() {
@@ -293,37 +409,150 @@ impl Cloud {
     }
 
     fn symmetry_deviation(&self, axis: [f64; 3], order: usize, cap: f64) -> Option<f64> {
-        if order < 2 {
-            return None;
-        }
-        if self.identity_stays_under(axis, order, cap) && !self.any_atom_can_leave(axis, order) {
-            return None;
-        }
-        let deviation = self.rotation_deviation(axis, order, cap)?;
-        self.permutation_moves(axis, order).then_some(deviation)
+        let turn = OrderTurn::new(order)?;
+        self.deviation_with(axis, &turn, cap)
     }
 
-    fn permutation_moves(&self, axis: [f64; 3], order: usize) -> bool {
-        let angle = 2.0 * std::f64::consts::PI / order as f64;
-        let sine = libm::sin(std::f64::consts::PI / order as f64);
-        let scale = 4.0 * sine * sine;
+    fn deviation_with(&self, axis: [f64; 3], turn: &OrderTurn, cap: f64) -> Option<f64> {
+        if self.identity_stays_under(axis, turn, cap) && !self.any_atom_can_leave(axis, turn) {
+            return None;
+        }
+        self.exchange_residual(axis, turn, cap)
+    }
+
+    /// Residual and the off-axis exchange, from one nearest-image pass.
+    ///
+    /// The distance sum is the residual. An atom that can leave its site and
+    /// whose nearest image is itself is not a permutation of the cloud, and
+    /// neither is a turn that lands every atom on itself. The cap stops the
+    /// pass at the same threshold as the distance scan. Sine and cosine of
+    /// the turn are computed once.
+    ///
+    /// A finite cap that the distances already exceed returns before the
+    /// neighbour list is built. The list is only needed for the exchange.
+    fn exchange_residual(&self, axis: [f64; 3], turn: &OrderTurn, cap: f64) -> Option<f64> {
+        let n = self.xs.len();
+        if n == 0 || turn.order < 2 {
+            return None;
+        }
+        if cap.is_finite()
+            && self.gaps.borrow().is_none()
+            && self.residual_past_cap(axis, turn, cap)
+        {
+            return None;
+        }
+        let scale = turn.chord_scale;
+        let s = turn.sine;
+        let co = turn.cosine;
         let gaps = self.gaps();
+        let mut total = 0.0;
         let mut moved = false;
-        for index in 0..self.xs.len() {
+        let stop = cap.is_finite();
+        for index in 0..n {
             let gap = gaps[index];
             let chord_sq = scale * self.perp_sq_at(index, axis);
             // chord^2 < (gap / 2)^2. An atom that close to the axis has no
             // other site it can reach, so staying put is the permutation.
             let axial = !gap.is_finite() || gap <= 0.0 || chord_sq < gap * 0.25;
-            let (partner, _) = self.nearest_index(rotate(self.point(index), axis, angle));
+            let here = self.point(index);
+            let image = rotate_trig(here, axis, s, co);
+            let (partner, distance) = if let Some(self_d2) = image_on_self(here, image, gap) {
+                (index, self_d2)
+            } else {
+                self.nearest_index(image)
+            };
+            total += distance;
             if !axial && partner == index {
-                return false;
+                return None;
             }
             if partner != index {
                 moved = true;
             }
+            if stop && sum_past_cap(total, n, cap) {
+                return None;
+            }
         }
-        moved
+        moved.then_some((total / n as f64).sqrt())
+    }
+
+    /// Whether the nearest-image sum is already past `cap`.
+    ///
+    /// Distances only: no neighbour list and no partner index. Each chunk's
+    /// squared lengths do not depend on each other, so the compiler can
+    /// autovectorise them. The minimum uses the same `<` as the index scan,
+    /// so a tie has the same squared length and the partial sum matches the
+    /// one-pass residual. A turn that stays under the cap is not decided
+    /// here.
+    fn residual_past_cap(&self, axis: [f64; 3], turn: &OrderTurn, cap: f64) -> bool {
+        let n = self.xs.len();
+        if n == 0 || turn.order < 2 || !cap.is_finite() {
+            return false;
+        }
+        let mut total = 0.0;
+        for index in 0..n {
+            let image = rotate_trig(self.point(index), axis, turn.sine, turn.cosine);
+            total += self.nearest_squared_wide(image);
+            if sum_past_cap(total, n, cap) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Smallest squared distance, four coordinates at a time.
+    ///
+    /// Each lane keeps its own minimum, so the four lengths in a chunk do
+    /// not depend on each other and the compiler can autovectorise them.
+    /// Strict `<` makes the lane minimum the squared length the index scan
+    /// keeps. The tail joins the first lane.
+    #[inline(never)]
+    fn nearest_squared_wide(&self, image: [f64; 3]) -> f64 {
+        let mut lane0 = f64::INFINITY;
+        let mut lane1 = f64::INFINITY;
+        let mut lane2 = f64::INFINITY;
+        let mut lane3 = f64::INFINITY;
+        let mut xs = self.xs.chunks_exact(4);
+        let mut ys = self.ys.chunks_exact(4);
+        let mut zs = self.zs.chunks_exact(4);
+        for ((x, y), z) in xs.by_ref().zip(ys.by_ref()).zip(zs.by_ref()) {
+            let d0 = squared_offset(image, x[0], y[0], z[0]);
+            let d1 = squared_offset(image, x[1], y[1], z[1]);
+            let d2 = squared_offset(image, x[2], y[2], z[2]);
+            let d3 = squared_offset(image, x[3], y[3], z[3]);
+            if d0 < lane0 {
+                lane0 = d0;
+            }
+            if d1 < lane1 {
+                lane1 = d1;
+            }
+            if d2 < lane2 {
+                lane2 = d2;
+            }
+            if d3 < lane3 {
+                lane3 = d3;
+            }
+        }
+        for ((&x, &y), &z) in xs
+            .remainder()
+            .iter()
+            .zip(ys.remainder())
+            .zip(zs.remainder())
+        {
+            let distance = squared_offset(image, x, y, z);
+            if distance < lane0 {
+                lane0 = distance;
+            }
+        }
+        if lane1 < lane0 {
+            lane0 = lane1;
+        }
+        if lane2 < lane0 {
+            lane0 = lane2;
+        }
+        if lane3 < lane0 {
+            lane0 = lane3;
+        }
+        lane0
     }
 
     fn point(&self, index: usize) -> [f64; 3] {
@@ -517,11 +746,13 @@ impl Cloud {
             return None;
         }
         let angle = 2.0 * std::f64::consts::PI / order as f64;
+        let s = libm::sin(angle);
+        let co = libm::cos(angle);
         let mut total = 0.0;
         let stop = cap.is_finite();
         if stop {
             for index in 0..n {
-                total += self.nearest_one(rotate(self.point(index), axis, angle));
+                total += self.nearest_one(rotate_trig(self.point(index), axis, s, co));
                 if total > cap * cap * n as f64 {
                     let partial = (total / n as f64).sqrt();
                     if partial >= cap * (1.0 + 1.0e-6) {
@@ -536,7 +767,7 @@ impl Cloud {
         while index < n {
             let width = (n - index).min(4);
             for lane in 0..width {
-                stored[lane] = rotate(self.point(index + lane), axis, angle);
+                stored[lane] = rotate_trig(self.point(index + lane), axis, s, co);
             }
             if !self.accumulate(&stored[..width], cap, &mut total) {
                 return None;
@@ -640,15 +871,19 @@ fn candidate_axes(x: ArrayView1<f64>, n: usize) -> Vec<[f64; 3]> {
 pub fn detect(x: ArrayView1<f64>, n: usize, orders: &[usize], tolerance: f64) -> Option<Candidate> {
     let mut best: Option<Candidate> = None;
     let cloud = Cloud::from_view(x, n);
+    let turns: Vec<OrderTurn> = orders
+        .iter()
+        .filter_map(|&order| OrderTurn::new(order))
+        .collect();
     for axis in candidate_axes(x, n) {
-        for &order in orders {
-            let Some(d) = cloud.symmetry_deviation(axis, order, tolerance) else {
+        for turn in &turns {
+            let Some(d) = cloud.deviation_with(axis, turn, tolerance) else {
                 continue;
             };
             if d < tolerance && best.map(|b| d < b.deviation).unwrap_or(true) {
                 best = Some(Candidate {
                     axis,
-                    order,
+                    order: turn.order,
                     improper: false,
                     deviation: d,
                 });
@@ -699,15 +934,18 @@ pub fn detect_orders(
     let axes = candidate_axes(x, n);
     let mut out = Vec::new();
     for &order in orders {
+        let Some(turn) = OrderTurn::new(order) else {
+            continue;
+        };
         let mut best: Option<Candidate> = None;
         for &axis in &axes {
-            let Some(d) = cloud.symmetry_deviation(axis, order, tolerance) else {
+            let Some(d) = cloud.deviation_with(axis, &turn, tolerance) else {
                 continue;
             };
             if d < tolerance && best.as_ref().map(|b| d < b.deviation).unwrap_or(true) {
                 best = Some(Candidate {
                     axis,
-                    order,
+                    order: turn.order,
                     improper: false,
                     deviation: d,
                 });
@@ -734,15 +972,19 @@ pub fn detect_all(
 ) -> Vec<Candidate> {
     let mut out = Vec::new();
     let cloud = Cloud::from_view(x, n);
+    let turns: Vec<OrderTurn> = orders
+        .iter()
+        .filter_map(|&order| OrderTurn::new(order))
+        .collect();
     for axis in candidate_axes(x, n) {
-        for &order in orders {
-            let Some(d) = cloud.symmetry_deviation(axis, order, tolerance) else {
+        for turn in &turns {
+            let Some(d) = cloud.deviation_with(axis, turn, tolerance) else {
                 continue;
             };
             if d < tolerance {
                 out.push(Candidate {
                     axis,
-                    order,
+                    order: turn.order,
                     improper: false,
                     deviation: d,
                 });
@@ -2451,5 +2693,544 @@ mod shell_tests {
             ..spec
         };
         assert!(shell_core_group(x.view(), n, &spec).is_some());
+    }
+
+    /// Residual and the exchange come from one nearest image. The split
+    /// scan measures the residual, then walks the cloud again.
+    #[test]
+    fn one_pass_residual_matches_the_image_that_supplies_the_exchange() {
+        let mut state = 0x1234_5678_9abc_def0_u64;
+        let mut unit = || {
+            state = state
+                .wrapping_mul(0x9e37_79b9_7f4a_7c15)
+                .wrapping_add(0x6a09_e667_f3bc_c909);
+            (state >> 11) as f64 / ((1u64 << 53) as f64) - 0.5
+        };
+        let mut mismatches = 0u32;
+        let mut example = String::new();
+        for n in [2usize, 3, 5, 7, 9, 17] {
+            let mut coords = Vec::with_capacity(3 * n);
+            for _ in 0..3 * n {
+                coords.push(unit() * 2.0);
+            }
+            if n >= 4 {
+                coords[3] = coords[0];
+                coords[4] = coords[1];
+                coords[5] = coords[2];
+            }
+            let x = Array1::from(coords);
+            let cloud = Cloud::from_view(x.view(), n);
+            for order in 2..=n.min(8) {
+                for cap in [0.05_f64, 0.2, 1.0, f64::INFINITY] {
+                    let axis = normalise([unit(), unit(), unit()]).unwrap_or([0.0, 0.0, 1.0]);
+                    let got = cloud.symmetry_deviation(axis, order, cap);
+                    let scalar = scalar_exchange(&cloud, axis, order, cap);
+                    if !same_option_bits(got, scalar) {
+                        mismatches += 1;
+                        if example.is_empty() {
+                            example = format!(
+                                "n={n} order={order} cap={cap} got={got:?} scalar={scalar:?}"
+                            );
+                        }
+                    }
+                    let split = split_exchange(&cloud, axis, order, cap);
+                    if !same_option_bits(got, split) {
+                        mismatches += 1;
+                        if example.is_empty() {
+                            example = format!(
+                                "split n={n} order={order} cap={cap} got={got:?} split={split:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(mismatches, 0, "{example}");
+    }
+
+    fn scalar_exchange(cloud: &Cloud, axis: [f64; 3], order: usize, cap: f64) -> Option<f64> {
+        let n = cloud.xs.len();
+        if n == 0 || order < 2 {
+            return None;
+        }
+        let turn = OrderTurn::new(order)?;
+        if cloud.identity_stays_under(axis, &turn, cap) && !cloud.any_atom_can_leave(axis, &turn) {
+            return None;
+        }
+        let angle = 2.0 * std::f64::consts::PI / order as f64;
+        let sine = libm::sin(std::f64::consts::PI / order as f64);
+        let scale = 4.0 * sine * sine;
+        let gaps = cloud.gaps();
+        let mut total = 0.0;
+        let mut moved = false;
+        let limit = cap * cap * n as f64;
+        let stop = cap.is_finite();
+        for index in 0..n {
+            let gap = gaps[index];
+            let chord_sq = scale * cloud.perp_sq_at(index, axis);
+            let axial = !gap.is_finite() || gap <= 0.0 || chord_sq < gap * 0.25;
+            let (partner, distance) =
+                cloud.nearest_index_scalar(rotate(cloud.point(index), axis, angle));
+            total += distance;
+            if !axial && partner == index {
+                return None;
+            }
+            if partner != index {
+                moved = true;
+            }
+            if stop && total > limit {
+                let partial = (total / n as f64).sqrt();
+                if partial >= cap * (1.0 + 1.0e-6) {
+                    return None;
+                }
+            }
+        }
+        moved.then_some((total / n as f64).sqrt())
+    }
+
+    /// Distance-only residual, then a second walk for the exchange.
+    fn split_exchange(cloud: &Cloud, axis: [f64; 3], order: usize, cap: f64) -> Option<f64> {
+        if order < 2 || cloud.xs.is_empty() {
+            return None;
+        }
+        let turn = OrderTurn::new(order)?;
+        if cloud.identity_stays_under(axis, &turn, cap) && !cloud.any_atom_can_leave(axis, &turn) {
+            return None;
+        }
+        let deviation = cloud.rotation_deviation(axis, order, cap)?;
+        let angle = 2.0 * std::f64::consts::PI / order as f64;
+        let sine = libm::sin(std::f64::consts::PI / order as f64);
+        let scale = 4.0 * sine * sine;
+        let gaps = cloud.gaps();
+        let mut moved = false;
+        for index in 0..cloud.xs.len() {
+            let gap = gaps[index];
+            let chord_sq = scale * cloud.perp_sq_at(index, axis);
+            let axial = !gap.is_finite() || gap <= 0.0 || chord_sq < gap * 0.25;
+            let (partner, _) = cloud.nearest_index_scalar(rotate(cloud.point(index), axis, angle));
+            if !axial && partner == index {
+                return None;
+            }
+            if partner != index {
+                moved = true;
+            }
+        }
+        moved.then_some(deviation)
+    }
+
+    #[test]
+    fn wide_nearest_image_matches_the_scalar_scan() {
+        let mut state = 0x1234_5678_u64;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (state >> 33) as f64 / (1u32 << 31) as f64
+        };
+        for n in [1usize, 3, 7, 8, 9, 17, 33, 55] {
+            let mut coords = Vec::with_capacity(3 * n);
+            for _ in 0..3 * n {
+                coords.push(next() * 4.0 - 2.0);
+            }
+            if n >= 4 {
+                coords[3] = coords[0];
+                coords[4] = coords[1];
+                coords[5] = coords[2];
+            }
+            let x = Array1::from(coords);
+            let cloud = Cloud::from_view(x.view(), n);
+            for _ in 0..24 {
+                let image = [next() * 6.0 - 3.0, next() * 6.0 - 3.0, next() * 6.0 - 3.0];
+                let scalar = cloud.nearest_index_scalar(image);
+                let chosen = cloud.nearest_index(image);
+                assert_eq!(chosen.0, scalar.0, "n={n}");
+                assert_eq!(chosen.1.to_bits(), scalar.1.to_bits(), "n={n}");
+                let wide = cloud.nearest_squared_wide(image);
+                assert_eq!(wide.to_bits(), scalar.1.to_bits(), "n={n}");
+            }
+        }
+    }
+
+    #[test]
+    fn an_image_inside_half_the_gap_is_the_source_atom() {
+        let mut state = 0x9e37_79b9_u64;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (state >> 33) as f64 / (1u32 << 31) as f64
+        };
+        for n in [4usize, 12, 33, 55] {
+            let mut coords = Vec::with_capacity(3 * n);
+            for _ in 0..3 * n {
+                coords.push(next() * 3.0 - 1.5);
+            }
+            let x = Array1::from(coords);
+            let cloud = Cloud::from_view(x.view(), n);
+            let gaps = cloud.gaps().clone();
+            let axes = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 1.0, 1.0]];
+            for axis in axes {
+                let axis = normalise(axis).expect("axis");
+                for order in [2usize, 3, 4, 6, 12] {
+                    let angle = 2.0 * std::f64::consts::PI / order as f64;
+                    for index in 0..n {
+                        let here = cloud.point(index);
+                        let image = rotate(here, axis, angle);
+                        let Some(self_d2) = image_on_self(here, image, gaps[index]) else {
+                            continue;
+                        };
+                        let (partner, distance) = cloud.nearest_index_scalar(image);
+                        assert_eq!(partner, index, "n={n} order={order}");
+                        assert_eq!(distance.to_bits(), self_d2.to_bits());
+                    }
+                }
+            }
+        }
+        let x = Array1::from(vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0]);
+        let cloud = Cloud::from_view(x.view(), 2);
+        let here = cloud.point(0);
+        let image = [here[0] + 0.999, here[1], here[2]];
+        let self_d2 = image_on_self(here, image, 4.0).expect("inside half the gap");
+        let (partner, distance) = cloud.nearest_index_scalar(image);
+        assert_eq!(partner, 0);
+        assert_eq!(distance.to_bits(), self_d2.to_bits());
+        let outside = [here[0] + 1.001, here[1], here[2]];
+        assert!(image_on_self(here, outside, 4.0).is_none());
+    }
+
+    /// A turn the distances already reject never builds the neighbour list.
+    #[test]
+    fn a_miss_leaves_the_neighbour_list_unbuilt() {
+        let mut state = 0x1234_5678_u64;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (state >> 33) as f64 / (1u32 << 31) as f64
+        };
+        for n in [8usize, 17, 33] {
+            let mut coords = Vec::with_capacity(3 * n);
+            for _ in 0..3 * n {
+                coords.push(next() * 4.0 - 2.0);
+            }
+            let x = Array1::from(coords);
+            let cloud = Cloud::from_view(x.view(), n);
+            let axis = normalise([0.2, -0.4, 0.9]).expect("axis");
+            let got = cloud.symmetry_deviation(axis, 2, 0.05);
+            assert!(got.is_none(), "n={n} {got:?}");
+            assert!(cloud.gaps.borrow().is_none(), "n={n}");
+        }
+    }
+
+    /// A sum strictly above the squared gate is the square-root comparison.
+    #[test]
+    fn a_sum_strictly_above_the_squared_gate_matches_the_square_root() {
+        let caps = [1.0e-6, 1.0e-4, 1.0e-2, 0.05, 0.1, 0.2, 1.0, 10.0, 1.0e3];
+        for n in 1..=128 {
+            for cap in caps {
+                let gate = cap * (1.0 + 1.0e-6);
+                let edge = gate * gate * (n as f64);
+                if !edge.is_finite() || edge <= 0.0 {
+                    continue;
+                }
+                let above = edge.next_up();
+                let root = (above / n as f64).sqrt();
+                assert!(root >= gate, "n={n} cap={cap} root={root} gate={gate}");
+                for scale in [0.5, 1.0, 2.0, 16.0] {
+                    let total = edge * scale;
+                    let original =
+                        total > cap * cap * (n as f64) && (total / n as f64).sqrt() >= gate;
+                    assert_eq!(
+                        sum_past_cap(total, n, cap),
+                        original,
+                        "n={n} cap={cap} scale={scale}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// `detect`, `detect_all` and `detect_orders` keep the base split's bits.
+    ///
+    /// The reference is the distance residual followed by the exchange walk,
+    /// and the scalar mirror for a plane. Accepted deviations match by
+    /// `to_bits`, including a ring that is symmetric, duplicated sites, and
+    /// the random clouds the microbench times.
+    #[test]
+    fn detection_matches_the_base_split_on_the_corpus() {
+        let mut clouds: Vec<(String, Array1<f64>, usize)> = Vec::new();
+        for (name, n, seed) in [
+            ("random33", 33usize, 1u64),
+            ("random55", 55, 2),
+            ("random38", 38, 7),
+        ] {
+            clouds.push((name.to_string(), bench_cloud(n, seed), n));
+        }
+        clouds.push(("ring12".to_string(), bench_ring(12, 2.2), 12));
+        let (lattice, lattice_n) = bench_lattice(2);
+        clouds.push(("lattice".to_string(), lattice, lattice_n));
+        let mut duplicated = bench_cloud(6, 3).to_vec();
+        duplicated.extend_from_within(..);
+        clouds.push(("duplicated".to_string(), Array1::from(duplicated), 12));
+
+        let orders: Vec<usize> = (2..=12).collect();
+        let high: Vec<usize> = (2..=38).collect();
+        let tolerance = 0.1;
+        for (name, x, n) in &clouds {
+            let orders = if name == "random38" { &high } else { &orders };
+            assert_detection_bits(name, x.view(), *n, orders, tolerance);
+        }
+    }
+
+    fn same_option_bits(left: Option<f64>, right: Option<f64>) -> bool {
+        match (left, right) {
+            (None, None) => true,
+            (Some(left), Some(right)) => left.to_bits() == right.to_bits(),
+            _ => false,
+        }
+    }
+
+    fn assert_candidate_bits(label: &str, got: &Candidate, expect: &Candidate) {
+        assert_eq!(got.order, expect.order, "{label} order");
+        assert_eq!(got.improper, expect.improper, "{label} improper");
+        for axis in 0..3 {
+            assert_eq!(
+                got.axis[axis].to_bits(),
+                expect.axis[axis].to_bits(),
+                "{label} axis {axis}"
+            );
+        }
+        assert_eq!(
+            got.deviation.to_bits(),
+            expect.deviation.to_bits(),
+            "{label} deviation"
+        );
+    }
+
+    fn assert_detection_bits(
+        name: &str,
+        x: ArrayView1<f64>,
+        n: usize,
+        orders: &[usize],
+        tolerance: f64,
+    ) {
+        let cloud = Cloud::from_view(x, n);
+        let axes = candidate_axes(x, n);
+        for &axis in &axes {
+            for &order in orders {
+                let got = cloud.symmetry_deviation(axis, order, tolerance);
+                let split = split_exchange(&cloud, axis, order, tolerance);
+                assert!(
+                    same_option_bits(got, split),
+                    "{name} order={order} got={got:?} split={split:?}"
+                );
+            }
+            let plane = cloud.plane_deviation(axis, tolerance);
+            let scalar = scalar_plane(&cloud, axis, tolerance);
+            assert!(
+                same_option_bits(plane, scalar),
+                "{name} plane got={plane:?} scalar={scalar:?}"
+            );
+        }
+
+        let expect_best = base_detect(x, n, orders, tolerance);
+        match (detect(x, n, orders, tolerance), expect_best) {
+            (None, None) => {}
+            (Some(got), Some(expect)) => {
+                assert_candidate_bits(&format!("{name} detect"), &got, &expect)
+            }
+            (got, expect) => panic!("{name} detect got={got:?} expect={expect:?}"),
+        }
+
+        let got_orders = detect_orders(x, n, orders, tolerance);
+        let expect_orders = base_detect_orders(x, n, orders, tolerance);
+        assert_eq!(
+            got_orders.len(),
+            expect_orders.len(),
+            "{name} detect_orders"
+        );
+        for (index, (got, expect)) in got_orders.iter().zip(&expect_orders).enumerate() {
+            assert_candidate_bits(&format!("{name} detect_orders {index}"), got, expect);
+        }
+
+        let got_all = detect_all(x, n, orders, tolerance);
+        let expect_all = base_detect_all(x, n, orders, tolerance);
+        assert_eq!(got_all.len(), expect_all.len(), "{name} detect_all");
+        for (index, (got, expect)) in got_all.iter().zip(&expect_all).enumerate() {
+            assert_candidate_bits(&format!("{name} detect_all {index}"), got, expect);
+        }
+    }
+
+    fn base_detect(
+        x: ArrayView1<f64>,
+        n: usize,
+        orders: &[usize],
+        tolerance: f64,
+    ) -> Option<Candidate> {
+        let cloud = Cloud::from_view(x, n);
+        let mut best: Option<Candidate> = None;
+        for axis in candidate_axes(x, n) {
+            for &order in orders {
+                let Some(deviation) = split_exchange(&cloud, axis, order, tolerance) else {
+                    continue;
+                };
+                if deviation < tolerance
+                    && best
+                        .as_ref()
+                        .map(|found| deviation < found.deviation)
+                        .unwrap_or(true)
+                {
+                    best = Some(Candidate {
+                        axis,
+                        order,
+                        improper: false,
+                        deviation,
+                    });
+                }
+            }
+        }
+        best
+    }
+
+    fn base_detect_orders(
+        x: ArrayView1<f64>,
+        n: usize,
+        orders: &[usize],
+        tolerance: f64,
+    ) -> Vec<Candidate> {
+        let cloud = Cloud::from_view(x, n);
+        let axes = candidate_axes(x, n);
+        let mut out = Vec::new();
+        for &order in orders {
+            let mut best: Option<Candidate> = None;
+            for &axis in &axes {
+                let Some(deviation) = split_exchange(&cloud, axis, order, tolerance) else {
+                    continue;
+                };
+                if deviation < tolerance
+                    && best
+                        .as_ref()
+                        .map(|found| deviation < found.deviation)
+                        .unwrap_or(true)
+                {
+                    best = Some(Candidate {
+                        axis,
+                        order,
+                        improper: false,
+                        deviation,
+                    });
+                }
+            }
+            if let Some(candidate) = best {
+                out.push(candidate);
+            }
+        }
+        out
+    }
+
+    fn base_detect_all(
+        x: ArrayView1<f64>,
+        n: usize,
+        orders: &[usize],
+        tolerance: f64,
+    ) -> Vec<Candidate> {
+        let cloud = Cloud::from_view(x, n);
+        let mut out = Vec::new();
+        for axis in candidate_axes(x, n) {
+            for &order in orders {
+                let Some(deviation) = split_exchange(&cloud, axis, order, tolerance) else {
+                    continue;
+                };
+                if deviation < tolerance {
+                    out.push(Candidate {
+                        axis,
+                        order,
+                        improper: false,
+                        deviation,
+                    });
+                }
+            }
+            let Some(deviation) = scalar_plane(&cloud, axis, tolerance) else {
+                continue;
+            };
+            if deviation < tolerance {
+                out.push(Candidate {
+                    axis,
+                    order: 1,
+                    improper: true,
+                    deviation,
+                });
+            }
+        }
+        out.sort_by(|left, right| {
+            left.deviation
+                .partial_cmp(&right.deviation)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        out
+    }
+
+    fn scalar_plane(cloud: &Cloud, axis: [f64; 3], cap: f64) -> Option<f64> {
+        let n = cloud.xs.len();
+        if n == 0 {
+            return None;
+        }
+        let mirror = mirror_matrix(axis);
+        let mut total = 0.0;
+        let limit = cap * cap * n as f64;
+        for index in 0..n {
+            let point = cloud.point(index);
+            let image = [
+                mirror[0][0] * point[0] + mirror[0][1] * point[1] + mirror[0][2] * point[2],
+                mirror[1][0] * point[0] + mirror[1][1] * point[1] + mirror[1][2] * point[2],
+                mirror[2][0] * point[0] + mirror[2][1] * point[1] + mirror[2][2] * point[2],
+            ];
+            total += cloud.nearest_squared_scalar(image);
+            if cap.is_finite() && total > limit {
+                let partial = (total / n as f64).sqrt();
+                if partial >= cap * (1.0 + 1.0e-6) {
+                    return None;
+                }
+            }
+        }
+        Some((total / n as f64).sqrt())
+    }
+
+    fn bench_cloud(n: usize, seed: u64) -> Array1<f64> {
+        let mut state = seed;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / ((1u64 << 53) as f64) - 0.5
+        };
+        let radius = 1.15 * (n as f64).cbrt();
+        Array1::from(
+            (0..3 * n)
+                .map(|_| 2.0 * radius * next())
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    fn bench_ring(n: usize, radius: f64) -> Array1<f64> {
+        let mut coords = vec![0.0; 3 * n];
+        for atom in 0..n {
+            let angle = 2.0 * std::f64::consts::PI * (atom as f64) / (n as f64);
+            coords[3 * atom] = radius * angle.cos();
+            coords[3 * atom + 1] = radius * angle.sin();
+        }
+        Array1::from(coords)
+    }
+
+    fn bench_lattice(max_r2: i32) -> (Array1<f64>, usize) {
+        let mut coords = Vec::new();
+        for i in -2..=2 {
+            for j in -2..=2 {
+                for k in -2..=2 {
+                    let r2 = i * i + j * j + k * k;
+                    if r2 > 0 && r2 <= max_r2 {
+                        coords.push(i as f64);
+                        coords.push(j as f64);
+                        coords.push(k as f64);
+                    }
+                }
+            }
+        }
+        let n = coords.len() / 3;
+        (Array1::from(coords), n)
     }
 }
