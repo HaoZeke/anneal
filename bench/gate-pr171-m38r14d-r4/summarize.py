@@ -281,27 +281,32 @@ def evaluate(found) -> tuple[list[dict[str, str]], list[dict[str, str]], str]:
         deficit = None
         rule1 = rule2 = rule3 = "0"
         search_equal = charge_equal = repeat_equal = False
+        search_mismatches = 0
+        hit_charge_mismatches = 0
+        repeat_mismatches = 0
         score_differences = 0
         if item["complete"]:
-            search_equal = all(
+            search_mismatches = sum(
                 found[(cell.name, cell.driver, "A", seed)].get("calls")
-                == found[(cell.name, cell.driver, "B", seed)].get("calls")
-                and found[(cell.name, cell.driver, "A", seed)].get("best_bits")
-                == found[(cell.name, cell.driver, "B", seed)].get("best_bits")
+                != found[(cell.name, cell.driver, "B", seed)].get("calls")
+                or found[(cell.name, cell.driver, "A", seed)].get("best_bits")
+                != found[(cell.name, cell.driver, "B", seed)].get("best_bits")
                 for seed in gate.SEEDS
             )
-            charge_equal = all(
-                row.get("hit") != "1"
-                or row.get("charged") == row.get("calls")
+            search_equal = search_mismatches == 0
+            hit_charge_mismatches = sum(
+                row.get("hit") == "1"
+                and row.get("charged") != row.get("calls")
                 for row in (
                     found[(cell.name, cell.driver, "B", seed)]
                     for seed in gate.SEEDS
                 )
             )
-            repeat_equal = all(
-                all(
+            charge_equal = hit_charge_mismatches == 0
+            repeat_mismatches = sum(
+                any(
                     found[(cell.name, cell.driver, "B", seed)].get(field)
-                    == found[(cell.name, cell.driver, "B2", seed)].get(field)
+                    != found[(cell.name, cell.driver, "B2", seed)].get(field)
                     for field in (
                         "hit",
                         "printed_hit",
@@ -312,6 +317,7 @@ def evaluate(found) -> tuple[list[dict[str, str]], list[dict[str, str]], str]:
                 )
                 for seed in gate.SEEDS
             )
+            repeat_equal = repeat_mismatches == 0
             score_differences = sum(
                 found[(cell.name, cell.driver, "B", seed)].get("hit")
                 != found[(cell.name, cell.driver, "B", seed)].get("printed_hit")
@@ -469,8 +475,11 @@ def evaluate(found) -> tuple[list[dict[str, str]], list[dict[str, str]], str]:
                 "outside_ratio_aa_hi": fmt(oa_hi, ".6f"),
                 "rule3": rule3,
                 "search_equal": "1" if search_equal else "0",
+                "search_mismatches": str(search_mismatches),
                 "hit_charge_equal": "1" if charge_equal else "0",
+                "hit_charge_mismatches": str(hit_charge_mismatches),
                 "repeat_equal": "1" if repeat_equal else "0",
+                "repeat_mismatches": str(repeat_mismatches),
                 "score_differences": str(score_differences),
                 "wilcoxon_w": fmt(w_stat, ".3f"),
                 "wilcoxon_p": fmt(w_prob, ".6g"),
@@ -562,8 +571,11 @@ SUMMARY_FIELDS = [
     "outside_ratio_aa_hi",
     "rule3",
     "search_equal",
+    "search_mismatches",
     "hit_charge_equal",
+    "hit_charge_mismatches",
     "repeat_equal",
+    "repeat_mismatches",
     "score_differences",
     "wilcoxon_w",
     "wilcoxon_p",

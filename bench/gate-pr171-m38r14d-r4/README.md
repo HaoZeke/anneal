@@ -446,3 +446,47 @@ A, B, B2, A2 order on core 0. It does not alter
 the cells, budgets, references, scoring, bootstrap
 stream, pass clauses, or round-three comparison
 rules above.
+
+## Round four retry verdict
+
+FAIL. The production preflight passed all 12 probes.
+Session 79ca48cebfe85ed5 then wrote 864 rows. Every
+exit is zero, every cell has 24 seeds in all four
+slots, and both B slots agree on every deterministic
+field.
+
+The A/A2 charged band is 1.000000. Clauses 1, 2,
+and 3 pass in every cell. Four cells fail the
+additional search or hit-charging invariants.
+
+| cell | driver | hits A/A2/B | charged B/A | outside B/A | search mismatches | hit-charge mismatches | score differences B | rules | verdict |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| lj75 | h2h_gmin_proof | 7/7/7 | 1.000000 | 1.008795 | 0 | 0 | 0 | 1/1/1 | pass |
+| lj98 | h2h_gmin_proof | 16/16/16 | 1.000000 | 1.005716 | 0 | 0 | 0 | 1/1/1 | pass |
+| m55r14 | h2h_morse | 18/18/18 | 1.000000 | 1.042058 | 2 | 0 | 0 | 1/1/1 | fail |
+| m80r14 | h2h_morse | 15/15/15 | 1.000000 | 1.050832 | 0 | 0 | 0 | 1/1/1 | pass |
+| m30r14 | h2h_morse | 17/17/17 | 1.000000 | 1.034256 | 0 | 0 | 0 | 1/1/1 | pass |
+| m38r6 | h2h_morse | 24/24/24 | 1.000000 | 1.006105 | 0 | 0 | 0 | 1/1/1 | pass |
+| m38r14 | h2h_morse | 11/11/24 | 0.106436 | 0.932571 | 19 | 1 | 0 | 1/1/1 | fail |
+| m38r14 | h2h_seed | 24/24/24 | 0.849222 | 1.010731 | 9 | 18 | 5 | 1/1/1 | fail |
+| lj75 | h2h_seed | 24/24/24 | 1.000000 | 0.995462 | 3 | 24 | 24 | 1/1/1 | fail |
+
+For h2h_seed m38r14, seen.lowest scores 24 hits
+in every arm. Printed best scores 23 for A and A2,
+differing at seed 2001. It scores 19 for B and B2,
+differing at seeds 2001, 2004, 2008, 2010, and
+2019.
+
+For h2h_seed LJ75, seen.lowest scores 24 hits and
+printed best scores zero in every arm; all 24 seeds
+differ. On the same seeds, h2h_gmin_proof scores
+seven hits in every arm. This is why h2h_seed is
+judged from seen.lowest rather than printed best.
+
+The m80r14 seed 2006 claim is verified in all four
+slots: hit is one and evals_to_hit and charged are
+both 3802858.
+
+Peak RssAnon is 286130176 bytes. The corresponding
+reported ru_maxrss and VmHWM are both 291151872
+bytes. Only RssAnon is a memory gate.
