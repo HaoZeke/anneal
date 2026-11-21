@@ -313,7 +313,15 @@ def base_rev() -> str | None:
             return rev
     if os.environ.get("CI") == "true":
         subprocess.run(
-            ["git", "-C", str(ROOT), "fetch", "--depth=1", "origin", "main"],
+            [
+                "git",
+                "-C",
+                str(ROOT),
+                "fetch",
+                "--depth=1",
+                "origin",
+                "+refs/heads/main:refs/remotes/origin/main",
+            ],
             capture_output=True,
         )
         if (
