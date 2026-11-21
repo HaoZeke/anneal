@@ -1,0 +1,447 @@
+# Copyright (c) anneal developers
+from __future__ import annotations
+
+import os
+from collections.abc import Callable, Mapping, Sequence
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import numpy.typing as npt
+
+from anneal._core import (
+    DEFAULT_HIT_TOL as DEFAULT_HIT_TOL,
+    SEARCH_HIT_TOL as SEARCH_HIT_TOL,
+    BasinBias as BasinBias,
+    Boltzmann as Boltzmann,
+    Bounds as Bounds,
+    Config as Config,
+    EpochLine as EpochLine,
+    Fast as Fast,
+    Gsa as Gsa,
+    History as History,
+    Ledger as Ledger,
+    Preset,
+    PyObjective as PyObjective,
+    __version__ as __version__,
+    energy_hits as energy_hits,
+)
+from anneal._landfold import (
+    LandfoldMap as LandfoldMap,
+    landfold as landfold,
+    landfold_book as landfold_book,
+)
+from anneal.ase import Anneal as Anneal
+from anneal.chemfit import (
+    ChemFitVector as ChemFitVector,
+    chemfit_box as chemfit_box,
+    fit_anneal as fit_anneal,
+    fit_chemfit as fit_chemfit,
+    flatten_parameters as flatten_parameters,
+    run_benchmark as run_benchmark,
+    run_fitter as run_fitter,
+    unflatten_parameters as unflatten_parameters,
+)
+from anneal.device import (
+    DeviceHistory as DeviceHistory,
+    EnsembleHistory as EnsembleHistory,
+    run_device as run_device,
+    run_ensemble as run_ensemble,
+)
+from anneal.tvm_ffi import (
+    TvmFfiTensorMetadata as TvmFfiTensorMetadata,
+    tvm_ffi_tensor as tvm_ffi_tensor,
+    tvm_ffi_tensor_metadata as tvm_ffi_tensor_metadata,
+    tvm_ffi_tensors_from_history as tvm_ffi_tensors_from_history,
+)
+
+class MinimizeResult:
+    x: npt.NDArray[np.float64]
+    fun: float
+    nfev: int
+    njev: int
+    charged: int
+    success: bool
+    message: str
+    diagnostics: dict[str, Any]
+    def __init__(
+        self,
+        x: npt.ArrayLike,
+        fun: float,
+        nfev: int,
+        success: bool,
+        message: str,
+        *,
+        njev: int = 0,
+        diagnostics: Mapping[str, Any] | None = None,
+    ) -> None: ...
+
+class JsonlParameterStore:
+    path: Path
+    def __init__(self, path: str | os.PathLike[str]) -> None: ...
+    def observations(self) -> list[tuple[npt.NDArray[np.float64], float]]: ...
+    def record(self, x: npt.ArrayLike, f: float) -> None: ...
+
+class Hdf5ParameterStore:
+    path: Path
+    def __init__(self, path: str | os.PathLike[str]) -> None: ...
+    def observations(self) -> list[tuple[npt.NDArray[np.float64], float]]: ...
+    def record(self, x: npt.ArrayLike, f: float) -> None: ...
+
+def open_parameter_store(
+    store: str | os.PathLike[str] | Any | None,
+) -> JsonlParameterStore | Hdf5ParameterStore | Any | None: ...
+def run(
+    obj_fn: Callable[[npt.NDArray[np.float64]], float],
+    low: npt.ArrayLike,
+    high: npt.ArrayLike,
+    preset: Preset,
+    n_epochs: int = 100,
+    steps_per_epoch: int = 200,
+    seed: int = 42,
+    x0: npt.ArrayLike | None = None,
+    max_evals: int | None = None,
+) -> History: ...
+def run_qmc(
+    obj_fn: Callable[[npt.NDArray[np.float64]], float],
+    low: npt.ArrayLike,
+    high: npt.ArrayLike,
+    preset: Preset,
+    n_starts: int = 8,
+    n_epochs: int = 100,
+    steps_per_epoch: int = 200,
+    seed: int = 42,
+    x0: npt.ArrayLike | None = None,
+    max_evals: int | None = None,
+) -> History: ...
+def run_hmc(
+    obj_fn: Callable[[npt.NDArray[np.float64]], float],
+    grad_fn: Callable[[npt.NDArray[np.float64]], Sequence[float] | npt.NDArray[np.float64]],
+    low: npt.ArrayLike,
+    high: npt.ArrayLike,
+    t_init: float = 5.0,
+    epsilon: float = 0.05,
+    l_steps: int = 5,
+    q: float = 1.0,
+    n_epochs: int = 100,
+    steps_per_epoch: int = 50,
+    seed: int = 42,
+    x0: npt.ArrayLike | None = None,
+) -> History: ...
+def cluster_search(
+    obj_fn: Callable[[npt.NDArray[np.float64]], float],
+    grad_fn: Callable[[npt.NDArray[np.float64]], Sequence[float] | npt.NDArray[np.float64]],
+    n: int,
+    budget: int,
+    seed: int = 0,
+    recommended: bool = True,
+    derived: bool = False,
+    communicating: bool = False,
+    *,
+    ras: bool = False,
+    start: npt.ArrayLike | None = None,
+    length_scale: float | None = None,
+    species: Sequence[int] | None = None,
+    sigmas: npt.ArrayLike | None = None,
+    rigid: bool = False,
+    layout: str = "block",
+    target: float | None = None,
+    water_sites: npt.ArrayLike | None = None,
+    groups: Sequence[Sequence[int]] | None = None,
+    local_step: str | None = None,
+    ring_moves: bool | None = None,
+    hold_stereocentres: bool | None = None,
+    measured_energy_scale: bool | None = None,
+) -> dict[str, Any]: ...
+def quench(
+    fg_fn: Callable[[npt.NDArray[np.float64]], tuple[float, npt.ArrayLike]],
+    x0: npt.ArrayLike,
+    gtol: float,
+    max_iter: int = 10000,
+    *,
+    method: str = "lbfgs",
+    species: Sequence[int] | None = None,
+) -> dict[str, Any]: ...
+def low_discrepancy_points(
+    low: npt.ArrayLike,
+    high: npt.ArrayLike,
+    n: int,
+    skip: int = 1,
+) -> npt.NDArray[np.float64]: ...
+def pilot_draws_qmc(n: int, seed: int = 42) -> npt.NDArray[np.float64]: ...
+def polish(
+    obj_fn: Callable[[npt.NDArray[np.float64]], float],
+    grad_fn: Callable[[npt.NDArray[np.float64]], Sequence[float] | npt.NDArray[np.float64]],
+    low: npt.ArrayLike,
+    high: npt.ArrayLike,
+    x0: npt.ArrayLike,
+    max_fevals: int = 200,
+    step0: float = 1.0,
+    grad_tol: float = 1e-8,
+) -> dict[str, Any]: ...
+def qmc_polish(
+    obj_fn: Callable[[npt.NDArray[np.float64]], float],
+    grad_fn: Callable[[npt.NDArray[np.float64]], Sequence[float] | npt.NDArray[np.float64]],
+    low: npt.ArrayLike,
+    high: npt.ArrayLike,
+    n_starts: int,
+    max_fevals_per_start: int,
+    seed: int = 0,
+    step0: float = 1.0,
+    grad_tol: float = 1e-8,
+    top_k: int = 0,
+) -> dict[str, Any]: ...
+def qmc_polish_objective(
+    objective: PyObjective,
+    n_starts: int,
+    max_fevals_per_start: int,
+    seed: int = 0,
+    step0: float = 1.0,
+    grad_tol: float = 1e-8,
+    top_k: int = 0,
+) -> dict[str, Any]: ...
+def qmc_best1bin_scout(
+    obj_fn: Callable[[npt.NDArray[np.float64]], float],
+    low: npt.ArrayLike,
+    high: npt.ArrayLike,
+    max_evals: int,
+    seed: int = 0,
+    population_size: int = 30,
+    weight_min: float = 0.5,
+    weight_span: float = 0.5,
+    crossover_rate: float = 0.7,
+) -> dict[str, Any]: ...
+def qmc_best1bin_scout_objective(
+    objective: PyObjective,
+    max_evals: int,
+    seed: int = 0,
+    population_size: int = 30,
+    weight_min: float = 0.5,
+    weight_span: float = 0.5,
+    crossover_rate: float = 0.7,
+) -> dict[str, Any]: ...
+def qmc_gsa_global_search(
+    obj_fn: Callable[[npt.NDArray[np.float64]], float],
+    low: npt.ArrayLike,
+    high: npt.ArrayLike,
+    max_evals: int,
+    seed: int = 0,
+    n_chains: int = 30,
+    t_init: float = 1.0,
+    q_v: float = 2.62,
+    q_a: float = 1.7,
+    x0: npt.ArrayLike | None = None,
+) -> dict[str, Any]: ...
+def qmc_gsa_global_search_objective(
+    objective: PyObjective,
+    max_evals: int,
+    seed: int = 0,
+    n_chains: int = 30,
+    t_init: float = 1.0,
+    q_v: float = 2.62,
+    q_a: float = 1.7,
+    x0: npt.ArrayLike | None = None,
+) -> dict[str, Any]: ...
+def qmc_trust_region_poll(
+    obj_fn: Callable[[npt.NDArray[np.float64]], float],
+    low: npt.ArrayLike,
+    high: npt.ArrayLike,
+    center: npt.ArrayLike,
+    max_evals: int,
+    seed: int = 0,
+    radius_fraction: float = 0.0,
+    n_levels: int = 3,
+    points_per_level: int = 0,
+) -> dict[str, Any]: ...
+def qmc_trust_region_poll_objective(
+    objective: PyObjective,
+    center: npt.ArrayLike,
+    max_evals: int,
+    seed: int = 0,
+    radius_fraction: float = 0.0,
+    n_levels: int = 3,
+    points_per_level: int = 0,
+) -> dict[str, Any]: ...
+def shifted_qmc_polish(
+    obj_fn: Callable[[npt.NDArray[np.float64]], float],
+    grad_fn: Callable[[npt.NDArray[np.float64]], Sequence[float] | npt.NDArray[np.float64]],
+    low: npt.ArrayLike,
+    high: npt.ArrayLike,
+    n_starts: int,
+    max_fevals_per_start: int,
+    seed: int = 0,
+    n_replicates: int = 1,
+    step0: float = 1.0,
+    grad_tol: float = 1e-8,
+    top_k: int = 0,
+) -> dict[str, Any]: ...
+def additive_independence(
+    obj_fn: Callable[[npt.NDArray[np.float64]], float],
+    low: npt.ArrayLike,
+    high: npt.ArrayLike,
+    max_fevals: int,
+    seed: int = 0,
+    degree: int = 8,
+    grid_m: int = 65,
+    local_frac: float = 0.2,
+    n_epochs: int = 40,
+    n_pilot: int = 0,
+) -> dict[str, Any]: ...
+def estimate_gle_omega0(
+    obj_fn: Callable[[npt.NDArray[np.float64]], float],
+    grad_fn: Callable[[npt.NDArray[np.float64]], Sequence[float] | npt.NDArray[np.float64]],
+    low: npt.ArrayLike,
+    high: npt.ArrayLike,
+) -> float: ...
+def gle_langevin(
+    obj_fn: Callable[[npt.NDArray[np.float64]], float],
+    grad_fn: Callable[[npt.NDArray[np.float64]], Sequence[float] | npt.NDArray[np.float64]],
+    low: npt.ArrayLike,
+    high: npt.ArrayLike,
+    max_fevals: int,
+    seed: int = 0,
+    omega0: float | None = None,
+    dt: float = 0.2,
+    n_epochs: int = 40,
+    x0: npt.ArrayLike | None = None,
+) -> dict[str, Any]: ...
+def gle_langevin_objective(
+    objective: PyObjective,
+    max_fevals: int,
+    seed: int = 0,
+    omega0: float | None = None,
+    dt: float = 0.2,
+    n_epochs: int = 40,
+    x0: npt.ArrayLike | None = None,
+) -> dict[str, Any]: ...
+def gle_langevin_preconditioned(
+    obj_fn: Callable[[npt.NDArray[np.float64]], float],
+    grad_fn: Callable[[npt.NDArray[np.float64]], Sequence[float] | npt.NDArray[np.float64]],
+    low: npt.ArrayLike,
+    high: npt.ArrayLike,
+    max_fevals: int,
+    seed: int = 0,
+    omega0: float | None = None,
+    dt: float = 0.2,
+    n_epochs: int = 40,
+    x0: npt.ArrayLike | None = None,
+    preconditioner_probes: int | None = None,
+) -> dict[str, Any]: ...
+def gle_langevin_preconditioned_objective(
+    objective: PyObjective,
+    max_fevals: int,
+    seed: int = 0,
+    omega0: float | None = None,
+    dt: float = 0.2,
+    n_epochs: int = 40,
+    x0: npt.ArrayLike | None = None,
+    preconditioner_probes: int | None = None,
+) -> dict[str, Any]: ...
+def gpmd_optimize(
+    obj_fn: Callable[[npt.NDArray[np.float64]], float],
+    low: npt.ArrayLike,
+    high: npt.ArrayLike,
+    budget: int,
+    seed: int = 0,
+    grad_fn: Callable[[npt.NDArray[np.float64]], Sequence[float] | npt.NDArray[np.float64]] | None = None,
+    x0: npt.ArrayLike | None = None,
+) -> dict[str, Any]: ...
+def amsa_optimize(
+    obj_fn: Callable[[npt.NDArray[np.float64]], float],
+    low: npt.ArrayLike,
+    high: npt.ArrayLike,
+    budget: int,
+    seed: int = 0,
+    grad_fn: Callable[[npt.NDArray[np.float64]], Sequence[float] | npt.NDArray[np.float64]] | None = None,
+    x0: npt.ArrayLike | None = None,
+) -> dict[str, Any]: ...
+def box_ensemble_optimize(
+    obj_fn: Callable[[npt.NDArray[np.float64]], float],
+    low: npt.ArrayLike,
+    high: npt.ArrayLike,
+    budget: int,
+    seed: int = 0,
+    grad_fn: Callable[[npt.NDArray[np.float64]], Sequence[float] | npt.NDArray[np.float64]] | None = None,
+    x0: npt.ArrayLike | None = None,
+    replicas: int = 4,
+    history: str = "shared",
+    membership: str = "accepted",
+) -> dict[str, Any]: ...
+def ensemble_optimize(
+    obj_fn: Callable[[npt.NDArray[np.float64]], float],
+    low: npt.ArrayLike,
+    high: npt.ArrayLike,
+    budget: int,
+    seed: int = 0,
+    grad_fn: Callable[[npt.NDArray[np.float64]], Sequence[float] | npt.NDArray[np.float64]] | None = None,
+    x0: npt.ArrayLike | None = None,
+    replicas: int = 4,
+    history: str = "shared",
+    membership: str = "accepted",
+    *,
+    coverage_shared: bool | None = None,
+    coverage_radius: float | None = None,
+    coverage_neighbors: int | None = None,
+) -> dict[str, Any]: ...
+def minimize(
+    fun: Callable[[npt.NDArray[np.float64]], float],
+    x0: npt.ArrayLike,
+    bounds: Any,
+    jac: Callable[[npt.NDArray[np.float64]], Sequence[float] | npt.NDArray[np.float64]] | None = None,
+    *,
+    budget: int | None = None,
+    seed: int = 0,
+    replicas: int = 4,
+    history: str = "shared",
+    membership: str = "accepted",
+    store: str | os.PathLike[str] | Any | None = None,
+    coverage_shared: bool | None = None,
+    coverage_radius: float | None = None,
+    coverage_neighbors: int | None = None,
+) -> MinimizeResult: ...
+def bfwt_optimize(
+    obj_fn: Callable[[npt.NDArray[np.float64]], float],
+    low: npt.ArrayLike,
+    high: npt.ArrayLike,
+    budget: int,
+    seed: int = 0,
+    barrier_hat: float = 0.0,
+    grad_fn: Callable[[npt.NDArray[np.float64]], Sequence[float] | npt.NDArray[np.float64]] | None = None,
+    x0: npt.ArrayLike | None = None,
+) -> dict[str, Any]: ...
+def dmc_population_optimize(
+    obj_fn: Callable[[npt.NDArray[np.float64]], float],
+    low: npt.ArrayLike,
+    high: npt.ArrayLike,
+    budget: int,
+    seed: int = 0,
+    grad_fn: Callable[[npt.NDArray[np.float64]], Sequence[float] | npt.NDArray[np.float64]] | None = None,
+    target_n: int = 16,
+    steps_per_control: int = 4,
+    x0: npt.ArrayLike | None = None,
+) -> dict[str, Any]: ...
+def global_optimize(
+    obj_fn: Callable[[npt.NDArray[np.float64]], float],
+    low: npt.ArrayLike,
+    high: npt.ArrayLike,
+    budget: int,
+    seed: int = 0,
+    grad_fn: Callable[[npt.NDArray[np.float64]], Sequence[float] | npt.NDArray[np.float64]] | None = None,
+    noise_sigma: float | None = None,
+    policy: str = "auto",
+    x0: npt.ArrayLike | None = None,
+    *,
+    replicas: int = 1,
+    coverage_shared: bool = True,
+    coverage_radius: float = 0.05,
+    coverage_neighbors: int = 0,
+) -> dict[str, Any]: ...
+def global_optimize_objective(
+    objective: PyObjective,
+    budget: int,
+    seed: int = 0,
+    use_gradient: bool = True,
+    x0: npt.ArrayLike | None = None,
+) -> dict[str, Any]: ...
+
+__all__: list[str]

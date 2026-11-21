@@ -6,6 +6,10 @@ The Python package =anneal= ships from PyPI as a maturin-built wheel.
 The Rust extension is exposed as the submodule =anneal._core=.
 The package source lives at =python/anneal/= in the repo and is installed via =maturin develop --features python= during development.
 
+PEP 561 =py.typed= metadata and =.pyi= stub files cover =anneal=,
+=anneal._core=, =anneal.ase=, =anneal.device=, =anneal.chemfit=,
+=anneal.tvm_ffi=, and =anneal._landfold=.
+
 * C and C++ (cargo-c)
 
 The Rust crate produces a =cdylib=, =staticlib=, generated header =anneal-core.h=, and pkg-config metadata =anneal-core.pc= via cargo-c.
