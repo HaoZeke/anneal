@@ -102,7 +102,7 @@ def table() -> str:
             "\\caption{Outside time of the submitted revision \\texttt{61fa67cf} in one session of",
             "\\texttt{record/outside-perf3-r2} (commit \\texttt{9178884e}): the arms \\texttt{develop} and",
             "\\texttt{develop\\_prime} are two builds of that source, with the same binary digest, run on",
-            "seeds 2000--2011 on core 0 of one host, alternating in blocks of four seeds.",
+            "seeds 2000--2011 on core 0.",
             "Both arms take the same calls to the same minimum on every seed.",
             "Hits are those of either arm; the next two columns are the median seconds outside the",
             "potential, Change is the second median over the first less one, and \\(p\\) is the",

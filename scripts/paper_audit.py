@@ -897,7 +897,7 @@ def gmin_rerun_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[
                    f"\\texttt{{\\seqsplit{{{main_host}}}}},")
     audit.said(SI, f"LJ\\(_{{150}}\\) on\n\\texttt{{\\seqsplit{{{lj150}}}}},\nwhose record names no processor, memory, "
                    "or kernel;")
-    audit.said(SI, "pinned to core 0, in alternating order by seed: six seeds with this code\nfirst and six with GMIN first.")
+    audit.said(SI, "in alternating order by seed: six seeds with this code first and six with GMIN first.")
     for shard in GMIN_SHARDS:
         commit = dict(line.split(" ", 1) for line in audit.text(f"{GMIN_RERUN}/{shard}/PROVENANCE").splitlines())["commit"]
         for patch in ("bench/lj104-lattice/v2/h2h-gmin.patch", "scripts/morse_h2h/morse-timer.patch",
@@ -1040,17 +1040,22 @@ def gmin_develop_prose(audit: Audit, panel: object, groups: dict) -> None:
                     f"\\(\\rho=6\\) this code takes the same median of {calls:.0f} calls at both revisions.")
     hits_m = f"{hits[('m55r14', 'anneal')]} and {hits[('m80r14', 'anneal')]} of 12 against none"
     audit.said(TEX, f"Morse M\\(_{{55}}\\) and M\\(_{{80}}\\) at \\(\\rho=14\\) on {hits_m} "
-                    f"(\\(p={p['m55r14']}\\) and {p['m80r14']}), and rigid")
+                    f"(\\(p={p['m55r14']}\\) and {p['m80r14']}).")
+    audit.said(TEX, "Against GMIN's rigid TIP4P potential, the code hits")
+    audit.said(TEX, "against GMIN run with the Wales-group LJ\\(_{38}\\) input at every Lennard-Jones and Morse size")
     audit.said(TEX, f"on Morse M\\(_{{55}}\\) and M\\(_{{80}}\\) at \\(\\rho=14\\) at the submitted revision, "
-                    f"{hits[('m55r14', 'anneal')]} and {hits[('m80r14', 'anneal')]} of 12 against none, and on rigid")
+                    f"{hits[('m55r14', 'anneal')]} and {hits[('m80r14', 'anneal')]} of 12 against none.")
     audit.said(TEX, "Table~\\ref{tab:gmin} runs GMIN against this code at two revisions: revision \\texttt{eeec8e2c}, "
                     "an ancestor of the submitted revision with the structure templates removed, on eight Lennard-Jones "
                     "sizes and Morse M\\(_{80}\\) at \\(\\rho=6\\), and the submitted revision \\texttt{61fa67cf} on "
                     "Gupta Au\\(_{55}\\) and on Morse M\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=6\\) and 14.")
-    audit.said(TEX, "Each block runs both arms of each cluster on one core of one host, on seeds 2000--2011 in "
-                    "alternating order, at the budget in the table, from the start this code writes for the seed.")
-    audit.said(COVER, "Paired by seed, the code hits more seeds than GMIN on a Lennard-Jones cluster, on two Morse "
-                      "clusters, and on two rigid TIP4P water clusters.")
+    audit.said(TEX, "Each block runs both arms of each cluster on seeds 2000--2011 in alternating order, at the "
+                    "budget in the table, from the start this code writes for the seed.")
+    audit.said(COVER, "Paired by seed against GMIN run with the Wales-group Lennard-Jones introduction file at every "
+                      "Lennard-Jones and Morse size, the code hits more seeds than GMIN on a Lennard-Jones cluster and "
+                      "on two Morse clusters.")
+    audit.said(COVER, "Against GMIN's rigid TIP4P potential, the code hits more seeds than GMIN on two water "
+                      "clusters.")
 
 
 def gmin_rerun(audit: Audit) -> None:
@@ -1129,7 +1134,8 @@ def gmin_rerun(audit: Audit) -> None:
     ahead = [x for x in GMIN_RERUN_SYSTEMS if hits(x, "anneal") > hits(x, "gmin") and paired[x]["mcnemar"] < 0.05]
     audit.cell(COVER, "Lennard-Jones clusters where the code hits more than GMIN at p<0.05", "lj98", " ".join(ahead))
     audit.said(TEX, f"GMIN on none (\\(p={p['lj98']}\\)), Morse M\\(_{{55}}\\)")
-    audit.said(TEX, f"With the templates removed, the code hits more seeds than GMIN on LJ\\(_{{98}}\\), "
+    audit.said(TEX, "With the templates removed, the code hits more seeds than GMIN, run with the Wales-group "
+                    f"LJ\\(_{{38}}\\) input at every Lennard-Jones and Morse size, on LJ\\(_{{98}}\\), "
                     f"{hits('lj98', 'anneal')} of 12 against none,")
     misses = [float(r["best"]) for s in ("lj75",) for a in ("anneal", "gmin") for r in groups[(s, a)] if r["hit"] == "0"]
     lj75_ref = {row[0]: row[3] for row in panel.SYSTEMS}["lj75"]
@@ -1910,7 +1916,7 @@ def gmin_patches(audit: Audit) -> None:
     audit.said(SI, ", ".join(f"\\path{{{n}}}" for n in want[:2]) + f", and \\path{{{want[2]}}}")
     shown = [f"\\texttt{{{n.replace('_', chr(92) + '_')}}}" for n in want]
     audit.said(TEX, "GMIN is the snapshot of SVNREV \\texttt{9cbec1a4} built with three patches, " + ", ".join(shown[:2]) + f", and {shown[2]}, "
-                    "which cap the force calls, time the potential, and, in the serial build, set the run index "
+                    "which cap the \\texttt{POTENTIAL} entries, time the potential, and, in the serial build, set the run index "
                     "(\\texttt{JP=1}) before its first use.")
     audit.record("JP=1" in audit.text(want[0]), want[0], "the first patch sets the serial run index", "JP=1",
                  "JP=1" if "JP=1" in audit.text(want[0]) else "absent")
@@ -1950,7 +1956,7 @@ def gmin_patches(audit: Audit) -> None:
             elif body and "H2H" not in body and body not in allowed:
                 stray.append(body)
         audit.cell(name, "added GMIN lines outside the cap and timers", "none", "; ".join(stray) or "none")
-    audit.said(SI, "which cap the force calls, time the potential, and, in the serial build, set the run index before "
+    audit.said(SI, "which cap the \\texttt{POTENTIAL} entries, time the potential, and, in the serial build, set the run index before "
                    "its first use; no other line of GMIN changes.")
     audit.record("Mackay cap" not in audit.text(TEX), TEX, "Mackay-cap driver prose is removed",
                  "absent", "absent" if "Mackay cap" not in audit.text(TEX) else "present")
@@ -2100,11 +2106,20 @@ def manuscript_ase(audit: Audit) -> None:
     audit.said(TEX, f"On the Morse clusters this code hits M\\(_{{38}}\\) and M\\(_{{55}}\\) at \\(\\rho=6\\) on "
                     f"{r['m38r6']} of 12 and at \\(\\rho=14\\) on {r['m38r14']} and {r['m55r14']} of 12, and neither "
                     f"ASE arm hits any; each ASE run there stopped at the cap after {min(charged)} to {max(charged)} "
-                    "force calls.")
+                    "calls.")
 
     # The Supporting Information.
     audit.said(SI, "on seeds 2000--2011, at \\(4\\times 10^{5}\\) calls for 38 atoms, \\(1\\times 10^{6}\\) for 55, "
-                    "and \\(4\\times 10^{6}\\) for 98 atoms and above, on one core of one host.")
+                    "and \\(4\\times 10^{6}\\) for 98 atoms and above.")
+    audit.said(SI, "The budget of this code counts one call per combined energy and gradient pass.")
+    ase_protocol = audit.text(SI).split("\\label{sec:si-ase}", 1)[1].split("\\section{", 1)[0]
+    host_claim = "one core of one host" in ase_protocol
+    audit.record(not host_claim, SI, "the ASE protocol names no single host", "absent",
+                 "present" if host_claim else "absent")
+    morse_caption = audit.text(TEX).split("% ase-nonlj table: start", 1)[1].split("% ase-nonlj table: end", 1)[0]
+    morse_host = "one core of one host" in morse_caption
+    audit.record(not morse_host, TEX, "the Morse ASE caption names no single host", "absent",
+                 "present" if morse_host else "absent")
     audit.said(SI, "Environment 3.29.0 at its constructor defaults")
     audit.said(SI, "\\texttt{\\seqsplit{" + ASE_REVISIONS["lj"] + "}}, and those of the Morse ASE table revision "
                    "\\texttt{\\seqsplit{" + ASE_REVISIONS["morse"] + "}}, at the length scale of the Morse pair; both "
@@ -3665,6 +3680,9 @@ def science_claims(audit: Audit) -> None:
     """Overclaiming wording stays out, endpoint prose stays on energies, and every citation resolves."""
     for path in (TEX, SI, COVER):
         flat = collapse(audit.text(path)).lower()
+        for phrase in ("one host", "one machine", "single machine", "same host", "same machine"):
+            audit.record(phrase not in flat, path, f"no single-host claim: {phrase}", "absent",
+                         "absent" if phrase not in flat else "present")
         for phrase in OVERCLAIMS:
             audit.record(phrase not in flat, path, f"no overclaim: {phrase}", "absent",
                          "absent" if phrase not in flat else "present")

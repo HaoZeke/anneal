@@ -82,7 +82,7 @@ The Lennard-Jones rows run the Wales-group LJ\(_{38}\) introduction file at ever
 The Morse rows add GMIN's native \texttt{MORSE} keyword and \(\rho\) to the same numerical settings.
 The Au\(_{55}\) row runs GMIN's Gupta potential with the gold row of Darby et al., \(A=0.2061\)~eV, \(p=10.229\), \(q=4.036\), \(\xi=1.79\)~eV, and \(r_0=2.884\)~\AA, at \(T=0.1\)~eV, with step 0.40 and taboo radius 4.0 multiplied by \(r_0/2^{1/6}\), GMIN's container radius, \texttt{NEWRESTART 40}, and an energy difference of 0.003.
 \cite{darbyCuAu2002}
-GMIN is the public snapshot of SVNREV \texttt{9cbec1a446352bc9ef064bd2b1a5767194655919}, tarball sha256 \texttt{\seqsplit{ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776}}, built by \path{scripts/gmin_panel/build_gmin.sh} at revision \texttt{eeec8e2c} for the first block of the table, and for the second by the same script at the record commit \texttt{f009acc9} on the submitted revision, which only sets the number of parallel build jobs, with three patches, \path{bench/lj104-lattice/v2/h2h-gmin.patch}, \path{scripts/morse_h2h/morse-timer.patch}, and \path{bench/metal-cluster-h2h/gmin-bgupta.patch}, which cap the force calls, time the potential, and, in the serial build, set the run index before its first use; no other line of GMIN changes.
+GMIN is the public snapshot of SVNREV \texttt{9cbec1a446352bc9ef064bd2b1a5767194655919}, tarball sha256 \texttt{\seqsplit{ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776}}, built by \path{scripts/gmin_panel/build_gmin.sh} at revision \texttt{eeec8e2c} for the first block of the table, and for the second by the same script at the record commit \texttt{f009acc9} on the submitted revision, which only sets the number of parallel build jobs, with three patches, \path{bench/lj104-lattice/v2/h2h-gmin.patch}, \path{scripts/morse_h2h/morse-timer.patch}, and \path{bench/metal-cluster-h2h/gmin-bgupta.patch}, which cap the \texttt{POTENTIAL} entries, time the potential, and, in the serial build, set the run index before its first use; no other line of GMIN changes.
 The recipe stamps the wall clock and the build directory into the binary, so the three shard binaries differ in their sha256 and share one \texttt{.text} section.
 The hit is a quenched energy at or below the Cambridge Cluster Database
 minimum plus 0.001: besides the five Lennard-Jones references above,
@@ -94,9 +94,8 @@ minimum plus 0.001: besides the five Lennard-Jones references above,
 
 \section{Host and commands}
 \label{sec:host}
-Each cell of the GMIN table ran both arms on one virtual machine, one thread
-pinned to core 0, in alternating order by seed: six seeds with this code
-first and six with GMIN first.
+Each cell of the GMIN table ran both arms in alternating order by seed:
+six seeds with this code first and six with GMIN first.
 The machine is recorded by the sha256 of its machine id: LJ\(_{38}\),
 LJ\(_{55}\), LJ\(_{75}\), LJ\(_{98}\), LJ\(_{102}\), LJ\(_{103}\),
 LJ\(_{104}\), and M\(_{80}\) of the first block ran on
@@ -285,7 +284,7 @@ names, and \path{paper/jctc/scripts/outside_table.py} writes the table.
 \caption{Outside time of the submitted revision \texttt{61fa67cf} in one session of
 \texttt{record/outside-perf3-r2} (commit \texttt{9178884e}): the arms \texttt{develop} and
 \texttt{develop\_prime} are two builds of that source, with the same binary digest, run on
-seeds 2000--2011 on core 0 of one host, alternating in blocks of four seeds.
+seeds 2000--2011 on core 0.
 Both arms take the same calls to the same minimum on every seed.
 Hits are those of either arm; the next two columns are the median seconds outside the
 potential, Change is the second median over the first less one, and \(p\) is the
@@ -312,7 +311,8 @@ Au\(_{55}\) & \(1\times 10^{6}\) & 4/12 & 9.047 & 9.066 & +0.2 & 0.23 \\
 The ASE arms are the basin hopping and the minima hopping of the Atomic
 Simulation Environment 3.29.0 at its constructor defaults, run on seeds
 2000--2011, at \(4\times 10^{5}\) calls for 38 atoms, \(1\times 10^{6}\) for
-55, and \(4\times 10^{6}\) for 98 atoms and above, on one core of one host.
+55, and \(4\times 10^{6}\) for 98 atoms and above.
+The budget of this code counts one call per combined energy and gradient pass.
 Each run stops at a hit, at the budget, or at a wall cap of three times the
 slowest wall of the cluster preset of this code on that cluster.
 No run of this code reached its cap.
@@ -421,13 +421,15 @@ that two arms are equivalent.
 \section{Searches that report no comparable rate}
 \label{sec:si-related}
 The main text compares searches by one measure: for one cluster and one
-published minimum, how many seeds reach it within a stated number of force
-calls, and how many seconds that takes.
+published minimum, how many seeds reach it within a stated budget, and how
+many seconds that takes.
+The budget of this code counts one call per combined energy and gradient pass.
+GMIN's budget counts every \texttt{POTENTIAL} entry, including \texttt{GRADT=false}.
 A report that gives an energy table, an iteration count, or a free energy
 does not answer it, and the reports below are left out for that reason.
 
 The published GOFEE curves count local optimizations on LJ\(_{75}\), and a
-local optimization is not a force call; a later GOFEE run puts a
+local optimization is not one combined energy and gradient pass; a later GOFEE run puts a
 spectral-graph and Voronoi filter in front of the sampling step.
 \cite{slavenskyClassifier2024}
 The same group has used a deliberately incomplete machine-learned
