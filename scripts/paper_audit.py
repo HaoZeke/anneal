@@ -3257,10 +3257,15 @@ _RESULT_HEADER = re.compile(
     re.I,
 )
 _RUN_HEADER = re.compile(r"hit|call|wall", re.I)
-_NUMBER_CELL = re.compile(r"^-?\d+(?:\.\d+)?(?:e[+-]?\d+)?(?:/\d+)?$", re.I)
+_NUMBER_CELL = re.compile(
+    r"^[~≈]?[-−+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:e[-−+]?\d+)?(?:/\d+)?"
+    r"\s*(?:%|×|x|s|ms|µs|μs|us|h|min|eV|meV|ε|Å|kcal/mol|kJ/mol)?$",
+    re.I,
+)
 _SHA_CELL = re.compile(r"^[0-9a-f]{7,40}$")
 _SHA_TOKEN = re.compile(r"(?<![0-9A-Za-z])([0-9a-f]{7,40})(?![0-9A-Za-z])")
-_REVISION_FIELDS = ("code_revision", "harness_revision", "harness_commit", "head")
+_REVISION_FIELDS = ("code_revision", "harness_revision", "harness_commit", "head", "anneal_head", "anneal_revision",
+                    "release_revision")
 EXTERNAL_FORM_SOURCES = (
     "scripts/pimc_lj38/run_campaign.py",
     "scripts/pimc_lj38/lj_potential.py",
@@ -3325,11 +3330,21 @@ def ancestor_of_head(rev: str) -> bool:
     return _ANCESTOR_OF_HEAD[rev]
 
 
+@functools.cache
+def _verified_aliases() -> tuple[tuple[str, str], ...]:
+    table = alias_table()
+    index = alias_index([r["local_revision"] for r in table], table)
+    return tuple(verified_aliases(Audit(), table, index).items())
+
+
 def harness_reachable(rev: str) -> bool:
-    """A printed revision is an ancestor of HEAD, a recorded external pin, or a qualified form."""
+    """A printed revision is an ancestor of HEAD, a verified alias of one, a recorded external pin, or a qualified form."""
     if external_form(rev) is True or external_pin(rev):
         return True
-    return ancestor_of_head(rev)
+    if ancestor_of_head(rev):
+        return True
+    rev = (rev or "").strip()
+    return len(rev) >= 7 and any(local.startswith(rev) and ancestor_of_head(pushed) for local, pushed in _verified_aliases())
 
 
 def is_revision_token(token: str) -> bool:
@@ -3339,14 +3354,18 @@ def is_revision_token(token: str) -> bool:
     return bool(re.search(r"\d", token)) or commit_of(token) is not None
 
 
-def _revision_token(cell: str) -> str | None:
-    """A git revision or a qualified external form. A pure number is a budget, not a commit."""
-    token = cell.strip().strip("`")
-    if external_form(token) is not None:
-        return token
-    if _SHA_CELL.fullmatch(token) and re.search(r"[a-f]", token):
-        return token
-    return None
+def _revision_tokens(cell: str) -> list[str]:
+    """Git revisions and URL@hex forms anywhere in a cell. A pure number is a budget, not a commit."""
+    text = cell or ""
+    found = [match.group(0) for match in _FORM_ATTEMPT.finditer(text)]
+    found += [t for t in _SHA_TOKEN.findall(_FORM_ATTEMPT.sub(" ", text)) if is_revision_token(t)]
+    return list(dict.fromkeys(found))
+
+
+def _number_cell(cell: str) -> str | None:
+    """The cell as printed when it is a number. Thousands commas, a unit and emphasis are allowed."""
+    shown = cell.strip()
+    return shown if _NUMBER_CELL.fullmatch(shown.strip("*_`").strip()) else None
 
 
 def _markdown_tables(text: str):
@@ -3374,7 +3393,7 @@ def _table_revision_flags(rel: str, header: list[str], rows: list[tuple[int, lis
     rev_cols = {idx for idx, name in enumerate(header) if _REVISION_HEADER.search(name)}
     for _line, cells in rows:
         for idx, cell in enumerate(cells):
-            if _revision_token(cell):
+            if _revision_tokens(cell):
                 rev_cols.add(idx)
     if not rev_cols:
         return None
@@ -3385,66 +3404,109 @@ def _table_revision_flags(rel: str, header: list[str], rows: list[tuple[int, lis
         for idx in sorted(rev_cols):
             if idx >= len(cells):
                 continue
-            token = _revision_token(cells[idx])
-            if token is None:
-                continue
-            if external_form(token) is not None:
-                forms.append((where, token))
-            if not harness_reachable(token) and token not in bad:
-                bad.append(token)
+            for token in _revision_tokens(cells[idx]):
+                if external_form(token) is not None:
+                    forms.append((where, token))
+                if not harness_reachable(token) and token not in bad:
+                    bad.append(token)
         if not bad:
             continue
         identity = " ".join(
             cells[idx].strip()
             for idx in range(len(cells))
-            if idx not in rev_cols and not _revision_token(cells[idx])
+            if idx not in rev_cols and cells[idx].strip()
             and (idx >= len(header) or not _RESULT_HEADER.search(header[idx]))
         )
         for idx, cell in enumerate(cells):
             if idx in rev_cols or idx >= len(header) or not _RESULT_HEADER.search(header[idx]):
                 continue
-            shown = cell.strip()
-            if not _NUMBER_CELL.fullmatch(shown):
+            shown = _number_cell(cell)
+            if shown is None:
                 continue
             number = f"{identity} {header[idx].strip()}={shown}".strip()
             flagged.extend((where, sha, number) for sha in bad)
     return flagged
 
 
-def _csv_backed_flags(rel: str, text: str, header: list[str], rows: list[tuple[int, list[str]]]):
-    """A result table whose README names the CSV, joined on system and arm."""
+def _key(text: str) -> str:
+    """A name or value compared without case, spaces or punctuation: LJ38 is lj38."""
+    return re.sub(r"[^0-9a-z]", "", (text or "").lower())
+
+
+def _named_csvs(rel: str, text: str) -> dict[Path, bool]:
+    """The CSVs a text names, from the README's directory or the root, each with whether it sits beside the README."""
+    directory = (ROOT / rel).parent
+    found: dict[Path, bool] = {}
+    for token in re.findall(r"(?<![\w./-])([\w./-]*[\w-]\.csv)(?![\w.-])", text):
+        for base in (directory, ROOT):
+            path = (base / token).resolve()
+            if path.is_file() and path.is_relative_to(ROOT.resolve()):
+                found.setdefault(path, path.parent == directory.resolve())
+                break
+    return found
+
+
+def _backing_csvs(rel: str, text: str, section: str) -> list[tuple[Path, bool]]:
+    """The CSVs that back a table: those its section names.
+
+    A README that names no CSV anywhere is backed by every CSV beside it.
+    A section that names none, in a README that names some, has no CSV.
+    """
+    found = _named_csvs(rel, section)
+    if not found and not _named_csvs(rel, text):
+        found = {path.resolve(): True for path in (ROOT / rel).parent.glob("*.csv")}
+    return sorted(found.items())
+
+
+def _csv_backed_flags(rel: str, text: str, header: list[str], rows: list[tuple[int, list[str]]], section: str):
+    """A result table backed by a CSV, joined on every column the two share.
+
+    A system that the CSV lacks is not its row. Another key value that the
+    CSV lacks, such as an arm named in prose, falls back to the whole file.
+    A table that shares no key column is joined only to the CSVs beside it.
+    """
     if not any(_RUN_HEADER.search(name) for name in header):
         return []
-    sys_idx = next((idx for idx, name in enumerate(header) if name.lower() == "system"), None)
-    if sys_idx is None:
-        return []
     flagged = []
-    directory = (ROOT / rel).parent
-    for csv_path in sorted(directory.glob("*.csv")):
-        if not re.search(rf"(?<![\w.-]){re.escape(csv_path.name)}(?![\w.-])", text):
-            continue
+    for csv_path, beside in _backing_csvs(rel, text, section):
         with csv_path.open(newline="") as handle:
             data = list(csv.DictReader(line for line in handle if line.strip() and not line.startswith("#")))
-        if not data or "system" not in data[0]:
+        if not data:
             continue
         fields = [name for name in _REVISION_FIELDS if name in data[0]]
         if not fields:
             continue
+        columns = {_key(c): c for c in data[0] if c not in _REVISION_FIELDS}
+        keys = [(idx, columns[_key(name)]) for idx, name in enumerate(header)
+                if _key(name) in columns and not _RESULT_HEADER.search(name)]
+        if not keys and not beside:
+            continue
         arm_key = "arm" if "arm" in data[0] else "code" if "code" in data[0] else ""
         known = {row[arm_key] for row in data if arm_key and row.get(arm_key)}
         arm_names = {arm.lower() for arm in known}
+        last: dict[int, str] = {}
         for line_no, cells in rows:
-            if sys_idx >= len(cells):
-                continue
-            system = cells[sys_idx].strip()
-            group = [row for row in data if row.get("system") == system]
+            group = data
+            for idx, column in keys:
+                value = cells[idx].strip() if idx < len(cells) else ""
+                value = value or last.get(idx, "")
+                last[idx] = value
+                if not value:
+                    continue
+                matched = [row for row in group if _key(row.get(column)) == _key(value)]
+                if matched:
+                    group = matched
+                elif _key(column) == "system":
+                    group = []
+                    break
             if not group:
                 continue
+            identity = " ".join(cells[idx].strip() for idx, _ in keys if idx < len(cells) and cells[idx].strip())
             for idx, name in enumerate(header):
                 if idx >= len(cells):
                     continue
-                shown = cells[idx].strip()
-                if not _NUMBER_CELL.fullmatch(shown):
+                shown = _number_cell(cells[idx])
+                if shown is None:
                     continue
                 if name.lower() in arm_names:
                     arms = {arm for arm in known if arm.lower() == name.lower()}
@@ -3459,11 +3521,11 @@ def _csv_backed_flags(rel: str, text: str, header: list[str], rows: list[tuple[i
                     if arm_key and row.get(arm_key) not in arms:
                         continue
                     for field in fields:
-                        token = _revision_token(row.get(field) or "")
-                        if token and not harness_reachable(token) and token not in bad:
-                            bad.append(token)
+                        for token in _revision_tokens(row.get(field) or ""):
+                            if not harness_reachable(token) and token not in bad:
+                                bad.append(token)
                 for sha in bad:
-                    flagged.append((f"{rel}:{line_no}", sha, f"{system} {name.strip()}={shown}"))
+                    flagged.append((f"{rel}:{line_no}", sha, f"{identity} {name.strip()}={shown}".strip()))
     return flagged
 
 
@@ -3516,7 +3578,7 @@ def _printed_readme_numbers(audit: Audit, forms: list[tuple[str, str]]) -> list[
                 for item in named:
                     add(*item)
                 continue
-            for item in _csv_backed_flags(rel, text, header, rows):
+            for item in _csv_backed_flags(rel, text, header, rows, _section(text, rows[0][0] if rows else 1)):
                 add(*item)
         for paragraph in _prose_paragraphs(text, table_lines):
             for line_no, line in paragraph:
@@ -3535,6 +3597,15 @@ def _printed_readme_numbers(audit: Audit, forms: list[tuple[str, str]]) -> list[
                     for sha in carried:
                         add(f"{rel}:{line_no}", sha, number)
     return found
+
+
+def _section(text: str, line_no: int) -> str:
+    """The lines from the heading above line_no to the next heading."""
+    lines = text.splitlines()
+    heads = [i for i, line in enumerate(lines) if line.startswith("#")]
+    start = max((i for i in heads if i < line_no - 1), default=0)
+    end = min((i for i in heads if i >= line_no - 1), default=len(lines))
+    return "\n".join(lines[start:end])
 
 
 def _prose_paragraphs(text: str, skip: set[int]):
