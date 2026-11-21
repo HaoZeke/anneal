@@ -1895,6 +1895,10 @@ These classes are in namespace =rgpot::lr= and are built with
 =-Dwith_long_range=true=.
 Each one owns a =DualList=, a pair list with a short and a long cutoff, until
 =setNeighbours= replaces it.
+Periodic lists include every image inside the cutoff, including one canonical
+half of an atom's interactions with its own images.
+The cutoff may exceed the shortest lattice vector, including for a triclinic
+cell.
 
 *** =rgpot::lr::CoulombPot=
 

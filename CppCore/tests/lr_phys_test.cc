@@ -191,8 +191,9 @@ void test_lists() {
 
 void test_madelung() {
   const double ke = rgpot::units::HARTREE_TO_EV * rgpot::units::BOHR_TO_ANGSTROM;
-  const double a = 2.0;
-  const double box[9] = {a, 0, 0, 0, a, 0, 0, 0, a};
+  const double a = 5.64;
+  const double cubic[9] = {a, 0, 0, 0, a, 0, 0, 0, a};
+  const double triclinic[9] = {a, 0, 0, a, a, 0, 0, a, a};
   std::vector<double> pos;
   std::vector<int> z(8, 11);
   std::vector<double> q;
@@ -209,16 +210,15 @@ void test_madelung() {
   }
   CoulombConfig cfg;
   cfg.method = CoulombMethod::Ewald;
-  cfg.cutoff = 8.0;
-  cfg.alpha = 2.5;
-  cfg.kmax = 12;
+  cfg.cutoff = 5.5;
+  cfg.alpha = 1.0;
+  cfg.kmax = 16;
   cfg.short_cutoff = 3.0;
   cfg.skin = 0.2;
   cfg.periodic = true;
-  CoulombPot pot(cfg, std::make_shared<FixedCharges>(q, 0.0));
   std::vector<double> hq;
   double htotal = 1.0;
-  rgpot::ForceInput hin{q.size(), pos.data(), z.data(), box};
+  rgpot::ForceInput hin{q.size(), pos.data(), z.data(), cubic};
   rgpot::lr::FnCharges hooked(
       [](const rgpot::ForceInput &in, double *qq, double *total, void *) {
         if (in.nAtoms >= 2) {
@@ -230,22 +230,82 @@ void test_madelung() {
       nullptr);
   hooked.load(hin, &hq, &htotal);
   check(hq.size() == q.size() && htotal == 0.0, "a charge callback fills the mesh");
-  check(pot.caps().periodic && pot.caps().stress, "coulomb caps report periodic stress");
-  const auto key = pot.paramsKey();
-  check(key == pot.paramsKey(), "coulomb params key is stable");
-  const Eval e = run(pot, pos, z, box);
-  std::cout << "CASE nacl " << e.energy << '\n';
-  const double M = 1.7475645946331821;
-  const double expect = -4.0 * M * ke / 1.0;
-  check_close(e.energy, expect, 2e-6, "NaCl Madelung");
+  // M. L. Glasser and I. J. Zucker, Theoretical Chemistry: Advances and
+  // Perspectives, volume 5, 1980, pages 67 to 139, gives 1.747565 for NaCl.
+  constexpr double madelung_nacl = 1.747565;
+  const double expect = -4.0 * madelung_nacl * ke / (0.5 * a);
+  auto check_nacl = [&](const double *box, double cutoff, double alpha, const char *what) {
+    cfg.cutoff = cutoff;
+    cfg.alpha = alpha;
+    CoulombPot pot(cfg, std::make_shared<FixedCharges>(q, 0.0));
+    check(pot.caps().periodic && pot.caps().stress, "coulomb caps report periodic stress");
+    const auto key = pot.paramsKey();
+    check(key == pot.paramsKey(), "coulomb params key is stable");
+    const Eval e = run(pot, pos, z, box);
+    std::cout << "CASE " << what << ' ' << e.energy << '\n';
+    check_close(e.energy, expect, 2e-6, what);
+  };
+  check_nacl(cubic, 5.5, 1.0, "NaCl Madelung below cell edge");
+  check_nacl(cubic, 18.0, 0.25, "NaCl Madelung above cell edge");
+  check_nacl(triclinic, 18.0, 0.25, "NaCl Madelung triclinic cell");
 
   std::vector<double> cs = {0, 0, 0, 0.5 * a, 0.5 * a, 0.5 * a};
   std::vector<int> z2 = {55, 17};
+  cfg.cutoff = 18.0;
+  cfg.alpha = 0.25;
   CoulombPot cscl(cfg, std::make_shared<FixedCharges>(std::vector<double>{1.0, -1.0}, 0.0));
-  const Eval e2 = run(cscl, cs, z2, box);
+  const Eval e2 = run(cscl, cs, z2, cubic);
   const double Mcs = 1.762674773070988;
   const double rnn = a * std::sqrt(3.0) / 2.0;
   check_close(e2.energy, -Mcs * ke / rnn, 2e-5, "CsCl Madelung");
+}
+
+void test_dispersion_lattice_sum() {
+  const double a = 3.0;
+  const double primitive_box[9] = {a, 0, 0, 0, a, 0, 0, 0, a};
+  const std::vector<double> primitive_pos = {0, 0, 0};
+  const std::vector<int> primitive_z = {6};
+  DispersionConfig cfg;
+  cfg.kind = DispersionKind::QDO;
+  cfg.cutoff = 7.1;
+  cfg.short_cutoff = 3.0;
+  cfg.periodic = true;
+  cfg.qdo_damped = false;
+  DispersionPot primitive(cfg);
+  const Eval lattice = run(primitive, primitive_pos, primitive_z, primitive_box);
+
+  constexpr int repeat = 5;
+  std::vector<double> explicit_pos;
+  std::vector<int> explicit_z;
+  for (int i = 0; i < repeat; ++i) {
+    for (int j = 0; j < repeat; ++j) {
+      for (int k = 0; k < repeat; ++k) {
+        explicit_pos.insert(explicit_pos.end(),
+                            {a * static_cast<double>(i), a * static_cast<double>(j),
+                             a * static_cast<double>(k)});
+        explicit_z.push_back(6);
+      }
+    }
+  }
+  const double extent = a * static_cast<double>(repeat);
+  const double explicit_box[9] = {extent, 0, 0, 0, extent, 0, 0, 0, extent};
+  DispersionPot explicit_supercell(cfg);
+  const Eval direct = run(explicit_supercell, explicit_pos, explicit_z, explicit_box);
+  const double per_cell = direct.energy / static_cast<double>(explicit_z.size());
+  check_close(lattice.energy, per_cell, 2e-12,
+              "QDO lattice sum matches an explicit supercell");
+
+  const double triclinic[9] = {5.0, 0.2, 0.1, 1.1, 4.8, 0.3, 0.4, 0.7, 5.2};
+  std::vector<double> pair_pos = {0.4, 0.7, 0.9, 2.1, 1.4, 1.8};
+  const std::vector<int> pair_z = {6, 8};
+  DispersionPot pair(cfg);
+  const Eval pair_eval = run(pair, pair_pos, pair_z, triclinic);
+  for (std::size_t i = 0; i < pair_pos.size(); ++i) {
+    const double force = fd_force(
+        [&](const std::vector<double> &p) { return run(pair, p, pair_z, triclinic).energy; },
+        pair_pos, i, 1e-6);
+    check_close(pair_eval.f[i], force, 2e-5, "periodic QDO force");
+  }
 }
 
 void test_forces_and_stress() {
@@ -255,7 +315,7 @@ void test_forces_and_stress() {
   std::vector<double> q = {0.4, -0.2, 0.5, -0.7};
   CoulombConfig cfg;
   cfg.method = CoulombMethod::Ewald;
-  cfg.cutoff = 5.0;
+  cfg.cutoff = 8.0;
   cfg.alpha = 0.45;
   cfg.kmax = 8;
   cfg.short_cutoff = 2.5;
@@ -1737,6 +1797,7 @@ int main() {
   try {
     test_lists();
     test_madelung();
+    test_dispersion_lattice_sum();
     test_forces_and_stress();
     test_dsf();
     test_qdo_nlh_mbd();
