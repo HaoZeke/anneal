@@ -1,0 +1,18 @@
+[workspace]
+
+[package]
+name = "scan-safe6-vs-safe4"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "scan-safe6-vs-safe4"
+path = "src/main.rs"
+
+[dependencies]
+anneal-core = { path = "../../.." }
+ndarray = "0.17"
+rand = "0.9"
+rgpot-pair = { git = "https://github.com/OmniPotentRPC/rgpot", rev = "8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e" }
+sha2 = "0.10"

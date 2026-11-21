@@ -1,0 +1,1585 @@
+ts=2026-11-21T02:46:40Z event=orchestrator_start
+ts=2026-11-21T02:46:40Z event=start run=r1-lj38-s2000-A cell=lj38 seed=2000 round=1 arm=A
+ts=2026-11-21T02:46:40Z event=pid run=r1-lj38-s2000-A pid=10955
+ts=2026-11-21T02:46:40Z event=end run=r1-lj38-s2000-A exit=0
+ts=2026-11-21T02:46:41Z event=start run=r1-lj38-s2001-A cell=lj38 seed=2001 round=1 arm=A
+ts=2026-11-21T02:46:41Z event=pid run=r1-lj38-s2001-A pid=10956
+ts=2026-11-21T02:46:41Z event=end run=r1-lj38-s2001-A exit=0
+ts=2026-11-21T02:46:41Z event=start run=r1-lj38-s2002-A cell=lj38 seed=2002 round=1 arm=A
+ts=2026-11-21T02:46:41Z event=pid run=r1-lj38-s2002-A pid=10957
+ts=2026-11-21T02:46:42Z event=end run=r1-lj38-s2002-A exit=0
+ts=2026-11-21T02:46:42Z event=start run=r1-lj38-s2003-A cell=lj38 seed=2003 round=1 arm=A
+ts=2026-11-21T02:46:42Z event=pid run=r1-lj38-s2003-A pid=10958
+ts=2026-11-21T02:46:43Z event=end run=r1-lj38-s2003-A exit=0
+ts=2026-11-21T02:46:43Z event=start run=r1-lj38-s2004-A cell=lj38 seed=2004 round=1 arm=A
+ts=2026-11-21T02:46:43Z event=pid run=r1-lj38-s2004-A pid=10959
+ts=2026-11-21T02:46:44Z event=end run=r1-lj38-s2004-A exit=0
+ts=2026-11-21T02:46:44Z event=start run=r1-lj38-s2005-A cell=lj38 seed=2005 round=1 arm=A
+ts=2026-11-21T02:46:44Z event=pid run=r1-lj38-s2005-A pid=10974
+ts=2026-11-21T02:46:45Z event=end run=r1-lj38-s2005-A exit=0
+ts=2026-11-21T02:46:45Z event=start run=r1-lj55-s2000-A cell=lj55 seed=2000 round=1 arm=A
+ts=2026-11-21T02:46:45Z event=pid run=r1-lj55-s2000-A pid=10975
+ts=2026-11-21T02:46:45Z event=end run=r1-lj55-s2000-A exit=0
+ts=2026-11-21T02:46:45Z event=start run=r1-lj55-s2001-A cell=lj55 seed=2001 round=1 arm=A
+ts=2026-11-21T02:46:45Z event=pid run=r1-lj55-s2001-A pid=10976
+ts=2026-11-21T02:46:45Z event=end run=r1-lj55-s2001-A exit=0
+ts=2026-11-21T02:46:45Z event=start run=r1-lj55-s2002-A cell=lj55 seed=2002 round=1 arm=A
+ts=2026-11-21T02:46:45Z event=pid run=r1-lj55-s2002-A pid=10977
+ts=2026-11-21T02:46:45Z event=end run=r1-lj55-s2002-A exit=0
+ts=2026-11-21T02:46:45Z event=start run=r1-lj55-s2003-A cell=lj55 seed=2003 round=1 arm=A
+ts=2026-11-21T02:46:45Z event=pid run=r1-lj55-s2003-A pid=10978
+ts=2026-11-21T02:46:45Z event=end run=r1-lj55-s2003-A exit=0
+ts=2026-11-21T02:46:45Z event=start run=r1-lj55-s2004-A cell=lj55 seed=2004 round=1 arm=A
+ts=2026-11-21T02:46:45Z event=pid run=r1-lj55-s2004-A pid=10979
+ts=2026-11-21T02:46:45Z event=end run=r1-lj55-s2004-A exit=0
+ts=2026-11-21T02:46:45Z event=start run=r1-lj55-s2005-A cell=lj55 seed=2005 round=1 arm=A
+ts=2026-11-21T02:46:45Z event=pid run=r1-lj55-s2005-A pid=10980
+ts=2026-11-21T02:46:45Z event=end run=r1-lj55-s2005-A exit=0
+ts=2026-11-21T02:46:45Z event=start run=r1-lj75-s2000-A cell=lj75 seed=2000 round=1 arm=A
+ts=2026-11-21T02:46:45Z event=pid run=r1-lj75-s2000-A pid=10981
+ts=2026-11-21T02:47:26Z event=end run=r1-lj75-s2000-A exit=0
+ts=2026-11-21T02:47:26Z event=start run=r1-lj75-s2001-A cell=lj75 seed=2001 round=1 arm=A
+ts=2026-11-21T02:47:26Z event=pid run=r1-lj75-s2001-A pid=11001
+ts=2026-11-21T02:48:33Z event=end run=r1-lj75-s2001-A exit=0
+ts=2026-11-21T02:48:33Z event=start run=r1-lj75-s2002-A cell=lj75 seed=2002 round=1 arm=A
+ts=2026-11-21T02:48:33Z event=pid run=r1-lj75-s2002-A pid=11003
+ts=2026-11-21T02:49:26Z event=end run=r1-lj75-s2002-A exit=0
+ts=2026-11-21T02:49:26Z event=start run=r1-lj75-s2003-A cell=lj75 seed=2003 round=1 arm=A
+ts=2026-11-21T02:49:26Z event=pid run=r1-lj75-s2003-A pid=11005
+ts=2026-11-21T02:50:32Z event=end run=r1-lj75-s2003-A exit=0
+ts=2026-11-21T02:50:32Z event=start run=r1-lj75-s2004-A cell=lj75 seed=2004 round=1 arm=A
+ts=2026-11-21T02:50:32Z event=pid run=r1-lj75-s2004-A pid=11007
+ts=2026-11-21T02:50:35Z event=end run=r1-lj75-s2004-A exit=0
+ts=2026-11-21T02:50:35Z event=start run=r1-lj75-s2005-A cell=lj75 seed=2005 round=1 arm=A
+ts=2026-11-21T02:50:35Z event=pid run=r1-lj75-s2005-A pid=11009
+ts=2026-11-21T02:51:44Z event=end run=r1-lj75-s2005-A exit=0
+ts=2026-11-21T02:51:44Z event=start run=r1-lj98-s2000-A cell=lj98 seed=2000 round=1 arm=A
+ts=2026-11-21T02:51:44Z event=pid run=r1-lj98-s2000-A pid=11011
+ts=2026-11-21T02:53:57Z event=end run=r1-lj98-s2000-A exit=0
+ts=2026-11-21T02:53:57Z event=start run=r1-lj98-s2001-A cell=lj98 seed=2001 round=1 arm=A
+ts=2026-11-21T02:53:57Z event=pid run=r1-lj98-s2001-A pid=11014
+ts=2026-11-21T02:54:01Z event=end run=r1-lj98-s2001-A exit=0
+ts=2026-11-21T02:54:01Z event=start run=r1-lj98-s2002-A cell=lj98 seed=2002 round=1 arm=A
+ts=2026-11-21T02:54:01Z event=pid run=r1-lj98-s2002-A pid=11015
+ts=2026-11-21T02:55:03Z event=end run=r1-lj98-s2002-A exit=0
+ts=2026-11-21T02:55:03Z event=start run=r1-lj98-s2003-A cell=lj98 seed=2003 round=1 arm=A
+ts=2026-11-21T02:55:03Z event=pid run=r1-lj98-s2003-A pid=11023
+ts=2026-11-21T02:56:09Z event=end run=r1-lj98-s2003-A exit=0
+ts=2026-11-21T02:56:09Z event=start run=r1-lj98-s2004-A cell=lj98 seed=2004 round=1 arm=A
+ts=2026-11-21T02:56:09Z event=pid run=r1-lj98-s2004-A pid=11025
+ts=2026-11-21T02:56:32Z event=end run=r1-lj98-s2004-A exit=0
+ts=2026-11-21T02:56:32Z event=start run=r1-lj98-s2005-A cell=lj98 seed=2005 round=1 arm=A
+ts=2026-11-21T02:56:32Z event=pid run=r1-lj98-s2005-A pid=11026
+ts=2026-11-21T02:58:16Z event=end run=r1-lj98-s2005-A exit=0
+ts=2026-11-21T02:58:16Z event=start run=r1-lj102-s2000-A cell=lj102 seed=2000 round=1 arm=A
+ts=2026-11-21T02:58:16Z event=pid run=r1-lj102-s2000-A pid=11069
+ts=2026-11-21T02:59:15Z event=end run=r1-lj102-s2000-A exit=0
+ts=2026-11-21T02:59:15Z event=start run=r1-lj102-s2001-A cell=lj102 seed=2001 round=1 arm=A
+ts=2026-11-21T02:59:15Z event=pid run=r1-lj102-s2001-A pid=11071
+ts=2026-11-21T03:01:20Z event=end run=r1-lj102-s2001-A exit=0
+ts=2026-11-21T03:01:20Z event=start run=r1-lj102-s2002-A cell=lj102 seed=2002 round=1 arm=A
+ts=2026-11-21T03:01:20Z event=pid run=r1-lj102-s2002-A pid=11074
+ts=2026-11-21T03:03:39Z event=end run=r1-lj102-s2002-A exit=0
+ts=2026-11-21T03:03:39Z event=start run=r1-lj102-s2003-A cell=lj102 seed=2003 round=1 arm=A
+ts=2026-11-21T03:03:39Z event=pid run=r1-lj102-s2003-A pid=11078
+ts=2026-11-21T03:05:22Z event=end run=r1-lj102-s2003-A exit=0
+ts=2026-11-21T03:05:22Z event=start run=r1-lj102-s2004-A cell=lj102 seed=2004 round=1 arm=A
+ts=2026-11-21T03:05:22Z event=pid run=r1-lj102-s2004-A pid=11086
+ts=2026-11-21T03:07:33Z event=end run=r1-lj102-s2004-A exit=0
+ts=2026-11-21T03:07:33Z event=start run=r1-lj102-s2005-A cell=lj102 seed=2005 round=1 arm=A
+ts=2026-11-21T03:07:33Z event=pid run=r1-lj102-s2005-A pid=11089
+ts=2026-11-21T03:09:53Z event=end run=r1-lj102-s2005-A exit=0
+ts=2026-11-21T03:09:53Z event=start run=r1-lj103-s2000-A cell=lj103 seed=2000 round=1 arm=A
+ts=2026-11-21T03:09:53Z event=pid run=r1-lj103-s2000-A pid=11093
+ts=2026-11-21T03:12:12Z event=end run=r1-lj103-s2000-A exit=0
+ts=2026-11-21T03:12:12Z event=start run=r1-lj103-s2001-A cell=lj103 seed=2001 round=1 arm=A
+ts=2026-11-21T03:12:12Z event=pid run=r1-lj103-s2001-A pid=11096
+ts=2026-11-21T03:29:26Z event=end run=r1-lj103-s2001-A exit=0
+ts=2026-11-21T03:29:26Z event=start run=r1-lj103-s2002-A cell=lj103 seed=2002 round=1 arm=A
+ts=2026-11-21T03:29:26Z event=pid run=r1-lj103-s2002-A pid=11210
+ts=2026-11-21T03:31:31Z event=end run=r1-lj103-s2002-A exit=0
+ts=2026-11-21T03:31:31Z event=start run=r1-lj103-s2003-A cell=lj103 seed=2003 round=1 arm=A
+ts=2026-11-21T03:31:31Z event=pid run=r1-lj103-s2003-A pid=11213
+ts=2026-11-21T03:31:34Z event=end run=r1-lj103-s2003-A exit=0
+ts=2026-11-21T03:31:34Z event=start run=r1-lj103-s2004-A cell=lj103 seed=2004 round=1 arm=A
+ts=2026-11-21T03:31:34Z event=pid run=r1-lj103-s2004-A pid=11215
+ts=2026-11-21T03:33:29Z event=end run=r1-lj103-s2004-A exit=0
+ts=2026-11-21T03:33:29Z event=start run=r1-lj103-s2005-A cell=lj103 seed=2005 round=1 arm=A
+ts=2026-11-21T03:33:29Z event=pid run=r1-lj103-s2005-A pid=11217
+ts=2026-11-21T03:35:31Z event=end run=r1-lj103-s2005-A exit=0
+ts=2026-11-21T03:35:31Z event=start run=r1-lj104-s2000-A cell=lj104 seed=2000 round=1 arm=A
+ts=2026-11-21T03:35:31Z event=pid run=r1-lj104-s2000-A pid=11220
+ts=2026-11-21T03:36:26Z event=end run=r1-lj104-s2000-A exit=0
+ts=2026-11-21T03:36:26Z event=start run=r1-lj104-s2001-A cell=lj104 seed=2001 round=1 arm=A
+ts=2026-11-21T03:36:26Z event=pid run=r1-lj104-s2001-A pid=11222
+ts=2026-11-21T03:38:42Z event=end run=r1-lj104-s2001-A exit=0
+ts=2026-11-21T03:38:42Z event=start run=r1-lj104-s2002-A cell=lj104 seed=2002 round=1 arm=A
+ts=2026-11-21T03:38:42Z event=pid run=r1-lj104-s2002-A pid=11226
+ts=2026-11-21T03:39:35Z event=end run=r1-lj104-s2002-A exit=0
+ts=2026-11-21T03:39:35Z event=start run=r1-lj104-s2003-A cell=lj104 seed=2003 round=1 arm=A
+ts=2026-11-21T03:39:35Z event=pid run=r1-lj104-s2003-A pid=11234
+ts=2026-11-21T03:41:47Z event=end run=r1-lj104-s2003-A exit=0
+ts=2026-11-21T03:41:47Z event=start run=r1-lj104-s2004-A cell=lj104 seed=2004 round=1 arm=A
+ts=2026-11-21T03:41:47Z event=pid run=r1-lj104-s2004-A pid=11237
+ts=2026-11-21T04:14:39Z event=end run=r1-lj104-s2004-A exit=0
+ts=2026-11-21T04:14:39Z event=start run=r1-lj104-s2005-A cell=lj104 seed=2005 round=1 arm=A
+ts=2026-11-21T04:14:39Z event=pid run=r1-lj104-s2005-A pid=11325
+ts=2026-11-21T04:16:01Z event=end run=r1-lj104-s2005-A exit=0
+ts=2026-11-21T04:16:01Z event=start run=r1-lj150-s2000-A cell=lj150 seed=2000 round=1 arm=A
+ts=2026-11-21T04:16:01Z event=pid run=r1-lj150-s2000-A pid=11327
+ts=2026-11-21T04:16:02Z event=end run=r1-lj150-s2000-A exit=0
+ts=2026-11-21T04:16:02Z event=start run=r1-lj150-s2001-A cell=lj150 seed=2001 round=1 arm=A
+ts=2026-11-21T04:16:02Z event=pid run=r1-lj150-s2001-A pid=11328
+ts=2026-11-21T04:16:26Z event=end run=r1-lj150-s2001-A exit=0
+ts=2026-11-21T04:16:26Z event=start run=r1-lj150-s2002-A cell=lj150 seed=2002 round=1 arm=A
+ts=2026-11-21T04:16:26Z event=pid run=r1-lj150-s2002-A pid=11330
+ts=2026-11-21T04:17:46Z event=end run=r1-lj150-s2002-A exit=0
+ts=2026-11-21T04:17:46Z event=start run=r1-lj150-s2003-A cell=lj150 seed=2003 round=1 arm=A
+ts=2026-11-21T04:17:46Z event=pid run=r1-lj150-s2003-A pid=11332
+ts=2026-11-21T04:18:47Z event=end run=r1-lj150-s2003-A exit=0
+ts=2026-11-21T04:18:47Z event=start run=r1-lj150-s2004-A cell=lj150 seed=2004 round=1 arm=A
+ts=2026-11-21T04:18:47Z event=pid run=r1-lj150-s2004-A pid=11334
+ts=2026-11-21T04:20:10Z event=end run=r1-lj150-s2004-A exit=0
+ts=2026-11-21T04:20:10Z event=start run=r1-lj150-s2005-A cell=lj150 seed=2005 round=1 arm=A
+ts=2026-11-21T04:20:10Z event=pid run=r1-lj150-s2005-A pid=11342
+ts=2026-11-21T04:25:24Z event=end run=r1-lj150-s2005-A exit=0
+ts=2026-11-21T04:25:24Z event=start run=r1-au55-s2000-A cell=au55 seed=2000 round=1 arm=A
+ts=2026-11-21T04:25:24Z event=pid run=r1-au55-s2000-A pid=11349
+ts=2026-11-21T04:26:04Z event=end run=r1-au55-s2000-A exit=0
+ts=2026-11-21T04:26:04Z event=start run=r1-au55-s2001-A cell=au55 seed=2001 round=1 arm=A
+ts=2026-11-21T04:26:04Z event=pid run=r1-au55-s2001-A pid=11350
+ts=2026-11-21T04:26:45Z event=end run=r1-au55-s2001-A exit=0
+ts=2026-11-21T04:26:45Z event=start run=r1-au55-s2002-A cell=au55 seed=2002 round=1 arm=A
+ts=2026-11-21T04:26:45Z event=pid run=r1-au55-s2002-A pid=11352
+ts=2026-11-21T04:26:59Z event=end run=r1-au55-s2002-A exit=0
+ts=2026-11-21T04:26:59Z event=start run=r1-au55-s2003-A cell=au55 seed=2003 round=1 arm=A
+ts=2026-11-21T04:26:59Z event=pid run=r1-au55-s2003-A pid=11353
+ts=2026-11-21T04:27:37Z event=end run=r1-au55-s2003-A exit=0
+ts=2026-11-21T04:27:37Z event=start run=r1-au55-s2004-A cell=au55 seed=2004 round=1 arm=A
+ts=2026-11-21T04:27:37Z event=pid run=r1-au55-s2004-A pid=11355
+ts=2026-11-21T04:28:16Z event=end run=r1-au55-s2004-A exit=0
+ts=2026-11-21T04:28:16Z event=start run=r1-au55-s2005-A cell=au55 seed=2005 round=1 arm=A
+ts=2026-11-21T04:28:16Z event=pid run=r1-au55-s2005-A pid=11357
+ts=2026-11-21T04:34:03Z event=end run=r1-au55-s2005-A exit=0
+ts=2026-11-21T04:34:03Z event=start run=r1-m80r6-s2000-A cell=m80r6 seed=2000 round=1 arm=A
+ts=2026-11-21T04:34:03Z event=pid run=r1-m80r6-s2000-A pid=11423
+ts=2026-11-21T04:34:04Z event=end run=r1-m80r6-s2000-A exit=0
+ts=2026-11-21T04:34:04Z event=start run=r1-m80r6-s2001-A cell=m80r6 seed=2001 round=1 arm=A
+ts=2026-11-21T04:34:04Z event=pid run=r1-m80r6-s2001-A pid=11424
+ts=2026-11-21T04:34:04Z event=end run=r1-m80r6-s2001-A exit=0
+ts=2026-11-21T04:34:04Z event=start run=r1-m80r6-s2002-A cell=m80r6 seed=2002 round=1 arm=A
+ts=2026-11-21T04:34:04Z event=pid run=r1-m80r6-s2002-A pid=11425
+ts=2026-11-21T04:34:16Z event=end run=r1-m80r6-s2002-A exit=0
+ts=2026-11-21T04:34:16Z event=start run=r1-m80r6-s2003-A cell=m80r6 seed=2003 round=1 arm=A
+ts=2026-11-21T04:34:16Z event=pid run=r1-m80r6-s2003-A pid=11426
+ts=2026-11-21T04:35:22Z event=end run=r1-m80r6-s2003-A exit=0
+ts=2026-11-21T04:35:22Z event=start run=r1-m80r6-s2004-A cell=m80r6 seed=2004 round=1 arm=A
+ts=2026-11-21T04:35:22Z event=pid run=r1-m80r6-s2004-A pid=11435
+ts=2026-11-21T04:35:23Z event=end run=r1-m80r6-s2004-A exit=0
+ts=2026-11-21T04:35:23Z event=start run=r1-m80r6-s2005-A cell=m80r6 seed=2005 round=1 arm=A
+ts=2026-11-21T04:35:23Z event=pid run=r1-m80r6-s2005-A pid=11436
+ts=2026-11-21T04:36:06Z event=end run=r1-m80r6-s2005-A exit=0
+ts=2026-11-21T04:36:06Z event=start run=r1-m80r14-s2000-A cell=m80r14 seed=2000 round=1 arm=A
+ts=2026-11-21T04:36:06Z event=pid run=r1-m80r14-s2000-A pid=11437
+ts=2026-11-21T04:36:47Z event=end run=r1-m80r14-s2000-A exit=0
+ts=2026-11-21T04:36:47Z event=start run=r1-m80r14-s2001-A cell=m80r14 seed=2001 round=1 arm=A
+ts=2026-11-21T04:36:47Z event=pid run=r1-m80r14-s2001-A pid=11439
+ts=2026-11-21T04:39:43Z event=end run=r1-m80r14-s2001-A exit=0
+ts=2026-11-21T04:39:43Z event=start run=r1-m80r14-s2002-A cell=m80r14 seed=2002 round=1 arm=A
+ts=2026-11-21T04:39:43Z event=pid run=r1-m80r14-s2002-A pid=11443
+ts=2026-11-21T04:42:39Z event=end run=r1-m80r14-s2002-A exit=0
+ts=2026-11-21T04:42:39Z event=start run=r1-m80r14-s2003-A cell=m80r14 seed=2003 round=1 arm=A
+ts=2026-11-21T04:42:39Z event=pid run=r1-m80r14-s2003-A pid=11447
+ts=2026-11-21T04:44:43Z event=end run=r1-m80r14-s2003-A exit=0
+ts=2026-11-21T04:44:43Z event=start run=r1-m80r14-s2004-A cell=m80r14 seed=2004 round=1 arm=A
+ts=2026-11-21T04:44:43Z event=pid run=r1-m80r14-s2004-A pid=11450
+ts=2026-11-21T04:47:22Z event=end run=r1-m80r14-s2004-A exit=0
+ts=2026-11-21T04:47:22Z event=start run=r1-m80r14-s2005-A cell=m80r14 seed=2005 round=1 arm=A
+ts=2026-11-21T04:47:22Z event=pid run=r1-m80r14-s2005-A pid=11460
+ts=2026-11-21T05:08:34Z event=end run=r1-m80r14-s2005-A exit=0
+ts=2026-11-21T05:08:34Z event=start run=r2-lj38-s2000-B cell=lj38 seed=2000 round=2 arm=B
+ts=2026-11-21T05:08:34Z event=pid run=r2-lj38-s2000-B pid=11510
+ts=2026-11-21T05:08:34Z event=end run=r2-lj38-s2000-B exit=0
+ts=2026-11-21T05:08:34Z event=start run=r2-lj38-s2001-B cell=lj38 seed=2001 round=2 arm=B
+ts=2026-11-21T05:08:34Z event=pid run=r2-lj38-s2001-B pid=11511
+ts=2026-11-21T05:08:35Z event=end run=r2-lj38-s2001-B exit=0
+ts=2026-11-21T05:08:35Z event=start run=r2-lj38-s2002-B cell=lj38 seed=2002 round=2 arm=B
+ts=2026-11-21T05:08:35Z event=pid run=r2-lj38-s2002-B pid=11512
+ts=2026-11-21T05:08:35Z event=end run=r2-lj38-s2002-B exit=0
+ts=2026-11-21T05:08:35Z event=start run=r2-lj38-s2003-B cell=lj38 seed=2003 round=2 arm=B
+ts=2026-11-21T05:08:35Z event=pid run=r2-lj38-s2003-B pid=11513
+ts=2026-11-21T05:08:36Z event=end run=r2-lj38-s2003-B exit=0
+ts=2026-11-21T05:08:36Z event=start run=r2-lj38-s2004-B cell=lj38 seed=2004 round=2 arm=B
+ts=2026-11-21T05:08:36Z event=pid run=r2-lj38-s2004-B pid=11514
+ts=2026-11-21T05:08:37Z event=end run=r2-lj38-s2004-B exit=0
+ts=2026-11-21T05:08:37Z event=start run=r2-lj38-s2005-B cell=lj38 seed=2005 round=2 arm=B
+ts=2026-11-21T05:08:37Z event=pid run=r2-lj38-s2005-B pid=11515
+ts=2026-11-21T05:08:38Z event=end run=r2-lj38-s2005-B exit=0
+ts=2026-11-21T05:08:38Z event=start run=r2-lj55-s2000-B cell=lj55 seed=2000 round=2 arm=B
+ts=2026-11-21T05:08:38Z event=pid run=r2-lj55-s2000-B pid=11516
+ts=2026-11-21T05:08:38Z event=end run=r2-lj55-s2000-B exit=0
+ts=2026-11-21T05:08:38Z event=start run=r2-lj55-s2001-B cell=lj55 seed=2001 round=2 arm=B
+ts=2026-11-21T05:08:38Z event=pid run=r2-lj55-s2001-B pid=11517
+ts=2026-11-21T05:08:38Z event=end run=r2-lj55-s2001-B exit=0
+ts=2026-11-21T05:08:38Z event=start run=r2-lj55-s2002-B cell=lj55 seed=2002 round=2 arm=B
+ts=2026-11-21T05:08:38Z event=pid run=r2-lj55-s2002-B pid=11518
+ts=2026-11-21T05:08:38Z event=end run=r2-lj55-s2002-B exit=0
+ts=2026-11-21T05:08:38Z event=start run=r2-lj55-s2003-B cell=lj55 seed=2003 round=2 arm=B
+ts=2026-11-21T05:08:38Z event=pid run=r2-lj55-s2003-B pid=11519
+ts=2026-11-21T05:08:38Z event=end run=r2-lj55-s2003-B exit=0
+ts=2026-11-21T05:08:38Z event=start run=r2-lj55-s2004-B cell=lj55 seed=2004 round=2 arm=B
+ts=2026-11-21T05:08:38Z event=pid run=r2-lj55-s2004-B pid=11520
+ts=2026-11-21T05:08:39Z event=end run=r2-lj55-s2004-B exit=0
+ts=2026-11-21T05:08:39Z event=start run=r2-lj55-s2005-B cell=lj55 seed=2005 round=2 arm=B
+ts=2026-11-21T05:08:39Z event=pid run=r2-lj55-s2005-B pid=11521
+ts=2026-11-21T05:08:39Z event=end run=r2-lj55-s2005-B exit=0
+ts=2026-11-21T05:08:39Z event=start run=r2-lj75-s2000-B cell=lj75 seed=2000 round=2 arm=B
+ts=2026-11-21T05:08:39Z event=pid run=r2-lj75-s2000-B pid=11522
+ts=2026-11-21T05:09:20Z event=end run=r2-lj75-s2000-B exit=0
+ts=2026-11-21T05:09:20Z event=start run=r2-lj75-s2001-B cell=lj75 seed=2001 round=2 arm=B
+ts=2026-11-21T05:09:20Z event=pid run=r2-lj75-s2001-B pid=11524
+ts=2026-11-21T05:10:29Z event=end run=r2-lj75-s2001-B exit=0
+ts=2026-11-21T05:10:29Z event=start run=r2-lj75-s2002-B cell=lj75 seed=2002 round=2 arm=B
+ts=2026-11-21T05:10:29Z event=pid run=r2-lj75-s2002-B pid=11526
+ts=2026-11-21T05:11:25Z event=end run=r2-lj75-s2002-B exit=0
+ts=2026-11-21T05:11:25Z event=start run=r2-lj75-s2003-B cell=lj75 seed=2003 round=2 arm=B
+ts=2026-11-21T05:11:25Z event=pid run=r2-lj75-s2003-B pid=11528
+ts=2026-11-21T05:12:32Z event=end run=r2-lj75-s2003-B exit=0
+ts=2026-11-21T05:12:32Z event=start run=r2-lj75-s2004-B cell=lj75 seed=2004 round=2 arm=B
+ts=2026-11-21T05:12:32Z event=pid run=r2-lj75-s2004-B pid=11530
+ts=2026-11-21T05:12:35Z event=end run=r2-lj75-s2004-B exit=0
+ts=2026-11-21T05:12:35Z event=start run=r2-lj75-s2005-B cell=lj75 seed=2005 round=2 arm=B
+ts=2026-11-21T05:12:35Z event=pid run=r2-lj75-s2005-B pid=11531
+ts=2026-11-21T05:13:42Z event=end run=r2-lj75-s2005-B exit=0
+ts=2026-11-21T05:13:42Z event=start run=r2-lj98-s2000-B cell=lj98 seed=2000 round=2 arm=B
+ts=2026-11-21T05:13:42Z event=pid run=r2-lj98-s2000-B pid=11539
+ts=2026-11-21T05:15:45Z event=end run=r2-lj98-s2000-B exit=0
+ts=2026-11-21T05:15:45Z event=start run=r2-lj98-s2001-B cell=lj98 seed=2001 round=2 arm=B
+ts=2026-11-21T05:15:45Z event=pid run=r2-lj98-s2001-B pid=11542
+ts=2026-11-21T05:15:49Z event=end run=r2-lj98-s2001-B exit=0
+ts=2026-11-21T05:15:49Z event=start run=r2-lj98-s2002-B cell=lj98 seed=2002 round=2 arm=B
+ts=2026-11-21T05:15:49Z event=pid run=r2-lj98-s2002-B pid=11543
+ts=2026-11-21T05:16:47Z event=end run=r2-lj98-s2002-B exit=0
+ts=2026-11-21T05:16:47Z event=start run=r2-lj98-s2003-B cell=lj98 seed=2003 round=2 arm=B
+ts=2026-11-21T05:16:47Z event=pid run=r2-lj98-s2003-B pid=11545
+ts=2026-11-21T05:17:53Z event=end run=r2-lj98-s2003-B exit=0
+ts=2026-11-21T05:17:53Z event=start run=r2-lj98-s2004-B cell=lj98 seed=2004 round=2 arm=B
+ts=2026-11-21T05:17:53Z event=pid run=r2-lj98-s2004-B pid=11547
+ts=2026-11-21T05:18:17Z event=end run=r2-lj98-s2004-B exit=0
+ts=2026-11-21T05:18:17Z event=start run=r2-lj98-s2005-B cell=lj98 seed=2005 round=2 arm=B
+ts=2026-11-21T05:18:17Z event=pid run=r2-lj98-s2005-B pid=11549
+ts=2026-11-21T05:20:05Z event=end run=r2-lj98-s2005-B exit=0
+ts=2026-11-21T05:20:05Z event=start run=r2-lj102-s2000-B cell=lj102 seed=2000 round=2 arm=B
+ts=2026-11-21T05:20:05Z event=pid run=r2-lj102-s2000-B pid=11552
+ts=2026-11-21T05:21:07Z event=end run=r2-lj102-s2000-B exit=0
+ts=2026-11-21T05:21:07Z event=start run=r2-lj102-s2001-B cell=lj102 seed=2001 round=2 arm=B
+ts=2026-11-21T05:21:07Z event=pid run=r2-lj102-s2001-B pid=11554
+ts=2026-11-21T05:23:09Z event=end run=r2-lj102-s2001-B exit=0
+ts=2026-11-21T05:23:09Z event=start run=r2-lj102-s2002-B cell=lj102 seed=2002 round=2 arm=B
+ts=2026-11-21T05:23:09Z event=pid run=r2-lj102-s2002-B pid=11557
+ts=2026-11-21T05:40:21Z event=end run=r2-lj102-s2002-B exit=0
+ts=2026-11-21T05:40:21Z event=start run=r2-lj102-s2003-B cell=lj102 seed=2003 round=2 arm=B
+ts=2026-11-21T05:40:21Z event=pid run=r2-lj102-s2003-B pid=11612
+ts=2026-11-21T05:42:06Z event=end run=r2-lj102-s2003-B exit=0
+ts=2026-11-21T05:42:06Z event=start run=r2-lj102-s2004-B cell=lj102 seed=2004 round=2 arm=B
+ts=2026-11-21T05:42:06Z event=pid run=r2-lj102-s2004-B pid=11615
+ts=2026-11-21T05:44:19Z event=end run=r2-lj102-s2004-B exit=0
+ts=2026-11-21T05:44:19Z event=start run=r2-lj102-s2005-B cell=lj102 seed=2005 round=2 arm=B
+ts=2026-11-21T05:44:19Z event=pid run=r2-lj102-s2005-B pid=11618
+ts=2026-11-21T05:46:43Z event=end run=r2-lj102-s2005-B exit=0
+ts=2026-11-21T05:46:43Z event=start run=r2-lj103-s2000-B cell=lj103 seed=2000 round=2 arm=B
+ts=2026-11-21T05:46:43Z event=pid run=r2-lj103-s2000-B pid=11622
+ts=2026-11-21T05:49:09Z event=end run=r2-lj103-s2000-B exit=0
+ts=2026-11-21T05:49:09Z event=start run=r2-lj103-s2001-B cell=lj103 seed=2001 round=2 arm=B
+ts=2026-11-21T05:49:09Z event=pid run=r2-lj103-s2001-B pid=11631
+ts=2026-11-21T05:51:20Z event=end run=r2-lj103-s2001-B exit=0
+ts=2026-11-21T05:51:20Z event=start run=r2-lj103-s2002-B cell=lj103 seed=2002 round=2 arm=B
+ts=2026-11-21T05:51:20Z event=pid run=r2-lj103-s2002-B pid=11634
+ts=2026-11-21T06:02:35Z event=end run=r2-lj103-s2002-B exit=0
+ts=2026-11-21T06:02:36Z event=start run=r2-lj103-s2003-B cell=lj103 seed=2003 round=2 arm=B
+ts=2026-11-21T06:02:36Z event=pid run=r2-lj103-s2003-B pid=11683
+ts=2026-11-21T06:02:38Z event=end run=r2-lj103-s2003-B exit=0
+ts=2026-11-21T06:02:38Z event=start run=r2-lj103-s2004-B cell=lj103 seed=2004 round=2 arm=B
+ts=2026-11-21T06:02:38Z event=pid run=r2-lj103-s2004-B pid=11684
+ts=2026-11-21T06:04:38Z event=end run=r2-lj103-s2004-B exit=0
+ts=2026-11-21T06:04:38Z event=start run=r2-lj103-s2005-B cell=lj103 seed=2005 round=2 arm=B
+ts=2026-11-21T06:04:38Z event=pid run=r2-lj103-s2005-B pid=11687
+ts=2026-11-21T06:06:43Z event=end run=r2-lj103-s2005-B exit=0
+ts=2026-11-21T06:06:43Z event=start run=r2-lj104-s2000-B cell=lj104 seed=2000 round=2 arm=B
+ts=2026-11-21T06:06:43Z event=pid run=r2-lj104-s2000-B pid=11690
+ts=2026-11-21T06:07:39Z event=end run=r2-lj104-s2000-B exit=0
+ts=2026-11-21T06:07:39Z event=start run=r2-lj104-s2001-B cell=lj104 seed=2001 round=2 arm=B
+ts=2026-11-21T06:07:39Z event=pid run=r2-lj104-s2001-B pid=11698
+ts=2026-11-21T06:09:57Z event=end run=r2-lj104-s2001-B exit=0
+ts=2026-11-21T06:09:57Z event=start run=r2-lj104-s2002-B cell=lj104 seed=2002 round=2 arm=B
+ts=2026-11-21T06:09:57Z event=pid run=r2-lj104-s2002-B pid=11702
+ts=2026-11-21T06:10:51Z event=end run=r2-lj104-s2002-B exit=0
+ts=2026-11-21T06:10:51Z event=start run=r2-lj104-s2003-B cell=lj104 seed=2003 round=2 arm=B
+ts=2026-11-21T06:10:51Z event=pid run=r2-lj104-s2003-B pid=11704
+ts=2026-11-21T06:13:07Z event=end run=r2-lj104-s2003-B exit=0
+ts=2026-11-21T06:13:07Z event=start run=r2-lj104-s2004-B cell=lj104 seed=2004 round=2 arm=B
+ts=2026-11-21T06:13:07Z event=pid run=r2-lj104-s2004-B pid=11707
+ts=2026-11-21T06:15:25Z event=end run=r2-lj104-s2004-B exit=0
+ts=2026-11-21T06:15:25Z event=start run=r2-lj104-s2005-B cell=lj104 seed=2005 round=2 arm=B
+ts=2026-11-21T06:15:25Z event=pid run=r2-lj104-s2005-B pid=11710
+ts=2026-11-21T06:16:49Z event=end run=r2-lj104-s2005-B exit=0
+ts=2026-11-21T06:16:49Z event=start run=r2-lj150-s2000-B cell=lj150 seed=2000 round=2 arm=B
+ts=2026-11-21T06:16:49Z event=pid run=r2-lj150-s2000-B pid=11713
+ts=2026-11-21T06:16:50Z event=end run=r2-lj150-s2000-B exit=0
+ts=2026-11-21T06:16:50Z event=start run=r2-lj150-s2001-B cell=lj150 seed=2001 round=2 arm=B
+ts=2026-11-21T06:16:50Z event=pid run=r2-lj150-s2001-B pid=11714
+ts=2026-11-21T06:17:15Z event=end run=r2-lj150-s2001-B exit=0
+ts=2026-11-21T06:17:15Z event=start run=r2-lj150-s2002-B cell=lj150 seed=2002 round=2 arm=B
+ts=2026-11-21T06:17:15Z event=pid run=r2-lj150-s2002-B pid=11715
+ts=2026-11-21T06:33:36Z event=end run=r2-lj150-s2002-B exit=0
+ts=2026-11-21T06:33:36Z event=start run=r2-lj150-s2003-B cell=lj150 seed=2003 round=2 arm=B
+ts=2026-11-21T06:33:36Z event=pid run=r2-lj150-s2003-B pid=11771
+ts=2026-11-21T06:34:39Z event=end run=r2-lj150-s2003-B exit=0
+ts=2026-11-21T06:34:39Z event=start run=r2-lj150-s2004-B cell=lj150 seed=2004 round=2 arm=B
+ts=2026-11-21T06:34:39Z event=pid run=r2-lj150-s2004-B pid=11773
+ts=2026-11-21T06:36:04Z event=end run=r2-lj150-s2004-B exit=0
+ts=2026-11-21T06:36:04Z event=start run=r2-lj150-s2005-B cell=lj150 seed=2005 round=2 arm=B
+ts=2026-11-21T06:36:04Z event=pid run=r2-lj150-s2005-B pid=11776
+ts=2026-11-21T06:41:19Z event=end run=r2-lj150-s2005-B exit=0
+ts=2026-11-21T06:41:19Z event=start run=r2-au55-s2000-B cell=au55 seed=2000 round=2 arm=B
+ts=2026-11-21T06:41:19Z event=pid run=r2-au55-s2000-B pid=11782
+ts=2026-11-21T06:41:57Z event=end run=r2-au55-s2000-B exit=0
+ts=2026-11-21T06:41:57Z event=start run=r2-au55-s2001-B cell=au55 seed=2001 round=2 arm=B
+ts=2026-11-21T06:41:57Z event=pid run=r2-au55-s2001-B pid=11784
+ts=2026-11-21T06:42:35Z event=end run=r2-au55-s2001-B exit=0
+ts=2026-11-21T06:42:35Z event=start run=r2-au55-s2002-B cell=au55 seed=2002 round=2 arm=B
+ts=2026-11-21T06:42:35Z event=pid run=r2-au55-s2002-B pid=11791
+ts=2026-11-21T06:42:48Z event=end run=r2-au55-s2002-B exit=0
+ts=2026-11-21T06:42:48Z event=start run=r2-au55-s2003-B cell=au55 seed=2003 round=2 arm=B
+ts=2026-11-21T06:42:48Z event=pid run=r2-au55-s2003-B pid=11793
+ts=2026-11-21T06:43:26Z event=end run=r2-au55-s2003-B exit=0
+ts=2026-11-21T06:43:26Z event=start run=r2-au55-s2004-B cell=au55 seed=2004 round=2 arm=B
+ts=2026-11-21T06:43:26Z event=pid run=r2-au55-s2004-B pid=11794
+ts=2026-11-21T06:44:03Z event=end run=r2-au55-s2004-B exit=0
+ts=2026-11-21T06:44:03Z event=start run=r2-au55-s2005-B cell=au55 seed=2005 round=2 arm=B
+ts=2026-11-21T06:44:03Z event=pid run=r2-au55-s2005-B pid=11796
+ts=2026-11-21T06:44:42Z event=end run=r2-au55-s2005-B exit=0
+ts=2026-11-21T06:44:42Z event=start run=r2-m80r6-s2000-B cell=m80r6 seed=2000 round=2 arm=B
+ts=2026-11-21T06:44:42Z event=pid run=r2-m80r6-s2000-B pid=11798
+ts=2026-11-21T06:44:42Z event=end run=r2-m80r6-s2000-B exit=0
+ts=2026-11-21T06:44:42Z event=start run=r2-m80r6-s2001-B cell=m80r6 seed=2001 round=2 arm=B
+ts=2026-11-21T06:44:42Z event=pid run=r2-m80r6-s2001-B pid=11799
+ts=2026-11-21T06:44:43Z event=end run=r2-m80r6-s2001-B exit=0
+ts=2026-11-21T06:44:43Z event=start run=r2-m80r6-s2002-B cell=m80r6 seed=2002 round=2 arm=B
+ts=2026-11-21T06:44:43Z event=pid run=r2-m80r6-s2002-B pid=11800
+ts=2026-11-21T06:44:54Z event=end run=r2-m80r6-s2002-B exit=0
+ts=2026-11-21T06:44:54Z event=start run=r2-m80r6-s2003-B cell=m80r6 seed=2003 round=2 arm=B
+ts=2026-11-21T06:44:54Z event=pid run=r2-m80r6-s2003-B pid=11801
+ts=2026-11-21T06:46:02Z event=end run=r2-m80r6-s2003-B exit=0
+ts=2026-11-21T06:46:02Z event=start run=r2-m80r6-s2004-B cell=m80r6 seed=2004 round=2 arm=B
+ts=2026-11-21T06:46:02Z event=pid run=r2-m80r6-s2004-B pid=11803
+ts=2026-11-21T06:46:03Z event=end run=r2-m80r6-s2004-B exit=0
+ts=2026-11-21T06:46:03Z event=start run=r2-m80r6-s2005-B cell=m80r6 seed=2005 round=2 arm=B
+ts=2026-11-21T06:46:03Z event=pid run=r2-m80r6-s2005-B pid=11804
+ts=2026-11-21T06:46:46Z event=end run=r2-m80r6-s2005-B exit=0
+ts=2026-11-21T06:46:46Z event=start run=r2-m80r14-s2000-B cell=m80r14 seed=2000 round=2 arm=B
+ts=2026-11-21T06:46:46Z event=pid run=r2-m80r14-s2000-B pid=11806
+ts=2026-11-21T06:47:26Z event=end run=r2-m80r14-s2000-B exit=0
+ts=2026-11-21T06:47:26Z event=start run=r2-m80r14-s2001-B cell=m80r14 seed=2001 round=2 arm=B
+ts=2026-11-21T06:47:26Z event=pid run=r2-m80r14-s2001-B pid=11807
+ts=2026-11-21T06:59:15Z event=end run=r2-m80r14-s2001-B exit=0
+ts=2026-11-21T06:59:15Z event=start run=r2-m80r14-s2002-B cell=m80r14 seed=2002 round=2 arm=B
+ts=2026-11-21T06:59:15Z event=pid run=r2-m80r14-s2002-B pid=11856
+ts=2026-11-21T07:01:57Z event=end run=r2-m80r14-s2002-B exit=0
+ts=2026-11-21T07:01:57Z event=start run=r2-m80r14-s2003-B cell=m80r14 seed=2003 round=2 arm=B
+ts=2026-11-21T07:01:57Z event=pid run=r2-m80r14-s2003-B pid=11866
+ts=2026-11-21T07:03:54Z event=end run=r2-m80r14-s2003-B exit=0
+ts=2026-11-21T07:03:54Z event=start run=r2-m80r14-s2004-B cell=m80r14 seed=2004 round=2 arm=B
+ts=2026-11-21T07:03:54Z event=pid run=r2-m80r14-s2004-B pid=11869
+ts=2026-11-21T07:06:34Z event=end run=r2-m80r14-s2004-B exit=0
+ts=2026-11-21T07:06:34Z event=start run=r2-m80r14-s2005-B cell=m80r14 seed=2005 round=2 arm=B
+ts=2026-11-21T07:06:34Z event=pid run=r2-m80r14-s2005-B pid=11872
+ts=2026-11-21T07:09:14Z event=end run=r2-m80r14-s2005-B exit=0
+ts=2026-11-21T07:09:14Z event=start run=r3-lj38-s2000-B cell=lj38 seed=2000 round=3 arm=B
+ts=2026-11-21T07:09:14Z event=pid run=r3-lj38-s2000-B pid=11876
+ts=2026-11-21T07:09:14Z event=end run=r3-lj38-s2000-B exit=0
+ts=2026-11-21T07:09:14Z event=start run=r3-lj38-s2001-B cell=lj38 seed=2001 round=3 arm=B
+ts=2026-11-21T07:09:14Z event=pid run=r3-lj38-s2001-B pid=11877
+ts=2026-11-21T07:09:15Z event=end run=r3-lj38-s2001-B exit=0
+ts=2026-11-21T07:09:15Z event=start run=r3-lj38-s2002-B cell=lj38 seed=2002 round=3 arm=B
+ts=2026-11-21T07:09:15Z event=pid run=r3-lj38-s2002-B pid=11878
+ts=2026-11-21T07:09:16Z event=end run=r3-lj38-s2002-B exit=0
+ts=2026-11-21T07:09:16Z event=start run=r3-lj38-s2003-B cell=lj38 seed=2003 round=3 arm=B
+ts=2026-11-21T07:09:16Z event=pid run=r3-lj38-s2003-B pid=11879
+ts=2026-11-21T07:09:17Z event=end run=r3-lj38-s2003-B exit=0
+ts=2026-11-21T07:09:17Z event=start run=r3-lj38-s2004-B cell=lj38 seed=2004 round=3 arm=B
+ts=2026-11-21T07:09:17Z event=pid run=r3-lj38-s2004-B pid=11880
+ts=2026-11-21T07:09:18Z event=end run=r3-lj38-s2004-B exit=0
+ts=2026-11-21T07:09:18Z event=start run=r3-lj38-s2005-B cell=lj38 seed=2005 round=3 arm=B
+ts=2026-11-21T07:09:18Z event=pid run=r3-lj38-s2005-B pid=11881
+ts=2026-11-21T07:09:19Z event=end run=r3-lj38-s2005-B exit=0
+ts=2026-11-21T07:09:19Z event=start run=r3-lj55-s2000-B cell=lj55 seed=2000 round=3 arm=B
+ts=2026-11-21T07:09:19Z event=pid run=r3-lj55-s2000-B pid=11882
+ts=2026-11-21T07:09:19Z event=end run=r3-lj55-s2000-B exit=0
+ts=2026-11-21T07:09:19Z event=start run=r3-lj55-s2001-B cell=lj55 seed=2001 round=3 arm=B
+ts=2026-11-21T07:09:19Z event=pid run=r3-lj55-s2001-B pid=11883
+ts=2026-11-21T07:09:19Z event=end run=r3-lj55-s2001-B exit=0
+ts=2026-11-21T07:09:19Z event=start run=r3-lj55-s2002-B cell=lj55 seed=2002 round=3 arm=B
+ts=2026-11-21T07:09:19Z event=pid run=r3-lj55-s2002-B pid=11884
+ts=2026-11-21T07:09:19Z event=end run=r3-lj55-s2002-B exit=0
+ts=2026-11-21T07:09:19Z event=start run=r3-lj55-s2003-B cell=lj55 seed=2003 round=3 arm=B
+ts=2026-11-21T07:09:19Z event=pid run=r3-lj55-s2003-B pid=11885
+ts=2026-11-21T07:09:19Z event=end run=r3-lj55-s2003-B exit=0
+ts=2026-11-21T07:09:19Z event=start run=r3-lj55-s2004-B cell=lj55 seed=2004 round=3 arm=B
+ts=2026-11-21T07:09:19Z event=pid run=r3-lj55-s2004-B pid=11886
+ts=2026-11-21T07:09:19Z event=end run=r3-lj55-s2004-B exit=0
+ts=2026-11-21T07:09:19Z event=start run=r3-lj55-s2005-B cell=lj55 seed=2005 round=3 arm=B
+ts=2026-11-21T07:09:19Z event=pid run=r3-lj55-s2005-B pid=11887
+ts=2026-11-21T07:09:19Z event=end run=r3-lj55-s2005-B exit=0
+ts=2026-11-21T07:09:19Z event=start run=r3-lj75-s2000-B cell=lj75 seed=2000 round=3 arm=B
+ts=2026-11-21T07:09:19Z event=pid run=r3-lj75-s2000-B pid=11888
+ts=2026-11-21T07:10:00Z event=end run=r3-lj75-s2000-B exit=0
+ts=2026-11-21T07:10:00Z event=start run=r3-lj75-s2001-B cell=lj75 seed=2001 round=3 arm=B
+ts=2026-11-21T07:10:00Z event=pid run=r3-lj75-s2001-B pid=11890
+ts=2026-11-21T07:11:08Z event=end run=r3-lj75-s2001-B exit=0
+ts=2026-11-21T07:11:08Z event=start run=r3-lj75-s2002-B cell=lj75 seed=2002 round=3 arm=B
+ts=2026-11-21T07:11:08Z event=pid run=r3-lj75-s2002-B pid=11892
+ts=2026-11-21T07:12:03Z event=end run=r3-lj75-s2002-B exit=0
+ts=2026-11-21T07:12:03Z event=start run=r3-lj75-s2003-B cell=lj75 seed=2003 round=3 arm=B
+ts=2026-11-21T07:12:03Z event=pid run=r3-lj75-s2003-B pid=11900
+ts=2026-11-21T07:27:58Z event=end run=r3-lj75-s2003-B exit=0
+ts=2026-11-21T07:27:58Z event=start run=r3-lj75-s2004-B cell=lj75 seed=2004 round=3 arm=B
+ts=2026-11-21T07:27:58Z event=pid run=r3-lj75-s2004-B pid=11948
+ts=2026-11-21T07:28:01Z event=end run=r3-lj75-s2004-B exit=0
+ts=2026-11-21T07:28:01Z event=start run=r3-lj75-s2005-B cell=lj75 seed=2005 round=3 arm=B
+ts=2026-11-21T07:28:01Z event=pid run=r3-lj75-s2005-B pid=11949
+ts=2026-11-21T07:29:07Z event=end run=r3-lj75-s2005-B exit=0
+ts=2026-11-21T07:29:07Z event=start run=r3-lj98-s2000-B cell=lj98 seed=2000 round=3 arm=B
+ts=2026-11-21T07:29:07Z event=pid run=r3-lj98-s2000-B pid=11951
+ts=2026-11-21T07:31:11Z event=end run=r3-lj98-s2000-B exit=0
+ts=2026-11-21T07:31:11Z event=start run=r3-lj98-s2001-B cell=lj98 seed=2001 round=3 arm=B
+ts=2026-11-21T07:31:11Z event=pid run=r3-lj98-s2001-B pid=11954
+ts=2026-11-21T07:31:14Z event=end run=r3-lj98-s2001-B exit=0
+ts=2026-11-21T07:31:14Z event=start run=r3-lj98-s2002-B cell=lj98 seed=2002 round=3 arm=B
+ts=2026-11-21T07:31:14Z event=pid run=r3-lj98-s2002-B pid=11955
+ts=2026-11-21T07:32:12Z event=end run=r3-lj98-s2002-B exit=0
+ts=2026-11-21T07:32:12Z event=start run=r3-lj98-s2003-B cell=lj98 seed=2003 round=3 arm=B
+ts=2026-11-21T07:32:12Z event=pid run=r3-lj98-s2003-B pid=11957
+ts=2026-11-21T07:33:17Z event=end run=r3-lj98-s2003-B exit=0
+ts=2026-11-21T07:33:17Z event=start run=r3-lj98-s2004-B cell=lj98 seed=2004 round=3 arm=B
+ts=2026-11-21T07:33:17Z event=pid run=r3-lj98-s2004-B pid=11959
+ts=2026-11-21T07:33:41Z event=end run=r3-lj98-s2004-B exit=0
+ts=2026-11-21T07:33:41Z event=start run=r3-lj98-s2005-B cell=lj98 seed=2005 round=3 arm=B
+ts=2026-11-21T07:33:41Z event=pid run=r3-lj98-s2005-B pid=11961
+ts=2026-11-21T07:35:26Z event=end run=r3-lj98-s2005-B exit=0
+ts=2026-11-21T07:35:26Z event=start run=r3-lj102-s2000-B cell=lj102 seed=2000 round=3 arm=B
+ts=2026-11-21T07:35:26Z event=pid run=r3-lj102-s2000-B pid=11963
+ts=2026-11-21T07:36:28Z event=end run=r3-lj102-s2000-B exit=0
+ts=2026-11-21T07:36:28Z event=start run=r3-lj102-s2001-B cell=lj102 seed=2001 round=3 arm=B
+ts=2026-11-21T07:36:28Z event=pid run=r3-lj102-s2001-B pid=11971
+ts=2026-11-21T07:38:27Z event=end run=r3-lj102-s2001-B exit=0
+ts=2026-11-21T07:38:27Z event=start run=r3-lj102-s2002-B cell=lj102 seed=2002 round=3 arm=B
+ts=2026-11-21T07:38:27Z event=pid run=r3-lj102-s2002-B pid=11974
+ts=2026-11-21T07:40:47Z event=end run=r3-lj102-s2002-B exit=0
+ts=2026-11-21T07:40:47Z event=start run=r3-lj102-s2003-B cell=lj102 seed=2003 round=3 arm=B
+ts=2026-11-21T07:40:47Z event=pid run=r3-lj102-s2003-B pid=11978
+ts=2026-11-21T07:51:33Z event=end run=r3-lj102-s2003-B exit=0
+ts=2026-11-21T07:51:33Z event=start run=r3-lj102-s2004-B cell=lj102 seed=2004 round=3 arm=B
+ts=2026-11-21T07:51:33Z event=pid run=r3-lj102-s2004-B pid=12025
+ts=2026-11-21T07:53:45Z event=end run=r3-lj102-s2004-B exit=0
+ts=2026-11-21T07:53:45Z event=start run=r3-lj102-s2005-B cell=lj102 seed=2005 round=3 arm=B
+ts=2026-11-21T07:53:45Z event=pid run=r3-lj102-s2005-B pid=12029
+ts=2026-11-21T07:56:07Z event=end run=r3-lj102-s2005-B exit=0
+ts=2026-11-21T07:56:07Z event=start run=r3-lj103-s2000-B cell=lj103 seed=2000 round=3 arm=B
+ts=2026-11-21T07:56:07Z event=pid run=r3-lj103-s2000-B pid=12038
+ts=2026-11-21T07:58:35Z event=end run=r3-lj103-s2000-B exit=0
+ts=2026-11-21T07:58:35Z event=start run=r3-lj103-s2001-B cell=lj103 seed=2001 round=3 arm=B
+ts=2026-11-21T07:58:35Z event=pid run=r3-lj103-s2001-B pid=12041
+ts=2026-11-21T08:00:46Z event=end run=r3-lj103-s2001-B exit=0
+ts=2026-11-21T08:00:46Z event=start run=r3-lj103-s2002-B cell=lj103 seed=2002 round=3 arm=B
+ts=2026-11-21T08:00:46Z event=pid run=r3-lj103-s2002-B pid=12045
+ts=2026-11-21T08:02:56Z event=end run=r3-lj103-s2002-B exit=0
+ts=2026-11-21T08:02:56Z event=start run=r3-lj103-s2003-B cell=lj103 seed=2003 round=3 arm=B
+ts=2026-11-21T08:02:56Z event=pid run=r3-lj103-s2003-B pid=12048
+ts=2026-11-21T08:02:59Z event=end run=r3-lj103-s2003-B exit=0
+ts=2026-11-21T08:02:59Z event=start run=r3-lj103-s2004-B cell=lj103 seed=2004 round=3 arm=B
+ts=2026-11-21T08:02:59Z event=pid run=r3-lj103-s2004-B pid=12049
+ts=2026-11-21T08:04:58Z event=end run=r3-lj103-s2004-B exit=0
+ts=2026-11-21T08:04:58Z event=start run=r3-lj103-s2005-B cell=lj103 seed=2005 round=3 arm=B
+ts=2026-11-21T08:04:58Z event=pid run=r3-lj103-s2005-B pid=12052
+ts=2026-11-21T08:21:49Z event=end run=r3-lj103-s2005-B exit=0
+ts=2026-11-21T08:21:49Z event=start run=r3-lj104-s2000-B cell=lj104 seed=2000 round=3 arm=B
+ts=2026-11-21T08:21:49Z event=pid run=r3-lj104-s2000-B pid=12106
+ts=2026-11-21T08:22:45Z event=end run=r3-lj104-s2000-B exit=0
+ts=2026-11-21T08:22:45Z event=start run=r3-lj104-s2001-B cell=lj104 seed=2001 round=3 arm=B
+ts=2026-11-21T08:22:45Z event=pid run=r3-lj104-s2001-B pid=12108
+ts=2026-11-21T08:25:06Z event=end run=r3-lj104-s2001-B exit=0
+ts=2026-11-21T08:25:06Z event=start run=r3-lj104-s2002-B cell=lj104 seed=2002 round=3 arm=B
+ts=2026-11-21T08:25:06Z event=pid run=r3-lj104-s2002-B pid=12111
+ts=2026-11-21T08:26:00Z event=end run=r3-lj104-s2002-B exit=0
+ts=2026-11-21T08:26:00Z event=start run=r3-lj104-s2003-B cell=lj104 seed=2003 round=3 arm=B
+ts=2026-11-21T08:26:00Z event=pid run=r3-lj104-s2003-B pid=12113
+ts=2026-11-21T08:28:18Z event=end run=r3-lj104-s2003-B exit=0
+ts=2026-11-21T08:28:18Z event=start run=r3-lj104-s2004-B cell=lj104 seed=2004 round=3 arm=B
+ts=2026-11-21T08:28:18Z event=pid run=r3-lj104-s2004-B pid=12116
+ts=2026-11-21T08:30:36Z event=end run=r3-lj104-s2004-B exit=0
+ts=2026-11-21T08:30:36Z event=start run=r3-lj104-s2005-B cell=lj104 seed=2005 round=3 arm=B
+ts=2026-11-21T08:30:36Z event=pid run=r3-lj104-s2005-B pid=12126
+ts=2026-11-21T08:32:01Z event=end run=r3-lj104-s2005-B exit=0
+ts=2026-11-21T08:32:01Z event=start run=r3-lj150-s2000-B cell=lj150 seed=2000 round=3 arm=B
+ts=2026-11-21T08:32:01Z event=pid run=r3-lj150-s2000-B pid=12128
+ts=2026-11-21T08:32:02Z event=end run=r3-lj150-s2000-B exit=0
+ts=2026-11-21T08:32:02Z event=start run=r3-lj150-s2001-B cell=lj150 seed=2001 round=3 arm=B
+ts=2026-11-21T08:32:02Z event=pid run=r3-lj150-s2001-B pid=12129
+ts=2026-11-21T08:32:27Z event=end run=r3-lj150-s2001-B exit=0
+ts=2026-11-21T08:32:27Z event=start run=r3-lj150-s2002-B cell=lj150 seed=2002 round=3 arm=B
+ts=2026-11-21T08:32:27Z event=pid run=r3-lj150-s2002-B pid=12131
+ts=2026-11-21T08:33:54Z event=end run=r3-lj150-s2002-B exit=0
+ts=2026-11-21T08:33:54Z event=start run=r3-lj150-s2003-B cell=lj150 seed=2003 round=3 arm=B
+ts=2026-11-21T08:33:54Z event=pid run=r3-lj150-s2003-B pid=12133
+ts=2026-11-21T08:34:57Z event=end run=r3-lj150-s2003-B exit=0
+ts=2026-11-21T08:34:57Z event=start run=r3-lj150-s2004-B cell=lj150 seed=2004 round=3 arm=B
+ts=2026-11-21T08:34:57Z event=pid run=r3-lj150-s2004-B pid=12135
+ts=2026-11-21T08:36:23Z event=end run=r3-lj150-s2004-B exit=0
+ts=2026-11-21T08:36:23Z event=start run=r3-lj150-s2005-B cell=lj150 seed=2005 round=3 arm=B
+ts=2026-11-21T08:36:23Z event=pid run=r3-lj150-s2005-B pid=12137
+ts=2026-11-21T08:50:45Z event=end run=r3-lj150-s2005-B exit=0
+ts=2026-11-21T08:50:45Z event=start run=r3-au55-s2000-B cell=au55 seed=2000 round=3 arm=B
+ts=2026-11-21T08:50:45Z event=pid run=r3-au55-s2000-B pid=12196
+ts=2026-11-21T08:51:23Z event=end run=r3-au55-s2000-B exit=0
+ts=2026-11-21T08:51:23Z event=start run=r3-au55-s2001-B cell=au55 seed=2001 round=3 arm=B
+ts=2026-11-21T08:51:23Z event=pid run=r3-au55-s2001-B pid=12197
+ts=2026-11-21T08:52:02Z event=end run=r3-au55-s2001-B exit=0
+ts=2026-11-21T08:52:02Z event=start run=r3-au55-s2002-B cell=au55 seed=2002 round=3 arm=B
+ts=2026-11-21T08:52:02Z event=pid run=r3-au55-s2002-B pid=12199
+ts=2026-11-21T08:52:15Z event=end run=r3-au55-s2002-B exit=0
+ts=2026-11-21T08:52:15Z event=start run=r3-au55-s2003-B cell=au55 seed=2003 round=3 arm=B
+ts=2026-11-21T08:52:15Z event=pid run=r3-au55-s2003-B pid=12200
+ts=2026-11-21T08:52:53Z event=end run=r3-au55-s2003-B exit=0
+ts=2026-11-21T08:52:53Z event=start run=r3-au55-s2004-B cell=au55 seed=2004 round=3 arm=B
+ts=2026-11-21T08:52:53Z event=pid run=r3-au55-s2004-B pid=12202
+ts=2026-11-21T08:53:31Z event=end run=r3-au55-s2004-B exit=0
+ts=2026-11-21T08:53:31Z event=start run=r3-au55-s2005-B cell=au55 seed=2005 round=3 arm=B
+ts=2026-11-21T08:53:31Z event=pid run=r3-au55-s2005-B pid=12204
+ts=2026-11-21T08:54:09Z event=end run=r3-au55-s2005-B exit=0
+ts=2026-11-21T08:54:09Z event=start run=r3-m80r6-s2000-B cell=m80r6 seed=2000 round=3 arm=B
+ts=2026-11-21T08:54:09Z event=pid run=r3-m80r6-s2000-B pid=12205
+ts=2026-11-21T08:54:10Z event=end run=r3-m80r6-s2000-B exit=0
+ts=2026-11-21T08:54:10Z event=start run=r3-m80r6-s2001-B cell=m80r6 seed=2001 round=3 arm=B
+ts=2026-11-21T08:54:10Z event=pid run=r3-m80r6-s2001-B pid=12206
+ts=2026-11-21T08:54:10Z event=end run=r3-m80r6-s2001-B exit=0
+ts=2026-11-21T08:54:10Z event=start run=r3-m80r6-s2002-B cell=m80r6 seed=2002 round=3 arm=B
+ts=2026-11-21T08:54:10Z event=pid run=r3-m80r6-s2002-B pid=12207
+ts=2026-11-21T08:54:22Z event=end run=r3-m80r6-s2002-B exit=0
+ts=2026-11-21T08:54:22Z event=start run=r3-m80r6-s2003-B cell=m80r6 seed=2003 round=3 arm=B
+ts=2026-11-21T08:54:22Z event=pid run=r3-m80r6-s2003-B pid=12208
+ts=2026-11-21T08:55:30Z event=end run=r3-m80r6-s2003-B exit=0
+ts=2026-11-21T08:55:30Z event=start run=r3-m80r6-s2004-B cell=m80r6 seed=2004 round=3 arm=B
+ts=2026-11-21T08:55:30Z event=pid run=r3-m80r6-s2004-B pid=12211
+ts=2026-11-21T08:55:30Z event=end run=r3-m80r6-s2004-B exit=0
+ts=2026-11-21T08:55:31Z event=start run=r3-m80r6-s2005-B cell=m80r6 seed=2005 round=3 arm=B
+ts=2026-11-21T08:55:31Z event=pid run=r3-m80r6-s2005-B pid=12212
+ts=2026-11-21T08:56:14Z event=end run=r3-m80r6-s2005-B exit=0
+ts=2026-11-21T08:56:14Z event=start run=r3-m80r14-s2000-B cell=m80r14 seed=2000 round=3 arm=B
+ts=2026-11-21T08:56:14Z event=pid run=r3-m80r14-s2000-B pid=12213
+ts=2026-11-21T08:56:55Z event=end run=r3-m80r14-s2000-B exit=0
+ts=2026-11-21T08:56:55Z event=start run=r3-m80r14-s2001-B cell=m80r14 seed=2001 round=3 arm=B
+ts=2026-11-21T08:56:55Z event=pid run=r3-m80r14-s2001-B pid=12215
+ts=2026-11-21T08:59:40Z event=end run=r3-m80r14-s2001-B exit=0
+ts=2026-11-21T08:59:40Z event=start run=r3-m80r14-s2002-B cell=m80r14 seed=2002 round=3 arm=B
+ts=2026-11-21T08:59:40Z event=pid run=r3-m80r14-s2002-B pid=12225
+ts=2026-11-21T09:17:14Z event=end run=r3-m80r14-s2002-B exit=0
+ts=2026-11-21T09:17:14Z event=start run=r3-m80r14-s2003-B cell=m80r14 seed=2003 round=3 arm=B
+ts=2026-11-21T09:17:14Z event=pid run=r3-m80r14-s2003-B pid=12273
+ts=2026-11-21T09:19:11Z event=end run=r3-m80r14-s2003-B exit=0
+ts=2026-11-21T09:19:11Z event=start run=r3-m80r14-s2004-B cell=m80r14 seed=2004 round=3 arm=B
+ts=2026-11-21T09:19:11Z event=pid run=r3-m80r14-s2004-B pid=12276
+ts=2026-11-21T09:21:54Z event=end run=r3-m80r14-s2004-B exit=0
+ts=2026-11-21T09:21:54Z event=start run=r3-m80r14-s2005-B cell=m80r14 seed=2005 round=3 arm=B
+ts=2026-11-21T09:21:54Z event=pid run=r3-m80r14-s2005-B pid=12280
+ts=2026-11-21T09:24:37Z event=end run=r3-m80r14-s2005-B exit=0
+ts=2026-11-21T09:24:37Z event=start run=r4-lj38-s2000-A cell=lj38 seed=2000 round=4 arm=A
+ts=2026-11-21T09:24:37Z event=pid run=r4-lj38-s2000-A pid=12290
+ts=2026-11-21T09:24:37Z event=end run=r4-lj38-s2000-A exit=0
+ts=2026-11-21T09:24:37Z event=start run=r4-lj38-s2001-A cell=lj38 seed=2001 round=4 arm=A
+ts=2026-11-21T09:24:37Z event=pid run=r4-lj38-s2001-A pid=12291
+ts=2026-11-21T09:24:37Z event=end run=r4-lj38-s2001-A exit=0
+ts=2026-11-21T09:24:37Z event=start run=r4-lj38-s2002-A cell=lj38 seed=2002 round=4 arm=A
+ts=2026-11-21T09:24:37Z event=pid run=r4-lj38-s2002-A pid=12292
+ts=2026-11-21T09:24:38Z event=end run=r4-lj38-s2002-A exit=0
+ts=2026-11-21T09:24:38Z event=start run=r4-lj38-s2003-A cell=lj38 seed=2003 round=4 arm=A
+ts=2026-11-21T09:24:38Z event=pid run=r4-lj38-s2003-A pid=12293
+ts=2026-11-21T09:24:39Z event=end run=r4-lj38-s2003-A exit=0
+ts=2026-11-21T09:24:39Z event=start run=r4-lj38-s2004-A cell=lj38 seed=2004 round=4 arm=A
+ts=2026-11-21T09:24:39Z event=pid run=r4-lj38-s2004-A pid=12294
+ts=2026-11-21T09:24:40Z event=end run=r4-lj38-s2004-A exit=0
+ts=2026-11-21T09:24:40Z event=start run=r4-lj38-s2005-A cell=lj38 seed=2005 round=4 arm=A
+ts=2026-11-21T09:24:40Z event=pid run=r4-lj38-s2005-A pid=12295
+ts=2026-11-21T09:24:41Z event=end run=r4-lj38-s2005-A exit=0
+ts=2026-11-21T09:24:41Z event=start run=r4-lj55-s2000-A cell=lj55 seed=2000 round=4 arm=A
+ts=2026-11-21T09:24:41Z event=pid run=r4-lj55-s2000-A pid=12296
+ts=2026-11-21T09:24:41Z event=end run=r4-lj55-s2000-A exit=0
+ts=2026-11-21T09:24:41Z event=start run=r4-lj55-s2001-A cell=lj55 seed=2001 round=4 arm=A
+ts=2026-11-21T09:24:41Z event=pid run=r4-lj55-s2001-A pid=12297
+ts=2026-11-21T09:24:41Z event=end run=r4-lj55-s2001-A exit=0
+ts=2026-11-21T09:24:41Z event=start run=r4-lj55-s2002-A cell=lj55 seed=2002 round=4 arm=A
+ts=2026-11-21T09:24:41Z event=pid run=r4-lj55-s2002-A pid=12298
+ts=2026-11-21T09:24:41Z event=end run=r4-lj55-s2002-A exit=0
+ts=2026-11-21T09:24:41Z event=start run=r4-lj55-s2003-A cell=lj55 seed=2003 round=4 arm=A
+ts=2026-11-21T09:24:41Z event=pid run=r4-lj55-s2003-A pid=12299
+ts=2026-11-21T09:24:41Z event=end run=r4-lj55-s2003-A exit=0
+ts=2026-11-21T09:24:41Z event=start run=r4-lj55-s2004-A cell=lj55 seed=2004 round=4 arm=A
+ts=2026-11-21T09:24:41Z event=pid run=r4-lj55-s2004-A pid=12300
+ts=2026-11-21T09:24:41Z event=end run=r4-lj55-s2004-A exit=0
+ts=2026-11-21T09:24:41Z event=start run=r4-lj55-s2005-A cell=lj55 seed=2005 round=4 arm=A
+ts=2026-11-21T09:24:41Z event=pid run=r4-lj55-s2005-A pid=12301
+ts=2026-11-21T09:24:41Z event=end run=r4-lj55-s2005-A exit=0
+ts=2026-11-21T09:24:41Z event=start run=r4-lj75-s2000-A cell=lj75 seed=2000 round=4 arm=A
+ts=2026-11-21T09:24:41Z event=pid run=r4-lj75-s2000-A pid=12302
+ts=2026-11-21T09:25:20Z event=end run=r4-lj75-s2000-A exit=0
+ts=2026-11-21T09:25:20Z event=start run=r4-lj75-s2001-A cell=lj75 seed=2001 round=4 arm=A
+ts=2026-11-21T09:25:20Z event=pid run=r4-lj75-s2001-A pid=12304
+ts=2026-11-21T09:26:24Z event=end run=r4-lj75-s2001-A exit=0
+ts=2026-11-21T09:26:24Z event=start run=r4-lj75-s2002-A cell=lj75 seed=2002 round=4 arm=A
+ts=2026-11-21T09:26:24Z event=pid run=r4-lj75-s2002-A pid=12306
+ts=2026-11-21T09:27:16Z event=end run=r4-lj75-s2002-A exit=0
+ts=2026-11-21T09:27:16Z event=start run=r4-lj75-s2003-A cell=lj75 seed=2003 round=4 arm=A
+ts=2026-11-21T09:27:17Z event=pid run=r4-lj75-s2003-A pid=12308
+ts=2026-11-21T09:28:20Z event=end run=r4-lj75-s2003-A exit=0
+ts=2026-11-21T09:28:20Z event=start run=r4-lj75-s2004-A cell=lj75 seed=2004 round=4 arm=A
+ts=2026-11-21T09:28:20Z event=pid run=r4-lj75-s2004-A pid=12310
+ts=2026-11-21T09:28:22Z event=end run=r4-lj75-s2004-A exit=0
+ts=2026-11-21T09:28:22Z event=start run=r4-lj75-s2005-A cell=lj75 seed=2005 round=4 arm=A
+ts=2026-11-21T09:28:22Z event=pid run=r4-lj75-s2005-A pid=12311
+ts=2026-11-21T09:29:25Z event=end run=r4-lj75-s2005-A exit=0
+ts=2026-11-21T09:29:25Z event=start run=r4-lj98-s2000-A cell=lj98 seed=2000 round=4 arm=A
+ts=2026-11-21T09:29:25Z event=pid run=r4-lj98-s2000-A pid=12313
+ts=2026-11-21T09:31:20Z event=end run=r4-lj98-s2000-A exit=0
+ts=2026-11-21T09:31:20Z event=start run=r4-lj98-s2001-A cell=lj98 seed=2001 round=4 arm=A
+ts=2026-11-21T09:31:20Z event=pid run=r4-lj98-s2001-A pid=12316
+ts=2026-11-21T09:40:26Z event=end run=r4-lj98-s2001-A exit=0
+ts=2026-11-21T09:40:26Z event=start run=r4-lj98-s2002-A cell=lj98 seed=2002 round=4 arm=A
+ts=2026-11-21T09:40:26Z event=pid run=r4-lj98-s2002-A pid=12346
+ts=2026-11-21T09:41:21Z event=end run=r4-lj98-s2002-A exit=0
+ts=2026-11-21T09:41:21Z event=start run=r4-lj98-s2003-A cell=lj98 seed=2003 round=4 arm=A
+ts=2026-11-21T09:41:21Z event=pid run=r4-lj98-s2003-A pid=12348
+ts=2026-11-21T09:42:24Z event=end run=r4-lj98-s2003-A exit=0
+ts=2026-11-21T09:42:24Z event=start run=r4-lj98-s2004-A cell=lj98 seed=2004 round=4 arm=A
+ts=2026-11-21T09:42:24Z event=pid run=r4-lj98-s2004-A pid=12350
+ts=2026-11-21T09:42:48Z event=end run=r4-lj98-s2004-A exit=0
+ts=2026-11-21T09:42:48Z event=start run=r4-lj98-s2005-A cell=lj98 seed=2005 round=4 arm=A
+ts=2026-11-21T09:42:48Z event=pid run=r4-lj98-s2005-A pid=12357
+ts=2026-11-21T09:44:30Z event=end run=r4-lj98-s2005-A exit=0
+ts=2026-11-21T09:44:30Z event=start run=r4-lj102-s2000-A cell=lj102 seed=2000 round=4 arm=A
+ts=2026-11-21T09:44:30Z event=pid run=r4-lj102-s2000-A pid=12360
+ts=2026-11-21T09:45:28Z event=end run=r4-lj102-s2000-A exit=0
+ts=2026-11-21T09:45:28Z event=start run=r4-lj102-s2001-A cell=lj102 seed=2001 round=4 arm=A
+ts=2026-11-21T09:45:28Z event=pid run=r4-lj102-s2001-A pid=12362
+ts=2026-11-21T09:47:23Z event=end run=r4-lj102-s2001-A exit=0
+ts=2026-11-21T09:47:23Z event=start run=r4-lj102-s2002-A cell=lj102 seed=2002 round=4 arm=A
+ts=2026-11-21T09:47:23Z event=pid run=r4-lj102-s2002-A pid=12365
+ts=2026-11-21T09:49:34Z event=end run=r4-lj102-s2002-A exit=0
+ts=2026-11-21T09:49:34Z event=start run=r4-lj102-s2003-A cell=lj102 seed=2003 round=4 arm=A
+ts=2026-11-21T09:49:34Z event=pid run=r4-lj102-s2003-A pid=12368
+ts=2026-11-21T09:51:13Z event=end run=r4-lj102-s2003-A exit=0
+ts=2026-11-21T09:51:13Z event=start run=r4-lj102-s2004-A cell=lj102 seed=2004 round=4 arm=A
+ts=2026-11-21T09:51:13Z event=pid run=r4-lj102-s2004-A pid=12370
+ts=2026-11-21T09:53:16Z event=end run=r4-lj102-s2004-A exit=0
+ts=2026-11-21T09:53:16Z event=start run=r4-lj102-s2005-A cell=lj102 seed=2005 round=4 arm=A
+ts=2026-11-21T09:53:16Z event=pid run=r4-lj102-s2005-A pid=12379
+ts=2026-11-21T09:55:27Z event=end run=r4-lj102-s2005-A exit=0
+ts=2026-11-21T09:55:27Z event=start run=r4-lj103-s2000-A cell=lj103 seed=2000 round=4 arm=A
+ts=2026-11-21T09:55:27Z event=pid run=r4-lj103-s2000-A pid=12383
+ts=2026-11-21T10:12:33Z event=end run=r4-lj103-s2000-A exit=0
+ts=2026-11-21T10:12:33Z event=start run=r4-lj103-s2001-A cell=lj103 seed=2001 round=4 arm=A
+ts=2026-11-21T10:12:33Z event=pid run=r4-lj103-s2001-A pid=12432
+ts=2026-11-21T10:14:35Z event=end run=r4-lj103-s2001-A exit=0
+ts=2026-11-21T10:14:35Z event=start run=r4-lj103-s2002-A cell=lj103 seed=2002 round=4 arm=A
+ts=2026-11-21T10:14:35Z event=pid run=r4-lj103-s2002-A pid=12435
+ts=2026-11-21T10:16:37Z event=end run=r4-lj103-s2002-A exit=0
+ts=2026-11-21T10:16:37Z event=start run=r4-lj103-s2003-A cell=lj103 seed=2003 round=4 arm=A
+ts=2026-11-21T10:16:37Z event=pid run=r4-lj103-s2003-A pid=12438
+ts=2026-11-21T10:16:40Z event=end run=r4-lj103-s2003-A exit=0
+ts=2026-11-21T10:16:40Z event=start run=r4-lj103-s2004-A cell=lj103 seed=2004 round=4 arm=A
+ts=2026-11-21T10:16:40Z event=pid run=r4-lj103-s2004-A pid=12439
+ts=2026-11-21T10:18:33Z event=end run=r4-lj103-s2004-A exit=0
+ts=2026-11-21T10:18:33Z event=start run=r4-lj103-s2005-A cell=lj103 seed=2005 round=4 arm=A
+ts=2026-11-21T10:18:33Z event=pid run=r4-lj103-s2005-A pid=12448
+ts=2026-11-21T10:20:31Z event=end run=r4-lj103-s2005-A exit=0
+ts=2026-11-21T10:20:31Z event=start run=r4-lj104-s2000-A cell=lj104 seed=2000 round=4 arm=A
+ts=2026-11-21T10:20:31Z event=pid run=r4-lj104-s2000-A pid=12451
+ts=2026-11-21T10:21:24Z event=end run=r4-lj104-s2000-A exit=0
+ts=2026-11-21T10:21:24Z event=start run=r4-lj104-s2001-A cell=lj104 seed=2001 round=4 arm=A
+ts=2026-11-21T10:21:24Z event=pid run=r4-lj104-s2001-A pid=12453
+ts=2026-11-21T10:23:33Z event=end run=r4-lj104-s2001-A exit=0
+ts=2026-11-21T10:23:33Z event=start run=r4-lj104-s2002-A cell=lj104 seed=2002 round=4 arm=A
+ts=2026-11-21T10:23:33Z event=pid run=r4-lj104-s2002-A pid=12456
+ts=2026-11-21T10:24:24Z event=end run=r4-lj104-s2002-A exit=0
+ts=2026-11-21T10:24:24Z event=start run=r4-lj104-s2003-A cell=lj104 seed=2003 round=4 arm=A
+ts=2026-11-21T10:24:24Z event=pid run=r4-lj104-s2003-A pid=12458
+ts=2026-11-21T10:35:34Z event=end run=r4-lj104-s2003-A exit=0
+ts=2026-11-21T10:35:34Z event=start run=r4-lj104-s2004-A cell=lj104 seed=2004 round=4 arm=A
+ts=2026-11-21T10:35:34Z event=pid run=r4-lj104-s2004-A pid=12507
+ts=2026-11-21T10:37:43Z event=end run=r4-lj104-s2004-A exit=0
+ts=2026-11-21T10:37:43Z event=start run=r4-lj104-s2005-A cell=lj104 seed=2005 round=4 arm=A
+ts=2026-11-21T10:37:43Z event=pid run=r4-lj104-s2005-A pid=12516
+ts=2026-11-21T10:39:04Z event=end run=r4-lj104-s2005-A exit=0
+ts=2026-11-21T10:39:04Z event=start run=r4-lj150-s2000-A cell=lj150 seed=2000 round=4 arm=A
+ts=2026-11-21T10:39:04Z event=pid run=r4-lj150-s2000-A pid=12518
+ts=2026-11-21T10:39:05Z event=end run=r4-lj150-s2000-A exit=0
+ts=2026-11-21T10:39:05Z event=start run=r4-lj150-s2001-A cell=lj150 seed=2001 round=4 arm=A
+ts=2026-11-21T10:39:05Z event=pid run=r4-lj150-s2001-A pid=12519
+ts=2026-11-21T10:39:29Z event=end run=r4-lj150-s2001-A exit=0
+ts=2026-11-21T10:39:29Z event=start run=r4-lj150-s2002-A cell=lj150 seed=2002 round=4 arm=A
+ts=2026-11-21T10:39:29Z event=pid run=r4-lj150-s2002-A pid=12521
+ts=2026-11-21T10:40:50Z event=end run=r4-lj150-s2002-A exit=0
+ts=2026-11-21T10:40:50Z event=start run=r4-lj150-s2003-A cell=lj150 seed=2003 round=4 arm=A
+ts=2026-11-21T10:40:50Z event=pid run=r4-lj150-s2003-A pid=12523
+ts=2026-11-21T10:41:50Z event=end run=r4-lj150-s2003-A exit=0
+ts=2026-11-21T10:41:50Z event=start run=r4-lj150-s2004-A cell=lj150 seed=2004 round=4 arm=A
+ts=2026-11-21T10:41:50Z event=pid run=r4-lj150-s2004-A pid=12525
+ts=2026-11-21T10:43:10Z event=end run=r4-lj150-s2004-A exit=0
+ts=2026-11-21T10:43:10Z event=start run=r4-lj150-s2005-A cell=lj150 seed=2005 round=4 arm=A
+ts=2026-11-21T10:43:10Z event=pid run=r4-lj150-s2005-A pid=12528
+ts=2026-11-21T10:48:04Z event=end run=r4-lj150-s2005-A exit=0
+ts=2026-11-21T10:48:04Z event=start run=r4-au55-s2000-A cell=au55 seed=2000 round=4 arm=A
+ts=2026-11-21T10:48:04Z event=pid run=r4-au55-s2000-A pid=12539
+ts=2026-11-21T10:48:42Z event=end run=r4-au55-s2000-A exit=0
+ts=2026-11-21T10:48:42Z event=start run=r4-au55-s2001-A cell=au55 seed=2001 round=4 arm=A
+ts=2026-11-21T10:48:42Z event=pid run=r4-au55-s2001-A pid=12541
+ts=2026-11-21T10:49:21Z event=end run=r4-au55-s2001-A exit=0
+ts=2026-11-21T10:49:21Z event=start run=r4-au55-s2002-A cell=au55 seed=2002 round=4 arm=A
+ts=2026-11-21T10:49:21Z event=pid run=r4-au55-s2002-A pid=12543
+ts=2026-11-21T10:49:35Z event=end run=r4-au55-s2002-A exit=0
+ts=2026-11-21T10:49:35Z event=start run=r4-au55-s2003-A cell=au55 seed=2003 round=4 arm=A
+ts=2026-11-21T10:49:35Z event=pid run=r4-au55-s2003-A pid=12544
+ts=2026-11-21T10:50:13Z event=end run=r4-au55-s2003-A exit=0
+ts=2026-11-21T10:50:13Z event=start run=r4-au55-s2004-A cell=au55 seed=2004 round=4 arm=A
+ts=2026-11-21T10:50:13Z event=pid run=r4-au55-s2004-A pid=12546
+ts=2026-11-21T11:05:38Z event=end run=r4-au55-s2004-A exit=0
+ts=2026-11-21T11:05:38Z event=start run=r4-au55-s2005-A cell=au55 seed=2005 round=4 arm=A
+ts=2026-11-21T11:05:38Z event=pid run=r4-au55-s2005-A pid=12592
+ts=2026-11-21T11:06:16Z event=end run=r4-au55-s2005-A exit=0
+ts=2026-11-21T11:06:16Z event=start run=r4-m80r6-s2000-A cell=m80r6 seed=2000 round=4 arm=A
+ts=2026-11-21T11:06:16Z event=pid run=r4-m80r6-s2000-A pid=12594
+ts=2026-11-21T11:06:17Z event=end run=r4-m80r6-s2000-A exit=0
+ts=2026-11-21T11:06:17Z event=start run=r4-m80r6-s2001-A cell=m80r6 seed=2001 round=4 arm=A
+ts=2026-11-21T11:06:17Z event=pid run=r4-m80r6-s2001-A pid=12595
+ts=2026-11-21T11:06:17Z event=end run=r4-m80r6-s2001-A exit=0
+ts=2026-11-21T11:06:17Z event=start run=r4-m80r6-s2002-A cell=m80r6 seed=2002 round=4 arm=A
+ts=2026-11-21T11:06:18Z event=pid run=r4-m80r6-s2002-A pid=12596
+ts=2026-11-21T11:06:29Z event=end run=r4-m80r6-s2002-A exit=0
+ts=2026-11-21T11:06:29Z event=start run=r4-m80r6-s2003-A cell=m80r6 seed=2003 round=4 arm=A
+ts=2026-11-21T11:06:29Z event=pid run=r4-m80r6-s2003-A pid=12597
+ts=2026-11-21T11:07:33Z event=end run=r4-m80r6-s2003-A exit=0
+ts=2026-11-21T11:07:33Z event=start run=r4-m80r6-s2004-A cell=m80r6 seed=2004 round=4 arm=A
+ts=2026-11-21T11:07:33Z event=pid run=r4-m80r6-s2004-A pid=12599
+ts=2026-11-21T11:07:34Z event=end run=r4-m80r6-s2004-A exit=0
+ts=2026-11-21T11:07:34Z event=start run=r4-m80r6-s2005-A cell=m80r6 seed=2005 round=4 arm=A
+ts=2026-11-21T11:07:34Z event=pid run=r4-m80r6-s2005-A pid=12600
+ts=2026-11-21T11:08:14Z event=end run=r4-m80r6-s2005-A exit=0
+ts=2026-11-21T11:08:14Z event=start run=r4-m80r14-s2000-A cell=m80r14 seed=2000 round=4 arm=A
+ts=2026-11-21T11:08:14Z event=pid run=r4-m80r14-s2000-A pid=12602
+ts=2026-11-21T11:08:53Z event=end run=r4-m80r14-s2000-A exit=0
+ts=2026-11-21T11:08:53Z event=start run=r4-m80r14-s2001-A cell=m80r14 seed=2001 round=4 arm=A
+ts=2026-11-21T11:08:53Z event=pid run=r4-m80r14-s2001-A pid=12603
+ts=2026-11-21T11:11:30Z event=end run=r4-m80r14-s2001-A exit=0
+ts=2026-11-21T11:11:30Z event=start run=r4-m80r14-s2002-A cell=m80r14 seed=2002 round=4 arm=A
+ts=2026-11-21T11:11:30Z event=pid run=r4-m80r14-s2002-A pid=12613
+ts=2026-11-21T11:14:05Z event=end run=r4-m80r14-s2002-A exit=0
+ts=2026-11-21T11:14:05Z event=start run=r4-m80r14-s2003-A cell=m80r14 seed=2003 round=4 arm=A
+ts=2026-11-21T11:14:05Z event=pid run=r4-m80r14-s2003-A pid=12617
+ts=2026-11-21T11:15:56Z event=end run=r4-m80r14-s2003-A exit=0
+ts=2026-11-21T11:15:56Z event=start run=r4-m80r14-s2004-A cell=m80r14 seed=2004 round=4 arm=A
+ts=2026-11-21T11:15:56Z event=pid run=r4-m80r14-s2004-A pid=12620
+ts=2026-11-21T11:18:32Z event=end run=r4-m80r14-s2004-A exit=0
+ts=2026-11-21T11:18:32Z event=start run=r4-m80r14-s2005-A cell=m80r14 seed=2005 round=4 arm=A
+ts=2026-11-21T11:18:32Z event=pid run=r4-m80r14-s2005-A pid=12623
+ts=2026-11-21T11:30:08Z event=end run=r4-m80r14-s2005-A exit=0
+ts=2026-11-21T11:30:08Z event=start run=r5-lj38-s2000-A cell=lj38 seed=2000 round=5 arm=A
+ts=2026-11-21T11:30:08Z event=pid run=r5-lj38-s2000-A pid=12657
+ts=2026-11-21T11:30:08Z event=end run=r5-lj38-s2000-A exit=0
+ts=2026-11-21T11:30:08Z event=start run=r5-lj38-s2001-A cell=lj38 seed=2001 round=5 arm=A
+ts=2026-11-21T11:30:08Z event=pid run=r5-lj38-s2001-A pid=12658
+ts=2026-11-21T11:30:08Z event=end run=r5-lj38-s2001-A exit=0
+ts=2026-11-21T11:30:08Z event=start run=r5-lj38-s2002-A cell=lj38 seed=2002 round=5 arm=A
+ts=2026-11-21T11:30:08Z event=pid run=r5-lj38-s2002-A pid=12659
+ts=2026-11-21T11:30:09Z event=end run=r5-lj38-s2002-A exit=0
+ts=2026-11-21T11:30:09Z event=start run=r5-lj38-s2003-A cell=lj38 seed=2003 round=5 arm=A
+ts=2026-11-21T11:30:09Z event=pid run=r5-lj38-s2003-A pid=12660
+ts=2026-11-21T11:30:10Z event=end run=r5-lj38-s2003-A exit=0
+ts=2026-11-21T11:30:10Z event=start run=r5-lj38-s2004-A cell=lj38 seed=2004 round=5 arm=A
+ts=2026-11-21T11:30:10Z event=pid run=r5-lj38-s2004-A pid=12661
+ts=2026-11-21T11:30:11Z event=end run=r5-lj38-s2004-A exit=0
+ts=2026-11-21T11:30:11Z event=start run=r5-lj38-s2005-A cell=lj38 seed=2005 round=5 arm=A
+ts=2026-11-21T11:30:11Z event=pid run=r5-lj38-s2005-A pid=12662
+ts=2026-11-21T11:30:12Z event=end run=r5-lj38-s2005-A exit=0
+ts=2026-11-21T11:30:12Z event=start run=r5-lj55-s2000-A cell=lj55 seed=2000 round=5 arm=A
+ts=2026-11-21T11:30:12Z event=pid run=r5-lj55-s2000-A pid=12663
+ts=2026-11-21T11:30:12Z event=end run=r5-lj55-s2000-A exit=0
+ts=2026-11-21T11:30:12Z event=start run=r5-lj55-s2001-A cell=lj55 seed=2001 round=5 arm=A
+ts=2026-11-21T11:30:12Z event=pid run=r5-lj55-s2001-A pid=12664
+ts=2026-11-21T11:30:12Z event=end run=r5-lj55-s2001-A exit=0
+ts=2026-11-21T11:30:12Z event=start run=r5-lj55-s2002-A cell=lj55 seed=2002 round=5 arm=A
+ts=2026-11-21T11:30:12Z event=pid run=r5-lj55-s2002-A pid=12665
+ts=2026-11-21T11:30:12Z event=end run=r5-lj55-s2002-A exit=0
+ts=2026-11-21T11:30:12Z event=start run=r5-lj55-s2003-A cell=lj55 seed=2003 round=5 arm=A
+ts=2026-11-21T11:30:12Z event=pid run=r5-lj55-s2003-A pid=12666
+ts=2026-11-21T11:30:12Z event=end run=r5-lj55-s2003-A exit=0
+ts=2026-11-21T11:30:12Z event=start run=r5-lj55-s2004-A cell=lj55 seed=2004 round=5 arm=A
+ts=2026-11-21T11:30:12Z event=pid run=r5-lj55-s2004-A pid=12667
+ts=2026-11-21T11:30:12Z event=end run=r5-lj55-s2004-A exit=0
+ts=2026-11-21T11:30:12Z event=start run=r5-lj55-s2005-A cell=lj55 seed=2005 round=5 arm=A
+ts=2026-11-21T11:30:12Z event=pid run=r5-lj55-s2005-A pid=12668
+ts=2026-11-21T11:30:12Z event=end run=r5-lj55-s2005-A exit=0
+ts=2026-11-21T11:30:12Z event=start run=r5-lj75-s2000-A cell=lj75 seed=2000 round=5 arm=A
+ts=2026-11-21T11:30:12Z event=pid run=r5-lj75-s2000-A pid=12669
+ts=2026-11-21T11:30:51Z event=end run=r5-lj75-s2000-A exit=0
+ts=2026-11-21T11:30:51Z event=start run=r5-lj75-s2001-A cell=lj75 seed=2001 round=5 arm=A
+ts=2026-11-21T11:30:51Z event=pid run=r5-lj75-s2001-A pid=12676
+ts=2026-11-21T11:31:56Z event=end run=r5-lj75-s2001-A exit=0
+ts=2026-11-21T11:31:56Z event=start run=r5-lj75-s2002-A cell=lj75 seed=2002 round=5 arm=A
+ts=2026-11-21T11:31:56Z event=pid run=r5-lj75-s2002-A pid=12678
+ts=2026-11-21T11:32:48Z event=end run=r5-lj75-s2002-A exit=0
+ts=2026-11-21T11:32:48Z event=start run=r5-lj75-s2003-A cell=lj75 seed=2003 round=5 arm=A
+ts=2026-11-21T11:32:48Z event=pid run=r5-lj75-s2003-A pid=12680
+ts=2026-11-21T11:33:52Z event=end run=r5-lj75-s2003-A exit=0
+ts=2026-11-21T11:33:52Z event=start run=r5-lj75-s2004-A cell=lj75 seed=2004 round=5 arm=A
+ts=2026-11-21T11:33:52Z event=pid run=r5-lj75-s2004-A pid=12682
+ts=2026-11-21T11:33:54Z event=end run=r5-lj75-s2004-A exit=0
+ts=2026-11-21T11:33:54Z event=start run=r5-lj75-s2005-A cell=lj75 seed=2005 round=5 arm=A
+ts=2026-11-21T11:33:54Z event=pid run=r5-lj75-s2005-A pid=12683
+ts=2026-11-21T11:34:57Z event=end run=r5-lj75-s2005-A exit=0
+ts=2026-11-21T11:34:57Z event=start run=r5-lj98-s2000-A cell=lj98 seed=2000 round=5 arm=A
+ts=2026-11-21T11:34:57Z event=pid run=r5-lj98-s2000-A pid=12686
+ts=2026-11-21T11:36:53Z event=end run=r5-lj98-s2000-A exit=0
+ts=2026-11-21T11:36:53Z event=start run=r5-lj98-s2001-A cell=lj98 seed=2001 round=5 arm=A
+ts=2026-11-21T11:36:53Z event=pid run=r5-lj98-s2001-A pid=12688
+ts=2026-11-21T11:36:56Z event=end run=r5-lj98-s2001-A exit=0
+ts=2026-11-21T11:36:56Z event=start run=r5-lj98-s2002-A cell=lj98 seed=2002 round=5 arm=A
+ts=2026-11-21T11:36:56Z event=pid run=r5-lj98-s2002-A pid=12689
+ts=2026-11-21T11:37:51Z event=end run=r5-lj98-s2002-A exit=0
+ts=2026-11-21T11:37:51Z event=start run=r5-lj98-s2003-A cell=lj98 seed=2003 round=5 arm=A
+ts=2026-11-21T11:37:51Z event=pid run=r5-lj98-s2003-A pid=12691
+ts=2026-11-21T11:38:53Z event=end run=r5-lj98-s2003-A exit=0
+ts=2026-11-21T11:38:53Z event=start run=r5-lj98-s2004-A cell=lj98 seed=2004 round=5 arm=A
+ts=2026-11-21T11:38:53Z event=pid run=r5-lj98-s2004-A pid=12693
+ts=2026-11-21T11:39:16Z event=end run=r5-lj98-s2004-A exit=0
+ts=2026-11-21T11:39:16Z event=start run=r5-lj98-s2005-A cell=lj98 seed=2005 round=5 arm=A
+ts=2026-11-21T11:39:16Z event=pid run=r5-lj98-s2005-A pid=12695
+ts=2026-11-21T11:40:59Z event=end run=r5-lj98-s2005-A exit=0
+ts=2026-11-21T11:40:59Z event=start run=r5-lj102-s2000-A cell=lj102 seed=2000 round=5 arm=A
+ts=2026-11-21T11:40:59Z event=pid run=r5-lj102-s2000-A pid=12704
+ts=2026-11-21T11:41:57Z event=end run=r5-lj102-s2000-A exit=0
+ts=2026-11-21T11:41:57Z event=start run=r5-lj102-s2001-A cell=lj102 seed=2001 round=5 arm=A
+ts=2026-11-21T11:41:57Z event=pid run=r5-lj102-s2001-A pid=12706
+ts=2026-11-21T11:43:51Z event=end run=r5-lj102-s2001-A exit=0
+ts=2026-11-21T11:43:51Z event=start run=r5-lj102-s2002-A cell=lj102 seed=2002 round=5 arm=A
+ts=2026-11-21T11:43:51Z event=pid run=r5-lj102-s2002-A pid=12708
+ts=2026-11-21T12:01:18Z event=end run=r5-lj102-s2002-A exit=0
+ts=2026-11-21T12:01:18Z event=start run=r5-lj102-s2003-A cell=lj102 seed=2003 round=5 arm=A
+ts=2026-11-21T12:01:18Z event=pid run=r5-lj102-s2003-A pid=12794
+ts=2026-11-21T12:02:56Z event=end run=r5-lj102-s2003-A exit=0
+ts=2026-11-21T12:02:56Z event=start run=r5-lj102-s2004-A cell=lj102 seed=2004 round=5 arm=A
+ts=2026-11-21T12:02:56Z event=pid run=r5-lj102-s2004-A pid=12796
+ts=2026-11-21T12:04:59Z event=end run=r5-lj102-s2004-A exit=0
+ts=2026-11-21T12:04:59Z event=start run=r5-lj102-s2005-A cell=lj102 seed=2005 round=5 arm=A
+ts=2026-11-21T12:04:59Z event=pid run=r5-lj102-s2005-A pid=12799
+ts=2026-11-21T12:07:11Z event=end run=r5-lj102-s2005-A exit=0
+ts=2026-11-21T12:07:11Z event=start run=r5-lj103-s2000-A cell=lj103 seed=2000 round=5 arm=A
+ts=2026-11-21T12:07:11Z event=pid run=r5-lj103-s2000-A pid=12808
+ts=2026-11-21T12:09:28Z event=end run=r5-lj103-s2000-A exit=0
+ts=2026-11-21T12:09:28Z event=start run=r5-lj103-s2001-A cell=lj103 seed=2001 round=5 arm=A
+ts=2026-11-21T12:09:28Z event=pid run=r5-lj103-s2001-A pid=12812
+ts=2026-11-21T12:11:33Z event=end run=r5-lj103-s2001-A exit=0
+ts=2026-11-21T12:11:33Z event=start run=r5-lj103-s2002-A cell=lj103 seed=2002 round=5 arm=A
+ts=2026-11-21T12:11:33Z event=pid run=r5-lj103-s2002-A pid=12815
+ts=2026-11-21T12:13:36Z event=end run=r5-lj103-s2002-A exit=0
+ts=2026-11-21T12:13:36Z event=start run=r5-lj103-s2003-A cell=lj103 seed=2003 round=5 arm=A
+ts=2026-11-21T12:13:36Z event=pid run=r5-lj103-s2003-A pid=12818
+ts=2026-11-21T12:13:38Z event=end run=r5-lj103-s2003-A exit=0
+ts=2026-11-21T12:13:38Z event=start run=r5-lj103-s2004-A cell=lj103 seed=2004 round=5 arm=A
+ts=2026-11-21T12:13:38Z event=pid run=r5-lj103-s2004-A pid=12819
+ts=2026-11-21T12:24:45Z event=end run=r5-lj103-s2004-A exit=0
+ts=2026-11-21T12:24:45Z event=start run=r5-lj103-s2005-A cell=lj103 seed=2005 round=5 arm=A
+ts=2026-11-21T12:24:45Z event=pid run=r5-lj103-s2005-A pid=12876
+ts=2026-11-21T12:26:44Z event=end run=r5-lj103-s2005-A exit=0
+ts=2026-11-21T12:26:44Z event=start run=r5-lj104-s2000-A cell=lj104 seed=2000 round=5 arm=A
+ts=2026-11-21T12:26:44Z event=pid run=r5-lj104-s2000-A pid=12893
+ts=2026-11-21T12:27:38Z event=end run=r5-lj104-s2000-A exit=0
+ts=2026-11-21T12:27:38Z event=start run=r5-lj104-s2001-A cell=lj104 seed=2001 round=5 arm=A
+ts=2026-11-21T12:27:38Z event=pid run=r5-lj104-s2001-A pid=12898
+ts=2026-11-21T12:29:50Z event=end run=r5-lj104-s2001-A exit=0
+ts=2026-11-21T12:29:50Z event=start run=r5-lj104-s2002-A cell=lj104 seed=2002 round=5 arm=A
+ts=2026-11-21T12:29:50Z event=pid run=r5-lj104-s2002-A pid=12910
+ts=2026-11-21T12:30:42Z event=end run=r5-lj104-s2002-A exit=0
+ts=2026-11-21T12:30:42Z event=start run=r5-lj104-s2003-A cell=lj104 seed=2003 round=5 arm=A
+ts=2026-11-21T12:30:42Z event=pid run=r5-lj104-s2003-A pid=12915
+ts=2026-11-21T12:32:50Z event=end run=r5-lj104-s2003-A exit=0
+ts=2026-11-21T12:32:50Z event=start run=r5-lj104-s2004-A cell=lj104 seed=2004 round=5 arm=A
+ts=2026-11-21T12:32:50Z event=pid run=r5-lj104-s2004-A pid=12927
+ts=2026-11-21T12:34:58Z event=end run=r5-lj104-s2004-A exit=0
+ts=2026-11-21T12:34:58Z event=start run=r5-lj104-s2005-A cell=lj104 seed=2005 round=5 arm=A
+ts=2026-11-21T12:34:58Z event=pid run=r5-lj104-s2005-A pid=12944
+ts=2026-11-21T12:36:19Z event=end run=r5-lj104-s2005-A exit=0
+ts=2026-11-21T12:36:19Z event=start run=r5-lj150-s2000-A cell=lj150 seed=2000 round=5 arm=A
+ts=2026-11-21T12:36:19Z event=pid run=r5-lj150-s2000-A pid=12969
+ts=2026-11-21T12:36:20Z event=end run=r5-lj150-s2000-A exit=0
+ts=2026-11-21T12:36:20Z event=start run=r5-lj150-s2001-A cell=lj150 seed=2001 round=5 arm=A
+ts=2026-11-21T12:36:20Z event=pid run=r5-lj150-s2001-A pid=12970
+ts=2026-11-21T12:36:44Z event=end run=r5-lj150-s2001-A exit=0
+ts=2026-11-21T12:36:44Z event=start run=r5-lj150-s2002-A cell=lj150 seed=2002 round=5 arm=A
+ts=2026-11-21T12:36:44Z event=pid run=r5-lj150-s2002-A pid=12974
+ts=2026-11-21T12:38:04Z event=end run=r5-lj150-s2002-A exit=0
+ts=2026-11-21T12:38:04Z event=start run=r5-lj150-s2003-A cell=lj150 seed=2003 round=5 arm=A
+ts=2026-11-21T12:38:04Z event=pid run=r5-lj150-s2003-A pid=12980
+ts=2026-11-21T12:39:04Z event=end run=r5-lj150-s2003-A exit=0
+ts=2026-11-21T12:39:04Z event=start run=r5-lj150-s2004-A cell=lj150 seed=2004 round=5 arm=A
+ts=2026-11-21T12:39:04Z event=pid run=r5-lj150-s2004-A pid=12986
+ts=2026-11-21T12:40:24Z event=end run=r5-lj150-s2004-A exit=0
+ts=2026-11-21T12:40:24Z event=start run=r5-lj150-s2005-A cell=lj150 seed=2005 round=5 arm=A
+ts=2026-11-21T12:40:24Z event=pid run=r5-lj150-s2005-A pid=12994
+ts=2026-11-21T12:45:21Z event=end run=r5-lj150-s2005-A exit=0
+ts=2026-11-21T12:45:21Z event=start run=r5-au55-s2000-A cell=au55 seed=2000 round=5 arm=A
+ts=2026-11-21T12:45:21Z event=pid run=r5-au55-s2000-A pid=13026
+ts=2026-11-21T12:45:59Z event=end run=r5-au55-s2000-A exit=0
+ts=2026-11-21T12:45:59Z event=start run=r5-au55-s2001-A cell=au55 seed=2001 round=5 arm=A
+ts=2026-11-21T12:45:59Z event=pid run=r5-au55-s2001-A pid=13047
+ts=2026-11-21T12:46:38Z event=end run=r5-au55-s2001-A exit=0
+ts=2026-11-21T12:46:38Z event=start run=r5-au55-s2002-A cell=au55 seed=2002 round=5 arm=A
+ts=2026-11-21T12:46:38Z event=pid run=r5-au55-s2002-A pid=13052
+ts=2026-11-21T12:46:52Z event=end run=r5-au55-s2002-A exit=0
+ts=2026-11-21T12:46:52Z event=start run=r5-au55-s2003-A cell=au55 seed=2003 round=5 arm=A
+ts=2026-11-21T12:46:52Z event=pid run=r5-au55-s2003-A pid=13054
+ts=2026-11-21T12:47:30Z event=end run=r5-au55-s2003-A exit=0
+ts=2026-11-21T12:47:30Z event=start run=r5-au55-s2004-A cell=au55 seed=2004 round=5 arm=A
+ts=2026-11-21T12:47:30Z event=pid run=r5-au55-s2004-A pid=13058
+ts=2026-11-21T12:48:07Z event=end run=r5-au55-s2004-A exit=0
+ts=2026-11-21T12:48:07Z event=start run=r5-au55-s2005-A cell=au55 seed=2005 round=5 arm=A
+ts=2026-11-21T12:48:07Z event=pid run=r5-au55-s2005-A pid=13062
+ts=2026-11-21T12:48:46Z event=end run=r5-au55-s2005-A exit=0
+ts=2026-11-21T12:48:46Z event=start run=r5-m80r6-s2000-A cell=m80r6 seed=2000 round=5 arm=A
+ts=2026-11-21T12:48:46Z event=pid run=r5-m80r6-s2000-A pid=13067
+ts=2026-11-21T12:48:47Z event=end run=r5-m80r6-s2000-A exit=0
+ts=2026-11-21T12:48:47Z event=start run=r5-m80r6-s2001-A cell=m80r6 seed=2001 round=5 arm=A
+ts=2026-11-21T12:48:47Z event=pid run=r5-m80r6-s2001-A pid=13068
+ts=2026-11-21T12:48:47Z event=end run=r5-m80r6-s2001-A exit=0
+ts=2026-11-21T12:48:47Z event=start run=r5-m80r6-s2002-A cell=m80r6 seed=2002 round=5 arm=A
+ts=2026-11-21T12:48:47Z event=pid run=r5-m80r6-s2002-A pid=13069
+ts=2026-11-21T12:48:58Z event=end run=r5-m80r6-s2002-A exit=0
+ts=2026-11-21T12:48:58Z event=start run=r5-m80r6-s2003-A cell=m80r6 seed=2003 round=5 arm=A
+ts=2026-11-21T12:48:58Z event=pid run=r5-m80r6-s2003-A pid=13070
+ts=2026-11-21T12:50:03Z event=end run=r5-m80r6-s2003-A exit=0
+ts=2026-11-21T12:50:03Z event=start run=r5-m80r6-s2004-A cell=m80r6 seed=2004 round=5 arm=A
+ts=2026-11-21T12:50:03Z event=pid run=r5-m80r6-s2004-A pid=13076
+ts=2026-11-21T12:50:04Z event=end run=r5-m80r6-s2004-A exit=0
+ts=2026-11-21T12:50:04Z event=start run=r5-m80r6-s2005-A cell=m80r6 seed=2005 round=5 arm=A
+ts=2026-11-21T12:50:04Z event=pid run=r5-m80r6-s2005-A pid=13077
+ts=2026-11-21T12:50:45Z event=end run=r5-m80r6-s2005-A exit=0
+ts=2026-11-21T12:50:45Z event=start run=r5-m80r14-s2000-A cell=m80r14 seed=2000 round=5 arm=A
+ts=2026-11-21T12:50:45Z event=pid run=r5-m80r14-s2000-A pid=13083
+ts=2026-11-21T12:51:24Z event=end run=r5-m80r14-s2000-A exit=0
+ts=2026-11-21T12:51:24Z event=start run=r5-m80r14-s2001-A cell=m80r14 seed=2001 round=5 arm=A
+ts=2026-11-21T12:51:24Z event=pid run=r5-m80r14-s2001-A pid=13086
+ts=2026-11-21T12:54:02Z event=end run=r5-m80r14-s2001-A exit=0
+ts=2026-11-21T12:54:02Z event=start run=r5-m80r14-s2002-A cell=m80r14 seed=2002 round=5 arm=A
+ts=2026-11-21T12:54:02Z event=pid run=r5-m80r14-s2002-A pid=13100
+ts=2026-11-21T12:56:38Z event=end run=r5-m80r14-s2002-A exit=0
+ts=2026-11-21T12:56:38Z event=start run=r5-m80r14-s2003-A cell=m80r14 seed=2003 round=5 arm=A
+ts=2026-11-21T12:56:38Z event=pid run=r5-m80r14-s2003-A pid=13121
+ts=2026-11-21T12:58:30Z event=end run=r5-m80r14-s2003-A exit=0
+ts=2026-11-21T12:58:30Z event=start run=r5-m80r14-s2004-A cell=m80r14 seed=2004 round=5 arm=A
+ts=2026-11-21T12:58:30Z event=pid run=r5-m80r14-s2004-A pid=13131
+ts=2026-11-21T13:01:05Z event=end run=r5-m80r14-s2004-A exit=0
+ts=2026-11-21T13:01:05Z event=start run=r5-m80r14-s2005-A cell=m80r14 seed=2005 round=5 arm=A
+ts=2026-11-21T13:01:05Z event=pid run=r5-m80r14-s2005-A pid=13144
+ts=2026-11-21T13:03:40Z event=end run=r5-m80r14-s2005-A exit=0
+ts=2026-11-21T13:03:40Z event=start run=r6-lj38-s2000-A2 cell=lj38 seed=2000 round=6 arm=A2
+ts=2026-11-21T13:03:40Z event=pid run=r6-lj38-s2000-A2 pid=13176
+ts=2026-11-21T13:03:40Z event=end run=r6-lj38-s2000-A2 exit=0
+ts=2026-11-21T13:03:40Z event=start run=r6-lj38-s2001-A2 cell=lj38 seed=2001 round=6 arm=A2
+ts=2026-11-21T13:03:40Z event=pid run=r6-lj38-s2001-A2 pid=13177
+ts=2026-11-21T13:03:41Z event=end run=r6-lj38-s2001-A2 exit=0
+ts=2026-11-21T13:03:41Z event=start run=r6-lj38-s2002-A2 cell=lj38 seed=2002 round=6 arm=A2
+ts=2026-11-21T13:03:41Z event=pid run=r6-lj38-s2002-A2 pid=13178
+ts=2026-11-21T13:03:42Z event=end run=r6-lj38-s2002-A2 exit=0
+ts=2026-11-21T13:03:42Z event=start run=r6-lj38-s2003-A2 cell=lj38 seed=2003 round=6 arm=A2
+ts=2026-11-21T13:03:42Z event=pid run=r6-lj38-s2003-A2 pid=13179
+ts=2026-11-21T13:03:43Z event=end run=r6-lj38-s2003-A2 exit=0
+ts=2026-11-21T13:03:43Z event=start run=r6-lj38-s2004-A2 cell=lj38 seed=2004 round=6 arm=A2
+ts=2026-11-21T13:03:43Z event=pid run=r6-lj38-s2004-A2 pid=13180
+ts=2026-11-21T13:03:44Z event=end run=r6-lj38-s2004-A2 exit=0
+ts=2026-11-21T13:03:44Z event=start run=r6-lj38-s2005-A2 cell=lj38 seed=2005 round=6 arm=A2
+ts=2026-11-21T13:03:44Z event=pid run=r6-lj38-s2005-A2 pid=13182
+ts=2026-11-21T13:03:44Z event=end run=r6-lj38-s2005-A2 exit=0
+ts=2026-11-21T13:03:44Z event=start run=r6-lj55-s2000-A2 cell=lj55 seed=2000 round=6 arm=A2
+ts=2026-11-21T13:03:44Z event=pid run=r6-lj55-s2000-A2 pid=13183
+ts=2026-11-21T13:03:45Z event=end run=r6-lj55-s2000-A2 exit=0
+ts=2026-11-21T13:03:45Z event=start run=r6-lj55-s2001-A2 cell=lj55 seed=2001 round=6 arm=A2
+ts=2026-11-21T13:03:45Z event=pid run=r6-lj55-s2001-A2 pid=13184
+ts=2026-11-21T13:03:45Z event=end run=r6-lj55-s2001-A2 exit=0
+ts=2026-11-21T13:03:45Z event=start run=r6-lj55-s2002-A2 cell=lj55 seed=2002 round=6 arm=A2
+ts=2026-11-21T13:03:45Z event=pid run=r6-lj55-s2002-A2 pid=13185
+ts=2026-11-21T13:03:45Z event=end run=r6-lj55-s2002-A2 exit=0
+ts=2026-11-21T13:03:45Z event=start run=r6-lj55-s2003-A2 cell=lj55 seed=2003 round=6 arm=A2
+ts=2026-11-21T13:03:45Z event=pid run=r6-lj55-s2003-A2 pid=13186
+ts=2026-11-21T13:03:45Z event=end run=r6-lj55-s2003-A2 exit=0
+ts=2026-11-21T13:03:45Z event=start run=r6-lj55-s2004-A2 cell=lj55 seed=2004 round=6 arm=A2
+ts=2026-11-21T13:03:45Z event=pid run=r6-lj55-s2004-A2 pid=13187
+ts=2026-11-21T13:03:45Z event=end run=r6-lj55-s2004-A2 exit=0
+ts=2026-11-21T13:03:45Z event=start run=r6-lj55-s2005-A2 cell=lj55 seed=2005 round=6 arm=A2
+ts=2026-11-21T13:03:45Z event=pid run=r6-lj55-s2005-A2 pid=13188
+ts=2026-11-21T13:03:45Z event=end run=r6-lj55-s2005-A2 exit=0
+ts=2026-11-21T13:03:45Z event=start run=r6-lj75-s2000-A2 cell=lj75 seed=2000 round=6 arm=A2
+ts=2026-11-21T13:03:45Z event=pid run=r6-lj75-s2000-A2 pid=13189
+ts=2026-11-21T13:04:23Z event=end run=r6-lj75-s2000-A2 exit=0
+ts=2026-11-21T13:04:23Z event=start run=r6-lj75-s2001-A2 cell=lj75 seed=2001 round=6 arm=A2
+ts=2026-11-21T13:04:23Z event=pid run=r6-lj75-s2001-A2 pid=13192
+ts=2026-11-21T13:05:28Z event=end run=r6-lj75-s2001-A2 exit=0
+ts=2026-11-21T13:05:28Z event=start run=r6-lj75-s2002-A2 cell=lj75 seed=2002 round=6 arm=A2
+ts=2026-11-21T13:05:28Z event=pid run=r6-lj75-s2002-A2 pid=13205
+ts=2026-11-21T13:06:20Z event=end run=r6-lj75-s2002-A2 exit=0
+ts=2026-11-21T13:06:20Z event=start run=r6-lj75-s2003-A2 cell=lj75 seed=2003 round=6 arm=A2
+ts=2026-11-21T13:06:20Z event=pid run=r6-lj75-s2003-A2 pid=13210
+ts=2026-11-21T13:07:23Z event=end run=r6-lj75-s2003-A2 exit=0
+ts=2026-11-21T13:07:23Z event=start run=r6-lj75-s2004-A2 cell=lj75 seed=2004 round=6 arm=A2
+ts=2026-11-21T13:07:23Z event=pid run=r6-lj75-s2004-A2 pid=13216
+ts=2026-11-21T13:07:26Z event=end run=r6-lj75-s2004-A2 exit=0
+ts=2026-11-21T13:07:26Z event=start run=r6-lj75-s2005-A2 cell=lj75 seed=2005 round=6 arm=A2
+ts=2026-11-21T13:07:26Z event=pid run=r6-lj75-s2005-A2 pid=13218
+ts=2026-11-21T13:08:29Z event=end run=r6-lj75-s2005-A2 exit=0
+ts=2026-11-21T13:08:29Z event=start run=r6-lj98-s2000-A2 cell=lj98 seed=2000 round=6 arm=A2
+ts=2026-11-21T13:08:29Z event=pid run=r6-lj98-s2000-A2 pid=13224
+ts=2026-11-21T13:10:24Z event=end run=r6-lj98-s2000-A2 exit=0
+ts=2026-11-21T13:10:24Z event=start run=r6-lj98-s2001-A2 cell=lj98 seed=2001 round=6 arm=A2
+ts=2026-11-21T13:10:24Z event=pid run=r6-lj98-s2001-A2 pid=13234
+ts=2026-11-21T13:10:28Z event=end run=r6-lj98-s2001-A2 exit=0
+ts=2026-11-21T13:10:28Z event=start run=r6-lj98-s2002-A2 cell=lj98 seed=2002 round=6 arm=A2
+ts=2026-11-21T13:10:28Z event=pid run=r6-lj98-s2002-A2 pid=13236
+ts=2026-11-21T13:11:23Z event=end run=r6-lj98-s2002-A2 exit=0
+ts=2026-11-21T13:11:23Z event=start run=r6-lj98-s2003-A2 cell=lj98 seed=2003 round=6 arm=A2
+ts=2026-11-21T13:11:23Z event=pid run=r6-lj98-s2003-A2 pid=13241
+ts=2026-11-21T13:12:24Z event=end run=r6-lj98-s2003-A2 exit=0
+ts=2026-11-21T13:12:24Z event=start run=r6-lj98-s2004-A2 cell=lj98 seed=2004 round=6 arm=A2
+ts=2026-11-21T13:12:24Z event=pid run=r6-lj98-s2004-A2 pid=13247
+ts=2026-11-21T13:12:47Z event=end run=r6-lj98-s2004-A2 exit=0
+ts=2026-11-21T13:12:47Z event=start run=r6-lj98-s2005-A2 cell=lj98 seed=2005 round=6 arm=A2
+ts=2026-11-21T13:12:47Z event=pid run=r6-lj98-s2005-A2 pid=13251
+ts=2026-11-21T13:14:28Z event=end run=r6-lj98-s2005-A2 exit=0
+ts=2026-11-21T13:14:28Z event=start run=r6-lj102-s2000-A2 cell=lj102 seed=2000 round=6 arm=A2
+ts=2026-11-21T13:14:28Z event=pid run=r6-lj102-s2000-A2 pid=13277
+ts=2026-11-21T13:15:26Z event=end run=r6-lj102-s2000-A2 exit=0
+ts=2026-11-21T13:15:26Z event=start run=r6-lj102-s2001-A2 cell=lj102 seed=2001 round=6 arm=A2
+ts=2026-11-21T13:15:26Z event=pid run=r6-lj102-s2001-A2 pid=13289
+ts=2026-11-21T13:17:20Z event=end run=r6-lj102-s2001-A2 exit=0
+ts=2026-11-21T13:17:20Z event=start run=r6-lj102-s2002-A2 cell=lj102 seed=2002 round=6 arm=A2
+ts=2026-11-21T13:17:20Z event=pid run=r6-lj102-s2002-A2 pid=13299
+ts=2026-11-21T13:19:29Z event=end run=r6-lj102-s2002-A2 exit=0
+ts=2026-11-21T13:19:30Z event=start run=r6-lj102-s2003-A2 cell=lj102 seed=2003 round=6 arm=A2
+ts=2026-11-21T13:19:30Z event=pid run=r6-lj102-s2003-A2 pid=13331
+ts=2026-11-21T13:21:08Z event=end run=r6-lj102-s2003-A2 exit=0
+ts=2026-11-21T13:21:08Z event=start run=r6-lj102-s2004-A2 cell=lj102 seed=2004 round=6 arm=A2
+ts=2026-11-21T13:21:09Z event=pid run=r6-lj102-s2004-A2 pid=13340
+ts=2026-11-21T13:23:11Z event=end run=r6-lj102-s2004-A2 exit=0
+ts=2026-11-21T13:23:11Z event=start run=r6-lj102-s2005-A2 cell=lj102 seed=2005 round=6 arm=A2
+ts=2026-11-21T13:23:11Z event=pid run=r6-lj102-s2005-A2 pid=13351
+ts=2026-11-21T13:25:22Z event=end run=r6-lj102-s2005-A2 exit=0
+ts=2026-11-21T13:25:22Z event=start run=r6-lj103-s2000-A2 cell=lj103 seed=2000 round=6 arm=A2
+ts=2026-11-21T13:25:22Z event=pid run=r6-lj103-s2000-A2 pid=13386
+ts=2026-11-21T13:27:38Z event=end run=r6-lj103-s2000-A2 exit=0
+ts=2026-11-21T13:27:38Z event=start run=r6-lj103-s2001-A2 cell=lj103 seed=2001 round=6 arm=A2
+ts=2026-11-21T13:27:38Z event=pid run=r6-lj103-s2001-A2 pid=13399
+ts=2026-11-21T13:29:41Z event=end run=r6-lj103-s2001-A2 exit=0
+ts=2026-11-21T13:29:41Z event=start run=r6-lj103-s2002-A2 cell=lj103 seed=2002 round=6 arm=A2
+ts=2026-11-21T13:29:41Z event=pid run=r6-lj103-s2002-A2 pid=13410
+ts=2026-11-21T13:31:43Z event=end run=r6-lj103-s2002-A2 exit=0
+ts=2026-11-21T13:31:43Z event=start run=r6-lj103-s2003-A2 cell=lj103 seed=2003 round=6 arm=A2
+ts=2026-11-21T13:31:43Z event=pid run=r6-lj103-s2003-A2 pid=13421
+ts=2026-11-21T13:31:45Z event=end run=r6-lj103-s2003-A2 exit=0
+ts=2026-11-21T13:31:45Z event=start run=r6-lj103-s2004-A2 cell=lj103 seed=2004 round=6 arm=A2
+ts=2026-11-21T13:31:45Z event=pid run=r6-lj103-s2004-A2 pid=13423
+ts=2026-11-21T13:33:39Z event=end run=r6-lj103-s2004-A2 exit=0
+ts=2026-11-21T13:33:39Z event=start run=r6-lj103-s2005-A2 cell=lj103 seed=2005 round=6 arm=A2
+ts=2026-11-21T13:33:39Z event=pid run=r6-lj103-s2005-A2 pid=13433
+ts=2026-11-21T13:35:38Z event=end run=r6-lj103-s2005-A2 exit=0
+ts=2026-11-21T13:35:38Z event=start run=r6-lj104-s2000-A2 cell=lj104 seed=2000 round=6 arm=A2
+ts=2026-11-21T13:35:38Z event=pid run=r6-lj104-s2000-A2 pid=13467
+ts=2026-11-21T13:36:31Z event=end run=r6-lj104-s2000-A2 exit=0
+ts=2026-11-21T13:36:31Z event=start run=r6-lj104-s2001-A2 cell=lj104 seed=2001 round=6 arm=A2
+ts=2026-11-21T13:36:31Z event=pid run=r6-lj104-s2001-A2 pid=13472
+ts=2026-11-21T13:38:41Z event=end run=r6-lj104-s2001-A2 exit=0
+ts=2026-11-21T13:38:41Z event=start run=r6-lj104-s2002-A2 cell=lj104 seed=2002 round=6 arm=A2
+ts=2026-11-21T13:38:41Z event=pid run=r6-lj104-s2002-A2 pid=13484
+ts=2026-11-21T13:39:32Z event=end run=r6-lj104-s2002-A2 exit=0
+ts=2026-11-21T13:39:32Z event=start run=r6-lj104-s2003-A2 cell=lj104 seed=2003 round=6 arm=A2
+ts=2026-11-21T13:39:32Z event=pid run=r6-lj104-s2003-A2 pid=13489
+ts=2026-11-21T13:41:40Z event=end run=r6-lj104-s2003-A2 exit=0
+ts=2026-11-21T13:41:40Z event=start run=r6-lj104-s2004-A2 cell=lj104 seed=2004 round=6 arm=A2
+ts=2026-11-21T13:41:40Z event=pid run=r6-lj104-s2004-A2 pid=13501
+ts=2026-11-21T13:43:47Z event=end run=r6-lj104-s2004-A2 exit=0
+ts=2026-11-21T13:43:47Z event=start run=r6-lj104-s2005-A2 cell=lj104 seed=2005 round=6 arm=A2
+ts=2026-11-21T13:43:47Z event=pid run=r6-lj104-s2005-A2 pid=13513
+ts=2026-11-21T13:45:07Z event=end run=r6-lj104-s2005-A2 exit=0
+ts=2026-11-21T13:45:07Z event=start run=r6-lj150-s2000-A2 cell=lj150 seed=2000 round=6 arm=A2
+ts=2026-11-21T13:45:07Z event=pid run=r6-lj150-s2000-A2 pid=13543
+ts=2026-11-21T13:45:08Z event=end run=r6-lj150-s2000-A2 exit=0
+ts=2026-11-21T13:45:08Z event=start run=r6-lj150-s2001-A2 cell=lj150 seed=2001 round=6 arm=A2
+ts=2026-11-21T13:45:08Z event=pid run=r6-lj150-s2001-A2 pid=13544
+ts=2026-11-21T13:45:32Z event=end run=r6-lj150-s2001-A2 exit=0
+ts=2026-11-21T13:45:32Z event=start run=r6-lj150-s2002-A2 cell=lj150 seed=2002 round=6 arm=A2
+ts=2026-11-21T13:45:32Z event=pid run=r6-lj150-s2002-A2 pid=13547
+ts=2026-11-21T13:46:52Z event=end run=r6-lj150-s2002-A2 exit=0
+ts=2026-11-21T13:46:52Z event=start run=r6-lj150-s2003-A2 cell=lj150 seed=2003 round=6 arm=A2
+ts=2026-11-21T13:46:52Z event=pid run=r6-lj150-s2003-A2 pid=13555
+ts=2026-11-21T13:47:51Z event=end run=r6-lj150-s2003-A2 exit=0
+ts=2026-11-21T13:47:51Z event=start run=r6-lj150-s2004-A2 cell=lj150 seed=2004 round=6 arm=A2
+ts=2026-11-21T13:47:51Z event=pid run=r6-lj150-s2004-A2 pid=13561
+ts=2026-11-21T13:49:11Z event=end run=r6-lj150-s2004-A2 exit=0
+ts=2026-11-21T13:49:11Z event=start run=r6-lj150-s2005-A2 cell=lj150 seed=2005 round=6 arm=A2
+ts=2026-11-21T13:49:11Z event=pid run=r6-lj150-s2005-A2 pid=13568
+ts=2026-11-21T13:54:04Z event=end run=r6-lj150-s2005-A2 exit=0
+ts=2026-11-21T13:54:04Z event=start run=r6-au55-s2000-A2 cell=au55 seed=2000 round=6 arm=A2
+ts=2026-11-21T13:54:04Z event=pid run=r6-au55-s2000-A2 pid=13593
+ts=2026-11-21T13:54:42Z event=end run=r6-au55-s2000-A2 exit=0
+ts=2026-11-21T13:54:42Z event=start run=r6-au55-s2001-A2 cell=au55 seed=2001 round=6 arm=A2
+ts=2026-11-21T13:54:42Z event=pid run=r6-au55-s2001-A2 pid=13615
+ts=2026-11-21T13:55:20Z event=end run=r6-au55-s2001-A2 exit=0
+ts=2026-11-21T13:55:20Z event=start run=r6-au55-s2002-A2 cell=au55 seed=2002 round=6 arm=A2
+ts=2026-11-21T13:55:20Z event=pid run=r6-au55-s2002-A2 pid=13625
+ts=2026-11-21T13:55:34Z event=end run=r6-au55-s2002-A2 exit=0
+ts=2026-11-21T13:55:34Z event=start run=r6-au55-s2003-A2 cell=au55 seed=2003 round=6 arm=A2
+ts=2026-11-21T13:55:34Z event=pid run=r6-au55-s2003-A2 pid=13627
+ts=2026-11-21T13:56:11Z event=end run=r6-au55-s2003-A2 exit=0
+ts=2026-11-21T13:56:11Z event=start run=r6-au55-s2004-A2 cell=au55 seed=2004 round=6 arm=A2
+ts=2026-11-21T13:56:11Z event=pid run=r6-au55-s2004-A2 pid=13631
+ts=2026-11-21T13:56:49Z event=end run=r6-au55-s2004-A2 exit=0
+ts=2026-11-21T13:56:49Z event=start run=r6-au55-s2005-A2 cell=au55 seed=2005 round=6 arm=A2
+ts=2026-11-21T13:56:49Z event=pid run=r6-au55-s2005-A2 pid=13636
+ts=2026-11-21T13:57:27Z event=end run=r6-au55-s2005-A2 exit=0
+ts=2026-11-21T13:57:27Z event=start run=r6-m80r6-s2000-A2 cell=m80r6 seed=2000 round=6 arm=A2
+ts=2026-11-21T13:57:27Z event=pid run=r6-m80r6-s2000-A2 pid=13640
+ts=2026-11-21T13:57:28Z event=end run=r6-m80r6-s2000-A2 exit=0
+ts=2026-11-21T13:57:28Z event=start run=r6-m80r6-s2001-A2 cell=m80r6 seed=2001 round=6 arm=A2
+ts=2026-11-21T13:57:28Z event=pid run=r6-m80r6-s2001-A2 pid=13641
+ts=2026-11-21T13:57:28Z event=end run=r6-m80r6-s2001-A2 exit=0
+ts=2026-11-21T13:57:28Z event=start run=r6-m80r6-s2002-A2 cell=m80r6 seed=2002 round=6 arm=A2
+ts=2026-11-21T13:57:28Z event=pid run=r6-m80r6-s2002-A2 pid=13642
+ts=2026-11-21T13:57:39Z event=end run=r6-m80r6-s2002-A2 exit=0
+ts=2026-11-21T13:57:39Z event=start run=r6-m80r6-s2003-A2 cell=m80r6 seed=2003 round=6 arm=A2
+ts=2026-11-21T13:57:39Z event=pid run=r6-m80r6-s2003-A2 pid=13644
+ts=2026-11-21T13:58:44Z event=end run=r6-m80r6-s2003-A2 exit=0
+ts=2026-11-21T13:58:44Z event=start run=r6-m80r6-s2004-A2 cell=m80r6 seed=2004 round=6 arm=A2
+ts=2026-11-21T13:58:44Z event=pid run=r6-m80r6-s2004-A2 pid=13651
+ts=2026-11-21T13:58:44Z event=end run=r6-m80r6-s2004-A2 exit=0
+ts=2026-11-21T13:58:44Z event=start run=r6-m80r6-s2005-A2 cell=m80r6 seed=2005 round=6 arm=A2
+ts=2026-11-21T13:58:44Z event=pid run=r6-m80r6-s2005-A2 pid=13652
+ts=2026-11-21T13:59:25Z event=end run=r6-m80r6-s2005-A2 exit=0
+ts=2026-11-21T13:59:25Z event=start run=r6-m80r14-s2000-A2 cell=m80r14 seed=2000 round=6 arm=A2
+ts=2026-11-21T13:59:25Z event=pid run=r6-m80r14-s2000-A2 pid=13655
+ts=2026-11-21T14:00:04Z event=end run=r6-m80r14-s2000-A2 exit=0
+ts=2026-11-21T14:00:04Z event=start run=r6-m80r14-s2001-A2 cell=m80r14 seed=2001 round=6 arm=A2
+ts=2026-11-21T14:00:04Z event=pid run=r6-m80r14-s2001-A2 pid=13659
+ts=2026-11-21T14:02:40Z event=end run=r6-m80r14-s2001-A2 exit=0
+ts=2026-11-21T14:02:40Z event=start run=r6-m80r14-s2002-A2 cell=m80r14 seed=2002 round=6 arm=A2
+ts=2026-11-21T14:02:40Z event=pid run=r6-m80r14-s2002-A2 pid=13674
+ts=2026-11-21T14:05:14Z event=end run=r6-m80r14-s2002-A2 exit=0
+ts=2026-11-21T14:05:14Z event=start run=r6-m80r14-s2003-A2 cell=m80r14 seed=2003 round=6 arm=A2
+ts=2026-11-21T14:05:14Z event=pid run=r6-m80r14-s2003-A2 pid=13694
+ts=2026-11-21T14:07:05Z event=end run=r6-m80r14-s2003-A2 exit=0
+ts=2026-11-21T14:07:05Z event=start run=r6-m80r14-s2004-A2 cell=m80r14 seed=2004 round=6 arm=A2
+ts=2026-11-21T14:07:05Z event=pid run=r6-m80r14-s2004-A2 pid=13720
+ts=2026-11-21T14:09:39Z event=end run=r6-m80r14-s2004-A2 exit=0
+ts=2026-11-21T14:09:39Z event=start run=r6-m80r14-s2005-A2 cell=m80r14 seed=2005 round=6 arm=A2
+ts=2026-11-21T14:09:39Z event=pid run=r6-m80r14-s2005-A2 pid=13735
+ts=2026-11-21T14:12:19Z event=end run=r6-m80r14-s2005-A2 exit=0
+ts=2026-11-21T14:12:19Z event=start run=r7-lj38-s2000-A2 cell=lj38 seed=2000 round=7 arm=A2
+ts=2026-11-21T14:12:19Z event=pid run=r7-lj38-s2000-A2 pid=13749
+ts=2026-11-21T14:12:19Z event=end run=r7-lj38-s2000-A2 exit=0
+ts=2026-11-21T14:12:19Z event=start run=r7-lj38-s2001-A2 cell=lj38 seed=2001 round=7 arm=A2
+ts=2026-11-21T14:12:19Z event=pid run=r7-lj38-s2001-A2 pid=13750
+ts=2026-11-21T14:12:20Z event=end run=r7-lj38-s2001-A2 exit=0
+ts=2026-11-21T14:12:20Z event=start run=r7-lj38-s2002-A2 cell=lj38 seed=2002 round=7 arm=A2
+ts=2026-11-21T14:12:20Z event=pid run=r7-lj38-s2002-A2 pid=13751
+ts=2026-11-21T14:12:21Z event=end run=r7-lj38-s2002-A2 exit=0
+ts=2026-11-21T14:12:21Z event=start run=r7-lj38-s2003-A2 cell=lj38 seed=2003 round=7 arm=A2
+ts=2026-11-21T14:12:21Z event=pid run=r7-lj38-s2003-A2 pid=13752
+ts=2026-11-21T14:12:22Z event=end run=r7-lj38-s2003-A2 exit=0
+ts=2026-11-21T14:12:22Z event=start run=r7-lj38-s2004-A2 cell=lj38 seed=2004 round=7 arm=A2
+ts=2026-11-21T14:12:22Z event=pid run=r7-lj38-s2004-A2 pid=13753
+ts=2026-11-21T14:12:23Z event=end run=r7-lj38-s2004-A2 exit=0
+ts=2026-11-21T14:12:23Z event=start run=r7-lj38-s2005-A2 cell=lj38 seed=2005 round=7 arm=A2
+ts=2026-11-21T14:12:23Z event=pid run=r7-lj38-s2005-A2 pid=13754
+ts=2026-11-21T14:12:24Z event=end run=r7-lj38-s2005-A2 exit=0
+ts=2026-11-21T14:12:24Z event=start run=r7-lj55-s2000-A2 cell=lj55 seed=2000 round=7 arm=A2
+ts=2026-11-21T14:12:24Z event=pid run=r7-lj55-s2000-A2 pid=13755
+ts=2026-11-21T14:12:24Z event=end run=r7-lj55-s2000-A2 exit=0
+ts=2026-11-21T14:12:24Z event=start run=r7-lj55-s2001-A2 cell=lj55 seed=2001 round=7 arm=A2
+ts=2026-11-21T14:12:24Z event=pid run=r7-lj55-s2001-A2 pid=13756
+ts=2026-11-21T14:12:24Z event=end run=r7-lj55-s2001-A2 exit=0
+ts=2026-11-21T14:12:24Z event=start run=r7-lj55-s2002-A2 cell=lj55 seed=2002 round=7 arm=A2
+ts=2026-11-21T14:12:24Z event=pid run=r7-lj55-s2002-A2 pid=13757
+ts=2026-11-21T14:12:24Z event=end run=r7-lj55-s2002-A2 exit=0
+ts=2026-11-21T14:12:24Z event=start run=r7-lj55-s2003-A2 cell=lj55 seed=2003 round=7 arm=A2
+ts=2026-11-21T14:12:24Z event=pid run=r7-lj55-s2003-A2 pid=13758
+ts=2026-11-21T14:12:24Z event=end run=r7-lj55-s2003-A2 exit=0
+ts=2026-11-21T14:12:24Z event=start run=r7-lj55-s2004-A2 cell=lj55 seed=2004 round=7 arm=A2
+ts=2026-11-21T14:12:24Z event=pid run=r7-lj55-s2004-A2 pid=13759
+ts=2026-11-21T14:12:24Z event=end run=r7-lj55-s2004-A2 exit=0
+ts=2026-11-21T14:12:24Z event=start run=r7-lj55-s2005-A2 cell=lj55 seed=2005 round=7 arm=A2
+ts=2026-11-21T14:12:24Z event=pid run=r7-lj55-s2005-A2 pid=13760
+ts=2026-11-21T14:12:24Z event=end run=r7-lj55-s2005-A2 exit=0
+ts=2026-11-21T14:12:24Z event=start run=r7-lj75-s2000-A2 cell=lj75 seed=2000 round=7 arm=A2
+ts=2026-11-21T14:12:24Z event=pid run=r7-lj75-s2000-A2 pid=13761
+ts=2026-11-21T14:13:03Z event=end run=r7-lj75-s2000-A2 exit=0
+ts=2026-11-21T14:13:03Z event=start run=r7-lj75-s2001-A2 cell=lj75 seed=2001 round=7 arm=A2
+ts=2026-11-21T14:13:03Z event=pid run=r7-lj75-s2001-A2 pid=13788
+ts=2026-11-21T14:14:09Z event=end run=r7-lj75-s2001-A2 exit=0
+ts=2026-11-21T14:14:09Z event=start run=r7-lj75-s2002-A2 cell=lj75 seed=2002 round=7 arm=A2
+ts=2026-11-21T14:14:09Z event=pid run=r7-lj75-s2002-A2 pid=13795
+ts=2026-11-21T14:15:03Z event=end run=r7-lj75-s2002-A2 exit=0
+ts=2026-11-21T14:15:03Z event=start run=r7-lj75-s2003-A2 cell=lj75 seed=2003 round=7 arm=A2
+ts=2026-11-21T14:15:03Z event=pid run=r7-lj75-s2003-A2 pid=13806
+ts=2026-11-21T14:16:08Z event=end run=r7-lj75-s2003-A2 exit=0
+ts=2026-11-21T14:16:08Z event=start run=r7-lj75-s2004-A2 cell=lj75 seed=2004 round=7 arm=A2
+ts=2026-11-21T14:16:08Z event=pid run=r7-lj75-s2004-A2 pid=13813
+ts=2026-11-21T14:16:10Z event=end run=r7-lj75-s2004-A2 exit=0
+ts=2026-11-21T14:16:10Z event=start run=r7-lj75-s2005-A2 cell=lj75 seed=2005 round=7 arm=A2
+ts=2026-11-21T14:16:10Z event=pid run=r7-lj75-s2005-A2 pid=13814
+ts=2026-11-21T14:17:14Z event=end run=r7-lj75-s2005-A2 exit=0
+ts=2026-11-21T14:17:14Z event=start run=r7-lj98-s2000-A2 cell=lj98 seed=2000 round=7 arm=A2
+ts=2026-11-21T14:17:14Z event=pid run=r7-lj98-s2000-A2 pid=13838
+ts=2026-11-21T14:19:11Z event=end run=r7-lj98-s2000-A2 exit=0
+ts=2026-11-21T14:19:11Z event=start run=r7-lj98-s2001-A2 cell=lj98 seed=2001 round=7 arm=A2
+ts=2026-11-21T14:19:11Z event=pid run=r7-lj98-s2001-A2 pid=13848
+ts=2026-11-21T14:19:14Z event=end run=r7-lj98-s2001-A2 exit=0
+ts=2026-11-21T14:19:14Z event=start run=r7-lj98-s2002-A2 cell=lj98 seed=2002 round=7 arm=A2
+ts=2026-11-21T14:19:14Z event=pid run=r7-lj98-s2002-A2 pid=13850
+ts=2026-11-21T14:20:09Z event=end run=r7-lj98-s2002-A2 exit=0
+ts=2026-11-21T14:20:09Z event=start run=r7-lj98-s2003-A2 cell=lj98 seed=2003 round=7 arm=A2
+ts=2026-11-21T14:20:09Z event=pid run=r7-lj98-s2003-A2 pid=13855
+ts=2026-11-21T14:21:14Z event=end run=r7-lj98-s2003-A2 exit=0
+ts=2026-11-21T14:21:14Z event=start run=r7-lj98-s2004-A2 cell=lj98 seed=2004 round=7 arm=A2
+ts=2026-11-21T14:21:14Z event=pid run=r7-lj98-s2004-A2 pid=13862
+ts=2026-11-21T14:21:38Z event=end run=r7-lj98-s2004-A2 exit=0
+ts=2026-11-21T14:21:38Z event=start run=r7-lj98-s2005-A2 cell=lj98 seed=2005 round=7 arm=A2
+ts=2026-11-21T14:21:38Z event=pid run=r7-lj98-s2005-A2 pid=13865
+ts=2026-11-21T14:23:23Z event=end run=r7-lj98-s2005-A2 exit=0
+ts=2026-11-21T14:23:23Z event=start run=r7-lj102-s2000-A2 cell=lj102 seed=2000 round=7 arm=A2
+ts=2026-11-21T14:23:23Z event=pid run=r7-lj102-s2000-A2 pid=13874
+ts=2026-11-21T14:24:24Z event=end run=r7-lj102-s2000-A2 exit=0
+ts=2026-11-21T14:24:24Z event=start run=r7-lj102-s2001-A2 cell=lj102 seed=2001 round=7 arm=A2
+ts=2026-11-21T14:24:24Z event=pid run=r7-lj102-s2001-A2 pid=13880
+ts=2026-11-21T14:26:28Z event=end run=r7-lj102-s2001-A2 exit=0
+ts=2026-11-21T14:26:28Z event=start run=r7-lj102-s2002-A2 cell=lj102 seed=2002 round=7 arm=A2
+ts=2026-11-21T14:26:28Z event=pid run=r7-lj102-s2002-A2 pid=13898
+ts=2026-11-21T14:28:42Z event=end run=r7-lj102-s2002-A2 exit=0
+ts=2026-11-21T14:28:42Z event=start run=r7-lj102-s2003-A2 cell=lj102 seed=2003 round=7 arm=A2
+ts=2026-11-21T14:28:42Z event=pid run=r7-lj102-s2003-A2 pid=13927
+ts=2026-11-21T14:30:25Z event=end run=r7-lj102-s2003-A2 exit=0
+ts=2026-11-21T14:30:25Z event=start run=r7-lj102-s2004-A2 cell=lj102 seed=2004 round=7 arm=A2
+ts=2026-11-21T14:30:25Z event=pid run=r7-lj102-s2004-A2 pid=13936
+ts=2026-11-21T14:32:35Z event=end run=r7-lj102-s2004-A2 exit=0
+ts=2026-11-21T14:32:35Z event=start run=r7-lj102-s2005-A2 cell=lj102 seed=2005 round=7 arm=A2
+ts=2026-11-21T14:32:35Z event=pid run=r7-lj102-s2005-A2 pid=13948
+ts=2026-11-21T14:34:52Z event=end run=r7-lj102-s2005-A2 exit=0
+ts=2026-11-21T14:34:52Z event=start run=r7-lj103-s2000-A2 cell=lj103 seed=2000 round=7 arm=A2
+ts=2026-11-21T14:34:52Z event=pid run=r7-lj103-s2000-A2 pid=13967
+ts=2026-11-21T14:37:21Z event=end run=r7-lj103-s2000-A2 exit=0
+ts=2026-11-21T14:37:21Z event=start run=r7-lj103-s2001-A2 cell=lj103 seed=2001 round=7 arm=A2
+ts=2026-11-21T14:37:21Z event=pid run=r7-lj103-s2001-A2 pid=13980
+ts=2026-11-21T14:39:36Z event=end run=r7-lj103-s2001-A2 exit=0
+ts=2026-11-21T14:39:36Z event=start run=r7-lj103-s2002-A2 cell=lj103 seed=2002 round=7 arm=A2
+ts=2026-11-21T14:39:36Z event=pid run=r7-lj103-s2002-A2 pid=14009
+ts=2026-11-21T14:41:50Z event=end run=r7-lj103-s2002-A2 exit=0
+ts=2026-11-21T14:41:50Z event=start run=r7-lj103-s2003-A2 cell=lj103 seed=2003 round=7 arm=A2
+ts=2026-11-21T14:41:50Z event=pid run=r7-lj103-s2003-A2 pid=14022
+ts=2026-11-21T14:41:52Z event=end run=r7-lj103-s2003-A2 exit=0
+ts=2026-11-21T14:41:52Z event=start run=r7-lj103-s2004-A2 cell=lj103 seed=2004 round=7 arm=A2
+ts=2026-11-21T14:41:52Z event=pid run=r7-lj103-s2004-A2 pid=14023
+ts=2026-11-21T14:43:52Z event=end run=r7-lj103-s2004-A2 exit=0
+ts=2026-11-21T14:43:52Z event=start run=r7-lj103-s2005-A2 cell=lj103 seed=2005 round=7 arm=A2
+ts=2026-11-21T14:43:52Z event=pid run=r7-lj103-s2005-A2 pid=14034
+ts=2026-11-21T14:45:56Z event=end run=r7-lj103-s2005-A2 exit=0
+ts=2026-11-21T14:45:56Z event=start run=r7-lj104-s2000-A2 cell=lj104 seed=2000 round=7 arm=A2
+ts=2026-11-21T14:45:56Z event=pid run=r7-lj104-s2000-A2 pid=14051
+ts=2026-11-21T14:46:56Z event=end run=r7-lj104-s2000-A2 exit=0
+ts=2026-11-21T14:46:56Z event=start run=r7-lj104-s2001-A2 cell=lj104 seed=2001 round=7 arm=A2
+ts=2026-11-21T14:46:56Z event=pid run=r7-lj104-s2001-A2 pid=14057
+ts=2026-11-21T14:49:21Z event=end run=r7-lj104-s2001-A2 exit=0
+ts=2026-11-21T14:49:21Z event=start run=r7-lj104-s2002-A2 cell=lj104 seed=2002 round=7 arm=A2
+ts=2026-11-21T14:49:21Z event=pid run=r7-lj104-s2002-A2 pid=14087
+ts=2026-11-21T14:50:18Z event=end run=r7-lj104-s2002-A2 exit=0
+ts=2026-11-21T14:50:18Z event=start run=r7-lj104-s2003-A2 cell=lj104 seed=2003 round=7 arm=A2
+ts=2026-11-21T14:50:18Z event=pid run=r7-lj104-s2003-A2 pid=14093
+ts=2026-11-21T14:52:34Z event=end run=r7-lj104-s2003-A2 exit=0
+ts=2026-11-21T14:52:34Z event=start run=r7-lj104-s2004-A2 cell=lj104 seed=2004 round=7 arm=A2
+ts=2026-11-21T14:52:34Z event=pid run=r7-lj104-s2004-A2 pid=14105
+ts=2026-11-21T14:54:44Z event=end run=r7-lj104-s2004-A2 exit=0
+ts=2026-11-21T14:54:44Z event=start run=r7-lj104-s2005-A2 cell=lj104 seed=2005 round=7 arm=A2
+ts=2026-11-21T14:54:44Z event=pid run=r7-lj104-s2005-A2 pid=14118
+ts=2026-11-21T14:56:08Z event=end run=r7-lj104-s2005-A2 exit=0
+ts=2026-11-21T14:56:08Z event=start run=r7-lj150-s2000-A2 cell=lj150 seed=2000 round=7 arm=A2
+ts=2026-11-21T14:56:08Z event=pid run=r7-lj150-s2000-A2 pid=14131
+ts=2026-11-21T14:56:09Z event=end run=r7-lj150-s2000-A2 exit=0
+ts=2026-11-21T14:56:09Z event=start run=r7-lj150-s2001-A2 cell=lj150 seed=2001 round=7 arm=A2
+ts=2026-11-21T14:56:09Z event=pid run=r7-lj150-s2001-A2 pid=14132
+ts=2026-11-21T14:56:36Z event=end run=r7-lj150-s2001-A2 exit=0
+ts=2026-11-21T14:56:36Z event=start run=r7-lj150-s2002-A2 cell=lj150 seed=2002 round=7 arm=A2
+ts=2026-11-21T14:56:36Z event=pid run=r7-lj150-s2002-A2 pid=14135
+ts=2026-11-21T14:58:03Z event=end run=r7-lj150-s2002-A2 exit=0
+ts=2026-11-21T14:58:03Z event=start run=r7-lj150-s2003-A2 cell=lj150 seed=2003 round=7 arm=A2
+ts=2026-11-21T14:58:03Z event=pid run=r7-lj150-s2003-A2 pid=14143
+ts=2026-11-21T14:59:05Z event=end run=r7-lj150-s2003-A2 exit=0
+ts=2026-11-21T14:59:05Z event=start run=r7-lj150-s2004-A2 cell=lj150 seed=2004 round=7 arm=A2
+ts=2026-11-21T14:59:05Z event=pid run=r7-lj150-s2004-A2 pid=14149
+ts=2026-11-21T15:00:30Z event=end run=r7-lj150-s2004-A2 exit=0
+ts=2026-11-21T15:00:30Z event=start run=r7-lj150-s2005-A2 cell=lj150 seed=2005 round=7 arm=A2
+ts=2026-11-21T15:00:30Z event=pid run=r7-lj150-s2005-A2 pid=14175
+ts=2026-11-21T15:05:37Z event=end run=r7-lj150-s2005-A2 exit=0
+ts=2026-11-21T15:05:37Z event=start run=r7-au55-s2000-A2 cell=au55 seed=2000 round=7 arm=A2
+ts=2026-11-21T15:05:37Z event=pid run=r7-au55-s2000-A2 pid=14207
+ts=2026-11-21T15:06:15Z event=end run=r7-au55-s2000-A2 exit=0
+ts=2026-11-21T15:06:15Z event=start run=r7-au55-s2001-A2 cell=au55 seed=2001 round=7 arm=A2
+ts=2026-11-21T15:06:15Z event=pid run=r7-au55-s2001-A2 pid=14212
+ts=2026-11-21T15:06:54Z event=end run=r7-au55-s2001-A2 exit=0
+ts=2026-11-21T15:06:54Z event=start run=r7-au55-s2002-A2 cell=au55 seed=2002 round=7 arm=A2
+ts=2026-11-21T15:06:54Z event=pid run=r7-au55-s2002-A2 pid=14216
+ts=2026-11-21T15:07:07Z event=end run=r7-au55-s2002-A2 exit=0
+ts=2026-11-21T15:07:07Z event=start run=r7-au55-s2003-A2 cell=au55 seed=2003 round=7 arm=A2
+ts=2026-11-21T15:07:07Z event=pid run=r7-au55-s2003-A2 pid=14218
+ts=2026-11-21T15:07:45Z event=end run=r7-au55-s2003-A2 exit=0
+ts=2026-11-21T15:07:45Z event=start run=r7-au55-s2004-A2 cell=au55 seed=2004 round=7 arm=A2
+ts=2026-11-21T15:07:45Z event=pid run=r7-au55-s2004-A2 pid=14246
+ts=2026-11-21T15:08:24Z event=end run=r7-au55-s2004-A2 exit=0
+ts=2026-11-21T15:08:24Z event=start run=r7-au55-s2005-A2 cell=au55 seed=2005 round=7 arm=A2
+ts=2026-11-21T15:08:24Z event=pid run=r7-au55-s2005-A2 pid=14249
+ts=2026-11-21T15:09:04Z event=end run=r7-au55-s2005-A2 exit=0
+ts=2026-11-21T15:09:04Z event=start run=r7-m80r6-s2000-A2 cell=m80r6 seed=2000 round=7 arm=A2
+ts=2026-11-21T15:09:04Z event=pid run=r7-m80r6-s2000-A2 pid=14253
+ts=2026-11-21T15:09:04Z event=end run=r7-m80r6-s2000-A2 exit=0
+ts=2026-11-21T15:09:04Z event=start run=r7-m80r6-s2001-A2 cell=m80r6 seed=2001 round=7 arm=A2
+ts=2026-11-21T15:09:04Z event=pid run=r7-m80r6-s2001-A2 pid=14254
+ts=2026-11-21T15:09:05Z event=end run=r7-m80r6-s2001-A2 exit=0
+ts=2026-11-21T15:09:05Z event=start run=r7-m80r6-s2002-A2 cell=m80r6 seed=2002 round=7 arm=A2
+ts=2026-11-21T15:09:05Z event=pid run=r7-m80r6-s2002-A2 pid=14255
+ts=2026-11-21T15:09:17Z event=end run=r7-m80r6-s2002-A2 exit=0
+ts=2026-11-21T15:09:17Z event=start run=r7-m80r6-s2003-A2 cell=m80r6 seed=2003 round=7 arm=A2
+ts=2026-11-21T15:09:17Z event=pid run=r7-m80r6-s2003-A2 pid=14275
+ts=2026-11-21T15:10:23Z event=end run=r7-m80r6-s2003-A2 exit=0
+ts=2026-11-21T15:10:23Z event=start run=r7-m80r6-s2004-A2 cell=m80r6 seed=2004 round=7 arm=A2
+ts=2026-11-21T15:10:23Z event=pid run=r7-m80r6-s2004-A2 pid=14281
+ts=2026-11-21T15:10:24Z event=end run=r7-m80r6-s2004-A2 exit=0
+ts=2026-11-21T15:10:24Z event=start run=r7-m80r6-s2005-A2 cell=m80r6 seed=2005 round=7 arm=A2
+ts=2026-11-21T15:10:24Z event=pid run=r7-m80r6-s2005-A2 pid=14282
+ts=2026-11-21T15:11:05Z event=end run=r7-m80r6-s2005-A2 exit=0
+ts=2026-11-21T15:11:05Z event=start run=r7-m80r14-s2000-A2 cell=m80r14 seed=2000 round=7 arm=A2
+ts=2026-11-21T15:11:05Z event=pid run=r7-m80r14-s2000-A2 pid=14286
+ts=2026-11-21T15:11:45Z event=end run=r7-m80r14-s2000-A2 exit=0
+ts=2026-11-21T15:11:45Z event=start run=r7-m80r14-s2001-A2 cell=m80r14 seed=2001 round=7 arm=A2
+ts=2026-11-21T15:11:45Z event=pid run=r7-m80r14-s2001-A2 pid=14292
+ts=2026-11-21T15:14:25Z event=end run=r7-m80r14-s2001-A2 exit=0
+ts=2026-11-21T15:14:25Z event=start run=r7-m80r14-s2002-A2 cell=m80r14 seed=2002 round=7 arm=A2
+ts=2026-11-21T15:14:25Z event=pid run=r7-m80r14-s2002-A2 pid=14305
+ts=2026-11-21T15:17:07Z event=end run=r7-m80r14-s2002-A2 exit=0
+ts=2026-11-21T15:17:07Z event=start run=r7-m80r14-s2003-A2 cell=m80r14 seed=2003 round=7 arm=A2
+ts=2026-11-21T15:17:07Z event=pid run=r7-m80r14-s2003-A2 pid=14325
+ts=2026-11-21T15:19:09Z event=end run=r7-m80r14-s2003-A2 exit=0
+ts=2026-11-21T15:19:09Z event=start run=r7-m80r14-s2004-A2 cell=m80r14 seed=2004 round=7 arm=A2
+ts=2026-11-21T15:19:09Z event=pid run=r7-m80r14-s2004-A2 pid=14337
+ts=2026-11-21T15:22:17Z event=end run=r7-m80r14-s2004-A2 exit=0
+ts=2026-11-21T15:22:17Z event=start run=r7-m80r14-s2005-A2 cell=m80r14 seed=2005 round=7 arm=A2
+ts=2026-11-21T15:22:17Z event=pid run=r7-m80r14-s2005-A2 pid=14371
+ts=2026-11-21T15:25:28Z event=end run=r7-m80r14-s2005-A2 exit=0
+ts=2026-11-21T15:25:28Z event=start run=r8-lj38-s2000-A cell=lj38 seed=2000 round=8 arm=A
+ts=2026-11-21T15:25:28Z event=pid run=r8-lj38-s2000-A pid=14394
+ts=2026-11-21T15:25:28Z event=end run=r8-lj38-s2000-A exit=0
+ts=2026-11-21T15:25:28Z event=start run=r8-lj38-s2001-A cell=lj38 seed=2001 round=8 arm=A
+ts=2026-11-21T15:25:28Z event=pid run=r8-lj38-s2001-A pid=14395
+ts=2026-11-21T15:25:29Z event=end run=r8-lj38-s2001-A exit=0
+ts=2026-11-21T15:25:29Z event=start run=r8-lj38-s2002-A cell=lj38 seed=2002 round=8 arm=A
+ts=2026-11-21T15:25:29Z event=pid run=r8-lj38-s2002-A pid=14396
+ts=2026-11-21T15:25:30Z event=end run=r8-lj38-s2002-A exit=0
+ts=2026-11-21T15:25:30Z event=start run=r8-lj38-s2003-A cell=lj38 seed=2003 round=8 arm=A
+ts=2026-11-21T15:25:30Z event=pid run=r8-lj38-s2003-A pid=14397
+ts=2026-11-21T15:25:31Z event=end run=r8-lj38-s2003-A exit=0
+ts=2026-11-21T15:25:31Z event=start run=r8-lj38-s2004-A cell=lj38 seed=2004 round=8 arm=A
+ts=2026-11-21T15:25:31Z event=pid run=r8-lj38-s2004-A pid=14398
+ts=2026-11-21T15:25:32Z event=end run=r8-lj38-s2004-A exit=0
+ts=2026-11-21T15:25:32Z event=start run=r8-lj38-s2005-A cell=lj38 seed=2005 round=8 arm=A
+ts=2026-11-21T15:25:32Z event=pid run=r8-lj38-s2005-A pid=14399
+ts=2026-11-21T15:25:33Z event=end run=r8-lj38-s2005-A exit=0
+ts=2026-11-21T15:25:33Z event=start run=r8-lj55-s2000-A cell=lj55 seed=2000 round=8 arm=A
+ts=2026-11-21T15:25:33Z event=pid run=r8-lj55-s2000-A pid=14400
+ts=2026-11-21T15:25:33Z event=end run=r8-lj55-s2000-A exit=0
+ts=2026-11-21T15:25:33Z event=start run=r8-lj55-s2001-A cell=lj55 seed=2001 round=8 arm=A
+ts=2026-11-21T15:25:33Z event=pid run=r8-lj55-s2001-A pid=14401
+ts=2026-11-21T15:25:33Z event=end run=r8-lj55-s2001-A exit=0
+ts=2026-11-21T15:25:33Z event=start run=r8-lj55-s2002-A cell=lj55 seed=2002 round=8 arm=A
+ts=2026-11-21T15:25:33Z event=pid run=r8-lj55-s2002-A pid=14402
+ts=2026-11-21T15:25:33Z event=end run=r8-lj55-s2002-A exit=0
+ts=2026-11-21T15:25:33Z event=start run=r8-lj55-s2003-A cell=lj55 seed=2003 round=8 arm=A
+ts=2026-11-21T15:25:33Z event=pid run=r8-lj55-s2003-A pid=14403
+ts=2026-11-21T15:25:33Z event=end run=r8-lj55-s2003-A exit=0
+ts=2026-11-21T15:25:34Z event=start run=r8-lj55-s2004-A cell=lj55 seed=2004 round=8 arm=A
+ts=2026-11-21T15:25:34Z event=pid run=r8-lj55-s2004-A pid=14404
+ts=2026-11-21T15:25:34Z event=end run=r8-lj55-s2004-A exit=0
+ts=2026-11-21T15:25:34Z event=start run=r8-lj55-s2005-A cell=lj55 seed=2005 round=8 arm=A
+ts=2026-11-21T15:25:34Z event=pid run=r8-lj55-s2005-A pid=14405
+ts=2026-11-21T15:25:34Z event=end run=r8-lj55-s2005-A exit=0
+ts=2026-11-21T15:25:34Z event=start run=r8-lj75-s2000-A cell=lj75 seed=2000 round=8 arm=A
+ts=2026-11-21T15:25:34Z event=pid run=r8-lj75-s2000-A pid=14406
+ts=2026-11-21T15:26:21Z event=end run=r8-lj75-s2000-A exit=0
+ts=2026-11-21T15:26:21Z event=start run=r8-lj75-s2001-A cell=lj75 seed=2001 round=8 arm=A
+ts=2026-11-21T15:26:21Z event=pid run=r8-lj75-s2001-A pid=14411
+ts=2026-11-21T15:27:39Z event=end run=r8-lj75-s2001-A exit=0
+ts=2026-11-21T15:27:39Z event=start run=r8-lj75-s2002-A cell=lj75 seed=2002 round=8 arm=A
+ts=2026-11-21T15:27:39Z event=pid run=r8-lj75-s2002-A pid=14419
+ts=2026-11-21T15:28:39Z event=end run=r8-lj75-s2002-A exit=0
+ts=2026-11-21T15:28:39Z event=start run=r8-lj75-s2003-A cell=lj75 seed=2003 round=8 arm=A
+ts=2026-11-21T15:28:39Z event=pid run=r8-lj75-s2003-A pid=14425
+ts=2026-11-21T15:29:55Z event=end run=r8-lj75-s2003-A exit=0
+ts=2026-11-21T15:29:55Z event=start run=r8-lj75-s2004-A cell=lj75 seed=2004 round=8 arm=A
+ts=2026-11-21T15:29:55Z event=pid run=r8-lj75-s2004-A pid=14432
+ts=2026-11-21T15:29:58Z event=end run=r8-lj75-s2004-A exit=0
+ts=2026-11-21T15:29:58Z event=start run=r8-lj75-s2005-A cell=lj75 seed=2005 round=8 arm=A
+ts=2026-11-21T15:29:58Z event=pid run=r8-lj75-s2005-A pid=14433
+ts=2026-11-21T15:31:11Z event=end run=r8-lj75-s2005-A exit=0
+ts=2026-11-21T15:31:11Z event=start run=r8-lj98-s2000-A cell=lj98 seed=2000 round=8 arm=A
+ts=2026-11-21T15:31:11Z event=pid run=r8-lj98-s2000-A pid=14457
+ts=2026-11-21T15:33:20Z event=end run=r8-lj98-s2000-A exit=0
+ts=2026-11-21T15:33:20Z event=start run=r8-lj98-s2001-A cell=lj98 seed=2001 round=8 arm=A
+ts=2026-11-21T15:33:20Z event=pid run=r8-lj98-s2001-A pid=14469
+ts=2026-11-21T15:33:24Z event=end run=r8-lj98-s2001-A exit=0
+ts=2026-11-21T15:33:24Z event=start run=r8-lj98-s2002-A cell=lj98 seed=2002 round=8 arm=A
+ts=2026-11-21T15:33:24Z event=pid run=r8-lj98-s2002-A pid=14470
+ts=2026-11-21T15:34:24Z event=end run=r8-lj98-s2002-A exit=0
+ts=2026-11-21T15:34:24Z event=start run=r8-lj98-s2003-A cell=lj98 seed=2003 round=8 arm=A
+ts=2026-11-21T15:34:24Z event=pid run=r8-lj98-s2003-A pid=14476
+ts=2026-11-21T15:35:30Z event=end run=r8-lj98-s2003-A exit=0
+ts=2026-11-21T15:35:30Z event=start run=r8-lj98-s2004-A cell=lj98 seed=2004 round=8 arm=A
+ts=2026-11-21T15:35:31Z event=pid run=r8-lj98-s2004-A pid=14489
+ts=2026-11-21T15:35:55Z event=end run=r8-lj98-s2004-A exit=0
+ts=2026-11-21T15:35:55Z event=start run=r8-lj98-s2005-A cell=lj98 seed=2005 round=8 arm=A
+ts=2026-11-21T15:35:55Z event=pid run=r8-lj98-s2005-A pid=14492
+ts=2026-11-21T15:37:46Z event=end run=r8-lj98-s2005-A exit=0
+ts=2026-11-21T15:37:46Z event=start run=r8-lj102-s2000-A cell=lj102 seed=2000 round=8 arm=A
+ts=2026-11-21T15:37:46Z event=pid run=r8-lj102-s2000-A pid=14503
+ts=2026-11-21T15:38:46Z event=end run=r8-lj102-s2000-A exit=0
+ts=2026-11-21T15:38:46Z event=start run=r8-lj102-s2001-A cell=lj102 seed=2001 round=8 arm=A
+ts=2026-11-21T15:38:46Z event=pid run=r8-lj102-s2001-A pid=14509
+ts=2026-11-21T15:40:50Z event=end run=r8-lj102-s2001-A exit=0
+ts=2026-11-21T15:40:50Z event=start run=r8-lj102-s2002-A cell=lj102 seed=2002 round=8 arm=A
+ts=2026-11-21T15:40:50Z event=pid run=r8-lj102-s2002-A pid=14521
+ts=2026-11-21T15:43:13Z event=end run=r8-lj102-s2002-A exit=0
+ts=2026-11-21T15:43:13Z event=start run=r8-lj102-s2003-A cell=lj102 seed=2003 round=8 arm=A
+ts=2026-11-21T15:43:13Z event=pid run=r8-lj102-s2003-A pid=14550
+ts=2026-11-21T15:44:58Z event=end run=r8-lj102-s2003-A exit=0
+ts=2026-11-21T15:44:58Z event=start run=r8-lj102-s2004-A cell=lj102 seed=2004 round=8 arm=A
+ts=2026-11-21T15:44:58Z event=pid run=r8-lj102-s2004-A pid=14566
+ts=2026-11-21T15:47:03Z event=end run=r8-lj102-s2004-A exit=0
+ts=2026-11-21T15:47:03Z event=start run=r8-lj102-s2005-A cell=lj102 seed=2005 round=8 arm=A
+ts=2026-11-21T15:47:03Z event=pid run=r8-lj102-s2005-A pid=14577
+ts=2026-11-21T15:49:26Z event=end run=r8-lj102-s2005-A exit=0
+ts=2026-11-21T15:49:26Z event=start run=r8-lj103-s2000-A cell=lj103 seed=2000 round=8 arm=A
+ts=2026-11-21T15:49:26Z event=pid run=r8-lj103-s2000-A pid=14590
+ts=2026-11-21T15:51:59Z event=end run=r8-lj103-s2000-A exit=0
+ts=2026-11-21T15:51:59Z event=start run=r8-lj103-s2001-A cell=lj103 seed=2001 round=8 arm=A
+ts=2026-11-21T15:51:59Z event=pid run=r8-lj103-s2001-A pid=14621
+ts=2026-11-21T15:54:09Z event=end run=r8-lj103-s2001-A exit=0
+ts=2026-11-21T15:54:09Z event=start run=r8-lj103-s2002-A cell=lj103 seed=2002 round=8 arm=A
+ts=2026-11-21T15:54:09Z event=pid run=r8-lj103-s2002-A pid=14633
+ts=2026-11-21T15:56:13Z event=end run=r8-lj103-s2002-A exit=0
+ts=2026-11-21T15:56:13Z event=start run=r8-lj103-s2003-A cell=lj103 seed=2003 round=8 arm=A
+ts=2026-11-21T15:56:13Z event=pid run=r8-lj103-s2003-A pid=14650
+ts=2026-11-21T15:56:15Z event=end run=r8-lj103-s2003-A exit=0
+ts=2026-11-21T15:56:15Z event=start run=r8-lj103-s2004-A cell=lj103 seed=2004 round=8 arm=A
+ts=2026-11-21T15:56:15Z event=pid run=r8-lj103-s2004-A pid=14652
+ts=2026-11-21T15:58:18Z event=end run=r8-lj103-s2004-A exit=0
+ts=2026-11-21T15:58:18Z event=start run=r8-lj103-s2005-A cell=lj103 seed=2005 round=8 arm=A
+ts=2026-11-21T15:58:18Z event=pid run=r8-lj103-s2005-A pid=14663
+ts=2026-11-21T16:00:24Z event=end run=r8-lj103-s2005-A exit=0
+ts=2026-11-21T16:00:24Z event=start run=r8-lj104-s2000-A cell=lj104 seed=2000 round=8 arm=A
+ts=2026-11-21T16:00:24Z event=pid run=r8-lj104-s2000-A pid=14674
+ts=2026-11-21T16:01:20Z event=end run=r8-lj104-s2000-A exit=0
+ts=2026-11-21T16:01:20Z event=start run=r8-lj104-s2001-A cell=lj104 seed=2001 round=8 arm=A
+ts=2026-11-21T16:01:20Z event=pid run=r8-lj104-s2001-A pid=14697
+ts=2026-11-21T16:03:36Z event=end run=r8-lj104-s2001-A exit=0
+ts=2026-11-21T16:03:36Z event=start run=r8-lj104-s2002-A cell=lj104 seed=2002 round=8 arm=A
+ts=2026-11-21T16:03:36Z event=pid run=r8-lj104-s2002-A pid=14732
+ts=2026-11-21T16:04:31Z event=end run=r8-lj104-s2002-A exit=0
+ts=2026-11-21T16:04:31Z event=start run=r8-lj104-s2003-A cell=lj104 seed=2003 round=8 arm=A
+ts=2026-11-21T16:04:31Z event=pid run=r8-lj104-s2003-A pid=14738
+ts=2026-11-21T16:06:53Z event=end run=r8-lj104-s2003-A exit=0
+ts=2026-11-21T16:06:53Z event=start run=r8-lj104-s2004-A cell=lj104 seed=2004 round=8 arm=A
+ts=2026-11-21T16:06:53Z event=pid run=r8-lj104-s2004-A pid=14757
+ts=2026-11-21T16:09:10Z event=end run=r8-lj104-s2004-A exit=0
+ts=2026-11-21T16:09:10Z event=start run=r8-lj104-s2005-A cell=lj104 seed=2005 round=8 arm=A
+ts=2026-11-21T16:09:10Z event=pid run=r8-lj104-s2005-A pid=14769
+ts=2026-11-21T16:10:34Z event=end run=r8-lj104-s2005-A exit=0
+ts=2026-11-21T16:10:34Z event=start run=r8-lj150-s2000-A cell=lj150 seed=2000 round=8 arm=A
+ts=2026-11-21T16:10:34Z event=pid run=r8-lj150-s2000-A pid=14777
+ts=2026-11-21T16:10:35Z event=end run=r8-lj150-s2000-A exit=0
+ts=2026-11-21T16:10:35Z event=start run=r8-lj150-s2001-A cell=lj150 seed=2001 round=8 arm=A
+ts=2026-11-21T16:10:35Z event=pid run=r8-lj150-s2001-A pid=14778
+ts=2026-11-21T16:11:01Z event=end run=r8-lj150-s2001-A exit=0
+ts=2026-11-21T16:11:01Z event=start run=r8-lj150-s2002-A cell=lj150 seed=2002 round=8 arm=A
+ts=2026-11-21T16:11:01Z event=pid run=r8-lj150-s2002-A pid=14781
+ts=2026-11-21T16:12:26Z event=end run=r8-lj150-s2002-A exit=0
+ts=2026-11-21T16:12:26Z event=start run=r8-lj150-s2003-A cell=lj150 seed=2003 round=8 arm=A
+ts=2026-11-21T16:12:26Z event=pid run=r8-lj150-s2003-A pid=14789
+ts=2026-11-21T16:13:29Z event=end run=r8-lj150-s2003-A exit=0
+ts=2026-11-21T16:13:29Z event=start run=r8-lj150-s2004-A cell=lj150 seed=2004 round=8 arm=A
+ts=2026-11-21T16:13:29Z event=pid run=r8-lj150-s2004-A pid=14812
+ts=2026-11-21T16:14:50Z event=end run=r8-lj150-s2004-A exit=0
+ts=2026-11-21T16:14:50Z event=start run=r8-lj150-s2005-A cell=lj150 seed=2005 round=8 arm=A
+ts=2026-11-21T16:14:50Z event=pid run=r8-lj150-s2005-A pid=14827
+ts=2026-11-21T16:19:52Z event=end run=r8-lj150-s2005-A exit=0
+ts=2026-11-21T16:19:52Z event=start run=r8-au55-s2000-A cell=au55 seed=2000 round=8 arm=A
+ts=2026-11-21T16:19:52Z event=pid run=r8-au55-s2000-A pid=14853
+ts=2026-11-21T16:20:33Z event=end run=r8-au55-s2000-A exit=0
+ts=2026-11-21T16:20:33Z event=start run=r8-au55-s2001-A cell=au55 seed=2001 round=8 arm=A
+ts=2026-11-21T16:20:33Z event=pid run=r8-au55-s2001-A pid=14857
+ts=2026-11-21T16:21:13Z event=end run=r8-au55-s2001-A exit=0
+ts=2026-11-21T16:21:13Z event=start run=r8-au55-s2002-A cell=au55 seed=2002 round=8 arm=A
+ts=2026-11-21T16:21:13Z event=pid run=r8-au55-s2002-A pid=14861
+ts=2026-11-21T16:21:26Z event=end run=r8-au55-s2002-A exit=0
+ts=2026-11-21T16:21:26Z event=start run=r8-au55-s2003-A cell=au55 seed=2003 round=8 arm=A
+ts=2026-11-21T16:21:26Z event=pid run=r8-au55-s2003-A pid=14863
+ts=2026-11-21T16:22:06Z event=end run=r8-au55-s2003-A exit=0
+ts=2026-11-21T16:22:06Z event=start run=r8-au55-s2004-A cell=au55 seed=2004 round=8 arm=A
+ts=2026-11-21T16:22:06Z event=pid run=r8-au55-s2004-A pid=14867
+ts=2026-11-21T16:22:47Z event=end run=r8-au55-s2004-A exit=0
+ts=2026-11-21T16:22:47Z event=start run=r8-au55-s2005-A cell=au55 seed=2005 round=8 arm=A
+ts=2026-11-21T16:22:47Z event=pid run=r8-au55-s2005-A pid=14873
+ts=2026-11-21T16:23:28Z event=end run=r8-au55-s2005-A exit=0
+ts=2026-11-21T16:23:28Z event=start run=r8-m80r6-s2000-A cell=m80r6 seed=2000 round=8 arm=A
+ts=2026-11-21T16:23:28Z event=pid run=r8-m80r6-s2000-A pid=14876
+ts=2026-11-21T16:23:29Z event=end run=r8-m80r6-s2000-A exit=0
+ts=2026-11-21T16:23:29Z event=start run=r8-m80r6-s2001-A cell=m80r6 seed=2001 round=8 arm=A
+ts=2026-11-21T16:23:29Z event=pid run=r8-m80r6-s2001-A pid=14877
+ts=2026-11-21T16:23:29Z event=end run=r8-m80r6-s2001-A exit=0
+ts=2026-11-21T16:23:29Z event=start run=r8-m80r6-s2002-A cell=m80r6 seed=2002 round=8 arm=A
+ts=2026-11-21T16:23:29Z event=pid run=r8-m80r6-s2002-A pid=14878
+ts=2026-11-21T16:23:41Z event=end run=r8-m80r6-s2002-A exit=0
+ts=2026-11-21T16:23:41Z event=start run=r8-m80r6-s2003-A cell=m80r6 seed=2003 round=8 arm=A
+ts=2026-11-21T16:23:41Z event=pid run=r8-m80r6-s2003-A pid=14881
+ts=2026-11-21T16:24:47Z event=end run=r8-m80r6-s2003-A exit=0
+ts=2026-11-21T16:24:47Z event=start run=r8-m80r6-s2004-A cell=m80r6 seed=2004 round=8 arm=A
+ts=2026-11-21T16:24:47Z event=pid run=r8-m80r6-s2004-A pid=14894
+ts=2026-11-21T16:24:48Z event=end run=r8-m80r6-s2004-A exit=0
+ts=2026-11-21T16:24:48Z event=start run=r8-m80r6-s2005-A cell=m80r6 seed=2005 round=8 arm=A
+ts=2026-11-21T16:24:48Z event=pid run=r8-m80r6-s2005-A pid=14895
+ts=2026-11-21T16:25:29Z event=end run=r8-m80r6-s2005-A exit=0
+ts=2026-11-21T16:25:29Z event=start run=r8-m80r14-s2000-A cell=m80r14 seed=2000 round=8 arm=A
+ts=2026-11-21T16:25:29Z event=pid run=r8-m80r14-s2000-A pid=14898
+ts=2026-11-21T16:26:09Z event=end run=r8-m80r14-s2000-A exit=0
+ts=2026-11-21T16:26:09Z event=start run=r8-m80r14-s2001-A cell=m80r14 seed=2001 round=8 arm=A
+ts=2026-11-21T16:26:09Z event=pid run=r8-m80r14-s2001-A pid=14920
+ts=2026-11-21T16:28:49Z event=end run=r8-m80r14-s2001-A exit=0
+ts=2026-11-21T16:28:49Z event=start run=r8-m80r14-s2002-A cell=m80r14 seed=2002 round=8 arm=A
+ts=2026-11-21T16:28:49Z event=pid run=r8-m80r14-s2002-A pid=14935
+ts=2026-11-21T16:31:30Z event=end run=r8-m80r14-s2002-A exit=0
+ts=2026-11-21T16:31:30Z event=start run=r8-m80r14-s2003-A cell=m80r14 seed=2003 round=8 arm=A
+ts=2026-11-21T16:31:30Z event=pid run=r8-m80r14-s2003-A pid=14949
+ts=2026-11-21T16:33:25Z event=end run=r8-m80r14-s2003-A exit=0
+ts=2026-11-21T16:33:25Z event=start run=r8-m80r14-s2004-A cell=m80r14 seed=2004 round=8 arm=A
+ts=2026-11-21T16:33:25Z event=pid run=r8-m80r14-s2004-A pid=14959
+ts=2026-11-21T16:36:06Z event=end run=r8-m80r14-s2004-A exit=0
+ts=2026-11-21T16:36:06Z event=start run=r8-m80r14-s2005-A cell=m80r14 seed=2005 round=8 arm=A
+ts=2026-11-21T16:36:06Z event=pid run=r8-m80r14-s2005-A pid=14979
+ts=2026-11-21T16:38:44Z event=end run=r8-m80r14-s2005-A exit=0
