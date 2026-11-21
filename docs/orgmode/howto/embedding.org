@@ -10,8 +10,8 @@ cmake as a subproject dependency.
 
 ** Meson
 
-Add a
-=subprojects/rgpot.wrap= file or vendor the source directly into =subprojects/rgpot/=.
+Add a =subprojects/rgpot.wrap= file or vendor the source directly into
+=subprojects/rgpot/=.
 
 *** Full library build (server + potentials)
 
