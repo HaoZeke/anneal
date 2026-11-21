@@ -342,22 +342,22 @@ fn translated_dmax(
     best
 }
 
-/// Bottleneck that is exact inside the acceptance band around `threshold`.
+/// Bottleneck that is exact inside the acceptance band around `merge_radius`.
 ///
-/// Outside that band the number may be a bound. It is below `threshold`
+/// Outside that band the number may be a bound. It is below `merge_radius`
 /// exactly when the full bottleneck is, except within the band, where the
 /// full bottleneck is returned so the caller can defer to ASE.
 fn decision_dmax(
     pos1: &[f64],
     pos2: &[f64],
     n: usize,
-    threshold: f64,
+    merge_radius: f64,
     standard: &mut [f64],
     shifted: &mut [f64],
     alive: &mut [bool],
 ) -> f64 {
     shift_by(pos1, 0, standard, n);
-    let cap = threshold + ACCEPTANCE_BAND;
+    let cap = merge_radius + ACCEPTANCE_BAND;
     let mut best = f64::INFINITY;
     let mut in_band = false;
     for origin in 0..n {
@@ -370,10 +370,10 @@ fn decision_dmax(
         if walk.distance < best {
             best = walk.distance;
         }
-        if walk.distance + ACCEPTANCE_BAND < threshold {
+        if walk.distance + ACCEPTANCE_BAND < merge_radius {
             return walk.distance;
         }
-        if (walk.distance - threshold).abs() <= ACCEPTANCE_BAND {
+        if (walk.distance - merge_radius).abs() <= ACCEPTANCE_BAND {
             in_band = true;
         }
     }

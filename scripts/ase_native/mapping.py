@@ -117,9 +117,13 @@ from __future__ import annotations
 
 import ast
 import math
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+from target_tol import energy_hits  # noqa: E402,F401
 BASE_SHA = "5eb79cdcb0a986984dc7b487e5a3cc93224246f9"
 
 # Preset coefficients. These are the values Config::with_scales and
@@ -247,12 +251,6 @@ def minima_threshold(length_scale: float) -> float:
 def lj_map(epsilon: float = 1.0, sigma: float = 1.0) -> tuple[float, float, float]:
     """Return (energy factor, length factor, force factor) from reduced units."""
     return epsilon, sigma, epsilon / sigma
-
-
-def energy_hits(energy: float, target: float, tol: float = HIT_TOL) -> bool:
-    if not (math.isfinite(energy) and math.isfinite(target) and math.isfinite(tol)):
-        return False
-    return tol >= 0.0 and energy <= target + tol
 
 
 def seeds_for(system: str) -> tuple[int, ...]:
