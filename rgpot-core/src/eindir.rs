@@ -158,7 +158,6 @@ impl rgpot_potential_t {
         set_last_error("");
         let status = unsafe { (self.callback)(self.pot_user_data, input, &mut output) };
         let outcome = if status == rgpot_status_t::RGPOT_SUCCESS {
-            set_last_error(&earlier);
             validated_result(&output, 3 * n_atoms)
                 .map(|forces| {
                     Arc::new(FusedValue {
@@ -180,6 +179,9 @@ impl rgpot_potential_t {
             Err(FusedError::from_status(status, message))
         };
         unsafe { rgpot_tensor_free(output.forces) };
+        if status == rgpot_status_t::RGPOT_SUCCESS {
+            set_last_error(&earlier);
+        }
         outcome
     }
 
