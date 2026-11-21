@@ -45,31 +45,9 @@ int axisCount(double length, double edge) {
   return static_cast<int>(n);
 }
 
-// Off diagonal entries at most this many ulps of the cell infinity norm
-// are orthorhombic. A larger shear is binned in fractional coordinates.
-constexpr int kOrthorhombicUlps = 4096;
-
 bool orthorhombicCell(const double box[9]) {
-  double scale = 0.0;
-  for (int row = 0; row < 3; ++row) {
-    const double sum = std::abs(box[3 * row]) + std::abs(box[3 * row + 1]) +
-                       std::abs(box[3 * row + 2]);
-    if (sum > scale) {
-      scale = sum;
-    }
-  }
-  if (!(scale > 0.0) || !std::isfinite(scale)) {
-    return false;
-  }
-  const double limit = static_cast<double>(kOrthorhombicUlps) *
-                       std::numeric_limits<double>::epsilon() * scale;
-  const int off[6] = {1, 2, 3, 5, 6, 7};
-  for (const int k : off) {
-    if (!(std::abs(box[k]) <= limit)) {
-      return false;
-    }
-  }
-  return true;
+  return box[1] == 0.0 && box[2] == 0.0 && box[3] == 0.0 && box[5] == 0.0 &&
+         box[6] == 0.0 && box[7] == 0.0;
 }
 
 } // namespace
@@ -172,11 +150,11 @@ void Neighbours::buildCells(const double *xyz, std::size_t n) {
   double frac_origin[3] = {0.0, 0.0, 0.0};
   double frac_span[3] = {1.0, 1.0, 1.0};
   bool use_frac = false;
-  // Cartesian bins only when the cell is orthorhombic within
-  // kOrthorhombicUlps. A periodic or partially periodic skewed cell
-  // uses the minimum image inverse; open axes are not wrapped and get
-  // bins spanning the actual fractional coordinate range. Failure in
-  // the inverse raises and does not fall through to the Cartesian bins.
+  // Cartesian bins only when every off-diagonal entry is zero. A periodic
+  // or partially periodic sheared cell uses the minimum image inverse; open
+  // axes are not wrapped and get bins spanning the actual fractional
+  // coordinate range. Failure in the inverse raises and does not fall
+  // through to the Cartesian bins.
   if ((periodic_[0] || periodic_[1] || periodic_[2]) &&
       !orthorhombicCell(box_)) {
     double dual_norm[3]{};
@@ -517,8 +495,7 @@ void Neighbours::update(const double *xyz, std::size_t n, const double *box9,
     periodic_[k] = spec.periodic[static_cast<std::size_t>(k)] && len_[k] > 0.0;
     inv_[k] = periodic_[k] ? 1.0 / len_[k] : 0.0;
   }
-  const bool sheared = box9[1] != 0.0 || box9[2] != 0.0 || box9[3] != 0.0 ||
-                       box9[5] != 0.0 || box9[6] != 0.0 || box9[7] != 0.0;
+  const bool sheared = !orthorhombicCell(box9);
   image_ = spec.image;
   use_general_ = image_ == Image::General || sheared;
   if (use_general_) {

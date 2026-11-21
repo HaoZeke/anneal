@@ -1419,34 +1419,27 @@ TEST_CASE("ulp cutoff boundaries and subnormal off-diagonal offsets match brute 
     }
   }
 
-  // 2. Off-diagonal entries around the orthorhombicCell threshold
-  // (limit = 4096 * eps * scale at Neighbours.cc:57) and subnormal offsets on
-  // both the cell and the coordinates. Row 0 has norm 10.0 while rows 1 and 2
-  // have diagonal 8.0, so scale is 10.0 for every tested offset.
+  // 2. Zero, subnormal, and small nonzero off-diagonal entries, with
+  // subnormal offsets on both the cell and the coordinates.
   const double scale = 10.0;
-  const double limit =
+  const double tiny_shear =
       4096.0 * std::numeric_limits<double>::epsilon() * scale;
   const double offsets[] = {
       0.0,
       sub,
       -sub,
       0.5 * std::numeric_limits<double>::min(),
-      std::nextafter(limit, 0.0),
-      limit,
-      std::nextafter(limit, std::numeric_limits<double>::infinity()),
-      -std::nextafter(limit, std::numeric_limits<double>::infinity()),
+      std::nextafter(tiny_shear, 0.0),
+      tiny_shear,
+      std::nextafter(tiny_shear, std::numeric_limits<double>::infinity()),
+      -std::nextafter(tiny_shear, std::numeric_limits<double>::infinity()),
   };
   for (const double off : offsets) {
     const double cell[9] = {10.0, 0.0, 0.0, off, 8.0, 0.0, 0.0, -off, 8.0};
     const std::vector<double> pos = {
-        0.0,       sub,        -sub,
-        d_below,   sub,        -sub,
-        0.0,       4.0,        4.0,
-        d_exact,   4.0,        4.0,
-        0.0,       2.0,        6.0,
-        d_above,   2.0,        6.0,
-        0.1,       0.02 * 8.0, 4.0,
-        0.1 + off, 0.98 * 8.0, 4.0,
+        0.0, sub,     -sub, d_below,    sub, -sub,      0.0,        4.0,
+        4.0, d_exact, 4.0,  4.0,        0.0, 2.0,       6.0,        d_above,
+        2.0, 6.0,     0.1,  0.02 * 8.0, 4.0, 0.1 + off, 0.98 * 8.0, 4.0,
     };
     const auto ref = bruteAllImages(pos, cell, cutoff);
     REQUIRE(ref.count({0, 1}) == 1);
@@ -1485,9 +1478,8 @@ TEST_CASE("non-finite fractional coordinates throw in skewed cell binning",
       {huge, 0.0, 0.0, 0.0, 0.0, 0.0},
   };
   for (const auto &pos : bad_cases) {
-    for (const auto &periodic :
-         {std::array<bool, 3>{true, true, true},
-          std::array<bool, 3>{true, true, false}}) {
+    for (const auto &periodic : {std::array<bool, 3>{true, true, true},
+                                 std::array<bool, 3>{true, true, false}}) {
       for (const double cutoff : {2.5e-3, 1.0}) {
         rgpot::nlist::Spec spec;
         spec.cutoff = cutoff;
@@ -1502,6 +1494,216 @@ TEST_CASE("non-finite fractional coordinates throw in skewed cell binning",
             cells.update(pos.data(), pos.size() / 3, cell, spec),
             Catch::Matchers::ContainsSubstring("fractional coordinate"));
       }
+    }
+  }
+}
+
+TEST_CASE("disproportionate open rows with a small shear match brute force",
+          "[nlist][triclinic][mixed]") {
+  setThreads("1");
+  const double cutoff = 1.0;
+  const double open_a = 5.0e8;
+  const double open_b = 4.0e8;
+  const double shear = 3.0e-4;
+  const double cross = -2.0e-4;
+
+  // 2D periodic slabs with a huge open row (5e8 vs periodic 10.0) and a small
+  // real shear (3e-4). Atom 0 and Atom 1 sit across two Cartesian bin
+  // boundaries (1.9999 in bin 1 vs 3.0001 in bin 3) while their periodic
+  // minimum image across the sheared row has distance ~0.9999 < cutoff.
+  struct SlabCase {
+    double cell[9];
+    std::array<bool, 3> periodic;
+    std::vector<double> pos;
+  };
+  const SlabCase slabs[] = {
+      {
+          {10.0, 0.0, 0.0, shear, 10.0, 0.0, 0.0, 0.0, open_a},
+          {true, true, false},
+          {
+              1.9999,
+              0.0001,
+              0.0,
+              3.0001,
+              9.9999,
+              0.0,
+              0.05,
+              5.0,
+              -1.2,
+              9.85,
+              5.0,
+              -0.8,
+              5.0,
+              0.1,
+              2.5,
+              5.0 + shear,
+              9.8,
+              2.7,
+          },
+      },
+      {
+          {10.0, 0.0, 0.0, 0.0, open_a, 0.0, shear, 0.0, 10.0},
+          {true, false, true},
+          {
+              1.9999,
+              0.0,
+              0.0001,
+              3.0001,
+              0.0,
+              9.9999,
+              0.05,
+              -1.2,
+              5.0,
+              9.85,
+              -0.8,
+              5.0,
+              5.0,
+              2.5,
+              0.1,
+              5.0 + shear,
+              2.7,
+              9.8,
+          },
+      },
+      {
+          {open_a, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, shear, 10.0},
+          {false, true, true},
+          {
+              0.0,
+              1.9999,
+              0.0001,
+              0.0,
+              3.0001,
+              9.9999,
+              -1.2,
+              0.05,
+              5.0,
+              -0.8,
+              9.85,
+              5.0,
+              2.5,
+              5.0,
+              0.1,
+              2.7,
+              5.0 + shear,
+              9.8,
+          },
+      },
+  };
+  for (const auto &tc : slabs) {
+    const auto ref = bruteAllImages(tc.pos, tc.cell, cutoff, tc.periodic);
+    REQUIRE(ref.count({0, 1}) == 1);
+    REQUIRE(ref.size() >= 3);
+    for (const auto mode :
+         {rgpot::nlist::Mode::Stream, rgpot::nlist::Mode::Stored,
+          rgpot::nlist::Mode::Auto}) {
+      rgpot::nlist::Spec spec;
+      spec.cutoff = cutoff;
+      spec.skin = 0.0;
+      spec.periodic = tc.periodic;
+      spec.image = rgpot::nlist::Image::Round;
+      spec.mode = mode;
+      rgpot::nlist::Neighbours cells;
+      cells.update(tc.pos.data(), tc.pos.size() / 3, tc.cell, spec);
+      requireSamePairs(walkedPairs(cells, tc.pos.size() / 3, cutoff), ref);
+    }
+  }
+
+  // 1D periodic wires with two disproportionate open rows (5e8 and 4e8) and a
+  // small real shear along the open axes. Anchor atoms establish a 5.0-wide
+  // span along an open axis so Atom 0 (1.9999) and Atom 1 (3.0001) land two
+  // Cartesian 1.0-wide bins apart while wrapping along the tilted periodic
+  // vector brings them within 0.9999 < cutoff.
+  const SlabCase wires[] = {
+      {
+          {10.0, shear, cross, 0.0, open_a, 0.0, 0.0, 0.0, open_b},
+          {true, false, false},
+          {
+              0.05,
+              1.9999,
+              0.2,
+              10.05,
+              3.0001,
+              0.2 + cross,
+              5.0,
+              0.0,
+              -1.0,
+              5.0,
+              5.0,
+              2.0,
+              0.10,
+              2.5,
+              0.5,
+              9.85,
+              2.5 - shear,
+              0.5 - cross,
+          },
+      },
+      {
+          {open_a, 0.0, 0.0, shear, 10.0, cross, 0.0, 0.0, open_b},
+          {false, true, false},
+          {
+              1.9999,
+              0.05,
+              0.2,
+              3.0001,
+              10.05,
+              0.2 + cross,
+              0.0,
+              5.0,
+              -1.0,
+              5.0,
+              5.0,
+              2.0,
+              2.5,
+              0.10,
+              0.5,
+              2.5 - shear,
+              9.85,
+              0.5 - cross,
+          },
+      },
+      {
+          {open_a, 0.0, 0.0, 0.0, open_b, 0.0, shear, cross, 10.0},
+          {false, false, true},
+          {
+              1.9999,
+              0.2,
+              0.05,
+              3.0001,
+              0.2 + cross,
+              10.05,
+              0.0,
+              -1.0,
+              5.0,
+              5.0,
+              2.0,
+              5.0,
+              2.5,
+              0.5,
+              0.10,
+              2.5 - shear,
+              0.5 - cross,
+              9.85,
+          },
+      },
+  };
+  for (const auto &tc : wires) {
+    const auto ref = bruteAllImages(tc.pos, tc.cell, cutoff, tc.periodic);
+    REQUIRE(ref.count({0, 1}) == 1);
+    REQUIRE(ref.count({4, 5}) == 1);
+    for (const auto mode :
+         {rgpot::nlist::Mode::Stream, rgpot::nlist::Mode::Stored,
+          rgpot::nlist::Mode::Auto}) {
+      rgpot::nlist::Spec spec;
+      spec.cutoff = cutoff;
+      spec.skin = 0.0;
+      spec.periodic = tc.periodic;
+      spec.image = rgpot::nlist::Image::Round;
+      spec.mode = mode;
+      rgpot::nlist::Neighbours cells;
+      cells.update(tc.pos.data(), tc.pos.size() / 3, tc.cell, spec);
+      requireSamePairs(walkedPairs(cells, tc.pos.size() / 3, cutoff), ref);
     }
   }
 }
