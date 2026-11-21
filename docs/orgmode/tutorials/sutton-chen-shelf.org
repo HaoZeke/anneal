@@ -74,9 +74,9 @@ The lowest minimum has 332 bonds, 19 twelve-coordinated atoms, 0 five-coordinate
 
 * Run the iso-hop arm
 
-=iso-hop= sets =Config::surface_hop_on_best=. The hop loop records that
-flag and does not quench the surface candidates, so =surface_hops= stays
-zero and the arm follows the same search as =iso=.
+=iso-hop= sets =Config::surface_hop_on_best=. The legacy surface-hop
+counters stay at zero and the arm matches =iso= on the shelf fixture
+(=tests/surface_hop.rs=, =surface_hops_run_from_new_bests_only_when_asked=).
 
 #+begin_src bash
 ANNEAL_MINIMA_DB=db-hop cargo run -q --release --example sc_h2h -- \
@@ -100,8 +100,9 @@ energy chains bonds 555 421 422 other coordination(z:count)
 -19052.921135 1 332 4 96 70 162 4:1,5:2,6:16,7:13,8:13,9:10,10:3,11:1,12:19
 #+end_example
 
-The surface-hop chain hit: true, after 27646 calls.
-It quenched 0 surface hops, and 0 sweeps went down.
+The iso-hop chain hit: true, after 27646 calls.
+=surface_hops= and =surface_descents= stayed at 0 and
+0; the lowest minimum matched =iso=.
 It found 93 distinct minima.
 Its lowest minimum has 332 bonds, 19 twelve-coordinated atoms, 0 five-coordinated atoms and 1 four-coordinated atoms.
 
