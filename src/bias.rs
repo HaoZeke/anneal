@@ -16,6 +16,8 @@ use ndarray::{Array1, Array2, ArrayView1};
 mod distance_bound_tests;
 #[cfg(test)]
 mod pair_threshold_tests;
+#[cfg(test)]
+mod spectrum_sort_tests;
 
 #[cfg(test)]
 std::thread_local! {
@@ -1182,6 +1184,79 @@ unsafe fn fresh_pairs_avx2(n: usize, x: ArrayView1<f64>) -> Vec<f64> {
     distances
 }
 
+/// Sorts by `f64::total_cmp`. `total_cmp` ties are the same bits, so any
+/// correct sort prints the same vector.
+///
+/// A pair spectrum is thousands of lengths spread over a bounded range, so a
+/// bucket pass on the order-preserving integer key leaves a few values per
+/// bucket and the whole sort is close to linear. The bucket index is monotone
+/// in the key, which is what keeps the result identical to the comparison
+/// sort; a crowded bucket falls back to sorting that bucket.
+fn sort_total_order(values: &mut [f64]) {
+    const SMALL: usize = 64;
+    const CROWDED: usize = 24;
+    let n = values.len();
+    if n < SMALL {
+        values.sort_by(f64::total_cmp);
+        return;
+    }
+    let key = |value: f64| -> u64 {
+        let bits = value.to_bits();
+        (bits ^ (((bits as i64) >> 63) as u64 >> 1)) ^ (1 << 63)
+    };
+    let value = |key: u64| -> f64 {
+        let key = key ^ (1 << 63);
+        f64::from_bits(key ^ (((key as i64) >> 63) as u64 >> 1))
+    };
+    let mut keys: Vec<u64> = Vec::with_capacity(n);
+    let (mut low, mut high) = (u64::MAX, 0u64);
+    for &entry in values.iter() {
+        let k = key(entry);
+        low = low.min(k);
+        high = high.max(k);
+        keys.push(k);
+    }
+    let buckets = (n / 4).next_power_of_two();
+    let span = high - low;
+    let mut shift = 0u32;
+    while (span >> shift) >= buckets as u64 {
+        shift += 1;
+    }
+    let mut start = vec![0u32; buckets + 1];
+    for &k in &keys {
+        start[((k - low) >> shift) as usize + 1] += 1;
+    }
+    for at in 0..buckets {
+        start[at + 1] += start[at];
+    }
+    let mut next: Vec<u32> = start[..buckets].to_vec();
+    let mut placed = vec![0u64; n];
+    for &k in &keys {
+        let bucket = ((k - low) >> shift) as usize;
+        placed[next[bucket] as usize] = k;
+        next[bucket] += 1;
+    }
+    for bucket in 0..buckets {
+        let run = &mut placed[start[bucket] as usize..start[bucket + 1] as usize];
+        if run.len() > CROWDED {
+            run.sort_unstable();
+        } else {
+            for at in 1..run.len() {
+                let held = run[at];
+                let mut to = at;
+                while to > 0 && run[to - 1] > held {
+                    run[to] = run[to - 1];
+                    to -= 1;
+                }
+                run[to] = held;
+            }
+        }
+    }
+    for (slot, &k) in values.iter_mut().zip(&placed) {
+        *slot = value(k);
+    }
+}
+
 fn store_pairs(n: usize, x: ArrayView1<f64>, unsorted: Vec<f64>, sorted: Vec<f64>) {
     SORTED_PAIR_CACHE.with(|slot| {
         let mut cache = slot.borrow_mut();
@@ -1251,11 +1326,7 @@ impl Fingerprint for SortedPairs {
         });
         let unsorted = edited.unwrap_or_else(|| fresh_pairs(n, x));
         let mut sorted = unsorted.clone();
-        // The spectrum is a multiset of lengths. `total_cmp` ties are the
-        // same bits, so a stable sort and an unstable sort print the same
-        // vector. The stable sort is the one that finishes a nearly ordered
-        // spectrum, which is what a one-atom edit leaves.
-        sorted.sort_by(f64::total_cmp);
+        sort_total_order(&mut sorted);
         let out = Array1::from(sorted.clone());
         store_pairs(n, x, unsorted, sorted);
         out
