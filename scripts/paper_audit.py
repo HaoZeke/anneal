@@ -4025,6 +4025,22 @@ def science_claims(audit: Audit) -> None:
                     "outside the history of the submitted revision, which the article does not print.")
     audit.said(TEX, "They are described here as the design of the search, and the article makes no claim about what "
                     "any of them contributes.")
+    config = audit.text("src/methods/cluster_hopping/config.rs")
+    audit.record("cfg.trail_on_stall = true;" in config, TEX,
+                 "Config::recommended enables the trail response", "enabled",
+                 "enabled" if "cfg.trail_on_stall = true;" in config else "disabled")
+    audit.said(TEX, "The preset enables two responses to a stuck chain.")
+    audit.said(SI, "Those presets enable both the trail and climb responses to a stuck chain.")
+    stack = audit.text("paper/jctc/scripts/fig_algorithm_stack.py")
+    arms = audit.text("paper/jctc/scripts/fig_rec_arms.py")
+    for word in ("chain 40", "Good-Turing census", "annealed-flow bank"):
+        audit.record(word not in stack, "paper/jctc/scripts/fig_algorithm_stack.py",
+                     f"the reported-run stack figure does not draw {word}", "absent",
+                     "absent" if word not in stack else "present")
+    audit.record('"lattice"' in arms and '"resample"' not in arms,
+                 "paper/jctc/scripts/fig_rec_arms.py",
+                 "the arm figure draws the lattice arm and no resample arm", "lattice",
+                 "lattice" if '"lattice"' in arms and '"resample"' not in arms else "other")
     trail = "666591a0"
     audit.record(git("merge-base", "--is-ancestor", trail, SUBMITTED).returncode != 0, TEX,
                  "the trail record is outside the history of the submitted revision", "outside", "checked")

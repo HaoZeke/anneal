@@ -91,6 +91,12 @@ minimum plus 0.001: besides the five Lennard-Jones references above,
 \(-250.286609\) and \(-220.646208\) at M\(_{55}\) (\(\rho=6\) and 14), and
 \(-378.333471\) and \(-340.811371\) at M\(_{80}\) (\(\rho=6\) and 14).
 \cite{walesCambridgeClusterDatabase}
+Each atomic driver in the printed GMIN and ASE rows calls
+\texttt{Config::recommended} or \texttt{Config::recommended\_with\_scales}.
+Those presets enable both the trail and climb responses to a stuck chain.
+The GMIN harness removes every \texttt{H2H\_*} and \texttt{ANNEAL\_*}
+variable before it starts this code, so the printed rows used the preset
+value of \texttt{trail\_on\_stall}.
 
 \section{Host and commands}
 \label{sec:host}
