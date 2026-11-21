@@ -1155,6 +1155,28 @@ pub struct Symmetrise {
     pub pair_cutoff: f64,
 }
 
+fn symmetry_order_and_blend<R: Rng + ?Sized>(orders: &[usize], rng: &mut R) -> (usize, f64) {
+    const ESTABLISHED_ORDERS: usize = 5;
+    const ORDER_BUCKETS: usize = ESTABLISHED_ORDERS + 1;
+
+    let established = orders.len().min(ESTABLISHED_ORDERS);
+    let established_order = orders[rng.random_range(0..established)];
+    let blend = 0.3 + 0.4 * rng.random::<f64>();
+    if orders.len() == established {
+        return (established_order, blend);
+    }
+    // Draw among the established orders first, exactly as the five-order
+    // library did. A separate, size-independent sixth bucket opens the tail,
+    // whose orders remain reachable without diluting the established choices
+    // as the point count grows.
+    let order = if rng.random_range(0..ORDER_BUCKETS) == ESTABLISHED_ORDERS {
+        orders[rng.random_range(established..orders.len())]
+    } else {
+        established_order
+    };
+    (order, blend)
+}
+
 impl MoveKernel<f64> for Symmetrise {
     fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, _t: f64, rng: &mut R) -> Array1<f64> {
         let n = self.n_points;
@@ -1164,9 +1186,8 @@ impl MoveKernel<f64> for Symmetrise {
         }
         let c = centroid(i, n);
         let axis = random_unit(rng);
-        let order = self.orders[rng.random_range(0..self.orders.len())];
+        let (order, blend) = symmetry_order_and_blend(&self.orders, rng);
         let angle = 2.0 * std::f64::consts::PI / order.max(1) as f64;
-        let blend = 0.3 + 0.4 * rng.random::<f64>();
 
         let rotated: Vec<[f64; 3]> = (0..n)
             .map(|a| {
@@ -1213,6 +1234,38 @@ mod cluster_move_tests {
 
     fn com(x: &Array1<f64>, n: usize) -> [f64; 3] {
         centroid(x.view(), n)
+    }
+
+    #[test]
+    fn symmetry_orders_keep_the_established_draw_and_bound_the_tail() {
+        let established = [2, 3, 4, 5, 6];
+        for seed in 0..128 {
+            let mut expected_rng = StdRng::seed_from_u64(seed);
+            let expected_order = established[expected_rng.random_range(0..established.len())];
+            let expected_blend = 0.3 + 0.4 * expected_rng.random::<f64>();
+            let mut actual_rng = StdRng::seed_from_u64(seed);
+            let actual = symmetry_order_and_blend(&established, &mut actual_rng);
+            assert_eq!(actual.0, expected_order);
+            assert_eq!(actual.1.to_bits(), expected_blend.to_bits());
+        }
+
+        let orders: Vec<usize> = (2..=101).collect();
+        let mut rng = StdRng::seed_from_u64(0x243f_6a88_85a3_08d3);
+        let mut counts = [0_usize; 6];
+        let mut tail_orders = std::collections::BTreeSet::new();
+        for _ in 0..60_000 {
+            let (order, _) = symmetry_order_and_blend(&orders, &mut rng);
+            if order <= 6 {
+                counts[order - 2] += 1;
+            } else {
+                counts[5] += 1;
+                tail_orders.insert(order);
+            }
+        }
+        for count in counts {
+            assert!((9_000..=11_000).contains(&count), "{counts:?}");
+        }
+        assert_eq!(tail_orders.len(), orders.len() - established.len());
     }
 
     #[test]
