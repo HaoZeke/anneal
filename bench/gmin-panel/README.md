@@ -72,13 +72,14 @@ is already omitted as censored, and `hit` and `evals_to_hit` are unaffected.
   commit on anneal rows and the GMIN SVNREV on GMIN rows;
   `harness_revision` is the anneal commit whose examples wrote the starts;
   `host` is the UTS hostname and `session` the start of the runner process.
-- `gmin-source.txt`: the GMIN tarball, SVNREV, patches, CMake flags,
-  compiler, linked BLAS and LAPACK and binary hash.
-  This committed file is historical evidence for the provisional rows and
-  retains their `aac1548a` label and old tarball digest. Current builders
-  share the verified `9cbec1a4` pin in `scripts/gmin_pin.py`; new source
-  notes and rows record the built `SVNREV` instead of rewriting this data.
-  `bin-sha256.txt`: the five binaries (`4f772314...` for GMIN in session
+- `gmin-source.txt`: the 2026-11-19 GMIN snapshot that new runs build
+  from (the shared pin in `scripts/gmin_pin.py`, SVNREV `9cbec1a4`,
+  tarball sha256, patches, CMake flags, compiler, linked BLAS and
+  LAPACK). A session appends `binary_sha256`
+  from the GMIN line of its own `bin-sha256.txt`. No session has run at
+  this snapshot yet, so the file has no binary hash.
+  `bin-sha256.txt`: the five binaries of the aac1548a sessions behind
+  the rows (`4f772314...` for GMIN in session
   `20261117T035457Z`, `4665badc...` in `20261117T152941Z`; the four Rust
   binaries are bit-identical across both sessions).
 - `summary.csv`, the table below and table `tab:gmin` in

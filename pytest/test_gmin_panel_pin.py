@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import hashlib
 import importlib.util
 import os
 import re
@@ -17,8 +19,15 @@ BUILD = ROOT / "scripts" / "gmin_panel" / "build_gmin.sh"
 PANEL = ROOT / "scripts" / "gmin_panel" / "run_panel.py"
 SOURCE = ROOT / "bench" / "gmin-panel" / "gmin-source.txt"
 sys.path.insert(0, str(ROOT / "scripts"))
-from gmin_pin import REVISION, TARBALL_SHA256, read_svnrev
+from gmin_pin import REVISION, SNAPSHOT, TARBALL_SHA256, URL, read_svnrev
 from morse_gmin.run_panel import gmin_line
+
+
+def _assign(text: str, name: str) -> str:
+    match = re.search(rf"^{name}=(\S+)$", text, re.M)
+    if match is None:
+        raise AssertionError(f"{name} is not set")
+    return match.group(1)
 
 
 def test_every_gmin_builder_loads_the_shared_pin() -> None:
@@ -50,10 +59,54 @@ def test_fake_built_svnrev_flows_into_code_revision(tmp_path: Path) -> None:
 
 
 def test_the_committed_gmin_source_matches_the_build_pin() -> None:
-    source = dict(line.split("=", 1) for line in SOURCE.read_text().splitlines() if "=" in line)
-    assert source["revision"] == REVISION
-    assert source["svnrev"] == REVISION
-    assert source["tarball_sha256"] == TARBALL_SHA256
+    script = BUILD.read_text()
+    source = SOURCE.read_text()
+    assert _assign(source, "revision") == REVISION
+    assert _assign(source, "svnrev") == REVISION
+    assert _assign(source, "tarball_sha256") == TARBALL_SHA256
+    assert _assign(source, "snapshot") == SNAPSHOT
+    hf_url = _assign(script, "HF_URL").replace("${HF_REVISION}", _assign(script, "HF_REVISION"))
+    assert _assign(source, "url") == hf_url
+    assert _assign(source, "fallback_url") == URL
+    assert _assign(source, "source_date_epoch") == _assign(script, "SOURCE_DATE_EPOCH")
+    assert "www-wales.ch.cam.ac.uk" not in _assign(source, "url")
+
+
+def _gmin_line(sums: str) -> str:
+    hashes = [line.split()[0] for line in sums.splitlines() if line.split()[1:] == ["GMIN"]]
+    assert len(hashes) == 1
+    return hashes[0]
+
+
+def test_the_committed_binary_hash_matches_bin_sha256() -> None:
+    source = SOURCE.read_text()
+    sums = (ROOT / "bench" / "gmin-panel" / "bin-sha256.txt").read_text()
+    if re.search(r"^binary_sha256=", source, re.M):
+        assert _assign(source, "binary_sha256") == _gmin_line(sums)
+
+
+def test_binary_sha256_comes_from_the_bin_sha256_pass(tmp_path: Path) -> None:
+    assert "binary_sha256" not in BUILD.read_text()
+    enter = (ROOT / "scripts" / "gmin_panel" / "enter_bench.sh").read_text()
+    step = re.search(
+        r'^GMIN_PANEL_WORK=\$WORK bash "\$HERE/build_gmin.sh"\n(.*?^cp -f "\$WORK/gmin-source.txt" "\$OUT/gmin-source.txt"\n)',
+        enter,
+        re.M | re.S,
+    )
+    assert step is not None
+    work, out = tmp_path / "work", tmp_path / "out"
+    (work / "bin").mkdir(parents=True)
+    out.mkdir()
+    (work / "bin" / "GMIN").write_bytes(b"gmin build\n")
+    (work / "bin" / "h2h_morse").write_bytes(b"anneal build\n")
+    (work / "gmin-source.txt").write_text("revision=r\n")
+    env = dict(os.environ, WORK=str(work), OUT=str(out))
+    subprocess.run(["bash", "-euo", "pipefail", "-c", step.group(1)], env=env, check=True)
+    source = (out / "gmin-source.txt").read_text()
+    sums = (out / "bin-sha256.txt").read_text()
+    assert source.count("binary_sha256=") == 1
+    assert _assign(source, "binary_sha256") == _gmin_line(sums)
+    assert _gmin_line(sums) == hashlib.sha256(b"gmin build\n").hexdigest()
 
 
 def test_the_build_normalizes_paths_and_stamps() -> None:

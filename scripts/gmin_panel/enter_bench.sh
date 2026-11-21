@@ -64,9 +64,11 @@ else
 fi
 
 GMIN_PANEL_WORK=$WORK bash "$HERE/build_gmin.sh"
-sha256sum "$WORK"/bin/* > "$WORK/bin-sha256.txt"
+# binary_sha256 is the GMIN line of bin-sha256.txt, one hash of one build.
+(cd "$WORK/bin" && sha256sum -- *) > "$WORK/bin-sha256.txt"
+awk '$2 == "GMIN" {print "binary_sha256=" $1}' "$WORK/bin-sha256.txt" >> "$WORK/gmin-source.txt"
+cp -f "$WORK/bin-sha256.txt" "$OUT/bin-sha256.txt"
 cp -f "$WORK/gmin-source.txt" "$OUT/gmin-source.txt"
-(cd "$WORK/bin" && sha256sum -- *) > "$OUT/bin-sha256.txt"
 cp -f "$HERE/run_panel.py" "$ROOT/scripts/target_tol.py" \
   "$ROOT/scripts/gmin_pin.py" "$WORK/"
 cp -f "$ROOT/examples/h2h_gmin_lj.data" "$ROOT/examples/h2h_gmin_morse.data" "$WORK/"
