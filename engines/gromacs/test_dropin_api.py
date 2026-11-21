@@ -30,6 +30,7 @@ LIB = os.environ.get("RGPOT_GROMACS_DROPIN", "")
 EVAL = os.environ.get("RGPOT_EVAL", "")
 ENGINE = os.environ.get("RGPOT_CLASSICAL_ENGINE", "")
 SCHEMA = os.environ.get("RGPOT_CAPNP_SCHEMA", "")
+STUB_ENGINE = os.environ.get("RGPOT_ENGINE_STUB", "")
 
 pytestmark = pytest.mark.skipif(not (LIB and EVAL),
                                 reason="needs RGPOT_GROMACS_DROPIN and RGPOT_EVAL")
@@ -115,6 +116,13 @@ def reference(spec, symbols, x_nm, box_nm):
 def assert_close(e, f, e_ref, f_ref, rel=1e-12):
     assert abs(e - e_ref) <= rel * max(abs(e_ref), 1.0), (e, e_ref)
     assert np.max(np.abs(f - f_ref)) <= rel * max(np.max(np.abs(f_ref)), 1.0)
+
+
+def stub_config(path: Path, *, reentrancy: int = 0, no_hooks: int = 0, model: int = 0,
+                with_hvp: int = 1) -> Path:
+    """The fixed 8-byte config tests/engine_stub.cc reads."""
+    path.write_bytes(bytes([reentrancy, no_hooks, model, with_hvp, 0, 0, 0, 0]))
+    return path
 
 
 def test_version():
@@ -216,6 +224,25 @@ def test_engine_route_matches_the_engine(tmp_path):
     shim.close()
     e_ref, f_ref = engine_force(config, symbols, dc.wrap(x, box) * 10, box * 10)
     assert_close(e, f, e_ref * dc.KJ_PER_EV, f_ref * dc.KJ_PER_EV * 10)
+
+
+@pytest.mark.skipif(not STUB_ENGINE, reason="needs RGPOT_ENGINE_STUB")
+def test_engine_route_keeps_explicit_engine_spin_when_qmi_uses_defaults(tmp_path):
+    symbols = ["Ar", "Ar"]
+    x = np.array([[0.1, 0.2, 0.3], [0.6, 0.5, 0.4]], dtype=float)
+    box = np.eye(3) * 1.5
+    config = stub_config(tmp_path / "stub.bin")
+    stub = ctypes.CDLL(STUB_ENGINE)
+    stub.stub_reset()
+
+    inp = write_input(tmp_path, f"    ENGINE {STUB_ENGINE}\n    CONFIG {config}",
+                      symbols, x)
+    shim = Shim(inp, tmp_path / "out.log")
+    # qmi defaults are CHARGE 0 and MULTIPLICITY 1. These defaults must not
+    # clobber an explicit spin choice from the engine config.
+    shim.step(x, box)
+    shim.close()
+    assert stub.stub_spin() == 0
 
 
 def engine_force(config: Path, symbols, x_ang, box_ang):

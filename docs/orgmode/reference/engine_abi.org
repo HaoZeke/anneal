@@ -386,8 +386,7 @@ int rgpot_engine_set_charge_spin(RgpotEnginePot *pot, int charge, int spin);
 #+end_src
 
 - Inputs :: =pot=, a handle; =charge=, the total charge; =spin=, the spin value
-  (multiplicity for =omol=, Metatomic and Skala; non-negative integer for other
-  UMA tasks).
+  (integer in =[0, 100]= for UMA; multiplicity for Metatomic and Skala).
 - Units :: =charge= in elementary charges; =spin= none.
 - Outputs :: 0 on success; the next evaluations use the new values.
 - Errors :: returns 1 for a null =pot= or negative =spin= (no message).
@@ -396,7 +395,7 @@ int rgpot_engine_set_charge_spin(RgpotEnginePot *pot, int charge, int spin);
   classical, MOPAC, NWChem and XTB libraries, and Metatomic with a model that
   reads neither.
   Returns 3 for a value the backend or task cannot take (for example =spin= 0 on
-  UMA =omol=, Metatomic or Skala, or =spin= above 100 on UMA), with the reason
+  Metatomic or Skala, or =spin= above 100 on UMA), with the reason
   in =rgpot_engine_last_error=; the values in force do not change.
   For Metatomic the reason is
   =the model reads no charge (rgpot::charge), so charge <n> cannot reach it= or

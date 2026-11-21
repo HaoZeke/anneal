@@ -432,10 +432,15 @@ bool openEngine(Env *env) {
   }
   auto charge_spin =
       reinterpret_cast<EngineChargeSpin>(symbol(env, "rgpot_engine_set_charge_spin", false));
-  const int status = charge_spin != nullptr
+  // Keep charge/spin from the engine config when grompp's defaults are still
+  // in place. Only a non-default CHARGE or MULTIPLICITY in the qmi input
+  // overrides what the config set explicitly.
+  const bool needs_charge_spin_override =
+      (env->charge != 0 || env->multiplicity != 1);
+  const int status = (charge_spin != nullptr && needs_charge_spin_override)
                          ? charge_spin(env->engine.pot, env->charge, env->multiplicity)
-                         : 3;
-  if (status == 3 && (env->charge != 0 || env->multiplicity != 1)) {
+                         : 0;
+  if (status == 3 && needs_charge_spin_override) {
     die(env,
         "ENGINE %s takes no charge or spin, so the input needs CHARGE 0 and "
         "MULTIPLICITY 1 (it has %d and %d)",

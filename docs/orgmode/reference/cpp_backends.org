@@ -1151,8 +1151,7 @@ That figure is the test's parity pin, not a value from the paper.
 - Outputs :: a plain struct read by =UmaPot=.
 - Errors :: =UmaPot= throws =std::runtime_error= when =model_path= is empty or
   does not end in =.pt2=, and =std::invalid_argument= (via
-  =rgpot::validate_uma_spin_for_task=) when =spin= is outside =[1, 100]= for
-  =omol= or =[0, 100]= for any other task.
+  =rgpot::validate_uma_spin_for_task=) when =spin= is outside =[0, 100]=.
   The first force throws =std::runtime_error= when the cache root cannot be
   created or the package cannot be unpacked into it.
   An empty
@@ -1178,9 +1177,7 @@ void validate_uma_spin_for_task(std::string_view task_name, int spin,
   the caller prefix for error messages (default =UmaPot=).
 - Units :: none.
 - Outputs :: none; accepted values are not modified.
-- Errors :: throws =std::invalid_argument= when =task_name= is =omol= and
-  =spin= is outside =[1, 100]=, or when any other task has =spin= outside
-  =[0, 100]=.
+- Errors :: throws =std::invalid_argument= when =spin= is outside =[0, 100]=.
 
 *** =rgpot::UmaPot=
 
@@ -1230,8 +1227,7 @@ The build option is
 void setChargeSpin(int charge, int spin);
 #+end_src
 
-- Inputs :: =charge= in elementary charges and =spin= (integer in =[1, 100]= for
-  =omol= and =[0, 100]= for every other task).
+- Inputs :: =charge= in elementary charges and =spin= (integer in =[0, 100]=).
 - Units :: none.
 - Outputs :: none; the config is updated and =paramsKey= is recomputed.
 - Errors :: throws =std::invalid_argument= without mutating the config when

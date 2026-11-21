@@ -24,18 +24,24 @@ TEST_CASE("validate_uma_spin_for_task accepts 0..100 for non-omol tasks",
   }
 }
 
-TEST_CASE("validate_uma_spin_for_task requires 1..100 for omol",
+TEST_CASE("validate_uma_spin_for_task accepts 0..100 for omol",
           "[uma][spin]") {
+  REQUIRE_NOTHROW(rgpot::validate_uma_spin_for_task("omol", 0, "test"));
   REQUIRE_NOTHROW(rgpot::validate_uma_spin_for_task("omol", 1, "test"));
   REQUIRE_NOTHROW(
       rgpot::validate_uma_spin_for_task("omol", rgpot::kUmaSpinMax, "test"));
-  for (const int bad : {0, -1, rgpot::kUmaSpinMax + 1}) {
+}
+
+TEST_CASE("validate_uma_spin_for_task rejects out-of-range omol spins",
+          "[uma][spin]") {
+  for (const int bad : {-1, rgpot::kUmaSpinMax + 1}) {
     REQUIRE_THROWS_AS(rgpot::validate_uma_spin_for_task("omol", bad, "caller"),
                       std::invalid_argument);
     REQUIRE_THROWS_WITH(
         rgpot::validate_uma_spin_for_task("omol", bad, "caller"),
         Catch::Matchers::ContainsSubstring("caller:") &&
-            Catch::Matchers::ContainsSubstring("positive multiplicity") &&
+            Catch::Matchers::ContainsSubstring("omol") &&
+            Catch::Matchers::ContainsSubstring("0 to 100") &&
             Catch::Matchers::ContainsSubstring(std::to_string(bad)));
   }
 }

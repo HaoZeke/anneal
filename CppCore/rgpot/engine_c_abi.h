@@ -339,8 +339,8 @@ RGPOT_ENGINE_API int rgpot_engine_set_num_threads(RgpotEnginePot *pot,
  * Change the total charge and spin the next evaluations assume. Returns 0 when
  * the values reach the backend, 1 for a NULL pot or a negative spin, and 3 for
  * a backend without a charge or spin or a value the backend or task cannot
- * take (for example spin 0 on UMA omol, Metatomic, or Skala, or spin > 100 on
- * UMA); a refused call changes nothing and leaves the reason in last_error. A
+ * take (for example spin 0 on Metatomic or Skala, or spin > 100 on UMA); a
+ * refused call changes nothing and leaves the reason in last_error. A
  * UMA package was exported for one charge and spin; a mismatch is reported by
  * the next force call. A Metatomic model reads those it declares in
  * requested_inputs, and one it does not read must stay at charge 0 or

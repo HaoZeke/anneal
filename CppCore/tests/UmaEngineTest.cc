@@ -243,23 +243,25 @@ TEST_CASE("an instance reports capabilities and rejects bad calls",
   REQUIRE(std::strlen(small_buf) == sizeof(small_buf) - 1);
 
   REQUIRE(e.set_charge_spin(pot, 0, -1) == 1); // negative spin is invalid
-  REQUIRE(e.set_charge_spin(pot, 0, 0) == 3);  // omol requires spin >= 1
-  REQUIRE(last_error(e, pot).find("positive multiplicity") !=
-          std::string::npos);
+  REQUIRE(e.set_charge_spin(pot, 0, 0) == 0);
   REQUIRE(e.set_charge_spin(pot, 0, 101) == 3);
   REQUIRE(e.set_charge_spin(pot, 1, 2) == 0);
   e.destroy(pot);
 
-  // omol rejects spin 0 at create; non-omol (omat) accepts spin 0 at create
-  // and through set_charge_spin.
+  // omol and non-omol tasks both accept explicit spin 0 at create and through
+  // set_charge_spin.
   {
-    auto bad = uma_params("nonexistent-uma.pt2", 0, 0, 1, 1, false, "omol");
-    auto bad_bytes = bad.asBytes();
-    char bad_err[256] = {0};
-    REQUIRE(e.create(bad_bytes.begin(), bad_bytes.size(), bad_err,
-                     sizeof(bad_err)) == nullptr);
-    REQUIRE(std::string(bad_err).find("positive multiplicity") !=
-            std::string::npos);
+    auto omol = uma_params("nonexistent-uma.pt2", 0, 0, 1, 1, false, "omol");
+    auto omol_bytes = omol.asBytes();
+    char omol_err[256] = {0};
+    RgpotEnginePot *omol_pot = e.create(omol_bytes.begin(), omol_bytes.size(),
+                                        omol_err, sizeof(omol_err));
+    INFO(omol_err);
+    REQUIRE(omol_pot != nullptr);
+    REQUIRE(e.set_charge_spin(omol_pot, 0, 0) == 0);
+    REQUIRE(e.set_charge_spin(omol_pot, 0, -1) == 1);
+    REQUIRE(e.set_charge_spin(omol_pot, 0, 101) == 3);
+    e.destroy(omol_pot);
   }
   {
     auto omat = uma_params("nonexistent-uma.pt2", 0, 0, 1, 1, false, "omat");
