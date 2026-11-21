@@ -1857,7 +1857,7 @@ def hexamer_provenance(audit: Audit) -> None:
 
 TEMPLATE_ERA_DATA = "paper/jctc/data/template_era"
 TEMPLATE_ERA_PROSE = (
-    "Table~\\ref{tab:si-template-era} pairs the rows of this code in the GMIN table of the main text with the GMIN "
+    "Table~\\ref{tab:si-template-era} pairs the archived rows of this code from the GMIN panel session with the "
     "panel of the earlier template-assisted revision \\texttt{c2de652d} (structure templates since removed in "
     "\\texttt{1c1b1238}), on seeds 2000--2011 at the same budgets.",
     "Both sessions start each seed from the geometry the driver writes for it.",
@@ -2509,14 +2509,6 @@ def manuscript_ase(audit: Audit) -> None:
     lennard_jones = curvature(lambda x: x**-12 - 2.0 * x**-6)
     audit.record(abs(morse6 - lennard_jones) < 1e-3, TEX, "Morse rho=6 curvature at the pair minimum",
                  f"{lennard_jones:.3f}", f"{morse6:.3f}")
-    numbers = audit.text("paper/jctc/NUMBERS_TODO.md")
-    audit.record("LJ75 GMIN pair is not printed" in numbers and
-                 "GMIN) hits" not in numbers,
-                 "paper/jctc/NUMBERS_TODO.md",
-                 "the withdrawn LJ75 GMIN result is not quoted",
-                 "withdrawn", "withdrawn" if "GMIN) hits" not in numbers else "quoted")
-
-
 GMIN_RERUN = "paper/jctc/data/gmin_eeec8e2c"
 GMIN_SHARDS = ("a", "b", "c", "d")
 

@@ -224,9 +224,9 @@ The TIP4P rows of the GMIN comparison were recorded by revision
 
 \section{Earlier template-assisted revision}
 \label{sec:si-template-era}
-Table~\ref{tab:si-template-era} pairs the rows of this code in the GMIN table
-of the main text with the GMIN panel of the earlier template-assisted
-revision \texttt{c2de652d} (structure templates since removed in
+Table~\ref{tab:si-template-era} pairs the archived rows of this code from the
+GMIN panel session with the panel of the earlier template-assisted revision
+\texttt{c2de652d} (structure templates since removed in
 \texttt{1c1b1238}), on seeds 2000--2011 at the same budgets.
 Both sessions start each seed from the geometry the driver writes for it.
 Au\(_{55}\) is left out, since its GMIN build differs between the sessions.
@@ -251,10 +251,10 @@ and \path{paper/jctc/scripts/template_era_table.py} writes the table.
 % template-era table: start
 \begin{table}
 \caption{This code at the earlier template-assisted revision \texttt{c2de652d} (structure
-templates since removed in \texttt{1c1b1238}) against the rows of this code in the GMIN
-table of the main text, paired by seed.
+templates since removed in \texttt{1c1b1238}) against the archived rows of this code
+from the GMIN panel session, paired by seed.
 Each revision runs \texttt{Config::recommended}\((N)\) through the drivers of that
-table; at \texttt{c2de652d}, LJ\(_{103}\) runs a build with
+session; at \texttt{c2de652d}, LJ\(_{103}\) runs a build with
 \texttt{bench/paper-0120/lj103-table.patch}, which adds its reference energy and budget.
 Both sessions start each seed from the geometry the driver writes for it.
 Au\(_{55}\) is left out, since its GMIN build differs between the sessions.
@@ -268,6 +268,7 @@ The rows of \texttt{c2de652d} are \texttt{paper/jctc/data/template\_era/rows.csv
 \centering
 \scriptsize
 \setlength{\tabcolsep}{3pt}
+\resizebox{\textwidth}{!}{%
 \begin{tabular}{@{}lrlrrrrrrrcr@{}}
 \toprule
 Cluster & Budget & Revision & Hits & Only & Both & Neither & Calls & IQR & \(p_\mathrm{M}\) & \(\Delta\), 95\% & \(p_\mathrm{calls}\) \\
@@ -303,6 +304,7 @@ M\(_{80}\), \(\rho=14\) & \(4\times 10^{6}\) & \texttt{c2de652d} & 9/12 & 4 & 5 
  &  & \texttt{61fa67cf} & 6/12 & 1 &  &  & 3901429 & 1446773 & 0.375 & \(-\)0.54 to 0.12 & 0.020 \\
 \bottomrule
 \end{tabular}
+}
 \end{table}
 % template-era table: end
 

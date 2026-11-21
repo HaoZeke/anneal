@@ -122,10 +122,10 @@ def table() -> str:
         [
             "\\begin{table}",
             "\\caption{This code at the earlier template-assisted revision \\texttt{c2de652d} (structure",
-            "templates since removed in \\texttt{1c1b1238}) against the rows of this code in the GMIN",
-            "table of the main text, paired by seed.",
+            "templates since removed in \\texttt{1c1b1238}) against the archived rows of this code",
+            "from the GMIN panel session, paired by seed.",
             "Each revision runs \\texttt{Config::recommended}\\((N)\\) through the drivers of that",
-            "table; at \\texttt{c2de652d}, LJ\\(_{103}\\) runs a build with",
+            "session; at \\texttt{c2de652d}, LJ\\(_{103}\\) runs a build with",
             "\\texttt{bench/paper-0120/lj103-table.patch}, which adds its reference energy and budget.",
             "Both sessions start each seed from the geometry the driver writes for it.",
             "Au\\(_{55}\\) is left out, since its GMIN build differs between the sessions.",
@@ -139,6 +139,7 @@ def table() -> str:
             "\\centering",
             "\\scriptsize",
             "\\setlength{\\tabcolsep}{3pt}",
+            "\\resizebox{\\textwidth}{!}{%",
             "\\begin{tabular}{@{}lrlrrrrrrrcr@{}}",
             "\\toprule",
             "Cluster & Budget & Revision & Hits & Only & Both & Neither & Calls & IQR & "
@@ -147,6 +148,7 @@ def table() -> str:
             *body,
             "\\bottomrule",
             "\\end{tabular}",
+            "}",
             "\\end{table}",
         ]
     )
