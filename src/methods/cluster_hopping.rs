@@ -606,18 +606,30 @@ impl TailAccount {
         self.budget.load(Ordering::Relaxed)
     }
 
+    #[cfg(test)]
     fn held(&self) -> usize {
         self.held.load(Ordering::Relaxed)
     }
 
-    fn store_budget(&self, value: usize) {
-        self.budget.store(value, Ordering::Relaxed);
+    /// A drop on another thread can race the ledger, so every change is one
+    /// read-modify-write. Returns the value before `f`.
+    fn update(cell: &AtomicUsize, f: impl Fn(usize) -> usize) -> usize {
+        let mut seen = cell.load(Ordering::Relaxed);
+        loop {
+            match cell.compare_exchange_weak(seen, f(seen), Ordering::Relaxed, Ordering::Relaxed) {
+                Ok(previous) => return previous,
+                Err(now) => seen = now,
+            }
+        }
+    }
+
+    fn credit_budget(&self, extra: usize) {
+        Self::update(&self.budget, |budget| budget.saturating_add(extra));
     }
 
     fn hide(&self, reserve: usize) {
-        self.store_budget(self.budget() - reserve);
-        self.held
-            .store(self.held().saturating_add(reserve), Ordering::Relaxed);
+        Self::update(&self.budget, |budget| budget.saturating_sub(reserve));
+        Self::update(&self.held, |held| held.saturating_add(reserve));
     }
 
     /// Put `calls` back, and no more than the account still records as held.
@@ -625,10 +637,9 @@ impl TailAccount {
         if calls == 0 {
             return 0;
         }
-        let held = self.held();
+        let held = Self::update(&self.held, |held| held - calls.min(held));
         let credit = calls.min(held);
-        self.held.store(held - credit, Ordering::Relaxed);
-        self.store_budget(self.budget().saturating_add(credit));
+        self.credit_budget(credit);
         credit
     }
 }
@@ -1100,11 +1111,10 @@ impl Ledger {
     /// Those calls are still counted in [`Ledger::spent`]. A default search
     /// does not grant anything.
     pub fn grant(&mut self, extra: usize) {
-        self.account
-            .store_budget(self.budget().saturating_add(extra));
+        self.account.credit_budget(extra);
     }
 
-    /// Charged evaluations the ledger was created with.
+    /// Current charged-evaluation budget, including grants and excluding holds.
     pub fn budget(&self) -> usize {
         self.account.budget()
     }
@@ -10504,6 +10514,39 @@ mod tests {
         }
         assert_eq!(short.budget(), 5, "dropping the cut reserve left it hidden");
         assert_eq!(short.held_tail(), 0);
+    }
+
+    #[test]
+    fn concurrent_hold_drops_and_grants_preserve_the_budget() {
+        const ROUNDS: usize = 8;
+        const HOLDS: usize = 4_096;
+        const GRANTS: usize = 200_000;
+        const INITIAL: usize = 100_000;
+
+        for round in 0..ROUNDS {
+            let mut ledger = Ledger::new(INITIAL);
+            let holds = (0..HOLDS).map(|_| ledger.hold_tail(1)).collect::<Vec<_>>();
+            let start = Arc::new(std::sync::Barrier::new(2));
+
+            std::thread::scope(|scope| {
+                let drop_start = Arc::clone(&start);
+                scope.spawn(move || {
+                    drop_start.wait();
+                    drop(holds);
+                });
+                start.wait();
+                for _ in 0..GRANTS {
+                    ledger.grant(1);
+                }
+            });
+
+            assert_eq!(
+                ledger.budget(),
+                INITIAL + GRANTS,
+                "round {round} lost a concurrent budget update"
+            );
+            assert_eq!(ledger.held_tail(), 0);
+        }
     }
 
     #[test]
