@@ -103,6 +103,7 @@ pub fn meson_configure_args(
         "-Dwith_examples=False".into(),
         "-Dwith_xtensor=False".into(),
         "-Dwith_eigen=False".into(),
+        "-Dwith_long_range=True".into(),
         format!("-Dwith_rpc={}", if rpc { "true" } else { "false" }),
         format!("-Dwith_cache={}", if cache { "true" } else { "false" }),
         "-Dpure_lib=False".into(),
@@ -1810,6 +1811,7 @@ mod tests {
         assert!(a.iter().any(|x| x == "-Dwith_rpc=true"));
         assert!(a.iter().any(|x| x == "-Dwith_cache=false"));
         assert!(a.iter().any(|x| x == "-Dwith_tests=True"));
+        assert!(a.iter().any(|x| x == "-Dwith_long_range=True"));
         assert!(a.iter().any(|x| x == "-Dwith_mpi=enabled"));
         assert!(a.iter().any(|x| x == "-Ddefault_library=static"));
         let off = meson_configure_args(true, false, false, "");

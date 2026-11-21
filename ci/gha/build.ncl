@@ -12,6 +12,7 @@ let meson_build_test =
     -Dwith_examples=False \
     -Dwith_xtensor=False \
     -Dwith_eigen=False \
+    -Dwith_long_range=True \
     -Dwith_rpc=${{ matrix.rpc }} \
     -Dwith_cache=${{ matrix.cache }} \
     -Dpure_lib=False
@@ -142,6 +143,7 @@ let fast_nlist_off_build_test =
     -Dwith_eigen=false \
     -Dwith_rpc=false \
     -Dwith_cache=false \
+    -Dwith_long_range=true \
     -Dwith_fast_nlist=disabled \
     -Dpure_lib=true
   meson compile -C bbdir
@@ -159,7 +161,8 @@ let thread_limit_build =
     -Dwith_xtensor=false \
     -Dwith_eigen=false \
     -Dwith_rpc=false \
-    -Dwith_cache=false
+    -Dwith_cache=false \
+    -Dwith_long_range=true
   meson compile -C bbdir
 "%
   & { name = "Build", id = "build" }
