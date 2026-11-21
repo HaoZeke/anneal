@@ -1,0 +1,180 @@
+diff --git a/examples/reach.rs b/examples/reach.rs
+new file mode 100644
+index 00000000..ec8fd613
+--- /dev/null
++++ b/examples/reach.rs
+@@ -0,0 +1,101 @@
++// Copyright (c) anneal developers
++//! Scratch reach harness: quench candidates drawn from stalled structures.
++use anneal_core::methods::warm_lbfgs::WarmLbfgs;
++use anneal_core::potentials::PairPotential;
++use ndarray::{Array1, ArrayView1};
++use rand::rngs::StdRng;
++use rand::{Rng, SeedableRng};
++
++fn read(path: &str) -> (usize, f64, Array1<f64>) {
++    let text = std::fs::read_to_string(path).unwrap();
++    let mut lines = text.lines();
++    let head: Vec<&str> = lines.next().unwrap().split_whitespace().collect();
++    let n: usize = head[0].parse().unwrap();
++    let e: f64 = head[1].parse().unwrap();
++    let mut v = Vec::new();
++    for l in lines.take(n) {
++        for t in l.split_whitespace() {
++            v.push(t.parse::<f64>().unwrap());
++        }
++    }
++    (n, e, Array1::from(v))
++}
++
++fn main() {
++    anneal_core::install_rgpot_kernels!();
++    let a: Vec<String> = std::env::args().skip(1).collect();
++    let pot_kind = a[0].clone();
++    let reference: f64 = a[1].parse().unwrap();
++    let generator = a[2].clone();
++    let draws: usize = a[3].parse().unwrap();
++    let files = &a[4..];
++    let mut rng = StdRng::seed_from_u64(7);
++    let mut hits = 0usize;
++    let mut total = 0usize;
++    let mut best = f64::INFINITY;
++    let mut below_incumbent = 0usize;
++    for f in files {
++        let (n, e_inc, x) = read(f);
++        let pot = match pot_kind.as_str() {
++            "lj" => PairPotential::lennard_jones(n),
++            "m6" => PairPotential::morse(n, 6.0),
++            "m14" => PairPotential::morse(n, 14.0),
++            _ => panic!(),
++        };
++        let mut file_hits = 0;
++        let mut file_best = f64::INFINITY;
++        for _ in 0..draws {
++            let y = generate(&generator, x.view(), n, &mut rng);
++            let Some(y) = y else { continue };
++            let mut opt = WarmLbfgs::default();
++            let (value, _, _) = opt.minimize(y.view(), 5000, |v| Some(pot.value_and_gradient(v)));
++            total += 1;
++            if value <= reference + 1e-3 {
++                hits += 1;
++                file_hits += 1;
++            }
++            if value < e_inc - 1e-6 {
++                below_incumbent += 1;
++            }
++            best = best.min(value);
++            file_best = file_best.min(value);
++        }
++        println!("{f} incumbent {e_inc:.4} best {file_best:.4} hits {file_hits}");
++    }
++    println!("SUMMARY generator {generator} draws {total} gm_hits {hits} below_incumbent {below_incumbent} best {best:.5} ref {reference}");
++}
++
++fn generate(g: &str, x: ArrayView1<f64>, n: usize, rng: &mut StdRng) -> Option<Array1<f64>> {
++    use anneal_core::lattice;
++    match g {
++        "observed" => Some(lattice::candidate(lattice::Source::Observed, x, n, rng)),
++        "twin" => Some(anneal_core::twin::propose(x, n, rng)),
++        "random_shell" => {
++            let (scale, shells) = lattice::shells(x, 1.35);
++            let mut counts: Vec<usize> = shells.iter().map(|s| s.len()).collect();
++            counts.sort_unstable();
++            let median = counts[counts.len() / 2];
++            let pool: Vec<usize> = (0..shells.len()).filter(|&i| shells[i].len() >= median).collect();
++            let i = pool[rng.random_range(0..pool.len())];
++            lattice::candidate_from_offsets(&shells[i], scale, n, rng)
++        }
++        "random_shell_sym" => {
++            let (scale, shells) = lattice::shells(x, 1.35);
++            let mut counts: Vec<usize> = shells.iter().map(|s| s.len()).collect();
++            counts.sort_unstable();
++            let median = counts[counts.len() / 2];
++            let pool: Vec<usize> = (0..shells.len()).filter(|&i| shells[i].len() >= median).collect();
++            let i = pool[rng.random_range(0..pool.len())];
++            let mut off = shells[i].clone();
++            for o in shells[i].iter() {
++                let inv = [-o[0], -o[1], -o[2]];
++                if !off.iter().any(|p| (p[0]-inv[0]).powi(2)+(p[1]-inv[1]).powi(2)+(p[2]-inv[2]).powi(2) < 0.25) {
++                    off.push(inv);
++                }
++            }
++            lattice::candidate_from_offsets(&off, scale, n, rng)
++        }
++        "random_cluster" => Some(anneal_core::methods::cluster_hopping::random_cluster_in_radius(n, 1.0 * (n as f64).cbrt(), 0.7, rng)),
++        _ => panic!("generator"),
++    }
++}
+diff --git a/src/lattice.rs b/src/lattice.rs
+index b6b0e008..f2ff153f 100644
+--- a/src/lattice.rs
++++ b/src/lattice.rs
+@@ -1354,3 +1354,44 @@ mod tests {
+         assert_eq!(c.len(), 3);
+     }
+ }
++
++/// Scratch: neighbour shells of every point within `cutoff` spacings.
++pub fn shells(x: ArrayView1<f64>, cutoff: f64) -> (f64, Vec<Vec<[f64; 3]>>) {
++    let scale = nearest_neighbour_scale(x);
++    let n = x.len() / 3;
++    let reach = cutoff * scale;
++    let mut out = Vec::with_capacity(n);
++    for i in 0..n {
++        let mut shell = Vec::new();
++        for j in 0..n {
++            if i == j {
++                continue;
++            }
++            let d = [x[3 * j] - x[3 * i], x[3 * j + 1] - x[3 * i + 1], x[3 * j + 2] - x[3 * i + 2]];
++            let r = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
++            if r <= reach {
++                shell.push([d[0] / scale, d[1] / scale, d[2] / scale]);
++            }
++        }
++        out.push(shell);
++    }
++    (scale, out)
++}
++
++/// Scratch: a candidate grown from `offsets` at `scale`.
++pub fn candidate_from_offsets<R: Rng + ?Sized>(
++    offsets: &[[f64; 3]],
++    scale: f64,
++    n: usize,
++    rng: &mut R,
++) -> Option<Array1<f64>> {
++    if offsets.is_empty() || n == 0 {
++        return None;
++    }
++    let sites = grow_from(&[], offsets, (n * 6).max(n + 32));
++    if sites.len() < n {
++        return None;
++    }
++    let adj = bonded_neighbours(&sites);
++    Some(cut(&Body { scale, sites, adj }, n, rng))
++}
+diff --git a/src/methods/cluster_hopping.rs b/src/methods/cluster_hopping.rs
+index ac63500e..c2c11356 100644
+--- a/src/methods/cluster_hopping.rs
++++ b/src/methods/cluster_hopping.rs
+@@ -6786,6 +6786,19 @@ where
+             && ledger.spent().saturating_sub(true_best_spent) >= cfg.restart_patience
+             && (stall_escapes + restarts) > escapes_at_true_best
+         {
++            if !morph_latched {
++                if let Some(dir) = std::env::var_os("DUMP_LATCH") {
++                    use std::io::Write;
++                    static K: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
++                    let k = K.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
++                    if k < 40 {
++                        let path = std::path::Path::new(&dir).join(format!("latch-{k:03}.xyz"));
++                        let mut f = std::fs::File::create(path).unwrap();
++                        writeln!(f, "{} {} {}", n, e, ledger.spent()).unwrap();
++                        for i in 0..n { writeln!(f, "{:.17e} {:.17e} {:.17e}", x[3*i], x[3*i+1], x[3*i+2]).unwrap(); }
++                    }
++                }
++            }
+             morph_latched = true;
+         }
+         let morph_gate_arm = if morph_ready && morph_latched {
