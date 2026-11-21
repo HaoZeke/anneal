@@ -43,7 +43,8 @@ template <typename T> struct Dual {
 
   constexpr Dual() = default;
   /// A constant: derivative zero. Implicit, so constants mix with duals.
-  constexpr Dual(double c) : v(c), d(0.0) {} // NOLINT(google-explicit-constructor)
+  constexpr Dual(double c)
+      : v(c), d(0.0) {} // NOLINT(google-explicit-constructor)
   constexpr Dual(const T &value, const T &tangent) : v(value), d(tangent) {}
 
   friend constexpr Dual operator-(const Dual &a) { return {-a.v, -a.d}; }

@@ -65,9 +65,9 @@ std::vector<double> product(const Pot &pot, const std::vector<double> &x,
 /// Row-major dense matrix whose column @c c is the central difference of
 /// the forces along coordinate @c c at step @a h.
 template <typename Pot>
-std::vector<double> columns(const Pot &pot, const std::vector<double> &x,
-                            const std::vector<int> &z, const std::array<double, 9> &box,
-                            double h, double &largest) {
+std::vector<double>
+columns(const Pot &pot, const std::vector<double> &x, const std::vector<int> &z,
+        const std::array<double, 9> &box, double h, double &largest) {
   const std::size_t dim = x.size();
   std::vector<double> m(dim * dim, 0.0);
   for (std::size_t c = 0; c < dim; ++c) {
@@ -113,11 +113,12 @@ inline double shortestDistance(const std::vector<double> &x, std::size_t n) {
 /// cutoff or a switch onset, where the pair term is only @f$C^2@f$. Costs
 /// @c 4 * x.size() force calls.
 template <typename Pot>
-std::vector<double> richardsonHessian(const Pot &pot, const std::vector<double> &x,
-                                      const std::vector<int> &z,
-                                      const std::array<double, 9> &box) {
+std::vector<double>
+richardsonHessian(const Pot &pot, const std::vector<double> &x,
+                  const std::vector<int> &z, const std::array<double, 9> &box) {
   const double eps = std::numeric_limits<double>::epsilon();
-  const double h = std::pow(eps, 0.2) * dense_oracle_detail::shortestDistance(x, z.size());
+  const double h =
+      std::pow(eps, 0.2) * dense_oracle_detail::shortestDistance(x, z.size());
   double largest = 0.0;
   const auto coarse = dense_oracle_detail::columns(pot, x, z, box, h, largest);
   auto fine = dense_oracle_detail::columns(pot, x, z, box, h / 2.0, largest);
@@ -136,7 +137,8 @@ DenseOracle finiteDifferenceOracle(const Pot &pot, const std::vector<double> &x,
                                    const std::array<double, 9> &box,
                                    const std::vector<double> &v) {
   const double eps = std::numeric_limits<double>::epsilon();
-  const double h = std::cbrt(eps) * dense_oracle_detail::shortestDistance(x, z.size());
+  const double h =
+      std::cbrt(eps) * dense_oracle_detail::shortestDistance(x, z.size());
   double largest = 0.0;
   const auto coarse = dense_oracle_detail::product(pot, x, z, box, v, h, largest);
   const auto fine = dense_oracle_detail::product(pot, x, z, box, v, h / 2.0, largest);

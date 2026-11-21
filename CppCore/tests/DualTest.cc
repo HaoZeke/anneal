@@ -95,8 +95,8 @@ TEST_CASE("the nested derivative of a pair term in the squared distance",
         secondDerivative([](auto t) { return lennardJonesInSquare(t); }, s);
     const double inv3 = 1.0 / (s * s * s);
     REQUIRE(close(d.value, 4.0 * inv3 * (inv3 - 1.0), 1.0e-14));
-    REQUIRE(close(d.first, 4.0 * (-6.0 * inv3 * inv3 + 3.0 * inv3) / s,
-                  1.0e-14));
+    REQUIRE(
+        close(d.first, 4.0 * (-6.0 * inv3 * inv3 + 3.0 * inv3) / s, 1.0e-14));
     REQUIRE(close(d.second, 4.0 * (42.0 * inv3 * inv3 - 12.0 * inv3) / (s * s),
                   1.0e-14));
   }
@@ -110,7 +110,8 @@ TEST_CASE("the inner and outer first derivatives of a nested dual agree",
 
 TEST_CASE("a branch on the value takes the derivative of the branch",
           "[dual]") {
-  const auto inside = secondDerivative([](auto t) { return clampedCube(t); }, 0.5);
+  const auto inside =
+      secondDerivative([](auto t) { return clampedCube(t); }, 0.5);
   REQUIRE(inside.first == 0.75);
   REQUIRE(inside.second == 3.0);
   for (const double t : {-0.25, 0.0, 1.0, 1.5}) {

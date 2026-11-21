@@ -970,17 +970,18 @@ void MorsePot::hessianImpl(const ForceInput &in, double *h) const {
   const double cutoff2 = cuttOffR * cuttOffR;
   const QuinticSwitch *sw = m_config.switch_width != 0.0 ? &m_switch : nullptr;
   nlist::visitHalf(neighbours_, 0, static_cast<long>(in.nAtoms),
-                   [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz,
-                       double r2) {
-    if (!(i < j) || !(r2 > 0.0) || r2 > cutoff2) {
-      return;
-    }
-    const double r = std::sqrt(r2);
-    const auto [d1, d2] = morseRadial(r, De, a, re, sw);
-    pair_hessian::scatter(pair_hessian::radial(d1, d2, dx, dy, dz, 1.0 / r),
-                          static_cast<std::size_t>(i), static_cast<std::size_t>(j),
-                          dim, h);
-  });
+                   [&](std::int32_t i, std::int32_t j, double dx, double dy,
+                       double dz, double r2) {
+                     if (!(i < j) || !(r2 > 0.0) || r2 > cutoff2) {
+                       return;
+                     }
+                     const double r = std::sqrt(r2);
+                     const auto [d1, d2] = morseRadial(r, De, a, re, sw);
+                     pair_hessian::scatter(
+                         pair_hessian::radial(d1, d2, dx, dy, dz, 1.0 / r),
+                         static_cast<std::size_t>(i),
+                         static_cast<std::size_t>(j), dim, h);
+                   });
 }
 
 namespace detail {

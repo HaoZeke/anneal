@@ -176,7 +176,8 @@ inline constexpr std::uint32_t kCxxLayoutRevision = 2;
 /// jet functions, minor 5 the engine and RPC Hessian-vector exports,
 /// minor 6 `rgpot_potential_new_eam_table` and minor 7 the dense Hessian,
 /// the dual-number callbacks and the derivative capabilities and counts.
-/// No exported C struct of that header changed layout. The neighbour query is `RGPOT_NLIST_ABI` 4.
+/// No exported C struct of that header changed layout. The neighbour query
+/// is `RGPOT_NLIST_ABI` 4.
 /// The C API is exported from librgpot, so it has no shared library of
 /// its own and rides this SONAME. `librgpot_mpi` stays at soversion 3
 /// (`RGPOT_MPI_ABI_VERSION` 1, unchanged).

@@ -90,12 +90,15 @@ struct System {
       }
     }
     for (std::size_t k = 0; k < x.size(); ++k) {
-      x[k] += 15.0 + 0.04 * spacing * std::sin(1.7 * static_cast<double>(k) + 0.3);
+      x[k] +=
+          15.0 + 0.04 * spacing * std::sin(1.7 * static_cast<double>(k) + 0.3);
     }
     z.assign(13, 1);
   }
   [[nodiscard]] ForceInput input() const {
-    return {.nAtoms = z.size(), .pos = x.data(), .atmnrs = z.data(),
+    return {.nAtoms = z.size(),
+            .pos = x.data(),
+            .atmnrs = z.data(),
             .box = box.data()};
   }
   [[nodiscard]] std::size_t dim() const { return x.size(); }
@@ -249,7 +252,8 @@ TEST_CASE("The dual-number product equals the analytic one", "[schemes]") {
                     HvpScheme::Analytic) == HvpScheme::Analytic);
   CHECK(cache.apply(pot, ljSystem().input(), v.data(), dual.data(), 0.0,
                     HvpScheme::Ad) == HvpScheme::Ad);
-  CHECK(largestDifference(dual, analytic) <= 1e-12 * largestMagnitude(analytic));
+  CHECK(largestDifference(dual, analytic) <=
+        1e-12 * largestMagnitude(analytic));
   CHECK(cache.counts().forceCalls == 0);
 }
 
@@ -266,8 +270,9 @@ TEST_CASE("Analytic, Ad and Exact refuse without a force call", "[schemes]") {
     CHECK_THROWS_AS(cache.apply(forces, in, v.data(), hv.data(), 0.0, scheme),
                     std::invalid_argument);
   }
-  CHECK_THROWS_AS(cache.apply(morse, in, v.data(), hv.data(), 0.0, HvpScheme::Ad),
-                  std::invalid_argument);
+  CHECK_THROWS_AS(
+      cache.apply(morse, in, v.data(), hv.data(), 0.0, HvpScheme::Ad),
+      std::invalid_argument);
   for (const HessianScheme scheme :
        {HessianScheme::Analytic, HessianScheme::Ad, HessianScheme::Exact}) {
     CHECK_THROWS_AS(cache.hessian(forces, in, h.data(), scheme),
@@ -291,8 +296,9 @@ TEST_CASE("hessian refuses malformed requests", "[schemes]") {
   std::vector<double> h(morseSystem().dim() * morseSystem().dim());
   CHECK_THROWS_AS(cache.hessian(pot, in, nullptr, HessianScheme::Analytic),
                   std::invalid_argument);
-  CHECK_THROWS_AS(cache.hessian(pot, in, h.data(), HessianScheme::Central, -1.0),
-                  std::invalid_argument);
+  CHECK_THROWS_AS(
+      cache.hessian(pot, in, h.data(), HessianScheme::Central, -1.0),
+      std::invalid_argument);
   for (const int raw : {0, 1, 6}) {
     CHECK_THROWS_AS(
         cache.hessian(pot, in, h.data(), static_cast<HessianScheme>(raw)),
@@ -314,7 +320,8 @@ TEST_CASE("hessian returns and counts the scheme that ran", "[schemes]") {
                       HessianScheme::Exact) == HessianScheme::Analytic);
   CHECK(cache.hessian(lj, ljSystem().input(), dual.data(), HessianScheme::Ad) ==
         HessianScheme::Ad);
-  CHECK(largestDifference(dual, analytic) <= 1e-12 * largestMagnitude(analytic));
+  CHECK(largestDifference(dual, analytic) <=
+        1e-12 * largestMagnitude(analytic));
 
   DualOnly dualOnly;
   std::vector<double> viaExact(dim * dim);
@@ -337,8 +344,8 @@ TEST_CASE("A central Hessian costs 6N force calls and is symmetric",
   ForcesOnly forces;
   HessianVectorCache cache;
   std::vector<double> central(dim * dim);
-  CHECK(cache.hessian(forces, s.input(), central.data(),
-                      HessianScheme::Central, 1e-4) == HessianScheme::Central);
+  CHECK(cache.hessian(forces, s.input(), central.data(), HessianScheme::Central,
+                      1e-4) == HessianScheme::Central);
   CHECK(forces.calls == 6 * s.z.size());
   CHECK(cache.derivativeCounts().hessianForceCalls == 6 * s.z.size());
   CHECK(cache.derivativeCounts().hessianCentral == 1);
@@ -377,7 +384,8 @@ TEST_CASE("resetCounts zeros every counter", "[schemes]") {
               HvpScheme::Central);
   cache.hessian(pot, ljSystem().input(), h.data(), HessianScheme::Analytic);
   cache.hessian(pot, ljSystem().input(), h.data(), HessianScheme::Ad);
-  cache.hessian(forces, morseSystem().input(), h.data(), HessianScheme::Central);
+  cache.hessian(forces, morseSystem().input(), h.data(),
+                HessianScheme::Central);
   const auto before = cache.derivativeCounts();
   CHECK(before.hvpAnalytic == 1);
   CHECK(before.hvpAd == 1);

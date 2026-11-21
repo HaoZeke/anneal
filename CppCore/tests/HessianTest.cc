@@ -38,7 +38,9 @@ struct Geometry {
   std::array<double, 9> box{};
 
   [[nodiscard]] ForceInput input() const {
-    return {.nAtoms = z.size(), .pos = x.data(), .atmnrs = z.data(),
+    return {.nAtoms = z.size(),
+            .pos = x.data(),
+            .atmnrs = z.data(),
             .box = box.data()};
   }
   [[nodiscard]] std::size_t dim() const { return x.size(); }
@@ -223,8 +225,8 @@ TEST_CASE("LJPot hessianImpl matches central differences of the forces",
     INFO(c.name);
     const LJPot pot(c.config);
     const auto h = analyticHessian(pot, c.geometry);
-    const auto fd = richardsonHessian(pot, c.geometry.x, c.geometry.z,
-                                      c.geometry.box);
+    const auto fd =
+        richardsonHessian(pot, c.geometry.x, c.geometry.z, c.geometry.box);
     // The extrapolated differences of these geometries agree with the
     // closed form to about 1e-11 of the largest entry; 1e-9 leaves room for
     // other compilers' rounding and still sits orders below any missed or
@@ -275,8 +277,8 @@ TEST_CASE("lj::pairEnergy is the pair term the force kernel sums",
   // Every pair of the cluster is inside both cutoffs and none has an image
   // inside them, so the pair sum over i < j is the whole energy.
   const Geometry g = cluster(1.12);
-  for (const LJConfig config :
-       {LJConfig{.cutoff = 6.0}, LJConfig{.cutoff = 6.0, .switch_width = 4.0}}) {
+  for (const LJConfig config : {LJConfig{.cutoff = 6.0},
+                                LJConfig{.cutoff = 6.0, .switch_width = 4.0}}) {
     const LJPot pot(config);
     const double a = std::pow(config.psi / config.cutoff, 6.0);
     rgpot::simd::LjParams params{};
@@ -284,8 +286,8 @@ TEST_CASE("lj::pairEnergy is the pair term the force kernel sums",
     params.four_u0 = 4.0 * config.u0;
     params.shift = 4.0 * config.u0 * a * (a - 1.0);
     if (config.switch_width != 0.0) {
-      const auto sw = rgpot::QuinticSwitch::endingAt(config.cutoff,
-                                                     config.switch_width);
+      const auto sw =
+          rgpot::QuinticSwitch::endingAt(config.cutoff, config.switch_width);
       params.use_switch = 1;
       params.r_on = sw.r_on;
       params.inv_width = sw.inv_width;
@@ -311,11 +313,15 @@ TEST_CASE("lj::pairEnergy is the pair term the force kernel sums",
       }
     }
     std::vector<double> kernel(g.dim(), 0.0);
-    ForceOut out{.F = kernel.data(), .energy = 0.0, .variance = 0.0,
-                 .stress = {}, .has_stress = 0};
+    ForceOut out{.F = kernel.data(),
+                 .energy = 0.0,
+                 .variance = 0.0,
+                 .stress = {},
+                 .has_stress = 0};
     pot.forceImpl(g.input(), &out);
     CHECK(std::abs(energy - out.energy) <= 1e-13 * std::abs(out.energy));
-    CHECK(largestDifference(forces, kernel) <= 1e-12 * largestMagnitude(kernel));
+    CHECK(largestDifference(forces, kernel) <=
+          1e-12 * largestMagnitude(kernel));
   }
 }
 
@@ -358,8 +364,8 @@ TEST_CASE("MorsePot hessianImpl matches central differences of the forces",
     INFO(c.name);
     const MorsePot pot(c.config);
     const auto h = analyticHessian(pot, c.geometry);
-    const auto fd = richardsonHessian(pot, c.geometry.x, c.geometry.z,
-                                      c.geometry.box);
+    const auto fd =
+        richardsonHessian(pot, c.geometry.x, c.geometry.z, c.geometry.box);
     CHECK(largestDifference(h, fd) <= 1e-9 * largestMagnitude(h));
     CHECK(largestMagnitude(h) > 0.1);
   }
@@ -375,7 +381,8 @@ TEST_CASE("MorsePot hessianImpl is symmetric and agrees with hessianVectorImpl",
     const auto v = direction(c.geometry.dim());
     std::vector<double> hv(v.size());
     pot.hessianVectorImpl(c.geometry.input(), v.data(), hv.data());
-    CHECK(largestDifference(multiply(h, v), hv) <= 1e-12 * largestMagnitude(hv));
+    CHECK(largestDifference(multiply(h, v), hv) <=
+          1e-12 * largestMagnitude(hv));
   }
 }
 

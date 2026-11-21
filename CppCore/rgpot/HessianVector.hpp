@@ -37,9 +37,9 @@
  * @c h is the displacement along the unit direction @f$v/|v|@f$; the
  * difference is scaled back by @f$|v|@f$, so the product scales with
  * @f$|v|@f$; the forward scheme is not linear in @f$v@f$, because its
- * @f$O(h)@f$ term keeps its sign when @f$v@f$ does. The forward error is @f$(h/2) T(u,u) |v|@f$ with @f$T@f$ the
- * third derivative; removing it takes the second evaluation that the
- * central scheme makes.
+ * @f$O(h)@f$ term keeps its sign when @f$v@f$ does. The forward error is
+ * @f$(h/2) T(u,u) |v|@f$ with @f$T@f$ the third derivative; removing it takes
+ * the second evaluation that the central scheme makes.
  *
  * @c HvpScheme::Auto falls back to @c Forward when the potential has no
  * analytic product; @c HvpScheme::Exact never differences and refuses
@@ -187,10 +187,8 @@ concept AnalyticHessian = requires(const Pot &pot) {
 
 /// A kernel that implements the analytic dense-Hessian hook.
 template <typename Pot>
-concept AnalyticHessianKernel =
-    requires(const Pot &pot, const ForceInput &in, double *h) {
-      pot.hessianImpl(in, h);
-    };
+concept AnalyticHessianKernel = requires(const Pot &pot, const ForceInput &in,
+                                         double *h) { pot.hessianImpl(in, h); };
 
 /// A kernel that reports a dual-number dense-Hessian capability bit.
 template <typename Pot>
@@ -200,10 +198,8 @@ concept AdHessian = requires(const Pot &pot) {
 
 /// A kernel that implements the dual-number dense-Hessian hook.
 template <typename Pot>
-concept AdHessianKernel =
-    requires(const Pot &pot, const ForceInput &in, double *h) {
-      pot.hessianAdImpl(in, h);
-    };
+concept AdHessianKernel = requires(const Pot &pot, const ForceInput &in,
+                                   double *h) { pot.hessianAdImpl(in, h); };
 
 /// The derivative capabilities @a pot advertises. A kernel without a
 /// @c caps() bit has only the finite differences.

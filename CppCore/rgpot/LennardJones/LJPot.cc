@@ -19,10 +19,10 @@
 #include <vector>
 // clang-format on
 
+#include "rgpot/LennardJones/LJPot.hpp"
 #include "rgpot/Dual.hpp"
 #include "rgpot/KeptPotential.hpp"
 #include "rgpot/LennardJones/LJPairEnergy.hpp"
-#include "rgpot/LennardJones/LJPot.hpp"
 #include "rgpot/PairHessian.hpp"
 #include "rgpot/nlist/NeighbourList.hpp"
 #include "rgpot/nlist/PairSum.hpp"
@@ -117,8 +117,7 @@ void visitLjPairs(const LJPot *self, double cutoff, nlist::Mode mode,
       [] { return std::make_unique<LjNeighbours>(); },
       [&](LjNeighbours &scratch) {
         updateScratchCells(scratch, in, cutoff, mode);
-        nlist::visitHalf(scratch.cells, 0, static_cast<long>(in.nAtoms),
-                         visit);
+        nlist::visitHalf(scratch.cells, 0, static_cast<long>(in.nAtoms), visit);
       });
 }
 
@@ -343,7 +342,8 @@ void LJPot::hessianAdImpl(const ForceInput &in, double *h) const {
   if (in.nAtoms < 2 || cuttOffR <= 0.0) {
     return;
   }
-  const simd::LjParams params = lj_params(u0, psi, cuttOffU, m_config, m_switch);
+  const simd::LjParams params =
+      lj_params(u0, psi, cuttOffU, m_config, m_switch);
   const double cutoff2 = cuttOffR * cuttOffR;
   visitLjPairs(this, cuttOffR, mode_, in,
                [&](std::int32_t i, std::int32_t j, double dx, double dy,
@@ -367,7 +367,8 @@ void LJPot::hessianVectorAdImpl(const ForceInput &in, const double *v,
   if (in.nAtoms < 2 || cuttOffR <= 0.0) {
     return;
   }
-  const simd::LjParams params = lj_params(u0, psi, cuttOffU, m_config, m_switch);
+  const simd::LjParams params =
+      lj_params(u0, psi, cuttOffU, m_config, m_switch);
   const double cutoff2 = cuttOffR * cuttOffR;
   visitLjPairs(this, cuttOffR, mode_, in,
                [&](std::int32_t i, std::int32_t j, double dx, double dy,
