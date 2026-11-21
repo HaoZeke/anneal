@@ -2,13 +2,13 @@
 # Copyright (c) anneal developers
 """Write tab:si-outside of the SI: the outside time of the submitted revision, two builds.
 
-The rows are paper/jctc/data/outside_perf/rows.csv, copied unchanged from the commit its
-PROVENANCE names. Only the develop and develop_prime arms are read: both are builds of the
-submitted revision 61fa67cf, and this script requires that they take the same calls to the
-same minimum on every seed. The third arm of the record is a commit outside the history of
-the submitted revision and is not printed, nor are the BLJ systems, which the article does
-not run. Every number is recomputed from the per-seed rows; the paired test is the exact
-Wilcoxon signed-rank test of scripts/paired_stats.py on the per-seed outside seconds.
+The row file contains the 168 develop and develop_prime rows selected from record commit
+9178884ee114e60dd597fb5a970edbda648979f8. Both arms build submitted revision 61fa67cf,
+and no other arm is present. This script requires them to take the same calls to the same
+minimum on every seed. The BLJ systems are retained in the row file but are not printed
+because the article does not run them. Every number is recomputed from the per-seed rows;
+the paired test is the exact Wilcoxon signed-rank test of scripts/paired_stats.py on the
+per-seed outside seconds.
 
     python3 paper/jctc/scripts/outside_table.py            # rewrite the block
     python3 paper/jctc/scripts/outside_table.py --check    # exit 1 if it is stale
