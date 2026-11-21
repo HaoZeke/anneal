@@ -417,3 +417,32 @@ no driver process started; ru_maxrss is unavailable.
 | m38r14 | h2h_morse | 96 | 127 | inconclusive |
 | m38r14 | h2h_seed | 96 | 127 | inconclusive |
 | lj75 | h2h_seed | 96 | 127 | inconclusive |
+
+## Round four retry protocol
+
+The 864 failed rows above remain unchanged. The
+retry writes rows-r2.csv, sessions-r2.jsonl, and
+hosts-r2.csv as new append-only files in a new
+session.
+
+The harness measures elapsed time and per-child
+ru_maxrss directly. It samples RssAnon and VmHWM
+from the process tree. RssAnon is the only memory
+gate; ru_maxrss and VmHWM are reported and never
+gate. The production command has no external timing
+wrapper.
+
+Before the campaign, preflight runs one real
+cell-seed for every A, B, B2, and A2 driver
+combination. It uses seed 1999, which is outside
+the campaign. Each probe uses the exact production
+affinity, environment, timeout, arguments, parser,
+timing, and memory path. Preflight aborts unless
+every exit is zero and the timing, RssAnon,
+ru_maxrss, and VmHWM fields are populated.
+
+The campaign remains seeds 2000 through 2023 in
+A, B, B2, A2 order on core 0. It does not alter
+the cells, budgets, references, scoring, bootstrap
+stream, pass clauses, or round-three comparison
+rules above.

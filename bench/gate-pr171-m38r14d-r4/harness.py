@@ -3,7 +3,7 @@
 
 One seed's arms run on one core, in the order from cells.arm_order.
 Lanes are separate cores. A row already stored is not run again.
-An unfinished marker from an earlier process is stored as a miss.
+An unfinished marker from an earlier process is inconclusive.
 """
 
 from __future__ import annotations
@@ -11,15 +11,18 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import json
 import math
 import os
 import queue
 import re
+import resource
 import struct
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -36,6 +39,7 @@ ROW_FIELDS = [
     "hit",
     "calls",
     "charged",
+    "elapsed_s",
     "wall_s",
     "pot_s",
     "outside_s",
@@ -94,7 +98,7 @@ def machine_id_sha256() -> str:
 
 
 def session_of(machine: str) -> str:
-    text = machine + "\ngate-pr171-m38r14d-r4\n"
+    text = machine + "\ngate-pr171-m38r14d-r4b\n"
     return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
@@ -233,15 +237,23 @@ def key_of(row: dict[str, str]) -> tuple[str, str, str, int]:
 
 
 class Store:
-    def __init__(self, rows_path: Path, sessions_path: Path, logs: Path):
+    def __init__(
+        self,
+        rows_path: Path,
+        sessions_path: Path,
+        hosts_path: Path,
+        logs: Path,
+    ):
         self.rows_path = rows_path
         self.sessions_path = sessions_path
+        self.hosts_path = hosts_path
         self.logs = logs
         self.pending = logs / "pending"
         self.completed = logs / "completed"
         self.lock = threading.Lock()
         self.rows_path.parent.mkdir(parents=True, exist_ok=True)
         self.sessions_path.parent.mkdir(parents=True, exist_ok=True)
+        self.hosts_path.parent.mkdir(parents=True, exist_ok=True)
         self.pending.mkdir(parents=True, exist_ok=True)
         self.completed.mkdir(parents=True, exist_ok=True)
         self.done: set[tuple[str, str, str, int]] = set()
@@ -270,22 +282,22 @@ class Store:
             self.done.add(key_of(row))
 
     def add_session(self, row: dict[str, str]) -> None:
-        fields = [
-            "session",
-            "event",
-            "machine_id_sha256",
-            "lanes",
-            "cores",
-            "mem_available",
-            "revision",
-            "tree",
-            "arm",
-            "binary",
-            "binary_sha256",
-            "detail",
-        ]
         with self.lock:
-            self.append(self.sessions_path, fields, row)
+            with self.sessions_path.open("a") as handle:
+                handle.write(json.dumps(row, sort_keys=True) + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+
+    def add_host(self, session: str, machine: str) -> None:
+        with self.lock:
+            self.append(
+                self.hosts_path,
+                ["session", "machine_id_sha256"],
+                {
+                    "session": session,
+                    "machine_id_sha256": machine,
+                },
+            )
 
 
 def marker_path(store: Store, cell: gate.Cell, arm: str, seed: int) -> Path:
@@ -320,6 +332,7 @@ def recover_markers(store: Store, session: str, machine: str, revisions: dict[st
                 "hit": "0",
                 "calls": str(cell.budget),
                 "charged": "",
+                "elapsed_s": "",
                 "wall_s": "",
                 "pot_s": "",
                 "outside_s": "",
@@ -341,15 +354,6 @@ def recover_markers(store: Store, session: str, machine: str, revisions: dict[st
             }
         )
         finish_marker(store, path)
-
-
-def read_rss(path: Path) -> str:
-    if not path.is_file():
-        return ""
-    match = re.search(r"MAXRSS_KB\s+(\d+)", path.read_text())
-    if not match:
-        return ""
-    return str(int(match.group(1)) * 1024)
 
 
 def process_ids(root: int) -> set[int]:
@@ -379,12 +383,14 @@ def status_kib(pid: int, field: str) -> int:
 
 
 def monitor_memory(pid: int, stop: threading.Event, peaks: dict[str, int]) -> None:
-    while not stop.wait(0.01):
+    while True:
         pids = process_ids(pid)
         rss_anon = sum(status_kib(item, "RssAnon") for item in pids)
         vmhwm = max((status_kib(item, "VmHWM") for item in pids), default=0)
         peaks["rss_anon"] = max(peaks["rss_anon"], rss_anon)
         peaks["vmhwm"] = max(peaks["vmhwm"], vmhwm)
+        if stop.wait(0.005):
+            return
 
 
 def write_log(path: Path, text: str) -> str:
@@ -397,6 +403,60 @@ def write_log(path: Path, text: str) -> str:
     os.replace(tmp, path)
     os.sync()
     return sha256_file(path)
+
+
+def production_command(command: list[str], core: int) -> list[str]:
+    return [
+        "timeout",
+        "--foreground",
+        str(gate.HANG_S),
+        "taskset",
+        "-c",
+        str(core),
+        *command,
+    ]
+
+
+def execute(
+    command: list[str],
+    src: Path,
+    env: dict[str, str],
+    scratch: Path,
+) -> tuple[int, str, str, float, int, int, int]:
+    stdout_path = scratch / "stdout"
+    stderr_path = scratch / "stderr"
+    started = time.monotonic()
+    with stdout_path.open("x") as stdout_handle, stderr_path.open("x") as stderr_handle:
+        proc = subprocess.Popen(
+            command,
+            cwd=src,
+            env=env,
+            stdout=stdout_handle,
+            stderr=stderr_handle,
+            text=True,
+        )
+        stop = threading.Event()
+        peaks = {"rss_anon": 0, "vmhwm": 0}
+        monitor = threading.Thread(
+            target=monitor_memory,
+            args=(proc.pid, stop, peaks),
+            daemon=False,
+        )
+        monitor.start()
+        _pid, status, usage = os.wait4(proc.pid, 0)
+        proc.returncode = os.waitstatus_to_exitcode(status)
+        stop.set()
+        monitor.join()
+    elapsed = time.monotonic() - started
+    return (
+        proc.returncode,
+        stdout_path.read_text(),
+        stderr_path.read_text(),
+        elapsed,
+        peaks["rss_anon"] * 1024,
+        int(usage.ru_maxrss) * 1024,
+        peaks["vmhwm"] * 1024,
+    )
 
 
 def run_arm(
@@ -419,57 +479,37 @@ def run_arm(
     scratch = Path(tempfile.mkdtemp(prefix="gate-", dir=store.logs))
     prefix = scratch / "out"
     command = argv_for(cell, binary, seed, prefix)
-    time_path = scratch / "time.txt"
     log_path = store.logs / f"{cell.name}__{cell.driver}__{arm}__{seed}.log"
     marker = marker_path(store, cell, arm, seed)
     marker.write_text(str(core) + "\n")
-    wrapped = [
-        "timeout",
-        "--foreground",
-        str(gate.HANG_S),
-        "taskset",
-        "-c",
-        str(core),
-        "/usr/bin/time",
-        "-f",
-        "MAXRSS_KB %M",
-        "-o",
-        str(time_path),
-        "--",
-        *command,
-    ]
+    wrapped = production_command(command, core)
     env = child_env(str(scratch))
-    proc = subprocess.Popen(
+    (
+        return_code,
+        stdout,
+        stderr,
+        elapsed,
+        rss_anon_peak,
+        ru_maxrss,
+        vmhwm_peak,
+    ) = execute(
         wrapped,
-        cwd=src,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
+        src,
+        env,
+        scratch,
     )
-    stop = threading.Event()
-    peaks = {"rss_anon": 0, "vmhwm": 0}
-    monitor = threading.Thread(
-        target=monitor_memory,
-        args=(proc.pid, stop, peaks),
-        daemon=False,
-    )
-    monitor.start()
-    stdout, stderr = proc.communicate()
-    stop.set()
-    monitor.join()
     log_digest = write_log(
         log_path,
-        "exit " + str(proc.returncode) + "\n" + stdout + "\n" + stderr,
+        "exit " + str(return_code) + "\n" + stdout + "\n" + stderr,
     )
     parsed = None
     error = ""
-    if proc.returncode == 0:
+    if return_code == 0:
         try:
             parsed = parse_output(cell, stdout)
         except (ValueError, KeyError, IndexError) as exc:
             error = str(exc)
-    exit_code = proc.returncode if proc.returncode != 0 or parsed is not None else 2
+    exit_code = return_code if return_code != 0 or parsed is not None else 2
     if parsed is None:
         parsed = {
             "hit": "0",
@@ -492,15 +532,16 @@ def run_arm(
         "hit": parsed["hit"] if exit_code == 0 else "0",
         "calls": parsed["calls"],
         "charged": parsed["charged"],
+        "elapsed_s": f"{elapsed:.6f}",
         "wall_s": parsed["wall_s"],
         "pot_s": parsed["pot_s"],
         "outside_s": parsed["outside_s"],
         "best": parsed["best"],
         "best_bits": best_bits(parsed["best"]) if exit_code == 0 else "",
         "budget": str(cell.budget),
-        "rss_anon_peak": str(peaks["rss_anon"] * 1024),
-        "ru_maxrss": read_rss(time_path),
-        "vmhwm_peak": str(peaks["vmhwm"] * 1024),
+        "rss_anon_peak": str(rss_anon_peak),
+        "ru_maxrss": str(ru_maxrss),
+        "vmhwm_peak": str(vmhwm_peak),
         "printed_hit": parsed["printed_hit"] if exit_code == 0 else "",
         "conclusive": "1" if exit_code == 0 else "0",
         "log_sha256": log_digest,
@@ -565,6 +606,93 @@ def load_paths(args) -> dict:
     return paths
 
 
+def run_preflight(paths: dict, logs: Path) -> str:
+    logs.mkdir(parents=True, exist_ok=True)
+    result_path = logs / "preflight-r2.jsonl"
+    if result_path.exists():
+        raise SystemExit("preflight result already exists")
+    probes = {}
+    for cell in gate.CELLS:
+        probes.setdefault(binary_name(cell), cell)
+    records = []
+    failed = False
+    for arm in ("A", "B", "B2", "A2"):
+        for driver, cell in sorted(probes.items()):
+            seed = 1999
+            scratch = Path(tempfile.mkdtemp(prefix="preflight-", dir=logs))
+            command = argv_for(
+                cell,
+                paths[arm]["bin"] / driver,
+                seed,
+                scratch / "out",
+            )
+            (
+                exit_code,
+                stdout,
+                stderr,
+                elapsed,
+                rss_anon_peak,
+                ru_maxrss,
+                vmhwm_peak,
+            ) = execute(
+                production_command(command, 0),
+                paths[arm]["src"],
+                child_env(str(scratch)),
+                scratch,
+            )
+            log_path = logs / f"preflight__{arm}__{driver}.log"
+            log_digest = write_log(
+                log_path,
+                "exit " + str(exit_code) + "\n" + stdout + "\n" + stderr,
+            )
+            parsed = None
+            if exit_code == 0:
+                try:
+                    parsed = parse_output(cell, stdout)
+                except (ValueError, KeyError, IndexError):
+                    parsed = None
+            timing_ok = bool(
+                parsed
+                and finite_number(parsed["wall_s"])
+                and finite_number(parsed["pot_s"])
+                and finite_number(parsed["outside_s"])
+                and elapsed > 0.0
+            )
+            rss_ok = (
+                rss_anon_peak > 0
+                and ru_maxrss > 0
+                and vmhwm_peak > 0
+            )
+            passed = exit_code == 0 and timing_ok and rss_ok
+            failed = failed or not passed
+            records.append(
+                {
+                    "arm": arm,
+                    "driver": driver,
+                    "elapsed_s": f"{elapsed:.6f}",
+                    "exit_code": exit_code,
+                    "log_sha256": log_digest,
+                    "rss_anon_peak": rss_anon_peak,
+                    "ru_maxrss": ru_maxrss,
+                    "seed": seed,
+                    "status": "pass" if passed else "fail",
+                    "vmhwm_peak": vmhwm_peak,
+                }
+            )
+    text = "".join(json.dumps(record, sort_keys=True) + "\n" for record in records)
+    digest = write_log(result_path, text)
+    if failed:
+        raise SystemExit("production preflight failed")
+    return digest
+
+
+def finite_number(token: str) -> bool:
+    try:
+        return math.isfinite(float(token))
+    except (TypeError, ValueError):
+        return False
+
+
 def self_test() -> None:
     env = child_env("/tmp")
     if set(env) - set(THREAD_ENV) - {"PATH", "HOME", "LANG", "LC_ALL", "TMPDIR"}:
@@ -618,6 +746,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--rows", type=Path, required=True)
     parser.add_argument("--sessions", type=Path, required=True)
+    parser.add_argument("--hosts", type=Path, required=True)
     parser.add_argument("--logs", type=Path, required=True)
     parser.add_argument("--bin-a", type=Path, required=True)
     parser.add_argument("--src-a", type=Path, required=True)
@@ -630,21 +759,11 @@ def main() -> int:
     args = parser.parse_args()
     paths = load_paths(args)
     check_trees(paths)
-    preflight_path = args.logs / "preflight.log"
+    preflight_path = args.logs / "preflight-r2.jsonl"
     if args.preflight:
         gate.self_test()
         self_test()
-        subprocess.run(
-            ["taskset", "-c", "0", "true"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        args.logs.mkdir(parents=True, exist_ok=True)
-        lines = ["preflight ok"]
-        for arm in ("A", "B", "B2", "A2"):
-            lines.append(f"{arm} {paths[arm]['head']} {paths[arm]['tree']}")
-        digest = write_log(preflight_path, "\n".join(lines) + "\n")
+        digest = run_preflight(paths, args.logs)
         print(f"preflight {digest}")
         return 0
     if not preflight_path.is_file():
@@ -654,8 +773,9 @@ def main() -> int:
     cores = [0]
     machine = machine_id_sha256()
     session = session_of(machine)
-    store = Store(args.rows, args.sessions, args.logs)
+    store = Store(args.rows, args.sessions, args.hosts, args.logs)
     recover_markers(store, session, machine, {arm: paths[arm]["head"] for arm in paths})
+    store.add_host(session, machine)
     store.add_session(
         {
             "session": session,
