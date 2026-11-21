@@ -7,6 +7,16 @@ fn crate_publication_keeps_cargo_verification_enabled() {
 }
 
 #[test]
+fn crate_publication_uses_the_canonical_version_and_explicit_package() {
+    let workflow = include_str!("../.github/workflows/release.yml");
+    let publish = workflow_job(workflow, "publish-crate");
+
+    assert!(publish.contains("anneal_version.package_version()"));
+    assert!(publish.contains("cargo publish --locked -p anneal-core"));
+    assert!(!publish.contains("grep -m1 '^version'"));
+}
+
+#[test]
 fn crate_publication_has_a_registry_fallback_for_git_dependencies() {
     let manifest = include_str!("../Cargo.toml");
     let workflow = include_str!("../.github/workflows/ci.yml");
@@ -48,6 +58,38 @@ fn release_tags_match_every_public_package_version() {
     assert!(workflow.contains("Cargo.toml"));
     assert!(workflow.contains("pyproject.toml"));
     assert!(workflow.contains("CITATION.cff"));
+}
+
+#[test]
+fn native_release_builds_where_artifact_packaging_reads() {
+    let workflow = include_str!("../.github/workflows/release.yml");
+    let native = workflow_job(workflow, "native-libs");
+
+    assert!(native.contains(
+        "cargo build --release --features capi --target ${{ matrix.target }} --target-dir target"
+    ));
+    assert!(native.contains("target/${{ matrix.target }}/release/${{ matrix.static_lib }}"));
+    assert!(native.contains("target/${{ matrix.target }}/release/${{ matrix.shared_lib }}"));
+}
+
+#[test]
+fn release_installs_and_imports_the_built_sdist() {
+    let workflow = include_str!("../.github/workflows/release.yml");
+    let sdist = workflow_job(workflow, "sdist");
+
+    assert!(sdist.contains("python -m venv .sdist-venv"));
+    assert!(sdist.contains("pip install dist/anneal-*.tar.gz"));
+    assert!(sdist.contains("import anneal, anneal._core"));
+    assert!(sdist.contains("os.path.relpath(anneal.__file__)"));
+}
+
+#[test]
+fn release_validates_every_built_wheel() {
+    let workflow = include_str!("../.github/workflows/release.yml");
+    let wheels = workflow_job(workflow, "wheels");
+
+    assert!(wheels.contains("pipx run twine check --strict dist/*"));
+    assert!(!wheels.contains("matrix.target != 'aarch64'"));
 }
 
 #[test]
@@ -220,6 +262,15 @@ fn rgpot_pair_stays_out_of_the_published_dependencies() {
     assert!(pyproject.contains("manifest-path = \"crates/anneal-python/Cargo.toml\""));
     let wheel = include_str!("../crates/anneal-python/src/lib.rs");
     assert!(wheel.contains("anneal_core::install_rgpot_kernels!();"));
+}
+
+#[test]
+fn packaged_wheel_crate_has_a_versioned_path_dependency() {
+    let version = env!("CARGO_PKG_VERSION");
+    let manifest = include_str!("../crates/anneal-python/Cargo.toml");
+    assert!(manifest.contains(&format!(
+        "anneal-core = {{ version = \"{version}\", path = \"../..\""
+    )));
 }
 
 // An example that skips the installation runs Lennard-Jones and Morse on the
