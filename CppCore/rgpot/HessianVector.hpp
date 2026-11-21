@@ -364,8 +364,7 @@ public:
   template <ForceKernel Pot>
   HessianScheme hessian(Pot &pot, const ForceInput &in, double *h,
                         HessianScheme scheme, double step = 0.0) {
-    const Geometry g = readGeometry(in);
-    const std::size_t dim = g.positions.size();
+    const std::size_t dim = coordinates(in);
     if (dim != 0 && h == nullptr) {
       throw std::invalid_argument("hessian: output is null");
     }
@@ -378,7 +377,7 @@ public:
       const std::uintptr_t hbytes = dim * dim * sizeof(double);
       const auto overlaps = [hb, hbytes](const void *p, std::size_t bytes) {
         const auto pb = reinterpret_cast<std::uintptr_t>(p);
-        return p != nullptr && pb < hb + hbytes && hb < pb + bytes;
+        return p != nullptr && (pb >= hb ? pb - hb < hbytes : hb - pb < bytes);
       };
       if (overlaps(in.pos, dim * sizeof(double)) ||
           overlaps(in.atmnrs, in.nAtoms * sizeof(int)) ||
@@ -386,6 +385,7 @@ public:
         throw std::invalid_argument("hessian: output overlaps the input");
       }
     }
+    const Geometry g = readGeometry(in);
     const double hstep = checkedStep(step);
     scheme = resolve(derivativeCaps(pot), scheme);
     if (scheme == HessianScheme::Analytic) {
@@ -571,8 +571,17 @@ private:
     }
   }
 
+  /// @c 3*in.nAtoms, refused when that many doubles overflow @c size_t.
+  static std::size_t coordinates(const ForceInput &in) {
+    if (in.nAtoms >
+        std::numeric_limits<std::size_t>::max() / 3 / sizeof(double)) {
+      throw std::invalid_argument("positions: 3*nAtoms doubles overflow");
+    }
+    return 3 * in.nAtoms;
+  }
+
   static Geometry readGeometry(const ForceInput &in) {
-    const std::size_t dim = 3 * in.nAtoms;
+    const std::size_t dim = coordinates(in);
     if (dim != 0 && in.pos == nullptr) {
       throw std::invalid_argument("positions: data pointer is null");
     }

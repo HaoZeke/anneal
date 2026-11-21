@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -345,8 +346,42 @@ TEST_CASE("hessian refuses an output that overlaps its input", "[schemes]") {
                         .box = h.data() + dim};
   CHECK_THROWS_AS(cache.hessian(pot, cell, h.data(), HessianScheme::Central),
                   std::invalid_argument);
+  const ForceInput species{.nAtoms = s.z.size(),
+                           .pos = s.x.data(),
+                           .atmnrs =
+                               reinterpret_cast<const int *>(h.data() + dim),
+                           .box = s.box.data()};
+  CHECK_THROWS_AS(cache.hessian(pot, species, h.data(), HessianScheme::Central),
+                  std::invalid_argument);
   CHECK(pot.calls == 0);
   CHECK(cache.derivativeCounts().hessianForceCalls == 0);
+}
+
+TEST_CASE("An atom count whose derivatives overflow is refused unread",
+          "[schemes]") {
+  const System &s = morseSystem();
+  ForcesOnly pot;
+  HessianVectorCache cache;
+  std::vector<double> h(s.dim() * s.dim());
+  std::vector<double> v(s.dim(), 1.0);
+  std::vector<double> hv(s.dim());
+  const auto claiming = [&s](std::size_t nAtoms) {
+    return ForceInput{.nAtoms = nAtoms,
+                      .pos = s.x.data(),
+                      .atmnrs = s.z.data(),
+                      .box = s.box.data()};
+  };
+  const std::size_t wraps = std::numeric_limits<std::size_t>::max() / 3 + 1;
+  const std::size_t squareOverflows = std::size_t{1} << 31;
+  CHECK_THROWS_AS(
+      cache.hessian(pot, claiming(wraps), h.data(), HessianScheme::Central),
+      std::invalid_argument);
+  CHECK_THROWS_AS(cache.hessian(pot, claiming(squareOverflows), h.data(),
+                                HessianScheme::Central),
+                  std::invalid_argument);
+  CHECK_THROWS_AS(cache.apply(pot, claiming(wraps), v.data(), hv.data()),
+                  std::invalid_argument);
+  CHECK(pot.calls == 0);
 }
 
 TEST_CASE("A central Hessian that overflows is refused", "[schemes]") {
