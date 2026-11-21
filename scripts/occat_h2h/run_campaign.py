@@ -369,6 +369,36 @@ def run_occat(system: str, seed: int, work: Path) -> dict[str, str]:
     }
 
 
+def parse_anneal_row(
+    output: str, system: str, anneal_name: str, kind: str
+) -> dict[str, str]:
+    lines = output.splitlines()
+    data = [
+        line
+        for line in lines
+        if line.startswith(system + ",") or line.startswith(anneal_name + ",")
+    ]
+    if not data:
+        raise ValueError("no anneal result row")
+    raw = next(csv.reader([data[-1]]))
+    headers = [line for line in lines if line.startswith("system,code,")]
+    if headers:
+        names = next(csv.reader([headers[-1]]))
+    elif kind == "gupta":
+        names = [
+            "system", "code", "seed", "budget", "hit", "evals_to_hit",
+            "charged", "wall_s", "best", "pot_s", "outside_s",
+            "pot_per_eval_s", "outside_per_eval_s", "status", "detail",
+        ]
+    else:
+        names = [
+            "system", "code", "seed", "budget", "hit", "evals_to_hit",
+            "charged", "wall_s", "best", "head", "tree", "cpu", "pins",
+            "pot_s", "status",
+        ]
+    return dict(zip(names, raw))
+
+
 def run_anneal(system: str, seed: int, work: Path) -> dict[str, str]:
     spec = SYSTEMS[system]
     env = os.environ.copy()
@@ -387,23 +417,12 @@ def run_anneal(system: str, seed: int, work: Path) -> dict[str, str]:
         cwd=work,
     )
     (work / "anneal.log").write_text(proc.stdout + proc.stderr)
-    data = [
-        line
-        for line in proc.stdout.splitlines()
-        if line.startswith(system + ",") or line.startswith(anneal_name + ",")
-    ]
-    if proc.returncode != 0 or not data:
+    try:
+        row = parse_anneal_row(proc.stdout, system, anneal_name, spec["kind"])
+    except ValueError:
+        row = None
+    if proc.returncode != 0 or row is None:
         raise RuntimeError(f"anneal {system} seed {seed} failed\n{(proc.stderr or proc.stdout)[-800:]}")
-    header = (
-        "system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,"
-        "head,tree,cpu,pins,pot_s"
-    )
-    # Metal rows carry outside columns after pot_s. Take the shared prefix.
-    raw = data[-1].split(",")
-    names = header.split(",")
-    row = {names[i]: raw[i] for i in range(min(len(names), len(raw)))}
-    if "pot_s" not in row and len(raw) >= 13:
-        row["pot_s"] = raw[9] if spec["kind"] == "gupta" else raw[-1]
     wall = float(row["wall_s"])
     pot = float(row["pot_s"])
     hit = truthy(row["hit"])
