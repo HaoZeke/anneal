@@ -987,8 +987,11 @@ struct rgpot_potential_t *rgpot_potential_new(PotentialCallback callback,
  *
  * A NULL `pot`, `input` or `output` returns `RGPOT_INVALID_PARAMETER`.
  * A missing positions tensor, shape or data, a non-positive atom count,
- * a missing species tensor or data, or a missing cell tensor or data
- * also returns `RGPOT_INVALID_PARAMETER` and does not call the callback.
+ * or a missing species tensor or data also returns
+ * `RGPOT_INVALID_PARAMETER` and does not call the callback.
+ * A missing cell, either a NULL tensor or a tensor with NULL data, is a
+ * valid call for a molecular potential, so it reaches the callback. A
+ * periodic callback reports its own `RGPOT_INVALID_PARAMETER`.
  * A non-positive atom count is reported on its own, before any force
  * buffer is considered. A successful call does not clear `rgpot_last_error`.
  * Otherwise `pot` must be a live handle from `rgpot_potential_new` or

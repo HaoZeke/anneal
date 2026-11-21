@@ -74,8 +74,11 @@ pub unsafe extern "C" fn rgpot_potential_new(
 ///
 /// A NULL `pot`, `input` or `output` returns `RGPOT_INVALID_PARAMETER`.
 /// A missing positions tensor, shape or data, a non-positive atom count,
-/// a missing species tensor or data, or a missing cell tensor or data
-/// also returns `RGPOT_INVALID_PARAMETER` and does not call the callback.
+/// or a missing species tensor or data also returns
+/// `RGPOT_INVALID_PARAMETER` and does not call the callback.
+/// A missing cell, either a NULL tensor or a tensor with NULL data, is a
+/// valid call for a molecular potential, so it reaches the callback. A
+/// periodic callback reports its own `RGPOT_INVALID_PARAMETER`.
 /// A non-positive atom count is reported on its own, before any force
 /// buffer is considered. A successful call does not clear `rgpot_last_error`.
 /// Otherwise `pot` must be a live handle from `rgpot_potential_new` or
@@ -116,10 +119,12 @@ pub unsafe extern "C" fn rgpot_potential_calculate(
 
 /// Missing buffer in a force input, or `None` when the callback may run.
 ///
-/// A non-positive row count is decided before the species, the cell or
-/// the output forces. An empty call has no force allocation, and that
-/// null must not become the reported error. A usable input returns
-/// `None` and leaves `rgpot_last_error` unchanged.
+/// A non-positive row count is decided before the species or the output
+/// forces. An empty call has no force allocation, and that null must not
+/// become the reported error. The cell is not checked here: the handle
+/// does not know whether its callback is periodic, and a molecular
+/// potential takes no cell. A usable input returns `None` and leaves
+/// `rgpot_last_error` unchanged.
 ///
 /// # Safety
 ///
@@ -146,13 +151,6 @@ unsafe fn force_input_defect(input: *const rgpot_force_input_t) -> Option<&'stat
     let species = unsafe { &(*input.atomic_numbers).dl_tensor };
     if species.data.is_null() {
         return Some("invalid parameter: atomic numbers are null");
-    }
-    if input.box_matrix.is_null() {
-        return Some("invalid parameter: box is null");
-    }
-    let cell = unsafe { &(*input.box_matrix).dl_tensor };
-    if cell.data.is_null() {
-        return Some("invalid parameter: box is null");
     }
     None
 }
@@ -491,7 +489,7 @@ mod tests {
     }
 
     #[test]
-    fn calculate_null_box_data_skips_the_callback() {
+    fn calculate_null_box_data_reaches_the_callback() {
         let counter = AtomicU32::new(0);
         let pot = counting_pot(&counter);
         let (_pos, _atmnrs, _box_, mut input) = make_test_input();
@@ -504,11 +502,33 @@ mod tests {
             variance: 0.0,
         };
         let status = unsafe { rgpot_potential_calculate(pot, &input, &mut output) };
-        assert_eq!(status, rgpot_status_t::RGPOT_INVALID_PARAMETER);
-        assert_eq!(counter.load(Ordering::SeqCst), 0);
-        assert_eq!(last_error(), "invalid parameter: box is null");
+        assert_eq!(status, rgpot_status_t::RGPOT_SUCCESS);
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
         unsafe {
-            crate::c_api::types::rgpot_force_input_free(&mut input);
+            cleanup(&mut input, &mut output);
+            rgpot_potential_free(pot);
+        }
+    }
+
+    #[test]
+    fn calculate_absent_box_tensor_reaches_the_callback() {
+        let counter = AtomicU32::new(0);
+        let pot = counting_pot(&counter);
+        let (_pos, _atmnrs, _box_, mut input) = make_test_input();
+        unsafe {
+            rgpot_tensor_free(input.box_matrix);
+        }
+        input.box_matrix = std::ptr::null_mut();
+        let mut output = rgpot_force_out_t {
+            forces: std::ptr::null_mut(),
+            energy: 0.0,
+            variance: 0.0,
+        };
+        let status = unsafe { rgpot_potential_calculate(pot, &input, &mut output) };
+        assert_eq!(status, rgpot_status_t::RGPOT_SUCCESS);
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
+        unsafe {
+            cleanup(&mut input, &mut output);
             rgpot_potential_free(pot);
         }
     }
