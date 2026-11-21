@@ -57,7 +57,9 @@ torch::Device parse_device(const std::string &name) {
     return torch::kCPU;
   if (name.rfind("cuda", 0) == 0)
     return torch::Device(name);
-  return torch::kCPU;
+  // A misspelt device used to run on the CPU without a word.
+  throw std::invalid_argument("UmaPot: unknown device '" + name +
+                              "'; use cpu, cuda or cuda:N");
 }
 
 struct EdgeList {
@@ -287,8 +289,22 @@ void UmaPot::ensureLoaded() const {
   if (create == registry.end())
     throw std::runtime_error("UmaPot: this torch has no AOTI runner for "
                              "device '" + device_key->second + "'");
+  // An AOTI package runs on the device it was traced for. The inputs go to
+  // the configured device, so the two must be of one kind: a CPU package
+  // handed CUDA tensors, or the reverse, reads memory of the wrong device.
+  const bool package_cuda = device_key->second.rfind("cuda", 0) == 0;
+  if (package_cuda != m_impl->device.is_cuda())
+    throw std::runtime_error(
+        "UmaPot: AOTI package " + m_config.model_path + " was exported for '" +
+        device_key->second + "' and device '" + m_impl->device.str() +
+        "' was requested; export the package for that device "
+        "(scripts/export_uma_aoti.py --device) or request '" +
+        device_key->second + "'");
   c10::Device device(device_key->second);
-  device.set_index(-1);
+  // The runner computes where the inputs are sent: cuda:N keeps its index.
+  device.set_index(package_cuda && m_impl->device.has_index()
+                       ? m_impl->device.index()
+                       : -1);
   m_impl->runner =
       create->second(unpacked.so.string(), 1, device.str(),
                      unpacked.model_dir.string(), false);
