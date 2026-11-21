@@ -386,3 +386,25 @@ fn the_cli_writes_csv_and_json_for_a_minima_book() {
         );
     }
 }
+
+#[test]
+fn an_explicit_sigma_must_be_positive_and_finite() {
+    let rows: Vec<Vec<f64>> = (0..40)
+        .map(|i| vec![(i as f64).sin(), (i as f64).cos(), i as f64 / 40.0])
+        .collect();
+    for sigma in [f64::NAN, f64::INFINITY, -1.0, 0.0] {
+        let config = LandfoldConfig {
+            landmarks: 10,
+            sigma: Some(sigma),
+            ..LandfoldConfig::default()
+        };
+        let err = landfold(&rows, &config).unwrap_err();
+        assert!(err.to_string().contains("sigma"), "{sigma}: {err}");
+    }
+    let config = LandfoldConfig {
+        landmarks: 10,
+        sigma: Some(0.5),
+        ..LandfoldConfig::default()
+    };
+    assert!(landfold(&rows, &config).is_ok());
+}

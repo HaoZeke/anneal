@@ -13,7 +13,7 @@
 //! recursion keeps the pairs from this quench, so later steps reuse that
 //! curvature instead of a collapsed scalar step. The trial is shortened
 //! to the current trust radius before any evaluation, and Armijo
-//! backtracks at most [`MAX_BACKTRACK`] times. A step that used the whole
+//! backtracks at most `MAX_BACKTRACK` times. A step that used the whole
 //! radius and lowered the energy may try a longer one next time.
 
 use ndarray::{Array1, ArrayView1};

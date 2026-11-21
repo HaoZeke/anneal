@@ -95,8 +95,9 @@ pub(crate) use torsion::HeldHands;
 
 pub use crate::methods::minima_hopping::SharedVisitPolicy;
 pub use config::{
-    ArmSelection, Config, ContinuousSymmetry, Keying, LadderMode, OrbitCore, PairRange,
-    PriorSwitches, REMOVED_PRIOR_KEYS, RemovedConfigKeyError, SoapProposalMode,
+    ArmSelection, Config, ContinuousSymmetry, InvalidConfig, Keying, LadderMode, OrbitCore,
+    PairRange, PriorSwitches, REMOVED_PRIOR_KEYS, RemovedConfigKeyError, SoapProposalMode,
+    check_molecular_groups,
 };
 pub use moves::*;
 
@@ -507,7 +508,7 @@ impl QuenchBoundary {
 /// first-encounter statistic the list exists to report.
 const IMPROVEMENT_CAP: usize = 512;
 
-/// A search stopped because no initial quench was finite.
+/// Why a search returned no [`Outcome`].
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SearchError {
     /// The initial evaluation was non-finite on every attempt.
@@ -516,6 +517,10 @@ pub enum SearchError {
         /// Quenches tried before the search stopped.
         attempts: usize,
     },
+    /// [`Config::validate`] refused the configuration; nothing was
+    /// evaluated.
+    #[error(transparent)]
+    InvalidConfig(#[from] InvalidConfig),
 }
 
 /// Why a search returned an [`Outcome`].
@@ -1637,7 +1642,7 @@ impl<'a> CallFloor<'a> {
             && (0..n).all(|a| ((a + 1)..n).all(|b| pair_distance(x, a, b) > self.pair(a, b)))
     }
 
-    /// Opens every pair at or inside its floor to [`CALL_FLOOR_OPENING`]
+    /// Opens every pair at or inside its floor to `CALL_FLOOR_OPENING`
     /// times that floor, as [`open_call_floor`] does for a single one.
     pub fn open(&self, x: &mut Array1<f64>, frozen: Option<&[bool]>) -> bool {
         if self.elements.is_none() {
@@ -4269,19 +4274,7 @@ where
         relax_off_call_floor(cfg, &mut *relax, led, x, steps)
     };
     let relax: Relax<'_> = &mut floored;
-    if let Some(floor) = cfg.call_floor {
-        assert!(
-            floor.is_finite() && floor > 0.0,
-            "call floor must be a positive distance, not {floor}"
-        );
-    }
-    if let Some(elements) = cfg.call_floor_elements.as_ref() {
-        assert_eq!(
-            elements.len(),
-            cfg.n_points,
-            "call-floor elements must name every point"
-        );
-    }
+    cfg.validate()?;
     // A target on the configuration is the same stop a caller can raise
     // on the ledger. A ledger target already set is left alone, so an
     // explicit `stop_below` still wins.
@@ -4325,12 +4318,6 @@ where
     // measured that way an LJ38 run registered 18 basins instead of about 200.
     let n_rep = cfg.replicas.max(1);
     let ratios = rung_ratios(n_rep, cfg.ladder_top);
-    assert!(
-        !(cfg.delayed_acceptance && n_rep > 1),
-        "delayed acceptance needs a single chain: a hop its surrogate decides \
-         weighs the bare energy and one it abstains on weighs the biases, so \
-         no swap between rungs can be balanced"
-    );
     // The first quench supplies a stable canonical reference before the bias
     // is built. Reporting it as a minimum additionally requires the same
     // geometry and gradient contract as every subsequent quench.
@@ -13472,18 +13459,7 @@ mod call_floor_tests {
         assert_eq!(seen[1], (0, inside));
     }
 
-    #[test]
-    #[should_panic(expected = "call floor")]
-    fn a_floor_that_is_not_a_positive_distance_is_refused() {
-        let _ = starts_inside_the_floor(Some(f64::NAN));
-    }
-
-    #[test]
-    #[should_panic(expected = "call-floor elements")]
-    fn call_floor_elements_must_name_every_point() {
-        let mut cfg = Config::for_cluster(POINTS);
-        cfg.call_floor = Some(FLOOR);
-        cfg.call_floor_elements = Some(vec![14; POINTS - 1]);
+    fn refusal(cfg: &Config) -> String {
         let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _: usize| {
             let _ = led.charge();
             (0.0, x.to_owned())
@@ -13491,13 +13467,31 @@ mod call_floor_tests {
         let mut rng = StdRng::seed_from_u64(3);
         let start =
             random_cluster_in_radius(POINTS, cfg.start_radius(), cfg.min_separation, &mut rng);
-        let _ = run(
-            &cfg,
-            start.view(),
-            &mut Ledger::new(10),
-            &mut relax,
-            &mut rng,
-        );
+        let mut ledger = Ledger::new(10);
+        match run(cfg, start.view(), &mut ledger, &mut relax, &mut rng) {
+            Err(SearchError::InvalidConfig(reason)) => {
+                assert_eq!(ledger.spent(), 0, "{reason}");
+                reason.0
+            }
+            other => panic!("expected an InvalidConfig refusal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_floor_that_is_not_a_positive_distance_is_refused() {
+        for floor in [f64::NAN, f64::INFINITY, 0.0, -1.0] {
+            let mut cfg = Config::for_cluster(POINTS);
+            cfg.call_floor = Some(floor);
+            assert!(refusal(&cfg).contains("call floor"), "{floor}");
+        }
+    }
+
+    #[test]
+    fn call_floor_elements_must_name_every_point() {
+        let mut cfg = Config::for_cluster(POINTS);
+        cfg.call_floor = Some(FLOOR);
+        cfg.call_floor_elements = Some(vec![14; POINTS - 1]);
+        assert!(refusal(&cfg).contains("call-floor elements"));
     }
 
     #[test]
