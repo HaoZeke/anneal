@@ -155,6 +155,22 @@ def test_a_molecular_config_needs_a_start():
         search(n=6, config=Config.for_molecular(*water))
 
 
+@pytest.mark.parametrize(
+    "config, start",
+    [
+        (Config.recommended(4).with_species([0, 0, 1, 1]), None),
+        (
+            Config.recommended_molecular([6, 6, 1, 1], [[0, 1, 2, 3]]),
+            np.zeros(12),
+        ),
+    ],
+    ids=["species", "molecular"],
+)
+def test_ras_refuses_non_cartesian_configs(config, start):
+    with pytest.raises(anneal.InvalidArgumentError, match="cartesian archive"):
+        search(config=config, start=start, ras=True)
+
+
 def test_a_rigid_body_config_runs():
     result = search(n=3, budget=400, config=Config.communicating_tip4p(3))
     assert result["best"].shape == (18,)

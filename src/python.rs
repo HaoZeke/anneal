@@ -4263,6 +4263,9 @@ fn cluster_search(
     let molecular_config = config
         .as_ref()
         .is_some_and(|cfg| matches!(cfg.move_library, MoveLibrary::Molecular { .. }));
+    let has_species = config
+        .as_ref()
+        .map_or(species.is_some(), |cfg| cfg.species.is_some());
     if molecular_config && start.is_none() {
         return Err(invalid_argument("a molecular config needs a start"));
     }
@@ -4340,7 +4343,7 @@ fn cluster_search(
             "interleaved layout is the rigid-body chart",
         ));
     }
-    if ras && (rigid || species.is_some()) {
+    if ras && (rigid || has_species || molecular_config) {
         return Err(invalid_argument("ras is the cartesian archive search"));
     }
     let water = match water_sites {
