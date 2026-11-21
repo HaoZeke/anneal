@@ -574,6 +574,10 @@ fn report(
         pot_s / calls,
         outside / calls,
     );
+    println!(
+        "safe6_nearest_index={}",
+        anneal_core::symmetrise::safe6_nearest_index_calls()
+    );
 }
 
 fn evals_to_hit(hit: bool, calls_at_hit: Option<usize>, budget: usize) -> usize {

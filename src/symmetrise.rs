@@ -26,7 +26,25 @@
 //! structure with no approximate symmetry is left alone, which is the case
 //! where the random version does its damage.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use ndarray::{Array1, ArrayView1};
+
+/// Nearest-image lookups on the safe6 exchange path.
+///
+/// Stall symmetrisation and the continuous-symmetry scan both resolve a
+/// rotated point here. The count is process-wide and always on, so a bench
+/// can print it after a timed run.
+static SAFE6_NEAREST_INDEX: AtomicU64 = AtomicU64::new(0);
+
+/// How many safe6 nearest-image lookups this process has made.
+pub fn safe6_nearest_index_calls() -> u64 {
+    SAFE6_NEAREST_INDEX.load(Ordering::Relaxed)
+}
+
+fn note_safe6_nearest() {
+    SAFE6_NEAREST_INDEX.fetch_add(1, Ordering::Relaxed);
+}
 
 /// An approximate rotational symmetry a structure was found to have.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -260,6 +278,23 @@ struct Cloud {
     /// still inside the cap, which is when the exact leave test builds
     /// the gap list too.
     axis_ratio: std::cell::RefCell<Option<AxisRatio>>,
+    /// Cylindrical index of each axis this cloud has already been turned
+    /// about. One entry serves every order of that axis.
+    axis_space: std::cell::RefCell<Vec<AxisSpace>>,
+    /// Set when a turn is rejected because no atom can reach another site.
+    /// A higher order about the same axis is a shorter turn, so it is
+    /// rejected for the same reason and does not need to be scored.
+    motionless: std::cell::Cell<bool>,
+}
+
+/// Last partner of each atom about one axis.
+///
+/// The next order about the same axis tries that partner before a scan.
+/// A point that still lies inside half the partner's gap has that partner
+/// as its nearest atom, so the scan does not run.
+struct AxisSpace {
+    key: [u64; 3],
+    partner: Vec<usize>,
 }
 
 #[derive(Clone, Copy)]
@@ -275,6 +310,15 @@ struct AxisRatio {
     /// Largest `perp^2 / gap^2` among atoms with a positive finite gap.
     /// Infinite when a radius is not finite, so the fast test steps aside.
     max_ratio: f64,
+}
+
+impl AxisSpace {
+    fn build(axis: [f64; 3], n: usize) -> Self {
+        Self {
+            key: Cloud::axis_key(axis),
+            partner: vec![usize::MAX; n],
+        }
+    }
 }
 
 impl Cloud {
@@ -295,7 +339,29 @@ impl Cloud {
             gaps: std::cell::RefCell::new(None),
             axis_sum: std::cell::RefCell::new(None),
             axis_ratio: std::cell::RefCell::new(None),
+            axis_space: std::cell::RefCell::new(Vec::new()),
+            motionless: std::cell::Cell::new(false),
         }
+    }
+
+    /// Index of `axis`, built once and then reused for every order.
+    fn prepare_axis_space(&self, axis: [f64; 3]) -> usize {
+        let key = Self::axis_key(axis);
+        if let Some(found) = self
+            .axis_space
+            .borrow()
+            .iter()
+            .position(|space| space.key == key)
+        {
+            return found;
+        }
+        let built = AxisSpace::build(axis, self.xs.len());
+        let mut spaces = self.axis_space.borrow_mut();
+        if let Some(found) = spaces.iter().position(|space| space.key == key) {
+            return found;
+        }
+        spaces.push(built);
+        spaces.len() - 1
     }
 
     fn axis_key(axis: [f64; 3]) -> [u64; 3] {
@@ -523,6 +589,36 @@ impl Cloud {
         (best_index, best)
     }
 
+    /// Nearest atom of `image` for atom `source` about the cached axis.
+    ///
+    /// The partner remembered from an earlier order is the nearest when the
+    /// image still lies inside half that partner's gap. Otherwise the
+    /// vectorised scan runs, and the partner it returns is remembered for
+    /// the next order about this axis.
+    fn nearest_for_exchange(
+        &self,
+        slot: usize,
+        image: [f64; 3],
+        source: usize,
+        hint: usize,
+        hint_gap: f64,
+    ) -> (usize, f64) {
+        note_safe6_nearest();
+        if hint < self.xs.len() && hint_gap.is_finite() && hint_gap > 0.0 {
+            let distance = squared_offset(image, self.xs[hint], self.ys[hint], self.zs[hint]);
+            if distance < hint_gap * 0.25 {
+                return (hint, distance);
+            }
+        }
+        let answer = self.nearest_index(image);
+        if let Some(space) = self.axis_space.borrow_mut().get_mut(slot)
+            && source < space.partner.len()
+        {
+            space.partner[source] = answer.0;
+        }
+        answer
+    }
+
     /// Root-mean-square distance of a rotation that permutes off-axis atoms.
     ///
     /// The residual scan is the vectorised one. A turn that cannot move any
@@ -561,12 +657,15 @@ impl Cloud {
         // The fast identity bound does not build the gap list. The leave
         // test builds it only after that bound says the turn is still
         // inside the cap, which is also when the exact walk builds it.
+        self.motionless.set(false);
         if self.identity_under_fast(axis, turn, cap) {
             if self.cannot_leave_fast(axis, turn) || !self.any_atom_can_leave(axis, turn) {
+                self.motionless.set(true);
                 return None;
             }
         } else if self.identity_stays_under(axis, turn, cap) && !self.any_atom_can_leave(axis, turn)
         {
+            self.motionless.set(true);
             return None;
         }
         self.exchange_residual(axis, turn, cap)
@@ -596,6 +695,7 @@ impl Cloud {
         let scale = turn.chord_scale;
         let s = turn.sine;
         let co = turn.cosine;
+        let slot = self.prepare_axis_space(axis);
         let gaps = self.gaps();
         let mut total = 0.0;
         let mut moved = false;
@@ -611,7 +711,9 @@ impl Cloud {
             let (partner, distance) = if let Some(self_d2) = image_on_self(here, image, gap) {
                 (index, self_d2)
             } else {
-                self.nearest_index(image)
+                let hint = self.axis_space.borrow()[slot].partner[index];
+                let hint_gap = if hint < n { gaps[hint] } else { 0.0 };
+                self.nearest_for_exchange(slot, image, index, hint, hint_gap)
             };
             total += distance;
             if !axial && partner == index {
@@ -1077,6 +1179,16 @@ fn candidate_axes(x: ArrayView1<f64>, n: usize) -> Vec<[f64; 3]> {
     out
 }
 
+/// Smallest order at which `cloud` last reported that no atom can move.
+///
+/// A larger order is a shorter chord, so it cannot move an atom either
+/// and scoring it would repeat that rejection.
+fn remember_motionless(cloud: &Cloud, order: usize, dead: &mut usize) {
+    if cloud.motionless.get() {
+        *dead = (*dead).min(order);
+    }
+}
+
 /// The best approximate rotational symmetry of `x`, over the given orders.
 ///
 /// `None` when nothing is even approximately symmetric, which is the signal to
@@ -1094,8 +1206,13 @@ pub fn detect(x: ArrayView1<f64>, n: usize, orders: &[usize], tolerance: f64) ->
         .filter_map(|&order| OrderTurn::new(order))
         .collect();
     for axis in candidate_axes(x, n) {
+        let mut dead = usize::MAX;
         for turn in &turns {
+            if turn.order >= dead {
+                continue;
+            }
             let Some(d) = cloud.deviation_with(axis, turn, tolerance) else {
+                remember_motionless(&cloud, turn.order, &mut dead);
                 continue;
             };
             if d < tolerance && best.map(|b| d < b.deviation).unwrap_or(true) {
@@ -1125,8 +1242,13 @@ pub fn best_order_about(
     let cloud = Cloud::from_view(x, n);
     let mut best_order = None;
     let mut best = f64::INFINITY;
+    let mut dead = usize::MAX;
     for &order in orders {
+        if order >= dead {
+            continue;
+        }
         let Some(deviation) = cloud.symmetry_deviation(axis, order, f64::INFINITY) else {
+            remember_motionless(&cloud, order, &mut dead);
             continue;
         };
         if deviation < best {
@@ -1150,14 +1272,19 @@ pub fn detect_orders(
 ) -> Vec<Candidate> {
     let cloud = Cloud::from_view(x, n);
     let axes = candidate_axes(x, n);
+    let mut dead = vec![usize::MAX; axes.len()];
     let mut out = Vec::new();
     for &order in orders {
         let Some(turn) = OrderTurn::new(order) else {
             continue;
         };
         let mut best: Option<Candidate> = None;
-        for &axis in &axes {
+        for (axis_at, &axis) in axes.iter().enumerate() {
+            if turn.order >= dead[axis_at] {
+                continue;
+            }
             let Some(d) = cloud.deviation_with(axis, &turn, tolerance) else {
+                remember_motionless(&cloud, turn.order, &mut dead[axis_at]);
                 continue;
             };
             if d < tolerance && best.as_ref().map(|b| d < b.deviation).unwrap_or(true) {
@@ -1195,8 +1322,13 @@ pub fn detect_all(
         .filter_map(|&order| OrderTurn::new(order))
         .collect();
     for axis in candidate_axes(x, n) {
+        let mut dead = usize::MAX;
         for turn in &turns {
+            if turn.order >= dead {
+                continue;
+            }
             let Some(d) = cloud.deviation_with(axis, turn, tolerance) else {
+                remember_motionless(&cloud, turn.order, &mut dead);
                 continue;
             };
             if d < tolerance {
@@ -3161,6 +3293,58 @@ mod shell_tests {
                 assert_eq!(chosen.1.to_bits(), scalar.1.to_bits(), "n={n}");
                 let wide = cloud.nearest_squared_wide(image);
                 assert_eq!(wide.to_bits(), scalar.1.to_bits(), "n={n}");
+            }
+        }
+    }
+
+    /// A partner remembered from an earlier order, and the scan behind it,
+    /// returns the same index and the same distance bits as the scalar scan.
+    #[test]
+    fn hinted_nearest_matches_the_scalar_scan() {
+        let mut state = 0x9e37_79b9_u64;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (state >> 33) as f64 / (1u32 << 31) as f64
+        };
+        for n in [2usize, 3, 7, 8, 9, 17, 33, 40] {
+            let mut coords = Vec::with_capacity(3 * n);
+            for _ in 0..3 * n {
+                coords.push(next() * 4.0 - 2.0);
+            }
+            if n >= 4 {
+                let at = 3 * (n / 2);
+                coords[at] = coords[0];
+                coords[at + 1] = coords[1];
+                coords[at + 2] = coords[2];
+            }
+            let cloud = Cloud::from_view(Array1::from(coords).view(), n);
+            let gaps = cloud.gaps().clone();
+            for axis in [
+                normalise([0.2, -0.5, 0.8]).unwrap(),
+                [0.0, 0.0, 1.0],
+                [1.0, 0.0, 0.0],
+            ] {
+                let slot = cloud.prepare_axis_space(axis);
+                for _pass in 0..2 {
+                    for order in 2..=n.min(12) {
+                        let turn = OrderTurn::new(order).unwrap();
+                        for source in 0..n {
+                            let image =
+                                rotate_trig(cloud.point(source), axis, turn.sine, turn.cosine);
+                            let scalar = cloud.nearest_index_scalar(image);
+                            let hint = cloud.axis_space.borrow()[slot].partner[source];
+                            let hint_gap = if hint < n { gaps[hint] } else { 0.0 };
+                            let chosen =
+                                cloud.nearest_for_exchange(slot, image, source, hint, hint_gap);
+                            assert_eq!(chosen.0, scalar.0, "n={n} order={order} source={source}");
+                            assert_eq!(
+                                chosen.1.to_bits(),
+                                scalar.1.to_bits(),
+                                "n={n} order={order} source={source}"
+                            );
+                        }
+                    }
+                }
             }
         }
     }
