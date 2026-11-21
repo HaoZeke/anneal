@@ -305,6 +305,30 @@ static void test_the_defaults_fill_only_the_callers_struct_size(void) {
     CHECK(untouched);
 }
 
+static void test_mid_field_struct_sizes_are_refused(void) {
+    anneal_box_options_t options = defaults();
+    anneal_box_stats_t stats;
+    counter_t counter = {0, 0};
+    double x[2] = {3.0, -2.0};
+    int64_t shape[1], strides[1];
+    DLManagedTensorVersioned tensor;
+    const double low[2] = {-5.0, -5.0};
+    const double high[2] = {5.0, 5.0};
+
+    options.struct_size = 33;
+    CHECK(anneal_box_options_default(&options) == ANNEAL_INVALID_PARAMETER);
+    CHECK(run(&options, 0).status == ANNEAL_INVALID_PARAMETER);
+
+    options = defaults();
+    memset(&stats, 0, sizeof stats);
+    stats.struct_size = 20;
+    point_at(&tensor, x, shape, strides, 2);
+    CHECK(anneal_box_minimize_ex(wells, wells_grad, &counter, &tensor, low,
+                                 high, &options, &stats) ==
+          ANNEAL_INVALID_PARAMETER);
+    CHECK(counter.evals == 0);
+}
+
 static void test_a_box_or_start_that_is_not_finite_is_refused(void) {
     anneal_box_options_t options = defaults();
     double x[2] = {0.0, 0.0};
@@ -376,6 +400,7 @@ int main(void) {
     test_a_bad_option_is_refused_before_a_callback();
     test_struct_size_ignores_what_lies_past_it();
     test_the_defaults_fill_only_the_callers_struct_size();
+    test_mid_field_struct_sizes_are_refused();
     test_a_box_or_start_that_is_not_finite_is_refused();
     test_a_callback_can_stop_the_search();
     test_null_arguments_are_refused();

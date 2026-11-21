@@ -207,6 +207,8 @@ pub struct anneal_box_options_t {
     pub langevin_friction: f64,
     /// An `anneal_box_coverage_t`.
     pub coverage_shared: i32,
+    /// Reserved alignment bytes. Callers must leave this zero.
+    pub _padding: i32,
     /// Coverage deposit radius in normalized RMS box distance.
     pub coverage_radius: f64,
     /// Initial deposit height in objective units; zero disables coverage.
@@ -766,6 +768,7 @@ fn default_options() -> anneal_box_options_t {
         langevin_dt: langevin.dt,
         langevin_friction: 0.0,
         coverage_shared: anneal_box_coverage_t::ANNEAL_BOX_COVERAGE_AUTO as i32,
+        _padding: 0,
         coverage_radius: coverage.radius,
         coverage_height: coverage.height,
         coverage_well_tempering: coverage.well_tempering,
@@ -774,15 +777,69 @@ fn default_options() -> anneal_box_options_t {
     }
 }
 
+fn options_size_is_field_boundary(size: usize) -> bool {
+    size > std::mem::size_of::<anneal_box_options_t>()
+        || [
+            std::mem::offset_of!(anneal_box_options_t, history),
+            std::mem::offset_of!(anneal_box_options_t, membership),
+            std::mem::offset_of!(anneal_box_options_t, identity_tol),
+            std::mem::offset_of!(anneal_box_options_t, shared_deposits),
+            std::mem::offset_of!(anneal_box_options_t, visit_policy),
+            std::mem::offset_of!(anneal_box_options_t, escape),
+            std::mem::offset_of!(anneal_box_options_t, langevin_steps),
+            std::mem::offset_of!(anneal_box_options_t, langevin_omega0),
+            std::mem::offset_of!(anneal_box_options_t, langevin_dt),
+            std::mem::offset_of!(anneal_box_options_t, langevin_friction),
+            std::mem::offset_of!(anneal_box_options_t, coverage_shared),
+            std::mem::offset_of!(anneal_box_options_t, _padding),
+            std::mem::offset_of!(anneal_box_options_t, coverage_radius),
+            std::mem::offset_of!(anneal_box_options_t, coverage_height),
+            std::mem::offset_of!(anneal_box_options_t, coverage_well_tempering),
+            std::mem::offset_of!(anneal_box_options_t, coverage_peer_weight),
+            std::mem::offset_of!(anneal_box_options_t, coverage_neighbors),
+            std::mem::size_of::<anneal_box_options_t>(),
+        ]
+        .contains(&size)
+}
+
+fn stats_size_is_field_boundary(size: usize) -> bool {
+    size > std::mem::size_of::<anneal_box_stats_t>()
+        || [
+            std::mem::offset_of!(anneal_box_stats_t, n_evals),
+            std::mem::offset_of!(anneal_box_stats_t, n_grads),
+            std::mem::offset_of!(anneal_box_stats_t, hops),
+            std::mem::offset_of!(anneal_box_stats_t, history_observations),
+            std::mem::offset_of!(anneal_box_stats_t, history_minima),
+            std::mem::offset_of!(anneal_box_stats_t, history_refusals),
+            std::mem::offset_of!(anneal_box_stats_t, history_seconds),
+            std::mem::offset_of!(anneal_box_stats_t, shared_deposits),
+            std::mem::offset_of!(anneal_box_stats_t, coverage_observations),
+            std::mem::offset_of!(anneal_box_stats_t, coverage_published),
+            std::mem::offset_of!(anneal_box_stats_t, coverage_applied_foreign),
+            std::mem::offset_of!(anneal_box_stats_t, coverage_capped_foreign),
+            std::mem::offset_of!(anneal_box_stats_t, coverage_recrossings),
+            std::mem::offset_of!(anneal_box_stats_t, coverage_novel_arrivals),
+            std::mem::offset_of!(anneal_box_stats_t, coverage_repelled_proposals),
+            std::mem::size_of::<anneal_box_stats_t>(),
+        ]
+        .contains(&size)
+}
+
+fn invalid_options_size(size: usize) -> String {
+    let least = std::mem::offset_of!(anneal_box_options_t, history);
+    if size < least {
+        format!("options.struct_size is {size}, below the {least} bytes of the oldest layout")
+    } else {
+        format!("options.struct_size {size} ends within a field")
+    }
+}
+
 /// The caller's options over the defaults: the first `struct_size` bytes
 /// come from the caller, the fields after them keep the default.
 unsafe fn read_options(given: *const anneal_box_options_t) -> Result<anneal_box_options_t, String> {
     let size = unsafe { (*given).struct_size };
-    let least = std::mem::offset_of!(anneal_box_options_t, history);
-    if size < least {
-        return Err(format!(
-            "options.struct_size is {size}, below the {least} bytes of the oldest layout"
-        ));
+    if !options_size_is_field_boundary(size) {
+        return Err(invalid_options_size(size));
     }
     let mut merged = default_options();
     let take = size.min(std::mem::size_of::<anneal_box_options_t>());
@@ -938,8 +995,8 @@ fn stats_of(result: &BoxEnsembleResult) -> anneal_box_stats_t {
 /// Set `out->struct_size` to `sizeof(anneal_box_options_t)` first. The
 /// library writes the defaults into the first `struct_size` bytes it knows,
 /// sets `struct_size` to the number of bytes written, and leaves the bytes of
-/// a newer, larger structure alone. A size below the oldest layout returns
-/// `ANNEAL_INVALID_PARAMETER` and writes nothing.
+/// a newer, larger structure alone. A size below the oldest layout or ending
+/// within a field returns `ANNEAL_INVALID_PARAMETER` and writes nothing.
 ///
 /// # Safety
 ///
@@ -955,11 +1012,10 @@ pub unsafe extern "C" fn anneal_box_options_default(
         return anneal_status_t::ANNEAL_INVALID_PARAMETER;
     }
     let size = unsafe { std::ptr::addr_of!((*out).struct_size).read() };
-    let least = std::mem::offset_of!(anneal_box_options_t, history);
-    if size < least {
+    if !options_size_is_field_boundary(size) {
         set_last_error(&format!(
-            "anneal_box_options_default: options.struct_size is {size}, below the \
-             {least} bytes of the oldest layout; set it to sizeof(anneal_box_options_t)"
+            "anneal_box_options_default: {}; set it to sizeof(anneal_box_options_t)",
+            invalid_options_size(size)
         ));
         return anneal_status_t::ANNEAL_INVALID_PARAMETER;
     }
@@ -1013,8 +1069,10 @@ pub unsafe extern "C" fn anneal_box_minimize_ex(
             0
         } else {
             let size = unsafe { (*stats).struct_size };
-            if size < std::mem::offset_of!(anneal_box_stats_t, n_evals) {
-                set_last_error("anneal_box_minimize_ex: stats.struct_size is not set");
+            if !stats_size_is_field_boundary(size) {
+                set_last_error(&format!(
+                    "anneal_box_minimize_ex: stats.struct_size {size} is not a field boundary"
+                ));
                 return anneal_status_t::ANNEAL_INVALID_PARAMETER;
             }
             size

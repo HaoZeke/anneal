@@ -61,7 +61,7 @@ only the defaults and statistics that fit, so a newer library can add
 fields at the end without breaking a program built against this header.
 On return, =struct_size= says how many bytes this library wrote, so a
 newer caller can detect fields that an older library did not fill. A size
-below the oldest layout is refused. The box follows the rule of
+below the oldest layout or ending partway through a field is refused. The box follows the rule of
 the Python drivers: every side finite, a finite width and sum of widths,
 and =low <= high=; the start must be finite, and a DLPack shape that is
 negative or a data pointer not aligned for =double= is refused. The
