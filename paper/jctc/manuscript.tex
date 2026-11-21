@@ -1,7 +1,7 @@
 % Copyright (c) anneal developers
 \documentclass[journal=jctcce,manuscript=article]{achemso}
 
-\usepackage{booktabs,amsmath}
+\usepackage{booktabs,amsmath,seqsplit}
 \graphicspath{{figs/}}
 
 \input{macros}
@@ -518,9 +518,11 @@ rate is method 10 of Newcombe for paired data
 For calls and wall, the exact Wilcoxon signed-rank test
 \cite{wilcoxonIndividualComparisons1945} runs on the per-seed differences,
 with a miss counted at the budget for calls and the wall of the whole run for
-time.
-Arms that do not share a start, the ASE arms, are compared on hits by the
-two-sided Fisher exact test \cite{fisherLogicInductiveInference1935}.
+time, only when both arms count the same operation.
+The ASE arms do not share starts and stop at different call and wall limits.
+A Fisher test on their hits would not account for those unequal stopping
+rules \cite{fisherLogicInductiveInference1935}, so no cross-arm test is
+reported for the ASE tables.
 Every test is two-sided and exact, so no continuity correction enters any of
 them.
 No adjustment for multiple comparisons is made: every \(p\) is that of one
@@ -695,6 +697,8 @@ taboo radius scaled by \(r_0/2^{1/6}\) and GMIN's container radius, and the
 gold driver of this code applies the basin bias of
 equation~\ref{eq:delta} on a stride of 8.
 The Supporting Information gives the inputs, the host, and the commands.
+The GMIN source is the public tarball dated 2026-11-19, sha256
+\texttt{\seqsplit{ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776}}.
 
 Paired by seed, this code alone hits 7 seeds of LJ\(_{98}\) and GMIN alone
 none, with \(p=0.016\) and an interval from 0.22 to 0.81.
@@ -702,18 +706,19 @@ On LJ\(_{38}\) and LJ\(_{75}\) this code alone hits 5 seeds and GMIN alone
 none, with \(p=0.0625\), the smallest value the exact test can reach with
 five discordant seeds; this code hits LJ\(_{38}\) on 12 and LJ\(_{75}\) on 5
 of 12, and GMIN on 7 and 0.
-This code takes a median of 127839.5 calls to the LJ\(_{38}\) minimum, and
-GMIN 389399.
+On LJ\(_{38}\), this code reports a median of 127839.5 combined
+energy-and-gradient passes to the minimum, while GMIN reports 389399
+\texttt{POTENTIAL} entries; these are not the same operation.
 On LJ\(_{102}\), LJ\(_{103}\), LJ\(_{104}\), and LJ\(_{150}\) the seeds
 that one arm alone hits are 4 to 3, 4 to 1, 3 to 4, and 1 to 2, with \(p\) of
 1, 0.375, 1, and 1.
 GMIN hits more seeds than this code on LJ\(_{104}\), 6 against 5 of 12, and
 on LJ\(_{150}\), 9 against 8 of 12.
 Both arms hit LJ\(_{55}\) and M\(_{80}\) at \(\rho=6\) on every seed.
-The median wall of a run is lower for this code on all nine clusters, and
-the paired Wilcoxon test on the walls is below 0.05 on six of them: from
+The median wall of a run is lower for this code on all nine clusters, from
 0.640~s against 3.427~s on LJ\(_{38}\) to 66.725~s against 341.6~s on
-LJ\(_{150}\).
+LJ\(_{150}\); no cross-arm work or wall test is reported because the two
+budgets count different operations.
 At the submitted revision, this code alone hits 9 seeds of M\(_{55}\) at
 \(\rho=14\) and GMIN alone none, with \(p=3.9\times 10^{-3}\) and an interval
 from 0.38 to 0.91, and 6 seeds of M\(_{80}\) at \(\rho=14\) against none, with
@@ -729,40 +734,27 @@ from 4 to 12 of 12 seeds.
 
 % gmin-panel table: start
 \begin{table}
-\caption{This code at the revision each block names against GMIN with the inputs of
-Section~\ref{sec:protocol}, both arms of each cluster in alternating order by seed.
+\caption{Paired outcomes and reported work for this code against GMIN.
+The Supporting Information gives the configurations, inputs, revisions, build recipe,
+and row provenance. Both arms start from the same geometry and run in alternating
+order on seeds 2000--2011.
+This code uses \texttt{Config::recommended}\((N)\) through \texttt{h2h\_gmin\_proof}
+on Lennard-Jones, through \texttt{h2h\_morse} on Morse, and through
+\texttt{h2h\_metal} with every atom labeled gold on Au\(_{55}\).
 On every Lennard-Jones size, LJ\(_{75}\) included, GMIN runs the Wales-group LJ\(_{38}\)
 introduction file with no symmetrization keyword, not the published LJ\(_{75}\) input.
-The harness clears every driver variable, so each driver runs its own preset:
-\texttt{Config::recommended}\((N)\) through \texttt{h2h\_gmin\_proof} on Lennard-Jones and
-through \texttt{h2h\_morse} on Morse, in the Lennard-Jones length unit, and on Au\(_{55}\)
-\texttt{Config::recommended}\((55)\) with every atom labeled gold through \texttt{h2h\_metal},
-which applies the basin bias of equation~\ref{eq:delta} on a stride of 8.
-Both revisions follow the removal of the structure templates in \texttt{1c1b1238} and of
-their switches in \texttt{5499be31}.
-Their search code differs only by \texttt{plateau\_heat}, which the preset leaves off, and
-M\(_{80}\) at \(\rho=6\) takes the same calls to the same minimum on every seed at both.
-GMIN is the snapshot of SVNREV \texttt{9cbec1a4} built with three patches,
-\texttt{bench/lj104-lattice/v2/h2h-gmin.patch}, \texttt{scripts/morse\_h2h/morse-timer.patch},
-and \texttt{bench/metal-cluster-h2h/gmin-bgupta.patch}, which cap the \texttt{POTENTIAL} entries, time the
-potential, and, in the serial build, set the run index (\texttt{JP=1}) before its first use.
-Seeds 2000--2011. The budget of this code counts one call per combined energy and gradient
-pass, and GMIN's budget counts every \texttt{POTENTIAL} entry, including \texttt{GRADT=false}.
-Both arms of a seed start from the same geometry.
+Eval. is a combined energy-and-gradient pass for this code and every
+\texttt{POTENTIAL} entry for GMIN, including \texttt{GRADT=false}; these counts are
+different operations and are not tested across arms.
 The column Only counts the seeds that arm alone hits, and Both and Neither the seeds
 both arms and neither arm hit.
-Calls and IQR are the median and the interquartile range of the
-calls to the minimum, with a miss at the full budget.
+Eval. and IQR are the median and interquartile range of the arm's reported count to
+the minimum, with a miss at its full budget.
 Wall, In and Out are the median seconds of the run, inside the
-potential and outside it; the Supporting Information times the outside work of the
-submitted revision again on LJ\(_{104}\), LJ\(_{150}\), M\(_{80}\) at both \(\rho\), and
-Au\(_{55}\) in a separate session with two builds of that source.
+potential and outside it.
 \(p_\mathrm{M}\) is the two-sided exact McNemar test on the seeds only one arm hits,
 and \(\Delta\) the 95\% interval of Newcombe's method 10 for paired data, for the hit rate
-of this code less that of GMIN;
-\(p_\mathrm{calls}\) and \(p_\mathrm{wall}\) are the two-sided exact Wilcoxon
-signed-rank test on the per-seed differences in calls, with a miss at the budget, and in
-the wall of the run.
+of this code less that of GMIN. No cross-arm work or wall test is reported.
 The rows are \texttt{paper/jctc/data/gmin\_eeec8e2c/*/rows.csv} and
 \texttt{paper/jctc/data/gmin\_develop/rows.csv}.}
 \label{tab:gmin}
@@ -770,41 +762,41 @@ The rows are \texttt{paper/jctc/data/gmin\_eeec8e2c/*/rows.csv} and
 \scriptsize
 \setlength{\tabcolsep}{2pt}
 \resizebox{\textwidth}{!}{%
-\begin{tabular}{@{}lrlrrrrrrrrrrcrr@{}}
+\begin{tabular}{@{}lrlrrrrrrrrrrc@{}}
 \toprule
-Cluster & Budget & Arm & Hits & Only & Both & Neither & Calls & IQR & Wall & In & Out & \(p_\mathrm{M}\) & \(\Delta\), 95\% & \(p_\mathrm{calls}\) & \(p_\mathrm{wall}\) \\
+Cluster & Budget & Arm & Hits & Only & Both & Neither & Eval. & IQR & Wall & In & Out & \(p_\mathrm{M}\) & \(\Delta\), 95\% \\
 \midrule
-\multicolumn{16}{@{}l}{\emph{Revision \texttt{eeec8e2c}, an ancestor of the submitted revision}} \\
-LJ\(_{38}\) & \(4\times 10^{5}\) & this work & 12/12 & 5 & 7 & 0 & 127839.5 & 139245.25 & 0.640 & 0.303 & 0.337 & 0.0625 & 0.09 to 0.68 & 0.021 & \(4.9\times 10^{-4}\) \\
- &  & GMIN & 7/12 & 0 &  &  & 389399 & 173127.75 & 3.427 & 2.507 & 0.916 &  &  &  &  \\
-LJ\(_{55}\) & \(1\times 10^{6}\) & this work & 12/12 & 0 & 12 & 0 & 5722 & 5372.5 & 0.052 & 0.026 & 0.027 & 1 & \(-\)0.24 to 0.24 & 0.092 & \(2.4\times 10^{-3}\) \\
- &  & GMIN & 12/12 & 0 &  &  & 12764.5 & 12435.75 & 0.209 & 0.170 & 0.039 &  &  &  &  \\
-LJ\(_{75}\) & \(4\times 10^{6}\) & this work & 5/12 & 5 & 0 & 7 & 4000000 & 962776.75 & 61.077 & 34.192 & 26.727 & 0.0625 & 0.09 to 0.68 & 0.062 & \(4.9\times 10^{-4}\) \\
- &  & GMIN & 0/12 & 0 &  &  & 4000000 & 0 & 117.7 & 101.2 & 16.559 &  &  &  &  \\
-LJ\(_{98}\) & \(4\times 10^{6}\) & this work & 7/12 & 7 & 0 & 5 & 3166811.5 & 2726730.25 & 82.514 & 50.013 & 32.396 & 0.016 & 0.22 to 0.81 & 0.016 & \(4.9\times 10^{-4}\) \\
- &  & GMIN & 0/12 & 0 &  &  & 4000000 & 0 & 177.3 & 157.6 & 19.771 &  &  &  &  \\
-LJ\(_{102}\) & \(4\times 10^{6}\) & this work & 6/12 & 4 & 2 & 3 & 3256052.5 & 2043827.25 & 83.435 & 51.809 & 31.506 & 1 & \(-\)0.31 to 0.44 & 1 & 0.092 \\
- &  & GMIN & 5/12 & 3 &  &  & 4000000 & 2463305.5 & 185.2 & 165.1 & 19.959 &  &  &  &  \\
-LJ\(_{103}\) & \(4\times 10^{6}\) & this work & 6/12 & 4 & 2 & 5 & 3905072.5 & 3160779.25 & 103.0 & 64.209 & 38.610 & 0.375 & \(-\)0.12 to 0.54 & 0.078 & \(9.8\times 10^{-4}\) \\
- &  & GMIN & 3/12 & 1 &  &  & 4000000 & 239453.25 & 191.4 & 171.0 & 20.319 &  &  &  &  \\
-LJ\(_{104}\) & \(4\times 10^{6}\) & this work & 5/12 & 3 & 2 & 3 & 4000000 & 2271734 & 107.1 & 66.409 & 40.127 & 1 & \(-\)0.44 to 0.31 & 1 & 0.064 \\
- &  & GMIN & 6/12 & 4 &  &  & 3696118 & 1285122.25 & 183.7 & 164.3 & 19.310 &  &  &  &  \\
-LJ\(_{150}\) & \(4\times 10^{6}\) & this work & 8/12 & 1 & 7 & 2 & 1129381.5 & 3842161.25 & 66.725 & 42.128 & 24.597 & 1 & \(-\)0.37 to 0.23 & 0.28 & 0.034 \\
- &  & GMIN & 9/12 & 2 &  &  & 3129518.5 & 3240050.5 & 341.6 & 316.8 & 24.713 &  &  &  &  \\
-M\(_{80}\), \(\rho=6\) & \(4\times 10^{6}\) & this work & 12/12 & 0 & 12 & 0 & 62677 & 575467.75 & 2.456 & 1.812 & 0.653 & 1 & \(-\)0.24 to 0.24 & 0.73 & 0.85 \\
- &  & GMIN & 12/12 & 0 &  &  & 268934 & 268091.5 & 9.977 & 8.943 & 1.033 &  &  &  &  \\
+\multicolumn{14}{@{}l}{\emph{Revision \texttt{eeec8e2c}, an ancestor of the submitted revision}} \\
+LJ\(_{38}\) & \(4\times 10^{5}\) & this work & 12/12 & 5 & 7 & 0 & 127839.5 & 139245.25 & 0.640 & 0.303 & 0.337 & 0.0625 & 0.09 to 0.68 \\
+ &  & GMIN & 7/12 & 0 &  &  & 389399 & 173127.75 & 3.427 & 2.507 & 0.916 &  &  \\
+LJ\(_{55}\) & \(1\times 10^{6}\) & this work & 12/12 & 0 & 12 & 0 & 5722 & 5372.5 & 0.052 & 0.026 & 0.027 & 1 & \(-\)0.24 to 0.24 \\
+ &  & GMIN & 12/12 & 0 &  &  & 12764.5 & 12435.75 & 0.209 & 0.170 & 0.039 &  &  \\
+LJ\(_{75}\) & \(4\times 10^{6}\) & this work & 5/12 & 5 & 0 & 7 & 4000000 & 962776.75 & 61.077 & 34.192 & 26.727 & 0.0625 & 0.09 to 0.68 \\
+ &  & GMIN & 0/12 & 0 &  &  & 4000000 & 0 & 117.7 & 101.2 & 16.559 &  &  \\
+LJ\(_{98}\) & \(4\times 10^{6}\) & this work & 7/12 & 7 & 0 & 5 & 3166811.5 & 2726730.25 & 82.514 & 50.013 & 32.396 & 0.016 & 0.22 to 0.81 \\
+ &  & GMIN & 0/12 & 0 &  &  & 4000000 & 0 & 177.3 & 157.6 & 19.771 &  &  \\
+LJ\(_{102}\) & \(4\times 10^{6}\) & this work & 6/12 & 4 & 2 & 3 & 3256052.5 & 2043827.25 & 83.435 & 51.809 & 31.506 & 1 & \(-\)0.31 to 0.44 \\
+ &  & GMIN & 5/12 & 3 &  &  & 4000000 & 2463305.5 & 185.2 & 165.1 & 19.959 &  &  \\
+LJ\(_{103}\) & \(4\times 10^{6}\) & this work & 6/12 & 4 & 2 & 5 & 3905072.5 & 3160779.25 & 103.0 & 64.209 & 38.610 & 0.375 & \(-\)0.12 to 0.54 \\
+ &  & GMIN & 3/12 & 1 &  &  & 4000000 & 239453.25 & 191.4 & 171.0 & 20.319 &  &  \\
+LJ\(_{104}\) & \(4\times 10^{6}\) & this work & 5/12 & 3 & 2 & 3 & 4000000 & 2271734 & 107.1 & 66.409 & 40.127 & 1 & \(-\)0.44 to 0.31 \\
+ &  & GMIN & 6/12 & 4 &  &  & 3696118 & 1285122.25 & 183.7 & 164.3 & 19.310 &  &  \\
+LJ\(_{150}\) & \(4\times 10^{6}\) & this work & 8/12 & 1 & 7 & 2 & 1129381.5 & 3842161.25 & 66.725 & 42.128 & 24.597 & 1 & \(-\)0.37 to 0.23 \\
+ &  & GMIN & 9/12 & 2 &  &  & 3129518.5 & 3240050.5 & 341.6 & 316.8 & 24.713 &  &  \\
+M\(_{80}\), \(\rho=6\) & \(4\times 10^{6}\) & this work & 12/12 & 0 & 12 & 0 & 62677 & 575467.75 & 2.456 & 1.812 & 0.653 & 1 & \(-\)0.24 to 0.24 \\
+ &  & GMIN & 12/12 & 0 &  &  & 268934 & 268091.5 & 9.977 & 8.943 & 1.033 &  &  \\
 \midrule
-\multicolumn{16}{@{}l}{\emph{The submitted revision \texttt{61fa67cf}}} \\
-Au\(_{55}\) & \(1\times 10^{6}\) & this work & 4/12 & 4 & 0 & 7 & 1000000 & 736743.75 & 36.578 & 27.155 & 9.462 & 0.375 & \(-\)0.12 to 0.55 & 0.62 & 0.012 \\
- &  & GMIN & 1/12 & 1 &  &  & 1000000 & 0 & 62.055 & 58.738 & 3.317 &  &  &  &  \\
-M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & this work & 12/12 & 0 & 12 & 0 & 22596 & 51763.75 & 0.409 & 0.287 & 0.122 & 1 & \(-\)0.24 to 0.24 & 0.68 & 0.57 \\
- &  & GMIN & 12/12 & 0 &  &  & 37047.5 & 37358.75 & 0.677 & 0.574 & 0.103 &  &  &  &  \\
-M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & this work & 9/12 & 9 & 0 & 3 & 451561.5 & 773925.5 & 7.444 & 5.699 & 1.745 & \(3.9\times 10^{-3}\) & 0.38 to 0.91 & \(3.9\times 10^{-3}\) & \(4.9\times 10^{-4}\) \\
- &  & GMIN & 0/12 & 0 &  &  & 1000000 & 0 & 17.967 & 15.508 & 2.461 &  &  &  &  \\
-M\(_{80}\), \(\rho=6\) & \(4\times 10^{6}\) & this work & 12/12 & 0 & 12 & 0 & 62677 & 575467.75 & 2.417 & 1.777 & 0.640 & 1 & \(-\)0.24 to 0.24 & 0.73 & 0.91 \\
- &  & GMIN & 12/12 & 0 &  &  & 268934 & 268091.5 & 10.632 & 9.523 & 1.109 &  &  &  &  \\
-M\(_{80}\), \(\rho=14\) & \(4\times 10^{6}\) & this work & 6/12 & 6 & 0 & 6 & 3901429 & 1446773 & 145.0 & 107.5 & 37.389 & 0.031 & 0.15 to 0.75 & 0.031 & 0.034 \\
- &  & GMIN & 0/12 & 0 &  &  & 4000000 & 0 & 148.9 & 134.9 & 14.081 &  &  &  &  \\
+\multicolumn{14}{@{}l}{\emph{The submitted revision \texttt{61fa67cf}}} \\
+Au\(_{55}\) & \(1\times 10^{6}\) & this work & 4/12 & 4 & 0 & 7 & 1000000 & 736743.75 & 36.578 & 27.155 & 9.462 & 0.375 & \(-\)0.12 to 0.55 \\
+ &  & GMIN & 1/12 & 1 &  &  & 1000000 & 0 & 62.055 & 58.738 & 3.317 &  &  \\
+M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & this work & 12/12 & 0 & 12 & 0 & 22596 & 51763.75 & 0.409 & 0.287 & 0.122 & 1 & \(-\)0.24 to 0.24 \\
+ &  & GMIN & 12/12 & 0 &  &  & 37047.5 & 37358.75 & 0.677 & 0.574 & 0.103 &  &  \\
+M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & this work & 9/12 & 9 & 0 & 3 & 451561.5 & 773925.5 & 7.444 & 5.699 & 1.745 & \(3.9\times 10^{-3}\) & 0.38 to 0.91 \\
+ &  & GMIN & 0/12 & 0 &  &  & 1000000 & 0 & 17.967 & 15.508 & 2.461 &  &  \\
+M\(_{80}\), \(\rho=6\) & \(4\times 10^{6}\) & this work & 12/12 & 0 & 12 & 0 & 62677 & 575467.75 & 2.417 & 1.777 & 0.640 & 1 & \(-\)0.24 to 0.24 \\
+ &  & GMIN & 12/12 & 0 &  &  & 268934 & 268091.5 & 10.632 & 9.523 & 1.109 &  &  \\
+M\(_{80}\), \(\rho=14\) & \(4\times 10^{6}\) & this work & 6/12 & 6 & 0 & 6 & 3901429 & 1446773 & 145.0 & 107.5 & 37.389 & 0.031 & 0.15 to 0.75 \\
+ &  & GMIN & 0/12 & 0 &  &  & 4000000 & 0 & 148.9 & 134.9 & 14.081 &  &  \\
 \bottomrule
 \end{tabular}
 }
@@ -837,8 +829,7 @@ seed, in alternating order.
 The budget of this code counts one call per combined energy and gradient pass, and GMIN's budget counts
 every \texttt{POTENTIAL} entry, including \texttt{GRADT=false}.
 Hits, Only, \(p_\mathrm{M}\) and \(\Delta\) are as in Table~\ref{tab:gmin};
-\(p_\mathrm{calls}\) and \(p_\mathrm{wall}\) are the two-sided exact Wilcoxon signed-rank test on
-the per-seed differences in calls, with a miss at the budget, and in wall.
+no cross-arm work or wall test is reported because the budgets count different operations.
 (H\(_2\)O)\(_{25}\) has no independent reference and is not scored; its row gives the lowest and
 the median best energy of each arm in kJ/mol.
 The rows are \texttt{paper/jctc/data/tip4p\_gmin/rows.csv}.}
@@ -846,15 +837,15 @@ The rows are \texttt{paper/jctc/data/tip4p\_gmin/rows.csv}.}
 \centering
 \footnotesize
 \setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}lrrrrrcrr@{}}
+\begin{tabular}{@{}lrrrrrc@{}}
 \toprule
-Cluster & This work & GMIN & Only, this work & Only, GMIN & \(p_\mathrm{M}\) & \(\Delta\), 95\% & \(p_\mathrm{calls}\) & \(p_\mathrm{wall}\) \\
+Cluster & This work & GMIN & Only, this work & Only, GMIN & \(p_\mathrm{M}\) & \(\Delta\), 95\% \\
 \midrule
-(H\(_2\)O)\(_{8}\) & 12/12 & 8/12 & 4 & 0 & 0.125 & 0.02 to 0.61 & \(4.9\times 10^{-4}\) & \(4.9\times 10^{-4}\) \\
-(H\(_2\)O)\(_{15}\) & 7/12 & 0/12 & 7 & 0 & 0.016 & 0.22 to 0.81 & 0.016 & \(4.9\times 10^{-4}\) \\
-(H\(_2\)O)\(_{20}\) & 6/12 & 0/12 & 6 & 0 & 0.031 & 0.15 to 0.75 & 0.031 & \(4.9\times 10^{-4}\) \\
-(H\(_2\)O)\(_{21}\) & 0/12 & 0/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 & 1 & \(4.9\times 10^{-4}\) \\
-(H\(_2\)O)\(_{25}\) & \multicolumn{8}{l}{this work \(-1113.035\), median \(-1103.345\); GMIN \(-1087.334\), median \(-1082.127\)} \\
+(H\(_2\)O)\(_{8}\) & 12/12 & 8/12 & 4 & 0 & 0.125 & 0.02 to 0.61 \\
+(H\(_2\)O)\(_{15}\) & 7/12 & 0/12 & 7 & 0 & 0.016 & 0.22 to 0.81 \\
+(H\(_2\)O)\(_{20}\) & 6/12 & 0/12 & 6 & 0 & 0.031 & 0.15 to 0.75 \\
+(H\(_2\)O)\(_{21}\) & 0/12 & 0/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 \\
+(H\(_2\)O)\(_{25}\) & \multicolumn{6}{l}{this work \(-1113.035\), median \(-1103.345\); GMIN \(-1087.334\), median \(-1082.127\)} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -866,10 +857,9 @@ The Atomic Simulation Environment provides a basin-hopping optimizer and a
 minima-hopping optimizer \cite{larsenAse2017,goedecker2004}.
 At its constructor defaults ASE basin hopping displaces every atom at random,
 and minima hopping escapes by short molecular dynamics.
-These runs do not share a start with this code, so their hits are compared by
-Fisher's test, and their effort is not equal: every run stopped at a hit, at
-the budget, or at a wall cap of three times the slowest wall of the cluster
-preset of this code on that cluster.
+These runs do not share a start with this code, and their effort is not equal:
+every run stopped at a hit, at the budget, or at the recorded wall cap shown
+in the table.
 Table~\ref{tab:ase} runs revision \texttt{61fa67cf} on four Lennard-Jones
 clusters and Au\(_{55}\), and Table~\ref{tab:ase-morse} runs revision
 \texttt{5eb79cdc} on four Morse clusters; both are ancestors of the
@@ -904,25 +894,24 @@ Stops counts the BH and MH runs that ended at the cap; those runs
 are misses with fewer calls than the budget, and no run of this code ended at the cap.
 Wall is the median over the 12 runs of the seconds each run took;
 a BH or MH run that ended at the cap is counted at its wall.
-\(p_\mathrm{BH}\) and \(p_\mathrm{MH}\) are the two-sided Fisher
-exact test on hits against each ASE arm; the test is unpaired because the random
-generators of the two codes do not make a shared start from one seed.
+No cross-arm test is reported: starts differ and the arms stop at unequal
+call and wall limits.
 The rows are \texttt{paper/jctc/data/ase\_panel/*/rows.csv}.}
 \label{tab:ase}
 \centering
 \scriptsize
 \setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}lrrrrrrrrrrrr@{}}
+\begin{tabular}{@{}lrrrrrrrrrr@{}}
 \toprule
- & & & \multicolumn{3}{c}{Hits} & \multicolumn{2}{c}{Stops} & \multicolumn{3}{c}{Wall (s)} & & \\
+ & & & \multicolumn{3}{c}{Hits} & \multicolumn{2}{c}{Stops} & \multicolumn{3}{c}{Wall (s)} \\
 \cmidrule(lr){4-6}\cmidrule(lr){7-8}\cmidrule(lr){9-11}
-Cluster & Budget & Cap & This code & BH & MH & BH & MH & This code & BH & MH & \(p_\mathrm{BH}\) & \(p_\mathrm{MH}\) \\
+Cluster & Budget & Cap & This code & BH & MH & BH & MH & This code & BH & MH \\
 \midrule
-LJ\(_{38}\) & \(4\times 10^{5}\) & 4.645 & 12/12 & 0/12 & 0/12 & 12 & 12 & 0.605 & 4.645 & 4.858 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
-LJ\(_{55}\) & \(1\times 10^{6}\) & 4.220 & 12/12 & 1/12 & 0/12 & 11 & 12 & 0.051 & 4.220 & 4.442 & \(9.6\times 10^{-6}\) & \(7.4\times 10^{-7}\) \\
-LJ\(_{98}\) & \(4\times 10^{6}\) & 289.0 & 7/12 & 0/12 & 0/12 & 0 & 12 & 78.919 & 123.0 & 299.2 & \(4.6\times 10^{-3}\) & \(4.6\times 10^{-3}\) \\
-LJ\(_{104}\) & \(4\times 10^{6}\) & 291.0 & 5/12 & 0/12 & 0/12 & 0 & 12 & 101.7 & 128.5 & 305.2 & 0.037 & 0.037 \\
-Au\(_{55}\) & \(1\times 10^{6}\) & 107.9 & 0/12 & 0/12 & 0/12 & 12 & 12 & 36.000 & 107.9 & 110.3 & 1 & 1 \\
+LJ\(_{38}\) & \(4\times 10^{5}\) & 4.645 & 12/12 & 0/12 & 0/12 & 12 & 12 & 0.605 & 4.645 & 4.858 \\
+LJ\(_{55}\) & \(1\times 10^{6}\) & 4.220 & 12/12 & 1/12 & 0/12 & 11 & 12 & 0.051 & 4.220 & 4.442 \\
+LJ\(_{98}\) & \(4\times 10^{6}\) & 289.0 & 7/12 & 0/12 & 0/12 & 0 & 12 & 78.919 & 123.0 & 299.2 \\
+LJ\(_{104}\) & \(4\times 10^{6}\) & 291.0 & 5/12 & 0/12 & 0/12 & 0 & 12 & 101.7 & 128.5 & 305.2 \\
+Au\(_{55}\) & \(1\times 10^{6}\) & 107.9 & 0/12 & 0/12 & 0/12 & 12 & 12 & 36.000 & 107.9 & 110.3 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -942,24 +931,23 @@ Stops counts the BH and MH runs that ended at the cap; those runs
 are misses with fewer calls than the budget, and no run of this code ended at the cap.
 Wall is the median over the 12 runs of the seconds each run took;
 a BH or MH run that ended at the cap is counted at its wall.
-\(p_\mathrm{BH}\) and \(p_\mathrm{MH}\) are the two-sided Fisher
-exact test on hits against each ASE arm; the test is unpaired because the random
-generators of the two codes do not make a shared start from one seed.
+No cross-arm test is reported: starts differ and the arms stop at unequal
+call and wall limits.
 The rows are \texttt{paper/jctc/data/ase\_panel/morse/rows.csv}.}
 \label{tab:ase-morse}
 \centering
 \scriptsize
 \setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}lrrrrrrrrrrrr@{}}
+\begin{tabular}{@{}lrrrrrrrrrr@{}}
 \toprule
- & & & \multicolumn{3}{c}{Hits} & \multicolumn{2}{c}{Stops} & \multicolumn{3}{c}{Wall (s)} & & \\
+ & & & \multicolumn{3}{c}{Hits} & \multicolumn{2}{c}{Stops} & \multicolumn{3}{c}{Wall (s)} \\
 \cmidrule(lr){4-6}\cmidrule(lr){7-8}\cmidrule(lr){9-11}
-Cluster & Budget & Cap & This code & BH & MH & BH & MH & This code & BH & MH & \(p_\mathrm{BH}\) & \(p_\mathrm{MH}\) \\
+Cluster & Budget & Cap & This code & BH & MH & BH & MH & This code & BH & MH \\
 \midrule
-M\(_{38}\), \(\rho=6\) & \(4\times 10^{5}\) & 10.186 & 12/12 & 0/12 & 0/12 & 12 & 12 & 0.502 & 10.186 & 10.188 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
-M\(_{38}\), \(\rho=14\) & \(4\times 10^{5}\) & 9.516 & 9/12 & 0/12 & 0/12 & 12 & 12 & 2.136 & 9.517 & 9.518 & \(3.4\times 10^{-4}\) & \(3.4\times 10^{-4}\) \\
-M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & 15.637 & 12/12 & 0/12 & 0/12 & 12 & 12 & 0.226 & 15.638 & 15.642 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
-M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & 47.552 & 8/12 & 0/12 & 0/12 & 12 & 12 & 11.333 & 47.553 & 47.556 & \(1.3\times 10^{-3}\) & \(1.3\times 10^{-3}\) \\
+M\(_{38}\), \(\rho=6\) & \(4\times 10^{5}\) & 10.186 & 12/12 & 0/12 & 0/12 & 12 & 12 & 0.502 & 10.186 & 10.188 \\
+M\(_{38}\), \(\rho=14\) & \(4\times 10^{5}\) & 9.516 & 9/12 & 0/12 & 0/12 & 12 & 12 & 2.136 & 9.517 & 9.518 \\
+M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & 15.637 & 12/12 & 0/12 & 0/12 & 12 & 12 & 0.226 & 15.638 & 15.642 \\
+M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & 47.552 & 8/12 & 0/12 & 0/12 & 12 & 12 & 11.333 & 47.553 & 47.556 \\
 \bottomrule
 \end{tabular}
 \end{table}

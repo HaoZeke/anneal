@@ -82,7 +82,18 @@ The Lennard-Jones rows run the Wales-group LJ\(_{38}\) introduction file at ever
 The Morse rows add GMIN's native \texttt{MORSE} keyword and \(\rho\) to the same numerical settings.
 The Au\(_{55}\) row runs GMIN's Gupta potential with the gold row of Darby et al., \(A=0.2061\)~eV, \(p=10.229\), \(q=4.036\), \(\xi=1.79\)~eV, and \(r_0=2.884\)~\AA, at \(T=0.1\)~eV, with step 0.40 and taboo radius 4.0 multiplied by \(r_0/2^{1/6}\), GMIN's container radius, \texttt{NEWRESTART 40}, and an energy difference of 0.003.
 \cite{darbyCuAu2002}
-GMIN is the public snapshot of SVNREV \texttt{9cbec1a446352bc9ef064bd2b1a5767194655919}, tarball sha256 \texttt{\seqsplit{ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776}}, built by \path{scripts/gmin_panel/build_gmin.sh} at revision \texttt{eeec8e2c} for the first block of the table, and for the second by the same script at the record commit \texttt{f009acc9} on the submitted revision, which only sets the number of parallel build jobs, with three patches, \path{bench/lj104-lattice/v2/h2h-gmin.patch}, \path{scripts/morse_h2h/morse-timer.patch}, and \path{bench/metal-cluster-h2h/gmin-bgupta.patch}, which cap the \texttt{POTENTIAL} entries, time the potential, and, in the serial build, set the run index before its first use; no other line of GMIN changes.
+GMIN is the public tarball dated 2026-11-19, sha256
+\texttt{\seqsplit{ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776}}.
+It was built by \path{scripts/gmin_panel/build_gmin.sh} at revision
+\texttt{eeec8e2c} for the first block of the table, and for the second by the
+same script at the record commit \texttt{f009acc9} on the submitted revision,
+which only sets the number of parallel build jobs, with three patches,
+\path{bench/lj104-lattice/v2/h2h-gmin.patch},
+\path{scripts/morse_h2h/morse-timer.patch}, and
+\path{bench/metal-cluster-h2h/gmin-bgupta.patch}, which cap the
+\texttt{POTENTIAL} entries, time the potential, and, in the serial build, set
+the run index (\texttt{JP=1}) before its first use; no other line of GMIN
+changes.
 The recipe stamps the wall clock and the build directory into the binary, so the three shard binaries differ in their sha256 and share one \texttt{.text} section.
 The hit is a quenched energy at or below the Cambridge Cluster Database
 minimum plus 0.001: besides the five Lennard-Jones references above,
@@ -134,6 +145,14 @@ python3 paper/jctc/scripts/knockout_tables.py
 
 # ASE: rewrite both tables from the imported rows
 python3 paper/jctc/scripts/ase_table.py
+
+# Figures: run from paper/jctc
+cd paper/jctc
+python3 scripts/render_all.py
+python3 scripts/fig_algorithm_stack.py figs/algorithm_stack.pdf
+python3 scripts/fig_rec_arms.py figs/rec_arms.pdf
+python3 scripts/fig_si_structures.py figs/si_structures.pdf
+python3 scripts/fig_si_water.py figs/si_water.pdf
 \end{verbatim}
 \end{footnotesize}
 The GMIN script writes \texttt{bench/gmin-panel/rows.csv}; the table of the main
@@ -395,9 +414,9 @@ slowest wall of the cluster preset of this code on that cluster.
 No run of this code reached its cap.
 The ASE arms do not start from the start of this code, because the random
 generators of the two codes do not make a shared start from one seed, so
-their tests are unpaired.
-Fisher's test against each ASE arm is below 0.05 on all 4 Lennard-Jones
-clusters.
+their hit counts are not paired.
+Their call limits and wall caps also differ from those of this code, so no
+cross-arm significance test is reported.
 Minima hopping reached its cap on every run of both tables, and basin hopping
 on every run of LJ\(_{38}\), Au\(_{55}\), and the Morse clusters and on 11
 of 12 on LJ\(_{55}\).
@@ -474,16 +493,12 @@ two-sided \(p\) is the share of those assignments whose \(T^{+}\) lies at
 least as far from the null mean \(m(m+1)/4\) as the one seen.
 No normal approximation is used.
 
-\emph{Fisher exact test, for unpaired arms only.}
-The ASE arms do not start from the start of this code, so their seeds do not
-pair, and their tables compare hits by the two-sided Fisher exact test
+\emph{Unpaired, unequally capped arms.}
+The ASE arms do not start from the start of this code, and their reported
+outcomes are censored by different call and wall limits.
+The tables therefore report the hit counts, recorded caps, stop counts, and
+wall medians without a cross-arm Fisher test or interval
 \cite{fisherLogicInductiveInference1935}.
-Conditional on the margins of the \(2\times 2\) table, the hits of the first
-arm are hypergeometric, and the two-sided \(p\) sums the probabilities of
-every table no more probable than the one observed, with a relative tolerance
-of \(10^{-12}\) on that comparison so that ties to rounding count.
-No calls or wall test is given for the ASE arms, and no interval of the
-difference.
 
 \emph{Medians and quantiles.}
 Medians, interquartile ranges, and the bootstrap quantiles below are type-7

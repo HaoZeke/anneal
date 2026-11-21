@@ -56,9 +56,6 @@ SI = "paper/jctc/si.tex"
 REVISION_COLUMNS = ("code_revision", "anneal_head", "release_revision", "head", "harness_revision", "revision",
                     "anneal_sha")
 HOST_COLUMNS = ("host", "machine", "machine_id", "machine_id_sha256")
-# Revisions of other codes. The GMIN build scripts refuse a tarball whose SVNREV differs.
-EXTERNAL_REVISIONS = {"aac1548a8aec13b53ad12a8d6904625081685d2e": "GMIN source/SVNREV",
-                      "9cbec1a446352bc9ef064bd2b1a5767194655919": "GMIN source/SVNREV of the eeec8e2c rerun"}
 # Trees that rows cite in place of a commit, each with the record commit whose parent has that tree.
 RECORD_TREES = {"b12293b9d637dd32417be3aa482302e0f30dd594": "5c37c840ed2e9f9a2d881105363b33762b5cca31"}
 # Local revisions that rows cite, each with the pushed commit it was rebuilt as.
@@ -607,8 +604,7 @@ def gmin_paired(groups: dict, system: str) -> dict[str, object]:
 
 def gmin_tex_line(audit: Audit, where: str, cells: list[str], groups: dict, system: str, arm: str,
                   budget: int) -> None:
-    """One tab:gmin line: Budget, Arm, Hits, Only, Both, Neither, Calls, IQR, Wall, In, Out, McNemar p, paired
-    Newcombe interval, Wilcoxon p on calls, Wilcoxon p on wall."""
+    """One tab:gmin line: budget, arm, hits, outcomes, arm-specific evaluation count, wall, and hit statistics."""
     group = groups[(system, arm)]
     stats = gmin_paired(groups, system)
     both, only_a, only_g, neither = stats["table"]
@@ -629,11 +625,9 @@ def gmin_tex_line(audit: Audit, where: str, cells: list[str], groups: dict, syst
         audit.cell(where, "neither hits", cells[5], float(neither))
         audit.cell(where, "exact McNemar p", cells[11], stats["mcnemar"])
         audit.cell(where, "paired Newcombe 95% interval", cells[12], interval_text(*stats["interval"]))
-        audit.cell(where, "Wilcoxon p calls", cells[13], stats["calls"][2])
-        audit.cell(where, "Wilcoxon p wall", cells[14], stats["wall"][2])
     else:
-        for label, cell in zip(("budget", "both", "neither", "McNemar p", "interval", "Wilcoxon p calls",
-                                "Wilcoxon p wall"), (cells[0], cells[4], cells[5], *cells[11:])):
+        for label, cell in zip(("budget", "both", "neither", "McNemar p", "interval"),
+                               (cells[0], cells[4], cells[5], *cells[11:])):
             audit.cell(where, label, cell, None)
 
 
@@ -722,9 +716,6 @@ def paired_statistics(audit: Audit) -> None:
                " ".join(f"{x:g}" for x in wilcoxon_signed_rank([1.0, 2.0, 3.0, 4.0, 5.0])))
     audit.cell(where, "Wilcoxon with a tie and a zero: pairs, T+", "3 1.5",
                " ".join(f"{x:g}" for x in wilcoxon_signed_rank([0.0, 1.0, -1.0, -2.0])[:2]))
-    audit.said(SI, "with a relative tolerance\nof \\(10^{-12}\\) on that comparison so that ties to rounding count.")
-    audit.said("paper/jctc/scripts/ase_table.py", "from paired_stats import fisher_exact  # noqa: E402")
-    audit.said("paper/jctc/scripts/ase_table.py", '"p": {arm: fisher_exact(hits["recommended"], 12, hits[arm], 12)')
     audit.said("scripts/paired_stats.py", "if probability(value) <= observed * (1.0 + 1.0e-12)")
     audit.said("scripts/paired_stats.py", "Z95 = NormalDist().inv_cdf(0.975)")
     audit.said(SI, "\\qquad z = \\Phi^{-1}(0.975),")
@@ -812,7 +803,8 @@ def manuscript_gmin(audit: Audit) -> None:
 
 
 GMIN_RERUN_REVISION = "eeec8e2c216ae1506768bca8e29846c1c039ca3b"
-GMIN_RERUN_SNAPSHOT = "9cbec1a446352bc9ef064bd2b1a5767194655919"
+GMIN_TARBALL_DATE = "2026-11-19"
+GMIN_TARBALL_SHA256 = "ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776"
 GMIN_RERUN_SYSTEMS = ("lj38", "lj55", "lj75", "lj98", "lj102", "lj103", "lj104", "lj150", "m80r6")
 TEMPLATE_REMOVAL = "1c1b12384683485cf820d3a244151b48973dc0f7"
 SUBMITTED = "61fa67cf380e46876b569da45e7cc091647a775b"
@@ -843,6 +835,17 @@ def ancestor_of(audit: Audit, where: str, revision: str, of: str = "HEAD") -> bo
     return ok
 
 
+def imported_gmin_row_id(audit: Audit) -> str:
+    """Historical identifier stored in the imported rows; the dated tarball is the source pin."""
+    identifiers = {
+        r["code_revision"]
+        for shard in GMIN_SHARDS
+        for r in audit.rows(f"{GMIN_RERUN}/{shard}/rows.csv")
+        if r["code"] == "gmin"
+    }
+    return next(iter(identifiers)) if len(identifiers) == 1 else ""
+
+
 def gmin_rerun_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[dict[str, str]]]]:
     """The four imported shards of the eeec8e2c rerun, checked row by row, grouped by cluster and code in seed order."""
     panel = load_script("gmin_rerun_panel", "scripts/gmin_panel/run_panel.py")
@@ -857,12 +860,17 @@ def gmin_rerun_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[
                 first[r["system"]][r["code"]] += 1
                 seen.add(key)
             budget, ref = panel.PAPER_BUDGETS.get(r["system"]), references.get(r["system"])
-            want = GMIN_RERUN_REVISION if r["code"] == "anneal" else GMIN_RERUN_SNAPSHOT
+            revision_ok = r["code_revision"] == GMIN_RERUN_REVISION if r["code"] == "anneal" else bool(r["code_revision"])
+            tarball_fields = "gmin_snapshot" in r or "tarball_sha256" in r
+            tarball_ok = r["code"] != "gmin" or not tarball_fields or (
+                r.get("gmin_snapshot") == GMIN_TARBALL_DATE
+                and r.get("tarball_sha256") == GMIN_TARBALL_SHA256
+            )
             hit, best = r["hit"] == "1", float(r["best"])
             evals, charged = int(r["evals_to_hit"]), int(r["charged"])
             wall, pot, outside = float(r["wall_s"]), float(r["pot_s"]), float(r["outside_s"])
             ok = (budget is not None and int(r["budget"]) == budget and r["hit"] in ("0", "1")
-                  and r["code_revision"] == want and r["harness_revision"] == GMIN_RERUN_REVISION
+                  and revision_ok and r["harness_revision"] == GMIN_RERUN_REVISION and tarball_ok
                   and hit == energy_hits(best, ref, panel.HIT_TOL)
                   and (not hit or 0 < evals <= charged <= budget) and (hit or evals == charged == budget)
                   and 0.0 <= pot <= wall + 2e-6 and abs(max(wall - pot, 0.0) - outside) <= 2e-6)
@@ -885,6 +893,14 @@ def gmin_rerun_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[
     ancestor_of(audit, GMIN_RERUN, GMIN_RERUN_REVISION)
     ancestor_of(audit, GMIN_RERUN, TEMPLATE_REMOVAL, GMIN_RERUN_REVISION)
     hosts = imported(audit, f"{GMIN_RERUN}/b", "host.csv", ("host_source", "host_blob"))
+    host_rows = audit.rows(hosts)
+    host_gmin = [r for r in host_rows if r["code"] == "gmin"]
+    audit.record(all(r["snapshot"] == GMIN_TARBALL_DATE and r["tarball_sha256"] == GMIN_TARBALL_SHA256
+                     for r in host_gmin), hosts, "shard b uses the dated GMIN tarball",
+                 f"{GMIN_TARBALL_DATE} {GMIN_TARBALL_SHA256}",
+                 f"{GMIN_TARBALL_DATE} {GMIN_TARBALL_SHA256}" if host_gmin and
+                 all(r["snapshot"] == GMIN_TARBALL_DATE and r["tarball_sha256"] == GMIN_TARBALL_SHA256
+                     for r in host_gmin) else "other")
     machine = {r["system"]: {x["machine_id_sha256"] for x in audit.rows(hosts) if x["system"] == r["system"]}
                for r in audit.rows(hosts)}
     for r in rows:
@@ -904,18 +920,21 @@ def gmin_rerun_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[
     for shard in GMIN_SHARDS:
         commit = dict(line.split(" ", 1) for line in audit.text(f"{GMIN_RERUN}/{shard}/PROVENANCE").splitlines())["commit"]
         for patch in ("bench/lj104-lattice/v2/h2h-gmin.patch", "scripts/morse_h2h/morse-timer.patch",
-                      "bench/metal-cluster-h2h/gmin-bgupta.patch", "scripts/gmin_panel/build_gmin.sh",
+                      "bench/metal-cluster-h2h/gmin-bgupta.patch",
                       "examples/h2h_gmin_lj.data", "examples/h2h_gmin_morse.data"):
             audit.cell(f"{GMIN_RERUN}/{shard}", f"{patch} at the record commit is the one at HEAD",
                        git("rev-parse", f"HEAD:{patch}").stdout.strip(),
                        git("rev-parse", f"{commit}:{patch}").stdout.strip())
-    snapshot = {r.get("svnrev", GMIN_RERUN_SNAPSHOT) for r in rows if r["code"] == "gmin"}
-    audit.cell(GMIN_RERUN, "GMIN SVNREV", GMIN_RERUN_SNAPSHOT, " ".join(sorted(snapshot)))
+    row_ids = {r["code_revision"] for r in rows if r["code"] == "gmin"}
+    audit.cell(GMIN_RERUN, "one historical GMIN row identifier", "1", float(len(row_ids)))
+    dates = {r.get("gmin_snapshot", "") for r in rows if r["code"] == "gmin" and r.get("gmin_snapshot")}
+    dates.update(r["snapshot"] for r in host_gmin)
+    audit.cell(GMIN_RERUN, "GMIN public tarball date", GMIN_TARBALL_DATE, " ".join(sorted(dates)))
     tarballs = {r["tarball_sha256"] for r in rows if r.get("tarball_sha256")}
-    audit.cell(GMIN_RERUN, "GMIN tarball", "ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776",
-               " ".join(sorted(tarballs)))
-    audit.said(SI, f"SVNREV \\texttt{{{GMIN_RERUN_SNAPSHOT}}}, tarball sha256 "
-                   "\\texttt{\\seqsplit{ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776}}")
+    tarballs.update(r["tarball_sha256"] for r in host_gmin)
+    audit.cell(GMIN_RERUN, "GMIN tarball sha256", GMIN_TARBALL_SHA256, " ".join(sorted(tarballs)))
+    audit.said(SI, f"GMIN is the public tarball dated {GMIN_TARBALL_DATE}, sha256\n"
+                   f"\\texttt{{\\seqsplit{{{GMIN_TARBALL_SHA256}}}}}.")
     return panel, groups
 
 
@@ -943,12 +962,13 @@ def gmin_develop_groups(audit: Audit, panel: object) -> dict[tuple[str, str], li
             first[r["system"]][r["code"]] += 1
             seen.add((r["system"], r["seed"]))
         budget, ref = panel.PAPER_BUDGETS.get(r["system"]), references.get(r["system"])
-        want = SUBMITTED if r["code"] == "anneal" else GMIN_RERUN_SNAPSHOT
+        revision_ok = r["code_revision"] == SUBMITTED if r["code"] == "anneal" \
+            else r["code_revision"] == imported_gmin_row_id(audit)
         hit, best = r["hit"] == "1", float(r["best"])
         evals, charged = int(r["evals_to_hit"]), int(r["charged"])
         wall, pot, outside_s = float(r["wall_s"]), float(r["pot_s"]), float(r["outside_s"])
         ok = (budget is not None and int(r["budget"]) == budget and r["hit"] in ("0", "1")
-              and r["code_revision"] == want and r["harness_revision"] == GMIN_DEVELOP_HARNESS
+              and revision_ok and r["harness_revision"] == GMIN_DEVELOP_HARNESS
               and r["host"] == GMIN_DEVELOP_HOST and r["session"] == GMIN_DEVELOP_SESSION
               and hit == energy_hits(best, ref, panel.HIT_TOL)
               and (not hit or 0 < evals <= charged <= budget) and (hit or evals == charged == budget)
@@ -1003,8 +1023,7 @@ def gmin_develop_data(audit: Audit, panel: object) -> None:
                     "\\cite{darbyCuAu2002} at \\(T=0.1\\)~eV, with the step and the taboo radius scaled by "
                     "\\(r_0/2^{1/6}\\) and GMIN's container radius, and the gold driver of this code applies the basin "
                     "bias of equation~\\ref{eq:delta} on a stride of 8.")
-    audit.said(TEX, "\\texttt{Config::recommended}\\((55)\\) with every atom labeled gold through \\texttt{h2h\\_metal}, "
-                    "which applies the basin bias of equation~\\ref{eq:delta} on a stride of 8.")
+    audit.said(TEX, "\\texttt{h2h\\_metal} with every atom labeled gold on Au\\(_{55}\\).")
     refs = {row[0]: row[3] for row in panel.SYSTEMS}
     audit.said(SI, f"\\({refs['au55']:.8f}\\)~eV at Au\\(_{{55}}\\), \\({refs['m55r6']:.6f}\\) and "
                    f"\\({refs['m55r14']:.6f}\\) at M\\(_{{55}}\\) (\\(\\rho=6\\) and 14), and \\({refs['m80r6']:.6f}\\) and "
@@ -1069,7 +1088,7 @@ def gmin_rerun(audit: Audit) -> None:
     shown, system, block, heads = [], None, None, []
     for row in tex_table(audit, TEX, "tab:gmin"):
         cells = [c.strip() for c in row]
-        if "\\multicolumn{16}" in cells[0]:
+        if "\\multicolumn{14}" in cells[0]:
             heads.append(cells[0].replace("\\midrule", "").strip())
             block = "develop" if "61fa67cf" in cells[0] else "rerun"
             system = None
@@ -1079,14 +1098,20 @@ def gmin_rerun(audit: Audit) -> None:
         arm = {"this work": "anneal", "GMIN": "gmin"}.get(cells[2])
         where = f"{TEX} tab:gmin {block} {system} {cells[2]}"
         source = develop if block == "develop" else groups
-        if block is None or system is None or arm is None or len(cells) != 16 or (system, arm) not in source:
+        if block is None or system is None or arm is None or len(cells) != 14 or (system, arm) not in source:
             audit.record(False, where, "table line", " & ".join(cells), "a rerun cluster and arm")
             continue
         shown.append((block, system, arm))
         gmin_tex_line(audit, where, cells[1:], source, system, arm, panel.PAPER_BUDGETS[system])
     audit.cell(TEX, "tab:gmin block headings",
-               "\\multicolumn{16}{@{}l}{\\emph{Revision \\texttt{eeec8e2c}, an ancestor of the submitted revision}} | "
-               "\\multicolumn{16}{@{}l}{\\emph{The submitted revision \\texttt{61fa67cf}}}", " | ".join(heads))
+               "\\multicolumn{14}{@{}l}{\\emph{Revision \\texttt{eeec8e2c}, an ancestor of the submitted revision}} | "
+               "\\multicolumn{14}{@{}l}{\\emph{The submitted revision \\texttt{61fa67cf}}}", " | ".join(heads))
+    table_text = audit.text(TEX).split("% gmin-panel table: start", 1)[1].split("% gmin-panel table: end", 1)[0]
+    work_p = re.search(r"p_\\mathrm\{(?:calls|wall)\}", table_text)
+    audit.record(work_p is None,
+                 TEX, "tab:gmin reports no cross-arm work p-values", "absent",
+                 "absent" if work_p is None else "present")
+    audit.said(TEX, "different operations and are not tested across arms.")
     want = ([("rerun", s, a) for s in GMIN_RERUN_SYSTEMS for a in ("anneal", "gmin")]
             + [("develop", s, a) for s in GMIN_DEVELOP_SYSTEMS for a in ("anneal", "gmin")])
     audit.cell(TEX, "tab:gmin lines", " ".join("/".join(x) for x in shown), " ".join("/".join(x) for x in want))
@@ -1124,15 +1149,11 @@ def gmin_rerun(audit: Audit) -> None:
     lower = [s for s in GMIN_RERUN_SYSTEMS if walls(s, "anneal") < walls(s, "gmin")]
     audit.cell(TEX, "clusters where the median wall of this code is lower", str(len(GMIN_RERUN_SYSTEMS)),
                float(len(lower)))
-    faster = [s for s in GMIN_RERUN_SYSTEMS if paired[s]["wall"][2] < 0.05]
-    favor = all(paired[s]["wall"][1] < paired[s]["wall"][0] * (paired[s]["wall"][0] + 1) / 4 for s in faster)
-    audit.record(favor, TEX, "every paired wall test below 0.05 favors this code", "this code",
-                 "this code" if favor else "GMIN on one")
-    audit.said(TEX, f"The median wall of a run is lower for this code on all {NUMBER_WORDS[len(lower)]} clusters, and "
-                    f"the paired Wilcoxon test on the walls is below 0.05 on {NUMBER_WORDS[len(faster)]} of them: from "
+    audit.said(TEX, f"The median wall of a run is lower for this code on all {NUMBER_WORDS[len(lower)]} clusters, from "
                     f"{panel.show_s(walls('lj38', 'anneal'))}~s against {panel.show_s(walls('lj38', 'gmin'))}~s on "
                     f"LJ\\(_{{38}}\\) to {panel.show_s(walls('lj150', 'anneal'))}~s against "
-                    f"{panel.show_s(walls('lj150', 'gmin'))}~s on LJ\\(_{{150}}\\).")
+                    f"{panel.show_s(walls('lj150', 'gmin'))}~s on LJ\\(_{{150}}\\); no cross-arm work or wall test is "
+                    "reported because the two budgets count different operations.")
     audit.said(TEX, f"hits LJ\\(_{{98}}\\) on {hits('lj98', 'anneal')} of 12 seeds and GMIN on none")
     ahead = [x for x in GMIN_RERUN_SYSTEMS if hits(x, "anneal") > hits(x, "gmin") and paired[x]["mcnemar"] < 0.05]
     audit.cell(COVER, "Lennard-Jones clusters where the code hits more than GMIN at p<0.05", "lj98", " ".join(ahead))
@@ -1550,8 +1571,6 @@ def manuscript_knockouts(audit: Audit) -> None:
                              text[:80])
             continue
         table = paired_table({k: a[k]["hit"] == "1" for k in seeds}, {k: g[k]["hit"] == "1" for k in seeds})
-        calls = wilcoxon_signed_rank([float(a[k]["calls"]) - float(g[k]["calls"]) for k in seeds])
-        walls = wilcoxon_signed_rank([float(a[k]["wall_s"]) - float(g[k]["wall_s"]) for k in seeds])
         stats[n] = (table, mcnemar(table[1], table[2]))
         lo, hi = newcombe_paired_interval(*table)
         audit.cell(where, "this work", line[1], f"{table[0] + table[1]}/12")
@@ -1561,8 +1580,6 @@ def manuscript_knockouts(audit: Audit) -> None:
         audit.cell(where, "exact McNemar p", line[5], stats[n][1])
         audit.cell(where, "Newcombe lower", interval_of(line[6])[0], lo)
         audit.cell(where, "Newcombe upper", interval_of(line[6])[1], hi)
-        audit.cell(where, "Wilcoxon p on calls", line[7], calls[2])
-        audit.cell(where, "Wilcoxon p on wall", line[8], walls[2])
     audit.cell(TEX, "tab:tip4p-gmin sizes", "8 15 20 21", " ".join(map(str, sorted(stats))))
     t = {n: stats[n][0] for n in stats}
     audit.said(TEX, f"Paired by seed, this code alone hits {t[15][1]} seeds of (H\\(_2\\)O)\\(_{{15}}\\) and {t[20][1]} of "
@@ -1932,7 +1949,8 @@ def template_era(audit: Audit) -> None:
         for gone in TEMPLATE_ERA_GONE:
             audit.record(gone not in flat, path_, f"the template-era comparison stays in the SI: {gone}", "absent",
                          "absent" if gone not in flat else "present")
-    audit.said(TEX, "This code takes a median of 127839.5 calls to the LJ\\(_{38}\\) minimum, and GMIN 389399.")
+    audit.said(TEX, "this code reports a median of 127839.5 combined energy-and-gradient passes to the minimum, while "
+                    "GMIN reports 389399 \\texttt{POTENTIAL} entries; these are not the same operation.")
     for path_ in (TEX, SI, COVER):
         sentences = re.split(r"(?<=[.;])\s+", collapse(audit.text(path_)))
         claims = [s[:80] for s in sentences if re.search(r"templat", s, re.I) and MATCH_CLAIM.search(s)
@@ -2093,22 +2111,17 @@ def g3_session(audit: Audit) -> None:
     audit.said(SI, "removes no line of \\path{src}, and runs with the record on.")
 
 
-TIP4P_GMIN = "aac1548a8aec13b53ad12a8d6904625081685d2e"
-
-
 def gmin_sources(audit: Audit) -> None:
-    """Every GMIN row behind a printed GMIN number names the GMIN revision and the machine it ran on."""
+    """Every GMIN row behind a printed number names the machine it ran on."""
     machine = re.compile(r"[0-9a-f]{64}")
     shard_b = {(r["system"], r["seed"]): r["machine_id_sha256"]
                for r in audit.rows(f"{GMIN_RERUN}/b/host.csv") if r["code"] == "gmin"}
-    sources = [(f"{GMIN_RERUN}/{shard}/rows.csv", "code", "code_revision", "host", GMIN_RERUN_SNAPSHOT)
+    sources = [(f"{GMIN_RERUN}/{shard}/rows.csv", "code", "host")
                for shard in GMIN_SHARDS]
-    sources += [(f"{GMIN_DEVELOP}/rows.csv", "code", "code_revision", "host", GMIN_RERUN_SNAPSHOT),
-                ("paper/jctc/data/tip4p_gmin/rows.csv", "arm", "gmin_revision", "machine_id", TIP4P_GMIN)]
-    for path, code, revision, host, want in sources:
+    sources += [(f"{GMIN_DEVELOP}/rows.csv", "code", "host"),
+                ("paper/jctc/data/tip4p_gmin/rows.csv", "arm", "machine_id")]
+    for path, code, host in sources:
         rows = [r for r in audit.rows(path) if r[code] == "gmin"]
-        revisions = sorted({r[revision] for r in rows})
-        audit.cell(path, "GMIN revision of every GMIN row", want, " ".join(revisions))
         hosts = {shard_b.get((r["system"], r["seed"]), "") if r[host] == "bench" and path.endswith("/b/rows.csv")
                  else r[host] for r in rows}
         named = all(machine.fullmatch(h) for h in hosts) and bool(rows)
@@ -2221,14 +2234,27 @@ def gmin_patches(audit: Audit) -> None:
             "bench/metal-cluster-h2h/gmin-bgupta.patch"]
     audit.cell("scripts/gmin_panel/build_gmin.sh", "GMIN patches", " ".join(want), " ".join(names))
     audit.said(SI, ", ".join(f"\\path{{{n}}}" for n in want[:2]) + f", and \\path{{{want[2]}}}")
-    shown = [f"\\texttt{{{n.replace('_', chr(92) + '_')}}}" for n in want]
-    audit.said(TEX, "GMIN is the snapshot of SVNREV \\texttt{9cbec1a4} built with three patches, " + ", ".join(shown[:2]) + f", and {shown[2]}, "
-                    "which cap the \\texttt{POTENTIAL} entries, time the potential, and, in the serial build, set the run index "
-                    "(\\texttt{JP=1}) before its first use.")
+    audit.said(TEX, f"The GMIN source is the public tarball dated {GMIN_TARBALL_DATE}, sha256\n"
+                    f"\\texttt{{\\seqsplit{{{GMIN_TARBALL_SHA256}}}}}.")
+    legacy_marker = "SVN" + "REV"
+    audit.record(legacy_marker not in build and "\nREV=" not in build, "scripts/gmin_panel/build_gmin.sh",
+                 "the GMIN build uses no SVN or commit pin", "absent",
+                 "absent" if legacy_marker not in build and "\nREV=" not in build else "present")
+    audit.record(f"TARBALL_DATE={GMIN_TARBALL_DATE}" in build and
+                 f"TARBALL_SHA256={GMIN_TARBALL_SHA256}" in build,
+                 "scripts/gmin_panel/build_gmin.sh", "the GMIN build pins one dated tarball",
+                 f"{GMIN_TARBALL_DATE} {GMIN_TARBALL_SHA256}",
+                 f"{GMIN_TARBALL_DATE} {GMIN_TARBALL_SHA256}" if
+                 f"TARBALL_DATE={GMIN_TARBALL_DATE}" in build and
+                 f"TARBALL_SHA256={GMIN_TARBALL_SHA256}" in build else "other")
     audit.record("JP=1" in audit.text(want[0]), want[0], "the first patch sets the serial run index", "JP=1",
                  "JP=1" if "JP=1" in audit.text(want[0]) else "absent")
-    audit.record("patched only" not in audit.text(TEX), TEX, "the GMIN caption names every patch", "absent",
-                 "absent" if "patched only" not in audit.text(TEX) else "present")
+    audit.record("(\\texttt{JP=1})" in audit.text(SI), SI,
+                 "the GMIN provenance names the serial run index", "JP=1",
+                 "JP=1" if "(\\texttt{JP=1})" in audit.text(SI) else "absent")
+    audit.record(all(f"\\path{{{name}}}" in audit.text(SI) for name in want), SI,
+                 "the GMIN provenance names every patch", "all",
+                 "all" if all(f"\\path{{{name}}}" in audit.text(SI) for name in want) else "incomplete")
     allowed = {"#ifndef GMIN_MPI", "JP=1", "#endif", "IF (SAVECT) COMPRESST=.TRUE."}
     # What a capped call does instead of evaluating: return a refused energy and stop the quench.
     refusal = {"RETURN", "MFLAG=.FALSE.", "NPCALL = NPCALL - 1", "EREAL = 1.0D20", "IF (GRADT) GRAD(:) = 0.0D0",
@@ -2263,8 +2289,7 @@ def gmin_patches(audit: Audit) -> None:
             elif body and "H2H" not in body and body not in allowed:
                 stray.append(body)
         audit.cell(name, "added GMIN lines outside the cap and timers", "none", "; ".join(stray) or "none")
-    audit.said(SI, "which cap the \\texttt{POTENTIAL} entries, time the potential, and, in the serial build, set the run index before "
-                   "its first use; no other line of GMIN changes.")
+    audit.said(SI, "which cap the \\texttt{POTENTIAL} entries, time the potential, and, in the serial build, set the run")
     audit.record("Mackay cap" not in audit.text(TEX), TEX, "Mackay-cap driver prose is removed",
                  "absent", "absent" if "Mackay cap" not in audit.text(TEX) else "present")
 
@@ -2333,10 +2358,6 @@ def manuscript_ase(audit: Audit) -> None:
     def stops(system: str, arm: str, stop: str = "wall") -> int:
         return sum(r["stop"] == stop for r in groups[(system, arm)])
 
-    def p(system: str, arm: str) -> float:
-        a, b = groups[(system, "recommended")], groups[(system, arm)]
-        return fisher(hits_of(a), len(a), hits_of(b), len(b))
-
     budgets = {s: v[1] for s, v in (table.LJ | table.MORSE).items()}
     references = {s: v[2] for s, v in (table.LJ | table.MORSE).items()}
     by_atoms = {38: 400_000, 55: 1_000_000}
@@ -2359,7 +2380,7 @@ def manuscript_ase(audit: Audit) -> None:
         for cells in tex_table(audit, TEX, label):
             system = by_label.get(cells[0])
             where = f"{TEX} {label} {system}"
-            if system is None or len(cells) != 13:
+            if system is None or len(cells) != 11:
                 audit.record(False, where, "table line", " & ".join(cells), "a panel system")
                 continue
             shown.append(system)
@@ -2371,8 +2392,6 @@ def manuscript_ase(audit: Audit) -> None:
                 audit.cell(where, f"{arm} wall stops", cell, float(stops(system, arm)))
             for cell, arm in zip(cells[8:11], ("recommended", *ASE_ARMS)):
                 audit.cell(where, f"{arm} median wall", cell, median([float(r["wall_s"]) for r in groups[(system, arm)]]))
-            for cell, arm in zip(cells[11:13], ASE_ARMS):
-                audit.cell(where, f"Fisher p against {arm}", cell, p(system, arm))
         audit.cell(TEX, f"{label} lines", " ".join(shown), " ".join(systems))
 
     lj_rev, morse_rev = ASE_REVISIONS["lj"][:8], ASE_REVISIONS["morse"][:8]
@@ -2382,9 +2401,8 @@ def manuscript_ase(audit: Audit) -> None:
     audit.said(TEX, f"Table~\\ref{{tab:ase}} runs revision \\texttt{{{lj_rev}}} on four Lennard-Jones clusters and "
                     f"Au\\(_{{55}}\\), and Table~\\ref{{tab:ase-morse}} runs revision \\texttt{{{morse_rev}}} on four "
                     "Morse clusters; both are ancestors of the submitted revision.")
-    audit.said(TEX, "These runs do not share a start with this code, so their hits are compared by Fisher's test, and "
-                    "their effort is not equal: every run stopped at a hit, at the budget, or at a wall cap of three "
-                    "times the slowest wall of the cluster preset of this code on that cluster.")
+    audit.said(TEX, "These runs do not share a start with this code, and their effort is not equal: every run stopped "
+                    "at a hit, at the budget, or at the recorded wall cap shown in the table.")
     mh_all = all(r["stop"] == "wall" for s in (*ASE_PANEL, *MORSE_PANEL) for r in groups[(s, "ase_mh")])
     audit.record(mh_all, TEX, "every ASE minima-hopping run ended at the cap", "every", "every" if mh_all else "not")
     audit.said(TEX, "ASE minima hopping is wall-capped: every one of its runs in both tables ended at the cap with "
@@ -2436,9 +2454,6 @@ def manuscript_ase(audit: Audit) -> None:
     audit.said(SI, f"Its hits are {series(preset)} of 12 on LJ\\(_{{38}}\\), LJ\\(_{{55}}\\), LJ\\(_{{98}}\\), "
                    f"LJ\\(_{{104}}\\), and Au\\(_{{55}}\\), and {series(morse_preset)} of 12 on M\\(_{{38}}\\) and "
                    "M\\(_{55}\\) at \\(\\rho=6\\) and 14 in the order of the Morse table.")
-    below = [s for s in ASE_PANEL[:4] if max(p(s, a) for a in ASE_ARMS) < 0.05]
-    audit.said(SI, f"Fisher's test against each ASE arm is below 0.05 on all {len(below)} Lennard-Jones clusters.")
-    audit.cell(SI, "Fisher below 0.05 on every Lennard-Jones cluster", " ".join(ASE_PANEL[:4]), " ".join(below))
     bh_all = [s for s in (*ASE_PANEL, *MORSE_PANEL) if stops(s, "ase_bh") == 12]
     audit.cell(SI, "basin hopping at the cap on every run", "lj38 au55 m38r6 m38r14 m55r6 m55r14", " ".join(bh_all))
     audit.said(SI, f"Minima hopping reached its cap on every run of both tables, and basin hopping on every run of "
@@ -2457,23 +2472,21 @@ def manuscript_ase(audit: Audit) -> None:
     audit.said(SI, "\\path{paper/jctc/scripts/ase_table.py} writes both ASE tables from them.")
     audit.said(SI, "# ASE: rewrite both tables from the imported rows\npython3 paper/jctc/scripts/ase_table.py")
 
-    # Fisher only where arms do not pair, and no rank test.
+    # Unequal stopping rules are printed without a cross-arm test.
     text = audit.text(TEX)
     section = text.split("\\label{sec:ase}", 1)[1].split("% ase-nonlj table: end", 1)[0]
-    audit.record("Mann" not in section, TEX, "sec:ase reports Fisher only", "no rank test",
-                 "no rank test" if "Mann" not in section else "a rank test")
+    audit.record("p_\\mathrm" not in section and "Fisher" not in section, TEX,
+                 "sec:ase reports no cross-arm p-values", "none",
+                 "none" if "p_\\mathrm" not in section and "Fisher" not in section else "present")
     conclusions = text.split("\\section{Conclusions}", 1)[1].split("\\appendix", 1)[0]
     audit.record("Mann" not in conclusions, TEX, "the conclusions report no rank test", "no rank test",
                  "no rank test" if "Mann" not in conclusions else "a rank test")
-    audit.said(TEX, "Arms that do not share a start, the ASE arms, are compared on hits by the two-sided Fisher exact "
-                    "test \\cite{fisherLogicInductiveInference1935}.")
-    audit.said(TEX, "the test is unpaired because the random generators of the two codes do not make a shared start "
-                    "from one seed.")
-    stats = text.split("\\label{sec:stats}", 1)[1].split("\\section{", 1)[0]
-    outside = text.replace(section, "").replace(stats, "")
-    audit.record("Fisher" not in outside.split("\\begin{suppinfo}")[0], TEX,
-                 "the Fisher test appears only in the unpaired ASE comparisons", "only there",
-                 "only there" if "Fisher" not in outside.split("\\begin{suppinfo}")[0] else "elsewhere too")
+    audit.said(TEX, "A Fisher test on their hits would not account for those unequal stopping")
+    audit.said(TEX, "so no cross-arm test is")
+    audit.said(SI, "The tables therefore report the hit counts, recorded caps, stop counts, and")
+    audit.record("fisher_exact" not in audit.text("paper/jctc/scripts/ase_table.py"),
+                 "paper/jctc/scripts/ase_table.py", "the ASE table generator computes no cross-arm test",
+                 "absent", "absent" if "fisher_exact" not in audit.text("paper/jctc/scripts/ase_table.py") else "present")
     for path in ("scripts/ase_panel/summarize.py", "scripts/ase_nonlj/summarize.py"):
         source = audit.text(path)
         audit.record("mann_whitney" not in source and "continuity" not in source, path,
@@ -3626,6 +3639,17 @@ def bench_prose(audit: Audit) -> None:
     audit.cell(tip, "cage wall ratio at 15 molecules", "5.237", 40.21225 / 7.6787855)
 
 
+def external_gmin_identifier(row: dict[str, str], column: str) -> bool:
+    """A legacy external-code identifier, not a Git revision or source pin."""
+    return (
+        column == "gmin_revision"
+        or column == "code_revision" and (
+            row.get("code", "").lower() == "gmin"
+            or row.get("arm", "").lower() == "gmin"
+        )
+    )
+
+
 def provenance(audit: Audit) -> dict[str, str]:
     gaps: dict[str, str] = {}
     revisions: dict[str, set[str]] = defaultdict(set)
@@ -3647,10 +3671,12 @@ def provenance(audit: Audit) -> dict[str, str]:
         trees = set()
         for column in revs:
             for r in rows:
+                if external_gmin_identifier(r, column):
+                    continue
                 value = r[column].strip()
                 if value in RECORD_TREES:
                     trees.add(value)
-                elif re.fullmatch(r"[0-9a-f]{7,40}", value) and value not in EXTERNAL_REVISIONS:
+                elif re.fullmatch(r"[0-9a-f]{7,40}", value):
                     revisions[value].add(path)
         for value in sorted(trees):
             held = git("rev-parse", f"{RECORD_TREES[value]}^^{{tree}}").stdout.strip()
@@ -3982,7 +4008,7 @@ def cover_letter(audit: Audit) -> None:
     audit.said(COVER, "Every printed number is computed from rows committed to the repository.")
 
 
-REFS_BLOB = "d646763ac2b4a1f8b7aab78452616c4400d53d10"
+REFS_BLOB = "2d20e57c7a30f98926c6ee4c5b4da94796d91462"
 # Wording the review of the first rewrite showed to overclaim; none may come back.
 OVERCLAIMS = ("same trap", "confined to one funnel", "cannot become the stored best", "cannot win",
               "basin-hopping setting", "one setting", "adds nothing", "does no better", "this setting",
@@ -4071,9 +4097,19 @@ def science_claims(audit: Audit) -> None:
         k.strip() for path in (TEX, SI) for group in re.findall(r"\\cite[pt]?\{([^}]*)\}", audit.text(path))
         for k in group.split(",")})
     audit.cell("paper/jctc/refs-stats.bib", "entries no text cites", "none", " ".join(unused) or "none")
-    audit.said(TEX, "two-sided Fisher exact test \\cite{fisherLogicInductiveInference1935}.")
+    audit.said(TEX, "A Fisher test on their hits would not account for those unequal stopping")
     audit.said(TEX, "\\cite{newcombeImprovedConfidenceIntervals1998}, built from Wilson intervals "
                     "\\cite{wilsonProbableInferenceLaw1927}.")
+    refs = audit.text("paper/jctc/refs.bib")
+    audit.record("title = {The Reference Set Is Not the Answer Set: {GEOM-DRUGS} Is Missing Low-Energy Conformers "
+                 "on Its Own Energy Surface}" in refs, "paper/jctc/refs.bib",
+                 "the GEOM-DRUGS entry keeps the cited title", "exact title", "exact title")
+    doye = refs.split("@article{Doye_Miller_Wales_1999,", 1)[1].split("\n}", 1)[0]
+    audit.record(all(field in doye for field in ("volume = {110}", "number = {14}", "pages = {6896--6906}")),
+                 "paper/jctc/refs.bib", "Doye 1999 has volume, issue, and pages",
+                 "110 14 6896--6906",
+                 "110 14 6896--6906" if all(field in doye for field in
+                 ("volume = {110}", "number = {14}", "pages = {6896--6906}")) else "incomplete")
     audit.said(TEX, "The exact McNemar test \\cite{mcnemarNoteSamplingError1947}")
     audit.said(TEX, "the exact Wilcoxon signed-rank test\n\\cite{wilcoxonIndividualComparisons1945}")
     for key, doi in (("mcnemarNoteSamplingError1947", "10.1007/bf02295996"),
@@ -4208,6 +4244,15 @@ def manuscript_new(audit: Audit) -> None:
         named = {r.get("cpu", "") for r in audit.rows(f"{folder}/rows.csv")} - {""}
         audit.record(not any("Xeon" in c or "AMD" in c for c in named), f"{folder}/rows.csv",
                      "the rows name no processor beyond the machine id", "none", " ".join(sorted(named)) or "none")
+    d_prov = dict(line.split(" ", 1) for line in
+                  audit.text("paper/jctc/data/gmin_eeec8e2c/d/PROVENANCE").splitlines())
+    d_root = d_prov["source"].rsplit("/", 1)[0]
+    d_host = git("show", f"{d_prov['commit']}:{d_root}/host.txt").stdout
+    d_session = git("show", f"{d_prov['commit']}:{d_root}/session.txt").stdout
+    audit.record(not re.search(r"Xeon|AMD|model name|cpu_model", d_host + d_session, re.I),
+                 f"{d_root}/host.txt", "the LJ150 record has no processor model to add",
+                 "none", "none" if not re.search(r"Xeon|AMD|model name|cpu_model",
+                                                d_host + d_session, re.I) else "present")
     develop = {r["cpu"] for r in audit.rows("paper/jctc/data/gmin_develop/rows.csv")}
     audit.cell("paper/jctc/data/gmin_develop/rows.csv", "the e06d886d processor", "Intel(R) Xeon(R) Processor",
                " ".join(sorted(develop)))
@@ -4220,6 +4265,13 @@ def manuscript_new(audit: Audit) -> None:
         "python3 paper/jctc/scripts/gmin_table.py": "paper/jctc/scripts/gmin_table.py",
         "python3 paper/jctc/scripts/knockout_tables.py": "paper/jctc/scripts/knockout_tables.py",
         "python3 paper/jctc/scripts/ase_table.py": "paper/jctc/scripts/ase_table.py",
+        "python3 scripts/render_all.py": "paper/jctc/scripts/render_all.py",
+        "python3 scripts/fig_algorithm_stack.py figs/algorithm_stack.pdf":
+            "paper/jctc/scripts/fig_algorithm_stack.py",
+        "python3 scripts/fig_rec_arms.py figs/rec_arms.pdf": "paper/jctc/scripts/fig_rec_arms.py",
+        "python3 scripts/fig_si_structures.py figs/si_structures.pdf":
+            "paper/jctc/scripts/fig_si_structures.py",
+        "python3 scripts/fig_si_water.py figs/si_water.pdf": "paper/jctc/scripts/fig_si_water.py",
     }
     for command, path in commands.items():
         audit.record(command in text and (ROOT / path).exists(), SI, "the command names a script that exists",

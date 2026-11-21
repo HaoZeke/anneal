@@ -192,22 +192,22 @@ def test_a_drifted_ase_table_cell_is_reported():
 def test_a_drifted_morse_ase_table_cell_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "& 47.556 & \\(1.3\\times 10^{-3}\\) & \\(1.3\\times 10^{-3}\\) \\\\"
+    old = "& 11.333 & 47.553 & 47.556 \\\\"
     assert tex.count(old) == 1
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, "& 47.556 & \\(1.3\\times 10^{-3}\\) & 0.37 \\\\")
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "& 11.333 & 47.553 & 47.557 \\\\")
     audit_mod.manuscript_ase(audit)
     audit_mod.generated_tables(audit)
-    assert sorted(r[2] for r in audit.drifts()) == ["Fisher p against ase_mh", "tab:ase-morse is the summariser's block"]
+    assert sorted(r[2] for r in audit.drifts()) == ["ase_mh median wall", "tab:ase-morse is the summariser's block"]
 
 
-def test_a_rank_test_in_the_ase_section_is_reported():
+def test_a_cross_arm_p_value_in_the_ase_section_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
     old = "ASE minima hopping is wall-capped"
     assert old in tex
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, "A Mann--Whitney test is not run. " + old)
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "\\(p_\\mathrm{BH}=0.01\\). " + old)
     audit_mod.manuscript_ase(audit)
-    assert [r[2] for r in audit.drifts()] == ["sec:ase reports Fisher only"]
+    assert [r[2] for r in audit.drifts()] == ["sec:ase reports no cross-arm p-values"]
 
 
 def test_a_returning_endpoint_section_is_reported():
@@ -475,14 +475,14 @@ def test_a_drifted_gmin_panel_summary_cell_is_reported():
     assert [r[2] for r in audit.drifts()] == ["gmin_hits"]
 
 
-def test_a_drifted_paired_wall_p_is_reported():
+def test_a_cross_arm_work_p_value_in_the_gmin_table_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "& 0.0625 & 0.09 to 0.68 & 0.021 & \\(4.9\\times 10^{-4}\\) \\\\"
+    old = "different operations and are not tested across arms."
     assert tex.count(old) == 1
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, old.replace("10^{-4}\\) \\\\", "10^{-3}\\) \\\\"))
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "\\(p_\\mathrm{calls}=0.021\\). " + old)
     audit_mod.manuscript_gmin(audit)
-    assert [r[2] for r in audit.drifts()] == ["Wilcoxon p wall"]
+    assert [r[2] for r in audit.drifts()] == ["tab:gmin reports no cross-arm work p-values"]
 
 
 def test_the_develop_gmin_rows_keep_the_harness_that_ran_them():
@@ -636,9 +636,10 @@ def test_a_drifted_pooled_move_choice_sentence_is_reported():
 def test_an_unpaired_fisher_p_in_the_gmin_table_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "& 0.0625 & 0.09 to 0.68 & 0.021 &"
+    old = ("LJ\\(_{38}\\) & \\(4\\times 10^{5}\\) & this work & 12/12 & 5 & 7 & 0 & 127839.5 & "
+           "139245.25 & 0.640 & 0.303 & 0.337 & 0.0625 & 0.09 to 0.68 \\\\")
     assert tex.count(old) == 1
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, "& 0.037 & 0.09 to 0.68 & 0.021 &")
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, old.replace("& 0.0625 &", "& 0.037 &"))
     audit_mod.manuscript_gmin(audit)
     assert [r[2] for r in audit.drifts()] == ["exact McNemar p"]
 
@@ -770,12 +771,12 @@ def test_a_limits_section_is_reported():
 
 def test_a_caption_missing_the_serial_patch_is_reported():
     audit = audit_mod.Audit()
-    tex = audit.text(audit_mod.TEX)
+    tex = audit.text(audit_mod.SI)
     old = "(\\texttt{JP=1})"
     assert old in tex
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, "")
+    audit.text_cache[audit_mod.SI] = tex.replace(old, "")
     audit_mod.gmin_patches(audit)
-    assert [r[2] for r in audit.drifts()] == ["prose"]
+    assert [r[2] for r in audit.drifts()] == ["the GMIN provenance names the serial run index"]
 
 
 def test_an_uncharged_gmin_panel_miss_is_reported():
@@ -1018,7 +1019,8 @@ def git(*args, stdin=None):
 
 def test_the_revision_index_answers_as_one_git_call_per_question(audited):
     names = sorted({r[c].strip() for rows in audited.read.values() for r in rows for c in audit_mod.REVISION_COLUMNS
-                    if c in r and re.fullmatch(r"[0-9a-f]{7,40}", r[c].strip())} - set(audit_mod.EXTERNAL_REVISIONS))
+                    if c in r and not audit_mod.external_gmin_identifier(r, c)
+                    and re.fullmatch(r"[0-9a-f]{7,40}", r[c].strip())})
     table = audit_mod.alias_table()
     index = audit_mod.alias_index(names, table)
     revisions = sorted({*names, *(r[c] for r in table for c in ("local_revision", "pushed_revision", "branch_revision") if r[c])})

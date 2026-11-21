@@ -40,7 +40,8 @@ REVISION = "eeec8e2c216ae1506768bca8e29846c1c039ca3b"
 SUBMITTED = "61fa67cf380e46876b569da45e7cc091647a775b"
 DEVELOP_HARNESS = "f009acc96bb95023eeb6e394e863630c752a5d05"
 DEVELOP_SYSTEMS = ("au55", "m55r6", "m55r14", "m80r6", "m80r14")
-GMIN_SNAPSHOT = "9cbec1a446352bc9ef064bd2b1a5767194655919"
+GMIN_TARBALL_DATE = "2026-11-19"
+GMIN_TARBALL_SHA256 = "ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776"
 SYSTEMS = ("lj38", "lj55", "lj75", "lj98", "lj102", "lj103", "lj104", "lj150", "m80r6")
 MARKS = PANEL.TEX_MARKS
 
@@ -62,6 +63,14 @@ def is_ancestor(commit: str) -> bool:
                           capture_output=True).returncode == 0
 
 
+def gmin_row_id(data: list[dict[str, str]]) -> str:
+    """The historical identifier stored in imported GMIN rows, not the source pin."""
+    identifiers = {row["code_revision"] for row in data if row["code"] == "gmin"}
+    if len(identifiers) != 1:
+        raise SystemExit(f"gmin_table: imported GMIN rows have {len(identifiers)} source identifiers")
+    return identifiers.pop()
+
+
 def rows() -> list[dict[str, str]]:
     out = []
     for shard in SHARDS:
@@ -71,10 +80,20 @@ def rows() -> list[dict[str, str]]:
         out += list(csv.DictReader(path.open()))
     if not is_ancestor(REVISION):
         raise SystemExit(f"gmin_table: {REVISION[:8]} is not an ancestor of HEAD")
+    gmin_row_id(out)
     for row in out:
-        want = REVISION if row["code"] == "anneal" else GMIN_SNAPSHOT
-        if row["code_revision"] != want or row["harness_revision"] != REVISION:
-            raise SystemExit(f"gmin_table: {row['system']} {row['code']} {row['seed']} is not at the pinned revisions")
+        if ((row["code"] == "anneal" and row["code_revision"] != REVISION)
+                or row["harness_revision"] != REVISION):
+            raise SystemExit(f"gmin_table: {row['system']} {row['code']} {row['seed']} is not at the recorded revisions")
+        has_tarball_fields = "gmin_snapshot" in row or "tarball_sha256" in row
+        if row["code"] == "gmin" and has_tarball_fields and (
+                row.get("gmin_snapshot") != GMIN_TARBALL_DATE
+                or row.get("tarball_sha256") != GMIN_TARBALL_SHA256):
+            raise SystemExit(f"gmin_table: {row['system']} {row['seed']} is not from the dated tarball")
+    host_rows = list(csv.DictReader((DATA / "b" / "host.csv").open()))
+    if any(row["snapshot"] != GMIN_TARBALL_DATE or row["tarball_sha256"] != GMIN_TARBALL_SHA256
+           for row in host_rows if row["code"] == "gmin"):
+        raise SystemExit("gmin_table: shard b is not from the dated tarball")
     keys = [(r["system"], r["code"], r["seed"]) for r in out]
     if len(keys) != len(set(keys)) or sorted({r["system"] for r in out}) != sorted(SYSTEMS):
         raise SystemExit("gmin_table: the shards do not cover each cell once")
@@ -88,10 +107,12 @@ def develop_rows() -> list[dict[str, str]]:
     out = list(csv.DictReader(path.open()))
     if not is_ancestor(SUBMITTED):
         raise SystemExit(f"gmin_table: {SUBMITTED[:8]} is not an ancestor of HEAD")
+    if gmin_row_id(out) != gmin_row_id(rows()):
+        raise SystemExit("gmin_table: the two imported blocks name different GMIN source identifiers")
     for row in out:
-        want = SUBMITTED if row["code"] == "anneal" else GMIN_SNAPSHOT
-        if row["code_revision"] != want or row["harness_revision"] != DEVELOP_HARNESS:
-            raise SystemExit(f"gmin_table: {row['system']} {row['code']} {row['seed']} is not at the pinned revisions")
+        if ((row["code"] == "anneal" and row["code_revision"] != SUBMITTED)
+                or row["harness_revision"] != DEVELOP_HARNESS):
+            raise SystemExit(f"gmin_table: {row['system']} {row['code']} {row['seed']} is not at the recorded revisions")
     keys = [(r["system"], r["code"], r["seed"]) for r in out]
     if len(keys) != len(set(keys)) or sorted({r["system"] for r in out}) != sorted(DEVELOP_SYSTEMS):
         raise SystemExit("gmin_table: the develop session does not cover each cell once")
@@ -99,66 +120,58 @@ def develop_rows() -> list[dict[str, str]]:
 
 
 def summary() -> tuple[list[dict[str, str]], dict[str, dict[str, object]]]:
-    PANEL.GMIN_REV = GMIN_SNAPSHOT
     data = rows()
+    PANEL.GMIN_REV = gmin_row_id(data)
     return PANEL.summarise(data, REVISION), PANEL.paired_summary(data, REVISION)
 
 
 def develop_summary() -> tuple[list[dict[str, str]], dict[str, dict[str, object]]]:
-    PANEL.GMIN_REV = GMIN_SNAPSHOT
     data = develop_rows()
+    PANEL.GMIN_REV = gmin_row_id(data)
     return (PANEL.summarise(data, SUBMITTED, DEVELOP_HARNESS),
             PANEL.paired_summary(data, SUBMITTED, DEVELOP_HARNESS))
 
 
 def heading(text: str) -> str:
-    return f"\\multicolumn{{16}}{{@{{}}l}}{{\\emph{{{text}}}}} \\\\"
+    return f"\\multicolumn{{14}}{{@{{}}l}}{{\\emph{{{text}}}}} \\\\"
+
+
+def printed_lines(lines: list[dict[str, str]], paired: dict[str, dict[str, object]]) -> list[list[str]]:
+    """Rows without cross-arm tests of unlike evaluation counts or capped work."""
+    return [cells[:-2] for cells in PANEL.paired_lines(lines, paired)]
 
 
 def table() -> str:
     lines, paired = summary()
     later, later_paired = develop_summary()
     body = [heading("Revision \\texttt{eeec8e2c}, an ancestor of the submitted revision")]
-    body += [" & ".join(cells) + " \\\\" for cells in PANEL.paired_lines(lines, paired)]
+    body += [" & ".join(cells) + " \\\\" for cells in printed_lines(lines, paired)]
     body += ["\\midrule", heading("The submitted revision \\texttt{61fa67cf}")]
-    body += [" & ".join(cells) + " \\\\" for cells in PANEL.paired_lines(later, later_paired)]
+    body += [" & ".join(cells) + " \\\\" for cells in printed_lines(later, later_paired)]
     return "\n".join(
         [
             "\\begin{table}",
-            "\\caption{This code at the revision each block names against GMIN with the inputs of",
-            "Section~\\ref{sec:protocol}, both arms of each cluster in alternating order by seed.",
+            "\\caption{Paired outcomes and reported work for this code against GMIN.",
+            "The Supporting Information gives the configurations, inputs, revisions, build recipe,",
+            "and row provenance. Both arms start from the same geometry and run in alternating",
+            "order on seeds 2000--2011.",
+            "This code uses \\texttt{Config::recommended}\\((N)\\) through \\texttt{h2h\\_gmin\\_proof}",
+            "on Lennard-Jones, through \\texttt{h2h\\_morse} on Morse, and through",
+            "\\texttt{h2h\\_metal} with every atom labeled gold on Au\\(_{55}\\).",
             "On every Lennard-Jones size, LJ\\(_{75}\\) included, GMIN runs the Wales-group LJ\\(_{38}\\)",
             "introduction file with no symmetrization keyword, not the published LJ\\(_{75}\\) input.",
-            "The harness clears every driver variable, so each driver runs its own preset:",
-            "\\texttt{Config::recommended}\\((N)\\) through \\texttt{h2h\\_gmin\\_proof} on Lennard-Jones and",
-            "through \\texttt{h2h\\_morse} on Morse, in the Lennard-Jones length unit, and on Au\\(_{55}\\)",
-            "\\texttt{Config::recommended}\\((55)\\) with every atom labeled gold through \\texttt{h2h\\_metal},",
-            "which applies the basin bias of equation~\\ref{eq:delta} on a stride of 8.",
-            "Both revisions follow the removal of the structure templates in \\texttt{1c1b1238} and of",
-            "their switches in \\texttt{5499be31}.",
-            "Their search code differs only by \\texttt{plateau\\_heat}, which the preset leaves off, and",
-            "M\\(_{80}\\) at \\(\\rho=6\\) takes the same calls to the same minimum on every seed at both.",
-            "GMIN is the snapshot of SVNREV \\texttt{9cbec1a4} built with three patches,",
-            "\\texttt{bench/lj104-lattice/v2/h2h-gmin.patch}, \\texttt{scripts/morse\\_h2h/morse-timer.patch},",
-            "and \\texttt{bench/metal-cluster-h2h/gmin-bgupta.patch}, which cap the \\texttt{POTENTIAL} entries, time the",
-            "potential, and, in the serial build, set the run index (\\texttt{JP=1}) before its first use.",
-            "Seeds 2000--2011. The budget of this code counts one call per combined energy and gradient",
-            "pass, and GMIN's budget counts every \\texttt{POTENTIAL} entry, including \\texttt{GRADT=false}.",
-            "Both arms of a seed start from the same geometry.",
+            "Eval. is a combined energy-and-gradient pass for this code and every",
+            "\\texttt{POTENTIAL} entry for GMIN, including \\texttt{GRADT=false}; these counts are",
+            "different operations and are not tested across arms.",
             "The column Only counts the seeds that arm alone hits, and Both and Neither the seeds",
             "both arms and neither arm hit.",
-            "Calls and IQR are the median and the interquartile range of the",
-            "calls to the minimum, with a miss at the full budget.",
+            "Eval. and IQR are the median and interquartile range of the arm's reported count to",
+            "the minimum, with a miss at its full budget.",
             "Wall, In and Out are the median seconds of the run, inside the",
-            "potential and outside it; the Supporting Information times the outside work of the",
-            "submitted revision again on LJ\\(_{104}\\), LJ\\(_{150}\\), M\\(_{80}\\) at both \\(\\rho\\), and",
-            "Au\\(_{55}\\) in a separate session with two builds of that source.",
+            "potential and outside it.",
             "\\(p_\\mathrm{M}\\) is the two-sided exact McNemar test on the seeds only one arm hits,",
             "and \\(\\Delta\\) the 95\\% interval of Newcombe's method 10 for paired data, for the hit rate",
-            "of this code less that of GMIN;",
-            "\\(p_\\mathrm{calls}\\) and \\(p_\\mathrm{wall}\\) are the two-sided exact Wilcoxon",
-            "signed-rank test on the per-seed differences in calls, with a miss at the budget, and in",
-            "the wall of the run.",
+            "of this code less that of GMIN. No cross-arm work or wall test is reported.",
             "The rows are \\texttt{paper/jctc/data/gmin\\_eeec8e2c/*/rows.csv} and",
             "\\texttt{paper/jctc/data/gmin\\_develop/rows.csv}.}",
             "\\label{tab:gmin}",
@@ -166,10 +179,10 @@ def table() -> str:
             "\\scriptsize",
             "\\setlength{\\tabcolsep}{2pt}",
             "\\resizebox{\\textwidth}{!}{%",
-            "\\begin{tabular}{@{}lrlrrrrrrrrrrcrr@{}}",
+            "\\begin{tabular}{@{}lrlrrrrrrrrrrc@{}}",
             "\\toprule",
-            "Cluster & Budget & Arm & Hits & Only & Both & Neither & Calls & IQR & Wall & In & Out & "
-            "\\(p_\\mathrm{M}\\) & \\(\\Delta\\), 95\\% & \\(p_\\mathrm{calls}\\) & \\(p_\\mathrm{wall}\\) \\\\",
+            "Cluster & Budget & Arm & Hits & Only & Both & Neither & Eval. & IQR & Wall & In & Out & "
+            "\\(p_\\mathrm{M}\\) & \\(\\Delta\\), 95\\% \\\\",
             "\\midrule",
             *body,
             "\\bottomrule",
