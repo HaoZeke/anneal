@@ -524,7 +524,7 @@ def test_a_drifted_develop_morse_count_is_reported():
     audit_mod.manuscript_gmin(audit)
     assert [(r[2], r[3]) for r in audit.drifts()] == [
         ("prose", "Morse M\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=14\\) on 9 and 6 of 12 against none "
-                  "(\\(p=3.9\\times 10^{-3}\\) and 0.031), and rigid")]
+                  "(\\(p=3.9\\times 10^{-3}\\) and 0.031).")]
 
 
 def test_a_develop_gmin_cell_that_drifts_is_reported():
@@ -1132,7 +1132,7 @@ def test_a_process_note_in_the_cover_letter_is_reported():
 def test_a_drifted_ase_call_range_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "stopped at the cap after 3933 to 20950 force calls"
+    old = "stopped at the cap after 3933 to 20950 calls"
     assert old in audit_mod.collapse(tex)
     audit.text_cache[audit_mod.TEX] = audit_mod.collapse(tex).replace(old, old.replace("3933", "3934"))
     audit_mod.manuscript_ase(audit)
@@ -1251,6 +1251,14 @@ def test_a_banned_word_is_reported():
     audit.text_cache[audit_mod.SI] = si.replace(old, "landscape to propose candidates")
     audit_mod.science_claims(audit)
     assert [r[2] for r in audit.drifts()] == ["the text does not say candidate"]
+
+
+def test_a_single_host_claim_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    audit.text_cache[audit_mod.TEX] = tex + "\nBoth arms ran on one host.\n"
+    audit_mod.science_claims(audit)
+    assert [r[2] for r in audit.drifts()] == ["no single-host claim: one host"]
 
 
 def test_record_only_revisions_resolve_and_unpushed_ones_do_not():

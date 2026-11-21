@@ -53,7 +53,7 @@ def draw(out: Path) -> None:
     bank = figstyle.box(
         ax, 3.72, 2.42, 2.6, 0.68,
         "annealed-flow bank, one slot per chain:\nresampled on within-epoch ranks;\n"
-        "minima keyed by radial distances and\nmerged inside a held distance; every\nforce call charged to its chain",
+        "minima keyed by radial distances and\nmerged inside a held distance; every\nenergy and gradient pass charged to its chain",
     )
     figstyle.arrow(ax, (3.27, 2.66), (bank[0], 2.66), both=True)
     ax.text(3.495, 2.72, "share,\nadopt", ha="center", va="bottom", fontsize=figstyle.SMALLEST)

@@ -45,11 +45,13 @@ Morse M\(_{38}\) at \(\rho=14\) from 12 to 4 of 12
 code.
 The other parts of the search are described as design, with no claim about
 their effect.
-Paired by seed against GMIN, the code hits LJ\(_{98}\) on 7 of 12 seeds and
-GMIN on none (\(p=0.016\)), Morse M\(_{55}\) and M\(_{80}\) at \(\rho=14\) on 9
-and 6 of 12 against none (\(p=3.9\times 10^{-3}\) and 0.031), and rigid
-TIP4P (H\(_2\)O)\(_{15}\) and (H\(_2\)O)\(_{20}\) on 7 and 6 of 12 against
-none (\(p=0.016\) and 0.031).
+Paired by seed against GMIN run with the Wales-group LJ\(_{38}\) input at
+every Lennard-Jones and Morse size, the code hits LJ\(_{98}\) on 7 of 12
+seeds and GMIN on none (\(p=0.016\)), Morse M\(_{55}\) and M\(_{80}\) at
+\(\rho=14\) on 9 and 6 of 12 against none (\(p=3.9\times 10^{-3}\) and
+0.031).
+Against GMIN's rigid TIP4P potential, the code hits (H\(_2\)O)\(_{15}\) and
+(H\(_2\)O)\(_{20}\) on 7 and 6 of 12 against none (\(p=0.016\) and 0.031).
 \end{abstract}
 
 \section{Introduction}
@@ -235,7 +237,7 @@ equation~\ref{eq:csm} defines, runs every ten quenches.
 
 \subsection{Stall rules}
 \label{sec:stall}
-Write \(S\) for the number of force calls charged so far, and
+Write \(S\) for the number of combined energy and gradient passes charged so far, and
 \(S_{\star}\) for the value of \(S\) at the last time the stored best
 fell by more than \(10^{-9}\).
 A call plateau is due when
@@ -558,7 +560,7 @@ With and Without are the hits of the two arms, Only with and Only without the se
 one arm alone hits.
 \(p_\mathrm{M}\) is the two-sided exact McNemar test on those seeds, and \(\Delta\) the 95\%
 interval of Newcombe's method 10 for paired data, for the hit rate with the templates less that without them.
-Budgets are in force calls.
+A budget counts one call per combined energy and gradient pass.
 The rows are \texttt{paper/jctc/data/knockouts/templates/rows.csv}, copied from the
 record their \texttt{PROVENANCE} names.}
 \label{tab:knockouts}
@@ -607,9 +609,9 @@ structure templates removed, on eight Lennard-Jones sizes and Morse
 M\(_{80}\) at \(\rho=6\), and the submitted revision \texttt{61fa67cf} on
 Gupta Au\(_{55}\) and on Morse M\(_{55}\) and M\(_{80}\) at \(\rho=6\) and
 14.
-Each block runs both arms of each cluster on one core of one host, on seeds
-2000--2011 in alternating order, at the budget in the table, from the start
-this code writes for the seed.
+Each block runs both arms of each cluster on seeds 2000--2011 in
+alternating order, at the budget in the table, from the start this code
+writes for the seed.
 GMIN runs one input at every Lennard-Jones and Morse size, the Wales-group
 LJ\(_{38}\) introduction file: \(T=1.0\), step \(0.40\), a taboo list of the
 last \(20\) minima within \(4.0\), and a restart after \(40\) steps without a
@@ -653,7 +655,7 @@ revisions.
 % gmin-panel table: start
 \begin{table}
 \caption{This code at the revision each block names against GMIN with the inputs of
-Section~\ref{sec:protocol}, both arms of each cluster on one host, in alternating order by seed.
+Section~\ref{sec:protocol}, both arms of each cluster in alternating order by seed.
 On every Lennard-Jones size, LJ\(_{75}\) included, GMIN runs the Wales-group LJ\(_{38}\)
 introduction file with no symmetrization keyword, not the published LJ\(_{75}\) input.
 The harness clears every driver variable, so each driver runs its own preset:
@@ -667,10 +669,11 @@ Their search code differs only by \texttt{plateau\_heat}, which the preset leave
 M\(_{80}\) at \(\rho=6\) takes the same calls to the same minimum on every seed at both.
 GMIN is the snapshot of SVNREV \texttt{9cbec1a4} built with three patches,
 \texttt{bench/lj104-lattice/v2/h2h-gmin.patch}, \texttt{scripts/morse\_h2h/morse-timer.patch},
-and \texttt{bench/metal-cluster-h2h/gmin-bgupta.patch}, which cap the force calls, time the
+and \texttt{bench/metal-cluster-h2h/gmin-bgupta.patch}, which cap the \texttt{POTENTIAL} entries, time the
 potential, and, in the serial build, set the run index (\texttt{JP=1}) before its first use.
-Seeds 2000--2011, one core, budget in force calls; both arms of a seed start from the
-same geometry.
+Seeds 2000--2011. The budget of this code counts one call per combined energy and gradient
+pass, and GMIN's budget counts every \texttt{POTENTIAL} entry, including \texttt{GRADT=false}.
+Both arms of a seed start from the same geometry.
 The column Only counts the seeds that arm alone hits, and Both and Neither the seeds
 both arms and neither arm hit.
 Calls and IQR are the median and the interquartile range of the
@@ -754,8 +757,10 @@ lowest energy of this code there is \(-1113.035\)~kJ/mol and that of GMIN
 \caption{This code against GMIN on rigid TIP4P water clusters, paired by seed.
 This code is \texttt{Config::recommended\_tip4p}\((N)\) of revision \texttt{e1a69a57}, after the
 removal of the structure templates, through \texttt{h2h\_seed} with the rigid water geometry of GMIN.
-Seeds 2000--2011, \(2\times 10^{6}\) force calls, one core, both arms from the same start on each
+Seeds 2000--2011, \(2\times 10^{6}\) calls, both arms from the same start on each
 seed, in alternating order.
+The budget of this code counts one call per combined energy and gradient pass, and GMIN's budget counts
+every \texttt{POTENTIAL} entry, including \texttt{GRADT=false}.
 Hits, Only, \(p_\mathrm{M}\) and \(\Delta\) are as in Table~\ref{tab:gmin};
 \(p_\mathrm{calls}\) and \(p_\mathrm{wall}\) are the two-sided exact Wilcoxon signed-rank test on
 the per-seed differences in calls, with a miss at the budget, and in wall.
@@ -806,7 +811,7 @@ none; no arm hits Au\(_{55}\).
 On the Morse clusters this code hits M\(_{38}\) and M\(_{55}\) at
 \(\rho=6\) on 12 of 12 and at \(\rho=14\) on 9 and 8 of 12, and neither ASE
 arm hits any; each ASE run there stopped at the cap after 3933 to 20950
-force calls.
+calls.
 
 % ase-panel table: start
 \begin{table}
@@ -816,7 +821,8 @@ force calls.
 This code is \texttt{Config::recommended}\((N)\) through \texttt{examples/ase\_panel.rs} on
 Lennard-Jones and \texttt{Config::recommended\_with\_scales} at the Gupta length and well depth
 on Au\(_{55}\), with no species labels, which is not the Au\(_{55}\) preset of Table~\ref{tab:gmin}.
-Seeds 2000--2011, one core of one host, budget in force calls.
+Seeds 2000--2011.
+The budget of this code counts one call per combined energy and gradient pass.
 Cap is the wall in seconds at which a run of this code or of BH or MH stops, three times
 the slowest wall of the cluster preset of this code on that cluster.
 Stops counts the BH and MH runs that ended at the cap; those runs
@@ -853,7 +859,8 @@ Au\(_{55}\) & \(1\times 10^{6}\) & 107.9 & 0/12 & 0/12 & 0/12 & 12 & 12 & 36.000
 of the Morse pair at revision \texttt{5eb79cdc} through \texttt{examples/ase\_nonlj.rs},
 against the basin hopping
 (BH) and minima hopping (MH) of ASE 3.29.0 on Morse clusters, at the effort each run reports.
-Seeds 2000--2011, one core of one host, budget in force calls.
+Seeds 2000--2011.
+The budget of this code counts one call per combined energy and gradient pass.
 Cap is the wall in seconds at which a run of this code or of BH or MH stops, three times
 the slowest wall of the cluster preset of this code on that cluster.
 Stops counts the BH and MH runs that ended at the cap; those runs
@@ -888,10 +895,12 @@ Removing the structure templates, at a revision and its child in the history
 of this basin-hopping code, lowers the hits on Morse M\(_{38}\) at
 \(\rho=14\) from 12 of 12 to 4, the one cluster of that run whose arms differ
 at \(p<0.05\).
-With the templates removed, the code hits more seeds than GMIN on
+With the templates removed, the code hits more seeds than GMIN, run with
+the Wales-group LJ\(_{38}\) input at every Lennard-Jones and Morse size, on
 LJ\(_{98}\), 7 of 12 against none, on Morse M\(_{55}\) and M\(_{80}\) at
-\(\rho=14\) at the submitted revision, 9 and 6 of 12 against none, and on
-rigid TIP4P (H\(_2\)O)\(_{15}\) and (H\(_2\)O)\(_{20}\).
+\(\rho=14\) at the submitted revision, 9 and 6 of 12 against none.
+Against GMIN's rigid TIP4P potential, the code hits (H\(_2\)O)\(_{15}\) and
+(H\(_2\)O)\(_{20}\).
 GMIN hits more seeds than the code on LJ\(_{104}\) and LJ\(_{150}\), 6 and 9
 of 12 against 5 and 8, with \(p=1\) on both.
 

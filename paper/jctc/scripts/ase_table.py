@@ -192,7 +192,7 @@ def table(caption: list[str], label: str, rows: list[str]) -> str:
 
 
 COMMON = [
-    "Seeds 2000--2011, one core of one host, budget in force calls.",
+    "The budget of this code counts one call per combined energy and gradient pass.",
     "Cap is the wall in seconds at which a run of this code or of BH or MH stops, three times",
     "the slowest wall of the cluster preset of this code on that cluster.",
     "Stops counts the BH and MH runs that ended at the cap; those runs",
@@ -213,8 +213,8 @@ def ase_block() -> str:
         "This code is \\texttt{Config::recommended}\\((N)\\) through \\texttt{examples/ase\\_panel.rs} on",
         "Lennard-Jones and \\texttt{Config::recommended\\_with\\_scales} at the Gupta length and well depth",
         "on Au\\(_{55}\\), with no species labels, which is not the Au\\(_{55}\\) preset of Table~\\ref{tab:gmin}.",
-        *COMMON[:-1],
-        COMMON[-1],
+        "Seeds 2000--2011.",
+        *COMMON,
         "The rows are \\texttt{paper/jctc/data/ase\\_panel/*/rows.csv}.}",
     ]
     return table(caption, "tab:ase", body(LJ, lj_panel()))
@@ -226,6 +226,7 @@ def morse_block() -> str:
         f"of the Morse pair at revision \\texttt{{{MORSE_REVISION[:8]}}} through \\texttt{{examples/ase\\_nonlj.rs}},",
         "against the basin hopping",
         f"(BH) and minima hopping (MH) of ASE {ASE_VERSION} on Morse clusters, at the effort each run reports.",
+        "Seeds 2000--2011.",
         *COMMON,
         "The rows are \\texttt{paper/jctc/data/ase\\_panel/morse/rows.csv}.}",
     ]
