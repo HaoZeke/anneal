@@ -280,14 +280,14 @@ ScaledInverse scaled_inverse(const double a[9], double inv[9]) {
   if (!invert(unit, iunit)) {
     return ScaledInverse::Singular;
   }
-  if (!well_conditioned(unit, iunit)) {
-    return ScaledInverse::IllConditioned;
-  }
   for (int k = 0; k < 9; ++k) {
     inv[k] = iunit[k] / scale;
     if (!std::isfinite(inv[k])) {
       return ScaledInverse::Singular;
     }
+  }
+  if (!well_conditioned(unit, iunit)) {
+    return ScaledInverse::IllConditioned;
   }
   return ScaledInverse::Ok;
 }
@@ -795,7 +795,7 @@ MinimumImage::MinimumImage(const double *cell,
   }
   double inv[9];
   if (!invert(raw, inv) &&
-      scaled_inverse(raw, inv) != ScaledInverse::Ok) {
+      scaled_inverse(raw, inv) == ScaledInverse::Singular) {
     throw std::invalid_argument("periodic cell must be nonsingular");
   }
   double basis[3][3] = {
@@ -813,7 +813,8 @@ MinimumImage::MinimumImage(const double *cell,
       }
     }
     double rinv[9];
-    if (!invert(reduced, rinv)) {
+    if (!invert(reduced, rinv) &&
+        scaled_inverse(reduced, rinv) == ScaledInverse::Singular) {
       throw std::invalid_argument("periodic cell must be nonsingular");
     }
     for (int k = 0; k < 9; ++k) {

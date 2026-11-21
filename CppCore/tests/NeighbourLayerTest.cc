@@ -1283,7 +1283,14 @@ TEST_CASE("naive cofactor cancellation scaled by 1e3 is rejected",
   requireCancellingThrows(1e3);
 }
 
-TEST_CASE("mixed periodicity on a skewed cell keeps the 0.466 pair and matches brute force",
+TEST_CASE("naive cofactor cancellation scaled by 1e-110 is rejected",
+          "[nlist][triclinic][singular]") {
+  setThreads("1");
+  requireCancellingThrows(1e-110);
+}
+
+TEST_CASE("mixed periodicity on a skewed cell keeps the 0.466 pair and matches "
+          "brute force",
           "[nlist][triclinic][mixed]") {
   setThreads("1");
   const double cutoff = 1.0;

@@ -41,6 +41,10 @@ public:
   /// images. A fold the bounds settle does not count. Tests read it to pin
   /// the paths that need no search.
   [[nodiscard]] static std::uint64_t searches() noexcept;
+  /// Inverse of the working cell basis, row-major.
+  [[nodiscard]] const std::array<double, 9> &inverse() const noexcept {
+    return inverse_;
+  }
 
 private:
   std::array<double, 9> cell_{};
