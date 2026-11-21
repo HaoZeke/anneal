@@ -45,10 +45,14 @@ from anneal._core import (
     Bounds,
     COPPER_Z,
     Config,
+    DEFAULT_BETA0,
     DEFAULT_HIT_TOL,
+    DEFAULT_STEPS_PER_CONTROL,
+    DEFAULT_TARGET_WALKERS,
     GOLD_Z,
     GminTip4p,
     Gupta,
+    IDENTITY_TOL,
     PLATINUM_Z,
     PairPotential,
     SEARCH_HIT_TOL,
@@ -68,9 +72,11 @@ from anneal._core import (
     gmin_tip4p_sites,
     interleaved_gmin_from_block as _core_interleaved_gmin_from_block,
     low_discrepancy_points as _core_low_discrepancy_points,
+    osa_acceptance_rate,
     pilot_draws_qmc as _core_pilot_draws_qmc,
     polish as _core_polish,
     quench as _core_quench,
+    recommend_target_n,
     rigid_from_ohh as _core_rigid_from_ohh,
     qmc_best1bin_scout as _core_qmc_best1bin_scout,
     qmc_best1bin_scout_objective as _core_qmc_best1bin_scout_objective,
@@ -974,6 +980,7 @@ def gpmd_optimize(
         grad_fn,
         x0_arr,
     )
+    out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
 
 
@@ -997,7 +1004,7 @@ def amsa_optimize(
     low_arr = _flat(low)
     high_arr = _flat(high)
     x0_arr = _flat_or_none(x0)
-    return _core_amsa_optimize(
+    out = _core_amsa_optimize(
         obj_fn,
         low_arr,
         high_arr,
@@ -1006,6 +1013,64 @@ def amsa_optimize(
         grad_fn,
         x0_arr,
     )
+    out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
+    return out
+
+
+def _box_hop_kwargs(
+    *,
+    identity_tol=None,
+    shared_deposits=None,
+    shared_visit_policy=None,
+    escape=None,
+    langevin_steps=None,
+    langevin_omega0=None,
+    langevin_dt=None,
+    langevin_noise=None,
+    langevin_friction=None,
+    coverage_shared=None,
+    coverage_radius=None,
+    coverage_neighbors=None,
+    coverage_height=None,
+    coverage_well_tempering=None,
+    coverage_peer_weight=None,
+):
+    kwargs = {}
+    if identity_tol is not None:
+        kwargs["identity_tol"] = float(identity_tol)
+    if shared_deposits is not None:
+        kwargs["shared_deposits"] = int(shared_deposits)
+    if shared_visit_policy is not None:
+        kwargs["shared_visit_policy"] = str(shared_visit_policy)
+    if escape is not None:
+        kwargs["escape"] = str(escape)
+    if langevin_steps is not None:
+        kwargs["langevin_steps"] = int(langevin_steps)
+    if langevin_omega0 is not None:
+        kwargs["langevin_omega0"] = float(langevin_omega0)
+    if langevin_dt is not None:
+        kwargs["langevin_dt"] = float(langevin_dt)
+    if langevin_noise is not None:
+        kwargs["langevin_noise"] = str(langevin_noise)
+    if langevin_friction is not None:
+        kwargs["langevin_friction"] = float(langevin_friction)
+    if coverage_shared is not None:
+        kwargs["coverage_shared"] = bool(coverage_shared)
+    if coverage_radius is not None:
+        kwargs["coverage_radius"] = float(coverage_radius)
+    if coverage_neighbors is not None:
+        if not isinstance(coverage_neighbors, (int, np.integer)) or isinstance(
+            coverage_neighbors, bool
+        ):
+            raise TypeError("coverage_neighbors must be an integer")
+        kwargs["coverage_neighbors"] = int(coverage_neighbors)
+    if coverage_height is not None:
+        kwargs["coverage_height"] = float(coverage_height)
+    if coverage_well_tempering is not None:
+        kwargs["coverage_well_tempering"] = float(coverage_well_tempering)
+    if coverage_peer_weight is not None:
+        kwargs["coverage_peer_weight"] = float(coverage_peer_weight)
+    return kwargs
 
 
 def box_ensemble_optimize(
@@ -1019,6 +1084,22 @@ def box_ensemble_optimize(
     replicas: int = 4,
     history: str = "shared",
     membership: str = "accepted",
+    *,
+    identity_tol: float | None = None,
+    shared_deposits: int | None = None,
+    shared_visit_policy: str | None = None,
+    escape: str | None = None,
+    langevin_steps: int | None = None,
+    langevin_omega0: float | None = None,
+    langevin_dt: float | None = None,
+    langevin_noise: str | None = None,
+    langevin_friction: float | None = None,
+    coverage_shared: bool | None = None,
+    coverage_radius: float | None = None,
+    coverage_neighbors: int | None = None,
+    coverage_height: float | None = None,
+    coverage_well_tempering: float | None = None,
+    coverage_peer_weight: float | None = None,
 ):
     """Communicating box hops on SharedDesignHistory / MinimumHistory.
 
@@ -1028,6 +1109,23 @@ def box_ensemble_optimize(
     low_arr = np.asarray(low, dtype=np.float64)
     high_arr = np.asarray(high, dtype=np.float64)
     x0_arr = None if x0 is None else np.asarray(x0, dtype=np.float64)
+    hop_kwargs = _box_hop_kwargs(
+        identity_tol=identity_tol,
+        shared_deposits=shared_deposits,
+        shared_visit_policy=shared_visit_policy,
+        escape=escape,
+        langevin_steps=langevin_steps,
+        langevin_omega0=langevin_omega0,
+        langevin_dt=langevin_dt,
+        langevin_noise=langevin_noise,
+        langevin_friction=langevin_friction,
+        coverage_shared=coverage_shared,
+        coverage_radius=coverage_radius,
+        coverage_neighbors=coverage_neighbors,
+        coverage_height=coverage_height,
+        coverage_well_tempering=coverage_well_tempering,
+        coverage_peer_weight=coverage_peer_weight,
+    )
     out = _core_box_ensemble_optimize(
         obj_fn,
         low_arr,
@@ -1039,6 +1137,7 @@ def box_ensemble_optimize(
         int(replicas),
         str(history),
         str(membership),
+        **hop_kwargs,
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -1056,9 +1155,21 @@ def ensemble_optimize(
     history: str = "shared",
     membership: str = "accepted",
     *,
-    coverage_shared=None,
-    coverage_radius=None,
-    coverage_neighbors=None,
+    identity_tol: float | None = None,
+    shared_deposits: int | None = None,
+    shared_visit_policy: str | None = None,
+    escape: str | None = None,
+    langevin_steps: int | None = None,
+    langevin_omega0: float | None = None,
+    langevin_dt: float | None = None,
+    langevin_noise: str | None = None,
+    langevin_friction: float | None = None,
+    coverage_shared: bool | None = None,
+    coverage_radius: float | None = None,
+    coverage_neighbors: int | None = None,
+    coverage_height: float | None = None,
+    coverage_well_tempering: float | None = None,
+    coverage_peer_weight: float | None = None,
 ):
     """Search on a design box.
 
@@ -1087,6 +1198,23 @@ def ensemble_optimize(
     low_arr = np.asarray(low, dtype=np.float64)
     high_arr = np.asarray(high, dtype=np.float64)
     x0_arr = None if x0 is None else np.asarray(x0, dtype=np.float64)
+    hop_kwargs = _box_hop_kwargs(
+        identity_tol=identity_tol,
+        shared_deposits=shared_deposits,
+        shared_visit_policy=shared_visit_policy,
+        escape=escape,
+        langevin_steps=langevin_steps,
+        langevin_omega0=langevin_omega0,
+        langevin_dt=langevin_dt,
+        langevin_noise=langevin_noise,
+        langevin_friction=langevin_friction,
+        coverage_shared=coverage_shared,
+        coverage_radius=coverage_radius,
+        coverage_neighbors=coverage_neighbors,
+        coverage_height=coverage_height,
+        coverage_well_tempering=coverage_well_tempering,
+        coverage_peer_weight=coverage_peer_weight,
+    )
     out = _core_ensemble_optimize(
         obj_fn,
         low_arr,
@@ -1098,9 +1226,7 @@ def ensemble_optimize(
         int(replicas),
         str(history),
         str(membership),
-        coverage_shared=coverage_shared,
-        coverage_radius=coverage_radius,
-        coverage_neighbors=coverage_neighbors,
+        **hop_kwargs,
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -1279,9 +1405,21 @@ def minimize(
     history="shared",
     membership="accepted",
     store=None,
+    identity_tol: float | None = None,
+    shared_deposits: int | None = None,
+    shared_visit_policy: str | None = None,
+    escape: str | None = None,
+    langevin_steps: int | None = None,
+    langevin_omega0: float | None = None,
+    langevin_dt: float | None = None,
+    langevin_noise: str | None = None,
+    langevin_friction: float | None = None,
     coverage_shared=None,
     coverage_radius=None,
     coverage_neighbors=None,
+    coverage_height: float | None = None,
+    coverage_well_tempering: float | None = None,
+    coverage_peer_weight: float | None = None,
 ):
     """Box search with a SciPy ``minimize`` shape.
 
@@ -1344,9 +1482,21 @@ def minimize(
         replicas=int(replicas),
         history=str(history),
         membership=str(membership),
+        identity_tol=identity_tol,
+        shared_deposits=shared_deposits,
+        shared_visit_policy=shared_visit_policy,
+        escape=escape,
+        langevin_steps=langevin_steps,
+        langevin_omega0=langevin_omega0,
+        langevin_dt=langevin_dt,
+        langevin_noise=langevin_noise,
+        langevin_friction=langevin_friction,
         coverage_shared=coverage_shared,
         coverage_radius=coverage_radius,
         coverage_neighbors=coverage_neighbors,
+        coverage_height=coverage_height,
+        coverage_well_tempering=coverage_well_tempering,
+        coverage_peer_weight=coverage_peer_weight,
     )
     fun_v = float(out["best_val"])
     best = np.asarray(out["best_pos"], dtype=np.float64)
@@ -1396,6 +1546,7 @@ def bfwt_optimize(
         grad_fn,
         x0_arr,
     )
+    out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
 
 
@@ -1406,16 +1557,26 @@ def dmc_population_optimize(
     budget: int,
     seed: int = 0,
     grad_fn=None,
-    target_n: int = 16,
-    steps_per_control: int = 4,
+    target_n: int | None = None,
+    steps_per_control: int = DEFAULT_STEPS_PER_CONTROL,
     x0=None,
+    *,
+    beta0: float = DEFAULT_BETA0,
 ):
     """Population-controlled diffusion search (DMC-inspired; classical objective).
 
     Parameters
     ----------
+    target_n :
+        Optional walker population size. ``None`` (default) uses
+        ``recommend_target_n(budget, dim)`` matching Rust
+        ``dmc_population_optimize``.
+    steps_per_control :
+        Diffusion steps between population-control events (default ``2``).
     x0 :
         Optional starting point for walker 0 (protocol anchor / incumbent).
+    beta0 :
+        Initial inverse-temperature scale (default ``1.0``).
     """
     out = _core_dmc_population_optimize(
         obj_fn,
@@ -1424,9 +1585,10 @@ def dmc_population_optimize(
         int(budget),
         int(seed),
         grad_fn,
-        int(target_n),
+        None if target_n is None else int(target_n),
         int(steps_per_control),
         _flat_or_none(x0),
+        beta0=float(beta0),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -1447,6 +1609,9 @@ def global_optimize(
     coverage_shared: bool = True,
     coverage_radius: float = 0.05,
     coverage_neighbors: int = 0,
+    coverage_height: float = 0.1,
+    coverage_well_tempering: float = 5.0,
+    coverage_peer_weight: float = 1.0,
 ):
     """Thompson-allocated portfolio global optimizer.
 
@@ -1585,6 +1750,9 @@ def global_optimize(
         coverage_shared=bool(coverage_shared),
         coverage_radius=float(coverage_radius),
         coverage_neighbors=int(coverage_neighbors),
+        coverage_height=float(coverage_height),
+        coverage_well_tempering=float(coverage_well_tempering),
+        coverage_peer_weight=float(coverage_peer_weight),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -1596,6 +1764,9 @@ def global_optimize_objective(
     seed: int = 0,
     use_gradient: bool = True,
     x0=None,
+    *,
+    noise_sigma: float | None = None,
+    policy: str = "auto",
 ):
     """Portfolio global optimizer over a native ``PyObjective`` handle."""
     out = _core_global_optimize_objective(
@@ -1603,8 +1774,9 @@ def global_optimize_objective(
         int(budget),
         int(seed),
         bool(use_gradient),
-        None,
+        None if noise_sigma is None else float(noise_sigma),
         _flat_or_none(x0),
+        policy=str(policy),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -1617,10 +1789,14 @@ __all__ = [
     "Bounds",
     "COPPER_Z",
     "Config",
+    "DEFAULT_BETA0",
     "DEFAULT_HIT_TOL",
+    "DEFAULT_STEPS_PER_CONTROL",
+    "DEFAULT_TARGET_WALKERS",
     "GOLD_Z",
     "GminTip4p",
     "Gupta",
+    "IDENTITY_TOL",
     "PLATINUM_Z",
     "PairPotential",
     "PotentialCalculator",
@@ -1643,6 +1819,8 @@ __all__ = [
     "energy_ohh",
     "gmin_tip4p_sites",
     "interleaved_gmin_from_block",
+    "osa_acceptance_rate",
+    "recommend_target_n",
     "rigid_from_ohh",
     "TvmFfiTensorMetadata",
     "__version__",

@@ -12,6 +12,10 @@ from anneal.device import DeviceHistory, EnsembleHistory
 __version__: str
 DEFAULT_HIT_TOL: float
 SEARCH_HIT_TOL: float
+DEFAULT_TARGET_WALKERS: int
+DEFAULT_STEPS_PER_CONTROL: int
+DEFAULT_BETA0: float
+IDENTITY_TOL: float
 COPPER_Z: int
 GOLD_Z: int
 PLATINUM_Z: int
@@ -34,6 +38,12 @@ class BasinBias:
     def deepest(self) -> float: ...
     @property
     def missing_mass(self) -> float: ...
+    merge_radius: float
+    height: float
+    def well_depth(self, i: int) -> float: ...
+    def wells(self) -> list[tuple[npt.NDArray[np.float64], float]]: ...
+    def deepest_wells(self, count: int) -> list[tuple[npt.NDArray[np.float64], float]]: ...
+    def cap_basins(self, cap: int) -> None: ...
 
 class Boltzmann:
     t_init: float
@@ -584,6 +594,7 @@ class Ledger:
     def best(self) -> float: ...
 
 def energy_hits(energy: float, target: float, tol: float = ...) -> bool: ...
+def recommend_target_n(budget: int, dim: int) -> int: ...
 def rigid_from_ohh(cartesian: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]: ...
 def energy_ohh(cartesian: npt.NDArray[np.float64]) -> float: ...
 def block_from_interleaved_gmin(
@@ -842,9 +853,11 @@ def dmc_population_optimize(
     budget: int,
     seed: int = 0,
     grad_fn: Callable[[npt.NDArray[np.float64]], Sequence[float] | npt.NDArray[np.float64]] | None = None,
-    target_n: int = 16,
-    steps_per_control: int = 4,
+    target_n: int | None = None,
+    steps_per_control: int = 2,
     x0: npt.NDArray[np.float64] | None = None,
+    *,
+    beta0: float = 1.0,
 ) -> dict[str, Any]: ...
 def gpmd_optimize(
     obj_fn: Callable[[npt.NDArray[np.float64]], float],
@@ -885,6 +898,22 @@ def box_ensemble_optimize(
     replicas: int = 4,
     history: str = "shared",
     membership: str = "accepted",
+    *,
+    identity_tol: float | None = None,
+    shared_deposits: int | None = None,
+    shared_visit_policy: str | None = None,
+    escape: str | None = None,
+    langevin_steps: int | None = None,
+    langevin_omega0: float | None = None,
+    langevin_dt: float | None = None,
+    langevin_noise: str | None = None,
+    langevin_friction: float | None = None,
+    coverage_shared: bool | None = None,
+    coverage_radius: float | None = None,
+    coverage_neighbors: int | None = None,
+    coverage_height: float | None = None,
+    coverage_well_tempering: float | None = None,
+    coverage_peer_weight: float | None = None,
 ) -> dict[str, Any]: ...
 def ensemble_optimize(
     obj_fn: Callable[[npt.NDArray[np.float64]], float],
@@ -898,9 +927,21 @@ def ensemble_optimize(
     history: str = "shared",
     membership: str = "accepted",
     *,
+    identity_tol: float | None = None,
+    shared_deposits: int | None = None,
+    shared_visit_policy: str | None = None,
+    escape: str | None = None,
+    langevin_steps: int | None = None,
+    langevin_omega0: float | None = None,
+    langevin_dt: float | None = None,
+    langevin_noise: str | None = None,
+    langevin_friction: float | None = None,
     coverage_shared: bool | None = None,
     coverage_radius: float | None = None,
     coverage_neighbors: int | None = None,
+    coverage_height: float | None = None,
+    coverage_well_tempering: float | None = None,
+    coverage_peer_weight: float | None = None,
 ) -> dict[str, Any]: ...
 def global_optimize(
     obj_fn: Callable[[npt.NDArray[np.float64]], float],
@@ -917,6 +958,9 @@ def global_optimize(
     coverage_shared: bool = True,
     coverage_radius: float = 0.05,
     coverage_neighbors: int = 0,
+    coverage_height: float = 0.1,
+    coverage_well_tempering: float = 5.0,
+    coverage_peer_weight: float = 1.0,
 ) -> dict[str, Any]: ...
 def global_optimize_objective(
     objective: PyObjective,
@@ -925,6 +969,8 @@ def global_optimize_objective(
     use_gradient: bool = True,
     noise_sigma: float | None = None,
     x0: npt.NDArray[np.float64] | None = None,
+    *,
+    policy: str = "auto",
 ) -> dict[str, Any]: ...
 def cluster_search(
     obj_fn: Callable[[npt.NDArray[np.float64]], float] | NativeClusterPotential,

@@ -11,8 +11,12 @@ import numpy.typing as npt
 
 from anneal._core import (
     COPPER_Z as COPPER_Z,
+    DEFAULT_BETA0 as DEFAULT_BETA0,
     DEFAULT_HIT_TOL as DEFAULT_HIT_TOL,
+    DEFAULT_STEPS_PER_CONTROL as DEFAULT_STEPS_PER_CONTROL,
+    DEFAULT_TARGET_WALKERS as DEFAULT_TARGET_WALKERS,
     GOLD_Z as GOLD_Z,
+    IDENTITY_TOL as IDENTITY_TOL,
     PLATINUM_Z as PLATINUM_Z,
     SEARCH_HIT_TOL as SEARCH_HIT_TOL,
     BasinBias as BasinBias,
@@ -36,6 +40,8 @@ from anneal._core import (
     __version__ as __version__,
     energy_hits as energy_hits,
     gmin_tip4p_sites as gmin_tip4p_sites,
+    osa_acceptance_rate as osa_acceptance_rate,
+    recommend_target_n as recommend_target_n,
 )
 from anneal._landfold import (
     LandfoldMap as LandfoldMap,
@@ -388,6 +394,22 @@ def box_ensemble_optimize(
     replicas: int = 4,
     history: str = "shared",
     membership: str = "accepted",
+    *,
+    identity_tol: float | None = None,
+    shared_deposits: int | None = None,
+    shared_visit_policy: str | None = None,
+    escape: str | None = None,
+    langevin_steps: int | None = None,
+    langevin_omega0: float | None = None,
+    langevin_dt: float | None = None,
+    langevin_noise: str | None = None,
+    langevin_friction: float | None = None,
+    coverage_shared: bool | None = None,
+    coverage_radius: float | None = None,
+    coverage_neighbors: int | None = None,
+    coverage_height: float | None = None,
+    coverage_well_tempering: float | None = None,
+    coverage_peer_weight: float | None = None,
 ) -> dict[str, Any]: ...
 def ensemble_optimize(
     obj_fn: Callable[[npt.NDArray[np.float64]], float],
@@ -401,9 +423,21 @@ def ensemble_optimize(
     history: str = "shared",
     membership: str = "accepted",
     *,
+    identity_tol: float | None = None,
+    shared_deposits: int | None = None,
+    shared_visit_policy: str | None = None,
+    escape: str | None = None,
+    langevin_steps: int | None = None,
+    langevin_omega0: float | None = None,
+    langevin_dt: float | None = None,
+    langevin_noise: str | None = None,
+    langevin_friction: float | None = None,
     coverage_shared: bool | None = None,
     coverage_radius: float | None = None,
     coverage_neighbors: int | None = None,
+    coverage_height: float | None = None,
+    coverage_well_tempering: float | None = None,
+    coverage_peer_weight: float | None = None,
 ) -> dict[str, Any]: ...
 def minimize(
     fun: Callable[[npt.NDArray[np.float64]], float],
@@ -417,9 +451,21 @@ def minimize(
     history: str = "shared",
     membership: str = "accepted",
     store: str | os.PathLike[str] | Any | None = None,
+    identity_tol: float | None = None,
+    shared_deposits: int | None = None,
+    shared_visit_policy: str | None = None,
+    escape: str | None = None,
+    langevin_steps: int | None = None,
+    langevin_omega0: float | None = None,
+    langevin_dt: float | None = None,
+    langevin_noise: str | None = None,
+    langevin_friction: float | None = None,
     coverage_shared: bool | None = None,
     coverage_radius: float | None = None,
     coverage_neighbors: int | None = None,
+    coverage_height: float | None = None,
+    coverage_well_tempering: float | None = None,
+    coverage_peer_weight: float | None = None,
 ) -> MinimizeResult: ...
 def bfwt_optimize(
     obj_fn: Callable[[npt.NDArray[np.float64]], float],
@@ -438,9 +484,11 @@ def dmc_population_optimize(
     budget: int,
     seed: int = 0,
     grad_fn: Callable[[npt.NDArray[np.float64]], Sequence[float] | npt.NDArray[np.float64]] | None = None,
-    target_n: int = 16,
-    steps_per_control: int = 4,
+    target_n: int | None = None,
+    steps_per_control: int = 2,
     x0: npt.ArrayLike | None = None,
+    *,
+    beta0: float = 1.0,
 ) -> dict[str, Any]: ...
 def global_optimize(
     obj_fn: Callable[[npt.NDArray[np.float64]], float],
@@ -457,6 +505,9 @@ def global_optimize(
     coverage_shared: bool = True,
     coverage_radius: float = 0.05,
     coverage_neighbors: int = 0,
+    coverage_height: float = 0.1,
+    coverage_well_tempering: float = 5.0,
+    coverage_peer_weight: float = 1.0,
 ) -> dict[str, Any]: ...
 def global_optimize_objective(
     objective: PyObjective,
@@ -464,6 +515,9 @@ def global_optimize_objective(
     seed: int = 0,
     use_gradient: bool = True,
     x0: npt.ArrayLike | None = None,
+    *,
+    noise_sigma: float | None = None,
+    policy: str = "auto",
 ) -> dict[str, Any]: ...
 
 __all__: list[str]

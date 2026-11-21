@@ -32,6 +32,19 @@ read/write attributes for every active configuration field.
 instance directly, and delegates scaled presets to
 =Config::recommended_with_scales= and =Config::for_cluster_with_scales=.
 
+=dmc_population_optimize= defaults (=target_n=None= via
+=recommend_target_n(budget, dim)=, =steps_per_control=2=, =beta0=1.0=)
+match Rust =dmc_population::dmc_population_optimize=. =box_ensemble_optimize=,
+=ensemble_optimize=, =minimize=, and =global_optimize= expose the full
+=BoxEnsembleConfig=, =GleEscapeConfig=, and =BoxCoverageConfig= keyword
+surface (=identity_tol=, =shared_deposits=, =shared_visit_policy=,
+=escape="gaussian"|"langevin"=, =langevin_*=, =coverage_height=,
+=coverage_well_tempering=, =coverage_peer_weight=).
+=global_optimize_objective= accepts =noise_sigma= and =policy=,
+=osa_acceptance_rate= is exported at top level, and =BasinBias= supports
+=w0 >= 0= along with =merge_radius=, =height=, =well_depth=, =wells=,
+=deepest_wells=, and =cap_basins=.
+
 * C and C++ (cargo-c)
 
 The Rust crate produces a =cdylib=, =staticlib=, generated header =anneal-core.h=, and pkg-config metadata =anneal-core.pc= via cargo-c.
