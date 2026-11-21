@@ -321,18 +321,25 @@ impl Cloud {
     #[target_feature(enable = "avx2")]
     unsafe fn nearest_index_avx2(&self, image: [f64; 3]) -> (usize, f64) {
         use std::arch::x86_64::{
-            _mm256_add_pd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_set1_pd, _mm256_storeu_pd,
+            _CMP_LT_OQ, _mm256_add_epi64, _mm256_add_pd, _mm256_blendv_epi8, _mm256_blendv_pd,
+            _mm256_castpd_si256, _mm256_cmp_pd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_set_epi64x,
+            _mm256_set1_epi64x, _mm256_set1_pd, _mm256_storeu_pd, _mm256_storeu_si256,
             _mm256_sub_pd,
         };
         let ix = _mm256_set1_pd(image[0]);
         let iy = _mm256_set1_pd(image[1]);
         let iz = _mm256_set1_pd(image[2]);
         let n = self.xs.len();
+        if n < 4 {
+            return self.nearest_index_scalar(image);
+        }
         let mut index = 0usize;
-        let mut best = f64::INFINITY;
-        let mut best_index = 0usize;
+        let mut lane_best = _mm256_set1_pd(f64::INFINITY);
+        let mut lane_best_index = _mm256_set_epi64x(3, 2, 1, 0);
+        let mut lane_index = lane_best_index;
+        let four = _mm256_set1_epi64x(4);
         while index + 4 <= n {
-            let lane = unsafe {
+            unsafe {
                 let dx = _mm256_sub_pd(_mm256_loadu_pd(self.xs.as_ptr().add(index)), ix);
                 let dy = _mm256_sub_pd(_mm256_loadu_pd(self.ys.as_ptr().add(index)), iy);
                 let dz = _mm256_sub_pd(_mm256_loadu_pd(self.zs.as_ptr().add(index)), iz);
@@ -340,30 +347,30 @@ impl Cloud {
                     _mm256_add_pd(_mm256_mul_pd(dx, dx), _mm256_mul_pd(dy, dy)),
                     _mm256_mul_pd(dz, dz),
                 );
-                let mut lane = [0.0; 4];
-                _mm256_storeu_pd(lane.as_mut_ptr(), distance);
-                lane
-            };
-            for lane_index in 0..4 {
-                if lane[lane_index] < best {
-                    best = lane[lane_index];
-                    best_index = index + lane_index;
-                }
+                let closer = _mm256_cmp_pd(distance, lane_best, _CMP_LT_OQ);
+                lane_best = _mm256_blendv_pd(lane_best, distance, closer);
+                lane_best_index =
+                    _mm256_blendv_epi8(lane_best_index, lane_index, _mm256_castpd_si256(closer));
+                lane_index = _mm256_add_epi64(lane_index, four);
             }
             index += 4;
         }
-        while index < n {
-            let dx = image[0] - self.xs[index];
-            let dy = image[1] - self.ys[index];
-            let dz = image[2] - self.zs[index];
-            let distance = dx * dx + dy * dy + dz * dz;
-            if distance < best {
-                best = distance;
-                best_index = index;
-            }
-            index += 1;
+        let mut distances = [0.0; 4];
+        let mut indices = [0_i64; 4];
+        unsafe {
+            _mm256_storeu_pd(distances.as_mut_ptr(), lane_best);
+            _mm256_storeu_si256(indices.as_mut_ptr().cast(), lane_best_index);
         }
-        (best_index, best)
+        let mut best = f64::INFINITY;
+        let mut best_index = 0usize;
+        for lane in 0..4 {
+            let candidate_index = indices[lane] as usize;
+            if distances[lane] < best || (distances[lane] == best && candidate_index < best_index) {
+                best = distances[lane];
+                best_index = candidate_index;
+            }
+        }
+        nearest_tail(&self.xs, &self.ys, &self.zs, index, image, best, best_index)
     }
 
     /// # Safety
@@ -450,40 +457,8 @@ impl Cloud {
     /// the chord length, and a high order makes that smaller than the
     /// acceptance tolerance without being a symmetry. A residual that does
     /// pass is kept only when every atom that could have moved did so.
-    /// The nearest-image residual of a turn that maps every atom to itself
-    /// is the chord length. Once the sum of those squared chords reaches
-    /// `cap`, the ordinary scan can reject the turn on its own and the
-    /// neighbour list is not needed. A turn that stays under the cap cannot
-    /// be rejected that way, so it is kept only when some atom can reach a
-    /// different atom.
-    fn identity_stays_under(&self, axis: [f64; 3], order: usize, cap: f64) -> bool {
-        if !cap.is_finite() {
-            return true;
-        }
-        let sine = libm::sin(std::f64::consts::PI / order as f64);
-        let scale = 4.0 * sine * sine;
-        let limit = cap * cap * self.xs.len() as f64;
-        let mut total = 0.0;
-        for index in 0..self.xs.len() {
-            total += scale * self.perp_sq_at(index, axis);
-            if total >= limit {
-                return false;
-            }
-        }
-        true
-    }
-
     fn symmetry_deviation(&self, axis: [f64; 3], order: usize, cap: f64) -> Option<f64> {
         if order < 2 {
-            return None;
-        }
-        // The chord sum is already the residual of a turn that maps every
-        // atom to itself. When that sum stays under the cap, the nearest-image
-        // scan cannot reject the turn, so it is kept only when an atom that
-        // can reach another site actually does. Checking that atom is one
-        // nearest-image query, not a scan of the whole cloud.
-        let stays = self.identity_stays_under(axis, order, cap);
-        if stays && !self.a_mover_lands_elsewhere(axis, order) {
             return None;
         }
         self.exchange_residual(axis, order, cap)
@@ -539,32 +514,6 @@ impl Cloud {
             }
         }
         moved.then_some((total / n as f64).sqrt())
-    }
-
-    /// An atom whose chord reaches half its own gap, and whose image is nearer
-    /// to a different atom than to itself.
-    fn a_mover_lands_elsewhere(&self, axis: [f64; 3], order: usize) -> bool {
-        if order < 2 || self.xs.is_empty() {
-            return false;
-        }
-        let sine = libm::sin(std::f64::consts::PI / order as f64);
-        let scale = 4.0 * sine * sine;
-        let angle = 2.0 * std::f64::consts::PI / order as f64;
-        let s = libm::sin(angle);
-        let co = libm::cos(angle);
-        let gaps = self.gaps();
-        for index in 0..self.xs.len() {
-            let gap = gaps[index];
-            let chord_sq = scale * self.perp_sq_at(index, axis);
-            if !gap.is_finite() || gap <= 0.0 || chord_sq < gap * 0.25 {
-                continue;
-            }
-            let (partner, _) = self.nearest_index(rotate_trig(self.point(index), axis, s, co));
-            if partner != index {
-                return true;
-            }
-        }
-        false
     }
 
     fn point(&self, index: usize) -> [f64; 3] {
@@ -2151,6 +2100,45 @@ mod tests {
 
     #[cfg(target_arch = "x86_64")]
     #[test]
+    fn avx2_nearest_index_matches_scalar_with_ties_and_tails() {
+        if !std::is_x86_feature_detected!("avx2") {
+            return;
+        }
+        let mut state = 0x6a09_e667_f3bc_c909_u64;
+        let mut coordinate = || {
+            state = state
+                .wrapping_mul(0x9e37_79b9_7f4a_7c15)
+                .wrapping_add(0xbb67_ae85_84ca_a73b);
+            (state >> 11) as f64 / (1_u64 << 53) as f64 * 8.0 - 4.0
+        };
+        for n in [1_usize, 2, 3, 4, 5, 7, 8, 9, 13, 18] {
+            let mut coords: Vec<f64> = (0..3 * n).map(|_| coordinate()).collect();
+            if n > 4 {
+                for dimension in 0..3 {
+                    coords[3 * 4 + dimension] = coords[3 + dimension];
+                }
+            }
+            let cloud = Cloud::from_view(Array1::from(coords).view(), n);
+            let mut queries: Vec<[f64; 3]> = (0..128)
+                .map(|_| [coordinate(), coordinate(), coordinate()])
+                .collect();
+            if n > 4 {
+                queries.push(cloud.point(1));
+            }
+            for query in queries {
+                let scalar = cloud.nearest_index_scalar(query);
+                let vector = unsafe { cloud.nearest_index_avx2(query) };
+                assert_eq!(
+                    (scalar.0, scalar.1.to_bits()),
+                    (vector.0, vector.1.to_bits()),
+                    "n={n} query={query:?}"
+                );
+            }
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
     fn the_vector_nearest_image_matches_the_scalar_scan() {
         let cloud = Cloud::from_view(octahedron(1.3).view(), 6);
         let queries = [[0.2, -0.4, 1.1], [3.0, 0.0, 0.0], [0.0, 0.0, 0.0]];
@@ -3092,7 +3080,18 @@ mod shell_tests {
             let gap = gaps[index];
             gap.is_finite() && gap > 0.0 && scale * cloud.perp_sq_at(index, axis) >= gap
         };
-        if cloud.identity_stays_under(axis, order, cap) && !(0..cloud.xs.len()).any(can_leave) {
+        let identity_stays_under = if cap.is_finite() {
+            let chord_scale = 4.0 * sine * sine;
+            let limit = cap * cap * cloud.xs.len() as f64;
+            let mut total = 0.0;
+            (0..cloud.xs.len()).all(|index| {
+                total += chord_scale * cloud.perp_sq_at(index, axis);
+                total < limit
+            })
+        } else {
+            true
+        };
+        if identity_stays_under && !(0..cloud.xs.len()).any(can_leave) {
             return None;
         }
         let deviation = cloud.rotation_deviation(axis, order, cap)?;
