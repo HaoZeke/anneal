@@ -604,8 +604,7 @@ def gmin_paired(groups: dict, system: str) -> dict[str, object]:
 
 def gmin_tex_line(audit: Audit, where: str, cells: list[str], groups: dict, system: str, arm: str,
                   budget: int) -> None:
-    """One tab:gmin line: Budget, Arm, Hits, Only, Both, Neither, Calls, IQR, Wall, In, Out, McNemar p, paired
-    Newcombe interval, Wilcoxon p on calls, Wilcoxon p on wall."""
+    """One tab:gmin line: budget, arm, hits, outcomes, arm-specific evaluation count, wall, and hit statistics."""
     group = groups[(system, arm)]
     stats = gmin_paired(groups, system)
     both, only_a, only_g, neither = stats["table"]
@@ -626,11 +625,9 @@ def gmin_tex_line(audit: Audit, where: str, cells: list[str], groups: dict, syst
         audit.cell(where, "neither hits", cells[5], float(neither))
         audit.cell(where, "exact McNemar p", cells[11], stats["mcnemar"])
         audit.cell(where, "paired Newcombe 95% interval", cells[12], interval_text(*stats["interval"]))
-        audit.cell(where, "Wilcoxon p calls", cells[13], stats["calls"][2])
-        audit.cell(where, "Wilcoxon p wall", cells[14], stats["wall"][2])
     else:
-        for label, cell in zip(("budget", "both", "neither", "McNemar p", "interval", "Wilcoxon p calls",
-                                "Wilcoxon p wall"), (cells[0], cells[4], cells[5], *cells[11:])):
+        for label, cell in zip(("budget", "both", "neither", "McNemar p", "interval"),
+                               (cells[0], cells[4], cells[5], *cells[11:])):
             audit.cell(where, label, cell, None)
 
 
@@ -1030,8 +1027,7 @@ def gmin_develop_data(audit: Audit, panel: object) -> None:
                     "\\cite{darbyCuAu2002} at \\(T=0.1\\)~eV, with the step and the taboo radius scaled by "
                     "\\(r_0/2^{1/6}\\) and GMIN's container radius, and the gold driver of this code applies the basin "
                     "bias of equation~\\ref{eq:delta} on a stride of 8.")
-    audit.said(TEX, "\\texttt{Config::recommended}\\((55)\\) with every atom labeled gold through \\texttt{h2h\\_metal}, "
-                    "which applies the basin bias of equation~\\ref{eq:delta} on a stride of 8.")
+    audit.said(TEX, "\\texttt{h2h\\_metal} with every atom labeled gold on Au\\(_{55}\\).")
     refs = {row[0]: row[3] for row in panel.SYSTEMS}
     audit.said(SI, f"\\({refs['au55']:.8f}\\)~eV at Au\\(_{{55}}\\), \\({refs['m55r6']:.6f}\\) and "
                    f"\\({refs['m55r14']:.6f}\\) at M\\(_{{55}}\\) (\\(\\rho=6\\) and 14), and \\({refs['m80r6']:.6f}\\) and "
@@ -1096,7 +1092,7 @@ def gmin_rerun(audit: Audit) -> None:
     shown, system, block, heads = [], None, None, []
     for row in tex_table(audit, TEX, "tab:gmin"):
         cells = [c.strip() for c in row]
-        if "\\multicolumn{16}" in cells[0]:
+        if "\\multicolumn{14}" in cells[0]:
             heads.append(cells[0].replace("\\midrule", "").strip())
             block = "develop" if "61fa67cf" in cells[0] else "rerun"
             system = None
@@ -1106,14 +1102,20 @@ def gmin_rerun(audit: Audit) -> None:
         arm = {"this work": "anneal", "GMIN": "gmin"}.get(cells[2])
         where = f"{TEX} tab:gmin {block} {system} {cells[2]}"
         source = develop if block == "develop" else groups
-        if block is None or system is None or arm is None or len(cells) != 16 or (system, arm) not in source:
+        if block is None or system is None or arm is None or len(cells) != 14 or (system, arm) not in source:
             audit.record(False, where, "table line", " & ".join(cells), "a rerun cluster and arm")
             continue
         shown.append((block, system, arm))
         gmin_tex_line(audit, where, cells[1:], source, system, arm, panel.PAPER_BUDGETS[system])
     audit.cell(TEX, "tab:gmin block headings",
-               "\\multicolumn{16}{@{}l}{\\emph{Revision \\texttt{eeec8e2c}, an ancestor of the submitted revision}} | "
-               "\\multicolumn{16}{@{}l}{\\emph{The submitted revision \\texttt{61fa67cf}}}", " | ".join(heads))
+               "\\multicolumn{14}{@{}l}{\\emph{Revision \\texttt{eeec8e2c}, an ancestor of the submitted revision}} | "
+               "\\multicolumn{14}{@{}l}{\\emph{The submitted revision \\texttt{61fa67cf}}}", " | ".join(heads))
+    table_text = audit.text(TEX).split("% gmin-panel table: start", 1)[1].split("% gmin-panel table: end", 1)[0]
+    work_p = re.search(r"p_\\mathrm\{(?:calls|wall)\}", table_text)
+    audit.record(work_p is None,
+                 TEX, "tab:gmin reports no cross-arm work p-values", "absent",
+                 "absent" if work_p is None else "present")
+    audit.said(TEX, "different operations and are not tested across arms.")
     want = ([("rerun", s, a) for s in GMIN_RERUN_SYSTEMS for a in ("anneal", "gmin")]
             + [("develop", s, a) for s in GMIN_DEVELOP_SYSTEMS for a in ("anneal", "gmin")])
     audit.cell(TEX, "tab:gmin lines", " ".join("/".join(x) for x in shown), " ".join("/".join(x) for x in want))
@@ -1151,15 +1153,11 @@ def gmin_rerun(audit: Audit) -> None:
     lower = [s for s in GMIN_RERUN_SYSTEMS if walls(s, "anneal") < walls(s, "gmin")]
     audit.cell(TEX, "clusters where the median wall of this code is lower", str(len(GMIN_RERUN_SYSTEMS)),
                float(len(lower)))
-    faster = [s for s in GMIN_RERUN_SYSTEMS if paired[s]["wall"][2] < 0.05]
-    favor = all(paired[s]["wall"][1] < paired[s]["wall"][0] * (paired[s]["wall"][0] + 1) / 4 for s in faster)
-    audit.record(favor, TEX, "every paired wall test below 0.05 favors this code", "this code",
-                 "this code" if favor else "GMIN on one")
-    audit.said(TEX, f"The median wall of a run is lower for this code on all {NUMBER_WORDS[len(lower)]} clusters, and "
-                    f"the paired Wilcoxon test on the walls is below 0.05 on {NUMBER_WORDS[len(faster)]} of them: from "
+    audit.said(TEX, f"The median wall of a run is lower for this code on all {NUMBER_WORDS[len(lower)]} clusters, from "
                     f"{panel.show_s(walls('lj38', 'anneal'))}~s against {panel.show_s(walls('lj38', 'gmin'))}~s on "
                     f"LJ\\(_{{38}}\\) to {panel.show_s(walls('lj150', 'anneal'))}~s against "
-                    f"{panel.show_s(walls('lj150', 'gmin'))}~s on LJ\\(_{{150}}\\).")
+                    f"{panel.show_s(walls('lj150', 'gmin'))}~s on LJ\\(_{{150}}\\); no cross-arm work or wall test is "
+                    "reported because the two budgets count different operations.")
     audit.said(TEX, f"hits LJ\\(_{{98}}\\) on {hits('lj98', 'anneal')} of 12 seeds and GMIN on none")
     ahead = [x for x in GMIN_RERUN_SYSTEMS if hits(x, "anneal") > hits(x, "gmin") and paired[x]["mcnemar"] < 0.05]
     audit.cell(COVER, "Lennard-Jones clusters where the code hits more than GMIN at p<0.05", "lj98", " ".join(ahead))
@@ -1577,8 +1575,6 @@ def manuscript_knockouts(audit: Audit) -> None:
                              text[:80])
             continue
         table = paired_table({k: a[k]["hit"] == "1" for k in seeds}, {k: g[k]["hit"] == "1" for k in seeds})
-        calls = wilcoxon_signed_rank([float(a[k]["calls"]) - float(g[k]["calls"]) for k in seeds])
-        walls = wilcoxon_signed_rank([float(a[k]["wall_s"]) - float(g[k]["wall_s"]) for k in seeds])
         stats[n] = (table, mcnemar(table[1], table[2]))
         lo, hi = newcombe_paired_interval(*table)
         audit.cell(where, "this work", line[1], f"{table[0] + table[1]}/12")
@@ -1588,8 +1584,6 @@ def manuscript_knockouts(audit: Audit) -> None:
         audit.cell(where, "exact McNemar p", line[5], stats[n][1])
         audit.cell(where, "Newcombe lower", interval_of(line[6])[0], lo)
         audit.cell(where, "Newcombe upper", interval_of(line[6])[1], hi)
-        audit.cell(where, "Wilcoxon p on calls", line[7], calls[2])
-        audit.cell(where, "Wilcoxon p on wall", line[8], walls[2])
     audit.cell(TEX, "tab:tip4p-gmin sizes", "8 15 20 21", " ".join(map(str, sorted(stats))))
     t = {n: stats[n][0] for n in stats}
     audit.said(TEX, f"Paired by seed, this code alone hits {t[15][1]} seeds of (H\\(_2\\)O)\\(_{{15}}\\) and {t[20][1]} of "
@@ -1959,7 +1953,8 @@ def template_era(audit: Audit) -> None:
         for gone in TEMPLATE_ERA_GONE:
             audit.record(gone not in flat, path_, f"the template-era comparison stays in the SI: {gone}", "absent",
                          "absent" if gone not in flat else "present")
-    audit.said(TEX, "This code takes a median of 127839.5 calls to the LJ\\(_{38}\\) minimum, and GMIN 389399.")
+    audit.said(TEX, "this code reports a median of 127839.5 combined energy-and-gradient passes to the minimum, while "
+                    "GMIN reports 389399 \\texttt{POTENTIAL} entries; these are not the same operation.")
     for path_ in (TEX, SI, COVER):
         sentences = re.split(r"(?<=[.;])\s+", collapse(audit.text(path_)))
         claims = [s[:80] for s in sentences if re.search(r"templat", s, re.I) and MATCH_CLAIM.search(s)

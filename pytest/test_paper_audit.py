@@ -475,14 +475,14 @@ def test_a_drifted_gmin_panel_summary_cell_is_reported():
     assert [r[2] for r in audit.drifts()] == ["gmin_hits"]
 
 
-def test_a_drifted_paired_wall_p_is_reported():
+def test_a_cross_arm_work_p_value_in_the_gmin_table_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "& 0.0625 & 0.09 to 0.68 & 0.021 & \\(4.9\\times 10^{-4}\\) \\\\"
+    old = "different operations and are not tested across arms."
     assert tex.count(old) == 1
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, old.replace("10^{-4}\\) \\\\", "10^{-3}\\) \\\\"))
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "\\(p_\\mathrm{calls}=0.021\\). " + old)
     audit_mod.manuscript_gmin(audit)
-    assert [r[2] for r in audit.drifts()] == ["Wilcoxon p wall"]
+    assert [r[2] for r in audit.drifts()] == ["tab:gmin reports no cross-arm work p-values"]
 
 
 def test_the_develop_gmin_rows_keep_the_harness_that_ran_them():
@@ -636,9 +636,10 @@ def test_a_drifted_pooled_move_choice_sentence_is_reported():
 def test_an_unpaired_fisher_p_in_the_gmin_table_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "& 0.0625 & 0.09 to 0.68 & 0.021 &"
+    old = ("LJ\\(_{38}\\) & \\(4\\times 10^{5}\\) & this work & 12/12 & 5 & 7 & 0 & 127839.5 & "
+           "139245.25 & 0.640 & 0.303 & 0.337 & 0.0625 & 0.09 to 0.68 \\\\")
     assert tex.count(old) == 1
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, "& 0.037 & 0.09 to 0.68 & 0.021 &")
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, old.replace("& 0.0625 &", "& 0.037 &"))
     audit_mod.manuscript_gmin(audit)
     assert [r[2] for r in audit.drifts()] == ["exact McNemar p"]
 
