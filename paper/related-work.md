@@ -1455,3 +1455,11 @@ Qiu, Qian, Mu, Liu, Zhang, Kim, and Ding, Physical Review B 114, 254105 (5 Novem
 None of the three papers reports a TIP4P or GFN2-xTB water-hexamer energy, `121` of `192`, `97` of `192`, the six polished hexamer gaps, or a Cambridge Lennard-Jones energy, and none fills the open ASE, AGOX, and GMIN comparison kit. They contradict no manuscript claim and require no new head-to-head on the current benchmarks.
 
 Cite `yanEvaFlow2026`, `xuGenerativeQc2026`, and `qiuPlanarBoron2026`.
+
+## 2026-11-21 — Post-generation conformer selection
+
+Vahediahmar, Zweig, Zhang, and Azizi, bioRxiv (20 November 2026), doi:10.64898/2026.11.19.767840, select compact conformer ensembles from candidate pools produced by frozen pretrained generators. CovSelect greedily maximises coverage of distinct reference states, while RefSelect trades some coverage for precision using the same learned reference-likelihood classifier. On GEOM-DRUGS, the abstract reports 91.33 percent mean recall and 98.36 percent median recall for CovSelect, with gains over the raw generators also reported on QMugs, pepconf, and Platinum.
+
+The same authors already show that the released GEOM-DRUGS reference ensemble is incomplete on GFN2-xTB, filed as `vahediahmarGeomDrugs2026`. This new method selects from a pool that already exists; it does not generate a missing basin or establish that the reference states are complete. It reports no Lennard-Jones energy, TIP4P energy, GFN2-xTB water-hexamer energy, or sealed motif count, so it does not contradict the Cambridge targets, 121 of 192, or 97 of 192. It does not fill the ASE, AGOX, and GMIN comparison kit and does not require a new head-to-head on the current benchmarks.
+
+Cite `vahediahmarConformerSelection2026` beside `vahediahmarGeomDrugs2026`.
