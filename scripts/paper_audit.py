@@ -1195,7 +1195,13 @@ def generated_tables(audit: Audit) -> None:
 
     gmin = load_script("gmin_panel_tex", "scripts/gmin_panel/run_panel.py")
     rows = gmin.read_rows(ROOT / "bench/gmin-panel/rows.csv")
-    want = gmin.tex_table(gmin.summarise(rows, "latest"), "latest")
+    # The committed paper table audits its historical rows. New summaries
+    # use GMIN_PIN by default and do not mix those rows with this table.
+    want = gmin.tex_table(
+        gmin.summarise(rows, "latest", gmin.GMIN_REV),
+        "latest",
+        gmin.GMIN_REV,
+    )
     panel = load_script("ase_panel_tex", "scripts/ase_panel/summarize.py")
     nonlj = load_script("ase_nonlj_tex", "scripts/ase_nonlj/summarize.py")
     ablation = load_script("ablation_tex", "paper/jctc/scripts/ablation_table.py")
