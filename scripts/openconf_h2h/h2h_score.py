@@ -38,6 +38,7 @@ import numpy as np
 from rdkit import Chem
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from bench_host import run_host  # noqa: E402
 import h2h_common as hc  # noqa: E402
 
 RMSD = 0.25
@@ -109,6 +110,35 @@ class Molecule:
     def same(self, a, b) -> bool:
         return abs(a[1] - b[1]) < ENERGY_TIE and self.rmsd(a[0], b[0]) < RMSD
 
+    def perceived_key(self, x: np.ndarray) -> str:
+        """The stereo key RDKit reads off the geometry ``x``."""
+        mol = Chem.Mol(self.mol)
+        conf = Chem.Conformer(mol.GetNumAtoms())
+        for i, (a, b, c) in enumerate(np.asarray(x).reshape(-1, 3)):
+            conf.SetAtomPosition(i, (float(a), float(b), float(c)))
+        mol.RemoveAllConformers()
+        mol.AddConformer(conf, assignId=True)
+        Chem.AssignStereochemistryFrom3D(mol)
+        return _stereo_key(mol)
+
+    def same_or_mirror(self, a, b) -> bool:
+        """``same``, or the mirror image of ``b`` is the same conformer as ``a``.
+
+        The fit in ``rmsd`` keeps proper rotations, so a mirror image never
+        matches under ``same``. A mirror image is the same species only when
+        reflecting keeps the stereo of the input SMILES: the molecule has no
+        handedness, or the reflected geometry still reads as the reference
+        stereo key (a meso compound). For a chiral molecule the reflected
+        geometry is the other enantiomer, which the stereo check rejects, so
+        a near match to it is a miss and is never counted as a hit.
+        """
+        if self.same(a, b):
+            return True
+        if abs(a[1] - b[1]) >= ENERGY_TIE:
+            return False
+        flipped = np.asarray(b[0]).reshape(-1, 3) * np.array([1.0, 1.0, -1.0])
+        return self.rmsd(a[0], flipped) < RMSD and self.perceived_key(flipped) == self.reference
+
     def dedupe(self, items: list[tuple[np.ndarray, float]]) -> list[tuple[np.ndarray, float]]:
         kept: list[tuple[np.ndarray, float]] = []
         for item in sorted(items, key=lambda t: t[1]):
@@ -154,8 +184,8 @@ def score(runs: Path, seeds_out: Path, summary_out: Path, polish_cache: Path) ->
                 "seed": seed,
                 "candidates": int(len(es)),
                 "invalid": int((~ok).sum()) if len(es) else 0,
-                **{k: info.get(k) for k in ("wall_s", "pot_s", "outside_s", "grad_calls", "energy_calls", "embed_s", "budget", "hostname", "openconf_revision", "code_revision")},
-                "host": info.get("hostname"),
+                **{k: info.get(k) for k in ("wall_s", "pot_s", "outside_s", "grad_calls", "energy_calls", "embed_s", "budget", "openconf_revision", "code_revision")},
+                "host": run_host(info),
             }
         )
     references = {}
@@ -183,7 +213,7 @@ def score(runs: Path, seeds_out: Path, summary_out: Path, polish_cache: Path) ->
     fields = [
         "molecule", "arm", "seed", "delta_min_kcal", "n_3kcal", "reference_3kcal", "coverage",
         "candidates", "invalid", "grad_calls", "energy_calls", "budget", "wall_s", "pot_s",
-        "outside_s", "embed_s", "e_ref_kcal", "hostname", "openconf_revision", "code_revision", "host",
+        "outside_s", "embed_s", "e_ref_kcal", "openconf_revision", "code_revision", "host",
     ]
     with seeds_out.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore", lineterminator="\n")

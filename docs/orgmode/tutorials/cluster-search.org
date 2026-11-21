@@ -107,6 +107,25 @@ A force-call cap or a target hit should raise =BaseException= rather than
 =Exception=. The search then returns at once with the best geometry found.
 A binary chart, a rigid chart, and a water-site chart do the same.
 
+* Where the budget went
+
+The result of =cluster_search= carries =ledger=, a dict of counts.
+=spent=, =screen=, =full= and =check= are charged evaluations, one per objective or gradient call.
+The other keys count events.
+
+#+begin_src python
+split = out["ledger"]
+print(split["spent"], split["screen"], split["full"], split["check"])
+print(split["quenches"], split["converged"], split["capped"])
+#+end_src
+
+- =spent= is every evaluation the search charged.
+- =screen=, =full= and =check= are the part spent in screening passes, in full relaxations and in confirming convergence. What =spent= leaves over was charged outside the relaxation passes.
+- =quenches= is the number of relaxations run. It equals =converged= plus =capped=: the relaxations that reached a small gradient and those that stopped at their step cap.
+- =screened_out= counts the trials the screening pass dropped before a full relaxation. =returned= counts the trials abandoned because their partial relaxation was going home, back to the basin the hop left.
+- =overlap_rejected= counts line-search geometries inside a relaxation that were closer than the overlap rule. Each was refused before the potential was called, so it is not in =spent=.
+- =basins= is the number of distinct basins registered.
+
 * Direct quantum-chemistry profiles
 
 The molecular-cluster and slab examples use the same persistent

@@ -637,4 +637,242 @@ mod tests {
         assert_eq!(top.propose(x.view(), &mut rng), x);
         assert_eq!(rng.random::<u64>(), untouched.random::<u64>());
     }
+
+    fn dihedral_of(x: &Array1<f64>, q: [usize; 4]) -> f64 {
+        let p = |i: usize| [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
+        let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+        let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        let cross = |a: [f64; 3], b: [f64; 3]| {
+            [
+                a[1] * b[2] - a[2] * b[1],
+                a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - a[1] * b[0],
+            ]
+        };
+        let (b0, b1, b2) = (
+            sub(p(q[0]), p(q[1])),
+            sub(p(q[2]), p(q[1])),
+            sub(p(q[3]), p(q[2])),
+        );
+        let axis = b1.map(|v| v / dot(b1, b1).sqrt());
+        let v = sub(b0, axis.map(|a| a * dot(b0, axis)));
+        let w = sub(b2, axis.map(|a| a * dot(b2, axis)));
+        dot(cross(axis, v), w).atan2(dot(v, w))
+    }
+
+    fn in_plane(degrees: f64) -> [f64; 3] {
+        let a = degrees.to_radians();
+        [a.cos(), a.sin(), 0.0]
+    }
+
+    fn along(from: [f64; 3], direction: [f64; 3], length: f64) -> [f64; 3] {
+        [0, 1, 2].map(|k| from[k] + length * direction[k])
+    }
+
+    /// Three hydrogens on the carbon `c`, tetrahedral about the bond to
+    /// `from`.
+    fn methyl(c: [f64; 3], from: [f64; 3]) -> Vec<[f64; 3]> {
+        let d = [0, 1, 2].map(|k| c[k] - from[k]);
+        let norm = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        let d = d.map(|v| v / norm);
+        let side = [-d[1], d[0], 0.0];
+        [0.0_f64, 120.0, 240.0]
+            .map(|phi| {
+                let (c3, s3) = ((phi.to_radians()).cos(), (phi.to_radians()).sin());
+                [0, 1, 2].map(|k| {
+                    let up = if k == 2 { 1.0 } else { 0.0 };
+                    c[k] + 1.09 * (d[k] / 3.0 + (8.0_f64).sqrt() / 3.0 * (c3 * up + s3 * side[k]))
+                })
+            })
+            .to_vec()
+    }
+
+    fn flatten(atoms: &[([f64; 3], u32)]) -> (Array1<f64>, Vec<u32>) {
+        (
+            Array1::from_iter(atoms.iter().flat_map(|(p, _)| *p)),
+            atoms.iter().map(|&(_, z)| z).collect(),
+        )
+    }
+
+    /// Trans CH3-CH=N-CH3. Atoms: C, C, N, C, H on the second C, then the
+    /// hydrogens of each methyl.
+    fn imine() -> (Array1<f64>, Vec<u32>) {
+        let a = [0.0; 3];
+        let b = along(a, in_plane(30.0), 1.50);
+        let n = along(b, in_plane(-30.0), 1.27);
+        let c = along(n, in_plane(30.0), 1.46);
+        let mut atoms = vec![
+            (a, 6),
+            (b, 6),
+            (n, 7),
+            (c, 6),
+            (along(b, in_plane(90.0), 1.09), 1),
+        ];
+        atoms.extend(methyl(a, b).into_iter().map(|h| (h, 1)));
+        atoms.extend(methyl(c, n).into_iter().map(|h| (h, 1)));
+        flatten(&atoms)
+    }
+
+    /// Trans CH3-N=N-CH3.
+    fn azo() -> (Array1<f64>, Vec<u32>) {
+        let a = [0.0; 3];
+        let n1 = along(a, in_plane(30.0), 1.47);
+        let n2 = along(n1, in_plane(-30.0), 1.25);
+        let c = along(n2, in_plane(30.0), 1.47);
+        let mut atoms = vec![(a, 6), (n1, 7), (n2, 7), (c, 6)];
+        atoms.extend(methyl(a, n1).into_iter().map(|h| (h, 1)));
+        atoms.extend(methyl(c, n2).into_iter().map(|h| (h, 1)));
+        flatten(&atoms)
+    }
+
+    /// E CH3-CH=N-OH. Atoms: C, C, N, O, H on the second C, H on O, then
+    /// the methyl hydrogens.
+    fn oxime() -> (Array1<f64>, Vec<u32>) {
+        let a = [0.0; 3];
+        let b = along(a, in_plane(30.0), 1.50);
+        let n = along(b, in_plane(-30.0), 1.28);
+        let o = along(n, in_plane(30.0), 1.40);
+        let mut atoms = vec![
+            (a, 6),
+            (b, 6),
+            (n, 7),
+            (o, 8),
+            (along(b, in_plane(90.0), 1.09), 1),
+            (along(o, in_plane(-30.0), 0.96), 1),
+        ];
+        atoms.extend(methyl(a, b).into_iter().map(|h| (h, 1)));
+        flatten(&atoms)
+    }
+
+    /// A planar acetamidine, HN=C(NH2)CH3, with the C=N bond `bond` long. The
+    /// atoms are C2, N1, H on N1, N3, C4, two H on N3 and three H on C4.
+    fn amidine(bond: f64) -> (Array1<f64>, Vec<u32>) {
+        let deg = std::f64::consts::PI / 180.0;
+        let polar = |r: f64, a: f64| [r * (a * deg).cos(), r * (a * deg).sin(), 0.0];
+        let n1 = [bond, 0.0, 0.0];
+        let on = |from: [f64; 3], d: [f64; 3]| [0, 1, 2].map(|k| from[k] + d[k]);
+        let n3 = polar(1.35, 120.0);
+        let c4 = polar(1.50, -120.0);
+        let mut atoms = vec![
+            ([0.0; 3], 6),
+            (n1, 7),
+            (on(n1, polar(1.01, 70.0)), 1),
+            (n3, 7),
+            (c4, 6),
+            (on(n3, polar(1.01, 60.0)), 1),
+            (on(n3, polar(1.01, 180.0)), 1),
+        ];
+        let toward = polar(1.0, 60.0);
+        let side = polar(1.0, 150.0);
+        for phi in [0.0_f64, 120.0, 240.0] {
+            let (c, s) = ((phi * deg).cos(), (phi * deg).sin());
+            let d = [0, 1, 2].map(|k| {
+                let ez = if k == 2 { 1.0 } else { 0.0 };
+                1.09 * (-0.334 * toward[k] + 0.943 * (c * ez + s * side[k]))
+            });
+            atoms.push((on(c4, d), 1));
+        }
+        (
+            Array1::from_iter(atoms.iter().flat_map(|(p, _)| *p)),
+            atoms.iter().map(|&(_, z)| z).collect(),
+        )
+    }
+
+    fn has_bond(top: &Topology, i: usize, j: usize) -> bool {
+        top.torsions[..top.bonds]
+            .iter()
+            .any(|b| (b.fixed.min(b.pivot), b.fixed.max(b.pivot)) == (i.min(j), i.max(j)))
+    }
+
+    /// How many of 800 proposals turn the dihedral `q` over, by more than a
+    /// quarter turn.
+    fn isomer_changes(x: &Array1<f64>, species: &[u32], q: [usize; 4]) -> usize {
+        let top = Topology::of(x.view(), species, 1.25, None, false);
+        let mut rng = StdRng::seed_from_u64(7);
+        (0..800)
+            .filter(|_| {
+                let y = top.propose(x.view(), &mut rng);
+                (dihedral_of(&y, q) - dihedral_of(x, q)).cos() < 0.0
+            })
+            .count()
+    }
+
+    #[test]
+    fn an_imine_with_a_substituent_on_nitrogen_is_not_turned() {
+        let (x, z) = imine();
+        let top = Topology::of(x.view(), &z, 1.25, None, false);
+        assert!(!has_bond(&top, 1, 2), "the C=N bond is a torsion");
+        assert_eq!(isomer_changes(&x, &z, [0, 1, 2, 3]), 0);
+    }
+
+    #[test]
+    fn an_azo_bond_is_not_turned() {
+        let (x, z) = azo();
+        let top = Topology::of(x.view(), &z, 1.25, None, false);
+        assert!(!has_bond(&top, 1, 2), "the N=N bond is a torsion");
+        assert_eq!(isomer_changes(&x, &z, [0, 1, 2, 3]), 0);
+    }
+
+    #[test]
+    fn an_oxime_keeps_its_double_bond_and_turns_its_single_one() {
+        let (x, z) = oxime();
+        let top = Topology::of(x.view(), &z, 1.25, None, false);
+        assert!(!has_bond(&top, 1, 2), "the C=N bond is a torsion");
+        assert_eq!(isomer_changes(&x, &z, [0, 1, 2, 3]), 0);
+        assert!(has_bond(&top, 2, 3), "the N-O bond is not a torsion");
+        assert!(
+            isomer_changes(&x, &z, [1, 2, 3, 5]) > 100,
+            "the N-O single bond stopped turning"
+        );
+    }
+
+    #[test]
+    fn a_double_bond_is_judged_by_its_length_not_by_its_twist() {
+        let (x, z) = azo();
+        let flat = Topology::of(x.view(), &z, 1.25, None, false);
+        assert!(!has_bond(&flat, 1, 2));
+        let mut twisted = x.clone();
+        for atom in [2usize, 3, 7, 8, 9] {
+            let axis = [0, 1, 2].map(|k| x[3 * 2 + k] - x[3 + k]);
+            let norm = axis.iter().map(|c| c * c).sum::<f64>().sqrt();
+            let axis = axis.map(|c| c / norm);
+            let (s, c) = (0.45_f64.sin(), 0.45_f64.cos());
+            let r = [0, 1, 2].map(|k| x[3 * atom + k] - x[3 + k]);
+            let d = r[0] * axis[0] + r[1] * axis[1] + r[2] * axis[2];
+            let cross = [
+                axis[1] * r[2] - axis[2] * r[1],
+                axis[2] * r[0] - axis[0] * r[2],
+                axis[0] * r[1] - axis[1] * r[0],
+            ];
+            for k in 0..3 {
+                twisted[3 * atom + k] =
+                    x[3 + k] + r[k] * c + cross[k] * s + axis[k] * d * (1.0 - c);
+            }
+        }
+        let top = Topology::of(twisted.view(), &z, 1.25, None, false);
+        assert!(
+            !has_bond(&top, 1, 2),
+            "a twisted double bond became a torsion"
+        );
+        let mut stretched = x.clone();
+        for k in 0..3 {
+            let shift = (x[3 * 2 + k] - x[3 + k]) * 0.18;
+            for atom in [2usize, 3, 7, 8, 9] {
+                stretched[3 * atom + k] += shift;
+            }
+        }
+        let top = Topology::of(stretched.view(), &z, 1.25, None, false);
+        assert!(
+            has_bond(&top, 1, 2),
+            "a single-bond length is not a torsion"
+        );
+        assert!(isomer_changes(&stretched, &z, [0, 1, 2, 3]) > 100);
+    }
+
+    #[test]
+    fn an_amidine_is_not_turned_about_its_double_bond() {
+        let (x, z) = amidine(1.28);
+        let top = Topology::of(x.view(), &z, 1.25, None, false);
+        assert!(top.torsions.is_empty(), "only the C=N could turn");
+    }
 }

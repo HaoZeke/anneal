@@ -346,8 +346,28 @@ def cluster_search(
     as ``KeyboardInterrupt`` or a harness stop, ends the search at once.
     The best geometry found is kept, and the exception is re-raised here.
 
+    The result also carries ``ledger``, a dict of counts that says where the
+    search's budget went. ``spent``, ``screen``, ``full`` and ``check`` are
+    charged evaluations, one per objective or gradient call; the rest count
+    events.
+
+    - ``spent``: the evaluations charged in all.
+    - ``screen``, ``full``, ``check``: those spent in screening passes, in full
+      relaxations and in confirming convergence. What ``spent`` leaves over
+      was charged outside the relaxation passes.
+    - ``quenches``: relaxations run, equal to ``converged`` plus ``capped``,
+      the ones that reached a small gradient and the ones that stopped at their
+      step cap.
+    - ``screened_out``: trials the screening pass dropped before a full
+      relaxation. ``returned``: trials abandoned because their partial
+      relaxation was going home, back to the basin the hop left.
+    - ``overlap_rejected``: line-search geometries within a relaxation that
+      were closer than the overlap rule. Each was refused before the potential
+      was called and is not counted in ``spent``.
+    - ``basins``: distinct basins registered.
+
     Returns a dict with ``best`` (flat coordinates in the state layout),
-    ``best_energy``, ``hops``, ``accepted``, ``nve_unavailable``,
+    ``best_energy``, ``hops``, ``accepted``, ``nve_unavailable``, ``ledger``,
     ``local_step`` and ``quench_seconds``. ``accepted`` counts the hops the
     acceptance rule took. ``nve_unavailable`` is true when a constant-energy
     (NVE) escape was requested and that escape is not compiled; the

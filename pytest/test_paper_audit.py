@@ -28,6 +28,7 @@ CHECKS = (
     audit_mod.paper_0120,
     audit_mod.gad_published,
     audit_mod.openconf,
+    audit_mod.conf_miss4,
     audit_mod.head_to_head,
     audit_mod.sc96_78_howto,
     audit_mod.stale_claims,
@@ -679,3 +680,77 @@ def test_the_british_spelling_of_labeled_is_caught():
     for word in ("labelled", "labelling", "modelled", "travelled"):
         assert audit_mod.BRITISH.search(word)
     assert not audit_mod.BRITISH.search("labeled")
+
+
+CONF_MISS4 = audit_mod.CONF_MISS4
+
+
+def test_conf_miss4_recomputes_the_exact_tests_without_scipy():
+    scipy_stats = pytest.importorskip("scipy.stats")
+    import random
+
+    rng = random.Random(4)
+    for n in (1, 5, 12, 24):
+        diffs = [rng.uniform(-1, 1) + 0.2 for _ in range(n)]
+        assert audit_mod.signed_rank_exact(diffs) == pytest.approx(
+            float(scipy_stats.wilcoxon(diffs, method="exact").pvalue), rel=1e-9
+        )
+    assert audit_mod.signed_rank_exact([0.0, 0.0]) == 1.0
+    assert audit_mod.signed_rank_exact([1.0, 2.0, 3.0, 4.0, 5.0, 0.0]) == pytest.approx(2 / 32)
+    for k, n in ((0, 6), (2, 7), (3, 6), (6, 6)):
+        assert audit_mod.binomial_half(k, n) == pytest.approx(float(scipy_stats.binomtest(k, n, 0.5).pvalue))
+    assert audit_mod.binomial_half(0, 0) == 1.0
+
+
+def test_a_drifted_conf_miss4_panel_cell_is_reported():
+    audit = audit_mod.Audit()
+    path = f"{CONF_MISS4}/panel.tsv"
+    audit.text_cache[path] = audit.text(path).replace("\t15/24\t15/24\t16888", "\t14/24\t15/24\t16888", 1)
+    audit_mod.conf_miss4(audit)
+    assert [r[2] for r in audit.drifts()] == ["hits"]
+
+
+def test_a_drifted_conf_miss4_wilcoxon_cell_is_reported():
+    audit = audit_mod.Audit()
+    path = f"{CONF_MISS4}/paired.tsv"
+    audit.text_cache[path] = audit.text(path).replace("\t0.0179\t", "\t0.0189\t", 1)
+    audit_mod.conf_miss4(audit)
+    assert sorted(r[2] for r in audit.drifts()) == ["p", "wilcoxon_p"]
+
+
+def test_a_conf_miss4_row_citing_a_commit_that_is_not_on_this_branch_is_reported():
+    audit = audit_mod.Audit()
+    for r in audit.rows(f"{CONF_MISS4}/guard.csv"):
+        if r["code_revision"] != "61fa67cf380e46876b569da45e7cc091647a775b":
+            r["code_revision"] = "0123456789abcdef0123456789abcdef01234567"
+    audit_mod.conf_miss4(audit)
+    assert sorted(r[2] for r in audit.drifts()) == [
+        "cited revision 01234567 is an ancestor of HEAD",
+        "every revision the rows cite is listed",
+    ]
+
+
+def test_a_conf_miss4_guard_mismatch_and_a_moved_mirror_hit_are_reported():
+    audit = audit_mod.Audit()
+    rows = audit.rows(f"{CONF_MISS4}/guard.csv")
+    series = next(r for r in rows if r["code_revision"] != "61fa67cf380e46876b569da45e7cc091647a775b")
+    series["charged"] = str(int(series["charged"]) + 1)
+    audit_mod.conf_miss4(audit)
+    assert [r[2] for r in audit.drifts()] == ["156 jobs, none differs between develop and the series"]
+    audit = audit_mod.Audit()
+    mirror = next(r for r in audit.rows(f"{CONF_MISS4}/rows.csv") if r["hit_mirror"] == "1" and r["hit"] == "0")
+    mirror["hit_mirror"] = "0"
+    audit_mod.conf_miss4(audit)
+    labels = {r[2] for r in audit.drifts()}
+    assert {"hits_mirror", "hit_mirror_after", "the runs that count only as a mirror hit"} <= labels
+
+
+def test_a_conf_miss4_provenance_tree_that_is_not_the_commits_is_reported():
+    audit = audit_mod.Audit()
+    path = f"{CONF_MISS4}/provenance.tsv"
+    first = audit.text(path).splitlines()[1].split("\t")[2]
+    audit.text_cache[path] = audit.text(path).replace(first, "0" * 40)
+    audit_mod.conf_miss4(audit)
+    assert sorted(r[2] for r in audit.drifts() if "tree of" in r[2]) == [
+        "tree of 259befae (anneal rows and the wheel)"
+    ]

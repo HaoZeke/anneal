@@ -39,12 +39,13 @@ import numpy as np
 from scipy.stats import fisher_exact, mannwhitneyu
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from bench_host import run_host  # noqa: E402
 import h2h_common as hc  # noqa: E402
 from h2h_score import WINDOW, Molecule, _fmt  # noqa: E402
 
 ARMS = ("anneal", "openconf", "develop")
 ROW_FIELDS = [
-    "molecule", "arm", "seed", "budget", "calls", "energy_calls", "grad_calls", "hit", "calls_to_hit",
+    "molecule", "arm", "seed", "budget", "calls", "energy_calls", "grad_calls", "hit", "hit_mirror", "calls_to_hit",
     "delta_min_kcal", "n_3kcal", "reference_3kcal", "candidates", "invalid", "wall_s", "pot_s",
     "outside_s", "embed_s", "e_ref_kcal", "error", "openconf_revision", "code_revision", "host",
 ]
@@ -150,6 +151,7 @@ def score_runs(runs: Path, rows_path: Path, workers: int) -> None:
                 continue
             calls = int(info["energy_calls"]) + int(info["grad_calls"])
             hit = any(m.same(lowest, item) for item in mine)
+            hit_mirror = hit or any(m.same_or_mirror(lowest, item) for item in mine)
             to_hit = None
             if hit:
                 to_hit = trace_hit[job_dir]
@@ -165,6 +167,7 @@ def score_runs(runs: Path, rows_path: Path, workers: int) -> None:
                     "energy_calls": info["energy_calls"],
                     "grad_calls": info["grad_calls"],
                     "hit": int(hit),
+                    "hit_mirror": int(hit_mirror),
                     "calls_to_hit": to_hit,
                     "delta_min_kcal": (min(e for _, e in mine) - e_ref) if mine else None,
                     "n_3kcal": len(window),
@@ -179,17 +182,32 @@ def score_runs(runs: Path, rows_path: Path, workers: int) -> None:
                     "error": info.get("error"),
                     "openconf_revision": info.get("openconf_revision"),
                     "code_revision": info.get("code_revision"),
-                    "host": info["hostname"],
+                    "host": run_host(info),
                 }
             )
     fresh = not rows_path.is_file()
     rows_path.parent.mkdir(parents=True, exist_ok=True)
     with rows_path.open("a", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS, lineterminator="\n")
+        fields = ROW_FIELDS if fresh else existing_fields(rows_path)
+        writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore", lineterminator="\n")
         if fresh:
             writer.writeheader()
         for row in sorted(new, key=lambda r: (r["molecule"], r["arm"], r["seed"])):
-            writer.writerow({k: _fmt(row.get(k)) for k in ROW_FIELDS})
+            writer.writerow({k: _fmt(row.get(k)) for k in fields})
+
+
+def existing_fields(rows_path: Path) -> list[str]:
+    """Header of a rows file written before a column was added; rows append to it as it is."""
+    with rows_path.open(newline="") as handle:
+        return next(csv.reader(handle))
+
+
+def mirror_hits(group: list[dict]) -> str:
+    """``hits_mirror`` of a group; empty when the rows predate the column."""
+    marks = [r.get("hit_mirror", "") for r in group]
+    if any(m in ("", None) for m in marks):
+        return ""
+    return f"{sum(int(m) for m in marks)}/{len(group)}"
 
 
 def _num(value: str) -> float | None:
@@ -201,7 +219,7 @@ def summarise(rows_path: Path, summary_path: Path, stats_path: Path, versus_path
         rows = list(csv.DictReader(handle))
     order = [name for name in hc.molecules() if any(r["molecule"] == name for r in rows)]
     summary_fields = [
-        "molecule", "arm", "n", "hits", "n_3kcal_median", "reference_3kcal", "calls_median",
+        "molecule", "arm", "n", "hits", "hits_mirror", "n_3kcal_median", "reference_3kcal", "calls_median",
         "calls_to_hit_median", "delta_min_median_kcal", "wall_median_s", "pot_median_s",
         "outside_median_s", "pot_share", "invalid_total", "errors",
     ]
@@ -227,6 +245,7 @@ def summarise(rows_path: Path, summary_path: Path, stats_path: Path, versus_path
                         "arm": arm,
                         "n": len(group),
                         "hits": f"{sum(int(r['hit']) for r in group)}/{len(group)}",
+                        "hits_mirror": mirror_hits(group),
                         "n_3kcal_median": _fmt(med(group, "n_3kcal")),
                         "reference_3kcal": group[-1]["reference_3kcal"],
                         "calls_median": _fmt(med(group, "calls")),
