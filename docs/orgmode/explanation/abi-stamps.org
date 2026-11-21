@@ -172,7 +172,7 @@ It also raises the minor to 5 for the engine and RPC Hessian-vector interfaces.
 It raises the minor to 6 for =rgpot_potential_new_eam_table= and the four
 =RGPOT_EAM_TABLE_*= format codes.
 They are additions that take no new struct, so the layout revision stays at 1.
-It raises the minor to 7 for =rgpot_potential_hessian=,
+It raises the minor to 8 for =rgpot_potential_hessian=,
 =rgpot_potential_hvp_resolved=, the analytic and dual-number Hessian callbacks, the dual-number Hessian-vector callback, =rgpot_potential_derivative_caps=
 and
 =rgpot_potential_derivative_counts=, the new structs =rgpot_derivative_caps_t=
