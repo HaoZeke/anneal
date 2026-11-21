@@ -283,3 +283,22 @@ fn the_sdist_packs_every_vendored_path_the_manifest_names() {
     assert!(workflow.contains("python -m maturin sdist --out dist"));
     assert!(workflow.contains("pip install dist/anneal-*.tar.gz pytest"));
 }
+
+// maturin sdist copies the root Cargo.toml verbatim without cargo package's
+// manifest rewrite, so cargo checks every explicit [[bench]] and [[example]]
+// target path on disk when pip builds the wheel from the sdist.
+#[test]
+fn the_sdist_packs_explicit_bench_and_example_targets() {
+    let manifest = include_str!("../Cargo.toml");
+    let pyproject = include_str!("../pyproject.toml");
+    assert!(manifest.contains("[[bench]]"));
+    assert!(manifest.contains("[[example]]"));
+    assert!(
+        pyproject.contains("{ path = \"benches/**/*.rs\", format = \"sdist\" }"),
+        "pyproject.toml does not pack benches/**/*.rs into the sdist"
+    );
+    assert!(
+        pyproject.contains("{ path = \"examples/**/*.rs\", format = \"sdist\" }"),
+        "pyproject.toml does not pack examples/**/*.rs into the sdist"
+    );
+}
