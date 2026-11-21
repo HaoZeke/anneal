@@ -1161,16 +1161,20 @@ fn symmetry_order_and_blend<R: Rng + ?Sized>(orders: &[usize], rng: &mut R) -> (
 
     let established = orders.len().min(ESTABLISHED_ORDERS);
     let established_order = orders[rng.random_range(0..established)];
-    let blend = 0.3 + 0.4 * rng.random::<f64>();
+    let blend_draw = rng.random::<f64>();
+    let blend = 0.3 + 0.4 * blend_draw;
     if orders.len() == established {
         return (established_order, blend);
     }
     // Draw among the established orders first, exactly as the five-order
-    // library did. A separate, size-independent sixth bucket opens the tail,
-    // whose orders remain reachable without diluting the established choices
-    // as the point count grows.
-    let order = if rng.random_range(0..ORDER_BUCKETS) == ESTABLISHED_ORDERS {
-        orders[rng.random_range(established..orders.len())]
+    // library did. Only its upper boundary can open a size-independent sixth
+    // bucket, using the existing blend draw so a retained order also retains
+    // the random stream. The bucket maps uniformly over every larger order.
+    let tail_draw = blend_draw * ORDER_BUCKETS as f64;
+    let order = if established_order == orders[established - 1] && tail_draw < 1.0 {
+        let tail = ((tail_draw * (orders.len() - established) as f64) as usize)
+            .min(orders.len() - established - 1);
+        orders[established + tail]
     } else {
         established_order
     };
@@ -1262,9 +1266,11 @@ mod cluster_move_tests {
                 tail_orders.insert(order);
             }
         }
-        for count in counts {
-            assert!((9_000..=11_000).contains(&count), "{counts:?}");
+        for count in &counts[..4] {
+            assert!((11_000..=13_000).contains(count), "{counts:?}");
         }
+        assert!((9_000..=11_000).contains(&counts[4]), "{counts:?}");
+        assert!((1_500..=2_500).contains(&counts[5]), "{counts:?}");
         assert_eq!(tail_orders.len(), orders.len() - established.len());
     }
 
