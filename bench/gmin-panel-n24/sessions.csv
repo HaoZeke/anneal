@@ -1,0 +1,3 @@
+session,event,utc,core,machine_id,anneal_revision,gmin_svnrev,arm_order,rows_done,balance,lj103,note
+20261120T123926Z,start,2026-11-20T12:39:26Z,0,9eb296774121518feb1b187b0f6a109a42de7a5dd39e62ccd37d6e7d329604b8,61fa67cf380e46876b569da45e7cc091647a775b,9cbec1a446352bc9ef064bd2b1a5767194655919,abba,0,0:anneal=0 0:gmin=0 1:anneal=0 1:gmin=0,present,both arms scheduled
+20261120T123926Z,complete,2026-11-21T02:23:41Z,0,9eb296774121518feb1b187b0f6a109a42de7a5dd39e62ccd37d6e7d329604b8,61fa67cf380e46876b569da45e7cc091647a775b,9cbec1a446352bc9ef064bd2b1a5767194655919,abba,624,0:anneal=156 0:gmin=156 1:anneal=156 1:gmin=156,present,both arms scheduled
