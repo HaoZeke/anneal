@@ -353,6 +353,14 @@ TEST_CASE("hessian refuses an output that overlaps its input", "[schemes]") {
                            .box = s.box.data()};
   CHECK_THROWS_AS(cache.hessian(pot, species, h.data(), HessianScheme::Central),
                   std::invalid_argument);
+  // The largest atom count whose (3N)^2 doubles fit in size_t: there the
+  // output's end address passes the top of the address space.
+  const ForceInput largest{.nAtoms = 506166749,
+                           .pos = h.data(),
+                           .atmnrs = s.z.data(),
+                           .box = s.box.data()};
+  CHECK_THROWS_AS(cache.hessian(pot, largest, h.data(), HessianScheme::Central),
+                  std::invalid_argument);
   CHECK(pot.calls == 0);
   CHECK(cache.derivativeCounts().hessianForceCalls == 0);
 }
