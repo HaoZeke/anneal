@@ -119,9 +119,17 @@ def assert_close(e, f, e_ref, f_ref, rel=1e-12):
 
 
 def stub_config(path: Path, *, reentrancy: int = 0, no_hooks: int = 0, model: int = 0,
-                with_hvp: int = 1) -> Path:
-    """The fixed 8-byte config tests/engine_stub.cc reads."""
-    path.write_bytes(bytes([reentrancy, no_hooks, model, with_hvp, 0, 0, 0, 0]))
+                with_hvp: int = 1, spin: int | None = None) -> Path:
+    """The 8-byte config tests/engine_stub.cc reads.
+
+    ``spin`` is an explicit engine spin. 0 is a real value. Omit it when the
+    config does not set one; that is not the same as spin 0.
+    """
+    if spin is not None and not 0 <= int(spin) <= 255:
+        raise ValueError(spin)
+    flag = 0 if spin is None else 1
+    value = 0 if spin is None else int(spin)
+    path.write_bytes(bytes([reentrancy, no_hooks, model, with_hvp, flag, value, 0, 0]))
     return path
 
 
@@ -265,23 +273,139 @@ def test_engine_without_charge_spin_refuses_a_nondefault_charge(tmp_path):
     assert "takes no charge or spin" in why
 
 
-@pytest.mark.skipif(not STUB_ENGINE, reason="needs RGPOT_ENGINE_STUB")
-def test_engine_route_keeps_explicit_engine_spin_when_qmi_uses_defaults(tmp_path):
+def _stub_charge_spin(work: Path, *, spin: int | None, charge: int, multiplicity: int):
+    """Run one engine step and return the charge and spin the stub recorded."""
+    work.mkdir(parents=True, exist_ok=True)
     symbols = ["Ar", "Ar"]
     x = np.array([[0.1, 0.2, 0.3], [0.6, 0.5, 0.4]], dtype=float)
     box = np.eye(3) * 1.5
-    config = stub_config(tmp_path / "stub.bin")
+    config = stub_config(work / "stub.bin", spin=spin)
     stub = ctypes.CDLL(STUB_ENGINE)
     stub.stub_reset()
-
-    inp = write_input(tmp_path, f"    ENGINE {STUB_ENGINE}\n    CONFIG {config}",
-                      symbols, x)
-    shim = Shim(inp, tmp_path / "out.log")
-    # qmi defaults are CHARGE 0 and MULTIPLICITY 1. These defaults must not
-    # clobber an explicit spin choice from the engine config.
+    inp = write_input(work, f"    ENGINE {STUB_ENGINE}\n    CONFIG {config}",
+                      symbols, x, charge=charge, multiplicity=multiplicity)
+    shim = Shim(inp, work / "out.log")
     shim.step(x, box)
     shim.close()
-    assert stub.stub_spin() == 0
+    return stub.stub_charge(), stub.stub_spin()
+
+
+@pytest.mark.skipif(not STUB_ENGINE, reason="needs RGPOT_ENGINE_STUB")
+def test_engine_route_keeps_explicit_engine_spin_when_qmi_uses_defaults(tmp_path):
+    # CHARGE 0 and MULTIPLICITY 1 are left on the CONFIG. The call is skipped
+    # and the explicit spin stays.
+    assert _stub_charge_spin(tmp_path, spin=4, charge=0, multiplicity=1) == (0, 4)
+
+
+@pytest.mark.skipif(not STUB_ENGINE, reason="needs RGPOT_ENGINE_STUB")
+def test_engine_route_keeps_explicit_spin_0_when_qmi_sets_only_the_charge(tmp_path):
+    # MULTIPLICITY 1 is the grompp default even beside CHARGE -1. The charge
+    # is applied and the explicit spin 0 stays.
+    assert _stub_charge_spin(tmp_path, spin=0, charge=-1, multiplicity=1) == (-1, 0)
+
+
+@pytest.mark.skipif(not STUB_ENGINE, reason="needs RGPOT_ENGINE_STUB")
+def test_engine_route_nondefault_multiplicity_overrides_configured_spin(tmp_path):
+    assert _stub_charge_spin(tmp_path, spin=0, charge=-1, multiplicity=3) == (-1, 3)
+
+
+@pytest.mark.skipif(not STUB_ENGINE, reason="needs RGPOT_ENGINE_STUB")
+def test_engine_route_without_explicit_spin_uses_the_qmi_values(tmp_path):
+    # No byte-4 flag: the zero the stub starts from is not a configured spin.
+    # The qmi charge and multiplicity are both applied, including a
+    # multiplicity of 1.
+    assert _stub_charge_spin(tmp_path / "one", spin=None, charge=-1, multiplicity=1) == (-1, 1)
+    assert _stub_charge_spin(tmp_path / "both", spin=None, charge=2, multiplicity=4) == (2, 4)
+
+
+def _named_engine(path: Path) -> Path:
+    """An engine whose name comes from RGPOT_FAKE_ENGINE_NAME and which records set_charge_spin."""
+    cc = shutil.which("cc") or shutil.which("gcc")
+    if cc is None:
+        pytest.skip("needs a C compiler")
+    src = path.parent / "named_engine.c"
+    src.write_text(
+        "#include <stddef.h>\n"
+        "#include <stdlib.h>\n"
+        "typedef struct RgpotEnginePot RgpotEnginePot;\n"
+        "static int g_charge = -7, g_spin = -7, g_calls = 0;\n"
+        "int rgpot_engine_abi_version(void) { return 1; }\n"
+        "const char *rgpot_engine_name(void) {\n"
+        "  const char *name = getenv(\"RGPOT_FAKE_ENGINE_NAME\");\n"
+        "  return name != 0 ? name : \"uma\";\n"
+        "}\n"
+        "RgpotEnginePot *rgpot_engine_create(const void *config, size_t config_len,\n"
+        "                                     char *errbuf, size_t errlen) {\n"
+        "  (void)config; (void)config_len; (void)errbuf; (void)errlen;\n"
+        "  return (RgpotEnginePot *)1;\n"
+        "}\n"
+        "void rgpot_engine_destroy(RgpotEnginePot *pot) { (void)pot; }\n"
+        "int rgpot_engine_force(RgpotEnginePot *pot, long n_atoms, const double *positions,\n"
+        "                       const int *atomic_nrs, double *forces, double *energy,\n"
+        "                       double *variance, const double *box, void *transform,\n"
+        "                       void *transform_user) {\n"
+        "  (void)pot; (void)positions; (void)atomic_nrs; (void)box;\n"
+        "  (void)transform; (void)transform_user;\n"
+        "  if (forces) { for (long i = 0; i < 3 * n_atoms; ++i) forces[i] = 0.0; }\n"
+        "  if (energy) *energy = 0.0;\n"
+        "  if (variance) *variance = 0.0;\n"
+        "  return 0;\n"
+        "}\n"
+        "int rgpot_engine_set_charge_spin(RgpotEnginePot *pot, int charge, int spin) {\n"
+        "  (void)pot; g_charge = charge; g_spin = spin; g_calls += 1; return 0;\n"
+        "}\n"
+        "void recorded_reset(void) { g_charge = -7; g_spin = -7; g_calls = 0; }\n"
+        "int recorded_charge(void) { return g_charge; }\n"
+        "int recorded_spin(void) { return g_spin; }\n"
+        "int recorded_calls(void) { return g_calls; }\n"
+    )
+    done = subprocess.run(
+        [cc, "-shared", "-fPIC", "-o", str(path), str(src)],
+        capture_output=True, text=True, check=False)
+    assert done.returncode == 0, done.stderr
+    return path
+
+
+SCHEMA_PATH = Path(__file__).resolve().parents[2] / "CppCore/rgpot/rpc/Potentials.capnp"
+
+
+@pytest.mark.skipif(not shutil.which("capnp") or not SCHEMA_PATH.is_file(),
+                    reason="needs capnp and Potentials.capnp")
+@pytest.mark.parametrize("engine,schema,text,charge,multiplicity,expect", [
+    ("uma", "UmaParams", "(spin = 0)", -1, 1, (-1, 0)),
+    ("uma", "UmaParams", "(spin = 0)", -1, 3, (-1, 3)),
+    ("uma", "UmaParams", "()", -1, 1, (-1, 1)),
+    ("uma", "UmaParams", "(spin = 2)", 0, 1, None),
+    ("metatomic", "MetatomicParams", "(spin = 0)", -1, 1, (-1, 0)),
+    ("metatomic", "MetatomicParams", "(spin = 3)", 2, 1, (2, 3)),
+    ("skala", "NWChemParams", "(multiplicity = 0)", -1, 1, (-1, 0)),
+    ("skala", "NWChemParams", "(multiplicity = 5)", 0, 1, None),
+    ("nwchem", "NWChemParams", "()", -1, 4, (-1, 4)),
+])
+def test_engine_route_reads_an_explicit_spin_from_the_config_message(
+        tmp_path, monkeypatch, engine, schema, text, charge, multiplicity, expect):
+    """The same rule as the stub, read from the engine's own params message."""
+    monkeypatch.setenv("RGPOT_FAKE_ENGINE_NAME", engine)
+    blob = subprocess.run(["capnp", "encode", str(SCHEMA_PATH), schema],
+                          input=text.encode(), capture_output=True, check=True).stdout
+    config = tmp_path / "params.bin"
+    config.write_bytes(blob)
+    so = _named_engine(tmp_path / "libnamed_engine.so")
+    lib = ctypes.CDLL(so)
+    lib.recorded_reset()
+    symbols = ["Ar", "Ar"]
+    x = np.array([[0.1, 0.2, 0.3], [0.6, 0.5, 0.4]], dtype=float)
+    box = np.eye(3) * 1.5
+    inp = write_input(tmp_path, f"    ENGINE {so}\n    CONFIG {config}", symbols, x,
+                      charge=charge, multiplicity=multiplicity)
+    shim = Shim(inp, tmp_path / "out.log")
+    shim.step(x, box)
+    shim.close()
+    if expect is None:
+        assert lib.recorded_calls() == 0
+    else:
+        assert lib.recorded_calls() == 1
+        assert (lib.recorded_charge(), lib.recorded_spin()) == expect
 
 
 def engine_force(config: Path, symbols, x_ang, box_ang):
