@@ -177,11 +177,12 @@ unsafe fn hvp_call(
 ///
 /// # Safety
 ///
-/// NULL pointers, an unknown scheme, a non-positive step and overlapping
-/// buffers return `RGPOT_INVALID_PARAMETER`. Otherwise `pot` must be a live
-/// handle, `input` must point to a valid `rgpot_force_input_t` whose tensors
-/// stay alive for the call, and `direction` and `hv_out` must point to
-/// `3 * n_atoms` readable and writable doubles.
+/// NULL pointers, an unknown scheme, a negative or non-finite step and
+/// overlapping buffers return `RGPOT_INVALID_PARAMETER`. Otherwise `pot`
+/// must be a live handle, `input` must point to a valid
+/// `rgpot_force_input_t` whose tensors stay alive for the call, and
+/// `direction` and `hv_out` must point to `3 * n_atoms` readable and
+/// writable doubles.
 #[no_mangle]
 pub unsafe extern "C" fn rgpot_potential_hvp(
     pot: *const rgpot_potential_t,

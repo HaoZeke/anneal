@@ -870,8 +870,8 @@ enum rgpot_status_t rgpot_potential_hvp(const struct rgpot_potential_t *pot,
 - Outputs :: =hv_out= holds =H direction=, =3 * n_atoms= doubles laid out like
   the positions.
   A zero =direction= writes zeros and makes no call.
-  The finite differences write =hv_out= only on success; a failing analytic
-  callback may leave it partly written.
+  The finite differences write =hv_out= only on success; a failing analytic or
+  dual-number callback may leave it partly written.
   The scheme that ran is counted in =rgpot_potential_derivative_counts=, a zero
   =direction= under the scheme the request resolved to.
 - Errors :: =RGPOT_INVALID_PARAMETER=, with a message naming the problem, for: a
