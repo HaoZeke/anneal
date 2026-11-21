@@ -3,8 +3,11 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import math
+from pathlib import Path
+import re
 
 import numpy as np
 import pytest
@@ -539,3 +542,165 @@ def test_cluster_search_invalid_stock_inputs_and_docstring():
     ):
         assert key in doc, f"cluster_search docstring missing {key!r}"
     assert "Ignored when ``species`` or ``rigid`` is set" not in doc
+
+
+def test_config_exposes_every_rust_struct_field():
+    repo_root = Path(__file__).resolve().parents[1]
+    cfg_rs = (repo_root / "src" / "methods" / "cluster_hopping" / "config.rs").read_text(
+        encoding="utf-8"
+    )
+    match = re.search(r"pub struct Config \{(.*?)\n\}", cfg_rs, re.S)
+    assert match is not None, "could not locate `pub struct Config` in config.rs"
+    rust_fields = set(re.findall(r"^\s*pub (\w+)\s*:", match.group(1), re.M))
+    assert len(rust_fields) >= 171
+
+    py_getters: set[str] = set()
+    py_setters: set[str] = set()
+    for name, member in inspect.getmembers(anneal.Config):
+        if name.startswith("_") or not inspect.isdatadescriptor(member):
+            continue
+        py_getters.add(name)
+        if getattr(member, "__set__", None) is not None:
+            # PyO3 emits getset_descriptor for all #[getter] properties; probe writability below.
+            py_setters.add(name)
+
+    missing_getters = sorted(rust_fields - py_getters)
+    assert not missing_getters, f"anneal.Config is missing Rust Config getters: {missing_getters}"
+
+    # Verify every Rust field except read-only `n_points` round-trips through getattr -> setattr.
+    cfg = anneal.Config.recommended_with_scales(13, 2.0, 3.0)
+    before = cfg.resolved_json()
+    read_only: set[str] = set()
+    for field in sorted(rust_fields):
+        val = getattr(cfg, field)
+        try:
+            setattr(cfg, field, val)
+        except AttributeError:
+            read_only.add(field)
+    assert read_only == {"n_points"}
+    assert cfg.resolved_json() == before
+
+
+def test_config_structured_fields_roundtrip_and_execute():
+    # 1. surfaces & two_phase
+    cfg = anneal.Config.recommended_with_scales(13, 2.0, 3.0)
+    assert cfg.surfaces == [
+        {
+            "kind": "relative",
+            "cutoff": 0.7,
+            "beta": pytest.approx(3.0 / 16.0),
+            "mu": 0.0,
+            "anisotropic": False,
+        }
+    ]
+    assert cfg.two_phase is None
+    cfg.two_phase = ("fixed", 2.4, 1.5, 0.25, True)
+    assert cfg.two_phase == {
+        "kind": "fixed",
+        "cutoff": 2.4,
+        "beta": 1.5,
+        "mu": 0.25,
+        "anisotropic": True,
+    }
+    cfg.two_phase = {"cutoff": {"Relative": 0.68}, "beta": 0.9}
+    assert cfg.two_phase == {
+        "kind": "relative",
+        "cutoff": 0.68,
+        "beta": 0.9,
+        "mu": 0.0,
+        "anisotropic": False,
+    }
+    cfg.surfaces = [("relative", 0.72, 0.5), cfg.two_phase]
+    assert len(cfg.surfaces) == 2
+    assert cfg.surfaces[0]["cutoff"] == pytest.approx(0.72)
+    cfg.two_phase = None
+    assert cfg.two_phase is None
+
+    with pytest.raises(ValueError, match="cutoff"):
+        cfg.two_phase = ("relative", -0.5, 1.0)
+
+    # 2. rigid_body_geometry & with_rigid_bodies
+    tip_cfg = anneal.Config.for_tip4p(4)
+    geom = tip_cfg.rigid_body_geometry
+    assert geom is not None
+    assert geom["species"] == [8, 1, 1]
+    assert len(geom["sites"]) == 3
+
+    custom_rigid = anneal.Config.recommended(3).with_rigid_bodies(
+        [[0.0, 0.0, 0.0], [0.0, 0.75, 0.58], [0.0, -0.75, 0.58]],
+        [8, 1, 1],
+    )
+    assert custom_rigid.rigid_body is True
+    assert custom_rigid.rigid_body_geometry is not None
+    assert custom_rigid.rigid_body_geometry["species"] == [8, 1, 1]
+    custom_rigid.rigid_body_geometry = None
+    assert custom_rigid.rigid_body_geometry is None
+    custom_rigid.rigid_body_geometry = geom
+    assert custom_rigid.rigid_body_geometry == geom
+
+    with pytest.raises(ValueError, match="rigid-body"):
+        custom_rigid.rigid_body_geometry = {"sites": [[0.0, 0.0, 0.0]], "species": [8, 1]}
+
+    # 3. reoccupy
+    rcfg = anneal.Config.recommended(4)
+    assert rcfg.reoccupy is None
+    rcfg.reoccupy = "lennard_jones"
+    assert rcfg.reoccupy is not None
+    assert rcfg.reoccupy["n_points"] == 4
+    assert rcfg.reoccupy["kind"] == "lennard_jones"
+    rcfg.reoccupy = {
+        "kind": ("morse", 6.0),
+        "patience": 2,
+        "relax_steps": 80,
+        "max_moves": 8,
+    }
+    assert rcfg.reoccupy["kind"] == ("morse", 6.0)
+    assert rcfg.reoccupy["patience"] == 2
+    rcfg.reoccupy = rcfg.reoccupy
+    assert rcfg.reoccupy["relax_steps"] == 80
+
+    lj4 = anneal.PairPotential.lennard_jones(4)
+    rcfg.reoccupy = "lennard_jones"
+    rcfg.reoccupy_interval = 20
+    reocc_out = anneal.cluster_search(lj4, None, 4, 150, seed=3, config=rcfg)
+    assert math.isfinite(reocc_out["best_energy"])
+    rcfg.reoccupy = None
+    assert rcfg.reoccupy is None
+
+    # 4. hmc
+    hcfg = anneal.Config.for_cluster(4)
+    assert hcfg.hmc is None
+    hcfg.hmc = "model_hessian"
+    assert hcfg.hmc == {
+        "n_points": 4,
+        "metric": "model_hessian",
+        "warmup_hops": 150,
+        "max_depth": 5,
+        "target_accept": 0.8,
+        "control_step": 0.38,
+        "target_reach": None,
+        "drift_period": 64,
+        "trajectory_temperature": None,
+    }
+    hcfg.hmc = {
+        "metric": "identity",
+        "warmup_hops": 10,
+        "max_depth": 3,
+        "target_accept": 0.75,
+        "control_step": 0.3,
+        "target_reach": 0.6,
+        "drift_period": 16,
+        "trajectory_temperature": 0.05,
+    }
+    assert hcfg.hmc["metric"] == "identity"
+    assert hcfg.hmc["max_depth"] == 3
+    assert hcfg.hmc["target_reach"] == pytest.approx(0.6)
+    assert hcfg.hmc["trajectory_temperature"] == pytest.approx(0.05)
+    hcfg.hmc = hcfg.hmc
+    hmc_out = anneal.cluster_search(lj4, None, 4, 160, seed=5, config=hcfg)
+    assert math.isfinite(hmc_out["best_energy"])
+    hcfg.hmc = None
+    assert hcfg.hmc is None
+
+    with pytest.raises(ValueError, match="hmc"):
+        hcfg.hmc = "unknown_metric"

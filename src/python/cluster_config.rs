@@ -5,13 +5,18 @@ use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
 
+use crate::hmc::hop::HopConfig;
+use crate::hmc::metric::MetricKind;
 use crate::methods::cluster_hopping::{
     ArmSelection, Config, ContinuousSymmetry, Keying, LadderMode, MoveLibrary, OrbitCore,
     PairRange, REMOVED_PRIOR_KEYS, SoapProposalMode, covalent_radius,
 };
+use crate::methods::lattice_search::LatticeSearchConfig;
 use crate::methods::minima_hopping::SharedVisitPolicy;
 use crate::methods::tric_opt::LocalStep;
+use crate::methods::two_phase::{Cutoff, TwoPhase};
 use crate::potentials::PairKind;
+use crate::rigid_body::RigidBodyGeometry;
 use crate::symmetrise::ShellCore;
 
 fn check_n_at_least_two(n: usize) -> PyResult<()> {
@@ -359,6 +364,439 @@ fn parse_continuous_symmetry(value: &Bound<'_, PyAny>) -> PyResult<ContinuousSym
     ))
 }
 
+fn parse_sites_vec(sites_any: &Bound<'_, PyAny>) -> PyResult<Vec<[f64; 3]>> {
+    if let Ok(rows) = sites_any.extract::<Vec<[f64; 3]>>() {
+        if rows.is_empty() {
+            return Err(PyValueError::new_err("sites must not be empty"));
+        }
+        return Ok(rows);
+    }
+    if let Ok(flat) = sites_any.extract::<Vec<f64>>() {
+        if flat.is_empty() || !flat.len().is_multiple_of(3) {
+            return Err(PyValueError::new_err(
+                "flat sites must have non-zero length divisible by 3",
+            ));
+        }
+        return Ok(flat.as_chunks::<3>().0.to_vec());
+    }
+    Err(PyTypeError::new_err(
+        "sites must be a sequence of (x, y, z) triples or a flat 3*k float sequence",
+    ))
+}
+
+fn rigid_body_geometry_to_py(py: Python<'_>, geom: &RigidBodyGeometry) -> PyResult<Py<PyDict>> {
+    let dict = PyDict::new(py);
+    let sites: Vec<(f64, f64, f64)> = geom.sites().iter().map(|s| (s[0], s[1], s[2])).collect();
+    dict.set_item("sites", sites)?;
+    dict.set_item("species", geom.species().to_vec())?;
+    Ok(dict.into())
+}
+
+fn parse_rigid_body_geometry(value: &Bound<'_, PyAny>) -> PyResult<RigidBodyGeometry> {
+    if let Ok(tup) = value.cast::<PyTuple>() {
+        if tup.len() != 2 {
+            return Err(PyValueError::new_err(
+                "rigid_body_geometry tuple must be (sites, species)",
+            ));
+        }
+        let sites = parse_sites_vec(&tup.get_item(0)?)?;
+        let species: Vec<u32> = tup.get_item(1)?.extract()?;
+        return RigidBodyGeometry::new(sites, species).map_err(PyValueError::new_err);
+    }
+    if let Ok(dict) = value.cast::<PyDict>() {
+        for (k, _) in dict.iter() {
+            let key: String = k.extract()?;
+            if key != "sites" && key != "species" {
+                return Err(PyValueError::new_err(format!(
+                    "unknown rigid_body_geometry key {key:?}; expected \"sites\" and \"species\""
+                )));
+            }
+        }
+        let Some(sites_any) = dict.get_item("sites")? else {
+            return Err(PyValueError::new_err(
+                "rigid_body_geometry dict requires \"sites\"",
+            ));
+        };
+        let Some(species_any) = dict.get_item("species")? else {
+            return Err(PyValueError::new_err(
+                "rigid_body_geometry dict requires \"species\"",
+            ));
+        };
+        let sites = parse_sites_vec(&sites_any)?;
+        let species: Vec<u32> = species_any.extract()?;
+        return RigidBodyGeometry::new(sites, species).map_err(PyValueError::new_err);
+    }
+    Err(PyTypeError::new_err(
+        "rigid_body_geometry must be None, (sites, species), or {\"sites\": ..., \"species\": ...}",
+    ))
+}
+
+fn parse_cutoff_kind_val(kind: &str, val: f64) -> PyResult<Cutoff> {
+    check_pos_finite("two_phase cutoff", val)?;
+    match kind {
+        "fixed" | "Fixed" => Ok(Cutoff::Fixed(val)),
+        "relative" | "Relative" => Ok(Cutoff::Relative(val)),
+        other => Err(PyValueError::new_err(format!(
+            "unknown two_phase cutoff kind {other:?}; expected \"fixed\" or \"relative\""
+        ))),
+    }
+}
+
+fn two_phase_to_py(py: Python<'_>, tp: &TwoPhase) -> PyResult<Py<PyDict>> {
+    let dict = PyDict::new(py);
+    let (kind, cutoff) = match tp.cutoff {
+        Cutoff::Fixed(v) => ("fixed", v),
+        Cutoff::Relative(v) => ("relative", v),
+    };
+    dict.set_item("kind", kind)?;
+    dict.set_item("cutoff", cutoff)?;
+    dict.set_item("beta", tp.beta)?;
+    dict.set_item("mu", tp.mu)?;
+    dict.set_item("anisotropic", tp.anisotropic)?;
+    Ok(dict.into())
+}
+
+fn parse_two_phase(value: &Bound<'_, PyAny>) -> PyResult<TwoPhase> {
+    if let Ok(tup) = value.cast::<PyTuple>() {
+        return match tup.len() {
+            3 => {
+                let kind: String = tup.get_item(0)?.extract()?;
+                let cutoff_val: f64 = tup.get_item(1)?.extract()?;
+                let beta: f64 = tup.get_item(2)?.extract()?;
+                check_nonneg_finite("two_phase beta", beta)?;
+                Ok(TwoPhase {
+                    cutoff: parse_cutoff_kind_val(&kind, cutoff_val)?,
+                    beta,
+                    mu: 0.0,
+                    anisotropic: false,
+                })
+            }
+            5 => {
+                let kind: String = tup.get_item(0)?.extract()?;
+                let cutoff_val: f64 = tup.get_item(1)?.extract()?;
+                let beta: f64 = tup.get_item(2)?.extract()?;
+                let mu: f64 = tup.get_item(3)?.extract()?;
+                let anisotropic: bool = tup.get_item(4)?.extract()?;
+                check_nonneg_finite("two_phase beta", beta)?;
+                check_nonneg_finite("two_phase mu", mu)?;
+                Ok(TwoPhase {
+                    cutoff: parse_cutoff_kind_val(&kind, cutoff_val)?,
+                    beta,
+                    mu,
+                    anisotropic,
+                })
+            }
+            _ => Err(PyValueError::new_err(
+                "two_phase tuple must be (kind, cutoff, beta) or (kind, cutoff, beta, mu, anisotropic)",
+            )),
+        };
+    }
+    if let Ok(dict) = value.cast::<PyDict>() {
+        for (k, _) in dict.iter() {
+            let key: String = k.extract()?;
+            if !matches!(
+                key.as_str(),
+                "kind" | "cutoff" | "beta" | "mu" | "anisotropic"
+            ) {
+                return Err(PyValueError::new_err(format!(
+                    "unknown two_phase key {key:?}"
+                )));
+            }
+        }
+        let Some(cutoff_any) = dict.get_item("cutoff")? else {
+            return Err(PyValueError::new_err("two_phase dict requires \"cutoff\""));
+        };
+        let cutoff = if let Some(kind_any) = dict.get_item("kind")? {
+            let kind: String = kind_any.extract()?;
+            let val: f64 = cutoff_any.extract()?;
+            parse_cutoff_kind_val(&kind, val)?
+        } else if let Ok(tup) = cutoff_any.cast::<PyTuple>() {
+            if tup.len() != 2 {
+                return Err(PyValueError::new_err(
+                    "two_phase cutoff tuple must be (kind, value)",
+                ));
+            }
+            let kind: String = tup.get_item(0)?.extract()?;
+            let val: f64 = tup.get_item(1)?.extract()?;
+            parse_cutoff_kind_val(&kind, val)?
+        } else if let Ok(sub) = cutoff_any.cast::<PyDict>() {
+            if sub.len() != 1 {
+                return Err(PyValueError::new_err(
+                    "two_phase cutoff dict must have a single \"fixed\" or \"relative\" entry",
+                ));
+            }
+            let (k, v) = sub.iter().next().expect("checked len == 1");
+            let kind: String = k.extract()?;
+            let val: f64 = v.extract()?;
+            parse_cutoff_kind_val(&kind, val)?
+        } else {
+            return Err(PyValueError::new_err(
+                "two_phase dict without \"kind\" requires cutoff=(kind, value)",
+            ));
+        };
+        let Some(beta_any) = dict.get_item("beta")? else {
+            return Err(PyValueError::new_err("two_phase dict requires \"beta\""));
+        };
+        let beta: f64 = beta_any.extract()?;
+        check_nonneg_finite("two_phase beta", beta)?;
+        let mu: f64 = match dict.get_item("mu")? {
+            Some(v) => v.extract()?,
+            None => 0.0,
+        };
+        check_nonneg_finite("two_phase mu", mu)?;
+        let anisotropic: bool = match dict.get_item("anisotropic")? {
+            Some(v) => v.extract()?,
+            None => false,
+        };
+        return Ok(TwoPhase {
+            cutoff,
+            beta,
+            mu,
+            anisotropic,
+        });
+    }
+    Err(PyTypeError::new_err(
+        "two_phase entry must be a dict or (kind, cutoff, beta[, mu, anisotropic]) tuple",
+    ))
+}
+
+fn parse_pair_kind_spec(value: &Bound<'_, PyAny>) -> PyResult<PairKind> {
+    if let Ok(s) = value.extract::<&str>() {
+        return match s {
+            "lennard_jones" | "lj" => Ok(PairKind::LennardJones),
+            other => Err(PyValueError::new_err(format!(
+                "unknown reoccupy pair kind {other:?}; expected \"lennard_jones\" or (\"morse\", rho)"
+            ))),
+        };
+    }
+    if let Ok(tup) = value.cast::<PyTuple>() {
+        if tup.len() == 2 {
+            let name: String = tup.get_item(0)?.extract()?;
+            let rho: f64 = tup.get_item(1)?.extract()?;
+            if name != "morse" {
+                return Err(PyValueError::new_err(format!(
+                    "reoccupy tuple kind must be (\"morse\", rho), got {name:?}"
+                )));
+            }
+            check_pos_finite("morse rho", rho)?;
+            return Ok(PairKind::Morse { rho });
+        }
+        return Err(PyValueError::new_err(
+            "reoccupy kind tuple must be (\"morse\", rho)",
+        ));
+    }
+    if let Ok(dict) = value.cast::<PyDict>() {
+        if dict.len() == 1
+            && let Some(rho_any) = dict.get_item("morse")?
+        {
+            let rho: f64 = rho_any.extract()?;
+            check_pos_finite("morse rho", rho)?;
+            return Ok(PairKind::Morse { rho });
+        }
+        return Err(PyValueError::new_err(
+            "reoccupy kind dict must be {\"morse\": rho}",
+        ));
+    }
+    Err(PyTypeError::new_err(
+        "reoccupy kind must be \"lennard_jones\" or (\"morse\", rho)",
+    ))
+}
+
+fn reoccupy_to_py(py: Python<'_>, cfg: &LatticeSearchConfig) -> PyResult<Py<PyDict>> {
+    let dict = PyDict::new(py);
+    dict.set_item("n_points", cfg.n_points)?;
+    match cfg.kind {
+        PairKind::LennardJones => dict.set_item("kind", "lennard_jones")?,
+        PairKind::Morse { rho } => dict.set_item("kind", ("morse", rho))?,
+    }
+    dict.set_item("neighbour_cutoff", cfg.neighbour_cutoff)?;
+    dict.set_item("relax_steps", cfg.relax_steps)?;
+    dict.set_item("patience", cfg.patience)?;
+    dict.set_item("max_moves", cfg.max_moves)?;
+    dict.set_item("min_separation", cfg.min_separation)?;
+    Ok(dict.into())
+}
+
+fn parse_reoccupy(default_n: usize, value: &Bound<'_, PyAny>) -> PyResult<LatticeSearchConfig> {
+    if value.extract::<&str>().is_ok() || value.cast::<PyTuple>().is_ok() {
+        return match parse_pair_kind_spec(value)? {
+            PairKind::LennardJones => Ok(LatticeSearchConfig::lennard_jones(default_n)),
+            PairKind::Morse { rho } => Ok(LatticeSearchConfig::morse(default_n, rho)),
+        };
+    }
+    if let Ok(dict) = value.cast::<PyDict>() {
+        for (k, _) in dict.iter() {
+            let key: String = k.extract()?;
+            if !matches!(
+                key.as_str(),
+                "n_points"
+                    | "kind"
+                    | "neighbour_cutoff"
+                    | "relax_steps"
+                    | "patience"
+                    | "max_moves"
+                    | "min_separation"
+            ) {
+                return Err(PyValueError::new_err(format!(
+                    "unknown reoccupy key {key:?}"
+                )));
+            }
+        }
+        let n_points: usize = match dict.get_item("n_points")? {
+            Some(v) => v.extract()?,
+            None => default_n,
+        };
+        check_n_at_least_two(n_points)?;
+        let kind = match dict.get_item("kind")? {
+            Some(v) => parse_pair_kind_spec(&v)?,
+            None => PairKind::LennardJones,
+        };
+        let mut cfg = match kind {
+            PairKind::LennardJones => LatticeSearchConfig::lennard_jones(n_points),
+            PairKind::Morse { rho } => LatticeSearchConfig::morse(n_points, rho),
+        };
+        if let Some(v) = dict.get_item("neighbour_cutoff")? {
+            let val: f64 = v.extract()?;
+            check_pos_finite("reoccupy neighbour_cutoff", val)?;
+            cfg.neighbour_cutoff = val;
+        }
+        if let Some(v) = dict.get_item("relax_steps")? {
+            cfg.relax_steps = v.extract()?;
+        }
+        if let Some(v) = dict.get_item("patience")? {
+            let val: usize = v.extract()?;
+            check_usize_ge_one("reoccupy patience", val)?;
+            cfg.patience = val;
+        }
+        if let Some(v) = dict.get_item("max_moves")? {
+            cfg.max_moves = v.extract()?;
+        }
+        if let Some(v) = dict.get_item("min_separation")? {
+            let val: f64 = v.extract()?;
+            check_nonneg_finite("reoccupy min_separation", val)?;
+            cfg.min_separation = val;
+        }
+        return Ok(cfg);
+    }
+    Err(PyTypeError::new_err(
+        "reoccupy must be None, \"lennard_jones\", (\"morse\", rho), or a config dict",
+    ))
+}
+
+fn metric_kind_to_str(m: MetricKind) -> &'static str {
+    match m {
+        MetricKind::Identity => "identity",
+        MetricKind::Diagonal => "diagonal",
+        MetricKind::ModelHessian => "model_hessian",
+    }
+}
+
+fn parse_metric_kind(s: &str) -> PyResult<MetricKind> {
+    match s {
+        "identity" => Ok(MetricKind::Identity),
+        "diagonal" => Ok(MetricKind::Diagonal),
+        "model_hessian" | "modelhess" => Ok(MetricKind::ModelHessian),
+        other => Err(PyValueError::new_err(format!(
+            "unknown hmc metric {other:?}; expected \"identity\", \"diagonal\", or \"model_hessian\""
+        ))),
+    }
+}
+
+fn hmc_to_py(py: Python<'_>, cfg: &HopConfig) -> PyResult<Py<PyDict>> {
+    let dict = PyDict::new(py);
+    dict.set_item("n_points", cfg.n_points)?;
+    dict.set_item("metric", metric_kind_to_str(cfg.metric))?;
+    dict.set_item("warmup_hops", cfg.warmup_hops)?;
+    dict.set_item("max_depth", cfg.max_depth)?;
+    dict.set_item("target_accept", cfg.target_accept)?;
+    dict.set_item("control_step", cfg.control_step)?;
+    dict.set_item("target_reach", cfg.target_reach)?;
+    dict.set_item("drift_period", cfg.drift_period)?;
+    dict.set_item("trajectory_temperature", cfg.trajectory_temperature)?;
+    Ok(dict.into())
+}
+
+fn parse_hmc(default_n: usize, value: &Bound<'_, PyAny>) -> PyResult<HopConfig> {
+    if let Ok(s) = value.extract::<&str>() {
+        return Ok(HopConfig::new(default_n, parse_metric_kind(s)?));
+    }
+    if let Ok(dict) = value.cast::<PyDict>() {
+        for (k, _) in dict.iter() {
+            let key: String = k.extract()?;
+            if !matches!(
+                key.as_str(),
+                "n_points"
+                    | "metric"
+                    | "warmup_hops"
+                    | "max_depth"
+                    | "target_accept"
+                    | "control_step"
+                    | "target_reach"
+                    | "drift_period"
+                    | "trajectory_temperature"
+            ) {
+                return Err(PyValueError::new_err(format!("unknown hmc key {key:?}")));
+            }
+        }
+        let n_points: usize = match dict.get_item("n_points")? {
+            Some(v) => v.extract()?,
+            None => default_n,
+        };
+        check_n_at_least_two(n_points)?;
+        let metric = match dict.get_item("metric")? {
+            Some(v) => {
+                let s: String = v.extract()?;
+                parse_metric_kind(&s)?
+            }
+            None => MetricKind::Identity,
+        };
+        let mut cfg = HopConfig::new(n_points, metric);
+        if let Some(v) = dict.get_item("warmup_hops")? {
+            cfg.warmup_hops = v.extract()?;
+        }
+        if let Some(v) = dict.get_item("max_depth")? {
+            let depth: u32 = v.extract()?;
+            if depth < 1 {
+                return Err(PyValueError::new_err("hmc max_depth must be at least 1"));
+            }
+            cfg.max_depth = depth;
+        }
+        if let Some(v) = dict.get_item("target_accept")? {
+            let val: f64 = v.extract()?;
+            check_unit_open("hmc target_accept", val)?;
+            cfg.target_accept = val;
+        }
+        if let Some(v) = dict.get_item("control_step")? {
+            let val: f64 = v.extract()?;
+            check_pos_finite("hmc control_step", val)?;
+            cfg.control_step = val;
+        }
+        if let Some(v) = dict.get_item("target_reach")? {
+            let reach: Option<f64> = v.extract()?;
+            if let Some(r) = reach {
+                check_pos_finite("hmc target_reach", r)?;
+            }
+            cfg.target_reach = reach;
+        }
+        if let Some(v) = dict.get_item("drift_period")? {
+            let val: usize = v.extract()?;
+            check_usize_ge_one("hmc drift_period", val)?;
+            cfg.drift_period = val;
+        }
+        if let Some(v) = dict.get_item("trajectory_temperature")? {
+            let temp: Option<f64> = v.extract()?;
+            if let Some(t) = temp {
+                check_pos_finite("hmc trajectory_temperature", t)?;
+            }
+            cfg.trajectory_temperature = temp;
+        }
+        return Ok(cfg);
+    }
+    Err(PyTypeError::new_err(
+        "hmc must be None, \"identity\", \"diagonal\", \"model_hessian\", or a config dict",
+    ))
+}
+
 /// Scale-aware cluster-search configuration and named presets.
 ///
 /// `Config.recommended(n)` is the measured default: composed surface
@@ -597,6 +1035,18 @@ impl PyClusterConfig {
             inner: self.inner.clone().with_dual_orbit_core(),
             recommended: self.recommended,
         }
+    }
+
+    /// Return a copy configured on a rigid centre-and-rotation chart.
+    fn with_rigid_bodies(&self, sites: &Bound<'_, PyAny>, species: Vec<u32>) -> PyResult<Self> {
+        check_n_at_least_two(self.inner.n_points)?;
+        let parsed_sites = parse_sites_vec(sites)?;
+        let geometry =
+            RigidBodyGeometry::new(parsed_sites, species).map_err(PyValueError::new_err)?;
+        Ok(Self {
+            inner: self.inner.clone().with_rigid_bodies(geometry),
+            recommended: self.recommended,
+        })
     }
 
     /// Merge covalently bonded molecular groups on `start`, or `None` if unchanged.
@@ -2619,6 +3069,99 @@ impl PyClusterConfig {
     #[setter]
     fn set_superbasin_features(&mut self, value: bool) {
         self.inner.superbasin_features = value;
+    }
+
+    #[getter]
+    fn rigid_body_geometry(&self, py: Python<'_>) -> PyResult<Option<Py<PyDict>>> {
+        self.inner
+            .rigid_body_geometry
+            .as_ref()
+            .map(|geom| rigid_body_geometry_to_py(py, geom))
+            .transpose()
+    }
+
+    #[setter]
+    fn set_rigid_body_geometry(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        if value.is_none() {
+            self.inner.rigid_body_geometry = None;
+            return Ok(());
+        }
+        self.inner.rigid_body_geometry = Some(parse_rigid_body_geometry(value)?);
+        Ok(())
+    }
+
+    #[getter]
+    fn two_phase(&self, py: Python<'_>) -> PyResult<Option<Py<PyDict>>> {
+        self.inner
+            .two_phase
+            .as_ref()
+            .map(|tp| two_phase_to_py(py, tp))
+            .transpose()
+    }
+
+    #[setter]
+    fn set_two_phase(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        if value.is_none() {
+            self.inner.two_phase = None;
+            return Ok(());
+        }
+        self.inner.two_phase = Some(parse_two_phase(value)?);
+        Ok(())
+    }
+
+    #[getter]
+    fn surfaces(&self, py: Python<'_>) -> PyResult<Vec<Py<PyDict>>> {
+        self.inner
+            .surfaces
+            .iter()
+            .map(|tp| two_phase_to_py(py, tp))
+            .collect()
+    }
+
+    #[setter]
+    fn set_surfaces(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        let items: Vec<Bound<'_, PyAny>> = value.extract()?;
+        let parsed: PyResult<Vec<TwoPhase>> = items.iter().map(parse_two_phase).collect();
+        self.inner.surfaces = parsed?;
+        Ok(())
+    }
+
+    #[getter]
+    fn reoccupy(&self, py: Python<'_>) -> PyResult<Option<Py<PyDict>>> {
+        self.inner
+            .reoccupy
+            .as_ref()
+            .map(|cfg| reoccupy_to_py(py, cfg))
+            .transpose()
+    }
+
+    #[setter]
+    fn set_reoccupy(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        if value.is_none() {
+            self.inner.reoccupy = None;
+            return Ok(());
+        }
+        self.inner.reoccupy = Some(parse_reoccupy(self.inner.n_points, value)?);
+        Ok(())
+    }
+
+    #[getter]
+    fn hmc(&self, py: Python<'_>) -> PyResult<Option<Py<PyDict>>> {
+        self.inner
+            .hmc
+            .as_ref()
+            .map(|cfg| hmc_to_py(py, cfg))
+            .transpose()
+    }
+
+    #[setter]
+    fn set_hmc(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        if value.is_none() {
+            self.inner.hmc = None;
+            return Ok(());
+        }
+        self.inner.hmc = Some(parse_hmc(self.inner.n_points, value)?);
+        Ok(())
     }
 
     fn __repr__(&self) -> String {

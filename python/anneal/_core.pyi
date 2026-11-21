@@ -387,6 +387,11 @@ class Config:
         sigmas: Sequence[float] | None = None,
     ) -> Config: ...
     def with_dual_orbit_core(self) -> Config: ...
+    def with_rigid_bodies(
+        self,
+        sites: Sequence[Sequence[float]] | Sequence[float] | npt.NDArray[np.float64],
+        species: Sequence[int],
+    ) -> Config: ...
     def with_flexible_molecules(
         self,
         start: npt.NDArray[np.float64],
@@ -581,6 +586,45 @@ class Config:
     superbasin_period: int
     superbasin_quotient: bool
     superbasin_features: bool
+    @property
+    def rigid_body_geometry(self) -> dict[str, Any] | None: ...
+    @rigid_body_geometry.setter
+    def rigid_body_geometry(
+        self,
+        value: dict[str, Any] | tuple[Any, Sequence[int]] | None,
+    ) -> None: ...
+    @property
+    def two_phase(self) -> dict[str, Any] | None: ...
+    @two_phase.setter
+    def two_phase(
+        self,
+        value: dict[str, Any]
+        | tuple[str, float, float]
+        | tuple[str, float, float, float, bool]
+        | None,
+    ) -> None: ...
+    @property
+    def surfaces(self) -> list[dict[str, Any]]: ...
+    @surfaces.setter
+    def surfaces(
+        self,
+        value: Sequence[
+            dict[str, Any]
+            | tuple[str, float, float]
+            | tuple[str, float, float, float, bool]
+        ],
+    ) -> None: ...
+    @property
+    def reoccupy(self) -> dict[str, Any] | None: ...
+    @reoccupy.setter
+    def reoccupy(
+        self,
+        value: str | tuple[str, float] | dict[str, Any] | None,
+    ) -> None: ...
+    @property
+    def hmc(self) -> dict[str, Any] | None: ...
+    @hmc.setter
+    def hmc(self, value: str | dict[str, Any] | None) -> None: ...
 
 class Ledger:
     def __init__(self, budget: int) -> None: ...

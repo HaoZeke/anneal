@@ -25,9 +25,11 @@ or =quench(pot, x0, gtol)=, converts to =PyObjective= via
 =for_cluster_with_scales=, =for_cluster_dual_core=, =with_scales=,
 =packing_superbasin=, =for_tip4p=, =for_molecular=,
 =recommended_molecular=), builder and inspection methods (=with_species=,
-=with_dual_orbit_core=, =with_flexible_molecules=, =resolved_json=,
-=resolved_sha256=, =check_removed_env=, =parse_prior_switches=), and
-read/write attributes for every active configuration field.
+=with_dual_orbit_core=, =with_rigid_bodies=, =with_flexible_molecules=,
+=resolved_json=, =resolved_sha256=, =check_removed_env=,
+=parse_prior_switches=), and read/write attributes for every active
+configuration field (including =rigid_body_geometry=, =two_phase=,
+=surfaces=, =reoccupy=, and =hmc=).
 =cluster_search= accepts =energy_scale= and a pre-configured =config=
 instance directly, and delegates scaled presets to
 =Config::recommended_with_scales= and =Config::for_cluster_with_scales=.
