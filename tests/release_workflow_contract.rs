@@ -1,3 +1,12 @@
+fn source_manifest() -> String {
+    let orig = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml.orig");
+    if orig.is_file() {
+        return std::fs::read_to_string(&orig)
+            .unwrap_or_else(|err| panic!("failed to read {}: {err}", orig.display()));
+    }
+    include_str!("../Cargo.toml").to_string()
+}
+
 #[test]
 fn crate_publication_keeps_cargo_verification_enabled() {
     let workflow = include_str!("../.github/workflows/release.yml");
@@ -8,7 +17,7 @@ fn crate_publication_keeps_cargo_verification_enabled() {
 
 #[test]
 fn crate_publication_has_a_registry_fallback_for_git_dependencies() {
-    let manifest = include_str!("../Cargo.toml");
+    let manifest = source_manifest();
     let workflow = include_str!("../.github/workflows/ci.yml");
 
     assert!(manifest.contains("rgpot-core = { version = \"=3.5.1\" }"));
@@ -26,11 +35,15 @@ fn crate_publication_has_a_registry_fallback_for_git_dependencies() {
     assert!(manifest.contains("\"/README.md\""));
     assert!(manifest.contains("\"/LICENSE.txt\""));
     assert!(manifest.contains("\"/CHANGELOG.md\""));
+    assert!(manifest.contains("\"/CITATION.cff\""));
     assert!(manifest.contains("\"/build.rs\""));
     assert!(manifest.contains("\"/cbindgen.toml\""));
     assert!(manifest.contains("\"/src/**\""));
     assert!(manifest.contains("\"/include/**\""));
     assert!(manifest.contains("\"/data/**\""));
+    assert!(manifest.contains("\"/benches/**\""));
+    assert!(manifest.contains("\"/examples/**\""));
+    assert!(manifest.contains("\"/tests/**\""));
     // `cargo package` writes anneal-core-${version}.crate. The version
     // comes from cargo metadata.
     assert!(workflow.contains("cargo package"));
@@ -62,7 +75,7 @@ fn release_tags_match_every_public_package_version() {
 
 #[test]
 fn scientific_tests_optimize_kernels_without_disabling_debug_checks() {
-    let manifest = include_str!("../Cargo.toml");
+    let manifest = source_manifest();
 
     assert!(manifest.contains("[profile.test]"));
     assert!(manifest.contains("opt-level = 2"));
@@ -207,7 +220,7 @@ fn ci_audits_large_blobs_without_a_deprecated_action_runtime() {
 /// directory, so `to = "dlpack"` installs `include/dlpack/dlpack.h`.
 #[test]
 fn c_abi_installs_the_dlpack_header_the_generated_include_names() {
-    let manifest = include_str!("../Cargo.toml");
+    let manifest = source_manifest();
     let header = include_str!("../include/dlpack/dlpack.h");
 
     assert!(manifest.contains("{ from = \"include/dlpack/dlpack.h\", to = \"dlpack\" }"));
@@ -218,7 +231,7 @@ fn c_abi_installs_the_dlpack_header_the_generated_include_names() {
 
 #[test]
 fn rgpot_pair_stays_out_of_the_published_dependencies() {
-    let manifest = include_str!("../Cargo.toml");
+    let manifest = source_manifest();
     let dependencies = manifest
         .split("\n[dependencies]\n")
         .nth(1)
@@ -228,8 +241,17 @@ fn rgpot_pair_stays_out_of_the_published_dependencies() {
     assert!(manifest.contains("members = [\"crates/anneal-python\"]"));
     let pyproject = include_str!("../pyproject.toml");
     assert!(pyproject.contains("manifest-path = \"crates/anneal-python/Cargo.toml\""));
-    let wheel = include_str!("../crates/anneal-python/src/lib.rs");
-    assert!(wheel.contains("anneal_core::install_rgpot_kernels!();"));
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let wheel_path = root.join("crates/anneal-python/src/lib.rs");
+    if root.join("Cargo.toml.orig").is_file() && !wheel_path.is_file() {
+        use std::io::Write;
+        let msg = "warning: skipped subcheck crates/anneal-python/src/lib.rs in release_workflow_contract::rgpot_pair_stays_out_of_the_published_dependencies: Cargo omits nested subpackage directories from packaged .crate archives\n";
+        let _ = std::io::stderr().write_all(msg.as_bytes());
+    } else {
+        let wheel = std::fs::read_to_string(&wheel_path)
+            .unwrap_or_else(|err| panic!("failed to read {}: {err}", wheel_path.display()));
+        assert!(wheel.contains("anneal_core::install_rgpot_kernels!();"));
+    }
 }
 
 // An example that skips the installation runs Lennard-Jones and Morse on the
@@ -266,7 +288,7 @@ fn every_example_installs_the_rgpot_kernels() {
 // the wheel does not enable, and maturin packs neither.
 #[test]
 fn the_sdist_packs_every_vendored_path_the_manifest_names() {
-    let manifest = include_str!("../Cargo.toml");
+    let manifest = source_manifest();
     let pyproject = include_str!("../pyproject.toml");
     let mut vendored = 0;
     for piece in manifest.split("path = \"vendor/").skip(1) {
@@ -289,10 +311,13 @@ fn the_sdist_packs_every_vendored_path_the_manifest_names() {
 // target path on disk when pip builds the wheel from the sdist.
 #[test]
 fn the_sdist_packs_explicit_bench_and_example_targets() {
-    let manifest = include_str!("../Cargo.toml");
+    let manifest = source_manifest();
     let pyproject = include_str!("../pyproject.toml");
     assert!(manifest.contains("[[bench]]"));
     assert!(manifest.contains("[[example]]"));
+    assert!(manifest.contains("\"/benches/**\""));
+    assert!(manifest.contains("\"/examples/**\""));
+    assert!(manifest.contains("\"/tests/**\""));
     assert!(
         pyproject.contains("{ path = \"benches/**/*.rs\", format = \"sdist\" }"),
         "pyproject.toml does not pack benches/**/*.rs into the sdist"

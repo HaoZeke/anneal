@@ -517,12 +517,15 @@ def classify_line(rel: str, line: str, ext: str, *, line_no: int = 0) -> str | N
 
 
 def git_tracked(root: Path, ext: str) -> list[Path]:
-    out = subprocess.check_output(
+    proc = subprocess.run(
         ["git", "ls-files", f"*{ext}"],
         cwd=root,
         text=True,
+        capture_output=True,
     )
-    return [root / part for part in out.splitlines() if part]
+    if proc.returncode == 0:
+        return [root / part for part in proc.stdout.splitlines() if part]
+    return sorted(root.rglob(f"*.{ext}"))
 
 
 def scan_repository(root: Path) -> list[str]:

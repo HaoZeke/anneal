@@ -25,18 +25,37 @@ description = "Simulated annealing components built on the eindir typed primitiv
 repository = "https://github.com/HaoZeke/anneal"
 categories = ["science", "mathematics"]
 keywords = ["optimization", "simulated-annealing", "metaheuristic"]
-# Publish from an explicit allowlist so only crate build inputs are shipped.
+# Publish from an explicit allowlist so crate sources, headers, embedded
+# data, benchmarks, examples, integration tests, and the small repository
+# inputs those tests read ship together while bulk paper and benchmark
+# campaign artifacts stay out.
 include = [
-    "/Cargo.toml",
-    "/Cargo.lock",
-    "/README.md",
-    "/LICENSE.txt",
+    "/.github/workflows/**",
+    "/.zenodo.json",
     "/CHANGELOG.md",
+    "/CITATION.cff",
+    "/CMakeLists.txt",
+    "/Cargo.lock",
+    "/Cargo.toml",
+    "/LICENSE.txt",
+    "/README.md",
+    "/bench/lj104-lattice/v2/h2h_cap.f90",
+    "/benches/**",
     "/build.rs",
     "/cbindgen.toml",
-    "/src/**",
-    "/include/**",
     "/data/**",
+    "/docs/source/conf.py",
+    "/examples/**",
+    "/include/**",
+    "/meson.build",
+    "/paper/seeds.toml",
+    "/pixi.toml",
+    "/profiles/**",
+    "/pyproject.toml",
+    "/scripts/**",
+    "/src/**",
+    "/tests/**",
+    "/towncrier.toml",
 ]
 
 [lib]
