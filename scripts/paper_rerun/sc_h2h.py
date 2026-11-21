@@ -8,7 +8,7 @@ Arms alternate ABBA by seed: an even offset runs anneal then GMIN, an odd
 offset runs GMIN then anneal. One job at a time. The process tree is bound
 to cpu 0. A job that exceeds ``JOB_TIMEOUT_S`` is an error, not a rerun.
 
-A hit is ``scripts/target_tol.py`` ``energy_hits``: best <= reference + 0.001.
+A hit is ``energy_hits`` from ``scripts/target_tol.py`` at ``DEFAULT_HIT_TOL``.
 """
 
 from __future__ import annotations
