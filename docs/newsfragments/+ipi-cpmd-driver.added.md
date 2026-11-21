@@ -1,0 +1,1 @@
+`rgpot-ipi-driver` serves `CPMD` through the generic i-PI driver, using `--pot "CPMD params <file>"`, with `--preserve-open-cell` for an isolated deck that must keep its own cell, and it rejects an init string that requests a `batch_size` above 1.
