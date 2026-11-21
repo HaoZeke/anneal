@@ -34,7 +34,16 @@ BOOTSTRAP_SEED = 20261121
 SEEDS = tuple(range(2000, 2024))
 DEFAULT_TIMEOUT_S = 21600
 ARMS = ("A", "A2", "B")
-OBSERVATIONS = (("A", "A"), ("B1", "B"), ("B2", "B"), ("A2", "A2"))
+OBSERVATIONS = (
+    ("BA_A1", "A"),
+    ("BA_B1", "B"),
+    ("BA_B2", "B"),
+    ("BA_A2", "A"),
+    ("A2A_A1", "A"),
+    ("A2A_A21", "A2"),
+    ("A2A_A22", "A2"),
+    ("A2A_A2", "A"),
+)
 OBSERVATION_ARMS = dict(OBSERVATIONS)
 DRIVERS = ("h2h_gmin_proof", "h2h_seed", "h2h_morse", "h2h_blj", "h2h_sc")
 PREFLIGHT_CELLS = {
@@ -302,13 +311,13 @@ def is_hit(best: float, reference: float, tol: float = HIT_TOL) -> bool:
     return math.isfinite(best) and best <= reference + tol
 
 
-def observation_order(seed: int) -> tuple[str, str, str, str]:
-    """Rotate the labelled ABBA observations by the seed offset."""
+def observation_order(seed: int) -> tuple[str, ...]:
+    """Rotate the two labelled ABBA blocks by the seed offset."""
     offset = seed - SEEDS[0]
     base = [name for name, _arm in OBSERVATIONS]
-    shift = offset % 4
+    shift = offset % len(base)
     rotated = base[shift:] + base[:shift]
-    return (rotated[0], rotated[1], rotated[2], rotated[3])
+    return tuple(rotated)
 
 
 def child_env() -> dict[str, str]:
@@ -823,106 +832,140 @@ def score_cell(
         rows[key] = {int(r["seed"]): r for r in got}
 
     inconclusive = sum(1 for got in rows.values() for r in got.values() if r["status"] != "ok")
-    hits = {
-        key: sum(1 for r in got.values() if rederived_hit(r, cell.reference))
-        for key, got in rows.items()
-    }
-    med_calls_a = type7_quantile(
-        [calls_for_test(r, cell.reference) for r in rows["a"].values()], 0.5
-    )
-    med_calls_b = type7_quantile(
-        [
-            calls_for_test(rows[key][seed], cell.reference)
-            for seed in SEEDS
-            for key in ("b1", "b2")
-        ],
-        0.5,
-    )
-
     traj_fields = ("status", "evals", "charged", "calls_to_hit", "best_bits")
-    traj_match = {"b": 0, "a2": 0}
+    b_keys = ("ba_b1", "ba_b2")
+    a2_keys = ("a2a_a21", "a2a_a22")
+    ba_a_keys = ("ba_a1", "ba_a2")
+    band_a_keys = ("a2a_a1", "a2a_a2")
+    traj_match = {"b": 0, "a2": 0, "all": 0}
     traj_diffs: list[str] = []
     hit_loss_seeds: list[int] = []
+    hits_a = 0
+    hits_a2 = 0
+    hits_b1 = 0
+    hits_b2 = 0
     for seed in SEEDS:
-        ra = rows["a"][seed]
-        for key, label in (("b1", "B1"), ("b2", "B2"), ("a2", "A2")):
+        ra = rows["ba_a1"][seed]
+        if all(rederived_hit(rows[key][seed], cell.reference) for key in ba_a_keys):
+            hits_a += 1
+        if all(rederived_hit(rows[key][seed], cell.reference) for key in a2_keys):
+            hits_a2 += 1
+        hits_b1 += int(rederived_hit(rows["ba_b1"][seed], cell.reference))
+        hits_b2 += int(rederived_hit(rows["ba_b2"][seed], cell.reference))
+        for key in rows:
+            if key == "ba_a1":
+                continue
             other = rows[key][seed]
-            diffs = [f for f in traj_fields if other[f] != ra[f]]
+            diffs = [field for field in traj_fields if other[field] != ra[field]]
             if not diffs and ra["status"] == "ok":
-                traj_match["b" if key.startswith("b") else "a2"] += 1
+                traj_match["all"] += 1
+                if key in b_keys:
+                    traj_match["b"] += 1
+                elif key in a2_keys:
+                    traj_match["a2"] += 1
             else:
                 detail = ", ".join(
                     f"{field} {other[field]} vs {ra[field]}" for field in diffs
                 )
-                traj_diffs.append(f"{cell.system} seed {seed} {label} vs A: {detail}")
+                traj_diffs.append(f"{cell.system} seed {seed} {key} vs A: {detail}")
         if rederived_hit(ra, cell.reference) and any(
-            not rederived_hit(rows[key][seed], cell.reference) for key in ("b1", "b2")
+            not rederived_hit(rows[key][seed], cell.reference) for key in b_keys
         ):
             hit_loss_seeds.append(seed)
 
-    ok_seeds = [s for s in SEEDS if all(rows[k][s]["status"] == "ok" for k in rows)]
+    ok_seeds = [seed for seed in SEEDS if all(rows[key][seed]["status"] == "ok" for key in rows)]
 
     def value(key: str, seed: int, field: str) -> float:
         return float(rows[key][seed][field])
+
+    def midpoint(keys: tuple[str, str], seed: int, field: str) -> float:
+        return type7_quantile([value(key, seed, field) for key in keys], 0.5)
+
+    def maximum(keys: tuple[str, str], seed: int, field: str) -> float:
+        return max(value(key, seed, field) for key in keys)
 
     def per_call(key: str, seed: int) -> float:
         row = rows[key][seed]
         return float(row["outside_s"]) / max(1, int(row["charged"]))
 
-    opc_a = [per_call("a", seed) for seed in ok_seeds]
-    opc_a2 = [per_call("a2", seed) for seed in ok_seeds]
-    opc_b = [
-        type7_quantile([per_call("b1", seed), per_call("b2", seed)], 0.5)
-        for seed in ok_seeds
-    ]
+    def midpoint_per_call(keys: tuple[str, str], seed: int) -> float:
+        return type7_quantile([per_call(key, seed) for key in keys], 0.5)
+
+    opc_a = [midpoint_per_call(ba_a_keys, seed) for seed in ok_seeds]
+    opc_b = [midpoint_per_call(b_keys, seed) for seed in ok_seeds]
+    opc_a_band = [midpoint_per_call(band_a_keys, seed) for seed in ok_seeds]
+    opc_a2 = [midpoint_per_call(a2_keys, seed) for seed in ok_seeds]
     med_opc_a = median_or_nan(opc_a)
-    med_opc_a2 = median_or_nan(opc_a2)
     med_opc_b = median_or_nan(opc_b)
+    med_opc_a2 = median_or_nan(opc_a2)
     outside_ba = finite_ratio(med_opc_b, med_opc_a)
-    outside_a2a = finite_ratio(med_opc_a2, med_opc_a)
+    outside_a2a = finite_ratio(med_opc_a2, median_or_nan(opc_a_band))
     ba_lo, ba_hi = bootstrap_median_ratio_ci(opc_b, opc_a)
-    a2a_lo, a2a_hi = bootstrap_median_ratio_ci(opc_a2, opc_a)
+    a2a_lo, a2a_hi = bootstrap_median_ratio_ci(opc_a2, opc_a_band)
     outside_limit = max(OUTSIDE_RATIO_LIMIT, a2a_hi) if not math.isnan(a2a_hi) else OUTSIDE_RATIO_LIMIT
 
-    rss_a = [value("a", seed, "rss_anon_kb") for seed in ok_seeds]
-    rss_a2 = [value("a2", seed, "rss_anon_kb") for seed in ok_seeds]
-    rss_b = [
-        max(value("b1", seed, "rss_anon_kb"), value("b2", seed, "rss_anon_kb"))
-        for seed in ok_seeds
-    ]
+    rss_a = [maximum(ba_a_keys, seed, "rss_anon_kb") for seed in ok_seeds]
+    rss_b = [maximum(b_keys, seed, "rss_anon_kb") for seed in ok_seeds]
+    rss_a_band = [maximum(band_a_keys, seed, "rss_anon_kb") for seed in ok_seeds]
+    rss_a2 = [maximum(a2_keys, seed, "rss_anon_kb") for seed in ok_seeds]
     med_rss_a = median_or_nan(rss_a)
-    med_rss_a2 = median_or_nan(rss_a2)
     med_rss_b = median_or_nan(rss_b)
+    med_rss_a2 = median_or_nan(rss_a2)
     rss_ba = finite_ratio(med_rss_b, med_rss_a)
-    rss_a2a = finite_ratio(med_rss_a2, med_rss_a)
+    rss_a2a = finite_ratio(med_rss_a2, median_or_nan(rss_a_band))
     rss_ba_lo, rss_ba_hi = bootstrap_median_ratio_ci(rss_b, rss_a)
-    rss_a2a_lo, rss_a2a_hi = bootstrap_median_ratio_ci(rss_a2, rss_a)
+    rss_a2a_lo, rss_a2a_hi = bootstrap_median_ratio_ci(rss_a2, rss_a_band)
     rss_limit = (
         max(RSS_RATIO_LIMIT, rss_a2a_hi) if not math.isnan(rss_a2a_hi) else RSS_RATIO_LIMIT
     )
 
-    def flat_field(keys: tuple[str, ...], field: str) -> list[float]:
-        return [value(key, seed, field) for seed in ok_seeds for key in keys]
-
-    med_ru_a = median_or_nan(flat_field(("a",), "ru_maxrss_kb"))
-    med_ru_a2 = median_or_nan(flat_field(("a2",), "ru_maxrss_kb"))
-    med_ru_b = median_or_nan(flat_field(("b1", "b2"), "ru_maxrss_kb"))
-    med_wall_a = median_or_nan(flat_field(("a",), "elapsed_s"))
-    med_wall_a2 = median_or_nan(flat_field(("a2",), "elapsed_s"))
-    med_wall_b = median_or_nan(flat_field(("b1", "b2"), "elapsed_s"))
-    fixed_a = [int(rows["a"][seed]["fixed_ring_bound"]) for seed in SEEDS]
-    fixed_a2 = [int(rows["a2"][seed]["fixed_ring_bound"]) for seed in SEEDS]
-    fixed_b = [
+    med_calls_a = median_or_nan(
+        [
+            type7_quantile(
+                [calls_for_test(rows[key][seed], cell.reference) for key in ba_a_keys], 0.5
+            )
+            for seed in ok_seeds
+        ]
+    )
+    med_calls_b = median_or_nan(
+        [
+            type7_quantile(
+                [calls_for_test(rows[key][seed], cell.reference) for key in b_keys], 0.5
+            )
+            for seed in ok_seeds
+        ]
+    )
+    ru_a = [midpoint(ba_a_keys, seed, "ru_maxrss_kb") for seed in ok_seeds]
+    ru_b = [midpoint(b_keys, seed, "ru_maxrss_kb") for seed in ok_seeds]
+    ru_a_band = [midpoint(band_a_keys, seed, "ru_maxrss_kb") for seed in ok_seeds]
+    ru_a2 = [midpoint(a2_keys, seed, "ru_maxrss_kb") for seed in ok_seeds]
+    wall_a = [midpoint(ba_a_keys, seed, "elapsed_s") for seed in ok_seeds]
+    wall_b = [midpoint(b_keys, seed, "elapsed_s") for seed in ok_seeds]
+    wall_a_band = [midpoint(band_a_keys, seed, "elapsed_s") for seed in ok_seeds]
+    wall_a2 = [midpoint(a2_keys, seed, "elapsed_s") for seed in ok_seeds]
+    med_ru_a = median_or_nan(ru_a)
+    med_ru_b = median_or_nan(ru_b)
+    med_ru_a2 = median_or_nan(ru_a2)
+    med_wall_a = median_or_nan(wall_a)
+    med_wall_b = median_or_nan(wall_b)
+    med_wall_a2 = median_or_nan(wall_a2)
+    fixed_a = [
         int(rows[key][seed]["fixed_ring_bound"])
         for seed in SEEDS
-        for key in ("b1", "b2")
+        for key in (*ba_a_keys, *band_a_keys)
+    ]
+    fixed_a2 = [
+        int(rows[key][seed]["fixed_ring_bound"]) for seed in SEEDS for key in a2_keys
+    ]
+    fixed_b = [
+        int(rows[key][seed]["fixed_ring_bound"]) for seed in SEEDS for key in b_keys
     ]
 
-    fail_a = traj_match["b"] < 2 * len(SEEDS) or traj_match["a2"] < len(SEEDS)
-    fail_b = bool(hit_loss_seeds) or min(hits["b1"], hits["b2"]) < hits["a"]
+    fail_a = traj_match["all"] < (len(OBSERVATIONS) - 1) * len(SEEDS)
+    fail_b = bool(hit_loss_seeds) or min(hits_b1, hits_b2) < hits_a
     fail_c = not (ba_hi <= outside_limit)
     fail_d = not (rss_ba <= rss_limit)
-    fail_e = any(fixed_a) or any(fixed_a2) or any(value <= 0 for value in fixed_b)
+    fail_e = any(fixed_a) or any(fixed_a2) or sum(fixed_b) <= 0
     if inconclusive:
         verdict = "INCONCLUSIVE"
     elif fail_a or fail_b or fail_c or fail_d or fail_e:
@@ -939,10 +982,10 @@ def score_cell(
             "inconclusive": str(inconclusive),
             "traj_match_ba": str(traj_match["b"]),
             "traj_match_a2a": str(traj_match["a2"]),
-            "hits_a": str(hits["a"]),
-            "hits_a2": str(hits["a2"]),
-            "hits_b1": str(hits["b1"]),
-            "hits_b2": str(hits["b2"]),
+            "hits_a": str(hits_a),
+            "hits_a2": str(hits_a2),
+            "hits_b1": str(hits_b1),
+            "hits_b2": str(hits_b2),
             "hit_loss_seeds": " ".join(str(s) for s in hit_loss_seeds),
             "med_calls_a": fmt_num(med_calls_a),
             "med_calls_b": fmt_num(med_calls_b),
@@ -966,19 +1009,19 @@ def score_cell(
             "rss_anon_a2a_ci_lo": fmt_num(rss_a2a_lo),
             "rss_anon_a2a_ci_hi": fmt_num(rss_a2a_hi),
             "rss_anon_limit": fmt_num(rss_limit),
-            "fixed_ring_a": str(min(fixed_a)),
-            "fixed_ring_a2": str(min(fixed_a2)),
-            "fixed_ring_b": str(min(fixed_b)),
+            "fixed_ring_a": str(sum(fixed_a)),
+            "fixed_ring_a2": str(sum(fixed_a2)),
+            "fixed_ring_b": str(sum(fixed_b)),
             "ru_maxrss_a_kb": fmt_num(med_ru_a),
             "ru_maxrss_a2_kb": fmt_num(med_ru_a2),
             "ru_maxrss_b_kb": fmt_num(med_ru_b),
             "ru_maxrss_ba": fmt_num(finite_ratio(med_ru_b, med_ru_a)),
-            "ru_maxrss_a2a": fmt_num(finite_ratio(med_ru_a2, med_ru_a)),
+            "ru_maxrss_a2a": fmt_num(finite_ratio(med_ru_a2, median_or_nan(ru_a_band))),
             "wall_a_s": fmt_num(med_wall_a),
             "wall_a2_s": fmt_num(med_wall_a2),
             "wall_b_s": fmt_num(med_wall_b),
             "wall_ba": fmt_num(finite_ratio(med_wall_b, med_wall_a)),
-            "wall_a2a": fmt_num(finite_ratio(med_wall_a2, med_wall_a)),
+            "wall_a2a": fmt_num(finite_ratio(med_wall_a2, median_or_nan(wall_a_band))),
             "fail_a": "1" if fail_a else "0",
             "fail_b": "1" if fail_b else "0",
             "fail_c": "1" if fail_c else "0",
@@ -1041,7 +1084,7 @@ def render_readme_results(
         "",
         "This section is generated from `rows.csv` by `run_gate.py summarize`.",
         "",
-        f"{len(scored)} cells, twenty-four seeds, four observations, {total_rows} rows, "
+        f"{len(scored)} cells, twenty-four seeds, eight observations, {total_rows} rows, "
         f"{len(inconclusive_rows)} inconclusive. Gate verdict: **{gate_verdict}**. "
         f"{len(verdicts['PASS'])} cells pass, {len(verdicts['FAIL'])} fail and "
         f"{len(verdicts['INCONCLUSIVE'])} are inconclusive.",
@@ -1056,9 +1099,9 @@ def render_readme_results(
         "Hits are A, A2, B1 and B2, re-derived from `best`. Outside is the median time outside",
         "energy calls per charged call. Its B/A ratio carries the bootstrap",
         "95% interval, and the limit is the clause (c) bound. RssAnon carries",
-        "the seed-cluster bootstrap interval. VmHWM and `ru_maxrss` never gate.",
+        "the paired-seed bootstrap interval. VmHWM and `ru_maxrss` never gate.",
         "",
-        "| Cell | Identity B, A2 | Hits A, A2, B1, B2 | Outside B/A [95% CI] | Outside A2/A [95% CI] | Outside limit | RssAnon B/A [95% CI] | RssAnon A2/A [95% CI] | RSS limit | Bound A, A2, B min | Verdict |",
+        "| Cell | Identity B, A2 | Hits A, A2, B1, B2 | Outside B/A [95% CI] | Outside A2/A [95% CI] | Outside limit | RssAnon B/A [95% CI] | RssAnon A2/A [95% CI] | RSS limit | Bound A, A2, B sum | Verdict |",
         "| --- | --- | --- | --- | --- | ---: | --- | --- | ---: | --- | --- |",
     ]
     for row in scored:
@@ -1115,16 +1158,23 @@ def render_readme_results(
             "",
             "### blj105n38 RssAnon modes",
             "",
-            "| Seed | A | B1 | B2 | A2 |",
+            "| Seed | A for B/A | B | A for A2/A | A2 |",
             "| ---: | --- | --- | --- | --- |",
         ]
     )
     indexed = {(row["seed"], row["observation"]): row for row in mode_rows}
     for seed in SEEDS:
         cells: list[str] = []
-        for observation in ("A", "B1", "B2", "A2"):
-            row = indexed[(str(seed), observation)]
-            cells.append(f"{mode(row)} ({float(row['rss_anon_kb']) / 1024:.1f})")
+        for observations in (
+            ("BA_A1", "BA_A2"),
+            ("BA_B1", "BA_B2"),
+            ("A2A_A1", "A2A_A2"),
+            ("A2A_A21", "A2A_A22"),
+        ):
+            pair = [indexed[(str(seed), observation)] for observation in observations]
+            peak = max(float(row["rss_anon_kb"]) for row in pair)
+            label = mode(max(pair, key=lambda row: float(row["rss_anon_kb"])))
+            cells.append(f"{label} ({peak / 1024:.1f})")
         lines.append(f"| {seed} | " + " | ".join(cells) + " |")
     lines.extend(
         [
@@ -1133,10 +1183,17 @@ def render_readme_results(
             "| --- | ---: | ---: | ---: |",
         ]
     )
-    for arm, observations in (("A", ("A",)), ("A2", ("A2",)), ("B", ("B1", "B2"))):
-        labels = [
-            mode(row) for row in mode_rows if row["observation"] in observations
-        ]
+    mode_groups = (
+        ("A for B/A", ("BA_A1", "BA_A2")),
+        ("B", ("BA_B1", "BA_B2")),
+        ("A for A2/A", ("A2A_A1", "A2A_A2")),
+        ("A2", ("A2A_A21", "A2A_A22")),
+    )
+    for arm, observations in mode_groups:
+        labels = []
+        for seed in SEEDS:
+            pair = [indexed[(str(seed), observation)] for observation in observations]
+            labels.append(mode(max(pair, key=lambda row: float(row["rss_anon_kb"]))))
         lines.append(
             f"| {arm} | {labels.count('~28')} | {labels.count('~32')} | "
             f"{labels.count('other')} |"
@@ -1305,15 +1362,19 @@ def self_test() -> None:
     ci_lo, ci_hi = bootstrap_median_ratio_ci([2.0] * 24, [2.0] * 24, draws=200)
     assert abs(ci_lo - 1.0) < 1e-12 and abs(ci_hi - 1.0) < 1e-12
     observations = tuple(name for name, _arm in OBSERVATIONS)
-    counts = {(slot, observation): 0 for slot in (1, 2, 3, 4) for observation in observations}
+    counts = {
+        (slot, observation): 0
+        for slot in range(1, len(OBSERVATIONS) + 1)
+        for observation in observations
+    }
     for seed in SEEDS:
         order = observation_order(seed)
-        assert len(order) == len(set(order)) == 4
+        assert len(order) == len(set(order)) == len(OBSERVATIONS)
         for slot, observation in enumerate(order, start=1):
             counts[(slot, observation)] += 1
-    assert all(value == 6 for value in counts.values()), counts
-    assert observation_order(2000) == ("A", "B1", "B2", "A2")
-    assert observation_order(2001) == ("B1", "B2", "A2", "A")
+    assert all(value == 3 for value in counts.values()), counts
+    assert observation_order(2000) == observations
+    assert observation_order(2001) == observations[1:] + observations[:1]
     repo_root = Path(__file__).resolve().parents[2]
     cells = build_cells(repo_root)
     names = [cell.system for cell in cells]
@@ -1405,7 +1466,7 @@ def main(argv: list[str]) -> int:
     sequence = 0
     for cell in cells:
         for seed in SEEDS:
-            rotation = (seed - SEEDS[0]) % 4
+            rotation = (seed - SEEDS[0]) % len(OBSERVATIONS)
             for slot, observation in enumerate(observation_order(seed), start=1):
                 arm = OBSERVATION_ARMS[observation]
                 sequence += 1

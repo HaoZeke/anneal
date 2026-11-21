@@ -192,14 +192,19 @@ def install(root: Path, arm: str) -> None:
     if arm == "B":
         bias = root / "src" / "bias.rs"
         text = bias.read_text(encoding="utf-8")
-        marker = "    fn blocks_separate("
+        marker = (
+            "        let bounded = self.metric.is_euclidean() "
+            "&& aggregate_rounding_is_small(d.len());\n"
+        )
         if text.count(marker) != 1:
             raise RuntimeError("bias.rs: fixed-ring bound marker missing")
-        brace = text.index("{", text.index(marker))
-        text = (
-            text[: brace + 1]
-            + "\n        crate::gate_memory::count_fixed_ring_bound();"
-            + text[brace + 1 :]
+        text = text.replace(
+            marker,
+            marker
+            + "        if bounded {\n"
+            + "            crate::gate_memory::count_fixed_ring_bound();\n"
+            + "        }\n",
+            1,
         )
         write_durable(bias, text.encode("utf-8"))
 

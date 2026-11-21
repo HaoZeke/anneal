@@ -44,13 +44,14 @@ before its sha256 is accepted.
 
 ## Protocol
 
-Seeds 2000 through 2023, twenty-four seeds. Each seed has the four
-labelled observations `(A, B1, B2, A2)`. For seed offset k, that ABBA
-sequence is rotated left by k modulo four. The rotation, slot and
-observation label are recorded in every row. Each labelled
-observation occupies each slot six times. The four observations of a
-seed run together, then the next seed. Cells run in table order. No
-quick mode, warm-up or other timed work shares the session.
+Seeds 2000 through 2023, twenty-four seeds. Each seed has two ABBA
+blocks: `(A, B, B, A)` measures B against A, then `(A, A2, A2, A)`
+measures the rebuild band. For seed offset k, the eight labelled
+observations are rotated left by k modulo eight. Rotation, slot and
+observation label are recorded in every row. Each label occupies each
+slot three times. The eight observations of a seed run together, then
+the next seed. Cells run in table order. No quick mode, warm-up or
+other timed work shares the session.
 
 The harness and every driver are pinned to core 0 with `taskset -c
 0`. Every `*_NUM_THREADS` variable is `1` and the child environment is
@@ -91,12 +92,12 @@ inconclusive row is a miss.
 
 A cell passes (`PASS`) only when all five clauses hold. It fails
 (`FAIL`) if any clause fails. A cell with any inconclusive row among
-its 96 observations is `INCONCLUSIVE` and cannot pass. Clauses are
-still computed from seeds whose four observations are conclusive.
+its 192 observations is `INCONCLUSIVE` and cannot pass. Clauses are
+still computed from seeds whose eight observations are conclusive.
 
-(a) Trajectory identity. On every seed both B rows and the A2 row
-equal A in `evals`, `charged`, `calls_to_hit` and bit-identical
-`best_bits`. Any difference fails the cell.
+(a) Trajectory identity. On every seed all seven other observations
+equal the first A row in `evals`, `charged`, `calls_to_hit` and
+bit-identical `best_bits`. Any difference fails the cell.
 
 (b) No hit loss. Neither B observation may miss where A hits, and
 neither B hit count may be below A's.
@@ -105,17 +106,22 @@ neither B hit count may be below A's.
 charged)`. The upper edge of the B/A bootstrap 95% confidence
 interval of the ratio of type-7 medians (10,000 paired seed
 resamples, fixed seed `20261121`) is at most `max(1.10, U)`, where
-`U` is the upper edge of the A2/A interval. Each seed contributes the
-median of its two B observations, so inference has 24 paired units.
+`U` is the upper edge of the A2/A interval. Every arm contributes the
+midpoint of its two observations in its ABBA block, so each interval
+has 24 paired units.
 
-(d) Peak RssAnon. The B/A ratio of type-7 medians is at most
-`max(1.05, U)`, where `U` is the upper edge of the A2/A bootstrap 95%
-interval. Both B/A and A2/A use the fixed seed and 10,000
-paired-seed draws. Each seed contributes the larger of its two B
-peaks. The point ratio and interval are reported.
+(d) Peak RssAnon. Every arm contributes the maximum of its two
+observations in its ABBA block. The B/A point ratio of type-7 medians
+must be at most `max(1.05, U)`, where `U` is the upper edge of the
+A2/A bootstrap 95% interval. Both intervals use the fixed seed and
+10,000 paired-seed draws. The B/A interval is reported but its point
+ratio, not its upper edge, is the preregistered gate.
 
-(e) The fixed-ring bound execution counter is nonzero in every B row
-and zero in every A and A2 row.
+(e) The fixed-ring path counter is zero in every A and A2 row and
+nonzero when summed over a cell's B rows. B increments it when the
+bounded lookup path is entered, before scalar-key filtering. A fast
+0-to-3-hop hit may legitimately have a zero row counter, so the
+cell sum proves execution without rejecting that trajectory.
 
 Every row's trajectory and outcome must therefore equal A, no hit may
 be lost, outside time must clear its preregistered band, memory must
