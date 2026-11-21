@@ -1,0 +1,1 @@
+`check_cxx_soversion.py` compares the soversion ledger with `main` for every pull request, as the ABI guide states, so a pull request into `develop` may edit the soversion line `develop` has not released.

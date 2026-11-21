@@ -89,8 +89,10 @@ The constants live in =CppCore/rgpot/abi/CxxLayout.hpp=.
 - the fingerprint of the stamp's inputs (the text of =compute_hash()=, the four
   constants, the covered structures and the data members of the covered classes)
   differs from the last ledger line;
-- compared with =main=, a shipped ledger line changed or was dropped, or
-  =compute_hash()= changed without a new ledger line;
+- compared with =main=, whatever branch a pull request targets, a shipped ledger
+  line changed or was dropped, or =compute_hash()= changed without a new ledger
+  line; a line not yet on =main=, such as the soversion =develop= has not
+  released, may be edited in place;
 - the SONAME of the built =librgpot= is not =librgpot.so.N= for =N= =
   =kCxxSoversion=;
 - the table tags and the =RGPOT_CXX_PLATFORM_LISTED_TAG= guards differ;
