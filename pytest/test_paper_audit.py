@@ -849,8 +849,8 @@ def clear_audit_caches():
 
 
 def isolated_readme(request, tmp_path, monkeypatch, path, text):
-    """A root whose bench holds this one README and an empty record-ref registry, with the scripts the revision
-    checks read and git on this repository.
+    """A root whose bench holds this one README, an empty record-ref registry and no unverifiable rows, with the
+    scripts the revision checks read and git on this repository.
 
     The audit's caches are cleared on the way in and out, so no result crosses between this root and the real one.
     """
@@ -866,6 +866,7 @@ def isolated_readme(request, tmp_path, monkeypatch, path, text):
                              check=True).stdout.strip()
     monkeypatch.setenv("GIT_DIR", git_dir)
     monkeypatch.setattr(audit_mod, "ROOT", tmp_path)
+    monkeypatch.setattr(audit_mod, "UNVERIFIABLE", [])
 
 
 def test_an_inline_external_revision_is_stripped_from_prose(request, tmp_path, monkeypatch):
@@ -921,6 +922,80 @@ def bench_flags(tmp_path, monkeypatch, files):
     monkeypatch.setattr(audit_mod, "_verified_record_refs", lambda: (), raising=False)
     return sorted((w.split(":")[0], rev, number) for w, rev, number in
                   audit_mod._printed_readme_numbers(audit_mod.Audit(), []))
+
+
+UNREACHABLE_ROW = "| lj38 | anneal at `0badc0de51` (rerun) | 3/12 | 812 |"
+
+
+def harness_results(tmp_path, monkeypatch, files, listed):
+    bench_flags(tmp_path, monkeypatch, files)
+    monkeypatch.setattr(audit_mod, "record_ref_checks", lambda audit: None)
+    monkeypatch.setattr(audit_mod, "EXTERNAL_FORM_SOURCES", ())
+    monkeypatch.setattr(audit_mod, "UNVERIFIABLE", listed, raising=False)
+    audit = audit_mod.Audit()
+    audit_mod.printed_harnesses(audit)
+    return audit
+
+
+def unverifiable_readme():
+    return {"bench/x/README.md": f"| System | Code | Hits | Calls median |\n|---|---|---|---|\n{UNREACHABLE_ROW}\n"}
+
+
+def test_a_listed_unverifiable_row_is_still_checked_and_passes(tmp_path, monkeypatch):
+    listed = [("bench/x/README.md", UNREACHABLE_ROW, ("0badc0de51",), "no ref holds it; no paper number reads it")]
+    audit = harness_results(tmp_path, monkeypatch, unverifiable_readme(), listed)
+    assert audit.drifts() == []
+    marked = [r for r in audit.results if r[2] == "a printed number comes from a reachable revision"]
+    assert [(r[0], r[1], r[3], r[4]) for r in marked] == [
+        ("OK", "bench/x/README.md:3", "unverifiable: no ref holds it; no paper number reads it", "0badc0de51 lj38 Hits=3/12"),
+        ("OK", "bench/x/README.md:3", "unverifiable: no ref holds it; no paper number reads it",
+         "0badc0de51 lj38 Calls median=812"),
+    ]
+
+
+def test_an_unlisted_unverifiable_row_still_drifts(tmp_path, monkeypatch):
+    audit = harness_results(tmp_path, monkeypatch, unverifiable_readme(), [])
+    assert sorted(r[4] for r in audit.drifts()) == ["0badc0de51 lj38 Calls median=812", "0badc0de51 lj38 Hits=3/12"]
+
+
+def test_an_unverifiable_entry_on_another_revision_clears_nothing(tmp_path, monkeypatch):
+    listed = [("bench/x/README.md", UNREACHABLE_ROW, ("0badc0de99",), "another revision")]
+    audit = harness_results(tmp_path, monkeypatch, unverifiable_readme(), listed)
+    assert sorted(r[2] for r in audit.drifts()) == ["a printed number comes from a reachable revision"] * 2 + [
+        "an unverifiable row is still printed and flagged"]
+
+
+def test_a_stale_unverifiable_entry_is_flagged(tmp_path, monkeypatch):
+    listed = [("bench/x/README.md", "| lj38 | anneal at `0badc0de51` (rerun) | 4/12 | 812 |", ("0badc0de51",), "edited")]
+    audit = harness_results(tmp_path, monkeypatch, unverifiable_readme(), listed)
+    assert ("bench/x/README.md", "an unverifiable row is still printed and flagged") in {(r[1], r[2]) for r in audit.drifts()}
+    assert len(audit.drifts()) == 3
+
+
+# README rows whose numbers the manuscript prints: tab:ase (manuscript.tex 1233-1238) reads the recommended, basin
+# hopping and minima hopping rows and the comparisons of recommended with each ASE arm; tab:gmin (1149-1150) and the
+# Au55 prose read the Au55 rows of the GMIN panel, which bench/occat-h2h repeats.
+def paper_printed_row(path, row):
+    cells = [c.strip() for c in row.strip().strip("|").split("|")]
+    if re.fullmatch(r"bench/ase-(lj38|lj55|lj98|lj104|lj150|au55)/README\.md", path):
+        return cells[0] in ("recommended", "basin hopping", "minima hopping") or cells[0].startswith("recommended against")
+    if path in ("bench/gmin-panel/README.md", "bench/occat-h2h/README.md"):
+        return "au55" in row.lower() or (path == "bench/gmin-panel/README.md" and cells[:2] == ["", ""])
+    return False
+
+
+def test_no_row_the_paper_prints_is_listed_unverifiable():
+    listed = [(path, row) for path, row, _revs, _why in audit_mod.UNVERIFIABLE]
+    assert listed
+    assert [item for item in listed if paper_printed_row(*item)] == []
+
+
+def test_every_unverifiable_entry_names_a_revision_and_a_reason():
+    for path, row, revisions, why in audit_mod.UNVERIFIABLE:
+        assert path.startswith("bench/") and path.endswith("README.md")
+        assert row in [line.strip() for line in (ROOT / path).read_text().splitlines()]
+        assert revisions and all(re.fullmatch(r"[0-9a-f]{7,40}", r) for r in revisions)
+        assert len(why) > 20
 
 
 def test_a_revision_inside_a_table_cell_is_read(tmp_path, monkeypatch):
