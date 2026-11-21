@@ -55,7 +55,7 @@ sites and can differ slightly from =lowest= even on one run
 The Cambridge Cluster Database header is -492.9082357122 kJ/mol for
 twelve TIP4P molecules (=scripts/tip4p_h2h/run_water_gmin.py=,
 =bench/water-gmin/verify.csv=).
-A hit is within 0.01 of that value.
+A hit is within 0.001 kJ/mol of that value.
 Read the trace for whether this seed hit. The summary above is not a
 record of one run.
 
@@ -81,13 +81,13 @@ with open("tip4p_n12_s100.trace.csv") as f:
         calls.append(int(row["calls"]))
         gap.append(float(row["energy"]) - cambridge)
 
-hits = [c for c, g in zip(calls, gap) if g <= 0.01]
+hits = [c for c, g in zip(calls, gap) if g <= 0.001]
 print("first hit:", hits[0] if hits else "none")
 print(f"last new lowest: call {calls[-1]}, {gap[-1]:.6f} above")
 
 fig, ax = plt.subplots(figsize=(6, 3.5))
 ax.step(calls + [500000], gap + [gap[-1]], where="post")
-ax.axhline(0.01, color="black", lw=0.8, ls="--", label="Cambridge value plus 0.01")
+ax.axhline(0.001, color="black", lw=0.8, ls="--", label="Cambridge value plus 0.001")
 ax.set_xscale("log")
 ax.set_yscale("symlog", linthresh=0.001)
 ax.set_ylim(bottom=-0.002)

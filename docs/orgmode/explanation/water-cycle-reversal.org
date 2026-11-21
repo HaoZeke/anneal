@@ -70,7 +70,7 @@ move. It uses nine sizes from 10 to 21 molecules and 32 seeds per
 size, seeds 35000 to 35031. These seeds were chosen after the move was
 frozen, and each run ran once. Each run has 500,000 calls into the
 potential and starts from the same recorded start. A run is a hit when
-its lowest energy comes within 0.01 kJ/mol of the Cambridge Cluster
+its lowest energy comes within 0.001 kJ/mol of the Cambridge Cluster
 Database value.
 
 The rows of that comparison are not in the repository, so this page
