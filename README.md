@@ -226,12 +226,14 @@ let mut ledger = Ledger::new(400_000);
 ```
 
 The `lj_joint_optimum` release example also provides a controlled NVE
-minima-hopping communication comparison. With the `ira` feature enabled,
-`mh-communication` runs both private-history and shared-history ensembles:
+minima-hopping communication comparison. It requires `ira` and `rgsaddle`.
+`ira` needs `IRA_LIB_DIR` pointing at `libira`. `mh-communication` runs
+both private-history and shared-history ensembles:
 
 ```bash
-ANNEAL_MH_REPLICAS=4 ./target/release/examples/lj_joint_optimum \
-  75 200000 2 mh-communication
+IRA_LIB_DIR=/path/to/ira/lib ANNEAL_MH_REPLICAS=4 \
+  cargo run --locked --release --features ira,rgsaddle \
+  --example lj_joint_optimum -- 75 200000 2 mh-communication
 ```
 
 Here 200,000 is the total objective-call budget for each ensemble, divided
@@ -286,7 +288,8 @@ the slab driver sends the periodic cell through the same adapter.
 ```bash
 POTENTIAL_CONFIG=/path/to/PotentialConfig.bin \
 POTENTIAL_LIBRARY=/path/to/libnwchemc.so \
-cargo run --locked --release --features rgpot-ex \
+cargo run --locked --release \
+  --features rgpot-ex,featomic,bank-rpc \
   --example molecular_cluster -- 6 1200 8 nwchemc
 ```
 

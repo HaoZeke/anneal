@@ -78,9 +78,9 @@ It labels the three sites 8, 1 and 1, so =rcycle= is on there too.
 
 * =examples/h2h_seed=
 
-#+begin_src sh
+#+begin_example
 h2h_seed <lj|morse|tip4p> <n> <rho> <budget> <seed> <arm> <stop> <prefix>
-#+end_src
+#+end_example
 
 - =arm= :: =recommended= or =base=.
            For =tip4p= these are =Config::recommended_tip4p= and =Config::for_tip4p=.

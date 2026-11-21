@@ -45,7 +45,7 @@ Contributor notes stay in =docs/orgmode/= and are exported with
 =emacs --batch -l docs/export.el=.
 
 =cog bump= (https://docs.cocogitto.io/) does not rewrite
-=CHANGELOG.md= (=disable_changelog = true=).
+=CHANGELOG.md= (~disable_changelog = true~).
 Its pre-bump hook sets the workspace version, restamps the generated
 copies, refreshes =Cargo.lock=, runs towncrier
 (https://towncrier.readthedocs.io/en/stable/), and runs the drift checks

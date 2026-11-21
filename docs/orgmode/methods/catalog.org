@@ -26,9 +26,9 @@ Key types and functions: =Prediction=, =Verdict= (=Hopeless= /
 src/quench.rs:96, its =predict= method (src/quench.rs:159) and =observe=
 (src/quench.rs:133).
 
-Constants and defaults: =warmup = 4= decrements before any verdict is
+Constants and defaults: ~warmup = 4~ decrements before any verdict is
 allowed (three decrements is the minimum to fit a rate and a residual);
-=confidence = 2.0= standard deviations; =margin = 1e-3= extra separation
+~confidence = 2.0~ standard deviations; ~margin = 1e-3~ extra separation
 beyond the fitted uncertainty (src/quench.rs:115-123).
 
 Feeds/consumes: wired into the driver's =adaptive_screen= config flag
@@ -53,10 +53,10 @@ Key types and functions: =Screen= (src/screen.rs:62) with =observe=,
 purchased screen still owes.
 
 Constants and defaults: threshold derivation
-=p > Q / (Q + R) = (R - S) / (2R - S)= where =S= is screen steps and =R=
-is full relax steps; for the measured hop (=S=25=, =R=200=) this is
+~p > Q / (Q + R) = (R - S) / (2R - S)~ where =S= is screen steps and =R=
+is full relax steps; for the measured hop (~S=25~, ~R=200~) this is
 =7/15= (src/screen.rs:38-45). Ridge prior precision =1e-3 * I=,
-inverse-gamma =a0 = b0 = 1e-3= (src/screen.rs:97-99). Config-side knobs:
+inverse-gamma ~a0 = b0 = 1e-3~ (src/screen.rs:97-99). Config-side knobs:
 =bayes_screen=, =bayes_exploration=, =bayes_threshold=, =bayes_warmup=
 (src/methods/cluster_hopping/config.rs:315, 454-460).
 =Config::derived= sets =bayes_threshold= from
@@ -153,13 +153,13 @@ search.
 Key types and functions: =MoveKernel<T>= trait (src/movekernel.rs:16);
 =Gaussian= (src/movekernel.rs:32), isotropic normal proposal;
 =Cauchy= (src/movekernel.rs:64), heavy-tailed symmetric proposal, the
-=q_v = 2= case of the generalized visiting distribution; =TsallisVisit=
+~q_v = 2~ case of the generalized visiting distribution; =TsallisVisit=
 (src/movekernel.rs:137), the Tsallis/GSA visiting kernel with tail index
 =q_v in (1,3)=, sampled by the Schuur/Xiang transform used by GenSA and
 SciPy =dual_annealing=.
 
-Constants and defaults: =VISIT_TAIL_LIMIT = 1.0e8= (src/movekernel.rs:143),
-matching SciPy's tail clip. Literature default =q_v = 2.7=.
+Constants and defaults: ~VISIT_TAIL_LIMIT = 1.0e8~ (src/movekernel.rs:143),
+matching SciPy's tail clip. Literature default ~q_v = 2.7~.
 
 Feeds/consumes: implements law L2 of the typed algebra (proposal support
 must lie within the neighborhood); used directly by
@@ -179,22 +179,22 @@ with variants =Atomic=, =Lean=, =LeanBurst=, =Visit=, =Twin=,
 its =kernels= method (moves.rs:50) composes the concrete arms. =ClusterMove=
 enum (moves.rs:176) with variants =AllPoints=, =SinglePoint=, =Visit=,
 =Burst= (composed surface relocations, one acceptance test per excursion),
-=GroupRelocate=/=GroupBurst=/=GroupShake= (rigid molecular analogues),
+=GroupRelocate= / =GroupBurst= / =GroupShake= (rigid molecular analogues),
 =SurfaceRelocate=, =ShellRotate=, =Symmetrise=, =Twin= (reflect across a
 dense plane), =Reseed= (regrow a local order from a template, the only
 kernel that crosses a funnel boundary in one step; see
-[[file:catalog.org::*Descriptors and identity][descriptors]]/=crate::lattice=), =Angular= (Wales-Doye worst-bound-point
+[[file:catalog.org::*Descriptors and identity][descriptors]] / =crate::lattice=), =Angular= (Wales-Doye worst-bound-point
 move), =Soap= (descriptor-space pullback step; see the SOAP entry below).
-=worst_bound=/=worst_bound_scaled= (moves.rs:434/445) decide when a point
+=worst_bound= / =worst_bound_scaled= (moves.rs:434/445) decide when a point
 is loose enough for the angular move. =connectivity_groups=
 (moves.rs:602) derives rigid molecular groups from the current bonding
 rather than a fixed declaration.
 
 Constants and defaults: =LennardJonesPreset= and =MolecularPreset=
 (src/methods/cluster_hopping/preset.rs) fix the dimensionless
-coefficients (e.g. =MERGE_RADIUS = 0.7=, =TEMPERATURE = 0.8=,
-=BIAS_HEIGHT = 0.25=, =SOAP_RMSD = 0.35=, =SOAP_CUTOFF = 3.5=,
-=MIN_SEPARATION = 0.85=) multiplied by declared length/energy scales.
+coefficients (e.g. ~MERGE_RADIUS = 0.7~, ~TEMPERATURE = 0.8~,
+~BIAS_HEIGHT = 0.25~, ~SOAP_RMSD = 0.35~, ~SOAP_CUTOFF = 3.5~,
+~MIN_SEPARATION = 0.85~) multiplied by declared length/energy scales.
 =Config::recommended= (config.rs) selects =MoveLibrary::LeanBurst=
 with the SOAP arm and Thompson allocation over the arms. Like
 =Config::communicating=, it completes the core's orbit on every new basin
@@ -238,7 +238,7 @@ Key types and functions: =Bias= trait (src/bias.rs:18); =WellTemperedBias=
 permutation/translation/rotation-invariant fingerprint for point sets.
 
 Constants and defaults: deposit rule
-=w_k = w_0 * exp(-V_{k-1}(s_k) / ((gamma - 1) * T))=; config knobs
+~w_k = w_0 * exp(-V_{k-1}(s_k) / ((gamma - 1) * T))~; config knobs
 =bias_height=, =bias_gamma=, =merge_radius=, =adaptive_height=,
 =height_revisits= (config.rs:75-94, 599-601). Measured motivation: at 38
 points the ico/decahedral fourth Steinhardt parameter separates by 0.19,
@@ -247,7 +247,7 @@ which motivates keying on identity instead (src/bias.rs:271-291).
 
 Feeds/consumes: consumed by the hop loop's acceptance/tabu logic in
 =run_with_gradient=; the fingerprint can be =SortedPairs= (descriptor
-space) or, with the =ira= feature, =IraPassthrough=/=IraMetric= from
+space) or, with the =ira= feature, =IraPassthrough= / =IraMetric= from
 [[file:catalog.org::*IRA/SOFI canonical order and shape distance][the shape module]].
 
 ** Density-of-states, flat histogram, and energy bias
@@ -255,7 +255,7 @@ space) or, with the =ira= feature, =IraPassthrough=/=IraMetric= from
 What it is: three related mechanisms that target the *quenched-energy*
 axis instead of (or on top of) coordinate/descriptor space, because a
 per-basin bias cannot fill a whole funnel of exponentially many basins.
-=DensityOfStates= builds a Wang-Landau-style posterior over =S = ln g=
+=DensityOfStates= builds a Wang-Landau-style posterior over ~S = ln g~
 on a binned energy axis. =CutWeight= is a flat-below/suppressed-above
 target (flat sampling over the whole range wastes budget on the
 high-energy sea). =EnergyBias= deposits a well-tempered bias directly in
@@ -267,10 +267,10 @@ Key types and functions: =DensityOfStates= (src/dos.rs:96); =Weight=
 (src/dos.rs:640); =EnergyBias= (src/dos.rs:972) and
 =EnergyBias::from_sample= (src/dos.rs:1006).
 
-Constants and defaults: =BINS = 96= (src/dos.rs:92);
-=EnergyBias::FILL_DEPOSITS = 100.0=, the number of deposits that fill a
+Constants and defaults: ~BINS = 96~ (src/dos.rs:92);
+~EnergyBias::FILL_DEPOSITS = 100.0~, the number of deposits that fill a
 one-standard-deviation well (src/dos.rs:993); tempering set by
-=(gamma - 1) T = sigma= and =w0 = sigma / FILL_DEPOSITS=, so no scale is
+~(gamma - 1) T = sigma~ and ~w0 = sigma / FILL_DEPOSITS~, so no scale is
 system-specific. Config knobs: =flat_histogram=, =flat_sweep=,
 =flat_quantile=, =statistical_temperature=, =energy_bias=
 (config.rs:321-388). Measured: at 38 points, flat-over-visited-range
@@ -295,7 +295,7 @@ rather than 400 on two rungs at the default sweep. The energy bias is
 one function every rung reads over its own temperature; its tempering
 factor and its deposits read the temperature the coldest rung would hop
 at from the state it holds, so neither depends on which rung fills the
-sample or deposits, and =(gamma - 1) T = sigma= holds at the
+sample or deposits, and ~(gamma - 1) T = sigma~ holds at the
 temperature the sample was filled at.
 
 ** Stall escapes
@@ -399,9 +399,9 @@ the climb loop: curvature pass via =crate::curvature::curvature_features=,
 perpendicular relaxation capped by =perp_max_move=, refresh cadence
 =refresh=, overshoot past the turning point).
 
-Constants and defaults: =step = 0.2=, =max_steps = 24=, =perp_steps = 3=,
-=perp_rate = 0.02=, =perp_max_move = 0.05=, =lanczos_steps = 12=,
-=refresh = 3=, =overshoot = 1.5= (activation.rs:77-88); the
+Constants and defaults: ~step = 0.2~, ~max_steps = 24~, ~perp_steps = 3~,
+~perp_rate = 0.02~, ~perp_max_move = 0.05~, ~lanczos_steps = 12~,
+~refresh = 3~, ~overshoot = 1.5~ (activation.rs:77-88); the
 =perp_max_move= cap exists because a fixed rate is unsafe on a
 gradient spanning decades -- measured on LJ38, an uncapped
 perpendicular step reached a minimum in only 6 of 1589 relaxations,
@@ -454,12 +454,12 @@ threshold rather than a Metropolis temperature, since "a temperature
 cold enough to polish cannot cross and one hot enough to cross cannot
 polish" (minima_hopping.rs:188-191).
 
-Key types and functions: =Visit= (minima_hopping.rs:42, =Same=/
-=Known=/=New=); =EscapeFeedback= (minima_hopping.rs:58); =observe=
+Key types and functions: =Visit= (minima_hopping.rs:42, =Same= /
+=Known= / =New=); =EscapeFeedback= (minima_hopping.rs:58); =observe=
 (minima_hopping.rs:162); =accept= (minima_hopping.rs:192);
 =discovery_rate= (minima_hopping.rs:210).
 
-Constants and defaults: =escape_ceiling = 4x= the starting scale
+Constants and defaults: ~escape_ceiling = 4x~ the starting scale
 (minima_hopping.rs:89), priced by measurement: at a ceiling of 64 an
 LJ38 run paid 138 charged evaluations per hop against 39 without the
 controller, buying 2173 hops instead of 7775 at the same budget and
@@ -489,7 +489,7 @@ tell the two apart (cluster_search.rs:9-16).
 
 Key types and functions: =search= (src/methods/cluster_search.rs:116);
 =RelaxStats= (cluster_search.rs:33, screen/full/check charged splits,
-=screen_share=); =CONVERGED_GRADIENT = 1e-3= (cluster_search.rs:102,
+=screen_share=); ~CONVERGED_GRADIENT = 1e-3~ (cluster_search.rs:102,
 the max-component gradient threshold for calling a relaxation
 converged).
 
@@ -507,7 +507,7 @@ which move or temperature to use next, without a fixed schedule.
 
 What it is: a closed-form temperature law clamping the design point into
 a window where descent and escape are both feasible:
-=T = clamp(theta * g / d, b / ln(B + e), 2g / d)=. The ceiling is the
+~T = clamp(theta * g / d, b / ln(B + e), 2g / d)~. The ceiling is the
 sphere-model descent boundary; the floor is a birth-death escape
 requirement (a barrier of depth =b= is not crossed within =B= remaining
 proposals below it). On a funnelled landscape the window is often empty,
@@ -517,7 +517,7 @@ Key types and functions: =BudgetWindowTemperature= (src/allocate.rs:34).
 
 Constants and defaults: config knob =theta= (must lie strictly below 2),
 =budget_window= toggle (config.rs:94-106). =Config::derived= sets
-=theta = 0.5=, i.e. the midpoint of the descent window (config.rs:817-831).
+~theta = 0.5~, i.e. the midpoint of the descent window (config.rs:817-831).
 
 Feeds/consumes: replaces the fixed =temperature= field when enabled; the
 gap is measured against the incumbent and the barrier estimated from
@@ -541,8 +541,8 @@ no dedicated Beta sampler.
 
 Constants and defaults: config knob =allocate_moves=
 (config.rs:92). Portfolio-side scheduler constants derived from the
-problem rather than tuned: =SLICE_GRAD_EQUIVALENTS = 4=,
-=ROUNDS_PER_ARM = 8= (src/methods/portfolio.rs:88-91).
+problem rather than tuned: ~SLICE_GRAD_EQUIVALENTS = 4~,
+~ROUNDS_PER_ARM = 8~ (src/methods/portfolio.rs:88-91).
 
 Feeds/consumes: selects among the =MoveLibrary= kernels each hop when
 =allocate_moves= is set; reused conceptually by the portfolio driver's
@@ -563,7 +563,7 @@ posterior predictive.
 Key types and functions: =DepthAllocator= (src/allocate.rs:770).
 
 Constants and defaults: config knob =depth_reward= (config.rs:389-392);
-weakly informative prior =kappa = 1e-6=, =alpha = beta = 1.0=
+weakly informative prior ~kappa = 1e-6~, ~alpha = beta = 1.0~
 (src/allocate.rs:812-814). On by default in =Config::recommended=
 (config.rs:759).
 
@@ -606,13 +606,13 @@ Key types and functions: =ProblemFeatures= (src/methods/regime.rs:16);
 =OptimizationRegime= enum and =select_regime=
 (src/methods/regime.rs:70/110); =preferred_arm_tail=
 (src/methods/regime.rs:135); =arm_prior_boost=
-(src/methods/regime.rs:242); =regime_exploit_prob=/=regime_exploit_width=
-(src/methods/regime.rs:260/274); =check_accept_path=/
+(src/methods/regime.rs:242); =regime_exploit_prob= / =regime_exploit_width=
+(src/methods/regime.rs:260/274); =check_accept_path= /
 =require_accept_compatible= (src/methods/regime.rs:325/309), which
 *refuse* exact Metropolis acceptance under
 =OptimizationRegime::StochasticNoise= (GJQ-style regime gate).
 
-Constants and defaults: =MULTIMODAL_MEAN_WIDTH = 9.0=
+Constants and defaults: ~MULTIMODAL_MEAN_WIDTH = 9.0~
 (src/methods/regime.rs:66), the half-width above which a box counts as
 global multimodal.
 
@@ -670,7 +670,7 @@ class.
 Key types and functions: =SoapSpec= (src/soap.rs:37); =power_spectrum=
 (src/soap.rs:118); =local_spectra_z= (src/soap.rs:140), species-aware
 per-atom spectra; =local_nu3_z= (src/soap.rs:171), SOAP plus the two
-4-body triple invariants; =jacobian_z=/=jacobian_nu3=
+4-body triple invariants; =jacobian_z= / =jacobian_nu3=
 (src/soap.rs:667/638), analytic Jacobians; =pullback_z=
 (src/soap.rs:794), the Cartesian step realizing a SOAP residual, with
 frozen-atom and mobile-mask support; =pullback_nu3= (src/soap.rs:861);
@@ -682,8 +682,8 @@ icosahedral, 1 = fcc cuboctahedron, 2 = hcp); =class_masses=
 Constants and defaults: =SoapSpec= carries =n_max=, =l_max=, =rcut_nn= (cutoff in nearest-neighbour units).
 =SoapSpec::at_length= writes the default cutoff at another length.
 =contact_cutoff= is the common-neighbour contact cutoff of the icosahedral test and of the 555, 421 and 422 class masses.
-It is =CONTACT_CUTOFF = 1.35= at the default and scales with =rcut_nn=.
-Preset values =SOAP_RMSD = 0.35=, =SOAP_CUTOFF = 3.5= (LennardJonesPreset).
+It is ~CONTACT_CUTOFF = 1.35~ at the default and scales with =rcut_nn=.
+Preset values ~SOAP_RMSD = 0.35~, ~SOAP_CUTOFF = 3.5~ (LennardJonesPreset).
 
 Feeds/consumes: consumed by =ClusterMove::Soap= for the hop proposal,
 by =DescriptorSpace= (below) for catalog descriptors, and by
@@ -698,22 +698,22 @@ high-angular-momentum channels rather than the full spectrum, since
 leftover RMS separates a local defect from packing identity better than
 a full-spectrum distance.
 
-Key types and functions: =CALCULATOR = "soap_power_spectrum"=,
-=LMIN = 5= (src/featomic_hop.rs:22-24); =set_packing_archive=
+Key types and functions: ~CALCULATOR = "soap_power_spectrum"~,
+~LMIN = 5~ (src/featomic_hop.rs:22-24); =set_packing_archive=
 (src/featomic_hop.rs:53); =atom_leftover_rms= (src/featomic_hop.rs:321);
 =soap_cloud_mean= (src/featomic_hop.rs:358), the packing label used
 cooperatively (see composition doc); =soap_morphology=
-(src/featomic_hop.rs:368); =soap_bank_distance=/=soap_bank_distance_lmin=
+(src/featomic_hop.rs:368); =soap_bank_distance= / =soap_bank_distance_lmin=
 (src/featomic_hop.rs:383/395); =leftover_profile_distance=
 (src/featomic_hop.rs:416, retained only so a regression test can name
 the failure it replaced -- must not be called by the bank);
 =leftover_rms= (src/featomic_hop.rs:448).
 
-Constants and defaults: =SOAP_DCUT_FALLBACK = 0.05= (measured: high-l
+Constants and defaults: ~SOAP_DCUT_FALLBACK = 0.05~ (measured: high-l
 mean SOAP of LJ75 Mackay vs. Marks is 0.163, of a structure to itself is
 0; this floor sits below the packing gap and above numerical zero);
-=SOAP_PACK_MERGE = 0.10= (isomers of one packing sit below 0.4 of the
-0.163 packing gap); =SOAP_PACK_GAP = 0.15= (src/featomic_hop.rs:26-44).
+~SOAP_PACK_MERGE = 0.10~ (isomers of one packing sit below 0.4 of the
+0.163 packing gap); ~SOAP_PACK_GAP = 0.15~ (src/featomic_hop.rs:26-44).
 
 Feeds/consumes: consumed by =crate::methods::csa_cluster= (morphology
 acquisition model) and by the cooperative example's =CATALOG_COOP_WELLS=
@@ -734,7 +734,7 @@ Key types and functions: =DescriptorBlockKind= (src/descriptor_space.rs:12);
 (src/descriptor_space.rs:296), the evaluator bound to one immutable
 schema.
 
-Constants and defaults: =NORMALIZATION_SCHEMA = "l2-v1"=
+Constants and defaults: ~NORMALIZATION_SCHEMA = "l2-v1"~
 (src/descriptor_space.rs:8).
 
 Feeds/consumes: produced per-candidate in the cooperative example
@@ -756,7 +756,7 @@ Key types and functions: =PullbackConfig= (src/descriptor_space/pullback.rs:9,
 (src/descriptor_space/pullback.rs:104); =regularized_pullback=
 (src/descriptor_space/pullback.rs:134).
 
-Constants and defaults: =CONSTRAINT_EPSILON = 1e-12=
+Constants and defaults: ~CONSTRAINT_EPSILON = 1e-12~
 (src/descriptor_space/pullback.rs:5).
 
 Feeds/consumes: called by =catalog_policy::proposal::pullback_increment=
@@ -784,7 +784,7 @@ example value); =IraPassthrough= (src/shape/mod.rs:415, defers to
 =IraMetric= rather than returning a vector, since "optimal over all
 permutations" cannot be expressed as a fixed-length descriptor);
 =IraMetric= (src/shape/mod.rs:424) and its =distance= method
-(src/shape/mod.rs:437); =DEGENERATE_BASIS = -1= (src/shape/mod.rs:700),
+(src/shape/mod.rs:437); ~DEGENERATE_BASIS = -1~ (src/shape/mod.rs:700),
 the IRA return code when a point set spans fewer than two dimensions
 and has no basis to build a frame from.
 
@@ -798,7 +798,7 @@ way a descriptor-space threshold cannot.
 
 Covered under [[file:catalog.org::*Stall escapes][stall escapes]]
 (=crate::symmetrise=); listed here as an identity mechanism because
-=detect=/=detect_all= (src/symmetrise.rs:202/226) and =mirror_matrix=
+=detect= / =detect_all= (src/symmetrise.rs:202/226) and =mirror_matrix=
 (src/symmetrise.rs:263) also underlie the point-group diagnostics used
 in the archive search's near-miss push
 (src/methods/archive_search.rs:122).
@@ -816,16 +816,16 @@ Key types and functions: =CalibrationPair= (src/catalog/calibration.rs:20);
 (src/catalog/calibration.rs:129); =EmpiricalQuantileMethod::NearestRankV1=
 (src/catalog/calibration.rs:13-16).
 
-Constants and defaults: =MINIMUM_CENSUS_CALIBRATION_PAIRS = 100=
-(src/catalog/calibration.rs:7); =CENSUS_QUANTILE = 0.99=
+Constants and defaults: ~MINIMUM_CENSUS_CALIBRATION_PAIRS = 100~
+(src/catalog/calibration.rs:7); ~CENSUS_QUANTILE = 0.99~
 (src/catalog/calibration.rs:9).
 
 Feeds/consumes: produces the =census_radius= consumed by =BasinCensus::new=
 (below); LJ-specific calibration data flows through
 =crate::catalog::lj= (src/catalog/lj.rs), including
-=CALIBRATION_ENERGY_TOLERANCE = 1e-7=,
-=CALIBRATION_GRADIENT_TOLERANCE = 1e-5=,
-=CALIBRATION_IRA_TOLERANCE = 1e-4= (src/catalog/lj.rs:39-45).
+~CALIBRATION_ENERGY_TOLERANCE = 1e-7~,
+~CALIBRATION_GRADIENT_TOLERANCE = 1e-5~,
+~CALIBRATION_IRA_TOLERANCE = 1e-4~ (src/catalog/lj.rs:39-45).
 
 * Cooperative layer
 
@@ -847,7 +847,7 @@ catalog.
 Key types and functions: =SignatureDigest= (src/catalog/signature.rs:10);
 =EngineSignature= (src/catalog/signature.rs:14); =DescriptorSignature=
 (src/catalog/signature.rs:25); =SystemSignature=
-(src/catalog/signature.rs:38) with =canonical_bytes=/=digest=
+(src/catalog/signature.rs:38) with =canonical_bytes= / =digest=
 (src/catalog/signature.rs:67/102); =CandidateRecord=
 (src/catalog/validator.rs:16); =FreshEvaluation=
 (src/catalog/validator.rs:47); =ValidatorConfig=
@@ -859,9 +859,9 @@ gradient/energy-mismatch failures); =ValidatedCandidate=
 (src/catalog/validator.rs:223).
 
 Constants and defaults: signature wire prefix
-=b"ANNEAL\0SYSTEM_SIGNATURE\0"=, =SIGNATURE_ENCODING_VERSION = 1=
+=b"ANNEAL\0SYSTEM_SIGNATURE\0"=, ~SIGNATURE_ENCODING_VERSION = 1~
 (src/catalog/signature.rs:6-7). LJ-specific signature and validator
-config: =crate::catalog::lj::system_signature=/=validator_config=
+config: =crate::catalog::lj::system_signature= / =validator_config=
 (src/catalog/lj.rs:157/206).
 
 Feeds/consumes: every =CatalogRequest= on the wire carries a
@@ -881,12 +881,12 @@ ever evicted here.
 Key types and functions: =BasinId= (src/catalog/census.rs:8); =CensusEntry=
 (src/catalog/census.rs:24); =CensusObservation=
 (src/catalog/census.rs:49); =BasinCensus= (src/catalog/census.rs:90),
-=observe= (census.rs:116), =singleton_count=/=unseen_mass=
-(census.rs:191/202), =is_saturated=/=saturated_at=
+=observe= (census.rs:116), =singleton_count= / =unseen_mass=
+(census.rs:191/202), =is_saturated= / =saturated_at=
 (census.rs:207/212).
 
-Constants and defaults: =PRODUCTION_MINIMUM_VISITS = 20=,
-=PRODUCTION_MAX_UNSEEN_MASS = 0.20= (src/catalog/census.rs:3-4).
+Constants and defaults: ~PRODUCTION_MINIMUM_VISITS = 20~,
+~PRODUCTION_MAX_UNSEEN_MASS = 0.20~ (src/catalog/census.rs:3-4).
 
 Feeds/consumes: =BasinId= is the join key between the census and
 =BasinCatalog=; =CensusEvidence::from_census=
@@ -906,22 +906,22 @@ population's own half-mean pair distance, floored at =max(census_radius,
 packing as the ensemble's aggregate charged work advances.
 
 Key types and functions: =BasinCatalogError=
-(src/catalog/basin.rs:7); =AdmissionRejection=/=AdmissionOutcome=
+(src/catalog/basin.rs:7); =AdmissionRejection= / =AdmissionOutcome=
 (src/catalog/basin.rs:21/32); =ActiveBasinEntry=
 (src/catalog/basin.rs:66); =BasinCatalog= (src/catalog/basin.rs:116),
 =admit= (basin.rs:173), =incumbent= (basin.rs:296), =update_threshold=
 (basin.rs:321).
 
 Constants and defaults: threshold schedule
-=scheduled = initial * (floor/initial)^progress= where
-=progress = clamp(largest_charged_work / (0.8 * total_charged_work), 0, 1)=
+~scheduled = initial * (floor/initial)^progress~ where
+~progress = clamp(largest_charged_work / (0.8 * total_charged_work), 0, 1)~
 (src/catalog/basin.rs:325-331); =version= increments on every mutating
 call, which is what the wire protocol's =CatalogSnapshot.version=
 tracks.
 
 Feeds/consumes: the coordinator-owned single source of truth consulted
 by =CatalogPolicy::decide= (relation to catalog, incumbent status) and
-returned to replicas as =PolicyState=/=CatalogSnapshot= over the wire.
+returned to replicas as =PolicyState= / =CatalogSnapshot= over the wire.
 
 ** Local-topology event catalog
 
@@ -934,9 +934,9 @@ recycled event, not a new discovery.
 
 Key types and functions: =Event= (src/catalog/event.rs:15);
 =TopologyRecord= (src/catalog/event.rs:26) with
-=search_entitlement=/=due=/=unsaturated= (event.rs:37/45/50);
-=EventCatalog= (src/catalog/event.rs:65), =observe_visit=/=observe_bag=
-(event.rs:76/81), =record_search= (event.rs:110), =known=/=due_key=/
+=search_entitlement= / =due= / =unsaturated= (event.rs:37/45/50);
+=EventCatalog= (src/catalog/event.rs:65), =observe_visit= / =observe_bag=
+(event.rs:76/81), =record_search= (event.rs:110), =known= / =due_key= /
 =keys_due= (event.rs:128/150/158). =crate::catalog::Catalog= is a
 compatibility alias for =EventCatalog= (src/catalog.rs:28).
 
@@ -958,7 +958,7 @@ trace reason. Explore-role mixing forces =Leave=. A certified attractor
 competitor) stays occupied and is taken from elsewhere.
 
 Key types and functions: =ActiveCatalogRelation= (src/catalog_policy.rs:14,
-=Empty=/=Incumbent=/=SameBasin=/=Unrelated{lower_energy_anchor}=);
+=Empty= / =Incumbent= / =SameBasin= / =Unrelated{lower_energy_anchor}=);
 =ValidationState= (catalog_policy.rs:30); =CensusEvidence=
 (catalog_policy.rs:39); =AggregateProgress= (catalog_policy.rs:104,
 =win_only= true once half the aggregate budget is spent);
@@ -968,13 +968,13 @@ Key types and functions: =ActiveCatalogRelation= (src/catalog_policy.rs:14,
 named reasons, each with a stable =code()=); =CatalogPolicy::decide=
 (catalog_policy.rs:249).
 
-Constants and defaults: =LOCAL_CENSUS_LEAVE = 8= exact local-basin
-visits, =LOCAL_STALL_LEAVE = 8= consecutive nondeepening slices
+Constants and defaults: ~LOCAL_CENSUS_LEAVE = 8~ exact local-basin
+visits, ~LOCAL_STALL_LEAVE = 8~ consecutive nondeepening slices
 (catalog_policy.rs:8-10) -- both trigger =Leave= from =SameBasin=.
 
 Feeds/consumes: the decision core the cooperative example's checkpoint
 closure calls every checkpoint via =CooperativeRun::decide=
-(src/cooperative_search.rs:998); its =Explore=/=Leave= outputs route to
+(src/cooperative_search.rs:998); its =Explore= / =Leave= outputs route to
 =boundary_crossing= and the target-free proposal primitives below; its
 =Exploit= output routes to the active catalog's incumbent.
 
@@ -1001,7 +1001,7 @@ Constants and defaults: differential scale must lie in =(0, 1]=
 
 Feeds/consumes: =farthest_hole= is what a =Leave= policy decision spends
 (descriptor-space "hole" step, distinct from =crate::featomic_hop='s
-Cartesian leftover hole); =catalog_differential=/=attraction_differential=
+Cartesian leftover hole); =catalog_differential= / =attraction_differential=
 feed =Explore=; both ultimately produce a descriptor increment that
 =pullback_increment= turns into a Cartesian proposal.
 
@@ -1069,7 +1069,7 @@ Key types and functions: =TransitionOutcome=
 =observe= (transition_graph.rs:108), =posterior_matrix=
 (transition_graph.rs:177), =uncertainty= (transition_graph.rs:204),
 =attraction_regions= (transition_graph.rs:219, diffusion + complete
-linkage); =matrix_power=/=complete_linkage_regions=
+linkage); =matrix_power= / =complete_linkage_regions=
 (transition_graph.rs:275/292, private).
 
 Feeds/consumes: region identity here is what =region_assignment.rs=
@@ -1086,13 +1086,13 @@ runs: three questions -- am I the occupant of the deepest published
 packing, on another packing that may be worth adopting, or on a packing
 exhausted for me -- answered from catalog rank and a stall counter.
 
-Key types and functions: =Role= (src/swarm.rs:21, =Occupant=/=Other=/
-=Leave=); =LedgerHalf= (src/swarm.rs:32, =Open=/=Closed=, first vs.
+Key types and functions: =Role= (src/swarm.rs:21, =Occupant= / =Other= /
+=Leave=); =LedgerHalf= (src/swarm.rs:32, =Open= / =Closed=, first vs.
 second half of the charged budget); =Decision= (src/swarm.rs:41);
 =ledger_half= (src/swarm.rs:55); =catalog_role= (src/swarm.rs:64);
 =policy= (src/swarm.rs:85).
 
-Constants and defaults: =STALL_LEAVE = 8= slices without a deeper own
+Constants and defaults: ~STALL_LEAVE = 8~ slices without a deeper own
 quench (src/swarm.rs:82) -- same value as =LOCAL_STALL_LEAVE= in
 =catalog_policy.rs=, independently fixed.
 
@@ -1121,13 +1121,13 @@ Key types and functions: =BasinEvidence= (src/methods/feynman_kac.rs:68);
 fractional ranks via =ascending_fractional_ranks=, feynman_kac.rs:794);
 =SelectionCoefficients= (feynman_kac.rs:284); =GenealogyDiagnostics=
 (feynman_kac.rs:333, Kish effective sample size, unique parents, max
-family size, offspring variance); =ReconfigurationPlan=/
+family size, offspring variance); =ReconfigurationPlan= /
 =PopulationEpochPlan= (feynman_kac.rs:346/354); =population_family_position=
 (feynman_kac.rs:392); =population_rejuvenation_draw=
 (feynman_kac.rs:430, deterministic per-destination-per-family-ordinal
 seed so cloned offspring never request the same catalog perturbation);
 =SynchronousPopulation= (feynman_kac.rs:492), the coordinator-owned
-barrier: =submit=/=abstain=/=complete_open_epoch=
+barrier: =submit= / =abstain= / =complete_open_epoch=
 (feynman_kac.rs:646/583/704); =reconfiguration_plan=
 (feynman_kac.rs:835, builds the bounded log-weight potential, applies
 systematic resampling via =systematic_parents=, feynman_kac.rs:890, and
@@ -1164,11 +1164,11 @@ worker to return =CheckpointAction::Retire { reason: "halving" }=.
 and launches one worker per pending spawn.
 
 Key types and functions: =RosterReply= (src/catalog_rpc/mod.rs);
-=CatalogOperation::Attach=/=Detach=/=Tick=/=Scale=; =SuccessiveHalving=
+=CatalogOperation::Attach= / =Detach= / =Tick= / =Scale=; =SuccessiveHalving=
 (src/scaling.rs) with =observe= and =set_target=; =ServerConfig::with_quorum=
 and =with_halving=; =CatalogServer::with_clock=; =CooperativeLedger::attach=
 (src/cooperative_search/ledger.rs). Schema fields:
-=CoordinatorStatus.rosterVersion=/=liveReplicas=/=ticks=/=spawnRequested=,
+=CoordinatorStatus.rosterVersion= / =liveReplicas= / =ticks= / =spawnRequested=,
 =PolicyStateReply.retired=, =AcceptedReply.payload.roster=.
 
 Constants and defaults: Tick identity is replica =u32::MAX= with its
@@ -1204,13 +1204,13 @@ closed, roster changed, retire, spawn, tick) to every attached
 subscriber.
 
 Key types and functions: =PROTOCOL_VERSION= (src/catalog_rpc/mod.rs);
-=CatalogIdentity=; =CatalogCandidate=; =CatalogOperation=/=CatalogRequest=;
+=CatalogIdentity=; =CatalogCandidate=; =CatalogOperation= / =CatalogRequest=;
 =ProtocolRejection=; =CatalogSnapshot=; =CoordinatorStatus=;
-=AcceptedReply=/=CatalogReply=; =RosterReply=; =CoordinatorEvent=.
+=AcceptedReply= / =CatalogReply=; =RosterReply=; =CoordinatorEvent=.
 Server: =ServerConfig=; =CatalogServer::start=, which runs one
 =RpcSystem= accept loop on a dedicated =LocalSet= thread. Client:
 =CatalogClient::connect= keeps its synchronous signature and posts
-onto that executor; sequenced =attach=/=detach=/=tick=/=scale=,
+onto that executor; sequenced =attach= / =detach= / =tick= / =scale=,
 =observe=, and =events= are the RPC surface drivers use besides the
 existing catalog methods.
 Schema: schema/Catalog.capnp defines the request/reply structs 1:1
@@ -1218,8 +1218,8 @@ with the Rust types and the =Coordinator= / =Session= / =Subscriber=
 interfaces.
 
 Constants and defaults: coordinator journal file name
-=JOURNAL_FILE = "catalog-requests-v5.bin"=,
-=MAX_JOURNAL_FRAME = 256 * 1024 * 1024=.
+~JOURNAL_FILE = "catalog-requests-v5.bin"~,
+~MAX_JOURNAL_FRAME = 256 * 1024 * 1024~.
 
 Feeds/consumes: gated behind the =bank-rpc= Cargo feature. A
 =Session= is bound to the identity given at attach; a call whose
@@ -1243,23 +1243,23 @@ sixteen stable event classifications: =LocalWork=, =Admission=,
 =PolicyExplore=, =PolicyLeave=, =PopulationPending=, =PopulationReady=,
 =RpcFallback=, =SharingDisabled=, =Slice=, =Transition=,
 =TransitionExecution=); =TraceEvent= (cooperative_search.rs:82);
-=TransitionTrace=/=PolicyTrace=/=SliceTrace=/=PopulationTrace=
+=TransitionTrace= / =PolicyTrace= / =SliceTrace= / =PopulationTrace=
 (cooperative_search.rs:109/126/216/251); =RunManifest=
 (cooperative_search.rs:268); =CooperativeRunError=
 (cooperative_search.rs:401); =CooperativeRun=
-(cooperative_search.rs:449) with =new=/=attach_client=
+(cooperative_search.rs:449) with =new= / =attach_client=
 (cs.rs:457/488), =record_work= (498), =offer_candidate= (564),
-=record_current=/=record_transition=/=record_executed_transition=
-(632/655/675), =synchronize= (700), =policy_input=/
+=record_current= / =record_transition= / =record_executed_transition=
+(632/655/675), =synchronize= (700), =policy_input= /
 =registered_policy_input= (735/789), =sample_candidate= (815),
 =descriptor_hole= (852), =boundary_crossing= (890),
-=submit_population=/=join_population=/=abstain_population=/
+=submit_population= / =join_population= / =abstain_population= /
 =poll_population= (928/947/964/981), =decide= (998), =record_slice=
 (1025), =json_lines= (1064).
 
 Feeds/consumes: this is the object the cooperative example's checkpoint
 closure drives every checkpoint; see [[file:composition.org][composition.org]] for the
-call sequence. Gated behind =#[cfg(feature = "bank-rpc")]=
+call sequence. Gated behind ~#[cfg(feature = "bank-rpc")]~
 (cooperative_search.rs:5).
 
 ** Cooperative ledger
@@ -1313,7 +1313,7 @@ observed fraction of launches from region \(j\) that reached \(j+1\)
 
 Key types and functions: =BridgeString= (src/methods/neus_bridge.rs:49,
 image chain with fixed endpoints); =chord= (neus_bridge.rs:56, initial
-equal-spacing construction); =assign=/=chord_distance=
+equal-spacing construction); =assign= / =chord_distance=
 (neus_bridge.rs:86/104, Voronoi region membership and tube-distance
 test); =update= (neus_bridge.rs:121, drift toward walker means, three-
 point smoothing, equal-arc-length reparametrization, endpoints
@@ -1342,7 +1342,7 @@ coordinator faces at a population-epoch boundary -- is the ensemble
 confined, where is the seam, which pair of basins deserves a bridge,
 is local work still worth its price (landscape_graph.rs:8-11). Same
 Fiedler-vector mathematics as =crate::spectral=
-(=TransitionGraph=/=DiffusionDirection=), but a different use:
+(=TransitionGraph= / =DiffusionDirection=), but a different use:
 =spectral= drives a chain-side bias collective variable from one
 replica's own visited landscape, while =landscape_graph= is the
 coordinator's server-side referee over the whole ensemble's shared
@@ -1366,10 +1366,10 @@ price at infinity by construction, since reachability is separated by
 a frontier search before the linear solve.
 
 Key types and functions: =LandscapeGraph= (landscape_graph.rs:52);
-=observe_basin=/=observe_crossing= (landscape_graph.rs:75/92,
+=observe_basin= / =observe_crossing= (landscape_graph.rs:75/92,
 undirected accumulation: confinement is a property of the seam, not
 the direction it was crossed in); =SpectralSplit=
-(landscape_graph.rs:34, =algebraic_connectivity=, =left=/=right=
+(landscape_graph.rs:34, =algebraic_connectivity=, =left= / =right=
 basin sets, =conductance=, =representatives= -- the highest-degree
 anchor on each side).
 
@@ -1416,7 +1416,7 @@ SOAP leftover with =featomic=, CNA fractions otherwise); =BankConfig=
 =spectrum_distance= (csa_cluster.rs:581, default sorted-pairwise-
 distance-spectrum Euclidean metric); =coordination_histogram_distance=
 (csa_cluster.rs:606, Lee-Lee-Lee coordination-histogram distance
-at shells =r1=1.35=, =r2=1.70=). Those shell counts come from the
+at shells ~r1=1.35~, ~r2=1.70~). Those shell counts come from the
 unwrapped cutoff. The weights are unchanged.
 
 Constants and defaults: bond cutoff derived as
@@ -1454,7 +1454,7 @@ holds the shared catalogue, floors, residual field, pending locks);
 (archive_search.rs:421, generic worker on a shared =Archive= until its
 ledger empties).
 
-Constants and defaults: =LOCAL_CUTOFF = 1.35= contact multiple for
+Constants and defaults: ~LOCAL_CUTOFF = 1.35~ contact multiple for
 local NAUTY (archive_search.rs:23).
 
 Feeds/consumes: consumes =crate::catalog::{Event, EventCatalog}=
@@ -1609,19 +1609,19 @@ projected-gradient cycle helper (portfolio.rs:146) and its work-unit to
 fallback (portfolio.rs:182); the values-only =SuccessScale=
 (portfolio.rs:1431) and =DescentPace= (portfolio.rs:1507).
 
-Constants and defaults: =SLICE_GRAD_EQUIVALENTS = 4= (a slice must
-afford a few gradient-descent steps); =ROUNDS_PER_ARM = 8=;
-=ENDGAME_WU_PER_ITER = 4=; =NEAR_BEST_ORDERS = 6.0= (Dolan-More
+Constants and defaults: ~SLICE_GRAD_EQUIVALENTS = 4~ (a slice must
+afford a few gradient-descent steps); ~ROUNDS_PER_ARM = 8~;
+~ENDGAME_WU_PER_ITER = 4~; ~NEAR_BEST_ORDERS = 6.0~ (Dolan-More
 tau=1e-3 to a 1e-9 win tolerance crosses six decimal orders)
 (src/methods/portfolio.rs:88-98). Endgame polish schedule: two-thirds
 of remaining budget when no jittered restart has run yet, half of
 remaining otherwise, always capped at remaining (portfolio.rs:115).
-Values-only loop: =IMPROVEMENT_RTOL = 1e-4= (portfolio.rs:344);
-=QN_FTOL = 8 eps= (portfolio.rs:419); =QN_AFFORDABLE_GRADIENTS = 5=
-(portfolio.rs:422); =GSA_LAST_SLICES = 3= (portfolio.rs:429);
-=PHASE_SLOWDOWN = 8= (portfolio.rs:432); =PHASE_TURNS = 8=
-(portfolio.rs:436); =OPENING_GAINS = 3= (portfolio.rs:442);
-=OPENING_SPAN = 4= (portfolio.rs:450); closing descent of =10(d+1)=
+Values-only loop: ~IMPROVEMENT_RTOL = 1e-4~ (portfolio.rs:344);
+~QN_FTOL = 8 eps~ (portfolio.rs:419); ~QN_AFFORDABLE_GRADIENTS = 5~
+(portfolio.rs:422); ~GSA_LAST_SLICES = 3~ (portfolio.rs:429);
+~PHASE_SLOWDOWN = 8~ (portfolio.rs:432); ~PHASE_TURNS = 8~
+(portfolio.rs:436); ~OPENING_GAINS = 3~ (portfolio.rs:442);
+~OPENING_SPAN = 4~ (portfolio.rs:450); closing descent of =10(d+1)=
 evaluations, at most 40% of the budget, skipped below =3(d+1)=
 (portfolio.rs:452-457).
 
@@ -1635,7 +1635,7 @@ exploit probability, and the typed-algebra kernels
 What it is: the classical-SA replica-exchange mechanism, a geometric
 temperature ladder with periodic swap attempts satisfying detailed
 balance by construction, generic over the =Exchange= trait's swap rule.
-Distinct from cluster hopping's own =replicas=/=swap_period= ladder
+Distinct from cluster hopping's own =replicas= / =swap_period= ladder
 (src/methods/cluster_hopping/config.rs:117-159), which drives the
 cluster-specific chain rather than the typed-algebra =Sampler=. There
 one rung hops at a time on the shared budget, each with its own basin
@@ -1652,7 +1652,7 @@ Key types and functions: =Exchange<T>= trait (src/exchange.rs:23);
 =MetropolisExchange= (exchange.rs:40, canonical swap rule,
 =min(1, exp((1/T_i - 1/T_j)(F_i - F_j)))=); =TsallisExchange<T>=
 (exchange.rs:63, q-deformed GSA-matching swap rule, reduces to
-Metropolis at =q=1=); =PtChainState=/=PtResult=
+Metropolis at ~q=1~); =PtChainState= / =PtResult=
 (src/methods/parallel_tempering.rs:21/30); =geometric_ladder=
 (parallel_tempering.rs:46); =ParallelTemperingSampler=
 (parallel_tempering.rs:61).
@@ -1688,7 +1688,7 @@ is empty at the end of every relaxation (line-search failure at
 built never actually engages; kept as a correct L-BFGS regardless.
 
 Key types and functions: =WarmLbfgs= (src/methods/warm_lbfgs.rs:57),
-=forget=/=len=/=is_empty= (warm_lbfgs.rs:89/94/99), =minimize=/
+=forget= / =len= / =is_empty= (warm_lbfgs.rs:89/94/99), =minimize= /
 =minimize_watched= (warm_lbfgs.rs:327/351).
 
 Feeds/consumes: the =Relax= closure most examples and =csa_cluster=
@@ -1708,7 +1708,7 @@ even after the working bank converges onto one basin (bank.rs:63-75).
 
 Governing rule: for a candidate at distance \(d\) from its nearest bank
 member under threshold \(D_{cut}\): if \(d \leq D_{cut}\), keep the
-lower-energy of the two (=Improved=/=Duplicate=); otherwise the
+lower-energy of the two (=Improved= / =Duplicate=); otherwise the
 candidate is novel and either fills a free slot (=Added=), displaces
 the current worst member if it is better (=Displaced=), or is rejected
 (=Rejected=). \(D_{cut}\) is supplied externally by
@@ -1717,7 +1717,7 @@ and narrows over the run.
 
 Key types and functions: =Bank= (src/methods/bank.rs:63); =Admission=
 (bank.rs:38, the five outcomes above); =offer= (bank.rs:148, the
-replacement rule); =seed=/=inject= (bank.rs:206/317, unconditional
+replacement rule); =seed= / =inject= (bank.rs:206/317, unconditional
 adds that also write the frozen first bank); =next_start=
 (bank.rs:249, least-used-first selection so starts spread over the
 bank rather than concentrating on the incumbent); =grow=
@@ -1779,7 +1779,7 @@ Governing score: for each launchable site (energy within
 with the highest score is launched from (ffs.rs:127-146).
 
 Key types and functions: =FfsConfig= (src/methods/ffs.rs:51,
-=window=6=, =shots=24=, =key_cutoff=1.35=); =FfsOutcome= (ffs.rs:36);
+~window=6~, ~shots=24~, ~key_cutoff=1.35~); =FfsOutcome= (ffs.rs:36);
 =ffs_descent= (ffs.rs:96, the Thompson-launch loop over a
 =HashMap<u64, Site>= archive keyed by =crate::graphkey::contact_key=).
 
@@ -1814,9 +1814,9 @@ posterior mass still reachable below the incumbent best falls under a
 threshold (nested.rs:300-314, =VolumeCurve=).
 
 Key types and functions: =NestedConfig= (src/methods/nested.rs:69,
-=live=32=, =walk=8=); =NestedOutcome= (nested.rs:47);
+~live=32~, ~walk=8~); =NestedOutcome= (nested.rs:47);
 =nested_search= (nested.rs:107); =VolumeCurve= (nested.rs:316,
-=record=/=log_volume=/=slope=/=mass_below=, the volume-energy
+=record= / =log_volume= / =slope= / =mass_below=, the volume-energy
 posterior).
 
 Feeds/consumes: consumes =crate::methods::cluster_hopping::{ClusterMove,
@@ -1840,8 +1840,8 @@ nine variants: =LocalProposal=, =RemoteProposal=,
 =DescriptorEvaluation= -- all uncharged, no potential call --
 =AcceptedQuench=, =RejectedQuench=, =FreshValidation=, =Retry=,
 =AuxiliaryEvaluation= -- all charged -- and =RpcFallback=, uncharged);
-=wire_code=/=from_wire_code= (ledger.rs:30/45); =ReplicaLedgerEvent=
-(ledger.rs:74); =LedgerUpdate= (ledger.rs:89, =Recorded=/=Duplicate=);
+=wire_code= / =from_wire_code= (ledger.rs:30/45); =ReplicaLedgerEvent=
+(ledger.rs:74); =LedgerUpdate= (ledger.rs:89, =Recorded= / =Duplicate=);
 =LedgerError= (ledger.rs:98, nine failure modes including
 =ConflictingReplay=, =BudgetExceeded=, =CounterRegression=);
 =FirstEncounter= (ledger.rs:180, counter vector frozen at first
@@ -1861,7 +1861,7 @@ Bayes-factor comparisons).
 ** Basin census Good-Turing accounting
 
 Covered under [[file:catalog.org::*Basin census][basin census]] above;
-=singleton_count=/=unseen_mass=/=is_saturated= are the accounting
+=singleton_count= / =unseen_mass= / =is_saturated= are the accounting
 surface a policy or an operator consults to answer "has this ensemble
 seen most of what it will see."
 
@@ -2021,10 +2021,10 @@ Key types and functions: =PilotObservation=
 (src/methods/bayesian_pilot.rs:47); =LaplacePosterior=
 (bayesian_pilot.rs:64); =PilotPrior= (bayesian_pilot.rs:85, log-Normal
 on \(T_0\)/\(\sigma\), truncated scaled-Beta on \(q_v\) over
-=(Q_V_MIN, Q_V_MAX) = (1.05, 2.95)=); =fit_laplace=, =pilot_draws=,
+~(Q_V_MIN, Q_V_MAX) = (1.05, 2.95)~); =fit_laplace=, =pilot_draws=,
 =pilot_draws_qmc= (re-exported src/methods/mod.rs:65-68).
 
-Constants and defaults: =TARGET_ACCEPT_RATE = 0.234=
+Constants and defaults: ~TARGET_ACCEPT_RATE = 0.234~
 (bayesian_pilot.rs:38, the Roberts/Rosenthal 2001 asymptotically
 optimal random-walk-Metropolis rate SA at high \(T\) is matched
 against).
@@ -2051,12 +2051,12 @@ bfwt.rs:65); \(T_{lo} = \max(\hat b, 0)/\ln(\max(B_{rem},0)+e)\)
 (=t_lo=, bfwt.rs:72); window nonempty iff
 \(\hat b\, d < 2\,\mathrm{gap}\,\ln(B_{rem}+e)\) (=window_nonempty=,
 bfwt.rs:79); mode selection and clamp (=budget_feasible_temp=,
-bfwt.rs:87-109, returns one of =Design=/=EscapeFloor=/=DescentCap=/
+bfwt.rs:87-109, returns one of =Design= / =EscapeFloor= / =DescentCap= /
 =EscapeForced=).
 
 Key types and functions: =BfwtMode= (bfwt.rs:33); =BfwtResult=
 (bfwt.rs:113); =budget_feasible_temp= (bfwt.rs:87);
-=THETA_STAR = 0.5=, =EULER_E= (bfwt.rs:23-25).
+~THETA_STAR = 0.5~, =EULER_E= (bfwt.rs:23-25).
 
 Feeds/consumes: consumed by =amsa= (above) as the temperature law
 inside its adaptive chain, and by =portfolio= as its own arm.
@@ -2088,7 +2088,7 @@ Constants and defaults: =default_lambda= \(4 + \lfloor 3 \ln n
 \rfloor\) (cma_es.rs:82). In the portfolio every run is centred on the
 incumbent; the first is local, with step 0.025 of each side, and large
 runs use step 0.3 (portfolio.rs:393-394). Runs keep the full covariance
-up to =CMA_FULL_MAX_DIM = 100= (portfolio.rs:403) and only when the
+up to ~CMA_FULL_MAX_DIM = 100~ (portfolio.rs:403) and only when the
 budget exceeds the learning horizon; in the values-only loop each run's
 =tolfunhist= is the success threshold in force (=SuccessScale=), set
 again at every slice the arm plays, so a run stops once its recent
@@ -2109,7 +2109,7 @@ resampling controls population size under a D8 entropy-calibrated
 inverse temperature; elites are refined by a dual-style visit to
 L-BFGS polish or derivative-free local search (dmc_population.rs:1-16).
 
-Key types and functions: =Walker=/=Population=
+Key types and functions: =Walker= / =Population=
 (src/methods/dmc_population.rs:80/89); =dmc_population_optimize=,
 =run_dmc_population= (re-exported src/methods/mod.rs:73-77);
 =population_control= (D8 entropy-calibrated resampling);
@@ -2117,12 +2117,12 @@ Key types and functions: =Walker=/=Population=
 and dimension: \(\mathrm{clamp}(0.65\sqrt{B}, 6+d, 8, 36)\) capped at
 \(B/6\)).
 
-Constants and defaults: =DEFAULT_TARGET_WALKERS = 24=,
-=DEFAULT_STEPS_PER_CONTROL = 2=, =DEFAULT_BETA0 = 1.0=
+Constants and defaults: ~DEFAULT_TARGET_WALKERS = 24~,
+~DEFAULT_STEPS_PER_CONTROL = 2~, ~DEFAULT_BETA0 = 1.0~
 (dmc_population.rs:29-33).
 
 Feeds/consumes: consumes =local_polish::projected_gradient_polish= for
-the elite refine step and =accept::TsallisAccept=/
+the elite refine step and =accept::TsallisAccept= /
 =movekernel::TsallisVisit=; consumed by =portfolio= as the =DmcPop=
 arm and exposed through =src/python.rs= as
 =anneal.dmc_population_optimize=.
@@ -2154,13 +2154,13 @@ Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:148);
 =FdBfgsOptions= (fd_bfgs.rs:76); the portfolio's =QnArmState= and
 =run_qn_arm= (src/methods/portfolio.rs:1059/3292).
 
-Constants and defaults: =ARMIJO = 1e-4=, =MAX_LINE_TRIALS = 40=,
-=FIRST_STEP_FRACTION = 0.05=, =CENTRAL_INTERVAL_FRACTION = 0.1=,
-=INTERVAL_MOVE = 2=, =MAX_REDIFFERENCES = 2= (fd_bfgs.rs:50-72). The
-default options have =ftol = 1e-12=, three slow iterations of
+Constants and defaults: ~ARMIJO = 1e-4~, ~MAX_LINE_TRIALS = 40~,
+~FIRST_STEP_FRACTION = 0.05~, ~CENTRAL_INTERVAL_FRACTION = 0.1~,
+~INTERVAL_MOVE = 2~, ~MAX_REDIFFERENCES = 2~ (fd_bfgs.rs:50-72). The
+default options have ~ftol = 1e-12~, three slow iterations of
 patience, the value floor =f64::MIN_POSITIVE= in the slow-iteration
 test and no gradient tolerance; the portfolio's values-only descents
-use =ftol = 8 eps= (=QN_FTOL=), so they stop on the resolution of their
+use ~ftol = 8 eps~ (=QN_FTOL=), so they stop on the resolution of their
 values.
 
 Feeds/consumes: the =qn= arm of the portfolio's values-only loop (its
@@ -2189,7 +2189,7 @@ coordinates); =estimate_gle_omega0=, =estimate_gle_preconditioner=,
 =gle_langevin_sa=, =gle_langevin_adaptive_sa=,
 =gle_langevin_preconditioned_sa= (re-exported src/methods/mod.rs:78-81).
 
-Constants and defaults: =DEFAULT_GLE_OMEGA0 = 0.2=
+Constants and defaults: ~DEFAULT_GLE_OMEGA0 = 0.2~
 (gle_langevin.rs:23, characteristic frequency fallback when local
 curvature yields no finite estimate).
 
@@ -2215,8 +2215,8 @@ Key types and functions: =GpmdResult= (gpmd.rs:36); =gpmd_optimize=
 (gpmd.rs:70); =run_gpmd= (gpmd.rs:86, the RNG-parametrized entry
 =gpmd_optimize= wraps).
 
-Constants and defaults: =ALPHA_TARGET = 0.32=,
-=POLISH_FRACTION = 0.25= (gpmd.rs:26-28).
+Constants and defaults: ~ALPHA_TARGET = 0.32~,
+~POLISH_FRACTION = 0.25~ (gpmd.rs:26-28).
 
 Feeds/consumes: consumes =local_polish::projected_gradient_polish=;
 generalized by =bfwt= (above) with an added escape floor; exposed
@@ -2238,8 +2238,8 @@ Key types and functions: =LocalPolishResult=
 =qmc_best1bin_scout=, =qmc_gsa_global_search=, =qmc_trust_region_poll=
 (re-exported src/methods/mod.rs:86-90).
 
-Constants and defaults: =ARMIJO_SUFFICIENT_DECREASE = 1e-4=,
-=BACKTRACK_SHRINK = 0.5=, =TRUST_REGION_RADIUS_DIMENSION_SCALE = 2.0=
+Constants and defaults: ~ARMIJO_SUFFICIENT_DECREASE = 1e-4~,
+~BACKTRACK_SHRINK = 0.5~, ~TRUST_REGION_RADIUS_DIMENSION_SCALE = 2.0~
 (local_polish.rs:15-19).
 
 Feeds/consumes: the shared polish primitive consumed by =amsa=,
@@ -2268,7 +2268,7 @@ SA practice converges on the worst-mixing coordinate
 (=GelmanRubin::compute=, src/methods/mcmc_sa.rs:45).
 
 Key types and functions: =MultiChainState= (mcmc_sa.rs:24);
-=GelmanRubin= (mcmc_sa.rs:40); =MultiChainSampler=/=MultiChainResult=
+=GelmanRubin= (mcmc_sa.rs:40); =MultiChainSampler= / =MultiChainResult=
 (re-exported src/methods/mod.rs:91).
 
 Feeds/consumes: generic over any =Sampler<f64>= impl; re-exported at
@@ -2291,14 +2291,14 @@ endpoints; routing commits to the global regime only when at least two
 competitive basins are found (routing_probe.rs:1-10).
 
 Governing rule: two descent endpoints belong to the same depth class
-when their gap is at most =BASIN_DEPTH_REL_TOL = 1e-2= of the probe's
+when their gap is at most ~BASIN_DEPTH_REL_TOL = 1e-2~ of the probe's
 own depth scale
 \(\max(|f_{worst\_start} - f_{best\_descent}|, |f_{best\_descent}|, 1)\)
 (=distinct_depth_classes=, src/methods/routing_probe.rs:50, scale-
 and-offset invariant by construction).
 
 Key types and functions: =RoutingProbe= (routing_probe.rs:18,
-=multimodal= is =distinct_basins >= 2=); =multimodality_probe=
+=multimodal= is ~distinct_basins >= 2~); =multimodality_probe=
 (routing_probe.rs:74).
 
 Feeds/consumes: consumes =local_polish::projected_gradient_polish=;
@@ -2329,8 +2329,8 @@ Key types and functions: =SketchMap2d= (sketchmap.rs:88);
 =pairwise_l2=, =row_l2=, =median_pairwise=, =farthest_point_landmarks=
 (re-exported src/methods/mod.rs:101-104).
 
-Constants and defaults: =DEFAULT_A = 4.0=, =DEFAULT_B = 2.0=,
-=DEFAULT_A_LOW = DEFAULT_B_LOW = 2.0= (sketchmap.rs:21-27, sketch-map
+Constants and defaults: ~DEFAULT_A = 4.0~, ~DEFAULT_B = 2.0~,
+~DEFAULT_A_LOW = DEFAULT_B_LOW = 2.0~ (sketchmap.rs:21-27, sketch-map
 literature defaults).
 
 Feeds/consumes: consumed by =portfolio= for collective-variable
@@ -2353,8 +2353,8 @@ Key types and functions: =TpeCategorical=
 arms; higher score is better); =TpeContinuous1d= (re-exported
 src/methods/mod.rs:105).
 
-Constants and defaults: =DEFAULT_GAMMA = 0.25=,
-=DEFAULT_ALPHA = 1.0= (tpe.rs:12-14, Dirichlet/Laplace smoothing).
+Constants and defaults: ~DEFAULT_GAMMA = 0.25~,
+~DEFAULT_ALPHA = 1.0~ (tpe.rs:12-14, Dirichlet/Laplace smoothing).
 
 Feeds/consumes: consumed by =portfolio= as the arm-allocation policy
 alternative to the Thompson/depth allocators used inside
