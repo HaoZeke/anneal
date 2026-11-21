@@ -540,13 +540,31 @@ void Builder::update(const double *positions, std::size_t n, const double *box9,
                      const Query &query) {
   check_geometry(positions, n, box9, query);
   reused_ = false;
+  unchanged_ = false;
   if (have_ && n_ == n && query_.cutoff == query.cutoff && query_.skin == query.skin &&
       query_.shape == query.shape && query_.cut == query.cut &&
       query_.periodic == query.periodic && query_.fields.shifts == query.fields.shifts &&
       query_.fields.vectors == query.fields.vectors &&
-      query_.fields.distances == query.fields.distances &&
-      std::memcmp(box_, box9, sizeof(box_)) == 0) {
-    if (withinSkin(ref_.data(), positions, n, query.skin)) {
+      query_.fields.distances == query.fields.distances) {
+    if (std::memcmp(box_, box9, sizeof(box_)) == 0 &&
+        (n == 0 || std::memcmp(ref_.data(), positions, 3 * n * sizeof(double)) == 0)) {
+      reused_ = true;
+      unchanged_ = true;
+      return;
+    }
+    const double search = search_radius(query);
+    int ref_nmax[3];
+    int cur_nmax[3];
+    shift_bounds(box_, query.periodic, search, ref_nmax);
+    shift_bounds(box9, query.periodic, search, cur_nmax);
+    const double span[3] = {
+        static_cast<double>(ref_nmax[0]),
+        static_cast<double>(ref_nmax[1]),
+        static_cast<double>(ref_nmax[2]),
+    };
+    if (cur_nmax[0] <= ref_nmax[0] && cur_nmax[1] <= ref_nmax[1] &&
+        cur_nmax[2] <= ref_nmax[2] &&
+        withinSkin(ref_.data(), positions, n, box_, box9, span, query.skin)) {
       reused_ = true;
       return;
     }

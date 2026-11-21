@@ -631,7 +631,10 @@ void energyAndGradient(const double *positions, const int *atomic_numbers,
   dE/dx.
   The force is the negative of the gradient.
   A null =neighbors= rebuilds the pairs on every call; a list is reused while
-  each atom has moved by at most half its skin and the cell is unchanged.
+  the atom count and query are unchanged, the current image extent on each axis
+  does not exceed the previous one, and both bounds stay inside half the skin:
+  every atom displacement and the four antipodal corner shifts
+  (=+span0= with =±span1= and =±span2=).
 - Errors :: throws
   =std::invalid_argument= for a null =energy=, or for a null =positions=, =box= or =gradient= when =n_atoms=
   > 0.

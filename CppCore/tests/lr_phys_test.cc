@@ -13,6 +13,7 @@
 #include "rgpot/units.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <iomanip>
 #include <iostream>
@@ -118,46 +119,86 @@ void test_lists() {
     pos.push_back(u(rng));
   }
   const double box[9] = {10, 0.4, 0.1, 0.2, 11, 0.3, 0.0, -0.2, 9};
-  lists.update(pos.data(), 40, box, true);
-  check(lists.short_rebuilt() && lists.long_rebuilt(), "first list build rebuilds");
-  check(lists.short_pairs().size() < lists.long_pairs().size(), "long list is the larger cutoff");
-  auto brute = [&](double cut) {
-    std::size_t n = 0;
-    const CellGeom g = cell_from_box(box);
-    for (int i = 0; i < 40; ++i) {
-      for (int j = i; j < 40; ++j) {
-        for (int a = -2; a <= 2; ++a) {
-          for (int b = -2; b <= 2; ++b) {
-            for (int c = -2; c <= 2; ++c) {
-              if (i == j && a == 0 && b == 0 && c == 0) {
-                continue;
-              }
-              double dx = pos[3 * j] - pos[3 * i];
-              double dy = pos[3 * j + 1] - pos[3 * i + 1];
-              double dz = pos[3 * j + 2] - pos[3 * i + 2];
-              dx += a * g.H[0][0] + b * g.H[1][0] + c * g.H[2][0];
-              dy += a * g.H[0][1] + b * g.H[1][1] + c * g.H[2][1];
-              dz += a * g.H[0][2] + b * g.H[1][2] + c * g.H[2][2];
-              const double r2 = dx * dx + dy * dy + dz * dz;
-              if (r2 < cut * cut && r2 > 0.0) {
-                const bool keep = i < j || (i == j && (a > 0 || (a == 0 && (b > 0 || (b == 0 && c > 0)))));
-                if (keep || i != j) {
-                  if (i < j || (i == j && a >= 0 && (a > 0 || b > 0 || (b == 0 && c > 0)))) {
-                    ++n;
-                  }
+  const int n = static_cast<int>(pos.size() / 3);
+  auto brute_pairs = [](const std::vector<double> &p, const double *b, double cut) {
+    std::vector<rgpot::lr::Pair> out;
+    const int count = static_cast<int>(p.size() / 3);
+    const CellGeom g = cell_from_box(b);
+    const double cut2 = cut * cut;
+    for (int i = 0; i < count; ++i) {
+      for (int j = i; j < count; ++j) {
+        for (int sa = -2; sa <= 2; ++sa) {
+          for (int sb = -2; sb <= 2; ++sb) {
+            for (int sc = -2; sc <= 2; ++sc) {
+              if (i == j) {
+                const int sum = sa + sb + sc;
+                if (sum < 0 || (sum == 0 && (sc < 0 || (sc == 0 && sb < 0))) ||
+                    (sa == 0 && sb == 0 && sc == 0)) {
+                  continue;
                 }
+              }
+              const double dx =
+                  p[3 * j] - p[3 * i] + sa * g.H[0][0] + sb * g.H[1][0] + sc * g.H[2][0];
+              const double dy =
+                  p[3 * j + 1] - p[3 * i + 1] + sa * g.H[0][1] + sb * g.H[1][1] + sc * g.H[2][1];
+              const double dz =
+                  p[3 * j + 2] - p[3 * i + 2] + sa * g.H[0][2] + sb * g.H[1][2] + sc * g.H[2][2];
+              const double r2 = dx * dx + dy * dy + dz * dz;
+              if (r2 > 0.0 && r2 < cut2) {
+                out.push_back(rgpot::lr::Pair{i, j, dx, dy, dz, std::sqrt(r2)});
               }
             }
           }
         }
       }
     }
-    return n;
+    return out;
   };
+  auto check_matches_brute = [&](const std::vector<double> &p, const double *b,
+                                 const char *what) {
+    auto less = [](const rgpot::lr::Pair &lhs, const rgpot::lr::Pair &rhs) {
+      if (lhs.i != rhs.i) {
+        return lhs.i < rhs.i;
+      }
+      if (lhs.j != rhs.j) {
+        return lhs.j < rhs.j;
+      }
+      if (std::abs(lhs.x - rhs.x) > 1e-12) {
+        return lhs.x < rhs.x;
+      }
+      if (std::abs(lhs.y - rhs.y) > 1e-12) {
+        return lhs.y < rhs.y;
+      }
+      return lhs.z < rhs.z - 1e-12;
+    };
+    for (bool is_long : {false, true}) {
+      auto got = is_long ? lists.long_pairs() : lists.short_pairs();
+      auto ref = brute_pairs(p, b, is_long ? 6.0 : 3.0);
+      std::sort(got.begin(), got.end(), less);
+      std::sort(ref.begin(), ref.end(), less);
+      check(got.size() == ref.size(), what);
+      if (got.size() != ref.size()) {
+        continue;
+      }
+      for (std::size_t k = 0; k < got.size(); ++k) {
+        check(got[k].i == ref[k].i && got[k].j == ref[k].j, what);
+        check_close(got[k].x, ref[k].x, 1e-12, what);
+        check_close(got[k].y, ref[k].y, 1e-12, what);
+        check_close(got[k].z, ref[k].z, 1e-12, what);
+        check_close(got[k].r, ref[k].r, 1e-12, what);
+      }
+    }
+  };
+
+  lists.update(pos.data(), n, box, true);
+  check(lists.short_rebuilt() && lists.long_rebuilt(), "first list build rebuilds");
+  check(lists.short_pairs().size() < lists.long_pairs().size(), "long list is the larger cutoff");
+  check_matches_brute(pos, box, "initial build matches brute force");
+
   // Compare the long list to a minimum-image brute force at the same cutoff.
   std::size_t brute_n = 0;
-  for (int i = 0; i < 40; ++i) {
-    for (int j = i + 1; j < 40; ++j) {
+  for (int i = 0; i < n; ++i) {
+    for (int j = i + 1; j < n; ++j) {
       double dx = pos[3 * j] - pos[3 * i];
       double dy = pos[3 * j + 1] - pos[3 * i + 1];
       double dz = pos[3 * j + 2] - pos[3 * i + 2];
@@ -177,16 +218,58 @@ void test_lists() {
       }
     }
   }
-  (void)brute;
   check(lists.long_pairs().size() >= brute_n, "long list covers the minimum image");
   for (double &x : pos) {
     x += 0.01;
   }
-  lists.update(pos.data(), 40, box, true);
-  check(!lists.long_rebuilt(), "a small move stays inside the skin");
+  lists.update(pos.data(), n, box, true);
+  check(!lists.short_rebuilt() && !lists.long_rebuilt(), "a small move stays inside the skin");
+  check_matches_brute(pos, box, "small move matches brute force");
+
+  const double small_box[9] = {
+      box[0] * 1.002, box[1] * 1.002 + 0.01, box[2] * 1.002,
+      box[3] * 1.002, box[4] * 1.002 - 0.01, box[5] * 1.002,
+      box[6] * 1.002, box[7] * 1.002 + 0.01, box[8] * 1.002,
+  };
+  for (double &x : pos) {
+    x *= 1.002;
+  }
+  const auto t0 = std::chrono::steady_clock::now();
+  lists.update(pos.data(), n, small_box, true);
+  const auto reuse_us =
+      std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count();
+  check(reuse_us < 1e6, "small cell change smoke time");
+  check(!lists.short_rebuilt() && !lists.long_rebuilt(),
+        "a small cell change stays inside the skin");
+  check_matches_brute(pos, small_box, "small cell change matches brute force");
+
+  const auto t_steady = std::chrono::steady_clock::now();
+  lists.update(pos.data(), n, small_box, true);
+  const auto steady_us =
+      std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t_steady)
+          .count();
+  check(steady_us < 1e6, "steady repeat smoke time");
+  check(!lists.short_rebuilt() && !lists.long_rebuilt(),
+        "a steady repeat reuses the list");
+  check_matches_brute(pos, small_box, "steady repeat matches brute force");
+
+  const double large_box[9] = {
+      box[0] * 1.06, box[1] * 1.06, box[2] * 1.06,
+      box[3] * 1.06, box[4] * 1.06, box[5] * 1.06,
+      box[6] * 1.06, box[7] * 1.06, box[8] * 1.06,
+  };
+  for (double &x : pos) {
+    x *= 1.06 / 1.002;
+  }
+  lists.update(pos.data(), n, large_box, true);
+  check(lists.short_rebuilt() && lists.long_rebuilt(),
+        "a large cell change rebuilds the skin");
+  check_matches_brute(pos, large_box, "large cell change matches brute force");
+
   pos[0] += 2.0;
-  lists.update(pos.data(), 40, box, true);
-  check(lists.long_rebuilt(), "a large move rebuilds the skin");
+  lists.update(pos.data(), n, large_box, true);
+  check(lists.short_rebuilt() && lists.long_rebuilt(), "a large move rebuilds the skin");
+  check_matches_brute(pos, large_box, "large move matches brute force");
 }
 
 void test_madelung() {

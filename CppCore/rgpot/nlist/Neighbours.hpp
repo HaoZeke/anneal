@@ -64,6 +64,9 @@ struct Spec {
 /// test decides `Builder::update`'s reused flag.
 [[nodiscard]] inline bool withinSkin(const double *reference, const double *current,
                                      std::size_t n, double skin) noexcept {
+  if (!(skin >= 0.0)) {
+    return false;
+  }
   const double limit2 = 0.25 * skin * skin;
   for (std::size_t a = 0; a < n; ++a) {
     const double dx = current[3 * a] - reference[3 * a];
@@ -74,6 +77,36 @@ struct Spec {
     }
   }
   return true;
+}
+
+/// Cell-aware Verlet skin check across a box deformation from
+/// `reference_box` to `current_box`.
+[[nodiscard]] inline bool withinSkin(const double *reference, const double *current,
+                                     std::size_t n, const double *reference_box,
+                                     const double *current_box, const double span[3],
+                                     double skin) noexcept {
+  if (std::memcmp(reference_box, current_box, 9 * sizeof(double)) == 0) {
+    return withinSkin(reference, current, n, skin);
+  }
+  double corner = 0.0;
+  for (int bits = 0; bits < 8; ++bits) {
+    const double b[3] = {
+        (bits & 1) ? span[0] : 0.0,
+        ((bits >> 1) & 1) ? span[1] : 0.0,
+        ((bits >> 2) & 1) ? span[2] : 0.0,
+    };
+    double d[3] = {};
+    for (int a = 0; a < 3; ++a) {
+      for (int c = 0; c < 3; ++c) {
+        d[c] += b[a] * (current_box[3 * a + c] - reference_box[3 * a + c]);
+      }
+    }
+    corner = std::max(corner, std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]));
+  }
+  if (corner > 0.0 && !(skin > 0.0)) {
+    return false;
+  }
+  return withinSkin(reference, current, n, skin - corner);
 }
 
 /// Candidate pairs around one configuration.

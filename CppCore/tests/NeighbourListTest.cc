@@ -471,6 +471,147 @@ TEST_CASE("the skin rebuild follows half the skin", "[nlist][api]") {
   }
 }
 
+TEST_CASE("a small cell change reuses the builder and a large change rebuilds",
+          "[nlist][api]") {
+  const double box[9] = {8.0, 0.2, 0.0, 0.1, 8.5, 0.15, 0.0, -0.1, 7.8};
+  std::vector<double> pos = {
+      0.4, 0.5, 0.6, 2.1, 0.8, 0.7, 7.5, 0.6, 0.5,
+      1.2, 3.0, 1.1, 3.3, 3.1, 1.4, 0.8, 7.9, 7.2,
+  };
+  const std::size_t n = pos.size() / 3;
+  const double cutoff = 3.2;
+  const double skin = 0.5;
+  const std::array<bool, 3> periodic{{true, true, true}};
+
+  rgpot::nlist::Query query;
+  query.cutoff = cutoff;
+  query.skin = skin;
+  query.shape = rgpot::nlist::Pairs{rgpot::nlist::Shell::Half};
+  query.cut = rgpot::nlist::Cut::Loose;
+  query.periodic = periodic;
+  query.fields = {true, false, false};
+
+  auto filter_strict = [&](const rgpot::nlist::Table &table, const std::vector<double> &p,
+                           const double *b) {
+    std::set<Key> out;
+    const double cut2 = cutoff * cutoff;
+    for (std::size_t k = 0; k < table.size(); ++k) {
+      const int i = table.first[k];
+      const int j = table.second[k];
+      const int sa = table.shift[3 * k];
+      const int sb = table.shift[3 * k + 1];
+      const int sc = table.shift[3 * k + 2];
+      const double vx = p[3 * static_cast<std::size_t>(j)] -
+                        p[3 * static_cast<std::size_t>(i)] +
+                        sa * b[0] + sb * b[3] + sc * b[6];
+      const double vy = p[3 * static_cast<std::size_t>(j) + 1] -
+                        p[3 * static_cast<std::size_t>(i) + 1] +
+                        sa * b[1] + sb * b[4] + sc * b[7];
+      const double vz = p[3 * static_cast<std::size_t>(j) + 2] -
+                        p[3 * static_cast<std::size_t>(i) + 2] +
+                        sa * b[2] + sb * b[5] + sc * b[8];
+      const double r2 = vx * vx + vy * vy + vz * vz;
+      if (r2 > 0.0 && r2 < cut2) {
+        out.insert(Key{i, j, sa, sb, sc});
+      }
+    }
+    return out;
+  };
+
+  rgpot::nlist::Builder builder;
+  builder.update(pos.data(), n, box, query);
+  REQUIRE_FALSE(builder.reused());
+  REQUIRE_FALSE(builder.unchanged());
+  REQUIRE(builder.builds() == 1);
+  REQUIRE(filter_strict(builder.table(), pos, box) ==
+          brute(pos, box, cutoff, false, true, periodic));
+
+  builder.update(pos.data(), n, box, query);
+  REQUIRE(builder.reused());
+  REQUIRE(builder.unchanged());
+  REQUIRE(builder.builds() == 1);
+
+  const double small_box[9] = {8.03, 0.21, 0.0, 0.1, 8.48, 0.15, 0.0, -0.09, 7.82};
+  for (double &x : pos) {
+    x += 0.02;
+  }
+  const auto t0 = std::chrono::steady_clock::now();
+  builder.update(pos.data(), n, small_box, query);
+  const auto elapsed =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  REQUIRE(elapsed < 1.0);
+  REQUIRE(builder.reused());
+  REQUIRE_FALSE(builder.unchanged());
+  REQUIRE(builder.builds() == 1);
+  REQUIRE(filter_strict(builder.table(), pos, small_box) ==
+          brute(pos, small_box, cutoff, false, true, periodic));
+
+  const double large_box[9] = {8.6, 0.2, 0.0, 0.1, 9.1, 0.15, 0.0, -0.1, 8.4};
+  builder.update(pos.data(), n, large_box, query);
+  REQUIRE_FALSE(builder.reused());
+  REQUIRE_FALSE(builder.unchanged());
+  REQUIRE(builder.builds() == 2);
+  REQUIRE(filter_strict(builder.table(), pos, large_box) ==
+          brute(pos, large_box, cutoff, false, true, periodic));
+}
+
+TEST_CASE("mixed-sign cell deformation keeps the same pairs as a fresh build",
+          "[nlist][api][edge]") {
+  const double ref_box[9] = {10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0};
+  const double deformed_box[9] = {9.4, 0.0, 0.0, 0.6, 10.0, 0.0, 0.0, 0.0, 10.0};
+  const std::vector<double> pos = {9.332, 0.0, 0.0, 3.5, 10.0, 0.0};
+  rgpot::nlist::Query query;
+  query.cutoff = 3.0;
+  query.skin = 1.0;
+  query.shape = rgpot::nlist::Pairs{rgpot::nlist::Shell::Half};
+  query.cut = rgpot::nlist::Cut::Loose;
+  query.periodic = {{true, true, true}};
+  query.fields = {true, true, true};
+
+  rgpot::nlist::Builder builder;
+  builder.update(pos.data(), pos.size() / 3, ref_box, query);
+  builder.update(pos.data(), pos.size() / 3, deformed_box, query);
+  const auto reused_view = builder.table().view();
+
+  rgpot::nlist::Table fresh;
+  rgpot::nlist::build(fresh, pos.data(), pos.size() / 3, deformed_box, query);
+  const auto fresh_view = fresh.view();
+  REQUIRE(from_table(builder.table()) == from_table(fresh));
+  REQUIRE(reused_view.first.size() == fresh_view.first.size());
+
+  bool found = false;
+  for (std::size_t p = 0; p < reused_view.first.size(); ++p) {
+    if (reused_view.first[p] == 0 && reused_view.second[p] == 1 &&
+        reused_view.shift[3 * p] == 1 && reused_view.shift[3 * p + 1] == -1 &&
+        reused_view.shift[3 * p + 2] == 0) {
+      found = true;
+      const double x = pos[3] - pos[0] +
+                       static_cast<double>(reused_view.shift[3 * p]) * deformed_box[0] +
+                       static_cast<double>(reused_view.shift[3 * p + 1]) * deformed_box[3];
+      const double y = pos[4] - pos[1] +
+                       static_cast<double>(reused_view.shift[3 * p]) * deformed_box[1] +
+                       static_cast<double>(reused_view.shift[3 * p + 1]) * deformed_box[4];
+      const double z = pos[5] - pos[2] +
+                       static_cast<double>(reused_view.shift[3 * p]) * deformed_box[2] +
+                       static_cast<double>(reused_view.shift[3 * p + 1]) * deformed_box[5];
+      REQUIRE(std::sqrt(x * x + y * y + z * z) == Catch::Approx(2.968).margin(1e-12));
+      break;
+    }
+  }
+  REQUIRE(found);
+}
+
+TEST_CASE("withinSkin rejects non-finite corner shifts", "[nlist][api][edge]") {
+  const std::vector<double> pos = {0.0, 0.0, 0.0, 0.1, 0.1, 0.1};
+  const double ref_box[9] = {10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0};
+  const double inf_box[9] = {std::numeric_limits<double>::infinity(), 0.0, 0.0,
+                             0.0,                                 10.0, 0.0,
+                             0.0,                                 0.0,  10.0};
+  const double span[3] = {1.0, 1.0, 0.0};
+  REQUIRE_FALSE(rgpot::nlist::withinSkin(pos.data(), pos.data(), pos.size() / 3, ref_box,
+                                         inf_box, span, 0.5));
+}
+
 TEST_CASE("a positive skin with a strict cut is rejected", "[nlist][api]") {
   const double box[9] = {10, 0, 0, 0, 10, 0, 0, 0, 10};
   const double pos[] = {0, 0, 0, 1, 0, 0};

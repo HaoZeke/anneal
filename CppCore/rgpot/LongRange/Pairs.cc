@@ -3,6 +3,7 @@
 
 #include "rgpot/LongRange/Pairs.hpp"
 
+#include "rgpot/Slices.hpp"
 #include "rgpot/nlist/NeighbourList.hpp"
 
 #include <algorithm>
@@ -70,33 +71,79 @@ void DualList::fill(Skin &skin, double cutoff, const double *pos, std::size_t n,
   query.fields.distances = false;
   skin.builder.update(pos, n, box9, query);
   *rebuilt = !skin.builder.reused();
+  if (skin.builder.unchanged()) {
+    return;
+  }
 
   const nlist::View candidates = skin.builder.table().view();
+  const std::size_t m = candidates.first.size();
   const double cut2 = cutoff * cutoff;
-  out->clear();
-  out->reserve(candidates.first.size());
-  for (std::size_t p = 0; p < candidates.first.size(); ++p) {
-    const int i = candidates.first[p];
-    const int j = candidates.second[p];
-    const double x =
-        pos[3 * j] - pos[3 * i] +
-        static_cast<double>(candidates.shift[3 * p]) * box9[0] +
-        static_cast<double>(candidates.shift[3 * p + 1]) * box9[3] +
-        static_cast<double>(candidates.shift[3 * p + 2]) * box9[6];
-    const double y =
-        pos[3 * j + 1] - pos[3 * i + 1] +
-        static_cast<double>(candidates.shift[3 * p]) * box9[1] +
-        static_cast<double>(candidates.shift[3 * p + 1]) * box9[4] +
-        static_cast<double>(candidates.shift[3 * p + 2]) * box9[7];
-    const double z =
-        pos[3 * j + 2] - pos[3 * i + 2] +
-        static_cast<double>(candidates.shift[3 * p]) * box9[2] +
-        static_cast<double>(candidates.shift[3 * p + 1]) * box9[5] +
-        static_cast<double>(candidates.shift[3 * p + 2]) * box9[8];
-    const double r2 = x * x + y * y + z * z;
-    if (r2 > 0.0 && r2 < cut2) {
-      out->push_back(Pair{i, j, x, y, z, std::sqrt(r2)});
+  const int nt = std::max(poolThreads(), 1);
+  if (nt <= 1) {
+    out->clear();
+    out->reserve(m);
+    for (std::size_t p = 0; p < m; ++p) {
+      const int i = candidates.first[p];
+      const int j = candidates.second[p];
+      const double x =
+          pos[3 * j] - pos[3 * i] +
+          static_cast<double>(candidates.shift[3 * p]) * box9[0] +
+          static_cast<double>(candidates.shift[3 * p + 1]) * box9[3] +
+          static_cast<double>(candidates.shift[3 * p + 2]) * box9[6];
+      const double y =
+          pos[3 * j + 1] - pos[3 * i + 1] +
+          static_cast<double>(candidates.shift[3 * p]) * box9[1] +
+          static_cast<double>(candidates.shift[3 * p + 1]) * box9[4] +
+          static_cast<double>(candidates.shift[3 * p + 2]) * box9[7];
+      const double z =
+          pos[3 * j + 2] - pos[3 * i + 2] +
+          static_cast<double>(candidates.shift[3 * p]) * box9[2] +
+          static_cast<double>(candidates.shift[3 * p + 1]) * box9[5] +
+          static_cast<double>(candidates.shift[3 * p + 2]) * box9[8];
+      const double r2 = x * x + y * y + z * z;
+      if (r2 > 0.0 && r2 < cut2) {
+        out->push_back(Pair{i, j, x, y, z, std::sqrt(r2)});
+      }
     }
+    return;
+  }
+  std::vector<std::vector<Pair>> local(static_cast<std::size_t>(nt));
+  forEachSlice(nt, [&](int slice) {
+    auto &mine = local[static_cast<std::size_t>(slice)];
+    const Range run = partition(static_cast<std::int64_t>(m), slice, nt);
+    for (auto p = static_cast<std::size_t>(run.begin);
+         p < static_cast<std::size_t>(run.end); ++p) {
+      const int i = candidates.first[p];
+      const int j = candidates.second[p];
+      const double x =
+          pos[3 * j] - pos[3 * i] +
+          static_cast<double>(candidates.shift[3 * p]) * box9[0] +
+          static_cast<double>(candidates.shift[3 * p + 1]) * box9[3] +
+          static_cast<double>(candidates.shift[3 * p + 2]) * box9[6];
+      const double y =
+          pos[3 * j + 1] - pos[3 * i + 1] +
+          static_cast<double>(candidates.shift[3 * p]) * box9[1] +
+          static_cast<double>(candidates.shift[3 * p + 1]) * box9[4] +
+          static_cast<double>(candidates.shift[3 * p + 2]) * box9[7];
+      const double z =
+          pos[3 * j + 2] - pos[3 * i + 2] +
+          static_cast<double>(candidates.shift[3 * p]) * box9[2] +
+          static_cast<double>(candidates.shift[3 * p + 1]) * box9[5] +
+          static_cast<double>(candidates.shift[3 * p + 2]) * box9[8];
+      const double r2 = x * x + y * y + z * z;
+      if (r2 > 0.0 && r2 < cut2) {
+        mine.push_back(Pair{i, j, x, y, z, std::sqrt(r2)});
+      }
+    }
+  });
+  std::size_t total = 0;
+  for (const auto &part : local) {
+    total += part.size();
+  }
+  out->clear();
+  out->reserve(total);
+  for (const auto &part : local) {
+    out->insert(out->end(), part.begin(), part.end());
   }
 }
 

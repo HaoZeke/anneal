@@ -156,8 +156,8 @@ struct Table {
 };
 
 /// Stored list with a skin rebuild. A later update keeps the table while
-/// every atom has moved by at most half the skin and the cell and the
-/// query are unchanged. Skin 0 rebuilds unless the coordinates match.
+/// atom and cell-corner displacements stay within the skin and the query
+/// is unchanged. Skin 0 rebuilds unless the coordinates and the cell match.
 /// Throws Error and keeps the previous table when the geometry is
 /// rejected. The same builder is used by one thread. Two builders may
 /// update at the same time.
@@ -169,6 +169,7 @@ public:
   [[nodiscard]] const Table &table() const noexcept { return table_; }
   [[nodiscard]] std::uint64_t builds() const noexcept { return builds_; }
   [[nodiscard]] bool reused() const noexcept { return reused_; }
+  [[nodiscard]] bool unchanged() const noexcept { return unchanged_; }
 
 private:
   Table table_;
@@ -179,6 +180,7 @@ private:
   std::uint64_t builds_ = 0;
   bool have_ = false;
   bool reused_ = false;
+  bool unchanged_ = false;
 };
 
 /// Walk pairs for one central atom, or one cluster of four, at a time

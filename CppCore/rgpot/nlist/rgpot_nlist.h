@@ -143,12 +143,15 @@ int32_t rgpot_nlist_build_systems(const double *positions, const int32_t *counts
                                   rgpot_nlist_soa *out, int32_t *system,
                                   size_t *count, size_t *needed);
 
-/* A builder keeps the last list and skips the search while every atom
- * has moved by at most half the skin. Skin 0 rebuilds unless the
- * coordinates match. open returns a code and writes *builder. update
- * fills out the same way rgpot_nlist_build does after a search. When the
- * stored list is kept, *reused is 1 and the vector and distance columns
- * still describe the geometry of the last search. close frees the builder. */
+/* A builder keeps the last list while the atom count and request are
+ * unchanged, the current image extent does not exceed the previous one,
+ * and both checks stay inside half the skin: every atom displacement and
+ * the four antipodal corner shifts (+span0 with +/-span1 and +/-span2).
+ * Skin 0 rebuilds unless the coordinates and the cell match. open returns
+ * a code and writes *builder. update fills out the same way
+ * rgpot_nlist_build does after a search. When the stored list is kept,
+ * *reused is 1 and the vector and distance columns still describe the
+ * geometry of the last search. close frees the builder. */
 typedef struct rgpot_nlist_builder rgpot_nlist_builder;
 
 int32_t rgpot_nlist_builder_open(rgpot_nlist_builder **builder);
