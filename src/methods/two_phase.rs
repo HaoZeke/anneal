@@ -604,12 +604,10 @@ pub struct SurfacePortfolio {
     held_at_best: f64,
     /// Blocks held on the plain surface since the hold began.
     held_blocks: usize,
-    /// The run's best when the last block settled.
-    settled_best: f64,
-    /// Blocks settled since the run's best last moved to a new minimum.
-    quiet_blocks: usize,
-    /// The longest such stretch, or the longest hold the stall lifted.
-    longest_quiet: usize,
+    /// Blocks the run had settled when the hold began.
+    held_after: usize,
+    /// Blocks settled since the portfolio was built.
+    settled_blocks: usize,
     /// The restraint arm of the last failed block.
     failed_arm: Option<usize>,
     /// The restraint arm the hold was set against.
@@ -684,9 +682,8 @@ impl SurfacePortfolio {
             plain_only: false,
             held_at_best: f64::INFINITY,
             held_blocks: 0,
-            settled_best: f64::INFINITY,
-            quiet_blocks: 0,
-            longest_quiet: 0,
+            held_after: 0,
+            settled_blocks: 0,
             failed_arm: None,
             held_against: None,
             just_opened: false,
@@ -840,9 +837,11 @@ impl SurfacePortfolio {
     /// basin the restraint does not leave. The plain quench is what leaves
     /// it, so the restraint is not drawn while the chain is still in that
     /// basin. A lower minimum means the plain walk has left it. A hold
-    /// that has gone more blocks without one than the run has ever gone
-    /// between new minima means the plain walk does not leave it either,
-    /// and that hold becomes the stretch the next one has to outlast.
+    /// that has outlasted every block the run settled before it, without
+    /// one, means the plain walk does not leave it either. Each hold so
+    /// lifted at least doubles the run, so a chain that keeps failing the
+    /// restraint returns to it ever more rarely, and the plain walk keeps
+    /// most of the budget wherever it is the surface that wins.
     ///
     /// Either way the next block goes back to the restraint that failed,
     /// from where the chain now stands, and its credit is the allocator's
@@ -854,6 +853,7 @@ impl SurfacePortfolio {
         self.plain_only = true;
         self.held_at_best = self.latest_best;
         self.held_blocks = 0;
+        self.held_after = self.settled_blocks;
         self.held_against = self.failed_arm.take();
     }
 
@@ -873,10 +873,7 @@ impl SurfacePortfolio {
             let mut returned = None;
             if self.plain_only {
                 let left = lower_minimum(self.latest_best, self.held_at_best);
-                let stalled = self.held_blocks > self.longest_quiet;
-                if stalled && !left {
-                    self.longest_quiet = self.held_blocks;
-                }
+                let stalled = self.held_blocks > self.held_after;
                 if left || stalled {
                     self.plain_only = false;
                     returned = self.held_against.take();
@@ -944,13 +941,7 @@ impl SurfacePortfolio {
                 self.credit_arm(arm, reward);
             }
         }
-        if lower_minimum(self.latest_best, self.settled_best) {
-            self.longest_quiet = self.longest_quiet.max(self.quiet_blocks);
-            self.quiet_blocks = 0;
-        } else {
-            self.quiet_blocks += 1;
-        }
-        self.settled_best = self.latest_best;
+        self.settled_blocks += 1;
         self.block_lowest = f64::INFINITY;
         self.hops_in_block = 0;
     }
@@ -1303,10 +1294,9 @@ mod tests {
             portfolio.held = Some(0);
             portfolio.observe(false, best, best);
         }
-        assert_eq!(portfolio.longest_quiet, 0);
         let mut holds = Vec::new();
         let mut held = 0;
-        for _ in 0..60 {
+        for _ in 0..200 {
             portfolio.begin(true);
             if portfolio.take_restraint_block_failed() {
                 portfolio.hold_plain();
@@ -1334,8 +1324,8 @@ mod tests {
             "a stalled hold never returned to the restraint: {holds:?}"
         );
         assert!(
-            holds.windows(2).all(|pair| pair[1] > pair[0]),
-            "each hold should outlast the one before: {holds:?}"
+            holds.windows(2).all(|pair| pair[1] >= 2 * pair[0]),
+            "each hold should outlast the run before it: {holds:?}"
         );
     }
 
