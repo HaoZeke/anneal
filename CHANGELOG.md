@@ -6,10 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 <!-- towncrier release notes start -->
 
+## Unreleased
+
+### Changed
+
+- ``Outcome::tabu.0`` now counts quarantined shelves on every replica
+  rung as well as the fingerprint tabu.
+- ``DepthAllocator::select_leaving`` is public so callers can gate
+  unavailable arms and account for attempts that do not leave a shelf.
+
 ## [0.12.0](https://github.com/HaoZeke/anneal/tree/v0.12.0) - 2026-11-16
 
 ### Added
 
+- ``Outcome::stall_non_leaves`` reports stall responses that remained on the current shelf.
 - ``Config::recommended_for_pair`` applies ``Config::recommended`` in a unit-depth pair potential's own length unit. Lennard-Jones is unchanged. ``h2h_morse`` reads ``H2H_PAIR_SCALE=1`` and otherwise keeps the preset.
 - ``Config::plateau_heat`` doubles the Metropolis temperature and the lattice-exchange temperature on each escape plateau, up to four times the preset, and returns to the preset when a new lowest minimum is recorded. The proposal step stays the configured length. Off leaves the preset trajectory. ``h2h_gmin_proof``, ``h2h_morse`` and ``h2h_metal`` read ``H2H_PLATEAU_HEAT=1``.
 - ``gmin_losses2`` compares the parent preset, this tree with Morse lengths on the pair minimum, and GMIN. Rows go under ``/work`` or ``$OUTPUT``. The Snakemake output is a stamp, so a rerun cannot delete a tracked table.
