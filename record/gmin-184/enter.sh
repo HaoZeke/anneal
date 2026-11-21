@@ -65,7 +65,7 @@ if [[ ! -x $WORK/bin/GMIN ]]; then
 fi
 
 src=$WORK/anneal-src
-if [[ ! -d $src/.git ]]; then
+if [[ ! -e $src/.git ]]; then
   git -C "$ROOT" worktree add --detach "$src" "$REV"
 fi
 git -C "$src" checkout --detach -q "$REV"
