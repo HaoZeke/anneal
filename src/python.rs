@@ -3650,33 +3650,36 @@ fn cluster_archive_search<O: eindir_core::gradient::DifferentiableObjective<f64>
     use eindir_core::gradient::Gradient;
     use rand::SeedableRng;
 
-    let mut stats = RelaxStats::default();
-    let mut relax = warm_relax(obj, cfg, &mut stats, seed);
-    let mut grad = |led: &mut crate::methods::cluster_hopping::Ledger,
-                    x: ArrayView1<f64>|
-     -> Option<Array1<f64>> {
-        if !led.charge() {
-            return None;
-        }
-        Some(Gradient::grad(obj, x))
-    };
-    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-    let start = random_cluster_in_radius(
-        cfg.n_points,
-        cfg.start_radius(),
-        cfg.min_separation,
-        &mut rng,
-    );
-    let mut archive = Archive::new();
-    let out = archive_search(
-        cfg,
-        start.view(),
-        ledger,
-        &mut relax,
-        Some(&mut grad),
-        &mut archive,
-        &mut rng,
-    );
+    let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut stats = RelaxStats::default();
+        let mut relax = warm_relax(obj, cfg, &mut stats, seed);
+        let mut grad = |led: &mut crate::methods::cluster_hopping::Ledger,
+                        x: ArrayView1<f64>|
+         -> Option<Array1<f64>> {
+            if !led.charge() {
+                return None;
+            }
+            Some(Gradient::grad(obj, x))
+        };
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        let start = random_cluster_in_radius(
+            cfg.n_points,
+            cfg.start_radius(),
+            cfg.min_separation,
+            &mut rng,
+        );
+        let mut archive = Archive::new();
+        archive_search(
+            cfg,
+            start.view(),
+            ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut archive,
+            &mut rng,
+        )
+    }))
+    .map_err(|payload| PyValueError::new_err(panic_payload_message(payload)))?;
     let dim = 3 * cfg.n_points;
     let best = out
         .best_state
@@ -3777,6 +3780,85 @@ impl<O: eindir_core::gradient::DifferentiableObjective<f64>>
         );
         (energy, self.to_block_gradient(gradient.view()))
     }
+}
+
+pub(crate) fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_owned()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "internal panic in native cluster kernel".to_owned()
+    }
+}
+
+fn scaled_cluster_preset(
+    n: usize,
+    recommended: bool,
+    derived: bool,
+    communicating: bool,
+    ras: bool,
+    has_custom_scales: bool,
+    scale: f64,
+    escale: f64,
+) -> crate::methods::cluster_hopping::Config {
+    use crate::methods::cluster_hopping::{Config, ContinuousSymmetry, OrbitCore};
+    use crate::methods::minima_hopping::SharedVisitPolicy;
+    use crate::methods::two_phase::TwoPhase;
+
+    if !has_custom_scales {
+        if ras {
+            Config::recommended(n)
+        } else if communicating {
+            Config::communicating(n)
+        } else if derived {
+            Config::derived(n)
+        } else if recommended {
+            Config::recommended(n)
+        } else {
+            Config::for_cluster(n)
+        }
+    } else if ras {
+        Config::recommended_with_scales(n, scale, escale)
+    } else if communicating {
+        let mut cfg = Config::for_cluster_with_scales(n, scale, escale);
+        cfg.allocate_moves = true;
+        cfg.return_screen = true;
+        cfg.orbit_complete_on_new = true;
+        cfg.orbit_core = OrbitCore::Fraction;
+        cfg.shared_deposits = 0;
+        cfg.shared_visit_policy = SharedVisitPolicy::Recognition;
+        if n < 98 {
+            cfg.surfaces = vec![TwoPhase::relative(0.7, escale / scale.powi(4))];
+        }
+        cfg.continuous_symmetry = ContinuousSymmetry::Measure { interval: 10 };
+        cfg
+    } else if derived {
+        let mut cfg = Config::recommended_with_scales(n, scale, escale);
+        cfg.budget_window = true;
+        cfg.bayes_screen = true;
+        cfg.bayes_threshold =
+            crate::screen::cost_asymmetric_threshold(cfg.screen_steps, cfg.relax_steps);
+        cfg
+    } else if recommended {
+        Config::recommended_with_scales(n, scale, escale)
+    } else {
+        Config::for_cluster_with_scales(n, scale, escale)
+    }
+}
+
+fn scaled_water_geometry(scale: f64) -> PyResult<crate::rigid_body::RigidBodyGeometry> {
+    let base = crate::potentials::gmin_water_geometry();
+    if scale == 1.0 {
+        return Ok(base);
+    }
+    let sites = base
+        .sites()
+        .iter()
+        .map(|s| [s[0] * scale, s[1] * scale, s[2] * scale])
+        .collect();
+    crate::rigid_body::RigidBodyGeometry::new(sites, base.species().to_vec())
+        .map_err(PyValueError::new_err)
 }
 
 fn rigid_probe(
@@ -4091,6 +4173,25 @@ fn cluster_search(
     if sigmas.is_some() && species.is_none() {
         return Err(PyValueError::new_err("sigmas require species"));
     }
+    if let Some(labels) = species.as_ref()
+        && labels.len() != n
+    {
+        return Err(PyValueError::new_err(format!(
+            "species length {} must match n ({n})",
+            labels.len()
+        )));
+    }
+    if let Some(vals) = sigmas.as_ref() {
+        if vals.len() != n {
+            return Err(PyValueError::new_err(format!(
+                "sigmas length {} must match n ({n})",
+                vals.len()
+            )));
+        }
+        if vals.iter().any(|v| !v.is_finite() || *v <= 0.0) {
+            return Err(PyValueError::new_err("sigmas must be finite and positive"));
+        }
+    }
     if layout != "block" && layout != "interleaved" {
         return Err(PyValueError::new_err("layout must be block or interleaved"));
     }
@@ -4197,35 +4298,21 @@ fn cluster_search(
         };
         cfg.rigid_body_geometry = Some(geometry);
         cfg
-    } else if ras {
-        Config::recommended(n)
-    } else if communicating {
-        Config::communicating(n)
-    } else if derived {
-        Config::derived(n)
-    } else if recommended {
-        if has_custom_scales && !stock {
-            Config::recommended_with_scales(n, scale, escale)
-        } else {
-            Config::recommended(n)
-        }
-    } else if has_custom_scales && !stock {
-        Config::for_cluster_with_scales(n, scale, escale)
     } else {
-        Config::for_cluster(n)
+        scaled_cluster_preset(
+            n,
+            recommended,
+            derived,
+            communicating,
+            ras,
+            has_custom_scales,
+            scale,
+            escale,
+        )
     };
     if !has_water && stock {
-        cfg = if communicating {
-            Config::communicating(n)
-        } else if derived {
-            Config::derived(n)
-        } else if recommended {
-            Config::recommended(n)
-        } else {
-            Config::for_cluster(n)
-        };
         if rigid {
-            cfg = cfg.with_rigid_bodies(crate::potentials::gmin_water_geometry());
+            cfg = cfg.with_rigid_bodies(scaled_water_geometry(scale)?);
         }
         if let Some(labels) = species {
             cfg = cfg.with_species(labels, sigmas);
@@ -4263,54 +4350,59 @@ fn cluster_search(
             return cluster_archive_search(py, pot, &cfg, &mut ledger, seed);
         }
         py.detach(|| {
-            let run = if interleaved {
-                let chart = InterleavedChart {
-                    inner: pot,
-                    n_molecules: n,
-                    bounds: Bounds::new(
-                        Array1::from_elem(dim, -extent),
-                        Array1::from_elem(dim, extent),
-                        0.0,
-                    ),
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let run = if interleaved {
+                    let chart = InterleavedChart {
+                        inner: pot,
+                        n_molecules: n,
+                        bounds: Bounds::new(
+                            Array1::from_elem(dim, -extent),
+                            Array1::from_elem(dim, extent),
+                            0.0,
+                        ),
+                    };
+                    let started = match start.as_ref() {
+                        Some(start) => {
+                            Array1::from_vec(crate::potentials::block_from_interleaved_gmin(
+                                start.as_slice().unwrap_or(&[]),
+                            ))
+                        }
+                        None => Array1::from_vec(rigid_probe(&cfg, seed.wrapping_add(1), false)),
+                    };
+                    crate::methods::cluster_search::search_from(
+                        &chart,
+                        &cfg,
+                        &mut ledger,
+                        started.view(),
+                        seed,
+                    )
+                } else if let Some(start) = start.as_ref() {
+                    crate::methods::cluster_search::search_from(
+                        pot,
+                        &cfg,
+                        &mut ledger,
+                        start.view(),
+                        seed,
+                    )
+                } else if rigid_chart {
+                    let started = Array1::from_vec(rigid_probe(&cfg, seed.wrapping_add(1), false));
+                    crate::methods::cluster_search::search_from(
+                        pot,
+                        &cfg,
+                        &mut ledger,
+                        started.view(),
+                        seed,
+                    )
+                } else {
+                    crate::methods::cluster_search::search(pot, &cfg, &mut ledger, seed)
                 };
-                let started = match start.as_ref() {
-                    Some(start) => {
-                        Array1::from_vec(crate::potentials::block_from_interleaved_gmin(
-                            start.as_slice().unwrap_or(&[]),
-                        ))
-                    }
-                    None => Array1::from_vec(rigid_probe(&cfg, seed.wrapping_add(1), false)),
-                };
-                crate::methods::cluster_search::search_from(
-                    &chart,
-                    &cfg,
-                    &mut ledger,
-                    started.view(),
-                    seed,
-                )
-            } else if let Some(start) = start.as_ref() {
-                crate::methods::cluster_search::search_from(
-                    pot,
-                    &cfg,
-                    &mut ledger,
-                    start.view(),
-                    seed,
-                )
-            } else if rigid_chart {
-                let started = Array1::from_vec(rigid_probe(&cfg, seed.wrapping_add(1), false));
-                crate::methods::cluster_search::search_from(
-                    pot,
-                    &cfg,
-                    &mut ledger,
-                    started.view(),
-                    seed,
-                )
-            } else {
-                crate::methods::cluster_search::search(pot, &cfg, &mut ledger, seed)
-            };
-            run.map(|pair| (pair, crate::methods::cluster_search::last_search_phase()))
+                run.map(|pair| (pair, crate::methods::cluster_search::last_search_phase()))
+                    .map_err(|err| err.to_string())
+            }))
+            .map_err(panic_payload_message)
         })
-        .map_err(|err| PyValueError::new_err(err.to_string()))?
+        .and_then(|res| res)
+        .map_err(PyValueError::new_err)?
     } else {
         let grad_fn = grad_fn.expect("checked grad_fn is Some");
         let gradient_scale = if budget >= 4 {
@@ -4359,46 +4451,58 @@ fn cluster_search(
             errors.finish(py)?;
             return out;
         }
-        let res = if interleaved {
-            let chart = InterleavedChart {
-                inner: &obj,
-                n_molecules: n,
-                bounds: Bounds::new(
-                    Array1::from_elem(dim, -extent),
-                    Array1::from_elem(dim, extent),
-                    0.0,
-                ),
-            };
-            let started = match start.as_ref() {
-                Some(start) => Array1::from_vec(crate::potentials::block_from_interleaved_gmin(
-                    start.as_slice().unwrap_or(&[]),
-                )),
-                None => Array1::from_vec(rigid_probe(&cfg, seed.wrapping_add(1), false)),
-            };
-            crate::methods::cluster_search::search_from(
-                &chart,
-                &cfg,
-                &mut ledger,
-                started.view(),
-                seed,
-            )
-        } else if let Some(start) = start {
-            crate::methods::cluster_search::search_from(&obj, &cfg, &mut ledger, start.view(), seed)
-        } else if rigid_chart {
-            let started = Array1::from_vec(rigid_probe(&cfg, seed.wrapping_add(1), false));
-            crate::methods::cluster_search::search_from(
-                &obj,
-                &cfg,
-                &mut ledger,
-                started.view(),
-                seed,
-            )
-        } else {
-            crate::methods::cluster_search::search(&obj, &cfg, &mut ledger, seed)
-        }
-        .map_err(|err| PyValueError::new_err(err.to_string()))?;
-        let phase = crate::methods::cluster_search::last_search_phase();
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if interleaved {
+                let chart = InterleavedChart {
+                    inner: &obj,
+                    n_molecules: n,
+                    bounds: Bounds::new(
+                        Array1::from_elem(dim, -extent),
+                        Array1::from_elem(dim, extent),
+                        0.0,
+                    ),
+                };
+                let started = match start.as_ref() {
+                    Some(start) => {
+                        Array1::from_vec(crate::potentials::block_from_interleaved_gmin(
+                            start.as_slice().unwrap_or(&[]),
+                        ))
+                    }
+                    None => Array1::from_vec(rigid_probe(&cfg, seed.wrapping_add(1), false)),
+                };
+                crate::methods::cluster_search::search_from(
+                    &chart,
+                    &cfg,
+                    &mut ledger,
+                    started.view(),
+                    seed,
+                )
+            } else if let Some(start) = start {
+                crate::methods::cluster_search::search_from(
+                    &obj,
+                    &cfg,
+                    &mut ledger,
+                    start.view(),
+                    seed,
+                )
+            } else if rigid_chart {
+                let started = Array1::from_vec(rigid_probe(&cfg, seed.wrapping_add(1), false));
+                crate::methods::cluster_search::search_from(
+                    &obj,
+                    &cfg,
+                    &mut ledger,
+                    started.view(),
+                    seed,
+                )
+            } else {
+                crate::methods::cluster_search::search(&obj, &cfg, &mut ledger, seed)
+            }
+        }));
         errors.finish(py)?;
+        let res = res
+            .map_err(|payload| PyValueError::new_err(panic_payload_message(payload)))?
+            .map_err(|err| PyValueError::new_err(err.to_string()))?;
+        let phase = crate::methods::cluster_search::last_search_phase();
         (res, phase)
     };
     let best_block = out
@@ -4522,16 +4626,22 @@ fn quench(
             )));
         }
         py.detach(|| {
-            let fg = |v: ArrayView1<f64>| {
-                calls += 1;
-                Some(eindir_core::gradient::DifferentiableObjective::value_and_gradient(&pot, v))
-            };
-            let (energy, x, _) = match tric.as_ref() {
-                Some(tric) => tric.minimize(start.view(), max_iter, fg),
-                None => opt.minimize(start.view(), max_iter, fg),
-            };
-            (energy, x)
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let fg = |v: ArrayView1<f64>| {
+                    calls += 1;
+                    Some(
+                        eindir_core::gradient::DifferentiableObjective::value_and_gradient(&pot, v),
+                    )
+                };
+                let (energy, x, _) = match tric.as_ref() {
+                    Some(tric) => tric.minimize(start.view(), max_iter, fg),
+                    None => opt.minimize(start.view(), max_iter, fg),
+                };
+                (energy, x)
+            }))
+            .map_err(panic_payload_message)
         })
+        .map_err(PyValueError::new_err)?
     } else {
         let mut failure: Option<PyErr> = None;
         let fg = |v: ArrayView1<f64>| {
@@ -4556,13 +4666,15 @@ fn quench(
                 }
             }
         };
-        let (energy, x, _) = match tric.as_ref() {
+        let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match tric.as_ref() {
             Some(tric) => tric.minimize(start.view(), max_iter, fg),
             None => opt.minimize(start.view(), max_iter, fg),
-        };
+        }));
         if let Some(err) = failure {
             return Err(err);
         }
+        let (energy, x, _) =
+            ran.map_err(|payload| PyValueError::new_err(panic_payload_message(payload)))?;
         (energy, x)
     };
     let out = PyDict::new(py);

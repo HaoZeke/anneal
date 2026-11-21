@@ -341,3 +341,201 @@ def test_cluster_search_scaled_presets_and_custom_config_match_rust():
         anneal.cluster_search(lj4, None, 5, 200, config=capped_cfg)
     with pytest.raises(ValueError, match="excludes"):
         anneal.cluster_search(lj4, None, 4, 200, config=capped_cfg, length_scale=1.2)
+
+
+def test_scaled_native_four_point_lj_seed_29_regression():
+    lj4 = anneal.PairPotential.lennard_jones(4)
+    out = anneal.cluster_search(
+        lj4,
+        None,
+        4,
+        120,
+        seed=29,
+        length_scale=2.0,
+        energy_scale=3.0,
+    )
+    assert out["best"].shape == (12,)
+    assert np.all(np.isfinite(out["best"]))
+    assert math.isfinite(out["best_energy"])
+
+    for seed in (0, 7, 13, 29, 41):
+        res = anneal.cluster_search(
+            lj4,
+            None,
+            4,
+            120,
+            seed=seed,
+            length_scale=2.5,
+            energy_scale=3.0,
+        )
+        assert res["best"].shape == (12,)
+        assert math.isfinite(res["best_energy"])
+
+
+def _sorted_pair_distances(flat: np.ndarray) -> np.ndarray:
+    pts = np.asarray(flat, dtype=np.float64).reshape(-1, 3)
+    dists = [
+        float(np.linalg.norm(pts[i] - pts[j]))
+        for i in range(len(pts))
+        for j in range(i + 1, len(pts))
+    ]
+    return np.asarray(sorted(dists), dtype=np.float64)
+
+
+def test_scaled_stock_species_and_rigid_cluster_search_covariance():
+    blj = anneal.BinaryLennardJones(3, 3, sigma_ab=1.05, sigma_bb=1.4)
+    species = [1, 1, 1, 2, 2, 2]
+    sigmas = [1.0, 1.0, 1.0, 1.4, 1.4, 1.4]
+    scale = 8.0
+    escale = 3.0
+
+    def obj_scaled(x: np.ndarray) -> float:
+        return escale * float(blj.eval(x / scale))
+
+    def grad_scaled(x: np.ndarray) -> np.ndarray:
+        return (escale / scale) * np.asarray(blj.grad(x / scale), dtype=np.float64)
+
+    stock_unit = anneal.cluster_search(
+        blj,
+        None,
+        6,
+        1500,
+        seed=3,
+        species=species,
+        sigmas=sigmas,
+    )
+    stock_unscaled_on_scaled = anneal.cluster_search(
+        obj_scaled,
+        grad_scaled,
+        6,
+        1500,
+        seed=3,
+        species=species,
+        sigmas=sigmas,
+    )
+    stock_scaled = anneal.cluster_search(
+        obj_scaled,
+        grad_scaled,
+        6,
+        1500,
+        seed=3,
+        species=species,
+        sigmas=sigmas,
+        length_scale=scale,
+        energy_scale=escale,
+    )
+    assert stock_scaled["merge_radius"] == pytest.approx(scale * stock_unit["merge_radius"])
+    assert stock_scaled["escape_threshold"] == pytest.approx(
+        escale * stock_unit["escape_threshold"]
+    )
+    assert stock_scaled["mean_step"] == pytest.approx(scale * stock_unit["mean_step"])
+    assert stock_unscaled_on_scaled["merge_radius"] == pytest.approx(stock_unit["merge_radius"])
+    assert stock_unscaled_on_scaled["escape_threshold"] == pytest.approx(
+        stock_unit["escape_threshold"]
+    )
+    assert stock_scaled["best_energy"] == pytest.approx(
+        escale * stock_unit["best_energy"], rel=1e-6, abs=1e-6
+    )
+    assert np.allclose(
+        _sorted_pair_distances(stock_scaled["best"]),
+        scale * _sorted_pair_distances(stock_unit["best"]),
+        rtol=1e-4,
+        atol=1e-4,
+    )
+    # Without scales, tiny reduced steps leave the 8x cluster stuck above the scaled minimum.
+    assert stock_scaled["best_energy"] < stock_unscaled_on_scaled["best_energy"] - 1.0
+
+    # Stock rigid=True path: centres and merge_radius scale by `scale`, energies and
+    # escape_threshold scale by `escale`, and Rodrigues vectors remain dimensionless.
+    tip = anneal.GminTip4p(2)
+
+    def rigid_unit_obj(x: np.ndarray) -> float:
+        return float(tip.eval(x))
+
+    def rigid_unit_grad(x: np.ndarray) -> np.ndarray:
+        return np.asarray(tip.grad(x), dtype=np.float64)
+
+    def _unscale_rigid(x: np.ndarray) -> np.ndarray:
+        y = np.array(x, dtype=np.float64, copy=True)
+        y[:6] /= scale
+        return y
+
+    def rigid_scaled_obj(x: np.ndarray) -> float:
+        return escale * float(tip.eval(_unscale_rigid(x)))
+
+    def rigid_scaled_grad(x: np.ndarray) -> np.ndarray:
+        g = np.asarray(tip.grad(_unscale_rigid(x)), dtype=np.float64)
+        out = np.empty_like(g)
+        out[:6] = (escale / scale) * g[:6]
+        out[6:] = escale * g[6:]
+        return out
+
+    rigid_u = anneal.cluster_search(
+        rigid_unit_obj,
+        rigid_unit_grad,
+        2,
+        300,
+        seed=5,
+        rigid=True,
+    )
+    rigid_unscaled_on_scaled = anneal.cluster_search(
+        rigid_scaled_obj,
+        rigid_scaled_grad,
+        2,
+        300,
+        seed=5,
+        rigid=True,
+    )
+    rigid_s = anneal.cluster_search(
+        rigid_scaled_obj,
+        rigid_scaled_grad,
+        2,
+        300,
+        seed=5,
+        rigid=True,
+        length_scale=scale,
+        energy_scale=escale,
+    )
+    assert rigid_s["merge_radius"] == pytest.approx(scale * rigid_u["merge_radius"])
+    assert rigid_s["escape_threshold"] == pytest.approx(escale * rigid_u["escape_threshold"])
+    assert rigid_s["mean_step"] == pytest.approx(scale * rigid_u["mean_step"])
+    assert rigid_unscaled_on_scaled["merge_radius"] == pytest.approx(rigid_u["merge_radius"])
+    assert rigid_unscaled_on_scaled["escape_threshold"] == pytest.approx(
+        rigid_u["escape_threshold"]
+    )
+    assert rigid_s["best_energy"] == pytest.approx(
+        escale * rigid_u["best_energy"], rel=1e-5, abs=1e-5
+    )
+    assert np.allclose(
+        _sorted_pair_distances(rigid_s["best"][:6]),
+        scale * _sorted_pair_distances(rigid_u["best"][:6]),
+        rtol=1e-4,
+        atol=1e-4,
+    )
+
+
+def test_cluster_search_invalid_stock_inputs_and_docstring():
+    lj4 = anneal.PairPotential.lennard_jones(4)
+    with pytest.raises(ValueError, match="species length"):
+        anneal.cluster_search(lj4, None, 4, 50, species=[1, 2])
+    with pytest.raises(ValueError, match="sigmas length"):
+        anneal.cluster_search(lj4, None, 4, 50, species=[1, 1, 2, 2], sigmas=[1.0, 1.0])
+    with pytest.raises(ValueError, match="sigmas must be finite and positive"):
+        anneal.cluster_search(lj4, None, 4, 50, species=[1, 1, 2, 2], sigmas=[1.0, 0.0, 1.0, 1.0])
+
+    doc = anneal.cluster_search.__doc__ or ""
+    for key in (
+        "best_energy",
+        "final",
+        "final_energy",
+        "spent",
+        "basins",
+        "screened_out",
+        "improvements",
+        "energy_trace",
+        "polish_calls",
+        "energy_scale",
+        "config",
+    ):
+        assert key in doc, f"cluster_search docstring missing {key!r}"
+    assert "Ignored when ``species`` or ``rigid`` is set" not in doc

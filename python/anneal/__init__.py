@@ -289,10 +289,13 @@ def cluster_search(
     """Run the measured cluster-search layer.
 
     Args:
-      obj_fn: callable ``f(numpy.ndarray) -> float``.
-      grad_fn: gradient or force callable ``g(x) -> numpy.ndarray``. A charged
-        central-difference probe determines its orientation when the budget is
-        at least four evaluations.
+      obj_fn: callable ``f(numpy.ndarray) -> float``, or a native cluster
+        potential (``PairPotential``, ``BinaryLennardJones``, ``SuttonChen``,
+        ``Gupta``, ``Tip4pCluster``, or ``GminTip4p``).
+      grad_fn: gradient or force callable ``g(x) -> numpy.ndarray``, or
+        ``None`` when ``obj_fn`` is a native cluster potential. A charged
+        central-difference probe determines callable gradient vs force
+        orientation when the budget is at least four evaluations.
       n: number of points. The Cartesian state length is ``3 * n``. With
         ``rigid=True`` or ``water_sites``, ``n`` is the number of bodies and
         the state length is ``6 * n``.
@@ -306,10 +309,13 @@ def cluster_search(
       start: optional flat start. Cartesian length is ``3n``. A rigid or
         water start is ``6n``. When set, hops use ``search_from`` instead of
         a random compact cluster.
-      length_scale: optional physical length. With the recommended preset
-        this uses ``with_scales`` so an angstrom start is not crushed into
-        the reduced LJ container. Ignored when ``species`` or ``rigid`` is
-        set, because those keep the stock preset. Excluded by ``water_sites``.
+      length_scale: optional physical length scale applied to the preset
+        (including ``species`` and ``rigid`` stock runs) so physical-unit
+        clusters are not crushed into the reduced LJ container. Excluded by
+        ``water_sites``, ``groups``, and ``config``.
+      energy_scale: optional physical energy scale applied to preset
+        temperatures, deposit heights, screen margins, and molecular presets.
+        Excluded by ``water_sites`` and ``config``.
       species: optional label per point. Two or more labels add a swap move.
         A wide diameter ratio also tries one downhill unlike-pair exchange
         beside the escape.
@@ -336,14 +342,14 @@ def cluster_search(
         exponential-map rotation vectors (active Rodrigues). The presets are
         ``Config.communicating_tip4p``, ``Config.recommended_tip4p`` and, with
         both false, ``Config.for_tip4p``. Requires ``start``. Excludes
-        ``ras``, ``derived``, ``length_scale``, ``rigid``, ``species``,
-        ``sigmas``, and a non-block layout.
+        ``ras``, ``derived``, ``length_scale``, ``energy_scale``, ``rigid``,
+        ``species``, ``sigmas``, and a non-block layout.
       groups: optional list of atom-index lists, one per rigid group of a
         molecular search. The presets become ``recommended_molecular`` and,
-        with ``recommended=False``, ``for_molecular``, at energy scale one.
-        Requires ``species`` and ``start``. Excludes ``ras``, ``derived``,
-        ``communicating``, ``length_scale``, ``rigid``, ``sigmas``,
-        ``water_sites`` and a non-block layout.
+        with ``recommended=False``, ``for_molecular``, scaled by
+        ``energy_scale`` when given. Requires ``species`` and ``start``.
+        Excludes ``ras``, ``derived``, ``communicating``, ``length_scale``,
+        ``rigid``, ``sigmas``, ``water_sites`` and a non-block layout.
       local_step: ``lbfgs``, ``tric`` or ``auto``, the optimizer of every
         quench of a ``groups`` search. ``tric`` relaxes in translation-rotation
         internal coordinates, in electronvolt and angstrom. ``auto`` times the
@@ -361,20 +367,41 @@ def cluster_search(
         preset's: on for ``recommended=True``, off otherwise.
       measured_energy_scale: take a ``groups`` search's temperature and
         deposit height from the median quenched energy change of its opening
-        hops instead of an energy scale of one. ``None`` keeps the preset's:
+        hops instead of ``energy_scale``. ``None`` keeps the preset's:
         on for ``recommended=True``, off otherwise.
+      config: explicit ``Config`` instance; mutually exclusive with preset
+        modifier arguments (mutate ``config`` directly instead).
 
     A callback raising a ``BaseException`` that is not an ``Exception``, such
     as ``KeyboardInterrupt`` or a harness stop, ends the search at once.
     The best geometry found is kept, and the exception is re-raised here.
 
-    Returns a dict with ``best`` (flat coordinates in the state layout),
-    ``best_energy``, ``hops``, ``accepted``, ``nve_unavailable``,
-    ``local_step`` and ``quench_seconds``. ``accepted`` counts the hops the
-    acceptance rule took. ``nve_unavailable`` is true when a constant-energy
-    (NVE) escape was requested and that escape is not compiled; the
-    ``python`` feature compiles it. ``quench_seconds`` is ``None`` unless
-    ``local_step="auto"`` timed a potential call and a TRIC step, in seconds.
+    Returns:
+      When ``ras=False`` (default), a dict containing:
+      - ``best``, ``best_energy``: lowest minimum found (flat coordinates in
+        the active layout and its energy).
+      - ``final``, ``final_energy``: final chain state (``numpy.ndarray`` or
+        ``None``) and energy.
+      - ``spent``, ``hops``, ``accepted``, ``basins``, ``screened_out``,
+        ``restarts``: evaluation ledger spend and basin-hopping counters.
+      - ``visit_counts``, ``escape_scale``, ``escape_threshold``,
+        ``merge_radius``, ``mean_step``, ``arms``, ``improvements``,
+        ``stop``, ``quenched``, ``energy_trace``, ``nve_unavailable``:
+        outcome diagnostics, improvement events ``(hop, charged, basin,
+        energy)``, optional stop code, and per-hop traces when enabled on
+        ``Config``.
+      - ``local_step``, ``quench_seconds``, ``converged``, ``capped``,
+        ``screens``, ``screen_charged``, ``full_charged``, ``check_charged``,
+        ``overlap_rejected``, ``refused``, ``screen_steps_taken``: quench and
+        screening statistics. ``quench_seconds`` is ``None`` unless
+        ``local_step="auto"`` timed a potential call and a TRIC step.
+      - ``search_seconds``, ``polish_seconds``, ``polish_calls``: wall-clock
+        phase timings in seconds and final polish call count.
+
+      When ``ras=True``, a dict from the residual archive search containing
+      ``best``, ``best_energy``, ``hops``, ``charged``, ``screens``,
+      ``same_floor``, ``artn``, ``best_at``, ``floors``, ``returned``,
+      ``events``, and ``nve_unavailable``.
     """
     start_arr = None if start is None else np.asarray(start, dtype=np.float64).reshape(-1)
     args = (
