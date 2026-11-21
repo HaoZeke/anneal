@@ -71,6 +71,7 @@ ROW_FIELDS = [
     "rss_anon_kb",
     "external_rss_anon_kb",
     "vm_hwm_kb",
+    "external_vm_hwm_kb",
     "rss_disagreement_kb",
     "ru_maxrss_kb",
     "fixed_ring_bound",
@@ -584,6 +585,7 @@ def run_one(
     out_file = run_dir / "stdout.tmp"
     err_file = run_dir / "stderr.tmp"
     external_peak_rss_anon_kb = 0
+    external_vm_hwm_kb = 0
     exec_confirmed = False
     cpus_allowed = ""
     taskset_p_line = ""
@@ -599,20 +601,6 @@ def run_one(
         cmdline_path = Path(f"/proc/{proc.pid}/cmdline")
         expected_exe = exe.resolve()
         while True:
-            state = ""
-            try:
-                st_text = status_path.read_text(encoding="utf-8")
-                for ln in st_text.splitlines():
-                    if ln.startswith("State:"):
-                        state = ln.split(":", 1)[1].strip()
-                    elif exec_confirmed and ln.startswith("RssAnon:"):
-                        val = int(ln.split()[1])
-                        if val > external_peak_rss_anon_kb:
-                            external_peak_rss_anon_kb = val
-                    elif ln.startswith("Cpus_allowed_list:"):
-                        cpus_allowed = ln.split(":", 1)[1].strip()
-            except (FileNotFoundError, ProcessLookupError):
-                pass
             if not exec_confirmed:
                 try:
                     proc_exe = exe_path.resolve()
@@ -622,7 +610,49 @@ def run_one(
                     ).resolve() == expected_exe
                 except (FileNotFoundError, ProcessLookupError, OSError):
                     pass
+                if not exec_confirmed:
+                    exited = os.waitid(
+                        os.P_PID,
+                        proc.pid,
+                        os.WEXITED | os.WNOHANG | os.WNOWAIT,
+                    )
+                    if exited is not None:
+                        break
+                    elapsed_now = time.monotonic() - t0
+                    if elapsed_now > timeout_s:
+                        timed_out = True
+                        try:
+                            proc.kill()
+                        except ProcessLookupError:
+                            pass
+                        break
+                    time.sleep(0.001)
+                    continue
+
+            state = ""
+            try:
+                st_text = status_path.read_text(encoding="utf-8")
+                for ln in st_text.splitlines():
+                    if ln.startswith("State:"):
+                        state = ln.split(":", 1)[1].strip()
+                    elif ln.startswith("RssAnon:"):
+                        external_peak_rss_anon_kb = max(
+                            external_peak_rss_anon_kb, int(ln.split()[1])
+                        )
+                    elif ln.startswith("VmHWM:"):
+                        external_vm_hwm_kb = max(external_vm_hwm_kb, int(ln.split()[1]))
+                    elif ln.startswith("Cpus_allowed_list:"):
+                        cpus_allowed = ln.split(":", 1)[1].strip()
+            except (FileNotFoundError, ProcessLookupError):
+                pass
             if state.startswith("Z"):
+                break
+            exited = os.waitid(
+                os.P_PID,
+                proc.pid,
+                os.WEXITED | os.WNOHANG | os.WNOWAIT,
+            )
+            if exited is not None:
                 break
             elapsed_now = time.monotonic() - t0
             if elapsed_now > timeout_s:
@@ -666,18 +696,12 @@ def run_one(
         notes.append("timeout")
     if rc != 0:
         notes.append(f"exit {rc}")
-    if cpus_allowed != "0":
+    if cpus_allowed and cpus_allowed != "0":
         notes.append(f"Cpus_allowed_list {cpus_allowed!r}")
     if taskset_mask != "1":
         notes.append(f"taskset mask {taskset_mask!r}")
-    if not exec_confirmed:
-        notes.append("exec not confirmed")
     if in_process_peak_rss_anon_kb <= 0:
         notes.append("in-process RssAnon not sampled")
-    if external_peak_rss_anon_kb <= 0:
-        notes.append("external RssAnon not sampled")
-    if vm_hwm_kb <= 0:
-        notes.append("VmHWM not sampled")
 
     parsed: dict[str, str] | None = None
     if not notes:
@@ -698,6 +722,7 @@ def run_one(
         f"in_process_peak_rss_anon_kb={in_process_peak_rss_anon_kb}\n"
         f"external_peak_rss_anon_kb={external_peak_rss_anon_kb}\n"
         f"vm_hwm_kb={vm_hwm_kb}\n"
+        f"external_vm_hwm_kb={external_vm_hwm_kb}\n"
         f"fixed_ring_bound={fixed_ring_bound}\n"
         f"ru_maxrss_kb={ru_maxrss_kb}\n"
         f"ru_utime_s={ru_utime_s:.6f} ru_stime_s={ru_stime_s:.6f}\n"
@@ -730,6 +755,7 @@ def run_one(
         "rss_anon_kb": str(in_process_peak_rss_anon_kb),
         "external_rss_anon_kb": str(external_peak_rss_anon_kb),
         "vm_hwm_kb": str(vm_hwm_kb),
+        "external_vm_hwm_kb": str(external_vm_hwm_kb),
         "rss_disagreement_kb": str(rss_disagreement_kb),
         "ru_maxrss_kb": str(ru_maxrss_kb),
         "fixed_ring_bound": str(fixed_ring_bound),
@@ -1237,8 +1263,6 @@ def preflight(
                     "elapsed_s",
                     "ru_utime_s",
                     "rss_anon_kb",
-                    "external_rss_anon_kb",
-                    "vm_hwm_kb",
                     "ru_maxrss_kb",
                 )
                 if row[f] in ("", "nan") or (f == "rss_anon_kb" and int(row[f]) <= 0)

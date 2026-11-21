@@ -25,11 +25,14 @@ driver's own clocks supply wall, potential and outside time.
 
 The gate memory reading is the maximum RssAnon observed inside the
 benchmark process. The process reads its own status after every basin
-store and at search end. A sampler thread also reads it every 5 ms.
-The parent polls RssAnon every 5 ms only after confirming that the
-child has executed the benchmark binary. That external peak is a
-cross-check and never gates. VmHWM and `ru_maxrss` are diagnostics.
-Every row whose internal and external peaks differ by more than
+store and at search end. A sampler thread also reads it every 10 ms.
+The driver stops and joins that sampler after capturing `wall_s`, so
+sampler shutdown does not enter wall or outside time. The parent
+reads child status only after confirming execution of the benchmark
+binary, polling RssAnon and VmHWM every 5 ms. Both parent readings are
+cross-checks only. Missing parent RssAnon or either VmHWM reading
+never makes a row inconclusive. `ru_maxrss` is also diagnostic. Every
+row whose internal and external RssAnon peaks differ by more than
 2 MiB is reported.
 
 Each row carries status and exit code. A non-zero exit, timeout,

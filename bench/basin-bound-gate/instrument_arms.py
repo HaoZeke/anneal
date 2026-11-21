@@ -59,13 +59,13 @@ pub(crate) fn count_fixed_ring_bound() {
     FIXED_RING_BOUND.fetch_add(1, Ordering::Relaxed);
 }
 
-pub(crate) struct SearchGuard {
+pub struct Sampler {
     stop: Arc<AtomicBool>,
     sampler: Option<JoinHandle<()>>,
 }
 
-impl SearchGuard {
-    pub(crate) fn start() -> Self {
+impl Sampler {
+    pub fn start() -> Self {
         RSS_ANON_KB.store(0, Ordering::Relaxed);
         VM_HWM_KB.store(0, Ordering::Relaxed);
         FIXED_RING_BOUND.store(0, Ordering::Relaxed);
@@ -75,7 +75,7 @@ impl SearchGuard {
         let sampler = thread::spawn(move || {
             while !thread_stop.load(Ordering::Relaxed) {
                 sample();
-                thread::sleep(Duration::from_millis(5));
+                thread::sleep(Duration::from_millis(10));
             }
             sample();
         });
@@ -84,21 +84,32 @@ impl SearchGuard {
             sampler: Some(sampler),
         }
     }
-}
 
-impl Drop for SearchGuard {
-    fn drop(&mut self) {
+    fn stop_and_report(&mut self, report: bool) {
+        sample();
         self.stop.store(true, Ordering::Relaxed);
         if let Some(sampler) = self.sampler.take() {
             let _ = sampler.join();
         }
         sample();
-        eprintln!(
-            "gate_memory rss_anon_kb={} vm_hwm_kb={} fixed_ring_bound={}",
-            RSS_ANON_KB.load(Ordering::Relaxed),
-            VM_HWM_KB.load(Ordering::Relaxed),
-            FIXED_RING_BOUND.load(Ordering::Relaxed),
-        );
+        if report {
+            eprintln!(
+                "gate_memory rss_anon_kb={} vm_hwm_kb={} fixed_ring_bound={}",
+                RSS_ANON_KB.load(Ordering::Relaxed),
+                VM_HWM_KB.load(Ordering::Relaxed),
+                FIXED_RING_BOUND.load(Ordering::Relaxed),
+            );
+        }
+    }
+
+    pub fn finish(mut self) {
+        self.stop_and_report(true);
+    }
+}
+
+impl Drop for Sampler {
+    fn drop(&mut self) {
+        self.stop_and_report(false);
     }
 }
 """
@@ -131,6 +142,22 @@ def replace_once(path: Path, old: str, new: str) -> None:
     write_durable(path, text.replace(old, new, 1).encode("utf-8"))
 
 
+def wrap_search(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines(keepends=True)
+    starts = [
+        index
+        for index, line in enumerate(lines)
+        if line.startswith("    let (outcome, wall, pot_s) = search(")
+    ]
+    if len(starts) != 1 or not lines[starts[0]].rstrip().endswith(";"):
+        raise RuntimeError(f"{path.name}: timed search marker missing")
+    index = starts[0]
+    lines.insert(index, "    let gate_sampler = anneal_core::gate_memory::Sampler::start();\n")
+    lines.insert(index + 2, "    gate_sampler.finish();\n")
+    write_durable(path, "".join(lines).encode("utf-8"))
+
+
 def install(root: Path, arm: str) -> None:
     driver_source = Path(__file__).resolve().parent / "driver-src"
     for name in ("h2h_blj.rs", "h2h_morse.rs"):
@@ -142,17 +169,25 @@ def install(root: Path, arm: str) -> None:
         "pub mod bias;\n#[doc(hidden)]\npub mod gate_memory;\n",
     )
     replace_once(
-        root / "src" / "methods" / "cluster_hopping.rs",
-        "{\n    let _caller_stop = ledger.bind_stop();\n",
-        "{\n    let _gate_memory = crate::gate_memory::SearchGuard::start();\n"
-        "    let _caller_stop = ledger.bind_stop();\n",
-    )
-    replace_once(
         root / "src" / "bias.rs",
         "        self.visits.push(0);\n        self.centres.len() - 1\n",
         "        self.visits.push(0);\n"
         "        crate::gate_memory::sample();\n"
         "        self.centres.len() - 1\n",
+    )
+    for name in ("h2h_gmin_proof.rs", "h2h_blj.rs", "h2h_morse.rs", "h2h_sc.rs"):
+        wrap_search(root / "examples" / name)
+    replace_once(
+        root / "examples" / "h2h_seed.rs",
+        "    let started = Instant::now();\n",
+        "    let gate_sampler = anneal_core::gate_memory::Sampler::start();\n"
+        "    let started = Instant::now();\n",
+    )
+    replace_once(
+        root / "examples" / "h2h_seed.rs",
+        "    let wall = started.elapsed().as_secs_f64();\n",
+        "    let wall = started.elapsed().as_secs_f64();\n"
+        "    gate_sampler.finish();\n",
     )
     if arm == "B":
         bias = root / "src" / "bias.rs"
