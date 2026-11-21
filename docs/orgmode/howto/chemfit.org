@@ -116,10 +116,9 @@ res = minimize(
 )
 #+end_src
 
-- =store= is a handle to an existing parameter store
-  (see =anneal.open_parameter_store= and =anneal.minimize=):
-  - =*.h5= / =*.hdf5=: parameter rows =(x, f)=
-  - a directory that already holds a readcon-db corpus: parameters go in
+- =store= is a parameter store path or handle (missing directories and files are created automatically; see =anneal.open_parameter_store= and =anneal.minimize=):
+  - =*.h5= / =*.hdf5= (or =*.jsonl=): parameter rows =(x, f)=; parent directories and files are created on the first record
+  - a campaign directory (created if missing, or an existing readcon-db corpus directory): parameters go in
     =anneal_params.h5= (or =.jsonl=) *beside* the LMDB, never as CON
     frames (those require length \(3N\))
   - an object with =observations()= and =record(x, f)=
