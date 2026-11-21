@@ -145,6 +145,14 @@ python3 paper/jctc/scripts/knockout_tables.py
 
 # ASE: rewrite both tables from the imported rows
 python3 paper/jctc/scripts/ase_table.py
+
+# Figures: run from paper/jctc
+cd paper/jctc
+python3 scripts/render_all.py
+python3 scripts/fig_algorithm_stack.py figs/algorithm_stack.pdf
+python3 scripts/fig_rec_arms.py figs/rec_arms.pdf
+python3 scripts/fig_si_structures.py figs/si_structures.pdf
+python3 scripts/fig_si_water.py figs/si_water.pdf
 \end{verbatim}
 \end{footnotesize}
 The GMIN script writes \texttt{bench/gmin-panel/rows.csv}; the table of the main

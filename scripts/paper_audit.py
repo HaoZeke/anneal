@@ -4262,6 +4262,13 @@ def manuscript_new(audit: Audit) -> None:
         "python3 paper/jctc/scripts/gmin_table.py": "paper/jctc/scripts/gmin_table.py",
         "python3 paper/jctc/scripts/knockout_tables.py": "paper/jctc/scripts/knockout_tables.py",
         "python3 paper/jctc/scripts/ase_table.py": "paper/jctc/scripts/ase_table.py",
+        "python3 scripts/render_all.py": "paper/jctc/scripts/render_all.py",
+        "python3 scripts/fig_algorithm_stack.py figs/algorithm_stack.pdf":
+            "paper/jctc/scripts/fig_algorithm_stack.py",
+        "python3 scripts/fig_rec_arms.py figs/rec_arms.pdf": "paper/jctc/scripts/fig_rec_arms.py",
+        "python3 scripts/fig_si_structures.py figs/si_structures.pdf":
+            "paper/jctc/scripts/fig_si_structures.py",
+        "python3 scripts/fig_si_water.py figs/si_water.pdf": "paper/jctc/scripts/fig_si_water.py",
     }
     for command, path in commands.items():
         audit.record(command in text and (ROOT / path).exists(), SI, "the command names a script that exists",
