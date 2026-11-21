@@ -510,6 +510,23 @@ def parse_h2h_seed_stdout(stdout: str, system: str, seed: int, budget: int) -> d
     }
 
 
+def sanitize_log_stdout(stdout: str) -> str:
+    """Remove machine-identifying CSV values while preserving driver output."""
+    lines = stdout.splitlines()
+    for index, line in enumerate(lines):
+        if not line.startswith("system,"):
+            continue
+        fields = line.split(",")
+        if "cpu" not in fields or index + 1 >= len(lines):
+            continue
+        values = lines[index + 1].split(",")
+        if len(values) == len(fields):
+            values[fields.index("cpu")] = "omitted"
+            lines[index + 1] = ",".join(values)
+    suffix = "\n" if stdout.endswith("\n") else ""
+    return "\n".join(lines) + suffix
+
+
 def verify_driver_budgets(cells: list[CellSpec], bins: dict[str, Path], env: dict[str, str]) -> None:
     checked: set[tuple[str, str]] = set()
     for cell in cells:
@@ -736,7 +753,7 @@ def run_one(
         f"ru_maxrss_kb={ru_maxrss_kb}\n"
         f"ru_utime_s={ru_utime_s:.6f} ru_stime_s={ru_stime_s:.6f}\n"
         f"rc={rc} timed_out={timed_out} elapsed_s={elapsed:.6f}\n"
-        f"--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}\n",
+        f"--- stdout ---\n{sanitize_log_stdout(stdout)}\n--- stderr ---\n{stderr}\n",
     )
 
     row = {
