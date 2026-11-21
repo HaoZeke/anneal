@@ -836,6 +836,29 @@ fn a_callback_that_sets_no_message_is_not_given_an_older_one() {
 }
 
 #[test]
+fn the_rust_hessian_checks_the_output_length_before_its_input() {
+    let mut system = System::octahedron();
+    let handle = Handle::new();
+    let dim = system.dim();
+    let mut short = vec![0.0; 9];
+    let input = system.input();
+    let err = unsafe { (*handle.pot).hessian(&input, 0.0, RGPOT_HESSIAN_CENTRAL, &mut short) }
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        format!("hessian_out: expected {} elements, got 9", dim * dim)
+    );
+
+    let inside = unsafe { short.as_mut_ptr().add(1) };
+    let empty =
+        unsafe { rgpot_force_input_create(0, inside, std::ptr::null_mut(), std::ptr::null_mut()) };
+    let err = unsafe { (*handle.pot).hessian(&empty, 0.0, RGPOT_HESSIAN_CENTRAL, &mut short) }
+        .unwrap_err();
+    assert_eq!(err.to_string(), "hessian_out: expected 0 elements, got 9");
+    assert_eq!(handle.force_calls(), 0);
+}
+
+#[test]
 fn a_successful_finite_difference_keeps_the_earlier_message() {
     let mut system = System::octahedron();
     let input = system.input();
@@ -928,7 +951,8 @@ fn an_atom_count_whose_derivatives_overflow_is_refused_without_a_read() {
     let mut hv = vec![0.0; dim];
     let mut used = RGPOT_HESSIAN_CENTRAL;
     let wraps = usize::MAX / 3 + 1;
-    for n in [wraps, 1 << 31] {
+    let past_isize = 357_913_942;
+    for n in [wraps, 1 << 31, past_isize] {
         let input = unsafe {
             rgpot_force_input_create(
                 n,

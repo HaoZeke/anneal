@@ -251,11 +251,11 @@ impl rgpot_potential_t {
         hessian_out: &mut [f64],
     ) -> Result<rgpot_hessian_scheme_t, HvpError> {
         self.refuse_if_peer_refused()?;
-        unsafe { refuse_overlap(input, hessian_out.as_ptr(), hessian_out.len()) }?;
-        let geometry = unsafe { read_geometry(input) }?;
-        let dim = geometry.positions.len();
-        let entries = dim
-            .checked_mul(dim)
+        let n_atoms =
+            unsafe { input.n_atoms() }.ok_or_else(|| invalid("positions: tensor is NULL"))?;
+        let entries = n_atoms
+            .checked_mul(3)
+            .and_then(|dim| dim.checked_mul(dim))
             .ok_or_else(|| invalid("(3 * n_atoms)^2 overflows"))?;
         if hessian_out.len() != entries {
             return Err(invalid(format!(
@@ -263,6 +263,9 @@ impl rgpot_potential_t {
                 hessian_out.len()
             )));
         }
+        unsafe { refuse_overlap(input, hessian_out.as_ptr(), hessian_out.len()) }?;
+        let geometry = unsafe { read_geometry(input) }?;
+        let dim = geometry.positions.len();
         let h = checked_step(step)?;
         let state = self.hessian_state();
         let analytic = *lock(&state.analytic);
@@ -369,7 +372,7 @@ pub(crate) unsafe fn refuse_overlap(
         tensors.push(("box_matrix", data as usize, 9 * f64_bytes));
     }
     for (label, start, bytes) in tensors {
-        if start < out.saturating_add(out_bytes) && out < start.saturating_add(bytes) {
+        if bytes > 0 && start < out.saturating_add(out_bytes) && out < start.saturating_add(bytes) {
             return Err(invalid(format!("hessian_out overlaps the {label} tensor")));
         }
     }
