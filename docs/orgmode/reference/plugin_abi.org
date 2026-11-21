@@ -23,8 +23,7 @@ A descriptor that fails validation is skipped with a line
 =[rgpot] invalid plugin PATH: REASON= on standard error.
 A plugin whose name is already registered is refused.
 The existing registration, including a built-in, keeps the name.
-The host prints
-=[rgpot] plugin name collision PATH: NAME is already registered=
+The host prints =[rgpot] plugin name collision PATH: NAME is already registered=
 on standard error and =load_plugin= returns false.
 The registry always holds the built-in plugins =lennard-jones=,
 =classical-morse= and =sutton-chen=.
@@ -43,9 +42,9 @@ null cell.
 A string that is not a JSON object is the table path.
 A missing path is rejected.
 An unknown or duplicate key is rejected.
-A built-in =calculate= returns =RGPOT_PLUGIN_INVALID_PARAM= when =n_atoms= is zero
-or when =positions=, =atomic_numbers=, =forces= or, because that potential is
-periodic, =cell= is null.
+A built-in =calculate= returns =RGPOT_PLUGIN_INVALID_PARAM= when =n_atoms= is
+zero or when =positions=, =atomic_numbers=, =forces= or, because that potential
+is periodic, =cell= is null.
 A zero-atom call is reported as =nAtoms must be positive=, including when
 =forces= is also null.
 =last_error= is the message of the last failure.
