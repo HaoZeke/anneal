@@ -767,6 +767,8 @@ def write_csv(path: Path, fields: list[str], rows: list[dict[str, str]]) -> None
 
 def write_tables(root: Path, rows: list[dict[str, str]], revision: str, tex: bool, out: Path | None = None) -> None:
     summary = summarise(rows, revision)
+    if rows and not summary:
+        raise SystemExit(f"no system has both arms at revision {revision}")
     write_csv(out or (root / "bench" / "gmin-panel" / "summary.csv"), SUMMARY_FIELDS, summary)
     splice(root / README, README_MARKS, readme_table(summary))
     if tex:

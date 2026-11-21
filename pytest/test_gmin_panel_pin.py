@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import importlib.util
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -12,6 +14,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "scripts" / "gmin_panel" / "build_gmin.sh"
+PANEL = ROOT / "scripts" / "gmin_panel" / "run_panel.py"
 SOURCE = ROOT / "bench" / "gmin-panel" / "gmin-source.txt"
 sys.path.insert(0, str(ROOT / "scripts"))
 from gmin_pin import REVISION, TARBALL_SHA256, read_svnrev
@@ -137,6 +140,72 @@ def test_fetch_falls_back_to_wales_after_dataset_failure(tmp_path: Path) -> None
     assert "pinned dataset download failed" in proc.stderr
     assert "www-wales.ch.cam.ac.uk/svn.tar.bz2" in proc.curl_log  # type: ignore[attr-defined]
     assert "tarball sha256 mismatch:" in proc.stderr
+
+
+def _load_panel(name: str) -> object:
+    spec = importlib.util.spec_from_file_location(name, PANEL)
+    assert spec is not None and spec.loader is not None
+    panel = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(panel)
+    return panel
+
+
+def _documented_summarize_args() -> dict[str, list[str]]:
+    readme = (ROOT / "bench" / "gmin-panel" / "README.md").read_text()
+    tex = (ROOT / "paper" / "jctc" / "manuscript.tex").read_text()
+    found = {
+        "README": re.search(r"`bash scripts/gmin_panel/enter_bench\.sh (--summarize[^`]*)`", readme),
+        "manuscript": re.search(r"^bash scripts/gmin_panel/enter_bench\.sh (--summarize.*)$", tex, re.M),
+    }
+    commands = {}
+    for where, match in found.items():
+        assert match is not None, f"no summarize command in the {where}"
+        commands[where] = match.group(1).split()
+    return commands
+
+
+@pytest.mark.parametrize("where", ["README", "manuscript"])
+@pytest.mark.parametrize("anneal_revision", ["enter_bench", "latest"])
+def test_documented_summarize_commands_select_the_committed_rows(
+    tmp_path: Path, where: str, anneal_revision: str
+) -> None:
+    panel = _load_panel(f"gmin_panel_summarize_{where}_{anneal_revision}")
+    rows_path = ROOT / "bench" / "gmin-panel" / "rows.csv"
+    rows = panel.read_rows(rows_path)
+    assert rows
+    for relative in ("bench/gmin-panel/README.md", "paper/jctc/manuscript.tex"):
+        (tmp_path / relative).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / relative).write_text((ROOT / relative).read_text())
+    if anneal_revision == "enter_bench":
+        anneal_revision = re.search(
+            r"^REV=\$\{GMIN_PANEL_REV:-(\w+)\}$", (ROOT / "scripts/gmin_panel/enter_bench.sh").read_text(), re.M
+        ).group(1)
+    summary = tmp_path / "summary.csv"
+    argv = [str(PANEL), "--root", str(tmp_path), "--rows", str(rows_path), "--revision", anneal_revision,
+            "--summary", str(summary), *_documented_summarize_args()[where]]
+    assert panel.main(argv) == 0
+    written = panel.read_rows(summary)
+    assert len(written) > 0
+    assert {r["gmin_revision"] for r in written} == {r["code_revision"] for r in rows if r["code"] == "gmin"}
+
+
+def test_summarize_refuses_to_wipe_the_tables(tmp_path: Path) -> None:
+    panel = _load_panel("gmin_panel_summarize_empty")
+    rows = [r for r in panel.read_rows(ROOT / "bench" / "gmin-panel" / "rows.csv") if r["code"] == "gmin"]
+    assert rows
+    with pytest.raises(SystemExit, match="no system has both arms"):
+        panel.write_tables(tmp_path, rows, "latest", True, tmp_path / "summary.csv")
+    assert not (tmp_path / "summary.csv").exists()
+
+
+def test_the_gmin_caption_follows_the_row_labels() -> None:
+    panel = _load_panel("gmin_panel_caption")
+    rows = panel.read_rows(ROOT / "bench" / "gmin-panel" / "rows.csv")
+    tex = panel.tex_table(panel.summarise(rows, "latest"), "latest")
+    labels = {r["code_revision"] for r in rows if r["code"] == "gmin"}
+    shown = " ".join(sorted(label[:8] for label in labels))
+    assert f"GMIN \\texttt{{{shown}}}." in tex
+    assert tex in (ROOT / "paper" / "jctc" / "manuscript.tex").read_text()
 
 
 @pytest.mark.parametrize("how", ["env", "flag"])
