@@ -554,11 +554,11 @@ impl Cloud {
         }
         let mut lane = [f64::INFINITY; 4];
         let mut who = [0usize; 4];
-        let mut xs = self.xs.chunks_exact(4);
-        let mut ys = self.ys.chunks_exact(4);
-        let mut zs = self.zs.chunks_exact(4);
+        let (xs, xs_tail) = self.xs.as_chunks::<4>();
+        let (ys, ys_tail) = self.ys.as_chunks::<4>();
+        let (zs, zs_tail) = self.zs.as_chunks::<4>();
         let mut base = 0usize;
-        for ((x, y), z) in xs.by_ref().zip(ys.by_ref()).zip(zs.by_ref()) {
+        for ((x, y), z) in xs.iter().zip(ys).zip(zs) {
             for offset in 0..4 {
                 let distance = squared_offset(image, x[offset], y[offset], z[offset]);
                 let candidate = base + offset;
@@ -578,12 +578,7 @@ impl Cloud {
                 index = who[offset];
             }
         }
-        for ((&x, &y), &z) in xs
-            .remainder()
-            .iter()
-            .zip(ys.remainder())
-            .zip(zs.remainder())
-        {
+        for ((&x, &y), &z) in xs_tail.iter().zip(ys_tail).zip(zs_tail) {
             let distance = squared_offset(image, x, y, z);
             if distance < best || (distance == best && base < index) {
                 best = distance;
@@ -786,10 +781,10 @@ impl Cloud {
         let mut lane1 = f64::INFINITY;
         let mut lane2 = f64::INFINITY;
         let mut lane3 = f64::INFINITY;
-        let mut xs = self.xs.chunks_exact(4);
-        let mut ys = self.ys.chunks_exact(4);
-        let mut zs = self.zs.chunks_exact(4);
-        for ((x, y), z) in xs.by_ref().zip(ys.by_ref()).zip(zs.by_ref()) {
+        let (xs, xs_tail) = self.xs.as_chunks::<4>();
+        let (ys, ys_tail) = self.ys.as_chunks::<4>();
+        let (zs, zs_tail) = self.zs.as_chunks::<4>();
+        for ((x, y), z) in xs.iter().zip(ys).zip(zs) {
             let d0 = squared_offset(image, x[0], y[0], z[0]);
             let d1 = squared_offset(image, x[1], y[1], z[1]);
             let d2 = squared_offset(image, x[2], y[2], z[2]);
@@ -807,12 +802,7 @@ impl Cloud {
                 lane3 = d3;
             }
         }
-        for ((&x, &y), &z) in xs
-            .remainder()
-            .iter()
-            .zip(ys.remainder())
-            .zip(zs.remainder())
-        {
+        for ((&x, &y), &z) in xs_tail.iter().zip(ys_tail).zip(zs_tail) {
             let distance = squared_offset(image, x, y, z);
             if distance < lane0 {
                 lane0 = distance;
