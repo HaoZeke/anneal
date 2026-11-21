@@ -516,7 +516,11 @@ impl<F: Fingerprint> BasinIndex<F> {
             let slack = 2.0 * gamma(width) * width as f64 * magnitude;
             let gap = (query.sums[b] - centre[b]).abs() * (1.0 - f64::EPSILON) - slack;
             if gap > 0.0 {
-                acc += gap * gap / width as f64;
+                // Squaring `gap` before the division overflows once `gap`
+                // exceeds the square root of the largest finite value, and
+                // the infinite term skips a centre the plain walk keeps.
+                // Dividing first leaves a finite quotient there.
+                acc += gap * (gap / width as f64);
                 if clearly_past(acc, limit, 1.0e-8) {
                     return true;
                 }

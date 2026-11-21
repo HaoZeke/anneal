@@ -369,3 +369,86 @@ fn a_metric_that_is_not_euclidean_never_uses_the_block_bound() {
     index.push(Array1::from(centre));
     assert_eq!(index.lookup(ArrayView1::from(&query[..])), Some(0));
 }
+
+#[test]
+fn a_block_gap_past_sqrt_max_keeps_the_linear_walk_answer() {
+    // 32 entries of 5e152 against a zero centre, radius 1e154. The block
+    // sum is 1.6e154, so squaring the gap overflows, while dividing first
+    // leaves a quotient of 8e306 against a radius squared of 1e308. The
+    // linear walk returns this centre.
+    let n = 32;
+    let centre = vec![0.0; n];
+    let query = vec![5.0e152; n];
+    let mut index = BasinIndex::new(Raw, 1.0e154);
+    index.push(Array1::from(centre));
+    let view = ArrayView1::from(&query[..]);
+    let sums = BlockSums::of(view);
+    assert!(!index.blocks_separate(0, &sums));
+    assert_eq!(old_walk(&index, view), Some(0));
+    assert_eq!(index.lookup(view), Some(0));
+
+    // A uniform shift of 2e153 has a finite quotient past the radius, so
+    // the bound dismisses it, as the linear walk does.
+    let far = vec![2.0e153; n];
+    let far_view = ArrayView1::from(&far[..]);
+    let far_sums = BlockSums::of(far_view);
+    assert!(index.blocks_separate(0, &far_sums));
+    assert_eq!(old_walk(&index, far_view), None);
+    assert_eq!(index.lookup(far_view), None);
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+
+    /// Lookups at magnitudes where a squared gap overflows match the walk
+    /// the block bound replaces, inside and outside the radius.
+    #[test]
+    fn the_block_bound_matches_the_linear_walk_at_huge_magnitudes(
+        seed in any::<u64>(),
+        n in 1usize..400,
+        centres in 1usize..40,
+        exponent in 0i32..=307,
+        radius_exp in 0i32..=307,
+    ) {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let scale = 10f64.powi(exponent);
+        let radius = 10f64.powi(radius_exp);
+        prop_assume!(scale.is_finite() && radius.is_finite() && radius > 0.0);
+        let mut index = BasinIndex::new(Raw, radius);
+        let query: Vec<f64> = (0..n)
+            .map(|_| (rng.random::<f64>() - 0.5) * 2.0 * scale)
+            .collect();
+        for _ in 0..centres {
+            let fraction = rng.random::<f64>() * 4.0;
+            let centre = if rng.random::<bool>() {
+                // A uniform shift is the separation a block sum sees whole,
+                // which is where squaring the gap overflows.
+                let delta = fraction * radius / (n as f64).sqrt();
+                query.iter().map(|q| q + delta).collect()
+            } else {
+                at_fraction(&mut rng, &query, radius, fraction)
+            };
+            let view = ArrayView1::from(&centre[..]);
+            prop_assert_eq!(
+                index.lookup(view),
+                old_walk(&index, view),
+                "n {} scale {:e} radius {:e}",
+                n,
+                scale,
+                radius
+            );
+            index.push(Array1::from(centre));
+        }
+        for probe in [query.clone(), query.iter().map(|q| q + scale).collect()] {
+            let view = ArrayView1::from(&probe[..]);
+            prop_assert_eq!(
+                index.lookup(view),
+                old_walk(&index, view),
+                "n {} scale {:e} radius {:e}",
+                n,
+                scale,
+                radius
+            );
+        }
+    }
+}
