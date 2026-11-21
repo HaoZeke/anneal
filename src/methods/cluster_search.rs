@@ -191,6 +191,16 @@ struct Check {
     gradient: Array1<f64>,
 }
 
+impl Check {
+    fn replace(&mut self, at: ArrayView1<f64>, energy: f64, gradient: &Array1<f64>) {
+        debug_assert_eq!(self.at.len(), at.len());
+        debug_assert_eq!(self.gradient.len(), gradient.len());
+        self.at.assign(&at);
+        self.energy = energy;
+        self.gradient.assign(gradient);
+    }
+}
+
 /// Gradient already charged by a relaxation, shared with the driver's check.
 #[derive(Clone)]
 struct PaidCheck(Arc<Mutex<Option<Check>>>);
@@ -919,11 +929,18 @@ where
         let remember =
             |point: ArrayView1<f64>, energy: f64, gradient: &Array1<f64>, physical: bool| {
                 if physical {
-                    *last.borrow_mut() = Some(Check {
-                        at: point.to_owned(),
-                        energy,
-                        gradient: gradient.clone(),
-                    });
+                    let mut last = last.borrow_mut();
+                    match last.as_mut() {
+                        Some(check) => check.replace(point, energy, gradient),
+                        None => {
+                            *last = Some(Check {
+                                at: point.to_owned(),
+                                energy,
+                                gradient: gradient.clone(),
+                            });
+                        }
+                    }
+                    drop(last);
                     if energy.is_finite()
                         && best_physical
                             .borrow()
@@ -1167,7 +1184,7 @@ where
             // `f` is the extrapolated energy, so the stored check is the
             // descent's own evaluation at `xr`.
             *paid.lock().expect("paid check") =
-                last.borrow().clone().filter(|check| check.at == xr);
+                last.borrow_mut().take().filter(|check| check.at == xr);
             return (f, xr);
         }
         // Charged like any other evaluation: asking whether a relaxation
@@ -1177,12 +1194,17 @@ where
         // and so does one whose last paid evaluation is where it stopped.
         let mut f = f;
         let mut xr = xr;
-        let stored_gradient = |point: &Array1<f64>| -> Option<Array1<f64>> {
+        let stored_gradient = |point: ArrayView1<f64>| -> Option<Array1<f64>> {
             last.borrow()
-                .clone()
-                .filter(|check| check.at == *point)
-                .or_else(|| prior.clone().filter(|check| check.at == *point))
-                .map(|check| check.gradient)
+                .as_ref()
+                .filter(|check| check.at.view() == point)
+                .map(|check| check.gradient.clone())
+                .or_else(|| {
+                    prior
+                        .as_ref()
+                        .filter(|check| check.at.view() == point)
+                        .map(|check| check.gradient.clone())
+                })
         };
         let mut validated = None;
         let confirm = |led: &mut Ledger,
@@ -1197,7 +1219,7 @@ where
             if !energy.is_finite() {
                 return None;
             }
-            if let Some(gradient) = stored_gradient(&point.to_owned()) {
+            if let Some(gradient) = stored_gradient(point) {
                 return gradient_is_converged(gradient.view(), cfg.record_gradient)
                     .then_some(gradient);
             }
@@ -1298,7 +1320,7 @@ where
                 energy: f,
                 gradient,
             })
-            .or_else(|| last.borrow().clone().filter(|check| check.at == xr));
+            .or_else(|| last.borrow_mut().take().filter(|check| check.at == xr));
         (f, xr)
     }
 }
@@ -2710,6 +2732,27 @@ mod tests {
     use super::*;
     use crate::potentials::PairPotential;
     use ndarray::Array1;
+
+    #[test]
+    fn replacing_a_paid_check_reuses_its_coordinate_storage() {
+        let mut check = Check {
+            at: Array1::from_vec(vec![1.0, 2.0, 3.0]),
+            energy: 4.0,
+            gradient: Array1::from_vec(vec![5.0, 6.0, 7.0]),
+        };
+        let at_storage = check.at.as_ptr();
+        let gradient_storage = check.gradient.as_ptr();
+        let at = Array1::from_vec(vec![8.0, 9.0, 10.0]);
+        let gradient = Array1::from_vec(vec![11.0, 12.0, 13.0]);
+
+        check.replace(at.view(), 14.0, &gradient);
+
+        assert_eq!(check.at.as_ptr(), at_storage);
+        assert_eq!(check.gradient.as_ptr(), gradient_storage);
+        assert_eq!(check.at, at);
+        assert_eq!(check.energy.to_bits(), 14.0_f64.to_bits());
+        assert_eq!(check.gradient, gradient);
+    }
 
     #[test]
     fn quench_watch_rejects_negative_infinity() {
