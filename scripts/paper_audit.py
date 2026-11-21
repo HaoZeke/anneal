@@ -4014,7 +4014,7 @@ def cover_letter(audit: Audit) -> None:
     audit.said(COVER, "Every printed number is computed from rows committed to the repository.")
 
 
-REFS_BLOB = "d646763ac2b4a1f8b7aab78452616c4400d53d10"
+REFS_BLOB = "2d20e57c7a30f98926c6ee4c5b4da94796d91462"
 # Wording the review of the first rewrite showed to overclaim; none may come back.
 OVERCLAIMS = ("same trap", "confined to one funnel", "cannot become the stored best", "cannot win",
               "basin-hopping setting", "one setting", "adds nothing", "does no better", "this setting",
@@ -4106,6 +4106,16 @@ def science_claims(audit: Audit) -> None:
     audit.said(TEX, "A Fisher test on their hits would not account for those unequal stopping")
     audit.said(TEX, "\\cite{newcombeImprovedConfidenceIntervals1998}, built from Wilson intervals "
                     "\\cite{wilsonProbableInferenceLaw1927}.")
+    refs = audit.text("paper/jctc/refs.bib")
+    audit.record("title = {The Reference Set Is Not the Answer Set: {GEOM-DRUGS} Is Missing Low-Energy Conformers "
+                 "on Its Own Energy Surface}" in refs, "paper/jctc/refs.bib",
+                 "the GEOM-DRUGS entry keeps the cited title", "exact title", "exact title")
+    doye = refs.split("@article{Doye_Miller_Wales_1999,", 1)[1].split("\n}", 1)[0]
+    audit.record(all(field in doye for field in ("volume = {110}", "number = {14}", "pages = {6896--6906}")),
+                 "paper/jctc/refs.bib", "Doye 1999 has volume, issue, and pages",
+                 "110 14 6896--6906",
+                 "110 14 6896--6906" if all(field in doye for field in
+                 ("volume = {110}", "number = {14}", "pages = {6896--6906}")) else "incomplete")
     audit.said(TEX, "The exact McNemar test \\cite{mcnemarNoteSamplingError1947}")
     audit.said(TEX, "the exact Wilcoxon signed-rank test\n\\cite{wilcoxonIndividualComparisons1945}")
     for key, doi in (("mcnemarNoteSamplingError1947", "10.1007/bf02295996"),
