@@ -132,10 +132,11 @@ row = next(line for line in lines if line.startswith(system + ","))
 fields = row.split(",")
 if fields[0] != system or fields[1] != arm or fields[2] != seed or fields[12] != "bench":
     raise SystemExit("row does not match the requested seed")
-if len(fields) != 15:
-    raise SystemExit("row is missing stop and cap_s")
+machine = fields[15] if len(fields) == 16 else ""
+if len(fields) != 16 or len(machine) != 64 or any(c not in "0123456789abcdef" for c in machine):
+    raise SystemExit("row is missing stop, cap_s, or machine")
 path = Path(rows_path)
-header = "system,arm,seed,budget,hit,evals_to_hit,charged,best,wall_s,inside_s,outside_s,code_revision,host,stop,cap_s"
+header = "system,arm,seed,budget,hit,evals_to_hit,charged,best,wall_s,inside_s,outside_s,code_revision,host,stop,cap_s,machine"
 text = path.read_text() if path.exists() else ""
 if f",{arm},{seed}," in text:
     print(f"keep existing {system} {arm} seed {seed}")

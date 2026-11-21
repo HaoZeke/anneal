@@ -12,11 +12,13 @@ A hit is a quenched energy within 0.001 of the reference. A miss is
 censored at the paper budget. One calculator call is one energy and one
 gradient. An ASE seed, and a recommended seed, stop at the wall cap stored
 on the ASE rows. The row records the calls, the wall, the time inside and
-outside the potential, the cap, code_revision and host.
+outside the potential, the cap, code_revision, host and a sha256
+of the machine id. The hit column is scored from the best energy.
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import subprocess
@@ -29,7 +31,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
-from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 from evaluator import evaluator_spec
 
 sys.path.insert(0, str(ROOT / "scripts" / "ase_gofee_h2h"))
@@ -198,6 +200,28 @@ def run_anneal(system: str, seed: int, budget: int, preset: str, cap_s: str) -> 
     }
 
 
+def machine_id() -> str:
+    text = Path("/etc/machine-id").read_text().strip()
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def score_hit(row: dict, reference: float, budget: int) -> None:
+    """Score the hit from the best energy, not from the searcher's flag."""
+    hit = energy_hits(float(row["best"]), reference, DEFAULT_HIT_TOL)
+    if hit:
+        row["hit"] = 1
+        row["stop"] = "hit"
+        if row["evals"] == "":
+            row["evals"] = str(row["charged"])
+        return
+    row["hit"] = 0
+    row["evals"] = ""
+    if row["stop"] != "hit":
+        return
+    capped = row["cap_s"] != "" and int(row["charged"]) < budget
+    row["stop"] = "wall" if capped else "budget"
+
+
 def check_lj() -> None:
     r = 2.0 ** (1.0 / 6.0)
     x = np.zeros(6)
@@ -255,6 +279,7 @@ def main() -> int:
             float(cap_text),
             budget,
         )
+    score_hit(row, float(spec["reference"]), budget)
     cap = "" if row["cap_s"] == "" else f"{float(row['cap_s']):.6f}"
     print(
         ",".join(
@@ -274,6 +299,7 @@ def main() -> int:
                 hostname(),
                 row["stop"],
                 cap,
+                machine_id(),
             ]
         ),
         flush=True,

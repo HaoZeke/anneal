@@ -10,11 +10,13 @@ at the budget. One calculator call is one energy and one gradient.
 
 Each ASE seed also stops at a wall cap. The cap is three times the slowest
 anneal wall on this harness. A seed that hits the cap is a miss. The row
-records the calls, the wall time, the best energy, and the cap.
+records the calls, the wall time, the best energy, the cap, and a
+sha256 of the machine id. The hit column is scored from the best energy.
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import subprocess
@@ -27,7 +29,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
-from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 sys.path.insert(0, str(ROOT / "scripts" / "ase_gofee_h2h"))
 from potential import (  # noqa: E402
     BudgetReached,
@@ -163,6 +165,28 @@ def run_anneal(seed: int, budget: int) -> dict:
     }
 
 
+def machine_id() -> str:
+    text = Path("/etc/machine-id").read_text().strip()
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def score_hit(row: dict, budget: int) -> None:
+    """Score the hit from the best energy, not from the searcher's flag."""
+    hit = energy_hits(float(row["best"]), REFERENCE, HIT_TOL)
+    if hit:
+        row["hit"] = 1
+        row["stop"] = "hit"
+        if row["evals"] == "":
+            row["evals"] = str(row["charged"])
+        return
+    row["hit"] = 0
+    row["evals"] = ""
+    if row["stop"] != "hit":
+        return
+    capped = row["cap_s"] != "" and int(row["charged"]) < budget
+    row["stop"] = "wall" if capped else "budget"
+
+
 def check_pair() -> None:
     r = 2.0 ** (1.0 / 6.0)
     x = np.zeros(6)
@@ -173,6 +197,7 @@ def check_pair() -> None:
 
 
 def emit(arm: str, seed: int, budget: int, revision: str, row: dict) -> None:
+    score_hit(row, budget)
     cap = "" if row["cap_s"] == "" else f"{float(row['cap_s']):.6f}"
     print(
         ",".join(
@@ -192,6 +217,7 @@ def emit(arm: str, seed: int, budget: int, revision: str, row: dict) -> None:
                 hostname(),
                 row["stop"],
                 cap,
+                machine_id(),
             ]
         ),
         flush=True,
