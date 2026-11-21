@@ -16,6 +16,9 @@
 //! `librgpot_covalent.so` with the same scaling as `h2h_covalent`. TIP4P is
 //! `GminTip4p` on the rigid `6 n` chart.
 
+#[path = "common/illinois.rs"]
+mod illinois;
+
 use anneal_core::methods::cluster_hopping::{Config, random_cluster_in_radius};
 use anneal_core::potentials::{GminTip4p, Gupta, random_tip4p_cluster};
 use ndarray::{Array1, ArrayView1};
@@ -238,7 +241,7 @@ fn covalent(n: usize, kind: c_int, budget: usize, reference: f64, symbol: &'stat
 fn dimer_scales(potential: &Covalent) -> (f64, f64) {
     let mut r = 0.05_f64;
     let mut before = potential.dimer(r);
-    let (mut lo, mut hi, mut slope_lo, mut slope_hi) = loop {
+    let (lo, hi, slope_lo, slope_hi) = loop {
         let next = 1.2 * r;
         if next >= 1.0e3 {
             panic!("dimer probe did not find a well");
@@ -249,30 +252,10 @@ fn dimer_scales(potential: &Covalent) -> (f64, f64) {
         }
         (r, before) = (next, now);
     };
-    let mut kept = 0_i32;
-    while hi - lo > 1.0e-10 * hi {
-        let mid = (lo * slope_hi - hi * slope_lo) / (slope_hi - slope_lo);
-        let (_, slope) = potential.dimer(mid);
-        if slope < 0.0 {
-            lo = mid;
-            slope_lo = slope;
-            kept = kept.min(0) - 1;
-            if kept <= -2 {
-                slope_hi *= 0.5;
-            }
-        } else if slope > 0.0 {
-            hi = mid;
-            slope_hi = slope;
-            kept = kept.max(0) + 1;
-            if kept >= 2 {
-                slope_lo *= 0.5;
-            }
-        } else {
-            lo = mid;
-            hi = mid;
-        }
-    }
-    let bond = 0.5 * (lo + hi);
+    let bond = illinois::find(lo, hi, slope_lo, slope_hi, 1.0e-10, 256, |r| {
+        Some(potential.dimer(r).1)
+    })
+    .expect("dimer false position did not converge");
     let (energy, _) = potential.dimer(bond);
     assert!(energy < 0.0, "dimer energy {energy} is not a well");
     (bond / 2.0_f64.powf(1.0 / 6.0), -energy)
