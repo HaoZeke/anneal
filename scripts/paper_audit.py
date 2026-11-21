@@ -1876,19 +1876,100 @@ def summary_against_rows(audit: Audit, summary: str, per_seed: str, arm_key: str
 
 
 SC_RERUN_SUMMARY = "bench/paper-rerun/sc-h2h/summary.csv"
-SC_RERUN_CODE = "61fa67cf"
+SC_RERUN_ROWS = "bench/paper-rerun/sc-h2h/rows.csv"
+SC_RERUN_MANIFEST = "bench/paper-rerun/sc-h2h/manifest.csv"
 
 
-def sc_rerun_summary(audit: Audit) -> list[dict[str, str]]:
-    """The develop rerun rollup. A test may already have loaded it; the audit does not, so provenance stays on the row file."""
-    cached = audit.read.get(SC_RERUN_SUMMARY)
+def side_rows(audit: Audit, path: str) -> list[dict[str, str]]:
+    """A file without revision columns. A test may already have loaded it; the audit does not, so provenance stays on the row file."""
+    cached = audit.read.get(path)
     if cached is not None:
         return cached
-    with (ROOT / SC_RERUN_SUMMARY).open(newline="") as handle:
+    with (ROOT / path).open(newline="") as handle:
         return list(csv.DictReader(handle))
 
 
-def sc_develop_table(audit: Audit, path: str) -> None:
+def sc_rerun_summary(audit: Audit) -> list[dict[str, str]]:
+    return side_rows(audit, SC_RERUN_SUMMARY)
+
+
+def sc_rerun_code(audit: Audit) -> str:
+    """The one code revision every rerun row records, which must be an ancestor of HEAD."""
+    revisions = sorted({r["code_revision"].strip() for r in audit.rows(SC_RERUN_ROWS)})
+    audit.record(len(revisions) == 1, SC_RERUN_ROWS, "one code revision", " ".join(revisions), "one")
+    code = revisions[0] if revisions else ""
+    audit.record(commit_of(code) == code and ancestor_of_head(code), SC_RERUN_ROWS,
+                 "the rerun code revision is an ancestor of HEAD", code, "a full SHA, ancestor of HEAD")
+    return code
+
+
+def sc_rerun_tests(rows: list[dict[str, str]]) -> list[dict[str, object]]:
+    """The summary each system and arm of the rerun rows gives, in summariser order.
+
+    Mann-Whitney ranks a miss after every hit, at the budget plus one call.
+    """
+    grouped: dict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
+    for r in rows:
+        grouped[(r["system"], r["arm"])].append(r)
+    systems = list(dict.fromkeys(r["system"] for r in rows))
+
+    def ranked(group: list[dict[str, str]]) -> list[float]:
+        return [float(r["evals_to_hit"]) if r["hit"] == "1" else float(r["budget"]) + 1.0 for r in group]
+
+    out = []
+    for system in systems:
+        anneal, gmin = grouped.get((system, "anneal"), []), grouped.get((system, "gmin"), [])
+        tested = bool(anneal and gmin and len(anneal) == len(gmin))
+        for arm, group in (("anneal", anneal), ("gmin", gmin)):
+            if not group:
+                continue
+            budgets = sorted({r["budget"] for r in group})
+            out.append({
+                "system": system, "arm": arm, "n": str(len(group)), "hits": str(hits_of(group)),
+                "hits_over_n": frac(group), "budget": " ".join(budgets),
+                "calls_median": median([float(r["evals_to_hit"]) for r in group]),
+                "fisher_p_vs_gmin": fisher(hits_of(anneal), len(anneal), hits_of(gmin), len(gmin))
+                if tested and arm == "anneal" else None,
+                "mannwhitney_p_calls": mann_whitney(ranked(anneal), ranked(gmin), True)
+                if tested and arm == "anneal" else None,
+            })
+    return out
+
+
+def sc_rerun_against_rows(audit: Audit) -> None:
+    """The rerun rows are the manifest's cells once each, and the summary is what they give."""
+    rows = audit.rows(SC_RERUN_ROWS)
+    manifest = side_rows(audit, SC_RERUN_MANIFEST)
+    audit.record(len(rows) == len(manifest), SC_RERUN_ROWS, "rows", len(rows), len(manifest))
+    count: dict[tuple[str, str, str], int] = defaultdict(int)
+    for r in rows:
+        count[(r["system"], r["arm"], r["seed"])] += 1
+    cells = {(m["system"], m["arm"], m["seed"]): m for m in manifest}
+    for key, m in cells.items():
+        audit.record(count.get(key, 0) == 1, SC_RERUN_ROWS, f"manifest cell {' '.join(key)}", count.get(key, 0), 1)
+    for key in sorted(set(count) - set(cells)):
+        audit.record(False, SC_RERUN_ROWS, f"row outside the manifest {' '.join(key)}", count[key], 0)
+    for r in rows:
+        m = cells.get((r["system"], r["arm"], r["seed"]))
+        if m and r["budget"] != m["budget"]:
+            audit.record(False, SC_RERUN_ROWS, f"budget {r['system']} {r['arm']} {r['seed']}", r["budget"], m["budget"])
+    references = {m["system"]: m["reference"] for m in manifest}
+    summary = {(s["system"], s["arm"]): s for s in sc_rerun_summary(audit)}
+    computed = {(c["system"], c["arm"]): c for c in sc_rerun_tests(rows)}
+    for key in sorted(set(summary) | set(computed)):
+        where = f"{SC_RERUN_SUMMARY} {key[0]} {key[1]}"
+        line, value = summary.get(key), computed.get(key)
+        if line is None or value is None:
+            audit.record(False, where, "summary row", "shown" if line else "missing", "rows" if value else "no rows")
+            continue
+        for column in ("n", "hits", "hits_over_n", "budget"):
+            audit.cell(where, column, line[column], value[column])
+        audit.cell(where, "reference", line["reference"], references.get(key[0], "not in the manifest"))
+        for column in ("calls_median", "fisher_p_vs_gmin", "mannwhitney_p_calls"):
+            audit.cell(where, column, line[column], value[column])
+
+
+def sc_develop_table(audit: Audit, path: str, code: str) -> None:
     """The printed Sutton-Chen counts are the develop rerun, at its code revision."""
     summary = sc_rerun_summary(audit)
     shown = {}
@@ -1903,8 +1984,8 @@ def sc_develop_table(audit: Audit, path: str) -> None:
             continue
         line, cell = got
         where = f"{path}:{line} {row['system']} {row['arm']}"
-        audit.record(cell["Code revision"].startswith(SC_RERUN_CODE), where, "code revision",
-                     cell["Code revision"], SC_RERUN_CODE)
+        audit.record(cell["Code revision"].startswith(code[:8]), where, "code revision",
+                     cell["Code revision"], code[:8])
         audit.cell(where, "hits", cell["Hits"], row["hits_over_n"])
         audit.cell(where, "calls median", cell["Calls median"], float(row["calls_median"]))
         if row["fisher_p_vs_gmin"] or cell["Fisher p"].strip():
@@ -1920,8 +2001,10 @@ def head_to_head(audit: Audit) -> None:
     summary_against_rows(audit, "bench/metal-cluster-h2h/sc-n12/results.csv", "bench/metal-cluster-h2h/sc-n12/seeds.csv",
                          "arm", "evals_to_hit", True)
     path = "bench/metal-cluster-h2h/sc-n12/README.md"
-    sc_develop_table(audit, path)
-    sc_develop_table(audit, "bench/paper-rerun/sc-h2h/README.md")
+    sc_rerun_against_rows(audit)
+    code = sc_rerun_code(audit)
+    sc_develop_table(audit, path, code)
+    sc_develop_table(audit, "bench/paper-rerun/sc-h2h/README.md", code)
     sc_summary = audit.rows("bench/metal-cluster-h2h/sc-n12/results.csv")
     # The stored sc-n12 rows keep the corrected-file GMIN rerun beside the
     # earlier file. The README no longer prints those revisions.
@@ -3204,11 +3287,20 @@ def external_pin(rev: str) -> bool:
     return any(key.startswith(rev) for key in EXTERNAL_REVISIONS)
 
 
+@functools.cache
+def commit_of(rev: str) -> str | None:
+    """The full commit a hex revision names in this repository; None when it names none or several."""
+    rev = (rev or "").strip()
+    if not re.fullmatch(r"[0-9a-f]{7,40}", rev):
+        return None
+    return git("rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}").stdout.strip() or None
+
+
 def ancestor_of_head(rev: str) -> bool:
     """The revision is a commit this repository holds, and it is an ancestor of HEAD."""
     rev = (rev or "").strip()
     if rev not in _ANCESTOR_OF_HEAD:
-        full = git("rev-parse", "--verify", f"{rev}^{{commit}}").stdout.strip()
+        full = commit_of(rev)
         _ANCESTOR_OF_HEAD[rev] = bool(full) and git("merge-base", "--is-ancestor", full, "HEAD").returncode == 0
     return _ANCESTOR_OF_HEAD[rev]
 
