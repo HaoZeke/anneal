@@ -571,10 +571,13 @@ private:
     }
   }
 
-  /// @c 3*in.nAtoms, refused when that many doubles overflow @c size_t.
+  /// @c 3*in.nAtoms, refused when that many doubles exceed
+  /// @c PTRDIFF_MAX bytes, past which pointer arithmetic over them is
+  /// undefined.
   static std::size_t coordinates(const ForceInput &in) {
-    if (in.nAtoms >
-        std::numeric_limits<std::size_t>::max() / 3 / sizeof(double)) {
+    constexpr auto most =
+        static_cast<std::size_t>(std::numeric_limits<std::ptrdiff_t>::max());
+    if (in.nAtoms > most / 3 / sizeof(double)) {
       throw std::invalid_argument("positions: 3*nAtoms doubles overflow");
     }
     return 3 * in.nAtoms;

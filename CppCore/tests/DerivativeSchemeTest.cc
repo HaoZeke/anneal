@@ -381,6 +381,12 @@ TEST_CASE("An atom count whose derivatives overflow is refused unread",
                   std::invalid_argument);
   CHECK_THROWS_AS(cache.apply(pot, claiming(wraps), v.data(), hv.data()),
                   std::invalid_argument);
+  const auto pastPtrdiff =
+      static_cast<std::size_t>(std::numeric_limits<std::ptrdiff_t>::max()) /
+          (3 * sizeof(double)) +
+      1;
+  CHECK_THROWS_AS(cache.apply(pot, claiming(pastPtrdiff), v.data(), hv.data()),
+                  std::invalid_argument);
   CHECK(pot.calls == 0);
 }
 
