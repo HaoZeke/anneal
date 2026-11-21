@@ -175,6 +175,11 @@ int share(int owner, void *data, std::size_t bytes) {
     std::fprintf(stderr, "rgpot rank %d: %s\n", src, why);
   }
   std::fflush(stderr);
+  // The first MPI_Abort kills every other rank. A peer that has not
+  // finished the fprintf above then leaves an empty log. Every rank
+  // that observed the mismatch is in this call; wait until those
+  // writes have landed.
+  MPI_Barrier(MPI_COMM_WORLD);
   MPI_Abort(MPI_COMM_WORLD, 1);
   return 0;
 }
