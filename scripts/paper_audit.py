@@ -2676,16 +2676,18 @@ class RevisionIndex:
         audited_refs = ["HEAD", *(ref for ref in remote_refs
                                    if git("show-ref", "--verify", "--quiet", ref).returncode == 0),
                         *git("for-each-ref", "--format=%(refname)", "refs/tags").stdout.split()]
-        audited_heads = git("rev-parse", *audited_refs).stdout.split()
+        # A verified record ref is a branch origin holds at the registered SHA and tree.
+        records = list(_verified_record_refs())
+        audited_heads = git("rev-parse", *audited_refs).stdout.split() + records
         self.commit = {n: line.split()[0] for n, line in zip(asked, out)
                        if line.split()[1:2] == ["commit"]}
         self.parents: dict[str, list[str]] = {}
-        roots = sorted({*audited_refs, *self.commit.values()})
+        roots = sorted({*audited_refs, *records, *self.commit.values()})
         for line in git("rev-list", "--parents", *roots).stdout.splitlines():
             commit, *parents = line.split()
             self.parents[commit] = parents
         self.audited = self.closure(audited_heads)
-        remote = git("for-each-ref", "--format=%(objectname)", *remote_refs).stdout.split()
+        remote = git("for-each-ref", "--format=%(objectname)", *remote_refs).stdout.split() + records
         self.remote = self.closure(r for r in remote if r in self.parents)
         self.patch_ids: dict[str, str] = {}
         shown = sorted({self.commit[p] for p in patched if p in self.commit})
@@ -3496,12 +3498,20 @@ def origin_record_heads() -> dict[str, str]:
     return {ref.removeprefix("refs/heads/"): sha for sha, ref in (line.split("\t") for line in out.stdout.splitlines())}
 
 
-@functools.cache
 def record_ref_status(path: str) -> tuple[tuple[str, str, tuple[tuple[str, bool, str, str], ...]], ...]:
     """Each registered record ref with its checks: it is a record ref named by a full SHA, origin holds it at
     that SHA, git fetch origin brings it here, and its tree is the registered one."""
-    with (ROOT / path).open(newline="") as handle:
+    return _record_ref_status(ROOT, path)
+
+
+@functools.cache
+def _record_ref_status(root: Path, path: str) -> tuple[tuple[str, str, tuple[tuple[str, bool, str, str], ...]], ...]:
+    if not (root / path).exists():
+        return ()
+    with (root / path).open(newline="") as handle:
         table = list(csv.DictReader(line for line in handle if not line.startswith("#")))
+    if not table:
+        return ()
     heads = origin_record_heads()
     out = []
     for row in table:
