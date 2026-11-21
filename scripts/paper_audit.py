@@ -94,7 +94,9 @@ AUDIT_REMOTE_BRANCHES = (
 AUDIT_OPTIONAL_REMOTES = (
     "record/repro-pin",
     "bench/cov-floor2",
+    "bench/crest-equal",
     "fix/sc-shelf-waypoint",
+    "main",
 )
 # Cited revisions that no remote ref contains, no verified alias covers and no
 # recorded code_tree resolves, each with the reason. The file only explains an
@@ -138,6 +140,7 @@ KNOWN_GAPS = {
     "bench/ase-gofee-h2h/lj-large-seeds.csv": "revision 89de725a is not in this repository",
     "bench/growpal-h2h/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "bench/metal-cluster-h2h/ptcu-b3d03061/icosa-23.csv": "revision and host unrecorded (no revision or host column)",
+    "bench/metal-cluster-h2h/ptcu-b3d03061/polish-reruns.csv": "revision be3849e7 is not in this repository",
     "bench/metal-cluster-h2h/sc-n12/pvalues.csv": "revision c89653df is not in this repository",
     "bench/metal-cluster-h2h/sc-n12/results.csv": "revision c89653df is not in this repository",
     "bench/metal-cluster-h2h/sc-n12/seeds.csv": "revision c89653df is not in this repository",
