@@ -14,19 +14,25 @@ time.
 
 ## Revisions and host
 
-- this series: anneal `259befae8221961d2249aa27d19ca426064af57b`, tree
-  `b1369a7edccdb56002f9667acff4f9c122083bb0`, the commit whose tree the
-  wheel was built from; the `anneal` rows cite it. The next commit,
-  `5c40c711f6f49ce0950d6025349adcde7f17cdce`, tree
-  `89078345063859912c378bb5344b959b365331c6`, adds only
-  `scripts/openconf_h2h/paired_stats.py` and `pytest/test_paired_stats.py`,
-  neither of which is in the wheel; the guard examples were built from
-  its tree and the harness ran from it, so the `openconf` rows and the
-  guard rows cite it. Both commits are ancestors of this record on this
-  branch. The commits after them change the scorer, the statistics and
-  the documentation, not the code that ran. `provenance.tsv` lists the
-  three commits the rows cite with their trees; the audit checks each
-  tree against the repository.
+- this series: anneal `259befae8221961d2249aa27d19ca426064af57b`,
+  tree `b1369a7edccdb56002f9667acff4f9c122083bb0`, the commit whose
+  tree the wheel was built from. Both the `anneal` and `openconf` rows
+  cite it. `paired()` reads `bin/anneal-head` once and assigns that
+  value to both arms; it cannot stamp the two arms with different
+  revisions. The raw rows first committed at `2235db00` likewise had
+  one stamp for both arms. The local hash in that first stamp is no
+  longer in the repository, and neither its tree nor its patch-id
+  survives, so it is not used as evidence for two different revisions.
+- harness and guard: `5c40c711f6f49ce0950d6025349adcde7f17cdce`,
+  tree `89078345063859912c378bb5344b959b365331c6`. This commit adds
+  the baseline arm and paired statistics. The harness ran from it, but
+  its paired row stamp remains the wheel revision above. The guard
+  examples were built from this tree and the guard rows cite it. The
+  local guard hash in the first record is also gone, with no surviving
+  tree or patch-id, and is not cited.
+- `provenance.tsv` lists every repository revision the rows cite with
+  its tree. The audit checks each tree, each commit object and
+  reachability from an `origin` remote-tracking ref.
 - develop: `61fa67cf380e46876b569da45e7cc091647a775b`, built into its
   own wheel, the `develop` rows. The series is built on this revision.
 - openconf: rowansci/openconf `e32c5fa7b6e6aac944bda31c851be42e14340235`
@@ -36,9 +42,14 @@ time.
   `BENCH_HOST` the harness was given; `scripts/openconf_h2h/bench_host.py`
   writes only that label, `bench` or `unlabelled`, never a node name.
 - The panel ran serially on one pinned core. For each molecule and seed
-  the openconf arm ran first; anneal and develop then ran one after the
-  other, each given the budget `(energy_calls + grad_calls) // 2` of
-  that openconf run. The other cores of the host were busy with
+  the openconf arm ran first; anneal and develop then ran in the order
+  selected by the paired runner's seeded coin flip, each given the
+  budget `(energy_calls + grad_calls) // 2` of that openconf run.
+  Develop ran first on 98 of the 192 pairs and anneal on 94. This is
+  derived by replaying `PAIRED_SCHEDULE_SEED` over the molecule and
+  seed pairs present in `rows.csv`, including the runner's preceding
+  shuffle and coin flips for its standard paired seeds. The other cores
+  of the host were busy with
   per-commit gates, example builds and the guard, so wall times here
   are not quiet-host times; hits, calls and energies do not depend on
   them. The `budget` column of `rows.csv` is that budget, and it equals
@@ -126,10 +137,10 @@ automatic choice gives the same p here:
 The ratio is above 1 on seven molecules, by 0.2 to 2.4 per cent, and
 the p values are not corrected for eight tests; two are below 0.05 and
 none is below 0.05 / 8. Both arms run the same search code, so a ratio
-here is not a cost of this series. The host was shared, and anneal ran
-before develop on each seed; neither effect was separated from the
-other, so the table does not say why the ratio is above 1 on seven
-molecules.
+here is not a cost of this series. The host was shared, and the arm
+order was randomized: develop ran first on 98 pairs and anneal on 94.
+The table does not separate host load or run-order effects, so it does
+not say why the ratio is above 1 on seven molecules.
 
 ## Guard
 

@@ -639,15 +639,27 @@ def test_a_drifted_conf_miss4_wilcoxon_cell_is_reported():
     assert sorted(r[2] for r in audit.drifts()) == ["p", "wilcoxon_p"]
 
 
-def test_a_conf_miss4_row_citing_a_commit_that_is_not_on_this_branch_is_reported():
+def test_a_conf_miss4_row_citing_a_missing_commit_is_reported():
     audit = audit_mod.Audit()
     for r in audit.rows(f"{CONF_MISS4}/guard.csv"):
         if r["code_revision"] != "61fa67cf380e46876b569da45e7cc091647a775b":
             r["code_revision"] = "0123456789abcdef0123456789abcdef01234567"
     audit_mod.conf_miss4(audit)
     assert sorted(r[2] for r in audit.drifts()) == [
+        "cited revision 01234567 is a commit object",
         "cited revision 01234567 is an ancestor of HEAD",
+        "cited revision 01234567 is reachable from origin",
         "every revision the rows cite is listed",
+    ]
+
+
+def test_conf_miss4_requires_one_revision_for_both_paired_arms():
+    audit = audit_mod.Audit()
+    row = next(r for r in audit.rows(f"{CONF_MISS4}/rows.csv") if r["arm"] == "openconf")
+    row["code_revision"] = "5c40c711f6f49ce0950d6025349adcde7f17cdce"
+    audit_mod.conf_miss4(audit)
+    assert [r[2] for r in audit.drifts()] == [
+        "anneal and openconf carry the paired runner's one revision"
     ]
 
 
@@ -673,5 +685,17 @@ def test_a_conf_miss4_provenance_tree_that_is_not_the_commits_is_reported():
     audit.text_cache[path] = audit.text(path).replace(first, "0" * 40)
     audit_mod.conf_miss4(audit)
     assert sorted(r[2] for r in audit.drifts() if "tree of" in r[2]) == [
-        "tree of 259befae (anneal rows and the wheel)"
+        "tree of 259befae (anneal and openconf rows; anneal wheel)"
     ]
+
+
+def test_a_conf_miss4_run_order_claim_is_checked_against_the_schedule():
+    audit = audit_mod.Audit()
+    path = f"{CONF_MISS4}/README.md"
+    audit.text_cache[path] = audit.text(path).replace(
+        "Develop ran first on 98 of the 192 pairs and anneal on 94.",
+        "Develop ran first on 97 of the 192 pairs and anneal on 95.",
+        1,
+    )
+    audit_mod.conf_miss4(audit)
+    assert [r[2] for r in audit.drifts()] == ["prose"]

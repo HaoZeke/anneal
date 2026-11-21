@@ -1818,6 +1818,8 @@ CONF_MISS4 = "bench/openconf-h2h/conf-miss4"
 CONF_MISS4_ARM = {"this series": "anneal", "develop 61fa67cf": "develop", "openconf": "openconf"}
 CONF_MISS4_LEDGER = ("spent", "screen", "full", "check", "quenches", "converged", "capped", "screened_out", "returned",
                      "overlap_rejected", "basins")
+CONF_MISS4_SCHEDULE_SEED = 20261115
+CONF_MISS4_STANDARD_SEEDS = tuple(range(2000, 2012))
 
 
 def derived_table(audit: Audit, path: str, delimiter: str = "\t") -> list[dict[str, str]]:
@@ -1882,7 +1884,18 @@ def conf_miss4(audit: Audit) -> None:
     audit.record(all(r["host"] == "cloud-vm" for r in rows + steps + guard), base, "the host column is the neutral label",
                  "cloud-vm", "cloud-vm" if all(r["host"] == "cloud-vm" for r in rows + steps + guard) else "other")
     cited = {r[c] for table in (rows, steps, guard) for r in table for c in ("code_revision",) if r[c]}
+    paired_revisions = {r["code_revision"] for r in rows if r["arm"] in ("anneal", "openconf")}
+    audit.record(len(paired_revisions) == 1, where, "anneal and openconf carry the paired runner's one revision",
+                 "one revision", " ".join(sorted(r[:8] for r in paired_revisions)))
     for revision in sorted(cited):
+        exists = git("cat-file", "-e", f"{revision}^{{commit}}").returncode == 0
+        on_origin = exists and bool(
+            git("for-each-ref", "--count=1", "--contains", revision, "refs/remotes/origin").stdout.strip()
+        )
+        audit.record(exists, base, f"cited revision {revision[:8]} is a commit object",
+                     "commit", "commit" if exists else "missing")
+        audit.record(on_origin, base, f"cited revision {revision[:8]} is reachable from origin",
+                     "reachable", "reachable" if on_origin else "not reachable")
         ok = git("merge-base", "--is-ancestor", revision, "HEAD").returncode == 0
         audit.record(ok, base, f"cited revision {revision[:8]} is an ancestor of HEAD", "ancestor", "ancestor" if ok else "not")
 
@@ -1896,6 +1909,24 @@ def conf_miss4(audit: Audit) -> None:
             audit.said(f"{base}/README.md", r["tree"])
     audit.record(cited <= listed, f"{base}/provenance.tsv", "every revision the rows cite is listed",
                  "all listed", "all listed" if cited <= listed else ", ".join(sorted(c[:8] for c in cited - listed)))
+
+    row_pairs = {(r["molecule"], int(r["seed"])) for r in rows if r["arm"] == "anneal"}
+    with (ROOT / "bench/openconf-h2h/molecules.csv").open(newline="") as handle:
+        schedule_names = [r["name"] for r in csv.DictReader(handle)]
+    rng = random.Random(CONF_MISS4_SCHEDULE_SEED)
+    standard = [(m, s) for m in schedule_names for s in CONF_MISS4_STANDARD_SEEDS]
+    rng.shuffle(standard)
+    orders = {pair: rng.random() < 0.5 for pair in standard}
+    extra_seeds = sorted({seed for _, seed in row_pairs} - set(CONF_MISS4_STANDARD_SEEDS))
+    extra = [(m, s) for m in schedule_names for s in extra_seeds]
+    rng.shuffle(extra)
+    orders.update({pair: rng.random() < 0.5 for pair in extra})
+    develop_first = sum(orders[pair] for pair in row_pairs)
+    audit.record(develop_first == 98 and len(row_pairs) == 192, where,
+                 "the seeded paired schedule runs develop first on 98 of 192 row pairs",
+                 "98 of 192", f"{develop_first} of {len(row_pairs)}")
+    audit.said(f"{base}/README.md", f"Develop ran first on {develop_first} of the {len(row_pairs)} pairs and anneal on "
+               f"{len(row_pairs) - develop_first}.")
 
     def col(g: list[dict[str, str]], key: str) -> list[float]:
         return [float(r[key]) for r in g if r[key] != ""]
