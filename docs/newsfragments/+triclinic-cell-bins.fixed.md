@@ -1,2 +1,2 @@
 <!-- Copyright 2023--present rgpot developers -->
-A fully periodic skewed cell is binned in fractional coordinates from the minimum image inverse, scaled by the cell size. A singular or ill conditioned cell raises an error instead of falling back to Cartesian bins.
+Periodic and partially periodic skewed cells are binned in fractional coordinates from the internal minimum image inverse, scaled by the cell size, while non-periodic fractional axes span the actual coordinate range without wrapping. A singular or ill conditioned cell, or a non-finite fractional coordinate, raises an error instead of falling back to Cartesian bins.

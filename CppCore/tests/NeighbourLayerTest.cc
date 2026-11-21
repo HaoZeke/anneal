@@ -1144,12 +1144,18 @@ void cancellingCell(double scale, double cell[9]) {
   cell[8] = x * scale;
 }
 
-/// Every lattice image with index coordinates in [-4, 4]. The minimum
-/// image of each pair must lie strictly inside that box.
-PairMap bruteAllImages(const std::vector<double> &pos, const double cell[9], double cutoff) {
+/// Every lattice image with index coordinates in [-4, 4] along periodic
+/// axes (and 0 along non-periodic axes). The minimum image of each pair
+/// must lie strictly inside that box on periodic axes.
+PairMap bruteAllImages(const std::vector<double> &pos, const double cell[9],
+                       double cutoff,
+                       std::array<bool, 3> periodic = {true, true, true}) {
   constexpr int kRad = 4;
   const double cut2 = cutoff * cutoff;
   const int n = static_cast<int>(pos.size() / 3);
+  const int ra = periodic[0] ? kRad : 0;
+  const int rb = periodic[1] ? kRad : 0;
+  const int rc = periodic[2] ? kRad : 0;
   PairMap out;
   for (int i = 0; i < n; ++i) {
     for (int j = i + 1; j < n; ++j) {
@@ -1158,9 +1164,9 @@ PairMap bruteAllImages(const std::vector<double> &pos, const double cell[9], dou
       int bb = 0;
       int bc = 0;
       bool any = false;
-      for (int a = -kRad; a <= kRad; ++a) {
-        for (int b = -kRad; b <= kRad; ++b) {
-          for (int c = -kRad; c <= kRad; ++c) {
+      for (int a = -ra; a <= ra; ++a) {
+        for (int b = -rb; b <= rb; ++b) {
+          for (int c = -rc; c <= rc; ++c) {
             double shift[3];
             cellPoint(cell, static_cast<double>(a), static_cast<double>(b),
                       static_cast<double>(c), shift);
@@ -1275,4 +1281,227 @@ TEST_CASE("naive cofactor cancellation scaled by 1e3 is rejected",
           "[nlist][triclinic][singular]") {
   setThreads("1");
   requireCancellingThrows(1e3);
+}
+
+TEST_CASE("mixed periodicity on a skewed cell keeps the 0.466 pair and matches brute force",
+          "[nlist][triclinic][mixed]") {
+  setThreads("1");
+  const double cutoff = 1.0;
+
+  // Exact regression case: a skewed cell with periodicity {true, true, false}
+  // and a pair across the periodic b face at distance 0.04 * hypot(6, 10) =
+  // 0.466476... with cutoff 1.0.
+  {
+    const double cell[9] = {10.0, 0.0, 0.0, 6.0, 10.0, 0.0, 0.0, 0.0, 10.0};
+    const std::array<bool, 3> periodic{true, true, false};
+    std::vector<double> pos(6);
+    cellPoint(cell, 0.05, 0.02, 0.5, pos.data());
+    cellPoint(cell, 0.05, 0.98, 0.5, pos.data() + 3);
+    const auto ref = bruteAllImages(pos, cell, cutoff, periodic);
+    REQUIRE(ref.size() == 1);
+    const double dist = std::sqrt(ref.begin()->second);
+    REQUIRE(std::abs(dist - 0.04 * std::hypot(6.0, 10.0)) < 1e-12);
+    REQUIRE(std::abs(dist - 0.466476151587624) < 1e-12);
+    for (const auto mode :
+         {rgpot::nlist::Mode::Stream, rgpot::nlist::Mode::Stored}) {
+      rgpot::nlist::Spec spec;
+      spec.cutoff = cutoff;
+      spec.skin = 0.0;
+      spec.periodic = periodic;
+      spec.image = rgpot::nlist::Image::Round;
+      spec.mode = mode;
+      rgpot::nlist::Neighbours cells;
+      cells.update(pos.data(), pos.size() / 3, cell, spec);
+      requireSamePairs(walkedPairs(cells, pos.size() / 3, cutoff), ref);
+    }
+  }
+
+  // All six mixed periodicity patterns on a fully skewed triclinic cell, with
+  // pairs wrapping across each periodic face (at distance ~0.466) and pairs
+  // along non-periodic axes that cross fractional 0 and 1 and extend outside
+  // [0, 1).
+  const double cell[9] = {10.0, 0.0, 0.0, 6.0, 10.0, 0.0, 6.0, 6.0, 10.0};
+  const double fracs[][3] = {
+      // Face-wrapping pairs along axis 0, axis 1, and axis 2.
+      {0.02, 0.25, 0.50},
+      {0.98, 0.25, 0.50},
+      {0.25, 0.02, 0.50},
+      {0.25, 0.98, 0.50},
+      {0.25, 0.50, 0.02},
+      {0.25, 0.50, 0.98},
+      // Non-periodic pairs straddling fractional 0 and 1, and outside [0, 1).
+      {-0.02, 0.50, 0.50},
+      {0.02, 0.50, 0.50},
+      {0.50, -0.02, 0.50},
+      {0.50, 0.02, 0.50},
+      {0.50, 0.50, -0.02},
+      {0.50, 0.50, 0.02},
+      {1.35, -0.35, 1.40},
+      {1.38, -0.35, 1.40},
+      {-0.45, 1.45, -0.40},
+      {-0.45, 1.48, -0.40},
+      {0.40, 0.40, -0.55},
+      {0.40, 0.40, -0.52},
+  };
+  const std::size_t n = sizeof(fracs) / sizeof(fracs[0]);
+  std::vector<double> pos(3 * n);
+  for (std::size_t a = 0; a < n; ++a) {
+    cellPoint(cell, fracs[a][0], fracs[a][1], fracs[a][2], pos.data() + 3 * a);
+  }
+  const std::array<bool, 3> patterns[] = {
+      {true, true, false},  {true, false, true},  {false, true, true},
+      {true, false, false}, {false, true, false}, {false, false, true},
+  };
+  for (const auto &periodic : patterns) {
+    INFO("p0=" << periodic[0] << " p1=" << periodic[1] << " p2=" << periodic[2]);
+    const auto ref = bruteAllImages(pos, cell, cutoff, periodic);
+    REQUIRE(!ref.empty());
+    for (const auto mode :
+         {rgpot::nlist::Mode::Stream, rgpot::nlist::Mode::Stored}) {
+      rgpot::nlist::Spec spec;
+      spec.cutoff = cutoff;
+      spec.skin = 0.0;
+      spec.periodic = periodic;
+      spec.image = rgpot::nlist::Image::Round;
+      spec.mode = mode;
+      rgpot::nlist::Neighbours cells;
+      cells.update(pos.data(), n, cell, spec);
+      requireSamePairs(walkedPairs(cells, n, cutoff), ref);
+    }
+  }
+}
+
+TEST_CASE("ulp cutoff boundaries and subnormal off-diagonal offsets match brute force",
+          "[nlist][triclinic][boundary]") {
+  setThreads("1");
+  const double cutoff = 1.0;
+  const double d_below = std::nextafter(cutoff, 0.0);
+  const double d_exact = cutoff;
+  const double d_above =
+      std::nextafter(cutoff, std::numeric_limits<double>::infinity());
+  const double sub = std::numeric_limits<double>::denorm_min();
+
+  // 1. Direct and periodic-wrapped pairs at 1-ulp below, at, and 1-ulp above
+  // the cutoff in a skewed triclinic cell.
+  {
+    const double cell[9] = {10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 6.0, 0.0, 10.0};
+    for (const double d : {d_below, d_exact, d_above}) {
+      // Atom 0 at (0, 0.5, 5) and Atom 1 at (d, 10.5, 5) wrap across b =
+      // (0, 10, 0) to exact displacement (-d, 0, 0), and Atom 2 at (0, 5, 5)
+      // with Atom 3 at (d, 5, 5) has direct displacement (-d, 0, 0).
+      const std::vector<double> pos = {
+          0.0, 0.5, 5.0, d, 10.5, 5.0, 0.0, 5.0, 5.0, d, 5.0, 5.0,
+      };
+      for (const auto &periodic :
+           {std::array<bool, 3>{true, true, true},
+            std::array<bool, 3>{true, true, false}}) {
+        const auto ref = bruteAllImages(pos, cell, cutoff, periodic);
+        if (d <= cutoff) {
+          REQUIRE(ref.count({0, 1}) == 1);
+          REQUIRE(ref.count({2, 3}) == 1);
+        } else {
+          REQUIRE(ref.count({0, 1}) == 0);
+          REQUIRE(ref.count({2, 3}) == 0);
+        }
+        for (const auto mode :
+             {rgpot::nlist::Mode::Stream, rgpot::nlist::Mode::Stored}) {
+          rgpot::nlist::Spec spec;
+          spec.cutoff = cutoff;
+          spec.skin = 0.0;
+          spec.periodic = periodic;
+          spec.image = rgpot::nlist::Image::Round;
+          spec.mode = mode;
+          rgpot::nlist::Neighbours cells;
+          cells.update(pos.data(), pos.size() / 3, cell, spec);
+          requireSamePairs(walkedPairs(cells, pos.size() / 3, cutoff), ref);
+        }
+      }
+    }
+  }
+
+  // 2. Off-diagonal entries around the orthorhombicCell threshold
+  // (limit = 4096 * eps * scale at Neighbours.cc:57) and subnormal offsets on
+  // both the cell and the coordinates. Row 0 has norm 10.0 while rows 1 and 2
+  // have diagonal 8.0, so scale is 10.0 for every tested offset.
+  const double scale = 10.0;
+  const double limit =
+      4096.0 * std::numeric_limits<double>::epsilon() * scale;
+  const double offsets[] = {
+      0.0,
+      sub,
+      -sub,
+      0.5 * std::numeric_limits<double>::min(),
+      std::nextafter(limit, 0.0),
+      limit,
+      std::nextafter(limit, std::numeric_limits<double>::infinity()),
+      -std::nextafter(limit, std::numeric_limits<double>::infinity()),
+  };
+  for (const double off : offsets) {
+    const double cell[9] = {10.0, 0.0, 0.0, off, 8.0, 0.0, 0.0, -off, 8.0};
+    const std::vector<double> pos = {
+        0.0,       sub,        -sub,
+        d_below,   sub,        -sub,
+        0.0,       4.0,        4.0,
+        d_exact,   4.0,        4.0,
+        0.0,       2.0,        6.0,
+        d_above,   2.0,        6.0,
+        0.1,       0.02 * 8.0, 4.0,
+        0.1 + off, 0.98 * 8.0, 4.0,
+    };
+    const auto ref = bruteAllImages(pos, cell, cutoff);
+    REQUIRE(ref.count({0, 1}) == 1);
+    REQUIRE(ref.count({2, 3}) == 1);
+    REQUIRE(ref.count({4, 5}) == 0);
+    REQUIRE(ref.count({6, 7}) == 1);
+    for (const auto mode :
+         {rgpot::nlist::Mode::Stream, rgpot::nlist::Mode::Stored}) {
+      rgpot::nlist::Spec spec;
+      spec.cutoff = cutoff;
+      spec.skin = 0.0;
+      spec.periodic = {true, true, true};
+      spec.image = rgpot::nlist::Image::Round;
+      spec.mode = mode;
+      rgpot::nlist::Neighbours cells;
+      cells.update(pos.data(), pos.size() / 3, cell, spec);
+      requireSamePairs(walkedPairs(cells, pos.size() / 3, cutoff), ref);
+    }
+  }
+}
+
+TEST_CASE("non-finite fractional coordinates throw in skewed cell binning",
+          "[nlist][triclinic][nonfinite]") {
+  setThreads("1");
+  double cell[9];
+  tiltedCell(1e-3, cell);
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const double inf = std::numeric_limits<double>::infinity();
+  const double huge = std::numeric_limits<double>::max();
+
+  // NaN coordinate, infinite coordinate, and finite coordinate whose product
+  // with frac_inv (~100 for scale 1e-3) overflows double to infinity.
+  const std::vector<double> bad_cases[] = {
+      {nan, 0.0, 0.0, 0.0, 0.0, 0.0},
+      {0.0, inf, 0.0, 0.0, 0.0, 0.0},
+      {huge, 0.0, 0.0, 0.0, 0.0, 0.0},
+  };
+  for (const auto &pos : bad_cases) {
+    for (const auto &periodic :
+         {std::array<bool, 3>{true, true, true},
+          std::array<bool, 3>{true, true, false}}) {
+      for (const double cutoff : {2.5e-3, 1.0}) {
+        rgpot::nlist::Spec spec;
+        spec.cutoff = cutoff;
+        spec.skin = 0.0;
+        spec.periodic = periodic;
+        spec.image = rgpot::nlist::Image::Round;
+        spec.mode = rgpot::nlist::Mode::Stream;
+        rgpot::nlist::Neighbours cells;
+        REQUIRE_THROWS_AS(cells.update(pos.data(), pos.size() / 3, cell, spec),
+                          std::invalid_argument);
+        REQUIRE_THROWS_WITH(
+            cells.update(pos.data(), pos.size() / 3, cell, spec),
+            Catch::Matchers::ContainsSubstring("fractional coordinate"));
+      }
+    }
+  }
 }
