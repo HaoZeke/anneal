@@ -2304,33 +2304,10 @@ if get_option('with_tests')
             )
         endif
     endforeach
-    _capnp_dep = dependency('capnp', required: false)
-    _capnpc_dep = dependency('capnpc', required: false)
     # socketpair, fork and waitpid. Windows has no POSIX process pair.
-    if _capnp_dep.found() and _capnpc_dep.found() and host_machine.system() != 'windows'
-        # The neighbour structs are rgpot-local: they exist only in the
-        # effective schema, not in the vendored copy.
-        if is_variable('rgpot_effective_schema')
-            _nlist_schema = rgpot_effective_schema
-        else
-            _nlist_schema = custom_target(
-                'nlist_effective_schema',
-                input: 'rgpot/rpc/Potentials.capnp',
-                output: 'Potentials.capnp',
-                command: [
-                    find_program('python3', 'python'),
-                    files('rgpot/rpc/schema_ledger.py'),
-                    'apply',
-                    '--root',
-                    meson.project_source_root(),
-                    '--schema',
-                    '@INPUT@',
-                    '--out',
-                    '@OUTPUT@',
-                ],
-                depend_files: rgpot_schema_inputs,
-            )
-        endif
+    if _rpc_stack and host_machine.system() != 'windows'
+        _capnp_dep = dependency('capnp')
+        _capnpc_dep = dependency('capnpc')
         test(
             'nlist_stream',
             executable(
@@ -2341,8 +2318,9 @@ if get_option('with_tests')
                 dependencies: [_capnp_dep, _capnpc_dep],
                 link_with: _nlist_link,
             ),
-            args: [_nlist_schema.full_path()],
-            depends: _nlist_schema,
+            args: [rgpot_effective_schema.full_path()],
+            depends: rgpot_effective_schema,
+            kwargs: _rt_kw['nlist_stream'],
         )
         _capnp_tool = find_program('capnp', required: false)
         if _capnp_tool.found()
@@ -2353,9 +2331,10 @@ if get_option('with_tests')
                     meson.current_source_dir() / 'tests' / 'test_nlist_capnp.py',
                     meson.project_source_root(),
                     _capnp_tool.full_path(),
-                    _nlist_schema.full_path(),
+                    rgpot_effective_schema.full_path(),
                 ],
-                depends: _nlist_schema,
+                depends: rgpot_effective_schema,
+                kwargs: _rt_kw['nlist_capnp_roundtrip'],
             )
         endif
     endif

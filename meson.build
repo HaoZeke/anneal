@@ -1349,10 +1349,6 @@ if get_option('with_tests') and _rt_atoms['python']
         'mpiexec': find_program('mpirun', 'mpiexec', required: false).found(),
         'linux': host_system == 'linux',
         'posix': host_system != 'windows',
-        'capnp': (
-            dependency('capnp', required: false).found()
-            and dependency('capnpc', required: false).found()
-        ),
         'capnp_tool': find_program('capnp', required: false).found(),
         'rustc': find_program('rustc', required: false).found(),
         'tsan': (
