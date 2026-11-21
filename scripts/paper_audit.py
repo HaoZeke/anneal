@@ -3259,7 +3259,7 @@ _RESULT_HEADER = re.compile(
 _RUN_HEADER = re.compile(r"hit|call|wall", re.I)
 _NUMBER_CELL = re.compile(r"^-?\d+(?:\.\d+)?(?:e[+-]?\d+)?(?:/\d+)?$", re.I)
 _SHA_CELL = re.compile(r"^[0-9a-f]{7,40}$")
-_SHA_TOKEN = re.compile(r"(?<![0-9a-f])([0-9a-f]{7,40})(?![0-9a-f])")
+_SHA_TOKEN = re.compile(r"(?<![0-9A-Za-z])([0-9a-f]{7,40})(?![0-9A-Za-z])")
 _REVISION_FIELDS = ("code_revision", "harness_revision", "harness_commit", "head")
 EXTERNAL_FORM_SOURCES = (
     "scripts/pimc_lj38/run_campaign.py",
@@ -3330,6 +3330,13 @@ def harness_reachable(rev: str) -> bool:
     if external_form(rev) is True or external_pin(rev):
         return True
     return ancestor_of_head(rev)
+
+
+def is_revision_token(token: str) -> bool:
+    """Seven to forty hex digits with a letter. A run of letters alone must name a commit, since acceded is a word."""
+    if not _SHA_CELL.fullmatch(token) or not re.search(r"[a-f]", token):
+        return False
+    return bool(re.search(r"\d", token)) or commit_of(token) is not None
 
 
 def _revision_token(cell: str) -> str | None:
@@ -3511,28 +3518,55 @@ def _printed_readme_numbers(audit: Audit, forms: list[tuple[str, str]]) -> list[
                 continue
             for item in _csv_backed_flags(rel, text, header, rows):
                 add(*item)
-        for line_no, line in enumerate(text.splitlines(), 1):
-            if line_no in table_lines or line.startswith("|"):
-                continue
-            for match in _FORM_ATTEMPT.finditer(line):
-                forms.append((f"{rel}:{line_no}", match.group(0)))
-            line = _FORM_ATTEMPT.sub(" ", line)
+        for paragraph in _prose_paragraphs(text, table_lines):
+            for line_no, line in paragraph:
+                for match in _FORM_ATTEMPT.finditer(line):
+                    forms.append((f"{rel}:{line_no}", match.group(0)))
             carried: list[str] = []
-            for sentence in re.split(r"(?<=\.)\s+", line):
-                local = []
-                for token in _SHA_TOKEN.findall(sentence):
-                    if re.search(r"[a-f]", token) and not harness_reachable(token) and token not in local:
-                        local.append(token)
-                bad = local or carried
-                carried = local
-                if not bad:
+            for line_no, sentence in _sentences(paragraph):
+                named = [t for t in _SHA_TOKEN.findall(sentence) if is_revision_token(t)]
+                if named:
+                    carried = list(dict.fromkeys(t for t in named if not harness_reachable(t)))
+                if not carried:
                     continue
                 for number in _prose_measures(sentence):
-                    if any(number in sha for sha in bad):
+                    if any(number in sha for sha in carried):
                         continue
-                    for sha in bad:
+                    for sha in carried:
                         add(f"{rel}:{line_no}", sha, number)
     return found
+
+
+def _prose_paragraphs(text: str, skip: set[int]):
+    """Runs of prose lines as (line number, line). A blank line, heading, fence, table row or list item starts a new run."""
+    paragraph: list[tuple[int, str]] = []
+    for line_no, line in enumerate(text.splitlines(), 1):
+        stripped = line.strip()
+        breaks = not stripped or line_no in skip or line.startswith("|") or stripped.startswith(("#", "```"))
+        if breaks or re.match(r"\s*(?:[-*+]|\d+[.)])\s", line):
+            if paragraph:
+                yield paragraph
+            paragraph = []
+            if breaks:
+                continue
+        paragraph.append((line_no, line))
+    if paragraph:
+        yield paragraph
+
+
+def _sentences(paragraph: list[tuple[int, str]]):
+    """The sentences of a paragraph, each with the line it starts on. Qualified forms are blanked first."""
+    joined, starts = "", []
+    for line_no, line in paragraph:
+        starts.append((len(joined), line_no))
+        joined += _FORM_ATTEMPT.sub(" ", line.strip()) + " "
+    at = 0
+    for piece in re.split(r"(?<=\.)\s+", joined):
+        if not piece.strip():
+            continue
+        start = joined.index(piece, at)
+        at = start + len(piece)
+        yield max(line_no for offset, line_no in starts if offset <= start), piece
 
 
 def _check_external_source(audit: Audit, path: str) -> None:

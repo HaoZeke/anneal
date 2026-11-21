@@ -5,6 +5,7 @@ matches its committed rows, and the audit notices a drifted cell."""
 import importlib.util
 import math
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -839,14 +840,73 @@ def test_a_41_digit_external_revision_is_rejected():
     assert not [r for r in audit.results if r[1].startswith(path) and r[2] == "qualified external revision" and r[0] == "OK"]
 
 
-def test_an_inline_external_revision_is_stripped_from_prose():
+def clear_audit_caches():
+    for value in vars(audit_mod).values():
+        if callable(getattr(value, "cache_clear", None)):
+            value.cache_clear()
+    audit_mod._ANCESTOR_OF_HEAD.clear()
+
+
+def isolated_readme(request, tmp_path, monkeypatch, path, text):
+    """A root whose bench holds this one README, with the scripts the revision checks read and git on this repository.
+
+    The audit's caches are cleared on the way in and out, so no result crosses between this root and the real one.
+    """
+    clear_audit_caches()
+    request.addfinalizer(clear_audit_caches)
+    for name in (audit_mod.ALIASES, *audit_mod.EXTERNAL_FORM_SOURCES, *audit_mod.EXTERNAL_PIN_SOURCES):
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / name, tmp_path / name)
+    (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / path).write_text(text)
+    git_dir = subprocess.run(["git", "rev-parse", "--absolute-git-dir"], cwd=ROOT, capture_output=True, text=True,
+                             check=True).stdout.strip()
+    monkeypatch.setenv("GIT_DIR", git_dir)
+    monkeypatch.setattr(audit_mod, "ROOT", tmp_path)
+
+
+def test_an_inline_external_revision_is_stripped_from_prose(request, tmp_path, monkeypatch):
     line = f"Rows at `{IPI_FORM}` hit at a median of 12 calls."
     assert IPI_PIN not in audit_mod._EXTERNAL_FORM.sub(" ", line)
-    audit = audit_mod.Audit()
     path = "bench/pimc-lj38/README.md"
-    audit.text_cache[path] = audit.text(path) + f"\n{line}\n"
+    text = (ROOT / path).read_text() + f"\n{line}\n"
+    isolated_readme(request, tmp_path, monkeypatch, path, text)
+    audit = audit_mod.Audit()
     audit_mod.printed_harnesses(audit)
     assert audit.drifts() == []
+    assert ("OK", f"{path}:{len(text.splitlines())}", "qualified external revision", IPI_FORM) in {r[:4] for r in audit.results}
+
+
+def prose_flags(extra):
+    audit = audit_mod.Audit()
+    path = "bench/pimc-lj38/README.md"
+    text = audit.text(path)
+    audit.text_cache[path] = text + "\n" + extra + "\n"
+    first = text.count("\n") + 2
+    audit_mod.printed_harnesses(audit)
+    return sorted((int(r[1].rsplit(":", 1)[1]) - first, r[4]) for r in audit.drifts() if r[1].startswith(f"{path}:"))
+
+
+@pytest.mark.parametrize("word", ["acceded", "defaced", "effaced", "deedeed", "Bacceded"])
+def test_a_hex_letter_word_is_not_a_revision(word):
+    assert prose_flags(f"The request {word} at a median of 12 calls.") == []
+
+
+def test_a_revision_wrapped_onto_the_next_line_reaches_its_number():
+    assert prose_flags("Rows at e3ed7dad\nreach a median of 400 calls.") == [(0, "e3ed7dad 400")]
+
+
+def test_a_revision_carries_through_its_paragraph():
+    flags = prose_flags("Rows at e3ed7dad hit 3 of 12 seeds. The anneal arm\nhits 5 of 12 at a median of 400 calls.")
+    assert flags == [(0, "e3ed7dad 400"), (0, "e3ed7dad 5 of 12")]
+
+
+def test_a_revision_does_not_carry_past_its_paragraph():
+    assert prose_flags("Rows at e3ed7dad.\n\nAnneal reaches a median of 400 calls.") == []
+
+
+def test_a_reachable_revision_ends_the_carry():
+    assert prose_flags("Rows at e3ed7dad. Rows at 61fa67cf reach a median of 9 calls.") == []
 
 
 def test_printed_revisions_are_ancestors_or_qualified():
