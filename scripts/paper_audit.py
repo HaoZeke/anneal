@@ -53,13 +53,14 @@ from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 TEX = "paper/jctc/manuscript.tex"
 SI = "paper/jctc/si.tex"
 
-REVISION_COLUMNS = ("code_revision", "anneal_head", "release_revision", "head", "harness_revision", "revision",
-                    "anneal_sha")
+REVISION_COLUMNS = ("revision", "code_revision", "harness_revision", "head", "commit",
+                    "anneal_head", "release_revision", "anneal_sha")
 HOST_COLUMNS = ("host", "machine", "machine_id", "machine_id_sha256")
 # Trees that rows cite in place of a commit, each with the record commit whose parent has that tree.
 RECORD_TREES = {"b12293b9d637dd32417be3aa482302e0f30dd594": "5c37c840ed2e9f9a2d881105363b33762b5cca31"}
 # Local revisions that rows cite, each with the pushed commit it was rebuilt as.
 ALIASES = "bench/revision-aliases.csv"
+REVISION_MAP = "bench/unreachable-revisions.csv"
 # Remote branches the alias table cites, plus develop. A missing one means
 # the clone cannot answer the revision checks, so the audit stops.
 AUDIT_REMOTE_BRANCHES = (
@@ -81,22 +82,18 @@ AUDIT_OPTIONAL_REMOTES = (
     "record/rerun-tuned-gmin-r2",
     "record/g3-funnel",
 )
-# Cited revisions with no pushed equivalent. de22f437 records the ASE and GOFEE
-# panel from five campaign heads and sits on the last, e09e0487, alone. The
-# pushed history before it has one commit, 57735de1, that adds the two-hour
-# cap, yet three heads ran capped, so the heads are not its commits one to one.
-UNPUSHED = {
-    "0f988569b49afe162e2f5ffd71b2ab45d0b3afec": "an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own",
-    "349523d3f5f42b748f3af1573166fd17155ac461": "an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own",
-    "befbc3e8": "an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own; the row gives eight digits",
-    "bf09f7a2b7a6bd6359898db675eeafefcd20548b": "an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own",
-    "ce1e7a46826cf51784ed26587c14b2747f5f48e1": "the GFN2 call-floor fix on f2a628c0, a local build head of the GFN2 "
-                                                "Si10 and C10 floor rows; the fix was pushed on another base",
-    "5351f272370dc8c0d18b06149753effc99aeabd5": "eae26977 with the call floor and the C20 example, a local build head of "
-                                                "the GFN2 C20 rows; b4ddad0d on bench/covalent-cov6b has its tree",
-    "1ce3ab64493196afd25e8690648e21157d91b882": "the template-free landing head for the GMIN panel and the Au55 ASE "
-                                                "reruns, first cited by 93e17b69; no pushed branch holds it",
-}
+def unreachable_reasons() -> dict[str, str]:
+    """Load the one reason shared by every map row for each identifier."""
+    reasons: dict[str, str] = {}
+    with (ROOT / REVISION_MAP).open(newline="") as handle:
+        for row in csv.DictReader(handle):
+            old = reasons.setdefault(row["revision"], row["why"])
+            if old != row["why"]:
+                raise RuntimeError(f"{REVISION_MAP}: inconsistent reasons for {row['revision']}")
+    return reasons
+
+
+UNPUSHED = unreachable_reasons()
 
 KNOWN_GAPS = {
     "data/sc96_78_hits.csv": "code_revision unrecorded on some rows; harness_revision unrecorded on some rows; host "
@@ -801,6 +798,7 @@ def manuscript_gmin(audit: Audit) -> None:
 
 GMIN_RERUN_REVISION = "eeec8e2c216ae1506768bca8e29846c1c039ca3b"
 GMIN_TARBALL_DATE = "2026-11-19"
+GMIN_TARBALL_SVNREV = "9cbec1a446352bc9ef064bd2b1a5767194655919"
 GMIN_TARBALL_SHA256 = "ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776"
 GMIN_RERUN_ROW_ID = "9cbec1a446352bc9ef064bd2b1a5767194655919"
 GMIN_RERUN_RAW_SYSTEMS = ("lj38", "lj55", "lj75", "lj98", "lj102", "lj103", "lj104", "lj150", "m80r6")
@@ -932,8 +930,9 @@ def gmin_rerun_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[
     tarballs = {r["tarball_sha256"] for r in rows if r.get("tarball_sha256")}
     tarballs.update(r["tarball_sha256"] for r in host_gmin)
     audit.cell(GMIN_RERUN, "GMIN tarball sha256", GMIN_TARBALL_SHA256, " ".join(sorted(tarballs)))
-    audit.said(SI, f"GMIN is the public tarball dated {GMIN_TARBALL_DATE}, sha256\n"
-                   f"\\texttt{{\\seqsplit{{{GMIN_TARBALL_SHA256}}}}}.")
+    audit.said(SI, "The Lennard--Jones, Morse, and Gupta rows whose source fields include a\n"
+                   f"tarball pin record the public tarball dated {GMIN_TARBALL_DATE}, sha256\n"
+                   f"\\texttt{{\\seqsplit{{{GMIN_TARBALL_SHA256}}}}},")
     return panel, groups
 
 
@@ -1845,11 +1844,20 @@ def hexamer_provenance(audit: Audit) -> None:
     for key in ("anneal_commit", "hexamer_gfn2_commit"):
         audit.record(key not in keys, f"{VISUALS}/provenance.txt", f"no {key} key names a commit for every file",
                      "absent", "absent" if key not in keys else "present")
-    audit.cell(f"{VISUALS}/provenance.txt", "the landfold commit is said to be outside this repository",
-               "not in this repository", keys.get("landfold_book_commit_note", "")[:22])
-    absent = git("cat-file", "-t", keys.get("landfold_book_commit", "")).returncode != 0
-    audit.record(absent, f"{VISUALS}/provenance.txt", "landfold_book_commit is indeed outside this repository",
-                 "absent", "absent" if absent else "present")
+    landfold_commit = keys.get("landfold_book_commit", "")
+    audit.record(bool(re.fullmatch(r"[0-9a-f]{40}", landfold_commit)),
+                 f"{VISUALS}/provenance.txt", "landfold source identifier is recorded",
+                 "40 hexadecimal digits", landfold_commit)
+    audit.said(f"{VISUALS}/provenance.txt",
+               "landfold_book_commit_note source identifier for the committed landfold outputs")
+    landfold = {name: digest for name, digest in digests.items()
+                if name.startswith("system_visuals/landfold/")}
+    audit.record(bool(landfold), f"{VISUALS}/provenance.txt",
+                 "committed landfold outputs have sha256 digests", "one or more", len(landfold))
+    for name, digest in sorted(landfold.items()):
+        body = (ROOT / "paper/jctc/data" / name).read_bytes()
+        audit.cell(f"{VISUALS}/provenance.txt", f"digest of {name}", digest,
+                   hashlib.sha256(body).hexdigest())
     audit.said(TEX, "for each class, the lowest of the archived GFN2-xTB water hexamers after relaxation with xtb 6.7.1 "
                     "(\\texttt{-{}-gfn 2 -{}-opt vtight}), as \\texttt{paper/jctc/data/system\\_visuals/hexamer\\_gfn2/RECORD} "
                     "records.}")
@@ -2120,9 +2128,36 @@ def gmin_sources(audit: Audit) -> None:
         named = all(machine.fullmatch(h) for h in hosts) and bool(rows)
         audit.record(named, path, "every GMIN row names its machine", "sha256 of the machine id",
                      "all" if named else ", ".join(sorted(h[:8] or "none" for h in hosts)))
-    audit.said(SI, "The rigid TIP4P rows use GMIN source\n"
-                   f"\\texttt{{\\seqsplit{{{TIP4P_GMIN}}}}}, as the\n"
-                   "\\texttt{gmin\\_revision} field of every committed row records.")
+    tip4p = audit.rows("paper/jctc/data/tip4p_gmin/rows.csv")
+    audit.cell("paper/jctc/data/tip4p_gmin/rows.csv",
+               "TIP4P rows carrying the historical GMIN identifier", "120", len(tip4p))
+    audit.record(all(r["gmin_revision"] == TIP4P_GMIN for r in tip4p),
+                 "paper/jctc/data/tip4p_gmin/rows.csv",
+                 "every TIP4P row carries the historical GMIN identifier",
+                 TIP4P_GMIN, "all" if tip4p else "no rows")
+    pinned = []
+    for shard, name in (("a", "rows.csv"), ("b", "host.csv"),
+                        ("c", "rows.csv"), ("d", "rows.csv")):
+        path = f"{GMIN_RERUN}/{shard}/{name}"
+        pinned.extend((path, row) for row in audit.rows(path)
+                      if row.get("tarball_sha256", ""))
+    audit.cell(SI, "rows carrying the dated GMIN tarball pin", "216", len(pinned))
+    audit.record(all(row["tarball_sha256"] == GMIN_TARBALL_SHA256
+                     and row["svnrev"] == GMIN_TARBALL_SVNREV
+                     and row.get("gmin_snapshot", row.get("snapshot", "")) == GMIN_TARBALL_DATE
+                     for _, row in pinned),
+                 ", ".join(sorted({path for path, _ in pinned})),
+                 "tarball rows agree on date, sha256 and SVNREV",
+                 f"{GMIN_TARBALL_DATE} {GMIN_TARBALL_SHA256} {GMIN_TARBALL_SVNREV}",
+                 "all" if pinned else "no rows")
+    audit.said(SI, "The Lennard--Jones, Morse, and Gupta rows whose source fields include a\n"
+                   "tarball pin record the public tarball dated 2026-11-19, sha256\n"
+                   "\\texttt{\\seqsplit{ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776}},\n"
+                   "and SVNREV\n"
+                   "\\texttt{\\seqsplit{9cbec1a446352bc9ef064bd2b1a5767194655919}}.")
+    audit.said(SI, "The 120 rigid TIP4P rows instead record GMIN source\n"
+                   "\\texttt{\\seqsplit{aac1548a8aec13b53ad12a8d6904625081685d2e}} in their\n"
+                   "\\texttt{gmin\\_revision} field.")
 
 
 MOVE_CHOICE = re.compile(r"Thompson|move choice|choice among the moves|choosing among the moves|posterior", re.I)
@@ -3558,8 +3593,7 @@ def covalent_panels(audit: Audit) -> None:
 def release(audit: Audit) -> None:
     version = re.search(r'^version = "([^"]+)"', (ROOT / "Cargo.toml").read_text(), re.M).group(1)
     audit.said(TEX, f"The newest released tag is v{version}, which is the crate version.")
-    tagged = subprocess.run(["git", "rev-parse", "-q", "--verify", f"refs/tags/v{version}"], cwd=ROOT,
-                            capture_output=True, text=True).returncode == 0
+    tagged = release_tag_available(f"v{version}")
     audit.record(tagged, TEX, "release tag exists", f"v{version}", "tagged" if tagged else "no tag")
 
 
@@ -3640,7 +3674,7 @@ def bench_prose(audit: Audit) -> None:
 
 
 def external_gmin_identifier(row: dict[str, str], column: str) -> bool:
-    """A legacy external-code identifier, not a Git revision or source pin."""
+    """A legacy field outside the revision-like columns audited as Git ids."""
     return (
         column == "gmin_revision"
         or column == "code_revision" and (
@@ -3648,6 +3682,60 @@ def external_gmin_identifier(row: dict[str, str], column: str) -> bool:
             or row.get("arm", "").lower() == "gmin"
         )
     )
+
+
+def revision_values(value: str) -> list[str]:
+    """Hexadecimal revision identifiers in one cell, including joined cells."""
+    return re.findall(r"(?<![0-9a-f])[0-9a-f]{7,40}(?![0-9a-f])", value)
+
+
+def revision_row_tables() -> list[tuple[str, list[dict[str, str]]]]:
+    """Every CSV or TSV below the paper data and benchmark row trees."""
+    tables = []
+    excluded = {ALIASES, REVISION_MAP}
+    for root in ("paper/jctc/data", "bench"):
+        paths = sorted((*((ROOT / root).rglob("*.csv")), *((ROOT / root).rglob("*.tsv"))))
+        for absolute in paths:
+            path = str(absolute.relative_to(ROOT))
+            if path in excluded:
+                continue
+            delimiter = "\t" if absolute.suffix == ".tsv" else ","
+            with absolute.open(newline="") as handle:
+                lines = [line for line in handle if line.strip() and not line.startswith("#")]
+            rows = list(csv.DictReader(lines, delimiter=delimiter))
+            if rows and set(rows[0]).intersection(REVISION_COLUMNS):
+                tables.append((path, rows))
+    return tables
+
+
+def all_revision_provenance(audit: Audit) -> None:
+    """Every revision-like cell in every row table is on origin or mapped."""
+    citations: dict[str, set[str]] = defaultdict(set)
+    for path, rows in revision_row_tables():
+        for row in rows:
+            for column in REVISION_COLUMNS:
+                for value in revision_values(row.get(column, "")):
+                    citations[value].add(path)
+    names = sorted(set(citations) - set(RECORD_TREES))
+    table = alias_table()
+    index = alias_index(names, table)
+    aliases = verified_aliases(audit, table, index)
+    for revision in sorted(citations):
+        where = ", ".join(sorted(citations[revision]))
+        if revision in RECORD_TREES:
+            held = git("rev-parse", f"{RECORD_TREES[revision]}^^{{tree}}").stdout.strip()
+            audit.record(held == revision, where, f"row tree {revision[:8]} is verified",
+                         revision[:8], held[:8] or "absent")
+            continue
+        remote = index.on_remote(revision)
+        mapped = revision in aliases or revision in UNPUSHED
+        state = "origin" if remote else "pushed equivalent" if revision in aliases else (
+            UNPUSHED.get(revision, "unmapped"))
+        audit.record(remote or mapped, where, f"row revision {revision[:8]} is reachable or mapped",
+                     "origin or map", state)
+    for revision in sorted(set(UNPUSHED) - set(citations)):
+        audit.record(False, REVISION_MAP, f"mapped revision {revision[:8]} is cited",
+                     UNPUSHED[revision], "no row cites it")
 
 
 def provenance(audit: Audit) -> dict[str, str]:
@@ -3725,8 +3813,7 @@ class RevisionIndex:
     def __init__(self, names: tuple[str, ...], texts: tuple[str, ...], tips: tuple[str, ...], patched: tuple[str, ...]) -> None:
         asked = sorted({n for n in names + tips + patched if n})
         out = git("cat-file", "--batch-check", stdin="".join(f"{n}^{{commit}}\n" for n in asked)).stdout.splitlines()
-        remote_refs = [f"refs/remotes/origin/{branch}" for branch in
-                       (*AUDIT_REMOTE_BRANCHES, *AUDIT_OPTIONAL_REMOTES)]
+        remote_refs = git("for-each-ref", "--format=%(refname)", "refs/remotes/origin").stdout.split()
         audited_refs = ["HEAD", *(ref for ref in remote_refs
                                    if git("show-ref", "--verify", "--quiet", ref).returncode == 0),
                         *git("for-each-ref", "--format=%(refname)", "refs/tags").stdout.split()]
@@ -3923,6 +4010,14 @@ def verified_aliases(audit: Audit, table: list[dict[str, str]], index: RevisionI
     return verified
 
 
+def release_tag_available(tag: str) -> bool:
+    """The release tag exists locally or is advertised by origin."""
+    local = git("show-ref", "--verify", "--quiet", f"refs/tags/{tag}").returncode == 0
+    if local:
+        return True
+    return git("ls-remote", "--exit-code", "--tags", "origin", f"refs/tags/{tag}").returncode == 0
+
+
 def unauditable() -> list[str]:
     """Why this clone cannot answer the revision checks, if it cannot.
 
@@ -3938,8 +4033,8 @@ def unauditable() -> list[str]:
                         "(git fetch origin '+refs/heads/*:refs/remotes/origin/*')")
     version = re.search(r'^version = "([^"]+)"', (ROOT / "Cargo.toml").read_text(), re.M).group(1)
     tag = f"v{version}"
-    if git("show-ref", "--verify", "--quiet", f"refs/tags/{tag}").returncode != 0:
-        problems.append(f"the release tag {tag} is not present; fetch tags from origin")
+    if not release_tag_available(tag):
+        problems.append(f"the release tag {tag} is neither local nor advertised by origin")
     for branch in AUDIT_REMOTE_BRANCHES:
         remote_ref = f"refs/remotes/origin/{branch}"
         if git("show-ref", "--verify", "--quiet", remote_ref).returncode != 0:
@@ -4486,20 +4581,20 @@ def todo_check(audit: Audit, pre_submission: bool = False) -> None:
         audit.record(not reruns, path, "no rendered rerun", "absent", f"{reruns} found" if reruns else "absent")
 
 
-REVISION_MAP = "bench/unreachable-revisions.csv"
 REVISION_MAP_COLUMNS = ("revision", "why", "row_file", "system", "arm", "revision_column", "rows", "seed_min", "seed_max")
 
 
 def revision_map_rows(audit: Audit) -> list[dict[str, str]]:
-    """Each unreachable revision with the row groups of the files read that cite it."""
+    """Each unreachable revision with every row group that cites it."""
     groups: dict[tuple[str, str, str, str, str], list[dict[str, str]]] = defaultdict(list)
-    for path, rows in audit.read.items():
+    for path, rows in revision_row_tables():
         for row in rows:
             for column in REVISION_COLUMNS:
-                value = row.get(column, "").strip()
-                if value in UNPUSHED:
-                    key = (value, path, row.get("system", row.get("board", "")), row.get("arm", row.get("code", "")), column)
-                    groups[key].append(row)
+                for value in revision_values(row.get(column, "")):
+                    if value in UNPUSHED:
+                        key = (value, path, row.get("system", row.get("board", "")),
+                               row.get("arm", row.get("code", "")), column)
+                        groups[key].append(row)
     out = []
     for (revision, path, system, arm, column), rows in sorted(groups.items()):
         seeds = [int(r["seed"]) for r in rows if r.get("seed", "").strip().lstrip("-").isdigit()]
@@ -4581,9 +4676,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
     for path, fragment, _why in UNTRACED:
         audit.said(path, fragment)
     gaps = provenance(audit)
-    cited = {r[c].strip() for rows in audit.read.values() for r in rows for c in REVISION_COLUMNS if c in r}
-    for name in sorted(set(UNPUSHED) - cited):
-        audit.record(False, "UNPUSHED", f"unpushed revision {name[:8]}", UNPUSHED[name], "no row cites it")
+    all_revision_provenance(audit)
     for path, why in sorted(KNOWN_GAPS.items()):
         audit.record(any(word in why for word in ("unrecorded", "revision recorded", "is not in this repository")), path,
                      "a known gap names the revision or says it is unrecorded", "revision or unrecorded", why)

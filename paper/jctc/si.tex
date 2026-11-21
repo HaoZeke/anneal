@@ -85,11 +85,14 @@ LJ\(_{38}\) input.
 The Morse rows add GMIN's native \texttt{MORSE} keyword and \(\rho\) to the same numerical settings.
 The Au\(_{55}\) row runs GMIN's Gupta potential with the gold row of Darby et al., \(A=0.2061\)~eV, \(p=10.229\), \(q=4.036\), \(\xi=1.79\)~eV, and \(r_0=2.884\)~\AA, at \(T=0.1\)~eV, with step 0.40 and taboo radius 4.0 multiplied by \(r_0/2^{1/6}\), GMIN's container radius, \texttt{NEWRESTART 40}, and an energy difference of 0.003.
 \cite{darbyCuAu2002}
-GMIN is the public tarball dated 2026-11-19, sha256
-\texttt{\seqsplit{ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776}}.
-The rigid TIP4P rows use GMIN source
-\texttt{\seqsplit{aac1548a8aec13b53ad12a8d6904625081685d2e}}, as the
-\texttt{gmin\_revision} field of every committed row records.
+The Lennard--Jones, Morse, and Gupta rows whose source fields include a
+tarball pin record the public tarball dated 2026-11-19, sha256
+\texttt{\seqsplit{ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776}},
+and SVNREV
+\texttt{\seqsplit{9cbec1a446352bc9ef064bd2b1a5767194655919}}.
+The 120 rigid TIP4P rows instead record GMIN source
+\texttt{\seqsplit{aac1548a8aec13b53ad12a8d6904625081685d2e}} in their
+\texttt{gmin\_revision} field.
 It was built by \path{scripts/gmin_panel/build_gmin.sh} at revision
 \texttt{eeec8e2c} for the first block of the table, and for the second by the
 same script at the record commit \texttt{f009acc9} on the submitted revision,

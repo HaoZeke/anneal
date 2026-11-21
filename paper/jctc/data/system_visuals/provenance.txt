@@ -17,8 +17,7 @@
 
 # landfold/ is the output of the.
 
-# occupancy_landfold_book example of landfold_book_commit, which is not in
-# this repository, on the dumps each map
+# occupancy_landfold_book example at landfold_book_commit, on the dumps each map
 # names, run from the folder of those dumps with its stdout to the json:
 # occupancy_landfold_book --label LJ<size> --dump-hist <hist> <inputs> >
 # <json> The water folds are the same command on the hexamer dumps of
@@ -49,7 +48,7 @@ anneal_repository https://github.com/HaoZeke/anneal
 
 landfold_book_commit 36086e988c5a71c156ffcbde152bf321a6f5ef25
 
-landfold_book_commit_note not in this repository; only landfold/ comes from it, and fig:systems reads none of it
+landfold_book_commit_note source identifier for the committed landfold outputs; only landfold/ comes from it, and fig:systems reads none of it
 
 structures_commit 61fa67cf380e46876b569da45e7cc091647a775b
 

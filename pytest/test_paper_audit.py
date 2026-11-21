@@ -95,20 +95,38 @@ def test_missing_release_tag_and_referenced_remote_stop_the_audit(monkeypatch):
     def without_required_refs(*args, stdin=None):
         if args[:3] == ("show-ref", "--verify", "--quiet") and args[3] in missing:
             return subprocess.CompletedProcess(["git", *args], 1, "", "")
+        if args[:4] == ("ls-remote", "--exit-code", "--tags", "origin"):
+            return subprocess.CompletedProcess(["git", *args], 2, "", "")
         return real_git(*args, stdin=stdin)
 
     monkeypatch.setattr(audit_mod, "git", without_required_refs)
     problems = audit_mod.unauditable()
-    assert f"the release tag v{version} is not present; fetch tags from origin" in problems
+    assert f"the release tag v{version} is neither local nor advertised by origin" in problems
     assert "the remote ref origin/develop is not present; fetch develop from origin" in problems
 
 
-def test_a_merged_branch_that_no_alias_names_is_not_required(monkeypatch, tmp_path):
-    """The remote closure is the named branches and the optional tips, no more.
+def test_an_advertised_release_tag_need_not_be_fetched(monkeypatch):
+    real_git = audit_mod.git
+    tag = f"refs/tags/v{workspace_version()}"
+
+    def without_local_tag(*args, stdin=None):
+        if args == ("show-ref", "--verify", "--quiet", tag):
+            return subprocess.CompletedProcess(["git", *args], 1, "", "")
+        if args == ("ls-remote", "--exit-code", "--tags", "origin", tag):
+            return subprocess.CompletedProcess(["git", *args], 0, "tag\\n", "")
+        return real_git(*args, stdin=stdin)
+
+    monkeypatch.setattr(audit_mod, "git", without_local_tag)
+    assert audit_mod.release_tag_available(f"v{workspace_version()}")
+    assert not [p for p in audit_mod.unauditable() if "release tag" in p]
+
+
+def test_every_fetched_origin_branch_joins_the_revision_index(monkeypatch, tmp_path):
+    """The remote closure includes every fetched origin branch.
 
     A clone that never had, or no longer has, an optional tip is still
-    auditable. A tip that is present joins the closure. A remote branch that
-    neither the alias table nor the optional list names does not.
+    auditable. Both an optional tip and any other fetched origin ref join the
+    closure when present.
     """
     repo = tmp_path / "clone"
     (repo / "bench").mkdir(parents=True)
@@ -149,13 +167,13 @@ def test_a_merged_branch_that_no_alias_names_is_not_required(monkeypatch, tmp_pa
     without_tip = index()
     assert without_tip.on_remote(root)
     assert not without_tip.on_remote(optional)
-    assert not without_tip.on_remote(unnamed), "an unnamed remote branch joined the closure"
+    assert without_tip.on_remote(unnamed)
 
     run_git("update-ref", optional_ref, optional)
     assert audit_mod.unauditable() == []
     with_tip = index()
     assert with_tip.on_remote(optional), "a present optional tip did not join the closure"
-    assert not with_tip.on_remote(unnamed), "an unnamed remote branch joined the closure"
+    assert with_tip.on_remote(unnamed)
 
 
 def test_a_drifted_table_cell_is_reported():
@@ -323,6 +341,23 @@ def test_a_record_that_names_another_relaxation_script_is_reported():
     audit.text_cache[path] = record.replace(blob, "0" * 40)
     audit_mod.hexamer_provenance(audit)
     assert [(r[1], r[2]) for r in audit.drifts()] == [(path, "blob of the relaxation script")]
+
+
+def test_landfold_provenance_does_not_need_pull_refs(monkeypatch):
+    real_git = audit_mod.git
+
+    def heads_only(*args, stdin=None):
+        assert "refs/remotes/origin/pull" not in args
+        return real_git(*args, stdin=stdin)
+
+    monkeypatch.setattr(audit_mod, "git", heads_only)
+    audit = audit_mod.Audit()
+    audit_mod.hexamer_provenance(audit)
+    assert not audit.drifts()
+    labels = [row[2] for row in audit.results]
+    assert labels.count("committed landfold outputs have sha256 digests") == 1
+    assert len([label for label in labels
+                if label.startswith("digest of system_visuals/landfold/")]) == 8
 
 
 def test_a_placeholder_in_the_text_is_reported():
@@ -615,17 +650,24 @@ def test_a_tip4p_gmin_row_of_another_source_is_reported():
     audit.read[path] = rows
     audit_mod.gmin_sources(audit)
     assert [(r[1], r[2]) for r in audit.drifts()] == [
-        (path, "historical identifier of every GMIN row")
+        (path, "historical identifier of every GMIN row"),
+        (path, "every TIP4P row carries the historical GMIN identifier"),
     ]
 
 
-def test_the_rendered_tip4p_gmin_source_is_checked():
-    audit = audit_mod.Audit()
-    si = audit.text(audit_mod.SI)
-    assert si.count(audit_mod.TIP4P_GMIN) == 1
-    audit.text_cache[audit_mod.SI] = si.replace(audit_mod.TIP4P_GMIN, "0" * 40)
-    audit_mod.gmin_sources(audit)
-    assert [r[2] for r in audit.drifts()] == ["prose"]
+def test_the_rendered_gmin_sources_match_the_rows():
+    si = (ROOT / audit_mod.SI).read_text()
+    recorded = (
+        audit_mod.TIP4P_GMIN,
+        audit_mod.GMIN_TARBALL_SHA256,
+        audit_mod.GMIN_TARBALL_SVNREV,
+    )
+    assert [si.count(value) for value in recorded] == [1, 1, 1]
+    for value in recorded:
+        audit = audit_mod.Audit()
+        audit.text_cache[audit_mod.SI] = si.replace(value, "0" * len(value))
+        audit_mod.gmin_sources(audit)
+        assert "prose" in [r[2] for r in audit.drifts()]
 
 
 def test_a_g3_row_with_other_calls_is_reported():
@@ -1055,6 +1097,24 @@ def test_an_unpushed_revision_needs_a_reason(tmp_path, monkeypatch):
         ("unpushed revision bf09f7a2", "not listed", "no pushed equivalent"),
         ("unpushed revision e09e0487", "listed although its alias holds", "resolved"),
     ]
+
+
+def test_an_unmapped_revision_in_any_benchmark_table_fails(monkeypatch):
+    tables = audit_mod.revision_row_tables()
+    path = "bench/ase-nonlj/summary.csv"
+    altered = []
+    for table_path, rows in tables:
+        if table_path == path:
+            rows = [dict(row) for row in rows]
+            rows[0]["code_revision"] = "0" * 40
+        altered.append((table_path, rows))
+    monkeypatch.setattr(audit_mod, "revision_row_tables", lambda: altered)
+    audit = audit_mod.Audit()
+    audit_mod.all_revision_provenance(audit)
+    assert [
+        row[2] for row in audit.drifts()
+        if row[1] == path
+    ] == ["row revision 00000000 is reachable or mapped"]
 
 
 def test_an_alias_with_another_patch_id_is_reported(tmp_path, monkeypatch):
