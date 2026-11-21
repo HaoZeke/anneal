@@ -12,7 +12,9 @@ scaled by their sigma. The run stops when the quenched energy is within
 0.001 of the Cambridge minimum, or when the force-call count, including
 every local-optimisation evaluation, reaches the LJ38 paper budget.
 
-Six seeds, one session. Inside the size the (seed, arm) pairs are shuffled.
+The default session is six seeds, 2000 through 2005. Seeds 2000 through
+2011 are accepted. A complete twelve-seed request is summarised on its
+own. Inside the size the (seed, arm) pairs are shuffled.
 A miss is stored as the full budget. Medians are Hyndman-Fan type 7. The
 wall ratio is the RPQA median wall divided by the anneal median wall.
 Inside microseconds are the potential time divided by the charged
@@ -43,6 +45,7 @@ from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
 PAPER_BUDGETS = {38: 400_000}
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
+ALLOWED_SEEDS = tuple(range(2000, 2012))
 ARMS = ("anneal", "rpqa")
 SCHEDULE_SEED = 20261113
 HIT_TOL = DEFAULT_HIT_TOL
@@ -169,6 +172,37 @@ def schedule(
     jobs = [(seed, arm) for seed in seeds for arm in arms]
     rng.shuffle(jobs)
     return jobs
+
+
+def seed_order(seeds: tuple[int, ...]) -> list[int]:
+    """Keep the default six in their listed order.
+
+    A wider request keeps those six first, then seeds past 2005 in the
+    order they were given.
+    """
+    chosen = set(seeds)
+    if not chosen <= set(ALLOWED_SEEDS):
+        raise SystemExit(f"seeds must be inside {ALLOWED_SEEDS[0]}-{ALLOWED_SEEDS[-1]}")
+    base = [seed for seed in SEEDS if seed in chosen]
+    if chosen <= set(SEEDS):
+        return base
+    extra = [seed for seed in seeds if seed not in SEEDS]
+    return base + extra
+
+
+def capped_jobs(seeds: tuple[int, ...], arms: tuple[str, ...]) -> list[tuple[int, str]]:
+    """Capped anneal and RPQA jobs.
+
+    The default six keep the scheduled shuffle. A wider list is shuffled
+    on its own so a seed past 2005 is not dropped.
+    """
+    chosen = set(seeds)
+    pool = SEEDS if chosen <= set(SEEDS) else tuple(seed_order(seeds))
+    return [
+        (seed, arm)
+        for seed, arm in schedule(pool, ARMS, SCHEDULE_SEED)
+        if seed in chosen and arm in arms
+    ]
 
 
 def load_source(path: Path) -> dict[str, str]:
@@ -879,6 +913,17 @@ def self_test() -> None:
         raise SystemExit(f"LJ55 length {paper_length(55)}")
     if paper_length(75) != (79, 790_000, 790_001):
         raise SystemExit(f"LJ75 length {paper_length(75)}")
+    if ALLOWED_SEEDS != tuple(range(2000, 2012)):
+        raise SystemExit("twelve-seed list")
+    if seed_order(SEEDS) != list(SEEDS):
+        raise SystemExit("default seed order")
+    extended = tuple(range(2000, 2012))
+    if seed_order(extended) != list(extended):
+        raise SystemExit("extended seed order")
+    if capped_jobs((2006,), ("anneal",)) != [(2006, "anneal")]:
+        raise SystemExit("seed past 2005 was dropped")
+    if capped_jobs(SEEDS, ARMS) != schedule(SEEDS, ARMS, SCHEDULE_SEED):
+        raise SystemExit("default shuffle changed")
     print("ok")
 
 
@@ -1100,8 +1145,8 @@ def run_paper(args: argparse.Namespace, seeds: tuple[int, ...]) -> int:
     Existing rows are skipped, not replaced.
     """
     for seed in seeds:
-        if seed not in SEEDS:
-            raise SystemExit(f"seed {seed} is outside 2000-2005")
+        if seed not in ALLOWED_SEEDS:
+            raise SystemExit(f"seed {seed} is outside {ALLOWED_SEEDS[0]}-{ALLOWED_SEEDS[-1]}")
     sizes = tuple(args.size) if args.size else PAPER_SIZES
     source = load_source(args.source)
     here = Path(__file__).resolve().parent
@@ -1119,7 +1164,7 @@ def run_paper(args: argparse.Namespace, seeds: tuple[int, ...]) -> int:
             raise SystemExit(f"binary LJ{n} reference {reference} != {REFERENCES[n]}")
         if n == 38 and calls != PAPER_BUDGETS[38]:
             raise SystemExit(f"binary LJ38 budget {calls}")
-        order = [seed for seed in SEEDS if seed in seeds]
+        order = seed_order(seeds)
         note(
             progress,
             f"paper lj{n} beads={PAPER_NBEADS} rounds={rounds} every={PAPER_PIN_INTERVAL} "
@@ -1175,11 +1220,12 @@ def run_paper(args: argparse.Namespace, seeds: tuple[int, ...]) -> int:
             )
             if args.seeds_out:
                 append_missing(args.seeds_out, SEED_FIELDS, [row], ("system", "arm", "seed"))
-        if len(rows) != len(SEEDS):
+        target = set(SEEDS) if set(seeds) <= set(SEEDS) else set(ALLOWED_SEEDS)
+        if set(order) != target or len(rows) != len(target):
             continue
         anneal_wall, anneal_head = comparison_anneal(args.summary, n, args.rows)
         summary = summarise_paper(
-            rows, len(SEEDS), anneal_wall, source, anneal_head, schedule_kind(n)
+            rows, len(target), anneal_wall, source, anneal_head, schedule_kind(n)
         )
         if summary:
             summary[0]["system"] = f"lj{n}"
@@ -1227,8 +1273,8 @@ def main(argv: list[str]) -> int:
     if args.budget is not None and args.budget != budget:
         raise SystemExit(f"LJ38 budget {args.budget} is not the paper budget {budget}")
     for seed in seeds:
-        if seed not in SEEDS:
-            raise SystemExit(f"seed {seed} is outside 2000-2005")
+        if seed not in ALLOWED_SEEDS:
+            raise SystemExit(f"seed {seed} is outside {ALLOWED_SEEDS[0]}-{ALLOWED_SEEDS[-1]}")
     source = load_source(args.source)
     head = args.head_file.read_text().strip()
     here = Path(__file__).resolve().parent
@@ -1239,11 +1285,7 @@ def main(argv: list[str]) -> int:
         raise SystemExit(f"binary budget {calls} {reference} != paper {budget} {REFERENCE}")
     check_potential(args.binary, args.runs / "check")
     progress = args.runs.parent / "progress.txt"
-    order = [
-        (seed, arm)
-        for seed, arm in schedule(SEEDS, ARMS, SCHEDULE_SEED)
-        if seed in seeds and arm in arms
-    ]
+    order = capped_jobs(seeds, arms)
     note(progress, "schedule " + " ".join(f"lj38:{arm}:{seed}" for seed, arm in order))
     rows: list[dict[str, str]] = []
     for seed, arm in order:
@@ -1284,7 +1326,7 @@ def main(argv: list[str]) -> int:
     if args.seeds_out and rows:
         append_seed_rows(args.seeds_out, rows)
     text_rows: list[dict[str, str]] = []
-    if "anneal" in arms and args.summary and args.seeds_out:
+    if "anneal" in arms and args.summary and args.seeds_out and set(seeds) == set(SEEDS):
         text_rows = publish_anneal_revisions(args, source)
     elif args.summary and rows:
         text_rows = summarise(rows, seeds, source, head)
