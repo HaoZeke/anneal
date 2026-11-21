@@ -64,16 +64,6 @@ fn labelled(spec: &Spec) -> Config {
     Config::recommended(spec.n).with_species(labels, None)
 }
 
-fn switch_completion(cfg: &mut Config) {
-    match std::env::var("H2H_COMPLETION").as_deref() {
-        Ok("off") => cfg.symmetry_completion_on_new = false,
-        Ok("once") => cfg.symmetry_completion_once = true,
-        Ok("framework") => cfg.symmetry_completion_framework = true,
-        Ok("fitted") => cfg.symmetry_completion_fitted = true,
-        _ => {}
-    }
-}
-
 fn potential(spec: &Spec) -> BinaryLennardJones {
     BinaryLennardJones::new(
         spec.n_a,
@@ -111,8 +101,7 @@ fn main() {
         eprintln!("bad seed {}", args[2]);
         std::process::exit(2);
     };
-    let mut cfg = labelled(&spec);
-    switch_completion(&mut cfg);
+    let cfg = labelled(&spec);
     let mut start_rng = StdRng::seed_from_u64(seed);
     let start = random_cluster_in_radius(
         spec.n,

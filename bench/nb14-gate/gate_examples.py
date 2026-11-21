@@ -27,6 +27,18 @@ FULL = (
     "outcome.best.to_bits(), outcome.final_energy, "
     "outcome.final_energy.to_bits());\n"
 )
+COMPLETION = """
+fn switch_completion(cfg: &mut Config) {
+    match std::env::var("H2H_COMPLETION").as_deref() {
+        Ok("off") => cfg.symmetry_completion_on_new = false,
+        Ok("once") => cfg.symmetry_completion_once = true,
+        Ok("framework") => cfg.symmetry_completion_framework = true,
+        Ok("fitted") => cfg.symmetry_completion_fitted = true,
+        _ => {}
+    }
+}
+
+"""
 
 
 def with_full_energies(text: str) -> str:
@@ -38,12 +50,28 @@ def with_full_energies(text: str) -> str:
     return "".join(lines[: end + 1] + [FULL] + lines[end + 1 :])
 
 
+def with_completion(text: str, tree: Path) -> str:
+    config = tree / "src/methods/cluster_hopping/config.rs"
+    if "symmetry_completion_fitted" not in config.read_text():
+        return text
+    text = text.replace("fn potential(spec: &Spec)", COMPLETION + "fn potential(spec: &Spec)")
+    text = text.replace(
+        "    let cfg = labelled(&spec);\n",
+        "    let mut cfg = labelled(&spec);\n"
+        "    switch_completion(&mut cfg);\n",
+    )
+    return text
+
+
 def main() -> None:
     tree, dest = Path(sys.argv[1]), Path(sys.argv[2])
     dest.mkdir(parents=True, exist_ok=True)
     for name, source in DRIVERS.items():
         path = HERE / "h2h_blj.rs" if source is None else tree / source
-        (dest / f"{name}.rs").write_text(with_full_energies(path.read_text()))
+        text = path.read_text()
+        if source is None:
+            text = with_completion(text, tree)
+        (dest / f"{name}.rs").write_text(with_full_energies(text))
 
 
 if __name__ == "__main__":
