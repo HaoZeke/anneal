@@ -58,7 +58,7 @@ The three output fields are objective calls, gradient calls and certified
 minimum reports. They are =256 0 0= for this example. The coverage assertion
 checks actual received peer samples, not merely a requested replica count.
 
-=jac=None= means no caller-supplied derivatives. Scalar local refinement
+~jac=None~ means no caller-supplied derivatives. Scalar local refinement
 can still estimate derivatives through function evaluations; every such
 probe is included in =res.nfev= and the aggregate budget. This is not a
 promise of a derivative-free proposal law or reliable numerical derivatives
@@ -68,21 +68,21 @@ does not certify a global minimum.
 
 * Replica and history controls
 
-With =jac=None= and no explicit coverage controls, =replicas=1= selects the
+With ~jac=None~ and no explicit coverage controls, ~replicas=1~ selects the
 scalar portfolio; two or more replicas select scalar hop chains. Explicit
 =coverage_shared=, =coverage_radius= or =coverage_neighbors= selects hop chains even at one
 replica. Replicas divide one aggregate budget; adding replicas does not
 multiply the number of paid calls. Comparing one portfolio against several
 hopping chains changes the controller as well as communication.
 
-=history="none", coverage_shared=True= communicates evaluated parameter
+~history="none", coverage_shared=True~ communicates evaluated parameter
 regions without a minimum ledger. The independent =coverage_radius= sets
 normalized RMS distance in parameter space. Fixed coordinates contribute
 zero distance and remain fixed in every callback. Nearby peer samples can
 repel proposals; neither distance nor repulsion requires forces. See
 [[file:../explanation/communication.org][the communication contract]] for the geometry, budget and counter definitions.
 
-=coverage_neighbors=1= limits both sampled-position and coverage-deposit
+~coverage_neighbors=1~ limits both sampled-position and coverage-deposit
 delivery to adjacent chain identities on a ring. Zero selects all-to-all;
 omitting the setting preserves the convenience policy above. This does not
 restrict the optional minimum ledger or forward received observations. The
@@ -98,25 +98,27 @@ the optional NNG minimum-history transport is a separate channel.
 * Optional parameter archives
 
 =store= supplies a parameter archive. Given =f_scipy=, =x0= and =bounds=
-as above and an existing =campaign_dir=:
+as above, name the archive. A directory is created if it is missing.
+An =.h5= file is created on the first record.
 
 #+begin_src python
+campaign_dir = "campaign"
 res = minimize(
     f_scipy,
     x0,
     bounds=bounds,
     jac=None,
-    budget=8000,
+    budget=64,
     seed=0,
     replicas=4,           # communicating chains
     history="shared",     # or "private" / "none"
-    store=campaign_dir,   # existing readcon-db root, or fit.h5
+    store=campaign_dir,   # directory, or an .h5 path
 )
 #+end_src
 
-- =store= is a handle to an *existing* archive:
-  - =*.h5= / =*.hdf5=: parameter rows =(x, f)=
-  - a directory that already holds a readcon-db corpus: parameters go in
+- =store= is a parameter store path or handle (missing directories and files are created automatically; see =anneal.open_parameter_store= and =anneal.minimize=):
+  - =*.h5= / =*.hdf5= (or =*.jsonl=): parameter rows =(x, f)=; parent directories and files are created on the first record
+  - a campaign directory (created if missing, or an existing readcon-db corpus directory): parameters go in
     =anneal_params.h5= (or =.jsonl=) *beside* the LMDB, never as CON
     frames (those require length \(3N\))
   - an object with =observations()= and =record(x, f)=
@@ -131,6 +133,6 @@ reuse =MinimaCorpus::record=.
 A fitting adapter flattens the parameter dictionary, calls
 =anneal.minimize=, and unflattens =res.x=. It forwards =replicas=,
 =history=, coverage settings and =store= explicitly. For an energy-only
-loss it forwards =jac=None=; it need not construct a Jacobian callback.
+loss it forwards ~jac=None~; it need not construct a Jacobian callback.
 Bounds must be finite closed intervals. This guide uses Anneal's public
 entry directly and does not require a particular ChemFit backend release.

@@ -7,7 +7,8 @@ One Sutton-Chen chain on the stored 78-atom start
 =================================================
 #+end_export
 
-This page runs one 9-6 N=78 chain from the stored start, then the same chain with surface hops.
+This page runs one 9-6 N=78 chain from the stored start, then the
+iso-hop arm on the same start.
 =scripts/sc96_78_shelf.py= writes =data/sc96_78_shelf.csv= and the blocks below.
 
 The Cambridge Cluster Database lists the global minimum at -19054.3977.
@@ -71,10 +72,11 @@ The chain found 93 distinct minima.
 The columns 555, 421 and 422 count bonded pairs by their common-neighbour signature.
 The lowest minimum has 332 bonds, 19 twelve-coordinated atoms, 0 five-coordinated atoms and 1 four-coordinated atoms.
 
-* Run the chain again with surface hops
+* Run the iso-hop arm
 
-=iso-hop= is that chain with surface hops.
-Each time the record falls, it tries every least-bound atom on every empty hollow site where the atom keeps its neighbours.
+=iso-hop= sets =Config::surface_hop_on_best=. The legacy surface-hop
+counters stay at zero and the arm matches =iso= on the shelf fixture
+(=tests/surface_hop.rs=, =surface_hops_run_from_new_bests_only_when_asked=).
 
 #+begin_src bash
 ANNEAL_MINIMA_DB=db-hop cargo run -q --release --example sc_h2h -- \
@@ -84,23 +86,24 @@ cargo run -q --release --example sc_minima -- db-hop $SIG sc9-6-78 10 0.62996052
 #+end_src
 
 #+begin_example
-surface_hops: 85
-surface_descents: 5
+surface_hops: 0
+surface_descents: 0
 hit: true
-hit_calls: 49561
+hit_calls: 27646
 system: sc9-6-78
-frames: 331
+frames: 203
 chains: 1
-distinct: 172
+distinct: 93
 energy chains bonds 555 421 422 other coordination(z:count)
 -19054.397655 1 332 4 94 69 165 4:1,6:20,7:10,8:14,9:10,10:4,12:19
--19053.987670 1 332 4 94 69 165 4:1,5:2,6:16,7:12,8:14,9:10,10:4,12:19
 -19052.995717 1 332 4 96 70 162 4:1,5:2,6:16,7:13,8:13,9:10,10:3,11:1,12:19
+-19052.921135 1 332 4 96 70 162 4:1,5:2,6:16,7:13,8:13,9:10,10:3,11:1,12:19
 #+end_example
 
-The surface-hop chain hit: true, after 49561 calls.
-It quenched 85 surface hops, and 5 sweeps went down.
-It found 172 distinct minima.
+The iso-hop chain hit: true, after 27646 calls.
+=surface_hops= and =surface_descents= stayed at 0 and
+0; the lowest minimum matched =iso=.
+It found 93 distinct minima.
 Its lowest minimum has 332 bonds, 19 twelve-coordinated atoms, 0 five-coordinated atoms and 1 four-coordinated atoms.
 
 * Compare the two lowest structures

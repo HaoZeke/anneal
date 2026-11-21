@@ -16,6 +16,18 @@ The block under the constructor is the example =cargo test --doc= runs.
   assert!(cfg.energy_lattice);
   #+end_src
 
+- =recommended_for_pair(n, kind)= :: =recommended= in the pair's own length,
+  at energy scale 1.
+  Lennard-Jones is the same preset.
+  Morse moves every length onto its pair minimum.
+
+  #+begin_src rust
+  use anneal_core::methods::cluster_hopping::Config;
+  use anneal_core::potentials::PairKind;
+  let lj = Config::recommended_for_pair(13, PairKind::LennardJones);
+  assert_eq!(lj.length_scale, Config::recommended(13).length_scale);
+  #+end_src
+
 - =recommended_with_scales(n, length, energy)= :: the same preset in declared units.
 
   #+begin_src rust
@@ -61,6 +73,10 @@ The block under the constructor is the example =cargo test --doc= runs.
   assert_eq!(cfg.n_points, 13);
   assert!(cfg.bayes_screen);
   #+end_src
+
+- =for_cluster_with_scales(n, length, energy)= :: =for_cluster= at those scales.
+  Orbit completion, when it runs, offers the shell core and the
+  fraction core.
 
 - =for_cluster_dual_core(n)= :: =for_cluster= with orbit completion on two cores and a restart after a stall.
 
@@ -128,7 +144,18 @@ The block under the constructor is the example =cargo test --doc= runs.
 
 * Search surfaces
 
-- =cluster_search(obj, grad, n, budget, seed=0, recommended=True, derived=False, communicating=False, *, ras=False, start=None, length_scale=None, species=None, sigmas=None, rigid=False, layout="block", target=None, water_sites=None)= :: \(3N\) point set, or \(6N\) for =rigid=True= or =water_sites=.
+- ~cluster_search~ :: \(3N\) point set, or \(6N\) for ~rigid=True~ or =water_sites=.
+
+  #+begin_src python :eval no
+  cluster_search(
+      obj, grad, n, budget, seed=0, recommended=True, derived=False,
+      communicating=False, *, ras=False, start=None, length_scale=None,
+      species=None, sigmas=None, rigid=False, layout="block", target=None,
+      water_sites=None, groups=None, local_step=None, ring_moves=None,
+      hold_stereocentres=None, measured_energy_scale=None,
+  )
+  #+end_src
+  Arguments after =*= are keyword-only.
   Always needs a gradient or force.
   =species= is one label per point and =sigmas= is one diameter per point; two or more labels add a swap move.
   A wide diameter ratio also tries one downhill unlike-pair exchange beside the microcanonical step and the inner-outer exchange.
@@ -150,11 +177,35 @@ The block under the constructor is the example =cargo test --doc= runs.
   The preset is then =Config.communicating_tip4p=, =Config.recommended_tip4p= or =Config.for_tip4p=.
   =water_sites= needs a start.
   It excludes =ras=, =derived=, =length_scale=, =rigid=, =species=, =sigmas=, and a non-block layout.
+  =groups= is one list of atom indices per rigid group.
+  The preset is then =recommended_molecular=, or =for_molecular= when
+  =recommended= is false, at energy scale one.
+  It needs =species= and =start=.
+  It excludes =ras=, =derived=, =communicating=, =length_scale=,
+  =rigid=, =sigmas=, =water_sites=, and a non-block layout.
+  =local_step= is =lbfgs=, =tric=, or =auto=.
+  Unset, =recommended= keeps =auto= and the other preset keeps L-BFGS.
+  =ring_moves=, =hold_stereocentres=, and =measured_energy_scale=
+  follow the preset when left unset: on for =recommended=, off otherwise.
   A callback may raise a =BaseException= that is not an =Exception=, such as =KeyboardInterrupt=.
   The run then stops at the next evaluation, and the exception is re-raised.
-- =ensemble_optimize(obj, low, high, budget, ..., grad_fn=None)= :: design box. Gradient → hop and quench; no gradient → portfolio.
+- ~ensemble_optimize~ :: design box. Gradient → hop and quench; no gradient → portfolio.
+
+  #+begin_src python :eval no
+  ensemble_optimize(obj, low, high, budget, ..., grad_fn=None)
+  #+end_src
 - =box_ensemble_optimize(...)= :: hop primitive. Requires =grad_fn=.
-- =global_optimize(obj, low, high, budget, ...)= :: portfolio arms when the caller does not want hops.
+- ~global_optimize~ :: portfolio arms when the caller does not want hops.
+
+  #+begin_src python :eval no
+  global_optimize(
+      obj, low, high, budget, seed=0, grad_fn=None, noise_sigma=None,
+      policy="auto", x0=None, *, replicas=1, coverage_shared=True,
+      coverage_radius=0.05, coverage_neighbors=0,
+  )
+  #+end_src
+  =replicas=, =coverage_shared=, =coverage_radius=, and
+  =coverage_neighbors= are keyword-only.
 
 A callback that raises =BaseException= other than =Exception= (a harness
 stop, or =KeyboardInterrupt=) ends the search at once. The best state
@@ -167,38 +218,111 @@ See [[file:../howto/choose-driver.org][choose a driver]].
 
 * Classical (values only)
 
-- =Boltzmann(t_init, sigma)= :: Logarithmic cooling + Gaussian + Metropolis.
-- =Fast(t_init, gamma)= :: Reciprocal cooling + Cauchy + Metropolis.
-- =Gsa(t_init, =q_v=, q_a)= :: =Tsallis= cooling + =Tsallis= visit + =Tsallis= accept.
+- ~Boltzmann~ :: Logarithmic cooling + Gaussian + Metropolis.
 
-All called via =run(obj, low, high, preset, n_epochs, steps_per_epoch, seed, x0=None)=.
+  #+begin_src python :eval no
+  Boltzmann(t_init=1.0, sigma=0.5)
+  #+end_src
+
+- ~Fast~ :: Reciprocal cooling + Cauchy + Metropolis.
+
+  #+begin_src python :eval no
+  Fast(t_init=1.0, gamma=0.5)
+  #+end_src
+
+- ~Gsa~ :: =Tsallis= cooling + =Tsallis= visit + =Tsallis= accept.
+
+  #+begin_src python :eval no
+  Gsa(t_init=1.0, q_v=2.62, q_a=1.7)
+  #+end_src
+
+All classical presets are called via ~run~.
+
+  #+begin_src python :eval no
+  run(
+      obj, low, high, preset, n_epochs=100, steps_per_epoch=200,
+      seed=42, x0=None, max_evals=None,
+  )
+  #+end_src
 Each move is mirror-reflected into =[low, high]= and the neighbourhood is the
 box, so =obj= is only evaluated inside it. =x0= starts the walk at a given
 point; without it the start is a uniform draw. The start costs one
-evaluation, so a run makes =1 + n_epochs * steps_per_epoch= calls.
+evaluation, so a run makes =1 + n_epochs * steps_per_epoch= calls, or
+=max_evals= when that cap is smaller.
 =run_qmc= and =global_optimize= take =x0= as well.
 =low=, =high= and =x0= may be any array-like of one shape, flattened in C order.
-A coordinate with =low == high= stays fixed. A NaN objective value counts as
+A coordinate with ~low == high~ stays fixed. A NaN objective value counts as
 worse than every number, =+inf= included, so it is never kept as the best.
 
 * Pilot and low-discrepancy
 
 - =pilot_draws_qmc(n, seed)= -> (n,3) array of (T0, sigma, =q_v=).
-- =low_discrepancy_points(low, high, n, skip=1)= .
+- ~low_discrepancy_points(low, high, n, skip=1)~ .
 
 * Polish
 
 These drivers require gradients.
 Gradient support is provided by =eindir=; see the [[https://eindir.rgoswami.me/howto/gradients.html][eindir gradients guide]].
 
-- =polish(obj, grad, low, high, x0, max_fevals=200, ...)
+- ~polish(obj, grad, low, high, x0, max_fevals=200, ...)~
 - =qmc_polish(obj, grad, low, high, n_starts, max_fevals_per_start, ...)=
-- =shifted_qmc_polish(..., n_replicates=1, ...)
+- ~shifted_qmc_polish(..., n_replicates=1, ...)~
 
 * Advanced drivers
 
-- =additive_independence(obj, low, high, max_fevals, seed=0, degree=8, ... n_pilot=0)= (values only, rank-1 surrogate).
-- =gle_langevin(obj, grad, low, high, max_fevals, seed=0, omega0=0.2, dt=0.2, n_epochs=40)= (gradient, colored noise).
+- ~additive_independence~ (values only, rank-1 surrogate).
+
+  #+begin_src python :eval no
+  additive_independence(
+      obj, low, high, max_fevals, seed=0, degree=8, ..., n_pilot=0,
+  )
+  #+end_src
+
+- ~gle_langevin~ (gradient, colored noise).
+
+  #+begin_src python :eval no
+  gle_langevin(
+      obj, grad, low, high, max_fevals, seed=0, omega0=None, dt=0.2,
+      n_epochs=40, x0=None,
+  )
+  #+end_src
+  Unset, =omega0= is estimated from the local gradient.
+  A number is that frequency.
+
+* Switches left off
+
+=with_scales= is the base the presets copy.
+These stay off there, and off on every stock preset.
+
+- =plateau_heat= :: doubles the Metropolis temperature and the
+  lattice-exchange temperature on each escape plateau, up to four
+  times, and returns to the preset on a new lowest minimum.
+  The proposal step stays put.
+- =branch_on_stall= :: spends a stalled stretch on fresh random descents.
+  Off, the chain is unchanged.
+- =call_floor= :: a pair at or below this distance is opened before a
+  relaxation, and a zero-step read inside it is refused uncharged.
+  Unset on every stock preset.
+  =call_floor_elements= names an atomic number per point and raises
+  each pair's floor to a fraction of its covalent radii, never below
+  =call_floor=.
+
+=h2h_morse= reads ~H2H_PAIR_SCALE=1~ and then uses
+=recommended_for_pair= for Morse.
+Unset, it keeps =recommended=.
+~H2H_PLATEAU_HEAT=1~ sets =plateau_heat= on =h2h_morse=, =h2h_metal=,
+and =h2h_gmin_proof=.
+~H2H_BRANCH=1~ sets =branch_on_stall= on those three.
+The ~h2h_morse~ harness reads ~H2H_PRIORS~ when it builds ~Config~.
+~H2H_PRIORS=0~ turns off the SOAP proposal, stall symmetrisation, and
+the continuous-symmetry proposal there; ~soap~ turns off only the SOAP
+proposal. The library API does not apply this variable. The
+~h2h_metal~ and ~h2h_covalent~ binaries read it for their own harness
+logic (SOAP only on metal, arm selection on covalent).
+~Config::check_removed_env~ rejects removed standalone environment
+variables (~H2H_HANDOVER~, ~PRIOR_RESEED~, ~PRIOR_GROWTH~, ~PRIOR_CORE~,
+~PRIOR_HANDOVER~, ~PRIOR_MOTIF~) whenever set and non-empty, and rejects
+removed prior names when ~H2H_PRIORS~ is set in the process environment.
 
 * Device and ensemble (same kernel)
 

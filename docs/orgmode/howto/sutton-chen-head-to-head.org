@@ -16,16 +16,19 @@ Start by choosing which of the four arms to run.
 Each of them runs arm 3, the orbit-completion search, in Cambridge reduced units.
 The Metropolis temperature is the published basin-hopping temperature of the row.
 
-| arm       | chains | surface hops |
-|-----------+--------+--------------|
-| =iso=     |      1 | no           |
-| =ens=     |      4 | no           |
-| =iso-hop= |      1 | yes          |
-| =ens-hop= |      4 | yes          |
+| arm       | chains | surface hops     |
+|-----------+--------+------------------|
+| =iso=     |      1 | no               |
+| =ens=     |      4 | no               |
+| =iso-hop= |      1 | set, not applied |
+| =ens-hop= |      4 | set, not applied |
 
 The =ens= chains split the budget and share one exact minimum history.
 They take turns, so a run repeats exactly on one thread.
-Surface hops are =Config::surface_hop_on_best=, described in the [[file:../methods/catalog.org][method catalog]].
+The hop arms set =Config::surface_hop_on_best=. The search records
+the flag and does not quench the candidates. The
+[[file:../methods/catalog.org][method catalog]] describes the flag and
+=packing::surface_hops=.
 
 * Give every code the same starts
 
@@ -59,8 +62,8 @@ Each output line is a key and a value, and the keys below answer most questions.
 - =best= :: Lowest validated energy.
 - =full_quenches= :: Full quenches over the whole run.
 - =screen_calls= :: Calls spent on short screening descents.
-- =surface_hops= :: Surface-hop candidates quenched.
-- =surface_descents= :: Sweeps that lowered the record.
+- =surface_hops= :: Legacy surface-hop counter; stays =0= because =outcome.surface_hops= is fixed at =(0, 0, 0.0)= and the hop loop does not quench surface candidates.
+- =surface_descents= :: Legacy surface-descent counter (second element of =outcome.surface_hops=); stays =0= because candidates are not quenched.
 - =resolved_sha256= :: Digest of the resolved configuration.
 
 The digest changes only when the configuration does.
@@ -84,7 +87,7 @@ The script draws the figure with =docs/scripts/plot_sc_hits.py= from the run log
 label hits median_calls_to_hit mean_par2 paired_p
 gmin 20/32 1272371 2187979 -
 iso 23/32 588617 1570333 0.0562
-iso-hop 32/32 127038.5 272221 0.0000
+iso-hop 23/32 588617 1570333 0.0562
 #+end_example
 
 #+CAPTION: Fraction of seeds 9532 to 9563 of 9-6 N=78 at the global minimum against energy calls, for GMIN, iso and iso-hop.
@@ -96,7 +99,7 @@ Its rows are those of harness 9149d1b0, one seed at a time on one core, from =sc
 Its file is the 9-6 row of =scripts/metal_h2h/run_sc.py=: temperature 10, step 0.251984, the container GMIN sizes for Sutton-Chen, and the quench block there.
 =gmin= hits 20 of 32 seeds, median 1272371 calls to a hit. It misses 12.
 =iso= hits 23 of 32 seeds, median 588617 calls to a hit. It misses 9.
-=iso-hop= hits 32 of 32 seeds, median 127038.5 calls to a hit.
+=iso-hop= hits 23 of 32 seeds, median 588617 calls to a hit. It misses 9.
 The earlier GMIN rows, with temperature 0.8, step 0.40 and a container radius of 30, hit 0 of 32 seeds. They are kept in the file.
 When a curve rises earlier, its arm solves more seeds at a smaller budget.
 The paired p-value comes from a sign-flip test on the per-seed differences.

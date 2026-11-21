@@ -1,0 +1,4 @@
+{"allowance":24,"best_value":0.11783502262789634,"dimension":8,"history_admissible":false,"max_projected_gradient":3.2859408024795296,"multiplier":1,"n_evals":24,"n_grads":21,"record":"quench-control","seed":0,"within_replica_budget":true}
+{"allowance":48,"best_value":2.602408453087032e-7,"dimension":8,"history_admissible":false,"max_projected_gradient":0.0037964856335091684,"multiplier":2,"n_evals":48,"n_grads":42,"record":"quench-control","seed":0,"within_replica_budget":true}
+{"allowance":96,"best_value":9.181535069772627e-19,"dimension":8,"history_admissible":true,"max_projected_gradient":7.263731301514476e-9,"multiplier":4,"n_evals":70,"n_grads":59,"record":"quench-control","seed":0,"within_replica_budget":true}
+{"allowance":192,"best_value":9.181535069772627e-19,"dimension":8,"history_admissible":true,"max_projected_gradient":7.263731301514476e-9,"multiplier":8,"n_evals":70,"n_grads":59,"record":"quench-control","seed":0,"within_replica_budget":true}

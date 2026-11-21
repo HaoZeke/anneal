@@ -355,10 +355,23 @@ def rewrite(rows: list[dict[str, str]]) -> None:
             break
     if not replaced and "lab-cosmo/sketchmap at c2871db" not in page:
         raise SystemExit("the reference-sketch-map paragraph is not the one this script rewrites")
-    start = page.index("| book | method | T |")
+    page = page.replace(
+        "=scripts/landfold_survey.py= writes =data/landfold_survey.csv= and\n"
+        "can rewrite the table on this page. The numbers are not copied here.\n",
+        "The table is =data/landfold_survey.csv=, written by =scripts/landfold_survey.py=.\n",
+        1,
+    )
+    marker = "# landfold-survey-table\n"
     end = page.index("* References")
     generated = org_table(rows) + "\n" + difference_table(rows) + "\n"
-    page = page[:start] + generated + page[end:]
+    if "| book | method | T |" in page:
+        start = page.index("| book | method | T |")
+        page = page[:start] + generated + page[end:]
+    elif marker in page:
+        start = page.index(marker) + len(marker)
+        page = page[:start] + "\n" + generated + page[end:]
+    else:
+        page = page[:end] + generated + page[end:]
     PAGE.write_text(page)
 
 

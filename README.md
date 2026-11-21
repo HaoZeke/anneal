@@ -226,12 +226,14 @@ let mut ledger = Ledger::new(400_000);
 ```
 
 The `lj_joint_optimum` release example also provides a controlled NVE
-minima-hopping communication comparison. With the `ira` feature enabled,
-`mh-communication` runs both private-history and shared-history ensembles:
+minima-hopping communication comparison. It requires `ira` and `rgsaddle`.
+`ira` needs `IRA_LIB_DIR` pointing at `libira`. `mh-communication` runs
+both private-history and shared-history ensembles:
 
 ```bash
-ANNEAL_MH_REPLICAS=4 ./target/release/examples/lj_joint_optimum \
-  75 200000 2 mh-communication
+IRA_LIB_DIR=/path/to/ira/lib ANNEAL_MH_REPLICAS=4 \
+  cargo run --locked --release --features ira,rgsaddle \
+  --example lj_joint_optimum -- 75 200000 2 mh-communication
 ```
 
 Here 200,000 is the total objective-call budget for each ensemble, divided
@@ -277,24 +279,27 @@ This input cannot be combined with `ANNEAL_OPTBENCH_STARTS`: a diagnostic
 shelf structure is not a published random-start archive. The `mh-private-soft`
 and `mh-shared-soft` selectors add velocity softening to the same comparison.
 
-External potentials use the same optimizer driver. The molecular-cluster and
-slab examples share one persistent in-process profile adapter; selecting
-`nwchemc` loads `libnwchemc` once and serves the complete hop loop without an
-RPC server or a result cache. Molecular requests omit a simulation cell, while
-the slab driver sends the periodic cell through the same adapter.
+External potentials use the same optimizer driver.
+`molecular_cluster` evaluates (H2O)m with GFN2-xTB. It opens
+`libxtb_engine.so` from `RGPOT_XTB_ENGINE`, or `./libxtb_engine.so` when
+that variable is unset. The arguments are the number of molecules, the
+call budget and the number of seeds. A fourth token is a comma-separated
+option list. `comm` or `communicating` turns on the communicating
+channel. The example does not read an engine name, `POTENTIAL_CONFIG` or
+`POTENTIAL_LIBRARY`.
 
 ```bash
-POTENTIAL_CONFIG=/path/to/PotentialConfig.bin \
-POTENTIAL_LIBRARY=/path/to/libnwchemc.so \
-cargo run --locked --release --features rgpot-ex \
-  --example molecular_cluster -- 6 1200 8 nwchemc
+RGPOT_XTB_ENGINE=/path/to/libxtb_engine.so \
+cargo run --locked --release \
+  --features rgpot-ex,featomic,bank-rpc \
+  --example molecular_cluster -- 6 1200 8
 ```
 
-The shared adapter is
-[`examples/common/profile_engine.rs`](examples/common/profile_engine.rs); the
-two consumers are
-[`examples/molecular_cluster.rs`](examples/molecular_cluster.rs) and
-[`examples/slab_adsorption.rs`](examples/slab_adsorption.rs).
+The handle is
+[`examples/common/rgpot_eindir.rs`](examples/common/rgpot_eindir.rs).
+[`examples/slab_adsorption.rs`](examples/slab_adsorption.rs)
+is separate. It evaluates a slab with `librgpot_cuh2.so`, from
+`RGPOT_CUH2_LIBRARY` or from `./librgpot_cuh2.so`.
 
 Rigid TIP4P water is a first-class objective, not an example-local potential.
 Each molecule is a rigid body (centre of mass plus an exponential-map
@@ -332,11 +337,19 @@ cargo test --locked --features rgsaddle
 
 The `vesin-nl` feature compiles vesin's own cell-list sources into the
 neighbour list instead of the crate's reimplementation. Its build script
-reads `VESIN_SRC`, a checkout of [vesin](https://github.com/Luthaf/vesin),
-so `cargo test --all-features` needs it set:
+reads `VESIN_SRC` and compiles `vesin/src/vesin.cpp`,
+`cpu_cell_list.cpp`, `verlet.cpp`, `shared_libraries.cpp`,
+`threadpool.cpp` and `vesin_cuda_stub.cpp`. That is the layout of vesin
+0.6.2. A later checkout moved those files. `cargo test --all-features`
+also needs `LAMMPS_LIB_DIR`, `IRA_LIB_DIR` and `GPR_OPTIM_LIB_DIR`,
+because those features panic when the directory is unset:
 
 ```bash
-VESIN_SRC=/path/to/vesin cargo test --locked --all-features
+VESIN_SRC=/path/to/vesin \
+LAMMPS_LIB_DIR=/path/to/lammps/lib \
+IRA_LIB_DIR=/path/to/ira/lib \
+GPR_OPTIM_LIB_DIR=/path/to/gpr_optim/lib \
+cargo test --locked --all-features
 ```
 
 ## Install
