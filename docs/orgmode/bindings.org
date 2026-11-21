@@ -34,6 +34,75 @@ anneal_core_dep = dependency('anneal-core')
 executable('myprog', 'main.cpp', dependencies: anneal_core_dep)
 #+END_SRC
 
+** Reproducible static archive
+
+Meson builds the static archive with
+=scripts/meson_cargo_build.py=. Leave
+=ANNEAL_REPRODUCIBLE_ARCHIVE= unset for that ordinary build. The
+script then forwards the caller's Cargo environment. On hosts where
+Meson passes =objcopy= and =nm=, it packs the final object with
+=ar crs=. On macOS and Windows it ships Cargo's archive as built.
+
+Set =ANNEAL_REPRODUCIBLE_ARCHIVE=1= to change three things.
+
+Archiver flags. On hosts where Meson passes =objcopy= and =nm=,
+the members are joined with =ld -r= and the archive that ships is
+packed with =ar crsD= when that archiver accepts =D= (zero mtime,
+uid, and gid). An archiver that rejects =D= is packed with =ar crs=
+and the member headers are then rewritten to those same zeros. On
+that path =AR= is used when it is set, otherwise =ar= on =PATH=,
+otherwise =llvm-ar=. On macOS and Windows, Meson passes an empty
+=objcopy= and =nm=, so no archiver runs: the copied Cargo archive's
+headers are rewritten in process and =AR= is ignored.
+
+Remapped prefixes. Cargo runs with =CARGO_INCREMENTAL=0= and
+=-Ccodegen-units=1=. =--remap-path-prefix= sends the source tree to
+=/source=, the Cargo target directory to =/build=, and
+=CARGO_HOME= (or =~/.cargo= when it is unset) to =/cargo=. When
+several prefixes match a path, rustc applies the last matching
+flag. The script passes them shortest first, so the most specific
+one wins: a target directory inside the source tree maps to
+=/build=, not =/source/target=.
+
+=CARGO_ENCODED_RUSTFLAGS= merge. When that variable is set, even
+to empty, its unit-separator list is kept and =RUSTFLAGS= is not
+read. Otherwise =RUSTFLAGS= is split on spaces. The remap flags
+are appended, and the whole list is written back as
+=CARGO_ENCODED_RUSTFLAGS=. Cargo honours that form when both
+variables are set, so a flag that contains a space survives.
+
+Export the variable for =meson compile=. Setup does not run the
+archive script. Ninja does not track the variable either, so after
+changing it in an existing build directory run =meson compile
+--clean= first, or use a fresh build directory. Compare two
+checkouts at different paths. Pass
+debug info so the source path is actually in the objects; a
+release build often has none, and then =cmp= can match even when
+the prefixes were not rewritten.
+
+#+BEGIN_SRC bash
+export ANNEAL_REPRODUCIBLE_ARCHIVE=1
+export CARGO_ENCODED_RUSTFLAGS=-Cdebuginfo=2
+meson setup build-repro
+meson compile -C build-repro
+#+END_SRC
+
+Run the same commands in the second checkout, then:
+
+#+BEGIN_SRC bash
+cmp "$A/build-repro/libanneal_core.a" \
+    "$B/build-repro/libanneal_core.a"
+strings "$A/build-repro/libanneal_core.a" | grep -F /source
+strings "$A/build-repro/libanneal_core.a" | grep -F "$A"
+#+END_SRC
+
+=cmp= exits 0 when the archives match. =grep= should find
+=/source= and should not find the checkout path. On Windows the
+file is =anneal_core.lib=. On GNU =ar= 2.42, =D= is already the
+default, so two builds of one tree match without the variable.
+The two-checkout comparison is the check that the remap and the
+final archive step agree.
+
 ** CMake
 
 #+BEGIN_SRC cmake
