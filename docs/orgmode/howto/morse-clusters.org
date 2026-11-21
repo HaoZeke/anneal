@@ -15,6 +15,7 @@ use anneal_core::potentials::PairPotential;
 
 let pot = PairPotential::morse(43, 6.0);
 let cfg = Config::recommended_with_scales(43, pot.kind().length_scale(), 1.0);
+// Or equivalently: Config::recommended_for_pair(43, pot.kind())
 #+end_src
 
 =PairKind::length_scale= is =r_min / 2^(1/6)=: 1 for Lennard-Jones and 0.891 for Morse.

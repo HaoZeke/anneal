@@ -30,12 +30,24 @@ For =GminTip4p=, set it to =gmin_water_geometry()=, as =examples/h2h_seed= does.
    * - Name
      - Move
      - Setting
+   * - ``rkick``
+     - Shift every centre and rotation vector together by uniform steps.
+     - ``translate_step`` (0.35 A) and ``rotate_step`` (0.40 rad) in ``for_tip4p``.
    * - ``rtrans``
      - Shift every centre by a uniform step in each coordinate.
      - ``translate_step``, 0.35 angstroms in ``for_tip4p``.
    * - ``rrot``
      - Add a uniform increment to each component of every rotation vector, then fold it into the ball of radius pi.
      - ``rotate_step``, 0.40 rad in ``for_tip4p``.
+   * - ``rtrans1``
+     - Shift one body's centre by a uniform step of at least ``min_separation``.
+     - ``max(min_separation, translate_step)``; ``min_separation`` is 2.70 A in ``for_tip4p``.
+   * - ``rreor``
+     - Draw a fresh uniform orientation for one body while keeping its centre fixed.
+     - Always enabled when ``local`` is ``false``.
+   * - ``rreloc``
+     - Move one body onto a vacant contact at ``min_separation``.
+     - ``relocate``, on in ``for_tip4p``.
    * - ``rcycle``
      - Reverse one directed cycle of hydrogen bonds.
        Each body on the cycle turns about its oxygen.
@@ -51,12 +63,13 @@ For =GminTip4p=, set it to =gmin_water_geometry()=, as =examples/h2h_seed= does.
 - =n_molecules= :: bodies in the state.
 - =translate_step= :: half-width of the =rtrans= step, in length units.
 - =rotate_step= :: largest =rrot= increment per component, or the cap of the =rorient= angle, in radians.
-- =local= :: =true= offers =rorient= in place of =rtrans= and =rrot=.
+- =local= :: =true= offers =rorient= in place of the six collective and single-body moves.
 - =reverse_cycles= :: =true= adds =rcycle=.
+- =relocate= :: =true= (when =local= is =false=) adds =rreloc=.
 
 * Presets
 
-- =Config::for_tip4p=, =Config::recommended_tip4p=, =Config::communicating_tip4p= :: =rtrans=, =rrot= and =rcycle=.
+- =Config::for_tip4p=, =Config::recommended_tip4p=, =Config::communicating_tip4p= :: =rkick=, =rtrans=, =rrot=, =rtrans1=, =rreor=, =rreloc= and =rcycle=.
 - =Config::with_rigid_bodies= :: =rorient= only.
 
 The Python =cluster_search= with =water_sites= uses these three TIP4P presets on the caller's sites.

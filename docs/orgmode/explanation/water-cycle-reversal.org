@@ -14,9 +14,8 @@ It covers how the move works, how it fits with the other moves, and what it chan
 * The other moves
 
 A rigid water has a centre and an orientation, six coordinates per molecule.
-=Config::for_tip4p= follows Wales and Hodges (1998) with two moves.
-=rtrans= shifts every centre by a small random step.
-=rrot= adds a small random increment to every rotation.
+=Config::for_tip4p= started from the Wales and Hodges (1998) collective moves,
+=rtrans= (shifting every centre by a small random step) and =rrot= (adding a small random increment to every rotation), and now also includes the single-molecule and relocation moves (=rkick=, =rtrans1=, =rreor=, =rreloc=; see [[file:../reference/rigid-water-moves.org][Rigid water moves]]).
 After each move the search relaxes the cluster to a local minimum.
 It then accepts or rejects that minimum by its energy.
 A move allocator picks the move for each hop.

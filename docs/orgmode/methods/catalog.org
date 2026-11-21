@@ -174,8 +174,9 @@ as an enum rather than a trait object so the generic =propose= stays
 monomorphized per call.
 
 Key types and functions: =MoveLibrary= (src/methods/cluster_hopping/moves.rs:12)
-with variants =Atomic=, =Lean=, =LeanBurst=, =Visit=, =Twin=,
-=SelfReseed=, =LearnedReseed=, =Reseed=, =GrowthAndTwin=, =Molecular=;
+with variants =WalesDoye=, =Atomic=, =Lean=, =LeanBurst=, =LeanBurstHollow=,
+=LeanBurstFill=, =Visit=, =Twin=, =SelfReseed=, =LearnedReseed=, =Reseed=,
+=GrowthAndTwin=, =Molecular=, =RigidBody=;
 its =kernels= method (moves.rs:50) composes the concrete arms. =ClusterMove=
 enum (moves.rs:176) with variants =AllPoints=, =SinglePoint=, =Visit=,
 =Burst= (composed surface relocations, one acceptance test per excursion),
@@ -195,7 +196,8 @@ Constants and defaults: =LennardJonesPreset= and =MolecularPreset=
 coefficients (e.g. =MERGE_RADIUS = 0.7=, =TEMPERATURE = 0.8=,
 =BIAS_HEIGHT = 0.25=, =SOAP_RMSD = 0.35=, =SOAP_CUTOFF = 3.5=,
 =MIN_SEPARATION = 0.85=) multiplied by declared length/energy scales.
-=Config::recommended= (config.rs) selects =MoveLibrary::LeanBurst=
+=Config::recommended= (config.rs) selects =MoveLibrary::LeanBurst= at every size
+(named structure templates were removed from cluster search)
 with the SOAP arm and Thompson allocation over the arms. Like
 =Config::communicating=, it completes the core's orbit on every new basin
 and, below 98 points, draws between the plain and the two-phase relative
