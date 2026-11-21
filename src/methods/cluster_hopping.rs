@@ -2945,6 +2945,15 @@ fn directed_stall_source(
         .flatten()
 }
 
+/// A side call may start only while this run is still taking charges.
+///
+/// The target and the caller stop close the run even when the original
+/// allocation has not been spent. [`Ledger::budget`] ignores both, so a
+/// side path that consults it keeps evaluating after the walk has stopped.
+fn side_call_allowed(ledger: &Ledger) -> bool {
+    !ledger.target_reached() && !ledger.stopped() && ledger.remaining() > 0
+}
+
 fn claim_observed_basis_probe(
     cfg: &Config,
     ledger: &Ledger,
@@ -2955,6 +2964,7 @@ fn claim_observed_basis_probe(
     !cfg.move_library.is_rigid_body()
         && cfg.active_region.is_none()
         && cfg.frozen.is_none()
+        && side_call_allowed(ledger)
         && ledger.remaining() >= evidence
         && seen.insert(basin)
 }
@@ -4985,7 +4995,9 @@ where
     // incumbent. It is merged only after the walk has finished.
     let mut observed_basis_best: Option<(f64, Array1<f64>)> = None;
     // Calls charged by side reconstructions, hidden from the walk's stall
-    // clocks and settled back onto the caller's ledger when the walk ends.
+    // clocks. They join the walk only while it is still taking charges. A
+    // reconstruction that reached the target was moved on before its record;
+    // one that missed is not added after that close.
     let mut observed_basis_spent = 0usize;
     // Multiple of the preset temperature the walk hops at. It stays one
     // unless `plateau_heat` is on.
@@ -9260,6 +9272,9 @@ where
                 ) && let Some(candidate) =
                     crate::lattice::observed_basis_candidate(x.view(), true)
                 {
+                    // The slice is the room left on the walk, not its original
+                    // allocation. The caller's stop is shared so a flag raised
+                    // inside the quench refuses every later charge.
                     let mut side_ledger = Ledger::new(ledger.remaining());
                     side_ledger.stop = ledger.stop.clone();
                     let (basis_energy, basis_state) =
@@ -9267,8 +9282,20 @@ where
                     let sane = !basis_state.is_empty()
                         && quench_is_sane(cfg, basis_energy, basis_state.view());
                     let required = grad.is_some();
-                    let gradient = if sane {
+                    // The quench may have closed the run. The follow-up
+                    // gradient is another side call and does not start.
+                    let follow_up = sane
+                        && side_call_allowed(ledger)
+                        && !side_ledger.stopped()
+                        && side_ledger.remaining() > 0;
+                    let gradient = if follow_up {
                         grad.as_deref_mut().and_then(|evaluate| {
+                            if !side_call_allowed(ledger)
+                                || side_ledger.stopped()
+                                || side_ledger.remaining() == 0
+                            {
+                                return None;
+                            }
                             evaluate(&mut side_ledger, basis_state.view()).filter(|values| {
                                 answer_gradient_ok(cfg, values.view(), basis_state.len())
                             })
@@ -9283,6 +9310,8 @@ where
                     let side_spent = side_ledger.spent();
                     ledger.budget = ledger.budget.saturating_sub(side_spent);
                     observed_basis_spent = observed_basis_spent.saturating_add(side_spent);
+                    // Recording settles the quench that already ran. It is not
+                    // another side call, so an empty remainder does not drop it.
                     if recordable && ledger.below_target(basis_energy) {
                         ledger.budget = ledger.budget.saturating_add(observed_basis_spent);
                         ledger.spent = ledger.spent.saturating_add(observed_basis_spent);
@@ -9295,11 +9324,14 @@ where
                     {
                         observed_basis_best = Some((basis_energy, basis_state));
                     }
+                    if ledger.stopped() || side_ledger.stopped() {
+                        break HopStop::of_closed(ledger);
+                    }
                 }
             }
             if stall_outcome.is_none()
                 && hop_room(hops)
-                && !ledger.target_reached()
+                && side_call_allowed(ledger)
                 && let Some(g) = grad.as_deref_mut()
             {
                 let scale = if cfg.minima_hopping {
@@ -9317,12 +9349,28 @@ where
                 };
                 let sign = if rng.random::<bool>() { 1.0 } else { -1.0 };
                 let source = directed_source.as_ref().unwrap_or(&x);
-                if let Some(o) = activate(source.view(), |y| g(ledger, y), &act, sign) {
+                if let Some(o) = activate(
+                    source.view(),
+                    |y| {
+                        if !side_call_allowed(ledger) {
+                            return None;
+                        }
+                        g(ledger, y)
+                    },
+                    &act,
+                    sign,
+                ) {
                     soft_escapes += 1;
                     if o.crossed {
                         soft_crossed += 1;
                     }
                     soft_lambda += o.lambda;
+                    // A spent budget still quenches: the relaxation charges
+                    // nothing and the chain adopts the point already in hand.
+                    // A target or a caller stop does not start that quench.
+                    if ledger.target_reached() || ledger.stopped() {
+                        break HopStop::of_closed(ledger);
+                    }
                     let (ee, xe) = relax(ledger, o.state.view(), cfg.relax_steps);
                     let escape_gradient = record_quenched_answer(
                         cfg,
@@ -9795,9 +9843,16 @@ where
     };
 
     ledger.budget = ledger.budget.saturating_add(observed_basis_spent);
-    ledger.spent = ledger.spent.saturating_add(observed_basis_spent);
+    // The hit record already includes a reconstruction that reached the
+    // target. A miss was withheld from the walk's clocks and is not charged
+    // onto the ledger after that close, so the hit's call count stays the
+    // one the search reported when it stopped.
+    if !ledger.target_reached() {
+        ledger.spent = ledger.spent.saturating_add(observed_basis_spent);
+    }
     if let Some((energy, state)) = observed_basis_best
         && energy < ledger.best
+        && !ledger.target_reached()
     {
         ledger.record(energy, state.view());
     }
@@ -10650,6 +10705,233 @@ mod tests {
             &active, &ledger, 10, 3, &mut seen
         ));
         assert!(seen.is_empty());
+    }
+
+    #[test]
+    fn an_observed_basis_probe_waits_while_the_target_is_reached() {
+        let cfg = Config::recommended(6);
+        let mut ledger = Ledger::new(20);
+        ledger.stop_below(0.0);
+        ledger.record(-1.0, Array1::zeros(3).view());
+        assert!(ledger.target_reached());
+        let mut seen = std::collections::HashSet::new();
+        assert!(!claim_observed_basis_probe(&cfg, &ledger, 10, 7, &mut seen));
+        assert!(seen.is_empty(), "a closed run must not consume the basin");
+    }
+
+    fn quiet_basis_search(n: usize) -> Config {
+        let mut cfg = Config::recommended(n);
+        cfg.escape_on_stall = true;
+        cfg.restart_on_stall = false;
+        cfg.trail_on_stall = false;
+        cfg.tabu_on_stall = false;
+        cfg.symmetrise_on_stall = false;
+        cfg.jump_on_stall = false;
+        cfg.path_on_stall = false;
+        cfg.return_screen = false;
+        cfg.bayes_screen = false;
+        cfg.energy_lattice = false;
+        cfg.orbit_complete_on_new = false;
+        cfg.point_symmetrise_on_new = false;
+        cfg.continuous_symmetry = ContinuousSymmetry::Off;
+        cfg.soap_mode = SoapProposalMode::Off;
+        cfg.prior_soap = false;
+        cfg.branch_on_stall = false;
+        cfg.superbasin_escape = false;
+        cfg.polish_records = 0;
+        cfg.restart_patience = 1;
+        cfg.relax_steps = 4;
+        cfg.screen_steps = 1;
+        cfg.max_hops = Some(40);
+        cfg.replicas = 1;
+        cfg.surfaces.clear();
+        cfg.angular_moves = false;
+        cfg.soft_perturb = false;
+        cfg.hmc = None;
+        cfg
+    }
+
+    fn regular_tetrahedron() -> Array1<f64> {
+        Array1::from_vec(vec![
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.5,
+            3.0_f64.sqrt() / 2.0,
+            0.0,
+            0.5,
+            3.0_f64.sqrt() / 6.0,
+            (2.0_f64 / 3.0).sqrt(),
+        ])
+    }
+
+    #[test]
+    fn a_stop_set_mid_probe_charges_nothing_further() {
+        let cfg = quiet_basis_search(4);
+        let budget = 400;
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut ledger = Ledger::with_stop(budget, stop.clone());
+        let tetra = regular_tetrahedron();
+        let mut seen_parent = false;
+        let mut side_charges = 0usize;
+        let charges_after = std::sync::atomic::AtomicUsize::new(0);
+        let gradient_after = std::sync::atomic::AtomicUsize::new(0);
+        let mut relax = |led: &mut Ledger, _x: ArrayView1<f64>, steps: usize| {
+            let side = led.spent() == 0 && seen_parent;
+            if !side {
+                seen_parent = true;
+            }
+            for _ in 0..steps {
+                if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    if led.charge() {
+                        charges_after.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    continue;
+                }
+                if !led.charge() {
+                    break;
+                }
+                if side {
+                    side_charges += 1;
+                    if side_charges == 2 {
+                        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
+                }
+            }
+            (0.0, tetra.clone())
+        };
+        let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| {
+            if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                gradient_after.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if led.charge() {
+                    charges_after.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                return None;
+            }
+            led.charge().then(|| Array1::zeros(x.len()))
+        };
+        let mut rng = StdRng::seed_from_u64(11);
+        run_with_gradient(
+            &cfg,
+            tetra.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut rng,
+        )
+        .expect("search");
+        assert!(
+            side_charges >= 2,
+            "the stall must enter the observed-basis probe"
+        );
+        assert_eq!(
+            charges_after.load(std::sync::atomic::Ordering::Relaxed),
+            0,
+            "a stop raised inside the probe charged further calls"
+        );
+        assert_eq!(
+            gradient_after.load(std::sync::atomic::Ordering::Relaxed),
+            0,
+            "the follow-up gradient ran after the probe had stopped"
+        );
+    }
+
+    #[test]
+    fn a_missed_basis_probe_is_not_charged_after_the_target_hit() {
+        let cfg = quiet_basis_search(4);
+        let budget = 400;
+        let mut ledger = Ledger::new(budget);
+        ledger.stop_below(-10.0);
+        let tetra = regular_tetrahedron();
+        let probed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let probed_flag = probed.clone();
+        let mut side_charges = 0usize;
+        let mut seen_parent = false;
+        let mut relax = |led: &mut Ledger, _x: ArrayView1<f64>, steps: usize| {
+            let side = led.spent() == 0 && seen_parent;
+            if side {
+                probed_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+            } else {
+                seen_parent = true;
+            }
+            for _ in 0..steps {
+                if !led.charge() {
+                    break;
+                }
+                if side {
+                    side_charges += 1;
+                }
+            }
+            let energy = if side || !probed_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                -(led.spent().min(4) as f64)
+            } else {
+                -(led.spent() as f64)
+            };
+            (energy, tetra.clone())
+        };
+        let mut rng = StdRng::seed_from_u64(11);
+        let outcome = run(&cfg, tetra.view(), &mut ledger, &mut relax, &mut rng).expect("search");
+        assert!(
+            probed.load(std::sync::atomic::Ordering::Relaxed),
+            "the stall must probe a basis before the hit"
+        );
+        assert!(side_charges > 0, "the probe charged no calls");
+        let (_, at, _, energy) = outcome
+            .improvements
+            .iter()
+            .find(|(_, _, _, energy)| *energy <= -10.0)
+            .copied()
+            .expect("the walk reaches the target");
+        assert!(energy <= -10.0);
+        assert_eq!(
+            at, outcome.charged,
+            "side calls {side_charges} were charged after the hit"
+        );
+    }
+
+    #[test]
+    fn a_basis_probe_that_reaches_the_target_keeps_its_calls_on_the_hit_clock() {
+        let cfg = quiet_basis_search(4);
+        let budget = 400;
+        let mut ledger = Ledger::new(budget);
+        ledger.stop_below(-10.0);
+        let tetra = regular_tetrahedron();
+        let mut seen_parent = false;
+        let mut side_charges = 0usize;
+        let mut relax = |led: &mut Ledger, _x: ArrayView1<f64>, steps: usize| {
+            let side = led.spent() == 0 && seen_parent;
+            if !side {
+                seen_parent = true;
+            }
+            for _ in 0..steps {
+                if !led.charge() {
+                    break;
+                }
+                if side {
+                    side_charges += 1;
+                }
+            }
+            let energy = if side { -100.0 } else { 0.0 };
+            (energy, tetra.clone())
+        };
+        let mut rng = StdRng::seed_from_u64(11);
+        let outcome = run(&cfg, tetra.view(), &mut ledger, &mut relax, &mut rng).expect("search");
+        assert!(side_charges > 0, "the stall must probe a basis");
+        let (_, at, _, energy) = outcome
+            .improvements
+            .iter()
+            .find(|(_, _, _, energy)| *energy <= -10.0)
+            .copied()
+            .expect("the probe reaches the target");
+        assert_eq!(energy, -100.0);
+        assert!(
+            at >= side_charges,
+            "the hit clock {at} dropped the probe's {side_charges} calls"
+        );
+        assert_eq!(at, outcome.charged);
     }
 
     #[test]
