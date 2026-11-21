@@ -56,7 +56,7 @@ still lives in =experiments/scripts/demo_bgsa.py= and the
 
 * Fitting through ChemFit
 
-For a gradient-free fit, use =anneal.chemfit.fit_anneal(fitter, budget, driver=...)=.
+For a gradient-free fit, use ~anneal.chemfit.fit_anneal(fitter, budget, driver=...)~.
 The default ~driver="portfolio"~ allocates the gradient-free arms.
 ~driver="boltzmann"~, ="fast"=, or ="gsa"= is the single-chain ablation.
 The fitter's initial parameters are the start, bounds come from the fitter

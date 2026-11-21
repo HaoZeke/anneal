@@ -1,4 +1,5 @@
 #+TITLE: Method Composition
+#+OPTIONS: ^:nil
 
 One narrative walk of a cooperative Lennard-Jones cluster run, naming
 each mechanism from [[file:catalog.org][catalog.org]] as it appears. The walk follows
@@ -40,7 +41,7 @@ minima into the featomic packing archive) and =CATALOG_SHARED_BIAS=
 drives the ordinary perturb-quench chain against a =BasinBias= keyed on
 =ClusterFingerprint= (examples/lj_cluster_search.rs:2077-2082), calling
 back into the closure below every =checkpoint_interval= charged
-evaluations (default 500, or ~CATALOG_SLICE=/~BANK_SLICE=,
+evaluations (default 500, or ~CATALOG_SLICE~ / ~BANK_SLICE~,
 examples/lj_cluster_search.rs:2058-2064). Inside each hop, before the
 checkpoint fires:
 
@@ -148,12 +149,12 @@ checkpoint. It runs, in order:
    =ActiveCatalogRelation=.
 
 7. *Act on the policy decision.* =ContinueLocal= does nothing further
-   this checkpoint. ~Exploit~ / ~Explore~/=Leave= all route through
+   this checkpoint. ~Exploit~ / ~Explore~ / ~Leave~ all route through
    =CooperativeRun::boundary_crossing=
    (examples/lj_cluster_search.rs:2477-2479): the coordinator returns
    either a =Crossing= (an observed boundary transport target, catalog.org
    "boundary transport") or nothing, and if a crossing is returned the
-   same ~CATALOG_SHARED_BIAS=/~CATALOG_COOP_WELLS= side effects as step
+   same ~CATALOG_SHARED_BIAS~ / ~CATALOG_COOP_WELLS~ side effects as step
    5 may fire before =boundary_crossing_trial= constructs the proposal
    and the checkpoint returns =CheckpointAction::BoundaryProposal=.
 
@@ -181,7 +182,7 @@ leaves =polish_records = 0= and never pays this cost.
 
 When enough replicas have joined a population epoch
 (=SynchronousPopulation=, catalog.org "Feynman-Kac population epochs"),
-the coordinator ranks the submitted =PopulationMember=s
+the coordinator ranks the submitted =PopulationMember= entries
 (=rank_population=), builds the bounded log-weight selection potential
 from =SelectionCoefficients=, draws parents by systematic resampling at
 a replayable per-epoch offset (=epoch_systematic_offset=), and caps
