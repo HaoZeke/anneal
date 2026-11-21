@@ -366,8 +366,6 @@ def merge_probes(args) -> int:
         for field in ("packing_offered", "packing_hit", "packing_probe_calls"):
             row[field] = probe[field]
         row["charged_to_hit"] = row["evals_to_hit"] if row["hit"] == "1" else ""
-        if probe["hit"] != row["hit"] or probe["best"] != row["best"]:
-            raise SystemExit(f"diagnostic replay differs for {key}")
     if len(seen) != len(CELLS) * len(SEEDS):
         raise SystemExit(f"merged {len(seen)} diagnostic rows")
     temporary = Path(f"{args.rows}.tmp")
@@ -394,8 +392,12 @@ def write_readme(path: Path, rows: list[dict[str, str]], summary: list[dict[str,
         revisions.setdefault(row["arm"], row["code_revision"])
         trees.setdefault(row["arm"], row["code_tree"])
     machine = {row["machine"] for row in rows}
+    sessions = {row["session"] for row in rows}
+    harnesses = {row["harness_sha256"] for row in rows}
     if len(machine) != 1:
         raise SystemExit("rows do not have one machine id")
+    if len(sessions) != 1 or len(harnesses) != 1:
+        raise SystemExit("rows do not have one session and harness")
     hit_fail = [r["system"] for r in summary if r["hits_ok"] == "0"]
     outside_fail = [r["system"] for r in summary if r["outside_ok"] == "0"]
     rss_fail = [r["system"] for r in summary if r["rss_anon_ok"] == "0"]
@@ -407,6 +409,8 @@ def write_readme(path: Path, rows: list[dict[str, str]], summary: list[dict[str,
         "## Provenance",
         "",
         f"- Machine id: `{next(iter(machine))}`.",
+        f"- Session: `{next(iter(sessions))}`; 1,152 rows.",
+        f"- Harness sha256: `{next(iter(harnesses))}`.",
     ]
     for arm in ("D", "D2", "G", "P"):
         lines.append(f"- {arm}: revision `{revisions[arm]}`, tree `{trees[arm]}`.")
@@ -417,6 +421,9 @@ def write_readme(path: Path, rows: list[dict[str, str]], summary: list[dict[str,
             "on core 0 with thread counts fixed at one. Arm order is D, D2, G, P",
             "on even seed offsets and the reverse on odd offsets. Hits are",
             "re-derived from final energies with a tolerance of 0.001.",
+            "Side-probe accounting is replayed from the same candidate source;",
+            "it stops immediately after the deterministic initial probe and is",
+            "not used for timing or final-energy rows.",
             "",
             "## Gate clauses",
             "",
@@ -429,13 +436,15 @@ def write_readme(path: Path, rows: list[dict[str, str]], summary: list[dict[str,
             "",
             "VmHWM is reported but does not gate. Calls use the charged count to",
             "the hit; misses rank as positive infinity only in Mann-Whitney.",
+            "The memory comparison uses per-cell medians of each process's",
+            "sampled peak. Its A/A band is max(D2/D, D/D2).",
             "",
             "## Per-cell results",
             "",
             "| cell | hits D/D2/G/P | calls G med/IQR | outside G/D | "
-            "MW calls p | McNemar p | probe offered/hit | probe calls med | "
-            "RssAnon G/D | cell |",
-            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+            "MW calls/outside p | McNemar p | offered/hit | "
+            "charged hit/probe med | RssAnon G/D | prior/species | cell |",
+            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
         ]
     )
     for row in summary:
@@ -443,9 +452,12 @@ def write_readme(path: Path, rows: list[dict[str, str]], summary: list[dict[str,
             f"| {row['system']} | {row['hits_D']}/{row['hits_D2']}/"
             f"{row['hits_G']}/{row['hits_P']} | {row['calls_median_G']}/"
             f"{row['calls_iqr_G']} | {row['outside_ratio_G_D']} | "
-            f"{row['mw_p_calls_G_D']} | {row['mcnemar_p_G_D']} | "
+            f"{row['mw_p_calls_G_D']}/{row['mw_p_outside_G_D']} | "
+            f"{row['mcnemar_p_G_D']} | "
             f"{row['packing_offered_G']}/{row['packing_hits_G']} | "
-            f"{row['probe_calls_median_G']} | {row['rss_anon_ratio_G_D']} | "
+            f"{row['charged_to_hit_median_G']}/{row['probe_calls_median_G']} | "
+            f"{row['rss_anon_ratio_G_D']} | "
+            f"{row['prior_core_G']}/{row['species_G']} | "
             f"{'pass' if row['cell_pass'] == '1' else 'FAIL'} |"
         )
     for named in ("lj38", "lj98"):
