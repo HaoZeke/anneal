@@ -439,23 +439,27 @@ fn body_sites() -> [[f64; 3]; 4] {
     ]
 }
 
+/// Fold each rotation vector into the ball of radius `π`.
+///
+/// A vector of length `θ` turns by `θ` about its axis, so `θ - 2πk` about
+/// the same axis is the same rotation. The fewest turns that bring the
+/// length to `π` or under are taken at once. Taking them one at a time
+/// never ended for a length that is not finite, and for a length beyond
+/// 2^53 turns one more turn changed nothing. A vector that is not finite
+/// has no rotation to fold and is left as it is; the caller refuses it.
 fn fold_rotations(n: usize, x: &mut [f64]) {
     for i in 0..n {
         let b = 3 * n + 3 * i;
-        let mut w = [x[b], x[b + 1], x[b + 2]];
-        loop {
-            let theta = (w[0] * w[0] + w[1] * w[1] + w[2] * w[2]).sqrt();
-            if theta <= std::f64::consts::PI || theta == 0.0 {
-                break;
-            }
-            let scale = 1.0 - 2.0 * std::f64::consts::PI / theta;
-            w[0] *= scale;
-            w[1] *= scale;
-            w[2] *= scale;
+        let w = [x[b], x[b + 1], x[b + 2]];
+        let theta = w[0].hypot(w[1]).hypot(w[2]);
+        if !theta.is_finite() || theta <= std::f64::consts::PI {
+            continue;
         }
-        x[b] = w[0];
-        x[b + 1] = w[1];
-        x[b + 2] = w[2];
+        let turns = ((theta - std::f64::consts::PI) / std::f64::consts::TAU).ceil();
+        let scale = 1.0 - turns * std::f64::consts::TAU / theta;
+        x[b] = w[0] * scale;
+        x[b + 1] = w[1] * scale;
+        x[b + 2] = w[2] * scale;
     }
 }
 
@@ -703,6 +707,76 @@ mod tests {
     use crate::methods::warm_lbfgs::WarmLbfgs;
     use rand::SeedableRng;
     use rand::rngs::StdRng;
+
+    /// The fold once subtracted a turn at a time. An angle that is not
+    /// finite never reached the ball, and one beyond 2^53 turns did not
+    /// move when a turn was subtracted, so either spun forever.
+    fn folds_within(seconds: u64, w: [f64; 3]) -> Option<Vec<f64>> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut x = vec![0.0; 6];
+            x[3..6].copy_from_slice(&w);
+            fold_rotation_vectors(1, &mut x);
+            let _ = tx.send(x);
+        });
+        rx.recv_timeout(std::time::Duration::from_secs(seconds))
+            .ok()
+    }
+
+    #[test]
+    fn folding_an_angle_that_cannot_be_folded_returns() {
+        for w in [
+            [f64::NAN, 0.0, 0.0],
+            [0.0, f64::INFINITY, 0.0],
+            [0.0, 0.0, f64::NEG_INFINITY],
+            [1.0e300, 0.0, 0.0],
+            [1.0e17, 1.0e17, 0.0],
+            [1.0e12, 0.0, 0.0],
+        ] {
+            let folded =
+                folds_within(10, w).unwrap_or_else(|| panic!("fold of {w:?} did not return"));
+            let theta = folded[3..6].iter().map(|v| v * v).sum::<f64>().sqrt();
+            if w.iter().all(|v| v.is_finite()) {
+                assert!(theta <= std::f64::consts::PI + 1.0e-9, "{w:?} -> {theta}");
+            } else {
+                assert!(
+                    folded[3..6].iter().any(|v| !v.is_finite()),
+                    "a non-finite rotation is reported as it came: {folded:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn folding_keeps_the_rotation_it_was_given() {
+        let reference = |mut w: [f64; 3]| {
+            loop {
+                let theta = (w[0] * w[0] + w[1] * w[1] + w[2] * w[2]).sqrt();
+                if theta <= std::f64::consts::PI || theta == 0.0 {
+                    return w;
+                }
+                let scale = 1.0 - 2.0 * std::f64::consts::PI / theta;
+                w = [w[0] * scale, w[1] * scale, w[2] * scale];
+            }
+        };
+        for w in [
+            [0.1, 0.2, 0.3],
+            [3.0, 0.2, 0.1],
+            [4.0, -1.0, 2.0],
+            [0.0, 7.0, 0.0],
+            [12.0, 5.0, -9.0],
+            [-30.0, 11.0, 4.0],
+        ] {
+            let folded = folds_within(10, w).expect("returns");
+            let expected = reference(w);
+            for k in 0..3 {
+                assert!(
+                    (folded[3 + k] - expected[k]).abs() < 1.0e-12,
+                    "{w:?}: {folded:?} vs {expected:?}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn fused_rotation_and_jacobian_are_bit_identical() {

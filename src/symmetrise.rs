@@ -28,6 +28,16 @@
 
 use ndarray::{Array1, ArrayView1};
 
+/// A squared distance, the atom, and the site it would move to.
+///
+/// The assignment of atoms to symmetric sites sorts one of these for every
+/// atom and site pair, which is `n * n` entries of this size, and the sort
+/// keeps a scratch buffer of the same order beside them.
+pub(crate) type Assignment = (f64, usize, usize);
+
+/// Bytes of one [`Assignment`].
+pub(crate) const ASSIGNMENT_BYTES: usize = std::mem::size_of::<Assignment>();
+
 /// An approximate rotational symmetry a structure was found to have.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Candidate {
@@ -1040,7 +1050,7 @@ pub fn complete_orbits_about(
     }
     // Assign atoms to sites nearest first, so the move is the smallest
     // permutation-free displacement onto the symmetric site set.
-    let mut pairs: Vec<(f64, usize, usize)> = Vec::with_capacity(n * n);
+    let mut pairs: Vec<Assignment> = Vec::with_capacity(n * n);
     for a in 0..n {
         let r = rel(a);
         for (i, p) in chosen.iter().enumerate() {

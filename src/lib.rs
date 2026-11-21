@@ -171,6 +171,8 @@ pub mod laws;
 pub mod localkey;
 /// Short MD segments through external engines (LAMMPS, GROMACS).
 pub mod md_engine;
+/// Checked sizes for buffers whose length the caller chooses.
+pub mod memory;
 /// Annealing-method extensions built on the typed algebra:
 /// MCMC-style multi-chain SA with Gelman-Rubin termination, Bayesian
 /// pilot adaptation, parallel tempering, etc.

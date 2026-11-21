@@ -1,0 +1,3 @@
+The generated header describes how ``anneal_box_stats_t`` grows: the first layout ends at ``coverage_repelled_proposals`` (17 words), the second adds the other coverage counters, ``coverage_regions_largest``, ``coverage_regions_smallest`` and ``coverage_decisions`` (42 words), and the library copies the first ``struct_size`` bytes of its own structure and no more.
+The same layouts are listed in the bindings page.
+``pytest/test_c_api.py`` fails when a field of the structure has no description in the header, when the header puts the end of the first layout anywhere but 17 words in, or when the bindings page lists fields in a different order than the header.

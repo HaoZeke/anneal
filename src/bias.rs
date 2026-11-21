@@ -1045,7 +1045,12 @@ struct SortedPairCache {
     next: usize,
 }
 
-const PAIR_SLOTS: usize = 8;
+/// Spectra the thread-local table keeps, each with the unsorted pair
+/// distances, the sorted ones and the coordinates they came from.
+pub(crate) const PAIR_SLOTS: usize = 8;
+
+/// Bytes of one slot's header, before the three vectors it owns.
+pub(crate) const PAIR_SLOT_BYTES: usize = std::mem::size_of::<PairSlot>();
 
 fn pair_hash(x: ArrayView1<f64>) -> u64 {
     let mut hash = 0xcbf29ce484222325u64;

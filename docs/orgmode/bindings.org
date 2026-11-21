@@ -5,6 +5,7 @@
 The Python package =anneal= ships from PyPI as a maturin-built wheel.
 The Rust extension is exposed as the submodule =anneal._core=.
 The package source lives at =python/anneal/= in the repo and is installed via =maturin develop --features python= during development.
+The classes, functions, type stubs and exceptions are described in [[file:reference/python-api.org][Python API]].
 
 * C and C++ (cargo-c)
 
@@ -22,6 +23,80 @@ going". =ANNEAL_STOPPED= asks the search to return at once: the best point
 found is written back, and the call itself returns =ANNEAL_STOPPED=. Any
 other status is a failure and leaves the start in place. The variants live
 in the generated =anneal-core.h=.
+
+** Every box-ensemble setting
+
+=anneal_box_config_t= carries ten settings. The ensemble has more, and
+the same ones the Python =box_ensemble_optimize= wrapper takes are in
+=anneal_box_options_t=: the history (=ANNEAL_BOX_HISTORY_NONE=,
+=_PRIVATE=, =_SHARED=), the membership rule, the identity tolerance, the
+shared deposits, the visit policy, the Langevin friction, and the coverage
+sharing, peer weight and neighbourhood. =anneal_box_options_default= fills
+the structure with the Rust defaults, so a run that changes nothing
+reproduces =anneal_box_minimize= with a default =anneal_box_config_t=,
+step for step. =anneal_box_minimize_ex= takes it, and an optional
+=anneal_box_stats_t= that reports the history and coverage counters.
+Every counter of the Python =box_ensemble_optimize= result is there. The
+coverage counters of the exchange are the =coverage_*= fields; the Python
+=coverage_regions_per_chain= list, which cannot be summed, is its
+largest and smallest entry as =coverage_regions_largest= and
+=coverage_regions_smallest=. The last field, =coverage_decisions=, is an
+=anneal_box_coverage_decisions_t= with the conditional influence of imported
+coverage heights on acceptance: the counts of comparisons, their peer
+overlaps and probability changes, and the sum and largest of those changes.
+
+The fields of =anneal_box_stats_t= come in two layouts, and a field never
+moves when a layout is added. A program built against the first header
+reads the first layout and nothing else.
+
+- first layout, 17 words :: =struct_size=, =value=, =n_evals=, =n_grads=,
+  =hops=, =history_observations=, =history_minima=, =history_refusals=,
+  =history_seconds=, =shared_deposits=, =coverage_observations=,
+  =coverage_published=, =coverage_applied_foreign=,
+  =coverage_capped_foreign=, =coverage_recrossings=,
+  =coverage_novel_arrivals= and =coverage_repelled_proposals=.
+- second layout, 42 words in all :: =coverage_peer_recrossings=,
+  =coverage_peer_only_recrossings=, =coverage_escape_updates=,
+  =coverage_novelty_updates=, =coverage_published_samples=,
+  =coverage_applied_foreign_samples=, =coverage_sample_peer_checks=,
+  =coverage_sample_anchor_overlaps=,
+  =coverage_sample_anchor_only_overlaps=, =coverage_sample_overlaps=,
+  =coverage_constrained_repulsions=, =coverage_regions_largest=,
+  =coverage_regions_smallest= and =coverage_decisions=.
+
+The library copies the first =struct_size= bytes of its own structure into
+the caller's, so a =struct_size= of =sizeof= in either header is safe, and
+nothing is written past the caller's structure. A =struct_size= below the
+offset of =n_evals= is refused. =tests/ffi_smoke.c= pins the offsets of the
+first layout.
+=coverage_decisions= is an =anneal_box_coverage_decisions_t= of eight
+counts and four real numbers.
+
+#+BEGIN_SRC c
+anneal_box_options_t options;
+anneal_box_stats_t stats;
+
+anneal_box_options_default(&options);
+options.seed = 4;
+options.identity_tol = 1e-3;
+options.coverage_shared = ANNEAL_BOX_COVERAGE_PRIVATE;
+stats.struct_size = sizeof stats;
+status = anneal_box_minimize_ex(eval, grad, NULL, &tensor, low, high,
+                                &options, &stats);
+#+END_SRC
+
+The enum-valued fields are =int32_t=, so a value the library does not know
+is refused with =ANNEAL_INVALID_PARAMETER= and a message in
+=anneal_last_error()=, before any callback runs. Both structures start
+with =struct_size=. The library reads only the bytes the caller's
+structure has and takes the default for the rest, and writes only the
+statistics that fit, so a newer library can add fields at the end without
+breaking a program built against this header: a program that was built
+before the coverage counters existed gets the statistics it knows, and
+nothing is written past its =struct_size=. =tests/ffi_smoke.c= builds
+against the installed header, and =scripts/ffi_smoke.sh= runs it from a
+checkout. =FFI_SMOKE_VALGRIND=1 scripts/ffi_smoke.sh= runs it under
+valgrind, as the ffi job in CI does.
 
 The install also places =dlpack/dlpack.h= (DLPack 1.3, the header =dlpk= 0.1.5 was translated from) on that include prefix. =anneal-core.h= includes it, so =pkg-config --cflags anneal-core= is enough to compile a consumer. Meson and CMake install the same header.
 

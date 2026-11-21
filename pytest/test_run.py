@@ -682,9 +682,11 @@ def test_global_optimize_starts_from_x0_and_stays_in_the_box():
     assert result["best_val"] <= lj_cluster_energy(x0)
 
 
-def test_global_optimize_refuses_x0_outside_the_box():
-    with pytest.raises(ValueError, match="outside"):
-        global_optimize(styb_tang_2d, LOW, HIGH, budget=50, x0=np.array([0.0, 7.0]))
+def test_global_optimize_clips_x0_outside_the_box():
+    objective = Recorder(styb_tang_2d)
+    result = global_optimize(objective, LOW, HIGH, budget=1, x0=np.array([0.0, 7.0]))
+    assert np.array_equal(objective.points[0], np.array([0.0, 5.0]))
+    assert np.array_equal(result["best_pos"], np.array([0.0, 5.0]))
 
 
 def test_run_takes_array_likes_of_any_shape_and_stride():
