@@ -315,6 +315,7 @@ LongRangeTest | tests core long_range | unit lr_phys_test lr_phys_test.cc | @lon
 ExprPotTest | tests core expr | custom suite=expr workdir=. | @expr
 ExprGoldens | tests core expr | custom suite=expr workdir=. | @expr
 ExprEindirTest | tests core expr rust_core | custom suite=expr workdir=. | @expr
+ForceVarianceTest | tests core | unit force_variance_test ForceVarianceTest.cc |
 MetatomicTest | tests metatomic | unit metatomic_test MetatomicPotTest.cc workdir=CppCore/tests | @metatomic
 UmaPotTest | tests metatomic | unit uma_pot_test UmaPotTest.cc workdir=CppCore/tests | @metatomic
 UmaGraphSizeTest | tests metatomic | custom workdir=. | @metatomic
