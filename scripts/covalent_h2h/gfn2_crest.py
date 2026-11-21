@@ -675,6 +675,8 @@ def main() -> None:
             args.summary,
             revision,
             host,
+            args.anneal_revision,
+            args.systems,
             false_hits=args.false_hits,
             superseded=args.superseded,
         )
