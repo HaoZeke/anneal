@@ -108,7 +108,8 @@ pub unsafe extern "C" fn rgpot_potential_set_ad_hessian_callback(
 /// `RGPOT_HESSIAN_ANALYTIC` or `RGPOT_HESSIAN_AD`, and any other scheme
 /// reports itself. `scheme_used` is written only on success; on a failure
 /// the content of `hessian_out` is unspecified. A failing callback's status
-/// is returned with its own `rgpot_last_error` message.
+/// is returned with the message it set, or `<callback> returned <status>`
+/// when it set none.
 ///
 /// # Safety
 ///

@@ -217,6 +217,23 @@ unsafe extern "C" fn failing_hessian(
     rgpot_status_t::RGPOT_SCC_NOT_CONVERGED
 }
 
+unsafe extern "C" fn silent_hessian(
+    _: *mut c_void,
+    _: *const rgpot_force_input_t,
+    _: *mut f64,
+) -> rgpot_status_t {
+    rgpot_status_t::RGPOT_INTERNAL_ERROR
+}
+
+unsafe extern "C" fn silent_hvp(
+    _: *mut c_void,
+    _: *const rgpot_force_input_t,
+    _: *const f64,
+    _: *mut f64,
+) -> rgpot_status_t {
+    rgpot_status_t::RGPOT_INTERNAL_ERROR
+}
+
 unsafe extern "C" fn nan_hessian(
     _: *mut c_void,
     input: *const rgpot_force_input_t,
@@ -743,6 +760,40 @@ fn callback_failures_keep_their_status_and_message() {
     );
     assert_eq!(handle.counts().hessian_analytic, 0);
     assert_eq!(handle.force_calls(), 0);
+}
+
+#[test]
+fn a_callback_that_sets_no_message_is_not_given_an_older_one() {
+    let mut system = System::octahedron();
+    let input = system.input();
+    let handle = Handle::new();
+    unsafe {
+        rgpot_potential_set_hessian_callback(handle.pot, Some(silent_hessian));
+        rgpot_potential_set_hvp_callback(handle.pot, Some(silent_hvp));
+        rgpot_set_last_error(c"an older failure".as_ptr());
+    }
+    assert_eq!(
+        handle
+            .try_hessian(&input, 0.0, RGPOT_HESSIAN_ANALYTIC as i32)
+            .unwrap_err(),
+        rgpot_status_t::RGPOT_INTERNAL_ERROR
+    );
+    assert_eq!(
+        last_error(),
+        "Hessian callback returned RGPOT_INTERNAL_ERROR"
+    );
+
+    unsafe { rgpot_set_last_error(c"an older failure".as_ptr()) };
+    assert_eq!(
+        handle
+            .try_hvp(&input, &direction(system.dim()), RGPOT_HVP_ANALYTIC as i32)
+            .unwrap_err(),
+        rgpot_status_t::RGPOT_INTERNAL_ERROR
+    );
+    assert_eq!(
+        last_error(),
+        "analytic HVP callback returned RGPOT_INTERNAL_ERROR"
+    );
 }
 
 #[test]

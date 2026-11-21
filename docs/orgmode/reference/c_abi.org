@@ -881,7 +881,8 @@ enum rgpot_status_t rgpot_potential_hvp(const struct rgpot_potential_t *pot,
   with neither, each refused before any call; a force callback output that fails
   the checks of =PotentialCallback=; a non-finite analytic output.
   A force or analytic callback's error status is returned unchanged, and
-  =rgpot-core= stores no message for it.
+  =rgpot_last_error= keeps the message the callback stored during the call, or
+  names the callback and the status when it stored none.
   A non-finite dual-number output is refused with
   =dual-number Hessian-vector callback: non-finite value at element <i>=.
   =RGPOT_INTERNAL_ERROR= for a caught panic.
@@ -1145,7 +1146,7 @@ enum rgpot_status_t rgpot_potential_hessian(const struct rgpot_potential_t *pot,
   output that fails the checks of =PotentialCallback=.
   A force or Hessian callback's error status is returned unchanged.
   For a Hessian callback, =rgpot_last_error= keeps the message the callback
-  stored, or =Hessian callback returned <status>=
+  stored during the call, or =Hessian callback returned <status>=
   (=dual-number Hessian callback returned <status>=) when it stored none.
   =RGPOT_INTERNAL_ERROR= for a caught panic.
 

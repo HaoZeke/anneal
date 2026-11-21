@@ -245,8 +245,9 @@ pub(crate) fn checked_step(step: f64) -> Result<f64, HvpError> {
 }
 
 /// Call a derivative callback and check that the `out` it wrote is finite.
-/// A failing status keeps the callback's own `rgpot_last_error` message,
-/// or is described as `{caller} returned <status>` when it set none; a
+/// A failing status keeps the message the callback set with
+/// `rgpot_set_last_error` during the call, or is described as
+/// `{caller} returned <status>` when it set none; a
 /// non-finite value is `{writer}: non-finite value at element <i>`.
 pub(crate) fn run_callback(
     caller: &str,
@@ -254,6 +255,7 @@ pub(crate) fn run_callback(
     out: &mut [f64],
     call: impl FnOnce(*mut f64) -> rgpot_status_t,
 ) -> Result<(), HvpError> {
+    crate::status::set_last_error("");
     let status = call(out.as_mut_ptr());
     if status != rgpot_status_t::RGPOT_SUCCESS {
         let message = crate::status::last_error_message();
