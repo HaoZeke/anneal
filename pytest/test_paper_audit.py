@@ -161,6 +161,52 @@ def test_a_merged_branch_that_no_alias_names_is_not_required(monkeypatch, tmp_pa
     assert not with_tip.on_remote(unnamed), "an unnamed remote branch joined the closure"
 
 
+def test_a_verified_record_ref_joins_the_audited_closure(tmp_path, monkeypatch):
+    """A commit only a verified record ref holds is in the audited and remote closures; unverified, it is not."""
+    repo = tmp_path / "clone"
+    repo.mkdir()
+
+    def run_git(*args):
+        done = subprocess.run(
+            ["git", "-c", "user.name=audit", "-c", "user.email=audit@example.invalid",
+             "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", *args],
+            cwd=repo, capture_output=True, text=True, check=True)
+        return done.stdout.strip()
+
+    run_git("init", "--quiet")
+    run_git("commit", "--allow-empty", "-m", "root")
+    root = run_git("rev-parse", "HEAD")
+    run_git("update-ref", "refs/remotes/origin/develop", root)
+    run_git("checkout", "--quiet", "--detach")
+    run_git("commit", "--allow-empty", "-m", "record")
+    record = run_git("rev-parse", "HEAD")
+    run_git("checkout", "--quiet", "--detach", root)
+    monkeypatch.setattr(audit_mod, "ROOT", repo)
+
+    monkeypatch.setattr(audit_mod, "_verified_record_refs", lambda: ())
+    unverified = audit_mod.RevisionIndex((root, record), (), (), ())
+    assert not unverified.audited_exists(record)
+    assert not unverified.on_remote(record)
+
+    monkeypatch.setattr(audit_mod, "_verified_record_refs", lambda: (record,))
+    verified = audit_mod.RevisionIndex((root, record), (), (), ())
+    assert verified.audited_exists(record)
+    assert verified.on_remote(record)
+    assert verified.on_remote(root)
+
+
+def test_the_sc_h2h_harness_is_pushed_through_its_record_ref(tmp_path, monkeypatch):
+    need_origin()
+    harness = "d59b0b6cf02fc300ff618f79d65da365128eed5a"
+    audit_mod.revision_index.cache_clear()
+    index = audit_mod.alias_index([harness], [])
+    assert index.audited_exists(harness) and index.on_remote(harness)
+    registry(tmp_path, monkeypatch, [])
+    audit_mod.revision_index.cache_clear()
+    index = audit_mod.alias_index([harness], [])
+    assert not index.audited_exists(harness) and not index.on_remote(harness)
+
+
 def test_a_drifted_table_cell_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
