@@ -2,7 +2,7 @@
 # Copyright (c) anneal developers
 """Write the TOC graphic slot at the JCTC size, 3.25 in by 1.75 in.
 
-The drawing is three labeled boxes: potential, hop, and bank.
+The drawing is two labeled boxes: potential and hop.
 No campaign count is printed. From the repository root:
 
     python3 paper/jctc/scripts/toc_graphic.py
@@ -18,11 +18,10 @@ HEIGHT = 1.75 * 72
 
 
 def stream() -> bytes:
-    """PDF content stream: a frame and three boxes."""
+    """PDF content stream: a frame and two boxes."""
     boxes = [
-        (12, 36, 66, 78, "potential"),
-        (90, 36, 144, 78, "hop"),
-        (168, 36, 222, 78, "bank"),
+        (40, 36, 104, 78, "potential"),
+        (130, 36, 194, 78, "hop"),
     ]
     parts = ["0.15 w", "12 18 210 96 re S"]
     for x0, y0, x1, y1, _label in boxes:
@@ -62,9 +61,9 @@ def pdf(body: bytes) -> bytes:
         out += f"{index} 0 obj\n".encode("ascii") + obj + b"\nendobj\n"
     xref = len(out)
     out += f"xref\n0 {len(objects) + 1}\n".encode("ascii")
-    out += b"0000000000 65535 f \n"
+    out += b"0000000000 65535 f\n"
     for offset in offsets[1:]:
-        out += f"{offset:010d} 00000 n \n".encode("ascii")
+        out += f"{offset:010d} 00000 n\n".encode("ascii")
     out += (
         f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\n"
         f"startxref\n{xref}\n%%EOF\n"

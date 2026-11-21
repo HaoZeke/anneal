@@ -4021,6 +4021,21 @@ OVERCLAIMS = ("same trap", "confined to one funnel", "cannot become the stored b
               "completes the patch", "never restarts", "is equivalent to", "across funnels")
 
 
+def stack_route_clears_temperature(source: str) -> bool:
+    """Whether the literal engine route avoids the literal temperature rectangle."""
+    box = re.search(r"TEMPERATURE_BOX = \(([^)]+)\)", source)
+    route = re.search(r"ENGINE_ROUTE = \(\n(.*?)\n\)", source, re.DOTALL)
+    if box is None or route is None:
+        return False
+    tx, ty, tw, th = (float(value.strip()) for value in box.group(1).split(","))
+    points = [tuple(map(float, pair)) for pair in re.findall(r"\(([\d.]+), ([\d.]+)\)", route.group(1))]
+    return len(points) >= 2 and all(
+        max(a[0], b[0]) <= tx or min(a[0], b[0]) >= tx + tw
+        or max(a[1], b[1]) <= ty or min(a[1], b[1]) >= ty + th
+        for a, b in zip(points, points[1:])
+    )
+
+
 def science_claims(audit: Audit) -> None:
     """Overclaiming wording stays out, endpoint prose stays on energies, and every citation resolves."""
     for path in (TEX, SI, COVER):
@@ -4068,6 +4083,14 @@ def science_claims(audit: Audit) -> None:
         audit.record(word not in stack, "paper/jctc/scripts/fig_algorithm_stack.py",
                      f"the reported-run stack figure does not draw {word}", "absent",
                      "absent" if word not in stack else "present")
+    route_clear = stack_route_clears_temperature(stack)
+    audit.record(route_clear, "paper/jctc/scripts/fig_algorithm_stack.py",
+                 "the energies-and-forces route clears the temperature box", "clear",
+                 "clear" if route_clear else "crossing")
+    toc = audit.text("paper/jctc/scripts/toc_graphic.py")
+    audit.record("bank" not in toc, "paper/jctc/scripts/toc_graphic.py",
+                 "the TOC graphic draws no unused bank", "absent",
+                 "absent" if "bank" not in toc else "present")
     audit.record('"lattice"' in arms and '"resample"' not in arms,
                  "paper/jctc/scripts/fig_rec_arms.py",
                  "the arm figure draws the lattice arm and no resample arm", "lattice",

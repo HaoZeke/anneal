@@ -35,7 +35,7 @@ import write_figure_provenance_v128
 
 def test_toc_graphic_writes_a_pdf(tmp_path: Path) -> None:
     body = toc_graphic.stream()
-    assert b"potential" in body and b"hop" in body and b"bank" in body
+    assert b"potential" in body and b"hop" in body and b"bank" not in body
     raw = toc_graphic.pdf(body)
     assert raw.startswith(b"%PDF-1.4\n")
     assert b"%%EOF\n" in raw

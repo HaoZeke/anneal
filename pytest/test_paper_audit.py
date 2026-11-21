@@ -1406,6 +1406,16 @@ def test_a_hypothesis_in_the_results_is_reported():
                                                    "the results and conclusions do not say hypothes"]
 
 
+def test_reported_run_figures_exclude_unused_components_and_crossings():
+    audit = audit_mod.Audit()
+    stack = audit.text("paper/jctc/scripts/fig_algorithm_stack.py")
+    assert audit_mod.stack_route_clears_temperature(stack)
+    crossing = stack.replace("(2.25, 0.74)", "(3.15, 0.74)").replace(
+        "(2.25, 1.52)", "(3.15, 1.52)")
+    assert not audit_mod.stack_route_clears_temperature(crossing)
+    assert "bank" not in audit.text("paper/jctc/scripts/toc_graphic.py")
+
+
 def test_an_unresolved_citation_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.SI)

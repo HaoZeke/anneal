@@ -32,10 +32,20 @@ BANDS = (
     ("One hop", 0.98, 1.3, figstyle.CORAL),
     ("Engine layer", 0.08, 0.82, figstyle.TEAL),
 )
+TEMPERATURE_BOX = (2.45, 1.06, 2.05, 0.4)
+ENGINE_ROUTE = (
+    (3.15, 0.74),
+    (2.25, 0.74),
+    (2.25, 1.52),
+    (3.15, 1.52),
+    (3.15, 1.60),
+)
 
 
 def draw(out: Path) -> None:
     import matplotlib.pyplot as plt
+    from matplotlib.patches import FancyArrowPatch
+    from matplotlib.path import Path as MplPath
 
     figstyle.setup()
     fig = plt.figure(figsize=(WIDTH, HEIGHT))
@@ -74,10 +84,10 @@ def draw(out: Path) -> None:
         ax, (last[0] + 0.35, row + tall), (first[0] + first[2] / 2, row + tall), colour=figstyle.MAGENTA, rad=0.09,
     )
     temperature = figstyle.box(
-        ax, 2.45, 1.06, 2.05, 0.4,
+        ax, *TEMPERATURE_BOX,
         "$T$ held at 0.8\n(the runs' setting)",
     )
-    quench, accept = boxes[2], boxes[3]
+    accept = boxes[3]
     figstyle.arrow(
         ax, (accept[0] + accept[2] / 2, temperature[1] + temperature[3]), (accept[0] + accept[2] / 2, row),
     )
@@ -87,10 +97,12 @@ def draw(out: Path) -> None:
     for i, name in enumerate(POTENTIALS):
         column, line = i % 6, i // 6
         figstyle.box(ax, left + column * (chip + gap), 0.45 - line * 0.27, chip, 0.22, name, size=figstyle.SMALLEST)
-    centre = quench[0] + quench[2] / 2
     figstyle.arrow(ax, (engine[0] + engine[2], 0.44), (left, 0.44), both=True)
-    figstyle.arrow(ax, (centre, 0.74), (centre, row), both=True)
-    ax.text(centre - 0.06, 1.26, "energies,\nforces", ha="right", va="center", fontsize=figstyle.SMALLEST)
+    route = MplPath(ENGINE_ROUTE, [MplPath.MOVETO] + [MplPath.LINETO] * (len(ENGINE_ROUTE) - 1))
+    ax.add_patch(FancyArrowPatch(
+        path=route, arrowstyle="<|-|>", mutation_scale=7, color=figstyle.BLACK, linewidth=0.7,
+    ))
+    ax.text(2.17, 1.26, "energies,\nforces", ha="right", va="center", fontsize=figstyle.SMALLEST)
     figstyle.save(fig, out)
 
 
