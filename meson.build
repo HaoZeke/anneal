@@ -378,9 +378,7 @@ endif
 has_eigen = false
 if get_option('with_eigen') or (
     get_option('with_examples')
-    and not get_option(
-    'with_rpc_client_only',
-    )
+    and not get_option('with_rpc_client_only')
 )
     eigen_dep = dependency('eigen3', required: false)
     if not eigen_dep.found()
@@ -407,9 +405,7 @@ endif
 has_fmt = false
 if not get_option('pure_lib') or (
     get_option('with_examples')
-    and not get_option(
-    'with_rpc_client_only',
-    )
+    and not get_option('with_rpc_client_only')
 )
     _args += ['-DNOT_PURE_LIB=TRUE']
     fmt_dep = dependency('fmt', required: true)
