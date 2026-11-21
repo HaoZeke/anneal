@@ -930,6 +930,40 @@ on `bench/cov-floor2`; this series carries the same change on this base.
   The pins (`floor-gate/pins-a52726af.txt`, sha1 `a22093e7…`) and the
   Au55 pins (`floor-gate/au55-pins-a52726af.txt`) are byte for byte
   those of `bench/paper-0120` on develop.
+- A rerun on another machine, also hostname bench in its own UTS
+  namespace (`floor-gate/gfn2.csv`, arms `floor-rerun`, `series` and
+  `grad`): an eight-core Intel Xeon with AVX-512, the same xtb 6.7.1
+  binary (sha256 `271dd6cd…`), the engine at the pinned revision built
+  there (`464e3d0c…`), and conda-forge OpenBLAS 0.3.34 on its
+  Cooperlake kernel. `floor-rerun` is `c3566383`, the tree of
+  `a52726af`; `series` is `7e39d748` (tree `5fae6a1c`), where a
+  zero-step read inside the call floor is refused and a declared floor
+  pushes a refused pair off itself; `grad` is `b3d1e4c2` (tree
+  `b6973a56`), whose GFN2 gradient gives no answer where the handle
+  gives no energy. The rows name the commits they were built from; a
+  rebase keeps the trees. `grad` ran serial on core 0 while
+  the other two shared cores 1-7. On every seed of Si13 and C20 the
+  three arms have the same hit, calls to hit, calls charged, best energy
+  and SCC failures. An instrumented copy of `grad` repeats its 24 rows;
+  the search asked it for 52,242 gradients and xtb answered every one,
+  so no gradient in the gate falls where the fix applies.
+- On C20 the rerun repeats the committed `a52726af` rows seed for seed.
+  On Si13 it does not: `c3566383` hits on all twelve seeds, but at
+  other calls to hit on every seed, with median calls to hit 1,972.5
+  against 2,206.5 and SCC failures 4.98% of calls against 2.89%. Si13
+  seed 2006 of the same `c3566383` build takes 620, 673, 683, 696 or
+  833 calls to hit as OpenBLAS is held to one kernel or another, so on a
+  silicon cluster with no gap the Si13 numbers belong to the machine's
+  BLAS. C20, with no SCC failure, does not move.
+- None of those three builds carries `acf5f0aa`, which stores xtb's
+  `dE/dx` as the rgpot force, the sign rgpot negates into the objective
+  gradient. Until that commit every gradient the xtb handle published
+  pointed uphill, so the `floor-gate/gfn2.csv` rows of `floor-rerun`,
+  `series` and `grad` were measured with it. Their agreement shows that
+  the three builds do the same thing under that sign. It does not show
+  that the gradient fix leaves the search unchanged under the correct
+  sign, and those rows are not evidence for the merged code until the gate
+  is run again on a build that has `acf5f0aa`.
 
 `scripts/covalent_h2h/gfn2_floor_gate.py` runs a same-session gate of
 two example builds and summarises its rows.
@@ -975,4 +1009,5 @@ Three first-parent commits changed it:
   the capped Si20 reference search with a fresh xtb single point of each
   best geometry.
 - `floor-gate/`: the element-floor gate against develop, GFN2 and the
-  paper headline panel, with the pins of the floor build.
+  paper headline panel, with the pins of the floor build, and the GFN2
+  rerun on another machine.

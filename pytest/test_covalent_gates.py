@@ -68,6 +68,21 @@ def test_a_floor_gate_run_without_calls_is_summarised(tmp_path, capsys):
     assert out.strip().splitlines()[-1] == "floor loses: nowhere"
 
 
+def test_a_floor_gate_run_takes_the_cores_from_the_first_core(tmp_path, monkeypatch):
+    cores = []
+
+    def run_one(binary, system, seed, budget, core, where):
+        cores.append(core)
+        return None
+
+    monkeypatch.setattr(floor_gate, "run_one", run_one)
+    floor_gate.run(argparse.Namespace(
+        arm=["grad=/bin/true@" + "0" * 40], systems=["si13"], seed0=2000, n=4,
+        budget=1, cores=2, first_core=3, out=tmp_path, rows=tmp_path / "rows.csv"))
+    assert len(cores) == 4
+    assert set(cores) <= {3, 4}
+
+
 def test_the_committed_floor_gate_loses_nowhere(capsys):
     pytest.importorskip("scipy.stats")
     floor_gate.summary(argparse.Namespace(rows=FLOOR_GATE_ROWS, arms=["base", "floor"]))
@@ -75,6 +90,20 @@ def test_the_committed_floor_gate_loses_nowhere(capsys):
     assert "si13 base: hits 12/12, median calls to hit 1896.5, SCC failures 1646/27222 (6.05%)" in out
     assert "si13 floor: hits 12/12, median calls to hit 2206.5, SCC failures 878/30392 (2.89%)" in out
     assert out.strip().splitlines()[-1] == "floor loses: nowhere"
+
+
+def test_the_rerun_arms_agree_and_repeat_the_committed_c20_rows():
+    fields = ("hit", "evals_to_hit", "charged", "best", "scc_rejected", "geometry_rejected")
+    seen = {}
+    for row in read(FLOOR_GATE_ROWS):
+        seen.setdefault((row["system"], row["seed"]), {})[row["arm"]] = tuple(row[f] for f in fields)
+    assert len(seen) == 24
+    for (system, _), arms in seen.items():
+        assert arms["floor-rerun"] == arms["series"] == arms["grad"]
+        if system == "c20":
+            assert arms["grad"] == arms["floor"]
+        else:
+            assert arms["grad"][1] != arms["floor"][1]
 
 
 def test_a_panel_system_one_arm_left_out_or_short_of_a_seed_loses(tmp_path, capsys):
