@@ -1254,6 +1254,21 @@ mod cluster_move_tests {
         }
 
         let orders: Vec<usize> = (2..=101).collect();
+        for seed in 0..128 {
+            let mut expected_rng = StdRng::seed_from_u64(seed);
+            let expected_order = established[expected_rng.random_range(0..established.len())];
+            let blend_draw = expected_rng.random::<f64>();
+            let expected_next = expected_rng.random::<u64>();
+            let mut actual_rng = StdRng::seed_from_u64(seed);
+            let (actual_order, _) = symmetry_order_and_blend(&orders, &mut actual_rng);
+            assert_eq!(actual_rng.random::<u64>(), expected_next);
+            if expected_order != established[4] || blend_draw * 6.0 >= 1.0 {
+                assert_eq!(actual_order, expected_order);
+            } else {
+                assert!(actual_order > established[4]);
+            }
+        }
+
         let mut rng = StdRng::seed_from_u64(0x243f_6a88_85a3_08d3);
         let mut counts = [0_usize; 6];
         let mut tail_orders = std::collections::BTreeSet::new();
