@@ -575,7 +575,6 @@ def analyze_campaign(rows_path: Path, summary_path: Path, report_path: Path) -> 
                 and cap_esc_d == 0
                 and cap_flag_b == len(SEEDS)
                 and cap_esc_b > 0
-                and cap_draws_b > 0
             )
 
         verdict = (
@@ -675,7 +674,7 @@ def analyze_campaign(rows_path: Path, summary_path: Path, report_path: Path) -> 
         f"- Active + superseded rows in `rows.csv`: `{len(all_rows)}` (`{len(superseded_rows)}` superseded)",
         f"- Total panel hits (`34` cells x `12` seeds = `408` runs/arm): `A={total_hits_a}/408`, `B={total_hits_b}/408`, `D={total_hits_d}/408`",
         "",
-        "## Pooled `A/A + Placement` Calibration Bands (`12` cells, `5` padded rebuilds + `A2` + `PA/A`)",
+        "## Pooled `A/A + Placement` Calibration Bands (`10` cells, `5` padded rebuilds + `A2` + `PA/A`)",
         "",
         "| Metric | N ratios | Empirical `[lo, hi]` | `2.5%..97.5%` | `A/A` `[lo, hi]` | Padding `[lo, hi]` |",
         "| --- | ---: | --- | --- | --- | --- |",

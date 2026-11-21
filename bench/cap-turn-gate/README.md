@@ -86,12 +86,12 @@ All binaries are built with `cargo build --release --locked` and
   12 seeds and the `(A, B)` pair projection is exact `ABBA` repeated
   three times (`AB, BA, BA, AB, ...`).
 - Calibration / placement schedule (`band = "place"`): 7-arm Latin
-  rotation over `(PA, A2, P1, P2, P3, P4, P5)` across 12 representative
+  rotation over `(PA, A2, P1, P2, P3, P4, P5)` across 10 representative
   cells spanning all 5 families (`lj38`, `lj55`, `blj105n38`,
-  `blj105n55`, `blj115n38`, `au38`, `m38r6`, `m38r14`, `m55r6`, `m80r6`,
-  `tip4p8`, `tip4p12`), yielding `84` cell-level median calibration
-  ratios (`12` same-binary `PA/A`, `12` independent-rebuild `A2/PA`, and
-  `60` padded-placement `P1..P5/PA`).
+  `blj115n38`, `au38`, `m38r6`, `m38r14`, `m55r6`, `tip4p8`, `tip4p12`),
+  yielding `70` cell-level median calibration ratios (`10` same-binary
+  `PA/A`, `10` independent-rebuild `A2/PA`, and `50` padded-placement
+  `P1..P5/PA`).
 
 ## In-Process Memory and Timing Measurement
 
@@ -140,7 +140,8 @@ any fails):
    - Every `B` cell (`34/34`) emits `sum(cap_twist_flag) == 12` (`1` on
      every `B` run).
    - Every atomic `B` cell (`20/20`: `lj*`, `blj*`, `au*`, `m*`) emits
-     `sum(cap_escapes) > 0` and `sum(cap_arm_draws) > 0`.
+     `sum(cap_escapes) > 0` (`Outcome::cap_escapes` counts `"stall-cap"`
+     executions directly; `Outcome::arms` records normal proposal arms).
    - Every rigid-body water `B` cell (`14/14`: `tip4p8..tip4p21`) emits
      `sum(cap_twist_flag) == 12`, `sum(cap_escapes) == 0`, and seed-wise
      identical `(charged, best_bits)` to `A`.

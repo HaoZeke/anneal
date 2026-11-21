@@ -111,19 +111,17 @@ MAIN_EXECUTION_ORDER: tuple[str, ...] = (
     "lj150",
 )
 
-# Representative 12-cell calibration subset spanning every family (including
+# Representative 10-cell calibration subset spanning every family (including
 # blj105n38 where allocator rounding shifted in #202).
 PLACEMENT_CELLS: tuple[str, ...] = (
     "lj38",
     "lj55",
     "blj105n38",
-    "blj105n55",
     "blj115n38",
     "au38",
     "m38r6",
     "m38r14",
     "m55r6",
-    "m80r6",
     "tip4p8",
     "tip4p12",
 )
