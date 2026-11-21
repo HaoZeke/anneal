@@ -175,6 +175,7 @@ IPIDriverTest | tests core ipi | unit ipi_driver_test IPIDriverTest.cc |
 EAMTablePotTest | tests core eam_table | unit eam_table_pot_test EAMTablePotTest.cc |
 EAMMultiImageTest | tests core eam_table | unit eam_multi_image_test EAMMultiImageTest.cc |
 CuH2 Utils Test | tests core xtensor | unit cuh2_util_test cuh2UtilsTest.cc |
+TestTempDirTest | tests core | unit test_temp_dir_test TestTempDirTest.cc |
 CacheTest | tests cache | unit cache_test CacheTest.cc |
 InvarianceTest | tests cache | unit invariance_test InvarianceTest.cc |
 XTBDlopenTest | tests core,xtb | custom suite=xtb workdir=. |
