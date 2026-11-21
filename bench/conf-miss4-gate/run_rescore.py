@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""Rescore the stored conf-miss4 conformers under two rules.
+"""Rescore the stored conf-miss4 conformers under two comparisons.
 
-R-A is the develop comparison: heavy-atom RMSD after a proper Kabsch
-fit, minimised over automorphisms. R-K is the kit comparison: R-A, or
-the same test after reflecting the candidate through the xy plane.
-Polish, the stereo filter, the energy window and the reference are
-shared. A miss enters the rank tests as positive infinity. The test
-family is unchanged.
+R-A calls Molecule.same from this tree. R-K calls
+Molecule.same_or_mirror from the kit tree's score module.
+Polish, the stereo filter, the energy window and the reference
+are shared. Every stored arm is scored. A miss enters the rank
+tests as positive infinity. The A-versus-B family is unchanged.
 """
 
 from __future__ import annotations
@@ -15,6 +14,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import importlib.util
 import sys
 from pathlib import Path
 
@@ -83,17 +83,25 @@ FLIP_FIELDS = [
 ]
 
 
-def same_or_mirror(mol: Molecule, a, b) -> bool:
-    """Kit rule. ``b`` matches ``a``, or its mirror image does.
-
-    A polished geometry has already passed the stereo check, so a
-    mirror image that passes it too is the same species. The Kabsch
-    fit keeps proper rotations, so the mirror is invisible to ``same``.
-    """
-    if mol.same(a, b):
-        return True
-    flipped = np.asarray(b[0]).reshape(-1, 3) * MIRROR
-    return abs(a[1] - b[1]) < ENERGY_TIE and mol.rmsd(a[0], flipped) < RMSD
+def load_kit_molecule(kit_root: Path):
+    """Molecule class from the kit tree's own score module."""
+    score_path = kit_root / "scripts" / "openconf_h2h" / "h2h_score.py"
+    if not score_path.is_file():
+        raise SystemExit("kit score module is missing")
+    name = "conf_miss4_kit_score"
+    spec = importlib.util.spec_from_file_location(name, score_path)
+    if spec is None or spec.loader is None:
+        raise SystemExit("kit score module did not load")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    saved = list(sys.path)
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path[:] = saved
+    if not hasattr(module.Molecule, "same_or_mirror"):
+        raise SystemExit("kit score module lacks the mirror comparison")
+    return module.Molecule
 
 
 def load_valid(path: Path) -> list[tuple[np.ndarray, float]]:
@@ -179,10 +187,10 @@ def closest_detail(mol: Molecule, ref, items: list) -> dict:
     }
 
 
-def hits_of(mol: Molecule, ref, items: list, rule: str) -> int:
+def hits_of(mol: Molecule, kit_mol, ref, items: list, rule: str) -> int:
     if rule == "R-A":
         return int(any(mol.same(ref, item) for item in items))
-    return int(any(same_or_mirror(mol, ref, item) for item in items))
+    return int(any(kit_mol.same_or_mirror(ref, item) for item in items))
 
 
 def mw_exact(b_values: list[float], a_values: list[float]) -> float:
@@ -342,12 +350,47 @@ def table(verdicts: list[dict]) -> list[str]:
     return lines
 
 
-def write_report(path: Path, refs: dict, flips: list[dict], verdicts: dict[str, list[dict]], machine: str) -> None:
+def band_table(records: list[dict]) -> list[str]:
+    """Median ratios of the second develop arm against A."""
+    lines = [
+        "| cell | median wall ratio | median call ratio | median outside ratio | hit difference |",
+        "|---|---|---|---|---|",
+    ]
+    for cell in AA_CELLS:
+        a = rows_for(records, cell, "A")
+        other = rows_for(records, cell, "Ap")
+        if not a or not other:
+            continue
+        lines.append(
+            "| {cell} | {wall} | {calls} | {outside} | {hits} |".format(
+                cell=cell,
+                wall=fmt_num(ratio(median(numeric(other, "wall_s")), median(numeric(a, "wall_s")))),
+                calls=fmt_num(ratio(median(numeric(other, "calls")), median(numeric(a, "calls")))),
+                outside=fmt_num(
+                    ratio(
+                        median(numeric(other, "outside_per_call_s")),
+                        median(numeric(a, "outside_per_call_s")),
+                    )
+                ),
+                hits=sum(int(row["hit"]) for row in other) - sum(int(row["hit"]) for row in a),
+            )
+        )
+    return lines
+
+
+def write_report(
+    path: Path,
+    refs: dict,
+    flips: list[dict],
+    verdicts: dict[str, list[dict]],
+    bands: dict[str, list[str]],
+    machine: str,
+) -> None:
     lines = [
         "Copyright (c) anneal developers",
         "",
         "Rescore of the stored conf-miss4 conformers. No search was repeated.",
-        "Both arms keep the geometries recorded in the gate session.",
+        "Every arm keeps the geometries recorded in the gate session.",
         "",
         "Polish is MMFF94 at dielectric one until the minimiser reports",
         "convergence, the same polished cache the gate scored. A conformer",
@@ -357,9 +400,10 @@ def write_report(path: Path, refs: dict, flips: list[dict], verdicts: dict[str, 
         "after a Kabsch fit, is under 0.25 angstrom and their energies",
         "differ by less than 0.5 kcal/mol.",
         "",
-        "R-A applies that comparison. R-K applies it and also accepts a",
-        "candidate whose mirror image meets it. The mirror is a reflection",
-        "through the xy plane. The Kabsch fit still keeps proper rotations.",
+        "R-A calls Molecule.same from this tree. R-K calls",
+        "Molecule.same_or_mirror from the kit tree's score module.",
+        "The mirror is a reflection through the xy plane. The Kabsch",
+        "fit still keeps proper rotations.",
         "",
         "The reference is the lowest valid conformer of the union of that",
         "cell's arms and seeds, including the second develop arm where the",
@@ -381,6 +425,19 @@ def write_report(path: Path, refs: dict, flips: list[dict], verdicts: dict[str, 
         lines.append(
             f"| {cell} | {ra['hits_a']}/24 | {ra['hits_b']}/24 | {rk['hits_a']}/24 | {rk['hits_b']}/24 |"
         )
+    lines += [
+        "",
+        "## Second develop arm",
+        "",
+        "| molecule | R-A | R-K |",
+        "|---|---|---|",
+    ]
+    for cell in MOLECULES:
+        ra = by_rule["R-A"][cell]
+        rk = by_rule["R-K"][cell]
+        if ra["hits_ap"] == "" and rk["hits_ap"] == "":
+            continue
+        lines.append(f"| {cell} | {ra['hits_ap']}/24 | {rk['hits_ap']}/24 |")
     lines += [
         "",
         "## Reference",
@@ -434,7 +491,8 @@ def write_report(path: Path, refs: dict, flips: list[dict], verdicts: dict[str, 
         "",
         "The family is unchanged. It is the eight molecules' four endpoints",
         f"(hits, calls, wall, outside time) and the five guard wall endpoints, {FAMILY} tests.",
-        "Bonferroni multiplies a family probability by 37 and caps the product at 1.",
+        "The rank tests stay A against B. Bonferroni multiplies a family",
+        "probability by 37 and caps the product at 1.",
         f"A loss needs that adjusted probability below {ALPHA}, a worse hit count",
         "or median, and a median ratio outside the develop band. McNemar is",
         "paired over seeds, is reported beside Fisher, and is not in the family.",
@@ -456,6 +514,18 @@ def write_report(path: Path, refs: dict, flips: list[dict], verdicts: dict[str, 
         lines += [f"### {rule}", ""]
         lines.extend(table(rows))
         lines += ["", f"Overall: {overall}", ""]
+    lines += [
+        "## A against the second develop arm",
+        "",
+        "Ratios are medians of the recorded finite times. The hit",
+        "difference uses that comparison's hits. This band is not a",
+        "member of the 37-test family.",
+        "",
+    ]
+    for rule in RULES:
+        lines += [f"### {rule}", ""]
+        lines.extend(bands[rule])
+        lines.append("")
     lines += [
         "## Session",
         "",
@@ -498,12 +568,88 @@ def limits_for(records: list[dict]) -> dict:
     return limits
 
 
+def read_stored(path: Path) -> list[dict]:
+    if not path.is_file():
+        return []
+    with path.open(newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def assert_stored_rows(stored: list[dict], recomputed: list[dict]) -> int:
+    """Stored rows must match. R-K hits are the check after the import."""
+    by = {
+        (row["cell"], row["arm"], str(row["seed"]), row["rule"]): row
+        for row in recomputed
+    }
+    rk = 0
+    for row in stored:
+        key = (row["cell"], row["arm"], str(row["seed"]), row["rule"])
+        fresh = by.get(key)
+        if fresh is None:
+            raise SystemExit("stored row missing from rescore")
+        for field in ROW_FIELDS:
+            if str(fresh[field]) != row[field]:
+                if row["rule"] == "R-K" and field == "hit":
+                    raise SystemExit("R-K hit changed")
+                raise SystemExit("stored row changed")
+        if row["rule"] == "R-K":
+            rk += 1
+    if stored and rk == 0:
+        raise SystemExit("no stored R-K rows")
+    return rk
+
+
+def assert_stored_flips(stored: list[dict], recomputed: list[dict]) -> None:
+    by = {(row["cell"], row["arm"], str(row["seed"])): row for row in recomputed}
+    for row in stored:
+        key = (row["cell"], row["arm"], str(row["seed"]))
+        fresh = by.get(key)
+        if fresh is None:
+            raise SystemExit("stored flip missing from rescore")
+        for field in FLIP_FIELDS:
+            if str(fresh[field]) != row[field]:
+                raise SystemExit("stored flip changed")
+
+
+def append_missing(path: Path, fields: list[str], recomputed: list[dict], key_fn) -> list[dict]:
+    """Add rows that are not already stored. Existing lines stay put."""
+    stored = read_stored(path)
+    if not stored:
+        write_csv(path, fields, recomputed)
+        return list(recomputed)
+    have = {key_fn(row) for row in stored}
+    missing = [row for row in recomputed if key_fn(row) not in have]
+    if not missing:
+        return []
+    with path.open("a", newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=fields,
+            lineterminator="\n",
+            extrasaction="ignore",
+        )
+        for row in missing:
+            writer.writerow(row)
+        handle.flush()
+    return missing
+
+
+def arms_in(jobs: list[dict]) -> list[str]:
+    arms = []
+    for job in jobs:
+        if job["arm"] not in arms:
+            arms.append(job["arm"])
+    return arms
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--rows", type=Path, required=True)
+    parser.add_argument("--kit-root", type=Path, required=True)
     parser.add_argument("--out-dir", type=Path, required=True)
     args = parser.parse_args()
+    kit_molecule = load_kit_molecule(args.kit_root)
     gate = load_gate_rows(args.rows)
     by_key = index_rows(gate)
     machine = gate[0]["machine_id"]
@@ -513,26 +659,35 @@ def main() -> int:
     per_rule: dict[str, dict[tuple, int]] = {rule: {} for rule in RULES}
     energies: dict[tuple, float] = {}
     flips = []
+    cell_jobs = {}
     for cell in MOLECULES:
         print(f"score {cell}", flush=True)
         mol = Molecule(catalog[cell])
+        kit_mol = kit_molecule(catalog[cell])
+        if mol.heavy != kit_mol.heavy or not np.array_equal(mol.perms, kit_mol.perms):
+            raise SystemExit(f"score modules disagree on {cell}")
         scored = score_cell(mol, run_dir, cell)
         refs[cell] = scored
         jobs = [job for job in schedule() if job["cell"] == cell]
+        cell_jobs[cell] = jobs
+        seen = set()
         for job in jobs:
             key = (cell, job["arm"], job["seed"])
+            if key in seen:
+                continue
+            seen.add(key)
             items = scored["kept"][(job["arm"], job["seed"])]
             if items:
                 energies[key] = min(e for _, e in items)
             for rule in RULES:
-                per_rule[rule][key] = hits_of(mol, scored["ref"], items, rule)
-            if job["arm"] not in ("A", "B"):
-                continue
+                per_rule[rule][key] = hits_of(mol, kit_mol, scored["ref"], items, rule)
             hit_a = per_rule["R-A"][key]
             hit_k = per_rule["R-K"][key]
             recorded = int(by_key[key]["hit"])
             if hit_a != recorded:
-                raise SystemExit(f"R-A disagrees with the gate at {cell} {job['arm']} {job['seed']}")
+                raise SystemExit(
+                    f"R-A disagrees with the gate at {cell} {job['arm']} {job['seed']}"
+                )
             if hit_a == hit_k:
                 continue
             detail = match_detail(mol, scored["ref"], items)
@@ -555,9 +710,11 @@ def main() -> int:
             )
     out_rows = []
     for cell in MOLECULES:
-        for arm in ("A", "B"):
+        for arm in arms_in(cell_jobs[cell]):
             for seed in SEEDS:
                 key = (cell, arm, seed)
+                if key not in per_rule["R-A"]:
+                    continue
                 gate_row = by_key[key]
                 energy = energies.get(key)
                 ref_e = refs[cell]["emin"]
@@ -581,14 +738,35 @@ def main() -> int:
                     )
     out_dir = args.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
-    write_csv(out_dir / "rescore-rows.csv", ROW_FIELDS, out_rows)
-    write_csv(out_dir / "flips.csv", FLIP_FIELDS, flips)
+    rows_path = out_dir / "rescore-rows.csv"
+    flips_path = out_dir / "flips.csv"
+    stored_rows = read_stored(rows_path)
+    stored_flips = read_stored(flips_path)
+    rk = assert_stored_rows(stored_rows, out_rows)
+    assert_stored_flips(stored_flips, flips)
+    if rk:
+        print(f"R-K hits unchanged {rk}", flush=True)
+    added_rows = append_missing(
+        rows_path,
+        ROW_FIELDS,
+        out_rows,
+        lambda row: (row["cell"], row["arm"], str(row["seed"]), row["rule"]),
+    )
+    added_flips = append_missing(
+        flips_path,
+        FLIP_FIELDS,
+        flips,
+        lambda row: (row["cell"], row["arm"], str(row["seed"])),
+    )
+    report_flips = list(stored_flips) + added_flips
     verdicts = {}
+    bands = {}
     for rule in RULES:
         rescored = apply_hits(gate, per_rule[rule])
         verdicts[rule] = judge(rescored, limits_for(rescored))
-    write_report(out_dir / "results-rescore.md", refs, flips, verdicts, machine)
-    print(f"rows {len(out_rows)} flips {len(flips)}", flush=True)
+        bands[rule] = band_table(rescored)
+    write_report(out_dir / "results-rescore.md", refs, report_flips, verdicts, bands, machine)
+    print(f"rows {len(stored_rows) + len(added_rows)} flips {len(report_flips)}", flush=True)
     return 0
 
 
