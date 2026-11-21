@@ -4,8 +4,11 @@
 
 Both arms open the same molecular centres: ``h2h_seed`` writes the start it
 draws for a seed, and GMIN reads it as its ``coords``. Each run is capped at
-2_000_000 charged evaluations, one entry to the potential on either side. A
-hit is a quenched energy at or below the reference plus 0.001 kJ/mol.
+2_000_000 charged gradient evaluations: one ``value_and_gradient`` pass in
+anneal and one ``GRADT=true`` entry to ``POTENTIAL`` (``gradient_passes``) in
+GMIN, while GMIN's ``GRADT=false`` energy-only entries are reported separately
+in ``energy_only_entries`` without consuming the cap and refused once aborted.
+A hit is a quenched energy at or below the reference plus 0.001 kJ/mol.
 
 The references are the Cambridge Cluster Database TIP4P headers, which the
 database lists for n <= 21. (H2O)25 is not in the database, so its hit is
