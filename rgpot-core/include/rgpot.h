@@ -816,8 +816,9 @@ enum rgpot_status_t rgpot_potential_set_ad_hvp_callback(
  *
  * `step` is `h`, a length in the units of the positions; 0 selects
  * `RGPOT_HVP_DEFAULT_STEP`. A zero direction writes zeros without a call.
- * A failing force callback's status is returned with its own
- * `rgpot_last_error` message. The scheme that ran is counted in
+ * A failing callback's status is returned, and `rgpot_last_error` holds
+ * the message the callback stored during the call or, when it stored
+ * none, one that names the status. The scheme that ran is counted in
  * `rgpot_potential_derivative_counts`; `rgpot_potential_hvp_resolved`
  * also returns it.
  *

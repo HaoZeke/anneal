@@ -876,8 +876,9 @@ enum rgpot_status_t rgpot_potential_hvp(const struct rgpot_potential_t *pot,
   =direction= under the scheme the request resolved to.
 - Errors :: =RGPOT_INVALID_PARAMETER=, with a message naming the problem, for: a
   NULL =pot=, =input=, =direction= or
-  =hv_out=; a =scheme= outside 0 to 5; a NULL =positions= tensor or one without a shape; overlapping =direction= and =hv_out=;
-  a refused peer; a =positions= tensor that is not a CPU float64 C-contiguous
+  =hv_out=; a =scheme= outside 0 to 5; a NULL =positions= tensor, one without a shape, or one whose =3 * n_atoms=
+  doubles exceed =PTRDIFF_MAX= bytes; overlapping =direction= and =hv_out=; a
+  refused peer; a =positions= tensor that is not a CPU float64 C-contiguous
   tensor of =3 * n_atoms= finite elements; a non-null =atomic_numbers= that is
   not int32 with =n_atoms= elements, or a non-null =box_matrix= that is not
   float64 with 9 elements; a non-finite =direction= element; a negative or
@@ -885,9 +886,9 @@ enum rgpot_status_t rgpot_potential_hvp(const struct rgpot_potential_t *pot,
   =RGPOT_HVP_AD= with no dual-number callback registered, or =RGPOT_HVP_EXACT=
   with neither, each refused before any call; a force callback output that fails
   the checks of =PotentialCallback=; a non-finite analytic output.
-  A force or analytic callback's error status is returned unchanged, and
-  =rgpot_last_error= keeps the message the callback stored during the call, or
-  names the callback and the status when it stored none.
+  A force, analytic or dual-number callback's error status is returned
+  unchanged, and =rgpot_last_error= keeps the message the callback stored during
+  the call, or names the callback and the status when it stored none.
   A non-finite dual-number output is refused with
   =dual-number Hessian-vector callback: non-finite value at element <i>=.
   =RGPOT_INTERNAL_ERROR= for a caught panic.
@@ -1141,7 +1142,8 @@ enum rgpot_status_t rgpot_potential_hessian(const struct rgpot_potential_t *pot,
   is unspecified.
 - Errors :: =RGPOT_INVALID_PARAMETER=, with a message naming the problem and
   before any call, for: a NULL =pot=, =input=, =hessian_out= or =scheme_used=; a
-  =scheme= outside 2 to 5; a NULL =positions= tensor; a refused peer; a
+  =scheme= outside 2 to 5; a NULL =positions= tensor, or one whose
+  =(3 * n_atoms)^2= doubles exceed =PTRDIFF_MAX= bytes; a refused peer; a
   =positions=, =atomic_numbers= or =box_matrix= tensor that fails the checks of
   =rgpot_potential_hvp=;
   =hessian_out= overlapping the =positions=, =atomic_numbers= or
