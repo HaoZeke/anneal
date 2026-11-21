@@ -1,32 +1,27 @@
-# scan-safe6 against scan-safe4
+# scan-safe6 r6 against develop
 
-This file was written before any build or run of this comparison.
+This revision was written before any build or run of the r6
+comparison.
 The cell list, the budgets, the references, the seeds, the round
 order and the bars below are fixed. Nothing in them is chosen from
 the outcomes.
 
 ## Arms
 
-- A is `perf/nm3-scan-safe4` at `7d5bd6924075fbc66c33da3632d86f2e7eb40b76`,
-  tree `578a12095ab5e0e6ac89c805173db78a9d1578b7`.
+- A is `develop` at
+  `fac18c6ee91a0b0d266e231d05af3875ba09b376`, tree
+  `facb1879318bd87905129cbf14ea2841001b1da8`.
 - A2 is a second release build of that same commit, in its own target
-  directory. It is the A/A arm.
-- B is `perf/nm3-scan-safe6` at `7965b1873421dfbd812f4143ae273e20f17b429c`.
-  Its tree must be `68b35a35c13fd4c5ce683594c744f3b5cb2cad8d`.
+  directory. It is the A/A placement arm.
+- B is the supplied 14-commit r6 stack on A. Its canonical tip is
+  `de19575d6d7c07a5c4b85bc321871fae5eb798f3`, and its tree must be
+  `ed7566889ff824533b855c0304d2a142ed27e334`. The supplied mailbox
+  SHA-256 is
+  `d14c1a620dd77c52fad5640edfce92d8f37c896c25e20b044327a86401248c74`.
 
-The measured code differs only by the two commits on `7d5bd692..7965b187`.
-Both describe the nearest-neighbour scan:
-
-- `9174c9d9` says a tie keeps the earlier atom, and that detection on
-  the named clouds matches the base split by `to_bits`.
-- `7965b187` says the four-lane reduction had ordered lanes by distance
-  alone, so a later atom could win a tie. The repair orders each
-  candidate by distance, then by index, which is the scalar walk. It
-  says forced ties match the scalar walk by index and by `to_bits`,
-  and that the seeded corpus is unchanged.
-
-Read together, the commits claim no change of behaviour against the
-scalar walk at `7d5bd692`. Bar 3 therefore gates. It is not only reported.
+The stack explicitly records changed search trajectories, charged
+counts, energies, hit masks, and symmetry behaviour. Bit identity is
+therefore reported but does not gate this comparison.
 
 ## Cells
 
@@ -68,8 +63,8 @@ seed once:
 7. A2
 8. A
 
-That is A, B, B, A, then A, A2, A2, A. Forty-eight runs per cell,
-528 runs in total.
+That is ABBA, followed by the A/A placement band A-A2-A2-A.
+Forty-eight planned runs per cell, 528 planned runs in total.
 
 ## How a run is launched
 
@@ -103,14 +98,19 @@ each accepted transition in order (hop, action, from-energy bits,
 to-energy bits, adopted flag, destination coordinate bits), then the
 final coordinates.
 
-`journal.log` is append-only. Every run gets a start line before the
+`journal.log` and `rows.csv` are append-only. Every run gets a start
+line before the
 process is spawned and an end line after it is reaped. A later start
 of the orchestrator appends a restart line and does not repeat a run
-that already has a start line. Rows are never rewritten.
+that already has a start line. Rows are never rewritten. Earlier
+safe4 rows are retained under `superseded-safe4/` and are not input
+to this analysis.
 
-A non-zero exit, an unreadable measurement, or a start line with no
-row leaves that cell inconclusive. An inconclusive cell is not passed
-and not failed. It is not run again.
+A non-zero exit or unreadable measurement may be replaced, but the
+superseded row remains. At most two replacement runs are allowed per
+cell across the entire schedule. A third need for replacement makes
+the cell inconclusive. A start line with no row is not launched again
+and also makes the cell inconclusive.
 
 ## Bars
 
@@ -139,12 +139,12 @@ inconclusive for the cell.
    bootstrap interval lies above the upper end of the A2/A interval.
 3. Bit identity of B against A, per cell, in the final energy, in
    `calls`, and in the trajectory digest. Every B replicate of a seed
-   must match every A replicate of that seed on all three. This bar
-   gates, because the commits claim no change of behaviour.
+   is compared with every A replicate of that seed on all three.
+   This is report-only because the r6 stack claims behaviour changes.
 4. Safe path exercise. Every B run must report a nonzero count of
-   calls into `Cloud::nearest_index` from symmetrisation on a stall.
-   A zero or missing count fails this bar. The same counter is
-   reported for A and A2 but does not gate for those arms.
+   calls from the r6 timed binary's always-on safe6 nearest-image
+   counter. A zero or missing count fails this bar. A and A2 report
+   zero because the counter does not exist in A.
 
 Memory is recorded three ways. After exec, the benchmark process
 polls its own status from before the measured search until after it
@@ -155,28 +155,30 @@ bar fails when the lower end of the B/A interval lies above the upper
 end of the A2/A interval. `ru_maxrss` and `VmHWM` are reported and
 never gate.
 
-The arm preparation step adds the same relaxed call counter to each
-arm before its release build. The benchmark process reads that
-counter before and after the search and emits the difference. The
-preparation refuses an unexpected source shape, so a new arm cannot
-silently omit or relocate the counted call.
+The B preparation step requires exactly one native safe6 counter
+entry point before its release build. The B driver enables the
+matching compile-time feature and reads the counter before and after
+the timed search. Neither A binary is instrumented.
 
 ## Analysis
 
 `analyze.py` reads `rows.csv` and `journal.log` and writes
 `summary.csv`, `REPORT.md`, and `RESTARTS.md`. It never writes this
 file. This registration and the analysis implementation are frozen
-in the harness commit before any revised data is collected. Each bar
+in the harness commit before any r6 data is collected. Each bar
 has its own verdict. A bar fails if any cell fails it, is
 inconclusive if any cell is inconclusive and none fail, and passes
-otherwise.
+otherwise. The overall verdict gates on hits, outside time, peak
+`RssAnon`, and safe path exercise. Bit identity is report-only.
 
 ## Log archive
 
 Only selected text logs are archived. Before the archive is made,
 machine-local directory prefixes, inherited-environment notices, and
 environment values longer than 16 characters are scrubbed from a
-staging copy. A second scan must find none of them. Environment dumps
+staging copy. This includes the registered home, store, software,
+temporary, and checkout prefixes, plus machine host names beginning
+with `ip-`. A second scan must find none of them. Environment dumps
 are not collected. The archive fixes owner and group to numeric zero
 and uses numeric ownership. All staged text and CSV output is LF-only;
 CSV writers use an explicit newline terminator.

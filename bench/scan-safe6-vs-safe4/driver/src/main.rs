@@ -92,6 +92,16 @@ fn read_self_status() -> MemoryPeak {
     sample
 }
 
+#[cfg(feature = "safe6")]
+fn safe6_nearest_index_calls() -> u64 {
+    anneal_core::symmetrise::safe6_nearest_index_calls()
+}
+
+#[cfg(not(feature = "safe6"))]
+fn safe6_nearest_index_calls() -> u64 {
+    0
+}
+
 #[derive(Clone, Copy)]
 enum Kind {
     Lj,
@@ -347,7 +357,7 @@ fn main() {
         }
         "run" => {
             let memory = MemorySampler::start();
-            let nearest_before = anneal_core::symmetrise::nearest_index_call_count();
+            let nearest_before = safe6_nearest_index_calls();
             let cell = args.get(1).expect("run needs a cell");
             let seed: u64 = args
                 .get(2)
@@ -378,8 +388,7 @@ fn main() {
                 }
             };
             let (hit, calls) = calls_to_hit(&outcome, spec);
-            let nearest_index_calls =
-                anneal_core::symmetrise::nearest_index_call_count() - nearest_before;
+            let nearest_index_calls = safe6_nearest_index_calls() - nearest_before;
             let memory = memory.finish();
             emit(
                 spec,

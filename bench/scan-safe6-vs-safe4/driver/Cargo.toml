@@ -6,6 +6,9 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+[features]
+safe6 = []
+
 [[bin]]
 name = "scan-safe6-vs-safe4"
 path = "src/main.rs"

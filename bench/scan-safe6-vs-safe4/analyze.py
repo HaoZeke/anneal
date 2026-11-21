@@ -50,6 +50,7 @@ HIT_TOL = 1.0e-3
 SUMMARY_FIELDS = [
     "cell",
     "status",
+    "replacements",
     "hits_a",
     "hits_b",
     "fisher_p",
@@ -64,7 +65,9 @@ SUMMARY_FIELDS = [
     "bit_seeds",
     "bit_verdict",
     "nearest_index_calls_min_b",
+    "nearest_index_calls_max_b",
     "path_verdict",
+    "rss_delta_kb",
     "rss_ba",
     "rss_ba_lo",
     "rss_ba_hi",
@@ -268,10 +271,17 @@ def analyse_cell(
     index: int,
     grouped: dict[tuple[str, str], list[dict[str, str]]],
 ) -> dict[str, str]:
-    present = []
+    all_rows = []
     for arm in ARMS:
         for seed in SEEDS:
-            present.extend(grouped.get((arm, str(seed)), []))
+            all_rows.extend(grouped.get((arm, str(seed)), []))
+    slots: dict[tuple[str, str, str], list[dict[str, str]]] = defaultdict(list)
+    for row in all_rows:
+        slots[(row["arm"], row["seed"], row["round"])].append(row)
+    present = []
+    for rows in slots.values():
+        rows.sort(key=lambda row: int(row.get("attempt", "0") or "0"))
+        present.append(rows[-1])
     expected = 8 * len(SEEDS)
     # Four A rounds, two B rounds, two A2 rounds, six seeds.
     bad_exit = [row for row in present if row.get("exit") != "0" or row.get("parse_ok") != "1"]
@@ -281,7 +291,10 @@ def analyse_cell(
         and not row.get("nearest_index_calls")
         for row in present
     )
-    missing = expected - len(present)
+    missing = expected - len(slots)
+    replacements = sum(
+        1 for row in all_rows if int(row.get("attempt", "0") or "0") > 0
+    )
     bad_charge = False
     for row in present:
         if row.get("exit") != "0" or row.get("parse_ok") != "1":
@@ -291,10 +304,11 @@ def analyse_cell(
                 bad_charge = True
         except (TypeError, ValueError):
             bad_charge = True
-    if missing or bad_exit or bad_charge:
+    if missing or bad_exit or bad_charge or replacements > 2:
         return {
             "cell": cell,
             "status": "inconclusive",
+            "replacements": str(replacements),
             "hits_a": "",
             "hits_b": "",
             "fisher_p": "",
@@ -309,7 +323,9 @@ def analyse_cell(
             "bit_seeds": "",
             "bit_verdict": "inconclusive",
             "nearest_index_calls_min_b": "",
+            "nearest_index_calls_max_b": "",
             "path_verdict": "fail" if missing_path else "inconclusive",
+            "rss_delta_kb": "",
             "rss_ba": "",
             "rss_ba_lo": "",
             "rss_ba_hi": "",
@@ -377,6 +393,7 @@ def analyse_cell(
 
     path_counts = samples("B", lambda row: float(row["nearest_index_calls"]))
     path_min = min(path_counts)
+    path_max = max(path_counts)
     path_verdict = "pass" if path_min > 0 else "fail"
 
     rss = {
@@ -385,6 +402,7 @@ def analyse_cell(
     }
     rss_point, rss_lo, rss_hi = bootstrap_ratio(rss["B"], rss["A"], rng)
     _, rss_a2_lo, rss_a2_hi = bootstrap_ratio(rss["A2"], rss["A"], rng)
+    rss_delta = type7(rss["B"]) - type7(rss["A"])
     rss_verdict = "fail" if rss_lo > rss_a2_hi else "pass"
 
     def ratio_of(column: str) -> float:
@@ -395,6 +413,7 @@ def analyse_cell(
     return {
         "cell": cell,
         "status": "ok",
+        "replacements": str(replacements),
         "hits_a": str(hits["A"]) if hits_verdict != "inconclusive" else "",
         "hits_b": str(hits["B"]) if hits_verdict != "inconclusive" else "",
         "fisher_p": fisher_p,
@@ -409,7 +428,9 @@ def analyse_cell(
         "bit_seeds": f"{bit_ok}/{len(SEEDS)}",
         "bit_verdict": bit_verdict,
         "nearest_index_calls_min_b": fmt(path_min, 8),
+        "nearest_index_calls_max_b": fmt(path_max, 8),
         "path_verdict": path_verdict,
+        "rss_delta_kb": fmt(rss_delta, 8),
         "rss_ba": fmt(rss_point, 4),
         "rss_ba_lo": fmt(rss_lo, 4),
         "rss_ba_hi": fmt(rss_hi, 4),
@@ -431,7 +452,7 @@ def write_report(rows_path: Path, journal_path: Path) -> None:
         cell = row["cell"]
         if cell not in grouped:
             raise ValueError(f"unexpected cell {cell}")
-        key = (row["arm"], row["seed"], row["round"])
+        key = (row["arm"], row["seed"], row["round"], row.get("attempt", "0"))
         if (cell, key) in seen:
             raise ValueError(f"duplicate row for {cell} {key}")
         seen.add((cell, key))
@@ -455,23 +476,33 @@ def write_report(rows_path: Path, journal_path: Path) -> None:
         "path": rollup([row["path_verdict"] for row in summary]),
         "rss": rollup([row["rss_verdict"] for row in summary]),
     }
+    overall = rollup(
+        [
+            row[key]
+            for row in summary
+            for key in (
+                "hits_verdict",
+                "time_verdict",
+                "path_verdict",
+                "rss_verdict",
+            )
+        ]
+    )
     lines = [
-        "# scan-safe6 against scan-safe4",
+        "# scan-safe6 r6 against develop",
         "",
-        "Bar 3 gates. The commits on `7d5bd692..7965b187` claim the scan",
-        "matches the scalar walk, so a difference in final energy, calls",
-        "or the trajectory digest is a failure and not only a report.",
+        f"- Overall: {overall}",
         "",
         f"- Hits: {bars['hits']}",
         f"- Time outside the potential per call: {bars['time']}",
-        f"- Bit identity: {bars['bits']}",
+        f"- Bit identity (report only): {bars['bits']}",
         f"- Safe path exercise: {bars['path']}",
         f"- Peak RssAnon: {bars['rss']}",
         "",
         "`ru_maxrss` and `VmHWM` ratios are in the table and do not gate.",
         "",
-        "| cell | hits A | hits B | Fisher p | MWU p | hits | B/A outside | outside 95% | A2/A 95% | time | bits | min B path calls | path | B/A RssAnon | RssAnon 95% | A2/A RssAnon | rss | ru_maxrss B/A | VmHWM B/A |",
-        "| --- | ---: | ---: | ---: | ---: | --- | ---: | --- | --- | --- | --- | ---: | --- | ---: | --- | --- | --- | ---: | ---: |",
+        "| cell | repl | hits A | hits B | Fisher p | MWU p | hits | B/A outside | outside 95% | A2/A 95% | time | bits | B path calls | path | RssAnon B-A KiB | B/A RssAnon | RssAnon 95% | A2/A RssAnon | rss | ru_maxrss B/A | VmHWM B/A |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- | --- | --- | --- | --- | --- | ---: | ---: | --- | --- | --- | ---: | ---: |",
     ]
     for row in summary:
         outside_ci = (
@@ -491,7 +522,7 @@ def write_report(rows_path: Path, journal_path: Path) -> None:
             f"{row['rss_a2a_lo']} .. {row['rss_a2a_hi']}" if row["rss_a2a_lo"] else ""
         )
         lines.append(
-            "| {cell} | {hits_a} | {hits_b} | {fisher_p} | {mwu_p} | {hits_verdict} | {outside_ba} | {outside_ci} | {a2_ci} | {time_verdict} | {bit_seeds} {bit_verdict} | {nearest_index_calls_min_b} | {path_verdict} | {rss_ba} | {rss_ci} | {rss_a2} | {rss_verdict} | {ru_maxrss_ba} | {vm_hwm_ba} |".format(
+            "| {cell} | {replacements} | {hits_a} | {hits_b} | {fisher_p} | {mwu_p} | {hits_verdict} | {outside_ba} | {outside_ci} | {a2_ci} | {time_verdict} | {bit_seeds} {bit_verdict} | {nearest_index_calls_min_b} .. {nearest_index_calls_max_b} | {path_verdict} | {rss_delta_kb} | {rss_ba} | {rss_ci} | {rss_a2} | {rss_verdict} | {ru_maxrss_ba} | {vm_hwm_ba} |".format(
                 outside_ci=outside_ci,
                 a2_ci=a2_ci,
                 rss_ci=rss_ci,

@@ -37,15 +37,16 @@ SEEDS = tuple(range(2000, 2006))
 ROUNDS = ("A", "B", "B", "A", "A", "A2", "A2", "A")
 
 EXPECTED_COMMIT = {
-    "A": "7d5bd6924075fbc66c33da3632d86f2e7eb40b76",
-    "A2": "7d5bd6924075fbc66c33da3632d86f2e7eb40b76",
-    "B": "7965b1873421dfbd812f4143ae273e20f17b429c",
+    "A": "fac18c6ee91a0b0d266e231d05af3875ba09b376",
+    "A2": "fac18c6ee91a0b0d266e231d05af3875ba09b376",
+    "B": "c4aa1edd6477de79c670dad92d6ce42652454395",
 }
 EXPECTED_TREE = {
-    "A": "578a12095ab5e0e6ac89c805173db78a9d1578b7",
-    "A2": "578a12095ab5e0e6ac89c805173db78a9d1578b7",
-    "B": "68b35a35c13fd4c5ce683594c744f3b5cb2cad8d",
+    "A": "facb1879318bd87905129cbf14ea2841001b1da8",
+    "A2": "facb1879318bd87905129cbf14ea2841001b1da8",
+    "B": "ed7566889ff824533b855c0304d2a142ed27e334",
 }
+REPLACEMENT_CAP = 2
 
 THREAD_KEYS = (
     "OMP_NUM_THREADS",
@@ -65,6 +66,9 @@ THREAD_KEYS = (
 )
 
 FIELDS = [
+    "run_id",
+    "attempt",
+    "replacement_for",
     "cell",
     "arm",
     "seed",
@@ -399,6 +403,8 @@ def write_provenance(
 
 def finish_run(
     run: dict[str, str],
+    run_id: str,
+    attempt: int,
     exit_code: int,
     max_rss: int,
     stdout_path: Path,
@@ -407,12 +413,15 @@ def finish_run(
     machine_id: str,
     trees: dict[str, str],
     hashes: dict[str, str],
-) -> None:
+) -> bool:
     parsed = parse_metrics(stdout_path, run["cell"], run["seed"])
     row = {key: "" for key in FIELDS}
     row.update(parsed if parsed is not None else {})
     row.update(
         {
+            "run_id": run_id,
+            "attempt": str(attempt),
+            "replacement_for": run["run"] if attempt else "",
             "cell": run["cell"],
             "arm": run["arm"],
             "seed": run["seed"],
@@ -427,8 +436,9 @@ def finish_run(
             "binary_sha256": hashes[run["arm"]],
         }
     )
-    journal_line(journal_path, event="end", run=run["run"], exit=str(exit_code))
+    journal_line(journal_path, event="end", run=run_id, exit=str(exit_code))
     append_row(rows_path, row)
+    return exit_code == 0 and parsed is not None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -468,70 +478,96 @@ def main(argv: list[str] | None = None) -> int:
     else:
         journal_line(args.journal, event="orchestrator_start")
 
-    done_rows = {
-        (row["cell"], row["arm"], row["seed"], row["round"]) for row in read_rows(args.rows)
+    rows = read_rows(args.rows)
+    replacements_used = {
+        cell: sum(
+            1
+            for row in rows
+            if row["cell"] == cell and int(row.get("attempt", "0") or "0") > 0
+        )
+        for cell, _budget, _reference in CELLS
     }
     starts, ends = parse_journal(args.journal)
 
     for ordinal, run in enumerate(runs, start=1):
         key = (run["cell"], run["arm"], run["seed"], run["round"])
-        stdout_path = args.logs_dir / f"{run['run']}.out"
-        stderr_path = args.logs_dir / f"{run['run']}.err"
-        if key in done_rows:
+        slot_rows = [
+            row
+            for row in rows
+            if (row["cell"], row["arm"], row["seed"], row["round"]) == key
+        ]
+        if any(row["exit"] == "0" and row["parse_ok"] == "1" for row in slot_rows):
             continue
-        started = starts.get(run["run"])
-        if started is not None:
-            pid_text = started.get("pid", "")
-            if pid_text.isdigit() and process_matches(int(pid_text), run):
-                exit_code, max_rss = reap(int(pid_text))
-                finish_run(
-                    run,
-                    exit_code,
-                    max_rss,
-                    stdout_path,
-                    args.rows,
-                    args.journal,
-                    machine_id,
-                    trees,
-                    hashes,
+        attempt = len(slot_rows)
+        while True:
+            if attempt > 0:
+                if replacements_used[run["cell"]] >= REPLACEMENT_CAP:
+                    journal_line(
+                        args.journal,
+                        event="replacement_cap",
+                        run=run["run"],
+                        cell=run["cell"],
+                    )
+                    break
+                replacements_used[run["cell"]] += 1
+            run_id = run["run"] if attempt == 0 else f"{run['run']}-x{attempt}"
+            stdout_path = args.logs_dir / f"{run_id}.out"
+            stderr_path = args.logs_dir / f"{run_id}.err"
+            if run_id in starts:
+                pid_text = starts[run_id].get("pid", "")
+                state = (
+                    "alive"
+                    if pid_text.isdigit() and process_matches(int(pid_text), run)
+                    else "lost"
                 )
-                done_rows.add(key)
-                print(f"[{ordinal}/{len(runs)}] adopted {run['run']} exit={exit_code}", flush=True)
-            continue
-        if run["run"] in ends:
-            continue
-        journal_line(
-            args.journal,
-            event="start",
-            run=run["run"],
-            cell=run["cell"],
-            seed=run["seed"],
-            round=run["round"],
-            arm=run["arm"],
-        )
-        pid = launch(bins[run["arm"]], run, env, stdout_path, stderr_path)
-        journal_line(args.journal, event="pid", run=run["run"], pid=str(pid))
-        exit_code, max_rss = reap(pid)
-        finish_run(
-            run,
-            exit_code,
-            max_rss,
-            stdout_path,
-            args.rows,
-            args.journal,
-            machine_id,
-            trees,
-            hashes,
-        )
-        done_rows.add(key)
-        print(
-            f"[{ordinal}/{len(runs)}] {run['run']} exit={exit_code}",
-            flush=True,
-        )
-        append_text(
-            args.logs_dir / "progress.txt",
-            f"{utc_now()} {ordinal}/{len(runs)} {run['run']} exit={exit_code}",
-        )
+                journal_line(
+                    args.journal,
+                    event="unreaped_start",
+                    run=run_id,
+                    state=state,
+                )
+                break
+            if run_id in ends:
+                break
+            journal_line(
+                args.journal,
+                event="start",
+                run=run_id,
+                cell=run["cell"],
+                seed=run["seed"],
+                round=run["round"],
+                arm=run["arm"],
+                attempt=str(attempt),
+            )
+            pid = launch(bins[run["arm"]], run, env, stdout_path, stderr_path)
+            journal_line(args.journal, event="pid", run=run_id, pid=str(pid))
+            exit_code, max_rss = reap(pid)
+            passed = finish_run(
+                run,
+                run_id,
+                attempt,
+                exit_code,
+                max_rss,
+                stdout_path,
+                args.rows,
+                args.journal,
+                machine_id,
+                trees,
+                hashes,
+            )
+            row = read_rows(args.rows)[-1]
+            rows.append(row)
+            print(
+                f"[{ordinal}/{len(runs)}] {run_id} exit={exit_code}",
+                flush=True,
+            )
+            append_text(
+                args.logs_dir / "progress.txt",
+                f"{utc_now()} {ordinal}/{len(runs)} {run_id} exit={exit_code}",
+            )
+            if passed:
+                break
+            attempt += 1
 
     import analyze
 

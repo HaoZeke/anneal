@@ -7,12 +7,15 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
 
-LOCAL_PREFIXES = ("/tmp/", "/home/", "/opt/", "/agent/")
+LOCAL_PREFIXES = ("/home/", "/cursor", "/opt/", "/tmp/", "/agent/")
 INHERITED_NOTICE = "Inherited environment"
+HOST_PATTERN = r"(^|[^[:alnum:]])ip-[[:alnum:]-]+"
+HOST_RE = re.compile(r"(?<![A-Za-z0-9])ip-[A-Za-z0-9-]+")
 REPLACEMENT = "[scrubbed]"
 
 
@@ -40,6 +43,7 @@ def scrub(path: Path, secrets: list[str]) -> None:
     text = raw.decode("utf-8", "replace").replace("\r\n", "\n").replace("\r", "\n")
     for item in (*LOCAL_PREFIXES, INHERITED_NOTICE, *secrets):
         text = text.replace(item, REPLACEMENT)
+    text = HOST_RE.sub(REPLACEMENT, text)
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
@@ -57,6 +61,19 @@ def grep_clean(stage: Path, secrets: list[str]) -> None:
         raise SystemExit(f"pre-archive grep found sensitive text:\n{proc.stdout}")
     if proc.returncode != 1:
         raise SystemExit(f"pre-archive grep failed:\n{proc.stderr}")
+    host_proc = subprocess.run(
+        ["grep", "-R", "-I", "-l", "-E", HOST_PATTERN, "."],
+        cwd=stage,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if host_proc.returncode == 0:
+        raise SystemExit(
+            f"pre-archive grep found a machine host:\n{host_proc.stdout}"
+        )
+    if host_proc.returncode != 1:
+        raise SystemExit(f"pre-archive host grep failed:\n{host_proc.stderr}")
     for path in stage.rglob("*"):
         if path.is_file() and b"\r" in path.read_bytes():
             raise SystemExit(f"non-LF text remains in {path.name}")
