@@ -101,6 +101,28 @@ def test_crest_rescore_reproduces_the_committed_row(tmp_path):
         crest.rescore(history, out, "si20", -922.98227162, "0" * 40, "bench")
 
 
+def test_crest_summary_refuses_mixed_anneal_revisions(tmp_path):
+    pytest.importorskip("scipy.stats")
+    crest = load("gfn2_crest_summary", "scripts/covalent_h2h/gfn2_crest.py")
+    panel = read(ROOT / "bench" / "covalent-h2h" / "gfn2" / "si20-panel.csv")
+    row = next(r for r in panel if r["code"] == "anneal-general")
+    rows = [dict(row, code_revision="a" * 40), dict(row, code_revision="b" * 40)]
+    history = write(tmp_path / "rows.csv", rows)
+    with pytest.raises(SystemExit, match="pass --anneal-revision"):
+        crest.summarise(
+            [history],
+            tmp_path / "summary.csv",
+            "0" * 40,
+            "bench",
+            systems=["si20"],
+        )
+
+
+def test_gfn2_runner_passes_the_superseded_rows():
+    runner = (ROOT / "scripts" / "covalent_h2h" / "gfn2_enter_bench.sh").read_text()
+    assert "--superseded $SUPERSEDED" in runner
+
+
 def test_the_committed_panel_is_the_same_on_every_seed(capsys):
     pytest.importorskip("scipy.stats")
     arm_gate.summary(argparse.Namespace(rows=PANEL_ROWS, arms=["develop", "floor"]))

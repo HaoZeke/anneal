@@ -740,11 +740,12 @@ def summarise(
     """Append one line per system and code over every rows file.
 
     With ``anneal_revision``, anneal's rows are only those of that
-    ``code_revision``. A row named in ``false_hits`` by system, code,
-    revision and seed counts as a miss at its budget. Rows of a seed outside
-    ``SEEDS``, or ``CREST_SEEDS`` for CREST, and rows ``superseded`` names
-    are left out. A CREST seed with two rows left is refused, as is an anneal
-    one under ``anneal_revision``.
+    ``code_revision``. Without it, a system with rows from more than one
+    anneal revision is refused instead of pooling different binaries. A row
+    named in ``false_hits`` by system, code, revision and seed counts as a
+    miss at its budget. Rows of a seed outside ``SEEDS``, or ``CREST_SEEDS``
+    for CREST, and rows ``superseded`` names are left out. Two remaining
+    rows for the same run are refused.
     """
     table = []
     for path in paths:
@@ -766,10 +767,22 @@ def summarise(
             if row["code"] != "anneal-general"
             or row.get("code_revision") == anneal_revision
         ]
+    else:
+        for system in systems or SYSTEMS:
+            revisions = {
+                row.get("code_revision", "")
+                for row in table
+                if row["system"] == system and row["code"] == "anneal-general"
+            }
+            if len(revisions) > 1:
+                raise SystemExit(
+                    f"{system} has anneal rows from multiple revisions; "
+                    "pass --anneal-revision"
+                )
     seen = set()
     for row in table:
         run = (row["system"], row["code"], row["seed"])
-        if run in seen and (row["code"] == "crest" or anneal_revision is not None):
+        if run in seen:
             raise SystemExit(f"{run} has two rows; name the older in --superseded")
         seen.add(run)
     if false_hits is not None:
