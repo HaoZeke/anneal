@@ -1,0 +1,10 @@
+cell,driver,role,n,hits_a,hits_ap,hits_b,mcnemar_b,mcnemar_c,mcnemar_p,b_worse,hit_deficit,hit_allowance,rule1,med_charged_a,med_charged_ap,med_charged_b,charged_ratio_ba,charged_ratio_aa,charged_band,charged_ratio_ba_lo,charged_ratio_ba_hi,charged_ratio_aa_lo,charged_ratio_aa_hi,hits_improved,rule2,med_calls_a,med_calls_ap,med_calls_b,calls_ratio_ba,calls_ratio_aa,calls_ratio_ba_lo,calls_ratio_ba_hi,med_wall_a,med_wall_ap,med_wall_b,wall_ratio_ba,wall_ratio_aa,wall_ratio_ba_lo,wall_ratio_ba_hi,med_outside_per_a,med_outside_per_ap,med_outside_per_b,outside_ratio_ba,outside_ratio_aa,outside_ratio_ba_lo,outside_ratio_ba_hi,outside_ratio_aa_lo,outside_ratio_aa_hi,rule3,search_equal,hit_charge_equal,repeat_equal,score_differences,wilcoxon_w,wilcoxon_p,bit_equal,bit_compared,hitstr_a,hitstr_b,cell_pass
+lj75,h2h_gmin_proof,reaches,0,,,,,,,,,0,0,,,,,,,,,,,0,0,,,,,,,,,,,,,,,,,,,,,,,,0,0,0,0,0,,,0,0,000000000000000000000000,000000000000000000000000,0
+lj98,h2h_gmin_proof,reaches,0,,,,,,,,,0,0,,,,,,,,,,,0,0,,,,,,,,,,,,,,,,,,,,,,,,0,0,0,0,0,,,0,0,000000000000000000000000,000000000000000000000000,0
+m55r14,h2h_morse,reaches,0,,,,,,,,,0,0,,,,,,,,,,,0,0,,,,,,,,,,,,,,,,,,,,,,,,0,0,0,0,0,,,0,0,000000000000000000000000,000000000000000000000000,0
+m80r14,h2h_morse,reaches,0,,,,,,,,,0,0,,,,,,,,,,,0,0,,,,,,,,,,,,,,,,,,,,,,,,0,0,0,0,0,,,0,0,000000000000000000000000,000000000000000000000000,0
+m30r14,h2h_morse,reaches,0,,,,,,,,,0,0,,,,,,,,,,,0,0,,,,,,,,,,,,,,,,,,,,,,,,0,0,0,0,0,,,0,0,000000000000000000000000,000000000000000000000000,0
+m38r6,h2h_morse,reaches,0,,,,,,,,,0,0,,,,,,,,,,,0,0,,,,,,,,,,,,,,,,,,,,,,,,0,0,0,0,0,,,0,0,000000000000000000000000,000000000000000000000000,0
+m38r14,h2h_morse,reaches,0,,,,,,,,,0,0,,,,,,,,,,,0,0,,,,,,,,,,,,,,,,,,,,,,,,0,0,0,0,0,,,0,0,000000000000000000000000,000000000000000000000000,0
+m38r14,h2h_seed,reaches,0,,,,,,,,,0,0,,,,,,,,,,,0,0,,,,,,,,,,,,,,,,,,,,,,,,0,0,0,0,0,,,0,0,000000000000000000000000,000000000000000000000000,0
+lj75,h2h_seed,reaches,0,,,,,,,,,0,0,,,,,,,,,,,0,0,,,,,,,,,,,,,,,,,,,,,,,,0,0,0,0,0,,,0,0,000000000000000000000000,000000000000000000000000,0

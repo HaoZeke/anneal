@@ -172,11 +172,11 @@ def series(found, cell: gate.Cell, arm: str, field: str, ranked: bool) -> list[f
         row = found.get((cell.name, cell.driver, arm, seed))
         if row is None:
             return None
+        if int(row.get("exit_code") or "0") != 0:
+            return None
         if ranked:
             values.append(ranked_charged(row, cell.budget))
             continue
-        if int(row.get("exit_code") or "0") != 0:
-            return None
         value = finite_float(row.get(field) or "")
         if value is None:
             return None

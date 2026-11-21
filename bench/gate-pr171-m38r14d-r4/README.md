@@ -389,3 +389,31 @@ Per-seed hit strings, A then B, seeds 2000 through
 | m38r14 | h2h_seed | 101111111111111111111111 | 101101110101111111101111 |
 | lj75 | h2h_seed | 000000000000000000000000 | 000000000000000000000000 |
 | hexamer | h2h_seed | 111111111111111111111111 | 111111111111111111111111 |
+
+## Round four verdict
+
+INCONCLUSIVE. The preflight passed revision, tree,
+binary, pin, and self-tests, but did not exercise
+the timing wrapper. All 864 append-only rows have
+exit 127 because that wrapper was unavailable. No
+row was rerun, replaced, relabeled, rescued, or
+hand-picked.
+
+No process reached a driver. Search equality,
+hit charging, clauses 1 through 3 from round three,
+both h2h_seed scorings, the LJ75 scoring comparison,
+and the claimed m80r14 seed 2006 count are therefore
+unverified. Peak RssAnon and VmHWM are zero because
+no driver process started; ru_maxrss is unavailable.
+
+| cell | driver | rows | exit | verdict |
+| --- | --- | --- | --- | --- |
+| lj75 | h2h_gmin_proof | 96 | 127 | inconclusive |
+| lj98 | h2h_gmin_proof | 96 | 127 | inconclusive |
+| m55r14 | h2h_morse | 96 | 127 | inconclusive |
+| m80r14 | h2h_morse | 96 | 127 | inconclusive |
+| m30r14 | h2h_morse | 96 | 127 | inconclusive |
+| m38r6 | h2h_morse | 96 | 127 | inconclusive |
+| m38r14 | h2h_morse | 96 | 127 | inconclusive |
+| m38r14 | h2h_seed | 96 | 127 | inconclusive |
+| lj75 | h2h_seed | 96 | 127 | inconclusive |
