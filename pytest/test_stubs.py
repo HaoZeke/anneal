@@ -240,6 +240,28 @@ def test_the_comparison_catches_drift(edit, fragment):
     assert any(fragment in problem for problem in problems), problems
 
 
+def test_coverage_neighbors_is_declared_as_the_integer_the_module_takes():
+    """stubtest checks names and kinds, not what an annotation admits."""
+    import numpy as np
+
+    functions, _, _ = _stub_surface(STUB.read_text())
+    declared = {}
+    for name, node in functions.items():
+        for arg in [*node.args.args, *node.args.kwonlyargs]:
+            if arg.arg == "coverage_neighbors":
+                declared[name] = ast.unparse(arg.annotation)
+    assert "global_optimize" in declared
+    assert set(declared.values()) <= {"int", "int | None"}, declared
+    low, high = np.full(2, -1.0), np.full(2, 1.0)
+
+    def sphere(x):
+        return float((x**2).sum())
+
+    for bad in ("1", 1.0, None):
+        with pytest.raises(TypeError):
+            core.global_optimize(sphere, low, high, 20, coverage_neighbors=bad)
+
+
 def test_stubtest_agrees():
     pytest.importorskip("mypy.stubtest")
     result = subprocess.run(

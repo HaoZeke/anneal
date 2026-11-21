@@ -723,7 +723,7 @@ def global_optimize(
     replicas: int = 1,
     coverage_shared: bool = True,
     coverage_radius: float = 0.05,
-    coverage_neighbors: int | str = 0,
+    coverage_neighbors: int = 0,
 ) -> _Result: ...
 def global_optimize_objective(
     objective: PyObjective,
