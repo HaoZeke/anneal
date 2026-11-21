@@ -770,8 +770,8 @@ A value the backend or task cannot take returns 3, keeps the values in force and
 leaves the reason in =rgpot_engine_last_error=.
 No engine returns 0 for a value its model does not receive.
 
-| library | charge and multiplicity |
-|---------+-------------------------|
+| library | charge and spin |
+|---------+-----------------|
 | =libuma_engine= | graph inputs of every call; =UmaParams.charge= and =spin= at create |
 | =libmetatomic_engine= | system data the model declares; =MetatomicParams.charge= and =spin= at create |
 | =libskala_engine= | the NWChem input of the next call; =NWChemParams.charge= and =multiplicity= at create |

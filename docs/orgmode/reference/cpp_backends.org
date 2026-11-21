@@ -1143,7 +1143,7 @@ That figure is the test's parity pin, not a value from the paper.
 - Inputs ::
   =model_path= (default empty; an AOTInductor =.pt2= package from =scripts/export_uma_aoti.py=), =task_name=
   (default =omol=), =device= (default =cpu=), =charge= (default 0), =spin=
-  (multiplicity, default 1), =cutoff= (default 6.0),
+  (integer from 0 to 100, default 1), =cutoff= (default 6.0),
   =max_neighbors= (default 300), =cache_dir= (default empty; the root of the
   persistent cache the package is unpacked into).
 - Units :: =cutoff= in Angstrom; =charge= in elementary charges; the other
