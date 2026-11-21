@@ -82,6 +82,9 @@ is already omitted as censored, and `hit` and `evals_to_hit` are unaffected.
   the rows (`4f772314...` for GMIN in session
   `20261117T035457Z`, `4665badc...` in `20261117T152941Z`; the four Rust
   binaries are bit-identical across both sessions).
+  `gmin-source-aac1548a.txt` is the build receipt of that `4665badc...`
+  GMIN: SVNREV `aac1548a`, tarball, patches, CMake flags, compiler,
+  linked BLAS and LAPACK and binary hash.
 - `summary.csv`, the table below and table `tab:gmin` in
   `paper/jctc/manuscript.tex` are written from `rows.csv` by
   `bash scripts/gmin_panel/enter_bench.sh --summarize --tex`.

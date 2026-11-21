@@ -85,6 +85,22 @@ def test_the_committed_binary_hash_matches_bin_sha256() -> None:
         assert _assign(source, "binary_sha256") == _gmin_line(sums)
 
 
+def test_the_historical_receipt_pairs_with_bin_sha256() -> None:
+    from gmin_pin import HISTORICAL_REVISION
+
+    receipt = (ROOT / "bench" / "gmin-panel" / "gmin-source-aac1548a.txt").read_text()
+    sums = (ROOT / "bench" / "gmin-panel" / "bin-sha256.txt").read_text()
+    assert _assign(receipt, "svnrev") == HISTORICAL_REVISION
+    assert _assign(receipt, "revision") == HISTORICAL_REVISION
+    assert _assign(receipt, "binary_sha256") == _gmin_line(sums)
+
+
+def test_the_build_records_the_compiler_it_runs() -> None:
+    script = BUILD.read_text()
+    assert "exec /usr/bin/gfortran" in script
+    assert 'echo "gfortran=$(/usr/bin/gfortran -dumpfullversion)"' in script
+
+
 def test_binary_sha256_comes_from_the_bin_sha256_pass(tmp_path: Path) -> None:
     assert "binary_sha256" not in BUILD.read_text()
     enter = (ROOT / "scripts" / "gmin_panel" / "enter_bench.sh").read_text()
