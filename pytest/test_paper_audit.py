@@ -478,11 +478,27 @@ def test_a_drifted_gmin_panel_summary_cell_is_reported():
 def test_a_cross_arm_work_p_value_in_the_gmin_table_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "different operations and are not tested across arms."
-    assert tex.count(old) == 1
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, "\\(p_\\mathrm{calls}=0.021\\). " + old)
+    old = "no cross-arm hit, work, or wall test is reported."
+    assert tex.count(old) == 2
+    start, rest = tex.split("% gmin-panel table: start", 1)
+    table, end = rest.split("% gmin-panel table: end", 1)
+    audit.text_cache[audit_mod.TEX] = (
+        start + "% gmin-panel table: start"
+        + table.replace(old, "\\(p_\\mathrm{calls}=0.021\\). " + old, 1)
+        + "% gmin-panel table: end" + end)
     audit_mod.manuscript_gmin(audit)
-    assert [r[2] for r in audit.drifts()] == ["tab:gmin reports no cross-arm work p-values"]
+    assert [r[2] for r in audit.drifts()] == ["tab:gmin reports no cross-arm tests"]
+
+
+def test_a_cross_arm_hit_p_value_in_the_gmin_prose_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = ("At those arm-specific ceilings, this code hits 7 of 12 seeds on\n"
+           "LJ\\(_{98}\\) and GMIN none; on LJ\\(_{38}\\), the counts are 12 and 7.")
+    assert tex.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, old + "\nThe paired result is \\(p=0.016\\).")
+    audit_mod.manuscript_gmin(audit)
+    assert [r[2] for r in audit.drifts()] == ["the GMIN results report no cross-arm hit test"]
 
 
 def test_the_develop_gmin_rows_keep_the_harness_that_ran_them():
@@ -653,15 +669,14 @@ def test_lj75_is_withdrawn_only_from_the_gmin_comparison():
     assert '"lj75_marks"' in audit.text("paper/jctc/scripts/system_visuals.py")
 
 
-def test_an_unpaired_fisher_p_in_the_gmin_table_is_reported():
+def test_a_gmin_interval_in_the_table_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = ("LJ\\(_{38}\\) & \\(4\\times 10^{5}\\) & this work & 12/12 & 5 & 7 & 0 & 127839.5 & "
-           "139245.25 & 0.640 & 0.303 & 0.337 & 0.0625 & 0.09 to 0.68 \\\\")
+    old = "different operations. The numeric ceiling is applied separately in each arm's unit"
     assert tex.count(old) == 1
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, old.replace("& 0.0625 &", "& 0.037 &"))
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, old + " a Newcombe interval is 0.1 to 0.7;")
     audit_mod.manuscript_gmin(audit)
-    assert [r[2] for r in audit.drifts()] == ["exact McNemar p"]
+    assert [r[2] for r in audit.drifts()] == ["tab:gmin reports no cross-arm tests"]
 
 
 def test_a_paired_count_that_drifts_is_reported():
@@ -677,13 +692,13 @@ def test_a_paired_count_that_drifts_is_reported():
 def test_a_drifted_develop_morse_count_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "Morse M\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=14\\) on 9 and 6 of 12 against none"
+    old = ("At the submitted revision, the hit counts for this code and GMIN are 9 and "
+           "0 on M\\(_{55}\\) at \\(\\rho=14\\), 6 and 0 on M\\(_{80}\\) at \\(\\rho=14\\), "
+           "and 4 and 1 on Au\\(_{55}\\).")
     assert old in audit_mod.collapse(tex)
-    audit.text_cache[audit_mod.TEX] = audit_mod.collapse(tex).replace(old, old.replace("on 9 and 6", "on 7 and 9"))
+    audit.text_cache[audit_mod.TEX] = audit_mod.collapse(tex).replace(old, old.replace("are 9 and", "are 7 and"))
     audit_mod.manuscript_gmin(audit)
-    assert [(r[2], r[3]) for r in audit.drifts()] == [
-        ("prose", "Morse M\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=14\\) on 9 and 6 of 12 against none "
-                  "(\\(p=3.9\\times 10^{-3}\\) and 0.031).")]
+    assert [(r[2], r[3]) for r in audit.drifts()] == [("prose", old)]
 
 
 def test_a_develop_gmin_cell_that_drifts_is_reported():
@@ -771,14 +786,16 @@ def test_a_fisher_test_in_the_gmin_section_is_reported():
     assert [r[2] for r in audit.drifts()] == ["the GMIN comparison does not print Fisher"]
 
 
-def test_a_tip4p_p_off_its_rows_is_reported():
+def test_a_tip4p_cross_arm_interval_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "On (H\\(_2\\)O)\\(_8\\) this code hits 12 of 12 and GMIN 8, with \\(p=0.125\\),"
-    assert old in audit_mod.collapse(tex)
-    audit.text_cache[audit_mod.TEX] = audit_mod.collapse(tex).replace(old, old.replace("0.125", "0.037"))
+    old = "no cross-arm hit, work, or wall test is reported."
+    assert tex.count(old) == 2
+    start, rest = tex.split("% tip4p-gmin table: start", 1)
+    audit.text_cache[audit_mod.TEX] = start + "% tip4p-gmin table: start" + rest.replace(
+        old, old + " A Newcombe interval is 0.1 to 0.7.", 1)
     audit_mod.manuscript_knockouts(audit)
-    assert {r[2] for r in audit.drifts()} == {"prose"}
+    assert {r[2] for r in audit.drifts()} == {"tab:tip4p-gmin reports no cross-arm test"}
 
 
 def test_a_limits_section_is_reported():

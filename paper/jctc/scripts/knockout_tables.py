@@ -328,8 +328,8 @@ def tip4p_table() -> str:
         "seed, in alternating order.",
         "The budget of this code counts one call per combined energy and gradient pass, and GMIN's budget counts",
         "every \\texttt{POTENTIAL} entry, including \\texttt{GRADT=false}.",
-        "Hits, Only, \\(p_\\mathrm{M}\\) and \\(\\Delta\\) are as in Table~\\ref{tab:gmin};",
-        "no cross-arm work or wall test is reported because the budgets count different operations.",
+        "The numeric ceiling is applied separately in each arm's unit and is not an equal-work budget;",
+        "no cross-arm hit, work, or wall test is reported.",
         "(H\\(_2\\)O)\\(_{25}\\) has no independent reference and is not scored; its row gives the lowest and",
         "the median best energy of each arm in kJ/mol.",
         "The rows are \\texttt{paper/jctc/data/tip4p\\_gmin/rows.csv}.}",
@@ -337,9 +337,9 @@ def tip4p_table() -> str:
         "\\centering",
         "\\footnotesize",
         "\\setlength{\\tabcolsep}{3pt}",
-        "\\begin{tabular}{@{}lrrrrrc@{}}",
+        "\\begin{tabular}{@{}lrrrr@{}}",
         "\\toprule",
-        "Cluster & This work & GMIN & Only, this work & Only, GMIN & \\(p_\\mathrm{M}\\) & \\(\\Delta\\), 95\\% \\\\",
+        "Cluster & This work & GMIN & Only, this work & Only, GMIN \\\\",
         "\\midrule",
     ]
     for size, cell in summary.items():
@@ -348,13 +348,12 @@ def tip4p_table() -> str:
         both, only_a, only_g, _ = cell["table"]
         n = cell["n"]
         lines.append(
-            f"(H\\(_2\\)O)\\(_{{{size}}}\\) & {both + only_a}/{n} & {both + only_g}/{n} & {only_a} & {only_g} & "
-            f"{show_p(cell['p'])} & {show_interval(*cell['interval'])} \\\\")
+            f"(H\\(_2\\)O)\\(_{{{size}}}\\) & {both + only_a}/{n} & {both + only_g}/{n} & {only_a} & {only_g} \\\\")
     for size, cell in summary.items():
         if size in TIP4P_SIZES:
             continue
         lines.append(
-            f"(H\\(_2\\)O)\\(_{{{size}}}\\) & \\multicolumn{{6}}{{l}}{{this work {energy(cell['low'][0])}, median "
+            f"(H\\(_2\\)O)\\(_{{{size}}}\\) & \\multicolumn{{4}}{{l}}{{this work {energy(cell['low'][0])}, median "
             f"{energy(cell['best'][0])}; GMIN {energy(cell['low'][1])}, median {energy(cell['best'][1])}}} \\\\")
     lines += ["\\bottomrule", "\\end{tabular}", "\\end{table}"]
     return "\n".join(lines)

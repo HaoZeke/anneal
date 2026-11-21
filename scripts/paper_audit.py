@@ -604,7 +604,7 @@ def gmin_paired(groups: dict, system: str) -> dict[str, object]:
 
 def gmin_tex_line(audit: Audit, where: str, cells: list[str], groups: dict, system: str, arm: str,
                   budget: int) -> None:
-    """One tab:gmin line: budget, arm, hits, outcomes, arm-specific evaluation count, wall, and hit statistics."""
+    """One tab:gmin line: budget, arm, hits, outcomes, arm-specific evaluation count, and wall."""
     group = groups[(system, arm)]
     stats = gmin_paired(groups, system)
     both, only_a, only_g, neither = stats["table"]
@@ -623,11 +623,8 @@ def gmin_tex_line(audit: Audit, where: str, cells: list[str], groups: dict, syst
         audit.cell(where, "budget", cells[0], float(budget))
         audit.cell(where, "both hit", cells[4], float(both))
         audit.cell(where, "neither hits", cells[5], float(neither))
-        audit.cell(where, "exact McNemar p", cells[11], stats["mcnemar"])
-        audit.cell(where, "paired Newcombe 95% interval", cells[12], interval_text(*stats["interval"]))
     else:
-        for label, cell in zip(("budget", "both", "neither", "McNemar p", "interval"),
-                               (cells[0], cells[4], cells[5], *cells[11:])):
+        for label, cell in zip(("budget", "both", "neither"), (cells[0], cells[4], cells[5])):
             audit.cell(where, label, cell, None)
 
 
@@ -1042,44 +1039,29 @@ def gmin_develop_data(audit: Audit, panel: object) -> None:
 
 
 def gmin_develop_prose(audit: Audit, panel: object, groups: dict) -> None:
-    """The results, abstract, conclusion and cover sentences of the second block, from its rows."""
+    """The descriptive results of the second block, from its rows."""
     paired = {s: gmin_paired(groups, s) for s in GMIN_DEVELOP_SYSTEMS}
     t = {s: paired[s]["table"] for s in GMIN_DEVELOP_SYSTEMS}
-    p = {s: pp(paired[s]["mcnemar"]) for s in GMIN_DEVELOP_SYSTEMS}
     hits = {(s, a): hits_of(groups[(s, a)]) for s in GMIN_DEVELOP_SYSTEMS for a in ("anneal", "gmin")}
-    ahead = [s for s in GMIN_DEVELOP_SYSTEMS if t[s][1] > t[s][2] and paired[s]["mcnemar"] < 0.05]
-    audit.cell(TEX, "clusters of the second block where this code hits more at p<0.05", "m55r14 m80r14", " ".join(ahead))
     audit.cell(TEX, "GMIN hits on M55 and M80 at rho 14", "0 0", f"{hits[('m55r14', 'gmin')]} {hits[('m80r14', 'gmin')]}")
-    a, b = paired["m55r14"]["interval"], paired["m80r14"]["interval"]
-    audit.said(TEX, f"At the submitted revision, this code alone hits {t['m55r14'][1]} seeds of M\\(_{{55}}\\) at "
-                    f"\\(\\rho=14\\) and GMIN alone none, with \\(p={p['m55r14']}\\) and an interval from {a[0]:.2f} to "
-                    f"{a[1]:.2f}, and {t['m80r14'][1]} seeds of M\\(_{{80}}\\) at \\(\\rho=14\\) against none, with "
-                    f"\\(p={p['m80r14']}\\) and an interval from {b[0]:.2f} to {b[1]:.2f}.")
-    audit.said(TEX, f"On Au\\(_{{55}}\\) this code alone hits {t['au55'][1]} seeds and GMIN alone {t['au55'][2]}, with "
-                    f"\\(p={p['au55']}\\).")
+    audit.said(TEX, f"At the submitted revision, the hit counts for this code and GMIN are "
+                    f"{hits[('m55r14', 'anneal')]} and {hits[('m55r14', 'gmin')]} on M\\(_{{55}}\\) at "
+                    f"\\(\\rho=14\\), {hits[('m80r14', 'anneal')]} and {hits[('m80r14', 'gmin')]} on "
+                    f"M\\(_{{80}}\\) at \\(\\rho=14\\), and {hits[('au55', 'anneal')]} and "
+                    f"{hits[('au55', 'gmin')]} on Au\\(_{{55}}\\).")
     audit.cell(TEX, "both arms hit M55 and M80 at rho 6 on every seed", "12 0 0 0 12 0 0 0",
                " ".join(map(str, t["m55r6"] + t["m80r6"])))
     calls = median([float(r["evals_to_hit"]) for r in groups[("m80r6", "anneal")]])
     audit.said(TEX, "Both arms hit M\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=6\\) on every seed, and on M\\(_{80}\\) at "
                     f"\\(\\rho=6\\) this code takes the same median of {calls:.0f} calls at both revisions.")
-    hits_m = f"{hits[('m55r14', 'anneal')]} and {hits[('m80r14', 'anneal')]} of 12 against none"
-    audit.said(TEX, f"Morse M\\(_{{55}}\\) and M\\(_{{80}}\\) at \\(\\rho=14\\) on {hits_m} "
-                    f"(\\(p={p['m55r14']}\\) and {p['m80r14']}).")
-    audit.said(TEX, "Against GMIN's rigid TIP4P potential, the code hits")
-    audit.said(TEX, "against GMIN run with the Wales-group LJ\\(_{38}\\) input at every Lennard-Jones and Morse size")
-    audit.said(TEX, f"on Morse M\\(_{{55}}\\) and M\\(_{{80}}\\) at \\(\\rho=14\\) at the submitted revision, "
-                    f"{hits[('m55r14', 'anneal')]} and {hits[('m80r14', 'anneal')]} of 12 against none.")
     audit.said(TEX, "Table~\\ref{tab:gmin} runs GMIN against this code at two revisions: revision \\texttt{eeec8e2c}, "
                     "an ancestor of the submitted revision with the structure templates removed, on seven Lennard-Jones "
                     "sizes and Morse M\\(_{80}\\) at \\(\\rho=6\\), and the submitted revision \\texttt{61fa67cf} on "
                     "Gupta Au\\(_{55}\\) and on Morse M\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=6\\) and 14.")
     audit.said(TEX, "Each block runs both arms of each cluster on seeds 2000--2011 in alternating order, at the "
                     "budget in the table, from the start this code writes for the seed.")
-    audit.said(COVER, "Paired by seed against GMIN run with the Wales-group Lennard-Jones introduction file at every "
-                      "Lennard-Jones and Morse size, the code hits more seeds than GMIN on a Lennard-Jones cluster and "
-                      "on two Morse clusters.")
-    audit.said(COVER, "Against GMIN's rigid TIP4P potential, the code hits more seeds than GMIN on two water "
-                      "clusters.")
+    audit.said(COVER, "The GMIN tables report committed outcomes at the arm-specific budget units\n"
+                      "stated with each table, without a cross-arm test.")
 
 
 def gmin_rerun(audit: Audit) -> None:
@@ -1090,7 +1072,7 @@ def gmin_rerun(audit: Audit) -> None:
     shown, system, block, heads = [], None, None, []
     for row in tex_table(audit, TEX, "tab:gmin"):
         cells = [c.strip() for c in row]
-        if "\\multicolumn{14}" in cells[0]:
+        if "\\multicolumn{12}" in cells[0]:
             heads.append(cells[0].replace("\\midrule", "").strip())
             block = "develop" if "61fa67cf" in cells[0] else "rerun"
             system = None
@@ -1100,20 +1082,24 @@ def gmin_rerun(audit: Audit) -> None:
         arm = {"this work": "anneal", "GMIN": "gmin"}.get(cells[2])
         where = f"{TEX} tab:gmin {block} {system} {cells[2]}"
         source = develop if block == "develop" else groups
-        if block is None or system is None or arm is None or len(cells) != 14 or (system, arm) not in source:
+        if block is None or system is None or arm is None or len(cells) != 12 or (system, arm) not in source:
             audit.record(False, where, "table line", " & ".join(cells), "a rerun cluster and arm")
             continue
         shown.append((block, system, arm))
         gmin_tex_line(audit, where, cells[1:], source, system, arm, panel.PAPER_BUDGETS[system])
     audit.cell(TEX, "tab:gmin block headings",
-               "\\multicolumn{14}{@{}l}{\\emph{Revision \\texttt{eeec8e2c}, an ancestor of the submitted revision}} | "
-               "\\multicolumn{14}{@{}l}{\\emph{The submitted revision \\texttt{61fa67cf}}}", " | ".join(heads))
+               "\\multicolumn{12}{@{}l}{\\emph{Revision \\texttt{eeec8e2c}, an ancestor of the submitted revision}} | "
+               "\\multicolumn{12}{@{}l}{\\emph{The submitted revision \\texttt{61fa67cf}}}", " | ".join(heads))
     table_text = audit.text(TEX).split("% gmin-panel table: start", 1)[1].split("% gmin-panel table: end", 1)[0]
-    work_p = re.search(r"p_\\mathrm\{(?:calls|wall)\}", table_text)
-    audit.record(work_p is None,
-                 TEX, "tab:gmin reports no cross-arm work p-values", "absent",
-                 "absent" if work_p is None else "present")
-    audit.said(TEX, "different operations and are not tested across arms.")
+    cross_arm = re.search(r"p_\\mathrm\{(?:M|calls|wall)\}|Newcombe|\\Delta", table_text)
+    audit.record(cross_arm is None, TEX, "tab:gmin reports no cross-arm tests", "absent",
+                 "absent" if cross_arm is None else "present")
+    audit.said(TEX, "The numeric ceilings in Table~\\ref{tab:gmin} use different units: one\n"
+                    "combined energy-and-gradient pass for this code and one\n"
+                    "\\texttt{POTENTIAL} entry for GMIN, including entries with\n"
+                    "\\texttt{GRADT=false}. The committed GMIN rows do not separate entries by\n"
+                    "gradient request, so no conversion or cross-arm hit, work, or wall test is\n"
+                    "reported.")
     want = ([("rerun", s, a) for s in GMIN_RERUN_SYSTEMS for a in ("anneal", "gmin")]
             + [("develop", s, a) for s in GMIN_DEVELOP_SYSTEMS for a in ("anneal", "gmin")])
     audit.cell(TEX, "tab:gmin lines", " ".join("/".join(x) for x in shown), " ".join("/".join(x) for x in want))
@@ -1127,31 +1113,21 @@ def gmin_rerun(audit: Audit) -> None:
                    "LJ\\(_{38}\\) input.")
     gmin_develop_data(audit, panel)
     gmin_develop_prose(audit, panel, develop)
-    paired = {s: gmin_paired(groups, s) for s in GMIN_RERUN_SYSTEMS}
-    t = {s: paired[s]["table"] for s in GMIN_RERUN_SYSTEMS}
-    p = {s: pp(paired[s]["mcnemar"]) for s in GMIN_RERUN_SYSTEMS}
-
     def hits(system: str, arm: str) -> int:
         return hits_of(groups[(system, arm)])
 
     def walls(system: str, arm: str) -> float:
         return median([float(r["wall_s"]) for r in groups[(system, arm)]])
 
-    lo, hi = paired["lj98"]["interval"]
-    audit.said(TEX, f"Paired by seed, this code alone hits {t['lj98'][1]} seeds of LJ\\(_{{98}}\\) and GMIN alone "
-                    f"{'none' if t['lj98'][2] == 0 else t['lj98'][2]}, with \\(p={p['lj98']}\\) and an interval from {lo:.2f} to {hi:.2f}.")
-    audit.cell(TEX, "LJ38 discordant seeds", "5 0", f"{t['lj38'][1]} {t['lj38'][2]}")
-    audit.said(TEX, f"On LJ\\(_{{38}}\\) this code alone hits {t['lj38'][1]} seeds and GMIN alone "
-                    f"{'none' if t['lj38'][2] == 0 else t['lj38'][2]}, with \\(p={p['lj38']}\\), the smallest value the exact test can "
-                    f"reach with five discordant seeds; this code hits {hits('lj38', 'anneal')} of 12 and GMIN "
-                    f"{hits('lj38', 'gmin')}.")
-    audit.cell(TEX, "LJ38 p is the five-seed floor", "0.0625", paired["lj38"]["mcnemar"])
+    audit.said(TEX, f"At those arm-specific ceilings, this code hits {hits('lj98', 'anneal')} of 12 seeds on "
+                    f"LJ\\(_{{98}}\\) and GMIN none; on LJ\\(_{{38}}\\), the counts are "
+                    f"{hits('lj38', 'anneal')} and {hits('lj38', 'gmin')}.")
     big = ("lj102", "lj103", "lj104", "lj150")
-    audit.said(TEX, "On LJ\\(_{102}\\), LJ\\(_{103}\\), LJ\\(_{104}\\), and LJ\\(_{150}\\) the seeds that one arm "
-                    "alone hits are " + series(f"{t[s][1]} to {t[s][2]}" for s in big) + ", with \\(p\\) of "
-                    + series(p[s] for s in big) + ".")
-    audit.cell(TEX, "both arms hit LJ55 and M80 at rho 6 on every seed", "12 0 0 0 12 0 0 0",
-               " ".join(map(str, t["lj55"] + t["m80r6"])))
+    audit.said(TEX, "On LJ\\(_{102}\\), LJ\\(_{103}\\), LJ\\(_{104}\\), and LJ\\(_{150}\\), the hit\n"
+                    "counts are " + series(f"{hits(s, 'anneal')} against {hits(s, 'gmin')}" for s in big) + ".")
+    audit.cell(TEX, "both arms hit LJ55 and M80 at rho 6 on every seed", "12 12 12 12",
+               f"{hits('lj55', 'anneal')} {hits('lj55', 'gmin')} "
+               f"{hits('m80r6', 'anneal')} {hits('m80r6', 'gmin')}")
     audit.said(TEX, "Both arms hit LJ\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=6\\) on every seed.")
     lower = [s for s in GMIN_RERUN_SYSTEMS if walls(s, "anneal") < walls(s, "gmin")]
     audit.cell(TEX, "printed clusters where the median wall of this code is lower", str(len(GMIN_RERUN_SYSTEMS)),
@@ -1159,15 +1135,7 @@ def gmin_rerun(audit: Audit) -> None:
     audit.said(TEX, f"The median wall of a run is lower for this code on all {NUMBER_WORDS[len(lower)]} clusters, from "
                     f"{panel.show_s(walls('lj38', 'anneal'))}~s against {panel.show_s(walls('lj38', 'gmin'))}~s on "
                     f"LJ\\(_{{38}}\\) to {panel.show_s(walls('lj150', 'anneal'))}~s against "
-                    f"{panel.show_s(walls('lj150', 'gmin'))}~s on LJ\\(_{{150}}\\); no cross-arm work or wall test is "
-                    "reported because the two budgets count different operations.")
-    audit.said(TEX, f"hits LJ\\(_{{98}}\\) on {hits('lj98', 'anneal')} of 12 seeds and GMIN on none")
-    ahead = [x for x in GMIN_RERUN_SYSTEMS if hits(x, "anneal") > hits(x, "gmin") and paired[x]["mcnemar"] < 0.05]
-    audit.cell(COVER, "Lennard-Jones clusters where the code hits more than GMIN at p<0.05", "lj98", " ".join(ahead))
-    audit.said(TEX, f"GMIN on none (\\(p={p['lj98']}\\)), Morse M\\(_{{55}}\\)")
-    audit.said(TEX, "With the templates removed, the code hits more seeds than GMIN, run with the Wales-group "
-                    f"LJ\\(_{{38}}\\) input at every Lennard-Jones and Morse size, on LJ\\(_{{98}}\\), "
-                    f"{hits('lj98', 'anneal')} of 12 against none,")
+                    f"{panel.show_s(walls('lj150', 'gmin'))}~s on LJ\\(_{{150}}\\).")
     lj_data = audit.text("examples/h2h_gmin_lj.data")
     for line in ("TEMPERATURE 1.0", "STEP 0.40 0.51", "NEWRESTART 40", "AVOID 4.0 20 F", "EDIFF 0.003"):
         audit.record(line in lj_data and line in audit.text("examples/h2h_gmin_morse.data"), "examples/h2h_gmin_lj.data",
@@ -1187,6 +1155,22 @@ def gmin_rerun(audit: Audit) -> None:
     for path in (TEX, SI):
         audit.record("Mann--Whitney" not in audit.text(path), path, "no Mann--Whitney test is reported", "absent",
                      "absent" if "Mann--Whitney" not in audit.text(path) else "present")
+    manuscript = audit.text(TEX)
+    gmin_results = manuscript.split("\\label{sec:protocol}", 1)[1].split("\\label{sec:ase}", 1)[0]
+    for marker in ("gmin-panel", "tip4p-gmin"):
+        start, end = f"% {marker} table: start", f"% {marker} table: end"
+        before, rest = gmin_results.split(start, 1)
+        _, after = rest.split(end, 1)
+        gmin_results = before + after
+    hit_test = re.search(r"\\\(p(?:_|=)|McNemar|Newcombe", gmin_results)
+    audit.record(hit_test is None, TEX, "the GMIN results report no cross-arm hit test", "absent",
+                 "absent" if hit_test is None else hit_test.group(0))
+    cover_gmin = [sentence for sentence in re.split(r"(?<=[.!?])\s+", collapse(audit.text(COVER)))
+                  if "GMIN" in sentence]
+    cover_test = next((sentence for sentence in cover_gmin
+                       if re.search(r"\\\(p(?:_|=)|McNemar|Newcombe|hits more", sentence)), None)
+    audit.record(cover_test is None, COVER, "the GMIN cover prose reports no cross-arm hit test", "absent",
+                 "absent" if cover_test is None else cover_test)
     gmin_patches(audit)
 
 
@@ -1576,29 +1560,29 @@ def manuscript_knockouts(audit: Audit) -> None:
         audit.cell(where, "GMIN", line[2], f"{table[0] + table[2]}/12")
         audit.cell(where, "only this work", line[3], float(table[1]))
         audit.cell(where, "only GMIN", line[4], float(table[2]))
-        audit.cell(where, "exact McNemar p", line[5], stats[n][1])
-        audit.cell(where, "Newcombe lower", interval_of(line[6])[0], lo)
-        audit.cell(where, "Newcombe upper", interval_of(line[6])[1], hi)
     audit.cell(TEX, "tab:tip4p-gmin sizes", "8 15 20 21", " ".join(map(str, sorted(stats))))
     t = {n: stats[n][0] for n in stats}
-    audit.said(TEX, f"Paired by seed, this code alone hits {t[15][1]} seeds of (H\\(_2\\)O)\\(_{{15}}\\) and {t[20][1]} of "
-                    f"(H\\(_2\\)O)\\(_{{20}}\\) and GMIN alone none, with \\(p={pp(stats[15][1])}\\) and "
-                    f"{pp(stats[20][1])}.")
     audit.cell(TEX, "GMIN alone hits no seed of 15 or 20", "0 0", f"{t[15][2]} {t[20][2]}")
-    audit.said(TEX, f"On (H\\(_2\\)O)\\(_8\\) this code hits {t[8][0] + t[8][1]} of 12 and GMIN {t[8][0] + t[8][2]}, "
-                    f"with \\(p={pp(stats[8][1])}\\), and neither arm hits (H\\(_2\\)O)\\(_{{21}}\\).")
+    audit.said(TEX, f"The hit counts for this code and GMIN are {t[8][0] + t[8][1]} and {t[8][0] + t[8][2]} on "
+                    f"(H\\(_2\\)O)\\(_8\\), {t[15][0] + t[15][1]} and {t[15][0] + t[15][2]} on "
+                    f"(H\\(_2\\)O)\\(_{{15}}\\), {t[20][0] + t[20][1]} and {t[20][0] + t[20][2]} on "
+                    f"(H\\(_2\\)O)\\(_{{20}}\\), and {t[21][0] + t[21][1]} and {t[21][0] + t[21][2]} on "
+                    f"(H\\(_2\\)O)\\(_{{21}}\\).")
     audit.cell(TEX, "neither arm hits 21", "0 0 0", " ".join(map(str, t[21][:3])))
     a25 = [float(r["best_energy"]) for r in arms[(25, "anneal")].values()]
     g25 = [float(r["best_energy"]) for r in arms[(25, "gmin")].values()]
     audit.said(TEX, f"lowest energy of this code there is \\({min(a25):.3f}\\)~kJ/mol and that of GMIN "
                     f"\\({min(g25):.3f}\\)~kJ/mol.")
-    audit.said(TEX, f"(H\\(_2\\)O)\\(_{{20}}\\) on {t[15][0] + t[15][1]} and {t[20][0] + t[20][1]} of 12 against none "
-                    f"(\\(p={pp(stats[15][1])}\\) and {pp(stats[20][1])}).")
-    two = [n for n in stats if t[n][1] > t[n][2] and stats[n][1] < 0.05]
-    audit.cell(COVER, "TIP4P sizes where the code hits more than GMIN at p<0.05", "15 20", " ".join(map(str, two)))
     audit.said(TEX, "Table~\\ref{tab:tip4p-gmin} puts revision \\texttt{e1a69a57} of this code against GMIN on rigid "
-                    "TIP4P clusters of 8, 15, 20, 21, and 25 molecules, at \\(2\\times 10^{6}\\) calls on seeds "
+                    "TIP4P clusters of 8, 15, 20, 21, and 25 molecules, at \\(2\\times 10^{6}\\) arm-specific evaluations on seeds "
                     "2000--2011, both arms from the same start on each seed in alternating order.")
+    audit.said(TEX, "The budget counts combined energy-and-gradient passes for this code and\n"
+                    "\\texttt{POTENTIAL} entries for GMIN, so no cross-arm test is reported.")
+    manuscript = audit.text(TEX)
+    table_text = manuscript.split("% tip4p-gmin table: start", 1)[1].split("% tip4p-gmin table: end", 1)[0]
+    cross_arm = re.search(r"p_\\mathrm\{M\}|Newcombe|\\Delta", table_text)
+    audit.record(cross_arm is None, TEX, "tab:tip4p-gmin reports no cross-arm test", "absent",
+                 "absent" if cross_arm is None else "present")
     orders = {r["arm_order"] for r in rows}
     audit.cell(path, "TIP4P arm orders", "anneal,gmin gmin,anneal", " ".join(sorted(orders)))
 
@@ -1797,12 +1781,6 @@ def presets_and_templates(audit: Audit) -> None:
     for system in ("lj104", "lj150"):
         audit.record(hits[(system, "gmin")] > hits[(system, "anneal")], GMIN_RERUN, f"GMIN hits more seeds on {system}",
                      "more", f"{hits[(system, 'gmin')]} against {hits[(system, 'anneal')]}")
-    audit.said(TEX, f"GMIN hits more seeds than this code on LJ\\(_{{104}}\\), {hits[('lj104', 'gmin')]} against "
-                    f"{hits[('lj104', 'anneal')]} of 12, and on LJ\\(_{{150}}\\), {hits[('lj150', 'gmin')]} against "
-                    f"{hits[('lj150', 'anneal')]} of 12.")
-    audit.said(TEX, f"GMIN hits more seeds than the code on LJ\\(_{{104}}\\) and LJ\\(_{{150}}\\), "
-                    f"{hits[('lj104', 'gmin')]} and {hits[('lj150', 'gmin')]} of 12 against {hits[('lj104', 'anneal')]} "
-                    f"and {hits[('lj150', 'anneal')]}, with \\(p=1\\) on both.")
     audit.said(SI, "the earlier template-assisted revision \\texttt{\\seqsplit{628773d6837ea2d959a27256ff4163b21162fd4d}} "
                    "(structure templates since removed in \\texttt{1c1b1238})")
     audit.said(SI, "That revision precedes commit \\texttt{1c1b1238}, which removed the structure templates, and its "
@@ -4015,8 +3993,8 @@ def cover_letter(audit: Audit) -> None:
                      "absent" if word not in audit.text(COVER) else "present")
     audit.said(COVER, "Parts of the search with no such run are described as design, with no claim about their "
                       "effect.")
-    audit.said(COVER, "The comparisons with the Atomic Simulation Environment are reported at the effort each run "
-                      "spent.")
+    audit.said(COVER, "The comparisons with the Atomic Simulation Environment report committed\n"
+                      "outcomes without a cross-arm test because the arms do not share starts.")
     audit.said(COVER, "Every printed number is computed from rows committed to the repository.")
 
 

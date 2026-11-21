@@ -135,12 +135,12 @@ def develop_summary() -> tuple[list[dict[str, str]], dict[str, dict[str, object]
 
 
 def heading(text: str) -> str:
-    return f"\\multicolumn{{14}}{{@{{}}l}}{{\\emph{{{text}}}}} \\\\"
+    return f"\\multicolumn{{12}}{{@{{}}l}}{{\\emph{{{text}}}}} \\\\"
 
 
 def printed_lines(lines: list[dict[str, str]], paired: dict[str, dict[str, object]]) -> list[list[str]]:
-    """Rows without cross-arm tests of unlike evaluation counts or capped work."""
-    return [cells[:-2] for cells in PANEL.paired_lines(lines, paired)]
+    """Rows without cross-arm tests at unlike work budgets."""
+    return [cells[:-4] for cells in PANEL.paired_lines(lines, paired)]
 
 
 def table() -> str:
@@ -164,16 +164,14 @@ def table() -> str:
             "introduction file with no symmetrization keyword.",
             "Eval. is a combined energy-and-gradient pass for this code and every",
             "\\texttt{POTENTIAL} entry for GMIN, including \\texttt{GRADT=false}; these counts are",
-            "different operations and are not tested across arms.",
+            "different operations. The numeric ceiling is applied separately in each arm's unit",
+            "and is not an equal-work budget, so no cross-arm hit, work, or wall test is reported.",
             "The column Only counts the seeds that arm alone hits, and Both and Neither the seeds",
             "both arms and neither arm hit.",
             "Eval. and IQR are the median and interquartile range of the arm's reported count to",
             "the minimum, with a miss at its full budget.",
             "Wall, In and Out are the median seconds of the run, inside the",
             "potential and outside it.",
-            "\\(p_\\mathrm{M}\\) is the two-sided exact McNemar test on the seeds only one arm hits,",
-            "and \\(\\Delta\\) the 95\\% interval of Newcombe's method 10 for paired data, for the hit rate",
-            "of this code less that of GMIN. No cross-arm work or wall test is reported.",
             "The rows are \\texttt{paper/jctc/data/gmin\\_eeec8e2c/*/rows.csv} and",
             "\\texttt{paper/jctc/data/gmin\\_develop/rows.csv}.}",
             "\\label{tab:gmin}",
@@ -181,10 +179,9 @@ def table() -> str:
             "\\scriptsize",
             "\\setlength{\\tabcolsep}{2pt}",
             "\\resizebox{\\textwidth}{!}{%",
-            "\\begin{tabular}{@{}lrlrrrrrrrrrrc@{}}",
+            "\\begin{tabular}{@{}lrlrrrrrrrrr@{}}",
             "\\toprule",
-            "Cluster & Budget & Arm & Hits & Only & Both & Neither & Eval. & IQR & Wall & In & Out & "
-            "\\(p_\\mathrm{M}\\) & \\(\\Delta\\), 95\\% \\\\",
+            "Cluster & Budget & Arm & Hits & Only & Both & Neither & Eval. & IQR & Wall & In & Out \\\\",
             "\\midrule",
             *body,
             "\\bottomrule",
