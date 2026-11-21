@@ -389,6 +389,7 @@ struct Scratch {
 /// Every call is serialized behind one mutex: the callbacks share whatever
 /// state `user` points at, and the box driver is single-threaded anyway.
 struct CallbackObjective {
+    name: String,
     eval: anneal_eval_fn,
     grad: anneal_grad_fn,
     user: usize,
@@ -444,7 +445,7 @@ impl Objective<f64> for CallbackObjective {
             return if value.is_nan() { f64::INFINITY } else { value };
         }
         if status != anneal_status_t::ANNEAL_SUCCESS {
-            self.fail("anneal_box_minimize: objective callback failed");
+            self.fail(&format!("{}: objective callback failed", self.name));
             return f64::INFINITY;
         }
         if value.is_nan() { f64::INFINITY } else { value }
@@ -469,7 +470,7 @@ impl Gradient<f64> for CallbackObjective {
             return gradient;
         }
         if status != anneal_status_t::ANNEAL_SUCCESS {
-            self.fail("anneal_box_minimize: gradient callback failed");
+            self.fail(&format!("{}: gradient callback failed", self.name));
             return Array1::from_elem(n, f64::NAN);
         }
         gradient
@@ -482,10 +483,11 @@ impl Gradient<f64> for CallbackObjective {
 
 unsafe fn cpu_f64_slice_mut<'a>(
     tensor: *mut DLManagedTensorVersioned,
+    name: &str,
     what: &str,
 ) -> Result<&'a mut [f64], anneal_status_t> {
     if tensor.is_null() {
-        set_last_error(&format!("anneal_box_minimize: {what} is null"));
+        set_last_error(&format!("{name}: {what} is null"));
         return Err(anneal_status_t::ANNEAL_INVALID_PARAMETER);
     }
     let t = unsafe { &(*tensor).dl_tensor };
@@ -494,7 +496,7 @@ unsafe fn cpu_f64_slice_mut<'a>(
         t.dtype.code == DLDataTypeCode::kDLFloat && t.dtype.bits == 64 && t.dtype.lanes == 1;
     if !cpu || !f64_dtype || t.ndim != 1 || t.shape.is_null() || t.data.is_null() {
         set_last_error(&format!(
-            "anneal_box_minimize: {what} must be a one-dimensional CPU float64 tensor"
+            "{name}: {what} must be a one-dimensional CPU float64 tensor"
         ));
         return Err(anneal_status_t::ANNEAL_INVALID_PARAMETER);
     }
@@ -504,25 +506,32 @@ unsafe fn cpu_f64_slice_mut<'a>(
             .is_some_and(|bytes| bytes <= isize::MAX as usize)
     });
     let Some(len) = fits else {
-        set_last_error(&format!(
-            "anneal_box_minimize: {what} has shape {shape}, not a length"
-        ));
+        set_last_error(&format!("{name}: {what} has shape {shape}, not a length"));
         return Err(anneal_status_t::ANNEAL_INVALID_PARAMETER);
     };
     if !t.strides.is_null() && unsafe { *t.strides } != 1 && len > 1 {
-        set_last_error(&format!("anneal_box_minimize: {what} must be contiguous"));
+        set_last_error(&format!("{name}: {what} must be contiguous"));
         return Err(anneal_status_t::ANNEAL_INVALID_PARAMETER);
     }
     let start = usize::try_from(t.byte_offset)
         .ok()
-        .and_then(|offset| (t.data as usize).checked_add(offset));
-    if !start.is_some_and(|address| address % std::mem::align_of::<f64>() == 0) {
+        .filter(|&offset| offset <= isize::MAX as usize)
+        .and_then(|offset| {
+            (t.data as usize)
+                .checked_add(offset)
+                .map(|address| (offset, address))
+        });
+    let Some((offset, address)) = start else {
+        set_last_error(&format!("{name}: {what} byte_offset is out of range"));
+        return Err(anneal_status_t::ANNEAL_INVALID_PARAMETER);
+    };
+    if address % std::mem::align_of::<f64>() != 0 {
         set_last_error(&format!(
-            "anneal_box_minimize: {what} data plus byte_offset must be aligned for float64"
+            "{name}: {what} data plus byte_offset must be aligned for float64"
         ));
         return Err(anneal_status_t::ANNEAL_INVALID_PARAMETER);
     }
-    let data = unsafe { t.data.cast::<u8>().add(t.byte_offset as usize) }.cast::<f64>();
+    let data = unsafe { t.data.cast::<u8>().add(offset) }.cast::<f64>();
     Ok(unsafe { std::slice::from_raw_parts_mut(data, len) })
 }
 
@@ -647,7 +656,7 @@ unsafe fn minimize_core(
     name: &str,
     resolve: impl FnOnce() -> Result<Resolved, String>,
 ) -> (anneal_status_t, Option<BoxEnsembleResult>) {
-    let start = match unsafe { cpu_f64_slice_mut(x, "x") } {
+    let start = match unsafe { cpu_f64_slice_mut(x, name, "x") } {
         Ok(s) => s.to_vec(),
         Err(st) => return (st, None),
     };
@@ -688,6 +697,7 @@ unsafe fn minimize_core(
     let stop = Arc::new(AtomicBool::new(false));
     let _caller_stop = crate::caller_stop::Bind::new(Arc::clone(&stop));
     let objective = CallbackObjective {
+        name: name.to_owned(),
         eval,
         grad,
         user: user as usize,
@@ -725,7 +735,7 @@ unsafe fn minimize_core(
         set_last_error(&format!("{name}: no finite point was evaluated"));
         return (anneal_status_t::ANNEAL_INTERNAL_ERROR, None);
     }
-    let dest = match unsafe { cpu_f64_slice_mut(x, "x") } {
+    let dest = match unsafe { cpu_f64_slice_mut(x, name, "x") } {
         Ok(s) => s,
         Err(st) => return (st, None),
     };
@@ -1204,7 +1214,7 @@ mod tests {
     ) -> anneal_status_t {
         let counter = unsafe { &mut *(user as *mut Counter) };
         counter.evals += 1;
-        let xs = unsafe { cpu_f64_slice_mut(x as *mut _, "x") }.unwrap();
+        let xs = unsafe { cpu_f64_slice_mut(x as *mut _, "test", "x") }.unwrap();
         unsafe { *value_out = rastrigin_value(xs) };
         anneal_status_t::ANNEAL_SUCCESS
     }
@@ -1216,8 +1226,8 @@ mod tests {
     ) -> anneal_status_t {
         let counter = unsafe { &mut *(user as *mut Counter) };
         counter.grads += 1;
-        let xs = unsafe { cpu_f64_slice_mut(x as *mut _, "x") }.unwrap();
-        let gs = unsafe { cpu_f64_slice_mut(grad_out, "grad") }.unwrap();
+        let xs = unsafe { cpu_f64_slice_mut(x as *mut _, "test", "x") }.unwrap();
+        let gs = unsafe { cpu_f64_slice_mut(grad_out, "test", "grad") }.unwrap();
         for (g, v) in gs.iter_mut().zip(xs.iter()) {
             *g = 2.0 * v + 20.0 * std::f64::consts::PI * (2.0 * std::f64::consts::PI * v).sin();
         }
@@ -1362,7 +1372,7 @@ mod tests {
     ) -> anneal_status_t {
         let counter = unsafe { &mut *(user as *mut StopAfter) };
         counter.evals += 1;
-        let xs = unsafe { cpu_f64_slice_mut(x as *mut _, "x") }.unwrap();
+        let xs = unsafe { cpu_f64_slice_mut(x as *mut _, "test", "x") }.unwrap();
         unsafe { *value_out = rastrigin_value(xs) };
         if counter.evals >= counter.after {
             anneal_status_t::ANNEAL_STOPPED
@@ -1378,8 +1388,8 @@ mod tests {
     ) -> anneal_status_t {
         let counter = unsafe { &mut *(user as *mut StopAfter) };
         counter.grads += 1;
-        let xs = unsafe { cpu_f64_slice_mut(x as *mut _, "x") }.unwrap();
-        let gs = unsafe { cpu_f64_slice_mut(grad_out, "grad") }.unwrap();
+        let xs = unsafe { cpu_f64_slice_mut(x as *mut _, "test", "x") }.unwrap();
+        let gs = unsafe { cpu_f64_slice_mut(grad_out, "test", "grad") }.unwrap();
         for (g, v) in gs.iter_mut().zip(xs.iter()) {
             *g = 2.0 * v + 20.0 * std::f64::consts::PI * (2.0 * std::f64::consts::PI * v).sin();
         }
@@ -1441,7 +1451,7 @@ mod tests {
     ) -> anneal_status_t {
         let wells = unsafe { &mut *(user as *mut Wells) };
         wells.evals += 1;
-        let xs = unsafe { cpu_f64_slice_mut(x as *mut _, "x") }.unwrap();
+        let xs = unsafe { cpu_f64_slice_mut(x as *mut _, "test", "x") }.unwrap();
         unsafe {
             *value_out = xs
                 .iter()
@@ -1456,8 +1466,8 @@ mod tests {
         x: *const DLManagedTensorVersioned,
         grad_out: *mut DLManagedTensorVersioned,
     ) -> anneal_status_t {
-        let xs = unsafe { cpu_f64_slice_mut(x as *mut _, "x") }.unwrap();
-        let gs = unsafe { cpu_f64_slice_mut(grad_out, "grad") }.unwrap();
+        let xs = unsafe { cpu_f64_slice_mut(x as *mut _, "test", "x") }.unwrap();
+        let gs = unsafe { cpu_f64_slice_mut(grad_out, "test", "grad") }.unwrap();
         for (g, v) in gs.iter_mut().zip(xs.iter()) {
             *g = -3.0 * (3.0 * v).sin() + 0.1 * v;
         }
@@ -2023,6 +2033,11 @@ mod tests {
                 });
             assert_eq!(status, anneal_status_t::ANNEAL_INVALID_PARAMETER, "{shape}");
             assert_eq!(evals, 0);
+            assert!(
+                last_error().starts_with("anneal_box_minimize_ex:"),
+                "{}",
+                last_error()
+            );
             assert!(last_error().contains("shape"), "{}", last_error());
         }
         let mut x = [0.0, 0.0, 0.0];
