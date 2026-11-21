@@ -251,6 +251,7 @@ impl rgpot_potential_t {
         hessian_out: &mut [f64],
     ) -> Result<rgpot_hessian_scheme_t, HvpError> {
         self.refuse_if_peer_refused()?;
+        unsafe { refuse_overlap(input, hessian_out.as_ptr(), hessian_out.len()) }?;
         let geometry = unsafe { read_geometry(input) }?;
         let dim = geometry.positions.len();
         let entries = dim
@@ -262,7 +263,6 @@ impl rgpot_potential_t {
                 hessian_out.len()
             )));
         }
-        refuse_overlap(input, geometry.n_atoms, hessian_out)?;
         let h = checked_step(step)?;
         let state = self.hessian_state();
         let analytic = *lock(&state.analytic);
@@ -326,23 +326,34 @@ impl rgpot_potential_t {
     }
 }
 
-/// Refuse a `hessian_out` that shares memory with a tensor of `input`,
-/// which the callbacks read while the Hessian is written.
-fn refuse_overlap(
+/// Refuse an output of `entries` doubles at `out` that shares memory with a
+/// tensor of `input`, which the callbacks read while the Hessian is written.
+/// Only addresses are compared, so the check can run before a slice over
+/// the output exists; reading tensor data that such a slice overlaps would
+/// break its exclusivity.
+///
+/// # Safety
+///
+/// The tensors of `input` must be NULL or valid.
+pub(crate) unsafe fn refuse_overlap(
     input: &rgpot_force_input_t,
-    n_atoms: usize,
-    hessian_out: &[f64],
+    out: *const f64,
+    entries: usize,
 ) -> Result<(), HvpError> {
-    if hessian_out.is_empty() {
+    if entries == 0 {
         return Ok(());
     }
-    let out = hessian_out.as_ptr() as usize;
-    let out_bytes = std::mem::size_of_val(hessian_out);
+    let n_atoms = unsafe { input.n_atoms() }.ok_or_else(|| invalid("positions: tensor is NULL"))?;
+    let dim = n_atoms
+        .checked_mul(3)
+        .ok_or_else(|| invalid("n_atoms * 3 overflows"))?;
+    let out = out as usize;
     let f64_bytes = std::mem::size_of::<f64>();
+    let out_bytes = entries.saturating_mul(f64_bytes);
     let mut tensors = vec![(
         "positions",
-        checked_f64_data(input.positions, "positions", 3 * n_atoms).map_err(invalid)? as usize,
-        3 * n_atoms * f64_bytes,
+        checked_f64_data(input.positions, "positions", dim).map_err(invalid)? as usize,
+        dim.saturating_mul(f64_bytes),
     )];
     if !input.atomic_numbers.is_null() {
         let data =
@@ -350,7 +361,7 @@ fn refuse_overlap(
         tensors.push((
             "atomic_numbers",
             data as usize,
-            n_atoms * std::mem::size_of::<i32>(),
+            n_atoms.saturating_mul(std::mem::size_of::<i32>()),
         ));
     }
     if !input.box_matrix.is_null() {

@@ -20,7 +20,8 @@ use std::os::raw::c_void;
 use crate::c_api::hvp::{fail, refuse};
 use crate::eindir::rgpot_potential_t;
 use crate::hessian::{
-    rgpot_derivative_caps_t, rgpot_derivative_counts_t, rgpot_hessian_scheme_t, HessianCallback,
+    refuse_overlap, rgpot_derivative_caps_t, rgpot_derivative_counts_t, rgpot_hessian_scheme_t,
+    HessianCallback,
 };
 use crate::status::{catch_unwind, rgpot_status_t};
 use crate::types::rgpot_force_input_t;
@@ -147,6 +148,9 @@ pub unsafe extern "C" fn rgpot_potential_hessian(
         else {
             return refuse("rgpot_potential_hessian: positions tensor is NULL or too large");
         };
+        if let Err(err) = unsafe { refuse_overlap(input, hessian_out, entries) } {
+            return fail(err);
+        }
         let hessian_out = unsafe { std::slice::from_raw_parts_mut(hessian_out, entries) };
         match unsafe { (*pot).hessian(input, step, scheme, hessian_out) } {
             Ok(ran) => {

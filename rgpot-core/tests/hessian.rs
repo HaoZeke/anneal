@@ -875,8 +875,87 @@ fn hessian_out_overlapping_the_input_is_refused_without_a_call() {
     assert_eq!(status, rgpot_status_t::RGPOT_INVALID_PARAMETER);
     assert_eq!(last_error(), "hessian_out overlaps the box_matrix tensor");
 
+    let mut h = vec![0.0; dim * dim];
+    let species = unsafe { h.as_mut_ptr().add(dim) }.cast::<i32>();
+    let input = unsafe {
+        rgpot_force_input_create(
+            n,
+            system.pos.as_mut_ptr(),
+            species,
+            system.cell.as_mut_ptr(),
+        )
+    };
+    let status = unsafe {
+        rgpot_potential_hessian(handle.pot, &input, 0.0, central, h.as_mut_ptr(), &mut used)
+    };
+    assert_eq!(status, rgpot_status_t::RGPOT_INVALID_PARAMETER);
+    assert_eq!(
+        last_error(),
+        "hessian_out overlaps the atomic_numbers tensor"
+    );
+
     assert_eq!(handle.force_calls(), 0);
     assert_eq!(handle.counts().hessian_force_calls, 0);
+}
+
+#[test]
+fn an_atom_count_whose_derivatives_overflow_is_refused_without_a_read() {
+    let mut system = System::octahedron();
+    let handle = Handle::new();
+    let dim = system.dim();
+    let mut h = vec![0.0; dim * dim];
+    let v = vec![1.0; dim];
+    let mut hv = vec![0.0; dim];
+    let mut used = RGPOT_HESSIAN_CENTRAL;
+    let wraps = usize::MAX / 3 + 1;
+    for n in [wraps, 1 << 31] {
+        let input = unsafe {
+            rgpot_force_input_create(
+                n,
+                system.pos.as_mut_ptr(),
+                system.z.as_mut_ptr(),
+                system.cell.as_mut_ptr(),
+            )
+        };
+        let status = unsafe {
+            rgpot_potential_hessian(
+                handle.pot,
+                &input,
+                0.0,
+                RGPOT_HESSIAN_CENTRAL as i32,
+                h.as_mut_ptr(),
+                &mut used,
+            )
+        };
+        assert_eq!(status, rgpot_status_t::RGPOT_INVALID_PARAMETER);
+        assert_eq!(
+            last_error(),
+            "rgpot_potential_hessian: positions tensor is NULL or too large"
+        );
+    }
+    for n in [wraps, isize::MAX as usize / 24 + 1] {
+        let input = unsafe {
+            rgpot_force_input_create(
+                n,
+                system.pos.as_mut_ptr(),
+                system.z.as_mut_ptr(),
+                system.cell.as_mut_ptr(),
+            )
+        };
+        let status = unsafe {
+            rgpot_potential_hvp(
+                handle.pot,
+                &input,
+                v.as_ptr(),
+                0.0,
+                RGPOT_HVP_CENTRAL as i32,
+                hv.as_mut_ptr(),
+            )
+        };
+        assert_eq!(status, rgpot_status_t::RGPOT_INVALID_PARAMETER);
+        assert!(last_error().ends_with("positions tensor is NULL or too large"));
+    }
+    assert_eq!(handle.force_calls(), 0);
 }
 
 #[test]
