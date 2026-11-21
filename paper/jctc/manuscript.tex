@@ -517,12 +517,12 @@ Within a cluster every arm has the same numeric call ceiling and wall cap,
 but runs reaching the shared cap are censored.
 Because the starts are unpaired and cap-censored outcomes occur, no
 cross-arm significance test is reported for the ASE tables.
-Every test is two-sided and exact, so no continuity correction enters any of
-them.
-No adjustment for multiple comparisons is made: every \(p\) is that of one
-cluster and one pair of arms, every cluster run is reported, and a
-difference in hits is called significant only when its own exact test is
-below 0.05.
+Among comparisons that report tests, every test is two-sided and exact, so
+no continuity correction enters.
+No adjustment for multiple comparisons is made: every reported \(p\) is
+that of one cluster and one pair of arms, every cluster run is reported,
+and a difference in hits is called significant only when its own exact test
+is below 0.05.
 With fewer than six discordant seeds the exact McNemar test cannot fall below
 0.05, so 12 seeds detect only large differences in hit rate, and the
 interval and the exact test, being different procedures, can disagree at
@@ -675,7 +675,7 @@ M\(_{80}\) at \(\rho=6\), and the submitted revision \texttt{61fa67cf} on
 Gupta Au\(_{55}\) and on Morse M\(_{55}\) and M\(_{80}\) at \(\rho=6\) and
 14.
 Each block runs both arms of each cluster on seeds 2000--2011 in
-alternating order, at the budget in the table, from the start this code
+alternating order, at the numeric ceiling in the table, from the start this code
 writes for the seed.
 GMIN runs one input at every Lennard-Jones and Morse size, the Wales-group
 LJ\(_{38}\) introduction file: \(T=1.0\), step \(0.40\), a taboo list of the
@@ -708,12 +708,14 @@ Both arms hit LJ\(_{55}\) and M\(_{80}\) at \(\rho=6\) on every seed.
 The median wall of a run is lower for this code on all eight clusters, from
 0.640~s against 3.427~s on LJ\(_{38}\) to 66.725~s against 341.6~s on
 LJ\(_{150}\).
+These arm-specific wall medians are descriptive and are not tested across
+arms.
 At the submitted revision, the hit counts for this code and GMIN are 9 and
 0 on M\(_{55}\) at \(\rho=14\), 6 and 0 on M\(_{80}\) at \(\rho=14\),
 and 4 and 1 on Au\(_{55}\).
 Both arms hit M\(_{55}\) and M\(_{80}\) at \(\rho=6\) on every seed, and on
-M\(_{80}\) at \(\rho=6\) this code takes the same median of 62677 calls at both
-revisions.
+M\(_{80}\) at \(\rho=6\) this code takes the same median of 62677 combined
+energy-and-gradient passes at both revisions.
 The Supporting Information runs the submitted revision alone on ten more Morse
 clusters, of 30, 38, 70 and 80 atoms at \(\rho\) from 3 to 14, where it hits
 from 4 to 12 of 12 seeds.
@@ -748,7 +750,7 @@ The rows are \texttt{paper/jctc/data/gmin\_eeec8e2c/*/rows.csv} and
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{@{}lrlrrrrrrrrr@{}}
 \toprule
-Cluster & Budget & Arm & Hits & Only & Both & Neither & Eval. & IQR & Wall & In & Out \\
+Cluster & Ceiling & Arm & Hits & Only & Both & Neither & Eval. & IQR & Wall & In & Out \\
 \midrule
 \multicolumn{12}{@{}l}{\emph{Revision \texttt{eeec8e2c}, an ancestor of the submitted revision}} \\
 LJ\(_{38}\) & \(4\times 10^{5}\) & this work & 12/12 & 5 & 7 & 0 & 127839.5 & 139245.25 & 0.640 & 0.303 & 0.337 \\
@@ -807,7 +809,7 @@ lowest energy of this code there is \(-1113.035\)~kJ/mol and that of GMIN
 \caption{This code against GMIN on rigid TIP4P water clusters, paired by seed.
 This code is \texttt{Config::recommended\_tip4p}\((N)\) of revision \texttt{e1a69a57}, after the
 removal of the structure templates, through \texttt{h2h\_seed} with the rigid water geometry of GMIN.
-Seeds 2000--2011, \(2\times 10^{6}\) calls, both arms from the same start on each
+Seeds 2000--2011, \(2\times 10^{6}\) arm-specific evaluations, both arms from the same start on each
 seed, in alternating order.
 The budget of this code counts one call per combined energy and gradient pass, and GMIN's budget counts
 every \texttt{POTENTIAL} entry, including \texttt{GRADT=false}.

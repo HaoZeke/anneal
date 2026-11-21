@@ -1053,13 +1053,14 @@ def gmin_develop_prose(audit: Audit, panel: object, groups: dict) -> None:
                " ".join(map(str, t["m55r6"] + t["m80r6"])))
     calls = median([float(r["evals_to_hit"]) for r in groups[("m80r6", "anneal")]])
     audit.said(TEX, "Both arms hit M\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=6\\) on every seed, and on M\\(_{80}\\) at "
-                    f"\\(\\rho=6\\) this code takes the same median of {calls:.0f} calls at both revisions.")
+                    f"\\(\\rho=6\\) this code takes the same median of {calls:.0f} combined\n"
+                    "energy-and-gradient passes at both revisions.")
     audit.said(TEX, "Table~\\ref{tab:gmin} runs GMIN against this code at two revisions: revision \\texttt{eeec8e2c}, "
                     "an ancestor of the submitted revision with the structure templates removed, on seven Lennard-Jones "
                     "sizes and Morse M\\(_{80}\\) at \\(\\rho=6\\), and the submitted revision \\texttt{61fa67cf} on "
                     "Gupta Au\\(_{55}\\) and on Morse M\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=6\\) and 14.")
     audit.said(TEX, "Each block runs both arms of each cluster on seeds 2000--2011 in alternating order, at the "
-                    "budget in the table, from the start this code writes for the seed.")
+                    "numeric ceiling in the table, from the start this code writes for the seed.")
     audit.said(COVER, "The GMIN tables report committed outcomes at the arm-specific budget units\n"
                       "stated with each table, without a cross-arm test.")
 
@@ -1136,6 +1137,8 @@ def gmin_rerun(audit: Audit) -> None:
                     f"{panel.show_s(walls('lj38', 'anneal'))}~s against {panel.show_s(walls('lj38', 'gmin'))}~s on "
                     f"LJ\\(_{{38}}\\) to {panel.show_s(walls('lj150', 'anneal'))}~s against "
                     f"{panel.show_s(walls('lj150', 'gmin'))}~s on LJ\\(_{{150}}\\).")
+    audit.said(TEX, "These arm-specific wall medians are descriptive and are not tested across\n"
+                    "arms.")
     lj_data = audit.text("examples/h2h_gmin_lj.data")
     for line in ("TEMPERATURE 1.0", "STEP 0.40 0.51", "NEWRESTART 40", "AVOID 4.0 20 F", "EDIFF 0.003"):
         audit.record(line in lj_data and line in audit.text("examples/h2h_gmin_morse.data"), "examples/h2h_gmin_lj.data",
@@ -4146,10 +4149,12 @@ def science_claims(audit: Audit) -> None:
                  "the trail record is outside the history of the submitted revision", "outside", "checked")
     audit.record(bool(git("branch", "-r", "--contains", trail).stdout.strip()), TEX, "the trail record is on origin",
                  "present", "checked")
-    audit.said(TEX, "Every test is two-sided and exact, so no continuity correction enters any of them.")
-    audit.said(TEX, "No adjustment for multiple comparisons is made: every \\(p\\) is that of one cluster and one pair of "
-                    "arms, every cluster run is reported, and a difference in hits is called significant only when its "
-                    "own exact test is below 0.05.")
+    audit.said(TEX, "Among comparisons that report tests, every test is two-sided and exact, so\n"
+                    "no continuity correction enters.")
+    audit.said(TEX, "No adjustment for multiple comparisons is made: every reported \\(p\\) is\n"
+                    "that of one cluster and one pair of arms, every cluster run is reported,\n"
+                    "and a difference in hits is called significant only when its own exact test\n"
+                    "is below 0.05.")
     audit.said(SI, "No equivalence margin was set before any run, so no table supports a claim that two arms are "
                    "equivalent.")
 

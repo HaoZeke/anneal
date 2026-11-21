@@ -324,7 +324,7 @@ def tip4p_table() -> str:
         "\\caption{This code against GMIN on rigid TIP4P water clusters, paired by seed.",
         "This code is \\texttt{Config::recommended\\_tip4p}\\((N)\\) of revision \\texttt{e1a69a57}, after the",
         "removal of the structure templates, through \\texttt{h2h\\_seed} with the rigid water geometry of GMIN.",
-        "Seeds 2000--2011, \\(2\\times 10^{6}\\) calls, both arms from the same start on each",
+        "Seeds 2000--2011, \\(2\\times 10^{6}\\) arm-specific evaluations, both arms from the same start on each",
         "seed, in alternating order.",
         "The budget of this code counts one call per combined energy and gradient pass, and GMIN's budget counts",
         "every \\texttt{POTENTIAL} entry, including \\texttt{GRADT=false}.",

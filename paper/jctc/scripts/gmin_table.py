@@ -6,10 +6,10 @@ The first block is the four shards of the 2026-11-19 GMIN panel rerun, whose row
 this code are revision eeec8e2c, an ancestor of develop. The second block is the
 2026-11-20 session at the submitted revision 61fa67cf on gold and Morse. Every row is
 copied unchanged from the record its PROVENANCE file names, and every GMIN row is the
-pinned snapshot. The summary and the paired tests are those of
-scripts/gmin_panel/run_panel.py, which validates each row against its reference and
-budget and takes the paired outcome table, McNemar, Newcombe and Wilcoxon from
-scripts/paired_stats.py.
+pinned tarball. The summary uses scripts/gmin_panel/run_panel.py to validate each row
+against its reference and arm-specific ceiling and to derive the paired outcome counts
+and descriptive evaluation and wall summaries. Cross-arm tests are not rendered because
+the arms count different operations.
 
     python3 paper/jctc/scripts/gmin_table.py            # rewrite the block
     python3 paper/jctc/scripts/gmin_table.py --check    # exit 1 if it is stale
@@ -181,7 +181,7 @@ def table() -> str:
             "\\resizebox{\\textwidth}{!}{%",
             "\\begin{tabular}{@{}lrlrrrrrrrrr@{}}",
             "\\toprule",
-            "Cluster & Budget & Arm & Hits & Only & Both & Neither & Eval. & IQR & Wall & In & Out \\\\",
+            "Cluster & Ceiling & Arm & Hits & Only & Both & Neither & Eval. & IQR & Wall & In & Out \\\\",
             "\\midrule",
             *body,
             "\\bottomrule",
