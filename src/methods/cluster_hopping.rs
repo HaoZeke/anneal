@@ -13404,29 +13404,46 @@ mod nonfinite_proposal_regression_tests {
     use rand::SeedableRng;
     use rand::rngs::StdRng;
 
+    /// A relaxation may hand back a finite energy with a coordinate it could
+    /// not resolve. The chain adopts that state, so every move applied to it
+    /// proposes a coordinate that is not finite. The temperature is left
+    /// finite: `TsallisVisit` sanitises a NaN temperature, so a NaN
+    /// temperature never reaches the boundary this test is about.
     #[test]
     fn nonfinite_proposals_are_refused_before_relaxation() {
-        let mut cfg = Config::for_cluster(4);
-        cfg.move_library = MoveLibrary::Visit;
-        cfg.temperature = f64::NAN;
-        cfg.max_hops = None;
-        let mut rng = StdRng::seed_from_u64(9);
-        let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
-        let mut ledger = Ledger::new(7);
-        let mut relax_calls = 0usize;
-        let mut relax = |ledger: &mut Ledger, state: ArrayView1<f64>, _steps: usize| {
-            assert!(ledger.charge());
-            assert!(
-                state.iter().all(|value| value.is_finite()),
-                "relax saw a non-finite proposal"
-            );
-            relax_calls += 1;
-            (0.0, state.to_owned())
-        };
+        for library in [MoveLibrary::Visit, MoveLibrary::WalesDoye] {
+            let mut cfg = Config::for_cluster(4);
+            cfg.move_library = library;
+            cfg.max_hops = None;
+            let mut rng = StdRng::seed_from_u64(9);
+            let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+            assert!(start.iter().all(|value| value.is_finite()));
+            let budget = 7;
+            let mut ledger = Ledger::new(budget);
+            let mut relax_calls = 0usize;
+            let mut relax = |ledger: &mut Ledger, state: ArrayView1<f64>, _steps: usize| {
+                assert!(ledger.charge());
+                assert!(
+                    state.iter().all(|value| value.is_finite()),
+                    "relax saw a non-finite proposal on call {}",
+                    relax_calls + 1
+                );
+                relax_calls += 1;
+                let mut relaxed = state.to_owned();
+                if relax_calls == 1 {
+                    relaxed[0] = f64::NAN;
+                }
+                (0.0, relaxed)
+            };
 
-        let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("run");
-        assert_eq!(out.stop, Some(HopStop::Budget));
-        assert!(relax_calls >= 1);
-        assert!(out.hops > 0);
+            let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("run");
+            assert_eq!(out.stop, Some(HopStop::Budget));
+            assert_eq!(relax_calls, 1, "only the initial quench may reach relax");
+            assert!(
+                out.hops > 4 * budget,
+                "every refused proposal costs a hop: {} hops",
+                out.hops
+            );
+        }
     }
 }
