@@ -87,3 +87,68 @@ python3 bench/generic-packings-r1-gate/run_gate.py --summarize \
   --rows bench/generic-packings-r1-gate/rows.csv \
   --summary bench/generic-packings-r1-gate/summary.csv
 ```
+
+## Session
+
+One session, `20261120T095800Z`, 1152 rows (24 cells, 4 arms, 12 seeds),
+every row on machine
+`3b11c160088e7af5c4f7ebd9da95e0bfe019a34698416701bb057c15fea10873`, cpu
+`Intel(R) Xeon(R) Processor`. All rows carry the same `harness_sha256`, the
+`run_gate.py` of the commit before the rows.
+
+The D and Dp builds are byte-identical binaries (reproducible build), so the
+A/A ratio measures run-to-run timing alone.
+
+The virtual machine was paused and resumed during the session (the kernel
+logs a virtual machine fork at uptime 1904 s and 2820 s, and later the
+guest uptime advanced more slowly than the UTC clock). `wall_s`, `pot_s`
+and `outside_s` are measured on the guest monotonic clock, which does not
+advance while the guest is paused. Two rows show a UTC gap over a minute
+beyond their wall time (lj75 D seed 2003, lj75 Dp seed 2009); both report
+wall times in line with the other arms on the same seed.
+
+## Result
+
+Verdict under the declared rules: **PASS**. No cell has a hit loss, a
+calls loss, or an outside-time-per-call ratio above 1.10.
+
+G does not recover any of the regression. G's rows are identical to D's on
+all 288 seed pairs in `best`, `evals_to_hit` and `charged`, and the driver
+diagnostics match line for line apart from timings. The restored candidates
+are reached only from `cluster_search::search`
+(`src/methods/cluster_search.rs:1504`) and one unit test. The four panel
+drivers call `cluster_hopping::run_with_gradient` directly, and that path
+never calls `generic_packing_candidate`. On m38r14 G hits 4/12 against
+P's 12/12; on sc108-38 7/12 against 12/12. Over the panel G hits 195,
+D 195, P 216. G hits 159 of P's 216 hit seeds, the same 159 that D hits.
+
+| cell | budget | G hits | D hits | Dp hits | P hits | Fisher p G vs D | calls median G | calls median D | MW p calls | outside/call G/D | A/A Dp/D | P hits G recovers | cell |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| lj38 | 400000 | 12/12 | 12/12 | 12/12 | 12/12 | 1 | 127839.5 | 127839.5 | 1 | 0.9705 | 1.0272 | 12/12 | pass |
+| lj55 | 1000000 | 12/12 | 12/12 | 12/12 | 12/12 | 1 | 5722.0 | 5722.0 | 1 | 1.0145 | 0.9970 | 12/12 | pass |
+| lj75 | 4000000 | 5/12 | 5/12 | 5/12 | 12/12 | 1 | 4000000.0 | 4000000.0 | 1 | 1.0030 | 1.0239 | 5/12 | pass |
+| lj98 | 4000000 | 7/12 | 7/12 | 7/12 | 10/12 | 1 | 3166811.5 | 3166811.5 | 1 | 1.0219 | 1.0079 | 5/10 | pass |
+| lj102 | 4000000 | 6/12 | 6/12 | 6/12 | 9/12 | 1 | 3256052.5 | 3256052.5 | 1 | 1.0288 | 1.0207 | 5/9 | pass |
+| lj103 | 4000000 | 6/12 | 6/12 | 6/12 | 8/12 | 1 | 3905072.5 | 3905072.5 | 1 | 1.0001 | 1.0011 | 4/8 | pass |
+| lj104 | 4000000 | 5/12 | 5/12 | 5/12 | 9/12 | 1 | 4000000.0 | 4000000.0 | 1 | 1.0008 | 0.9984 | 4/9 | pass |
+| lj150 | 4000000 | 8/12 | 8/12 | 8/12 | 5/12 | 1 | 1129381.5 | 1129381.5 | 1 | 1.0056 | 0.9985 | 3/5 | pass |
+| au55 | 1000000 | 4/12 | 4/12 | 4/12 | 6/12 | 1 | 1000000.0 | 1000000.0 | 1 | 0.9874 | 0.9901 | 3/6 | pass |
+| m55r6 | 1000000 | 12/12 | 12/12 | 12/12 | 12/12 | 1 | 22596.0 | 22596.0 | 1 | 1.0083 | 0.9997 | 12/12 | pass |
+| m55r14 | 1000000 | 9/12 | 9/12 | 9/12 | 7/12 | 1 | 451561.5 | 451561.5 | 1 | 1.0013 | 1.0036 | 5/7 | pass |
+| m80r6 | 4000000 | 12/12 | 12/12 | 12/12 | 2/12 | 1 | 62677.0 | 62677.0 | 1 | 0.9953 | 0.9956 | 2/2 | pass |
+| m80r14 | 4000000 | 6/12 | 6/12 | 6/12 | 9/12 | 1 | 3901429.0 | 3901429.0 | 1 | 0.9949 | 0.9946 | 5/9 | pass |
+| m38r14 | 400000 | 4/12 | 4/12 | 4/12 | 12/12 | 1 | 400000.0 | 400000.0 | 1 | 1.0004 | 0.9996 | 4/12 | pass |
+| m38r6 | 400000 | 12/12 | 12/12 | 12/12 | 12/12 | 1 | 49438.5 | 49438.5 | 1 | 1.0019 | 1.0013 | 12/12 | pass |
+| sc126-38 | 400000 | 12/12 | 12/12 | 12/12 | 12/12 | 1 | 113504.5 | 113504.5 | 1 | 1.0005 | 1.0005 | 12/12 | pass |
+| sc126-55 | 1000000 | 12/12 | 12/12 | 12/12 | 12/12 | 1 | 18379.5 | 18379.5 | 1 | 0.9999 | 1.0023 | 12/12 | pass |
+| sc126-80 | 1000000 | 5/12 | 5/12 | 5/12 | 6/12 | 1 | 1000000.0 | 1000000.0 | 1 | 0.9962 | 0.9938 | 4/6 | pass |
+| sc108-38 | 400000 | 7/12 | 7/12 | 7/12 | 12/12 | 1 | 361031.5 | 361031.5 | 1 | 1.0028 | 1.0027 | 7/12 | pass |
+| sc108-55 | 1000000 | 5/12 | 5/12 | 5/12 | 6/12 | 1 | 1000000.0 | 1000000.0 | 1 | 1.0191 | 1.0200 | 4/6 | pass |
+| sc108-80 | 1000000 | 3/12 | 3/12 | 3/12 | 0/12 | 1 | 1000000.0 | 1000000.0 | 1 | 1.0178 | 0.9981 | 0/0 | pass |
+| sc96-38 | 400000 | 12/12 | 12/12 | 12/12 | 12/12 | 1 | 50230.0 | 50230.0 | 1 | 0.9839 | 1.0066 | 12/12 | pass |
+| sc96-55 | 1000000 | 12/12 | 12/12 | 12/12 | 12/12 | 1 | 23157.0 | 23157.0 | 1 | 0.9983 | 1.0016 | 12/12 | pass |
+| sc96-80 | 1000000 | 7/12 | 7/12 | 7/12 | 7/12 | 1 | 989847.5 | 989847.5 | 1 | 0.9994 | 1.0051 | 3/7 | pass |
+
+Cells where G has fewer hits than D: none. Medians are type 7 of
+`evals_to_hit` with a miss at the budget. "P hits G recovers" is the
+number of P's hit seeds that G also hits, out of P's hits.
