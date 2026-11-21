@@ -226,6 +226,45 @@ def test_engine_route_matches_the_engine(tmp_path):
     assert_close(e, f, e_ref * dc.KJ_PER_EV, f_ref * dc.KJ_PER_EV * 10)
 
 
+def _bare_engine(path: Path) -> Path:
+    """An engine library with the required symbols and no charge/spin setter."""
+    cc = shutil.which("cc") or shutil.which("gcc")
+    if cc is None:
+        pytest.skip("needs a C compiler")
+    src = path.parent / "bare_engine.c"
+    src.write_text(
+        "#include <stddef.h>\n"
+        "typedef struct RgpotEnginePot RgpotEnginePot;\n"
+        "int rgpot_engine_abi_version(void) { return 1; }\n"
+        "RgpotEnginePot *rgpot_engine_create(const void *config, size_t config_len,\n"
+        "                                     char *errbuf, size_t errlen) {\n"
+        "  (void)config; (void)config_len; (void)errbuf; (void)errlen;\n"
+        "  return (RgpotEnginePot *)1;\n"
+        "}\n"
+        "void rgpot_engine_destroy(RgpotEnginePot *pot) { (void)pot; }\n"
+        "int rgpot_engine_force(RgpotEnginePot *pot, long n_atoms, const double *positions,\n"
+        "                       const int *atomic_nrs, double *forces, double *energy,\n"
+        "                       double *variance, const double *box, void *transform,\n"
+        "                       void *transform_user) {\n"
+        "  (void)pot; (void)n_atoms; (void)positions; (void)atomic_nrs; (void)forces;\n"
+        "  (void)energy; (void)variance; (void)box; (void)transform; (void)transform_user;\n"
+        "  return 0;\n"
+        "}\n"
+    )
+    done = subprocess.run(
+        [cc, "-shared", "-fPIC", "-o", str(path), str(src)],
+        capture_output=True, text=True, check=False)
+    assert done.returncode == 0, done.stderr
+    return path
+
+
+def test_engine_without_charge_spin_refuses_a_nondefault_charge(tmp_path):
+    so = _bare_engine(tmp_path / "libbare_engine.so")
+    why = refused(tmp_path, f"    ENGINE {so}", charge=-1)
+    assert "CHARGE 0 and MULTIPLICITY 1" in why
+    assert "takes no charge or spin" in why
+
+
 @pytest.mark.skipif(not STUB_ENGINE, reason="needs RGPOT_ENGINE_STUB")
 def test_engine_route_keeps_explicit_engine_spin_when_qmi_uses_defaults(tmp_path):
     symbols = ["Ar", "Ar"]

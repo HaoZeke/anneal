@@ -40,9 +40,13 @@ keep whatever the GROMACS force field gives them.
 =grompp= already removes the QM-QM nonbonded pairs and bonded terms, so the QM
 region interacts only through rgpot.
 A =POTENTIAL= needs =CHARGE 0= and =MULTIPLICITY 1=.
-An =ENGINE= gets both through =rgpot_engine_set_charge_spin=; when the engine
-lacks that call or the call returns 3, the input needs =CHARGE 0= and
-=MULTIPLICITY 1= too.
+An =ENGINE= keeps the charge and spin of its =CONFIG= when the qmi file has
+=CHARGE 0= and =MULTIPLICITY 1=: =rgpot_engine_set_charge_spin= is not called,
+so those grompp defaults do not replace a spin the engine config set.
+A =CHARGE= other than 0 or a =MULTIPLICITY= other than 1 is sent as that pair,
+so a multiplicity of 1 is applied when the charge is not 0.
+When the engine lacks =rgpot_engine_set_charge_spin= or the call returns 3,
+that input is refused and the file needs =CHARGE 0= and =MULTIPLICITY 1=.
 
 ** Errors
 
