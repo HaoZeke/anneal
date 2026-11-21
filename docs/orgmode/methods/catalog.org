@@ -54,7 +54,7 @@ Key types and functions: =Screen= (src/screen.rs:62) with =observe=,
 purchased screen still owes.
 
 Constants and defaults: threshold derivation
-=p > Q / (Q + R) = (R - S) / (2R - S)= where =S= is screen steps and =R=
+~p > Q / (Q + R) = (R - S) / (2R - S)~ where =S= is screen steps and =R=
 is full relax steps; for the measured hop (~S=25~, ~R=200~) this is
 =7/15= (src/screen.rs:38-45). Ridge prior precision =1e-3 * I=,
 inverse-gamma ~a0 = b0 = 1e-3~ (src/screen.rs:97-99). Config-side knobs:
