@@ -251,6 +251,30 @@ struct Cloud {
     /// Squared nearest-neighbour gaps, filled the first time a turn has to
     /// be told apart from the identity.
     gaps: std::cell::RefCell<Option<Vec<f64>>>,
+    /// Per-axis sums used to reject a turn that cannot be a symmetry
+    /// without walking the atoms again. The key is the axis, bit for bit.
+    /// The gap list is not part of this sum: a miss that the cap already
+    /// explains must leave that list unbuilt.
+    axis_sum: std::cell::RefCell<Option<AxisSum>>,
+    /// Largest perp/gap ratio on this axis. Filled only once a turn is
+    /// still inside the cap, which is when the exact leave test builds
+    /// the gap list too.
+    axis_ratio: std::cell::RefCell<Option<AxisRatio>>,
+}
+
+#[derive(Clone, Copy)]
+struct AxisSum {
+    key: [u64; 3],
+    /// Sum of clamped squared perpendicular radii, in index order.
+    sum_perp: f64,
+}
+
+#[derive(Clone, Copy)]
+struct AxisRatio {
+    key: [u64; 3],
+    /// Largest `perp^2 / gap^2` among atoms with a positive finite gap.
+    /// Infinite when a radius is not finite, so the fast test steps aside.
+    max_ratio: f64,
 }
 
 impl Cloud {
@@ -269,7 +293,92 @@ impl Cloud {
             ys,
             zs,
             gaps: std::cell::RefCell::new(None),
+            axis_sum: std::cell::RefCell::new(None),
+            axis_ratio: std::cell::RefCell::new(None),
         }
+    }
+
+    fn axis_key(axis: [f64; 3]) -> [u64; 3] {
+        [axis[0].to_bits(), axis[1].to_bits(), axis[2].to_bits()]
+    }
+
+    /// Sum of squared radii about `axis`. Does not build the gap list.
+    fn prepare_sum(&self, axis: [f64; 3]) -> AxisSum {
+        let key = Self::axis_key(axis);
+        if let Some(prep) = self.axis_sum.borrow().as_ref()
+            && prep.key == key
+        {
+            return *prep;
+        }
+        let mut sum_perp = 0.0;
+        for index in 0..self.xs.len() {
+            sum_perp += self.perp_sq_at(index, axis);
+        }
+        let prep = AxisSum { key, sum_perp };
+        *self.axis_sum.borrow_mut() = Some(prep);
+        prep
+    }
+
+    /// Largest perp/gap on `axis`. Builds the gap list, as the exact leave
+    /// test does once a turn is still inside the cap.
+    fn prepare_ratio(&self, axis: [f64; 3]) -> AxisRatio {
+        let key = Self::axis_key(axis);
+        if let Some(prep) = self.axis_ratio.borrow().as_ref()
+            && prep.key == key
+        {
+            return *prep;
+        }
+        let gaps = self.gaps();
+        let mut max_ratio = 0.0;
+        for index in 0..self.xs.len() {
+            let perp = self.perp_sq_at(index, axis);
+            if !perp.is_finite() {
+                max_ratio = f64::INFINITY;
+                continue;
+            }
+            let gap = gaps[index];
+            if gap.is_finite() && gap > 0.0 {
+                let ratio = perp / gap;
+                if ratio > max_ratio {
+                    max_ratio = ratio;
+                }
+            }
+        }
+        drop(gaps);
+        let prep = AxisRatio { key, max_ratio };
+        *self.axis_ratio.borrow_mut() = Some(prep);
+        prep
+    }
+
+    /// `true` only when the walked identity sum is under the cap.
+    ///
+    /// `n` products added in order each round by at most one ulp, so the
+    /// walked sum and `scale * sum_perp` differ by far less than this
+    /// allowance. A sum this bound does not cover falls through to the
+    /// exact walk. The gap list stays unbuilt.
+    fn identity_under_fast(&self, axis: [f64; 3], turn: &OrderTurn, cap: f64) -> bool {
+        if !cap.is_finite() {
+            return true;
+        }
+        let n = self.xs.len();
+        if n == 0 {
+            return false;
+        }
+        let sum = self.prepare_sum(axis);
+        let limit = cap * cap * n as f64;
+        let slop = n as f64 * 8.0 * f64::EPSILON;
+        turn.chord_scale * sum.sum_perp * (1.0 + slop) < limit
+    }
+
+    /// `true` only when no atom's chord reaches its own gap.
+    ///
+    /// An atom leaves when `leave_scale * perp >= gap`, which is
+    /// `leave_scale * (perp / gap) >= 1`. Room above the largest ratio
+    /// keeps a rounded division from calling the turn too short.
+    fn cannot_leave_fast(&self, axis: [f64; 3], turn: &OrderTurn) -> bool {
+        let prep = self.prepare_ratio(axis);
+        let slop = 8.0 * f64::EPSILON;
+        turn.leave_scale * prep.max_ratio * (1.0 + slop) < 1.0
     }
 
     /// Squared distance from each atom to its nearest other atom.
@@ -354,6 +463,10 @@ impl Cloud {
     /// reduced with the lanes under that same order, so a tie keeps the
     /// earlier atom. The distance-only miss path does not use this walk.
     fn nearest_index(&self, image: [f64; 3]) -> (usize, f64) {
+        #[cfg(target_arch = "x86_64")]
+        if std::is_x86_feature_detected!("avx2") {
+            return unsafe { self.nearest_index_avx2(image) };
+        }
         let mut lane = [f64::INFINITY; 4];
         let mut who = [0usize; 4];
         let mut xs = self.xs.chunks_exact(4);
@@ -445,7 +558,15 @@ impl Cloud {
     }
 
     fn deviation_with(&self, axis: [f64; 3], turn: &OrderTurn, cap: f64) -> Option<f64> {
-        if self.identity_stays_under(axis, turn, cap) && !self.any_atom_can_leave(axis, turn) {
+        // The fast identity bound does not build the gap list. The leave
+        // test builds it only after that bound says the turn is still
+        // inside the cap, which is also when the exact walk builds it.
+        if self.identity_under_fast(axis, turn, cap) {
+            if self.cannot_leave_fast(axis, turn) || !self.any_atom_can_leave(axis, turn) {
+                return None;
+            }
+        } else if self.identity_stays_under(axis, turn, cap) && !self.any_atom_can_leave(axis, turn)
+        {
             return None;
         }
         self.exchange_residual(axis, turn, cap)
@@ -602,6 +723,74 @@ impl Cloud {
             }
         }
         best
+    }
+
+    /// # Safety
+    ///
+    /// AVX2 must be enabled.
+    ///
+    /// Same minimum as the scalar lane walk: strict `<` inside a lane keeps
+    /// the earlier index, and the lanes then reduce by distance and then by
+    /// index. A tie therefore keeps the earlier atom.
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    unsafe fn nearest_index_avx2(&self, image: [f64; 3]) -> (usize, f64) {
+        use std::arch::x86_64::{
+            _CMP_LT_OQ, _mm256_add_pd, _mm256_cmp_pd, _mm256_loadu_pd, _mm256_min_pd,
+            _mm256_movemask_pd, _mm256_mul_pd, _mm256_set1_pd, _mm256_storeu_pd, _mm256_sub_pd,
+        };
+        let ix = _mm256_set1_pd(image[0]);
+        let iy = _mm256_set1_pd(image[1]);
+        let iz = _mm256_set1_pd(image[2]);
+        let n = self.xs.len();
+        let mut index = 0usize;
+        let mut best_lanes = _mm256_set1_pd(f64::INFINITY);
+        let mut who = [0usize; 4];
+        while index + 4 <= n {
+            let distance = unsafe {
+                let dx = _mm256_sub_pd(_mm256_loadu_pd(self.xs.as_ptr().add(index)), ix);
+                let dy = _mm256_sub_pd(_mm256_loadu_pd(self.ys.as_ptr().add(index)), iy);
+                let dz = _mm256_sub_pd(_mm256_loadu_pd(self.zs.as_ptr().add(index)), iz);
+                _mm256_add_pd(
+                    _mm256_add_pd(_mm256_mul_pd(dx, dx), _mm256_mul_pd(dy, dy)),
+                    _mm256_mul_pd(dz, dz),
+                )
+            };
+            let mask = _mm256_movemask_pd(_mm256_cmp_pd(distance, best_lanes, _CMP_LT_OQ));
+            best_lanes = _mm256_min_pd(best_lanes, distance);
+            if mask & 1 != 0 {
+                who[0] = index;
+            }
+            if mask & 2 != 0 {
+                who[1] = index + 1;
+            }
+            if mask & 4 != 0 {
+                who[2] = index + 2;
+            }
+            if mask & 8 != 0 {
+                who[3] = index + 3;
+            }
+            index += 4;
+        }
+        let mut lane = [0.0; 4];
+        unsafe { _mm256_storeu_pd(lane.as_mut_ptr(), best_lanes) };
+        let mut best = lane[0];
+        let mut chosen = who[0];
+        for offset in 1..4 {
+            if lane[offset] < best || (lane[offset] == best && who[offset] < chosen) {
+                best = lane[offset];
+                chosen = who[offset];
+            }
+        }
+        while index < n {
+            let distance = squared_offset(image, self.xs[index], self.ys[index], self.zs[index]);
+            if distance < best || (distance == best && index < chosen) {
+                best = distance;
+                chosen = index;
+            }
+            index += 1;
+        }
+        (chosen, best)
     }
 
     /// # Safety
