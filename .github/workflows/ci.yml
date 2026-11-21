@@ -103,6 +103,12 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo clippy --all-targets --features rgsaddle -- -D warnings
 
+      - name: cargo doc (default features)
+        if: ${{ !cancelled() }}
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps --locked
+
       # `cargo package` writes anneal-core-${version}.crate and verifies
       # it. The next step extracts that crate, drops the development
       # cargo config and the lockfile, and checks the default features
@@ -188,6 +194,16 @@ jobs:
           : > .ci/gpr-optim/libgpr_optim.so
           GPR_OPTIM_LIB_DIR="$GITHUB_WORKSPACE/.ci/gpr-optim" \
             cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: cargo doc (CI and workspace features)
+        if: ${{ !cancelled() && steps.feature-deps.outcome == 'success' }}
+        shell: bash
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: |
+          cargo doc --no-deps --locked --features "$CI_FEATURES,lammps"
+          GPR_OPTIM_LIB_DIR="$GITHUB_WORKSPACE/.ci/gpr-optim" \
+            cargo doc --no-deps --locked --workspace --all-features
 
       - name: Install Cocogitto
         id: cocogitto

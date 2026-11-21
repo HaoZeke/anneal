@@ -8,8 +8,11 @@
 //! one of the last four stall destinations. When no kept minimum
 //! qualifies, the walker stays put.
 //!
-//! [`SEATS`], [`MEMORY`] and [`STAGNATION_HOPS`] set those three counts,
-//! and [`same_minimum`] decides whether two energies are one minimum.
+//! [`SEATS`](crate::methods::stall_archive::SEATS),
+//! [`MEMORY`](crate::methods::stall_archive::MEMORY) and
+//! [`STAGNATION_HOPS`] set those three counts, and
+//! [`same_minimum`](crate::methods::stall_archive::same_minimum) decides
+//! whether two energies are one minimum.
 //! Any tie goes to the minimum offered first, so the choice reads no
 //! random number and no target.
 //!
@@ -70,6 +73,8 @@ impl Default for StallArchive {
 }
 
 impl StallArchive {
+    /// Create an empty archive holding up to `capacity.max(1)` minima
+    /// and barring each chosen stall destination for `memory` stalls.
     pub fn new(capacity: usize, memory: usize) -> Self {
         Self {
             seats: Vec::new(),

@@ -602,7 +602,7 @@ mod featomic_cv {
     ///
     /// # Why a descriptor kernel rather than the coordinate one
     ///
-    /// Two measurements, both in [`crate::gpr`].
+    /// Two measurements, both in `crate::gpr` (behind the `gpr` feature).
     ///
     /// The inverse-distance kernel there is not invariant to relabelling the
     /// points. On 13 points a relabelling that changes nothing physical moved

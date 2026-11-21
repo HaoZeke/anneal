@@ -1637,8 +1637,8 @@ impl<'a> CallFloor<'a> {
             && (0..n).all(|a| ((a + 1)..n).all(|b| pair_distance(x, a, b) > self.pair(a, b)))
     }
 
-    /// Opens every pair at or inside its floor to [`CALL_FLOOR_OPENING`]
-    /// times that floor, as [`open_call_floor`] does for a single one.
+    /// Opens every pair at or inside its floor to 1.05 times that floor,
+    /// as [`open_call_floor`] does for a single one.
     pub fn open(&self, x: &mut Array1<f64>, frozen: Option<&[bool]>) -> bool {
         if self.elements.is_none() {
             return open_call_floor(x, self.absolute, CALL_FLOOR_OPENING * self.absolute, frozen);

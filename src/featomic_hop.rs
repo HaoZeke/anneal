@@ -151,7 +151,7 @@ struct Spectrum {
     /// Species-conditioned mean spectrum. This is the packing label:
     /// leftover RMS is almost the same on every closed shell.
     cloud_mean: Array1<f64>,
-    /// Jacobian of [`cloud_mean`] with respect to coordinates.
+    /// Jacobian of [`Self::cloud_mean`] with respect to coordinates.
     mean_jac: ndarray::Array2<f64>,
     n_at: usize,
     n_feat: usize,
