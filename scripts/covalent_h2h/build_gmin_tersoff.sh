@@ -10,11 +10,15 @@
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
+ROOT=$(cd "$HERE/../.." && pwd)
+PIN=$ROOT/scripts/gmin_pin.py
+eval "$(python3 "$PIN" shell)"
 LIB=$(realpath "${1:?librgpot_covalent.so}")
 WORK=/work/gmin-h2h
 TREE=$WORK/tersoff
 
 bash "$HERE/build_gmin.sh"
+python3 "$PIN" read-svnrev "$WORK/src/wales/GMIN/source/SVNREV" >/dev/null
 if [[ ! -x $WORK/bin/GMIN-tersoff ]]; then
   rm -rf "$TREE"
   mkdir -p "$TREE"

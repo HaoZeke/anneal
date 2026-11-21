@@ -21,7 +21,8 @@ fi
 bash "$ROOT/scripts/gmin_h2h/build_gmin.sh"
 
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs-budget"
-cp -a "$HERE/run_budget.py" "$ROOT/scripts/target_tol.py" "$WORK/bin/"
+cp -a "$HERE/run_budget.py" "$ROOT/scripts/target_tol.py" \
+  "$ROOT/scripts/gmin_pin.py" "$ROOT/scripts/machine_provenance.py" "$WORK/bin/"
 cp -a "$ROOT/examples/h2h_gmin_tip4p.data" "$WORK/bin/h2h_gmin_tip4p.data"
 cp -a /work/gmin-h2h/bin/GMIN "$WORK/bin/GMIN"
 chmod +x "$WORK/bin/GMIN" "$WORK/bin/h2h_seed" "$WORK/bin/run_budget.py"
@@ -66,6 +67,7 @@ exec /usr/bin/python3 -u $WORK/bin/run_budget.py \\
   ${REUSE:+--gmin-rows $REUSE} \\
   --head-file $WORK/anneal-head \\
   --gmin-source $WORK/gmin-source.txt \\
+  --svnrev /work/gmin-h2h/src/wales/GMIN/source/SVNREV \\
   "\$@"
 EOF
 chmod +x "$WORK/bin/inside_budget.sh"

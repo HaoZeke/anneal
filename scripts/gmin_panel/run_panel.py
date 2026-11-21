@@ -64,14 +64,10 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+from gmin_pin import TARBALL_SHA256, read_svnrev  # noqa: E402
 
 SEEDS = tuple(range(2000, 2012))
 HIT_TOL = DEFAULT_HIT_TOL
-# SVNREV of the rows behind bench/gmin-panel/rows.csv and the paper table.
-GMIN_REV = "aac1548a8aec13b53ad12a8d6904625081685d2e"
-# 2026-11-19 snapshot pinned by scripts/gmin_panel/build_gmin.sh.
-GMIN_PIN = "9cbec1a446352bc9ef064bd2b1a5767194655919"
-GMIN_TARBALL_SHA256 = "ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776"
 PAPER_BUDGETS = {
     "lj38": 400_000,
     "lj55": 1_000_000,
@@ -501,15 +497,12 @@ def row_key(row: dict[str, str]) -> tuple[str, str, str, str, str]:
 
 def panel_groups(rows: list[dict[str, str]], revision: str) -> dict[tuple[str, str], list[dict[str, str]]]:
     """The latest stored row per seed of each system and code at this revision."""
-    wanted = {"anneal": revision, "gmin": GMIN_REV}
     groups: dict[tuple[str, str], dict[int, dict[str, str]]] = {}
     for row in rows:
-        if revision == "latest":
-            if row["code"] == "gmin" and row["code_revision"] != GMIN_REV:
-                continue
-        else:
-            if row["harness_revision"] != revision or wanted.get(row["code"]) != row["code_revision"]:
-                continue
+        if revision != "latest" and row["harness_revision"] != revision:
+            continue
+        if row["code"] == "anneal" and revision != "latest" and row["code_revision"] != revision:
+            continue
         groups.setdefault((row["system"], row["code"]), {})[int(row["seed"])] = row
     return {key: [group[s] for s in sorted(group)] for key, group in groups.items()}
 
@@ -592,6 +585,7 @@ def summarise(rows: list[dict[str, str]], revision: str) -> list[dict[str, str]]
         wall_mw = mann_whitney(*wall_pair) if wall_pair is not None else None
         both = anneal + gmin
         anneal_revisions = " ".join(sorted({r["code_revision"] for r in anneal}))
+        gmin_revisions = " ".join(sorted({r["code_revision"] for r in gmin}))
         harness_revisions = " ".join(sorted({r["harness_revision"] for r in both}))
         out.append(
             {
@@ -622,7 +616,7 @@ def summarise(rows: list[dict[str, str]], revision: str) -> list[dict[str, str]]
                 "anneal_best_min": f"{min(col(anneal, 'best')):.8f}",
                 "gmin_best_min": f"{min(col(gmin, 'best')):.8f}",
                 "anneal_revision": anneal_revisions,
-                "gmin_revision": GMIN_REV,
+                "gmin_revision": gmin_revisions,
                 "harness_revision": harness_revisions,
                 "host": " ".join(sorted({r["host"] for r in both})),
                 "sessions": " ".join(sorted({r["session"] for r in both})),
@@ -716,12 +710,16 @@ def tex_table(summary: list[dict[str, str]], revision: str) -> str:
         if arm == "gmin" and system in ("lj75", "lj98"):
             cells[3] += "~\\rerun{5}"
     shown_revision = revision[:8] if revision != "latest" else "mixed"
+    gmin_revisions = sorted(
+        {value for row in summary for value in row["gmin_revision"].split()}
+    )
+    shown_gmin = " ".join(value[:8] for value in gmin_revisions) or "unknown"
     body = [" & ".join(cells) + " \\\\" for cells in lines]
     return "\n".join(
         [
             "\\begin{table}",
             "\\caption{This work against GMIN, both arms of each cluster on one host in one session.",
-            f"Revisions: anneal \\texttt{{{shown_revision}}}, GMIN \\texttt{{{GMIN_REV[:8]}}}.",
+            f"Revisions: anneal \\texttt{{{shown_revision}}}, GMIN \\texttt{{{shown_gmin}}}.",
             "Seeds 2000--2011, one core, budget in force calls.",
             "Calls and IQR are the median and the interquartile range of the",
             "calls to the minimum, with a miss at the full budget.",
@@ -838,9 +836,9 @@ def self_test() -> None:
         raise SystemExit(f"ranked wall {pair}")
     kept = panel_groups(
         [
-            {"system": "au55", "code": "gmin", "seed": "2000", "code_revision": GMIN_REV,
+            {"system": "au55", "code": "gmin", "seed": "2000", "code_revision": "gmin-rev",
              "harness_revision": "rev", "best": "-190.4"},
-            {"system": "au55", "code": "gmin", "seed": "2000", "code_revision": GMIN_REV,
+            {"system": "au55", "code": "gmin", "seed": "2000", "code_revision": "gmin-rev",
              "harness_revision": "rev", "best": "-191.0308"},
         ],
         "rev",
@@ -903,6 +901,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--work", type=Path)
     parser.add_argument("--logs", type=Path)
     parser.add_argument("--gmin-source", type=Path)
+    parser.add_argument("--svnrev", type=Path)
     parser.add_argument("--lj-data", type=Path)
     parser.add_argument("--morse-data", type=Path)
     parser.add_argument("--system", action="append")
@@ -926,9 +925,21 @@ def main(argv: list[str]) -> int:
     if os.sched_getaffinity(0) != {0}:
         print(f"pinned to {sorted(os.sched_getaffinity(0))}, expected core 0", file=sys.stderr)
         return 2
-    needed = (args.bin, args.tree, args.work, args.logs, args.gmin_source, args.lj_data, args.morse_data)
+    needed = (
+        args.bin,
+        args.tree,
+        args.work,
+        args.logs,
+        args.gmin_source,
+        args.svnrev,
+        args.lj_data,
+        args.morse_data,
+    )
     if any(value is None for value in needed):
-        parser.error("--bin, --tree, --work, --logs, --gmin-source, --lj-data and --morse-data are needed to run")
+        parser.error(
+            "--bin, --tree, --work, --logs, --gmin-source, --svnrev, "
+            "--lj-data and --morse-data are needed to run"
+        )
     head = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=args.tree, capture_output=True, text=True, check=True
     ).stdout.strip()
@@ -937,11 +948,12 @@ def main(argv: list[str]) -> int:
     source = dict(
         line.split("=", 1) for line in args.gmin_source.read_text().splitlines() if "=" in line
     )
-    if source.get("svnrev") != GMIN_PIN:
-        raise SystemExit(f"GMIN SVNREV {source.get('svnrev')} is not {GMIN_PIN}")
-    if source.get("tarball_sha256") != GMIN_TARBALL_SHA256:
+    gmin_revision = read_svnrev(args.svnrev)
+    if source.get("svnrev") != gmin_revision:
+        raise SystemExit(f"{args.gmin_source} does not describe {args.svnrev}")
+    if source.get("tarball_sha256") != TARBALL_SHA256:
         raise SystemExit(
-            f"GMIN tarball sha256 {source.get('tarball_sha256')} is not {GMIN_TARBALL_SHA256}"
+            f"GMIN tarball sha256 {source.get('tarball_sha256')} is not {TARBALL_SHA256}"
         )
     systems = [row[0] for row in SYSTEMS if not args.system or row[0] in args.system]
     for system in systems:
@@ -957,12 +969,16 @@ def main(argv: list[str]) -> int:
     session = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     done = set() if args.rerun else {row_key(r) for r in read_rows(args.rows)}
     seeds = tuple(args.seed) if args.seed else SEEDS
-    print(f"session {session} revision {args.revision} gmin {GMIN_PIN} order {args.order}", flush=True)
+    print(
+        f"session {session} revision {args.revision} "
+        f"gmin {gmin_revision} order {args.order}",
+        flush=True,
+    )
     for system in systems:
         driver, _binary = resolve_driver(args.bin, args.tree, system)
         for seed in seeds:
             for slot, code in enumerate(arm_sequence(args.order, seed)):
-                code_revision = args.revision if code == "anneal" else GMIN_PIN
+                code_revision = args.revision if code == "anneal" else gmin_revision
                 key = (system, code, str(seed), code_revision, args.revision)
                 if key in done:
                     print(f"skip {system} {code} {seed}", flush=True)

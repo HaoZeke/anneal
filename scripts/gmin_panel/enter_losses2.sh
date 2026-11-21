@@ -65,7 +65,8 @@ done
 
 GMIN_PANEL_WORK=$OUT bash "$HERE/build_gmin.sh"
 cp -f "$OUT/bin/GMIN" "$OUT/base-bin/GMIN"
-cp -f "$HERE/run_losses2.py" "$HERE/run_panel.py" "$ROOT/scripts/target_tol.py" "$OUT/"
+cp -f "$HERE/run_losses2.py" "$HERE/run_panel.py" \
+  "$ROOT/scripts/target_tol.py" "$ROOT/scripts/gmin_pin.py" "$OUT/"
 cp -f "$ROOT/examples/h2h_gmin_lj.data" "$ROOT/examples/h2h_gmin_morse.data" "$OUT/"
 user_site=$(python3 -c 'import site; print(site.getusersitepackages())')
 
@@ -88,6 +89,7 @@ exec taskset -c 0 /usr/bin/python3 -u $OUT/run_losses2.py \\
   --work $OUT/runs \\
   --logs $OUT/logs \\
   --gmin-source $OUT/gmin-source.txt \\
+  --svnrev $OUT/src/wales/GMIN/source/SVNREV \\
   --lj-data $OUT/h2h_gmin_lj.data \\
   --morse-data $OUT/h2h_gmin_morse.data \\
   --rows $OUT/rows.csv \\

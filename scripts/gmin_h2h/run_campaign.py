@@ -32,6 +32,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 from machine_provenance import machine_provenance  # noqa: E402
+from gmin_pin import TARBALL_SHA256, read_svnrev  # noqa: E402
 
 PAPER_BUDGETS = {
     98: 4_000_000,
@@ -478,6 +479,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--gmin", type=Path, required=True)
     parser.add_argument("--data", type=Path, required=True)
     parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--svnrev", type=Path, required=True)
     parser.add_argument("--head-file", type=Path, required=True)
     parser.add_argument("--runs", type=Path, required=True)
     parser.add_argument("--starts", type=Path, required=True)
@@ -497,7 +499,17 @@ def main(argv: list[str]) -> int:
             raise SystemExit(
                 f"LJ{n} budget {args.budget} is not the paper budget {PAPER_BUDGETS[n]}"
             )
-    url, revision = load_source(args.source)
+    url, recorded_revision = load_source(args.source)
+    revision = read_svnrev(args.svnrev)
+    source = dict(
+        line.split("=", 1)
+        for line in args.source.read_text().splitlines()
+        if "=" in line
+    )
+    if recorded_revision != revision or source.get("svnrev") != revision:
+        raise SystemExit(f"{args.source} does not describe {args.svnrev}")
+    if source.get("tarball_sha256") != TARBALL_SHA256:
+        raise SystemExit(f"{args.source} has another GMIN tarball")
     head = args.head_file.read_text().strip()
     machine_id, cpu_model = machine_provenance()
     progress = args.runs.parent / "progress.txt"

@@ -37,6 +37,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 from machine_provenance import machine_columns, require_csv_schema  # noqa: E402
+from gmin_pin import read_built_revision  # noqa: E402
 
 SYSTEMS = ("sw10", "sw13", "sw20", "tc10", "tc20")
 SEEDS = tuple(range(2000, 2012))
@@ -422,6 +423,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--carbon-data", type=Path, required=True)
     parser.add_argument("--ase", type=Path, required=True)
     parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--svnrev", type=Path, required=True)
     parser.add_argument("--head-file", type=Path, required=True)
     parser.add_argument("--before-head-file", type=Path)
     parser.add_argument("--runs", type=Path, required=True)
@@ -434,7 +436,7 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv[1:])
     names = tuple(args.system) if args.system else SYSTEMS
     wanted = set(args.code) if args.code else None
-    revision = load_source(args.source)
+    revision = read_built_revision(args.svnrev, args.source)
     head = args.head_file.read_text().strip()
     machine = machine_columns()
     heads = {"binary": head, "before_binary": ""}

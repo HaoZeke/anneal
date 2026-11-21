@@ -34,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from machine_provenance import machine_columns, require_csv_schema  # noqa: E402
+from gmin_pin import read_svnrev  # noqa: E402
 from gm_radius import gmin_block, read_minimum  # noqa: E402
 from run_h2h import (  # noqa: E402
     BUDGET,
@@ -205,7 +206,7 @@ def main() -> int:
     parser.add_argument("--point", type=Path, required=True)
     parser.add_argument("--anneal-revision", required=True)
     parser.add_argument("--gmin", type=Path, required=True)
-    parser.add_argument("--gmin-revision", required=True)
+    parser.add_argument("--gmin-svnrev", type=Path, required=True)
     parser.add_argument("--data", type=Path, required=True)
     parser.add_argument("--verify-data", type=Path, required=True)
     parser.add_argument("--gm-dir", type=Path, required=True)
@@ -223,6 +224,7 @@ def main() -> int:
         print(f"cwd is {Path.cwd()}, not /work", file=sys.stderr)
         return 2
     run_h2h.CAMBRIDGE = {n: ref for n, (ref, _) in CAMBRIDGE.items()}
+    gmin_revision = read_svnrev(args.gmin_svnrev)
     args.work.mkdir(parents=True, exist_ok=True)
     write_gm_blocks(args.repo, args.gm_dir)
     verify(args.point, args.gmin, args.verify_data, args.gm_dir, args.verify_out, args.work)
@@ -250,13 +252,13 @@ def main() -> int:
                 print(f"anneal n={n} seed={seed} reused", flush=True)
             start_sha = sha1(start)
             gmin = find(stored, system=system, code="gmin", seed=str(seed),
-                        code_revision=args.gmin_revision, start_sha1=start_sha,
+                        code_revision=gmin_revision, start_sha1=start_sha,
                         machine_id=machine["machine_id"])
             if gmin is None:
                 print(f"gmin n={n} seed={seed}", flush=True)
                 gmin = run_gmin(args.gmin, args.data, n, seed, start, args.work)
                 gmin["outside_s"] = f"{max(0.0, float(gmin['wall_s']) - float(gmin['pot_s'])):.6f}"
-                gmin.update(start_sha1=start_sha, code_revision=args.gmin_revision,
+                gmin.update(start_sha1=start_sha, code_revision=gmin_revision,
                             host=host, cpu=cpu, **machine)
                 append_row(args.rows, gmin)
                 stored.append({k: str(v) for k, v in gmin.items()})
@@ -266,7 +268,7 @@ def main() -> int:
     summary = [
         {**row, **machine}
         for row in summarise(
-            read_rows(args.rows), args.anneal_revision, args.gmin_revision
+            read_rows(args.rows), args.anneal_revision, gmin_revision
         )
     ]
     if summary:

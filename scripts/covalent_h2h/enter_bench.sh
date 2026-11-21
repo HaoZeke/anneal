@@ -17,7 +17,9 @@ bash "$HERE/build_gmin_tersoff.sh" "$WORK/lib/librgpot_covalent.so"
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$OUT"
 RUN=$WORK/${BENCH_OUT:-before}
 mkdir -p "$RUN/runs" "$RUN/starts"
-cp -a "$HERE/run_campaign.py" "$HERE/ase_bh.py" "$ROOT/scripts/target_tol.py" "$WORK/bin/"
+cp -a "$HERE/run_campaign.py" "$HERE/ase_bh.py" \
+  "$ROOT/scripts/target_tol.py" "$ROOT/scripts/gmin_pin.py" \
+  "$ROOT/scripts/machine_provenance.py" "$WORK/bin/"
 cp -a "$ROOT/examples/h2h_gmin_sw.data" "$WORK/bin/h2h_gmin_sw.data"
 cp -a "$ROOT/examples/h2h_gmin_tc.data" "$WORK/bin/h2h_gmin_tc.data"
 cp -a /work/gmin-h2h/bin/GMIN "$WORK/bin/GMIN"
@@ -61,6 +63,7 @@ exec /usr/bin/python3 -u $WORK/bin/run_campaign.py \\
   --carbon-data $WORK/bin/h2h_gmin_tc.data \\
   --ase $WORK/bin/ase_bh.py \\
   --source $WORK/gmin-source.txt \\
+  --svnrev /work/gmin-h2h/src/wales/GMIN/source/SVNREV \\
   --head-file $WORK/anneal-head \\
   --runs $RUN/runs \\
   --starts $RUN/starts \\

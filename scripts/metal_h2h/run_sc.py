@@ -33,6 +33,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 from machine_provenance import machine_columns  # noqa: E402
+from gmin_pin import read_built_revision  # noqa: E402
 
 # N=38 and N=55 are the LJ paper map. N=80 is not in it.
 PAPER_BUDGETS = {
@@ -366,6 +367,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--summary", type=Path, required=True)
     parser.add_argument("--seeds-out", type=Path, required=True)
     parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--svnrev", type=Path, required=True)
     parser.add_argument("--head-file", type=Path, required=True)
     parser.add_argument("--only", nargs=3, metavar=("SYSTEM", "SEED", "ARM"))
     args = parser.parse_args(argv)
@@ -378,7 +380,7 @@ def main(argv: list[str]) -> int:
     if set(PAPER_BUDGETS) != set(REFERENCES):
         raise SystemExit("budgets and references differ")
     head = args.head_file.read_text().strip()
-    revision = load_source(args.source)
+    revision = read_built_revision(args.svnrev, args.source)
     if args.only:
         system, seed_text, arm = args.only
         if system not in PAPER_BUDGETS or arm not in ARMS:

@@ -48,6 +48,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+from gmin_pin import REVISION as GMIN_PIN_REVISION  # noqa: E402
 
 TEX = "paper/jctc/manuscript.tex"
 SI = "paper/jctc/si.tex"
@@ -56,7 +57,10 @@ REVISION_COLUMNS = ("code_revision", "anneal_head", "release_revision", "head", 
 HOST_COLUMNS = ("host",)
 MACHINE_PROVENANCE_COLUMNS = frozenset(("machine_id", "cpu_model"))
 # Revisions of other codes. The GMIN build scripts refuse a tarball whose SVNREV differs.
-EXTERNAL_REVISIONS = {"aac1548a8aec13b53ad12a8d6904625081685d2e": "GMIN source/SVNREV"}
+EXTERNAL_REVISIONS = {
+    "aac1548a8aec13b53ad12a8d6904625081685d2e": "GMIN source/SVNREV",
+    GMIN_PIN_REVISION: "GMIN source/SVNREV",
+}
 # Local revisions that rows cite, each with the pushed commit it was rebuilt as.
 ALIASES = "bench/revision-aliases.csv"
 # Remote branches the alias table cites, plus develop. A missing one means
@@ -471,8 +475,6 @@ def gmin_panel_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[
     latest: dict[tuple[str, str], dict[int, dict[str, str]]] = {}
     bad_rows: list[str] = []
     for index, r in enumerate(rows, start=2):
-        if r["code"] == "gmin" and r["code_revision"] != panel.GMIN_REV:
-            continue
         system = r["system"]
         budget = panel.PAPER_BUDGETS.get(system)
         ref = references.get(system)
@@ -510,6 +512,19 @@ def gmin_panel_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[
     hosts = {r["host"] for group in groups.values() for r in group}
     audit.cell("bench/gmin-panel/rows.csv", "host", " ".join(sorted(hosts)), "bench")
     return panel, groups
+
+
+def gmin_revision(groups: dict[tuple[str, str], list[dict[str, str]]]) -> str:
+    """Return the revision actually recorded by the selected GMIN rows."""
+    revisions = {
+        row["code_revision"]
+        for (_system, arm), rows in groups.items()
+        if arm == "gmin"
+        for row in rows
+    }
+    if len(revisions) != 1:
+        raise RuntimeError(f"GMIN panel has mixed revisions: {sorted(revisions)}")
+    return next(iter(revisions))
 
 
 def gmin_panel_summary(audit: Audit, panel: object, groups: dict) -> None:
@@ -601,7 +616,7 @@ def gmin_panel_readme(audit: Audit, panel: object, groups: dict) -> None:
     old_au = pick(rows, system="au55", code="gmin", session=first_session)
     new_session = groups[("au55", "gmin")][0]["session"]
     audit.said(GMIN_PANEL_README, GMIN_PANEL_REVISION)
-    audit.said(GMIN_PANEL_README, panel.GMIN_REV)
+    audit.said(GMIN_PANEL_README, gmin_revision(groups))
     audit.said(GMIN_PANEL_README, f"adds the energy {dict((r[0], r[3]) for r in panel.SYSTEMS)['lj103']:.6f}")
     r0 = 2.884
     scale = r0 / 2.0 ** (1.0 / 6.0)
@@ -698,7 +713,12 @@ def gmin_panel_prose(audit: Audit, panel: object, groups: dict) -> None:
     rad = (2.0 + (3.0 * 55 / 17.77153175) ** (1.0 / 3.0)) * 2.884
     anneal_revs = {r["code_revision"] for s in systems for r in groups[(s, "anneal")]}
     shown_rev = sorted(anneal_revs)[0][:8] if len(anneal_revs) == 1 else "mixed"
-    audit.said(TEX, f"Revisions: anneal \\texttt{{{shown_rev}}}, GMIN \\texttt{{{panel.GMIN_REV[:8]}}}.")
+    shown_gmin = gmin_revision(groups)[:8]
+    audit.said(
+        TEX,
+        f"Revisions: anneal \\texttt{{{shown_rev}}}, "
+        f"GMIN \\texttt{{{shown_gmin}}}.",
+    )
     audit.said(TEX, f"Seeds {seed_span}, one core, budget in force calls.")
     audit.said(TEX, f"Both arms use seeds {seed_span}, the budget in the table and the start this code writes for the seed.")
     audit.said(TEX, f"GMIN's nearest-neighbor container \\({rad:.6f}\\)~\\AA, step and taboo distances scaled by "

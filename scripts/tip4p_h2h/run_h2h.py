@@ -36,6 +36,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         break
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 from machine_provenance import machine_columns, require_csv_schema  # noqa: E402
+from gmin_pin import read_built_revision  # noqa: E402
 
 BUDGET = 2_000_000
 HIT_TOL = DEFAULT_HIT_TOL
@@ -327,6 +328,7 @@ def main() -> int:
     parser.add_argument("--seed", type=int)
     parser.add_argument("--head-file", type=Path)
     parser.add_argument("--gmin-source", type=Path)
+    parser.add_argument("--svnrev", type=Path, required=True)
     args = parser.parse_args()
     if socket.gethostname() != "bench":
         print(f"hostname is {socket.gethostname()}, not bench", file=sys.stderr)
@@ -335,7 +337,11 @@ def main() -> int:
         print(f"cwd is {Path.cwd()}, not /work", file=sys.stderr)
         return 2
     args.work.mkdir(parents=True, exist_ok=True)
-    head, revision = read_provenance(args.head_file, args.gmin_source)
+    head, _recorded_revision = read_provenance(
+        args.head_file,
+        args.gmin_source,
+    )
+    revision = read_built_revision(args.svnrev, args.gmin_source)
     host = os.uname().nodename
     machine = machine_columns()
     whole = args.size is None and args.seed is None

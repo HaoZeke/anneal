@@ -32,6 +32,7 @@ import sys
 from pathlib import Path
 
 from read_deposit import HIT_TOL, REFERENCES, ZENODO_DOI, read_zip
+from gmin_pin import read_built_revision
 
 BUDGET = 400_000
 SEEDS = tuple(range(2000, 2012))
@@ -579,6 +580,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--data", type=Path, required=True)
     parser.add_argument("--zip", type=Path, required=True)
     parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--svnrev", type=Path, required=True)
     parser.add_argument("--head-file", type=Path, required=True)
     parser.add_argument("--runs", type=Path, required=True)
     parser.add_argument("--summary", type=Path)
@@ -605,7 +607,7 @@ def main(argv: list[str]) -> int:
         raise SystemExit("the gad arm needs --condevo")
     head = args.head_file.read_text().strip()
     host = socket.gethostname()
-    revision = load_source(args.source)
+    revision = read_built_revision(args.svnrev, args.source)
     progress = args.runs.parent / "progress.txt"
     args.runs.mkdir(parents=True, exist_ok=True)
     deposited = gad_rows(args.zip)

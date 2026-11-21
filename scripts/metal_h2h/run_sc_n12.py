@@ -441,6 +441,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--seeds-out", type=Path, required=True)
     parser.add_argument("--arms-out", type=Path)
     parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--svnrev", type=Path, required=True)
     parser.add_argument("--head-file", type=Path, required=True)
     parser.add_argument("--only", nargs=3, metavar=("SYSTEM", "SEED", "ARM"))
     args = parser.parse_args(argv)
@@ -451,7 +452,7 @@ def main(argv: list[str]) -> int:
         print(f"working directory is {Path.cwd()}, expected /work", file=sys.stderr)
         return 2
     head = args.head_file.read_text().strip()
-    revision = sc.load_source(args.source)
+    revision = sc.read_built_revision(args.svnrev, args.source)
     rows = load_rows(args.seeds_out)
     arm_rows = load_rows(args.arms_out) if args.arms_out else []
     done = {(row["system"], row["seed"], row["arm"]) for row in rows}

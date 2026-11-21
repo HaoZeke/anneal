@@ -1,2 +1,3 @@
 Cap GMIN by gradient passes, report energy-only potential entries separately,
-and use the same combined energy-and-gradient call unit as anneal.
+use the same combined energy-and-gradient call unit as anneal, and share one
+verified GMIN source pin across builders and row provenance.

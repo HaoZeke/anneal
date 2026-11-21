@@ -123,6 +123,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--starts78", type=Path, required=True)
     parser.add_argument("--reference78", type=Path, required=True)
     parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--svnrev", type=Path, required=True)
     parser.add_argument("--head-file", type=Path, required=True)
     parser.add_argument("--panel-system", action="append", choices=tuple(sc.PAPER_BUDGETS))
     parser.add_argument("--no-n78", action="store_true")
@@ -135,7 +136,7 @@ def main(argv: list[str]) -> int:
         print(f"working directory is {Path.cwd()}, expected /work", file=sys.stderr)
         return 2
     head = args.head_file.read_text().strip()
-    revision = sc.load_source(args.source)
+    revision = sc.read_built_revision(args.svnrev, args.source)
     reference = args.reference78.read_text().strip()
 
     panel_fields, panel_rows = load(args.panel_seeds)
