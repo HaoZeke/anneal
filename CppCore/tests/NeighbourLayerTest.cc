@@ -9,6 +9,7 @@
 #include <cstring>
 #include <limits>
 #include <map>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -1097,4 +1098,181 @@ TEST_CASE("a directed walk gives a lower partner the negated vector of the half 
       }
     }
   }
+}
+
+namespace {
+
+// Magnitude at which the cofactor determinant of the tilted cell below
+// overflows double, including after scaling by 1e-3 and by 1e3.
+constexpr double kDetOverflowScale = 1e105;
+
+void cellPoint(const double cell[9], double f0, double f1, double f2, double out[3]) {
+  out[0] = f0 * cell[0] + f1 * cell[3] + f2 * cell[6];
+  out[1] = f0 * cell[1] + f1 * cell[4] + f2 * cell[7];
+  out[2] = f0 * cell[2] + f1 * cell[5] + f2 * cell[8];
+}
+
+void tiltedCell(double scale, double cell[9]) {
+  const double side = 10.0 * scale;
+  const double tilt = 6.0 * scale;
+  cell[0] = side;
+  cell[1] = 0.0;
+  cell[2] = 0.0;
+  cell[3] = 0.0;
+  cell[4] = side;
+  cell[5] = 0.0;
+  cell[6] = tilt;
+  cell[7] = 0.0;
+  cell[8] = side;
+}
+
+// w*x and y*z round to one double, so the naive minor w*x - y*z is 0
+// while the fused minor is not. The cell is skewed and ill conditioned.
+void cancellingCell(double scale, double cell[9]) {
+  const double w = 3560.0;
+  const double x = 4432.0;
+  const double y = 628.0;
+  const double z = (w * x) / y;
+  cell[0] = scale;
+  cell[1] = 0.0;
+  cell[2] = 0.0;
+  cell[3] = 0.0;
+  cell[4] = w * scale;
+  cell[5] = y * scale;
+  cell[6] = 0.0;
+  cell[7] = z * scale;
+  cell[8] = x * scale;
+}
+
+/// Every lattice image with index coordinates in [-4, 4]. The minimum
+/// image of each pair must lie strictly inside that box.
+PairMap bruteAllImages(const std::vector<double> &pos, const double cell[9], double cutoff) {
+  constexpr int kRad = 4;
+  const double cut2 = cutoff * cutoff;
+  const int n = static_cast<int>(pos.size() / 3);
+  PairMap out;
+  for (int i = 0; i < n; ++i) {
+    for (int j = i + 1; j < n; ++j) {
+      double best = 0.0;
+      int ba = 0;
+      int bb = 0;
+      int bc = 0;
+      bool any = false;
+      for (int a = -kRad; a <= kRad; ++a) {
+        for (int b = -kRad; b <= kRad; ++b) {
+          for (int c = -kRad; c <= kRad; ++c) {
+            double shift[3];
+            cellPoint(cell, static_cast<double>(a), static_cast<double>(b),
+                      static_cast<double>(c), shift);
+            const double dx = pos[3 * i] - pos[3 * j] - shift[0];
+            const double dy = pos[3 * i + 1] - pos[3 * j + 1] - shift[1];
+            const double dz = pos[3 * i + 2] - pos[3 * j + 2] - shift[2];
+            const double r2 = dx * dx + dy * dy + dz * dz;
+            if (!any || r2 < best) {
+              best = r2;
+              ba = a;
+              bb = b;
+              bc = c;
+              any = true;
+            }
+          }
+        }
+      }
+      REQUIRE(any);
+      REQUIRE(std::abs(ba) < kRad);
+      REQUIRE(std::abs(bb) < kRad);
+      REQUIRE(std::abs(bc) < kRad);
+      if (best <= cut2) {
+        out[{i, j}] = best;
+      }
+    }
+  }
+  return out;
+}
+
+void requireSameKeys(const PairMap &got, const PairMap &ref) {
+  REQUIRE(got.size() == ref.size());
+  for (const auto &item : ref) {
+    REQUIRE(got.find(item.first) != got.end());
+  }
+}
+
+std::vector<double> facePair(const double cell[9]) {
+  std::vector<double> pos(6);
+  cellPoint(cell, 0.05, 0.5, 0.02, pos.data());
+  cellPoint(cell, 0.05, 0.5, 0.98, pos.data() + 3);
+  return pos;
+}
+
+void requireTiltPairs(double scale) {
+  double cell[9];
+  tiltedCell(scale, cell);
+  const double cutoff = 2.5 * scale;
+  const auto pos = facePair(cell);
+  const auto ref = bruteAllImages(pos, cell, cutoff);
+  REQUIRE(ref.size() == 1);
+  for (const auto mode : {rgpot::nlist::Mode::Stream, rgpot::nlist::Mode::Stored}) {
+    rgpot::nlist::Spec spec;
+    spec.cutoff = cutoff;
+    spec.skin = 0.0;
+    spec.periodic = {true, true, true};
+    spec.image = rgpot::nlist::Image::Round;
+    spec.mode = mode;
+    rgpot::nlist::Neighbours cells;
+    cells.update(pos.data(), pos.size() / 3, cell, spec);
+    requireSameKeys(walkedPairs(cells, pos.size() / 3, cutoff), ref);
+  }
+}
+
+void requireCancellingThrows(double scale) {
+  double cell[9];
+  cancellingCell(scale, cell);
+  const auto pos = facePair(cell);
+  rgpot::nlist::Spec spec;
+  spec.cutoff = std::abs(scale);
+  spec.skin = 0.0;
+  spec.periodic = {true, true, true};
+  spec.image = rgpot::nlist::Image::Round;
+  spec.mode = rgpot::nlist::Mode::Stream;
+  rgpot::nlist::Neighbours cells;
+  REQUIRE_THROWS_WITH(cells.update(pos.data(), pos.size() / 3, cell, spec),
+                      Catch::Matchers::ContainsSubstring("too ill conditioned"));
+}
+
+} // namespace
+
+TEST_CASE("a strongly skewed triclinic cell matches brute force images",
+          "[nlist][triclinic][skew]") {
+  setThreads("1");
+  requireTiltPairs(kDetOverflowScale);
+}
+
+TEST_CASE("a strongly skewed cell scaled by 1e-3 matches brute force images",
+          "[nlist][triclinic][skew]") {
+  setThreads("1");
+  requireTiltPairs(kDetOverflowScale * 1e-3);
+}
+
+TEST_CASE("a strongly skewed cell scaled by 1e3 matches brute force images",
+          "[nlist][triclinic][skew]") {
+  setThreads("1");
+  requireTiltPairs(kDetOverflowScale * 1e3);
+}
+
+TEST_CASE("naive cofactor cancellation on a skewed cell is rejected",
+          "[nlist][triclinic][singular]") {
+  setThreads("1");
+  requireCancellingThrows(1.0);
+}
+
+TEST_CASE("naive cofactor cancellation scaled by 1e-3 is rejected",
+          "[nlist][triclinic][singular]") {
+  setThreads("1");
+  requireCancellingThrows(1e-3);
+}
+
+TEST_CASE("naive cofactor cancellation scaled by 1e3 is rejected",
+          "[nlist][triclinic][singular]") {
+  setThreads("1");
+  requireCancellingThrows(1e3);
 }

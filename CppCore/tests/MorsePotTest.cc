@@ -23,6 +23,10 @@
 #include "rgpot/Morse/detail/MorseSplitSnapshot.hpp"
 #include "rgpot/PerAtom.hpp"
 #include "rgpot/Slices.hpp"
+#include "rgpot/nlist/MinimumImage.hpp"
+#include "rgpot/nlist/NeighbourList.hpp"
+#include "rgpot/simd/exp.hpp"
+#include "rgpot/stress.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
 
 using Catch::Matchers::WithinAbs;
@@ -242,7 +246,9 @@ struct FullEval {
 };
 
 FullEval runFullEval(rgpot::MorsePot &pot, const std::vector<double> &pos,
-                     const std::vector<int> &z, const std::array<double, 9> &box) {
+                     const std::vector<int> &z,
+                     const std::array<double, 9> &box,
+                     bool *first_reused = nullptr) {
   const std::size_t n = z.size();
   const rgpot::ForceInput in{n, pos.data(), z.data(), box.data()};
   FullEval res;
@@ -250,6 +256,9 @@ FullEval runFullEval(rgpot::MorsePot &pot, const std::vector<double> &pos,
   rgpot::ForceOut out{};
   out.F = res.forces.data();
   pot.forceImpl(in, &out);
+  if (first_reused != nullptr) {
+    *first_reused = pot.listReused();
+  }
   res.energy = out.energy;
   std::copy(out.stress, out.stress + 9, res.stress.begin());
 
@@ -261,6 +270,189 @@ FullEval runFullEval(rgpot::MorsePot &pot, const std::vector<double> &pos,
   pot.forcePerAtom(in, &pa_out, rgpot::PerAtomOut{res.atom_e.data(), res.atom_v.data()});
   res.atom_energy_total = pa_out.energy;
   std::copy(pa_out.stress, pa_out.stress + 9, res.atom_stress.begin());
+  return res;
+}
+
+struct BrutePair {
+  std::int32_t i;
+  std::int32_t j;
+  double dx;
+  double dy;
+  double dz;
+  double r;
+};
+
+/// Brute-force all-pairs scan across all 0 <= i < j < n using the minimum-image
+/// convention (orthorhombic round or triclinic MinimumImage).
+std::vector<BrutePair> bruteForcePairs(const std::vector<double> &pos,
+                                       const std::array<double, 9> &box,
+                                       double cutoff) {
+  const std::size_t n = pos.size() / 3;
+  const double cutoff2 = cutoff * cutoff;
+  const bool sheared = box[1] != 0.0 || box[2] != 0.0 || box[3] != 0.0 ||
+                       box[5] != 0.0 || box[6] != 0.0 || box[7] != 0.0;
+  const rgpot::nlist::MinimumImage mi(box.data(), {true, true, true});
+  const double L0 = box[0];
+  const double L1 = box[4];
+  const double L2 = box[8];
+  const double half_L0 = 0.5 * L0;
+  const double half_L1 = 0.5 * L1;
+  const double half_L2 = 0.5 * L2;
+  const double inv0 = 1.0 / L0;
+  const double inv1 = 1.0 / L1;
+  const double inv2 = 1.0 / L2;
+
+  const int slices = 8;
+  std::vector<std::vector<BrutePair>> per_slice(
+      static_cast<std::size_t>(slices));
+  ThreadGuard guard;
+  ThreadGuard::set("8");
+  rgpot::forEachSlice(slices, [&](int slice) {
+    const auto range =
+        rgpot::partition(static_cast<std::int64_t>(n), slice, slices);
+    auto &local = per_slice[static_cast<std::size_t>(slice)];
+    for (std::int64_t ii = range.begin; ii < range.end; ++ii) {
+      const auto i = static_cast<std::size_t>(ii);
+      const double xi = pos[3 * i];
+      const double yi = pos[3 * i + 1];
+      const double zi = pos[3 * i + 2];
+      for (std::size_t j = i + 1; j < n; ++j) {
+        double dz = zi - pos[3 * j + 2];
+        double adz = dz < 0.0 ? -dz : dz;
+        if (adz > half_L2) {
+          adz = L2 - adz;
+        }
+        if (adz > cutoff) {
+          continue;
+        }
+        double dx = xi - pos[3 * j];
+        double dy = yi - pos[3 * j + 1];
+        if (sheared) {
+          const double kz = dz > half_L2 ? 1.0 : (dz < -half_L2 ? -1.0 : 0.0);
+          const double dy_z = dy - kz * box[7];
+          double ady = dy_z < 0.0 ? -dy_z : dy_z;
+          if (ady > half_L1) {
+            ady = L1 - ady;
+          }
+          if (adz * adz + ady * ady > cutoff2) {
+            continue;
+          }
+          if (!mi.foldWithin(dx, dy, dz, cutoff2)) {
+            continue;
+          }
+        } else {
+          double ady = dy < 0.0 ? -dy : dy;
+          if (ady > half_L1) {
+            ady = L1 - ady;
+          }
+          if (adz * adz + ady * ady > cutoff2) {
+            continue;
+          }
+          double adx = dx < 0.0 ? -dx : dx;
+          if (adx > half_L0) {
+            adx = L0 - adx;
+          }
+          if (adx > cutoff) {
+            continue;
+          }
+          auto round_axis = [](double d, double inv, double len) {
+            const double t = d * inv;
+            const double s = t + std::copysign(0.5, t);
+            return d - len * static_cast<double>(static_cast<long long>(s));
+          };
+          dx = round_axis(dx, inv0, L0);
+          dy = round_axis(dy, inv1, L1);
+          dz = round_axis(dz, inv2, L2);
+        }
+        const double r2 = dx * dx + dy * dy + dz * dz;
+        if (r2 > 0.0 && r2 <= cutoff2) {
+          local.push_back({static_cast<std::int32_t>(i),
+                           static_cast<std::int32_t>(j), dx, dy, dz,
+                           std::sqrt(r2)});
+        }
+      }
+    }
+  });
+  std::vector<BrutePair> out;
+  for (const auto &part : per_slice) {
+    out.insert(out.end(), part.begin(), part.end());
+  }
+  return out;
+}
+
+/// Independent brute-force all-pairs Morse evaluation from the pair list.
+FullEval evalBruteForcePairs(const rgpot::MorseConfig &cfg, std::size_t n,
+                             const std::array<double, 9> &box,
+                             const std::vector<BrutePair> &pairs) {
+  FullEval res;
+  res.forces.assign(3 * n, 0.0);
+  res.atom_e.assign(n, 0.0);
+  res.atom_v.assign(6 * n, 0.0);
+  std::vector<double> row_e(n, 0.0);
+  std::vector<double> row_s(6 * n, 0.0);
+
+  const double d_cut =
+      1.0 - rgpot::simd::exp_fixed(-cfg.a * (cfg.cutoff - cfg.re));
+  const double shift = cfg.De * d_cut * d_cut - cfg.De;
+  const double twoDeA = 2.0 * cfg.De * cfg.a;
+  const bool switched = cfg.switch_width != 0.0;
+  const rgpot::QuinticSwitch sw_fn =
+      switched ? rgpot::QuinticSwitch::endingAt(cfg.cutoff, cfg.switch_width)
+               : rgpot::QuinticSwitch{};
+
+  double energy = 0.0;
+  double strain[6] = {};
+  rgpot::PerAtomOut pa{res.atom_e.data(), res.atom_v.data()};
+  for (const BrutePair &p : pairs) {
+    const double d = 1.0 - rgpot::simd::exp_fixed(-cfg.a * (p.r - cfg.re));
+    const double bare = cfg.De * d * d - cfg.De;
+    double pair_e = 0.0;
+    double fscale = 0.0;
+    if (switched) {
+      const auto s = sw_fn(p.r);
+      pair_e = bare * s.s;
+      fscale = (twoDeA * d * (d - 1.0) * s.s - bare * s.dsdr) / p.r;
+    } else {
+      pair_e = bare - shift;
+      fscale = twoDeA * d * (d - 1.0) / p.r;
+    }
+    const auto ai = static_cast<std::size_t>(p.i);
+    const auto aj = static_cast<std::size_t>(p.j);
+    const double fx = fscale * p.dx;
+    const double fy = fscale * p.dy;
+    const double fz = fscale * p.dz;
+    res.forces[3 * ai] += fx;
+    res.forces[3 * ai + 1] += fy;
+    res.forces[3 * ai + 2] += fz;
+    res.forces[3 * aj] -= fx;
+    res.forces[3 * aj + 1] -= fy;
+    res.forces[3 * aj + 2] -= fz;
+    if (n < rgpot::kTeamMinAtoms) {
+      energy += pair_e;
+      rgpot::accumulatePairStrain(strain, fscale, p.dx, p.dy, p.dz);
+    } else {
+      row_e[ai] += pair_e;
+      rgpot::accumulatePairStrain(row_s.data() + 6 * ai, fscale, p.dx, p.dy,
+                                  p.dz);
+    }
+    rgpot::tallyPair(pa, ai, aj, pair_e, fscale, p.dx, p.dy, p.dz);
+  }
+
+  if (n >= rgpot::kTeamMinAtoms) {
+    for (std::size_t a_idx = 0; a_idx < n; ++a_idx) {
+      energy += row_e[a_idx];
+      for (std::size_t c = 0; c < 6; ++c) {
+        strain[c] += row_s[6 * a_idx + c];
+      }
+    }
+  }
+  rgpot::ForceOut out{};
+  rgpot::publishCauchyStress(&out, strain, rgpot::cellVolume(box.data()));
+  res.energy = energy;
+  res.atom_energy_total = energy;
+  res.atom_forces = res.forces;
+  std::copy(out.stress, out.stress + 9, res.stress.begin());
+  std::copy(out.stress, out.stress + 9, res.atom_stress.begin());
   return res;
 }
 
@@ -285,6 +477,33 @@ std::size_t countBitDiffs(const FullEval &a, const FullEval &b) {
   return diffs;
 }
 
+bool withinScaledEps(double a, double b, double ulp_scale = 64.0) {
+  const double scale = std::max(1.0, std::max(std::abs(a), std::abs(b)));
+  const double tol = ulp_scale * std::numeric_limits<double>::epsilon() * scale;
+  return std::abs(a - b) <= tol;
+}
+
+std::size_t countCloseDiffs(const FullEval &a, const FullEval &b) {
+  std::size_t diffs = 0;
+  diffs += withinScaledEps(a.energy, b.energy) ? 0 : 1;
+  diffs += withinScaledEps(a.atom_energy_total, b.atom_energy_total) ? 0 : 1;
+  for (std::size_t k = 0; k < 9; ++k) {
+    diffs += withinScaledEps(a.stress[k], b.stress[k]) ? 0 : 1;
+    diffs += withinScaledEps(a.atom_stress[k], b.atom_stress[k]) ? 0 : 1;
+  }
+  for (std::size_t k = 0; k < a.forces.size(); ++k) {
+    diffs += withinScaledEps(a.forces[k], b.forces[k]) ? 0 : 1;
+    diffs += withinScaledEps(a.atom_forces[k], b.atom_forces[k]) ? 0 : 1;
+  }
+  for (std::size_t k = 0; k < a.atom_e.size(); ++k) {
+    diffs += withinScaledEps(a.atom_e[k], b.atom_e[k]) ? 0 : 1;
+  }
+  for (std::size_t k = 0; k < a.atom_v.size(); ++k) {
+    diffs += withinScaledEps(a.atom_v[k], b.atom_v[k]) ? 0 : 1;
+  }
+  return diffs;
+}
+
 } // namespace
 
 TEST_CASE("MorsePot OpenMP threaded and serial paths agree across build, Verlet reuse and rebuild",
@@ -296,16 +515,39 @@ TEST_CASE("MorsePot OpenMP threaded and serial paths agree across build, Verlet 
       .De = 1.0, .a = 4.0 / 2.55, .re = 2.55, .cutoff = 5.3, .switch_width = 0.8};
 
   // Below kTeamMinAtoms (6x6x6 Cu vacancy = 863 atoms): stays on one thread
-  // with zero OpenMP regions opened and identical bits across thread settings.
+  // with zero OpenMP regions opened and identical bits across thread settings,
+  // and matches the Neighbours allPairs() brute-force walk bit for bit.
   {
     const auto sys = fccVacancy(6, 2.55 * std::sqrt(2.0), 29);
     REQUIRE(sys.z.size() == 863);
     const auto step2 = perturbed(sys.pos, 0.05);
+
+    rgpot::nlist::Neighbours all;
+    rgpot::nlist::Spec all_spec;
+    all_spec.cutoff = std::numeric_limits<double>::infinity();
+    all_spec.skin = 0.0;
+    all_spec.image = rgpot::nlist::Image::Round;
+    all_spec.mode = rgpot::nlist::Mode::Stream;
+    all.update(sys.pos.data(), sys.z.size(), sys.box.data(), all_spec);
+    REQUIRE(all.allPairs());
+    std::vector<BrutePair> all_pairs;
+    const double cutoff2 = cu_vacancy.cutoff * cu_vacancy.cutoff;
+    all.forHalf(0, static_cast<std::int64_t>(sys.z.size()),
+                [&](std::int32_t i, std::int32_t j, double dx, double dy,
+                    double dz, double r2) {
+                  if (i < j && r2 > 0.0 && r2 <= cutoff2) {
+                    all_pairs.push_back({i, j, dx, dy, dz, std::sqrt(r2)});
+                  }
+                });
+    const auto all_ref1 =
+        evalBruteForcePairs(cu_vacancy, sys.z.size(), sys.box, all_pairs);
+
     ThreadGuard::set("1");
     rgpot::MorsePot ref_pot(cu_vacancy);
     const auto ref1 = runFullEval(ref_pot, sys.pos, sys.z, sys.box);
     const auto ref2 = runFullEval(ref_pot, step2, sys.z, sys.box);
     REQUIRE(ref_pot.listReused());
+    CHECK(countBitDiffs(ref1, all_ref1) == 0);
 
     for (const char *th : {"2", "4", "8", "16"}) {
       ThreadGuard::set(th);
@@ -319,8 +561,9 @@ TEST_CASE("MorsePot OpenMP threaded and serial paths agree across build, Verlet 
   }
 
   // Above kTeamMinAtoms (13x13x13 Cu vacancy = 8787 atoms): shifted, switched
-  // and sheared cells across Stored, Auto and Stream modes. Stored and Auto
-  // cover 1, 2, 4, 8 and 16 threads; Stream covers the largest requested team.
+  // and sheared cells across Stored, Auto and Stream modes at 1, 2, 4, 8 and 16
+  // threads across initial build, Verlet reuse and rebuild, with one list build
+  // per config and an independent brute-force all-pairs reference for Stream.
   for (const bool sheared : {false, true}) {
     const auto sys = fccVacancy(13, 2.55 * std::sqrt(2.0), 29, sheared);
     REQUIRE(sys.z.size() >= rgpot::kTeamMinAtoms);
@@ -330,70 +573,140 @@ TEST_CASE("MorsePot OpenMP threaded and serial paths agree across build, Verlet 
     auto past_skin = within_skin;
     past_skin[0] += 0.75;
 
+    const auto pairs0 = bruteForcePairs(sys.pos, sys.box, cu_vacancy.cutoff);
+    const auto pairs1 =
+        bruteForcePairs(within_skin, sys.box, cu_vacancy.cutoff);
+    const auto pairs2 = bruteForcePairs(past_skin, sys.box, cu_vacancy.cutoff);
+
     for (const auto &cfg : {cu_vacancy, cu_switched}) {
       if (sheared && cfg.switch_width != 0.0) {
         continue;
       }
+      const auto brute0 =
+          evalBruteForcePairs(cfg, sys.z.size(), sys.box, pairs0);
+      const auto brute1 =
+          evalBruteForcePairs(cfg, sys.z.size(), sys.box, pairs1);
+      const auto brute2 =
+          evalBruteForcePairs(cfg, sys.z.size(), sys.box, pairs2);
+
       for (const auto mode :
            {rgpot::nlist::Mode::Stored, rgpot::nlist::Mode::Auto, rgpot::nlist::Mode::Stream}) {
-        if (sheared && mode != rgpot::nlist::Mode::Stored) {
-          continue;
-        }
-        if (cfg.switch_width != 0.0 && mode != rgpot::nlist::Mode::Stored) {
-          continue;
-        }
         INFO("sheared=" << sheared << " switch=" << cfg.switch_width
                         << " mode=" << static_cast<int>(mode));
 
-        const bool full_matrix =
-            !sheared && cfg.switch_width == 0.0 && mode == rgpot::nlist::Mode::Stored;
-        ThreadGuard::set("1");
-        rgpot::MorsePot serial_pot(cfg);
-        serial_pot.setNeighbourMode(mode);
-        const auto ref0 = runFullEval(serial_pot, sys.pos, sys.z, sys.box);
+        const std::vector<const char *> thread_list{"1", "2", "4", "8", "16"};
 
-        ThreadGuard::set(full_matrix ? "1" : "16");
         rgpot::MorsePot pot(cfg);
         pot.setNeighbourMode(mode);
-        CHECK(countBitDiffs(runFullEval(pot, sys.pos, sys.z, sys.box), ref0) == 0);
-        if (!full_matrix) {
-          continue;
-        }
 
-        // The stored neighbour build is serial and independent of the requested
-        // team. Build it once, then exercise every team on the same geometry.
-        for (const char *th : {"2", "4", "8", "16"}) {
-          INFO("OMP_NUM_THREADS=" << th);
+        // 1. Initial geometry: one stored list build at 1 thread, then reuse
+        // across 2, 4, 8 and 16 threads; Stream (and Auto below 20k atoms)
+        // checks against the brute-force all-pairs reference and bit-for-bit
+        // against 1-thread Stream.
+        FullEval stream_ref0;
+        for (const char *th : thread_list) {
+          INFO("step=initial OMP_NUM_THREADS=" << th);
           ThreadGuard::set(th);
-          CHECK(countBitDiffs(runFullEval(pot, sys.pos, sys.z, sys.box), ref0) == 0);
-        }
-
-        ThreadGuard::set("1");
-        const auto ref1 = runFullEval(serial_pot, within_skin, sys.z, sys.box);
-        const auto ref2 = runFullEval(serial_pot, past_skin, sys.z, sys.box);
-        for (const char *th : {"1", "2", "4", "8", "16"}) {
-          INFO("OMP_NUM_THREADS=" << th);
-          ThreadGuard::set(th);
-          const auto teams_before_reuse = rgpot::teamsOpened();
-          CHECK(countBitDiffs(runFullEval(pot, within_skin, sys.z, sys.box), ref1) == 0);
-          CHECK(pot.listReused());
+          const auto teams_before = rgpot::teamsOpened();
+          bool first_reused = false;
+          const auto got0 =
+              runFullEval(pot, sys.pos, sys.z, sys.box, &first_reused);
+          if (mode == rgpot::nlist::Mode::Stored) {
+            if (std::string(th) == "1") {
+              CHECK_FALSE(first_reused);
+            } else {
+              CHECK(first_reused);
+            }
+            CHECK(pot.listReused());
+            CHECK(countBitDiffs(got0, brute0) == 0);
+          } else {
+            CHECK(countCloseDiffs(got0, brute0) == 0);
+            if (std::string(th) == "1") {
+              stream_ref0 = got0;
+            } else {
+              CHECK(countBitDiffs(got0, stream_ref0) == 0);
+            }
+          }
           if (std::string(th) != "1") {
 #if defined(_OPENMP)
-            // forceImpl + forcePerAtom each open one two-phase region.
-            CHECK(rgpot::teamsOpened() == teams_before_reuse + 2);
+            CHECK(rgpot::teamsOpened() == teams_before + 2);
 #endif
           }
         }
 
-        ThreadGuard::set("16");
-        CHECK(countBitDiffs(runFullEval(pot, past_skin, sys.z, sys.box), ref2) == 0);
-        rgpot::ForceOut probe{};
-        std::vector<double> fbuf(3 * sys.z.size(), 0.0);
-        probe.F = fbuf.data();
-        auto moved = past_skin;
-        moved[0] += 0.75;
-        pot.forceImpl({sys.z.size(), moved.data(), sys.z.data(), sys.box.data()}, &probe);
-        CHECK_FALSE(pot.listReused());
+        // 2. Within-skin perturbation: Verlet list reuse across all thread
+        // counts.
+        FullEval stream_ref1;
+        for (const char *th : thread_list) {
+          INFO("step=within_skin OMP_NUM_THREADS=" << th);
+          ThreadGuard::set(th);
+          const auto teams_before = rgpot::teamsOpened();
+          bool first_reused = false;
+          const auto got1 =
+              runFullEval(pot, within_skin, sys.z, sys.box, &first_reused);
+          if (mode == rgpot::nlist::Mode::Stored) {
+            CHECK(first_reused);
+            CHECK(pot.listReused());
+            CHECK(countBitDiffs(got1, brute1) == 0);
+          } else {
+            CHECK(countCloseDiffs(got1, brute1) == 0);
+            if (std::string(th) == "1") {
+              stream_ref1 = got1;
+            } else {
+              CHECK(countBitDiffs(got1, stream_ref1) == 0);
+            }
+          }
+          if (std::string(th) != "1") {
+#if defined(_OPENMP)
+            CHECK(rgpot::teamsOpened() == teams_before + 2);
+#endif
+          }
+        }
+
+        // 3. Past-skin perturbation: one rebuild on the first call, then
+        // exercise all thread counts on the rebuilt geometry, and verify that
+        // another past-skin step invalidates the stored list.
+        FullEval stream_ref2;
+        for (const char *th : thread_list) {
+          INFO("step=past_skin OMP_NUM_THREADS=" << th);
+          ThreadGuard::set(th);
+          const auto teams_before = rgpot::teamsOpened();
+          bool first_reused = true;
+          const auto got2 =
+              runFullEval(pot, past_skin, sys.z, sys.box, &first_reused);
+          if (mode == rgpot::nlist::Mode::Stored) {
+            if (std::string(th) == "1") {
+              CHECK_FALSE(first_reused);
+            } else {
+              CHECK(first_reused);
+            }
+            CHECK(pot.listReused());
+            CHECK(countBitDiffs(got2, brute2) == 0);
+          } else {
+            CHECK(countCloseDiffs(got2, brute2) == 0);
+            if (std::string(th) == "1") {
+              stream_ref2 = got2;
+            } else {
+              CHECK(countBitDiffs(got2, stream_ref2) == 0);
+            }
+          }
+          if (std::string(th) != "1") {
+#if defined(_OPENMP)
+            CHECK(rgpot::teamsOpened() == teams_before + 2);
+#endif
+          }
+        }
+        if (mode == rgpot::nlist::Mode::Stored) {
+          rgpot::ForceOut probe{};
+          std::vector<double> fbuf(3 * sys.z.size(), 0.0);
+          probe.F = fbuf.data();
+          auto moved = past_skin;
+          moved[0] += 0.75;
+          pot.forceImpl(
+              {sys.z.size(), moved.data(), sys.z.data(), sys.box.data()},
+              &probe);
+          CHECK_FALSE(pot.listReused());
+        }
       }
     }
   }
@@ -437,6 +750,59 @@ TEST_CASE("MorsePot OpenMP threaded and serial paths agree across build, Verlet 
     const auto got = runFullEval(par_pot, pos, z, box);
     CHECK(rgpot::teamsOpened() == before);
     CHECK(countBitDiffs(got, ref) == 0);
+
+    // Extra dilute case: 16 atoms in a compact cluster inside cell 0 (120
+    // upper pairs < 4096), where Stream visits upper partners in ascending
+    // index order and matches Stored energy and stress bit for bit.
+    auto cluster_pos = pos;
+    for (std::size_t a = 0; a < 16; ++a) {
+      const double ix = static_cast<double>(a % 2);
+      const double iy = static_cast<double>((a / 2) % 2);
+      const double iz = static_cast<double>(a / 4);
+      cluster_pos[3 * a] =
+          1.5 + ix * 1.7 + 0.03 * std::sin(1.3 * static_cast<double>(a));
+      cluster_pos[3 * a + 1] =
+          1.5 + iy * 1.7 + 0.03 * std::cos(1.7 * static_cast<double>(a));
+      cluster_pos[3 * a + 2] =
+          1.5 + iz * 1.7 + 0.03 * std::sin(2.1 * static_cast<double>(a));
+    }
+    for (std::size_t a = 16; a < 20; ++a) {
+      const std::size_t gx = a % grid;
+      const std::size_t gy = (a / grid) % grid;
+      const std::size_t gz =
+          a / (static_cast<std::size_t>(grid) * static_cast<std::size_t>(grid));
+      cluster_pos[3 * a] = (static_cast<double>(gx) + 0.5) * spacing;
+      cluster_pos[3 * a + 1] = (static_cast<double>(gy) + 0.5) * spacing;
+      cluster_pos[3 * a + 2] = (static_cast<double>(gz) + 0.5) * spacing;
+    }
+
+    ThreadGuard::set("1");
+    rgpot::MorsePot cluster_serial_pot(cu_vacancy);
+    cluster_serial_pot.setNeighbourMode(rgpot::nlist::Mode::Stored);
+    const auto cluster_ref =
+        runFullEval(cluster_serial_pot, cluster_pos, z, box);
+    REQUIRE(cluster_serial_pot.retainedPairs() == 240);
+
+    rgpot::MorsePot cluster_par_pot(cu_vacancy);
+    cluster_par_pot.setNeighbourMode(rgpot::nlist::Mode::Stored);
+    CHECK(countBitDiffs(runFullEval(cluster_par_pot, cluster_pos, z, box),
+                        cluster_ref) == 0);
+
+    ThreadGuard::set("4");
+    const auto cluster_before = rgpot::teamsOpened();
+    const auto cluster_got = runFullEval(cluster_par_pot, cluster_pos, z, box);
+    CHECK(rgpot::teamsOpened() == cluster_before);
+    CHECK(countBitDiffs(cluster_got, cluster_ref) == 0);
+
+    rgpot::MorsePot stream_pot(cu_vacancy);
+    stream_pot.setNeighbourMode(rgpot::nlist::Mode::Stream);
+    const auto stream_got = runFullEval(stream_pot, cluster_pos, z, box);
+    CHECK(f64Bits(stream_got.energy) == f64Bits(cluster_ref.energy));
+    CHECK(f64Bits(stream_got.atom_energy_total) ==
+          f64Bits(cluster_ref.atom_energy_total));
+    for (std::size_t k = 0; k < 9; ++k) {
+      CHECK(f64Bits(stream_got.stress[k]) == f64Bits(cluster_ref.stress[k]));
+    }
   }
 
   // Stored-half rebuild that preserves n_atoms, slices, total_up and total_inc

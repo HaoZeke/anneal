@@ -259,6 +259,39 @@ bool well_conditioned(const double cell[9], const double inv[9]) {
   return cond <= std::sqrt(eps);
 }
 
+enum class ScaledInverse { Ok, Singular, IllConditioned };
+
+// Cofactor inverse of A / ||A||_inf, written back in the original
+// scaling. The determinant and the condition estimate therefore see a
+// matrix of unit scale, not the absolute entries.
+ScaledInverse scaled_inverse(const double a[9], double inv[9]) {
+  const double scale = inf_norm(a);
+  if (!(scale > 0.0) || !std::isfinite(scale)) {
+    return ScaledInverse::Singular;
+  }
+  double unit[9];
+  for (int k = 0; k < 9; ++k) {
+    unit[k] = a[k] / scale;
+    if (!std::isfinite(unit[k])) {
+      return ScaledInverse::Singular;
+    }
+  }
+  double iunit[9];
+  if (!invert(unit, iunit)) {
+    return ScaledInverse::Singular;
+  }
+  if (!well_conditioned(unit, iunit)) {
+    return ScaledInverse::IllConditioned;
+  }
+  for (int k = 0; k < 9; ++k) {
+    inv[k] = iunit[k] / scale;
+    if (!std::isfinite(inv[k])) {
+      return ScaledInverse::Singular;
+    }
+  }
+  return ScaledInverse::Ok;
+}
+
 std::int64_t checked_index(double value) {
   const double limit = std::ldexp(1.0, 63);
   if (!std::isfinite(value) || value <= -limit || value >= limit) {
@@ -761,7 +794,8 @@ MinimumImage::MinimumImage(const double *cell,
     raw[k] = cell_[static_cast<std::size_t>(k)];
   }
   double inv[9];
-  if (!invert(raw, inv)) {
+  if (!invert(raw, inv) &&
+      scaled_inverse(raw, inv) != ScaledInverse::Ok) {
     throw std::invalid_argument("periodic cell must be nonsingular");
   }
   double basis[3][3] = {
@@ -797,6 +831,26 @@ MinimumImage::MinimumImage(const double *cell,
     dual_of(inv, dual_norm_.data());
   }
   narrow_ = narrow;
+}
+
+CellInverse MinimumImage::invertCell(const double *cell) {
+  double raw[9];
+  for (int k = 0; k < 9; ++k) {
+    if (!std::isfinite(cell[k])) {
+      throw std::invalid_argument("periodic cell must be finite");
+    }
+    raw[k] = cell[k];
+  }
+  CellInverse out;
+  const ScaledInverse scaled = scaled_inverse(raw, out.inverse.data());
+  if (scaled == ScaledInverse::IllConditioned) {
+    throw std::invalid_argument("periodic cell is too ill conditioned to bin");
+  }
+  if (scaled != ScaledInverse::Ok) {
+    throw std::invalid_argument("periodic cell must be nonsingular");
+  }
+  dual_of(out.inverse.data(), out.dual_norm.data());
+  return out;
 }
 
 namespace {
