@@ -86,6 +86,10 @@ jobs:
       - name: cargo fmt
         run: cargo fmt -- --check
 
+      - name: cargo clippy (no default features)
+        if: ${{ !cancelled() }}
+        run: cargo clippy --no-default-features --all-targets -- -D warnings
+
       - name: cargo clippy (default features)
         if: ${{ !cancelled() }}
         run: cargo clippy --all-targets -- -D warnings
@@ -131,6 +135,7 @@ jobs:
             cd "$pkg"
             cargo generate-lockfile
             cargo check --locked
+            cargo check --locked --no-default-features
             cargo check --locked --features rgsaddle,python
           )
 
@@ -512,6 +517,100 @@ jobs:
 
       - name: cargo test
         run: cargo test
+
+  # --no-default-features omits `catalog` (readcon-core, readcon-db, heed,
+  # lmdb-master-sys) so downstream crates linking another readcon-db can
+  # depend on anneal-core without duplicate rkrdb_* symbols.
+  test-no-default:
+    name: Test no default features (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, macos-26]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Free disk space
+        if: runner.os == 'Linux'
+        run: bash scripts/ci_free_disk.sh
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> ../tmp/anneal-target"
+          key: no-default-${{ matrix.os }}
+          save-if: ${{ github.event_name == 'push' }}
+
+      - name: cargo check (--no-default-features)
+        run: cargo check --locked --no-default-features --all-targets
+
+      - name: cargo test (--no-default-features)
+        run: cargo test --locked --no-default-features
+
+      # A failing test must not skip the symbol guard. nm reads the rlib
+      # and staticlib this build just wrote. A missing artefact fails the
+      # step; it does not look like a clean library.
+      - name: Check no readcon symbols in --no-default-features artifacts
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          list=$(mktemp)
+          cargo rustc --locked --lib --no-default-features --message-format=json \
+            -- --crate-type=rlib --crate-type=staticlib \
+            | python3 -c '
+          import json, sys
+          rlib = None
+          static = None
+          for line in sys.stdin:
+              line = line.strip()
+              if not line.startswith("{"):
+                  continue
+              msg = json.loads(line)
+              if msg.get("reason") != "compiler-artifact":
+                  continue
+              target = msg.get("target") or {}
+              if target.get("name") != "anneal_core":
+                  continue
+              if "lib" not in (target.get("kind") or []):
+                  continue
+              for name in msg.get("filenames") or []:
+                  if name.endswith(".rlib"):
+                      rlib = name
+                  elif name.endswith(".a"):
+                      static = name
+          missing = [
+              label
+              for label, path in (("rlib", rlib), ("staticlib", static))
+              if not path
+          ]
+          if missing:
+              sys.stderr.write(
+                  "compiler-artifact did not name the built %s\n"
+                  % " and ".join(missing)
+              )
+              sys.exit(1)
+          print(rlib)
+          print(static)
+          ' > "$list"
+          leaked=""
+          while IFS= read -r artifact; do
+            test -f "$artifact"
+            printf 'nm -g --defined-only %s\n' "$artifact"
+            symbols=$(nm -g --defined-only "$artifact")
+            hit=$(printf '%s\n' "$symbols" | grep -E '(_?rkr_|_?rkrdb_|_?mdb_|readcon_core|readcon_db)' || true)
+            if [[ -n "$hit" ]]; then
+              leaked="${leaked}${artifact}"$'\n'"${hit}"$'\n'
+            fi
+          done < "$list"
+          if [[ -n "$leaked" ]]; then
+            printf 'Unexpected readcon/lmdb symbols in --no-default-features build:\n%s\n' "$leaked" >&2
+            exit 1
+          fi
 
   # pip builds the release sdist from its own files only. Installing it in a
   # fresh virtualenv catches a path the sdist leaves out. pytest runs from

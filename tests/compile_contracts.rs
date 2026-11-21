@@ -141,9 +141,11 @@ fn expect_compile_fail(facts: &ProbeFacts, relative: &str, fragments: &[&str]) {
     );
     std::fs::write(root.path().join("Cargo.toml"), manifest).expect("probe manifest");
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
+    // This probe depends on anneal-core's default features, including
+    // catalog. The no-default CI job has not fetched those crates, so
+    // `--offline` fails before rustc reports the type error.
     let output = Command::new(cargo)
         .arg("check")
-        .arg("--offline")
         .arg("--manifest-path")
         .arg(root.path().join("Cargo.toml"))
         .env("CARGO_TARGET_DIR", probe_target())
