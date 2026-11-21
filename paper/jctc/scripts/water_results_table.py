@@ -3,8 +3,8 @@
 """Print the water hexamer against CREST from the water_v45b per-seed table.
 
 Reads data/water_v45b/water-v45b-perseed.csv (rule water_crest_fair of anneal_repro
-v4.5b) and recomputes Wilson (z=1.96), exact two-sided McNemar, and Newcombe 1998
-method 10 from the per-seed hits. Four arms on anneal 36086e98, seeds 0 to 191 at a
+v4.5b) and recomputes Wilson, exact two-sided McNemar, and Newcombe 1998 method 10
+from the per-seed hits through scripts/paired_stats.py. Four arms on anneal 36086e98, seeds 0 to 191 at a
 budget of 4000 force calls: the default hop, the hop with the budget-fair polish,
 CREST, and CREST plus the polish under the same budget (crest_fair).
 
@@ -20,12 +20,13 @@ import math
 import sys
 from dataclasses import dataclass
 from decimal import Decimal
-from fractions import Fraction
 from pathlib import Path
 from typing import NoReturn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
 
+import paired_stats
 import results_jcc
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,7 +41,6 @@ SEEDS = "tbl:sealed-rows"
 SEED_SPAN = "0-191"
 RUNS = 192
 BUDGET = 4000
-WILSON_Z = 1.96
 ANNEAL_COMMIT = "36086e988c5a71c156ffcbde152bf321a6f5ef25"
 RULE = "water_crest_fair"
 CREST_FOLDER = "crest"
@@ -91,68 +91,26 @@ def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def wilson(hits: int, n: int, z: float = WILSON_Z) -> tuple[float, float]:
-    """Wilson score interval at the campaign z, clamped to [0, 1]."""
+def wilson(hits: int, n: int) -> tuple[float, float]:
     if n <= 0:
         raise ValueError("Wilson interval needs a positive sample")
     if hits < 0 or hits > n:
         raise ValueError("hits outside 0..n")
-    probability = hits / n
-    z2 = z * z
-    denominator = 1.0 + z2 / n
-    centre = (probability + z2 / (2.0 * n)) / denominator
-    margin = z * math.sqrt(probability * (1.0 - probability) / n + z2 / (4.0 * n * n)) / denominator
-    return max(0.0, centre - margin), min(1.0, centre + margin)
+    return paired_stats.wilson(hits, n)
 
 
 def mcnemar_exact_p(arm_only: int, other_only: int) -> float:
-    """Two-sided exact McNemar p-value: twice the lower binomial tail at p=0.5, capped at 1."""
     if arm_only < 0 or other_only < 0:
         raise ValueError("discordant counts must be non-negative")
-    discordant = arm_only + other_only
-    if discordant == 0:
-        return 1.0
-    smaller = min(arm_only, other_only)
-    tail = sum(math.comb(discordant, index) for index in range(smaller + 1))
-    probability = Fraction(2 * tail, 1 << discordant)
-    return 1.0 if probability > 1 else float(probability)
+    return paired_stats.mcnemar_exact(arm_only, other_only)
 
 
 def newcombe_paired(both: int, arm_only: int, other_only: int, neither: int) -> tuple[float, float]:
-    """Newcombe 1998 method 10 for the paired hit-rate difference (arm minus other)."""
-    counts = (both, arm_only, other_only, neither)
-    if any(count < 0 for count in counts):
+    if min(both, arm_only, other_only, neither) < 0:
         raise ValueError("contingency counts must be non-negative")
-    total = sum(counts)
-    if total <= 0:
+    if both + arm_only + other_only + neither <= 0:
         raise ValueError("Newcombe interval needs a positive count")
-    arm_hits = both + arm_only
-    other_hits = both + other_only
-    arm_rate = arm_hits / total
-    other_rate = other_hits / total
-    difference = arm_rate - other_rate
-    arm_low, arm_high = wilson(arm_hits, total)
-    other_low, other_high = wilson(other_hits, total)
-    marginal_product = arm_hits * (other_only + neither) * other_hits * (arm_only + neither)
-    if marginal_product == 0:
-        phi = 0.0
-    else:
-        covariance = both * neither - arm_only * other_only
-        if covariance > 0:
-            covariance = max(covariance - total / 2.0, 0.0)
-        phi = covariance / math.sqrt(marginal_product)
-
-    def mover(left: float, right: float) -> float:
-        value = left * left - 2.0 * phi * left * right + right * right
-        if value < 0.0:
-            if value < -1e-12:
-                die(f"Newcombe radicand {value} is negative")
-            value = 0.0
-        return math.sqrt(value)
-
-    lower = difference - mover(arm_rate - arm_low, other_high - other_rate)
-    upper = difference + mover(arm_high - arm_rate, other_rate - other_low)
-    return lower, upper
+    return paired_stats.newcombe_paired(both, arm_only, other_only, neither)
 
 
 def _round6(value: float) -> float:
@@ -418,7 +376,7 @@ def main_table(keys: dict[str, str], arms: tuple[Arm, ...], folders) -> str:
         r"is an opt-in mode of the hop whose external polish is charged against that budget; CREST plus "
         r"the polish, budget-fair, runs the same polish after CREST inside the same budget "
         r"(CREST capped at 3382 calls with a polish reserve of 618, max total 3907). The interval "
-        r"of the hits is the Wilson score interval \eqref{eq:wilson} at \(z=1.96\), printed to three "
+        r"of the hits is the 95\% Wilson score interval \eqref{eq:wilson}, printed to three "
         r"decimals. An arm of the hop is "
         r"paired with CREST on each seed: both hit, only the hop, only CREST, or neither; the difference "
         r"is the hop's hit rate less CREST's, with the 95\% interval of Newcombe's method "
@@ -612,7 +570,6 @@ def values(keys: dict[str, str], arms: tuple[Arm, ...], folders) -> list[str]:
             *(repr(bound) for bound in contrast["newcombe_95_6"]),
         ]
     found += [keys["anneal_commit"][:8], keys["port_commit"][:8], "0", "191", str(RUNS), str(BUDGET), RULE]
-    found += [repr(WILSON_Z), str(WILSON_Z)]
     found += [keys.get("anneal_repro_commit", ""), keys.get("summary_json_sha256", "")[:8]]
     found += [keys.get("anneal_repro_tip", ""), keys.get("bundle_sha256", "")[:8]]
     found += [by["crest_fair"].hits, by["polish_fair"].hits, by[CREST_FOLDER].hits, by["anneal"].hits]

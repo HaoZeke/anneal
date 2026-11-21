@@ -2,7 +2,7 @@
 # Copyright (c) anneal developers
 """Generate the non-LJ (Morse) ASE panel report from its committed rows.
 
-Wall-censored misses do not enter a rank test. Does not start a search.
+Compares hits by the two-sided Fisher exact test. Does not start a search.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
+from paired_stats import fisher_exact  # noqa: E402
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
 SEEDS = tuple(range(2000, 2012))
@@ -39,14 +40,6 @@ ROW_FIELDS = (
     "wall_s", "inside_s", "outside_s", "code_revision", "host", "stop", "cap_s",
 )
 HIT_TOL = DEFAULT_HIT_TOL
-TEX_LABELS = {
-    "m38r6": "M\\(_{38}\\), \\(\\rho=6\\)",
-    "m38r14": "M\\(_{38}\\), \\(\\rho=14\\)",
-    "m55r6": "M\\(_{55}\\), \\(\\rho=6\\)",
-    "m55r14": "M\\(_{55}\\), \\(\\rho=14\\)",
-}
-MANUSCRIPT = ROOT / "paper" / "jctc" / "manuscript.tex"
-TEX_MARKS = ("% ase-nonlj table: start", "% ase-nonlj table: end")
 ASE_VERSION = "3.29.0"
 REVISION = "9a30f3190b3bb7040c675a904f8388eb68224151"
 
@@ -66,12 +59,6 @@ def median(values: list[float]) -> float:
     return type7(sorted(values), 0.5)
 
 
-def calls(row: dict[str, str]) -> float:
-    if row["evals_to_hit"]:
-        return float(row["evals_to_hit"])
-    return float(row["budget"])
-
-
 def g6(value: float) -> str:
     return f"{value:.6g}"
 
@@ -89,49 +76,7 @@ def seed_list(rows: list[dict[str, str]]) -> str:
 
 
 def fisher(hits: int, base: int) -> float:
-    row = 12
-    col = hits + base
-    total = 24
-
-    def probability(value: int) -> float:
-        return math.comb(row, value) * math.comb(row, col - value) / math.comb(total, col)
-
-    observed = probability(hits)
-    return min(
-        1.0,
-        sum(
-            probability(value)
-            for value in range(max(0, col - row), min(row, col) + 1)
-            if probability(value) <= observed * (1.0 + 1.0e-12)
-        ),
-    )
-
-
-def mann_whitney(left: list[float], right: list[float]) -> tuple[float, float]:
-    n_left, n_right = len(left), len(right)
-    pooled = sorted([(value, 0) for value in left] + [(value, 1) for value in right])
-    ranks = [0.0] * len(pooled)
-    tie_term = 0
-    index = 0
-    while index < len(pooled):
-        end = index + 1
-        while end < len(pooled) and pooled[end][0] == pooled[index][0]:
-            end += 1
-        average = 0.5 * (index + 1 + end)
-        ranks[index:end] = [average] * (end - index)
-        width = end - index
-        tie_term += width**3 - width
-        index = end
-    rank_left = sum(rank for rank, (_, arm) in zip(ranks, pooled) if arm == 0)
-    statistic = rank_left - n_left * (n_left + 1) / 2.0
-    total = n_left + n_right
-    variance = n_left * n_right / 12.0 * (
-        total + 1 - tie_term / (total * (total - 1))
-    )
-    if variance <= 0.0:
-        return statistic, 1.0
-    z = max(0.0, (abs(statistic - n_left * n_right / 2.0) - 0.5) / math.sqrt(variance))
-    return statistic, min(1.0, math.erfc(z / math.sqrt(2.0)))
+    return fisher_exact(hits, 12, base, 12)
 
 
 def wall_ratio(left: list[dict[str, str]], right: list[dict[str, str]]) -> tuple[float, float]:
@@ -140,18 +85,10 @@ def wall_ratio(left: list[dict[str, str]], right: list[dict[str, str]]) -> tuple
     return left_wall / right_wall, right_wall / left_wall
 
 
-def wall_censored(rows: list[dict[str, str]]) -> bool:
-    return any(row["stop"] == "wall" and row["hit"] == "0" for row in rows)
-
-
-def against(group: list[dict[str, str]], other: list[dict[str, str]]) -> tuple[str, str, str]:
+def against(group: list[dict[str, str]], other: list[dict[str, str]]) -> str:
     hits = sum(row["hit"] == "1" for row in group)
     base = sum(row["hit"] == "1" for row in other)
-    fisher_text = g6(fisher(hits, base))
-    if wall_censored(group) or wall_censored(other):
-        return fisher_text, "", ""
-    u_stat, mw_p = mann_whitney([calls(row) for row in group], [calls(row) for row in other])
-    return fisher_text, g6(u_stat), g6(mw_p)
+    return g6(fisher(hits, base))
 
 
 def load_rows() -> dict[str, dict[str, list[dict[str, str]]]]:
@@ -221,97 +158,6 @@ def load_identity() -> list[dict[str, str]]:
     return rows
 
 
-def show_p(p: float) -> str:
-    """Two significant figures; 1 only when p is exactly 1."""
-    if p >= 1.0:
-        return "1"
-    if p >= 0.01:
-        return f"{p:.2f}" if p >= 0.1 else f"{p:.3f}"
-    mantissa, exponent = f"{p:.1e}".split("e")
-    return f"\\({mantissa}\\times 10^{{{int(exponent)}}}\\)"
-
-
-def show_budget(budget: str) -> str:
-    mantissa, exponent = f"{int(budget):.0e}".split("e")
-    return f"\\({mantissa}\\times 10^{{{int(exponent)}}}\\)"
-
-
-def show_wall(value: float) -> str:
-    return f"{value:.3f}" if value < 100.0 else f"{value:.1f}"
-
-
-def tex_table(grouped: dict[str, dict[str, list[dict[str, str]]]]) -> str:
-    """Table tab:ase-morse: recommended against both ASE arms, Fisher on hits only."""
-    body = []
-    revisions = {row["code_revision"] for s in SYSTEMS for row in grouped[s]["recommended"]}
-    if len(revisions) != 1:
-        raise SystemExit(f"recommended rows carry more than one revision: {sorted(revisions)}")
-    for system in SYSTEMS:
-        _, _, budget, _, _ = SPEC[system]
-        arms = grouped[system]
-        if any(row["stop"] == "wall" for row in arms["recommended"]):
-            raise SystemExit(f"{system}: a recommended row stopped at the wall cap")
-        if not all(row["stop"] == "wall" for arm in ASE_ARMS for row in arms[arm]):
-            raise SystemExit(f"{system}: an ASE row did not stop at the wall cap")
-        caps = {row["cap_s"] for arm in ASE_ARMS for row in arms[arm]}
-        slowest = max(float(row["wall_s"]) for row in arms["for_cluster"])
-        if len(caps) != 1 or abs(float(next(iter(caps))) - 3.0 * slowest) > 1.0e-6:
-            raise SystemExit(f"{system}: the ASE wall cap is not three times the slowest for_cluster wall")
-
-        def hits(arm: str) -> int:
-            return sum(row["hit"] == "1" for row in arms[arm])
-
-        body.append(" & ".join([
-            TEX_LABELS[system], show_budget(budget), f"{float(caps.pop()):.3f}",
-            f"{hits('recommended')}/12", f"{hits('ase_bh')}/12", f"{hits('ase_mh')}/12",
-            show_wall(median([float(row["wall_s"]) for row in arms["recommended"]])),
-            show_wall(median([float(row["wall_s"]) for row in arms["ase_bh"]])),
-            show_wall(median([float(row["wall_s"]) for row in arms["ase_mh"]])),
-            show_p(fisher(hits("recommended"), hits("ase_bh"))),
-            show_p(fisher(hits("recommended"), hits("ase_mh"))),
-        ]) + " \\\\")
-    return "\n".join([
-        "\\begin{table}",
-        "\\caption{This work against the basin hopping (BH) and minima hopping",
-        f"(MH) of ASE {ASE_VERSION} on Morse clusters.",
-        f"This work is anneal \\texttt{{{revisions.pop()[:8]}}} at the length",
-        "scale of the Morse pair.",
-        "Seeds 2000--2011, one core, budget in force calls.",
-        "Cap is the wall in seconds at which a BH or MH run stops, three times",
-        "the slowest wall of the cluster-preset arm of the panel.",
-        "Every BH and MH run ended at the cap, as a miss with fewer calls than",
-        "the budget, and no run of this work did.",
-        "Wall is the median over the 12 runs of the seconds each run took;",
-        "a BH or MH run is counted at its wall, which lies at the cap.",
-        "\\(p_\\mathrm{BH}\\) and \\(p_\\mathrm{MH}\\) are the two-sided Fisher",
-        "exact test on hits against each ASE arm.}",
-        "\\label{tab:ase-morse}",
-        "\\centering",
-        "\\footnotesize",
-        "\\setlength{\\tabcolsep}{3pt}",
-        "\\begin{tabular}{@{}lrrrrrrrrrr@{}}",
-        "\\toprule",
-        " & & & \\multicolumn{3}{c}{Hits} & \\multicolumn{3}{c}{Wall (s)} & & \\\\",
-        "\\cmidrule(lr){4-6}\\cmidrule(lr){7-9}",
-        "Cluster & Budget & Cap & This work & BH & MH & This work & BH & MH & "
-        "\\(p_\\mathrm{BH}\\) & \\(p_\\mathrm{MH}\\) \\\\",
-        "\\midrule",
-        *body,
-        "\\bottomrule",
-        "\\end{tabular}",
-        "\\end{table}",
-    ])
-
-
-def splice(text: str, block: str) -> str:
-    start, end = TEX_MARKS
-    if text.count(start) != 1 or text.count(end) != 1:
-        raise SystemExit(f"{MANUSCRIPT} needs one '{start}' and one '{end}'")
-    head, rest = text.split(start, 1)
-    _old, tail = rest.split(end, 1)
-    return f"{head}{start}\n{block}\n{end}{tail}"
-
-
 def group_revision(group: list[dict[str, str]]) -> str:
     found = {row["code_revision"] for row in group}
     if len(found) != 1:
@@ -321,14 +167,14 @@ def group_revision(group: list[dict[str, str]]) -> str:
 
 def main() -> None:
     flags = sys.argv[1:]
-    if any(flag not in ("--check", "--tex") for flag in flags) or len(set(flags)) != len(flags):
-        raise SystemExit("usage: summarize.py [--check] [--tex]")
+    if any(flag != "--check" for flag in flags) or len(set(flags)) != len(flags):
+        raise SystemExit("usage: summarize.py [--check]")
     grouped = load_rows()
     identity = load_identity()
     revisions = sorted({row["code_revision"] for s in SYSTEMS for a in ARMS for row in grouped[s][a]})
     summary_header = (
         "system,arm,hits,n,median_best,gap_to_reference,median_wall_s,median_inside_s,median_outside_s,"
-        "fisher_p_bh,mann_whitney_U_bh,mann_whitney_p_bh,fisher_p_mh,mann_whitney_U_mh,mann_whitney_p_mh,"
+        "fisher_p_bh,fisher_p_mh,"
         "wall_over_bh,wall_over_mh,wall_stops,wall_cap_s,code_revision,host"
     )
     summary_path = ROOT / "bench" / "ase-nonlj" / "summary.csv"
@@ -384,10 +230,10 @@ def main() -> None:
     )
     vs_lines = [
         "",
-        "## Fisher and Mann-Whitney against ASE arms",
+        "## Fisher against ASE arms",
         "",
-        "| system | comparison | hits | Fisher p | U | Mann-Whitney p | wall ratio | inverse ratio |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| system | comparison | hits | Fisher p | wall ratio | inverse ratio |",
+        "| --- | --- | --- | --- | --- | --- |",
     ]
 
     for system in SYSTEMS:
@@ -407,15 +253,15 @@ def main() -> None:
             hit_stops = sum(row["stop"] == "hit" for row in group)
             budget_stops = sum(row["stop"] == "budget" for row in group)
             wall_stops = sum(row["stop"] == "wall" for row in group)
-            f_bh, u_bh, mw_bh = against(group, grouped[system]["ase_bh"])
-            f_mh, u_mh, mw_mh = against(group, grouped[system]["ase_mh"])
+            f_bh = against(group, grouped[system]["ase_bh"])
+            f_mh = against(group, grouped[system]["ase_mh"])
             w_bh, inv_bh = wall_ratio(group, grouped[system]["ase_bh"])
             w_mh, inv_mh = wall_ratio(group, grouped[system]["ase_mh"])
             arm_cap = "" if arm == "for_cluster" else cap
             summary_lines.append(
                 f"{system},{arm},{hits},12,{best:.8f},{best - reference:.8f},"
                 f"{wall:.6f},{inside:.6f},{outside:.6f},"
-                f"{f_bh},{u_bh},{mw_bh},{f_mh},{u_mh},{mw_mh},"
+                f"{f_bh},{f_mh},"
                 f"{w_bh:.6f},{w_mh:.6f},{wall_stops},{arm_cap},{group_revision(group)},bench"
             )
             readme.append(
@@ -424,15 +270,14 @@ def main() -> None:
                 f"{hit_stops}/{budget_stops}/{wall_stops} | {arm_cap} |"
             )
             if arm in ("for_cluster", "recommended"):
-                for other_arm, (fp, u_val, mwp, wr, ir) in (
-                    ("ase_bh", (f_bh, u_bh, mw_bh, w_bh, inv_bh)),
-                    ("ase_mh", (f_mh, u_mh, mw_mh, w_mh, inv_mh)),
+                for other_arm, (fp, wr, ir) in (
+                    ("ase_bh", (f_bh, w_bh, inv_bh)),
+                    ("ase_mh", (f_mh, w_mh, inv_mh)),
                 ):
                     other_hits = sum(row["hit"] == "1" for row in grouped[system][other_arm])
                     vs_lines.append(
                         f"| {system} | {LABEL[arm]} vs {LABEL[other_arm]} | {hits}/12 vs {other_hits}/12 | "
-                        f"{fp} | {u_val or 'not estimated'} | {mwp or 'not estimated'} | "
-                        f"{wr:.6f} | {ir:.6f} |"
+                        f"{fp} | {wr:.6f} | {ir:.6f} |"
                     )
 
     readme.extend(vs_lines)
@@ -442,10 +287,7 @@ def main() -> None:
             "Medians are Hyndman-Fan type 7. Wall ratios are ratios of arm medians.",
             "The Rust and NumPy random generators do not make a shared starting",
             "geometry from the same numeric seed, so seed labels are not treated as pairs.",
-            "Fisher is two-sided exact. Mann-Whitney is two-sided asymptotic with",
-            "the tie correction and the continuity correction. It is not estimated",
-            "when either arm has wall-censored misses; assigning those misses the",
-            "larger paper budget would manufacture observations that were never run.",
+            "Fisher is two-sided exact.",
             "Inside is time in the potential. Outside is the rest of the wall.",
             "",
         ]
@@ -455,8 +297,6 @@ def main() -> None:
         summary_path: "\n".join(summary_lines) + "\n",
         out / "README.md": "\n".join(readme),
     }
-    if "--tex" in flags:
-        outputs[MANUSCRIPT] = splice(MANUSCRIPT.read_text(), tex_table(grouped))
     if "--check" in flags:
         stale = [
             str(path.relative_to(ROOT))

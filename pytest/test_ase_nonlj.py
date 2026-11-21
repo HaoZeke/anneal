@@ -26,30 +26,19 @@ def test_rows_are_complete_and_generated_reports_are_current():
             tuple(int(row["seed"]) for row in rows) == SUMMARY.SEEDS
             for rows in grouped[system].values()
         )
-        assert all(SUMMARY.wall_censored(grouped[system][arm]) for arm in SUMMARY.ASE_ARMS)
-    subprocess.run(["python3", str(SCRIPT), "--check", "--tex"], cwd=ROOT, check=True)
+        assert all(row["stop"] == "wall" for arm in SUMMARY.ASE_ARMS for row in grouped[system][arm])
+    subprocess.run(["python3", str(SCRIPT), "--check"], cwd=ROOT, check=True)
 
 
-def test_wall_censored_ase_comparisons_have_no_rank_estimate():
-    with (ROOT / "bench" / "ase-nonlj" / "summary.csv").open(newline="") as handle:
-        rows = list(csv.DictReader(handle))
-    assert rows
-    for row in rows:
-        assert row["mann_whitney_U_bh"] == ""
-        assert row["mann_whitney_p_bh"] == ""
-        assert row["mann_whitney_U_mh"] == ""
-        assert row["mann_whitney_p_mh"] == ""
+def test_summary_and_report_carry_no_rank_test():
+    text = (ROOT / "bench" / "ase-nonlj" / "summary.csv").read_text()
+    assert "mann_whitney" not in text.splitlines()[0]
+    assert "Mann-Whitney" not in (ROOT / "bench" / "ase-nonlj" / "README.md").read_text()
+    assert not hasattr(SUMMARY, "mann_whitney")
 
 
-def test_exact_and_rank_statistics_match_the_panel_definitions():
+def test_fisher_matches_the_panel_definition():
     assert SUMMARY.fisher(0, 10) == pytest.approx(6.730380752335834e-05)
-    statistic, probability = SUMMARY.mann_whitney(
-        [400_000.0] * 12,
-        [336_650, 141_347, 164_437, 10_413, 307_562, 203_015,
-         400_000, 349_934, 164_167, 19_727, 400_000, 339_051],
-    )
-    assert statistic == 132
-    assert probability == pytest.approx(0.0001253087278839309)
 
 
 def test_wall_ratios_do_not_pair_independent_seed_labels():

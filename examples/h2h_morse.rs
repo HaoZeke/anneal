@@ -11,6 +11,8 @@
 //! it, `run` draws the start. `H2H_PAIR_SCALE=1` uses
 //! `Config::recommended_for_pair` in place of `Config::recommended`.
 //! `H2H_PLATEAU_HEAT=1` heats a stalled walk. Unset, both leave the preset.
+//! `H2H_KNOCKOUT`, a comma list of `prior_soap` and `move_choice`, switches
+//! those parts off; unset or empty, it leaves the preset.
 //!
 //! The potential is the in-tree Morse pair, Doye and Wales' form with
 //! `epsilon = 1` and `r_0 = 1`. `rho` is the range. A hit is a quenched energy at
@@ -18,7 +20,7 @@
 //! the potential.
 
 use anneal_core::methods::cluster_hopping::{
-    Config, ContinuousSymmetry, Ledger, SoapProposalMode, random_cluster_in_radius,
+    Config, ContinuousSymmetry, Knockouts, Ledger, SoapProposalMode, random_cluster_in_radius,
     run_with_gradient,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
@@ -193,6 +195,17 @@ fn cmd_run(args: &[String]) -> i32 {
     // `1` heats the walk on each call plateau. Unset leaves the preset.
     if std::env::var("H2H_PLATEAU_HEAT").is_ok_and(|value| value == "1") {
         cfg.plateau_heat = true;
+    }
+    // A comma list of parts to switch off, `Knockouts::parse`. Unset or
+    // empty leaves the preset.
+    if let Ok(text) = std::env::var("H2H_KNOCKOUT") {
+        match Knockouts::parse(&text) {
+            Ok(knockouts) => cfg.apply_knockouts(knockouts),
+            Err(err) => {
+                eprintln!("H2H_KNOCKOUT: {err}");
+                return 1;
+            }
+        }
     }
     let start = if let Some(path) = args.get(3) {
         match read_coords(path) {

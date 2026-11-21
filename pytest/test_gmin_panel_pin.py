@@ -22,14 +22,16 @@ def _assign(text: str, name: str) -> str:
     return match.group(1)
 
 
-def test_the_runner_pins_the_same_snapshot_as_the_build() -> None:
+def test_the_runner_pins_the_same_dated_tarball_as_the_build() -> None:
     script = BUILD.read_text()
     panel = PANEL.read_text()
-    revision = _assign(script, "REV")
+    date = _assign(script, "TARBALL_DATE")
     digest = _assign(script, "TARBALL_SHA256")
-    assert _assign(script, "SNAPSHOT") == "2026-11-19"
-    assert f'GMIN_PIN = "{revision}"' in panel
+    assert date == "2026-11-19"
+    assert f'GMIN_TARBALL_DATE = "{date}"' in panel
     assert f'GMIN_TARBALL_SHA256 = "{digest}"' in panel
+    assert "SVNREV" not in script
+    assert "\nREV=" not in script
     assert 'GMIN_REV = "aac1548a8aec13b53ad12a8d6904625081685d2e"' in panel
 
 

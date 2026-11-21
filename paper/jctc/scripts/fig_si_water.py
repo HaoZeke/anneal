@@ -3,9 +3,9 @@
 """Draw fig:si-water: the TIP4P minima of tbl:tip4p and the archived hexamers of each class.
 
 (a) The TIP4P global minimum of each (H2O)n, n = 6 to 21, of the Cambridge Cluster
-Database, at the published energy. (b, c) The lowest archived minimum of each hexamer
-class at GFN2-xTB and at PBE/6-31G*. Each is read by system_visuals.py, which holds its
-files to their digests, and drawn by xyzrender.
+Database, at the published energy. (b, c) The lowest minimum of each hexamer class at
+GFN2-xTB, relaxed with xtb 6.7.1, and the lowest archived one at PBE/6-31G*. Each is read
+by system_visuals.py, which holds its files to their digests, and drawn by xyzrender.
 
 Usage: fig_si_water.py [--data DIR] out.pdf
 """
