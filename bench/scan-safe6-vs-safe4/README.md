@@ -82,15 +82,16 @@ not the id itself. No quick flag. No budget, reference, or search
 setting is changed after this file. `H2H_*` and `ANNEAL_*` variables
 are removed from the measured environment so they cannot retune a run.
 
-The orchestrator is pinned to the other cores so its sampling does
-not share core 0 with the measured process.
+The orchestrator is pinned to the other cores so its work does not
+share core 0 with the measured process.
 
 ## Rows, journal, exits
 
 Each row stores the best energy (the value that decides the hit), the
 final energy, and the process exit code, plus calls to the hit,
 charged calls, the trajectory digest, wall time, time inside the
-potential, time outside it, and the three memory figures below.
+potential, time outside it, the nearest-index call count, and the
+three memory figures below.
 
 `calls` is the charged count at the first improving record that hits,
 or the budget when the run misses. `charged` is the ledger spend at
@@ -140,27 +141,42 @@ inconclusive for the cell.
    `calls`, and in the trajectory digest. Every B replicate of a seed
    must match every A replicate of that seed on all three. This bar
    gates, because the commits claim no change of behaviour.
+4. Safe path exercise. Every B run must report a nonzero count of
+   calls into `Cloud::nearest_index` from symmetrisation on a stall.
+   A zero or missing count fails this bar. The same counter is
+   reported for A and A2 but does not gate for those arms.
 
-Memory is recorded three ways. The memory bar uses the peak `RssAnon`
-sampled from process start until exit, as a median ratio with the same
-bootstrap comparison as the time bar and with no 1.10 allowance. It
-fails when the lower end of the B/A interval lies above the upper end
-of the A2/A interval. `ru_maxrss` and `VmHWM` are reported and never
-gate. A run whose process was still alive when the orchestrator
-attached again is waited on and is not launched a second time. Its
-`RssAnon` sample did not cover the whole process, so the memory bar
-for that cell is inconclusive. The other bars still use the row.
+Memory is recorded three ways. After exec, the benchmark process
+polls its own status from before the measured search until after it
+finishes and emits its peak `RssAnon`. This self-reported value is the
+only memory gate. It is analysed as a median ratio with the same
+bootstrap comparison as the time bar and with no 1.10 allowance. The
+bar fails when the lower end of the B/A interval lies above the upper
+end of the A2/A interval. `ru_maxrss` and `VmHWM` are reported and
+never gate.
+
+The arm preparation step adds the same relaxed call counter to each
+arm before its release build. The benchmark process reads that
+counter before and after the search and emits the difference. The
+preparation refuses an unexpected source shape, so a new arm cannot
+silently omit or relocate the counted call.
 
 ## Analysis
 
 `analyze.py` reads `rows.csv` and `journal.log` and writes
-`summary.csv` and `REPORT.md`. Each bar has its own verdict. A bar
-fails if any cell fails it, is inconclusive if any cell is
-inconclusive and none fail, and passes otherwise.
+`summary.csv`, `REPORT.md`, and `RESTARTS.md`. It never writes this
+file. This registration and the analysis implementation are frozen
+in the harness commit before any revised data is collected. Each bar
+has its own verdict. A bar fails if any cell fails it, is
+inconclusive if any cell is inconclusive and none fail, and passes
+otherwise.
 
-## Recorded restarts
+## Log archive
 
-<!-- restart-record -->
-The orchestrator was not restarted.
-Every started run has an end line.
-<!-- end-restart-record -->
+Only selected text logs are archived. Before the archive is made,
+machine-local directory prefixes, inherited-environment notices, and
+environment values longer than 16 characters are scrubbed from a
+staging copy. A second scan must find none of them. Environment dumps
+are not collected. The archive fixes owner and group to numeric zero
+and uses numeric ownership. All staged text and CSV output is LF-only;
+CSV writers use an explicit newline terminator.

@@ -19,10 +19,78 @@ use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use sha2::{Digest, Sha256};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
+use std::fs;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::thread;
+use std::time::{Duration, Instant};
 
 const HIT_TOL: f64 = anneal_core::DEFAULT_HIT_TOL;
+
+#[derive(Clone, Copy)]
+struct MemoryPeak {
+    rss_anon_kb: u64,
+    vm_hwm_kb: u64,
+}
+
+struct MemorySampler {
+    stop: Arc<AtomicBool>,
+    worker: thread::JoinHandle<MemoryPeak>,
+}
+
+impl MemorySampler {
+    fn start() -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let worker_stop = Arc::clone(&stop);
+        let worker = thread::spawn(move || {
+            let mut peak = MemoryPeak {
+                rss_anon_kb: 0,
+                vm_hwm_kb: 0,
+            };
+            loop {
+                let sample = read_self_status();
+                peak.rss_anon_kb = peak.rss_anon_kb.max(sample.rss_anon_kb);
+                peak.vm_hwm_kb = peak.vm_hwm_kb.max(sample.vm_hwm_kb);
+                if worker_stop.load(Ordering::Acquire) {
+                    return peak;
+                }
+                thread::sleep(Duration::from_millis(1));
+            }
+        });
+        Self { stop, worker }
+    }
+
+    fn finish(self) -> MemoryPeak {
+        self.stop.store(true, Ordering::Release);
+        self.worker.join().expect("memory sampler")
+    }
+}
+
+fn read_self_status() -> MemoryPeak {
+    let text = fs::read_to_string("/proc/self/status").expect("read own process status");
+    let mut sample = MemoryPeak {
+        rss_anon_kb: 0,
+        vm_hwm_kb: 0,
+    };
+    for line in text.lines() {
+        if let Some(value) = line.strip_prefix("RssAnon:") {
+            sample.rss_anon_kb = value
+                .split_whitespace()
+                .next()
+                .expect("RssAnon value")
+                .parse()
+                .expect("numeric RssAnon");
+        } else if let Some(value) = line.strip_prefix("VmHWM:") {
+            sample.vm_hwm_kb = value
+                .split_whitespace()
+                .next()
+                .expect("VmHWM value")
+                .parse()
+                .expect("numeric VmHWM");
+        }
+    }
+    sample
+}
 
 #[derive(Clone, Copy)]
 enum Kind {
@@ -221,14 +289,24 @@ fn trajectory_digest(outcome: &Outcome, calls: usize) -> String {
     format!("{:x}", hasher.finalize())
 }
 
-fn emit(spec: Spec, seed: u64, hit: bool, calls: usize, outcome: &Outcome, wall_s: f64, inside_s: f64) {
+fn emit(
+    spec: Spec,
+    seed: u64,
+    hit: bool,
+    calls: usize,
+    outcome: &Outcome,
+    wall_s: f64,
+    inside_s: f64,
+    nearest_index_calls: u64,
+    memory: MemoryPeak,
+) {
     let outside_s = (wall_s - inside_s).max(0.0);
     let digest = trajectory_digest(outcome, calls);
     println!(
-        "cell,seed,budget,reference,hit,calls,charged,wall,inside_s,outside_s,best,best_bits,final,final_bits,trajectory_sha256"
+        "cell,seed,budget,reference,hit,calls,charged,wall,inside_s,outside_s,best,best_bits,final,final_bits,trajectory_sha256,nearest_index_calls,rss_anon_peak_kb,vm_hwm_kb"
     );
     println!(
-        "{cell},{seed},{budget},{reference:?},{hit},{calls},{charged},{wall_s:.9},{inside_s:.9},{outside_s:.9},{best:?},{best_bits},{final:?},{final_bits},{digest}",
+        "{cell},{seed},{budget},{reference:?},{hit},{calls},{charged},{wall_s:.9},{inside_s:.9},{outside_s:.9},{best:?},{best_bits},{final:?},{final_bits},{digest},{nearest_index_calls},{rss_anon_peak_kb},{vm_hwm_kb}",
         cell = std::env::args().nth(2).unwrap(),
         budget = spec.budget,
         reference = spec.reference,
@@ -238,6 +316,8 @@ fn emit(spec: Spec, seed: u64, hit: bool, calls: usize, outcome: &Outcome, wall_
         best_bits = format!("{:016x}", outcome.best.to_bits()),
         final = outcome.final_energy,
         final_bits = format!("{:016x}", outcome.final_energy.to_bits()),
+        rss_anon_peak_kb = memory.rss_anon_kb,
+        vm_hwm_kb = memory.vm_hwm_kb,
     );
 }
 
@@ -266,6 +346,8 @@ fn main() {
             println!("{:?}", spec.reference);
         }
         "run" => {
+            let memory = MemorySampler::start();
+            let nearest_before = anneal_core::symmetrise::nearest_index_call_count();
             let cell = args.get(1).expect("run needs a cell");
             let seed: u64 = args
                 .get(2)
@@ -296,7 +378,20 @@ fn main() {
                 }
             };
             let (hit, calls) = calls_to_hit(&outcome, spec);
-            emit(spec, seed, hit, calls, &outcome, wall_s, inside_s);
+            let nearest_index_calls =
+                anneal_core::symmetrise::nearest_index_call_count() - nearest_before;
+            let memory = memory.finish();
+            emit(
+                spec,
+                seed,
+                hit,
+                calls,
+                &outcome,
+                wall_s,
+                inside_s,
+                nearest_index_calls,
+                memory,
+            );
         }
         other => {
             eprintln!("unknown command {other}");

@@ -14,7 +14,6 @@ import hashlib
 import os
 import subprocess
 import sys
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -80,6 +79,7 @@ FIELDS = [
     "final",
     "final_bits",
     "trajectory_sha256",
+    "nearest_index_calls",
     "wall",
     "inside_s",
     "outside_s",
@@ -111,6 +111,9 @@ METRIC_FIELDS = [
     "final",
     "final_bits",
     "trajectory_sha256",
+    "nearest_index_calls",
+    "rss_anon_peak_kb",
+    "vm_hwm_kb",
 ]
 
 
@@ -254,22 +257,6 @@ def parse_journal(path: Path) -> tuple[dict[str, dict[str, str]], set[str]]:
     return starts, ends
 
 
-def read_status(pid: int) -> dict[str, int | str] | None:
-    try:
-        text = Path(f"/proc/{pid}/status").read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return None
-    found: dict[str, int | str] = {}
-    for line in text.splitlines():
-        if line.startswith("RssAnon:"):
-            found["RssAnon"] = int(line.split()[1])
-        elif line.startswith("VmHWM:"):
-            found["VmHWM"] = int(line.split()[1])
-        elif line.startswith("State:"):
-            found["State"] = line.split()[1]
-    return found
-
-
 def process_matches(pid: int, run: dict[str, str]) -> bool:
     try:
         raw = Path(f"/proc/{pid}/cmdline").read_bytes()
@@ -320,22 +307,6 @@ def reap(pid: int) -> tuple[int, int]:
         raise RuntimeError(f"waited on {waited} while sampling {pid}")
     exit_code = os.waitstatus_to_exitcode(status)
     return exit_code, int(usage.ru_maxrss)
-
-
-def sample_until_exit(pid: int) -> tuple[int, int, int, int]:
-    peak_anon = 0
-    peak_hwm = 0
-    while True:
-        status = read_status(pid)
-        if status is None:
-            break
-        peak_anon = max(peak_anon, int(status.get("RssAnon", 0)))
-        peak_hwm = max(peak_hwm, int(status.get("VmHWM", 0)))
-        if str(status.get("State", "")).startswith("Z"):
-            break
-        time.sleep(0.01)
-    exit_code, max_rss = reap(pid)
-    return exit_code, peak_anon, peak_hwm, max_rss
 
 
 def launch(
@@ -429,8 +400,6 @@ def write_provenance(
 def finish_run(
     run: dict[str, str],
     exit_code: int,
-    peak_anon: int,
-    peak_hwm: int,
     max_rss: int,
     stdout_path: Path,
     rows_path: Path,
@@ -438,7 +407,6 @@ def finish_run(
     machine_id: str,
     trees: dict[str, str],
     hashes: dict[str, str],
-    rss_full: str,
 ) -> None:
     parsed = parse_metrics(stdout_path, run["cell"], run["seed"])
     row = {key: "" for key in FIELDS}
@@ -451,10 +419,8 @@ def finish_run(
             "round": run["round"],
             "exit": str(exit_code),
             "parse_ok": "1" if parsed is not None else "0",
-            "rss_anon_peak_kb": str(peak_anon),
-            "vm_hwm_kb": str(peak_hwm),
             "ru_maxrss_kb": str(max_rss),
-            "rss_full": rss_full,
+            "rss_full": "1" if parsed is not None else "0",
             "core": "0",
             "machine_id": machine_id,
             "library_tree": trees[run["arm"]],
@@ -517,12 +483,10 @@ def main(argv: list[str] | None = None) -> int:
         if started is not None:
             pid_text = started.get("pid", "")
             if pid_text.isdigit() and process_matches(int(pid_text), run):
-                exit_code, peak_anon, peak_hwm, max_rss = sample_until_exit(int(pid_text))
+                exit_code, max_rss = reap(int(pid_text))
                 finish_run(
                     run,
                     exit_code,
-                    peak_anon,
-                    peak_hwm,
                     max_rss,
                     stdout_path,
                     args.rows,
@@ -530,7 +494,6 @@ def main(argv: list[str] | None = None) -> int:
                     machine_id,
                     trees,
                     hashes,
-                    "0",
                 )
                 done_rows.add(key)
                 print(f"[{ordinal}/{len(runs)}] adopted {run['run']} exit={exit_code}", flush=True)
@@ -548,12 +511,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         pid = launch(bins[run["arm"]], run, env, stdout_path, stderr_path)
         journal_line(args.journal, event="pid", run=run["run"], pid=str(pid))
-        exit_code, peak_anon, peak_hwm, max_rss = sample_until_exit(pid)
+        exit_code, max_rss = reap(pid)
         finish_run(
             run,
             exit_code,
-            peak_anon,
-            peak_hwm,
             max_rss,
             stdout_path,
             args.rows,
@@ -561,11 +522,10 @@ def main(argv: list[str] | None = None) -> int:
             machine_id,
             trees,
             hashes,
-            "1",
         )
         done_rows.add(key)
         print(
-            f"[{ordinal}/{len(runs)}] {run['run']} exit={exit_code} rss_anon_kb={peak_anon}",
+            f"[{ordinal}/{len(runs)}] {run['run']} exit={exit_code}",
             flush=True,
         )
         append_text(
@@ -575,7 +535,7 @@ def main(argv: list[str] | None = None) -> int:
 
     import analyze
 
-    analyze.write_report(args.rows, args.journal, HERE / "README.md")
+    analyze.write_report(args.rows, args.journal)
     return 0
 
 

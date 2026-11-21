@@ -63,6 +63,8 @@ SUMMARY_FIELDS = [
     "time_verdict",
     "bit_seeds",
     "bit_verdict",
+    "nearest_index_calls_min_b",
+    "path_verdict",
     "rss_ba",
     "rss_ba_lo",
     "rss_ba_hi",
@@ -251,21 +253,6 @@ def journal_notes(path: Path) -> list[str]:
     return lines
 
 
-def replace_restart_section(readme: Path, notes: list[str]) -> None:
-    text = readme.read_text(encoding="utf-8")
-    begin = "<!-- restart-record -->"
-    end = "<!-- end-restart-record -->"
-    if begin not in text or end not in text:
-        raise ValueError("readme is missing the restart markers")
-    body = "\n".join(notes)
-    pre, rest = text.split(begin, 1)
-    _, post = rest.split(end, 1)
-    updated = f"{pre}{begin}\n{body}\n{end}{post}"
-    if not updated.endswith("\n"):
-        updated += "\n"
-    readme.write_text(updated, encoding="utf-8", newline="\n")
-
-
 def rollup(verdicts: list[str]) -> str:
     if any(item == "fail" for item in verdicts):
         return "FAIL"
@@ -288,6 +275,12 @@ def analyse_cell(
     expected = 8 * len(SEEDS)
     # Four A rounds, two B rounds, two A2 rounds, six seeds.
     bad_exit = [row for row in present if row.get("exit") != "0" or row.get("parse_ok") != "1"]
+    missing_path = any(
+        row.get("arm") == "B"
+        and row.get("exit") == "0"
+        and not row.get("nearest_index_calls")
+        for row in present
+    )
     missing = expected - len(present)
     bad_charge = False
     for row in present:
@@ -315,6 +308,8 @@ def analyse_cell(
             "time_verdict": "inconclusive",
             "bit_seeds": "",
             "bit_verdict": "inconclusive",
+            "nearest_index_calls_min_b": "",
+            "path_verdict": "fail" if missing_path else "inconclusive",
             "rss_ba": "",
             "rss_ba_lo": "",
             "rss_ba_hi": "",
@@ -380,17 +375,17 @@ def analyse_cell(
             bit_ok += 1
     bit_verdict = "pass" if bit_ok == len(SEEDS) else "fail"
 
-    rss_verdict = "pass"
-    rss_point = rss_lo = rss_hi = rss_a2_lo = rss_a2_hi = math.nan
-    partial = any(row.get("rss_full") != "1" for row in present)
-    if partial:
-        rss_verdict = "inconclusive"
-    else:
-        rss = {arm: samples(arm, lambda row: float(row["rss_anon_peak_kb"])) for arm in ARMS}
-        rss_point, rss_lo, rss_hi = bootstrap_ratio(rss["B"], rss["A"], rng)
-        _, rss_a2_lo, rss_a2_hi = bootstrap_ratio(rss["A2"], rss["A"], rng)
-        if rss_lo > rss_a2_hi:
-            rss_verdict = "fail"
+    path_counts = samples("B", lambda row: float(row["nearest_index_calls"]))
+    path_min = min(path_counts)
+    path_verdict = "pass" if path_min > 0 else "fail"
+
+    rss = {
+        arm: samples(arm, lambda row: float(row["rss_anon_peak_kb"]))
+        for arm in ARMS
+    }
+    rss_point, rss_lo, rss_hi = bootstrap_ratio(rss["B"], rss["A"], rng)
+    _, rss_a2_lo, rss_a2_hi = bootstrap_ratio(rss["A2"], rss["A"], rng)
+    rss_verdict = "fail" if rss_lo > rss_a2_hi else "pass"
 
     def ratio_of(column: str) -> float:
         num = samples("B", lambda row, column=column: float(row[column]))
@@ -413,18 +408,20 @@ def analyse_cell(
         "time_verdict": time_verdict,
         "bit_seeds": f"{bit_ok}/{len(SEEDS)}",
         "bit_verdict": bit_verdict,
-        "rss_ba": "" if partial else fmt(rss_point, 4),
-        "rss_ba_lo": "" if partial else fmt(rss_lo, 4),
-        "rss_ba_hi": "" if partial else fmt(rss_hi, 4),
-        "rss_a2a_lo": "" if partial else fmt(rss_a2_lo, 4),
-        "rss_a2a_hi": "" if partial else fmt(rss_a2_hi, 4),
+        "nearest_index_calls_min_b": fmt(path_min, 8),
+        "path_verdict": path_verdict,
+        "rss_ba": fmt(rss_point, 4),
+        "rss_ba_lo": fmt(rss_lo, 4),
+        "rss_ba_hi": fmt(rss_hi, 4),
+        "rss_a2a_lo": fmt(rss_a2_lo, 4),
+        "rss_a2a_hi": fmt(rss_a2_hi, 4),
         "rss_verdict": rss_verdict,
         "ru_maxrss_ba": fmt(ratio_of("ru_maxrss_kb"), 4),
         "vm_hwm_ba": fmt(ratio_of("vm_hwm_kb"), 4),
     }
 
 
-def write_report(rows_path: Path, journal_path: Path, readme_path: Path) -> None:
+def write_report(rows_path: Path, journal_path: Path) -> None:
     rows = load_rows(rows_path)
     grouped: dict[str, dict[tuple[str, str], list[dict[str, str]]]] = {
         cell: defaultdict(list) for cell in CELLS
@@ -455,6 +452,7 @@ def write_report(rows_path: Path, journal_path: Path, readme_path: Path) -> None
         "hits": rollup([row["hits_verdict"] for row in summary]),
         "time": rollup([row["time_verdict"] for row in summary]),
         "bits": rollup([row["bit_verdict"] for row in summary]),
+        "path": rollup([row["path_verdict"] for row in summary]),
         "rss": rollup([row["rss_verdict"] for row in summary]),
     }
     lines = [
@@ -467,12 +465,13 @@ def write_report(rows_path: Path, journal_path: Path, readme_path: Path) -> None
         f"- Hits: {bars['hits']}",
         f"- Time outside the potential per call: {bars['time']}",
         f"- Bit identity: {bars['bits']}",
+        f"- Safe path exercise: {bars['path']}",
         f"- Peak RssAnon: {bars['rss']}",
         "",
         "`ru_maxrss` and `VmHWM` ratios are in the table and do not gate.",
         "",
-        "| cell | hits A | hits B | Fisher p | MWU p | hits | B/A outside | outside 95% | A2/A 95% | time | bits | B/A RssAnon | RssAnon 95% | A2/A RssAnon | rss | ru_maxrss B/A | VmHWM B/A |",
-        "| --- | ---: | ---: | ---: | ---: | --- | ---: | --- | --- | --- | --- | ---: | --- | --- | --- | ---: | ---: |",
+        "| cell | hits A | hits B | Fisher p | MWU p | hits | B/A outside | outside 95% | A2/A 95% | time | bits | min B path calls | path | B/A RssAnon | RssAnon 95% | A2/A RssAnon | rss | ru_maxrss B/A | VmHWM B/A |",
+        "| --- | ---: | ---: | ---: | ---: | --- | ---: | --- | --- | --- | --- | ---: | --- | ---: | --- | --- | --- | ---: | ---: |",
     ]
     for row in summary:
         outside_ci = (
@@ -492,7 +491,7 @@ def write_report(rows_path: Path, journal_path: Path, readme_path: Path) -> None
             f"{row['rss_a2a_lo']} .. {row['rss_a2a_hi']}" if row["rss_a2a_lo"] else ""
         )
         lines.append(
-            "| {cell} | {hits_a} | {hits_b} | {fisher_p} | {mwu_p} | {hits_verdict} | {outside_ba} | {outside_ci} | {a2_ci} | {time_verdict} | {bit_seeds} {bit_verdict} | {rss_ba} | {rss_ci} | {rss_a2} | {rss_verdict} | {ru_maxrss_ba} | {vm_hwm_ba} |".format(
+            "| {cell} | {hits_a} | {hits_b} | {fisher_p} | {mwu_p} | {hits_verdict} | {outside_ba} | {outside_ci} | {a2_ci} | {time_verdict} | {bit_seeds} {bit_verdict} | {nearest_index_calls_min_b} | {path_verdict} | {rss_ba} | {rss_ci} | {rss_a2} | {rss_verdict} | {ru_maxrss_ba} | {vm_hwm_ba} |".format(
                 outside_ci=outside_ci,
                 a2_ci=a2_ci,
                 rss_ci=rss_ci,
@@ -505,11 +504,17 @@ def write_report(rows_path: Path, journal_path: Path, readme_path: Path) -> None
     lines.extend(notes)
     lines.append("")
     report_path.write_text("\n".join(lines), encoding="utf-8", newline="\n")
-    replace_restart_section(readme_path, notes)
+    restart_path = HERE / "RESTARTS.md"
+    restart_lines = ["# Orchestrator restarts", "", *notes, ""]
+    restart_path.write_text(
+        "\n".join(restart_lines),
+        encoding="utf-8",
+        newline="\n",
+    )
 
 
 def main() -> int:
-    write_report(HERE / "rows.csv", HERE / "journal.log", HERE / "README.md")
+    write_report(HERE / "rows.csv", HERE / "journal.log")
     return 0
 
 
