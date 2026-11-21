@@ -19,7 +19,9 @@ equivalent is listed in ``UNPUSHED`` with the reason. A printed number may
 rest on a commit off HEAD only when that commit is on a record branch listed
 in ``RECORD_REFS`` that origin holds at the listed SHA and tree. Printed
 numbers no committed row backs are listed in ``UNTRACED``; their text must
-still be where the list says. The revision checks need the full history and the remote
+still be where the list says. README rows on a commit nothing holds, whose
+numbers the paper does not print, are listed in ``UNVERIFIABLE`` with the
+revision and the reason; each must still be printed and flagged. The revision checks need the full history and the remote
 branches; a clone without them is refused, with exit status 2.
 
     python3 scripts/paper_audit.py            # exit 1 on any drift
@@ -183,6 +185,149 @@ UNTRACED = [
      "the earlier Pt6Cu17 energy has no committed row"),
     ("bench/water-h2o20-goat/README.md", "Seed 16001, 28000 calls, same wrapper as the table above, scored −2214.506788 eV",
      "the seed 16001 rows were not committed"),
+]
+
+
+# README rows that print numbers from a commit no ref, kit, bundle or mbox
+# holds, and that the paper does not print. Each row stays a check: it passes
+# only while its exact text is in the README and the audit still flags it on
+# a listed revision, and an entry that matches nothing fails.
+WHY_TAB = ("no origin branch, kit, bundle or mbox holds the commit; tab:ase reads other rows of it, "
+           "not this one")
+WHY_AU = ("no origin branch holds the commit and the no-templates2 mbox rebuilds its content but not its "
+          "SHA; the paper prints no number of this row")
+WHY_OLD = ("no origin branch, kit, bundle or mbox holds the commit; the manuscript, SI and figure and "
+           "table scripts print no number of this row")
+UNVERIFIABLE = [
+    ('bench/agox-lj75/README.md',
+     '| current AGOX | 0/6 | 5655.108823 | -392.980553 | 4.511777 | 103.663412 | 0.009647 |',
+     ('0a5136605161', 'ccc22cee607b'), WHY_OLD),
+    ('bench/agox-lj75/README.md',
+     '| documented AGOX | 0/6 | 14493.759020 | -372.106043 | 25.386287 | 263.511422 | 0.003795 |',
+     ('0a5136605161', 'ccc22cee607b'), WHY_OLD),
+    ('bench/agox-lj75/README.md',
+     '| anneal | 0/6 | 55.299841 | -396.282249 | 1.210082 | 1.000000 | 1.000000 |',
+     ('0a5136605161', 'ccc22cee607b'), WHY_OLD),
+    ('bench/ase-au55/README.md',
+     '| anneal | 0/12 | 1 | 72 | 1 | -190.81083051 | 0.22002228 | 36.060303 | 1.000000 | 1.000000 | 29.540093 | 6.382390 |',
+     ('1ce3ab644931',), WHY_AU),
+    ('bench/ase-au55/README.md',
+     '| anneal | 0/12 | 1 | 72 | 1 | -190.81083051 | 0.22002228 | 36.060303 | 1.000000 | 1.000000 | 29.540093 | 6.382390 |',
+     ('33bed75ff4e4', 'fc1af066a915'), WHY_OLD),
+    ('bench/ase-lj104/README.md',
+     '| anneal | 0/12 | 1 | 72 | 1 | -580.80432897 | 1.28231303 | 88.960797 | 1.000000 | 1.000000 | 63.958464 | 25.016078 |',
+     ('5a7f629d79be',), WHY_TAB),
+    ('bench/ase-lj150/README.md',
+     '| anneal | 0/12 | 1 | 72 | 1 | -884.65296483 | 8.65729317 | 177.839157 | 1.000000 | 1.000000 | 132.630578 | 45.213123 |',
+     ('5a7f629d79be',), WHY_TAB),
+    ('bench/ase-lj38/README.md',
+     '| anneal | 10/12 | 1 | 72 | 1 | -173.92842659 | 0.00000041 | 0.981375 | 1.000000 | 1.000000 | 0.574202 | 0.407172 |',
+     ('5a7f629d79be',), WHY_TAB),
+    ('bench/ase-lj55/README.md',
+     '| anneal | 12/12 | 1 | 72 | 1 | -279.24847046 | -0.00000046 | 0.823500 | 1.000000 | 1.000000 | 0.562777 | 0.260722 |',
+     ('5a7f629d79be',), WHY_TAB),
+    ('bench/ase-lj75/README.md',
+     '| basin hopping | 0/12 | 1 | 78 | 0.359317 | -393.72607097 | 3.76626003 | 89.907831 | 1.760879 | 0.567898 | 46.580477 | 43.358141 |',
+     ('162d230740f0', '8173c5e2855b'), WHY_OLD),
+    ('bench/ase-lj75/README.md',
+     '| minima hopping | 0/12 | 1 | 78 | 0.359317 | -391.70068193 | 5.79164907 | 172.344747 | 3.375083 | 0.296295 | 0.943898 | 171.463289 |',
+     ('162d230740f0', '8173c5e2855b'), WHY_OLD),
+    ('bench/ase-lj98/README.md',
+     '| anneal | 4/12 | 1 | 72 | 1 | -543.54672557 | 0.11863543 | 80.934059 | 1.000000 | 1.000000 | 57.146890 | 23.659054 |',
+     ('5a7f629d79be',), WHY_TAB),
+    ('bench/ase-nonlj/README.md',
+     '| m38r6 | for_cluster vs basin hopping | 5/12 vs 0/12 | 0.0372671 | not estimated | not estimated | 0.324342 | 3.083165 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m38r6 | for_cluster vs minima hopping | 5/12 vs 0/12 | 0.0372671 | not estimated | not estimated | 0.324323 | 3.083344 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m38r6 | recommended vs basin hopping | 12/12 vs 0/12 | 7.39602e-07 | not estimated | not estimated | 0.025276 | 39.563762 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m38r6 | recommended vs minima hopping | 12/12 vs 0/12 | 7.39602e-07 | not estimated | not estimated | 0.025274 | 39.566068 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m38r14 | for_cluster vs basin hopping | 0/12 vs 0/12 | 1 | not estimated | not estimated | 0.314585 | 3.178786 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m38r14 | for_cluster vs minima hopping | 0/12 vs 0/12 | 1 | not estimated | not estimated | 0.314572 | 3.178919 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m38r14 | recommended vs basin hopping | 12/12 vs 0/12 | 7.39602e-07 | not estimated | not estimated | 0.018058 | 55.378224 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m38r14 | recommended vs minima hopping | 12/12 vs 0/12 | 7.39602e-07 | not estimated | not estimated | 0.018057 | 55.380532 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m55r6 | for_cluster vs basin hopping | 12/12 vs 0/12 | 7.39602e-07 | not estimated | not estimated | 0.081985 | 12.197304 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m55r6 | for_cluster vs minima hopping | 12/12 vs 0/12 | 7.39602e-07 | not estimated | not estimated | 0.081980 | 12.198089 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m55r6 | recommended vs basin hopping | 12/12 vs 0/12 | 7.39602e-07 | not estimated | not estimated | 0.018064 | 55.359963 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m55r6 | recommended vs minima hopping | 12/12 vs 0/12 | 7.39602e-07 | not estimated | not estimated | 0.018062 | 55.363522 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m55r14 | for_cluster vs basin hopping | 0/12 vs 0/12 | 1 | not estimated | not estimated | 0.304338 | 3.285817 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m55r14 | for_cluster vs minima hopping | 0/12 vs 0/12 | 1 | not estimated | not estimated | 0.304323 | 3.285984 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m55r14 | recommended vs basin hopping | 5/12 vs 0/12 | 0.0372671 | not estimated | not estimated | 0.317431 | 3.150296 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m55r14 | recommended vs minima hopping | 5/12 vs 0/12 | 0.0372671 | not estimated | not estimated | 0.317414 | 3.150456 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/covalent-h2h/README.md',
+     '| Si10 | anneal G | 12/12 | 666 | 268 | -460.683738 | 33.2 | 58.43 ms | 0.010 ms |',
+     ('8aeb3b0b2272', 'b22eb28536ef', 'ce1e7a46826c', 'e6edbcbabc34', 'eb7f899959de'), WHY_OLD),
+    ('bench/covalent-h2h/README.md',
+     '| Si10 | CREST | 11/12 | 97,521 | 8,524 | -460.683718 | 2646.6 | 26.72 ms | 0.244 ms |',
+     ('8aeb3b0b2272', 'b22eb28536ef', 'e6edbcbabc34', 'eb7f899959de'), WHY_OLD),
+    ('bench/covalent-h2h/README.md',
+     '| C10 | anneal G | 11/12 | 6,350 | 6,077 | -571.322738 | 14.6 | 1.18 ms | 0.002 ms |',
+     ('ce1e7a46826c', 'e6edbcbabc34', 'eb7f899959de'), WHY_OLD),
+    ('bench/covalent-h2h/README.md',
+     '| C10 | CREST | 4/12 | 78,367 | 2,880 | -571.322711 | 439.5 | 5.10 ms | 0.288 ms |',
+     ('ce1e7a46826c', 'e6edbcbabc34', 'eb7f899959de'), WHY_OLD),
+    ('bench/covalent-h2h/README.md',
+     '| Si10 | anneal G, `ce1e7a46` | 12/12 | 665.5 | 296 | -460.683738 | 36.1 | 70.88 ms | 0.044 ms |',
+     ('ce1e7a46',), WHY_OLD),
+    ('bench/covalent-h2h/README.md',
+     '| C10 | anneal G, `ce1e7a46` | 12/12 | 2,516.5 | 1,908 | -571.322738 | 10.9 | 4.43 ms | 0.005 ms |',
+     ('ce1e7a46',), WHY_OLD),
+    ('bench/covalent-h2h/README.md',
+     '| C20 | anneal G, `5351f272` | 0/12 | 100,000 | 0 | -1148.292908 | 1866.6 | 18.54 ms | 0.005 ms |',
+     ('5351f272',), WHY_OLD),
+    ('bench/covalent-h2h/README.md',
+     'no pair below 2.23 Å. Seeds 3000 and 3007 share the next,',
+     ('a52726af',), WHY_OLD),
+    ('bench/growpal-h2h-v2/README.md',
+     '| LJ38 | yes | 21038447 | 52.6 | 560.6 | 81.3 | 479.3 | 3.87 | 22.78 |',
+     ('2b46484da27f', '621761ec8e4e'), WHY_OLD),
+    ('bench/growpal-h2h-v2/README.md',
+     '| LJ55 | yes | 104093769 | 104.1 | 3409.8 | 614.6 | 2795.2 | 5.90 | 26.85 |',
+     ('2b46484da27f', '621761ec8e4e'), WHY_OLD),
+    ('bench/occat-h2h/README.md',
+     '| cu38 | anneal | 12/12 | 7426.500000 | 0.155761 | 0.124461 | 0.033680 | 1.000000 |',
+     ('6eda862e2e5f', '7536aeb6656b'), WHY_OLD),
+    ('bench/occat-h2h/README.md',
+     '| cu38 | occat | 0/12 | 400000.000000 | 370.751968 | 179.488185 | 191.263784 | 2380.261866 |',
+     ('6eda862e2e5f',), WHY_OLD),
+    ('bench/occat-h2h/README.md',
+     '| cu38 | gmin | 0/12 | 400000.000000 | 11.972000 | 11.006452 | 0.952224 | 76.861345 |',
+     ('6eda862e2e5f',), WHY_OLD),
+    ('bench/occat-h2h/README.md',
+     '| cu55 | anneal | 1/1 | 2341.000000 | 0.108601 | 0.076119 | 0.032482 | 1.000000 |',
+     ('6eda862e2e5f',), WHY_OLD),
+    ('bench/occat-h2h/README.md',
+     '| cu38 | 12 | 12 | 0 | 0 | 7.39602e-07 | 7.39602e-07 | 1.02689e-05 | 3.65846e-05 | 3.65846e-05 | 3.65846e-05 | 1.02689e-05 | 3.65846e-05 | 3.65846e-05 | 3.65846e-05 |',
+     ('6eda862e2e5f', '7536aeb6656b'), WHY_OLD),
 ]
 
 
@@ -3721,14 +3866,24 @@ def printed_harnesses(audit: Audit) -> None:
     """Fail when a printed number rests on a revision that is not an ancestor of HEAD or of a verified record ref.
 
     A qualified external revision is a repository URL plus a full SHA. Each one is
-    checked. A short SHA in that position fails. There is no allowlist.
+    checked. A short SHA in that position fails. A README row listed in
+    ``UNVERIFIABLE`` on the flagged revision passes with its reason shown.
     """
     record_ref_checks(audit)
     forms: list[tuple[str, str]] = []
     flagged = _printed_readme_numbers(audit, forms)
+    listed = {(path, row, revision): why for path, row, revisions, why in UNVERIFIABLE for revision in revisions}
+    matched: set[tuple[str, str, str]] = set()
     for where, revision, number in flagged:
-        audit.record(False, where, "a printed number comes from a reachable revision",
-                     "ancestor or qualified external revision", f"{revision[:12]} {number}")
+        path, _, line = where.rpartition(":")
+        key = (path, audit.text(path).splitlines()[int(line) - 1].strip(), revision[:12])
+        if key in listed:
+            matched.add(key)
+        audit.record(key in listed, where, "a printed number comes from a reachable revision",
+                     f"unverifiable: {listed[key]}" if key in listed else "ancestor or qualified external revision",
+                     f"{revision[:12]} {number}")
+    for path, row, revision in sorted(set(listed) - matched):
+        audit.record(False, path, "an unverifiable row is still printed and flagged", row, revision)
     for where, token in forms:
         audit.record(external_form(token) is True, where, "qualified external revision",
                      token, "repo URL @ full SHA")
@@ -3775,6 +3930,8 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
             print(f"{status:5}  {where}  {label}  shown={shown}  computed={value}")
         for path, fragment, why in UNTRACED:
             print(f"UNTRACED  {path}  {fragment!r}  {why}")
+        for path, row, revisions, why in UNVERIFIABLE:
+            print(f"UNVERIFIABLE  {path}  {row!r}  {' '.join(revisions)}  {why}")
     drift = audit.drifts()
     for status, where, label, shown, value in drift:
         print(f"{status}  {where}  {label}  shown={shown}  computed={value}", file=sys.stderr)
