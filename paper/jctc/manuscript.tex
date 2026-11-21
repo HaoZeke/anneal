@@ -35,7 +35,7 @@ Indian Institute of Technology Kanpur, Kanpur, India}
 \begin{abstract}
 We present a template-free basin-hopping search for funnelled atomic and
 rigid-molecular landscapes.
-Each proposal is quenched; displacement, shell, lattice, descriptor, and
+Each proposal is quenched; displacement, shell, lattice, fivefold-residual, and
 symmetry moves are chosen from their observed quench depths; a
 well-tempered basin bias and tabu list discourage repeated basins; and
 separate climb and trail responses leave stalled regions.
@@ -190,11 +190,12 @@ The site is drawn with Boltzmann weights at the reduced temperature
 \(0.8\).
 If that lattice offers no site, the move uses equation~\ref{eq:single}.
 
-A descriptor move steps the cluster in the smooth overlap of atomic
-positions, away from the nearest packing stored so far, as
-equation~\ref{eq:soap-step} defines.
-The cutoff is \(3.5\) and the target displacement is \(0.35\), both in
-reduced units.
+The arm named \texttt{soap} in the implementation is a fivefold-residual
+move.
+It compares the cluster with a copy rotated through \(2\pi/5\), matches the
+atoms, and, above 13 atoms, moves the five atoms that carry the largest
+residual, as equation~\ref{eq:soap-step} defines.
+Their root-mean-square displacement is \(0.75\) in reduced units.
 
 Below 98 atoms the quench chooses a surface and holds it for 100 hops.
 The two surfaces are the plain potential and the plain potential plus
@@ -219,7 +220,7 @@ single step on the original potential.
 The single-atom and shell moves make local rearrangements, while the lattice
 move fills a low-energy vacant site in the manner of Shao et al.\
 \cite{shaoChengCai2004}.
-Descriptor and symmetry moves offer larger changes of packing; the latter
+Fivefold-residual and symmetry moves offer larger changes of packing; the latter
 follow the observation of Oakley et al.\ that direct symmetric proposals can
 enter otherwise narrow regions of a cluster landscape \cite{oakley2013}.
 The alternate quench surface penalizes extended clusters in the spirit of
@@ -279,10 +280,11 @@ The chain is stuck when
 q \ge \max(5000,\, 2\, q_{\mathrm{long}}).
 \label{eq:stuck}
 \end{equation}
-While it is stuck, the symmetry projection of Section~\ref{sec:symmetry} is
-quenched and kept when its energy is lower than the energy the chain is
-standing on, and a structure already dominated by an icosahedral signature
-skips that projection.
+While a free atomic cluster is stuck, the symmetry projection of
+Section~\ref{sec:symmetry} is quenched and kept when its energy is lower than
+the energy the chain is standing on.
+The branch is withheld only for a calculation with an active region or
+frozen atoms.
 The preset enables two responses to a stuck chain.
 One is a climb of amplitude \(0.25\).
 The other starts at the recorded basin entry, continues outward along the
@@ -367,10 +369,19 @@ Two checks can withhold the full quench.
 A proposal whose descriptor distance from \(x\) is below the merge
 radius \(0.7\) is treated as a return to the occupied basin, and the
 partial relaxation is what enters equation~\ref{eq:metropolis}.
-A partial energy more than \(2\) above the stored best is handled the
-same way (equation~\ref{eq:screen}).
-Neither check redraws the cluster, and a proposal whose partial energy
-exceeds the threshold can still quench below the stored best.
+For every other proposal, the preset uses the Bayesian screen of
+equation~\ref{eq:bayes-screen}.
+A linear model learns the fully quenched energy from the partial energy,
+the descriptor displacement, and their product.
+It finishes every partial relaxation that already beats the stored best,
+the first 300 observed full relaxations, and a random tenth of later
+proposals.
+Otherwise it finishes when the Student-\(t\) posterior assigns probability
+at least \(7/15\) to beating the best.
+The exploration floor supplies outcomes outside the model's preferred
+region and prevents the training set from becoming self-confirming.
+If either check withholds the finish, the partial relaxation enters
+equation~\ref{eq:metropolis}; neither check redraws the cluster.
 
 \subsection{Choosing among the moves}
 \label{sec:posterior}
@@ -969,27 +980,60 @@ A multiset of distances does not fix a structure, so two homometric sets have
 \(\delta=0\) without being congruent.
 Two configurations lie in one region when \(\delta<\rho_m\), with the merge
 radius \(\rho_m=0.7\).
-The descriptor move of Section~\ref{sec:moves} uses a second descriptor, the
-mean over atoms of the smooth-overlap power spectrum \(p_i(x)\) within the
-radial cutoff \(3.5\),
+For a selected fivefold axis \(a\), let \(R_a\) rotate by \(2\pi/5\), and
+let \(\pi\) be the minimum-cost atom assignment between the original and
+rotated coordinates.
+The residual is
 \begin{equation}
-\bar p(x) = \frac1N\sum_{i=1}^{N} p_i(x),
+r_i=x_i-\bigl[R_a x\bigr]_{\pi(i)},\qquad
+y_i =
+\begin{cases}
+x_i+c\,r_i,&i\in A,\\
+x_i,&i\notin A,
+\end{cases}
+\quad
+c=\frac{b_N}{\sqrt{|A|^{-1}\sum_{j\in A}\lVert r_j\rVert^2}},
 \qquad
-y = x + \lambda\, g,
+b_N=\begin{cases}0.75,&N>13,\\0.35,&N\leq13.\end{cases}
 \label{eq:soap-step}
 \end{equation}
-where \(g\) is the displacement that moves \(\bar p\) away from the nearest
-mean spectrum \(\bar p_\mathrm{ref}\) of the packings stored so far, along
-\(\bar p(x)-\bar p_\mathrm{ref}\), and \(\lambda\) is chosen so that the
-root-mean-square displacement of \(y\) from \(x\) is \(0.35\).
+For \(N>13\), \(A\) contains the five atoms with the largest
+\(\lVert r_i\rVert\).
+The move requires two eligible fivefold axes and draws between the axes
+nearest the two reconstructable shell openings.
+For \(N\leq13\), \(A\) contains every atom and the best axis is
+used.
+An exactly fivefold residual instead uses a pentagon-breaking displacement
+over all atoms at the same root-mean-square amplitude.
+If the drawn-axis proposal does not move, the arm tries the measured
+best-axis residual: when its fivefold gate passes, it moves all atoms with
+root-mean-square displacement \(0.35\); otherwise it leaves \(x\) unchanged.
 
 \emph{Screen and merge.}
 Let \(\tilde y\) be a proposal after the partial relaxation and let
 \(E^\star\) be the stored best.
-The screen withholds the full quench when
+The recommended preset forms
 \begin{equation}
-E(\tilde y) - a > E^\star + \Delta_s,
-\qquad \Delta_s = 2 ,
+\begin{aligned}
+z(\tilde y)&=\bigl(1,E(\tilde y),\delta(\tilde y,x),
+E(\tilde y)\delta(\tilde y,x)\bigr),\\
+p(\tilde y)&=\Pr\!\left(E(y)<E^\star\mid z(\tilde y),\mathcal D\right),
+\qquad p(\tilde y)\geq\frac{7}{15},
+\end{aligned}
+\label{eq:bayes-screen}
+\end{equation}
+where the posterior predictive distribution is Student-\(t\) and
+\(\mathcal D\) contains the feature vector and fully quenched energy of each
+finished proposal.
+The inequality is the rule for finishing a proposal after 300 observations;
+a fraction \(0.1\) is finished independently of it, and
+\(E(\tilde y)<E^\star\) always finishes.
+
+The non-default calibrated-margin path, which the recommended preset
+bypasses because it enables the Bayesian screen, instead withholds the full
+quench when
+\begin{equation}
+E(\tilde y)-a>E^\star+\Delta_s,\qquad \Delta_s=2 ,
 \label{eq:screen}
 \end{equation}
 where \(a\ge 0\) is the upper decile of the energy that the last 256

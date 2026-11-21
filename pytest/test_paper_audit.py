@@ -1477,6 +1477,45 @@ def test_reported_run_figures_exclude_unused_components_and_crossings():
     assert "bank" not in audit.text("paper/jctc/scripts/toc_graphic.py")
 
 
+def test_default_screen_cannot_be_described_as_the_margin_path():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = ("For every other proposal, the preset uses the Bayesian screen of\n"
+           "equation~\\ref{eq:bayes-screen}.")
+    assert old in tex
+    audit.text_cache[audit_mod.TEX] = tex.replace(
+        old, "For every other proposal, the preset uses the margin screen.")
+    audit_mod.science_claims(audit)
+    assert any(r[2] == "prose" and r[3] == old for r in audit.drifts())
+
+
+def test_icosahedral_stall_skip_cannot_return():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    marker = "The preset enables two responses to a stuck chain."
+    assert marker in tex
+    audit.text_cache[audit_mod.TEX] = tex.replace(
+        marker,
+        ("A structure already dominated by an icosahedral signature skips "
+         "that projection.\n" + marker),
+    )
+    audit_mod.science_claims(audit)
+    assert any(
+        r[2].startswith("stale mechanism claim is absent:")
+        for r in audit.drifts()
+    )
+
+
+def test_fivefold_arm_amplitude_is_locked_to_the_code():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "Their root-mean-square displacement is \\(0.75\\) in reduced units."
+    assert old in tex
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, old.replace("0.75", "0.35"))
+    audit_mod.science_claims(audit)
+    assert any(r[2] == "prose" and r[3] == old for r in audit.drifts())
+
+
 def test_a_historical_printed_row_with_the_trail_disabled_is_reported(monkeypatch):
     audit = audit_mod.Audit()
     real_git = audit_mod.git

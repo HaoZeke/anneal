@@ -4203,6 +4203,25 @@ def science_claims(audit: Audit) -> None:
     audit.said(TEX, "When no basin entry is recorded, a trail draw leaves the chain where it is;\n"
                     "the climb is a separate choice of the same draw, not a fallback.")
     audit.said(SI, "Those presets enable both the trail and climb responses to a stuck chain.")
+    audit.said(TEX, "For every other proposal, the preset uses the Bayesian screen of\n"
+                    "equation~\\ref{eq:bayes-screen}.")
+    audit.said(TEX, "Otherwise it finishes when the Student-\\(t\\) posterior assigns probability\n"
+                    "at least \\(7/15\\) to beating the best.")
+    audit.said(TEX, "The non-default calibrated-margin path, which the recommended preset\n"
+                    "bypasses because it enables the Bayesian screen")
+    audit.said(TEX, "The arm named \\texttt{soap} in the implementation is a fivefold-residual\n"
+                    "move.")
+    audit.said(TEX, "Their root-mean-square displacement is \\(0.75\\) in reduced units.")
+    audit.said(TEX, "If the drawn-axis proposal does not move, the arm tries the measured\n"
+                    "best-axis residual")
+    audit.said(TEX, "The branch is withheld only for a calculation with an active region or\n"
+                    "frozen atoms.")
+    manuscript = collapse(audit.text(TEX)).lower()
+    for stale in ("away from the nearest packing stored so far",
+                  "a structure already dominated by an icosahedral signature",
+                  "a partial energy more than \\(2\\) above the stored best"):
+        audit.record(stale not in manuscript, TEX, f"stale mechanism claim is absent: {stale}",
+                     "absent", "absent" if stale not in manuscript else "present")
     stack = audit.text("paper/jctc/scripts/fig_algorithm_stack.py")
     arms = audit.text("paper/jctc/scripts/fig_rec_arms.py")
     for word in ("chain 40", "Good-Turing census", "annealed-flow bank"):
@@ -4356,6 +4375,10 @@ def manuscript_new(audit: Audit) -> None:
     for fragment in ("bias_gamma: 5.0,", "tabu_capacity: 8,", "ContinuousSymmetry::Measure { interval: 10 };",
                      "prior_soap: true,", "calibrated_screen: true,"):
         audit.said(config, fragment)
+    for fragment in ("cfg.bayes_screen = true;",
+                     "bayes_exploration: 0.1,",
+                     "bayes_warmup: 300,"):
+        audit.said(config, fragment)
     config_src = audit.text(config)
     for removed in ("reseed_hops: 5,", "pub prior_reseed:", "pub prior_growth:", "pub prior_core:",
                     "pub prior_handover:", "pub prior_motif:"):
@@ -4365,6 +4388,24 @@ def manuscript_new(audit: Audit) -> None:
     audit.said("src/methods/cluster_hopping.rs", "const WARMUP: usize = 8;")
     audit.said("src/methods/cluster_hopping.rs", "const QUANTILE: f64 = 0.9;")
     hop = audit.text("src/methods/cluster_hopping.rs")
+    audit.said("src/methods/cluster_hopping.rs",
+               "let feats = Array1::from(vec![1.0, e_screen, drift, e_screen * drift]);")
+    audit.said("src/methods/cluster_hopping.rs",
+               "e_screen >= ledger.best\n"
+               "                && !screen.decide(feats.view(), ledger.best, rng.random::<f64>())")
+    audit.said("src/methods/cluster_hopping.rs",
+               "let withhold = cfg.active_region.is_some() || cfg.frozen.is_some();")
+    screen = "src/screen.rs"
+    audit.said(screen, "if self.n < self.warmup {")
+    audit.said(screen, "if u < self.exploration {")
+    audit.said(screen, "let go = p >= self.threshold;")
+    moves = "src/methods/cluster_hopping/moves.rs"
+    audit.said(moves, "let drawn = crate::soap::step_away_fivefold(x, *rmsd, rng);")
+    audit.said(moves, "crate::soap::step_away_fivefold_measured(x, *rmsd)")
+    soap = "src/soap.rs"
+    audit.said(soap, "const PENTAGON_CAP: f64 = 0.75;")
+    audit.said(soap, "concentrate_residual(&mut dr, 5);")
+    audit.said(soap, "scale_support_to_cap(x, dr, rmsd.max(PENTAGON_CAP))")
     audit.record("if frac_421 < 0.20 {" not in hop, "src/methods/cluster_hopping.rs", "motif-seeded growth gate is removed",
                  "absent", "absent" if "if frac_421 < 0.20 {" not in hop else "present")
     audit.record("if frac_422 < 0.15 {" not in hop, "src/methods/cluster_hopping.rs", "motif-seeded growth gate is removed",
