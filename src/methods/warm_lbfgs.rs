@@ -60,6 +60,8 @@
 use ndarray::{Array1, ArrayView1};
 use rgmin::{GradNorm, Lbfgs};
 
+use crate::methods::cluster_hopping::covalent_radius;
+
 /// Stands between the caller's objective and the solver.
 struct Refusals<F> {
     fg: F,
@@ -103,6 +105,13 @@ where
 /// solver at the start of each [`WarmLbfgs::minimize`] call.
 pub struct WarmLbfgs {
     inner: Lbfgs,
+    /// Declared bonds the opening trial must not stretch past.
+    ///
+    /// Unset, the relaxation is [`rgmin::Lbfgs`] unchanged. Set, an empty
+    /// memory still opens along the steepest direction, and the trial is
+    /// the longest fraction of that step that leaves every declared bond
+    /// inside its bond check.
+    bonds: Option<BondLimit>,
     /// Pairs retained; the usual choice is between five and ten.
     pub max_pairs: usize,
     /// Gradient infinity norm below which a relaxation is converged.
@@ -120,6 +129,7 @@ impl Default for WarmLbfgs {
     fn default() -> Self {
         Self {
             inner: Lbfgs::default(),
+            bonds: None,
             max_pairs: 8,
             gtol: 1e-6,
             armijo: 1e-4,
@@ -167,6 +177,29 @@ impl WarmLbfgs {
     /// Store one accepted curvature pair.
     pub fn record_pair(&mut self, s: Array1<f64>, y: Array1<f64>) {
         self.inner.record(s, y);
+    }
+
+    /// Keep each declared bond inside `tolerance` times its covalent radii.
+    ///
+    /// The tolerance and the radii are the caller's bond check. A step that
+    /// already fits is not shortened. No bond information leaves the
+    /// relaxation on the solver's own line search.
+    pub(crate) fn keep_declared_bonds(
+        &mut self,
+        species: &[u32],
+        groups: &[Vec<usize>],
+        tolerance: f64,
+    ) {
+        self.bonds = Some(BondLimit {
+            species: species.to_vec(),
+            groups: groups.to_vec(),
+            tolerance,
+        });
+    }
+
+    /// Drop a bond limit installed by [`Self::keep_declared_bonds`].
+    pub(crate) fn clear_bond_limit(&mut self) {
+        self.bonds = None;
     }
 
     /// Evaluations answered with a non-finite value or gradient, over every
@@ -242,12 +275,399 @@ impl WarmLbfgs {
     {
         self.sync();
         let mut guard = Refusals::new(fg);
-        let (f, x, evals) = self
-            .inner
-            .minimize_watched(x0, max_iter, |v| guard.eval(v), watch);
+        let bonds = self.bonds.clone();
+        let (f, x, evals) = if let Some(bonds) = bonds.as_ref() {
+            self.descend_within_bonds(x0, max_iter, &mut |v| guard.eval(v), watch, bonds)
+        } else {
+            self.inner
+                .minimize_watched(x0, max_iter, |v| guard.eval(v), watch)
+        };
         self.refused += guard.refused;
         (f, x, evals + usize::from(guard.refused_start))
     }
+
+    /// The same loop as [`rgmin::Lbfgs::minimize_watched`], with the opening
+    /// trial held inside the bond check.
+    ///
+    /// An empty memory takes `min(1, 1/||g||)` along `-g`. That length is
+    /// one coordinate unit whenever the gradient is longer than one, which
+    /// stretches a covalent bond past the check before any curvature exists
+    /// to size the step. The trial here is that same direction, shortened
+    /// to the largest factor that leaves every currently bonded pair at or
+    /// inside the check. A direction that never reaches the check keeps the
+    /// factor the solver would have used.
+    fn descend_within_bonds<F, W>(
+        &mut self,
+        x0: ArrayView1<f64>,
+        max_iter: usize,
+        fg: &mut F,
+        mut watch: W,
+        bonds: &BondLimit,
+    ) -> (f64, Array1<f64>, usize)
+    where
+        F: FnMut(ArrayView1<f64>) -> Option<(f64, Array1<f64>)>,
+        W: FnMut(usize, f64) -> bool,
+    {
+        let mut x = x0.to_owned();
+        let mut evals = 0usize;
+        let (mut f, mut g) = match fg(x.view()) {
+            Some(v) => v,
+            None => return (f64::INFINITY, x, evals),
+        };
+        evals += 1;
+        for it in 0..max_iter {
+            if !watch(it, f) {
+                break;
+            }
+            if gradient_norm(self.inner.norm, &g) < self.inner.gtol {
+                break;
+            }
+            let d = self.inner.two_loop(g.view());
+            let slope = d.dot(&g);
+            if slope >= 0.0 {
+                self.inner.forget();
+                continue;
+            }
+            let a_max = max_bond_alpha(x.view(), d.view(), bonds);
+            let (ok, used) = line_search_capped(
+                &mut self.inner,
+                &mut x,
+                &mut f,
+                &mut g,
+                &d,
+                slope,
+                fg,
+                a_max,
+            );
+            evals += used;
+            if !ok {
+                if self.inner.is_empty() {
+                    break;
+                }
+                self.inner.forget();
+            }
+        }
+        (f, x, evals)
+    }
+}
+
+/// Species, declared groups, and the bond-check factor `tolerance`.
+#[derive(Clone, Debug)]
+struct BondLimit {
+    species: Vec<u32>,
+    groups: Vec<Vec<usize>>,
+    tolerance: f64,
+}
+
+fn gradient_norm(norm: GradNorm, g: &Array1<f64>) -> f64 {
+    match norm {
+        GradNorm::Euclidean => {
+            if g.iter().any(|v| !v.is_finite()) {
+                return f64::INFINITY;
+            }
+            l2(g)
+        }
+        GradNorm::Infinity => {
+            let mut peak = 0.0_f64;
+            for v in g.iter() {
+                if !v.is_finite() {
+                    return f64::INFINITY;
+                }
+                peak = peak.max(v.abs());
+            }
+            peak
+        }
+    }
+}
+
+fn l2(g: &Array1<f64>) -> f64 {
+    g.iter().fold(0.0_f64, |acc, v| acc + v * v).sqrt()
+}
+
+/// Largest `alpha` for which `x + alpha * direction` keeps every declared
+/// bond inside the check. Infinite when the direction does not stretch one.
+fn max_bond_alpha(x: ArrayView1<f64>, direction: ArrayView1<f64>, bonds: &BondLimit) -> f64 {
+    let n = bonds.species.len();
+    if !(bonds.tolerance > 0.0) || x.len() != 3 * n || direction.len() != x.len() {
+        return f64::INFINITY;
+    }
+    let mut cap = f64::INFINITY;
+    for atoms in &bonds.groups {
+        if atoms.len() < 2 {
+            continue;
+        }
+        for (left, &a) in atoms.iter().enumerate() {
+            if a >= n {
+                continue;
+            }
+            for &b in atoms.iter().skip(left + 1) {
+                if b >= n || a == b {
+                    continue;
+                }
+                let reach = bonds.tolerance
+                    * (covalent_radius(bonds.species[a]) + covalent_radius(bonds.species[b]));
+                if !(reach > 0.0) {
+                    continue;
+                }
+                let mut separated = [0.0; 3];
+                let mut relative = [0.0; 3];
+                for axis in 0..3 {
+                    separated[axis] = x[3 * b + axis] - x[3 * a + axis];
+                    relative[axis] = direction[3 * b + axis] - direction[3 * a + axis];
+                }
+                let step = alpha_until_reach(separated, relative, reach);
+                if step < cap {
+                    cap = step;
+                }
+            }
+        }
+    }
+    cap
+}
+
+/// Largest nonnegative scale at which `||v + s w||` is still at most `limit`.
+///
+/// Infinite when `s = 0` is already past the limit, or when the ray never
+/// reaches it. The closed form is the positive root of that quadratic. A
+/// root that rounds past the limit is walked back by bisection onto the
+/// legal side of the same comparison.
+fn alpha_until_reach(v: [f64; 3], w: [f64; 3], limit: f64) -> f64 {
+    let distance = |scale: f64| -> f64 {
+        let mut square = 0.0;
+        for axis in 0..3 {
+            let delta = v[axis] + scale * w[axis];
+            square += delta * delta;
+        }
+        square.sqrt()
+    };
+    if distance(0.0) > limit {
+        return f64::INFINITY;
+    }
+    let vv = v.iter().map(|c| c * c).sum::<f64>();
+    let ww = w.iter().map(|c| c * c).sum::<f64>();
+    let vw = v
+        .iter()
+        .zip(w)
+        .map(|(left, right)| left * right)
+        .sum::<f64>();
+    let limit2 = limit * limit;
+    let root = if ww == 0.0 {
+        if vw <= 0.0 {
+            f64::INFINITY
+        } else {
+            (limit2 - vv) / (2.0 * vw)
+        }
+    } else {
+        let linear = 2.0 * vw;
+        let constant = vv - limit2;
+        let disc = linear * linear - 4.0 * ww * constant;
+        if disc < 0.0 || constant > 0.0 {
+            f64::INFINITY
+        } else {
+            (-linear + disc.sqrt()) / (2.0 * ww)
+        }
+    };
+    if !root.is_finite() || root < 0.0 {
+        return f64::INFINITY;
+    }
+    if distance(root) <= limit {
+        return root;
+    }
+    let mut lo = 0.0;
+    let mut hi = root;
+    for _ in 0..60 {
+        let mid = 0.5 * (lo + hi);
+        if distance(mid) <= limit {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    lo
+}
+
+/// Strong Wolfe search copied from `rgmin` 0.5.0, with `a_max` as a ceiling.
+///
+/// The opening length matches that solver: one, or `1/||d||` when the
+/// memory is empty and the direction is longer than one. The ceiling is
+/// the bond check. A direction the check does not constrain has an
+/// infinite ceiling, and the arithmetic below is then the original search.
+fn line_search_capped<F>(
+    solver: &mut Lbfgs,
+    x: &mut Array1<f64>,
+    f: &mut f64,
+    g: &mut Array1<f64>,
+    d: &Array1<f64>,
+    slope: f64,
+    fg: &mut F,
+    a_max: f64,
+) -> (bool, usize)
+where
+    F: FnMut(ArrayView1<f64>) -> Option<(f64, Array1<f64>)>,
+{
+    let f0 = *f;
+    let mut evals = 0usize;
+    let mut scratch = x.clone();
+    let probe = |a: f64, fg: &mut F, evals: &mut usize, scratch: &mut Array1<f64>| {
+        scratch.assign(x);
+        scratch.scaled_add(a, d);
+        let answered = fg(scratch.view());
+        if answered.is_some() {
+            *evals += 1;
+        }
+        answered
+    };
+
+    let mut a_prev = 0.0;
+    let mut f_prev = f0;
+    let mut slope_prev = slope;
+    let mut a = if solver.is_empty() {
+        let dnorm = d.iter().fold(0.0_f64, |acc, v| acc + v * v).sqrt();
+        if dnorm > 1.0 { 1.0 / dnorm } else { 1.0 }
+    } else {
+        1.0
+    };
+    if a > a_max {
+        a = a_max;
+    }
+    if !(a > 0.0) {
+        return (false, evals);
+    }
+    let mut lo = 0.0;
+    let mut f_lo = f0;
+    let mut slope_lo = slope;
+    let mut hi = f64::NAN;
+    let mut f_hi = f64::NAN;
+    let mut slope_hi = f64::NAN;
+    let mut bracketed = false;
+
+    let bracket_cap = solver.max_line_evals;
+    let total_cap = 2 * solver.max_line_evals;
+
+    for i in 0..bracket_cap {
+        let (fa, ga) = match probe(a, fg, &mut evals, &mut scratch) {
+            Some(v) => v,
+            None => return (false, evals),
+        };
+        let slope_a = d.dot(&ga);
+        if fa > f0 + solver.armijo * a * slope || (i > 0 && fa >= f_prev) {
+            lo = a_prev;
+            f_lo = f_prev;
+            slope_lo = slope_prev;
+            hi = a;
+            f_hi = fa;
+            slope_hi = slope_a;
+            bracketed = true;
+            break;
+        }
+        if slope_a.abs() <= -solver.curvature * slope {
+            accept_step(solver, x, f, g, d, a, fa, ga);
+            return (true, evals);
+        }
+        if slope_a >= 0.0 {
+            lo = a;
+            f_lo = fa;
+            slope_lo = slope_a;
+            hi = a_prev;
+            f_hi = f_prev;
+            slope_hi = slope_prev;
+            bracketed = true;
+            break;
+        }
+        a_prev = a;
+        f_prev = fa;
+        slope_prev = slope_a;
+        let grown = a * 2.0;
+        if grown <= a_max {
+            a = grown;
+        } else if a < a_max {
+            a = a_max;
+        } else {
+            // The bond check is the longest step on this ray, and the
+            // step still decreases the value. Taking it is the trial the
+            // check allows; a longer one is not evaluated.
+            accept_step(solver, x, f, g, d, a, fa, ga);
+            return (true, evals);
+        }
+    }
+
+    if !bracketed {
+        return (false, evals);
+    }
+
+    while evals < total_cap {
+        let width = hi - lo;
+        let mut trial = lo + 0.5 * width;
+        if slope_hi.is_finite() {
+            let d1 = slope_lo + slope_hi - 3.0 * (f_lo - f_hi) / (lo - hi);
+            let disc = d1 * d1 - slope_lo * slope_hi;
+            if disc >= 0.0 && (lo - hi).abs() > 1e-16 {
+                let d2 = (hi - lo).signum() * disc.sqrt();
+                let denom = slope_hi - slope_lo + 2.0 * d2;
+                if denom.abs() > 1e-16 {
+                    let q = hi - (hi - lo) * (slope_hi + d2 - d1) / denom;
+                    if (q - lo) / width > 0.1 && (q - lo) / width < 0.9 {
+                        trial = q;
+                    }
+                }
+            }
+        } else {
+            let denom = 2.0 * (f_hi - f_lo - slope_lo * width);
+            if denom.abs() > 1e-16 {
+                let q = lo - slope_lo * width * width / denom;
+                if (q - lo) / width > 0.1 && (q - lo) / width < 0.9 {
+                    trial = q;
+                }
+            }
+        }
+        let (ft, gt) = match probe(trial, fg, &mut evals, &mut scratch) {
+            Some(v) => v,
+            None => return (false, evals),
+        };
+        let slope_t = d.dot(&gt);
+        if ft > f0 + solver.armijo * trial * slope || ft >= f_lo {
+            hi = trial;
+            f_hi = ft;
+            slope_hi = slope_t;
+        } else {
+            if slope_t.abs() <= -solver.curvature * slope {
+                accept_step(solver, x, f, g, d, trial, ft, gt);
+                return (true, evals);
+            }
+            if slope_t * (hi - lo) >= 0.0 {
+                hi = lo;
+                f_hi = f_lo;
+                slope_hi = slope_lo;
+            }
+            lo = trial;
+            f_lo = ft;
+            slope_lo = slope_t;
+        }
+        if (hi - lo).abs() < 1e-14 {
+            break;
+        }
+    }
+    (false, evals)
+}
+
+fn accept_step(
+    solver: &mut Lbfgs,
+    x: &mut Array1<f64>,
+    f: &mut f64,
+    g: &mut Array1<f64>,
+    d: &Array1<f64>,
+    step: f64,
+    f_new: f64,
+    g_new: Array1<f64>,
+) {
+    let mut s = d.clone();
+    s *= step;
+    let mut y = g_new.clone();
+    y -= &*g;
+    solver.record(s, y);
+    x.scaled_add(step, d);
+    *f = f_new;
+    *g = g_new;
 }
 
 #[cfg(test)]
@@ -405,5 +825,142 @@ mod tests {
         assert_eq!(x, refused);
         let (f, _, _) = opt.minimize(Array1::zeros(4).view(), 200, |v| Some(refused_outside(v)));
         assert!(f.is_finite() && f < 36.0, "the next relaxation gave {f}");
+    }
+
+    /// Harmonic O–H. `k` is the test spring, not a quench parameter.
+    fn oh_spring(x: ArrayView1<f64>, equilibrium: f64, stiffness: f64) -> (f64, Array1<f64>) {
+        let mut square = 0.0;
+        for axis in 0..3 {
+            let delta = x[3 + axis] - x[axis];
+            square += delta * delta;
+        }
+        let distance = square.sqrt();
+        let gap = distance - equilibrium;
+        let energy = 0.5 * stiffness * gap * gap;
+        let mut gradient = Array1::zeros(x.len());
+        if distance > 0.0 {
+            let scale = stiffness * gap / distance;
+            for axis in 0..3 {
+                let delta = x[3 + axis] - x[axis];
+                gradient[axis] = -scale * delta;
+                gradient[3 + axis] = scale * delta;
+            }
+        }
+        (energy, gradient)
+    }
+
+    fn bond_length(x: ArrayView1<f64>) -> f64 {
+        (0..3)
+            .map(|axis| {
+                let delta = x[3 + axis] - x[axis];
+                delta * delta
+            })
+            .sum::<f64>()
+            .sqrt()
+    }
+
+    /// Develop's empty memory steps one coordinate unit along `-g`. On this
+    /// bond that point fails the bond check. The opening trial must not.
+    #[test]
+    fn an_empty_memory_opening_stays_inside_the_bond_check() {
+        use crate::methods::cluster_hopping::declared_group_lost_a_bond;
+
+        let tolerance = 1.25;
+        let species = [8u32, 1];
+        let groups = vec![vec![0usize, 1]];
+        let mut x0 = Array1::zeros(6);
+        x0[3] = 0.90;
+        let (_, gradient) = oh_spring(x0.view(), 0.96, 400.0);
+        let mut direction = gradient;
+        direction.mapv_inplace(|component| -component);
+        let norm = direction.iter().fold(0.0_f64, |acc, v| acc + v * v).sqrt();
+        assert!(norm > 1.0, "||g|| = {norm}, so the opening is not one unit");
+        let mut uncapped = x0.clone();
+        uncapped.scaled_add(1.0 / norm, &direction);
+        let uncapped_length = uncapped
+            .iter()
+            .zip(x0.iter())
+            .fold(0.0_f64, |acc, (left, right)| {
+                let delta = left - right;
+                acc + delta * delta
+            })
+            .sqrt();
+        assert!(
+            (uncapped_length - 1.0).abs() < 1e-12,
+            "uncapped length {uncapped_length}"
+        );
+        assert!(
+            declared_group_lost_a_bond(uncapped.view(), &species, Some(&groups), tolerance),
+            "the one-unit step has to be the trial the check refuses"
+        );
+
+        let mut opt = WarmLbfgs::default();
+        opt.keep_declared_bonds(&species, &groups, tolerance);
+        let mut probes = Vec::new();
+        let start = oh_spring(x0.view(), 0.96, 400.0).0;
+        let (energy, done, _) = opt.minimize(x0.view(), 40, |point| {
+            probes.push(point.to_owned());
+            Some(oh_spring(point, 0.96, 400.0))
+        });
+        assert!(probes.len() >= 2, "the line search never left the start");
+        assert!(
+            !declared_group_lost_a_bond(probes[1].view(), &species, Some(&groups), tolerance),
+            "first trial broke the check at length {}",
+            bond_length(probes[1].view())
+        );
+        let taken = probes[1]
+            .iter()
+            .zip(x0.iter())
+            .fold(0.0_f64, |acc, (left, right)| {
+                let delta = left - right;
+                acc + delta * delta
+            })
+            .sqrt();
+        assert!(taken > 0.0 && taken < 1.0, "first trial length {taken}");
+        assert!(energy.is_finite() && energy < start, "energy {energy}");
+        assert!(
+            !declared_group_lost_a_bond(done.view(), &species, Some(&groups), tolerance),
+            "settled length {}",
+            bond_length(done.view())
+        );
+        assert!(
+            (bond_length(done.view()) - 0.96).abs() < 1e-4,
+            "settled at {}",
+            bond_length(done.view())
+        );
+    }
+
+    /// A first step the check already allows is the solver's own step.
+    #[test]
+    fn a_step_inside_the_check_matches_the_uncapped_solver() {
+        use crate::methods::cluster_hopping::declared_group_lost_a_bond;
+
+        let tolerance = 1.25;
+        let species = [8u32, 1];
+        let groups = vec![vec![0usize, 1]];
+        let mut x0 = Array1::zeros(6);
+        x0[3] = 0.962;
+        let (_, gradient) = oh_spring(x0.view(), 0.96, 50.0);
+        let mut direction = gradient;
+        direction.mapv_inplace(|component| -component);
+        let norm = direction.iter().fold(0.0_f64, |acc, v| acc + v * v).sqrt();
+        let alpha = if norm > 1.0 { 1.0 / norm } else { 1.0 };
+        let mut opening = x0.clone();
+        opening.scaled_add(alpha, &direction);
+        assert!(
+            !declared_group_lost_a_bond(opening.view(), &species, Some(&groups), tolerance),
+            "this opening is the control, and it has to fit the check"
+        );
+
+        let mut plain = WarmLbfgs::default();
+        let mut capped = WarmLbfgs::default();
+        capped.keep_declared_bonds(&species, &groups, tolerance);
+        let (plain_energy, plain_x, plain_evals) =
+            plain.minimize(x0.view(), 40, |point| Some(oh_spring(point, 0.96, 50.0)));
+        let (capped_energy, capped_x, capped_evals) =
+            capped.minimize(x0.view(), 40, |point| Some(oh_spring(point, 0.96, 50.0)));
+        assert_eq!(plain_evals, capped_evals);
+        assert_eq!(plain_energy.to_bits(), capped_energy.to_bits());
+        assert_eq!(plain_x, capped_x);
     }
 }
