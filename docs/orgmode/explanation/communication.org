@@ -140,7 +140,7 @@ assert len(result["replicas"]) == 4
 The portfolio requires finite positive-width intervals. Fixed-axis box search
 uses the separate convenience domain mapping described below. A caller-owned
 native objective handle passed to =global_optimize_objective= retains its
-single-portfolio interface. ChemFit's =fit_anneal(jac=False)= calls =minimize=;
+single-portfolio interface. ChemFit's ~fit_anneal(jac=False)~ calls =minimize=;
 it does not implicitly select the portfolio ensemble shown here.
 
 At arm checkpoints, replicas publish paid feasible positions and receive peers'
@@ -234,7 +234,7 @@ an explicit geometric setting, not a universal diversity or quality guarantee.
 
 The shared receiver rule restricts both paid-sample delivery and coverage-
 deposit delivery. Box scalar hops, gradient hops and portfolio replicas use
-the same =BoxCoverageConfig.neighbors=. For five live chains, =neighbors=1=
+the same =BoxCoverageConfig.neighbors=. For five live chains, ~neighbors=1~
 gives each chain two direct peers, including the edge between chain zero and
 chain four. Saturating the radius yields all-to-all without duplicate edges.
 Retiring a reader does not renumber the ring or discard its producer history
@@ -262,7 +262,7 @@ controls. =census_bus_topology= requires =bank-rpc= and exercises TCP and IPC.
 
 ** Common Python result and domain
 
-=minimize(fun, x0, bounds, jac=None, budget=..., replicas=...)= delegates to
+~minimize(fun, x0, bounds, jac=None, budget=..., replicas=...)~ delegates to
 =ensemble_optimize= and retains its complete result dictionary under
 =result.diagnostics=. It does not select atomic geometry from vector length
 or introduce a separate optimization loop.
@@ -575,15 +575,15 @@ Three different questions require three different checks.
    descriptor orders comparisons; descriptor proximity alone does not
    identify a minimum. The box witness compares each coordinate difference
    against =identity_tol * max(box_width, 1e-12)=, with default
-   =identity_tol=1e-3=. Here "exact history" means witness-based identity
+   ~identity_tol=1e-3~. Here "exact history" means witness-based identity
    under this declared numerical rule, not exact real arithmetic.
 3. /Are the structures nearby packings?/ The
    [[file:../../../src/catalog/packing.rs][packing map]] uses leader-clustered
    local environments and normalized class histograms. =nearby_packing=
    constructs a pairwise book and tests histogram L1 distance against
-   =PACKING_LINK=0.35=. Community calculations can connect structures through
+   ~PACKING_LINK=0.35~. Community calculations can connect structures through
    other references; that is distinct from this pairwise test and from the
-   =PACKING_MERGE=0.20= book-cell grain. None of these radii guarantees one
+   ~PACKING_MERGE=0.20~ book-cell grain. None of these radii guarantees one
    population group per energy funnel.
 
 Catalog admission is another boundary. A
@@ -631,7 +631,7 @@ That broader transaction must not be inferred for the generic hook wrappers.
 With the =history-nng= feature, box shared history can use
 [[file:../../../src/history_nng.rs][=HistoryNngClient=]] and its request/reply
 server instead of the in-process mutex table. =HISTORY_NNG= selects the
-endpoint and =HISTORY_NNG_SERVE=1= requests a local server. The client sends
+endpoint and ~HISTORY_NNG_SERVE=1~ requests a local server. The client sends
 energy, design coordinates, gradient and box widths, and receives identity
 and counts. Observation and acceptance publication are separate requests, not
 one atomic adoption transaction. It does not receive a coordinate proposal.
@@ -702,9 +702,9 @@ minimum refreshes every eight eligible checkpoints. Send and receive are
 best-effort and nonblocking. Retained peers are the latest heard states, not a
 synchronized population snapshot.
 
-=CENSUS_BUS_BASE= identifies the endpoint namespace. =CENSUS_BUS_NEIGHBORS=0=
+=CENSUS_BUS_BASE= identifies the endpoint namespace. ~CENSUS_BUS_NEIGHBORS=0~
 subscribes to every peer; a positive value restricts subscriptions to cyclic
-neighbors within that distance. =CENSUS_BUS_IPC=1= selects local IPC rather
+neighbors within that distance. ~CENSUS_BUS_IPC=1~ selects local IPC rather
 than loopback TCP. Peers do not forward live-minimum records. A ring supplies
 a local census, not a globally mixed aggregate, and does not restrict the
 coordinator's hearing or parent selection. In the LJ driver, private sharing
@@ -780,9 +780,9 @@ minimum history. =BoxEnsembleConfig::shared_deposits= caps incoming coverage
 visits per receiving region and boundary. The width-normalized RMS descriptor
 distance differs from the minimum witness's width-scaled max norm.
 
-The LJ catalog path uses =CATALOG_SHARED_BIAS=1= and =DepositRemote=. Fresh bus
+The LJ catalog path uses ~CATALOG_SHARED_BIAS=1~ and =DepositRemote=. Fresh bus
 minima are admitted only when =nearby_packing= holds unless
-=CENSUS_BUS_UNBOUNDED=1=. The switch covers those bus observations only:
+~CENSUS_BUS_UNBOUNDED=1~. The switch covers those bus observations only:
 population-parent and own-visit deposits have separate admission paths.
 Depositing history changes subsequent biased acceptance and repulsion; it is
 not attractive coordinate consensus.

@@ -69,22 +69,12 @@ fn main() {
 }
 #+end_src
 
-It prints:
-
-#+begin_example
-reverse_cycles: true
-best: -479.316795
-accepted: {"rcycle": 578, "rrot": 48, "rtrans": 27}
-reverse_cycles: false
-best: -488.323527
-accepted: {"rrot": 110, "rtrans": 94}
-#+end_example
-
-With the move on, most accepted hops come from =rcycle=.
-On this start the search without the move still ends lower.
-One start cannot rank two settings.
+It prints =reverse_cycles=, the best energy, and the accepted count of
+each move. One start cannot rank two settings.
 Run many seeds and pair the runs by seed.
-[[file:../explanation/water-cycle-reversal.org][Hydrogen-bond cycle reversal]] does that over 288 pairs.
+[[file:../explanation/water-cycle-reversal.org][Hydrogen-bond cycle reversal]]
+describes the move. The rows of its size-and-seed comparison are not
+in the repository.
 
 * See also
 

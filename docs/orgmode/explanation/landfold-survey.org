@@ -208,60 +208,11 @@ The reference row is lab-cosmo/sketchmap at c2871db187f4a60377e7727af781da6c6c34
 It uses the landfold landmarks, sigma and switch exponents 2, 4.
 Landmark weights are Euclidean Voronoi populations to power 1, normalized, as =dimlandmark -w= writes them.
 The fit follows the stages in =utils/sketch-map.sh=, and other points are placed with =dimproj=.
-The table is =data/landfold_survey.csv=, written by =scripts/landfold_survey.py=.
+=scripts/landfold_survey.py= writes =data/landfold_survey.csv= and
+can rewrite the table on this page. The numbers are not copied here.
 The =umap_learn= column is the umap-learn version of the run.
 
-| book | method | T | C | Kruskal | sketch-map | runtime (s) |
-|------+--------+---+---+---------+------------+-------------|
-| lj38 | anneal_landfold | 0.8995 | 0.9290 | 0.2902 | 0.02640 | 0.60 |
-| lj38 | anneal_landfold_serial | 0.8995 | 0.9290 | 0.2902 | 0.02640 | 3.82 |
-| lj38 | anneal_landfold_book |  |  |  |  | 0.82 |
-| lj38 | reference_sketchmap | 0.8478 | 0.9389 | 0.2694 | 0.02847 | 42.30 |
-| lj38 | sklearn_mds | 0.8534 | 0.9331 | 0.2443 | 0.02671 | 7.34 |
-| lj38 | sklearn_mds_switch | 0.8487 | 0.9191 | 0.2824 | 0.03056 | 9.95 |
-| lj38 | sklearn_isomap | 0.8324 | 0.9422 | 0.3063 | 0.03525 | 0.74 |
-| lj38 | sklearn_tsne | 0.9628 | 0.9294 | 0.3189 | 0.03728 | 43.43 |
-| lj38 | opentsne | 0.9625 | 0.9177 | 0.3441 | 0.03918 | 1.54 |
-| lj38 | umap | 0.9247 | 0.9370 | 0.3334 | 0.03867 | 1.91 |
-| lj38 | phate | 0.8445 | 0.9346 | 0.4765 | 0.04325 | 4.03 |
-| lj75 | anneal_landfold | 0.9283 | 0.9216 | 0.3024 | 0.02436 | 0.59 |
-| lj75 | anneal_landfold_serial | 0.9283 | 0.9216 | 0.3024 | 0.02436 | 3.75 |
-| lj75 | anneal_landfold_book |  |  |  |  | 1.12 |
-| lj75 | reference_sketchmap | 0.8579 | 0.9282 | 0.2755 | 0.02677 | 42.71 |
-| lj75 | sklearn_mds | 0.8288 | 0.8967 | 0.2735 | 0.02692 | 9.26 |
-| lj75 | sklearn_mds_switch | 0.8457 | 0.8906 | 0.2990 | 0.02866 | 9.33 |
-| lj75 | sklearn_isomap | 0.8285 | 0.9323 | 0.3589 | 0.03292 | 0.78 |
-| lj75 | sklearn_tsne | 0.9619 | 0.9435 | 0.3557 | 0.02867 | 42.01 |
-| lj75 | opentsne | 0.9603 | 0.9364 | 0.3707 | 0.02953 | 1.44 |
-| lj75 | umap | 0.9425 | 0.9465 | 0.3621 | 0.03183 | 1.66 |
-| lj75 | phate | 0.8622 | 0.9325 | 0.4847 | 0.04017 | 3.92 |
-| lj98 | anneal_landfold | 0.9539 | 0.9547 | 0.2909 | 0.01696 | 0.64 |
-| lj98 | anneal_landfold_serial | 0.9539 | 0.9547 | 0.2909 | 0.01696 | 4.31 |
-| lj98 | anneal_landfold_book |  |  |  |  | 1.46 |
-| lj98 | reference_sketchmap | 0.9001 | 0.9542 | 0.2554 | 0.02225 | 43.01 |
-| lj98 | sklearn_mds | 0.8890 | 0.8994 | 0.2493 | 0.02059 | 8.87 |
-| lj98 | sklearn_mds_switch | 0.8899 | 0.8796 | 0.2746 | 0.02404 | 8.92 |
-| lj98 | sklearn_isomap | 0.8933 | 0.9574 | 0.3050 | 0.02624 | 0.73 |
-| lj98 | sklearn_tsne | 0.9796 | 0.9715 | 0.3200 | 0.02654 | 42.22 |
-| lj98 | opentsne | 0.9802 | 0.9721 | 0.3218 | 0.02643 | 1.41 |
-| lj98 | umap | 0.9667 | 0.9698 | 0.3913 | 0.03122 | 1.72 |
-| lj98 | phate | 0.9179 | 0.9573 | 0.3766 | 0.04028 | 4.20 |
-
-Differences are landfold minus that method.
-Runtime ratios are that method divided by landfold.
-Each range is the smallest and largest value across the books.
-
-| method | T | C | sketch-map | runtime ratio |
-|--------+---+---+------------+---------------|
-| anneal_landfold_serial | 0.0000 to 0.0000 | 0.0000 to 0.0000 | 0.0000 to 0.0000 | 6.3559 to 6.7344 |
-| reference_sketchmap | 0.0517 to 0.0704 | -0.0099 to 0.0005 | -0.0053 to -0.0021 | 67.2031 to 72.3898 |
-| sklearn_mds | 0.0461 to 0.0995 | -0.0041 to 0.0553 | -0.0036 to -0.0003 | 12.2333 to 15.6949 |
-| sklearn_mds_switch | 0.0508 to 0.0826 | 0.0099 to 0.0751 | -0.0071 to -0.0042 | 13.9375 to 16.5833 |
-| sklearn_isomap | 0.0606 to 0.0998 | -0.0132 to -0.0027 | -0.0093 to -0.0086 | 1.1406 to 1.3220 |
-| sklearn_tsne | -0.0633 to -0.0257 | -0.0219 to -0.0004 | -0.0109 to -0.0043 | 65.9688 to 72.3833 |
-| opentsne | -0.0630 to -0.0263 | -0.0174 to 0.0113 | -0.0128 to -0.0052 | 2.2031 to 2.5667 |
-| umap | -0.0252 to -0.0128 | -0.0249 to -0.0080 | -0.0143 to -0.0075 | 2.6875 to 3.1833 |
-| phate | 0.0360 to 0.0661 | -0.0109 to -0.0026 | -0.0233 to -0.0158 | 6.5625 to 6.7167 |
+# landfold-survey-table
 
 * References
 
