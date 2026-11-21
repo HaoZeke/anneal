@@ -444,6 +444,7 @@ fn report(
         pot_s / calls,
         outside / calls,
     );
+    println!("best_bits,{:016x}", outcome.best.to_bits());
     // After the search. The row above is the result; these lines are the
     // funnel and the arms that produced it.
     if let Ok(path) = std::env::var("H2H_BEST")

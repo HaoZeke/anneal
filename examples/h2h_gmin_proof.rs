@@ -108,6 +108,7 @@ fn cmd_run(args: &[String]) -> i32 {
         cpu_model(),
         cpu_pins(),
     );
+    println!("best_bits,{:016x}", outcome.best.to_bits());
     0
 }
 

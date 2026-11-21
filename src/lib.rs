@@ -103,6 +103,7 @@ pub mod coreclass;
 pub mod corekey;
 /// Continuous symmetry measure averages for a free point set.
 pub mod csm;
+mod hop_tally;
 pub mod curvature;
 /// Transport for consensus traffic between server brains.
 #[cfg(feature = "bank-rpc")]

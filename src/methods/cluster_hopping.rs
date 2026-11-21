@@ -26,6 +26,7 @@
 //! stage is decided online rather than fixed.
 
 use ndarray::{Array1, ArrayView1};
+use crate::hop_tally;
 use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
@@ -2515,11 +2516,19 @@ fn arm_row<'a>(arms: &'a mut Vec<ArmCount>, name: &str) -> &'a mut ArmCount {
     arms.last_mut().expect("the row was just pushed")
 }
 
-fn begin_arm(arms: &mut Vec<ArmCount>, name: &str) {
+fn begin_arm(arms: &mut Vec<ArmCount>, name: &str, spent: usize) {
     arm_row(arms, name).proposed += 1;
+    hop_tally::begin_move(name, spent);
 }
 
-fn finish_arm(arms: &mut Vec<ArmCount>, name: &str, accepted: bool, improved: bool) {
+fn finish_arm(
+    arms: &mut Vec<ArmCount>,
+    name: &str,
+    accepted: bool,
+    improved: bool,
+    spent: usize,
+    proposal: f64,
+) {
     let row = arm_row(arms, name);
     if accepted {
         row.accepted += 1;
@@ -2527,6 +2536,7 @@ fn finish_arm(arms: &mut Vec<ArmCount>, name: &str, accepted: bool, improved: bo
     if improved {
         row.improved += 1;
     }
+    hop_tally::finish_move(name, accepted, spent, proposal);
 }
 
 /// The arm a hop plays.
@@ -2658,8 +2668,10 @@ pub fn run_with_gradient<'g, R: Rng + ?Sized>(
     grad: Option<&mut GradFn<'g>>,
     rng: &mut R,
 ) -> Result<Outcome, SearchError> {
+    hop_tally::begin_run();
+    let mut counted = hop_tally::DrawRng { inner: rng };
     let mut checkpoint = continue_without_checkpoint;
-    run_full(
+    let result = run_full(
         cfg,
         start,
         ledger,
@@ -2671,8 +2683,12 @@ pub fn run_with_gradient<'g, R: Rng + ?Sized>(
         None,
         None,
         &mut checkpoint,
-        rng,
-    )
+        &mut counted,
+    );
+    if let Ok(outcome) = result.as_ref() {
+        hop_tally::emit(outcome.charged, outcome.best);
+    }
+    result
 }
 
 /// As [`run_with_gradient`], with value and gradient together, which is
@@ -5025,6 +5041,7 @@ where
     let mut held_seat: Option<usize> = None;
     let mut held_count: usize = 0;
     let stop = loop {
+        hop_tally::at_iteration(ledger.spent(), e);
         // A finished checkpoint interval is delivered before the budget
         // exit. The loop otherwise returns here with nothing left to
         // charge, and the callback that the last hop completed never runs.
@@ -7273,7 +7290,7 @@ where
         } else {
             kernels[k].name().to_owned()
         };
-        begin_arm(&mut arm_counts, &proposal_action);
+        begin_arm(&mut arm_counts, &proposal_action, ledger.spent());
         // Stage one of the staged quench: settle the moved atoms against the
         // frozen environment at fractional price, before recentring shifts
         // every coordinate and hides which atoms the move touched.
@@ -8285,7 +8302,14 @@ where
                 tabu_hits += 1;
             }
         }
-        finish_arm(&mut arm_counts, &proposal_action, accept, improved);
+        finish_arm(
+            &mut arm_counts,
+            &proposal_action,
+            accept,
+            improved,
+            ledger.spent(),
+            e_new,
+        );
         // The quench was recorded before this test. The minima file already
         // has the line; this sets the acceptance column.
         if recordable {
@@ -10634,12 +10658,12 @@ mod tests {
     #[test]
     fn an_arm_count_separates_proposals_from_accepts_and_improvements() {
         let mut arms = Vec::new();
-        begin_arm(&mut arms, "gshake");
-        finish_arm(&mut arms, "gshake", false, false);
-        begin_arm(&mut arms, "gburst");
-        finish_arm(&mut arms, "gburst", true, true);
-        begin_arm(&mut arms, "gshake");
-        finish_arm(&mut arms, "gshake", true, false);
+        begin_arm(&mut arms, "gshake", 0);
+        finish_arm(&mut arms, "gshake", false, false, 0, 0.0);
+        begin_arm(&mut arms, "gburst", 0);
+        finish_arm(&mut arms, "gburst", true, true, 0, 0.0);
+        begin_arm(&mut arms, "gshake", 0);
+        finish_arm(&mut arms, "gshake", true, false, 0, 0.0);
         assert_eq!(arms[0].move_type, "gshake");
         assert_eq!(arms[0].proposed, 2);
         assert_eq!(arms[0].accepted, 1);
