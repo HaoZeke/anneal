@@ -62,8 +62,8 @@ Each output line is a key and a value, and the keys below answer most questions.
 - =best= :: Lowest validated energy.
 - =full_quenches= :: Full quenches over the whole run.
 - =screen_calls= :: Calls spent on short screening descents.
-- =surface_hops= :: Surface-hop candidates quenched.
-- =surface_descents= :: Sweeps that lowered the record.
+- =surface_hops= :: Legacy surface-hop counter; stays =0= because =outcome.surface_hops= is fixed at =(0, 0, 0.0)= and the hop loop does not quench surface candidates.
+- =surface_descents= :: Legacy surface-descent counter (second element of =outcome.surface_hops=); stays =0= because candidates are not quenched.
 - =resolved_sha256= :: Digest of the resolved configuration.
 
 The digest changes only when the configuration does.
