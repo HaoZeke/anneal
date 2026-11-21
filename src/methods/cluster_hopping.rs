@@ -157,6 +157,55 @@ pub struct AcceptedTransition {
     pub adopted: bool,
 }
 
+/// Minima at which a chain's symmetry completion found nothing to do.
+///
+/// A completion is a function of the minimum, so a minimum that gave nothing
+/// gives nothing when the chain enters it again. A minimum is held again when
+/// its energy is the held one to the precision a relaxation reaches and it is
+/// within the merge radius of the held structure by the chain's own region
+/// identity. The merge radius alone is not enough: structures that far apart
+/// in one region differ in what a completion finds on them.
+#[derive(Default)]
+struct FruitlessMinima {
+    held: Vec<(f64, Array1<f64>)>,
+}
+
+impl FruitlessMinima {
+    fn same_energy(a: f64, b: f64) -> bool {
+        (a - b).abs() <= 1e-9 * a.abs().max(b.abs()).max(1.0)
+    }
+
+    fn holds(
+        &self,
+        identity: &BasinIndex<ClusterFingerprint>,
+        energy: f64,
+        x: ArrayView1<f64>,
+    ) -> bool {
+        let mut described: Option<Array1<f64>> = None;
+        self.held.iter().rev().any(|(held, centre)| {
+            Self::same_energy(*held, energy) && {
+                let d = described.get_or_insert_with(|| identity.describe(x));
+                d.len() == centre.len()
+                    && d.iter()
+                        .zip(centre.iter())
+                        .map(|(a, b)| (a - b) * (a - b))
+                        .sum::<f64>()
+                        .sqrt()
+                        <= identity.merge_radius()
+            }
+        })
+    }
+
+    fn insert(
+        &mut self,
+        identity: &BasinIndex<ClusterFingerprint>,
+        energy: f64,
+        x: ArrayView1<f64>,
+    ) {
+        self.held.push((energy, identity.describe(x)));
+    }
+}
+
 /// Coordinates and their paid evidence travel together through adoption and
 /// ladder scheduling. A shared identity belongs only to this exact occupancy.
 struct OccupiedMinimum {
@@ -4696,6 +4745,8 @@ where
     // Regions whose symmetry completion this chain has attempted, under
     // `Config::symmetry_completion_once`.
     let mut completed_regions: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    // Minima at which this chain's symmetry completion found nothing to do.
+    let mut fruitless = FruitlessMinima::default();
     if cfg.move_library.is_rigid_body() {
         identity.set_cap(RIGID_BASIN_CAP);
         bias.cap_basins(RIGID_BASIN_CAP);
@@ -8554,7 +8605,7 @@ where
         } else {
             crate::detected_symmetry::complete_detected_classed
         };
-        if cfg.symmetry_completion_on_new
+        let completed = if cfg.symmetry_completion_on_new
             && accept
             && moved_basin
             && hop_room(hops)
@@ -8564,16 +8615,29 @@ where
             && (!cfg.symmetry_completion_once
                 || history.is_some()
                 || completed_regions.insert(identity.basin_of(x.view())))
-            && let Some(y) = complete(
-                x.view(),
-                n,
-                cfg.species.as_deref(),
-                cfg.symmetry_tolerance,
-                cfg.symmetry_merge_radius,
-                cfg.symmetry_core_fraction,
-                cfg.min_separation,
-            )
         {
+            let chain_alone = history.is_none();
+            if chain_alone && fruitless.holds(&identity, e, x.view()) {
+                None
+            } else {
+                let found = complete(
+                    x.view(),
+                    n,
+                    cfg.species.as_deref(),
+                    cfg.symmetry_tolerance,
+                    cfg.symmetry_merge_radius,
+                    cfg.symmetry_core_fraction,
+                    cfg.min_separation,
+                );
+                if found.is_none() && chain_alone {
+                    fruitless.insert(&identity, e, x.view());
+                }
+                found
+            }
+        } else {
+            None
+        };
+        if let Some(y) = completed {
             let (es, xs) = relax(ledger, y.view(), cfg.relax_steps);
             if es.is_finite() && xs.len() == x.len() {
                 let completion_gradient = record_quenched_answer(
@@ -12475,6 +12539,28 @@ mod tests {
         assert!(every >= 4, "{every}");
         assert!((1..=2).contains(&once), "{once}");
         assert!(once < every, "{once} {every}");
+    }
+
+    /// A minimum is held again when its energy is the held one and its
+    /// structure is within the merge radius of the held one, and by neither
+    /// alone: the same structure at another energy, and another structure at
+    /// the same energy, are not it.
+    #[test]
+    fn a_fruitless_minimum_is_held_by_its_energy_and_its_structure() {
+        let n = 8;
+        let cfg = Config::for_cluster(n);
+        let identity = BasinIndex::new(ClusterFingerprint::for_keying(n, false), cfg.merge_radius);
+        let mut rng = StdRng::seed_from_u64(9);
+        let x = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+        let mut held = FruitlessMinima::default();
+        assert!(!held.holds(&identity, -3.0, x.view()));
+        held.insert(&identity, -3.0, x.view());
+        assert!(held.holds(&identity, -3.0, x.view()));
+        let relaxed = x.mapv(|v| v + 1e-7 * (v * 13.0).sin());
+        assert!(held.holds(&identity, -3.0 + 1e-11, relaxed.view()));
+        assert!(!held.holds(&identity, -3.0 + 1e-5, x.view()));
+        let stretched = x.mapv(|v| 1.5 * v);
+        assert!(!held.holds(&identity, -3.0, stretched.view()));
     }
 
     /// A structure whose positions are an octahedron and whose species are
