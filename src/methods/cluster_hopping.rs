@@ -640,6 +640,20 @@ pub struct Ledger {
     /// The count is [`Ledger::spent`] at that call, before any later relaxation.
     /// Capped at [`IMPROVEMENT_CAP`] records, the same cap as [`Outcome::improvements`].
     encounters: Vec<(usize, f64)>,
+    /// A restraint block finished without beating the incumbent it opened
+    /// on. The hop that sees this returns to where the chain stood when
+    /// that incumbent was found.
+    pub(crate) revert_unrestrained: bool,
+    /// The screening pass opened a surface block. The hop records the
+    /// chain it started from.
+    pub(crate) block_opened: bool,
+    /// Chain at the start of the block that last lowered the incumbent.
+    block_chain: Option<(f64, Array1<f64>)>,
+    /// Chain at the start of the block whose relaxation found the
+    /// incumbent a later failed restraint block could not beat.
+    before_gain: Option<(f64, Array1<f64>)>,
+    /// Speculative quenches must not publish a minimum the chain does not walk.
+    pub(crate) suspend_record: bool,
 }
 
 struct DiagnosticQuench<'a> {
@@ -692,6 +706,11 @@ impl Ledger {
             answer_polish_calls: 0,
             held_tail: 0,
             encounters: Vec::new(),
+            revert_unrestrained: false,
+            block_opened: false,
+            block_chain: None,
+            before_gain: None,
+            suspend_record: false,
         }
     }
 
@@ -918,6 +937,9 @@ impl Ledger {
     /// improvement. The charged count has to be the one at this call: a
     /// later push would time the minimum after work that did not find it.
     pub fn record(&mut self, value: f64, state: ArrayView1<f64>) {
+        if self.suspend_record {
+            return;
+        }
         if value.is_finite() && value < self.best {
             self.best = value;
             self.best_state = Some(state.to_owned());
@@ -3285,21 +3307,12 @@ where
 /// Drop below another energy that counts as strictly lower, so rounding noise is no improvement.
 const STRICT_IMPROVEMENT: f64 = 1e-10;
 
-/// Body count at and below which the rigid factor may climb to 24.
-///
-/// An all-body kick on a ten-water chart still falls into the target
-/// basin at that factor. A larger chart caps the factor at
-/// [`RIGID_FACTOR_CAP_LARGE`] and can still cool when the acceptance
-/// rate is high.
-const RIGID_HOT_BODIES: usize = 10;
-/// Highest rigid factor on a chart with more than [`RIGID_HOT_BODIES`] bodies.
-const RIGID_FACTOR_CAP_LARGE: f64 = 4.0;
 /// Metropolis acceptance the orientation amplitude aims at.
 ///
 /// The ratio a Cartesian basin-hopping step is adjusted toward, and the
-/// default of GMIN's acceptance-ratio update. A chart with more than ten
-/// bodies keeps its acceptance temperature at the factor cap and moves this
-/// amplitude instead, so the two controls do not chase the same ratio.
+/// default of GMIN's acceptance-ratio update. Every rigid chart accepts at
+/// the temperature the preset stored for that potential and moves this
+/// amplitude toward the same ratio.
 const RIGID_ACCEPT_TARGET: f64 = 0.5;
 /// Quenched trials between orientation-amplitude updates.
 const RIGID_ACCEPT_BLOCK: usize = 50;
@@ -3675,14 +3688,6 @@ mod biased_metropolis_tests {
         assert!(stalled(&cfg, patience, 0));
         assert!(!stalled(&cfg, 2 * patience - 1, patience));
         assert!(stalled(&cfg, 2 * patience, patience));
-    }
-}
-
-fn rigid_factor_cap(n_bodies: usize) -> f64 {
-    if n_bodies > RIGID_HOT_BODIES {
-        RIGID_FACTOR_CAP_LARGE
-    } else {
-        24.0
     }
 }
 
@@ -4988,22 +4993,9 @@ where
     let mut descent = ScreenDescent::default();
     let mut accepted = 0usize;
     let mut arm_counts: Vec<ArmCount> = Vec::new();
-    // A rigid chart is not in the preset's reduced energy unit. Charts of
-    // ten bodies or fewer start at the top of the acceptance window and let
-    // the rate pull the factor down. A chart with more bodies stays at the
-    // lower cap: the orientation amplitude, not the temperature, is what
-    // tracks the acceptance ratio. Letting that factor climb back to 24
-    // leaves the hydrogen-bond funnel.
-    let mut rigid_factor: f64 = if cfg.move_library.is_rigid_body() {
-        rigid_factor_cap(cfg.n_points)
-    } else {
-        1.0
-    };
-    let mut rigid_window = 0usize;
-    let mut rigid_hits = 0usize;
-    // Large rigid charts hold the acceptance temperature at the factor cap.
-    // The orientation amplitude is what moves toward a one-half acceptance
-    // ratio. Charts of ten bodies and fewer leave both untouched.
+    // The orientation amplitude moves toward a one-half acceptance ratio on
+    // every rigid chart. The acceptance temperature stays the value the
+    // preset stored for this potential.
     let mut orient_scale = 1.0_f64;
     let mut orient_window = 0usize;
     let mut orient_yes = 0usize;
@@ -5119,7 +5111,11 @@ where
         } else {
             1e-9
         };
+        let hop_origin = (e, x.clone());
         if ledger.best < best_seen - new_lowest {
+            if let Some(origin) = ledger.block_chain.clone() {
+                ledger.before_gain = Some(origin);
+            }
             best_seen = ledger.best;
             charged_at_best = ledger.spent();
             heat = 1.0;
@@ -6580,14 +6576,9 @@ where
             let cap = 4.0 * cfg.temperature;
             temperature = spread.clamp(floor, cap);
         }
-        if cfg.move_library.is_rigid_body() {
-            // The preset temperature stays in its own energy unit. A rigid
-            // water chart is not that unit, so a local factor moves the
-            // acceptance rate toward one half without editing the preset.
-            temperature *= rigid_factor;
-        }
         // `plateau_heat` is an acceptance temperature. The proposal step
-        // stays on `cfg.temperature`.
+        // stays on `cfg.temperature`. A rigid chart uses the same stored
+        // temperature; a second factor is not a property of the potential.
         temperature *= heat;
         // The coldest rung's temperature from the state it holds, which the
         // energy bias is built and filled at. Read here, where that rung's own
@@ -7532,6 +7523,10 @@ where
             }
             break HopStop::of_closed(ledger);
         }
+        if ledger.block_opened {
+            ledger.block_chain = Some(hop_origin.clone());
+            ledger.block_opened = false;
+        }
         let entry_snapshot = if cfg.trail_on_stall {
             Some(x_screen.clone())
         } else {
@@ -8184,13 +8179,19 @@ where
         };
         let mut accept = accept;
         if cfg.move_library.is_rigid_body() && !unquenched {
-            // Metropolis at the preset temperature. The threshold rule
-            // collapses under a run of small accepts and then cannot
-            // cross the gap between rigid cages.
+            // Metropolis at the temperature the preset stored for this
+            // potential. A second factor, chosen from the body count, accepts
+            // rises of several kJ/mol and leaves the chain in the cage above
+            // the minimum. The threshold rule collapses under a run of small
+            // accepts and then cannot cross the gap between rigid cages.
             let rise = (e_new - e) / cfg.temperature.max(1e-12);
             accept = rise <= 0.0 || rng.random::<f64>() < (-rise).exp();
         }
-        if cfg.move_library.is_rigid_body() && cfg.n_points > RIGID_HOT_BODIES {
+        if cfg.move_library.is_rigid_body() {
+            // Count this decision before a same-basin return is vetoed. A
+            // return is a proposal that did not leave, and treating it as a
+            // rejection shrinks the orientation amplitude until the chart
+            // cannot cross into the next cage.
             orient_window += 1;
             if accept {
                 orient_yes += 1;
@@ -8223,32 +8224,9 @@ where
         if cfg.move_library.is_rigid_body() && returning && (e_new - e).abs() <= 5.0e-2 {
             // Same quenched energy and the same distance key. Adopting it
             // does not leave the basin, so it is not an acceptance the
-            // temperature window should see.
+            // temperature window should see. The orientation window above
+            // already counted the Metropolis decision.
             accept = false;
-        }
-        if cfg.move_library.is_rigid_body()
-            && cfg.n_points <= RIGID_HOT_BODIES
-            && (!returning || (e_new - e).abs() > 5.0e-2)
-        {
-            // Same-basin accepts have no energy change, and counting them
-            // keeps a rigid chart cold. Only a move that lands on a
-            // different minimum says whether the temperature is high enough.
-            let changed = accept && (e_new - e).abs() > 5.0e-2;
-            rigid_window += 1;
-            if changed {
-                rigid_hits += 1;
-            }
-            if rigid_window >= 8 {
-                let rate = rigid_hits as f64 / rigid_window as f64;
-                let cap = rigid_factor_cap(cfg.n_points);
-                if rate < 0.25 {
-                    rigid_factor = (rigid_factor * 2.0).min(cap);
-                } else if rate > 0.6 {
-                    rigid_factor = (rigid_factor / 1.5).max(1.0);
-                }
-                rigid_window = 0;
-                rigid_hits = 0;
-            }
         }
         // An uphill step the bare rule accepted is checked with the
         // deposits before the chain moves. A filled destination can
@@ -8910,6 +8888,29 @@ where
             quiet += 1;
         }
         let stuck = stalled(cfg, quiet, longest_quiet);
+        // A restraint block that did not beat the incumbent it opened on
+        // reached that incumbent from somewhere else. Stand where the
+        // chain stood when the incumbent was found, and let the plain
+        // quench leave the basin. The surface portfolio holds the plain
+        // arm from here on.
+        if ledger.revert_unrestrained {
+            if let Some((energy, state)) = ledger.before_gain.take()
+                && state.len() == x.len()
+                && energy.is_finite()
+            {
+                x = state;
+                e = energy;
+            } else if let Some(state) = ledger.best_state.clone()
+                && state.len() == x.len()
+                && ledger.best.is_finite()
+            {
+                x = state;
+                e = ledger.best;
+            }
+            current_validation_gradient = None;
+            here = None;
+            ledger.revert_unrestrained = false;
+        }
         // Basin hopping with occasional jumping (Iwamatsu and Okabe, Chem.
         // Phys. Lett. 399, 396 (2004)): after `jump_patience` hops without
         // improvement, take `jump_steps` collective displacements with no
@@ -11078,7 +11079,11 @@ mod tests {
         assert_eq!(comm.surfaces.len(), 1);
         assert!(comm.surfaces[0].is_active());
         assert_eq!(rec.surfaces, comm.surfaces);
-        assert!(Config::communicating(98).surfaces.is_empty());
+        assert_eq!(
+            Config::communicating(98).surfaces.len(),
+            1,
+            "the communicating surface is offered at every size"
+        );
         assert!(matches!(
             rec.continuous_symmetry,
             ContinuousSymmetry::Measure { interval: 10 }

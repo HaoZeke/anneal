@@ -1,0 +1,7 @@
+After a failed restraint block, the plain-surface hold in
+``SurfacePortfolio`` now ends. It lifts when the plain walk reaches a
+lower minimum, or once the hold has lasted more blocks than the run had
+settled when it began. The next block then goes back to the restraint
+that failed. Before, one failed block held the plain surface for the
+rest of the run, so a ``cluster_search`` chain left on the icosahedral
+shelf at 75 points never drew the restraint again.

@@ -219,17 +219,14 @@ impl MoveLibrary {
                     )
                 };
                 let mobile = mobile_atoms(cfg, groups);
-                // One free group: a group shake, relocation or burst carries
-                // it whole, the quench returns the conformer it started from,
-                // and the hop pays a quench for it. A rotatable bond has two
-                // atoms on each side, so a group of three or fewer keeps the
-                // rigid arms. Whether the SOAP arm stays is
+                // One fragment with a dihedral: a group shake, relocation or
+                // burst carries it whole, the quench returns the conformer it
+                // started from, and the hop pays a quench for it. A chart
+                // without four centers has no torsion and keeps the rigid arms.
+                // Whether the SOAP arm stays is
                 // [`Config::with_flexible_molecules`]'s call: only it knows
                 // the group is one covalent molecule.
-                let lone_molecule = groups.len() == 1
-                    && groups[0].len() >= 4
-                    && mobile.is_none()
-                    && cfg.species.is_some();
+                let lone_molecule = lone_internal_fragment(cfg, groups);
                 if lone_molecule {
                     kernels.retain(|kernel| {
                         !matches!(
@@ -2692,6 +2689,22 @@ impl ClusterMove {
 /// `active_region` first because it names the movers directly, then
 /// the complement of `frozen`, and only then the grouped atoms, which
 /// is the free-cluster case where all three agree anyway.
+/// One movable fragment whose internal coordinate is a dihedral.
+///
+/// A dihedral is four distinct centers, and the torsion arm is the move
+/// that turns it. Translating or rotating that fragment leaves every
+/// internal coordinate fixed. Without atom types there is no torsion to
+/// draw, so the rigid arms stay.
+pub(super) fn lone_internal_fragment(cfg: &Config, groups: &[Vec<usize>]) -> bool {
+    let Some(atoms) = groups.first() else {
+        return false;
+    };
+    groups.len() == 1
+        && cfg.species.is_some()
+        && mobile_atoms(cfg, groups).is_none()
+        && atoms.iter().take(4).count() == 4
+}
+
 pub(super) fn mobile_atoms(cfg: &Config, groups: &[Vec<usize>]) -> Option<Vec<usize>> {
     if let Some((seeds, _)) = cfg.active_region.as_ref()
         && !seeds.is_empty()
