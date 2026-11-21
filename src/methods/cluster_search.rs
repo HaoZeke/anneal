@@ -1527,6 +1527,8 @@ where
             seed,
         )
     };
+    // The polish below spends this reserve. Release it first; that empties
+    // the hold, so its later drop is a no-op.
     if let Some(hold) = hold.as_mut() {
         ledger.release_tail(hold);
     }
@@ -1611,6 +1613,8 @@ where
             &mut rng,
         )
     };
+    // The polish below spends this reserve. Release it first; that empties
+    // the hold, so its later drop is a no-op.
     if let Some(hold) = hold.as_mut() {
         ledger.release_tail(hold);
     }
