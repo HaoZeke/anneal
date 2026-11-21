@@ -72,6 +72,18 @@ def test_provenance_gaps_are_exactly_the_listed_ones(audited):
     assert audit_mod.provenance(audited) == audit_mod.KNOWN_GAPS
 
 
+def test_covalent_provenance_tables_are_audited(audited):
+    required = {
+        "bench/covalent-h2h/gfn2/floor-gate-c2de652d.csv",
+        "bench/covalent-h2h/gfn2/floor-gate-land1.csv",
+        "bench/covalent-h2h/gfn2/si20-censoring.csv",
+        "bench/covalent-h2h/gfn2/si20-panel.csv",
+        "bench/covalent-h2h/gfn2/si20-starts.csv",
+        "bench/covalent-h2h/gfn2/superseded.csv",
+    }
+    assert required <= audited.read.keys()
+
+
 def test_untraced_numbers_are_still_quoted(audited):
     for path, fragment, _why in audit_mod.UNTRACED:
         assert audit_mod.collapse(fragment) in audit_mod.collapse((ROOT / path).read_text()), (path, fragment)
@@ -461,7 +473,10 @@ def test_the_revision_index_answers_as_one_git_call_per_question(audited):
     batched, single = {}, {}
     for revision in revisions:
         batched[revision, "exists"] = index.exists(revision)
-        single[revision, "exists"] = git("cat-file", "-e", f"{revision}^{{commit}}").returncode == 0
+        single[revision, "exists"] = bool(
+            git("for-each-ref", "--count=1", "--contains", revision,
+                "refs/heads", "refs/remotes", "refs/tags").stdout.strip()
+        )
     for row in table:
         for column in ("pushed_revision", "branch_revision"):
             revision = row[column]
