@@ -1,0 +1,2 @@
+cell,n,budget,reference,hits_a,hits_b,evals_median_a,evals_median_b,fisher_p,mannwhitney_p,mannwhitney_p_inf,outside_per_call_median_a,outside_per_call_median_b,outside_ratio,outside_fit_slope_a,outside_fit_intercept_a,outside_fit_slope_b,outside_fit_intercept_b,aa_n,aa_outside_per_call_median_a1,aa_outside_per_call_median_a2,aa_outside_ratio,verdict,reasons
+sc108-80,12,1000000,-21819.9952,3,0,1000000.0,1000000.0,0.2173913,0.039402801,0.039402801,9.9802245e-06,1.1759686e-05,1.1782988,1.1651545e-05,-0.88455503,0,11.164427,,,,,FAIL,mannwhitney outside
