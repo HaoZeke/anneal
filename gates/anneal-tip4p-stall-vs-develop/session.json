@@ -1,0 +1,132 @@
+{
+ "arms": {
+  "A": {
+   "binaries_sha256": {
+    "h2h_gmin_proof": "99f9f4ae3ad3d6eee228896c6a39e07e7cac93c3c6c674174cb462a8686afa65",
+    "h2h_metal": "1dfc42ca7b078cab98150a41041d1802c8aa6c9a157b433519d0b479a77e0c78",
+    "h2h_morse": "722a376469791347d934082979209fb461130e6795cbbac883d435af4e252596",
+    "h2h_seed": "bb6e3d0d4c7a27fab919e3048a03636a99208b6b0f86e2e1bdbfa68951ac6247"
+   },
+   "commit": "61fa67cf380e46876b569da45e7cc091647a775b",
+   "label": "develop",
+   "tree": "cff796c507a8fa1d0bfb28888c3570b61988055e",
+   "worktree_clean": true
+  },
+  "A2": {
+   "binaries_sha256": {
+    "h2h_gmin_proof": "99f9f4ae3ad3d6eee228896c6a39e07e7cac93c3c6c674174cb462a8686afa65",
+    "h2h_metal": "1dfc42ca7b078cab98150a41041d1802c8aa6c9a157b433519d0b479a77e0c78",
+    "h2h_morse": "722a376469791347d934082979209fb461130e6795cbbac883d435af4e252596",
+    "h2h_seed": "bb6e3d0d4c7a27fab919e3048a03636a99208b6b0f86e2e1bdbfa68951ac6247"
+   },
+   "commit": "61fa67cf380e46876b569da45e7cc091647a775b",
+   "label": "develop-2",
+   "tree": "cff796c507a8fa1d0bfb28888c3570b61988055e",
+   "worktree_clean": true
+  },
+  "B": {
+   "binaries_sha256": {
+    "h2h_gmin_proof": "c051a52d4bc01cab0cf59d863a4139f369dccc1051488a22b668d4acb12ffd9d",
+    "h2h_metal": "ebf45e7780238f3325facd6a8ac3edc382ce1901ff9d05bc6a948670fe645504",
+    "h2h_morse": "3118bd25b7565e592ad1fa6f5dea2a931b0ed238d8bf654e98e34d462c0e45fc",
+    "h2h_seed": "fcdf62b81c331fefd8f2356fd51dab76ba9f5b3435e1cf303dff5a907029e212"
+   },
+   "commit": "87280ef9745f8367d9857d757e21af35410d7b25",
+   "label": "stall",
+   "tree": "b778132b34901c95570b129acb44ab6bb0e06402",
+   "worktree_clean": true
+  },
+  "C": {
+   "binaries_sha256": {
+    "h2h_gmin_proof": "99b9e9861ca5c2baf2297569bcea07c010d12991fbce26d593f04179ede817eb",
+    "h2h_metal": "5169665664648694440e1568e5f2137934164ae2f67a45be825918867f5885b9",
+    "h2h_morse": "09172010a6c221b366a033573c709bbd9c580966a5372af20b40ce7ab7502fd9",
+    "h2h_seed": "50c2b3c3d1ff10103b1b8b89494a3aaa1114d767a115f8db27d8820cadb34cb3"
+   },
+   "commit": "ea777eafb9b80d8b93d94e68f499d66740e8a05b",
+   "label": "pr160",
+   "tree": "da15bc0a999531019e6e53fcc6b6b104afc47187",
+   "worktree_clean": true
+  }
+ },
+ "campaigns_run": [
+  "rigid",
+  "nonrigid"
+ ],
+ "core": "0",
+ "machine_id": "3b11c160088e7af5c4f7ebd9da95e0bfe019a34698416701bb057c15fea10873",
+ "pinning": {
+  "child_cpus_allowed": "01",
+  "child_cpus_allowed_list": "0",
+  "child_taskset_p": "pid 20133's current affinity mask: 1",
+  "core": "0",
+  "parent_cpus_allowed": "01",
+  "parent_cpus_allowed_list": "0",
+  "parent_taskset_p": "pid 20098's current affinity mask: 1"
+ },
+ "rss": {
+  "A": {
+   "nonrigid_peak_rss_anon_kb": 735212,
+   "nonrigid_peak_ru_maxrss_kb": 740624,
+   "overall_peak_rss_anon_kb": 735212,
+   "overall_peak_ru_maxrss_kb": 740624,
+   "rigid_median_rss_anon_kb": 25336.0,
+   "rigid_median_ru_maxrss_kb": 30086.0,
+   "rigid_peak_rss_anon_kb": 163068,
+   "rigid_peak_ru_maxrss_kb": 167916
+  },
+  "A2": {
+   "nonrigid_peak_rss_anon_kb": 0,
+   "nonrigid_peak_ru_maxrss_kb": 0,
+   "overall_peak_rss_anon_kb": 162660,
+   "overall_peak_ru_maxrss_kb": 167492,
+   "rigid_median_rss_anon_kb": 25218.0,
+   "rigid_median_ru_maxrss_kb": 30082.0,
+   "rigid_peak_rss_anon_kb": 162660,
+   "rigid_peak_ru_maxrss_kb": 167492
+  },
+  "B": {
+   "nonrigid_peak_rss_anon_kb": 735472,
+   "nonrigid_peak_ru_maxrss_kb": 740564,
+   "overall_peak_rss_anon_kb": 735472,
+   "overall_peak_ru_maxrss_kb": 740564,
+   "rigid_median_rss_anon_kb": 34436.0,
+   "rigid_median_ru_maxrss_kb": 39106.0,
+   "rigid_peak_rss_anon_kb": 204300,
+   "rigid_peak_ru_maxrss_kb": 208880
+  },
+  "C": {
+   "nonrigid_peak_rss_anon_kb": 735568,
+   "nonrigid_peak_ru_maxrss_kb": 740500,
+   "overall_peak_rss_anon_kb": 735568,
+   "overall_peak_ru_maxrss_kb": 740500,
+   "rigid_median_rss_anon_kb": 34524.0,
+   "rigid_median_ru_maxrss_kb": 39336.0,
+   "rigid_peak_rss_anon_kb": 205552,
+   "rigid_peak_ru_maxrss_kb": 210312
+  }
+ },
+ "scored_rows": {
+  "nonrigid": 225,
+  "rigid": 1248,
+  "total": 1473
+ },
+ "thread_env": {
+  "BLIS_NUM_THREADS": "1",
+  "GOTO_NUM_THREADS": "1",
+  "MKL_DOMAIN_NUM_THREADS": "1",
+  "MKL_DYNAMIC": "FALSE",
+  "MKL_NUM_THREADS": "1",
+  "NUMBA_NUM_THREADS": "1",
+  "NUMEXPR_MAX_THREADS": "1",
+  "NUMEXPR_NUM_THREADS": "1",
+  "OMP_DYNAMIC": "FALSE",
+  "OMP_NUM_THREADS": "1",
+  "OPENBLAS_NUM_THREADS": "1",
+  "POLARS_MAX_THREADS": "1",
+  "RAYON_NUM_THREADS": "1",
+  "TBB_NUM_THREADS": "1",
+  "TOKIO_WORKER_THREADS": "1",
+  "VECLIB_MAXIMUM_THREADS": "1"
+ }
+}
