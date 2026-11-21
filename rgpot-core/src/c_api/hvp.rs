@@ -126,7 +126,10 @@ unsafe fn hvp_call(
         return Err(refuse(&format!("{name}: unknown scheme {scheme}")));
     };
     let input = unsafe { &*input };
-    let Some(dim) = unsafe { input.n_atoms() }.and_then(|n| n.checked_mul(3)) else {
+    let Some(dim) = unsafe { input.n_atoms() }
+        .and_then(|n| n.checked_mul(3))
+        .filter(|&dim| dim <= isize::MAX as usize / std::mem::size_of::<f64>())
+    else {
         return Err(refuse(&format!(
             "{name}: positions tensor is NULL or too large"
         )));
