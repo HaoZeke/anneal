@@ -2117,6 +2117,9 @@ def gmin_sources(audit: Audit) -> None:
         named = all(machine.fullmatch(h) for h in hosts) and bool(rows)
         audit.record(named, path, "every GMIN row names its machine", "sha256 of the machine id",
                      "all" if named else ", ".join(sorted(h[:8] or "none" for h in hosts)))
+    audit.said(SI, "The rigid TIP4P rows use GMIN source\n"
+                   f"\\texttt{{\\seqsplit{{{TIP4P_GMIN}}}}}, as the\n"
+                   "\\texttt{gmin\\_revision} field of every committed row records.")
 
 
 MOVE_CHOICE = re.compile(r"Thompson|move choice|choice among the moves|choosing among the moves|posterior", re.I)

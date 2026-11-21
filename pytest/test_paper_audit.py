@@ -607,6 +607,27 @@ def test_a_gmin_row_without_a_machine_is_reported():
     assert [(r[1], r[2]) for r in audit.drifts()] == [(path, "every GMIN row names its machine")]
 
 
+def test_a_tip4p_gmin_row_of_another_source_is_reported():
+    audit = audit_mod.Audit()
+    path = "paper/jctc/data/tip4p_gmin/rows.csv"
+    rows = [dict(r) for r in audit.rows(path)]
+    next(r for r in rows if r["arm"] == "gmin")["gmin_revision"] = "0" * 40
+    audit.read[path] = rows
+    audit_mod.gmin_sources(audit)
+    assert [(r[1], r[2]) for r in audit.drifts()] == [
+        (path, "historical identifier of every GMIN row")
+    ]
+
+
+def test_the_rendered_tip4p_gmin_source_is_checked():
+    audit = audit_mod.Audit()
+    si = audit.text(audit_mod.SI)
+    assert si.count(audit_mod.TIP4P_GMIN) == 1
+    audit.text_cache[audit_mod.SI] = si.replace(audit_mod.TIP4P_GMIN, "0" * 40)
+    audit_mod.gmin_sources(audit)
+    assert [r[2] for r in audit.drifts()] == ["prose"]
+
+
 def test_a_g3_row_with_other_calls_is_reported():
     audit = audit_mod.Audit()
     path = "paper/jctc/data/g3_funnel/rows.csv"
