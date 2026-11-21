@@ -104,3 +104,21 @@ def test_a_fitter_with_its_own_fit_anneal_gets_every_keyword():
         "tell_every": 5,
         "n_epochs": 3,
     }
+
+
+def test_run_fitter_rejects_preset_and_preset_kwargs_together_and_ignores_noncallable_attr():
+    fitter = _fitter()
+    with pytest.raises(ValueError, match="not both"):
+        run_fitter(
+            fitter,
+            40,
+            method="fast",
+            preset=Fast(t_init=2.0),
+            preset_kwargs={"t_init": 1.0},
+        )
+    assert fitter.calls == []
+
+    fitter.fit_anneal = None
+    out = run_fitter(fitter, 40, seed=0)
+    assert len(fitter.evaluated) > 1
+    assert set(out) == {"x", "eps"}

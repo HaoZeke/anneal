@@ -123,3 +123,54 @@ def test_boltzmann_clips_the_start_and_never_leaves_the_box():
     for trial in fitter.seen:
         assert np.all(trial >= -1.0 - 1e-9)
         assert np.all(trial <= 1.0 + 1e-9)
+
+
+def test_flatten_and_unflatten_params_cover_nested_and_error_paths():
+    from anneal import Gsa
+    from anneal.chemfit import bounds_from_fitter
+
+    nested = {"outer": {"inner": np.array([1.0, 2.0]), "scalar": 3.0}}
+    flat, spec = flatten_params(nested)
+    assert flat.tolist() == [1.0, 2.0, 3.0]
+    rebuilt = unflatten_params(flat * 2.0, spec)
+    assert np.allclose(rebuilt["outer"]["inner"], [2.0, 4.0])
+    assert rebuilt["outer"]["scalar"] == 6.0
+
+    with pytest.raises(ValueError, match="initial_params is empty"):
+        flatten_params({})
+    with pytest.raises(ValueError, match="needs a name"):
+        unflatten_params(np.array([1.0]), [((), ())])
+    with pytest.raises(ValueError, match="does not match"):
+        unflatten_params(np.zeros(5), spec)
+
+    assert bounds_from_fitter({"x": np.zeros(2)}, {"x": (-1.0, 1.0)}, 3) is None
+    assert bounds_from_fitter({"x": 1.0, "y": 2.0}, {"x": (-1.0, 1.0)}, 2) is None
+    assert bounds_from_fitter({"x": 1.0}, {"x": None}, 1) is None
+
+    low, high = resolve_bounds(
+        {"x": np.zeros(2)},
+        context_bounds={"low": -2.0, "high": 2.0},
+    )
+    assert np.array_equal(low, [-2.0, -2.0]) and np.array_equal(high, [2.0, 2.0])
+    with pytest.raises(ValueError, match="initial_params is empty"):
+        resolve_bounds({})
+    with pytest.raises(ValueError, match="parameter length"):
+        resolve_bounds({"x": np.zeros(2)}, low=np.zeros(3), high=np.ones(3))
+    with pytest.raises(ValueError, match="will not invent a box"):
+        resolve_bounds({"x": 0.0})
+
+    fitter = _Review()
+    with pytest.raises(TypeError, match="mapping"):
+        run_benchmark({"fitter": fitter, "budget": 10, "initial_params": "bad"})
+    with pytest.raises(ValueError, match="empty"):
+        run_benchmark({"fitter": fitter, "budget": 10, "initial_params": {}})
+    for bad in (Gsa(q_v=1.0), Gsa(q_v=3.0), Gsa(q_a=float("nan"))):
+        with pytest.raises(ValueError, match="q_"):
+            run_benchmark(
+                {"fitter": fitter, "budget": 10, "initial_params": {"x": 0.0}},
+                method="gsa",
+                low=-1.0,
+                high=1.0,
+                preset=bad,
+            )
+    assert fitter.seen == []

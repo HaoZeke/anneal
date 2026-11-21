@@ -12,6 +12,7 @@ import pytest
 anneal = pytest.importorskip("anneal")
 
 from anneal.chemfit import (  # noqa: E402
+    ChemFitVector,
     fit_anneal,
     flatten_parameters,
     unflatten_parameters,
@@ -157,3 +158,58 @@ def test_fit_anneal_accepts_dict_and_vector_x0():
         fit_anneal(_stub(), 100, x0={"other": 1.0})
     with pytest.raises(ValueError, match="has length"):
         fit_anneal(_stub(), 100, x0=np.zeros(3))
+
+
+def test_chemfit_vector_and_flatten_edge_cases():
+    with pytest.warns(FutureWarning, match="ChemFitVector"):
+        view = ChemFitVector({"a": "0.5", "b": np.array([1.0, 2.0])})
+    assert view.dim == 3
+    with pytest.raises(ValueError, match="has no b"):
+        view.pack({"a": 0.5})
+    with pytest.raises(ValueError, match="layout needs 3"):
+        view.unpack(np.zeros(2))
+
+    for bad in ({}, {"nested": {}}, "not-a-dict"):
+        with pytest.raises(ValueError, match="non-empty dict"):
+            flatten_parameters(bad)
+    with pytest.raises(ValueError, match="parameter empty is empty"):
+        flatten_parameters({"empty": np.array([])})
+    with pytest.raises(ValueError, match="not real-numeric"):
+        flatten_parameters({"ragged": [[1.0], [2.0, 3.0]]})
+
+    _, spec = flatten_parameters({"x": 1.0, "arr": np.zeros((2, 2))})
+    restored = unflatten_parameters(
+        np.array([2.0, 1.0, 2.0, 3.0, 4.0]),
+        spec,
+        {"x": "placeholder", "arr": np.zeros(4)},
+    )
+    assert restored["x"] == pytest.approx(2.0)
+    assert restored["arr"].shape == (2, 2)
+
+
+def test_chemfit_examples_execute_cleanly():
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    env = dict(os.environ)
+    env["PYTHONPATH"] = (
+        f"{root}{os.pathsep}{env['PYTHONPATH']}" if env.get("PYTHONPATH") else str(root)
+    )
+    for cmd in (
+        [sys.executable, str(root / "examples" / "chemfit_anneal.py")],
+        [
+            sys.executable,
+            str(root / "examples" / "chemfit_positions.py"),
+            "--driver",
+            "portfolio",
+            "--budget",
+            "200",
+        ],
+    ):
+        proc = subprocess.run(
+            cmd, cwd=root, env=env, capture_output=True, text=True, check=True
+        )
+        assert proc.stdout.strip()

@@ -74,3 +74,42 @@ def test_thirteen_atoms_fit_inside_the_box_within_the_budget(entry, shape):
     assert np.all(returned >= -3.0) and np.all(returned <= 3.0)
     assert lennard_jones(returned) < lennard_jones(start)
     assert lennard_jones(returned) == min(lennard_jones(p) for p in seen)
+
+
+@pytest.mark.parametrize(
+    "entry", ["fit_anneal", "fit_chemfit", "run_benchmark", "run_fitter"]
+)
+def test_installed_chemfit_handles_nested_fixed_and_float32_parameters(entry):
+    initial = {
+        "fixed": 0.25,
+        "nested": {"a": 1.5},
+        "vec": np.array([0.8, -0.8], dtype=np.float32),
+    }
+    bounds = {
+        "fixed": (0.25, 0.25),
+        "nested": {"a": (-2.0, 2.0)},
+        "vec": (-1.0, 1.0),
+    }
+
+    def objective(params):
+        return float(
+            (params["nested"]["a"] - 0.5) ** 2
+            + np.sum(np.asarray(params["vec"], dtype=np.float64) ** 2)
+        )
+
+    fitter = fitter_module.Fitter(objective, initial_params=initial, bounds=bounds)
+    if entry == "fit_anneal":
+        out = fit_anneal(fitter, 120, seed=0)
+    elif entry == "fit_chemfit":
+        out = fit_chemfit(fitter, 120, seed=0)
+    elif entry == "run_benchmark":
+        out = run_benchmark(
+            {"fitter": fitter, "budget": 120, "initial_params": initial},
+            seed=0,
+        )
+    else:
+        out = run_fitter(fitter, 120, seed=0)
+    assert out["fixed"] == 0.25
+    assert isinstance(out["nested"]["a"], float) and -2.0 <= out["nested"]["a"] <= 2.0
+    assert isinstance(out["vec"], np.ndarray) and out["vec"].dtype == np.float32
+    assert np.all(out["vec"] >= -1.0) and np.all(out["vec"] <= 1.0)

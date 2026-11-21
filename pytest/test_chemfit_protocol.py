@@ -411,3 +411,62 @@ def test_an_objective_error_inside_chemfit_reaches_the_caller(entry):
         drive(entry, fitter, 60)
     assert caught.value is error
     assert len(calls) == 3
+
+
+@pytest.mark.parametrize("entry", ENTRIES)
+def test_a_fitter_without_finish_is_refused_before_init(entry):
+    class NoFinish:
+        initial_parameters = {"x": 0.0}
+        bounds = {"x": (-1.0, 1.0)}
+        calls = []
+
+        def init(self):
+            self.calls.append("init")
+
+        def evaluate(self, params):
+            return 0.0
+
+        def step(self):
+            pass
+
+    fitter = NoFinish()
+    with pytest.raises(TypeError, match="finish"):
+        drive(entry, fitter, 20)
+    assert fitter.calls == []
+
+
+def test_finish_with_uninspectable_signature_receives_best_params():
+    class OpaqueFinish:
+        def __call__(self, params):
+            return {"got": dict(params)}
+
+        @property
+        def __signature__(self):
+            raise ValueError("no signature")
+
+    fitter = NextFitter(*_problem())
+    fitter.finish = OpaqueFinish()
+    out = drive("fit_anneal", fitter, 30)
+    assert "positions" in out["got"] and "cell" in out["got"]
+
+
+@pytest.mark.parametrize("driver", ["portfolio", "boltzmann", "fast", "gsa"])
+def test_all_nan_and_initial_nan_losses_behave_across_drivers(driver):
+    all_nan = NextFitter(*_problem(), loss=lambda params: float("nan"))
+    out_start = drive("fit_anneal", all_nan, 20, driver=driver)
+    assert same_params(out_start, all_nan.evaluated[0])
+
+    calls = 0
+
+    def first_nan(params):
+        nonlocal calls
+        calls += 1
+        return float("nan") if calls == 1 else sum_of_squares(params)
+
+    recovered = NextFitter(*_problem(), loss=first_nan)
+    out_best = drive("fit_anneal", recovered, 30, driver=driver)
+    finite_losses = [
+        (i, v) for i, v in enumerate(recovered.losses) if not np.isnan(v)
+    ]
+    best_idx = min(finite_losses, key=lambda item: item[1])[0]
+    assert same_params(out_best, recovered.evaluated[best_idx])
