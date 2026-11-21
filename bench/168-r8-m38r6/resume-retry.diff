@@ -1,0 +1,175 @@
+diff --git a/src/methods/cluster_hopping.rs b/src/methods/cluster_hopping.rs
+index 1a304a42..13a57c1f 100644
+--- a/src/methods/cluster_hopping.rs
++++ b/src/methods/cluster_hopping.rs
+@@ -626,8 +626,14 @@ pub struct Ledger {
+     /// The screening pass opened a surface block. The hop records the
+     /// chain it started from.
+     pub(crate) block_opened: bool,
++    /// The failed restraint block was a retry a plain hold handed back.
++    /// The hop that sees [`Self::revert_unrestrained`] then returns to the
++    /// chain that block opened on.
++    pub(crate) revert_to_block_start: bool,
+     /// Chain at the start of the block that last lowered the incumbent.
+     block_chain: Option<(f64, Array1<f64>)>,
++    /// Chain at the start of the block before the one now held.
++    previous_block_chain: Option<(f64, Array1<f64>)>,
+     /// Chain at the start of the block whose relaxation found the
+     /// incumbent a later failed restraint block could not beat.
+     before_gain: Option<(f64, Array1<f64>)>,
+@@ -685,7 +691,9 @@ impl Ledger {
+             encounters: Vec::new(),
+             revert_unrestrained: false,
+             block_opened: false,
++            revert_to_block_start: false,
+             block_chain: None,
++            previous_block_chain: None,
+             before_gain: None,
+             suspend_record: false,
+         }
+@@ -7458,7 +7466,7 @@ where
+             break HopStop::of_closed(ledger);
+         }
+         if ledger.block_opened {
+-            ledger.block_chain = Some(hop_origin.clone());
++            ledger.previous_block_chain = ledger.block_chain.replace(hop_origin.clone());
+             ledger.block_opened = false;
+         }
+         let entry_snapshot = if cfg.trail_on_stall {
+@@ -8826,9 +8834,18 @@ where
+         // reached that incumbent from somewhere else. Stand where the
+         // chain stood when the incumbent was found, and let the plain
+         // quench leave the basin. The surface portfolio holds the plain
+-        // arm from here on.
++        // arm from here on. A failed retry the hold handed back interrupted
++        // a plain walk still under way, so the chain goes back to where
++        // that walk stood when the retry opened.
+         if ledger.revert_unrestrained {
+-            if let Some((energy, state)) = ledger.before_gain.take()
++            let resume = std::mem::take(&mut ledger.revert_to_block_start)
++                .then(|| ledger.previous_block_chain.clone())
++                .flatten()
++                .filter(|(energy, state)| state.len() == x.len() && energy.is_finite());
++            if let Some((energy, state)) = resume {
++                x = state;
++                e = energy;
++            } else if let Some((energy, state)) = ledger.before_gain.take()
+                 && state.len() == x.len()
+                 && energy.is_finite()
+             {
+diff --git a/src/methods/cluster_search.rs b/src/methods/cluster_search.rs
+index 2dc1b0cc..56f1225e 100644
+--- a/src/methods/cluster_search.rs
++++ b/src/methods/cluster_search.rs
+@@ -911,6 +911,7 @@ where
+                 }
+                 if portfolio.take_restraint_block_failed() {
+                     led.revert_unrestrained = true;
++                    led.revert_to_block_start = portfolio.take_failed_retry();
+                     portfolio.hold_plain();
+                 }
+                 chosen
+diff --git a/src/methods/two_phase.rs b/src/methods/two_phase.rs
+index 562e8ee7..a52fdf2d 100644
+--- a/src/methods/two_phase.rs
++++ b/src/methods/two_phase.rs
+@@ -612,6 +612,10 @@ pub struct SurfacePortfolio {
+     failed_arm: Option<usize>,
+     /// The restraint arm the hold was set against.
+     held_against: Option<usize>,
++    /// The block now held was handed back to the restraint by a hold.
++    retry_open: bool,
++    /// The last failed restraint block was such a retry.
++    failed_retry: bool,
+     /// The call to [`Self::begin`] that opened the block now held.
+     just_opened: bool,
+     rng: StdRng,
+@@ -686,6 +690,8 @@ impl SurfacePortfolio {
+             settled_blocks: 0,
+             failed_arm: None,
+             held_against: None,
++            retry_open: false,
++            failed_retry: false,
+             just_opened: false,
+             rng: StdRng::seed_from_u64(seed ^ 0x5a2f_ace5),
+         }
+@@ -823,6 +829,16 @@ impl SurfacePortfolio {
+         failed
+     }
+ 
++    /// Whether the restraint block reported by
++    /// [`Self::take_restraint_block_failed`] was a retry a plain hold handed
++    /// back, since the last take.
++    ///
++    /// A retry interrupts a plain walk that was still under way, so a failed
++    /// one returns the chain to where that walk stood, not to the incumbent.
++    pub fn take_failed_retry(&mut self) -> bool {
++        std::mem::take(&mut self.failed_retry)
++    }
++
+     /// Whether the block now held was opened by the last [`Self::begin`].
+     pub fn take_block_opened(&mut self) -> bool {
+         let opened = self.just_opened;
+@@ -886,6 +902,7 @@ impl SurfacePortfolio {
+             self.held = Some(if self.plain_only {
+                 0
+             } else if let Some(arm) = returned {
++                self.retry_open = true;
+                 arm
+             } else {
+                 self.select_arm()
+@@ -934,6 +951,7 @@ impl SurfacePortfolio {
+             {
+                 self.restraint_block_failed = true;
+                 self.failed_arm = Some(arm);
++                self.failed_retry = self.retry_open;
+             }
+             if let Some(key) = self.block_source.take() {
+                 self.credit_source(key, arm, reward);
+@@ -941,6 +959,7 @@ impl SurfacePortfolio {
+                 self.credit_arm(arm, reward);
+             }
+         }
++        self.retry_open = false;
+         self.settled_blocks += 1;
+         self.block_lowest = f64::INFINITY;
+         self.hops_in_block = 0;
+@@ -1329,6 +1348,38 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn only_a_restraint_block_the_hold_handed_back_fails_as_a_retry() {
++        let mut portfolio = SurfacePortfolio::with_block(&[TwoPhase::diameter(2.0, 1.0)], 3, 1);
++        portfolio.begin(true);
++        portfolio.held = Some(0);
++        portfolio.observe(false, -3.0, -3.0);
++        portfolio.begin(true);
++        portfolio.held = Some(1);
++        portfolio.observe(false, -2.0, -3.0);
++        portfolio.begin(true);
++        assert!(portfolio.take_restraint_block_failed());
++        assert!(
++            !portfolio.take_failed_retry(),
++            "a first failure is not a retry"
++        );
++        portfolio.hold_plain();
++        let mut retried = false;
++        for _ in 0..20 {
++            portfolio.observe(false, -2.5, -3.0);
++            portfolio.begin(true);
++            if portfolio.take_restraint_block_failed() {
++                retried = portfolio.take_failed_retry();
++                break;
++            }
++        }
++        assert!(
++            retried,
++            "the failed block the hold handed back was not a retry"
++        );
++        assert!(!portfolio.take_failed_retry(), "a retry is reported once");
++    }
++
+     fn rigid_water() -> Array1<f64> {
+         Array1::from(vec![
+             0.0, 0.0, 0.0, 0.7572, 0.5865, 0.0, -0.7572, 0.5865, 0.0,
