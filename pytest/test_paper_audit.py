@@ -380,6 +380,19 @@ def test_a_hand_edited_tab_ase_recommended_hit_is_reported(monkeypatch):
     assert any(item[3] == "99/12" for item in hits)
 
 
+def test_a_hand_edited_tab_ase_block_is_reported():
+    """The manuscript block between the ASE marks must be the summariser's block."""
+    audit = audit_mod.Audit()
+    start, end = "% ase-panel table: start", "% ase-panel table: end"
+    audit.text_cache[audit_mod.SI] = audit.text(audit_mod.SI).replace(
+        f"{start}\n{end}", f"{start}\nhand edited\n{end}", 1,
+    )
+    audit_mod.generated_tables(audit)
+    rows = [row for row in audit.drifts() if row[2] == "tab:ase is the summariser's block"]
+    assert rows
+    assert rows[0][3] == "edited by hand"
+
+
 def test_a_drifted_morse_ase_table_cell_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.SI)
@@ -911,6 +924,18 @@ def test_type7_quantiles():
     values = [4e6, 1801909.5, 12.0, 3.0, 99.5, 7.25]
     for p in (0.25, 0.5, 0.75):
         assert math.isclose(audit_mod.type7(values, p), float(np.quantile(values, p)), rel_tol=1e-12)
+
+
+def test_rerun_tags_ignore_comments_and_claims_need_their_fence():
+    tex = "GMIN hits 9 of 12. \\rerun{5}\n% \\rerun{6} in a comment\n"
+    assert audit_mod.rerun_tags(tex) == [(1, "5")]
+    claims = ("GMIN hits 9 of 12",)
+    fenced = "GMIN hits 9 of 12, with p of 0.21.~\\rerun{5}\nNext sentence.\n"
+    assert audit_mod.untagged_claims(fenced, claims[0], "5") == (1, 1)
+    bare = "GMIN hits 9 of 12, with p of 0.21.\nNext sentence.~\\rerun{5}\n"
+    assert audit_mod.untagged_claims(bare, claims[0], "5") == (1, 0)
+    assert audit_mod.untagged_claims(bare, "a missing result", "5") == (0, 0)
+    assert audit_mod.untagged_claims(fenced, claims[0], "6") == (1, 0)
 
 
 @pytest.mark.parametrize("token", [

@@ -5032,6 +5032,26 @@ def manuscript_new(audit: Audit) -> None:
 
 
 SENTENCE_END = re.compile(r"[.?!](?![\d])")
+RERUN_TAG = re.compile(r"\\rerun\{([^}]*)\}")
+
+
+def rerun_tags(text: str) -> list[tuple[int, str]]:
+    """The line number and item of each \\rerun tag outside a comment."""
+    return [(number, found.group(1)) for number, line in enumerate(text.splitlines(), 1)
+            for found in RERUN_TAG.finditer(line) if not line.lstrip().startswith("%")]
+
+
+def untagged_claims(text: str, fragment: str, item: str) -> tuple[int, int]:
+    """The occurrences of a fragment, and how many end their sentence in the tag of that item."""
+    flat, found, tagged, start = collapse(text), 0, 0, 0
+    while (at := flat.find(collapse(fragment), start)) >= 0:
+        found += 1
+        end = SENTENCE_END.search(flat, at + len(collapse(fragment)))
+        tagged += bool(end and flat.startswith(f"~\\rerun{{{item}}}", end.end()))
+        start = at + 1
+    return found, tagged
+
+
 FORBIDDEN_RERUN = re.compile(r"\\rerun\b|\[rerun", re.IGNORECASE)
 FORBIDDEN_PENDING = re.compile(r"\bpending\b|to be assigned|\btbd\b", re.IGNORECASE)
 DOI_DEF = re.compile(r"\\(?:newcommand|renewcommand|providecommand)\*?\{\\DOI\}|\\def\\DOI\b")
