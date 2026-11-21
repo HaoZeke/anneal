@@ -261,6 +261,56 @@ def test_the_gmin_caption_follows_the_row_labels() -> None:
     assert tex in (ROOT / "paper" / "jctc" / "manuscript.tex").read_text()
 
 
+def _load_losses2() -> object:
+    spec = importlib.util.spec_from_file_location("gmin_losses2_test", PANEL.parent / "run_losses2.py")
+    assert spec is not None and spec.loader is not None
+    losses2 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(losses2)
+    return losses2
+
+
+def test_the_known_gmin_revisions_are_the_rows_and_the_pin() -> None:
+    from gmin_pin import KNOWN_REVISIONS
+
+    assert KNOWN_REVISIONS == ("aac1548a8aec13b53ad12a8d6904625081685d2e", REVISION)
+    assert REVISION == "9cbec1a446352bc9ef064bd2b1a5767194655919"
+
+
+@pytest.mark.parametrize(
+    "svnrev", ["aac1548a8aec13b53ad12a8d6904625081685d2e", "9cbec1a446352bc9ef064bd2b1a5767194655919"]
+)
+def test_losses2_selects_rows_at_each_known_gmin_revision(svnrev: str) -> None:
+    losses2 = _load_losses2()
+    rows = [
+        {"system": "lj38", "code": "gmin", "seed": str(seed), "code_revision": svnrev, "harness_revision": "head"}
+        for seed in losses2.panel.SEEDS
+    ]
+    assert len(losses2.selected(rows, "lj38", "gmin", "head", "base")) == len(losses2.panel.SEEDS)
+    unknown = [dict(row, code_revision="0" * 40) for row in rows]
+    assert losses2.selected(unknown, "lj38", "gmin", "head", "base") == []
+
+
+def test_losses2_runs_the_pinned_build_and_refuses_another(tmp_path: Path) -> None:
+    losses2 = _load_losses2()
+    svnrev = tmp_path / "SVNREV"
+    note = tmp_path / "gmin-source.txt"
+    svnrev.write_text(f"{REVISION}\n")
+    note.write_text(f"svnrev={REVISION}\ntarball_sha256={TARBALL_SHA256}\n")
+    assert losses2.gmin_label(note, svnrev) == REVISION
+    historical = "aac1548a8aec13b53ad12a8d6904625081685d2e"
+    svnrev.write_text(f"{historical}\n")
+    note.write_text(f"svnrev={historical}\ntarball_sha256={TARBALL_SHA256}\n")
+    with pytest.raises(ValueError, match="expected"):
+        losses2.gmin_label(note, svnrev)
+
+
+@pytest.mark.parametrize("enter, work", [("enter_bench.sh", "$WORK"), ("enter_losses2.sh", "$OUT")])
+def test_the_runners_read_the_svnrev_the_build_extracts(enter: str, work: str) -> None:
+    src = _assign(BUILD.read_text(), "SRC").replace("$WORK", work)
+    text = (PANEL.parent / enter).read_text()
+    assert f"--svnrev {src}/wales/GMIN/source/SVNREV" in text
+
+
 @pytest.mark.parametrize("how", ["env", "flag"])
 def test_a_local_tarball_with_the_wrong_sha256_is_refused(tmp_path: Path, how: str) -> None:
     bad = tmp_path / "svn.tar.bz2"

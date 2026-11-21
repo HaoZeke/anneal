@@ -92,7 +92,7 @@ exec taskset -c 0 /usr/bin/python3 -u $WORK/run_panel.py \\
   --work $WORK/runs \\
   --logs $WORK/logs \\
   --gmin-source $WORK/gmin-source.txt \\
-  --svnrev $WORK/src/wales/GMIN/source/SVNREV \\
+  --svnrev $WORK/gmin-src/wales/GMIN/source/SVNREV \\
   --lj-data $WORK/h2h_gmin_lj.data \\
   --morse-data $WORK/h2h_gmin_morse.data \\
   "\$@"

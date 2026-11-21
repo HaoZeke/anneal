@@ -28,6 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import run_panel as panel  # noqa: E402
+from gmin_pin import KNOWN_REVISIONS  # noqa: E402
 
 PAIR_ENV = {"H2H_PAIR_SCALE": "1"}
 CODES = ("baseline", "fix2", "gmin")
@@ -58,14 +59,25 @@ def write_start(bin_dir: Path, tree: Path, system: str, seed: int, path: Path) -
     )
 
 
+def gmin_label(gmin_source: Path, svnrev: Path) -> str:
+    """The SVNREV of a new GMIN build, refused unless it is the pin its note describes."""
+    source = dict(line.split("=", 1) for line in gmin_source.read_text().splitlines() if "=" in line)
+    gmin_revision = panel.read_svnrev(svnrev)
+    if source.get("svnrev") != gmin_revision:
+        raise SystemExit(f"{gmin_source} does not describe {svnrev}")
+    if source.get("tarball_sha256") != panel.TARBALL_SHA256:
+        raise SystemExit(f"{gmin_source} has another GMIN tarball")
+    return gmin_revision
+
+
 def selected(rows: list[dict[str, str]], system: str, code: str, revision: str, base: str) -> list[dict[str, str]]:
-    wanted = base if code == "baseline" else revision
+    wanted = KNOWN_REVISIONS if code == "gmin" else (base,) if code == "baseline" else (revision,)
     found: dict[int, dict[str, str]] = {}
     for row in rows:
         if (
             row["system"] == system
             and row["code"] == code
-            and (code == "gmin" or row["code_revision"] == wanted)
+            and row["code_revision"] in wanted
             and row["harness_revision"] == revision
             and int(row["seed"]) in panel.SEEDS
         ):
@@ -194,12 +206,7 @@ def main(argv: list[str]) -> int:
         ).stdout.strip()
         if head != revision:
             raise SystemExit(f"{tree} is at {head}, not {revision}")
-    source = dict(line.split("=", 1) for line in args.gmin_source.read_text().splitlines() if "=" in line)
-    gmin_revision = panel.read_svnrev(args.svnrev)
-    if source.get("svnrev") != gmin_revision:
-        raise SystemExit(f"{args.gmin_source} does not describe {args.svnrev}")
-    if source.get("tarball_sha256") != panel.TARBALL_SHA256:
-        raise SystemExit(f"{args.gmin_source} has another GMIN tarball")
+    gmin_revision = gmin_label(args.gmin_source, args.svnrev)
     systems = [row[0] for row in panel.SYSTEMS if not args.system or row[0] in args.system]
     for system in systems:
         for bin_dir, tree in ((args.base_bin, args.base_tree), (args.head_bin, args.head_tree)):

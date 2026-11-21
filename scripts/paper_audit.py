@@ -48,6 +48,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+from gmin_pin import HISTORICAL_REVISION as GMIN_HISTORICAL_REVISION  # noqa: E402
 from gmin_pin import REVISION as GMIN_PIN_REVISION  # noqa: E402
 
 TEX = "paper/jctc/manuscript.tex"
@@ -58,7 +59,7 @@ HOST_COLUMNS = ("host",)
 MACHINE_PROVENANCE_COLUMNS = frozenset(("machine_id", "cpu_model"))
 # Revisions of other codes. The GMIN build scripts refuse a tarball whose SVNREV differs.
 EXTERNAL_REVISIONS = {
-    "aac1548a8aec13b53ad12a8d6904625081685d2e": "GMIN source/SVNREV",
+    GMIN_HISTORICAL_REVISION: "GMIN source/SVNREV",
     GMIN_PIN_REVISION: "GMIN source/SVNREV",
 }
 # Local revisions that rows cite, each with the pushed commit it was rebuilt as.

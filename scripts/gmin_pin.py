@@ -13,6 +13,10 @@ SNAPSHOT = "2026-11-19"
 URL = "http://www-wales.ch.cam.ac.uk/svn.tar.bz2"
 REVISION = "9cbec1a446352bc9ef064bd2b1a5767194655919"
 TARBALL_SHA256 = "ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776"
+# SVNREV of the provisional rows already committed. No builder uses it.
+HISTORICAL_REVISION = "aac1548a8aec13b53ad12a8d6904625081685d2e"
+# Every SVNREV a stored GMIN row may carry.
+KNOWN_REVISIONS = (HISTORICAL_REVISION, REVISION)
 
 
 def sha256(path: Path) -> str:
