@@ -516,6 +516,32 @@ if (
         timeout: 1200,
         is_parallel: false,
     )
+    # A static librgpot links the runtime its compiler selects. The parent
+    # build's own compiler is covered above, so this runs only when Clang is
+    # another one: GCC's libgomp does not satisfy objects Clang compiled.
+    _clang_cc = find_program('clang', required: false)
+    _clang_cxx = find_program('clang++', required: false)
+    if (
+        _clang_cc.found()
+        and _clang_cxx.found()
+        and cppc.get_id() != 'clang'
+    )
+        test(
+            'consumer_no_openmp_clang',
+            python3_engines,
+            args: [
+                files('test_consumer_no_openmp.py'),
+                '--compilers',
+                _clang_cc.full_path(),
+                _clang_cxx.full_path(),
+                meson.project_source_root(),
+                meson_prog.full_path(),
+            ],
+            env: nested_meson_env,
+            timeout: 1200,
+            is_parallel: false,
+        )
+    endif
     _cmake_prog = find_program('cmake', required: false)
     if _cmake_prog.found() and _nested_ninja.found()
         test(

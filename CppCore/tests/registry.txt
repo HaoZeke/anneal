@@ -355,6 +355,7 @@ installed_sources | tests python toplevel | custom timeout=180 | @meson
 installed_sources_selftest | tests python | py CppCore/tests/test_installed_sources.py |
 eigen_subproject_fallback | tests core posix python toplevel | custom timeout=300 | @meson
 consumer_no_openmp | tests core posix python toplevel | custom timeout=1200 serial | @meson
+consumer_no_openmp_clang | tests core posix python toplevel probe | custom timeout=1200 serial | @meson
 cmake_consumer_openmp | tests core posix python toplevel probe | custom timeout=1200 serial | @cmake_package
 gromacs_include_prefix | tests core posix python toplevel | custom timeout=300 | @meson
 fortran_sw_module_order | tests core posix python toplevel fortran | custom timeout=600 | @meson

@@ -11,8 +11,14 @@ librgpot does, so the library's own build is unchanged.
 With --pc, the Libs of that rgpot.pc carry no OpenMP flag either, nor do
 its Cflags unless --pc-static says librgpot is static: meson writes the
 compile flag of a static library's archives there.
-Exit 77 (skip) when rgpot finds no OpenMP.
-Usage: test_consumer_no_openmp.py [--pc rgpot.pc [--pc-static]] <root> <meson>
+With --compilers CC CXX the nested builds use those compilers instead of the
+environment's. A static librgpot links the OpenMP runtime its compiler
+selects, which for Clang is libomp and not libgomp, so a build that ran only
+under GCC would not notice a runtime paired with the wrong compiler.
+Exit 77 (skip) when rgpot finds no OpenMP, or when the compilers given cannot
+link -fopenmp.
+Usage: test_consumer_no_openmp.py [--compilers CC CXX]
+       [--pc rgpot.pc [--pc-static]] <root> <meson>
 """
 
 from __future__ import annotations
@@ -189,10 +195,28 @@ def _pc_flags(pc: Path) -> dict[str, list[str]]:
     return flags
 
 
+def _use_compilers(cc: str, cxx: str) -> bool:
+    """Point the nested builds at another compiler, if it can build OpenMP."""
+    with tempfile.TemporaryDirectory(prefix="rgpot-omp-probe-") as probe:
+        src = Path(probe) / "probe.cc"
+        src.write_text("int main() { return 0; }\n")
+        built = _run([cxx, "-fopenmp", str(src), "-o", str(Path(probe) / "probe")])
+    if built.returncode != 0:
+        print(f"{cxx} cannot link -fopenmp: nothing to compare")
+        return False
+    os.environ["CC"] = cc
+    os.environ["CXX"] = cxx
+    return True
+
+
 def main() -> int:
     args = sys.argv[1:]
     pc = None
     pc_static = False
+    if len(args) >= 3 and args[0] == "--compilers":
+        if not _use_compilers(args[1], args[2]):
+            return 77
+        args = args[3:]
     if len(args) >= 2 and args[0] == "--pc":
         pc = Path(args[1])
         args = args[2:]
