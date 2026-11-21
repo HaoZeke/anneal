@@ -1,0 +1,1 @@
+The sorted pair spectrum that keys a basin is sorted in close to linear time. A bucket pass on the order-preserving integer key of each length leaves a few lengths per bucket, and the lengths come out exactly as the comparison sort gives them, so no search changes. Sorting the 5356 lengths of a 104-point cluster takes about 32 microseconds, against 59 for the comparison sort.
