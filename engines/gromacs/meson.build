@@ -43,16 +43,20 @@ if gmx_dropin_pytest
     gmx_dropin_env.set('RGPOT_GROMACS_DROPIN', gmx_dropin.full_path())
     gmx_dropin_env.set('RGPOT_EVAL', rgpot_eval.full_path())
     gmx_dropin_depends = [gmx_dropin, rgpot_eval]
+    if is_variable('rgpot_effective_schema')
+        gmx_dropin_env.set('RGPOT_CAPNP_SCHEMA', rgpot_effective_schema.full_path())
+        gmx_dropin_depends += [rgpot_effective_schema]
+    endif
     if is_variable('classical_engine')
         gmx_dropin_env.set(
             'RGPOT_CLASSICAL_ENGINE',
             classical_engine.full_path(),
         )
-        gmx_dropin_env.set(
-            'RGPOT_CAPNP_SCHEMA',
-            project_root / 'CppCore' / 'rgpot' / 'rpc' / 'Potentials.capnp',
-        )
         gmx_dropin_depends += [classical_engine]
+    endif
+    if is_variable('engine_stub')
+        gmx_dropin_env.set('RGPOT_ENGINE_STUB', engine_stub.full_path())
+        gmx_dropin_depends += [engine_stub]
     endif
     gmx_dropin_pytest_args = [
         '-m',
