@@ -258,36 +258,73 @@ def test_a_retired_rerun_sentence_is_reported():
     assert [r[2] for r in audit.drifts()] == ["retired claim"]
 
 
+def sc_code_revisions(audit, path, system, arm):
+    """The code revisions shown on the passing code-revision checks of one printed Sutton-Chen row."""
+    return [r[3] for r in audit.results
+            if r[0] == "OK" and r[2] == "code revision" and r[1].startswith(f"{path}:") and r[1].endswith(f" {system} {arm}")]
+
+
 def test_an_old_sutton_chen_gmin_cell_is_reported():
     audit = audit_mod.Audit()
     text = audit.text(SC_N12)
-    audit.text_cache[SC_N12] = text.replace("| sc126-38 | gmin | f9d1ac05 | 12/12 |", "| sc126-38 | gmin | f9d1ac05 | 1/12 |")
+    audit.text_cache[SC_N12] = text.replace("| sc126-38 | gmin | 61fa67cf | 12/12 |", "| sc126-38 | gmin | 61fa67cf | 1/12 |")
     audit_mod.head_to_head(audit)
-    assert [(r[1].split()[-3:], r[2]) for r in audit.drifts()] == [(["sc126-38", "gmin", "f9d1ac05"], "hits")]
+    assert [(r[1].split()[-2:], r[2], r[3], r[4]) for r in audit.drifts()] == [(["sc126-38", "gmin"], "hits", "1/12", "12/12")]
+    assert sc_code_revisions(audit, SC_N12, "sc126-38", "gmin") == ["61fa67cf"]
 
 
 def test_a_dropped_sutton_chen_rerun_row_is_reported():
+    kept = audit_mod.Audit()
+    audit_mod.head_to_head(kept)
+    assert sc_code_revisions(kept, SC_N12, "sc108-38", "gmin") == ["61fa67cf"]
     audit = audit_mod.Audit()
     text = audit.text(SC_N12)
-    audit.text_cache[SC_N12] = text.replace("| sc108-38 | gmin | f9d1ac05 | 0/12 | 400000 | 4.305 |\n", "")
+    old = "| sc108-38 | gmin | 61fa67cf | 3/12 | 400000 |  |  |\n"
+    assert old in text
+    audit.text_cache[SC_N12] = text.replace(old, "")
     audit_mod.head_to_head(audit)
-    assert [r[2] for r in audit.drifts()] == ["table row sc108-38 gmin f9d1ac05"]
+    assert [(r[1], r[2], r[3], r[4]) for r in audit.drifts()] == [(SC_N12, "table row sc108-38 gmin", "missing", "shown")]
+    assert sc_code_revisions(audit, SC_N12, "sc108-38", "gmin") == []
+
+
+def test_the_printed_sutton_chen_gmin_rows_have_one_harness():
+    # The printed GMIN rows no longer name their harness; the stored rows
+    # give it, and with it the GMIN data file of scripts/metal_h2h/run_sc.py.
+    rows = audit_mod.Audit().rows("bench/paper-rerun/sc-h2h/rows.csv")
+    assert {(r["harness_revision"], r["harness_blob"], r["gmin_pin"]) for r in rows if r["arm"] == "gmin"} == {
+        ("d59b0b6cf02fc300ff618f79d65da365128eed5a", "ac6b3c85b4eb435c4787a8a7425ab7e6858f9b34",
+         "9cbec1a446352bc9ef064bd2b1a5767194655919")}
 
 
 def test_a_rerun_missing_from_the_sutton_chen_readme_is_reported():
+    # The rerun summary holds one row per system and arm, and sc96-55 gmin is
+    # already printed; sc96-99 is a system the rerun never ran.
+    audit = audit_mod.Audit()
+    summary = audit.rows(audit_mod.SC_RERUN_SUMMARY)
+    summary.append({**summary[0], "system": "sc96-99", "arm": "gmin", "hits_over_n": "0/12"})
+    audit_mod.head_to_head(audit)
+    assert sorted((r[1], r[2], r[3], r[4]) for r in audit.drifts()) == [
+        (SC_N12, "table row sc96-99 gmin", "missing", "shown"),
+        ("bench/paper-rerun/sc-h2h/README.md", "table row sc96-99 gmin", "missing", "shown"),
+    ]
+
+
+def test_an_sc_n12_gmin_rerun_without_its_seed_rows_is_reported():
+    # The sc-n12 README no longer prints harness revisions, a test table or a
+    # rerun sentence, so the stored rows must still back every summary line.
     audit = audit_mod.Audit()
     summary = audit.rows("bench/metal-cluster-h2h/sc-n12/results.csv")
     row = dict([r for r in summary if r["system"] == "sc96-55" and r["arm"] == "gmin"][-1])
     summary.append({**row, "harness_revision": "0" * 40})
     audit_mod.head_to_head(audit)
-    labels = {r[2] for r in audit.drifts() if r[1] == SC_N12}
-    assert {"table row sc96-55 gmin 00000000", "test row sc96-55", "prose"} <= labels
+    assert [(r[1], r[2], r[3], r[4]) for r in audit.drifts()] == [
+        ("bench/metal-cluster-h2h/sc-n12/results.csv sc96-55 gmin 00000000", "per-seed rows", "12", "0")]
 
 
 def test_a_rerun_without_its_tests_is_reported():
     audit = audit_mod.Audit()
-    summary = audit.rows("bench/metal-cluster-h2h/sc-n12/results.csv")
-    row = [r for r in summary if r["system"] == "sc96-55" and r["arm"] == "gmin"][-1]
+    summary = audit.rows(audit_mod.SC_RERUN_SUMMARY)
+    row = next(r for r in summary if r["system"] == "sc126-38" and r["arm"] == "anneal")
     row["fisher_p_vs_gmin"] = ""
     audit_mod.head_to_head(audit)
     assert ("Fisher p", "1") in [(r[2], r[3]) for r in audit.drifts()]
@@ -306,9 +343,10 @@ def test_a_gmin_row_left_on_the_old_file_is_reported():
 def test_a_gmin_lead_must_be_stated_as_the_rows_give_it():
     audit = audit_mod.Audit()
     text = audit.text(SC_N12)
-    audit.text_cache[SC_N12] = text.replace("| 0.113 | tie | GMIN, n.s. | GMIN |", "| 0.113 | tie | GMIN, n.s. | anneal |")
+    audit.text_cache[SC_N12] = text.replace("| sc126-55 | anneal | 61fa67cf | 12/12 | 25529 |",
+                                            "| sc126-55 | anneal | 61fa67cf | 12/12 | 25530 |")
     audit_mod.head_to_head(audit)
-    assert [r[2] for r in audit.drifts()] == ["Wall ahead"]
+    assert [r[2] for r in audit.drifts()] == ["calls median"]
 
 
 def test_a_drifted_readme_p_value_is_reported():
