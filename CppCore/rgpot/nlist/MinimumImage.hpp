@@ -25,24 +25,10 @@ namespace rgpot::nlist {
 /// coordinates, is returned without a search when a bound from its
 /// fractional coordinates shows that no other image is as short. The
 /// search would return the same bits.
-///
-/// Inverse of a row-major cell in that same arithmetic. The cell is
-/// divided by its infinity norm before the cofactor inverse, so the
-/// determinant and the condition estimate are relative to the cell
-/// scale. `dual_norm[k]` is the Euclidean norm of column k.
-struct CellInverse {
-  std::array<double, 9> inverse{};
-  std::array<double, 3> dual_norm{};
-};
-
 class MinimumImage {
 public:
   MinimumImage() = default;
   MinimumImage(const double *cell, const std::array<bool, 3> &periodic);
-  /// `invert` of the scale-free cell. Throws `std::invalid_argument`
-  /// when `cell` is non-finite, singular, or too ill conditioned for
-  /// that inverse.
-  [[nodiscard]] static CellInverse invertCell(const double *cell);
   void fold(double &dx, double &dy, double &dz) const;
   /// fold for a caller that keeps only images of squared length at most
   /// `within2`. False means every image is longer, and the displacement is

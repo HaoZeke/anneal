@@ -833,7 +833,10 @@ MinimumImage::MinimumImage(const double *cell,
   narrow_ = narrow;
 }
 
-CellInverse MinimumImage::invertCell(const double *cell) {
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((visibility("hidden")))
+#endif
+void invertCell(const double *cell, double inv[9], double dual_norm[3]) {
   double raw[9];
   for (int k = 0; k < 9; ++k) {
     if (!std::isfinite(cell[k])) {
@@ -841,16 +844,14 @@ CellInverse MinimumImage::invertCell(const double *cell) {
     }
     raw[k] = cell[k];
   }
-  CellInverse out;
-  const ScaledInverse scaled = scaled_inverse(raw, out.inverse.data());
+  const ScaledInverse scaled = scaled_inverse(raw, inv);
   if (scaled == ScaledInverse::IllConditioned) {
     throw std::invalid_argument("periodic cell is too ill conditioned to bin");
   }
   if (scaled != ScaledInverse::Ok) {
     throw std::invalid_argument("periodic cell must be nonsingular");
   }
-  dual_of(out.inverse.data(), out.dual_norm.data());
-  return out;
+  dual_of(inv, dual_norm);
 }
 
 namespace {

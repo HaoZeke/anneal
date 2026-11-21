@@ -22,6 +22,12 @@
 #endif
 
 namespace rgpot::nlist {
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((visibility("hidden")))
+#endif
+void invertCell(const double *cell, double inv[9], double dual_norm[3]);
+
 namespace {
 
 int axisCount(double length, double edge) {
@@ -168,13 +174,11 @@ void Neighbours::buildCells(const double *xyz, std::size_t n) {
   // image inverse. Failure there raises; it does not fall through to
   // the Cartesian bins.
   if (periodic_[0] && periodic_[1] && periodic_[2] && !orthorhombicCell(box_)) {
-    const CellInverse frame = MinimumImage::invertCell(box_);
-    nx_ = axisCount(1.0, edge * frame.dual_norm[0]);
-    ny_ = axisCount(1.0, edge * frame.dual_norm[1]);
-    nz_ = axisCount(1.0, edge * frame.dual_norm[2]);
-    for (int k = 0; k < 9; ++k) {
-      frac_inv[k] = frame.inverse[static_cast<std::size_t>(k)];
-    }
+    double dual_norm[3]{};
+    invertCell(box_, frac_inv, dual_norm);
+    nx_ = axisCount(1.0, edge * dual_norm[0]);
+    ny_ = axisCount(1.0, edge * dual_norm[1]);
+    nz_ = axisCount(1.0, edge * dual_norm[2]);
     use_frac = true;
   }
   const auto avail = availableBytes();
