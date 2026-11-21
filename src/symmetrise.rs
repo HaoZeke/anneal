@@ -193,6 +193,24 @@ fn sum_past_cap(total: f64, n: usize, cap: f64) -> bool {
     (total / n as f64).sqrt() >= gate
 }
 
+/// Whether `distance` is inside half of `gap` by more than rounding.
+///
+/// `squared_offset` rounds three differences, three products and two adds,
+/// and the quarter-gap product rounds once more. `32 * EPSILON` is above
+/// that error, including a midpoint where the gap rounds up and the two
+/// squared lengths differ by one ulp. A distance this far inside belongs
+/// to the hinted atom at the same bits the full scan records. Anything
+/// closer to the boundary, a subnormal length, or a product that overflowed
+/// returns false so the scan can decide.
+fn gap_ball_holds(distance: f64, gap: f64) -> bool {
+    if !gap.is_normal() || !(distance == 0.0 || distance.is_normal()) {
+        return false;
+    }
+    let room = 0.25 * (1.0 - 32.0 * f64::EPSILON);
+    let limit = gap * room;
+    limit.is_finite() && distance < limit
+}
+
 /// Squared displacement when the image lies strictly inside half the gap.
 ///
 /// The nearest other atom is `gap` away. An image closer than half that is
@@ -290,8 +308,9 @@ struct Cloud {
 /// Last partner of each atom about one axis.
 ///
 /// The next order about the same axis tries that partner before a scan.
-/// A point that still lies inside half the partner's gap has that partner
-/// as its nearest atom, so the scan does not run.
+/// A point that lies inside half the partner's gap by more than the
+/// rounding in the squared length has that partner as its nearest atom,
+/// so the scan does not run.
 struct AxisSpace {
     key: [u64; 3],
     partner: Vec<usize>,
@@ -592,9 +611,11 @@ impl Cloud {
     /// Nearest atom of `image` for atom `source` about the cached axis.
     ///
     /// The partner remembered from an earlier order is the nearest when the
-    /// image still lies inside half that partner's gap. Otherwise the
-    /// vectorised scan runs, and the partner it returns is remembered for
-    /// the next order about this axis.
+    /// image lies inside half that partner's gap by more than the rounding
+    /// in the squared length. Otherwise the vectorised scan runs, and the
+    /// partner it returns is remembered for the next order about this axis.
+    /// The index and the distance bits are the ones the full scan returns,
+    /// including when two atoms tie.
     fn nearest_for_exchange(
         &self,
         slot: usize,
@@ -604,9 +625,9 @@ impl Cloud {
         hint_gap: f64,
     ) -> (usize, f64) {
         note_safe6_nearest();
-        if hint < self.xs.len() && hint_gap.is_finite() && hint_gap > 0.0 {
+        if hint < self.xs.len() {
             let distance = squared_offset(image, self.xs[hint], self.ys[hint], self.zs[hint]);
-            if distance < hint_gap * 0.25 {
+            if gap_ball_holds(distance, hint_gap) {
                 return (hint, distance);
             }
         }
@@ -3349,6 +3370,100 @@ mod shell_tests {
         }
     }
 
+    fn placed_cloud(points: &[[f64; 3]]) -> Cloud {
+        let mut xs = Vec::with_capacity(points.len());
+        let mut ys = Vec::with_capacity(points.len());
+        let mut zs = Vec::with_capacity(points.len());
+        for point in points {
+            xs.push(point[0]);
+            ys.push(point[1]);
+            zs.push(point[2]);
+        }
+        Cloud {
+            xs,
+            ys,
+            zs,
+            gaps: std::cell::RefCell::new(None),
+            axis_sum: std::cell::RefCell::new(None),
+            axis_ratio: std::cell::RefCell::new(None),
+            axis_space: std::cell::RefCell::new(Vec::new()),
+            motionless: std::cell::Cell::new(false),
+        }
+    }
+
+    /// A midpoint whose squared lengths differ by one ulp.
+    ///
+    /// The unslacked test `distance < gap * 0.25` accepts atom 1. The full
+    /// scan returns atom 0, one ulp closer. These are the published squares:
+    /// hinted `(1, 60.51659008643544)`, full `(0, 60.516590086435436)`,
+    /// gap `242.0663603457418`, quarter `60.51659008643545`.
+    #[test]
+    fn nearest_for_exchange_ieee_midpoint_counterexample() {
+        let d0 = f64::from_bits(0x404e_421f_9fbb_56c9);
+        let d1 = f64::from_bits(0x404e_421f_9fbb_56ca);
+        let gap = f64::from_bits(0x406e_421f_9fbb_56cb);
+        let quarter = f64::from_bits(0x404e_421f_9fbb_56cb);
+        assert_eq!(d0, 60.516590086435436);
+        assert_eq!(d1, 60.51659008643544);
+        assert_eq!(gap, 242.0663603457418);
+        assert_eq!(quarter, 60.51659008643545);
+        assert_eq!((gap * 0.25).to_bits(), quarter.to_bits());
+        assert!(d1 < gap * 0.25);
+        assert!(d0 < d1);
+
+        let cloud = placed_cloud(&[
+            [
+                f64::from_bits(0xc01f_1df1_585a_4e1a),
+                f64::from_bits(0x3e89_4c58_3ada_5b51),
+                0.0,
+            ],
+            [f64::from_bits(0x401f_1df1_585a_4e1d), 0.0, 0.0],
+        ]);
+        let image = [0.0, 0.0, 0.0];
+        let hinted = squared_offset(image, cloud.xs[1], cloud.ys[1], cloud.zs[1]);
+        let nearer = squared_offset(image, cloud.xs[0], cloud.ys[0], cloud.zs[0]);
+        assert_eq!(hinted.to_bits(), d1.to_bits());
+        assert_eq!(nearer.to_bits(), d0.to_bits());
+        let full = cloud.nearest_index(image);
+        assert_eq!(full.0, 0);
+        assert_eq!(full.1.to_bits(), d0.to_bits());
+        let chosen = cloud.nearest_for_exchange(0, image, 0, 1, gap);
+        assert_eq!(chosen.0, full.0);
+        assert_eq!(chosen.1.to_bits(), full.1.to_bits());
+
+        // The same one-ulp split on a real nearest-neighbour gap. The image
+        // is the floating-point midpoint of the two atoms.
+        let cloud = placed_cloud(&[
+            [
+                f64::from_bits(0xc005_b736_c13a_c499),
+                f64::from_bits(0xc006_a423_4280_fe3e),
+                f64::from_bits(0xbff1_9b7f_4cad_eb1e),
+            ],
+            [
+                f64::from_bits(0xbff4_147f_ee40_2e6a),
+                f64::from_bits(0xbff0_bf88_f0a2_5417),
+                f64::from_bits(0xbffe_784e_3923_81fd),
+            ],
+        ]);
+        let image = [
+            f64::from_bits(0xbfff_c176_b85a_dbce),
+            f64::from_bits(0xbfff_03e7_bad2_284a),
+            f64::from_bits(0xbff8_09e6_c2e8_b68e),
+        ];
+        let gaps = cloud.gaps().clone();
+        let hinted = squared_offset(image, cloud.xs[1], cloud.ys[1], cloud.zs[1]);
+        assert!(
+            hinted < gaps[1] * 0.25,
+            "unslacked half-gap test would accept atom 1"
+        );
+        let full = cloud.nearest_index(image);
+        assert_eq!(full.0, 0);
+        assert!(full.1 < hinted);
+        let chosen = cloud.nearest_for_exchange(0, image, 0, 1, gaps[1]);
+        assert_eq!(chosen.0, full.0);
+        assert_eq!(chosen.1.to_bits(), full.1.to_bits());
+    }
+
     /// Indices 1 and 4 are the same distance from the origin. The scalar
     /// walk returns the earlier one.
     #[test]
@@ -3428,6 +3543,50 @@ mod shell_tests {
                 let chosen = cloud.nearest_index(image);
                 proptest::prop_assert_eq!(chosen.0, scalar.0);
                 proptest::prop_assert_eq!(chosen.1.to_bits(), scalar.1.to_bits());
+            }
+        }
+    }
+
+    proptest::proptest! {
+        /// Hinted partners match the full scan, including at a midpoint.
+        #[test]
+        fn hinted_nearest_matches_the_full_scan(
+            coords in proptest::collection::vec(-50.0f64..50.0, 6usize..48),
+            salt in proptest::num::u64::ANY,
+        ) {
+            let n = coords.len() / 3;
+            let mut coords = coords;
+            coords.truncate(3 * n);
+            let cloud = Cloud::from_view(Array1::from(coords).view(), n);
+            let gaps = cloud.gaps().clone();
+            let mut images = Vec::new();
+            if n >= 2 {
+                let left = cloud.point(0);
+                let right = cloud.point(1);
+                images.push([
+                    (left[0] + right[0]) / 2.0,
+                    (left[1] + right[1]) / 2.0,
+                    (left[2] + right[2]) / 2.0,
+                ]);
+            }
+            let mut state = salt;
+            for index in 0..n.min(3) {
+                images.push(cloud.point(index));
+                let mut draw = [0.0; 3];
+                for component in &mut draw {
+                    state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                    let unit = (state >> 11) as f64 / (1u64 << 53) as f64;
+                    *component = unit * 100.0 - 50.0;
+                }
+                images.push(draw);
+            }
+            for image in images {
+                let full = cloud.nearest_index(image);
+                for hint in 0..n {
+                    let chosen = cloud.nearest_for_exchange(0, image, 0, hint, gaps[hint]);
+                    proptest::prop_assert_eq!(chosen.0, full.0);
+                    proptest::prop_assert_eq!(chosen.1.to_bits(), full.1.to_bits());
+                }
             }
         }
     }
