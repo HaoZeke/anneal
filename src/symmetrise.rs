@@ -3086,7 +3086,7 @@ mod shell_tests {
             let mut total = 0.0;
             (0..cloud.xs.len()).all(|index| {
                 total += chord_scale * cloud.perp_sq_at(index, axis);
-                total < limit
+                total.partial_cmp(&limit) == Some(std::cmp::Ordering::Less)
             })
         } else {
             true
