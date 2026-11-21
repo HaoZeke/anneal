@@ -28,6 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import run_panel as panel  # noqa: E402
+from gmin_pin import KNOWN_REVISIONS  # noqa: E402
 
 PAIR_ENV = {"H2H_PAIR_SCALE": "1"}
 CODES = ("baseline", "fix2", "gmin")
@@ -58,14 +59,25 @@ def write_start(bin_dir: Path, tree: Path, system: str, seed: int, path: Path) -
     )
 
 
+def gmin_label(gmin_source: Path, svnrev: Path) -> str:
+    """The SVNREV of a new GMIN build, refused unless it is the pin its note describes."""
+    source = dict(line.split("=", 1) for line in gmin_source.read_text().splitlines() if "=" in line)
+    gmin_revision = panel.read_svnrev(svnrev)
+    if source.get("svnrev") != gmin_revision:
+        raise SystemExit(f"{gmin_source} does not describe {svnrev}")
+    if source.get("tarball_sha256") != panel.TARBALL_SHA256:
+        raise SystemExit(f"{gmin_source} has another GMIN tarball")
+    return gmin_revision
+
+
 def selected(rows: list[dict[str, str]], system: str, code: str, revision: str, base: str) -> list[dict[str, str]]:
-    wanted = base if code == "baseline" else panel.GMIN_REV if code == "gmin" else revision
+    wanted = KNOWN_REVISIONS if code == "gmin" else (base,) if code == "baseline" else (revision,)
     found: dict[int, dict[str, str]] = {}
     for row in rows:
         if (
             row["system"] == system
             and row["code"] == code
-            and row["code_revision"] == wanted
+            and row["code_revision"] in wanted
             and row["harness_revision"] == revision
             and int(row["seed"]) in panel.SEEDS
         ):
@@ -164,6 +176,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--work", type=Path)
     parser.add_argument("--logs", type=Path)
     parser.add_argument("--gmin-source", type=Path)
+    parser.add_argument("--svnrev", type=Path)
     parser.add_argument("--lj-data", type=Path)
     parser.add_argument("--morse-data", type=Path)
     parser.add_argument("--system", action="append")
@@ -184,7 +197,7 @@ def main(argv: list[str]) -> int:
         print(f"pinned to {sorted(os.sched_getaffinity(0))}, expected core 0", file=sys.stderr)
         return 2
     needed = (args.base_bin, args.base_tree, args.head_bin, args.head_tree, args.work, args.logs,
-              args.gmin_source, args.lj_data, args.morse_data)
+              args.gmin_source, args.svnrev, args.lj_data, args.morse_data)
     if any(value is None for value in needed):
         parser.error("run needs both binaries, their trees, work, logs, the GMIN source note and both data files")
     for tree, revision in ((args.base_tree, args.base_revision), (args.head_tree, args.revision)):
@@ -193,9 +206,7 @@ def main(argv: list[str]) -> int:
         ).stdout.strip()
         if head != revision:
             raise SystemExit(f"{tree} is at {head}, not {revision}")
-    source = dict(line.split("=", 1) for line in args.gmin_source.read_text().splitlines() if "=" in line)
-    if source.get("svnrev") != panel.GMIN_REV:
-        raise SystemExit(f"GMIN SVNREV {source.get('svnrev')} is not {panel.GMIN_REV}")
+    gmin_revision = gmin_label(args.gmin_source, args.svnrev)
     systems = [row[0] for row in panel.SYSTEMS if not args.system or row[0] in args.system]
     for system in systems:
         for bin_dir, tree in ((args.base_bin, args.base_tree), (args.head_bin, args.head_tree)):
@@ -224,7 +235,7 @@ def main(argv: list[str]) -> int:
                 code_revision = {
                     "baseline": args.base_revision,
                     "fix2": args.revision,
-                    "gmin": panel.GMIN_REV,
+                    "gmin": gmin_revision,
                 }[code]
                 key = (system, code, str(seed), code_revision, args.revision)
                 if key in done:

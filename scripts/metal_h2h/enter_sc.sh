@@ -13,7 +13,8 @@ LIB=${RGPOT_SC_LIB:-/work/rgpot/bdir-xtb/CppCore/librgpot.so}
 bash "$HERE/build_sc.sh"
 bash "$HERE/build_gmin_sc.sh"
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs" "$LOGS" /work
-cp -a "$HERE/run_sc.py" "$ROOT/scripts/target_tol.py" "$WORK/bin/"
+cp -a "$HERE/run_sc.py" "$ROOT/scripts/target_tol.py" \
+  "$ROOT/scripts/gmin_pin.py" "$ROOT/scripts/machine_provenance.py" "$WORK/bin/"
 chmod +x "$WORK/bin/h2h_sc" "$WORK/bin/GMIN" "$WORK/bin/run_sc.py"
 
 cat > "$WORK/bin/inside.sh" << EOF
@@ -39,6 +40,7 @@ exec /usr/bin/python3 -u $WORK/bin/run_sc.py \\
   --summary $ROOT/bench/metal-cluster-h2h/sc-8e076b7f/results.csv \\
   --seeds-out $ROOT/bench/metal-cluster-h2h/sc-8e076b7f/seeds.csv \\
   --source $WORK/gmin-source.txt \\
+  --svnrev /work/metal-darby/src/wales/GMIN/source/SVNREV \\
   --head-file $WORK/anneal-head \\
   "\$@"
 EOF

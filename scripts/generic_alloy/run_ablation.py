@@ -54,6 +54,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+from machine_provenance import machine_columns, require_csv_schema  # noqa: E402
 
 SEEDS = tuple(range(2000, 2012))
 WIDE_SEEDS = tuple(range(2000, 2024))
@@ -208,6 +209,8 @@ ROW_FIELDS = [
     "code_revision",
     "host",
     "cpu",
+    "machine_id",
+    "cpu_model",
 ]
 
 SUMMARY_FIELDS = [
@@ -231,6 +234,8 @@ SUMMARY_FIELDS = [
     "mannwhitney_p_outside",
     "code_revision",
     "host",
+    "machine_id",
+    "cpu_model",
     "seeds",
     "schedule_seed",
 ]
@@ -393,6 +398,7 @@ def read_rows(path: Path) -> list[dict[str, str]]:
 
 def append_row(path: Path, row: dict) -> None:
     fresh = not path.is_file() or path.stat().st_size == 0
+    require_csv_schema(path, ROW_FIELDS)
     with path.open("a", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS, lineterminator="\n")
         if fresh:
@@ -468,6 +474,12 @@ def summarise(campaign: str, rows: list[dict[str, str]]) -> list[dict[str, str]]
                     **tests,
                     "code_revision": " ".join(sorted({row["code_revision"] for row in group})),
                     "host": " ".join(sorted({row["host"] for row in group})),
+                    "machine_id": ";".join(
+                        sorted({row.get("machine_id", "") for row in group})
+                    ),
+                    "cpu_model": ";".join(
+                        sorted({row.get("cpu_model", "") for row in group})
+                    ),
                     "seeds": " ".join(sorted({row["seed"] for row in group}, key=int)),
                     "schedule_seed": str(SCHEDULE_SEED),
                 }
@@ -561,6 +573,7 @@ def main(argv: list[str]) -> int:
     }
     host = os.uname().nodename
     cpu = cpu_model()
+    machine = machine_columns()
     args.rows.parent.mkdir(parents=True, exist_ok=True)
     args.logs.mkdir(parents=True, exist_ok=True)
     done = {
@@ -605,6 +618,7 @@ def main(argv: list[str]) -> int:
             "code_revision": revision,
             "host": host,
             "cpu": cpu,
+            **machine,
         }
         append_row(args.rows, row)
         print(

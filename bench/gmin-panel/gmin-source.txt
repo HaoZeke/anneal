@@ -1,11 +1,13 @@
-url=http://www-wales.ch.cam.ac.uk/svn.tar.bz2
-revision=aac1548a8aec13b53ad12a8d6904625081685d2e
-svnrev=aac1548a8aec13b53ad12a8d6904625081685d2e
-tarball_sha256=a972c29b081a74235286bf3e8755c8811da2f7e2a4faab81ffb41570d6d2fe05
+snapshot=2026-11-19
+url=https://huggingface.co/datasets/HaoZeke/anneal-paper-data/resolve/2d639566b6e9a7243bfd485aa3cb9a904c915451/gmin/svn-20261119.tar.bz2
+fallback_url=http://www-wales.ch.cam.ac.uk/svn.tar.bz2
+revision=9cbec1a446352bc9ef064bd2b1a5767194655919
+svnrev=9cbec1a446352bc9ef064bd2b1a5767194655919
+tarball_sha256=ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776
+source_date_epoch=1795057278
 patch=bench/lj104-lattice/v2/h2h-gmin.patch a31221a67883d20032a029e34e3d81bd62c5bcb786c97fff02a9c234adc34553
 patch=scripts/morse_h2h/morse-timer.patch 934297ddf8a44c5d7257928a04b4242560e03ed9b202aed3cd539441c460c111
 patch=bench/metal-cluster-h2h/gmin-bgupta.patch 85e41503a1e64c46902ecb5aefc4c60e9d81e0d69ab1efaa2dc16ab20efb52a8
 cmake=-DWITH_ALIGN=OFF -DWITH_MPI=OFF -DWITH_OPENMP=OFF -DWITH_SPARSE=OFF -DWITH_PYTHON=OFF -DWITH_MYBLAS=OFF -DWITH_MYLAPACK=OFF
 gfortran=13.3.0
 linked=/usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3.12.0 /usr/lib/x86_64-linux-gnu/blas/libblas.so.3.12.0
-binary_sha256=4665badc28f4d765117771bea47cf1ebcb93c5e7a7456679f17b53aaff15fe69

@@ -27,6 +27,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+from machine_provenance import machine_columns  # noqa: E402
 
 SYSTEMS = ("zn38", "zn55", "zn75", "zn80", "cu19au19")
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
@@ -53,6 +54,8 @@ SUMMARY_FIELDS = [
     "anneal_head",
     "code_revision",
     "host",
+    "machine_id",
+    "cpu_model",
 ]
 
 ROW_FIELDS = [
@@ -260,6 +263,7 @@ def summarise(rows: list[dict], seeds: tuple[int, ...], head: str) -> list[dict[
                     "anneal_head": head,
                     "code_revision": head,
                     "host": os.uname().nodename,
+                    **machine_columns(),
                 }
             )
     return out

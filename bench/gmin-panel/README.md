@@ -72,11 +72,19 @@ is already omitted as censored, and `hit` and `evals_to_hit` are unaffected.
   commit on anneal rows and the GMIN SVNREV on GMIN rows;
   `harness_revision` is the anneal commit whose examples wrote the starts;
   `host` is the UTS hostname and `session` the start of the runner process.
-- `gmin-source.txt`: the GMIN tarball, SVNREV, patches, CMake flags,
-  compiler, linked BLAS and LAPACK and binary hash.
-  `bin-sha256.txt`: the five binaries (`4f772314...` for GMIN in session
+- `gmin-source.txt`: the 2026-11-19 GMIN snapshot that new runs build
+  from (the shared pin in `scripts/gmin_pin.py`, SVNREV `9cbec1a4`,
+  tarball sha256, patches, CMake flags, compiler, linked BLAS and
+  LAPACK). A session appends `binary_sha256`
+  from the GMIN line of its own `bin-sha256.txt`. No session has run at
+  this snapshot yet, so the file has no binary hash.
+  `bin-sha256.txt`: the five binaries of the aac1548a sessions behind
+  the rows (`4f772314...` for GMIN in session
   `20261117T035457Z`, `4665badc...` in `20261117T152941Z`; the four Rust
   binaries are bit-identical across both sessions).
+  `gmin-source-aac1548a.txt` is the build receipt of that `4665badc...`
+  GMIN: SVNREV `aac1548a`, tarball, patches, CMake flags, compiler,
+  linked BLAS and LAPACK and binary hash.
 - `summary.csv`, the table below and table `tab:gmin` in
   `paper/jctc/manuscript.tex` are written from `rows.csv` by
   `bash scripts/gmin_panel/enter_bench.sh --summarize --tex`.

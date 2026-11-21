@@ -34,6 +34,8 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+from machine_provenance import machine_columns  # noqa: E402
+from gmin_pin import read_built_revision  # noqa: E402
 
 HIT_TOL = DEFAULT_HIT_TOL
 SEEDS = tuple(range(2000, 2012))
@@ -252,6 +254,7 @@ def main() -> int:
     parser.add_argument("--seed", type=int, help="one seed instead of all twelve")
     parser.add_argument("--head-file", type=Path)
     parser.add_argument("--gmin-source", type=Path)
+    parser.add_argument("--svnrev", type=Path, required=True)
     args = parser.parse_args()
     if socket.gethostname() != "bench":
         print(f"hostname is {socket.gethostname()}, not bench", file=sys.stderr)
@@ -260,15 +263,21 @@ def main() -> int:
         print(f"cwd is {Path.cwd()}, not /work", file=sys.stderr)
         return 2
     args.work.mkdir(parents=True, exist_ok=True)
-    head, revision = read_provenance(args.head_file, args.gmin_source)
+    head, _recorded_revision = read_provenance(
+        args.head_file,
+        args.gmin_source,
+    )
+    revision = read_built_revision(args.svnrev, args.gmin_source)
     host = os.uname().nodename
+    machine = machine_columns()
     reuse = load_reuse(args.gmin_rows)
     n = args.size
     budgets = (args.budget,) if args.budget else BUDGETS
     seeds = (args.seed,) if args.seed is not None else SEEDS
     whole = args.budget is None and args.seed is None
     fields = ["system", "code", "budget", "seed", "hit", "evals_to_hit", "charged",
-              "best", "wall_s", "pot_s", "outside_s", "basins", "code_revision", "host"]
+              "best", "wall_s", "pot_s", "outside_s", "basins", "code_revision", "host",
+              "machine_id", "cpu_model"]
     rows: list[dict[str, str]] = []
     with args.rows.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
@@ -291,13 +300,19 @@ def main() -> int:
                            "best": row["best"], "wall_s": row["wall_s"], "pot_s": row["pot_s"],
                            "outside_s": f"{outside_of(row):.6f}", "basins": row.get("basins", ""),
                            "code_revision": head if code == "anneal" else row.get("code_revision") or revision,
-                           "host": host if code == "anneal" or carried is None else row.get("host", "")}
+                           "host": host if code == "anneal" or carried is None else row.get("host", ""),
+                           **(machine if code == "anneal" or carried is None else {
+                               "machine_id": row.get("machine_id", ""),
+                               "cpu_model": row.get("cpu_model", ""),
+                           })}
+                    if not out["machine_id"] or not out["cpu_model"]:
+                        raise RuntimeError("refusing a reused row without machine provenance")
                     rows.append(out)
                     writer.writerow(out)
                     handle.flush()
     if not whole:
         return 0
-    summary = [summarise(rows, budget, n) for budget in budgets]
+    summary = [{**summarise(rows, budget, n), **machine} for budget in budgets]
     with args.summary.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(summary[0].keys()))
         writer.writeheader()
