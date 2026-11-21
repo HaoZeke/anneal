@@ -123,23 +123,34 @@ pub(crate) fn fcc_cut(n: usize, centre: FccCentre, nearest: f64) -> Array1<f64> 
     if !valid_request(n, nearest) {
         return Array1::zeros(0);
     }
-    let origin = match centre {
+    let origin: [f64; 3] = match centre {
         FccCentre::Atom => [0.0, 0.0, 0.0],
         FccCentre::Octahedral => [1.0, 0.0, 0.0],
         FccCentre::Tetrahedral => [0.5, 0.5, 0.5],
     };
+    let shift = origin.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
     let mut limit = 1i32;
     let mut sites = Vec::new();
-    while sites.len() < n {
+    loop {
         sites.clear();
+        let safe_radius = (f64::from(limit) - shift).max(0.0);
+        let safe_r2 = safe_radius * safe_radius;
+        let mut inside = 0usize;
         for i in -limit..=limit {
             for j in -limit..=limit {
                 for k in -limit..=limit {
                     if (i + j + k).rem_euclid(2) == 0 {
-                        sites.push([f64::from(i), f64::from(j), f64::from(k)]);
+                        let site = [f64::from(i), f64::from(j), f64::from(k)];
+                        if dist2(&site, &origin) <= safe_r2 {
+                            inside += 1;
+                        }
+                        sites.push(site);
                     }
                 }
             }
+        }
+        if inside >= n {
+            break;
         }
         limit += 1;
     }
@@ -756,6 +767,42 @@ mod tests {
             quench_as_placed(axial.clone(), &mut Probe).expect("finite quench");
         assert_eq!(energy, -1.0);
         assert_eq!(quenched, axial);
+    }
+
+    #[test]
+    fn fcc_octahedral_cut_completes_outer_shells_without_box_clipping() {
+        let coords = fcc_cut(38, FccCentre::Octahedral, 1.0);
+        assert_eq!(coords.len(), 3 * 38);
+        let mut centroid = [0.0; 3];
+        for i in 0..38 {
+            for k in 0..3 {
+                centroid[k] += coords[3 * i + k];
+            }
+        }
+        for c in &mut centroid {
+            *c /= 38.0;
+        }
+        let mut sorted: Vec<i64> = (0..38)
+            .map(|i| {
+                let d2: f64 = (0..3)
+                    .map(|k| (coords[3 * i + k] - centroid[k]).powi(2))
+                    .sum();
+                (d2 * 1000.0).round() as i64
+            })
+            .collect();
+        sorted.sort();
+        let mut grouped: Vec<(i64, usize)> = Vec::new();
+        for r in sorted {
+            if let Some((last_r, count)) = grouped.last_mut()
+                && *last_r == r
+            {
+                *count += 1;
+            } else {
+                grouped.push((r, 1));
+            }
+        }
+        let counts: Vec<usize> = grouped.into_iter().map(|(_, count)| count).collect();
+        assert_eq!(counts, vec![6, 8, 24]);
     }
 
     #[test]
