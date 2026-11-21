@@ -4028,6 +4028,29 @@ def stack_route_clears_temperature(source: str) -> bool:
     )
 
 
+TRAIL_ROW_REVISIONS = (
+    "eeec8e2c216ae1506768bca8e29846c1c039ca3b",
+    "61fa67cf380e46876b569da45e7cc091647a775b",
+    "5eb79cdcb0a986984dc7b487e5a3cc93224246f9",
+    "0cc3814c053c2f5a709f0f375ebae07e5373c171",
+    "1c1b12384683485cf820d3a244151b48973dc0f7",
+    "628773d6837ea2d959a27256ff4163b21162fd4d",
+    "b12293b9d637dd32417be3aa482302e0f30dd594",
+    "c2de652dca0bc75e2b0cb4afffac91fd656404e4",
+)
+
+
+def historical_trail_presets(audit: Audit) -> None:
+    """Every revision behind a printed atomic row enabled the trail response."""
+    path = "src/methods/cluster_hopping/config.rs"
+    for revision in TRAIL_ROW_REVISIONS:
+        source = git("show", f"{revision}:{path}")
+        enabled = source.returncode == 0 and "cfg.trail_on_stall = true;" in source.stdout
+        audit.record(enabled, f"{path} at {revision[:8]}",
+                     "printed-row preset enables the trail response", "enabled",
+                     "enabled" if enabled else "disabled or unavailable")
+
+
 def science_claims(audit: Audit) -> None:
     """Overclaiming wording stays out, endpoint prose stays on energies, and every citation resolves."""
     for path in (TEX, SI, COVER):
@@ -4067,6 +4090,7 @@ def science_claims(audit: Audit) -> None:
     audit.record("cfg.trail_on_stall = true;" in config, TEX,
                  "Config::recommended enables the trail response", "enabled",
                  "enabled" if "cfg.trail_on_stall = true;" in config else "disabled")
+    historical_trail_presets(audit)
     audit.said(TEX, "The preset enables two responses to a stuck chain.")
     audit.said(SI, "Those presets enable both the trail and climb responses to a stuck chain.")
     stack = audit.text("paper/jctc/scripts/fig_algorithm_stack.py")

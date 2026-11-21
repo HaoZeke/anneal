@@ -643,8 +643,8 @@ pub struct Config {
     /// is an evaluated waypoint of the descent, partway down from the ridge.
     /// Restarting from it with an outward push costs only the requench,
     /// against 637 evaluations for a Lanczos climb, and starts from a point
-    /// the landscape has already priced. The climb remains the fallback when
-    /// no entry is on record.
+    /// the landscape has already priced. Without a recorded entry the trail
+    /// arm is a no-op; the climb is a separate arm of the stall allocator.
     pub trail_on_stall: bool,
     /// Smallest number of hops without improvement before a climb is
     /// triggered.

@@ -1416,6 +1416,30 @@ def test_reported_run_figures_exclude_unused_components_and_crossings():
     assert "bank" not in audit.text("paper/jctc/scripts/toc_graphic.py")
 
 
+def test_a_historical_printed_row_with_the_trail_disabled_is_reported(monkeypatch):
+    audit = audit_mod.Audit()
+    real_git = audit_mod.git
+    target = audit_mod.TRAIL_ROW_REVISIONS[0]
+
+    def trail_disabled(*args, stdin=None):
+        result = real_git(*args, stdin=stdin)
+        if args == ("show", f"{target}:src/methods/cluster_hopping/config.rs"):
+            return subprocess.CompletedProcess(
+                result.args,
+                result.returncode,
+                result.stdout.replace("cfg.trail_on_stall = true;", "cfg.trail_on_stall = false;"),
+                result.stderr,
+            )
+        return result
+
+    monkeypatch.setattr(audit_mod, "git", trail_disabled)
+    audit_mod.historical_trail_presets(audit)
+    assert [(r[1], r[2]) for r in audit.drifts()] == [
+        ("src/methods/cluster_hopping/config.rs at eeec8e2c",
+         "printed-row preset enables the trail response")
+    ]
+
+
 def test_an_unresolved_citation_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.SI)
