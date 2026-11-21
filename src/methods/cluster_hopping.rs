@@ -820,6 +820,15 @@ impl Ledger {
         child
     }
 
+    fn side_probe(&self, room: usize) -> (Self, usize) {
+        let mut child = Self::new(self.budget);
+        child.stop = self.stop.clone();
+        child.target = self.target;
+        let offset = self.budget.saturating_sub(room.min(self.remaining()));
+        child.spent = offset;
+        (child, offset)
+    }
+
     /// Binds this ledger's stop on the running thread, if it has one.
     ///
     /// Worker threads do not see the binding. Give them [`Ledger::slice`]
@@ -1008,6 +1017,17 @@ impl Ledger {
     /// Charged count and energy at each incumbent [`Ledger::record`] stored.
     pub fn encounters(&self) -> &[(usize, f64)] {
         &self.encounters
+    }
+
+    fn stamp_encounter(&mut self, value: f64, at: usize) {
+        if let Some((spent, _)) = self
+            .encounters
+            .iter_mut()
+            .rev()
+            .find(|(_, energy)| *energy == value)
+        {
+            *spent = at;
+        }
     }
 
     /// Replace the incumbent with a reoptimized geometry and its energy.
@@ -4369,26 +4389,38 @@ where
     F: FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + ?Sized,
 {
     fn energy(&mut self, point: ArrayView1<f64>) -> Option<f64> {
+        if self.ledger.remaining() == 0 || self.ledger.stopped() {
+            return None;
+        }
         let (value, _) = (self.relax)(self.ledger, point, 0);
         value.is_finite().then_some(value)
     }
 
     fn quench(&mut self, point: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
+        if self.ledger.remaining() == 0 || self.ledger.stopped() {
+            return None;
+        }
         let result = (self.relax)(self.ledger, point, self.steps);
         result.0.is_finite().then_some(result)
     }
 }
 
-/// Quench every generic packing and retain the lowest measured energy.
-///
-/// Candidate generation itself is free. The pair search and every relaxation
-/// use the supplied ledger, so all potential evaluations are charged. No
-/// second-neighbour or potential-family switch is consulted.
-pub(crate) fn generic_packing_candidate<F>(
+fn generic_packings_apply(cfg: &Config, n: usize, dim: usize) -> bool {
+    cfg.energy_lattice
+        && !cfg.move_library.is_molecular()
+        && !cfg.move_library.is_rigid_body()
+        && cfg.rigid_body_geometry.is_none()
+        && cfg.frozen.is_none()
+        && cfg.active_region.is_none()
+        && n >= 2
+        && dim == 3 * n
+}
+
+fn generic_packing_candidate_with_encounter<F>(
     cfg: &Config,
     ledger: &mut Ledger,
     relax: &mut F,
-) -> Option<(f64, Array1<f64>)>
+) -> Option<(f64, Array1<f64>, usize)>
 where
     F: FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + ?Sized,
 {
@@ -4397,37 +4429,78 @@ where
         return None;
     }
     let candidate_count = 8usize;
-    if ledger.remaining() <= candidate_count {
+    if ledger.remaining() <= candidate_count || ledger.stopped() {
         return None;
     }
+    let probe_start = ledger.spent();
     let probe_limit =
         (ledger.remaining() / (candidate_count + 2)).min(f64::MANTISSA_DIGITS as usize);
     let nearest = measured_pair_minimum(ledger, relax, n, probe_limit)?;
-    let mut best: Option<(f64, Array1<f64>)> = None;
+    let mut best: Option<(f64, Array1<f64>, usize)> = None;
+    let mut hit_target = false;
     let mut candidates = binary_geometry::packing_candidates(n, nearest);
     let axial = candidates.pop()?;
     for (index, candidate) in candidates.iter().enumerate() {
+        if ledger.stopped() || ledger.remaining() == 0 {
+            break;
+        }
         let candidates_left = candidates.len() - index;
         let steps = cfg
             .relax_steps
             .min(ledger.remaining().saturating_sub(candidates_left));
         let (energy, relaxed) = relax(ledger, candidate.view(), steps);
-        if energy.is_finite() && best.as_ref().is_none_or(|(held, _)| energy < *held) {
-            best = Some((energy, relaxed));
+        if energy.is_finite()
+            && quench_is_sane(cfg, energy, relaxed.view())
+            && best.as_ref().is_none_or(|(held, _, _)| energy < *held)
+        {
+            let found_at = ledger.spent().saturating_sub(probe_start);
+            best = Some((energy, relaxed, found_at));
+            if ledger
+                .target()
+                .is_some_and(|target| crate::energy_hits(energy, target, 0.0))
+            {
+                hit_target = true;
+                break;
+            }
         }
     }
-    let steps = cfg.relax_steps.min(ledger.remaining());
-    let mut probe = GenericPackingProbe {
-        ledger,
-        relax,
-        steps,
-    };
-    if let Some((energy, relaxed)) = binary_geometry::quench_as_placed(axial, &mut probe)
-        && best.as_ref().is_none_or(|(held, _)| energy < *held)
-    {
-        best = Some((energy, relaxed));
+    if !hit_target && !ledger.stopped() && ledger.remaining() > 0 {
+        let steps = cfg.relax_steps.min(ledger.remaining());
+        let mut probe = GenericPackingProbe {
+            ledger,
+            relax,
+            steps,
+        };
+        if let Some((energy, relaxed)) = binary_geometry::quench_as_placed(axial, &mut probe)
+            && quench_is_sane(cfg, energy, relaxed.view())
+            && best.as_ref().is_none_or(|(held, _, _)| energy < *held)
+        {
+            best = Some((
+                energy,
+                relaxed,
+                probe.ledger.spent().saturating_sub(probe_start),
+            ));
+        }
     }
     best
+}
+
+/// Quench every generic packing and retain the lowest measured energy.
+///
+/// Candidate generation itself is free. The pair search and every relaxation
+/// use the supplied ledger, so all potential evaluations are charged. No
+/// second-neighbour or potential-family switch is consulted.
+#[cfg(test)]
+pub(crate) fn generic_packing_candidate<F>(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    relax: &mut F,
+) -> Option<(f64, Array1<f64>)>
+where
+    F: FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + ?Sized,
+{
+    generic_packing_candidate_with_encounter(cfg, ledger, relax)
+        .map(|(energy, state, _)| (energy, state))
 }
 
 fn run_full<'g, R, H>(
@@ -5272,6 +5345,10 @@ where
     let mut held_cv: Option<Array1<f64>> = None;
     let mut held_seat: Option<usize> = None;
     let mut held_count: usize = 0;
+    let mut packings_offered = false;
+    // Held until the walk finishes unless a candidate already hits the stop
+    // target, so a deep wrong-funnel packing does not trap the walk at hop 0.
+    let mut pending_packing: Option<(f64, Array1<f64>, usize)> = None;
     let stop = loop {
         // A finished checkpoint interval is delivered before the budget
         // exit. The loop otherwise returns here with nothing left to
@@ -5294,6 +5371,49 @@ where
         }
         if ledger.target_reached() {
             break HopStop::of_closed(ledger);
+        }
+        if !packings_offered
+            && !escape_refused
+            && generic_packings_apply(cfg, n, x.len())
+            && ledger.remaining() > 0
+        {
+            packings_offered = true;
+            let room = ledger.remaining().div_ceil(2);
+            let (mut probe, probe_offset) = ledger.side_probe(room);
+            let offered = generic_packing_candidate_with_encounter(cfg, &mut probe, relax);
+            let probe_spent = probe.spent().saturating_sub(probe_offset);
+            let before = ledger.spent();
+            ledger.charge_many(probe_spent);
+            charged_at_best = charged_at_best.saturating_add(ledger.spent().saturating_sub(before));
+            if let Some((cut_energy, cut_state, cut_offset)) = offered
+                && cut_energy < ledger.best - 1e-10
+                && quench_is_sane(cfg, cut_energy, cut_state.view())
+            {
+                let cut_at = before + cut_offset;
+                let cut_gradient = grad.as_deref_mut().and_then(|evaluate| {
+                    evaluate(ledger, cut_state.view())
+                        .filter(|values| answer_gradient_ok(cfg, values.view(), cut_state.len()))
+                });
+                if !gradient_required || cut_gradient.is_some() {
+                    if ledger
+                        .target()
+                        .is_some_and(|target| crate::energy_hits(cut_energy, target, 0.0))
+                    {
+                        ledger.record(cut_energy, cut_state.view());
+                        ledger.stamp_encounter(cut_energy, cut_at);
+                        if improvements.len() < 512 {
+                            improvements.push((hops, cut_at, bias.n_basins(), cut_energy));
+                        }
+                        break HopStop::of_closed(ledger);
+                    }
+                    pending_packing = Some((cut_energy, cut_state, cut_at));
+                } else {
+                    unconverged_records += 1;
+                }
+            }
+            if ledger.stopped() || ledger.target_reached() {
+                break HopStop::of_closed(ledger);
+            }
         }
         // A rigid quench creeps by far less than an isomer gap. Treating
         // that creep as a new lowest restarts the stall clock forever, so
@@ -9974,6 +10094,16 @@ where
         }
     }
 
+    if let Some((energy, state, found_at)) = pending_packing
+        && energy < ledger.best - 1e-10
+    {
+        ledger.record(energy, state.view());
+        ledger.stamp_encounter(energy, found_at);
+        if improvements.len() < 512 {
+            improvements.push((hops, found_at, bias.n_basins(), energy));
+        }
+    }
+
     let n_basins = bias.n_basins();
     // The ledger is the list of incumbents. A push beside `Ledger::record`
     // carries the hop and basin count; an auxiliary quench that only records
@@ -10699,6 +10829,219 @@ mod tests {
             ledger.spent() - before
         );
         assert_eq!(calls, ledger.spent());
+    }
+
+    #[test]
+    fn run_with_gradient_reaches_generic_packings_on_two_species_atomic_config() {
+        let n = 23usize;
+        let mut species = vec![29u32; 11];
+        species.extend(std::iter::repeat_n(79u32, 12));
+        let mut cfg = Config::recommended(n).with_species(species, None);
+        cfg.max_hops = Some(3);
+        let mut start_rng = StdRng::seed_from_u64(11);
+        let start =
+            random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, &mut start_rng);
+        let far_threshold = 0.5 * f64::EPSILON.sqrt().recip();
+        let expected_packings = binary_geometry::packing_candidates(n, 2.0);
+        let mut seen_pair_probes = 0usize;
+        let mut seen_packing_counts = vec![0usize; expected_packings.len()];
+        let total_evals = std::sync::atomic::AtomicUsize::new(0);
+        let mut ledger = Ledger::new(2_000);
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            if !led.charge() {
+                return (f64::NAN, x.to_owned());
+            }
+            total_evals.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let has_far_spectator = (2..n).any(|atom| x[3 * atom + 1].abs() > far_threshold);
+            if steps == 0 && has_far_spectator {
+                seen_pair_probes += 1;
+                let distance = (x[3] - x[0]).abs();
+                return ((distance - 2.0).powi(2), x.to_owned());
+            }
+            for (index, packing) in expected_packings.iter().enumerate() {
+                let max_diff = x
+                    .iter()
+                    .zip(packing.iter())
+                    .map(|(a, b)| (a - b).abs())
+                    .fold(0.0_f64, f64::max);
+                if max_diff < 1e-4 {
+                    seen_packing_counts[index] += 1;
+                    return (-50.0 - index as f64, x.to_owned());
+                }
+            }
+            (-1.0, x.to_owned())
+        };
+        let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| {
+            if !led.charge() {
+                return None;
+            }
+            total_evals.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Some(Array1::zeros(x.len()))
+        };
+        let mut rng = StdRng::seed_from_u64(11);
+        let outcome = run_with_gradient(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut rng,
+        )
+        .expect("finite start");
+        assert!(
+            seen_pair_probes >= 3,
+            "expected pair-minimum probes through run_full, saw {seen_pair_probes}"
+        );
+        assert_eq!(
+            seen_packing_counts,
+            vec![1; expected_packings.len()],
+            "expected each of the 8 generic packings to be offered once through run_full"
+        );
+        assert!(
+            outcome.best <= -57.0 + 1e-9,
+            "expected offered generic packing to beat the opening quench, got {}",
+            outcome.best
+        );
+        let evals = total_evals.load(std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(outcome.charged, evals);
+        assert_eq!(ledger.spent(), evals);
+        assert!(outcome.charged <= 2_000);
+    }
+
+    #[test]
+    fn run_with_gradient_skips_generic_packings_on_molecular_and_rigid_configs() {
+        let far_threshold = 0.5 * f64::EPSILON.sqrt().recip();
+
+        // Molecular configuration (even if energy_lattice is toggled on).
+        let mut molecular = Config::recommended_molecular(
+            vec![8, 1, 1, 8, 1, 1],
+            vec![vec![0, 1, 2], vec![3, 4, 5]],
+            1.0,
+        );
+        molecular.energy_lattice = true;
+        molecular.max_hops = Some(2);
+        let mol_start = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 0.96, 0.0, 0.0, -0.24, 0.93, 0.0, 4.0, 0.0, 0.0, 4.96, 0.0, 0.0, 3.76,
+            0.93, 0.0,
+        ]);
+        let mut mol_probes = 0usize;
+        let mut mol_ledger = Ledger::new(400);
+        let mut mol_relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            if !led.charge() {
+                return (f64::NAN, x.to_owned());
+            }
+            if steps == 0 && (2..molecular.n_points).any(|a| x[3 * a + 1].abs() > far_threshold) {
+                mol_probes += 1;
+            }
+            (0.0, x.to_owned())
+        };
+        let mut mol_grad =
+            |led: &mut Ledger, x: ArrayView1<f64>| led.charge().then(|| Array1::zeros(x.len()));
+        let mut mol_rng = StdRng::seed_from_u64(13);
+        let mol_out = run_with_gradient(
+            &molecular,
+            mol_start.view(),
+            &mut mol_ledger,
+            &mut mol_relax,
+            Some(&mut mol_grad),
+            &mut mol_rng,
+        )
+        .expect("finite molecular start");
+        assert_eq!(
+            mol_probes, 0,
+            "molecular config must never run packing probes"
+        );
+        assert_eq!(mol_out.charged, mol_ledger.spent());
+
+        // Rigid-body configuration (even if energy_lattice is toggled on).
+        let geometry = crate::potentials::gmin_water_geometry();
+        let mut rigid = Config::recommended(3).with_rigid_bodies(geometry);
+        rigid.energy_lattice = true;
+        rigid.max_hops = Some(2);
+        let rigid_start = Array1::from_vec(vec![
+            -2.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0,
+        ]);
+        let mut rigid_probes = 0usize;
+        let mut rigid_ledger = Ledger::new(400);
+        let mut rigid_relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            if !led.charge() {
+                return (f64::NAN, x.to_owned());
+            }
+            if steps == 0 && x.iter().any(|v| v.abs() > far_threshold) {
+                rigid_probes += 1;
+            }
+            (0.0, x.to_owned())
+        };
+        let mut rigid_grad =
+            |led: &mut Ledger, x: ArrayView1<f64>| led.charge().then(|| Array1::zeros(x.len()));
+        let mut rigid_rng = StdRng::seed_from_u64(17);
+        let rigid_out = run_with_gradient(
+            &rigid,
+            rigid_start.view(),
+            &mut rigid_ledger,
+            &mut rigid_relax,
+            Some(&mut rigid_grad),
+            &mut rigid_rng,
+        )
+        .expect("finite rigid start");
+        assert_eq!(
+            rigid_probes, 0,
+            "rigid config must never run packing probes"
+        );
+        assert_eq!(rigid_out.charged, rigid_ledger.spent());
+    }
+
+    #[test]
+    fn run_with_gradient_reaches_sutton_chen_10_8_38_through_generic_packings() {
+        use crate::methods::warm_lbfgs::WarmLbfgs;
+        use crate::potentials::{SuttonChen, SuttonChenFamily};
+
+        let n = 38usize;
+        let reference = -10117.2454;
+        let cfg = Config::recommended(n);
+        assert!(cfg.species.is_none());
+        let potential = SuttonChen::new(n, SuttonChenFamily::Sc10_8);
+        let mut start_rng = StdRng::seed_from_u64(0);
+        let start =
+            random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, &mut start_rng);
+        let mut ledger = Ledger::new(20_000);
+        ledger.stop_below(reference + crate::DEFAULT_HIT_TOL);
+        let mut opt = WarmLbfgs::default();
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
+            opt.forget();
+            let (value, relaxed, _) = opt.minimize(x, iterations, |v| {
+                if !led.charge() {
+                    return None;
+                }
+                Some(potential.value_and_gradient(v))
+            });
+            (value, relaxed)
+        };
+        let mut grad = |led: &mut Ledger, v: ArrayView1<f64>| {
+            if !led.charge() {
+                return None;
+            }
+            Some(potential.value_and_gradient(v).1)
+        };
+        let mut rng = StdRng::seed_from_u64(0);
+        let outcome = run_with_gradient(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut rng,
+        )
+        .expect("finite start");
+        assert!(
+            crate::energy_hits(outcome.best, reference, crate::DEFAULT_HIT_TOL),
+            "expected sc108-38 hit <= {reference}, got {} in {} evals",
+            outcome.best,
+            outcome.charged
+        );
+        assert_eq!(outcome.stop, Some(HopStop::Target));
+        assert_eq!(outcome.charged, ledger.spent());
     }
 
     #[test]

@@ -104,10 +104,10 @@ fn lattice_exchange_follows_the_plateau() {
     let mut cfg = Config::recommended(ATOMS);
     cfg.restart_patience = 2_000;
     let (cold, hot) = pair(&cfg, 30_000, 2000);
-    assert_eq!(fingerprint(&cold), 0x36d8782aa911b509, "preset walk");
+    assert_eq!(fingerprint(&cold), 0x100885ac118293e1, "preset walk");
     assert_eq!(
         fingerprint(&hot),
-        0x3f0f303c1d5f14d8,
+        0x44038697bde16fb7,
         "heat * cfg.temperature"
     );
 }
@@ -131,10 +131,10 @@ fn a_same_iteration_record_returns_to_the_preset() {
     cfg.general_collective = true;
     cfg.continuous_symmetry = ContinuousSymmetry::Measure { interval: 1 };
     let (cold, hot) = pair(&cfg, 6_000, 10);
-    assert_eq!(fingerprint(&cold), 0x3f6e77c9980269b9, "preset walk");
+    assert_eq!(fingerprint(&cold), 0xdd5b3f896df84eb7, "preset walk");
     assert_eq!(
         fingerprint(&hot),
-        0xc711fc71269b412d,
+        0x4f443a96ed586f29,
         "same-iteration heat = 1.0"
     );
 }
