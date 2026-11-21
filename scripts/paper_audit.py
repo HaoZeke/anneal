@@ -805,7 +805,8 @@ def manuscript_gmin(audit: Audit) -> None:
 GMIN_RERUN_REVISION = "eeec8e2c216ae1506768bca8e29846c1c039ca3b"
 GMIN_TARBALL_DATE = "2026-11-19"
 GMIN_TARBALL_SHA256 = "ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776"
-GMIN_RERUN_SYSTEMS = ("lj38", "lj55", "lj75", "lj98", "lj102", "lj103", "lj104", "lj150", "m80r6")
+GMIN_RERUN_RAW_SYSTEMS = ("lj38", "lj55", "lj75", "lj98", "lj102", "lj103", "lj104", "lj150", "m80r6")
+GMIN_RERUN_SYSTEMS = tuple(system for system in GMIN_RERUN_RAW_SYSTEMS if system != "lj75")
 TEMPLATE_REMOVAL = "1c1b12384683485cf820d3a244151b48973dc0f7"
 SUBMITTED = "61fa67cf380e46876b569da45e7cc091647a775b"
 GMIN_DEVELOP = "paper/jctc/data/gmin_develop"
@@ -881,15 +882,15 @@ def gmin_rerun_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[
     keys = [(r["system"], r["code"], r["seed"]) for r in rows]
     audit.cell(GMIN_RERUN, "each cluster, code and seed once", str(len(keys)), float(len(set(keys))))
     groups = {}
-    for system in GMIN_RERUN_SYSTEMS:
+    for system in GMIN_RERUN_RAW_SYSTEMS:
         for code in ("anneal", "gmin"):
             group = sorted((r for r in rows if r["system"] == system and r["code"] == code), key=lambda r: int(r["seed"]))
             audit.cell(f"{GMIN_RERUN} {system} {code}", "seeds", " ".join(r["seed"] for r in group), PANEL_SEEDS)
             groups[(system, code)] = group
         audit.cell(f"{GMIN_RERUN} {system}", "seeds with this code first and with GMIN first", "6 6",
                    f"{first[system]['anneal']} {first[system]['gmin']}")
-    audit.cell(GMIN_RERUN, "clusters", " ".join(GMIN_RERUN_SYSTEMS), " ".join(sorted({r["system"] for r in rows},
-               key=GMIN_RERUN_SYSTEMS.index)))
+    audit.cell(GMIN_RERUN, "raw clusters", " ".join(GMIN_RERUN_RAW_SYSTEMS),
+               " ".join(sorted({r["system"] for r in rows}, key=GMIN_RERUN_RAW_SYSTEMS.index)))
     ancestor_of(audit, GMIN_RERUN, GMIN_RERUN_REVISION)
     ancestor_of(audit, GMIN_RERUN, TEMPLATE_REMOVAL, GMIN_RERUN_REVISION)
     hosts = imported(audit, f"{GMIN_RERUN}/b", "host.csv", ("host_source", "host_blob"))
@@ -910,7 +911,7 @@ def gmin_rerun_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[
     ids = {system: " ".join(sorted(v)) for system, v in machine.items()}
     lj150 = "9eb296774121518feb1b187b0f6a109a42de7a5dd39e62ccd37d6e7d329604b8"
     main_host = "3b11c160088e7af5c4f7ebd9da95e0bfe019a34698416701bb057c15fea10873"
-    for system in GMIN_RERUN_SYSTEMS:
+    for system in GMIN_RERUN_RAW_SYSTEMS:
         audit.cell(f"{GMIN_RERUN} {system}", "machine id", lj150 if system == "lj150" else main_host, ids.get(system))
     audit.said(SI, f"LJ\\(_{{104}}\\), and M\\(_{{80}}\\) of the first block ran on\n"
                    f"\\texttt{{\\seqsplit{{{main_host}}}}},")
@@ -1068,7 +1069,7 @@ def gmin_develop_prose(audit: Audit, panel: object, groups: dict) -> None:
     audit.said(TEX, f"on Morse M\\(_{{55}}\\) and M\\(_{{80}}\\) at \\(\\rho=14\\) at the submitted revision, "
                     f"{hits[('m55r14', 'anneal')]} and {hits[('m80r14', 'anneal')]} of 12 against none.")
     audit.said(TEX, "Table~\\ref{tab:gmin} runs GMIN against this code at two revisions: revision \\texttt{eeec8e2c}, "
-                    "an ancestor of the submitted revision with the structure templates removed, on eight Lennard-Jones "
+                    "an ancestor of the submitted revision with the structure templates removed, on seven Lennard-Jones "
                     "sizes and Morse M\\(_{80}\\) at \\(\\rho=6\\), and the submitted revision \\texttt{61fa67cf} on "
                     "Gupta Au\\(_{55}\\) and on Morse M\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=6\\) and 14.")
     audit.said(TEX, "Each block runs both arms of each cluster on seeds 2000--2011 in alternating order, at the "
@@ -1115,6 +1116,14 @@ def gmin_rerun(audit: Audit) -> None:
     want = ([("rerun", s, a) for s in GMIN_RERUN_SYSTEMS for a in ("anneal", "gmin")]
             + [("develop", s, a) for s in GMIN_DEVELOP_SYSTEMS for a in ("anneal", "gmin")])
     audit.cell(TEX, "tab:gmin lines", " ".join("/".join(x) for x in shown), " ".join("/".join(x) for x in want))
+    lj75_rows = groups[("lj75", "anneal")] + groups[("lj75", "gmin")]
+    audit.cell(GMIN_RERUN, "raw LJ75 rows retained", "24", float(len(lj75_rows)))
+    audit.record("LJ\\(_{75}\\)" not in table_text and not any(s == "lj75" for _, s, _ in shown),
+                 TEX, "tab:gmin omits the invalid LJ75 pair", "absent",
+                 "absent" if "LJ\\(_{75}\\)" not in table_text else "present")
+    audit.said(SI, "The archived LJ\\(_{75}\\) pair is retained in the row files but excluded from\n"
+                   "the GMIN table and every cross-code result because its GMIN arm used the\n"
+                   "LJ\\(_{38}\\) input.")
     gmin_develop_data(audit, panel)
     gmin_develop_prose(audit, panel, develop)
     paired = {s: gmin_paired(groups, s) for s in GMIN_RERUN_SYSTEMS}
@@ -1130,15 +1139,12 @@ def gmin_rerun(audit: Audit) -> None:
     lo, hi = paired["lj98"]["interval"]
     audit.said(TEX, f"Paired by seed, this code alone hits {t['lj98'][1]} seeds of LJ\\(_{{98}}\\) and GMIN alone "
                     f"{'none' if t['lj98'][2] == 0 else t['lj98'][2]}, with \\(p={p['lj98']}\\) and an interval from {lo:.2f} to {hi:.2f}.")
-    audit.cell(TEX, "LJ38 and LJ75: discordant seeds", "5 0 5 0",
-               f"{t['lj38'][1]} {t['lj38'][2]} {t['lj75'][1]} {t['lj75'][2]}")
-    audit.said(TEX, f"On LJ\\(_{{38}}\\) and LJ\\(_{{75}}\\) this code alone hits {t['lj38'][1]} seeds and GMIN alone "
+    audit.cell(TEX, "LJ38 discordant seeds", "5 0", f"{t['lj38'][1]} {t['lj38'][2]}")
+    audit.said(TEX, f"On LJ\\(_{{38}}\\) this code alone hits {t['lj38'][1]} seeds and GMIN alone "
                     f"{'none' if t['lj38'][2] == 0 else t['lj38'][2]}, with \\(p={p['lj38']}\\), the smallest value the exact test can "
-                    f"reach with five discordant seeds; this code hits LJ\\(_{{38}}\\) on {hits('lj38', 'anneal')} and "
-                    f"LJ\\(_{{75}}\\) on {hits('lj75', 'anneal')} of 12, and GMIN on {hits('lj38', 'gmin')} and "
-                    f"{hits('lj75', 'gmin')}.")
-    audit.cell(TEX, "LJ38 and LJ75 p is the five-seed floor", "0.0625 0.0625",
-               f"{paired['lj38']['mcnemar']} {paired['lj75']['mcnemar']}")
+                    f"reach with five discordant seeds; this code hits {hits('lj38', 'anneal')} of 12 and GMIN "
+                    f"{hits('lj38', 'gmin')}.")
+    audit.cell(TEX, "LJ38 p is the five-seed floor", "0.0625", paired["lj38"]["mcnemar"])
     big = ("lj102", "lj103", "lj104", "lj150")
     audit.said(TEX, "On LJ\\(_{102}\\), LJ\\(_{103}\\), LJ\\(_{104}\\), and LJ\\(_{150}\\) the seeds that one arm "
                     "alone hits are " + series(f"{t[s][1]} to {t[s][2]}" for s in big) + ", with \\(p\\) of "
@@ -1147,7 +1153,7 @@ def gmin_rerun(audit: Audit) -> None:
                " ".join(map(str, t["lj55"] + t["m80r6"])))
     audit.said(TEX, "Both arms hit LJ\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=6\\) on every seed.")
     lower = [s for s in GMIN_RERUN_SYSTEMS if walls(s, "anneal") < walls(s, "gmin")]
-    audit.cell(TEX, "clusters where the median wall of this code is lower", str(len(GMIN_RERUN_SYSTEMS)),
+    audit.cell(TEX, "printed clusters where the median wall of this code is lower", str(len(GMIN_RERUN_SYSTEMS)),
                float(len(lower)))
     audit.said(TEX, f"The median wall of a run is lower for this code on all {NUMBER_WORDS[len(lower)]} clusters, from "
                     f"{panel.show_s(walls('lj38', 'anneal'))}~s against {panel.show_s(walls('lj38', 'gmin'))}~s on "
@@ -1161,14 +1167,6 @@ def gmin_rerun(audit: Audit) -> None:
     audit.said(TEX, "With the templates removed, the code hits more seeds than GMIN, run with the Wales-group "
                     f"LJ\\(_{{38}}\\) input at every Lennard-Jones and Morse size, on LJ\\(_{{98}}\\), "
                     f"{hits('lj98', 'anneal')} of 12 against none,")
-    misses = [float(r["best"]) for s in ("lj75",) for a in ("anneal", "gmin") for r in groups[(s, a)] if r["hit"] == "0"]
-    lj75_ref = {row[0]: row[3] for row in panel.SYSTEMS}["lj75"]
-    audit.cell(TEX, "every LJ75 miss of tab:gmin ends at -396.2822", "-396.2822",
-               f"{min(misses):.4f}" if f"{min(misses):.4f}" == f"{max(misses):.4f}" else f"{min(misses)} to {max(misses)}")
-    audit.cell(TEX, "the LJ75 miss gap", "1.210", max(misses) - lj75_ref)
-    audit.said(TEX, "Every miss on LJ\\(_{75}\\) in Table~\\ref{tab:gmin}, of either code, ends at the icosahedral "
-                    "competitor at \\(-396.2822\\), \\(1.210\\) above the published decahedral minimum at "
-                    f"\\({lj75_ref:.6f}\\).")
     lj_data = audit.text("examples/h2h_gmin_lj.data")
     for line in ("TEMPERATURE 1.0", "STEP 0.40 0.51", "NEWRESTART 40", "AVOID 4.0 20 F", "EDIFF 0.003"):
         audit.record(line in lj_data and line in audit.text("examples/h2h_gmin_morse.data"), "examples/h2h_gmin_lj.data",
@@ -2098,15 +2096,23 @@ def g3_session(audit: Audit) -> None:
     keys = ("hit", "budget", "evals_to_hit", "charged")
     for label, other in (("first block", table), ("second block", develop)):
         shared = [r for r in rows if (r["system"], r["seed"]) in other]
+        if label == "first block":
+            printed = [r for r in shared if r["system"] in GMIN_RERUN_SYSTEMS]
+            lj75 = [r for r in shared if r["system"] == "lj75"]
+            audit.cell(path, "LJ75 traces retained outside the GMIN comparison",
+                       "12", float(len(lj75)))
+            shared = printed
         same = sum(all(r[k] == other[(r["system"], r["seed"])][k] for k in keys)
                    and float(r["best"]) == float(other[(r["system"], r["seed"])]["best"]) for r in shared)
         audit.cell(path, f"seeds with the calls and lowest energy of the GMIN table, {label}",
-                   "60" if label == "first block" else "12", float(same))
+                   "48" if label == "first block" else "12", float(same))
         audit.cell(path, f"seeds shared with the GMIN table, {label}",
-                   "60" if label == "first block" else "12", float(len(shared)))
-    audit.said(SI, "On all 60 seeds this code takes the same calls to the same lowest energy as its rows in the GMIN "
-                   "table, and a replay of each of the 60 runs gives the same record of accepted minima and the same "
-                   "lowest energy.")
+                   "48" if label == "first block" else "12", float(len(shared)))
+    audit.said(SI, "On all 60 seeds this code takes the same calls to the same lowest energy as\n"
+                   "its archived rows, and a replay of each run gives the same record of accepted\n"
+                   "minima and the same lowest energy. The 48 non-LJ\\(_{75}\\) seeds are the rows\n"
+                   "of this code printed in the GMIN table; the 12 LJ\\(_{75}\\) traces document\n"
+                   "this code alone and are not used in a GMIN comparison.")
     audit.said(SI, "Commit \\texttt{\\seqsplit{e578f267b3826cfd7e0f1737515bc45f1b8a72c6}} of \\path{record/g3-funnel}")
     audit.said(SI, "removes no line of \\path{src}, and runs with the record on.")
 
@@ -2504,12 +2510,12 @@ def manuscript_ase(audit: Audit) -> None:
     lennard_jones = curvature(lambda x: x**-12 - 2.0 * x**-6)
     audit.record(abs(morse6 - lennard_jones) < 1e-3, TEX, "Morse rho=6 curvature at the pair minimum",
                  f"{lennard_jones:.3f}", f"{morse6:.3f}")
-    gmin_panel, gmin = gmin_panel_groups(audit)
-    lj75 = gmin[("lj75", "anneal")], gmin[("lj75", "gmin")]
-    audit.said("paper/jctc/NUMBERS_TODO.md", f"In tab:gmin, seeds 2000-2011, the recommended preset hits "
-                                             f"{hits_of(lj75[0])} of {len(lj75[0])}.")
-    audit.said("paper/jctc/NUMBERS_TODO.md", f"And the Wales-group basin-hopping program (GMIN) hits {hits_of(lj75[1])} "
-                                             f"of {len(lj75[1])}.")
+    numbers = audit.text("paper/jctc/NUMBERS_TODO.md")
+    audit.record("LJ75 GMIN pair is not printed" in numbers and
+                 "GMIN) hits" not in numbers,
+                 "paper/jctc/NUMBERS_TODO.md",
+                 "the withdrawn LJ75 GMIN result is not quoted",
+                 "withdrawn", "withdrawn" if "GMIN) hits" not in numbers else "quoted")
 
 
 GMIN_RERUN = "paper/jctc/data/gmin_eeec8e2c"
@@ -4067,6 +4073,36 @@ def science_claims(audit: Audit) -> None:
                  "paper/jctc/scripts/fig_rec_arms.py",
                  "the arm figure draws the lattice arm and no resample arm", "lattice",
                  "lattice" if '"lattice"' in arms and '"resample"' not in arms else "other")
+    table = text.split("% gmin-panel table: start", 1)[1].split("% gmin-panel table: end", 1)[0]
+    audit.record("LJ\\(_{75}\\)" not in table, TEX,
+                 "LJ75 is absent from the GMIN comparison table", "absent",
+                 "absent" if "LJ\\(_{75}\\)" not in table else "present")
+    kept = {
+        TEX: (
+            "The global minima at 75 and 98 atoms",
+            "trail step has one only on LJ\\(_{75}\\)",
+            "LJ\\(_{75}\\) & \\(4\\times 10^{6}\\) & 12 & 5/12 & 6/12",
+            "Published global minima of LJ\\(_{38}\\), LJ\\(_{75}\\),",
+        ),
+        SI: (
+            "The references, in reduced units, are \\(-173.928427\\) for LJ\\(_{38}\\),",
+            "The trail step has one record, on LJ\\(_{75}\\)",
+            "They hit LJ\\(_{75}\\) on 5 of 12 against 12",
+            "The published GOFEE curves count local optimizations on LJ\\(_{75}\\)",
+            "the 12 LJ\\(_{75}\\) traces document",
+        ),
+    }
+    for path, claims in kept.items():
+        for claim in claims:
+            audit.said(path, claim)
+    visuals = audit.text("paper/jctc/scripts/system_visuals.py")
+    si_figure = audit.text("paper/jctc/scripts/fig_si_structures.py")
+    audit.record('"lj75_marks"' in visuals and 's.key != "lj75_marks"' not in si_figure,
+                 "paper/jctc/scripts/system_visuals.py",
+                 "the manuscript and SI structure figures include LJ75", "present",
+                 "present" if '"lj75_marks"' in visuals and 's.key != "lj75_marks"' not in si_figure else "absent")
+    audit.said(SI, "A fingerprint bias during local optimization is reported on LJ\\(_{38}\\)\n"
+                   "and LJ\\(_{75}\\).")
     trail = "666591a0"
     audit.record(git("merge-base", "--is-ancestor", trail, SUBMITTED).returncode != 0, TEX,
                  "the trail record is outside the history of the submitted revision", "outside", "checked")

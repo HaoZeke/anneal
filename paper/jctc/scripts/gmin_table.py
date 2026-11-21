@@ -42,7 +42,8 @@ DEVELOP_HARNESS = "f009acc96bb95023eeb6e394e863630c752a5d05"
 DEVELOP_SYSTEMS = ("au55", "m55r6", "m55r14", "m80r6", "m80r14")
 GMIN_TARBALL_DATE = "2026-11-19"
 GMIN_TARBALL_SHA256 = "ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776"
-SYSTEMS = ("lj38", "lj55", "lj75", "lj98", "lj102", "lj103", "lj104", "lj150", "m80r6")
+RAW_SYSTEMS = ("lj38", "lj55", "lj75", "lj98", "lj102", "lj103", "lj104", "lj150", "m80r6")
+SYSTEMS = tuple(system for system in RAW_SYSTEMS if system != "lj75")
 MARKS = PANEL.TEX_MARKS
 
 
@@ -95,7 +96,7 @@ def rows() -> list[dict[str, str]]:
            for row in host_rows if row["code"] == "gmin"):
         raise SystemExit("gmin_table: shard b is not from the dated tarball")
     keys = [(r["system"], r["code"], r["seed"]) for r in out]
-    if len(keys) != len(set(keys)) or sorted({r["system"] for r in out}) != sorted(SYSTEMS):
+    if len(keys) != len(set(keys)) or sorted({r["system"] for r in out}) != sorted(RAW_SYSTEMS):
         raise SystemExit("gmin_table: the shards do not cover each cell once")
     return out
 
@@ -122,7 +123,8 @@ def develop_rows() -> list[dict[str, str]]:
 def summary() -> tuple[list[dict[str, str]], dict[str, dict[str, object]]]:
     data = rows()
     PANEL.GMIN_REV = gmin_row_id(data)
-    return PANEL.summarise(data, REVISION), PANEL.paired_summary(data, REVISION)
+    printed = [row for row in data if row["system"] in SYSTEMS]
+    return PANEL.summarise(printed, REVISION), PANEL.paired_summary(printed, REVISION)
 
 
 def develop_summary() -> tuple[list[dict[str, str]], dict[str, dict[str, object]]]:
@@ -158,8 +160,8 @@ def table() -> str:
             "This code uses \\texttt{Config::recommended}\\((N)\\) through \\texttt{h2h\\_gmin\\_proof}",
             "on Lennard-Jones, through \\texttt{h2h\\_morse} on Morse, and through",
             "\\texttt{h2h\\_metal} with every atom labeled gold on Au\\(_{55}\\).",
-            "On every Lennard-Jones size, LJ\\(_{75}\\) included, GMIN runs the Wales-group LJ\\(_{38}\\)",
-            "introduction file with no symmetrization keyword, not the published LJ\\(_{75}\\) input.",
+            "Every printed Lennard-Jones row runs the Wales-group LJ\\(_{38}\\)",
+            "introduction file with no symmetrization keyword.",
             "Eval. is a combined energy-and-gradient pass for this code and every",
             "\\texttt{POTENTIAL} entry for GMIN, including \\texttt{GRADT=false}; these counts are",
             "different operations and are not tested across arms.",

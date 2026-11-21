@@ -633,6 +633,26 @@ def test_a_drifted_pooled_move_choice_sentence_is_reported():
     assert [r[2] for r in audit.drifts()] == ["prose"]
 
 
+def test_lj75_is_withdrawn_only_from_the_gmin_comparison():
+    table = audit_mod.load_script("gmin_table_lj75", "paper/jctc/scripts/gmin_table.py")
+    raw = [row for row in table.rows() if row["system"] == "lj75"]
+    assert len(raw) == 24
+    assert "LJ\\(_{75}\\)" not in table.table()
+
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    gmin = tex.split("% gmin-panel table: start", 1)[1].split("% gmin-panel table: end", 1)[0]
+    assert "LJ\\(_{75}\\)" not in gmin
+    assert "LJ\\(_{75}\\) & \\(4\\times 10^{6}\\) & 12 & 5/12 & 6/12" in tex
+
+    si = audit.text(audit_mod.SI)
+    assert "They hit LJ\\(_{75}\\) on 5 of 12 against 12" in si
+    assert "The published GOFEE curves count local optimizations on LJ\\(_{75}\\)" in si
+    assert "A fingerprint bias during local optimization is reported on LJ\\(_{38}\\)" in si
+    assert "the 12 LJ\\(_{75}\\) traces document" in si
+    assert '"lj75_marks"' in audit.text("paper/jctc/scripts/system_visuals.py")
+
+
 def test_an_unpaired_fisher_p_in_the_gmin_table_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)

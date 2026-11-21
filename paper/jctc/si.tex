@@ -79,6 +79,9 @@ These two coefficients are the TIP4P pair in the log.
 \label{sec:si-gmin}
 The GMIN table of the main text uses three GMIN inputs.
 The Lennard-Jones rows run the Wales-group LJ\(_{38}\) introduction file at every Lennard-Jones size, with \(T=1.0\), \texttt{NEWRESTART 40}, and an energy difference of 0.003, with no symmetrization keyword, from the start that this code writes for the seed.
+The archived LJ\(_{75}\) pair is retained in the row files but excluded from
+the GMIN table and every cross-code result because its GMIN arm used the
+LJ\(_{38}\) input.
 The Morse rows add GMIN's native \texttt{MORSE} keyword and \(\rho\) to the same numerical settings.
 The Au\(_{55}\) row runs GMIN's Gupta potential with the gold row of Darby et al., \(A=0.2061\)~eV, \(p=10.229\), \(q=4.036\), \(\xi=1.79\)~eV, and \(r_0=2.884\)~\AA, at \(T=0.1\)~eV, with step 0.40 and taboo radius 4.0 multiplied by \(r_0/2^{1/6}\), GMIN's container radius, \texttt{NEWRESTART 40}, and an energy difference of 0.003.
 \cite{darbyCuAu2002}
@@ -95,8 +98,9 @@ which only sets the number of parallel build jobs, with three patches,
 the run index (\texttt{JP=1}) before its first use; no other line of GMIN
 changes.
 The recipe stamps the wall clock and the build directory into the binary, so the three shard binaries differ in their sha256 and share one \texttt{.text} section.
-The hit is a quenched energy at or below the Cambridge Cluster Database
-minimum plus 0.001: besides the five Lennard-Jones references above,
+For the printed rows, the hit is a quenched energy at or below the Cambridge
+Cluster Database minimum plus 0.001: besides the four printed Lennard-Jones
+references above,
 \(-569.363652\) at LJ\(_{102}\), \(-575.766131\) at LJ\(_{103}\),
 \(-893.310258\) at LJ\(_{150}\), \(-191.03085280\)~eV at Au\(_{55}\),
 \(-250.286609\) and \(-220.646208\) at M\(_{55}\) (\(\rho=6\) and 14), and
@@ -114,7 +118,7 @@ value of \texttt{trail\_on\_stall}.
 Each cell of the GMIN table ran both arms in alternating order by seed:
 six seeds with this code first and six with GMIN first.
 The machine is recorded by the sha256 of its machine id: LJ\(_{38}\),
-LJ\(_{55}\), LJ\(_{75}\), LJ\(_{98}\), LJ\(_{102}\), LJ\(_{103}\),
+LJ\(_{55}\), LJ\(_{98}\), LJ\(_{102}\), LJ\(_{103}\),
 LJ\(_{104}\), and M\(_{80}\) of the first block ran on
 \texttt{\seqsplit{3b11c160088e7af5c4f7ebd9da95e0bfe019a34698416701bb057c15fea10873}},
 an x86\_64 machine with an Intel Xeon processor, 8 logical CPUs, 49342816~KiB
@@ -358,8 +362,10 @@ That revision adds to the submitted revision an optional record of the
 accepted minima in \path{src/methods/cluster_hopping.rs} and the two drivers,
 removes no line of \path{src}, and runs with the record on.
 On all 60 seeds this code takes the same calls to the same lowest energy as
-its rows in the GMIN table, and a replay of each of the 60 runs gives the same
-record of accepted minima and the same lowest energy.
+its archived rows, and a replay of each run gives the same record of accepted
+minima and the same lowest energy. The 48 non-LJ\(_{75}\) seeds are the rows
+of this code printed in the GMIN table; the 12 LJ\(_{75}\) traces document
+this code alone and are not used in a GMIN comparison.
 The rows are copied from that commit, as
 \path{paper/jctc/data/g3_funnel/PROVENANCE} names.
 
