@@ -146,7 +146,7 @@ The block under the constructor is the example =cargo test --doc= runs.
 
 - ~cluster_search~ :: \(3N\) point set, or \(6N\) for ~rigid=True~ or =water_sites=.
 
-  #+begin_src python
+  #+begin_src python :eval no
   cluster_search(
       obj, grad, n, budget, seed=0, recommended=True, derived=False,
       communicating=False, *, ras=False, start=None, length_scale=None,
@@ -191,13 +191,13 @@ The block under the constructor is the example =cargo test --doc= runs.
   The run then stops at the next evaluation, and the exception is re-raised.
 - ~ensemble_optimize~ :: design box. Gradient → hop and quench; no gradient → portfolio.
 
-  #+begin_src python
+  #+begin_src python :eval no
   ensemble_optimize(obj, low, high, budget, ..., grad_fn=None)
   #+end_src
 - =box_ensemble_optimize(...)= :: hop primitive. Requires =grad_fn=.
 - ~global_optimize~ :: portfolio arms when the caller does not want hops.
 
-  #+begin_src python
+  #+begin_src python :eval no
   global_optimize(
       obj, low, high, budget, seed=0, grad_fn=None, noise_sigma=None,
       policy="auto", x0=None, *, replicas=1, coverage_shared=True,
@@ -220,25 +220,25 @@ See [[file:../howto/choose-driver.org][choose a driver]].
 
 - ~Boltzmann~ :: Logarithmic cooling + Gaussian + Metropolis.
 
-  #+begin_src python
+  #+begin_src python :eval no
   Boltzmann(t_init=1.0, sigma=0.5)
   #+end_src
 
 - ~Fast~ :: Reciprocal cooling + Cauchy + Metropolis.
 
-  #+begin_src python
+  #+begin_src python :eval no
   Fast(t_init=1.0, gamma=0.5)
   #+end_src
 
 - ~Gsa~ :: =Tsallis= cooling + =Tsallis= visit + =Tsallis= accept.
 
-  #+begin_src python
+  #+begin_src python :eval no
   Gsa(t_init=1.0, q_v=2.62, q_a=1.7)
   #+end_src
 
 All classical presets are called via ~run~.
 
-  #+begin_src python
+  #+begin_src python :eval no
   run(
       obj, low, high, preset, n_epochs=100, steps_per_epoch=200,
       seed=42, x0=None, max_evals=None,
@@ -272,15 +272,15 @@ Gradient support is provided by =eindir=; see the [[https://eindir.rgoswami.me/h
 
 - ~additive_independence~ (values only, rank-1 surrogate).
 
-  #+begin_src python
+  #+begin_src python :eval no
   additive_independence(
-      obj, low, high, max_fevals, seed=0, degree=8, ... n_pilot=0,
+      obj, low, high, max_fevals, seed=0, degree=8, ..., n_pilot=0,
   )
   #+end_src
 
 - ~gle_langevin~ (gradient, colored noise).
 
-  #+begin_src python
+  #+begin_src python :eval no
   gle_langevin(
       obj, grad, low, high, max_fevals, seed=0, omega0=None, dt=0.2,
       n_epochs=40, x0=None,
@@ -319,8 +319,10 @@ the continuous-symmetry proposal there; ~soap~ turns off only the SOAP
 proposal. The library API does not apply this variable. The
 ~h2h_metal~ and ~h2h_covalent~ binaries read it for their own harness
 logic (SOAP only on metal, arm selection on covalent).
-~Config::check_removed_env~ only rejects removed prior names when
-~H2H_PRIORS~ is set in the process environment.
+~Config::check_removed_env~ rejects removed standalone environment
+variables (~H2H_HANDOVER~, ~PRIOR_RESEED~, ~PRIOR_GROWTH~, ~PRIOR_CORE~,
+~PRIOR_HANDOVER~, ~PRIOR_MOTIF~) whenever set and non-empty, and rejects
+removed prior names when ~H2H_PRIORS~ is set in the process environment.
 
 * Device and ensemble (same kernel)
 
