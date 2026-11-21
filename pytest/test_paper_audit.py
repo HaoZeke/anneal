@@ -210,6 +210,19 @@ def test_a_cross_arm_p_value_in_the_ase_section_is_reported():
     assert [r[2] for r in audit.drifts()] == ["sec:ase reports no cross-arm p-values"]
 
 
+def test_unequal_ase_limits_are_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "same numeric call ceiling and wall cap"
+    assert tex.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "different call and wall limits", 1)
+    audit_mod.manuscript_ase(audit)
+    assert sorted(r[2] for r in audit.drifts()) == [
+        "ASE limits are not described as unequal",
+        "prose",
+    ]
+
+
 def test_a_returning_endpoint_section_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
@@ -1374,10 +1387,10 @@ def test_a_hypothesis_in_the_results_is_reported():
 
 def test_an_unresolved_citation_is_reported():
     audit = audit_mod.Audit()
-    tex = audit.text(audit_mod.TEX)
+    tex = audit.text(audit_mod.SI)
     old = "\\cite{fisherLogicInductiveInference1935}"
     assert old in tex
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, "\\cite{fisherLogicInductiveInference1936}", 1)
+    audit.text_cache[audit_mod.SI] = tex.replace(old, "\\cite{fisherLogicInductiveInference1936}", 1)
     audit_mod.science_claims(audit)
     assert "cited keys without an entry" in {r[2] for r in audit.drifts()}
 

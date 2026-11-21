@@ -186,8 +186,8 @@ COMMON = [
     "are misses with fewer calls than the budget, and no run of this code ended at the cap.",
     "Wall is the median over the 12 runs of the seconds each run took;",
     "a BH or MH run that ended at the cap is counted at its wall.",
-    "No cross-arm test is reported: starts differ and the arms stop at unequal",
-    "call and wall limits.",
+    "No cross-arm test is reported: starts differ; every arm has the same numeric call",
+    "ceiling and wall cap for that cluster, and runs reaching the shared cap are censored.",
 ]
 
 

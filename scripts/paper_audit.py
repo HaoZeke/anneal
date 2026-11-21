@@ -2462,7 +2462,7 @@ def manuscript_ase(audit: Audit) -> None:
     audit.said(SI, "\\path{paper/jctc/scripts/ase_table.py} writes both ASE tables from them.")
     audit.said(SI, "# ASE: rewrite both tables from the imported rows\npython3 paper/jctc/scripts/ase_table.py")
 
-    # Unequal stopping rules are printed without a cross-arm test.
+    # Shared numeric ceilings and cap-censored outcomes are printed without a cross-arm test.
     text = audit.text(TEX)
     section = text.split("\\label{sec:ase}", 1)[1].split("% ase-nonlj table: end", 1)[0]
     audit.record("p_\\mathrm" not in section and "Fisher" not in section, TEX,
@@ -2471,9 +2471,21 @@ def manuscript_ase(audit: Audit) -> None:
     conclusions = text.split("\\section{Conclusions}", 1)[1].split("\\appendix", 1)[0]
     audit.record("Mann" not in conclusions, TEX, "the conclusions report no rank test", "no rank test",
                  "no rank test" if "Mann" not in conclusions else "a rank test")
-    audit.said(TEX, "A Fisher test on their hits would not account for those unequal stopping")
-    audit.said(TEX, "so no cross-arm test is")
+    audit.said(TEX, "Within a cluster every arm has the same numeric call ceiling and wall cap,\n"
+                    "but runs reaching the shared cap are censored.")
+    audit.said(TEX, "Because the starts are unpaired and cap-censored outcomes occur, no\n"
+                    "cross-arm significance test is reported for the ASE tables.")
+    audit.said(TEX, "No cross-arm test is reported: starts differ; every arm has the same numeric call\n"
+                    "ceiling and wall cap for that cluster, and runs reaching the shared cap are censored.")
+    audit.said(SI, "Every arm within a cluster has the same numeric call ceiling and wall cap.")
+    audit.said(SI, "\\emph{Unpaired, equally capped arms.}")
     audit.said(SI, "The tables therefore report the hit counts, recorded caps, stop counts, and")
+    for path in (TEX, SI):
+        text = audit.text(path)
+        false_limits = re.search(r"(?:different|unequal) call and wall limits|call limits and wall caps also differ",
+                                 text)
+        audit.record(false_limits is None, path, "ASE limits are not described as unequal", "absent",
+                     "absent" if false_limits is None else false_limits.group(0))
     audit.record("fisher_exact" not in audit.text("paper/jctc/scripts/ase_table.py"),
                  "paper/jctc/scripts/ase_table.py", "the ASE table generator computes no cross-arm test",
                  "absent", "absent" if "fisher_exact" not in audit.text("paper/jctc/scripts/ase_table.py") else "present")
@@ -4117,7 +4129,8 @@ def science_claims(audit: Audit) -> None:
         k.strip() for path in (TEX, SI) for group in re.findall(r"\\cite[pt]?\{([^}]*)\}", audit.text(path))
         for k in group.split(",")})
     audit.cell("paper/jctc/refs-stats.bib", "entries no text cites", "none", " ".join(unused) or "none")
-    audit.said(TEX, "A Fisher test on their hits would not account for those unequal stopping")
+    audit.said(TEX, "Because the starts are unpaired and cap-censored outcomes occur, no\n"
+                    "cross-arm significance test is reported for the ASE tables.")
     audit.said(TEX, "\\cite{newcombeImprovedConfidenceIntervals1998}, built from Wilson intervals "
                     "\\cite{wilsonProbableInferenceLaw1927}.")
     refs = audit.text("paper/jctc/refs.bib")

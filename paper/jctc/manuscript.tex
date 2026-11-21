@@ -512,10 +512,11 @@ For calls and wall, the exact Wilcoxon signed-rank test
 \cite{wilcoxonIndividualComparisons1945} runs on the per-seed differences,
 with a miss counted at the budget for calls and the wall of the whole run for
 time, only when both arms count the same operation.
-The ASE arms do not share starts and stop at different call and wall limits.
-A Fisher test on their hits would not account for those unequal stopping
-rules \cite{fisherLogicInductiveInference1935}, so no cross-arm test is
-reported for the ASE tables.
+The ASE arms do not share starts.
+Within a cluster every arm has the same numeric call ceiling and wall cap,
+but runs reaching the shared cap are censored.
+Because the starts are unpaired and cap-censored outcomes occur, no
+cross-arm significance test is reported for the ASE tables.
 Every test is two-sided and exact, so no continuity correction enters any of
 them.
 No adjustment for multiple comparisons is made: every \(p\) is that of one
@@ -876,8 +877,8 @@ Stops counts the BH and MH runs that ended at the cap; those runs
 are misses with fewer calls than the budget, and no run of this code ended at the cap.
 Wall is the median over the 12 runs of the seconds each run took;
 a BH or MH run that ended at the cap is counted at its wall.
-No cross-arm test is reported: starts differ and the arms stop at unequal
-call and wall limits.
+No cross-arm test is reported: starts differ; every arm has the same numeric call
+ceiling and wall cap for that cluster, and runs reaching the shared cap are censored.
 The rows are \texttt{paper/jctc/data/ase\_panel/*/rows.csv}.}
 \label{tab:ase}
 \centering
@@ -913,8 +914,8 @@ Stops counts the BH and MH runs that ended at the cap; those runs
 are misses with fewer calls than the budget, and no run of this code ended at the cap.
 Wall is the median over the 12 runs of the seconds each run took;
 a BH or MH run that ended at the cap is counted at its wall.
-No cross-arm test is reported: starts differ and the arms stop at unequal
-call and wall limits.
+No cross-arm test is reported: starts differ; every arm has the same numeric call
+ceiling and wall cap for that cluster, and runs reaching the shared cap are censored.
 The rows are \texttt{paper/jctc/data/ase\_panel/morse/rows.csv}.}
 \label{tab:ase-morse}
 \centering

@@ -421,8 +421,9 @@ No run of this code reached its cap.
 The ASE arms do not start from the start of this code, because the random
 generators of the two codes do not make a shared start from one seed, so
 their hit counts are not paired.
-Their call limits and wall caps also differ from those of this code, so no
-cross-arm significance test is reported.
+Every arm within a cluster has the same numeric call ceiling and wall cap.
+Runs reaching the shared cap are censored, so no cross-arm significance
+test is reported.
 Minima hopping reached its cap on every run of both tables, and basin hopping
 on every run of LJ\(_{38}\), Au\(_{55}\), and the Morse clusters and on 11
 of 12 on LJ\(_{55}\).
@@ -499,9 +500,10 @@ two-sided \(p\) is the share of those assignments whose \(T^{+}\) lies at
 least as far from the null mean \(m(m+1)/4\) as the one seen.
 No normal approximation is used.
 
-\emph{Unpaired, unequally capped arms.}
-The ASE arms do not start from the start of this code, and their reported
-outcomes are censored by different call and wall limits.
+\emph{Unpaired, equally capped arms.}
+The ASE arms do not start from the start of this code.
+Every arm within a cluster has the same numeric call ceiling and wall cap,
+and reported outcomes reaching the shared cap are censored.
 The tables therefore report the hit counts, recorded caps, stop counts, and
 wall medians without a cross-arm Fisher test or interval
 \cite{fisherLogicInductiveInference1935}.
