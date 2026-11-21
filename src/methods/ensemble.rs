@@ -237,6 +237,9 @@ pub struct EnsembleReport {
     /// Lowest energy across replicas.
     pub best: f64,
     /// Earliest aggregate call count at which any replica crossed the target.
+    ///
+    /// The ensemble SOLVED marker, `tally.solved` and `first_target_calls` moved
+    /// from reference + 1e-3 to reference + 1e-4.
     pub first_target_calls: Option<usize>,
     /// Charged calls consumed by the ensemble.
     pub aggregate_charged: usize,

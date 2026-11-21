@@ -1260,19 +1260,136 @@ def line_of(audit: Audit, path: str, number: int) -> str:
 def resolve_named_hit_tol(expr: str, names: dict[str, float]) -> float | None:
     """Resolve a tolerance expression through ``names`` or as a numeric literal.
 
-    ``${DEFAULT_HIT_TOL}`` and ``DEFAULT_HIT_TOL`` both follow ``names``.
-    A bare number is parsed. Anything else is unresolved, so a check that
-    compares the two sides cannot pass by reading the constant twice.
+    ``${DEFAULT_HIT_TOL}``, ``$DEFAULT_HIT_TOL``, ``DEFAULT_HIT_TOL`` and
+    ``f"{DEFAULT_HIT_TOL}"`` all follow ``names``. A bare number is parsed.
+    Anything else is unresolved, so a check that compares the two sides
+    cannot pass by reading the constant twice.
     """
-    token = expr.strip().strip("\"'")
+    token = expr.strip().rstrip(",\\").strip()
+    fmatch = re.fullmatch(r"""f["']\{([A-Za-z_][A-Za-z0-9_]*)\}["']""", token)
+    if fmatch:
+        token = fmatch.group(1)
+    else:
+        token = token.strip("\"'")
     if token.startswith("${") and token.endswith("}"):
         token = token[2:-1]
+    elif token.startswith("$") and token[1:].isidentifier():
+        token = token[1:]
     if token in names:
         return float(names[token])
     try:
         return float(token)
     except ValueError:
         return None
+
+
+_TOLERANCE_NAMES = (
+    "HIT_TOL|SEED_HIT_TOL|LJ_HIT_TOL|TARGET_TOL|TARGET_TOLERANCE|"
+    "H2H_TOL|REFERENCE_TOL_EV|DEFAULT_HIT_TOL"
+)
+# `NAME = rhs` and `"NAME": rhs`. A `{NAME:.6f}` format spec is a use, not
+# an assignment, so a colon alone does not count.
+TOLERANCE_ASSIGN_RE = re.compile(
+    rf"""
+    (?:
+        \b(?P<name>{_TOLERANCE_NAMES})\s*=\s*(?P<rhs>[^\s#,;]+)
+        |
+        ["'](?P<key>{_TOLERANCE_NAMES})["']\s*:\s*(?P<value>[^\s#,;]+)
+    )
+    """,
+    re.VERBOSE,
+)
+
+
+def _tolerance_binding(match: re.Match[str]) -> tuple[str, str]:
+    if match.group("name") is not None:
+        return match.group("name"), match.group("rhs")
+    return match.group("key"), match.group("value")
+
+
+def script_tolerance_paths() -> list[str]:
+    """Shell and Python scripts whose hit tolerances must follow the shared constant."""
+    skip = {
+        "scripts/target_tol.py",
+        "scripts/target_tol_lint_rules.py",
+        "scripts/target_tol_lint_scan.py",
+        "scripts/paper_audit.py",
+    }
+    paths = [
+        path.relative_to(ROOT).as_posix()
+        for path in (ROOT / "scripts").rglob("*")
+        if path.suffix in {".py", ".sh"}
+    ]
+    paths.append("paper/jctc/scripts/hq_sci_tally.py")
+    return sorted(path for path in paths if path not in skip)
+
+
+def _fmt_tol(value: float) -> str:
+    return f"{value:.16g}"
+
+
+def audit_script_tolerances(audit: Audit, shared: float, names: dict[str, float]) -> None:
+    """Compare every script hit tolerance with ``shared``.
+
+    ``TARGET_TOLERANCE`` on line 43 of ``elja_jcc_molslab_ensemble.sh`` is
+    named on its own. A shell loader that imports ``DEFAULT_HIT_TOL`` is the
+    binding of that constant, not a second tolerance. Later aliases such as
+    ``TARGET_TOL=$TARGET_TOLERANCE`` follow the value assigned above them.
+    """
+    jcc = "scripts/elja_jcc_molslab_ensemble.sh"
+    line43 = audit.text(jcc).splitlines()[42]
+    match43 = TOLERANCE_ASSIGN_RE.search(line43)
+    resolved43 = None
+    if match43:
+        name43, rhs43 = _tolerance_binding(match43)
+        if name43 == "TARGET_TOLERANCE":
+            resolved43 = resolve_named_hit_tol(rhs43, names)
+    audit.record(
+        resolved43 == shared,
+        jcc,
+        "TARGET_TOLERANCE at line 43",
+        _fmt_tol(shared),
+        _fmt_tol(resolved43) if resolved43 is not None else line43.strip(),
+    )
+    shown = _fmt_tol(shared)
+    tolerance_names = set(_TOLERANCE_NAMES.split("|"))
+    for rel in script_tolerance_paths():
+        text = audit.text(rel)
+        assigned_here = {
+            _tolerance_binding(match)[0]
+            for line in text.splitlines()
+            for match in TOLERANCE_ASSIGN_RE.finditer(line)
+            if not (
+                _tolerance_binding(match)[0] == "DEFAULT_HIT_TOL"
+                and "from target_tol import DEFAULT_HIT_TOL" in line
+            )
+        }
+        local = dict(names)
+        # A name this file does not assign is the shared constant (an import
+        # or a format use). A name it does assign follows that assignment.
+        for tol_name in tolerance_names:
+            if tol_name not in local and tol_name not in assigned_here:
+                local[tol_name] = shared
+        for index, line in enumerate(text.splitlines(), 1):
+            if re.search(r"\bDEFAULT_HIT_TOL\s*=\s*\$\(", line) and (
+                "from target_tol import DEFAULT_HIT_TOL" in line
+            ):
+                continue
+            for match in TOLERANCE_ASSIGN_RE.finditer(line):
+                name, rhs = _tolerance_binding(match)
+                if name == "DEFAULT_HIT_TOL" and "from target_tol import DEFAULT_HIT_TOL" in line:
+                    continue
+                resolved = resolve_named_hit_tol(rhs, local)
+                if rel == jcc and index == 43 and name == "TARGET_TOLERANCE":
+                    if resolved is not None:
+                        local[name] = resolved
+                    continue
+                label = f"{name} line {index}"
+                if resolved is None:
+                    audit.record(False, rel, label, shown, f"unresolved:{rhs}")
+                else:
+                    audit.record(resolved == shared, rel, label, shown, _fmt_tol(resolved))
+                    local[name] = resolved
 
 
 def jcc_target_lines(tally_text: str, script_text: str) -> tuple[int | None, int | None]:
@@ -1558,6 +1675,14 @@ def supporting_numbers(audit: Audit) -> None:
     audit.said(SI, "No seed reached the reference within \\(10^{-6}\\)~eV.")
     audit.said(SI, "Eight seeds lie inside the 0.001~eV tolerance.")
     audit.said(SI, "The hit tolerance is 0.001~eV.")
+    py_search_hit_tol = float(
+        re.search(r"SEARCH_HIT_TOL:\s*float\s*=\s*([0-9.eE+-]+)", target_tol_py).group(1)
+    )
+    audit_script_tolerances(
+        audit,
+        py_default_hit_tol,
+        {"DEFAULT_HIT_TOL": py_default_hit_tol, "SEARCH_HIT_TOL": py_search_hit_tol},
+    )
 
 
 def manuscript_tip4p(audit: Audit) -> None:

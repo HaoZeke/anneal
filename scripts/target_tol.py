@@ -7,10 +7,10 @@ import math
 
 DEFAULT_HIT_TOL: float = 1.0e-3
 
-# Cluster-search drivers score a hit inside this window. It is tighter than
-# DEFAULT_HIT_TOL: those drivers were scored at 1e-4, and widening them to
-# the default would count a different set of runs. The solved flag, the
-# first-encounter statistic, and the ensemble discovery level share it.
+# Solved flags and first encounters were already scored at 1e-4.
+# The ensemble SOLVED marker, `tally.solved` and `first_target_calls` moved
+# from reference + 1e-3 to reference + 1e-4. Widening that window back to
+# DEFAULT_HIT_TOL would count a different set of runs.
 SEARCH_HIT_TOL: float = 1.0e-4
 
 
