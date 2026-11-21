@@ -546,7 +546,7 @@ def load_paths(args) -> dict:
         "B2": (args.bin_b, args.src_b),
     }
     paths = {}
-    names = ("h2h_gmin_proof", "h2h_morse", "h2h_metal", "h2h_seed")
+    names = tuple(sorted({binary_name(cell) for cell in gate.CELLS}))
     for arm, (bin_dir, src) in spec.items():
         head, tree = git_id(src)
         digest = {}
