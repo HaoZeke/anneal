@@ -63,7 +63,7 @@ class RgpotRpcCalculator(Calculator):
         Prefer :meth:`spawn`.
     """
 
-    implemented_properties = ["energy", "forces"]
+    implemented_properties = ["energy", "free_energy", "forces"]
     # The connection is a session (F3), not the pure protocol.
     reentrant = False
 
