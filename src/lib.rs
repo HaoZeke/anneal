@@ -78,6 +78,8 @@ pub mod calibrate;
 pub mod caller_stop;
 /// Declarative campaign configuration: TOML in, channels explicit.
 pub mod campaign;
+/// Turns a cap of a cluster about a local symmetry axis.
+pub mod cap_twist;
 /// Event catalogue keyed by local topology.
 pub mod catalog;
 /// Pure cooperative-catalog policy and target-free proposals.
