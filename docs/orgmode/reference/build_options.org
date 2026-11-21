@@ -38,6 +38,7 @@ A =feature= option takes =enabled=, =disabled= or =auto=.
 | =with_expr= | boolean | =false= | Compile the vendored OpenMM Lepton (=third_party/lepton=) and build =ExprPot=. |
 | =with_tblite= | boolean | =false= | Link tblite and build =TBLitePot=. |
 | =with_metatomic= | boolean | =false= | Build the Metatomic potential and engine against torch and metatomic. |
+| =with_uma= | boolean | =false= | Build the UMA potential (=UmaPot=) and engine plugin against torch alone, without the metatensor and metatomic packages. Torch is a Python package or a libtorch tree named by =RGPOT_TORCH_ROOT= (=lib=, =include= and a =build-version= file), and without =with_metatomic= the plugin records that library directory as its run path. =with_metatomic= builds the plugin too. The plugin needs =with_rpc=. Neither =UmaPot= nor the plugin is built when =with_python= is true. |
 | =with_skala= | boolean | =false= | Build =SkalaPot=, Skala XC through NWChemPot and =libnwchemc=. Needs =with_rpc= or =with_rpc_client_only=. |
 | =with_python= | boolean | =false= | Build the pip-installable Python package (=rgpot._core=). |
 | =with_fortran_pots= | feature | =auto= | Fortran 2018 kernels in =CppCore/rgpot/fortran= (CuH2, EDIP, LenoskySi, EAMAl, FeHe, WaterH, SWSi and the Tersoff silicon gather). =auto= builds them when a Fortran compiler is found. Independent of the RPC options. |
