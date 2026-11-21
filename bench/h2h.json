@@ -1644,6 +1644,44 @@
       "missing_outputs": {
         "/work/gmin-losses2/stamps/panel.stamp": "a touch() stamp outside the tree that marks the rows written under /work/gmin-losses2; it is never committed"
       }
+    },
+    {
+      "rule": "outside_perf",
+      "competitors": [
+        "anneal 61fa67cf"
+      ],
+      "runners": [
+        "scripts/outside_perf/run_interleaved.py",
+        "scripts/outside_perf/summarize.py",
+        "scripts/outside_perf/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/outside_perf/run_interleaved.py",
+        "name": "PAPER_BUDGETS",
+        "keys": [
+          "lj150",
+          "lj104",
+          "m80r6",
+          "m80r14",
+          "au55",
+          "blj55s130",
+          "blj38s105"
+        ]
+      },
+      "seeds": {
+        "source": "scripts/outside_perf/run_interleaved.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/outside-perf/benchmarks/outside_perf.py",
+      "rows": [
+        {
+          "path": "bench/outside-perf/rows.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ]
     }
   ],
   "not_h2h": {

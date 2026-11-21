@@ -451,39 +451,57 @@ fn adjust_one(
 /// row-minimum lower bound, so it is the only optimal assignment and
 /// the same permutation successive shortest paths returns. A tie or a
 /// shared column returns `None` and the solver runs.
+struct RowMinimaScratch {
+    assignment: Vec<usize>,
+    taken: Vec<bool>,
+}
+
+std::thread_local! {
+    static ROW_MINIMA_SCRATCH: std::cell::RefCell<RowMinimaScratch> = const {
+        std::cell::RefCell::new(RowMinimaScratch {
+            assignment: Vec::new(),
+            taken: Vec::new(),
+        })
+    };
+}
+
 pub(crate) fn strict_unique_row_minima(costs: &[f64], n: usize) -> Option<Vec<usize>> {
     if n == 0 || n.checked_mul(n) != Some(costs.len()) {
         return None;
     }
-    let mut assignment = vec![0usize; n];
-    let mut taken = vec![false; n];
-    for row in 0..n {
-        let base = row * n;
-        let mut best_column = 0usize;
-        let mut best = costs[base];
-        if !best.is_finite() {
-            return None;
-        }
-        for column in 1..n {
-            let cost = costs[base + column];
-            if !cost.is_finite() {
+    ROW_MINIMA_SCRATCH.with(|cell| {
+        let scratch = &mut *cell.borrow_mut();
+        scratch.assignment.resize(n, 0);
+        scratch.taken.resize(n, false);
+        scratch.taken.fill(false);
+        for row in 0..n {
+            let base = row * n;
+            let mut best_column = 0usize;
+            let mut best = costs[base];
+            if !best.is_finite() {
                 return None;
             }
-            if cost < best {
-                best = cost;
-                best_column = column;
+            for column in 1..n {
+                let cost = costs[base + column];
+                if !cost.is_finite() {
+                    return None;
+                }
+                if cost < best {
+                    best = cost;
+                    best_column = column;
+                }
             }
+            let winners = (0..n)
+                .filter(|&column| !(costs[base + column] > best))
+                .count();
+            if winners != 1 || scratch.taken[best_column] {
+                return None;
+            }
+            scratch.taken[best_column] = true;
+            scratch.assignment[row] = best_column;
         }
-        let winners = (0..n)
-            .filter(|&column| !(costs[base + column] > best))
-            .count();
-        if winners != 1 || taken[best_column] {
-            return None;
-        }
-        taken[best_column] = true;
-        assignment[row] = best_column;
-    }
-    Some(assignment)
+        Some(scratch.assignment.clone())
+    })
 }
 
 pub(crate) fn successive_shortest_paths(costs: &[f64], n: usize) -> Option<Vec<usize>> {
@@ -924,7 +942,187 @@ pub(crate) fn kuhn_munkres_walk(costs: &[f64], n: usize) -> Option<Vec<usize>> {
     kuhn_munkres(costs, n)
 }
 
+struct KuhnMunkresScratch {
+    weights: Vec<f64>,
+    row_potential: Vec<f64>,
+    column_potential: Vec<f64>,
+    row_match: Vec<usize>,
+    column_match: Vec<usize>,
+    rows_seen: Vec<bool>,
+    columns_seen: Vec<bool>,
+    row_scanned: Vec<bool>,
+    column_slack: Vec<f64>,
+    used: Vec<bool>,
+}
+
+std::thread_local! {
+    static KUHN_MUNKRES_SCRATCH: std::cell::RefCell<KuhnMunkresScratch> = const {
+        std::cell::RefCell::new(KuhnMunkresScratch {
+            weights: Vec::new(),
+            row_potential: Vec::new(),
+            column_potential: Vec::new(),
+            row_match: Vec::new(),
+            column_match: Vec::new(),
+            rows_seen: Vec::new(),
+            columns_seen: Vec::new(),
+            row_scanned: Vec::new(),
+            column_slack: Vec::new(),
+            used: Vec::new(),
+        })
+    };
+}
+
 fn kuhn_munkres(costs: &[f64], n: usize) -> Option<Vec<usize>> {
+    let result = kuhn_munkres_incremental(costs, n);
+    #[cfg(any(test, debug_assertions))]
+    {
+        let reference = kuhn_munkres_full_scan(costs, n);
+        debug_assert_eq!(
+            result, reference,
+            "incremental Kuhn-Munkres diverged from the full scan"
+        );
+    }
+    result
+}
+
+/// Growing buffers and retained column slack, with no atom-count fallback.
+///
+/// A seen row is scanned once. Later dual steps subtract the same delta
+/// from every unseen cached slack, which is the update the full scan would
+/// recompute from the changed potentials.
+fn kuhn_munkres_incremental(costs: &[f64], n: usize) -> Option<Vec<usize>> {
+    let tight_tolerance = kuhn_munkres_tolerance(costs);
+    KUHN_MUNKRES_SCRATCH.with(|scratch| {
+        let mut scratch = scratch.borrow_mut();
+        scratch.weights.resize(costs.len(), 0.0);
+        for (weight, cost) in scratch.weights.iter_mut().zip(costs) {
+            *weight = -*cost;
+        }
+        scratch.row_potential.resize(n, f64::NEG_INFINITY);
+        scratch.column_potential.resize(n, 0.0);
+        scratch.row_match.resize(n, usize::MAX);
+        scratch.column_match.resize(n, usize::MAX);
+        scratch.rows_seen.resize(n, false);
+        scratch.columns_seen.resize(n, false);
+        scratch.row_scanned.resize(n, false);
+        scratch.column_slack.resize(n, f64::INFINITY);
+        scratch.used.resize(n, false);
+        let KuhnMunkresScratch {
+            weights,
+            row_potential,
+            column_potential,
+            row_match,
+            column_match,
+            rows_seen,
+            columns_seen,
+            row_scanned,
+            column_slack,
+            used,
+        } = &mut *scratch;
+        row_potential.fill(f64::NEG_INFINITY);
+        column_potential.fill(0.0);
+        row_match.fill(usize::MAX);
+        column_match.fill(usize::MAX);
+        for row in 0..n {
+            let base = row * n;
+            for column in 0..n {
+                row_potential[row] = row_potential[row].max(weights[base + column]);
+            }
+        }
+
+        for root in 0..n {
+            let mut augmented = false;
+            row_scanned.fill(false);
+            column_slack.fill(f64::INFINITY);
+            for _ in 0..=n {
+                rows_seen.fill(false);
+                columns_seen.fill(false);
+                if augment_tight(
+                    root,
+                    n,
+                    weights,
+                    row_potential,
+                    column_potential,
+                    tight_tolerance,
+                    row_match,
+                    column_match,
+                    rows_seen,
+                    columns_seen,
+                ) {
+                    augmented = true;
+                    break;
+                }
+                for row in 0..n {
+                    if !rows_seen[row] || row_scanned[row] {
+                        continue;
+                    }
+                    row_scanned[row] = true;
+                    let base = row * n;
+                    for column in 0..n {
+                        if columns_seen[column] {
+                            continue;
+                        }
+                        let slack =
+                            row_potential[row] + column_potential[column] - weights[base + column];
+                        if slack < column_slack[column] {
+                            column_slack[column] = slack;
+                        }
+                    }
+                }
+                let mut delta = f64::INFINITY;
+                for column in 0..n {
+                    if !columns_seen[column] {
+                        delta = delta.min(column_slack[column]);
+                    }
+                }
+                #[cfg(any(test, debug_assertions))]
+                {
+                    let reference = phase_delta(
+                        n,
+                        weights,
+                        row_potential,
+                        column_potential,
+                        rows_seen,
+                        columns_seen,
+                    );
+                    let roundoff = 128.0 * f64::EPSILON * (1.0 + delta.abs().max(reference.abs()));
+                    debug_assert!(
+                        (delta - reference).abs() <= roundoff,
+                        "incremental phase delta diverged: {delta:e} vs {reference:e}"
+                    );
+                }
+                if !(delta > 0.0) || !delta.is_finite() {
+                    return None;
+                }
+                for index in 0..n {
+                    if rows_seen[index] {
+                        row_potential[index] -= delta;
+                    }
+                    if columns_seen[index] {
+                        column_potential[index] += delta;
+                    } else if column_slack[index].is_finite() {
+                        column_slack[index] -= delta;
+                    }
+                }
+            }
+            if !augmented {
+                return None;
+            }
+        }
+
+        used.fill(false);
+        for &column in row_match.iter() {
+            if column == usize::MAX || used[column] {
+                return None;
+            }
+            used[column] = true;
+        }
+        Some(row_match.clone())
+    })
+}
+
+#[cfg(any(test, debug_assertions))]
+fn kuhn_munkres_full_scan(costs: &[f64], n: usize) -> Option<Vec<usize>> {
     let tight_tolerance = kuhn_munkres_tolerance(costs);
     let weights: Vec<f64> = costs.iter().map(|cost| -cost).collect();
     let mut row_potential = vec![f64::NEG_INFINITY; n];
@@ -1468,6 +1666,28 @@ mod tests {
                 let got = cost_of(&costs, n, &assignment);
                 let want = cost_of(&costs, n, &slow);
                 assert!((got - want).abs() < 1e-8, "n={n} {got} vs {want}");
+            }
+        }
+    }
+
+    #[test]
+    fn incremental_kuhn_munkres_matches_the_full_scan() {
+        let mut state = 0x5eed_f00d_u64;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            state
+        };
+        for n in [1usize, 2, 3, 8, 17, 38, 55] {
+            for trial in 0..6 {
+                let costs: Vec<f64> = (0..n * n)
+                    .map(|_| {
+                        let bucket = (next() % 9) as f64;
+                        bucket + ((next() % 4) as f64) * 0.125
+                    })
+                    .collect();
+                let fast = kuhn_munkres(&costs, n).expect("incremental");
+                let full = super::kuhn_munkres_full_scan(&costs, n).expect("full scan");
+                assert_eq!(fast, full, "n={n} trial={trial}");
             }
         }
     }

@@ -1123,3 +1123,19 @@ rule gmin_losses2:
         export OUTPUT=/work/gmin-losses2
         bash scripts/gmin_panel/enter_losses2.sh
         """
+
+
+# Develop 61fa67cf against a second build of that source and the checked-out
+# candidate. Seven systems, seeds 2000-2011, one serial process on core 0.
+# Not part of `rule all`:
+#   snakemake -s workflow/Snakefile outside_perf
+rule outside_perf:
+    output:
+        "bench/outside-perf/rows.csv",
+        "bench/outside-perf/summary.csv",
+        "bench/outside-perf/trajectory-diff.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/outside_perf/enter_bench.sh
+        """
