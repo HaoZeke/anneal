@@ -270,39 +270,98 @@ rgpot_minimage = static_library(
 # link arguments of its dependencies to whatever links it, so a static
 # librgpot would put -fopenmp on every consumer's link line. Outside a
 # shared build the targets therefore compile with the OpenMP flag and link
-# the runtime by name, which is what gcc's -fopenmp adds to a link. A
-# compiler whose runtime is not found by name keeps the flag.
+# the runtime library by name, which is what the compiler driver adds to a
+# link that carries the flag.
+#
+# The runtime is the one the driver selects, not one picked from a list: Clang
+# links libomp, or libgomp under -fopenmp=libgomp, and objects compiled for
+# one do not link against the other. The driver's own link line names the
+# library (-lomp, -lgomp, -liomp5) and the directories it searches for it, so
+# the library comes from there and has to define that runtime's entry point.
+# When it cannot be found and checked, the targets keep the OpenMP flag, and
+# configure says so.
 rgpot_openmp = dependency('openmp', language: 'cpp', required: false)
 rgpot_openmp_deps = []
 rgpot_openmp_runtime_deps = []
 if rgpot_openmp.found()
     rgpot_openmp_deps = [rgpot_openmp]
-    if get_option('default_library') != 'shared'
-        _omp_runtime = []
-        foreach _name : {
-            'gcc': ['gomp'],
-            'clang': ['omp', 'gomp', 'iomp5'],
-            'intel': ['iomp5'],
-            'intel-llvm': ['iomp5'],
-        }.get(cppc.get_id(), [])
-            if _omp_runtime.length() == 0
-                _lib = cppc.find_library(_name, required: false)
-                if _lib.found()
-                    _omp_runtime = [_lib]
+    if get_option('default_library') != 'shared' and cppc.get_argument_syntax() != 'msvc'
+        _omp_tokens = []
+        _omp_flag = cppc.first_supported_argument(
+            ['-fopenmp', '-qopenmp', '-openmp'],
+        )
+        if _omp_flag.length() > 0
+            _omp_probe = run_command(
+                cppc.cmd_array(),
+                _omp_flag,
+                '-###',
+                '-x',
+                'c++',
+                files('rgpot/Slices.cc'),
+                '-o',
+                'rgpot_openmp_probe',
+                check: false,
+            )
+            if _omp_probe.returncode() == 0
+                _omp_tokens = (
+                    _omp_probe.stdout() + ' ' + _omp_probe.stderr()
+                ).split()
+            endif
+        endif
+        _omp_entry_points = {
+            'omp': '__kmpc_fork_call',
+            'iomp5': '__kmpc_fork_call',
+            'gomp': 'GOMP_parallel',
+        }
+        _omp_name = ''
+        _omp_dirs = []
+        foreach _tok : _omp_tokens
+            _arg = _tok.strip('"\'')
+            if _arg.startswith('-L') and _arg != '-L'
+                _omp_dirs += [_arg.substring(2)]
+            elif _arg.startswith('-l') and _omp_name == ''
+                if _omp_entry_points.has_key(_arg.substring(2))
+                    _omp_name = _arg.substring(2)
                 endif
             endif
         endforeach
-        if _omp_runtime.length() > 0
-            rgpot_openmp_runtime_deps = _omp_runtime
+        _omp_lib = []
+        if _omp_name != ''
+            _omp_found = cppc.find_library(
+                _omp_name,
+                dirs: _omp_dirs,
+                required: false,
+            )
+            _omp_entry = _omp_entry_points[_omp_name]
+            if _omp_found.found() and cppc.links(
+                'extern "C" int @0@(void); int main() { void *volatile p = (void *)&@0@; return p == 0; }'.format(
+                    _omp_entry,
+                ),
+                dependencies: _omp_found,
+                name: 'OpenMP runtime lib@0@ defines @1@'.format(
+                    _omp_name,
+                    _omp_entry,
+                ),
+            )
+                _omp_lib = [_omp_found]
+            endif
+        endif
+        if _omp_lib.length() > 0
+            rgpot_openmp_runtime_deps = _omp_lib
             rgpot_openmp_deps = [
                 rgpot_openmp.partial_dependency(
                     compile_args: true,
                     includes: true,
                 ),
-            ] + _omp_runtime
-        elif cppc.get_argument_syntax() != 'msvc'
+            ] + _omp_lib
+        else
+            rgpot_openmp_runtime_deps = [
+                rgpot_openmp.partial_dependency(link_args: true),
+            ]
             message(
-                'OpenMP runtime not found by name: a static librgpot links consumers with the OpenMP flag',
+                'OpenMP runtime of @0@ not found or not usable: a static librgpot links consumers with the OpenMP flag'.format(
+                    cppc.get_id(),
+                ),
             )
         endif
     endif
