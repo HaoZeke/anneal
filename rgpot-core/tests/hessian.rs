@@ -838,6 +838,7 @@ fn a_callback_that_sets_no_message_is_not_given_an_older_one() {
 #[test]
 fn the_rust_hessian_checks_the_output_length_before_its_input() {
     let mut system = System::octahedron();
+    system.pos[0] = f64::NAN;
     let handle = Handle::new();
     let dim = system.dim();
     let mut short = vec![0.0; 9];

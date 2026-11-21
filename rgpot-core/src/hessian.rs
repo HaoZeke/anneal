@@ -378,3 +378,30 @@ pub(crate) unsafe fn refuse_overlap(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::c_api::types::{rgpot_force_input_create, rgpot_force_input_free};
+
+    #[test]
+    fn an_empty_tensor_inside_the_output_does_not_overlap_it() {
+        let mut out = [0.0; 9];
+        let mut z = [78];
+        let mut cell = [0.0; 9];
+        let inside = unsafe { out.as_mut_ptr().add(1) };
+        let mut input = |n_atoms| unsafe {
+            rgpot_force_input_create(n_atoms, inside, z.as_mut_ptr(), cell.as_mut_ptr())
+        };
+        let mut empty = input(0);
+        assert!(unsafe { refuse_overlap(&empty, out.as_ptr(), out.len()) }.is_ok());
+
+        let mut one = input(1);
+        let err = unsafe { refuse_overlap(&one, out.as_ptr(), out.len()) }.unwrap_err();
+        assert_eq!(err.to_string(), "hessian_out overlaps the positions tensor");
+        unsafe {
+            rgpot_force_input_free(&mut empty);
+            rgpot_force_input_free(&mut one);
+        }
+    }
+}
