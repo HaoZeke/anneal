@@ -15,4 +15,4 @@ def landfold_book(
     **kwargs: Any,
 ) -> dict[str, Any]: ...
 
-__all__: list[str]
+__all__ = ["LandfoldMap", "landfold", "landfold_book"]

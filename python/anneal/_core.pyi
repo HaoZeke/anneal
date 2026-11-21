@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import Any, final
 
 import numpy as np
 import numpy.typing as npt
@@ -20,8 +20,9 @@ COPPER_Z: int
 GOLD_Z: int
 PLATINUM_Z: int
 
-Preset = Boltzmann | Fast | Gsa
+_Preset = Boltzmann | Fast | Gsa
 
+@final
 class BasinBias:
     def __init__(
         self,
@@ -45,16 +46,19 @@ class BasinBias:
     def deepest_wells(self, count: int) -> list[tuple[npt.NDArray[np.float64], float]]: ...
     def cap_basins(self, cap: int) -> None: ...
 
+@final
 class Boltzmann:
     t_init: float
     sigma: float
     def __init__(self, t_init: float = 1.0, sigma: float = 0.5) -> None: ...
 
+@final
 class Fast:
     t_init: float
     gamma: float
     def __init__(self, t_init: float = 1.0, gamma: float = 0.5) -> None: ...
 
+@final
 class Gsa:
     t_init: float
     q_v: float
@@ -66,6 +70,7 @@ class Gsa:
         q_a: float = 1.7,
     ) -> None: ...
 
+@final
 class Bounds:
     def __init__(
         self,
@@ -80,6 +85,7 @@ class Bounds:
     def contains(self, x: npt.NDArray[np.float64]) -> bool: ...
     def clip(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]: ...
 
+@final
 class PyObjective:
     def __init__(
         self,
@@ -94,6 +100,7 @@ class PyObjective:
     def eval(self, x: npt.NDArray[np.float64]) -> float: ...
     def grad(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]: ...
 
+@final
 class PairPotential:
     def __init__(
         self,
@@ -132,6 +139,7 @@ class PairPotential:
     def to_objective(self) -> PyObjective: ...
     def __call__(self, x: npt.NDArray[np.float64]) -> float: ...
 
+@final
 class BinaryLennardJones:
     def __init__(
         self,
@@ -177,6 +185,7 @@ class BinaryLennardJones:
     def to_objective(self) -> PyObjective: ...
     def __call__(self, x: npt.NDArray[np.float64]) -> float: ...
 
+@final
 class SuttonChen:
     def __init__(self, n_points: int, family: str) -> None: ...
     @staticmethod
@@ -210,6 +219,7 @@ class SuttonChen:
     def to_objective(self) -> PyObjective: ...
     def __call__(self, x: npt.NDArray[np.float64]) -> float: ...
 
+@final
 class Gupta:
     @staticmethod
     def zinc(n_points: int) -> Gupta: ...
@@ -242,6 +252,7 @@ class Gupta:
     def to_objective(self) -> PyObjective: ...
     def __call__(self, x: npt.NDArray[np.float64]) -> float: ...
 
+@final
 class Tip4pCluster:
     def __init__(self, n_molecules: int) -> None: ...
     @staticmethod
@@ -267,6 +278,7 @@ class Tip4pCluster:
     def to_objective(self) -> PyObjective: ...
     def __call__(self, x: npt.NDArray[np.float64]) -> float: ...
 
+@final
 class GminTip4p:
     def __init__(self, n_molecules: int) -> None: ...
     @property
@@ -284,7 +296,7 @@ class GminTip4p:
     def to_objective(self) -> PyObjective: ...
     def __call__(self, x: npt.NDArray[np.float64]) -> float: ...
 
-NativeClusterPotential = (
+_NativeClusterPotential = (
     PairPotential
     | BinaryLennardJones
     | SuttonChen
@@ -293,6 +305,7 @@ NativeClusterPotential = (
     | GminTip4p
 )
 
+@final
 class EpochLine:
     @property
     def epoch(self) -> int: ...
@@ -305,6 +318,7 @@ class EpochLine:
     @property
     def best_val(self) -> float: ...
 
+@final
 class History:
     @property
     def epochs(self) -> list[EpochLine]: ...
@@ -319,6 +333,7 @@ class History:
     @property
     def total_rejected(self) -> int: ...
 
+@final
 class LandfoldMap:
     def project(self, rows: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]: ...
     @property
@@ -326,6 +341,7 @@ class LandfoldMap:
     @property
     def weights(self) -> npt.NDArray[np.float64]: ...
 
+@final
 class Config:
     @staticmethod
     def recommended(n: int) -> Config: ...
@@ -626,6 +642,7 @@ class Config:
     @hmc.setter
     def hmc(self, value: str | dict[str, Any] | None) -> None: ...
 
+@final
 class Ledger:
     def __init__(self, budget: int) -> None: ...
     @property
@@ -657,7 +674,7 @@ class Ledger:
     def charge_frac(self, frac: float) -> bool: ...
     def record(self, value: float, state: npt.NDArray[np.float64]) -> None: ...
 
-def energy_hits(energy: float, target: float, tol: float = ...) -> bool: ...
+def energy_hits(energy: float, target: float, tol: float = 1e-3) -> bool: ...
 def recommend_target_n(budget: int, dim: int) -> int: ...
 def rigid_from_ohh(cartesian: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]: ...
 def energy_ohh(cartesian: npt.NDArray[np.float64]) -> float: ...
@@ -687,7 +704,7 @@ def run(
     obj_fn: Callable[[npt.NDArray[np.float64]], float],
     low: npt.NDArray[np.float64],
     high: npt.NDArray[np.float64],
-    preset: Preset,
+    preset: _Preset,
     n_epochs: int = 100,
     steps_per_epoch: int = 200,
     seed: int = 42,
@@ -698,7 +715,7 @@ def run_qmc(
     obj_fn: Callable[[npt.NDArray[np.float64]], float],
     low: npt.NDArray[np.float64],
     high: npt.NDArray[np.float64],
-    preset: Preset,
+    preset: _Preset,
     n_starts: int = 8,
     n_epochs: int = 100,
     steps_per_epoch: int = 200,
@@ -724,7 +741,7 @@ def _run_device(
     obj_fn: Callable[[Any], Any],
     low: Any,
     high: Any,
-    preset: Preset,
+    preset: _Preset,
     *,
     n_epochs: int = 100,
     steps_per_epoch: int = 200,
@@ -735,7 +752,7 @@ def _run_device_ensemble(
     obj_fn: Callable[[Any], Any],
     low: Any,
     high: Any,
-    preset: Preset,
+    preset: _Preset,
     *,
     n_chains: int,
     n_epochs: int = 100,
@@ -1037,7 +1054,7 @@ def global_optimize_objective(
     policy: str = "auto",
 ) -> dict[str, Any]: ...
 def cluster_search(
-    obj_fn: Callable[[npt.NDArray[np.float64]], float] | NativeClusterPotential,
+    obj_fn: Callable[[npt.NDArray[np.float64]], float] | _NativeClusterPotential,
     grad_fn: Callable[[npt.NDArray[np.float64]], Sequence[float] | npt.NDArray[np.float64]] | None,
     n: int,
     budget: int,
@@ -1064,7 +1081,7 @@ def cluster_search(
     config: Config | None = None,
 ) -> dict[str, Any]: ...
 def quench(
-    fg_fn: Callable[[npt.NDArray[np.float64]], tuple[float, Sequence[float]]] | NativeClusterPotential,
+    fg_fn: Callable[[npt.NDArray[np.float64]], tuple[float, Sequence[float]]] | _NativeClusterPotential,
     x0: npt.NDArray[np.float64],
     gtol: float,
     max_iter: int = 10000,
@@ -1104,3 +1121,76 @@ def landfold_book(
     weight_power: float = ...,
     threads: int | None = None,
 ) -> dict[str, Any]: ...
+
+__all__ = [
+    "__version__",
+    "DEFAULT_HIT_TOL",
+    "SEARCH_HIT_TOL",
+    "DEFAULT_TARGET_WALKERS",
+    "DEFAULT_STEPS_PER_CONTROL",
+    "DEFAULT_BETA0",
+    "IDENTITY_TOL",
+    "energy_hits",
+    "recommend_target_n",
+    "_run_device",
+    "_run_device_ensemble",
+    "LandfoldMap",
+    "landfold",
+    "landfold_book",
+    "COPPER_Z",
+    "GOLD_Z",
+    "PLATINUM_Z",
+    "PairPotential",
+    "BinaryLennardJones",
+    "SuttonChen",
+    "Gupta",
+    "Tip4pCluster",
+    "GminTip4p",
+    "rigid_from_ohh",
+    "energy_ohh",
+    "block_from_interleaved_gmin",
+    "interleaved_gmin_from_block",
+    "gmin_tip4p_sites",
+    "BasinBias",
+    "Boltzmann",
+    "Fast",
+    "Gsa",
+    "EpochLine",
+    "History",
+    "Config",
+    "Ledger",
+    "Bounds",
+    "PyObjective",
+    "cluster_search",
+    "quench",
+    "low_discrepancy_points",
+    "osa_acceptance_rate",
+    "pilot_draws_qmc",
+    "run",
+    "run_hmc",
+    "polish",
+    "qmc_polish",
+    "qmc_polish_objective",
+    "qmc_best1bin_scout",
+    "qmc_best1bin_scout_objective",
+    "qmc_gsa_global_search",
+    "qmc_gsa_global_search_objective",
+    "qmc_trust_region_poll",
+    "qmc_trust_region_poll_objective",
+    "shifted_qmc_polish",
+    "additive_independence",
+    "estimate_gle_omega0",
+    "gle_langevin",
+    "gle_langevin_objective",
+    "gle_langevin_preconditioned",
+    "gle_langevin_preconditioned_objective",
+    "run_qmc",
+    "dmc_population_optimize",
+    "gpmd_optimize",
+    "amsa_optimize",
+    "box_ensemble_optimize",
+    "ensemble_optimize",
+    "bfwt_optimize",
+    "global_optimize",
+    "global_optimize_objective",
+]

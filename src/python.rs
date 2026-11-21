@@ -1922,6 +1922,9 @@ fn recommend_target_n(budget: usize, dim: usize) -> usize {
 ///
 /// When `x0` is provided, walker 0 is seeded at that point (clipped into the
 /// box), matching the protocol anchor used by classical SA and dual annealing.
+const _: () = assert!(crate::methods::dmc_population::DEFAULT_STEPS_PER_CONTROL == 2);
+const _: () = assert!(crate::methods::dmc_population::DEFAULT_BETA0.to_bits() == 1.0_f64.to_bits());
+
 #[pyfunction]
 #[pyo3(signature = (
     obj_fn,
@@ -1931,10 +1934,10 @@ fn recommend_target_n(budget: usize, dim: usize) -> usize {
     seed = 0,
     grad_fn = None,
     target_n = None,
-    steps_per_control = crate::methods::dmc_population::DEFAULT_STEPS_PER_CONTROL,
+    steps_per_control = 2,
     x0 = None,
     *,
-    beta0 = crate::methods::dmc_population::DEFAULT_BETA0,
+    beta0 = 1.0,
 ))]
 fn dmc_population_optimize(
     py: Python<'_>,
@@ -4684,9 +4687,11 @@ fn quench(
     Ok(out.into())
 }
 
+const _: () = assert!(crate::DEFAULT_HIT_TOL.to_bits() == 1.0e-3_f64.to_bits());
+
 /// One-sided target-energy hit predicate (`energy <= target + tol`).
 #[pyfunction]
-#[pyo3(signature = (energy, target, tol = crate::DEFAULT_HIT_TOL))]
+#[pyo3(signature = (energy, target, tol = 1e-3))]
 fn energy_hits(energy: f64, target: f64, tol: f64) -> bool {
     crate::energy_hits(energy, target, tol)
 }

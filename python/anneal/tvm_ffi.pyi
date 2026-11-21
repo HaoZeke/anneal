@@ -21,4 +21,9 @@ def tvm_ffi_tensors_from_history(
     tvm_ffi: Any | None = None,
 ) -> dict[str, Any]: ...
 
-__all__: list[str]
+__all__ = [
+    "TvmFfiTensorMetadata",
+    "tvm_ffi_tensor",
+    "tvm_ffi_tensor_metadata",
+    "tvm_ffi_tensors_from_history",
+]

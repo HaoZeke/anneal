@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import ast
 import importlib
+import importlib.util
 import inspect
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -17,6 +17,7 @@ import anneal
 import anneal._core as core
 
 PKG_DIR = Path(anneal.__file__).resolve().parent
+ALLOWLIST_PATH = Path(__file__).resolve().parent / "stubtest_allowlist.txt"
 HEADER = "# Copyright (c) anneal developers"
 
 STUB_MODULES = (
@@ -30,16 +31,20 @@ STUB_MODULES = (
 )
 
 
-def _stub_top_level(path: Path) -> tuple[set[str], dict[str, ast.FunctionDef]]:
+def _stub_top_level(
+    path: Path,
+) -> tuple[set[str], dict[str, ast.FunctionDef], dict[str, ast.ClassDef]]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     names: set[str] = set()
     functions: dict[str, ast.FunctionDef] = {}
+    classes: dict[str, ast.ClassDef] = {}
     for node in tree.body:
         if isinstance(node, ast.FunctionDef):
             names.add(node.name)
             functions[node.name] = node
         elif isinstance(node, ast.ClassDef):
             names.add(node.name)
+            classes[node.name] = node
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             names.add(node.target.id)
         elif isinstance(node, ast.Assign):
@@ -50,15 +55,19 @@ def _stub_top_level(path: Path) -> tuple[set[str], dict[str, ast.FunctionDef]]:
             for alias in node.names:
                 if alias.asname is not None:
                     names.add(alias.asname)
-    return names, functions
+    return names, functions, classes
 
 
-def _ast_param_spec(fn: ast.FunctionDef) -> list[tuple[str, str, bool]]:
+def _ast_param_spec(
+    fn: ast.FunctionDef, *, drop_self: bool = False
+) -> list[tuple[str, str, bool]]:
     spec: list[tuple[str, str, bool]] = []
     pos_args = list(fn.args.posonlyargs) + list(fn.args.args)
     n_pos_defaults = len(fn.args.defaults)
     first_default = len(pos_args) - n_pos_defaults
-    for idx, arg in enumerate(pos_args):
+    start_idx = 1 if drop_self else 0
+    for idx in range(start_idx, len(pos_args)):
+        arg = pos_args[idx]
         kind = (
             "POSITIONAL_ONLY"
             if idx < len(fn.args.posonlyargs)
@@ -93,7 +102,7 @@ def test_py_typed_marker_and_stub_headers_exist():
 @pytest.mark.parametrize(("mod_name", "stub_path"), STUB_MODULES)
 def test_stub_covers_exported_names(mod_name: str, stub_path: Path):
     mod = importlib.import_module(mod_name)
-    names, _ = _stub_top_level(stub_path)
+    names, _, _ = _stub_top_level(stub_path)
     if hasattr(mod, "__all__"):
         expected = set(mod.__all__)
     else:
@@ -112,7 +121,7 @@ def test_stub_covers_exported_names(mod_name: str, stub_path: Path):
     ],
 )
 def test_stub_function_signatures_match_runtime(mod, stub_path: Path):
-    _, functions = _stub_top_level(stub_path)
+    _, functions, _ = _stub_top_level(stub_path)
     for name, fn_node in sorted(functions.items()):
         runtime_fn = getattr(mod, name)
         assert _ast_param_spec(fn_node) == _runtime_param_spec(runtime_fn), (
@@ -120,8 +129,79 @@ def test_stub_function_signatures_match_runtime(mod, stub_path: Path):
         )
 
 
+def test_core_pyo3_classes_marked_final_and_constructor_signatures_match():
+    _, _, core_classes = _stub_top_level(PKG_DIR / "_core.pyi")
+    assert len(core_classes) == 17
+    for cls_name, cls_node in sorted(core_classes.items()):
+        decorator_names = {
+            dec.id if isinstance(dec, ast.Name) else getattr(dec, "attr", "")
+            for dec in cls_node.decorator_list
+        }
+        assert "final" in decorator_names, f"{cls_name} must be marked @final"
+        runtime_cls = getattr(core, cls_name)
+        with pytest.raises(TypeError):
+            type(f"_Sub{cls_name}", (runtime_cls,), {})
+
+    checked_inits = 0
+    for mod_name, stub_path in STUB_MODULES:
+        mod = importlib.import_module(mod_name)
+        _, _, classes = _stub_top_level(stub_path)
+        for cls_name, cls_node in sorted(classes.items()):
+            init_nodes = [
+                n
+                for n in cls_node.body
+                if isinstance(n, ast.FunctionDef) and n.name == "__init__"
+            ]
+            if not init_nodes:
+                continue
+            runtime_cls = getattr(mod, cls_name)
+            assert _ast_param_spec(init_nodes[0], drop_self=True) == _runtime_param_spec(
+                runtime_cls
+            ), f"constructor signature mismatch for {mod_name}.{cls_name}"
+            checked_inits += 1
+    assert checked_inits == 18
+
+
+def test_stubtest_allowlist_entries_all_have_reasons():
+    lines = ALLOWLIST_PATH.read_text(encoding="utf-8").splitlines()
+    assert lines and lines[0] == HEADER
+    entries: list[str] = []
+    saw_reason = False
+    for line in lines[1:]:
+        stripped = line.strip()
+        if not stripped:
+            saw_reason = False
+            continue
+        if stripped.startswith("#"):
+            if "Reason:" in stripped or saw_reason:
+                saw_reason = True
+            continue
+        assert saw_reason, f"allowlist entry {stripped!r} is missing a `# Reason:` comment"
+        entries.append(stripped)
+        saw_reason = False
+    assert len(entries) == 3
+
+
+def test_mypy_stubtest_passes_across_package():
+    if importlib.util.find_spec("mypy") is None:
+        pytest.skip("mypy is not installed")
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "mypy.stubtest",
+            "--allowlist",
+            str(ALLOWLIST_PATH),
+            "anneal",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
 def test_mypy_validates_stubs_and_typed_consumer(tmp_path: Path):
-    if shutil.which("mypy") is None:
+    if importlib.util.find_spec("mypy") is None:
         pytest.skip("mypy is not installed")
     consumer = tmp_path / "consumer.py"
     consumer.write_text(
@@ -144,3 +224,16 @@ def test_mypy_validates_stubs_and_typed_consumer(tmp_path: Path):
         text=True,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+    bad_subclass = tmp_path / "bad_subclass.py"
+    bad_subclass.write_text(
+        "import anneal\n\nclass BadConfig(anneal.Config):\n    pass\n",
+        encoding="utf-8",
+    )
+    bad_proc = subprocess.run(
+        [sys.executable, "-m", "mypy", "--strict", str(bad_subclass)],
+        capture_output=True,
+        text=True,
+    )
+    assert bad_proc.returncode != 0
+    assert "Cannot inherit from final class" in bad_proc.stdout

@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
-ParameterSpec = list[tuple[tuple[str, ...], tuple[int, ...]]]
+_ParameterSpec = list[tuple[tuple[str, ...], tuple[int, ...]]]
 
 class ChemFitVector:
     x0: npt.NDArray[np.float64]
@@ -20,11 +20,11 @@ class ChemFitVector:
 
 def flatten_parameters(
     params: dict[str, Any],
-) -> tuple[npt.NDArray[np.float64], ParameterSpec]: ...
-def spec_total(spec: ParameterSpec) -> int: ...
+) -> tuple[npt.NDArray[np.float64], _ParameterSpec]: ...
+def spec_total(spec: _ParameterSpec) -> int: ...
 def unflatten_parameters(
     vector: npt.NDArray[np.float64],
-    spec: ParameterSpec,
+    spec: _ParameterSpec,
     template: dict[str, Any],
 ) -> dict[str, Any]: ...
 def fit_anneal(
@@ -57,10 +57,10 @@ def fit_chemfit(
 ) -> dict[str, Any]: ...
 def flatten_params(
     params: dict[str, Any],
-) -> tuple[npt.NDArray[np.float64], ParameterSpec]: ...
+) -> tuple[npt.NDArray[np.float64], _ParameterSpec]: ...
 def unflatten_params(
     vector: npt.NDArray[np.float64],
-    spec: ParameterSpec,
+    spec: _ParameterSpec,
 ) -> dict[str, Any]: ...
 def bounds_from_fitter(
     initial: dict[str, Any],
@@ -94,4 +94,13 @@ def run_fitter(
     **kwargs: Any,
 ) -> dict[str, Any]: ...
 
-__all__: list[str]
+__all__ = [
+    "ChemFitVector",
+    "chemfit_box",
+    "fit_anneal",
+    "fit_chemfit",
+    "flatten_parameters",
+    "run_benchmark",
+    "run_fitter",
+    "unflatten_parameters",
+]

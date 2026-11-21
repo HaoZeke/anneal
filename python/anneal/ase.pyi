@@ -77,4 +77,4 @@ class Anneal:
         steps: int | None = None,
     ) -> bool: ...
 
-__all__: list[str]
+__all__ = ["Anneal", "PotentialCalculator"]

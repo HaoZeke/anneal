@@ -61,3 +61,10 @@ def run_ensemble(
     steps_per_epoch: int = 200,
     seed: int = 42,
 ) -> EnsembleHistory: ...
+
+__all__ = [
+    "DeviceHistory",
+    "EnsembleHistory",
+    "run_device",
+    "run_ensemble",
+]
