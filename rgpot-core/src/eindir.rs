@@ -137,7 +137,8 @@ impl rgpot_potential_t {
     /// Run the callback once at `input` and classify the outcome.
     ///
     /// The thread's error message is cleared first, so a failure carries
-    /// the message the callback set and never a stale one.
+    /// the message the callback set and never a stale one, and restored
+    /// when the callback succeeds.
     ///
     /// # Safety
     ///
@@ -153,9 +154,11 @@ impl rgpot_potential_t {
             energy: 0.0,
             variance: 0.0,
         };
+        let earlier = last_error_message();
         set_last_error("");
         let status = unsafe { (self.callback)(self.pot_user_data, input, &mut output) };
         let outcome = if status == rgpot_status_t::RGPOT_SUCCESS {
+            set_last_error(&earlier);
             validated_result(&output, 3 * n_atoms)
                 .map(|forces| {
                     Arc::new(FusedValue {

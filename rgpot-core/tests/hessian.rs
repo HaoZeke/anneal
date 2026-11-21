@@ -836,6 +836,26 @@ fn a_callback_that_sets_no_message_is_not_given_an_older_one() {
 }
 
 #[test]
+fn a_successful_finite_difference_keeps_the_earlier_message() {
+    let mut system = System::octahedron();
+    let input = system.input();
+    let handle = Handle::new();
+    for scheme in [RGPOT_HVP_FORWARD, RGPOT_HVP_CENTRAL] {
+        unsafe { rgpot_set_last_error(c"an older failure".as_ptr()) };
+        assert!(handle
+            .try_hvp(&input, &direction(system.dim()), scheme as i32)
+            .is_ok());
+        assert_eq!(last_error(), "an older failure");
+    }
+    unsafe { rgpot_set_last_error(c"an older failure".as_ptr()) };
+    assert!(handle
+        .try_hessian(&input, 0.0, RGPOT_HESSIAN_CENTRAL as i32)
+        .is_ok());
+    assert_eq!(last_error(), "an older failure");
+    assert!(handle.force_calls() > 0);
+}
+
+#[test]
 fn hessian_out_overlapping_the_input_is_refused_without_a_call() {
     let mut system = System::octahedron();
     let handle = Handle::new();
