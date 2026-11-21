@@ -7,8 +7,9 @@ memory-layout change, so search trajectories must not move.
 - Arm A is tree `15032ef401fb681e230d27c7b315d89f7ac53e4e`.
 - Arm A2 is a separate release rebuild of the A tree in a separate
   target directory. A2 against A is the A/A band.
-- Arm B is the four-change tip whose tree starts `f2786b12`. No other
-  tip may stand in for B.
+- Arm B is the four-change tree
+  `f2786b12dc42dab75994a0380e10bd3ff4ba0dc7`. No other tree may
+  stand in for B.
 
 Every arm is a locked release build with `rgpot-ex`, using the same
 compiler, flags and benchmark-only measurement overlay. Each arm has
@@ -140,13 +141,5 @@ seed 2002 is retained even if it repeats the earlier 1.5 versus
 
 ## Results
 
-Partial kit. No timed row was started.
-
-The required four-change B tree starts `f2786b12`. During the bounded
-two-hour fetch window, every available branch tip instead had tree
-`f92688aa056e610760363e9abb572b2d3b638fad` and contained three
-changes over A. That tip was not substituted. Row count: 0. Gate
-verdict: **INCONCLUSIVE**.
-
-No per-cell ratios, confidence intervals, identity counts, hit counts,
-outside-time results, memory modes or disagreement rows exist.
+R2 not yet run. The earlier zero-row partial kit is superseded by this
+preregistered protocol.
