@@ -102,13 +102,14 @@ neither B hit count may be below A's.
 charged)`. The upper edge of the B/A bootstrap 95% confidence
 interval of the ratio of type-7 medians (10,000 paired seed
 resamples, fixed seed `20261121`) is at most `max(1.10, U)`, where
-`U` is the upper edge of the A2/A interval. A seed resample keeps its
-two B observations together, so they are not pseudoreplicates.
+`U` is the upper edge of the A2/A interval. Each seed contributes the
+median of its two B observations, so inference has 24 paired units.
 
 (d) Peak RssAnon. The B/A ratio of type-7 medians is at most
 `max(1.05, U)`, where `U` is the upper edge of the A2/A bootstrap 95%
 interval. Both B/A and A2/A use the fixed seed and 10,000
-seed-cluster draws. The point ratio and interval are reported.
+paired-seed draws. Each seed contributes the larger of its two B
+peaks. The point ratio and interval are reported.
 
 (e) The fixed-ring bound execution counter is nonzero in every B row
 and zero in every A and A2 row.

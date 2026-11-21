@@ -401,28 +401,6 @@ def bootstrap_median_ratio_ci(
     return type7_quantile(replicates, 0.025), type7_quantile(replicates, 0.975)
 
 
-def bootstrap_cluster_median_ratio_ci(
-    nums: list[list[float]],
-    dens: list[list[float]],
-    draws: int = BOOTSTRAP_DRAWS,
-    seed: int = BOOTSTRAP_SEED,
-) -> tuple[float, float]:
-    """Seed-cluster bootstrap of a ratio of type-7 medians."""
-    n = len(nums)
-    if n == 0 or len(dens) != n:
-        return math.nan, math.nan
-    rng = random.Random(seed)
-    replicates: list[float] = []
-    for _ in range(draws):
-        idxs = [rng.randrange(n) for _ in range(n)]
-        num_sample = [value for i in idxs for value in nums[i]]
-        den_sample = [value for i in idxs for value in dens[i]]
-        replicates.append(
-            finite_ratio(type7_quantile(num_sample, 0.5), type7_quantile(den_sample, 0.5))
-        )
-    return type7_quantile(replicates, 0.025), type7_quantile(replicates, 0.975)
-
-
 def fsync_dir(path: Path) -> None:
     fd = os.open(path, os.O_RDONLY)
     try:
@@ -865,37 +843,34 @@ def score_cell(
         row = rows[key][seed]
         return float(row["outside_s"]) / max(1, int(row["charged"]))
 
-    opc_a = [[per_call("a", seed)] for seed in ok_seeds]
-    opc_a2 = [[per_call("a2", seed)] for seed in ok_seeds]
-    opc_b = [[per_call("b1", seed), per_call("b2", seed)] for seed in ok_seeds]
-    flat_opc_a = [item for cluster in opc_a for item in cluster]
-    flat_opc_a2 = [item for cluster in opc_a2 for item in cluster]
-    flat_opc_b = [item for cluster in opc_b for item in cluster]
-    med_opc_a = median_or_nan(flat_opc_a)
-    med_opc_a2 = median_or_nan(flat_opc_a2)
-    med_opc_b = median_or_nan(flat_opc_b)
-    outside_ba = finite_ratio(med_opc_b, med_opc_a)
-    outside_a2a = finite_ratio(med_opc_a2, med_opc_a)
-    ba_lo, ba_hi = bootstrap_cluster_median_ratio_ci(opc_b, opc_a)
-    a2a_lo, a2a_hi = bootstrap_cluster_median_ratio_ci(opc_a2, opc_a)
-    outside_limit = max(OUTSIDE_RATIO_LIMIT, a2a_hi) if not math.isnan(a2a_hi) else OUTSIDE_RATIO_LIMIT
-
-    rss_a = [[value("a", seed, "rss_anon_kb")] for seed in ok_seeds]
-    rss_a2 = [[value("a2", seed, "rss_anon_kb")] for seed in ok_seeds]
-    rss_b = [
-        [value("b1", seed, "rss_anon_kb"), value("b2", seed, "rss_anon_kb")]
+    opc_a = [per_call("a", seed) for seed in ok_seeds]
+    opc_a2 = [per_call("a2", seed) for seed in ok_seeds]
+    opc_b = [
+        type7_quantile([per_call("b1", seed), per_call("b2", seed)], 0.5)
         for seed in ok_seeds
     ]
-    flat_rss_a = [item for cluster in rss_a for item in cluster]
-    flat_rss_a2 = [item for cluster in rss_a2 for item in cluster]
-    flat_rss_b = [item for cluster in rss_b for item in cluster]
-    med_rss_a = median_or_nan(flat_rss_a)
-    med_rss_a2 = median_or_nan(flat_rss_a2)
-    med_rss_b = median_or_nan(flat_rss_b)
+    med_opc_a = median_or_nan(opc_a)
+    med_opc_a2 = median_or_nan(opc_a2)
+    med_opc_b = median_or_nan(opc_b)
+    outside_ba = finite_ratio(med_opc_b, med_opc_a)
+    outside_a2a = finite_ratio(med_opc_a2, med_opc_a)
+    ba_lo, ba_hi = bootstrap_median_ratio_ci(opc_b, opc_a)
+    a2a_lo, a2a_hi = bootstrap_median_ratio_ci(opc_a2, opc_a)
+    outside_limit = max(OUTSIDE_RATIO_LIMIT, a2a_hi) if not math.isnan(a2a_hi) else OUTSIDE_RATIO_LIMIT
+
+    rss_a = [value("a", seed, "rss_anon_kb") for seed in ok_seeds]
+    rss_a2 = [value("a2", seed, "rss_anon_kb") for seed in ok_seeds]
+    rss_b = [
+        max(value("b1", seed, "rss_anon_kb"), value("b2", seed, "rss_anon_kb"))
+        for seed in ok_seeds
+    ]
+    med_rss_a = median_or_nan(rss_a)
+    med_rss_a2 = median_or_nan(rss_a2)
+    med_rss_b = median_or_nan(rss_b)
     rss_ba = finite_ratio(med_rss_b, med_rss_a)
     rss_a2a = finite_ratio(med_rss_a2, med_rss_a)
-    rss_ba_lo, rss_ba_hi = bootstrap_cluster_median_ratio_ci(rss_b, rss_a)
-    rss_a2a_lo, rss_a2a_hi = bootstrap_cluster_median_ratio_ci(rss_a2, rss_a)
+    rss_ba_lo, rss_ba_hi = bootstrap_median_ratio_ci(rss_b, rss_a)
+    rss_a2a_lo, rss_a2a_hi = bootstrap_median_ratio_ci(rss_a2, rss_a)
     rss_limit = (
         max(RSS_RATIO_LIMIT, rss_a2a_hi) if not math.isnan(rss_a2a_hi) else RSS_RATIO_LIMIT
     )
@@ -1305,10 +1280,6 @@ def self_test() -> None:
     assert not rederived_hit({"status": "inconclusive", "best": "-400", "hit": "1"}, -305.5)
     ci_lo, ci_hi = bootstrap_median_ratio_ci([2.0] * 24, [2.0] * 24, draws=200)
     assert abs(ci_lo - 1.0) < 1e-12 and abs(ci_hi - 1.0) < 1e-12
-    cluster_lo, cluster_hi = bootstrap_cluster_median_ratio_ci(
-        [[2.0, 2.0]] * 24, [[2.0]] * 24, draws=200
-    )
-    assert abs(cluster_lo - 1.0) < 1e-12 and abs(cluster_hi - 1.0) < 1e-12
     observations = tuple(name for name, _arm in OBSERVATIONS)
     counts = {(slot, observation): 0 for slot in (1, 2, 3, 4) for observation in observations}
     for seed in SEEDS:
