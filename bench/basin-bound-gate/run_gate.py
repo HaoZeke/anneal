@@ -31,10 +31,11 @@ OUTSIDE_RATIO_LIMIT = 1.10
 RSS_RATIO_LIMIT = 1.05
 BOOTSTRAP_DRAWS = 10000
 BOOTSTRAP_SEED = 20261121
-SEEDS = tuple(range(2000, 2012))
+SEEDS = tuple(range(2000, 2024))
 DEFAULT_TIMEOUT_S = 21600
 ARMS = ("A", "A2", "B")
-ARM_KEYS = (("A", "a"), ("A2", "a2"), ("B", "b"))
+OBSERVATIONS = (("A", "A"), ("B1", "B"), ("B2", "B"), ("A2", "A2"))
+OBSERVATION_ARMS = dict(OBSERVATIONS)
 DRIVERS = ("h2h_gmin_proof", "h2h_seed", "h2h_morse", "h2h_blj", "h2h_sc")
 PREFLIGHT_CELLS = {
     "h2h_gmin_proof": "lj38",
@@ -48,8 +49,11 @@ PREFLIGHT_SEED = SEEDS[0]
 ROW_FIELDS = [
     "cell",
     "arm",
+    "observation",
     "seed",
     "slot",
+    "rotation",
+    "superseded",
     "status",
     "exit_code",
     "hit",
@@ -65,7 +69,11 @@ ROW_FIELDS = [
     "ru_utime_s",
     "ru_stime_s",
     "rss_anon_kb",
+    "external_rss_anon_kb",
+    "vm_hwm_kb",
+    "rss_disagreement_kb",
     "ru_maxrss_kb",
+    "fixed_ring_bound",
     "library_tree",
     "binary_sha256",
     "log_sha256",
@@ -90,7 +98,8 @@ SUMMARY_FIELDS = [
     "traj_match_a2a",
     "hits_a",
     "hits_a2",
-    "hits_b",
+    "hits_b1",
+    "hits_b2",
     "hit_loss_seeds",
     "med_calls_a",
     "med_calls_b",
@@ -108,8 +117,15 @@ SUMMARY_FIELDS = [
     "rss_anon_a2_kb",
     "rss_anon_b_kb",
     "rss_anon_ba",
+    "rss_anon_ba_ci_lo",
+    "rss_anon_ba_ci_hi",
     "rss_anon_a2a",
+    "rss_anon_a2a_ci_lo",
+    "rss_anon_a2a_ci_hi",
     "rss_anon_limit",
+    "fixed_ring_a",
+    "fixed_ring_a2",
+    "fixed_ring_b",
     "ru_maxrss_a_kb",
     "ru_maxrss_a2_kb",
     "ru_maxrss_b_kb",
@@ -124,12 +140,12 @@ SUMMARY_FIELDS = [
     "fail_b",
     "fail_c",
     "fail_d",
+    "fail_e",
     "verdict",
 ]
 
 HOST_FIELDS = [
     "machine_id_sha256",
-    "cpu_model",
     "logical_cpus",
     "os",
     "arch",
@@ -285,15 +301,13 @@ def is_hit(best: float, reference: float, tol: float = HIT_TOL) -> bool:
     return math.isfinite(best) and best <= reference + tol
 
 
-def arm_order(seed: int) -> tuple[str, str, str]:
-    """Rotate (A, A2, B) by the seed offset, and reverse odd offsets."""
+def observation_order(seed: int) -> tuple[str, str, str, str]:
+    """Rotate the labelled ABBA observations by the seed offset."""
     offset = seed - SEEDS[0]
-    base = list(ARMS)
-    shift = offset % 3
+    base = [name for name, _arm in OBSERVATIONS]
+    shift = offset % 4
     rotated = base[shift:] + base[:shift]
-    if offset % 2 == 1:
-        rotated.reverse()
-    return (rotated[0], rotated[1], rotated[2])
+    return (rotated[0], rotated[1], rotated[2], rotated[3])
 
 
 def child_env() -> dict[str, str]:
@@ -381,6 +395,28 @@ def bootstrap_median_ratio_ci(
         idxs = [rng.randrange(n) for _ in range(n)]
         num_sample = [nums[i] for i in idxs]
         den_sample = [dens[i] for i in idxs]
+        replicates.append(
+            finite_ratio(type7_quantile(num_sample, 0.5), type7_quantile(den_sample, 0.5))
+        )
+    return type7_quantile(replicates, 0.025), type7_quantile(replicates, 0.975)
+
+
+def bootstrap_cluster_median_ratio_ci(
+    nums: list[list[float]],
+    dens: list[list[float]],
+    draws: int = BOOTSTRAP_DRAWS,
+    seed: int = BOOTSTRAP_SEED,
+) -> tuple[float, float]:
+    """Seed-cluster bootstrap of a ratio of type-7 medians."""
+    n = len(nums)
+    if n == 0 or len(dens) != n:
+        return math.nan, math.nan
+    rng = random.Random(seed)
+    replicates: list[float] = []
+    for _ in range(draws):
+        idxs = [rng.randrange(n) for _ in range(n)]
+        num_sample = [value for i in idxs for value in nums[i]]
+        den_sample = [value for i in idxs for value in dens[i]]
         replicates.append(
             finite_ratio(type7_quantile(num_sample, 0.5), type7_quantile(den_sample, 0.5))
         )
@@ -543,8 +579,10 @@ def run_one(
     *,
     cell: CellSpec,
     arm: str,
+    observation: str,
     seed: int,
     slot: int,
+    rotation: int,
     exe: Path,
     bin_sha256: str,
     lib_tree: str,
@@ -561,13 +599,14 @@ def run_one(
     Any non-zero exit, timeout, unparsable output or pinning fault makes
     the row inconclusive. It is still recorded and is never rerun.
     """
-    run_dir = work_dir / cell.family / cell.system / f"{seed}-{arm}"
+    run_dir = work_dir / cell.family / cell.system / f"{seed}-{observation}"
     run_dir.mkdir(parents=True, exist_ok=True)
     cmd, log_cmd = driver_command(cell, exe, seed, arm)
 
     out_file = run_dir / "stdout.tmp"
     err_file = run_dir / "stderr.tmp"
-    peak_rss_anon_kb = 0
+    external_peak_rss_anon_kb = 0
+    exec_confirmed = False
     cpus_allowed = ""
     taskset_p_line = ""
     taskset_mask = ""
@@ -578,6 +617,9 @@ def run_one(
     with out_file.open("w", encoding="utf-8") as out_f, err_file.open("w", encoding="utf-8") as err_f:
         proc = subprocess.Popen(cmd, cwd=run_dir, env=env, stdout=out_f, stderr=err_f)
         status_path = Path(f"/proc/{proc.pid}/status")
+        exe_path = Path(f"/proc/{proc.pid}/exe")
+        cmdline_path = Path(f"/proc/{proc.pid}/cmdline")
+        expected_exe = exe.resolve()
         while True:
             state = ""
             try:
@@ -585,14 +627,23 @@ def run_one(
                 for ln in st_text.splitlines():
                     if ln.startswith("State:"):
                         state = ln.split(":", 1)[1].strip()
-                    elif ln.startswith("RssAnon:"):
+                    elif exec_confirmed and ln.startswith("RssAnon:"):
                         val = int(ln.split()[1])
-                        if val > peak_rss_anon_kb:
-                            peak_rss_anon_kb = val
+                        if val > external_peak_rss_anon_kb:
+                            external_peak_rss_anon_kb = val
                     elif ln.startswith("Cpus_allowed_list:"):
                         cpus_allowed = ln.split(":", 1)[1].strip()
             except (FileNotFoundError, ProcessLookupError):
                 pass
+            if not exec_confirmed:
+                try:
+                    proc_exe = exe_path.resolve()
+                    cmd0 = cmdline_path.read_bytes().split(b"\0", 1)[0]
+                    exec_confirmed = proc_exe == expected_exe or Path(
+                        os.fsdecode(cmd0)
+                    ).resolve() == expected_exe
+                except (FileNotFoundError, ProcessLookupError, OSError):
+                    pass
             if state.startswith("Z"):
                 break
             elapsed_now = time.monotonic() - t0
@@ -603,7 +654,7 @@ def run_one(
                 except ProcessLookupError:
                     pass
                 break
-            time.sleep(0.0005 if elapsed_now < 0.05 else 0.025)
+            time.sleep(0.005)
 
         tp = subprocess.run(["taskset", "-p", str(proc.pid)], capture_output=True, text=True, check=False)
         taskset_p_line = tp.stdout.strip()
@@ -620,10 +671,19 @@ def run_one(
 
     stdout = out_file.read_text(encoding="utf-8", errors="replace")
     stderr = err_file.read_text(encoding="utf-8", errors="replace")
-    out_file.unlink(missing_ok=True)
-    err_file.unlink(missing_ok=True)
 
     notes: list[str] = []
+    memory_lines = [line for line in stderr.splitlines() if line.startswith("gate_memory ")]
+    memory: dict[str, str] = {}
+    if len(memory_lines) == 1:
+        try:
+            memory = dict(token.split("=", 1) for token in memory_lines[0].split()[1:])
+        except ValueError:
+            memory = {}
+    in_process_peak_rss_anon_kb = int(memory.get("rss_anon_kb", "0"))
+    vm_hwm_kb = int(memory.get("vm_hwm_kb", "0"))
+    fixed_ring_bound = int(memory.get("fixed_ring_bound", "0"))
+    rss_disagreement_kb = abs(in_process_peak_rss_anon_kb - external_peak_rss_anon_kb)
     if timed_out:
         notes.append("timeout")
     if rc != 0:
@@ -632,8 +692,14 @@ def run_one(
         notes.append(f"Cpus_allowed_list {cpus_allowed!r}")
     if taskset_mask != "1":
         notes.append(f"taskset mask {taskset_mask!r}")
-    if peak_rss_anon_kb <= 0:
-        notes.append("RssAnon not sampled")
+    if not exec_confirmed:
+        notes.append("exec not confirmed")
+    if in_process_peak_rss_anon_kb <= 0:
+        notes.append("in-process RssAnon not sampled")
+    if external_peak_rss_anon_kb <= 0:
+        notes.append("external RssAnon not sampled")
+    if vm_hwm_kb <= 0:
+        notes.append("VmHWM not sampled")
 
     parsed: dict[str, str] | None = None
     if not notes:
@@ -651,7 +717,10 @@ def run_one(
         f"cmd={' '.join(log_cmd)}\n"
         f"taskset_p={taskset_p_line}\n"
         f"Cpus_allowed_list={cpus_allowed}\n"
-        f"peak_rss_anon_kb={peak_rss_anon_kb}\n"
+        f"in_process_peak_rss_anon_kb={in_process_peak_rss_anon_kb}\n"
+        f"external_peak_rss_anon_kb={external_peak_rss_anon_kb}\n"
+        f"vm_hwm_kb={vm_hwm_kb}\n"
+        f"fixed_ring_bound={fixed_ring_bound}\n"
         f"ru_maxrss_kb={ru_maxrss_kb}\n"
         f"ru_utime_s={ru_utime_s:.6f} ru_stime_s={ru_stime_s:.6f}\n"
         f"rc={rc} timed_out={timed_out} elapsed_s={elapsed:.6f}\n"
@@ -661,8 +730,11 @@ def run_one(
     row = {
         "cell": cell.system,
         "arm": arm,
+        "observation": observation,
         "seed": str(seed),
         "slot": str(slot),
+        "rotation": str(rotation),
+        "superseded": "0",
         "status": "ok",
         "exit_code": str(rc),
         "hit": "0",
@@ -677,8 +749,12 @@ def run_one(
         "elapsed_s": f"{elapsed:.6f}",
         "ru_utime_s": f"{ru_utime_s:.6f}",
         "ru_stime_s": f"{ru_stime_s:.6f}",
-        "rss_anon_kb": str(peak_rss_anon_kb),
+        "rss_anon_kb": str(in_process_peak_rss_anon_kb),
+        "external_rss_anon_kb": str(external_peak_rss_anon_kb),
+        "vm_hwm_kb": str(vm_hwm_kb),
+        "rss_disagreement_kb": str(rss_disagreement_kb),
         "ru_maxrss_kb": str(ru_maxrss_kb),
+        "fixed_ring_bound": str(fixed_ring_bound),
         "library_tree": lib_tree,
         "binary_sha256": bin_sha256,
         "log_sha256": log_sha,
@@ -728,14 +804,18 @@ def median_or_nan(values: list[float]) -> float:
 
 def score_cell(
     cell: CellSpec,
-    by_arm: dict[str, list[dict[str, str]]],
+    by_observation: dict[str, list[dict[str, str]]],
 ) -> tuple[dict[str, str], list[str]]:
     rows: dict[str, dict[int, dict[str, str]]] = {}
-    for arm, key in ARM_KEYS:
-        got = by_arm.get(arm, [])
+    for observation, _arm in OBSERVATIONS:
+        key = observation.lower()
+        got = by_observation.get(observation, [])
         seeds = sorted(int(r["seed"]) for r in got)
         if seeds != list(SEEDS):
-            raise RuntimeError(f"{cell.system} {arm}: expected one row per seed {SEEDS[0]}..{SEEDS[-1]}")
+            raise RuntimeError(
+                f"{cell.system} {observation}: expected one row per seed "
+                f"{SEEDS[0]}..{SEEDS[-1]}"
+            )
         rows[key] = {int(r["seed"]): r for r in got}
 
     inconclusive = sum(1 for got in rows.values() for r in got.values() if r["status"] != "ok")
@@ -743,10 +823,17 @@ def score_cell(
         key: sum(1 for r in got.values() if rederived_hit(r, cell.reference))
         for key, got in rows.items()
     }
-    med_calls = {
-        key: type7_quantile([calls_for_test(r, cell.reference) for r in got.values()], 0.5)
-        for key, got in rows.items()
-    }
+    med_calls_a = type7_quantile(
+        [calls_for_test(r, cell.reference) for r in rows["a"].values()], 0.5
+    )
+    med_calls_b = type7_quantile(
+        [
+            calls_for_test(rows[key][seed], cell.reference)
+            for seed in SEEDS
+            for key in ("b1", "b2")
+        ],
+        0.5,
+    )
 
     traj_fields = ("status", "evals", "charged", "calls_to_hit", "best_bits")
     traj_match = {"b": 0, "a2": 0}
@@ -754,50 +841,90 @@ def score_cell(
     hit_loss_seeds: list[int] = []
     for seed in SEEDS:
         ra = rows["a"][seed]
-        for key, label in (("b", "B"), ("a2", "A2")):
+        for key, label in (("b1", "B1"), ("b2", "B2"), ("a2", "A2")):
             other = rows[key][seed]
             diffs = [f for f in traj_fields if other[f] != ra[f]]
             if not diffs and ra["status"] == "ok":
-                traj_match[key] += 1
+                traj_match["b" if key.startswith("b") else "a2"] += 1
             else:
-                detail = ", ".join(f"{f} {other[f]} vs {ra[f]}" for f in traj_fields)
+                detail = ", ".join(
+                    f"{field} {other[field]} vs {ra[field]}" for field in diffs
+                )
                 traj_diffs.append(f"{cell.system} seed {seed} {label} vs A: {detail}")
-        if rederived_hit(ra, cell.reference) and not rederived_hit(rows["b"][seed], cell.reference):
+        if rederived_hit(ra, cell.reference) and any(
+            not rederived_hit(rows[key][seed], cell.reference) for key in ("b1", "b2")
+        ):
             hit_loss_seeds.append(seed)
 
     ok_seeds = [s for s in SEEDS if all(rows[k][s]["status"] == "ok" for k in rows)]
 
-    def per_call(key: str) -> list[float]:
-        return [
-            float(rows[key][s]["outside_s"]) / max(1, int(rows[key][s]["charged"])) for s in ok_seeds
-        ]
+    def value(key: str, seed: int, field: str) -> float:
+        return float(rows[key][seed][field])
 
-    def column(key: str, field: str) -> list[float]:
-        return [float(rows[key][s][field]) for s in ok_seeds]
+    def per_call(key: str, seed: int) -> float:
+        row = rows[key][seed]
+        return float(row["outside_s"]) / max(1, int(row["charged"]))
 
-    opc = {key: per_call(key) for key in rows}
-    med_opc = {key: median_or_nan(vals) for key, vals in opc.items()}
-    outside_ba = finite_ratio(med_opc["b"], med_opc["a"])
-    outside_a2a = finite_ratio(med_opc["a2"], med_opc["a"])
-    ba_lo, ba_hi = bootstrap_median_ratio_ci(opc["b"], opc["a"])
-    a2a_lo, a2a_hi = bootstrap_median_ratio_ci(opc["a2"], opc["a"])
+    opc_a = [[per_call("a", seed)] for seed in ok_seeds]
+    opc_a2 = [[per_call("a2", seed)] for seed in ok_seeds]
+    opc_b = [[per_call("b1", seed), per_call("b2", seed)] for seed in ok_seeds]
+    flat_opc_a = [item for cluster in opc_a for item in cluster]
+    flat_opc_a2 = [item for cluster in opc_a2 for item in cluster]
+    flat_opc_b = [item for cluster in opc_b for item in cluster]
+    med_opc_a = median_or_nan(flat_opc_a)
+    med_opc_a2 = median_or_nan(flat_opc_a2)
+    med_opc_b = median_or_nan(flat_opc_b)
+    outside_ba = finite_ratio(med_opc_b, med_opc_a)
+    outside_a2a = finite_ratio(med_opc_a2, med_opc_a)
+    ba_lo, ba_hi = bootstrap_cluster_median_ratio_ci(opc_b, opc_a)
+    a2a_lo, a2a_hi = bootstrap_cluster_median_ratio_ci(opc_a2, opc_a)
     outside_limit = max(OUTSIDE_RATIO_LIMIT, a2a_hi) if not math.isnan(a2a_hi) else OUTSIDE_RATIO_LIMIT
 
-    med_rss = {key: median_or_nan(column(key, "rss_anon_kb")) for key in rows}
-    rss_ba = finite_ratio(med_rss["b"], med_rss["a"])
-    rss_a2a = finite_ratio(med_rss["a2"], med_rss["a"])
-    rss_limit = max(RSS_RATIO_LIMIT, rss_a2a) if not math.isnan(rss_a2a) else RSS_RATIO_LIMIT
+    rss_a = [[value("a", seed, "rss_anon_kb")] for seed in ok_seeds]
+    rss_a2 = [[value("a2", seed, "rss_anon_kb")] for seed in ok_seeds]
+    rss_b = [
+        [value("b1", seed, "rss_anon_kb"), value("b2", seed, "rss_anon_kb")]
+        for seed in ok_seeds
+    ]
+    flat_rss_a = [item for cluster in rss_a for item in cluster]
+    flat_rss_a2 = [item for cluster in rss_a2 for item in cluster]
+    flat_rss_b = [item for cluster in rss_b for item in cluster]
+    med_rss_a = median_or_nan(flat_rss_a)
+    med_rss_a2 = median_or_nan(flat_rss_a2)
+    med_rss_b = median_or_nan(flat_rss_b)
+    rss_ba = finite_ratio(med_rss_b, med_rss_a)
+    rss_a2a = finite_ratio(med_rss_a2, med_rss_a)
+    rss_ba_lo, rss_ba_hi = bootstrap_cluster_median_ratio_ci(rss_b, rss_a)
+    rss_a2a_lo, rss_a2a_hi = bootstrap_cluster_median_ratio_ci(rss_a2, rss_a)
+    rss_limit = (
+        max(RSS_RATIO_LIMIT, rss_a2a_hi) if not math.isnan(rss_a2a_hi) else RSS_RATIO_LIMIT
+    )
 
-    med_ru = {key: median_or_nan(column(key, "ru_maxrss_kb")) for key in rows}
-    med_wall = {key: median_or_nan(column(key, "elapsed_s")) for key in rows}
+    def flat_field(keys: tuple[str, ...], field: str) -> list[float]:
+        return [value(key, seed, field) for seed in ok_seeds for key in keys]
 
-    fail_a = traj_match["b"] < len(SEEDS)
-    fail_b = bool(hit_loss_seeds) or hits["b"] < hits["a"]
+    med_ru_a = median_or_nan(flat_field(("a",), "ru_maxrss_kb"))
+    med_ru_a2 = median_or_nan(flat_field(("a2",), "ru_maxrss_kb"))
+    med_ru_b = median_or_nan(flat_field(("b1", "b2"), "ru_maxrss_kb"))
+    med_wall_a = median_or_nan(flat_field(("a",), "elapsed_s"))
+    med_wall_a2 = median_or_nan(flat_field(("a2",), "elapsed_s"))
+    med_wall_b = median_or_nan(flat_field(("b1", "b2"), "elapsed_s"))
+    fixed_a = [int(rows["a"][seed]["fixed_ring_bound"]) for seed in SEEDS]
+    fixed_a2 = [int(rows["a2"][seed]["fixed_ring_bound"]) for seed in SEEDS]
+    fixed_b = [
+        int(rows[key][seed]["fixed_ring_bound"])
+        for seed in SEEDS
+        for key in ("b1", "b2")
+    ]
+
+    fail_a = traj_match["b"] < 2 * len(SEEDS) or traj_match["a2"] < len(SEEDS)
+    fail_b = bool(hit_loss_seeds) or min(hits["b1"], hits["b2"]) < hits["a"]
     fail_c = not (ba_hi <= outside_limit)
     fail_d = not (rss_ba <= rss_limit)
+    fail_e = any(fixed_a) or any(fixed_a2) or any(value <= 0 for value in fixed_b)
     if inconclusive:
         verdict = "INCONCLUSIVE"
-    elif fail_a or fail_b or fail_c or fail_d:
+    elif fail_a or fail_b or fail_c or fail_d or fail_e:
         verdict = "FAIL"
     else:
         verdict = "PASS"
@@ -813,13 +940,14 @@ def score_cell(
             "traj_match_a2a": str(traj_match["a2"]),
             "hits_a": str(hits["a"]),
             "hits_a2": str(hits["a2"]),
-            "hits_b": str(hits["b"]),
+            "hits_b1": str(hits["b1"]),
+            "hits_b2": str(hits["b2"]),
             "hit_loss_seeds": " ".join(str(s) for s in hit_loss_seeds),
-            "med_calls_a": fmt_num(med_calls["a"]),
-            "med_calls_b": fmt_num(med_calls["b"]),
-            "outside_a_us": fmt_num(med_opc["a"] * 1e6),
-            "outside_a2_us": fmt_num(med_opc["a2"] * 1e6),
-            "outside_b_us": fmt_num(med_opc["b"] * 1e6),
+            "med_calls_a": fmt_num(med_calls_a),
+            "med_calls_b": fmt_num(med_calls_b),
+            "outside_a_us": fmt_num(med_opc_a * 1e6),
+            "outside_a2_us": fmt_num(med_opc_a2 * 1e6),
+            "outside_b_us": fmt_num(med_opc_b * 1e6),
             "outside_ba": fmt_num(outside_ba),
             "outside_ba_ci_lo": fmt_num(ba_lo),
             "outside_ba_ci_hi": fmt_num(ba_hi),
@@ -827,39 +955,38 @@ def score_cell(
             "outside_a2a_ci_lo": fmt_num(a2a_lo),
             "outside_a2a_ci_hi": fmt_num(a2a_hi),
             "outside_limit": fmt_num(outside_limit),
-            "rss_anon_a_kb": fmt_num(med_rss["a"]),
-            "rss_anon_a2_kb": fmt_num(med_rss["a2"]),
-            "rss_anon_b_kb": fmt_num(med_rss["b"]),
+            "rss_anon_a_kb": fmt_num(med_rss_a),
+            "rss_anon_a2_kb": fmt_num(med_rss_a2),
+            "rss_anon_b_kb": fmt_num(med_rss_b),
             "rss_anon_ba": fmt_num(rss_ba),
+            "rss_anon_ba_ci_lo": fmt_num(rss_ba_lo),
+            "rss_anon_ba_ci_hi": fmt_num(rss_ba_hi),
             "rss_anon_a2a": fmt_num(rss_a2a),
+            "rss_anon_a2a_ci_lo": fmt_num(rss_a2a_lo),
+            "rss_anon_a2a_ci_hi": fmt_num(rss_a2a_hi),
             "rss_anon_limit": fmt_num(rss_limit),
-            "ru_maxrss_a_kb": fmt_num(med_ru["a"]),
-            "ru_maxrss_a2_kb": fmt_num(med_ru["a2"]),
-            "ru_maxrss_b_kb": fmt_num(med_ru["b"]),
-            "ru_maxrss_ba": fmt_num(finite_ratio(med_ru["b"], med_ru["a"])),
-            "ru_maxrss_a2a": fmt_num(finite_ratio(med_ru["a2"], med_ru["a"])),
-            "wall_a_s": fmt_num(med_wall["a"]),
-            "wall_a2_s": fmt_num(med_wall["a2"]),
-            "wall_b_s": fmt_num(med_wall["b"]),
-            "wall_ba": fmt_num(finite_ratio(med_wall["b"], med_wall["a"])),
-            "wall_a2a": fmt_num(finite_ratio(med_wall["a2"], med_wall["a"])),
+            "fixed_ring_a": str(min(fixed_a)),
+            "fixed_ring_a2": str(min(fixed_a2)),
+            "fixed_ring_b": str(min(fixed_b)),
+            "ru_maxrss_a_kb": fmt_num(med_ru_a),
+            "ru_maxrss_a2_kb": fmt_num(med_ru_a2),
+            "ru_maxrss_b_kb": fmt_num(med_ru_b),
+            "ru_maxrss_ba": fmt_num(finite_ratio(med_ru_b, med_ru_a)),
+            "ru_maxrss_a2a": fmt_num(finite_ratio(med_ru_a2, med_ru_a)),
+            "wall_a_s": fmt_num(med_wall_a),
+            "wall_a2_s": fmt_num(med_wall_a2),
+            "wall_b_s": fmt_num(med_wall_b),
+            "wall_ba": fmt_num(finite_ratio(med_wall_b, med_wall_a)),
+            "wall_a2a": fmt_num(finite_ratio(med_wall_a2, med_wall_a)),
             "fail_a": "1" if fail_a else "0",
             "fail_b": "1" if fail_b else "0",
             "fail_c": "1" if fail_c else "0",
             "fail_d": "1" if fail_d else "0",
+            "fail_e": "1" if fail_e else "0",
             "verdict": verdict,
         },
         traj_diffs,
     )
-
-
-def cpu_model_name() -> str:
-    cpuinfo = Path("/proc/cpuinfo")
-    if cpuinfo.is_file():
-        for ln in cpuinfo.read_text(encoding="utf-8", errors="replace").splitlines():
-            if ln.startswith("model name"):
-                return ln.split(":", 1)[1].strip()
-    return "unknown"
 
 
 def write_csv_durable(path: Path, fields: list[str], rows: list[dict[str, str]]) -> str:
@@ -876,7 +1003,6 @@ def write_hosts_csv(path: Path, machine_ids: list[str], compiler: str) -> None:
     rows = [
         {
             "machine_id_sha256": mid,
-            "cpu_model": cpu_model_name(),
             "logical_cpus": str(os.cpu_count() or 1),
             "os": platform.system(),
             "arch": platform.machine(),
@@ -893,6 +1019,7 @@ def write_hosts_csv(path: Path, machine_ids: list[str], compiler: str) -> None:
 def render_readme_results(
     scored: list[dict[str, str]],
     traj_diffs: list[str],
+    rows: list[dict[str, str]],
     total_rows: int,
     inconclusive_rows: list[str],
 ) -> str:
@@ -913,7 +1040,7 @@ def render_readme_results(
         "",
         "This section is generated from `rows.csv` by `run_gate.py summarize`.",
         "",
-        f"{len(scored)} cells, twelve seeds, three arms, {total_rows} rows, "
+        f"{len(scored)} cells, twenty-four seeds, four observations, {total_rows} rows, "
         f"{len(inconclusive_rows)} inconclusive. Gate verdict: **{gate_verdict}**. "
         f"{len(verdicts['PASS'])} cells pass, {len(verdicts['FAIL'])} fail and "
         f"{len(verdicts['INCONCLUSIVE'])} are inconclusive.",
@@ -922,40 +1049,97 @@ def render_readme_results(
         f"- Clause (b), hit loss, fails on: {cells_failing('fail_b')}.",
         f"- Clause (c), outside time per call, fails on: {cells_failing('fail_c')}.",
         f"- Clause (d), peak RssAnon, fails on: {cells_failing('fail_d')}.",
+        f"- Clause (e), fixed-ring execution, fails on: {cells_failing('fail_e')}.",
         "",
-        "`Traj` counts seeds whose B row and A2 row match A. Hits are A, A2",
-        "and B, re-derived from `best`. Outside is the median time outside",
+        "`Traj` counts B observations and A2 observations that match A.",
+        "Hits are A, A2, B1 and B2, re-derived from `best`. Outside is the median time outside",
         "energy calls per charged call. Its B/A ratio carries the bootstrap",
-        "95% interval, and the limit is the clause (c) bound. Memory and wall",
-        "ratios are of medians. `ru_maxrss` is reported and never gates.",
+        "95% interval, and the limit is the clause (c) bound. RssAnon carries",
+        "the seed-cluster bootstrap interval. VmHWM and `ru_maxrss` never gate.",
         "",
-        "| Cell | Traj B, A2 | Hits A, A2, B | Outside A (us) | Outside B/A [95% CI] | A2/A [95% CI] | Limit | RssAnon B/A, A2/A | ru_maxrss B/A | Wall B/A, A2/A | Failed | Verdict |",
-        "| --- | --- | --- | ---: | --- | --- | ---: | --- | ---: | --- | --- | --- |",
+        "| Cell | Identity B, A2 | Hits A, A2, B1, B2 | Outside B/A [95% CI] | Outside A2/A [95% CI] | Outside limit | RssAnon B/A [95% CI] | RssAnon A2/A [95% CI] | RSS limit | Bound A, A2, B min | Verdict |",
+        "| --- | --- | --- | --- | --- | ---: | --- | --- | ---: | --- | --- |",
     ]
     for row in scored:
-        failed = ", ".join(c for c in "abcd" if row[f"fail_{c}"] == "1") or "none"
         lines.append(
             f"| {row['cell']} | {row['traj_match_ba']}, {row['traj_match_a2a']} | "
-            f"{row['hits_a']}, {row['hits_a2']}, {row['hits_b']} | {row['outside_a_us']} | "
+            f"{row['hits_a']}, {row['hits_a2']}, {row['hits_b1']}, {row['hits_b2']} | "
             f"{row['outside_ba']} [{row['outside_ba_ci_lo']}, {row['outside_ba_ci_hi']}] | "
             f"{row['outside_a2a']} [{row['outside_a2a_ci_lo']}, {row['outside_a2a_ci_hi']}] | "
-            f"{row['outside_limit']} | {row['rss_anon_ba']}, {row['rss_anon_a2a']} | "
-            f"{row['ru_maxrss_ba']} | {row['wall_ba']}, {row['wall_a2a']} | "
-            f"{failed} | {row['verdict']} |"
+            f"{row['outside_limit']} | "
+            f"{row['rss_anon_ba']} [{row['rss_anon_ba_ci_lo']}, {row['rss_anon_ba_ci_hi']}] | "
+            f"{row['rss_anon_a2a']} [{row['rss_anon_a2a_ci_lo']}, {row['rss_anon_a2a_ci_hi']}] | "
+            f"{row['rss_anon_limit']} | {row['fixed_ring_a']}, {row['fixed_ring_a2']}, "
+            f"{row['fixed_ring_b']} | {row['verdict']} |"
         )
     lines.extend(["", "### Trajectory differences", ""])
     if traj_diffs:
         lines.extend(f"- {item}" for item in traj_diffs)
     else:
         lines.append(
-            f"None. On all {len(scored)} cells and {len(SEEDS)} seeds, the B row and "
-            "the A2 row match A on `evals`, `charged`, `calls_to_hit` and `best_bits`."
+            f"None. On all {len(scored)} cells and {len(SEEDS)} seeds, both B "
+            "observations and A2 match A."
         )
     lines.extend(["", "### Inconclusive rows", ""])
     if inconclusive_rows:
         lines.extend(f"- {item}" for item in inconclusive_rows)
     else:
         lines.append("None. Every run exited 0 with timing and RssAnon recorded.")
+    disagreements = [
+        row for row in rows if int(row["rss_disagreement_kb"]) > 2 * 1024
+    ]
+    lines.extend(["", "### Internal and external peak disagreements", ""])
+    if disagreements:
+        for row in disagreements:
+            lines.append(
+                f"- {row['cell']} seed {row['seed']} {row['observation']}: "
+                f"{float(row['rss_anon_kb']) / 1024:.1f} MiB internal, "
+                f"{float(row['external_rss_anon_kb']) / 1024:.1f} MiB external."
+            )
+    else:
+        lines.append("None over 2 MiB.")
+
+    mode_rows = [row for row in rows if row["cell"] == "blj105n38"]
+
+    def mode(row: dict[str, str]) -> str:
+        mib = float(row["rss_anon_kb"]) / 1024
+        if 26.0 <= mib < 30.0:
+            return "~28"
+        if 30.0 <= mib <= 34.0:
+            return "~32"
+        return "other"
+
+    lines.extend(
+        [
+            "",
+            "### blj105n38 RssAnon modes",
+            "",
+            "| Seed | A | B1 | B2 | A2 |",
+            "| ---: | --- | --- | --- | --- |",
+        ]
+    )
+    indexed = {(row["seed"], row["observation"]): row for row in mode_rows}
+    for seed in SEEDS:
+        cells: list[str] = []
+        for observation in ("A", "B1", "B2", "A2"):
+            row = indexed[(str(seed), observation)]
+            cells.append(f"{mode(row)} ({float(row['rss_anon_kb']) / 1024:.1f})")
+        lines.append(f"| {seed} | " + " | ".join(cells) + " |")
+    lines.extend(
+        [
+            "",
+            "| Arm | ~28 MiB | ~32 MiB | Other |",
+            "| --- | ---: | ---: | ---: |",
+        ]
+    )
+    for arm, observations in (("A", ("A",)), ("A2", ("A2",)), ("B", ("B1", "B2"))):
+        labels = [
+            mode(row) for row in mode_rows if row["observation"] in observations
+        ]
+        lines.append(
+            f"| {arm} | {labels.count('~28')} | {labels.count('~32')} | "
+            f"{labels.count('other')} |"
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -978,37 +1162,49 @@ def summarize(
 ) -> int:
     cells = build_cells(repo_root)
     rows = read_rows(rows_path)
-    keys = [(r["cell"], r["arm"], r["seed"]) for r in rows]
+    active_rows = [row for row in rows if row["superseded"] == "0"]
+    keys = [(r["cell"], r["observation"], r["seed"]) for r in active_rows]
     if len(keys) != len(set(keys)):
-        raise RuntimeError("rows.csv holds a repeated cell, arm and seed")
-    by_cell_arm: dict[tuple[str, str], list[dict[str, str]]] = {}
-    for row in rows:
-        by_cell_arm.setdefault((row["cell"], row["arm"]), []).append(row)
+        raise RuntimeError("rows.csv holds a repeated active cell, observation and seed")
+    by_cell_observation: dict[tuple[str, str], list[dict[str, str]]] = {}
+    for row in active_rows:
+        by_cell_observation.setdefault((row["cell"], row["observation"]), []).append(row)
     scored: list[dict[str, str]] = []
     all_traj_diffs: list[str] = []
     for cell in cells:
         cell_score, cell_diffs = score_cell(
             cell,
-            {arm: by_cell_arm.get((cell.system, arm), []) for arm in ARMS},
+            {
+                observation: by_cell_observation.get((cell.system, observation), [])
+                for observation, _arm in OBSERVATIONS
+            },
         )
         scored.append(cell_score)
         all_traj_diffs.extend(cell_diffs)
     inconclusive_rows = [
-        f"{r['cell']} seed {r['seed']} {r['arm']}: {r['note']}" for r in rows if r["status"] != "ok"
+        f"{r['cell']} seed {r['seed']} {r['observation']}: {r['note']}"
+        for r in active_rows
+        if r["status"] != "ok"
     ]
     write_csv_durable(summary_path, SUMMARY_FIELDS, scored)
     if hosts_path is not None:
-        mids = sorted({row["machine_id_sha256"] for row in rows}) or [hashed_machine_id()]
+        mids = sorted({row["machine_id_sha256"] for row in active_rows}) or [hashed_machine_id()]
         write_hosts_csv(hosts_path, mids, compiler)
     if readme_path is not None:
         update_readme(
             readme_path,
-            render_readme_results(scored, all_traj_diffs, len(rows), inconclusive_rows),
+            render_readme_results(
+                scored,
+                all_traj_diffs,
+                active_rows,
+                len(active_rows),
+                inconclusive_rows,
+            ),
         )
     for row in scored:
         print(
             f"{row['cell']} traj {row['traj_match_ba']}/{row['traj_match_a2a']} "
-            f"hits {row['hits_a']}/{row['hits_a2']}/{row['hits_b']} "
+            f"hits {row['hits_a']}/{row['hits_a2']}/{row['hits_b1']}/{row['hits_b2']} "
             f"outside {row['outside_ba']} [{row['outside_ba_ci_lo']},{row['outside_ba_ci_hi']}] "
             f"limit {row['outside_limit']} rss {row['rss_anon_ba']} wall {row['wall_ba']} "
             f"{row['verdict']}"
@@ -1042,8 +1238,10 @@ def preflight(
             row = run_one(
                 cell=cell,
                 arm=arm,
+                observation=arm,
                 seed=PREFLIGHT_SEED,
                 slot=0,
+                rotation=0,
                 exe=bins[arm] / driver,
                 bin_sha256=bin_shas[(arm, driver)],
                 lib_tree=trees[arm],
@@ -1057,7 +1255,17 @@ def preflight(
             )
             empty = [
                 f
-                for f in ("wall_s", "pot_s", "outside_s", "elapsed_s", "ru_utime_s", "rss_anon_kb", "ru_maxrss_kb")
+                for f in (
+                    "wall_s",
+                    "pot_s",
+                    "outside_s",
+                    "elapsed_s",
+                    "ru_utime_s",
+                    "rss_anon_kb",
+                    "external_rss_anon_kb",
+                    "vm_hwm_kb",
+                    "ru_maxrss_kb",
+                )
                 if row[f] in ("", "nan") or (f == "rss_anon_kb" and int(row[f]) <= 0)
             ]
             ok = row["status"] == "ok" and row["exit_code"] == "0" and not empty
@@ -1095,17 +1303,22 @@ def self_test() -> None:
     assert rederived_hit({"status": "ok", "best": "-305.5174", "hit": "0"}, -305.5183221676)
     assert not rederived_hit({"status": "ok", "best": "nan", "hit": "1"}, -305.5183221676)
     assert not rederived_hit({"status": "inconclusive", "best": "-400", "hit": "1"}, -305.5)
-    ci_lo, ci_hi = bootstrap_median_ratio_ci([2.0] * 12, [2.0] * 12, draws=200)
+    ci_lo, ci_hi = bootstrap_median_ratio_ci([2.0] * 24, [2.0] * 24, draws=200)
     assert abs(ci_lo - 1.0) < 1e-12 and abs(ci_hi - 1.0) < 1e-12
-    counts = {(slot, arm): 0 for slot in (1, 2, 3) for arm in ARMS}
+    cluster_lo, cluster_hi = bootstrap_cluster_median_ratio_ci(
+        [[2.0, 2.0]] * 24, [[2.0]] * 24, draws=200
+    )
+    assert abs(cluster_lo - 1.0) < 1e-12 and abs(cluster_hi - 1.0) < 1e-12
+    observations = tuple(name for name, _arm in OBSERVATIONS)
+    counts = {(slot, observation): 0 for slot in (1, 2, 3, 4) for observation in observations}
     for seed in SEEDS:
-        order = arm_order(seed)
-        assert len(order) == len(set(order)) == 3
-        for slot, arm in enumerate(order, start=1):
-            counts[(slot, arm)] += 1
-    assert all(value == 4 for value in counts.values()), counts
-    assert arm_order(2000) == ("A", "A2", "B")
-    assert arm_order(2001) == ("A", "B", "A2")
+        order = observation_order(seed)
+        assert len(order) == len(set(order)) == 4
+        for slot, observation in enumerate(order, start=1):
+            counts[(slot, observation)] += 1
+    assert all(value == 6 for value in counts.values()), counts
+    assert observation_order(2000) == ("A", "B1", "B2", "A2")
+    assert observation_order(2001) == ("B1", "B2", "A2", "A")
     repo_root = Path(__file__).resolve().parents[2]
     cells = build_cells(repo_root)
     names = [cell.system for cell in cells]
@@ -1131,7 +1344,6 @@ def main(argv: list[str]) -> int:
     run_p = sub.add_parser("run")
     for arm in ARMS:
         run_p.add_argument(f"--{arm.lower()}-bin", type=Path, required=True)
-        run_p.add_argument(f"--{arm.lower()}-commit", required=True)
         run_p.add_argument(f"--{arm.lower()}-tree", required=True)
     run_p.add_argument("--compiler", required=True)
     run_p.add_argument("--build-flags", required=True)
@@ -1161,7 +1373,6 @@ def main(argv: list[str]) -> int:
     cells = build_cells(repo_root)
     bins = {arm: getattr(args, f"{arm.lower()}_bin").resolve() for arm in ARMS}
     trees = {arm: getattr(args, f"{arm.lower()}_tree") for arm in ARMS}
-    commits = {arm: getattr(args, f"{arm.lower()}_commit") for arm in ARMS}
     verify_driver_budgets(cells, bins, env)
 
     machine_id = hashed_machine_id()
@@ -1178,7 +1389,6 @@ def main(argv: list[str]) -> int:
             "build_flags": args.build_flags,
             "arms": {
                 arm: {
-                    "commit": commits[arm],
                     "tree": trees[arm],
                     "binaries": {drv: bin_shas[(arm, drv)] for drv in DRIVERS},
                 }
@@ -1196,22 +1406,26 @@ def main(argv: list[str]) -> int:
         cells, bins, trees, bin_shas, args.work, args.logs, machine_id, session, env, args.timeout, args.journal
     )
 
-    total_jobs = len(cells) * len(SEEDS) * len(ARMS)
+    total_jobs = len(cells) * len(SEEDS) * len(OBSERVATIONS)
     sequence = 0
     for cell in cells:
         for seed in SEEDS:
-            for slot, arm in enumerate(arm_order(seed), start=1):
+            rotation = (seed - SEEDS[0]) % 4
+            for slot, observation in enumerate(observation_order(seed), start=1):
+                arm = OBSERVATION_ARMS[observation]
                 sequence += 1
                 row = run_one(
                     cell=cell,
                     arm=arm,
+                    observation=observation,
                     seed=seed,
                     slot=slot,
+                    rotation=rotation,
                     exe=bins[arm] / cell.driver,
                     bin_sha256=bin_shas[(arm, cell.driver)],
                     lib_tree=trees[arm],
                     work_dir=args.work,
-                    log_path=args.logs / cell.family / cell.system / f"{seed}-{arm}.log",
+                    log_path=args.logs / cell.family / cell.system / f"{seed}-{observation}.log",
                     machine_id=machine_id,
                     session=session,
                     sequence=sequence,
@@ -1221,7 +1435,8 @@ def main(argv: list[str]) -> int:
                 append_csv(args.rows, ROW_FIELDS, row)
                 print(
                     f"[{utc_now()}] {sequence}/{total_jobs} {cell.system} seed={seed} slot={slot} "
-                    f"arm={arm} status={row['status']} hit={row['hit']} calls={row['calls_to_hit']} "
+                    f"observation={observation} arm={arm} status={row['status']} "
+                    f"hit={row['hit']} calls={row['calls_to_hit']} "
                     f"best={row['best']} elapsed={row['elapsed_s']}",
                     flush=True,
                 )

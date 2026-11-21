@@ -1,80 +1,57 @@
-# basin-bound gate
+# basin-bound memory gate
 
-Three arms, one session, one core. This file states the rule before
-any timed row is recorded. The change under test is a pure
-performance change, so search trajectories must not move.
+Three builds, one session, one core. This file states the rule before
+any timed row is recorded. The change under test is a performance and
+memory-layout change, so search trajectories must not move.
 
-- Arm A is develop `9837358ae1027067ff654fac8b48969020853452`, tree
-  `15032ef401fb681e230d27c7b315d89f7ac53e4e`.
-- Arm A2 is the same commit, built a second time from a second
-  worktree into a second target directory. A2 against A is the A/A
-  band.
-- Arm B is A plus two commits: the block-sum bound that skips basin
-  centres (`perf(bias): skip basin centres on a block-sum bound`) and
-  one sine and cosine per rotation in symmetrise
-  (`perf(symmetrise): take one sine and cosine per rotation`). B is
-  `41a4a07d7a4b6e8b5dc50fc74fee4080b66ebf1b`, tree
-  `3b430f17ada0387c2ec1ae00e2ca45b8f7abc89f`. The author's own bench
-  commit is not part of B.
+- Arm A is tree `15032ef401fb681e230d27c7b315d89f7ac53e4e`.
+- Arm A2 is a separate release rebuild of the A tree in a separate
+  target directory. A2 against A is the A/A band.
+- Arm B is the four-change tip whose tree starts `f2786b12`. No other
+  tip may stand in for B.
 
-Release build, rustc 1.88.0, `cargo build --release --locked
---features rgpot-ex`, the same toolchain and flags in every arm. Each
-arm has its own worktree and target directory. The five drivers are
-the same source bytes on every arm. `h2h_gmin_proof`, `h2h_seed` and
-`h2h_sc` are the develop sources. `driver-src/h2h_morse.rs` and
-`driver-src/h2h_blj.rs` are the bindings-parity gate copies, placed in
-`examples/` of every arm unmodified, so the binaries differ only by
-the library they link.
+Every arm is a locked release build with `rgpot-ex`, using the same
+compiler, flags and benchmark-only measurement overlay. Each arm has
+its own detached worktree and target directory. The overlay changes
+measurement only: it samples memory in the benchmark process and
+counts entries to the fixed-ring bound. Its source hash and every
+binary hash are journalled.
 
 ## Harness
 
-`run_gate.py` is the bindings-parity gate harness with the arms
-renamed to A, A2 and B. Other changes from that harness, all required
-by this gate's protocol:
+`run_gate.py` extends the earlier three-arm gate. It records elapsed,
+user and system time and `ru_maxrss` from the child rusage. The
+driver's own clocks supply wall, potential and outside time.
 
-- m55r6 is added, the one cell of the basin-bound author's bench that
-  the panel lacked. m80r14 was already in the panel.
-- The four clauses below replace the parity gate's three.
-- The harness records its own timing from `os.wait4`, which returns
-  the `resource` rusage of the child: `elapsed_s` (monotonic clock),
-  `ru_utime_s`, `ru_stime_s` and `ru_maxrss_kb`. No external `time`
-  binary is used. `wall_s` and `pot_s` are the driver's in-process
-  clocks, and the time outside energy calls is the driver's
-  `outside_s`, or `wall_s - pot_s` where the driver does not print it.
-- Each row carries `status` and `exit_code`. A non-zero exit, a
-  timeout, unparsable output or a pinning fault is recorded as an
-  `inconclusive` row. It is never rerun or replaced, and `rows.csv`
-  is append-only. The campaign refuses to start on a non-empty
-  `rows.csv`.
-- `evals` is the driver's `evals_to_hit` whether or not the run hit,
-  so energy calls are compared on misses too.
-- Before the first row, a preflight runs one real cell and seed per
-  arm and driver through the production command (seed 2000 on lj38,
-  blj115n38, m55r6, sc126-55 and tip4p8). It aborts the campaign on a
-  non-zero exit or an empty timing or RssAnon field. Preflight runs
-  are not rows. Their outcomes go to `sessions.jsonl`.
-- `sessions.jsonl` journals the session start (arm commits, trees,
-  binary sha256, compiler, flags, thread variables), every preflight
-  run and the session end.
-- Each run log is written as `.tmp`, synced and renamed, and its
-  read-back sha256 is the row's `log_sha256`.
-- The TIP4P start-file comparison across arms is dropped. Clause (a)
-  compares the trajectories themselves.
+The gate memory reading is the maximum RssAnon observed inside the
+benchmark process. The process reads its own status after every basin
+store and at search end. A sampler thread also reads it every 5 ms.
+The parent polls RssAnon every 5 ms only after confirming that the
+child has executed the benchmark binary. That external peak is a
+cross-check and never gates. VmHWM and `ru_maxrss` are diagnostics.
+Every row whose internal and external peaks differ by more than
+2 MiB is reported.
+
+Each row carries status and exit code. A non-zero exit, timeout,
+unparsable output or pinning fault is inconclusive. Rows are
+append-only. A superseded row is marked as such and remains present.
+The campaign refuses to start on an unrecognised non-empty row file.
+Each run log is written as `.tmp`, synced, renamed, and read back
+before its sha256 is accepted.
 
 ## Protocol
 
-Seeds 2000 through 2011, twelve seeds. For seed offset k, the order
-(A, A2, B) is rotated left by k mod 3, and an odd k reverses that
-rotation. Each arm occupies each of the three slots four times. The
-three arms of a seed run in that order, then the next seed. Cells run
-one after another in the table order below. No quick mode, no
-warm-up, and no other timed work shares the session.
+Seeds 2000 through 2023, twenty-four seeds. Each seed has the four
+labelled observations `(A, B1, B2, A2)`. For seed offset k, that ABBA
+sequence is rotated left by k modulo four. The rotation, slot and
+observation label are recorded in every row. Each labelled
+observation occupies each slot six times. The four observations of a
+seed run together, then the next seed. Cells run in table order. No
+quick mode, warm-up or other timed work shares the session.
 
 The harness and every driver are pinned to core 0 with `taskset -c
 0`. Every `*_NUM_THREADS` variable is `1` and the child environment is
-otherwise limited to the harness allow-list. Each run logs `taskset
--p` and `Cpus_allowed_list`, and samples peak `RssAnon` from
-`/proc/<pid>/status`.
+otherwise limited to the harness allow-list.
 
 Budgets are the paper list: 4e5 at 38 atoms, 1e6 at 55, 4e6 at 75 and
 above. TIP4P uses 2e6 for every size from 8 through 21 and stops at
@@ -109,39 +86,47 @@ tolerance 0.001 (`best` finite and at or below `reference + 0.001`),
 never read from the `hit` column. A miss, a non-finite energy or an
 inconclusive row is a miss.
 
-A cell passes (`PASS`) only when all four clauses hold. It fails
+A cell passes (`PASS`) only when all five clauses hold. It fails
 (`FAIL`) if any clause fails. A cell with any inconclusive row among
-its 36 is `INCONCLUSIVE` and cannot pass. Its clauses are still
-computed, and (c) and (d) then use the seeds whose three rows are all
-conclusive.
+its 96 observations is `INCONCLUSIVE` and cannot pass. Clauses are
+still computed from seeds whose four observations are conclusive.
 
-(a) Trajectory identity. On every seed the B row equals the A row in
-`evals` (energy calls), `charged` and `calls_to_hit`, and `best_bits`
-is bit-identical. Any difference fails the cell. Every difference of
-B or A2 against A is listed per cell and seed. A2 differences are
-reported and do not gate.
+(a) Trajectory identity. On every seed both B rows and the A2 row
+equal A in `evals`, `charged`, `calls_to_hit` and bit-identical
+`best_bits`. Any difference fails the cell.
 
-(b) No hit loss. No seed where A hits and B misses, and B's hit count
-is not below A's.
+(b) No hit loss. Neither B observation may miss where A hits, and
+neither B hit count may be below A's.
 
 (c) Time outside energy calls per call, `outside_s / max(1,
 charged)`. The upper edge of the B/A bootstrap 95% confidence
 interval of the ratio of type-7 medians (10,000 paired seed
-resamples, seed `20261121`) is at most `max(1.10, U)`, where `U` is
-the upper edge of the A2/A interval computed the same way.
+resamples, fixed seed `20261121`) is at most `max(1.10, U)`, where
+`U` is the upper edge of the A2/A interval. A seed resample keeps its
+two B observations together, so they are not pseudoreplicates.
 
-(d) Peak `RssAnon`. The B/A ratio of type-7 medians is at most
-`max(1.05, A2/A)`, with A2/A the same ratio for A2. `ru_maxrss` is
-reported per cell and never gates.
+(d) Peak RssAnon. The B/A ratio of type-7 medians is at most
+`max(1.05, U)`, where `U` is the upper edge of the A2/A bootstrap 95%
+interval. Both B/A and A2/A use the fixed seed and 10,000
+seed-cluster draws. The point ratio and interval are reported.
 
-Also reported per cell: the outside time per call of each arm and its
-B/A and A2/A median ratios, so the claimed speedup can be checked, and
-wall-clock (`elapsed_s`) B/A and A2/A median ratios. The gate passes
-only if every cell passes.
+(e) The fixed-ring bound execution counter is nonzero in every B row
+and zero in every A and A2 row.
+
+Every row's trajectory and outcome must therefore equal A, no hit may
+be lost, outside time must clear its preregistered band, memory must
+clear its preregistered band, and the new path must execute. The gate
+passes only if every cell passes.
 
 Rows are appended as each arm finishes. `summary.csv`, `hosts.csv` and
 the results section below are generated after the last row by
 `run_gate.py summarize`.
+
+For blj105n38, the report lists each arm and seed in the approximately
+28 MiB and 32 MiB modes and gives a mode-count table. It also lists
+all internal/external peak disagreements over 2 MiB. In particular,
+seed 2002 is retained even if it repeats the earlier 1.5 versus
+22.9 MiB diagnostic; it is not relabelled or discarded.
 
 ## Results
 
