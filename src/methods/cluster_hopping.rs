@@ -1271,6 +1271,8 @@ pub struct Outcome {
     pub stall_escapes: usize,
     /// Stall exits taken through the recorded basin entry.
     pub trail_escapes: usize,
+    /// Stall exits taken by turning a cap, see [`Config::cap_twist`].
+    pub cap_escapes: usize,
     /// Energy gained by those that landed lower than where they left.
     pub stall_escape_gain: f64,
     /// Mean softest eigenvalue over those proposals.
@@ -2993,6 +2995,10 @@ fn stall_arms(cfg: &Config) -> Vec<&'static str> {
             && !cfg.move_library.is_rigid_body()
             && !std::env::var("RESTART_STALL_ARM").is_ok_and(|v| v == "0"))
         .then_some("restart"),
+        (cfg.cap_twist
+            && !cfg.move_library.is_rigid_body()
+            && cfg.move_library.declared_groups().is_none())
+        .then_some("cap"),
     ]
     .into_iter()
     .flatten()
@@ -4721,11 +4727,19 @@ where
     let mut stall_escapes = 0usize;
     let mut stall_escape_gain = 0.0_f64;
     let mut trail_escapes = 0usize;
+    let mut cap_escapes = 0usize;
     // Evaluated screen state of the trial that entered the current basin,
     // kept as the exit point a stalled chain leaves through.
     let mut basin_entry: Option<Array1<f64>> = None;
     let stall_arms = stall_arms(cfg);
     let mut stall_allocator = crate::allocate::DepthAllocator::new(stall_arms.len().max(1));
+    // The call-plateau leave is the climb alone unless the cap turn is on,
+    // and then it is a learned draw between the two.
+    let leave_arms: Vec<usize> = ["climb", "cap"]
+        .iter()
+        .filter_map(|name| stall_arms.iter().position(|arm| arm == name))
+        .collect();
+    let mut leave_allocator = crate::allocate::DepthAllocator::new(leave_arms.len().max(1));
     let mut last_polish_spent = 0usize;
     let mut soft_lambda = 0.0_f64;
     // The escape scale starts at the move library's own amplitude, so a run
@@ -9137,8 +9151,13 @@ where
         // the last one the cap allows. The climb can take up to three, one
         // per lattice growth and one for its activation quench, so each of
         // those rechecks.
+        let mut leave_pick: Option<usize> = None;
         let stall_response = if !hop_room(hops) {
             None
+        } else if directed_leave && leave_arms.len() > 1 {
+            let pick = leave_allocator.select(rng);
+            leave_pick = Some(pick);
+            Some(leave_arms[pick])
         } else if directed_leave {
             stall_arms.iter().position(|arm| *arm == "climb")
         } else if stuck && !stall_arms.is_empty() {
@@ -9233,6 +9252,39 @@ where
                 AdoptionHistory::Fresh,
                 None,
                 Some("stall-trail"),
+                hops
+            );
+            stall_outcome = Some(stalled_from - e);
+        }
+        if stall_response.map(|arm| stall_arms[arm] == "cap") == Some(true) {
+            quiet = 0;
+            longest_quiet = 0;
+            let turned = crate::cap_twist::propose(x.view(), n, rng);
+            let (ec, xc) = relax(ledger, turned.view(), cfg.relax_steps);
+            let cap_gradient = record_quenched_answer(
+                cfg,
+                ledger,
+                &mut grad,
+                ec,
+                xc.view(),
+                &mut unconverged_records,
+            );
+            hops += 1;
+            stall_escapes += 1;
+            cap_escapes += 1;
+            if ec < e {
+                stall_escape_gain += e - ec;
+            }
+            // Taken whatever its energy, as the trail is: the turned cap is
+            // a different stacking, and its value is that it is one.
+            adopt_minimum!(
+                ec,
+                xc,
+                cap_gradient,
+                None,
+                AdoptionHistory::Fresh,
+                None,
+                Some("stall-cap"),
                 hops
             );
             stall_outcome = Some(stalled_from - e);
@@ -9354,6 +9406,9 @@ where
         }
         if cfg.retry_noop_stall_leave && leave_due && stall_outcome.is_some() {
             charged_at_best = ledger.spent();
+        }
+        if let (Some(pick), Some(gain)) = (leave_pick, stall_outcome) {
+            leave_allocator.update(pick, gain);
         }
         if let (Some(arm), Some(gain)) = (stall_response, stall_outcome) {
             stall_allocator.update(arm, gain);
@@ -9865,6 +9920,7 @@ where
         mean_step: radius.mean_step(),
         stall_escapes,
         trail_escapes,
+        cap_escapes,
         stall_escape_gain,
         soft_lambda: if soft_escapes > 0 {
             soft_lambda / soft_escapes as f64
@@ -11102,6 +11158,18 @@ mod tests {
         let rigid = atomic.with_rigid_bodies(crate::potentials::gmin_water_geometry());
         assert!(rigid.restart_on_stall);
         assert!(!stall_arms(&rigid).contains(&"restart"));
+    }
+
+    #[test]
+    fn the_cap_turn_is_a_stall_arm_only_when_asked_for_and_only_for_atoms() {
+        let mut atomic = Config::recommended(6);
+        assert!(!atomic.cap_twist);
+        assert!(!stall_arms(&atomic).contains(&"cap"));
+        atomic.cap_twist = true;
+        assert_eq!(stall_arms(&atomic).last(), Some(&"cap"));
+        let rigid = atomic.with_rigid_bodies(crate::potentials::gmin_water_geometry());
+        assert!(rigid.cap_twist);
+        assert!(!stall_arms(&rigid).contains(&"cap"));
     }
 
     #[test]
