@@ -1,0 +1,13 @@
+seed,step,cause,move_a,move_b,accepted_a,accepted_b,proposal_a,proposal_b,draws_iter_a,draws_iter_b,draws_begin_a,draws_begin_b,draws_end_a,draws_end_b,charged_a,charged_b,steps_a,steps_b
+2000,0,potential calls inside the move,sym,sym,1,1,c0d51787957c27d1,c0d3030d854c6f38,0,0,41,41,41,41,1636,37,6967,21078
+2001,7,rng inside the move,sym,sym,0,1,c0d515aa1d1cfe9e,c0d520d5b7c892eb,235,235,273,273,275,273,28,32,14003,16238
+2002,5,potential calls inside the move,sym,sym,0,1,c0d52dc171df9ce4,c0d53097ccdcc2b6,176,176,214,214,216,216,26,34,14025,17025
+2003,5,rng inside the move,sym,sym,0,1,c0d51c6713b84094,c0d52875a137ab9f,204,204,242,242,244,242,27,30,15629,20342
+2004,0,rng inside the move,sym,sym,1,0,c0d51d10b9837c56,c0d3270492de03d4,0,0,41,41,41,42,2149,35,1549,16372
+2005,3,potential calls inside the move,sym,sym,0,0,c0d5311408d5e70f,c0d530c8204cb96b,142,142,180,180,182,182,26,27,15753,19221
+2006,6,potential calls inside the move,sym,sym,1,1,c0d50bd190674d11,c0d50bd18fcf4afc,223,223,261,261,263,263,339,32,18015,15517
+2007,0,potential calls inside the move,sym,sym,1,1,c0d529d60c43eb0c,c0d514baafefe94a,0,0,38,38,38,38,1705,1376,19870,15110
+2008,4,potential calls inside the move,sym,sym,0,0,c0d51aa7394d899e,c0d50eaf624e9798,172,172,210,210,212,212,30,26,15881,15721
+2009,5,potential calls inside the move,sym,sym,0,0,c0d51872df594dcc,c0d506c708669c3b,176,176,214,214,216,216,416,28,20067,17021
+2010,1,potential calls inside the move,sym,sym,0,1,c0d50be2145bd353,c0d5242eab6903be,31,31,69,69,71,71,26,31,17580,17435
+2011,0,potential calls inside the move,sym,sym,1,1,c0d52be9200aaa6a,c0d51f354f1d77d8,0,0,38,38,38,38,1595,1957,19900,16888
