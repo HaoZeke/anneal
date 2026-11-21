@@ -31,10 +31,13 @@ use eindir_core::{Bounds, Objective};
 use crate::history::History;
 use crate::variant::{boltzmann_in_box, fast_in_box, gsa_in_box};
 
+mod cluster_config;
 mod device;
 mod landfold;
 mod portfolio_peers;
 mod potentials;
+
+use cluster_config::PyClusterConfig;
 
 /// Drop the GIL before native search that may call back into Python.
 ///
@@ -2832,209 +2835,6 @@ fn osa_acceptance_rate(
 ///
 /// Construct with `Config.recommended`, `Config.derived`, or
 /// `Config.for_cluster`. The recommended stack is the measured
-/// default: composed surface relocations, depth-rewarded move
-/// allocation, and tabu on stall.
-#[pyclass(name = "Config")]
-#[derive(Clone)]
-pub struct PyClusterConfig {
-    inner: crate::methods::cluster_hopping::Config,
-    recommended: bool,
-}
-
-#[pymethods]
-impl PyClusterConfig {
-    /// Measured configuration for `n` points.
-    #[staticmethod]
-    fn recommended(n: usize) -> PyResult<Self> {
-        if n < 2 {
-            return Err(PyValueError::new_err("n must be at least 2"));
-        }
-        Ok(Self {
-            inner: crate::methods::cluster_hopping::Config::recommended(n),
-            recommended: true,
-        })
-    }
-
-    /// Communicating paper arm: orbit kernel plus recognition, not recommended.
-    #[staticmethod]
-    fn communicating(n: usize) -> PyResult<Self> {
-        if n < 2 {
-            return Err(PyValueError::new_err("n must be at least 2"));
-        }
-        Ok(Self {
-            inner: crate::methods::cluster_hopping::Config::communicating(n),
-            recommended: false,
-        })
-    }
-
-    /// Recommended flags with the cost-asymmetric screen and budget-window
-    /// temperature. Not the measured configuration.
-    #[staticmethod]
-    fn derived(n: usize) -> PyResult<Self> {
-        if n < 2 {
-            return Err(PyValueError::new_err("n must be at least 2"));
-        }
-        Ok(Self {
-            inner: crate::methods::cluster_hopping::Config::derived(n),
-            recommended: true,
-        })
-    }
-
-    /// Plain Wales-Doye protocol for `n` points (comparison baseline).
-    #[staticmethod]
-    fn for_cluster(n: usize) -> PyResult<Self> {
-        if n < 2 {
-            return Err(PyValueError::new_err("n must be at least 2"));
-        }
-        Ok(Self {
-            inner: crate::methods::cluster_hopping::Config::for_cluster(n),
-            recommended: false,
-        })
-    }
-
-    /// The communicating arm on `n` rigid TIP4P waters.
-    #[staticmethod]
-    fn communicating_tip4p(n: usize) -> PyResult<Self> {
-        if n < 2 {
-            return Err(PyValueError::new_err("n must be at least 2"));
-        }
-        Ok(Self {
-            inner: crate::methods::cluster_hopping::Config::communicating_tip4p(n),
-            recommended: false,
-        })
-    }
-
-    /// The recommended arm on `n` rigid TIP4P waters.
-    #[staticmethod]
-    fn recommended_tip4p(n: usize) -> PyResult<Self> {
-        if n < 2 {
-            return Err(PyValueError::new_err("n must be at least 2"));
-        }
-        Ok(Self {
-            inner: crate::methods::cluster_hopping::Config::recommended_tip4p(n),
-            recommended: true,
-        })
-    }
-
-    /// Points in a state; the state length is `3 * n_points`, or `6 *
-    /// n_points` molecules on a rigid-body configuration.
-    #[getter]
-    fn n_points(&self) -> usize {
-        self.inner.n_points
-    }
-
-    /// Whether the state is rigid bodies: centres, then rotations.
-    #[getter]
-    fn rigid_body(&self) -> bool {
-        self.inner.rigid_body_geometry.is_some()
-    }
-
-    /// How far above the incumbent a screened trial may land.
-    #[getter]
-    fn screen_margin(&self) -> f64 {
-        self.inner.screen_margin
-    }
-
-    /// Whether the energy screen credits the descent its pass left undone.
-    #[getter]
-    fn calibrated_screen(&self) -> bool {
-        self.inner.calibrated_screen
-    }
-
-    /// Whether a full relaxation below the incumbent continues until it
-    /// stops descending.
-    #[getter]
-    fn finish_improving(&self) -> bool {
-        self.inner.finish_improving
-    }
-
-    /// Composed surface-relocation burst arm.
-    #[getter]
-    fn burst_moves(&self) -> bool {
-        matches!(
-            self.inner.move_library,
-            crate::methods::cluster_hopping::MoveLibrary::LeanBurst
-        )
-    }
-
-    /// Discounted Thompson allocation over move arms.
-    #[getter]
-    fn allocate_moves(&self) -> bool {
-        self.inner.allocate_moves
-    }
-
-    /// Reward move arms by the depth they reach.
-    #[getter]
-    fn depth_reward(&self) -> bool {
-        self.inner.depth_reward
-    }
-
-    /// Orbit completion once per newly entered basin.
-    #[getter]
-    fn orbit_complete_on_new(&self) -> bool {
-        self.inner.orbit_complete_on_new
-    }
-
-    /// Shared-history visit policy: `tabu` or `recognition`.
-    #[getter]
-    fn shared_visit_policy(&self) -> &'static str {
-        match self.inner.shared_visit_policy {
-            crate::methods::minima_hopping::SharedVisitPolicy::Tabu => "tabu",
-            crate::methods::minima_hopping::SharedVisitPolicy::Recognition => "recognition",
-        }
-    }
-
-    /// Quarantine the stalled funnel.
-    #[getter]
-    fn tabu_on_stall(&self) -> bool {
-        self.inner.tabu_on_stall
-    }
-
-    /// Cost-asymmetric Bayes-screen threshold, if that screen is on.
-    #[getter]
-    fn bayes_threshold(&self) -> f64 {
-        self.inner.bayes_threshold
-    }
-
-    /// Budget-window temperature rather than fixed \(T=0.8\).
-    #[getter]
-    fn budget_window(&self) -> bool {
-        self.inner.budget_window
-    }
-
-    /// Reject JSON configurations that set removed structure-prior keys.
-    #[staticmethod]
-    fn validate_json(text: &str) -> PyResult<()> {
-        crate::methods::cluster_hopping::Config::validate_json_keys(text)
-            .map_err(|err| PyValueError::new_err(err.to_string()))
-    }
-
-    /// Reject TOML configurations that set removed structure-prior keys.
-    #[staticmethod]
-    fn validate_toml(text: &str) -> PyResult<()> {
-        crate::methods::cluster_hopping::Config::validate_toml_keys(text)
-            .map_err(|err| PyValueError::new_err(err.to_string()))
-    }
-
-    fn __repr__(&self) -> String {
-        if self.inner.bayes_screen && self.inner.budget_window {
-            format!("Config.derived({})", self.inner.n_points)
-        } else if !self.inner.surfaces.is_empty()
-            && self.inner.orbit_complete_on_new
-            && matches!(
-                self.inner.shared_visit_policy,
-                crate::methods::minima_hopping::SharedVisitPolicy::Recognition
-            )
-        {
-            format!("Config.communicating({})", self.inner.n_points)
-        } else if self.recommended {
-            format!("Config.recommended({})", self.inner.n_points)
-        } else {
-            format!("Config.for_cluster({})", self.inner.n_points)
-        }
-    }
-}
-
 /// Work ledger: every objective or gradient evaluation is one charged unit.
 #[pyclass(name = "Ledger")]
 pub struct PyLedger {
@@ -3276,14 +3076,6 @@ fn cluster_bounds(n: usize, dim: usize, length_scale: f64) -> Bounds<f64> {
         Array1::from_elem(dim, extent),
         0.0,
     )
-}
-
-fn recommended_with_scale(n: usize, length_scale: f64) -> crate::methods::cluster_hopping::Config {
-    let mut cfg = crate::methods::cluster_hopping::Config::with_scales(n, length_scale, 1.0);
-    cfg.allocate_moves = true;
-    cfg.return_screen = true;
-    cfg.orbit_complete_on_new = true;
-    cfg
 }
 
 /// Residual archive search on the measured recommended preset.
@@ -3569,6 +3361,7 @@ fn rigid_probe(
     ras = false,
     start = None,
     length_scale = None,
+    energy_scale = None,
     species = None,
     sigmas = None,
     rigid = false,
@@ -3580,6 +3373,7 @@ fn rigid_probe(
     ring_moves = None,
     hold_stereocentres = None,
     measured_energy_scale = None,
+    config = None,
 ))]
 fn cluster_search(
     py: Python<'_>,
@@ -3594,6 +3388,7 @@ fn cluster_search(
     ras: bool,
     start: Option<PyReadonlyArray1<'_, f64>>,
     length_scale: Option<f64>,
+    energy_scale: Option<f64>,
     species: Option<Vec<u32>>,
     sigmas: Option<Vec<f64>>,
     rigid: bool,
@@ -3605,9 +3400,62 @@ fn cluster_search(
     ring_moves: Option<bool>,
     hold_stereocentres: Option<bool>,
     measured_energy_scale: Option<bool>,
+    config: Option<PyRef<'_, PyClusterConfig>>,
 ) -> PyResult<Py<PyDict>> {
     use crate::methods::cluster_hopping::Config;
     use crate::methods::tric_opt::LocalStep;
+
+    if let Some(ref user_cfg) = config {
+        if n < 2 {
+            return Err(PyValueError::new_err("n must be at least 2"));
+        }
+        if budget < 1 {
+            return Err(PyValueError::new_err("budget must be positive"));
+        }
+        if user_cfg.inner.n_points != n {
+            return Err(PyValueError::new_err(format!(
+                "config.n_points = {} must match n = {n}",
+                user_cfg.inner.n_points
+            )));
+        }
+        if derived
+            || communicating
+            || length_scale.is_some()
+            || energy_scale.is_some()
+            || species.is_some()
+            || sigmas.is_some()
+            || rigid
+            || water_sites.is_some()
+            || groups.is_some()
+            || local_step.is_some()
+            || ring_moves.is_some()
+            || hold_stereocentres.is_some()
+            || measured_energy_scale.is_some()
+        {
+            return Err(PyValueError::new_err(
+                "config excludes preset-modifier arguments (derived, communicating, length_scale, \
+                 energy_scale, species, sigmas, rigid, water_sites, groups, local_step, \
+                 ring_moves, hold_stereocentres, measured_energy_scale); mutate config directly",
+            ));
+        }
+        if layout != "block" && layout != "interleaved" {
+            return Err(PyValueError::new_err("layout must be block or interleaved"));
+        }
+        let cfg_rigid = user_cfg.inner.rigid_body_geometry.is_some()
+            || user_cfg.inner.move_library.is_rigid_body();
+        if !cfg_rigid && layout != "block" {
+            return Err(PyValueError::new_err(
+                "interleaved layout is the rigid-body chart",
+            ));
+        }
+        if ras
+            && (cfg_rigid
+                || user_cfg.inner.species.is_some()
+                || user_cfg.inner.move_library.is_molecular())
+        {
+            return Err(PyValueError::new_err("ras is the cartesian archive search"));
+        }
+    }
 
     let local_step = match local_step {
         None => None,
@@ -3671,6 +3519,13 @@ fn cluster_search(
             "length_scale must be finite and positive",
         ));
     }
+    if let Some(escale) = energy_scale
+        && (!escale.is_finite() || escale <= 0.0)
+    {
+        return Err(PyValueError::new_err(
+            "energy_scale must be finite and positive",
+        ));
+    }
     if rigid && species.is_some() {
         return Err(PyValueError::new_err(
             "rigid bodies and species swaps are different charts",
@@ -3682,7 +3537,10 @@ fn cluster_search(
     if layout != "block" && layout != "interleaved" {
         return Err(PyValueError::new_err("layout must be block or interleaved"));
     }
-    if !rigid && layout != "block" {
+    let user_rigid = config.as_ref().is_some_and(|c| {
+        c.inner.rigid_body_geometry.is_some() || c.inner.move_library.is_rigid_body()
+    });
+    if !(rigid || user_rigid) && layout != "block" {
         return Err(PyValueError::new_err(
             "interleaved layout is the rigid-body chart",
         ));
@@ -3700,9 +3558,9 @@ fn cluster_search(
                     sl.len()
                 )));
             }
-            if ras || derived || length_scale.is_some() {
+            if ras || derived || length_scale.is_some() || energy_scale.is_some() {
                 return Err(PyValueError::new_err(
-                    "water_sites excludes ras, derived and length_scale",
+                    "water_sites excludes ras, derived, length_scale and energy_scale",
                 ));
             }
             if rigid || species.is_some() || sigmas.is_some() || layout != "block" {
@@ -3720,8 +3578,8 @@ fn cluster_search(
             )
         }
     };
-    let interleaved = rigid && layout == "interleaved";
-    let rigid_chart = water.is_some() || rigid;
+    let rigid_chart = water.is_some() || rigid || user_rigid;
+    let interleaved = (rigid || user_rigid) && layout == "interleaved";
     let dim = if rigid_chart { 6 * n } else { 3 * n };
     let start = match start {
         Some(start) => {
@@ -3739,15 +3597,25 @@ fn cluster_search(
         None => None,
     };
     let scale = length_scale.unwrap_or(1.0);
-    let molecular = groups.is_some();
-    let stock = (species.is_some() || rigid) && !molecular;
+    let escale = energy_scale.unwrap_or(1.0);
+    let has_custom_scales = length_scale.is_some() || energy_scale.is_some();
+    let molecular = groups.is_some()
+        || config
+            .as_ref()
+            .is_some_and(|c| c.inner.move_library.is_molecular());
+    if molecular && config.is_some() && start.is_none() {
+        return Err(PyValueError::new_err("molecular config needs a start"));
+    }
+    let stock = (species.is_some() || rigid) && !molecular && config.is_none();
     let has_water = water.is_some();
-    let mut cfg = if let Some(groups) = groups {
+    let mut cfg = if let Some(user_cfg) = config {
+        user_cfg.inner.clone()
+    } else if let Some(groups) = groups {
         let labels = species.clone().unwrap_or_default();
         let mut cfg = if recommended {
-            Config::recommended_molecular(labels, groups, 1.0)
+            Config::recommended_molecular(labels, groups, escale)
         } else {
-            Config::for_molecular(labels, groups, 1.0)
+            Config::for_molecular(labels, groups, escale)
         };
         if let Some(step) = local_step {
             cfg.local_step = step;
@@ -3779,13 +3647,13 @@ fn cluster_search(
     } else if derived {
         Config::derived(n)
     } else if recommended {
-        if length_scale.is_some() && !stock {
-            recommended_with_scale(n, scale)
+        if has_custom_scales && !stock {
+            Config::recommended_with_scales(n, scale, escale)
         } else {
             Config::recommended(n)
         }
-    } else if length_scale.is_some() && !stock {
-        Config::with_scales(n, scale, 1.0)
+    } else if has_custom_scales && !stock {
+        Config::for_cluster_with_scales(n, scale, escale)
     } else {
         Config::for_cluster(n)
     };
@@ -3871,7 +3739,7 @@ fn cluster_search(
                     start.view(),
                     seed,
                 )
-            } else if rigid {
+            } else if rigid_chart {
                 let started = Array1::from_vec(rigid_probe(&cfg, seed.wrapping_add(1), false));
                 crate::methods::cluster_search::search_from(
                     pot,
@@ -3912,16 +3780,14 @@ fn cluster_search(
         } else {
             1.0
         };
-        let bounds = if rigid {
+        let bounds = if rigid_chart {
             Bounds::new(
                 Array1::from_elem(dim, -extent),
                 Array1::from_elem(dim, extent),
                 0.0,
             )
-        } else if molecular {
-            cluster_bounds(n, dim, cfg.length_scale)
         } else {
-            cluster_bounds(n, dim, scale)
+            cluster_bounds(n, dim, cfg.length_scale)
         };
         let obj = CallableDiffObjective {
             fn_: obj_fn,
@@ -3960,7 +3826,7 @@ fn cluster_search(
             )
         } else if let Some(start) = start {
             crate::methods::cluster_search::search_from(&obj, &cfg, &mut ledger, start.view(), seed)
-        } else if rigid {
+        } else if rigid_chart {
             let started = Array1::from_vec(rigid_probe(&cfg, seed.wrapping_add(1), false));
             crate::methods::cluster_search::search_from(
                 &obj,

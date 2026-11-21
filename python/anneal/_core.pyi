@@ -320,45 +320,257 @@ class Config:
     @staticmethod
     def recommended(n: int) -> Config: ...
     @staticmethod
+    def recommended_with_scales(
+        n: int,
+        length_scale: float = 1.0,
+        energy_scale: float = 1.0,
+    ) -> Config: ...
+    @staticmethod
+    def recommended_for_pair(
+        n: int,
+        kind: str = "lj",
+        rho: float | None = None,
+    ) -> Config: ...
+    @staticmethod
     def communicating(n: int) -> Config: ...
     @staticmethod
     def derived(n: int) -> Config: ...
     @staticmethod
     def for_cluster(n: int) -> Config: ...
     @staticmethod
+    def for_cluster_with_scales(
+        n: int,
+        length_scale: float = 1.0,
+        energy_scale: float = 1.0,
+    ) -> Config: ...
+    @staticmethod
+    def for_cluster_dual_core(n: int) -> Config: ...
+    @staticmethod
+    def with_scales(
+        n: int,
+        length_scale: float = 1.0,
+        energy_scale: float = 1.0,
+    ) -> Config: ...
+    @staticmethod
+    def packing_superbasin(n: int) -> Config: ...
+    @staticmethod
+    def for_tip4p(n: int) -> Config: ...
+    @staticmethod
     def communicating_tip4p(n: int) -> Config: ...
     @staticmethod
     def recommended_tip4p(n: int) -> Config: ...
     @staticmethod
+    def for_molecular(
+        species: Sequence[int],
+        groups: Sequence[Sequence[int]],
+        energy_scale: float = 1.0,
+    ) -> Config: ...
+    @staticmethod
+    def recommended_molecular(
+        species: Sequence[int],
+        groups: Sequence[Sequence[int]],
+        energy_scale: float = 1.0,
+    ) -> Config: ...
+    def with_species(
+        self,
+        species: Sequence[int],
+        sigmas: Sequence[float] | None = None,
+    ) -> Config: ...
+    def with_dual_orbit_core(self) -> Config: ...
+    def with_flexible_molecules(
+        self,
+        start: npt.NDArray[np.float64],
+    ) -> Config | None: ...
+    def copy(self) -> Config: ...
+    def monoatomic(self) -> bool: ...
+    def packing_cna_applies(self) -> bool: ...
+    def start_radius(self) -> float: ...
+    def resolved_json(self) -> str: ...
+    def resolved_sha256(self) -> str: ...
+    @staticmethod
     def validate_json(text: str) -> None: ...
     @staticmethod
     def validate_toml(text: str) -> None: ...
+    @staticmethod
+    def check_removed_env() -> None: ...
+    @staticmethod
+    def parse_prior_switches(spec: str) -> dict[str, bool]: ...
     @property
     def n_points(self) -> int: ...
     @property
     def rigid_body(self) -> bool: ...
+    burst_moves: bool
+    move_library: str
+    length_scale: float
+    energy_scale: float
+    neighbour_cutoff: float
+    symmetrise_cutoff: float
+    container: float
+    min_separation: float
+    pair_range: tuple[float, float] | None
+    call_floor: float | None
+    call_floor_elements: list[int] | None
+    group_cutoff: float
+    covalent_cutoff: float
+    bond_tolerance: float
+    species: list[int] | None
+    species_sigma: list[float] | None
+    frozen: list[bool] | None
+    active_region: tuple[list[int], int] | None
+    temperature: float
+    bias_height: float
+    bias_gamma: float
+    basin_stride: int
+    merge_radius: float
+    keying: str
+    keying_sigma: float
+    morphology_scale: float
+    shape_keyed: bool
+    theta: float
+    budget_window: bool
+    adaptive_height: bool
+    height_revisits: float
+    calibrate_radius: bool
+    calibrate_quantile: float
+    calibrate_warmup: int
+    anneal_diversity: bool
+    diversity_floor: float
+    flat_histogram: bool
+    flat_sweep: int
+    flat_quantile: float
+    statistical_temperature: bool
+    energy_bias: bool
+    plateau_heat: bool
+    incumbent_gap: float
+    measured_energy_scale: bool
+    long_ranged: bool
+    allocate_moves: bool
+    depth_reward: bool
+    arm_selection: str
+    novel_reward: bool
+    improvement_rewards: bool
+    contextual_moves: bool
+    contextual_floor: float
+    displacement_only: bool
+    angular_moves: bool
+    angular_target: float
+    energy_lattice: bool
+    construct_width: int
+    reoccupy_interval: int
+    prior_soap: bool
+    soap_mode: str
+    soap_class_residual: bool
+    soap_repel: bool
+    ring_moves: bool
+    hold_stereocentres: bool
+    homotop_descent: bool
+    homotop_ranked: bool
+    homotop_window: bool
+    homotop_reorder: bool
+    general_collective: bool
+    soft_perturb: bool
+    soft_modes: int
+    soft_steps: int
+    cov_perturb: bool
+    relax_steps: int
+    screen_steps: int
+    screen_margin: float
+    calibrated_screen: bool
+    bayes_screen: bool
+    bayes_threshold: float
+    bayes_exploration: float
+    bayes_warmup: int
+    adaptive_screen: bool
+    probe_screen: bool
+    quench_warmup: int
+    quench_confidence: float
+    return_screen: bool
+    return_polish: int
+    return_polish_after: int
+    finish_improving: bool
+    quench_once: bool
+    record_gradient: float
+    answer_gradient: float
+    polish_records: int
+    local_step: str
+    precondition_bonds: bool
+    capped_lindh_quench: bool
+    staged_quench: bool
+    settle_iters: int
+    delayed_acceptance: bool
+    surrogate_tolerance: float
+    max_hops: int | None
+    target_energy: float | None
+    witness_tripleton_ceiling: bool
+    minima_hopping: bool
+    md_escape: bool
+    md_escape_dt: float
+    md_escape_kinetic: float
+    md_escape_minima: int
+    md_escape_max_steps: int
+    md_escape_soften: int
+    escape_on_stall: bool
+    retry_noop_stall_leave: bool
+    align_directed_stall_source: bool
+    escape_lanczos_steps: int
+    escape_epsilon: float
+    escape_amplitude: float
+    escape_overshoot: float
+    escape_max_climb: int
+    escape_stall_patience: int
+    escape_stall_factor: float
+    trail_on_stall: bool
+    tabu_on_stall: bool
+    tabu_capacity: int
+    restart_on_stall: bool
+    restart_patience: int
+    branch_on_stall: bool
+    jump_on_stall: bool
+    jump_patience: int
+    jump_steps: int
+    jump_step: float
+    path_on_stall: bool
+    stall_patience: int
+    path_images: int
+    symmetrise_on_stall: bool
+    symmetrise_patience: int
+    point_symmetrise: bool
+    point_symmetrise_on_new: bool
+    point_symmetrise_every_accept: bool
+    symmetrise_core_fraction: float
+    symmetry_tolerance: float
+    symmetry_merge_radius: float
+    orbit_complete_on_new: bool
+    orbit_arm: bool
+    orbit_core: str
     @property
-    def screen_margin(self) -> float: ...
-    @property
-    def calibrated_screen(self) -> bool: ...
-    @property
-    def finish_improving(self) -> bool: ...
-    @property
-    def burst_moves(self) -> bool: ...
-    @property
-    def allocate_moves(self) -> bool: ...
-    @property
-    def depth_reward(self) -> bool: ...
-    @property
-    def orbit_complete_on_new(self) -> bool: ...
-    @property
-    def shared_visit_policy(self) -> str: ...
-    @property
-    def tabu_on_stall(self) -> bool: ...
-    @property
-    def bayes_threshold(self) -> float: ...
-    @property
-    def budget_window(self) -> bool: ...
+    def continuous_symmetry(self) -> dict[str, Any]: ...
+    @continuous_symmetry.setter
+    def continuous_symmetry(
+        self,
+        value: str | tuple[str, int] | dict[str, Any],
+    ) -> None: ...
+    surface_hop_on_best: bool
+    replicas: int
+    swap_period: int
+    bias_by_rung: bool
+    ladder_top: float
+    ladder_mode: str
+    ladder_window: int
+    ladder_pilot: int
+    ladder_target_accept: float
+    shared_deposits: int
+    shared_visit_policy: str
+    exchange_metropolis: bool
+    trace_quenched: bool
+    energy_trace: bool
+    track_funnels: bool
+    funnel_period: int
+    superbasin_report: bool
+    superbasin_escape: bool
+    superbasin_period: int
+    superbasin_quotient: bool
+    superbasin_features: bool
 
 class Ledger:
     def __init__(self, budget: int) -> None: ...
@@ -727,6 +939,7 @@ def cluster_search(
     ras: bool = False,
     start: npt.NDArray[np.float64] | None = None,
     length_scale: float | None = None,
+    energy_scale: float | None = None,
     species: list[int] | None = None,
     sigmas: list[float] | None = None,
     rigid: bool = False,
@@ -738,6 +951,7 @@ def cluster_search(
     ring_moves: bool | None = None,
     hold_stereocentres: bool | None = None,
     measured_energy_scale: bool | None = None,
+    config: Config | None = None,
 ) -> dict[str, Any]: ...
 def quench(
     fg_fn: Callable[[npt.NDArray[np.float64]], tuple[float, Sequence[float]]] | NativeClusterPotential,

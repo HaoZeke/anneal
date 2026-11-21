@@ -155,6 +155,7 @@ def cluster_search(
     ras: bool = False,
     start: npt.ArrayLike | None = None,
     length_scale: float | None = None,
+    energy_scale: float | None = None,
     species: Sequence[int] | None = None,
     sigmas: npt.ArrayLike | None = None,
     rigid: bool = False,
@@ -166,6 +167,7 @@ def cluster_search(
     ring_moves: bool | None = None,
     hold_stereocentres: bool | None = None,
     measured_energy_scale: bool | None = None,
+    config: Config | None = None,
 ) -> dict[str, Any]: ...
 def rigid_from_ohh(cartesian: npt.ArrayLike) -> npt.NDArray[np.float64]: ...
 def energy_ohh(cartesian: npt.ArrayLike) -> float: ...

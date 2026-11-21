@@ -20,6 +20,18 @@ or =quench(pot, x0, gtol)=, converts to =PyObjective= via
 =pot.to_objective()=, and plugs into ASE =Atoms= via
 =anneal.ase.PotentialCalculator=.
 
+=anneal.Config= exposes every Rust =cluster_hopping::Config= preset
+(=recommended_with_scales=, =recommended_for_pair=,
+=for_cluster_with_scales=, =for_cluster_dual_core=, =with_scales=,
+=packing_superbasin=, =for_tip4p=, =for_molecular=,
+=recommended_molecular=), builder and inspection methods (=with_species=,
+=with_dual_orbit_core=, =with_flexible_molecules=, =resolved_json=,
+=resolved_sha256=, =check_removed_env=, =parse_prior_switches=), and
+read/write attributes for every active configuration field.
+=cluster_search= accepts =energy_scale= and a pre-configured =config=
+instance directly, and delegates scaled presets to
+=Config::recommended_with_scales= and =Config::for_cluster_with_scales=.
+
 * C and C++ (cargo-c)
 
 The Rust crate produces a =cdylib=, =staticlib=, generated header =anneal-core.h=, and pkg-config metadata =anneal-core.pc= via cargo-c.

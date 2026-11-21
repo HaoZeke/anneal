@@ -266,6 +266,7 @@ def cluster_search(
     ras: bool = False,
     start=None,
     length_scale: float | None = None,
+    energy_scale: float | None = None,
     species=None,
     sigmas=None,
     rigid: bool = False,
@@ -277,6 +278,7 @@ def cluster_search(
     ring_moves: bool | None = None,
     hold_stereocentres: bool | None = None,
     measured_energy_scale: bool | None = None,
+    config: Config | None = None,
 ):
     """Run the measured cluster-search layer.
 
@@ -384,6 +386,8 @@ def cluster_search(
         kwargs["start"] = start_arr
     if length_scale is not None:
         kwargs["length_scale"] = float(length_scale)
+    if energy_scale is not None:
+        kwargs["energy_scale"] = float(energy_scale)
     if species is not None:
         kwargs["species"] = [int(value) for value in species]
     if sigmas is not None:
@@ -402,6 +406,8 @@ def cluster_search(
         kwargs["hold_stereocentres"] = bool(hold_stereocentres)
     if measured_energy_scale is not None:
         kwargs["measured_energy_scale"] = bool(measured_energy_scale)
+    if config is not None:
+        kwargs["config"] = config
     out = _core_cluster_search(*args, **kwargs)
     out["best"] = np.asarray(out["best"], dtype=np.float64)
     return out
