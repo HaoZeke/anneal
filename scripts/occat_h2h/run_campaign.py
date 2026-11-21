@@ -27,6 +27,11 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+from machine_provenance import (  # noqa: E402
+    aggregate_machine_columns,
+    machine_columns,
+    require_csv_schema,
+)
 
 HIT_TOL = DEFAULT_HIT_TOL
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
@@ -89,6 +94,8 @@ SEED_FIELDS = [
     "outside_s",
     "code_revision",
     "host",
+    "machine_id",
+    "cpu_model",
 ]
 
 GMIN_SOURCES = [
@@ -572,6 +579,10 @@ def summarise(rows: list[dict[str, str]], out: Path, tests: Path) -> None:
         "pot_median_s",
         "outside_median_s",
         "wall_ratio",
+        "code_revision",
+        "host",
+        "machine_id",
+        "cpu_model",
     ]
     test_fields = [
         "system",
@@ -589,6 +600,10 @@ def summarise(rows: list[dict[str, str]], out: Path, tests: Path) -> None:
         "mannwhitney_wall_gmin",
         "mannwhitney_pot_gmin",
         "mannwhitney_outside_gmin",
+        "code_revision",
+        "host",
+        "machine_id",
+        "cpu_model",
     ]
     summary_rows = []
     test_rows = []
@@ -616,6 +631,11 @@ def summarise(rows: list[dict[str, str]], out: Path, tests: Path) -> None:
                     "pot_median_s": f"{median([float(row['pot_s']) for row in group]):.6f}",
                     "outside_median_s": f"{median([float(row['outside_s']) for row in group]):.6f}",
                     "wall_ratio": f"{(wall / anneal_wall) if anneal_wall else float('nan'):.6f}",
+                    "code_revision": ";".join(
+                        sorted({row["code_revision"] for row in group})
+                    ),
+                    "host": ";".join(sorted({row["host"] for row in group})),
+                    **aggregate_machine_columns(group),
                 }
             )
         common = None
@@ -652,6 +672,27 @@ def summarise(rows: list[dict[str, str]], out: Path, tests: Path) -> None:
                     "mannwhitney_wall_gmin": f"{mann_whitney(col('anneal','wall_s'), col('gmin','wall_s')):.6g}",
                     "mannwhitney_pot_gmin": f"{mann_whitney(col('anneal','pot_s'), col('gmin','pot_s')):.6g}",
                     "mannwhitney_outside_gmin": f"{mann_whitney(col('anneal','outside_s'), col('gmin','outside_s')):.6g}",
+                    "code_revision": ";".join(
+                        sorted(
+                            {
+                                row["code_revision"]
+                                for group in matched.values()
+                                for row in group
+                            }
+                        )
+                    ),
+                    "host": ";".join(
+                        sorted(
+                            {
+                                row["host"]
+                                for group in matched.values()
+                                for row in group
+                            }
+                        )
+                    ),
+                    **aggregate_machine_columns(
+                        [row for group in matched.values() for row in group]
+                    ),
                 }
             )
     write_csv(out, summary_fields, summary_rows)
@@ -685,13 +726,20 @@ def one(
 def campaign(seeds_path: Path, summary_path: Path, tests_path: Path, work_root: Path) -> None:
     if socket.gethostname() != "bench":
         raise SystemExit("refusing to run unless the hostname is bench")
-    stored = load_gmin()
+    machine = machine_columns()
+    stored = {
+        key: row
+        for key, row in load_gmin().items()
+        if row.get("machine_id") == machine["machine_id"]
+        and row.get("cpu_model") == machine["cpu_model"]
+    }
     revision = subprocess.check_output(
         ["git", "-C", str(ROOT), "-c", "core.hooksPath=/dev/null", "rev-parse", "HEAD"],
         text=True,
     ).strip()
     host = socket.gethostname()
     rows: list[dict[str, str]] = []
+    require_csv_schema(seeds_path, SEED_FIELDS)
     if seeds_path.is_file():
         with seeds_path.open() as handle:
             rows.extend(csv.DictReader(handle))
@@ -704,6 +752,7 @@ def campaign(seeds_path: Path, summary_path: Path, tests_path: Path, work_root: 
                 row = one(system, seed, code, stored, work_root)
                 row["code_revision"] = revision
                 row["host"] = host
+                row.update(machine)
                 rows.append(row)
                 done.add((system, code, seed))
                 write_seeds(seeds_path, rows)
@@ -721,6 +770,7 @@ def campaign(seeds_path: Path, summary_path: Path, tests_path: Path, work_root: 
                     row = one(system, seed, code, stored, work_root)
                     row["code_revision"] = revision
                     row["host"] = host
+                    row.update(machine)
                     rows.append(row)
                     done.add((system, code, seed))
                     write_seeds(seeds_path, rows)

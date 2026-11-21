@@ -6,11 +6,15 @@ import importlib.util
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+from machine_provenance import MACHINE_ID_SALT  # noqa: E402
+
 RUNNER = ROOT / "scripts" / "gmin_h2h" / "run_campaign.py"
 SPEC = importlib.util.spec_from_file_location("gmin_h2h_campaign", RUNNER)
 campaign = importlib.util.module_from_spec(SPEC)
@@ -27,7 +31,7 @@ def test_machine_provenance_prefers_machine_id_and_records_cpu(tmp_path):
 
     digest, cpu = campaign.machine_provenance(machine_id, product_uuid, cpuinfo)
 
-    expected = hashlib.sha256(campaign.MACHINE_ID_SALT + b"machine-a").hexdigest()
+    expected = hashlib.sha256(MACHINE_ID_SALT + b"machine-a").hexdigest()
     assert digest == expected
     assert cpu == "Example CPU 123"
 
@@ -41,7 +45,7 @@ def test_machine_provenance_falls_back_to_dmi_uuid(tmp_path):
 
     digest, cpu = campaign.machine_provenance(missing, product_uuid, cpuinfo)
 
-    expected = hashlib.sha256(campaign.MACHINE_ID_SALT + b"dmi-machine").hexdigest()
+    expected = hashlib.sha256(MACHINE_ID_SALT + b"dmi-machine").hexdigest()
     assert digest == expected
     assert cpu == "Example Board"
 

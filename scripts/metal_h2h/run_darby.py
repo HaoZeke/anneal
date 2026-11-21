@@ -30,6 +30,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+from machine_provenance import machine_columns  # noqa: E402
 
 PAPER_BUDGETS = {
     "au38": 400_000,
@@ -97,6 +98,8 @@ SUMMARY_FIELDS = (
     "gmin_revision",
     "code_revision",
     "host",
+    "machine_id",
+    "cpu_model",
 )
 
 
@@ -374,6 +377,7 @@ def summarise(rows: list[dict], head: str, revision: str) -> list[dict[str, str]
                     "gmin_revision": revision,
                     "code_revision": head if arm == "anneal" else revision,
                     "host": os.uname().nodename,
+                    **machine_columns(),
                 }
             )
     return out

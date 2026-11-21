@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
 import os
 import random
 import subprocess
@@ -32,6 +31,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+from machine_provenance import machine_provenance  # noqa: E402
 
 PAPER_BUDGETS = {
     98: 4_000_000,
@@ -45,10 +45,6 @@ SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
 ARMS = ("anneal", "gmin")
 SCHEDULE_SEED = 20261111
 HIT_TOL = DEFAULT_HIT_TOL
-MACHINE_ID_SALT = b"anneal-bench-machine-id-v1\0"
-MACHINE_ID_PATH = Path("/etc/machine-id")
-PRODUCT_UUID_PATH = Path("/sys/class/dmi/id/product_uuid")
-CPUINFO_PATH = Path("/proc/cpuinfo")
 
 SUMMARY_FIELDS = [
     "system",
@@ -149,39 +145,6 @@ def load_source(path: Path) -> tuple[str, str]:
     if not url or not revision:
         raise SystemExit(f"{path} has no url and revision")
     return url, revision
-
-
-def machine_provenance(
-    machine_id_path: Path = MACHINE_ID_PATH,
-    product_uuid_path: Path = PRODUCT_UUID_PATH,
-    cpuinfo_path: Path = CPUINFO_PATH,
-) -> tuple[str, str]:
-    """Return the salted physical-machine digest and CPU model."""
-    identifier = ""
-    for path in (machine_id_path, product_uuid_path):
-        if path.is_file():
-            identifier = path.read_text().strip()
-            if identifier:
-                break
-    if not identifier:
-        raise RuntimeError("neither /etc/machine-id nor the DMI product_uuid is available")
-
-    cpu_model = ""
-    if cpuinfo_path.is_file():
-        fields = {}
-        for line in cpuinfo_path.read_text(errors="replace").splitlines():
-            if ":" in line:
-                key, value = line.split(":", 1)
-                fields.setdefault(key.strip(), " ".join(value.split()))
-        for key in ("model name", "Model", "Processor", "Hardware"):
-            if fields.get(key):
-                cpu_model = fields[key]
-                break
-    if not cpu_model:
-        raise RuntimeError("/proc/cpuinfo has no CPU model string")
-
-    digest = hashlib.sha256(MACHINE_ID_SALT + identifier.encode()).hexdigest()
-    return digest, cpu_model
 
 
 def binary_budget(binary: Path, n: int) -> tuple[int, float]:

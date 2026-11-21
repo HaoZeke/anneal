@@ -54,7 +54,7 @@ SI = "paper/jctc/si.tex"
 
 REVISION_COLUMNS = ("code_revision", "anneal_head", "release_revision", "head", "harness_revision")
 HOST_COLUMNS = ("host",)
-MACHINE_ID_COLUMNS = ("machine_id",)
+MACHINE_PROVENANCE_COLUMNS = frozenset(("machine_id", "cpu_model"))
 # Revisions of other codes. The GMIN build scripts refuse a tarball whose SVNREV differs.
 EXTERNAL_REVISIONS = {"aac1548a8aec13b53ad12a8d6904625081685d2e": "GMIN source/SVNREV"}
 # Local revisions that rows cite, each with the pushed commit it was rebuilt as.
@@ -2460,7 +2460,7 @@ def provenance(audit: Audit) -> dict[str, str]:
         columns = set(rows[0]) if rows else set()
         revs = [c for c in REVISION_COLUMNS if c in columns]
         hosts = [c for c in HOST_COLUMNS if c in columns]
-        machines = [c for c in MACHINE_ID_COLUMNS if c in columns]
+        machines = MACHINE_PROVENANCE_COLUMNS & columns
         problems = []
         if not revs and not hosts:
             problems.append("revision and host unrecorded (no revision or host column)")
@@ -2473,17 +2473,27 @@ def provenance(audit: Audit) -> dict[str, str]:
                 what = "unrecorded" if column in revs else "empty or unknown"
                 problems.append(f"{column} {what} on some rows")
         if machines:
-            if "cpu_model" not in columns:
-                problems.append("machine_id recorded; no cpu_model column")
+            if machines != MACHINE_PROVENANCE_COLUMNS:
+                missing = sorted(MACHINE_PROVENANCE_COLUMNS - machines)
+                problems.append(
+                    f"{' and '.join(sorted(machines))} recorded; "
+                    f"no {' or '.join(missing)} column"
+                )
             elif any(not r["cpu_model"].strip() for r in rows):
                 problems.append("cpu_model empty on some rows")
-            if any(not re.fullmatch(r"[0-9a-f]{64}", r["machine_id"].strip()) for r in rows):
+            if "machine_id" in columns and any(
+                not all(
+                    re.fullmatch(r"[0-9a-f]{64}", value)
+                    for value in r["machine_id"].strip().split(";")
+                )
+                for r in rows
+            ):
                 problems.append("machine_id is not a salted sha256 on some rows")
         for column in revs:
             for r in rows:
-                value = r[column].strip()
-                if re.fullmatch(r"[0-9a-f]{7,40}", value) and value not in EXTERNAL_REVISIONS:
-                    revisions[value].add(path)
+                for value in r[column].strip().split(";"):
+                    if re.fullmatch(r"[0-9a-f]{7,40}", value) and value not in EXTERNAL_REVISIONS:
+                        revisions[value].add(path)
         if problems:
             gaps[path] = "; ".join(problems)
     names = sorted(revisions)

@@ -35,6 +35,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+from machine_provenance import machine_columns, require_csv_schema  # noqa: E402
 
 BUDGET = 2_000_000
 HIT_TOL = DEFAULT_HIT_TOL
@@ -220,6 +221,7 @@ def verify(point: Path, gmin: Path, verify_data: Path, gm_dir: Path, out: Path, 
     TIP4P parameters and energy units.
     """
     rows = []
+    machine = machine_columns()
     run = work / "verify"
     run.mkdir(parents=True, exist_ok=True)
     for n, ref in CAMBRIDGE.items():
@@ -233,7 +235,7 @@ def verify(point: Path, gmin: Path, verify_data: Path, gm_dir: Path, out: Path, 
                      "anneal_kj": f"{anneal_e:.10f}", "gmin_kj": f"{gmin_e:.10f}",
                      "anneal_minus_ref": f"{anneal_e - ref:.2e}",
                      "gmin_minus_ref": f"{gmin_e - ref:.2e}",
-                     "reproduced": int(ok)})
+                     "reproduced": int(ok), **machine})
         print(f"verify n={n} ref={ref:.6f} anneal={anneal_e:.6f} gmin={gmin_e:.6f} ok={ok}", flush=True)
         if not ok:
             raise RuntimeError(f"n={n} not reproduced: anneal {anneal_e}, gmin {gmin_e}, ref {ref}")
@@ -335,6 +337,7 @@ def main() -> int:
     args.work.mkdir(parents=True, exist_ok=True)
     head, revision = read_provenance(args.head_file, args.gmin_source)
     host = os.uname().nodename
+    machine = machine_columns()
     whole = args.size is None and args.seed is None
     if whole and args.point and args.verify_data and args.gm_dir and args.verify_out:
         verify(args.point, args.gmin, args.verify_data, args.gm_dir, args.verify_out, args.work)
@@ -350,9 +353,10 @@ def main() -> int:
             start = args.work / f"tip4p{n}-s{seed}.start.gmin"
             print(f"gmin n={n} seed={seed}", flush=True)
             gmin = run_gmin(args.gmin, args.data, n, seed, start, args.work)
-            anneal.update(code_revision=head, host=host)
-            gmin.update(code_revision=revision, host=host)
+            anneal.update(code_revision=head, host=host, **machine)
+            gmin.update(code_revision=revision, host=host, **machine)
             rows.extend([anneal, gmin])
+            require_csv_schema(args.rows, sorted({*anneal, *gmin}))
             with args.rows.open("a") as handle:
                 writer = csv.DictWriter(handle, fieldnames=sorted({*anneal, *gmin}))
                 if handle.tell() == 0:
@@ -360,7 +364,10 @@ def main() -> int:
                 writer.writerow(anneal)
                 writer.writerow(gmin)
     if whole:
-        summary = [dict(row, code_revision=head, host=host) for row in summarise(rows)]
+        summary = [
+            dict(row, code_revision=head, host=host, **machine)
+            for row in summarise(rows)
+        ]
         with args.summary.open("w") as handle:
             writer = csv.DictWriter(handle, fieldnames=list(summary[0].keys()))
             writer.writeheader()
