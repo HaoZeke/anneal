@@ -1435,6 +1435,58 @@ mod tests {
                 }
                 s
             }
+
+            /// The status and message of a central Hessian-vector product
+            /// and of a central dense Hessian.
+            fn derivatives(&self) -> [(rgpot_status_t, String); 2] {
+                use crate::c_api::hessian::rgpot_potential_hessian;
+                use crate::c_api::hvp::rgpot_potential_hvp_resolved;
+                use crate::hessian::rgpot_hessian_scheme_t;
+                use crate::hvp::rgpot_hvp_scheme_t;
+
+                let mut pos = [0.0f64, 0.0, 0.0, 1.0, 0.0, 0.0];
+                let mut atm = [1i32, 1];
+                let mut box_ = [10.0f64, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0];
+                let input = rgpot_force_input_t {
+                    positions: unsafe { rgpot_tensor_cpu_f64_2d(pos.as_mut_ptr(), 2, 3) },
+                    atomic_numbers: unsafe { rgpot_tensor_cpu_i32_1d(atm.as_mut_ptr(), 2) },
+                    box_matrix: unsafe { rgpot_tensor_cpu_f64_matrix3(box_.as_mut_ptr()) },
+                };
+                let direction = [1.0f64, 0.0, 0.0, 0.0, 0.0, 0.0];
+                let mut hv = [0.0f64; 6];
+                let mut hvp_used = rgpot_hvp_scheme_t::RGPOT_HVP_AUTO;
+                let hvp = unsafe {
+                    rgpot_potential_hvp_resolved(
+                        self.pot,
+                        &input,
+                        direction.as_ptr(),
+                        0.0,
+                        rgpot_hvp_scheme_t::RGPOT_HVP_CENTRAL as i32,
+                        hv.as_mut_ptr(),
+                        &mut hvp_used,
+                    )
+                };
+                let hvp = (hvp, last_error());
+                let mut h = [0.0f64; 36];
+                let mut hessian_used = rgpot_hessian_scheme_t::RGPOT_HESSIAN_CENTRAL;
+                let hessian = unsafe {
+                    rgpot_potential_hessian(
+                        self.pot,
+                        &input,
+                        0.0,
+                        rgpot_hessian_scheme_t::RGPOT_HESSIAN_CENTRAL as i32,
+                        h.as_mut_ptr(),
+                        &mut hessian_used,
+                    )
+                };
+                let hessian = (hessian, last_error());
+                unsafe {
+                    rgpot_tensor_free(input.positions);
+                    rgpot_tensor_free(input.atomic_numbers);
+                    rgpot_tensor_free(input.box_matrix);
+                }
+                [hvp, hessian]
+            }
         }
 
         impl Drop for Handle {
@@ -1493,6 +1545,10 @@ mod tests {
                 "{}",
                 last_error()
             );
+            for (status, message) in h.derivatives() {
+                assert_eq!(status, rgpot_status_t::RGPOT_INVALID_PARAMETER);
+                assert!(message.starts_with("peer refused:"), "{message}");
+            }
             assert_eq!(*h.calls, 0, "no callback may run for a refused peer");
         }
 
