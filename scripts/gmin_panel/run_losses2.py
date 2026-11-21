@@ -26,11 +26,44 @@ import sys
 import time
 from pathlib import Path
 
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "machine_provenance.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import run_panel as panel  # noqa: E402
+from machine_provenance import (  # noqa: E402
+    aggregate_machine_columns,
+    machine_columns,
+    machine_fieldnames,
+    require_csv_schema,
+)
 
 PAIR_ENV = {"H2H_PAIR_SCALE": "1"}
 CODES = ("baseline", "fix2", "gmin")
+SUMMARY_FIELDS = [
+    "system",
+    "budget",
+    "left",
+    "right",
+    "left_hits",
+    "left_n",
+    "right_hits",
+    "right_n",
+    "fisher_p",
+    "left_evals_median",
+    "right_evals_median",
+    "mannwhitney_p_calls",
+    "left_wall_median_s",
+    "right_wall_median_s",
+    "left_pot_median_s",
+    "right_pot_median_s",
+    "left_outside_median_s",
+    "right_outside_median_s",
+    "base_revision",
+    "code_revision",
+    "host",
+]
 
 
 def output_dir(path: Path, root: Path) -> Path:
@@ -70,7 +103,13 @@ def selected(rows: list[dict[str, str]], system: str, code: str, revision: str, 
             and int(row["seed"]) in panel.SEEDS
         ):
             found[int(row["seed"])] = row
-    return [found[seed] for seed in sorted(found)]
+    ordered = [found[seed] for seed in sorted(found)]
+    revisions = {row["code_revision"] for row in ordered}
+    if len(revisions) > 1:
+        raise RuntimeError(
+            f"{system} {code}: mixed code_revision values {sorted(revisions)}"
+        )
+    return ordered
 
 
 def comparison(system: str, left_name: str, right_name: str, left: list[dict[str, str]], right: list[dict[str, str]],
@@ -81,6 +120,7 @@ def comparison(system: str, left_name: str, right_name: str, left: list[dict[str
     left_hits = sum(row["hit"] == "1" for row in left)
     right_hits = sum(row["hit"] == "1" for row in right)
     _u, p_calls = panel.mann_whitney(nums(left, "evals_to_hit"), nums(right, "evals_to_hit"))
+    both = left + right
     return {
         "system": system,
         "budget": str(panel.PAPER_BUDGETS[system]),
@@ -102,7 +142,8 @@ def comparison(system: str, left_name: str, right_name: str, left: list[dict[str
         "right_outside_median_s": f"{panel.type7(nums(right, 'outside_s'), 0.5):.6f}",
         "base_revision": base,
         "code_revision": revision,
-        "host": " ".join(sorted({row["host"] for row in left + right})),
+        "host": " ".join(sorted({row["host"] for row in both})),
+        **aggregate_machine_columns(both),
     }
 
 
@@ -121,7 +162,17 @@ def summarise(rows: list[dict[str, str]], revision: str, base: str) -> list[dict
 
 def write_summary(path: Path, rows: list[dict[str, str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fields = list(rows[0]) if rows else ["system"]
+    fields = (
+        machine_fieldnames(SUMMARY_FIELDS)
+        if not rows or "machine_id" in rows[0]
+        else SUMMARY_FIELDS
+    )
+    for row in rows:
+        if "machine_id" in fields and (
+            not str(row.get("machine_id", "")).strip()
+            or not str(row.get("cpu_model", "")).strip()
+        ):
+            raise ValueError("summary row is missing machine_id or cpu_model")
     with path.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
         writer.writeheader()
@@ -195,7 +246,7 @@ def main(argv: list[str]) -> int:
         if head != revision:
             raise SystemExit(f"{tree} is at {head}, not {revision}")
     source = dict(line.split("=", 1) for line in args.gmin_source.read_text().splitlines() if "=" in line)
-    gmin_revision = panel.read_svnrev(args.svnrev)
+    gmin_revision = panel.read_built_revision(args.svnrev, args.gmin_source)
     if source.get("svnrev") != gmin_revision:
         raise SystemExit(f"{args.gmin_source} does not describe {args.svnrev}")
     if source.get("tarball_sha256") != panel.TARBALL_SHA256:
@@ -206,12 +257,13 @@ def main(argv: list[str]) -> int:
             budget, reference = panel.binary_budget(bin_dir, tree, system)
             if budget != panel.PAPER_BUDGETS[system] or abs(reference - panel.spec(system)[3]) > 1e-8:
                 raise SystemExit(f"{system}: budget {budget} reference {reference}")
+    require_csv_schema(rows_path, panel.ROW_FIELDS)
     lj_data = args.lj_data.read_text()
     morse_data = args.morse_data.read_text()
     lj_data += "" if lj_data.endswith("\n") else "\n"
     morse_data += "" if morse_data.endswith("\n") else "\n"
     host = socket.gethostname()
-    cpu = panel.cpu_model()
+    machine = machine_columns()
     session = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     done = {panel.row_key(row) for row in panel.read_rows(rows_path)}
     seeds = tuple(args.seed) if args.seed else panel.SEEDS
@@ -261,7 +313,7 @@ def main(argv: list[str]) -> int:
                     "code_revision": code_revision,
                     "harness_revision": args.revision,
                     "host": host,
-                    "cpu": cpu,
+                    **machine,
                     "session": session,
                     "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 }

@@ -31,6 +31,12 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         break
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 from gmin_pin import read_svnrev  # noqa: E402
+from machine_provenance import (  # noqa: E402
+    aggregate_machine_columns,
+    machine_columns,
+    machine_fieldnames,
+    require_csv_schema,
+)
 
 # Cambridge Cluster Database, Doye and Wales. The bold entry at that rho.
 # 30B and 30D' are the global minima at rho 6 and 14.
@@ -65,6 +71,8 @@ FIELDS = [
     "outside_s",
     "code_revision",
     "host",
+    "machine_id",
+    "cpu_model",
 ]
 SUMMARY_FIELDS = [
     "system",
@@ -83,6 +91,7 @@ SUMMARY_FIELDS = [
     "anneal_outside_median_s",
     "gmin_pot_median_s",
     "gmin_outside_median_s",
+    "host",
 ]
 
 
@@ -198,7 +207,14 @@ def hit_bit(value: str) -> str:
     return "1" if value in ("1", "true", "True") else "0"
 
 
-def anneal_line(text: str, name: str, revision: str) -> dict[str, str]:
+def anneal_line(
+    text: str,
+    name: str,
+    revision: str,
+    *,
+    host: str | None = None,
+    machine: dict[str, str] | None = None,
+) -> dict[str, str]:
     rows = [line for line in text.splitlines() if line.startswith(name + ",anneal,")]
     if len(rows) != 1:
         raise RuntimeError(f"expected one anneal row for {name}, saw {len(rows)}")
@@ -211,6 +227,7 @@ def anneal_line(text: str, name: str, revision: str) -> dict[str, str]:
         evals = budget
     elif evals >= budget:
         evals = min(charged, budget)
+    stamped_machine = dict(machine) if machine is not None else machine_columns()
     return {
         "system": name,
         "code": "anneal",
@@ -224,7 +241,8 @@ def anneal_line(text: str, name: str, revision: str) -> dict[str, str]:
         "pot_s": cols[9],
         "outside_s": cols[10],
         "code_revision": revision,
-        "host": "bench",
+        "host": socket.gethostname() if host is None else host,
+        **stamped_machine,
     }
 
 
@@ -235,6 +253,9 @@ def gmin_line(
     budget: int,
     target: float,
     revision: str,
+    *,
+    host: str | None = None,
+    machine: dict[str, str] | None = None,
 ) -> dict[str, str]:
     fields = {}
     for part in text.split()[1:]:
@@ -255,6 +276,7 @@ def gmin_line(
     wall = float(fields["wall_s"])
     pot = float(fields.get("pot_s") or 0.0)
     outside = float(fields.get("outside_s") or max(wall - pot, 0.0))
+    stamped_machine = dict(machine) if machine is not None else machine_columns()
     return {
         "system": name,
         "code": "gmin",
@@ -268,7 +290,8 @@ def gmin_line(
         "pot_s": f"{pot:.6f}",
         "outside_s": f"{outside:.6f}",
         "code_revision": revision,
-        "host": "bench",
+        "host": socket.gethostname() if host is None else host,
+        **stamped_machine,
     }
 
 
@@ -284,6 +307,10 @@ def load_archives(root: Path, svnrev: str) -> dict[tuple[str, int], dict[str, st
                 if raw.get("code") != "gmin":
                     continue
                 if raw.get("code_revision") != svnrev:
+                    continue
+                machine_id = (raw.get("machine_id") or "").strip()
+                cpu_model = (raw.get("cpu_model") or "").strip()
+                if not machine_id or not cpu_model:
                     continue
                 name = raw["system"]
                 if name not in wanted:
@@ -306,23 +333,31 @@ def load_archives(root: Path, svnrev: str) -> dict[tuple[str, int], dict[str, st
                     "pot_s": raw["pot_s"],
                     "outside_s": raw["outside_s"],
                     "code_revision": svnrev,
-                    "host": "bench",
+                    "host": (raw.get("host") or "").strip(),
+                    "machine_id": machine_id,
+                    "cpu_model": cpu_model,
                 }
     return found
 
 
 def load_done(path: Path) -> dict[tuple[str, str, int], dict[str, str]]:
-    if not path.is_file():
+    if not path.is_file() or path.stat().st_size == 0:
         return {}
+    require_csv_schema(path, FIELDS)
     done = {}
     with path.open(newline="") as handle:
         for raw in csv.DictReader(handle):
+            if not (raw.get("machine_id") or "").strip() or not (raw.get("cpu_model") or "").strip():
+                raise RuntimeError(f"{path} has a row missing machine_id or cpu_model")
             done[(raw["system"], raw["code"], int(raw["seed"]))] = {key: raw.get(key, "") for key in FIELDS}
     return done
 
 
 def write_rows(path: Path, rows: list[dict[str, str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    for row in rows:
+        if not str(row.get("machine_id", "")).strip() or not str(row.get("cpu_model", "")).strip():
+            raise ValueError("row is missing machine_id or cpu_model")
     ordered = sorted(rows, key=lambda row: (row["system"], row["code"], int(row["seed"])))
     with path.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=FIELDS, lineterminator="\n")
@@ -344,6 +379,8 @@ def summarise(rows: list[dict[str, str]], reused: set[tuple[str, int]]) -> list[
         ah = sum(row["hit"] == "1" for row in anneal)
         gh = sum(row["hit"] == "1" for row in gmin)
         reused_seeds = " ".join(str(seed) for seed in SEEDS if (name, seed) in reused)
+        both = anneal + gmin
+        hosts = sorted({row.get("host", "") for row in both if row.get("host", "")})
         out.append(
             {
                 "system": name,
@@ -362,6 +399,8 @@ def summarise(rows: list[dict[str, str]], reused: set[tuple[str, int]]) -> list[
                 "anneal_outside_median_s": f"{type7(col(anneal, 'outside_s')):.6f}",
                 "gmin_pot_median_s": f"{type7(col(gmin, 'pot_s')):.6f}",
                 "gmin_outside_median_s": f"{type7(col(gmin, 'outside_s')):.6f}",
+                "host": " ".join(hosts),
+                **aggregate_machine_columns(both),
             }
         )
     return out
@@ -369,8 +408,13 @@ def summarise(rows: list[dict[str, str]], reused: set[tuple[str, int]]) -> list[
 
 def write_summary(path: Path, rows: list[dict[str, str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    fields = (
+        machine_fieldnames(SUMMARY_FIELDS)
+        if not rows or "machine_id" in rows[0]
+        else SUMMARY_FIELDS
+    )
     with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=SUMMARY_FIELDS, lineterminator="\n")
+        writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
 
@@ -552,7 +596,12 @@ def main() -> int:
     write_rows(seeds_path, rows)
     summary = summarise(rows, reused)
     write_summary(summary_path, summary)
-    writer = csv.DictWriter(sys.stdout, fieldnames=SUMMARY_FIELDS)
+    summary_fields = (
+        machine_fieldnames(SUMMARY_FIELDS)
+        if not summary or "machine_id" in summary[0]
+        else SUMMARY_FIELDS
+    )
+    writer = csv.DictWriter(sys.stdout, fieldnames=summary_fields)
     writer.writeheader()
     writer.writerows(summary)
     return 0

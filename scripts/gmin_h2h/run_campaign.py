@@ -85,6 +85,11 @@ PER_SEED_FIELDS = [
     "pot_s",
     "head",
     "tree",
+    "gmin_url",
+    "gmin_revision",
+    "gmin_build_key",
+    "anneal_head",
+    "code_revision",
     "host",
     "machine_id",
     "cpu_model",
@@ -205,11 +210,27 @@ def write_per_seed_row(
     row: dict[str, str],
     machine_id: str,
     cpu_model: str,
-) -> None:
+    *,
+    code_revision: str = "",
+    anneal_head: str = "",
+    gmin_url: str = "",
+    gmin_revision: str = "",
+    gmin_build_key: str = "",
+) -> dict[str, str]:
     values = {field: row.get(field, "") for field in PER_SEED_FIELDS}
+    resolved_head = anneal_head or row.get("anneal_head") or row.get("head", "")
+    resolved_gmin = gmin_revision or row.get("gmin_revision", "")
+    resolved_code = (
+        code_revision or row.get("code_revision") or resolved_head or resolved_gmin
+    )
     values.update(
         {
-            "host": os.uname().nodename,
+            "gmin_url": gmin_url or row.get("gmin_url", ""),
+            "gmin_revision": resolved_gmin,
+            "gmin_build_key": gmin_build_key or row.get("gmin_build_key", ""),
+            "anneal_head": resolved_head,
+            "code_revision": resolved_code,
+            "host": row.get("host") or os.uname().nodename,
             "machine_id": machine_id,
             "cpu_model": cpu_model,
         }
@@ -218,6 +239,7 @@ def write_per_seed_row(
         writer = csv.DictWriter(handle, fieldnames=PER_SEED_FIELDS)
         writer.writeheader()
         writer.writerow(values)
+    return values
 
 
 def _env(budget: int) -> dict[str, str]:
@@ -238,6 +260,7 @@ def run_anneal(
     saved: Path,
     machine_id: str,
     cpu_model: str,
+    head: str = "",
 ) -> dict[str, str]:
     with log.open("w") as handle:
         proc = subprocess.run(
@@ -254,8 +277,18 @@ def run_anneal(
     row = parse_anneal(text)
     if int(row["budget"]) != budget or row["hit"] not in ("0", "1", "true", "false"):
         raise RuntimeError(f"anneal row {row}")
-    write_per_seed_row(saved, row, machine_id, cpu_model)
-    return row
+    reported_head = row.get("head", "").strip()
+    if head and reported_head and reported_head != head:
+        raise RuntimeError(f"anneal binary reported {reported_head}, expected {head}")
+    effective_head = head or reported_head
+    return write_per_seed_row(
+        saved,
+        row,
+        machine_id,
+        cpu_model,
+        code_revision=effective_head,
+        anneal_head=effective_head,
+    )
 
 
 def run_gmin(
@@ -271,6 +304,10 @@ def run_gmin(
     saved: Path,
     machine_id: str,
     cpu_model: str,
+    *,
+    url: str = "",
+    revision: str = "",
+    build_key: str = "",
 ) -> dict[str, str]:
     work.mkdir(parents=True, exist_ok=True)
     (work / "data").write_text(data.read_text() + f"RANSEED {seed}\n")
@@ -313,8 +350,16 @@ def run_gmin(
         or int(row["energy_only_entries"]) < 0
     ):
         raise RuntimeError(f"invalid gmin counters: {row}")
-    write_per_seed_row(saved, row, machine_id, cpu_model)
-    return row
+    return write_per_seed_row(
+        saved,
+        row,
+        machine_id,
+        cpu_model,
+        code_revision=revision,
+        gmin_url=url,
+        gmin_revision=revision,
+        gmin_build_key=build_key,
+    )
 
 
 def as_result(n: int, arm: str, row: dict[str, str]) -> dict:
@@ -328,17 +373,43 @@ def as_result(n: int, arm: str, row: dict[str, str]) -> dict:
         "evals": float(row["evals_to_hit"]),
         "wall_s": float(row["wall_s"]),
         "best": float(row["best"]),
+        "gmin_url": row.get("gmin_url", ""),
+        "gmin_revision": row.get("gmin_revision", ""),
+        "gmin_build_key": row.get("gmin_build_key", ""),
+        "anneal_head": row.get("anneal_head") or row.get("head", ""),
+        "code_revision": row.get("code_revision", ""),
+        "host": row.get("host", ""),
+        "machine_id": row.get("machine_id", ""),
+        "cpu_model": row.get("cpu_model", ""),
     }
+
+
+def _provenance_value(items: list[dict], key: str, label: str, fallback: str) -> str:
+    values = {
+        str(item.get(key, "")).strip()
+        for item in items
+        if str(item.get(key, "")).strip()
+    }
+    if len(values) > 1:
+        raise ValueError(f"mixed {label} values on rows: {sorted(values)}")
+    if values:
+        actual = next(iter(values))
+        if fallback and actual != fallback:
+            raise ValueError(
+                f"refusing to relabel {label} {actual!r} with {fallback!r}"
+            )
+        return actual
+    return fallback
 
 
 def summarise(
     rows: list[dict],
     seeds: tuple[int, ...],
-    url: str,
-    revision: str,
-    head: str,
-    machine_id: str,
-    cpu_model: str,
+    url: str = "",
+    revision: str = "",
+    head: str = "",
+    machine_id: str = "",
+    cpu_model: str = "",
 ) -> list[dict[str, str]]:
     by_n: dict[int, dict[str, list[dict]]] = {}
     for row in rows:
@@ -347,6 +418,21 @@ def summarise(
     out: list[dict[str, str]] = []
     for n in sorted(by_n):
         arms = by_n[n]
+        anneal_group = arms.get("anneal", [])
+        gmin_group = arms.get("gmin", [])
+        resolved_head = _provenance_value(
+            anneal_group, "code_revision", "anneal code_revision", head
+        )
+        resolved_head = _provenance_value(
+            anneal_group, "anneal_head", "anneal_head", resolved_head
+        )
+        resolved_revision = _provenance_value(
+            gmin_group, "code_revision", "gmin code_revision", revision
+        )
+        resolved_revision = _provenance_value(
+            gmin_group, "gmin_revision", "gmin_revision", resolved_revision
+        )
+        resolved_url = _provenance_value(gmin_group, "gmin_url", "gmin_url", url)
         walls = {
             arm: median_iqr([item["wall_s"] for item in group])[0]
             for arm, group in arms.items()
@@ -362,6 +448,21 @@ def summarise(
             evals_median, evals_iqr = median_iqr([item["evals"] for item in group])
             wall_median, wall_iqr = median_iqr([item["wall_s"] for item in group])
             hits = sum(bool(item["hit"]) for item in group)
+            arm_code_rev = _provenance_value(
+                group,
+                "code_revision",
+                f"{arm} code_revision",
+                resolved_head if arm == "anneal" else resolved_revision,
+            )
+            hosts = sorted(
+                {str(item.get("host", "")).strip() for item in group if str(item.get("host", "")).strip()}
+            )
+            mids = sorted(
+                {str(item.get("machine_id", "")).strip() for item in group if str(item.get("machine_id", "")).strip()}
+            )
+            cpus = sorted(
+                {str(item.get("cpu_model", "")).strip() for item in group if str(item.get("cpu_model", "")).strip()}
+            )
             out.append(
                 {
                     "system": system_name(n),
@@ -378,13 +479,13 @@ def summarise(
                     "wall_ratio": ratio,
                     "seeds": seed_text,
                     "schedule_seed": str(SCHEDULE_SEED),
-                    "gmin_url": url,
-                    "gmin_revision": revision,
-                    "anneal_head": head,
-                    "code_revision": head if arm == "anneal" else revision,
-                    "host": os.uname().nodename,
-                    "machine_id": machine_id,
-                    "cpu_model": cpu_model,
+                    "gmin_url": resolved_url,
+                    "gmin_revision": resolved_revision,
+                    "anneal_head": resolved_head,
+                    "code_revision": arm_code_rev,
+                    "host": ";".join(hosts) if hosts else os.uname().nodename,
+                    "machine_id": ";".join(mids) if mids else machine_id,
+                    "cpu_model": ";".join(cpus) if cpus else cpu_model,
                 }
             )
     return out
@@ -409,6 +510,10 @@ def load_saved(
     arm: str,
     machine_id: str,
     cpu_model: str,
+    *,
+    code_revision: str,
+    gmin_url: str = "",
+    gmin_build_key: str = "",
 ) -> dict | None:
     if not path.is_file():
         return None
@@ -423,6 +528,20 @@ def load_saved(
             return None
     if row.get("machine_id") != machine_id or row.get("cpu_model") != cpu_model:
         return None
+    if not code_revision or row.get("code_revision") != code_revision:
+        return None
+    if arm == "anneal":
+        if row.get("anneal_head") != code_revision:
+            return None
+        if row.get("head") and row["head"] != code_revision:
+            return None
+    else:
+        if row.get("gmin_revision") != code_revision:
+            return None
+        if gmin_url and row.get("gmin_url") != gmin_url:
+            return None
+        if gmin_build_key and row.get("gmin_build_key") != gmin_build_key:
+            return None
     return as_result(n, arm, row)
 
 
@@ -510,6 +629,7 @@ def main(argv: list[str]) -> int:
         raise SystemExit(f"{args.source} does not describe {args.svnrev}")
     if source.get("tarball_sha256") != TARBALL_SHA256:
         raise SystemExit(f"{args.source} has another GMIN tarball")
+    build_key = source.get("build_key", "").strip()
     head = args.head_file.read_text().strip()
     machine_id, cpu_model = machine_provenance()
     progress = args.runs.parent / "progress.txt"
@@ -526,8 +646,18 @@ def main(argv: list[str]) -> int:
         write_start(args.binary, n, seed, coords)
         saved, log = job_paths(args.runs, n, seed, arm)
         saved.parent.mkdir(parents=True, exist_ok=True)
+        expected_revision = head if arm == "anneal" else revision
         existing = (
-            load_saved(saved, n, arm, machine_id, cpu_model)
+            load_saved(
+                saved,
+                n,
+                arm,
+                machine_id,
+                cpu_model,
+                code_revision=expected_revision,
+                gmin_url=url,
+                gmin_build_key=build_key,
+            )
             if saved.is_file()
             else None
         )
@@ -551,6 +681,7 @@ def main(argv: list[str]) -> int:
                 saved,
                 machine_id,
                 cpu_model,
+                head,
             )
         else:
             raw = run_gmin(
@@ -566,6 +697,9 @@ def main(argv: list[str]) -> int:
                 saved,
                 machine_id,
                 cpu_model,
+                url=url,
+                revision=revision,
+                build_key=build_key,
             )
         result = as_result(n, arm, raw)
         rows.append(result)

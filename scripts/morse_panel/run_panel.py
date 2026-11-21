@@ -23,6 +23,12 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 from gmin_pin import read_svnrev  # noqa: E402
+from machine_provenance import (  # noqa: E402
+    aggregate_machine_columns,
+    machine_columns,
+    machine_fieldnames,
+    require_csv_schema,
+)
 
 SYSTEMS = (
     ("m55r6", 55, 6.0, 1_000_000, -250.286609),
@@ -50,7 +56,7 @@ FIELDS = [
     "pot_s",
     "outside_s",
 ]
-ROW_FIELDS = FIELDS + ["code_revision", "host"]
+ROW_FIELDS = FIELDS + ["code_revision", "host", "machine_id", "cpu_model"]
 SUMMARY_FIELDS = [
     "system",
     "anneal_hits",
@@ -71,6 +77,7 @@ SUMMARY_FIELDS = [
     "anneal_outside_median_s",
     "gmin_outside_median_s",
     "gmin_reused",
+    "host",
 ]
 
 
@@ -103,11 +110,18 @@ def mannwhitney(left: list[float], right: list[float]) -> float:
     return float(mannwhitneyu(left, right, alternative="two-sided", method="asymptotic", use_continuity=True).pvalue)
 
 
-def load_rows(path: Path) -> list[dict[str, str]]:
-    if not path.is_file():
+def load_rows(path: Path, *, strict_schema: bool = True) -> list[dict[str, str]]:
+    if not path.is_file() or path.stat().st_size == 0:
         return []
-    with path.open() as handle:
-        return list(csv.DictReader(handle))
+    if strict_schema:
+        require_csv_schema(path, ROW_FIELDS)
+    with path.open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    if strict_schema:
+        for row in rows:
+            if not (row.get("machine_id") or "").strip() or not (row.get("cpu_model") or "").strip():
+                raise RuntimeError(f"{path} has a row missing machine_id or cpu_model")
+    return rows
 
 
 def have(
@@ -127,10 +141,16 @@ def have(
 
 
 def canonical(row: dict[str, str]) -> dict[str, str]:
+    machine_id = str(row.get("machine_id", "")).strip()
+    cpu_model = str(row.get("cpu_model", "")).strip()
+    if not machine_id or not cpu_model:
+        raise ValueError("row is missing machine_id or cpu_model")
     out = {key: row[key] for key in FIELDS}
     out["hit"] = "1" if str(row["hit"]) in ("1", "true") else "0"
     out["code_revision"] = row.get("code_revision", "")
     out["host"] = row.get("host", "")
+    out["machine_id"] = machine_id
+    out["cpu_model"] = cpu_model
     return out
 
 
@@ -141,7 +161,7 @@ def write_rows(path: Path, rows: list[dict[str, str]]) -> None:
         key=lambda row: (row["system"], row["code"], int(row["seed"])),
     )
     with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS)
+        writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS, lineterminator="\n")
         writer.writeheader()
         writer.writerows(ordered)
 
@@ -153,10 +173,12 @@ def reuse_gmin(root: Path, revision: str) -> list[dict[str, str]]:
         root / "bench/morse14-h2h/seeds.csv",
         root / "bench/morse-h2h/seeds.csv",
     ):
-        for row in load_rows(path):
+        for row in load_rows(path, strict_schema=False):
             if row.get("code") != "gmin":
                 continue
             if row.get("code_revision") != revision:
+                continue
+            if not (row.get("machine_id") or "").strip() or not (row.get("cpu_model") or "").strip():
                 continue
             budget = wanted.get(row["system"])
             if budget is None or int(row["budget"]) != budget:
@@ -297,6 +319,8 @@ def summarise(rows: list[dict[str, str]], reused: set[tuple[str, int]]) -> list[
         ah = sum(row["hit"] in ("1", "true") for row in anneal)
         gh = sum(row["hit"] in ("1", "true") for row in gmin)
         reused_seeds = " ".join(str(seed) for seed in SEEDS if (name, seed) in reused)
+        both = anneal + gmin
+        hosts = sorted({row.get("host", "") for row in both if row.get("host", "")})
         out.append(
             {
                 "system": name,
@@ -318,6 +342,8 @@ def summarise(rows: list[dict[str, str]], reused: set[tuple[str, int]]) -> list[
                 "anneal_outside_median_s": f"{type7(col(anneal, 'outside_s')):.6f}",
                 "gmin_outside_median_s": f"{type7(col(gmin, 'outside_s')):.6f}",
                 "gmin_reused": reused_seeds,
+                "host": " ".join(hosts),
+                **aggregate_machine_columns(both),
             }
         )
     return out
@@ -394,12 +420,18 @@ def main() -> None:
         ["git", "-C", str(root), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
     ).stdout.strip()
     host = socket.gethostname()
+    machine = machine_columns()
     for name, _n, rho, budget, ref in systems:
         for seed in seeds:
             if args.arm in ("anneal", "both") and not have(rows, name, "anneal", seed):
                 print(f"anneal {name} {seed}", file=sys.stderr, flush=True)
                 rows.append(
-                    {**run_anneal(binary, name, seed, budget), "code_revision": head, "host": host}
+                    {
+                        **run_anneal(binary, name, seed, budget),
+                        "code_revision": head,
+                        "host": host,
+                        **machine,
+                    }
                 )
                 write_rows(seeds_path, rows)
             if args.arm == "anneal":
@@ -421,6 +453,7 @@ def main() -> None:
                         ),
                         "code_revision": gmin_revision,
                         "host": host,
+                        **machine,
                     }
                 )
                 write_rows(seeds_path, rows)
@@ -441,9 +474,16 @@ def main() -> None:
         return
     out_dir = root / "bench/morse-panel"
     out_dir.mkdir(parents=True, exist_ok=True)
+    require_csv_schema(out_dir / "seeds.csv", ROW_FIELDS)
+    summary_fields = (
+        machine_fieldnames(SUMMARY_FIELDS)
+        if not summary or "machine_id" in summary[0]
+        else SUMMARY_FIELDS
+    )
+    require_csv_schema(out_dir / "summary.csv", summary_fields)
     write_rows(out_dir / "seeds.csv", rows)
     with (out_dir / "summary.csv").open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=SUMMARY_FIELDS)
+        writer = csv.DictWriter(handle, fieldnames=summary_fields, lineterminator="\n")
         writer.writeheader()
         writer.writerows(summary)
     print(f"wrote {out_dir / 'summary.csv'}", file=sys.stderr)

@@ -18,7 +18,14 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "scripts"))
+for _candidate in (
+    Path(__file__).resolve().parent,
+    Path(__file__).resolve().parents[1],
+    ROOT / "scripts",
+):
+    if (_candidate / "machine_provenance.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
 from machine_provenance import machine_columns, require_csv_schema  # noqa: E402
 SYSTEMS = ("sc126-80", "sc96-80", "sc108-80", "sc108-55")
 SEEDS = tuple(range(2000, 2012))

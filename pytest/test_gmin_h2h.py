@@ -201,3 +201,198 @@ def test_gmin_cap_refuses_energy_only_calls_once_aborted(tmp_path):
     assert row["charged"] == "1"
     assert row["gradient_passes"] == "1"
     assert row["energy_only_entries"] == "0"
+
+
+def test_load_saved_requires_matching_producer_revisions_and_build_key(tmp_path):
+    anneal_path = tmp_path / "anneal-2000.row"
+    raw_anneal = {
+        "system": "lj38",
+        "code": "anneal",
+        "seed": "2000",
+        "budget": "400000",
+        "hit": "1",
+        "evals_to_hit": "12000",
+        "charged": "12000",
+        "wall_s": "0.5",
+        "best": "-173.928427",
+        "pot_s": "0.4",
+    }
+    campaign.write_per_seed_row(
+        anneal_path,
+        raw_anneal,
+        "a" * 64,
+        "Example CPU",
+        anneal_head="head-rev-1",
+    )
+
+    loaded_anneal = campaign.load_saved(
+        anneal_path,
+        38,
+        "anneal",
+        "a" * 64,
+        "Example CPU",
+        code_revision="head-rev-1",
+    )
+    assert loaded_anneal is not None
+    assert loaded_anneal["code_revision"] == "head-rev-1"
+    assert (
+        campaign.load_saved(
+            anneal_path,
+            38,
+            "anneal",
+            "a" * 64,
+            "Example CPU",
+            code_revision="head-rev-2",
+        )
+        is None
+    )
+
+    untagged_anneal = tmp_path / "untagged-anneal.row"
+    campaign.write_per_seed_row(untagged_anneal, raw_anneal, "a" * 64, "Example CPU")
+    assert (
+        campaign.load_saved(
+            untagged_anneal,
+            38,
+            "anneal",
+            "a" * 64,
+            "Example CPU",
+            code_revision="head-rev-1",
+        )
+        is None
+    )
+
+    gmin_path = tmp_path / "gmin-2000.row"
+    campaign.write_per_seed_row(
+        gmin_path,
+        {
+            "system": "lj38",
+            "code": "gmin",
+            "seed": "2000",
+            "budget": "400000",
+            "hit": "1",
+            "evals_to_hit": "18000",
+            "charged": "18000",
+            "gradient_passes": "18000",
+            "energy_only_entries": "12",
+            "wall_s": "0.8",
+            "best": "-173.928427",
+            "pot_s": "0.7",
+        },
+        "a" * 64,
+        "Example CPU",
+        gmin_url="https://example.invalid/gmin.tar.gz",
+        gmin_revision="svn-100",
+        gmin_build_key="b" * 64,
+    )
+
+    loaded_gmin = campaign.load_saved(
+        gmin_path,
+        38,
+        "gmin",
+        "a" * 64,
+        "Example CPU",
+        code_revision="svn-100",
+        gmin_url="https://example.invalid/gmin.tar.gz",
+        gmin_build_key="b" * 64,
+    )
+    assert loaded_gmin is not None
+    assert loaded_gmin["code_revision"] == "svn-100"
+    assert loaded_gmin["gmin_build_key"] == "b" * 64
+    assert (
+        campaign.load_saved(
+            gmin_path,
+            38,
+            "gmin",
+            "a" * 64,
+            "Example CPU",
+            code_revision="svn-101",
+            gmin_url="https://example.invalid/gmin.tar.gz",
+            gmin_build_key="b" * 64,
+        )
+        is None
+    )
+    assert (
+        campaign.load_saved(
+            gmin_path,
+            38,
+            "gmin",
+            "a" * 64,
+            "Example CPU",
+            code_revision="svn-100",
+            gmin_url="https://example.invalid/gmin.tar.gz",
+            gmin_build_key="c" * 64,
+        )
+        is None
+    )
+
+
+def test_summarise_preserves_row_revisions_and_refuses_relabeling():
+    rows = [
+        {
+            "n": 38,
+            "arm": "anneal",
+            "seed": 2000,
+            "budget": 400_000,
+            "hit": True,
+            "evals": 10_000.0,
+            "wall_s": 0.4,
+            "best": -173.928427,
+            "anneal_head": "head-1",
+            "code_revision": "head-1",
+        },
+        {
+            "n": 38,
+            "arm": "gmin",
+            "seed": 2000,
+            "budget": 400_000,
+            "hit": True,
+            "evals": 15_000.0,
+            "wall_s": 0.6,
+            "best": -173.928427,
+            "gmin_url": "https://example.invalid/gmin",
+            "gmin_revision": "svn-1",
+            "code_revision": "svn-1",
+        },
+    ]
+    summary = campaign.summarise(rows, (2000,), "", "", "", "a" * 64, "Example CPU")
+    by_arm = {row["arm"]: row for row in summary}
+    assert by_arm["anneal"]["code_revision"] == "head-1"
+    assert by_arm["gmin"]["code_revision"] == "svn-1"
+    assert by_arm["gmin"]["gmin_url"] == "https://example.invalid/gmin"
+
+    with pytest.raises(ValueError, match="refusing to relabel"):
+        campaign.summarise(
+            rows,
+            (2000,),
+            "https://example.invalid/gmin",
+            "svn-1",
+            "head-2",
+            "a" * 64,
+            "Example CPU",
+        )
+
+    mixed_rows = rows + [
+        {
+            "n": 38,
+            "arm": "gmin",
+            "seed": 2001,
+            "budget": 400_000,
+            "hit": True,
+            "evals": 16_000.0,
+            "wall_s": 0.7,
+            "best": -173.928427,
+            "gmin_url": "https://example.invalid/gmin",
+            "gmin_revision": "svn-2",
+            "code_revision": "svn-2",
+        }
+    ]
+    with pytest.raises(ValueError, match="mixed"):
+        campaign.summarise(
+            mixed_rows,
+            (2000, 2001),
+            "",
+            "",
+            "",
+            "a" * 64,
+            "Example CPU",
+        )

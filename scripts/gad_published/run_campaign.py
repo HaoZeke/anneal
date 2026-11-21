@@ -31,8 +31,18 @@ import subprocess
 import sys
 from pathlib import Path
 
-from read_deposit import HIT_TOL, REFERENCES, ZENODO_DOI, read_zip
-from gmin_pin import read_built_revision
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "gmin_pin.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from read_deposit import HIT_TOL, REFERENCES, ZENODO_DOI, read_zip  # noqa: E402
+from gmin_pin import read_built_revision  # noqa: E402
+from machine_provenance import (  # noqa: E402
+    aggregate_machine_columns,
+    machine_columns,
+    require_csv_schema,
+)
 
 BUDGET = 400_000
 SEEDS = tuple(range(2000, 2012))
@@ -66,10 +76,29 @@ SUMMARY_FIELDS = [
     "evals_upper",
     "code_revision",
     "host",
+    "machine_id",
+    "cpu_model",
     "date",
     "gmin_revision",
     "condevo_commit",
     "zenodo",
+]
+PER_SEED_FIELDS = [
+    "system",
+    "code",
+    "seed",
+    "budget",
+    "hit",
+    "evals_to_hit",
+    "charged",
+    "wall_s",
+    "best",
+    "pot_s",
+    "outside_s",
+    "code_revision",
+    "host",
+    "machine_id",
+    "cpu_model",
 ]
 
 
@@ -243,7 +272,13 @@ def gad_rows(zip_path: Path) -> list[dict]:
 
 
 def parse_anneal(text: str, code: str = "anneal") -> dict[str, str]:
-    lines = text.splitlines()
+    lines = [line for line in text.splitlines() if line.strip()]
+    for index, line in enumerate(lines[:-1]):
+        if line.startswith("system,code,seed,budget,") and "machine_id" in line:
+            row = next(csv.DictReader(lines[index : index + 2]))
+            if row["hit"] not in ("0", "1"):
+                raise ValueError(f"{code} hit {row['hit']}")
+            return row
     data = [line for line in lines if f",{code}," in line]
     if len(data) != 1:
         raise ValueError(f"expected one {code} row, saw {len(data)}")
@@ -255,6 +290,9 @@ def parse_anneal(text: str, code: str = "anneal") -> dict[str, str]:
 
 
 def parse_gmin(text: str) -> dict[str, str]:
+    lines = [line for line in text.splitlines() if line.strip()]
+    if len(lines) >= 2 and lines[0].startswith("system,code,seed,budget,"):
+        return next(csv.DictReader(lines[:2]))
     fields: dict[str, str] = {}
     for part in text.split()[1:]:
         key, value = part.split("=", 1)
@@ -262,6 +300,40 @@ def parse_gmin(text: str) -> dict[str, str]:
     if "hit" not in fields or "evals_to_hit" not in fields:
         raise ValueError(f"no gmin row in {text!r}")
     return fields
+
+
+def write_saved_rerun(
+    path: Path,
+    arm: str,
+    row: dict[str, str],
+    *,
+    code_revision: str,
+    host: str,
+    machine: dict[str, str],
+) -> dict[str, str]:
+    wall_s = float(row["wall_s"])
+    pot_s = float(row["pot_s"])
+    values = {
+        "system": row["system"],
+        "code": arm,
+        "seed": str(int(row["seed"])),
+        "budget": str(int(row["budget"])),
+        "hit": "1" if row["hit"] in ("1", "true") else "0",
+        "evals_to_hit": str(row["evals_to_hit"]),
+        "charged": str(row["charged"]),
+        "wall_s": f"{wall_s:.6f}",
+        "best": str(row["best"]),
+        "pot_s": f"{pot_s:.6f}",
+        "outside_s": row.get("outside_s") or f"{max(wall_s - pot_s, 0.0):.6f}",
+        "code_revision": code_revision,
+        "host": host,
+        **machine,
+    }
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=PER_SEED_FIELDS, lineterminator="\n")
+        writer.writeheader()
+        writer.writerow(values)
+    return values
 
 
 def rerun_record(n: int, arm: str, row: dict[str, str]) -> dict:
@@ -290,6 +362,10 @@ def rerun_record(n: int, arm: str, row: dict[str, str]) -> dict:
         "outside_s": wall_s - pot_s,
         "inside_us": inside,
         "outside_us": outside,
+        "code_revision": row.get("code_revision", ""),
+        "host": row.get("host", ""),
+        "machine_id": row.get("machine_id", ""),
+        "cpu_model": row.get("cpu_model", ""),
     }
 
 
@@ -400,7 +476,14 @@ def run_gad(
     return parse_anneal(text, "gad")
 
 
-def summarise(rows: list[dict], head: str, revision: str, host: str) -> list[dict[str, str]]:
+def summarise(
+    rows: list[dict],
+    head: str,
+    revision: str,
+    host: str,
+    machine: dict[str, str] | None = None,
+) -> list[dict[str, str]]:
+    current_machine = dict(machine) if machine is not None else machine_columns()
     by_system: dict[str, dict[str, list[dict]]] = {}
     for row in rows:
         by_system.setdefault(row["system"], {}).setdefault(row["arm"], []).append(row)
@@ -414,6 +497,11 @@ def summarise(rows: list[dict], head: str, revision: str, host: str) -> list[dic
             group = arms.get(arm, [])
             if not group:
                 continue
+            group_machine = (
+                current_machine
+                if arm == "gad_deposit"
+                else (aggregate_machine_columns(group) or current_machine)
+            )
             row = {key: "" for key in SUMMARY_FIELDS}
             row.update(
                 system=system,
@@ -424,6 +512,7 @@ def summarise(rows: list[dict], head: str, revision: str, host: str) -> list[dic
                 best_median=f"{median_iqr([item['best'] for item in group])[0]:.8f}",
                 code_revision=head,
                 host=host,
+                **group_machine,
                 date=date,
                 gmin_revision=revision,
                 condevo_commit=CONDEVO_COMMIT,
@@ -466,10 +555,10 @@ def summarise(rows: list[dict], head: str, revision: str, host: str) -> list[dic
 def append_summary(path: Path, rows: list[dict[str, str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.is_file() and path.stat().st_size > 0:
-        with path.open(newline="") as handle:
-            header = next(csv.reader(handle))
-        if header != SUMMARY_FIELDS:
-            raise SystemExit(f"{path} has another header; rows are appended, never rewritten")
+        try:
+            require_csv_schema(path, SUMMARY_FIELDS)
+        except RuntimeError as error:
+            raise SystemExit(f"{path} has another header; rows are appended, never rewritten") from error
         new = False
     else:
         new = True
@@ -490,11 +579,24 @@ def load_source(path: Path) -> str:
     return revision
 
 
-def saved_rerun(path: Path, n: int, arm: str) -> dict | None:
+def saved_rerun(
+    path: Path,
+    n: int,
+    arm: str,
+    *,
+    code_revision: str,
+    machine: dict[str, str],
+) -> dict | None:
     if not path.is_file() or path.stat().st_size == 0:
         return None
     text = path.read_text()
     row = parse_gmin(text) if arm == "gmin" else parse_anneal(text, arm)
+    if (
+        row.get("machine_id") != machine["machine_id"]
+        or row.get("cpu_model") != machine["cpu_model"]
+        or row.get("code_revision") != code_revision
+    ):
+        return None
     return rerun_record(n, arm, row)
 
 
@@ -607,7 +709,10 @@ def main(argv: list[str]) -> int:
         raise SystemExit("the gad arm needs --condevo")
     head = args.head_file.read_text().strip()
     host = socket.gethostname()
+    machine = machine_columns()
     revision = read_built_revision(args.svnrev, args.source)
+    if args.summary:
+        require_csv_schema(args.summary, SUMMARY_FIELDS)
     progress = args.runs.parent / "progress.txt"
     args.runs.mkdir(parents=True, exist_ok=True)
     deposited = gad_rows(args.zip)
@@ -642,7 +747,18 @@ def main(argv: list[str]) -> int:
         saved = args.runs / f"lj{n}" / f"{arm}-{seed}.row"
         log = args.runs / f"lj{n}" / f"{arm}-{seed}.log"
         saved.parent.mkdir(parents=True, exist_ok=True)
-        existing = saved_rerun(saved, n, arm)
+        arm_revision = {
+            "anneal": head,
+            "gmin": revision,
+            "gad": CONDEVO_COMMIT,
+        }[arm]
+        existing = saved_rerun(
+            saved,
+            n,
+            arm,
+            code_revision=arm_revision,
+            machine=machine,
+        )
         if existing is not None:
             rows.append(existing)
             note(progress, f"skip n={n} arm={arm} seed={seed} hit={existing['hit']} evals={existing['evals']:.0f}")
@@ -650,7 +766,6 @@ def main(argv: list[str]) -> int:
         note(progress, f"start n={n} arm={arm} seed={seed} budget={BUDGET}")
         if arm == "anneal":
             raw = run_anneal(args.binary, n, seed, log)
-            saved.write_text(log.read_text())
         elif arm == "gad":
             raw = run_gad(
                 args.gad_python,
@@ -662,7 +777,6 @@ def main(argv: list[str]) -> int:
                 args.runs / f"lj{n}" / f"gad-{seed}",
                 log,
             )
-            saved.write_text(log.read_text())
         else:
             raw = run_gmin(
                 args.gmin,
@@ -673,15 +787,22 @@ def main(argv: list[str]) -> int:
                 args.runs / f"lj{n}" / f"gmin-{seed}",
                 log,
             )
-            saved.write_text((args.runs / f"lj{n}" / f"gmin-{seed}" / "row.txt").read_text())
-        result = rerun_record(n, arm, raw)
+        persisted = write_saved_rerun(
+            saved,
+            arm,
+            raw,
+            code_revision=arm_revision,
+            host=host,
+            machine=machine,
+        )
+        result = rerun_record(n, arm, persisted)
         rows.append(result)
         note(
             progress,
             f"done n={n} arm={arm} seed={seed} hit={result['hit']} "
             f"evals={result['evals']:.0f} wall_s={result['wall_s']:.3f} best={result['best']:.6f}",
         )
-    text_rows = summarise(rows, head, revision, host)
+    text_rows = summarise(rows, head, revision, host, machine)
     if args.summary:
         append_summary(args.summary, text_rows)
     writer = csv.DictWriter(sys.stdout, fieldnames=SUMMARY_FIELDS)

@@ -64,7 +64,13 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
-from gmin_pin import TARBALL_SHA256, read_svnrev  # noqa: E402
+from gmin_pin import TARBALL_SHA256, read_built_revision, read_svnrev  # noqa: E402
+from machine_provenance import (  # noqa: E402
+    aggregate_machine_columns,
+    machine_columns,
+    machine_fieldnames,
+    require_csv_schema,
+)
 
 SEEDS = tuple(range(2000, 2012))
 HIT_TOL = DEFAULT_HIT_TOL
@@ -147,7 +153,8 @@ ROW_FIELDS = [
     "code_revision",
     "harness_revision",
     "host",
-    "cpu",
+    "machine_id",
+    "cpu_model",
     "session",
     "utc",
 ]
@@ -253,13 +260,6 @@ def mann_whitney(left: list[float], right: list[float]) -> tuple[float, float]:
 
 def is_hit(text: str) -> bool:
     return text.strip().lower() in ("1", "true")
-
-
-def cpu_model() -> str:
-    for line in Path("/proc/cpuinfo").read_text().splitlines():
-        if line.startswith("model name"):
-            return line.split(":", 1)[1].strip().replace(",", " ")
-    return ""
 
 
 def single_thread_env() -> dict[str, str]:
@@ -480,8 +480,21 @@ def read_rows(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
+def validate_row_schema(row: dict[str, str]) -> None:
+    missing = [field for field in ROW_FIELDS if field not in row]
+    extra = [field for field in row if field not in ROW_FIELDS]
+    if missing or extra:
+        raise ValueError(f"row schema mismatch: missing={missing} extra={extra}")
+    for required in ("host", "machine_id", "cpu_model", "code_revision", "harness_revision"):
+        if not str(row.get(required, "")).strip():
+            raise ValueError(f"row is missing non-empty {required}")
+
+
 def append_row(path: Path, row: dict[str, str]) -> None:
+    validate_row_schema(row)
+    require_csv_schema(path, ROW_FIELDS)
     fresh = not path.is_file() or path.stat().st_size == 0
+    path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS, lineterminator="\n")
         if fresh:
@@ -504,7 +517,17 @@ def panel_groups(rows: list[dict[str, str]], revision: str) -> dict[tuple[str, s
         if row["code"] == "anneal" and revision != "latest" and row["code_revision"] != revision:
             continue
         groups.setdefault((row["system"], row["code"]), {})[int(row["seed"])] = row
-    return {key: [group[s] for s in sorted(group)] for key, group in groups.items()}
+    out: dict[tuple[str, str], list[dict[str, str]]] = {}
+    for key, group in groups.items():
+        ordered = [group[s] for s in sorted(group)]
+        revisions = {r["code_revision"] for r in ordered}
+        if len(revisions) > 1:
+            system, code = key
+            raise RuntimeError(
+                f"{system} {code}: mixed code_revision values {sorted(revisions)}"
+            )
+        out[key] = ordered
+    return out
 
 
 def fmt(value: float | None, digits: int = 6) -> str:
@@ -514,6 +537,11 @@ def fmt(value: float | None, digits: int = 6) -> str:
 def validate_group(group: list[dict[str, str]], system: str, code: str) -> None:
     budget = PAPER_BUDGETS[system]
     reference = spec(system)[3]
+    revisions = {r["code_revision"] for r in group}
+    if len(revisions) > 1:
+        raise RuntimeError(
+            f"{system} {code}: mixed code_revision values {sorted(revisions)}"
+        )
     seeds = [int(r["seed"]) for r in group]
     if seeds != sorted(seeds):
         raise RuntimeError(f"{system} {code}: seeds out of order {seeds}")
@@ -619,6 +647,7 @@ def summarise(rows: list[dict[str, str]], revision: str) -> list[dict[str, str]]
                 "gmin_revision": gmin_revisions,
                 "harness_revision": harness_revisions,
                 "host": " ".join(sorted({r["host"] for r in both})),
+                **aggregate_machine_columns(both),
                 "sessions": " ".join(sorted({r["session"] for r in both})),
                 "seeds": " ".join(r["seed"] for r in anneal),
             }
@@ -767,7 +796,12 @@ def write_csv(path: Path, fields: list[str], rows: list[dict[str, str]]) -> None
 
 def write_tables(root: Path, rows: list[dict[str, str]], revision: str, tex: bool, out: Path | None = None) -> None:
     summary = summarise(rows, revision)
-    write_csv(out or (root / "bench" / "gmin-panel" / "summary.csv"), SUMMARY_FIELDS, summary)
+    fields = (
+        machine_fieldnames(SUMMARY_FIELDS)
+        if summary and "machine_id" in summary[0]
+        else SUMMARY_FIELDS
+    )
+    write_csv(out or (root / "bench" / "gmin-panel" / "summary.csv"), fields, summary)
     splice(root / README, README_MARKS, readme_table(summary))
     if tex:
         splice(root / MANUSCRIPT, TEX_MARKS, tex_table(summary, revision))
@@ -948,7 +982,7 @@ def main(argv: list[str]) -> int:
     source = dict(
         line.split("=", 1) for line in args.gmin_source.read_text().splitlines() if "=" in line
     )
-    gmin_revision = read_svnrev(args.svnrev)
+    gmin_revision = read_built_revision(args.svnrev, args.gmin_source)
     if source.get("svnrev") != gmin_revision:
         raise SystemExit(f"{args.gmin_source} does not describe {args.svnrev}")
     if source.get("tarball_sha256") != TARBALL_SHA256:
@@ -960,12 +994,13 @@ def main(argv: list[str]) -> int:
         budget, reference = binary_budget(args.bin, args.tree, system)
         if budget != PAPER_BUDGETS[system] or abs(reference - spec(system)[3]) > 1e-8:
             raise SystemExit(f"{resolve_driver(args.bin, args.tree, system)[1]} {system}: budget {budget} reference {reference}")
+    require_csv_schema(args.rows, ROW_FIELDS)
     lj_data = args.lj_data.read_text()
     morse_data = args.morse_data.read_text()
     lj_data += "" if lj_data.endswith("\n") else "\n"
     morse_data += "" if morse_data.endswith("\n") else "\n"
     host = socket.gethostname()
-    cpu = cpu_model()
+    machine = machine_columns()
     session = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     done = set() if args.rerun else {row_key(r) for r in read_rows(args.rows)}
     seeds = tuple(args.seed) if args.seed else SEEDS
@@ -1003,7 +1038,7 @@ def main(argv: list[str]) -> int:
                     "code_revision": code_revision,
                     "harness_revision": args.revision,
                     "host": host,
-                    "cpu": cpu,
+                    **machine,
                     "session": session,
                     "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 }
