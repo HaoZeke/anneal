@@ -1046,10 +1046,18 @@ def test_a_revision_on_a_registered_record_ref_is_reachable(tmp_path, monkeypatc
     assert not audit_mod.harness_reachable("9a30f319")
 
 
-@pytest.mark.parametrize("revision", [SIDE_COMMIT, "c1c02d1646a7"])
+def test_a_revision_on_the_cov_floor2_record_ref_is_reachable(tmp_path, monkeypatch):
+    need_origin()
+    assert git("merge-base", "--is-ancestor", "c1c02d1646a7", "HEAD").returncode == 1
+    assert audit_mod.harness_reachable("c1c02d1646a7")
+    registry(tmp_path, monkeypatch, [])
+    assert not audit_mod.harness_reachable("c1c02d1646a7")
+
+
+@pytest.mark.parametrize("revision", [SIDE_COMMIT, "b7e90ce985ff"])
 def test_a_revision_on_no_registered_record_ref_is_flagged(revision):
     # e3ed7dad is on origin/record/bench-sc-h2h-n12, which is not registered;
-    # c1c02d16 is on origin/bench/cov-floor2, which is not a record ref.
+    # b7e90ce9 is only on origin/bench/cov-floor2, which is not a record ref.
     need_origin()
     assert audit_mod.commit_of(revision)
     assert not audit_mod.harness_reachable(revision)
