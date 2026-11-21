@@ -3710,8 +3710,12 @@ fn cluster_search(
             }
             let sites = sl.chunks(3).map(|c| [c[0], c[1], c[2]]).collect();
             Some(
-                crate::rigid_body::RigidBodyGeometry::new(sites, vec![8, 1, 1])
-                    .map_err(PyValueError::new_err)?,
+                crate::rigid_body::RigidBodyGeometry::new_bonded(
+                    sites,
+                    vec![8, 1, 1],
+                    vec![[0, 1], [0, 2]],
+                )
+                .map_err(PyValueError::new_err)?,
             )
         }
     };

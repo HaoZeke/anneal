@@ -13,6 +13,8 @@ use ndarray::{Array1, ArrayView1};
 pub struct RigidBodyGeometry {
     sites: Vec<[f64; 3]>,
     species: Vec<u32>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    bonds: Vec<[usize; 2]>,
     #[serde(skip)]
     block_keys: Vec<(u32, u32)>,
     #[serde(skip)]
@@ -22,13 +24,40 @@ pub struct RigidBodyGeometry {
 impl RigidBodyGeometry {
     /// Declare actual site positions and chemical identities in the body frame.
     pub fn new(sites: Vec<[f64; 3]>, species: Vec<u32>) -> Result<Self, &'static str> {
+        Self::new_bonded(sites, species, Vec::new())
+    }
+
+    /// Declare site positions, chemical identities, and intrabody bonds.
+    ///
+    /// Each bond joins two distinct sites at different positions. A bond of
+    /// zero length has no direction, and a move that turns a body about its
+    /// bonds could not orient it.
+    pub fn new_bonded(
+        sites: Vec<[f64; 3]>,
+        species: Vec<u32>,
+        mut bonds: Vec<[usize; 2]>,
+    ) -> Result<Self, &'static str> {
         if sites.is_empty()
             || sites.len() != species.len()
             || species.contains(&0)
             || sites.iter().flatten().any(|value| !value.is_finite())
+            || bonds
+                .iter()
+                .any(|bond| bond[0] >= sites.len() || bond[1] >= sites.len() || bond[0] == bond[1])
         {
             return Err("invalid rigid-body site geometry");
         }
+        if bonds
+            .iter()
+            .any(|&[a, b]| sites[a].iter().zip(&sites[b]).all(|(p, q)| p == q))
+        {
+            return Err("a rigid-body bond joins two sites at one position");
+        }
+        for bond in &mut bonds {
+            bond.sort_unstable();
+        }
+        bonds.sort_unstable();
+        bonds.dedup();
         let mut block_keys = Vec::new();
         for &a in &species {
             for &b in &species {
@@ -50,6 +79,7 @@ impl RigidBodyGeometry {
         Ok(Self {
             sites,
             species,
+            bonds,
             block_keys,
             block_of_pair,
         })
@@ -103,6 +133,11 @@ impl RigidBodyGeometry {
     /// Atomic number of each site, in declaration order.
     pub fn species(&self) -> &[u32] {
         &self.species
+    }
+
+    /// Intrabody bonds as pairs of site indices.
+    pub fn bonds(&self) -> &[[usize; 2]] {
+        &self.bonds
     }
 
     /// Largest body-frame site distance from the centre.
@@ -184,5 +219,27 @@ impl RigidBodyGeometry {
             });
             Array1::from(flat)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RigidBodyGeometry;
+
+    #[test]
+    fn a_bond_between_sites_at_one_position_is_refused() {
+        let sites = vec![[0.0; 3], [0.0; 3], [1.0, 0.0, 0.0]];
+        let species = vec![6, 1, 1];
+        assert!(
+            RigidBodyGeometry::new_bonded(sites.clone(), species.clone(), vec![[0, 1], [0, 2]])
+                .is_err()
+        );
+        assert!(
+            RigidBodyGeometry::new_bonded(sites.clone(), species.clone(), vec![[1, 0]]).is_err()
+        );
+        let bonded = RigidBodyGeometry::new_bonded(sites.clone(), species.clone(), vec![[0, 2]])
+            .expect("a bond of positive length");
+        assert_eq!(bonded.bonds(), &[[0, 2]]);
+        assert!(RigidBodyGeometry::new(sites, species).is_ok());
     }
 }
