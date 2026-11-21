@@ -76,7 +76,7 @@ stops before wheels and nothing is published. The validate step uses
    =python3 scripts/check_version_sot.py= so a drifted copy stops the
    release before the commit.
 6. A reproducible Meson static archive sets
-   =ANNEAL_REPRODUCIBLE_ARCHIVE=1= and is checked with the two-build
+   ~ANNEAL_REPRODUCIBLE_ARCHIVE=1~ and is checked with the two-build
    comparison on the [[file:bindings.org][Bindings]] page. Published
    wheels leave the variable unset.
 7. Commit. Push =main=.
