@@ -10722,6 +10722,174 @@ mod tests {
         assert!(directed_stall_source(true, true, None).is_none());
     }
 
+    /// The call clock is armed by the recorded minimum, while the walker
+    /// may already stand on a higher basin. With alignment on, a leave
+    /// that climbs the record consumes the plateau, and a leave whose
+    /// curvature pass refuses that record does not.
+    #[test]
+    fn aligned_stall_leave_consumes_the_clock_only_when_a_response_runs() {
+        #[derive(Clone, Copy, Debug)]
+        struct Clock {
+            attempts: usize,
+            escapes: usize,
+            best: f64,
+        }
+
+        fn place(shift: f64, n: usize) -> Array1<f64> {
+            let mut coordinates = Array1::zeros(3 * n);
+            for atom in 0..n {
+                coordinates[3 * atom] = shift + 1.2 * atom as f64;
+                coordinates[3 * atom + 1] = 0.1 * (atom % 2) as f64;
+            }
+            coordinates
+        }
+
+        fn separation(x: ArrayView1<f64>, origin: &Array1<f64>) -> f64 {
+            x.iter()
+                .zip(origin.iter())
+                .map(|(value, at)| {
+                    let delta = value - at;
+                    delta * delta
+                })
+                .sum()
+        }
+
+        fn clock(align: bool, respond: bool) -> Clock {
+            let n = 6;
+            let mut cfg = Config::for_cluster(n);
+            cfg.escape_on_stall = true;
+            cfg.retry_noop_stall_leave = true;
+            cfg.align_directed_stall_source = align;
+            cfg.trail_on_stall = false;
+            cfg.restart_on_stall = false;
+            cfg.symmetrise_on_stall = false;
+            cfg.tabu_on_stall = false;
+            cfg.return_screen = false;
+            cfg.bayes_screen = false;
+            cfg.energy_lattice = false;
+            cfg.orbit_complete_on_new = false;
+            cfg.continuous_symmetry = ContinuousSymmetry::Off;
+            cfg.soap_mode = SoapProposalMode::Off;
+            cfg.prior_soap = false;
+            cfg.jump_on_stall = false;
+            cfg.path_on_stall = false;
+            cfg.general_collective = false;
+            cfg.minima_hopping = false;
+            cfg.surfaces.clear();
+            cfg.temperature = 1.0e3;
+            cfg.screen_margin = f64::INFINITY;
+            cfg.restart_patience = 40;
+            cfg.max_hops = Some(48);
+            cfg.relax_steps = 1;
+            cfg.screen_steps = 1;
+            cfg.escape_max_climb = 2;
+            cfg.escape_lanczos_steps = 4;
+
+            let best = place(0.0, n);
+            let walker = place(30.0, n);
+            let mut rng = StdRng::seed_from_u64(9);
+            let start = random_cluster(n, cfg.start_radius(), cfg.min_separation, &mut rng);
+            let mut ledger = Ledger::new(4_000);
+            let mut opened = false;
+            let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+                if !led.charge() {
+                    return (f64::NAN, x.to_owned());
+                }
+                if !opened {
+                    opened = true;
+                    (-2.0, best.clone())
+                } else {
+                    (-1.0, walker.clone())
+                }
+            };
+            let mut attempts = 0usize;
+            let mut in_attempt = false;
+            let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| {
+                if !led.charge() {
+                    return None;
+                }
+                let dist2 = separation(x, &best);
+                if dist2 <= 1.0e-18 {
+                    in_attempt = false;
+                    return Some(Array1::zeros(x.len()));
+                }
+                // Curvature samples sit an epsilon off the record. The
+                // uphill walker is thirty lengths away and is refused, so
+                // a climb runs only when the leave starts on the record.
+                if dist2 < 25.0 {
+                    if !in_attempt {
+                        attempts += 1;
+                    }
+                    in_attempt = respond;
+                    if respond {
+                        let mut force = Array1::zeros(x.len());
+                        for (slot, (value, origin)) in
+                            force.iter_mut().zip(x.iter().zip(best.iter()))
+                        {
+                            *slot = 2.0 * (value - origin);
+                        }
+                        return Some(force);
+                    }
+                    return None;
+                }
+                in_attempt = false;
+                None
+            };
+            let mut run_rng = StdRng::seed_from_u64(9);
+            let out = run_with_gradient(
+                &cfg,
+                start.view(),
+                &mut ledger,
+                &mut relax,
+                Some(&mut grad),
+                &mut run_rng,
+            )
+            .expect("search");
+            let recorded = out
+                .best_state
+                .as_ref()
+                .expect("the opening minimum is the record");
+            assert!(
+                separation(recorded.view(), &best) <= 1.0e-18,
+                "the opening quench is the recorded minimum"
+            );
+            assert!(
+                out.final_energy > out.best,
+                "the walker ends above the record"
+            );
+            Clock {
+                attempts,
+                escapes: out.stall_escapes,
+                best: out.best,
+            }
+        }
+
+        let aligned = clock(true, true);
+        let silent = clock(true, false);
+        let live = clock(false, true);
+        assert_eq!(aligned.best, -2.0);
+        assert!(
+            aligned.escapes >= 1,
+            "an aligned leave climbs the record ({aligned:?})"
+        );
+        assert!(
+            aligned.attempts >= 1 && aligned.attempts <= 6,
+            "a climb that runs consumes the plateau ({aligned:?})"
+        );
+        assert_eq!(
+            live.escapes, 0,
+            "the live walker is not the record, so an unaligned leave does not run ({live:?})"
+        );
+        assert_eq!(
+            silent.escapes, 0,
+            "a refused record produces no stall response"
+        );
+        assert!(
+            silent.attempts > aligned.attempts * 2,
+            "a leave that does not run stays due ({silent:?} against {aligned:?})"
+        );
+    }
+
     #[test]
     fn exchange_scans_read_raw_energies_only_for_two_labels() {
         // A zero-step call is not charged, so it does not move the budget.
