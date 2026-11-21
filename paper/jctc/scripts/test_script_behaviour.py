@@ -530,9 +530,10 @@ def test_house_drawers_write_pdfs(tmp_path: Path) -> None:
     import fig_rec_arms
     import figstyle
 
-    assert fig_algorithm_stack.POTENTIALS == (
-        "Lennard-Jones", "Morse", "Sutton-Chen", "Gupta", "TIP4P", "GFN2-xTB",
+    assert fig_algorithm_stack.RGPOT_POTENTIALS == (
+        "Lennard-Jones", "Morse", "Gupta", "binary LJ",
     )
+    assert fig_algorithm_stack.NATIVE_POTENTIALS == ("TIP4P", "Sutton-Chen")
     assert fig_rec_arms.ARMS == (
         "single", "surface", "sym", "burst", "soap", "dls-kernel",
     )

@@ -30,8 +30,10 @@ f3cd2a0fa0aae6af10373772466aa66fedd28d3d6eaead88ef43664c1f8b94ec
 
 The current files were regenerated from the scripts listed in
 `FIGURE-SOURCE.tsv`.
-The stack lists only Lennard-Jones, Morse, Sutton-Chen, Gupta, TIP4P, and
-GFN2-xTB.
+The stack routes Lennard-Jones, Morse, Gupta, and binary Lennard-Jones
+through the rgpot kernel table. TIP4P and Sutton-Chen use the native
+implementations. The offline GFN2-xTB reference relaxation is not in the
+search stack.
 The arm figure uses the six move names from the implementation:
 single, surface, sym, burst, soap, and dls-kernel.
 
@@ -43,7 +45,7 @@ f293f076357068b50c437d39f6cbdfc15cc00e04dff693beda7e4f3727911778
 
 New hash.
 
-7b9888fcccfae129c97c662ecacb3b7c0e7d2a142e8945f9fa5160c842216bbe
+c411e78b0d7f534d8a56d9e101b52fc1998b76c7b0c99ea8ad613fbf597c2006
 
 Row 2 is rec_arms.pdf.
 

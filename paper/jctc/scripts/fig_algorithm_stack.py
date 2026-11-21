@@ -5,9 +5,9 @@
 The top band is the state held by one chain. The middle band is one hop: the
 Thompson draw over the arms from the Normal-Gamma posterior of eq:thompson,
 the proposal and quench, the acceptance test at T = 0.8, and the depth of
-eq:depth that updates the posterior. The bottom band is rgpot, through which
-the six potentials used by the reported calculations reach the hop. No run
-enters the figure.
+eq:depth that updates the posterior. The bottom band separates the four
+rgpot kernels from the two potentials implemented by anneal itself. No
+offline reference relaxation enters the search stack.
 
 Usage: fig_algorithm_stack.py OUT.pdf
 """
@@ -22,9 +22,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import figstyle
 
-POTENTIALS = (
-    "Lennard-Jones", "Morse", "Sutton-Chen", "Gupta", "TIP4P", "GFN2-xTB",
-)
+RGPOT_POTENTIALS = ("Lennard-Jones", "Morse", "Gupta", "binary LJ")
+NATIVE_POTENTIALS = ("TIP4P", "Sutton-Chen")
 WIDTH = figstyle.DOUBLE
 HEIGHT = 3.35
 BANDS = (
@@ -92,12 +91,25 @@ def draw(out: Path) -> None:
         ax, (accept[0] + accept[2] / 2, temperature[1] + temperature[3]), (accept[0] + accept[2] / 2, row),
     )
 
-    engine = figstyle.box(ax, 0.15, 0.18, 1.2, 0.52, "rgpot: energy and\nforces through\none interface")
-    chip, gap, left = 0.78, 0.05, 1.45
-    for i, name in enumerate(POTENTIALS):
-        column, line = i % 6, i // 6
-        figstyle.box(ax, left + column * (chip + gap), 0.45 - line * 0.27, chip, 0.22, name, size=figstyle.SMALLEST)
-    figstyle.arrow(ax, (engine[0] + engine[2], 0.44), (left, 0.44), both=True)
+    rgpot = figstyle.box(ax, 0.15, 0.18, 1.05, 0.52, "rgpot\nkernels")
+    chip, gap, left = 0.72, 0.05, 1.3
+    for i, name in enumerate(RGPOT_POTENTIALS):
+        figstyle.box(
+            ax, left + i * (chip + gap), 0.33, chip, 0.22, name,
+            size=figstyle.SMALLEST,
+        )
+    figstyle.arrow(ax, (rgpot[0] + rgpot[2], 0.44), (left, 0.44), both=True)
+
+    native = figstyle.box(ax, 4.48, 0.18, 1.02, 0.52, "native\nanneal")
+    for i, name in enumerate(NATIVE_POTENTIALS):
+        y = 0.45 - i * 0.27
+        figstyle.box(ax, 5.62, y, 0.75, 0.22, name, size=figstyle.SMALLEST)
+        figstyle.arrow(
+            ax, (native[0] + native[2], y + 0.11), (5.62, y + 0.11),
+            both=True,
+        )
+    figstyle.arrow(ax, (rgpot[0] + rgpot[2] / 2, rgpot[1] + rgpot[3]), ENGINE_ROUTE[0])
+    figstyle.arrow(ax, (native[0] + native[2] / 2, native[1] + native[3]), ENGINE_ROUTE[0])
     route = MplPath(ENGINE_ROUTE, [MplPath.MOVETO] + [MplPath.LINETO] * (len(ENGINE_ROUTE) - 1))
     ax.add_patch(FancyArrowPatch(
         path=route, arrowstyle="<|-|>", mutation_scale=7, color=figstyle.BLACK, linewidth=0.7,

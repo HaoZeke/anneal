@@ -393,14 +393,12 @@ the main text, with two builds of that source.
 Both builds take the same calls to the same minimum on every seed, and their
 median outside seconds differ by at most 3.0\% on each cluster, with every
 \(p\) at or above 0.23.
-The rows are copied from commit \texttt{9178884e} of
-\texttt{record/outside-perf3-r2}, as \path{paper/jctc/data/outside_perf/PROVENANCE}
-names, and \path{paper/jctc/scripts/outside_table.py} writes the table.
-The same record also contains a \texttt{new} arm at revision
-\texttt{1e38f2dacd9981fa9602381cebf1bca108b97230}, which is outside the
-history of the submitted revision,
-for all seven systems.
-It also contains all three arms for BLJ\(_{55}\) at size ratio 1.30 and
+The row file is the exact \texttt{develop} and \texttt{develop\_prime}
+projection of commit \texttt{9178884e} on
+\texttt{record/outside-perf3-r2}, as
+\path{paper/jctc/data/outside_perf/PROVENANCE} names, and
+\path{paper/jctc/scripts/outside_table.py} writes the table.
+It also contains both builds for BLJ\(_{55}\) at size ratio 1.30 and
 BLJ\(_{38}\) at size ratio 1.05, systems not used in this article.
 Those arms and systems are retained in the committed row file but are not
 printed.

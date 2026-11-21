@@ -1963,8 +1963,26 @@ OUTSIDE_DATA = "paper/jctc/data/outside_perf"
 
 def outside_session(audit: Audit) -> None:
     """tab:si-outside is the two builds of 61fa67cf in record/outside-perf3-r2, recomputed from its per-seed rows."""
-    path = imported(audit, OUTSIDE_DATA)
     fields = dict(line.split(" ", 1) for line in audit.text(f"{OUTSIDE_DATA}/PROVENANCE").splitlines())
+    path = f"{OUTSIDE_DATA}/rows.csv"
+    source = git("show", f"{fields['commit']}:{fields['source']}").stdout
+    audit.cell(path, "blob of the record source", fields["source_blob"],
+               git("rev-parse", f"{fields['commit']}:{fields['source']}").stdout.strip())
+    source_rows = list(csv.DictReader(io.StringIO(source)))
+    selected = [row for row in source_rows if row["arm"] in ("develop", "develop_prime")]
+    projected = io.StringIO()
+    writer = csv.DictWriter(projected, fieldnames=source_rows[0], lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(selected)
+    audit.cell(path, "blob of the reachable-arm projection", fields["blob"],
+               git("hash-object", "--stdin", stdin=projected.getvalue()).stdout.strip())
+    audit.cell(path, "blob of the committed projection", fields["blob"],
+               git("hash-object", str(ROOT / path)).stdout.strip())
+    audit.cell(path, "selection from the record source", "arms develop,develop_prime", fields["selection"])
+    on_branch = git("merge-base", "--is-ancestor", fields["commit"],
+                    f"refs/remotes/origin/{fields['branch']}").returncode == 0
+    audit.record(on_branch, path, "the record commit is on the record branch of origin",
+                 fields["branch"], "on it" if on_branch else "not on it")
     audit.cell(f"{OUTSIDE_DATA}/PROVENANCE", "tree of the record commit", fields["tree"],
                git("rev-parse", f"{fields['commit']}^{{tree}}").stdout.strip())
     ancestor_of(audit, path, fields["ancestor"])
@@ -1985,14 +2003,13 @@ def outside_session(audit: Audit) -> None:
         audit.record(word not in flat, SI, f"the outside table prints no {word} arm or system", "absent",
                      "absent" if word not in flat else "present")
     rows = audit.rows(path)
-    new = [row for row in rows if row["arm"] == "new"]
     blj = [row for row in rows if row["system"] in ("blj55s130", "blj38s105")]
-    audit.cell(path, "unprinted new-arm rows", "84", float(len(new)))
-    audit.cell(path, "unprinted BLJ rows", "72", float(len(blj)))
-    audit.said(SI, "The same record also contains a \\texttt{new} arm at revision\n"
-                   "\\texttt{1e38f2dacd9981fa9602381cebf1bca108b97230}, which is outside the\n"
-                   "history of the submitted revision,\nfor all seven systems.")
-    audit.said(SI, "It also contains all three arms for BLJ\\(_{55}\\) at size ratio 1.30 and\n"
+    audit.cell(path, "unprinted BLJ rows", "48", float(len(blj)))
+    audit.cell(path, "code revisions", "61fa67cf380e46876b569da45e7cc091647a775b",
+               ",".join(sorted({row["code_revision"] for row in rows})))
+    audit.said(SI, "The row file is the exact \\texttt{develop} and \\texttt{develop\\_prime}\n"
+                   "projection of commit \\texttt{9178884e}")
+    audit.said(SI, "It also contains both builds for BLJ\\(_{55}\\) at size ratio 1.30 and\n"
                    "BLJ\\(_{38}\\) at size ratio 1.05, systems not used in this article.")
 
 
@@ -4229,15 +4246,39 @@ def science_claims(audit: Audit) -> None:
         audit.record(word not in stack, "paper/jctc/scripts/fig_algorithm_stack.py",
                      f"the reported-run stack figure does not draw {word}", "absent",
                      "absent" if word not in stack else "present")
-    potential_tuple = (
-        'POTENTIALS = (\n'
-        '    "Lennard-Jones", "Morse", "Sutton-Chen", "Gupta", "TIP4P", "GFN2-xTB",\n'
-        ')'
-    )
-    audit.record(potential_tuple in stack, "paper/jctc/scripts/fig_algorithm_stack.py",
-                 "the stack figure lists exactly the reported potentials",
-                 "Lennard-Jones, Morse, Sutton-Chen, Gupta, TIP4P, GFN2-xTB",
-                 "exact" if potential_tuple in stack else "other")
+    def figure_tuple(name: str) -> tuple[str, ...]:
+        match = re.search(rf"^{name}\s*=\s*\(([^)]*)\)", stack, re.M | re.S)
+        return tuple(re.findall(r'"([^"]+)"', match.group(1))) if match else ()
+
+    kernel_source = audit.text("src/potentials.rs")
+    kernel_block = kernel_source.split("pub struct ClusterKernels {", 1)[1].split("\n}", 1)[0]
+    kernel_fields = re.findall(r"pub\s+([a-z_]+)\s*:", kernel_block)
+    kernel_labels = {
+        "cluster_lj": "Lennard-Jones",
+        "cambridge_morse": "Morse",
+        "gupta": "Gupta",
+        "binary_lj": "binary LJ",
+    }
+    dispatched = tuple(kernel_labels.get(field, f"unknown:{field}") for field in kernel_fields)
+    drawn_rgpot = figure_tuple("RGPOT_POTENTIALS")
+    audit.record(drawn_rgpot == dispatched, "paper/jctc/scripts/fig_algorithm_stack.py",
+                 "the rgpot figure row is derived from ClusterKernels",
+                 ", ".join(dispatched), ", ".join(drawn_rgpot))
+    drawn_native = figure_tuple("NATIVE_POTENTIALS")
+    native = ("TIP4P", "Sutton-Chen")
+    audit.record(drawn_native == native, "paper/jctc/scripts/fig_algorithm_stack.py",
+                 "the native figure row lists the in-tree search potentials",
+                 ", ".join(native), ", ".join(drawn_native))
+    audit.said("src/potentials/tip4p.rs", "pub struct Tip4pCluster")
+    audit.said("src/potentials/sutton_chen.rs", "pub struct SuttonChen")
+    audit.record("GFN2-xTB" not in stack, "paper/jctc/scripts/fig_algorithm_stack.py",
+                 "the search stack excludes the offline GFN2 reference relaxation",
+                 "absent", "absent" if "GFN2-xTB" not in stack else "present")
+    audit.said(TEX, "The lower band separates the rgpot Lennard-Jones, Morse, Gupta, and binary\n"
+                    "Lennard-Jones kernels from the native TIP4P and Sutton--Chen implementations;\n"
+                    "offline reference relaxations are not part of the search stack.")
+    audit.said(TEX, "the lowest of the archived GFN2-xTB water hexamers after relaxation\n"
+                    "with xtb 6.7.1")
     for unused in ("EMT", "EAM", "Stillinger-Weber", "Tersoff",
                    "GFN-FF", "PBE/6-31G*", "PET-MAD"):
         audit.record(f'"{unused}"' not in stack, "paper/jctc/scripts/fig_algorithm_stack.py",

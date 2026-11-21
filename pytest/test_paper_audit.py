@@ -424,6 +424,18 @@ def test_an_outside_provenance_with_another_tree_is_reported():
     assert [r[2] for r in audit.drifts()] == ["tree of the record commit"]
 
 
+def test_an_unreachable_outside_arm_is_reported():
+    audit = audit_mod.Audit()
+    path = f"{audit_mod.OUTSIDE_DATA}/rows.csv"
+    rows = audit.rows(path)
+    old = "61fa67cf380e46876b569da45e7cc091647a775b"
+    assert rows[0]["code_revision"] == old
+    rows[0]["code_revision"] = "1e38f2dacd9981fa9602381cebf1bca108b97230"
+    audit_mod.outside_session(audit)
+    descriptions = {r[2] for r in audit.drifts()}
+    assert "code revisions" in descriptions
+
+
 def test_a_drifted_outside_cell_is_reported():
     audit = audit_mod.Audit()
     si = audit.text(audit_mod.SI)
@@ -1471,10 +1483,9 @@ def test_reported_run_figures_exclude_unused_components_and_crossings():
     audit = audit_mod.Audit()
     stack = audit.text("paper/jctc/scripts/fig_algorithm_stack.py")
     assert audit_mod.stack_route_clears_temperature(stack)
-    assert (
-        '"Lennard-Jones", "Morse", "Sutton-Chen", "Gupta", "TIP4P", "GFN2-xTB"'
-        in stack
-    )
+    assert '("Lennard-Jones", "Morse", "Gupta", "binary LJ")' in stack
+    assert '("TIP4P", "Sutton-Chen")' in stack
+    assert "GFN2-xTB" not in stack
     arms = audit.text("paper/jctc/scripts/fig_rec_arms.py")
     assert '("single", "surface", "sym", "burst", "soap", "dls-kernel")' in arms
     crossing = stack.replace("(2.25, 0.74)", "(3.15, 0.74)").replace(
@@ -1491,9 +1502,22 @@ def test_unused_potential_and_wrong_arm_label_are_reported():
     audit.text_cache[arms_path] = audit.text(arms_path).replace('"dls-kernel"', '"lattice"')
     audit_mod.science_claims(audit)
     descriptions = {r[2] for r in audit.drifts()}
-    assert "the stack figure lists exactly the reported potentials" in descriptions
+    assert "the rgpot figure row is derived from ClusterKernels" in descriptions
     assert "the stack figure excludes unused potential EMT" in descriptions
     assert "the arm figure uses the six ClusterMove names" in descriptions
+
+
+def test_stack_potentials_follow_the_kernel_dispatch():
+    audit = audit_mod.Audit()
+    source = audit.text("src/potentials.rs")
+    old = "    pub binary_lj: fn("
+    assert old in source
+    audit.text_cache["src/potentials.rs"] = source.replace(
+        old, "    pub omitted_binary_lj: fn(", 1)
+    audit_mod.science_claims(audit)
+    assert "the rgpot figure row is derived from ClusterKernels" in {
+        r[2] for r in audit.drifts()
+    }
 
 
 def test_default_screen_cannot_be_described_as_the_margin_path():
