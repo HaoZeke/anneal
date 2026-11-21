@@ -1022,6 +1022,10 @@ fn polish(
     out.set_item("n_grads", result.n_grads)?;
     out.set_item("projected_grad_norm", result.projected_grad_norm)?;
     out.set_item("projected_stationary", result.projected_stationary)?;
+    out.set_item(
+        "best_grad",
+        result.best_grad.map(|g| PyArray1::from_vec(py, g.to_vec())),
+    )?;
     errors.finish(py)?;
     Ok(out.into())
 }
@@ -1896,6 +1900,12 @@ fn portfolio_result_to_dict(
     }
     out.set_item("arm_pulls", pulls)?;
     out.set_item("arm_successes", successes)?;
+    out.set_item(
+        "hop_state",
+        result
+            .hop_state
+            .map(|pair| (PyArray1::from_vec(py, pair.pos.to_vec()), pair.val)),
+    )?;
     Ok(out.into())
 }
 
@@ -2433,11 +2443,13 @@ fn box_ensemble_optimize(
     let out = PyDict::new(py);
     out.set_item("best_val", result.best_val)?;
     out.set_item("best_pos", py_view1(py, result.best_pos.view()))?;
+    out.set_item("charged", result.n_evals.saturating_add(result.n_grads))?;
     out.set_item("n_evals", result.n_evals)?;
     out.set_item("n_grads", result.n_grads)?;
     out.set_item("hops", result.hops)?;
     out.set_item("history_observations", result.history_observations)?;
     out.set_item("history_minima", result.history_minima)?;
+    out.set_item("history_attempts", result.history_cost.0)?;
     out.set_item("history_refusals", result.history_cost.1)?;
     out.set_item("history_seconds", result.history_cost.2)?;
     out.set_item("shared_deposits", result.shared_deposits)?;
@@ -2629,6 +2641,7 @@ fn ensemble_optimize(
     out.set_item("hops", result.hops)?;
     out.set_item("history_observations", result.history_observations)?;
     out.set_item("history_minima", result.history_minima)?;
+    out.set_item("history_attempts", result.history_cost.0)?;
     out.set_item("history_refusals", result.history_cost.1)?;
     out.set_item("history_seconds", result.history_cost.2)?;
     out.set_item("coverage_observations", result.coverage.local_observations)?;
@@ -3338,6 +3351,83 @@ impl PyLedger {
         self.inner.best
     }
 
+    /// State attaining `best`, or `None` before any finite record.
+    #[getter]
+    fn best_state<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f64>>> {
+        self.inner
+            .best_state
+            .as_ref()
+            .map(|state| PyArray1::from_vec(py, state.to_vec()))
+    }
+
+    /// Threshold installed by `stop_below`, if any.
+    #[getter]
+    fn target(&self) -> Option<f64> {
+        self.inner.target()
+    }
+
+    /// Whether the incumbent has reached the installed threshold.
+    #[getter]
+    fn target_reached(&self) -> bool {
+        self.inner.target_reached()
+    }
+
+    /// Whether a caller stop flag is raised on this ledger.
+    #[getter]
+    fn stopped(&self) -> bool {
+        self.inner.stopped()
+    }
+
+    /// Charged calls spent tightening recorded answers after the hop.
+    #[getter]
+    fn answer_polish_calls(&self) -> usize {
+        self.inner.answer_polish_calls()
+    }
+
+    /// Number of initial-quench redraws after a non-finite start.
+    #[getter]
+    fn start_redraws(&self) -> usize {
+        self.inner.start_redraws().len()
+    }
+
+    /// `(spent, energy)` pairs recorded each time the incumbent improved.
+    #[getter]
+    fn encounters(&self) -> Vec<(usize, f64)> {
+        self.inner.encounters().to_vec()
+    }
+
+    /// Stop once a recorded energy is at or below `energy`.
+    fn stop_below(&mut self, energy: f64) {
+        self.inner.stop_below(energy);
+    }
+
+    /// Whether `energy` meets the installed target threshold.
+    fn below_target(&self, energy: f64) -> bool {
+        self.inner.below_target(energy)
+    }
+
+    /// Charge one evaluation, returning `False` once exhausted or stopped.
+    fn charge(&mut self) -> bool {
+        self.inner.charge()
+    }
+
+    /// Charge `n` evaluations at once, returning `False` if short of room.
+    fn charge_many(&mut self, n: usize) -> bool {
+        self.inner.charge_many(n)
+    }
+
+    /// Charge a fractional evaluation, settling whole units as debt crosses 1.
+    fn charge_frac(&mut self, frac: f64) -> bool {
+        self.inner.charge_frac(frac)
+    }
+
+    /// Record `(value, state)` when `value` is finite and improves `best`.
+    fn record(&mut self, value: f64, state: PyReadonlyArray1<'_, f64>) -> PyResult<()> {
+        let slice = state.as_slice()?;
+        self.inner.record(value, ArrayView1::from(slice));
+        Ok(())
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "Ledger(budget={}, spent={}, best={:?})",
@@ -3597,6 +3687,10 @@ fn cluster_archive_search<O: eindir_core::gradient::DifferentiableObjective<f64>
     dict.set_item("best_energy", out.best)?;
     dict.set_item("hops", out.full)?;
     dict.set_item("charged", out.charged)?;
+    dict.set_item("screens", out.screens)?;
+    dict.set_item("same_floor", out.same_floor)?;
+    dict.set_item("artn", out.artn)?;
+    dict.set_item("best_at", out.best_at)?;
     dict.set_item("floors", out.floors)?;
     dict.set_item("returned", out.returned)?;
     dict.set_item("events", out.events)?;
@@ -4164,12 +4258,12 @@ fn cluster_search(
         None
     };
     let extent = cfg.container.max(1.0) * 4.0;
-    let (out, stats) = if let Some(pot) = native_pot.as_ref() {
+    let ((out, stats), phase) = if let Some(pot) = native_pot.as_ref() {
         if ras {
             return cluster_archive_search(py, pot, &cfg, &mut ledger, seed);
         }
         py.detach(|| {
-            if interleaved {
+            let run = if interleaved {
                 let chart = InterleavedChart {
                     inner: pot,
                     n_molecules: n,
@@ -4213,7 +4307,8 @@ fn cluster_search(
                 )
             } else {
                 crate::methods::cluster_search::search(pot, &cfg, &mut ledger, seed)
-            }
+            };
+            run.map(|pair| (pair, crate::methods::cluster_search::last_search_phase()))
         })
         .map_err(|err| PyValueError::new_err(err.to_string()))?
     } else {
@@ -4302,8 +4397,9 @@ fn cluster_search(
             crate::methods::cluster_search::search(&obj, &cfg, &mut ledger, seed)
         }
         .map_err(|err| PyValueError::new_err(err.to_string()))?;
+        let phase = crate::methods::cluster_search::last_search_phase();
         errors.finish(py)?;
-        res
+        (res, phase)
     };
     let best_block = out
         .best_state
@@ -4314,11 +4410,41 @@ fn cluster_search(
     } else {
         best_block
     };
+    let final_arr = out.final_state.map(|value| {
+        let block = value.to_vec();
+        let coords = if interleaved {
+            crate::potentials::interleaved_gmin_from_block(&block)
+        } else {
+            block
+        };
+        PyArray1::from_vec(py, coords)
+    });
     let dict = PyDict::new(py);
     dict.set_item("best", PyArray1::from_vec(py, best))?;
     dict.set_item("best_energy", out.best)?;
+    dict.set_item("final", final_arr)?;
+    dict.set_item("final_energy", out.final_energy)?;
+    dict.set_item("spent", ledger.spent())?;
     dict.set_item("hops", out.hops)?;
     dict.set_item("accepted", out.accepted)?;
+    dict.set_item("basins", out.basins)?;
+    dict.set_item("screened_out", out.screened_out)?;
+    dict.set_item("restarts", out.restarts)?;
+    dict.set_item("visit_counts", out.visit_counts)?;
+    dict.set_item("escape_scale", out.escape_scale)?;
+    dict.set_item("escape_threshold", out.escape_threshold)?;
+    dict.set_item("merge_radius", out.merge_radius)?;
+    dict.set_item("mean_step", out.mean_step)?;
+    dict.set_item("arms", out.arms)?;
+    dict.set_item("improvements", out.improvements)?;
+    dict.set_item(
+        "stop",
+        out.stop
+            .as_ref()
+            .map(crate::methods::cluster_hopping::HopStop::code),
+    )?;
+    dict.set_item("quenched", out.quenched)?;
+    dict.set_item("energy_trace", out.energy_trace)?;
     dict.set_item("nve_unavailable", out.nve_unavailable)?;
     let quench = match stats.local_step {
         LocalStep::Tric => "tric",
@@ -4326,6 +4452,18 @@ fn cluster_search(
     };
     dict.set_item("local_step", quench)?;
     dict.set_item("quench_seconds", stats.quench_seconds)?;
+    dict.set_item("converged", stats.converged)?;
+    dict.set_item("capped", stats.capped)?;
+    dict.set_item("screens", stats.screens)?;
+    dict.set_item("screen_charged", stats.screen_charged)?;
+    dict.set_item("full_charged", stats.full_charged)?;
+    dict.set_item("check_charged", stats.check_charged)?;
+    dict.set_item("overlap_rejected", stats.overlap_rejected)?;
+    dict.set_item("refused", stats.refused)?;
+    dict.set_item("screen_steps_taken", stats.screen_steps_taken)?;
+    dict.set_item("search_seconds", phase.search_seconds)?;
+    dict.set_item("polish_seconds", phase.polish_seconds)?;
+    dict.set_item("polish_calls", phase.polish_calls)?;
     Ok(dict.into())
 }
 

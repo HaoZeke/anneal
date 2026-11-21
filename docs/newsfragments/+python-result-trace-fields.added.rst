@@ -1,0 +1,1 @@
+Exposed full ``Outcome``, ``RelaxStats``, ``SearchPhase``, and ``ArchiveOutcome`` diagnostics from ``cluster_search``, ``Ledger`` target/charging/encounter methods, ``best_grad`` from ``polish``, ``hop_state`` from ``global_optimize``, and ``history_attempts`` / ``charged`` from ``box_ensemble_optimize`` and ``ensemble_optimize``.

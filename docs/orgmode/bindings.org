@@ -45,6 +45,22 @@ surface (=identity_tol=, =shared_deposits=, =shared_visit_policy=,
 =w0 >= 0= along with =merge_radius=, =height=, =well_depth=, =wells=,
 =deepest_wells=, and =cap_basins=.
 
+=cluster_search= returns full =Outcome=, =RelaxStats=, and =SearchPhase=
+diagnostics (=spent=, =final=, =final_energy=, =basins=, =screened_out=,
+=restarts=, =visit_counts=, =escape_scale=, =escape_threshold=,
+=merge_radius=, =mean_step=, =arms=, =improvements=, =stop=, =quenched=,
+=energy_trace=, =converged=, =capped=, =screens=, =screen_charged=,
+=full_charged=, =check_charged=, =overlap_rejected=, =refused=,
+=screen_steps_taken=, =search_seconds=, =polish_seconds=, =polish_calls=;
+plus =screens=, =same_floor=, =artn=, and =best_at= under =ras=True=).
+=Ledger= exposes =best_state=, =target=, =target_reached=, =stopped=,
+=answer_polish_calls=, =start_redraws=, =encounters=, =stop_below=,
+=below_target=, =charge=, =charge_many=, =charge_frac=, and =record=.
+=polish= includes =best_grad=, =global_optimize= and
+=global_optimize_objective= include =hop_state=, and
+=box_ensemble_optimize= and =ensemble_optimize= report
+=history_attempts= alongside =charged=.
+
 * C and C++ (cargo-c)
 
 The Rust crate produces a =cdylib=, =staticlib=, generated header =anneal-core.h=, and pkg-config metadata =anneal-core.pc= via cargo-c.

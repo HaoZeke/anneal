@@ -375,7 +375,7 @@ class Anneal:
             length_scale=_nn_length_scale(self.atoms),
         )
         _set_positions(self.atoms, out["best"])
-        self.charged += int(out.get("charged", 0) or 0)
+        self.charged += int(out.get("charged", out.get("spent", 0)) or 0)
         self._did_search = True
         self.nsteps += 1
         self.log()

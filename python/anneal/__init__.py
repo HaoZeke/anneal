@@ -416,6 +416,8 @@ def cluster_search(
         kwargs["config"] = config
     out = _core_cluster_search(*args, **kwargs)
     out["best"] = np.asarray(out["best"], dtype=np.float64)
+    if out.get("final") is not None:
+        out["final"] = np.asarray(out["final"], dtype=np.float64)
     return out
 
 
@@ -523,6 +525,8 @@ def polish(
         float(grad_tol),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
+    if out.get("best_grad") is not None:
+        out["best_grad"] = np.asarray(out["best_grad"], dtype=np.float64)
     return out
 
 
@@ -1755,6 +1759,9 @@ def global_optimize(
         coverage_peer_weight=float(coverage_peer_weight),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
+    if out.get("hop_state") is not None:
+        pos, val = out["hop_state"]
+        out["hop_state"] = (np.asarray(pos, dtype=np.float64), float(val))
     return out
 
 
@@ -1779,6 +1786,9 @@ def global_optimize_objective(
         policy=str(policy),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
+    if out.get("hop_state") is not None:
+        pos, val = out["hop_state"]
+        out["hop_state"] = (np.asarray(pos, dtype=np.float64), float(val))
     return out
 
 
