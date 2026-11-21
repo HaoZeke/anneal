@@ -26,3 +26,20 @@ def energy_hits(energy: float, target: float, tol: float = DEFAULT_HIT_TOL) -> b
     t = float(target)
     w = float(tol)
     return w >= 0.0 and e <= t + w
+
+
+def energy_matches_reference(
+    energy: float, reference: float, tol: float = DEFAULT_HIT_TOL
+) -> bool:
+    """Return whether ``energy`` is within ``tol`` of ``reference``.
+
+    This two-sided predicate scores reproduction of a declared minimum.
+    ``energy_hits`` remains the one-sided predicate for stopping thresholds.
+    """
+    if not (
+        math.isfinite(energy)
+        and math.isfinite(reference)
+        and math.isfinite(tol)
+    ):
+        return False
+    return tol >= 0.0 and abs(float(energy) - float(reference)) <= float(tol)

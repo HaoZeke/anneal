@@ -3532,8 +3532,8 @@ fn rigid_probe(
 ///     `communicating`, `length_scale`, `rigid`, `sigmas`, `water_sites`
 ///     and a non-block layout.
 ///   local_step: `lbfgs`, `tric` or `auto`, `Config::local_step` of a
-///     `groups` search. Unset keeps the preset's: `auto` for
-///     `recommended=True`, L-BFGS otherwise. The result's `local_step` is
+///     `groups` search. Unset keeps the preset's L-BFGS quench; pass
+///     `auto` or `tric` to opt in. The result's `local_step` is
 ///     the quench in force at the end, and `quench_seconds` the measured
 ///     seconds per potential call and per TRIC step under `auto`.
 ///   ring_moves: `Config::ring_moves` of a `groups` search, ring crankshafts
@@ -3860,7 +3860,7 @@ fn cluster_search(
         errors.finish(py)?;
         return out;
     }
-    let (out, stats) = if interleaved {
+    let result = if interleaved {
         let chart = InterleavedChart {
             inner: &obj,
             n_molecules: n,
@@ -3884,9 +3884,9 @@ fn cluster_search(
         crate::methods::cluster_search::search_from(&obj, &cfg, &mut ledger, started.view(), seed)
     } else {
         crate::methods::cluster_search::search(&obj, &cfg, &mut ledger, seed)
-    }
-    .map_err(|err| PyValueError::new_err(err.to_string()))?;
+    };
     errors.finish(py)?;
+    let (out, stats) = result.map_err(|err| PyValueError::new_err(err.to_string()))?;
     let best_block = out
         .best_state
         .map(|value| value.to_vec())

@@ -26,7 +26,7 @@
 
 use ndarray::{Array1, ArrayView1};
 
-use crate::methods::cluster_hopping::{Config, Ledger};
+use crate::methods::cluster_hopping::{Config, Ledger, SearchError};
 use crate::methods::cluster_search::search_from;
 use crate::potentials::{BinaryLennardJones, GminTip4p, gmin_water_geometry};
 
@@ -62,12 +62,14 @@ pub struct StockSearch {
     pub state: Vec<f64>,
     /// The wide-ratio escape was requested and the `rgsaddle` feature is off.
     pub nve_unavailable: bool,
+    /// Whether the search recorded a finite minimum.
+    pub ok: bool,
 }
 
 impl StockSearch {
     /// Whether the recorded energy is at or below `target`.
     pub fn success(&self, target: f64) -> bool {
-        crate::energy_hits(self.energy, target, 0.0)
+        self.ok && crate::energy_hits(self.energy, target, 0.0)
     }
 }
 
@@ -170,7 +172,12 @@ where
     if target.is_finite() {
         ledger.stop_below(target);
     }
-    let (out, _) = search_from(potential, cfg, &mut ledger, start, seed).expect("finite start");
+    let result = search_from(potential, cfg, &mut ledger, start, seed);
+    let (nve_unavailable, ok) = match result {
+        Ok((out, _)) => (out.nve_unavailable, true),
+        Err(SearchError::NoFiniteMinimum { .. }) => (false, false),
+        Err(error) => panic!("stock search failed: {error}"),
+    };
     let state = ledger
         .best_state
         .clone()
@@ -180,7 +187,8 @@ where
         energy: ledger.best,
         charged: ledger.spent(),
         state,
-        nve_unavailable: out.nve_unavailable,
+        nve_unavailable,
+        ok,
     }
 }
 
@@ -277,6 +285,7 @@ mod tests {
             charged: 0,
             state: Vec::new(),
             nve_unavailable: false,
+            ok: true,
         };
         assert!(!nan_run.success(0.0));
         assert!(hit.charged < 20_000, "charged {}", hit.charged);
@@ -629,6 +638,10 @@ mod tests {
         );
         assert_eq!(binary_entry.charged, 0, "binary charged after the stop");
         assert_eq!(water_entry.charged, 0, "TIP4P charged after the stop");
+        assert!(!binary_entry.ok, "non-finite binary result reported ok");
+        assert!(!water_entry.ok, "non-finite TIP4P result reported ok");
+        assert!(!binary_entry.success(f64::INFINITY));
+        assert!(!water_entry.success(f64::INFINITY));
         assert_eq!(binary_entry.state.len(), binary_start.len());
         assert_eq!(water_entry.state.len(), water_start.len());
     }

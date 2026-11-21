@@ -63,7 +63,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
     if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
         sys.path.insert(0, str(_candidate))
         break
-from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+from target_tol import DEFAULT_HIT_TOL, energy_matches_reference  # noqa: E402
 
 SEEDS = tuple(range(2000, 2012))
 HIT_TOL = DEFAULT_HIT_TOL
@@ -309,7 +309,7 @@ def binary_budget(bin_dir: Path, tree: Path, system: str) -> tuple[int, float]:
 def check_run_counts(
     label: str, hit: bool, best: float, reference: float, evals: int, charged: int, budget: int, wall: float, pot: float
 ) -> None:
-    if hit != energy_hits(best, reference, HIT_TOL):
+    if hit != energy_matches_reference(best, reference, HIT_TOL):
         raise RuntimeError(f"{label}: hit {int(hit)} with best {best} against {reference}")
     if hit and not (0 < evals <= charged <= budget):
         raise RuntimeError(f"{label}: hit reports evals {evals} charged {charged} budget {budget}")

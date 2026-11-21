@@ -240,13 +240,18 @@ fn stream_binary(
                 }
                 writeln!(
                     file.lock().expect("output"),
-                    "{{\"start\":{start},\"file\":\"{name}\",\"problem\":\"{problem_name}\",\"preset\":\"{preset}\",\"energy\":{:.10},\"charged\":{},\"success\":{}}}",
-                    found.energy, found.charged, success
+                    "{{\"start\":{start},\"file\":\"{name}\",\"problem\":\"{problem_name}\",\"preset\":\"{preset}\",\"energy\":{:.10},\"charged\":{},\"status\":\"{}\",\"success\":{}}}",
+                    found.energy,
+                    found.charged,
+                    if found.ok { "ok" } else { "failed" },
+                    success
                 )
                 .expect("write");
                 eprintln!(
-                    "{problem_name} {preset} start {start} energy {:.6} charged {} success {success}",
-                    found.energy, found.charged
+                    "{problem_name} {preset} start {start} energy {:.6} charged {} status {} success {success}",
+                    found.energy,
+                    found.charged,
+                    if found.ok { "ok" } else { "failed" }
                 );
             });
         }
@@ -304,13 +309,18 @@ fn stream_tip4p(
                 }
                 writeln!(
                     file.lock().expect("output"),
-                    "{{\"start\":{start},\"file\":\"{name}\",\"problem\":\"{problem_name}\",\"preset\":\"{preset}\",\"energy\":{:.10},\"charged\":{},\"success\":{}}}",
-                    found.energy, found.charged, success
+                    "{{\"start\":{start},\"file\":\"{name}\",\"problem\":\"{problem_name}\",\"preset\":\"{preset}\",\"energy\":{:.10},\"charged\":{},\"status\":\"{}\",\"success\":{}}}",
+                    found.energy,
+                    found.charged,
+                    if found.ok { "ok" } else { "failed" },
+                    success
                 )
                 .expect("write");
                 eprintln!(
-                    "{problem_name} {preset} start {start} energy {:.6} charged {} success {success}",
-                    found.energy, found.charged
+                    "{problem_name} {preset} start {start} energy {:.6} charged {} status {} success {success}",
+                    found.energy,
+                    found.charged,
+                    if found.ok { "ok" } else { "failed" }
                 );
             });
         }

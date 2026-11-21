@@ -1047,6 +1047,8 @@ rule gmin_panel:
         "scripts/gmin_panel/enter_bench.sh",
         "scripts/gmin_panel/build_gmin.sh",
         "scripts/gmin_panel/run_panel.py",
+        "scripts/target_tol.py",
+        "examples/h2h_metal.rs",
         "examples/h2h_gmin_lj.data",
         "examples/h2h_gmin_morse.data",
     output:
@@ -1122,4 +1124,21 @@ rule gmin_losses2:
         set -euo pipefail
         export OUTPUT=/work/gmin-losses2
         bash scripts/gmin_panel/enter_losses2.sh
+        """
+
+
+# (H2O)20 under GFN2 plus the O-H wall, anneal against CREST 3.0.2.
+# Same start per seed, random rigid waters, 28000 calls, seeds 2000-2011.
+# One UTS namespace, hostname bench, core 0. Rows are appended to
+# bench/h2o20-crest/seeds.csv. The output is a stamp under /work.
+# Not part of `rule all`.
+#   snakemake -s workflow/Snakefile h2o20_crest
+rule h2o20_crest:
+    output:
+        touch("/work/h2o20-fix2/stamps/panel.stamp"),
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/h2o20_crest/enter_onehost.sh
+        touch /work/h2o20-fix2/stamps/panel.stamp
         """

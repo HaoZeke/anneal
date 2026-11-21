@@ -324,11 +324,11 @@ def cluster_search(
         ``water_sites`` and a non-block layout.
       local_step: ``lbfgs``, ``tric`` or ``auto``, the optimizer of every
         quench of a ``groups`` search. ``tric`` relaxes in translation-rotation
-        internal coordinates, in electronvolt and angstrom. ``auto`` times the
-        opening Cartesian quench and keeps TRIC only when a potential call
-        costs more than a TRIC step. ``None`` keeps the preset's: ``auto`` for
-        ``recommended=True``, ``lbfgs`` otherwise. The result's
-        ``local_step`` names the quench in force at the end.
+        internal coordinates, in electronvolt and angstrom. ``auto`` times
+        the opening Cartesian quench and keeps TRIC only when a potential
+        call costs more than a TRIC step. ``None`` keeps the preset's
+        ``lbfgs`` quench; pass ``"auto"`` or ``"tric"`` to opt in. The
+        result's ``local_step`` names the quench in force at the end.
       ring_moves: ring crankshafts beside the torsion move of a ``groups``
         search: one arc of a flexible ring turns about the axis through the
         two ring atoms that bound it, which keeps every bond length.

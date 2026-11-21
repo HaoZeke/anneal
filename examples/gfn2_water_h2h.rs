@@ -284,6 +284,10 @@ fn force_audit_line(seed: u64, max_force: f64) -> String {
     )
 }
 
+fn failure_status(error: impl std::fmt::Display) -> String {
+    format!("status: failed\nsearch_error: {error}")
+}
+
 fn read_xyz(path: &std::path::Path) -> Vec<f64> {
     let text =
         fs::read_to_string(path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
@@ -368,7 +372,7 @@ fn main() {
     let species = water_species(m).expect("species");
     let groups = water_groups(m).expect("groups");
     let mut cfg = Config::recommended_molecular(species, groups.clone(), 1.0);
-    cfg.capped_lindh_quench = true;
+    cfg.capped_lindh_quench = std::env::var("H2H_CAPPED_LINDH").ok().as_deref() == Some("1");
     configure_water_arm(&mut cfg, WaterSearchArm::Recommended);
     cfg.target_energy = target_energy;
     cfg.move_library = MoveLibrary::Molecular {
@@ -551,7 +555,7 @@ fn main() {
     let (outcome, stats): (Outcome, RelaxStats) = match searched {
         Ok(pair) => pair,
         Err(error) => {
-            writeln!(meta, "search_error: {error}").ok();
+            writeln!(meta, "{}", failure_status(error)).ok();
             writeln!(meta, "hops: 0").ok();
             writeln!(meta, "objective_best_eV: nan").ok();
             writeln!(meta, "engine_best_eV: nan").ok();
@@ -566,11 +570,25 @@ fn main() {
             writeln!(meta, "{line}").ok();
             writeln!(meta, "final_best_evaluation: 0").ok();
             println!("{line}");
-            return;
+            std::process::exit(2);
         }
     };
+    writeln!(meta, "status: ok").ok();
     writeln!(meta, "hops: {}", outcome.hops).ok();
     writeln!(meta, "basins: {}", outcome.basins).ok();
+    let local_step = match stats.local_step {
+        anneal_core::methods::tric_opt::LocalStep::Tric => "tric",
+        _ => "lbfgs",
+    };
+    writeln!(meta, "local_step: {local_step}").ok();
+    if let Some((potential_call_s, tric_step_s)) = stats.quench_seconds {
+        writeln!(
+            meta,
+            "auto_potential_call_s: {potential_call_s:.9}\nauto_tric_step_s: {tric_step_s:.9}\nauto_outside_fraction: {:.6}",
+            tric_step_s / potential_call_s
+        )
+        .ok();
+    }
     let overlap_rejected = stats.overlap_rejected + outcome.overlap_rejected;
     writeln!(meta, "overlap_rejected: {overlap_rejected}").ok();
     writeln!(
@@ -658,4 +676,17 @@ fn main() {
         &format!("objective {engine_e:.10} eV wall {wall_e:.10} eV"),
     )
     .expect("best xyz");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::failure_status;
+
+    #[test]
+    fn non_finite_search_has_a_failed_user_status() {
+        assert_eq!(
+            failure_status("no finite minimum after 3000 evaluations"),
+            "status: failed\nsearch_error: no finite minimum after 3000 evaluations"
+        );
+    }
 }

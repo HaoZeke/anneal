@@ -45,7 +45,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
-from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+from target_tol import DEFAULT_HIT_TOL, energy_hits, energy_matches_reference  # noqa: E402
 
 TEX = "paper/jctc/manuscript.tex"
 SI = "paper/jctc/si.tex"
@@ -464,7 +464,7 @@ def gmin_panel_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[
         evals, charged = int(r["evals_to_hit"]), int(r["charged"])
         wall, pot, outside = float(r["wall_s"]), float(r["pot_s"]), float(r["outside_s"])
         ok = (
-            hit == energy_hits(best, ref, panel.HIT_TOL)
+            hit == energy_matches_reference(best, ref, panel.HIT_TOL)
             and (not hit or 0 < evals <= charged <= budget)
             and (hit or (evals == budget and charged == budget))
             and 0.0 <= pot <= wall + 2e-6

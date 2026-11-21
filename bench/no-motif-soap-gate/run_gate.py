@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import csv
 import importlib.util
+import math
 import os
 import shutil
 import socket
@@ -14,6 +15,11 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+from target_tol import DEFAULT_HIT_TOL, energy_matches_reference  # noqa: E402
 
 ROW_FIELDS = [
     "session",
@@ -205,7 +211,9 @@ def parse_budget(proc: subprocess.CompletedProcess[str]) -> tuple[int, float]:
     return int(lines[0]), float(lines[1])
 
 
-def parse_row(stdout: str, system: str, seed: int, budget: int) -> dict[str, str]:
+def parse_row(
+    stdout: str, system: str, seed: int, budget: int, reference: float
+) -> dict[str, str]:
     headers = [line for line in stdout.splitlines() if line.startswith("system,")]
     if not headers:
         raise RuntimeError(f"{system} seed {seed}: no CSV header in output")
@@ -222,8 +230,18 @@ def parse_row(stdout: str, system: str, seed: int, budget: int) -> dict[str, str
     wall = float(row["wall_s"])
     pot = float(row.get("pot_s", "0"))
     outside = float(row["outside_s"]) if "outside_s" in row else max(wall - pot, 0.0)
+    hit = row["hit"].strip().lower() in ("1", "true")
+    best = float(row["best"])
+    if not math.isfinite(best):
+        raise RuntimeError(f"{system} seed {seed}: non-finite best {row['best']}")
+    expected_hit = energy_matches_reference(best, reference, DEFAULT_HIT_TOL)
+    if hit != expected_hit:
+        raise RuntimeError(
+            f"{system} seed {seed}: hit {int(hit)} with best {best} "
+            f"against reference {reference} at tolerance {DEFAULT_HIT_TOL}"
+        )
     return {
-        "hit": "1" if row["hit"].strip().lower() in ("1", "true") else "0",
+        "hit": "1" if hit else "0",
         "evals_to_hit": str(int(float(row["evals_to_hit"]))),
         "charged": str(int(float(row.get("charged", row["evals_to_hit"])))),
         "best": row["best"],
@@ -494,7 +512,7 @@ def main(argv: list[str]) -> int:
                 log.write_text(" ".join(command) + f"\nexit={proc.returncode}\n" + proc.stdout + proc.stderr)
                 if proc.returncode != 0:
                     raise SystemExit(f"{panel} {system} seed {seed} arm {arm_name} failed; see {log}")
-                parsed = parse_row(proc.stdout, system, seed, budget)
+                parsed = parse_row(proc.stdout, system, seed, budget, reference)
                 row = {
                     "session": session,
                     "panel": panel,

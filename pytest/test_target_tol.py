@@ -253,13 +253,15 @@ def test_hq_sci_tally_boundary_below_and_nan(tmp_path: Path):
     assert "4/8=4/8" in out
 
 
-def test_gmin_panel_check_run_counts_boundary_below_and_nan():
+def test_gmin_panel_check_run_counts_boundary_off_reference_and_nan():
     mod = _load_module("test_gmin_panel_mod", "scripts/gmin_panel/run_panel.py")
     ref = -397.492331
     boundary = ref + mod.HIT_TOL
-    # Exact boundary and deeper-than-reference hits are valid.
+    # The exact upper boundary is valid, but a lower off-reference value is not.
     mod.check_run_counts("exact", True, boundary, ref, 100, 100, 1000, 1.0, 0.5)
-    mod.check_run_counts("below", True, ref - 5.0, ref, 100, 100, 1000, 1.0, 0.5)
+    mod.check_run_counts("below-miss", False, ref - 5.0, ref, 1000, 1000, 1000, 1.0, 0.5)
+    with pytest.raises(RuntimeError):
+        mod.check_run_counts("below-hit", True, ref - 5.0, ref, 100, 100, 1000, 1.0, 0.5)
     # 1 ULP above boundary is a miss, not a hit.
     above = math.nextafter(boundary, math.inf)
     mod.check_run_counts("above-miss", False, above, ref, 1000, 1000, 1000, 1.0, 0.5)

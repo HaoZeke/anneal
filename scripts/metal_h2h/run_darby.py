@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 import os
 import random
 import subprocess
@@ -29,7 +30,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
     if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
         sys.path.insert(0, str(_candidate))
         break
-from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+from target_tol import DEFAULT_HIT_TOL, energy_matches_reference  # noqa: E402
 
 PAPER_BUDGETS = {
     "au38": 400_000,
@@ -323,12 +324,22 @@ def as_result(system: str, arm: str, row: dict[str, str]) -> dict:
     wall = float(row["wall_s"])
     pot = float(row["pot_s"])
     outside = max(wall - pot, 0.0)
+    hit = row["hit"] in ("1", "true")
+    best = float(row["best"])
+    if not math.isfinite(best):
+        raise ValueError(f"{system} {arm} seed {row['seed']}: non-finite best {row['best']}")
+    expected_hit = energy_matches_reference(best, REFERENCES[system], DEFAULT_HIT_TOL)
+    if hit != expected_hit:
+        raise ValueError(
+            f"{system} {arm} seed {row['seed']}: hit {int(hit)} with best "
+            f"{best} against {REFERENCES[system]}"
+        )
     return {
         "system": system,
         "arm": arm,
         "seed": int(float(row["seed"])),
         "budget": int(float(row["budget"])),
-        "hit": row["hit"] in ("1", "true"),
+        "hit": hit,
         "evals": float(row["evals_to_hit"]),
         "wall_s": wall,
         "pot_per": pot / charged,

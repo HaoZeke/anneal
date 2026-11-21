@@ -359,11 +359,15 @@ def test_cluster_search_auto_quench_takes_tric_for_a_slow_gradient():
         return flexible_water(x, 2)[0]
 
     def grad(x):
-        time.sleep(0.003)
+        time.sleep(0.012)
         return flexible_water(x, 2)[1]
 
     kwargs = dict(start=WATER_DIMER, species=[8, 1, 1] * 2, groups=[[0, 1, 2], [3, 4, 5]], seed=2)
-    out = cluster_search(energy, grad, 6, 400, **kwargs)
+    default_out = cluster_search(energy, grad, 6, 120, **kwargs)
+    assert default_out["local_step"] == "lbfgs"
+    assert default_out["quench_seconds"] is None
+
+    out = cluster_search(energy, grad, 6, 400, local_step="auto", **kwargs)
     call, step = out["quench_seconds"]
     assert out["local_step"] == "tric", (call, step)
     assert call > step

@@ -24,9 +24,23 @@ pub fn energy_hits(energy: f64, target: f64, tol: f64) -> bool {
         && energy <= target + tol
 }
 
+/// Whether `energy` lies within `tol` of a declared reference energy.
+///
+/// Unlike [`energy_hits`], this is a two-sided identity check. It is used when
+/// a benchmark claims to have reproduced a named minimum rather than merely
+/// crossed an energy threshold.
+#[inline]
+pub fn energy_matches_reference(energy: f64, reference: f64, tol: f64) -> bool {
+    energy.is_finite()
+        && reference.is_finite()
+        && tol.is_finite()
+        && tol >= 0.0
+        && (energy - reference).abs() <= tol
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{DEFAULT_HIT_TOL, SEARCH_HIT_TOL, energy_hits};
+    use super::{DEFAULT_HIT_TOL, SEARCH_HIT_TOL, energy_hits, energy_matches_reference};
 
     #[test]
     fn exact_boundary_target_plus_tol_is_a_hit() {
@@ -62,6 +76,26 @@ mod tests {
         assert!(!energy_hits(-10.0, -10.0, f64::INFINITY));
         assert!(!energy_hits(-10.0, -10.0, f64::NEG_INFINITY));
         assert!(!energy_hits(-11.0, -10.0, -1.0e-12));
+    }
+
+    #[test]
+    fn reference_matches_reject_non_finite_and_off_reference_energies() {
+        let reference = -130.540_017_08;
+        assert!(!energy_matches_reference(
+            f64::INFINITY,
+            reference,
+            DEFAULT_HIT_TOL
+        ));
+        assert!(!energy_matches_reference(
+            -130.320_1,
+            reference,
+            DEFAULT_HIT_TOL
+        ));
+        assert!(energy_matches_reference(
+            reference + DEFAULT_HIT_TOL / 2.0,
+            reference,
+            DEFAULT_HIT_TOL
+        ));
     }
 
     #[test]
