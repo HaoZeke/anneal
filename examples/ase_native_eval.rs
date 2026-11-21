@@ -41,9 +41,22 @@ const MORSE_REFERENCES: &[(&str, usize, f64, i64, f64)] = &[
 ];
 
 enum Kind {
-    Lj { n: usize, budget: i64, reference: f64 },
-    Morse { n: usize, rho: f64, budget: i64, reference: f64 },
-    Gold { n: usize, budget: i64, reference: f64 },
+    Lj {
+        n: usize,
+        budget: i64,
+        reference: f64,
+    },
+    Morse {
+        n: usize,
+        rho: f64,
+        budget: i64,
+        reference: f64,
+    },
+    Gold {
+        n: usize,
+        budget: i64,
+        reference: f64,
+    },
 }
 
 fn system(name: &str) -> Option<Kind> {
@@ -113,7 +126,11 @@ struct Scales {
 
 fn scales_of(kind: &Kind) -> Scales {
     match *kind {
-        Kind::Lj { n, budget, reference } => Scales {
+        Kind::Lj {
+            n,
+            budget,
+            reference,
+        } => Scales {
             n,
             kind: "lj",
             epsilon: 1.0,
@@ -124,7 +141,12 @@ fn scales_of(kind: &Kind) -> Scales {
             reference,
             budget,
         },
-        Kind::Morse { n, rho, budget, reference } => Scales {
+        Kind::Morse {
+            n,
+            rho,
+            budget,
+            reference,
+        } => Scales {
             n,
             kind: "morse",
             epsilon: 1.0,
@@ -135,7 +157,11 @@ fn scales_of(kind: &Kind) -> Scales {
             reference,
             budget,
         },
-        Kind::Gold { n, budget, reference } => {
+        Kind::Gold {
+            n,
+            budget,
+            reference,
+        } => {
             let (length_scale, energy_scale) = gupta_scales();
             Scales {
                 n,
@@ -203,7 +229,7 @@ fn read_exact(input: &mut impl Read, bytes: &mut [u8]) -> io::Result<bool> {
                 return Err(io::Error::new(
                     io::ErrorKind::UnexpectedEof,
                     "short coordinate record",
-                ))
+                ));
             }
             Ok(n) => filled += n,
             Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
@@ -243,8 +269,8 @@ fn greedy_capped(a: &[f64], b: &[f64], n: usize, ceiling: f64, alive: &mut [bool
         let mut best_i = 0usize;
         let mut best_d2 = f64::INFINITY;
         let mut found = false;
-        for j in 0..n {
-            if !alive[j] {
+        for (j, &live) in alive.iter().enumerate().take(n) {
+            if !live {
                 continue;
             }
             let other = 3 * j;
