@@ -28,6 +28,7 @@ use rand::rngs::StdRng;
 use serde::Serialize;
 
 use crate::allocate::{DepthAllocator, RewardMoments};
+use crate::methods::stall_archive::same_minimum;
 use crate::surface_evidence::{
     MIN_TRANSFER_OBSERVATIONS, SourceTransferKey, SurfaceEvidenceBook, SurfaceEvidenceMessage,
     SurfaceReport,
@@ -599,9 +600,28 @@ pub struct SurfacePortfolio {
     restraint_block_failed: bool,
     /// Set when the search asks later blocks to hold the plain surface.
     plain_only: bool,
+    /// The run's best when the hold began.
+    held_at_best: f64,
+    /// Blocks held on the plain surface since the hold began.
+    held_blocks: usize,
+    /// The run's best when the last block settled.
+    settled_best: f64,
+    /// Blocks settled since the run's best last moved to a new minimum.
+    quiet_blocks: usize,
+    /// The longest such stretch, or the longest hold the stall lifted.
+    longest_quiet: usize,
+    /// The restraint arm of the last failed block.
+    failed_arm: Option<usize>,
+    /// The restraint arm the hold was set against.
+    held_against: Option<usize>,
     /// The call to [`Self::begin`] that opened the block now held.
     just_opened: bool,
     rng: StdRng,
+}
+
+/// Whether `energy` is a minimum below `incumbent`, not a requench of it.
+fn lower_minimum(energy: f64, incumbent: f64) -> bool {
+    energy < incumbent && (!incumbent.is_finite() || !same_minimum(energy, incumbent))
 }
 
 /// Hops an arm is held for before the allocator redraws.
@@ -662,6 +682,13 @@ impl SurfacePortfolio {
             block_lowest: f64::INFINITY,
             restraint_block_failed: false,
             plain_only: false,
+            held_at_best: f64::INFINITY,
+            held_blocks: 0,
+            settled_best: f64::INFINITY,
+            quiet_blocks: 0,
+            longest_quiet: 0,
+            failed_arm: None,
+            held_against: None,
             just_opened: false,
             rng: StdRng::seed_from_u64(seed ^ 0x5a2f_ace5),
         }
@@ -806,13 +833,28 @@ impl SurfacePortfolio {
         opened
     }
 
-    /// Later blocks hold the plain surface.
+    /// Later blocks hold the plain surface until the plain walk leaves
+    /// the basin or stalls.
     ///
     /// A restraint block that stopped beating the incumbent has reached a
     /// basin the restraint does not leave. The plain quench is what leaves
-    /// it, so the allocator is not asked for the restraint again.
+    /// it, so the restraint is not drawn while the chain is still in that
+    /// basin. A lower minimum means the plain walk has left it. A hold
+    /// that has gone more blocks without one than the run has ever gone
+    /// between new minima means the plain walk does not leave it either,
+    /// and that hold becomes the stretch the next one has to outlast.
+    ///
+    /// Either way the next block goes back to the restraint that failed,
+    /// from where the chain now stands, and its credit is the allocator's
+    /// evidence about the restraint outside the old basin. Without it the
+    /// one failure stays the arm's only evidence, and a failure far above
+    /// the incumbent keeps the restraint from being drawn again for the
+    /// rest of the run, however long the plain walk then stalls.
     pub fn hold_plain(&mut self) {
         self.plain_only = true;
+        self.held_at_best = self.latest_best;
+        self.held_blocks = 0;
+        self.held_against = self.failed_arm.take();
     }
 
     /// The surface for the relaxation about to start.
@@ -828,10 +870,26 @@ impl SurfacePortfolio {
             self.hops_in_block += 1;
         }
         if self.held.is_none() {
+            let mut returned = None;
+            if self.plain_only {
+                let left = lower_minimum(self.latest_best, self.held_at_best);
+                let stalled = self.held_blocks > self.longest_quiet;
+                if stalled && !left {
+                    self.longest_quiet = self.held_blocks;
+                }
+                if left || stalled {
+                    self.plain_only = false;
+                    returned = self.held_against.take();
+                } else {
+                    self.held_blocks += 1;
+                }
+            }
             self.block_source = self.occupied.clone();
             self.just_opened = true;
             self.held = Some(if self.plain_only {
                 0
+            } else if let Some(arm) = returned {
+                arm
             } else {
                 self.select_arm()
             });
@@ -878,6 +936,7 @@ impl SurfacePortfolio {
                 && reward <= 0.0
             {
                 self.restraint_block_failed = true;
+                self.failed_arm = Some(arm);
             }
             if let Some(key) = self.block_source.take() {
                 self.credit_source(key, arm, reward);
@@ -885,6 +944,13 @@ impl SurfacePortfolio {
                 self.credit_arm(arm, reward);
             }
         }
+        if lower_minimum(self.latest_best, self.settled_best) {
+            self.longest_quiet = self.longest_quiet.max(self.quiet_blocks);
+            self.quiet_blocks = 0;
+        } else {
+            self.quiet_blocks += 1;
+        }
+        self.settled_best = self.latest_best;
         self.block_lowest = f64::INFINITY;
         self.hops_in_block = 0;
     }
@@ -1192,6 +1258,85 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_plain_hold_lasts_until_the_plain_walk_beats_its_incumbent() {
+        let mut portfolio = SurfacePortfolio::with_block(&[TwoPhase::diameter(2.0, 1.0)], 11, 1);
+        let plain_block = |portfolio: &mut SurfacePortfolio, best: f64| {
+            portfolio.begin(true);
+            portfolio.held = Some(0);
+            portfolio.observe(false, best, best);
+        };
+        plain_block(&mut portfolio, -3.0);
+        for _ in 0..10 {
+            plain_block(&mut portfolio, -3.0);
+        }
+        plain_block(&mut portfolio, -3.5);
+        portfolio.begin(true);
+        portfolio.held = Some(1);
+        portfolio.observe(false, -2.0, -3.5);
+        portfolio.begin(true);
+        assert!(portfolio.take_restraint_block_failed());
+        portfolio.hold_plain();
+        portfolio.observe(false, -3.0, -3.5);
+        for _ in 0..5 {
+            portfolio.begin(true);
+            assert_eq!(portfolio.held, Some(0), "a held block drew the restraint");
+            portfolio.observe(false, -3.0, -3.5);
+        }
+        portfolio.begin(true);
+        portfolio.observe(false, -4.0, -4.0);
+        portfolio.begin(true);
+        assert_eq!(
+            portfolio.held,
+            Some(1),
+            "the block after the plain walk left went to another arm"
+        );
+    }
+
+    #[test]
+    fn a_stalled_plain_hold_returns_to_the_restraint_and_backs_off() {
+        let mut portfolio = SurfacePortfolio::with_block(&[TwoPhase::diameter(2.0, 1.0)], 5, 1);
+        for best in [-1.0, -2.0, -2.0, -3.0] {
+            portfolio.begin(true);
+            portfolio.held = Some(0);
+            portfolio.observe(false, best, best);
+        }
+        assert_eq!(portfolio.longest_quiet, 0);
+        let mut holds = Vec::new();
+        let mut held = 0;
+        for _ in 0..60 {
+            portfolio.begin(true);
+            if portfolio.take_restraint_block_failed() {
+                portfolio.hold_plain();
+                held = 0;
+            }
+            match portfolio.held {
+                Some(0) if portfolio.plain_only => held += 1,
+                Some(1) => {
+                    if held > 0 {
+                        holds.push(held);
+                    }
+                    held = 0;
+                }
+                _ => {}
+            }
+            let reached = if portfolio.held == Some(1) {
+                -2.0
+            } else {
+                -3.0
+            };
+            portfolio.observe(false, reached, -3.0);
+        }
+        assert!(
+            holds.len() >= 3,
+            "a stalled hold never returned to the restraint: {holds:?}"
+        );
+        assert!(
+            holds.windows(2).all(|pair| pair[1] > pair[0]),
+            "each hold should outlast the one before: {holds:?}"
+        );
     }
 
     fn rigid_water() -> Array1<f64> {
