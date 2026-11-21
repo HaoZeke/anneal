@@ -17,12 +17,7 @@ if [[ -n $(git -C "$ROOT" status --porcelain -- src examples Cargo.toml Cargo.lo
 fi
 H2H_WORK=$WORK bash "$HERE/build_anneal.sh"
 
-GMIN_SRC=/work/gmin-h2h/src/wales/GMIN/source/newtip.f90
-if [[ -f $GMIN_SRC ]] && ! grep -q H2H_POT_ENTER "$GMIN_SRC"; then
-  patch -p1 --forward --batch -d /work/gmin-h2h/src/wales/GMIN < "$HERE/newtip-timer.patch"
-  rm -f /work/gmin-h2h/bin/GMIN
-fi
-bash "$ROOT/scripts/gmin_h2h/build_gmin.sh"
+bash "$ROOT/scripts/gmin_h2h/build_gmin.sh" --extra-patch "$HERE/newtip-timer.patch"
 
 mkdir -p "$WORK/bin" "$WORK/user" "$WORK/scratch" "$WORK/runs" "$WORK/gm" "$OUT"
 cp -a "$HERE/run_water_gmin.py" "$HERE/run_h2h.py" \

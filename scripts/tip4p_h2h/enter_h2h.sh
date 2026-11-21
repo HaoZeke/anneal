@@ -12,12 +12,7 @@ bash "$HERE/build_anneal.sh"
 
 # Time NEWTIP the way the Lennard-Jones kernel is timed. The public GMIN
 # build only brackets LJ, so pot_s would be empty for the water arm.
-GMIN_SRC=/work/gmin-h2h/src/wales/GMIN/source/newtip.f90
-if [[ -f $GMIN_SRC ]] && ! grep -q H2H_POT_ENTER "$GMIN_SRC"; then
-  patch -p1 --forward --batch -d /work/gmin-h2h/src/wales/GMIN < "$HERE/newtip-timer.patch"
-  rm -f /work/gmin-h2h/bin/GMIN
-fi
-bash "$ROOT/scripts/gmin_h2h/build_gmin.sh"
+bash "$ROOT/scripts/gmin_h2h/build_gmin.sh" --extra-patch "$HERE/newtip-timer.patch"
 
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs" "$WORK/gm"
 cp -a "$HERE/run_h2h.py" "$ROOT/scripts/target_tol.py" \

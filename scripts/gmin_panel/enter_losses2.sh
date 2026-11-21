@@ -89,7 +89,7 @@ exec taskset -c 0 /usr/bin/python3 -u $OUT/run_losses2.py \\
   --work $OUT/runs \\
   --logs $OUT/logs \\
   --gmin-source $OUT/gmin-source.txt \\
-  --svnrev $OUT/src/wales/GMIN/source/SVNREV \\
+  --svnrev $OUT/gmin-src/wales/GMIN/source/SVNREV \\
   --lj-data $OUT/h2h_gmin_lj.data \\
   --morse-data $OUT/h2h_gmin_morse.data \\
   --rows $OUT/rows.csv \\

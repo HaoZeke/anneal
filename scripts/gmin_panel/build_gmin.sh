@@ -22,11 +22,22 @@ URL=$GMIN_PIN_URL
 SNAPSHOT=$GMIN_PIN_SNAPSHOT
 REV=$GMIN_PIN_REVISION
 TARBALL_SHA256=$GMIN_PIN_TARBALL_SHA256
+CAP_SOURCE=$ROOT/bench/lj104-lattice/v2/h2h_cap.f90
 PATCHES=(
   "$ROOT/bench/lj104-lattice/v2/h2h-gmin.patch"
   "$ROOT/scripts/morse_h2h/morse-timer.patch"
   "$ROOT/bench/metal-cluster-h2h/gmin-bgupta.patch"
 )
+CMAKE_FLAGS=(
+  -DWITH_ALIGN=OFF
+  -DWITH_MPI=OFF
+  -DWITH_OPENMP=OFF
+  -DWITH_SPARSE=OFF
+  -DWITH_PYTHON=OFF
+  -DWITH_MYBLAS=OFF
+  -DWITH_MYLAPACK=OFF
+)
+BUILD_KEY_FILE=$WORK/gmin-build-key
 
 LOCAL=${GMIN_TARBALL:-}
 while [[ $# -gt 0 ]]; do
@@ -91,6 +102,34 @@ else
   mv "$tmp" "$TARBALL"
 fi
 
+FC_BIN=${FC:-gfortran}
+CC_BIN=${CC:-gcc}
+CXX_BIN=${CXX:-g++}
+GFORTRAN_VER=$("$FC_BIN" -dumpfullversion)
+KEY_ARGS=(
+  --revision "$REV"
+  --tarball "$TARBALL"
+  --input "$CAP_SOURCE"
+)
+for patch in "${PATCHES[@]}"; do
+  KEY_ARGS+=(--input "$patch")
+done
+KEY_ARGS+=(
+  "--option=FC=$FC_BIN"
+  "--option=CC=$CC_BIN"
+  "--option=CXX=$CXX_BIN"
+  "--option=gfortran=$GFORTRAN_VER"
+)
+for flag in "${CMAKE_FLAGS[@]}"; do
+  KEY_ARGS+=("--option=$flag")
+done
+BUILD_KEY=$(python3 "$PIN" build-key "${KEY_ARGS[@]}")
+OLD_BUILD_KEY=$(
+  python3 "$PIN" read-build-key \
+    --metadata "$WORK/gmin-source.txt" \
+    --key-file "$BUILD_KEY_FILE"
+)
+
 extract_tree() {
   mkdir -p "$SRC"
   tar -xjf "$TARBALL" -C "$SRC" \
@@ -101,44 +140,34 @@ extract_tree() {
     ./wales/HiRE
 }
 
-if [[ ! -f $SRC/wales/GMIN/source/SVNREV ]]; then
-  extract_tree
+need_rebuild=0
+if [[ $OLD_BUILD_KEY != "$BUILD_KEY" || ! -x $WORK/bin/GMIN || ! -f $SRC/wales/GMIN/source/SVNREV ]]; then
+  need_rebuild=1
 fi
 got=$(python3 "$PIN" read-svnrev "$SRC/wales/GMIN/source/SVNREV" 2>/dev/null || true)
 if [[ $got != "$REV" ]]; then
-  rm -rf "$SRC"
-  rm -f "$WORK/bin/GMIN"
-  extract_tree
-  got=$(python3 "$PIN" read-svnrev "$SRC/wales/GMIN/source/SVNREV" 2>/dev/null || true)
-fi
-if [[ $got != "$REV" ]]; then
-  python3 "$PIN" read-svnrev "$SRC/wales/GMIN/source/SVNREV" >/dev/null
-  exit 1
+  need_rebuild=1
 fi
 
-if [[ ! -f $SRC/wales/GMIN/source/h2h_cap.f90 ]]; then
+if (( need_rebuild )); then
+  rm -rf "$SRC"
+  rm -f "$WORK/bin/GMIN" "$BUILD_KEY_FILE"
+  extract_tree
+  got=$(python3 "$PIN" read-svnrev "$SRC/wales/GMIN/source/SVNREV")
   for patch in "${PATCHES[@]}"; do
     patch -p1 --forward --batch -d "$SRC/wales/GMIN" < "$patch"
   done
-fi
-
-if [[ ! -x $WORK/bin/GMIN ]]; then
+  cp "$CAP_SOURCE" "$SRC/wales/GMIN/source/h2h_cap.f90"
   build=$SRC/wales/GMIN/build/gfortran
   mkdir -p "$build"
   (
     cd "$build"
-    FC=gfortran CC=gcc CXX=g++ cmake ../../source \
-      -DWITH_ALIGN=OFF \
-      -DWITH_MPI=OFF \
-      -DWITH_OPENMP=OFF \
-      -DWITH_SPARSE=OFF \
-      -DWITH_PYTHON=OFF \
-      -DWITH_MYBLAS=OFF \
-      -DWITH_MYLAPACK=OFF
+    FC=$FC_BIN CC=$CC_BIN CXX=$CXX_BIN cmake ../../source "${CMAKE_FLAGS[@]}"
     make -j"$(nproc)" GMIN
   )
   cp -a "$build/GMIN" "$WORK/bin/GMIN"
   chmod +x "$WORK/bin/GMIN"
+  printf '%s\n' "$BUILD_KEY" > "$BUILD_KEY_FILE"
 fi
 
 {
@@ -146,13 +175,15 @@ fi
   echo "url=$URL"
   echo "revision=$REV"
   echo "svnrev=$got"
-  echo "tarball_sha256=$(tarball_sha256 "$TARBALL")"
+  echo "tarball_sha256=$(python3 "$PIN" verify-tarball "$TARBALL")"
+  echo "build_key=$BUILD_KEY"
+  echo "cap=${CAP_SOURCE#"$ROOT"/} $(sha256sum "$CAP_SOURCE" | awk '{print $1}')"
   for patch in "${PATCHES[@]}"; do
     echo "patch=${patch#"$ROOT"/} $(sha256sum "$patch" | awk '{print $1}')"
   done
-  echo "cmake=-DWITH_ALIGN=OFF -DWITH_MPI=OFF -DWITH_OPENMP=OFF -DWITH_SPARSE=OFF -DWITH_PYTHON=OFF -DWITH_MYBLAS=OFF -DWITH_MYLAPACK=OFF"
-  echo "gfortran=$(gfortran -dumpfullversion)"
-  echo "linked=$(ldd "$WORK/bin/GMIN" | awk '/blas|lapack/ {print $3}' | xargs -r readlink -f | paste -sd' ' -)"
+  echo "cmake=${CMAKE_FLAGS[*]}"
+  echo "gfortran=$GFORTRAN_VER"
+  echo "linked=$(ldd "$WORK/bin/GMIN" 2>/dev/null | awk '/blas|lapack/ {print $3}' | xargs -r readlink -f | paste -sd' ' - || true)"
   echo "binary_sha256=$(sha256sum "$WORK/bin/GMIN" | awk '{print $1}')"
 } > "$WORK/gmin-source.txt"
-echo "gmin snapshot=$SNAPSHOT revision=$REV binary=$WORK/bin/GMIN"
+echo "gmin snapshot=$SNAPSHOT revision=$REV build_key=$BUILD_KEY binary=$WORK/bin/GMIN"

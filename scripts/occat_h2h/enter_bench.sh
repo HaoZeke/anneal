@@ -28,9 +28,7 @@ if [[ ! -x $WORK/target/release/examples/h2h_gmin_proof || ! -x $WORK/target/rel
   )
 fi
 
-if [[ ! -x /work/gmin-h2h/bin/GMIN ]]; then
-  bash "$ROOT/scripts/gmin_h2h/build_gmin.sh"
-fi
+bash "$ROOT/scripts/gmin_h2h/build_gmin.sh"
 
 cat > "$WORK/inside.sh" << EOF
 #!/bin/bash

@@ -7,14 +7,24 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 PIN=$ROOT/scripts/gmin_pin.py
 eval "$(python3 "$PIN" shell)"
-WORK=/work/metal-darby
+WORK=${GMIN_DARBY_WORK:-/work/metal-darby}
 SRC=$WORK/src
 TARBALL=$WORK/svn.tar.bz2
 URL=$GMIN_PIN_URL
 REV=$GMIN_PIN_REVISION
-TARBALL_SHA256=$GMIN_PIN_TARBALL_SHA256
 CAP=$ROOT/bench/lj104-lattice/v2/h2h-gmin.patch
+CAP_SOURCE=$ROOT/bench/lj104-lattice/v2/h2h_cap.f90
 TIME=$ROOT/bench/metal-cluster-h2h/gmin-bgupta.patch
+BUILD_KEY_FILE=$WORK/gmin-build-key
+CMAKE_FLAGS=(
+  -DWITH_ALIGN=OFF
+  -DWITH_MPI=OFF
+  -DWITH_OPENMP=OFF
+  -DWITH_SPARSE=OFF
+  -DWITH_PYTHON=OFF
+  -DWITH_MYBLAS=OFF
+  -DWITH_MYLAPACK=OFF
+)
 
 LOCAL=${GMIN_TARBALL:-}
 while [[ $# -gt 0 ]]; do
@@ -24,12 +34,20 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ -n $LOCAL ]]; then
+  if [[ ! -s $LOCAL ]]; then
+    echo "tarball ${LOCAL} is missing" >&2
+    exit 1
+  fi
+  python3 "$PIN" verify-tarball "$LOCAL" >/dev/null
+fi
+
 mkdir -p "$WORK/bin" "$SRC"
 if [[ -n $LOCAL ]]; then
-  python3 "$PIN" verify-tarball "$LOCAL" >/dev/null
   if [[ $LOCAL != "$TARBALL" ]]; then
     cp -a "$LOCAL" "$TARBALL"
   fi
+  python3 "$PIN" verify-tarball "$TARBALL" >/dev/null
 elif python3 "$PIN" verify-tarball "$TARBALL" >/dev/null 2>&1; then
   :
 elif python3 "$PIN" verify-tarball /work/svn.tar.bz2 >/dev/null 2>&1; then
@@ -40,56 +58,79 @@ else
   python3 "$PIN" verify-tarball "$tmp" >/dev/null
   mv "$tmp" "$TARBALL"
 fi
-python3 "$PIN" verify-tarball "$TARBALL" >/dev/null
+TARBALL_SHA256=$(python3 "$PIN" verify-tarball "$TARBALL")
 
-if [[ -f $SRC/wales/GMIN/source/SVNREV ]] &&
-   ! python3 "$PIN" read-svnrev "$SRC/wales/GMIN/source/SVNREV" >/dev/null 2>&1; then
-  rm -rf "$SRC/wales/GMIN"
-  rm -f "$WORK/bin/GMIN"
+FC_BIN=${FC:-gfortran}
+CC_BIN=${CC:-gcc}
+CXX_BIN=${CXX:-g++}
+GFORTRAN_VER=$("$FC_BIN" -dumpfullversion)
+KEY_ARGS=(
+  --revision "$REV"
+  --tarball-sha256 "$TARBALL_SHA256"
+  --input "$CAP_SOURCE"
+  --input "$CAP"
+  --input "$TIME"
+  "--option=FC=$FC_BIN"
+  "--option=CC=$CC_BIN"
+  "--option=CXX=$CXX_BIN"
+  "--option=gfortran=$GFORTRAN_VER"
+)
+for flag in "${CMAKE_FLAGS[@]}"; do
+  KEY_ARGS+=("--option=$flag")
+done
+BUILD_KEY=$(python3 "$PIN" build-key "${KEY_ARGS[@]}")
+OLD_BUILD_KEY=$(
+  python3 "$PIN" read-build-key \
+    --metadata "$WORK/gmin-source.txt" \
+    --key-file "$BUILD_KEY_FILE"
+)
+
+need_rebuild=0
+if [[ $OLD_BUILD_KEY != "$BUILD_KEY" || ! -x $WORK/bin/GMIN || ! -f $SRC/wales/GMIN/source/SVNREV ]]; then
+  need_rebuild=1
+fi
+got=$(python3 "$PIN" read-svnrev "$SRC/wales/GMIN/source/SVNREV" 2>/dev/null || true)
+if [[ $got != "$REV" ]]; then
+  need_rebuild=1
 fi
 
-if [[ ! -f $SRC/wales/GMIN/source/SVNREV ]]; then
+if (( need_rebuild )); then
+  rm -rf "$SRC/wales"
+  rm -f "$WORK/bin/GMIN" "$BUILD_KEY_FILE"
   tar -xjf "$TARBALL" -C "$SRC" \
     ./wales/GMIN \
     ./wales/CMakeModules \
     ./wales/INTERFACES \
     ./wales/SCRIPTS/all \
     ./wales/HiRE
-fi
-
-got=$(python3 "$PIN" read-svnrev "$SRC/wales/GMIN/source/SVNREV")
-
-if [[ ! -f $SRC/wales/GMIN/source/h2h_cap.f90 ]]; then
+  got=$(python3 "$PIN" read-svnrev "$SRC/wales/GMIN/source/SVNREV")
   patch -p1 --forward --batch -d "$SRC/wales/GMIN" < "$CAP"
-fi
-if ! grep -q 'H2H_POT_ENTER' "$SRC/wales/GMIN/source/BGupta.f90"; then
   patch -p1 --forward --batch -d "$SRC/wales/GMIN" < "$TIME"
-fi
-
-if [[ ! -x $WORK/bin/GMIN ]]; then
+  cp "$CAP_SOURCE" "$SRC/wales/GMIN/source/h2h_cap.f90"
   build=$SRC/wales/GMIN/build/gfortran
   mkdir -p "$build"
   (
     cd "$build"
-    FC=gfortran CC=gcc CXX=g++ cmake ../../source \
-      -DWITH_ALIGN=OFF \
-      -DWITH_MPI=OFF \
-      -DWITH_OPENMP=OFF \
-      -DWITH_SPARSE=OFF \
-      -DWITH_PYTHON=OFF \
-      -DWITH_MYBLAS=OFF \
-      -DWITH_MYLAPACK=OFF
+    FC=$FC_BIN CC=$CC_BIN CXX=$CXX_BIN cmake ../../source "${CMAKE_FLAGS[@]}"
     make -j"$(nproc)" GMIN
   )
   cp -a "$build/GMIN" "$WORK/bin/GMIN"
   chmod +x "$WORK/bin/GMIN"
+  printf '%s\n' "$BUILD_KEY" > "$BUILD_KEY_FILE"
 fi
 
-cat > "$WORK/gmin-source.txt" << EOF
-url=$URL
-revision=$REV
-svnrev=$got
-tarball_sha256=$(python3 "$PIN" verify-tarball "$TARBALL")
-potential=BGUPTAT
-EOF
-echo "gmin url=$URL revision=$REV binary=$WORK/bin/GMIN"
+{
+  echo "url=$URL"
+  echo "revision=$REV"
+  echo "svnrev=$got"
+  echo "tarball_sha256=$TARBALL_SHA256"
+  echo "build_key=$BUILD_KEY"
+  echo "potential=BGUPTAT"
+  echo "cap=${CAP_SOURCE#"$ROOT"/} $(sha256sum "$CAP_SOURCE" | awk '{print $1}')"
+  echo "patch=${CAP#"$ROOT"/} $(sha256sum "$CAP" | awk '{print $1}')"
+  echo "patch=${TIME#"$ROOT"/} $(sha256sum "$TIME" | awk '{print $1}')"
+  echo "cmake=${CMAKE_FLAGS[*]}"
+  echo "gfortran=$GFORTRAN_VER"
+  echo "binary_sha256=$(sha256sum "$WORK/bin/GMIN" | awk '{print $1}')"
+} > "$WORK/gmin-source.txt"
+echo "gmin url=$URL revision=$REV build_key=$BUILD_KEY binary=$WORK/bin/GMIN"

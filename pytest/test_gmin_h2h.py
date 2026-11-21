@@ -156,3 +156,48 @@ def test_gmin_cap_charges_gradient_passes_only(tmp_path):
     assert row["charged"] == "2"
     assert row["gradient_passes"] == "2"
     assert row["energy_only_entries"] == "2"
+
+
+def test_gmin_cap_refuses_energy_only_calls_once_aborted(tmp_path):
+    gfortran = shutil.which("gfortran")
+    if gfortran is None:
+        pytest.skip("gfortran is not on PATH")
+    (tmp_path / "prec_stub.f90").write_text(
+        "MODULE PREC\n"
+        "  INTEGER, PARAMETER :: REAL64=SELECTED_REAL_KIND(15,307)\n"
+        "END MODULE PREC\n"
+    )
+    (tmp_path / "driver.f90").write_text(
+        "PROGRAM CHECK_POST_ABORT\n"
+        "  USE H2H_CAP\n"
+        "  LOGICAL :: REFUSED\n"
+        "  REFUSED=H2H_REFUSE(.TRUE.)\n"
+        "  IF (REFUSED) STOP 1\n"
+        "  REFUSED=H2H_REFUSE(.TRUE.)\n"
+        "  IF (.NOT. REFUSED) STOP 2\n"
+        "  REFUSED=H2H_REFUSE(.FALSE.)\n"
+        "  IF (.NOT. REFUSED) STOP 3\n"
+        "  CALL H2H_REPORT()\n"
+        "END PROGRAM CHECK_POST_ABORT\n"
+    )
+    binary = tmp_path / "check-post-abort"
+    subprocess.run(
+        [
+            gfortran,
+            str(tmp_path / "prec_stub.f90"),
+            str(ROOT / "bench" / "lj104-lattice" / "v2" / "h2h_cap.f90"),
+            str(tmp_path / "driver.f90"),
+            "-o",
+            str(binary),
+        ],
+        check=True,
+        cwd=tmp_path,
+    )
+    row_path = tmp_path / "row.txt"
+    env = dict(os.environ, H2H_BUDGET="1", H2H_ROW=str(row_path))
+    subprocess.run([str(binary)], check=True, cwd=tmp_path, env=env)
+    row = campaign.parse_gmin(row_path.read_text())
+
+    assert row["charged"] == "1"
+    assert row["gradient_passes"] == "1"
+    assert row["energy_only_entries"] == "0"
