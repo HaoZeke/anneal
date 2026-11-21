@@ -86,3 +86,14 @@ def test_au_length_comes_from_the_evaluator(monkeypatch):
         2.057976038904,
     )
     assert '"length"' not in RUNNER_PATH.read_text()
+
+
+def test_wall_cap_call_ranges_report_wall_stops_only():
+    _summary, report = SUMMARY.render("lj55")
+    grouped = SUMMARY.load("lj55")
+    wall_calls = [int(row["charged"]) for row in grouped["ase_bh"] if row["stop"] == "wall"]
+    assert len(wall_calls) == 11
+    assert (
+        f"Basin hopping stopped at the wall cap on 11/12 seeds; "
+        f"those rows charged {min(wall_calls):,}-{max(wall_calls):,} calls."
+    ) in report

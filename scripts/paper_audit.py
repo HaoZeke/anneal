@@ -162,9 +162,6 @@ KNOWN_GAPS = {
     "bench/ase-nonlj/rows.csv": "revision 90b88235 is not in this repository",
     "bench/ase-nonlj/identity.csv": "revision and host unrecorded (no revision or host column)",
     "bench/ase-nonlj/summary.csv": "revision 90b88235 is not in this repository",
-    "bench/ase-recommended/summary.csv": "revision 1ce3ab64 is not in this repository; revision 36548663 is not in this "
-                                         "repository; revision 5a7f629d is not in this repository; revision b49341e3 is "
-                                         "not in this repository",
     "bench/morse-panel/template-free-rows.csv": "revision 1ce3ab64 is not in this repository",
     "paper/jctc/data/lj55_lj98/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "paper/jctc/data/literature.tsv": "revision and host unrecorded (no revision or host column)",
@@ -194,10 +191,6 @@ UNTRACED = [
 # holds, and that the paper does not print. Each row stays a check: it passes
 # only while its exact text is in the README and the audit still flags it on
 # a listed revision, and an entry that matches nothing fails.
-WHY_TAB = ("no origin branch, kit, bundle or mbox holds the commit; tab:ase reads other rows of it, "
-           "not this one")
-WHY_AU = ("no origin branch holds the commit and the no-templates2 mbox rebuilds its content but not its "
-          "SHA; the paper prints no number of this row")
 WHY_OLD = ("no origin branch, kit, bundle or mbox holds the commit; the manuscript, SI and figure and "
            "table scripts print no number of this row")
 UNVERIFIABLE = [
@@ -210,33 +203,12 @@ UNVERIFIABLE = [
     ('bench/agox-lj75/README.md',
      '| anneal | 0/6 | 55.299841 | -396.282249 | 1.210082 | 1.000000 | 1.000000 |',
      ('0a5136605161', 'ccc22cee607b'), WHY_OLD),
-    ('bench/ase-au55/README.md',
-     '| anneal | 0/12 | 1 | 72 | 1 | -190.81083051 | 0.22002228 | 36.060303 | 1.000000 | 1.000000 | 29.540093 | 6.382390 |',
-     ('1ce3ab644931',), WHY_AU),
-    ('bench/ase-au55/README.md',
-     '| anneal | 0/12 | 1 | 72 | 1 | -190.81083051 | 0.22002228 | 36.060303 | 1.000000 | 1.000000 | 29.540093 | 6.382390 |',
-     ('33bed75ff4e4', 'fc1af066a915'), WHY_OLD),
-    ('bench/ase-lj104/README.md',
-     '| anneal | 0/12 | 1 | 72 | 1 | -580.80432897 | 1.28231303 | 88.960797 | 1.000000 | 1.000000 | 63.958464 | 25.016078 |',
-     ('5a7f629d79be',), WHY_TAB),
-    ('bench/ase-lj150/README.md',
-     '| anneal | 0/12 | 1 | 72 | 1 | -884.65296483 | 8.65729317 | 177.839157 | 1.000000 | 1.000000 | 132.630578 | 45.213123 |',
-     ('5a7f629d79be',), WHY_TAB),
-    ('bench/ase-lj38/README.md',
-     '| anneal | 10/12 | 1 | 72 | 1 | -173.92842659 | 0.00000041 | 0.981375 | 1.000000 | 1.000000 | 0.574202 | 0.407172 |',
-     ('5a7f629d79be',), WHY_TAB),
-    ('bench/ase-lj55/README.md',
-     '| anneal | 12/12 | 1 | 72 | 1 | -279.24847046 | -0.00000046 | 0.823500 | 1.000000 | 1.000000 | 0.562777 | 0.260722 |',
-     ('5a7f629d79be',), WHY_TAB),
     ('bench/ase-lj75/README.md',
      '| basin hopping | 0/12 | 1 | 78 | 0.359317 | -393.72607097 | 3.76626003 | 89.907831 | 1.760879 | 0.567898 | 46.580477 | 43.358141 |',
      ('162d230740f0', '8173c5e2855b'), WHY_OLD),
     ('bench/ase-lj75/README.md',
      '| minima hopping | 0/12 | 1 | 78 | 0.359317 | -391.70068193 | 5.79164907 | 172.344747 | 3.375083 | 0.296295 | 0.943898 | 171.463289 |',
      ('162d230740f0', '8173c5e2855b'), WHY_OLD),
-    ('bench/ase-lj98/README.md',
-     '| anneal | 4/12 | 1 | 72 | 1 | -543.54672557 | 0.11863543 | 80.934059 | 1.000000 | 1.000000 | 57.146890 | 23.659054 |',
-     ('5a7f629d79be',), WHY_TAB),
     ('bench/ase-nonlj/README.md',
      '| m38r6 | for_cluster vs basin hopping | 5/12 vs 0/12 | 0.0372671 | not estimated | not estimated | 0.324342 | 3.083165 |',
      ('90b88235fe54',), WHY_OLD),
@@ -1011,12 +983,18 @@ def ase_groups(audit: Audit) -> dict[tuple[str, str], list[dict[str, str]]]:
             latest[int(row["seed"])] = row
         return [latest[s] for s in sorted(latest)]
 
+    expected_blob = git("rev-parse", "61fa67cf380e46876b569da45e7cc091647a775b:scripts/ase_panel/run_one.py").stdout.strip()
+    ase_hosts: set[str] = set()
     for system in ASE_PANEL:
-        rows = audit.rows(f"bench/ase-{system}/rows.csv")
-        others = audit.rows("bench/ase-au55/rows-for-cluster.csv") if system == "au55" else rows
+        rows = audit.rows(f"bench/ase-{system}/rows-61fa67cf.csv")
+        ase_hosts.update(r["host"] for r in rows)
+        blobs = sorted({r["harness_blob"] for r in rows})
+        audit.cell(f"ase panel {system}", "harness_blob", " ".join(blobs), expected_blob)
         for arm in ("anneal", "recommended", *ASE_ARMS):
-            source = rows if arm == "recommended" else others
-            groups[(system, arm)] = campaign(source, system, arm)
+            groups[(system, arm)] = campaign(rows, system, arm)
+    audit.record(len(ase_hosts) == 1 and bool(re.fullmatch(r"[0-9a-f]{64}", next(iter(ase_hosts)))),
+                 "ase panel", "single machine-id sha256 host", "one sha256", " ".join(sorted(ase_hosts)))
+    ase_host = next(iter(ase_hosts)) if len(ase_hosts) == 1 else ""
     morse = pick(audit.rows("bench/ase-nonlj/rows.csv"), code_revision=MORSE_REVISION)
     for system in MORSE_PANEL:
         for arm in ("for_cluster", "recommended", *ASE_ARMS):
@@ -1025,7 +1003,8 @@ def ase_groups(audit: Audit) -> dict[tuple[str, str], list[dict[str, str]]]:
         group.sort(key=lambda r: int(r["seed"]))
         where = f"ase panel {system} {arm}"
         audit.cell(where, "seeds", " ".join(r["seed"] for r in group), PANEL_SEEDS)
-        audit.cell(where, "host", " ".join(sorted({r["host"] for r in group})), "bench")
+        want_host = "bench" if system in MORSE_PANEL else ase_host
+        audit.cell(where, "host", " ".join(sorted({r["host"] for r in group})), want_host)
     return groups
 
 
@@ -1340,6 +1319,7 @@ def panel_references(audit: Audit) -> None:
     ref = {s: next(iter(v)) for s, v in refs.items()}
     for path, rows in (("bench/gmin-panel/rows.csv", audit.rows("bench/gmin-panel/rows.csv")),
                        ("bench/ase-nonlj/rows.csv", audit.rows("bench/ase-nonlj/rows.csv")),
+                       *((f"bench/ase-{s}/rows-61fa67cf.csv", audit.rows(f"bench/ase-{s}/rows-61fa67cf.csv")) for s in ASE_PANEL),
                        *((f"bench/ase-{s}/rows.csv", audit.rows(f"bench/ase-{s}/rows.csv")) for s in ASE_PANEL),
                        ("bench/ase-au55/rows-for-cluster.csv", audit.rows("bench/ase-au55/rows-for-cluster.csv"))):
         worst = max((abs(float(r["best"]) - ref[r["system"]]) for r in rows if hits_of([r])), default=0.0)
@@ -3191,7 +3171,9 @@ def manuscript_new(audit: Audit) -> None:
     audit.said("scripts/ase_panel/enter_bench.sh", ': "${ASE_PANEL_REVISION:?')
     audit.said("scripts/ase_panel/enter_bench.sh", "ROWS=${ASE_PANEL_ROWS:-$DEFAULT_ROWS}")
     audit.said("scripts/ase_nonlj/enter_bench.sh", 'echo "keep existing $SYSTEM $ARM seed $SEED"')
-    audit.said(TEX, "The ASE rows cannot be searched again from this repository.")
+    audit.said(TEX, "The active ASE panel rows in \\texttt{rows-61fa67cf.csv} come from revision\n"
+                    "\\texttt{61fa67cf} in this repository; the retained earlier ASE rows come from\n"
+                    "builds whose commits are not in it")
     audit.said(TEX, "\\path{bench/unreachable-revisions.csv} lists each revision with the rows that cite it.")
     audit.said("paper/jctc/scripts/water_h2h.py", 'command = f"gfn2_water_h2h {MOLECULES} {budget} {seed} {outdir.name}"')
     audit.said("paper/jctc/scripts/water_h2h.py", 'paper_dir = LOGS / f"anneal-paper4000-seed{seed}"')

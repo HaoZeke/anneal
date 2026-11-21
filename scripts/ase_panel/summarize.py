@@ -58,6 +58,11 @@ ROW_FIELDS = (
     "system", "arm", "seed", "budget", "hit", "evals_to_hit", "charged", "best",
     "wall_s", "inside_s", "outside_s", "code_revision", "host", "stop", "cap_s",
 )
+RERUN_ROW_FIELDS = (
+    *ROW_FIELDS,
+    "harness_blob", "ase_version", "session",
+)
+ROWS_FILE = "rows-61fa67cf.csv"
 
 
 def type7(ordered: list[float], probability: float) -> float:
@@ -92,37 +97,43 @@ def wall_censored(rows: list[dict[str, str]]) -> bool:
 
 def load(system: str) -> dict[str, list[dict[str, str]]]:
     directory = ROOT / "bench" / f"ase-{system}"
-    paths = [directory / "rows.csv"]
-    if system == "au55":
-        paths.append(directory / "rows-for-cluster.csv")
-    rows = []
-    for path in paths:
-        with path.open(newline="") as handle:
-            reader = csv.DictReader(handle)
-            if tuple(reader.fieldnames or ()) != ROW_FIELDS:
-                raise SystemExit(f"{path}: unexpected columns {reader.fieldnames}")
-            for row in reader:
-                if system != "au55" or (
-                    (path.name == "rows.csv" and row["arm"] == "recommended")
-                    or (path.name == "rows-for-cluster.csv" and row["arm"] != "recommended")
-                ):
-                    rows.append(row)
+    rerun_path = directory / ROWS_FILE
+    is_rerun = rerun_path.exists()
+    path = rerun_path if is_rerun else directory / "rows.csv"
+    expected_fields = RERUN_ROW_FIELDS if is_rerun else ROW_FIELDS
+    if b"\r" in path.read_bytes():
+        raise SystemExit(f"{path} contains CR")
+    with path.open(newline="") as handle:
+        reader = csv.DictReader(handle)
+        if tuple(reader.fieldnames or ()) != expected_fields:
+            raise SystemExit(f"{path}: unexpected columns {reader.fieldnames}")
+        rows = list(reader)
     _, budget, reference, _ = SYSTEMS[system]
     grouped = {arm: [] for arm in ARMS}
     by_arm: dict[str, list[tuple[int, dict[str, str]]]] = {arm: [] for arm in ARMS}
     for row in rows:
+        valid_host = (
+            bool(re.fullmatch(r"[0-9a-f]{64}", row["host"]))
+            if is_rerun
+            else (row["host"] == "bench" or bool(re.fullmatch(r"[0-9a-f]{64}", row["host"])))
+        )
         if (
             row["system"] != system
             or row["arm"] not in grouped
             or row["budget"] != str(budget)
-            or row["host"] != "bench"
+            or not valid_host
         ):
             raise SystemExit(f"unexpected row {row}")
+        if not re.fullmatch(r"[0-9a-f]{40}", row["code_revision"]):
+            raise SystemExit(f"invalid revision {row}")
+        if is_rerun:
+            if not re.fullmatch(r"[0-9a-f]{40}", row["harness_blob"]):
+                raise SystemExit(f"invalid harness blob {row}")
+            if row["ase_version"] != ASE_VERSION or not re.fullmatch(r"[0-9a-f]+", row["session"]):
+                raise SystemExit(f"invalid ase version or session {row}")
         charged = int(row["charged"])
         if not 0 < charged <= budget:
             raise SystemExit(f"invalid charged count {row}")
-        if not re.fullmatch(r"[0-9a-f]{40}", row["code_revision"]):
-            raise SystemExit(f"invalid revision {row}")
         hit = row["hit"] == "1"
         if row["hit"] not in {"0", "1"} or hit != bool(row["evals_to_hit"]):
             raise SystemExit(f"hit/calls mismatch {row}")
@@ -240,9 +251,18 @@ def comparison(
     return fisher_text, f"{statistic:.6g}", f"{probability:.6g}"
 
 
+def joined(rows: list[dict[str, str]], key: str) -> str:
+    return ", ".join(dict.fromkeys(row[key] for row in rows))
+
+
 def render(system: str) -> tuple[str, str]:
     _, budget, reference, title = SYSTEMS[system]
     grouped = load(system)
+    flat = [row for arm in ARMS for row in grouped[arm]]
+    hosts = list(dict.fromkeys(row["host"] for row in flat))
+    if len(hosts) != 1:
+        raise SystemExit(f"{system} host is not unique: {hosts}")
+    host = hosts[0]
     anneal = grouped["anneal"]
     lines = [HEADER]
     reports = []
@@ -272,13 +292,15 @@ def render(system: str) -> tuple[str, str]:
             f"{over:.6f},{back:.6f},{fisher_p},{u_text},{mw_text},{wall_stops},{cap},"
             f"{','.join(versus['ase_bh'])},{','.join(versus['ase_mh'])}"
         )
+        wall_charged = [int(row["charged"]) for row in group if row["stop"] == "wall"]
+        low_charged = min(wall_charged) if wall_charged else 0
+        high_charged = max(wall_charged) if wall_charged else 0
         reports.append(
             (arm, hits, best, wall, inside, outside, over, back, fisher_p, u_text, mw_text,
-             wall_stops, cap, min(int(row["charged"]) for row in group),
-             max(int(row["charged"]) for row in group), versus)
+             wall_stops, cap, low_charged, high_charged, versus)
         )
 
-    revisions = list(dict.fromkeys(row["code_revision"] for arm in ARMS for row in grouped[arm]))
+    revisions = list(dict.fromkeys(row["code_revision"] for row in flat))
     cap_details = []
     for arm in ARMS:
         arm_caps = sorted({row["cap_s"] for row in grouped[arm] if row["cap_s"]})
@@ -287,19 +309,16 @@ def render(system: str) -> tuple[str, str]:
     report = [
         "Copyright (c) anneal developers",
         "",
-        f"{title}, seeds 2000-2011, maximum budget {budget:,}, host bench, one core.",
+        f"{title}, seeds 2000-2011, maximum budget {budget:,}, host {host}, one core.",
         f"The reference minimum is {reference:.8f}; a hit is at most {HIT_TOL:g} above it.",
         "Anneal uses the cluster preset. Recommended uses Config::recommended.",
         "ASE basin hopping and minima hopping use",
-        "the ASE 3.29 constructor defaults.",
-        "Rows carry code_revision " + ", ".join(revisions) + ".",
+        "the ASE 3.29.0 constructor defaults.",
+        f"Rows are in `{ROWS_FILE}` and carry code_revision " + ", ".join(revisions) + ".",
+        "Rows carry harness_blob " + joined(flat, "harness_blob") + ".",
+        "Rows carry ase_version " + joined(flat, "ase_version") + ".",
+        "Rows carry session " + joined(flat, "session") + ".",
     ]
-    if system == "au55":
-        report.extend([
-            "The anneal, basin-hopping and minima-hopping rows of `rows.csv` at 33bed75f are kept",
-            "and superseded by `rows-for-cluster.csv`; `superseded.csv` lists each of them.",
-            "This report reads the recommended rows of `rows.csv` and every row of `rows-for-cluster.csv`.",
-        ])
     if cap_details:
         report.extend([
             f"The recorded wall caps are {'; '.join(cap_details)}. A wall-stopped row did not receive",
@@ -356,8 +375,17 @@ def render(system: str) -> tuple[str, str]:
         "Medians are type 7. Wall ratios are ratios of arm medians. The Rust and",
         "NumPy random generators do not make a shared starting geometry from the",
         "same numeric seed, so the report does not treat seed labels as pairs.",
-        "",
     ])
+    if system == "au55":
+        report.extend([
+            "",
+            "## Historical rows",
+            "",
+            "The earlier `rows.csv` and `rows-for-cluster.csv` tables are retained;",
+            "the anneal, basin-hopping and minima-hopping rows of `rows.csv` at 33bed75f are kept",
+            "and superseded by `rows-for-cluster.csv`; `superseded.csv` lists each of them.",
+        ])
+    report.append("")
     return "\n".join(lines) + "\n", "\n".join(report)
 
 
@@ -375,13 +403,13 @@ def aggregate_rows(system: str, summary: str) -> list[str]:
         "mann_whitney_p_bh", "fisher_p_mh", "mann_whitney_U_mh",
         "mann_whitney_p_mh", "wall_cap_s",
     )
-    revisions = {
-        arm: {row["code_revision"] for row in rows} for arm, rows in load(system).items()
-    }
+    loaded = load(system)
+    revisions = {arm: {row["code_revision"] for row in rows} for arm, rows in loaded.items()}
+    hosts = {arm: ";".join(sorted({row["host"] for row in rows})) for arm, rows in loaded.items()}
     out = []
     for row in csv.DictReader(summary.splitlines()):
         found = ";".join(sorted(revisions[row["arm"]]))
-        out.append(",".join([system, *(row[field] for field in fields), found, "bench"]))
+        out.append(",".join([system, *(row[field] for field in fields), found, hosts[row["arm"]]]))
     return out
 
 

@@ -219,8 +219,8 @@ def test_a_drifted_table_cell_is_reported():
 def test_a_drifted_ase_table_cell_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "& 246.5 & 10/12 & 0/12 & 0/12 & 0 & 12 &"
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, "& 246.5 & 11/12 & 0/12 & 0/12 & 0 & 12 &")
+    old = "& 289.0 & 7/12 & 0/12 & 0/12 & 0 & 12 &"
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "& 289.0 & 8/12 & 0/12 & 0/12 & 0 & 12 &")
     audit_mod.manuscript_ase(audit)
     audit_mod.generated_tables(audit)
     assert sorted(r[2] for r in audit.drifts()) == ["recommended hits", "tab:ase is the summariser's block"]
@@ -1122,16 +1122,16 @@ def readme_revisions():
 def test_unreachable_revisions_in_the_bench_readmes_are_found():
     found = readme_revisions()
     assert {
-        ("bench/ase-au55/README.md", "1ce3ab64"),
-        ("bench/ase-au55/README.md", "fc1af066"),
-        ("bench/ase-lj38/README.md", "5a7f629d"),
-        ("bench/ase-lj38/README.md", "b49341e3"),
-        ("bench/ase-lj55/README.md", "36548663"),
+        ("bench/agox-lj75/README.md", "ccc22cee"),
+        ("bench/ase-lj75/README.md", "162d2307"),
+        ("bench/ase-lj75/README.md", "8173c5e2"),
         ("bench/ase-nonlj/README.md", "90b88235"),
         ("bench/covalent-h2h/README.md", "ce1e7a46"),
         ("bench/covalent-h2h/README.md", "eb7f8999"),
         ("bench/covalent-h2h/README.md", "a52726af"),
     } <= found
+    reruns = {f"bench/ase-{s}/README.md" for s in ("lj38", "lj55", "lj98", "lj104", "lj150", "au55")}
+    assert not (reruns & {path for path, _ in found})
 
 
 def test_openconf_local_revisions_are_read_through_their_aliases(monkeypatch):

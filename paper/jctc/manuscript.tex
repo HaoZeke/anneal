@@ -67,10 +67,10 @@ is 2.265~s for this setting against 9.666~s for GMIN.
 Against the basin hopping and the minima hopping of the Atomic
 Simulation Environment, with each run capped in wall time, this setting
 hits LJ\(_{38}\), LJ\(_{55}\), LJ\(_{98}\), LJ\(_{104}\), and
-LJ\(_{150}\) on 12, 12, 10, 9, and 5 of 12 seeds, and neither ASE arm
+LJ\(_{150}\) on 12, 12, 7, 5, and 8 of 12 seeds, and neither ASE arm
 hits more than 1 of 12 on any of them.~\rerun{5}
-On LJ\(_{38}\) the median wall of this setting is 0.067~s, and every ASE run
-stops at the cap of 4.654~s.~\rerun{5}
+On LJ\(_{38}\) the median wall of this setting is 0.605~s, and every ASE run
+stops at the cap of 4.645~s.~\rerun{5}
 On seeds 2000--2005 against AGOX GOFEE, this setting hits LJ\(_{38}\),
 LJ\(_{55}\), and LJ\(_{75}\) on 6 of 6 and GOFEE hits none of them, and the
 median wall of a GOFEE run on LJ\(_{38}\) is 499.4~s against 0.081~s.
@@ -1024,8 +1024,9 @@ python3 paper/jctc/scripts/water_h2h.py
 \end{footnotesize}
 The GMIN script writes \texttt{bench/gmin-panel/rows.csv}, and the summarizers
 of each panel rewrite its table from the committed rows without a new search.
-The ASE rows cannot be searched again from this repository.
-They come from builds whose commits are not in it, and
+The active ASE panel rows in \texttt{rows-61fa67cf.csv} come from revision
+\texttt{61fa67cf} in this repository; the retained earlier ASE rows come from
+builds whose commits are not in it, and
 \path{bench/unreachable-revisions.csv} lists each revision with the rows that cite it.
 The Lennard-Jones script reruns a seed only under
 \texttt{ASE\_PANEL\_REVISION}, a full commit SHA, and a new rows file in
@@ -1200,20 +1201,20 @@ LJ\(_{55}\), and 12 on Au\(_{55}\).~\rerun{5}
 On LJ\(_{98}\), LJ\(_{104}\), and LJ\(_{150}\) basin hopping spent the
 full \(4\times 10^{6}\) calls on every seed.
 This setting hits LJ\(_{38}\) and LJ\(_{55}\) on 12 of 12, LJ\(_{98}\)
-on 10 of 12, LJ\(_{104}\) on 9 of 12, and LJ\(_{150}\) on 5 of 12.~\rerun{5}
+on 7 of 12, LJ\(_{104}\) on 5 of 12, and LJ\(_{150}\) on 8 of 12.~\rerun{5}
 Basin hopping hits LJ\(_{55}\) on 1 of 12 and no other cluster, and
 minima hopping hits none.~\rerun{5}
 Fisher's test against each ASE arm is below 0.05 on all 5
 Lennard-Jones clusters.~\rerun{5}
 No arm hits Au\(_{55}\).
 There the median best energy lies 0.051~eV above the reference for this
-setting, 1.196~eV for basin hopping, and 0.737~eV for minima hopping.
+setting, 1.232~eV for basin hopping, and 0.737~eV for minima hopping.
 
 % ase-panel table: start
 \begin{table}
 \caption{This work against the basin hopping (BH) and minima hopping
 (MH) of ASE 3.29.0 at its constructor defaults.
-This work is anneal \texttt{1ce3ab64493196afd25e8690648e21157d91b882, b49341e308e6e98e39a2ea7bcc7fbf743f6c45ac}.
+This work is anneal \texttt{61fa67cf380e46876b569da45e7cc091647a775b}.
 Seeds 2000--2011, one core, budget in force calls.
 Cap is the wall in seconds at which a BH or MH run stops, three times
 the slowest wall of the cluster-preset arm of the panel.
@@ -1234,12 +1235,12 @@ exact test on hits against each ASE arm.}
 \cmidrule(lr){4-6}\cmidrule(lr){7-8}\cmidrule(lr){9-11}
 Cluster & Budget & Cap & This work & BH & MH & BH & MH & This work & BH & MH & \(p_\mathrm{BH}\) & \(p_\mathrm{MH}\) \\
 \midrule
-LJ\(_{38}\) & \(4\times 10^{5}\) & 4.654 & 12/12 & 0/12 & 0/12 & 12 & 12 & 0.067 & 4.654 & 4.864 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
-LJ\(_{55}\) & \(1\times 10^{6}\) & 4.425 & 12/12 & 1/12 & 0/12 & 11 & 12 & 0.128 & 4.425 & 4.488 & \(9.6\times 10^{-6}\) & \(7.4\times 10^{-7}\) \\
-LJ\(_{98}\) & \(4\times 10^{6}\) & 246.5 & 10/12 & 0/12 & 0/12 & 0 & 12 & 37.017 & 118.3 & 254.8 & \(6.7\times 10^{-5}\) & \(6.7\times 10^{-5}\) \\
-LJ\(_{104}\) & \(4\times 10^{6}\) & 280.9 & 9/12 & 0/12 & 0/12 & 0 & 12 & 65.136 & 127.2 & 287.9 & \(3.4\times 10^{-4}\) & \(3.4\times 10^{-4}\) \\
-LJ\(_{150}\) & \(4\times 10^{6}\) & 544.4 & 5/12 & 0/12 & 0/12 & 0 & 12 & 216.0 & 213.5 & 571.3 & 0.037 & 0.037 \\
-Au\(_{55}\) & \(1\times 10^{6}\) & 122.7 & 0/12 & 0/12 & 0/12 & 12 & 12 & 36.069 & 122.7 & 126.8 & 1 & 1 \\
+LJ\(_{38}\) & \(4\times 10^{5}\) & 4.645 & 12/12 & 0/12 & 0/12 & 12 & 12 & 0.605 & 4.645 & 4.858 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
+LJ\(_{55}\) & \(1\times 10^{6}\) & 4.220 & 12/12 & 1/12 & 0/12 & 11 & 12 & 0.051 & 4.220 & 4.442 & \(9.6\times 10^{-6}\) & \(7.4\times 10^{-7}\) \\
+LJ\(_{98}\) & \(4\times 10^{6}\) & 289.0 & 7/12 & 0/12 & 0/12 & 0 & 12 & 78.919 & 123.0 & 299.2 & \(4.6\times 10^{-3}\) & \(4.6\times 10^{-3}\) \\
+LJ\(_{104}\) & \(4\times 10^{6}\) & 291.0 & 5/12 & 0/12 & 0/12 & 0 & 12 & 101.7 & 128.5 & 305.2 & 0.037 & 0.037 \\
+LJ\(_{150}\) & \(4\times 10^{6}\) & 667.2 & 8/12 & 0/12 & 0/12 & 0 & 12 & 59.386 & 216.1 & 712.5 & \(1.3\times 10^{-3}\) & \(1.3\times 10^{-3}\) \\
+Au\(_{55}\) & \(1\times 10^{6}\) & 107.9 & 0/12 & 0/12 & 0/12 & 12 & 12 & 36.000 & 107.9 & 110.3 & 1 & 1 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1347,7 +1348,7 @@ LJ\(_{75}\) & This work & \(4\times 10^{6}\) & 6/6 & 0 & 979290 & 26.220 \\
 
 Table~\ref{tab:ase} shows ASE minima hopping on 0 of 12 seeds at
 LJ\(_{38}\) and LJ\(_{55}\), because its runs stop at wall caps of
-4.654 and 4.425~s.
+4.645 and 4.220~s.
 The runs of Table~\ref{tab:gofee} have no wall cap.
 They hit LJ\(_{38}\) on 1 of 6 seeds in a median wall of 1037.8~s and
 LJ\(_{55}\) on 6 of 6 in 410.4~s, both far beyond those caps.
@@ -1631,7 +1632,7 @@ In the ASE panel it hits 0 of 12, as do both ASE arms, and its median
 best energy lies 0.051~eV above the reference.
 Those two Au\(_{55}\) counts come from revision \texttt{9837358a} with
 the gold driver of Section~\ref{sec:gmin} and from revision
-\texttt{1ce3ab64} with the preset scaled to the Gupta length and well
+\texttt{61fa67cf} with the preset scaled to the Gupta length and well
 depth.
 
 \section{Conclusions}
