@@ -72,6 +72,9 @@ GMIN_REV = "aac1548a8aec13b53ad12a8d6904625081685d2e"
 # 2026-11-19 snapshot pinned by scripts/gmin_panel/build_gmin.sh.
 GMIN_PIN = "9cbec1a446352bc9ef064bd2b1a5767194655919"
 GMIN_TARBALL_SHA256 = "ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776"
+# 2026-11-21T03:01:22Z tarball sha256 behind record/gmin-184/rows.csv.
+GMIN_RERUN_TARBALL_SHA256 = "0d9917600ecda72b2176253d0e838bcb58ec6e38902ef7d0affc7e7e7eba8f39"
+GMIN_PANEL_REVS = frozenset({GMIN_REV, GMIN_PIN, GMIN_RERUN_TARBALL_SHA256})
 PAPER_BUDGETS = {
     "lj38": 400_000,
     "lj55": 1_000_000,
@@ -501,14 +504,17 @@ def row_key(row: dict[str, str]) -> tuple[str, str, str, str, str]:
 
 def panel_groups(rows: list[dict[str, str]], revision: str) -> dict[tuple[str, str], list[dict[str, str]]]:
     """The latest stored row per seed of each system and code at this revision."""
-    wanted = {"anneal": revision, "gmin": GMIN_REV}
     groups: dict[tuple[str, str], dict[int, dict[str, str]]] = {}
     for row in rows:
         if revision == "latest":
-            if row["code"] == "gmin" and row["code_revision"] != GMIN_REV:
+            if row["code"] == "gmin" and row["code_revision"] not in GMIN_PANEL_REVS:
                 continue
         else:
-            if row["harness_revision"] != revision or wanted.get(row["code"]) != row["code_revision"]:
+            if row["harness_revision"] != revision:
+                continue
+            if row["code"] == "anneal" and row["code_revision"] != revision:
+                continue
+            if row["code"] == "gmin" and row["code_revision"] not in GMIN_PANEL_REVS:
                 continue
         groups.setdefault((row["system"], row["code"]), {})[int(row["seed"])] = row
     return {key: [group[s] for s in sorted(group)] for key, group in groups.items()}
@@ -592,6 +598,7 @@ def summarise(rows: list[dict[str, str]], revision: str) -> list[dict[str, str]]
         wall_mw = mann_whitney(*wall_pair) if wall_pair is not None else None
         both = anneal + gmin
         anneal_revisions = " ".join(sorted({r["code_revision"] for r in anneal}))
+        gmin_revisions = " ".join(sorted({r["code_revision"] for r in gmin}))
         harness_revisions = " ".join(sorted({r["harness_revision"] for r in both}))
         out.append(
             {
@@ -622,7 +629,7 @@ def summarise(rows: list[dict[str, str]], revision: str) -> list[dict[str, str]]
                 "anneal_best_min": f"{min(col(anneal, 'best')):.8f}",
                 "gmin_best_min": f"{min(col(gmin, 'best')):.8f}",
                 "anneal_revision": anneal_revisions,
-                "gmin_revision": GMIN_REV,
+                "gmin_revision": gmin_revisions,
                 "harness_revision": harness_revisions,
                 "host": " ".join(sorted({r["host"] for r in both})),
                 "sessions": " ".join(sorted({r["session"] for r in both})),
@@ -708,6 +715,38 @@ def readme_table(summary: list[dict[str, str]]) -> str:
     return "\n".join(rows)
 
 
+def session_date(stamp: str) -> str:
+    return f"{stamp[:4]}-{stamp[4:6]}-{stamp[6:8]}" if len(stamp) >= 8 and stamp[:8].isdigit() else stamp
+
+
+def gmin_label(rev: str) -> str:
+    return f"GMIN tarball SHA-256 \\texttt{{{rev[:8]}}}" if len(rev) == 64 else f"GMIN \\texttt{{{rev[:8]}}}"
+
+
+def caption_revisions(summary: list[dict[str, str]], revision: str) -> list[str]:
+    lj = [line for line in summary if line["system"].startswith("lj")]
+    nonlj = [line for line in summary if not line["system"].startswith("lj")]
+    lj_a = sorted({r for line in lj for r in line["anneal_revision"].split()})
+    lj_g = sorted({r for line in lj for r in line["gmin_revision"].split()})
+    lj_s = sorted({s for line in lj for s in line["sessions"].split()})
+    nl_a = sorted({r for line in nonlj for r in line["anneal_revision"].split()})
+    nl_g = sorted({r for line in nonlj for r in line["gmin_revision"].split()})
+    nl_s = sorted({s for line in nonlj for s in line["sessions"].split()})
+    if revision != "latest" or not lj or not nonlj or (lj_a == nl_a and lj_g == nl_g and lj_s == nl_s):
+        all_a = sorted({r for line in summary for r in line["anneal_revision"].split()})
+        all_g = sorted({r for line in summary for r in line["gmin_revision"].split()})
+        shown_rev = revision[:8] if revision != "latest" else (all_a[0][:8] if len(all_a) == 1 else "mixed")
+        shown_gmin = all_g[0][:8] if len(all_g) == 1 else "mixed"
+        return [f"Revisions: anneal \\texttt{{{shown_rev}}}, GMIN \\texttt{{{shown_gmin}}}."]
+    return [
+        f"The eight Lennard-Jones rows come from session \\texttt{{{lj_s[0]}}} "
+        f"({session_date(lj_s[0])}; anneal \\texttt{{{lj_a[0][:8]}}}, {gmin_label(lj_g[0])}).",
+        f"Au\\(_{{55}}\\) and the four Morse rows come from session \\texttt{{{nl_s[0]}}} "
+        f"({session_date(nl_s[0])}; anneal \\texttt{{{nl_a[0][:8]}}}, {gmin_label(nl_g[0])}; "
+        "see Supporting Information).",
+    ]
+
+
 def tex_table(summary: list[dict[str, str]], revision: str) -> str:
     lines = table_lines(summary, tex=True)
     for index, cells in enumerate(lines):
@@ -715,13 +754,12 @@ def tex_table(summary: list[dict[str, str]], revision: str) -> str:
         arm = "anneal" if index % 2 == 0 else "gmin"
         if arm == "gmin" and system in ("lj75", "lj98"):
             cells[3] += "~\\rerun{5}"
-    shown_revision = revision[:8] if revision != "latest" else "mixed"
     body = [" & ".join(cells) + " \\\\" for cells in lines]
     return "\n".join(
         [
             "\\begin{table}",
-            "\\caption{This work against GMIN, both arms of each cluster on one host in one session.",
-            f"Revisions: anneal \\texttt{{{shown_revision}}}, GMIN \\texttt{{{GMIN_REV[:8]}}}.",
+            "\\caption{This work against GMIN, both arms of each cluster run in one session on one host.",
+            *caption_revisions(summary, revision),
             "Seeds 2000--2011, one core, budget in force calls.",
             "Calls and IQR are the median and the interquartile range of the",
             "calls to the minimum, with a miss at the full budget.",
@@ -866,6 +904,25 @@ def self_test() -> None:
                 raise SystemExit(f"abba balance {slot} {arm} {pairs}")
     if len(pairs) != len(SEEDS) * 2:
         raise SystemExit("abba length")
+    mixed_cap = caption_revisions(
+        [
+            {
+                "system": "lj38",
+                "anneal_revision": "c2de652dca0bc75e2b0cb4afffac91fd656404e4",
+                "gmin_revision": GMIN_REV,
+                "sessions": "20261117T035457Z",
+            },
+            {
+                "system": "au55",
+                "anneal_revision": "9837358ae1027067ff654fac8b48969020853452",
+                "gmin_revision": GMIN_RERUN_TARBALL_SHA256,
+                "sessions": "20261121T133601Z",
+            },
+        ],
+        "latest",
+    )
+    if len(mixed_cap) != 2 or "c2de652d" not in mixed_cap[0] or "9837358a" not in mixed_cap[1]:
+        raise SystemExit(f"mixed caption {mixed_cap}")
     print("ok")
 
 
