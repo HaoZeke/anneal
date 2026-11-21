@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import figstyle
 
-ARMS = ("single", "surface", "sym", "burst", "soap", "resample")
+ARMS = ("single", "surface", "sym", "burst", "soap", "lattice")
 CONTINUE = Fraction(2, 3)
 CAP = 8
 

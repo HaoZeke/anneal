@@ -272,8 +272,13 @@ While it is stuck, the symmetry projection of Section~\ref{sec:symmetry} is
 quenched and kept when its energy is lower than the energy the chain is
 standing on, and a structure already dominated by an icosahedral signature
 skips that projection.
-The trail step steps from the basin entry back along the direction from
-which the chain arrived and quenches; it is off in the preset.
+The preset enables two responses to a stuck chain.
+One is a climb of amplitude \(0.25\).
+The other starts at the recorded basin entry, continues outward along the
+direction from the current minimum to that entry with a random displacement
+of amplitude \(0.25\), and quenches.
+A depth-rewarded Thompson draw chooses between the climb and this trail
+response, and the quenched result becomes the chain state at any energy.
 Tabu stores the descriptors of up to eight basins the chain has failed
 to leave.
 
