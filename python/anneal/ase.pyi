@@ -4,7 +4,28 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
+import numpy as np
 import numpy.typing as npt
+
+class PotentialCalculator:
+    implemented_properties: list[str]
+    potential: Any
+    results: dict[str, Any]
+    atoms: Any
+    def __init__(self, potential: Any, **kwargs: Any) -> None: ...
+    def reset(self) -> None: ...
+    def calculate(
+        self,
+        atoms: Any = None,
+        properties: tuple[str, ...] = ("energy", "forces"),
+        system_changes: Any = None,
+    ) -> None: ...
+    def get_potential_energy(
+        self,
+        atoms: Any = None,
+        force_consistent: bool = False,
+    ) -> float: ...
+    def get_forces(self, atoms: Any = None) -> npt.NDArray[np.float64]: ...
 
 class Anneal:
     atoms: Any

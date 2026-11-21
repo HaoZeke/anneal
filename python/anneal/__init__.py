@@ -40,11 +40,20 @@ import numpy as np
 
 from anneal._core import (
     BasinBias,
+    BinaryLennardJones,
     Boltzmann,
     Bounds,
+    COPPER_Z,
     Config,
     DEFAULT_HIT_TOL,
+    GOLD_Z,
+    GminTip4p,
+    Gupta,
+    PLATINUM_Z,
+    PairPotential,
     SEARCH_HIT_TOL,
+    SuttonChen,
+    Tip4pCluster,
     EpochLine,
     Fast,
     Gsa,
@@ -52,12 +61,17 @@ from anneal._core import (
     Ledger,
     PyObjective,
     __version__,
+    block_from_interleaved_gmin as _core_block_from_interleaved_gmin,
     cluster_search as _core_cluster_search,
     energy_hits,
+    energy_ohh as _core_energy_ohh,
+    gmin_tip4p_sites,
+    interleaved_gmin_from_block as _core_interleaved_gmin_from_block,
     low_discrepancy_points as _core_low_discrepancy_points,
     pilot_draws_qmc as _core_pilot_draws_qmc,
     polish as _core_polish,
     quench as _core_quench,
+    rigid_from_ohh as _core_rigid_from_ohh,
     qmc_best1bin_scout as _core_qmc_best1bin_scout,
     qmc_best1bin_scout_objective as _core_qmc_best1bin_scout_objective,
     qmc_gsa_global_search as _core_qmc_gsa_global_search,
@@ -393,25 +407,63 @@ def cluster_search(
     return out
 
 
+_NATIVE_POTENTIALS = (
+    PairPotential,
+    BinaryLennardJones,
+    SuttonChen,
+    Gupta,
+    Tip4pCluster,
+    GminTip4p,
+)
+
+
+def rigid_from_ohh(cartesian):
+    """Convert Cartesian ``(O, H, H)`` triples to block Rodrigues coordinates."""
+    return np.asarray(_core_rigid_from_ohh(_flat(cartesian)), dtype=np.float64)
+
+
+def energy_ohh(cartesian) -> float:
+    """Evaluate rigid TIP4P energy on Cartesian ``(O, H, H)`` coordinates."""
+    return float(_core_energy_ohh(_flat(cartesian)))
+
+
+def block_from_interleaved_gmin(interleaved):
+    """Reorder interleaved GMIN ``(c, omega)`` rows to block ``(centres, omega)``."""
+    return np.asarray(_core_block_from_interleaved_gmin(_flat(interleaved)), dtype=np.float64)
+
+
+def interleaved_gmin_from_block(block):
+    """Reorder block ``(centres, omega)`` to interleaved GMIN ``(c, omega)`` rows."""
+    return np.asarray(_core_interleaved_gmin_from_block(_flat(block)), dtype=np.float64)
+
+
 def quench(fg_fn, x0, gtol: float, max_iter: int = 10000, *, method: str = "lbfgs", species=None):
     """Relax ``x0`` with the quench a molecular cluster search runs.
 
-    ``fg_fn(x)`` returns ``(energy, gradient)``. The descent stops when the
-    largest gradient component is below ``gtol``. ``method`` is ``lbfgs``,
-    the search's Cartesian L-BFGS, or ``tric``, translation-rotation internal
-    coordinates over the atomic numbers ``species`` (electronvolt and
+    ``fg_fn`` is either a callable ``fg_fn(x) -> (energy, gradient)`` or a
+    native potential instance (``PairPotential``, ``BinaryLennardJones``,
+    ``SuttonChen``, ``Gupta``, ``Tip4pCluster``, ``GminTip4p``). The descent
+    stops when the largest gradient component is below ``gtol``. ``method`` is
+    ``lbfgs``, the search's Cartesian L-BFGS, or ``tric``, translation-rotation
+    internal coordinates over the atomic numbers ``species`` (electronvolt and
     angstrom). ``max_iter`` caps iterations for ``lbfgs`` and calls for
     ``tric``. Returns a dict with ``x``, ``energy`` and ``calls``, the number
     of ``fg_fn`` evaluations.
     """
-
-    def fg(x):
-        energy, gradient = fg_fn(np.asarray(x, dtype=np.float64))
-        return float(energy), np.asarray(gradient, dtype=np.float64).reshape(-1).tolist()
+    if isinstance(fg_fn, _NATIVE_POTENTIALS):
+        target_fg = fg_fn
+    elif hasattr(fg_fn, "value_and_gradient") and not callable(fg_fn):
+        def target_fg(x):
+            energy, gradient = fg_fn.value_and_gradient(np.asarray(x, dtype=np.float64))
+            return float(energy), np.asarray(gradient, dtype=np.float64).reshape(-1).tolist()
+    else:
+        def target_fg(x):
+            energy, gradient = fg_fn(np.asarray(x, dtype=np.float64))
+            return float(energy), np.asarray(gradient, dtype=np.float64).reshape(-1).tolist()
 
     labels = None if species is None else [int(value) for value in species]
     out = _core_quench(
-        fg,
+        target_fg,
         np.asarray(x0, dtype=np.float64).reshape(-1),
         float(gtol),
         int(max_iter),
@@ -1554,11 +1606,21 @@ def global_optimize_objective(
 
 __all__ = [
     "BasinBias",
+    "BinaryLennardJones",
     "Boltzmann",
     "Bounds",
+    "COPPER_Z",
     "Config",
     "DEFAULT_HIT_TOL",
+    "GOLD_Z",
+    "GminTip4p",
+    "Gupta",
+    "PLATINUM_Z",
+    "PairPotential",
+    "PotentialCalculator",
     "SEARCH_HIT_TOL",
+    "SuttonChen",
+    "Tip4pCluster",
     "DeviceHistory",
     "EnsembleHistory",
     "EpochLine",
@@ -1569,8 +1631,13 @@ __all__ = [
     "Ledger",
     "PyObjective",
     "Anneal",
+    "block_from_interleaved_gmin",
     "cluster_search",
     "energy_hits",
+    "energy_ohh",
+    "gmin_tip4p_sites",
+    "interleaved_gmin_from_block",
+    "rigid_from_ohh",
     "TvmFfiTensorMetadata",
     "__version__",
     "low_discrepancy_points",
@@ -1642,4 +1709,8 @@ def __getattr__(name):
         from anneal.ase import Anneal as _Anneal
 
         return _Anneal
+    if name == "PotentialCalculator":
+        from anneal.ase import PotentialCalculator as _PotentialCalculator
+
+        return _PotentialCalculator
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

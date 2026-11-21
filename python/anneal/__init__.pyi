@@ -10,28 +10,42 @@ import numpy as np
 import numpy.typing as npt
 
 from anneal._core import (
+    COPPER_Z as COPPER_Z,
     DEFAULT_HIT_TOL as DEFAULT_HIT_TOL,
+    GOLD_Z as GOLD_Z,
+    PLATINUM_Z as PLATINUM_Z,
     SEARCH_HIT_TOL as SEARCH_HIT_TOL,
     BasinBias as BasinBias,
+    BinaryLennardJones as BinaryLennardJones,
     Boltzmann as Boltzmann,
     Bounds as Bounds,
     Config as Config,
     EpochLine as EpochLine,
     Fast as Fast,
+    GminTip4p as GminTip4p,
     Gsa as Gsa,
+    Gupta as Gupta,
     History as History,
     Ledger as Ledger,
+    NativeClusterPotential,
+    PairPotential as PairPotential,
     Preset,
     PyObjective as PyObjective,
+    SuttonChen as SuttonChen,
+    Tip4pCluster as Tip4pCluster,
     __version__ as __version__,
     energy_hits as energy_hits,
+    gmin_tip4p_sites as gmin_tip4p_sites,
 )
 from anneal._landfold import (
     LandfoldMap as LandfoldMap,
     landfold as landfold,
     landfold_book as landfold_book,
 )
-from anneal.ase import Anneal as Anneal
+from anneal.ase import (
+    Anneal as Anneal,
+    PotentialCalculator as PotentialCalculator,
+)
 from anneal.chemfit import (
     ChemFitVector as ChemFitVector,
     chemfit_box as chemfit_box,
@@ -129,8 +143,8 @@ def run_hmc(
     x0: npt.ArrayLike | None = None,
 ) -> History: ...
 def cluster_search(
-    obj_fn: Callable[[npt.NDArray[np.float64]], float],
-    grad_fn: Callable[[npt.NDArray[np.float64]], Sequence[float] | npt.NDArray[np.float64]],
+    obj_fn: Callable[[npt.NDArray[np.float64]], float] | NativeClusterPotential,
+    grad_fn: Callable[[npt.NDArray[np.float64]], Sequence[float] | npt.NDArray[np.float64]] | None,
     n: int,
     budget: int,
     seed: int = 0,
@@ -153,8 +167,14 @@ def cluster_search(
     hold_stereocentres: bool | None = None,
     measured_energy_scale: bool | None = None,
 ) -> dict[str, Any]: ...
+def rigid_from_ohh(cartesian: npt.ArrayLike) -> npt.NDArray[np.float64]: ...
+def energy_ohh(cartesian: npt.ArrayLike) -> float: ...
+def block_from_interleaved_gmin(
+    interleaved: npt.ArrayLike,
+) -> npt.NDArray[np.float64]: ...
+def interleaved_gmin_from_block(block: npt.ArrayLike) -> npt.NDArray[np.float64]: ...
 def quench(
-    fg_fn: Callable[[npt.NDArray[np.float64]], tuple[float, npt.ArrayLike]],
+    fg_fn: Callable[[npt.NDArray[np.float64]], tuple[float, npt.ArrayLike]] | NativeClusterPotential | Any,
     x0: npt.ArrayLike,
     gtol: float,
     max_iter: int = 10000,

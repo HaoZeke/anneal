@@ -21,9 +21,89 @@ import numpy as np
 
 from anneal import cluster_search, polish
 
-__all__ = ["Anneal"]
+__all__ = ["Anneal", "PotentialCalculator"]
 
 _MODES = frozenset({"auto", "local", "search"})
+
+
+def _base_ase_calculator():
+    try:
+        from ase.calculators.calculator import Calculator
+    except ImportError:
+        return object
+    return Calculator
+
+
+class PotentialCalculator(_base_ase_calculator()):
+    """ASE-compatible calculator wrapping an ``anneal`` potential or objective.
+
+    ``potential`` may be any built-in potential (``PairPotential``,
+    ``BinaryLennardJones``, ``SuttonChen``, ``Gupta``), a ``PyObjective``
+    constructed with ``grad_fn``, or an object providing
+    ``value_and_gradient(x) -> (energy, gradient)``. Forces are returned
+    with ASE's minus-gradient sign convention and shape ``(N, 3)``.
+    """
+
+    implemented_properties = ["energy", "forces"]
+
+    def __init__(self, potential, **kwargs):
+        if _base_ase_calculator() is not object:
+            super().__init__(**kwargs)
+        if not (
+            hasattr(potential, "value_and_gradient")
+            or (hasattr(potential, "eval") and hasattr(potential, "grad"))
+        ):
+            raise TypeError(
+                "potential must implement value_and_gradient(x) or eval(x) and grad(x)"
+            )
+        self.potential = potential
+        self.results: dict[str, object] = {}
+        self.atoms = None
+
+    def reset(self) -> None:
+        self.results = {}
+
+    def _eval_and_grad(self, flat: np.ndarray) -> tuple[float, np.ndarray]:
+        x = np.ascontiguousarray(flat, dtype=np.float64).reshape(-1)
+        if hasattr(self.potential, "value_and_gradient"):
+            energy, grad = self.potential.value_and_gradient(x)
+        else:
+            energy = self.potential.eval(x)
+            grad = self.potential.grad(x)
+        return float(energy), np.asarray(grad, dtype=np.float64).reshape(-1)
+
+    def calculate(
+        self,
+        atoms=None,
+        properties=("energy", "forces"),
+        system_changes=None,
+    ) -> None:
+        if atoms is None:
+            atoms = self.atoms
+        if atoms is None:
+            raise ValueError("atoms must be provided to calculate")
+        self.atoms = atoms
+        pos = np.asarray(atoms.get_positions(), dtype=np.float64)
+        energy, grad = self._eval_and_grad(pos.reshape(-1))
+        self.results = {
+            "energy": energy,
+            "free_energy": energy,
+            "forces": -grad.reshape(pos.shape),
+        }
+
+    def get_potential_energy(self, atoms=None, force_consistent: bool = False) -> float:
+        target = self.atoms if atoms is None else atoms
+        if target is None:
+            raise ValueError("atoms must be provided")
+        self.calculate(target, properties=("energy", "forces"))
+        return float(self.results["energy"])
+
+    def get_forces(self, atoms=None) -> np.ndarray:
+        target = self.atoms if atoms is None else atoms
+        if target is None:
+            raise ValueError("atoms must be provided")
+        self.calculate(target, properties=("energy", "forces"))
+        return np.asarray(self.results["forces"], dtype=np.float64).copy()
 
 
 def _positions(atoms) -> np.ndarray:

@@ -10,6 +10,16 @@ PEP 561 =py.typed= metadata and =.pyi= stub files cover =anneal=,
 =anneal._core=, =anneal.ase=, =anneal.device=, =anneal.chemfit=,
 =anneal.tvm_ffi=, and =anneal._landfold=.
 
+Built-in cluster potentials (=PairPotential=, =BinaryLennardJones=,
+=SuttonChen=, =Gupta=, =Tip4pCluster=, and =GminTip4p=) and TIP4P chart
+helpers (=rigid_from_ohh=, =energy_ohh=, =block_from_interleaved_gmin=,
+=interleaved_gmin_from_block=, =gmin_tip4p_sites=) are exported from
+=anneal=. Each potential evaluates in Rust without per-call Python
+callbacks when handed directly to =cluster_search(pot, None, n, budget)=
+or =quench(pot, x0, gtol)=, converts to =PyObjective= via
+=pot.to_objective()=, and plugs into ASE =Atoms= via
+=anneal.ase.PotentialCalculator=.
+
 * C and C++ (cargo-c)
 
 The Rust crate produces a =cdylib=, =staticlib=, generated header =anneal-core.h=, and pkg-config metadata =anneal-core.pc= via cargo-c.

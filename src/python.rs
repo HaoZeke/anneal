@@ -34,6 +34,7 @@ use crate::variant::{boltzmann_in_box, fast_in_box, gsa_in_box};
 mod device;
 mod landfold;
 mod portfolio_peers;
+mod potentials;
 
 /// Drop the GIL before native search that may call back into Python.
 ///
@@ -3291,9 +3292,9 @@ fn recommended_with_scale(n: usize, length_scale: f64) -> crate::methods::cluste
 /// [`crate::methods::cluster_search::search`]. `archive_search` clones the
 /// config and turns `return_screen` on there; the preset itself is unchanged.
 #[cfg(feature = "graphkey")]
-fn cluster_archive_search(
+fn cluster_archive_search<O: eindir_core::gradient::DifferentiableObjective<f64>>(
     py: Python<'_>,
-    obj: &CallableDiffObjective,
+    obj: &O,
     cfg: &crate::methods::cluster_hopping::Config,
     ledger: &mut crate::methods::cluster_hopping::Ledger,
     seed: u64,
@@ -3349,9 +3350,9 @@ fn cluster_archive_search(
 }
 
 #[cfg(not(feature = "graphkey"))]
-fn cluster_archive_search(
+fn cluster_archive_search<O: eindir_core::gradient::DifferentiableObjective<f64>>(
     _py: Python<'_>,
-    _obj: &CallableDiffObjective,
+    _obj: &O,
     _cfg: &crate::methods::cluster_hopping::Config,
     _ledger: &mut crate::methods::cluster_hopping::Ledger,
     _seed: u64,
@@ -3361,13 +3362,13 @@ fn cluster_archive_search(
     ))
 }
 
-struct InterleavedChart<'a> {
-    inner: &'a CallableDiffObjective,
+struct InterleavedChart<'a, O> {
+    inner: &'a O,
     n_molecules: usize,
     bounds: Bounds<f64>,
 }
 
-impl InterleavedChart<'_> {
+impl<O> InterleavedChart<'_, O> {
     fn to_user(&self, block: ArrayView1<f64>) -> Array1<f64> {
         let slice = block.as_slice().unwrap_or(&[]);
         Array1::from_vec(crate::potentials::interleaved_gmin_from_block(slice))
@@ -3389,7 +3390,7 @@ impl InterleavedChart<'_> {
     }
 }
 
-impl Objective<f64> for InterleavedChart<'_> {
+impl<O: Objective<f64>> Objective<f64> for InterleavedChart<'_, O> {
     fn dim(&self) -> usize {
         6 * self.n_molecules
     }
@@ -3403,7 +3404,9 @@ impl Objective<f64> for InterleavedChart<'_> {
     }
 }
 
-impl eindir_core::gradient::Gradient<f64> for InterleavedChart<'_> {
+impl<O: eindir_core::gradient::Gradient<f64>> eindir_core::gradient::Gradient<f64>
+    for InterleavedChart<'_, O>
+{
     fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
         let user = self.inner.grad(self.to_user(x).view());
         self.to_block_gradient(user.view())
@@ -3414,7 +3417,9 @@ impl eindir_core::gradient::Gradient<f64> for InterleavedChart<'_> {
     }
 }
 
-impl eindir_core::gradient::DifferentiableObjective<f64> for InterleavedChart<'_> {
+impl<O: eindir_core::gradient::DifferentiableObjective<f64>>
+    eindir_core::gradient::DifferentiableObjective<f64> for InterleavedChart<'_, O>
+{
     fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
         let user = self.to_user(x);
         let (energy, gradient) = eindir_core::gradient::DifferentiableObjective::value_and_gradient(
@@ -3579,7 +3584,7 @@ fn rigid_probe(
 fn cluster_search(
     py: Python<'_>,
     obj_fn: Py<PyAny>,
-    grad_fn: Py<PyAny>,
+    grad_fn: Option<Py<PyAny>>,
     n: usize,
     budget: usize,
     seed: u64,
@@ -3811,82 +3816,166 @@ fn cluster_search(
         }
         ledger.stop_below(limit);
     }
-    let gradient_scale = if budget >= 4 {
-        let probe_owned = if rigid_chart || molecular {
-            Some(match start.as_ref() {
-                Some(start) => start.clone(),
-                None => Array1::from_vec(rigid_probe(&cfg, seed, interleaved)),
-            })
-        } else {
-            None
+    let native_pot = if grad_fn.is_none() {
+        let Some(pot) = potentials::NativePotential::extract_bound(obj_fn.bind(py))? else {
+            return Err(PyTypeError::new_err(
+                "grad_fn is required unless obj_fn is a native cluster potential",
+            ));
         };
-        let scale = cluster_gradient_scale(
-            py,
-            &obj_fn,
-            &grad_fn,
-            &cfg,
-            seed,
-            probe_owned.as_ref().map(|probe| probe.view()),
-            &errors,
-        )?;
-        for _ in 0..3 {
-            assert!(ledger.charge());
+        if Objective::dim(&pot) != dim {
+            return Err(PyValueError::new_err(format!(
+                "potential dimension {} does not match state dimension {dim}",
+                Objective::dim(&pot)
+            )));
         }
-        scale
+        Some(pot)
     } else {
-        1.0
+        None
     };
     let extent = cfg.container.max(1.0) * 4.0;
-    let bounds = if rigid {
-        Bounds::new(
-            Array1::from_elem(dim, -extent),
-            Array1::from_elem(dim, extent),
-            0.0,
-        )
-    } else if molecular {
-        cluster_bounds(n, dim, cfg.length_scale)
+    let (out, stats) = if let Some(pot) = native_pot.as_ref() {
+        if ras {
+            return cluster_archive_search(py, pot, &cfg, &mut ledger, seed);
+        }
+        py.detach(|| {
+            if interleaved {
+                let chart = InterleavedChart {
+                    inner: pot,
+                    n_molecules: n,
+                    bounds: Bounds::new(
+                        Array1::from_elem(dim, -extent),
+                        Array1::from_elem(dim, extent),
+                        0.0,
+                    ),
+                };
+                let started = match start.as_ref() {
+                    Some(start) => {
+                        Array1::from_vec(crate::potentials::block_from_interleaved_gmin(
+                            start.as_slice().unwrap_or(&[]),
+                        ))
+                    }
+                    None => Array1::from_vec(rigid_probe(&cfg, seed.wrapping_add(1), false)),
+                };
+                crate::methods::cluster_search::search_from(
+                    &chart,
+                    &cfg,
+                    &mut ledger,
+                    started.view(),
+                    seed,
+                )
+            } else if let Some(start) = start.as_ref() {
+                crate::methods::cluster_search::search_from(
+                    pot,
+                    &cfg,
+                    &mut ledger,
+                    start.view(),
+                    seed,
+                )
+            } else if rigid {
+                let started = Array1::from_vec(rigid_probe(&cfg, seed.wrapping_add(1), false));
+                crate::methods::cluster_search::search_from(
+                    pot,
+                    &cfg,
+                    &mut ledger,
+                    started.view(),
+                    seed,
+                )
+            } else {
+                crate::methods::cluster_search::search(pot, &cfg, &mut ledger, seed)
+            }
+        })
+        .map_err(|err| PyValueError::new_err(err.to_string()))?
     } else {
-        cluster_bounds(n, dim, scale)
-    };
-    let obj = CallableDiffObjective {
-        fn_: obj_fn,
-        grad_fn,
-        bounds,
-        gradient_scale,
-        errors: std::sync::Arc::clone(&errors),
-    };
-    if ras {
-        let out = cluster_archive_search(py, &obj, &cfg, &mut ledger, seed);
-        errors.finish(py)?;
-        return out;
-    }
-    let (out, stats) = if interleaved {
-        let chart = InterleavedChart {
-            inner: &obj,
-            n_molecules: n,
-            bounds: Bounds::new(
+        let grad_fn = grad_fn.expect("checked grad_fn is Some");
+        let gradient_scale = if budget >= 4 {
+            let probe_owned = if rigid_chart || molecular {
+                Some(match start.as_ref() {
+                    Some(start) => start.clone(),
+                    None => Array1::from_vec(rigid_probe(&cfg, seed, interleaved)),
+                })
+            } else {
+                None
+            };
+            let scale = cluster_gradient_scale(
+                py,
+                &obj_fn,
+                &grad_fn,
+                &cfg,
+                seed,
+                probe_owned.as_ref().map(|probe| probe.view()),
+                &errors,
+            )?;
+            for _ in 0..3 {
+                assert!(ledger.charge());
+            }
+            scale
+        } else {
+            1.0
+        };
+        let bounds = if rigid {
+            Bounds::new(
                 Array1::from_elem(dim, -extent),
                 Array1::from_elem(dim, extent),
                 0.0,
-            ),
+            )
+        } else if molecular {
+            cluster_bounds(n, dim, cfg.length_scale)
+        } else {
+            cluster_bounds(n, dim, scale)
         };
-        let started = match start.as_ref() {
-            Some(start) => Array1::from_vec(crate::potentials::block_from_interleaved_gmin(
-                start.as_slice().unwrap_or(&[]),
-            )),
-            None => Array1::from_vec(rigid_probe(&cfg, seed.wrapping_add(1), false)),
+        let obj = CallableDiffObjective {
+            fn_: obj_fn,
+            grad_fn,
+            bounds,
+            gradient_scale,
+            errors: std::sync::Arc::clone(&errors),
         };
-        crate::methods::cluster_search::search_from(&chart, &cfg, &mut ledger, started.view(), seed)
-    } else if let Some(start) = start {
-        crate::methods::cluster_search::search_from(&obj, &cfg, &mut ledger, start.view(), seed)
-    } else if rigid {
-        let started = Array1::from_vec(rigid_probe(&cfg, seed.wrapping_add(1), false));
-        crate::methods::cluster_search::search_from(&obj, &cfg, &mut ledger, started.view(), seed)
-    } else {
-        crate::methods::cluster_search::search(&obj, &cfg, &mut ledger, seed)
-    }
-    .map_err(|err| PyValueError::new_err(err.to_string()))?;
-    errors.finish(py)?;
+        if ras {
+            let out = cluster_archive_search(py, &obj, &cfg, &mut ledger, seed);
+            errors.finish(py)?;
+            return out;
+        }
+        let res = if interleaved {
+            let chart = InterleavedChart {
+                inner: &obj,
+                n_molecules: n,
+                bounds: Bounds::new(
+                    Array1::from_elem(dim, -extent),
+                    Array1::from_elem(dim, extent),
+                    0.0,
+                ),
+            };
+            let started = match start.as_ref() {
+                Some(start) => Array1::from_vec(crate::potentials::block_from_interleaved_gmin(
+                    start.as_slice().unwrap_or(&[]),
+                )),
+                None => Array1::from_vec(rigid_probe(&cfg, seed.wrapping_add(1), false)),
+            };
+            crate::methods::cluster_search::search_from(
+                &chart,
+                &cfg,
+                &mut ledger,
+                started.view(),
+                seed,
+            )
+        } else if let Some(start) = start {
+            crate::methods::cluster_search::search_from(&obj, &cfg, &mut ledger, start.view(), seed)
+        } else if rigid {
+            let started = Array1::from_vec(rigid_probe(&cfg, seed.wrapping_add(1), false));
+            crate::methods::cluster_search::search_from(
+                &obj,
+                &cfg,
+                &mut ledger,
+                started.view(),
+                seed,
+            )
+        } else {
+            crate::methods::cluster_search::search(&obj, &cfg, &mut ledger, seed)
+        }
+        .map_err(|err| PyValueError::new_err(err.to_string()))?;
+        errors.finish(py)?;
+        res
+    };
     let best_block = out
         .best_state
         .map(|value| value.to_vec())
@@ -3953,40 +4042,62 @@ fn quench(
             )));
         }
     };
-    let mut failure: Option<PyErr> = None;
-    let mut calls = 0usize;
     let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
     opt.max_line_evals = 64;
     opt.gtol = gtol;
-    let fg = |v: ArrayView1<f64>| {
-        if failure.is_some() {
-            return None;
+    let mut calls = 0usize;
+    let (energy, x) = if let Some(pot) = potentials::NativePotential::extract_bound(fg_fn.bind(py))?
+    {
+        if Objective::dim(&pot) != dim {
+            return Err(PyValueError::new_err(format!(
+                "potential dimension {} does not match x0 length {dim}",
+                Objective::dim(&pot)
+            )));
         }
-        calls += 1;
-        let out = fg_fn
-            .call1(py, (PyArray1::from_vec(py, v.to_vec()),))
-            .and_then(|value| value.extract::<(f64, Vec<f64>)>(py));
-        match out {
-            Ok((e, g)) if g.len() == dim => Some((e, Array1::from_vec(g))),
-            Ok(_) => {
-                failure = Some(PyValueError::new_err(format!(
-                    "fg_fn must return a gradient of {dim} numbers"
-                )));
-                None
+        py.detach(|| {
+            let fg = |v: ArrayView1<f64>| {
+                calls += 1;
+                Some(eindir_core::gradient::DifferentiableObjective::value_and_gradient(&pot, v))
+            };
+            let (energy, x, _) = match tric.as_ref() {
+                Some(tric) => tric.minimize(start.view(), max_iter, fg),
+                None => opt.minimize(start.view(), max_iter, fg),
+            };
+            (energy, x)
+        })
+    } else {
+        let mut failure: Option<PyErr> = None;
+        let fg = |v: ArrayView1<f64>| {
+            if failure.is_some() {
+                return None;
             }
-            Err(err) => {
-                failure = Some(err);
-                None
+            calls += 1;
+            let out = fg_fn
+                .call1(py, (PyArray1::from_vec(py, v.to_vec()),))
+                .and_then(|value| value.extract::<(f64, Vec<f64>)>(py));
+            match out {
+                Ok((e, g)) if g.len() == dim => Some((e, Array1::from_vec(g))),
+                Ok(_) => {
+                    failure = Some(PyValueError::new_err(format!(
+                        "fg_fn must return a gradient of {dim} numbers"
+                    )));
+                    None
+                }
+                Err(err) => {
+                    failure = Some(err);
+                    None
+                }
             }
+        };
+        let (energy, x, _) = match tric.as_ref() {
+            Some(tric) => tric.minimize(start.view(), max_iter, fg),
+            None => opt.minimize(start.view(), max_iter, fg),
+        };
+        if let Some(err) = failure {
+            return Err(err);
         }
+        (energy, x)
     };
-    let (energy, x, _) = match tric.as_ref() {
-        Some(tric) => tric.minimize(start.view(), max_iter, fg),
-        None => opt.minimize(start.view(), max_iter, fg),
-    };
-    if let Some(err) = failure {
-        return Err(err);
-    }
     let out = PyDict::new(py);
     out.set_item("x", PyArray1::from_vec(py, x.to_vec()))?;
     out.set_item("energy", energy)?;
@@ -4020,6 +4131,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(energy_hits, m)?)?;
     device::register(m)?;
     landfold::register(m)?;
+    potentials::register(m)?;
     m.add_class::<PyBasinBias>()?;
     m.add_class::<PyBoltzmann>()?;
     m.add_class::<PyFast>()?;
