@@ -1818,7 +1818,7 @@ fn read_start_xyz(path: &str) -> Option<Vec<f64>> {
 mod tests {
     use super::{
         WATER_HEXAMER_MOLECULES, parse_xyz, prepared_water_start, reference_coordinates,
-        water_groups, water_species,
+        report_failed, water_groups, water_species,
     };
     use anneal_core::methods::cluster_hopping::Config;
 
