@@ -54,7 +54,14 @@ from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 TEX = "paper/jctc/manuscript.tex"
 SI = "paper/jctc/si.tex"
 
-REVISION_COLUMNS = ("code_revision", "anneal_head", "release_revision", "head", "harness_revision")
+REVISION_COLUMNS = (
+    "revision", "code_revision", "harness_revision", "head", "commit",
+    "anneal_head", "release_revision", "anneal_sha",
+)
+ALL_REVISION_COLUMNS = (
+    *REVISION_COLUMNS, "anneal_revision", "anneal_commit",
+    "develop_revision", "superseded_by_revision",
+)
 HOST_COLUMNS = ("host",)
 # Revisions of other codes. The GMIN build scripts refuse a tarball whose SVNREV differs.
 EXTERNAL_REVISIONS = {
@@ -110,9 +117,91 @@ UNPUSHED = {
     "fc1af066a915a80eb46a3bc478caaf155cc9b29f": "the build head of the Au55 cluster-preset rerun and its ASE arms, first "
                                                 "cited by 0f69a6b1; no pushed branch holds it",
     "1ce3ab64493196afd25e8690648e21157d91b882": "the template-free landing head for the Au55 ASE rows and template-free "
-                                                "Morse rows, first cited by 93e17b69; no pushed branch holds it",
+                                                "Morse rows, first cited by 93e17b69; 1c1b1238 normalized CRLF in 9 bench "
+                                                "CSVs so trees differ (6604e64e vs 4274f564)",
     "90b88235fe54abace3bde32789582eb6573ed40a": "the build head of the Morse ASE panel, first cited by c3bcdc01; no pushed "
                                                 "branch holds it",
+    "0a5136605161aaff2610584cd93ae6e9564fda46": "AGOX 3.11.1 upstream commit pinned in scripts/lj_board/run_arm.py and "
+                                                "cited in bench/agox-lj75 and bench/agox-lj98 by 6ac602fe and 1235d606; "
+                                                "external repository",
+    "162d230740f078abbcb5caae9b0aba08477691bd": "the harness head of the LJ75 ASE rows in bench/ase-lj75, first cited by "
+                                                "c2de652d; no pushed branch holds it",
+    "28e12a5ba65766009ce42813fee50caffbd7646f": "the build head of the Au38 and Au55 basin-suffix panel, first cited by "
+                                                "b3d03061; no pushed branch holds it",
+    "2b46484da27f932b64b687c04c848e6040db5777": "the harness head of the uncapped GrowPAL LJ38 and LJ55 rows, first cited "
+                                                "by 0baf811f; no pushed branch holds it",
+    "422628e8390cad725242ac424f07c1282ec81f9a": "the build head of the pentagonal-retry GMIN head-to-head, first cited by "
+                                                "a8406b41; no pushed branch holds it",
+    "42b974223530e72abae3f89cc733c9149fc41057": "the build head of the Sutton-Chen GMIN head-to-head in sc-8e076b7f, first "
+                                                "cited by 290d5202; no pushed branch holds it",
+    "456be5ffbc2b9c39d395394c646ab2578eb8ea26": "the earlier anneal build head of the LJ38 RPQA head-to-head, first cited "
+                                                "by 22e78c86; no pushed branch holds it",
+    "4e7f5b3c9c38fe9246301a2c7bce8d940548ef90": "the build head of the Sutton-Chen half-budget chain rows, first cited by "
+                                                "26d4405e; no pushed branch holds it",
+    "4e86f5fdc1583ef21f105fc2bed96a279b2430c1": "RPQA i-PI upstream commit pinned in scripts/pimc_lj38/install_rpqa.sh and "
+                                                "cited on rpqa rows by adc74aa1 and 22e78c86; external repository",
+    "621761ec8e4e225dbcc1d54d8a4ccdc6295ba315": "the build head of the GrowPAL 0.1.6 head-to-head in growpal-h2h-v2, first "
+                                                "cited by 260d281c; no pushed branch holds it",
+    "639910870b23c06617d07fd7fab99ad8bc1b3960": "the build head of the first GrowPAL head-to-head in growpal-h2h, first "
+                                                "cited by 14c2cdbc; no pushed branch holds it",
+    "66dd578e58ef0db9a168abda81b4f0f2f8c000fd": "the branch build head of the labelled-cluster Gupta alloy ablation, first "
+                                                "cited by 185b5563; no pushed branch holds it",
+    "6e4409104eb773ec447a8ff4da1e22079ea66fbc": "the build head of the Gupta homotop panel and LJ identity check, first "
+                                                "cited by 469c56c8; no pushed branch holds it",
+    "6eda862e2e5f2851a493061a121dc3492f9d087d": "the harness head of the Cu38 and Cu55 OCCat and GMIN rows, first cited by "
+                                                "08ac7c74; no pushed branch holds it",
+    "7536aeb6656b2284df31491d23092c790793b590": "an earlier Cu38 anneal build head in bench/occat-h2h/seeds.csv, first "
+                                                "cited by 08ac7c74; no pushed branch holds it",
+    "7be00382dba9b06054a7b43d04b9eaba1cacd5a2": "the build head of the motif-panel-cfa21b1a Gupta tables, first cited by "
+                                                "b768cda5; no pushed branch holds it",
+    "8173c5e2855bbb863ebbcd93811f71c847eed31a": "an earlier LJ75 ASE basin-hopping harness head in bench/ase-lj75, first "
+                                                "cited by c2de652d; no pushed branch holds it",
+    "8a211859251489c2289e55ff4b942dbded63f0fc": "the build head of the generic close-packed panel in gupta-binary-e2865427, "
+                                                "first cited by 3a8134db; no pushed branch holds it",
+    "8aeb3b0b22729cf1a83ad75974b50d459f1b34f6": "the build head of the GFN2 Si10 rerun in bench/covalent-h2h/gfn2/summaries.csv, "
+                                                "first cited by 02f1fc1a; no pushed branch holds it",
+    "8f627b2f35df9ee017685ab1500c928859201423": "the build head of the covalent panel after the free-atom refusal, first "
+                                                "cited by 4ca55fae; no pushed branch holds it",
+    "93e43c601ca1812ea87ca674a54276dd98f5f665": "the build head of the covalent panel before the free-atom refusal, first "
+                                                "cited by 4ca55fae; no pushed branch holds it",
+    "95aed4124f7ec26c790d80c1296c0cf1b159be5d": "the build head of the GFN2 Si13 and C20 element call-floor gate, first "
+                                                "cited by b815e0a9; no pushed branch holds it",
+    "9631d65aa33e90f996755fc1415628b49b08d960": "the build head of the third covalent panel in bench/covalent-h2h/v3, first "
+                                                "cited by f511db94; no pushed branch holds it",
+    "982c216dc9351ad2c377b305000ed47928fa599c": "the build head of the Gupta ASE head-to-head in bench/metal-cluster-h2h, "
+                                                "first cited by 9a211d71; no pushed branch holds it",
+    "98a69388cea92d85836d9eadf83756adbadd0dcb": "the base build head of the GFN2 element call-floor gate, first cited by "
+                                                "6817c6ab; no pushed branch holds it",
+    "a43cc948e31cde1fcf1a3f1941854ae2c5247908": "the build head of the n=36 labelled funnel-leave seeds in bench/au55-funnel2, "
+                                                "first cited by f0a70387; no pushed branch holds it",
+    "a52726af5f3cee9506124c70ac0f3917ad335bb0": "the floor build head of the covalent call-floor gate and GFN2 Si20 rows, "
+                                                "first cited by 6817c6ab; no pushed branch holds it",
+    "a70f3371a38a0c3c2e1104b0bf3e2ee962361960": "the branch build head of the g2 priors-on and priors-off Gupta alloy "
+                                                "panel, first cited by 7192e9f8; no pushed branch holds it",
+    "b22eb28536efcbfba899e629bd22632767712181": "the summary head of the GFN2 Si10 seed-2009 rescore in summaries.csv, "
+                                                "first cited by c960b9f8; no pushed branch holds it",
+    "b7514369a9aa5fea90fa3ed87cfc7081406e4bb7": "the build head of the GFN2 Si13 fresh-SCC comparison and CREST rescore, "
+                                                "first cited by 1697c7a8; no pushed branch holds it",
+    "cbd08fd19a38e4e612a888777dbafe43c23ba14c": "the branch build head of the priors-off Gupta alloy panel on develop "
+                                                "5d44d218, first cited by 02cefdd7; no pushed branch holds it",
+    "ccc22cee607b18463b3891dd2f9048810d671ac0": "the anneal build head of the LJ75 AGOX head-to-head in bench/agox-lj75, "
+                                                "first cited by 1235d606; no pushed branch holds it",
+    "db6bdb906ab881ad89b0097c5c79b3120583d193": "the build head of the Darby Gupta panel in bench/metal-cluster-h2h/darby.csv, "
+                                                "first cited by 4fdc37e8; no pushed branch holds it",
+    "e02a355f2fef43f437a1449b00504efeba9eeb83": "the summary head of the GFN2 C20 comparison in summaries.csv, first cited "
+                                                "by 9b84a43f; no pushed branch holds it",
+    "e0f4a82597169ead26d1a87e088893ab28acb96f": "one of two build heads of the six-seed fingerprint screen in "
+                                                "bench/outside-time3, first cited by 4b4b6cb1; no pushed branch holds it",
+    "e3f617afaea225941feb36511fa79a481bd92048": "arm B local worktree head of the no-motif SOAP gate, first cited by "
+                                                "2f067491; object and tree absent so unprovable against 8c41eddb",
+    "e6edbcbabc34fa4d935205b99752c84c9e8f6998": "the summary head of the GFN2 call-floor comparison in summaries.csv, first "
+                                                "cited by 8abfff19; no pushed branch holds it",
+    "eb7f899959de53b33948f29e11f35005b734e9ad": "the summary head of the twelve-seed GFN2 Si10 CREST arm in summaries.csv, "
+                                                "first cited by d9935407; no pushed branch holds it",
+    "f235b67d393fdcf7f96da773bb3189fce5bb74f3": "the build head of the second covalent panel in bench/covalent-h2h/v2, "
+                                                "first cited by daccf350; no pushed branch holds it",
+    "faf48265c8b75cff28464cc9d5c1bfd2bb22599f": "the second build head of the six-seed fingerprint screen in "
+                                                "bench/outside-time3, first cited by 4b4b6cb1; no pushed branch holds it",
 }
 
 KNOWN_GAPS = {
@@ -3282,16 +3371,73 @@ REVISION_MAP = "bench/unreachable-revisions.csv"
 REVISION_MAP_COLUMNS = ("revision", "why", "row_file", "system", "arm", "revision_column", "rows", "seed_min", "seed_max")
 
 
-def revision_map_rows(audit: Audit) -> list[dict[str, str]]:
-    """Each unreachable revision with the row groups of the files read that cite it."""
-    groups: dict[tuple[str, str, str, str, str], list[dict[str, str]]] = defaultdict(list)
-    for path, rows in audit.read.items():
+def revision_values(value: str) -> list[str]:
+    """Hexadecimal revision identifiers in one cell, including joined cells."""
+    return re.findall(r"(?<![0-9a-f])[0-9a-f]{7,64}(?![0-9a-f])", value or "")
+
+
+def revision_row_tables() -> list[tuple[str, list[dict[str, str]]]]:
+    """Every CSV or TSV below the paper, benchmark, data, results and record trees."""
+    tables = []
+    excluded = {ALIASES, REVISION_MAP, RECORD_REFS}
+    for root in ("paper/jctc/data", "bench", "data", "results", "record"):
+        directory = ROOT / root
+        if not directory.is_dir():
+            continue
+        paths = sorted((*directory.rglob("*.csv"), *directory.rglob("*.tsv")))
+        for absolute in paths:
+            path = absolute.relative_to(ROOT).as_posix()
+            if path in excluded:
+                continue
+            delimiter = "\t" if absolute.suffix == ".tsv" else ","
+            with absolute.open(newline="") as handle:
+                lines = [line for line in handle if line.strip() and not line.lstrip().startswith("#")]
+            if not lines:
+                continue
+            rows = list(csv.DictReader(lines, delimiter=delimiter))
+            if rows and set(rows[0]).intersection(ALL_REVISION_COLUMNS):
+                tables.append((path, rows))
+    return tables
+
+
+def all_revision_provenance(audit: Audit) -> None:
+    """Every revision-like cell in every row table is on origin, aliased, external, or mapped."""
+    citations: dict[str, set[str]] = defaultdict(set)
+    for path, rows in revision_row_tables():
         for row in rows:
-            for column in REVISION_COLUMNS:
-                value = row.get(column, "").strip()
-                if value in UNPUSHED:
-                    key = (value, path, row.get("system", row.get("board", "")), row.get("arm", row.get("code", "")), column)
-                    groups[key].append(row)
+            for column in ALL_REVISION_COLUMNS:
+                for value in revision_values(row.get(column, "")):
+                    if not external_pin(value):
+                        citations[value].add(path)
+    names = sorted(citations)
+    table = alias_table()
+    index = alias_index(names, table)
+    aliases = verified_aliases(audit, table, index)
+    for revision in names:
+        where = ", ".join(sorted(citations[revision]))
+        remote = index.on_remote(revision)
+        aliased = any(local.startswith(revision) for local in aliases)
+        mapped = aliased or revision in UNPUSHED
+        state = "origin" if remote else "pushed equivalent" if aliased else UNPUSHED.get(revision, "unmapped")
+        audit.record(remote or mapped, where, f"row revision {revision[:8]} is reachable or mapped",
+                     "origin or map", state)
+    for revision in sorted(set(UNPUSHED) - set(citations)):
+        audit.record(False, REVISION_MAP, f"mapped revision {revision[:8]} is cited",
+                     UNPUSHED[revision], "no row cites it")
+
+
+def revision_map_rows(audit: Audit) -> list[dict[str, str]]:
+    """Each unreachable revision with every row group that cites it."""
+    groups: dict[tuple[str, str, str, str, str], list[dict[str, str]]] = defaultdict(list)
+    for path, rows in revision_row_tables():
+        for row in rows:
+            for column in ALL_REVISION_COLUMNS:
+                for value in revision_values(row.get(column, "")):
+                    if value in UNPUSHED:
+                        system = row.get("system", row.get("cluster", row.get("board", "")))
+                        arm = row.get("arm", row.get("code", row.get("method", "")))
+                        key = (value, path, system, arm, column)
+                        groups[key].append(row)
     out = []
     for (revision, path, system, arm, column), rows in sorted(groups.items()):
         seeds = [int(r["seed"]) for r in rows if r.get("seed", "").strip().lstrip("-").isdigit()]
@@ -3988,9 +4134,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
     for path, fragment, _why in UNTRACED:
         audit.said(path, fragment)
     gaps = provenance(audit)
-    cited = {r[c].strip() for rows in audit.read.values() for r in rows for c in REVISION_COLUMNS if c in r}
-    for name in sorted(set(UNPUSHED) - cited):
-        audit.record(False, "UNPUSHED", f"unpushed revision {name[:8]}", UNPUSHED[name], "no row cites it")
+    all_revision_provenance(audit)
     for path, why in sorted(KNOWN_GAPS.items()):
         audit.record(any(word in why for word in ("unrecorded", "revision recorded", "is not in this repository")), path,
                      "a known gap names the revision or says it is unrecorded", "revision or unrecorded", why)

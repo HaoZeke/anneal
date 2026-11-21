@@ -51,6 +51,7 @@ CHECKS = (
     audit_mod.rerun_claims,
     audit_mod.rerun_check,
     audit_mod.revision_map,
+    audit_mod.all_revision_provenance,
 )
 
 
@@ -604,6 +605,34 @@ def test_an_unpushed_revision_needs_a_reason(tmp_path, monkeypatch):
     assert [(r[2], r[3], r[4]) for r in audit.drifts()] == [
         ("unpushed revision bf09f7a2", "not listed", "no pushed equivalent"),
         ("unpushed revision e09e0487", "listed although its alias holds", "resolved"),
+    ]
+
+
+def test_an_unmapped_revision_in_any_benchmark_table_fails(monkeypatch):
+    tables = audit_mod.revision_row_tables()
+    path = "bench/ase-nonlj/summary.csv"
+    altered = []
+    for table_path, rows in tables:
+        if table_path == path:
+            rows = [dict(row) for row in rows]
+            rows[0]["code_revision"] = "0" * 40
+        altered.append((table_path, rows))
+    monkeypatch.setattr(audit_mod, "revision_row_tables", lambda: altered)
+    audit = audit_mod.Audit()
+    audit_mod.all_revision_provenance(audit)
+    assert [row[2] for row in audit.drifts() if row[1] == path] == [
+        "row revision 00000000 is reachable or mapped"
+    ]
+
+
+def test_an_uncited_unpushed_revision_is_reported(monkeypatch):
+    unpushed = dict(audit_mod.UNPUSHED)
+    unpushed["f" * 40] = "not cited anywhere"
+    monkeypatch.setattr(audit_mod, "UNPUSHED", unpushed)
+    audit = audit_mod.Audit()
+    audit_mod.all_revision_provenance(audit)
+    assert [row[2] for row in audit.drifts() if row[1] == audit_mod.REVISION_MAP] == [
+        "mapped revision ffffffff is cited"
     ]
 
 
