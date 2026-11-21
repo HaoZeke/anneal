@@ -704,11 +704,13 @@ enum rgpot_status_t rgpot_potential_set_ad_hessian_callback(
  * reports itself. `scheme_used` is written only on success; on a failure
  * the content of `hessian_out` is unspecified. A failing callback's status
  * is returned with the message it set, or `<callback> returned <status>`
- * when it set none.
+ * when it set none. A non-finite entry from any scheme returns
+ * `RGPOT_INVALID_PARAMETER`.
  *
  * # Safety
  *
- * NULL pointers, an unknown scheme and a negative or non-finite step
+ * NULL pointers, an unknown scheme, a negative or non-finite step and a
+ * `hessian_out` that overlaps the positions, atomic numbers or box
  * return `RGPOT_INVALID_PARAMETER` without a call. Otherwise `pot` must be a
  * live handle, `input` must point to a valid `rgpot_force_input_t` whose
  * tensors stay alive for the call, `hessian_out` must point to `(3 *

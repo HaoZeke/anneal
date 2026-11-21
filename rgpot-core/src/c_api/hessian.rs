@@ -109,11 +109,13 @@ pub unsafe extern "C" fn rgpot_potential_set_ad_hessian_callback(
 /// reports itself. `scheme_used` is written only on success; on a failure
 /// the content of `hessian_out` is unspecified. A failing callback's status
 /// is returned with the message it set, or `<callback> returned <status>`
-/// when it set none.
+/// when it set none. A non-finite entry from any scheme returns
+/// `RGPOT_INVALID_PARAMETER`.
 ///
 /// # Safety
 ///
-/// NULL pointers, an unknown scheme and a negative or non-finite step
+/// NULL pointers, an unknown scheme, a negative or non-finite step and a
+/// `hessian_out` that overlaps the positions, atomic numbers or box
 /// return `RGPOT_INVALID_PARAMETER` without a call. Otherwise `pot` must be a live
 /// handle, `input` must point to a valid `rgpot_force_input_t` whose tensors
 /// stay alive for the call, `hessian_out` must point to `(3 * n_atoms)^2`
@@ -141,6 +143,7 @@ pub unsafe extern "C" fn rgpot_potential_hessian(
         let Some(entries) = unsafe { input.n_atoms() }
             .and_then(|n| n.checked_mul(3))
             .and_then(|dim| dim.checked_mul(dim))
+            .filter(|&entries| entries <= isize::MAX as usize / std::mem::size_of::<f64>())
         else {
             return refuse("rgpot_potential_hessian: positions tensor is NULL or too large");
         };

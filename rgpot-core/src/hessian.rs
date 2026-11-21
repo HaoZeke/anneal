@@ -37,6 +37,7 @@ use crate::eindir::rgpot_potential_t;
 use crate::fused::lock;
 use crate::hvp::{checked_step, invalid, read_geometry, run_callback, HvpError};
 use crate::status::rgpot_status_t;
+use crate::tensor::{checked_f64_data, checked_i32_data};
 use crate::types::rgpot_force_input_t;
 
 /// Dense Hessian of a potential.
@@ -234,8 +235,9 @@ impl rgpot_potential_t {
     /// `hessian_out` holds `(3 * n_atoms)^2` doubles. `step` is the central
     /// displacement, and 0 selects
     /// [`RGPOT_HVP_DEFAULT_STEP`](crate::hvp::RGPOT_HVP_DEFAULT_STEP). A
-    /// refused scheme makes no call. On a failure the content of
-    /// `hessian_out` is unspecified.
+    /// refused scheme, or a `hessian_out` that overlaps a tensor of
+    /// `input`, makes no call. A non-finite entry fails every scheme. On a
+    /// failure the content of `hessian_out` is unspecified.
     ///
     /// # Safety
     ///
@@ -260,6 +262,7 @@ impl rgpot_potential_t {
                 hessian_out.len()
             )));
         }
+        refuse_overlap(input, geometry.n_atoms, hessian_out)?;
         let h = checked_step(step)?;
         let state = self.hessian_state();
         let analytic = *lock(&state.analytic);
@@ -310,10 +313,54 @@ impl rgpot_potential_t {
                         hessian_out[c * dim + r] = mean;
                     }
                 }
+                if let Some(i) = hessian_out.iter().position(|v| !v.is_finite()) {
+                    return Err(invalid(format!(
+                        "central Hessian: non-finite value at element {i}"
+                    )));
+                }
                 state.by_central.fetch_add(1, Ordering::Relaxed);
             }
             rgpot_hessian_scheme_t::RGPOT_HESSIAN_EXACT => unreachable!("resolved above"),
         }
         Ok(scheme)
     }
+}
+
+/// Refuse a `hessian_out` that shares memory with a tensor of `input`,
+/// which the callbacks read while the Hessian is written.
+fn refuse_overlap(
+    input: &rgpot_force_input_t,
+    n_atoms: usize,
+    hessian_out: &[f64],
+) -> Result<(), HvpError> {
+    if hessian_out.is_empty() {
+        return Ok(());
+    }
+    let out = hessian_out.as_ptr() as usize;
+    let out_bytes = std::mem::size_of_val(hessian_out);
+    let f64_bytes = std::mem::size_of::<f64>();
+    let mut tensors = vec![(
+        "positions",
+        checked_f64_data(input.positions, "positions", 3 * n_atoms).map_err(invalid)? as usize,
+        3 * n_atoms * f64_bytes,
+    )];
+    if !input.atomic_numbers.is_null() {
+        let data =
+            checked_i32_data(input.atomic_numbers, "atomic_numbers", n_atoms).map_err(invalid)?;
+        tensors.push((
+            "atomic_numbers",
+            data as usize,
+            n_atoms * std::mem::size_of::<i32>(),
+        ));
+    }
+    if !input.box_matrix.is_null() {
+        let data = checked_f64_data(input.box_matrix, "box_matrix", 9).map_err(invalid)?;
+        tensors.push(("box_matrix", data as usize, 9 * f64_bytes));
+    }
+    for (label, start, bytes) in tensors {
+        if start < out.saturating_add(out_bytes) && out < start.saturating_add(bytes) {
+            return Err(invalid(format!("hessian_out overlaps the {label} tensor")));
+        }
+    }
+    Ok(())
 }

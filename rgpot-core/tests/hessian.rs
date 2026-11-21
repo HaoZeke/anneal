@@ -234,6 +234,36 @@ unsafe extern "C" fn silent_hvp(
     rgpot_status_t::RGPOT_INTERNAL_ERROR
 }
 
+/// Forces of +-1.5e308 on a coordinate moved up or down from the positions
+/// behind `user_data`, so that every central difference overflows.
+unsafe extern "C" fn cliff_force(
+    user_data: *mut c_void,
+    input: *const rgpot_force_input_t,
+    output: *mut rgpot_force_out_t,
+) -> rgpot_status_t {
+    let x0 = unsafe { &*(user_data as *const Vec<f64>) };
+    let pos = positions(unsafe { &*input });
+    let forces: Vec<f64> = pos
+        .iter()
+        .zip(x0)
+        .map(|(x, x0)| {
+            if x > x0 {
+                1.5e308
+            } else if x < x0 {
+                -1.5e308
+            } else {
+                0.0
+            }
+        })
+        .collect();
+    let out = unsafe { &mut *output };
+    out.energy = 0.0;
+    out.variance = 0.0;
+    out.forces =
+        unsafe { rgpot_tensor_owned_cpu_f64_2d(forces.as_ptr(), (pos.len() / 3) as i64, 3) };
+    rgpot_status_t::RGPOT_SUCCESS
+}
+
 unsafe extern "C" fn nan_hessian(
     _: *mut c_void,
     input: *const rgpot_force_input_t,
@@ -794,6 +824,86 @@ fn a_callback_that_sets_no_message_is_not_given_an_older_one() {
         last_error(),
         "analytic HVP callback returned RGPOT_INTERNAL_ERROR"
     );
+}
+
+#[test]
+fn hessian_out_overlapping_the_input_is_refused_without_a_call() {
+    let mut system = System::octahedron();
+    let handle = Handle::new();
+    let dim = system.dim();
+    let n = system.z.len();
+    let central = RGPOT_HESSIAN_CENTRAL as i32;
+    let mut used = RGPOT_HESSIAN_CENTRAL;
+
+    let mut shared = vec![0.0; dim * dim];
+    shared[dim * dim - dim..].copy_from_slice(&system.pos);
+    let tail = unsafe { shared.as_mut_ptr().add(dim * dim - dim) };
+    let input = unsafe {
+        rgpot_force_input_create(n, tail, system.z.as_mut_ptr(), system.cell.as_mut_ptr())
+    };
+    let status = unsafe {
+        rgpot_potential_hessian(
+            handle.pot,
+            &input,
+            0.0,
+            central,
+            shared.as_mut_ptr(),
+            &mut used,
+        )
+    };
+    assert_eq!(status, rgpot_status_t::RGPOT_INVALID_PARAMETER);
+    assert_eq!(last_error(), "hessian_out overlaps the positions tensor");
+
+    let mut h = vec![0.0; dim * dim];
+    h[dim..dim + 9].copy_from_slice(&system.cell);
+    let cell = unsafe { h.as_mut_ptr().add(dim) };
+    let input = unsafe {
+        rgpot_force_input_create(n, system.pos.as_mut_ptr(), system.z.as_mut_ptr(), cell)
+    };
+    let status = unsafe {
+        rgpot_potential_hessian(handle.pot, &input, 0.0, central, h.as_mut_ptr(), &mut used)
+    };
+    assert_eq!(status, rgpot_status_t::RGPOT_INVALID_PARAMETER);
+    assert_eq!(last_error(), "hessian_out overlaps the box_matrix tensor");
+
+    assert_eq!(handle.force_calls(), 0);
+    assert_eq!(handle.counts().hessian_force_calls, 0);
+}
+
+#[test]
+fn a_central_hessian_that_overflows_is_refused() {
+    let mut system = System::octahedron();
+    let input = system.input();
+    let x0 = Box::new(system.pos.clone());
+    let pot =
+        unsafe { rgpot_potential_new(cliff_force, &*x0 as *const Vec<f64> as *mut c_void, None) };
+    assert!(!pot.is_null());
+    let dim = system.dim();
+    let mut h = vec![0.0; dim * dim];
+    let mut used = RGPOT_HESSIAN_CENTRAL;
+    let status = unsafe {
+        rgpot_potential_hessian(
+            pot,
+            &input,
+            0.0,
+            RGPOT_HESSIAN_CENTRAL as i32,
+            h.as_mut_ptr(),
+            &mut used,
+        )
+    };
+    assert_eq!(status, rgpot_status_t::RGPOT_INVALID_PARAMETER);
+    assert_eq!(
+        last_error(),
+        "central Hessian: non-finite value at element 0"
+    );
+    let mut counts = rgpot_derivative_counts_t::default();
+    assert_eq!(
+        unsafe { rgpot_potential_derivative_counts(pot, &mut counts) },
+        rgpot_status_t::RGPOT_SUCCESS
+    );
+    assert_eq!(counts.hessian_central, 0);
+    assert_eq!(counts.hessian_force_calls, 2 * dim as u64);
+    unsafe { rgpot_potential_free(pot) };
 }
 
 #[test]

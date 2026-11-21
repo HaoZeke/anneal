@@ -1138,12 +1138,14 @@ enum rgpot_status_t rgpot_potential_hessian(const struct rgpot_potential_t *pot,
   before any call, for: a NULL =pot=, =input=, =hessian_out= or =scheme_used=; a
   =scheme= outside 2 to 5; a NULL =positions= tensor; a refused peer; a
   =positions=, =atomic_numbers= or =box_matrix= tensor that fails the checks of
-  =rgpot_potential_hvp=; a negative or non-finite =step=;
+  =rgpot_potential_hvp=; =hessian_out= overlapping the =positions=,
+  =atomic_numbers= or =box_matrix= data; a negative or non-finite =step=;
   =RGPOT_HESSIAN_ANALYTIC= with no Hessian callback registered,
   =RGPOT_HESSIAN_AD= with no dual-number Hessian callback registered, or
   =RGPOT_HESSIAN_EXACT= with neither.
-  =RGPOT_INVALID_PARAMETER= for a non-finite callback output or a force callback
-  output that fails the checks of =PotentialCallback=.
+  =RGPOT_INVALID_PARAMETER= for a non-finite callback output, a non-finite
+  central difference (=central Hessian: non-finite value at element <i>=) or a
+  force callback output that fails the checks of =PotentialCallback=.
   A force or Hessian callback's error status is returned unchanged.
   For a Hessian callback, =rgpot_last_error= keeps the message the callback
   stored during the call, or =Hessian callback returned <status>=
