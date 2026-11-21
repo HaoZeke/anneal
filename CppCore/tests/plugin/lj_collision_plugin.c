@@ -1,3 +1,6 @@
+// MIT License
+// Copyright 2023--present rgpot developers
+
 /*
  * External plugin that claims the built-in name lennard-jones.
  * The registry must refuse it and keep the built-in.
