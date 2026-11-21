@@ -149,6 +149,13 @@ def test_flags_that_a_config_already_decides_are_refused(clash):
         search(config=Config.recommended(4), **clash)
 
 
+def test_config_doc_names_recommended_false_as_a_clash():
+    assert (
+        "passing any of them or ``recommended=False`` with ``config`` raises"
+        in anneal.cluster_search.__doc__
+    )
+
+
 def test_a_molecular_config_needs_a_start():
     water = ([8, 1, 1, 8, 1, 1], [[0, 1, 2], [3, 4, 5]])
     with pytest.raises(anneal.InvalidArgumentError, match="start"):

@@ -355,8 +355,8 @@ def cluster_search(
         what ``derived``, ``communicating``, ``rigid``, ``length_scale``,
         ``species``, ``sigmas``, ``water_sites``, ``groups``, ``local_step``,
         ``ring_moves``, ``hold_stereocentres`` and ``measured_energy_scale``
-        would set, so passing any of them with ``config`` raises
-        ``InvalidArgumentError``, and ``recommended`` is not read. A config
+        would set, so passing any of them or ``recommended=False`` with ``config`` raises
+        ``InvalidArgumentError``. A config
         with rigid bodies searches the ``6 * n`` chart and starts from a
         compact placement when ``start`` is ``None``. A molecular config
         needs ``start``.
