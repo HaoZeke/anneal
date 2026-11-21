@@ -162,6 +162,24 @@ def test_a_merged_branch_that_no_alias_names_is_not_required(monkeypatch, tmp_pa
     assert not with_tip.on_remote(unnamed), "an unnamed remote branch joined the closure"
 
 
+@pytest.mark.parametrize(
+    ("branch", "revision"),
+    [
+        ("fix/morse-gmin", "0ef6ba4e39e7a8f2812b75a8e02fcd75a12e19e2"),
+        ("fix/sc-portfolio", "17210f1b11c25e1c2031cdb33c4f1cccfb7cc807"),
+        ("bench/ptcu-gupta", "55fde657c867f1220a2b6a9792338c67421ebd68"),
+    ],
+)
+def test_optional_remote_branches_join_the_remote_closure(branch, revision):
+    assert branch in audit_mod.AUDIT_OPTIONAL_REMOTES
+    ref = f"refs/remotes/origin/{branch}"
+    if git("show-ref", "--verify", "--quiet", ref).returncode != 0:
+        pytest.skip(f"optional remote {ref} is not fetched in this clone")
+    index = audit_mod.RevisionIndex((revision,), (), (), ())
+    assert index.audited_exists(revision)
+    assert index.on_remote(revision)
+
+
 def test_a_verified_record_ref_joins_the_audited_closure(tmp_path, monkeypatch):
     """A commit only a verified record ref holds is in the audited and remote closures; unverified, it is not."""
     repo = tmp_path / "clone"

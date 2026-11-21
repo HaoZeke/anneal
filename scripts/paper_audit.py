@@ -79,6 +79,9 @@ AUDIT_REMOTE_BRANCHES = (
 AUDIT_OPTIONAL_REMOTES = (
     "record/repro-pin",
     "bench/cov-floor2",
+    "bench/ptcu-gupta",
+    "fix/morse-gmin",
+    "fix/sc-portfolio",
     "fix/sc-shelf-waypoint",
 )
 # Push-only record branches whose commits printed numbers may rest on, each with its SHA and tree.
