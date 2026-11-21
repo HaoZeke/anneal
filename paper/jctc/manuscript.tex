@@ -518,9 +518,11 @@ rate is method 10 of Newcombe for paired data
 For calls and wall, the exact Wilcoxon signed-rank test
 \cite{wilcoxonIndividualComparisons1945} runs on the per-seed differences,
 with a miss counted at the budget for calls and the wall of the whole run for
-time.
-Arms that do not share a start, the ASE arms, are compared on hits by the
-two-sided Fisher exact test \cite{fisherLogicInductiveInference1935}.
+time, only when both arms count the same operation.
+The ASE arms do not share starts and stop at different call and wall limits.
+A Fisher test on their hits would not account for those unequal stopping
+rules \cite{fisherLogicInductiveInference1935}, so no cross-arm test is
+reported for the ASE tables.
 Every test is two-sided and exact, so no continuity correction enters any of
 them.
 No adjustment for multiple comparisons is made: every \(p\) is that of one
@@ -855,10 +857,9 @@ The Atomic Simulation Environment provides a basin-hopping optimizer and a
 minima-hopping optimizer \cite{larsenAse2017,goedecker2004}.
 At its constructor defaults ASE basin hopping displaces every atom at random,
 and minima hopping escapes by short molecular dynamics.
-These runs do not share a start with this code, so their hits are compared by
-Fisher's test, and their effort is not equal: every run stopped at a hit, at
-the budget, or at a wall cap of three times the slowest wall of the cluster
-preset of this code on that cluster.
+These runs do not share a start with this code, and their effort is not equal:
+every run stopped at a hit, at the budget, or at the recorded wall cap shown
+in the table.
 Table~\ref{tab:ase} runs revision \texttt{61fa67cf} on four Lennard-Jones
 clusters and Au\(_{55}\), and Table~\ref{tab:ase-morse} runs revision
 \texttt{5eb79cdc} on four Morse clusters; both are ancestors of the
@@ -893,25 +894,24 @@ Stops counts the BH and MH runs that ended at the cap; those runs
 are misses with fewer calls than the budget, and no run of this code ended at the cap.
 Wall is the median over the 12 runs of the seconds each run took;
 a BH or MH run that ended at the cap is counted at its wall.
-\(p_\mathrm{BH}\) and \(p_\mathrm{MH}\) are the two-sided Fisher
-exact test on hits against each ASE arm; the test is unpaired because the random
-generators of the two codes do not make a shared start from one seed.
+No cross-arm test is reported: starts differ and the arms stop at unequal
+call and wall limits.
 The rows are \texttt{paper/jctc/data/ase\_panel/*/rows.csv}.}
 \label{tab:ase}
 \centering
 \scriptsize
 \setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}lrrrrrrrrrrrr@{}}
+\begin{tabular}{@{}lrrrrrrrrrr@{}}
 \toprule
- & & & \multicolumn{3}{c}{Hits} & \multicolumn{2}{c}{Stops} & \multicolumn{3}{c}{Wall (s)} & & \\
+ & & & \multicolumn{3}{c}{Hits} & \multicolumn{2}{c}{Stops} & \multicolumn{3}{c}{Wall (s)} \\
 \cmidrule(lr){4-6}\cmidrule(lr){7-8}\cmidrule(lr){9-11}
-Cluster & Budget & Cap & This code & BH & MH & BH & MH & This code & BH & MH & \(p_\mathrm{BH}\) & \(p_\mathrm{MH}\) \\
+Cluster & Budget & Cap & This code & BH & MH & BH & MH & This code & BH & MH \\
 \midrule
-LJ\(_{38}\) & \(4\times 10^{5}\) & 4.645 & 12/12 & 0/12 & 0/12 & 12 & 12 & 0.605 & 4.645 & 4.858 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
-LJ\(_{55}\) & \(1\times 10^{6}\) & 4.220 & 12/12 & 1/12 & 0/12 & 11 & 12 & 0.051 & 4.220 & 4.442 & \(9.6\times 10^{-6}\) & \(7.4\times 10^{-7}\) \\
-LJ\(_{98}\) & \(4\times 10^{6}\) & 289.0 & 7/12 & 0/12 & 0/12 & 0 & 12 & 78.919 & 123.0 & 299.2 & \(4.6\times 10^{-3}\) & \(4.6\times 10^{-3}\) \\
-LJ\(_{104}\) & \(4\times 10^{6}\) & 291.0 & 5/12 & 0/12 & 0/12 & 0 & 12 & 101.7 & 128.5 & 305.2 & 0.037 & 0.037 \\
-Au\(_{55}\) & \(1\times 10^{6}\) & 107.9 & 0/12 & 0/12 & 0/12 & 12 & 12 & 36.000 & 107.9 & 110.3 & 1 & 1 \\
+LJ\(_{38}\) & \(4\times 10^{5}\) & 4.645 & 12/12 & 0/12 & 0/12 & 12 & 12 & 0.605 & 4.645 & 4.858 \\
+LJ\(_{55}\) & \(1\times 10^{6}\) & 4.220 & 12/12 & 1/12 & 0/12 & 11 & 12 & 0.051 & 4.220 & 4.442 \\
+LJ\(_{98}\) & \(4\times 10^{6}\) & 289.0 & 7/12 & 0/12 & 0/12 & 0 & 12 & 78.919 & 123.0 & 299.2 \\
+LJ\(_{104}\) & \(4\times 10^{6}\) & 291.0 & 5/12 & 0/12 & 0/12 & 0 & 12 & 101.7 & 128.5 & 305.2 \\
+Au\(_{55}\) & \(1\times 10^{6}\) & 107.9 & 0/12 & 0/12 & 0/12 & 12 & 12 & 36.000 & 107.9 & 110.3 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -931,24 +931,23 @@ Stops counts the BH and MH runs that ended at the cap; those runs
 are misses with fewer calls than the budget, and no run of this code ended at the cap.
 Wall is the median over the 12 runs of the seconds each run took;
 a BH or MH run that ended at the cap is counted at its wall.
-\(p_\mathrm{BH}\) and \(p_\mathrm{MH}\) are the two-sided Fisher
-exact test on hits against each ASE arm; the test is unpaired because the random
-generators of the two codes do not make a shared start from one seed.
+No cross-arm test is reported: starts differ and the arms stop at unequal
+call and wall limits.
 The rows are \texttt{paper/jctc/data/ase\_panel/morse/rows.csv}.}
 \label{tab:ase-morse}
 \centering
 \scriptsize
 \setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}lrrrrrrrrrrrr@{}}
+\begin{tabular}{@{}lrrrrrrrrrr@{}}
 \toprule
- & & & \multicolumn{3}{c}{Hits} & \multicolumn{2}{c}{Stops} & \multicolumn{3}{c}{Wall (s)} & & \\
+ & & & \multicolumn{3}{c}{Hits} & \multicolumn{2}{c}{Stops} & \multicolumn{3}{c}{Wall (s)} \\
 \cmidrule(lr){4-6}\cmidrule(lr){7-8}\cmidrule(lr){9-11}
-Cluster & Budget & Cap & This code & BH & MH & BH & MH & This code & BH & MH & \(p_\mathrm{BH}\) & \(p_\mathrm{MH}\) \\
+Cluster & Budget & Cap & This code & BH & MH & BH & MH & This code & BH & MH \\
 \midrule
-M\(_{38}\), \(\rho=6\) & \(4\times 10^{5}\) & 10.186 & 12/12 & 0/12 & 0/12 & 12 & 12 & 0.502 & 10.186 & 10.188 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
-M\(_{38}\), \(\rho=14\) & \(4\times 10^{5}\) & 9.516 & 9/12 & 0/12 & 0/12 & 12 & 12 & 2.136 & 9.517 & 9.518 & \(3.4\times 10^{-4}\) & \(3.4\times 10^{-4}\) \\
-M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & 15.637 & 12/12 & 0/12 & 0/12 & 12 & 12 & 0.226 & 15.638 & 15.642 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
-M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & 47.552 & 8/12 & 0/12 & 0/12 & 12 & 12 & 11.333 & 47.553 & 47.556 & \(1.3\times 10^{-3}\) & \(1.3\times 10^{-3}\) \\
+M\(_{38}\), \(\rho=6\) & \(4\times 10^{5}\) & 10.186 & 12/12 & 0/12 & 0/12 & 12 & 12 & 0.502 & 10.186 & 10.188 \\
+M\(_{38}\), \(\rho=14\) & \(4\times 10^{5}\) & 9.516 & 9/12 & 0/12 & 0/12 & 12 & 12 & 2.136 & 9.517 & 9.518 \\
+M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & 15.637 & 12/12 & 0/12 & 0/12 & 12 & 12 & 0.226 & 15.638 & 15.642 \\
+M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & 47.552 & 8/12 & 0/12 & 0/12 & 12 & 12 & 11.333 & 47.553 & 47.556 \\
 \bottomrule
 \end{tabular}
 \end{table}

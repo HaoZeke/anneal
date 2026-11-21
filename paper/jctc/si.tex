@@ -406,9 +406,9 @@ slowest wall of the cluster preset of this code on that cluster.
 No run of this code reached its cap.
 The ASE arms do not start from the start of this code, because the random
 generators of the two codes do not make a shared start from one seed, so
-their tests are unpaired.
-Fisher's test against each ASE arm is below 0.05 on all 4 Lennard-Jones
-clusters.
+their hit counts are not paired.
+Their call limits and wall caps also differ from those of this code, so no
+cross-arm significance test is reported.
 Minima hopping reached its cap on every run of both tables, and basin hopping
 on every run of LJ\(_{38}\), Au\(_{55}\), and the Morse clusters and on 11
 of 12 on LJ\(_{55}\).
@@ -485,16 +485,12 @@ two-sided \(p\) is the share of those assignments whose \(T^{+}\) lies at
 least as far from the null mean \(m(m+1)/4\) as the one seen.
 No normal approximation is used.
 
-\emph{Fisher exact test, for unpaired arms only.}
-The ASE arms do not start from the start of this code, so their seeds do not
-pair, and their tables compare hits by the two-sided Fisher exact test
+\emph{Unpaired, unequally capped arms.}
+The ASE arms do not start from the start of this code, and their reported
+outcomes are censored by different call and wall limits.
+The tables therefore report the hit counts, recorded caps, stop counts, and
+wall medians without a cross-arm Fisher test or interval
 \cite{fisherLogicInductiveInference1935}.
-Conditional on the margins of the \(2\times 2\) table, the hits of the first
-arm are hypergeometric, and the two-sided \(p\) sums the probabilities of
-every table no more probable than the one observed, with a relative tolerance
-of \(10^{-12}\) on that comparison so that ties to rounding count.
-No calls or wall test is given for the ASE arms, and no interval of the
-difference.
 
 \emph{Medians and quantiles.}
 Medians, interquartile ranges, and the bootstrap quantiles below are type-7

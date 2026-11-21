@@ -4,8 +4,8 @@
 
 Every row file under paper/jctc/data/ase_panel is copied unchanged from the
 record its PROVENANCE file names, and every row of this code is a revision
-that is an ancestor of HEAD. Hits, stops, caps, median walls and the Fisher
-tests are recomputed here from the rows; nothing is read from a summary.
+that is an ancestor of HEAD. Hits, stops, caps and median walls are
+recomputed here from the rows; nothing is read from a summary.
 
     python3 paper/jctc/scripts/ase_table.py            # rewrite both blocks
     python3 paper/jctc/scripts/ase_table.py --check    # exit 1 if either is stale
@@ -23,7 +23,6 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
-from paired_stats import fisher_exact  # noqa: E402
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
 MANUSCRIPT = ROOT / "paper" / "jctc" / "manuscript.tex"
@@ -118,7 +117,6 @@ def summary(system: str, arms: dict[str, list[dict[str, str]]], preset: str) -> 
         "wall": {arm: statistics.median(float(r["wall_s"]) for r in rows) for arm, rows in arms.items()},
         "calls": {arm: (min(int(r["charged"]) for r in rows), max(int(r["charged"]) for r in rows))
                   for arm, rows in arms.items()},
-        "p": {arm: fisher_exact(hits["recommended"], 12, hits[arm], 12) for arm in ASE_ARMS},
     }
 
 
@@ -135,15 +133,6 @@ def morse_panel() -> dict[str, dict]:
         raise SystemExit("ase_table: the Morse rows do not cover the four clusters")
     return {system: summary(system, group(rows, system, spec, MORSE_ARMS), "for_cluster")
             for system, spec in MORSE.items()}
-
-
-def show_p(p: float) -> str:
-    if p >= 1.0:
-        return "1"
-    if p >= 0.01:
-        return f"{p:.2f}" if p >= 0.1 else f"{p:.3f}"
-    mantissa, exponent = f"{p:.1e}".split("e")
-    return f"\\({mantissa}\\times 10^{{{int(exponent)}}}\\)"
 
 
 def show_budget(budget: int) -> str:
@@ -164,7 +153,6 @@ def body(specs: dict[str, tuple], panel: dict[str, dict]) -> list[str]:
             *(f"{s['hits'][arm]}/12" for arm in ("recommended", *ASE_ARMS)),
             *(str(s["stops"][arm]) for arm in ASE_ARMS),
             *(show_wall(s["wall"][arm]) for arm in ("recommended", *ASE_ARMS)),
-            *(show_p(s["p"][arm]) for arm in ASE_ARMS),
         ]) + " \\\\")
     return lines
 
@@ -177,12 +165,11 @@ def table(caption: list[str], label: str, rows: list[str]) -> str:
         "\\centering",
         "\\scriptsize",
         "\\setlength{\\tabcolsep}{3pt}",
-        "\\begin{tabular}{@{}lrrrrrrrrrrrr@{}}",
+        "\\begin{tabular}{@{}lrrrrrrrrrr@{}}",
         "\\toprule",
-        " & & & \\multicolumn{3}{c}{Hits} & \\multicolumn{2}{c}{Stops} & \\multicolumn{3}{c}{Wall (s)} & & \\\\",
+        " & & & \\multicolumn{3}{c}{Hits} & \\multicolumn{2}{c}{Stops} & \\multicolumn{3}{c}{Wall (s)} \\\\",
         "\\cmidrule(lr){4-6}\\cmidrule(lr){7-8}\\cmidrule(lr){9-11}",
-        "Cluster & Budget & Cap & This code & BH & MH & BH & MH & This code & BH & MH & "
-        "\\(p_\\mathrm{BH}\\) & \\(p_\\mathrm{MH}\\) \\\\",
+        "Cluster & Budget & Cap & This code & BH & MH & BH & MH & This code & BH & MH \\\\",
         "\\midrule",
         *rows,
         "\\bottomrule",
@@ -199,9 +186,8 @@ COMMON = [
     "are misses with fewer calls than the budget, and no run of this code ended at the cap.",
     "Wall is the median over the 12 runs of the seconds each run took;",
     "a BH or MH run that ended at the cap is counted at its wall.",
-    "\\(p_\\mathrm{BH}\\) and \\(p_\\mathrm{MH}\\) are the two-sided Fisher",
-    "exact test on hits against each ASE arm; the test is unpaired because the random",
-    "generators of the two codes do not make a shared start from one seed.",
+    "No cross-arm test is reported: starts differ and the arms stop at unequal",
+    "call and wall limits.",
 ]
 
 

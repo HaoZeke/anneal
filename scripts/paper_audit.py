@@ -716,9 +716,6 @@ def paired_statistics(audit: Audit) -> None:
                " ".join(f"{x:g}" for x in wilcoxon_signed_rank([1.0, 2.0, 3.0, 4.0, 5.0])))
     audit.cell(where, "Wilcoxon with a tie and a zero: pairs, T+", "3 1.5",
                " ".join(f"{x:g}" for x in wilcoxon_signed_rank([0.0, 1.0, -1.0, -2.0])[:2]))
-    audit.said(SI, "with a relative tolerance\nof \\(10^{-12}\\) on that comparison so that ties to rounding count.")
-    audit.said("paper/jctc/scripts/ase_table.py", "from paired_stats import fisher_exact  # noqa: E402")
-    audit.said("paper/jctc/scripts/ase_table.py", '"p": {arm: fisher_exact(hits["recommended"], 12, hits[arm], 12)')
     audit.said("scripts/paired_stats.py", "if probability(value) <= observed * (1.0 + 1.0e-12)")
     audit.said("scripts/paired_stats.py", "Z95 = NormalDist().inv_cdf(0.975)")
     audit.said(SI, "\\qquad z = \\Phi^{-1}(0.975),")
@@ -2367,10 +2364,6 @@ def manuscript_ase(audit: Audit) -> None:
     def stops(system: str, arm: str, stop: str = "wall") -> int:
         return sum(r["stop"] == stop for r in groups[(system, arm)])
 
-    def p(system: str, arm: str) -> float:
-        a, b = groups[(system, "recommended")], groups[(system, arm)]
-        return fisher(hits_of(a), len(a), hits_of(b), len(b))
-
     budgets = {s: v[1] for s, v in (table.LJ | table.MORSE).items()}
     references = {s: v[2] for s, v in (table.LJ | table.MORSE).items()}
     by_atoms = {38: 400_000, 55: 1_000_000}
@@ -2393,7 +2386,7 @@ def manuscript_ase(audit: Audit) -> None:
         for cells in tex_table(audit, TEX, label):
             system = by_label.get(cells[0])
             where = f"{TEX} {label} {system}"
-            if system is None or len(cells) != 13:
+            if system is None or len(cells) != 11:
                 audit.record(False, where, "table line", " & ".join(cells), "a panel system")
                 continue
             shown.append(system)
@@ -2405,8 +2398,6 @@ def manuscript_ase(audit: Audit) -> None:
                 audit.cell(where, f"{arm} wall stops", cell, float(stops(system, arm)))
             for cell, arm in zip(cells[8:11], ("recommended", *ASE_ARMS)):
                 audit.cell(where, f"{arm} median wall", cell, median([float(r["wall_s"]) for r in groups[(system, arm)]]))
-            for cell, arm in zip(cells[11:13], ASE_ARMS):
-                audit.cell(where, f"Fisher p against {arm}", cell, p(system, arm))
         audit.cell(TEX, f"{label} lines", " ".join(shown), " ".join(systems))
 
     lj_rev, morse_rev = ASE_REVISIONS["lj"][:8], ASE_REVISIONS["morse"][:8]
@@ -2416,9 +2407,8 @@ def manuscript_ase(audit: Audit) -> None:
     audit.said(TEX, f"Table~\\ref{{tab:ase}} runs revision \\texttt{{{lj_rev}}} on four Lennard-Jones clusters and "
                     f"Au\\(_{{55}}\\), and Table~\\ref{{tab:ase-morse}} runs revision \\texttt{{{morse_rev}}} on four "
                     "Morse clusters; both are ancestors of the submitted revision.")
-    audit.said(TEX, "These runs do not share a start with this code, so their hits are compared by Fisher's test, and "
-                    "their effort is not equal: every run stopped at a hit, at the budget, or at a wall cap of three "
-                    "times the slowest wall of the cluster preset of this code on that cluster.")
+    audit.said(TEX, "These runs do not share a start with this code, and their effort is not equal: every run stopped "
+                    "at a hit, at the budget, or at the recorded wall cap shown in the table.")
     mh_all = all(r["stop"] == "wall" for s in (*ASE_PANEL, *MORSE_PANEL) for r in groups[(s, "ase_mh")])
     audit.record(mh_all, TEX, "every ASE minima-hopping run ended at the cap", "every", "every" if mh_all else "not")
     audit.said(TEX, "ASE minima hopping is wall-capped: every one of its runs in both tables ended at the cap with "
@@ -2470,9 +2460,6 @@ def manuscript_ase(audit: Audit) -> None:
     audit.said(SI, f"Its hits are {series(preset)} of 12 on LJ\\(_{{38}}\\), LJ\\(_{{55}}\\), LJ\\(_{{98}}\\), "
                    f"LJ\\(_{{104}}\\), and Au\\(_{{55}}\\), and {series(morse_preset)} of 12 on M\\(_{{38}}\\) and "
                    "M\\(_{55}\\) at \\(\\rho=6\\) and 14 in the order of the Morse table.")
-    below = [s for s in ASE_PANEL[:4] if max(p(s, a) for a in ASE_ARMS) < 0.05]
-    audit.said(SI, f"Fisher's test against each ASE arm is below 0.05 on all {len(below)} Lennard-Jones clusters.")
-    audit.cell(SI, "Fisher below 0.05 on every Lennard-Jones cluster", " ".join(ASE_PANEL[:4]), " ".join(below))
     bh_all = [s for s in (*ASE_PANEL, *MORSE_PANEL) if stops(s, "ase_bh") == 12]
     audit.cell(SI, "basin hopping at the cap on every run", "lj38 au55 m38r6 m38r14 m55r6 m55r14", " ".join(bh_all))
     audit.said(SI, f"Minima hopping reached its cap on every run of both tables, and basin hopping on every run of "
@@ -2491,23 +2478,21 @@ def manuscript_ase(audit: Audit) -> None:
     audit.said(SI, "\\path{paper/jctc/scripts/ase_table.py} writes both ASE tables from them.")
     audit.said(SI, "# ASE: rewrite both tables from the imported rows\npython3 paper/jctc/scripts/ase_table.py")
 
-    # Fisher only where arms do not pair, and no rank test.
+    # Unequal stopping rules are printed without a cross-arm test.
     text = audit.text(TEX)
     section = text.split("\\label{sec:ase}", 1)[1].split("% ase-nonlj table: end", 1)[0]
-    audit.record("Mann" not in section, TEX, "sec:ase reports Fisher only", "no rank test",
-                 "no rank test" if "Mann" not in section else "a rank test")
+    audit.record("p_\\mathrm" not in section and "Fisher" not in section, TEX,
+                 "sec:ase reports no cross-arm p-values", "none",
+                 "none" if "p_\\mathrm" not in section and "Fisher" not in section else "present")
     conclusions = text.split("\\section{Conclusions}", 1)[1].split("\\appendix", 1)[0]
     audit.record("Mann" not in conclusions, TEX, "the conclusions report no rank test", "no rank test",
                  "no rank test" if "Mann" not in conclusions else "a rank test")
-    audit.said(TEX, "Arms that do not share a start, the ASE arms, are compared on hits by the two-sided Fisher exact "
-                    "test \\cite{fisherLogicInductiveInference1935}.")
-    audit.said(TEX, "the test is unpaired because the random generators of the two codes do not make a shared start "
-                    "from one seed.")
-    stats = text.split("\\label{sec:stats}", 1)[1].split("\\section{", 1)[0]
-    outside = text.replace(section, "").replace(stats, "")
-    audit.record("Fisher" not in outside.split("\\begin{suppinfo}")[0], TEX,
-                 "the Fisher test appears only in the unpaired ASE comparisons", "only there",
-                 "only there" if "Fisher" not in outside.split("\\begin{suppinfo}")[0] else "elsewhere too")
+    audit.said(TEX, "A Fisher test on their hits would not account for those unequal stopping")
+    audit.said(TEX, "so no cross-arm test is")
+    audit.said(SI, "The tables therefore report the hit counts, recorded caps, stop counts, and")
+    audit.record("fisher_exact" not in audit.text("paper/jctc/scripts/ase_table.py"),
+                 "paper/jctc/scripts/ase_table.py", "the ASE table generator computes no cross-arm test",
+                 "absent", "absent" if "fisher_exact" not in audit.text("paper/jctc/scripts/ase_table.py") else "present")
     for path in ("scripts/ase_panel/summarize.py", "scripts/ase_nonlj/summarize.py"):
         source = audit.text(path)
         audit.record("mann_whitney" not in source and "continuity" not in source, path,
@@ -4118,7 +4103,7 @@ def science_claims(audit: Audit) -> None:
         k.strip() for path in (TEX, SI) for group in re.findall(r"\\cite[pt]?\{([^}]*)\}", audit.text(path))
         for k in group.split(",")})
     audit.cell("paper/jctc/refs-stats.bib", "entries no text cites", "none", " ".join(unused) or "none")
-    audit.said(TEX, "two-sided Fisher exact test \\cite{fisherLogicInductiveInference1935}.")
+    audit.said(TEX, "A Fisher test on their hits would not account for those unequal stopping")
     audit.said(TEX, "\\cite{newcombeImprovedConfidenceIntervals1998}, built from Wilson intervals "
                     "\\cite{wilsonProbableInferenceLaw1927}.")
     audit.said(TEX, "The exact McNemar test \\cite{mcnemarNoteSamplingError1947}")
