@@ -6,7 +6,11 @@ name: C++ layout stamp
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, develop]
+
+concurrency:
+  group: cxx-layout-stamp-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
