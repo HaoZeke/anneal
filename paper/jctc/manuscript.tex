@@ -539,9 +539,6 @@ in the tables and figures, and the Supporting Information defines each one.
 \section{Landscapes of the test clusters}
 \label{sec:landscape}
 Figure~\ref{fig:systems} shows the published minima.
-Every miss on LJ\(_{75}\) in Table~\ref{tab:gmin}, of either code, ends at
-the icosahedral competitor at \(-396.2822\), \(1.210\) above the
-published decahedral minimum at \(-397.492331\).
 
 \begin{figure}
 \centering
@@ -679,7 +676,7 @@ GMIN is the Wales-group basin-hopping program and the reference code for
 these clusters \cite{wales1997,oakley2013}.
 Table~\ref{tab:gmin} runs GMIN against this code at two revisions:
 revision \texttt{eeec8e2c}, an ancestor of the submitted revision with the
-structure templates removed, on eight Lennard-Jones sizes and Morse
+structure templates removed, on seven Lennard-Jones sizes and Morse
 M\(_{80}\) at \(\rho=6\), and the submitted revision \texttt{61fa67cf} on
 Gupta Au\(_{55}\) and on Morse M\(_{55}\) and M\(_{80}\) at \(\rho=6\) and
 14.
@@ -702,10 +699,9 @@ The GMIN source is the public tarball dated 2026-11-19, sha256
 
 Paired by seed, this code alone hits 7 seeds of LJ\(_{98}\) and GMIN alone
 none, with \(p=0.016\) and an interval from 0.22 to 0.81.
-On LJ\(_{38}\) and LJ\(_{75}\) this code alone hits 5 seeds and GMIN alone
-none, with \(p=0.0625\), the smallest value the exact test can reach with
-five discordant seeds; this code hits LJ\(_{38}\) on 12 and LJ\(_{75}\) on 5
-of 12, and GMIN on 7 and 0.
+On LJ\(_{38}\) this code alone hits 5 seeds and GMIN alone none, with
+\(p=0.0625\), the smallest value the exact test can reach with five
+discordant seeds; this code hits 12 of 12 and GMIN 7.
 On LJ\(_{38}\), this code reports a median of 127839.5 combined
 energy-and-gradient passes to the minimum, while GMIN reports 389399
 \texttt{POTENTIAL} entries; these are not the same operation.
@@ -715,7 +711,7 @@ that one arm alone hits are 4 to 3, 4 to 1, 3 to 4, and 1 to 2, with \(p\) of
 GMIN hits more seeds than this code on LJ\(_{104}\), 6 against 5 of 12, and
 on LJ\(_{150}\), 9 against 8 of 12.
 Both arms hit LJ\(_{55}\) and M\(_{80}\) at \(\rho=6\) on every seed.
-The median wall of a run is lower for this code on all nine clusters, from
+The median wall of a run is lower for this code on all eight clusters, from
 0.640~s against 3.427~s on LJ\(_{38}\) to 66.725~s against 341.6~s on
 LJ\(_{150}\); no cross-arm work or wall test is reported because the two
 budgets count different operations.
@@ -741,8 +737,8 @@ order on seeds 2000--2011.
 This code uses \texttt{Config::recommended}\((N)\) through \texttt{h2h\_gmin\_proof}
 on Lennard-Jones, through \texttt{h2h\_morse} on Morse, and through
 \texttt{h2h\_metal} with every atom labeled gold on Au\(_{55}\).
-On every Lennard-Jones size, LJ\(_{75}\) included, GMIN runs the Wales-group LJ\(_{38}\)
-introduction file with no symmetrization keyword, not the published LJ\(_{75}\) input.
+Every printed Lennard-Jones row runs the Wales-group LJ\(_{38}\)
+introduction file with no symmetrization keyword.
 Eval. is a combined energy-and-gradient pass for this code and every
 \texttt{POTENTIAL} entry for GMIN, including \texttt{GRADT=false}; these counts are
 different operations and are not tested across arms.
@@ -771,8 +767,6 @@ LJ\(_{38}\) & \(4\times 10^{5}\) & this work & 12/12 & 5 & 7 & 0 & 127839.5 & 13
  &  & GMIN & 7/12 & 0 &  &  & 389399 & 173127.75 & 3.427 & 2.507 & 0.916 &  &  \\
 LJ\(_{55}\) & \(1\times 10^{6}\) & this work & 12/12 & 0 & 12 & 0 & 5722 & 5372.5 & 0.052 & 0.026 & 0.027 & 1 & \(-\)0.24 to 0.24 \\
  &  & GMIN & 12/12 & 0 &  &  & 12764.5 & 12435.75 & 0.209 & 0.170 & 0.039 &  &  \\
-LJ\(_{75}\) & \(4\times 10^{6}\) & this work & 5/12 & 5 & 0 & 7 & 4000000 & 962776.75 & 61.077 & 34.192 & 26.727 & 0.0625 & 0.09 to 0.68 \\
- &  & GMIN & 0/12 & 0 &  &  & 4000000 & 0 & 117.7 & 101.2 & 16.559 &  &  \\
 LJ\(_{98}\) & \(4\times 10^{6}\) & this work & 7/12 & 7 & 0 & 5 & 3166811.5 & 2726730.25 & 82.514 & 50.013 & 32.396 & 0.016 & 0.22 to 0.81 \\
  &  & GMIN & 0/12 & 0 &  &  & 4000000 & 0 & 177.3 & 157.6 & 19.771 &  &  \\
 LJ\(_{102}\) & \(4\times 10^{6}\) & this work & 6/12 & 4 & 2 & 3 & 3256052.5 & 2043827.25 & 83.435 & 51.809 & 31.506 & 1 & \(-\)0.31 to 0.44 \\
