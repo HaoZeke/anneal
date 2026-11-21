@@ -130,4 +130,13 @@ seed 2002 is retained even if it repeats the earlier 1.5 versus
 
 ## Results
 
-Not yet run.
+Partial kit. No timed row was started.
+
+The required four-change B tree starts `f2786b12`. During the bounded
+two-hour fetch window, every available branch tip instead had tree
+`f92688aa056e610760363e9abb572b2d3b638fad` and contained three
+changes over A. That tip was not substituted. Row count: 0. Gate
+verdict: **INCONCLUSIVE**.
+
+No per-cell ratios, confidence intervals, identity counts, hit counts,
+outside-time results, memory modes or disagreement rows exist.
