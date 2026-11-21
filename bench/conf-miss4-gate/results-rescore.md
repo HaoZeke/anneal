@@ -1,7 +1,7 @@
 Copyright (c) anneal developers
 
 Rescore of the stored conf-miss4 conformers. No search was repeated.
-Both arms keep the geometries recorded in the gate session.
+Every arm keeps the geometries recorded in the gate session.
 
 Polish is MMFF94 at dielectric one until the minimiser reports
 convergence, the same polished cache the gate scored. A conformer
@@ -11,9 +11,10 @@ when their heavy-atom RMSD, minimised over graph automorphisms
 after a Kabsch fit, is under 0.25 angstrom and their energies
 differ by less than 0.5 kcal/mol.
 
-R-A applies that comparison. R-K applies it and also accepts a
-candidate whose mirror image meets it. The mirror is a reflection
-through the xy plane. The Kabsch fit still keeps proper rotations.
+R-A calls Molecule.same from this tree. R-K calls
+Molecule.same_or_mirror from the kit tree's score module.
+The mirror is a reflection through the xy plane. The Kabsch
+fit still keeps proper rotations.
 
 The reference is the lowest valid conformer of the union of that
 cell's arms and seeds, including the second develop arm where the
@@ -33,6 +34,13 @@ energy and geometry do not change under R-K.
 | amprenavir | 2/24 | 2/24 | 2/24 | 2/24 |
 | lopinavir | 2/24 | 2/24 | 2/24 | 2/24 |
 | lorlatinib | 9/24 | 9/24 | 9/24 | 9/24 |
+
+## Second develop arm
+
+| molecule | R-A | R-K |
+|---|---|---|
+| rq3 | 24/24 | 24/24 |
+| xld | 17/24 | 24/24 |
 
 ## Reference
 
@@ -72,14 +80,22 @@ under 0.5 kcal/mol. Anything else is a distinct minimum.
 | xld | A | 2017 | 0 | 1 | mirror | 2.018045 | 0.000015 | 0.000000 |
 | xld | B | 2023 | 0 | 1 | mirror | 2.018048 | 0.000010 | 0.000000 |
 | xld | A | 2023 | 0 | 1 | mirror | 2.018048 | 0.000010 | 0.000000 |
+| xld | Ap | 2002 | 0 | 1 | mirror | 2.018045 | 0.000039 | 0.000000 |
+| xld | Ap | 2007 | 0 | 1 | mirror | 2.018042 | 0.000033 | 0.000000 |
+| xld | Ap | 2008 | 0 | 1 | mirror | 2.018049 | 0.000012 | 0.000000 |
+| xld | Ap | 2013 | 0 | 1 | mirror | 2.018060 | 0.000047 | 0.000000 |
+| xld | Ap | 2016 | 0 | 1 | mirror | 2.018049 | 0.000058 | 0.000000 |
+| xld | Ap | 2017 | 0 | 1 | mirror | 2.018045 | 0.000015 | 0.000000 |
+| xld | Ap | 2023 | 0 | 1 | mirror | 2.018048 | 0.000010 | 0.000000 |
 
-Flips: 14. Mirror images: 14. Distinct minima: 0.
+Flips: 21. Mirror images: 21. Distinct minima: 0.
 
 ## Tests
 
 The family is unchanged. It is the eight molecules' four endpoints
 (hits, calls, wall, outside time) and the five guard wall endpoints, 37 tests.
-Bonferroni multiplies a family probability by 37 and caps the product at 1.
+The rank tests stay A against B. Bonferroni multiplies a family
+probability by 37 and caps the product at 1.
 A loss needs that adjusted probability below 0.05, a worse hit count
 or median, and a median ratio outside the develop band. McNemar is
 paired over seeds, is reported beside Fisher, and is not in the family.
@@ -133,6 +149,30 @@ Overall: PASS
 | hexamer | 24/24 | 24/24 | 24/24 | 1.0000e+00 | 1.0000e+00 | 4578.5 | 4578.5 | 5.0407e-01 | 0.0147624 | 0.0147556 | 6.5486e-01 | 1.0984e-06 | 1.07784e-06 | 0.981284 | 7.5340e-01 | 4.43617 | PASS |
 
 Overall: PASS
+
+## A against the second develop arm
+
+Ratios are medians of the recorded finite times. The hit
+difference uses that comparison's hits. This band is not a
+member of the 37-test family.
+
+### R-A
+
+| cell | median wall ratio | median call ratio | median outside ratio | hit difference |
+|---|---|---|---|---|
+| rq3 | 1.01152 | 1 | 0.999265 | 0 |
+| xld | 1.01603 | 1 | 0.99478 | 0 |
+| lj38 | 0.999288 | 1 | 1.0154 | 0 |
+| hexamer | 1.0741 | 1 | 1.02561 | 0 |
+
+### R-K
+
+| cell | median wall ratio | median call ratio | median outside ratio | hit difference |
+|---|---|---|---|---|
+| rq3 | 1.01152 | 1 | 0.999265 | 0 |
+| xld | 1.01603 | 1 | 0.99478 | 0 |
+| lj38 | 0.999288 | 1 | 1.0154 | 0 |
+| hexamer | 1.0741 | 1 | 1.02561 | 0 |
 
 ## Session
 
