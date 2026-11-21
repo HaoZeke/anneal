@@ -26,12 +26,26 @@ import sys
 import time
 from pathlib import Path
 
+import importlib.util
+
 for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
     if (_candidate / "machine_provenance.py").is_file() and str(_candidate) not in sys.path:
         sys.path.insert(0, str(_candidate))
         break
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import run_panel as panel  # noqa: E402
+_panel_path = (Path(__file__).resolve().parent / "run_panel.py").resolve()
+_existing_panel = sys.modules.get("run_panel")
+if (
+    _existing_panel is not None
+    and getattr(_existing_panel, "__file__", None) is not None
+    and Path(_existing_panel.__file__).resolve() == _panel_path
+):
+    panel = _existing_panel
+else:
+    _panel_spec = importlib.util.spec_from_file_location(
+        "gmin_panel_run_panel", _panel_path
+    )
+    panel = importlib.util.module_from_spec(_panel_spec)
+    _panel_spec.loader.exec_module(panel)
 from machine_provenance import (  # noqa: E402
     aggregate_machine_columns,
     machine_columns,
