@@ -20,7 +20,7 @@ use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
-use crate::methods::cluster_hopping::{Ledger, Outcome, Relax, random_cluster};
+use crate::methods::cluster_hopping::{Ledger, Outcome, Relax, random_cluster_in_radius};
 use crate::potentials::PairKind;
 
 use std::collections::VecDeque;
@@ -691,7 +691,13 @@ pub fn run(cfg: &LatticeSearchConfig, ledger: &mut Ledger, relax: Relax<'_>, see
     let mut constructions = 0usize;
     let mut improvements = 0usize;
     let mut charged_at_best = 0usize;
-    let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+    let unit_radius = (3.0 * n as f64 / (4.0 * std::f64::consts::PI * 0.7)).cbrt();
+    let draw_radius = if cfg.min_separation.is_finite() && cfg.min_separation > 0.7 {
+        unit_radius * (cfg.min_separation / 0.7)
+    } else {
+        unit_radius
+    };
+    let start = random_cluster_in_radius(n, draw_radius, cfg.min_separation, &mut rng);
     let (mut e, mut x) = relax(ledger, start.view(), cfg.relax_steps);
     ledger.record(e, x.view());
     let mut stalls = 0usize;
@@ -721,7 +727,7 @@ pub fn run(cfg: &LatticeSearchConfig, ledger: &mut Ledger, relax: Relax<'_>, see
             stalls += 1;
         }
         if stalls >= cfg.patience {
-            let fresh = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+            let fresh = random_cluster_in_radius(n, draw_radius, cfg.min_separation, &mut rng);
             let (e_fresh, x_fresh) = relax(ledger, fresh.view(), cfg.relax_steps);
             ledger.record(e_fresh, x_fresh.view());
             e = e_fresh;

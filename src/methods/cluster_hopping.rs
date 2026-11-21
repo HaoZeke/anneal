@@ -5878,7 +5878,7 @@ where
             && !cfg.move_library.is_rigid_body()
             && call_due
         {
-            let fresh = random_cluster(x.len() / 3, 0.7, cfg.min_separation, rng);
+            let fresh = cfg.scaled_liquid_start(x.len() / 3, rng);
             let (energy, relaxed) = relax(ledger, fresh.view(), cfg.relax_steps);
             charged_at_best = ledger.spent();
             best_seen = ledger.best;
@@ -10082,6 +10082,10 @@ fn hop_is_identity(x: ArrayView1<f64>, y: ArrayView1<f64>) -> bool {
 }
 
 /// Samples a non-overlapping cluster uniformly inside a sphere.
+///
+/// When `radius` cannot accommodate all `n` points at `min_sep` within the
+/// initial rejection budget, the sampling sphere expands iteratively until
+/// every point is placed so the returned vector always has length `3 * n`.
 pub fn random_cluster_in_radius<R: Rng + ?Sized>(
     n: usize,
     radius: f64,
@@ -10112,7 +10116,58 @@ pub fn random_cluster_in_radius<R: Rng + ?Sized>(
             pts.push(p);
         }
     }
-    let mut out = Array1::zeros(3 * pts.len());
+    if pts.len() < n {
+        let sep = if min_sep.is_finite() && min_sep > 0.0 {
+            min_sep
+        } else {
+            0.0
+        };
+        let base_r = if radius.is_finite() && radius > 0.0 {
+            radius
+        } else {
+            0.0
+        };
+        let mut draw_r = base_r.max(sep * portable_cbrt(n.max(1) as f64));
+        for _ in 0..12 {
+            if pts.len() == n {
+                break;
+            }
+            draw_r = (draw_r * 1.35).max(sep);
+            for _ in 0..2_500 {
+                if pts.len() == n {
+                    break;
+                }
+                let mut v = [0.0; 3];
+                let mut norm = 0.0;
+                for k in 0..3 {
+                    let u1: f64 = rng.random::<f64>().max(1e-12);
+                    let u2: f64 = rng.random::<f64>();
+                    v[k] = portable_sqrt(-2.0 * portable_ln(u1))
+                        * portable_cos(2.0 * std::f64::consts::PI * u2);
+                    norm += v[k] * v[k];
+                }
+                let norm = portable_sqrt(norm).max(1e-12);
+                let r = draw_r * portable_cbrt(rng.random::<f64>());
+                let p = [v[0] / norm * r, v[1] / norm * r, v[2] / norm * r];
+                if pts.iter().all(|q| {
+                    ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt()
+                        >= sep
+                }) {
+                    pts.push(p);
+                }
+            }
+        }
+        if pts.len() < n {
+            let step = if sep > 0.0 { sep } else { 1.0 };
+            let mut next_x = pts.iter().map(|q| q[0]).fold(0.0_f64, f64::max) + step;
+            while pts.len() < n {
+                pts.push([next_x, 0.0, 0.0]);
+                next_x += step;
+            }
+        }
+    }
+    assert_eq!(pts.len(), n);
+    let mut out = Array1::zeros(3 * n);
     for (i, p) in pts.iter().enumerate() {
         for k in 0..3 {
             out[3 * i + k] = p[k];
@@ -10141,12 +10196,16 @@ pub fn optimize_with_settle<'g>(
     seed: u64,
 ) -> Result<Outcome, SearchError> {
     let mut rng = StdRng::seed_from_u64(seed);
-    let start = random_cluster_in_radius(
-        cfg.n_points,
-        cfg.start_radius(),
-        cfg.min_separation,
-        &mut rng,
-    );
+    let start = if cfg.move_library.is_rigid_body() {
+        random_rigid_cluster(cfg.n_points, cfg.min_separation, &mut rng)
+    } else {
+        random_cluster_in_radius(
+            cfg.n_points,
+            cfg.start_radius(),
+            cfg.min_separation,
+            &mut rng,
+        )
+    };
     run_with_gradient_settle(cfg, start.view(), ledger, relax, grad, settle, &mut rng)
 }
 
@@ -10159,12 +10218,16 @@ pub fn optimize_with_gradient<'g>(
     seed: u64,
 ) -> Result<Outcome, SearchError> {
     let mut rng = StdRng::seed_from_u64(seed);
-    let start = random_cluster_in_radius(
-        cfg.n_points,
-        cfg.start_radius(),
-        cfg.min_separation,
-        &mut rng,
-    );
+    let start = if cfg.move_library.is_rigid_body() {
+        random_rigid_cluster(cfg.n_points, cfg.min_separation, &mut rng)
+    } else {
+        random_cluster_in_radius(
+            cfg.n_points,
+            cfg.start_radius(),
+            cfg.min_separation,
+            &mut rng,
+        )
+    };
     run_with_gradient(cfg, start.view(), ledger, relax, grad, &mut rng)
 }
 
@@ -10179,7 +10242,11 @@ pub fn optimize_with_energy_gradient<'g>(
     seed: u64,
 ) -> Result<Outcome, SearchError> {
     let mut rng = StdRng::seed_from_u64(seed);
-    let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+    let start = if cfg.move_library.is_rigid_body() {
+        random_rigid_cluster(cfg.n_points, cfg.min_separation, &mut rng)
+    } else {
+        cfg.scaled_liquid_start(cfg.n_points, &mut rng)
+    };
     run_with_energy_gradient(
         cfg,
         start.view(),
@@ -13585,5 +13652,55 @@ mod call_floor_tests {
         assert!((distance(&x, 0, 1) - target).abs() < 1.0e-12);
         assert!(floor.clears(x.view()));
         assert!(distance(&x, 0, 2) > floor.pair(0, 2));
+    }
+
+    #[test]
+    fn random_cluster_in_radius_never_returns_short_vector() {
+        let mut rng = StdRng::seed_from_u64(29);
+        let x = random_cluster(4, 0.7, 1.4, &mut rng);
+        assert_eq!(x.len(), 12);
+        for i in 0..4 {
+            for j in (i + 1)..4 {
+                assert!(distance(&x, i, j) + 1.0e-12 >= 1.4);
+            }
+        }
+    }
+
+    #[test]
+    fn scaled_liquid_start_matches_unit_and_scales_covariantly() {
+        for seed in [0_u64, 7, 29] {
+            let cfg_unit = Config::recommended(38);
+            let mut rng_a = StdRng::seed_from_u64(seed);
+            let mut rng_b = StdRng::seed_from_u64(seed);
+            let a = cfg_unit.scaled_liquid_start(38, &mut rng_a);
+            let b = random_cluster(38, 0.7, cfg_unit.min_separation, &mut rng_b);
+            assert!(
+                a.iter()
+                    .zip(b.iter())
+                    .all(|(u, v)| u.to_bits() == v.to_bits())
+            );
+
+            let cfg4 = Config::recommended(4);
+            let cfg4_scaled = Config::recommended_with_scales(4, 2.0, 3.0);
+            let mut rng_u = StdRng::seed_from_u64(seed);
+            let mut rng_s = StdRng::seed_from_u64(seed);
+            let u = cfg4.scaled_liquid_start(4, &mut rng_u);
+            let s = cfg4_scaled.scaled_liquid_start(4, &mut rng_s);
+            assert_eq!(s.len(), 12);
+            for (ui, si) in u.iter().zip(s.iter()) {
+                assert!((si - 2.0 * ui).abs() < 1.0e-12);
+            }
+        }
+    }
+
+    #[test]
+    fn scaled_four_point_lj_search_seed_29_preserves_dimension() {
+        let pot = crate::potentials::PairPotential::lennard_jones(4);
+        let cfg = Config::recommended_with_scales(4, 2.0, 3.0);
+        let mut ledger = Ledger::new(120);
+        let (out, _stats) =
+            crate::methods::cluster_search::search(&pot, &cfg, &mut ledger, 29).unwrap();
+        assert_eq!(out.best_state.as_ref().unwrap().len(), 12);
+        assert!(out.best.is_finite());
     }
 }

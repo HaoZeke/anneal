@@ -25,9 +25,7 @@
 //! stack the caller configured, so everything measured to work (the composed
 //! excursion, the depth bandit) rides along unchanged.
 
-use crate::methods::cluster_hopping::{
-    Config, GradFn, Ledger, Relax, random_cluster, run_with_gradient,
-};
+use crate::methods::cluster_hopping::{Config, GradFn, Ledger, Relax, run_with_gradient};
 use ndarray::Array1;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
@@ -67,7 +65,7 @@ pub fn committor_population(
     let mut pop: Vec<(Array1<f64>, f64, f64, f64)> = (0..walkers.max(2))
         .map(|_| {
             (
-                random_cluster(n, 0.7, cfg.min_separation, &mut rng),
+                cfg.scaled_liquid_start(n, &mut rng),
                 f64::INFINITY,
                 1.0,
                 1.0,
