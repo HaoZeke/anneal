@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import os
 import random
 import subprocess
@@ -44,6 +45,10 @@ SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
 ARMS = ("anneal", "gmin")
 SCHEDULE_SEED = 20261111
 HIT_TOL = DEFAULT_HIT_TOL
+MACHINE_ID_SALT = b"anneal-bench-machine-id-v1\0"
+MACHINE_ID_PATH = Path("/etc/machine-id")
+PRODUCT_UUID_PATH = Path("/sys/class/dmi/id/product_uuid")
+CPUINFO_PATH = Path("/proc/cpuinfo")
 
 SUMMARY_FIELDS = [
     "system",
@@ -65,6 +70,27 @@ SUMMARY_FIELDS = [
     "anneal_head",
     "code_revision",
     "host",
+    "machine_id",
+    "cpu_model",
+]
+PER_SEED_FIELDS = [
+    "system",
+    "code",
+    "seed",
+    "budget",
+    "hit",
+    "evals_to_hit",
+    "charged",
+    "gradient_passes",
+    "energy_only_entries",
+    "wall_s",
+    "best",
+    "pot_s",
+    "head",
+    "tree",
+    "host",
+    "machine_id",
+    "cpu_model",
 ]
 
 
@@ -125,6 +151,39 @@ def load_source(path: Path) -> tuple[str, str]:
     return url, revision
 
 
+def machine_provenance(
+    machine_id_path: Path = MACHINE_ID_PATH,
+    product_uuid_path: Path = PRODUCT_UUID_PATH,
+    cpuinfo_path: Path = CPUINFO_PATH,
+) -> tuple[str, str]:
+    """Return the salted physical-machine digest and CPU model."""
+    identifier = ""
+    for path in (machine_id_path, product_uuid_path):
+        if path.is_file():
+            identifier = path.read_text().strip()
+            if identifier:
+                break
+    if not identifier:
+        raise RuntimeError("neither /etc/machine-id nor the DMI product_uuid is available")
+
+    cpu_model = ""
+    if cpuinfo_path.is_file():
+        fields = {}
+        for line in cpuinfo_path.read_text(errors="replace").splitlines():
+            if ":" in line:
+                key, value = line.split(":", 1)
+                fields.setdefault(key.strip(), " ".join(value.split()))
+        for key in ("model name", "Model", "Processor", "Hardware"):
+            if fields.get(key):
+                cpu_model = fields[key]
+                break
+    if not cpu_model:
+        raise RuntimeError("/proc/cpuinfo has no CPU model string")
+
+    digest = hashlib.sha256(MACHINE_ID_SALT + identifier.encode()).hexdigest()
+    return digest, cpu_model
+
+
 def binary_budget(binary: Path, n: int) -> tuple[int, float]:
     proc = subprocess.run(
         [str(binary), "budget", system_name(n)],
@@ -149,6 +208,10 @@ def write_start(binary: Path, n: int, seed: int, path: Path) -> None:
 
 
 def parse_anneal(text: str) -> dict[str, str]:
+    lines = [line for line in text.splitlines() if line.strip()]
+    for index, line in enumerate(lines[:-1]):
+        if line.startswith("system,code,seed,budget,"):
+            return next(csv.DictReader(lines[index : index + 2]))
     data = [line for line in text.splitlines() if ",anneal," in line]
     if len(data) != 1:
         raise ValueError(f"expected one anneal row, saw {len(data)}")
@@ -161,6 +224,9 @@ def parse_anneal(text: str) -> dict[str, str]:
 
 
 def parse_gmin(text: str) -> dict[str, str]:
+    lines = [line for line in text.splitlines() if line.strip()]
+    if len(lines) >= 2 and lines[0].startswith("system,code,seed,budget,"):
+        return next(csv.DictReader(lines[:2]))
     fields: dict[str, str] = {}
     for part in text.split()[1:]:
         key, value = part.split("=", 1)
@@ -168,6 +234,26 @@ def parse_gmin(text: str) -> dict[str, str]:
     if "hit" not in fields or "evals_to_hit" not in fields:
         raise ValueError(f"no gmin row in {text!r}")
     return fields
+
+
+def write_per_seed_row(
+    path: Path,
+    row: dict[str, str],
+    machine_id: str,
+    cpu_model: str,
+) -> None:
+    values = {field: row.get(field, "") for field in PER_SEED_FIELDS}
+    values.update(
+        {
+            "host": os.uname().nodename,
+            "machine_id": machine_id,
+            "cpu_model": cpu_model,
+        }
+    )
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=PER_SEED_FIELDS)
+        writer.writeheader()
+        writer.writerow(values)
 
 
 def _env(budget: int) -> dict[str, str]:
@@ -186,6 +272,8 @@ def run_anneal(
     coords: Path,
     log: Path,
     saved: Path,
+    machine_id: str,
+    cpu_model: str,
 ) -> dict[str, str]:
     with log.open("w") as handle:
         proc = subprocess.run(
@@ -202,7 +290,7 @@ def run_anneal(
     row = parse_anneal(text)
     if int(row["budget"]) != budget or row["hit"] not in ("0", "1", "true", "false"):
         raise RuntimeError(f"anneal row {row}")
-    saved.write_text(text)
+    write_per_seed_row(saved, row, machine_id, cpu_model)
     return row
 
 
@@ -217,6 +305,8 @@ def run_gmin(
     work: Path,
     log: Path,
     saved: Path,
+    machine_id: str,
+    cpu_model: str,
 ) -> dict[str, str]:
     work.mkdir(parents=True, exist_ok=True)
     (work / "data").write_text(data.read_text() + f"RANSEED {seed}\n")
@@ -250,7 +340,16 @@ def run_gmin(
     row = parse_gmin(text)
     if int(row["budget"]) != budget:
         raise RuntimeError(f"gmin budget {row['budget']} != {budget}")
-    saved.write_text(text)
+    required = ("gradient_passes", "energy_only_entries")
+    if any(field not in row for field in required):
+        raise RuntimeError(f"gmin row has no parity counters: {row}")
+    if (
+        int(row["gradient_passes"]) != int(row["charged"])
+        or not 0 <= int(row["gradient_passes"]) <= budget
+        or int(row["energy_only_entries"]) < 0
+    ):
+        raise RuntimeError(f"invalid gmin counters: {row}")
+    write_per_seed_row(saved, row, machine_id, cpu_model)
     return row
 
 
@@ -274,6 +373,8 @@ def summarise(
     url: str,
     revision: str,
     head: str,
+    machine_id: str,
+    cpu_model: str,
 ) -> list[dict[str, str]]:
     by_n: dict[int, dict[str, list[dict]]] = {}
     for row in rows:
@@ -318,6 +419,8 @@ def summarise(
                     "anneal_head": head,
                     "code_revision": head if arm == "anneal" else revision,
                     "host": os.uname().nodename,
+                    "machine_id": machine_id,
+                    "cpu_model": cpu_model,
                 }
             )
     return out
@@ -336,7 +439,13 @@ def job_paths(runs: Path, n: int, seed: int, arm: str) -> tuple[Path, Path]:
     return directory / f"{arm}-{seed}.row", directory / f"{arm}-{seed}.log"
 
 
-def load_saved(path: Path, n: int, arm: str) -> dict | None:
+def load_saved(
+    path: Path,
+    n: int,
+    arm: str,
+    machine_id: str,
+    cpu_model: str,
+) -> dict | None:
     if not path.is_file():
         return None
     text = path.read_text().strip()
@@ -346,6 +455,10 @@ def load_saved(path: Path, n: int, arm: str) -> dict | None:
         row = parse_anneal(text)
     else:
         row = parse_gmin(text)
+        if "gradient_passes" not in row or "energy_only_entries" not in row:
+            return None
+    if row.get("machine_id") != machine_id or row.get("cpu_model") != cpu_model:
+        return None
     return as_result(n, arm, row)
 
 
@@ -423,6 +536,7 @@ def main(argv: list[str]) -> int:
             )
     url, revision = load_source(args.source)
     head = args.head_file.read_text().strip()
+    machine_id, cpu_model = machine_provenance()
     progress = args.runs.parent / "progress.txt"
     progress.parent.mkdir(parents=True, exist_ok=True)
     order = schedule(sizes, seeds, arms, SCHEDULE_SEED)
@@ -437,7 +551,11 @@ def main(argv: list[str]) -> int:
         write_start(args.binary, n, seed, coords)
         saved, log = job_paths(args.runs, n, seed, arm)
         saved.parent.mkdir(parents=True, exist_ok=True)
-        existing = load_saved(saved, n, arm) if saved.is_file() else None
+        existing = (
+            load_saved(saved, n, arm, machine_id, cpu_model)
+            if saved.is_file()
+            else None
+        )
         if existing is not None:
             rows.append(existing)
             note(
@@ -448,7 +566,17 @@ def main(argv: list[str]) -> int:
             continue
         note(progress, f"start n={n} arm={arm} seed={seed} budget={budget}")
         if arm == "anneal":
-            raw = run_anneal(args.binary, n, seed, budget, coords, log, saved)
+            raw = run_anneal(
+                args.binary,
+                n,
+                seed,
+                budget,
+                coords,
+                log,
+                saved,
+                machine_id,
+                cpu_model,
+            )
         else:
             raw = run_gmin(
                 args.gmin,
@@ -461,6 +589,8 @@ def main(argv: list[str]) -> int:
                 args.runs / system_name(n) / f"gmin-{seed}",
                 log,
                 saved,
+                machine_id,
+                cpu_model,
             )
         result = as_result(n, arm, raw)
         rows.append(result)
@@ -471,8 +601,11 @@ def main(argv: list[str]) -> int:
             f"best={result['best']:.6f}",
         )
         if args.summary:
-            write_summary(args.summary, summarise(rows, seeds, url, revision, head))
-    text_rows = summarise(rows, seeds, url, revision, head)
+            write_summary(
+                args.summary,
+                summarise(rows, seeds, url, revision, head, machine_id, cpu_model),
+            )
+    text_rows = summarise(rows, seeds, url, revision, head, machine_id, cpu_model)
     if args.summary:
         write_summary(args.summary, text_rows)
     writer = csv.DictWriter(sys.stdout, fieldnames=SUMMARY_FIELDS)

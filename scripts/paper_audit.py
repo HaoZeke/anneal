@@ -11,11 +11,13 @@ A printed number agrees with a recomputed one when they differ by at most
 half a unit in the printed number's last digit. A bare integer below 10 is
 read as exact, so a printed p of 1 cannot stand for 0.6.
 
-Every row file read here is checked for a code revision and a host. A file
-without them, or whose revision is not in this repository, must be listed in
-``KNOWN_GAPS``. A revision that was rebuilt on push is read through its alias
-in ``ALIASES`` once the pushed equivalent is verified; one with no pushed
-equivalent is listed in ``UNPUSHED`` with the reason. Printed numbers no
+Every row file read here is checked for a code revision and a host. New row
+schemas that carry a physical ``machine_id`` must also carry ``cpu_model``;
+the compatibility ``host`` may be a UTS-namespace label. A file without the
+older provenance fields, or whose revision is not in this repository, must
+be listed in ``KNOWN_GAPS``. A revision that was rebuilt on push is read
+through its alias in ``ALIASES`` once the pushed equivalent is verified; one
+with no pushed equivalent is listed in ``UNPUSHED`` with the reason. Printed numbers no
 committed row backs are listed in ``UNTRACED``; their text must still be where
 the list says. The revision checks need the full history and the remote
 branches; a clone without them is refused, with exit status 2.
@@ -52,6 +54,7 @@ SI = "paper/jctc/si.tex"
 
 REVISION_COLUMNS = ("code_revision", "anneal_head", "release_revision", "head", "harness_revision")
 HOST_COLUMNS = ("host",)
+MACHINE_ID_COLUMNS = ("machine_id",)
 # Revisions of other codes. The GMIN build scripts refuse a tarball whose SVNREV differs.
 EXTERNAL_REVISIONS = {"aac1548a8aec13b53ad12a8d6904625081685d2e": "GMIN source/SVNREV"}
 # Local revisions that rows cite, each with the pushed commit it was rebuilt as.
@@ -2457,6 +2460,7 @@ def provenance(audit: Audit) -> dict[str, str]:
         columns = set(rows[0]) if rows else set()
         revs = [c for c in REVISION_COLUMNS if c in columns]
         hosts = [c for c in HOST_COLUMNS if c in columns]
+        machines = [c for c in MACHINE_ID_COLUMNS if c in columns]
         problems = []
         if not revs and not hosts:
             problems.append("revision and host unrecorded (no revision or host column)")
@@ -2468,6 +2472,13 @@ def provenance(audit: Audit) -> dict[str, str]:
             if any(r[column].strip() in ("", "unknown") for r in rows):
                 what = "unrecorded" if column in revs else "empty or unknown"
                 problems.append(f"{column} {what} on some rows")
+        if machines:
+            if "cpu_model" not in columns:
+                problems.append("machine_id recorded; no cpu_model column")
+            elif any(not r["cpu_model"].strip() for r in rows):
+                problems.append("cpu_model empty on some rows")
+            if any(not re.fullmatch(r"[0-9a-f]{64}", r["machine_id"].strip()) for r in rows):
+                problems.append("machine_id is not a salted sha256 on some rows")
         for column in revs:
             for r in rows:
                 value = r[column].strip()

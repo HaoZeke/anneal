@@ -13,14 +13,22 @@ TARBALL=$WORK/svn.tar.bz2
 URL=http://www-wales.ch.cam.ac.uk/svn.tar.bz2
 REV=aac1548a8aec13b53ad12a8d6904625081685d2e
 PATCH=$ROOT/bench/lj104-lattice/v2/h2h-gmin.patch
+CAP_SOURCE=$ROOT/bench/lj104-lattice/v2/h2h_cap.f90
+BUILD_KEY_FILE=$WORK/gmin-build-key
+BUILD_KEY=$(sha256sum "$PATCH" "$CAP_SOURCE" | sha256sum | cut -d' ' -f1)
 
 mkdir -p "$WORK/bin" "$SRC"
+OLD_BUILD_KEY=$(cat "$BUILD_KEY_FILE" 2>/dev/null || true)
 if [[ ! -s $TARBALL ]]; then
   if [[ -s /work/svn.tar.bz2 ]]; then
     cp -a /work/svn.tar.bz2 "$TARBALL"
   else
     curl -fL --retry 3 -o "$TARBALL" "$URL"
   fi
+fi
+
+if [[ -f $SRC/wales/GMIN/source/SVNREV && $OLD_BUILD_KEY != "$BUILD_KEY" ]]; then
+  rm -rf "$SRC/wales/GMIN"
 fi
 
 if [[ ! -f $SRC/wales/GMIN/source/SVNREV ]]; then
@@ -44,8 +52,9 @@ fi
 if [[ ! -f $SRC/wales/GMIN/source/h2h_cap.f90 ]]; then
   patch -p1 --forward --batch -d "$SRC/wales/GMIN" < "$PATCH"
 fi
+cp "$CAP_SOURCE" "$SRC/wales/GMIN/source/h2h_cap.f90"
 
-if [[ ! -x $WORK/bin/GMIN ]]; then
+if [[ ! -x $WORK/bin/GMIN || $OLD_BUILD_KEY != "$BUILD_KEY" ]]; then
   build=$SRC/wales/GMIN/build/gfortran
   mkdir -p "$build"
   (
@@ -62,6 +71,7 @@ if [[ ! -x $WORK/bin/GMIN ]]; then
   )
   cp -a "$build/GMIN" "$WORK/bin/GMIN"
   chmod +x "$WORK/bin/GMIN"
+  printf '%s\n' "$BUILD_KEY" > "$BUILD_KEY_FILE"
 fi
 
 cat > "$WORK/gmin-source.txt" << EOF

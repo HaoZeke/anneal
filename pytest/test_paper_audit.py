@@ -72,6 +72,23 @@ def test_provenance_gaps_are_exactly_the_listed_ones(audited):
     assert audit_mod.provenance(audited) == audit_mod.KNOWN_GAPS
 
 
+def test_new_machine_provenance_requires_a_digest_and_cpu_model():
+    audit = audit_mod.Audit()
+    audit.read["new.csv"] = [
+        {
+            "code_revision": "",
+            "host": "bench",
+            "machine_id": "not-a-digest",
+            "cpu_model": "",
+        }
+    ]
+
+    gap = audit_mod.provenance(audit)["new.csv"]
+
+    assert "cpu_model empty on some rows" in gap
+    assert "machine_id is not a salted sha256 on some rows" in gap
+
+
 def test_untraced_numbers_are_still_quoted(audited):
     for path, fragment, _why in audit_mod.UNTRACED:
         assert audit_mod.collapse(fragment) in audit_mod.collapse((ROOT / path).read_text()), (path, fragment)
