@@ -38,8 +38,8 @@ step for step. =anneal_box_minimize_ex= takes it, and an optional
 =anneal_box_stats_t= that reports the history and coverage counters.
 
 #+BEGIN_SRC c
-anneal_box_options_t options;
-anneal_box_stats_t stats;
+anneal_box_options_t options = {0};
+anneal_box_stats_t stats = {0};
 
 options.struct_size = sizeof options;
 anneal_box_options_default(&options);
@@ -59,7 +59,9 @@ with =struct_size=, which the caller sets before any call, including
 caller's structure has and takes the default for the rest, and writes
 only the defaults and statistics that fit, so a newer library can add
 fields at the end without breaking a program built against this header.
-A size below the oldest layout is refused. The box follows the rule of
+On return, =struct_size= says how many bytes this library wrote, so a
+newer caller can detect fields that an older library did not fill. A size
+below the oldest layout is refused. The box follows the rule of
 the Python drivers: every side finite, a finite width and sum of widths,
 and =low <= high=; the start must be finite, and a DLPack shape that is
 negative or a data pointer not aligned for =double= is refused. The

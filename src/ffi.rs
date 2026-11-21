@@ -222,8 +222,8 @@ pub struct anneal_box_options_t {
 
 /// Outcome of one box ensemble, with the history and coverage counters.
 ///
-/// `struct_size` is the caller's `sizeof(anneal_box_stats_t)`; the library
-/// writes only the bytes that fit.
+/// `struct_size` is the number of bytes this library wrote; the caller sets
+/// it to its `sizeof(anneal_box_stats_t)` before the call.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct anneal_box_stats_t {
@@ -936,9 +936,9 @@ fn stats_of(result: &BoxEnsembleResult) -> anneal_box_stats_t {
 /// that follows the history.
 ///
 /// Set `out->struct_size` to `sizeof(anneal_box_options_t)` first. The
-/// library writes the defaults into the first `struct_size` bytes only,
-/// keeps `struct_size` as the caller set it, and leaves the bytes of a
-/// newer, larger structure alone. A size below the oldest layout returns
+/// library writes the defaults into the first `struct_size` bytes it knows,
+/// sets `struct_size` to the number of bytes written, and leaves the bytes of
+/// a newer, larger structure alone. A size below the oldest layout returns
 /// `ANNEAL_INVALID_PARAMETER` and writes nothing.
 ///
 /// # Safety
@@ -963,9 +963,9 @@ pub unsafe extern "C" fn anneal_box_options_default(
         ));
         return anneal_status_t::ANNEAL_INVALID_PARAMETER;
     }
-    let mut defaults = default_options();
-    defaults.struct_size = size;
     let take = size.min(std::mem::size_of::<anneal_box_options_t>());
+    let mut defaults = default_options();
+    defaults.struct_size = take;
     unsafe {
         std::ptr::copy_nonoverlapping(
             (&defaults as *const anneal_box_options_t).cast::<u8>(),
@@ -1032,9 +1032,9 @@ pub unsafe extern "C" fn anneal_box_minimize_ex(
             })
         };
         if let (Some(result), false) = (result, stats.is_null()) {
-            let mut full = stats_of(&result);
-            full.struct_size = stats_size;
             let take = stats_size.min(std::mem::size_of::<anneal_box_stats_t>());
+            let mut full = stats_of(&result);
+            full.struct_size = take;
             unsafe {
                 std::ptr::copy_nonoverlapping(
                     (&full as *const anneal_box_stats_t).cast::<u8>(),
@@ -1731,6 +1731,24 @@ mod tests {
             short.struct_size,
             std::mem::offset_of!(anneal_box_stats_t, history_observations)
         );
+        #[repr(C)]
+        struct NewerStats {
+            stats: anneal_box_stats_t,
+            future: [u64; 2],
+        }
+        let mut newer = NewerStats {
+            stats: anneal_box_stats_t {
+                struct_size: std::mem::size_of::<NewerStats>(),
+                ..Default::default()
+            },
+            future: [u64::MAX; 2],
+        };
+        assert_eq!(call(&mut newer.stats), anneal_status_t::ANNEAL_SUCCESS);
+        assert_eq!(
+            newer.stats.struct_size,
+            std::mem::size_of::<anneal_box_stats_t>()
+        );
+        assert_eq!(newer.future, [u64::MAX; 2]);
         assert_eq!(call(std::ptr::null_mut()), anneal_status_t::ANNEAL_SUCCESS);
         let mut unset = anneal_box_stats_t::default();
         assert_eq!(call(&mut unset), anneal_status_t::ANNEAL_INVALID_PARAMETER);
@@ -1880,7 +1898,7 @@ mod tests {
                 full,
             );
         }
-        assert_eq!(newer.struct_size, full + 16);
+        assert_eq!(newer.struct_size, full);
         assert_eq!(
             anneal_box_options_t {
                 struct_size: full,
