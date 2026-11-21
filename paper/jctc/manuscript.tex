@@ -1,7 +1,7 @@
 % Copyright (c) anneal developers
 \documentclass[journal=jctcce,manuscript=article]{achemso}
 
-\usepackage{booktabs,amsmath}
+\usepackage{booktabs,amsmath,seqsplit}
 \graphicspath{{figs/}}
 
 \input{macros}
@@ -695,6 +695,8 @@ taboo radius scaled by \(r_0/2^{1/6}\) and GMIN's container radius, and the
 gold driver of this code applies the basin bias of
 equation~\ref{eq:delta} on a stride of 8.
 The Supporting Information gives the inputs, the host, and the commands.
+The GMIN source is the public tarball dated 2026-11-19, sha256
+\texttt{\seqsplit{ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776}}.
 
 Paired by seed, this code alone hits 7 seeds of LJ\(_{98}\) and GMIN alone
 none, with \(p=0.016\) and an interval from 0.22 to 0.81.

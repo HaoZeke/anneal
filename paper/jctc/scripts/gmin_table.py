@@ -40,7 +40,8 @@ REVISION = "eeec8e2c216ae1506768bca8e29846c1c039ca3b"
 SUBMITTED = "61fa67cf380e46876b569da45e7cc091647a775b"
 DEVELOP_HARNESS = "f009acc96bb95023eeb6e394e863630c752a5d05"
 DEVELOP_SYSTEMS = ("au55", "m55r6", "m55r14", "m80r6", "m80r14")
-GMIN_SNAPSHOT = "9cbec1a446352bc9ef064bd2b1a5767194655919"
+GMIN_TARBALL_DATE = "2026-11-19"
+GMIN_TARBALL_SHA256 = "ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776"
 SYSTEMS = ("lj38", "lj55", "lj75", "lj98", "lj102", "lj103", "lj104", "lj150", "m80r6")
 MARKS = PANEL.TEX_MARKS
 
@@ -62,6 +63,14 @@ def is_ancestor(commit: str) -> bool:
                           capture_output=True).returncode == 0
 
 
+def gmin_row_id(data: list[dict[str, str]]) -> str:
+    """The historical identifier stored in imported GMIN rows, not the source pin."""
+    identifiers = {row["code_revision"] for row in data if row["code"] == "gmin"}
+    if len(identifiers) != 1:
+        raise SystemExit(f"gmin_table: imported GMIN rows have {len(identifiers)} source identifiers")
+    return identifiers.pop()
+
+
 def rows() -> list[dict[str, str]]:
     out = []
     for shard in SHARDS:
@@ -71,10 +80,20 @@ def rows() -> list[dict[str, str]]:
         out += list(csv.DictReader(path.open()))
     if not is_ancestor(REVISION):
         raise SystemExit(f"gmin_table: {REVISION[:8]} is not an ancestor of HEAD")
+    gmin_row_id(out)
     for row in out:
-        want = REVISION if row["code"] == "anneal" else GMIN_SNAPSHOT
-        if row["code_revision"] != want or row["harness_revision"] != REVISION:
-            raise SystemExit(f"gmin_table: {row['system']} {row['code']} {row['seed']} is not at the pinned revisions")
+        if ((row["code"] == "anneal" and row["code_revision"] != REVISION)
+                or row["harness_revision"] != REVISION):
+            raise SystemExit(f"gmin_table: {row['system']} {row['code']} {row['seed']} is not at the recorded revisions")
+        has_tarball_fields = "gmin_snapshot" in row or "tarball_sha256" in row
+        if row["code"] == "gmin" and has_tarball_fields and (
+                row.get("gmin_snapshot") != GMIN_TARBALL_DATE
+                or row.get("tarball_sha256") != GMIN_TARBALL_SHA256):
+            raise SystemExit(f"gmin_table: {row['system']} {row['seed']} is not from the dated tarball")
+    host_rows = list(csv.DictReader((DATA / "b" / "host.csv").open()))
+    if any(row["snapshot"] != GMIN_TARBALL_DATE or row["tarball_sha256"] != GMIN_TARBALL_SHA256
+           for row in host_rows if row["code"] == "gmin"):
+        raise SystemExit("gmin_table: shard b is not from the dated tarball")
     keys = [(r["system"], r["code"], r["seed"]) for r in out]
     if len(keys) != len(set(keys)) or sorted({r["system"] for r in out}) != sorted(SYSTEMS):
         raise SystemExit("gmin_table: the shards do not cover each cell once")
@@ -88,10 +107,12 @@ def develop_rows() -> list[dict[str, str]]:
     out = list(csv.DictReader(path.open()))
     if not is_ancestor(SUBMITTED):
         raise SystemExit(f"gmin_table: {SUBMITTED[:8]} is not an ancestor of HEAD")
+    if gmin_row_id(out) != gmin_row_id(rows()):
+        raise SystemExit("gmin_table: the two imported blocks name different GMIN source identifiers")
     for row in out:
-        want = SUBMITTED if row["code"] == "anneal" else GMIN_SNAPSHOT
-        if row["code_revision"] != want or row["harness_revision"] != DEVELOP_HARNESS:
-            raise SystemExit(f"gmin_table: {row['system']} {row['code']} {row['seed']} is not at the pinned revisions")
+        if ((row["code"] == "anneal" and row["code_revision"] != SUBMITTED)
+                or row["harness_revision"] != DEVELOP_HARNESS):
+            raise SystemExit(f"gmin_table: {row['system']} {row['code']} {row['seed']} is not at the recorded revisions")
     keys = [(r["system"], r["code"], r["seed"]) for r in out]
     if len(keys) != len(set(keys)) or sorted({r["system"] for r in out}) != sorted(DEVELOP_SYSTEMS):
         raise SystemExit("gmin_table: the develop session does not cover each cell once")
@@ -99,14 +120,14 @@ def develop_rows() -> list[dict[str, str]]:
 
 
 def summary() -> tuple[list[dict[str, str]], dict[str, dict[str, object]]]:
-    PANEL.GMIN_REV = GMIN_SNAPSHOT
     data = rows()
+    PANEL.GMIN_REV = gmin_row_id(data)
     return PANEL.summarise(data, REVISION), PANEL.paired_summary(data, REVISION)
 
 
 def develop_summary() -> tuple[list[dict[str, str]], dict[str, dict[str, object]]]:
-    PANEL.GMIN_REV = GMIN_SNAPSHOT
     data = develop_rows()
+    PANEL.GMIN_REV = gmin_row_id(data)
     return (PANEL.summarise(data, SUBMITTED, DEVELOP_HARNESS),
             PANEL.paired_summary(data, SUBMITTED, DEVELOP_HARNESS))
 

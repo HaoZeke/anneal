@@ -10,7 +10,7 @@ than in the draw. Rows and the summary are appended under ``$OUTPUT``
 or ``/work/gmin-losses2``. A path inside this repository is refused.
 
 ``code_revision`` is the parent commit on baseline rows, this commit on
-the pair-scaled rows, and the GMIN SVNREV on GMIN rows. ``host`` is the
+the pair-scaled rows, and the dated tarball identifier on GMIN rows. ``host`` is the
 UTS hostname. The process refuses to run unless that hostname is bench
 and the affinity is core 0.
 """
@@ -194,8 +194,12 @@ def main(argv: list[str]) -> int:
         if head != revision:
             raise SystemExit(f"{tree} is at {head}, not {revision}")
     source = dict(line.split("=", 1) for line in args.gmin_source.read_text().splitlines() if "=" in line)
-    if source.get("svnrev") != panel.GMIN_REV:
-        raise SystemExit(f"GMIN SVNREV {source.get('svnrev')} is not {panel.GMIN_REV}")
+    if source.get("tarball_date") != panel.GMIN_TARBALL_DATE:
+        raise SystemExit(
+            f"GMIN tarball date {source.get('tarball_date')} is not {panel.GMIN_TARBALL_DATE}"
+        )
+    if source.get("tarball_sha256") != panel.GMIN_TARBALL_SHA256:
+        raise SystemExit("GMIN tarball sha256 does not match the panel pin")
     systems = [row[0] for row in panel.SYSTEMS if not args.system or row[0] in args.system]
     for system in systems:
         for bin_dir, tree in ((args.base_bin, args.base_tree), (args.head_bin, args.head_tree)):

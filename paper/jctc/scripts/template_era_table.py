@@ -58,7 +58,7 @@ def groups(rows: list[dict[str, str]], revision: str, gmin: str,
 
 def blocks() -> list[tuple[str, str, dict[tuple[str, str], list[dict[str, str]]]]]:
     later = [(TABLE.REVISION, TABLE.rows()), (TABLE.SUBMITTED, TABLE.develop_rows())]
-    return [(revision, harness, groups(rows, revision, TABLE.GMIN_SNAPSHOT, harness))
+    return [(revision, harness, groups(rows, revision, TABLE.gmin_row_id(rows), harness))
             for (revision, rows), harness in zip(later, (TABLE.REVISION, TABLE.DEVELOP_HARNESS))]
 
 

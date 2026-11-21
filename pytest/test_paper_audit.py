@@ -770,12 +770,12 @@ def test_a_limits_section_is_reported():
 
 def test_a_caption_missing_the_serial_patch_is_reported():
     audit = audit_mod.Audit()
-    tex = audit.text(audit_mod.TEX)
+    tex = audit.text(audit_mod.SI)
     old = "(\\texttt{JP=1})"
     assert old in tex
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, "")
+    audit.text_cache[audit_mod.SI] = tex.replace(old, "")
     audit_mod.gmin_patches(audit)
-    assert [r[2] for r in audit.drifts()] == ["prose"]
+    assert [r[2] for r in audit.drifts()] == ["the GMIN provenance names the serial run index"]
 
 
 def test_an_uncharged_gmin_panel_miss_is_reported():
@@ -1018,7 +1018,8 @@ def git(*args, stdin=None):
 
 def test_the_revision_index_answers_as_one_git_call_per_question(audited):
     names = sorted({r[c].strip() for rows in audited.read.values() for r in rows for c in audit_mod.REVISION_COLUMNS
-                    if c in r and re.fullmatch(r"[0-9a-f]{7,40}", r[c].strip())} - set(audit_mod.EXTERNAL_REVISIONS))
+                    if c in r and not audit_mod.external_gmin_identifier(r, c)
+                    and re.fullmatch(r"[0-9a-f]{7,40}", r[c].strip())})
     table = audit_mod.alias_table()
     index = audit_mod.alias_index(names, table)
     revisions = sorted({*names, *(r[c] for r in table for c in ("local_revision", "pushed_revision", "branch_revision") if r[c])})

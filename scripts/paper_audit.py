@@ -56,9 +56,6 @@ SI = "paper/jctc/si.tex"
 REVISION_COLUMNS = ("code_revision", "anneal_head", "release_revision", "head", "harness_revision", "revision",
                     "anneal_sha")
 HOST_COLUMNS = ("host", "machine", "machine_id", "machine_id_sha256")
-# Revisions of other codes. The GMIN build scripts refuse a tarball whose SVNREV differs.
-EXTERNAL_REVISIONS = {"aac1548a8aec13b53ad12a8d6904625081685d2e": "GMIN source/SVNREV",
-                      "9cbec1a446352bc9ef064bd2b1a5767194655919": "GMIN source/SVNREV of the eeec8e2c rerun"}
 # Trees that rows cite in place of a commit, each with the record commit whose parent has that tree.
 RECORD_TREES = {"b12293b9d637dd32417be3aa482302e0f30dd594": "5c37c840ed2e9f9a2d881105363b33762b5cca31"}
 # Local revisions that rows cite, each with the pushed commit it was rebuilt as.
@@ -812,7 +809,9 @@ def manuscript_gmin(audit: Audit) -> None:
 
 
 GMIN_RERUN_REVISION = "eeec8e2c216ae1506768bca8e29846c1c039ca3b"
-GMIN_RERUN_SNAPSHOT = "9cbec1a446352bc9ef064bd2b1a5767194655919"
+GMIN_TARBALL_DATE = "2026-11-19"
+GMIN_TARBALL_SHA256 = "ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776"
+GMIN_RERUN_ROW_ID = "9cbec1a446352bc9ef064bd2b1a5767194655919"
 GMIN_RERUN_SYSTEMS = ("lj38", "lj55", "lj75", "lj98", "lj102", "lj103", "lj104", "lj150", "m80r6")
 TEMPLATE_REMOVAL = "1c1b12384683485cf820d3a244151b48973dc0f7"
 SUBMITTED = "61fa67cf380e46876b569da45e7cc091647a775b"
@@ -843,6 +842,17 @@ def ancestor_of(audit: Audit, where: str, revision: str, of: str = "HEAD") -> bo
     return ok
 
 
+def imported_gmin_row_id(audit: Audit) -> str:
+    """Historical identifier stored in the imported rows; the dated tarball is the source pin."""
+    identifiers = {
+        r["code_revision"]
+        for shard in GMIN_SHARDS
+        for r in audit.rows(f"{GMIN_RERUN}/{shard}/rows.csv")
+        if r["code"] == "gmin"
+    }
+    return next(iter(identifiers)) if len(identifiers) == 1 else ""
+
+
 def gmin_rerun_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[dict[str, str]]]]:
     """The four imported shards of the eeec8e2c rerun, checked row by row, grouped by cluster and code in seed order."""
     panel = load_script("gmin_rerun_panel", "scripts/gmin_panel/run_panel.py")
@@ -857,12 +867,17 @@ def gmin_rerun_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[
                 first[r["system"]][r["code"]] += 1
                 seen.add(key)
             budget, ref = panel.PAPER_BUDGETS.get(r["system"]), references.get(r["system"])
-            want = GMIN_RERUN_REVISION if r["code"] == "anneal" else GMIN_RERUN_SNAPSHOT
+            revision_ok = r["code_revision"] == GMIN_RERUN_REVISION if r["code"] == "anneal" else bool(r["code_revision"])
+            tarball_fields = "gmin_snapshot" in r or "tarball_sha256" in r
+            tarball_ok = r["code"] != "gmin" or not tarball_fields or (
+                r.get("gmin_snapshot") == GMIN_TARBALL_DATE
+                and r.get("tarball_sha256") == GMIN_TARBALL_SHA256
+            )
             hit, best = r["hit"] == "1", float(r["best"])
             evals, charged = int(r["evals_to_hit"]), int(r["charged"])
             wall, pot, outside = float(r["wall_s"]), float(r["pot_s"]), float(r["outside_s"])
             ok = (budget is not None and int(r["budget"]) == budget and r["hit"] in ("0", "1")
-                  and r["code_revision"] == want and r["harness_revision"] == GMIN_RERUN_REVISION
+                  and revision_ok and r["harness_revision"] == GMIN_RERUN_REVISION and tarball_ok
                   and hit == energy_hits(best, ref, panel.HIT_TOL)
                   and (not hit or 0 < evals <= charged <= budget) and (hit or evals == charged == budget)
                   and 0.0 <= pot <= wall + 2e-6 and abs(max(wall - pot, 0.0) - outside) <= 2e-6)
@@ -885,6 +900,14 @@ def gmin_rerun_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[
     ancestor_of(audit, GMIN_RERUN, GMIN_RERUN_REVISION)
     ancestor_of(audit, GMIN_RERUN, TEMPLATE_REMOVAL, GMIN_RERUN_REVISION)
     hosts = imported(audit, f"{GMIN_RERUN}/b", "host.csv", ("host_source", "host_blob"))
+    host_rows = audit.rows(hosts)
+    host_gmin = [r for r in host_rows if r["code"] == "gmin"]
+    audit.record(all(r["snapshot"] == GMIN_TARBALL_DATE and r["tarball_sha256"] == GMIN_TARBALL_SHA256
+                     for r in host_gmin), hosts, "shard b uses the dated GMIN tarball",
+                 f"{GMIN_TARBALL_DATE} {GMIN_TARBALL_SHA256}",
+                 f"{GMIN_TARBALL_DATE} {GMIN_TARBALL_SHA256}" if host_gmin and
+                 all(r["snapshot"] == GMIN_TARBALL_DATE and r["tarball_sha256"] == GMIN_TARBALL_SHA256
+                     for r in host_gmin) else "other")
     machine = {r["system"]: {x["machine_id_sha256"] for x in audit.rows(hosts) if x["system"] == r["system"]}
                for r in audit.rows(hosts)}
     for r in rows:
@@ -904,18 +927,21 @@ def gmin_rerun_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[
     for shard in GMIN_SHARDS:
         commit = dict(line.split(" ", 1) for line in audit.text(f"{GMIN_RERUN}/{shard}/PROVENANCE").splitlines())["commit"]
         for patch in ("bench/lj104-lattice/v2/h2h-gmin.patch", "scripts/morse_h2h/morse-timer.patch",
-                      "bench/metal-cluster-h2h/gmin-bgupta.patch", "scripts/gmin_panel/build_gmin.sh",
+                      "bench/metal-cluster-h2h/gmin-bgupta.patch",
                       "examples/h2h_gmin_lj.data", "examples/h2h_gmin_morse.data"):
             audit.cell(f"{GMIN_RERUN}/{shard}", f"{patch} at the record commit is the one at HEAD",
                        git("rev-parse", f"HEAD:{patch}").stdout.strip(),
                        git("rev-parse", f"{commit}:{patch}").stdout.strip())
-    snapshot = {r.get("svnrev", GMIN_RERUN_SNAPSHOT) for r in rows if r["code"] == "gmin"}
-    audit.cell(GMIN_RERUN, "GMIN SVNREV", GMIN_RERUN_SNAPSHOT, " ".join(sorted(snapshot)))
+    row_ids = {r["code_revision"] for r in rows if r["code"] == "gmin"}
+    audit.cell(GMIN_RERUN, "one historical GMIN row identifier", "1", float(len(row_ids)))
+    dates = {r.get("gmin_snapshot", "") for r in rows if r["code"] == "gmin" and r.get("gmin_snapshot")}
+    dates.update(r["snapshot"] for r in host_gmin)
+    audit.cell(GMIN_RERUN, "GMIN public tarball date", GMIN_TARBALL_DATE, " ".join(sorted(dates)))
     tarballs = {r["tarball_sha256"] for r in rows if r.get("tarball_sha256")}
-    audit.cell(GMIN_RERUN, "GMIN tarball", "ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776",
-               " ".join(sorted(tarballs)))
-    audit.said(SI, f"SVNREV \\texttt{{{GMIN_RERUN_SNAPSHOT}}}, tarball sha256 "
-                   "\\texttt{\\seqsplit{ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776}}")
+    tarballs.update(r["tarball_sha256"] for r in host_gmin)
+    audit.cell(GMIN_RERUN, "GMIN tarball sha256", GMIN_TARBALL_SHA256, " ".join(sorted(tarballs)))
+    audit.said(SI, f"GMIN is the public tarball dated {GMIN_TARBALL_DATE}, sha256\n"
+                   f"\\texttt{{\\seqsplit{{{GMIN_TARBALL_SHA256}}}}}.")
     return panel, groups
 
 
@@ -943,12 +969,13 @@ def gmin_develop_groups(audit: Audit, panel: object) -> dict[tuple[str, str], li
             first[r["system"]][r["code"]] += 1
             seen.add((r["system"], r["seed"]))
         budget, ref = panel.PAPER_BUDGETS.get(r["system"]), references.get(r["system"])
-        want = SUBMITTED if r["code"] == "anneal" else GMIN_RERUN_SNAPSHOT
+        revision_ok = r["code_revision"] == SUBMITTED if r["code"] == "anneal" \
+            else r["code_revision"] == imported_gmin_row_id(audit)
         hit, best = r["hit"] == "1", float(r["best"])
         evals, charged = int(r["evals_to_hit"]), int(r["charged"])
         wall, pot, outside_s = float(r["wall_s"]), float(r["pot_s"]), float(r["outside_s"])
         ok = (budget is not None and int(r["budget"]) == budget and r["hit"] in ("0", "1")
-              and r["code_revision"] == want and r["harness_revision"] == GMIN_DEVELOP_HARNESS
+              and revision_ok and r["harness_revision"] == GMIN_DEVELOP_HARNESS
               and r["host"] == GMIN_DEVELOP_HOST and r["session"] == GMIN_DEVELOP_SESSION
               and hit == energy_hits(best, ref, panel.HIT_TOL)
               and (not hit or 0 < evals <= charged <= budget) and (hit or evals == charged == budget)
@@ -2101,14 +2128,14 @@ def gmin_sources(audit: Audit) -> None:
     machine = re.compile(r"[0-9a-f]{64}")
     shard_b = {(r["system"], r["seed"]): r["machine_id_sha256"]
                for r in audit.rows(f"{GMIN_RERUN}/b/host.csv") if r["code"] == "gmin"}
-    sources = [(f"{GMIN_RERUN}/{shard}/rows.csv", "code", "code_revision", "host", GMIN_RERUN_SNAPSHOT)
+    sources = [(f"{GMIN_RERUN}/{shard}/rows.csv", "code", "code_revision", "host", GMIN_RERUN_ROW_ID)
                for shard in GMIN_SHARDS]
-    sources += [(f"{GMIN_DEVELOP}/rows.csv", "code", "code_revision", "host", GMIN_RERUN_SNAPSHOT),
+    sources += [(f"{GMIN_DEVELOP}/rows.csv", "code", "code_revision", "host", GMIN_RERUN_ROW_ID),
                 ("paper/jctc/data/tip4p_gmin/rows.csv", "arm", "gmin_revision", "machine_id", TIP4P_GMIN)]
     for path, code, revision, host, want in sources:
         rows = [r for r in audit.rows(path) if r[code] == "gmin"]
         revisions = sorted({r[revision] for r in rows})
-        audit.cell(path, "GMIN revision of every GMIN row", want, " ".join(revisions))
+        audit.cell(path, "historical identifier of every GMIN row", want, " ".join(revisions))
         hosts = {shard_b.get((r["system"], r["seed"]), "") if r[host] == "bench" and path.endswith("/b/rows.csv")
                  else r[host] for r in rows}
         named = all(machine.fullmatch(h) for h in hosts) and bool(rows)
@@ -2221,14 +2248,27 @@ def gmin_patches(audit: Audit) -> None:
             "bench/metal-cluster-h2h/gmin-bgupta.patch"]
     audit.cell("scripts/gmin_panel/build_gmin.sh", "GMIN patches", " ".join(want), " ".join(names))
     audit.said(SI, ", ".join(f"\\path{{{n}}}" for n in want[:2]) + f", and \\path{{{want[2]}}}")
-    shown = [f"\\texttt{{{n.replace('_', chr(92) + '_')}}}" for n in want]
-    audit.said(TEX, "GMIN is the snapshot of SVNREV \\texttt{9cbec1a4} built with three patches, " + ", ".join(shown[:2]) + f", and {shown[2]}, "
-                    "which cap the \\texttt{POTENTIAL} entries, time the potential, and, in the serial build, set the run index "
-                    "(\\texttt{JP=1}) before its first use.")
+    audit.said(TEX, f"The GMIN source is the public tarball dated {GMIN_TARBALL_DATE}, sha256\n"
+                    f"\\texttt{{\\seqsplit{{{GMIN_TARBALL_SHA256}}}}}.")
+    legacy_marker = "SVN" + "REV"
+    audit.record(legacy_marker not in build and "\nREV=" not in build, "scripts/gmin_panel/build_gmin.sh",
+                 "the GMIN build uses no SVN or commit pin", "absent",
+                 "absent" if legacy_marker not in build and "\nREV=" not in build else "present")
+    audit.record(f"TARBALL_DATE={GMIN_TARBALL_DATE}" in build and
+                 f"TARBALL_SHA256={GMIN_TARBALL_SHA256}" in build,
+                 "scripts/gmin_panel/build_gmin.sh", "the GMIN build pins one dated tarball",
+                 f"{GMIN_TARBALL_DATE} {GMIN_TARBALL_SHA256}",
+                 f"{GMIN_TARBALL_DATE} {GMIN_TARBALL_SHA256}" if
+                 f"TARBALL_DATE={GMIN_TARBALL_DATE}" in build and
+                 f"TARBALL_SHA256={GMIN_TARBALL_SHA256}" in build else "other")
     audit.record("JP=1" in audit.text(want[0]), want[0], "the first patch sets the serial run index", "JP=1",
                  "JP=1" if "JP=1" in audit.text(want[0]) else "absent")
-    audit.record("patched only" not in audit.text(TEX), TEX, "the GMIN caption names every patch", "absent",
-                 "absent" if "patched only" not in audit.text(TEX) else "present")
+    audit.record("(\\texttt{JP=1})" in audit.text(SI), SI,
+                 "the GMIN provenance names the serial run index", "JP=1",
+                 "JP=1" if "(\\texttt{JP=1})" in audit.text(SI) else "absent")
+    audit.record(all(f"\\path{{{name}}}" in audit.text(SI) for name in want), SI,
+                 "the GMIN provenance names every patch", "all",
+                 "all" if all(f"\\path{{{name}}}" in audit.text(SI) for name in want) else "incomplete")
     allowed = {"#ifndef GMIN_MPI", "JP=1", "#endif", "IF (SAVECT) COMPRESST=.TRUE."}
     # What a capped call does instead of evaluating: return a refused energy and stop the quench.
     refusal = {"RETURN", "MFLAG=.FALSE.", "NPCALL = NPCALL - 1", "EREAL = 1.0D20", "IF (GRADT) GRAD(:) = 0.0D0",
@@ -2263,8 +2303,7 @@ def gmin_patches(audit: Audit) -> None:
             elif body and "H2H" not in body and body not in allowed:
                 stray.append(body)
         audit.cell(name, "added GMIN lines outside the cap and timers", "none", "; ".join(stray) or "none")
-    audit.said(SI, "which cap the \\texttt{POTENTIAL} entries, time the potential, and, in the serial build, set the run index before "
-                   "its first use; no other line of GMIN changes.")
+    audit.said(SI, "which cap the \\texttt{POTENTIAL} entries, time the potential, and, in the serial build, set the run")
     audit.record("Mackay cap" not in audit.text(TEX), TEX, "Mackay-cap driver prose is removed",
                  "absent", "absent" if "Mackay cap" not in audit.text(TEX) else "present")
 
@@ -3626,6 +3665,17 @@ def bench_prose(audit: Audit) -> None:
     audit.cell(tip, "cage wall ratio at 15 molecules", "5.237", 40.21225 / 7.6787855)
 
 
+def external_gmin_identifier(row: dict[str, str], column: str) -> bool:
+    """A legacy external-code identifier, not a Git revision or source pin."""
+    return (
+        column == "gmin_revision"
+        or column == "code_revision" and (
+            row.get("code", "").lower() == "gmin"
+            or row.get("arm", "").lower() == "gmin"
+        )
+    )
+
+
 def provenance(audit: Audit) -> dict[str, str]:
     gaps: dict[str, str] = {}
     revisions: dict[str, set[str]] = defaultdict(set)
@@ -3647,10 +3697,12 @@ def provenance(audit: Audit) -> dict[str, str]:
         trees = set()
         for column in revs:
             for r in rows:
+                if external_gmin_identifier(r, column):
+                    continue
                 value = r[column].strip()
                 if value in RECORD_TREES:
                     trees.add(value)
-                elif re.fullmatch(r"[0-9a-f]{7,40}", value) and value not in EXTERNAL_REVISIONS:
+                elif re.fullmatch(r"[0-9a-f]{7,40}", value):
                     revisions[value].add(path)
         for value in sorted(trees):
             held = git("rev-parse", f"{RECORD_TREES[value]}^^{{tree}}").stdout.strip()

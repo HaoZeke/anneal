@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Copyright (c) anneal developers
-# One serial GMIN for the whole panel: the 2026-11-19 snapshot of the
-# public tarball, pinned by SVNREV and sha256, the evaluator cap with the
+# One serial GMIN for the whole panel: the public tarball dated 2026-11-19,
+# pinned by that date and sha256, the evaluator cap with the
 # Lennard-Jones timer, and the timers inside Morse and binary Gupta.
 # ALIGN, MPI and OpenMP stay off.
 #
@@ -17,8 +17,7 @@ WORK=${GMIN_PANEL_WORK:-/work/gmin-panel}
 SRC=$WORK/gmin-src
 TARBALL=$WORK/svn.tar.bz2
 URL=http://www-wales.ch.cam.ac.uk/svn.tar.bz2
-SNAPSHOT=2026-11-19
-REV=9cbec1a446352bc9ef064bd2b1a5767194655919
+TARBALL_DATE=2026-11-19
 TARBALL_SHA256=ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776
 PATCHES=(
   "$ROOT/bench/lj104-lattice/v2/h2h-gmin.patch"
@@ -104,19 +103,12 @@ extract_tree() {
     ./wales/HiRE
 }
 
-if [[ ! -f $SRC/wales/GMIN/source/SVNREV ]]; then
-  extract_tree
-fi
-got=$(tr -d '[:space:]' < "$SRC/wales/GMIN/source/SVNREV")
-if [[ $got != "$REV" ]]; then
+stamp=$SRC/.tarball-sha256
+if [[ ! -f $stamp ]] || [[ $(<"$stamp") != "$TARBALL_SHA256" ]]; then
   rm -rf "$SRC"
   rm -f "$WORK/bin/GMIN"
   extract_tree
-  got=$(tr -d '[:space:]' < "$SRC/wales/GMIN/source/SVNREV")
-fi
-if [[ $got != "$REV" ]]; then
-  echo "GMIN SVNREV is $got, expected $REV" >&2
-  exit 1
+  printf '%s\n' "$TARBALL_SHA256" > "$stamp"
 fi
 
 if [[ ! -f $SRC/wales/GMIN/source/h2h_cap.f90 ]]; then
@@ -145,10 +137,8 @@ if [[ ! -x $WORK/bin/GMIN ]]; then
 fi
 
 {
-  echo "snapshot=$SNAPSHOT"
+  echo "tarball_date=$TARBALL_DATE"
   echo "url=$URL"
-  echo "revision=$REV"
-  echo "svnrev=$got"
   echo "tarball_sha256=$(tarball_sha256 "$TARBALL")"
   for patch in "${PATCHES[@]}"; do
     echo "patch=${patch#"$ROOT"/} $(sha256sum "$patch" | awk '{print $1}')"
@@ -158,4 +148,4 @@ fi
   echo "linked=$(ldd "$WORK/bin/GMIN" | awk '/blas|lapack/ {print $3}' | xargs -r readlink -f | paste -sd' ' -)"
   echo "binary_sha256=$(sha256sum "$WORK/bin/GMIN" | awk '{print $1}')"
 } > "$WORK/gmin-source.txt"
-echo "gmin snapshot=$SNAPSHOT revision=$REV binary=$WORK/bin/GMIN"
+echo "gmin tarball_date=$TARBALL_DATE sha256=$TARBALL_SHA256 binary=$WORK/bin/GMIN"
