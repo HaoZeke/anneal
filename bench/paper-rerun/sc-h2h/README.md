@@ -41,7 +41,7 @@ Two GMIN rows are printed for each system: the earlier data file and the correct
 | sc126-38 | anneal | e3ed7dad | 12/12 | 10344.5 | 11/12 | 50658.5 |
 | sc126-38 | gmin | e3ed7dad | 1/12 | 400000 | 12/12 | 42469.5 |
 | sc126-38 | gmin | f9d1ac05 | 12/12 | 48872.5 | 12/12 | 42469.5 |
-| sc108-38 | anneal | e3ed7dad | 12/12 | 11193 | 9/12 | 270248 |
+| sc108-38 | anneal | e3ed7dad | 12/12 | 11193 | 9/12 | 270247.5 |
 | sc108-38 | gmin | e3ed7dad | 0/12 | 400000 | 3/12 | 400000 |
 | sc108-38 | gmin | f9d1ac05 | 0/12 | 400000 | 3/12 | 400000 |
 | sc96-38 | anneal | e3ed7dad | 12/12 | 9177 | 12/12 | 20236 |
@@ -50,7 +50,7 @@ Two GMIN rows are printed for each system: the earlier data file and the correct
 | sc126-55 | anneal | e3ed7dad | 12/12 | 65397.5 | 12/12 | 25529 |
 | sc126-55 | gmin | e3ed7dad | 0/12 | 1000000 | 12/12 | 43404.5 |
 | sc126-55 | gmin | a50f4b02 | 12/12 | 30565.5 | 12/12 | 43404.5 |
-| sc108-55 | anneal | e3ed7dad | 5/12 | 1000000 | 7/12 | 707416 |
+| sc108-55 | anneal | e3ed7dad | 5/12 | 1000000 | 7/12 | 707416.5 |
 | sc108-55 | gmin | e3ed7dad | 0/12 | 1000000 | 1/12 | 1000000 |
 | sc108-55 | gmin | a50f4b02 | 2/12 | 1000000 | 1/12 | 1000000 |
 | sc96-55 | anneal | e3ed7dad | 12/12 | 17280 | 12/12 | 28040 |
@@ -62,7 +62,7 @@ Two GMIN rows are printed for each system: the earlier data file and the correct
 | sc108-80 | anneal | e3ed7dad | 4/12 | 1000000 | 0/12 | 1000000 |
 | sc108-80 | gmin | e3ed7dad | 0/12 | 1000000 | 0/12 | 1000000 |
 | sc108-80 | gmin | a50f4b02 | 0/12 | 1000000 | 0/12 | 1000000 |
-| sc96-80 | anneal | e3ed7dad | 7/12 | 773712.5 | 6/12 | 993354 |
+| sc96-80 | anneal | e3ed7dad | 7/12 | 773712.5 | 6/12 | 993354.5 |
 | sc96-80 | gmin | e3ed7dad | 0/12 | 1000000 | 1/12 | 1000000 |
 | sc96-80 | gmin | a50f4b02 | 0/12 | 1000000 | 1/12 | 1000000 |
 
