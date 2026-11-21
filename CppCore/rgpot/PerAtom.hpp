@@ -49,7 +49,7 @@ concept PerAtomPotential = requires(const P &pot, const ForceInput &in, ForceOut
 template <PerAtomPotential P>
 void invokeForcePerAtom(const P &pot, const ForceInput &in, ForceOut *out,
                         const PerAtomOut &atoms) {
-  guardForceCall(in, out, kernelPeriodic(pot));
+  guardForceCall(in, out, kernelNeedsCell(pot));
   pot.forcePerAtom(in, out, atoms);
 }
 

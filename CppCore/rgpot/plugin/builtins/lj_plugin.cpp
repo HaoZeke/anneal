@@ -286,7 +286,7 @@ rgpot_plugin_status_t calculatePot(rgpot_plugin_instance *instance,
   result.F = output->forces;
   const ForceInput request{input->n_atoms, input->positions,
                            input->atomic_numbers, input->cell};
-  if (rejectForceCall(request, &result, pot->caps().periodic) != 0) {
+  if (rejectForceCall(request, &result, kernelNeedsCell(*pot)) != 0) {
     return RGPOT_PLUGIN_INVALID_PARAM;
   }
   try {

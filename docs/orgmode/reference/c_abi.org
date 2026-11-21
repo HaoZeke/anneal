@@ -587,7 +587,9 @@ enum rgpot_status_t rgpot_potential_calculate(const struct rgpot_potential_t *po
   The callback is not called.
   A missing cell, either a NULL tensor or a tensor with NULL data, is not an
   error here: a molecular potential takes no cell.
-  A periodic callback rejects it with =invalid parameter: box is null=.
+  A periodic callback rejects it with =invalid parameter: box is null=,
+  except a kernel that also runs an open molecule without one, such as the
+  D2 dispersion sum.
   A zero-atom geometry is named as such even when no force tensor is present.
   Otherwise the callback's status, unchanged.
   =RGPOT_INTERNAL_ERROR= for a caught panic.

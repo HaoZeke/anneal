@@ -67,6 +67,10 @@ double d2_r0(int z);
  */
 class D2Pot final : public Potential<D2Pot> {
 public:
+  /// A call with no cell is an open molecule, not an error; see
+  /// @c kernelCellOptional.
+  static constexpr bool kCellOptional = true;
+
   explicit D2Pot(D2Config cfg = {});
 
   void forceImpl(const ForceInput &in, ForceOut *out) const override;

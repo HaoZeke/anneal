@@ -305,7 +305,7 @@ public:
     };
     if (scheme == HvpScheme::Analytic) {
       if constexpr (AnalyticHessianVectorKernel<Pot>) {
-        guardInputCall(in, kernelPeriodic(pot));
+        guardInputCall(in, kernelNeedsCell(pot));
         std::as_const(pot).hessianVectorImpl(in, v, hv);
         requireFinite(hv, dim, "hessianVectorImpl");
         analytic_.fetch_add(1, std::memory_order_relaxed);
@@ -668,7 +668,7 @@ private:
                  .variance = 0.0,
                  .stress = {},
                  .has_stress = 0};
-    guardForceCall(moved, &out, kernelPeriodic(pot));
+    guardForceCall(moved, &out, kernelNeedsCell(pot));
     calls.fetch_add(1, std::memory_order_relaxed);
     pot.forceImpl(moved, &out);
     if (!std::isfinite(out.energy)) {

@@ -223,7 +223,7 @@ public:
                 .variance = 0.0,
                 .stress = {},
                 .has_stress = 0};
-    guardForceCall(fi, &fo, caps().periodic);
+    guardForceCall(fi, &fo, needsCell());
 
 #ifdef RGPOT_HAS_CACHE
     rgpot::cache::KeyHash key = cacheKey(fi);
@@ -335,7 +335,7 @@ public:
           "invalid parameter: batch input or output is null");
     }
     for (size_t i = 0; i < batch.nSystems; ++i) {
-      guardForceCall(batch.in[i], &batch.out[i], caps().periodic);
+      guardForceCall(batch.in[i], &batch.out[i], needsCell());
     }
     for (size_t i = 0; i < batch.nSystems; ++i) {
       ForceOut &out = batch.out[i];
@@ -427,6 +427,12 @@ public:
   }
 
 private:
+  /// Whether a call without a cell is an error for this kernel: it is
+  /// periodic and does not declare @c kCellOptional.
+  [[nodiscard]] bool needsCell() const noexcept {
+    return caps().periodic && !kernelCellOptional<Derived>();
+  }
+
 #ifdef RGPOT_HAS_CACHE
   /**
    * @brief Result-cache key for one system.

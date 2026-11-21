@@ -248,7 +248,7 @@ FullResult run_force(Pot &pot, const Geom &g) {
                 .pos = g.pos.data(),
                 .atmnrs = g.types.data(),
                 .box = flat.data()};
-  guardForceCall(in, &fo, kernelPeriodic(pot));
+  guardForceCall(in, &fo, kernelNeedsCell(pot));
   pot.forceImpl(in, &fo);
   if (!std::isfinite(fo.energy)) {
     throw rgbind::NumericalError("energy is not finite");

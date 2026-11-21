@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include "rgpot/D2Pot/D2CpmdPot.hpp"
+#include "rgpot/D2Pot/D2Pot.hpp"
 #include "rgpot/HessianVector.hpp"
 #include "rgpot/LennardJones/LJClusterPot.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
@@ -160,6 +162,41 @@ TEST_CASE("a free cluster accepts a null cell", "[null-force]") {
   REQUIRE_NOTHROW(pot.forceBatch(batch));
 }
 
+TEST_CASE("a molecular dispersion kernel accepts a null cell", "[null-force]") {
+  double pos[6] = {0.0, 0.0, 0.0, 3.0, 0.0, 0.0};
+  int species[2] = {1, 1};
+  double forces[6] = {};
+  const rgpot::ForceInput in{2, pos, species, nullptr};
+  rgpot::ForceOut out{};
+  out.F = forces;
+  rgpot::ForceBatch batch{1, &in, &out};
+
+  rgpot::D2Pot d2;
+  REQUIRE_NOTHROW(d2.forceBatch(batch));
+  rgpot::D2CpmdPot d2Cpmd;
+  REQUIRE_NOTHROW(d2Cpmd.forceBatch(batch));
+
+  REQUIRE(rgpot::kernelCellOptional<rgpot::D2Pot>());
+  REQUIRE(rgpot::kernelCellOptional<rgpot::D2CpmdPot>());
+  REQUIRE_FALSE(rgpot::kernelCellOptional<rgpot::LJPot>());
+  REQUIRE_FALSE(rgpot::kernelNeedsCell(d2));
+  REQUIRE(rgpot::kernelNeedsCell(rgpot::LJPot{}));
+  REQUIRE_FALSE(rgpot::kernelNeedsCell(rgpot::LJClusterPot{}));
+}
+
+TEST_CASE("a molecular dispersion kernel still rejects a missing species buffer",
+          "[null-force]") {
+  double pos[6] = {0.0, 0.0, 0.0, 3.0, 0.0, 0.0};
+  double forces[6] = {};
+  const rgpot::ForceInput in{2, pos, nullptr, nullptr};
+  rgpot::ForceOut out{};
+  out.F = forces;
+  rgpot::ForceBatch batch{1, &in, &out};
+  rgpot::D2Pot d2;
+  requireRejected([&] { d2.forceBatch(batch); },
+                  "invalid parameter: atomic numbers are null");
+}
+
 TEST_CASE("per-atom evaluation rejects a missing species buffer",
           "[null-force]") {
   rgpot::LJPot pot;
@@ -191,6 +228,19 @@ TEST_CASE("a Hessian product rejects a missing species buffer",
   rgpot::ForceInput in{2, pos, nullptr, box};
   requireRejected([&] { cache.apply(pot, in, direction, product); },
                   "invalid parameter: atomic numbers are null");
+}
+
+TEST_CASE("a Hessian product rejects a missing cell on a periodic kernel",
+          "[null-force]") {
+  rgpot::HessianVectorCache cache;
+  rgpot::LJPot pot;
+  double pos[6] = {0.0, 0.0, 0.0, 1.5, 0.0, 0.0};
+  int species[2] = {1, 1};
+  double direction[6] = {1.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+  double product[6] = {};
+  rgpot::ForceInput in{2, pos, species, nullptr};
+  requireRejected([&] { cache.apply(pot, in, direction, product); },
+                  "invalid parameter: box is null");
 }
 
 TEST_CASE("the built-in LJ plugin rejects null positions", "[null-force]") {
@@ -236,7 +286,8 @@ TEST_CASE("the built-in LJ plugin rejects null positions", "[null-force]") {
 
 namespace {
 
-rgpot_status_t callTrampoline(rgpot::LJPot &pot, rgpot_force_input_t *input) {
+template <class Pot>
+rgpot_status_t callTrampoline(Pot &pot, rgpot_force_input_t *input) {
   auto handle = rgpot::PotentialHandle::from_impl(pot);
   auto *raw = handle.raw();
   rgpot_force_out_t output = rgpot_force_out_create();
@@ -286,6 +337,19 @@ TEST_CASE("the LJ trampoline rejects a null cell", "[null-force]") {
   input.box_matrix->dl_tensor.data = nullptr;
   REQUIRE(callTrampoline(pot, &input) == RGPOT_INVALID_PARAMETER);
   REQUIRE(std::string(rgpot_last_error()) == "invalid parameter: box is null");
+  rgpot_force_input_free(&input);
+}
+
+TEST_CASE("the D2 trampoline accepts a null cell", "[null-force]") {
+  rgpot::D2Pot pot;
+  double pos[6] = {0.0, 0.0, 0.0, 3.0, 0.0, 0.0};
+  int species[2] = {1, 1};
+  rgpot_force_input_t input =
+      rgpot_force_input_create(2, pos, species, nullptr);
+  REQUIRE(callTrampoline(pot, &input) == RGPOT_SUCCESS);
+  rgpot_tensor_free(input.box_matrix);
+  input.box_matrix = nullptr;
+  REQUIRE(callTrampoline(pot, &input) == RGPOT_SUCCESS);
   rgpot_force_input_free(&input);
 }
 

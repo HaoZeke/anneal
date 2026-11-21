@@ -496,7 +496,7 @@ private:
                            .variance = 0.0,
                            .stress = {},
                            .has_stress = 0};
-      if (::rgpot::rejectForceCall(fi, &fo, ::rgpot::kernelPeriodic(*self)) !=
+      if (::rgpot::rejectForceCall(fi, &fo, ::rgpot::kernelNeedsCell(*self)) !=
           0) {
         rgpot_set_last_error(::rgpot::forceLastError());
         return RGPOT_INVALID_PARAMETER;
@@ -561,7 +561,7 @@ private:
         input->positions->dl_tensor.shape != nullptr) {
       const ::rgpot::ForceInput fi = legacy_input(input);
       // No force buffer here, so the input is checked on its own.
-      if (::rgpot::rejectInputCall(fi, ::rgpot::kernelPeriodic(*self)) != 0) {
+      if (::rgpot::rejectInputCall(fi, ::rgpot::kernelNeedsCell(*self)) != 0) {
         rgpot_set_last_error(::rgpot::forceLastError());
         return RGPOT_INVALID_PARAMETER;
       }

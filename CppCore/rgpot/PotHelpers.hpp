@@ -105,15 +105,15 @@ const char *forceLastError() noexcept;
  *
  * For a call that has no force array, such as a Hessian-vector product. A
  * system with no atoms is named first, then a null position or species
- * pointer, then a null cell when @a periodic is set. Each stores a message
+ * pointer, then a null cell when @a needsCell is set. Each stores a message
  * and returns @c kInvalidParameter. A usable input returns 0 and leaves the
  * stored message unchanged.
  */
-int rejectInputCall(const ForceInput &in, bool periodic);
+int rejectInputCall(const ForceInput &in, bool needsCell);
 
 /// Throw @c std::invalid_argument with the stored message when
 /// @c rejectInputCall rejects @a in.
-void guardInputCall(const ForceInput &in, bool periodic);
+void guardInputCall(const ForceInput &in, bool needsCell);
 
 /**
  * @brief Reject a force call that would read a null buffer.
@@ -122,15 +122,17 @@ void guardInputCall(const ForceInput &in, bool periodic);
  * the force pointer is read. An empty force allocation has a null data
  * pointer, and that call must not be reported as a null force buffer.
  * After that, a null @a out or force array, a null position or species
- * pointer, or a null cell when @a periodic is set, stores a message and
+ * pointer, or a null cell when @a needsCell is set, stores a message and
  * returns @c kInvalidParameter. A usable call returns 0 and leaves the
  * stored message unchanged.
  */
-int rejectForceCall(const ForceInput &in, const ForceOut *out, bool periodic);
+int rejectForceCall(const ForceInput &in, const ForceOut *out,
+                    bool needsCell);
 
 /// Throw @c std::invalid_argument with the stored message when
 /// @c rejectForceCall rejects @a in and @a out.
-void guardForceCall(const ForceInput &in, const ForceOut *out, bool periodic);
+void guardForceCall(const ForceInput &in, const ForceOut *out,
+                    bool needsCell);
 
 /// @c pot.caps().periodic when the kernel reports it, otherwise true,
 /// which is the default of @c PotCaps.
@@ -140,6 +142,25 @@ template <class Pot> bool kernelPeriodic(const Pot &pot) {
   } else {
     return true;
   }
+}
+
+/// True when @p Pot declares @c kCellOptional: a kernel that supports a
+/// periodic cell and also evaluates an open system when it gets none, such
+/// as a molecular dispersion sum. @c caps().periodic says what a kernel
+/// supports, not what a call must supply, so such a kernel states the second
+/// on its own.
+template <class Pot> constexpr bool kernelCellOptional() {
+  if constexpr (requires { Pot::kCellOptional; }) {
+    return Pot::kCellOptional;
+  } else {
+    return false;
+  }
+}
+
+/// Whether a call without a cell is an error for @p pot: the kernel is
+/// periodic and does not declare @c kCellOptional.
+template <class Pot> bool kernelNeedsCell(const Pot &pot) {
+  return kernelPeriodic(pot) && !kernelCellOptional<Pot>();
 }
 
 } // namespace rgpot

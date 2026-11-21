@@ -141,7 +141,7 @@ template <typename P, typename... A> Built own(A &&...args) {
   const P *kernel = pot.get();
   Built out;
   out.eval = [kernel](const ForceInput &in, ForceOut *res) {
-    guardForceCall(in, res, kernelPeriodic(*kernel));
+    guardForceCall(in, res, kernelNeedsCell(*kernel));
     kernel->forceImpl(in, res);
   };
   if constexpr (PerAtomPotential<P>) {
