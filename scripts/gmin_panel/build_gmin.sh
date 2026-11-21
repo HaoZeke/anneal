@@ -13,13 +13,15 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+PIN=$ROOT/scripts/gmin_pin.py
+eval "$(python3 "$PIN" shell)"
 WORK=${GMIN_PANEL_WORK:-/work/gmin-panel}
 SRC=$WORK/gmin-src
 TARBALL=$WORK/svn.tar.bz2
-URL=http://www-wales.ch.cam.ac.uk/svn.tar.bz2
-SNAPSHOT=2026-11-19
-REV=9cbec1a446352bc9ef064bd2b1a5767194655919
-TARBALL_SHA256=ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776
+URL=$GMIN_PIN_URL
+SNAPSHOT=$GMIN_PIN_SNAPSHOT
+REV=$GMIN_PIN_REVISION
+TARBALL_SHA256=$GMIN_PIN_TARBALL_SHA256
 PATCHES=(
   "$ROOT/bench/lj104-lattice/v2/h2h-gmin.patch"
   "$ROOT/scripts/morse_h2h/morse-timer.patch"
@@ -50,16 +52,11 @@ tarball_sha256() {
 
 refuse_sha_mismatch() {
   local path=$1
-  local got
-  got=$(tarball_sha256 "$path")
-  if [[ $got != "$TARBALL_SHA256" ]]; then
-    echo "tarball sha256 mismatch: got ${got}, expected ${TARBALL_SHA256}" >&2
-    exit 1
-  fi
+  python3 "$PIN" verify-tarball "$path" >/dev/null
 }
 
 sha_matches() {
-  [[ -s $1 ]] && [[ $(tarball_sha256 "$1") == "$TARBALL_SHA256" ]]
+  [[ -s $1 ]] && python3 "$PIN" verify-tarball "$1" >/dev/null 2>&1
 }
 
 # A caller-supplied file is checked before any cache, download, or extract.
@@ -107,15 +104,15 @@ extract_tree() {
 if [[ ! -f $SRC/wales/GMIN/source/SVNREV ]]; then
   extract_tree
 fi
-got=$(tr -d '[:space:]' < "$SRC/wales/GMIN/source/SVNREV")
+got=$(python3 "$PIN" read-svnrev "$SRC/wales/GMIN/source/SVNREV" 2>/dev/null || true)
 if [[ $got != "$REV" ]]; then
   rm -rf "$SRC"
   rm -f "$WORK/bin/GMIN"
   extract_tree
-  got=$(tr -d '[:space:]' < "$SRC/wales/GMIN/source/SVNREV")
+  got=$(python3 "$PIN" read-svnrev "$SRC/wales/GMIN/source/SVNREV" 2>/dev/null || true)
 fi
 if [[ $got != "$REV" ]]; then
-  echo "GMIN SVNREV is $got, expected $REV" >&2
+  python3 "$PIN" read-svnrev "$SRC/wales/GMIN/source/SVNREV" >/dev/null
   exit 1
 fi
 

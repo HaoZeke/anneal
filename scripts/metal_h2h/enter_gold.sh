@@ -27,12 +27,33 @@ DEFAULT_HIT_TOL=$(PYTHONPATH="$ROOT/scripts${PYTHONPATH:+:$PYTHONPATH}" python3 
 BIN=${BIN:-$ROOT/target/release/examples/h2h_metal}
 GMIN=${GMIN:-/work/metal-darby/bin/GMIN}
 WORK=${WORK:-$ROOT/bench/gold-gupta/work}
+STORED=${GOLD_SEEDS_OUT:-$ROOT/bench/gold-gupta/seeds.csv}
 REF38=-130.54001708
 REF55=-191.03085280
 REV=${GOLD_REVISION:-$(git -C "$ROOT" rev-parse --short=12 HEAD)}
 CODE_REVISION=$(git -C "$ROOT" rev-parse HEAD)
 HOST=$(hostname)
+eval "$(
+  PYTHONPATH="$ROOT/scripts${PYTHONPATH:+:$PYTHONPATH}" python3 - <<'PY'
+import shlex
+from machine_provenance import machine_columns
+
+for key, value in machine_columns().items():
+    print(f"{key.upper()}={shlex.quote(value)}")
+PY
+)"
 mkdir -p "$WORK"
+PYTHONPATH="$ROOT/scripts${PYTHONPATH:+:$PYTHONPATH}" python3 - "$STORED" << 'PY'
+import sys
+from pathlib import Path
+from machine_provenance import require_csv_schema
+
+require_csv_schema(
+    Path(sys.argv[1]),
+    "system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,pot_s,outside_s,"
+    "revision,code_revision,host,machine_id,cpu_model".split(","),
+)
+PY
 # A, p, q, xi, r0. Same printing as run_darby.py's {:.10g}.
 GOLD_ROW="0.2061 10.229 4.036 1.79 2.884"
 
@@ -43,28 +64,32 @@ echo "GMIN $GMIN"
 
 publish() {
   mkdir -p "$ROOT/bench/gold-gupta"
-  python3 - "$WORK/rows.csv" "$ROOT/bench/gold-gupta/seeds.csv" "$REV" << 'PY'
+  python3 - "$WORK/rows.csv" "$STORED" << 'PY'
 import csv, sys
-fresh, stored, revision = sys.argv[1], sys.argv[2], sys.argv[3]
-fields = ["system","code","seed","budget","hit","evals_to_hit","charged","wall_s","best","pot_s","outside_s","revision","code_revision","host"]
-kept = []
+fresh, stored = sys.argv[1], sys.argv[2]
+fields = ["system","code","seed","budget","hit","evals_to_hit","charged","wall_s","best","pot_s","outside_s","revision","code_revision","host","machine_id","cpu_model"]
+existing = []
+need_header = True
 try:
     with open(stored, newline="") as handle:
-        for row in csv.DictReader(handle):
-            if row.get("revision") == revision:
-                continue
-            kept.append({key: row.get(key, "") for key in fields})
+        reader = csv.DictReader(handle)
+        if reader.fieldnames != fields:
+            raise SystemExit(f"{stored} has a legacy schema; use a new campaign table")
+        existing = list(reader)
+        need_header = False
 except FileNotFoundError:
     pass
 with open(fresh, newline="") as handle:
     fresh_rows = list(csv.DictReader(handle))
-with open(stored, "w", newline="") as handle:
+seen = {(row["system"], row["code"], row["seed"], row["code_revision"]) for row in existing}
+new = [row for row in fresh_rows if (row["system"], row["code"], row["seed"], row["code_revision"]) not in seen]
+with open(stored, "a", newline="") as handle:
     writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
-    writer.writeheader()
-    writer.writerows(kept)
-    writer.writerows(fresh_rows)
+    if need_header:
+        writer.writeheader()
+    writer.writerows(new)
 PY
-  chmod a+r "$WORK/rows.csv" "$ROOT/bench/gold-gupta/seeds.csv" || true
+  chmod a+r "$WORK/rows.csv" "$STORED" || true
 }
 
 anneal_one() {
@@ -118,8 +143,10 @@ EOF
 record_anneal() {
   local line
   line=$(anneal_one "$@" | awk -F, 'NF>=11 && $1!="system" {print}')
-  echo "$line" | awk -F, -v rev="$REV" -v code="$CODE_REVISION" -v host="$HOST" \
-    'BEGIN{OFS=","} {print $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,rev,code,host}' | tee -a "$WORK/rows.csv"
+  python3 - "$line" "$REV" "$CODE_REVISION" "$HOST" "$MACHINE_ID" "$CPU_MODEL" << 'PY' | tee -a "$WORK/rows.csv"
+import csv, sys
+csv.writer(sys.stdout, lineterminator="\n").writerow([*next(csv.reader([sys.argv[1]])), *sys.argv[2:]])
+PY
   publish
 }
 
@@ -135,8 +162,9 @@ for tok in line.split():
         k,v=tok.split("=",1); d[k]=v
 wall=float(d["wall_s"]); pot=float(d["pot_s"])
 hit="true" if d["hit"]=="1" else "false"
-print(",".join([d["system"],"gmin",d["seed"],d["budget"],hit,d["evals_to_hit"],d["charged"],f"{wall:.6f}",d["best"],f"{pot:.6f}",f"{wall-pot:.6f}",*sys.argv[2:]]))
-' "$line" "$REV" "$CODE_REVISION" "$HOST" | tee -a "$WORK/rows.csv"
+import csv
+csv.writer(sys.stdout, lineterminator="\n").writerow([d["system"],"gmin",d["seed"],d["budget"],hit,d["evals_to_hit"],d["charged"],f"{wall:.6f}",d["best"],f"{pot:.6f}",f"{wall-pot:.6f}",*sys.argv[2:]])
+' "$line" "$REV" "$CODE_REVISION" "$HOST" "$MACHINE_ID" "$CPU_MODEL" | tee -a "$WORK/rows.csv"
   publish
 }
 
@@ -181,7 +209,7 @@ if [[ ${1:-} == --from-large ]]; then
   exit 0
 fi
 
-echo "system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,pot_s,outside_s,revision,code_revision,host" > "$WORK/rows.csv"
+echo "system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,pot_s,outside_s,revision,code_revision,host,machine_id,cpu_model" > "$WORK/rows.csv"
 
 for seed in $(seq 2000 2011); do
   run_pair au38 38 400000 "$REF38" "$seed"

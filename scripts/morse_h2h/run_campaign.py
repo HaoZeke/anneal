@@ -30,6 +30,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+from gmin_pin import read_built_revision  # noqa: E402
 
 # (name, n, rho, budget, cambridge energy)
 SYSTEMS = (
@@ -380,6 +381,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--gmin", type=Path, required=True)
     parser.add_argument("--data", type=Path, required=True)
     parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--svnrev", type=Path, required=True)
     parser.add_argument("--head-file", type=Path, required=True)
     parser.add_argument("--runs", type=Path, required=True)
     parser.add_argument("--starts", type=Path, required=True)
@@ -394,7 +396,8 @@ def main(argv: list[str]) -> int:
     for name in names:
         if name not in PAPER_BUDGETS:
             raise SystemExit(f"no paper budget for {name}")
-    url, revision = load_source(args.source)
+    url, _recorded_revision = load_source(args.source)
+    revision = read_built_revision(args.svnrev, args.source)
     head = args.head_file.read_text().strip()
     progress = args.runs.parent / "progress.txt"
     progress.parent.mkdir(parents=True, exist_ok=True)

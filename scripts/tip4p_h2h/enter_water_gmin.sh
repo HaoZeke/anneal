@@ -23,10 +23,11 @@ if [[ -f $GMIN_SRC ]] && ! grep -q H2H_POT_ENTER "$GMIN_SRC"; then
   rm -f /work/gmin-h2h/bin/GMIN
 fi
 bash "$ROOT/scripts/gmin_h2h/build_gmin.sh"
-GMIN_REV=gmin-$(sed -n 's/^revision=//p' /work/gmin-h2h/gmin-source.txt)
 
 mkdir -p "$WORK/bin" "$WORK/user" "$WORK/scratch" "$WORK/runs" "$WORK/gm" "$OUT"
-cp -a "$HERE/run_water_gmin.py" "$HERE/run_h2h.py" "$HERE/gm_radius.py" "$ROOT/scripts/target_tol.py" "$WORK/bin/"
+cp -a "$HERE/run_water_gmin.py" "$HERE/run_h2h.py" \
+  "$HERE/gm_radius.py" "$ROOT/scripts/target_tol.py" \
+  "$ROOT/scripts/gmin_pin.py" "$ROOT/scripts/machine_provenance.py" "$WORK/bin/"
 cp -a "$ROOT/examples/h2h_gmin_tip4p.data" "$WORK/bin/h2h_gmin_tip4p.data"
 { sed 's/^STEPS .*/STEPS 0 1.0/' "$ROOT/examples/h2h_gmin_tip4p.data"; echo "CHECKD 0"; } \
   > "$WORK/bin/h2h_gmin_tip4p_verify.data"
@@ -66,7 +67,7 @@ exec /usr/bin/python3 -u $WORK/bin/run_water_gmin.py \\
   --point $WORK/bin/h2h_tip4p_point \\
   --anneal-revision $(cat "$WORK/anneal-head") \\
   --gmin $WORK/bin/GMIN \\
-  --gmin-revision $GMIN_REV \\
+  --gmin-svnrev /work/gmin-h2h/src/wales/GMIN/source/SVNREV \\
   --data $WORK/bin/h2h_gmin_tip4p.data \\
   --verify-data $WORK/bin/h2h_gmin_tip4p_verify.data \\
   --gm-dir $WORK/gm \\

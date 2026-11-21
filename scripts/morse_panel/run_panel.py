@@ -22,6 +22,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+from gmin_pin import read_svnrev  # noqa: E402
 
 SYSTEMS = (
     ("m55r6", 55, 6.0, 1_000_000, -250.286609),
@@ -50,7 +51,6 @@ FIELDS = [
     "outside_s",
 ]
 ROW_FIELDS = FIELDS + ["code_revision", "host"]
-GMIN_REV = "aac1548a8aec13b53ad12a8d6904625081685d2e"
 SUMMARY_FIELDS = [
     "system",
     "anneal_hits",
@@ -110,9 +110,18 @@ def load_rows(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
-def have(rows: list[dict[str, str]], system: str, code: str, seed: int) -> bool:
+def have(
+    rows: list[dict[str, str]],
+    system: str,
+    code: str,
+    seed: int,
+    revision: str | None = None,
+) -> bool:
     return any(
-        row["system"] == system and row["code"] == code and int(row["seed"]) == seed
+        row["system"] == system
+        and row["code"] == code
+        and int(row["seed"]) == seed
+        and (revision is None or row.get("code_revision") == revision)
         for row in rows
     )
 
@@ -137,7 +146,7 @@ def write_rows(path: Path, rows: list[dict[str, str]]) -> None:
         writer.writerows(ordered)
 
 
-def reuse_gmin(root: Path) -> list[dict[str, str]]:
+def reuse_gmin(root: Path, revision: str) -> list[dict[str, str]]:
     wanted = {name: budget for name, _n, _rho, budget, _ref in SYSTEMS}
     found = []
     for path in (
@@ -146,6 +155,8 @@ def reuse_gmin(root: Path) -> list[dict[str, str]]:
     ):
         for row in load_rows(path):
             if row.get("code") != "gmin":
+                continue
+            if row.get("code_revision") != revision:
                 continue
             budget = wanted.get(row["system"])
             if budget is None or int(row["budget"]) != budget:
@@ -319,6 +330,11 @@ def main() -> None:
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--work", type=Path, default=Path("/work/morse-panel"))
     parser.add_argument("--gmin", type=Path, default=Path("/work/morse-h2h/bin/GMIN"))
+    parser.add_argument(
+        "--svnrev",
+        type=Path,
+        default=Path("/work/gmin-h2h/src/wales/GMIN/source/SVNREV"),
+    )
     parser.add_argument("--system", action="append")
     parser.add_argument("--seed", type=int, action="append")
     parser.add_argument("--arm", choices=("anneal", "gmin", "both"), default="both")
@@ -330,10 +346,17 @@ def main() -> None:
     work.mkdir(parents=True, exist_ok=True)
     seeds_path = work / "seeds.csv"
     rows = load_rows(seeds_path)
-    reused_gmin = reuse_gmin(root)
+    gmin_revision = read_svnrev(args.svnrev)
+    reused_gmin = reuse_gmin(root, gmin_revision)
     reused_keys = {(row["system"], int(row["seed"])) for row in reused_gmin}
     for row in reused_gmin:
-        if not have(rows, row["system"], "gmin", int(row["seed"])):
+        if not have(
+            rows,
+            row["system"],
+            "gmin",
+            int(row["seed"]),
+            gmin_revision,
+        ):
             rows.append(row)
     write_rows(seeds_path, rows)
 
@@ -381,7 +404,7 @@ def main() -> None:
                 write_rows(seeds_path, rows)
             if args.arm == "anneal":
                 continue
-            if not have(rows, name, "gmin", seed):
+            if not have(rows, name, "gmin", seed, gmin_revision):
                 print(f"gmin {name} {seed}", file=sys.stderr, flush=True)
                 rows.append(
                     {
@@ -396,7 +419,7 @@ def main() -> None:
                             ref,
                             work / "gmin" / name / str(seed),
                         ),
-                        "code_revision": GMIN_REV,
+                        "code_revision": gmin_revision,
                         "host": host,
                     }
                 )
