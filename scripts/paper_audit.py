@@ -15,9 +15,13 @@ Every row file read here is checked for a code revision and a host. A file
 without them, or whose revision is not in this repository, must be listed in
 ``KNOWN_GAPS``. A revision that was rebuilt on push is read through its alias
 in ``ALIASES`` once the pushed equivalent is verified; one with no pushed
-equivalent is listed in ``UNPUSHED`` with the reason. Printed numbers no
-committed row backs are listed in ``UNTRACED``; their text must still be where
-the list says. The revision checks need the full history and the remote
+equivalent is listed in ``UNPUSHED`` with the reason. A printed number may
+rest on a commit off HEAD only when that commit is on a record branch listed
+in ``RECORD_REFS`` that origin holds at the listed SHA and tree. Printed
+numbers no committed row backs are listed in ``UNTRACED``; their text must
+still be where the list says. README rows on a commit nothing holds, whose
+numbers the paper does not print, are listed in ``UNVERIFIABLE`` with the
+revision and the reason; each must still be printed and flagged. The revision checks need the full history and the remote
 branches; a clone without them is refused, with exit status 2.
 
     python3 scripts/paper_audit.py            # exit 1 on any drift
@@ -73,6 +77,8 @@ AUDIT_OPTIONAL_REMOTES = (
     "bench/cov-floor2",
     "fix/sc-shelf-waypoint",
 )
+# Push-only record branches whose commits printed numbers may rest on, each with its SHA and tree.
+RECORD_REFS = "bench/record-refs.csv"
 # Cited revisions with no pushed equivalent. de22f437 records the ASE and GOFEE
 # panel from five campaign heads and sits on the last, e09e0487, alone. The
 # pushed history before it has one commit, 57735de1, that adds the two-hour
@@ -179,6 +185,149 @@ UNTRACED = [
      "the earlier Pt6Cu17 energy has no committed row"),
     ("bench/water-h2o20-goat/README.md", "Seed 16001, 28000 calls, same wrapper as the table above, scored −2214.506788 eV",
      "the seed 16001 rows were not committed"),
+]
+
+
+# README rows that print numbers from a commit no ref, kit, bundle or mbox
+# holds, and that the paper does not print. Each row stays a check: it passes
+# only while its exact text is in the README and the audit still flags it on
+# a listed revision, and an entry that matches nothing fails.
+WHY_TAB = ("no origin branch, kit, bundle or mbox holds the commit; tab:ase reads other rows of it, "
+           "not this one")
+WHY_AU = ("no origin branch holds the commit and the no-templates2 mbox rebuilds its content but not its "
+          "SHA; the paper prints no number of this row")
+WHY_OLD = ("no origin branch, kit, bundle or mbox holds the commit; the manuscript, SI and figure and "
+           "table scripts print no number of this row")
+UNVERIFIABLE = [
+    ('bench/agox-lj75/README.md',
+     '| current AGOX | 0/6 | 5655.108823 | -392.980553 | 4.511777 | 103.663412 | 0.009647 |',
+     ('0a5136605161', 'ccc22cee607b'), WHY_OLD),
+    ('bench/agox-lj75/README.md',
+     '| documented AGOX | 0/6 | 14493.759020 | -372.106043 | 25.386287 | 263.511422 | 0.003795 |',
+     ('0a5136605161', 'ccc22cee607b'), WHY_OLD),
+    ('bench/agox-lj75/README.md',
+     '| anneal | 0/6 | 55.299841 | -396.282249 | 1.210082 | 1.000000 | 1.000000 |',
+     ('0a5136605161', 'ccc22cee607b'), WHY_OLD),
+    ('bench/ase-au55/README.md',
+     '| anneal | 0/12 | 1 | 72 | 1 | -190.81083051 | 0.22002228 | 36.060303 | 1.000000 | 1.000000 | 29.540093 | 6.382390 |',
+     ('1ce3ab644931',), WHY_AU),
+    ('bench/ase-au55/README.md',
+     '| anneal | 0/12 | 1 | 72 | 1 | -190.81083051 | 0.22002228 | 36.060303 | 1.000000 | 1.000000 | 29.540093 | 6.382390 |',
+     ('33bed75ff4e4', 'fc1af066a915'), WHY_OLD),
+    ('bench/ase-lj104/README.md',
+     '| anneal | 0/12 | 1 | 72 | 1 | -580.80432897 | 1.28231303 | 88.960797 | 1.000000 | 1.000000 | 63.958464 | 25.016078 |',
+     ('5a7f629d79be',), WHY_TAB),
+    ('bench/ase-lj150/README.md',
+     '| anneal | 0/12 | 1 | 72 | 1 | -884.65296483 | 8.65729317 | 177.839157 | 1.000000 | 1.000000 | 132.630578 | 45.213123 |',
+     ('5a7f629d79be',), WHY_TAB),
+    ('bench/ase-lj38/README.md',
+     '| anneal | 10/12 | 1 | 72 | 1 | -173.92842659 | 0.00000041 | 0.981375 | 1.000000 | 1.000000 | 0.574202 | 0.407172 |',
+     ('5a7f629d79be',), WHY_TAB),
+    ('bench/ase-lj55/README.md',
+     '| anneal | 12/12 | 1 | 72 | 1 | -279.24847046 | -0.00000046 | 0.823500 | 1.000000 | 1.000000 | 0.562777 | 0.260722 |',
+     ('5a7f629d79be',), WHY_TAB),
+    ('bench/ase-lj75/README.md',
+     '| basin hopping | 0/12 | 1 | 78 | 0.359317 | -393.72607097 | 3.76626003 | 89.907831 | 1.760879 | 0.567898 | 46.580477 | 43.358141 |',
+     ('162d230740f0', '8173c5e2855b'), WHY_OLD),
+    ('bench/ase-lj75/README.md',
+     '| minima hopping | 0/12 | 1 | 78 | 0.359317 | -391.70068193 | 5.79164907 | 172.344747 | 3.375083 | 0.296295 | 0.943898 | 171.463289 |',
+     ('162d230740f0', '8173c5e2855b'), WHY_OLD),
+    ('bench/ase-lj98/README.md',
+     '| anneal | 4/12 | 1 | 72 | 1 | -543.54672557 | 0.11863543 | 80.934059 | 1.000000 | 1.000000 | 57.146890 | 23.659054 |',
+     ('5a7f629d79be',), WHY_TAB),
+    ('bench/ase-nonlj/README.md',
+     '| m38r6 | for_cluster vs basin hopping | 5/12 vs 0/12 | 0.0372671 | not estimated | not estimated | 0.324342 | 3.083165 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m38r6 | for_cluster vs minima hopping | 5/12 vs 0/12 | 0.0372671 | not estimated | not estimated | 0.324323 | 3.083344 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m38r6 | recommended vs basin hopping | 12/12 vs 0/12 | 7.39602e-07 | not estimated | not estimated | 0.025276 | 39.563762 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m38r6 | recommended vs minima hopping | 12/12 vs 0/12 | 7.39602e-07 | not estimated | not estimated | 0.025274 | 39.566068 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m38r14 | for_cluster vs basin hopping | 0/12 vs 0/12 | 1 | not estimated | not estimated | 0.314585 | 3.178786 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m38r14 | for_cluster vs minima hopping | 0/12 vs 0/12 | 1 | not estimated | not estimated | 0.314572 | 3.178919 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m38r14 | recommended vs basin hopping | 12/12 vs 0/12 | 7.39602e-07 | not estimated | not estimated | 0.018058 | 55.378224 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m38r14 | recommended vs minima hopping | 12/12 vs 0/12 | 7.39602e-07 | not estimated | not estimated | 0.018057 | 55.380532 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m55r6 | for_cluster vs basin hopping | 12/12 vs 0/12 | 7.39602e-07 | not estimated | not estimated | 0.081985 | 12.197304 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m55r6 | for_cluster vs minima hopping | 12/12 vs 0/12 | 7.39602e-07 | not estimated | not estimated | 0.081980 | 12.198089 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m55r6 | recommended vs basin hopping | 12/12 vs 0/12 | 7.39602e-07 | not estimated | not estimated | 0.018064 | 55.359963 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m55r6 | recommended vs minima hopping | 12/12 vs 0/12 | 7.39602e-07 | not estimated | not estimated | 0.018062 | 55.363522 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m55r14 | for_cluster vs basin hopping | 0/12 vs 0/12 | 1 | not estimated | not estimated | 0.304338 | 3.285817 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m55r14 | for_cluster vs minima hopping | 0/12 vs 0/12 | 1 | not estimated | not estimated | 0.304323 | 3.285984 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m55r14 | recommended vs basin hopping | 5/12 vs 0/12 | 0.0372671 | not estimated | not estimated | 0.317431 | 3.150296 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/ase-nonlj/README.md',
+     '| m55r14 | recommended vs minima hopping | 5/12 vs 0/12 | 0.0372671 | not estimated | not estimated | 0.317414 | 3.150456 |',
+     ('90b88235fe54',), WHY_OLD),
+    ('bench/covalent-h2h/README.md',
+     '| Si10 | anneal G | 12/12 | 666 | 268 | -460.683738 | 33.2 | 58.43 ms | 0.010 ms |',
+     ('8aeb3b0b2272', 'b22eb28536ef', 'ce1e7a46826c', 'e6edbcbabc34', 'eb7f899959de'), WHY_OLD),
+    ('bench/covalent-h2h/README.md',
+     '| Si10 | CREST | 11/12 | 97,521 | 8,524 | -460.683718 | 2646.6 | 26.72 ms | 0.244 ms |',
+     ('8aeb3b0b2272', 'b22eb28536ef', 'e6edbcbabc34', 'eb7f899959de'), WHY_OLD),
+    ('bench/covalent-h2h/README.md',
+     '| C10 | anneal G | 11/12 | 6,350 | 6,077 | -571.322738 | 14.6 | 1.18 ms | 0.002 ms |',
+     ('ce1e7a46826c', 'e6edbcbabc34', 'eb7f899959de'), WHY_OLD),
+    ('bench/covalent-h2h/README.md',
+     '| C10 | CREST | 4/12 | 78,367 | 2,880 | -571.322711 | 439.5 | 5.10 ms | 0.288 ms |',
+     ('ce1e7a46826c', 'e6edbcbabc34', 'eb7f899959de'), WHY_OLD),
+    ('bench/covalent-h2h/README.md',
+     '| Si10 | anneal G, `ce1e7a46` | 12/12 | 665.5 | 296 | -460.683738 | 36.1 | 70.88 ms | 0.044 ms |',
+     ('ce1e7a46',), WHY_OLD),
+    ('bench/covalent-h2h/README.md',
+     '| C10 | anneal G, `ce1e7a46` | 12/12 | 2,516.5 | 1,908 | -571.322738 | 10.9 | 4.43 ms | 0.005 ms |',
+     ('ce1e7a46',), WHY_OLD),
+    ('bench/covalent-h2h/README.md',
+     '| C20 | anneal G, `5351f272` | 0/12 | 100,000 | 0 | -1148.292908 | 1866.6 | 18.54 ms | 0.005 ms |',
+     ('5351f272',), WHY_OLD),
+    ('bench/covalent-h2h/README.md',
+     'no pair below 2.23 Å. Seeds 3000 and 3007 share the next,',
+     ('a52726af',), WHY_OLD),
+    ('bench/growpal-h2h-v2/README.md',
+     '| LJ38 | yes | 21038447 | 52.6 | 560.6 | 81.3 | 479.3 | 3.87 | 22.78 |',
+     ('2b46484da27f', '621761ec8e4e'), WHY_OLD),
+    ('bench/growpal-h2h-v2/README.md',
+     '| LJ55 | yes | 104093769 | 104.1 | 3409.8 | 614.6 | 2795.2 | 5.90 | 26.85 |',
+     ('2b46484da27f', '621761ec8e4e'), WHY_OLD),
+    ('bench/occat-h2h/README.md',
+     '| cu38 | anneal | 12/12 | 7426.500000 | 0.155761 | 0.124461 | 0.033680 | 1.000000 |',
+     ('6eda862e2e5f', '7536aeb6656b'), WHY_OLD),
+    ('bench/occat-h2h/README.md',
+     '| cu38 | occat | 0/12 | 400000.000000 | 370.751968 | 179.488185 | 191.263784 | 2380.261866 |',
+     ('6eda862e2e5f',), WHY_OLD),
+    ('bench/occat-h2h/README.md',
+     '| cu38 | gmin | 0/12 | 400000.000000 | 11.972000 | 11.006452 | 0.952224 | 76.861345 |',
+     ('6eda862e2e5f',), WHY_OLD),
+    ('bench/occat-h2h/README.md',
+     '| cu55 | anneal | 1/1 | 2341.000000 | 0.108601 | 0.076119 | 0.032482 | 1.000000 |',
+     ('6eda862e2e5f',), WHY_OLD),
+    ('bench/occat-h2h/README.md',
+     '| cu38 | 12 | 12 | 0 | 0 | 7.39602e-07 | 7.39602e-07 | 1.02689e-05 | 3.65846e-05 | 3.65846e-05 | 3.65846e-05 | 1.02689e-05 | 3.65846e-05 | 3.65846e-05 | 3.65846e-05 |',
+     ('6eda862e2e5f', '7536aeb6656b'), WHY_OLD),
 ]
 
 
@@ -1838,87 +1987,9 @@ def and_list(items: list[str]) -> str:
 SC_FAMILIES = ("126", "108", "96")
 
 
-def number(text: str) -> float | None:
-    return float(text) if text else None
-
-
 def sc_order(system: str) -> tuple[int, int]:
     family, n = system.removeprefix("sc").split("-")
     return int(n), SC_FAMILIES.index(family)
-
-
-def sc_ahead(anneal: dict[str, str], gmin: dict[str, str], rows: list[dict[str, str]]) -> dict[str, str]:
-    """Which code leads on hits, calls and wall; n.s. is p >= 0.05.
-
-    On calls and wall the lead is the code lower in more seed pairs, the
-    direction of the Mann-Whitney test.
-    """
-    a_rows = pick(rows, system=anneal["system"], arm="anneal", harness_revision=anneal["harness_revision"])
-    g_rows = pick(rows, system=gmin["system"], arm="gmin", harness_revision=gmin["harness_revision"])
-
-    def lead(column: str, p: str) -> str:
-        a = [float(r[column]) for r in a_rows]
-        g = [float(r[column]) for r in g_rows]
-        balance = sum((y < x) - (y > x) for x in a for y in g)
-        if balance == 0:
-            return "tie"
-        who = "GMIN" if balance > 0 else "anneal"
-        return who if float(p) < 0.05 else f"{who}, n.s."
-
-    a_hits, g_hits = int(anneal["hits"]), int(gmin["hits"])
-    hits = "tie" if a_hits == g_hits else ("GMIN" if g_hits > a_hits else "anneal")
-    if hits != "tie" and float(gmin["fisher_p_vs_gmin"]) >= 0.05:
-        hits += ", n.s."
-    return {"Hits": hits, "Calls": lead("evals_to_hit", gmin["mannwhitney_p_evals"]),
-            "Wall": lead("wall_s", gmin["mannwhitney_p_wall"])}
-
-
-def sc_reading(anneal: dict[str, dict[str, str]], reruns: dict[str, dict[str, str]],
-               rows: list[dict[str, str]]) -> list[str]:
-    """The sentences of the sc-n12 README that read the rerun tests."""
-    reruns = {s: r for s, r in reruns.items()
-              if all(r[c] for c in ("fisher_p_vs_gmin", "mannwhitney_p_evals", "mannwhitney_p_wall"))}
-    ahead = {s: sc_ahead(anneal[s], r, rows) for s, r in reruns.items()}
-    level = [s for s, r in reruns.items() if int(r["hits"]) >= int(anneal[s]["hits"])]
-
-    def where(column: str, value: str, among: list[str]) -> list[str]:
-        return [s for s in among if ahead[s][column] == value]
-
-    out = []
-    if ties := where("Hits", "tie", list(reruns)):
-        out.append(f"GMIN ties anneal on hits on {and_list(ties)}.")
-    for who, other in (("GMIN", "anneal"), ("anneal", "GMIN")):
-        sig, ns = where("Hits", who, list(reruns)), where("Hits", f"{who}, n.s.", list(reruns))
-        if sig or ns:
-            parts = ([f"on {and_list(sig)} at Fisher p < 0.05"] if sig else []) + \
-                    ([f"on {and_list(ns)} not significantly" if sig else f"on {and_list(ns)}, not significantly"] if ns else [])
-            out.append(f"{who.capitalize() if who == 'anneal' else who} hits more seeds than {other} {', and '.join(parts)}.")
-    for column, noun in (("Wall", "wall time"), ("Calls", "calls")):
-        if wins := where(column, "GMIN", level):
-            out.append(f"GMIN beats anneal on {noun} on {and_list(wins)}, at Mann-Whitney p < 0.05.")
-        if leads := where(column, "GMIN, n.s.", level):
-            out.append(f"GMIN's lead on {noun} on {and_list(leads)} is not significant.")
-        if losses := where(column, "anneal", level):
-            out.append(f"Anneal beats GMIN on {noun} on {and_list(losses)}, at Mann-Whitney p < 0.05.")
-        if trails := where(column, "anneal, n.s.", level):
-            out.append(f"Anneal's lead on {noun} on {and_list(trails)} is not significant.")
-    cheap = [s for s in reruns if s not in level
-             and float(reruns[s]["wall_median_s"]) < float(anneal[s]["wall_median_s"])
-             and float(reruns[s]["evals_median"]) == float(reruns[s]["budget"])]
-    if cheap:
-        out.append(f"On {and_list(cheap)} GMIN's median wall is lower while it hits fewer seeds, "
-                   "and its median calls are the full budget.")
-    for s, r in reruns.items():
-        if r["hits"] != "0":
-            continue
-        bests = sorted(float(x["best"]) for x in pick(rows, system=s, arm="gmin", harness_revision=r["harness_revision"]))
-        h = r["harness_revision"][:8]
-        if bests and f"{bests[0]:.4f}" == f"{bests[-1]:.4f}":
-            out.append(f"On {s} every {h} GMIN seed ends at {bests[0]:.4f}.")
-        elif bests:
-            out.append(f"On {s} the {h} GMIN seeds end between {bests[0]:.4f} and {bests[-1]:.4f}, "
-                       f"against {float(r['reference']):.4f}.")
-    return out
 
 
 def summary_against_rows(audit: Audit, summary: str, per_seed: str, arm_key: str, calls_key: str,
@@ -1953,26 +2024,139 @@ def summary_against_rows(audit: Audit, summary: str, per_seed: str, arm_key: str
                        fisher(hits_of(group), len(group), hits_of(other), len(other)))
 
 
+SC_RERUN_SUMMARY = "bench/paper-rerun/sc-h2h/summary.csv"
+SC_RERUN_ROWS = "bench/paper-rerun/sc-h2h/rows.csv"
+SC_RERUN_MANIFEST = "bench/paper-rerun/sc-h2h/manifest.csv"
+
+
+def side_rows(audit: Audit, path: str) -> list[dict[str, str]]:
+    """A file without revision columns. A test may already have loaded it; the audit does not, so provenance stays on the row file."""
+    cached = audit.read.get(path)
+    if cached is not None:
+        return cached
+    with (ROOT / path).open(newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def sc_rerun_summary(audit: Audit) -> list[dict[str, str]]:
+    return side_rows(audit, SC_RERUN_SUMMARY)
+
+
+def sc_rerun_code(audit: Audit) -> str:
+    """The one code revision every rerun row records, which must be an ancestor of HEAD."""
+    revisions = sorted({r["code_revision"].strip() for r in audit.rows(SC_RERUN_ROWS)})
+    audit.record(len(revisions) == 1, SC_RERUN_ROWS, "one code revision", " ".join(revisions), "one")
+    code = revisions[0] if revisions else ""
+    audit.record(commit_of(code) == code and ancestor_of_head(code), SC_RERUN_ROWS,
+                 "the rerun code revision is an ancestor of HEAD", code, "a full SHA, ancestor of HEAD")
+    return code
+
+
+def sc_rerun_tests(rows: list[dict[str, str]]) -> list[dict[str, object]]:
+    """The summary each system and arm of the rerun rows gives, in summariser order.
+
+    Mann-Whitney ranks a miss after every hit, at the budget plus one call.
+    """
+    grouped: dict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
+    for r in rows:
+        grouped[(r["system"], r["arm"])].append(r)
+    systems = list(dict.fromkeys(r["system"] for r in rows))
+
+    def ranked(group: list[dict[str, str]]) -> list[float]:
+        return [float(r["evals_to_hit"]) if r["hit"] == "1" else float(r["budget"]) + 1.0 for r in group]
+
+    out = []
+    for system in systems:
+        anneal, gmin = grouped.get((system, "anneal"), []), grouped.get((system, "gmin"), [])
+        tested = bool(anneal and gmin and len(anneal) == len(gmin))
+        for arm, group in (("anneal", anneal), ("gmin", gmin)):
+            if not group:
+                continue
+            budgets = sorted({r["budget"] for r in group})
+            out.append({
+                "system": system, "arm": arm, "n": str(len(group)), "hits": str(hits_of(group)),
+                "hits_over_n": frac(group), "budget": " ".join(budgets),
+                "calls_median": median([float(r["evals_to_hit"]) for r in group]),
+                "fisher_p_vs_gmin": fisher(hits_of(anneal), len(anneal), hits_of(gmin), len(gmin))
+                if tested and arm == "anneal" else None,
+                "mannwhitney_p_calls": mann_whitney(ranked(anneal), ranked(gmin), True)
+                if tested and arm == "anneal" else None,
+            })
+    return out
+
+
+def sc_rerun_against_rows(audit: Audit) -> None:
+    """The rerun rows are the manifest's cells once each, and the summary is what they give."""
+    rows = audit.rows(SC_RERUN_ROWS)
+    manifest = side_rows(audit, SC_RERUN_MANIFEST)
+    audit.record(len(rows) == len(manifest), SC_RERUN_ROWS, "rows", len(rows), len(manifest))
+    count: dict[tuple[str, str, str], int] = defaultdict(int)
+    for r in rows:
+        count[(r["system"], r["arm"], r["seed"])] += 1
+    cells = {(m["system"], m["arm"], m["seed"]): m for m in manifest}
+    for key, m in cells.items():
+        audit.record(count.get(key, 0) == 1, SC_RERUN_ROWS, f"manifest cell {' '.join(key)}", count.get(key, 0), 1)
+    for key in sorted(set(count) - set(cells)):
+        audit.record(False, SC_RERUN_ROWS, f"row outside the manifest {' '.join(key)}", count[key], 0)
+    for r in rows:
+        m = cells.get((r["system"], r["arm"], r["seed"]))
+        if m and r["budget"] != m["budget"]:
+            audit.record(False, SC_RERUN_ROWS, f"budget {r['system']} {r['arm']} {r['seed']}", r["budget"], m["budget"])
+    references = {m["system"]: m["reference"] for m in manifest}
+    summary = {(s["system"], s["arm"]): s for s in sc_rerun_summary(audit)}
+    computed = {(c["system"], c["arm"]): c for c in sc_rerun_tests(rows)}
+    for key in sorted(set(summary) | set(computed)):
+        where = f"{SC_RERUN_SUMMARY} {key[0]} {key[1]}"
+        line, value = summary.get(key), computed.get(key)
+        if line is None or value is None:
+            audit.record(False, where, "summary row", "shown" if line else "missing", "rows" if value else "no rows")
+            continue
+        for column in ("n", "hits", "hits_over_n", "budget"):
+            audit.cell(where, column, line[column], value[column])
+        audit.cell(where, "reference", line["reference"], references.get(key[0], "not in the manifest"))
+        for column in ("calls_median", "fisher_p_vs_gmin", "mannwhitney_p_calls"):
+            audit.cell(where, column, line[column], value[column])
+
+
+def sc_develop_table(audit: Audit, path: str, code: str) -> None:
+    """The printed Sutton-Chen counts are the develop rerun, at its code revision."""
+    summary = sc_rerun_summary(audit)
+    shown = {}
+    for line, row in md_table(audit, path, "System | Arm | Code revision"):
+        shown[(row["System"], row["Arm"])] = (line, row)
+    for row in summary:
+        key = (row["system"], row["arm"])
+        got = shown.get(key)
+        audit.record(got is not None, path, f"table row {row['system']} {row['arm']}",
+                     "shown" if got else "missing", "shown")
+        if got is None:
+            continue
+        line, cell = got
+        where = f"{path}:{line} {row['system']} {row['arm']}"
+        audit.record(bool(code) and commit_of(cell["Code revision"].strip().strip("`")) == code, where,
+                     "code revision", cell["Code revision"], code[:8])
+        audit.cell(where, "hits", cell["Hits"], row["hits_over_n"])
+        audit.cell(where, "calls median", cell["Calls median"], float(row["calls_median"]))
+        if row["fisher_p_vs_gmin"] or cell["Fisher p"].strip():
+            audit.cell(where, "Fisher p", cell["Fisher p"],
+                       float(row["fisher_p_vs_gmin"]) if row["fisher_p_vs_gmin"] else None)
+        if row["mannwhitney_p_calls"] or cell["Mann-Whitney p calls"].strip():
+            audit.cell(where, "Mann-Whitney p calls", cell["Mann-Whitney p calls"],
+                       float(row["mannwhitney_p_calls"]) if row["mannwhitney_p_calls"] else None)
+
+
 def head_to_head(audit: Audit) -> None:
     summary_against_rows(audit, "bench/morse-h2h/results.csv", "bench/morse-h2h/seeds.csv", "code", "evals_to_hit", True)
     summary_against_rows(audit, "bench/metal-cluster-h2h/sc-n12/results.csv", "bench/metal-cluster-h2h/sc-n12/seeds.csv",
                          "arm", "evals_to_hit", True)
     path = "bench/metal-cluster-h2h/sc-n12/README.md"
-    sc_rows = audit.rows("bench/metal-cluster-h2h/sc-n12/seeds.csv")
+    sc_rerun_against_rows(audit)
+    code = sc_rerun_code(audit)
+    sc_develop_table(audit, path, code)
+    sc_develop_table(audit, "bench/paper-rerun/sc-h2h/README.md", code)
     sc_summary = audit.rows("bench/metal-cluster-h2h/sc-n12/results.csv")
-    shown = set()
-    for line, row in md_table(audit, path, "System | Arm | Harness"):
-        group = [r for r in pick(sc_rows, system=row["System"], arm=row["Arm"])
-                 if r["harness_revision"].startswith(row["Harness"])]
-        where = f"{path}:{line} {row['System']} {row['Arm']} {row['Harness']}"
-        shown.add((row["System"], row["Arm"], row["Harness"]))
-        audit.cell(where, "seeds", "12", float(len(group)))
-        audit.cell(where, "hits", row["Hits"], frac(group))
-        audit.cell(where, "calls median", row["Calls median"], median([float(r["evals_to_hit"]) for r in group]))
-        audit.cell(where, "wall median", row["Wall median (s)"], median([float(r["wall_s"]) for r in group]))
-    # A GMIN row whose harness is not that of the anneal row of its system is
-    # a rerun. Every rerun, the rows it replaces and its tests must be shown,
-    # and no system may be left with GMIN rows from the old file only.
+    # The stored sc-n12 rows keep the corrected-file GMIN rerun beside the
+    # earlier file. The README no longer prints those revisions.
     anneal = {r["system"]: r for r in sc_summary if r["arm"] == "anneal"}
     anneal_harness = {s: r["harness_revision"] for s, r in anneal.items()}
     reruns: dict[str, dict[str, str]] = {}
@@ -1980,41 +2164,11 @@ def head_to_head(audit: Audit) -> None:
         if r["arm"] == "gmin" and r["harness_revision"] != anneal_harness[r["system"]]:
             reruns[r["system"]] = r
     reruns = dict(sorted(reruns.items(), key=lambda item: sc_order(item[0])))
-    tested = {}
-    for line, row in md_table(audit, path, "System | GMIN harness"):
-        where = f"{path}:{line} {row['System']} {row['GMIN harness']}"
-        r = reruns.get(row["System"])
-        tested[row["System"]] = row["GMIN harness"]
-        audit.cell(where, "latest GMIN harness", row["GMIN harness"], r["harness_revision"][:8] if r else "not rerun")
-        if r:
-            audit.cell(where, "Fisher p", row["Fisher p"], number(r["fisher_p_vs_gmin"]))
-            audit.cell(where, "Mann-Whitney p calls", row["Mann-Whitney p calls"], number(r["mannwhitney_p_evals"]))
-            audit.cell(where, "Mann-Whitney p wall", row["Mann-Whitney p wall"], number(r["mannwhitney_p_wall"]))
-            audit.cell(where, "wall ratio", row["Wall ratio"], number(r["wall_ratio"]))
-            if not all(r[c] for c in ("fisher_p_vs_gmin", "mannwhitney_p_evals", "mannwhitney_p_wall")):
-                continue
-            ahead = sc_ahead(anneal[row["System"]], r, sc_rows)
-            for column in ("Hits", "Calls", "Wall"):
-                audit.cell(where, f"{column} ahead", row[f"{column} ahead"], ahead[column])
-    by_harness: dict[str, list[str]] = {}
-    for system, r in reruns.items():
-        by_harness.setdefault(r["harness_revision"][:8], []).append(system)
-        for arm, harness in (("anneal", anneal_harness[system]), ("gmin", anneal_harness[system]),
-                             ("gmin", r["harness_revision"])):
-            audit.cell(path, f"table row {system} {arm} {harness[:8]}",
-                       "shown" if (system, arm, harness[:8]) in shown else "missing", "shown")
-        audit.cell(path, f"test row {system}", tested.get(system, "missing"), r["harness_revision"][:8])
-    for system in tested:
-        audit.cell(path, f"test row {system} is a rerun", "rerun" if system in reruns else "not rerun", "rerun")
     for system in anneal_harness:
         audit.cell(path, f"{system} GMIN row from the corrected file",
                    "rerun" if system in reruns else f"old file only ({anneal_harness[system][:8]})", "rerun")
-    parts = [f"{and_list(systems)} under harness {h}" for h, systems in by_harness.items()]
-    audit.said(path, f"The GMIN rows rerun with the corrected file are {'; '.join(parts)}.")
     audit.said("bench/metal-cluster-h2h/sc-8e076b7f/README.md",
                f"`../sc-n12/README.md` has the corrected file and GMIN reruns of {and_list(reruns)}.")
-    for sentence in sc_reading(anneal, reruns, sc_rows):
-        audit.said(path, sentence)
 
     path = "bench/morse-h2h/README.md"
     results = audit.rows("bench/morse-h2h/results.csv")
@@ -2427,10 +2581,10 @@ def bench_prose(audit: Audit) -> None:
                f"spreads by {spreads[0]} s at LJ38, {spreads[1]} s at LJ75, {spreads[2]} s at LJ98 and {spreads[3]} s at LJ104.")
 
     gad = audit.rows("bench/gad-published/summary.csv")
-    rerun = pick(gad, system="lj38", arm="anneal", provenance="rerun")[0]
+    rerun = pick(gad, system="lj38", arm="gmin", provenance="rerun")[0]
     audit.said("bench/pimc-lj38/README.md",
-               f"| anneal | {rerun['hits']}/{rerun['n']} | {float(rerun['evals_median']):g} | {rerun['wall_median_s']} | "
-               f"{rerun['inside_us']} | {rerun['outside_us']} | {rerun['anneal_head'][:8]} |")
+               f"| gmin | {rerun['hits']}/{rerun['n']} | {float(rerun['evals_median']):g} | {rerun['wall_median_s']} | "
+               f"{rerun['inside_us']} | {rerun['outside_us']} | {rerun['gmin_revision'][:8]} |")
 
     nh3 = audit.rows("bench/nh3-octamer/ladder.csv")
     stops = {r["seed"]: r["calls"] for r in nh3 if r["budget"] == "16000" and r["calls"] != "16000"}
@@ -2451,6 +2605,7 @@ def bench_prose(audit: Audit) -> None:
 
 
 def provenance(audit: Audit) -> dict[str, str]:
+    record_ref_status(RECORD_REFS)
     gaps: dict[str, str] = {}
     revisions: dict[str, set[str]] = defaultdict(set)
     for path, rows in audit.read.items():
@@ -2521,16 +2676,18 @@ class RevisionIndex:
         audited_refs = ["HEAD", *(ref for ref in remote_refs
                                    if git("show-ref", "--verify", "--quiet", ref).returncode == 0),
                         *git("for-each-ref", "--format=%(refname)", "refs/tags").stdout.split()]
-        audited_heads = git("rev-parse", *audited_refs).stdout.split()
+        # A verified record ref is a branch origin holds at the registered SHA and tree.
+        records = list(_verified_record_refs())
+        audited_heads = git("rev-parse", *audited_refs).stdout.split() + records
         self.commit = {n: line.split()[0] for n, line in zip(asked, out)
                        if line.split()[1:2] == ["commit"]}
         self.parents: dict[str, list[str]] = {}
-        roots = sorted({*audited_refs, *self.commit.values()})
+        roots = sorted({*audited_refs, *records, *self.commit.values()})
         for line in git("rev-list", "--parents", *roots).stdout.splitlines():
             commit, *parents = line.split()
             self.parents[commit] = parents
         self.audited = self.closure(audited_heads)
-        remote = git("for-each-ref", "--format=%(objectname)", *remote_refs).stdout.split()
+        remote = git("for-each-ref", "--format=%(objectname)", *remote_refs).stdout.split() + records
         self.remote = self.closure(r for r in remote if r in self.parents)
         self.patch_ids: dict[str, str] = {}
         shown = sorted({self.commit[p] for p in patched if p in self.commit})
@@ -3243,6 +3400,510 @@ def manuscript_followups(audit: Audit) -> None:
     audit.said(TEX, "Derived adds the budget window and the Bayes screen of")
 
 
+_ANCESTOR_OF_HEAD: dict[str, bool] = {}
+_EXTERNAL_FORM = re.compile(r"https://[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+\.git@[0-9a-f]{40}(?![0-9A-Za-z])")
+_FORM_ATTEMPT = re.compile(r"https://[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+\.git@[0-9a-f]+")
+_REVISION_HEADER = re.compile(r"harness|revision|commit|\bsha\b", re.I)
+_RESULT_HEADER = re.compile(
+    r"hit|call|wall|fisher|mann|median|inside|outside|ratio|gap|\bpot\b|eval|ahead|energy",
+    re.I,
+)
+_RUN_HEADER = re.compile(r"hit|call|wall", re.I)
+_NUMBER_CELL = re.compile(
+    r"^[~≈]?[-−+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:e[-−+]?\d+)?(?:/\d+)?"
+    r"\s*(?:%|×|x|s|ms|µs|μs|us|h|min|eV|meV|ε|Å|kcal/mol|kJ/mol)?$",
+    re.I,
+)
+_SHA_CELL = re.compile(r"^[0-9a-f]{7,40}$")
+_SHA_TOKEN = re.compile(r"(?<![0-9A-Za-z])([0-9a-f]{7,40})(?![0-9A-Za-z])")
+_REVISION_FIELDS = ("code_revision", "harness_revision", "harness_commit", "head", "anneal_head", "anneal_revision",
+                    "release_revision")
+EXTERNAL_FORM_SOURCES = (
+    "scripts/pimc_lj38/run_campaign.py",
+    "scripts/pimc_lj38/lj_potential.py",
+    "scripts/pimc_lj38/rpqa_driver.py",
+    "scripts/pimc_lj38/rpqa_ipi.py",
+)
+
+
+# Install scripts that pin another code, each with a URL= and a PIN= line.
+EXTERNAL_PIN_SOURCES = ("scripts/pimc_lj38/install_rpqa.sh",)
+
+
+@functools.cache
+def external_pins() -> frozenset[tuple[str, str]]:
+    """The (repository URL, full SHA) pairs the install scripts check out."""
+    pins = set()
+    for path in EXTERNAL_PIN_SOURCES:
+        text = (ROOT / path).read_text()
+        urls = re.findall(r"^URL=(\S+)$", text, re.M)
+        shas = re.findall(r"^PIN=([0-9a-f]{40})$", text, re.M)
+        if len(urls) == 1 and len(shas) == 1:
+            pins.add((urls[0], shas[0]))
+    return frozenset(pins)
+
+
+def external_form(text: str) -> bool | None:
+    """A repo URL plus a full SHA that an install script pins.
+
+    Any other URL@hex, a short or long SHA, or a pair no script pins, is
+    rejected, not skipped. None when the text is not a URL@hex at all.
+    """
+    token = (text or "").strip().strip("`")
+    if not _FORM_ATTEMPT.fullmatch(token):
+        return None
+    url, sha = token.rsplit("@", 1)
+    return len(sha) == 40 and (url, sha) in external_pins()
+
+
+def external_pin(rev: str) -> bool:
+    """True when rev is the recorded revision of another code, or its unique prefix."""
+    rev = (rev or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{7,40}", rev):
+        return False
+    return any(key.startswith(rev) for key in EXTERNAL_REVISIONS)
+
+
+@functools.cache
+def commit_of(rev: str) -> str | None:
+    """The full commit a hex revision names in this repository; None when it names none or several."""
+    rev = (rev or "").strip()
+    if not re.fullmatch(r"[0-9a-f]{7,40}", rev):
+        return None
+    return git("rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}").stdout.strip() or None
+
+
+def ancestor_of_head(rev: str) -> bool:
+    """The revision is a commit this repository holds, and it is an ancestor of HEAD."""
+    rev = (rev or "").strip()
+    if rev not in _ANCESTOR_OF_HEAD:
+        full = commit_of(rev)
+        _ANCESTOR_OF_HEAD[rev] = bool(full) and git("merge-base", "--is-ancestor", full, "HEAD").returncode == 0
+    return _ANCESTOR_OF_HEAD[rev]
+
+
+@functools.cache
+def _verified_aliases() -> tuple[tuple[str, str], ...]:
+    table = alias_table()
+    index = alias_index([r["local_revision"] for r in table], table)
+    return tuple(verified_aliases(Audit(), table, index).items())
+
+
+@functools.cache
+def origin_record_heads() -> dict[str, str]:
+    """The record/* branches on origin, by name. Empty when origin cannot be reached, so every registry row fails."""
+    out = git("ls-remote", "origin", "refs/heads/record/*")
+    if out.returncode != 0:
+        return {}
+    return {ref.removeprefix("refs/heads/"): sha for sha, ref in (line.split("\t") for line in out.stdout.splitlines())}
+
+
+def record_ref_status(path: str) -> tuple[tuple[str, str, tuple[tuple[str, bool, str, str], ...]], ...]:
+    """Each registered record ref with its checks: it is a record ref named by a full SHA, origin holds it at
+    that SHA, git fetch origin brings it here, and its tree is the registered one."""
+    return _record_ref_status(ROOT, path)
+
+
+@functools.cache
+def _record_ref_status(root: Path, path: str) -> tuple[tuple[str, str, tuple[tuple[str, bool, str, str], ...]], ...]:
+    if not (root / path).exists():
+        return ()
+    with (root / path).open(newline="") as handle:
+        table = list(csv.DictReader(line for line in handle if not line.startswith("#")))
+    if not table:
+        return ()
+    heads = origin_record_heads()
+    out = []
+    for row in table:
+        ref, sha, tree = row["ref"].strip(), row["sha"].strip(), row["tree"].strip()
+        named = ref.startswith("record/") and bool(re.fullmatch(r"[0-9a-f]{40}", sha))
+        fetch = git("fetch", "--quiet", "--no-tags", "origin", f"refs/heads/{ref}") if named else None
+        present = git("cat-file", "-e", f"{sha}^{{commit}}").returncode == 0 if named else False
+        fetched = bool(fetch) and fetch.returncode == 0 and present
+        actual = git("rev-parse", "--verify", "--quiet", f"{sha}^{{tree}}").stdout.strip() if present else ""
+        out.append((ref, sha, (
+            (f"{ref} is a record ref with a full SHA", named, f"{ref} {sha}", "record/<name> and 40 hex digits"),
+            (f"{ref} is on origin at {sha[:8]}", heads.get(ref) == sha, heads.get(ref, "absent"), sha),
+            (f"{ref} fetches", fetched, "fetched" if fetched else "fails", "fetched"),
+            (f"{ref} has tree {tree[:8] or 'unrecorded'}", bool(tree) and actual == tree, actual or "absent",
+             tree or "unrecorded"),
+        )))
+    commit_of.cache_clear()
+    _ANCESTOR_OF_HEAD.clear()
+    return tuple(out)
+
+
+def _verified_record_refs() -> tuple[str, ...]:
+    return tuple(sha for _ref, sha, checks in record_ref_status(RECORD_REFS) if all(ok for _, ok, _, _ in checks))
+
+
+def record_ref_checks(audit: Audit) -> None:
+    for _ref, _sha, checks in record_ref_status(RECORD_REFS):
+        for label, ok, shown, value in checks:
+            audit.record(ok, RECORD_REFS, label, shown, value)
+
+
+@functools.cache
+def _on_record_ref(commit: str, refs: tuple[str, ...]) -> bool:
+    return any(git("merge-base", "--is-ancestor", commit, sha).returncode == 0 for sha in refs)
+
+
+def harness_reachable(rev: str) -> bool:
+    """A printed revision is an ancestor of HEAD or of a verified record ref, a verified alias of an ancestor of
+    HEAD, a recorded external pin, or a qualified form."""
+    if external_form(rev) is True or external_pin(rev):
+        return True
+    refs = _verified_record_refs()
+    if ancestor_of_head(rev):
+        return True
+    full = commit_of(rev)
+    if full and _on_record_ref(full, refs):
+        return True
+    rev = (rev or "").strip()
+    return len(rev) >= 7 and any(local.startswith(rev) and ancestor_of_head(pushed) for local, pushed in _verified_aliases())
+
+
+def is_revision_token(token: str) -> bool:
+    """Seven to forty hex digits with a letter. A run of letters alone must name a commit, since acceded is a word."""
+    if not _SHA_CELL.fullmatch(token) or not re.search(r"[a-f]", token):
+        return False
+    return bool(re.search(r"\d", token)) or commit_of(token) is not None
+
+
+def _revision_tokens(cell: str) -> list[str]:
+    """Git revisions and URL@hex forms anywhere in a cell. A pure number is a budget, not a commit."""
+    text = cell or ""
+    found = [match.group(0) for match in _FORM_ATTEMPT.finditer(text)]
+    found += [t for t in _SHA_TOKEN.findall(_FORM_ATTEMPT.sub(" ", text)) if is_revision_token(t)]
+    return list(dict.fromkeys(found))
+
+
+def _number_cell(cell: str) -> str | None:
+    """The cell as printed when it is a number. Thousands commas, a unit and emphasis are allowed."""
+    shown = cell.strip()
+    return shown if _NUMBER_CELL.fullmatch(shown.strip("*_`").strip()) else None
+
+
+def _markdown_tables(text: str):
+    lines = text.splitlines()
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if line.startswith("|") and index + 1 < len(lines) and re.match(r"^\|\s*[-:| ]+\s*$", lines[index + 1]):
+            header = [cell.strip() for cell in line.strip().strip("|").split("|")]
+            rows = []
+            cursor = index + 2
+            while cursor < len(lines) and lines[cursor].startswith("|"):
+                cells = [cell.strip() for cell in lines[cursor].strip().strip("|").split("|")]
+                rows.append((cursor + 1, cells))
+                cursor += 1
+            yield header, rows
+            index = cursor
+            continue
+        index += 1
+
+
+def _table_revision_flags(rel: str, header: list[str], rows: list[tuple[int, list[str]]],
+                          forms: list[tuple[str, str]]):
+    """Numbers on a table row that names a revision. None when the table names none."""
+    rev_cols = {idx for idx, name in enumerate(header) if _REVISION_HEADER.search(name)}
+    for _line, cells in rows:
+        for idx, cell in enumerate(cells):
+            if _revision_tokens(cell):
+                rev_cols.add(idx)
+    if not rev_cols:
+        return None
+    flagged = []
+    for line_no, cells in rows:
+        where = f"{rel}:{line_no}"
+        bad = []
+        for idx in sorted(rev_cols):
+            if idx >= len(cells):
+                continue
+            for token in _revision_tokens(cells[idx]):
+                if external_form(token) is not None:
+                    forms.append((where, token))
+                if not harness_reachable(token) and token not in bad:
+                    bad.append(token)
+        if not bad:
+            continue
+        identity = " ".join(
+            cells[idx].strip()
+            for idx in range(len(cells))
+            if idx not in rev_cols and cells[idx].strip()
+            and (idx >= len(header) or not _RESULT_HEADER.search(header[idx]))
+        )
+        for idx, cell in enumerate(cells):
+            if idx in rev_cols or idx >= len(header) or not _RESULT_HEADER.search(header[idx]):
+                continue
+            shown = _number_cell(cell)
+            if shown is None:
+                continue
+            number = f"{identity} {header[idx].strip()}={shown}".strip()
+            flagged.extend((where, sha, number) for sha in bad)
+    return flagged
+
+
+def _key(text: str) -> str:
+    """A name or value compared without case, spaces or punctuation: LJ38 is lj38."""
+    return re.sub(r"[^0-9a-z]", "", (text or "").lower())
+
+
+def _named_csvs(rel: str, text: str) -> dict[Path, bool]:
+    """The CSVs a text names, from the README's directory or the root, each with whether it sits beside the README."""
+    directory = (ROOT / rel).parent
+    found: dict[Path, bool] = {}
+    for token in re.findall(r"(?<![\w./-])([\w./-]*[\w-]\.csv)(?![\w.-])", text):
+        for base in (directory, ROOT):
+            path = (base / token).resolve()
+            if path.is_file() and path.is_relative_to(ROOT.resolve()):
+                found.setdefault(path, path.parent == directory.resolve())
+                break
+    return found
+
+
+def _backing_csvs(rel: str, text: str, section: str) -> list[tuple[Path, bool]]:
+    """The CSVs that back a table: those its section names.
+
+    A README that names no CSV anywhere is backed by every CSV beside it.
+    A section that names none, in a README that names some, has no CSV.
+    """
+    found = _named_csvs(rel, section)
+    if not found and not _named_csvs(rel, text):
+        found = {path.resolve(): True for path in (ROOT / rel).parent.glob("*.csv")}
+    return sorted(found.items())
+
+
+def _csv_backed_flags(rel: str, text: str, header: list[str], rows: list[tuple[int, list[str]]], section: str):
+    """A result table backed by a CSV, joined on every column the two share.
+
+    A system that the CSV lacks is not its row. Another key value that the
+    CSV lacks, such as an arm named in prose, falls back to the whole file.
+    A table that shares no key column is joined only to the CSVs beside it.
+    """
+    if not any(_RUN_HEADER.search(name) for name in header):
+        return []
+    flagged = []
+    for csv_path, beside in _backing_csvs(rel, text, section):
+        with csv_path.open(newline="") as handle:
+            data = list(csv.DictReader(line for line in handle if line.strip() and not line.startswith("#")))
+        if not data:
+            continue
+        fields = [name for name in _REVISION_FIELDS if name in data[0]]
+        if not fields:
+            continue
+        columns = {_key(c): c for c in data[0] if c not in _REVISION_FIELDS}
+        keys = [(idx, columns[_key(name)]) for idx, name in enumerate(header)
+                if _key(name) in columns and not _RESULT_HEADER.search(name)]
+        if not keys and not beside:
+            continue
+        arm_key = "arm" if "arm" in data[0] else "code" if "code" in data[0] else ""
+        known = {row[arm_key] for row in data if arm_key and row.get(arm_key)}
+        arm_names = {arm.lower() for arm in known}
+        last: dict[int, str] = {}
+        for line_no, cells in rows:
+            group = data
+            for idx, column in keys:
+                value = cells[idx].strip() if idx < len(cells) else ""
+                value = value or last.get(idx, "")
+                last[idx] = value
+                if not value:
+                    continue
+                matched = [row for row in group if _key(row.get(column)) == _key(value)]
+                if matched:
+                    group = matched
+                elif _key(column) == "system":
+                    group = []
+                    break
+            if not group:
+                continue
+            identity = " ".join(cells[idx].strip() for idx, _ in keys if idx < len(cells) and cells[idx].strip())
+            for idx, name in enumerate(header):
+                if idx >= len(cells):
+                    continue
+                shown = _number_cell(cells[idx])
+                if shown is None:
+                    continue
+                if name.lower() in arm_names:
+                    arms = {arm for arm in known if arm.lower() == name.lower()}
+                elif any(arm.lower() in name.lower() for arm in known):
+                    arms = {arm for arm in known if arm.lower() in name.lower()}
+                elif _RESULT_HEADER.search(name):
+                    arms = set(known)
+                else:
+                    continue
+                bad = []
+                for row in group:
+                    if arm_key and row.get(arm_key) not in arms:
+                        continue
+                    for field in fields:
+                        for token in _revision_tokens(row.get(field) or ""):
+                            if not harness_reachable(token) and token not in bad:
+                                bad.append(token)
+                for sha in bad:
+                    flagged.append((f"{rel}:{line_no}", sha, f"{identity} {name.strip()}={shown}".strip()))
+    return flagged
+
+
+def _prose_measures(line: str) -> list[str]:
+    """Measured figures stated with their revision. A method sentence is not a result."""
+    numbers: list[str] = []
+    if re.search(r"median calls|at a median of|median of", line):
+        numbers += re.findall(r"(?:from|to) (\d+)\b(?!\.)", line)
+        numbers += re.findall(r"median of (-?\d+(?:\.\d+)?)", line)
+        numbers += re.findall(r"\d+ of \d+", line)
+    if re.search(r"Mann-Whitney p \d", line):
+        numbers += re.findall(r"Mann-Whitney p (\d+(?:\.\d+)?)", line)
+    if re.search(r"hits \d+ of \d+", line):
+        numbers += re.findall(r"hits (\d+ of \d+)", line)
+    if re.search(r"ends at|end between", line):
+        for match in re.finditer(r"-?\d+\.\d+", line):
+            prefix = line[max(0, match.start() - 16):match.start()]
+            if re.search(r"against\s+$", prefix):
+                continue
+            numbers.append(match.group(0))
+    if re.search(r"\bwall is\b", line):
+        numbers += re.findall(r"\bwall is (-?\d+(?:\.\d+)?)", line)
+    found: list[str] = []
+    for number in numbers:
+        if number in {"0.05", "0.050"} or number in found:
+            continue
+        found.append(number)
+    return found
+
+
+def _printed_readme_numbers(audit: Audit, forms: list[tuple[str, str]]) -> list[tuple[str, str, str]]:
+    """Each printed README number whose revision is not an ancestor and not a qualified form."""
+    found: list[tuple[str, str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    def add(where: str, revision: str, number: str) -> None:
+        item = (where, revision, number)
+        if item not in seen:
+            seen.add(item)
+            found.append(item)
+
+    for path in sorted((ROOT / "bench").rglob("README.md")):
+        rel = path.relative_to(ROOT).as_posix()
+        text = audit.text(rel)
+        table_lines: set[int] = set()
+        for header, rows in _markdown_tables(text):
+            table_lines.update(line_no for line_no, _cells in rows)
+            named = _table_revision_flags(rel, header, rows, forms)
+            if named is not None:
+                for item in named:
+                    add(*item)
+                continue
+            for item in _csv_backed_flags(rel, text, header, rows, _section(text, rows[0][0] if rows else 1)):
+                add(*item)
+        for paragraph in _prose_paragraphs(text, table_lines):
+            for line_no, line in paragraph:
+                for match in _FORM_ATTEMPT.finditer(line):
+                    forms.append((f"{rel}:{line_no}", match.group(0)))
+            carried: list[str] = []
+            for line_no, sentence in _sentences(paragraph):
+                named = [t for t in _SHA_TOKEN.findall(sentence) if is_revision_token(t)]
+                if named:
+                    carried = list(dict.fromkeys(t for t in named if not harness_reachable(t)))
+                if not carried:
+                    continue
+                for number in _prose_measures(sentence):
+                    if any(number in sha for sha in carried):
+                        continue
+                    for sha in carried:
+                        add(f"{rel}:{line_no}", sha, number)
+    return found
+
+
+def _section(text: str, line_no: int) -> str:
+    """The lines from the heading above line_no to the next heading."""
+    lines = text.splitlines()
+    heads = [i for i, line in enumerate(lines) if line.startswith("#")]
+    start = max((i for i in heads if i < line_no - 1), default=0)
+    end = min((i for i in heads if i >= line_no - 1), default=len(lines))
+    return "\n".join(lines[start:end])
+
+
+def _prose_paragraphs(text: str, skip: set[int]):
+    """Runs of prose lines as (line number, line). A blank line, heading, fence, table row or list item starts a new run."""
+    paragraph: list[tuple[int, str]] = []
+    for line_no, line in enumerate(text.splitlines(), 1):
+        stripped = line.strip()
+        breaks = not stripped or line_no in skip or line.startswith("|") or stripped.startswith(("#", "```"))
+        if breaks or re.match(r"\s*(?:[-*+]|\d+[.)])\s", line):
+            if paragraph:
+                yield paragraph
+            paragraph = []
+            if breaks:
+                continue
+        paragraph.append((line_no, line))
+    if paragraph:
+        yield paragraph
+
+
+def _sentences(paragraph: list[tuple[int, str]]):
+    """The sentences of a paragraph, each with the line it starts on. Qualified forms are blanked first."""
+    joined, starts = "", []
+    for line_no, line in paragraph:
+        starts.append((len(joined), line_no))
+        joined += _FORM_ATTEMPT.sub(" ", line.strip()) + " "
+    at = 0
+    for piece in re.split(r"(?<=\.)\s+", joined):
+        if not piece.strip():
+            continue
+        start = joined.index(piece, at)
+        at = start + len(piece)
+        yield max(line_no for offset, line_no in starts if offset <= start), piece
+
+
+def _check_external_source(audit: Audit, path: str) -> None:
+    """The i-PI citation is a repo URL and a full SHA. A bare or short SHA fails."""
+    text = audit.text(path)
+    attempts = _FORM_ATTEMPT.findall(text)
+    if not attempts:
+        audit.record(False, path, "qualified external revision", "missing", "repo URL @ full SHA")
+        return
+    for token in attempts:
+        audit.record(external_form(token) is True, path, "qualified external revision", token, "repo URL @ full SHA")
+    stripped = _FORM_ATTEMPT.sub(" ", text)
+    for _url, sha in sorted(external_pins()):
+        for bare in re.findall(rf"(?<![0-9a-f])({sha[:7]}[0-9a-f]*)(?![0-9a-f])", stripped):
+            if sha.startswith(bare):
+                audit.record(False, path, "qualified external revision", bare, "repo URL @ full SHA")
+
+
+def printed_harnesses(audit: Audit) -> None:
+    """Fail when a printed number rests on a revision that is not an ancestor of HEAD or of a verified record ref.
+
+    A qualified external revision is a repository URL plus a full SHA. Each one is
+    checked. A short SHA in that position fails. A README row listed in
+    ``UNVERIFIABLE`` on the flagged revision passes with its reason shown.
+    """
+    record_ref_checks(audit)
+    forms: list[tuple[str, str]] = []
+    flagged = _printed_readme_numbers(audit, forms)
+    listed = {(path, row, revision): why for path, row, revisions, why in UNVERIFIABLE for revision in revisions}
+    matched: set[tuple[str, str, str]] = set()
+    for where, revision, number in flagged:
+        path, _, line = where.rpartition(":")
+        key = (path, audit.text(path).splitlines()[int(line) - 1].strip(), revision[:12])
+        if key in listed:
+            matched.add(key)
+        audit.record(key in listed, where, "a printed number comes from a reachable revision",
+                     f"unverifiable: {listed[key]}" if key in listed else "ancestor or qualified external revision",
+                     f"{revision[:12]} {number}")
+    for path, row, revision in sorted(set(listed) - matched):
+        audit.record(False, path, "an unverifiable row is still printed and flagged", row, revision)
+    for where, token in forms:
+        audit.record(external_form(token) is True, where, "qualified external revision",
+                     token, "repo URL @ full SHA")
+    for path in EXTERNAL_FORM_SOURCES:
+        _check_external_source(audit, path)
+    if not flagged:
+        audit.record(True, "bench", "a printed number comes from a reachable revision",
+                     "ancestor or qualified external revision", "ancestor or qualified external revision")
+
+
 def run(report: bool = False, write_map: bool = False, pre_submission: bool = False) -> int:
     problems = unauditable()
     if problems:
@@ -3252,7 +3913,8 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
     audit = Audit()
     for check in (manuscript_ablation, selection_tables, manuscript_retry, manuscript_gmin, manuscript_tip4p, manuscript_hexamer,
                   manuscript_cross_field, supporting_information, release, paper_0120, gad_published, openconf,
-                  head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, lj_large, bench_prose,
+                  head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2,
+                  printed_harnesses, ase_gofee, lj_large, bench_prose,
                   manuscript_ase, panel_references, generated_tables, supporting_gmin, supporting_numbers, au55_superseded, manuscript_new, manuscript_followups, cover_letter):
         check(audit)
     if write_map:
@@ -3278,6 +3940,8 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
             print(f"{status:5}  {where}  {label}  shown={shown}  computed={value}")
         for path, fragment, why in UNTRACED:
             print(f"UNTRACED  {path}  {fragment!r}  {why}")
+        for path, row, revisions, why in UNVERIFIABLE:
+            print(f"UNVERIFIABLE  {path}  {row!r}  {' '.join(revisions)}  {why}")
     drift = audit.drifts()
     for status, where, label, shown, value in drift:
         print(f"{status}  {where}  {label}  shown={shown}  computed={value}", file=sys.stderr)

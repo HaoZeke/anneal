@@ -9,9 +9,7 @@ Anneal is Config::for_cluster. Its code_revision is
 ASE basin hopping and minima hopping use the ASE 3.29 constructor
 defaults. The harness revision for the new ASE rows is
 162d230740f078abbcb5caae9b0aba08477691bd.
-Basin hopping seed 2000 was already measured at
-8173c5e2855bbb863ebbcd93811f71c847eed31a. Its wall is 96.169444 s
-and it spent the call budget.
+The earlier basin-hopping wall was removed because its revision is not reachable. The quoting record remains on `origin/bench/ase-lj75`.
 The ASE wall cap is 167.806728 s, three times the slowest anneal
 wall, seed 2000 at 55.935576 s. A seed that reaches the cap is a
 miss. The row keeps the calls, the wall, the best energy and the cap.
