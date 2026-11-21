@@ -1,0 +1,4 @@
+BASE 5eb79cdcb0a986984dc7b487e5a3cc93224246f9
+harness scripts/pimc_lj38/run_campaign.py
+n 12
+machine-id sha256 3b11c160088e7af5c4f7ebd9da95e0bfe019a34698416701bb057c15fea10873
