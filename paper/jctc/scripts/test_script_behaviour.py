@@ -530,6 +530,12 @@ def test_house_drawers_write_pdfs(tmp_path: Path) -> None:
     import fig_rec_arms
     import figstyle
 
+    assert fig_algorithm_stack.POTENTIALS == (
+        "Lennard-Jones", "Morse", "Sutton-Chen", "Gupta", "TIP4P", "GFN2-xTB",
+    )
+    assert fig_rec_arms.ARMS == (
+        "single", "surface", "sym", "burst", "soap", "dls-kernel",
+    )
     stack = tmp_path / "stack.pdf"
     arms = tmp_path / "arms.pdf"
     fig_algorithm_stack.draw(stack)

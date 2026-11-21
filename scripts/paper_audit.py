@@ -4224,10 +4224,25 @@ def science_claims(audit: Audit) -> None:
                      "absent", "absent" if stale not in manuscript else "present")
     stack = audit.text("paper/jctc/scripts/fig_algorithm_stack.py")
     arms = audit.text("paper/jctc/scripts/fig_rec_arms.py")
-    for word in ("chain 40", "Good-Turing census", "annealed-flow bank"):
+    for word in ("chain 40", "40 chains", "Good-Turing census",
+                 "annealed-flow bank", "tbl:systems"):
         audit.record(word not in stack, "paper/jctc/scripts/fig_algorithm_stack.py",
                      f"the reported-run stack figure does not draw {word}", "absent",
                      "absent" if word not in stack else "present")
+    potential_tuple = (
+        'POTENTIALS = (\n'
+        '    "Lennard-Jones", "Morse", "Sutton-Chen", "Gupta", "TIP4P", "GFN2-xTB",\n'
+        ')'
+    )
+    audit.record(potential_tuple in stack, "paper/jctc/scripts/fig_algorithm_stack.py",
+                 "the stack figure lists exactly the reported potentials",
+                 "Lennard-Jones, Morse, Sutton-Chen, Gupta, TIP4P, GFN2-xTB",
+                 "exact" if potential_tuple in stack else "other")
+    for unused in ("EMT", "EAM", "Stillinger-Weber", "Tersoff",
+                   "GFN-FF", "PBE/6-31G*", "PET-MAD"):
+        audit.record(f'"{unused}"' not in stack, "paper/jctc/scripts/fig_algorithm_stack.py",
+                     f"the stack figure excludes unused potential {unused}",
+                     "absent", "absent" if f'"{unused}"' not in stack else "present")
     route_clear = stack_route_clears_temperature(stack)
     audit.record(route_clear, "paper/jctc/scripts/fig_algorithm_stack.py",
                  "the energies-and-forces route clears the temperature box", "clear",
@@ -4236,10 +4251,12 @@ def science_claims(audit: Audit) -> None:
     audit.record("bank" not in toc, "paper/jctc/scripts/toc_graphic.py",
                  "the TOC graphic draws no unused bank", "absent",
                  "absent" if "bank" not in toc else "present")
-    audit.record('"lattice"' in arms and '"resample"' not in arms,
+    arm_tuple = 'ARMS = ("single", "surface", "sym", "burst", "soap", "dls-kernel")'
+    audit.record(arm_tuple in arms and '"lattice"' not in arms and '"resample"' not in arms,
                  "paper/jctc/scripts/fig_rec_arms.py",
-                 "the arm figure draws the lattice arm and no resample arm", "lattice",
-                 "lattice" if '"lattice"' in arms and '"resample"' not in arms else "other")
+                 "the arm figure uses the six ClusterMove names",
+                 "single, surface, sym, burst, soap, dls-kernel",
+                 "exact" if arm_tuple in arms and '"lattice"' not in arms and '"resample"' not in arms else "other")
     table = text.split("% gmin-panel table: start", 1)[1].split("% gmin-panel table: end", 1)[0]
     audit.record("LJ\\(_{75}\\)" in table, TEX,
                  "LJ75 is present in the GMIN comparison table", "present",

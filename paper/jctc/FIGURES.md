@@ -26,14 +26,14 @@ The hash is unchanged.
 
 f3cd2a0fa0aae6af10373772466aa66fedd28d3d6eaead88ef43664c1f8b94ec
 
-## Compound names use a hyphen
+## Reported search schematics
 
-The new file matches the sealed kit render.
-The previous file prints an en dash in the compound names.
-The new file prints a hyphen.
-The names are Normal-Gamma and Good-Turing.
-They also include Sutton-Chen and Stillinger-Weber.
-rec_arms.pdf has only Normal-Gamma.
+The current files were regenerated from the scripts listed in
+`FIGURE-SOURCE.tsv`.
+The stack lists only Lennard-Jones, Morse, Sutton-Chen, Gupta, TIP4P, and
+GFN2-xTB.
+The arm figure uses the six move names from the implementation:
+single, surface, sym, burst, soap, and dls-kernel.
 
 Row 1 is algorithm_stack.pdf.
 
@@ -43,7 +43,7 @@ f293f076357068b50c437d39f6cbdfc15cc00e04dff693beda7e4f3727911778
 
 New hash.
 
-a1ffc48a74d571e7200a3fb039a90f7990af2278e6860a51c5c526db1f7dceed
+7b9888fcccfae129c97c662ecacb3b7c0e7d2a142e8945f9fa5160c842216bbe
 
 Row 2 is rec_arms.pdf.
 
@@ -53,7 +53,7 @@ Previous hash.
 
 New hash.
 
-3a4ba782ad42c841b3d94b9937212bbb61ec842f4cbe1cd385df9e047699fa38
+df826dbba80c4b3b7ccddc92b352b11b765d7a9b4c762f08a346415c362c3002
 
 ## One version byte
 

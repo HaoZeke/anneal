@@ -1471,10 +1471,29 @@ def test_reported_run_figures_exclude_unused_components_and_crossings():
     audit = audit_mod.Audit()
     stack = audit.text("paper/jctc/scripts/fig_algorithm_stack.py")
     assert audit_mod.stack_route_clears_temperature(stack)
+    assert (
+        '"Lennard-Jones", "Morse", "Sutton-Chen", "Gupta", "TIP4P", "GFN2-xTB"'
+        in stack
+    )
+    arms = audit.text("paper/jctc/scripts/fig_rec_arms.py")
+    assert '("single", "surface", "sym", "burst", "soap", "dls-kernel")' in arms
     crossing = stack.replace("(2.25, 0.74)", "(3.15, 0.74)").replace(
         "(2.25, 1.52)", "(3.15, 1.52)")
     assert not audit_mod.stack_route_clears_temperature(crossing)
     assert "bank" not in audit.text("paper/jctc/scripts/toc_graphic.py")
+
+
+def test_unused_potential_and_wrong_arm_label_are_reported():
+    audit = audit_mod.Audit()
+    stack_path = "paper/jctc/scripts/fig_algorithm_stack.py"
+    arms_path = "paper/jctc/scripts/fig_rec_arms.py"
+    audit.text_cache[stack_path] = audit.text(stack_path).replace('"Gupta"', '"EMT"')
+    audit.text_cache[arms_path] = audit.text(arms_path).replace('"dls-kernel"', '"lattice"')
+    audit_mod.science_claims(audit)
+    descriptions = {r[2] for r in audit.drifts()}
+    assert "the stack figure lists exactly the reported potentials" in descriptions
+    assert "the stack figure excludes unused potential EMT" in descriptions
+    assert "the arm figure uses the six ClusterMove names" in descriptions
 
 
 def test_default_screen_cannot_be_described_as_the_margin_path():

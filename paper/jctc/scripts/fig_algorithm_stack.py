@@ -6,7 +6,8 @@ The top band is the state held by one chain. The middle band is one hop: the
 Thompson draw over the arms from the Normal-Gamma posterior of eq:thompson,
 the proposal and quench, the acceptance test at T = 0.8, and the depth of
 eq:depth that updates the posterior. The bottom band is rgpot, through which
-every potential of tbl:systems reaches the hop. No run enters the figure.
+the six potentials used by the reported calculations reach the hop. No run
+enters the figure.
 
 Usage: fig_algorithm_stack.py OUT.pdf
 """
@@ -22,8 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import figstyle
 
 POTENTIALS = (
-    "Lennard-Jones", "Morse", "Sutton-Chen", "EMT", "EAM", "Stillinger-Weber",
-    "Tersoff", "TIP4P", "GFN2-xTB", "GFN-FF", "PBE/6-31G*", "PET-MAD",
+    "Lennard-Jones", "Morse", "Sutton-Chen", "Gupta", "TIP4P", "GFN2-xTB",
 )
 WIDTH = figstyle.DOUBLE
 HEIGHT = 3.35
