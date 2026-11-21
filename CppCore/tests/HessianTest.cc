@@ -97,6 +97,16 @@ Geometry lattice() {
   return g;
 }
 
+/// lattice() in a cell whose second vector is (1.5, 6, 0). The shear is one
+/// lattice spacing, so the crystal is the same, but the neighbour layer
+/// takes the general minimum image and pairs across the y faces pair other
+/// atoms. The gaps of lattice() hold.
+Geometry sheared() {
+  Geometry g = lattice();
+  g.box[3] = 1.5;
+  return g;
+}
+
 /// @a g with positions and cell scaled by @a f.
 Geometry scaled(Geometry g, double f) {
   for (double &x : g.x) {
@@ -186,6 +196,9 @@ std::vector<LjCase> ljCases() {
       {"periodic lattice, shifted", lattice(), LJConfig{.cutoff = 2.35}},
       {"periodic lattice, switched", lattice(),
        LJConfig{.cutoff = 2.36, .switch_width = 0.56}},
+      {"sheared lattice, shifted", sheared(), LJConfig{.cutoff = 2.35}},
+      {"sheared lattice, switched", sheared(),
+       LJConfig{.cutoff = 2.36, .switch_width = 0.56}},
   };
 }
 
@@ -199,12 +212,16 @@ struct MorseCase {
 /// where no pair distance lies in [3.10, 3.83] or [4.38, 4.77].
 std::vector<MorseCase> morseCases() {
   const Geometry lat = scaled(lattice(), 2.9 / 1.5);
+  const Geometry shear = scaled(sheared(), 2.9 / 1.5);
   return {
       {"cluster, shifted", cluster(2.9), MorseConfig{.cutoff = 7.0}},
       {"cluster, switched", cluster(2.9),
        MorseConfig{.cutoff = 7.0, .switch_width = 3.5}},
       {"periodic lattice, shifted", lat, MorseConfig{.cutoff = 4.6}},
       {"periodic lattice, switched", lat,
+       MorseConfig{.cutoff = 4.6, .switch_width = 1.1}},
+      {"sheared lattice, shifted", shear, MorseConfig{.cutoff = 4.6}},
+      {"sheared lattice, switched", shear,
        MorseConfig{.cutoff = 4.6, .switch_width = 1.1}},
   };
 }
