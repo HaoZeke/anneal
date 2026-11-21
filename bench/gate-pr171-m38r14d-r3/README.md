@@ -269,3 +269,115 @@ to fixed labels.
 Filled from summary.csv after the measurement.
 The rule above is not edited when this section
 is filled.
+
+Session e8ae91f267499713 wrote 1512 rows. Every
+exit code is 0. No row is missing and no row is a
+timeout. Three lanes ran on cores 0, 1, and 2.
+Peak resident set on a row is 654032896 bytes.
+The machine id on the rows is the sha256 of the
+platform machine-id file.
+
+Arms A and A' are separate release builds of the
+BASE tree. Each driver has the same bytes in both
+builds. Across all 504 seed pairs, A and A' match
+on the hit, the charged count, and best_bits. The
+hit allowance is 0. The charged A/A' band is
+1.000000. Wall time still moves between A and A'.
+
+Arm B is 03476abc24dc56e0620e2ce5508b5f1f21e8a3f1.
+Its tree is
+5d4ce286694a171f2507edc442d15fcfcb908113.
+
+The gate fails. Six cells fail.
+
+Clause 1 fails for m38r14 with h2h_seed. A has 23
+hits and B has 19, a deficit of 4 against an
+allowance of 0. The discordant counts are b = 0
+and c = 4. The exact two-sided McNemar
+probability is 0.125, so the p < 0.05 part of
+clause 1 does not fire. The deficit does.
+
+Clause 2 fails for lj98 with h2h_gmin_proof
+(1.001278), m55r14 with h2h_morse (1.005916),
+m80r14 with h2h_morse (1.008927), m30r14 with
+h2h_morse (1.004557), m38r6 with h2h_morse
+(1.000324), and m38r14 with h2h_seed (1.185919).
+None of those cells improved the hit count, so
+the band is not waived. Ranked charged counts
+decide this clause. On the first five, the median
+raw call count matches across arms and the ranked
+median for B sits above the band. On m38r14 with
+h2h_seed the raw-call ratio is 0.849362 and the
+ranked ratio is 1.185919, because the four extra
+misses are ranked at the budget.
+
+Clause 2 passes for the other fifteen cells.
+m38r14 with h2h_morse improves hits from 11 to
+24, which waives clause 2. Its charged ratio is
+0.106845.
+
+Clause 3 fails for no cell. The largest outside
+ratio B/A is m30r14 with h2h_morse at 1.038049.
+
+Bit identity of best_bits, A against B, is in the
+table. It is not a pass clause. The hexamer guard
+matches on all 24 seeds. Its hits, charged counts,
+and best_bits also match A against B.
+
+summary.csv holds median calls, median wall time,
+median outside per charged call, the B/A and A'/A
+ratios, the bootstrap intervals, the Wilcoxon
+signed-rank statistic, and the hit strings.
+aa_band.csv holds the A/A' terms. The allowance
+and the band are the same on every row.
+
+| cell | driver | hits A/A'/B | b | c | p | deficit | charged B/A | outside B/A | bits | rules | pass |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| lj38 | h2h_gmin_proof | 23/23/24 | 1 | 0 | 1 | -1 | 0.355773 | 1.025565 | 23/24 | 1/1/1 | 1 |
+| lj55 | h2h_gmin_proof | 24/24/24 | 0 | 0 | 1 | 0 | 1.000000 | 0.928786 | 24/24 | 1/1/1 | 1 |
+| lj75 | h2h_gmin_proof | 7/7/7 | 0 | 0 | 1 | 0 | 1.000000 | 0.998277 | 24/24 | 1/1/1 | 1 |
+| lj98 | h2h_gmin_proof | 16/16/16 | 0 | 0 | 1 | 0 | 1.001278 | 1.011999 | 24/24 | 1/0/1 | 0 |
+| lj102 | h2h_gmin_proof | 11/11/11 | 0 | 0 | 1 | 0 | 1.000000 | 1.004865 | 24/24 | 1/1/1 | 1 |
+| lj103 | h2h_gmin_proof | 13/13/13 | 0 | 0 | 1 | 0 | 1.000000 | 0.999579 | 24/24 | 1/1/1 | 1 |
+| lj104 | h2h_gmin_proof | 11/11/11 | 0 | 0 | 1 | 0 | 1.000000 | 1.001231 | 24/24 | 1/1/1 | 1 |
+| lj150 | h2h_gmin_proof | 18/18/18 | 0 | 0 | 1 | 0 | 1.000000 | 1.010154 | 24/24 | 1/1/1 | 1 |
+| au55 | h2h_metal | 8/8/8 | 0 | 0 | 1 | 0 | 1.000000 | 1.003178 | 24/24 | 1/1/1 | 1 |
+| m55r6 | h2h_morse | 24/24/24 | 0 | 0 | 1 | 0 | 1.000000 | 1.021379 | 24/24 | 1/1/1 | 1 |
+| m55r14 | h2h_morse | 18/18/18 | 0 | 0 | 1 | 0 | 1.005916 | 1.037299 | 22/24 | 1/0/1 | 0 |
+| m80r6 | h2h_morse | 24/24/24 | 0 | 0 | 1 | 0 | 1.000000 | 1.018344 | 24/24 | 1/1/1 | 1 |
+| m80r14 | h2h_morse | 15/15/15 | 0 | 0 | 1 | 0 | 1.008927 | 1.028987 | 24/24 | 1/0/1 | 0 |
+| m30r6 | h2h_morse | 24/24/24 | 0 | 0 | 1 | 0 | 1.000000 | 0.998750 | 24/24 | 1/1/1 | 1 |
+| m30r14 | h2h_morse | 17/17/17 | 0 | 0 | 1 | 0 | 1.004557 | 1.038049 | 24/24 | 1/0/1 | 0 |
+| m38r6 | h2h_morse | 24/24/24 | 0 | 0 | 1 | 0 | 1.000324 | 1.000623 | 24/24 | 1/0/1 | 0 |
+| m38r14 | h2h_morse | 11/11/24 | 13 | 0 | 0.000244141 | -13 | 0.106845 | 0.938369 | 11/24 | 1/1/1 | 1 |
+| m80r3 | h2h_morse | 24/24/24 | 0 | 0 | 1 | 0 | 1.000000 | 1.002976 | 24/24 | 1/1/1 | 1 |
+| m38r14 | h2h_seed | 23/23/19 | 0 | 4 | 0.125 | 4 | 1.185919 | 1.024673 | 19/24 | 0/0/1 | 0 |
+| lj75 | h2h_seed | 0/0/0 | 0 | 0 | 1 | 0 | 1.000000 | 0.996697 | 24/24 | 1/1/1 | 1 |
+| hexamer | h2h_seed | 24/24/24 | 0 | 0 | 1 | 0 | 1.000000 | 0.987185 | 24/24 | 1/1/1 | 1 |
+
+Per-seed hit strings, A then B, seeds 2000 through
+2023.
+
+| cell | driver | A | B |
+| --- | --- | --- | --- |
+| lj38 | h2h_gmin_proof | 111111111111111111101111 | 111111111111111111111111 |
+| lj55 | h2h_gmin_proof | 111111111111111111111111 | 111111111111111111111111 |
+| lj75 | h2h_gmin_proof | 010001001011000001100000 | 010001001011000001100000 |
+| lj98 | h2h_gmin_proof | 111101101000101111110101 | 111101101000101111110101 |
+| lj102 | h2h_gmin_proof | 110101011000010000010111 | 110101011000010000010111 |
+| lj103 | h2h_gmin_proof | 111110000001011111000110 | 111110000001011111000110 |
+| lj104 | h2h_gmin_proof | 000001110101010100101110 | 000001110101010100101110 |
+| lj150 | h2h_gmin_proof | 101101101011111110101111 | 101101101011111110101111 |
+| au55 | h2h_metal | 000001001011000000001111 | 000001001011000000001111 |
+| m55r6 | h2h_morse | 111111111111111111111111 | 111111111111111111111111 |
+| m55r14 | h2h_morse | 110110111011110110011111 | 110110111011110110011111 |
+| m80r6 | h2h_morse | 111111111111111111111111 | 111111111111111111111111 |
+| m80r14 | h2h_morse | 110100110010110111111010 | 110100110010110111111010 |
+| m30r6 | h2h_morse | 111111111111111111111111 | 111111111111111111111111 |
+| m30r14 | h2h_morse | 010110101111011011111101 | 010110101111011011111101 |
+| m38r6 | h2h_morse | 111111111111111111111111 | 111111111111111111111111 |
+| m38r14 | h2h_morse | 010000001101100001111110 | 111111111111111111111111 |
+| m80r3 | h2h_morse | 111111111111111111111111 | 111111111111111111111111 |
+| m38r14 | h2h_seed | 101111111111111111111111 | 101101110101111111101111 |
+| lj75 | h2h_seed | 000000000000000000000000 | 000000000000000000000000 |
+| hexamer | h2h_seed | 111111111111111111111111 | 111111111111111111111111 |
