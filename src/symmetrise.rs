@@ -326,43 +326,47 @@ impl Cloud {
         (0..self.xs.len()).any(|index| index != far && can_leave(index))
     }
 
-    /// Nearest atom, eight coordinates at a time.
+    /// Nearest atom and its squared distance, four coordinates at a time.
     ///
-    /// Strict `<` keeps the earlier index on a tie. The distances in a
-    /// chunk do not depend on each other, so the compiler can autovectorise
-    /// them. The index update stays in program order, then the tail.
+    /// Each lane keeps the minimum a scalar walk would keep: a smaller
+    /// distance, or the same distance at an earlier index. The tail is
+    /// reduced with the lanes under that same order, so a tie keeps the
+    /// earlier atom. The distance-only miss path does not use this walk.
     fn nearest_index(&self, image: [f64; 3]) -> (usize, f64) {
-        let n = self.xs.len();
-        let mut index = 0usize;
-        let mut best_index = 0usize;
-        let mut best = f64::INFINITY;
-        while index + 8 <= n {
-            let mut dist = [0.0; 8];
-            for lane in 0..8 {
-                dist[lane] = squared_offset(
-                    image,
-                    self.xs[index + lane],
-                    self.ys[index + lane],
-                    self.zs[index + lane],
-                );
-            }
-            for lane in 0..8 {
-                if dist[lane] < best {
-                    best = dist[lane];
-                    best_index = index + lane;
+        let mut lane = [f64::INFINITY; 4];
+        let mut who = [0usize; 4];
+        let (xs, xs_remainder) = self.xs.as_chunks::<4>();
+        let (ys, ys_remainder) = self.ys.as_chunks::<4>();
+        let (zs, zs_remainder) = self.zs.as_chunks::<4>();
+        let mut base = 0usize;
+        for ((x, y), z) in xs.iter().zip(ys).zip(zs) {
+            for offset in 0..4 {
+                let distance = squared_offset(image, x[offset], y[offset], z[offset]);
+                let candidate = base + offset;
+                if distance < lane[offset] {
+                    lane[offset] = distance;
+                    who[offset] = candidate;
                 }
             }
-            index += 8;
+            base += 4;
         }
-        while index < n {
-            let distance = squared_offset(image, self.xs[index], self.ys[index], self.zs[index]);
+        let mut best = f64::INFINITY;
+        let mut index = 0usize;
+        for offset in 0..4 {
+            if lane[offset] < best || (lane[offset] == best && who[offset] < index) {
+                best = lane[offset];
+                index = who[offset];
+            }
+        }
+        for ((&x, &y), &z) in xs_remainder.iter().zip(ys_remainder).zip(zs_remainder) {
+            let distance = squared_offset(image, x, y, z);
             if distance < best {
                 best = distance;
-                best_index = index;
+                index = base;
             }
-            index += 1;
+            base += 1;
         }
-        (best_index, best)
+        (index, best)
     }
 
     #[cfg(test)]
@@ -511,10 +515,10 @@ impl Cloud {
         let mut lane1 = f64::INFINITY;
         let mut lane2 = f64::INFINITY;
         let mut lane3 = f64::INFINITY;
-        let mut xs = self.xs.chunks_exact(4);
-        let mut ys = self.ys.chunks_exact(4);
-        let mut zs = self.zs.chunks_exact(4);
-        for ((x, y), z) in xs.by_ref().zip(ys.by_ref()).zip(zs.by_ref()) {
+        let (xs, xs_remainder) = self.xs.as_chunks::<4>();
+        let (ys, ys_remainder) = self.ys.as_chunks::<4>();
+        let (zs, zs_remainder) = self.zs.as_chunks::<4>();
+        for ((x, y), z) in xs.iter().zip(ys).zip(zs) {
             let d0 = squared_offset(image, x[0], y[0], z[0]);
             let d1 = squared_offset(image, x[1], y[1], z[1]);
             let d2 = squared_offset(image, x[2], y[2], z[2]);
@@ -532,12 +536,7 @@ impl Cloud {
                 lane3 = d3;
             }
         }
-        for ((&x, &y), &z) in xs
-            .remainder()
-            .iter()
-            .zip(ys.remainder())
-            .zip(zs.remainder())
-        {
+        for ((&x, &y), &z) in xs_remainder.iter().zip(ys_remainder).zip(zs_remainder) {
             let distance = squared_offset(image, x, y, z);
             if distance < lane0 {
                 lane0 = distance;
@@ -2849,6 +2848,89 @@ mod shell_tests {
         }
     }
 
+    /// Indices 1 and 4 are the same distance from the origin. The scalar
+    /// walk returns the earlier one.
+    #[test]
+    fn a_tie_keeps_the_earliest_index() {
+        let coords = vec![
+            10.0, 0.0, 0.0, 1.0, 0.0, 0.0, 20.0, 0.0, 0.0, -30.0, 0.0, 0.0, -1.0, 0.0, 0.0,
+        ];
+        let cloud = Cloud::from_view(Array1::from(coords).view(), 5);
+        let image = [0.0, 0.0, 0.0];
+        let scalar = cloud.nearest_index_scalar(image);
+        let chosen = cloud.nearest_index(image);
+        assert_eq!(scalar.0, 1);
+        assert_eq!(scalar.1.to_bits(), 1.0_f64.to_bits());
+        assert_eq!(chosen.0, scalar.0);
+        assert_eq!(chosen.1.to_bits(), scalar.1.to_bits());
+    }
+
+    /// Equal distances in two chunks and the tail keep the earliest index.
+    ///
+    /// Nine atoms: two groups of four and a tail atom. Index 1, index 4
+    /// and index 8 are the same site.
+    #[test]
+    fn a_cross_chunk_tie_keeps_the_earliest_index() {
+        let mut coords = Vec::with_capacity(27);
+        for index in 0..9 {
+            coords.extend_from_slice(&[index as f64 + 2.0, 3.0, -2.0]);
+        }
+        for index in [1usize, 4, 8] {
+            let at = 3 * index;
+            coords[at] = 0.25;
+            coords[at + 1] = -0.5;
+            coords[at + 2] = 0.75;
+        }
+        let cloud = Cloud::from_view(Array1::from(coords).view(), 9);
+        let image = cloud.point(1);
+        let scalar = cloud.nearest_index_scalar(image);
+        let chosen = cloud.nearest_index(image);
+        assert_eq!(scalar.0, 1);
+        assert_eq!(chosen.0, 1);
+        assert_eq!(chosen.1.to_bits(), 0.0_f64.to_bits());
+        assert_eq!(chosen.1.to_bits(), scalar.1.to_bits());
+    }
+
+    proptest::proptest! {
+        /// Random clouds with copies forced into a later chunk and the tail.
+        #[test]
+        fn tied_sites_match_the_scalar_nearest_index(
+            coords in proptest::collection::vec(-4.0f64..4.0, 15usize..73),
+        ) {
+            let n = coords.len() / 3;
+            let mut coords = coords;
+            coords.truncate(3 * n);
+            let copy_site = |coords: &mut Vec<f64>, from: usize, to: usize| {
+                coords[3 * to] = coords[3 * from];
+                coords[3 * to + 1] = coords[3 * from + 1];
+                coords[3 * to + 2] = coords[3 * from + 2];
+            };
+            if n > 4 {
+                copy_site(&mut coords, 1, 4);
+            }
+            if n % 4 != 0 && n - 1 != 1 {
+                copy_site(&mut coords, 1, n - 1);
+            }
+            if n > 7 {
+                copy_site(&mut coords, 2, 6);
+            }
+            let cloud = Cloud::from_view(Array1::from(coords).view(), n);
+            let images = [
+                [0.0, 0.0, 0.0],
+                cloud.point(0),
+                cloud.point(1),
+                cloud.point(4),
+                cloud.point(n - 1),
+            ];
+            for image in images {
+                let scalar = cloud.nearest_index_scalar(image);
+                let chosen = cloud.nearest_index(image);
+                proptest::prop_assert_eq!(chosen.0, scalar.0);
+                proptest::prop_assert_eq!(chosen.1.to_bits(), scalar.1.to_bits());
+            }
+        }
+    }
+
     #[test]
     fn an_image_inside_half_the_gap_is_the_source_atom() {
         let mut state = 0x9e37_79b9_u64;
@@ -2961,8 +3043,25 @@ mod shell_tests {
             clouds.push((name.to_string(), bench_cloud(n, seed), n));
         }
         clouds.push(("ring12".to_string(), bench_ring(12, 2.2), 12));
+        clouds.push(("ring55".to_string(), bench_ring(55, 2.2), 55));
         let (lattice, lattice_n) = bench_lattice(2);
         clouds.push(("lattice".to_string(), lattice, lattice_n));
+        let mut packed = Vec::new();
+        for i in -4..=4 {
+            for j in -4..=4 {
+                for k in -4..=4 {
+                    let r2 = i * i + j * j + k * k;
+                    if r2 > 0 && r2 <= 6 {
+                        packed.push(i as f64);
+                        packed.push(j as f64);
+                        packed.push(k as f64);
+                    }
+                }
+            }
+        }
+        let packed_n = packed.len() / 3;
+        assert_eq!(packed_n, 80);
+        clouds.push(("packed80".to_string(), Array1::from(packed), packed_n));
         let mut duplicated = bench_cloud(6, 3).to_vec();
         duplicated.extend_from_within(..);
         clouds.push(("duplicated".to_string(), Array1::from(duplicated), 12));
