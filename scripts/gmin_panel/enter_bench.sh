@@ -8,6 +8,9 @@
 #
 #   enter_bench.sh [run_panel.py options]
 #   enter_bench.sh --summarize [--tex]   # rewrite the tables from rows.csv only
+#
+# --summarize scores the latest stored row of each seed, whatever anneal
+# revision wrote it, unless GMIN_PANEL_REV names one.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -19,7 +22,7 @@ cargo_home=${CARGO_HOME:-$HOME/.cargo}
 
 if [[ ${1:-} == --summarize ]]; then
   shift
-  exec python3 "$HERE/run_panel.py" --summarize --root "$ROOT" --rows "$OUT/rows.csv" --revision "$REV" "$@"
+  exec python3 "$HERE/run_panel.py" --summarize --root "$ROOT" --rows "$OUT/rows.csv" --revision "${GMIN_PANEL_REV:-latest}" "$@"
 fi
 
 tree() {

@@ -258,6 +258,54 @@ def test_documented_summarize_commands_select_the_committed_rows(
     assert {r["gmin_revision"] for r in written} == {r["code_revision"] for r in rows if r["code"] == "gmin"}
 
 
+SUMMARIZE_FILES = (
+    "scripts/gmin_panel/enter_bench.sh",
+    "scripts/gmin_panel/run_panel.py",
+    "scripts/target_tol.py",
+    "scripts/gmin_pin.py",
+    "bench/gmin-panel/rows.csv",
+)
+SUMMARIZED_FILES = (
+    "bench/gmin-panel/summary.csv",
+    "bench/gmin-panel/README.md",
+    "paper/jctc/manuscript.tex",
+)
+
+
+def _documented_summarize_commands() -> dict[str, str]:
+    command = r"bash scripts/gmin_panel/enter_bench\.sh --summarize[^`\n]*"
+    sources = {
+        "README": (ROOT / "bench/gmin-panel/README.md", rf"`({command})`"),
+        "manuscript": (ROOT / "paper/jctc/manuscript.tex", rf"^({command})$"),
+        "Snakefile": (ROOT / "workflow/Snakefile", rf"^\s*({command})$"),
+    }
+    found = {}
+    for where, (path, pattern) in sources.items():
+        matches = re.findall(pattern, path.read_text(), re.M)
+        assert len(matches) == 1, f"{where}: {matches}"
+        found[where] = " ".join(matches[0].split())
+    return found
+
+
+@pytest.mark.parametrize("where", ["README", "manuscript", "Snakefile"])
+def test_documented_summarize_command_reproduces_the_committed_tables(tmp_path: Path, where: str) -> None:
+    panel = _load_panel(f"gmin_panel_documented_{where}")
+    for relative in SUMMARIZE_FILES + SUMMARIZED_FILES:
+        (tmp_path / relative).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / relative).write_bytes((ROOT / relative).read_bytes())
+    (tmp_path / "bench/gmin-panel/summary.csv").write_bytes(b"")
+    for relative, (start, end) in (("bench/gmin-panel/README.md", panel.README_MARKS),
+                                   ("paper/jctc/manuscript.tex", panel.TEX_MARKS)):
+        text = (tmp_path / relative).read_text()
+        head, rest = text.split(start, 1)
+        (tmp_path / relative).write_text(f"{head}{start}\n{end}{rest.split(end, 1)[1]}")
+        assert (tmp_path / relative).read_bytes() != (ROOT / relative).read_bytes()
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GMIN_PANEL_")}
+    subprocess.run(["bash", "-c", _documented_summarize_commands()[where]], cwd=tmp_path, env=env, check=True)
+    for relative in SUMMARIZED_FILES:
+        assert (tmp_path / relative).read_bytes() == (ROOT / relative).read_bytes(), relative
+
+
 def test_summarize_refuses_to_wipe_the_tables(tmp_path: Path) -> None:
     panel = _load_panel("gmin_panel_summarize_empty")
     rows = [r for r in panel.read_rows(ROOT / "bench" / "gmin-panel" / "rows.csv") if r["code"] == "gmin"]
