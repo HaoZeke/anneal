@@ -229,12 +229,16 @@ variable (Barducci-Bussi-Parrinello well-tempered metadynamics).
 escape acceleration of Chatterjee and Voter with the well-tempered weight
 on top. =BasinIndex= splits out the identity-only half (no potential
 attached) for mechanisms that need "have I been here before" without
-depositing.
+depositing. Its lookup walks the stored centres newest first and returns
+the first within the merge radius. A key test and a suffix test drop
+far centres, and for a Euclidean metric so does a lower bound from sums
+over 32-entry blocks, which allows for rounding so that the answer is
+the one the full distance gives.
 
-Key types and functions: =Bias= trait (src/bias.rs:18); =WellTemperedBias=
-(src/bias.rs:46); =BasinBias<F: Fingerprint>= (src/bias.rs:292);
-=BasinIndex<F: Fingerprint>= (src/bias.rs:308); =Fingerprint= trait
-(src/bias.rs:522); =SortedPairs= (src/bias.rs:533), the default
+Key types and functions: =Bias= trait (src/bias.rs:35); =WellTemperedBias=
+(src/bias.rs:63); =BasinBias<F: Fingerprint>= (src/bias.rs:358);
+=BasinIndex<F: Fingerprint>= (src/bias.rs:381); =Fingerprint= trait
+(src/bias.rs:970); =SortedPairs= (src/bias.rs:987), the default
 permutation/translation/rotation-invariant fingerprint for point sets.
 
 Constants and defaults: deposit rule

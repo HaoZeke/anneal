@@ -391,6 +391,18 @@ pub struct BasinIndex<F: Fingerprint> {
     centre_suffix: Vec<f64>,
     /// Triangle-inequality keys, parallel to `centres`.
     keys: Vec<Option<f64>>,
+    /// Block sums of every centre, packed in basin order.
+    ///
+    /// A centre that the key cannot rule out is most often still several
+    /// radii away. The block sums bound its distance from below at one
+    /// read in thirty-two, so most of those centres are dismissed without
+    /// touching the descriptor.
+    centre_blocks: Vec<f64>,
+    /// Where each centre's block sums start in `centre_blocks`.
+    block_start: Vec<usize>,
+    /// Largest entry magnitude of each centre, which bounds the rounding
+    /// of its block sums. Infinite for a centre with a non-finite entry.
+    centre_magnitude: Vec<f64>,
     visits: Vec<u64>,
     /// Most seats the index opens. `None` grows with every new region.
     cap: Option<usize>,
@@ -408,6 +420,9 @@ impl<F: Fingerprint> BasinIndex<F> {
             centres: Vec::new(),
             centre_suffix: Vec::new(),
             keys: Vec::new(),
+            centre_blocks: Vec::new(),
+            block_start: Vec::new(),
+            centre_magnitude: Vec::new(),
             visits: Vec::new(),
             cap: None,
         }
@@ -476,6 +491,40 @@ impl<F: Fingerprint> BasinIndex<F> {
         false
     }
 
+    /// Whether the block sums of basin `i` already put it past the radius.
+    ///
+    /// By Cauchy-Schwarz the squared sum of a block's differences over the
+    /// block length is at most the block's squared distance, so the sum of
+    /// those terms is a lower bound on the squared distance. Each block
+    /// difference is first shrunk by the most the rounding of its two block
+    /// sums can have moved it, and the total must clear the same slack as
+    /// the packed full sum, so a centre the full sum keeps is never skipped.
+    /// The long end is summed first, where a sorted spectrum differs most.
+    fn blocks_separate(&self, i: usize, query: &BlockSums) -> bool {
+        let n = self.centres[i].len();
+        let count = n.div_ceil(BLOCK);
+        if query.sums.len() != count {
+            return false;
+        }
+        let start = self.block_start[i];
+        let centre = &self.centre_blocks[start..start + count];
+        let magnitude = query.magnitude + self.centre_magnitude[i];
+        let limit = self.merge_radius * self.merge_radius;
+        let mut acc = 0.0;
+        for b in (0..count).rev() {
+            let width = (n - b * BLOCK).min(BLOCK);
+            let slack = 2.0 * gamma(width) * width as f64 * magnitude;
+            let gap = (query.sums[b] - centre[b]).abs() * (1.0 - f64::EPSILON) - slack;
+            if gap > 0.0 {
+                acc += gap * gap / width as f64;
+                if clearly_past(acc, limit, 1.0e-8) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     /// Index of the nearest registered basin within `merge_radius`.
     ///
     /// Most recently added first, returning the first centre inside the radius
@@ -492,8 +541,15 @@ impl<F: Fingerprint> BasinIndex<F> {
     /// distinction did not show. With a shape distance at milliseconds per
     /// comparison it is the difference between one call and one per basin, and
     /// the exhaustive version did not finish an LJ38 run.
+    ///
+    /// For a metric whose [`BasinMetric::is_euclidean`] is true, a centre is
+    /// skipped without reading its descriptor when the sums over 32-entry
+    /// blocks already put it outside the radius. That bound allows for the
+    /// rounding of the sums, so the answer is the one the plain walk gives.
     pub fn lookup(&self, d: ArrayView1<f64>) -> Option<usize> {
         let dk = self.metric.key(d);
+        let bounded = self.metric.is_euclidean() && aggregate_rounding_is_small(d.len());
+        let mut blocks: Option<BlockSums> = None;
         for (i, c) in self.centres.iter().enumerate().rev() {
             if c.len() != d.len() {
                 continue;
@@ -504,6 +560,9 @@ impl<F: Fingerprint> BasinIndex<F> {
             if let (Some(k), Some(ck)) = (dk, self.keys[i])
                 && (k - ck).abs() > self.merge_radius
             {
+                continue;
+            }
+            if bounded && self.blocks_separate(i, blocks.get_or_insert_with(|| BlockSums::of(d))) {
                 continue;
             }
             if self.suffix_separates(i, d) {
@@ -526,6 +585,10 @@ impl<F: Fingerprint> BasinIndex<F> {
             self.centre_suffix
                 .extend(d.iter().skip(d.len() - 32).copied());
         }
+        let blocks = BlockSums::of(d.view());
+        self.block_start.push(self.centre_blocks.len());
+        self.centre_blocks.extend_from_slice(&blocks.sums);
+        self.centre_magnitude.push(blocks.magnitude);
         self.centres.push(d);
         self.visits.push(0);
         self.centres.len() - 1
@@ -614,6 +677,13 @@ pub trait BasinMetric: Send + Sync {
     fn distance_bounded(&self, a: ArrayView1<f64>, b: ArrayView1<f64>, _bound: f64) -> f64 {
         self.distance(a, b)
     }
+
+    /// Whether `distance_bounded` is the Euclidean distance between the
+    /// descriptors, computed as a sum of squared differences, so that the
+    /// index may skip a centre on a lower bound of that distance.
+    fn is_euclidean(&self) -> bool {
+        false
+    }
 }
 
 /// Ordinary Euclidean distance between descriptors.
@@ -635,6 +705,10 @@ impl BasinMetric for EuclideanMetric {
     /// The Euclidean norm, which obeys the reverse triangle inequality.
     fn key(&self, v: ArrayView1<f64>) -> Option<f64> {
         Some(v.iter().map(|x| x * x).sum::<f64>().sqrt())
+    }
+
+    fn is_euclidean(&self) -> bool {
+        true
     }
 
     fn distance_bounded(&self, a: ArrayView1<f64>, b: ArrayView1<f64>, bound: f64) -> f64 {
@@ -679,6 +753,55 @@ impl BasinMetric for EuclideanMetric {
 /// relative, with `u = 2^-53`. A 4753-entry spectrum, LJ98, puts two orders
 /// about `1e-12` apart. This is a hundred times that.
 const SUM_ORDER_GAP: f64 = 1.0e-10;
+
+/// Entries per block of the block-sum bound in [`BasinIndex::lookup`], the
+/// width the suffix test and the bounded distance already work in.
+///
+/// Narrower blocks bound more tightly and cost more reads. Lookups return
+/// the same basin at any width.
+const BLOCK: usize = 32;
+
+/// Sums of consecutive [`BLOCK`]-entry blocks of a descriptor, with the
+/// largest entry magnitude, which bounds how far rounding moved each sum.
+struct BlockSums {
+    sums: Vec<f64>,
+    /// Infinite when an entry is not finite, which turns the bound off.
+    magnitude: f64,
+}
+
+impl BlockSums {
+    fn of(d: ArrayView1<f64>) -> Self {
+        let mut sums = Vec::with_capacity(d.len().div_ceil(BLOCK));
+        let mut largest = 0.0_f64;
+        let mut finite = true;
+        let mut acc = 0.0;
+        for (k, &v) in d.iter().enumerate() {
+            acc += v;
+            finite &= v.is_finite();
+            largest = largest.max(v.abs());
+            if (k + 1) % BLOCK == 0 || k + 1 == d.len() {
+                sums.push(acc);
+                acc = 0.0;
+            }
+        }
+        let magnitude = if finite { largest } else { f64::INFINITY };
+        Self { sums, magnitude }
+    }
+}
+
+/// The standard bound on the relative rounding of an `n`-term sum,
+/// \(n u / (1 - n u)\) with \(u = 2^{-53}\).
+fn gamma(n: usize) -> f64 {
+    let nu = n as f64 * f64::EPSILON * 0.5;
+    nu / (1.0 - nu)
+}
+
+/// Whether a descriptor is short enough that the rounding of its full sum
+/// and of its block bound stays well inside the relative slack of
+/// [`clearly_past`]. Past that the block bound is not used.
+fn aggregate_rounding_is_small(n: usize) -> bool {
+    gamma(2 * n + 2 * BLOCK) < 0.1 * SUM_ORDER_GAP
+}
 
 /// Whether a partial sum of squares is past `limit` in every summation order.
 ///
