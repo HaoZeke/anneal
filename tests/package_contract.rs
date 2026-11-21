@@ -6,7 +6,10 @@ use std::process::Command;
 
 fn temp_target(tag: &str) -> PathBuf {
     let mut dir = std::env::temp_dir();
-    dir.push(format!("anneal-package-contract-{tag}-{}", std::process::id()));
+    dir.push(format!(
+        "anneal-package-contract-{tag}-{}",
+        std::process::id()
+    ));
     fs::create_dir_all(&dir).expect("create temp target dir");
     dir
 }
@@ -52,7 +55,11 @@ fn packaged_crate_is_under_ten_mebibytes() {
         .expect("cargo package --no-verify");
     assert!(status.success(), "cargo package --no-verify failed");
 
-    let crate_name = format!("{}-{}.crate", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+    let crate_name = format!(
+        "{}-{}.crate",
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION")
+    );
     let crate_path = target.join("package").join(crate_name);
     let size = fs::metadata(&crate_path)
         .unwrap_or_else(|err| panic!("missing {}: {err}", crate_path.display()))
