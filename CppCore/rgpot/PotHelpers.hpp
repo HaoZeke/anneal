@@ -101,6 +101,21 @@ void setForceLastError(const char *reason) noexcept;
 const char *forceLastError() noexcept;
 
 /**
+ * @brief Reject an input that would read a null buffer, with no force output.
+ *
+ * For a call that has no force array, such as a Hessian-vector product. A
+ * system with no atoms is named first, then a null position or species
+ * pointer, then a null cell when @a periodic is set. Each stores a message
+ * and returns @c kInvalidParameter. A usable input returns 0 and leaves the
+ * stored message unchanged.
+ */
+int rejectInputCall(const ForceInput &in, bool periodic);
+
+/// Throw @c std::invalid_argument with the stored message when
+/// @c rejectInputCall rejects @a in.
+void guardInputCall(const ForceInput &in, bool periodic);
+
+/**
  * @brief Reject a force call that would read a null buffer.
  *
  * A system with no atoms is rejected first, with its own message, before

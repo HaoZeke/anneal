@@ -560,20 +560,9 @@ private:
     if (input != nullptr && input->positions != nullptr &&
         input->positions->dl_tensor.shape != nullptr) {
       const ::rgpot::ForceInput fi = legacy_input(input);
-      // No force buffer here. Name a missing input directly so a
-      // zero-atom product is not reported as a null force array.
-      const char *why = nullptr;
-      if (fi.nAtoms == 0) {
-        why = "invalid parameter: nAtoms must be positive";
-      } else if (fi.pos == nullptr) {
-        why = "invalid parameter: positions is null";
-      } else if (fi.atmnrs == nullptr) {
-        why = "invalid parameter: atomic numbers are null";
-      } else if (::rgpot::kernelPeriodic(*self) && fi.box == nullptr) {
-        why = "invalid parameter: box is null";
-      }
-      if (why != nullptr) {
-        rgpot_set_last_error(why);
+      // No force buffer here, so the input is checked on its own.
+      if (::rgpot::rejectInputCall(fi, ::rgpot::kernelPeriodic(*self)) != 0) {
+        rgpot_set_last_error(::rgpot::forceLastError());
         return RGPOT_INVALID_PARAMETER;
       }
     }

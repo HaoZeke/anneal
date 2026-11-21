@@ -80,14 +80,9 @@ void setForceLastError(const char *reason) noexcept {
 
 const char *forceLastError() noexcept { return g_force_error.c_str(); }
 
-int rejectForceCall(const ForceInput &in, const ForceOut *out, bool periodic) {
-  // Before the force pointer. A zero-atom call often has no force
-  // allocation, and that null must not become the reported error.
+int rejectInputCall(const ForceInput &in, bool periodic) {
   if (in.nAtoms == 0) {
     return fail("invalid parameter: nAtoms must be positive");
-  }
-  if (out == nullptr || out->F == nullptr) {
-    return fail("invalid parameter: forces are null");
   }
   if (in.pos == nullptr) {
     return fail("invalid parameter: positions is null");
@@ -99,6 +94,21 @@ int rejectForceCall(const ForceInput &in, const ForceOut *out, bool periodic) {
     return fail("invalid parameter: box is null");
   }
   return 0;
+}
+
+int rejectForceCall(const ForceInput &in, const ForceOut *out, bool periodic) {
+  // A zero-atom call often has no force allocation, and that null must not
+  // become the reported error, so the force pointer is read only for atoms.
+  if (in.nAtoms != 0 && (out == nullptr || out->F == nullptr)) {
+    return fail("invalid parameter: forces are null");
+  }
+  return rejectInputCall(in, periodic);
+}
+
+void guardInputCall(const ForceInput &in, bool periodic) {
+  if (rejectInputCall(in, periodic) != 0) {
+    throw std::invalid_argument(forceLastError());
+  }
 }
 
 void guardForceCall(const ForceInput &in, const ForceOut *out, bool periodic) {

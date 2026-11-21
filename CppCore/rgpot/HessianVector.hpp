@@ -305,6 +305,7 @@ public:
     };
     if (scheme == HvpScheme::Analytic) {
       if constexpr (AnalyticHessianVectorKernel<Pot>) {
+        guardInputCall(in, kernelPeriodic(pot));
         std::as_const(pot).hessianVectorImpl(in, v, hv);
         requireFinite(hv, dim, "hessianVectorImpl");
         analytic_.fetch_add(1, std::memory_order_relaxed);
