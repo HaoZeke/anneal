@@ -70,6 +70,12 @@ option(
 option('with_tblite', type: 'boolean', value: false)
 option('with_metatomic', type: 'boolean', value: false)
 option(
+    'with_uma',
+    type: 'boolean',
+    value: false,
+    description: 'Build the UMA engine plugin against torch alone, without the metatensor and metatomic packages. Torch is a Python package or a libtorch tree named by RGPOT_TORCH_ROOT. with_metatomic builds the plugin too.',
+)
+option(
     'with_skala',
     type: 'boolean',
     value: false,

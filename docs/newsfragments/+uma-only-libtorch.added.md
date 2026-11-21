@@ -1,0 +1,1 @@
+A build option `with_uma` builds the UMA engine plugin against torch alone, without the metatensor and metatomic packages that `with_metatomic` needs. Torch is then a Python package or the C++ distribution: `RGPOT_TORCH_ROOT` may name a libtorch tree (`lib`, `include` and a `build-version` file), and the plugin records that library directory as its run path.

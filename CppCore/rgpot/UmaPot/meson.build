@@ -16,6 +16,14 @@ uma = static_library(
 # (ptlrpc) and needs the rpc stack at build time. RUNPATH mirrors the
 # metatomic engine; both reuse variables MetatomicPot/meson.build minted.
 if _rpc_stack
+    # Without the metatomic engine nothing has minted the plugin's run paths.
+    # A build against torch alone finds libtorch where it was configured: a
+    # libtorch tree does not travel with the plugin the way site-packages
+    # peers do.
+    if not is_variable('_engine_build_rpath')
+        _engine_build_rpath = _torch_libdir
+        _engine_install_rpath = _torch_libdir
+    endif
     uma_engine = library(
         'uma_engine',
         [

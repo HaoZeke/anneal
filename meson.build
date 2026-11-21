@@ -538,11 +538,17 @@ if get_option('with_tblite')
 endif
 
 has_metatomic = false
+has_uma = false
 _mta_engine_deps = []
-if get_option('with_metatomic')
+# The UMA engine needs torch alone; the metatomic engine needs torch and the
+# metatensor and metatomic packages. with_uma builds the first without the
+# second: torch may then be a plain libtorch tree with no Python package.
+if get_option('with_metatomic') or get_option('with_uma')
     # Discover torch without importing it (import can load NumPy C extensions
     # during meson configure). Supports multi-ABI builds via:
     #   RGPOT_TORCH_ROOT=/path/to/site-packages/torch  (isolated major)
+    #   RGPOT_TORCH_ROOT=/path/to/libtorch  (the C++ distribution: lib,
+    #     include and a build-version file; no Python package)
     #   or first torch/version.py on sys.path (PYTHONPATH prefixes).
     # Prefer manual -isystem/-L over cmake Torch: old/CUDA wheels break cmake
     # with missing nvcc; libtorch_cpu.so is enough for the engine plugin.
@@ -567,7 +573,10 @@ def torch_root() -> Path:
             return p
         if (p / "torch" / "version.py").is_file():
             return p / "torch"
-        raise SystemExit(f"RGPOT_TORCH_ROOT has no version.py: {env}")
+        if (p / "build-version").is_file() and (p / "lib").is_dir():
+            return p
+        raise SystemExit(
+            f"RGPOT_TORCH_ROOT has neither version.py nor build-version: {env}")
     for entry in sys.path:
         cand = Path(entry) / "torch" / "version.py"
         if cand.is_file():
@@ -579,14 +588,21 @@ def torch_root() -> Path:
 
 troot = torch_root()
 version_file = troot / "version.py"
-match = re.search(
-    r"^__version__\s*=\s*['\"]([^'\"]+)",
-    version_file.read_text(),
-    re.MULTILINE,
-)
-if match is None:
-    raise SystemExit(f"torch version not found in {version_file}")
-version = ".".join(match.group(1).split("+")[0].split(".")[:2])
+if version_file.is_file():
+    match = re.search(
+        r"^__version__\s*=\s*['\"]([^'\"]+)",
+        version_file.read_text(),
+        re.MULTILINE,
+    )
+    if match is None:
+        raise SystemExit(f"torch version not found in {version_file}")
+    full_version = match.group(1)
+else:
+    # The C++ distribution names its version in one line, e.g. 2.8.0+cpu.
+    full_version = (troot / "build-version").read_text().strip()
+    if not re.fullmatch(r"\d+\.\d+(\.\d+)?([+.-].*)?", full_version):
+        raise SystemExit(f"torch version not found in {troot / 'build-version'}")
+version = ".".join(full_version.split("+")[0].split(".")[:2])
 libdir = troot / "lib"
 inc = troot / "include"
 api_inc = troot / "include" / "torch" / "csrc" / "api" / "include"
@@ -642,7 +658,11 @@ print(api_inc)
     )
     # Torch stays off the umbrella _deps list. Putting it there makes
     # librgpot NEEDED libtorch_cpu and `import rgpot` requires torch.
+    _args += ['-DRGPOT_HAS_UMA=TRUE']
+    has_uma = true
+endif
 
+if get_option('with_metatomic')
     # metatensor-torch / metatomic-torch headers live in the
     # python interpreter's site-packages under
     # <purelib>/metatensor/torch/torch-X.Y/include and
@@ -725,7 +745,6 @@ print(api_inc)
     # is unnecessary here.
 
     _args += ['-DRGPOT_HAS_METATOMIC=TRUE']
-    _args += ['-DRGPOT_HAS_UMA=TRUE']
     has_metatomic = true
 endif
 

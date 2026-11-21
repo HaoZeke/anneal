@@ -52,6 +52,7 @@ _rt_atoms = {
     'dftd4': has_dftd4,
     'long_range': has_long_range,
     'metatomic': has_metatomic,
+    'uma': has_uma,
     'rust_core': get_option('with_rust_core'),
 }
 _rt_tests = []
@@ -492,6 +493,8 @@ if not get_option('with_rpc_client_only')
     # engine plugin (has_metatomic); it is dlopen'd, not linked.
     if has_metatomic and not get_option('with_python')
         rgpotentials += [metatomicpot]
+    endif
+    if has_uma and not get_option('with_python')
         subdir('rgpot/UmaPot')
         rgpotentials += [uma]
     endif
