@@ -195,8 +195,9 @@ static R3_GATE_LAYOUT_KEEP: extern "C" fn() = r3_gate_layout_pad;
     library_text = library.read_text()
     library_text = replace_once(
         library_text,
-        "#![warn(missing_docs)]\n",
-        "#![warn(missing_docs)]\n\n#[doc(hidden)]\nmod r3_gate_layout;\n",
+        "//! consumed by the Python `anneal` package via pyo3.\n",
+        "//! consumed by the Python `anneal` package via pyo3.\n"
+        "\n#[doc(hidden)]\nmod r3_gate_layout;\n",
     )
     library.write_text(library_text, newline="\n")
 
