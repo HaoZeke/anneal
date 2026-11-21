@@ -183,6 +183,24 @@ endif
 # Fortran pots all consume this dependency. Prefer an installed vesin
 # >= 0.6; fall back to the vendored single-TU build, which carries the
 # local patches maintained as vesin upstream candidates.
+fs = import('fs')
+vesin_version_lines = []
+foreach line : fs.read('third_party/vesin/VERSION').strip().split('\n')
+    line = line.strip()
+    if line != '' and not line.startswith('#')
+        vesin_version_lines += line
+    endif
+endforeach
+if vesin_version_lines.length() != 1
+    error('third_party/vesin/VERSION must contain exactly one version')
+endif
+vesin_version = vesin_version_lines[0]
+vesin_version_marker = '// vesin version: ' + vesin_version
+if not fs.read('third_party/vesin/vesin-single-build.cpp').contains(
+    vesin_version_marker,
+)
+    error('vendored vesin source does not match VERSION ' + vesin_version)
+endif
 vesin_threads_dep = dependency('threads')
 vesin_dep = dependency('vesin', version: '>=0.6', required: false)
 # vesin_hdr_dep carries compile information only. Meson copies the objects

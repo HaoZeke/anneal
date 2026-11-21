@@ -13,7 +13,7 @@ install_missing_pkgs() {
   purelib="$("$PY" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
   [[ -d "${purelib}/metatensor/include" ]] || need+=("metatensor-torch>=0.8.4,<0.9")
   [[ -d "${purelib}/metatomic/torch" ]] || need+=("metatomic-torch>=0.1.9,<0.2")
-  [[ -f "${purelib}/vesin/include/vesin.h" ]] || need+=("vesin>=0.5.2,<0.6" "vesin-torch>=0.5.2,<0.6")
+  [[ -f "${purelib}/vesin/include/vesin.h" ]] || need+=("vesin>=0.6.0,<0.7" "vesin-torch>=0.6.0,<0.7")
   if ((${#need[@]} == 0)); then
     echo "metatomic/metatensor/vesin purelib trees already present"
     return 0

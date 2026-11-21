@@ -372,6 +372,26 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
     target_link_libraries(rgpot_nlist PUBLIC OpenMP::OpenMP_CXX)
   endif()
   set_target_properties(rgpot_nlist PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+  file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/vesin/VERSION"
+       _rgpot_vesin_versions REGEX "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+  list(LENGTH _rgpot_vesin_versions _rgpot_vesin_version_count)
+  if(NOT _rgpot_vesin_version_count EQUAL 1)
+    message(
+      FATAL_ERROR
+        "third_party/vesin/VERSION must contain exactly one version")
+  endif()
+  list(GET _rgpot_vesin_versions 0 RGPOT_VESIN_VERSION)
+  file(STRINGS
+       "${CMAKE_CURRENT_SOURCE_DIR}/third_party/vesin/vesin-single-build.cpp"
+       _rgpot_vesin_source_version REGEX "^// vesin version: ")
+  if(NOT _rgpot_vesin_source_version STREQUAL
+     "// vesin version: ${RGPOT_VESIN_VERSION}")
+    message(
+      FATAL_ERROR
+        "vendored vesin source does not match VERSION ${RGPOT_VESIN_VERSION}")
+  endif()
+
   add_library(rgpot_vesin STATIC third_party/vesin/vesin-single-build.cpp)
   add_library(rgpot::vesin ALIAS rgpot_vesin)
   set_target_properties(rgpot_vesin PROPERTIES
