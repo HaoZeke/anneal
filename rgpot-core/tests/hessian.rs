@@ -7,6 +7,9 @@
 
 use std::os::raw::c_void;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::OnceLock;
+
+use dlpk::sys::DLManagedTensorVersioned;
 
 use rgpot_core::c_api::hessian::{
     rgpot_potential_derivative_caps, rgpot_potential_derivative_counts, rgpot_potential_hessian,
@@ -23,7 +26,7 @@ use rgpot_core::hessian::{
     rgpot_derivative_caps_t, rgpot_derivative_counts_t, rgpot_hessian_scheme_t,
 };
 use rgpot_core::hvp::{rgpot_hvp_counts_t, rgpot_hvp_scheme_t};
-use rgpot_core::potential::rgpot_potential_t;
+use rgpot_core::potential::{rgpot_potential_t, PotentialCallback};
 use rgpot_core::status::{rgpot_last_error, rgpot_set_last_error, rgpot_status_t};
 use rgpot_core::tensor::rgpot_tensor_owned_cpu_f64_2d;
 use rgpot_core::types::{rgpot_force_input_t, rgpot_force_out_t};
@@ -141,6 +144,28 @@ unsafe extern "C" fn morse_force(
     out.forces =
         unsafe { rgpot_tensor_owned_cpu_f64_2d(forces.as_ptr(), (pos.len() / 3) as i64, 3) };
     rgpot_status_t::RGPOT_SUCCESS
+}
+
+static OWNED_DELETER: OnceLock<unsafe extern "C" fn(*mut DLManagedTensorVersioned)> =
+    OnceLock::new();
+
+unsafe extern "C" fn messaging_deleter(tensor: *mut DLManagedTensorVersioned) {
+    unsafe { rgpot_set_last_error(c"a deleter's message".as_ptr()) };
+    let owned = OWNED_DELETER.get().expect("stored before the swap");
+    unsafe { owned(tensor) };
+}
+
+/// [`morse_force`], whose force tensor stores a message when it is freed.
+unsafe extern "C" fn messaging_force(
+    user_data: *mut c_void,
+    input: *const rgpot_force_input_t,
+    output: *mut rgpot_force_out_t,
+) -> rgpot_status_t {
+    let status = unsafe { morse_force(user_data, input, output) };
+    let forces = unsafe { &mut *(*output).forces };
+    OWNED_DELETER.get_or_init(|| forces.deleter.expect("an owned tensor has a deleter"));
+    forces.deleter = Some(messaging_deleter);
+    status
 }
 
 unsafe fn write_hessian(
@@ -324,10 +349,13 @@ struct Handle {
 
 impl Handle {
     fn new() -> Self {
+        Self::with_force(morse_force)
+    }
+
+    fn with_force(force: PotentialCallback) -> Self {
         let morse = Box::new(Morse::platinum());
-        let pot = unsafe {
-            rgpot_potential_new(morse_force, &*morse as *const Morse as *mut c_void, None)
-        };
+        let pot =
+            unsafe { rgpot_potential_new(force, &*morse as *const Morse as *mut c_void, None) };
         assert!(!pot.is_null());
         Self { pot, morse }
     }
@@ -864,6 +892,26 @@ fn a_successful_finite_difference_keeps_the_earlier_message() {
     let mut system = System::octahedron();
     let input = system.input();
     let handle = Handle::new();
+    for scheme in [RGPOT_HVP_FORWARD, RGPOT_HVP_CENTRAL] {
+        unsafe { rgpot_set_last_error(c"an older failure".as_ptr()) };
+        assert!(handle
+            .try_hvp(&input, &direction(system.dim()), scheme as i32)
+            .is_ok());
+        assert_eq!(last_error(), "an older failure");
+    }
+    unsafe { rgpot_set_last_error(c"an older failure".as_ptr()) };
+    assert!(handle
+        .try_hessian(&input, 0.0, RGPOT_HESSIAN_CENTRAL as i32)
+        .is_ok());
+    assert_eq!(last_error(), "an older failure");
+    assert!(handle.force_calls() > 0);
+}
+
+#[test]
+fn a_force_tensor_deleter_does_not_replace_the_earlier_message() {
+    let mut system = System::octahedron();
+    let input = system.input();
+    let handle = Handle::with_force(messaging_force);
     for scheme in [RGPOT_HVP_FORWARD, RGPOT_HVP_CENTRAL] {
         unsafe { rgpot_set_last_error(c"an older failure".as_ptr()) };
         assert!(handle
