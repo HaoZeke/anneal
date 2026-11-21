@@ -165,8 +165,11 @@ The header states that the pointer is valid until the next =rgpot_*= call on the
 same thread.
 A message that contains a NUL byte is stored as
 =(error message contained interior NUL)=.
-When a callback returns an error status, =rgpot-core= stores no message of its
-own: the text is whatever the callback stored, or an older message.
+When the force callback of =rgpot_potential_calculate= returns an error status,
+=rgpot-core= stores no message of its own: the text is whatever the callback
+stored, or an older message.
+The Hessian-vector and Hessian entry points clear the message before they call a
+callback, so a failing callback that stored none is named with its status.
 
 #+attr_rgpot: compile
 #+begin_src c
