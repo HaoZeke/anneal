@@ -5,8 +5,14 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+PIN=$ROOT/scripts/gmin_pin.py
+eval "$(python3 "$PIN" shell)"
 bash "$ROOT/scripts/metal_h2h/build_gmin_darby.sh"
 SRC=/work/metal-darby/src
+TARBALL=/work/metal-darby/svn.tar.bz2
+SVNREV=$SRC/wales/GMIN/source/SVNREV
+revision=$(python3 "$PIN" read-svnrev "$SVNREV")
+tarball_sha256=$(python3 "$PIN" verify-tarball "$TARBALL")
 TIME=$ROOT/bench/metal-cluster-h2h/gmin-sc-time.patch
 if ! grep -q H2H_SC_TICK "$SRC/wales/GMIN/source/potential.f90"; then
   patch -p1 --forward --batch -d "$SRC/wales/GMIN" < "$TIME"
@@ -40,9 +46,10 @@ if [[ -z $blas ]]; then
   exit 1
 fi
 cat > "$WORK/gmin-source.txt" << EOF
-url=http://www-wales.ch.cam.ac.uk/svn.tar.bz2
-revision=aac1548a8aec13b53ad12a8d6904625081685d2e
-svnrev=GMIN/source/SVNREV
+url=$GMIN_PIN_URL
+revision=$revision
+svnrev=$revision
+tarball_sha256=$tarball_sha256
 potential=SC
 blas=$(readlink -f "$blas")
 EOF

@@ -24,7 +24,9 @@ fi
 bash "$HERE/build_sc.sh"
 bash "$HERE/build_gmin_sc.sh"
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$RUNS" "$LOGS" "$STARTS78"
-cp -a "$HERE/run_sc.py" "$HERE/run_sc_n12.py" "$HERE/run_sc96_gmin.py" "$ROOT/scripts/target_tol.py" "$WORK/bin/"
+cp -a "$HERE/run_sc.py" "$HERE/run_sc_n12.py" \
+  "$HERE/run_sc96_gmin.py" "$ROOT/scripts/target_tol.py" \
+  "$ROOT/scripts/gmin_pin.py" "$ROOT/scripts/machine_provenance.py" "$WORK/bin/"
 chmod +x "$WORK/bin/h2h_sc" "$WORK/bin/GMIN" "$WORK/bin/run_sc96_gmin.py"
 
 # The N=78 starts and the Cambridge energy need numpy and the network, so
@@ -66,6 +68,7 @@ exec /usr/bin/python3 -u $WORK/bin/run_sc96_gmin.py \\
   --starts78 $STARTS78 \\
   --reference78 $WORK/sc96-78/reference.txt \\
   --source $WORK/gmin-source.txt \\
+  --svnrev /work/metal-darby/src/wales/GMIN/source/SVNREV \\
   --head-file $WORK/anneal-head \\
   "\$@"
 EOF

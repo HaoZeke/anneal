@@ -11,7 +11,8 @@ bash "$HERE/build_anneal.sh"
 bash "$HERE/build_gmin.sh"
 
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs" "$WORK/starts"
-cp -a "$HERE/run_campaign.py" "$ROOT/scripts/target_tol.py" "$WORK/bin/"
+cp -a "$HERE/run_campaign.py" "$ROOT/scripts/target_tol.py" \
+  "$ROOT/scripts/gmin_pin.py" "$ROOT/scripts/machine_provenance.py" "$WORK/bin/"
 cp -a "$ROOT/examples/h2h_gmin_lj.data" "$WORK/bin/h2h_gmin_lj.data"
 chmod +x "$WORK/bin/h2h_gmin_proof" "$WORK/bin/GMIN"
 
@@ -39,6 +40,7 @@ exec /usr/bin/python3 -u $WORK/bin/run_campaign.py \\
   --gmin $WORK/bin/GMIN \\
   --data $WORK/bin/h2h_gmin_lj.data \\
   --source $WORK/gmin-source.txt \\
+  --svnrev $WORK/src/wales/GMIN/source/SVNREV \\
   --head-file $WORK/anneal-head \\
   --runs $WORK/runs \\
   --starts $WORK/starts \\

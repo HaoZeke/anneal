@@ -41,6 +41,20 @@ def test_wall_censored_ase_comparisons_have_no_rank_estimate():
         assert row["mann_whitney_p_mh"] == ""
 
 
+def test_retained_summary_parses_quoted_cpu_model():
+    header = "code_revision,host,machine_id,cpu_model"
+    keep = SUMMARY.csv_fields(
+        ("old-revision", "bench", "a" * 64, "Example CPU, revision 2")
+    )
+    replace = SUMMARY.csv_fields(
+        (SUMMARY.REVISION, "bench", "a" * 64, "Example CPU, revision 2")
+    )
+
+    assert SUMMARY.retained_summary_lines(
+        [header, keep, replace], header, SUMMARY.REVISION
+    ) == [keep]
+
+
 def test_exact_and_rank_statistics_match_the_panel_definitions():
     assert SUMMARY.fisher(0, 10) == pytest.approx(6.730380752335834e-05)
     statistic, probability = SUMMARY.mann_whitney(

@@ -12,10 +12,13 @@ from __future__ import annotations
 
 import argparse
 import csv
+import sys
 from pathlib import Path
 from statistics import median
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts"))
+from machine_provenance import aggregate_machine_columns, csv_fields  # noqa: E402
 SEEDS = ROOT / "bench/metal-cluster-h2h/sc-n12/seeds.csv"
 ROWS = ROOT / "bench/metal-cluster-h2h/sc-chain/rows.csv"
 SUMMARY = ROOT / "bench/metal-cluster-h2h/sc-chain/summary.csv"
@@ -33,13 +36,17 @@ def _hit(value: str) -> bool:
 
 def _line(variant: str, system: str, group: list[dict[str, str]]) -> str:
     hits = sum(_hit(row["hit"]) for row in group)
-    return (
+    line = (
         f"{variant},{system},{hits},{len(group)},"
         f"{median(float(row['best']) for row in group):.8f},"
         f"{median(float(row['wall_s']) for row in group):.6f},"
         f"{median(float(row['pot_s']) for row in group):.6f},"
-        f"{median(float(row['outside_s']) for row in group):.6f}\n"
+        f"{median(float(row['outside_s']) for row in group):.6f}"
     )
+    machine = aggregate_machine_columns(group)
+    if machine:
+        line += "," + csv_fields((machine["machine_id"], machine["cpu_model"]))
+    return line + "\n"
 
 
 def summary_text() -> str:
@@ -49,7 +56,8 @@ def summary_text() -> str:
         if row["arm"] == "anneal" and row["system"] in SYSTEMS
     ]
     runs = list(csv.DictReader(ROWS.open()))
-    lines = [HEADER]
+    provenance = aggregate_machine_columns([*seeds, *runs])
+    lines = [HEADER.rstrip() + (",machine_id,cpu_model\n" if provenance else "\n")]
     for system in SYSTEMS:
         group = [row for row in seeds if row["system"] == system]
         if len(group) != 12:
