@@ -271,6 +271,21 @@ def test_an_uncharged_gmin_panel_miss_is_reported():
     assert "row invariants" in {r[2] for r in audit.drifts()}
 
 
+def test_a_stale_gmin_single_session_claim_is_reported():
+    audit = audit_mod.Audit()
+    audit.text_cache[audit_mod.COVER] = (
+        audit.text(audit_mod.COVER)
+        + "\n% check\nthirteen Lennard-Jones, Gupta, and Morse clusters in one session.\n"
+    )
+    audit.text_cache[audit_mod.SI] = audit.text(audit_mod.SI) + "\nThe same-session panel of the main text.\n"
+    audit_mod.manuscript_gmin(audit)
+    audit_mod.supporting_gmin(audit)
+    assert {(r[1], r[2]) for r in audit.drifts()} == {
+        (audit_mod.COVER, "no whole-table single-session claim"),
+        (audit_mod.SI, "no same-session panel claim in SI"),
+    }
+
+
 def test_a_drifted_sutton_chen_howto_cell_is_reported():
     audit = audit_mod.Audit()
     path = audit_mod.SC96_78_HOWTO
@@ -1107,7 +1122,6 @@ def readme_revisions():
 def test_unreachable_revisions_in_the_bench_readmes_are_found():
     found = readme_revisions()
     assert {
-        ("bench/gmin-panel/README.md", "1ce3ab64"),
         ("bench/ase-au55/README.md", "1ce3ab64"),
         ("bench/ase-au55/README.md", "fc1af066"),
         ("bench/ase-lj38/README.md", "5a7f629d"),
