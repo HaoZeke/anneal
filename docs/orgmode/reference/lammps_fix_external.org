@@ -1,0 +1,134 @@
+#+COMMENT: Copyright 2023--present rgpot developers
+#+TITLE: LAMMPS Python frontend reference
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+
+* LAMMPS Python frontend reference
+
+** Constructor
+
+#+attr_rgpot: signature
+#+begin_src python
+FixExternal(
+    lmp,
+    potential,
+    elements,
+    *,
+    fix_id="rgpot",
+    create=True,
+    comm=None,
+    virial="auto",
+    allow_periodic_on_free_box=False,
+)
+#+end_src
+
+=lmp= is an initialized object from LAMMPS' Python module.
+=potential= is a Python rgpot potential object: an
+=evaluate(positions, numbers, cell)= method returns a dictionary with =energy=,
+=forces= and optional =stress=, or a callable returns
+=(energy, forces, variance)=.
+A callable =stress()= method, when present, supplies the stress after a call.
+
+=elements= is one symbol or atomic number per LAMMPS atom type, in type order;
+it may be a whitespace-separated string or a sequence. rgpot's element table
+resolves symbols.
+
+** Units
+
+Python rgpot potentials use Angstrom, eV, eV/Angstrom and eV/Angstrom cubed.
+The frontend uses rgpot's unit-expression converter for these LAMMPS styles:
+
+| LAMMPS =units= | Length | Energy | Force |
+|-----------------+--------+--------+-------|
+| =metal= | Angstrom | eV | eV/Angstrom |
+| =real= | Angstrom | kcal/mol | kcal/(mol Angstrom) |
+| =electron= | Bohr | Hartree | Hartree/Bohr |
+
+Any other style raises =ValueError= before the fix is created.
+
+** Cell, positions and atom order
+
+The cell has one vector per row.
+For LAMMPS' restricted triclinic box it is
+
+#+attr_rgpot: skip the triclinic cell rows, not code
+#+begin_example
+((xhi-xlo, 0,       0),
+ (xy,       yhi-ylo, 0),
+ (xz,       yz,      zhi-zlo))
+#+end_example
+
+The origin is not subtracted.
+With periodic boundaries, image flags unwrap each Cartesian position as
+=x + ix*a + iy*b + iz*c=.
+All three boundaries must be periodic or all three non-periodic; mixed
+boundaries raise =ValueError=.
+The potential protocol always receives the 3 by 3 cell.
+A free-boundary potential may ignore it; a periodic potential such as =LJPot=
+folds pairs across the cell vectors, so it is refused with =boundary f f f= (see
+below).
+
+** Free boundaries and periodic potentials
+
+With =boundary f f f= the cell is the box extent, which is not a periodic cell
+of the system.
+A potential that applies periodic boundary conditions to the cell it is given
+would pair atoms through the box faces and return a wrong energy.
+The constructor therefore raises =ValueError= when all three LAMMPS boundaries
+are non-periodic and the potential is periodic.
+The message names the potential and points to =rgpot.LJClusterPot=.
+The check runs before any fix is created, so nothing is left registered in
+LAMMPS.
+
+A potential counts as periodic when its =caps()= method returns a mapping whose
+=periodic= entry is true. rgpot potentials report this as =caps()["periodic"]=;
+=LJPot= reports true and =LJClusterPot= reports false.
+A potential with no =caps()= method, or whose mapping has no =periodic= entry,
+is not classified and is never refused.
+Boxes that are periodic in all three directions are not checked.
+
+=allow_periodic_on_free_box=True= turns the check off.
+The periodic potential is then evaluated on the box extents exactly as before,
+which is only meaningful when that cell is the intended periodic cell.
+
+The evaluation is in increasing atom-ID order.
+Returned forces are mapped back to each rank's local order.
+IDs must be the integers =1..N= without duplicates.
+
+** Virial and pressure
+
+An rgpot stress is the Cauchy tensor =sigma = V^-1 dE/depsilon=.
+LAMMPS' external-fix virial is =W = -dE/depsilon=, so the frontend returns
+=-V sigma=, symmetrized, in LAMMPS order =xx yy zz xy xz yz= and in the LAMMPS
+energy unit.
+
+With =virial="auto"=, a missing stress on a periodic box raises =RuntimeError=
+naming the potential and saying it lacks analytic stress.
+A non-periodic box with no stress returns a zero virial.
+=virial="none"= returns zeros.
+
+** MPI and errors
+
+For one LAMMPS rank, mpi4py is not imported.
+For several ranks, =comm= or =MPI.COMM_WORLD= must have the same size as LAMMPS.
+Rank zero gathers =(IDs, positions, atomic numbers)=, evaluates once, broadcasts
+energy and virial, and scatters forces in each rank's local atom order.
+Collective status checks before the gather and after the rank-zero evaluation
+turn a failure on any one rank into the same error on every rank.
+
+A Python exception cannot cross LAMMPS' C callback.
+The callback stores the first exception in =driver.error=, writes zero forces,
+and sets an internal variable watched by =fix halt=.
+=driver.run(steps, *keywords)= clears the flag and re-raises that exception
+after LAMMPS stops.
+A collective failure raises =RuntimeError= with the same rank, phase, exception
+type, and message on every rank.
+Calling =lmp.command("run ...")= directly instead exposes LAMMPS' halt error;
+the stored Python exception remains in =driver.error=.
+
+=close()= removes the halt fix and external fix, deregisters the callback, and
+releases the LAMMPS object.
+This also applies with =create=False=: the caller supplies the fix but transfers
+its teardown to =FixExternal=.
+Closing twice is harmless; an =unfix= failure is raised and teardown can be
+retried.
+=close()= does not close the potential object supplied by the caller.

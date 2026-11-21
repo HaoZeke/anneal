@@ -29,6 +29,12 @@ has_eam_table: bool = True
 
 has_ipi: bool = True
 
+def atomic_number(symbol: str) -> int:
+    """Atomic number of an element symbol."""
+
+def unit_conversion_factor(from_unit: str, to_unit: str) -> float:
+    """Multiplicative conversion factor between compatible unit expressions."""
+
 def echo_f64(values: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> NDArray[numpy.float64]: ...
 
 def evaluate_lj(positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple: ...

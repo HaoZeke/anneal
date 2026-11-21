@@ -1,0 +1,74 @@
+#+COMMENT: Copyright 2023--present rgpot developers
+#+TITLE: Run LAMMPS with a Python potential
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+
+* Run LAMMPS with a Python potential
+
+=rgpot.lammps.FixExternal= connects any Python rgpot potential to LAMMPS'
+=fix external pf/callback=.
+It is an optional frontend: =import rgpot= imports neither LAMMPS nor mpi4py,
+and the potential remains usable without LAMMPS.
+
+Install LAMMPS' Python module separately, define the box, atoms and masses, and
+pass one element per LAMMPS atom type:
+
+#+attr_rgpot: fragment needs the lammps Python module and an input file
+#+begin_src python
+from lammps import lammps
+
+import rgpot
+from rgpot.lammps import FixExternal
+
+lmp = lammps()
+lmp.file("in.setup")  # units, boundary, box, atoms and masses
+potential = rgpot.LJPot(u0=0.0104, psi=3.40, cutoff=8.5)
+
+with FixExternal(lmp, potential, "Ar") as driver:
+    lmp.commands_string("""
+        velocity all create 80 4928
+        fix motion all nve
+        timestep 0.001
+        thermo 10
+    """)
+    driver.run(1000)
+    print(driver.energy, driver.evaluations)
+#+end_src
+
+The frontend creates =fix rgpot all external pf/callback 1 1=, enables its
+energy and virial, and adds a =fix halt= that stops a run after a callback
+failure.
+=driver.run(...)= then raises the original Python exception on one rank, or a
+collective =RuntimeError= naming the failing rank under MPI.
+Use =fix_id= to choose another fix name.
+With =create=False= the input must already define the external fix and its
+=fix_modify energy yes virial yes= settings.
+In both modes, =close()= removes the external fix and its callback; the context
+manager therefore owns teardown even when the input created the fix.
+
+The default =virial="auto"= uses the potential's analytic stress.
+A periodic box whose potential reports no stress raises an error that names the
+potential and says it lacks analytic stress, so =fix npt=, =fix nph= and
+=fix box/relax= are not driven by a guessed pressure.
+A non-periodic box (=boundary f f f=) passes the box extents as the cell to the
+potential.
+A periodic potential wraps pairs across the faces of that cell and returns a
+wrong energy without any warning, so =FixExternal= refuses the combination.
+It raises =ValueError= naming the potential, and the fix is a non-periodic
+potential such as =rgpot.LJClusterPot= in place of =rgpot.LJPot=.
+The check reads the =periodic= entry of the potential's =caps()= dictionary; a
+potential without =caps()=, or whose =caps()= omits =periodic=, is not checked.
+Pass =allow_periodic_on_free_box=True= only when you do want the periodic
+potential evaluated on the box extents.
+A non-periodic box with no stress returns a zero virial.
+Set =virial="none"= when a zero virial is intentional.
+
+Under =mpirun= install mpi4py.
+Rank zero gathers atoms by LAMMPS atom ID, evaluates the whole system once, and
+scatters each rank's forces.
+Pass =comm= when the =lammps= object uses a communicator other than
+=MPI.COMM_WORLD=.
+Atom IDs must be exactly =1..N=.
+
+See the
+[[file:../reference/lammps_fix_external.org][LAMMPS Python frontend reference]]
+for units, triclinic cells, image unwrapping and virial conventions.

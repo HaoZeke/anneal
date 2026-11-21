@@ -10,6 +10,7 @@
 #include "rgpot/StillingerWeber/SWSi.hpp"
 #include "rgpot/SuttonChen/SuttonChenScales.hpp"
 #include "rgpot/Tersoff/TersoffSiC.hpp"
+#include "rgpot/elements.hpp"
 #ifdef RGPOT_HAS_EAM_TABLE
 #include "rgpot/EAMTable/EAMTablePot.hpp"
 #endif
@@ -18,7 +19,6 @@
 #endif
 
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <cstddef>
 #include <stdexcept>
@@ -27,18 +27,6 @@
 namespace rgpot::spec {
 
 namespace {
-
-constexpr std::array<const char *, 118> kSymbols = {
-    "H",  "He", "Li", "Be", "B",  "C",  "N",  "O",  "F",  "Ne", "Na", "Mg",
-    "Al", "Si", "P",  "S",  "Cl", "Ar", "K",  "Ca", "Sc", "Ti", "V",  "Cr",
-    "Mn", "Fe", "Co", "Ni", "Cu", "Zn", "Ga", "Ge", "As", "Se", "Br", "Kr",
-    "Rb", "Sr", "Y",  "Zr", "Nb", "Mo", "Tc", "Ru", "Rh", "Pd", "Ag", "Cd",
-    "In", "Sn", "Sb", "Te", "I",  "Xe", "Cs", "Ba", "La", "Ce", "Pr", "Nd",
-    "Pm", "Sm", "Eu", "Gd", "Tb", "Dy", "Ho", "Er", "Tm", "Yb", "Lu", "Hf",
-    "Ta", "W",  "Re", "Os", "Ir", "Pt", "Au", "Hg", "Tl", "Pb", "Bi", "Po",
-    "At", "Rn", "Fr", "Ra", "Ac", "Th", "Pa", "U",  "Np", "Pu", "Am", "Cm",
-    "Bk", "Cf", "Es", "Fm", "Md", "No", "Lr", "Rf", "Db", "Sg", "Bh", "Hs",
-    "Mt", "Ds", "Rg", "Cn", "Nh", "Fl", "Mc", "Lv", "Ts", "Og"};
 
 std::string lower(std::string s) {
   std::transform(s.begin(), s.end(), s.begin(),
@@ -310,12 +298,7 @@ Built build(const std::string &name, const Options &options, double cutoff) {
 }
 
 int atomicNumber(const std::string &symbol) {
-  for (std::size_t k = 0; k < kSymbols.size(); ++k) {
-    if (symbol == kSymbols[k]) {
-      return static_cast<int>(k) + 1;
-    }
-  }
-  return 0;
+  return rgpot::elements::atomicNumber(symbol);
 }
 
 } // namespace rgpot::spec

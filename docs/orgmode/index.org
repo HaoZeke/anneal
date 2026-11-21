@@ -79,6 +79,7 @@ meson compile -C bbdir && meson test -C bbdir
 
    howto/pip-python
    howto/ase
+   howto/lammps-fix-external
    howto/engine-lammps
    howto/engine-gromacs
    howto/engine-gromacs-qmmm
@@ -110,6 +111,7 @@ meson compile -C bbdir && meson test -C bbdir
 
    reference/architecture
    reference/python_api
+   reference/lammps_fix_external
    reference/cpp_api
    reference/cpp_potentials
    reference/cpp_backends
