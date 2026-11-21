@@ -68,6 +68,20 @@ struct DualOnly {
   }
 };
 
+/// Forces of +-1.5e308 on a coordinate moved up or down from @c x0, so that
+/// every central difference overflows.
+struct Cliff {
+  std::vector<double> x0;
+  void forceImpl(const ForceInput &in, ForceOut *out) const {
+    for (std::size_t k = 0; k < x0.size(); ++k) {
+      const double d = in.pos[k] - x0[k];
+      out->F[k] = d > 0.0 ? 1.5e308 : (d < 0.0 ? -1.5e308 : 0.0);
+    }
+    out->energy = 0.0;
+    out->variance = 0.0;
+  }
+};
+
 static_assert(!rgpot::AnalyticHessianVector<ForcesOnly>);
 static_assert(rgpot::AdHessianVectorKernel<DualOnly>);
 static_assert(!rgpot::AnalyticHessianKernel<DualOnly>);
@@ -307,6 +321,43 @@ TEST_CASE("hessian refuses malformed requests", "[schemes]") {
   CHECK_THROWS_AS(cache.apply(pot, in, h.data(), h.data() + in.nAtoms * 3, 0.0,
                               static_cast<HvpScheme>(6)),
                   std::invalid_argument);
+}
+
+TEST_CASE("hessian refuses an output that overlaps its input", "[schemes]") {
+  const System &s = morseSystem();
+  const std::size_t dim = s.dim();
+  ForcesOnly pot;
+  HessianVectorCache cache;
+  std::vector<double> shared(dim * dim);
+  std::copy(s.x.begin(), s.x.end(), shared.end() - static_cast<long>(dim));
+  const ForceInput tail{.nAtoms = s.z.size(),
+                        .pos = shared.data() + (dim * dim - dim),
+                        .atmnrs = s.z.data(),
+                        .box = s.box.data()};
+  CHECK_THROWS_AS(
+      cache.hessian(pot, tail, shared.data(), HessianScheme::Central),
+      std::invalid_argument);
+  std::vector<double> h(dim * dim);
+  std::copy(s.box.begin(), s.box.end(), h.begin() + static_cast<long>(dim));
+  const ForceInput cell{.nAtoms = s.z.size(),
+                        .pos = s.x.data(),
+                        .atmnrs = s.z.data(),
+                        .box = h.data() + dim};
+  CHECK_THROWS_AS(cache.hessian(pot, cell, h.data(), HessianScheme::Central),
+                  std::invalid_argument);
+  CHECK(pot.calls == 0);
+  CHECK(cache.derivativeCounts().hessianForceCalls == 0);
+}
+
+TEST_CASE("A central Hessian that overflows is refused", "[schemes]") {
+  const System &s = morseSystem();
+  Cliff pot{s.x};
+  HessianVectorCache cache;
+  std::vector<double> h(s.dim() * s.dim());
+  CHECK_THROWS_AS(
+      cache.hessian(pot, s.input(), h.data(), HessianScheme::Central),
+      std::domain_error);
+  CHECK(cache.derivativeCounts().hessianCentral == 0);
 }
 
 TEST_CASE("hessian returns and counts the scheme that ran", "[schemes]") {

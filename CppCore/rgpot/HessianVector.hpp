@@ -62,6 +62,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -353,10 +354,12 @@ public:
    * @c DerivativeCounts::hessianForceCalls, not in @c HvpCounts. On a
    * failure the content of @a h is unspecified.
    *
-   * @throws std::invalid_argument for a malformed request, an unknown
-   *         scheme, and @c Analytic, @c Ad or @c Exact on a potential that
-   *         lacks what they need.
-   * @throws std::domain_error when the kernel returns a non-finite value.
+   * @throws std::invalid_argument for a malformed request, including an
+   *         @a h that overlaps the positions, species or cell of @a in, an
+   *         unknown scheme, and @c Analytic, @c Ad or @c Exact on a
+   *         potential that lacks what they need.
+   * @throws std::domain_error when the kernel or the central difference
+   *         gives a non-finite value.
    */
   template <ForceKernel Pot>
   HessianScheme hessian(Pot &pot, const ForceInput &in, double *h,
@@ -365,6 +368,23 @@ public:
     const std::size_t dim = g.positions.size();
     if (dim != 0 && h == nullptr) {
       throw std::invalid_argument("hessian: output is null");
+    }
+    if (dim != 0) {
+      if (dim >
+          std::numeric_limits<std::size_t>::max() / sizeof(double) / dim) {
+        throw std::invalid_argument("hessian: (3*nAtoms)^2 doubles overflow");
+      }
+      const auto hb = reinterpret_cast<std::uintptr_t>(h);
+      const std::uintptr_t hbytes = dim * dim * sizeof(double);
+      const auto overlaps = [hb, hbytes](const void *p, std::size_t bytes) {
+        const auto pb = reinterpret_cast<std::uintptr_t>(p);
+        return p != nullptr && pb < hb + hbytes && hb < pb + bytes;
+      };
+      if (overlaps(in.pos, dim * sizeof(double)) ||
+          overlaps(in.atmnrs, in.nAtoms * sizeof(int)) ||
+          overlaps(in.box, 9 * sizeof(double))) {
+        throw std::invalid_argument("hessian: output overlaps the input");
+      }
     }
     const double hstep = checkedStep(step);
     scheme = resolve(derivativeCaps(pot), scheme);
@@ -408,6 +428,7 @@ public:
           h[c * dim + r] = mean;
         }
       }
+      requireFinite(h, dim * dim, "central Hessian");
       hessianCentral_.fetch_add(1, std::memory_order_relaxed);
     }
     return scheme;
