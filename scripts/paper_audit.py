@@ -2116,7 +2116,7 @@ TIP4P_GMIN = "aac1548a8aec13b53ad12a8d6904625081685d2e"
 
 
 def gmin_sources(audit: Audit) -> None:
-    """Every GMIN row behind a printed GMIN number names the GMIN revision and the machine it ran on."""
+    """Every GMIN row behind a printed GMIN number names its identifier and machine."""
     machine = re.compile(r"[0-9a-f]{64}")
     shard_b = {(r["system"], r["seed"]): r["machine_id_sha256"]
                for r in audit.rows(f"{GMIN_RERUN}/b/host.csv") if r["code"] == "gmin"}
@@ -4250,6 +4250,15 @@ def manuscript_new(audit: Audit) -> None:
         named = {r.get("cpu", "") for r in audit.rows(f"{folder}/rows.csv")} - {""}
         audit.record(not any("Xeon" in c or "AMD" in c for c in named), f"{folder}/rows.csv",
                      "the rows name no processor beyond the machine id", "none", " ".join(sorted(named)) or "none")
+    d_prov = dict(line.split(" ", 1) for line in
+                  audit.text("paper/jctc/data/gmin_eeec8e2c/d/PROVENANCE").splitlines())
+    d_root = d_prov["source"].rsplit("/", 1)[0]
+    d_host = git("show", f"{d_prov['commit']}:{d_root}/host.txt").stdout
+    d_session = git("show", f"{d_prov['commit']}:{d_root}/session.txt").stdout
+    audit.record(not re.search(r"Xeon|AMD|model name|cpu_model", d_host + d_session, re.I),
+                 f"{d_root}/host.txt", "the LJ150 record has no processor model to add",
+                 "none", "none" if not re.search(r"Xeon|AMD|model name|cpu_model",
+                                                d_host + d_session, re.I) else "present")
     develop = {r["cpu"] for r in audit.rows("paper/jctc/data/gmin_develop/rows.csv")}
     audit.cell("paper/jctc/data/gmin_develop/rows.csv", "the e06d886d processor", "Intel(R) Xeon(R) Processor",
                " ".join(sorted(develop)))
