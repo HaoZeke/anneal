@@ -6,8 +6,11 @@ consumer with find_package(rgpot) and links rgpot::rgpot. The consumer's
 compile and link lines carry no OpenMP flag, and the program fails to
 compile if _OPENMP is defined. It runs and reads OMP_NUM_THREADS back
 through librgpot, which only an OpenMP librgpot does.
-Exit 77 (skip) when CMake finds no OpenMP for rgpot.
+Exit 77 (skip) when CMake finds no OpenMP for rgpot. CMake records a miss as
+the value NOTFOUND, or as <variable>-NOTFOUND, in the cache, so those values
+do not count as a flag.
 Usage: test_cmake_consumer_openmp.py <root> <cmake>
+       test_cmake_consumer_openmp.py --self-test
 """
 
 from __future__ import annotations
@@ -52,6 +55,37 @@ def _run(argv: list[str], **kw) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _cmake_found_openmp(cache: str) -> bool:
+    """True when the cache holds an OpenMP_CXX_FLAGS value CMake found."""
+    match = re.search(r"^OpenMP_CXX_FLAGS:\w+=(\S*)", cache, re.MULTILINE)
+    if match is None:
+        return False
+    value = match.group(1)
+    return value != "" and value != "NOTFOUND" and not value.endswith("-NOTFOUND")
+
+
+def _self_test() -> int:
+    cases = [
+        ("OpenMP_CXX_FLAGS:STRING=-fopenmp\n", True),
+        ("OpenMP_CXX_FLAGS:STRING=-fopenmp=libomp\n", True),
+        ("OpenMP_CXX_FLAGS:STRING=-Xpreprocessor -fopenmp\n", True),
+        ("OpenMP_CXX_FLAGS:STRING=\n", False),
+        ("OpenMP_CXX_FLAGS:STRING=NOTFOUND\n", False),
+        ("OpenMP_CXX_FLAGS:STRING=OpenMP_CXX_FLAGS-NOTFOUND\n", False),
+        ("OpenMP_CXX_FLAGS:UNINITIALIZED=NOTFOUND\n", False),
+        ("OpenMP_C_FLAGS:STRING=-fopenmp\n", False),
+        ("OpenMP_gomp_LIBRARY:FILEPATH=/usr/lib/libgomp.so\n", False),
+        ("A:STRING=1\nOpenMP_CXX_FLAGS:STRING=NOTFOUND\nB:STRING=2\n", False),
+        ("A:STRING=1\nOpenMP_CXX_FLAGS:STRING=-fopenmp\nB:STRING=2\n", True),
+    ]
+    bad = [(c, w) for c, w in cases if _cmake_found_openmp(c) != w]
+    for cache, want in bad:
+        print(f"expected {want} for {cache!r}", file=sys.stderr)
+    if not bad:
+        print(f"{len(cases)} cache cases classified")
+    return 1 if bad else 0
+
+
 def _pool_lines(output: str) -> list[str]:
     # The runtime may print diagnostics of its own around the program's line.
     return [ln.strip() for ln in output.splitlines() if ln.strip().startswith("pool ")]
@@ -67,6 +101,8 @@ def _checked(argv: list[str], **kw) -> str | None:
 
 
 def main() -> int:
+    if sys.argv[1:] == ["--self-test"]:
+        return _self_test()
     if len(sys.argv) != 3:
         print(__doc__.strip().splitlines()[-1], file=sys.stderr)
         return 2
@@ -102,7 +138,7 @@ def main() -> int:
         if configured is None:
             return 1
         cache = (build / "CMakeCache.txt").read_text()
-        if not re.search(r"^OpenMP_CXX_FLAGS:\w+=\S", cache, re.MULTILINE):
+        if not _cmake_found_openmp(cache):
             print("CMake found no OpenMP for rgpot: nothing to compare")
             return 77
         if _checked([cmake, "--build", str(build), "-j", jobs]) is None:
