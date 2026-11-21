@@ -1527,6 +1527,8 @@ where
             seed,
         )
     };
+    // The polish below spends this reserve. Release it first. Drop returns
+    // the calls only when the hold leaves scope, which is after that polish.
     if let Some(hold) = hold.as_mut() {
         ledger.release_tail(hold);
     }
@@ -1611,6 +1613,8 @@ where
             &mut rng,
         )
     };
+    // The polish below spends this reserve. Release it first. Drop returns
+    // the calls only when the hold leaves scope, which is after that polish.
     if let Some(hold) = hold.as_mut() {
         ledger.release_tail(hold);
     }
