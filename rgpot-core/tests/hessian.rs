@@ -798,6 +798,15 @@ fn a_callback_that_sets_no_message_is_not_given_an_older_one() {
     let input = system.input();
     let handle = Handle::new();
     unsafe {
+        rgpot_potential_set_hessian_callback(handle.pot, Some(analytic_hessian));
+        rgpot_set_last_error(c"an older failure".as_ptr());
+    }
+    assert!(handle
+        .try_hessian(&input, 0.0, RGPOT_HESSIAN_ANALYTIC as i32)
+        .is_ok());
+    assert_eq!(last_error(), "an older failure");
+
+    unsafe {
         rgpot_potential_set_hessian_callback(handle.pot, Some(silent_hessian));
         rgpot_potential_set_hvp_callback(handle.pot, Some(silent_hvp));
         rgpot_set_last_error(c"an older failure".as_ptr());

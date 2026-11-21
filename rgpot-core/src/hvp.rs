@@ -248,13 +248,15 @@ pub(crate) fn checked_step(step: f64) -> Result<f64, HvpError> {
 /// A failing status keeps the message the callback set with
 /// `rgpot_set_last_error` during the call, or is described as
 /// `{caller} returned <status>` when it set none; a
-/// non-finite value is `{writer}: non-finite value at element <i>`.
+/// non-finite value is `{writer}: non-finite value at element <i>`. A
+/// successful call leaves the earlier message in place.
 pub(crate) fn run_callback(
     caller: &str,
     writer: &str,
     out: &mut [f64],
     call: impl FnOnce(*mut f64) -> rgpot_status_t,
 ) -> Result<(), HvpError> {
+    let earlier = crate::status::last_error_message();
     crate::status::set_last_error("");
     let status = call(out.as_mut_ptr());
     if status != rgpot_status_t::RGPOT_SUCCESS {
@@ -268,6 +270,7 @@ pub(crate) fn run_callback(
             },
         });
     }
+    crate::status::set_last_error(&earlier);
     if let Some(i) = out.iter().position(|v| !v.is_finite()) {
         return Err(invalid(format!(
             "{writer}: non-finite value at element {i}"
