@@ -274,6 +274,7 @@ rgpot_minimage = static_library(
 # compiler whose runtime is not found by name keeps the flag.
 rgpot_openmp = dependency('openmp', language: 'cpp', required: false)
 rgpot_openmp_deps = []
+rgpot_openmp_runtime_deps = []
 if rgpot_openmp.found()
     rgpot_openmp_deps = [rgpot_openmp]
     if get_option('default_library') != 'shared'
@@ -292,6 +293,7 @@ if rgpot_openmp.found()
             endif
         endforeach
         if _omp_runtime.length() > 0
+            rgpot_openmp_runtime_deps = _omp_runtime
             rgpot_openmp_deps = [
                 rgpot_openmp.partial_dependency(
                     compile_args: true,
@@ -364,6 +366,7 @@ if not get_option('with_rpc_client_only')
     # Product-sums in the simd sources are explicit. Contraction stays off
     # in this archive so a multiply that is not written as mul_add is not fused.
     _deps += dependency('threads')
+    _deps_sans_openmp = _deps
     _deps += rgpot_openmp_deps
     _rgpot_srcs += files(
         'rgpot/plugin/PluginBridge.cc',
@@ -735,12 +738,16 @@ if not get_option('with_rpc_client_only')
         include_directories: _incdirs,
         compile_args: _args,
     )
-    _rgpot_consumer_deps_no_openmp = []
-    foreach _d : _rgpot_consumer_deps
-        if _d.name() != 'openmp'
-            _rgpot_consumer_deps_no_openmp += [_d]
-        endif
-    endforeach
+    # The same list built from the dependencies taken before OpenMP joined
+    # _deps, so nothing has to be told apart by name afterwards. A static
+    # librgpot still needs the runtime library on the consumer's link line.
+    _rgpot_consumer_deps_no_openmp = _deps_sans_openmp + [
+        vesin_dep,
+        fastnlist_native_dep,
+    ] + fortran_rt_deps + rgpot_openmp_runtime_deps
+    if _rpc_stack
+        _rgpot_consumer_deps_no_openmp += [ptlrpc_hdr_dep]
+    endif
     rgpot_dep_no_openmp = declare_dependency(
         link_with: rgpot,
         dependencies: _rgpot_consumer_deps_no_openmp,
