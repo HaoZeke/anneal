@@ -1,3 +1,6 @@
-system,energy_eV,xtb_Eh,xtb_eV,code,seed,code_revision,host,xyz
-si13,-624.70446339,-22.957465589557,-624.70443593,anneal-general,2003,c1c02d1646a71267e0f6c02cfcfcc07d5b88d9b4,bench,minima/si13-ring.xyz
-si20,-922.98227162,-33.918972862053,-922.98223105,anneal-general,3003,a52726af5f3cee9506124c70ac0f3917ad335bb0,bench,minima/si20-ring.xyz
+system,energy_eV,xtb_Eh,xtb_eV,code,seed,code_revision,host,xyz,source
+si13,-624.70446339,-22.957465589557,-624.70443593,anneal-general,2003,c1c02d1646a71267e0f6c02cfcfcc07d5b88d9b4,bench,minima/si13-ring.xyz,minima/si13-ring.xyz
+si20,-922.98227162,-33.918972862053,-922.98223105,anneal-general,3003,a52726af5f3cee9506124c70ac0f3917ad335bb0,bench,minima/si20-ring.xyz,minima/si20-ring.xyz
+si10,-460.68373809,,,,,,,,scripts/covalent_h2h/gfn2_crest.py REFERENCE; bench/covalent-h2h/README.md
+c10,-571.32273783,,,,,,,,scripts/covalent_h2h/gfn2_crest.py REFERENCE; bench/covalent-h2h/README.md
+c20,-1148.85383633,,,,,,,,scripts/covalent_h2h/gfn2_crest.py REFERENCE; bench/covalent-h2h/README.md

@@ -1,7 +1,7 @@
 # Copyright (c) anneal developers
 """The same-session gate summaries: an arm short of seeds loses the gate,
-and the committed gates read as their README states. CREST's rescore
-against another reference."""
+and the committed gates read as their README states. A rescore of both
+arms against another reference."""
 
 import argparse
 import csv
@@ -85,6 +85,60 @@ def test_a_panel_system_one_arm_left_out_or_short_of_a_seed_loses(tmp_path, caps
     assert verdict(capsys) == "floor loses: lj38 h2h_gmin_proof seeds, lj55 h2h_gmin_proof seeds"
 
 
+def test_the_floor_gate_reference_matches_minima():
+    pytest.importorskip("scipy.stats")
+    crest = load("gfn2_crest_ref", "scripts/covalent_h2h/gfn2_crest.py")
+    minima = ROOT / "bench" / "covalent-h2h" / "gfn2" / "minima.csv"
+    rows = read(minima)
+    expect = {}
+    for row in rows:
+        assert row["source"].strip()
+        expect[row["system"]] = float(row["energy_eV"])
+    assert floor_gate.REFERENCE == expect
+    assert set(expect) == {"si10", "c10", "c20", "si13", "si20"}
+    campaign = {"si10": -460.68373809, "c10": -571.32273783, "c20": -1148.85383633}
+    cited = {row["system"]: row["source"] for row in rows}
+    for system, energy in campaign.items():
+        assert crest.energy_hits(expect[system], energy, 0.0)
+        assert crest.energy_hits(energy, expect[system], 0.0)
+        assert crest.energy_hits(energy, crest.REFERENCE[system], 0.0)
+        assert crest.energy_hits(crest.REFERENCE[system], energy, 0.0)
+        assert "scripts/covalent_h2h/gfn2_crest.py" in cited[system]
+    assert expect["si13"] == -624.70446339
+    assert expect["si20"] == -922.98227162
+    assert expect["si13"] != crest.REFERENCE["si13"]
+    assert "minima/si13-ring.xyz" in cited["si13"]
+    assert "minima/si20-ring.xyz" in cited["si20"]
+
+
+def test_a_reference_without_a_source_is_refused(tmp_path):
+    path = tmp_path / "minima.csv"
+    path.write_text("system,energy_eV,source\nc20,-1148.85383633,\n", encoding="utf-8")
+    with pytest.raises(SystemExit, match="no reference source"):
+        floor_gate.read_minima(path)
+
+
+def test_si13_summary_hits_are_the_stop_target_score(tmp_path):
+    pytest.importorskip("scipy.stats")
+    crest = load("gfn2_crest_summary", "scripts/covalent_h2h/gfn2_crest.py")
+    gfn2 = ROOT / "bench" / "covalent-h2h" / "gfn2"
+    out = tmp_path / "summaries.csv"
+    crest.summarise([gfn2 / "rows.csv"], out, "0" * 40, "bench", systems=["si13"])
+    fresh = {row["code"]: row for row in read(out)}
+    stop = f"{crest.REFERENCE['si13']:.8f}"
+    assert fresh["anneal-general"]["stop_target_eV"] == stop
+    assert fresh["crest"]["stop_target_eV"] == stop
+    assert (fresh["anneal-general"]["runs"], fresh["anneal-general"]["hits"]) == ("6", "6")
+    assert (fresh["crest"]["runs"], fresh["crest"]["hits"]) == ("6", "4")
+    assert fresh["crest"]["fisher_p"] == "0.454545"
+    assert fresh["crest"]["mannwhitney_p"] == "0.00499812"
+    committed = [row for row in read(gfn2 / "summaries.csv") if row["system"] == "si13"]
+    assert {(row["code"], row["runs"], row["hits"], row["stop_target_eV"]) for row in committed} == {
+        ("anneal-general", "6", "6", stop),
+        ("crest", "6", "4", stop),
+    }
+
+
 def test_crest_rescore_reproduces_the_committed_row(tmp_path):
     pytest.importorskip("scipy.stats")
     crest = load("gfn2_crest", "scripts/covalent_h2h/gfn2_crest.py")
@@ -93,12 +147,97 @@ def test_crest_rescore_reproduces_the_committed_row(tmp_path):
     out = tmp_path / "rescore.csv"
     crest.rescore(history, out, "si13", -624.70446339, "0" * 40, "bench")
     crest.rescore(history, out, "si13", crest.REFERENCE["si13"], "0" * 40, "bench")
-    ring, reference = read(out)
-    keys = ("system", "code", "reference_eV", "runs", "hits", "seeds")
-    assert {k: ring[k] for k in keys} == {k: read(gfn2 / "rescore.csv")[0][k] for k in keys}
-    assert (reference["runs"], reference["hits"]) == ("6", "4")
+    written = read(out)
+    assert len(written) == 4
+    keys = (
+        "system", "code", "reference_eV", "runs", "hits", "budgets",
+        "charged", "median_budget_all", "median_charged_all",
+        "median_budget_ran", "median_charged_ran", "no_result",
+        "no_result_seeds", "stop_note", "seeds",
+    )
+    ring = [{k: row[k] for k in keys} for row in written[:2]]
+    committed = [{k: row[k] for k in keys} for row in read(gfn2 / "rescore.csv")]
+    assert ring == committed
+    at_stop = {row["code"]: row for row in written[2:]}
+    assert (at_stop["crest"]["runs"], at_stop["crest"]["hits"]) == ("6", "4")
+    assert (at_stop["anneal-general"]["runs"], at_stop["anneal-general"]["hits"]) == ("6", "6")
+    assert at_stop["crest"]["stop_note"] == written[1]["stop_note"]
+    assert at_stop["anneal-general"]["stop_note"] == written[0]["stop_note"]
+    assert "censored" not in written[0]
     with pytest.raises(SystemExit, match="no CREST rows"):
         crest.rescore(history, out, "si20", -922.98227162, "0" * 40, "bench")
+
+
+def test_si13_ring_rescore_records_how_each_arm_stopped(tmp_path):
+    pytest.importorskip("scipy.stats")
+    crest = load("gfn2_crest_ring", "scripts/covalent_h2h/gfn2_crest.py")
+    gfn2 = ROOT / "bench" / "covalent-h2h" / "gfn2"
+    minima = {row["system"]: float(row["energy_eV"]) for row in read(gfn2 / "minima.csv")}
+    history = [gfn2 / "seeds.csv", gfn2 / "rows.csv"]
+    out = tmp_path / "rescore.csv"
+    crest.rescore(history, out, "si13", minima["si13"], "0" * 40, "bench")
+    fresh = read(out)
+    assert [row["code"] for row in fresh] == ["anneal-general", "crest"]
+    by_code = {row["code"]: row for row in fresh}
+    assert (by_code["anneal-general"]["runs"], by_code["anneal-general"]["hits"]) == ("6", "1")
+    assert (by_code["crest"]["runs"], by_code["crest"]["hits"]) == ("6", "0")
+    stop = f"{crest.REFERENCE['si13']:.8f}"
+    anneal_note = by_code["anneal-general"]["stop_note"]
+    crest_note = by_code["crest"]["stop_note"]
+    assert f"6 runs stopped at the {stop} stop target" in anneal_note
+    assert "0 produced no result" in anneal_note
+    assert "4 runs ran to their own end (seeds 2001-2004" in crest_note
+    assert "2 produced no result (seeds 2000 2005)" in crest_note
+    assert "ran to its own end" not in crest_note
+    assert "both runs stopped" not in anneal_note
+    assert "stopped at the" not in crest_note
+    assert by_code["crest"]["no_result"] == "2"
+    assert by_code["crest"]["no_result_seeds"] == "2000 2005"
+    assert by_code["anneal-general"]["no_result"] == "0"
+    assert "censored" not in fresh[0]
+    recorded = read(gfn2 / "rows.csv")
+    for code, row in by_code.items():
+        arm = sorted(
+            (item for item in recorded if item["system"] == "si13" and item["code"] == code),
+            key=lambda item: int(item["seed"]),
+        )
+        budgets = [float(item["budget"]) for item in arm]
+        charged = [float(item["charged"]) for item in arm]
+        ran = [item for item in arm if not crest._no_result(item)]
+        assert row["budgets"] == " ".join(str(int(value)) for value in budgets)
+        assert row["charged"] == " ".join(str(int(value)) for value in charged)
+        assert row["median_budget_all"] == f"{crest.type7(budgets, 0.5):.1f}"
+        assert row["median_charged_all"] == f"{crest.type7(charged, 0.5):.1f}"
+        ran_budgets = [float(item["budget"]) for item in ran]
+        ran_charged = [float(item["charged"]) for item in ran]
+        assert row["median_budget_ran"] == f"{crest.type7(ran_budgets, 0.5):.1f}"
+        assert row["median_charged_ran"] == f"{crest.type7(ran_charged, 0.5):.1f}"
+        assert row["no_result"] == str(len(arm) - len(ran))
+        assert "median budget of the runs that ran" in row["stop_note"]
+        assert "median budget of all rows" in row["stop_note"]
+        assert row["median_budget_ran"] in row["stop_note"]
+        assert row["median_budget_all"] in row["stop_note"]
+    assert "fisher_p" not in fresh[0]
+    assert "mannwhitney_p" not in fresh[0]
+    stored_crest_hits = [
+        row
+        for row in recorded
+        if row["system"] == "si13" and row["code"] == "crest" and row["hit"] == "true"
+    ]
+    assert len(stored_crest_hits) == 4
+    readme = (ROOT / "bench" / "covalent-h2h" / "README.md").read_text()
+    assert "both runs stopped" not in readme
+    assert "does not converge in xtb's 250 iterations" in readme
+    for row in fresh:
+        assert row["stop_note"] in readme
+    keys = (
+        "system", "code", "reference_eV", "runs", "hits", "budgets",
+        "charged", "median_budget_all", "median_charged_all",
+        "median_budget_ran", "median_charged_ran", "no_result",
+        "no_result_seeds", "stop_note", "seeds",
+    )
+    committed = [{k: row[k] for k in keys} for row in read(gfn2 / "rescore.csv")]
+    assert committed == [{k: row[k] for k in keys} for row in fresh]
 
 
 def test_the_committed_panel_is_the_same_on_every_seed(capsys):

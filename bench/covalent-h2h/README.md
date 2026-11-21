@@ -864,9 +864,19 @@ energy from a fresh SCC to 1e-10 eV, but Si13 and Si20 minima do not
   and xtb 6.7.1 gives it -22.957465589557 Eh from a fresh start. It is
   the lowest Si13 minimum any run has reached, recorded in
   `gfn2/minima.csv` with its structure in `gfn2/minima/si13-ring.xyz`.
-  Against it CREST hits on none of its six seeds (`gfn2/rescore.csv`,
-  from `--rescore si13 -624.70446339`). Anneal's rows are not rescored:
-  each stopped at the reference it ran with.
+  Against it both arms are scored in `gfn2/rescore.csv`: anneal hits on
+  one of six seeds and CREST on none. The CREST seeds that produced no
+  result stay in that 0/6 as misses. No p-value is computed. The 6/6
+  and 4/6 above are the stop-target score. Each arm's call budgets are
+  its recorded rows. A median of the runs that ran leaves out a row
+  that charged nothing or whose best energy is not finite, and the
+  all-rows median keeps it:
+  anneal-general: 6 runs stopped at the -599.34546694 stop target (seeds 2000-2005 budgets 100000 100000 100000 100000 100000 100000); 0 produced no result; median budget of the runs that ran 100000.0; median charged of the runs that ran 1974.5; median budget of all rows 100000.0; median charged of all rows 1974.5
+  crest: 4 runs ran to their own end (seeds 2001-2004 budgets 143630 95213 113947 112396); 2 produced no result (seeds 2000 2005); median budget of the runs that ran 113171.5; median charged of the runs that ran 113171.5; median budget of all rows 103804.5; median charged of all rows 103804.5
+  No log of CREST seeds 2000 2005 is committed, so the rows do not say
+  why their calls are 0. The record above is that the SCC of the xtb
+  `--opt` of the start does not converge in 250 iterations, and those
+  seeds end before any search.
 - Si20 has no panel reference yet. With the engine reusing the previous
   wavefunction, the Si13 and Si20 minima had energies a fresh SCC does
   not reproduce: an Si13 minimum at -601.12421 eV is -593.51232 eV fresh,

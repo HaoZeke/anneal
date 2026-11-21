@@ -34,19 +34,30 @@ Rows are appended to ``--rows`` with the anneal revision, the host and the
 binary hashes, and a file with another header is refused, never
 rewritten. ``--history`` names earlier rows files, such as ``seeds.csv``,
 read alongside it. ``--summary`` appends one line per system and code over
-all of them, with Fisher's exact test on hits and a two-sided Mann-Whitney
-on calls to the hit, with a miss ranked after every hit, both against
-anneal; alone when no binaries are given, over ``--systems``, and with
+all of them. ``stop_target_eV`` is the campaign stop target the stored
+hits were scored against, with Fisher's exact test on those hits and a
+two-sided Mann-Whitney on calls to the hit, a miss ranked after every
+hit, both against anneal; alone when no binaries are given, over
+``--systems``, and with
 ``--anneal-revision`` over anneal's rows of that ``code_revision`` only.
 ``--false-hits`` names rows, by system, code, revision and seed, whose hit
 is not the geometry's energy; the summary counts them as misses at their
-budget. ``--rescore SYSTEM ENERGY_EV`` appends to ``--rescored`` CREST's
-hits on that system, over the same files, against another reference;
-anneal stops at its own and is not rescored.
+budget. ``--rescore SYSTEM ENERGY_EV`` appends to ``--rescored`` both
+codes' hits on that system, over the same files, against another
+reference. A hit is the recorded best energy. Each line gives that
+arm's call budgets and charged calls. A row with no charged call or a
+non-finite best produced no result and stays in the run count as a
+miss; it did not run to its own end. A row that reached the campaign
+stop target with calls still left stopped there. A row that produced a
+result and whose budget is the calls it made ran to its own end.
+Medians of the runs that produced a result are separate from the
+medians of every row. No p-value is computed.
 Time per call skips a run that made no call.
-Anneal stops at the reference and its miss is the full budget. CREST runs
-to its own end; its energy is the first frame of ``crest_best.xyz``. A
-hit is an energy within ``HIT_TOL`` eV of the reference. This process
+Anneal stops at the reference and its miss is the full budget. CREST that
+writes ``crest_best.xyz`` runs to its own end; its energy is the first
+frame of that file. A preopt that writes no ``xtbopt.xyz`` never starts
+CREST, so the row charges no call and records no finite energy.
+A hit is an energy within ``HIT_TOL`` eV of the reference. This process
 refuses to run unless the UTS hostname is bench.
 """
 
@@ -133,6 +144,7 @@ PROVENANCE_FIELDS = [
 SUMMARY_FIELDS = [
     "system",
     "code",
+    "stop_target_eV",
     "runs",
     "hits",
     "seeds",
@@ -501,12 +513,14 @@ def summarise(
     anneal_revision: str | None = None,
     systems: list[str] | None = None,
     false_hits: Path | None = None,
+    on_date: str | None = None,
 ) -> None:
     """Append one line per system and code over every rows file.
 
     With ``anneal_revision``, anneal's rows are only those of that
     ``code_revision``. A row named in ``false_hits`` by system, code,
-    revision and seed counts as a miss at its budget.
+    revision and seed counts as a miss at its budget. ``on_date``
+    records a summary that was already dated; a new summary uses today.
     """
     table = []
     for path in paths:
@@ -533,7 +547,7 @@ def summarise(
             else row
             for row in table
         ]
-    date = datetime.date.today().isoformat()
+    date = on_date or datetime.date.today().isoformat()
     lines = []
     for system in systems or SYSTEMS:
         groups = {
@@ -547,6 +561,8 @@ def summarise(
             runs = groups[code]
             if not runs:
                 continue
+            if system not in REFERENCE:
+                raise SystemExit(f"no stop target for {system}")
             evals = [float(row["evals_to_hit"]) for row in runs]
             hits = sum(row["hit"] == "true" for row in runs)
             seeds = sorted(int(row["seed"]) for row in runs)
@@ -554,6 +570,7 @@ def summarise(
             line = {
                 "system": system,
                 "code": code,
+                "stop_target_eV": f"{REFERENCE[system]:.8f}",
                 "runs": len(runs),
                 "hits": hits,
                 "seeds": " ".join(str(seed) for seed in seeds),
@@ -590,11 +607,117 @@ RESCORE_FIELDS = [
     "reference_eV",
     "runs",
     "hits",
+    "budgets",
+    "charged",
+    "median_budget_all",
+    "median_charged_all",
+    "median_budget_ran",
+    "median_charged_ran",
+    "no_result",
+    "no_result_seeds",
+    "stop_note",
     "seeds",
     "code_revision",
     "host",
     "date",
 ]
+
+
+def _count_text(values: list[float]) -> str:
+    return " ".join(str(int(value)) if value.is_integer() else f"{value:.8f}" for value in values)
+
+
+def _seed_span(seeds: list[int]) -> str:
+    if len(seeds) > 1 and seeds == list(range(seeds[0], seeds[-1] + 1)):
+        return f"{seeds[0]}-{seeds[-1]}"
+    return " ".join(str(seed) for seed in seeds)
+
+
+def _median_text(values: list[float]) -> str:
+    if not values:
+        return ""
+    return f"{type7(values, 0.5):.1f}"
+
+
+def _no_result(row: dict) -> bool:
+    """A row that charged nothing, or whose best energy is not finite."""
+    try:
+        best = float(row["best"])
+    except ValueError:
+        return True
+    return float(row["charged"]) == 0.0 or not math.isfinite(best)
+
+
+def arm_calls(runs: list[dict], stop: float | None) -> dict[str, str]:
+    """Per-row budgets and charged calls, and how those rows stopped.
+
+    A row with no charged call or a non-finite best produced no result.
+    It stays in the run count and is not treated as a finished search.
+    Anneal stops on the campaign stop target, so a finished anneal row
+    has calls still left. CREST records the calls it made as its budget,
+    so a finished CREST row ran to its own end.
+    """
+    ordered = sorted(runs, key=lambda row: int(row["seed"]))
+    budgets = [float(row["budget"]) for row in ordered]
+    charged = [float(row["charged"]) for row in ordered]
+    groups: dict[str, list[dict]] = {"own_end": [], "at_stop": [], "short": [], "none": []}
+    for row, cap, made in zip(ordered, budgets, charged):
+        if _no_result(row):
+            groups["none"].append(row)
+            continue
+        if (
+            stop is not None
+            and energy_hits(float(row["best"]), stop, HIT_TOL)
+            and made < cap
+        ):
+            groups["at_stop"].append(row)
+        elif cap == made:
+            groups["own_end"].append(row)
+        else:
+            groups["short"].append(row)
+    ran = [row for row in ordered if not _no_result(row)]
+    parts = []
+    at_stop_how = "stopped at the stop target"
+    if stop is not None:
+        at_stop_how = f"stopped at the {stop:.8f} stop target"
+    for key, how in (
+        ("own_end", "ran to their own end"),
+        ("at_stop", at_stop_how),
+        ("short", "stopped short of their recorded budget"),
+    ):
+        chosen = groups[key]
+        if not chosen:
+            continue
+        seeds = [int(row["seed"]) for row in chosen]
+        calls = _count_text([float(row["budget"]) for row in chosen])
+        parts.append(f"{len(chosen)} runs {how} (seeds {_seed_span(seeds)} budgets {calls})")
+    missing = groups["none"]
+    missing_seeds = [int(row["seed"]) for row in missing]
+    if missing:
+        parts.append(f"{len(missing)} produced no result (seeds {_seed_span(missing_seeds)})")
+    else:
+        parts.append("0 produced no result")
+    parts.append(
+        "median budget of the runs that ran "
+        f"{_median_text([float(row['budget']) for row in ran])}"
+    )
+    parts.append(
+        "median charged of the runs that ran "
+        f"{_median_text([float(row['charged']) for row in ran])}"
+    )
+    parts.append(f"median budget of all rows {_median_text(budgets)}")
+    parts.append(f"median charged of all rows {_median_text(charged)}")
+    return {
+        "budgets": _count_text(budgets),
+        "charged": _count_text(charged),
+        "median_budget_all": _median_text(budgets),
+        "median_charged_all": _median_text(charged),
+        "median_budget_ran": _median_text([float(row["budget"]) for row in ran]),
+        "median_charged_ran": _median_text([float(row["charged"]) for row in ran]),
+        "no_result": str(len(missing)),
+        "no_result_seeds": _seed_span(missing_seeds),
+        "stop_note": "; ".join(parts),
+    }
 
 
 def rescore(
@@ -605,35 +728,56 @@ def rescore(
     revision: str,
     host: str,
 ) -> None:
-    """Append CREST's hits on ``system`` against another reference.
+    """Append each code's hits on ``system`` against ``reference``.
 
-    CREST runs to its own end, so its best energy is scored against any
-    reference after the fact. Anneal stops at the reference it ran with,
-    and its rows are not rescored.
+    A hit is the recorded best energy, not the stored hit flag. The line
+    records that arm's budgets and charged calls from the rows, the runs
+    that produced no result, and medians over the runs that produced a
+    result separately from every row. No p-value is computed.
     """
-    runs = []
+    table = []
     for path in paths:
         if path.is_file():
             with open(path, newline="") as handle:
-                runs.extend(
-                    row
-                    for row in csv.DictReader(handle)
-                    if row["system"] == system and row["code"] == "crest"
+                table.extend(
+                    row for row in csv.DictReader(handle) if row["system"] == system
                 )
-    if not runs:
+    stop = REFERENCE.get(system)
+    lines = []
+    for code in CODES:
+        runs = [row for row in table if row["code"] == code]
+        if not runs:
+            continue
+        calls = arm_calls(runs, stop)
+        lines.append(
+            {
+                "system": system,
+                "code": code,
+                "reference_eV": f"{reference:.8f}",
+                "runs": len(runs),
+                "hits": sum(
+                    energy_hits(float(row["best"]), reference, HIT_TOL) for row in runs
+                ),
+                "budgets": calls["budgets"],
+                "charged": calls["charged"],
+                "median_budget_all": calls["median_budget_all"],
+                "median_charged_all": calls["median_charged_all"],
+                "median_budget_ran": calls["median_budget_ran"],
+                "median_charged_ran": calls["median_charged_ran"],
+                "no_result": calls["no_result"],
+                "no_result_seeds": calls["no_result_seeds"],
+                "stop_note": calls["stop_note"],
+                "seeds": " ".join(
+                    str(seed) for seed in sorted(int(row["seed"]) for row in runs)
+                ),
+                "code_revision": revision,
+                "host": host,
+                "date": datetime.date.today().isoformat(),
+            }
+        )
+    if not any(line["code"] == "crest" for line in lines):
         raise SystemExit(f"no CREST rows on {system}")
-    line = {
-        "system": system,
-        "code": "crest",
-        "reference_eV": f"{reference:.8f}",
-        "runs": len(runs),
-        "hits": sum(energy_hits(float(row["best"]), reference, HIT_TOL) for row in runs),
-        "seeds": " ".join(str(seed) for seed in sorted(int(r["seed"]) for r in runs)),
-        "code_revision": revision,
-        "host": host,
-        "date": datetime.date.today().isoformat(),
-    }
-    append_rows(rescored, RESCORE_FIELDS, [line])
+    append_rows(rescored, RESCORE_FIELDS, lines)
 
 
 def self_test() -> None:
