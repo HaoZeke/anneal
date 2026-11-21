@@ -52,6 +52,11 @@ def _run(argv: list[str], **kw) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _pool_lines(output: str) -> list[str]:
+    # The runtime may print diagnostics of its own around the program's line.
+    return [ln.strip() for ln in output.splitlines() if ln.strip().startswith("pool ")]
+
+
 def _checked(argv: list[str], **kw) -> str | None:
     done = _run(argv, **kw)
     if done.returncode != 0:
@@ -144,7 +149,7 @@ def main() -> int:
         env["OMP_NUM_THREADS"] = "3"
         ran = _run([str(cbuild / "consumer")], env=env)
         print(f"consumer: {ran.stdout.strip()}")
-        if ran.returncode != 0 or ran.stdout.strip() != "pool 3":
+        if ran.returncode != 0 or _pool_lines(ran.stdout) != ["pool 3"]:
             print("consumer did not reach librgpot's OpenMP pool", file=sys.stderr)
             return 1
     print("an installed static rgpot links its CMake consumer without -fopenmp")

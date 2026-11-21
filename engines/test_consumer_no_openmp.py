@@ -81,6 +81,11 @@ int main() {
 OPENMP_FLAG = re.compile(r"^[-/][A-Za-z]*openmp", re.IGNORECASE)
 
 
+def _pool_lines(output: str) -> list[str]:
+    # The runtime may print diagnostics of its own around the program's line.
+    return [ln.strip() for ln in output.splitlines() if ln.strip().startswith("pool ")]
+
+
 def _meson_argv(argv: list[str]) -> list[str]:
     if len(argv) == 1 and Path(argv[0]).name.lower().startswith("python"):
         return [argv[0], "-m", "mesonbuild.mesonmain"]
@@ -165,7 +170,7 @@ def _case(root: Path, meson: list[str], work: Path, library: str) -> int:
     for target in ("consumer_openmp", "consumer_no_openmp"):
         ran = _run([str(build / target)], env=env)
         print(f"[{library}] {target}: {ran.stdout.strip()}")
-        if ran.returncode != 0 or ran.stdout.strip() != "pool 3":
+        if ran.returncode != 0 or _pool_lines(ran.stdout) != ["pool 3"]:
             print(
                 f"[{library}] {target} exited {ran.returncode} without "
                 "reaching librgpot's OpenMP pool",
