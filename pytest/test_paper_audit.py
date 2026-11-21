@@ -39,6 +39,7 @@ CHECKS = (
     audit_mod.panel_references,
     audit_mod.generated_tables,
     audit_mod.supporting_numbers,
+    audit_mod.outside_session,
     audit_mod.manuscript_new,
     audit_mod.manuscript_followups,
     audit_mod.cover_letter,
@@ -251,22 +252,21 @@ def test_a_returning_endpoint_section_is_reported():
     assert [r[2] for r in audit.drifts()] == ["the endpoint-energy section is not printed"]
 
 
-def test_a_trap_in_the_results_is_reported():
+def test_the_trap_claim_is_required_in_the_results():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "Both arms hit LJ\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=6\\) on every seed."
-    assert tex.count(old) == 1
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, old + " The misses end in a trap.")
+    assert "trap" in tex.lower()
+    audit.text_cache[audit_mod.TEX] = re.sub("trap", "site", tex, flags=re.IGNORECASE)
     audit_mod.science_claims(audit)
-    assert [r[2] for r in audit.drifts()] == ["the results and conclusions do not say trap"]
+    assert [r[2] for r in audit.drifts()] == ["the results and conclusions state the trap claim"]
 
 
 def test_a_drifted_template_count_is_reported():
     audit = audit_mod.Audit()
     tex = audit_mod.collapse(audit.text(audit_mod.TEX))
-    old = "at \\(\\rho=14\\) from 12 of 12 to 4,"
+    old = "at \\(\\rho=14\\) fall from 12 to 4 of 12"
     assert old in tex
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, old.replace("to 4,", "to 3,"))
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, old.replace("to 4", "to 3"))
     audit_mod.manuscript_knockouts(audit)
     assert {r[2] for r in audit.drifts()} == {"prose"}
 
@@ -306,9 +306,9 @@ def test_a_template_era_row_in_the_text_is_reported():
 def test_a_table_without_its_preset_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "This code is \\texttt{Config::recommended\\_tip4p}\\((N)\\) of revision \\texttt{e1a69a57}"
+    old = "recommended template-free rigid-water preset"
     assert old in tex
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, "This code is of revision \\texttt{e1a69a57}")
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "rigid-water preset")
     audit_mod.presets_and_templates(audit)
     assert [r[2] for r in audit.drifts()] == ["tab:tip4p-gmin names its preset"]
 
@@ -400,8 +400,7 @@ def test_c2de652d_in_the_manuscript_fails():
     audit.text_cache[audit_mod.TEX] = tex.replace(old, "Revision \\texttt{c2de652d} hits M\\(_{80}\\) on 2 of 12.\n\n" + old)
     audit_mod.template_era(audit)
     audit_mod.science_claims(audit)
-    assert sorted(r[2] for r in audit.drifts()) == ["no row is labelled c2de652d",
-                                                    "the template-era comparison stays in the SI: c2de652d"]
+    assert [r[2] for r in audit.drifts()] == ["no row is labelled c2de652d"]
 
 
 def test_c2de652d_in_the_si_outside_its_section_fails():
@@ -511,7 +510,7 @@ def test_a_cover_sentence_off_the_abstract_is_reported():
     audit_mod.cover_letter(audit)
     assert [r[2] for r in audit.drifts()] == [
         "a cover-letter sentence with a number is a sentence of the abstract",
-        "the only cover-letter sentences with a number are the preprint and graphic lines"]
+        "the numbered cover-letter claims match the two abstract claims"]
 
 
 def test_a_drifted_gmin_panel_summary_cell_is_reported():
@@ -542,7 +541,8 @@ def test_a_cross_arm_hit_p_value_in_the_gmin_prose_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
     old = ("At those arm-specific ceilings, this code hits 7 of 12 seeds on\n"
-           "LJ\\(_{98}\\) and GMIN none; on LJ\\(_{38}\\), the counts are 12 and 7.")
+           "LJ\\(_{98}\\) and 5 of 12 on LJ\\(_{75}\\), while GMIN hits neither; on\n"
+           "LJ\\(_{38}\\), the counts are 12 and 7.")
     assert tex.count(old) == 1
     audit.text_cache[audit_mod.TEX] = tex.replace(old, old + "\nThe paired result is \\(p=0.016\\).")
     audit_mod.manuscript_gmin(audit)
@@ -572,11 +572,11 @@ def test_a_drifted_length_unit_cell_is_reported():
 def test_a_drifted_pooled_length_unit_sentence_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "(40 against\n35 of 48 seeds, pooled McNemar \\(p=0.30\\))"
+    old = "it hits 40 of 48 against 35\n(pooled McNemar \\(p=0.30\\)"
     assert tex.count(old) == 1
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, "(40 against\n30 of 48 seeds, pooled McNemar \\(p=0.30\\))")
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, old.replace("against 35", "against 30"))
     audit_mod.manuscript_knockouts(audit)
-    assert [r[2] for r in audit.drifts()] == ["prose"]
+    assert [r[2] for r in audit.drifts()] == ["prose", "prose"]
 
 
 def test_a_length_unit_row_from_another_driver_is_reported():
@@ -718,30 +718,32 @@ def test_a_move_choice_row_from_another_driver_is_reported():
 def test_a_drifted_pooled_move_choice_sentence_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "(73 against 75 of 96 seeds, pooled McNemar\n\\(p=0.85\\))"
+    old = "preset hits 73 of 96 seeds and the uniform\ndraw 75 (pooled McNemar \\(p=0.85\\)"
     assert tex.count(old) == 1
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, "(73 against 70 of 96 seeds, pooled McNemar\n\\(p=0.85\\))")
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, old.replace("draw 75", "draw 70"))
     audit_mod.manuscript_knockouts(audit)
     assert [r[2] for r in audit.drifts()] == ["prose"]
 
 
-def test_lj75_is_withdrawn_only_from_the_gmin_comparison():
+def test_lj75_is_present_in_the_gmin_comparison():
     table = audit_mod.load_script("gmin_table_lj75", "paper/jctc/scripts/gmin_table.py")
     raw = [row for row in table.rows() if row["system"] == "lj75"]
     assert len(raw) == 24
-    assert "LJ\\(_{75}\\)" not in table.table()
+    assert "LJ\\(_{75}\\)" in table.table()
+    assert "GMIN & 0/12" in table.table()
 
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
     gmin = tex.split("% gmin-panel table: start", 1)[1].split("% gmin-panel table: end", 1)[0]
-    assert "LJ\\(_{75}\\)" not in gmin
+    assert "LJ\\(_{75}\\)" in gmin
+    assert "LJ\\(_{75}\\) & \\(4\\times 10^{6}\\) & this work & 5/12" in gmin
     assert "LJ\\(_{75}\\) & \\(4\\times 10^{6}\\) & 12 & 5/12 & 6/12" in tex
 
     si = audit.text(audit_mod.SI)
     assert "They hit LJ\\(_{75}\\) on 5 of 12 against 12" in si
     assert "The published GOFEE curves count local optimizations on LJ\\(_{75}\\)" in si
     assert "A fingerprint bias during local optimization is reported on LJ\\(_{38}\\)" in si
-    assert "the 12 LJ\\(_{75}\\) traces document" in si
+    assert "Published global minima of LJ\\(_{38}\\), LJ\\(_{75}\\), LJ\\(_{98}\\)" in tex
     assert '"lj75_marks"' in audit.text("paper/jctc/scripts/system_visuals.py")
 
 
@@ -840,12 +842,13 @@ def test_the_paired_newcombe_interval_matches_the_published_example():
 
 def test_a_title_across_funnels_is_reported():
     audit = audit_mod.Audit()
-    tex = audit.text(audit_mod.TEX)
-    old = "of a basin-hopping search: a"
+    tex = audit_mod.collapse(audit.text(audit_mod.TEX))
+    old = "Template-free basin hopping with adaptive moves for funnelled cluster landscapes"
     assert old in tex
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, "of a basin-hopping search across funnels: a")
+    audit.text_cache[audit_mod.TEX] = tex.replace(
+        old, "Template-free basin hopping across funnels with adaptive moves")
     audit_mod.science_claims(audit)
-    assert [r[2] for r in audit.drifts()] == ["no overclaim: across funnels"]
+    assert [r[2] for r in audit.drifts()] == ["no overclaim: across funnels", "prose"]
     titled = audit_mod.Audit()
     titled.text_cache[audit_mod.TEX] = audit.text_cache[audit_mod.TEX]
     audit_mod.manuscript_new(titled)
@@ -1438,12 +1441,12 @@ def test_a_gmin_line_off_the_rerun_is_reported():
 
 def test_a_relabeled_develop_block_is_reported():
     audit = audit_mod.Audit()
-    tex = audit.text(audit_mod.TEX)
-    old = "\\emph{The submitted revision \\texttt{61fa67cf}}"
-    assert tex.count(old) == 1
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, "\\emph{The submitted revision \\texttt{1ce3ab64}}")
-    audit_mod.manuscript_gmin(audit)
-    assert {"tab:gmin block headings", "table line", "tab:gmin lines"} <= {r[2] for r in audit.drifts()}
+    si = audit.text(audit_mod.SI)
+    old = audit_mod.SUBMITTED
+    assert old in si
+    audit.text_cache[audit_mod.SI] = si.replace(old, "1ce3ab64493196afd25e8690648e21157d91b882")
+    audit_mod.presets_and_templates(audit)
+    assert "tab:gmin revision 61fa67cf is named in the SI" in {r[2] for r in audit.drifts()}
 
 
 def test_an_overclaim_that_returns_is_reported():
@@ -1452,7 +1455,7 @@ def test_an_overclaim_that_returns_is_reported():
     old = "Both arms hit LJ\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=6\\) on every seed."
     audit.text_cache[audit_mod.TEX] = tex.replace(old, old + " The misses sit in the same trap.")
     audit_mod.science_claims(audit)
-    assert sorted(r[2] for r in audit.drifts()) == ["no overclaim: same trap", "the results and conclusions do not say trap"]
+    assert [r[2] for r in audit.drifts()] == ["no overclaim: same trap"]
 
 
 def test_a_hypothesis_in_the_results_is_reported():
@@ -1461,9 +1464,7 @@ def test_a_hypothesis_in_the_results_is_reported():
     old = "Both arms hit LJ\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=6\\) on every seed."
     audit.text_cache[audit_mod.TEX] = tex.replace(old, old + " This supports the funnel hypothesis.")
     audit_mod.science_claims(audit)
-    assert sorted(r[2] for r in audit.drifts()) == ["the manuscript states no hypothesis",
-                                                   "the results and conclusions do not say funnel",
-                                                   "the results and conclusions do not say hypothes"]
+    assert [r[2] for r in audit.drifts()] == ["the manuscript states no hypothesis"]
 
 
 def test_reported_run_figures_exclude_unused_components_and_crossings():

@@ -43,7 +43,7 @@ DEVELOP_SYSTEMS = ("au55", "m55r6", "m55r14", "m80r6", "m80r14")
 GMIN_TARBALL_DATE = "2026-11-19"
 GMIN_TARBALL_SHA256 = "ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776"
 RAW_SYSTEMS = ("lj38", "lj55", "lj75", "lj98", "lj102", "lj103", "lj104", "lj150", "m80r6")
-SYSTEMS = tuple(system for system in RAW_SYSTEMS if system != "lj75")
+SYSTEMS = RAW_SYSTEMS
 MARKS = PANEL.TEX_MARKS
 
 
@@ -146,20 +146,19 @@ def printed_lines(lines: list[dict[str, str]], paired: dict[str, dict[str, objec
 def table() -> str:
     lines, paired = summary()
     later, later_paired = develop_summary()
-    body = [heading("Revision \\texttt{eeec8e2c}, an ancestor of the submitted revision")]
+    body = [heading("Template-free predecessor")]
     body += [" & ".join(cells) + " \\\\" for cells in printed_lines(lines, paired)]
-    body += ["\\midrule", heading("The submitted revision \\texttt{61fa67cf}")]
+    body += ["\\midrule", heading("Submitted revision")]
     body += [" & ".join(cells) + " \\\\" for cells in printed_lines(later, later_paired)]
     return "\n".join(
         [
             "\\begin{table}",
             "\\caption{Paired outcomes and reported work for this code against GMIN.",
-            "The Supporting Information gives the configurations, inputs, revisions, build recipe,",
-            "and row provenance. Both arms start from the same geometry and run in alternating",
+            "The Supporting Information gives the configurations, inputs, revisions, hosts, build",
+            "recipe, and row provenance. Both arms start from the same geometry and run in alternating",
             "order on seeds 2000--2011.",
-            "This code uses \\texttt{Config::recommended}\\((N)\\) through \\texttt{h2h\\_gmin\\_proof}",
-            "on Lennard-Jones, through \\texttt{h2h\\_morse} on Morse, and through",
-            "\\texttt{h2h\\_metal} with every atom labeled gold on Au\\(_{55}\\).",
+            "This code uses its recommended atomic-cluster preset, with every atom labeled gold",
+            "on Au\\(_{55}\\).",
             "Every printed Lennard-Jones row runs the Wales-group LJ\\(_{38}\\)",
             "introduction file with no symmetrization keyword.",
             "Eval. is a combined energy-and-gradient pass for this code and every",
@@ -171,9 +170,7 @@ def table() -> str:
             "Eval. and IQR are the median and interquartile range of the arm's reported count to",
             "the minimum, with a miss at its full budget.",
             "Wall, In and Out are the median seconds of the run, inside the",
-            "potential and outside it.",
-            "The rows are \\texttt{paper/jctc/data/gmin\\_eeec8e2c/*/rows.csv} and",
-            "\\texttt{paper/jctc/data/gmin\\_develop/rows.csv}.}",
+            "potential and outside it.}",
             "\\label{tab:gmin}",
             "\\centering",
             "\\scriptsize",

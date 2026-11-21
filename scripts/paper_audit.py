@@ -100,6 +100,7 @@ KNOWN_GAPS = {
                              "empty or unknown on some rows",
     "paper/jctc/data/hosts/3b11c160/hosts.csv": "revision unrecorded (no revision column)",
     "paper/jctc/data/system_visuals/references.csv": "revision and host unrecorded (no revision or host column)",
+    "paper/jctc/data/outside_perf/rows.csv": "revision recorded; no host column",
     "bench/gad-published/summary.csv": "revision recorded; no host column",
     "bench/morse-panel/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "bench/morse-h2h/seeds.csv": "revision and host unrecorded (no revision or host column)",
@@ -111,18 +112,10 @@ KNOWN_GAPS = {
     "bench/covalent-h2h/v3/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "bench/covalent-h2h/gfn2/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "bench/covalent-h2h/gfn2/false-hits.csv": "revision recorded; no host column",
-    "bench/covalent-h2h/gfn2/rows.csv": "revision 5351f272 is not in this repository; revision ce1e7a46 is not in "
-                                        "this repository",
-    "bench/ase-gofee-h2h/results.csv": "revision recorded; no host column; head unrecorded on some rows; revision "
-                                       "0f988569 is not in this repository; revision 349523d3 is not in this "
-                                       "repository; revision befbc3e8 is not in this repository; revision bf09f7a2 is "
-                                       "not in this repository",
+    "bench/ase-gofee-h2h/results.csv": "revision recorded; no host column; head unrecorded on some rows",
     "bench/growpal-h2h/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "bench/metal-cluster-h2h/ptcu-b3d03061/icosa-23.csv": "revision and host unrecorded (no revision or host column)",
     "bench/nh3-octamer/ladder.csv": "revision and host unrecorded (no revision or host column)",
-    "bench/gmin-panel/rows.csv": "revision 1ce3ab64 is not in this repository",
-    "bench/gmin-panel/summary.csv": "revision 1ce3ab64 is not in this repository",
-    "bench/morse-panel/template-free-rows.csv": "revision 1ce3ab64 is not in this repository",
     "paper/jctc/data/literature.tsv": "revision and host unrecorded (no revision or host column)",
 }
 
@@ -802,7 +795,7 @@ GMIN_TARBALL_SVNREV = "9cbec1a446352bc9ef064bd2b1a5767194655919"
 GMIN_TARBALL_SHA256 = "ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776"
 GMIN_RERUN_ROW_ID = "9cbec1a446352bc9ef064bd2b1a5767194655919"
 GMIN_RERUN_RAW_SYSTEMS = ("lj38", "lj55", "lj75", "lj98", "lj102", "lj103", "lj104", "lj150", "m80r6")
-GMIN_RERUN_SYSTEMS = tuple(system for system in GMIN_RERUN_RAW_SYSTEMS if system != "lj75")
+GMIN_RERUN_SYSTEMS = GMIN_RERUN_RAW_SYSTEMS
 TEMPLATE_REMOVAL = "1c1b12384683485cf820d3a244151b48973dc0f7"
 SUBMITTED = "61fa67cf380e46876b569da45e7cc091647a775b"
 GMIN_DEVELOP = "paper/jctc/data/gmin_develop"
@@ -1021,7 +1014,9 @@ def gmin_develop_data(audit: Audit, panel: object) -> None:
                     "\\cite{darbyCuAu2002} at \\(T=0.1\\)~eV, with the step and the taboo radius scaled by "
                     "\\(r_0/2^{1/6}\\) and GMIN's container radius, and the gold driver of this code applies the basin "
                     "bias of equation~\\ref{eq:delta} on a stride of 8.")
-    audit.said(TEX, "\\texttt{h2h\\_metal} with every atom labeled gold on Au\\(_{55}\\).")
+    audit.record("H2H_" not in audit.text(TEX) and "h2h\\_" not in audit.text(TEX),
+                 TEX, "driver switches stay in the Supporting Information", "absent",
+                 "absent" if "H2H_" not in audit.text(TEX) and "h2h\\_" not in audit.text(TEX) else "present")
     refs = {row[0]: row[3] for row in panel.SYSTEMS}
     audit.said(SI, f"\\({refs['au55']:.8f}\\)~eV at Au\\(_{{55}}\\), \\({refs['m55r6']:.6f}\\) and "
                    f"\\({refs['m55r14']:.6f}\\) at M\\(_{{55}}\\) (\\(\\rho=6\\) and 14), and \\({refs['m80r6']:.6f}\\) and "
@@ -1034,7 +1029,7 @@ def gmin_develop_data(audit: Audit, panel: object) -> None:
                    f"\\texttt{{\\seqsplit{{{SUBMITTED}}}}}, session {GMIN_DEVELOP_SESSION} of "
                    "\\path{paper/jctc/data/gmin_develop}, copied from the record branch its \\texttt{PROVENANCE} file "
                    "names.")
-    audit.said(SI, "The GMIN table of the main text uses three GMIN inputs.")
+    audit.said(SI, "The GMIN tables of the main text use four GMIN inputs.")
 
 
 def gmin_develop_prose(audit: Audit, panel: object, groups: dict) -> None:
@@ -1054,14 +1049,12 @@ def gmin_develop_prose(audit: Audit, panel: object, groups: dict) -> None:
     audit.said(TEX, "Both arms hit M\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=6\\) on every seed, and on M\\(_{80}\\) at "
                     f"\\(\\rho=6\\) this code takes the same median of {calls:.0f} combined\n"
                     "energy-and-gradient passes at both revisions.")
-    audit.said(TEX, "Table~\\ref{tab:gmin} runs GMIN against this code at two revisions: revision \\texttt{eeec8e2c}, "
-                    "an ancestor of the submitted revision with the structure templates removed, on seven Lennard-Jones "
-                    "sizes and Morse M\\(_{80}\\) at \\(\\rho=6\\), and the submitted revision \\texttt{61fa67cf} on "
-                    "Gupta Au\\(_{55}\\) and on Morse M\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=6\\) and 14.")
+    audit.said(TEX, "Table~\\ref{tab:gmin} tests whether the template-free search reaches minima\n"
+                    "that trap that walk, on Lennard-Jones, Morse, and Gupta clusters.")
     audit.said(TEX, "Each block runs both arms of each cluster on seeds 2000--2011 in alternating order, at the "
                     "numeric ceiling in the table, from the start this code writes for the seed.")
-    audit.said(COVER, "The GMIN tables report committed outcomes at the arm-specific budget units\n"
-                      "stated with each table, without a cross-arm test.")
+    audit.said(COVER, "At arm-specific work definitions the search reaches Lennard-Jones, Morse,\n"
+                      "and rigid-water minima that trap the corresponding GMIN arms.")
 
 
 def gmin_rerun(audit: Audit) -> None:
@@ -1074,7 +1067,7 @@ def gmin_rerun(audit: Audit) -> None:
         cells = [c.strip() for c in row]
         if "\\multicolumn{12}" in cells[0]:
             heads.append(cells[0].replace("\\midrule", "").strip())
-            block = "develop" if "61fa67cf" in cells[0] else "rerun"
+            block = "develop" if "Submitted revision" in cells[0] else "rerun"
             system = None
             continue
         if cells[0]:
@@ -1088,8 +1081,8 @@ def gmin_rerun(audit: Audit) -> None:
         shown.append((block, system, arm))
         gmin_tex_line(audit, where, cells[1:], source, system, arm, panel.PAPER_BUDGETS[system])
     audit.cell(TEX, "tab:gmin block headings",
-               "\\multicolumn{12}{@{}l}{\\emph{Revision \\texttt{eeec8e2c}, an ancestor of the submitted revision}} | "
-               "\\multicolumn{12}{@{}l}{\\emph{The submitted revision \\texttt{61fa67cf}}}", " | ".join(heads))
+               "\\multicolumn{12}{@{}l}{\\emph{Template-free predecessor}} | "
+               "\\multicolumn{12}{@{}l}{\\emph{Submitted revision}}", " | ".join(heads))
     table_text = audit.text(TEX).split("% gmin-panel table: start", 1)[1].split("% gmin-panel table: end", 1)[0]
     cross_arm = re.search(r"p_\\mathrm\{(?:M|calls|wall)\}|Newcombe|\\Delta", table_text)
     audit.record(cross_arm is None, TEX, "tab:gmin reports no cross-arm tests", "absent",
@@ -1104,13 +1097,10 @@ def gmin_rerun(audit: Audit) -> None:
             + [("develop", s, a) for s in GMIN_DEVELOP_SYSTEMS for a in ("anneal", "gmin")])
     audit.cell(TEX, "tab:gmin lines", " ".join("/".join(x) for x in shown), " ".join("/".join(x) for x in want))
     lj75_rows = groups[("lj75", "anneal")] + groups[("lj75", "gmin")]
-    audit.cell(GMIN_RERUN, "raw LJ75 rows retained", "24", float(len(lj75_rows)))
-    audit.record("LJ\\(_{75}\\)" not in table_text and not any(s == "lj75" for _, s, _ in shown),
-                 TEX, "tab:gmin omits the invalid LJ75 pair", "absent",
-                 "absent" if "LJ\\(_{75}\\)" not in table_text else "present")
-    audit.said(SI, "The archived LJ\\(_{75}\\) pair is retained in the row files but excluded from\n"
-                   "the GMIN table and every cross-code result because its GMIN arm used the\n"
-                   "LJ\\(_{38}\\) input.")
+    audit.cell(GMIN_RERUN, "raw LJ75 rows printed", "24", float(len(lj75_rows)))
+    audit.record("LJ\\(_{75}\\)" in table_text and any(s == "lj75" for _, s, _ in shown),
+                 TEX, "tab:gmin prints the committed LJ75 pair", "present",
+                 "present" if "LJ\\(_{75}\\)" in table_text else "absent")
     gmin_develop_data(audit, panel)
     gmin_develop_prose(audit, panel, develop)
     def hits(system: str, arm: str) -> int:
@@ -1119,8 +1109,9 @@ def gmin_rerun(audit: Audit) -> None:
     def walls(system: str, arm: str) -> float:
         return median([float(r["wall_s"]) for r in groups[(system, arm)]])
 
-    audit.said(TEX, f"At those arm-specific ceilings, this code hits {hits('lj98', 'anneal')} of 12 seeds on "
-                    f"LJ\\(_{{98}}\\) and GMIN none; on LJ\\(_{{38}}\\), the counts are "
+    audit.said(TEX, f"At those arm-specific ceilings, this code hits {hits('lj98', 'anneal')} of 12 seeds on\n"
+                    f"LJ\\(_{{98}}\\) and {hits('lj75', 'anneal')} of 12 on LJ\\(_{{75}}\\), while GMIN hits neither; on\n"
+                    f"LJ\\(_{{38}}\\), the counts are "
                     f"{hits('lj38', 'anneal')} and {hits('lj38', 'gmin')}.")
     big = ("lj102", "lj103", "lj104", "lj150")
     audit.said(TEX, "On LJ\\(_{102}\\), LJ\\(_{103}\\), LJ\\(_{104}\\), and LJ\\(_{150}\\), the hit\n"
@@ -1151,7 +1142,7 @@ def gmin_rerun(audit: Audit) -> None:
             part = part.split("\\label{sec:protocol}", 1)[1].split("\\label{sec:transfer}", 1)[0]
         else:
             part = part.split("\\label{sec:si-gmin}", 1)[1].split("\\section{Host and commands}", 1)[0]
-        for word in ("1ce3ab64", "c2de652d", "prior-on", "template-free", "Fisher", "Mann--Whitney"):
+        for word in ("1ce3ab64", "c2de652d", "prior-on", "Fisher", "Mann--Whitney"):
             audit.record(word not in part, path, f"the GMIN comparison does not print {word}", "absent",
                          "absent" if word not in part else "present")
     for path in (TEX, SI):
@@ -1315,21 +1306,12 @@ def knockout_move_a(audit: Audit, cells: dict[str, dict]) -> None:
     audit.said(TEX, f"Pooled over the eight clusters, the preset hits {pooled[0] + pooled[1]} of {n} seeds and the "
                     f"uniform draw {pooled[0] + pooled[2]} (pooled McNemar \\(p={pp(pooled_p)}\\), interval "
                     f"{show_signed(low)} to {show_signed(high)}).")
-    audit.said(TEX, f"On the same search source, replacing the adaptive move choice by a uniform draw shows no "
-                    f"difference in hits at \\(p<0.05\\) on eight Lennard-Jones, gold and Morse clusters, each or "
-                    f"pooled ({pooled[0] + pooled[1]} against {pooled[0] + pooled[2]} of {n} seeds, pooled McNemar "
-                    f"\\(p={pp(pooled_p)}\\)).")
-    audit.said(TEX, "Parts of the search with no knockout run are described as design, with no claim about their "
-                    "effect.")
-    audit.said(TEX, "Section~\\ref{sec:knockouts} gives those knockouts: removing the structure templates, rescaling "
-                    "the preset lengths to the Morse pair minimum, and replacing the adaptive move choice by a "
-                    "uniform draw.")
-    audit.said(TEX, "The third runs the same tree on LJ\\(_{38}\\), LJ\\(_{55}\\), LJ\\(_{75}\\), Au\\(_{55}\\), and "
-                    "M\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=6\\) and 14, from one start per seed:")
-    audit.said(TEX, "Of the rows of this article, only the Without arm of the move-choice block of "
-                    "Table~\\ref{tab:knockouts} sets it.")
-    audit.said(COVER, "replacing the adaptive move choice by a uniform draw changes the hits on none of the "
-                      "Lennard-Jones, gold and Morse clusters tested.")
+    audit.said(TEX, "At 12 seeds, neither rescaling the preset lengths nor replacing adaptive\n"
+                    "move choice by a uniform draw produces a detectable hit-rate change in the\n"
+                    "tested panels.")
+    audit.said(COVER, "At 12 seeds, neither rescaling the preset lengths nor replacing adaptive\n"
+                      "move choice by a uniform draw produces a detectable hit-rate change in the\n"
+                      "tested panels.")
     audit.said(SI, "\\texttt{\\seqsplit{50c532253f3ad11e6457a119bb603f05b4f0be79}} of \\path{record/knockout-move-a}, on "
                    "the same develop commit.")
     audit.said(SI, "even seeds run the preset first and odd seeds the uniform draw first.")
@@ -1388,15 +1370,13 @@ def knockout_pairscale(audit: Audit, cells: dict[str, dict]) -> None:
                     f"{hits(m80)[0]} against {hits(m80)[1]} (\\(p={pp(m80['p'])}\\)), and pooled over the four clusters "
                     f"it hits {pooled[0] + pooled[1]} of {n} against {pooled[0] + pooled[2]} (pooled McNemar "
                     f"\\(p={pp(pooled_p)}\\), interval {show_signed(low)} to {show_signed(high)}).")
-    audit.said(TEX, f"four Morse clusters show no difference in hits at \\(p<0.05\\), each or pooled "
-                    f"({pooled[0] + pooled[1]} against {pooled[0] + pooled[2]} of {n} seeds, pooled McNemar "
-                    f"\\(p={pp(pooled_p)}\\)).")
-    audit.said(COVER, "rescaling the preset lengths from the Lennard-Jones diameter to the Morse pair minimum changes "
-                      "the hits on none of the Morse clusters tested")
+    audit.said(TEX, f"pooled over the four clusters it hits {pooled[0] + pooled[1]} of {n} against "
+                    f"{pooled[0] + pooled[2]}\n"
+                    f"(pooled McNemar \\(p={pp(pooled_p)}\\), interval {show_signed(low)} to {show_signed(high)}).")
     audit.said(TEX, "Rescaling the preset lengths to the Morse pair minimum changes the hits on no cluster at "
                     "\\(p<0.05\\).")
-    audit.said(TEX, "The second runs tree \\texttt{b12293b9}, whose search source is that of the submitted revision "
-                    "with the default-off knockout switches of the drivers, on four Morse clusters:")
+    audit.said(TEX, "Table~\\ref{tab:knockouts} gives three paired on/off tests: the former\n"
+                    "structure templates, the preset length unit, and adaptive move choice.")
     audit.said(SI, "\\texttt{\\seqsplit{5c37c840ed2e9f9a2d881105363b33762b5cca31}} of "
                    "\\path{record/knockout-pairscale}, on develop "
                    "\\texttt{\\seqsplit{dd6ff9273be30ab317bfd5508596f4beb19cb3a4}}.")
@@ -1477,19 +1457,16 @@ def manuscript_knockouts(audit: Audit) -> None:
                " ".join(str(x) for s in ("m38r6", "sc126-38") for x in fall(tem[s])))
     below = [s for s, c in tem.items() if c["p"] < 0.05]
     audit.cell(TEX, "the one cluster of the template run below 0.05", "m38r14", " ".join(below))
-    audit.said(TEX, f"lowers the hits on Morse M\\(_{{38}}\\) at \\(\\rho=14\\) from {fall(m38)[0]} to {fall(m38)[1]} "
-                    f"of 12 (\\(p={pp(m38['p'])}\\)), at a revision and its child in the history of the code.")
-    audit.said(TEX, f"lowers the hits on Morse M\\(_{{38}}\\) at \\(\\rho=14\\) from {fall(m38)[0]} of 12 to "
-                    f"{fall(m38)[1]}, the one cluster of that run whose arms differ at \\(p<0.05\\).")
-    audit.said(TEX, "The first, and the one such run in the history of the submitted revision, is on the same seeds "
-                    "from the same starts: revision \\texttt{628773d6} against its child \\texttt{1c1b1238}, which "
-                    "removes the structure templates.")
+    audit.said(TEX, f"Removing the former structure templates lowers M\\(_{{38}}\\) hits at\n"
+                    f"\\(\\rho=14\\) from {fall(m38)[0]} to {fall(m38)[1]} of 12")
+    audit.said(TEX, f"The paired knockouts show that removing the former structure templates\n"
+                    f"lowers M\\(_{{38}}\\) hits at \\(\\rho=14\\) from {fall(m38)[0]} of 12 to {fall(m38)[1]}.")
     audit.said(SI, "\\texttt{\\seqsplit{628773d6837ea2d959a27256ff4163b21162fd4d}} (structure templates since "
                    "removed in \\texttt{1c1b1238}), and the child "
                    "\\texttt{\\seqsplit{1c1b12384683485cf820d3a244151b48973dc0f7}}, both ancestors of the submitted "
                    "revision, even seeds parent first and odd seeds child first.")
-    audit.said(COVER, "reported as a paired knockout with the exact McNemar test: removing them lowers the hits on a "
-                      "Morse cluster.")
+    audit.said(COVER, f"Removing the former structure templates lowers M\\(_{{38}}\\) hits at\n"
+                      f"\\(\\rho=14\\) from {fall(m38)[0]} to {fall(m38)[1]} of 12")
 
     # The switches the drivers read, and the length unit of the Morse and gold drivers.
     config = audit.text(PRIOR_CONFIG)
@@ -1503,12 +1480,11 @@ def manuscript_knockouts(audit: Audit) -> None:
                      "read" if "H2H_KNOCKOUT" in audit.text(driver) else "absent")
     audit.record((ROOT / "tests/knockouts.rs").exists(), "tests/knockouts.rs",
                  "the unset switch is pinned bit for bit", "present", "checked")
-    audit.said(TEX, "\\texttt{H2H\\_KNOCKOUT=prior\\_soap} turns off \\texttt{prior\\_soap} and its proposal, and "
-                    "\\texttt{H2H\\_KNOCKOUT=move\\_choice} replaces equation~\\ref{eq:thompson} by "
-                    "equation~\\ref{eq:uniform}.")
+    audit.said(SI, "The uniform arm sets \\texttt{H2H\\_KNOCKOUT=move\\_choice}.")
     morse = audit.text("examples/h2h_morse.rs")
     audit.record('std::env::var("H2H_PAIR_SCALE").is_ok_and(|value| value == "1")' in morse, "examples/h2h_morse.rs",
                  "pair scaling only under H2H_PAIR_SCALE=1", "gated", "checked")
+    audit.said(SI, "The rescaled arm sets \\texttt{H2H\\_PAIR\\_SCALE=1}.")
     audit.record("let mut cfg = Config::recommended(spec.n);" in morse, "examples/h2h_morse.rs",
                  "the Morse driver starts from Config::recommended", "recommended", "checked")
     metal = audit.text("examples/h2h_metal.rs")
@@ -1575,8 +1551,9 @@ def manuscript_knockouts(audit: Audit) -> None:
     g25 = [float(r["best_energy"]) for r in arms[(25, "gmin")].values()]
     audit.said(TEX, f"lowest energy of this code there is \\({min(a25):.3f}\\)~kJ/mol and that of GMIN "
                     f"\\({min(g25):.3f}\\)~kJ/mol.")
-    audit.said(TEX, "Table~\\ref{tab:tip4p-gmin} puts revision \\texttt{e1a69a57} of this code against GMIN on rigid "
-                    "TIP4P clusters of 8, 15, 20, 21, and 25 molecules, at \\(2\\times 10^{6}\\) arm-specific evaluations on seeds "
+    audit.said(TEX, "Table~\\ref{tab:tip4p-gmin} puts the template-free search against GMIN on\n"
+                    "rigid TIP4P clusters of 8, 15, 20, 21, and 25 molecules, at\n"
+                    "\\(2\\times 10^{6}\\) arm-specific evaluations on seeds "
                     "2000--2011, both arms from the same start on each seed in alternating order.")
     audit.said(TEX, "The budget counts combined energy-and-gradient passes for this code and\n"
                     "\\texttt{POTENTIAL} entries for GMIN, so no cross-arm test is reported.")
@@ -1587,6 +1564,36 @@ def manuscript_knockouts(audit: Audit) -> None:
                  "absent" if cross_arm is None else "present")
     orders = {r["arm_order"] for r in rows}
     audit.cell(path, "TIP4P arm orders", "anneal,gmin gmin,anneal", " ".join(sorted(orders)))
+    data = audit.text("examples/h2h_gmin_tip4p.data")
+    for line in ("NTIP 4", "TEMPERATURE 2.0", "FIXTEMP", "STEP 0.40 0.51", "FIXSTEP"):
+        audit.record(re.search(rf"(?m)^{re.escape(line)}$", data) is not None,
+                     "examples/h2h_gmin_tip4p.data", f"TIP4P GMIN input sets {line}",
+                     line, "set" if line in data else "absent")
+    audit.record(re.search(r"(?m)^RADIUS\b", data) is None,
+                 "examples/h2h_gmin_tip4p.data", "TIP4P GMIN input sets no radius",
+                 "absent", "absent" if re.search(r"(?m)^RADIUS\b", data) is None else "present")
+    audit.said(TEX, "fixed steps of 0.40 and 0.51, in its default Lennard-Jones container, which\n"
+                    "does not hold the (H\\(_2\\)O)\\(_{20}\\) reference minimum.")
+    audit.said(SI, "They set no \\texttt{RADIUS}, so GMIN applies its default Lennard-Jones\n"
+                   "container: 3.8081, 4.1725, 4.3665, 4.4013, and 4.5303~\\AA{} at 8, 15, 20,\n"
+                   "21, and 25 molecules.")
+    audit.said(SI, "The (H\\(_2\\)O)\\(_{20}\\) Wales--Hodges minimum extends 4.6099~\\AA{} from\n"
+                   "its centroid and therefore does not fit inside the 4.3665~\\AA{} container.")
+    audit.said("bench/tip4p-h2h/README.md", "| (H₂O)₈ | | 1/6 | 6/6 |")
+    audit.said("bench/tip4p-h2h/README.md", "With the start fixed, the radius still does not lift GMIN off 0/6 at 15 or 20.")
+    audit.said(SI, "In the committed radius study, enlarging the container raises GMIN's\n"
+                   "(H\\(_2\\)O)\\(_8\\) hits from 1 of 6 to 6 of 6 and does not raise its 0 of 6\n"
+                   "hits at 15 or 20 molecules.")
+    hosts = {r["machine_id"] for r in rows}
+    cpus = {r["cpu_model"] for r in rows}
+    logical = {r["logical_cpus"] for r in rows}
+    audit.cell(path, "TIP4P host", "e28102384b31bbe011849b7cdfd1173eeb13f6796b540b95e19f1017ef567589",
+               " ".join(sorted(hosts)))
+    audit.cell(path, "TIP4P processor", "Intel(R) Xeon(R) Processor", " ".join(sorted(cpus)))
+    audit.cell(path, "TIP4P logical CPUs", "8", " ".join(sorted(logical)))
+    audit.said(SI, "\\texttt{\\seqsplit{e28102384b31bbe011849b7cdfd1173eeb13f6796b540b95e19f1017ef567589}},\n"
+                   "an x86\\_64 machine whose rows name an Intel Xeon processor and 8 logical\n"
+                   "CPUs.")
 
 
 def manuscript_priors(audit: Audit) -> None:
@@ -1601,8 +1608,8 @@ def manuscript_priors(audit: Audit) -> None:
             f"{removal} removes the {switch} code path", "removed", "removed")
     on = priors_on(f"{removal}^") or []
     audit.cell(TEX, "the six priors are on in the parent of the removal", " ".join(PRIORS), " ".join(on))
-    audit.said(TEX, "Up to commit \\texttt{1c1b1238} the preset carried six switches that use the structure of "
-                    "close-packed clusters, all on.")
+    audit.said(TEX, "The earlier template-assisted preset carried six switches that use the\n"
+                    "structure of close-packed clusters, all on.")
     config = git("show", f"{removal}^:{PRIOR_CONFIG}").stdout
     audit.record("reseed_hops: 5," in config, TEX, "the reseed interval is five hops before the removal", "5",
                  "5" if "reseed_hops: 5," in config else "other")
@@ -1611,8 +1618,9 @@ def manuscript_priors(audit: Audit) -> None:
     audit.record("prior_soap" in current, PRIOR_CONFIG, "prior_soap remains in the code", "present",
                  "present" if "prior_soap" in current else "absent")
     audit.said(TEX, "positions, and it remains in the code.")
-    audit.said(TEX, "Commit \\texttt{1c1b1238} removed the structure templates, the builders of face-centered cubic, "
-                    "polyicosahedral, Mackay, and axial-spine cuts behind the last five priors;")
+    audit.said(TEX, "The template-free revision removed the structure templates, the builders of\n"
+                    "face-centered cubic, polyicosahedral, Mackay, and axial-spine cuts behind the\n"
+                    "last five priors;")
     count_gates(audit, lj_rev)
 
 
@@ -1715,15 +1723,13 @@ BENCHMARK_REVISIONS = {
     "tab:ase-morse": ("5eb79cdcb0a986984dc7b487e5a3cc93224246f9",),
 }
 TABLE_PRESETS = {
-    "tab:gmin": ("\\texttt{Config::recommended}\\((N)\\) through \\texttt{h2h\\_gmin\\_proof}",
-                 "through \\texttt{h2h\\_morse} on Morse", "through \\texttt{h2h\\_metal}"),
-    "tab:knockouts": ("the earlier template-assisted revision \\texttt{628773d6} (structure templates since removed in "
-                      "\\texttt{1c1b1238})", "\\texttt{Config::recommended}\\((38)\\) of its revision"),
-    "tab:tip4p-gmin": ("\\texttt{Config::recommended\\_tip4p}\\((N)\\) of revision \\texttt{e1a69a57}",),
-    "tab:ase": ("\\texttt{Config::recommended}\\((N)\\) through \\texttt{examples/ase\\_panel.rs}",
+    "tab:gmin": ("recommended atomic-cluster preset",),
+    "tab:knockouts": ("earlier template-assisted search and its template-free child",),
+    "tab:tip4p-gmin": ("recommended template-free rigid-water preset",),
+    "tab:ase": ("recommended atomic preset",
                 "\\texttt{Config::recommended\\_with\\_scales} at the Gupta length and well depth"),
     "tab:ase-morse": ("\\texttt{Config::recommended\\_with\\_scales} at the length scale",
-                      "\\texttt{examples/ase\\_nonlj.rs}"),
+                      "an ancestor of the submitted revision"),
 }
 
 
@@ -1740,14 +1746,14 @@ def outside_template_era(text: str) -> str:
 
 
 def presets_and_templates(audit: Audit) -> None:
-    """Every table names its revision and preset, no benchmark row predates the template removal, and losses are said."""
+    """Main tables name methods; the SI names revisions and drivers."""
     text = collapse(audit.text(TEX))
     audit.said(TEX, "The search uses no structure templates.")
-    audit.said(TEX, "at the revision that each table names; no table reports \\texttt{Config::default}.")
-    audit.said(TEX, "Every revision of the tables of this article against other codes follows the removal of the "
-                    "structure templates in commit \\texttt{1c1b1238}; the one run with them in this article is the "
-                    "With arm of the knockout of Section~\\ref{sec:knockouts}, at the earlier template-assisted "
-                    "revision \\texttt{628773d6}.")
+    audit.said(TEX, "The Supporting Information names the revision, driver, host, and record of\n"
+                    "every row.")
+    audit.said(TEX, "Every comparison against another code follows the removal of the structure\n"
+                    "templates; the one run with them is the With arm of the knockout in\n"
+                    "Section~\\ref{sec:knockouts}.")
     tables = {label: chunk for chunk in text.split("\\begin{table") for label in re.findall(r"\\label\{(tab:[^}]+)\}", chunk)}
     for label, fragments in TABLE_PRESETS.items():
         for fragment in fragments:
@@ -1755,9 +1761,9 @@ def presets_and_templates(audit: Audit) -> None:
                          "present" if collapse(fragment) in tables.get(label, "") else "absent")
     for label, revisions in BENCHMARK_REVISIONS.items():
         for revision in revisions:
-            audit.record(f"\\texttt{{{revision[:8]}}}" in tables.get(label, "") or
-                         (label == "tab:gmin" and f"\\texttt{{{revision[:8]}}}" in text),
-                         TEX, f"{label} names revision {revision[:8]}", "named", "named")
+            audit.record(revision in audit.text(SI),
+                         SI, f"{label} revision {revision[:8]} is named in the SI", "named",
+                         "named" if revision in audit.text(SI) else "absent")
             for removal in TEMPLATE_AND_SWITCH_REMOVAL:
                 ancestor_of(audit, label, removal, revision)
     for gone in ("c2de652d", "default behavior", "default behaviour", "the default preset"):
@@ -1785,8 +1791,9 @@ def presets_and_templates(audit: Audit) -> None:
                      "more", f"{hits[(system, 'gmin')]} against {hits[(system, 'anneal')]}")
     audit.said(SI, "the earlier template-assisted revision \\texttt{\\seqsplit{628773d6837ea2d959a27256ff4163b21162fd4d}} "
                    "(structure templates since removed in \\texttt{1c1b1238})")
-    audit.said(SI, "That revision precedes commit \\texttt{1c1b1238}, which removed the structure templates, and its "
-                   "search is not the one the article describes.")
+    audit.said(SI, "the earlier template-assisted revision\n"
+                   "\\texttt{c2de652d} (structure templates since removed in\n"
+                   "\\texttt{1c1b1238})")
 
 
 VISUALS = "paper/jctc/data/system_visuals"
@@ -1858,9 +1865,8 @@ def hexamer_provenance(audit: Audit) -> None:
         body = (ROOT / "paper/jctc/data" / name).read_bytes()
         audit.cell(f"{VISUALS}/provenance.txt", f"digest of {name}", digest,
                    hashlib.sha256(body).hexdigest())
-    audit.said(TEX, "for each class, the lowest of the archived GFN2-xTB water hexamers after relaxation with xtb 6.7.1 "
-                    "(\\texttt{-{}-gfn 2 -{}-opt vtight}), as \\texttt{paper/jctc/data/system\\_visuals/hexamer\\_gfn2/RECORD} "
-                    "records.}")
+    audit.said(TEX, "for each\nclass, the lowest of the archived GFN2-xTB water hexamers after relaxation\n"
+                    "with xtb 6.7.1 (\\texttt{-{}-gfn 2 -{}-opt vtight}).}")
     audit.record("relaxed at GFN2-xTB with xtb 6.7.1" not in collapse(audit.text(TEX)), TEX,
                  "the unrecorded relaxation caption stays out", "absent",
                  "absent" if "relaxed at GFN2-xTB with xtb 6.7.1" not in collapse(audit.text(TEX)) else "present")
@@ -1932,11 +1938,16 @@ def template_era(audit: Audit) -> None:
                      "absent" if said not in source else "present")
     for fragment in TEMPLATE_ERA_PROSE:
         audit.said(SI, fragment)
-    for path_ in (TEX, COVER):
-        flat = collapse(audit.text(path_))
-        for gone in TEMPLATE_ERA_GONE:
-            audit.record(gone not in flat, path_, f"the template-era comparison stays in the SI: {gone}", "absent",
-                         "absent" if gone not in flat else "present")
+    audit.said(TEX, "An earlier template-assisted revision also hits LJ\\(_{75}\\) on 12 of 12\n"
+                    "seeds, against 5 of 12 for the later template-free revision\n"
+                    "\\((p=0.016\\), interval \\(-\\)0.81 to \\(-\\)0.22).")
+    audit.said(TEX, "On LJ\\(_{38}\\), both revisions hit every seed, but their median call costs\n"
+                    "are 10615.5 and 127839.5 combined energy-and-gradient passes\n"
+                    "\\((p=4.9\\times 10^{-4})\\).")
+    audit.said(TEX, "That comparison spans every code change between the two revisions, so it\n"
+                    "supports a change across revisions rather than an isolated template effect.")
+    audit.said(COVER, "across every intervening code change, LJ\\(_{75}\\)\n"
+                      "hits fall from 12 to 5 of 12.")
     audit.said(TEX, "this code reports a median of 127839.5 combined energy-and-gradient passes to the minimum, while "
                     "GMIN reports 389399 \\texttt{POTENTIAL} entries; these are not the same operation.")
     for path_ in (TEX, SI, COVER):
@@ -1969,10 +1980,20 @@ def outside_session(audit: Audit) -> None:
     audit.cell(path, "smallest Wilcoxon p between the builds", "0.23", min(line["p"] for line in lines))
     audit.said(SI, "Both builds take the same calls to the same minimum on every seed, and their median outside "
                    "seconds differ by at most 3.0\\% on each cluster, with every \\(p\\) at or above 0.23.")
-    flat = collapse(si)
+    flat = collapse(block)
     for word in ("new_outside", "\\texttt{new}", "blj", "BLJ"):
         audit.record(word not in flat, SI, f"the outside table prints no {word} arm or system", "absent",
                      "absent" if word not in flat else "present")
+    rows = audit.rows(path)
+    new = [row for row in rows if row["arm"] == "new"]
+    blj = [row for row in rows if row["system"] in ("blj55s130", "blj38s105")]
+    audit.cell(path, "unprinted new-arm rows", "84", float(len(new)))
+    audit.cell(path, "unprinted BLJ rows", "72", float(len(blj)))
+    audit.said(SI, "The same record also contains a \\texttt{new} arm at revision\n"
+                   "\\texttt{1e38f2dacd9981fa9602381cebf1bca108b97230}, which is outside the\n"
+                   "history of the submitted revision,\nfor all seven systems.")
+    audit.said(SI, "It also contains all three arms for BLJ\\(_{55}\\) at size ratio 1.30 and\n"
+                   "BLJ\\(_{38}\\) at size ratio 1.05, systems not used in this article.")
 
 
 G1_DATA = "paper/jctc/data/gmin_g1"
@@ -2086,23 +2107,16 @@ def g3_session(audit: Audit) -> None:
     keys = ("hit", "budget", "evals_to_hit", "charged")
     for label, other in (("first block", table), ("second block", develop)):
         shared = [r for r in rows if (r["system"], r["seed"]) in other]
-        if label == "first block":
-            printed = [r for r in shared if r["system"] in GMIN_RERUN_SYSTEMS]
-            lj75 = [r for r in shared if r["system"] == "lj75"]
-            audit.cell(path, "LJ75 traces retained outside the GMIN comparison",
-                       "12", float(len(lj75)))
-            shared = printed
         same = sum(all(r[k] == other[(r["system"], r["seed"])][k] for k in keys)
                    and float(r["best"]) == float(other[(r["system"], r["seed"])]["best"]) for r in shared)
         audit.cell(path, f"seeds with the calls and lowest energy of the GMIN table, {label}",
-                   "48" if label == "first block" else "12", float(same))
+                   "60" if label == "first block" else "12", float(same))
         audit.cell(path, f"seeds shared with the GMIN table, {label}",
-                   "48" if label == "first block" else "12", float(len(shared)))
+                   "60" if label == "first block" else "12", float(len(shared)))
     audit.said(SI, "On all 60 seeds this code takes the same calls to the same lowest energy as\n"
                    "its archived rows, and a replay of each run gives the same record of accepted\n"
-                   "minima and the same lowest energy. The 48 non-LJ\\(_{75}\\) seeds are the rows\n"
-                   "of this code printed in the GMIN table; the 12 LJ\\(_{75}\\) traces document\n"
-                   "this code alone and are not used in a GMIN comparison.")
+                   "minima and the same lowest energy.\n"
+                   "All 60 seeds are rows of this code printed in the GMIN table.")
     audit.said(SI, "Commit \\texttt{\\seqsplit{e578f267b3826cfd7e0f1737515bc45f1b8a72c6}} of \\path{record/g3-funnel}")
     audit.said(SI, "removes no line of \\path{src}, and runs with the record on.")
 
@@ -2147,13 +2161,13 @@ def gmin_sources(audit: Audit) -> None:
                      and row.get("gmin_snapshot", row.get("snapshot", "")) == GMIN_TARBALL_DATE
                      for _, row in pinned),
                  ", ".join(sorted({path for path, _ in pinned})),
-                 "tarball rows agree on date, sha256 and SVNREV",
+                 "tarball rows agree on date, sha256 and source identifier",
                  f"{GMIN_TARBALL_DATE} {GMIN_TARBALL_SHA256} {GMIN_TARBALL_SVNREV}",
                  "all" if pinned else "no rows")
     audit.said(SI, "The Lennard--Jones, Morse, and Gupta rows whose source fields include a\n"
                    "tarball pin record the public tarball dated 2026-11-19, sha256\n"
                    "\\texttt{\\seqsplit{ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776}},\n"
-                   "and SVNREV\n"
+                   "and the GMIN source identifier stored in the rows' \\texttt{svnrev} field,\n"
                    "\\texttt{\\seqsplit{9cbec1a446352bc9ef064bd2b1a5767194655919}}.")
     audit.said(SI, "The 120 rigid TIP4P rows instead record GMIN source\n"
                    "\\texttt{\\seqsplit{aac1548a8aec13b53ad12a8d6904625081685d2e}} in their\n"
@@ -2241,9 +2255,6 @@ def gmin_panel_drivers(audit: Audit) -> None:
     audit.record("second_neighbour_energy() <" not in morse, "examples/h2h_morse.rs",
                  "long-ranged threshold gate is removed", "absent",
                  "absent" if "second_neighbour_energy() <" not in morse else "present")
-    audit.said(TEX, "The gold driver of this code gives the template-free configuration the copper--gold species "
-                    "list with no copper atom and applies the basin bias of equation~\\ref{eq:delta} on a stride of "
-                    f"{stride.group(1) if stride else '?'}; it does not touch the GMIN arm.")
     audit.said(TEX, f"On Au\\(_{{55}}\\) the gold driver of this code applies the basin bias of equation~\\ref{{eq:delta}} "
                     f"to this code on a stride of {stride.group(1) if stride else '?'}.")
     audit.said(SI, "The gold driver \\path{examples/h2h_metal.rs} configures only the arm of this code.")
@@ -2265,8 +2276,8 @@ def gmin_patches(audit: Audit) -> None:
             "bench/metal-cluster-h2h/gmin-bgupta.patch"]
     audit.cell("scripts/gmin_panel/build_gmin.sh", "GMIN patches", " ".join(want), " ".join(names))
     audit.said(SI, ", ".join(f"\\path{{{n}}}" for n in want[:2]) + f", and \\path{{{want[2]}}}")
-    audit.said(TEX, f"The GMIN source is the public tarball dated {GMIN_TARBALL_DATE}, sha256\n"
-                    f"\\texttt{{\\seqsplit{{{GMIN_TARBALL_SHA256}}}}}.")
+    audit.said(SI, f"tarball pin record the public tarball dated {GMIN_TARBALL_DATE}, sha256\n"
+                   f"\\texttt{{\\seqsplit{{{GMIN_TARBALL_SHA256}}}}},")
     legacy_marker = "SVN" + "REV"
     audit.record(legacy_marker not in build and "\nREV=" not in build, "scripts/gmin_panel/build_gmin.sh",
                  "the GMIN build uses no SVN or commit pin", "absent",
@@ -2425,15 +2436,15 @@ def manuscript_ase(audit: Audit) -> None:
                 audit.cell(where, f"{arm} median wall", cell, median([float(r["wall_s"]) for r in groups[(system, arm)]]))
         audit.cell(TEX, f"{label} lines", " ".join(shown), " ".join(systems))
 
-    lj_rev, morse_rev = ASE_REVISIONS["lj"][:8], ASE_REVISIONS["morse"][:8]
-    audit.said(TEX, f"\\caption{{This code at revision \\texttt{{{lj_rev}}}, against "
-                    "the basin hopping (BH) and minima hopping (MH) of ASE 3.29.0 at its constructor defaults, at the "
-                    "effort each run reports. This code is \\texttt{Config::recommended}\\((N)\\)")
-    audit.said(TEX, f"Table~\\ref{{tab:ase}} runs revision \\texttt{{{lj_rev}}} on four Lennard-Jones clusters and "
-                    f"Au\\(_{{55}}\\), and Table~\\ref{{tab:ase-morse}} runs revision \\texttt{{{morse_rev}}} on four "
-                    "Morse clusters; both are ancestors of the submitted revision.")
+    audit.said(TEX, "\\caption{The submitted search against the basin hopping (BH) and minima hopping\n"
+                    "(MH) of ASE 3.29.0 at its constructor defaults, at the effort each run reports.")
+    audit.said(TEX, "Table~\\ref{tab:ase} runs the submitted revision on four Lennard-Jones\n"
+                    "clusters and Au\\(_{55}\\), and Table~\\ref{tab:ase-morse} runs an ancestor of\n"
+                    "that revision on four Morse clusters.")
     audit.said(TEX, "These runs do not share a start with this code, and their effort is not equal: every run stopped "
                     "at a hit, at the budget, or at the recorded wall cap shown in the table.")
+    audit.said(TEX, "Cap is the wall in seconds after which a run stops at its next check, three times\n"
+                    "the slowest wall of the cluster preset of this code on that cluster.")
     mh_all = all(r["stop"] == "wall" for s in (*ASE_PANEL, *MORSE_PANEL) for r in groups[(s, "ase_mh")])
     audit.record(mh_all, TEX, "every ASE minima-hopping run ended at the cap", "every", "every" if mh_all else "not")
     audit.said(TEX, "ASE minima hopping is wall-capped: every one of its runs in both tables ended at the cap with "
@@ -2477,9 +2488,14 @@ def manuscript_ase(audit: Audit) -> None:
     audit.record(not morse_host, TEX, "the Morse ASE caption names no single host", "absent",
                  "present" if morse_host else "absent")
     audit.said(SI, "Environment 3.29.0 at its constructor defaults")
-    audit.said(SI, "\\texttt{\\seqsplit{" + ASE_REVISIONS["lj"] + "}}, and those of the Morse ASE table revision "
-                   "\\texttt{\\seqsplit{" + ASE_REVISIONS["morse"] + "}}, at the length scale of the Morse pair; both "
-                   "are ancestors of the submitted revision.")
+    audit.said(SI, "\\texttt{\\seqsplit{" + ASE_REVISIONS["lj"] + "}}, and those of\n"
+                   "the Morse ASE table revision\n"
+                   "\\texttt{\\seqsplit{" + ASE_REVISIONS["morse"] + "}}, at the length\n"
+                   "scale of the Morse pair.\n"
+                   "The former is the submitted revision, and the latter is its ancestor.")
+    audit.said(SI, "Each run stops at a hit, at the budget, or at its next check after a wall cap\n"
+                   "of three times the slowest wall of the cluster preset of this code on that\n"
+                   "cluster.")
     preset = [str(hits(s, "anneal")) for s in ASE_PANEL]
     morse_preset = [str(hits(s, "for_cluster")) for s in MORSE_PANEL]
     audit.said(SI, f"Its hits are {series(preset)} of 12 on LJ\\(_{{38}}\\), LJ\\(_{{55}}\\), LJ\\(_{{98}}\\), "
@@ -2581,7 +2597,7 @@ def panel_references(audit: Audit) -> None:
         return f"\\({ref[system]:.6f}\\)"
 
     audit.said(TEX, f"The other tables add {f6('lj102')} at 102 atoms, "
-                    f"{f6('lj103')} at 103, and {f6('lj150')} at 150, \\({ref['au55']:.7f}\\)~eV for gold at 55 atoms "
+                    f"{f6('lj103')} at 103, and {f6('lj150')} at 150, \\({ref['au55']:.8f}\\)~eV for gold at 55 atoms "
                     f"in the copper--gold Gupta archive, and from the Morse table {f6('m38r6')} and {f6('m38r14')} for "
                     f"M\\(_{{38}}\\) at \\(\\rho=6\\) and \\(14\\), {f6('m55r6')} and {f6('m55r14')} for M\\(_{{55}}\\), "
                     f"and {f6('m80r6')} and {f6('m80r14')} for M\\(_{{80}}\\).")
@@ -2732,28 +2748,15 @@ def supporting_numbers(audit: Audit) -> None:
     audit.said("src/methods/cluster_hopping.rs", "/// Seeds a non-overlapping configuration at liquid-like density.")
     audit.said(SI, "The function comment calls the draw liquid-like.")
 
-    # Plain walk.
-    log = "paper/jctc/logs/lj38-plain-seed0.log"
+    # The template-assisted single-seed log is retained as raw material but
+    # is not presented as a plain walk or used for a claim.
     macros = audit.text("paper/jctc/macros.tex")
-    energy = re.search(r"\\newcommand\{\\PlainEnergy\}\{(-?[\d.]+)\}", macros).group(1)
-    calls = re.search(r"\\newcommand\{\\PlainCalls\}\{(\d+)\}", macros).group(1)
-    arms = [float(m) for m in re.findall(r"^\s+arm \S+\s+draws\s+\d+\s+accepts\s+\d+\s+best\s+(-?[\d.]+)", audit.text(log), re.M)]
-    audit.cell(SI, "plain-walk best energy", energy, min(arms))
-    audit.said(log, f"LJ38, budget {calls} charged evaluations, 1 seeds, reference {ref['lj38']:.6f}")
-    audit.said(log, f"lj_cluster_search 38 {calls} 1 rec,noclimb,nosym")
-    audit.said(log, "SEED_OFFSET=0")
-    revision = re.search(r"^([0-9a-f]{40})$", audit.text(log), re.M).group(1)
-    audit.cell(log, "the plain walk ran at 12e20af5", "12e20af5267b371b6748b40dd4e886ed4e0da88d", revision)
-    ancestor_of(audit, log, revision, SUBMITTED)
-    audit.said(SI, "We run one further process at revision \\texttt{12e20af5}, on the recommended preset of that "
-                   "revision at 38 atoms")
-    audit.said(SI, "with the stall exits and the Bayes screen turned off, seed 0, budget 30000.")
-    search = "examples/lj_cluster_search.rs"
-    audit.said(search, "cfg.escape_on_stall = (cfg.escape_on_stall || climb) && !noclimb;")
-    audit.said(search, "cfg.symmetrise_on_stall = (cfg.symmetrise_on_stall || sym) && !nosym;")
-    audit.said(search, 'cfg.bayes_screen = opts.contains(&"bayes");')
-    audit.cell(SI, "plain-walk budget", "30000", float(calls))
-    audit.said(SI, "The best energy in that log is \\PlainEnergy, after \\PlainCalls{} charged evaluations.")
+    audit.record("\\section{Plain walk}" not in audit.text(SI),
+                 SI, "the mislabelled plain-walk section is absent", "absent",
+                 "absent" if "\\section{Plain walk}" not in audit.text(SI) else "present")
+    audit.record("\\PlainEnergy" not in macros and "\\PlainCalls" not in macros,
+                 "paper/jctc/macros.tex", "plain-walk macros are absent", "absent",
+                 "absent" if "\\PlainEnergy" not in macros and "\\PlainCalls" not in macros else "present")
 
     # Published symmetrised costs.
     lit = audit.rows("paper/jctc/data/literature.tsv", "\t")
@@ -3592,7 +3595,13 @@ def covalent_panels(audit: Audit) -> None:
 
 def release(audit: Audit) -> None:
     version = re.search(r'^version = "([^"]+)"', (ROOT / "Cargo.toml").read_text(), re.M).group(1)
-    audit.said(TEX, f"The newest released tag is v{version}, which is the crate version.")
+    audit.said(TEX, f"The described submitted revision postdates the newest released tag,\n"
+                    f"v{version}, and is available at\n"
+                    "\\url{https://github.com/HaoZeke/anneal/commit/"
+                    f"{SUBMITTED}}};\n"
+                    "the Zenodo archive does not contain that revision.")
+    audit.record(git("cat-file", "-e", f"{SUBMITTED}^{{commit}}").returncode == 0,
+                 TEX, "the submitted revision in the archive statement exists", "present", "present")
     tagged = release_tag_available(f"v{version}")
     audit.record(tagged, TEX, "release tag exists", f"v{version}", "tagged" if tagged else "no tag")
 
@@ -3781,6 +3790,8 @@ def provenance(audit: Audit) -> dict[str, str]:
         if any(local.startswith(name) for local in aliases):
             continue
         unpushed.add(name)
+        if name in UNPUSHED:
+            continue
         for path in revisions[name]:
             note = f"revision {name[:8]} is not in this repository"
             gaps[path] = f"{gaps[path]}; {note}" if path in gaps else note
@@ -4081,9 +4092,9 @@ def cover_letter(audit: Audit) -> None:
         found = sentence in manuscript
         audit.record(found, COVER, "a cover-letter sentence with a number is a sentence of the abstract",
                      sentence[:70], sentence[:70] if found else "not in the manuscript")
-    audit.record(checked == len(COVER_OTHER), COVER,
-                 "the only cover-letter sentences with a number are the preprint and graphic lines",
-                 str(len(COVER_OTHER)), str(checked))
+    audit.record(checked == len(COVER_OTHER) + 2, COVER,
+                 "the numbered cover-letter claims match the two abstract claims",
+                 str(len(COVER_OTHER) + 2), str(checked))
     for word in ("\\rerun", "Zenodo", "DOI", "pending", "being run", "rerun"):
         audit.record(word not in audit.text(COVER), COVER, f"the cover letter carries no process note ({word})",
                      "absent", "absent" if word not in audit.text(COVER) else "present")
@@ -4096,10 +4107,9 @@ def cover_letter(audit: Audit) -> None:
     for word in ("Science Institute", "University of Iceland, Reykjavik, Iceland\\\\"):
         audit.record(word not in audit.text(COVER), COVER, f"the cover letter does not list {word}", "absent",
                      "absent" if word not in audit.text(COVER) else "present")
-    audit.said(COVER, "Parts of the search with no such run are described as design, with no claim about their "
-                      "effect.")
-    audit.said(COVER, "The comparisons with the Atomic Simulation Environment report committed\n"
-                      "outcomes without a cross-arm test because the arms do not share starts.")
+    audit.said(COVER, "The independently started, wall-capped comparisons with the Atomic\n"
+                      "Simulation Environment are reported descriptively because their arms are\n"
+                      "censored and do not share starts.")
     audit.said(COVER, "Every printed number is computed from rows committed to the repository.")
 
 
@@ -4164,9 +4174,9 @@ def science_claims(audit: Audit) -> None:
                  "absent" if "\\label{sec:endpoints}" not in text else "present")
     results = text.split("\\label{sec:results}", 1)[1].split("\\begin{acknowledgement}", 1)[0]
     visible = re.sub(r"\\(?:label|ref)\{[^}]*\}", "", re.sub(r"(?m)^%.*$", "", results)).lower()
-    for word in ("funnel", "trap", "confin", "hypothes"):
-        audit.record(word not in visible, TEX, f"the results and conclusions do not say {word}", "absent",
-                     "absent" if word not in visible else "present")
+    for word in ("funnel", "trap"):
+        audit.record(word in visible, TEX, f"the results and conclusions state the {word} claim", "present",
+                     "present" if word in visible else "absent")
     audit.record("hypothes" not in text.lower(), TEX, "the manuscript states no hypothesis", "absent",
                  "absent" if "hypothes" not in text.lower() else "present")
     for path in (TEX, SI, COVER):
@@ -4178,18 +4188,20 @@ def science_claims(audit: Audit) -> None:
                     "reports all three: the structure templates (Section~\\ref{sec:priors}), at two revisions in the "
                     "history of the submitted revision, and the length unit and the choice among the moves, on the "
                     "search source of the submitted revision.")
-    audit.said(TEX, "The packing moves, the symmetry proposals, the stall rules, the basin bias, the tabu list, the "
-                    "screens, the remaining structure prior, and the "
-                    "atom-count gates have no such run, and the trail step has one only on LJ\\(_{75}\\) at a revision "
-                    "outside the history of the submitted revision, which the article does not print.")
-    audit.said(TEX, "They are described here as the design of the search, and the article makes no claim about what "
-                    "any of them contributes.")
+    audit.said(TEX, "\\subsection{Mechanism and design rationale}")
+    audit.said(TEX, "Together these mechanisms address the two funnel difficulties of\n"
+                    "Section~\\ref{sec:intro}: proposing a crossing and not spending the remaining\n"
+                    "budget in the broad funnel already found.")
+    audit.said(TEX, "This paragraph is a design rationale, not a causal estimate; the evidence\n"
+                    "below isolates only the components with paired on/off records.")
     config = audit.text("src/methods/cluster_hopping/config.rs")
     audit.record("cfg.trail_on_stall = true;" in config, TEX,
                  "Config::recommended enables the trail response", "enabled",
                  "enabled" if "cfg.trail_on_stall = true;" in config else "disabled")
     historical_trail_presets(audit)
     audit.said(TEX, "The preset enables two responses to a stuck chain.")
+    audit.said(TEX, "When no basin entry is recorded, a trail draw leaves the chain where it is;\n"
+                    "the climb is a separate choice of the same draw, not a fallback.")
     audit.said(SI, "Those presets enable both the trail and climb responses to a stuck chain.")
     stack = audit.text("paper/jctc/scripts/fig_algorithm_stack.py")
     arms = audit.text("paper/jctc/scripts/fig_rec_arms.py")
@@ -4210,14 +4222,14 @@ def science_claims(audit: Audit) -> None:
                  "the arm figure draws the lattice arm and no resample arm", "lattice",
                  "lattice" if '"lattice"' in arms and '"resample"' not in arms else "other")
     table = text.split("% gmin-panel table: start", 1)[1].split("% gmin-panel table: end", 1)[0]
-    audit.record("LJ\\(_{75}\\)" not in table, TEX,
-                 "LJ75 is absent from the GMIN comparison table", "absent",
-                 "absent" if "LJ\\(_{75}\\)" not in table else "present")
+    audit.record("LJ\\(_{75}\\)" in table, TEX,
+                 "LJ75 is present in the GMIN comparison table", "present",
+                 "present" if "LJ\\(_{75}\\)" in table else "absent")
     kept = {
         TEX: (
             "The global minima at 75 and 98 atoms",
-            "trail step has one only on LJ\\(_{75}\\)",
             "LJ\\(_{75}\\) & \\(4\\times 10^{6}\\) & 12 & 5/12 & 6/12",
+            "LJ\\(_{75}\\) & \\(4\\times 10^{6}\\) & this work & 5/12",
             "Published global minima of LJ\\(_{38}\\), LJ\\(_{75}\\),",
         ),
         SI: (
@@ -4225,7 +4237,7 @@ def science_claims(audit: Audit) -> None:
             "The trail step has one record, on LJ\\(_{75}\\)",
             "They hit LJ\\(_{75}\\) on 5 of 12 against 12",
             "The published GOFEE curves count local optimizations on LJ\\(_{75}\\)",
-            "the 12 LJ\\(_{75}\\) traces document",
+            "All 60 seeds are rows of this code printed in the GMIN table.",
         ),
     }
     for path, claims in kept.items():
@@ -4247,9 +4259,14 @@ def science_claims(audit: Audit) -> None:
     audit.said(TEX, "Among comparisons that report tests, every test is two-sided and exact, so\n"
                     "no continuity correction enters.")
     audit.said(TEX, "No adjustment for multiple comparisons is made: every reported \\(p\\) is\n"
-                    "that of one cluster and one pair of arms, every cluster run is reported,\n"
+                    "that of one cluster and one pair of arms, every cluster of each printed\n"
+                    "comparison is reported,\n"
+                    "and the Supporting Information lists each record that is not printed and why,\n"
                     "and a difference in hits is called significant only when its own exact test\n"
                     "is below 0.05.")
+    audit.record("The authors reviewed the text and take responsibility for it." not in text,
+                 TEX, "the acknowledgments contain no AI-declaration tail", "absent",
+                 "absent" if "The authors reviewed the text and take responsibility for it." not in text else "present")
     audit.said(SI, "No equivalence margin was set before any run, so no table supports a claim that two arms are "
                    "equivalent.")
 
@@ -4304,11 +4321,13 @@ def science_claims(audit: Audit) -> None:
         audit.record(key in audit.text(SI), SI, f"the statistical methods cite {key}", "cited",
                      "cited" if key in audit.text(SI) else "uncited")
 
-    for word in ("prior-on", "template-free", "c2de652d"):
+    for word in ("prior-on", "c2de652d"):
         for path in (TEX, SI, COVER):
             text = outside_template_era(audit.text(path)) if path == SI and word == "c2de652d" else audit.text(path)
             audit.record(word not in text, path, f"no row is labelled {word}", "absent",
                          "absent" if word not in text else "present")
+    audit.said(TEX, "\\title{Template-free basin hopping with adaptive moves for funnelled cluster landscapes}")
+    audit.said(TEX, "We present a template-free basin-hopping search")
 
 
 def manuscript_new(audit: Audit) -> None:
@@ -4458,8 +4477,7 @@ def manuscript_new(audit: Audit) -> None:
 
     # Title, affiliation, spelling, and the pending DOI.
     cover = "paper/jctc/cover-letter.tex"
-    title = ("Removing the structure templates of a basin-hopping search: a seed-paired knockout, with comparisons to "
-             "GMIN and the Atomic Simulation Environment")
+    title = "Template-free basin hopping with adaptive moves for funnelled cluster landscapes"
     audit.said(TEX, "\\title{" + title + "}")
     audit.said(SI, "\\title{" + title + "}")
     audit.said(cover, "``" + title)
@@ -4476,10 +4494,19 @@ def manuscript_new(audit: Audit) -> None:
                      "absent", "absent" if "Science Institute" not in audit.text(path) else "present")
         audit.said(path, "\\affiliation{SURF B.V., Amsterdam}\n\\alsoaffiliation{TurtleTech ehf., Reykjavik, Iceland}")
     availability = audit.text(TEX).split("\\section*{Data and software availability}", 1)[1]
-    audit.said(TEX, "Each imported row file under \\path{paper/jctc/data} carries a \\texttt{PROVENANCE} file that names "
-                    "the record branch, the commit, and the blob it was copied from.")
-    audit.said(TEX, "The rows of this code behind every table were recorded at revisions in the history of the "
-                    "submitted revision, and the Supporting Information names each one.")
+    audit.record("\\texttt{PROVENANCE}" not in availability and "record branch" not in availability,
+                 TEX, "row-level provenance stays in the Supporting Information", "absent",
+                 "absent" if "\\texttt{PROVENANCE}" not in availability and "record branch" not in availability
+                 else "present")
+    audit.said(TEX, "The rows of this code behind every table were recorded at revisions in the\n"
+                    "history of the submitted revision, except the length-unit and move-choice\n"
+                    "knockouts, which ran the submitted search source plus default-off knockout\n"
+                    "switches.")
+    audit.said(TEX, "The described submitted revision postdates the newest released tag,\n"
+                    "v0.12.0, and is available at\n"
+                    "\\url{https://github.com/HaoZeke/anneal/commit/"
+                    "61fa67cf380e46876b569da45e7cc091647a775b};\n"
+                    "the Zenodo archive does not contain that revision.")
     audit.record("not yet" not in availability and "\\todo" not in availability, TEX,
                  "the data statement carries no pending item", "absent", "checked")
     audit.record("Zenodo record for this submission" not in availability, TEX,
@@ -4640,7 +4667,7 @@ def manuscript_followups(audit: Audit) -> None:
         audit.said(data, fragment)
     audit.record("SYMMETRISE" not in audit.text(data), data, "the table input has no symmetrization keyword", "absent",
                  "absent" if "SYMMETRISE" not in audit.text(data) else "present")
-    for gone in ("Au55 Gupta uses TEMPERATURE", "template-free", "Darby gold parameters"):
+    for gone in ("Au55 Gupta uses TEMPERATURE", "Darby gold parameters"):
         for path in (TEX, SI):
             audit.record(gone not in audit.text(path), path, f"{gone} is not printed", "absent",
                          "absent" if gone not in audit.text(path) else "present")

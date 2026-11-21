@@ -7,9 +7,8 @@
 \sisetup{scientific-notation=true,exponent-product=\times}
 \graphicspath{{figs/}}
 \input{macros}
-\title{Removing the structure templates of a basin-hopping search: a
-seed-paired knockout, with comparisons to GMIN and the Atomic Simulation
-Environment}
+\title{Template-free basin hopping with adaptive moves for funnelled
+cluster landscapes}
 \author{Rohit Goswami}
 \affiliation{SURF B.V., Amsterdam}
 \alsoaffiliation{TurtleTech ehf., Reykjavik, Iceland}
@@ -35,7 +34,7 @@ Indian Institute of Technology Kanpur, Kanpur, India}
 \section{Board constants}
 We read a hit as an energy at or below the reference plus \(0.001\)
 (inclusive \(E \le E_{\mathrm{ref}} + 10^{-3}\)),
-taken from a converged improvement.
+comparing the lowest converged quenched energy of the run with the reference.
 The references, in reduced units, are \(-173.928427\) for LJ\(_{38}\),
 \(-279.248470\) for LJ\(_{55}\), and \(-397.492331\) for LJ\(_{75}\).
 LJ\(_{98}\) uses \(-543.665361\), and LJ\(_{104}\) uses \(-582.086642\).
@@ -45,16 +44,6 @@ Lennard-Jones basin hopping and the value stored at
 \cite{wales1997} The start density passed to \texttt{random\_cluster} is
 \(0.7\).
 The function comment calls the draw liquid-like.
-
-\section{Plain walk}
-We run one further process at revision \texttt{12e20af5}, on the
-recommended preset of that revision at 38 atoms with the stall exits and the
-Bayes screen turned off, seed 0, budget 30000.
-That revision precedes commit \texttt{1c1b1238}, which removed the structure
-templates, and its search is not the one the article describes.
-We keep the record in \path{logs/lj38-plain-seed0.log}.
-The best energy in that log is \PlainEnergy, after \PlainCalls{} charged
-evaluations.
 
 \section{Published symmetrized costs}
 \path{data/literature.tsv} quotes Oakley, Johnston and Wales, Table 1.
@@ -77,18 +66,29 @@ These two coefficients are the TIP4P pair in the log.
 
 \section{GMIN inputs}
 \label{sec:si-gmin}
-The GMIN table of the main text uses three GMIN inputs.
+The GMIN tables of the main text use four GMIN inputs.
 The Lennard-Jones rows run the Wales-group LJ\(_{38}\) introduction file at every Lennard-Jones size, with \(T=1.0\), \texttt{NEWRESTART 40}, and an energy difference of 0.003, with no symmetrization keyword, from the start that this code writes for the seed.
-The archived LJ\(_{75}\) pair is retained in the row files but excluded from
-the GMIN table and every cross-code result because its GMIN arm used the
-LJ\(_{38}\) input.
 The Morse rows add GMIN's native \texttt{MORSE} keyword and \(\rho\) to the same numerical settings.
 The Au\(_{55}\) row runs GMIN's Gupta potential with the gold row of Darby et al., \(A=0.2061\)~eV, \(p=10.229\), \(q=4.036\), \(\xi=1.79\)~eV, and \(r_0=2.884\)~\AA, at \(T=0.1\)~eV, with step 0.40 and taboo radius 4.0 multiplied by \(r_0/2^{1/6}\), GMIN's container radius, \texttt{NEWRESTART 40}, and an energy difference of 0.003.
 \cite{darbyCuAu2002}
+The rigid TIP4P rows select \texttt{NEWTIP} with \texttt{NTIP 4}
+(TIPID 4),
+\texttt{TEMPERATURE 2.0}, \texttt{FIXTEMP}, \texttt{STEP 0.40 0.51}, and
+\texttt{FIXSTEP}.
+They set no \texttt{RADIUS}, so GMIN applies its default Lennard-Jones
+container: 3.8081, 4.1725, 4.3665, 4.4013, and 4.5303~\AA{} at 8, 15, 20,
+21, and 25 molecules.
+The (H\(_2\)O)\(_{20}\) Wales--Hodges minimum extends 4.6099~\AA{} from
+its centroid and therefore does not fit inside the 4.3665~\AA{} container.
+In the committed radius study, enlarging the container raises GMIN's
+(H\(_2\)O)\(_8\) hits from 1 of 6 to 6 of 6 and does not raise its 0 of 6
+hits at 15 or 20 molecules.
+The printed (H\(_2\)O)\(_8\) comparison is 12 of 12 for this code and 8 of
+12 for GMIN.
 The Lennard--Jones, Morse, and Gupta rows whose source fields include a
 tarball pin record the public tarball dated 2026-11-19, sha256
 \texttt{\seqsplit{ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776}},
-and SVNREV
+and the GMIN source identifier stored in the rows' \texttt{svnrev} field,
 \texttt{\seqsplit{9cbec1a446352bc9ef064bd2b1a5767194655919}}.
 The 120 rigid TIP4P rows instead record GMIN source
 \texttt{\seqsplit{aac1548a8aec13b53ad12a8d6904625081685d2e}} in their
@@ -136,6 +136,10 @@ whose record names no processor, memory, or kernel;
 and every cluster of the second block on
 \texttt{\seqsplit{e06d886d760e0a59870126b963636ff6408201594f2686f72deb66816fccadb3}},
 whose rows name an Intel Xeon processor and no memory or kernel.
+The rigid TIP4P rows ran on
+\texttt{\seqsplit{e28102384b31bbe011849b7cdfd1173eeb13f6796b540b95e19f1017ef567589}},
+an x86\_64 machine whose rows name an Intel Xeon processor and 8 logical
+CPUs.
 GMIN is built by \path{scripts/gmin_panel/build_gmin.sh} with ALIGN, MPI,
 and OpenMP off, against the system BLAS and LAPACK; the record does not
 give the compiler version.
@@ -202,11 +206,13 @@ Its rows name tree \texttt{\seqsplit{b12293b9d637dd32417be3aa482302e0f30dd594}}.
 That tree is the submitted revision's search source plus the knockout
 switches, and the Morse driver is the driver of that tree; even seeds run
 the Lennard-Jones diameter first and odd seeds the Morse minimum first.
+The rescaled arm sets \texttt{H2H\_PAIR\_SCALE=1}.
 The move-choice block is the record
 \texttt{\seqsplit{50c532253f3ad11e6457a119bb603f05b4f0be79}} of
 \path{record/knockout-move-a}, on the same develop commit.
 Its rows name the same tree and, on each cluster, the driver of that
 tree; even seeds run the preset first and odd seeds the uniform draw first.
+The uniform arm sets \texttt{H2H\_KNOCKOUT=move\_choice}.
 The trail step has one record, on LJ\(_{75}\), whose two arms ran at
 \texttt{666591a0}, a commit outside the history of the submitted revision, so
 the knockout table has no trail block.
@@ -215,7 +221,8 @@ The rows of this code in the Lennard-Jones and gold ASE table are revision
 \texttt{\seqsplit{61fa67cf380e46876b569da45e7cc091647a775b}}, and those of
 the Morse ASE table revision
 \texttt{\seqsplit{5eb79cdcb0a986984dc7b487e5a3cc93224246f9}}, at the length
-scale of the Morse pair; both are ancestors of the submitted revision.
+scale of the Morse pair.
+The former is the submitted revision, and the latter is its ancestor.
 The cap of each run is three times the slowest wall of the cluster preset of
 this code on that cluster.
 That preset is not a configuration of the main-text tables.
@@ -223,7 +230,8 @@ Its hits are 10, 12, 4, 0, and 0 of 12 on LJ\(_{38}\), LJ\(_{55}\),
 LJ\(_{98}\), LJ\(_{104}\), and Au\(_{55}\), and 5, 0, 12, and 0 of 12 on
 M\(_{38}\) and M\(_{55}\) at \(\rho=6\) and 14 in the order of the Morse table.
 The TIP4P rows of the GMIN comparison were recorded by revision
-\texttt{e1a69a57}, an ancestor of the submitted revision.
+\texttt{\seqsplit{e1a69a57a8dda1b44fdde9413ae31e3fc3af1889}}, an ancestor
+of the submitted revision.
 
 \section{Earlier template-assisted revision}
 \label{sec:si-template-era}
@@ -372,9 +380,8 @@ accepted minima in \path{src/methods/cluster_hopping.rs} and the two drivers,
 removes no line of \path{src}, and runs with the record on.
 On all 60 seeds this code takes the same calls to the same lowest energy as
 its archived rows, and a replay of each run gives the same record of accepted
-minima and the same lowest energy. The 48 non-LJ\(_{75}\) seeds are the rows
-of this code printed in the GMIN table; the 12 LJ\(_{75}\) traces document
-this code alone and are not used in a GMIN comparison.
+minima and the same lowest energy.
+All 60 seeds are rows of this code printed in the GMIN table.
 The rows are copied from that commit, as
 \path{paper/jctc/data/g3_funnel/PROVENANCE} names.
 
@@ -389,6 +396,14 @@ median outside seconds differ by at most 3.0\% on each cluster, with every
 The rows are copied from commit \texttt{9178884e} of
 \texttt{record/outside-perf3-r2}, as \path{paper/jctc/data/outside_perf/PROVENANCE}
 names, and \path{paper/jctc/scripts/outside_table.py} writes the table.
+The same record also contains a \texttt{new} arm at revision
+\texttt{1e38f2dacd9981fa9602381cebf1bca108b97230}, which is outside the
+history of the submitted revision,
+for all seven systems.
+It also contains all three arms for BLJ\(_{55}\) at size ratio 1.30 and
+BLJ\(_{38}\) at size ratio 1.05, systems not used in this article.
+Those arms and systems are retained in the committed row file but are not
+printed.
 
 % outside table: start
 \begin{table}
@@ -424,8 +439,9 @@ Simulation Environment 3.29.0 at its constructor defaults, run on seeds
 2000--2011, at \(4\times 10^{5}\) calls for 38 atoms, \(1\times 10^{6}\) for
 55, and \(4\times 10^{6}\) for 98 atoms and above.
 The budget of this code counts one call per combined energy and gradient pass.
-Each run stops at a hit, at the budget, or at a wall cap of three times the
-slowest wall of the cluster preset of this code on that cluster.
+Each run stops at a hit, at the budget, or at its next check after a wall cap
+of three times the slowest wall of the cluster preset of this code on that
+cluster.
 No run of this code reached its cap.
 The ASE arms do not start from the start of this code, because the random
 generators of the two codes do not make a shared start from one seed, so

@@ -180,7 +180,7 @@ def table(caption: list[str], label: str, rows: list[str]) -> str:
 
 COMMON = [
     "The budget of this code counts one call per combined energy and gradient pass.",
-    "Cap is the wall in seconds at which a run of this code or of BH or MH stops, three times",
+    "Cap is the wall in seconds after which a run stops at its next check, three times",
     "the slowest wall of the cluster preset of this code on that cluster.",
     "Stops counts the BH and MH runs that ended at the cap; those runs",
     "are misses with fewer calls than the budget, and no run of this code ended at the cap.",
@@ -193,15 +193,14 @@ COMMON = [
 
 def ase_block() -> str:
     caption = [
-        "\\caption{This code at revision",
-        f"\\texttt{{{LJ_REVISION[:8]}}}, against the basin hopping (BH) and minima hopping",
+        "\\caption{The submitted search against the basin hopping (BH) and minima hopping",
         f"(MH) of ASE {ASE_VERSION} at its constructor defaults, at the effort each run reports.",
-        "This code is \\texttt{Config::recommended}\\((N)\\) through \\texttt{examples/ase\\_panel.rs} on",
+        "This code uses its recommended atomic preset on",
         "Lennard-Jones and \\texttt{Config::recommended\\_with\\_scales} at the Gupta length and well depth",
         "on Au\\(_{55}\\), with no species labels, which is not the Au\\(_{55}\\) preset of Table~\\ref{tab:gmin}.",
         "Seeds 2000--2011.",
         *COMMON,
-        "The rows are \\texttt{paper/jctc/data/ase\\_panel/*/rows.csv}.}",
+        "The Supporting Information gives the revisions, drivers, and row records.}",
     ]
     return table(caption, "tab:ase", body(LJ, lj_panel()))
 
@@ -209,12 +208,11 @@ def ase_block() -> str:
 def morse_block() -> str:
     caption = [
         "\\caption{This code, \\texttt{Config::recommended\\_with\\_scales} at the length scale",
-        f"of the Morse pair at revision \\texttt{{{MORSE_REVISION[:8]}}} through \\texttt{{examples/ase\\_nonlj.rs}},",
-        "against the basin hopping",
+        "of the Morse pair at an ancestor of the submitted revision, against the basin hopping",
         f"(BH) and minima hopping (MH) of ASE {ASE_VERSION} on Morse clusters, at the effort each run reports.",
         "Seeds 2000--2011.",
         *COMMON,
-        "The rows are \\texttt{paper/jctc/data/ase\\_panel/morse/rows.csv}.}",
+        "The Supporting Information gives the revision, driver, and row record.}",
     ]
     return table(caption, "tab:ase-morse", body(MORSE, morse_panel()))
 

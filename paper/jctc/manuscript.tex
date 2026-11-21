@@ -6,9 +6,8 @@
 
 \input{macros}
 
-\title{Removing the structure templates of a basin-hopping search: a
-seed-paired knockout, with comparisons to GMIN and the Atomic Simulation
-Environment}
+\title{Template-free basin hopping with adaptive moves for funnelled
+cluster landscapes}
 
 \author{Rohit Goswami}
 \affiliation{SURF B.V., Amsterdam}
@@ -34,25 +33,29 @@ Indian Institute of Technology Kanpur, Kanpur, India}
 \begin{document}
 
 \begin{abstract}
-We test whether one part of a basin-hopping search changes how many seeds
-reach the global minimum of a cluster, by running the code with and without it
-on the same seeds from the same starts and comparing the paired hits with the
-exact McNemar test.
-Removing the structure templates, the builders of close-packed and
-icosahedral cuts behind five of the six structure priors, lowers the hits on
-Morse M\(_{38}\) at \(\rho=14\) from 12 to 4 of 12
-(\(p=7.8\times 10^{-3}\)), at a revision and its child in the history of the
-code.
-Run on the search source of the submitted revision with the preset lengths in
-the Lennard-Jones diameter or rescaled to the Morse pair minimum, four Morse
-clusters show no difference in hits at \(p<0.05\), each or pooled (40 against
-35 of 48 seeds, pooled McNemar \(p=0.30\)).
-On the same search source, replacing the adaptive move choice by a uniform
-draw shows no difference in hits at \(p<0.05\) on eight Lennard-Jones, gold
-and Morse clusters, each or pooled (73 against 75 of 96 seeds, pooled McNemar
-\(p=0.85\)).
-Parts of the search with no knockout run are described as design, with no
-claim about their effect.
+We present a template-free basin-hopping search for funnelled atomic and
+rigid-molecular landscapes.
+Each proposal is quenched; displacement, shell, lattice, descriptor, and
+symmetry moves are chosen from their observed quench depths; a
+well-tempered basin bias and tabu list discourage repeated basins; and
+separate climb and trail responses leave stalled regions.
+At arm-specific work definitions, the search reaches minima that trap a
+reference basin-hopping program: 7 of 12 seeds on LJ\(_{98}\), 9 of 12 on
+M\(_{55}\) at \(\rho=14\), and 6 of 12 on M\(_{80}\) at \(\rho=14\),
+against 0 of 12 in each reference arm.
+On rigid TIP4P water it reaches the published minima on 7 of 12 seeds at
+15 molecules and 6 of 12 at 20 molecules, against 0 of 12 in each
+reference arm.
+Removing the former structure templates lowers M\(_{38}\) hits at
+\(\rho=14\) from 12 to 4 of 12
+\((p=7.8\times 10^{-3})\); across every intervening code change, LJ\(_{75}\)
+hits fall from 12 to 5 of 12.
+At 12 seeds, neither rescaling the preset lengths nor replacing adaptive
+move choice by a uniform draw produces a detectable hit-rate change in the
+tested panels.
+Under independent starts and shared wall caps, the search reaches four of
+five atomic and all four Morse references, while the two Atomic Simulation
+Environment optimizers reach only LJ\(_{55}\), once.
 \end{abstract}
 
 \section{Introduction}
@@ -86,20 +89,17 @@ Earlier remedies change the surface the walk sees, by compressing the cluster
 \cite{oakley2013}, or fill the vacant sites of a lattice read from the
 cluster \cite{shaoChengCai2004}.
 
-A search that combines several such parts can be scored against other codes,
-but such a comparison cannot say which part carries the result.
-This article reports the paired change in hits for the three parts of one
-basin-hopping code that have been run with and without them, the structure
-templates, the length unit and the choice among the moves, and describes the
-rest of the search as design.
-Section~\ref{sec:search} describes the search and marks which of its parts
-have such a run.
-Section~\ref{sec:knockouts} gives those knockouts: removing the structure
-templates, rescaling the preset lengths to the Morse pair minimum, and
-replacing the adaptive move choice by a uniform draw.
-Section~\ref{sec:benchmarks} then compares the code with GMIN on
-Lennard-Jones, Morse, and rigid TIP4P clusters, paired by seed, and with the
-Atomic Simulation Environment at the effort each run reports
+A useful search must both propose routes between funnels and avoid spending
+its budget in basins already explored.
+The method here combines structural moves with feedback from quenched
+outcomes, basin-level memory, and explicit stall exits.
+Section~\ref{sec:search} gives the mechanism and its design rationale.
+Section~\ref{sec:evidence} then organizes the benchmark evidence by claim:
+that the template-free search reaches funnel-trapped minima, that removing
+the former templates costs hits, and that two other adaptations show no
+detectable effect at 12 seeds.
+Comparisons use GMIN and the Atomic Simulation Environment as evidence for
+those claims, not as organizing principles
 \cite{wales1997,larsenAse2017}.
 
 \section{The search}
@@ -114,25 +114,16 @@ well depth.
 The preset is \texttt{Config::recommended} for atomic clusters and
 \texttt{Config::recommended\_tip4p} for rigid TIP4P water, at the revision
 that each table names; no table reports \texttt{Config::default}.
-The caption of each table names its revision, its preset, and the driver
-settings beyond the preset.
-Every revision of the tables of this article against other codes follows the
-removal of the structure templates in commit \texttt{1c1b1238}; the one run
-with them in this article is the With arm of the knockout of
-Section~\ref{sec:knockouts}, at the earlier template-assisted revision
-\texttt{628773d6}.
+The Supporting Information names the revision, driver, host, and record of
+every row.
+Every comparison against another code follows the removal of the structure
+templates; the one run with them is the With arm of the knockout in
+Section~\ref{sec:knockouts}.
 Three parts of the search have a run with and without them, and
 Section~\ref{sec:knockouts} reports all three: the structure templates
 (Section~\ref{sec:priors}), at two revisions in the history of the submitted
 revision, and the length unit and the choice among the moves, on the search
 source of the submitted revision.
-The packing moves, the symmetry proposals, the stall rules, the basin bias,
-the tabu list, the screens, the
-remaining structure prior, and the atom-count gates have no such run, and the
-trail step has one only on LJ\(_{75}\) at a revision outside the history of
-the submitted revision, which the article does not print.
-They are described here as the design of the search, and the article makes no
-claim about what any of them contributes.
 
 \begin{figure}
 \centering
@@ -221,6 +212,33 @@ spirit of the compression of Doye \cite{doye2000}.
 At 98 atoms and above the penalty is absent and every quench uses the
 plain potential.
 
+\subsection{Mechanism and design rationale}
+\label{sec:mechanism}
+The quench turns each move into a proposal between minima rather than a
+single step on the original potential.
+The single-atom and shell moves make local rearrangements, while the lattice
+move fills a low-energy vacant site in the manner of Shao et al.\
+\cite{shaoChengCai2004}.
+Descriptor and symmetry moves offer larger changes of packing; the latter
+follow the observation of Oakley et al.\ that direct symmetric proposals can
+enter otherwise narrow regions of a cluster landscape \cite{oakley2013}.
+The alternate quench surface penalizes extended clusters in the spirit of
+Doye's compression, so compact funnels receive proposals without imposing a
+structure template \cite{doye2000}.
+
+After quenching, the depth feedback allocates later proposals toward moves
+that have crossed to lower minima.
+The well-tempered bias makes repeated descriptor regions progressively less
+attractive, while tabu rejects a return to a basin the chain has repeatedly
+failed to leave.
+When progress stops, the climb and trail arms attempt different exits from
+the stalled region.
+Together these mechanisms address the two funnel difficulties of
+Section~\ref{sec:intro}: proposing a crossing and not spending the remaining
+budget in the broad funnel already found.
+This paragraph is a design rationale, not a causal estimate; the evidence
+below isolates only the components with paired on/off records.
+
 \subsection{Symmetry proposals}
 \label{sec:symmetry}
 Many global minima of clusters are symmetric \cite{wales1997}, and
@@ -272,6 +290,8 @@ direction from the current minimum to that entry with a random displacement
 of amplitude \(0.25\), and quenches.
 A depth-rewarded Thompson draw chooses between the climb and this trail
 response, and the quenched result becomes the chain state at any energy.
+When no basin entry is recorded, a trail draw leaves the chain where it is;
+the climb is a separate choice of the same draw, not a fallback.
 Tabu stores the descriptors of up to eight basins the chain has failed
 to leave.
 
@@ -415,10 +435,8 @@ reduced units of the Lennard-Jones pair.
 The Morse and gold drivers of Table~\ref{tab:gmin} run
 \texttt{Config::recommended} without rescaling its lengths to the pair
 minimum of their potential.
-The Morse driver selects \texttt{Config::recommended\_for\_pair}, which
-rescales them to the Morse pair minimum, only under
-\texttt{H2H\_PAIR\_SCALE=1}, and no row of Table~\ref{tab:gmin} sets it; the
-Morse rows of Table~\ref{tab:ase-morse} run
+No row of Table~\ref{tab:gmin} rescales those lengths to the Morse pair
+minimum; the Morse rows of Table~\ref{tab:ase-morse} run
 \texttt{Config::recommended\_with\_scales} at that length scale.
 For atomic clusters the preset has one atom-count gate: the diameter penalty
 of equation~\ref{eq:penalty} is used only below 98 atoms.
@@ -434,7 +452,7 @@ No constant was refitted for a size.
 
 \subsection{Structure priors and templates}
 \label{sec:priors}
-Up to commit \texttt{1c1b1238} the preset carried six switches that use the
+The earlier template-assisted preset carried six switches that use the
 structure of close-packed clusters, all on.
 \texttt{prior\_soap} adds a fivefold proposal in the smooth overlap of atomic
 positions, and it remains in the code.
@@ -449,7 +467,7 @@ they stalled and continued from the best of them.
 \texttt{prior\_motif} grew the best structure on a face-centered cubic,
 pentagonal, or icosahedral lattice when a run had gone half its budget without
 improvement.
-Commit \texttt{1c1b1238} removed the structure templates, the builders of
+The template-free revision removed the structure templates, the builders of
 face-centered cubic, polyicosahedral, Mackay, and axial-spine cuts behind the
 last five priors; the builders are parameterized by the atom count and a
 nearest-neighbor length and hold no coordinate table for one cluster.
@@ -476,7 +494,7 @@ atoms, \(-279.248470\) at 55, \(-397.492331\) at 75, \(-543.665361\) at
 \cite{walesCambridgeClusterDatabase}
 The other tables add
 \(-569.363652\) at 102 atoms, \(-575.766131\) at 103, and
-\(-893.310258\) at 150, \(-191.0308528\)~eV for gold at 55 atoms in
+\(-893.310258\) at 150, \(-191.03085280\)~eV for gold at 55 atoms in
 the copper--gold Gupta archive, and from the Morse table
 \(-157.477108\) and \(-144.321054\) for M\(_{38}\) at \(\rho=6\) and
 \(14\), \(-250.286609\) and \(-220.646208\) for M\(_{55}\), and
@@ -520,7 +538,9 @@ cross-arm significance test is reported for the ASE tables.
 Among comparisons that report tests, every test is two-sided and exact, so
 no continuity correction enters.
 No adjustment for multiple comparisons is made: every reported \(p\) is
-that of one cluster and one pair of arms, every cluster run is reported,
+that of one cluster and one pair of arms, every cluster of each printed
+comparison is reported,
+and the Supporting Information lists each record that is not printed and why,
 and a difference in hits is called significant only when its own exact test
 is below 0.05.
 With fewer than six discordant seeds the exact McNemar test cannot fall below
@@ -542,62 +562,36 @@ Figure~\ref{fig:systems} shows the published minima.
 and LJ\(_{104}\).
 (b) TIP4P reference minima of 10, 15, and 20 molecules, and, for each
 class, the lowest of the archived GFN2-xTB water hexamers after relaxation
-with xtb 6.7.1 (\texttt{-{}-gfn 2 -{}-opt vtight}), as
-\texttt{paper/jctc/data/system\_visuals/hexamer\_gfn2/RECORD} records.}
+with xtb 6.7.1 (\texttt{-{}-gfn 2 -{}-opt vtight}).}
 \label{fig:systems}
 \end{figure}
 
-\section{Knockouts}
+\section{Evidence by claim}
+\label{sec:evidence}
 \label{sec:knockouts}
 \label{sec:results}
-Table~\ref{tab:knockouts} gives the three runs that switch one part of the
-search on and off with all else held.
-The first, and the one such run in the history of the submitted revision, is
-on the same seeds from the same starts: revision \texttt{628773d6} against its
-child \texttt{1c1b1238}, which removes the structure templates.
-The second runs tree \texttt{b12293b9}, whose search source is that of the
-submitted revision with the default-off knockout switches of the drivers, on
-four Morse clusters: \texttt{Config::recommended}\((N)\) in the Lennard-Jones
-diameter against \texttt{Config::recommended\_for\_pair}\((N)\), which rescales
-every preset length to the Morse pair minimum.
-The third runs the same tree on LJ\(_{38}\), LJ\(_{55}\), LJ\(_{75}\),
-Au\(_{55}\), and M\(_{55}\) and M\(_{80}\) at \(\rho=6\) and 14, from one start
-per seed: \texttt{Config::recommended}\((N)\) against the same preset with
-\texttt{H2H\_KNOCKOUT=move\_choice}, which draws each move from
-equation~\ref{eq:uniform} in place of equation~\ref{eq:thompson}.
-The rows of all three are copied unchanged from the records that the
-\texttt{PROVENANCE} files beside them name.
+Table~\ref{tab:knockouts} gives three paired on/off tests: the former
+structure templates, the preset length unit, and adaptive move choice.
+Each pair uses the same seeds and starts, and changes the named component
+while retaining the rest of the search at the revision of that test.
+The Supporting Information gives the revisions, drivers, switches, and row
+records.
 
 % knockout table: start
 \begin{table*}
 \caption{Three parts of the search run with and without them on the same seeds.
-The structure templates, from the same starts: the earlier template-assisted revision
-\texttt{628773d6} (structure templates since removed in \texttt{1c1b1238}) against its child
-\texttt{1c1b1238}, both ancestors of the submitted revision.
-Their With arm is not the method of this article; it is the search before the removal.
-Each arm is \texttt{Config::recommended}\((38)\) of its revision through \texttt{h2h\_morse} or
-\texttt{h2h\_sc}; at \(\rho=6\) the Morse driver of \texttt{628773d6} also quenches one
-icosahedral template before the walk, and \texttt{1c1b1238} removes that line.
-The length unit: both arms run tree \texttt{b12293b9}, the search source of the submitted revision
-with the default-off knockout switches of the drivers, through \texttt{h2h\_morse}, in alternating
-order by seed.
-With is \texttt{Config::recommended}\((N)\) in the Lennard-Jones diameter it was measured in, the
-method of this article, and Without is \texttt{Config::recommended\_for\_pair}\((N)\), every preset
-length rescaled to the Morse pair minimum.
-The choice among the moves: both arms run the same tree and binaries, through \texttt{h2h\_gmin\_proof},
-\texttt{h2h\_metal} and \texttt{h2h\_morse}, from one start per seed, in alternating order by seed;
-With is \texttt{Config::recommended}\((N)\), and Without the same preset with
-\texttt{H2H\_KNOCKOUT=move\_choice}, which draws each move from equation~\ref{eq:uniform} in place of
-equation~\ref{eq:thompson}.
+The structure-template pair uses the earlier template-assisted search and its template-free child;
+its With arm is not the method of this article.
+For the length-unit pair, With uses the recommended preset in the Lennard-Jones diameter and Without
+rescales every preset length to the Morse pair minimum.
+For move choice, With uses the depth-adaptive draw of equation~\ref{eq:thompson} and Without uses
+the uniform draw of equation~\ref{eq:uniform}.
+The Supporting Information gives the provenance, drivers, switches, and row records.
 With and Without are the hits of the two arms, Only with and Only without the seeds that
 one arm alone hits.
 \(p_\mathrm{M}\) is the two-sided exact McNemar test on those seeds, and \(\Delta\) the 95\%
 interval of Newcombe's method 10 for paired data, for the hit rate of With less that of Without.
-A budget counts one call per combined energy and gradient pass.
-The rows are \protect\path{paper/jctc/data/knockouts/templates/rows.csv},
-\protect\path{paper/jctc/data/knockouts/pairscale/rows.csv} and
-\protect\path{paper/jctc/data/knockouts/move-a/rows.csv}, copied from the records their
-\texttt{PROVENANCE} files name.}
+A budget counts one call per combined energy and gradient pass.}
 \label{tab:knockouts}
 \centering
 \scriptsize
@@ -605,19 +599,19 @@ The rows are \protect\path{paper/jctc/data/knockouts/templates/rows.csv},
 \toprule
 System & Budget & Seeds & With & Without & Only with & Only without & \(p_\mathrm{M}\) & \(\Delta\), 95\% \\
 \midrule
-\multicolumn{9}{@{}l}{\emph{Structure templates, \texttt{628773d6} against \texttt{1c1b1238}}} \\
+\multicolumn{9}{@{}l}{\emph{Former structure templates against the template-free child}} \\
 M\(_{38}\), \(\rho=6\) & \(4\times 10^{5}\) & 12 & 12/12 & 12/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 \\
 M\(_{38}\), \(\rho=14\) & \(4\times 10^{5}\) & 12 & 12/12 & 4/12 & 8 & 0 & \(7.8\times 10^{-3}\) & 0.30 to 0.86 \\
 SC 12--6, \(N=38\) & \(4\times 10^{5}\) & 12 & 12/12 & 12/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 \\
 SC 10--8, \(N=38\) & \(4\times 10^{5}\) & 12 & 12/12 & 7/12 & 5 & 0 & 0.0625 & 0.09 to 0.68 \\
 \midrule
-\multicolumn{9}{@{}l}{\emph{Length unit, the Lennard-Jones diameter against the Morse minimum, tree \texttt{b12293b9}}} \\
+\multicolumn{9}{@{}l}{\emph{Length unit, the Lennard-Jones diameter against the Morse minimum}} \\
 M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & 12 & 12/12 & 12/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 \\
 M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & 12 & 9/12 & 7/12 & 4 & 2 & 0.6875 & \(-\)0.21 to 0.49 \\
 M\(_{80}\), \(\rho=6\) & \(4\times 10^{6}\) & 12 & 12/12 & 12/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 \\
 M\(_{80}\), \(\rho=14\) & \(4\times 10^{6}\) & 12 & 7/12 & 4/12 & 6 & 3 & 0.51 & \(-\)0.21 to 0.61 \\
 \midrule
-\multicolumn{9}{@{}l}{\emph{Choice among the moves, equation~\ref{eq:thompson} against equation~\ref{eq:uniform}, tree \texttt{b12293b9}}} \\
+\multicolumn{9}{@{}l}{\emph{Choice among the moves, equation~\ref{eq:thompson} against equation~\ref{eq:uniform}}} \\
 LJ\(_{38}\) & \(4\times 10^{5}\) & 12 & 12/12 & 12/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 \\
 LJ\(_{55}\) & \(1\times 10^{6}\) & 12 & 12/12 & 12/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 \\
 LJ\(_{75}\) & \(4\times 10^{6}\) & 12 & 5/12 & 6/12 & 3 & 4 & 1 & \(-\)0.44 to 0.31 \\
@@ -631,13 +625,26 @@ M\(_{80}\), \(\rho=14\) & \(4\times 10^{6}\) & 12 & 7/12 & 8/12 & 3 & 4 & 1 & \(
 \end{table*}
 % knockout table: end
 
-At \texttt{628773d6} against its child \texttt{1c1b1238}, the hits on
+\subsection{Removing templates costs hits}
+With the former structure templates against their template-free child, the
+hits on
 M\(_{38}\) at \(\rho=14\) fall from 12 to 4 of 12
 (\(p=7.8\times 10^{-3}\), interval 0.30 to 0.86), and on the Sutton--Chen
 10--8 cluster of 38 atoms from 12 to 7 of 12 (\(p=0.0625\)).
 Both revisions hit M\(_{38}\) at \(\rho=6\) and the Sutton--Chen 12--6
 cluster of 38 atoms on every seed.
 
+An earlier template-assisted revision also hits LJ\(_{75}\) on 12 of 12
+seeds, against 5 of 12 for the later template-free revision
+\((p=0.016\), interval \(-\)0.81 to \(-\)0.22).
+On LJ\(_{38}\), both revisions hit every seed, but their median call costs
+are 10615.5 and 127839.5 combined energy-and-gradient passes
+\((p=4.9\times 10^{-4})\).
+That comparison spans every code change between the two revisions, so it
+supports a change across revisions rather than an isolated template effect.
+The complete panel is in the Supporting Information.
+
+\subsection{No detected effect from two adaptations}
 Rescaling the preset lengths to the Morse pair minimum changes the hits on no
 cluster at \(p<0.05\).
 Both arms hit M\(_{55}\) and M\(_{80}\) at \(\rho=6\) on every seed.
@@ -651,29 +658,13 @@ cluster at \(p<0.05\), with a McNemar \(p\) of 1 on each of the eight.
 Pooled over the eight clusters, the preset hits 73 of 96 seeds and the uniform
 draw 75 (pooled McNemar \(p=0.85\), interval \(-\)0.13 to 0.09).
 
-The structure prior that remains and the choice among the moves can each be
-switched off by name in the Lennard-Jones, Morse, and gold drivers:
-\texttt{H2H\_KNOCKOUT=prior\_soap} turns off \texttt{prior\_soap} and its
-proposal, and \texttt{H2H\_KNOCKOUT=move\_choice} replaces
-equation~\ref{eq:thompson} by equation~\ref{eq:uniform}.
-With the variable unset, the drivers run the preset unchanged.
-Of the rows of this article, only the Without arm of the move-choice block of
-Table~\ref{tab:knockouts} sets it.
-
-\section{Benchmarks}
-\label{sec:benchmarks}
-
-\subsection{Against GMIN on Lennard-Jones and Morse clusters}
+\subsection{The template-free search reaches trapped minima}
 \label{sec:protocol}
 \label{sec:gmin}
-GMIN is the Wales-group basin-hopping program and the reference code for
-these clusters \cite{wales1997,oakley2013}.
-Table~\ref{tab:gmin} runs GMIN against this code at two revisions:
-revision \texttt{eeec8e2c}, an ancestor of the submitted revision with the
-structure templates removed, on seven Lennard-Jones sizes and Morse
-M\(_{80}\) at \(\rho=6\), and the submitted revision \texttt{61fa67cf} on
-Gupta Au\(_{55}\) and on Morse M\(_{55}\) and M\(_{80}\) at \(\rho=6\) and
-14.
+GMIN is the Wales-group basin-hopping program and provides a reference walk
+on these landscapes \cite{wales1997,oakley2013}.
+Table~\ref{tab:gmin} tests whether the template-free search reaches minima
+that trap that walk, on Lennard-Jones, Morse, and Gupta clusters.
 Each block runs both arms of each cluster on seeds 2000--2011 in
 alternating order, at the numeric ceiling in the table, from the start this code
 writes for the seed.
@@ -687,9 +678,8 @@ Darby et al.\ \cite{darbyCuAu2002} at \(T=0.1\)~eV, with the step and the
 taboo radius scaled by \(r_0/2^{1/6}\) and GMIN's container radius, and the
 gold driver of this code applies the basin bias of
 equation~\ref{eq:delta} on a stride of 8.
-The Supporting Information gives the inputs, the host, and the commands.
-The GMIN source is the public tarball dated 2026-11-19, sha256
-\texttt{\seqsplit{ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776}}.
+The Supporting Information gives the inputs, source pin, revisions, hosts,
+records, and commands.
 
 The numeric ceilings in Table~\ref{tab:gmin} use different units: one
 combined energy-and-gradient pass for this code and one
@@ -698,14 +688,15 @@ combined energy-and-gradient pass for this code and one
 gradient request, so no conversion or cross-arm hit, work, or wall test is
 reported.
 At those arm-specific ceilings, this code hits 7 of 12 seeds on
-LJ\(_{98}\) and GMIN none; on LJ\(_{38}\), the counts are 12 and 7.
+LJ\(_{98}\) and 5 of 12 on LJ\(_{75}\), while GMIN hits neither; on
+LJ\(_{38}\), the counts are 12 and 7.
 On LJ\(_{38}\), this code reports a median of 127839.5 combined
 energy-and-gradient passes to the minimum, while GMIN reports 389399
 \texttt{POTENTIAL} entries; these are not the same operation.
 On LJ\(_{102}\), LJ\(_{103}\), LJ\(_{104}\), and LJ\(_{150}\), the hit
 counts are 6 against 5, 6 against 3, 5 against 6, and 8 against 9.
 Both arms hit LJ\(_{55}\) and M\(_{80}\) at \(\rho=6\) on every seed.
-The median wall of a run is lower for this code on all eight clusters, from
+The median wall of a run is lower for this code on all nine clusters, from
 0.640~s against 3.427~s on LJ\(_{38}\) to 66.725~s against 341.6~s on
 LJ\(_{150}\).
 These arm-specific wall medians are descriptive and are not tested across
@@ -723,12 +714,11 @@ from 4 to 12 of 12 seeds.
 % gmin-panel table: start
 \begin{table}
 \caption{Paired outcomes and reported work for this code against GMIN.
-The Supporting Information gives the configurations, inputs, revisions, build recipe,
-and row provenance. Both arms start from the same geometry and run in alternating
+The Supporting Information gives the configurations, inputs, revisions, hosts, build
+recipe, and row provenance. Both arms start from the same geometry and run in alternating
 order on seeds 2000--2011.
-This code uses \texttt{Config::recommended}\((N)\) through \texttt{h2h\_gmin\_proof}
-on Lennard-Jones, through \texttt{h2h\_morse} on Morse, and through
-\texttt{h2h\_metal} with every atom labeled gold on Au\(_{55}\).
+This code uses its recommended atomic-cluster preset, with every atom labeled gold
+on Au\(_{55}\).
 Every printed Lennard-Jones row runs the Wales-group LJ\(_{38}\)
 introduction file with no symmetrization keyword.
 Eval. is a combined energy-and-gradient pass for this code and every
@@ -740,9 +730,7 @@ both arms and neither arm hit.
 Eval. and IQR are the median and interquartile range of the arm's reported count to
 the minimum, with a miss at its full budget.
 Wall, In and Out are the median seconds of the run, inside the
-potential and outside it.
-The rows are \texttt{paper/jctc/data/gmin\_eeec8e2c/*/rows.csv} and
-\texttt{paper/jctc/data/gmin\_develop/rows.csv}.}
+potential and outside it.}
 \label{tab:gmin}
 \centering
 \scriptsize
@@ -752,11 +740,13 @@ The rows are \texttt{paper/jctc/data/gmin\_eeec8e2c/*/rows.csv} and
 \toprule
 Cluster & Ceiling & Arm & Hits & Only & Both & Neither & Eval. & IQR & Wall & In & Out \\
 \midrule
-\multicolumn{12}{@{}l}{\emph{Revision \texttt{eeec8e2c}, an ancestor of the submitted revision}} \\
+\multicolumn{12}{@{}l}{\emph{Template-free predecessor}} \\
 LJ\(_{38}\) & \(4\times 10^{5}\) & this work & 12/12 & 5 & 7 & 0 & 127839.5 & 139245.25 & 0.640 & 0.303 & 0.337 \\
  &  & GMIN & 7/12 & 0 &  &  & 389399 & 173127.75 & 3.427 & 2.507 & 0.916 \\
 LJ\(_{55}\) & \(1\times 10^{6}\) & this work & 12/12 & 0 & 12 & 0 & 5722 & 5372.5 & 0.052 & 0.026 & 0.027 \\
  &  & GMIN & 12/12 & 0 &  &  & 12764.5 & 12435.75 & 0.209 & 0.170 & 0.039 \\
+LJ\(_{75}\) & \(4\times 10^{6}\) & this work & 5/12 & 5 & 0 & 7 & 4000000 & 962776.75 & 61.077 & 34.192 & 26.727 \\
+ &  & GMIN & 0/12 & 0 &  &  & 4000000 & 0 & 117.7 & 101.2 & 16.559 \\
 LJ\(_{98}\) & \(4\times 10^{6}\) & this work & 7/12 & 7 & 0 & 5 & 3166811.5 & 2726730.25 & 82.514 & 50.013 & 32.396 \\
  &  & GMIN & 0/12 & 0 &  &  & 4000000 & 0 & 177.3 & 157.6 & 19.771 \\
 LJ\(_{102}\) & \(4\times 10^{6}\) & this work & 6/12 & 4 & 2 & 3 & 3256052.5 & 2043827.25 & 83.435 & 51.809 & 31.506 \\
@@ -770,7 +760,7 @@ LJ\(_{150}\) & \(4\times 10^{6}\) & this work & 8/12 & 1 & 7 & 2 & 1129381.5 & 3
 M\(_{80}\), \(\rho=6\) & \(4\times 10^{6}\) & this work & 12/12 & 0 & 12 & 0 & 62677 & 575467.75 & 2.456 & 1.812 & 0.653 \\
  &  & GMIN & 12/12 & 0 &  &  & 268934 & 268091.5 & 9.977 & 8.943 & 1.033 \\
 \midrule
-\multicolumn{12}{@{}l}{\emph{The submitted revision \texttt{61fa67cf}}} \\
+\multicolumn{12}{@{}l}{\emph{Submitted revision}} \\
 Au\(_{55}\) & \(1\times 10^{6}\) & this work & 4/12 & 4 & 0 & 7 & 1000000 & 736743.75 & 36.578 & 27.155 & 9.462 \\
  &  & GMIN & 1/12 & 1 &  &  & 1000000 & 0 & 62.055 & 58.738 & 3.317 \\
 M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & this work & 12/12 & 0 & 12 & 0 & 22596 & 51763.75 & 0.409 & 0.287 & 0.122 \\
@@ -787,14 +777,15 @@ M\(_{80}\), \(\rho=14\) & \(4\times 10^{6}\) & this work & 6/12 & 6 & 0 & 6 & 39
 \end{table}
 % gmin-panel table: end
 
-\subsection{Against GMIN on rigid TIP4P water}
+\subsection{Rigid-water evidence for the same claim}
 \label{sec:transfer}
-Table~\ref{tab:tip4p-gmin} puts revision \texttt{e1a69a57} of this code
-against GMIN on rigid TIP4P clusters of 8, 15, 20, 21, and 25 molecules, at
+Table~\ref{tab:tip4p-gmin} puts the template-free search against GMIN on
+rigid TIP4P clusters of 8, 15, 20, 21, and 25 molecules, at
 \(2\times 10^{6}\) arm-specific evaluations on seeds 2000--2011, both arms
 from the same start on each seed in alternating order.
 GMIN runs its rigid TIP4P potential at a fixed temperature of 2~kJ/mol and
-fixed steps of 0.40 and 0.51.
+fixed steps of 0.40 and 0.51, in its default Lennard-Jones container, which
+does not hold the (H\(_2\)O)\(_{20}\) reference minimum.
 The budget counts combined energy-and-gradient passes for this code and
 \texttt{POTENTIAL} entries for GMIN, so no cross-arm test is reported.
 The hit counts for this code and GMIN are 12 and 8 on
@@ -807,17 +798,18 @@ lowest energy of this code there is \(-1113.035\)~kJ/mol and that of GMIN
 % tip4p-gmin table: start
 \begin{table}
 \caption{This code against GMIN on rigid TIP4P water clusters, paired by seed.
-This code is \texttt{Config::recommended\_tip4p}\((N)\) of revision \texttt{e1a69a57}, after the
-removal of the structure templates, through \texttt{h2h\_seed} with the rigid water geometry of GMIN.
+This code uses its recommended template-free rigid-water preset.
 Seeds 2000--2011, \(2\times 10^{6}\) arm-specific evaluations, both arms from the same start on each
 seed, in alternating order.
+GMIN uses its default Lennard-Jones container, which does not hold the
+(H\(_2\)O)\(_{20}\) reference minimum.
 The budget of this code counts one call per combined energy and gradient pass, and GMIN's budget counts
 every \texttt{POTENTIAL} entry, including \texttt{GRADT=false}.
 The numeric ceiling is applied separately in each arm's unit and is not an equal-work budget;
 no cross-arm hit, work, or wall test is reported.
 (H\(_2\)O)\(_{25}\) has no independent reference and is not scored; its row gives the lowest and
-the median best energy of each arm in kJ/mol.
-The rows are \texttt{paper/jctc/data/tip4p\_gmin/rows.csv}.}
+the median best energy of each arm in kJ/mol. The Supporting Information gives the input, revision,
+host, driver, and row record.}
 \label{tab:tip4p-gmin}
 \centering
 \footnotesize
@@ -836,7 +828,7 @@ Cluster & This work & GMIN & Only, this work & Only, GMIN \\
 \end{table}
 % tip4p-gmin table: end
 
-\subsection{Against ASE, at the effort each run reports}
+\subsection{Independent starts under shared wall caps}
 \label{sec:ase}
 The Atomic Simulation Environment provides a basin-hopping optimizer and a
 minima-hopping optimizer \cite{larsenAse2017,goedecker2004}.
@@ -845,10 +837,9 @@ and minima hopping escapes by short molecular dynamics.
 These runs do not share a start with this code, and their effort is not equal:
 every run stopped at a hit, at the budget, or at the recorded wall cap shown
 in the table.
-Table~\ref{tab:ase} runs revision \texttt{61fa67cf} on four Lennard-Jones
-clusters and Au\(_{55}\), and Table~\ref{tab:ase-morse} runs revision
-\texttt{5eb79cdc} on four Morse clusters; both are ancestors of the
-submitted revision.
+Table~\ref{tab:ase} runs the submitted revision on four Lennard-Jones
+clusters and Au\(_{55}\), and Table~\ref{tab:ase-morse} runs an ancestor of
+that revision on four Morse clusters.
 ASE minima hopping is wall-capped: every one of its runs in both tables
 ended at the cap with fewer calls than the budget.
 Basin hopping reached the cap on 35 of the 60 runs of Table~\ref{tab:ase}
@@ -865,15 +856,14 @@ calls.
 
 % ase-panel table: start
 \begin{table}
-\caption{This code at revision
-\texttt{61fa67cf}, against the basin hopping (BH) and minima hopping
+\caption{The submitted search against the basin hopping (BH) and minima hopping
 (MH) of ASE 3.29.0 at its constructor defaults, at the effort each run reports.
-This code is \texttt{Config::recommended}\((N)\) through \texttt{examples/ase\_panel.rs} on
+This code uses its recommended atomic preset on
 Lennard-Jones and \texttt{Config::recommended\_with\_scales} at the Gupta length and well depth
 on Au\(_{55}\), with no species labels, which is not the Au\(_{55}\) preset of Table~\ref{tab:gmin}.
 Seeds 2000--2011.
 The budget of this code counts one call per combined energy and gradient pass.
-Cap is the wall in seconds at which a run of this code or of BH or MH stops, three times
+Cap is the wall in seconds after which a run stops at its next check, three times
 the slowest wall of the cluster preset of this code on that cluster.
 Stops counts the BH and MH runs that ended at the cap; those runs
 are misses with fewer calls than the budget, and no run of this code ended at the cap.
@@ -881,7 +871,7 @@ Wall is the median over the 12 runs of the seconds each run took;
 a BH or MH run that ended at the cap is counted at its wall.
 No cross-arm test is reported: starts differ; every arm has the same numeric call
 ceiling and wall cap for that cluster, and runs reaching the shared cap are censored.
-The rows are \texttt{paper/jctc/data/ase\_panel/*/rows.csv}.}
+The Supporting Information gives the revisions, drivers, and row records.}
 \label{tab:ase}
 \centering
 \scriptsize
@@ -905,12 +895,11 @@ Au\(_{55}\) & \(1\times 10^{6}\) & 107.9 & 0/12 & 0/12 & 0/12 & 12 & 12 & 36.000
 % ase-nonlj table: start
 \begin{table}
 \caption{This code, \texttt{Config::recommended\_with\_scales} at the length scale
-of the Morse pair at revision \texttt{5eb79cdc} through \texttt{examples/ase\_nonlj.rs},
-against the basin hopping
+of the Morse pair at an ancestor of the submitted revision, against the basin hopping
 (BH) and minima hopping (MH) of ASE 3.29.0 on Morse clusters, at the effort each run reports.
 Seeds 2000--2011.
 The budget of this code counts one call per combined energy and gradient pass.
-Cap is the wall in seconds at which a run of this code or of BH or MH stops, three times
+Cap is the wall in seconds after which a run stops at its next check, three times
 the slowest wall of the cluster preset of this code on that cluster.
 Stops counts the BH and MH runs that ended at the cap; those runs
 are misses with fewer calls than the budget, and no run of this code ended at the cap.
@@ -918,7 +907,7 @@ Wall is the median over the 12 runs of the seconds each run took;
 a BH or MH run that ended at the cap is counted at its wall.
 No cross-arm test is reported: starts differ; every arm has the same numeric call
 ceiling and wall cap for that cluster, and runs reaching the shared cap are censored.
-The rows are \texttt{paper/jctc/data/ase\_panel/morse/rows.csv}.}
+The Supporting Information gives the revision, driver, and row record.}
 \label{tab:ase-morse}
 \centering
 \scriptsize
@@ -939,13 +928,25 @@ M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & 47.552 & 8/12 & 0/12 & 0/12 & 12 
 % ase-nonlj table: end
 
 \section{Conclusions}
-Removing the structure templates, at a revision and its child in the history
-of this basin-hopping code, lowers the hits on Morse M\(_{38}\) at
-\(\rho=14\) from 12 of 12 to 4, the one cluster of that run whose arms differ
-at \(p<0.05\).
-The GMIN and ASE tables report their committed hit counts at the
-arm-specific budget definitions stated with each table; no cross-arm test is
-made when the operations or starts differ.
+The template-free search combines quenched structural proposals, adaptive
+move allocation, basin memory, and stall exits.
+At arm-specific work definitions it reaches funnel-trapped references on
+LJ\(_{98}\), M\(_{55}\) and M\(_{80}\) at \(\rho=14\), and rigid
+(H\(_2\)O)\(_{15}\) and (H\(_2\)O)\(_{20}\), where the corresponding GMIN
+arms hit no seed.
+Under independent starts and shared wall caps, it reaches four of five
+atomic and all four Morse references, while the ASE optimizers reach only
+LJ\(_{55}\), once; these censored arms are descriptive, not equal-work
+tests.
+
+The paired knockouts show that removing the former structure templates
+lowers M\(_{38}\) hits at \(\rho=14\) from 12 of 12 to 4.
+Across all changes between the template-assisted and later revisions,
+LJ\(_{75}\) hits fall from 12 of 12 to 5, while the LJ\(_{38}\) median call
+cost rises from 10615.5 to 127839.5.
+At 12 seeds, rescaling the preset lengths and replacing adaptive move choice
+with a uniform draw produce no detectable hit-rate change in their tested
+panels.
 
 \appendix
 \section{Definitions}
@@ -1114,7 +1115,6 @@ In memoriam Cosmo.
 He thanks his cactus Ami and his in-laws Nagaselvamani and
 Sankaranarayan.
 Ruhila Goswami set the figure colors.
-The authors reviewed the text and take responsibility for it.
 
 \section*{Funding}
 This research received no specific grant from any funding agency in the
@@ -1137,13 +1137,16 @@ and the scripts that write the tables are in it.
 Documentation is at \url{https://anneal.rgoswami.me}.
 The archive of the software line is
 \url{https://doi.org/10.5281/zenodo.10672746}.
-The newest released tag is v0.12.0, which is the crate version.
-Each imported row file under \path{paper/jctc/data} carries a
-\texttt{PROVENANCE} file that names the record branch, the commit, and the
-blob it was copied from.
+The described submitted revision postdates the newest released tag,
+v0.12.0, and is available at
+\url{https://github.com/HaoZeke/anneal/commit/61fa67cf380e46876b569da45e7cc091647a775b};
+the Zenodo archive does not contain that revision.
 The rows of this code behind every table were recorded at revisions in the
-history of the submitted revision, and the Supporting Information names each
-one.
+history of the submitted revision, except the length-unit and move-choice
+knockouts, which ran the submitted search source plus default-off knockout
+switches.
+The Supporting Information gives the exact record location of both
+exceptions and names the revision, driver, host, and record of every row.
 
 \bibliography{refs,refs-stats}
 
