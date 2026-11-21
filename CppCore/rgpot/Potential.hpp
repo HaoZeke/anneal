@@ -85,6 +85,30 @@ public:
         "potential has no analytic Hessian-vector product");
   }
 
+  /// Dense energy Hessian from closed-form derivatives. Implementations
+  /// advertising `caps().analyticHessian` override this hook. The output
+  /// holds `3 * in.nAtoms` squared doubles, row-major, coordinate
+  /// `3 * i + k` for axis `k` of atom `i`, and is written symmetric.
+  virtual void hessianImpl(const ForceInput &, double *) const {
+    throw std::runtime_error("potential has no analytic Hessian");
+  }
+
+  /// Dense energy Hessian, laid out as for `hessianImpl`, from dual-number
+  /// evaluation of the energy kernel. Implementations advertising
+  /// `caps().adHessian` override this hook.
+  virtual void hessianAdImpl(const ForceInput &, double *) const {
+    throw std::runtime_error("potential has no dual-number Hessian");
+  }
+
+  /// Energy-Hessian product from dual-number evaluation of the energy
+  /// kernel. Implementations advertising `caps().adHvp` override this hook;
+  /// the buffers follow `hessianVectorImpl`.
+  virtual void hessianVectorAdImpl(const ForceInput &, const double *,
+                                   double *) const {
+    throw std::runtime_error(
+        "potential has no dual-number Hessian-vector product");
+  }
+
   /**
    * @brief Evaluate a batch of independent systems in one call.
    *

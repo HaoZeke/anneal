@@ -150,7 +150,7 @@ is not the hash.
 | 3.5.1   | 1, 0, 1         | 4                    |
 | 3.6.0   | 1, 1, 1         | 6                    |
 | 3.7.0   | 1, 2, 1         | 6                    |
-| next    | 1, 6, 1         | 9                    |
+| next    | 1, 7, 1         | 9                    |
 
 3.6.0 raised the minor for =rgpot_eindir_abi_compatible=; a caller built against
 minor 0 still matches it.
@@ -172,6 +172,16 @@ It also raises the minor to 5 for the engine and RPC Hessian-vector interfaces.
 It raises the minor to 6 for =rgpot_potential_new_eam_table= and the four
 =RGPOT_EAM_TABLE_*= format codes.
 They are additions that take no new struct, so the layout revision stays at 1.
+It raises the minor to 8 for =rgpot_potential_hessian=,
+=rgpot_potential_hvp_resolved=, the analytic and dual-number Hessian callbacks, the dual-number Hessian-vector callback, =rgpot_potential_derivative_caps=
+and
+=rgpot_potential_derivative_counts=, the new structs =rgpot_derivative_caps_t=
+and =rgpot_derivative_counts_t=, the enum =rgpot_hessian_scheme_t=, and the
+values =RGPOT_HVP_AD= (4) and =RGPOT_HVP_EXACT= (5).
+The product takes its scheme as an =int=, so a library of minor 6 refuses the
+new values with =RGPOT_INVALID_PARAMETER= instead of misreading them.
+No existing struct changes and the new state lives behind =fused_cache=, so the
+layout revision stays at 1.
 
 The ledger notes that soversion 3 was the 3.4.0 layout, which 3.5.0 reused after
 the layout changed, and that 4 is the 3.5.0 layout, shipped from 3.5.1.
@@ -189,4 +199,8 @@ It also stamps =D2CpmdConfig=, =D2CpmdPot= and =PotType::D2Cpmd=.
 =D4Config= gains =periodic= in the padding after =atm=, so it keeps its size and
 only the field offsets show it.
 =D2CpmdConfig= gains =symmetry=.
+=PotCaps= gains =analyticHessian=, =adHessian= and =adHvp=, and =PotentialBase=
+gains the virtuals =hessianImpl=, =hessianAdImpl= and =hessianVectorAdImpl=
+after =hessianVectorImpl=.
+The vtable changed, so =kCxxLayoutRevision= is 2.
 A program linked against soversion 8 does not load =librgpot.so.9=.

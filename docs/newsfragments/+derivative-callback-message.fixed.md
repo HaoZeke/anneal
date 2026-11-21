@@ -1,0 +1,1 @@
+A Hessian-vector product or Hessian callback of `rgpot-core` that fails without calling `rgpot_set_last_error` is reported as `<callback> returned <status>`, instead of with a message an earlier call on the thread left in `rgpot_last_error`, and a successful derivative call, forward and central differences included, leaves that earlier message in place.

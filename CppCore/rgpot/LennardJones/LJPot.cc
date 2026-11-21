@@ -19,8 +19,11 @@
 #include <vector>
 // clang-format on
 
-#include "rgpot/KeptPotential.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
+#include "rgpot/Dual.hpp"
+#include "rgpot/KeptPotential.hpp"
+#include "rgpot/LennardJones/LJPairEnergy.hpp"
+#include "rgpot/PairHessian.hpp"
 #include "rgpot/nlist/NeighbourList.hpp"
 #include "rgpot/nlist/PairSum.hpp"
 #include "rgpot/simd/api.hpp"
@@ -102,6 +105,50 @@ KeptKey ljNeighbourKey(const LJPot *self, double cutoff,
   KeptKey key;
   key.ptr(self).f64(cutoff).i64(static_cast<std::int64_t>(mode));
   return key;
+}
+
+/// Each half-list pair of @a in once, from the calling thread's kept list,
+/// as @c visit(i, j, dx, dy, dz, r2) with @c i < j.
+template <typename Visit>
+void visitLjPairs(const LJPot *self, double cutoff, nlist::Mode mode,
+                  const ForceInput &in, Visit &&visit) {
+  KeptLjNeighbours::with(
+      ljNeighbourKey(self, cutoff, mode),
+      [] { return std::make_unique<LjNeighbours>(); },
+      [&](LjNeighbours &scratch) {
+        updateScratchCells(scratch, in, cutoff, mode);
+        nlist::visitHalf(scratch.cells, 0, static_cast<long>(in.nAtoms), visit);
+      });
+}
+
+struct LjRadial {
+  double d1; //!< phi'(r).
+  double d2; //!< phi''(r).
+};
+
+/// Radial derivatives of the shifted pair term, or of the switched one when
+/// @a sw is set.
+LjRadial ljRadial(double r2, double r, double inv_r, double psi2, double fourU0,
+                  const QuinticSwitch *sw) noexcept {
+  const double sr2 = psi2 / r2;
+  const double a = sr2 * sr2 * sr2;
+  double d1 = fourU0 * inv_r * (6.0 * a - 12.0 * a * a);
+  double d2 = fourU0 * inv_r * inv_r * (156.0 * a * a - 42.0 * a);
+  if (sw != nullptr) {
+    const double bare = fourU0 * a * (a - 1.0);
+    const auto s = (*sw)(r);
+    const double s2 = sw->d2sdr2(r);
+    d2 = d2 * s.s + 2.0 * d1 * s.dsdr + bare * s2;
+    d1 = d1 * s.s + bare * s.dsdr;
+  }
+  return {d1, d2};
+}
+
+/// The pair block from dual numbers: g_s and g_ss of the pair energy at r2.
+pair_hessian::Block ljDualBlock(double r2, double dx, double dy, double dz,
+                                const simd::LjParams &params) {
+  const ad::Dual2 g = lj::pairEnergy(ad::seed2(r2), params);
+  return pair_hessian::squared(g.v.d, g.d.d, dx, dy, dz);
 }
 
 } // namespace
@@ -215,7 +262,7 @@ void LJPot::hessianVectorImpl(const ForceInput &in, const double *v, double *hv)
   const double cutoff2 = cuttOffR * cuttOffR;
   const double psi2 = psi * psi;
   const double fourU0 = 4.0 * u0;
-  const bool switched = m_config.switch_width != 0.0;
+  const QuinticSwitch *sw = m_config.switch_width != 0.0 ? &m_switch : nullptr;
   const auto addPair = [&](std::int32_t i, std::int32_t j, double dx, double dy,
                            double dz, double r2) {
     if (!(i < j) || r2 > cutoff2) {
@@ -227,17 +274,7 @@ void LJPot::hessianVectorImpl(const ForceInput &in, const double *v, double *hv)
     }
     const double r = std::sqrt(r2);
     const double inv_r = 1.0 / r;
-    const double sr2 = psi2 / r2;
-    const double a = sr2 * sr2 * sr2;
-    double d1 = fourU0 * inv_r * (6.0 * a - 12.0 * a * a);
-    double d2 = fourU0 * inv_r * inv_r * (156.0 * a * a - 42.0 * a);
-    if (switched) {
-      const double bare = fourU0 * a * (a - 1.0);
-      const auto s = m_switch(r);
-      const double s2 = m_switch.d2sdr2(r);
-      d2 = d2 * s.s + 2.0 * d1 * s.dsdr + bare * s2;
-      d1 = d1 * s.s + bare * s.dsdr;
-    }
+    const auto [d1, d2] = ljRadial(r2, r, inv_r, psi2, fourU0, sw);
     const double ux = dx * inv_r;
     const double uy = dy * inv_r;
     const double uz = dz * inv_r;
@@ -260,13 +297,93 @@ void LJPot::hessianVectorImpl(const ForceInput &in, const double *v, double *hv)
     hj[1] -= ky;
     hj[2] -= kz;
   };
-  KeptLjNeighbours::with(
-      ljNeighbourKey(this, cuttOffR, mode_),
-      [] { return std::make_unique<LjNeighbours>(); },
-      [&](LjNeighbours &scratch) {
-        updateScratchCells(scratch, in, cuttOffR, mode_);
-        nlist::visitHalf(scratch.cells, 0, N, addPair);
-      });
+  visitLjPairs(this, cuttOffR, mode_, in, addPair);
+}
+
+/**
+ * @details
+ *
+ * The blocks are @c pair_hessian::radial of the @f$\phi'@f$ and
+ * @f$\phi''@f$ that @c hessianVectorImpl contracts with the direction.
+ */
+void LJPot::hessianImpl(const ForceInput &in, double *h) const {
+  const std::size_t dim = 3 * in.nAtoms;
+  std::fill_n(h, dim * dim, 0.0);
+  if (in.nAtoms < 2 || cuttOffR <= 0.0) {
+    return;
+  }
+  const double cutoff2 = cuttOffR * cuttOffR;
+  const double psi2 = psi * psi;
+  const double fourU0 = 4.0 * u0;
+  const QuinticSwitch *sw = m_config.switch_width != 0.0 ? &m_switch : nullptr;
+  visitLjPairs(this, cuttOffR, mode_, in,
+               [&](std::int32_t i, std::int32_t j, double dx, double dy,
+                   double dz, double r2) {
+                 if (!(i < j) || r2 > cutoff2) {
+                   return;
+                 }
+                 if (!(r2 > 0.0)) {
+                   throw std::domain_error(
+                       "LJPot Hessian is undefined for coincident atoms");
+                 }
+                 const double r = std::sqrt(r2);
+                 const double inv_r = 1.0 / r;
+                 const auto [d1, d2] = ljRadial(r2, r, inv_r, psi2, fourU0, sw);
+                 pair_hessian::scatter(
+                     pair_hessian::radial(d1, d2, dx, dy, dz, inv_r),
+                     static_cast<std::size_t>(i), static_cast<std::size_t>(j),
+                     dim, h);
+               });
+}
+
+void LJPot::hessianAdImpl(const ForceInput &in, double *h) const {
+  const std::size_t dim = 3 * in.nAtoms;
+  std::fill_n(h, dim * dim, 0.0);
+  if (in.nAtoms < 2 || cuttOffR <= 0.0) {
+    return;
+  }
+  const simd::LjParams params =
+      lj_params(u0, psi, cuttOffU, m_config, m_switch);
+  const double cutoff2 = cuttOffR * cuttOffR;
+  visitLjPairs(this, cuttOffR, mode_, in,
+               [&](std::int32_t i, std::int32_t j, double dx, double dy,
+                   double dz, double r2) {
+                 if (!(i < j) || r2 > cutoff2) {
+                   return;
+                 }
+                 if (!(r2 > 0.0)) {
+                   throw std::domain_error(
+                       "LJPot Hessian is undefined for coincident atoms");
+                 }
+                 pair_hessian::scatter(ljDualBlock(r2, dx, dy, dz, params),
+                                       static_cast<std::size_t>(i),
+                                       static_cast<std::size_t>(j), dim, h);
+               });
+}
+
+void LJPot::hessianVectorAdImpl(const ForceInput &in, const double *v,
+                                double *hv) const {
+  std::fill_n(hv, 3 * in.nAtoms, 0.0);
+  if (in.nAtoms < 2 || cuttOffR <= 0.0) {
+    return;
+  }
+  const simd::LjParams params =
+      lj_params(u0, psi, cuttOffU, m_config, m_switch);
+  const double cutoff2 = cuttOffR * cuttOffR;
+  visitLjPairs(this, cuttOffR, mode_, in,
+               [&](std::int32_t i, std::int32_t j, double dx, double dy,
+                   double dz, double r2) {
+                 if (!(i < j) || r2 > cutoff2) {
+                   return;
+                 }
+                 if (!(r2 > 0.0)) {
+                   throw std::domain_error("LJPot Hessian-vector product is "
+                                           "undefined for coincident atoms");
+                 }
+                 pair_hessian::apply(ljDualBlock(r2, dx, dy, dz, params),
+                                     static_cast<std::size_t>(i),
+                                     static_cast<std::size_t>(j), v, hv);
+               });
 }
 
 void LJPot::forceStage(const HalfList &list, const double *, double *forces,

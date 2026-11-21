@@ -43,7 +43,7 @@ pub struct rgpot_abi_stamp_t {
 /// ABI major of this build.
 pub const RGPOT_ABI_VERSION_MAJOR: u16 = 1;
 /// ABI minor of this build.
-pub const RGPOT_ABI_VERSION_MINOR: u16 = 6;
+pub const RGPOT_ABI_VERSION_MINOR: u16 = 8;
 /// Layout revision of this build.
 pub const RGPOT_ABI_LAYOUT_REVISION: u16 = 1;
 
@@ -188,12 +188,26 @@ mod tests {
     #[test]
     fn the_minor_counts_the_eam_table_constructor() {
         assert_eq!(RGPOT_ABI_VERSION_MAJOR, 1);
-        assert_eq!(RGPOT_ABI_VERSION_MINOR, 6);
-        assert_eq!(rgpot_abi_stamp().abi_minor, 6);
+        assert_eq!(unsafe { rgpot_abi_compatible(&stamp(1, 6, 1)) }, 1);
         for earlier in 0..RGPOT_ABI_VERSION_MINOR {
             assert_eq!(unsafe { rgpot_abi_compatible(&stamp(1, earlier, 1)) }, 1);
         }
-        assert_eq!(unsafe { rgpot_abi_compatible(&stamp(1, 7, 1)) }, 0);
+    }
+
+    /// The dense Hessian, the dual-number callbacks, the resolved product,
+    /// and the derivative capabilities and counts are additive, and the two
+    /// new HVP scheme values extend an enum the product takes as an `int`,
+    /// so the minor moves to 8 and every earlier caller still matches.
+    #[test]
+    fn the_minor_counts_the_hessian_exports() {
+        assert_eq!(RGPOT_ABI_VERSION_MAJOR, 1);
+        assert_eq!(RGPOT_ABI_VERSION_MINOR, 8);
+        assert_eq!(rgpot_abi_stamp().abi_minor, 8);
+        assert_eq!(RGPOT_ABI_LAYOUT_REVISION, 1);
+        for earlier in 0..RGPOT_ABI_VERSION_MINOR {
+            assert_eq!(unsafe { rgpot_abi_compatible(&stamp(1, earlier, 1)) }, 1);
+        }
+        assert_eq!(unsafe { rgpot_abi_compatible(&stamp(1, 9, 1)) }, 0);
     }
 
     fn stamp(major: u16, minor: u16, layout: u16) -> rgpot_abi_stamp_t {
@@ -312,6 +326,23 @@ mod tests {
             "#define RGPOT_EAM_TABLE_FUNCFL 1",
             "#define RGPOT_EAM_TABLE_SETFL 2",
             "#define RGPOT_EAM_TABLE_FINNIS_SINCLAIR 3",
+            "RGPOT_HVP_AD = 4,",
+            "RGPOT_HVP_EXACT = 5,",
+            "rgpot_potential_hvp_resolved(const struct rgpot_potential_t *pot,",
+            "rgpot_potential_set_ad_hvp_callback(const struct rgpot_potential_t *pot,",
+            "typedef enum rgpot_hessian_scheme_t {",
+            "RGPOT_HESSIAN_CENTRAL = 2,",
+            "RGPOT_HESSIAN_ANALYTIC = 3,",
+            "RGPOT_HESSIAN_AD = 4,",
+            "RGPOT_HESSIAN_EXACT = 5,",
+            "(*HessianCallback)(void *user_data,",
+            "rgpot_potential_set_hessian_callback(const struct rgpot_potential_t *pot,",
+            "rgpot_potential_set_ad_hessian_callback(const struct rgpot_potential_t *pot,",
+            "rgpot_potential_hessian(const struct rgpot_potential_t *pot,",
+            "typedef struct rgpot_derivative_caps_t {",
+            "typedef struct rgpot_derivative_counts_t {",
+            "rgpot_potential_derivative_caps(const struct rgpot_potential_t *pot,",
+            "rgpot_potential_derivative_counts(const struct rgpot_potential_t *pot,",
         ] {
             assert!(flat.contains(f), "rgpot.h lacks {f}");
         }
@@ -422,6 +453,13 @@ mod tests {
             "rgpot_potential_set_taylor_jet",
             "rgpot_potential_taylor_jet",
             "rgpot_ch5_2008_taylor_jet",
+            "rgpot_potential_hvp_resolved",
+            "rgpot_potential_set_ad_hvp_callback",
+            "rgpot_potential_set_hessian_callback",
+            "rgpot_potential_set_ad_hessian_callback",
+            "rgpot_potential_hessian",
+            "rgpot_potential_derivative_caps",
+            "rgpot_potential_derivative_counts",
         ] {
             assert!(baseline.lines().any(|l| l == name), "baseline lacks {name}");
         }

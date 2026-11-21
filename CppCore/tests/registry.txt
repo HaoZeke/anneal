@@ -127,6 +127,9 @@ CPMDPotConfigMessageTest | tests core | unit cpmd_pot_config_message_test CPMDPo
 CambridgeMorseTest | tests core | unit cambridge_morse_test CambridgeMorseTest.cc |
 GuptaTest | tests core | unit gupta_test GuptaTest.cc |
 HessianVectorTest | tests core | unit hessian_vector_test HessianVectorTest.cc |
+DualTest | tests core | unit dual_test DualTest.cc |
+HessianTest | tests core | unit hessian_test HessianTest.cc |
+DerivativeSchemeTest | tests core | unit derivative_scheme_test DerivativeSchemeTest.cc |
 ModelPotsTest | tests core | unit model_pots_test ModelPotsTest.cc |
 SWSiTest | tests core | unit sw_si_test SWSiTest.cc |
 TersoffSiCTest | tests core | unit tersoff_sic_test TersoffSiCTest.cc fp_contract=off |
@@ -322,6 +325,7 @@ UmaFloat64Test | tests metatomic | custom workdir=. | @metatomic
 UmaProvenanceTest | tests metatomic | custom workdir=. | @metatomic
 SkalaPotTest | tests core rpc skala | custom suite=skala workdir=. | @skala
 PotentialHvpTest | tests core rust_core | unit potential_hvp_test PotentialHvpTest.cc | @rust_core
+PotentialHessianTest | tests core rust_core | unit potential_hessian_test PotentialHessianTest.cc | @rust_core
 abi_core_symbols | rust_core linux | custom | @rust_core
 EAMTableCAbiTest | tests rust_core | custom | @rust_core
 EAMTableHandleTest | tests core rust_core | unit eam_table_handle_test EAMTableHandleTest.cc | @rust_core

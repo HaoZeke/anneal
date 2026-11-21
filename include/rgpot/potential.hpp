@@ -134,31 +134,83 @@ public:
   /**
    * @brief Write @f$H v@f$ at @a input to @a hv_out.
    *
-   * See @c rgpot_potential_hvp. @a direction and @a hv_out hold
+   * See @c rgpot_potential_hvp_resolved. @a direction and @a hv_out hold
    * @c 3*n_atoms doubles and must not overlap. With @c RGPOT_HVP_FORWARD,
    * @c k products at one geometry cost @c k+1 force calls.
    *
    * @param step Displacement length; 0 selects @c RGPOT_HVP_DEFAULT_STEP.
-   * @throws rgpot::Error on a malformed request or a failing callback.
+   * @return The scheme that computed the product: @c RGPOT_HVP_AUTO
+   *         reports @c RGPOT_HVP_ANALYTIC or @c RGPOT_HVP_FORWARD, and
+   *         @c RGPOT_HVP_EXACT reports @c RGPOT_HVP_ANALYTIC or
+   *         @c RGPOT_HVP_AD.
+   * @throws rgpot::Error on a malformed request, a refused scheme or a
+   *         failing callback.
    */
-  void hvp(const InputSpec &input, const double *direction, double *hv_out,
-           double step = 0.0,
-           rgpot_hvp_scheme_t scheme = RGPOT_HVP_AUTO) const {
-    detail::check_status(
-        rgpot_potential_hvp(handle_, &input.c_struct(), direction, step,
-                            static_cast<int32_t>(scheme), hv_out));
+  rgpot_hvp_scheme_t hvp(const InputSpec &input, const double *direction,
+                         double *hv_out, double step = 0.0,
+                         rgpot_hvp_scheme_t scheme = RGPOT_HVP_AUTO) const {
+    rgpot_hvp_scheme_t used = scheme;
+    detail::check_status(rgpot_potential_hvp_resolved(
+        handle_, &input.c_struct(), direction, step,
+        static_cast<int32_t>(scheme), hv_out, &used));
+    return used;
   }
 
-  /// @c hvp() into a new vector of @c 3*n_atoms doubles.
+  /// @c hvp() into a new vector of @c 3*n_atoms doubles, writing the scheme
+  /// that ran to @a scheme_used when it is not @c nullptr.
   std::vector<double> hvp(const InputSpec &input,
                           const std::vector<double> &direction,
                           double step = 0.0,
-                          rgpot_hvp_scheme_t scheme = RGPOT_HVP_AUTO) const {
+                          rgpot_hvp_scheme_t scheme = RGPOT_HVP_AUTO,
+                          rgpot_hvp_scheme_t *scheme_used = nullptr) const {
     if (direction.size() != 3 * input.n_atoms()) {
       throw Error("invalid parameter: direction must hold 3 * n_atoms values");
     }
     std::vector<double> out(direction.size());
-    hvp(input, direction.data(), out.data(), step, scheme);
+    const auto used = hvp(input, direction.data(), out.data(), step, scheme);
+    if (scheme_used != nullptr) {
+      *scheme_used = used;
+    }
+    return out;
+  }
+
+  /**
+   * @brief Write the dense Hessian at @a input to @a hessian_out.
+   *
+   * See @c rgpot_potential_hessian. @a hessian_out holds @c 3*n_atoms rows
+   * of @c 3*n_atoms doubles. There is no automatic scheme:
+   * @c RGPOT_HESSIAN_CENTRAL makes @c 6*n_atoms force calls and runs only
+   * when asked for.
+   *
+   * @param step Central displacement; 0 selects @c RGPOT_HVP_DEFAULT_STEP.
+   * @return The scheme that computed the Hessian: @c RGPOT_HESSIAN_EXACT
+   *         reports @c RGPOT_HESSIAN_ANALYTIC or @c RGPOT_HESSIAN_AD.
+   * @throws rgpot::Error on a malformed request, a refused scheme or a
+   *         failing callback.
+   */
+  rgpot_hessian_scheme_t hessian(const InputSpec &input, double *hessian_out,
+                                 rgpot_hessian_scheme_t scheme,
+                                 double step = 0.0) const {
+    rgpot_hessian_scheme_t used = scheme;
+    detail::check_status(rgpot_potential_hessian(
+        handle_, &input.c_struct(), step, static_cast<int32_t>(scheme),
+        hessian_out, &used));
+    return used;
+  }
+
+  /// @c hessian() into a new vector of @c 3*n_atoms rows of @c 3*n_atoms
+  /// doubles, writing the scheme that ran to @a scheme_used when it is not
+  /// @c nullptr.
+  std::vector<double>
+  hessian(const InputSpec &input, rgpot_hessian_scheme_t scheme,
+          double step = 0.0,
+          rgpot_hessian_scheme_t *scheme_used = nullptr) const {
+    const std::size_t dim = 3 * input.n_atoms();
+    std::vector<double> out(dim * dim);
+    const auto used = hessian(input, out.data(), scheme, step);
+    if (scheme_used != nullptr) {
+      *scheme_used = used;
+    }
     return out;
   }
 
@@ -179,6 +231,39 @@ public:
   /// Register or clear (@c nullptr) the analytic product of this handle.
   void set_hvp_callback(HessianVectorCallback callback) const {
     detail::check_status(rgpot_potential_set_hvp_callback(handle_, callback));
+  }
+
+  /// Register or clear (@c nullptr) the dual-number product of this handle.
+  void set_ad_hvp_callback(HessianVectorCallback callback) const {
+    detail::check_status(
+        rgpot_potential_set_ad_hvp_callback(handle_, callback));
+  }
+
+  /// Register or clear (@c nullptr) the analytic Hessian of this handle.
+  void set_hessian_callback(HessianCallback callback) const {
+    detail::check_status(
+        rgpot_potential_set_hessian_callback(handle_, callback));
+  }
+
+  /// Register or clear (@c nullptr) the dual-number Hessian of this handle.
+  void set_ad_hessian_callback(HessianCallback callback) const {
+    detail::check_status(
+        rgpot_potential_set_ad_hessian_callback(handle_, callback));
+  }
+
+  /// Which analytic, dual-number and finite-difference schemes this handle
+  /// has for products and Hessians, with their force-call costs.
+  rgpot_derivative_caps_t derivative_caps() const {
+    rgpot_derivative_caps_t caps{};
+    detail::check_status(rgpot_potential_derivative_caps(handle_, &caps));
+    return caps;
+  }
+
+  /// Products and Hessians answered by each scheme so far.
+  rgpot_derivative_counts_t derivative_counts() const {
+    rgpot_derivative_counts_t counts{};
+    detail::check_status(rgpot_potential_derivative_counts(handle_, &counts));
+    return counts;
   }
 
   /// Drop the cached centre, for a potential that changed in place.
@@ -213,15 +298,18 @@ public:
    * @c eindir_objective_t (first-member IS-A). Child terms stay inside
    * @a impl; this factory does not build a list of objectives.
    *
-   * The analytic callback is registered only when this specific instance
-   * advertises @c caps().analyticHvp. This gate is done at registration time
-   * on @a impl because @c caps() is an instance query.
+   * Each derivative callback is registered only when this specific
+   * instance advertises its bit: @c caps().analyticHvp for
+   * @c hessianVectorImpl, @c caps().adHvp for @c hessianVectorAdImpl,
+   * @c caps().analyticHessian for @c hessianImpl and @c caps().adHessian
+   * for @c hessianAdImpl. This gate is done at registration time on
+   * @a impl because @c caps() is an instance query.
    */
   template <typename Impl> static PotentialHandle from_impl(Impl &impl) {
     auto *handle = rgpot_potential_new_eindir(
         &trampoline_callback<Impl>, static_cast<void *>(&impl), nullptr, 0,
         nullptr, nullptr, nullptr, nullptr);
-    return with_analytic_hvp<Impl>(
+    return with_derivatives<Impl>(
         with_fused_settings<Impl>(PotentialHandle(handle), impl), impl);
   }
 
@@ -241,7 +329,7 @@ public:
     auto *handle = rgpot_potential_new_eindir(
         &trampoline_callback<Impl>, static_cast<void *>(&impl), nullptr,
         n_atoms, atomic_numbers, box_matrix, bounds_low, bounds_high);
-    return with_analytic_hvp<Impl>(
+    return with_derivatives<Impl>(
         with_fused_settings<Impl>(PotentialHandle(handle), impl), impl);
   }
 
@@ -421,17 +509,16 @@ private:
     }
   }
 
-  /// @c HessianVectorCallback over @c Impl::hessianVectorImpl.
-  template <typename Impl>
-  static rgpot_status_t
-  hvp_trampoline(void *user_data, const rgpot_force_input_t *input,
-                 const double *direction, double *hv_out) {
+  /// Run @a body on the legacy input of @a input, with the exceptions of a
+  /// potential turned into a status and a stored message.
+  template <typename Body>
+  static rgpot_status_t guarded(const rgpot_force_input_t *input,
+                                const char *unknown, Body &&body) {
     try {
       if (!input->positions) {
         return RGPOT_INVALID_PARAMETER;
       }
-      const auto *self = static_cast<const Impl *>(user_data);
-      self->hessianVectorImpl(legacy_input(input), direction, hv_out);
+      body(legacy_input(input));
       return RGPOT_SUCCESS;
     } catch (const ::rgpot::SccNotConverged &e) {
       rgpot_set_last_error(e.what());
@@ -440,9 +527,58 @@ private:
       rgpot_set_last_error(e.what());
       return RGPOT_INTERNAL_ERROR;
     } catch (...) {
-      rgpot_set_last_error("unknown exception in the potential HVP");
+      rgpot_set_last_error(unknown);
       return RGPOT_INTERNAL_ERROR;
     }
+  }
+
+  /// @c HessianVectorCallback over @c Impl::hessianVectorImpl.
+  template <typename Impl>
+  static rgpot_status_t
+  hvp_trampoline(void *user_data, const rgpot_force_input_t *input,
+                 const double *direction, double *hv_out) {
+    const auto *self = static_cast<const Impl *>(user_data);
+    return guarded(input, "unknown exception in the potential HVP",
+                   [&](const ::rgpot::ForceInput &in) {
+                     self->hessianVectorImpl(in, direction, hv_out);
+                   });
+  }
+
+  /// @c HessianVectorCallback over @c Impl::hessianVectorAdImpl.
+  template <typename Impl>
+  static rgpot_status_t
+  ad_hvp_trampoline(void *user_data, const rgpot_force_input_t *input,
+                    const double *direction, double *hv_out) {
+    const auto *self = static_cast<const Impl *>(user_data);
+    return guarded(input, "unknown exception in the potential dual-number HVP",
+                   [&](const ::rgpot::ForceInput &in) {
+                     self->hessianVectorAdImpl(in, direction, hv_out);
+                   });
+  }
+
+  /// @c HessianCallback over @c Impl::hessianImpl.
+  template <typename Impl>
+  static rgpot_status_t hessian_trampoline(void *user_data,
+                                           const rgpot_force_input_t *input,
+                                           double *hessian_out) {
+    const auto *self = static_cast<const Impl *>(user_data);
+    return guarded(input, "unknown exception in the potential Hessian",
+                   [&](const ::rgpot::ForceInput &in) {
+                     self->hessianImpl(in, hessian_out);
+                   });
+  }
+
+  /// @c HessianCallback over @c Impl::hessianAdImpl.
+  template <typename Impl>
+  static rgpot_status_t ad_hessian_trampoline(void *user_data,
+                                              const rgpot_force_input_t *input,
+                                              double *hessian_out) {
+    const auto *self = static_cast<const Impl *>(user_data);
+    return guarded(input,
+                   "unknown exception in the potential dual-number Hessian",
+                   [&](const ::rgpot::ForceInput &in) {
+                     self->hessianAdImpl(in, hessian_out);
+                   });
   }
 
   /// Install the settings @a impl reports, when it reports any.
@@ -457,19 +593,50 @@ private:
     return handle;
   }
 
+  /// Register the derivative callbacks whose caps() bit @a impl sets.
   template <typename Impl>
-  static PotentialHandle with_analytic_hvp(PotentialHandle handle,
-                                           const Impl &impl) {
+  static PotentialHandle with_derivatives(PotentialHandle handle,
+                                          const Impl &impl) {
+    if (handle.raw() == nullptr) {
+      return handle;
+    }
     if constexpr (::rgpot::AnalyticHessianVector<Impl>) {
-      if (handle.raw() != nullptr && impl.caps().analyticHvp) {
-        if constexpr (requires(const Impl &self, const ::rgpot::ForceInput &in,
-                               const double *direction, double *product) {
-                        self.hessianVectorImpl(in, direction, product);
-                      }) {
+      if (impl.caps().analyticHvp) {
+        if constexpr (::rgpot::AnalyticHessianVectorKernel<Impl>) {
           handle.set_hvp_callback(&hvp_trampoline<Impl>);
         } else {
           throw std::invalid_argument("from_impl: caps().analyticHvp is true "
                                       "but hessianVectorImpl is missing");
+        }
+      }
+    }
+    if constexpr (::rgpot::AdHessianVector<Impl>) {
+      if (impl.caps().adHvp) {
+        if constexpr (::rgpot::AdHessianVectorKernel<Impl>) {
+          handle.set_ad_hvp_callback(&ad_hvp_trampoline<Impl>);
+        } else {
+          throw std::invalid_argument("from_impl: caps().adHvp is true "
+                                      "but hessianVectorAdImpl is missing");
+        }
+      }
+    }
+    if constexpr (::rgpot::AnalyticHessian<Impl>) {
+      if (impl.caps().analyticHessian) {
+        if constexpr (::rgpot::AnalyticHessianKernel<Impl>) {
+          handle.set_hessian_callback(&hessian_trampoline<Impl>);
+        } else {
+          throw std::invalid_argument("from_impl: caps().analyticHessian is "
+                                      "true but hessianImpl is missing");
+        }
+      }
+    }
+    if constexpr (::rgpot::AdHessian<Impl>) {
+      if (impl.caps().adHessian) {
+        if constexpr (::rgpot::AdHessianKernel<Impl>) {
+          handle.set_ad_hessian_callback(&ad_hessian_trampoline<Impl>);
+        } else {
+          throw std::invalid_argument("from_impl: caps().adHessian is true "
+                                      "but hessianAdImpl is missing");
         }
       }
     }

@@ -6,7 +6,8 @@ Meson and CMake read that constant. kCxxSoversionTable records
 header_stamp().hash for each platform tag, without RGPOT_HAS_CACHE.
 The ledger records the soversion and a fingerprint of the stamp's inputs.
 The fingerprint is platform-independent. Shipped ledger lines are
-immutable: a layout change appends a higher soversion.
+immutable: a layout change appends a higher soversion. A line is shipped
+once it is on main, whatever branch a pull request targets.
 
 A live stamp is checked only when its tag is in the table and features
 is 0. An unlisted platform prints the stamp and passes. Cache builds
@@ -299,13 +300,9 @@ def git_show(rev: str, path: str) -> str | None:
 
 
 def base_rev() -> str | None:
-    candidates = []
     import os
 
-    if os.environ.get("GITHUB_BASE_REF"):
-        candidates.append("origin/" + os.environ["GITHUB_BASE_REF"])
-    candidates.extend(["origin/main", "main"])
-    for rev in candidates:
+    for rev in ["origin/main", "main"]:
         if (
             subprocess.run(
                 ["git", "-C", str(ROOT), "rev-parse", "--verify", "--quiet", rev],
@@ -316,7 +313,15 @@ def base_rev() -> str | None:
             return rev
     if os.environ.get("CI") == "true":
         subprocess.run(
-            ["git", "-C", str(ROOT), "fetch", "--depth=1", "origin", "main"],
+            [
+                "git",
+                "-C",
+                str(ROOT),
+                "fetch",
+                "--depth=1",
+                "origin",
+                "+refs/heads/main:refs/remotes/origin/main",
+            ],
             capture_output=True,
         )
         if (

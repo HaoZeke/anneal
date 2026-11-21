@@ -14,7 +14,9 @@
 //! rgpot_tensor_free(centre.forces);
 //! ```
 //!
-//! See [`crate::hvp`] for the schemes and the centre cache.
+//! See [`crate::hvp`] for the schemes and the centre cache, and
+//! [`crate::c_api::hessian`] for dense Hessians and the derivative
+//! capabilities and counts.
 
 use std::os::raw::c_void;
 
@@ -24,7 +26,7 @@ use crate::status::{catch_unwind, rgpot_status_t, set_last_error};
 use crate::tensor::create_owned_f64_tensor;
 use crate::types::{rgpot_force_input_t, rgpot_force_out_t};
 
-fn fail(err: HvpError) -> rgpot_status_t {
+pub(crate) fn fail(err: HvpError) -> rgpot_status_t {
     match &err {
         HvpError::Invalid(why) => set_last_error(why),
         HvpError::Callback { message, .. } => set_last_error(message),
@@ -32,7 +34,7 @@ fn fail(err: HvpError) -> rgpot_status_t {
     err.status()
 }
 
-fn refuse(msg: &str) -> rgpot_status_t {
+pub(crate) fn refuse(msg: &str) -> rgpot_status_t {
     set_last_error(msg);
     rgpot_status_t::RGPOT_INVALID_PARAMETER
 }
@@ -70,6 +72,78 @@ pub unsafe extern "C" fn rgpot_potential_set_hvp_callback(
     rgpot_status_t::RGPOT_SUCCESS
 }
 
+/// Register `callback` as the dual-number Hessian-vector product of `pot`,
+/// or clear it with NULL.
+///
+/// It has the signature of the analytic callback. `RGPOT_HVP_AD` calls it,
+/// and `RGPOT_HVP_EXACT` when no analytic callback is registered;
+/// `RGPOT_HVP_AUTO` never does.
+///
+/// # Safety
+///
+/// As for `rgpot_potential_set_hvp_callback`.
+#[no_mangle]
+pub unsafe extern "C" fn rgpot_potential_set_ad_hvp_callback(
+    pot: *const rgpot_potential_t,
+    callback: Option<
+        unsafe extern "C" fn(
+            user_data: *mut c_void,
+            input: *const rgpot_force_input_t,
+            direction: *const f64,
+            hv_out: *mut f64,
+        ) -> rgpot_status_t,
+    >,
+) -> rgpot_status_t {
+    let callback: Option<HessianVectorCallback> = callback;
+    if pot.is_null() {
+        return refuse("rgpot_potential_set_ad_hvp_callback: pot is NULL");
+    }
+    unsafe { &*pot }.set_ad_hessian_vector_callback(callback);
+    rgpot_status_t::RGPOT_SUCCESS
+}
+
+/// The checks and the call shared by `rgpot_potential_hvp` and
+/// `rgpot_potential_hvp_resolved`, `name` naming the caller in refusals.
+unsafe fn hvp_call(
+    name: &str,
+    pot: *const rgpot_potential_t,
+    input: *const rgpot_force_input_t,
+    direction: *const f64,
+    step: f64,
+    scheme: i32,
+    hv_out: *mut f64,
+) -> Result<rgpot_hvp_scheme_t, rgpot_status_t> {
+    if pot.is_null() {
+        return Err(refuse(&format!("{name}: pot is NULL")));
+    }
+    if input.is_null() {
+        return Err(refuse(&format!("{name}: input is NULL")));
+    }
+    if direction.is_null() || hv_out.is_null() {
+        return Err(refuse(&format!("{name}: direction or hv_out is NULL")));
+    }
+    let Some(scheme) = rgpot_hvp_scheme_t::from_raw(scheme) else {
+        return Err(refuse(&format!("{name}: unknown scheme {scheme}")));
+    };
+    let input = unsafe { &*input };
+    let Some(dim) = unsafe { input.n_atoms() }
+        .and_then(|n| n.checked_mul(3))
+        .filter(|&dim| dim <= isize::MAX as usize / std::mem::size_of::<f64>())
+    else {
+        return Err(refuse(&format!(
+            "{name}: positions tensor is NULL or too large"
+        )));
+    };
+    let bytes = dim * std::mem::size_of::<f64>();
+    let (d, o) = (direction as usize, hv_out as usize);
+    if dim > 0 && d < o.saturating_add(bytes) && o < d.saturating_add(bytes) {
+        return Err(refuse(&format!("{name}: direction and hv_out overlap")));
+    }
+    let direction = unsafe { std::slice::from_raw_parts(direction, dim) };
+    let hv_out = unsafe { std::slice::from_raw_parts_mut(hv_out, dim) };
+    unsafe { (*pot).hessian_vector_resolved(input, direction, step, scheme, hv_out) }.map_err(fail)
+}
+
 /// Write the Hessian-vector product `H direction` at the geometry of
 /// `input` to `hv_out`.
 ///
@@ -88,19 +162,27 @@ pub unsafe extern "C" fn rgpot_potential_set_hvp_callback(
 ///   force calls, error `O(h^2)`.
 /// - `RGPOT_HVP_ANALYTIC`: the registered callback; `RGPOT_INVALID_PARAMETER`
 ///   when none is registered.
+/// - `RGPOT_HVP_AD`: the registered dual-number callback;
+///   `RGPOT_INVALID_PARAMETER` when none is registered.
+/// - `RGPOT_HVP_EXACT`: the analytic callback, else the dual-number one;
+///   `RGPOT_INVALID_PARAMETER` when neither is registered, without a call.
 ///
 /// `step` is `h`, a length in the units of the positions; 0 selects
 /// `RGPOT_HVP_DEFAULT_STEP`. A zero direction writes zeros without a call.
-/// A failing force callback's status is returned with its own
-/// `rgpot_last_error` message.
+/// A failing callback's status is returned, and `rgpot_last_error` holds
+/// the message the callback stored during the call or, when it stored
+/// none, one that names the status. The scheme that ran is counted in
+/// `rgpot_potential_derivative_counts`; `rgpot_potential_hvp_resolved`
+/// also returns it.
 ///
 /// # Safety
 ///
-/// NULL pointers, an unknown scheme, a non-positive step and overlapping
-/// buffers return `RGPOT_INVALID_PARAMETER`. Otherwise `pot` must be a live
-/// handle, `input` must point to a valid `rgpot_force_input_t` whose tensors
-/// stay alive for the call, and `direction` and `hv_out` must point to
-/// `3 * n_atoms` readable and writable doubles.
+/// NULL pointers, an unknown scheme, a negative or non-finite step and
+/// overlapping buffers return `RGPOT_INVALID_PARAMETER`. Otherwise `pot`
+/// must be a live handle, `input` must point to a valid
+/// `rgpot_force_input_t` whose tensors stay alive for the call, and
+/// `direction` and `hv_out` must point to `3 * n_atoms` readable and
+/// writable doubles.
 #[no_mangle]
 pub unsafe extern "C" fn rgpot_potential_hvp(
     pot: *const rgpot_potential_t,
@@ -111,32 +193,55 @@ pub unsafe extern "C" fn rgpot_potential_hvp(
     hv_out: *mut f64,
 ) -> rgpot_status_t {
     catch_unwind(std::panic::AssertUnwindSafe(|| {
-        if pot.is_null() {
-            return refuse("rgpot_potential_hvp: pot is NULL");
+        match unsafe {
+            hvp_call(
+                "rgpot_potential_hvp",
+                pot,
+                input,
+                direction,
+                step,
+                scheme,
+                hv_out,
+            )
+        } {
+            Ok(_) => rgpot_status_t::RGPOT_SUCCESS,
+            Err(status) => status,
         }
-        if input.is_null() {
-            return refuse("rgpot_potential_hvp: input is NULL");
+    }))
+}
+
+/// `rgpot_potential_hvp`, writing the scheme that computed the product to
+/// `scheme_used`.
+///
+/// `RGPOT_HVP_AUTO` reports `RGPOT_HVP_ANALYTIC` or `RGPOT_HVP_FORWARD`,
+/// `RGPOT_HVP_EXACT` reports `RGPOT_HVP_ANALYTIC` or `RGPOT_HVP_AD`, and any
+/// other scheme reports itself. `scheme_used` is written only on success.
+///
+/// # Safety
+///
+/// As for `rgpot_potential_hvp`. A NULL `scheme_used` returns
+/// `RGPOT_INVALID_PARAMETER` without a call; otherwise it must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn rgpot_potential_hvp_resolved(
+    pot: *const rgpot_potential_t,
+    input: *const rgpot_force_input_t,
+    direction: *const f64,
+    step: f64,
+    scheme: i32,
+    hv_out: *mut f64,
+    scheme_used: *mut rgpot_hvp_scheme_t,
+) -> rgpot_status_t {
+    catch_unwind(std::panic::AssertUnwindSafe(|| {
+        const NAME: &str = "rgpot_potential_hvp_resolved";
+        if scheme_used.is_null() {
+            return refuse(&format!("{NAME}: scheme_used is NULL"));
         }
-        if direction.is_null() || hv_out.is_null() {
-            return refuse("rgpot_potential_hvp: direction or hv_out is NULL");
-        }
-        let Some(scheme) = rgpot_hvp_scheme_t::from_raw(scheme) else {
-            return refuse(&format!("rgpot_potential_hvp: unknown scheme {scheme}"));
-        };
-        let input = unsafe { &*input };
-        let Some(dim) = unsafe { input.n_atoms() }.and_then(|n| n.checked_mul(3)) else {
-            return refuse("rgpot_potential_hvp: positions tensor is NULL or too large");
-        };
-        let bytes = dim * std::mem::size_of::<f64>();
-        let (d, o) = (direction as usize, hv_out as usize);
-        if dim > 0 && d < o.saturating_add(bytes) && o < d.saturating_add(bytes) {
-            return refuse("rgpot_potential_hvp: direction and hv_out overlap");
-        }
-        let direction = unsafe { std::slice::from_raw_parts(direction, dim) };
-        let hv_out = unsafe { std::slice::from_raw_parts_mut(hv_out, dim) };
-        match unsafe { (*pot).hessian_vector(input, direction, step, scheme, hv_out) } {
-            Ok(()) => rgpot_status_t::RGPOT_SUCCESS,
-            Err(err) => fail(err),
+        match unsafe { hvp_call(NAME, pot, input, direction, step, scheme, hv_out) } {
+            Ok(ran) => {
+                unsafe { scheme_used.write(ran) };
+                rgpot_status_t::RGPOT_SUCCESS
+            }
+            Err(status) => status,
         }
     }))
 }
@@ -194,7 +299,8 @@ pub unsafe extern "C" fn rgpot_potential_hvp_invalidate(pot: *const rgpot_potent
     }
 }
 
-/// Read the Hessian-vector counters of `pot` into `out`.
+/// Read the Hessian-vector counters of `pot` into `out`. The counts by
+/// scheme are in `rgpot_potential_derivative_counts`.
 ///
 /// # Safety
 ///
@@ -212,7 +318,8 @@ pub unsafe extern "C" fn rgpot_potential_hvp_counts(
     rgpot_status_t::RGPOT_SUCCESS
 }
 
-/// Zero the Hessian-vector counters of `pot`. The cached centre stays.
+/// Zero the Hessian-vector counters of `pot`, and the counts of
+/// `rgpot_potential_derivative_counts`. The cached centre stays.
 ///
 /// # Safety
 ///

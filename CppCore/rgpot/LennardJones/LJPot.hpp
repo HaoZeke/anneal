@@ -84,7 +84,10 @@ public:
   [[nodiscard]] PotCaps caps() const noexcept override {
     return {.reentrancy = Reentrancy::SharedInstance,
             .stress = true,
-            .analyticHvp = true};
+            .analyticHvp = true,
+            .analyticHessian = true,
+            .adHessian = true,
+            .adHvp = true};
   }
 
   [[nodiscard]] uint64_t paramsKey() const noexcept override {
@@ -117,6 +120,31 @@ public:
    */
   void hessianVectorImpl(const ForceInput &in, const double *v,
                          double *hv) const override;
+
+  /**
+   * @brief Dense analytic Hessian.
+   *
+   * The pairs and pair derivatives of @c hessianVectorImpl, each pair
+   * adding its block @f$K@f$ (PairHessian.hpp) to the diagonal blocks of
+   * its atoms and @f$-K@f$ to the two off-diagonal ones. @a h holds
+   * @f$(3N)^2@f$ doubles, row-major, and is written symmetric to the last
+   * bit. Coincident atoms throw @c std::domain_error.
+   */
+  void hessianImpl(const ForceInput &in, double *h) const override;
+
+  /**
+   * @brief Dense Hessian from dual numbers.
+   *
+   * The pairs of @c hessianImpl, with each block built from @f$g_s@f$ and
+   * @f$g_{ss}@f$ of @c lj::pairEnergy evaluated on @c ad::Dual2 at
+   * @f$s = r^2@f$, so the energy kernel is differentiated instead of its
+   * hand-written derivatives.
+   */
+  void hessianAdImpl(const ForceInput &in, double *h) const override;
+
+  /// @f$H v@f$ from the dual-number blocks of @c hessianAdImpl.
+  void hessianVectorAdImpl(const ForceInput &in, const double *v,
+                           double *hv) const override;
 
   /// forceImpl plus each pair energy and virial split half to each atom.
   void forcePerAtom(const ForceInput &in, ForceOut *out, const PerAtomOut &atoms) const;

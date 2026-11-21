@@ -124,8 +124,9 @@ uint32_t rgpot_version_patch(void);
 A function wrapped in the crate's panic guard returns =RGPOT_INTERNAL_ERROR= for
 a caught Rust panic and stores the panic message.
 The guarded functions are =rgpot_potential_calculate=, =rgpot_potential_hvp=,
-=rgpot_potential_hvp_centre=, =rgpot_potential_set_taylor_jet=, =rgpot_potential_taylor_jet=,
-=rgpot_ch5_2008_taylor_jet=, =rgpot_rpc_calculate= and =rgpot_rpc_server_start=.
+=rgpot_potential_hvp_resolved=, =rgpot_potential_hvp_centre=,
+=rgpot_potential_hessian=, =rgpot_potential_set_taylor_jet=,
+=rgpot_potential_taylor_jet=, =rgpot_ch5_2008_taylor_jet=, =rgpot_rpc_calculate= and =rgpot_rpc_server_start=.
 
 *** =rgpot_set_last_error=
 
@@ -164,8 +165,11 @@ The header states that the pointer is valid until the next =rgpot_*= call on the
 same thread.
 A message that contains a NUL byte is stored as
 =(error message contained interior NUL)=.
-When a callback returns an error status, =rgpot-core= stores no message of its
-own: the text is whatever the callback stored, or an older message.
+When the force callback of =rgpot_potential_calculate= returns an error status,
+=rgpot-core= stores no message of its own: the text is whatever the callback
+stored, or an older message.
+The Hessian-vector and Hessian entry points clear the message before they call a
+callback, so a failing callback that stored none is named with its status.
 
 #+attr_rgpot: compile
 #+begin_src c
@@ -652,9 +656,10 @@ enum rgpot_status_t rgpot_potential_set_peer_capabilities(const struct rgpot_pot
   =RGPOT_SUCCESS=.
   An incompatible one is recorded on the handle: =rgpot_potential_calculate=,
   =rgpot_potential_hvp=,
-  =rgpot_potential_hvp_centre=, =rgpot_potential_taylor_jet=,
-  =eindir_objective_eval= and =eindir_objective_grad= then fail before the
-  callback runs.
+  =rgpot_potential_hvp_resolved=, =rgpot_potential_hvp_centre=,
+  =rgpot_potential_hessian=,
+  =rgpot_potential_taylor_jet=, =eindir_objective_eval= and =eindir_objective_grad=
+  then fail before the callback runs.
   Either way the cached eindir result and the Hessian-vector centre are dropped.
 - Errors :: =RGPOT_INVALID_PARAMETER= with
   =rgpot_potential_set_peer_capabilities: invalid argument= for a NULL =pot= or
@@ -779,12 +784,15 @@ bits.
 - Inputs :: none; an enum passed as =int32_t=.
 - Units :: none.
 - Outputs :: =RGPOT_HVP_AUTO= (0): the analytic callback when one is registered,
-  else forward.
+  else forward; =rgpot_potential_hvp_resolved= reports which ran.
   =RGPOT_HVP_FORWARD= (1): =(F(x) - F(x + h u)) |v| / h= with =u = v / |v|=,
   =F(x)= from the cached centre.
   =RGPOT_HVP_CENTRAL= (2): =(F(x - h u) - F(x + h u)) |v| / (2 h)=, two force
   calls.
   =RGPOT_HVP_ANALYTIC= (3): the registered callback.
+  =RGPOT_HVP_AD= (4): the registered dual-number callback.
+  =RGPOT_HVP_EXACT= (5): the analytic callback, else the dual-number one; never
+  a finite difference.
 - Errors :: none; =rgpot_potential_hvp= refuses any other value.
 
 *** =rgpot_hvp_counts_t=
@@ -862,21 +870,76 @@ enum rgpot_status_t rgpot_potential_hvp(const struct rgpot_potential_t *pot,
 - Outputs :: =hv_out= holds =H direction=, =3 * n_atoms= doubles laid out like
   the positions.
   A zero =direction= writes zeros and makes no call.
-  The finite differences write =hv_out= only on success; a failing analytic
-  callback may leave it partly written.
+  The finite differences write =hv_out= only on success; a failing analytic or
+  dual-number callback may leave it partly written.
+  The scheme that ran is counted in =rgpot_potential_derivative_counts=, a zero
+  =direction= under the scheme the request resolved to.
 - Errors :: =RGPOT_INVALID_PARAMETER=, with a message naming the problem, for: a
   NULL =pot=, =input=, =direction= or
-  =hv_out=; a =scheme= outside 0 to 3; a NULL =positions= tensor or one without a shape; overlapping =direction= and =hv_out=;
-  a refused peer; a =positions= tensor that is not a CPU float64 C-contiguous
+  =hv_out=; a =scheme= outside 0 to 5; a NULL =positions= tensor, one without a shape, or one whose =3 * n_atoms=
+  doubles exceed =PTRDIFF_MAX= bytes; overlapping =direction= and =hv_out=; a
+  refused peer; a =positions= tensor that is not a CPU float64 C-contiguous
   tensor of =3 * n_atoms= finite elements; a non-null =atomic_numbers= that is
   not int32 with =n_atoms= elements, or a non-null =box_matrix= that is not
   float64 with 9 elements; a non-finite =direction= element; a negative or
-  non-finite =step=; =RGPOT_HVP_ANALYTIC= with no callback registered; a force
-  callback output that fails the checks of =PotentialCallback=; a non-finite
-  analytic output.
-  A force or analytic callback's error status is returned unchanged, and
-  =rgpot-core= stores no message for it.
+  non-finite =step=; =RGPOT_HVP_ANALYTIC= with no callback registered,
+  =RGPOT_HVP_AD= with no dual-number callback registered, or =RGPOT_HVP_EXACT=
+  with neither, each refused before any call; a force callback output that fails
+  the checks of =PotentialCallback=; a non-finite analytic output.
+  A force, analytic or dual-number callback's error status is returned
+  unchanged, and =rgpot_last_error= keeps the message the callback stored during
+  the call, or names the callback and the status when it stored none.
+  A non-finite dual-number output is refused with
+  =dual-number Hessian-vector callback: non-finite value at element <i>=.
   =RGPOT_INTERNAL_ERROR= for a caught panic.
+
+*** =rgpot_potential_hvp_resolved=
+
+#+attr_rgpot: signature
+#+begin_src c
+enum rgpot_status_t rgpot_potential_hvp_resolved(const struct rgpot_potential_t *pot,
+                                                 const struct rgpot_force_input_t *input,
+                                                 const double *direction,
+                                                 double step,
+                                                 int32_t scheme,
+                                                 double *hv_out,
+                                                 enum rgpot_hvp_scheme_t *scheme_used);
+#+end_src
+
+- Inputs :: those of =rgpot_potential_hvp=, and =scheme_used= writable.
+- Units :: those of =rgpot_potential_hvp=.
+- Outputs :: =hv_out= as for =rgpot_potential_hvp=, and =*scheme_used= the
+  scheme that computed it: =RGPOT_HVP_AUTO= reports =RGPOT_HVP_ANALYTIC= or
+  =RGPOT_HVP_FORWARD=, =RGPOT_HVP_EXACT= reports =RGPOT_HVP_ANALYTIC= or
+  =RGPOT_HVP_AD=, and any other scheme reports itself.
+  =*scheme_used= is written only on success.
+- Errors :: those of =rgpot_potential_hvp=, the messages naming
+  =rgpot_potential_hvp_resolved=, and =RGPOT_INVALID_PARAMETER= for a NULL =scheme_used=,
+  before any call.
+
+*** =rgpot_potential_set_ad_hvp_callback=
+
+#+attr_rgpot: signature
+#+begin_src c
+enum rgpot_status_t rgpot_potential_set_ad_hvp_callback(const struct rgpot_potential_t *pot,
+                                                        enum rgpot_status_t (*callback)(void *user_data,
+                                                                                        const struct rgpot_force_input_t *input,
+                                                                                        const double *direction,
+                                                                                        double *hv_out));
+#+end_src
+
+- Inputs :: =pot= a live handle; =callback= a =HessianVectorCallback= that
+  differentiates the energy with dual numbers, or NULL to clear the registered
+  one.
+- Units :: those of =HessianVectorCallback=.
+- Outputs :: the callback is stored on the handle beside the analytic one and
+  called with the handle's
+  =user_data= by =RGPOT_HVP_AD=, and by =RGPOT_HVP_EXACT= when no analytic
+  callback is registered.
+  =RGPOT_HVP_AUTO= never calls it.
+  The cached centre is kept.
+- Errors :: =RGPOT_INVALID_PARAMETER= with
+  =rgpot_potential_set_ad_hvp_callback: pot is NULL= for a NULL =pot=.
 
 *** =rgpot_potential_hvp_centre=
 
@@ -941,7 +1004,8 @@ void rgpot_potential_reset_hvp_counts(const struct rgpot_potential_t *pot);
 
 - Inputs :: =pot= NULL or a live handle.
 - Units :: none.
-- Outputs :: the four counters are set to 0; the cached centre is kept.
+- Outputs :: the four counters and those of =rgpot_potential_derivative_counts=
+  are set to 0; the cached centre is kept.
 - Errors :: none.
   NULL is a no-op.
 
@@ -964,6 +1028,214 @@ rgpot_status_t products(const rgpot_potential_t *pot,
     s = rgpot_potential_hvp(pot, input, q[i], 0.0, RGPOT_HVP_FORWARD, hq);
   }
   return s;
+}
+#+end_src
+
+** Dense Hessians
+
+The Hessian is the =3 * n_atoms= square matrix of second derivatives of the
+energy with respect to the positions, row-major, with coordinate =3 i + k= for
+axis =k= of atom =i=.
+A request names its scheme and there is no automatic one, so a Hessian is never
+differenced unless the caller asks for =RGPOT_HESSIAN_CENTRAL=.
+The callbacks live behind the =fused_cache= pointer of the handle, beside the
+Hessian-vector state.
+
+*** =rgpot_hessian_scheme_t=
+
+- Inputs :: none; an enum passed as =int32_t=.
+- Units :: none.
+- Outputs :: =RGPOT_HESSIAN_CENTRAL= (2): column =c= is
+  =(F(x - h e_c) - F(x + h e_c)) / (2 h)=, from =6 * n_atoms= force calls, and
+  the matrix written is the symmetric part of those columns.
+  =RGPOT_HESSIAN_ANALYTIC= (3): the registered Hessian callback.
+  =RGPOT_HESSIAN_AD= (4): the registered dual-number Hessian callback.
+  =RGPOT_HESSIAN_EXACT= (5): the analytic callback, else the dual-number one;
+  never a finite difference.
+  The values share the numbering of =rgpot_hvp_scheme_t=; 0 and 1 have no dense
+  meaning.
+- Errors :: none; =rgpot_potential_hessian= refuses any other value.
+
+*** =HessianCallback=
+
+#+attr_rgpot: signature
+#+begin_src c
+typedef enum rgpot_status_t (*HessianCallback)(void *user_data,
+                                               const struct rgpot_force_input_t *input,
+                                               double *hessian_out);
+#+end_src
+
+- Inputs :: the =user_data= of the handle; the geometry.
+- Units :: =hessian_out= in energy per length squared.
+- Outputs :: the callback writes the Hessian to =hessian_out=, =(3 * n_atoms)^2=
+  doubles row-major, and returns =RGPOT_SUCCESS= or an error status.
+- Errors :: =rgpot_potential_hessian= returns the callback's error status
+  unchanged, and =RGPOT_INVALID_PARAMETER= with
+  =Hessian callback: non-finite value at element <i>=, or
+  =dual-number Hessian callback: non-finite value at element <i>=, when the
+  output holds a NaN or an infinity.
+
+*** =rgpot_potential_set_hessian_callback=
+
+#+attr_rgpot: signature
+#+begin_src c
+enum rgpot_status_t rgpot_potential_set_hessian_callback(const struct rgpot_potential_t *pot,
+                                                         enum rgpot_status_t (*callback)(void *user_data,
+                                                                                         const struct rgpot_force_input_t *input,
+                                                                                         double *hessian_out));
+#+end_src
+
+- Inputs :: =pot= a live handle; =callback= a =HessianCallback=, or NULL to
+  clear the registered one.
+- Units :: none.
+- Outputs :: the callback is stored on the handle and called with the handle's
+  =user_data= by =RGPOT_HESSIAN_ANALYTIC= and =RGPOT_HESSIAN_EXACT=.
+- Errors :: =RGPOT_INVALID_PARAMETER= with
+  =rgpot_potential_set_hessian_callback: pot is NULL= for a NULL =pot=.
+
+*** =rgpot_potential_set_ad_hessian_callback=
+
+#+attr_rgpot: signature
+#+begin_src c
+enum rgpot_status_t rgpot_potential_set_ad_hessian_callback(const struct rgpot_potential_t *pot,
+                                                            enum rgpot_status_t (*callback)(void *user_data,
+                                                                                            const struct rgpot_force_input_t *input,
+                                                                                            double *hessian_out));
+#+end_src
+
+- Inputs :: =pot= a live handle; =callback= a =HessianCallback= that
+  differentiates the energy with dual numbers, or NULL to clear the registered
+  one.
+- Units :: none.
+- Outputs :: the callback is stored on the handle and called with the handle's
+  =user_data= by =RGPOT_HESSIAN_AD=, and by =RGPOT_HESSIAN_EXACT= when no
+  analytic Hessian callback is registered.
+- Errors :: =RGPOT_INVALID_PARAMETER= with
+  =rgpot_potential_set_ad_hessian_callback: pot is NULL= for a NULL =pot=.
+
+*** =rgpot_potential_hessian=
+
+#+attr_rgpot: signature
+#+begin_src c
+enum rgpot_status_t rgpot_potential_hessian(const struct rgpot_potential_t *pot,
+                                            const struct rgpot_force_input_t *input,
+                                            double step,
+                                            int32_t scheme,
+                                            double *hessian_out,
+                                            enum rgpot_hessian_scheme_t *scheme_used);
+#+end_src
+
+- Inputs :: =pot= a live handle; =input= the geometry; =step= the central
+  displacement =h=, 0 for
+  =RGPOT_HVP_DEFAULT_STEP=; =scheme= a =rgpot_hessian_scheme_t= value;
+  =hessian_out= with room for =(3 * n_atoms)^2= doubles; =scheme_used= writable.
+- Units :: =step= in the length unit of the positions; =hessian_out= in energy
+  per length squared.
+- Outputs :: =hessian_out= holds the Hessian, row-major, and =*scheme_used= the
+  scheme that computed it: =RGPOT_HESSIAN_EXACT= reports
+  =RGPOT_HESSIAN_ANALYTIC= or =RGPOT_HESSIAN_AD=, and any other scheme reports
+  itself.
+  The central force calls bypass the cached centre and are counted in
+  =hessian_force_calls= of
+  =rgpot_derivative_counts_t=, not in =rgpot_hvp_counts_t=.
+  =*scheme_used= is written only on success; on a failure the content of =hessian_out=
+  is unspecified.
+- Errors :: =RGPOT_INVALID_PARAMETER=, with a message naming the problem and
+  before any call, for: a NULL =pot=, =input=, =hessian_out= or =scheme_used=; a
+  =scheme= outside 2 to 5; a NULL =positions= tensor, or one whose
+  =(3 * n_atoms)^2= doubles exceed =PTRDIFF_MAX= bytes; a refused peer; a
+  =positions=, =atomic_numbers= or =box_matrix= tensor that fails the checks of
+  =rgpot_potential_hvp=;
+  =hessian_out= overlapping the =positions=, =atomic_numbers= or
+  =box_matrix= data; a negative or non-finite =step=; =RGPOT_HESSIAN_ANALYTIC= with no Hessian callback registered, =RGPOT_HESSIAN_AD= with no dual-number Hessian callback registered, or =RGPOT_HESSIAN_EXACT=
+  with neither.
+  =RGPOT_INVALID_PARAMETER= for a non-finite callback output, a non-finite
+  central difference (=central Hessian: non-finite value at element <i>=) or a
+  force callback output that fails the checks of =PotentialCallback=.
+  A force or Hessian callback's error status is returned unchanged.
+  For a Hessian callback, =rgpot_last_error= keeps the message the callback
+  stored during the call, or =Hessian callback returned <status>=
+  (=dual-number Hessian callback returned <status>=) when it stored none.
+  =RGPOT_INTERNAL_ERROR= for a caught panic.
+
+*** =rgpot_derivative_caps_t=
+
+- Inputs :: none; a struct filled by =rgpot_potential_derivative_caps=.
+- Units :: none; flags and counts of force calls.
+- Outputs :: =hvp_analytic= and =hvp_ad=, a Hessian-vector callback of each kind
+  is registered;
+  =hvp_fd=, forward and central products are available; =hessian_analytic= and
+  =hessian_ad=, a Hessian callback of each kind is registered; =hessian_fd=, the
+  central Hessian is available;
+  =hvp_forward_force_calls=, 1, the force calls of a forward product at the cached centre, a new centre adding one; =hvp_central_force_calls=,
+  2; =hessian_central_force_calls_per_atom=, 6.
+  The flags are =bool=, the costs =uint32_t=; an analytic or dual-number scheme
+  makes no force call.
+- Errors :: none.
+
+*** =rgpot_potential_derivative_caps=
+
+#+attr_rgpot: signature
+#+begin_src c
+enum rgpot_status_t rgpot_potential_derivative_caps(const struct rgpot_potential_t *pot,
+                                                    struct rgpot_derivative_caps_t *out);
+#+end_src
+
+- Inputs :: =pot= a live handle; =out= writable.
+- Units :: none.
+- Outputs :: =*out= holds the capabilities of the handle; the analytic and
+  dual-number flags follow the callbacks registered at the time of the call, and
+  the finite-difference flags are set for every handle.
+- Errors :: =RGPOT_INVALID_PARAMETER= with
+  =rgpot_potential_derivative_caps: NULL argument= when either pointer is NULL.
+
+*** =rgpot_derivative_counts_t=
+
+- Inputs :: none; a struct filled by =rgpot_potential_derivative_counts=.
+- Units :: none; counts, each =uint64_t=.
+- Outputs :: =hvp_forward=, =hvp_central=, =hvp_analytic= and =hvp_ad=, the
+  products each scheme answered, a zero direction under the scheme its request
+  resolved to; =hessian_central=, =hessian_analytic= and
+  =hessian_ad=, the Hessians each scheme answered; =hessian_force_calls=, the
+  force calls of central Hessians, failed ones included.
+  A refused request counts nowhere.
+- Errors :: none.
+
+*** =rgpot_potential_derivative_counts=
+
+#+attr_rgpot: signature
+#+begin_src c
+enum rgpot_status_t rgpot_potential_derivative_counts(const struct rgpot_potential_t *pot,
+                                                      struct rgpot_derivative_counts_t *out);
+#+end_src
+
+- Inputs :: =pot= a live handle; =out= writable.
+- Units :: none.
+- Outputs :: =*out= holds the counts of the handle;
+  =rgpot_potential_reset_hvp_counts= zeros them.
+- Errors :: =RGPOT_INVALID_PARAMETER= with
+  =rgpot_potential_derivative_counts: NULL argument= when either pointer is
+  NULL.
+
+#+attr_rgpot: compile
+#+begin_src c
+#include "rgpot/eindir_abi.hpp"
+#include "rgpot.h"
+
+/* The exact Hessian when the handle has one, else the central one, and
+   which ran. */
+rgpot_status_t dense(const rgpot_potential_t *pot,
+                     const rgpot_force_input_t *input, double *h,
+                     rgpot_hessian_scheme_t *used) {
+  rgpot_derivative_caps_t caps;
+  rgpot_status_t s = rgpot_potential_derivative_caps(pot, &caps);
+  if (s != RGPOT_SUCCESS) {
+    return s;
+  }
+  int scheme = (caps.hessian_analytic || caps.hessian_ad)
+                   ? RGPOT_HESSIAN_EXACT
+                   : RGPOT_HESSIAN_CENTRAL;
+  return rgpot_potential_hessian(pot, input, 0.0, scheme, h, used);
 }
 #+end_src
 

@@ -25,6 +25,7 @@
 
 #include "rgpot/Morse/MorsePot.hpp"
 #include "rgpot/Morse/detail/MorseSplitSnapshot.hpp"
+#include "rgpot/PairHessian.hpp"
 #include "rgpot/PerAtom.hpp"
 #include "rgpot/Slices.hpp"
 #include "rgpot/nlist/NeighbourList.hpp"
@@ -874,6 +875,33 @@ void MorsePot::updateNeighbours(const ForceInput &in) const {
                      nlist::Image::Round, mode, periodic);
 }
 
+namespace {
+
+struct MorseRadial {
+  double d1; //!< phi'(r).
+  double d2; //!< phi''(r).
+};
+
+/// Radial derivatives of the shifted pair term, or of the switched one when
+/// @a sw is set.
+MorseRadial morseRadial(double r, double De, double a, double re,
+                        const QuinticSwitch *sw) noexcept {
+  const double twoDeA = 2.0 * De * a;
+  const double e = simd::exp_fixed(-a * (r - re));
+  double d1 = twoDeA * e * (1.0 - e);
+  double d2 = twoDeA * a * e * (2.0 * e - 1.0);
+  if (sw != nullptr) {
+    const double bare = De * (1.0 - e) * (1.0 - e) - De;
+    const auto s = (*sw)(r);
+    const double s2 = sw->d2sdr2(r);
+    d2 = d2 * s.s + 2.0 * d1 * s.dsdr + bare * s2;
+    d1 = d1 * s.s + bare * s.dsdr;
+  }
+  return {d1, d2};
+}
+
+} // namespace
+
 /**
  * @details
  *
@@ -892,8 +920,7 @@ void MorsePot::hessianVectorImpl(const ForceInput &in, const double *v,
   }
   updateNeighbours(in);
   const double cutoff2 = cuttOffR * cuttOffR;
-  const double twoDeA = 2.0 * De * a;
-  const bool switched = m_config.switch_width != 0.0;
+  const QuinticSwitch *sw = m_config.switch_width != 0.0 ? &m_switch : nullptr;
   nlist::visitHalf(neighbours_, 0, N,
                    [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz,
                        double r2) {
@@ -901,16 +928,7 @@ void MorsePot::hessianVectorImpl(const ForceInput &in, const double *v,
       return;
     }
     const double r = std::sqrt(r2);
-    const double e = simd::exp_fixed(-a * (r - re));
-    double d1 = twoDeA * e * (1.0 - e);
-    double d2 = twoDeA * a * e * (2.0 * e - 1.0);
-    if (switched) {
-      const double bare = De * (1.0 - e) * (1.0 - e) - De;
-      const auto s = m_switch(r);
-      const double s2 = m_switch.d2sdr2(r);
-      d2 = d2 * s.s + 2.0 * d1 * s.dsdr + bare * s2;
-      d1 = d1 * s.s + bare * s.dsdr;
-    }
+    const auto [d1, d2] = morseRadial(r, De, a, re, sw);
     const double inv_r = 1.0 / r;
     const double ux = dx * inv_r;
     const double uy = dy * inv_r;
@@ -934,6 +952,36 @@ void MorsePot::hessianVectorImpl(const ForceInput &in, const double *v,
     hj[1] -= ky;
     hj[2] -= kz;
   });
+}
+
+/**
+ * @details
+ *
+ * The blocks are @c pair_hessian::radial of the @f$\phi'@f$ and
+ * @f$\phi''@f$ that @c hessianVectorImpl contracts with the direction.
+ */
+void MorsePot::hessianImpl(const ForceInput &in, double *h) const {
+  const std::size_t dim = 3 * in.nAtoms;
+  std::fill_n(h, dim * dim, 0.0);
+  if (in.nAtoms < 2 || cuttOffR <= 0.0) {
+    return;
+  }
+  updateNeighbours(in);
+  const double cutoff2 = cuttOffR * cuttOffR;
+  const QuinticSwitch *sw = m_config.switch_width != 0.0 ? &m_switch : nullptr;
+  nlist::visitHalf(neighbours_, 0, static_cast<long>(in.nAtoms),
+                   [&](std::int32_t i, std::int32_t j, double dx, double dy,
+                       double dz, double r2) {
+                     if (!(i < j) || !(r2 > 0.0) || r2 > cutoff2) {
+                       return;
+                     }
+                     const double r = std::sqrt(r2);
+                     const auto [d1, d2] = morseRadial(r, De, a, re, sw);
+                     pair_hessian::scatter(
+                         pair_hessian::radial(d1, d2, dx, dy, dz, 1.0 / r),
+                         static_cast<std::size_t>(i),
+                         static_cast<std::size_t>(j), dim, h);
+                   });
 }
 
 namespace detail {

@@ -25,12 +25,16 @@
 //!   calculate, free.
 //! - [`eam_table`] — Constructor of the tabulated EAM potential handle.
 //! - [`hvp`] — Hessian-vector products of a potential handle: the product,
-//!   the cached centre, the analytic callback and the counters.
+//!   the cached centre, the analytic and dual-number callbacks and the
+//!   counters.
+//! - [`hessian`] — Dense Hessians of a potential handle, their callbacks,
+//!   and the derivative capabilities and counts of the handle.
 //! - [`jet`] — Validated Taylor jets of a potential handle and their callback.
 //! - [`rpc`] — RPC client functions (feature-gated on `rpc`): connect,
 //!   calculate, disconnect.
 
 pub mod eam_table;
+pub mod hessian;
 pub mod hvp;
 pub mod jet;
 pub mod potential;

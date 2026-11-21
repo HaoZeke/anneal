@@ -1,0 +1,1 @@
+`check_cxx_soversion.py` compares the soversion ledger with `main` for every pull request, as the ABI guide states, so a pull request into `develop` may edit the soversion line `develop` has not released. In a CI clone without `main`, its fallback fetch now writes `origin/main`, so the comparison runs instead of being skipped.

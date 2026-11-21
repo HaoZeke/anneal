@@ -523,6 +523,7 @@ CPP_SKIP_DIRS = ("CppCore/rgpot/rpc/",)
 # document them once.
 CPP_BASE_MEMBERS = {
     "forceImpl", "forceBatchImpl", "forceBatch", "caps", "hessianVectorImpl", "setCache",
+    "hessianImpl", "hessianAdImpl", "hessianVectorAdImpl",
 }
 
 
