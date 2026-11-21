@@ -124,8 +124,9 @@ uint32_t rgpot_version_patch(void);
 A function wrapped in the crate's panic guard returns =RGPOT_INTERNAL_ERROR= for
 a caught Rust panic and stores the panic message.
 The guarded functions are =rgpot_potential_calculate=, =rgpot_potential_hvp=,
-=rgpot_potential_hvp_centre=, =rgpot_potential_set_taylor_jet=, =rgpot_potential_taylor_jet=,
-=rgpot_ch5_2008_taylor_jet=, =rgpot_rpc_calculate= and =rgpot_rpc_server_start=.
+=rgpot_potential_hvp_resolved=, =rgpot_potential_hvp_centre=,
+=rgpot_potential_hessian=, =rgpot_potential_set_taylor_jet=,
+=rgpot_potential_taylor_jet=, =rgpot_ch5_2008_taylor_jet=, =rgpot_rpc_calculate= and =rgpot_rpc_server_start=.
 
 *** =rgpot_set_last_error=
 
@@ -652,9 +653,10 @@ enum rgpot_status_t rgpot_potential_set_peer_capabilities(const struct rgpot_pot
   =RGPOT_SUCCESS=.
   An incompatible one is recorded on the handle: =rgpot_potential_calculate=,
   =rgpot_potential_hvp=,
-  =rgpot_potential_hvp_centre=, =rgpot_potential_taylor_jet=,
-  =eindir_objective_eval= and =eindir_objective_grad= then fail before the
-  callback runs.
+  =rgpot_potential_hvp_resolved=, =rgpot_potential_hvp_centre=,
+  =rgpot_potential_hessian=,
+  =rgpot_potential_taylor_jet=, =eindir_objective_eval= and =eindir_objective_grad=
+  then fail before the callback runs.
   Either way the cached eindir result and the Hessian-vector centre are dropped.
 - Errors :: =RGPOT_INVALID_PARAMETER= with
   =rgpot_potential_set_peer_capabilities: invalid argument= for a NULL =pot= or
@@ -1138,11 +1140,10 @@ enum rgpot_status_t rgpot_potential_hessian(const struct rgpot_potential_t *pot,
   before any call, for: a NULL =pot=, =input=, =hessian_out= or =scheme_used=; a
   =scheme= outside 2 to 5; a NULL =positions= tensor; a refused peer; a
   =positions=, =atomic_numbers= or =box_matrix= tensor that fails the checks of
-  =rgpot_potential_hvp=; =hessian_out= overlapping the =positions=,
-  =atomic_numbers= or =box_matrix= data; a negative or non-finite =step=;
-  =RGPOT_HESSIAN_ANALYTIC= with no Hessian callback registered,
-  =RGPOT_HESSIAN_AD= with no dual-number Hessian callback registered, or
-  =RGPOT_HESSIAN_EXACT= with neither.
+  =rgpot_potential_hvp=;
+  =hessian_out= overlapping the =positions=, =atomic_numbers= or
+  =box_matrix= data; a negative or non-finite =step=; =RGPOT_HESSIAN_ANALYTIC= with no Hessian callback registered, =RGPOT_HESSIAN_AD= with no dual-number Hessian callback registered, or =RGPOT_HESSIAN_EXACT=
+  with neither.
   =RGPOT_INVALID_PARAMETER= for a non-finite callback output, a non-finite
   central difference (=central Hessian: non-finite value at element <i>=) or a
   force callback output that fails the checks of =PotentialCallback=.
