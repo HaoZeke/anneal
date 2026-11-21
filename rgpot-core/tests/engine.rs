@@ -2,6 +2,7 @@
 
 use std::ffi::c_int;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use rgpot_core::engine::{
@@ -411,6 +412,150 @@ fn failed_callback_replacement_keeps_old_registration_and_none_passes_null() {
         )
         .expect("harmonic force after clearing callbacks");
     assert_eq!(answer.energy.to_bits(), 1.25f64.to_bits());
+}
+
+/// An oracle that reports when it is dropped, and can panic when it is.
+struct Tracked {
+    dropped: Arc<AtomicBool>,
+    oracle_calls: Arc<AtomicUsize>,
+    panic_on_drop: bool,
+}
+
+impl Tracked {
+    fn new(panic_on_drop: bool) -> (Self, Arc<AtomicBool>, Arc<AtomicUsize>) {
+        let dropped = Arc::new(AtomicBool::new(false));
+        let oracle_calls = Arc::new(AtomicUsize::new(0));
+        let tracked = Self {
+            dropped: Arc::clone(&dropped),
+            oracle_calls: Arc::clone(&oracle_calls),
+            panic_on_drop,
+        };
+        (tracked, dropped, oracle_calls)
+    }
+}
+
+impl EngineCallbacks for Tracked {
+    fn oracle(&mut self, request: &EngineRequest<'_>) -> Result<EngineEvaluation, EngineFailure> {
+        self.oracle_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(EngineEvaluation {
+            energy: request.positions.iter().sum(),
+            forces: request.positions.iter().map(|value| -*value).collect(),
+        })
+    }
+}
+
+impl Drop for Tracked {
+    fn drop(&mut self) {
+        self.dropped.store(true, Ordering::SeqCst);
+        if self.panic_on_drop && !std::thread::panicking() {
+            panic!("callback destructor panic for fixture");
+        }
+    }
+}
+
+fn force_one(session: &mut EngineSession) -> Result<EngineEvaluation, EngineError> {
+    session.force(
+        &EngineRequest {
+            positions: &[1.0, 2.0, 3.0],
+            atomic_numbers: &[1],
+            box_matrix: &CELL,
+        },
+        None,
+    )
+}
+
+#[test]
+fn a_panicking_destructor_of_replaced_callbacks_does_not_unwind_out_of_the_swap() {
+    let path = build(
+        "harmonic_callback_replacement_destructor",
+        &["ACCEPT_CALLBACK_REPLACEMENT"],
+    );
+    let (old, old_dropped, _) = Tracked::new(true);
+    let (new, new_dropped, new_calls) = Tracked::new(false);
+    let mut session = load_session(&path);
+    session
+        .set_callbacks(Some(Box::new(old)))
+        .expect("set initial callbacks");
+
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        session.set_callbacks(Some(Box::new(new)))
+    }));
+    let error = outcome
+        .expect("the destructor panic must not unwind out of set_callbacks")
+        .expect_err("a panicking destructor is reported");
+    assert_eq!(
+        error,
+        EngineError::Fatal {
+            code: -1,
+            message: "callback destructor panicked".into(),
+        }
+    );
+    assert!(old_dropped.load(Ordering::SeqCst));
+    assert!(
+        !new_dropped.load(Ordering::SeqCst),
+        "the registered replacement must stay owned by the session"
+    );
+    assert_eq!(force_one(&mut session), Err(error));
+    assert_eq!(new_calls.load(Ordering::SeqCst), 0);
+
+    let dropped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || drop(session)));
+    assert!(dropped.is_ok(), "dropping the session must not panic");
+    assert!(new_dropped.load(Ordering::SeqCst));
+}
+
+#[test]
+fn clearing_callbacks_whose_destructor_panics_is_contained_and_reported() {
+    let path = build("harmonic_callback_clear_destructor", &[]);
+    let (old, old_dropped, _) = Tracked::new(true);
+    let mut session = load_session(&path);
+    session
+        .set_callbacks(Some(Box::new(old)))
+        .expect("set initial callbacks");
+
+    let outcome =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| session.set_callbacks(None)));
+    let error = outcome
+        .expect("the destructor panic must not unwind out of set_callbacks")
+        .expect_err("a panicking destructor is reported");
+    assert!(matches!(error, EngineError::Fatal { code: -1, .. }));
+    assert!(old_dropped.load(Ordering::SeqCst));
+    assert_eq!(null_callback_clears(&path), 1);
+}
+
+#[test]
+fn a_refused_callback_context_stays_alive_until_the_engine_is_destroyed() {
+    let path = build(
+        "harmonic_callback_refused_retained",
+        &["RETAIN_REFUSED_CALLBACKS"],
+    );
+    let observer = FixtureObserver::open(&path);
+    let (old, old_dropped, old_calls) = Tracked::new(false);
+    let (refused, refused_dropped, refused_calls) = Tracked::new(true);
+    let mut session = load_session(&path);
+    session
+        .set_callbacks(Some(Box::new(old)))
+        .expect("set initial callbacks");
+    session
+        .set_callbacks(Some(Box::new(refused)))
+        .expect_err("the fixture refuses the replacement");
+
+    assert!(
+        !refused_dropped.load(Ordering::SeqCst),
+        "an engine that kept the refused context must not see it freed"
+    );
+    force_one(&mut session).expect("the engine evaluates through the context it kept");
+    assert_eq!(old_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(refused_calls.load(Ordering::SeqCst), 1);
+    assert!(!old_dropped.load(Ordering::SeqCst));
+
+    let dropped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || drop(session)));
+    assert!(
+        dropped.is_ok(),
+        "a panicking destructor must not escape the drop"
+    );
+    assert_eq!(observer.destroyed(), 1);
+    assert!(refused_dropped.load(Ordering::SeqCst));
+    assert!(old_dropped.load(Ordering::SeqCst));
 }
 
 struct PanicOracle;

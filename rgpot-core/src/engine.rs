@@ -1344,10 +1344,35 @@ unsafe extern "C" fn model_update_trampoline(ctx: *mut c_void, model_state: u64)
     }
 }
 
+/// Callback states an engine refused, kept until the engine is destroyed.
+///
+/// A refused `rgpot_engine_set_callbacks` call must retain nothing, but a
+/// 1.5 engine written before the header said so may have kept the context it
+/// rejected. Freeing it would leave that engine holding a dangling pointer, so
+/// the session keeps each refused state alive until `rgpot_engine_destroy` has
+/// run. A destructor that panics is contained here: it cannot unwind out of
+/// the session's own drop.
+#[derive(Default)]
+// The boxes are the point: an engine holds the address of each state.
+#[allow(clippy::vec_box)]
+struct RefusedCallbacks(Vec<Box<CallbackState>>);
+
+impl Drop for RefusedCallbacks {
+    fn drop(&mut self) {
+        for state in self.0.drain(..) {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || drop(state)));
+        }
+    }
+}
+
 /// Owning session over one version-checked engine instance.
+///
+/// The fields drop in order: the native engine is destroyed first, so no
+/// native callback can reach a context after it is freed.
 pub struct EngineSession {
     engine: EnginePotential,
     callbacks: Option<Box<CallbackState>>,
+    refused: RefusedCallbacks,
 }
 
 impl EngineSession {
@@ -1369,6 +1394,7 @@ impl EngineSession {
         Ok(Self {
             engine,
             callbacks: None,
+            refused: RefusedCallbacks::default(),
         })
     }
 
@@ -1405,9 +1431,13 @@ impl EngineSession {
     /// Register owned learning-engine callbacks, or clear them with `None`.
     ///
     /// `None` is represented by a null callback-table pointer. If native
-    /// replacement fails, the previous owned callbacks remain registered.
+    /// replacement fails, the previous owned callbacks remain registered and
+    /// the refused ones are kept alive until the engine is destroyed, in case
+    /// an older engine retained them.
     /// A failure the previous callbacks recorded and no call has reported yet
-    /// is reported here, since a successful replacement drops them.
+    /// is reported here, since a successful replacement drops them. So is a
+    /// panic in their destructor, which poisons the session like any other
+    /// callback panic.
     pub fn set_callbacks(
         &mut self,
         callbacks: Option<Box<dyn EngineCallbacks>>,
@@ -1452,10 +1482,24 @@ impl EngineSession {
             keep_decisive(&mut failure, replacement);
         }
         if code == 0 {
-            // The native side now owns a copy of `raw`, so keep its context
-            // alive even if a synchronously reported callback failure poisons
-            // the session.
-            self.callbacks = next;
+            // Install the replacement before the old state is dropped, so a
+            // destructor that panics cannot leave the engine holding a
+            // context the session no longer owns.
+            let previous = std::mem::replace(&mut self.callbacks, next);
+            let dropped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                drop(previous);
+            }));
+            if dropped.is_err() {
+                keep_decisive(
+                    &mut failure,
+                    EngineFailure {
+                        status: PANIC_STATUS,
+                        message: "callback destructor panicked".into(),
+                    },
+                );
+            }
+        } else if let Some(refused) = next {
+            self.refused.0.push(refused);
         }
         self.engine.settle(code, failure)
     }

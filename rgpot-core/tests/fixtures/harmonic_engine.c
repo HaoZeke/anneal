@@ -2,7 +2,10 @@
  * E = k/2 sum x^2 over all coordinates, F = -k x. The create message is one
  * native-endian double, k. An atomic number of zero fails the evaluation with
  * a recoverable code, a negative one with a fatal code. Compile definitions
- * drop symbols or change the ABI major. */
+ * drop symbols or change the ABI major. ACCEPT_CALLBACK_REPLACEMENT makes a
+ * second callback registration succeed. RETAIN_REFUSED_CALLBACKS makes the
+ * refused one stay registered although the call fails, as an engine written
+ * before the header forbade it might. */
 #include "rgpot/engine_c_abi.h"
 
 #include <math.h>
@@ -227,10 +230,15 @@ int rgpot_engine_set_callbacks(RgpotEnginePot *pot,
     memset(&pot->callbacks, 0, sizeof pot->callbacks);
     return RGPOT_ENGINE_OK;
   }
+#ifndef ACCEPT_CALLBACK_REPLACEMENT
   if (pot->callbacks.oracle != NULL) {
     snprintf(pot->error, sizeof pot->error, "callback replacement refused");
+#ifdef RETAIN_REFUSED_CALLBACKS
+    pot->callbacks = *callbacks;
+#endif
     return RGPOT_ENGINE_ERR_EVAL;
   }
+#endif
   pot->callbacks = *callbacks;
   return RGPOT_ENGINE_OK;
 }
