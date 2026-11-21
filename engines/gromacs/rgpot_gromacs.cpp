@@ -411,7 +411,7 @@ int decode_default_one(std::uint32_t wire) {
 // The single-segment Cap'n Proto framing `capnp encode` writes and
 // FlatArrayMessageReader accepts. Returns the root struct's data section.
 bool root_data(const std::string &config, const unsigned char **data,
-               std::uint32_t *data_words, std::uint32_t *pointer_words) {
+               std::uint32_t *data_words) {
   if (config.size() < 16 || config.size() % 8 != 0) {
     return false;
   }
@@ -430,23 +430,22 @@ bool root_data(const std::string &config, const unsigned char **data,
   }
   const std::uint32_t offset = static_cast<std::uint32_t>((ptr >> 2) & 0x3fffffffu);
   const std::uint32_t dwords = static_cast<std::uint32_t>((ptr >> 32) & 0xffffu);
-  const std::uint32_t pwords = static_cast<std::uint32_t>((ptr >> 48) & 0xffffu);
   const std::size_t start = 16 + static_cast<std::size_t>(offset) * 8;
   if (start + static_cast<std::size_t>(dwords) * 8 > config.size()) {
     return false;
   }
   *data = bytes + start;
   *data_words = dwords;
-  *pointer_words = pwords;
   return true;
 }
 
 // Spin the engine CONFIG set, when it differs from the schema default of 1.
 // rgpot_engine_set_charge_spin takes charge and spin together and the ABI
-// has no getter, so a qmi charge is applied with this value. The sizes are
-// the current Potentials.capnp structs: UmaParams and NWChemParams keep the
-// spin in the high half of data word 0, and MetatomicParams keeps it in the
-// low half of data word 4. Skala's configuration is NWChemParams. The test
+// has no getter, so a qmi charge is applied with this value. UmaParams and
+// NWChemParams keep the spin in the high half of data word 0, and
+// MetatomicParams keeps it in the low half of data word 4. Schema evolution
+// may append data or pointer fields, so only the word containing spin must be
+// present. Skala's configuration is NWChemParams. The test
 // stub carries the same fact in byte 4 (nonzero means explicit) and byte 5
 // (the spin, and 0 is a real value). A message this does not recognise has
 // no explicit spin, and the qmi multiplicity is used.
@@ -462,27 +461,25 @@ std::optional<int> explicit_config_spin(const std::string &config, const char *n
   }
   struct Layout {
     const char *name;
-    std::uint32_t data_words;
-    std::uint32_t pointer_words;
     std::uint32_t spin_byte;
   };
   const Layout layouts[] = {
-      {"uma", 4, 3, 4},
-      {"nwchem", 2, 11, 4},
-      {"skala", 2, 11, 4},
-      {"metatomic", 5, 8, 32},
+      {"uma", 4},
+      {"nwchem", 4},
+      {"skala", 4},
+      {"metatomic", 32},
   };
   const unsigned char *data = nullptr;
   std::uint32_t data_words = 0;
-  std::uint32_t pointer_words = 0;
-  if (!root_data(config, &data, &data_words, &pointer_words)) {
+  if (!root_data(config, &data, &data_words)) {
     return std::nullopt;
   }
   for (const Layout &layout : layouts) {
     if (std::strcmp(name, layout.name) != 0) {
       continue;
     }
-    if (data_words != layout.data_words || pointer_words != layout.pointer_words) {
+    if (static_cast<std::size_t>(data_words) * 8 <
+        static_cast<std::size_t>(layout.spin_byte) + sizeof(std::uint32_t)) {
       return std::nullopt;
     }
     const int spin = decode_default_one(load_u32(data + layout.spin_byte));
@@ -549,8 +546,7 @@ bool openEngine(Env *env) {
   // multiplicity other than 1 replaces it. A message that leaves spin at
   // its default keeps the qmi pair. CHARGE 0 and MULTIPLICITY 1 are left on
   // the CONFIG, so the call is skipped. An engine that does not export
-  // rgpot_engine_set_charge_spin is the same as a call that returns 3: a
-  // non-default charge or multiplicity is refused.
+  // rgpot_engine_set_charge_spin refuses a non-default charge or multiplicity.
   const bool multiplicity_overrides = env->multiplicity != 1;
   int spin = env->multiplicity;
   if (!multiplicity_overrides) {
@@ -559,23 +555,25 @@ bool openEngine(Env *env) {
     }
   }
   const bool needs_charge_spin_override = (env->charge != 0 || multiplicity_overrides);
-  int status = 0;
   if (needs_charge_spin_override) {
-    status = charge_spin != nullptr ? charge_spin(env->engine.pot, env->charge, spin) : 3;
-  }
-  if (status == 3 && needs_charge_spin_override) {
-    die(env,
-        "ENGINE %s takes no charge or spin, so the input needs CHARGE 0 and "
-        "MULTIPLICITY 1 (it has %d and %d)",
-        env->engine_path.c_str(), env->charge, env->multiplicity);
-  }
-  if (status != 0 && status != 3) {
-    char text[1024] = {};
-    if (env->engine.last_error != nullptr) {
-      env->engine.last_error(env->engine.pot, text, sizeof(text));
+    if (charge_spin == nullptr) {
+      die(env,
+          "ENGINE %s takes no charge or spin, so the input needs CHARGE 0 and "
+          "MULTIPLICITY 1 (it has %d and %d)",
+          env->engine_path.c_str(), env->charge, env->multiplicity);
     }
-    die(env, "ENGINE %s refused CHARGE %d MULTIPLICITY %d: %s", env->engine_path.c_str(),
-        env->charge, env->multiplicity, text);
+    const int status = charge_spin(env->engine.pot, env->charge, spin);
+    if (status != 0) {
+      char text[1024] = {};
+      if (env->engine.last_error != nullptr) {
+        env->engine.last_error(env->engine.pot, text, sizeof(text));
+      }
+      die(env,
+          "ENGINE %s refused CHARGE %d and spin %d from input MULTIPLICITY %d "
+          "(status %d): %s",
+          env->engine_path.c_str(), env->charge, spin, env->multiplicity, status,
+          text[0] != '\0' ? text : "no reason reported");
+    }
   }
   env->backend = std::string("engine ") + (name != nullptr ? name : "") + " (" +
                  env->engine_path + ")";

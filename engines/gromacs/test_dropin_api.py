@@ -234,12 +234,26 @@ def test_engine_route_matches_the_engine(tmp_path):
     assert_close(e, f, e_ref * dc.KJ_PER_EV, f_ref * dc.KJ_PER_EV * 10)
 
 
-def _bare_engine(path: Path) -> Path:
-    """An engine library with the required symbols and no charge/spin setter."""
+def _bare_engine(path: Path, *, refuses_charge_spin: bool = False) -> Path:
+    """An engine library with no setter, or one that rejects charge/spin."""
     cc = shutil.which("cc") or shutil.which("gcc")
     if cc is None:
         pytest.skip("needs a C compiler")
     src = path.parent / "bare_engine.c"
+    refusal = (
+        "#include <string.h>\n"
+        "int rgpot_engine_set_charge_spin(RgpotEnginePot *pot, int charge, int spin) {\n"
+        "  (void)pot; (void)charge; (void)spin; return 3;\n"
+        "}\n"
+        "size_t rgpot_engine_last_error(const RgpotEnginePot *pot, char *buf, size_t len) {\n"
+        "  const char *s = \"spin multiplicity must be >= 1\";\n"
+        "  size_t n = strlen(s), m = n;\n"
+        "  (void)pot;\n"
+        "  if (buf && len) { if (m >= len) m = len - 1; memcpy(buf, s, m); buf[m] = 0; }\n"
+        "  return n;\n"
+        "}\n"
+        if refuses_charge_spin else ""
+    )
     src.write_text(
         "#include <stddef.h>\n"
         "typedef struct RgpotEnginePot RgpotEnginePot;\n"
@@ -258,6 +272,7 @@ def _bare_engine(path: Path) -> Path:
         "  (void)energy; (void)variance; (void)box; (void)transform; (void)transform_user;\n"
         "  return 0;\n"
         "}\n"
+        + refusal
     )
     done = subprocess.run(
         [cc, "-shared", "-fPIC", "-o", str(path), str(src)],
@@ -271,6 +286,13 @@ def test_engine_without_charge_spin_refuses_a_nondefault_charge(tmp_path):
     why = refused(tmp_path, f"    ENGINE {so}", charge=-1)
     assert "CHARGE 0 and MULTIPLICITY 1" in why
     assert "takes no charge or spin" in why
+
+
+def test_engine_spin_validation_failure_reports_the_backend_reason(tmp_path):
+    so = _bare_engine(tmp_path / "librefusing_engine.so", refuses_charge_spin=True)
+    why = refused(tmp_path, f"    ENGINE {so}", multiplicity=0)
+    assert "refused CHARGE 0 and spin 0 from input MULTIPLICITY 0 (status 3)" in why
+    assert "spin multiplicity must be >= 1" in why
 
 
 def _stub_charge_spin(work: Path, *, spin: int | None, charge: int, multiplicity: int):
@@ -366,13 +388,14 @@ def _named_engine(path: Path) -> Path:
     return path
 
 
-SCHEMA_PATH = Path(__file__).resolve().parents[2] / "CppCore/rgpot/rpc/Potentials.capnp"
+SCHEMA_PATH = Path(SCHEMA) if SCHEMA else None
 
 
-@pytest.mark.skipif(not shutil.which("capnp") or not SCHEMA_PATH.is_file(),
-                    reason="needs capnp and Potentials.capnp")
+@pytest.mark.skipif(not shutil.which("capnp") or not SCHEMA_PATH or not SCHEMA_PATH.is_file(),
+                    reason="needs capnp and the built effective Potentials.capnp")
 @pytest.mark.parametrize("engine,schema,text,charge,multiplicity,expect", [
-    ("uma", "UmaParams", "(spin = 0)", -1, 1, (-1, 0)),
+    pytest.param("uma", "UmaParams", '(spin = 0, cacheDir = "unused")',
+                 -1, 1, (-1, 0), id="uma-effective-schema-spin-zero"),
     ("uma", "UmaParams", "(spin = 0)", -1, 3, (-1, 3)),
     ("uma", "UmaParams", "()", -1, 1, (-1, 1)),
     ("uma", "UmaParams", "(spin = 2)", 0, 1, None),
