@@ -39,8 +39,14 @@ The first argument is an rgpot potential object or a kind string.
 A kind string names any potential class of the build: the class name in any
 case, with or without the =Pot= suffix, with =_=, =-=, =.= and spaces ignored.
 =lj=, =LJPot=, =morse=, =ljcluster=, =eam_al=, =sw=, =stillingerwebersi=,
-=tersoffsic= and =lennard-jones= all resolve.
+=tersoffsic=, =gromacs=, =openmm=, =ipi=, =expr= and =lennard-jones= all resolve
+when their build features are present.
 =rgpot.ase.available_kinds()= lists the strings this build accepts.
+It does not list the unconstructible =LammpsPot=, =GromacsPot= and =OpenMMPot=
+result classes.
+The in-process =gromacs= and =openmm= factories are listed; LAMMPS needs its
+engine plugin and remains available by passing the object returned by
+=rgpot_lammps_potential=.
 
 The other keyword arguments go to that class's constructor, apart from the
 calculator's own =numerical_stress= and =stress_step= and ASE's =label=,
@@ -102,7 +108,7 @@ Voigt order (xx, yy, zz, yz, xz, xy) with the ASE sign, \(\sigma = V^{-1}
 | Property                 | Kernels                                                    |
 |--------------------------+------------------------------------------------------------|
 | =energy=, =free_energy=, =forces= | every kernel                                      |
-| =stress=                 | kernels whose =caps()= report it: LJ, Morse, both Stillinger-Weber classes |
+| =stress=                 | kernels whose =caps()= report it: LJ, Morse, both Stillinger-Weber classes, TersoffSiC; IPIPot when its driver sends a virial |
 | =energies=               | kernels with =evaluate_per_atom=: LJ, LJ cluster, Morse    |
 | =stresses=               | kernels with both: LJ, Morse                               |
 
@@ -114,7 +120,7 @@ Per-atom values are computed only when asked for, so the first
 =get_potential_energies()= after =get_potential_energy()= costs one more kernel
 call.
 
-=numerical_stress=True= adds =stress= for a kernel that writes none (EAM-Al, EDIP, Lenosky, Tersoff, FeHe, CuH2, WaterH) from a central difference over six cell strains of =stress_step=
+=numerical_stress=True= adds =stress= for any kernel that writes none, including EAM-Al, EDIP, Lenosky, Tersoff, FeHe, CuH2, WaterH, D3, D4, Expr and the engine factories, from a central difference over six cell strains of =stress_step=
 (default 1e-6).
 That is twelve energy calls a stress.
 =get_hessian= raises =NotImplementedError=: no bound potential has an analytic
@@ -123,9 +129,9 @@ Hessian.
 
 ** Periodic boundaries
 
-The kernels are fully periodic and take the minimum image of each pair.
-The calculator turns every ASE geometry into a kernel call with the same energy
-as the infinite system:
+Kernels that report periodic support take the minimum image of each pair.
+For those kernels the calculator turns every ASE geometry into a kernel call
+with the same energy as the infinite system:
 
 - A periodic cell whose perpendicular width along a periodic axis is at most
   twice the kernel cutoff is tiled into a supercell that is wider.
@@ -149,11 +155,14 @@ A cluster or slab with no volume keeps the padded box's stress.
 
 The cutoff is =config()["cutoff"]= where the binding has one, and otherwise the
 kernel's published cutoff.
-A kernel with no known cutoff (=ExprPot=, D3, D4, WaterH) is not tiled.
+A kernel with no known cutoff (D3, D4 and WaterH) is not tiled.
+For =ExprPot=, the largest cutoff in its term specifications is used.
 Its cluster box is the 100 Angstrom cube while the cluster spans less than 50
 Angstrom, and twice the extent beyond that.
-=ljcluster= has free boundaries and raises =ValueError= for a periodic
-structure.
+=ljcluster=, D3 and D4 have free boundaries and raise =ValueError= for a
+periodic or partly periodic structure.
+Other kernels accept fully periodic, partly periodic and non-periodic ASE
+geometries.
 
 ** Caching
 
@@ -174,6 +183,8 @@ from its no-argument constructor.
 A calculator over anything else, or over a bound object that has neither
 (=ExprPot=, the engine potentials), raises =TypeError= when pickled; build it
 from a kind string with its parameters instead.
+=IPIPot= always raises =TypeError= on pickle and copy because it owns a live
+socket; construct a new calculator with the same address.
 =Atoms.copy()= does not copy a calculator, as everywhere in ASE.
 
 =calc.set(u0=...)= rebuilds the potential with the new parameter and resets the
@@ -221,6 +232,19 @@ The rgpot column includes that cost.
 The default properties are energy and forces.
 Pass =attach=True= to store a =SinglePointCalculator= on each structure.
 The inputs are not modified.
+
+** Conformance checks
+
+=tests/python/test_ase_all_potentials.py= parameterises the same ASE contract over every potential type that =available_kinds()=
+advertises in the current build.
+For each type it checks
+=implemented_properties= against the kernel capabilities, forces against =calculate_numerical_forces=, claimed stress against =calculate_numerical_stress=,
+energy/free-energy handling, all ASE geometry state changes, reset, pickle/copy,
+=FixAtoms=, and short BFGS runs over both the atoms and =FrechetCellFilter=.
+It also checks that partial periodicity either evaluates or raises the explicit
+free-boundary error.
+The socket-backed =IPIPot= case uses ASE's =SocketClient= and an ASE
+=LennardJones= driver, including the driver virial.
 
 ** RPC calculator
 

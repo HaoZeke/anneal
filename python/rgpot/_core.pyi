@@ -1029,6 +1029,13 @@ class TersoffSiC:
         Return (energy, forces, variance) for one configuration. Forces are -dE/dx.
         """
 
+    def caps(self) -> dict: ...
+
+    def evaluate(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> dict:
+        """
+        Energy, forces, variance, and the Cauchy stress, shape (3, 3), in eV/Angstrom^3. The kernel runs detached.
+        """
+
     def energy_gradient(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
         """
         Energy and dE/dx. positions is (n_atoms, 3) or (n_config, n_atoms, 3). A batch shares atom_types and box, and crosses into the library once.

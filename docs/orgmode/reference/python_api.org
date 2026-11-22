@@ -499,7 +499,7 @@ Only the nineteen classes =LJPot=, =LJClusterPot=, =MorsePot=, =MullerBrownPot=,
 =EAMAlPot=, =EAMTablePot=, =FeHePot=, =CuH2Pot=, =WaterHPot=, =D3Pot=, =D4Pot=,
 =ExprPot= and =SumPot= have =hvp= and =evaluate_batch=.
 =StillingerWeberSi=, =TersoffSiC=, =IPIPot=, =LammpsPot=, =GromacsPot= and
-=OpenMMPot= do not.
+=OpenMMPot= do not have =evaluate_batch= or =hvp=.
 
 The nineteen classes build their kernel in the constructor.
 A constructor argument the kernel rejects raises there, not at the first call.
@@ -830,8 +830,8 @@ rgpot.TersoffSiC()
 - Units :: energy eV, lengths Angstrom.
 - Outputs :: the 1989 Tersoff silicon-carbon kernel, Phys.
   Rev. B 39, 5566 (1989), with the 1990 erratum.
-  It has only =__call__= and =energy_gradient=: no =caps=, =evaluate=,
-  =evaluate_batch= or =hvp=.
+  =caps= reports analytic stress and =evaluate= returns it.
+  It has no =evaluate_batch= or =hvp=.
   See the [[file:tersoff_sic.org][Tersoff SiC reference]].
 - Errors :: another atomic number raises =ValueError=
   =TersoffSiC: atomic number Z is neither carbon (6) nor silicon (14)=.
@@ -1074,7 +1074,8 @@ caps()
   rgpot.MullerBrownPot, rgpot.D2Pot, rgpot.D2CpmdPot, rgpot.SWPot,
   rgpot.EDIPPot, rgpot.LenoskyPot, rgpot.TersoffPot, rgpot.EAMAlPot,
   rgpot.EAMTablePot, rgpot.FeHePot, rgpot.CuH2Pot, rgpot.WaterHPot, rgpot.D3Pot,
-  rgpot.D4Pot, rgpot.ExprPot, rgpot.SumPot, rgpot.StillingerWeberSi
+  rgpot.D4Pot, rgpot.ExprPot, rgpot.SumPot, rgpot.StillingerWeberSi,
+  rgpot.TersoffSiC
 - Inputs :: none.
 - Units :: none.
 - Outputs :: a dict with the keys =reentrancy= (="shared"=,
@@ -1116,7 +1117,8 @@ evaluate(positions, atom_types, box)
   rgpot.MullerBrownPot, rgpot.D2Pot, rgpot.D2CpmdPot, rgpot.SWPot,
   rgpot.EDIPPot, rgpot.LenoskyPot, rgpot.TersoffPot, rgpot.EAMAlPot,
   rgpot.EAMTablePot, rgpot.FeHePot, rgpot.CuH2Pot, rgpot.WaterHPot, rgpot.D3Pot,
-  rgpot.D4Pot, rgpot.ExprPot, rgpot.SumPot, rgpot.StillingerWeberSi
+  rgpot.D4Pot, rgpot.ExprPot, rgpot.SumPot, rgpot.StillingerWeberSi,
+  rgpot.TersoffSiC
 - Inputs :: =positions=, =atom_types= and =box= as in the conventions.
 - Units :: energy eV; forces eV/Angstrom; variance eV^2; stress eV/Angstrom^3,
   the Cauchy stress (1/V) dE/dε.

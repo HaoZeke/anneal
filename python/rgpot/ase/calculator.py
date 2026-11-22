@@ -64,6 +64,28 @@ _ASE_KEYS = {
 # the "Pot" suffix and with "_", "-", "." and spaces ignored.
 _ALIASES = {
     "lennardjones": "LJPot",
+    "gromacs": "rgpot_gromacs_potential",
+    "openmm": "rgpot_openmm_potential",
+}
+
+# These are result types returned by engine factory functions. nanobind
+# does not expose constructors for them, so listing their class names as
+# accepted kinds would be dishonest.
+_FACTORY_ONLY_TYPES = {"LammpsPot", "GromacsPot", "OpenMMPot"}
+
+_FACTORY_DEFAULTS = {
+    "rgpot_gromacs_potential": {
+        "u0": 1.0,
+        "cutoff": 8.0,
+        "psi": 1.0,
+        "engine_path": "",
+    },
+    "rgpot_openmm_potential": {
+        "u0": 1.0,
+        "cutoff": 8.0,
+        "psi": 1.0,
+        "engine_path": "",
+    },
 }
 
 # Neighbour cutoffs of the bound kernels, in Angstrom, for kernels whose
@@ -90,14 +112,16 @@ def _normalise(name: str) -> str:
     return re.sub(r"[\s_\-.]", "", name).lower()
 
 
-def _potential_classes() -> dict[str, type]:
-    """Kind string -> bound potential class, from the compiled module."""
+def _potential_factories() -> dict[str, Any]:
+    """Kind string -> bound potential constructor, from the compiled module."""
     import rgpot
 
-    found: dict[str, type] = {}
+    found: dict[str, Any] = {}
     for name in dir(rgpot):
         cls = getattr(rgpot, name, None)
         if not isinstance(cls, type) or issubclass(cls, BaseException):
+            continue
+        if name in _FACTORY_ONLY_TYPES:
             continue
         if not str(getattr(cls, "__module__", "")).startswith("rgpot"):
             continue
@@ -108,20 +132,23 @@ def _potential_classes() -> dict[str, type]:
         if key.endswith("pot") and len(key) > 3:
             found.setdefault(key[:-3], cls)
     for alias, target in _ALIASES.items():
-        cls = getattr(rgpot, target, None)
-        if isinstance(cls, type):
-            found.setdefault(alias, cls)
+        factory = getattr(rgpot, target, None)
+        if callable(factory):
+            found.setdefault(alias, factory)
     return found
 
 
 def available_kinds() -> list[str]:
     """Kind strings :class:`RgpotCalculator` accepts in this build."""
-    return sorted(_potential_classes())
+    return sorted(_potential_factories())
 
 
-def _init_parameters(cls: type) -> list[str] | None:
+def _init_parameters(factory: Any) -> list[str] | None:
     """Keyword names of the bound constructor, None when unknown."""
-    sigs = getattr(getattr(cls, "__init__", None), "__nb_signature__", None)
+    callable_obj = (
+        getattr(factory, "__init__", None) if isinstance(factory, type) else factory
+    )
+    sigs = getattr(callable_obj, "__nb_signature__", None)
     if not sigs:
         return None
     names: set[str] = set()
@@ -135,20 +162,20 @@ def _init_parameters(cls: type) -> list[str] | None:
     return sorted(names)
 
 
-def _build(cls: type, params: dict[str, Any]) -> Any:
-    accepted = _init_parameters(cls)
+def _build(factory: Any, params: dict[str, Any]) -> Any:
+    accepted = _init_parameters(factory)
     if accepted is not None:
         unknown = sorted(set(params) - set(accepted))
         if unknown:
             raise ValueError(
-                f"unknown {cls.__name__} parameters: {unknown}; "
+                f"unknown {factory.__name__} parameters: {unknown}; "
                 f"accepted: {accepted}"
             )
     try:
-        return cls(**params)
+        return factory(**params)
     except TypeError as err:
         raise ValueError(
-            f"{cls.__name__} rejected parameters {sorted(params)}: {err}"
+            f"{factory.__name__} rejected parameters {sorted(params)}: {err}"
         ) from err
 
 
@@ -166,14 +193,15 @@ def _resolve_potential(
                 "potential must be an rgpot potential or a kind string"
             )
         return potential, _spec_of(potential)
-    classes = _potential_classes()
-    cls = classes.get(_normalise(potential))
-    if cls is None:
+    factories = _potential_factories()
+    factory = factories.get(_normalise(potential))
+    if factory is None:
         raise ValueError(
             f"unknown potential kind {potential!r}; this build has "
-            f"{sorted(classes)}"
+            f"{sorted(factories)}"
         )
-    return _build(cls, dict(params)), (cls.__name__, dict(params))
+    full = {**_FACTORY_DEFAULTS.get(factory.__name__, {}), **params}
+    return _build(factory, full), (factory.__name__, full)
 
 
 def _spec_of(potential: Any) -> tuple[str, dict[str, Any]] | None:
@@ -181,6 +209,8 @@ def _spec_of(potential: Any) -> tuple[str, dict[str, Any]] | None:
     import rgpot
 
     cls = type(potential)
+    if cls.__name__ in _FACTORY_ONLY_TYPES:
+        return None
     if getattr(rgpot, cls.__name__, None) is not cls:
         return None
     config = getattr(potential, "config", None)
@@ -193,7 +223,9 @@ def _spec_of(potential: Any) -> tuple[str, dict[str, Any]] | None:
     return None
 
 
-def _kernel_cutoff(potential: Any) -> float:
+def _kernel_cutoff(
+    potential: Any, parameters: dict[str, Any] | None = None
+) -> float:
     """Cutoff the open box and the supercell have to clear, in Angstrom."""
     cutoff = getattr(potential, "cutoff", None)
     if cutoff is not None:
@@ -203,13 +235,27 @@ def _kernel_cutoff(potential: Any) -> float:
         cfg = config()
         if isinstance(cfg, dict) and "cutoff" in cfg:
             return float(cfg["cutoff"])
+    params = parameters or {}
+    cutoffs = [
+        float(term["cutoff"])
+        for term in dict(params.get("terms") or {}).values()
+        if isinstance(term, dict) and "cutoff" in term
+    ]
+    if "cutoff" in params:
+        cutoffs.append(float(params["cutoff"]))
+    if cutoffs:
+        return max(cutoffs)
     return float(_KERNEL_CUTOFF_ANGSTROM.get(type(potential).__name__, 0.0))
 
 
 def _caps(potential: Any) -> dict[str, Any]:
     caps = getattr(potential, "caps", None)
     result = caps() if callable(caps) else None
-    return dict(result) if isinstance(result, dict) else {}
+    if isinstance(result, dict):
+        return dict(result)
+    # IPIPot publishes the stress of its last socket exchange through a
+    # separate method. Other call-only bindings have no stress surface.
+    return {"stress": callable(getattr(potential, "stress", None))}
 
 
 def _pbc_flags(pbc: Any) -> np.ndarray:
@@ -461,7 +507,12 @@ def _call(potential: Any, positions: np.ndarray, numbers: np.ndarray, box: np.nd
     if evaluate is not None:
         return evaluate(positions, numbers, box)
     energy, forces, _variance = potential(positions, numbers, box)
-    return {"energy": energy, "forces": forces, "stress": None}
+    stress = getattr(potential, "stress", None)
+    return {
+        "energy": energy,
+        "forces": forces,
+        "stress": stress() if callable(stress) else None,
+    }
 
 
 class RgpotCalculator(Calculator):
@@ -510,7 +561,8 @@ class RgpotCalculator(Calculator):
 
     def _configure(self) -> None:
         pot = self._potential
-        self._cutoff = _kernel_cutoff(pot)
+        params = self._spec[1] if self._spec is not None else None
+        self._cutoff = _kernel_cutoff(pot, params)
         self._caps = _caps(pot)
         self._kernel_periodic = bool(self._caps.get("periodic", True))
         self._name = type(pot).__name__
@@ -560,6 +612,11 @@ class RgpotCalculator(Calculator):
                 f"cannot pickle a calculator over {self._name}: build it from "
                 "a kind string or a bound rgpot potential"
             )
+        if self._name == "IPIPot":
+            raise TypeError(
+                "cannot pickle a calculator over IPIPot: the potential owns "
+                "a live socket; construct a new calculator with the address"
+            )
         state = self.__dict__.copy()
         del state["_potential"]
         return state
@@ -571,6 +628,7 @@ class RgpotCalculator(Calculator):
         assert self._spec is not None
         name, params = self._spec
         self._potential = _build(getattr(rgpot, name), params)
+        self._configure()
 
     def calculate(
         self,
@@ -580,6 +638,8 @@ class RgpotCalculator(Calculator):
     ) -> None:
         """Fill ``self.results``. ``free_energy`` equals ``energy``."""
         Calculator.calculate(self, atoms, properties, system_changes)
+        if system_changes:
+            self.results = {}
         assert self.atoms is not None
         wanted = set(properties)
         per_atom = self._per_atom and bool(wanted & {"energies", "stresses"})
