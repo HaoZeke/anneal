@@ -967,7 +967,9 @@ if has_fast_nlist
     # without linking the object a second time.
     if _fast_as_object
         fastnlist_dep = declare_dependency(
-            sources: _fast_bundled ? [_fastnlist_tgt[0], _fastnlist_tgt[1]] : [_fastnlist_tgt[0]],
+            sources: _fast_bundled ? [_fastnlist_tgt[0], _fastnlist_tgt[1]] : [
+                _fastnlist_tgt[0],
+            ],
             link_args: _fast_native,
         )
         fastnlist_native_dep = declare_dependency(
