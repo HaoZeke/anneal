@@ -67,7 +67,14 @@ Created create(const void *config, std::size_t config_len) {
             ? TorchDeterminismPolicy::Strict
             : TorchDeterminismPolicy::Fast;
     c.charge = params.getCharge();
-    c.spin = params.getSpin() > 0 ? params.getSpin() : 1;
+    c.spin = params.getSpin();
+    if (c.spin < 1) {
+      out.error =
+          "rgpot_engine_create(metatomic): metatomic spin multiplicity must be "
+          ">= 1; got " +
+          std::to_string(c.spin);
+      return out;
+    }
     c.attach_system_extras = params.getAttachSystemExtras();
 
     set_torch_threads(params.getIntraopThreads(), params.getInteropThreads());

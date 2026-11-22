@@ -521,6 +521,11 @@ bool openEngine(Env *env) {
   env->engine.force = reinterpret_cast<EngineForce>(symbol(env, "rgpot_engine_force", true));
   env->engine.last_error =
       reinterpret_cast<EngineLastError>(symbol(env, "rgpot_engine_last_error", false));
+  const char *name = nullptr;
+  if (auto get =
+          reinterpret_cast<const char *(*)()>(symbol(env, "rgpot_engine_name", false))) {
+    name = get();
+  }
   std::string config;
   if (!env->config_path.empty()) {
     config = readFile(env, env->config_path, "the engine CONFIG message");
@@ -528,6 +533,7 @@ bool openEngine(Env *env) {
       die(env, "the engine CONFIG message %s is empty", env->config_path.c_str());
     }
   }
+  const std::optional<int> configured_spin = explicit_config_spin(env, config, name);
   // Cap'n Proto reads the message as 8-byte words.
   std::vector<std::uint64_t> aligned((config.size() + 7) / 8, 0);
   std::memcpy(aligned.data(), config.data(), config.size());
@@ -546,10 +552,6 @@ bool openEngine(Env *env) {
       periodic = c.periodic != 0;
     }
   }
-  const char *name = nullptr;
-  if (auto get = reinterpret_cast<const char *(*)()>(symbol(env, "rgpot_engine_name", false))) {
-    name = get();
-  }
   auto charge_spin =
       reinterpret_cast<EngineChargeSpin>(symbol(env, "rgpot_engine_set_charge_spin", false));
   // grompp writes MULTIPLICITY 1 unless that value is changed, including
@@ -562,10 +564,8 @@ bool openEngine(Env *env) {
   // rgpot_engine_set_charge_spin refuses a non-default charge or multiplicity.
   const bool multiplicity_overrides = env->multiplicity != 1;
   int spin = env->multiplicity;
-  if (!multiplicity_overrides) {
-    if (const std::optional<int> configured = explicit_config_spin(env, config, name)) {
-      spin = *configured;
-    }
+  if (!multiplicity_overrides && configured_spin) {
+    spin = *configured_spin;
   }
   const bool needs_charge_spin_override = (env->charge != 0 || multiplicity_overrides);
   if (needs_charge_spin_override) {
