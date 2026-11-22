@@ -1469,6 +1469,15 @@ def test_printed_revisions_are_ancestors_or_qualified():
     assert any(row[1] == "scripts/pimc_lj38/run_campaign.py" for row in audit.results)
 
 
+def test_the_gmin_panel_session_rows_keep_their_harness():
+    rows = audit_mod.Audit().rows("bench/gmin-panel/rows.csv")
+    session = [r for r in rows if r["harness_revision"] == audit_mod.GMIN_PANEL_SESSION]
+    assert len(session) == 120
+    assert sum(r["code"] == "gmin" for r in session) == 60
+    registry = (ROOT / audit_mod.RECORD_REFS).read_text()
+    assert f"{audit_mod.GMIN_RECORD_REF},{audit_mod.GMIN_RECORD_SHA},{audit_mod.GMIN_RECORD_TREE}" in registry
+
+
 def test_a_short_external_revision_is_reported():
     audit = audit_mod.Audit()
     path = "bench/pimc-lj38/README.md"

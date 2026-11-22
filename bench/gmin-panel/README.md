@@ -85,6 +85,14 @@ is already omitted as censored, and `hit` and `evals_to_hit` are unaffected.
 - `summary.csv`, the table below and table `tab:gmin` in
   `paper/jctc/manuscript.tex` are written from `rows.csv` by
   `bash scripts/gmin_panel/enter_bench.sh --summarize --tex`.
+- Session `20261121T133601Z` is recorded at
+  `e4341de058b73366f2d7b5f17995da283d57bad6`, tree
+  `63d1488f465fff1e65ce9b338641ef945fad75a9`, on `record/gmin-184`.
+  That commit holds `enter.sh`, `apply_patches.py` and `run_record.py`.
+  Its parent is `b8190ce61a64ff6cb61ee6bfc656b0657d78494d`. The rows
+  keep `harness_revision`
+  `9837358ae1027067ff654fac8b48969020853452`, the anneal commit the
+  session ran. That commit is an ancestor of the record commit.
 
 <!-- gmin-panel table: start -->
 | System | Budget | Arm | Hits | Median calls | IQR | Wall (s) | Inside (s) | Outside (s) | Fisher p | MW p calls | MW p wall |

@@ -635,6 +635,15 @@ def manuscript_retry(audit: Audit) -> None:
 
 GMIN_PANEL_REVISION = "c2de652dca0bc75e2b0cb4afffac91fd656404e4"
 GMIN_PANEL_README = "bench/gmin-panel/README.md"
+# The 120 rows of session 20261121T133601Z cite this anneal commit.
+# The scripts that drove them are on the record commit below, whose
+# parent is b8190ce6. 9837358a is an ancestor, not that parent.
+GMIN_PANEL_SESSION = "9837358ae1027067ff654fac8b48969020853452"
+GMIN_RECORD_REF = "record/gmin-184"
+GMIN_RECORD_SHA = "e4341de058b73366f2d7b5f17995da283d57bad6"
+GMIN_RECORD_TREE = "63d1488f465fff1e65ce9b338641ef945fad75a9"
+GMIN_RECORD_PARENT = "b8190ce61a64ff6cb61ee6bfc656b0657d78494d"
+GMIN_RECORD_README = "record/gmin-184/README.md"
 
 
 def mann_whitney_u(a: list[float], b: list[float]) -> float:
@@ -815,7 +824,19 @@ def gmin_panel_readme(audit: Audit, panel: object, groups: dict) -> None:
     new_session = groups[("au55", "gmin")][0]["session"]
     audit.said(GMIN_PANEL_README, GMIN_PANEL_REVISION)
     audit.said(GMIN_PANEL_README, panel.GMIN_REV)
-    audit.said(GMIN_PANEL_README, "9837358ae1027067ff654fac8b48969020853452")
+    audit.said(GMIN_PANEL_README, GMIN_PANEL_SESSION)
+    audit.said(GMIN_PANEL_README, GMIN_RECORD_SHA)
+    audit.said(GMIN_PANEL_README, GMIN_RECORD_TREE)
+    audit.said(GMIN_PANEL_README, GMIN_RECORD_PARENT)
+    audit.said(GMIN_RECORD_README, GMIN_RECORD_SHA)
+    audit.said(GMIN_RECORD_README, GMIN_RECORD_PARENT)
+    registry = (ROOT / RECORD_REFS).read_text()
+    registered = f"{GMIN_RECORD_REF},{GMIN_RECORD_SHA},{GMIN_RECORD_TREE}"
+    audit.record(registered in registry, RECORD_REFS, "gmin-184 record", registered, "registered")
+    session = [r for r in rows if r["harness_revision"] == GMIN_PANEL_SESSION]
+    audit.record(len(session) == 120 and sum(r["code"] == "gmin" for r in session) == 60,
+                 "bench/gmin-panel/rows.csv", "session harness_revision",
+                 str(len(session)), GMIN_PANEL_SESSION)
     audit.said(GMIN_PANEL_README, panel.GMIN_RERUN_TARBALL_SHA256)
     audit.said(GMIN_PANEL_README, f"adds the energy {dict((r[0], r[3]) for r in panel.SYSTEMS)['lj103']:.6f}")
     r0 = 2.884
