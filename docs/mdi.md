@@ -26,6 +26,13 @@ meson setup "$work/build-mdi" \
 meson compile -C "$work/build-mdi" rgpot-mdi
 ```
 
+CMake builds the same frontend with `-DRGPOT_WITH_MDI=ON`. It builds `rgpot-core`
+with cargo and the Cargo feature `mdi`, then links `rgpot-mdi` and the
+`rgpot-eval` helper the test uses. Neither tool is built on Windows or with
+`-DRGPOT_RPC_CLIENT_ONLY=ON`, which is also true of Meson. The
+`mdi_concrete_potentials` test is registered by both build systems when python
+can import `mdi`.
+
 Install the official MDI Library, either as a system library or from `pymdi`.
 When it is not on the dynamic loader's search path, pass its shared object:
 

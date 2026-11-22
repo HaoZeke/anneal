@@ -3,7 +3,11 @@
 
 fs = import('fs')
 engines_inc = include_directories('.')
-rgpot_inc = include_directories('../CppCore', '../include', '../rgpot-core/include')
+rgpot_inc = include_directories(
+    '../CppCore',
+    '../include',
+    '../rgpot-core/include',
+)
 # include_directories() rejects an absolute path that sits inside the
 # source tree. A pixi prefix and a LAMMPS checkout under the workspace
 # both do. A path relative to this file is accepted; a path outside the
@@ -63,17 +67,10 @@ rgpot_eval = executable(
     cpp_args: _args,
 )
 if mdi_enabled and get_option('with_tests')
-    _mdi_python = find_program('python3')
-    _mdi_python_probe = run_command(
-        _mdi_python,
-        '-c',
-        'import mdi',
-        check: false,
-    )
-    if _mdi_python_probe.returncode() == 0
+    if has_pymdi
         test(
             'mdi_concrete_potentials',
-            _mdi_python,
+            find_program('python3'),
             args: [
                 files('mdi_roundtrip.py'),
                 rgpot_mdi,

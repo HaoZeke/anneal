@@ -76,5 +76,6 @@ Pass an option as =-DNAME=ON= or =-DNAME=OFF= to =cmake=.
 | =RGPOT_WITH_IPI= | BOOL | ON (OFF on Windows) | i-PI socket server potential and driver client. Enabling it on Windows is a configure error. |
 | =RGPOT_WITH_EAM_TABLE= | BOOL | OFF | EAM and Finnis-Sinclair potentials read from LAMMPS tables. |
 | =RGPOT_WITH_CBE= | BOOL | OFF | Link the external pkg-config =cbe= library and build the CBE H + CH4 frontend. |
+| =RGPOT_WITH_MDI= | BOOL | OFF | Build the optional =rgpot-mdi= compatibility frontend, as Meson's =with_mdi=. It builds =rgpot-core= with cargo and the Cargo feature =mdi=, which Meson does through =with_rust_core=, and needs the official MDI Library at runtime. =rgpot-mdi= and =rgpot-eval= are not built on Windows or with =RGPOT_RPC_CLIENT_ONLY=. The test =mdi_concrete_potentials= runs when python can import =mdi=. |
 | =RGPOT_BUILD_TESTS= | BOOL | ON when rgpot is the top-level project, else OFF | Build the tests. |
 | =RGPOT_WITH_CP2K= | BOOL | OFF | =CP2KPot=, the =potserv= CP2K backend and =libcp2kc_rgpot= against libcp2k. |

@@ -65,6 +65,9 @@ endif()
 option(RGPOT_WITH_EAM_TABLE
        "EAM and Finnis-Sinclair potentials read from LAMMPS tables" OFF)
 option(RGPOT_WITH_CBE "Linked external cbe-pes frontend" OFF)
+option(RGPOT_WITH_MDI
+       "Optional MDI engine frontend over rgpot_potential_t (builds rgpot-core with cargo; uses the official MDI Library at runtime)"
+       OFF)
 option(RGPOT_BUILD_TESTS "Build tests" ${RGPOT_IS_TOP_LEVEL})
 option(RGPOT_WITH_CP2K
        "CP2KPot, the potserv CP2K backend and libcp2kc_rgpot against libcp2k (pkg-config libcp2k)" OFF)
@@ -641,6 +644,95 @@ if(RGPOT_WITH_RPC AND NOT RGPOT_RPC_CLIENT_ONLY)
   endif()
 endif()
 
+# --- MDI frontend ---
+# rgpot-core is built with cargo only for this option, with the Cargo features
+# meson passes for its with_rust_core and with_mdi options. rgpot-mdi and
+# rgpot-eval follow meson's engines/: they are not built on Windows or in the
+# client-only build.
+if(RGPOT_WITH_MDI)
+  find_program(RGPOT_CARGO cargo)
+  if(NOT RGPOT_CARGO)
+    message(FATAL_ERROR "RGPOT_WITH_MDI needs cargo to build rgpot-core")
+  endif()
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  find_package(Threads REQUIRED)
+
+  set(_rgpot_cargo_features mdi)
+  if(RGPOT_WITH_RPC)
+    list(APPEND _rgpot_cargo_features rpc)
+  endif()
+  if(RGPOT_WITH_CACHE)
+    list(APPEND _rgpot_cargo_features cache)
+  endif()
+  list(JOIN _rgpot_cargo_features "," _rgpot_cargo_feature_list)
+  set(_rgpot_cargo_profile debug)
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set(_rgpot_cargo_profile release)
+  endif()
+  if(MSVC)
+    set(_rgpot_rust_archive rgpot_core.lib)
+  else()
+    set(_rgpot_rust_archive librgpot_core.a)
+  endif()
+  set(_rgpot_rust_dir "${CMAKE_CURRENT_BINARY_DIR}/rust-core")
+  set(_rgpot_rust_built "${_rgpot_rust_dir}/${_rgpot_rust_archive}")
+  file(MAKE_DIRECTORY "${_rgpot_rust_dir}")
+  add_custom_target(
+    rgpot_rust_core_build
+    COMMAND
+      "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build_rust_core.py" --cargo
+      "${RGPOT_CARGO}" --manifest
+      "${CMAKE_CURRENT_SOURCE_DIR}/rgpot-core/Cargo.toml" --target-dir
+      "${_rgpot_rust_dir}/cargo-target" --profile ${_rgpot_cargo_profile}
+      --artifact ${_rgpot_rust_archive} --features
+      "${_rgpot_cargo_feature_list}" "${_rgpot_rust_built}"
+      "${_rgpot_rust_dir}/rgpot_rust_built.h"
+    BYPRODUCTS "${_rgpot_rust_built}" "${_rgpot_rust_dir}/rgpot_rust_built.h"
+    COMMENT "Building rgpot-core with cargo (features: ${_rgpot_cargo_feature_list})"
+    USES_TERMINAL)
+  add_library(rgpot_rust_core STATIC IMPORTED GLOBAL)
+  set_target_properties(
+    rgpot_rust_core
+    PROPERTIES IMPORTED_LOCATION "${_rgpot_rust_built}"
+               INTERFACE_INCLUDE_DIRECTORIES
+               "${CMAKE_CURRENT_SOURCE_DIR}/rgpot-core/include"
+               INTERFACE_LINK_LIBRARIES "Threads::Threads;${CMAKE_DL_LIBS}")
+  add_dependencies(rgpot_rust_core rgpot_rust_core_build)
+
+  if(RGPOT_RPC_CLIENT_ONLY OR WIN32)
+    message(
+      STATUS
+        "rgpot-mdi is not built: engines/ is skipped on Windows and in the client-only build")
+  else()
+    set(_rgpot_engines_dir "${CMAKE_CURRENT_SOURCE_DIR}/engines")
+    add_library(rgpot_pot_spec STATIC "${_rgpot_engines_dir}/pot_spec.cpp")
+    target_include_directories(
+      rgpot_pot_spec PUBLIC "${_rgpot_engines_dir}"
+                            "${CMAKE_CURRENT_SOURCE_DIR}/rgpot-core/include")
+    target_compile_definitions(rgpot_pot_spec PUBLIC RGPOT_HAS_FORTRAN_POTS)
+    target_link_libraries(rgpot_pot_spec PUBLIC rgpot::rgpot)
+    set_target_properties(rgpot_pot_spec PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+    add_executable(rgpot-mdi "${_rgpot_engines_dir}/rgpot_mdi.cpp")
+    target_link_libraries(rgpot-mdi PRIVATE rgpot_pot_spec rgpot_rust_core
+                                            rgpot_vesin ${CMAKE_DL_LIBS})
+    add_executable(rgpot-eval "${_rgpot_engines_dir}/rgpot_eval.cpp")
+    target_link_libraries(rgpot-eval PRIVATE rgpot_pot_spec rgpot_vesin)
+    foreach(_rgpot_engine rgpot-mdi rgpot-eval)
+      set_target_properties(${_rgpot_engine} PROPERTIES LINKER_LANGUAGE CXX)
+      if(OpenMP_CXX_FOUND)
+        target_link_libraries(${_rgpot_engine} PRIVATE OpenMP::OpenMP_CXX)
+      endif()
+      if(MSVC)
+        target_compile_options(${_rgpot_engine} PRIVATE /W4)
+      else()
+        target_compile_options(${_rgpot_engine} PRIVATE -Wall -Wextra -Wpedantic)
+      endif()
+    endforeach()
+  endif()
+endif()
+
 # --- Installation ---
 include(GNUInstallDirs)
 
@@ -651,6 +743,9 @@ if(RGPOT_IS_TOP_LEVEL)
   if(TARGET potserv_mpi)
     install(TARGETS potserv_mpi nwchem_mpi_force_host
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+  endif()
+  if(TARGET rgpot-mdi)
+    install(TARGETS rgpot-mdi RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
   endif()
   if(RGPOT_WITH_RPC)
     install(

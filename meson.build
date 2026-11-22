@@ -106,6 +106,20 @@ if mdi_enabled and not get_option('with_rust_core')
     error('with_mdi=true needs with_rust_core=true')
 endif
 
+# The MDI TCP test needs pymdi, the driver side of the protocol.
+has_pymdi = false
+if mdi_enabled
+    _pymdi_python = find_program('python3', required: false)
+    if _pymdi_python.found()
+        has_pymdi = run_command(
+            _pymdi_python,
+            '-c',
+            'import mdi',
+            check: false,
+        ).returncode() == 0
+    endif
+endif
+
 if get_option('with_rpc_client_only')
     _args += ['-DRGPOT_RPC_CLIENT_ONLY=TRUE']
 endif

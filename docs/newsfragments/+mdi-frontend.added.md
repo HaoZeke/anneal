@@ -1,3 +1,3 @@
 <!-- Copyright 2023--present rgpot developers -->
 
-An opt-in MDI compatibility frontend now serves every `rgpot_potential_t` to drivers such as LAMMPS `fix mdi/qm`, with atomic-unit wire conversion, shared energy/force evaluations, and TCP low-latency mode. Direct in-process calls and Cap'n Proto RPC remain the default paths.
+An opt-in MDI compatibility frontend now serves every `rgpot_potential_t` to drivers such as LAMMPS `fix mdi/qm`, with atomic-unit wire conversion, shared energy/force evaluations, and TCP low-latency mode. Direct in-process calls and Cap'n Proto RPC remain the default paths. Meson `-Dwith_mdi=true` and CMake `-DRGPOT_WITH_MDI=ON` build it, TCP is refused with an error where POSIX sockets are missing, and `rgpot_mdi_server_start` is exported by every build, so the C ABI minor of 9 is true of each library; a build without the `mdi` feature returns `RGPOT_RPC_ERROR`.

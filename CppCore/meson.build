@@ -55,6 +55,7 @@ _rt_atoms = {
     'uma': has_uma,
     'rust_core': get_option('with_rust_core'),
     'mdi': mdi_enabled,
+    'pymdi': has_pymdi,
 }
 _rt_tests = []
 _rt_kw = {}
