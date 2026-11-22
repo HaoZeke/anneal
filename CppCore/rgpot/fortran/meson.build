@@ -144,7 +144,7 @@ fortran_pots_dep = declare_dependency(
 # Fortran-only test programs link the kernels and the neighbour query.
 # The OpenMP dependency is the C++ one. Its compile flag (/openmp, -fopenmp)
 # must not be handed to flang, which treats /openmp as a source file.
-_fortran_nlist_omp = dependency('openmp', language: 'cpp', required: false)
+_fortran_nlist_omp = rgpot_openmp
 _fortran_nlist_omp_link = []
 if _fortran_nlist_omp.found()
     _fortran_nlist_omp_link = [

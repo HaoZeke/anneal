@@ -282,7 +282,16 @@ rgpot_minimage = static_library(
 # the library comes from there and has to define that runtime's entry point.
 # When it cannot be found and checked, the targets keep the OpenMP flag, and
 # configure says so.
-rgpot_openmp = dependency('openmp', language: 'cpp', required: false)
+#
+# use_openmp=false never looks for OpenMP: rgpot_openmp is a dependency that
+# was not found, so every target above and below compiles without the
+# OpenMP flag, the _OPENMP regions of Slices.hpp run serially, and neither
+# librgpot nor a consumer of rgpot_dep gets the flag or the runtime.
+if get_option('use_openmp')
+    rgpot_openmp = dependency('openmp', language: 'cpp', required: false)
+else
+    rgpot_openmp = dependency('', required: false)
+endif
 rgpot_openmp_deps = []
 rgpot_openmp_runtime_deps = []
 if rgpot_openmp.found()
