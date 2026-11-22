@@ -496,6 +496,31 @@ def main() -> int:
             b_str = f"{m['hit_B']}/{m['evals_B']}/{m['charged_B']}/{m['best_B']} ({m['best_bits_B']})"
             lines.append(f"| {m['panel']} | {m['cell']} | {m['seed']} | {a_str} | {b_str} |")
 
+    lines.extend(["", "## Memory Diagnostic (Paired `RssAnon` Spread vs `A`)", ""])
+    lines.append(
+        "The pre-registered rule in `PROTOCOL.md` sets `band_upper_kb` from the "
+        "cell medians `med_AA` and `med_AP` floored at `4.0 KiB`. Below is the "
+        "per-seed paired `RssAnon` range (`min..max` of `arm - A` across the 12 "
+        "seeds) alongside the pre-registered `mem_ok` outcome:"
+    )
+    lines.append("")
+    lines.append(
+        "| Cell | med B - med A (KiB) | band margin (KiB) | paired AA-A (KiB) | paired AP-A (KiB) | paired B-A (KiB) | MW p (B > A) | mem_ok |"
+    )
+    lines.append("| --- | --- | --- | --- | --- | --- | --- | --- |")
+    for s in summary_rows:
+        c = s["cell"]
+        d_aa = [float(by_key[("default", c, "AA", sd)]["rss_anon_kb"]) - float(by_key[("default", c, "A", sd)]["rss_anon_kb"]) for sd in DEFAULT_SEEDS]
+        d_ap = [float(by_key[("default", c, "AP", sd)]["rss_anon_kb"]) - float(by_key[("default", c, "A", sd)]["rss_anon_kb"]) for sd in DEFAULT_SEEDS]
+        d_b = [float(by_key[("default", c, "B", sd)]["rss_anon_kb"]) - float(by_key[("default", c, "A", sd)]["rss_anon_kb"]) for sd in DEFAULT_SEEDS]
+        med_diff = float(s["med_rss_B_kb"]) - float(s["med_rss_A_kb"])
+        margin = float(s["rss_band_upper_kb"]) - float(s["med_rss_A_kb"])
+        lines.append(
+            f"| {c} | {med_diff:+.1f} | +{margin:.1f} | {min(d_aa):+.0f}..{max(d_aa):+.0f} | "
+            f"{min(d_ap):+.0f}..{max(d_ap):+.0f} | {min(d_b):+.0f}..{max(d_b):+.0f} | "
+            f"{s['mw_p_rss_gt_BA']} | {s['mem_ok']} |"
+        )
+
     args.report.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"Verdict: {verdict}", flush=True)
     return 0
