@@ -372,6 +372,25 @@ def test_a_dropped_sutton_chen_rerun_row_is_reported():
     assert sc_code_revisions(audit, SC_N12, "sc108-38", "gmin", "gmin pin") == []
 
 
+def test_a_sutton_chen_harness_blob_off_its_revision_is_reported():
+    audit = audit_mod.Audit()
+    rows = audit.rows(SC_RERUN_ROWS)
+    rows[0]["harness_blob"] = "0" * 40
+    audit_mod.sc_h2h_harness_blob(audit)
+    drifted = [(r[2], r[3], r[4]) for r in audit.drifts()]
+    assert len(drifted) == 1
+    assert drifted[0][0] == "harness_blob"
+    assert "0" * 40 in drifted[0][1]
+    assert drifted[0][2] == "ac6b3c85b4eb435c4787a8a7425ab7e6858f9b34"
+
+
+def test_the_sutton_chen_harness_blob_matches_the_cited_harness():
+    audit = audit_mod.Audit()
+    audit_mod.sc_h2h_harness_blob(audit)
+    assert audit.drifts() == []
+    assert any(r[2] == "harness_blob" and r[3] == "ac6b3c85b4eb435c4787a8a7425ab7e6858f9b34" for r in audit.results)
+
+
 def test_the_printed_sutton_chen_gmin_rows_have_one_harness():
     # The printed GMIN rows no longer name their harness; the stored rows
     # give it, and with it the GMIN data file of scripts/metal_h2h/run_sc.py.

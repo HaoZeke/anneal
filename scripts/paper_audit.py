@@ -2207,6 +2207,19 @@ def sc_rerun_tests(rows: list[dict[str, str]]) -> list[dict[str, object]]:
     return out
 
 
+def sc_h2h_harness_blob(audit: Audit) -> None:
+    """The rows' harness blob is the harness file at the cited harness revision."""
+    rows = audit.rows(SC_RERUN_ROWS)
+    revisions = sorted({r["harness_revision"].strip() for r in rows})
+    blobs = sorted({r["harness_blob"].strip() for r in rows})
+    revision = revisions[0] if len(revisions) == 1 else ""
+    expected = ""
+    if revision:
+        expected = git("rev-parse", "--verify", "--quiet",
+                       f"{revision}:scripts/paper_rerun/sc_h2h.py").stdout.strip()
+    audit.cell(SC_RERUN_ROWS, "harness_blob", " ".join(blobs), expected)
+
+
 def sc_rerun_against_rows(audit: Audit) -> None:
     """The rerun rows are the manifest's cells once each, and the summary is what they give."""
     rows = audit.rows(SC_RERUN_ROWS)
@@ -2291,6 +2304,7 @@ def head_to_head(audit: Audit) -> None:
                          "arm", "evals_to_hit", True)
     path = "bench/metal-cluster-h2h/sc-n12/README.md"
     sc_rerun_against_rows(audit)
+    sc_h2h_harness_blob(audit)
     code = sc_rerun_code(audit)
     sc_develop_table(audit, path, code)
     sc_develop_table(audit, "bench/paper-rerun/sc-h2h/README.md", code)
