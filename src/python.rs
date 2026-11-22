@@ -3525,6 +3525,9 @@ fn rigid_probe(
 ///     `Config.for_tip4p(n)` when both are false, with these sites as the
 ///     rigid geometry. Needs `start`. Excludes `ras`, `derived`,
 ///     `length_scale`, `rigid`, `species`, `sigmas`, and a non-block layout.
+///   bonds: optional pairs of site indices for that custom body. Unset
+///     bonds are the two O-H contacts, `[[0, 1], [0, 2]]`. A list with no
+///     site joined to two others is refused. Needs `water_sites`.
 ///   groups: optional atom indices of each rigid group of a molecular
 ///     search. The presets become `Config::recommended_molecular` or, with
 ///     `recommended=False`, `Config::for_molecular`, at energy scale one.
@@ -3570,6 +3573,7 @@ fn rigid_probe(
     layout = "block",
     target = None,
     water_sites = None,
+    bonds = None,
     groups = None,
     local_step = None,
     ring_moves = None,
@@ -3595,6 +3599,7 @@ fn cluster_search(
     layout: &str,
     target: Option<f64>,
     water_sites: Option<PyReadonlyArray1<'_, f64>>,
+    bonds: Option<Vec<Vec<usize>>>,
     groups: Option<Vec<Vec<usize>>>,
     local_step: Option<&str>,
     ring_moves: Option<bool>,
@@ -3666,6 +3671,9 @@ fn cluster_search(
             "length_scale must be finite and positive",
         ));
     }
+    if bonds.is_some() && water_sites.is_none() {
+        return Err(PyValueError::new_err("bonds needs water_sites"));
+    }
     if rigid && species.is_some() {
         return Err(PyValueError::new_err(
             "rigid bodies and species swaps are different charts",
@@ -3709,13 +3717,21 @@ fn cluster_search(
                 return Err(PyValueError::new_err("water_sites needs a start"));
             }
             let sites = sl.chunks(3).map(|c| [c[0], c[1], c[2]]).collect();
+            let declared = match bonds {
+                None => vec![[0, 1], [0, 2]],
+                Some(pairs) => pairs
+                    .into_iter()
+                    .map(|pair| {
+                        if pair.len() != 2 {
+                            return Err(PyValueError::new_err("a bond is two site indices"));
+                        }
+                        Ok([pair[0], pair[1]])
+                    })
+                    .collect::<PyResult<Vec<[usize; 2]>>>()?,
+            };
             Some(
-                crate::rigid_body::RigidBodyGeometry::new_bonded(
-                    sites,
-                    vec![8, 1, 1],
-                    vec![[0, 1], [0, 2]],
-                )
-                .map_err(PyValueError::new_err)?,
+                crate::rigid_body::RigidBodyGeometry::new_bonded(sites, vec![8, 1, 1], declared)
+                    .map_err(PyValueError::new_err)?,
             )
         }
     };

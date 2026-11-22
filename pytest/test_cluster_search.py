@@ -187,6 +187,30 @@ def test_cluster_search_water_sites_validation():
         cluster_search(
             f, g, 2, 100, start=start, water_sites=WATER_SITES, species=[1, 2]
         )
+    with pytest.raises(ValueError, match="needs water_sites"):
+        cluster_search(f, g, 2, 100, start=start, bonds=[[0, 1], [0, 2]])
+    with pytest.raises(ValueError, match="no hub"):
+        cluster_search(
+            f, g, 2, 100, start=start, water_sites=WATER_SITES, bonds=[[1, 2]]
+        )
+
+
+def test_cluster_search_custom_bonds():
+    n = 2
+    start = np.zeros(6 * n)
+    out = cluster_search(
+        lambda x: rigid_energy_grad(x)[0],
+        lambda x: rigid_energy_grad(x)[1],
+        n,
+        8,
+        seed=0,
+        recommended=False,
+        start=start,
+        water_sites=WATER_SITES,
+        bonds=[[0, 1], [0, 2]],
+    )
+    assert np.asarray(out["best"]).shape == (6 * n,)
+    assert np.isfinite(out["best_energy"])
 
 
 def test_cluster_search_ras_flag_exists_and_recommended_defaults():
