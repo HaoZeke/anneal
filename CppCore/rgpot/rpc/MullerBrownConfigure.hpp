@@ -2,7 +2,6 @@
 // MIT License
 // Copyright 2023--present rgpot developers
 
-#include <algorithm>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -13,30 +12,13 @@
 
 namespace rgpot::rpc {
 
-inline void readMullerBrownParameter(const capnp::List<double>::Reader &source,
-                                     std::array<double, 4> &target,
-                                     const char *name) {
-  if (source.size() == 0)
-    return;
-  if (source.size() != target.size())
-    throw std::invalid_argument(std::string("Muller-Brown ") + name +
-                                " must contain four values");
-  std::copy(source.begin(), source.end(), target.begin());
-}
-
 /// Every field is on the wire, so the result never depends on the pot being
-/// replaced: an empty list is the published default, four values override it.
+/// replaced; the rule for empty lists is in mullerBrownConfigFromLists.
 [[nodiscard]] inline MullerBrownConfig
 mullerBrownConfigFrom(const ::MullerBrownParams::Reader &params) {
-  MullerBrownConfig config;
-  readMullerBrownParameter(params.getAmplitude(), config.amplitude,
-                           "amplitude");
-  readMullerBrownParameter(params.getA(), config.a, "a");
-  readMullerBrownParameter(params.getB(), config.b, "b");
-  readMullerBrownParameter(params.getC(), config.c, "c");
-  readMullerBrownParameter(params.getX0(), config.x0, "x0");
-  readMullerBrownParameter(params.getY0(), config.y0, "y0");
-  return config;
+  return mullerBrownConfigFromLists(params.getAmplitude(), params.getA(),
+                                    params.getB(), params.getC(),
+                                    params.getX0(), params.getY0());
 }
 
 struct MullerBrownConfigureResult {

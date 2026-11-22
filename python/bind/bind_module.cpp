@@ -107,17 +107,6 @@ rgpot::EAMTableFormat eam_table_format(const std::string &name) {
 }
 #endif
 
-template <typename Array>
-void copy_model_parameter(const std::vector<double> &source, Array &target,
-                          const char *name) {
-  if (source.empty())
-    return;
-  if (source.size() != target.size())
-    throw std::invalid_argument(std::string("Muller-Brown ") + name +
-                                " must contain four values");
-  std::copy(source.begin(), source.end(), target.begin());
-}
-
 #ifdef RGPOT_HAS_DFTD3
 rgpot::D3Damping d3_damping(const std::string &name) {
   if (name == "bj" || name == "BJ") {
@@ -996,15 +985,11 @@ NB_MODULE(_core, m) {
          const std::vector<double> &amplitude, const std::vector<double> &a,
          const std::vector<double> &b, const std::vector<double> &c,
          const std::vector<double> &x0, const std::vector<double> &y0) {
-        rgpot::MullerBrownConfig config;
-        copy_model_parameter(amplitude, config.amplitude, "amplitude");
-        copy_model_parameter(a, config.a, "a");
-        copy_model_parameter(b, config.b, "b");
-        copy_model_parameter(c, config.c, "c");
-        copy_model_parameter(x0, config.x0, "x0");
-        copy_model_parameter(y0, config.y0, "y0");
-        new (self) PotHolder<rgpot::MullerBrownPot>(
-            [config] { return std::make_unique<rgpot::MullerBrownPot>(config); });
+        const auto config =
+            rgpot::mullerBrownConfigFromLists(amplitude, a, b, c, x0, y0);
+        new (self) PotHolder<rgpot::MullerBrownPot>([config] {
+          return std::make_unique<rgpot::MullerBrownPot>(config);
+        });
       },
       nb::arg("amplitude") = std::vector<double>{-200, -100, -170, 15},
       nb::arg("a") = std::vector<double>{-1, -1, -6.5, 0.7},

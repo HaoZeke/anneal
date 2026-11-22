@@ -52,7 +52,7 @@ STRUCTS = (
     ("CppCore/rgpot/D2Pot/D2Pot.hpp", "D2Config"),
     ("CppCore/rgpot/D2Pot/D2CpmdPot.hpp", "D2CpmdConfig"),
     ("CppCore/rgpot/D4Pot/D4Config.hpp", "D4Config"),
-    ("CppCore/rgpot/Models/ModelPots.hpp", "MullerBrownConfig"),
+    ("CppCore/rgpot/Models/MullerBrownConfig.hpp", "MullerBrownConfig"),
 )
 
 # Classes whose sizeof the stamp folds. Only instance data members are
