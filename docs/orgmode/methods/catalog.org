@@ -238,7 +238,7 @@ the one the full distance gives.
 Key types and functions: =Bias= trait (src/bias.rs:35); =WellTemperedBias=
 (src/bias.rs:63); =BasinBias<F: Fingerprint>= (src/bias.rs:358);
 =BasinIndex<F: Fingerprint>= (src/bias.rs:381); =Fingerprint= trait
-(src/bias.rs:974); =SortedPairs= (src/bias.rs:991), the default
+(src/bias.rs:970); =SortedPairs= (src/bias.rs:987), the default
 permutation/translation/rotation-invariant fingerprint for point sets.
 
 Constants and defaults: deposit rule
