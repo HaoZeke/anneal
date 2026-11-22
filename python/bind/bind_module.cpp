@@ -256,58 +256,99 @@ ChildSpec child_spec_from(const std::string &name, nb::handle spec) {
   return out;
 }
 
-std::unique_ptr<rgpot::PotentialBase> child_from_spec(const ChildSpec &spec) {
+rgpot::LJConfig lj_config_from(const ChildSpec &spec) {
+  rgpot::LJConfig cfg;
+  if (spec.has_u0) {
+    cfg.u0 = spec.u0;
+  }
+  if (spec.has_cutoff) {
+    cfg.cutoff = spec.cutoff;
+  }
+  if (spec.has_psi) {
+    cfg.psi = spec.psi;
+  }
+  if (spec.has_switch_width) {
+    cfg.switch_width = spec.switch_width;
+  }
+  return cfg;
+}
+
+rgpot::MorseConfig morse_config_from(const ChildSpec &spec) {
+  rgpot::MorseConfig cfg;
+  if (spec.has_De) {
+    cfg.De = spec.De;
+  }
+  if (spec.has_a) {
+    cfg.a = spec.a;
+  }
+  if (spec.has_re) {
+    cfg.re = spec.re;
+  }
+  if (spec.has_cutoff) {
+    cfg.cutoff = spec.cutoff;
+  }
+  if (spec.has_switch_width) {
+    cfg.switch_width = spec.switch_width;
+  }
+  return cfg;
+}
+
+rgpot::D2Config d2_config_from(const ChildSpec &spec) {
+  rgpot::D2Config cfg =
+      spec.has_functional ? rgpot::d2_config_for(spec.functional) : rgpot::D2Config{};
+  if (spec.has_s6) {
+    cfg.s6 = spec.s6;
+  }
+  if (spec.has_d) {
+    cfg.d = spec.d;
+  }
+  if (spec.has_sr) {
+    cfg.sr = spec.sr;
+  }
+  if (spec.has_cutoff) {
+    cfg.cutoff = spec.cutoff;
+  }
+  return cfg;
+}
+
+/// Radius, in Angstrom, past which the child needs a periodic cell wider than
+/// twice that radius to see every neighbour it counts. The value is the
+/// cutoff the child is built with, so a kind with a default cutoff reports
+/// its class default. A kind that sums every image itself (d2, d3, d4) or is
+/// defined by CPMD's minimum image (d2cpmd) needs no wider cell and reports
+/// 0. An unknown kind throws, so no child resolves to a silent 0.
+double child_cutoff(const ChildSpec &spec) {
   if (spec.kind == "lj") {
-    rgpot::LJConfig cfg;
-    if (spec.has_u0) {
-      cfg.u0 = spec.u0;
-    }
-    if (spec.has_cutoff) {
-      cfg.cutoff = spec.cutoff;
-    }
-    if (spec.has_psi) {
-      cfg.psi = spec.psi;
-    }
-    if (spec.has_switch_width) {
-      cfg.switch_width = spec.switch_width;
-    }
-    return std::make_unique<rgpot::LJPot>(cfg);
+    return lj_config_from(spec).cutoff;
   }
   if (spec.kind == "morse") {
-    rgpot::MorseConfig cfg;
-    if (spec.has_De) {
-      cfg.De = spec.De;
-    }
-    if (spec.has_a) {
-      cfg.a = spec.a;
-    }
-    if (spec.has_re) {
-      cfg.re = spec.re;
-    }
-    if (spec.has_cutoff) {
-      cfg.cutoff = spec.cutoff;
-    }
-    if (spec.has_switch_width) {
-      cfg.switch_width = spec.switch_width;
-    }
-    return std::make_unique<rgpot::MorsePot>(cfg);
+    return morse_config_from(spec).cutoff;
+  }
+  if (spec.kind == "d2" || spec.kind == "d2cpmd") {
+    return 0.0;
+  }
+#ifdef RGPOT_HAS_DFTD3
+  if (spec.kind == "d3") {
+    return 0.0;
+  }
+#endif
+#ifdef RGPOT_HAS_DFTD4
+  if (spec.kind == "d4") {
+    return 0.0;
+  }
+#endif
+  throw std::invalid_argument("unknown child kind: " + spec.kind);
+}
+
+std::unique_ptr<rgpot::PotentialBase> child_from_spec(const ChildSpec &spec) {
+  if (spec.kind == "lj") {
+    return std::make_unique<rgpot::LJPot>(lj_config_from(spec));
+  }
+  if (spec.kind == "morse") {
+    return std::make_unique<rgpot::MorsePot>(morse_config_from(spec));
   }
   if (spec.kind == "d2") {
-    rgpot::D2Config cfg =
-        spec.has_functional ? rgpot::d2_config_for(spec.functional) : rgpot::D2Config{};
-    if (spec.has_s6) {
-      cfg.s6 = spec.s6;
-    }
-    if (spec.has_d) {
-      cfg.d = spec.d;
-    }
-    if (spec.has_sr) {
-      cfg.sr = spec.sr;
-    }
-    if (spec.has_cutoff) {
-      cfg.cutoff = spec.cutoff;
-    }
-    return std::make_unique<rgpot::D2Pot>(cfg);
+    return std::make_unique<rgpot::D2Pot>(d2_config_from(spec));
   }
   if (spec.kind == "d2cpmd") {
     rgpot::D2CpmdConfig cfg = spec.has_functional ? rgpot::d2_cpmd_config_for(spec.functional)
@@ -387,6 +428,16 @@ std::unique_ptr<rgpot::SumPot> sum_from_specs(const std::vector<SumSpec> &specs)
              spec.term.enabled ? child_from_spec(spec.child) : nullptr);
   }
   return sum;
+}
+
+double sum_cutoff(const std::vector<SumSpec> &specs) {
+  double cutoff = 0.0;
+  for (const SumSpec &spec : specs) {
+    if (spec.term.enabled) {
+      cutoff = std::max(cutoff, child_cutoff(spec.child));
+    }
+  }
+  return cutoff;
 }
 
 nb::list sum_components(const rgpot::SumPot &pot) {
@@ -1041,6 +1092,26 @@ NB_MODULE(_core, m) {
           nb::arg("box").noconvert(),
           "Return (energy, forces, variance) for one configuration. "
           "Forces are -dE/dx.")
+      .def("caps",
+           [](const rgpot::TersoffSiC &self) {
+             return rgpot::pybind::caps_dict(self.caps());
+           })
+      .def(
+          "evaluate",
+          [](rgpot::TersoffSiC &self, const F64 &positions,
+             nb::handle atom_types, const F64 &box) {
+            auto geom = rgpot::pybind::read_geom(positions, atom_types, box);
+            rgpot::pybind::FullResult result;
+            {
+              nb::gil_scoped_release release;
+              result = rgpot::pybind::run_force(self, geom);
+            }
+            return rgpot::pybind::result_dict(result);
+          },
+          nb::arg("positions").noconvert(), nb::arg("atom_types"),
+          nb::arg("box").noconvert(),
+          "Energy, forces, variance, and the Cauchy stress, shape (3, 3), "
+          "in eV/Angstrom^3. The kernel runs detached.")
       .def("energy_gradient", &energy_gradient_call<rgpot::TersoffSiC>,
            nb::arg("positions").noconvert(), nb::arg("atom_types"),
            nb::arg("box").noconvert(),
@@ -1106,13 +1177,21 @@ NB_MODULE(_core, m) {
       "__init__",
       [](PotHolder<rgpot::SumPot> *self, const nb::list &terms) {
         const std::vector<SumSpec> specs = sum_specs_from(terms);
+        const double cutoff = sum_cutoff(specs);
         new (self) PotHolder<rgpot::SumPot>([=] { return sum_from_specs(specs); });
+        self->set_cutoff(cutoff);
       },
       nb::arg("terms"),
       "Weighted sum of child potentials. terms is a list of kind strings or "
       "dicts with kind, name (term<i>), weight (1.0, sign allowed), enabled "
       "(True) and the kind's fields as for ExprPot. A disabled term is "
       "never built or evaluated.");
+  sum.def_prop_ro(
+      "cutoff",
+      [](const PotHolder<rgpot::SumPot> &self) { return self.cutoff(); },
+      "Largest minimum-image cutoff of the enabled terms, in Angstrom: the "
+      "periodic cell width the sum needs to exceed twice. A term with no such "
+      "radius (d2, d2cpmd, d3, d4) counts 0, and a sum of only those is 0.");
   sum.def(
       "components",
       [](PotHolder<rgpot::SumPot> &self) { return sum_components(self.slot()); },
@@ -1129,12 +1208,15 @@ NB_MODULE(_core, m) {
          const nb::dict &terms) {
         std::vector<ChildSpec> specs;
         specs.reserve(terms.size());
+        double cutoff = 0.0;
         for (auto item : terms) {
           auto name = nb::cast<std::string>(item.first);
           specs.push_back(child_spec_from(name, item.second));
+          cutoff = std::max(cutoff, child_cutoff(specs.back()));
         }
         new (self) PotHolder<rgpot::ExprPot>(
             [=] { return expr_from_specs(expression, specs); });
+        self->set_cutoff(cutoff);
       },
       nb::arg("expression"), nb::arg("terms"),
       "expression is a Lepton string; terms maps names to 'lj'/'morse'/"
@@ -1144,6 +1226,13 @@ NB_MODULE(_core, m) {
   expr.def_prop_ro("expression", [](const PotHolder<rgpot::ExprPot> &self) {
     return self.primary().expression();
   });
+  expr.def_prop_ro(
+      "cutoff",
+      [](const PotHolder<rgpot::ExprPot> &self) { return self.cutoff(); },
+      "Largest minimum-image cutoff of the terms, in Angstrom: the periodic "
+      "cell width the expression needs to exceed twice. A term with no such "
+      "radius (d2, d2cpmd, d3, d4) counts 0, and an expression of only those "
+      "is 0.");
   expr.def(
       "d_energy_d_term",
       [](PotHolder<rgpot::ExprPot> &self, const std::string &name) {

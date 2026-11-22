@@ -119,9 +119,10 @@ mod tests {
     }
 
     /// Conventional cubic cell and its four-site basis within a sphere
-    /// of 12 cells. Independent of `fcc_power_sum`.
+    /// of 32 cells. Independent of `fcc_power_sum`, which walks a cube
+    /// in half-cell indices.
     fn direct_fcc_energy(m: &SuttonChenMetal, radius: f64) -> f64 {
-        const CELLS: i32 = 12;
+        const CELLS: i32 = 32;
         let basis = [
             [0.0, 0.0, 0.0],
             [0.5, 0.5, 0.0],
@@ -201,5 +202,76 @@ mod tests {
         let (au_r, _) = sutton_chen_scales(au.epsilon, au.c, au.a, au.n, au.m);
         let ratio = au_r / pt_r;
         assert!((ratio - au.a / pt.a).abs() < 1e-12);
+    }
+
+    #[test]
+    fn copper_silver_gold_and_nickel_match_published_bulk_values() {
+        // Sutton and Chen, Phil. Mag. Lett. 61, 139 (1990), Table I.
+        // The tabulated `a` is the conventional fcc lattice constant
+        // and the cohesive energy is positive here.
+        let rows = [
+            (
+                "Cu",
+                SuttonChenMetal {
+                    epsilon: 1.23820e-2,
+                    c: 39.432,
+                    a: 3.61,
+                    n: 9,
+                    m: 6,
+                },
+                3.50,
+            ),
+            (
+                "Ag",
+                SuttonChenMetal {
+                    epsilon: 2.54150e-3,
+                    c: 144.410,
+                    a: 4.09,
+                    n: 12,
+                    m: 6,
+                },
+                2.96,
+            ),
+            ("Au", sutton_chen_gold(), 3.78),
+            (
+                "Ni",
+                SuttonChenMetal {
+                    epsilon: 1.57070e-2,
+                    c: 39.432,
+                    a: 3.52,
+                    n: 9,
+                    m: 6,
+                },
+                4.44,
+            ),
+        ];
+        for (name, metal, published_depth) in rows {
+            let (radius, depth) =
+                sutton_chen_scales(metal.epsilon, metal.c, metal.a, metal.n, metal.m);
+            let lattice_constant = radius * 2.0_f64.sqrt();
+            assert!(
+                (lattice_constant - metal.a).abs() < 1e-5,
+                "{name}: a={lattice_constant}, expected {}",
+                metal.a
+            );
+            assert!(
+                (depth - published_depth).abs() < 2e-4,
+                "{name}: cohesive energy={depth}, expected {published_depth}"
+            );
+
+            // This sum has a spherical cutoff and a four-site conventional
+            // basis, independently of the parity walk in fcc_power_sum.
+            let brute = direct_fcc_energy(&metal, radius);
+            assert!(
+                (brute + published_depth).abs() < 2e-4,
+                "{name}: brute-force energy={brute}, expected -{published_depth}"
+            );
+            for strain in [-2e-3, 2e-3] {
+                assert!(
+                    direct_fcc_energy(&metal, radius * (1.0 + strain)) > brute,
+                    "{name}: the published lattice is not a local minimum"
+                );
+            }
+        }
     }
 }

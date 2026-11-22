@@ -167,6 +167,15 @@ half the smallest face spacing of the cell.
 
 ** Checks
 
+=rgpot-pair= independently checks the bulk scale against a conventional
+four-site fcc cell summed inside a spherical cutoff.
+Its Cu, Ag, Au and Ni rows recover the published conventional lattice constants
+3.61, 4.09, 4.08 and 3.52 Angstrom within 1e-5 Angstrom and the cohesive
+energies 3.50, 2.96, 3.78 and 4.44 eV within 2e-4 eV.
+The production sum instead walks half-cell integer triples with =i + j + k=
+even, which is fcc; restricting the triples to all even or all odd would be bcc.
+Thus the reported fcc-neighbour bug does not apply to the current solver.
+
 =SuttonChenPotTest= compares the platinum row with the Large-scale
 Atomic/Molecular Massively Parallel Simulator (LAMMPS), version 22 Jul 2025.
 LAMMPS runs the potential as =pair_style eam/fs=, the embedded atom method (EAM)

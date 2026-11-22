@@ -389,6 +389,11 @@ public:
   /// so a centre computed on one thread's instance serves the others.
   HessianVectorCache &hvp() { return hvp_; }
 
+  /// Radius in Angstrom the kernel needs a periodic cell wider than twice,
+  /// for a composite whose children set it. NaN until set_cutoff.
+  [[nodiscard]] double cutoff() const noexcept { return cutoff_; }
+  void set_cutoff(double value) noexcept { cutoff_ = value; }
+
 private:
   void clear() noexcept {
     std::lock_guard<std::mutex> lock(mu_);
@@ -403,6 +408,7 @@ private:
   std::mutex mu_;
   std::unordered_map<std::thread::id, std::unique_ptr<Pot>> extra_;
   HessianVectorCache hvp_;
+  double cutoff_ = std::numeric_limits<double>::quiet_NaN();
 };
 
 inline HvpScheme parse_hvp_scheme(const std::string &name) {

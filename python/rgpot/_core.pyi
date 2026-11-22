@@ -1051,6 +1051,13 @@ class TersoffSiC:
         Return (energy, forces, variance) for one configuration. Forces are -dE/dx.
         """
 
+    def caps(self) -> dict: ...
+
+    def evaluate(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> dict:
+        """
+        Energy, forces, variance, and the Cauchy stress, shape (3, 3), in eV/Angstrom^3. The kernel runs detached.
+        """
+
     def energy_gradient(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
         """
         Energy and dE/dx. positions is (n_atoms, 3) or (n_config, n_atoms, 3). A batch shares atom_types and box, and crosses into the library once.
@@ -1189,6 +1196,12 @@ class SumPot:
         Weighted sum of child potentials. terms is a list of kind strings or dicts with kind, name (term<i>), weight (1.0, sign allowed), enabled (True) and the kind's fields as for ExprPot. A disabled term is never built or evaluated.
         """
 
+    @property
+    def cutoff(self) -> float:
+        """
+        Largest minimum-image cutoff of the enabled terms, in Angstrom: the periodic cell width the sum needs to exceed twice. A term with no such radius (d2, d2cpmd, d3, d4) counts 0, and a sum of only those is 0.
+        """
+
     def components(self) -> list:
         """
         Per-term record of this thread's last call: name, weight, enabled, evaluated, energy (eV, before the weight), forces (N, 3), variance and stress (3, 3, or None).
@@ -1260,6 +1273,12 @@ class ExprPot:
 
     @property
     def expression(self) -> str: ...
+
+    @property
+    def cutoff(self) -> float:
+        """
+        Largest minimum-image cutoff of the terms, in Angstrom: the periodic cell width the expression needs to exceed twice. A term with no such radius (d2, d2cpmd, d3, d4) counts 0, and an expression of only those is 0.
+        """
 
     def d_energy_d_term(self, name: str) -> float: ...
 

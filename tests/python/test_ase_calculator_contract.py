@@ -159,11 +159,12 @@ def test_implemented_properties_by_capabilities() -> None:
             "forces",
             "stress",
         ]
-        tersoff_call = RgpotCalculator("tersoffsic")
-        assert tersoff_call.implemented_properties == [
+        tersoff_sic = RgpotCalculator("tersoffsic")
+        assert tersoff_sic.implemented_properties == [
             "energy",
             "free_energy",
             "forces",
+            "stress",
         ]
 
 
@@ -364,6 +365,9 @@ def test_todict_json_roundtrip_and_custom_potential() -> None:
     np.testing.assert_allclose(clone.get_stress(), ref_stress, atol=EXACT_MATCH_ATOL)
 
     class _CallablePot:
+        # A caller-supplied potential states its cutoff. 0 leaves the cell untiled.
+        cutoff = 0.0
+
         def __call__(self, positions, numbers, box):
             del numbers, box
             return 0.0, np.zeros_like(positions), 0.0

@@ -608,17 +608,21 @@ def test_bundled_kinds_are_tiling_invariant(kind: str, symbol: str, lattice: str
     )
 
 
-@needs_fortran
-def test_call_only_binding_works() -> None:
-    """TersoffSiC has __call__ but no evaluate or caps."""
+def test_tersoff_sic_binding_reports_analytic_stress() -> None:
     atoms = si_small()
     atoms.calc = RgpotCalculator("tersoffsic")
-    reference = atoms.copy()
-    reference.calc = RgpotCalculator("tersoff")
-    assert atoms.get_potential_energy() == pytest.approx(
-        reference.get_potential_energy(), rel=1e-12
+    assert np.isfinite(atoms.get_potential_energy())
+    assert "stress" in atoms.calc.implemented_properties
+    np.testing.assert_allclose(
+        atoms.get_forces(),
+        calculate_numerical_forces(atoms, eps=1e-5),
+        atol=2e-6,
     )
-    assert "stress" not in atoms.calc.implemented_properties
+    np.testing.assert_allclose(
+        atoms.get_stress(),
+        calculate_numerical_stress(atoms, eps=1e-6, voigt=True),
+        atol=2e-6,
+    )
 
 
 def test_cluster_only_kernel_refuses_periodic_cells() -> None:

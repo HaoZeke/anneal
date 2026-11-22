@@ -43,8 +43,9 @@ differentiates. A caller with no volume keeps the padded box's stress.
 from __future__ import annotations
 
 import itertools
+import math
 import re
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Sequence, SupportsFloat, SupportsIndex
 
 import numpy as np
 from ase.atoms import Atoms
@@ -66,12 +67,40 @@ _ASE_KEYS = {
 # the "Pot" suffix and with "_", "-", "." and spaces ignored.
 _ALIASES = {
     "lennardjones": "LJPot",
+    "gromacs": "rgpot_gromacs_potential",
+    "openmm": "rgpot_openmm_potential",
 }
 
-# Neighbour cutoffs of the bound kernels, in Angstrom, for kernels whose
-# binding has no config()["cutoff"]. WaterH has no cutoff, so an open
-# cell for it uses the 100 Angstrom floor and a periodic cell is not
-# tiled.
+# These are result types returned by engine factory functions. nanobind
+# does not expose constructors for them, so listing their class names as
+# accepted kinds would be dishonest.
+_FACTORY_ONLY_TYPES = {"LammpsPot", "GromacsPot", "OpenMMPot"}
+
+_FACTORY_DEFAULTS = {
+    "rgpot_gromacs_potential": {
+        "u0": 1.0,
+        "cutoff": 8.0,
+        "psi": 1.0,
+        "engine_path": "",
+    },
+    "rgpot_openmm_potential": {
+        "u0": 1.0,
+        "cutoff": 8.0,
+        "psi": 1.0,
+        "engine_path": "",
+    },
+}
+
+# Cutoffs, in Angstrom, of the bound kernels whose binding publishes none
+# through ``cutoff``, ``native_cutoff`` or ``config()["cutoff"]``. A cell
+# narrower than twice the value is tiled for a minimum-image kernel. A 0.0
+# entry is a statement that no wider cell is needed: the kernel sums every
+# image itself (D2Pot, D4Pot), is not periodic (D3Pot, MullerBrownPot), has no
+# cutoff (WaterHPot), is defined by a single minimum image (D2CpmdPot), or
+# hands the geometry to an engine that owns the neighbour search (IPIPot,
+# LammpsPot). A
+# class that is in neither this table nor one of the three published forms
+# has no known cutoff, and :func:`_kernel_cutoff` raises for it.
 _KERNEL_CUTOFF_ANGSTROM = {
     "SWPot": 1.8 * 2.0951,
     "StillingerWeberSi": 1.8 * 2.0951,
@@ -83,7 +112,17 @@ _KERNEL_CUTOFF_ANGSTROM = {
     "FeHePot": 5.4,
     "CuH2Pot": 6.1,
     "WaterHPot": 0.0,
+    "D2Pot": 0.0,
+    "D2CpmdPot": 0.0,
+    "D3Pot": 0.0,
+    "MullerBrownPot": 0.0,
+    "D4Pot": 0.0,
+    "IPIPot": 0.0,
+    "LammpsPot": 0.0,
 }
+
+# GromacsPot and OpenMMPot report ``native_cutoff()`` in nanometres.
+_NANOMETRE_IN_ANGSTROM = 10.0
 
 _OPEN_BOX_FLOOR_ANGSTROM = 100.0
 
@@ -92,14 +131,16 @@ def _normalise(name: str) -> str:
     return re.sub(r"[\s_\-.]", "", name).lower()
 
 
-def _potential_classes() -> dict[str, type]:
-    """Kind string -> bound potential class, from the compiled module."""
+def _potential_factories() -> dict[str, Any]:
+    """Kind string -> bound potential constructor, from the compiled module."""
     import rgpot
 
-    found: dict[str, type] = {}
+    found: dict[str, Any] = {}
     for name in dir(rgpot):
         cls = getattr(rgpot, name, None)
         if not isinstance(cls, type) or issubclass(cls, BaseException):
+            continue
+        if name in _FACTORY_ONLY_TYPES:
             continue
         if not str(getattr(cls, "__module__", "")).startswith("rgpot"):
             continue
@@ -110,20 +151,23 @@ def _potential_classes() -> dict[str, type]:
         if key.endswith("pot") and len(key) > 3:
             found.setdefault(key[:-3], cls)
     for alias, target in _ALIASES.items():
-        cls = getattr(rgpot, target, None)
-        if isinstance(cls, type):
-            found.setdefault(alias, cls)
+        factory = getattr(rgpot, target, None)
+        if callable(factory):
+            found.setdefault(alias, factory)
     return found
 
 
 def available_kinds() -> list[str]:
     """Kind strings :class:`RgpotCalculator` accepts in this build."""
-    return sorted(_potential_classes())
+    return sorted(_potential_factories())
 
 
-def _init_parameters(cls: type) -> list[str] | None:
+def _init_parameters(factory: Any) -> list[str] | None:
     """Keyword names of the bound constructor, None when unknown."""
-    sigs = getattr(getattr(cls, "__init__", None), "__nb_signature__", None)
+    callable_obj = (
+        getattr(factory, "__init__", None) if isinstance(factory, type) else factory
+    )
+    sigs = getattr(callable_obj, "__nb_signature__", None)
     if not sigs:
         return None
     names: set[str] = set()
@@ -137,20 +181,20 @@ def _init_parameters(cls: type) -> list[str] | None:
     return sorted(names)
 
 
-def _build(cls: type, params: dict[str, Any]) -> Any:
-    accepted = _init_parameters(cls)
+def _build(factory: Any, params: dict[str, Any]) -> Any:
+    accepted = _init_parameters(factory)
     if accepted is not None:
         unknown = sorted(set(params) - set(accepted))
         if unknown:
             raise ValueError(
-                f"unknown {cls.__name__} parameters: {unknown}; "
+                f"unknown {factory.__name__} parameters: {unknown}; "
                 f"accepted: {accepted}"
             )
     try:
-        return cls(**params)
+        return factory(**params)
     except TypeError as err:
         raise ValueError(
-            f"{cls.__name__} rejected parameters {sorted(params)}: {err}"
+            f"{factory.__name__} rejected parameters {sorted(params)}: {err}"
         ) from err
 
 
@@ -168,14 +212,15 @@ def _resolve_potential(
                 "potential must be an rgpot potential or a kind string"
             )
         return potential, _spec_of(potential)
-    classes = _potential_classes()
-    cls = classes.get(_normalise(potential))
-    if cls is None:
+    factories = _potential_factories()
+    factory = factories.get(_normalise(potential))
+    if factory is None:
         raise ValueError(
             f"unknown potential kind {potential!r}; this build has "
-            f"{sorted(classes)}"
+            f"{sorted(factories)}"
         )
-    return _build(cls, dict(params)), (cls.__name__, dict(params))
+    full = {**_FACTORY_DEFAULTS.get(factory.__name__, {}), **params}
+    return _build(factory, full), (factory.__name__, full)
 
 
 def _spec_of(potential: Any) -> tuple[str, dict[str, Any]] | None:
@@ -183,6 +228,8 @@ def _spec_of(potential: Any) -> tuple[str, dict[str, Any]] | None:
     import rgpot
 
     cls = type(potential)
+    if cls.__name__ in _FACTORY_ONLY_TYPES:
+        return None
     if getattr(rgpot, cls.__name__, None) is not cls:
         return None
     config = getattr(potential, "config", None)
@@ -195,23 +242,61 @@ def _spec_of(potential: Any) -> tuple[str, dict[str, Any]] | None:
     return None
 
 
+def _checked_cutoff(name: str, value: Any) -> float:
+    cutoff = float(value)
+    if not math.isfinite(cutoff) or cutoff < 0.0:
+        raise ValueError(
+            f"{name} reports the cutoff {cutoff!r}; it must be finite and not "
+            "negative"
+        )
+    return cutoff
+
+
 def _kernel_cutoff(potential: Any) -> float:
-    """Cutoff the open box and the supercell have to clear, in Angstrom."""
+    """Cutoff the open box and the supercell have to clear, in Angstrom.
+
+    The potential publishes it as ``native_cutoff()`` (nanometres), a
+    ``cutoff`` property (``EAMTablePot``, ``ExprPot``, ``SumPot``) or
+    ``config()["cutoff"]``. A kernel that has none of these is looked up in
+    ``_KERNEL_CUTOFF_ANGSTROM``. A kernel in no source raises ``ValueError``:
+    a cutoff of 0 would skip the tiling a minimum-image kernel needs and
+    return the wrong energy in a short cell, without a message.
+    """
+    name = type(potential).__name__
+    if name in _KERNEL_CUTOFF_ANGSTROM:
+        return _checked_cutoff(name, _KERNEL_CUTOFF_ANGSTROM[name])
+    native = getattr(potential, "native_cutoff", None)
+    if callable(native):
+        raw_native = native()
+        if not isinstance(raw_native, (SupportsFloat, SupportsIndex)):
+            raise TypeError(
+                f"{name}.native_cutoff() returned {raw_native!r}; expected a number"
+            )
+        return _checked_cutoff(name, float(raw_native) * _NANOMETRE_IN_ANGSTROM)
     cutoff = getattr(potential, "cutoff", None)
-    if cutoff is not None:
-        return float(cutoff)
+    if cutoff is not None and not callable(cutoff):
+        return _checked_cutoff(name, cutoff)
     config = getattr(potential, "config", None)
     if callable(config):
         cfg = config()
-        if isinstance(cfg, dict) and "cutoff" in cfg:
-            return float(cfg["cutoff"])
-    return float(_KERNEL_CUTOFF_ANGSTROM.get(type(potential).__name__, 0.0))
+        if isinstance(cfg, dict) and cfg.get("cutoff") is not None:
+            return _checked_cutoff(name, cfg["cutoff"])
+    raise ValueError(
+        f"cannot determine the cutoff of {name}: it has no cutoff property, "
+        "native_cutoff() or config()['cutoff'], and no built-in entry. "
+        "Without it the calculator cannot tile a short periodic cell, so it "
+        "refuses the potential instead of assuming 0"
+    )
 
 
 def _caps(potential: Any) -> dict[str, Any]:
     caps = getattr(potential, "caps", None)
     result = caps() if callable(caps) else None
-    return dict(result) if isinstance(result, dict) else {}
+    if isinstance(result, dict):
+        return dict(result)
+    # IPIPot publishes the stress of its last socket exchange through a
+    # separate method. Other call-only bindings have no stress surface.
+    return {"stress": callable(getattr(potential, "stress", None))}
 
 
 def _pbc_flags(pbc: Any) -> np.ndarray:
@@ -463,7 +548,12 @@ def _call(potential: Any, positions: np.ndarray, numbers: np.ndarray, box: np.nd
     if evaluate is not None:
         return evaluate(positions, numbers, box)
     energy, forces, _variance = potential(positions, numbers, box)
-    return {"energy": energy, "forces": forces, "stress": None}
+    stress = getattr(potential, "stress", None)
+    return {
+        "energy": energy,
+        "forces": forces,
+        "stress": stress() if callable(stress) else None,
+    }
 
 
 class RgpotCalculator(Calculator):
@@ -562,6 +652,11 @@ class RgpotCalculator(Calculator):
                 f"cannot pickle a calculator over {self._name}: build it from "
                 "a kind string or a bound rgpot potential"
             )
+        if self._name == "IPIPot":
+            raise TypeError(
+                "cannot pickle a calculator over IPIPot: the potential owns "
+                "a live socket; construct a new calculator with the address"
+            )
         state = self.__dict__.copy()
         del state["_potential"]
         return state
@@ -573,6 +668,7 @@ class RgpotCalculator(Calculator):
         assert self._spec is not None
         name, params = self._spec
         self._potential = _build(getattr(rgpot, name), params)
+        self._configure()
 
     def calculate(
         self,
@@ -582,6 +678,8 @@ class RgpotCalculator(Calculator):
     ) -> None:
         """Fill ``self.results``. ``free_energy`` equals ``energy``."""
         Calculator.calculate(self, atoms, properties, system_changes)
+        if system_changes:
+            self.results = {}
         assert self.atoms is not None
         wanted = set(properties)
         per_atom = self._per_atom and bool(wanted & {"energies", "stresses"})
