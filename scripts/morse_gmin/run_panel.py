@@ -35,7 +35,10 @@ from machine_provenance import (  # noqa: E402
     aggregate_machine_columns,
     machine_columns,
     machine_fieldnames,
+    read_built_gmin_provenance,
     require_csv_schema,
+    require_gmin_build_key,
+    validate_saved_gmin_provenance,
 )
 
 # Cambridge Cluster Database, Doye and Wales. The bold entry at that rho.
@@ -70,6 +73,7 @@ FIELDS = [
     "pot_s",
     "outside_s",
     "code_revision",
+    "gmin_build_key",
     "host",
     "machine_id",
     "cpu_model",
@@ -241,6 +245,7 @@ def anneal_line(
         "pot_s": cols[9],
         "outside_s": cols[10],
         "code_revision": revision,
+        "gmin_build_key": "",
         "host": socket.gethostname() if host is None else host,
         **stamped_machine,
     }
@@ -254,6 +259,7 @@ def gmin_line(
     target: float,
     revision: str,
     *,
+    gmin_build_key: str = "",
     host: str | None = None,
     machine: dict[str, str] | None = None,
 ) -> dict[str, str]:
@@ -277,6 +283,11 @@ def gmin_line(
     pot = float(fields.get("pot_s") or 0.0)
     outside = float(fields.get("outside_s") or max(wall - pot, 0.0))
     stamped_machine = dict(machine) if machine is not None else machine_columns()
+    stamped_key = (
+        require_gmin_build_key(gmin_build_key, "gmin_build_key")
+        if gmin_build_key
+        else ""
+    )
     return {
         "system": name,
         "code": "gmin",
@@ -290,12 +301,18 @@ def gmin_line(
         "pot_s": f"{pot:.6f}",
         "outside_s": f"{outside:.6f}",
         "code_revision": revision,
+        "gmin_build_key": stamped_key,
         "host": socket.gethostname() if host is None else host,
         **stamped_machine,
     }
 
 
-def load_archives(root: Path, svnrev: str) -> dict[tuple[str, int], dict[str, str]]:
+def load_archives(
+    root: Path,
+    svnrev: str,
+    gmin_build_key: str,
+) -> dict[tuple[str, int], dict[str, str]]:
+    expected_key = require_gmin_build_key(gmin_build_key, "expected gmin_build_key")
     wanted = {row[0]: row for row in SYSTEMS}
     found: dict[tuple[str, int], dict[str, str]] = {}
     for relative in ARCHIVES:
@@ -305,8 +322,6 @@ def load_archives(root: Path, svnrev: str) -> dict[tuple[str, int], dict[str, st
         with path.open(newline="") as handle:
             for raw in csv.DictReader(handle):
                 if raw.get("code") != "gmin":
-                    continue
-                if raw.get("code_revision") != svnrev:
                     continue
                 machine_id = (raw.get("machine_id") or "").strip()
                 cpu_model = (raw.get("cpu_model") or "").strip()
@@ -320,6 +335,12 @@ def load_archives(root: Path, svnrev: str) -> dict[tuple[str, int], dict[str, st
                 seed = int(raw["seed"])
                 if seed not in SEEDS:
                     continue
+                validate_saved_gmin_provenance(
+                    raw,
+                    path=path,
+                    revision=svnrev,
+                    build_key=expected_key,
+                )
                 found[(name, seed)] = {
                     "system": name,
                     "code": "gmin",
@@ -333,6 +354,7 @@ def load_archives(root: Path, svnrev: str) -> dict[tuple[str, int], dict[str, st
                     "pot_s": raw["pot_s"],
                     "outside_s": raw["outside_s"],
                     "code_revision": svnrev,
+                    "gmin_build_key": expected_key,
                     "host": (raw.get("host") or "").strip(),
                     "machine_id": machine_id,
                     "cpu_model": cpu_model,
@@ -340,7 +362,13 @@ def load_archives(root: Path, svnrev: str) -> dict[tuple[str, int], dict[str, st
     return found
 
 
-def load_done(path: Path) -> dict[tuple[str, str, int], dict[str, str]]:
+def load_done(
+    path: Path,
+    *,
+    gmin_revision: str,
+    gmin_build_key: str,
+) -> dict[tuple[str, str, int], dict[str, str]]:
+    expected_key = require_gmin_build_key(gmin_build_key, "expected gmin_build_key")
     if not path.is_file() or path.stat().st_size == 0:
         return {}
     require_csv_schema(path, FIELDS)
@@ -349,6 +377,13 @@ def load_done(path: Path) -> dict[tuple[str, str, int], dict[str, str]]:
         for raw in csv.DictReader(handle):
             if not (raw.get("machine_id") or "").strip() or not (raw.get("cpu_model") or "").strip():
                 raise RuntimeError(f"{path} has a row missing machine_id or cpu_model")
+            if raw.get("code") == "gmin":
+                validate_saved_gmin_provenance(
+                    raw,
+                    path=path,
+                    revision=gmin_revision,
+                    build_key=expected_key,
+                )
             done[(raw["system"], raw["code"], int(raw["seed"]))] = {key: raw.get(key, "") for key in FIELDS}
     return done
 
@@ -443,6 +478,7 @@ def run_gmin(
     target: float,
     work: Path,
     revision: str,
+    gmin_build_key: str,
 ) -> dict[str, str]:
     work.mkdir(parents=True, exist_ok=True)
     coords = work / "coords"
@@ -473,7 +509,15 @@ def run_gmin(
     row_path = work / "row.txt"
     if not row_path.is_file():
         raise RuntimeError(f"gmin {name} {seed} exited {proc.returncode}\n{(proc.stdout or '')[-500:]}")
-    return gmin_line(row_path.read_text(), name, seed, budget, target, revision)
+    return gmin_line(
+        row_path.read_text(),
+        name,
+        seed,
+        budget,
+        target,
+        revision,
+        gmin_build_key=require_gmin_build_key(gmin_build_key, "gmin_build_key"),
+    )
 
 
 def git_head(root: Path) -> str:
@@ -524,6 +568,11 @@ def main() -> int:
     parser.add_argument("--work", type=Path, default=Path("/work/morse-gmin"))
     parser.add_argument("--gmin", type=Path, default=Path("/work/morse-gmin/bin/GMIN"))
     parser.add_argument("--svnrev", type=Path, default=Path("/work/gmin-h2h/src/wales/GMIN/source/SVNREV"))
+    parser.add_argument(
+        "--gmin-source",
+        type=Path,
+        default=Path(os.environ.get("GMIN_SOURCE_FILE", "/work/gmin-h2h/gmin-source.txt")),
+    )
     parser.add_argument("--system", action="append")
     parser.add_argument("--seed", type=int, action="append")
     parser.add_argument("--arm", choices=("anneal", "gmin", "both"), default="both")
@@ -538,12 +587,12 @@ def main() -> int:
     if not args.gmin.is_file():
         raise SystemExit(f"missing {args.gmin}")
     revision = git_head(root)
-    got = read_svnrev(args.svnrev)
+    got, gmin_build_key = read_built_gmin_provenance(args.svnrev, args.gmin_source)
     data = (root / "examples" / "h2h_gmin_morse.data").read_text()
     if not data.endswith("\n"):
         data += "\n"
-    archives = load_archives(root, got)
-    done = load_done(seeds_path)
+    archives = load_archives(root, got, gmin_build_key)
+    done = load_done(seeds_path, gmin_revision=got, gmin_build_key=gmin_build_key)
     rows = list(done.values())
     systems = [row for row in SYSTEMS if not args.system or row[0] in args.system]
     seeds = tuple(args.seed) if args.seed else SEEDS
@@ -584,6 +633,7 @@ def main() -> int:
                     target,
                     args.work / name / f"gmin-{seed}",
                     got,
+                    gmin_build_key,
                 )
                 rows.append(row)
                 done[(name, "gmin", seed)] = row

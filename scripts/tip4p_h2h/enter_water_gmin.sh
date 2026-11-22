@@ -63,6 +63,7 @@ exec /usr/bin/python3 -u $WORK/bin/run_water_gmin.py \\
   --anneal-revision $(cat "$WORK/anneal-head") \\
   --gmin $WORK/bin/GMIN \\
   --gmin-svnrev /work/gmin-h2h/src/wales/GMIN/source/SVNREV \\
+  --gmin-source $WORK/gmin-source.txt \\
   --data $WORK/bin/h2h_gmin_tip4p.data \\
   --verify-data $WORK/bin/h2h_gmin_tip4p_verify.data \\
   --gm-dir $WORK/gm \\

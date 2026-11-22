@@ -30,11 +30,13 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
-from gmin_pin import read_built_revision  # noqa: E402
 from machine_provenance import (  # noqa: E402
     aggregate_machine_columns,
     machine_columns,
+    read_built_gmin_source,
     require_csv_schema,
+    require_gmin_build_key,
+    validate_saved_gmin_provenance,
     validate_saved_row_identity,
 )
 
@@ -93,6 +95,7 @@ PER_SEED_FIELDS = [
     "outside_s",
     "gmin_url",
     "gmin_revision",
+    "gmin_build_key",
     "anneal_head",
     "code_revision",
     "host",
@@ -216,10 +219,16 @@ def write_per_seed_row(
     machine: dict[str, str],
     url: str = "",
     revision: str = "",
+    gmin_build_key: str = "",
     head: str = "",
     host: str | None = None,
 ) -> dict[str, str]:
     code_revision = head if arm == "anneal" else revision
+    stamped_build_key = (
+        require_gmin_build_key(gmin_build_key, "gmin_build_key")
+        if arm == "gmin"
+        else ""
+    )
     values = {
         "system": row["system"],
         "code": arm,
@@ -234,6 +243,7 @@ def write_per_seed_row(
         "outside_s": f"{float(row.get('outside_s') or max(float(row['wall_s']) - float(row.get('pot_s') or 0.0), 0.0)):.6f}",
         "gmin_url": url if arm == "gmin" else "",
         "gmin_revision": revision if arm == "gmin" else "",
+        "gmin_build_key": stamped_build_key,
         "anneal_head": head if arm == "anneal" else "",
         "code_revision": code_revision,
         "host": os.uname().nodename if host is None else host,
@@ -301,6 +311,7 @@ def run_gmin(
     machine: dict[str, str] | None = None,
     url: str = "",
     revision: str = "",
+    gmin_build_key: str = "",
 ):
     stamped_machine = dict(machine) if machine is not None else machine_columns()
     work.mkdir(parents=True, exist_ok=True)
@@ -338,6 +349,7 @@ def run_gmin(
         machine=stamped_machine,
         url=url,
         revision=revision,
+        gmin_build_key=gmin_build_key,
     )
 
 
@@ -364,6 +376,7 @@ def as_result(name, arm, row):
         "best": float(row["best"]),
         "gmin_url": row.get("gmin_url", ""),
         "gmin_revision": row.get("gmin_revision", ""),
+        "gmin_build_key": row.get("gmin_build_key", ""),
         "anneal_head": row.get("anneal_head", ""),
         "code_revision": row.get("code_revision", ""),
         "host": row.get("host", ""),
@@ -502,9 +515,12 @@ def load_saved(
     machine: dict[str, str] | None = None,
     url: str = "",
     revision: str = "",
+    gmin_build_key: str = "",
     head: str = "",
 ):
     if not path.is_file() or not path.read_text().strip():
+        if arm == "gmin":
+            require_gmin_build_key(gmin_build_key, "expected gmin_build_key")
         return None
     expected_machine = dict(machine) if machine is not None else machine_columns()
     text = path.read_text()
@@ -522,16 +538,21 @@ def load_saved(
         or row.get("cpu_model") != expected_machine["cpu_model"]
     ):
         return None
+    if arm == "gmin":
+        validate_saved_gmin_provenance(
+            row,
+            path=path,
+            revision=revision,
+            build_key=gmin_build_key,
+            url=url,
+            revision_fields=("code_revision", "gmin_revision"),
+        )
+        return as_result(name, arm, row)
     code_revision = (row.get("code_revision") or "").strip()
     if not code_revision:
         return None
-    if arm == "anneal" and head and code_revision != head:
+    if head and code_revision != head:
         return None
-    if arm == "gmin":
-        if revision and code_revision != revision:
-            return None
-        if url and (row.get("gmin_url") or "") != url:
-            return None
     return as_result(name, arm, row)
 
 
@@ -589,8 +610,8 @@ def main(argv: list[str]) -> int:
     for name in names:
         if name not in PAPER_BUDGETS:
             raise SystemExit(f"no paper budget for {name}")
-    url, _recorded_revision = load_source(args.source)
-    revision = read_built_revision(args.svnrev, args.source)
+    load_source(args.source)
+    url, revision, gmin_build_key = read_built_gmin_source(args.source, args.svnrev)
     head = args.head_file.read_text().strip()
     machine = machine_columns()
     if args.summary:
@@ -618,6 +639,7 @@ def main(argv: list[str]) -> int:
             machine=machine,
             url=url,
             revision=revision,
+            gmin_build_key=gmin_build_key,
             head=head,
         )
         if existing is not None:
@@ -653,6 +675,7 @@ def main(argv: list[str]) -> int:
                 machine=machine,
                 url=url,
                 revision=revision,
+                gmin_build_key=gmin_build_key,
             )
         result = as_result(name, arm, raw)
         rows.append(result)

@@ -38,8 +38,11 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
-from machine_provenance import machine_columns, require_csv_schema  # noqa: E402
-from gmin_pin import read_built_revision  # noqa: E402
+from machine_provenance import (  # noqa: E402
+    machine_columns,
+    read_built_gmin_provenance,
+    require_csv_schema,
+)
 
 BUDGET = 2_000_000
 HIT_TOL = DEFAULT_HIT_TOL
@@ -344,7 +347,8 @@ def main() -> int:
         args.head_file,
         args.gmin_source,
     )
-    revision = read_built_revision(args.svnrev, args.gmin_source)
+    source_path = args.gmin_source or (args.svnrev.parents[3] / "gmin-source.txt")
+    revision, gmin_build_key = read_built_gmin_provenance(args.svnrev, source_path)
     host = os.uname().nodename
     machine = machine_columns()
     whole = args.size is None and args.seed is None
@@ -362,8 +366,13 @@ def main() -> int:
             start = args.work / f"tip4p{n}-s{seed}.start.gmin"
             print(f"gmin n={n} seed={seed}", flush=True)
             gmin = run_gmin(args.gmin, args.data, n, seed, start, args.work)
-            anneal.update(code_revision=head, host=host, **machine)
-            gmin.update(code_revision=revision, host=host, **machine)
+            anneal.update(code_revision=head, gmin_build_key="", host=host, **machine)
+            gmin.update(
+                code_revision=revision,
+                gmin_build_key=gmin_build_key,
+                host=host,
+                **machine,
+            )
             rows.extend([anneal, gmin])
             require_csv_schema(args.rows, sorted({*anneal, *gmin}))
             with args.rows.open("a") as handle:

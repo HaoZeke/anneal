@@ -37,9 +37,11 @@ from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 from machine_provenance import (  # noqa: E402
     aggregate_machine_columns,
     machine_columns,
+    read_built_gmin_provenance,
     require_csv_schema,
+    require_gmin_build_key,
+    validate_saved_gmin_provenance,
 )
-from gmin_pin import read_built_revision  # noqa: E402
 
 HIT_TOL = DEFAULT_HIT_TOL
 SEEDS = tuple(range(2000, 2012))
@@ -186,9 +188,11 @@ def run_gmin(gmin: Path, data: Path, n: int, seed: int, budget: int, start: Path
 
 def load_reuse(
     path: Path | None,
-    revision: str = "",
+    revision: str,
+    gmin_build_key: str,
 ) -> dict[tuple[int, int], dict[str, str]]:
     """Map (budget, seed) to a stored GMIN row, from one or more CSVs."""
+    expected_key = require_gmin_build_key(gmin_build_key, "expected gmin_build_key")
     out: dict[tuple[int, int], dict[str, str]] = {}
     if path is None:
         return out
@@ -200,8 +204,12 @@ def load_reuse(
             for row in csv.DictReader(handle):
                 if row.get("code") != "gmin":
                     continue
-                if revision and row.get("code_revision", "").strip() != revision:
-                    continue
+                validate_saved_gmin_provenance(
+                    row,
+                    path=p,
+                    revision=revision,
+                    build_key=expected_key,
+                )
                 out[(int(row["budget"]), int(row["seed"]))] = row
     return out
 
@@ -215,6 +223,7 @@ def build_budget_row(
     seed: int,
     head: str,
     revision: str,
+    gmin_build_key: str = "",
     host: str,
     machine: dict[str, str],
     reused: bool = False,
@@ -223,13 +232,11 @@ def build_budget_row(
     if reused:
         if code != "gmin":
             raise ValueError(f"only gmin rows may be reused, got {code!r}")
-        carried_rev = row.get("code_revision", "").strip()
-        if not carried_rev:
-            raise RuntimeError("refusing a reused row without code_revision")
-        if revision and carried_rev != revision:
-            raise RuntimeError(
-                f"refusing a reused row from {carried_rev}, expected {revision}"
-            )
+        carried_rev, stamped_build_key = validate_saved_gmin_provenance(
+            row,
+            revision=revision,
+            build_key=gmin_build_key,
+        )
         row_host = row.get("host", "").strip()
         row_machine = {
             "machine_id": row.get("machine_id", "").strip(),
@@ -240,6 +247,11 @@ def build_budget_row(
         code_revision = carried_rev
     else:
         code_revision = head if code == "anneal" else revision
+        stamped_build_key = (
+            require_gmin_build_key(gmin_build_key, "gmin_build_key")
+            if code == "gmin"
+            else ""
+        )
         row_host = host
         row_machine = {
             "machine_id": machine["machine_id"],
@@ -261,6 +273,7 @@ def build_budget_row(
         "outside_s": f"{outside_of(row):.6f}",
         "basins": row.get("basins", ""),
         "code_revision": code_revision,
+        "gmin_build_key": stamped_build_key,
         "host": row_host,
         **row_machine,
     }
@@ -355,17 +368,18 @@ def main() -> int:
         args.head_file,
         args.gmin_source,
     )
-    revision = read_built_revision(args.svnrev, args.gmin_source)
+    source_path = args.gmin_source or (args.svnrev.parents[3] / "gmin-source.txt")
+    revision, gmin_build_key = read_built_gmin_provenance(args.svnrev, source_path)
     host = os.uname().nodename
     machine = machine_columns()
-    reuse = load_reuse(args.gmin_rows, revision)
+    reuse = load_reuse(args.gmin_rows, revision, gmin_build_key)
     n = args.size
     budgets = (args.budget,) if args.budget else BUDGETS
     seeds = (args.seed,) if args.seed is not None else SEEDS
     whole = args.budget is None and args.seed is None
     fields = ["system", "code", "budget", "seed", "hit", "evals_to_hit", "charged",
-              "best", "wall_s", "pot_s", "outside_s", "basins", "code_revision", "host",
-              "machine_id", "cpu_model"]
+              "best", "wall_s", "pot_s", "outside_s", "basins", "code_revision",
+              "gmin_build_key", "host", "machine_id", "cpu_model"]
     require_csv_schema(args.rows, fields)
     rows: list[dict[str, str]] = []
     with args.rows.open("w", newline="") as handle:
@@ -392,6 +406,7 @@ def main() -> int:
                         seed=seed,
                         head=head,
                         revision=revision,
+                        gmin_build_key=gmin_build_key,
                         host=host,
                         machine=machine,
                         reused=(code == "gmin" and carried is not None),

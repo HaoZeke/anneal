@@ -5,6 +5,10 @@ these provenance columns:
 
 - `code_revision` (or the harness-specific revision columns) identifies the
   code that produced the row.
+- `gmin_build_key` on GMIN-bearing tables records the 64-hex SHA-256 build
+  key from the built `gmin-source.txt` (empty on non-GMIN rows).  Saved GMIN
+  rows are reused only when both `code_revision` and `gmin_build_key` match
+  the current build; any mismatch is rejected naming the mismatched field.
 - `host` remains the UTS hostname for compatibility.  Bench runs normally
   record `bench`; it is not a physical-machine identity.
 - `machine_id` is lowercase hexadecimal SHA-256 of the public salt

@@ -25,8 +25,12 @@ import run_sc as sc  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from machine_provenance import (  # noqa: E402
     aggregate_machine_columns,
+    gmin_row_key,
     machine_columns,
+    read_built_gmin_provenance,
     require_csv_schema,
+    validate_gmin_group_provenance,
+    validate_saved_gmin_provenance,
 )
 
 SEEDS = tuple(range(2000, 2012))
@@ -56,6 +60,7 @@ SEED_FIELDS = (
     "paths",
     "path_improvements",
     "code_revision",
+    "gmin_build_key",
     "host",
     "harness_revision",
     "machine_id",
@@ -383,9 +388,11 @@ def summarise(rows: list[dict[str, str]], head: str, revision: str) -> list[dict
         if anneal:
             out.append(line(system, "anneal", own, anneal, test, True, gmin))
         if gmin:
+            validate_gmin_group_provenance(gmin, label=f"{system} gmin ({own})")
             out.append(line(system, "gmin", own, gmin, test, False, anneal))
         for (arm, harness), group in groups.items():
             if arm == "gmin" and harness != own:
+                validate_gmin_group_provenance(group, label=f"{system} gmin ({harness})")
                 later.append(line(system, "gmin", harness, group, tests(anneal, group), True, anneal))
     return out + later
 
@@ -452,27 +459,49 @@ def main(argv: list[str]) -> int:
         print(f"working directory is {Path.cwd()}, expected /work", file=sys.stderr)
         return 2
     head = args.head_file.read_text().strip()
-    revision = sc.read_built_revision(args.svnrev, args.source)
-    rows = load_rows(args.seeds_out)
-    arm_rows = load_rows(args.arms_out) if args.arms_out else []
-    done = {(row["system"], row["seed"], row["arm"]) for row in rows}
+    revision, gmin_build_key = read_built_gmin_provenance(args.svnrev, args.source)
     require_csv_schema(args.seeds_out, SEED_FIELDS)
     require_csv_schema(args.summary, SUMMARY_FIELDS)
     if args.arms_out:
         require_csv_schema(args.arms_out, ARM_FIELDS)
+    rows = load_rows(args.seeds_out)
+    arm_rows = load_rows(args.arms_out) if args.arms_out else []
+    for row in rows:
+        if row["arm"] == "gmin":
+            validate_saved_gmin_provenance(
+                row,
+                path=args.seeds_out,
+                revision=revision,
+                build_key=gmin_build_key,
+            )
+        elif (row.get("code_revision") or "").strip() != head:
+            raise ValueError(
+                f"{args.seeds_out}: saved row code_revision mismatch: "
+                f"got {row.get('code_revision')!r}, expected {head!r}"
+            )
+    done = {
+        (row["system"], row["seed"], row["arm"], *gmin_row_key(row, arm_field="arm"))
+        for row in rows
+    }
     machine = machine_columns()
 
     def store(seed_row: dict[str, str], extra_arms: list[dict[str, str]]) -> None:
-        key = (seed_row["system"], seed_row["seed"], seed_row["arm"])
-        if key in done:
-            return
         seed_row = {
             **seed_row,
             "code_revision": head if seed_row["arm"] == "anneal" else revision,
+            "gmin_build_key": "" if seed_row["arm"] == "anneal" else gmin_build_key,
             "host": os.uname().nodename,
             "harness_revision": head,
             **machine,
         }
+        key = (
+            seed_row["system"],
+            seed_row["seed"],
+            seed_row["arm"],
+            *gmin_row_key(seed_row, arm_field="arm"),
+        )
+        if key in done:
+            return
         rows.append(seed_row)
         done.add(key)
         arm_rows.extend({**row, **machine} for row in extra_arms)
@@ -493,7 +522,12 @@ def main(argv: list[str]) -> int:
         )
         return 0
     for system, seed, arm in jobs():
-        if (system, str(seed), arm) in done:
+        expected_key = (
+            (system, str(seed), "gmin", revision, gmin_build_key)
+            if arm == "gmin"
+            else (system, str(seed), arm, head, "")
+        )
+        if expected_key in done:
             print(f"skip {system} {arm} seed {seed}", flush=True)
             continue
         seed_row, extra = one_job(args, system, seed, arm)

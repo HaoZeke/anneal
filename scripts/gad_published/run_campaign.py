@@ -37,11 +37,13 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         break
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from read_deposit import HIT_TOL, REFERENCES, ZENODO_DOI, read_zip  # noqa: E402
-from gmin_pin import read_built_revision  # noqa: E402
 from machine_provenance import (  # noqa: E402
     aggregate_machine_columns,
     machine_columns,
+    read_built_gmin_provenance,
     require_csv_schema,
+    require_gmin_build_key,
+    validate_saved_gmin_provenance,
     validate_saved_row_identity,
 )
 
@@ -97,6 +99,7 @@ PER_SEED_FIELDS = [
     "pot_s",
     "outside_s",
     "code_revision",
+    "gmin_build_key",
     "host",
     "machine_id",
     "cpu_model",
@@ -309,11 +312,17 @@ def write_saved_rerun(
     row: dict[str, str],
     *,
     code_revision: str,
+    gmin_build_key: str = "",
     host: str,
     machine: dict[str, str],
 ) -> dict[str, str]:
     wall_s = float(row["wall_s"])
     pot_s = float(row["pot_s"])
+    stamped_key = (
+        require_gmin_build_key(gmin_build_key, "gmin_build_key")
+        if arm == "gmin"
+        else ""
+    )
     values = {
         "system": row["system"],
         "code": arm,
@@ -327,6 +336,7 @@ def write_saved_rerun(
         "pot_s": f"{pot_s:.6f}",
         "outside_s": row.get("outside_s") or f"{max(wall_s - pot_s, 0.0):.6f}",
         "code_revision": code_revision,
+        "gmin_build_key": stamped_key,
         "host": host,
         **machine,
     }
@@ -602,9 +612,12 @@ def saved_rerun(
     budget: int = BUDGET,
     *,
     code_revision: str,
+    gmin_build_key: str = "",
     machine: dict[str, str],
 ) -> dict | None:
     if not path.is_file() or path.stat().st_size == 0:
+        if arm == "gmin":
+            require_gmin_build_key(gmin_build_key, "expected gmin_build_key")
         return None
     text = path.read_text()
     row = _parse_saved_row(text, arm)
@@ -619,8 +632,17 @@ def saved_rerun(
     if (
         row.get("machine_id") != machine["machine_id"]
         or row.get("cpu_model") != machine["cpu_model"]
-        or row.get("code_revision") != code_revision
     ):
+        return None
+    if arm == "gmin":
+        validate_saved_gmin_provenance(
+            row,
+            path=path,
+            revision=code_revision,
+            build_key=gmin_build_key,
+        )
+        return rerun_record(n, arm, row)
+    if row.get("code_revision") != code_revision:
         return None
     return rerun_record(n, arm, row)
 
@@ -735,7 +757,7 @@ def main(argv: list[str]) -> int:
     head = args.head_file.read_text().strip()
     host = socket.gethostname()
     machine = machine_columns()
-    revision = read_built_revision(args.svnrev, args.source)
+    revision, gmin_build_key = read_built_gmin_provenance(args.svnrev, args.source)
     if args.summary:
         require_csv_schema(args.summary, SUMMARY_FIELDS)
     progress = args.runs.parent / "progress.txt"
@@ -784,6 +806,7 @@ def main(argv: list[str]) -> int:
             arm,
             BUDGET,
             code_revision=arm_revision,
+            gmin_build_key=gmin_build_key if arm == "gmin" else "",
             machine=machine,
         )
         if existing is not None:
@@ -819,6 +842,7 @@ def main(argv: list[str]) -> int:
             arm,
             raw,
             code_revision=arm_revision,
+            gmin_build_key=gmin_build_key if arm == "gmin" else "",
             host=host,
             machine=machine,
         )

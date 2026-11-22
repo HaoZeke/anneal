@@ -18,6 +18,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "machine_provenance.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from machine_provenance import (  # noqa: E402
+    read_built_gmin_provenance,
+    validate_saved_gmin_provenance,
+)
+
 SYSTEM = "au55"
 BUDGET = 1_000_000
 REFERENCE = -191.03085280
@@ -123,17 +132,45 @@ def run_anneal(binary: Path, seed: int) -> dict[str, str]:
     return parse_row(text)
 
 
-def stored_gmin(root: Path) -> list[dict[str, str]]:
+def _resolve_gmin_provenance(
+    svnrev: Path | None = None, gmin_source: Path | None = None
+) -> tuple[str, str]:
+    svnrev_path = svnrev or Path(
+        os.environ.get(
+            "GMIN_SVNREV_FILE", "/work/gmin-h2h/src/wales/GMIN/source/SVNREV"
+        )
+    )
+    source_path = gmin_source or Path(
+        os.environ.get("GMIN_SOURCE_FILE", "/work/gmin-h2h/gmin-source.txt")
+    )
+    return read_built_gmin_provenance(svnrev_path, source_path)
+
+
+def stored_gmin(
+    root: Path,
+    *,
+    gmin_revision: str = "",
+    gmin_build_key: str = "",
+) -> list[dict[str, str]]:
     path = root / "bench" / "au55-gupta" / "seeds.csv"
     if not path.is_file():
         return []
+    if not gmin_revision or not gmin_build_key:
+        gmin_revision, gmin_build_key = _resolve_gmin_provenance()
     rows = []
-    for row in csv.DictReader(path.open()):
-        if row["code"] != "gmin" or int(row["budget"]) != BUDGET:
-            continue
-        row = {field: row[field] for field in SEED_FIELDS}
-        row["hit"] = "1" if row["hit"] in ("1", "true") else "0"
-        rows.append(row)
+    with path.open() as handle:
+        for row in csv.DictReader(handle):
+            if row["code"] != "gmin" or int(row["budget"]) != BUDGET:
+                continue
+            validate_saved_gmin_provenance(
+                row,
+                path=path,
+                revision=gmin_revision,
+                build_key=gmin_build_key,
+            )
+            cleaned = {field: row[field] for field in SEED_FIELDS}
+            cleaned["hit"] = "1" if row["hit"] in ("1", "true") else "0"
+            rows.append(cleaned)
     return rows
 
 
@@ -195,6 +232,8 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--seed", type=int)
+    parser.add_argument("--svnrev", type=Path)
+    parser.add_argument("--gmin-source", type=Path)
     args = parser.parse_args()
     root = args.root.resolve()
     binary = binary_path(root)
@@ -202,8 +241,13 @@ def main() -> int:
         row = run_anneal(binary, args.seed)
         print(",".join(row[field] for field in SEED_FIELDS), flush=True)
         return 0
+    gmin_revision, gmin_build_key = _resolve_gmin_provenance(
+        args.svnrev, args.gmin_source
+    )
     anneal = [run_anneal(binary, seed) for seed in SEEDS]
-    gmin = stored_gmin(root)
+    gmin = stored_gmin(
+        root, gmin_revision=gmin_revision, gmin_build_key=gmin_build_key
+    )
     rows = []
     for seed in SEEDS:
         rows.extend(row for row in anneal if int(row["seed"]) == seed)

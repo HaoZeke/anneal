@@ -50,7 +50,10 @@ from machine_provenance import (  # noqa: E402
     aggregate_machine_columns,
     machine_columns,
     machine_fieldnames,
+    read_built_gmin_provenance,
     require_csv_schema,
+    validate_gmin_group_provenance,
+    validate_saved_gmin_provenance,
 )
 
 PAIR_ENV = {"H2H_PAIR_SCALE": "1"}
@@ -123,6 +126,11 @@ def selected(rows: list[dict[str, str]], system: str, code: str, revision: str, 
         raise RuntimeError(
             f"{system} {code}: mixed code_revision values {sorted(revisions)}"
         )
+    if code == "gmin":
+        try:
+            validate_gmin_group_provenance(ordered, label=f"{system} {code}")
+        except ValueError as error:
+            raise RuntimeError(str(error)) from error
     return ordered
 
 
@@ -259,12 +267,9 @@ def main(argv: list[str]) -> int:
         ).stdout.strip()
         if head != revision:
             raise SystemExit(f"{tree} is at {head}, not {revision}")
-    source = dict(line.split("=", 1) for line in args.gmin_source.read_text().splitlines() if "=" in line)
-    gmin_revision = panel.read_built_revision(args.svnrev, args.gmin_source)
-    if source.get("svnrev") != gmin_revision:
-        raise SystemExit(f"{args.gmin_source} does not describe {args.svnrev}")
-    if source.get("tarball_sha256") != panel.TARBALL_SHA256:
-        raise SystemExit(f"{args.gmin_source} has another GMIN tarball")
+    gmin_revision, gmin_build_key = read_built_gmin_provenance(
+        args.svnrev, args.gmin_source
+    )
     systems = [row[0] for row in panel.SYSTEMS if not args.system or row[0] in args.system]
     for system in systems:
         for bin_dir, tree in ((args.base_bin, args.base_tree), (args.head_bin, args.head_tree)):
@@ -279,8 +284,24 @@ def main(argv: list[str]) -> int:
     host = socket.gethostname()
     machine = machine_columns()
     session = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    done = {panel.row_key(row) for row in panel.read_rows(rows_path)}
     seeds = tuple(args.seed) if args.seed else panel.SEEDS
+    existing_rows = panel.read_rows(rows_path)
+    wanted_systems = set(systems)
+    wanted_seeds = {str(s) for s in seeds}
+    for stored_row in existing_rows:
+        if (
+            stored_row.get("code") == "gmin"
+            and stored_row.get("harness_revision") == args.revision
+            and stored_row.get("system") in wanted_systems
+            and stored_row.get("seed") in wanted_seeds
+        ):
+            validate_saved_gmin_provenance(
+                stored_row,
+                path=rows_path,
+                revision=gmin_revision,
+                build_key=gmin_build_key,
+            )
+    done = {panel.row_key(row) for row in existing_rows}
     print(f"session {session} revision {args.revision} base {args.base_revision}", flush=True)
     for system in systems:
         morse = panel.spec(system)[1] == "morse"
@@ -296,7 +317,8 @@ def main(argv: list[str]) -> int:
                     "fix2": args.revision,
                     "gmin": gmin_revision,
                 }[code]
-                key = (system, code, str(seed), code_revision, args.revision)
+                arm_build_key = gmin_build_key if code == "gmin" else ""
+                key = (system, code, str(seed), code_revision, arm_build_key, args.revision)
                 if key in done:
                     print(f"skip {system} {code} {seed}", flush=True)
                     continue
@@ -325,6 +347,7 @@ def main(argv: list[str]) -> int:
                     "budget": str(panel.PAPER_BUDGETS[system]),
                     **result,
                     "code_revision": code_revision,
+                    "gmin_build_key": arm_build_key,
                     "harness_revision": args.revision,
                     "host": host,
                     **machine,

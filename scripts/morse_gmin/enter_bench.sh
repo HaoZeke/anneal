@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Copyright (c) anneal developers
 # Morse against GMIN. One UTS namespace, hostname bench, one core.
-# A stored GMIN row is copied only when its code_revision matches the
-# built GMIN/source/SVNREV. Anneal is this tree.
+# A stored GMIN row is copied only when both its code_revision and
+# gmin_build_key match the built GMIN binary. Anneal is this tree.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)

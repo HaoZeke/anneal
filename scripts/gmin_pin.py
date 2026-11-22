@@ -110,17 +110,47 @@ def read_built_revision(svnrev: Path, metadata: Path | None = None) -> str:
     """Read a built SVNREV and optionally verify its generated source note."""
     revision = read_svnrev(svnrev)
     if metadata is not None:
+        if not metadata.is_file():
+            raise ValueError(f"missing GMIN source metadata {metadata}")
         source = dict(
             line.split("=", 1)
             for line in metadata.read_text().splitlines()
             if "=" in line
         )
-        if source.get("svnrev") != revision:
+        if "revision" in source and source["revision"].strip() != revision:
             raise ValueError(f"{metadata} does not describe {svnrev}")
-        if source.get("tarball_sha256") != TARBALL_SHA256:
+        if source.get("svnrev", "").strip() != revision:
+            raise ValueError(f"{metadata} does not describe {svnrev}")
+        if source.get("tarball_sha256", "").strip() != TARBALL_SHA256:
             raise ValueError(f"{metadata} has another GMIN tarball")
         require_build_key(source.get("build_key", ""), f"{metadata} build_key")
     return revision
+
+
+def read_built_provenance(svnrev: Path, metadata: Path) -> tuple[str, str]:
+    """Read and verify both the built GMIN SVN revision and its 64-hex build key."""
+    revision = read_built_revision(svnrev, metadata)
+    source = dict(
+        line.split("=", 1)
+        for line in metadata.read_text().splitlines()
+        if "=" in line
+    )
+    build_key = require_build_key(source.get("build_key", ""), f"{metadata} build_key")
+    return revision, build_key
+
+
+def read_built_source(metadata: Path, svnrev: Path) -> tuple[str, str, str]:
+    """Read and verify the source URL, built SVN revision, and 64-hex build key."""
+    revision, build_key = read_built_provenance(svnrev, metadata)
+    source = dict(
+        line.split("=", 1)
+        for line in metadata.read_text().splitlines()
+        if "=" in line
+    )
+    url = source.get("url", "").strip()
+    if not url:
+        raise ValueError(f"{metadata} is missing url")
+    return url, revision, build_key
 
 
 def shell_assignments() -> str:

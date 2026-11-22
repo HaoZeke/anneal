@@ -8,7 +8,9 @@ import csv
 import hashlib
 import io
 import os
-from collections.abc import Iterable, Mapping
+import re
+import sys
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
 MACHINE_ID_SALT = b"anneal-bench-machine-id-v1\0"
@@ -16,6 +18,11 @@ MACHINE_ID_PATH = Path("/etc/machine-id")
 PRODUCT_UUID_PATH = Path("/sys/class/dmi/id/product_uuid")
 CPUINFO_PATH = Path("/proc/cpuinfo")
 MACHINE_FIELDS = ("machine_id", "cpu_model")
+GMIN_BUILD_KEY_RE = re.compile(r"[0-9a-f]{64}")
+
+
+class SavedRowProvenanceMismatch(ValueError):
+    """Raised when a saved row disagrees with expected producer provenance."""
 
 
 def machine_provenance(
@@ -179,3 +186,171 @@ def validate_saved_row_identity(
         raise ValueError(
             f"{where}saved row budget mismatch: got {actual_budget}, expected {budget}"
         )
+
+
+def require_gmin_build_key(value: object, label: str = "gmin_build_key") -> str:
+    """Validate and return a 64-hex GMIN build key, rejecting absent or malformed values."""
+    cleaned = "" if value is None else str(value).strip()
+    if not GMIN_BUILD_KEY_RE.fullmatch(cleaned):
+        raise ValueError(f"missing or invalid {label}: {value!r}")
+    return cleaned
+
+
+def _gmin_pin_module():
+    here = str(Path(__file__).resolve().parent)
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    import gmin_pin
+
+    return gmin_pin
+
+
+def read_built_gmin_provenance(svnrev: Path, metadata: Path) -> tuple[str, str]:
+    """Return the verified `(revision, build_key)` pair for a built GMIN binary."""
+    return _gmin_pin_module().read_built_provenance(svnrev, metadata)
+
+
+def read_built_gmin_source(metadata: Path, svnrev: Path) -> tuple[str, str, str]:
+    """Return the verified `(url, revision, build_key)` triple for a built GMIN binary."""
+    return _gmin_pin_module().read_built_source(metadata, svnrev)
+
+
+def validate_saved_gmin_provenance(
+    row: Mapping[str, object],
+    *,
+    path: Path | str | None = None,
+    revision: str,
+    build_key: str,
+    url: str = "",
+    revision_fields: Sequence[str] = ("code_revision",),
+    build_key_field: str = "gmin_build_key",
+) -> tuple[str, str]:
+    """Ensure a saved GMIN row matches both expected SVN revision and 64-hex build key.
+
+    Caller-configuration errors (missing/invalid expected revision or build key)
+    raise plain ``ValueError``; stored-row disagreements raise
+    ``SavedRowProvenanceMismatch`` (a ``ValueError`` subclass) naming the field.
+    """
+    where = f"{path}: " if path is not None else ""
+    expected_rev = str(revision).strip()
+    if not expected_rev:
+        raise ValueError(f"{where}missing expected GMIN code_revision")
+    expected_key = require_gmin_build_key(
+        build_key, f"{where}expected {build_key_field}"
+    )
+    for field in revision_fields:
+        raw_rev = row.get(field)
+        actual_rev = "" if raw_rev is None else str(raw_rev).strip()
+        if actual_rev != expected_rev:
+            raise SavedRowProvenanceMismatch(
+                f"{where}saved row {field} mismatch: "
+                f"got {actual_rev!r}, expected {expected_rev!r}"
+            )
+    if "gmin_revision" not in revision_fields and "gmin_revision" in row:
+        raw_extra = row.get("gmin_revision")
+        extra_rev = "" if raw_extra is None else str(raw_extra).strip()
+        if extra_rev != expected_rev:
+            raise SavedRowProvenanceMismatch(
+                f"{where}saved row gmin_revision mismatch: "
+                f"got {extra_rev!r}, expected {expected_rev!r}"
+            )
+    if url:
+        raw_url = row.get("gmin_url")
+        actual_url = "" if raw_url is None else str(raw_url).strip()
+        if actual_url != url:
+            raise SavedRowProvenanceMismatch(
+                f"{where}saved row gmin_url mismatch: "
+                f"got {actual_url!r}, expected {url!r}"
+            )
+    raw_key = row.get(build_key_field)
+    actual_key = "" if raw_key is None else str(raw_key).strip()
+    if not GMIN_BUILD_KEY_RE.fullmatch(actual_key) or actual_key != expected_key:
+        raise SavedRowProvenanceMismatch(
+            f"{where}saved row {build_key_field} mismatch: "
+            f"got {actual_key!r}, expected {expected_key!r}"
+        )
+    return expected_rev, expected_key
+
+
+def gmin_row_key(
+    row: Mapping[str, object],
+    *,
+    arm_field: str = "code",
+    gmin_arms: Iterable[str] = ("gmin",),
+    revision_field: str = "code_revision",
+    build_key_field: str = "gmin_build_key",
+) -> tuple[str, str]:
+    """Return `(code_revision, gmin_build_key)` for keying stored rows."""
+    arm = str(row.get(arm_field) or "").strip()
+    rev = str(row.get(revision_field) or "").strip()
+    if not rev:
+        raise ValueError(f"saved row is missing {revision_field}")
+    raw_key = row.get(build_key_field)
+    key = "" if raw_key is None else str(raw_key).strip()
+    if arm in set(gmin_arms):
+        return rev, require_gmin_build_key(key, build_key_field)
+    if key:
+        raise ValueError(
+            f"non-GMIN arm {arm!r} must not carry {build_key_field}: {key!r}"
+        )
+    return rev, ""
+
+
+def validate_gmin_group_provenance(
+    rows: Iterable[Mapping[str, object]],
+    *,
+    label: str = "",
+    expected_revision: str = "",
+    expected_build_key: str = "",
+    revision_field: str = "code_revision",
+    build_key_field: str = "gmin_build_key",
+) -> None:
+    """Validate revision and build-key consistency across a GMIN row group.
+
+    Wholly legacy pre-build-key groups (where ``build_key_field`` is absent on
+    every row and ``expected_build_key`` is not provided) are permitted for
+    offline summarisation of historical committed tables.
+    """
+    materialized = list(rows)
+    if not materialized:
+        return
+    prefix = f"{label}: " if label else ""
+    revs = {
+        str(row.get(revision_field) or "").strip()
+        for row in materialized
+    }
+    if "" in revs:
+        raise ValueError(f"{prefix}missing {revision_field} on GMIN row")
+    if len(revs) > 1:
+        raise ValueError(
+            f"{prefix}mixed {revision_field} values {sorted(revs)}"
+        )
+    if expected_revision and next(iter(revs)) != expected_revision:
+        raise ValueError(
+            f"{prefix}{revision_field} mismatch: "
+            f"got {next(iter(revs))!r}, expected {expected_revision!r}"
+        )
+    has_col = [build_key_field in row for row in materialized]
+    if not any(has_col) and not expected_build_key:
+        return
+    if not all(has_col):
+        raise ValueError(
+            f"{prefix}cannot mix legacy and {build_key_field} GMIN rows"
+        )
+    keys = {
+        require_gmin_build_key(row.get(build_key_field), f"{prefix}{build_key_field}")
+        for row in materialized
+    }
+    if len(keys) > 1:
+        raise ValueError(
+            f"{prefix}mixed {build_key_field} values {sorted(keys)}"
+        )
+    if expected_build_key:
+        wanted = require_gmin_build_key(
+            expected_build_key, f"{prefix}expected {build_key_field}"
+        )
+        actual = next(iter(keys))
+        if actual != wanted:
+            raise ValueError(
+                f"{prefix}{build_key_field} mismatch: got {actual!r}, expected {wanted!r}"
+            )

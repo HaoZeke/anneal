@@ -25,9 +25,13 @@ from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 from gmin_pin import read_svnrev  # noqa: E402
 from machine_provenance import (  # noqa: E402
     aggregate_machine_columns,
+    gmin_row_key,
     machine_columns,
     machine_fieldnames,
+    read_built_gmin_provenance,
     require_csv_schema,
+    require_gmin_build_key,
+    validate_saved_gmin_provenance,
 )
 
 SYSTEMS = (
@@ -56,7 +60,13 @@ FIELDS = [
     "pot_s",
     "outside_s",
 ]
-ROW_FIELDS = FIELDS + ["code_revision", "host", "machine_id", "cpu_model"]
+ROW_FIELDS = FIELDS + [
+    "code_revision",
+    "gmin_build_key",
+    "host",
+    "machine_id",
+    "cpu_model",
+]
 SUMMARY_FIELDS = [
     "system",
     "anneal_hits",
@@ -176,12 +186,17 @@ def have(
     code: str,
     seed: int,
     revision: str | None = None,
+    gmin_build_key: str | None = None,
 ) -> bool:
     return any(
         row["system"] == system
         and row["code"] == code
         and int(row["seed"]) == seed
         and (revision is None or row.get("code_revision") == revision)
+        and (
+            gmin_build_key is None
+            or (row.get("gmin_build_key") or "").strip() == gmin_build_key
+        )
         for row in rows
     )
 
@@ -191,9 +206,11 @@ def canonical(row: dict[str, str]) -> dict[str, str]:
     cpu_model = str(row.get("cpu_model", "")).strip()
     if not machine_id or not cpu_model:
         raise ValueError("row is missing machine_id or cpu_model")
+    code_rev, build_key = gmin_row_key(row)
     out = {key: row[key] for key in FIELDS}
     out["hit"] = "1" if str(row["hit"]) in ("1", "true") else "0"
-    out["code_revision"] = row.get("code_revision", "")
+    out["code_revision"] = code_rev
+    out["gmin_build_key"] = build_key
     out["host"] = row.get("host", "")
     out["machine_id"] = machine_id
     out["cpu_model"] = cpu_model
@@ -212,7 +229,12 @@ def write_rows(path: Path, rows: list[dict[str, str]]) -> None:
         writer.writerows(ordered)
 
 
-def reuse_gmin(root: Path, revision: str) -> list[dict[str, str]]:
+def reuse_gmin(
+    root: Path,
+    revision: str,
+    gmin_build_key: str,
+) -> list[dict[str, str]]:
+    expected_key = require_gmin_build_key(gmin_build_key, "expected gmin_build_key")
     wanted = {name: budget for name, _n, _rho, budget, _ref in SYSTEMS}
     found = []
     for path in (
@@ -222,8 +244,6 @@ def reuse_gmin(root: Path, revision: str) -> list[dict[str, str]]:
         for row in load_rows(path, strict_schema=False):
             if row.get("code") != "gmin":
                 continue
-            if row.get("code_revision") != revision:
-                continue
             if not (row.get("machine_id") or "").strip() or not (row.get("cpu_model") or "").strip():
                 continue
             budget = wanted.get(row["system"])
@@ -231,7 +251,19 @@ def reuse_gmin(root: Path, revision: str) -> list[dict[str, str]]:
                 continue
             if int(row["seed"]) not in SEEDS:
                 continue
-            found.append({key: row[key] for key in ROW_FIELDS if key in row})
+            validate_saved_gmin_provenance(
+                row,
+                path=path,
+                revision=revision,
+                build_key=expected_key,
+            )
+            found.append(
+                {
+                    **{key: row[key] for key in ROW_FIELDS if key in row},
+                    "code_revision": revision,
+                    "gmin_build_key": expected_key,
+                }
+            )
     # First file wins on a duplicate.
     kept = []
     seen = set()
@@ -407,6 +439,11 @@ def main() -> None:
         type=Path,
         default=Path("/work/gmin-h2h/src/wales/GMIN/source/SVNREV"),
     )
+    parser.add_argument(
+        "--gmin-source",
+        type=Path,
+        default=Path(os.environ.get("GMIN_SOURCE_FILE", "/work/gmin-h2h/gmin-source.txt")),
+    )
     parser.add_argument("--system", action="append")
     parser.add_argument("--seed", type=int, action="append")
     parser.add_argument("--arm", choices=("anneal", "gmin", "both"), default="both")
@@ -418,8 +455,18 @@ def main() -> None:
     work.mkdir(parents=True, exist_ok=True)
     seeds_path = work / "seeds.csv"
     rows = load_rows(seeds_path)
-    gmin_revision = read_svnrev(args.svnrev)
-    reused_gmin = reuse_gmin(root, gmin_revision)
+    gmin_revision, gmin_build_key = read_built_gmin_provenance(
+        args.svnrev, args.gmin_source
+    )
+    for existing in rows:
+        if existing.get("code") == "gmin":
+            validate_saved_gmin_provenance(
+                existing,
+                path=seeds_path,
+                revision=gmin_revision,
+                build_key=gmin_build_key,
+            )
+    reused_gmin = reuse_gmin(root, gmin_revision, gmin_build_key)
     reused_keys = {(row["system"], int(row["seed"])) for row in reused_gmin}
     for row in reused_gmin:
         if not have(
@@ -428,6 +475,7 @@ def main() -> None:
             "gmin",
             int(row["seed"]),
             gmin_revision,
+            gmin_build_key,
         ):
             rows.append(row)
     write_rows(seeds_path, rows)
@@ -475,6 +523,7 @@ def main() -> None:
                     {
                         **run_anneal(binary, name, seed, budget),
                         "code_revision": head,
+                        "gmin_build_key": "",
                         "host": host,
                         **machine,
                     }
@@ -482,7 +531,7 @@ def main() -> None:
                 write_rows(seeds_path, rows)
             if args.arm == "anneal":
                 continue
-            if not have(rows, name, "gmin", seed, gmin_revision):
+            if not have(rows, name, "gmin", seed, gmin_revision, gmin_build_key):
                 print(f"gmin {name} {seed}", file=sys.stderr, flush=True)
                 rows.append(
                     {
@@ -498,6 +547,7 @@ def main() -> None:
                             work / "gmin" / name / str(seed),
                         ),
                         "code_revision": gmin_revision,
+                        "gmin_build_key": gmin_build_key,
                         "host": host,
                         **machine,
                     }

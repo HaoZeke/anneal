@@ -32,14 +32,16 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 from machine_provenance import (  # noqa: E402
+    SavedRowProvenanceMismatch,
     machine_provenance,
+    read_built_gmin_source,
+    require_gmin_build_key,
+    validate_saved_gmin_provenance,
     validate_saved_row_identity,
 )
 from gmin_pin import (  # noqa: E402
     TARBALL_SHA256,
-    read_built_revision,
     read_svnrev,
-    require_build_key,
 )
 
 PAPER_BUDGETS = {
@@ -364,7 +366,7 @@ def run_gmin(
         or int(row["energy_only_entries"]) < 0
     ):
         raise RuntimeError(f"invalid gmin counters: {row}")
-    verified_key = require_build_key(build_key, "gmin build_key")
+    verified_key = require_gmin_build_key(build_key, "gmin build_key")
     return write_per_seed_row(
         saved,
         row,
@@ -558,11 +560,8 @@ def load_saved(
     gmin_build_key: str = "",
 ) -> dict | None:
     n = system_size(system)
-    expected_build_key = (
-        require_build_key(gmin_build_key, "expected gmin_build_key")
-        if arm == "gmin"
-        else ""
-    )
+    if arm == "gmin":
+        require_gmin_build_key(gmin_build_key, "expected gmin_build_key")
     if not path.is_file():
         return None
     text = path.read_text().strip()
@@ -591,20 +590,27 @@ def load_saved(
             raise ValueError(f"{path}: invalid gmin counters: {row}")
     if row.get("machine_id") != machine_id or row.get("cpu_model") != cpu_model:
         return None
-    if not code_revision or row.get("code_revision") != code_revision:
+    if not code_revision:
         return None
     if arm == "anneal":
+        if row.get("code_revision") != code_revision:
+            return None
         if row.get("anneal_head") != code_revision:
             return None
         if row.get("head") and row["head"] != code_revision:
             return None
     else:
-        if row.get("gmin_revision") != code_revision:
-            return None
-        if gmin_url and row.get("gmin_url") != gmin_url:
-            return None
-        stored_build_key = (row.get("gmin_build_key") or "").strip()
-        if stored_build_key != expected_build_key:
+        try:
+            validate_saved_gmin_provenance(
+                row,
+                path=path,
+                revision=code_revision,
+                build_key=gmin_build_key,
+                url=gmin_url,
+                revision_fields=("code_revision", "gmin_revision"),
+            )
+        except SavedRowProvenanceMismatch as mismatch:
+            print(str(mismatch), file=sys.stderr)
             return None
     return as_result(n, arm, row)
 
@@ -651,21 +657,8 @@ def self_test() -> None:
 
 
 def load_source_metadata(source_path: Path, svnrev_path: Path) -> tuple[str, str, str]:
-    url, recorded_revision = load_source(source_path)
-    revision = read_built_revision(svnrev_path, source_path)
-    source = dict(
-        line.split("=", 1)
-        for line in source_path.read_text().splitlines()
-        if "=" in line
-    )
-    if recorded_revision != revision or source.get("svnrev") != revision:
-        raise ValueError(f"{source_path} does not describe {svnrev_path}")
-    if source.get("tarball_sha256") != TARBALL_SHA256:
-        raise ValueError(f"{source_path} has another GMIN tarball")
-    build_key = require_build_key(
-        source.get("build_key", ""), f"{source_path} build_key"
-    )
-    return url, revision, build_key
+    load_source(source_path)
+    return read_built_gmin_source(source_path, svnrev_path)
 
 
 def main(argv: list[str]) -> int:

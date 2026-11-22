@@ -38,10 +38,13 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 from machine_provenance import (  # noqa: E402
     machine_columns,
+    read_built_gmin_provenance,
     require_csv_schema,
+    require_gmin_build_key,
+    validate_gmin_group_provenance,
+    validate_saved_gmin_provenance,
     validate_saved_row_identity,
 )
-from gmin_pin import read_built_revision  # noqa: E402
 
 SYSTEMS = ("sw10", "sw13", "sw20", "tc10", "tc20")
 SEEDS = tuple(range(2000, 2012))
@@ -86,6 +89,7 @@ ROW_FIELDS = [
     "pot_s",
     "outside_s",
     "code_revision",
+    "gmin_build_key",
     "host",
     "machine_id",
     "cpu_model",
@@ -336,6 +340,8 @@ def summarise(rows, references, revision, heads):
             group = [row for row in rows if row["system"] == name and row["code"] == code]
             if not group:
                 continue
+            if code in GMIN:
+                validate_gmin_group_provenance(group, label=f"{name} {code}")
             seed_text = " ".join(sorted({row["seed"] for row in group}, key=int))
             evals = median_iqr([float(row["evals_to_hit"]) for row in group])
             charged = [float(row["charged"]) for row in group]
@@ -418,8 +424,12 @@ def load_saved(
     budget: int,
     *,
     machine: dict[str, str] | None = None,
+    code_revision: str = "",
+    gmin_build_key: str = "",
 ) -> dict[str, str] | None:
     if not path.is_file() or not path.read_text().strip():
+        if code in GMIN:
+            require_gmin_build_key(gmin_build_key, "expected gmin_build_key")
         return None
     expected_machine = dict(machine) if machine is not None else machine_columns()
     row = next(csv.DictReader(path.read_text().splitlines()))
@@ -436,6 +446,18 @@ def load_saved(
         or row.get("cpu_model") != expected_machine["cpu_model"]
     ):
         raise RuntimeError(f"{path} is a legacy or different-machine row")
+    if code in GMIN:
+        validate_saved_gmin_provenance(
+            row,
+            path=path,
+            revision=code_revision,
+            build_key=gmin_build_key,
+        )
+    elif code_revision and (row.get("code_revision") or "").strip() != code_revision:
+        raise ValueError(
+            f"{path}: saved row code_revision mismatch: "
+            f"got {row.get('code_revision')!r}, expected {code_revision!r}"
+        )
     return row
 
 
@@ -456,6 +478,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--carbon-data", type=Path, required=True)
     parser.add_argument("--ase", type=Path, required=True)
     parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--tersoff-source", type=Path)
     parser.add_argument("--svnrev", type=Path, required=True)
     parser.add_argument("--head-file", type=Path, required=True)
     parser.add_argument("--before-head-file", type=Path)
@@ -469,7 +492,18 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv[1:])
     names = tuple(args.system) if args.system else SYSTEMS
     wanted = set(args.code) if args.code else None
-    revision = read_built_revision(args.svnrev, args.source)
+    revision, sw_build_key = read_built_gmin_provenance(args.svnrev, args.source)
+    default_tersoff_source = args.source.with_name("gmin-tersoff-source.txt")
+    tersoff_source = args.tersoff_source or (
+        default_tersoff_source if default_tersoff_source.is_file() else args.source
+    )
+    tersoff_revision, tc_build_key = read_built_gmin_provenance(
+        args.svnrev, tersoff_source
+    )
+    if tersoff_revision != revision:
+        raise SystemExit(
+            f"GMIN-tersoff revision {tersoff_revision} != GMIN revision {revision}"
+        )
     head = args.head_file.read_text().strip()
     machine = machine_columns()
     heads = {"binary": head, "before_binary": ""}
@@ -516,7 +550,28 @@ def main(argv: list[str]) -> int:
         saved = args.runs / name / f"{code}-{seed}.row"
         log = args.runs / name / f"{code}-{seed}.log"
         saved.parent.mkdir(parents=True, exist_ok=True)
-        existing = load_saved(saved, name, seed, code, budget, machine=machine)
+        expected_rev = (
+            heads[ANNEAL[code][0]]
+            if code in ANNEAL
+            else revision
+            if code in GMIN
+            else head
+        )
+        expected_build_key = (
+            (tc_build_key if name.startswith("tc") else sw_build_key)
+            if code in GMIN
+            else ""
+        )
+        existing = load_saved(
+            saved,
+            name,
+            seed,
+            code,
+            budget,
+            machine=machine,
+            code_revision=expected_rev,
+            gmin_build_key=expected_build_key,
+        )
         if existing is not None:
             rows.append(existing)
             note(progress, f"skip {name} code={code} seed={seed} hit={existing['hit']}")
@@ -529,9 +584,8 @@ def main(argv: list[str]) -> int:
         else:
             raw = run_gmin(args, name, seed, code, budget, references[name], radius, start, log)
         row = normalise(raw)
-        row["code_revision"] = (
-            heads[ANNEAL[code][0]] if code in ANNEAL else revision if code in GMIN else head
-        )
+        row["code_revision"] = expected_rev
+        row["gmin_build_key"] = expected_build_key
         row["host"] = os.uname().nodename
         row.update(machine)
         write_csv(saved, ROW_FIELDS, [row])
