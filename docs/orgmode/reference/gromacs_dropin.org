@@ -54,6 +54,9 @@ Only a =MULTIPLICITY= other than 1 replaces the spin, and it is sent with
 the qmi charge.
 When the =CONFIG= leaves the spin at its schema default, the qmi charge and
 multiplicity are both applied.
+A spin the =CONFIG= sets below the least its engine accepts is refused at
+start-up and never rewritten: 0 is valid for =uma=, and =metatomic=, =skala=
+and =nwchem= need 1 or more.
 When the engine lacks =rgpot_engine_set_charge_spin= or the call returns 3,
 a charge other than 0 or a multiplicity other than 1 is refused and the file
 needs =CHARGE 0= and =MULTIPLICITY 1=.

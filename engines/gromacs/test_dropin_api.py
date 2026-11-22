@@ -341,7 +341,10 @@ def test_engine_route_without_explicit_spin_uses_the_qmi_values(tmp_path):
 
 
 def _named_engine(path: Path) -> Path:
-    """An engine whose name comes from RGPOT_FAKE_ENGINE_NAME and which records set_charge_spin."""
+    """An engine named by RGPOT_FAKE_ENGINE_NAME that records set_charge_spin.
+
+    Like the real engines, it refuses a spin below 1 unless it is named uma.
+    """
     cc = shutil.which("cc") or shutil.which("gcc")
     if cc is None:
         pytest.skip("needs a C compiler")
@@ -349,6 +352,7 @@ def _named_engine(path: Path) -> Path:
     src.write_text(
         "#include <stddef.h>\n"
         "#include <stdlib.h>\n"
+        "#include <string.h>\n"
         "typedef struct RgpotEnginePot RgpotEnginePot;\n"
         "static int g_charge = -7, g_spin = -7, g_calls = 0;\n"
         "int rgpot_engine_abi_version(void) { return 1; }\n"
@@ -374,7 +378,10 @@ def _named_engine(path: Path) -> Path:
         "  return 0;\n"
         "}\n"
         "int rgpot_engine_set_charge_spin(RgpotEnginePot *pot, int charge, int spin) {\n"
-        "  (void)pot; g_charge = charge; g_spin = spin; g_calls += 1; return 0;\n"
+        "  int min_spin = strcmp(rgpot_engine_name(), \"uma\") == 0 ? 0 : 1;\n"
+        "  (void)pot;\n"
+        "  if (spin < min_spin) return 3;\n"
+        "  g_charge = charge; g_spin = spin; g_calls += 1; return 0;\n"
         "}\n"
         "void recorded_reset(void) { g_charge = -7; g_spin = -7; g_calls = 0; }\n"
         "int recorded_charge(void) { return g_charge; }\n"
@@ -391,6 +398,14 @@ def _named_engine(path: Path) -> Path:
 SCHEMA_PATH = Path(SCHEMA) if SCHEMA else None
 
 
+def _encode_config(tmp_path: Path, schema: str, text: str) -> Path:
+    blob = subprocess.run(["capnp", "encode", str(SCHEMA_PATH), schema],
+                          input=text.encode(), capture_output=True, check=True).stdout
+    config = tmp_path / "params.bin"
+    config.write_bytes(blob)
+    return config
+
+
 @pytest.mark.skipif(not shutil.which("capnp") or not SCHEMA_PATH or not SCHEMA_PATH.is_file(),
                     reason="needs capnp and the built effective Potentials.capnp")
 @pytest.mark.parametrize("engine,schema,text,charge,multiplicity,expect", [
@@ -399,9 +414,11 @@ SCHEMA_PATH = Path(SCHEMA) if SCHEMA else None
     ("uma", "UmaParams", "(spin = 0)", -1, 3, (-1, 3)),
     ("uma", "UmaParams", "()", -1, 1, (-1, 1)),
     ("uma", "UmaParams", "(spin = 2)", 0, 1, None),
-    ("metatomic", "MetatomicParams", "(spin = 0)", -1, 1, (-1, 0)),
+    ("metatomic", "MetatomicParams", "()", -1, 1, (-1, 1)),
     ("metatomic", "MetatomicParams", "(spin = 3)", 2, 1, (2, 3)),
-    ("skala", "NWChemParams", "(multiplicity = 0)", -1, 1, (-1, 0)),
+    ("metatomic", "MetatomicParams", "(spin = 0)", -1, 3, (-1, 3)),
+    ("skala", "NWChemParams", "()", -1, 1, (-1, 1)),
+    ("skala", "NWChemParams", "(multiplicity = 3)", -1, 1, (-1, 3)),
     ("skala", "NWChemParams", "(multiplicity = 5)", 0, 1, None),
     ("nwchem", "NWChemParams", "()", -1, 4, (-1, 4)),
 ])
@@ -409,10 +426,7 @@ def test_engine_route_reads_an_explicit_spin_from_the_config_message(
         tmp_path, monkeypatch, engine, schema, text, charge, multiplicity, expect):
     """The same rule as the stub, read from the engine's own params message."""
     monkeypatch.setenv("RGPOT_FAKE_ENGINE_NAME", engine)
-    blob = subprocess.run(["capnp", "encode", str(SCHEMA_PATH), schema],
-                          input=text.encode(), capture_output=True, check=True).stdout
-    config = tmp_path / "params.bin"
-    config.write_bytes(blob)
+    config = _encode_config(tmp_path, schema, text)
     so = _named_engine(tmp_path / "libnamed_engine.so")
     lib = ctypes.CDLL(so)
     lib.recorded_reset()
@@ -429,6 +443,26 @@ def test_engine_route_reads_an_explicit_spin_from_the_config_message(
     else:
         assert lib.recorded_calls() == 1
         assert (lib.recorded_charge(), lib.recorded_spin()) == expect
+
+
+@pytest.mark.skipif(not shutil.which("capnp") or not SCHEMA_PATH or not SCHEMA_PATH.is_file(),
+                    reason="needs capnp and the built effective Potentials.capnp")
+@pytest.mark.parametrize("engine,schema,text,spin,minimum", [
+    ("metatomic", "MetatomicParams", "(spin = 0)", 0, 1),
+    ("metatomic", "MetatomicParams", "(spin = -2)", -2, 1),
+    ("skala", "NWChemParams", "(multiplicity = 0)", 0, 1),
+    ("nwchem", "NWChemParams", "(multiplicity = 0)", 0, 1),
+    ("uma", "UmaParams", "(spin = -1)", -1, 0),
+])
+def test_engine_route_refuses_a_config_spin_below_the_layout_minimum(
+        tmp_path, monkeypatch, engine, schema, text, spin, minimum):
+    monkeypatch.setenv("RGPOT_FAKE_ENGINE_NAME", engine)
+    config = _encode_config(tmp_path, schema, text)
+    so = _named_engine(tmp_path / "libnamed_engine.so")
+    why = refused(tmp_path, f"    ENGINE {so}\n    CONFIG {config}", charge=-1)
+    assert f"the CONFIG message sets spin {spin}" in why
+    assert f"the {engine} engine needs a spin of at least {minimum}" in why
+    assert "refused CHARGE" not in why
 
 
 def engine_force(config: Path, symbols, x_ang, box_ang):

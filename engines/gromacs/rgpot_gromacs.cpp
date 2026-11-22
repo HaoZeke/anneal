@@ -441,7 +441,12 @@ bool root_data(const std::string &config, const unsigned char **data,
 
 // Spin the engine CONFIG set, when it differs from the schema default of 1.
 // rgpot_engine_set_charge_spin takes charge and spin together and the ABI
-// has no getter, so a qmi charge is applied with this value. UmaParams and
+// has no getter, so a qmi charge is applied with this value. Each layout has
+// the lowest spin its engine accepts: UMA takes 0, while the metatomic and
+// skala/NWChem engines count a multiplicity and take 1 or more. A spin below
+// that minimum is refused here, never rewritten, because the engine would
+// otherwise treat it as 1 and then refuse the same value from the setter.
+// UmaParams and
 // NWChemParams keep the spin in the high half of data word 0, and
 // MetatomicParams keeps it in the low half of data word 4. Schema evolution
 // may append data or pointer fields, so only the word containing spin must be
@@ -449,7 +454,8 @@ bool root_data(const std::string &config, const unsigned char **data,
 // stub carries the same fact in byte 4 (nonzero means explicit) and byte 5
 // (the spin, and 0 is a real value). A message this does not recognise has
 // no explicit spin, and the qmi multiplicity is used.
-std::optional<int> explicit_config_spin(const std::string &config, const char *name) {
+std::optional<int> explicit_config_spin(Env *env, const std::string &config,
+                                        const char *name) {
   if (name == nullptr) {
     return std::nullopt;
   }
@@ -462,12 +468,13 @@ std::optional<int> explicit_config_spin(const std::string &config, const char *n
   struct Layout {
     const char *name;
     std::uint32_t spin_byte;
+    int min_spin;
   };
   const Layout layouts[] = {
-      {"uma", 4},
-      {"nwchem", 4},
-      {"skala", 4},
-      {"metatomic", 32},
+      {"uma", 4, 0},
+      {"nwchem", 4, 1},
+      {"skala", 4, 1},
+      {"metatomic", 32, 1},
   };
   const unsigned char *data = nullptr;
   std::uint32_t data_words = 0;
@@ -483,6 +490,12 @@ std::optional<int> explicit_config_spin(const std::string &config, const char *n
       return std::nullopt;
     }
     const int spin = decode_default_one(load_u32(data + layout.spin_byte));
+    if (spin < layout.min_spin) {
+      die(env,
+          "ENGINE %s: the CONFIG message sets spin %d, but the %s engine "
+          "needs a spin of at least %d",
+          env->engine_path.c_str(), spin, layout.name, layout.min_spin);
+    }
     if (spin == 1) {
       return std::nullopt;
     }
@@ -550,7 +563,7 @@ bool openEngine(Env *env) {
   const bool multiplicity_overrides = env->multiplicity != 1;
   int spin = env->multiplicity;
   if (!multiplicity_overrides) {
-    if (const std::optional<int> configured = explicit_config_spin(config, name)) {
+    if (const std::optional<int> configured = explicit_config_spin(env, config, name)) {
       spin = *configured;
     }
   }
