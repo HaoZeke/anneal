@@ -96,18 +96,64 @@ def type7(values: list[float]) -> float:
 
 
 def fisher(h1: int, n1: int, h2: int, n2: int) -> float:
-    from scipy.stats import fisher_exact
+    try:
+        from scipy.stats import fisher_exact
+    except ModuleNotFoundError:
+        fisher_exact = None
+    if fisher_exact is not None:
+        table = [[h1, n1 - h1], [h2, n2 - h2]]
+        return float(fisher_exact(table, alternative="two-sided").pvalue)
+    hits = h1 + h2
+    ways = math.comb(n1 + n2, hits)
 
-    table = [[h1, n1 - h1], [h2, n2 - h2]]
-    return float(fisher_exact(table, alternative="two-sided").pvalue)
+    def prob(k: int) -> float:
+        return math.comb(n1, k) * math.comb(n2, hits - k) / ways
+
+    observed = prob(h1)
+    lo, hi = max(0, hits - n2), min(n1, hits)
+    return min(
+        1.0,
+        sum(prob(k) for k in range(lo, hi + 1) if prob(k) <= observed * (1 + 1e-7)),
+    )
 
 
 def mannwhitney(left: list[float], right: list[float]) -> float:
-    from scipy.stats import mannwhitneyu
-
     if not left or not right:
         return float("nan")
-    return float(mannwhitneyu(left, right, alternative="two-sided", method="asymptotic", use_continuity=True).pvalue)
+    try:
+        from scipy.stats import mannwhitneyu
+    except ModuleNotFoundError:
+        mannwhitneyu = None
+    if mannwhitneyu is not None:
+        return float(
+            mannwhitneyu(
+                left,
+                right,
+                alternative="two-sided",
+                method="asymptotic",
+                use_continuity=True,
+            ).pvalue
+        )
+    n1, n2 = len(left), len(right)
+    pooled = sorted(left + right)
+    n = n1 + n2
+    rank: dict[float, float] = {}
+    ties = 0.0
+    i = 0
+    while i < n:
+        j = i
+        while j + 1 < n and pooled[j + 1] == pooled[i]:
+            j += 1
+        rank[pooled[i]] = (i + j + 2) / 2.0
+        t = j - i + 1
+        ties += t**3 - t
+        i = j + 1
+    u = sum(rank[v] for v in left) - n1 * (n1 + 1) / 2.0
+    var = n1 * n2 / 12.0 * ((n + 1) - ties / (n * (n - 1)))
+    if var <= 0.0:
+        return 1.0
+    dev = max(abs(u - n1 * n2 / 2.0) - 0.5, 0.0)
+    return min(1.0, math.erfc(dev / math.sqrt(var) / math.sqrt(2.0)))
 
 
 def load_rows(path: Path, *, strict_schema: bool = True) -> list[dict[str, str]]:

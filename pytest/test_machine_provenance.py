@@ -704,3 +704,99 @@ def test_remaining_gmin_runners_emit_machine_id_and_cpu_model(tmp_path):
     mp_summary = morse_panel.summarise(mp_rows, set())
     assert mp_summary[0]["machine_id"] == f"{'a' * 64};{'b' * 64}"
     assert mp_summary[0]["cpu_model"] == "CPU A;CPU B"
+
+
+def test_provenance_runners_and_summaries_run_without_scipy(monkeypatch):
+    monkeypatch.setitem(sys.modules, "scipy", None)
+    monkeypatch.setitem(sys.modules, "scipy.stats", None)
+
+    ablation = _load_module("generic_alloy_ablation_noscipy", "scripts/generic_alloy/run_ablation.py")
+    morse_panel = _load_module("morse_panel_noscipy", "scripts/morse_panel/run_panel.py")
+
+    machine_a = {"machine_id": "a" * 64, "cpu_model": "CPU A"}
+    machine_b = {"machine_id": "b" * 64, "cpu_model": "CPU B"}
+    mp_rows = []
+    for seed in morse_panel.SEEDS:
+        mp_rows.append(
+            {
+                "system": "m55r6",
+                "code": "anneal",
+                "seed": str(seed),
+                "budget": "1000000",
+                "hit": "1",
+                "evals_to_hit": "30000",
+                "charged": "30000",
+                "wall_s": "1.0",
+                "best": "-250.286609",
+                "pot_s": "0.8",
+                "outside_s": "0.2",
+                "code_revision": "head-1",
+                "host": "bench-a",
+                **machine_a,
+            }
+        )
+        mp_rows.append(
+            {
+                "system": "m55r6",
+                "code": "gmin",
+                "seed": str(seed),
+                "budget": "1000000",
+                "hit": "0",
+                "evals_to_hit": "1000000",
+                "charged": "1000000",
+                "wall_s": "2.0",
+                "best": "-249.000000",
+                "pot_s": "1.6",
+                "outside_s": "0.4",
+                "code_revision": "svn-1",
+                "host": "bench-b",
+                **machine_b,
+            }
+        )
+    mp_summary = morse_panel.summarise(mp_rows, set())
+    assert mp_summary[0]["machine_id"] == f"{'a' * 64};{'b' * 64}"
+    assert mp_summary[0]["cpu_model"] == "CPU A;CPU B"
+    assert 0.0 <= float(mp_summary[0]["fisher_p"]) <= 1.0
+
+    ablation_rows = [
+        {
+            "campaign": "priors-off",
+            "system": "cu6au32",
+            "arm": "develop",
+            "seed": str(seed),
+            "budget": "400000",
+            "hit": "1",
+            "evals_to_hit": "10000",
+            "charged": "10000",
+            "wall_s": "0.5",
+            "best": "-130.79994836",
+            "pot_s": "0.4",
+            "outside_s": "0.1",
+            "code_revision": "rev-1",
+            "host": "bench",
+            **machine_a,
+        }
+        for seed in ablation.SEEDS[:2]
+    ] + [
+        {
+            "campaign": "priors-off",
+            "system": "cu6au32",
+            "arm": "descent",
+            "seed": str(seed),
+            "budget": "400000",
+            "hit": "0",
+            "evals_to_hit": "400000",
+            "charged": "400000",
+            "wall_s": "1.5",
+            "best": "-129.0",
+            "pot_s": "1.2",
+            "outside_s": "0.3",
+            "code_revision": "rev-2",
+            "host": "bench",
+            **machine_b,
+        }
+        for seed in ablation.SEEDS[:2]
+    ]
+    ab_summary = ablation.summarise("priors-off", ablation_rows)
+    assert len(ab_summary) == 2
+    assert 0.0 <= float(ab_summary[1]["fisher_p"]) <= 1.0
