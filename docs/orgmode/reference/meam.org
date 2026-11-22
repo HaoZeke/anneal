@@ -1,0 +1,157 @@
+# Copyright 2023--present rgpot developers
+#+TITLE: Modified embedded-atom method
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Modified embedded-atom method
+
+=MEAMPot= is the modified embedded-atom method of Baskes, Physical Review B 46,
+2727 (1992).
+It carries the second-neighbour extension of Lee and Baskes, Physical Review B
+62, 8564 (2000).
+The class reports =PotType::MEAM= and lives in =CppCore/rgpot/MEAM/=.
+It reads the library and parameter files of the LAMMPS =pair_style meam=, so a
+parameter set that runs there runs here without conversion.
+Lengths are Angstrom and energies are eV.
+
+** Energy
+
+The energy is
+
+#+attr_rgpot: skip the energy formula, not code
+#+begin_example
+E = sum_i F_i(rhobar_i) + 1/2 sum_{i != j} phi_ij(r_ij) S_ij
+F(rhobar) = A E_c rhobar ln(rhobar)
+rhobar = rho0 G(Gamma) / rho_ref
+Gamma = (t1 rho1 + t2 rho2 + t3 rho3) / rho0^2
+#+end_example
+
+rho_ref is the background density of the element's reference structure. rho0 to
+rho3 are the partial densities of the paper, built from the radially screened
+neighbours of atom i.
+=ialloy= (0, 1 or 2) sets how the t weights average over species, and
+=mixture_ref_t= and =bkgd_dyn= set the background.
+G follows =ibar=.
+Values 0 and 4 give sqrt(1 + Gamma) with the =gsmooth_factor= smoothing, 1 gives
+exp(Gamma / 2), 3 a logistic form and -5 a signed square root.
+=ibar= 2 is not defined and the constructor of =MEAMModel= throws for it.
+
+S_ij is the product of the radial cutoff of r_ij, with width =delr=, and the
+many-body screening of every third atom k.
+The screening of k is the ellipse construction of the paper, between =Cmin= and
+=Cmax= of the triple (i, j, k).
+
+phi is not an input.
+It is the pair term for which the energy of the reference structure of the pair
+equals the Rose universal equation of state, so the model builds it from that
+structure when it is constructed, for every pair of species.
+=erose_form= 0, 1 and 2 select the three Rose forms, and =zbl= blends in the ZBL
+repulsion at short range.
+The pair terms are tabulated as LAMMPS does: 1000 points up to 1.1 rc, with a
+cubic in each interval built from the five point slope.
+
+** Second neighbours
+
+A pair with =nn2= set to 1 counts the second neighbours of its reference
+structure.
+They are screened by the factor S of the Lee-Baskes construction and enter both
+rho0 and the pair term, which becomes the series
+
+#+attr_rgpot: skip the pair term series, not code
+#+begin_example
+phi(r) = phi_ref(r) - sum_n (-Z2 S / Z1)^n phi(a^n r)
+#+end_example
+
+The sum runs to n = 10 and stops at the first term smaller than 1e-20, as LAMMPS
+does.
+The B1, B2 and DIA reference pairs add the like-atom terms of both species, and
+L12 uses the weights -3/4 and -1/4 for the two like-atom terms.
+=nn2= for a C11 pair is not defined and the constructor throws.
+
+** Files and species
+
+=MEAMConfig= names a library file (=library=), an optional parameter file
+(=parameters=, empty for none) and the library entries to use (=elements=).
+The entries keep the order of =elements=, and an empty list takes the whole
+library in file order.
+The parameter file indexes elements from 1 in that order, as the element list of
+=pair_coeff= does.
+A parameter line separates its words with an equals sign, parentheses, commas,
+single quotes, blanks and tabs, and either file may carry =#= comments.
+A library entry may wrap over several lines, and the quotes around a name are
+dropped.
+
+An atom takes the element whose atomic number it has.
+=atomic_numbers= gives one number per entry.
+Without it each number is read from the leading chemical symbol of the entry
+name, so =AlS= is aluminium and =FeS= is iron.
+The =ielement= column of the library is not used, since the shipped 2NN library
+sets it to 1 for every element.
+An atom whose number no element has makes =forceImpl= throw
+=std::invalid_argument=.
+
+=z= in a library entry must equal the number of first neighbours of its lattice.
+A lattice name that no element can have, =t0= other than 1, and =rho0= that is
+not positive throw =std::invalid_argument= with the file and line number.
+
+** Calls
+
+=MEAMPot::forceImpl= writes the energy, the forces and, when =stress= is set and
+the cell volume is positive, the Cauchy stress of =stress.hpp=.
+The convention is that of =LJPot=: the stress is dE/d(epsilon) / V for the
+strain that sends every position and every cell row r to r (I + epsilon), in
+eV/Angstrom^3.
+A compressed cell has negative diagonal entries, and the LAMMPS virial W is
+-sigma V.
+
+With =periodic= (the default) every image within reach is counted, also when the
+reach exceeds half the cell, so a small cell is not a minimum-image
+approximation.
+The reach is the radial cutoff rc times the root of the largest ellipse bound of
+the model.
+=forceImpl= throws =std::invalid_argument= for a singular cell and for a cell so
+thin that the image count would be unreasonable.
+The bound is 1 for =Cmax= below 2, since the ellipse then never reaches past
+r_ik = r_ij, and Cmax^2 / (4 (Cmax - 1)) from 2 up.
+LAMMPS applies the second form to every =Cmax=, which agrees from 2 up, is
+looser below 2, and diverges at =Cmax= = 1.
+With =periodic= false the box is ignored and the atoms are a cluster.
+
+The potential keeps nothing between calls.
+=caps()= reports the periodic and stress flags and one instance serves
+concurrent callers.
+The cutoff is =MEAMPot::cutoff()=, which is rc.
+=paramsKey()= hashes every number that decides the model, so two instances with
+the same files and options share a key, and a changed parameter changes it.
+
+The forces are the exact gradient of the energy, including the derivative of
+every screening factor with respect to the three distances of a triple.
+The kernel does not use the half-list or the staged interface of the
+domain-decomposed kernels, and there is no =pot_spec= name, Python binding or C
+ABI entry for it yet.
+
+** Validation
+
+The reference values in =CppCore/tests/data/meam/= come from LAMMPS 20260930
+(=stable_30Sep2026_update1=) built with the MEAM package.
+=make_lammps_ref.py= in that directory writes each =.ref= file from a LAMMPS
+run, and every file records the version, the library and the parameter file.
+The library and parameter files are those of LAMMPS, copied unchanged (see
+=NOTICE= and =COPYING= there).
+
+=MEAMPotTest= compares energy, forces, virial and stress with 11 such runs.
+They are cubic and sheared triclinic cells of Ni, bcc Fe, and Si-C zincblende
+with a mixed pair.
+Three alloys of five species switch on =ialloy=,
+=bkgd_dyn=, =mixture_ref_t=, =emb_lin_neg=, the Rose forms and the ZBL blend.
+Four runs use second neighbours, among them a seven element alloy and the
+Al-Si-Mg-Cu-Fe set.
+They agree to better than 1e-11 eV in the energy and better than 1e-11
+eV/Angstrom in the forces.
+The test bounds are 1e-8 and 1e-7 for the alloys.
+
+Without LAMMPS the tests still check that the forces are the central difference
+gradient of the energy, that the stress is the strain derivative, that the
+reference crystals follow the Rose equation of state, that the energy is
+extensive when the cell is repeated, and that a cluster matches a periodic cell
+far from its images.

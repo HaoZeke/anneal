@@ -1,0 +1,24 @@
+# Written for the rgpot MEAM tests, not taken from LAMMPS.
+# Element order Ni AlS Cu Fe WL. Linear-extended embedding, dynamic
+# background, no t1 correction, the Rose form with a cubic term, and the
+# L12, B1, B2, C11 and dimer reference pairs.
+rc = 4.4
+delr = 0.2
+gsmooth_factor = 4.0
+erose_form = 1
+emb_lin_neg = 1
+augt1 = 0
+bkgd_dyn = 1
+lattce(1,2) = 'l12'
+lattce(1,3) = 'b1'
+lattce(2,3) = 'b2'
+lattce(1,4) = 'c11'
+lattce(3,4) = 'dim'
+lattce(2,5) = 'dia'
+delta(1,2) = 0.05
+repuls(1,3) = 0.1
+attrac(2,3) = 0.05
+Cmin(1,2,3) = 0.7
+Cmax(1,2,3) = 2.4
+Cmin(3,3,3) = 0.9
+zbl(1,2) = 0

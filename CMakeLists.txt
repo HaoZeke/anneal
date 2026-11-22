@@ -272,7 +272,10 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
       CppCore/rgpot/nlist/HalfShellWalk.cc
       CppCore/rgpot/nlist/HalfShell.cc
       CppCore/rgpot/StillingerWeber/SWSi.cc
-      CppCore/rgpot/Tersoff/TersoffSiC.cc)
+      CppCore/rgpot/Tersoff/TersoffSiC.cc
+      CppCore/rgpot/MEAM/MEAMModel.cc
+      CppCore/rgpot/MEAM/MEAMReader.cc
+      CppCore/rgpot/MEAM/MEAMPot.cc)
   # The rest of Meson's librgpot: pots potserv does not serve, and the
   # MOPAC, XTB and external-engine frontends, which load their engines at
   # run time.
@@ -441,6 +444,9 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
       CppCore/rgpot/SuttonChen/SuttonChenPot.cc
       CppCore/rgpot/SuttonChen/SuttonChenScales.cc
       CppCore/rgpot/Tersoff/TersoffSiC.cc
+      CppCore/rgpot/MEAM/MEAMModel.cc
+      CppCore/rgpot/MEAM/MEAMReader.cc
+      CppCore/rgpot/MEAM/MEAMPot.cc
       CppCore/rgpot/ReducedPair/ReducedPair.cc
       CppCore/rgpot/EAM/EAM.cpp
       CppCore/rgpot/EAM/EAMPot.cc)

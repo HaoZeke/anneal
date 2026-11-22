@@ -132,6 +132,7 @@ meson compile -C bbdir && meson test -C bbdir
    reference/sutton_chen
    reference/gupta
    reference/eam_table
+   reference/meam
    reference/fortran_potentials
    reference/potential_names
    api/index

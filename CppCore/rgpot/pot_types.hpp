@@ -75,7 +75,8 @@ enum class PotType {
   CoupledProtonWell,
   CBE,          //!< External cbe-pes frontend.
   D2,           //!<  Grimme DFT-D2 lattice sum (rgpot::D2Pot).
-  D2Cpmd        //!<  CPMD's minimum-image empirical D2 (rgpot::D2CpmdPot).
+  D2Cpmd,       //!<  CPMD's minimum-image empirical D2 (rgpot::D2CpmdPot).
+  MEAM          //!< Modified embedded-atom method (LAMMPS meam files).
 };
 
 } // namespace rgpot

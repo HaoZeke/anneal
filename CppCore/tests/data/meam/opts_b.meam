@@ -1,0 +1,16 @@
+# Written for the rgpot MEAM tests, not taken from LAMMPS.
+# Element order Ni AlS Cu Fe WL. ialloy 1 (t averaged with t squared), the
+# erose_form 2 energy, and the B2, L12, CH4, linear and zig-zag pairs.
+rc = 4.2
+delr = 0.1
+ialloy = 1
+erose_form = 2
+lattce(1,2) = 'b2'
+lattce(2,3) = 'l12'
+lattce(1,5) = 'ch4'
+lattce(3,5) = 'lin'
+lattce(2,4) = 'zig'
+theta(2,4) = 150.0
+Cmin(2,2,2) = 0.9
+Cmax(1,3,4) = 2.6
+zbl(2,3) = 0
