@@ -30,8 +30,8 @@
 //! | [`eam_table`] | Tabulated EAM potentials read from DYNAMO tables |
 //! | [`c_api`] | `extern "C"` entry points collected by cbindgen |
 //! | [`version`] | Loaded library version, to check against `rgpot.h` |
-//! | [`engine`] | Loader for the generic engine C ABI (`engine` feature) |
-//! | [`rpc`] | Cap'n Proto RPC client and server (feature-gated) |
+//! | `engine` | Loader for the generic engine C ABI (`engine` feature) |
+//! | `rpc` | Cap'n Proto RPC client and server (feature-gated) |
 //!
 //! ## Design Principles
 //!
@@ -40,7 +40,7 @@
 //!    single source of truth for all language bindings.
 //!
 //! 2. **Panic safety at every boundary.** All `extern "C"` functions wrap their
-//!    body in [`status::catch_unwind`], converting panics to
+//!    body in `status::catch_unwind`, converting panics to
 //!    [`status::rgpot_status_t::RGPOT_INTERNAL_ERROR`] and storing a
 //!    human-readable message retrievable via [`status::rgpot_last_error`].
 //!

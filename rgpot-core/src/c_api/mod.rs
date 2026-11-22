@@ -9,10 +9,10 @@
 //!
 //! 1. **Return [`rgpot_status_t`](crate::status::rgpot_status_t)** (or a
 //!    pointer / void for constructors and destructors).
-//! 2. **Wrap the body in [`catch_unwind`](crate::status::catch_unwind)** to
+//! 2. **Wrap the body in `crate::status::catch_unwind`** to
 //!    prevent panics from crossing the FFI boundary.
 //! 3. **Validate pointer arguments** and call
-//!    [`set_last_error`](crate::status::set_last_error) before returning a
+//!    `crate::status::set_last_error` before returning a
 //!    non-success status.
 //!
 //! ## Submodules
@@ -30,7 +30,7 @@
 //! - [`hessian`] — Dense Hessians of a potential handle, their callbacks,
 //!   and the derivative capabilities and counts of the handle.
 //! - [`jet`] — Validated Taylor jets of a potential handle and their callback.
-//! - [`rpc`] — RPC client functions (feature-gated on `rpc`): connect,
+//! - `rpc` — RPC client functions (feature-gated on `rpc`): connect,
 //!   calculate, disconnect.
 
 pub mod eam_table;

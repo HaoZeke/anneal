@@ -65,7 +65,7 @@ enum ReleaseCmd {
     Assert {
         /// Expected semver (optional; often the git tag without v).
         version: Option<String>,
-        /// Require CHANGELOG.md to contain ## [version] (or the workspace version if omitted).
+        /// Require CHANGELOG.md to contain `## [version]` (or the workspace version if omitted).
         #[arg(long, env = "REQUIRE_CHANGELOG")]
         require_changelog: bool,
     },
