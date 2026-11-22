@@ -321,9 +321,8 @@ impl Cloud {
     #[target_feature(enable = "avx2")]
     unsafe fn nearest_index_avx2(&self, image: [f64; 3]) -> (usize, f64) {
         use std::arch::x86_64::{
-            _CMP_LT_OQ, _mm256_add_epi64, _mm256_add_pd, _mm256_blendv_epi8, _mm256_blendv_pd,
-            _mm256_castpd_si256, _mm256_cmp_pd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_set_epi64x,
-            _mm256_set1_epi64x, _mm256_set1_pd, _mm256_storeu_pd, _mm256_storeu_si256,
+            _CMP_LT_OQ, _mm256_add_pd, _mm256_blendv_pd, _mm256_cmp_pd, _mm256_loadu_pd,
+            _mm256_min_pd, _mm256_mul_pd, _mm256_set_pd, _mm256_set1_pd, _mm256_storeu_pd,
             _mm256_sub_pd,
         };
         let ix = _mm256_set1_pd(image[0]);
@@ -335,9 +334,11 @@ impl Cloud {
         }
         let mut index = 0usize;
         let mut lane_best = _mm256_set1_pd(f64::INFINITY);
-        let mut lane_best_index = _mm256_set_epi64x(3, 2, 1, 0);
+        // Floating-point indices stay exact for any realizable slice and let
+        // the lane comparison select them without the slower byte blend.
+        let mut lane_best_index = _mm256_set_pd(3.0, 2.0, 1.0, 0.0);
         let mut lane_index = lane_best_index;
-        let four = _mm256_set1_epi64x(4);
+        let four = _mm256_set1_pd(4.0);
         while index + 4 <= n {
             unsafe {
                 let dx = _mm256_sub_pd(_mm256_loadu_pd(self.xs.as_ptr().add(index)), ix);
@@ -348,18 +349,17 @@ impl Cloud {
                     _mm256_mul_pd(dz, dz),
                 );
                 let closer = _mm256_cmp_pd(distance, lane_best, _CMP_LT_OQ);
-                lane_best = _mm256_blendv_pd(lane_best, distance, closer);
-                lane_best_index =
-                    _mm256_blendv_epi8(lane_best_index, lane_index, _mm256_castpd_si256(closer));
-                lane_index = _mm256_add_epi64(lane_index, four);
+                lane_best = _mm256_min_pd(lane_best, distance);
+                lane_best_index = _mm256_blendv_pd(lane_best_index, lane_index, closer);
+                lane_index = _mm256_add_pd(lane_index, four);
             }
             index += 4;
         }
         let mut distances = [0.0; 4];
-        let mut indices = [0_i64; 4];
+        let mut indices = [0.0; 4];
         unsafe {
             _mm256_storeu_pd(distances.as_mut_ptr(), lane_best);
-            _mm256_storeu_si256(indices.as_mut_ptr().cast(), lane_best_index);
+            _mm256_storeu_pd(indices.as_mut_ptr(), lane_best_index);
         }
         let mut best = f64::INFINITY;
         let mut best_index = 0usize;
