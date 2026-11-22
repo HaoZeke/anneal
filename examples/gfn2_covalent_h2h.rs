@@ -20,7 +20,9 @@
 //! is no pair-range cut, because dispersion has no finite reach.
 //! The call floor is the handle's 0.90 Å, raised pair by pair to
 //! `element_call_floor` of the atomic numbers: 1.55 Å for Si–Si and 1.06 Å
-//! for C–C.
+//! for C–C. A line search whose probe failed its SCC asks no probe within
+//! `REFUSAL_SPACING_A` of it in every coordinate
+//! (`WarmLbfgs::refusal_spacing`), and ends at its accepted step.
 //!
 //! The start is a random cluster in the scaled start radius from
 //! `StdRng::seed_from_u64(seed)`. `H2H_START_ONLY=1` writes it to
@@ -33,6 +35,8 @@
 //! the search returns its best so far. `charged` is then the calls made
 //! before it closed.
 
+#[path = "common/illinois.rs"]
+mod illinois;
 #[path = "common/rgpot_eindir.rs"]
 mod rgpot_eindir;
 
@@ -54,6 +58,8 @@ use rgpot_eindir::RgpotObjective;
 
 const HIT_TOL_EV: f64 = anneal_core::DEFAULT_HIT_TOL;
 const FAR_A: f64 = 20.0;
+/// About a hundredth of the C–C call floor, 1.06 Å.
+const REFUSAL_SPACING_A: f64 = 0.01;
 
 static POTENTIAL_NS: AtomicU64 = AtomicU64::new(0);
 
@@ -126,7 +132,7 @@ fn dimer_scales(z: i32, mut charge: impl FnMut() -> bool) -> Option<(f64, f64)> 
     let far = probe(FAR_A)?.0;
     let mut r = 1.0_f64;
     let mut before = probe(r)?;
-    let (mut lo, mut hi, mut slope_lo, mut slope_hi) = loop {
+    let (lo, hi, slope_lo, slope_hi) = loop {
         let next = 1.05 * r;
         if next >= FAR_A {
             return None;
@@ -137,21 +143,9 @@ fn dimer_scales(z: i32, mut charge: impl FnMut() -> bool) -> Option<(f64, f64)> 
         }
         (r, before) = (next, now);
     };
-    for _ in 0..40 {
-        if hi - lo <= 1.0e-8 * hi {
-            break;
-        }
-        let mid = (lo * slope_hi - hi * slope_lo) / (slope_hi - slope_lo);
-        let (_, slope) = probe(mid)?;
-        if slope < 0.0 {
-            lo = mid;
-            slope_lo = slope;
-        } else {
-            hi = mid;
-            slope_hi = slope;
-        }
-    }
-    let bond = 0.5 * (lo + hi);
+    let bond = illinois::find(lo, hi, slope_lo, slope_hi, 1.0e-8, 256, |r| {
+        probe(r).map(|(_, slope)| slope)
+    })?;
     let (energy, _) = probe(bond)?;
     let depth = far - energy;
     (depth > 0.0).then(|| (bond / 2.0_f64.powf(1.0 / 6.0), depth))
@@ -257,6 +251,7 @@ fn main() {
     pot.restart();
     let pot = Mutex::new(pot);
     let mut optimiser = WarmLbfgs::default();
+    optimiser.refusal_spacing = REFUSAL_SPACING_A;
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
         optimiser.forget();
         let (value, relaxed, _) = optimiser.minimize(x, iterations, |v| {

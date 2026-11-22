@@ -40,6 +40,9 @@
 //! system's energy unit. A miss is the full budget. `pot_s` is the time
 //! inside the library call.
 
+#[path = "common/illinois.rs"]
+mod illinois;
+
 use anneal_core::methods::cluster_hopping::{
     Config, ContinuousSymmetry, Ledger, MoveLibrary, Outcome, PairRange, SoapProposalMode,
     random_cluster_in_radius, run_with_gradient,
@@ -222,7 +225,7 @@ fn dimer_scales(potential: &Potential, mut charge: impl FnMut() -> bool) -> Opti
     let mut probe = |r: f64| charge().then(|| potential.dimer(r));
     let mut r = 0.05_f64;
     let mut before = probe(r)?;
-    let (mut lo, mut hi, mut slope_lo, mut slope_hi) = loop {
+    let (lo, hi, slope_lo, slope_hi) = loop {
         let next = 1.2 * r;
         if next >= 1.0e3 {
             return None;
@@ -233,30 +236,9 @@ fn dimer_scales(potential: &Potential, mut charge: impl FnMut() -> bool) -> Opti
         }
         (r, before) = (next, now);
     };
-    let mut kept = 0_i32;
-    while hi - lo > 1.0e-10 * hi {
-        let mid = (lo * slope_hi - hi * slope_lo) / (slope_hi - slope_lo);
-        let (_, slope) = probe(mid)?;
-        if slope < 0.0 {
-            lo = mid;
-            slope_lo = slope;
-            kept = kept.min(0) - 1;
-            if kept <= -2 {
-                slope_hi *= 0.5;
-            }
-        } else if slope > 0.0 {
-            hi = mid;
-            slope_hi = slope;
-            kept = kept.max(0) + 1;
-            if kept >= 2 {
-                slope_lo *= 0.5;
-            }
-        } else {
-            lo = mid;
-            hi = mid;
-        }
-    }
-    let bond = 0.5 * (lo + hi);
+    let bond = illinois::find(lo, hi, slope_lo, slope_hi, 1.0e-10, 256, |r| {
+        probe(r).map(|(_, slope)| slope)
+    })?;
     let (energy, _) = probe(bond)?;
     (energy < 0.0).then(|| (bond / 2.0_f64.powf(1.0 / 6.0), -energy))
 }

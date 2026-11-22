@@ -296,10 +296,12 @@ fn failed_step(point: ArrayView1<f64>, anchor: Option<&Array1<f64>>) -> Option<(
     Some((FAILED_STEP_ENERGY, gradient))
 }
 
-/// Physical `(energy, gradient)`, or an uphill rejection of a non-finite answer.
+/// Physical `(energy, gradient)`, or a rejection of a non-finite answer.
 ///
 /// The anchor is the last finite geometry. A later failure steps back toward
-/// it instead of becoming the quench result.
+/// it instead of becoming the quench result. A failed first call has no
+/// direction to step toward, so its non-finite marker reaches `WarmLbfgs`;
+/// the solver then counts the refused call and ends that relaxation.
 fn evaluated_pair<O>(
     objective: &O,
     point: ArrayView1<f64>,
@@ -313,7 +315,9 @@ where
         *anchor = Some(point.to_owned());
         return Some((energy, gradient, true));
     }
-    failed_step(point, anchor.as_ref()).map(|(energy, gradient)| (energy, gradient, false))
+    failed_step(point, anchor.as_ref())
+        .map(|(energy, gradient)| (energy, gradient, false))
+        .or_else(|| Some((f64::NAN, Array1::zeros(point.len()), false)))
 }
 
 fn finite_gradient<O>(objective: &O, x: ArrayView1<f64>) -> Option<Array1<f64>>
@@ -2839,6 +2843,21 @@ mod tests {
         );
         let empty = Array1::from_vec(vec![]);
         assert!(!gradient_is_converged(empty.view(), 1.0e-3));
+    }
+
+    #[test]
+    fn a_failed_first_potential_call_is_counted_as_refused() {
+        let objective = PairPotential::lennard_jones(2);
+        let start = Array1::from_elem(6, f64::NAN);
+        let mut anchor = None;
+        let mut opt = WarmLbfgs::default();
+        let (energy, point, evals) = opt.minimize(start.view(), 10, |x| {
+            evaluated_pair(&objective, x, &mut anchor)
+                .map(|(energy, gradient, _)| (energy, gradient))
+        });
+        assert!(energy.is_infinite() && energy.is_sign_positive());
+        assert!(point.iter().all(|value| value.is_nan()));
+        assert_eq!((evals, opt.refused()), (1, 1));
     }
 
     /// A non-finite evaluation must not become the recorded best, and a

@@ -86,6 +86,38 @@ UNPUSHED = {
                                                 "Si10 and C10 floor rows; the fix was pushed on another base",
     "5351f272370dc8c0d18b06149753effc99aeabd5": "eae26977 with the call floor and the C20 example, a local build head of "
                                                 "the GFN2 C20 rows; b4ddad0d on bench/covalent-cov6b has its tree",
+    "ccd69256770d99ae724a723d073736a18f8533ce": "the Si20 panel driver on the element floor rebased on c2de652d, a "
+                                                "local build head of the first Si20 CREST rows; the series was "
+                                                "delivered as patches, which a push rebuilds",
+    "35d2292c2b89f1c5269e1f87403539f6c586f166": "the Si20 panel driver whose CREST seed 2003 was censored after writing "
+                                                "binary garbage; the series was delivered as patches, which a push "
+                                                "rebuilds",
+    "3ae9698012de0ea36a42b5eb101f41f2f6e89584": "the template-free landing build used for the Si20 floor gate; the "
+                                                "covalent-general r3 kit records its rows",
+    "3be9554e8dc314d9af5d959c2f634ca061d66c42": "an early Si20 floor-gate build on c2de652d; its rows survive in the "
+                                                "covalent-general r3 kit",
+    "522e2de71a8940cc1ae00280a859b3ffce974869": "the local Si20 panel parser build; its rows and corrections survive in "
+                                                "the covalent-general r3 kit",
+    "5855af269ba1a0fd5a2e81533960aeba3e741a46": "the local Si20 anneal rerun build; its superseded rows survive in the "
+                                                "covalent-general r3 kit",
+    "6fff2974b02c3bef48007a73aeae18932b9c0660": "a mistyped local revision in the Si20 correction; the provenance error "
+                                                "is retained and superseded in the covalent-general r3 kit",
+    "6fff2974b5a595d4d21f58478b433bfdbfc8ec60": "the corrected local Si20 parser revision; its derived row survives in "
+                                                "the covalent-general r3 kit",
+    "75a180907784387a0426959bc421decad29135b9": "the first local Si20 CREST panel build; its superseded rows survive in "
+                                                "the covalent-general r3 kit",
+    "c878bf86cf08f7fffb4a4c41f27c47d8359d9d4a": "the local floor-gate runner after the landing rebase; its rows survive "
+                                                "in the covalent-general r3 kit",
+    "cd1456c13390f8820519c5f4a9ba52b8480c10bb": "the local Si20 anneal panel build; its rows survive in the "
+                                                "covalent-general r3 kit",
+    "e5e21199c8fd3c085bc316b2235b8839522552c4": "an early local floor-gate runner; its rows survive in the "
+                                                "covalent-general r3 kit",
+    "67d4e3adbd6d7d186796383bb0460a82d4687f29": "the local binary revision of the corrected serial Si20 panel before "
+                                                "the final message-only rewrite; the covalent-general r3 kit has "
+                                                "the same source tree",
+    "0458d692270ece75a17bba6778288968eb485a86": "the local fresh-rescoring script revision before the final "
+                                                "message-only rewrite; the covalent-general r3 kit has the same "
+                                                "source tree",
     "b49341e308e6e98e39a2ea7bcc7fbf743f6c45ac": "the build head of the recommended arm of the ASE panel, first cited by "
                                                 "70c0ad6c; no pushed branch holds it",
     "5a7f629d79be88b9d3f0cb2c6665062bda4ac625": "the build head of the cluster-preset and ASE arms of the Lennard-Jones "
@@ -126,7 +158,28 @@ KNOWN_GAPS = {
     "bench/covalent-h2h/v2/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "bench/covalent-h2h/v3/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "bench/covalent-h2h/gfn2/seeds.csv": "revision and host unrecorded (no revision or host column)",
-    "bench/covalent-h2h/gfn2/false-hits.csv": "revision recorded; no host column",
+    "bench/covalent-h2h/gfn2/false-hits.csv": "revision recorded; no host column; revision ccd69256 is not in this "
+                                              "repository",
+    "bench/covalent-h2h/gfn2/floor-gate-c2de652d.csv": "revision 3be9554e is not in this repository; revision ccd69256 is "
+                                                       "not in this repository; revision e5e21199 is not in this "
+                                                       "repository",
+    "bench/covalent-h2h/gfn2/floor-gate-land1.csv": "revision 3ae96980 is not in this repository; revision c878bf86 is "
+                                                    "not in this repository",
+    "bench/covalent-h2h/gfn2/si20-censoring.csv": "revision 35d2292c is not in this repository; revision 522e2de7 is "
+                                                  "not in this repository",
+    "bench/covalent-h2h/gfn2/si20-fresh-rescore.csv": "revision 0458d692 is not in this repository",
+    "bench/covalent-h2h/gfn2/si20-panel.csv": "revision 35d2292c is not in this repository; revision 522e2de7 is not "
+                                              "in this repository; revision 5855af26 is not in this repository; "
+                                              "revision 67d4e3ad is not in this repository; revision 6fff2974 is not "
+                                              "in this repository; revision 6fff2974 is not in this repository; "
+                                              "revision 75a18090 is not in this repository; revision ccd69256 is not "
+                                              "in this repository; revision cd1456c1 is not in this repository",
+    "bench/covalent-h2h/gfn2/si20-starts.csv": "revision 35d2292c is not in this repository",
+    "bench/covalent-h2h/gfn2/superseded.csv": "host empty or unknown on some rows; revision 35d2292c is not in this "
+                                              "repository; revision 522e2de7 is not in this repository; revision "
+                                              "5855af26 is not in this repository; revision 6fff2974 is not in this "
+                                              "repository; revision 75a18090 is not in this repository; revision "
+                                              "cd1456c1 is not in this repository",
     "bench/covalent-h2h/gfn2/rows.csv": "revision 5351f272 is not in this repository; revision ce1e7a46 is not in "
                                         "this repository",
     "bench/ase-gofee-h2h/results.csv": "revision recorded; no host column; head unrecorded on some rows; revision "
@@ -2181,6 +2234,13 @@ def covalent_gfn2(audit: Audit) -> None:
     header = "system | code | hits | median calls | IQR | best / eV"
     seeds = audit.rows("bench/covalent-h2h/gfn2/seeds.csv")
     rows = audit.rows("bench/covalent-h2h/gfn2/rows.csv")
+    audit.rows("bench/covalent-h2h/gfn2/floor-gate-c2de652d.csv")
+    audit.rows("bench/covalent-h2h/gfn2/floor-gate-land1.csv")
+    audit.rows("bench/covalent-h2h/gfn2/si20-panel.csv")
+    audit.rows("bench/covalent-h2h/gfn2/si20-censoring.csv")
+    audit.rows("bench/covalent-h2h/gfn2/si20-fresh-rescore.csv")
+    audit.rows("bench/covalent-h2h/gfn2/si20-starts.csv")
+    audit.rows("bench/covalent-h2h/gfn2/superseded.csv")
     named = {(r["system"], r["code"], r["code_revision"], r["seed"]): r
              for r in audit.rows("bench/covalent-h2h/gfn2/false-hits.csv")}
     systems = {"Si10": "si10", "C10": "c10"}
@@ -2465,7 +2525,7 @@ def provenance(audit: Audit) -> dict[str, str]:
         elif not hosts:
             problems.append("revision recorded; no host column")
         for column in revs + hosts:
-            if any(r[column].strip() in ("", "unknown") for r in rows):
+            if any((r[column] or "").strip() in ("", "unknown") for r in rows):
                 what = "unrecorded" if column in revs else "empty or unknown"
                 problems.append(f"{column} {what} on some rows")
         for column in revs:
