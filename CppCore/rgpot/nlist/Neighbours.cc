@@ -306,8 +306,17 @@ prepareFractionalCells(const double *xyz, std::size_t n, const double *box9,
   };
   constexpr double eps = std::numeric_limits<double>::epsilon();
   constexpr double kFracEdgeSlack = 1.0 + 16.0 * eps;
+  const bool simple_upper =
+      inv[2] == 0.0 && inv[3] == 0.0 && inv[5] == 0.0 && inv[6] == 0.0 &&
+      inv[7] == 0.0;
   const bool lower_triangular = inv[1] == 0.0 && inv[2] == 0.0 && inv[5] == 0.0;
   auto project = [&](double px, double py, double pz, double s[3]) {
+    if (simple_upper) [[likely]] {
+      s[0] = px * inv[0];
+      s[1] = px * inv[1] + py * inv[4];
+      s[2] = pz * inv[8];
+      return;
+    }
     if (lower_triangular) {
       s[0] = (px * inv[0] + py * inv[3]) + pz * inv[6];
       s[1] = py * inv[4] + pz * inv[7];

@@ -897,6 +897,9 @@ void MinimumImage::fold(double &dx, double &dy, double &dz) const {
 
 std::uint64_t MinimumImage::searches() noexcept { return searches_run; }
 
+#if defined(__ELF__) && (defined(__GNUC__) || defined(__clang__))
+__attribute__((hot))
+#endif
 bool MinimumImage::foldWithin(double &dx, double &dy, double &dz,
                               double within2) const {
   if (!std::isfinite(dx) || !std::isfinite(dy) || !std::isfinite(dz)) {
