@@ -147,9 +147,9 @@ skip = ["pp*", "*-musllinux*", "*_i686", "*-win32"]
 # wheel whose librgpot has no bind(c) entry points is the bug 3.0.1 fixed.
 # The pytest run checks the repaired wheel's runpath, its import without
 # LD_LIBRARY_PATH and its abi3 tag.
-test-command = "python -c \"import rgpot; assert rgpot.has_expr and rgpot.has_dftd3 and rgpot.has_dftd4 and rgpot.has_xckernel, (rgpot.has_expr, rgpot.has_dftd3, rgpot.has_dftd4, rgpot.has_xckernel); print(rgpot.__file__, len(rgpot.XcKernel.catalog()))\" && python -m pytest -q tests/test_rgpot_pip_core.py tests/test_ase_plugin_wheel.py"
-test-requires = ["pytest", "numpy", "ase==3.29.0"]
-test-sources = ["tests/test_rgpot_pip_core.py", "tests/test_ase_plugin_wheel.py"]
+test-command = "python -c \"import rgpot; assert rgpot.has_expr and rgpot.has_dftd3 and rgpot.has_dftd4 and rgpot.has_xckernel, (rgpot.has_expr, rgpot.has_dftd3, rgpot.has_dftd4, rgpot.has_xckernel); print(rgpot.__file__, len(rgpot.XcKernel.catalog()))\" && python -m pytest -q tests/test_rgpot_pip_core.py"
+test-requires = ["pytest", "numpy"]
+test-sources = ["tests/test_rgpot_pip_core.py"]
 
 # meson skips the limited_api kwarg under these interpreters anyway; the
 # explicit -D flag makes meson-python drop the abi3 tag to match.

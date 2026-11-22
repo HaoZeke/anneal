@@ -23,7 +23,7 @@ __all__ = [
 def _make_ase_plugins() -> set[Any]:
     """Build ASE 3.29 calculator plugins without importing its API eagerly."""
     try:
-        from ase._4.plugins.plugin import CalculatorPlugin
+        from ase._4.plugins.plugin import CalculatorPlugin  # pyright: ignore[reportMissingImports]
     except ImportError:
         return set()
     citation = "https://github.com/OmniPotentRPC/rgpot"
