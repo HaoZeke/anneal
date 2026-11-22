@@ -898,12 +898,15 @@ void Neighbours::update(const double *xyz, std::size_t n, const double *box9,
       }
     }
     cell_atoms_.assign(n, 0);
-    std::vector<std::int32_t> fill(cell_start_.begin(), cell_start_.end() - 1);
     for (std::size_t a = 0; a < n; ++a) {
       const auto c = static_cast<std::size_t>(cell_of_[a]);
-      cell_atoms_[static_cast<std::size_t>(fill[c]++)] =
+      cell_atoms_[static_cast<std::size_t>(cell_start_[c]++)] =
           static_cast<std::int32_t>(a);
     }
+    for (std::size_t c = ncells; c > 0; --c) {
+      cell_start_[c] = cell_start_[c - 1];
+    }
+    cell_start_[0] = 0;
     if (plan.cache_previous && ref_.size() == 3 * n) {
       workspace.coordinate.assign(ref_.begin(), ref_.end());
       std::memcpy(workspace.cached_box, box_, sizeof(workspace.cached_box));
