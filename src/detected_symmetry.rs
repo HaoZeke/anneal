@@ -360,15 +360,18 @@ fn sort_pairs(pairs: &mut Vec<(f64, usize, usize)>) {
 /// The sites of a completion, opened in order, each the average of the images
 /// merged into it.
 ///
-/// [`SiteSet::first_within`] is [`first_site_within`] over them. A site whose
-/// first or second coordinate alone is farther than the reach cannot pass the
-/// distance test, so four sites at a time are cleared on those two
-/// coordinates and only the ones left are measured, in order. The coordinates
-/// are kept apart from the sites for that.
+/// [`SiteSet::first_within`] is [`first_site_within`] over them. Four sites at
+/// a time are tested in full, the reach on the first coordinate, the squared
+/// distance against the limit [`within_cutoff`] allows, and then the root
+/// against the cutoff, each with the arithmetic of the scalar test, so the
+/// lane that passes is the site the scalar scan in order finds. The
+/// coordinates are kept apart from the sites for that, and padded with
+/// infinity to a whole number of lanes, which no image is within the reach of.
 struct SiteSet {
     sites: Vec<([f64; 3], usize)>,
     first: Vec<f64>,
     second: Vec<f64>,
+    third: Vec<f64>,
 }
 
 impl SiteSet {
@@ -377,13 +380,21 @@ impl SiteSet {
             sites: Vec::new(),
             first: Vec::new(),
             second: Vec::new(),
+            third: Vec::new(),
         }
     }
 
     fn push(&mut self, w: [f64; 3]) {
+        let at = self.sites.len();
         self.sites.push((w, 1));
-        self.first.push(w[0]);
-        self.second.push(w[1]);
+        if at >= self.first.len() {
+            for column in [&mut self.first, &mut self.second, &mut self.third] {
+                column.extend([f64::INFINITY; 4]);
+            }
+        }
+        self.first[at] = w[0];
+        self.second[at] = w[1];
+        self.third[at] = w[2];
     }
 
     /// Averages the image `w` into site `i`.
@@ -396,6 +407,7 @@ impl SiteSet {
         *count += 1;
         self.first[i] = p[0];
         self.second[i] = p[1];
+        self.third[i] = p[2];
     }
 
     fn first_within(&self, w: [f64; 3], cutoff: f64) -> Option<usize> {
@@ -413,54 +425,50 @@ impl SiteSet {
     #[target_feature(enable = "avx2")]
     unsafe fn first_within_avx2(&self, w: [f64; 3], cutoff: f64) -> Option<usize> {
         use std::arch::x86_64::{
-            _CMP_LE_OQ, _mm256_and_pd, _mm256_andnot_pd, _mm256_cmp_pd, _mm256_loadu_pd,
-            _mm256_movemask_pd, _mm256_set1_pd, _mm256_sub_pd,
+            _CMP_LE_OQ, _mm256_add_pd, _mm256_and_pd, _mm256_andnot_pd, _mm256_cmp_pd,
+            _mm256_loadu_pd, _mm256_movemask_pd, _mm256_mul_pd, _mm256_set1_pd, _mm256_sqrt_pd,
+            _mm256_sub_pd,
         };
         let reach = cutoff * (1.0 + 1e-9);
-        let count = self.sites.len();
+        let limit = cutoff * cutoff;
+        let lanes = self.first.len();
+        debug_assert!(lanes.is_multiple_of(4) && lanes >= self.sites.len());
         let mut at = 0usize;
         unsafe {
             let sign = _mm256_set1_pd(-0.0);
-            let limit = _mm256_set1_pd(reach);
+            let reach_v = _mm256_set1_pd(reach);
+            let limit_v = _mm256_set1_pd(limit + limit * (64.0 * f64::EPSILON));
+            let cutoff_v = _mm256_set1_pd(cutoff);
             let wx = _mm256_set1_pd(w[0]);
             let wy = _mm256_set1_pd(w[1]);
-            while at + 4 <= count {
-                let dx = _mm256_andnot_pd(
-                    sign,
-                    _mm256_sub_pd(wx, _mm256_loadu_pd(self.first.as_ptr().add(at))),
-                );
-                let dy = _mm256_andnot_pd(
-                    sign,
-                    _mm256_sub_pd(wy, _mm256_loadu_pd(self.second.as_ptr().add(at))),
+            let wz = _mm256_set1_pd(w[2]);
+            while at < lanes {
+                let ex = _mm256_sub_pd(wx, _mm256_loadu_pd(self.first.as_ptr().add(at)));
+                let ey = _mm256_sub_pd(wy, _mm256_loadu_pd(self.second.as_ptr().add(at)));
+                let ez = _mm256_sub_pd(wz, _mm256_loadu_pd(self.third.as_ptr().add(at)));
+                let d2 = _mm256_add_pd(
+                    _mm256_add_pd(_mm256_mul_pd(ex, ex), _mm256_mul_pd(ey, ey)),
+                    _mm256_mul_pd(ez, ez),
                 );
                 let near = _mm256_and_pd(
-                    _mm256_cmp_pd::<_CMP_LE_OQ>(dx, limit),
-                    _mm256_cmp_pd::<_CMP_LE_OQ>(dy, limit),
+                    _mm256_cmp_pd::<_CMP_LE_OQ>(_mm256_andnot_pd(sign, ex), reach_v),
+                    _mm256_cmp_pd::<_CMP_LE_OQ>(d2, limit_v),
                 );
-                let mut mask = _mm256_movemask_pd(near) as u32;
-                while mask != 0 {
-                    let lane = mask.trailing_zeros() as usize;
-                    mask &= mask - 1;
-                    if site_within(&self.sites[at + lane].0, w, cutoff) {
-                        return Some(at + lane);
+                if _mm256_movemask_pd(near) != 0 {
+                    let inside = _mm256_and_pd(
+                        near,
+                        _mm256_cmp_pd::<_CMP_LE_OQ>(_mm256_sqrt_pd(d2), cutoff_v),
+                    );
+                    let mask = _mm256_movemask_pd(inside) as u32;
+                    if mask != 0 {
+                        return Some(at + mask.trailing_zeros() as usize);
                     }
                 }
                 at += 4;
             }
         }
-        (at..count).find(|&i| site_within(&self.sites[i].0, w, cutoff))
+        None
     }
-}
-
-/// Whether the site `p` is within `cutoff` of `w`, as [`first_site_within`]
-/// decides it.
-fn site_within(p: &[f64; 3], w: [f64; 3], cutoff: f64) -> bool {
-    let reach = cutoff * (1.0 + 1e-9);
-    if (w[0] - p[0]).abs() > reach {
-        return false;
-    }
-    let d2 = (w[0] - p[0]).powi(2) + (w[1] - p[1]).powi(2) + (w[2] - p[2]).powi(2);
-    within_cutoff(d2, cutoff)
 }
 
 fn apply(g: &Rot, v: [f64; 3]) -> [f64; 3] {
@@ -1315,7 +1323,9 @@ mod tests {
 
     /// The four-at-a-time scan over the sites finds the site the scan in order
     /// finds, through merges that move sites, with images at the reach and a
-    /// rounding step beyond it, and with coordinates that are not numbers.
+    /// rounding step beyond it on a coordinate and at the cutoff in a
+    /// direction, with a count of sites that is not a multiple of four, and
+    /// with coordinates that are not numbers.
     #[test]
     fn the_cleared_scan_finds_the_site_the_scan_in_order_finds() {
         let cutoff = 0.3;
@@ -1335,6 +1345,19 @@ mod tests {
                 }
                 if k % 11 == 0 {
                     w[1] = (k % 5) as f64 * cutoff * (1.0 + 4.0 * f64::EPSILON);
+                }
+                if k % 13 == 0 && !set.sites.is_empty() {
+                    let p = set.sites[k % set.sites.len()].0;
+                    let (polar, azimuth) = (t * 0.91, t * 1.7);
+                    let u = [
+                        polar.sin() * azimuth.cos(),
+                        polar.sin() * azimuth.sin(),
+                        polar.cos(),
+                    ];
+                    let step = cutoff * (1.0 + ((k / 13 % 5) as f64 - 2.0) * 3.0 * f64::EPSILON);
+                    for c in 0..3 {
+                        w[c] = p[c] + step * u[c];
+                    }
                 }
                 if poisoned && k % 97 == 3 {
                     w[k % 3] = [f64::NAN, f64::INFINITY, f64::NEG_INFINITY][k % 3];
