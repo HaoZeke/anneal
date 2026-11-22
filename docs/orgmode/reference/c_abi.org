@@ -1694,6 +1694,10 @@ enum rgpot_status_t rgpot_mdi_server_start(
   =RGPOT_RPC_ERROR= when the official library cannot load, MDI initialization or
   communication fails, command ordering is invalid, geometry is non-finite, the
   potential fails, or its forces tensor is malformed.
+  On a platform without POSIX sockets, such as Windows, the call returns
+  =RGPOT_RPC_ERROR= before it loads the library or connects when the options
+  select =-method TCP=, because rgpot has no validated Windows path for the
+  =TCP_NODELAY= step.
   =rgpot_last_error= starts with =rgpot_mdi_server_start:=.
 - Availability :: the symbol is exported by every build, because ABI minor 9
   promises it.

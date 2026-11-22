@@ -53,6 +53,14 @@ potential needs atomic numbers. The MDI Library's TCP communicator is set to
 TCP: MDI has no public socket-option API, so rgpot validates the 1.4
 communicator ABI and stream socket before applying `TCP_NODELAY`.
 
+TCP is refused on Windows. The MDI Library itself supports TCP there, but the
+`TCP_NODELAY` step reads the 1.4 communicator and calls POSIX socket functions,
+and rgpot has no validated Windows socket path. `rgpot_mdi_server_start` and
+`serve_mdi` return an error that says so, before they load the library or
+connect, when the options select `-method TCP` on a platform without POSIX
+sockets. There is no fallback to a connection without `TCP_NODELAY`. Other MDI
+methods are not affected by this check.
+
 Rust embedders can enable `rgpot-core`'s `mdi` feature and call
 `serve_mdi(potential, &MdiEngineConfig::default().with_options(...))`. C and
 C++ embedders call `rgpot_mdi_server_start`, which every build exports: a

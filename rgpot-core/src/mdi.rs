@@ -24,6 +24,13 @@ use crate::types::{rgpot_force_input_t, rgpot_force_out_t};
 use crate::units::{bohr_to_angstrom, ev_per_angstrom_to_hartree_per_bohr, ev_to_hartree};
 
 const NODE: &str = "@DEFAULT";
+
+/// The MDI Library supports TCP on Windows, but the low-latency step reads its
+/// 1.4 communicator and sets `TCP_NODELAY` through POSIX socket calls. The
+/// Windows communicator keeps a `SOCKET` where this layout holds an `int`, and
+/// no Windows socket path is validated here, so rgpot refuses TCP there
+/// instead of serving it at Nagle latency.
+const TCP_UNSUPPORTED: &str = "MDI method TCP is not supported on this platform: the TCP_NODELAY step needs POSIX sockets; use another MDI method";
 const COMMANDS: &[&str] = &[
     ">NATOMS",
     "<NATOMS",
@@ -98,6 +105,27 @@ impl std::error::Error for MdiError {}
 
 type Result<T> = std::result::Result<T, MdiError>;
 
+/// Whether MDI `options` select the TCP method, as `-method TCP`.
+fn options_select_tcp(options: &str) -> bool {
+    let mut words = options.split_whitespace();
+    while let Some(word) = words.next() {
+        if word == "-method" {
+            return words
+                .next()
+                .is_some_and(|method| method.eq_ignore_ascii_case("TCP"));
+        }
+    }
+    false
+}
+
+/// Refuse TCP before anything loads or connects where `posix_sockets` is false.
+fn refuse_unsupported_tcp(options: &str, posix_sockets: bool) -> Result<()> {
+    if !posix_sockets && options_select_tcp(options) {
+        return Err(MdiError(TCP_UNSUPPORTED.into()));
+    }
+    Ok(())
+}
+
 struct MdiApi {
     _library: Library,
     init_code: InitCode,
@@ -120,6 +148,7 @@ struct MdiApi {
 }
 
 #[repr(C)]
+#[cfg_attr(not(unix), allow(dead_code))]
 struct MdiCommunicatorPrefix {
     mdi_version: [c_int; 3],
     nodes: *mut c_void,
@@ -332,75 +361,86 @@ impl MdiApi {
         if pointer.is_null() {
             return Err(MdiError("MDI communicator lookup returned null".into()));
         }
-        #[cfg(unix)]
+        self.set_low_latency(pointer, code, comm)
+    }
+
+    #[cfg(unix)]
+    fn set_low_latency(
+        &self,
+        pointer: *mut MdiCommunicatorPrefix,
+        code: usize,
+        comm: MdiComm,
+    ) -> Result<()> {
+        let communicator = unsafe { &*pointer };
+        if communicator.code_id != code
+            || communicator.method_id != self.tcp_method
+            || communicator.id != comm
         {
-            let communicator = unsafe { &*pointer };
-            if communicator.code_id != code
-                || communicator.method_id != self.tcp_method
-                || communicator.id != comm
-            {
-                return Err(MdiError(
-                    "MDI 1.4 communicator layout failed validation".into(),
-                ));
-            }
-            let mut socket_type: c_int = 0;
-            let mut socket_type_len = std::mem::size_of::<c_int>() as libc::socklen_t;
-            let status = unsafe {
-                libc::getsockopt(
-                    communicator.sockfd,
-                    libc::SOL_SOCKET,
-                    libc::SO_TYPE,
-                    (&mut socket_type as *mut c_int).cast::<c_void>(),
-                    &mut socket_type_len,
-                )
-            };
-            if status != 0 || socket_type != libc::SOCK_STREAM {
-                return Err(MdiError(
-                    "MDI 1.4 communicator does not contain a TCP stream socket".into(),
-                ));
-            }
-            let enabled: c_int = 1;
+            return Err(MdiError(
+                "MDI 1.4 communicator layout failed validation".into(),
+            ));
+        }
+        let mut socket_type: c_int = 0;
+        let mut socket_type_len = std::mem::size_of::<c_int>() as libc::socklen_t;
+        let status = unsafe {
+            libc::getsockopt(
+                communicator.sockfd,
+                libc::SOL_SOCKET,
+                libc::SO_TYPE,
+                (&mut socket_type as *mut c_int).cast::<c_void>(),
+                &mut socket_type_len,
+            )
+        };
+        if status != 0 || socket_type != libc::SOCK_STREAM {
+            return Err(MdiError(
+                "MDI 1.4 communicator does not contain a TCP stream socket".into(),
+            ));
+        }
+        let enabled: c_int = 1;
+        let status = unsafe {
+            libc::setsockopt(
+                communicator.sockfd,
+                libc::IPPROTO_TCP,
+                libc::TCP_NODELAY,
+                (&enabled as *const c_int).cast::<c_void>(),
+                std::mem::size_of::<c_int>() as libc::socklen_t,
+            )
+        };
+        if status != 0 {
+            return Err(MdiError(format!(
+                "setsockopt(TCP_NODELAY) failed: {}",
+                std::io::Error::last_os_error()
+            )));
+        }
+        #[cfg(target_os = "linux")]
+        {
             let status = unsafe {
                 libc::setsockopt(
                     communicator.sockfd,
                     libc::IPPROTO_TCP,
-                    libc::TCP_NODELAY,
+                    libc::TCP_QUICKACK,
                     (&enabled as *const c_int).cast::<c_void>(),
                     std::mem::size_of::<c_int>() as libc::socklen_t,
                 )
             };
             if status != 0 {
                 return Err(MdiError(format!(
-                    "setsockopt(TCP_NODELAY) failed: {}",
+                    "setsockopt(TCP_QUICKACK) failed: {}",
                     std::io::Error::last_os_error()
                 )));
             }
-            #[cfg(target_os = "linux")]
-            {
-                let status = unsafe {
-                    libc::setsockopt(
-                        communicator.sockfd,
-                        libc::IPPROTO_TCP,
-                        libc::TCP_QUICKACK,
-                        (&enabled as *const c_int).cast::<c_void>(),
-                        std::mem::size_of::<c_int>() as libc::socklen_t,
-                    )
-                };
-                if status != 0 {
-                    return Err(MdiError(format!(
-                        "setsockopt(TCP_QUICKACK) failed: {}",
-                        std::io::Error::last_os_error()
-                    )));
-                }
-            }
-        }
-        #[cfg(not(unix))]
-        {
-            return Err(MdiError(
-                "TCP_NODELAY is not implemented for MDI on this platform".into(),
-            ));
         }
         Ok(())
+    }
+
+    #[cfg(not(unix))]
+    fn set_low_latency(
+        &self,
+        _pointer: *mut MdiCommunicatorPrefix,
+        _code: usize,
+        _comm: MdiComm,
+    ) -> Result<()> {
+        Err(MdiError(TCP_UNSUPPORTED.into()))
     }
 }
 
@@ -652,10 +692,13 @@ impl<'a> Engine<'a> {
 /// # Safety
 ///
 /// `pot` must remain a valid `rgpot_potential_t` for the duration of the call.
+///
+/// The TCP method is refused with an error on a platform without POSIX sockets.
 pub unsafe fn serve_mdi(pot: *const rgpot_potential_t, config: &MdiEngineConfig) -> Result<usize> {
     if pot.is_null() {
         return Err(MdiError("MDI potential is null".into()));
     }
+    refuse_unsupported_tcp(&config.options, cfg!(unix))?;
     let api = MdiApi::load(config.library_path.as_deref())?;
     let options =
         CString::new(config.options.as_str()).map_err(|error| MdiError(error.to_string()))?;
@@ -688,6 +731,36 @@ mod tests {
             config.library_path.as_deref(),
             Some(Path::new("/tmp/libmdi.so"))
         );
+    }
+
+    #[test]
+    fn the_tcp_method_is_read_from_the_options() {
+        assert!(options_select_tcp(
+            "-role ENGINE -name RGPOT -method TCP -port 8021"
+        ));
+        assert!(options_select_tcp("-method tcp -role ENGINE"));
+        assert!(!options_select_tcp("-role ENGINE -name RGPOT -method MPI"));
+        assert!(!options_select_tcp("-role ENGINE -name RGPOT -method"));
+        assert!(!options_select_tcp("-role ENGINE -name TCP"));
+    }
+
+    #[test]
+    fn tcp_is_refused_without_posix_sockets() {
+        let tcp = "-role ENGINE -name RGPOT -method TCP -hostname localhost -port 8021";
+        let error = refuse_unsupported_tcp(tcp, false).unwrap_err().to_string();
+        assert!(error.contains("TCP is not supported on this platform"));
+        assert!(refuse_unsupported_tcp(tcp, true).is_ok());
+        assert!(refuse_unsupported_tcp("-role ENGINE -method MPI", false).is_ok());
+    }
+
+    #[cfg(not(unix))]
+    #[test]
+    fn serving_tcp_here_fails_before_the_library_loads() {
+        let config = MdiEngineConfig::default().with_library_path("/nonexistent/mdi.dll");
+        let error = unsafe { serve_mdi(std::ptr::NonNull::dangling().as_ptr(), &config) }
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("TCP is not supported on this platform"));
     }
 
     #[test]
