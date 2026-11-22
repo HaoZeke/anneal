@@ -211,8 +211,10 @@ def _make_builder_sandbox(tmp_path: Path) -> tuple[Path, Path, dict[str, str], P
     (stubs / "cmake").write_text(
         "#!/usr/bin/env python3\n"
         "import os, pathlib, sys\n"
+        "vars_to_log = ('FC', 'CC', 'CXX', 'FFLAGS', 'FCFLAGS', 'CFLAGS', 'CXXFLAGS', 'CPPFLAGS', 'LDFLAGS')\n"
+        "header = ''.join(f'{k}={os.environ.get(k, \"\")}\\n' for k in vars_to_log)\n"
         "pathlib.Path('cmake-Record.txt').write_text(\n"
-        "    f\"FC={os.environ.get('FC','')}\\n\" + '\\n'.join(sys.argv[1:]) + '\\n'\n"
+        "    header + '\\n'.join(sys.argv[1:]) + '\\n'\n"
         ")\n"
     )
     (stubs / "make").write_text(
@@ -239,6 +241,8 @@ def _make_builder_sandbox(tmp_path: Path) -> tuple[Path, Path, dict[str, str], P
         (stubs / tool).chmod(0o755)
 
     env = os.environ.copy()
+    for flag_var in ("FFLAGS", "FCFLAGS", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS"):
+        env.pop(flag_var, None)
     env["PATH"] = f"{stubs}:{env['PATH']}"
     env["GMIN_TARBALL"] = str(tarball)
     return repo, tarball, env, counter
@@ -301,6 +305,73 @@ def test_every_gmin_builder_rebuilds_when_inputs_or_options_change_under_same_sv
     third_count = int(counter.read_text().strip())
     assert third_count > second_count
     assert binary.read_text() != second_text
+
+
+@pytest.mark.parametrize(
+    ("script_rel", "work_var", "meta_name", "key_name", "binary_name", "needs_lib"),
+    [
+        ("scripts/gmin_panel/build_gmin.sh", "GMIN_PANEL_WORK", "gmin-source.txt", "gmin-build-key", "GMIN", False),
+        ("scripts/gmin_h2h/build_gmin.sh", "GMIN_H2H_WORK", "gmin-source.txt", "gmin-build-key", "GMIN", False),
+        ("scripts/covalent_h2h/build_gmin.sh", "GMIN_H2H_WORK", "gmin-source.txt", "gmin-build-key", "GMIN", False),
+        ("scripts/covalent_h2h/build_gmin_tersoff.sh", "GMIN_H2H_WORK", "gmin-tersoff-source.txt", "gmin-tersoff-build-key", "GMIN-tersoff", True),
+        ("scripts/metal_h2h/build_gmin_darby.sh", "GMIN_DARBY_WORK", "gmin-source.txt", "gmin-build-key", "GMIN", False),
+        ("scripts/metal_h2h/build_gmin_sc.sh", "GMIN_SC_WORK", "gmin-source.txt", "gmin-build-key", "GMIN", False),
+    ],
+)
+def test_every_gmin_builder_keys_on_inherited_compiler_and_linker_flags(
+    tmp_path: Path,
+    script_rel: str,
+    work_var: str,
+    meta_name: str,
+    key_name: str,
+    binary_name: str,
+    needs_lib: bool,
+) -> None:
+    repo, _tarball, base_env, counter = _make_builder_sandbox(tmp_path)
+    work = tmp_path / "work"
+    env = dict(base_env)
+    env[work_var] = str(work)
+    if script_rel == "scripts/metal_h2h/build_gmin_sc.sh":
+        env["GMIN_DARBY_WORK"] = str(tmp_path / "darby-work")
+    lib = tmp_path / "librgpot_covalent.so"
+    lib.write_bytes(b"fake-rgpot-v1\n")
+
+    cmd = ["bash", str(repo / script_rel)]
+    if needs_lib:
+        cmd.append(str(lib))
+
+    subprocess.run(cmd, cwd=repo, env=env, check=True)
+    binary = work / "bin" / binary_name
+    seen_keys = {read_build_key(work / meta_name, work / key_name)}
+    assert "" not in seen_keys
+    seen_binaries = {binary.read_text()}
+    prev_count = int(counter.read_text().strip())
+
+    for flag_var, flag_val in (
+        ("FFLAGS", "-O3 -ffree-line-length-none"),
+        ("CFLAGS", "-O2 -fno-omit-frame-pointer"),
+        ("CXXFLAGS", "-O2 -fno-exceptions"),
+        ("LDFLAGS", "-Wl,--as-needed"),
+    ):
+        flagged_env = dict(env)
+        flagged_env[flag_var] = flag_val
+        subprocess.run(cmd, cwd=repo, env=flagged_env, check=True)
+        new_key = read_build_key(work / meta_name, work / key_name)
+        assert new_key and new_key not in seen_keys, f"{script_rel} ignored {flag_var}"
+        seen_keys.add(new_key)
+
+        new_count = int(counter.read_text().strip())
+        assert new_count > prev_count, f"{script_rel} did not rebuild on {flag_var}"
+        prev_count = new_count
+
+        new_bin = binary.read_text()
+        assert new_bin not in seen_binaries, f"{script_rel} binary unchanged on {flag_var}"
+        seen_binaries.add(new_bin)
+
+        # Re-running with the same flag value reuses the cached build.
+        subprocess.run(cmd, cwd=repo, env=flagged_env, check=True)
+        assert int(counter.read_text().strip()) == prev_count
+        assert read_build_key(work / meta_name, work / key_name) == new_key
 
 
 def test_gmin_panel_builder_replaces_stale_pre_build_key_tree(tmp_path: Path) -> None:

@@ -105,6 +105,12 @@ fi
 FC_BIN=${FC:-gfortran}
 CC_BIN=${CC:-gcc}
 CXX_BIN=${CXX:-g++}
+FFLAGS_VAL=${FFLAGS:-}
+FCFLAGS_VAL=${FCFLAGS:-}
+CFLAGS_VAL=${CFLAGS:-}
+CXXFLAGS_VAL=${CXXFLAGS:-}
+CPPFLAGS_VAL=${CPPFLAGS:-}
+LDFLAGS_VAL=${LDFLAGS:-}
 GFORTRAN_VER=$("$FC_BIN" -dumpfullversion)
 KEY_ARGS=(
   --revision "$REV"
@@ -119,6 +125,12 @@ KEY_ARGS+=(
   "--option=CC=$CC_BIN"
   "--option=CXX=$CXX_BIN"
   "--option=gfortran=$GFORTRAN_VER"
+  "--option=FFLAGS=$FFLAGS_VAL"
+  "--option=FCFLAGS=$FCFLAGS_VAL"
+  "--option=CFLAGS=$CFLAGS_VAL"
+  "--option=CXXFLAGS=$CXXFLAGS_VAL"
+  "--option=CPPFLAGS=$CPPFLAGS_VAL"
+  "--option=LDFLAGS=$LDFLAGS_VAL"
 )
 for flag in "${CMAKE_FLAGS[@]}"; do
   KEY_ARGS+=("--option=$flag")
@@ -162,7 +174,11 @@ if (( need_rebuild )); then
   mkdir -p "$build"
   (
     cd "$build"
-    FC=$FC_BIN CC=$CC_BIN CXX=$CXX_BIN cmake ../../source "${CMAKE_FLAGS[@]}"
+    FC=$FC_BIN CC=$CC_BIN CXX=$CXX_BIN \
+      FFLAGS=$FFLAGS_VAL FCFLAGS=$FCFLAGS_VAL \
+      CFLAGS=$CFLAGS_VAL CXXFLAGS=$CXXFLAGS_VAL \
+      CPPFLAGS=$CPPFLAGS_VAL LDFLAGS=$LDFLAGS_VAL \
+      cmake ../../source "${CMAKE_FLAGS[@]}"
     make -j"$(nproc)" GMIN
   )
   cp -a "$build/GMIN" "$WORK/bin/GMIN"
@@ -183,6 +199,10 @@ fi
   done
   echo "cmake=${CMAKE_FLAGS[*]}"
   echo "gfortran=$GFORTRAN_VER"
+  echo "fflags=$FFLAGS_VAL"
+  echo "cflags=$CFLAGS_VAL"
+  echo "cxxflags=$CXXFLAGS_VAL"
+  echo "ldflags=$LDFLAGS_VAL"
   echo "linked=$(ldd "$WORK/bin/GMIN" 2>/dev/null | awk '/blas|lapack/ {print $3}' | xargs -r readlink -f | paste -sd' ' - || true)"
   echo "binary_sha256=$(sha256sum "$WORK/bin/GMIN" | awk '{print $1}')"
 } > "$WORK/gmin-source.txt"

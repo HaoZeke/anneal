@@ -34,6 +34,12 @@ tarball_sha256=$(python3 "$PIN" verify-tarball "$TARBALL")
 FC_BIN=${FC:-gfortran}
 CC_BIN=${CC:-gcc}
 CXX_BIN=${CXX:-g++}
+FFLAGS_VAL=${FFLAGS:-}
+FCFLAGS_VAL=${FCFLAGS:-}
+CFLAGS_VAL=${CFLAGS:-}
+CXXFLAGS_VAL=${CXXFLAGS:-}
+CPPFLAGS_VAL=${CPPFLAGS:-}
+LDFLAGS_VAL=${LDFLAGS:-}
 GFORTRAN_VER=$("$FC_BIN" -dumpfullversion)
 KEY_ARGS=(
   --revision "$revision"
@@ -46,6 +52,12 @@ KEY_ARGS=(
   "--option=CC=$CC_BIN"
   "--option=CXX=$CXX_BIN"
   "--option=gfortran=$GFORTRAN_VER"
+  "--option=FFLAGS=$FFLAGS_VAL"
+  "--option=FCFLAGS=$FCFLAGS_VAL"
+  "--option=CFLAGS=$CFLAGS_VAL"
+  "--option=CXXFLAGS=$CXXFLAGS_VAL"
+  "--option=CPPFLAGS=$CPPFLAGS_VAL"
+  "--option=LDFLAGS=$LDFLAGS_VAL"
 )
 for flag in "${CMAKE_FLAGS[@]}"; do
   KEY_ARGS+=("--option=$flag")
@@ -72,7 +84,11 @@ if [[ $OLD_BUILD_KEY != "$BUILD_KEY" || ! -x $WORK/bin/GMIN ]]; then
   mkdir -p "$build"
   (
     cd "$build"
-    FC=$FC_BIN CC=$CC_BIN CXX=$CXX_BIN cmake ../../source "${CMAKE_FLAGS[@]}"
+    FC=$FC_BIN CC=$CC_BIN CXX=$CXX_BIN \
+      FFLAGS=$FFLAGS_VAL FCFLAGS=$FCFLAGS_VAL \
+      CFLAGS=$CFLAGS_VAL CXXFLAGS=$CXXFLAGS_VAL \
+      CPPFLAGS=$CPPFLAGS_VAL LDFLAGS=$LDFLAGS_VAL \
+      cmake ../../source "${CMAKE_FLAGS[@]}"
     make -j"$(nproc)" GMIN
   )
   cp -a "$build/GMIN" "$WORK/bin/GMIN"
@@ -93,6 +109,10 @@ build_key=$BUILD_KEY
 potential=SC
 cmake=${CMAKE_FLAGS[*]}
 gfortran=$GFORTRAN_VER
+fflags=$FFLAGS_VAL
+cflags=$CFLAGS_VAL
+cxxflags=$CXXFLAGS_VAL
+ldflags=$LDFLAGS_VAL
 blas=$(readlink -f "$blas")
 EOF
 echo "gmin build_key=$BUILD_KEY binary=$WORK/bin/GMIN"
