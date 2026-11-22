@@ -47,7 +47,8 @@ module rgpot_tersoff
 
    public :: tersoff_params_t, tersoff_energy_forces
 
-   !> Tersoff parameters. Defaults are eOn's silicon set, Tersoff's Si(C).
+   !> Tersoff parameters. Defaults are eOn's silicon set from Table I of
+   !! J. Tersoff, Phys. Rev. B 39, 5566 (1989).
    type :: tersoff_params_t
       real(wp) :: a = 1.8308e+3_wp      !< Repulsive prefactor (eV).
       real(wp) :: b = 4.7118e+2_wp      !< Attractive prefactor (eV).
