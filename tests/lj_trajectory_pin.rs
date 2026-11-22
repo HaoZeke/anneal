@@ -89,9 +89,8 @@ fn trajectory_hash() -> String {
 fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     anneal_core::install_rgpot_kernels!();
     let hash = trajectory_hash();
-    // The general move library is deterministic on every build.
-    // Every order the point count can hold is tried, so this short
-    // walk hash moved.
-    let expected = "663aa3fbceda184ae10b98446ba01438f112e0ea4428da48575cf1645ae9b57d";
+    // The general move library is deterministic on every build. Established
+    // orders keep their draw while the upper order can open the general tail.
+    let expected = "7babb82e15897c1517f0d918ecf855a5dee32ee990dceb69a097597a8f39ba84";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }
