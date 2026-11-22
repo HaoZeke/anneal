@@ -1659,8 +1659,8 @@ d_energy_d_term(name)
   A disabled term is not counted.
   A sum with no enabled term, or only terms that need no wider cell, reports
   0.0.
-- Errors :: none; an unknown kind on an enabled term already raised
-  =ValueError= in the constructor.
+- Errors :: none; an unknown kind on an enabled term already raised =ValueError=
+  in the constructor.
 
 *** =rgpot.SumPot.components=
 
