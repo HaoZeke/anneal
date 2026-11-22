@@ -22,6 +22,7 @@ struct Probe {
     scale: f64,
     fail: bool,
     malformed: bool,
+    nonfinite_energy: bool,
 }
 
 unsafe extern "C" fn probe_potential(
@@ -54,7 +55,11 @@ unsafe extern "C" fn probe_potential(
     let native_force = probe.scale / (EV_TO_HARTREE * BOHR_TO_ANGSTROM);
     let forces = [native_force; 6];
     let output = unsafe { &mut *output };
-    output.energy = probe.scale / EV_TO_HARTREE;
+    output.energy = if probe.nonfinite_energy {
+        f64::NAN
+    } else {
+        probe.scale / EV_TO_HARTREE
+    };
     output.variance = 0.0;
     let (rows, columns) = if probe.malformed { (3, 2) } else { (2, 3) };
     output.forces = unsafe { rgpot_tensor_owned_cpu_f64_2d(forces.as_ptr(), rows, columns) };
@@ -65,7 +70,7 @@ fn mdi_library() -> Option<String> {
     let output = Command::new("python3")
         .args([
             "-c",
-            "import pathlib, mdi; print(pathlib.Path(mdi.__file__).with_name('libmdi.so'))",
+            "import pathlib, mdi; root = pathlib.Path(mdi.__file__).parent; print(next(path for name in ('libmdi.so', 'libmdi.dylib', 'mdi.dll') if (path := root / name).is_file()))",
         ])
         .output()
         .ok()?;
@@ -88,6 +93,7 @@ fn server_child(scenario: &str) {
         scale,
         fail: scenario == "callback",
         malformed: scenario == "malformed",
+        nonfinite_energy: scenario == "energy_nan",
     };
     let pot = unsafe {
         rgpot_potential_new(
@@ -105,10 +111,11 @@ fn server_child(scenario: &str) {
     unsafe { rgpot_potential_free(pot) };
     if matches!(
         scenario,
-        "missing" | "zero" | "nan" | "callback" | "malformed"
+        "missing" | "zero" | "nan" | "callback" | "malformed" | "energy_nan"
     ) {
         assert!(result.is_err(), "invalid MDI exchange must fail");
-        let expected_calls = usize::from(matches!(scenario, "callback" | "malformed"));
+        let expected_calls =
+            usize::from(matches!(scenario, "callback" | "malformed" | "energy_nan"));
         assert_eq!(probe.calls.load(Ordering::SeqCst), expected_calls);
     } else {
         assert_eq!(result.expect("serve MDI driver"), 2);
@@ -186,7 +193,7 @@ mdi.MDI_Send_Command(">CELL", comm)
 mdi.MDI_Send(cell, 9, mdi.MDI_DOUBLE, comm)
 mdi.MDI_Send_Command("<CELL", comm)
 assert list(mdi.MDI_Recv(9, mdi.MDI_DOUBLE, comm)) == cell
-if scenario in ("callback", "malformed"):
+if scenario in ("callback", "malformed", "energy_nan"):
     mdi.MDI_Send_Command("<ENERGY", comm)
     try:
         mdi.MDI_Recv(1, mdi.MDI_DOUBLE, comm)
@@ -268,7 +275,14 @@ fn mdi_tcp_round_trip() {
     };
     run_scenario("first", 1.0, &library);
     run_scenario("second", 2.0, &library);
-    for scenario in ["missing", "zero", "nan", "callback", "malformed"] {
+    for scenario in [
+        "missing",
+        "zero",
+        "nan",
+        "callback",
+        "malformed",
+        "energy_nan",
+    ] {
         run_scenario(scenario, 1.0, &library);
     }
 }

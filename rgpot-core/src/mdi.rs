@@ -496,18 +496,22 @@ impl<'a> Engine<'a> {
             };
             let status = unsafe { rgpot_potential_calculate(self.pot, &input, &mut output) };
             let forces = if status == rgpot_status_t::RGPOT_SUCCESS {
-                copy_f64_tensor(output.forces, "potential forces", natoms * 3, true)
-                    .and_then(|forces| {
-                        let force_rows = validate_positions(output.forces)?;
-                        if force_rows != natoms {
-                            Err(format!(
-                                "potential forces: expected shape=[{natoms},3], got [{force_rows},3]"
-                            ))
-                        } else {
-                            Ok(forces)
-                        }
-                    })
-                    .map_err(MdiError)
+                if !output.energy.is_finite() {
+                    Err(MdiError("potential energy is non-finite".into()))
+                } else {
+                    copy_f64_tensor(output.forces, "potential forces", natoms * 3, true)
+                        .and_then(|forces| {
+                            let force_rows = validate_positions(output.forces)?;
+                            if force_rows != natoms {
+                                Err(format!(
+                                    "potential forces: expected shape=[{natoms},3], got [{force_rows},3]"
+                                ))
+                            } else {
+                                Ok(forces)
+                            }
+                        })
+                        .map_err(MdiError)
+                }
             } else {
                 Err(MdiError(format!(
                     "rgpot potential evaluation failed with status {}",

@@ -39,6 +39,15 @@ def free_port() -> int:
         return int(probe.getsockname()[1])
 
 
+def mdi_library() -> Path:
+    root = Path(mdi.__file__).parent
+    for name in ("libmdi.so", "libmdi.dylib", "mdi.dll"):
+        candidate = root / name
+        if candidate.is_file():
+            return candidate
+    raise RuntimeError(f"official MDI Library not found in {root}")
+
+
 def direct(executable: Path, spec: str, coords: list[float], cell: list[float]):
     tokens = spec.split()
     geometry = ["2", " ".join(str(value) for value in cell)]
@@ -65,7 +74,7 @@ def direct(executable: Path, spec: str, coords: list[float], cell: list[float]):
 
 def run_case(engine: Path, evaluator: Path, spec: str) -> None:
     port = free_port()
-    library = Path(mdi.__file__).with_name("libmdi.so")
+    library = mdi_library()
     mdi.MDI_Init(
         f"-role DRIVER -name TEST -method TCP -hostname 127.0.0.1 -port {port}"
     )
