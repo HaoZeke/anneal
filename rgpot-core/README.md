@@ -17,6 +17,7 @@ Data exchange uses the [DLPack](https://github.com/dmlc/dlpack) tensor protocol 
 | `profile` | Prefix-generic in-process loader with one persistent backend session |
 | `engine` | Native loader for shared libraries that implement the generic engine C ABI |
 | `rpc` | Cap'n Proto RPC client and server for distributed calculations |
+| `mdi` | Optional MDI compatibility engine over the same generic potential handle |
 | `cache` | *(planned)* Result caching layer |
 
 ## Quick Start

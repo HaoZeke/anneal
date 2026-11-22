@@ -20,8 +20,12 @@ if [ -z "$rustc_bin" ]; then
   echo "rustc is not available (set RUSTC or add rustc to PATH)" >&2
   exit 1
 fi
+# rust-core and cargo-target hold the plain rgpot-core archive that
+# RGPOT_WITH_MDI builds. It carries no neighbour list, so it is not the
+# bundle this script links in place of the minimage and fma archives.
 find_archive() {
-  find "$build" \( -name "$1" -o -name "$2" -o -name "$3" \) -print -quit
+  find "$build" \( -name cargo-target -o -name rust-core \) -prune -o \
+    \( -name "$1" -o -name "$2" -o -name "$3" \) -print -quit
 }
 half=$(find_archive librgpot_halfshell.a librgpot_halfshell.lib rgpot_halfshell.lib)
 core=$(find_archive librgpot_core.a librgpot_core.lib rgpot_core.lib)

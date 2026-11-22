@@ -43,7 +43,7 @@ pub struct rgpot_abi_stamp_t {
 /// ABI major of this build.
 pub const RGPOT_ABI_VERSION_MAJOR: u16 = 1;
 /// ABI minor of this build.
-pub const RGPOT_ABI_VERSION_MINOR: u16 = 8;
+pub const RGPOT_ABI_VERSION_MINOR: u16 = 9;
 /// Layout revision of this build.
 pub const RGPOT_ABI_LAYOUT_REVISION: u16 = 1;
 
@@ -201,13 +201,26 @@ mod tests {
     #[test]
     fn the_minor_counts_the_hessian_exports() {
         assert_eq!(RGPOT_ABI_VERSION_MAJOR, 1);
-        assert_eq!(RGPOT_ABI_VERSION_MINOR, 8);
-        assert_eq!(rgpot_abi_stamp().abi_minor, 8);
+        assert_eq!(unsafe { rgpot_abi_compatible(&stamp(1, 8, 1)) }, 1);
         assert_eq!(RGPOT_ABI_LAYOUT_REVISION, 1);
         for earlier in 0..RGPOT_ABI_VERSION_MINOR {
             assert_eq!(unsafe { rgpot_abi_compatible(&stamp(1, earlier, 1)) }, 1);
         }
-        assert_eq!(unsafe { rgpot_abi_compatible(&stamp(1, 9, 1)) }, 0);
+    }
+
+    /// `rgpot_mdi_server_start` is an additive C ABI export for the optional
+    /// MDI frontend, exported by every build, so the minor moves to 9 and
+    /// every earlier caller still matches.
+    #[test]
+    fn the_minor_counts_the_mdi_export() {
+        assert_eq!(RGPOT_ABI_VERSION_MAJOR, 1);
+        assert_eq!(RGPOT_ABI_VERSION_MINOR, 9);
+        assert_eq!(rgpot_abi_stamp().abi_minor, 9);
+        assert_eq!(RGPOT_ABI_LAYOUT_REVISION, 1);
+        for earlier in 0..RGPOT_ABI_VERSION_MINOR {
+            assert_eq!(unsafe { rgpot_abi_compatible(&stamp(1, earlier, 1)) }, 1);
+        }
+        assert_eq!(unsafe { rgpot_abi_compatible(&stamp(1, 10, 1)) }, 0);
     }
 
     fn stamp(major: u16, minor: u16, layout: u16) -> rgpot_abi_stamp_t {
@@ -460,9 +473,23 @@ mod tests {
             "rgpot_potential_hessian",
             "rgpot_potential_derivative_caps",
             "rgpot_potential_derivative_counts",
+            "rgpot_mdi_server_start",
         ] {
             assert!(baseline.lines().any(|l| l == name), "baseline lacks {name}");
         }
+    }
+
+    /// Minor 9 promises `rgpot_mdi_server_start` to every library, so the
+    /// header declares it with no feature guard and no `mdi` define exists.
+    #[test]
+    fn the_mdi_export_is_declared_in_every_build() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        let header = std::fs::read_to_string(format!("{root}/include/rgpot.h")).unwrap();
+        assert!(header.contains("rgpot_mdi_server_start("));
+        assert!(
+            !header.contains("RGPOT_HAS_MDI"),
+            "rgpot_mdi_server_start must not depend on a build feature"
+        );
     }
 
     /// A library built without the schema feature lacks these names, so the

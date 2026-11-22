@@ -98,6 +98,18 @@ rgpot_test_set_feature(eam_table RGPOT_WITH_EAM_TABLE)
 rgpot_test_set_feature(eigen RGPOT_WITH_EIGEN)
 rgpot_test_set_feature(xtensor RGPOT_WITH_XTENSOR)
 rgpot_test_set_feature(cp2k RGPOT_WITH_CP2K)
+rgpot_test_set_feature(mdi RGPOT_WITH_MDI)
+set(_rgpot_pymdi FALSE)
+if(RGPOT_WITH_MDI AND Python3_Interpreter_FOUND)
+  execute_process(
+    COMMAND "${Python3_EXECUTABLE}" -c "import mdi"
+    RESULT_VARIABLE _rgpot_pymdi_probe
+    OUTPUT_QUIET ERROR_QUIET)
+  if(_rgpot_pymdi_probe EQUAL 0)
+    set(_rgpot_pymdi TRUE)
+  endif()
+endif()
+rgpot_test_set_feature(pymdi _rgpot_pymdi)
 rgpot_test_set_feature(mpi RGPOT_HAVE_MPI)
 rgpot_test_set_feature(mpiexec MPIEXEC_EXECUTABLE)
 rgpot_test_set_feature(linux CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -370,6 +382,15 @@ if(_on)
   rgpot_add_test(ExprLeptonSymbols
     COMMAND "${RGPOT_TEST_ROOT}/scripts/check_lepton_symbols.sh"
             $<TARGET_FILE:rgpot> absent)
+endif()
+
+# The MDI frontend answering a pymdi driver over TCP.
+rgpot_test_enabled(mdi_concrete_potentials _on)
+if(_on)
+  rgpot_add_test(mdi_concrete_potentials
+    COMMAND Python3::Interpreter
+            "${RGPOT_TEST_ROOT}/engines/mdi_roundtrip.py"
+            $<TARGET_FILE:rgpot-mdi> $<TARGET_FILE:rgpot-eval>)
 endif()
 
 add_library(rgpot_layout_fixture SHARED CppCore/tests/layout_fixture.cc)

@@ -126,7 +126,8 @@ a caught Rust panic and stores the panic message.
 The guarded functions are =rgpot_potential_calculate=, =rgpot_potential_hvp=,
 =rgpot_potential_hvp_resolved=, =rgpot_potential_hvp_centre=,
 =rgpot_potential_hessian=, =rgpot_potential_set_taylor_jet=,
-=rgpot_potential_taylor_jet=, =rgpot_ch5_2008_taylor_jet=, =rgpot_rpc_calculate= and =rgpot_rpc_server_start=.
+=rgpot_potential_taylor_jet=, =rgpot_ch5_2008_taylor_jet=, =rgpot_rpc_calculate=, =rgpot_rpc_server_start=
+and =rgpot_mdi_server_start=.
 
 *** =rgpot_set_last_error=
 
@@ -1681,6 +1682,41 @@ enum rgpot_status_t rgpot_rpc_server_start(const struct rgpot_potential_t *pot,
   =RGPOT_INTERNAL_ERROR= when the runtime cannot be created, or for a caught
   panic.
   =RGPOT_RPC_ERROR= with =failed to bind <addr>: ...= or =accept failed: ...=.
+
+*** =rgpot_mdi_server_start=
+
+#+attr_rgpot: signature
+#+begin_src c
+enum rgpot_status_t rgpot_mdi_server_start(
+    const struct rgpot_potential_t *pot, const char *options,
+    const char *library_path);
+#+end_src
+
+- Inputs :: =pot= a handle that stays alive while the engine runs; =options= a
+  NUL-terminated UTF-8 MDI option string; =library_path= NULL or a
+  NUL-terminated UTF-8 path to the official MDI Library.
+- Units :: the MDI wire is Bohr, Hartree and
+  Hartree/Bohr. The potential receives Angstrom, eV and eV/Angstrom through the
+  generic force callback.
+- Outputs :: none; the call connects to one MDI driver, serves =@DEFAULT=, and
+  blocks until =EXIT=.
+  Energy, potential energy and forces share one evaluation until coordinates,
+  species or cell change.
+- Errors :: =RGPOT_INVALID_PARAMETER= for a NULL handle or options string, or
+  invalid UTF-8.
+  =RGPOT_RPC_ERROR= when the official library cannot load, MDI initialization or
+  communication fails, command ordering is invalid, geometry is non-finite, the
+  potential fails, or its forces tensor is malformed.
+  On a platform without POSIX sockets, such as Windows, the call returns
+  =RGPOT_RPC_ERROR= before it loads the library or connects when the options
+  select =-method TCP=, because rgpot has no validated Windows path for the
+  =TCP_NODELAY= step.
+  =rgpot_last_error= starts with =rgpot_mdi_server_start:=.
+- Availability :: the symbol is exported by every build, because ABI minor 9
+  promises it.
+  A library built without the Cargo feature =mdi= returns =RGPOT_RPC_ERROR= for
+  every call, whatever its arguments, and stores a message that starts with
+  =rgpot_mdi_server_start:= and names the missing feature.
 
 ** ABI stamp
 

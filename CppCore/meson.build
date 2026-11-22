@@ -54,6 +54,8 @@ _rt_atoms = {
     'metatomic': has_metatomic,
     'uma': has_uma,
     'rust_core': get_option('with_rust_core'),
+    'mdi': mdi_enabled,
+    'pymdi': has_pymdi,
 }
 _rt_tests = []
 _rt_kw = {}
@@ -664,8 +666,8 @@ if not get_option('with_rpc_client_only')
         install: not meson.is_subproject(),
     )
 
-    # 51 rgpot_* exports when the rust archive is linked normally, 104 when
-    # the bundle is whole-archived. The extra 53 are the public C ABI.
+    # 51 rgpot_* exports when the rust archive is linked normally, 105 when
+    # the bundle is whole-archived. The extra 54 are the public C ABI.
     # Two of the umbrella exports are the Muller-Brown entry points.
     if get_option('with_rust_core') and host_machine.system() == 'linux'
         _so_export_whole = false

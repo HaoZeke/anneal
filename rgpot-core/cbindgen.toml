@@ -28,7 +28,7 @@ documentation_style = "doxy"
 # rgpot_potential_set_hessian_callback and rgpot_potential_set_taylor_jet,
 # not by a signature.
 include = ["rgpot_hvp_scheme_t", "HessianVectorCallback", "rgpot_hessian_scheme_t", "HessianCallback", "rgpot_taylor_jet_fn", "rgpot_interval_t"]
-exclude = []
+exclude = ["BOHR_TO_ANGSTROM", "EV_TO_HARTREE"]
 
 [export.rename]
 

@@ -9,6 +9,10 @@
 `rgpot` is a potential-energy library and Cap'n Proto RPC server for atomistic
 simulation codes.
 Documentation: [rgpot.rgoswami.me](https://rgpot.rgoswami.me).
+The direct in-process interface and Cap'n Proto RPC are the default paths.
+An optional, non-default [MDI compatibility frontend](docs/mdi.md) serves the
+same generic potential abstraction to drivers such as LAMMPS `fix mdi/qm`;
+enable it explicitly with Cargo feature `mdi` or Meson `-Dwith_mdi=true`.
 It gives clients one geometry carrier, one result carrier, and one extensible
 backend-configuration carrier:
 

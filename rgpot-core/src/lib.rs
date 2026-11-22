@@ -69,6 +69,8 @@ pub mod status;
 pub mod taylor;
 pub mod tensor;
 pub mod types;
+#[cfg(feature = "mdi")]
+pub mod units;
 pub mod version;
 
 #[cfg(feature = "schema")]
@@ -93,3 +95,6 @@ pub mod profile;
 
 #[cfg(feature = "rpc")]
 pub mod rpc;
+
+#[cfg(feature = "mdi")]
+pub mod mdi;

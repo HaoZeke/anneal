@@ -5,6 +5,12 @@ option('with_xtensor', type: 'boolean', value: false)
 option('with_eigen', type: 'boolean', value: false)
 option('with_rpc', type: 'boolean', value: false)
 option('with_rpc_client_only', type: 'boolean', value: false)
+option(
+    'with_mdi',
+    type: 'boolean',
+    value: false,
+    description: 'optional MDI engine frontend over rgpot_potential_t; uses the official MDI Library at runtime',
+)
 option('with_cache', type: 'boolean', value: false)
 option('pure_lib', type: 'boolean', value: true)
 option('with_rust_core', type: 'boolean', value: false)

@@ -63,7 +63,7 @@ typedef struct DLManagedTensorVersioned DLManagedTensorVersioned;
 /**
  * ABI minor of this build.
  */
-#define RGPOT_ABI_VERSION_MINOR 8
+#define RGPOT_ABI_VERSION_MINOR 9
 
 /**
  * Layout revision of this build.
@@ -1135,6 +1135,28 @@ rgpot_rpc_calculate_hvp(rgpot_rpc_client_t *client,
  */
 void rgpot_rpc_client_free(rgpot_rpc_client_t *client);
 #endif
+
+/**
+ * Start an MDI engine for `pot` and block until the driver sends `EXIT`.
+ *
+ * `options` is passed to the official MDI Library, for example
+ * `-role ENGINE -name RGPOT -method TCP -hostname localhost -port 8021`.
+ * `library_path` may be NULL to use `RGPOT_MDI_LIBRARY` or the platform
+ * loader's normal `libmdi` search.
+ *
+ * The symbol exists in every build so that the ABI minor that introduced it
+ * is true of every library. A build without the `mdi` feature returns
+ * `RGPOT_RPC_ERROR` and stores a message that names the missing feature.
+ *
+ * # Safety
+ *
+ * `pot` must remain valid until this function returns. `options` must point
+ * to a NUL-terminated UTF-8 string. `library_path` must be NULL or point to
+ * a NUL-terminated UTF-8 string.
+ */
+enum rgpot_status_t rgpot_mdi_server_start(const struct rgpot_potential_t *pot,
+                                           const char *options,
+                                           const char *library_path);
 
 /**
  * Taylor jet callback of the CH5 2008 surface, for
