@@ -180,6 +180,18 @@ if get_option('b_coverage')
     endif
     add_project_arguments(_atomic_profile_c, language: 'c')
     add_project_arguments(_atomic_profile_cpp, language: 'cpp')
+    # Fortran kernels are called from those same OpenMP regions.
+    if has_fortran
+        _atomic_profile_fc = fc.get_supported_arguments(
+            ['-fprofile-update=atomic'],
+        )
+        if _atomic_profile_fc.length() == 0
+            error(
+                'b_coverage requires -fprofile-update=atomic; ' + fc.get_id() + ' did not accept it',
+            )
+        endif
+        add_project_arguments(_atomic_profile_fc, language: 'fortran')
+    endif
 endif
 
 # Dependencies

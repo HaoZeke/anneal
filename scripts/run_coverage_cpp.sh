@@ -32,28 +32,36 @@ meson compile -C "$BUILD"
 meson test -C "$BUILD" --print-errorlogs \
   --timeout-multiplier "${RGPOT_COV_TIMEOUT_MULTIPLIER:-1}"
 
-# lcov 2 renamed the branch-coverage rc option and rejects the old name. With
-# GCC 14 + OpenMP, geninfo also reports template instances in toolchain headers
-# as inconsistent, exception-branch tags across template instantiations (e.g.
-# bits/vector.tcc) as mismatch, and non-atomic OpenMP arc counter updates as
-# negative; tolerate those classes while keeping every other lcov error fatal.
+# lcov 2 renamed the branch-coverage rc option and rejects the old name.
+# Skipping compiler-generated exception-unwind branches prevents mismatched
+# exception-tag errors across inline/template instantiations without needing
+# --ignore-errors mismatch; -fprofile-update=atomic prevents negative counts
+# under OpenMP, and no --ignore-errors suppressions are needed.
 LCOV_MAJOR=$(lcov --version | sed -n 's/.*LCOV version \([0-9][0-9]*\)\..*/\1/p')
-LCOV_ARGS=()
+LCOV_CAPTURE_ARGS=()
+LCOV_FILTER_ARGS=()
 if [[ "${LCOV_MAJOR:-0}" -ge 2 ]]; then
-  LCOV_ARGS+=(--rc branch_coverage=1 --ignore-errors "inconsistent,mismatch,negative")
+  LCOV_CAPTURE_ARGS+=(--rc branch_coverage=1 --rc no_exception_branch=1)
+  LCOV_FILTER_ARGS+=(--rc branch_coverage=1)
 else
-  LCOV_ARGS+=(--rc lcov_branch_coverage=1)
+  LCOV_CAPTURE_ARGS+=(--rc lcov_branch_coverage=1)
+  LCOV_FILTER_ARGS+=(--rc lcov_branch_coverage=1)
 fi
 
 echo "==> lcov capture"
-lcov --directory "$BUILD" --capture --output-file "$OUT" "${LCOV_ARGS[@]}"
+lcov --directory "$BUILD" --capture --output-file "$OUT" "${LCOV_CAPTURE_ARGS[@]}"
 
-# Keep library sources: CppCore/rgpot (C++ and Fortran kernels)
+# Keep library sources: CppCore/rgpot (C++ and Fortran kernels) and repo headers
+# (avoid */include/* which matches toolchain/pixi headers).
+EXTRACT_PATTERNS=("${ROOT}/CppCore/rgpot/*")
+if grep -q "^SF:${ROOT}/include/" "$OUT"; then
+  EXTRACT_PATTERNS+=("${ROOT}/include/*")
+fi
 TMP=$(mktemp)
 trap 'rm -f "$TMP"' EXIT
 lcov --extract "$OUT" \
-  '*/CppCore/rgpot/*' '*/include/*' \
-  --output-file "$TMP" "${LCOV_ARGS[@]}"
+  "${EXTRACT_PATTERNS[@]}" \
+  --output-file "$TMP" "${LCOV_FILTER_ARGS[@]}"
 mv "$TMP" "$OUT"
 
 test -s "$OUT"
