@@ -6,7 +6,3 @@ anneal\._core\.(BasinBias|BinaryLennardJones|Boltzmann|Bounds|Fast|GminTip4p|Gsa
 # Reason: Companion tp_new side of PyO3 #[new] for the same twelve extension
 # classes whose constructor signatures are declared on __init__ in _core.pyi.
 anneal\._core\.(BasinBias|BinaryLennardJones|Boltzmann|Bounds|Fast|GminTip4p|Gsa|Ledger|PairPotential|PyObjective|SuttonChen|Tip4pCluster)\.__new__
-# Reason: PotentialCalculator conditionally subclasses ASE's Calculator
-# (metaclass abc.ABCMeta) when optional `ase` is installed and `object`
-# (metaclass type) when `ase` is absent.
-anneal\.ase\.PotentialCalculator

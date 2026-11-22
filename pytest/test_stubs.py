@@ -7,6 +7,7 @@ import ast
 import importlib
 import importlib.util
 import inspect
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -18,6 +19,7 @@ import anneal._core as core
 
 PKG_DIR = Path(anneal.__file__).resolve().parent
 ALLOWLIST_PATH = Path(__file__).resolve().parent / "stubtest_allowlist.txt"
+ASE_ALLOWLIST_PATH = Path(__file__).resolve().parent / "stubtest_allowlist_ase.txt"
 HEADER = "# Copyright (c) anneal developers"
 
 STUB_MODULES = (
@@ -162,9 +164,9 @@ def test_core_pyo3_classes_marked_final_and_constructor_signatures_match():
     assert checked_inits == 18
 
 
-def test_stubtest_allowlist_entries_all_have_reasons():
-    lines = ALLOWLIST_PATH.read_text(encoding="utf-8").splitlines()
-    assert lines and lines[0] == HEADER
+def _parse_allowlist_entries(path: Path) -> list[str]:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert lines and lines[0] == HEADER, f"missing copyright header in {path}"
     entries: list[str] = []
     saw_reason = False
     for line in lines[1:]:
@@ -176,24 +178,75 @@ def test_stubtest_allowlist_entries_all_have_reasons():
             if "Reason:" in stripped or saw_reason:
                 saw_reason = True
             continue
-        assert saw_reason, f"allowlist entry {stripped!r} is missing a `# Reason:` comment"
+        assert saw_reason, (
+            f"allowlist entry {stripped!r} in {path.name} is missing a `# Reason:` comment"
+        )
         entries.append(stripped)
         saw_reason = False
-    assert len(entries) == 3
+    return entries
+
+
+def test_stubtest_allowlist_entries_all_have_reasons():
+    assert len(_parse_allowlist_entries(ALLOWLIST_PATH)) == 2
+    assert len(_parse_allowlist_entries(ASE_ALLOWLIST_PATH)) == 1
+
+
+def _stubtest_args(*, with_ase: bool) -> list[str]:
+    cmd = [
+        sys.executable,
+        "-m",
+        "mypy.stubtest",
+        "--allowlist",
+        str(ALLOWLIST_PATH),
+    ]
+    if with_ase:
+        cmd.extend(["--allowlist", str(ASE_ALLOWLIST_PATH)])
+    cmd.append("anneal")
+    return cmd
 
 
 def test_mypy_stubtest_passes_across_package():
-    if importlib.util.find_spec("mypy") is None:
-        pytest.skip("mypy is not installed")
+    import mypy  # noqa: F401
+
+    has_ase = importlib.util.find_spec("ase") is not None
     proc = subprocess.run(
+        _stubtest_args(with_ase=has_ase),
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_mypy_stubtest_passes_without_ase(tmp_path: Path):
+    import mypy  # noqa: F401
+
+    (tmp_path / "sitecustomize.py").write_text(
+        "import sys\n"
+        "for _mod in ('ase', 'ase.calculators', 'ase.calculators.calculator'):\n"
+        "    sys.modules[_mod] = None\n",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = (
+        f"{tmp_path}{os.pathsep}{existing}" if existing else str(tmp_path)
+    )
+
+    check_no_ase = subprocess.run(
         [
             sys.executable,
-            "-m",
-            "mypy.stubtest",
-            "--allowlist",
-            str(ALLOWLIST_PATH),
-            "anneal",
+            "-c",
+            "from anneal.ase import PotentialCalculator; assert PotentialCalculator.__mro__ == (PotentialCalculator, object)",
         ],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert check_no_ase.returncode == 0, check_no_ase.stdout + check_no_ase.stderr
+
+    proc = subprocess.run(
+        _stubtest_args(with_ase=False),
+        env=env,
         capture_output=True,
         text=True,
     )
@@ -201,8 +254,8 @@ def test_mypy_stubtest_passes_across_package():
 
 
 def test_mypy_validates_stubs_and_typed_consumer(tmp_path: Path):
-    if importlib.util.find_spec("mypy") is None:
-        pytest.skip("mypy is not installed")
+    import mypy  # noqa: F401
+
     consumer = tmp_path / "consumer.py"
     consumer.write_text(
         "import numpy as np\n"
