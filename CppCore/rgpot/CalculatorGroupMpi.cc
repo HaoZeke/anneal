@@ -38,6 +38,35 @@ int (*g_abort_requested)(void) = nullptr;
 constexpr int kErrorCap = 512;
 constexpr double kErrorWaitS = 10.0;
 
+bool waitRequest(MPI_Request *req, double budget_s) {
+  const double start = MPI_Wtime();
+  for (;;) {
+    int flag = 0;
+    MPI_Test(req, &flag, MPI_STATUS_IGNORE);
+    if (flag)
+      return true;
+    if (MPI_Wtime() - start >= budget_s)
+      return false;
+    struct timespec pause = {0, 1000000};
+    nanosleep(&pause, nullptr);
+  }
+}
+
+void flushAndAbortWorld(MPI_Comm sync_comm, bool leader) {
+  std::fflush(stderr);
+  if (sync_comm != MPI_COMM_NULL) {
+    MPI_Request req = MPI_REQUEST_NULL;
+    if (MPI_Ibarrier(sync_comm, &req) == MPI_SUCCESS)
+      waitRequest(&req, kErrorWaitS);
+  }
+  // Open MPI's MPI_Abort kills peer processes immediately and drops unread
+  // bytes still in their stderr forwarding pipes. Barrier first so every rank
+  // has flushed stderr, then let one rank abort after a short drain window.
+  const struct timespec drain = {0, leader ? 50000000L : 500000000L};
+  nanosleep(&drain, nullptr);
+  MPI_Abort(MPI_COMM_WORLD, 1);
+}
+
 int calculatorCount() {
   if (!g_bound || g_group.index < 0 || g_group.ranks <= 0)
     return 1;
@@ -180,7 +209,7 @@ int share(int owner, void *data, std::size_t bytes) {
   // that observed the mismatch is in this call; wait until those
   // writes have landed.
   MPI_Barrier(MPI_COMM_WORLD);
-  MPI_Abort(MPI_COMM_WORLD, 1);
+  flushAndAbortWorld(MPI_COMM_WORLD, rank == 0);
   return 0;
 }
 
@@ -236,20 +265,6 @@ int agree(unsigned char *flags, std::size_t n) {
     n -= chunk;
   }
   return 1;
-}
-
-bool waitRequest(MPI_Request *req, double budget_s) {
-  const double start = MPI_Wtime();
-  for (;;) {
-    int flag = 0;
-    MPI_Test(req, &flag, MPI_STATUS_IGNORE);
-    if (flag)
-      return true;
-    if (MPI_Wtime() - start >= budget_s)
-      return false;
-    struct timespec pause = {0, 1000000};
-    nanosleep(&pause, nullptr);
-  }
 }
 
 void abortWithLocal(int rank, const char *message, std::size_t len) {
@@ -341,8 +356,7 @@ void publishError(const char *message, std::size_t len) {
     std::fprintf(stderr, "rgpot rank %d: %.*s\n", world_base + src,
                  std::min(count, max_n), recv.data() + offset);
   }
-  std::fflush(stderr);
-  MPI_Abort(MPI_COMM_WORLD, 1);
+  flushAndAbortWorld(g_comm, g_group.rank_in_group == 0);
 }
 
 const rgpot_mpi_api_t kApi = {
