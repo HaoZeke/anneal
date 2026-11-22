@@ -151,7 +151,85 @@ void Neighbours::buildCells(const double *xyz, std::size_t n) {
   double frac_inv[9]{};
   double frac_origin[3] = {0.0, 0.0, 0.0};
   double frac_span[3] = {1.0, 1.0, 1.0};
+  double ref[3] = {0.0, 0.0, 0.0};
   bool use_frac = false;
+  // Project one atom relative to the coordinate-minimum origin `ref`, wrapping
+  // along periodic lattice vectors when any periodic projection exceeds 2
+  // cells. Subtracting `ref` cancels any rigid translation (exact under
+  // Sterbenz's lemma for large offsets), keeping the error bounded by the
+  // cell-local extent instead of |r|. The rounding error per endpoint is at
+  // most 2*eps*(|px*B_{0,k}| + |py*B_{1,k}| + |pz*B_{2,k}|) from subtraction
+  // ((eps/2)|p|) and the 3-term dot product (3*(eps/2)*sum|t_c|), plus
+  // 2*eps*(sum|m_j*H_{j,c}|*|B_{c,k}| + pre + post) per wrapping pass when
+  // unwrapped atoms sit multiple periodic cells from `ref`.
+  auto project_frac = [&](std::size_t a, double s[3], double err[3]) {
+    double px = xyz[3 * a] - ref[0];
+    double py = xyz[3 * a + 1] - ref[1];
+    double pz = xyz[3 * a + 2] - ref[2];
+    auto eval_s = [&](double rx, double ry, double rz, double out_s[3],
+                      double out_abs[3]) {
+      for (int k = 0; k < 3; ++k) {
+        const double t0 = rx * frac_inv[k];
+        const double t1 = ry * frac_inv[3 + k];
+        const double t2 = rz * frac_inv[6 + k];
+        const double sk = (t0 + t1) + t2;
+        const double absk = std::abs(t0) + std::abs(t1) + std::abs(t2);
+        if (!std::isfinite(sk) || !std::isfinite(absk)) {
+          throw std::invalid_argument("fractional coordinate must be finite");
+        }
+        out_s[k] = sk;
+        out_abs[k] = absk;
+      }
+    };
+    double abs_sum[3]{};
+    eval_s(px, py, pz, s, abs_sum);
+    constexpr double eps = std::numeric_limits<double>::epsilon();
+    for (int k = 0; k < 3; ++k) {
+      err[k] = 2.0 * eps * abs_sum[k];
+    }
+    for (int pass = 0; pass < 3; ++pass) {
+      bool need_wrap = false;
+      double m[3] = {0.0, 0.0, 0.0};
+      for (int k = 0; k < 3; ++k) {
+        if (periodic_[k] && std::abs(s[k]) > 2.0) {
+          m[k] = std::round(s[k]);
+          if (m[k] != 0.0) {
+            need_wrap = true;
+          }
+        }
+      }
+      if (!need_wrap) {
+        break;
+      }
+      const double mx = m[0] * box_[0] + m[1] * box_[3] + m[2] * box_[6];
+      const double my = m[0] * box_[1] + m[1] * box_[4] + m[2] * box_[7];
+      const double mz = m[0] * box_[2] + m[1] * box_[5] + m[2] * box_[8];
+      if (!std::isfinite(mx) || !std::isfinite(my) || !std::isfinite(mz)) {
+        break;
+      }
+      const double mx_abs = std::abs(m[0] * box_[0]) +
+                            std::abs(m[1] * box_[3]) + std::abs(m[2] * box_[6]);
+      const double my_abs = std::abs(m[0] * box_[1]) +
+                            std::abs(m[1] * box_[4]) + std::abs(m[2] * box_[7]);
+      const double mz_abs = std::abs(m[0] * box_[2]) +
+                            std::abs(m[1] * box_[5]) + std::abs(m[2] * box_[8]);
+      px -= mx;
+      py -= my;
+      pz -= mz;
+      double wrap_abs[3]{};
+      eval_s(px, py, pz, s, wrap_abs);
+      for (int k = 0; k < 3; ++k) {
+        const double h_abs = mx_abs * std::abs(frac_inv[k]) +
+                             my_abs * std::abs(frac_inv[3 + k]) +
+                             mz_abs * std::abs(frac_inv[6 + k]);
+        if (!std::isfinite(h_abs)) {
+          throw std::invalid_argument("fractional coordinate must be finite");
+        }
+        err[k] += 2.0 * eps * (abs_sum[k] + h_abs + wrap_abs[k]);
+        abs_sum[k] = wrap_abs[k];
+      }
+    }
+  };
   // Cartesian bins only when every off-diagonal entry is zero. A periodic
   // or partially periodic sheared cell uses the minimum image inverse; open
   // axes are not wrapped and get bins spanning the actual fractional
@@ -161,37 +239,62 @@ void Neighbours::buildCells(const double *xyz, std::size_t n) {
       !orthorhombicCell(box_)) {
     double dual_norm[3]{};
     invertCell(box_, frac_inv, dual_norm);
-    constexpr double kFracEdgeSlack =
-        1.0 + 16.0 * std::numeric_limits<double>::epsilon();
+    double max_err[3] = {0.0, 0.0, 0.0};
+    double lo[3] = {0.0, 0.0, 0.0};
+    double hi[3] = {0.0, 0.0, 0.0};
+    if (n > 0) {
+      ref[0] = xyz[0];
+      ref[1] = xyz[1];
+      ref[2] = xyz[2];
+      for (std::size_t a = 0; a < n; ++a) {
+        for (int c = 0; c < 3; ++c) {
+          const double v = xyz[3 * a + static_cast<std::size_t>(c)];
+          if (!std::isfinite(v)) {
+            throw std::invalid_argument("fractional coordinate must be finite");
+          }
+          if (v < ref[c]) {
+            ref[c] = v;
+          }
+        }
+      }
+      for (std::size_t a = 0; a < n; ++a) {
+        double s[3]{};
+        double err[3]{};
+        project_frac(a, s, err);
+        for (int k = 0; k < 3; ++k) {
+          if (err[k] > max_err[k]) {
+            max_err[k] = err[k];
+          }
+          if (!periodic_[k]) {
+            if (a == 0 || s[k] < lo[k]) {
+              lo[k] = s[k];
+            }
+            if (a == 0 || s[k] > hi[k]) {
+              hi[k] = s[k];
+            }
+          }
+        }
+      }
+    }
+    constexpr double eps = std::numeric_limits<double>::epsilon();
+    constexpr double kFracEdgeSlack = 1.0 + 16.0 * eps;
     int naxis[3] = {1, 1, 1};
     for (int k = 0; k < 3; ++k) {
-      const double frac_edge = (edge * dual_norm[k]) * kFracEdgeSlack;
+      // Cushion covers 16-ulp bin-edge rounding, both endpoints' projection
+      // errors (2 * max_err[k]), and up to 2*eps from [0, 1) wrap / span ratio.
+      const double base_edge =
+          (edge * dual_norm[k]) * kFracEdgeSlack + 2.0 * max_err[k] + 2.0 * eps;
       if (periodic_[k]) {
         frac_origin[k] = 0.0;
         frac_span[k] = 1.0;
-        naxis[k] = axisCount(1.0, frac_edge);
+        naxis[k] = axisCount(1.0, base_edge);
       } else if (n > 0) {
-        double lo = 0.0;
-        double hi = 0.0;
-        for (std::size_t a = 0; a < n; ++a) {
-          const double s = xyz[3 * a] * frac_inv[k] +
-                           xyz[3 * a + 1] * frac_inv[3 + k] +
-                           xyz[3 * a + 2] * frac_inv[6 + k];
-          if (!std::isfinite(s)) {
-            throw std::invalid_argument("fractional coordinate must be finite");
-          }
-          if (a == 0 || s < lo) {
-            lo = s;
-          }
-          if (a == 0 || s > hi) {
-            hi = s;
-          }
-        }
-        const double extent = hi - lo;
+        const double extent = hi[k] - lo[k];
         if (!std::isfinite(extent)) {
           throw std::invalid_argument("fractional coordinate must be finite");
         }
-        frac_origin[k] = lo;
+        const double frac_edge = base_edge + 2.0 * eps * extent;
+        frac_origin[k] = lo[k];
         frac_span[k] = extent > frac_edge ? extent : frac_edge;
         naxis[k] = axisCount(frac_span[k], frac_edge);
       }
@@ -283,15 +386,12 @@ void Neighbours::buildCells(const double *xyz, std::size_t n) {
         }
         return i;
       };
-      const double x = xyz[3 * a];
-      const double y = xyz[3 * a + 1];
-      const double z = xyz[3 * a + 2];
-      ix = bin_frac(x * frac_inv[0] + y * frac_inv[3] + z * frac_inv[6], 0,
-                    nx_);
-      iy = bin_frac(x * frac_inv[1] + y * frac_inv[4] + z * frac_inv[7], 1,
-                    ny_);
-      iz = bin_frac(x * frac_inv[2] + y * frac_inv[5] + z * frac_inv[8], 2,
-                    nz_);
+      double s[3]{};
+      double err[3]{};
+      project_frac(a, s, err);
+      ix = bin_frac(s[0], 0, nx_);
+      iy = bin_frac(s[1], 1, ny_);
+      iz = bin_frac(s[2], 2, nz_);
     } else {
       ix = bin(xyz[3 * a] - origin[0], span[0], nx_);
       iy = bin(xyz[3 * a + 1] - origin[1], span[1], ny_);
