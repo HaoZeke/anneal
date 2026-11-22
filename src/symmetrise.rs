@@ -507,16 +507,16 @@ impl Cloud {
             // An image inside half the nearest-neighbour gap is closer to its
             // own atom than to any other, which is the answer the scan would
             // return. The squared length is the same multiply-add.
-            let (partner, distance) = if let Some(self_d2) = image_on_self(here, image, gap) {
-                (index, self_d2)
+            let (matches_self, distance) = if let Some(self_d2) = image_on_self(here, image, gap) {
+                (true, self_d2)
             } else {
-                self.nearest_index(image)
+                self.nearest_matches_index(image, index)
             };
             total += distance;
-            if !axial && partner == index {
+            if !axial && matches_self {
                 return None;
             }
-            if partner != index {
+            if !matches_self {
                 moved = true;
             }
             if stop && total > limit {
@@ -534,8 +534,12 @@ impl Cloud {
     }
 
     fn nearest_squared_scalar(&self, image: [f64; 3]) -> f64 {
+        self.nearest_squared_range_scalar(image, 0, self.xs.len())
+    }
+
+    fn nearest_squared_range_scalar(&self, image: [f64; 3], start: usize, end: usize) -> f64 {
         let mut best = f64::INFINITY;
-        for index in 0..self.xs.len() {
+        for index in start..end {
             let dx = image[0] - self.xs[index];
             let dy = image[1] - self.ys[index];
             let dz = image[2] - self.zs[index];
@@ -553,6 +557,15 @@ impl Cloud {
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
     unsafe fn nearest_squared_avx2(&self, image: [f64; 3]) -> f64 {
+        unsafe { self.nearest_squared_range_avx2(image, 0, self.xs.len()) }
+    }
+
+    /// # Safety
+    ///
+    /// AVX2 must be enabled and `start..end` must lie inside the cloud.
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    unsafe fn nearest_squared_range_avx2(&self, image: [f64; 3], start: usize, end: usize) -> f64 {
         use std::arch::x86_64::{
             _mm256_add_pd, _mm256_loadu_pd, _mm256_min_pd, _mm256_mul_pd, _mm256_set1_pd,
             _mm256_storeu_pd, _mm256_sub_pd,
@@ -560,10 +573,9 @@ impl Cloud {
         let ix = _mm256_set1_pd(image[0]);
         let iy = _mm256_set1_pd(image[1]);
         let iz = _mm256_set1_pd(image[2]);
-        let n = self.xs.len();
-        let mut index = 0usize;
+        let mut index = start;
         let mut best_lanes = _mm256_set1_pd(f64::INFINITY);
-        while index + 4 <= n {
+        while index + 4 <= end {
             unsafe {
                 let dx = _mm256_sub_pd(_mm256_loadu_pd(self.xs.as_ptr().add(index)), ix);
                 let dy = _mm256_sub_pd(_mm256_loadu_pd(self.ys.as_ptr().add(index)), iy);
@@ -588,7 +600,7 @@ impl Cloud {
         if lane[3] < best {
             best = lane[3];
         }
-        while index < n {
+        while index < end {
             let dx = image[0] - self.xs[index];
             let dy = image[1] - self.ys[index];
             let dz = image[2] - self.zs[index];
@@ -599,6 +611,37 @@ impl Cloud {
             index += 1;
         }
         best
+    }
+
+    /// The nearest distance and whether the scalar nearest scan selects
+    /// `source`. Splitting before and after the source keeps the scan
+    /// distance-only while preserving earliest-index ties.
+    fn nearest_matches_index(&self, image: [f64; 3], source: usize) -> (bool, f64) {
+        let here = self.point(source);
+        let dx = image[0] - here[0];
+        let dy = image[1] - here[1];
+        let dz = image[2] - here[2];
+        let self_distance = (dx * dx + dy * dy) + dz * dz;
+        let mut best = self.nearest_squared_range(image, 0, source);
+        let mut matches = false;
+        if self_distance < best {
+            best = self_distance;
+            matches = true;
+        }
+        let after = self.nearest_squared_range(image, source + 1, self.xs.len());
+        if after < best {
+            best = after;
+            matches = false;
+        }
+        (matches, best)
+    }
+
+    fn nearest_squared_range(&self, image: [f64; 3], start: usize, end: usize) -> f64 {
+        #[cfg(target_arch = "x86_64")]
+        if std::is_x86_feature_detected!("avx2") {
+            return unsafe { self.nearest_squared_range_avx2(image, start, end) };
+        }
+        self.nearest_squared_range_scalar(image, start, end)
     }
 
     /// # Safety
@@ -2145,6 +2188,14 @@ mod tests {
                     (vector.0, vector.1.to_bits()),
                     "n={n} query={query:?}"
                 );
+                for source in 0..n {
+                    let matched = cloud.nearest_matches_index(query, source);
+                    assert_eq!(
+                        (scalar.0 == source, scalar.1.to_bits()),
+                        (matched.0, matched.1.to_bits()),
+                        "n={n} source={source} query={query:?}"
+                    );
+                }
             }
         }
     }
