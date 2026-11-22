@@ -25,6 +25,12 @@
 
 namespace rgpot::nlist {
 
+#if defined(__ELF__) && (defined(__GNUC__) || defined(__clang__))
+#define RGPOT_SKEW_SECTION __attribute__((section(".text.rgpot_nlist_skew")))
+#else
+#define RGPOT_SKEW_SECTION
+#endif
+
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((visibility("hidden")))
 #endif
@@ -118,8 +124,9 @@ std::uint64_t availableBytes() {
 #endif
 }
 
-bool Neighbours::reusable(const double *xyz, std::size_t n, const double *box9,
-                          const Spec &spec, bool &wrapped) const {
+bool Neighbours::reusable(const double *xyz, std::size_t n, const Spec &spec,
+                          bool same_cell,
+                          bool &wrapped) const {
   wrapped = false;
   if (!built_ || n != n_) {
     return false;
@@ -130,7 +137,7 @@ bool Neighbours::reusable(const double *xyz, std::size_t n, const double *box9,
   key.image = spec.image;
   key.mode = spec.mode;
   key.periodic = spec.periodic;
-  if (!(key == key_) || std::memcmp(box_, box9, sizeof(box_)) != 0) {
+  if (!(key == key_) || !same_cell) {
     return false;
   }
   if (allPairs()) {
@@ -242,12 +249,15 @@ void Neighbours::buildCells(const double *xyz, std::size_t n) {
     cell_start_[c + 1] += cell_start_[c];
   }
   cell_atoms_.assign(n, 0);
-  std::vector<std::int32_t> fill(cell_start_.begin(), cell_start_.end() - 1);
   for (std::size_t a = 0; a < n; ++a) {
     const auto c = static_cast<std::size_t>(cell_of_[a]);
-    cell_atoms_[static_cast<std::size_t>(fill[c]++)] =
+    cell_atoms_[static_cast<std::size_t>(cell_start_[c]++)] =
         static_cast<std::int32_t>(a);
   }
+  for (std::size_t c = ncells; c > 0; --c) {
+    cell_start_[c] = cell_start_[c - 1];
+  }
+  cell_start_[0] = 0;
 }
 
 void prepareFractionalCells(const double *xyz, std::size_t n,
@@ -776,94 +786,102 @@ void Neighbours::buildStored(const double *xyz, std::size_t n,
   off_[n] = static_cast<std::int32_t>(nbr_.size());
 }
 
-void Neighbours::update(const double *xyz, std::size_t n, const double *box9,
-                        const Spec &spec) {
-  const bool sheared = !orthorhombicCell(box9);
-  if (!sheared) {
-    // Keep the established orthorhombic path in place: it neither constructs
-    // a transactional neighbour object nor touches fractional workspace.
-    xyz_ = xyz;
-    bool wrapped = false;
-    if (reusable(xyz, n, box9, spec, wrapped)) {
-      reused_ = true;
-      if (wrapped) {
-        buildCells(xyz, n);
-      }
-      return;
+void Neighbours::updateOrthorhombic(const double *xyz, std::size_t n,
+                                    const double *box9, const Spec &spec,
+                                    bool same_cell) {
+  xyz_ = xyz;
+  bool wrapped = false;
+  if (reusable(xyz, n, spec, same_cell, wrapped)) {
+    reused_ = true;
+    if (wrapped) {
+      buildCells(xyz, n);
     }
-    reused_ = false;
-    n_ = n;
-    std::memcpy(box_, box9, sizeof(box_));
-    len_[0] = box9[0];
-    len_[1] = box9[4];
-    len_[2] = box9[8];
-    for (int k = 0; k < 3; ++k) {
-      periodic_[k] =
-          spec.periodic[static_cast<std::size_t>(k)] && len_[k] > 0.0;
-      inv_[k] = periodic_[k] ? 1.0 / len_[k] : 0.0;
-    }
-    image_ = spec.image;
-    use_general_ = image_ == Image::General;
-    if (use_general_) {
-      general_ = MinimumImage(box9, spec.periodic);
-    }
-    search_ = spec.cutoff + spec.skin;
-    if (!(search_ > 0.0)) {
-      search_ = 0.0;
-    }
-    key_.cutoff = spec.cutoff;
-    key_.skin = spec.skin;
-    key_.image = spec.image;
-    key_.mode = spec.mode;
-    key_.periodic = spec.periodic;
-    off_.clear();
+    return;
+  }
+  reused_ = false;
+  n_ = n;
+  std::memcpy(box_, box9, sizeof(box_));
+  len_[0] = box9[0];
+  len_[1] = box9[4];
+  len_[2] = box9[8];
+  for (int k = 0; k < 3; ++k) {
+    periodic_[k] =
+        spec.periodic[static_cast<std::size_t>(k)] && len_[k] > 0.0;
+    inv_[k] = periodic_[k] ? 1.0 / len_[k] : 0.0;
+  }
+  image_ = spec.image;
+  use_general_ = image_ == Image::General;
+  if (use_general_) {
+    general_ = MinimumImage(box9, spec.periodic);
+  }
+  search_ = spec.cutoff + spec.skin;
+  if (!(search_ > 0.0)) {
+    search_ = 0.0;
+  }
+  key_.cutoff = spec.cutoff;
+  key_.skin = spec.skin;
+  key_.image = spec.image;
+  key_.mode = spec.mode;
+  key_.periodic = spec.periodic;
+  off_.clear();
+  nbr_.clear();
+  streaming_ = true;
+  if (n < 2 || !(search_ > 0.0)) {
+    streaming_ = false;
+    mode_ = Mode::Stored;
+    off_.assign(n + 1, 0);
     nbr_.clear();
-    streaming_ = true;
-    if (n < 2 || !(search_ > 0.0)) {
-      streaming_ = false;
-      mode_ = Mode::Stored;
-      off_.assign(n + 1, 0);
-      nbr_.clear();
-      built_ = true;
-      ref_.assign(xyz, xyz + 3 * n);
-      return;
-    }
-    if (std::isinf(search_)) {
-      mode_ = Mode::Stream;
-      built_ = true;
-      return;
-    }
-    buildCells(xyz, n);
-    if (spec.mode == Mode::Stream) {
-      streaming_ = true;
-      mode_ = Mode::Stream;
-      built_ = true;
-      ref_.assign(xyz, xyz + 3 * n);
-      return;
-    }
-    const std::uint64_t bound = candidateBound();
-    const auto avail = availableBytes();
-    const auto index_bytes = static_cast<std::uint64_t>(sizeof(std::int32_t));
-    const bool bounded = bound <= static_cast<std::uint64_t>(0x7fffffff);
-    const bool over_budget = avail > 0 && bound > avail / index_bytes;
-    const bool fits = bounded && !over_budget;
-    const bool want_store =
-        spec.mode == Mode::Stored ? fits : spec.mode == Mode::Auto && fits;
-    if (want_store) {
-      buildStored(xyz, n, bound);
-      streaming_ = false;
-      mode_ = Mode::Stored;
-      ++builds_;
-    } else {
-      streaming_ = true;
-      mode_ = Mode::Stream;
-    }
     built_ = true;
     ref_.assign(xyz, xyz + 3 * n);
     return;
   }
+  if (std::isinf(search_)) {
+    mode_ = Mode::Stream;
+    built_ = true;
+    return;
+  }
+  buildCells(xyz, n);
+  if (spec.mode == Mode::Stream) {
+    streaming_ = true;
+    mode_ = Mode::Stream;
+    built_ = true;
+    ref_.assign(xyz, xyz + 3 * n);
+    return;
+  }
+  const std::uint64_t bound = candidateBound();
+  const auto avail = availableBytes();
+  const auto index_bytes = static_cast<std::uint64_t>(sizeof(std::int32_t));
+  const bool bounded = bound <= static_cast<std::uint64_t>(0x7fffffff);
+  const bool over_budget = avail > 0 && bound > avail / index_bytes;
+  const bool fits = bounded && !over_budget;
+  const bool want_store =
+      spec.mode == Mode::Stored ? fits : spec.mode == Mode::Auto && fits;
+  if (want_store) {
+    buildStored(xyz, n, bound);
+    streaming_ = false;
+    mode_ = Mode::Stored;
+    ++builds_;
+  } else {
+    streaming_ = true;
+    mode_ = Mode::Stream;
+  }
+  built_ = true;
+  ref_.assign(xyz, xyz + 3 * n);
+}
 
-  auto build_fractional_cells = [&](const FractionalPlan &plan) {
+void Neighbours::update(const double *xyz, std::size_t n, const double *box9,
+                        const Spec &spec) {
+  const bool same_cell =
+      built_ && std::memcmp(box_, box9, sizeof(box_)) == 0;
+  const bool skewed =
+      same_cell ? std::signbit(inv_[0]) : !orthorhombicCell(box9);
+  if (!skewed) {
+    updateOrthorhombic(xyz, n, box9, spec, same_cell);
+    return;
+  }
+
+  auto build_fractional_cells =
+      [&](const FractionalPlan &plan) RGPOT_SKEW_SECTION {
     auto &workspace = fractionalWorkspace();
     const int previous_axes[3] = {nx_, ny_, nz_};
     nx_ = plan.axes[0];
@@ -902,7 +920,7 @@ void Neighbours::update(const double *xyz, std::size_t n, const double *box9,
   };
 
   bool wrapped = false;
-  if (reusable(xyz, n, box9, spec, wrapped)) {
+  if (reusable(xyz, n, spec, same_cell, wrapped)) {
     if (wrapped) {
       FractionalPlan plan;
       prepareFractionalCells(xyz, n, box_, periodic_, search_, plan);
@@ -947,6 +965,10 @@ void Neighbours::update(const double *xyz, std::size_t n, const double *box9,
     periodic_[k] = next_periodic[k];
     inv_[k] = periodic_[k] ? 1.0 / len_[k] : 0.0;
   }
+  // General minimum image owns every skewed fold, leaving the Cartesian
+  // inverse unused. Its sign bit caches the cell classification without
+  // changing the public class layout; negative zero covers an open x axis.
+  inv_[0] = std::copysign(inv_[0], -1.0);
   image_ = spec.image;
   use_general_ = true;
   general_ = std::move(next_general);
@@ -1004,5 +1026,7 @@ void Neighbours::update(const double *xyz, std::size_t n, const double *box9,
   built_ = true;
   ref_.assign(xyz, xyz + 3 * n);
 }
+
+#undef RGPOT_SKEW_SECTION
 
 } // namespace rgpot::nlist
