@@ -30,11 +30,17 @@ namespace rgpot::cache {
 
 namespace {
 // Versioned storage keys keep entries formed with a different hash protocol
-// in a separate RocksDB namespace.
-std::array<char, 1 + sizeof(size_t)> storage_key(const KeyHash &key) {
-  std::array<char, 1 + sizeof(size_t)> bytes{};
+// in a separate RocksDB namespace. The key is one version byte and the 64-bit
+// hash in little-endian order, so its width and byte order do not depend on
+// the platform.
+constexpr size_t storage_key_bytes = 1 + sizeof(uint64_t);
+
+std::array<char, storage_key_bytes> storage_key(const KeyHash &key) {
+  std::array<char, storage_key_bytes> bytes{};
   bytes[0] = 2;
-  std::memcpy(bytes.data() + 1, &key.hash, sizeof(key.hash));
+  for (size_t i = 0; i < sizeof(uint64_t); ++i) {
+    bytes[1 + i] = static_cast<char>((key.hash >> (8 * i)) & 0xffU);
+  }
   return bytes;
 }
 
