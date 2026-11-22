@@ -6,6 +6,7 @@ from __future__ import annotations
 import inspect
 import math
 import re
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -92,7 +93,7 @@ def test_cluster_search_ras_exposes_full_archive_outcome():
     try:
         out = anneal.cluster_search(pot, None, 4, 500, seed=0, ras=True)
     except ValueError as exc:
-        assert "graphkey" in str(exc)
+        assert str(exc) == "ras=True requires building with the graphkey feature"
         return
     for key in (
         "best",
@@ -229,18 +230,33 @@ def test_core_docstrings_match_live_result_fields():
     assert "Ignored once" not in cs_core_doc
     assert "at energy scale one" not in cs_core_doc
 
+    repo_root = Path(__file__).resolve().parents[1]
+    py_rs = (repo_root / "src" / "python.rs").read_text(encoding="utf-8")
+    ras_fn_match = re.search(
+        r"#\[cfg\(feature = \"graphkey\"\)\]\s*fn cluster_archive_search.*?\n\}",
+        py_rs,
+        re.S,
+    )
+    assert ras_fn_match is not None
+    expected_ras_keys = set(
+        re.findall(r'dict\.set_item\(\s*"([^"]+)"', ras_fn_match.group(0))
+    )
+    assert len(expected_ras_keys) == 12
+
     try:
         ras_out = anneal._core.cluster_search(pot, None, 4, 200, seed=0, ras=True)
     except ValueError as exc:
-        assert "graphkey" in str(exc)
+        assert str(exc) == "ras=True requires building with the graphkey feature"
     else:
-        for key in sorted(ras_out.keys()):
-            assert f"`{key}`" in cs_core_doc, (
-                f"anneal._core.cluster_search.__doc__ missing ras=True key {key!r}"
-            )
-            assert f"``{key}``" in cs_wrap_doc, (
-                f"anneal.cluster_search.__doc__ missing ras=True key {key!r}"
-            )
+        assert set(ras_out.keys()) == expected_ras_keys
+
+    for key in sorted(expected_ras_keys):
+        assert f"`{key}`" in cs_core_doc, (
+            f"anneal._core.cluster_search.__doc__ missing ras=True key {key!r}"
+        )
+        assert f"``{key}``" in cs_wrap_doc, (
+            f"anneal.cluster_search.__doc__ missing ras=True key {key!r}"
+        )
 
     # 2. anneal._core.Ledger docstring must describe Ledger (no orphaned Config text).
     ledger_doc = anneal._core.Ledger.__doc__ or ""

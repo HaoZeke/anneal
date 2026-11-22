@@ -206,7 +206,7 @@ def test_native_potentials_work_with_quench_cluster_search_and_objectives():
             target=-6.0,
         )
     except ValueError as exc:
-        assert "graphkey" in str(exc)
+        assert str(exc) == "ras=True requires building with the graphkey feature"
     else:
         assert anneal.energy_hits(s_ras["best_energy"], -6.0)
 

@@ -528,14 +528,26 @@ def test_cluster_search_invalid_stock_inputs_and_docstring():
 
     out = anneal._core.cluster_search(lj4, None, 4, 120, seed=1)
     assert len(out) == 35
-    ras_keys: set[str] = set()
+
+    repo_root = Path(__file__).resolve().parents[1]
+    py_rs = (repo_root / "src" / "python.rs").read_text(encoding="utf-8")
+    ras_fn_match = re.search(
+        r"#\[cfg\(feature = \"graphkey\"\)\]\s*fn cluster_archive_search.*?\n\}",
+        py_rs,
+        re.S,
+    )
+    assert ras_fn_match is not None, "could not locate cluster_archive_search in src/python.rs"
+    ras_keys = set(
+        re.findall(r'dict\.set_item\(\s*"([^"]+)"', ras_fn_match.group(0))
+    )
+    assert len(ras_keys) == 12
+
     try:
         ras_out = anneal._core.cluster_search(lj4, None, 4, 200, seed=1, ras=True)
     except ValueError as exc:
-        assert "graphkey" in str(exc)
+        assert str(exc) == "ras=True requires building with the graphkey feature"
     else:
-        assert len(ras_out) == 12
-        ras_keys = set(ras_out.keys())
+        assert set(ras_out.keys()) == ras_keys
 
     core_doc = anneal._core.cluster_search.__doc__ or ""
     wrap_doc = anneal.cluster_search.__doc__ or ""
