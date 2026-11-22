@@ -125,6 +125,10 @@ pub struct RelaxStats {
     /// gradient. The line search backtracks from each, and a refused start
     /// ends its relaxation at `+inf`.
     pub refused: usize,
+    /// Plain-surface holds a failed restraint block began.
+    pub plain_holds: usize,
+    /// Holds lifted again, on a lower minimum or a stall.
+    pub hold_lifts: usize,
 }
 
 impl RelaxStats {
@@ -913,6 +917,7 @@ where
                     led.revert_unrestrained = true;
                     portfolio.hold_plain();
                 }
+                (stats.plain_holds, stats.hold_lifts) = portfolio.holds_and_lifts();
                 chosen
             }
             None => cfg.two_phase.filter(|two| two.is_active()),

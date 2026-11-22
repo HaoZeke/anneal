@@ -612,6 +612,9 @@ pub struct SurfacePortfolio {
     failed_arm: Option<usize>,
     /// The restraint arm the hold was set against.
     held_against: Option<usize>,
+    /// Plain holds begun, and holds lifted, over the run.
+    holds: usize,
+    lifts: usize,
     /// The call to [`Self::begin`] that opened the block now held.
     just_opened: bool,
     rng: StdRng,
@@ -686,6 +689,8 @@ impl SurfacePortfolio {
             settled_blocks: 0,
             failed_arm: None,
             held_against: None,
+            holds: 0,
+            lifts: 0,
             just_opened: false,
             rng: StdRng::seed_from_u64(seed ^ 0x5a2f_ace5),
         }
@@ -855,6 +860,13 @@ impl SurfacePortfolio {
         self.held_blocks = 0;
         self.held_after = self.settled_blocks;
         self.held_against = self.failed_arm.take();
+        self.holds += 1;
+    }
+
+    /// Plain holds begun by [`Self::hold_plain`] and holds lifted since,
+    /// over the run.
+    pub fn holds_and_lifts(&self) -> (usize, usize) {
+        (self.holds, self.lifts)
     }
 
     /// The surface for the relaxation about to start.
@@ -876,6 +888,7 @@ impl SurfacePortfolio {
                 let stalled = self.held_blocks > self.held_after;
                 if left || stalled {
                     self.plain_only = false;
+                    self.lifts += 1;
                     returned = self.held_against.take();
                 } else {
                     self.held_blocks += 1;
@@ -1327,6 +1340,37 @@ mod tests {
             holds.windows(2).all(|pair| pair[1] >= 2 * pair[0]),
             "each hold should outlast the run before it: {holds:?}"
         );
+    }
+
+    #[test]
+    fn the_portfolio_counts_each_hold_and_each_lift() {
+        let mut portfolio = SurfacePortfolio::with_block(&[TwoPhase::diameter(2.0, 1.0)], 5, 1);
+        for best in [-1.0, -2.0, -2.0, -3.0] {
+            portfolio.begin(true);
+            portfolio.held = Some(0);
+            portfolio.observe(false, best, best);
+        }
+        assert_eq!(portfolio.holds_and_lifts(), (0, 0));
+        let (mut holds, mut lifts) = (0, 0);
+        for _ in 0..200 {
+            let was_held = portfolio.plain_only;
+            portfolio.begin(true);
+            if was_held && !portfolio.plain_only {
+                lifts += 1;
+            }
+            if portfolio.take_restraint_block_failed() {
+                portfolio.hold_plain();
+                holds += 1;
+            }
+            let reached = if portfolio.held == Some(1) {
+                -2.0
+            } else {
+                -3.0
+            };
+            portfolio.observe(false, reached, -3.0);
+        }
+        assert!(holds >= 3 && lifts >= 3, "{holds} holds, {lifts} lifts");
+        assert_eq!(portfolio.holds_and_lifts(), (holds, lifts));
     }
 
     fn rigid_water() -> Array1<f64> {
