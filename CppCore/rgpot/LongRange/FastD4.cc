@@ -212,9 +212,7 @@ Shell shell_of(const std::vector<Pair> &pairs, std::size_t n) {
   const double to_b = 1.0 / kBohr;
   for (const Pair &pr : pairs) {
     s.off[static_cast<std::size_t>(pr.i) + 1] += 1;
-    if (pr.i != pr.j) {
-      s.off[static_cast<std::size_t>(pr.j) + 1] += 1;
-    }
+    s.off[static_cast<std::size_t>(pr.j) + 1] += 1;
   }
   for (std::size_t i = 0; i < n; ++i) {
     s.off[i + 1] += s.off[i];
@@ -229,14 +227,12 @@ Shell shell_of(const std::vector<Pair> &pairs, std::size_t n) {
     a.z = pr.z * to_b;
     a.r = pr.r * to_b;
     s.nb[static_cast<std::size_t>(cur[static_cast<std::size_t>(pr.i)]++)] = a;
-    if (pr.i != pr.j) {
-      Nb b = a;
-      b.j = pr.i;
-      b.x = -a.x;
-      b.y = -a.y;
-      b.z = -a.z;
-      s.nb[static_cast<std::size_t>(cur[static_cast<std::size_t>(pr.j)]++)] = b;
-    }
+    Nb b = a;
+    b.j = pr.i;
+    b.x = -a.x;
+    b.y = -a.y;
+    b.z = -a.z;
+    s.nb[static_cast<std::size_t>(cur[static_cast<std::size_t>(pr.j)]++)] = b;
   }
   return s;
 }

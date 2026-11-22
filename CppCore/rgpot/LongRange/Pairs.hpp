@@ -4,9 +4,10 @@
 
 // Dual cutoff lists. The short list is the local model. The long list
 // is Coulomb real space and dispersion. Each list is a half list with a
-// Verlet skin: candidates live at cutoff + skin and are rebuilt when an
-// atom, or a cell corner, leaves the skin. The rebuild and the filter
-// run with the current OpenMP team, so one thread stays one thread.
+// Verlet skin: nlist::Builder keeps candidates at cutoff + skin until
+// atom and cell-corner displacements leave the skin, and DualList
+// filters them to cutoff on the current OpenMP team (skipping the
+// filter when positions and the cell are unchanged).
 
 #include <cstddef>
 #include <memory>

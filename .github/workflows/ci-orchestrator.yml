@@ -482,6 +482,7 @@ jobs:
             -Dwith_eigen=false \
             -Dwith_rpc=false \
             -Dwith_cache=false \
+            -Dwith_long_range=true \
             -Dwith_fast_nlist=disabled \
             -Dpure_lib=true
           meson compile -C bbdir
@@ -640,7 +641,8 @@ jobs:
             -Dwith_xtensor=false \
             -Dwith_eigen=false \
             -Dwith_rpc=false \
-            -Dwith_cache=false
+            -Dwith_cache=false \
+            -Dwith_long_range=true
           meson compile -C bbdir
       - name: Test with OMP_THREAD_LIMIT=1
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}

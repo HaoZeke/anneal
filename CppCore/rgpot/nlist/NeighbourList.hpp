@@ -156,8 +156,8 @@ struct Table {
 };
 
 /// Stored list with a skin rebuild. A later update keeps the table while
-/// every atom has moved by at most half the skin and the cell and the
-/// query are unchanged. Skin 0 rebuilds unless the coordinates match.
+/// atom and cell-corner displacements stay within the skin and the query
+/// is unchanged. Skin 0 rebuilds unless the coordinates and the cell match.
 /// Throws Error and keeps the previous table when the geometry is
 /// rejected. The same builder is used by one thread. Two builders may
 /// update at the same time.

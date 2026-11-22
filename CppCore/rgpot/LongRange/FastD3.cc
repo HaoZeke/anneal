@@ -181,9 +181,7 @@ void d3bj_evaluate(const double *pos, const int *z, std::size_t n, const double 
         continue;
       }
       mine[pr.i] += 1;
-      if (pr.i != pr.j) {
-        mine[pr.j] += 1;
-      }
+      mine[pr.j] += 1;
     }
   });
   std::vector<int> off(n + 1, 0);
@@ -212,14 +210,12 @@ void d3bj_evaluate(const double *pos, const int *z, std::size_t n, const double 
       a.z = pr.z * to_b;
       a.r = pr.r * to_b;
       nb[static_cast<std::size_t>(slot[pr.i]++)] = a;
-      if (pr.i != pr.j) {
-        Nb b = a;
-        b.j = pr.i;
-        b.x = -a.x;
-        b.y = -a.y;
-        b.z = -a.z;
-        nb[static_cast<std::size_t>(slot[pr.j]++)] = b;
-      }
+      Nb b = a;
+      b.j = pr.i;
+      b.x = -a.x;
+      b.y = -a.y;
+      b.z = -a.z;
+      nb[static_cast<std::size_t>(slot[pr.j]++)] = b;
     }
   });
   const auto neigh = [&](std::size_t i) {
@@ -306,16 +302,17 @@ void d3bj_evaluate(const double *pos, const int *z, std::size_t n, const double 
           floc[3 * a.j] -= gx;
           floc[3 * a.j + 1] -= gy;
           floc[3 * a.j + 2] -= gz;
-          sig[0] += gx * (-a.x);
-          sig[4] += gy * (-a.y);
-          sig[8] += gz * (-a.z);
-          sig[1] += gy * (-a.x);
-          sig[3] += gx * (-a.y);
-          sig[2] += gz * (-a.x);
-          sig[6] += gx * (-a.z);
-          sig[5] += gz * (-a.y);
-          sig[7] += gy * (-a.z);
         }
+        const double virial_scale = a.j == static_cast<int>(i) ? 0.5 : 1.0;
+        sig[0] += virial_scale * gx * (-a.x);
+        sig[4] += virial_scale * gy * (-a.y);
+        sig[8] += virial_scale * gz * (-a.z);
+        sig[1] += virial_scale * gy * (-a.x);
+        sig[3] += virial_scale * gx * (-a.y);
+        sig[2] += virial_scale * gz * (-a.x);
+        sig[6] += virial_scale * gx * (-a.z);
+        sig[5] += virial_scale * gz * (-a.y);
+        sig[7] += virial_scale * gy * (-a.z);
       }
     }
     for (std::size_t i = static_cast<std::size_t>(slice); i < n; i += static_cast<std::size_t>(nt)) {

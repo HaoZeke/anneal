@@ -1,0 +1,4 @@
+<!-- Copyright 2023--present rgpot developers -->
+`rgpot::lr::DualList` now builds its half-shell candidate lists through `rgpot::nlist::Builder`, enumerating every periodic image inside the cutoff once (including one canonical direction for self images when the cutoff exceeds a cubic or triclinic cell vector), and filters candidates on the active OpenMP team while skipping the distance pass when coordinates and the cell are unchanged.
+`rgpot::nlist::Builder::update` now subtracts the cell-corner displacement across the periodic shift stencil from the Verlet skin before testing atom displacements, so variable-cell and NPT steps within the skin reuse the stored candidate table instead of rebuilding on every box change.
+D3 and D4 now restore the opposite directed neighbor for each canonical periodic self image, preserving their energies, coordination numbers and forces; D3 also restores self-image stress.
