@@ -1087,17 +1087,20 @@ impl EnginePotential {
     }
 
     /// Attach a persistent result cache or detach it with `None`.
+    ///
     /// The directory is dedicated to one model and its parameters.
+    /// The engine receives the path as a narrow C string.
+    /// On Unix the bytes of the path pass through unchanged.
+    /// On Windows the engine opens the path as UTF-8, so a path that is not
+    /// valid Unicode is refused with [`EngineError::Invalid`] instead of
+    /// being altered on the way.
     pub fn set_cache(&mut self, path: Option<&Path>) -> Result<(), EngineError> {
         self.check_alive()?;
         let operation = "rgpot_engine_set_cache";
         let set = self
             .set_cache
             .ok_or_else(|| unsupported_symbol(operation))?;
-        let path = path
-            .map(|p| CString::new(p.as_os_str().as_encoded_bytes()))
-            .transpose()
-            .map_err(|_| EngineError::Invalid("cache path contains a null byte".into()))?;
+        let path = path.map(cache_path).transpose()?;
         let code = unsafe {
             set(
                 self.handle.as_ptr(),
@@ -1583,6 +1586,38 @@ impl EngineSession {
         self.engine.settle(code, failure)
     }
 
+    /// Attach a persistent result cache stored in the directory `path`.
+    ///
+    /// Give each model and parameter set its own directory.
+    /// Attaching starts the counts at zero and replaces any cache already
+    /// attached.
+    /// A refused attachment leaves the previous cache in place.
+    /// An engine that does not export `rgpot_engine_set_cache`, or a
+    /// composite engine whose per-term records the cache cannot hold,
+    /// returns [`EngineError::Unsupported`].
+    pub fn attach_cache(&mut self, path: &Path) -> Result<(), EngineError> {
+        let answer = self.engine.set_cache(Some(path));
+        self.finish(answer)
+    }
+
+    /// Detach the result cache and close it.
+    ///
+    /// The stored entries stay on disk and serve a later attachment of the
+    /// same directory.
+    pub fn clear_cache(&mut self) -> Result<(), EngineError> {
+        let answer = self.engine.set_cache(None);
+        self.finish(answer)
+    }
+
+    /// Status of the attached cache: results the kernel computed and results
+    /// the cache served since attachment.
+    ///
+    /// With no cache attached, or on an engine that does not export
+    /// `rgpot_engine_cache_counts`, this returns [`EngineError::Unsupported`].
+    pub fn cache_counts(&self) -> Result<EngineCacheCounts, EngineError> {
+        self.finish(self.engine.cache_counts())
+    }
+
     /// Monotone model state, or zero for a static engine.
     pub fn model_state(&self) -> Result<u64, EngineError> {
         self.engine.check_alive()?;
@@ -1737,6 +1772,20 @@ fn text_of(buffer: &[c_char]) -> String {
         .take_while(|value| *value != 0)
         .collect();
     String::from_utf8_lossy(&bytes).into_owned()
+}
+
+#[cfg(not(windows))]
+fn cache_path(path: &Path) -> Result<CString, EngineError> {
+    CString::new(path.as_os_str().as_encoded_bytes())
+        .map_err(|_| EngineError::Invalid("cache path contains a null byte".into()))
+}
+
+#[cfg(windows)]
+fn cache_path(path: &Path) -> Result<CString, EngineError> {
+    let text = path.to_str().ok_or_else(|| {
+        EngineError::Invalid("cache path must be valid Unicode on Windows".into())
+    })?;
+    CString::new(text).map_err(|_| EngineError::Invalid("cache path contains a null byte".into()))
 }
 
 unsafe fn optional<T: Copy>(library: &Library, name: &str) -> Option<T> {
