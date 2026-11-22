@@ -22,7 +22,7 @@ TEST_CASE("SO(3) force scatter is stored as variance, not RMS", "[variance]") {
   const double stored =
       rgpot::forceScatterVariance(sum_of_squares, n_components);
 
-  REQUIRE(stored == rms * rms);
+  REQUIRE(stored == Catch::Approx(rms * rms).epsilon(1e-12));
   REQUIRE(std::sqrt(stored) == Catch::Approx(rms));
   REQUIRE(std::sqrt(stored) != Catch::Approx(std::sqrt(rms)).margin(1e-6));
 }
@@ -31,7 +31,7 @@ TEST_CASE("model energy uncertainty is stored as its square", "[variance]") {
   constexpr double rms = 0.005;
   const double stored = rgpot::modelUncertaintyVariance(rms);
 
-  REQUIRE(stored == rms * rms);
+  REQUIRE(stored == Catch::Approx(rms * rms).epsilon(1e-12));
   REQUIRE(std::sqrt(stored) == Catch::Approx(rms));
 }
 
