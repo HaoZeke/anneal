@@ -354,7 +354,8 @@ evaluate_metatomic(positions, atom_types, box, *, model_path, engine_path=None, 
   =engine_path= =None= uses =rgpot.default_metatomic_engine_path()=, or an empty
   string when that is =None=.
   =device= is the torch device string.
-- Units :: positions and box in Angstrom; energy eV; forces eV/Angstrom.
+- Units :: positions and box in Angstrom; energy eV; forces eV/Angstrom;
+  variance eV^2 from the model uncertainty, else eV^2 per Angstrom squared.
 - Outputs :: the tuple =(energy, forces, variance)= of
   =rgpot.evaluate_metatomic_dlopen=.
   The function imports =torch= first when it is installed, so the engine
@@ -378,7 +379,8 @@ evaluate_metatomic_dlopen(positions, atom_types, box, model_path, engine_path=''
   It does not search the engines bundled with the package;
   =rgpot.evaluate_metatomic= does.
   An empty =device= means ="cpu"=.
-- Units :: positions and box in Angstrom; energy eV; forces eV/Angstrom.
+- Units :: positions and box in Angstrom; energy eV; forces eV/Angstrom;
+  variance eV^2 from the model uncertainty, else eV^2 per Angstrom squared.
 - Outputs :: a tuple =(energy, forces, variance)=: a float, a =(N, 3)= float64
   array and a float.
   Each call builds and drops its own frontend.

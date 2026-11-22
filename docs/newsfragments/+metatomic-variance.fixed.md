@@ -1,1 +1,0 @@
-`MetatomicPot` now stores `ForceOut::variance` as a variance rather than an RMS: the square of the mean `energy_uncertainty`, or the mean-square force residual over orientations when running multiple passes without model uncertainty. Callers that take one square root recover the intended RMS uncertainty scale instead of a fourth root.
