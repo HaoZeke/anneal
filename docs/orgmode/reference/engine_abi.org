@@ -1252,6 +1252,9 @@ the handle as a =PotentialImpl=.
   =force_batch=, =hvp=, =caps=, =last_error=,
   =last_components=, =component_name=, =model_state=, =set_callbacks=, =hint=)
   function pointers.
+  The struct is
+  =#[non_exhaustive]=: build it with =EngineSymbols::new= for the four required symbols and one =with_*=
+  method per optional symbol, such as =with_hint=.
 - =EngineError= :: Typed error enum covering =Load=, =Missing=, =Abi=
   (=expected=, =found=), =AbiStamp= (=expected=, =found=), =Create=, =Invalid=,
   =Unsupported=, =Recoverable= (=code=, =message=), and =Fatal= (=code=,

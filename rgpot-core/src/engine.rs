@@ -120,7 +120,10 @@ impl EngineStatus {
     }
 
     /// The C ABI return code. Its sign is the class of the status, so
-    /// `from_code(status.code())` is the same status.
+    /// `from_code(status.code())` is the same status for every status
+    /// [`Self::from_code`] produces. A failure built directly with a magnitude
+    /// beyond the range of `c_int` saturates to `c_int::MAX` or `c_int::MIN`,
+    /// so that code is not the exact magnitude and does not round-trip.
     pub const fn code(self) -> c_int {
         match self {
             Self::Success => 0,
@@ -421,7 +424,12 @@ pub struct EngineCaps {
 /// The symbols of one engine library. `abi_version`, `create`, `destroy` and
 /// `force` are required by the header; the optional entries are probed and may
 /// be absent.
+///
+/// The struct is `#[non_exhaustive]`, so a symbol added to the ABI later does
+/// not break callers. Build one with [`EngineSymbols::new`] and the `with_*`
+/// methods, one per optional symbol.
 #[derive(Clone, Copy)]
+#[non_exhaustive]
 pub struct EngineSymbols {
     /// Required symbol `rgpot_engine_abi_version`.
     pub abi_version: AbiVersionFn,
@@ -451,6 +459,105 @@ pub struct EngineSymbols {
     pub set_callbacks: Option<SetCallbacksFn>,
     /// Optional symbol `rgpot_engine_hint`.
     pub hint: Option<HintFn>,
+}
+
+impl EngineSymbols {
+    /// A symbol table with the four required symbols and every optional one
+    /// absent.
+    #[must_use]
+    pub fn new(
+        abi_version: AbiVersionFn,
+        create: CreateFn,
+        destroy: DestroyFn,
+        force: ForceFn,
+    ) -> Self {
+        Self {
+            abi_version,
+            abi_stamp: None,
+            create,
+            destroy,
+            force,
+            force_batch: None,
+            hvp: None,
+            caps: None,
+            last_error: None,
+            last_components: None,
+            component_name: None,
+            model_state: None,
+            set_callbacks: None,
+            hint: None,
+        }
+    }
+
+    /// Provide the optional symbol `rgpot_engine_abi_stamp`.
+    #[must_use]
+    pub fn with_abi_stamp(mut self, abi_stamp: AbiStampFn) -> Self {
+        self.abi_stamp = Some(abi_stamp);
+        self
+    }
+
+    /// Provide the optional symbol `rgpot_engine_force_batch`.
+    #[must_use]
+    pub fn with_force_batch(mut self, force_batch: ForceBatchFn) -> Self {
+        self.force_batch = Some(force_batch);
+        self
+    }
+
+    /// Provide the optional symbol `rgpot_engine_hvp`.
+    #[must_use]
+    pub fn with_hvp(mut self, hvp: HvpFn) -> Self {
+        self.hvp = Some(hvp);
+        self
+    }
+
+    /// Provide the optional symbol `rgpot_engine_caps`.
+    #[must_use]
+    pub fn with_caps(mut self, caps: CapsFn) -> Self {
+        self.caps = Some(caps);
+        self
+    }
+
+    /// Provide the optional symbol `rgpot_engine_last_error`.
+    #[must_use]
+    pub fn with_last_error(mut self, last_error: LastErrorFn) -> Self {
+        self.last_error = Some(last_error);
+        self
+    }
+
+    /// Provide the optional symbol `rgpot_engine_last_components`.
+    #[must_use]
+    pub fn with_last_components(mut self, last_components: LastComponentsFn) -> Self {
+        self.last_components = Some(last_components);
+        self
+    }
+
+    /// Provide the optional symbol `rgpot_engine_component_name`.
+    #[must_use]
+    pub fn with_component_name(mut self, component_name: ComponentNameFn) -> Self {
+        self.component_name = Some(component_name);
+        self
+    }
+
+    /// Provide the optional symbol `rgpot_engine_model_state`.
+    #[must_use]
+    pub fn with_model_state(mut self, model_state: ModelStateFn) -> Self {
+        self.model_state = Some(model_state);
+        self
+    }
+
+    /// Provide the optional symbol `rgpot_engine_set_callbacks`.
+    #[must_use]
+    pub fn with_set_callbacks(mut self, set_callbacks: SetCallbacksFn) -> Self {
+        self.set_callbacks = Some(set_callbacks);
+        self
+    }
+
+    /// Provide the optional symbol `rgpot_engine_hint`.
+    #[must_use]
+    pub fn with_hint(mut self, hint: HintFn) -> Self {
+        self.hint = Some(hint);
+        self
+    }
 }
 
 /// Why an engine could not be loaded or an evaluation failed.
@@ -630,13 +737,14 @@ fn described(failure: EngineFailure) -> String {
 }
 
 /// The decisive failure the host reported during one native call, from the
-/// transform and then the registered callbacks.
+/// transform and then the registered callbacks, including any refused state
+/// the engine kept registered.
 fn host_failure(
     transform: Option<&TransformCall<'_>>,
-    callbacks: Option<&CallbackState>,
+    callbacks: HostCallbacks<'_>,
 ) -> Option<EngineFailure> {
     let mut decisive = transform.and_then(TransformCall::take_failure);
-    if let Some(failure) = callbacks.and_then(CallbackState::take_failure) {
+    if let Some(failure) = callbacks.take_failure() {
         keep_decisive(&mut decisive, failure);
     }
     decisive
@@ -832,14 +940,14 @@ impl EnginePotential {
         request: &EngineRequest<'_>,
         transform: Option<&mut dyn CoordinateTransform>,
     ) -> Result<EngineEvaluation, EngineError> {
-        self.force_with_host(request, transform, None)
+        self.force_with_host(request, transform, HostCallbacks::NONE)
     }
 
     fn force_with_host(
         &mut self,
         request: &EngineRequest<'_>,
         transform: Option<&mut dyn CoordinateTransform>,
-        callbacks: Option<&CallbackState>,
+        callbacks: HostCallbacks<'_>,
     ) -> Result<EngineEvaluation, EngineError> {
         self.check_alive()?;
         let n_atoms = request.atomic_numbers.len();
@@ -895,7 +1003,13 @@ impl EnginePotential {
         boxes: &[f64],
         transform: Option<&mut dyn CoordinateTransform>,
     ) -> Result<Vec<EngineEvaluation>, EngineError> {
-        self.force_batch_with_host(atomic_numbers, positions, boxes, transform, None)
+        self.force_batch_with_host(
+            atomic_numbers,
+            positions,
+            boxes,
+            transform,
+            HostCallbacks::NONE,
+        )
     }
 
     fn force_batch_with_host(
@@ -904,7 +1018,7 @@ impl EnginePotential {
         positions: &[f64],
         boxes: &[f64],
         transform: Option<&mut dyn CoordinateTransform>,
-        callbacks: Option<&CallbackState>,
+        callbacks: HostCallbacks<'_>,
     ) -> Result<Vec<EngineEvaluation>, EngineError> {
         self.check_alive()?;
         let batch = self
@@ -1233,6 +1347,53 @@ impl CallbackState {
     }
 }
 
+/// Every callback state an engine may still call: the registered one and the
+/// refused ones an older engine kept.
+#[derive(Clone, Copy)]
+struct HostCallbacks<'a> {
+    active: Option<&'a CallbackState>,
+    refused: &'a [Box<CallbackState>],
+}
+
+impl<'a> HostCallbacks<'a> {
+    const NONE: Self = Self {
+        active: None,
+        refused: &[],
+    };
+
+    fn new(active: &'a Option<Box<CallbackState>>, refused: &'a RefusedCallbacks) -> Self {
+        Self {
+            active: active.as_deref(),
+            refused: &refused.0,
+        }
+    }
+
+    fn states(self) -> impl Iterator<Item = &'a CallbackState> {
+        self.active
+            .into_iter()
+            .chain(self.refused.iter().map(|state| &**state))
+    }
+
+    /// The decisive recorded failure, drained from every state so none is
+    /// left to surface in a later call.
+    fn take_failure(self) -> Option<EngineFailure> {
+        let mut decisive = None;
+        for failure in self.states().filter_map(CallbackState::take_failure) {
+            keep_decisive(&mut decisive, failure);
+        }
+        decisive
+    }
+
+    /// The decisive recorded fatal failure. Recoverable ones stay recorded.
+    fn take_fatal(self) -> Option<EngineFailure> {
+        let mut decisive = None;
+        for failure in self.states().filter_map(CallbackState::take_fatal) {
+            keep_decisive(&mut decisive, failure);
+        }
+        decisive
+    }
+}
+
 unsafe extern "C" fn oracle_trampoline(
     ctx: *mut c_void,
     n_atoms: c_long,
@@ -1404,9 +1565,11 @@ impl EngineSession {
         request: &EngineRequest<'_>,
         transform: Option<&mut dyn CoordinateTransform>,
     ) -> Result<EngineEvaluation, EngineError> {
-        let answer = self
-            .engine
-            .force_with_host(request, transform, self.callbacks.as_deref());
+        let answer = self.engine.force_with_host(
+            request,
+            transform,
+            HostCallbacks::new(&self.callbacks, &self.refused),
+        );
         self.finish(answer)
     }
 
@@ -1423,7 +1586,7 @@ impl EngineSession {
             positions,
             boxes,
             transform,
-            self.callbacks.as_deref(),
+            HostCallbacks::new(&self.callbacks, &self.refused),
         );
         self.finish(answer)
     }
@@ -1433,7 +1596,9 @@ impl EngineSession {
     /// `None` is represented by a null callback-table pointer. If native
     /// replacement fails, the previous owned callbacks remain registered and
     /// the refused ones are kept alive until the engine is destroyed, in case
-    /// an older engine retained them.
+    /// an older engine retained them. A failure recorded by a refused state
+    /// that the engine still calls is reported like one from the registered
+    /// callbacks.
     /// A failure the previous callbacks recorded and no call has reported yet
     /// is reported here, since a successful replacement drops them. So is a
     /// panic in their destructor, which poisons the session like any other
@@ -1474,10 +1639,7 @@ impl EngineSession {
             std::ptr::null()
         };
         let code = unsafe { set_callbacks(self.engine.handle.as_ptr(), raw_ptr) };
-        let mut failure = self
-            .callbacks
-            .as_deref()
-            .and_then(CallbackState::take_failure);
+        let mut failure = HostCallbacks::new(&self.callbacks, &self.refused).take_failure();
         if let Some(replacement) = next.as_deref().and_then(CallbackState::take_failure) {
             keep_decisive(&mut failure, replacement);
         }
@@ -1550,7 +1712,7 @@ impl EngineSession {
                 error.len(),
             )
         };
-        let failure = host_failure(None, self.callbacks.as_deref());
+        let failure = host_failure(None, HostCallbacks::new(&self.callbacks, &self.refused));
         self.engine.settle_with(code, failure, || {
             let text = text_of(&error);
             if text.is_empty() {
@@ -1569,11 +1731,7 @@ impl EngineSession {
         if matches!(answer, Err(EngineError::Fatal { .. })) {
             return answer;
         }
-        match self
-            .callbacks
-            .as_deref()
-            .and_then(CallbackState::take_fatal)
-        {
+        match HostCallbacks::new(&self.callbacks, &self.refused).take_fatal() {
             Some(failure) => {
                 let code = failure.status.code();
                 Err(self.engine.poison(code, described(failure)))

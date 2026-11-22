@@ -1,15 +1,17 @@
 #![cfg(unix)]
 
-use std::ffi::c_int;
+use std::ffi::{c_int, c_long};
+use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use rgpot_core::engine::{
-    AcquireReason, CoordinateTransform, EngineCallbacks, EngineError, EngineEvaluation,
-    EngineFailure, EnginePotential, EngineRequest, EngineSession, EngineStatus,
-    RgpotEngineAbiStamp, RgpotEngineCaps, RgpotEngineComponent, ENGINE_ABI_LAYOUT_REVISION,
-    ENGINE_ABI_MINOR, ENGINE_ABI_VERSION, ENGINE_ERR_INVALID, ENGINE_ERR_UNSUPPORTED,
+    AcquireReason, CoordTransformFn, CoordinateTransform, EngineCallbacks, EngineError,
+    EngineEvaluation, EngineFailure, EnginePotential, EngineRequest, EngineSession, EngineStatus,
+    EngineSymbols, RgpotEngineAbiStamp, RgpotEngineCaps, RgpotEngineComponent, RgpotEnginePot,
+    ENGINE_ABI_LAYOUT_REVISION, ENGINE_ABI_MINOR, ENGINE_ABI_VERSION, ENGINE_ERR_INVALID,
+    ENGINE_ERR_UNSUPPORTED,
 };
 use rgpot_core::hvp::rgpot_hvp_scheme_t;
 use rgpot_core::status::rgpot_status_t;
@@ -710,6 +712,60 @@ fn hint_reports_status_updates_state_and_surfaces_callback_panics() {
 }
 
 #[test]
+fn a_panic_in_a_retained_refused_callback_is_fatal() {
+    let path = build(
+        "harmonic_refused_model_update_panic",
+        &["RETAIN_REFUSED_CALLBACKS"],
+    );
+    let (old, _, _) = Tracked::new(false);
+    let mut session = load_session(&path);
+    session
+        .set_callbacks(Some(Box::new(old)))
+        .expect("set initial callbacks");
+    session
+        .set_callbacks(Some(Box::new(PanicModelUpdate)))
+        .expect_err("the fixture refuses the replacement");
+
+    let error = session
+        .hint(&[1])
+        .expect_err("the retained refused callback panics in the model update");
+    assert_eq!(
+        error,
+        EngineError::Fatal {
+            code: -1,
+            message: "model-update callback panicked".into(),
+        }
+    );
+    assert_poisoned_without_an_extra_force(&mut session, &path, &error);
+}
+
+#[test]
+fn a_panic_in_a_retained_refused_oracle_is_fatal() {
+    let path = build(
+        "harmonic_refused_oracle_panic",
+        &["RETAIN_REFUSED_CALLBACKS"],
+    );
+    let (old, _, _) = Tracked::new(false);
+    let mut session = load_session(&path);
+    session
+        .set_callbacks(Some(Box::new(old)))
+        .expect("set initial callbacks");
+    session
+        .set_callbacks(Some(Box::new(PanicOracle)))
+        .expect_err("the fixture refuses the replacement");
+
+    let error = force_one(&mut session).expect_err("the retained refused oracle panics");
+    assert_eq!(
+        error,
+        EngineError::Fatal {
+            code: -1,
+            message: "oracle callback panicked".into(),
+        }
+    );
+    assert_poisoned_without_an_extra_force(&mut session, &path, &error);
+}
+
+#[test]
 fn native_fatal_status_poisons_an_engine_session() {
     let path = build("harmonic_session_fatal_once", &["FATAL_ONCE"]);
     let observer = FixtureObserver::open(&path);
@@ -774,6 +830,78 @@ fn typed_status_does_not_retry_from_error_text() {
         .expect_err("recoverable input");
     assert_eq!(error.engine_status(), Some(EngineStatus::from_code(1)));
     assert_eq!(observer.native_calls() - before, 2);
+}
+
+#[test]
+fn status_codes_round_trip_in_range_and_saturate_beyond_it() {
+    for code in [0, 1, -1, 2, -2, c_int::MAX, c_int::MIN] {
+        assert_eq!(
+            EngineStatus::from_code(EngineStatus::from_code(code).code()),
+            EngineStatus::from_code(code)
+        );
+        assert_eq!(EngineStatus::from_code(code).code(), code);
+    }
+    let huge = NonZeroU32::new(u32::MAX).expect("nonzero");
+    assert_eq!(
+        EngineStatus::RecoverableInputFailure(huge).code(),
+        c_int::MAX
+    );
+    assert_eq!(EngineStatus::FatalInstanceFailure(huge).code(), c_int::MIN);
+}
+
+unsafe extern "C" fn stub_abi_version() -> c_int {
+    ENGINE_ABI_VERSION
+}
+
+unsafe extern "C" fn stub_create(
+    _config: *const std::ffi::c_void,
+    _config_len: usize,
+    _error: *mut std::ffi::c_char,
+    _error_len: usize,
+) -> *mut RgpotEnginePot {
+    std::ptr::null_mut()
+}
+
+unsafe extern "C" fn stub_destroy(_pot: *mut RgpotEnginePot) {}
+
+#[allow(clippy::too_many_arguments)]
+unsafe extern "C" fn stub_force(
+    _pot: *mut RgpotEnginePot,
+    _n_atoms: c_long,
+    _positions: *const f64,
+    _atomic_numbers: *const c_int,
+    _forces: *mut f64,
+    _energy: *mut f64,
+    _variance: *mut f64,
+    _box: *const f64,
+    _transform: Option<CoordTransformFn>,
+    _user: *mut std::ffi::c_void,
+) -> c_int {
+    0
+}
+
+unsafe extern "C" fn stub_model_state(_pot: *const RgpotEnginePot) -> u64 {
+    0
+}
+
+#[test]
+fn symbols_are_built_with_a_constructor_and_optional_setters() {
+    let required = EngineSymbols::new(stub_abi_version, stub_create, stub_destroy, stub_force);
+    assert!(required.abi_stamp.is_none());
+    assert!(required.force_batch.is_none());
+    assert!(required.hvp.is_none());
+    assert!(required.caps.is_none());
+    assert!(required.last_error.is_none());
+    assert!(required.last_components.is_none());
+    assert!(required.component_name.is_none());
+    assert!(required.model_state.is_none());
+    assert!(required.set_callbacks.is_none());
+    assert!(required.hint.is_none());
+
+    let with_state = required.with_model_state(stub_model_state);
+    assert!(with_state.model_state.is_some());
+    assert!(with_state.set_callbacks.is_none());
+    assert!(with_state.hint.is_none());
 }
 
 #[test]
