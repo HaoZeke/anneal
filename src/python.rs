@@ -4529,15 +4529,6 @@ fn cluster_search(
         py.detach(|| {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let run = if interleaved {
-                    let chart = InterleavedChart {
-                        inner: pot,
-                        n_molecules: n,
-                        bounds: Bounds::new(
-                            Array1::from_elem(dim, -extent),
-                            Array1::from_elem(dim, extent),
-                            0.0,
-                        ),
-                    };
                     let started = match start.as_ref() {
                         Some(start) => {
                             Array1::from_vec(crate::potentials::block_from_interleaved_gmin(
@@ -4547,7 +4538,7 @@ fn cluster_search(
                         None => Array1::from_vec(rigid_probe(&cfg, seed.wrapping_add(1), false)),
                     };
                     crate::methods::cluster_search::search_from(
-                        &chart,
+                        pot,
                         &cfg,
                         &mut ledger,
                         started.view(),

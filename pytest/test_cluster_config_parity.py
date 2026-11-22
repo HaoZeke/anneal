@@ -610,7 +610,7 @@ def test_config_exposes_every_rust_struct_field():
     missing_getters = sorted(rust_fields - py_getters)
     assert not missing_getters, f"anneal.Config is missing Rust Config getters: {missing_getters}"
 
-    # Verify every Rust field except read-only `n_points` round-trips through getattr -> setattr.
+    # Every mutable Rust field round-trips; geometry changes must use with_rigid_bodies().
     cfg = anneal.Config.recommended_with_scales(13, 2.0, 3.0)
     before = cfg.resolved_json()
     read_only: set[str] = set()
@@ -620,7 +620,7 @@ def test_config_exposes_every_rust_struct_field():
             setattr(cfg, field, val)
         except AttributeError:
             read_only.add(field)
-    assert read_only == {"n_points"}
+    assert read_only == {"n_points", "rigid_body_geometry"}
     assert cfg.resolved_json() == before
 
 
@@ -676,13 +676,10 @@ def test_config_structured_fields_roundtrip_and_execute():
     assert custom_rigid.rigid_body is True
     assert custom_rigid.rigid_body_geometry is not None
     assert custom_rigid.rigid_body_geometry["species"] == [8, 1, 1]
-    custom_rigid.rigid_body_geometry = None
-    assert custom_rigid.rigid_body_geometry is None
-    custom_rigid.rigid_body_geometry = geom
-    assert custom_rigid.rigid_body_geometry == geom
-
-    with pytest.raises(ValueError, match="rigid-body"):
-        custom_rigid.rigid_body_geometry = {"sites": [[0.0, 0.0, 0.0]], "species": [8, 1]}
+    with pytest.raises(AttributeError, match="not writable"):
+        custom_rigid.rigid_body_geometry = None
+    with pytest.raises(AttributeError, match="not writable"):
+        anneal.Config.recommended(3).rigid_body_geometry = geom
 
     # 3. reoccupy
     rcfg = anneal.Config.recommended(4)
@@ -701,6 +698,11 @@ def test_config_structured_fields_roundtrip_and_execute():
     assert rcfg.reoccupy["patience"] == 2
     rcfg.reoccupy = rcfg.reoccupy
     assert rcfg.reoccupy["relax_steps"] == 80
+    with pytest.raises(
+        ValueError,
+        match=r"reoccupy n_points 5 must match parent Config n_points 4",
+    ):
+        rcfg.reoccupy = {"n_points": 5}
 
     lj4 = anneal.PairPotential.lennard_jones(4)
     rcfg.reoccupy = "lennard_jones"
@@ -740,6 +742,11 @@ def test_config_structured_fields_roundtrip_and_execute():
     assert hcfg.hmc["target_reach"] == pytest.approx(0.6)
     assert hcfg.hmc["trajectory_temperature"] == pytest.approx(0.05)
     hcfg.hmc = hcfg.hmc
+    with pytest.raises(
+        ValueError,
+        match=r"hmc n_points 5 must match parent Config n_points 4",
+    ):
+        hcfg.hmc = {"n_points": 5}
     hmc_out = anneal.cluster_search(lj4, None, 4, 160, seed=5, config=hcfg)
     assert math.isfinite(hmc_out["best_energy"])
     hcfg.hmc = None

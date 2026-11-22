@@ -220,9 +220,13 @@ class Anneal:
     atoms
         ASE ``Atoms`` (or a duck type with ``get/set_positions``,
         ``get_potential_energy``, ``get_forces``, and ``__len__``).
-    logfile, trajectory, restart, master
+    logfile, trajectory, master
         Same names as ASE. ``attach`` fires observers. ``trajectory`` is
-        written at the start of ``run`` and after each step; errors raise.
+        written at the start of ``run`` and after each step unless
+        ``master=False``; errors raise.
+    restart
+        Restart files are not supported and a non-``None`` value raises
+        ``NotImplementedError``.
     force_consistent, append_trajectory
         Accepted for the BFGS constructor shape. ``append_trajectory``
         is passed to the final/step write. ``force_consistent`` is unused
@@ -249,6 +253,8 @@ class Anneal:
         mode: str = "local",
     ):
         _require_calculator(atoms)
+        if restart is not None:
+            raise NotImplementedError("Anneal restart files are not supported")
         mode = str(mode)
         if mode not in _MODES:
             raise ValueError(f"mode must be auto, local, or search, got {mode!r}")
@@ -258,8 +264,8 @@ class Anneal:
         self.mode = mode
         self.logfile = logfile
         self.trajectory = trajectory
-        self.restart = restart
-        self.master = master
+        self.restart = None
+        self.master = None if master is None else bool(master)
         self.force_consistent = force_consistent
         self.append_trajectory = bool(append_trajectory)
         self.nsteps = 0
@@ -299,15 +305,17 @@ class Anneal:
             function = getattr(function, "write", None)
         if not callable(function):
             raise TypeError("attach function must be callable")
-        self._observers.append((function, max(1, int(interval)), args, kwargs))
+        self._observers.append((function, int(interval), args, kwargs))
 
     def _call_observers(self) -> None:
         for function, interval, args, kwargs in self._observers:
-            if self.nsteps % interval == 0:
+            if (interval > 0 and self.nsteps % interval == 0) or (
+                interval <= 0 and self.nsteps == abs(interval)
+            ):
                 function(*args, **kwargs)
 
     def _write_trajectory(self) -> None:
-        if self.trajectory is None:
+        if self.trajectory is None or self.master is False:
             return
         if hasattr(self.trajectory, "write"):
             self.trajectory.write(self.atoms)

@@ -434,8 +434,10 @@ jobs:
           .venv/bin/python -m pip install "maturin>=1.5,<2" pytest numpy array-api-strict mypy
           .venv/bin/python -c "import array_api_strict, mypy"
 
-      - name: maturin develop
-        run: .venv/bin/python -m maturin develop --features python --pip-path .venv/bin/pip3
+      # Build graphkey into the live extension so the ras=True mapping tests
+      # exercise ArchiveOutcome instead of accepting the feature-disabled error.
+      - name: maturin develop (python + graphkey)
+        run: .venv/bin/python -m maturin develop --features python,graphkey --pip-path .venv/bin/pip3
 
       - name: pytest
         run: .venv/bin/python -m pytest pytest/

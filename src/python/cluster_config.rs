@@ -392,45 +392,6 @@ fn rigid_body_geometry_to_py(py: Python<'_>, geom: &RigidBodyGeometry) -> PyResu
     Ok(dict.into())
 }
 
-fn parse_rigid_body_geometry(value: &Bound<'_, PyAny>) -> PyResult<RigidBodyGeometry> {
-    if let Ok(tup) = value.cast::<PyTuple>() {
-        if tup.len() != 2 {
-            return Err(PyValueError::new_err(
-                "rigid_body_geometry tuple must be (sites, species)",
-            ));
-        }
-        let sites = parse_sites_vec(&tup.get_item(0)?)?;
-        let species: Vec<u32> = tup.get_item(1)?.extract()?;
-        return RigidBodyGeometry::new(sites, species).map_err(PyValueError::new_err);
-    }
-    if let Ok(dict) = value.cast::<PyDict>() {
-        for (k, _) in dict.iter() {
-            let key: String = k.extract()?;
-            if key != "sites" && key != "species" {
-                return Err(PyValueError::new_err(format!(
-                    "unknown rigid_body_geometry key {key:?}; expected \"sites\" and \"species\""
-                )));
-            }
-        }
-        let Some(sites_any) = dict.get_item("sites")? else {
-            return Err(PyValueError::new_err(
-                "rigid_body_geometry dict requires \"sites\"",
-            ));
-        };
-        let Some(species_any) = dict.get_item("species")? else {
-            return Err(PyValueError::new_err(
-                "rigid_body_geometry dict requires \"species\"",
-            ));
-        };
-        let sites = parse_sites_vec(&sites_any)?;
-        let species: Vec<u32> = species_any.extract()?;
-        return RigidBodyGeometry::new(sites, species).map_err(PyValueError::new_err);
-    }
-    Err(PyTypeError::new_err(
-        "rigid_body_geometry must be None, (sites, species), or {\"sites\": ..., \"species\": ...}",
-    ))
-}
-
 fn parse_cutoff_kind_val(kind: &str, val: f64) -> PyResult<Cutoff> {
     check_pos_finite("two_phase cutoff", val)?;
     match kind {
@@ -647,6 +608,11 @@ fn parse_reoccupy(default_n: usize, value: &Bound<'_, PyAny>) -> PyResult<Lattic
             None => default_n,
         };
         check_n_at_least_two(n_points)?;
+        if n_points != default_n {
+            return Err(PyValueError::new_err(format!(
+                "reoccupy n_points {n_points} must match parent Config n_points {default_n}"
+            )));
+        }
         let kind = match dict.get_item("kind")? {
             Some(v) => parse_pair_kind_spec(&v)?,
             None => PairKind::LennardJones,
@@ -743,6 +709,11 @@ fn parse_hmc(default_n: usize, value: &Bound<'_, PyAny>) -> PyResult<HopConfig> 
             None => default_n,
         };
         check_n_at_least_two(n_points)?;
+        if n_points != default_n {
+            return Err(PyValueError::new_err(format!(
+                "hmc n_points {n_points} must match parent Config n_points {default_n}"
+            )));
+        }
         let metric = match dict.get_item("metric")? {
             Some(v) => {
                 let s: String = v.extract()?;
@@ -3079,16 +3050,6 @@ impl PyClusterConfig {
             .as_ref()
             .map(|geom| rigid_body_geometry_to_py(py, geom))
             .transpose()
-    }
-
-    #[setter]
-    fn set_rigid_body_geometry(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
-        if value.is_none() {
-            self.inner.rigid_body_geometry = None;
-            return Ok(());
-        }
-        self.inner.rigid_body_geometry = Some(parse_rigid_body_geometry(value)?);
-        Ok(())
     }
 
     /// Optional two-phase relaxation schedule dict or `None`.

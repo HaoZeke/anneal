@@ -604,11 +604,6 @@ class Config:
     superbasin_features: bool
     @property
     def rigid_body_geometry(self) -> dict[str, Any] | None: ...
-    @rigid_body_geometry.setter
-    def rigid_body_geometry(
-        self,
-        value: dict[str, Any] | tuple[Any, Sequence[int]] | None,
-    ) -> None: ...
     @property
     def two_phase(self) -> dict[str, Any] | None: ...
     @two_phase.setter

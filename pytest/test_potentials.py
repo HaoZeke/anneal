@@ -172,6 +172,64 @@ def test_tip4p_and_gmin_tip4p_potentials_and_helpers():
     assert math.isclose(e_ohh, gtip.eval(rigid), rel_tol=1e-10, abs_tol=1e-10)
 
 
+def test_native_rigid_interleaved_search_matches_block_rust_path():
+    pot = anneal.GminTip4p(2)
+    block_start = np.array(
+        [
+            0.0,
+            0.0,
+            0.0,
+            3.2,
+            0.2,
+            -0.1,
+            0.15,
+            -0.1,
+            0.05,
+            -0.2,
+            0.1,
+            0.25,
+        ],
+        dtype=np.float64,
+    )
+    interleaved_start = anneal.interleaved_gmin_from_block(block_start)
+
+    block = anneal.cluster_search(
+        pot,
+        None,
+        2,
+        160,
+        seed=13,
+        rigid=True,
+        layout="block",
+        start=block_start,
+    )
+    interleaved = anneal.cluster_search(
+        pot,
+        None,
+        2,
+        160,
+        seed=13,
+        rigid=True,
+        layout="interleaved",
+        start=interleaved_start,
+    )
+
+    interleaved_best_block = anneal.block_from_interleaved_gmin(interleaved["best"])
+    assert interleaved["best_energy"] == pytest.approx(block["best_energy"], abs=1e-12)
+    np.testing.assert_allclose(interleaved_best_block, block["best"], rtol=0.0, atol=1e-12)
+
+    block_forces = -pot.grad(block["best"])
+    interleaved_forces = anneal.interleaved_gmin_from_block(
+        -pot.grad(interleaved_best_block)
+    )
+    np.testing.assert_allclose(
+        interleaved_forces,
+        anneal.interleaved_gmin_from_block(block_forces),
+        rtol=0.0,
+        atol=1e-12,
+    )
+
+
 def test_native_potentials_work_with_quench_cluster_search_and_objectives():
     lj4 = anneal.PairPotential.lennard_jones(4)
     rng = np.random.default_rng(31)
