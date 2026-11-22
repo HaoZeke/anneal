@@ -1781,7 +1781,7 @@ fn hungarian(cost: &[f64], n: usize) -> Vec<usize> {
 /// scalar loop. Four columns share that sum.
 fn fill_squared_cost(x: ArrayView1<f64>, y: &[f64], n: usize, cost: &mut [f64]) {
     #[cfg(target_arch = "x86_64")]
-    if x.as_slice().is_some() && std::is_x86_feature_detected!("avx2") {
+    if x.as_slice().is_some() && crate::avx2_available() {
         unsafe { fill_squared_cost_avx2(x, y, n, cost) };
         return;
     }
@@ -2060,7 +2060,7 @@ fn rotation_row_min_rms_until(x: ArrayView1<f64>, axis: [f64; 3], cut: f64) -> f
 fn nearest_image(px: f64, py: f64, pz: f64, tx: &[f64], ty: &[f64], tz: &[f64]) -> f64 {
     #[cfg(target_arch = "x86_64")]
     {
-        if std::arch::is_x86_feature_detected!("avx") {
+        if crate::avx_available() {
             // The host has AVX, and each slice is read for `tx.len()` lanes.
             return unsafe { nearest_image_avx(px, py, pz, tx, ty, tz) };
         }

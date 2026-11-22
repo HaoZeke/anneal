@@ -133,7 +133,7 @@ unsafe fn scan_columns(
     column: usize,
 ) -> (f64, usize) {
     #[cfg(target_arch = "x86_64")]
-    if std::is_x86_feature_detected!("avx2") {
+    if crate::avx2_available() {
         return unsafe {
             scan_avx2(
                 row,
@@ -311,7 +311,7 @@ fn adjust_reduced(
     row_potential: &mut [f64],
 ) {
     #[cfg(target_arch = "x86_64")]
-    if std::is_x86_feature_detected!("avx2") {
+    if crate::avx2_available() {
         unsafe {
             adjust_reduced_avx2(
                 delta,
@@ -813,7 +813,7 @@ fn phase_delta(
     columns_seen: &[bool],
 ) -> f64 {
     #[cfg(target_arch = "x86_64")]
-    if std::is_x86_feature_detected!("avx2") {
+    if crate::avx2_available() {
         return unsafe {
             phase_delta_avx2(
                 n,
@@ -1015,7 +1015,7 @@ fn augment_tight(
         // column the scalar walk would enter. The slack bits match that walk.
         #[cfg(target_arch = "x86_64")]
         if column + 4 <= n
-            && std::is_x86_feature_detected!("avx2")
+            && crate::avx2_available()
             && unsafe {
                 group_ineligible(
                     row,

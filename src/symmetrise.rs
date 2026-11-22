@@ -442,11 +442,11 @@ impl Cloud {
 
     fn nearest_index(&self, image: [f64; 3]) -> (usize, f64) {
         #[cfg(all(target_arch = "x86_64", anneal_avx512))]
-        if std::is_x86_feature_detected!("avx512f") {
+        if crate::avx512_available() {
             return unsafe { self.nearest_index_avx512(image) };
         }
         #[cfg(target_arch = "x86_64")]
-        if std::is_x86_feature_detected!("avx2") {
+        if crate::avx2_available() {
             return unsafe { self.nearest_index_avx2(image) };
         }
         self.nearest_index_scalar(image)
@@ -642,7 +642,7 @@ impl Cloud {
 
     fn nearest_squared_range(&self, image: [f64; 3], start: usize, end: usize) -> f64 {
         #[cfg(target_arch = "x86_64")]
-        if std::is_x86_feature_detected!("avx2") {
+        if crate::avx2_available() {
             return unsafe { self.nearest_squared_range_avx2(image, start, end) };
         }
         self.nearest_squared_range_scalar(image, start, end)
@@ -692,11 +692,11 @@ impl Cloud {
 
     fn nearest_one(&self, image: [f64; 3]) -> f64 {
         #[cfg(all(target_arch = "x86_64", anneal_avx512))]
-        if std::is_x86_feature_detected!("avx512f") {
+        if crate::avx512_available() {
             return unsafe { self.nearest_squared_avx512(image) };
         }
         #[cfg(target_arch = "x86_64")]
-        if std::is_x86_feature_detected!("avx2") {
+        if crate::avx2_available() {
             return unsafe { self.nearest_squared_avx2(image) };
         }
         self.nearest_squared_scalar(image)
@@ -710,7 +710,7 @@ impl Cloud {
     /// per handful of images reads each coordinate a quarter as often.
     fn nearest_squared_batch(&self, images: &[[f64; 3]], out: &mut [f64]) {
         #[cfg(target_arch = "x86_64")]
-        if std::is_x86_feature_detected!("avx2") {
+        if crate::avx2_available() {
             unsafe { self.nearest_squared_batch_avx2(images, out) };
             return;
         }

@@ -647,7 +647,7 @@ impl BasinMetric for EuclideanMetric {
         // inside the radius still falls through to the block sum.
         #[cfg(target_arch = "x86_64")]
         if let (Some(left), Some(right)) = (a.as_slice(), b.as_slice())
-            && std::arch::is_x86_feature_detected!("avx2")
+            && crate::avx2_available()
             // SAFETY: AVX2 was just detected.
             && unsafe { packed_squared_distance_exceeds(left, right, limit) }
         {
@@ -1108,7 +1108,7 @@ std::thread_local! {
 
 fn fresh_pairs(n: usize, x: ArrayView1<f64>) -> Vec<f64> {
     #[cfg(target_arch = "x86_64")]
-    if std::is_x86_feature_detected!("avx2") {
+    if crate::avx2_available() {
         return unsafe { fresh_pairs_avx2(n, x) };
     }
     fresh_pairs_scalar(n, x)

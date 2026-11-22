@@ -2,6 +2,7 @@ fn main() {
     // AVX-512F intrinsics in `std::arch` stabilized in 1.89. The crate's
     // minimum is 1.88, which still has the four-wide scan.
     println!("cargo:rustc-check-cfg=cfg(anneal_avx512)");
+    println!("cargo:rustc-check-cfg=cfg(anneal_force_scalar)");
     println!("cargo:rerun-if-env-changed=RUSTC");
     if rustc_has_stable_avx512() {
         println!("cargo:rustc-cfg=anneal_avx512");
