@@ -1931,3 +1931,68 @@ TEST_CASE("failed Neighbours::update leaves prior state intact and matches a fre
     }
   }
 }
+
+TEST_CASE("tiny skewed cell with subnormal determinant matches brute force pair count",
+          "[nlist][triclinic][subnormal]") {
+  setThreads("1");
+  // side^3 ~ 1.00051e-321 is nonzero subnormal, where an unscaled cofactor
+  // inverse loses precision and leaves the pair unfolded at 5.00185e-108 >
+  // cutoff instead of folding it to 4.99985e-108 <= cutoff.
+  const double side = 1.00017e-107;
+  const double tilt = 1.0e-111;
+  const double cell[9] = {side, 0.0, 0.0, tilt, side, 0.0, 0.0, 0.0, side};
+  const double raw_det = (cell[0] * cell[4]) * cell[8];
+  REQUIRE(std::fpclassify(raw_det) == FP_SUBNORMAL);
+
+  const double cutoff = 5.0e-108;
+  const std::vector<double> pos = {
+      0.0, 0.0, 0.0,
+      5.00185e-108, 0.0, 0.0,
+  };
+  for (const auto &periodic :
+       {std::array<bool, 3>{true, true, true},
+        std::array<bool, 3>{true, true, false}}) {
+    const auto ref = bruteAllImages(pos, cell, cutoff, periodic);
+    REQUIRE(ref.size() == 1);
+    REQUIRE(std::abs(std::sqrt(ref.at({0, 1})) - 4.99985e-108) < 1.0e-120);
+    for (const auto mode :
+         {rgpot::nlist::Mode::Stream, rgpot::nlist::Mode::Stored,
+          rgpot::nlist::Mode::Auto}) {
+      rgpot::nlist::Spec spec;
+      spec.cutoff = cutoff;
+      spec.skin = 0.0;
+      spec.periodic = periodic;
+      spec.image = rgpot::nlist::Image::Round;
+      spec.mode = mode;
+      rgpot::nlist::Neighbours cells;
+      cells.update(pos.data(), pos.size() / 3, cell, spec);
+      const auto got = walkedPairs(cells, pos.size() / 3, cutoff);
+      REQUIRE(got.size() == ref.size());
+      REQUIRE(got.count({0, 1}) == 1);
+      REQUIRE(std::abs(std::sqrt(got.at({0, 1})) - 4.99985e-108) < 1.0e-120);
+    }
+  }
+
+  const double sc = 2.814e-108;
+  const double deep_cell[9] = {sc, 0.0, 0.0, 0.1 * sc, sc, 0.0, 0.0, 0.0, sc};
+  REQUIRE(std::fpclassify((deep_cell[0] * deep_cell[4]) * deep_cell[8]) ==
+          FP_SUBNORMAL);
+  const double deep_cut = 0.50 * sc;
+  const std::vector<double> deep_pos = {0.0, 0.0, 0.0, 0.51 * sc, 0.0, 0.0};
+  const auto deep_ref = bruteAllImages(deep_pos, deep_cell, deep_cut);
+  REQUIRE(deep_ref.size() == 1);
+  for (const auto mode :
+       {rgpot::nlist::Mode::Stream, rgpot::nlist::Mode::Stored,
+        rgpot::nlist::Mode::Auto}) {
+    rgpot::nlist::Spec spec;
+    spec.cutoff = deep_cut;
+    spec.skin = 0.0;
+    spec.periodic = {true, true, true};
+    spec.image = rgpot::nlist::Image::Round;
+    spec.mode = mode;
+    rgpot::nlist::Neighbours cells;
+    cells.update(deep_pos.data(), deep_pos.size() / 3, deep_cell, spec);
+    REQUIRE(walkedPairs(cells, deep_pos.size() / 3, deep_cut).size() ==
+            deep_ref.size());
+  }
+}

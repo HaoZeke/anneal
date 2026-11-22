@@ -794,17 +794,19 @@ MinimumImage::MinimumImage(const double *cell,
     raw[k] = cell_[static_cast<std::size_t>(k)];
   }
   double inv[9];
-  if (!invert(raw, inv) &&
-      scaled_inverse(raw, inv) == ScaledInverse::Singular) {
+  const ScaledInverse raw_scaled = scaled_inverse(raw, inv);
+  const bool raw_ok = raw_scaled != ScaledInverse::Singular;
+  if (!raw_ok && !invert(raw, inv)) {
     throw std::invalid_argument("periodic cell must be nonsingular");
   }
-  double basis[3][3] = {
-      {raw[0], raw[1], raw[2]},
-      {raw[3], raw[4], raw[5]},
-      {raw[6], raw[7], raw[8]},
-  };
-  bool narrow = !well_conditioned(raw, inv);
+  bool narrow = raw_ok ? raw_scaled == ScaledInverse::IllConditioned
+                       : !well_conditioned(raw, inv);
   if (narrow) {
+    double basis[3][3] = {
+        {raw[0], raw[1], raw[2]},
+        {raw[3], raw[4], raw[5]},
+        {raw[6], raw[7], raw[8]},
+    };
     minkowski_reduce(basis);
     double reduced[9];
     for (int row = 0; row < 3; ++row) {
@@ -813,15 +815,17 @@ MinimumImage::MinimumImage(const double *cell,
       }
     }
     double rinv[9];
-    if (!invert(reduced, rinv) &&
-        scaled_inverse(reduced, rinv) == ScaledInverse::Singular) {
+    const ScaledInverse red_scaled = scaled_inverse(reduced, rinv);
+    const bool red_ok = red_scaled != ScaledInverse::Singular;
+    if (!red_ok && !invert(reduced, rinv)) {
       throw std::invalid_argument("periodic cell must be nonsingular");
     }
     for (int k = 0; k < 9; ++k) {
       cell_[static_cast<std::size_t>(k)] = reduced[k];
       inverse_[static_cast<std::size_t>(k)] = rinv[k];
     }
-    narrow = !well_conditioned(reduced, rinv);
+    narrow = red_ok ? red_scaled == ScaledInverse::IllConditioned
+                    : !well_conditioned(reduced, rinv);
     if (!narrow) {
       dual_of(rinv, dual_norm_.data());
     }
