@@ -797,8 +797,8 @@ impl Ledger {
             fract: 0.0,
             best: f64::INFINITY,
             best_state: None,
-            quench_boundaries: Retained::new(Keep::Shown, None),
-            evidence: Keep::Shown,
+            quench_boundaries: Retained::new(Keep::All, None),
+            evidence: Keep::All,
             diagnostic_quench: false,
             target: None,
             stop: None,
@@ -950,16 +950,29 @@ impl Ledger {
     /// Keep every quench boundary on this ledger and every accepted
     /// transition of a run charged to it.
     ///
-    /// This is the opt-in for a caller that reads
-    /// [`Ledger::quench_boundaries`] or [`Outcome::accepted_transitions`]
-    /// after a run: both then hold the whole run, and memory grows with the
-    /// budget. By default a run keeps an entry only until a checkpoint has
-    /// shown it, and keeps none when it has no checkpoint; boundaries
-    /// recorded outside a run are kept. The search itself never reads
-    /// either record, so the choice does not change the run.
+    /// This is the default, and undoes [`Ledger::keep_evidence_until_shown`]
+    /// or [`Ledger::keep_recent_evidence`] for later entries. Both records
+    /// then hold the whole run, and memory grows with the budget.
     pub fn keep_all_evidence(&mut self) {
         self.evidence = Keep::All;
         self.quench_boundaries.set_keep(Keep::All);
+    }
+
+    /// Keep a quench boundary or accepted transition of a run only until a
+    /// checkpoint has shown it, and none when the run has no checkpoint.
+    ///
+    /// This is the opt-in for a caller that reads neither record after a
+    /// run, and lets a long run hold its memory flat. Checkpoints see what
+    /// they would see under [`Ledger::keep_all_evidence`]. After a run
+    /// [`Ledger::quench_boundaries`] and [`Outcome::accepted_transitions`]
+    /// hold only what its last checkpoint had yet to show, so a caller
+    /// that reads them must not opt in. [`Ledger::dropped_quench_boundaries`]
+    /// and [`Outcome::dropped_transitions`] count the rest. The search
+    /// itself never reads either record, so the choice does not change the
+    /// run.
+    pub fn keep_evidence_until_shown(&mut self) {
+        self.evidence = Keep::Shown;
+        self.quench_boundaries.set_keep(Keep::Shown);
     }
 
     /// Keep only the newest `cap` quench boundaries on this ledger, and the
@@ -1253,17 +1266,14 @@ impl Ledger {
 
     /// Relaxation boundaries recorded against this ledger in execution order.
     ///
-    /// By default a run keeps a boundary only until a checkpoint has shown
-    /// it, so after a run these are the ones recorded since its last
-    /// checkpoint, or none when it had no checkpoint. Boundaries recorded
-    /// outside a run are kept. [`Ledger::keep_all_evidence`] keeps every
-    /// one; under [`Ledger::keep_recent_evidence`] these are the newest.
+    /// By default every boundary is kept. Under
+    /// [`Ledger::keep_evidence_until_shown`] a run keeps only those its last
+    /// checkpoint had yet to show; under [`Ledger::keep_recent_evidence`] these are the newest.
     pub fn quench_boundaries(&self) -> &[QuenchBoundary] {
         self.quench_boundaries.as_slice()
     }
 
-    /// Relaxation boundaries recorded but not kept. Zero under
-    /// [`Ledger::keep_all_evidence`].
+    /// Relaxation boundaries recorded but not kept. Zero by default.
     pub fn dropped_quench_boundaries(&self) -> usize {
         self.quench_boundaries.dropped()
     }
@@ -1295,13 +1305,12 @@ pub struct Outcome {
     pub final_energy: f64,
     /// Accepted live-chain edges in execution order.
     ///
-    /// By default these are the edges made since the run's last checkpoint,
-    /// or none when it had no checkpoint. [`Ledger::keep_all_evidence`]
-    /// keeps every edge; under [`Ledger::keep_recent_evidence`] these are
-    /// the newest.
+    /// By default every edge is kept. Under
+    /// [`Ledger::keep_evidence_until_shown`] these are the edges made since
+    /// the run's last checkpoint, or none when it had no checkpoint; under
+    /// [`Ledger::keep_recent_evidence`] these are the newest.
     pub accepted_transitions: Vec<AcceptedTransition>,
-    /// Accepted transitions the run made but did not keep. Zero under
-    /// [`Ledger::keep_all_evidence`].
+    /// Accepted transitions the run made but did not keep. Zero by default.
     pub dropped_transitions: usize,
     /// Hops taken.
     pub hops: usize,

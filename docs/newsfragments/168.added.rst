@@ -1,8 +1,14 @@
-``Ledger::keep_all_evidence()`` keeps every quench boundary and accepted
-transition of a run, and ``Ledger::keep_recent_evidence(cap)`` keeps the
-newest ``cap`` of each. ``Ledger::dropped_quench_boundaries`` and
-``Outcome::dropped_transitions`` count what was not kept.
-``RelaxStats::plain_holds`` and ``RelaxStats::hold_lifts`` count the
+``Ledger::keep_evidence_until_shown()`` lets a caller that reads neither
+record keep a run's quench boundaries and accepted transitions only
+until a checkpoint has shown them, and none when the run has no
+checkpoint, so a long run's memory stays flat. The default still keeps
+everything. ``Ledger::keep_recent_evidence(cap)`` keeps the newest
+``cap`` of each, and ``Ledger::keep_all_evidence()`` restores the
+default. ``Ledger::dropped_quench_boundaries`` and
+``Outcome::dropped_transitions`` count what was not kept. The head-to-head
+drivers ``h2h_seed``, ``h2h_morse``, ``h2h_metal`` and ``h2h_gmin_proof``,
+and ``sc_h2h`` and ``lj_cluster_search`` without ``ANNEAL_MINIMA_DB``, opt
+in. ``RelaxStats::plain_holds`` and ``RelaxStats::hold_lifts`` count the
 plain-surface holds a failed restraint block began and the holds lifted
 again. ``h2h_seed`` prints an ``h2h_mem`` line with its peak heap and
 peak ``RssAnon``, read inside the process, and takes ``all`` or a count

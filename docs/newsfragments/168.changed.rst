@@ -1,8 +1,0 @@
-By default a run now keeps a quench boundary or an accepted transition
-only until a checkpoint has shown it, and keeps none when it has no
-checkpoint; boundaries recorded on a ledger outside a run are still
-kept. Both records grew with the budget and held most of a long run's
-memory. A caller that reads ``Ledger::quench_boundaries`` or
-``Outcome::accepted_transitions`` after a run calls
-``Ledger::keep_all_evidence()`` first. Checkpoint hooks see what they saw
-before, and the search never reads either record, so no run changes.

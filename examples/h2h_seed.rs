@@ -5,8 +5,9 @@
 //! `arm` is `recommended` or `base` for the `cluster_hopping` presets.
 //! `stop` is an energy at which the run ends early, or `-` to spend the
 //! whole budget. `keep` is `all` for `Ledger::keep_all_evidence`, or a
-//! count for `Ledger::keep_recent_evidence`; without it the ledger keeps
-//! its default, and the run has no checkpoint, so it keeps no evidence.
+//! count for `Ledger::keep_recent_evidence`. Without it the ledger keeps
+//! evidence only until a checkpoint shows it, and the run has none, so it
+//! keeps no evidence; this driver reads neither record.
 //!
 //! Each run starts as in the ABCluster head-to-head. Atoms come from
 //! `random_cluster_in_radius` at the radius and separation of
@@ -365,7 +366,7 @@ fn main() {
     };
     let mut ledger = Ledger::with_stop(budget, stop);
     match keep {
-        None => {}
+        None => ledger.keep_evidence_until_shown(),
         Some("all") => ledger.keep_all_evidence(),
         Some(cap) => ledger.keep_recent_evidence(cap.parse().expect("keep")),
     }

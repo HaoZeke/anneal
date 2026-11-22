@@ -260,6 +260,7 @@ fn search(
     let potential = PairPotential::morse(spec.n, spec.rho);
     let mut ledger = Ledger::new(budget);
     ledger.stop_below(spec.reference + HIT_TOL);
+    ledger.keep_evidence_until_shown();
     let mut optimiser = WarmLbfgs::default();
     let pot_ns = std::sync::atomic::AtomicU64::new(0);
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {

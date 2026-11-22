@@ -499,8 +499,8 @@ fn main() {
                 scope.spawn(move || {
                     turns.wait(r, &stop);
                     let mut ledger = Ledger::with_stop(budget, Arc::clone(&stop));
-                    if minima_db.is_some() {
-                        ledger.keep_all_evidence();
+                    if minima_db.is_none() {
+                        ledger.keep_evidence_until_shown();
                     }
                     let mut rng = StdRng::seed_from_u64(replica_seed);
                     let mut opt = WarmLbfgs::default();
