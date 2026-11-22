@@ -34,17 +34,17 @@ configuration field (including =rigid_body_geometry=, =two_phase=,
 instance directly, and delegates scaled presets to
 =Config::recommended_with_scales= and =Config::for_cluster_with_scales=.
 
-=dmc_population_optimize= defaults (=target_n=None= via
-=recommend_target_n(budget, dim)=, =steps_per_control=2=, =beta0=1.0=)
+=dmc_population_optimize= defaults (~target_n=None~ via
+=recommend_target_n(budget, dim)=, ~steps_per_control=2~, ~beta0=1.0~)
 match Rust =dmc_population::dmc_population_optimize=. =box_ensemble_optimize=,
 =ensemble_optimize=, =minimize=, and =global_optimize= expose the full
 =BoxEnsembleConfig=, =GleEscapeConfig=, and =BoxCoverageConfig= keyword
 surface (=identity_tol=, =shared_deposits=, =shared_visit_policy=,
-=escape="gaussian"|"langevin"=, =langevin_*=, =coverage_height=,
+~escape="gaussian"|"langevin"~, =langevin_*=, =coverage_height=,
 =coverage_well_tempering=, =coverage_peer_weight=).
 =global_optimize_objective= accepts =noise_sigma= and =policy=,
 =osa_acceptance_rate= is exported at top level, and =BasinBias= supports
-=w0 >= 0= along with =merge_radius=, =height=, =well_depth=, =wells=,
+~w0 >= 0~ along with =merge_radius=, =height=, =well_depth=, =wells=,
 =deepest_wells=, and =cap_basins=.
 
 =cluster_search= returns full =Outcome=, =RelaxStats=, and =SearchPhase=
@@ -54,7 +54,7 @@ diagnostics (=spent=, =final=, =final_energy=, =basins=, =screened_out=,
 =energy_trace=, =converged=, =capped=, =screens=, =screen_charged=,
 =full_charged=, =check_charged=, =overlap_rejected=, =refused=,
 =screen_steps_taken=, =search_seconds=, =polish_seconds=, =polish_calls=;
-plus =screens=, =same_floor=, =artn=, and =best_at= under =ras=True=).
+plus =screens=, =same_floor=, =artn=, and =best_at= under ~ras=True~).
 =Ledger= exposes =best_state=, =target=, =target_reached=, =stopped=,
 =answer_polish_calls=, =start_redraws=, =encounters=, =stop_below=,
 =below_target=, =charge=, =charge_many=, =charge_frac=, and =record=.
