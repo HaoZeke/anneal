@@ -1333,6 +1333,16 @@ def test_a_short_external_revision_is_reported():
     assert any(row[2] == "qualified external revision" and row[3] == short for row in audit.drifts())
 
 
+def test_a_best_column_is_checked_with_its_revision():
+    header = ["System", "Code revision", "Best", "Note"]
+    rows = [(4, ["lj38", "e3ed7dad", "-1.50", "kept"])]
+    flagged = audit_mod._table_revision_flags("bench/x/README.md", header, rows, [])
+    assert flagged is not None
+    assert any(item[1] == "e3ed7dad" and "Best=-1.50" in item[2] for item in flagged)
+    reached = [(4, ["lj38", "61fa67cf", "-1.50", "kept"])]
+    assert audit_mod._table_revision_flags("bench/x/README.md", header, reached, []) == []
+
+
 def test_an_unreachable_printed_revision_is_reported():
     audit = audit_mod.Audit()
     path = "bench/metal-cluster-h2h/sc-n12/README.md"

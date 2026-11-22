@@ -3680,7 +3680,7 @@ _EXTERNAL_FORM = re.compile(r"https://[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+\.git@
 _FORM_ATTEMPT = re.compile(r"https://[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+\.git@[0-9a-f]+")
 _REVISION_HEADER = re.compile(r"harness|revision|commit|\bsha\b", re.I)
 _RESULT_HEADER = re.compile(
-    r"hit|call|wall|fisher|mann|median|inside|outside|ratio|gap|\bpot\b|eval|ahead|energy",
+    r"hit|call|wall|fisher|mann|median|inside|outside|ratio|gap|\bpot\b|eval|ahead|energy|best",
     re.I,
 )
 _RUN_HEADER = re.compile(r"hit|call|wall", re.I)
