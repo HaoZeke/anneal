@@ -44,7 +44,8 @@ fn run(cfg: &Config, budget: usize, seed: u64) -> (f64, usize, usize) {
 /// the octahedron on more seeds, so this comparison keeps the 200-step
 /// quench the masks were measured on. Conjugating detected operations
 /// into the inertia frame moves the plain mask to `0x90a9` (6 of 16).
-/// The cutoff walk stays 16 of 16.
+/// Skipping an identity-only projection moves it to `0x0023` (3 of
+/// 16). The cutoff walk stays 16 of 16.
 #[test]
 fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not() {
     anneal_core::install_rgpot_kernels!();
@@ -82,8 +83,8 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
         }
     }
     // The template-free walk is deterministic: cutoff 0xffff, plain
-    // 0x90a9 (6 seeds), with and without IRA.
-    let plain_exact = 0x90a9;
+    // 0x0023 (3 seeds), with and without IRA.
+    let plain_exact = 0x0023;
     assert_eq!(
         compact_mask, 0xffff,
         "the cutoff walk reached the octahedron on {compact_hits} of {SEEDS} seeds (mask {compact_mask:#06x})"

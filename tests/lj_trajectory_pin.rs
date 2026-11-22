@@ -92,7 +92,8 @@ fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     // The general move library is deterministic on every build.
     // Every order the point count can hold is tried, so this short
     // walk hash moved. Conjugating the detected operations into the
-    // inertia frame moves it again.
-    let expected = "ad830e720fc969305e6fea920e4893a3181dfabfff5d7e87e992978cf0c09883";
+    // inertia frame moves it, and skipping an identity-only projection
+    // moves it again.
+    let expected = "4de18266a0473776a21d984850ecdc60cdcbd8ba982cb285498248423ab8537d";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }

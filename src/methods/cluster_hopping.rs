@@ -10516,6 +10516,37 @@ mod tests {
         assert!(!ledger.below_target(f64::NAN));
     }
 
+    /// An identity-only detection is not a symmetry, so the search does
+    /// not relax a copy of the coordinates.
+    #[test]
+    fn an_asymmetric_cloud_adds_no_relaxation() {
+        let start = Array1::from_vec(vec![
+            0.2, -0.5, 0.1, 1.1, 0.3, -0.4, -0.6, 0.8, 0.7, 0.4, -0.2, 1.3,
+        ]);
+        let mut plain = Config::for_cluster(4);
+        plain.max_hops = Some(2);
+        plain.replicas = 1;
+        plain.continuous_symmetry = ContinuousSymmetry::Off;
+        let mut measured = plain.clone();
+        measured.continuous_symmetry = ContinuousSymmetry::Measure { interval: 1 };
+        let count = |cfg: &Config| {
+            let mut calls = 0usize;
+            let mut ledger = Ledger::new(12);
+            let mut rng = StdRng::seed_from_u64(11);
+            let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _: usize| {
+                calls += 1;
+                let _ = led.charge();
+                (x.iter().sum::<f64>(), x.to_owned())
+            };
+            run(cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("run");
+            calls
+        };
+        let without = count(&plain);
+        let with = count(&measured);
+        assert!(without > 0, "the walk never relaxed");
+        assert_eq!(with, without, "the identity projection was relaxed");
+    }
+
     #[test]
     fn an_ordinary_walk_never_records_an_improvement_after_its_budget() {
         let mut cfg = Config::for_cluster(1);

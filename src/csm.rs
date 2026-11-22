@@ -142,18 +142,22 @@ pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjectio
     let ops = detected_ops(x);
     // `project` applies `ops` after it has rotated the coordinates. The
     // detector reports operations in the input frame, so each orientation
-    // conjugates them.
-    let best = orientations
-        .iter()
-        .filter_map(|orientation| {
-            let turned = conjugate_ops(&ops, orientation);
-            project(x, classes, &turned, &[*orientation])
+    // conjugates them. An identity-only set is not a symmetry.
+    let best = (ops.len() >= 2)
+        .then(|| {
+            orientations
+                .iter()
+                .filter_map(|orientation| {
+                    let turned = conjugate_ops(&ops, orientation);
+                    project(x, classes, &turned, &[*orientation])
+                })
+                .min_by(|left, right| {
+                    left.1
+                        .partial_cmp(&right.1)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
         })
-        .min_by(|left, right| {
-            left.1
-                .partial_cmp(&right.1)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
+        .flatten()
         .and_then(|(coordinates, measure)| {
             (closest_pair(&coordinates) >= SINGULAR_PAIR).then_some(GroupProjection {
                 coordinates,
@@ -176,7 +180,7 @@ fn conjugate_ops(ops: &[[[f64; 3]; 3]], rotation: &[[f64; 3]; 3]) -> Vec<[[f64; 
 fn detected_ops(x: ArrayView1<'_, f64>) -> Vec<[[f64; 3]; 3]> {
     let n = x.len() / 3;
     if n < 2 {
-        return vec![identity()];
+        return Vec::new();
     }
     let orders: Vec<usize> = (2..=n).collect();
     // Operations outside the tolerance are not a group of this structure.
@@ -185,11 +189,10 @@ fn detected_ops(x: ArrayView1<'_, f64>) -> Vec<[[f64; 3]; 3]> {
     // group and assigned every element.
     let candidates = crate::symmetrise::detect_all(x, n, &orders, 0.25);
     let group = crate::symmetrise::generate_group(&candidates, 64);
-    if group.is_empty() {
-        vec![identity()]
-    } else {
-        group
-    }
+    // The closure always contains the identity, so an empty check never
+    // fires. One element means nothing was detected. Projecting that
+    // identity copies the coordinates and the search then relaxes them.
+    if group.len() < 2 { Vec::new() } else { group }
 }
 
 struct ProposeCache {
@@ -993,6 +996,14 @@ mod tests {
             "distortion did not raise the measure: {}",
             measures[1]
         );
+    }
+
+    #[test]
+    fn an_asymmetric_cloud_is_not_projected() {
+        let x = Array1::from_vec(vec![
+            0.2, -0.5, 0.1, 1.1, 0.3, -0.4, -0.6, 0.8, 0.7, 0.4, -0.2, 1.3,
+        ]);
+        assert!(propose(x.view(), &[0, 0, 0, 0]).is_none());
     }
 
     #[test]

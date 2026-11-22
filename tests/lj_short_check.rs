@@ -14,7 +14,9 @@
 //! feature build keeps the Hungarian record.
 //!
 //! Removing the fixed fivefold openings and the order cap on detected
-//! symmetry moves both short records.
+//! symmetry moves both short records. Skipping an identity-only
+//! projection drops one converged quench from each record. The
+//! energies and the hop counts stay.
 
 use anneal_core::methods::cluster_hopping::{Config, Ledger};
 use anneal_core::methods::cluster_search::search;
@@ -25,8 +27,8 @@ fn lj38_and_lj98_short_searches_stay_put() {
     anneal_core::install_rgpot_kernels!();
     // (n, seed, budget, best, hops, converged, capped)
     let cases: &[(usize, u64, usize, f64, usize, usize, usize)] = &[
-        (38, 1, 2500, -170.260_483_558_385_5, 26, 15, 21),
-        (98, 7, 2500, -520.107_879_491_539_2, 11, 10, 8),
+        (38, 1, 2500, -170.260_483_558_385_5, 26, 14, 21),
+        (98, 7, 2500, -520.107_879_491_539_2, 11, 9, 8),
     ];
     let mut records = Vec::new();
     for (n, seed, budget, best, hops, converged, capped) in cases {
@@ -61,7 +63,7 @@ fn lj38_and_lj98_short_searches_stay_put() {
         assert_eq!(stats.capped, *capped);
     }
     let expected = "\
-LJ38 -170.2604835583855163 26 15 21 2500
-LJ98 -520.1078794915391654 11 10 8 2500";
+LJ38 -170.2604835583855163 26 14 21 2500
+LJ98 -520.1078794915391654 11 9 8 2500";
     assert_eq!(records.join("\n"), expected);
 }
