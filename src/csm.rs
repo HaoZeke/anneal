@@ -140,15 +140,37 @@ pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjectio
     let orientations = inertia_orientations(x, classes.len())?;
     clear_op_cache();
     let ops = detected_ops(x);
-    let best = project(x, classes, &ops, &orientations).and_then(|(coordinates, measure)| {
-        (closest_pair(&coordinates) >= SINGULAR_PAIR).then_some(GroupProjection {
-            coordinates,
-            measure,
-            group: "detected",
+    // `project` applies `ops` after it has rotated the coordinates. The
+    // detector reports operations in the input frame, so each orientation
+    // conjugates them.
+    let best = orientations
+        .iter()
+        .filter_map(|orientation| {
+            let turned = conjugate_ops(&ops, orientation);
+            project(x, classes, &turned, &[*orientation])
         })
-    });
+        .min_by(|left, right| {
+            left.1
+                .partial_cmp(&right.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .and_then(|(coordinates, measure)| {
+            (closest_pair(&coordinates) >= SINGULAR_PAIR).then_some(GroupProjection {
+                coordinates,
+                measure,
+                group: "detected",
+            })
+        });
     store_propose(x, classes, best.as_ref());
     best
+}
+
+/// Operations of the input frame, written in the frame of `rotation`.
+fn conjugate_ops(ops: &[[[f64; 3]; 3]], rotation: &[[f64; 3]; 3]) -> Vec<[[f64; 3]; 3]> {
+    let back = transpose(*rotation);
+    ops.iter()
+        .map(|op| matmul(matmul(*rotation, *op), back))
+        .collect()
 }
 
 fn detected_ops(x: ArrayView1<'_, f64>) -> Vec<[[f64; 3]; 3]> {
@@ -876,6 +898,101 @@ mod tests {
     fn a_pair_inside_the_singular_distance_is_not_proposed() {
         let x = Array1::from_vec(vec![0.0, 0.0, 0.0, 0.005, 0.0, 0.0]);
         assert!(propose(x.view(), &[0, 0]).is_none());
+    }
+
+    fn rotation_from(axis: [f64; 3], angle: f64) -> [[f64; 3]; 3] {
+        let axis = normalize(axis).expect("axis");
+        let sine = libm::sin(angle);
+        let cosine = libm::cos(angle);
+        let turn = 1.0 - cosine;
+        let (x, y, z) = (axis[0], axis[1], axis[2]);
+        [
+            [
+                turn * x * x + cosine,
+                turn * x * y - sine * z,
+                turn * x * z + sine * y,
+            ],
+            [
+                turn * x * y + sine * z,
+                turn * y * y + cosine,
+                turn * y * z - sine * x,
+            ],
+            [
+                turn * x * z - sine * y,
+                turn * y * z + sine * x,
+                turn * z * z + cosine,
+            ],
+        ]
+    }
+
+    fn apply_rotation(x: &Array1<f64>, rotation: [[f64; 3]; 3]) -> Array1<f64> {
+        let mut out = Array1::zeros(x.len());
+        let n = x.len() / 3;
+        for atom in 0..n {
+            let point = [x[3 * atom], x[3 * atom + 1], x[3 * atom + 2]];
+            let turned = mul_vec(&rotation, point);
+            for axis in 0..3 {
+                out[3 * atom + axis] = turned[axis];
+            }
+        }
+        out
+    }
+
+    /// Operations written in the input frame, applied after an orientation,
+    /// give the same average as applying them before that orientation.
+    #[test]
+    fn conjugating_operations_matches_the_input_frame() {
+        let x = bipyramid();
+        let classes = vec![0u32; 7];
+        let ops = inversion_ops();
+        let (plain, plain_measure) =
+            project(x.view(), &classes, &ops, &[identity()]).expect("input frame");
+        let orientations = inertia_orientations(x.view(), 7).expect("axes");
+        for orientation in orientations {
+            let turned = conjugate_ops(&ops, &orientation);
+            let (spun, spun_measure) =
+                project(x.view(), &classes, &turned, &[orientation]).expect("oriented");
+            assert!(
+                (plain_measure - spun_measure).abs() < 1e-8,
+                "{plain_measure} vs {spun_measure}"
+            );
+            for (left, right) in plain.iter().zip(spun.iter()) {
+                assert!((left - right).abs() < 1e-6, "{left} vs {right}");
+            }
+        }
+    }
+
+    /// A rigid rotation does not change the detected measure.
+    #[test]
+    fn a_rotation_leaves_the_detected_measure_unchanged() {
+        let symmetric = Array1::from_vec(vec![
+            1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+            -1.0,
+        ]);
+        let mut distorted = symmetric.clone();
+        distorted[0] += 0.05;
+        let rotation = rotation_from([1.0, 2.0, -0.5], 0.7);
+        let mut measures = Vec::new();
+        for structure in [symmetric, distorted] {
+            let classes = vec![0u32; structure.len() / 3];
+            let plain = propose(structure.view(), &classes).expect("projection");
+            let turned = apply_rotation(&structure, rotation);
+            let spun = propose(turned.view(), &classes).expect("rotated");
+            let gap = (plain.measure - spun.measure).abs();
+            assert!(
+                gap < 1e-4,
+                "plain {} spun {} gap {gap}",
+                plain.measure,
+                spun.measure
+            );
+            measures.push(plain.measure);
+        }
+        assert!(measures[0] < 1e-8, "exact octahedron {}", measures[0]);
+        assert!(
+            measures[1] > measures[0] + 1e-6,
+            "distortion did not raise the measure: {}",
+            measures[1]
+        );
     }
 
     #[test]

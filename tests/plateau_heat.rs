@@ -1,6 +1,8 @@
 // Copyright (c) anneal developers
 //! `plateau_heat` is an acceptance temperature. Each test pins a walk
-//! that moves when one heated site is reverted.
+//! that moves when one heated site is reverted. Conjugating detected
+//! operations into the inertia frame moves these fingerprints. Heat
+//! still leaves the cold walk, and a new record still clears it.
 
 use anneal_core::methods::cluster_hopping::{
     Config, ContinuousSymmetry, Ledger, Outcome, random_cluster_in_radius, run_with_gradient,
@@ -94,9 +96,9 @@ fn metropolis_heat_follows_the_plateau() {
     let (cold, hot) = pair(&cfg, 30_000, 2000);
     let cold_fp = fingerprint(&cold);
     let hot_fp = fingerprint(&hot);
-    assert_eq!(cold_fp, 0xdd8af03c9ac82943, "preset walk");
+    assert_eq!(cold_fp, 0xa542a86a8a7d444b, "preset walk");
     assert_ne!(hot_fp, cold_fp, "temperature *= heat");
-    assert_eq!(hot_fp, 0x65011b94de64e545, "PLATEAU_HEAT_CAP");
+    assert_eq!(hot_fp, 0xa2139aef1d1e7380, "PLATEAU_HEAT_CAP");
 }
 
 #[test]
@@ -104,10 +106,10 @@ fn lattice_exchange_follows_the_plateau() {
     let mut cfg = Config::recommended(ATOMS);
     cfg.restart_patience = 2_000;
     let (cold, hot) = pair(&cfg, 30_000, 2000);
-    assert_eq!(fingerprint(&cold), 0xbd04ca786a59dd87, "preset walk");
+    assert_eq!(fingerprint(&cold), 0xbc92ea1d2cd78e4d, "preset walk");
     assert_eq!(
         fingerprint(&hot),
-        0x4c64a9472ddef719,
+        0x94452361470223ea,
         "heat * cfg.temperature"
     );
 }
@@ -131,10 +133,10 @@ fn a_same_iteration_record_returns_to_the_preset() {
     cfg.general_collective = true;
     cfg.continuous_symmetry = ContinuousSymmetry::Measure { interval: 1 };
     let (cold, hot) = pair(&cfg, 6_000, 10);
-    assert_eq!(fingerprint(&cold), 0x47e648fd8a6be40a, "preset walk");
+    assert_eq!(fingerprint(&cold), 0xa0488f40c95c5120, "preset walk");
     assert_eq!(
         fingerprint(&hot),
-        0x17e103a9504f70c6,
+        0x7319d48a1cb49e7e,
         "same-iteration heat = 1.0"
     );
 }
