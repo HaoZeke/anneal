@@ -30,6 +30,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+from machine_provenance import machine_columns  # noqa: E402
 
 PAPER_BUDGETS = {
     38: 400_000,
@@ -66,6 +67,8 @@ SUMMARY_FIELDS = [
     "anneal_head",
     "code_revision",
     "host",
+    "machine_id",
+    "cpu_model",
 ]
 
 SEED_FIELDS = [
@@ -85,6 +88,8 @@ SEED_FIELDS = [
     "reached",
     "code_revision",
     "host",
+    "machine_id",
+    "cpu_model",
 ]
 
 
@@ -324,6 +329,12 @@ def summarise(rows: list[dict[str, str]], seeds: tuple[int, ...], source: dict[s
                     "anneal_head": head,
                     "code_revision": head if arm == "anneal" else source["growpal_version"],
                     "host": os.uname().nodename,
+                    "machine_id": ";".join(
+                        sorted({item["machine_id"] for item in group})
+                    ),
+                    "cpu_model": ";".join(
+                        sorted({item["cpu_model"] for item in group})
+                    ),
                 }
             )
     return out
@@ -429,6 +440,7 @@ def main(argv: list[str]) -> int:
             )
     source = load_source(args.source)
     head = args.head_file.read_text().strip()
+    machine = machine_columns()
     here = Path(__file__).resolve().parent
     if str(here) not in sys.path:
         sys.path.insert(0, str(here))
@@ -448,6 +460,11 @@ def main(argv: list[str]) -> int:
         saved = seed_path(args.rows, n, seed, arm)
         log = args.runs / system_name(n) / f"{arm}-{seed}.log"
         existing = load_seed(saved)
+        if existing is not None and (
+            existing.get("machine_id") != machine["machine_id"]
+            or existing.get("cpu_model") != machine["cpu_model"]
+        ):
+            raise RuntimeError(f"{saved} is a legacy or different-machine row")
         if existing is not None:
             rows.append(existing)
             note(
@@ -465,6 +482,7 @@ def main(argv: list[str]) -> int:
             **row,
             "code_revision": head if arm == "anneal" else source["growpal_version"],
             "host": os.uname().nodename,
+            **machine,
         }
         write_seed(saved, row)
         produced = True

@@ -20,7 +20,8 @@ fi
 bash "$ROOT/scripts/gmin_h2h/build_gmin.sh"
 
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs" "$WORK/gm"
-cp -a "$HERE/run_h2h.py" "$ROOT/scripts/target_tol.py" "$WORK/bin/"
+cp -a "$HERE/run_h2h.py" "$ROOT/scripts/target_tol.py" \
+  "$ROOT/scripts/gmin_pin.py" "$ROOT/scripts/machine_provenance.py" "$WORK/bin/"
 cp -a "$ROOT/examples/h2h_gmin_tip4p.data" "$WORK/bin/h2h_gmin_tip4p.data"
 # A single-point data file for the reproduction check: no basin hops, and
 # CHECKD prints the energy at the input geometry.
@@ -63,6 +64,7 @@ exec /usr/bin/python3 -u $WORK/bin/run_h2h.py \\
   --summary $ROOT/bench/tip4p-h2h/h2h-summary.csv \\
   --head-file $WORK/anneal-head \\
   --gmin-source $WORK/gmin-source.txt \\
+  --svnrev /work/gmin-h2h/src/wales/GMIN/source/SVNREV \\
   "\$@"
 EOF
 chmod +x "$WORK/bin/inside.sh"

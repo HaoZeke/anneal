@@ -22,6 +22,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import run_sc as sc  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from machine_provenance import (  # noqa: E402
+    aggregate_machine_columns,
+    machine_columns,
+    require_csv_schema,
+)
 
 SEEDS = tuple(range(2000, 2012))
 EIGHTY = ("sc126-80", "sc96-80", "sc108-80")
@@ -52,6 +58,8 @@ SEED_FIELDS = (
     "code_revision",
     "host",
     "harness_revision",
+    "machine_id",
+    "cpu_model",
 )
 SUMMARY_FIELDS = (
     "system",
@@ -79,6 +87,8 @@ SUMMARY_FIELDS = (
     "code_revision",
     "host",
     "harness_revision",
+    "machine_id",
+    "cpu_model",
 )
 ARM_FIELDS = (
     "system",
@@ -89,6 +99,8 @@ ARM_FIELDS = (
     "accepts",
     "improved",
     "best",
+    "machine_id",
+    "cpu_model",
 )
 
 
@@ -356,6 +368,7 @@ def summarise(rows: list[dict[str, str]], head: str, revision: str) -> list[dict
             "code_revision": code,
             "host": first.get("host") or os.uname().nodename,
             "harness_revision": harness,
+            **aggregate_machine_columns(group),
         }
 
     for system in list(EIGHTY) + list(SMALLER):
@@ -428,6 +441,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--seeds-out", type=Path, required=True)
     parser.add_argument("--arms-out", type=Path)
     parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--svnrev", type=Path, required=True)
     parser.add_argument("--head-file", type=Path, required=True)
     parser.add_argument("--only", nargs=3, metavar=("SYSTEM", "SEED", "ARM"))
     args = parser.parse_args(argv)
@@ -438,10 +452,15 @@ def main(argv: list[str]) -> int:
         print(f"working directory is {Path.cwd()}, expected /work", file=sys.stderr)
         return 2
     head = args.head_file.read_text().strip()
-    revision = sc.load_source(args.source)
+    revision = sc.read_built_revision(args.svnrev, args.source)
     rows = load_rows(args.seeds_out)
     arm_rows = load_rows(args.arms_out) if args.arms_out else []
     done = {(row["system"], row["seed"], row["arm"]) for row in rows}
+    require_csv_schema(args.seeds_out, SEED_FIELDS)
+    require_csv_schema(args.summary, SUMMARY_FIELDS)
+    if args.arms_out:
+        require_csv_schema(args.arms_out, ARM_FIELDS)
+    machine = machine_columns()
 
     def store(seed_row: dict[str, str], extra_arms: list[dict[str, str]]) -> None:
         key = (seed_row["system"], seed_row["seed"], seed_row["arm"])
@@ -452,10 +471,11 @@ def main(argv: list[str]) -> int:
             "code_revision": head if seed_row["arm"] == "anneal" else revision,
             "host": os.uname().nodename,
             "harness_revision": head,
+            **machine,
         }
         rows.append(seed_row)
         done.add(key)
-        arm_rows.extend(extra_arms)
+        arm_rows.extend({**row, **machine} for row in extra_arms)
         write_rows(args.seeds_out, rows, SEED_FIELDS)
         if args.arms_out:
             write_rows(args.arms_out, arm_rows, ARM_FIELDS)

@@ -1,0 +1,4 @@
+Fetch the pinned GMIN snapshot (SVNREV ``9cbec1a4``, tarball sha256
+``ec5730d5``) from the paper dataset, with the Wales URL as a fallback,
+and normalize build paths and version stamps for the pinned toolchain.
+The pin covers source and toolchain, not binary identity across hosts.

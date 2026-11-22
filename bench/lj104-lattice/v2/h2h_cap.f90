@@ -1,18 +1,20 @@
 ! Evaluator cap for a counted comparison.
-! One entry to POTENTIAL is one evaluation, the same unit the
 ! Copyright (c) anneal developers
-! annealing ledger charges for an energy and gradient pair.
+! One GRADT=true entry to POTENTIAL is one gradient pass, the same unit
+! the annealing ledger charges for a combined energy and gradient pass.
+! GRADT=false entries are counted separately and do not consume the cap.
 ! The cap is read from the environment. With H2H_BUDGET unset
 ! the module stays idle and a normal GMIN run is unchanged.
 MODULE H2H_CAP
    USE PREC, ONLY: REAL64
    IMPLICIT NONE
    INTEGER :: CAP = 0
-   INTEGER :: CALLS = 0
+   INTEGER :: GRADIENT_PASSES = 0
+   INTEGER :: ENERGY_ONLY_ENTRIES = 0
    LOGICAL :: READY = .FALSE.
    LOGICAL :: ABORT = .FALSE.
    LOGICAL :: FOUND = .FALSE.
-   INTEGER :: HIT_CALLS = -1
+   INTEGER :: HIT_GRADIENT_PASSES = -1
    REAL(REAL64) :: TARGET_ENERGY = 0.0D0
    REAL(REAL64) :: TOL = 1.0D-3
    LOGICAL :: HAVE_TARGET = .FALSE.
@@ -85,14 +87,18 @@ CONTAINS
       IF (RATE > 0) T0 = REAL(TICK, REAL64) / REAL(RATE, REAL64)
    END SUBROUTINE H2H_INIT
 
-   LOGICAL FUNCTION H2H_REFUSE(NPCALL)
-      INTEGER, INTENT(IN) :: NPCALL
+   LOGICAL FUNCTION H2H_REFUSE(GRADT)
+      LOGICAL, INTENT(IN) :: GRADT
       IF (.NOT. READY) CALL H2H_INIT()
-      CALLS = NPCALL
-      H2H_REFUSE = CAP > 0 .AND. NPCALL > CAP
+      IF (GRADT) THEN
+         GRADIENT_PASSES = GRADIENT_PASSES + 1
+      ELSE
+         ENERGY_ONLY_ENTRIES = ENERGY_ONLY_ENTRIES + 1
+      END IF
+      H2H_REFUSE = CAP > 0 .AND. GRADT .AND. GRADIENT_PASSES > CAP
       IF (H2H_REFUSE) THEN
          ABORT = .TRUE.
-         CALLS = CAP
+         GRADIENT_PASSES = CAP
       END IF
    END FUNCTION H2H_REFUSE
 
@@ -131,7 +137,7 @@ CONTAINS
       IF (HAVE_TARGET .AND. .NOT. FOUND) THEN
          IF (ENERGY_HITS(ENERGY, TARGET_ENERGY, TOL)) THEN
             FOUND = .TRUE.
-            HIT_CALLS = CALLS
+            HIT_GRADIENT_PASSES = GRADIENT_PASSES
             ABORT = .TRUE.
          END IF
       END IF
@@ -150,21 +156,23 @@ CONTAINS
       IF (RATE > 0) WALL = REAL(TICK, REAL64) / REAL(RATE, REAL64) - T0
       IF (FOUND) THEN
          HIT = 1
-         EVALS = HIT_CALLS
+         EVALS = HIT_GRADIENT_PASSES
       ELSE
          HIT = 0
          EVALS = CAP
-         IF (CAP <= 0) EVALS = CALLS
+         IF (CAP <= 0) EVALS = GRADIENT_PASSES
       END IF
       IF (BEST > 1.0D99) THEN
          REPORTED = 0.0D0
       ELSE
          REPORTED = BEST
       END IF
-      WRITE(LINE, '(A,A,A,I0,A,I0,A,I1,A,I0,A,I0,A,G0.12,A,G0.6,A,G0.9)') &
+      WRITE(LINE, '(A,A,A,I0,A,I0,A,I1,A,I0,A,I0,A,I0,A,I0,A,G0.12,A,G0.6,A,G0.9)') &
          'h2h_row system=', TRIM(SYSTEM), ' code=gmin seed=', SEED, &
          ' budget=', CAP, ' hit=', HIT, ' evals_to_hit=', EVALS, &
-         ' charged=', CALLS, ' best=', REPORTED, ' wall_s=', WALL, &
+         ' charged=', GRADIENT_PASSES, ' gradient_passes=', GRADIENT_PASSES, &
+         ' energy_only_entries=', ENERGY_ONLY_ENTRIES, &
+         ' best=', REPORTED, ' wall_s=', WALL, &
          ' pot_s=', POT_S
       WRITE(*, '(A)') TRIM(LINE)
       CALL GET_ENVIRONMENT_VARIABLE('H2H_ROW', ROWFILE, LENGTH=N, STATUS=IOS)

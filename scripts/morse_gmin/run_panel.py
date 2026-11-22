@@ -30,6 +30,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+from gmin_pin import read_svnrev  # noqa: E402
 
 # Cambridge Cluster Database, Doye and Wales. The bold entry at that rho.
 # 30B and 30D' are the global minima at rho 6 and 14.
@@ -45,7 +46,6 @@ SYSTEMS = (
     ("m80r14", 80, 14.0, 4_000_000, -340.811371),
 )
 SEEDS = tuple(range(2000, 2012))
-GMIN_REV = "aac1548a8aec13b53ad12a8d6904625081685d2e"
 ARCHIVES = (
     "bench/morse-h2h/seeds.csv",
     "bench/morse14-h2h/seeds.csv",
@@ -228,7 +228,14 @@ def anneal_line(text: str, name: str, revision: str) -> dict[str, str]:
     }
 
 
-def gmin_line(text: str, name: str, seed: int, budget: int, target: float) -> dict[str, str]:
+def gmin_line(
+    text: str,
+    name: str,
+    seed: int,
+    budget: int,
+    target: float,
+    revision: str,
+) -> dict[str, str]:
     fields = {}
     for part in text.split()[1:]:
         if "=" not in part:
@@ -260,15 +267,12 @@ def gmin_line(text: str, name: str, seed: int, budget: int, target: float) -> di
         "best": f"{best:.8f}",
         "pot_s": f"{pot:.6f}",
         "outside_s": f"{outside:.6f}",
-        "code_revision": GMIN_REV,
+        "code_revision": revision,
         "host": "bench",
     }
 
 
 def load_archives(root: Path, svnrev: str) -> dict[tuple[str, int], dict[str, str]]:
-    if svnrev != GMIN_REV:
-        print(f"GMIN SVNREV {svnrev} is not {GMIN_REV}; stored rows are not reused", flush=True)
-        return {}
     wanted = {row[0]: row for row in SYSTEMS}
     found: dict[tuple[str, int], dict[str, str]] = {}
     for relative in ARCHIVES:
@@ -278,6 +282,8 @@ def load_archives(root: Path, svnrev: str) -> dict[tuple[str, int], dict[str, st
         with path.open(newline="") as handle:
             for raw in csv.DictReader(handle):
                 if raw.get("code") != "gmin":
+                    continue
+                if raw.get("code_revision") != svnrev:
                     continue
                 name = raw["system"]
                 if name not in wanted:
@@ -299,7 +305,7 @@ def load_archives(root: Path, svnrev: str) -> dict[tuple[str, int], dict[str, st
                     "best": raw["best"],
                     "pot_s": raw["pot_s"],
                     "outside_s": raw["outside_s"],
-                    "code_revision": GMIN_REV,
+                    "code_revision": svnrev,
                     "host": "bench",
                 }
     return found
@@ -392,6 +398,7 @@ def run_gmin(
     budget: int,
     target: float,
     work: Path,
+    revision: str,
 ) -> dict[str, str]:
     work.mkdir(parents=True, exist_ok=True)
     coords = work / "coords"
@@ -422,7 +429,7 @@ def run_gmin(
     row_path = work / "row.txt"
     if not row_path.is_file():
         raise RuntimeError(f"gmin {name} {seed} exited {proc.returncode}\n{(proc.stdout or '')[-500:]}")
-    return gmin_line(row_path.read_text(), name, seed, budget, target)
+    return gmin_line(row_path.read_text(), name, seed, budget, target, revision)
 
 
 def git_head(root: Path) -> str:
@@ -433,10 +440,6 @@ def git_head(root: Path) -> str:
         text=True,
     )
     return proc.stdout.strip()
-
-
-def svnrev(path: Path) -> str:
-    return path.read_text().strip()
 
 
 def self_test() -> None:
@@ -491,7 +494,7 @@ def main() -> int:
     if not args.gmin.is_file():
         raise SystemExit(f"missing {args.gmin}")
     revision = git_head(root)
-    got = svnrev(args.svnrev)
+    got = read_svnrev(args.svnrev)
     data = (root / "examples" / "h2h_gmin_morse.data").read_text()
     if not data.endswith("\n"):
         data += "\n"
@@ -536,6 +539,7 @@ def main() -> int:
                     budget,
                     target,
                     args.work / name / f"gmin-{seed}",
+                    got,
                 )
                 rows.append(row)
                 done[(name, "gmin", seed)] = row

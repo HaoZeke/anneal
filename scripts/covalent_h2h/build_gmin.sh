@@ -8,11 +8,14 @@ set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 GMIN=/work/gmin-h2h/src/wales/GMIN
+PIN=$ROOT/scripts/gmin_pin.py
+eval "$(python3 "$PIN" shell)"
 
 # The shared script extracts, checks the revision and applies the cap.
 # A timer patch removes the binary, and the second call rebuilds the
 # objects it touched.
 bash "$ROOT/scripts/gmin_h2h/build_gmin.sh"
+python3 "$PIN" read-svnrev "$GMIN/source/SVNREV" >/dev/null
 if ! grep -q H2H_POT_ENTER "$GMIN/source/SW.f90"; then
   patch -p1 --forward --batch -d "$GMIN" < "$HERE/sw-timer.patch"
   rm -f /work/gmin-h2h/bin/GMIN

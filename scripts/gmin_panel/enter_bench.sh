@@ -8,6 +8,9 @@
 #
 #   enter_bench.sh [run_panel.py options]
 #   enter_bench.sh --summarize [--tex]   # rewrite the tables from rows.csv only
+#
+# --summarize scores the latest stored row of each seed, whatever anneal
+# revision wrote it, unless GMIN_PANEL_REV names one.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -19,7 +22,7 @@ cargo_home=${CARGO_HOME:-$HOME/.cargo}
 
 if [[ ${1:-} == --summarize ]]; then
   shift
-  exec python3 "$HERE/run_panel.py" --summarize --root "$ROOT" --rows "$OUT/rows.csv" --revision "$REV" "$@"
+  exec python3 "$HERE/run_panel.py" --summarize --root "$ROOT" --rows "$OUT/rows.csv" --revision "${GMIN_PANEL_REV:-latest}" "$@"
 fi
 
 tree() {
@@ -64,10 +67,13 @@ else
 fi
 
 GMIN_PANEL_WORK=$WORK bash "$HERE/build_gmin.sh"
-sha256sum "$WORK"/bin/* > "$WORK/bin-sha256.txt"
+# binary_sha256 is the GMIN line of bin-sha256.txt, one hash of one build.
+(cd "$WORK/bin" && sha256sum -- *) > "$WORK/bin-sha256.txt"
+awk '$2 == "GMIN" {print "binary_sha256=" $1}' "$WORK/bin-sha256.txt" >> "$WORK/gmin-source.txt"
+cp -f "$WORK/bin-sha256.txt" "$OUT/bin-sha256.txt"
 cp -f "$WORK/gmin-source.txt" "$OUT/gmin-source.txt"
-(cd "$WORK/bin" && sha256sum -- *) > "$OUT/bin-sha256.txt"
-cp -f "$HERE/run_panel.py" "$ROOT/scripts/target_tol.py" "$WORK/"
+cp -f "$HERE/run_panel.py" "$ROOT/scripts/target_tol.py" \
+  "$ROOT/scripts/gmin_pin.py" "$WORK/"
 cp -f "$ROOT/examples/h2h_gmin_lj.data" "$ROOT/examples/h2h_gmin_morse.data" "$WORK/"
 # Captured before HOME moves.
 user_site=$(python3 -c 'import site; print(site.getusersitepackages())')
@@ -89,6 +95,7 @@ exec taskset -c 0 /usr/bin/python3 -u $WORK/run_panel.py \\
   --work $WORK/runs \\
   --logs $WORK/logs \\
   --gmin-source $WORK/gmin-source.txt \\
+  --svnrev $WORK/gmin-src/wales/GMIN/source/SVNREV \\
   --lj-data $WORK/h2h_gmin_lj.data \\
   --morse-data $WORK/h2h_gmin_morse.data \\
   "\$@"

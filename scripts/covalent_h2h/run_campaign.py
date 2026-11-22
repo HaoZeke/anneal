@@ -36,6 +36,8 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+from machine_provenance import machine_columns, require_csv_schema  # noqa: E402
+from gmin_pin import read_built_revision  # noqa: E402
 
 SYSTEMS = ("sw10", "sw13", "sw20", "tc10", "tc20")
 SEEDS = tuple(range(2000, 2012))
@@ -81,6 +83,8 @@ ROW_FIELDS = [
     "outside_s",
     "code_revision",
     "host",
+    "machine_id",
+    "cpu_model",
 ]
 
 SUMMARY_FIELDS = [
@@ -106,6 +110,8 @@ SUMMARY_FIELDS = [
     "anneal_head",
     "code_revision",
     "host",
+    "machine_id",
+    "cpu_model",
 ]
 
 
@@ -357,6 +363,12 @@ def summarise(rows, references, revision, heads):
                     "anneal_head": heads[ANNEAL.get(code, ("binary",))[0]],
                     "code_revision": heads[ANNEAL[code][0]] if code in ANNEAL else revision if code in GMIN else heads["binary"],
                     "host": os.uname().nodename,
+                    "machine_id": ";".join(
+                        sorted({row["machine_id"] for row in group})
+                    ),
+                    "cpu_model": ";".join(
+                        sorted({row["cpu_model"] for row in group})
+                    ),
                 }
             )
     return out
@@ -411,6 +423,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--carbon-data", type=Path, required=True)
     parser.add_argument("--ase", type=Path, required=True)
     parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--svnrev", type=Path, required=True)
     parser.add_argument("--head-file", type=Path, required=True)
     parser.add_argument("--before-head-file", type=Path)
     parser.add_argument("--runs", type=Path, required=True)
@@ -423,13 +436,15 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv[1:])
     names = tuple(args.system) if args.system else SYSTEMS
     wanted = set(args.code) if args.code else None
-    revision = load_source(args.source)
+    revision = read_built_revision(args.svnrev, args.source)
     head = args.head_file.read_text().strip()
+    machine = machine_columns()
     heads = {"binary": head, "before_binary": ""}
     if args.before_head_file:
         heads["before_binary"] = args.before_head_file.read_text().strip()
     progress = args.runs.parent / "progress.txt"
     progress.parent.mkdir(parents=True, exist_ok=True)
+    require_csv_schema(args.rows, ROW_FIELDS)
 
     def codes_of(name):
         return tuple(
@@ -441,10 +456,11 @@ def main(argv: list[str]) -> int:
 
     if args.summarise_only:
         rows = [normalise(row) for row in csv.DictReader(args.rows.read_text().splitlines())]
+        if any(not row.get("machine_id") or not row.get("cpu_model") for row in rows):
+            raise RuntimeError("legacy rows need a new campaign table")
         references = {
             name: float(binary_lines(args.binary, "budget", name)[1]) for name in SYSTEMS
         }
-        write_csv(args.rows, ROW_FIELDS, rows)
         write_csv(args.summary, SUMMARY_FIELDS, summarise(rows, references, revision, heads))
         return 0
     for name in names:
@@ -469,6 +485,11 @@ def main(argv: list[str]) -> int:
         saved.parent.mkdir(parents=True, exist_ok=True)
         if saved.is_file() and saved.read_text().strip():
             row = next(csv.DictReader(saved.read_text().splitlines()))
+            if (
+                row.get("machine_id") != machine["machine_id"]
+                or row.get("cpu_model") != machine["cpu_model"]
+            ):
+                raise RuntimeError(f"{saved} is a legacy or different-machine row")
             rows.append(row)
             note(progress, f"skip {name} code={code} seed={seed} hit={row['hit']}")
             continue
@@ -484,6 +505,7 @@ def main(argv: list[str]) -> int:
             heads[ANNEAL[code][0]] if code in ANNEAL else revision if code in GMIN else head
         )
         row["host"] = os.uname().nodename
+        row.update(machine)
         write_csv(saved, ROW_FIELDS, [row])
         rows.append(row)
         note(

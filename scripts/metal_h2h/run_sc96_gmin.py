@@ -28,6 +28,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import run_sc as sc  # noqa: E402
 import run_sc_n12 as n12  # noqa: E402
+from machine_provenance import machine_columns  # noqa: E402
 
 N78 = "sc96-78"
 N78_SEEDS = tuple(range(9532, 9564))
@@ -43,6 +44,8 @@ N78_FIELDS = (
     "code_revision",
     "host",
     "harness_revision",
+    "machine_id",
+    "cpu_model",
     "wall_s",
     "pot_s",
 )
@@ -73,7 +76,14 @@ def run_panel(args, system: str, seed: int, head: str, revision: str) -> dict[st
     log.parent.mkdir(parents=True, exist_ok=True)
     row = sc.run_gmin(args.gmin, system, seed, sc.PAPER_BUDGETS[system], coords, args.runs / system / f"gmin-{seed}", log)
     seed_row = n12.as_seed(system, "gmin", row, {})
-    seed_row.update({"code_revision": revision, "host": os.uname().nodename, "harness_revision": head})
+    seed_row.update(
+        {
+            "code_revision": revision,
+            "host": os.uname().nodename,
+            "harness_revision": head,
+            **machine_columns(),
+        }
+    )
     return seed_row
 
 
@@ -95,6 +105,7 @@ def run_n78(args, seed: int, reference: str, head: str, revision: str) -> dict[s
         "code_revision": revision,
         "host": os.uname().nodename,
         "harness_revision": head,
+        **machine_columns(),
         "wall_s": f"{float(row['wall_s']):.6f}",
         "pot_s": f"{float(row['pot_s']):.6f}",
     }
@@ -112,6 +123,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--starts78", type=Path, required=True)
     parser.add_argument("--reference78", type=Path, required=True)
     parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--svnrev", type=Path, required=True)
     parser.add_argument("--head-file", type=Path, required=True)
     parser.add_argument("--panel-system", action="append", choices=tuple(sc.PAPER_BUDGETS))
     parser.add_argument("--no-n78", action="store_true")
@@ -124,14 +136,15 @@ def main(argv: list[str]) -> int:
         print(f"working directory is {Path.cwd()}, expected /work", file=sys.stderr)
         return 2
     head = args.head_file.read_text().strip()
-    revision = sc.load_source(args.source)
+    revision = sc.read_built_revision(args.svnrev, args.source)
     reference = args.reference78.read_text().strip()
 
     panel_fields, panel_rows = load(args.panel_seeds)
     if list(panel_fields) != list(n12.SEED_FIELDS):
         raise SystemExit(f"{args.panel_seeds} columns are not run_sc_n12.SEED_FIELDS")
     n78_fields, n78_rows = load(args.n78_rows)
-    n78_fields = n78_fields + [field for field in N78_FIELDS if field not in n78_fields]
+    if n78_fields != list(N78_FIELDS):
+        raise SystemExit(f"{args.n78_rows} has a legacy schema; use a new campaign table")
 
     def stored(rows: list[dict[str, str]], seed: int, **match: str) -> bool:
         return any(
