@@ -8,6 +8,12 @@
 
 #include "rgpot/nlist/NeighbourList.hpp"
 
+#if defined(__has_include)
+#if !__has_include(<capnp/dynamic.h>)
+#error "nlist_stream requires Cap'n Proto headers (<capnp/dynamic.h>); enable with_rpc"
+#endif
+#endif
+
 #include <capnp/dynamic.h>
 #include <capnp/message.h>
 #include <capnp/schema-parser.h>

@@ -276,11 +276,14 @@ private:
 
   void buildCells(const double *xyz, std::size_t n);
   void buildStored(const double *xyz, std::size_t n, std::uint64_t bound);
+  void updateOrthorhombic(const double *xyz, std::size_t n,
+                          const double *box9, const Spec &spec,
+                          bool same_cell);
   [[nodiscard]] std::uint64_t candidateBound() const;
   /// `wrapped` is set when some atom is within the skin only through
   /// another periodic image of its reference position.
   [[nodiscard]] bool reusable(const double *xyz, std::size_t n,
-                              const double *box9, const Spec &spec,
+                              const Spec &spec, bool same_cell,
                               bool &wrapped) const;
   void fold(double &dx, double &dy, double &dz) const;
 

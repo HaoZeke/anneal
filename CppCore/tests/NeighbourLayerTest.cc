@@ -3,12 +3,16 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <map>
+#include <new>
+#include <random>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -27,6 +31,25 @@
 #if defined(_OPENMP)
 #include <omp.h>
 #endif
+
+namespace {
+
+std::atomic<std::uint64_t> allocationCalls{0};
+
+} // namespace
+
+void *operator new(std::size_t size) {
+  void *memory = std::malloc(size == 0 ? 1 : size);
+  if (memory == nullptr) {
+    throw std::bad_alloc();
+  }
+  allocationCalls.fetch_add(1, std::memory_order_relaxed);
+  return memory;
+}
+
+void operator delete(void *memory) noexcept { std::free(memory); }
+
+void operator delete(void *memory, std::size_t) noexcept { std::free(memory); }
 
 namespace {
 
@@ -61,7 +84,8 @@ std::uint64_t bits(double v) {
 }
 
 std::vector<double> fcc(int n, double a) {
-  const double b[4][3] = {{0, 0, 0}, {0, 0.5, 0.5}, {0.5, 0, 0.5}, {0.5, 0.5, 0}};
+  const double b[4][3] = {
+      {0, 0, 0}, {0, 0.5, 0.5}, {0.5, 0, 0.5}, {0.5, 0.5, 0}};
   std::vector<double> pos;
   for (int ix = 0; ix < n; ++ix) {
     for (int iy = 0; iy < n; ++iy) {
@@ -78,9 +102,10 @@ std::vector<double> fcc(int n, double a) {
 }
 
 std::vector<double> diamond(int n, double a) {
-  const double b[8][3] = {{0, 0, 0},         {0.5, 0.5, 0},     {0.5, 0, 0.5},
-                          {0, 0.5, 0.5},     {0.25, 0.25, 0.25},{0.75, 0.75, 0.25},
-                          {0.75, 0.25, 0.75},{0.25, 0.75, 0.75}};
+  const double b[8][3] = {{0, 0, 0},          {0.5, 0.5, 0},
+                          {0.5, 0, 0.5},      {0, 0.5, 0.5},
+                          {0.25, 0.25, 0.25}, {0.75, 0.75, 0.25},
+                          {0.75, 0.25, 0.75}, {0.25, 0.75, 0.75}};
   std::vector<double> pos;
   for (int ix = 0; ix < n; ++ix) {
     for (int iy = 0; iy < n; ++iy) {
@@ -311,7 +336,8 @@ double roundVisit(double t) {
   return static_cast<double>(static_cast<long long>(shifted));
 }
 
-void foldDelta(double &dx, double &dy, double &dz, double lx, double ly, double lz, bool periodic) {
+void foldDelta(double &dx, double &dy, double &dz, double lx, double ly,
+               double lz, bool periodic) {
   if (!periodic) {
     return;
   }
@@ -322,8 +348,8 @@ void foldDelta(double &dx, double &dy, double &dz, double lx, double ly, double 
 
 using PairMap = std::map<std::pair<int, int>, double>;
 
-PairMap directPairs(const std::vector<double> &pos, double lx, double ly, double lz, double cutoff,
-                    bool periodic) {
+PairMap directPairs(const std::vector<double> &pos, double lx, double ly,
+                    double lz, double cutoff, bool periodic) {
   const double cut2 = cutoff * cutoff;
   const int n = static_cast<int>(pos.size() / 3);
   PairMap out;
@@ -343,7 +369,8 @@ PairMap directPairs(const std::vector<double> &pos, double lx, double ly, double
 }
 
 std::vector<double> fccBlock(int nx, int ny, int nz, double a) {
-  const double b[4][3] = {{0, 0, 0}, {0, 0.5, 0.5}, {0.5, 0, 0.5}, {0.5, 0.5, 0}};
+  const double b[4][3] = {
+      {0, 0, 0}, {0, 0.5, 0.5}, {0.5, 0, 0.5}, {0.5, 0.5, 0}};
   std::vector<double> pos;
   for (int ix = 0; ix < nx; ++ix) {
     for (int iy = 0; iy < ny; ++iy) {
@@ -359,17 +386,19 @@ std::vector<double> fccBlock(int nx, int ny, int nz, double a) {
   return pos;
 }
 
-PairMap walkedPairs(rgpot::nlist::Neighbours &cells, std::size_t n, double cutoff) {
+PairMap walkedPairs(rgpot::nlist::Neighbours &cells, std::size_t n,
+                    double cutoff) {
   const double cut2 = cutoff * cutoff;
   PairMap out;
-  cells.forHalf(0, static_cast<std::int64_t>(n),
-                [&](std::int32_t i, std::int32_t j, double, double, double, double r2) {
-                  if (r2 <= cut2) {
-                    const int lo = std::min(i, j);
-                    const int hi = std::max(i, j);
-                    out[{lo, hi}] = r2;
-                  }
-                });
+  cells.forHalf(
+      0, static_cast<std::int64_t>(n),
+      [&](std::int32_t i, std::int32_t j, double, double, double, double r2) {
+        if (r2 <= cut2) {
+          const int lo = std::min(i, j);
+          const int hi = std::max(i, j);
+          out[{lo, hi}] = r2;
+        }
+      });
   return out;
 }
 
@@ -383,8 +412,9 @@ void requireSamePairs(const PairMap &got, const PairMap &ref) {
   }
 }
 
-void loadCells(rgpot::nlist::Neighbours &cells, const std::vector<double> &pos, double lx,
-               double ly, double lz, double cutoff, bool periodic, rgpot::nlist::Mode mode) {
+void loadCells(rgpot::nlist::Neighbours &cells, const std::vector<double> &pos,
+               double lx, double ly, double lz, double cutoff, bool periodic,
+               rgpot::nlist::Mode mode) {
   const double box[9] = {lx, 0, 0, 0, ly, 0, 0, 0, lz};
   rgpot::nlist::Spec spec;
   spec.cutoff = cutoff;
@@ -417,7 +447,39 @@ std::vector<double> shearedFcc(int n, double a, const double cell[9]) {
 
 } // namespace
 
-TEST_CASE("a short cutoff stream matches the direct pair sum", "[nlist][stream][direct]") {
+TEST_CASE("repeated orthorhombic stream updates do not add staging allocations",
+          "[nlist][stream][allocation]") {
+  setThreads("1");
+  auto first = fccBlock(10, 5, 4, 2.0);
+  auto second = first;
+  second[0] += 0.1;
+  const std::size_t n = first.size() / 3;
+  const double cell[9] = {20.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 8.0};
+  rgpot::nlist::Spec spec;
+  spec.cutoff = 3.0;
+  spec.skin = 0.0;
+  spec.periodic = {true, true, true};
+  spec.mode = rgpot::nlist::Mode::Stream;
+
+  rgpot::nlist::Neighbours cells;
+  cells.update(first.data(), n, cell, spec);
+  cells.update(second.data(), n, cell, spec);
+  for (int step = 0; step < 8; ++step) {
+    const auto before = allocationCalls.load(std::memory_order_relaxed);
+    const auto &positions = step % 2 == 0 ? first : second;
+    cells.update(positions.data(), n, cell, spec);
+    const auto growth =
+        allocationCalls.load(std::memory_order_relaxed) - before;
+    // The Cartesian builder retains all neighbour-list arrays. Its only
+    // allocations are the existing temporary fill array and Linux memory
+    // availability probe; a transactional Neighbours object adds four.
+    REQUIRE(growth <= 2);
+  }
+  setThreads("");
+}
+
+TEST_CASE("a short cutoff stream matches the direct pair sum",
+          "[nlist][stream][direct]") {
   setThreads("1");
   const double a = 4.05;
   const double cutoff = 2.5;
@@ -429,7 +491,8 @@ TEST_CASE("a short cutoff stream matches the direct pair sum", "[nlist][stream][
   REQUIRE(none.empty());
 
   rgpot::nlist::Neighbours streamed;
-  loadCells(streamed, pos, lx, ly, lz, cutoff, false, rgpot::nlist::Mode::Stream);
+  loadCells(streamed, pos, lx, ly, lz, cutoff, false,
+            rgpot::nlist::Mode::Stream);
   REQUIRE(streamed.streaming());
   REQUIRE(streamed.slots() == 0);
   requireSamePairs(walkedPairs(streamed, pos.size() / 3, cutoff), none);
@@ -451,7 +514,8 @@ TEST_CASE("a short cutoff stream matches the direct pair sum", "[nlist][stream][
   requireSamePairs(walkedPairs(stored, pos.size() / 3, cutoff), close);
 
   rgpot::nlist::Neighbours automatic;
-  loadCells(automatic, pos, lx, ly, lz, cutoff, false, rgpot::nlist::Mode::Auto);
+  loadCells(automatic, pos, lx, ly, lz, cutoff, false,
+            rgpot::nlist::Mode::Auto);
   REQUIRE(automatic.mode() == rgpot::nlist::Mode::Stored);
   REQUIRE(!automatic.streaming());
   requireSamePairs(walkedPairs(automatic, pos.size() / 3, cutoff), close);
@@ -459,8 +523,8 @@ TEST_CASE("a short cutoff stream matches the direct pair sum", "[nlist][stream][
   setThreads("4");
   std::vector<PairMap> parts(4);
   again.forCellTeam(true, 4,
-                    [&](int thread, std::int32_t i, std::int32_t j, double, double, double,
-                        double r2) {
+                    [&](int thread, std::int32_t i, std::int32_t j, double,
+                        double, double, double r2) {
                       if (r2 <= cutoff * cutoff) {
                         const int lo = std::min(i, j);
                         const int hi = std::max(i, j);
@@ -476,7 +540,8 @@ TEST_CASE("a short cutoff stream matches the direct pair sum", "[nlist][stream][
   requireSamePairs(merged, close);
 }
 
-TEST_CASE("periodic and long-cutoff streams match the direct pair sum", "[nlist][stream][direct]") {
+TEST_CASE("periodic and long-cutoff streams match the direct pair sum",
+          "[nlist][stream][direct]") {
   setThreads("1");
   const double a = 4.05;
   auto pos = fccBlock(10, 4, 4, a);
@@ -501,7 +566,8 @@ TEST_CASE("periodic and long-cutoff streams match the direct pair sum", "[nlist]
   const auto many = directPairs(wide, side, side, side, long_cut, true);
   REQUIRE(many.size() > 100);
   rgpot::nlist::Neighbours tiles;
-  loadCells(tiles, wide, side, side, side, long_cut, true, rgpot::nlist::Mode::Stream);
+  loadCells(tiles, wide, side, side, side, long_cut, true,
+            rgpot::nlist::Mode::Stream);
   requireSamePairs(walkedPairs(tiles, wide.size() / 3, long_cut), many);
 }
 
@@ -613,22 +679,25 @@ struct Walks {
   PairBits half, team, atom;
 };
 
-Walks walk(const rgpot::nlist::Neighbours &cells, std::size_t n, double cutoff) {
+Walks walk(const rgpot::nlist::Neighbours &cells, std::size_t n,
+           double cutoff) {
   const double cut2 = cutoff * cutoff;
   Walks out;
   auto into = [&](PairBits &dst, bool once) {
-    return [&dst, cut2, once](std::int32_t i, std::int32_t j, double dx, double dy, double dz,
-                              double r2) {
+    return [&dst, cut2, once](std::int32_t i, std::int32_t j, double dx,
+                              double dy, double dz, double r2) {
       if (r2 < cut2 && (!once || i < j)) {
-        dst.push_back({static_cast<std::uint64_t>(i), static_cast<std::uint64_t>(j), bits(dx),
-                       bits(dy), bits(dz)});
+        dst.push_back({static_cast<std::uint64_t>(i),
+                       static_cast<std::uint64_t>(j), bits(dx), bits(dy),
+                       bits(dz)});
       }
     };
   };
   cells.forHalf(0, static_cast<std::int64_t>(n), into(out.half, false));
   auto team = into(out.team, false);
   cells.forCellTeam(true, 1,
-                    [&](int, std::int32_t i, std::int32_t j, double dx, double dy, double dz,
+                    [&](int, std::int32_t i, std::int32_t j, double dx,
+                        double dy, double dz,
                         double r2) { team(i, j, dx, dy, dz, r2); });
   auto atom = into(out.atom, true);
   for (std::size_t i = 0; i < n; ++i) {
@@ -649,7 +718,8 @@ void wrapInto(std::vector<double> &pos, double side) {
 
 } // namespace
 
-TEST_CASE("a stored list survives atoms wrapped through the faces", "[nlist][skin]") {
+TEST_CASE("a stored list survives atoms wrapped through the faces",
+          "[nlist][skin]") {
   // Five bins per side, so the tile walk takes the image of each pair from
   // the bins of its atoms.
   const double a = 3.6;
@@ -670,8 +740,8 @@ TEST_CASE("a stored list survives atoms wrapped through the faces", "[nlist][ski
   spec.mode = rgpot::nlist::Mode::Stored;
   rgpot::nlist::Neighbours warm;
 
-  auto check = [&](const std::vector<double> &xyz, const double *cell, bool reused,
-                   std::uint64_t builds) {
+  auto check = [&](const std::vector<double> &xyz, const double *cell,
+                   bool reused, std::uint64_t builds) {
     warm.update(xyz.data(), xyz.size() / 3, cell, spec);
     REQUIRE(warm.mode() == rgpot::nlist::Mode::Stored);
     REQUIRE(warm.reused() == reused);
@@ -725,7 +795,8 @@ TEST_CASE("a stored list survives atoms wrapped through the faces", "[nlist][ski
   check(pos, big, false, 4);
 }
 
-TEST_CASE("forCellTeam on a stored list walks the stored index across threads and Verlet reuse",
+TEST_CASE("forCellTeam on a stored list walks the stored index across threads "
+          "and Verlet reuse",
           "[nlist][stored][threads]") {
   const double a = 3.6;
   const double side = 8 * a;
@@ -757,11 +828,12 @@ TEST_CASE("forCellTeam on a stored list walks the stored index across threads an
     }
     PairBits want_half;
     stored.forHalf(0, static_cast<std::int64_t>(n),
-                   [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz, double r2) {
+                   [&](std::int32_t i, std::int32_t j, double dx, double dy,
+                       double dz, double r2) {
                      if (r2 <= cutoff * cutoff) {
                        want_half.push_back({static_cast<std::uint64_t>(i),
-                                            static_cast<std::uint64_t>(j), bits(dx), bits(dy),
-                                            bits(dz)});
+                                            static_cast<std::uint64_t>(j),
+                                            bits(dx), bits(dy), bits(dz)});
                      }
                    });
     // forHalf walks rows in atom-index order. A stored forCellTeam gives
@@ -784,22 +856,23 @@ TEST_CASE("forCellTeam on a stored list walks the stored index across threads an
       // One byte per slice. forEachSlice may run the slices on different
       // threads, and each slice is written by only one of them.
       walk.owns.assign(static_cast<std::size_t>(nt), 1);
-      stored.forCellTeam(
-          true, nt,
-          [&](int slice, std::int32_t i, std::int32_t j, double dx, double dy, double dz,
-              double r2) {
-            const auto run =
-                rgpot::nlist::partition(static_cast<std::int64_t>(n), slice, nt);
-            const auto s = static_cast<std::size_t>(slice);
-            if (static_cast<std::int64_t>(i) < run.begin ||
-                static_cast<std::int64_t>(i) >= run.end) {
-              walk.owns[s] = 0;
-            }
-            if (r2 <= cutoff * cutoff) {
-              per_slice[s].push_back({static_cast<std::uint64_t>(i), static_cast<std::uint64_t>(j),
-                                      bits(dx), bits(dy), bits(dz)});
-            }
-          });
+      stored.forCellTeam(true, nt,
+                         [&](int slice, std::int32_t i, std::int32_t j,
+                             double dx, double dy, double dz, double r2) {
+                           const auto run = rgpot::nlist::partition(
+                               static_cast<std::int64_t>(n), slice, nt);
+                           const auto s = static_cast<std::size_t>(slice);
+                           if (static_cast<std::int64_t>(i) < run.begin ||
+                               static_cast<std::int64_t>(i) >= run.end) {
+                             walk.owns[s] = 0;
+                           }
+                           if (r2 <= cutoff * cutoff) {
+                             per_slice[s].push_back(
+                                 {static_cast<std::uint64_t>(i),
+                                  static_cast<std::uint64_t>(j), bits(dx),
+                                  bits(dy), bits(dz)});
+                           }
+                         });
       for (const auto &part : per_slice) {
         walk.got.insert(walk.got.end(), part.begin(), part.end());
       }
@@ -827,7 +900,8 @@ TEST_CASE("forCellTeam on a stored list walks the stored index across threads an
         }
       }
       INFO("step=" << step << " nt=" << walk.nt << " got=" << walk.got.size()
-                   << " want=" << want_half.size() << " first_mismatch=" << mismatch);
+                   << " want=" << want_half.size()
+                   << " first_mismatch=" << mismatch);
       REQUIRE(same_length);
       REQUIRE(mismatch == walk.got.size());
     }
@@ -841,9 +915,10 @@ namespace {
 using Visits = std::vector<std::array<std::uint64_t, 6>>;
 
 auto into(Visits &dst) {
-  return [&dst](std::int32_t i, std::int32_t j, double dx, double dy, double dz, double r2) {
-    dst.push_back({static_cast<std::uint64_t>(i), static_cast<std::uint64_t>(j), bits(dx),
-                   bits(dy), bits(dz), bits(r2)});
+  return [&dst](std::int32_t i, std::int32_t j, double dx, double dy, double dz,
+                double r2) {
+    dst.push_back({static_cast<std::uint64_t>(i), static_cast<std::uint64_t>(j),
+                   bits(dx), bits(dy), bits(dz), bits(r2)});
   };
 }
 
@@ -877,18 +952,22 @@ constexpr double kFreeBox[9] = {1.0e6, 0, 0, 0, 1.0e6, 0, 0, 0, 1.0e6};
 /// The directed walk of an unbounded search split into `nslices`, joined
 /// in slice order. A slice holds the n - 1 pairs of each atom in its run,
 /// so a slice past the atom count holds none.
-Visits teamVisits(const rgpot::nlist::Neighbours &cells, std::size_t n, int nslices) {
+Visits teamVisits(const rgpot::nlist::Neighbours &cells, std::size_t n,
+                  int nslices) {
   std::vector<Visits> parts(static_cast<std::size_t>(nslices));
   cells.forCellTeam(false, nslices,
-                    [&](int t, std::int32_t i, std::int32_t j, double dx, double dy, double dz,
-                        double r2) {
-                      into(parts[static_cast<std::size_t>(t)])(i, j, dx, dy, dz, r2);
+                    [&](int t, std::int32_t i, std::int32_t j, double dx,
+                        double dy, double dz, double r2) {
+                      into(parts[static_cast<std::size_t>(t)])(i, j, dx, dy, dz,
+                                                               r2);
                     });
   Visits joined;
   for (int t = 0; t < nslices; ++t) {
-    const auto run = rgpot::nlist::partition(static_cast<std::int64_t>(n), t, nslices);
+    const auto run =
+        rgpot::nlist::partition(static_cast<std::int64_t>(n), t, nslices);
     const auto &part = parts[static_cast<std::size_t>(t)];
-    REQUIRE(part.size() == static_cast<std::size_t>(run.end - run.begin) * (n - 1));
+    REQUIRE(part.size() ==
+            static_cast<std::size_t>(run.end - run.begin) * (n - 1));
     joined.insert(joined.end(), part.begin(), part.end());
   }
   return joined;
@@ -915,8 +994,8 @@ TEST_CASE("an unbounded search visits every pair in the order of one bin",
   const Visits half_ref = halfVisits(one_bin, n);
   const Visits directed_ref = directedVisits(one_bin, n);
 
-  for (const auto mode :
-       {rgpot::nlist::Mode::Auto, rgpot::nlist::Mode::Stored, rgpot::nlist::Mode::Stream}) {
+  for (const auto mode : {rgpot::nlist::Mode::Auto, rgpot::nlist::Mode::Stored,
+                          rgpot::nlist::Mode::Stream}) {
     INFO("mode " << static_cast<int>(mode));
     rgpot::nlist::Spec spec = wide;
     spec.cutoff = kInf;
@@ -959,7 +1038,8 @@ TEST_CASE("an unbounded search visits every pair in the order of one bin",
   rgpot::nlist::Neighbours small;
   small.update(few.data(), m, kFreeBox, unbounded);
   REQUIRE(small.allPairs());
-  REQUIRE(teamVisits(small, m, static_cast<int>(m) + 2) == directedVisits(small, m));
+  REQUIRE(teamVisits(small, m, static_cast<int>(m) + 2) ==
+          directedVisits(small, m));
 
   // A finite search past the cluster still bins.
   rgpot::nlist::Neighbours finite;
@@ -967,7 +1047,8 @@ TEST_CASE("an unbounded search visits every pair in the order of one bin",
   REQUIRE(!finite.allPairs());
 }
 
-TEST_CASE("an unbounded search keeps its update until the atoms, the cell or the search change",
+TEST_CASE("an unbounded search keeps its update until the atoms, the cell or "
+          "the search change",
           "[nlist][allpairs][skin]") {
   setThreads("1");
   auto pos = jitteredCluster(2, 3.9);
@@ -1029,13 +1110,15 @@ TEST_CASE("an unbounded periodic search takes the nearest image of every pair",
   const auto direct = directPairs(pos, 3 * a, 2 * a, 2 * a, kInf, true);
   REQUIRE(direct.size() == n * (n - 1) / 2);
   rgpot::nlist::Neighbours all;
-  loadCells(all, pos, 3 * a, 2 * a, 2 * a, kInf, true, rgpot::nlist::Mode::Auto);
+  loadCells(all, pos, 3 * a, 2 * a, 2 * a, kInf, true,
+            rgpot::nlist::Mode::Auto);
   REQUIRE(all.allPairs());
   requireSamePairs(walkedPairs(all, n, kInf), direct);
 }
 
-TEST_CASE("a directed walk gives a lower partner the negated vector of the half walk",
-          "[nlist][triclinic][allpairs]") {
+TEST_CASE(
+    "a directed walk gives a lower partner the negated vector of the half walk",
+    "[nlist][triclinic][allpairs]") {
   // A team adds the force of a pair at both of its rows, one thread at
   // both ends from the half walk, and the bits agree only if the second
   // row sees the negated vector. Sites without a jitter put pairs on the
@@ -1044,7 +1127,8 @@ TEST_CASE("a directed walk gives a lower partner the negated vector of the half 
   const double a = 3.6;
   const double side = 3 * a;
   const double cubic[9] = {side, 0, 0, 0, side, 0, 0, 0, side};
-  const double sheared[9] = {side, 0, 0, 0.08 * side, side, 0, 0.04 * side, -0.06 * side, side};
+  const double sheared[9] = {
+      side, 0, 0, 0.08 * side, side, 0, 0.04 * side, -0.06 * side, side};
   const auto cube = fcc(3, a);
   const std::size_t n = cube.size() / 3;
   const auto rows = static_cast<std::int64_t>(n);
@@ -1052,15 +1136,17 @@ TEST_CASE("a directed walk gives a lower partner the negated vector of the half 
     std::vector<double> pos(cube.size());
     for (std::size_t i = 0; i < n; ++i) {
       for (std::size_t c = 0; c < 3; ++c) {
-        pos[3 * i + c] = (cube[3 * i] * cell[c] + cube[3 * i + 1] * cell[3 + c] +
-                          cube[3 * i + 2] * cell[6 + c]) /
-                         side;
+        pos[3 * i + c] =
+            (cube[3 * i] * cell[c] + cube[3 * i + 1] * cell[3 + c] +
+             cube[3 * i + 2] * cell[6 + c]) /
+            side;
       }
     }
-    for (const auto image : {rgpot::nlist::Image::Round, rgpot::nlist::Image::General}) {
+    for (const auto image :
+         {rgpot::nlist::Image::Round, rgpot::nlist::Image::General}) {
       for (const double cutoff : {5.0, kInf}) {
-        INFO("sheared " << (cell == sheared) << " image " << static_cast<int>(image)
-                        << " cutoff " << cutoff);
+        INFO("sheared " << (cell == sheared) << " image "
+                        << static_cast<int>(image) << " cutoff " << cutoff);
         rgpot::nlist::Spec spec;
         spec.cutoff = cutoff;
         spec.skin = 1.0;
@@ -1068,26 +1154,1377 @@ TEST_CASE("a directed walk gives a lower partner the negated vector of the half 
         spec.mode = rgpot::nlist::Mode::Stored;
         rgpot::nlist::Neighbours cells;
         cells.update(pos.data(), n, cell, spec);
-        std::map<std::pair<std::int32_t, std::int32_t>, std::array<double, 4>> half;
+        std::map<std::pair<std::int32_t, std::int32_t>, std::array<double, 4>>
+            half;
         cells.forHalf(0, rows,
-                      [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz,
+                      [&](std::int32_t i, std::int32_t j, double dx, double dy,
+                          double dz,
                           double r2) { half[{i, j}] = {dx, dy, dz, r2}; });
         std::size_t lower = 0;
         std::size_t apart = 0;
-        cells.forDirected(0, rows, [&](std::int32_t i, std::int32_t j, double dx, double dy,
-                                       double dz, double r2) {
-          if (j > i) {
-            return;
-          }
-          ++lower;
-          const auto &h = half.at({j, i});
-          if (dx != -h[0] || dy != -h[1] || dz != -h[2] || bits(r2) != bits(h[3])) {
-            ++apart;
-          }
-        });
+        cells.forDirected(0, rows,
+                          [&](std::int32_t i, std::int32_t j, double dx,
+                              double dy, double dz, double r2) {
+                            if (j > i) {
+                              return;
+                            }
+                            ++lower;
+                            const auto &h = half.at({j, i});
+                            if (dx != -h[0] || dy != -h[1] || dz != -h[2] ||
+                                bits(r2) != bits(h[3])) {
+                              ++apart;
+                            }
+                          });
         REQUIRE(lower == half.size());
         REQUIRE(apart == 0);
       }
     }
   }
+}
+
+namespace {
+
+// Magnitude at which the cofactor determinant of the tilted cell below
+// overflows double, including after scaling by 1e-3 and by 1e3.
+constexpr double kDetOverflowScale = 1e105;
+
+void cellPoint(const double cell[9], double f0, double f1, double f2,
+               double out[3]) {
+  out[0] = f0 * cell[0] + f1 * cell[3] + f2 * cell[6];
+  out[1] = f0 * cell[1] + f1 * cell[4] + f2 * cell[7];
+  out[2] = f0 * cell[2] + f1 * cell[5] + f2 * cell[8];
+}
+
+void tiltedCell(double scale, double cell[9]) {
+  const double side = 10.0 * scale;
+  const double tilt = 6.0 * scale;
+  cell[0] = side;
+  cell[1] = 0.0;
+  cell[2] = 0.0;
+  cell[3] = 0.0;
+  cell[4] = side;
+  cell[5] = 0.0;
+  cell[6] = tilt;
+  cell[7] = 0.0;
+  cell[8] = side;
+}
+
+// w*x and y*z round to one double, so the naive minor w*x - y*z is 0
+// while the fused minor is not. The cell is skewed and ill conditioned.
+void cancellingCell(double scale, double cell[9]) {
+  const double w = 3560.0;
+  const double x = 4432.0;
+  const double y = 628.0;
+  const double z = (w * x) / y;
+  cell[0] = scale;
+  cell[1] = 0.0;
+  cell[2] = 0.0;
+  cell[3] = 0.0;
+  cell[4] = w * scale;
+  cell[5] = y * scale;
+  cell[6] = 0.0;
+  cell[7] = z * scale;
+  cell[8] = x * scale;
+}
+
+/// Every lattice image with index coordinates in [-4, 4] along periodic
+/// axes (and 0 along non-periodic axes). The minimum image of each pair
+/// must lie strictly inside that box on periodic axes.
+PairMap bruteAllImages(const std::vector<double> &pos, const double cell[9],
+                       double cutoff,
+                       std::array<bool, 3> periodic = {true, true, true}) {
+  constexpr int kRad = 4;
+  const double cut2 = cutoff * cutoff;
+  const int n = static_cast<int>(pos.size() / 3);
+  const int ra = periodic[0] ? kRad : 0;
+  const int rb = periodic[1] ? kRad : 0;
+  const int rc = periodic[2] ? kRad : 0;
+  PairMap out;
+  for (int i = 0; i < n; ++i) {
+    for (int j = i + 1; j < n; ++j) {
+      double best = 0.0;
+      int ba = 0;
+      int bb = 0;
+      int bc = 0;
+      bool any = false;
+      for (int a = -ra; a <= ra; ++a) {
+        for (int b = -rb; b <= rb; ++b) {
+          for (int c = -rc; c <= rc; ++c) {
+            double shift[3];
+            cellPoint(cell, static_cast<double>(a), static_cast<double>(b),
+                      static_cast<double>(c), shift);
+            const double dx = pos[3 * i] - pos[3 * j] - shift[0];
+            const double dy = pos[3 * i + 1] - pos[3 * j + 1] - shift[1];
+            const double dz = pos[3 * i + 2] - pos[3 * j + 2] - shift[2];
+            const double r2 = dx * dx + dy * dy + dz * dz;
+            if (!any || r2 < best) {
+              best = r2;
+              ba = a;
+              bb = b;
+              bc = c;
+              any = true;
+            }
+          }
+        }
+      }
+      REQUIRE(any);
+      REQUIRE(std::abs(ba) < kRad);
+      REQUIRE(std::abs(bb) < kRad);
+      REQUIRE(std::abs(bc) < kRad);
+      if (best <= cut2) {
+        out[{i, j}] = best;
+      }
+    }
+  }
+  return out;
+}
+
+void requireSameKeys(const PairMap &got, const PairMap &ref) {
+  REQUIRE(got.size() == ref.size());
+  for (const auto &item : ref) {
+    REQUIRE(got.find(item.first) != got.end());
+  }
+}
+
+std::vector<double> facePair(const double cell[9]) {
+  std::vector<double> pos(6);
+  cellPoint(cell, 0.05, 0.5, 0.02, pos.data());
+  cellPoint(cell, 0.05, 0.5, 0.98, pos.data() + 3);
+  return pos;
+}
+
+void requireTiltPairs(double scale) {
+  double cell[9];
+  tiltedCell(scale, cell);
+  const double cutoff = 2.5 * scale;
+  const auto pos = facePair(cell);
+  const auto ref = bruteAllImages(pos, cell, cutoff);
+  REQUIRE(ref.size() == 1);
+  for (const auto mode :
+       {rgpot::nlist::Mode::Stream, rgpot::nlist::Mode::Stored}) {
+    rgpot::nlist::Spec spec;
+    spec.cutoff = cutoff;
+    spec.skin = 0.0;
+    spec.periodic = {true, true, true};
+    spec.image = rgpot::nlist::Image::Round;
+    spec.mode = mode;
+    rgpot::nlist::Neighbours cells;
+    cells.update(pos.data(), pos.size() / 3, cell, spec);
+    requireSameKeys(walkedPairs(cells, pos.size() / 3, cutoff), ref);
+  }
+}
+
+void requireCancellingThrows(double scale) {
+  double cell[9];
+  cancellingCell(scale, cell);
+  const auto pos = facePair(cell);
+  rgpot::nlist::Spec spec;
+  spec.cutoff = std::abs(scale);
+  spec.skin = 0.0;
+  spec.periodic = {true, true, true};
+  spec.image = rgpot::nlist::Image::Round;
+  spec.mode = rgpot::nlist::Mode::Stream;
+  rgpot::nlist::Neighbours cells;
+  REQUIRE_THROWS_WITH(
+      cells.update(pos.data(), pos.size() / 3, cell, spec),
+      Catch::Matchers::ContainsSubstring("too ill conditioned"));
+}
+
+} // namespace
+
+TEST_CASE("a strongly skewed triclinic cell matches brute force images",
+          "[nlist][triclinic][skew]") {
+  setThreads("1");
+  requireTiltPairs(kDetOverflowScale);
+}
+
+TEST_CASE("a strongly skewed cell scaled by 1e-3 matches brute force images",
+          "[nlist][triclinic][skew]") {
+  setThreads("1");
+  requireTiltPairs(kDetOverflowScale * 1e-3);
+}
+
+TEST_CASE("a strongly skewed cell scaled by 1e3 matches brute force images",
+          "[nlist][triclinic][skew]") {
+  setThreads("1");
+  requireTiltPairs(kDetOverflowScale * 1e3);
+}
+
+TEST_CASE("naive cofactor cancellation on a skewed cell is rejected",
+          "[nlist][triclinic][singular]") {
+  setThreads("1");
+  requireCancellingThrows(1.0);
+}
+
+TEST_CASE("naive cofactor cancellation scaled by 1e-3 is rejected",
+          "[nlist][triclinic][singular]") {
+  setThreads("1");
+  requireCancellingThrows(1e-3);
+}
+
+TEST_CASE("naive cofactor cancellation scaled by 1e3 is rejected",
+          "[nlist][triclinic][singular]") {
+  setThreads("1");
+  requireCancellingThrows(1e3);
+}
+
+TEST_CASE("naive cofactor cancellation scaled by 1e-110 is rejected",
+          "[nlist][triclinic][singular]") {
+  setThreads("1");
+  requireCancellingThrows(1e-110);
+}
+
+TEST_CASE("mixed periodicity on a skewed cell keeps the 0.466 pair and matches "
+          "brute force",
+          "[nlist][triclinic][mixed]") {
+  setThreads("1");
+  const double cutoff = 1.0;
+
+  // Exact regression case: a skewed cell with periodicity {true, true, false}
+  // and a pair across the periodic b face at distance 0.04 * hypot(6, 10) =
+  // 0.466476... with cutoff 1.0.
+  {
+    const double cell[9] = {10.0, 0.0, 0.0, 6.0, 10.0, 0.0, 0.0, 0.0, 10.0};
+    const std::array<bool, 3> periodic{true, true, false};
+    std::vector<double> pos(6);
+    cellPoint(cell, 0.05, 0.02, 0.5, pos.data());
+    cellPoint(cell, 0.05, 0.98, 0.5, pos.data() + 3);
+    const auto ref = bruteAllImages(pos, cell, cutoff, periodic);
+    REQUIRE(ref.size() == 1);
+    const double dist = std::sqrt(ref.begin()->second);
+    REQUIRE(std::abs(dist - 0.04 * std::hypot(6.0, 10.0)) < 1e-12);
+    REQUIRE(std::abs(dist - 0.466476151587624) < 1e-12);
+    for (const auto mode :
+         {rgpot::nlist::Mode::Stream, rgpot::nlist::Mode::Stored}) {
+      rgpot::nlist::Spec spec;
+      spec.cutoff = cutoff;
+      spec.skin = 0.0;
+      spec.periodic = periodic;
+      spec.image = rgpot::nlist::Image::Round;
+      spec.mode = mode;
+      rgpot::nlist::Neighbours cells;
+      cells.update(pos.data(), pos.size() / 3, cell, spec);
+      requireSamePairs(walkedPairs(cells, pos.size() / 3, cutoff), ref);
+    }
+  }
+
+  // All six mixed periodicity patterns on a fully skewed triclinic cell, with
+  // pairs wrapping across each periodic face (at distance ~0.466) and pairs
+  // along non-periodic axes that cross fractional 0 and 1 and extend outside
+  // [0, 1).
+  const double cell[9] = {10.0, 0.0, 0.0, 6.0, 10.0, 0.0, 6.0, 6.0, 10.0};
+  const double fracs[][3] = {
+      // Face-wrapping pairs along axis 0, axis 1, and axis 2.
+      {0.02, 0.25, 0.50},
+      {0.98, 0.25, 0.50},
+      {0.25, 0.02, 0.50},
+      {0.25, 0.98, 0.50},
+      {0.25, 0.50, 0.02},
+      {0.25, 0.50, 0.98},
+      // Non-periodic pairs straddling fractional 0 and 1, and outside [0, 1).
+      {-0.02, 0.50, 0.50},
+      {0.02, 0.50, 0.50},
+      {0.50, -0.02, 0.50},
+      {0.50, 0.02, 0.50},
+      {0.50, 0.50, -0.02},
+      {0.50, 0.50, 0.02},
+      {1.35, -0.35, 1.40},
+      {1.38, -0.35, 1.40},
+      {-0.45, 1.45, -0.40},
+      {-0.45, 1.48, -0.40},
+      {0.40, 0.40, -0.55},
+      {0.40, 0.40, -0.52},
+  };
+  const std::size_t n = sizeof(fracs) / sizeof(fracs[0]);
+  std::vector<double> pos(3 * n);
+  for (std::size_t a = 0; a < n; ++a) {
+    cellPoint(cell, fracs[a][0], fracs[a][1], fracs[a][2], pos.data() + 3 * a);
+  }
+  const std::array<bool, 3> patterns[] = {
+      {true, true, false},  {true, false, true},  {false, true, true},
+      {true, false, false}, {false, true, false}, {false, false, true},
+  };
+  for (const auto &periodic : patterns) {
+    INFO("p0=" << periodic[0] << " p1=" << periodic[1]
+               << " p2=" << periodic[2]);
+    const auto ref = bruteAllImages(pos, cell, cutoff, periodic);
+    REQUIRE(!ref.empty());
+    for (const auto mode :
+         {rgpot::nlist::Mode::Stream, rgpot::nlist::Mode::Stored}) {
+      rgpot::nlist::Spec spec;
+      spec.cutoff = cutoff;
+      spec.skin = 0.0;
+      spec.periodic = periodic;
+      spec.image = rgpot::nlist::Image::Round;
+      spec.mode = mode;
+      rgpot::nlist::Neighbours cells;
+      cells.update(pos.data(), n, cell, spec);
+      requireSamePairs(walkedPairs(cells, n, cutoff), ref);
+    }
+  }
+}
+
+TEST_CASE("ulp cutoff boundaries and subnormal off-diagonal offsets match "
+          "brute force",
+          "[nlist][triclinic][boundary]") {
+  setThreads("1");
+  const double cutoff = 1.0;
+  const double d_below = std::nextafter(cutoff, 0.0);
+  const double d_exact = cutoff;
+  const double d_above =
+      std::nextafter(cutoff, std::numeric_limits<double>::infinity());
+  const double sub = std::numeric_limits<double>::denorm_min();
+
+  // 1. Direct and periodic-wrapped pairs at 1-ulp below, at, and 1-ulp above
+  // the cutoff in a skewed triclinic cell.
+  {
+    const double cell[9] = {10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 6.0, 0.0, 10.0};
+    for (const double d : {d_below, d_exact, d_above}) {
+      // Atom 0 at (0, 0.5, 5) and Atom 1 at (d, 10.5, 5) wrap across b =
+      // (0, 10, 0) to exact displacement (-d, 0, 0), and Atom 2 at (0, 5, 5)
+      // with Atom 3 at (d, 5, 5) has direct displacement (-d, 0, 0).
+      const std::vector<double> pos = {
+          0.0, 0.5, 5.0, d, 10.5, 5.0, 0.0, 5.0, 5.0, d, 5.0, 5.0,
+      };
+      for (const auto &periodic : {std::array<bool, 3>{true, true, true},
+                                   std::array<bool, 3>{true, true, false}}) {
+        const auto ref = bruteAllImages(pos, cell, cutoff, periodic);
+        if (d <= cutoff) {
+          REQUIRE(ref.count({0, 1}) == 1);
+          REQUIRE(ref.count({2, 3}) == 1);
+        } else {
+          REQUIRE(ref.count({0, 1}) == 0);
+          REQUIRE(ref.count({2, 3}) == 0);
+        }
+        for (const auto mode :
+             {rgpot::nlist::Mode::Stream, rgpot::nlist::Mode::Stored}) {
+          rgpot::nlist::Spec spec;
+          spec.cutoff = cutoff;
+          spec.skin = 0.0;
+          spec.periodic = periodic;
+          spec.image = rgpot::nlist::Image::Round;
+          spec.mode = mode;
+          rgpot::nlist::Neighbours cells;
+          cells.update(pos.data(), pos.size() / 3, cell, spec);
+          requireSamePairs(walkedPairs(cells, pos.size() / 3, cutoff), ref);
+        }
+      }
+    }
+  }
+
+  // 2. Zero, subnormal, and small nonzero off-diagonal entries, with
+  // subnormal offsets on both the cell and the coordinates.
+  const double scale = 10.0;
+  const double tiny_shear =
+      4096.0 * std::numeric_limits<double>::epsilon() * scale;
+  const double offsets[] = {
+      0.0,
+      sub,
+      -sub,
+      0.5 * std::numeric_limits<double>::min(),
+      std::nextafter(tiny_shear, 0.0),
+      tiny_shear,
+      std::nextafter(tiny_shear, std::numeric_limits<double>::infinity()),
+      -std::nextafter(tiny_shear, std::numeric_limits<double>::infinity()),
+  };
+  for (const double off : offsets) {
+    const double cell[9] = {10.0, 0.0, 0.0, off, 8.0, 0.0, 0.0, -off, 8.0};
+    const std::vector<double> pos = {
+        0.0, sub,     -sub, d_below,    sub, -sub,      0.0,        4.0,
+        4.0, d_exact, 4.0,  4.0,        0.0, 2.0,       6.0,        d_above,
+        2.0, 6.0,     0.1,  0.02 * 8.0, 4.0, 0.1 + off, 0.98 * 8.0, 4.0,
+    };
+    const auto ref = bruteAllImages(pos, cell, cutoff);
+    REQUIRE(ref.count({0, 1}) == 1);
+    REQUIRE(ref.count({2, 3}) == 1);
+    REQUIRE(ref.count({4, 5}) == 0);
+    REQUIRE(ref.count({6, 7}) == 1);
+    for (const auto mode :
+         {rgpot::nlist::Mode::Stream, rgpot::nlist::Mode::Stored}) {
+      rgpot::nlist::Spec spec;
+      spec.cutoff = cutoff;
+      spec.skin = 0.0;
+      spec.periodic = {true, true, true};
+      spec.image = rgpot::nlist::Image::Round;
+      spec.mode = mode;
+      rgpot::nlist::Neighbours cells;
+      cells.update(pos.data(), pos.size() / 3, cell, spec);
+      requireSamePairs(walkedPairs(cells, pos.size() / 3, cutoff), ref);
+    }
+  }
+}
+
+TEST_CASE("non-finite fractional coordinates throw in skewed cell binning",
+          "[nlist][triclinic][nonfinite]") {
+  setThreads("1");
+  double cell[9];
+  tiltedCell(1e-3, cell);
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const double inf = std::numeric_limits<double>::infinity();
+  const double huge = std::numeric_limits<double>::max();
+
+  // NaN coordinate, infinite coordinate, and finite coordinate whose product
+  // with frac_inv (~100 for scale 1e-3) overflows double to infinity.
+  const std::vector<double> bad_cases[] = {
+      {nan, 0.0, 0.0, 0.0, 0.0, 0.0},
+      {0.0, inf, 0.0, 0.0, 0.0, 0.0},
+      {huge, 0.0, 0.0, 0.0, 0.0, 0.0},
+  };
+  for (const auto &pos : bad_cases) {
+    for (const auto &periodic : {std::array<bool, 3>{true, true, true},
+                                 std::array<bool, 3>{true, true, false}}) {
+      for (const double cutoff : {2.5e-3, 1.0}) {
+        rgpot::nlist::Spec spec;
+        spec.cutoff = cutoff;
+        spec.skin = 0.0;
+        spec.periodic = periodic;
+        spec.image = rgpot::nlist::Image::Round;
+        spec.mode = rgpot::nlist::Mode::Stream;
+        rgpot::nlist::Neighbours cells;
+        REQUIRE_THROWS_AS(cells.update(pos.data(), pos.size() / 3, cell, spec),
+                          std::invalid_argument);
+        REQUIRE_THROWS_WITH(
+            cells.update(pos.data(), pos.size() / 3, cell, spec),
+            Catch::Matchers::ContainsSubstring("fractional coordinate"));
+      }
+    }
+  }
+}
+
+TEST_CASE("disproportionate open rows with a small shear match brute force",
+          "[nlist][triclinic][mixed]") {
+  setThreads("1");
+  const double cutoff = 1.0;
+  const double open_a = 5.0e8;
+  const double open_b = 4.0e8;
+  const double shear = 3.0e-4;
+  const double cross = -2.0e-4;
+
+  // 2D periodic slabs with a huge open row (5e8 vs periodic 10.0) and a small
+  // real shear (3e-4). Atom 0 and Atom 1 sit across two Cartesian bin
+  // boundaries (1.9999 in bin 1 vs 3.0001 in bin 3) while their periodic
+  // minimum image across the sheared row has distance ~0.9999 < cutoff.
+  struct SlabCase {
+    double cell[9];
+    std::array<bool, 3> periodic;
+    std::vector<double> pos;
+  };
+  const SlabCase slabs[] = {
+      {
+          {10.0, 0.0, 0.0, shear, 10.0, 0.0, 0.0, 0.0, open_a},
+          {true, true, false},
+          {
+              1.9999,
+              0.0001,
+              0.0,
+              3.0001,
+              9.9999,
+              0.0,
+              0.05,
+              5.0,
+              -1.2,
+              9.85,
+              5.0,
+              -0.8,
+              5.0,
+              0.1,
+              2.5,
+              5.0 + shear,
+              9.8,
+              2.7,
+          },
+      },
+      {
+          {10.0, 0.0, 0.0, 0.0, open_a, 0.0, shear, 0.0, 10.0},
+          {true, false, true},
+          {
+              1.9999,
+              0.0,
+              0.0001,
+              3.0001,
+              0.0,
+              9.9999,
+              0.05,
+              -1.2,
+              5.0,
+              9.85,
+              -0.8,
+              5.0,
+              5.0,
+              2.5,
+              0.1,
+              5.0 + shear,
+              2.7,
+              9.8,
+          },
+      },
+      {
+          {open_a, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, shear, 10.0},
+          {false, true, true},
+          {
+              0.0,
+              1.9999,
+              0.0001,
+              0.0,
+              3.0001,
+              9.9999,
+              -1.2,
+              0.05,
+              5.0,
+              -0.8,
+              9.85,
+              5.0,
+              2.5,
+              5.0,
+              0.1,
+              2.7,
+              5.0 + shear,
+              9.8,
+          },
+      },
+  };
+  for (const auto &tc : slabs) {
+    const auto ref = bruteAllImages(tc.pos, tc.cell, cutoff, tc.periodic);
+    REQUIRE(ref.count({0, 1}) == 1);
+    REQUIRE(ref.size() >= 3);
+    for (const auto mode :
+         {rgpot::nlist::Mode::Stream, rgpot::nlist::Mode::Stored,
+          rgpot::nlist::Mode::Auto}) {
+      rgpot::nlist::Spec spec;
+      spec.cutoff = cutoff;
+      spec.skin = 0.0;
+      spec.periodic = tc.periodic;
+      spec.image = rgpot::nlist::Image::Round;
+      spec.mode = mode;
+      rgpot::nlist::Neighbours cells;
+      cells.update(tc.pos.data(), tc.pos.size() / 3, tc.cell, spec);
+      requireSamePairs(walkedPairs(cells, tc.pos.size() / 3, cutoff), ref);
+    }
+  }
+
+  // 1D periodic wires with two disproportionate open rows (5e8 and 4e8) and a
+  // small real shear along the open axes. Anchor atoms establish a 5.0-wide
+  // span along an open axis so Atom 0 (1.9999) and Atom 1 (3.0001) land two
+  // Cartesian 1.0-wide bins apart while wrapping along the tilted periodic
+  // vector brings them within 0.9999 < cutoff.
+  const SlabCase wires[] = {
+      {
+          {10.0, shear, cross, 0.0, open_a, 0.0, 0.0, 0.0, open_b},
+          {true, false, false},
+          {
+              0.05,
+              1.9999,
+              0.2,
+              10.05,
+              3.0001,
+              0.2 + cross,
+              5.0,
+              0.0,
+              -1.0,
+              5.0,
+              5.0,
+              2.0,
+              0.10,
+              2.5,
+              0.5,
+              9.85,
+              2.5 - shear,
+              0.5 - cross,
+          },
+      },
+      {
+          {open_a, 0.0, 0.0, shear, 10.0, cross, 0.0, 0.0, open_b},
+          {false, true, false},
+          {
+              1.9999,
+              0.05,
+              0.2,
+              3.0001,
+              10.05,
+              0.2 + cross,
+              0.0,
+              5.0,
+              -1.0,
+              5.0,
+              5.0,
+              2.0,
+              2.5,
+              0.10,
+              0.5,
+              2.5 - shear,
+              9.85,
+              0.5 - cross,
+          },
+      },
+      {
+          {open_a, 0.0, 0.0, 0.0, open_b, 0.0, shear, cross, 10.0},
+          {false, false, true},
+          {
+              1.9999,
+              0.2,
+              0.05,
+              3.0001,
+              0.2 + cross,
+              10.05,
+              0.0,
+              -1.0,
+              5.0,
+              5.0,
+              2.0,
+              5.0,
+              2.5,
+              0.5,
+              0.10,
+              2.5 - shear,
+              0.5 - cross,
+              9.85,
+          },
+      },
+  };
+  for (const auto &tc : wires) {
+    const auto ref = bruteAllImages(tc.pos, tc.cell, cutoff, tc.periodic);
+    REQUIRE(ref.count({0, 1}) == 1);
+    REQUIRE(ref.count({4, 5}) == 1);
+    for (const auto mode :
+         {rgpot::nlist::Mode::Stream, rgpot::nlist::Mode::Stored,
+          rgpot::nlist::Mode::Auto}) {
+      rgpot::nlist::Spec spec;
+      spec.cutoff = cutoff;
+      spec.skin = 0.0;
+      spec.periodic = tc.periodic;
+      spec.image = rgpot::nlist::Image::Round;
+      spec.mode = mode;
+      rgpot::nlist::Neighbours cells;
+      cells.update(tc.pos.data(), tc.pos.size() / 3, tc.cell, spec);
+      requireSamePairs(walkedPairs(cells, tc.pos.size() / 3, cutoff), ref);
+    }
+  }
+}
+
+TEST_CASE("fractional bin edges keep nextafter cutoff pairs across exact bin "
+          "boundaries",
+          "[nlist][triclinic][boundary]") {
+  setThreads("1");
+  const double cutoff = 1.0;
+  const double d_below = std::nextafter(cutoff, 0.0);
+  // Column 0 of cell^-1 is (0.1, -0.075, 0) with exact Euclidean norm 0.125 =
+  // 1/8. Without an ulp cushion on frac_edge, axisCount(1.0, 0.125) selects 8
+  // fractional bins and rounding in r * frac_inv places pairs at distance
+  // nextafter(cutoff, 0) two bins apart.
+  const double cell[9] = {10.0, 0.0, 0.0, 7.5, 10.0, 0.0, 0.0, 0.0, 10.0};
+
+  const std::vector<double> direct_pair = {
+      1.2499999999999996,   0.0, 5.0, 2.0499999999999994,
+      -0.60000000000000009, 5.0,
+  };
+  const std::vector<double> wrapped_pair = {
+      1.2499999999999996,   0.0,   0.25, 2.0499999999999994,
+      -0.60000000000000009, 10.25,
+  };
+  for (const auto &periodic : {std::array<bool, 3>{true, true, true},
+                               std::array<bool, 3>{true, true, false}}) {
+    const auto ref = bruteAllImages(direct_pair, cell, cutoff, periodic);
+    REQUIRE(ref.size() == 1);
+    REQUIRE(std::sqrt(ref.at({0, 1})) == d_below);
+    for (const auto mode :
+         {rgpot::nlist::Mode::Stream, rgpot::nlist::Mode::Stored,
+          rgpot::nlist::Mode::Auto}) {
+      rgpot::nlist::Spec spec;
+      spec.cutoff = cutoff;
+      spec.skin = 0.0;
+      spec.periodic = periodic;
+      spec.image = rgpot::nlist::Image::Round;
+      spec.mode = mode;
+      rgpot::nlist::Neighbours cells;
+      cells.update(direct_pair.data(), direct_pair.size() / 3, cell, spec);
+      requireSamePairs(walkedPairs(cells, direct_pair.size() / 3, cutoff), ref);
+    }
+  }
+  {
+    const std::array<bool, 3> periodic{true, true, true};
+    const auto ref = bruteAllImages(wrapped_pair, cell, cutoff, periodic);
+    REQUIRE(ref.size() == 1);
+    REQUIRE(std::sqrt(ref.at({0, 1})) <= d_below);
+    for (const auto mode :
+         {rgpot::nlist::Mode::Stream, rgpot::nlist::Mode::Stored,
+          rgpot::nlist::Mode::Auto}) {
+      rgpot::nlist::Spec spec;
+      spec.cutoff = cutoff;
+      spec.skin = 0.0;
+      spec.periodic = periodic;
+      spec.image = rgpot::nlist::Image::Round;
+      spec.mode = mode;
+      rgpot::nlist::Neighbours cells;
+      cells.update(wrapped_pair.data(), wrapped_pair.size() / 3, cell, spec);
+      requireSamePairs(walkedPairs(cells, wrapped_pair.size() / 3, cutoff),
+                       ref);
+    }
+  }
+
+  // Open axis 0 with anchor atoms spanning fractional [0, 1] so the open axis
+  // hits the same 1 / 0.125 = 8 bin boundary without the ulp cushion.
+  const std::vector<double> open_axis_pos = {
+      1.2499999999999996,
+      0.0,
+      5.0,
+      2.0499999999999994,
+      -0.60000000000000009,
+      5.0,
+      0.0,
+      0.0,
+      0.0,
+      10.0,
+      0.0,
+      8.5,
+  };
+  const std::array<bool, 3> open_a{false, true, true};
+  const auto open_ref = bruteAllImages(open_axis_pos, cell, cutoff, open_a);
+  REQUIRE(open_ref.count({0, 1}) == 1);
+  REQUIRE(std::sqrt(open_ref.at({0, 1})) == d_below);
+  for (const auto mode :
+       {rgpot::nlist::Mode::Stream, rgpot::nlist::Mode::Stored,
+        rgpot::nlist::Mode::Auto}) {
+    rgpot::nlist::Spec spec;
+    spec.cutoff = cutoff;
+    spec.skin = 0.0;
+    spec.periodic = open_a;
+    spec.image = rgpot::nlist::Image::Round;
+    spec.mode = mode;
+    rgpot::nlist::Neighbours cells;
+    cells.update(open_axis_pos.data(), open_axis_pos.size() / 3, cell, spec);
+    requireSamePairs(walkedPairs(cells, open_axis_pos.size() / 3, cutoff),
+                     open_ref);
+  }
+}
+
+namespace {
+
+void requireMatchesBuilder(const rgpot::nlist::Neighbours &got,
+                           const rgpot::nlist::Neighbours &fresh,
+                           std::size_t n) {
+  REQUIRE(got.mode() == fresh.mode());
+  REQUIRE(got.streaming() == fresh.streaming());
+  REQUIRE(got.allPairs() == fresh.allPairs());
+  REQUIRE(got.slots() == fresh.slots());
+  REQUIRE(got.offsets() == fresh.offsets());
+  REQUIRE(got.neighbours() == fresh.neighbours());
+  REQUIRE(halfVisits(got, n) == halfVisits(fresh, n));
+  REQUIRE(directedVisits(got, n) == directedVisits(fresh, n));
+  for (std::size_t a = 0; a < n; ++a) {
+    Visits got_atom;
+    Visits fresh_atom;
+    got.forAtom(static_cast<std::int32_t>(a), into(got_atom));
+    fresh.forAtom(static_cast<std::int32_t>(a), into(fresh_atom));
+    REQUIRE(got_atom == fresh_atom);
+  }
+  std::vector<Visits> got_team(3);
+  std::vector<Visits> fresh_team(3);
+  got.forRowTeam(3, [&](int s, std::int32_t i, std::int32_t j, double dx,
+                        double dy, double dz, double r2) {
+    into(got_team[static_cast<std::size_t>(s)])(i, j, dx, dy, dz, r2);
+  });
+  fresh.forRowTeam(3, [&](int s, std::int32_t i, std::int32_t j, double dx,
+                          double dy, double dz, double r2) {
+    into(fresh_team[static_cast<std::size_t>(s)])(i, j, dx, dy, dz, r2);
+  });
+  REQUIRE(got_team == fresh_team);
+}
+
+} // namespace
+
+TEST_CASE("failed Neighbours::update leaves prior state intact and matches a "
+          "fresh builder",
+          "[nlist][triclinic][transactional]") {
+  setThreads("1");
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const double cell_a[9] = {10.0, 0.0, 0.0, 6.0, 10.0, 0.0, 0.0, 0.0, 10.0};
+  const double cell_b[9] = {10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 6.0, 0.0, 10.0};
+  const double singular_cell[9] = {0.0, 0.0, 0.0, 6.0, 10.0,
+                                   0.0, 0.0, 0.0, 10.0};
+  const double nan_cell[9] = {nan, 0.0, 0.0, 6.0, 10.0, 0.0, 0.0, 0.0, 10.0};
+  double ill_cell[9];
+  cancellingCell(1.0, ill_cell);
+
+  const std::vector<double> pos_a = {
+      0.5, 0.2, 5.0, 6.5, 9.9, 5.0, 2.0, 2.0, 0.1, 2.3, 2.1, 0.2,
+  };
+  const std::vector<double> pos_c = {
+      0.2, 5.0, 0.2, 6.2, 5.0, 9.9, 4.0, 4.0, 4.0, 4.4, 4.2, 4.1, 7.0, 7.0, 7.0,
+  };
+  const std::size_t n_a = pos_a.size() / 3;
+  const std::size_t n_c = pos_c.size() / 3;
+  std::vector<double> pos_nan = pos_a;
+  pos_nan[0] = nan;
+  std::vector<double> pos_more(24, 1.0);
+
+  for (const auto mode :
+       {rgpot::nlist::Mode::Stored, rgpot::nlist::Mode::Stream,
+        rgpot::nlist::Mode::Auto}) {
+    for (const double skin : {0.0, 0.4}) {
+      rgpot::nlist::Spec spec;
+      spec.cutoff = 1.5;
+      spec.skin = skin;
+      spec.periodic = {true, true, true};
+      spec.image = rgpot::nlist::Image::Round;
+      spec.mode = mode;
+
+      rgpot::nlist::Neighbours cells;
+      cells.update(pos_a.data(), n_a, cell_a, spec);
+      rgpot::nlist::Neighbours fresh_a;
+      fresh_a.update(pos_a.data(), n_a, cell_a, spec);
+      requireMatchesBuilder(cells, fresh_a, n_a);
+
+      // 1. Valid -> throwing bad cells (ill-conditioned in buildCells with
+      // larger n, singular in MinimumImage, NaN cell) -> prior state intact,
+      // then valid build on cell_b matches a fresh builder.
+      REQUIRE_THROWS_AS(
+          cells.update(pos_more.data(), pos_more.size() / 3, ill_cell, spec),
+          std::invalid_argument);
+      requireMatchesBuilder(cells, fresh_a, n_a);
+
+      REQUIRE_THROWS_AS(cells.update(pos_a.data(), n_a, singular_cell, spec),
+                        std::invalid_argument);
+      requireMatchesBuilder(cells, fresh_a, n_a);
+
+      REQUIRE_THROWS_AS(cells.update(pos_a.data(), n_a, nan_cell, spec),
+                        std::invalid_argument);
+      requireMatchesBuilder(cells, fresh_a, n_a);
+
+      // 2. Valid -> NaN position on a new cell_b (throws inside fractional
+      // binning) -> valid pos_a on cell_b. A non-transactional update that
+      // wrote box_ = cell_b and cleared off_/nbr_ while keeping built_ = true
+      // and ref_ = pos_a would falsely treat this valid call as reusable.
+      REQUIRE_THROWS_AS(cells.update(pos_nan.data(), n_a, cell_b, spec),
+                        std::invalid_argument);
+      requireMatchesBuilder(cells, fresh_a, n_a);
+
+      cells.update(pos_a.data(), n_a, cell_b, spec);
+      REQUIRE_FALSE(cells.reused());
+      rgpot::nlist::Neighbours fresh_b;
+      fresh_b.update(pos_a.data(), n_a, cell_b, spec);
+      requireMatchesBuilder(cells, fresh_b, n_a);
+
+      // 3. Valid -> NaN position on the same cell_b and spec (throws in
+      // reusable skin fold or fractional binning) -> valid build on pos_c.
+      REQUIRE_THROWS_AS(cells.update(pos_nan.data(), n_a, cell_b, spec),
+                        std::invalid_argument);
+      requireMatchesBuilder(cells, fresh_b, n_a);
+
+      cells.update(pos_c.data(), n_c, cell_a, spec);
+      REQUIRE_FALSE(cells.reused());
+      rgpot::nlist::Neighbours fresh_c;
+      fresh_c.update(pos_c.data(), n_c, cell_a, spec);
+      requireMatchesBuilder(cells, fresh_c, n_c);
+    }
+  }
+}
+
+TEST_CASE("tiny skewed cell with subnormal determinant matches brute force "
+          "pair count",
+          "[nlist][triclinic][subnormal]") {
+  setThreads("1");
+  // side^3 ~ 1.00051e-321 is nonzero subnormal, where an unscaled cofactor
+  // inverse loses precision and leaves the pair unfolded at 5.00185e-108 >
+  // cutoff instead of folding it to 4.99985e-108 <= cutoff.
+  const double side = 1.00017e-107;
+  const double tilt = 1.0e-111;
+  const double cell[9] = {side, 0.0, 0.0, tilt, side, 0.0, 0.0, 0.0, side};
+  const double raw_det = (cell[0] * cell[4]) * cell[8];
+  REQUIRE(std::fpclassify(raw_det) == FP_SUBNORMAL);
+
+  const double cutoff = 5.0e-108;
+  const std::vector<double> pos = {
+      0.0, 0.0, 0.0, 5.00185e-108, 0.0, 0.0,
+  };
+  for (const auto &periodic : {std::array<bool, 3>{true, true, true},
+                               std::array<bool, 3>{true, true, false}}) {
+    const auto ref = bruteAllImages(pos, cell, cutoff, periodic);
+    REQUIRE(ref.size() == 1);
+    REQUIRE(std::abs(std::sqrt(ref.at({0, 1})) - 4.99985e-108) < 1.0e-120);
+    for (const auto mode :
+         {rgpot::nlist::Mode::Stream, rgpot::nlist::Mode::Stored,
+          rgpot::nlist::Mode::Auto}) {
+      rgpot::nlist::Spec spec;
+      spec.cutoff = cutoff;
+      spec.skin = 0.0;
+      spec.periodic = periodic;
+      spec.image = rgpot::nlist::Image::Round;
+      spec.mode = mode;
+      rgpot::nlist::Neighbours cells;
+      cells.update(pos.data(), pos.size() / 3, cell, spec);
+      const auto got = walkedPairs(cells, pos.size() / 3, cutoff);
+      REQUIRE(got.size() == ref.size());
+      REQUIRE(got.count({0, 1}) == 1);
+      REQUIRE(std::abs(std::sqrt(got.at({0, 1})) - 4.99985e-108) < 1.0e-120);
+    }
+  }
+
+  const double sc = 2.814e-108;
+  const double deep_cell[9] = {sc, 0.0, 0.0, 0.1 * sc, sc, 0.0, 0.0, 0.0, sc};
+  REQUIRE(std::fpclassify((deep_cell[0] * deep_cell[4]) * deep_cell[8]) ==
+          FP_SUBNORMAL);
+  const double deep_cut = 0.50 * sc;
+  const std::vector<double> deep_pos = {0.0, 0.0, 0.0, 0.51 * sc, 0.0, 0.0};
+  const auto deep_ref = bruteAllImages(deep_pos, deep_cell, deep_cut);
+  REQUIRE(deep_ref.size() == 1);
+  for (const auto mode :
+       {rgpot::nlist::Mode::Stream, rgpot::nlist::Mode::Stored,
+        rgpot::nlist::Mode::Auto}) {
+    rgpot::nlist::Spec spec;
+    spec.cutoff = deep_cut;
+    spec.skin = 0.0;
+    spec.periodic = {true, true, true};
+    spec.image = rgpot::nlist::Image::Round;
+    spec.mode = mode;
+    rgpot::nlist::Neighbours cells;
+    cells.update(deep_pos.data(), deep_pos.size() / 3, deep_cell, spec);
+    REQUIRE(walkedPairs(cells, deep_pos.size() / 3, deep_cut).size() ==
+            deep_ref.size());
+  }
+}
+
+namespace {
+
+PairMap walkedCellTeamPairs(const rgpot::nlist::Neighbours &cells,
+                            std::size_t n, double cutoff, int nthreads) {
+  (void)n;
+  const double cut2 = cutoff * cutoff;
+  std::vector<PairMap> per_slice(static_cast<std::size_t>(nthreads));
+  cells.forCellTeam(true, nthreads,
+                    [&](int slice, std::int32_t i, std::int32_t j, double,
+                        double, double, double r2) {
+                      if (r2 <= cut2) {
+                        const int lo = std::min(i, j);
+                        const int hi = std::max(i, j);
+                        auto &dst = per_slice[static_cast<std::size_t>(slice)];
+                        REQUIRE(dst.find({lo, hi}) == dst.end());
+                        dst[{lo, hi}] = r2;
+                      }
+                    });
+  PairMap out;
+  for (const auto &part : per_slice) {
+    for (const auto &item : part) {
+      REQUIRE(out.find(item.first) == out.end());
+      out.emplace(item.first, item.second);
+    }
+  }
+  return out;
+}
+
+PairMap walkedRowTeamPairs(const rgpot::nlist::Neighbours &cells, double cutoff,
+                           int nthreads) {
+  const double cut2 = cutoff * cutoff;
+  std::vector<PairMap> per_slice(static_cast<std::size_t>(nthreads));
+  cells.forRowTeam(nthreads, [&](int slice, std::int32_t i, std::int32_t j,
+                                 double, double, double, double r2) {
+    if (r2 <= cut2) {
+      const int lo = std::min(i, j);
+      const int hi = std::max(i, j);
+      per_slice[static_cast<std::size_t>(slice)][{lo, hi}] = r2;
+    }
+  });
+  PairMap out;
+  for (const auto &part : per_slice) {
+    for (const auto &item : part) {
+      out.emplace(item.first, item.second);
+    }
+  }
+  return out;
+}
+
+std::vector<double> translateCoords(const std::vector<double> &base,
+                                    const std::array<double, 3> &shift) {
+  std::vector<double> out = base;
+  for (std::size_t a = 0; a < out.size() / 3; ++a) {
+    out[3 * a] += shift[0];
+    out[3 * a + 1] += shift[1];
+    out[3 * a + 2] += shift[2];
+  }
+  return out;
+}
+
+std::array<double, 3> latticePlusDelta(const double cell[9], double m0,
+                                       double m1, double m2,
+                                       const std::array<double, 3> &delta) {
+  return {
+      m0 * cell[0] + m1 * cell[3] + m2 * cell[6] + delta[0],
+      m0 * cell[1] + m1 * cell[4] + m2 * cell[7] + delta[1],
+      m0 * cell[2] + m1 * cell[5] + m2 * cell[8] + delta[2],
+  };
+}
+
+} // namespace
+
+TEST_CASE("skewed-cell large translations match brute force on serial and "
+          "OpenMP paths",
+          "[nlist][triclinic][translation]") {
+  // 1. Multi-atom skewed cell translated by 0, 1e6, 1e9, and near-lattice
+  // multiples across periodic, mixed, and open boundaries.
+  {
+    const double cell[9] = {10.0, 0.0, 0.0, 7.3, 10.1, 0.0, 2.7, -3.1, 9.9};
+    const rgpot::nlist::MinimumImage mi(cell, {true, true, true});
+    const auto &inv = mi.inverse();
+    const double dn0 = std::hypot(inv[0], std::hypot(inv[3], inv[6]));
+    const double cutoff = (1.0 / 9.0 - 1e-13) / dn0;
+
+    // 4x4x2 skewed grid with paired partners within cutoff (and periodic face
+    // pairs) so every boundary condition has pairs across bin boundaries.
+    std::vector<double> base;
+    base.reserve(68 * 3);
+    int idx = 0;
+    for (int ix = 0; ix < 4; ++ix) {
+      for (int iy = 0; iy < 4; ++iy) {
+        for (int iz = 0; iz < 2; ++iz) {
+          const double f0 = (ix + 0.12) / 4.0 + 0.02 * std::sin(1.3 * idx);
+          const double f1 = (iy + 0.15) / 4.0 + 0.02 * std::cos(1.7 * idx);
+          const double f2 = (iz + 0.19) / 2.0 + 0.02 * std::sin(2.1 * idx);
+          double p[3];
+          cellPoint(cell, f0, f1, f2, p);
+          base.push_back(p[0]);
+          base.push_back(p[1]);
+          base.push_back(p[2]);
+          const double sep = cutoff * ((idx % 4 == 0) ? 0.995 : 0.75);
+          base.push_back(p[0] + (inv[0] / dn0) * sep);
+          base.push_back(p[1] + (inv[3] / dn0) * sep);
+          base.push_back(p[2] + (inv[6] / dn0) * sep);
+          ++idx;
+        }
+      }
+    }
+    {
+      double p0[3];
+      double p1[3];
+      cellPoint(cell, 0.01, 0.5, 0.5, p0);
+      cellPoint(cell, 0.99, 0.5, 0.5, p1);
+      base.insert(base.end(), {p0[0], p0[1], p0[2], p1[0], p1[1], p1[2]});
+    }
+
+    const std::vector<std::array<double, 3>> offsets = {
+        {0.0, 0.0, 0.0},
+        {1.0e6, -0.7e6, 0.5e6},
+        {1.0e9, 1.13e9, -0.71e9},
+        latticePlusDelta(cell, 100000.0, -80000.0, 60000.0,
+                         {0.17, -0.23, 0.31}),
+        latticePlusDelta(cell, 1.0e8, 5.0e7, -3.0e7, {0.11, 0.19, -0.07}),
+    };
+
+    for (const auto &periodic : {std::array<bool, 3>{true, true, true},
+                                 std::array<bool, 3>{true, true, false},
+                                 std::array<bool, 3>{false, false, false}}) {
+      for (const auto &offset : offsets) {
+        const auto pos = translateCoords(base, offset);
+        const std::size_t n = pos.size() / 3;
+        const auto ref = bruteAllImages(pos, cell, cutoff, periodic);
+        REQUIRE_FALSE(ref.empty());
+        for (const auto mode :
+             {rgpot::nlist::Mode::Stream, rgpot::nlist::Mode::Stored,
+              rgpot::nlist::Mode::Auto}) {
+          rgpot::nlist::Spec spec;
+          spec.cutoff = cutoff;
+          spec.skin = 0.0;
+          spec.periodic = periodic;
+          spec.image = rgpot::nlist::Image::Round;
+          spec.mode = mode;
+
+          setThreads("1");
+          rgpot::nlist::Neighbours serial_nb;
+          serial_nb.update(pos.data(), n, cell, spec);
+          requireSamePairs(walkedPairs(serial_nb, n, cutoff), ref);
+
+          setThreads("4");
+          rgpot::nlist::Neighbours omp_nb;
+          omp_nb.update(pos.data(), n, cell, spec);
+          requireSamePairs(walkedPairs(omp_nb, n, cutoff), ref);
+          requireSamePairs(walkedCellTeamPairs(omp_nb, n, cutoff, 4), ref);
+          requireSamePairs(walkedRowTeamPairs(omp_nb, cutoff, 4), ref);
+        }
+      }
+    }
+  }
+
+  // 2. Boundary-straddling pair constructed directly at large coordinates so
+  // the pair separation stays within cutoff across 1e6, 1e9, 1e12, and a
+  // near-lattice-vector shift.
+  {
+    const double cell[9] = {10.0, 0.0, 0.0, 7.3, 10.1, 0.0, 2.7, -3.1, 9.9};
+    const rgpot::nlist::MinimumImage mi(cell, {true, true, true});
+    const auto &inv = mi.inverse();
+    const double dn0 = std::hypot(inv[0], std::hypot(inv[3], inv[6]));
+    const double cutoff = (1.0 / 9.0 - 1e-13) / dn0;
+    const double step = cutoff * (1.0 - 1e-10);
+    const std::array<double, 3> lattice_near =
+        latticePlusDelta(cell, 1.0e8, -7.0e7, 4.0e7, {0.13, -0.19, 0.29});
+    const std::vector<std::array<double, 3>> origins = {
+        {1.0e6, -0.5e6, 0.3e6},
+        {1.0e9, 1.13e9, -0.71e9},
+        {0.83e12, -0.41e12, 0.67e12},
+        lattice_near,
+    };
+    for (const auto &orig : origins) {
+      for (int k = 0; k < 9; ++k) {
+        const double x0 = orig[0] + (static_cast<double>(k) / 9.0) * cell[0];
+        const double y0 = orig[1];
+        const double z0 = orig[2];
+        const std::vector<double> pos = {
+            x0,
+            y0,
+            z0,
+            x0 + (inv[0] / dn0) * step,
+            y0 + (inv[3] / dn0) * step,
+            z0 + (inv[6] / dn0) * step,
+        };
+        const auto ref = bruteAllImages(pos, cell, cutoff);
+        if (ref.empty()) {
+          continue;
+        }
+        for (const auto mode :
+             {rgpot::nlist::Mode::Stream, rgpot::nlist::Mode::Stored}) {
+          rgpot::nlist::Spec spec;
+          spec.cutoff = cutoff;
+          spec.skin = 0.0;
+          spec.periodic = {true, true, true};
+          spec.image = rgpot::nlist::Image::Round;
+          spec.mode = mode;
+
+          setThreads("1");
+          rgpot::nlist::Neighbours serial_nb;
+          serial_nb.update(pos.data(), 2, cell, spec);
+          requireSamePairs(walkedPairs(serial_nb, 2, cutoff), ref);
+
+          setThreads("4");
+          rgpot::nlist::Neighbours omp_nb;
+          omp_nb.update(pos.data(), 2, cell, spec);
+          requireSamePairs(walkedCellTeamPairs(omp_nb, 2, cutoff, 4), ref);
+          requireSamePairs(walkedRowTeamPairs(omp_nb, cutoff, 4), ref);
+        }
+      }
+    }
+  }
+
+  // 3. Large system (n >= kTeamMinAtoms) exercising buildStored's OpenMP
+  // gather path as well as forCellTeam and forRowTeam under 1e6, 1e9, and
+  // near-lattice-vector translations.
+  {
+    const double L = 42.0;
+    const double cell[9] = {L,   0.0,      0.0,       0.18 * L, L,
+                            0.0, 0.09 * L, -0.14 * L, L};
+    const double cutoff = 3.0;
+    const std::size_t n = static_cast<std::size_t>(rgpot::nlist::kTeamMinAtoms);
+    std::vector<double> base;
+    base.reserve(n * 3);
+    const int gx = 16;
+    const int gy = 16;
+    const int gz = 8;
+    const double basis[4][3] = {
+        {0.0, 0.0, 0.0}, {0.0, 0.5, 0.5}, {0.5, 0.0, 0.5}, {0.5, 0.5, 0.0}};
+    std::size_t idx = 0;
+    for (int ix = 0; ix < gx && idx < n; ++ix) {
+      for (int iy = 0; iy < gy && idx < n; ++iy) {
+        for (int iz = 0; iz < gz && idx < n; ++iz) {
+          for (const auto &b : basis) {
+            if (idx >= n) {
+              break;
+            }
+            const double f0 =
+                (ix + b[0]) / gx + 0.002 * std::sin(1.1 * idx + 0.3);
+            const double f1 =
+                (iy + b[1]) / gy + 0.002 * std::cos(1.7 * idx + 0.5);
+            const double f2 =
+                (iz + b[2]) / gz + 0.002 * std::sin(2.3 * idx + 0.9);
+            double p[3];
+            cellPoint(cell, f0, f1, f2, p);
+            base.push_back(p[0]);
+            base.push_back(p[1]);
+            base.push_back(p[2]);
+            ++idx;
+          }
+        }
+      }
+    }
+    REQUIRE(base.size() == n * 3);
+
+    using PairVec = std::vector<std::pair<std::int32_t, std::int32_t>>;
+    auto collect_sorted = [&](const rgpot::nlist::Neighbours &nb,
+                              bool use_team) {
+      PairVec out;
+      if (!use_team) {
+        nb.forHalf(0, static_cast<std::int64_t>(n),
+                   [&](std::int32_t i, std::int32_t j, double, double, double,
+                       double r2) {
+                     if (r2 <= cutoff * cutoff) {
+                       out.emplace_back(std::min(i, j), std::max(i, j));
+                     }
+                   });
+      } else {
+        std::vector<PairVec> slices(4);
+        nb.forCellTeam(true, 4,
+                       [&](int s, std::int32_t i, std::int32_t j, double,
+                           double, double, double r2) {
+                         if (r2 <= cutoff * cutoff) {
+                           slices[static_cast<std::size_t>(s)].emplace_back(
+                               std::min(i, j), std::max(i, j));
+                         }
+                       });
+        for (const auto &part : slices) {
+          out.insert(out.end(), part.begin(), part.end());
+        }
+      }
+      std::sort(out.begin(), out.end());
+      return out;
+    };
+
+    const std::vector<std::array<double, 3>> big_offsets = {
+        {0.0, 0.0, 0.0},
+        {1.0e6, -0.7e6, 0.4e6},
+        {1.0e9, 1.2e9, -0.8e9},
+        latticePlusDelta(cell, 2.0e7, -1.5e7, 1.0e7, {0.15, -0.22, 0.31}),
+    };
+    for (const auto &off : big_offsets) {
+      const auto pos = translateCoords(base, off);
+      const rgpot::nlist::MinimumImage mi(cell, {true, true, true});
+      PairVec brute;
+      for (std::size_t i = 0; i < n; ++i) {
+        for (std::size_t j = i + 1; j < n; ++j) {
+          double dx = pos[3 * i] - pos[3 * j];
+          double dy = pos[3 * i + 1] - pos[3 * j + 1];
+          double dz = pos[3 * i + 2] - pos[3 * j + 2];
+          mi.fold(dx, dy, dz);
+          if (dx * dx + dy * dy + dz * dz <= cutoff * cutoff) {
+            brute.emplace_back(static_cast<std::int32_t>(i),
+                               static_cast<std::int32_t>(j));
+          }
+        }
+      }
+      REQUIRE_FALSE(brute.empty());
+
+      rgpot::nlist::Spec spec;
+      spec.cutoff = cutoff;
+      spec.skin = 0.2;
+      spec.periodic = {true, true, true};
+      spec.image = rgpot::nlist::Image::Round;
+      spec.mode = rgpot::nlist::Mode::Stored;
+
+      setThreads("1");
+      rgpot::nlist::Neighbours serial_nb;
+      serial_nb.update(pos.data(), n, cell, spec);
+      REQUIRE_FALSE(serial_nb.streaming());
+      REQUIRE(collect_sorted(serial_nb, false) == brute);
+
+      setThreads("4");
+      rgpot::nlist::Neighbours omp_nb;
+      omp_nb.update(pos.data(), n, cell, spec);
+      REQUIRE_FALSE(omp_nb.streaming());
+      REQUIRE(omp_nb.slots() == serial_nb.slots());
+      REQUIRE(collect_sorted(omp_nb, false) == brute);
+      REQUIRE(collect_sorted(omp_nb, true) == brute);
+    }
+  }
+  setThreads("");
+}
+
+TEST_CASE("property sweep over random skewed cells and random translations "
+          "matches brute force",
+          "[nlist][triclinic][property]") {
+  std::mt19937_64 rng(0x5eede41234ULL);
+  std::uniform_real_distribution<double> u01(0.0, 1.0);
+  std::uniform_real_distribution<double> ulen(5.0, 14.0);
+  std::uniform_real_distribution<double> ushear(-0.35, 0.35);
+
+  const std::array<bool, 3> pbc_patterns[] = {
+      {true, true, true},
+      {true, true, false},
+      {true, false, true},
+      {false, false, false},
+  };
+  const double scales[] = {0.0, 1.0e3, 1.0e6, 1.0e9};
+
+  for (int trial = 0; trial < 36; ++trial) {
+    const double l0 = ulen(rng);
+    const double l1 = ulen(rng);
+    const double l2 = ulen(rng);
+    const double cell[9] = {
+        l0,
+        0.0,
+        0.0,
+        ushear(rng) * l0,
+        l1,
+        0.0,
+        ushear(rng) * l0,
+        ushear(rng) * l1,
+        l2,
+    };
+    const auto &periodic = pbc_patterns[trial % 4];
+    const rgpot::nlist::MinimumImage mi(cell, {true, true, true});
+    const auto &inv = mi.inverse();
+    const double dn0 = std::hypot(inv[0], std::hypot(inv[3], inv[6]));
+    double cutoff = 1.0 + 2.0 * u01(rng);
+    if (trial % 2 == 1) {
+      // Tune cutoff just under 1 / k * dual_norm[0] to stress bin boundaries.
+      const int kbins = 3 + (trial % 7);
+      cutoff = (1.0 / static_cast<double>(kbins) - 1e-12) / dn0;
+    }
+
+    const std::size_t n = 24;
+    std::vector<double> base;
+    base.reserve(n * 3);
+    for (std::size_t a = 0; a < n - 2; ++a) {
+      double p[3];
+      cellPoint(cell, u01(rng) * 1.4 - 0.2, u01(rng) * 1.4 - 0.2,
+                u01(rng) * 1.4 - 0.2, p);
+      base.push_back(p[0]);
+      base.push_back(p[1]);
+      base.push_back(p[2]);
+    }
+    // Add one pair aligned along dual[0] near cutoff to probe boundary binning.
+    double anchor[3];
+    cellPoint(cell, 0.25, 0.5, 0.5, anchor);
+    const double step = cutoff * (1.0 - 1e-9);
+    base.push_back(anchor[0]);
+    base.push_back(anchor[1]);
+    base.push_back(anchor[2]);
+    base.push_back(anchor[0] + (inv[0] / dn0) * step);
+    base.push_back(anchor[1] + (inv[3] / dn0) * step);
+    base.push_back(anchor[2] + (inv[6] / dn0) * step);
+
+    const double sc = scales[trial % 4];
+    std::array<double, 3> shift{};
+    if (trial % 3 == 0 && sc > 0.0) {
+      const double m0 = std::floor(sc / l0) * (u01(rng) - 0.5) * 2.0;
+      const double m1 = std::floor(sc / l1) * (u01(rng) - 0.5) * 2.0;
+      const double m2 = std::floor(sc / l2) * (u01(rng) - 0.5) * 2.0;
+      shift = latticePlusDelta(cell, m0, m1, m2,
+                               {0.5 * (u01(rng) - 0.5), 0.5 * (u01(rng) - 0.5),
+                                0.5 * (u01(rng) - 0.5)});
+    } else {
+      shift = {sc * (2.0 * u01(rng) - 1.0), sc * (2.0 * u01(rng) - 1.0),
+               sc * (2.0 * u01(rng) - 1.0)};
+    }
+    const auto pos = translateCoords(base, shift);
+    const auto ref = bruteAllImages(pos, cell, cutoff, periodic);
+
+    INFO("trial=" << trial << " scale=" << sc << " cutoff=" << cutoff);
+    for (const auto mode :
+         {rgpot::nlist::Mode::Stream, rgpot::nlist::Mode::Stored,
+          rgpot::nlist::Mode::Auto}) {
+      rgpot::nlist::Spec spec;
+      spec.cutoff = cutoff;
+      spec.skin = 0.0;
+      spec.periodic = periodic;
+      spec.image = rgpot::nlist::Image::Round;
+      spec.mode = mode;
+
+      setThreads("1");
+      rgpot::nlist::Neighbours serial_nb;
+      serial_nb.update(pos.data(), n, cell, spec);
+      requireSamePairs(walkedPairs(serial_nb, n, cutoff), ref);
+
+      setThreads("4");
+      rgpot::nlist::Neighbours omp_nb;
+      omp_nb.update(pos.data(), n, cell, spec);
+      requireSamePairs(walkedPairs(omp_nb, n, cutoff), ref);
+      requireSamePairs(walkedCellTeamPairs(omp_nb, n, cutoff, 4), ref);
+      requireSamePairs(walkedRowTeamPairs(omp_nb, cutoff, 4), ref);
+    }
+  }
+  setThreads("");
 }

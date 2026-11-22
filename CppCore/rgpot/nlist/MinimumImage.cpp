@@ -259,6 +259,39 @@ bool well_conditioned(const double cell[9], const double inv[9]) {
   return cond <= std::sqrt(eps);
 }
 
+enum class ScaledInverse { Ok, Singular, IllConditioned };
+
+// Cofactor inverse of A / ||A||_inf, written back in the original
+// scaling. The determinant and the condition estimate therefore see a
+// matrix of unit scale, not the absolute entries.
+ScaledInverse scaled_inverse(const double a[9], double inv[9]) {
+  const double scale = inf_norm(a);
+  if (!(scale > 0.0) || !std::isfinite(scale)) {
+    return ScaledInverse::Singular;
+  }
+  double unit[9];
+  for (int k = 0; k < 9; ++k) {
+    unit[k] = a[k] / scale;
+    if (!std::isfinite(unit[k])) {
+      return ScaledInverse::Singular;
+    }
+  }
+  double iunit[9];
+  if (!invert(unit, iunit)) {
+    return ScaledInverse::Singular;
+  }
+  for (int k = 0; k < 9; ++k) {
+    inv[k] = iunit[k] / scale;
+    if (!std::isfinite(inv[k])) {
+      return ScaledInverse::Singular;
+    }
+  }
+  if (!well_conditioned(unit, iunit)) {
+    return ScaledInverse::IllConditioned;
+  }
+  return ScaledInverse::Ok;
+}
+
 std::int64_t checked_index(double value) {
   const double limit = std::ldexp(1.0, 63);
   if (!std::isfinite(value) || value <= -limit || value >= limit) {
@@ -761,16 +794,19 @@ MinimumImage::MinimumImage(const double *cell,
     raw[k] = cell_[static_cast<std::size_t>(k)];
   }
   double inv[9];
-  if (!invert(raw, inv)) {
+  const ScaledInverse raw_scaled = scaled_inverse(raw, inv);
+  const bool raw_ok = raw_scaled != ScaledInverse::Singular;
+  if (!raw_ok && !invert(raw, inv)) {
     throw std::invalid_argument("periodic cell must be nonsingular");
   }
-  double basis[3][3] = {
-      {raw[0], raw[1], raw[2]},
-      {raw[3], raw[4], raw[5]},
-      {raw[6], raw[7], raw[8]},
-  };
-  bool narrow = !well_conditioned(raw, inv);
+  bool narrow = raw_ok ? raw_scaled == ScaledInverse::IllConditioned
+                       : !well_conditioned(raw, inv);
   if (narrow) {
+    double basis[3][3] = {
+        {raw[0], raw[1], raw[2]},
+        {raw[3], raw[4], raw[5]},
+        {raw[6], raw[7], raw[8]},
+    };
     minkowski_reduce(basis);
     double reduced[9];
     for (int row = 0; row < 3; ++row) {
@@ -779,14 +815,17 @@ MinimumImage::MinimumImage(const double *cell,
       }
     }
     double rinv[9];
-    if (!invert(reduced, rinv)) {
+    const ScaledInverse red_scaled = scaled_inverse(reduced, rinv);
+    const bool red_ok = red_scaled != ScaledInverse::Singular;
+    if (!red_ok && !invert(reduced, rinv)) {
       throw std::invalid_argument("periodic cell must be nonsingular");
     }
     for (int k = 0; k < 9; ++k) {
       cell_[static_cast<std::size_t>(k)] = reduced[k];
       inverse_[static_cast<std::size_t>(k)] = rinv[k];
     }
-    narrow = !well_conditioned(reduced, rinv);
+    narrow = red_ok ? red_scaled == ScaledInverse::IllConditioned
+                    : !well_conditioned(reduced, rinv);
     if (!narrow) {
       dual_of(rinv, dual_norm_.data());
     }
@@ -797,6 +836,27 @@ MinimumImage::MinimumImage(const double *cell,
     dual_of(inv, dual_norm_.data());
   }
   narrow_ = narrow;
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((visibility("hidden")))
+#endif
+void invertCell(const double *cell, double inv[9], double dual_norm[3]) {
+  double raw[9];
+  for (int k = 0; k < 9; ++k) {
+    if (!std::isfinite(cell[k])) {
+      throw std::invalid_argument("periodic cell must be finite");
+    }
+    raw[k] = cell[k];
+  }
+  const ScaledInverse scaled = scaled_inverse(raw, inv);
+  if (scaled == ScaledInverse::IllConditioned) {
+    throw std::invalid_argument("periodic cell is too ill conditioned to bin");
+  }
+  if (scaled != ScaledInverse::Ok) {
+    throw std::invalid_argument("periodic cell must be nonsingular");
+  }
+  dual_of(inv, dual_norm);
 }
 
 namespace {
@@ -837,6 +897,9 @@ void MinimumImage::fold(double &dx, double &dy, double &dz) const {
 
 std::uint64_t MinimumImage::searches() noexcept { return searches_run; }
 
+#if defined(__ELF__) && (defined(__GNUC__) || defined(__clang__))
+__attribute__((hot))
+#endif
 bool MinimumImage::foldWithin(double &dx, double &dy, double &dz,
                               double within2) const {
   if (!std::isfinite(dx) || !std::isfinite(dy) || !std::isfinite(dz)) {

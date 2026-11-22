@@ -31,7 +31,6 @@
 #   linux         the host is Linux
 #   posix         the host is not Windows
 #   python        a python3 interpreter
-#   capnp         the capnp and capnpc libraries
 #   capnp_tool    the capnp compiler
 #   rustc         a Rust compiler
 #   tsan          -fsanitize=thread compiles and no sanitizer is configured
@@ -223,8 +222,8 @@ nlist_metatomic | tests | nlist nlist_metatomic nlist_metatomic.cc |
 nlist_batch | tests | nlist nlist_batch nlist_batch.cc |
 nlist_c | tests | nlist nlist_c nlist_c.c |
 nlist_verlet | tests | nlist nlist_verlet nlist_verlet.c |
-nlist_stream | tests capnp posix | custom |
-nlist_capnp_roundtrip | tests capnp posix capnp_tool | custom |
+nlist_stream | tests rpc posix | custom |
+nlist_capnp_roundtrip | tests rpc posix capnp_tool | custom |
 nlist_rust | tests rustc | custom |
 
 # Plugins.

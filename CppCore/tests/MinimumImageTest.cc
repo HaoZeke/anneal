@@ -301,6 +301,151 @@ TEST_CASE("foldWithin drops only displacements with no image inside the radius",
   REQUIRE(kept > 0);
 }
 
+TEST_CASE("Uniformly scaled tiny cells keep their inverse and minimum images",
+          "[PairList][triclinic]") {
+  const std::array<bool, 3> all_periodic{true, true, true};
+  const double unit_id[9] = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
+  const double unit_tri[9] = {4.0, 0.2, 0.1, 0.3, 5.0, -0.2, 0.1, -0.3, 6.0};
+  const rgpot::nlist::MinimumImage ref_tri(unit_tri, all_periodic);
+
+  for (const double scale : {1.0e-8, 1.0e-110}) {
+    CAPTURE(scale);
+    double tiny_id[9];
+    double tiny_tri[9];
+    for (int k = 0; k < 9; ++k) {
+      tiny_id[k] = scale * unit_id[k];
+      tiny_tri[k] = scale * unit_tri[k];
+    }
+
+    const rgpot::nlist::MinimumImage img_id(tiny_id, all_periodic);
+    const auto &inv_id = img_id.inverse();
+    const double inv_scale = 1.0 / scale;
+    for (int r = 0; r < 3; ++r) {
+      for (int c = 0; c < 3; ++c) {
+        const double want = (r == c) ? inv_scale : 0.0;
+        REQUIRE_THAT(inv_id[3 * r + c], WithinAbs(want, 1.0e-12 * inv_scale));
+      }
+    }
+
+    // Exact minimum images on the scaled cubic cell across all periodic masks.
+    const double raw_disp[3] = {2.3 * scale, -1.7 * scale, 0.6 * scale};
+    const double folded_axis[3] = {0.3 * scale, 0.3 * scale, -0.4 * scale};
+    for (unsigned mask = 0; mask < 8; ++mask) {
+      const std::array<bool, 3> periodic{(mask & 1u) != 0, (mask & 2u) != 0,
+                                         (mask & 4u) != 0};
+      const rgpot::nlist::MinimumImage masked(tiny_id, periodic);
+      double dx = raw_disp[0];
+      double dy = raw_disp[1];
+      double dz = raw_disp[2];
+      masked.fold(dx, dy, dz);
+      REQUIRE_THAT(dx, WithinAbs(periodic[0] ? folded_axis[0] : raw_disp[0],
+                                 1.0e-12 * scale));
+      REQUIRE_THAT(dy, WithinAbs(periodic[1] ? folded_axis[1] : raw_disp[1],
+                                 1.0e-12 * scale));
+      REQUIRE_THAT(dz, WithinAbs(periodic[2] ? folded_axis[2] : raw_disp[2],
+                                 1.0e-12 * scale));
+    }
+
+    // Scaled triclinic inverse and minimum images agree with scaling the
+    // reference fold.
+    const rgpot::nlist::MinimumImage img_tri(tiny_tri, all_periodic);
+    const auto &inv_tri = img_tri.inverse();
+    const auto &ref_inv = ref_tri.inverse();
+    for (int k = 0; k < 9; ++k) {
+      REQUIRE_THAT(inv_tri[k],
+                   WithinAbs(ref_inv[k] / scale, 1.0e-12 * inv_scale));
+    }
+    std::mt19937_64 rng(23);
+    std::uniform_real_distribution<double> u(-12.0, 12.0);
+    for (int n = 0; n < 24; ++n) {
+      double rx = u(rng);
+      double ry = u(rng);
+      double rz = u(rng);
+      double sx = scale * rx;
+      double sy = scale * ry;
+      double sz = scale * rz;
+      ref_tri.fold(rx, ry, rz);
+      img_tri.fold(sx, sy, sz);
+      const double r_ref = scale * std::hypot(rx, ry, rz);
+      const double r_got = std::hypot(sx, sy, sz);
+      REQUIRE_THAT(r_got, WithinAbs(r_ref, 1.0e-9 * scale));
+    }
+  }
+
+  // A uniformly scaled tiny ill-conditioned cell whose raw determinant
+  // underflows double to zero must still receive its scaled inverse and fold
+  // instead of being rejected as singular.
+  const double ill_scale = 1.0e-110;
+  const double tiny_ill[9] = {
+      ill_scale, ill_scale, 0.0, 0.0,      5.0e-10 * ill_scale,
+      0.0,       0.0,       0.0, ill_scale};
+  const rgpot::nlist::MinimumImage ill_img(tiny_ill, all_periodic);
+  double max_inv = 0.0;
+  for (const double v : ill_img.inverse()) {
+    REQUIRE(std::isfinite(v));
+    max_inv = std::max(max_inv, std::abs(v));
+  }
+  REQUIRE(max_inv > 1.0e118);
+
+  const double eps_x = 1.0e-122;
+  const double eps_y = -2.0e-122;
+  const double eps_z = 1.5e-122;
+  double dx = tiny_ill[0] + tiny_ill[3] - tiny_ill[6] + eps_x;
+  double dy = tiny_ill[1] + tiny_ill[4] - tiny_ill[7] + eps_y;
+  double dz = tiny_ill[2] + tiny_ill[5] - tiny_ill[8] + eps_z;
+  ill_img.fold(dx, dy, dz);
+  REQUIRE_THAT(dx, WithinAbs(eps_x, 1.0e-125));
+  REQUIRE_THAT(dy, WithinAbs(eps_y, 1.0e-125));
+  REQUIRE_THAT(dz, WithinAbs(eps_z, 1.0e-125));
+}
+
+TEST_CASE("Subnormal-determinant tiny cells fold with scaled_inverse accuracy",
+          "[PairList][triclinic]") {
+  const std::array<bool, 3> all_periodic{true, true, true};
+  // side^3 ~ 1.00051e-321 is a nonzero subnormal double whose quantized
+  // significand rounds up to 203 * 2^-1074, biasing the unscaled cofactor
+  // inverse and dual norm downward by ~0.24% so raw rounding leaves
+  // 5.00185e-108 unfolded instead of wrapping to 4.99985e-108.
+  const double side = 1.00017e-107;
+  const double tilt = 1.0e-111;
+  const double cell[9] = {side, 0.0, 0.0, tilt, side, 0.0, 0.0, 0.0, side};
+  const double raw_det = (cell[0] * cell[4]) * cell[8];
+  REQUIRE(std::fpclassify(raw_det) == FP_SUBNORMAL);
+
+  const rgpot::nlist::MinimumImage img(cell, all_periodic);
+  const auto before = rgpot::nlist::MinimumImage::searches();
+  double ix = 1.2 * side;
+  double iy = 0.0;
+  double iz = 0.0;
+  img.fold(ix, iy, iz);
+  REQUIRE(rgpot::nlist::MinimumImage::searches() == before);
+  REQUIRE_THAT(ix, WithinAbs(0.2 * side, 1.0e-120));
+
+  double dx = -5.00185e-108;
+  double dy = 0.0;
+  double dz = 0.0;
+  img.fold(dx, dy, dz);
+  REQUIRE_THAT(std::hypot(dx, dy, dz), WithinAbs(4.99985e-108, 1.0e-120));
+
+  double wx = -5.00185e-108;
+  double wy = 0.0;
+  double wz = 0.0;
+  const double cutoff = 5.0e-108;
+  REQUIRE(img.foldWithin(wx, wy, wz, cutoff * cutoff));
+  REQUIRE(wx * wx + wy * wy + wz * wz <= cutoff * cutoff);
+
+  const double sc = 2.814e-108;
+  const double cell_deep[9] = {sc, 0.0, 0.0, 0.1 * sc, sc, 0.0, 0.0, 0.0, sc};
+  REQUIRE(std::fpclassify((cell_deep[0] * cell_deep[4]) * cell_deep[8]) ==
+          FP_SUBNORMAL);
+  const rgpot::nlist::MinimumImage img_deep(cell_deep, all_periodic);
+  double cx = -0.51 * sc;
+  double cy = 0.0;
+  double cz = 0.0;
+  img_deep.fold(cx, cy, cz);
+  REQUIRE_THAT(std::hypot(cx, cy, cz), WithinAbs(0.49 * sc, 1.0e-121));
+}
+
 TEST_CASE("Benchmark minimum image fold", "[.][benchmark]") {
   const double triclinic[9] = {4.0, 0.2, 0.1, 0.3, 5.0, -0.2, 0.1, -0.3, 6.0};
   const std::array<bool, 3> periodic{true, true, true};
@@ -330,5 +475,4 @@ TEST_CASE("Benchmark minimum image fold", "[.][benchmark]") {
     }
     return sink;
   };
-
 }
