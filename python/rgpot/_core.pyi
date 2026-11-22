@@ -464,8 +464,10 @@ class EAMTablePot:
         """
 
 class MullerBrownPot:
-    def __init__(self, amplitude: list[float] = [-200, -100, -170, 15], a: list[float] = [-1, -1, -6.5, 0.7], b: list[float] = [0, 0, 11, 0.6], c: list[float] = [-10, -10, -6.5, 0.7], x0: list[float] = [1, 0, -0.5, -1], y0: list[float] = [0, 0.5, 1.5, 1]) -> None:
-        """The two-dimensional Muller-Brown surface on the first atom's x and y coordinates."""
+    def __init__(self, amplitude: Sequence[float] = [-200.0, -100.0, -170.0, 15.0], a: Sequence[float] = [-1.0, -1.0, -6.5, 0.7], b: Sequence[float] = [0.0, 0.0, 11.0, 0.6], c: Sequence[float] = [-10.0, -10.0, -6.5, 0.7], x0: Sequence[float] = [1.0, 0.0, -0.5, -1.0], y0: Sequence[float] = [0.0, 0.5, 1.5, 1.0]) -> None:
+        """
+        The Muller-Brown two-dimensional model surface. The first atom's x and y coordinates are active; every other coordinate has zero force.
+        """
 
     def config(self) -> dict: ...
 
@@ -485,7 +487,17 @@ class MullerBrownPot:
 
     def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
         """
-        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. The kernel runs with the interpreter released.
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product and 'ad' its dual-number product; 'exact' is analytic, else ad, and never differences; 'auto' is analytic where the kernel has one, otherwise forward. hvp_resolved() also returns the scheme that ran. step 0 is 1e-3 Angstrom. The kernel runs with the interpreter released.
+        """
+
+    def hvp_resolved(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> tuple:
+        """
+        hvp() as (product, scheme): scheme is the one that ran, so 'auto' reports 'analytic' or 'forward' and 'exact' reports 'analytic' or 'ad'.
+        """
+
+    def hessian(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], scheme: str, step: float = 0.0) -> tuple:
+        """
+        (hessian, scheme): the dense Hessian, shape (3N, 3N), coordinate 3 i + k for axis k of atom i, and the scheme that ran. scheme has no default: 'analytic' and 'ad' use the kernel's closed-form and dual-number Hessians, 'exact' is analytic, else ad, and each is refused when the kernel lacks it; 'central' differences the forces with 6N calls. step 0 is 1e-3 Angstrom. The kernel runs with the interpreter released.
         """
 
     def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
@@ -506,6 +518,16 @@ class MullerBrownPot:
 
     def has_analytic_hvp(self) -> bool:
         """Whether hvp(scheme='auto') uses the kernel's own product."""
+
+    def derivative_caps(self) -> dict:
+        """
+        Which analytic, dual-number and finite-difference schemes hvp() and hessian() have here, with the force calls of the differenced ones.
+        """
+
+    def derivative_counts(self) -> dict:
+        """
+        Products and Hessians by the scheme that ran, and the force calls of central Hessians, so far. reset_hvp_counts() zeros them.
+        """
 
 class SWPot:
     def __init__(self) -> None: ...
