@@ -81,8 +81,10 @@ jobs:
       import-names: rgpot._core
       test-path: tests/python
       # tests/python/test_cpu_scaling.py runs scripts/cpu_scaling.py from the
-      # repository root. The wheel test tree is only the copied sources.
-      extra-test-sources: scripts/cpu_scaling.py
+      # repository root, and tests/python/test_eam_table_binding.py reads
+      # CppCore/tests/data/eam_table. The wheel test tree is only the copied
+      # sources.
+      extra-test-sources: scripts/cpu_scaling.py CppCore/tests/data/eam_table
       extras: ase
       test-requires: pytest-timeout hypothesis
       os: '["ubuntu-latest","ubuntu-24.04-arm","macos-15"]'
