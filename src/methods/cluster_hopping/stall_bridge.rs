@@ -14,8 +14,10 @@ type ProposeStd = fn(&ClusterMove, ArrayView1<f64>, f64, f64, &mut StdRng) -> Ar
 
 /// Walk a stored cage after a rigid chain has stalled.
 ///
-/// The main walker and its generator stay untouched. Every finite quench is
-/// stamped on the ledger at the call that found it.
+/// The main walker and its generator stay untouched. A quench is recorded
+/// only when it is finite, sane, stationary and clear of a centre clash.
+/// The walk stops once that record reaches the ledger target, before
+/// another evaluation.
 #[inline(never)]
 #[cold]
 #[allow(clippy::too_many_arguments)]
@@ -23,6 +25,7 @@ pub(super) fn walk_armed_rigid_archive(
     cfg: &Config,
     ledger: &mut Ledger,
     relax: &mut (dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + Send),
+    grad: &mut Option<&mut super::GradFn<'_>>,
     cage_archive: &mut crate::methods::stall_archive::StallArchive,
     kernels: &[ClusterMove],
     propose: ProposeStd,
@@ -65,7 +68,11 @@ pub(super) fn walk_armed_rigid_archive(
     let mut bandit = FlooredThompson::new(arms);
     let mut branch_best = side_energy;
     let mut side_hops = 0usize;
-    while ledger.spent() < archive_end && ledger.remaining() > 0 && !ledger.stopped() {
+    while ledger.spent() < archive_end
+        && ledger.remaining() > 0
+        && !ledger.stopped()
+        && !ledger.target_reached()
+    {
         if side_hops > 0 && side_hops.is_multiple_of(crate::methods::rigid_quench::STAGNATION_HOPS)
         {
             let next_key = super::rigid_cage_key(side_state.view(), cfg.n_points, cage_quantum);
@@ -81,10 +88,12 @@ pub(super) fn walk_armed_rigid_archive(
         let mut arm = bandit.select(&mut side_rng);
         let mut trial = if reverses(arm) {
             let mut out = side_state.clone();
-            if let Some(geometry) = geometry {
-                super::cycles::reverse_chain(geometry, cfg.n_points, &mut out, &mut side_rng);
-            }
-            out
+            // A false return leaves `out` as it was. That hop is an
+            // identity, so a kernel that moves the centres takes it.
+            let turned = geometry.is_some_and(|geometry| {
+                super::cycles::reverse_chain(geometry, cfg.n_points, &mut out, &mut side_rng)
+            });
+            if turned { out } else { side_state.clone() }
         } else {
             propose(
                 &kernels[arm],
@@ -115,7 +124,7 @@ pub(super) fn walk_armed_rigid_archive(
         if !quenched.is_finite() || relaxed.len() != side_state.len() {
             break;
         }
-        super::record_if_centres_clear(ledger, cfg, quenched, relaxed.view());
+        super::record_auxiliary_rigid(cfg, ledger, grad, quenched, relaxed.view());
         let improved = quenched < branch_best - new_lowest;
         if improved {
             branch_best = quenched;

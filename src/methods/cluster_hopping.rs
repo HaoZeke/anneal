@@ -3467,14 +3467,32 @@ fn rigid_centres_clear(state: ArrayView1<f64>, n: usize, min_d: f64) -> bool {
     true
 }
 
-/// Records a rigid quench when its centres clear half a contact.
+/// Records an auxiliary rigid quench when it can be the incumbent.
 ///
-/// A clash can undercut every separated cage. The record used to run
-/// before that test, and the clash became the reported incumbent.
-fn record_if_centres_clear(ledger: &mut Ledger, cfg: &Config, energy: f64, state: ArrayView1<f64>) {
-    if rigid_centres_clear(state, cfg.n_points, 0.5 * cfg.min_separation) {
+/// The energy and the coordinates have to be finite and sane, the centres
+/// have to clear half a contact, and a supplied gradient has to meet the
+/// rigid record tolerance. A caller that did not pass a gradient is not
+/// given a stationarity test. Returns whether the ledger's target is now
+/// reached, so the walk can stop before another evaluation.
+fn record_auxiliary_rigid(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    grad: &mut Option<&mut GradFn<'_>>,
+    energy: f64,
+    state: ArrayView1<f64>,
+) -> bool {
+    let geometry_ok = quench_is_sane(cfg, energy, state)
+        && rigid_centres_clear(state, cfg.n_points, 0.5 * cfg.min_separation);
+    let stationary = !geometry_ok
+        || match grad.as_deref_mut() {
+            None => true,
+            Some(evaluate) => evaluate(ledger, state)
+                .is_some_and(|values| answer_gradient_ok(cfg, values.view(), state.len())),
+        };
+    if geometry_ok && stationary {
         ledger.record(energy, state);
     }
+    ledger.target_reached()
 }
 
 fn rigid_step_scale(scale: f64, accepted: usize, trials: usize) -> f64 {
@@ -3495,7 +3513,9 @@ fn rigid_step_scale(scale: f64, accepted: usize, trials: usize) -> f64 {
 #[cfg(test)]
 mod rigid_step_tests {
     use super::cycles::tests::{bond_sets, tadpole};
-    use super::{Config, Ledger, MoveLibrary, Outcome, RIGID_CAGE_WINDOWS, rigid_step_scale, run};
+    use super::{
+        Config, HopStop, Ledger, MoveLibrary, Outcome, RIGID_CAGE_WINDOWS, rigid_step_scale, run,
+    };
     use ndarray::{Array1, ArrayView1};
     use rand::SeedableRng;
     use rand::rngs::StdRng;
@@ -3839,10 +3859,12 @@ mod rigid_step_tests {
             (-50.0, overlap.clone())
         };
         let mut archive = crate::methods::stall_archive::StallArchive::new(4, 8);
+        let mut grad = None;
         super::stall_bridge::walk_armed_rigid_archive(
             &cfg,
             &mut ledger,
             &mut relax,
+            &mut grad,
             &mut archive,
             &kernels,
             super::ClusterMove::propose_scaled,
@@ -3865,6 +3887,139 @@ mod rigid_step_tests {
             n,
             0.5 * cfg.min_separation
         ));
+    }
+
+    #[test]
+    fn an_auxiliary_record_refuses_non_finite_non_stationary_and_overlapping() {
+        let n = 4;
+        let cfg = Config::recommended_tip4p(n);
+        let clear = spread(n);
+        let mut ledger = Ledger::new(8);
+        ledger.record(-1.0, clear.view());
+        let mut grad = None;
+        assert!(!super::record_auxiliary_rigid(
+            &cfg,
+            &mut ledger,
+            &mut grad,
+            f64::NAN,
+            clear.view(),
+        ));
+        let mut broken = clear.clone();
+        broken[0] = f64::NAN;
+        assert!(!super::record_auxiliary_rigid(
+            &cfg,
+            &mut ledger,
+            &mut grad,
+            -100.0,
+            broken.view(),
+        ));
+        let overlap = Array1::zeros(6 * n);
+        assert!(!super::record_auxiliary_rigid(
+            &cfg,
+            &mut ledger,
+            &mut grad,
+            -100.0,
+            overlap.view(),
+        ));
+        let mut steep = |_ledger: &mut Ledger, state: ArrayView1<f64>| {
+            Some(Array1::from_elem(state.len(), 1.0))
+        };
+        let mut grad = Some(&mut steep as &mut super::GradFn);
+        assert!(!super::record_auxiliary_rigid(
+            &cfg,
+            &mut ledger,
+            &mut grad,
+            -100.0,
+            clear.view(),
+        ));
+        assert_eq!(ledger.best, -1.0);
+        assert_eq!(ledger.encounters(), &[(0, -1.0)]);
+        let mut flat =
+            |_ledger: &mut Ledger, state: ArrayView1<f64>| Some(Array1::zeros(state.len()));
+        let mut grad = Some(&mut flat as &mut super::GradFn);
+        ledger.stop_below(-50.0);
+        assert!(super::record_auxiliary_rigid(
+            &cfg,
+            &mut ledger,
+            &mut grad,
+            -80.0,
+            clear.view(),
+        ));
+        assert_eq!(ledger.best, -80.0);
+    }
+
+    #[test]
+    fn an_auxiliary_hit_ends_the_search_before_another_evaluation() {
+        let n = 4;
+        let mut cfg = Config::recommended_tip4p(n);
+        cfg.restart_patience = 1;
+        cfg.relax_steps = 1;
+        let start = spread(n);
+        let patience = cfg.restart_patience * RIGID_CAGE_WINDOWS;
+        let side_from = patience + 2;
+        let mut calls = 0usize;
+        let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+            let _ = ledger.charge();
+            calls += 1;
+            let call = ledger.spent();
+            if call >= side_from {
+                (-30.0, start.clone())
+            } else {
+                (-1.0, x.to_owned())
+            }
+        };
+        let mut ledger = Ledger::new(patience + 16);
+        ledger.stop_below(-10.0);
+        let mut rng = StdRng::seed_from_u64(11);
+        let outcome = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("search");
+        assert_eq!(calls, side_from);
+        assert_eq!(ledger.spent(), side_from);
+        assert_eq!(outcome.best, -30.0);
+        assert_eq!(outcome.stop, Some(HopStop::Target));
+        assert!(ledger.target_reached());
+    }
+
+    #[test]
+    fn an_archive_hit_does_not_evaluate_again() {
+        let n = 4;
+        let mut cfg = Config::recommended_tip4p(n);
+        cfg.relax_steps = 1;
+        cfg.rigid_body_geometry = Some(crate::potentials::Tip4pCluster::new(n).rigid_geometry());
+        let clear = spread(n);
+        let kernels = vec![super::ClusterMove::RigidOrientAll {
+            n_molecules: n,
+            step: 0.2,
+        }];
+        let mut ledger = Ledger::new(8);
+        ledger.record(-1.0, clear.view());
+        ledger.stop_below(-10.0);
+        let mut calls = 0usize;
+        let mut relax = |ledger: &mut Ledger, _x: ArrayView1<f64>, _steps: usize| {
+            let _ = ledger.charge();
+            calls += 1;
+            (-40.0, clear.clone())
+        };
+        let mut archive = crate::methods::stall_archive::StallArchive::new(4, 8);
+        let mut grad = None;
+        super::stall_bridge::walk_armed_rigid_archive(
+            &cfg,
+            &mut ledger,
+            &mut relax,
+            &mut grad,
+            &mut archive,
+            &kernels,
+            super::ClusterMove::propose_scaled,
+            -1.0,
+            clear.view(),
+            0,
+            cfg.min_separation / 50.0,
+            1.0,
+            5.0e-2,
+            100,
+        );
+        assert_eq!(calls, 1);
+        assert_eq!(ledger.best, -40.0);
+        assert!(ledger.target_reached());
     }
 }
 
@@ -5769,7 +5924,7 @@ where
             macro_rules! hop_side {
                 ($rng:ident, $energy:ident, $state:ident) => {{
                     let mut going = false;
-                    if ledger.remaining() > 0 && !ledger.stopped() {
+                    if ledger.remaining() > 0 && !ledger.stopped() && !ledger.target_reached() {
                         let arm = $rng.random_range(0..kernels.len());
                         let mut trial = kernels[arm].propose_scaled(
                             $state.view(),
@@ -5781,13 +5936,19 @@ where
                         contain_trial(cfg, &mut trial, cfg.n_points);
                         let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
                         if quenched.is_finite() && relaxed.len() == $state.len() {
-                            record_if_centres_clear(ledger, cfg, quenched, relaxed.view());
+                            let reached = record_auxiliary_rigid(
+                                cfg,
+                                ledger,
+                                &mut grad,
+                                quenched,
+                                relaxed.view(),
+                            );
                             let rise = (quenched - $energy) / cfg.temperature.max(1e-12);
                             if rise <= 0.0 || $rng.random::<f64>() < (-rise).exp() {
                                 $energy = quenched;
                                 $state = relaxed;
                             }
-                            going = true;
+                            going = !reached;
                         }
                     }
                     going
@@ -5796,7 +5957,7 @@ where
             // The outer half turns about the core by three orientation
             // steps. A single-molecule move into a hollow quenches back
             // into the same cage; this turn does not.
-            if !ledger.stopped() && ledger.remaining() > 0 {
+            if !ledger.stopped() && ledger.remaining() > 0 && !ledger.target_reached() {
                 let angle = match cfg.move_library {
                     MoveLibrary::RigidBody { rotate_step, .. } => RIGID_SHELL_STEPS * rotate_step,
                     _ => 0.0,
@@ -5804,10 +5965,19 @@ where
                 let mut turned: Option<(f64, Array1<f64>)> = None;
                 if angle > 0.0 {
                     for axis in 0..3 {
+                        if ledger.target_reached() || ledger.remaining() == 0 || ledger.stopped() {
+                            break;
+                        }
                         let trial = rigid_shell_turn(side_state.view(), cfg.n_points, axis, angle);
                         let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
                         if quenched.is_finite() && relaxed.len() == side_state.len() {
-                            record_if_centres_clear(ledger, cfg, quenched, relaxed.view());
+                            let reached = record_auxiliary_rigid(
+                                cfg,
+                                ledger,
+                                &mut grad,
+                                quenched,
+                                relaxed.view(),
+                            );
                             if rigid_centres_clear(
                                 relaxed.view(),
                                 cfg.n_points,
@@ -5816,24 +5986,29 @@ where
                             {
                                 turned = Some((quenched, relaxed));
                             }
+                            if reached {
+                                break;
+                            }
                         }
                     }
                 }
-                if let Some((energy, state)) = turned
+                if !ledger.target_reached()
+                    && let Some((energy, state)) = turned
                     && (energy - side_energy).abs() > 1.0e-3
                 {
                     side_energy = energy;
                     side_state = state;
                     let twist_end = ledger.spent().saturating_add(cage_patience);
-                    while ledger.spent() < twist_end && hop_side!(side_rng, side_energy, side_state)
-                    {
-                    }
+                    while ledger.spent() < twist_end
+                        && !ledger.target_reached()
+                        && hop_side!(side_rng, side_energy, side_state)
+                    {}
                 }
             }
             // The shell of the walker is one leave. When it comes up short,
             // walk a stored cage and turn that shell. The stored-cage turn
             // is what reaches the contact the walker's own shell does not.
-            if !ledger.stopped() && ledger.remaining() > 0 {
+            if !ledger.stopped() && ledger.remaining() > 0 && !ledger.target_reached() {
                 cage_archive.offer_cage(e, x.view(), key);
                 if let Some(best) = ledger.best_state.as_ref() {
                     cage_archive.offer_cage(
@@ -5856,7 +6031,10 @@ where
                 );
                 let stored_end = ledger.spent().saturating_add(cage_patience);
                 let mut stored_hops = 0usize;
-                while ledger.spent() < stored_end && hop_side!(side_rng, side_energy, side_state) {
+                while ledger.spent() < stored_end
+                    && !ledger.target_reached()
+                    && hop_side!(side_rng, side_energy, side_state)
+                {
                     if stored_hops > 0
                         && stored_hops.is_multiple_of(crate::methods::rigid_quench::STAGNATION_HOPS)
                     {
@@ -5871,7 +6049,7 @@ where
                     }
                     stored_hops += 1;
                 }
-                if !ledger.stopped() && ledger.remaining() > 0 {
+                if !ledger.stopped() && ledger.remaining() > 0 && !ledger.target_reached() {
                     let angle = match cfg.move_library {
                         MoveLibrary::RigidBody { rotate_step, .. } => {
                             RIGID_SHELL_STEPS * rotate_step
@@ -5881,11 +6059,23 @@ where
                     let mut turned: Option<(f64, Array1<f64>)> = None;
                     if angle > 0.0 {
                         for axis in 0..3 {
+                            if ledger.target_reached()
+                                || ledger.remaining() == 0
+                                || ledger.stopped()
+                            {
+                                break;
+                            }
                             let trial =
                                 rigid_shell_turn(side_state.view(), cfg.n_points, axis, angle);
                             let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
                             if quenched.is_finite() && relaxed.len() == side_state.len() {
-                                record_if_centres_clear(ledger, cfg, quenched, relaxed.view());
+                                let reached = record_auxiliary_rigid(
+                                    cfg,
+                                    ledger,
+                                    &mut grad,
+                                    quenched,
+                                    relaxed.view(),
+                                );
                                 if rigid_centres_clear(
                                     relaxed.view(),
                                     cfg.n_points,
@@ -5894,21 +6084,29 @@ where
                                 {
                                     turned = Some((quenched, relaxed));
                                 }
+                                if reached {
+                                    break;
+                                }
                             }
                         }
                     }
-                    if let Some((energy, state)) = turned
+                    if !ledger.target_reached()
+                        && let Some((energy, state)) = turned
                         && (energy - side_energy).abs() > 1.0e-3
                     {
                         side_energy = energy;
                         side_state = state;
                         let twist_end = ledger.spent().saturating_add(cage_patience);
                         while ledger.spent() < twist_end
+                            && !ledger.target_reached()
                             && hop_side!(side_rng, side_energy, side_state)
                         {
                         }
                     }
                 }
+            }
+            if ledger.target_reached() {
+                break HopStop::Target;
             }
             // The calls just spent are not a new lowest of the main chain.
             // Leaving them on the quiet clock would start the later walk
@@ -5945,6 +6143,7 @@ where
                 cfg,
                 ledger,
                 relax,
+                &mut grad,
                 &mut cage_archive,
                 &kernels,
                 propose,
@@ -5956,6 +6155,9 @@ where
                 new_lowest,
                 archive_end,
             );
+            if ledger.target_reached() {
+                break HopStop::Target;
+            }
             best_seen = best_seen.min(ledger.best);
             if let Some(book) = stall_book.as_mut() {
                 book.archive_best_seen = book.archive_best_seen.min(ledger.best);
