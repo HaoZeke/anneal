@@ -837,16 +837,39 @@ def score_cell(
     by_observation: dict[str, list[dict[str, str]]],
 ) -> tuple[dict[str, str], list[str]]:
     rows: dict[str, dict[int, dict[str, str]]] = {}
+    complete = True
     for observation, _arm in OBSERVATIONS:
         key = observation.lower()
         got = by_observation.get(observation, [])
         seeds = sorted(int(r["seed"]) for r in got)
         if seeds != list(SEEDS):
-            raise RuntimeError(
-                f"{cell.system} {observation}: expected one row per seed "
-                f"{SEEDS[0]}..{SEEDS[-1]}"
-            )
+            complete = False
         rows[key] = {int(r["seed"]): r for r in got}
+    if not complete:
+        partial = {field: "nan" for field in SUMMARY_FIELDS}
+        partial.update(
+            {
+                "cell": cell.system,
+                "family": cell.family,
+                "budget": str(cell.budget),
+                "reference": cell.ref_text,
+                "rows": str(sum(len(got) for got in rows.values())),
+                "inconclusive": "1",
+                "hit_loss_seeds": "",
+                "outside_limit": fmt_num(OUTSIDE_RATIO_LIMIT),
+                "rss_anon_limit": fmt_num(RSS_RATIO_LIMIT),
+                "fixed_ring_a": "0",
+                "fixed_ring_a2": "0",
+                "fixed_ring_b": "0",
+                "fail_a": "0",
+                "fail_b": "0",
+                "fail_c": "0",
+                "fail_d": "0",
+                "fail_e": "0",
+                "verdict": "INCONCLUSIVE",
+            }
+        )
+        return partial, []
 
     inconclusive = sum(1 for got in rows.values() for r in got.values() if r["status"] != "ok")
     traj_fields = ("status", "evals", "charged", "calls_to_hit", "best_bits")
@@ -1261,6 +1284,11 @@ def summarize(
         for r in active_rows
         if r["status"] != "ok"
     ]
+    inconclusive_rows.extend(
+        f"{row['cell']}: incomplete panel ({row['rows']} of {len(SEEDS) * len(OBSERVATIONS)} rows)"
+        for row in scored
+        if row["verdict"] == "INCONCLUSIVE" and int(row["rows"]) < len(SEEDS) * len(OBSERVATIONS)
+    )
     write_csv_durable(summary_path, SUMMARY_FIELDS, scored)
     if hosts_path is not None:
         mids = sorted({row["machine_id_sha256"] for row in active_rows}) or [hashed_machine_id()]
