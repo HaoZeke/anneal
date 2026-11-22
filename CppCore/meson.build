@@ -265,13 +265,113 @@ rgpot_minimage = static_library(
 # Slices.cc. Keeping the object inside rgpot_halfshell satisfies
 # --no-undefined links that take halfshell without rgpot_core, while
 # rgpot_core links rgpot_halfshell instead of compiling a second copy.
-_halfshell_omp = dependency('openmp', language: 'cpp', required: false)
+#
+# Every OpenMP target takes rgpot_openmp_deps. A static library hands the
+# link arguments of its dependencies to whatever links it, so a static
+# librgpot would put -fopenmp on every consumer's link line. Outside a
+# shared build the targets therefore compile with the OpenMP flag and link
+# the runtime library by name, which is what the compiler driver adds to a
+# link that carries the flag.
+#
+# The runtime is the one the driver selects, not one picked from a list: Clang
+# links libomp, or libgomp under -fopenmp=libgomp, and objects compiled for
+# one do not link against the other. The driver's own link line names the
+# library (-lomp, -lgomp, -liomp5) and the directories it searches for it, so
+# the library comes from there and has to define that runtime's entry point.
+# When it cannot be found and checked, the targets keep the OpenMP flag, and
+# configure says so.
+rgpot_openmp = dependency('openmp', language: 'cpp', required: false)
+rgpot_openmp_deps = []
+rgpot_openmp_runtime_deps = []
+if rgpot_openmp.found()
+    rgpot_openmp_deps = [rgpot_openmp]
+    if get_option('default_library') != 'shared' and cppc.get_argument_syntax() != 'msvc'
+        _omp_tokens = []
+        _omp_flag = cppc.first_supported_argument(
+            ['-fopenmp', '-qopenmp', '-openmp'],
+        )
+        if _omp_flag.length() > 0
+            _omp_probe = run_command(
+                cppc.cmd_array(),
+                _omp_flag,
+                '-###',
+                '-x',
+                'c++',
+                files('rgpot/Slices.cc'),
+                '-o',
+                'rgpot_openmp_probe',
+                check: false,
+            )
+            if _omp_probe.returncode() == 0
+                _omp_tokens = (
+                    _omp_probe.stdout() + ' ' + _omp_probe.stderr()
+                ).split()
+            endif
+        endif
+        _omp_entry_points = {
+            'omp': '__kmpc_fork_call',
+            'iomp5': '__kmpc_fork_call',
+            'gomp': 'GOMP_parallel',
+        }
+        _omp_name = ''
+        _omp_dirs = []
+        foreach _tok : _omp_tokens
+            _arg = _tok.strip('"\'')
+            if _arg.startswith('-L') and _arg != '-L'
+                _omp_dirs += [_arg.substring(2)]
+            elif _arg.startswith('-l') and _omp_name == ''
+                if _omp_entry_points.has_key(_arg.substring(2))
+                    _omp_name = _arg.substring(2)
+                endif
+            endif
+        endforeach
+        _omp_lib = []
+        if _omp_name != ''
+            _omp_found = cppc.find_library(
+                _omp_name,
+                dirs: _omp_dirs,
+                required: false,
+            )
+            _omp_entry = _omp_entry_points[_omp_name]
+            if _omp_found.found() and cppc.links(
+                'extern "C" int @0@(void); int main() { void *volatile p = (void *)&@0@; return p == 0; }'.format(
+                    _omp_entry,
+                ),
+                dependencies: _omp_found,
+                name: 'OpenMP runtime lib@0@ defines @1@'.format(
+                    _omp_name,
+                    _omp_entry,
+                ),
+            )
+                _omp_lib = [_omp_found]
+            endif
+        endif
+        if _omp_lib.length() > 0
+            rgpot_openmp_runtime_deps = _omp_lib
+            rgpot_openmp_deps = [
+                rgpot_openmp.partial_dependency(
+                    compile_args: true,
+                    includes: true,
+                ),
+            ] + _omp_lib
+        else
+            rgpot_openmp_runtime_deps = [
+                rgpot_openmp.partial_dependency(link_args: true),
+            ]
+            message(
+                'OpenMP runtime of @0@ not found or not usable: a static librgpot links consumers with the OpenMP flag'.format(
+                    cppc.get_id(),
+                ),
+            )
+        endif
+    endif
+endif
 rgpot_slices = static_library(
     'rgpot_slices',
     files('rgpot/Slices.cc'),
     include_directories: _incdirs,
     cpp_args: _args + _fp_contract_off,
-    dependencies: _halfshell_omp.found() ? [_halfshell_omp] : [],
+    dependencies: rgpot_openmp_deps,
     pic: true,
     install: false,
 )
@@ -285,7 +385,7 @@ rgpot_halfshell = static_library(
     ),
     include_directories: _incdirs,
     cpp_args: _args,
-    dependencies: _halfshell_omp.found() ? [_halfshell_omp] : [],
+    dependencies: rgpot_openmp_deps,
     link_whole: [rgpot_slices],
     link_with: [rgpot_minimage, rgpot_exact_fma],
     pic: true,
@@ -325,10 +425,8 @@ if not get_option('with_rpc_client_only')
     # Product-sums in the simd sources are explicit. Contraction stays off
     # in this archive so a multiply that is not written as mul_add is not fused.
     _deps += dependency('threads')
-    _nlist_openmp = dependency('openmp', language: 'cpp', required: false)
-    if _nlist_openmp.found()
-        _deps += _nlist_openmp
-    endif
+    _deps_sans_openmp = _deps
+    _deps += rgpot_openmp_deps
     _rgpot_srcs += files(
         'rgpot/plugin/PluginBridge.cc',
         'rgpot/plugin/PluginRegistry.cc',
@@ -519,9 +617,6 @@ if not get_option('with_rpc_client_only')
     # vesin objects and the Fortran runtime enter here, once, rather than
     # through the convenience archives (see the vesin_hdr_dep note).
     rgpot_deps = _deps_sans_core + [vesin_dep, fastnlist_dep] + fortran_rt_deps
-    if eam_openmp.found()
-        rgpot_deps += eam_openmp
-    endif
     _rpc_whole = []
     if _rpc_stack
         # link_whole, not link_with: the RPC entry points are called by
@@ -722,9 +817,32 @@ if not get_option('with_rpc_client_only')
     if _rpc_stack
         _rgpot_consumer_deps += [ptlrpc_hdr_dep]
     endif
+    # rgpot_dep hands the OpenMP dependency on, so its consumer compiles
+    # and links with the OpenMP flag. rgpot_dep_no_openmp does not. librgpot
+    # keeps its teams: they open in its own objects, and the templates in
+    # Slices.hpp run serially in a translation unit without _OPENMP. A
+    # shared librgpot records the runtime as NEEDED. A static one carries
+    # the runtime by name in rgpot_openmp_deps.
+    _rgpot_openmp_consumer = rgpot_openmp.found() ? [rgpot_openmp] : []
     rgpot_dep = declare_dependency(
         link_with: rgpot,
-        dependencies: _rgpot_consumer_deps,
+        dependencies: _rgpot_consumer_deps + _rgpot_openmp_consumer,
+        include_directories: _incdirs,
+        compile_args: _args,
+    )
+    # The same list built from the dependencies taken before OpenMP joined
+    # _deps, so nothing has to be told apart by name afterwards. A static
+    # librgpot still needs the runtime library on the consumer's link line.
+    _rgpot_consumer_deps_no_openmp = _deps_sans_openmp + [
+        vesin_dep,
+        fastnlist_native_dep,
+    ] + fortran_rt_deps + rgpot_openmp_runtime_deps
+    if _rpc_stack
+        _rgpot_consumer_deps_no_openmp += [ptlrpc_hdr_dep]
+    endif
+    rgpot_dep_no_openmp = declare_dependency(
+        link_with: rgpot,
+        dependencies: _rgpot_consumer_deps_no_openmp,
         include_directories: _incdirs,
         compile_args: _args,
     )
