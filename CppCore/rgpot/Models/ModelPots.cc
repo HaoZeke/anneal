@@ -77,8 +77,8 @@ Radial radial(const Curve &curve, double r) {
   const double t = std::exp(-curve.exponent * (r - curve.re));
   const double dt = -curve.exponent * t;
   const double d2t = curve.exponent * curve.exponent * t;
-  const double cs = curve.de / (1.0 + curve.sato);
-  const double ct = curve.de / (1.0 - curve.sato);
+  const double cs = curve.de;
+  const double ct = 0.5 * curve.de * (1.0 - curve.sato) / (1.0 + curve.sato);
   const double es = cs * (t * t - 2.0 * t);
   const double et = ct * (t * t + 2.0 * t);
   const double des = cs * (2.0 * t - 2.0) * dt;
@@ -168,7 +168,7 @@ std::array<Curve, 3> curves(LepsSystem system) {
     return {fh, hh, fh};
   }
   // Hartree and Bohr. Spectroscopic Morse curves and Sato parameters from
-  // Connor, Mayne and Whitehead, J. Chem. Phys. 72, 6209 (1980).
+  // Connor, Jakubetz, Manz and Whitehead, J. Chem. Phys. 72, 6209 (1980).
   const Curve hcl{0.16963487116282344, 2.4085504321417757,
                   0.9886770766652772, 0.067};
   const Curve cl2{0.09238779594959665, 3.7565865631435686,

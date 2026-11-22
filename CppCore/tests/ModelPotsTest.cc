@@ -61,8 +61,8 @@ LepsRadial lepsRadial(const LepsCurve &curve, double distance) {
   const double t = std::exp(-curve.exponent * (distance - curve.re));
   const double dt = -curve.exponent * t;
   const double d2t = curve.exponent * curve.exponent * t;
-  const double cs = curve.de / (1.0 + curve.sato);
-  const double ct = curve.de / (1.0 - curve.sato);
+  const double cs = curve.de;
+  const double ct = 0.5 * curve.de * (1.0 - curve.sato) / (1.0 + curve.sato);
   const double es = cs * (t * t - 2.0 * t);
   const double et = ct * (t * t + 2.0 * t);
   const double des = cs * (2.0 * t - 2.0) * dt;
@@ -222,6 +222,47 @@ TEST_CASE("LEPS presets match a collinear dense analytic oracle") {
       scale += std::abs(value);
     for (std::size_t atom = 0; atom < 3; ++atom)
       close(got[3 * atom], oracle[atom], scale);
+  }
+}
+
+TEST_CASE("LEPS presets reproduce published collinear saddle positions and barriers") {
+  struct SaddleCase {
+    rgpot::LepsSystem system;
+    double rAbBohr;
+    double rBcBohr;
+    double rEqBcBohr;
+    double expectedBarrierEv;
+  };
+  constexpr double kAsymptoticSeparationBohr = 200.0;
+  constexpr double kPublishedBarrierToleranceEv = 0.002;
+  constexpr std::array<SaddleCase, 3> cases{{
+      {rgpot::LepsSystem::HH2, 1.761167421479969, 1.761167421479969,
+       1.40083, 0.434181570445937},
+      {rgpot::LepsSystem::HCl2, 4.249704311427898, 3.782504018033288,
+       3.7565865631435686, 0.065180935874998},
+      {rgpot::LepsSystem::FH2, 2.912665520731471, 1.439595744501899,
+       1.4019877, 0.046150511500620},
+  }};
+  const std::array<double, 9> zeroDirection{};
+  for (const auto &tc : cases) {
+    rgpot::LepsPot pot(tc.system);
+    const double rAb = tc.rAbBohr * rgpot::units::BOHR_TO_ANGSTROM;
+    const double rBc = tc.rBcBohr * rgpot::units::BOHR_TO_ANGSTROM;
+    const double rAsy =
+        kAsymptoticSeparationBohr * rgpot::units::BOHR_TO_ANGSTROM;
+    const double rEqBc = tc.rEqBcBohr * rgpot::units::BOHR_TO_ANGSTROM;
+    const std::array<double, 9> saddle{0.0, 0.0, 0.0, rAb,       0.0,
+                                       0.0, rAb + rBc, 0.0, 0.0};
+    const std::array<double, 9> reactant{0.0, 0.0, 0.0, rAsy,         0.0,
+                                         0.0, rAsy + rEqBc, 0.0, 0.0};
+    const auto atSaddle = pot.evaluateCoordinates(saddle, zeroDirection);
+    const auto atReactant = pot.evaluateCoordinates(reactant, zeroDirection);
+    for (double g : atSaddle.gradient)
+      close(g, 0.0, 1.0);
+    const double barrier = atSaddle.energy - atReactant.energy;
+    close(barrier, tc.expectedBarrierEv, 1.0);
+    REQUIRE(std::abs(barrier - tc.expectedBarrierEv) <=
+            kPublishedBarrierToleranceEv);
   }
 }
 
