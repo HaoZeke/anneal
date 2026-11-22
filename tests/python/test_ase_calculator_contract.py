@@ -159,11 +159,12 @@ def test_implemented_properties_by_capabilities() -> None:
             "forces",
             "stress",
         ]
-        tersoff_call = RgpotCalculator("tersoffsic")
-        assert tersoff_call.implemented_properties == [
+        tersoff_sic = RgpotCalculator("tersoffsic")
+        assert tersoff_sic.implemented_properties == [
             "energy",
             "free_energy",
             "forces",
+            "stress",
         ]
 
 
