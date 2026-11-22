@@ -26,6 +26,7 @@ That is the tensor =IPIPot= reads.
   =unix_prefix= (default =/tmp/ipi_=).
   =connect_timeout_s= (default 30.0) and =timeout_s= (default 0.0).
   =cutoff= (default 0.0) and =stress_step= (default 0.0).
+  =preserve_open_cell= (default false).
   =extras_json= (default true).
   =address= is =unix:/absolute/path=, =unix:<name>=, =tcp:<host>:<port>= or
   =tcp:<port>=.
@@ -74,6 +75,8 @@ The driver follows the reference =driver.py=.
 =STATUS= gets =NEEDINIT= before the first =INIT=.
 It gets =HAVEDATA= while a result waits for =GETFORCE=, and =READY= otherwise.
 =INIT= carries a bead index and an init string, and both are kept.
+An init string that requests =batch_size= above 1 is rejected: one driver
+connection evaluates one structure per request.
 =POSDATA= carries the cell, its inverse and the positions.
 Its atom count must equal the length of =species= on every message.
 =GETFORCE= gets =FORCEREADY=, the energy, the atom count and the forces.
@@ -90,6 +93,8 @@ A periodic cell can be no wider than twice =cutoff= along an axis.
 The driver tiles such a cell along that axis.
 The energy is divided by the number of copies.
 The forces of the first copy are sent.
+With =preserve_open_cell=true= a singular cell and the original positions reach
+the evaluator unchanged.
 
 An evaluation may report no stress while =stress_step= is above 0.
 The virial is then a central difference of the energy under strain.
@@ -134,6 +139,7 @@ bool step();
   The same on a disconnect inside a message (=i-PI server disconnected=).
   The same on an unexpected header.
   The same on an =INIT= string length outside 0 to 2^20.
+  The same when an =INIT= string requests =batch_size= above 1.
   The same on a =POSDATA= atom count that differs from =species=.
   The same on non-finite positions or cell values.
   The same on =GETFORCE= before =POSDATA=.
@@ -294,6 +300,7 @@ rgpot-ipi-driver -m EAMCell --species-from start.xyz -a localhost -p 31415
 | =-p=, =--port=           | TCP port, default 12345                                |
 | =-S=, =--sockets-prefix= | prefix of a UNIX name, default =/tmp/ipi_=             |
 | =--cutoff A=             | cutoff for a spec without one; tiling and box range    |
+| =--preserve-open-cell=   | pass a singular cell through instead of padding it     |
 | =--stress-step H=        | finite-difference virial for a stress-free potential   |
 | =--timeout S=            | seconds per message; 0, the default, waits forever     |
 | =--connect-timeout S=    | seconds to retry connecting, default 30                |

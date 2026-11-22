@@ -53,6 +53,8 @@ options:
   --cutoff A             host cutoff in Angstrom: the cutoff of a potential
                          whose spec names none, and the range used to tile
                          thin periodic cells and pad open boxes
+  --preserve-open-cell   pass a singular cell to the potential unchanged
+                         instead of padding it with a finite open box
   --stress-step H        central-difference virial with strain step H when
                          the potential reports no stress (0: zero virial)
   --timeout S            seconds one message may take (0: wait forever)
@@ -294,6 +296,8 @@ int main(int argc, char **argv) {
       prefix = value();
     } else if (a == "--cutoff") {
       cutoff = number(a, value());
+    } else if (a == "--preserve-open-cell") {
+      cfg.preserve_open_cell = true;
     } else if (a == "--stress-step") {
       cfg.stress_step = number(a, value());
     } else if (a == "--timeout") {

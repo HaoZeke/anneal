@@ -152,6 +152,41 @@ void check_finite(const double *values, size_t n, const char *what) {
   }
 }
 
+long batch_size(const std::string &init) {
+  size_t start = 0;
+  while (start <= init.size()) {
+    const size_t end = init.find(',', start);
+    const std::string token =
+        init.substr(start, end == std::string::npos ? end : end - start);
+    const size_t colon = token.find(':');
+    if (colon != std::string::npos) {
+      auto trim = [](const std::string &text) {
+        const size_t first = text.find_first_not_of(" \t\r\n");
+        if (first == std::string::npos) {
+          return std::string{};
+        }
+        const size_t last = text.find_last_not_of(" \t\r\n");
+        return text.substr(first, last - first + 1);
+      };
+      if (trim(token.substr(0, colon)) == "batch_size") {
+        const std::string value = trim(token.substr(colon + 1));
+        size_t used = 0;
+        try {
+          const long batch = std::stol(value, &used);
+          return used == value.size() ? batch : 1;
+        } catch (const std::exception &) {
+          return 1;
+        }
+      }
+    }
+    if (end == std::string::npos) {
+      break;
+    }
+    start = end + 1;
+  }
+  return 1;
+}
+
 } // namespace
 
 IPIDriver::IPIDriver(const IPIDriverConfig &config, IPIEvaluator evaluate)
@@ -277,6 +312,11 @@ bool IPIDriver::step() {
       if (len > 0) {
         readFull(link, init.data(), init.size(), deadline);
       }
+      const long batch = batch_size(init);
+      if (batch > 1) {
+        fail("INIT requested batch_size " + std::to_string(batch) +
+             "; IPIDriver evaluates one structure per request");
+      }
       m_bead = bead;
       m_init = std::move(init);
       m_initialised = true;
@@ -297,6 +337,9 @@ bool IPIDriver::step() {
              " does not match the " + std::to_string(m_config.species.size()) +
              " species the driver was given");
       }
+      if (m_have_data) {
+        fail("POSDATA before GETFORCE collected the previous result");
+      }
       std::vector<double> pos(static_cast<size_t>(nat) * 3);
       readFull(link, pos.data(), pos.size() * sizeof(double), deadline);
       check_finite(h, 9, "cell values");
@@ -304,6 +347,7 @@ bool IPIDriver::step() {
       m_have_data = false;
       compute(h, pos.data());
       m_have_data = true;
+      m_initialised = true;
       ++m_evals;
       return true;
     }
@@ -350,8 +394,10 @@ struct Evaluated {
 class Geometry {
 public:
   Geometry(const std::vector<int> &species, double cutoff,
+           bool preserve_open_cell,
            const IPIEvaluator &evaluate)
-      : m_species(species), m_cutoff(cutoff), m_evaluate(evaluate) {}
+      : m_species(species), m_cutoff(cutoff),
+        m_preserve_open_cell(preserve_open_cell), m_evaluate(evaluate) {}
 
   /// rows in Angstrom (lattice vectors as rows), pos in Angstrom.
   Evaluated operator()(const double rows[9], const double *pos) const {
@@ -362,7 +408,11 @@ public:
     double box[9];
     size_t copies = 1;
     if (!(volume > 0.0)) {
-      openBox(&xyz, box);
+      if (m_preserve_open_cell) {
+        std::copy(rows, rows + 9, box);
+      } else {
+        openBox(&xyz, box);
+      }
     } else {
       std::copy(rows, rows + 9, box);
       copies = tile(&xyz, &z, box);
@@ -473,6 +523,7 @@ private:
 
   const std::vector<int> &m_species;
   double m_cutoff;
+  bool m_preserve_open_cell;
   const IPIEvaluator &m_evaluate;
 };
 
@@ -498,7 +549,8 @@ void IPIDriver::compute(const double h[9], const double *pos_bohr) {
   for (size_t i = 0; i < 3 * n; ++i) {
     pos[i] = pos_bohr[i] * units::BOHR_TO_ANGSTROM;
   }
-  const Geometry geometry(m_config.species, m_config.cutoff, m_evaluate);
+  const Geometry geometry(m_config.species, m_config.cutoff,
+                          m_config.preserve_open_cell, m_evaluate);
   Evaluated res = geometry(rows, pos.data());
 
   const char *source = "kernel";

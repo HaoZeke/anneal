@@ -59,6 +59,9 @@ struct IPIDriverConfig {
   /// Interaction range in Angstrom. A periodic cell narrower than twice
   /// this is tiled, and an open box (singular cell) is padded by it.
   double cutoff = 0.0;
+  /// Pass a singular cell to the evaluator unchanged. The default false
+  /// pads it for kernels that require a finite box.
+  bool preserve_open_cell = false;
   /// Strain step of the central-difference virial used when the
   /// evaluation reports no stress. 0 sends a zero virial instead.
   double stress_step = 0.0;

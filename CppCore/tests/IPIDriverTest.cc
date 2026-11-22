@@ -441,6 +441,35 @@ TEST_CASE("IPIDriver connects over TCP and serves repeated steps",
   CHECK(driver.evaluations() == 5);
 }
 
+TEST_CASE("IPIDriver rejects batched INIT requests", "[ipi_driver]") {
+  auto server = FakeServer::unix_at(temp_socket("batch"));
+  Recorder rec;
+  rgpot::IPIDriver driver(config_for(server.address(), {1}), rec.evaluator());
+  DriverThread thread(driver);
+  server.accept();
+
+  REQUIRE(server.status() == "NEEDINIT");
+  server.init(0, "request_id: 7, batch_size: 2");
+  CHECK_THAT(thread.join(), ContainsSubstring("batch_size 2"));
+  CHECK(driver.evaluations() == 0);
+}
+
+TEST_CASE("IPIDriver accepts POSDATA without INIT", "[ipi_driver]") {
+  auto server = FakeServer::unix_at(temp_socket("noinit"));
+  Recorder rec;
+  rgpot::IPIDriver driver(config_for(server.address(), {1}), rec.evaluator());
+  DriverThread thread(driver);
+  server.accept();
+  double h[9];
+  ipi_cell(kRows, h);
+  server.posdata(h, {0.0, 0.0, 0.0}, 1);
+  REQUIRE(server.status() == "HAVEDATA");
+  (void)server.getforce();
+  REQUIRE(server.status() == "READY");
+  server.header("EXIT");
+  REQUIRE(thread.join().empty());
+}
+
 TEST_CASE("IPIDriver maps unix:<name> onto the i-PI prefix", "[ipi_driver]") {
   const std::string name = "rgpot-ipid-" + std::to_string(::getpid());
   auto server = FakeServer::unix_at(std::string(wire::kUnixPrefix) + name);
@@ -681,6 +710,28 @@ TEST_CASE("IPIDriver pads a singular cell into an open box", "[ipi_driver]") {
   CHECK_THAT(res.virial[0], WithinRel(-rec.sigma[0] * side * side * side *
                                           units::EV_TO_HARTREE,
                                       1e-13));
+}
+
+TEST_CASE("IPIDriver can preserve a singular cell", "[ipi_driver]") {
+  auto server = FakeServer::unix_at(temp_socket("preserve-open"));
+  Recorder rec;
+  auto cfg = config_for(server.address(), {1});
+  cfg.preserve_open_cell = true;
+  rgpot::IPIDriver driver(cfg, rec.evaluator());
+  DriverThread thread(driver);
+  server.accept();
+  const double h[9]{};
+  server.posdata(h, {2.0, 3.0, 4.0}, 1);
+  (void)server.getforce();
+  server.header("EXIT");
+  REQUIRE(thread.join().empty());
+  std::lock_guard<std::mutex> lock(rec.mu);
+  for (double value : rec.box) {
+    CHECK(value == 0.0);
+  }
+  CHECK_THAT(rec.pos[0], WithinRel(2.0 * units::BOHR_TO_ANGSTROM, 1e-14));
+  CHECK_THAT(rec.pos[1], WithinRel(3.0 * units::BOHR_TO_ANGSTROM, 1e-14));
+  CHECK_THAT(rec.pos[2], WithinRel(4.0 * units::BOHR_TO_ANGSTROM, 1e-14));
 }
 
 TEST_CASE("IPIDriver tiles a cell thinner than twice the cutoff",
