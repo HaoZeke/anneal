@@ -293,9 +293,8 @@ TEST_CASE("classical engine reproduces Muller-Brown stationary energies",
     const std::array<double, 3> position{point.x, point.y, 4.0};
     std::array<double, 3> force{};
     double energy = 0.0;
-    REQUIRE(e.force(pot, 1, position.data(), atomicNumbers.data(),
-                    force.data(), &energy, nullptr, kBox.data(), nullptr,
-                    nullptr) == 0);
+    REQUIRE(e.force(pot, 1, position.data(), atomicNumbers.data(), force.data(),
+                    &energy, nullptr, kBox.data(), nullptr, nullptr) == 0);
     REQUIRE(energy == Catch::Approx(point.energy).margin(0.01));
     REQUIRE(force[2] == 0.0);
   }

@@ -36,8 +36,9 @@ configureMullerBrown(const ::PotentialConfig::Reader &cfg) {
     return result;
   }
   if (cfg.which() != ::PotentialConfig::MULLER_BROWN) {
-    result.message = "rgpot params arm " + potentialConfigArm(cfg) +
-                     " not handled by MullerBrownPot (use matching backend pot)";
+    result.message =
+        "rgpot params arm " + potentialConfigArm(cfg) +
+        " not handled by MullerBrownPot (use matching backend pot)";
     return result;
   }
   try {

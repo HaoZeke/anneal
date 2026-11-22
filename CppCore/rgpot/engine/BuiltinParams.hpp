@@ -78,9 +78,9 @@ inline Builtin read_builtin(const void *config, std::size_t config_len) {
         wire.getX0(), wire.getY0());
   } else if (native.which() != ::PotentialConfig::NONE &&
              native.which() != ::PotentialConfig::XTB) {
-    throw std::invalid_argument(
-        "BuiltinParams.config arm " + rgpot::rpc::potentialConfigArm(native) +
-        " does not match a builtin potential");
+    throw std::invalid_argument("BuiltinParams.config arm " +
+                                rgpot::rpc::potentialConfigArm(native) +
+                                " does not match a builtin potential");
   }
   return out;
 }

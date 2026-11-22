@@ -24,9 +24,8 @@ void close(double got, double expected, double scale) {
   REQUIRE(std::abs(got - expected) <= bar);
 }
 
-std::array<double, 2>
-mullerOracle(const std::array<double, 2> &x,
-             const std::array<double, 2> &direction) {
+std::array<double, 2> mullerOracle(const std::array<double, 2> &x,
+                                   const std::array<double, 2> &direction) {
   constexpr std::array<double, 4> amplitude{-200.0, -100.0, -170.0, 15.0};
   constexpr std::array<double, 4> a{-1.0, -1.0, -6.5, 0.7};
   constexpr std::array<double, 4> b{0.0, 0.0, 11.0, 0.6};
