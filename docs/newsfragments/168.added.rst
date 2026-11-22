@@ -4,4 +4,6 @@ newest ``cap`` of each. ``Ledger::dropped_quench_boundaries`` and
 ``Outcome::dropped_transitions`` count what was not kept.
 ``RelaxStats::plain_holds`` and ``RelaxStats::hold_lifts`` count the
 plain-surface holds a failed restraint block began and the holds lifted
-again. ``h2h_seed`` takes the cap as an optional ninth argument.
+again. ``h2h_seed`` prints an ``h2h_mem`` line with its peak heap and
+peak ``RssAnon``, read inside the process, and takes ``all`` or a count
+as an optional ninth argument.

@@ -4,9 +4,9 @@
 //!
 //! `arm` is `recommended` or `base` for the `cluster_hopping` presets.
 //! `stop` is an energy at which the run ends early, or `-` to spend the
-//! whole budget. `keep`, when given, is passed to
-//! `Ledger::keep_recent_evidence`, and an `h2h_evidence` line reports what
-//! was kept and dropped.
+//! whole budget. `keep` is `all` for `Ledger::keep_all_evidence`, or a
+//! count for `Ledger::keep_recent_evidence`; without it the ledger keeps
+//! its default, and the run has no checkpoint, so it keeps no evidence.
 //!
 //! Each run starts as in the ABCluster head-to-head. Atoms come from
 //! `random_cluster_in_radius` at the radius and separation of
@@ -21,9 +21,17 @@
 //! written to `<prefix>.xyz`: atoms as `X`, waters as O, H, H with the M
 //! site left out. Water sites use the parameters of the global
 //! minimisation program (GMIN).
+//!
+//! An `h2h_mem` line reports memory measured inside the process. The global
+//! allocator counts live heap bytes and their peak. Each time that peak
+//! grows by another [`RSS_STEP`] bytes, the next potential call reads
+//! `RssAnon` from `/proc/self/status`, so `peak_rss_anon_kb` is the largest
+//! anonymous resident set seen at a new heap peak, with the call count at
+//! which it was read. `vmhwm_kb` is the kernel's peak resident set, read
+//! once at the end.
 
 use anneal_core::methods::cluster_hopping::{Config, Ledger, Outcome, random_cluster_in_radius};
-use anneal_core::methods::cluster_search::search_from;
+use anneal_core::methods::cluster_search::{RelaxStats, search_from};
 use anneal_core::potentials::{
     GminTip4p, PairPotential, energy_ohh, gmin_coords_text, gmin_tip4p_sites, gmin_water_geometry,
     random_tip4p_cluster,
@@ -34,13 +42,90 @@ use eindir_core::gradient::{DifferentiableObjective, Gradient};
 use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
+use std::alloc::{GlobalAlloc, Layout, System};
 use std::fmt::Write as _;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 /// A new lowest energy enters the trace only when it is this much lower.
 const TRACE_STEP: f64 = 1.0e-7;
+
+/// Heap-peak growth, in bytes, between two reads of `RssAnon`.
+const RSS_STEP: usize = 256 * 1024;
+
+/// The system allocator, counting live bytes and their peak.
+struct Peak;
+
+static LIVE: AtomicUsize = AtomicUsize::new(0);
+static HEAP_PEAK: AtomicUsize = AtomicUsize::new(0);
+
+// SAFETY: every call is forwarded unchanged to `System`; the counters only
+// observe sizes.
+unsafe impl GlobalAlloc for Peak {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        let ptr = unsafe { System.alloc(layout) };
+        if !ptr.is_null() {
+            let live = LIVE.fetch_add(layout.size(), Ordering::Relaxed) + layout.size();
+            HEAP_PEAK.fetch_max(live, Ordering::Relaxed);
+        }
+        ptr
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        unsafe { System.dealloc(ptr, layout) };
+        LIVE.fetch_sub(layout.size(), Ordering::Relaxed);
+    }
+
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        let ptr = unsafe { System.alloc_zeroed(layout) };
+        if !ptr.is_null() {
+            let live = LIVE.fetch_add(layout.size(), Ordering::Relaxed) + layout.size();
+            HEAP_PEAK.fetch_max(live, Ordering::Relaxed);
+        }
+        ptr
+    }
+
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        let moved = unsafe { System.realloc(ptr, layout, new_size) };
+        if !moved.is_null() {
+            if new_size >= layout.size() {
+                let grown = new_size - layout.size();
+                let live = LIVE.fetch_add(grown, Ordering::Relaxed) + grown;
+                HEAP_PEAK.fetch_max(live, Ordering::Relaxed);
+            } else {
+                LIVE.fetch_sub(layout.size() - new_size, Ordering::Relaxed);
+            }
+        }
+        moved
+    }
+}
+
+#[global_allocator]
+static ALLOCATOR: Peak = Peak;
+
+/// A `kB` field of `/proc/self/status`, read by this process.
+fn status_kb(field: &str) -> Option<usize> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    status.lines().find_map(|line| {
+        line.strip_prefix(field)?
+            .strip_prefix(':')?
+            .trim()
+            .strip_suffix("kB")?
+            .trim()
+            .parse()
+            .ok()
+    })
+}
+
+/// Peaks recorded during the run.
+#[derive(Default)]
+struct Memory {
+    heap_read_at: usize,
+    heap_peak_calls: usize,
+    rss_anon_kb: usize,
+    rss_anon_calls: usize,
+}
 
 enum Model {
     Pair(PairPotential),
@@ -52,6 +137,7 @@ struct Seen {
     lowest: f64,
     at: Array1<f64>,
     trace: Vec<(usize, f64)>,
+    memory: Memory,
 }
 
 struct Counted {
@@ -74,6 +160,18 @@ impl Counted {
             .fetch_add(mark.elapsed().as_nanos() as u64, Ordering::Relaxed);
         let mut seen = self.seen.lock().unwrap();
         seen.calls += 1;
+        let heap = HEAP_PEAK.load(Ordering::Relaxed);
+        if heap >= seen.memory.heap_read_at + RSS_STEP {
+            let calls = seen.calls;
+            seen.memory.heap_read_at = heap;
+            seen.memory.heap_peak_calls = calls;
+            if let Some(kb) = status_kb("RssAnon")
+                && kb > seen.memory.rss_anon_kb
+            {
+                seen.memory.rss_anon_kb = kb;
+                seen.memory.rss_anon_calls = calls;
+            }
+        }
         if seen.calls <= self.budget && e < seen.lowest {
             if e < seen.lowest - TRACE_STEP {
                 let calls = seen.calls;
@@ -221,7 +319,7 @@ fn main() {
     let arm = args[5].as_str();
     let stop_at: Option<f64> = (args[6] != "-").then(|| args[6].parse().expect("stop energy"));
     let prefix = &args[7];
-    let keep: Option<usize> = args.get(8).map(|cap| cap.parse().expect("keep"));
+    let keep: Option<&str> = args.get(8).map(String::as_str);
 
     let water = kind == "tip4p";
     let (model, start) = if water {
@@ -261,37 +359,34 @@ fn main() {
             lowest: f64::INFINITY,
             at: start.clone(),
             trace: Vec::new(),
+            memory: Memory::default(),
         }),
         pot_ns: AtomicU64::new(0),
     };
     let mut ledger = Ledger::with_stop(budget, stop);
-    if let Some(cap) = keep {
-        ledger.keep_recent_evidence(cap);
+    match keep {
+        None => {}
+        Some("all") => ledger.keep_all_evidence(),
+        Some(cap) => ledger.keep_recent_evidence(cap.parse().expect("keep")),
     }
     let started = Instant::now();
-    let out: Outcome = match (water, arm) {
-        (true, _) => {
-            search_from(
-                &objective,
-                &water_config(arm, n),
-                &mut ledger,
-                start.view(),
-                seed,
-            )
-            .expect("finite start")
-            .0
-        }
-        (false, _) => {
-            search_from(
-                &objective,
-                &atomic_config(arm, n),
-                &mut ledger,
-                start.view(),
-                seed,
-            )
-            .expect("finite start")
-            .0
-        }
+    let (out, stats): (Outcome, RelaxStats) = match (water, arm) {
+        (true, _) => search_from(
+            &objective,
+            &water_config(arm, n),
+            &mut ledger,
+            start.view(),
+            seed,
+        )
+        .expect("finite start"),
+        (false, _) => search_from(
+            &objective,
+            &atomic_config(arm, n),
+            &mut ledger,
+            start.view(),
+            seed,
+        )
+        .expect("finite start"),
     };
     let wall = started.elapsed().as_secs_f64();
     let pot_s = objective.pot_ns.load(Ordering::Relaxed) as f64 / 1.0e9;
@@ -348,15 +443,26 @@ fn main() {
         seen.lowest,
         out.basins,
     );
-    if let Some(cap) = keep {
-        println!(
-            "h2h_evidence keep={cap} quench_boundaries={} dropped_quench_boundaries={} accepted_transitions={} dropped_transitions={}",
-            ledger.quench_boundaries().len(),
-            ledger.dropped_quench_boundaries(),
-            out.accepted_transitions.len(),
-            out.dropped_transitions,
-        );
-    }
+    let rss_anon_end = status_kb("RssAnon").unwrap_or(0);
+    println!(
+        "h2h_mem peak_heap_kb={} peak_heap_at_calls={} peak_rss_anon_kb={} peak_rss_anon_at_calls={} rss_anon_end_kb={} vmhwm_kb={} quench_boundaries={} accepted_transitions={} dropped_quench_boundaries={} dropped_transitions={} plain_holds={} hold_lifts={}",
+        HEAP_PEAK.load(Ordering::Relaxed) / 1024,
+        seen.memory.heap_peak_calls,
+        seen.memory.rss_anon_kb.max(rss_anon_end),
+        if rss_anon_end > seen.memory.rss_anon_kb {
+            seen.calls
+        } else {
+            seen.memory.rss_anon_calls
+        },
+        rss_anon_end,
+        status_kb("VmHWM").unwrap_or(0),
+        ledger.quench_boundaries().len(),
+        out.accepted_transitions.len(),
+        ledger.dropped_quench_boundaries(),
+        out.dropped_transitions,
+        stats.plain_holds,
+        stats.hold_lifts,
+    );
     if water {
         std::fs::write(
             format!("{prefix}.gmin"),
