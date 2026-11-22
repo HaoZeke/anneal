@@ -2,7 +2,7 @@
 
 ## Build and machine
 
-- develop SHA: `91f05d0a100bc919afe8c572072711dd2f319087`
+- measured commit SHA: `91f05d0a100bc919afe8c572072711dd2f319087` (recorded as `base_sha` in `bench/results/rgpot_omp_scaling_results.json`, local commit before rebase and not in `develop` history)
 - reference A SHA: `fc538973851b0ae61bcb51295e60108222a29cda`
 - compiler: `g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0`
 - build type: `release (meson -Dbuildtype=release)`
