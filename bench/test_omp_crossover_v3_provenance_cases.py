@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 CHECKER = ROOT / "bench" / "test_omp_crossover_v3_provenance.py"
@@ -58,9 +59,10 @@ def repo_is_shallow(repo: Path) -> bool:
     return probe.returncode == 0 and probe.stdout.strip() == "true"
 
 
-def repo_enforces_commit_resolution(repo: Path, original: dict) -> bool:
+def repo_enforces_commit_resolution(repo: Path, original: dict[str, Any]) -> bool:
     if not repo_has_git(repo) or repo_is_shallow(repo):
         return False
+    present: list[bool] = []
     for arm in original["metadata"]["arms"]:
         sha = arm.get("commit_sha")
         if not isinstance(sha, str) or not sha:
@@ -71,9 +73,8 @@ def repo_enforces_commit_resolution(repo: Path, original: dict) -> bool:
             text=True,
             capture_output=True,
         )
-        if probe.returncode == 0:
-            return True
-    return False
+        present.append(probe.returncode == 0)
+    return bool(present) and all(present)
 
 
 def commit_tree(arm: dict) -> str:
@@ -105,7 +106,7 @@ def object_tree(revision: str, fallback_seed: str) -> str:
 def run_checker(
     payload: dict,
     repo: Path = ROOT,
-    pins: dict | None = None,
+    pins: dict[str, Any] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     with tempfile.TemporaryDirectory() as directory:
         record = Path(directory) / SOURCE_JSON.name
@@ -369,7 +370,7 @@ def check_cases(original: dict, repo: Path) -> None:
     require_named_rejection(run_checker(renamed_arm, repo=repo), "team-1", "renamed-team")
 
 
-def check_absent_commit_forgeries(original: dict, repo: Path) -> None:
+def check_absent_commit_forgeries(original: dict[str, Any], repo: Path) -> None:
     arms = {arm["name"]: arm for arm in original["metadata"]["arms"]}
     team = arms["team-1"]
     forged_tree = "1" * 40
@@ -437,14 +438,18 @@ def main() -> None:
     original = json.loads(SOURCE_JSON.read_text(encoding="utf-8"))
     check_cases(original, ROOT)
     forged_pins = json.loads(SOURCE_PINS.read_text(encoding="utf-8"))
-    for arm_pins in forged_pins.values():
+    for arm_name, arm_pins in forged_pins.items():
+        if arm_name == "kTeamMinAtoms":
+            continue
         for sha in arm_pins:
             arm_pins[sha] = "f" * 40
     del forged_pins["team-1"]
-    require_acceptance(
-        run_checker(original, repo=ROOT, pins=forged_pins),
-        "git-backed provenance with forged pins",
-    )
+    forged = run_checker(original, repo=ROOT, pins=forged_pins)
+    stock = next(arm for arm in original["metadata"]["arms"] if arm["name"] == "stock")
+    if repo_enforces_commit_resolution(ROOT, original):
+        require_acceptance(forged, "git-backed provenance with forged pins")
+    else:
+        require_tree_rejection(forged, "stock", stock["tree"], "f" * 40)
     with tempfile.TemporaryDirectory() as partial_git_dir:
         partial_repo = Path(partial_git_dir)
         subprocess.run(
@@ -476,10 +481,137 @@ def main() -> None:
         )
         check_cases(original, partial_repo)
         check_absent_commit_forgeries(original, partial_repo)
-    with tempfile.TemporaryDirectory() as no_git_repo:
-        no_git_path = Path(no_git_repo)
-        check_cases(original, no_git_path)
-        check_absent_commit_forgeries(original, no_git_path)
+    with tempfile.TemporaryDirectory() as shallow_root:
+        shallow_repo, head_sha, head_tree = make_shallow_repo(Path(shallow_root))
+        check_substituted_head(original, shallow_repo, head_sha, head_tree)
+        with tempfile.TemporaryDirectory() as no_git_repo:
+            no_git_path = Path(no_git_repo)
+            check_cases(original, no_git_path)
+            check_absent_commit_forgeries(original, no_git_path)
+            check_substituted_head(original, no_git_path, head_sha, head_tree)
+
+
+def commit_resolves(repo: Path, sha: str) -> bool:
+    if not repo_has_git(repo):
+        return False
+    probe = subprocess.run(
+        ["git", "cat-file", "-e", f"{sha}^{{commit}}"],
+        cwd=repo,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    return probe.returncode == 0
+
+
+def substituted_team(
+    original: dict[str, Any], sha: str, tree: str, threshold: int
+) -> dict[str, Any]:
+    payload: dict[str, Any] = json.loads(json.dumps(original))
+    changed = next(arm for arm in payload["metadata"]["arms"] if arm["name"] == "team-1")
+    changed["sha"] = sha
+    changed["commit_sha"] = sha
+    changed["tree"] = tree
+    changed["commit_tree"] = tree
+    changed["threshold"] = threshold
+    changed["tree_threshold"] = threshold
+    return payload
+
+
+def inflated_team_threshold(original: dict[str, Any], threshold: int) -> dict[str, Any]:
+    payload: dict[str, Any] = json.loads(json.dumps(original))
+    changed = next(arm for arm in payload["metadata"]["arms"] if arm["name"] == "team-1")
+    changed["threshold"] = threshold
+    changed["tree_threshold"] = threshold
+    return payload
+
+
+def check_substituted_head(
+    original: dict[str, Any], repo: Path, head_sha: str, head_tree: str
+) -> None:
+    swapped = run_checker(
+        substituted_team(original, head_sha, head_tree, 8192), repo=repo
+    )
+    if commit_resolves(repo, head_sha):
+        require_exact_rejection(swapped, f"team-1: commit is not pinned: {head_sha}")
+    else:
+        require_exact_rejection(
+            swapped, f"team-1: commit does not resolve and has no pin: {head_sha}"
+        )
+    require_threshold_rejection(
+        run_checker(inflated_team_threshold(original, 999999), repo=repo),
+        "team-1",
+        999999,
+        1,
+    )
+
+
+def make_shallow_repo(root: Path) -> tuple[Path, str, str]:
+    seed = root / "seed"
+    shallow = root / "shallow"
+    seed.mkdir()
+    header = seed / "CppCore" / "rgpot"
+    header.mkdir(parents=True)
+    (header / "Slices.hpp").write_text(
+        "inline constexpr int kTeamMinAtoms = 8192;\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "init", "-q"],
+        cwd=seed,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "add", "--", "CppCore/rgpot/Slices.hpp"],
+        cwd=seed,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "-m",
+            "threshold",
+        ],
+        cwd=seed,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "clone", "--depth", "1", "--no-local", seed.as_uri(), str(shallow)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    if not repo_is_shallow(shallow):
+        raise SystemExit("shallow provenance fixture is not shallow")
+    head_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=shallow,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    head_tree = subprocess.run(
+        ["git", "rev-parse", "HEAD^{tree}"],
+        cwd=shallow,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    return shallow, head_sha, head_tree
 
 
 if __name__ == "__main__":

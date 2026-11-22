@@ -1,0 +1,20 @@
+{
+  "stock": {
+    "32e8fb1bba2b0f92d60603722a2f5e12636d5e66": "c16effc9194d2c8f0e3f3b60121d00e8df230769"
+  },
+  "team-1": {
+    "e06abcefc2c023fe7e049fae64be52cdf48b5fa7": "9ed37e2f439d8726cd1a926d1afa2155f003de55"
+  },
+  "team-1024": {
+    "f86bdf80c8e8466dffc6038a7c431f26f5708536": "102018297727e18c2e43ffeb7575768efa353995"
+  },
+  "team-4096": {
+    "1ed94957c6b64016d077d4fb5e4220265cdc320c": "42a386d9aa0c8bf863ccdc49e3d8646a9c9e134a"
+  },
+  "kTeamMinAtoms": {
+    "stock": 8192,
+    "team-1": 1,
+    "team-1024": 1024,
+    "team-4096": 4096
+  }
+}

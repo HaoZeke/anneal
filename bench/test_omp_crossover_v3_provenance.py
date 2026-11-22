@@ -90,16 +90,6 @@ def recorded_commit_trees(record: list[dict]) -> dict[str, str]:
     return out
 
 
-def recorded_tree_thresholds(record: list[dict]) -> dict[str, int]:
-    out: dict[str, int] = {}
-    for arm in record:
-        tree = arm.get("commit_tree") or arm.get("tree")
-        threshold = arm.get("tree_threshold")
-        if isinstance(tree, str) and tree and isinstance(threshold, int) and not isinstance(threshold, bool):
-            if tree not in out:
-                out[tree] = threshold
-    return out
-
 def resolved_commit_tree(
     repo: Path,
     arm: str,
@@ -107,6 +97,7 @@ def resolved_commit_tree(
     recorded_trees: dict[str, str],
     pins: dict[str, dict[str, str]],
 ) -> tuple[str, bool]:
+    resolved: str | None = None
     if has_git(repo):
         commit = subprocess.run(
             ["git", "rev-parse", "--verify", f"{sha}^{{commit}}"],
@@ -115,20 +106,34 @@ def resolved_commit_tree(
             capture_output=True,
         )
         if commit.returncode == 0:
-            return subprocess.run(
+            resolved = subprocess.run(
                 ["git", "rev-parse", f"{sha}^{{tree}}"],
                 cwd=repo,
                 check=True,
                 text=True,
                 capture_output=True,
-            ).stdout.strip(), True
-        if has_known_recorded_commit(repo, recorded_trees) and not is_shallow_git(repo):
+            ).stdout.strip()
+        elif has_known_recorded_commit(repo, recorded_trees) and not is_shallow_git(repo):
             raise SystemExit(f"{arm}: commit does not resolve: {sha}")
     arm_pins = pins.get(arm)
+    pinned: str | None = None
+    if isinstance(arm_pins, dict):
+        raw_pin = arm_pins.get(sha)
+        if isinstance(raw_pin, str) and raw_pin:
+            pinned = raw_pin
+    # A resolved object still has to be the commit named by the pin. A full
+    # history may disagree with a forged pin value; a shallow one may not.
+    if resolved is not None:
+        if isinstance(arm_pins, dict) and pinned is None:
+            raise SystemExit(f"{arm}: commit is not pinned: {sha}")
+        if pinned is not None and pinned != resolved and is_shallow_git(repo):
+            raise SystemExit(
+                f"{arm}: pinned tree {pinned} does not match commit tree {resolved}"
+            )
+        return resolved, True
     if not isinstance(arm_pins, dict):
         raise SystemExit(f"{arm}: pinned manifest has no arm entry")
-    pinned = arm_pins.get(sha)
-    if not isinstance(pinned, str) or not pinned:
+    if pinned is None:
         raise SystemExit(f"{arm}: commit does not resolve and has no pin: {sha}")
     return pinned, False
 
@@ -144,7 +149,7 @@ def tree_file(repo: Path, tree: str, path: str) -> str:
 
 
 def tree_threshold(
-    repo: Path, arm: str, tree: str, fallback_threshold: int, commit_present: bool
+    repo: Path, arm: str, tree: str, pinned_threshold: int, commit_present: bool
 ) -> int:
     if has_git(repo):
         present = subprocess.run(
@@ -165,10 +170,16 @@ def tree_threshold(
                 match = re.search(r"kTeamMinAtoms\s*=\s*([0-9]+)", slices)
             if match is None:
                 raise SystemExit(f"{arm}: tree {tree} has no kTeamMinAtoms value")
-            return int(match.group(1))
+            parsed = int(match.group(1))
+            if parsed != pinned_threshold:
+                raise SystemExit(
+                    f"{arm}: pinned kTeamMinAtoms {pinned_threshold} "
+                    f"does not match tree threshold {parsed}"
+                )
+            return parsed
     if commit_present:
         raise SystemExit(f"{arm}: resolved commit tree is unavailable: {tree}")
-    return fallback_threshold
+    return pinned_threshold
 
 
 def check_provenance(
@@ -176,6 +187,7 @@ def check_provenance(
     payload: dict,
     report_text: str,
     pins: dict[str, dict[str, str]],
+    thresholds: dict[str, int],
 ) -> None:
     record = payload["metadata"]["arms"]
     record_names = [arm["name"] for arm in record]
@@ -203,16 +215,16 @@ def check_provenance(
             raise SystemExit(f"{name}: arm record is missing required key commit_tree")
         if "tree" not in arm:
             raise SystemExit(f"{name}: arm record is missing required key tree")
-        if arm["tree"] != arm["commit_tree"]:
+        tree = require_non_empty_string(name, "tree", arm["tree"])
+        commit_tree = require_non_empty_string(name, "commit_tree", arm["commit_tree"])
+        if tree != commit_tree:
             raise SystemExit(
-                f"{name}: recorded tree {arm['tree']} does not match commit_tree {arm['commit_tree']}"
+                f"{name}: recorded tree {tree} does not match commit_tree {commit_tree}"
             )
         if "tree_threshold" not in arm:
             raise SystemExit(f"{name}: arm record is missing required key tree_threshold")
         if "threshold" not in arm:
             raise SystemExit(f"{name}: arm record is missing required key threshold")
-        tree = require_non_empty_string(name, "tree", arm["tree"])
-        require_non_empty_string(name, "commit_tree", arm["commit_tree"])
         require_int_not_bool(name, "tree_threshold", arm["tree_threshold"])
         threshold = require_int_not_bool(name, "threshold", arm["threshold"])
         if arm["threshold"] != arm["tree_threshold"]:
@@ -224,12 +236,42 @@ def check_provenance(
         actual, commit_present = resolved_commit_tree(repo, name, sha, recorded_trees, pins)
         if recorded != actual:
             raise SystemExit(f"{name}: recorded tree {recorded} does not match commit tree {actual}")
-        actual_threshold = tree_threshold(repo, name, recorded, threshold, commit_present)
+        if name not in thresholds:
+            raise SystemExit(f"{name}: pinned manifest has no kTeamMinAtoms")
+        actual_threshold = tree_threshold(
+            repo, name, recorded, thresholds[name], commit_present
+        )
         if threshold != actual_threshold:
             raise SystemExit(
                 f"{name}: recorded threshold {threshold} "
                 f"does not match tree threshold {actual_threshold}"
             )
+
+
+def parse_pins(raw: object) -> tuple[dict[str, dict[str, str]], dict[str, int]]:
+    if not isinstance(raw, dict):
+        raise SystemExit("pinned manifest must be a JSON object")
+    threshold_raw = raw.get("kTeamMinAtoms")
+    if not isinstance(threshold_raw, dict):
+        raise SystemExit("pinned manifest is missing kTeamMinAtoms")
+    thresholds: dict[str, int] = {}
+    for arm, value in threshold_raw.items():
+        if not isinstance(arm, str) or isinstance(value, bool) or not isinstance(value, int):
+            raise SystemExit(f"pinned manifest has invalid kTeamMinAtoms for {arm!r}")
+        thresholds[arm] = value
+    commits: dict[str, dict[str, str]] = {}
+    for arm, entry in raw.items():
+        if arm == "kTeamMinAtoms":
+            continue
+        if not isinstance(arm, str) or not isinstance(entry, dict):
+            raise SystemExit("pinned manifest must map arms to objects")
+        arm_commits: dict[str, str] = {}
+        for sha, tree in entry.items():
+            if not isinstance(sha, str) or not sha or not isinstance(tree, str) or not tree:
+                raise SystemExit(f"{arm}: pinned manifest has an invalid commit entry")
+            arm_commits[sha] = tree
+        commits[arm] = arm_commits
+    return commits, thresholds
 
 
 def main() -> None:
@@ -260,10 +302,10 @@ def main() -> None:
     pins_path = args.pins if args.pins.is_absolute() else repo / args.pins
     if not pins_path.is_file():
         raise SystemExit(f"pinned manifest is missing: {pins_path}")
-    pins = json.loads(pins_path.read_text(encoding="utf-8"))
-    if not isinstance(pins, dict):
-        raise SystemExit("pinned manifest must be a JSON object")
-    check_provenance(repo, payload, report_path.read_text(encoding="utf-8"), pins)
+    commits, thresholds = parse_pins(json.loads(pins_path.read_text(encoding="utf-8")))
+    check_provenance(
+        repo, payload, report_path.read_text(encoding="utf-8"), commits, thresholds
+    )
 
 
 if __name__ == "__main__":
