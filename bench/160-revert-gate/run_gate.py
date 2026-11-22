@@ -455,14 +455,11 @@ def cmd_run(args: argparse.Namespace) -> None:
 
 
 def cmd_hosts(args: argparse.Namespace) -> None:
-    cpu = next((l.split(":", 1)[1].strip() for l in Path("/proc/cpuinfo").read_text().splitlines()
-                if l.startswith("model name")), "")
     path = args.out.resolve() / "hosts.csv"
     with path.open("w", newline="") as handle:
         w = csv.writer(handle, lineterminator="\n")
-        w.writerow(["machine_id", "cpu_model", "logical_cpus", "kernel", "arch"])
-        uname = os.uname()
-        w.writerow([machine_id(), cpu, os.cpu_count(), uname.release, uname.machine])
+        w.writerow(["machine_id", "logical_cpus"])
+        w.writerow([machine_id(), os.cpu_count()])
 
 
 def main(argv: list[str]) -> None:
