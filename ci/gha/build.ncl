@@ -135,6 +135,7 @@ let fast_nlist_off_build_test =
   meson setup bbdir \
     -Dwith_tests=true \
     -Dwith_eam_table=true \
+    -Dwith_long_range=true \
     -Dwith_rust_core=true \
     -Dwith_examples=false \
     -Dwith_xtensor=false \
