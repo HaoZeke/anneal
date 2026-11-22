@@ -1156,7 +1156,7 @@ pub struct Symmetrise {
 }
 
 const ESTABLISHED_SYMMETRY_ORDERS: usize = 5;
-const SYMMETRY_TAIL_BUCKETS: usize = 1 << 30;
+const SYMMETRY_TAIL_BUCKETS: usize = ESTABLISHED_SYMMETRY_ORDERS + 2;
 
 fn symmetry_order_from_draw(orders: &[usize], established_order: usize, blend_draw: f64) -> usize {
     let established = orders.len().min(ESTABLISHED_SYMMETRY_ORDERS);
@@ -1167,7 +1167,8 @@ fn symmetry_order_from_draw(orders: &[usize], established_order: usize, blend_dr
     if established_order != orders[established - 1] || tail_draw >= 1.0 {
         return established_order;
     }
-    let tail = ((tail_draw * (orders.len() - established) as f64) as usize)
+    let weighted = tail_draw * tail_draw * tail_draw;
+    let tail = ((weighted * (orders.len() - established) as f64) as usize)
         .min(orders.len() - established - 1);
     orders[established + tail]
 }
@@ -1178,10 +1179,10 @@ fn symmetry_order_and_blend<R: Rng + ?Sized>(orders: &[usize], rng: &mut R) -> (
     let blend_draw = rng.random::<f64>();
     let blend = 0.3 + 0.4 * blend_draw;
     // Draw among the established orders first, exactly as the five-order
-    // library did. Only its upper boundary can open one fixed escape interval
-    // out of 2^30. The existing blend draw supplies that size-independent
-    // decision, so retained orders also retain the random stream. The escape
-    // interval maps uniformly over every larger order.
+    // library did. Only the highest established order can open one fixed
+    // seventh bucket that replaces it with the size-independent general-order
+    // tail. The escape interval weights every larger order, favouring its
+    // lower end.
     let order = symmetry_order_from_draw(orders, established_order, blend_draw);
     (order, blend)
 }
@@ -1287,13 +1288,14 @@ mod cluster_move_tests {
                 tail_orders.insert(order);
             }
         }
-        for count in &counts[..5] {
+        for count in &counts[..4] {
             assert!((11_000..=13_000).contains(count), "{counts:?}");
         }
-        assert!(counts[5] <= 4, "{counts:?}");
+        assert!((9_000..=11_000).contains(&counts[4]), "{counts:?}");
+        assert!((1_500..=2_500).contains(&counts[5]), "{counts:?}");
         for tail in 0..orders.len() - established.len() {
-            let draw = (tail as f64 + 0.5)
-                / (SYMMETRY_TAIL_BUCKETS * (orders.len() - established.len())) as f64;
+            let weighted = (tail as f64 + 0.5) / (orders.len() - established.len()) as f64;
+            let draw = weighted.cbrt() / SYMMETRY_TAIL_BUCKETS as f64;
             let selected = symmetry_order_from_draw(&orders, established[4], draw);
             assert_eq!(selected, orders[established.len() + tail]);
             tail_orders.insert(selected);
