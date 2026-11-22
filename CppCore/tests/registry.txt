@@ -337,6 +337,7 @@ EAMTableHandleTest | tests core rust_core | unit eam_table_handle_test EAMTableH
 EngineTableTest | tests core rpc posix | custom workdir=. | @engine_plugins
 lj_eval | core posix | custom timeout=60 | @engines
 lj_engine | core posix | custom timeout=60 | @engines
+mdi_concrete_potentials | tests core posix python mdi | custom timeout=120 | @engines
 external_potentials | core posix | custom timeout=120 | @engines
 engine_abi_stamps | core posix | custom | @engines
 engine_abi_stamp_rust_loader | core posix rustc probe | custom timeout=900 | @engines

@@ -21,6 +21,7 @@ documentation_style = "doxy"
 [defines]
 "feature = rpc" = "RGPOT_HAS_RPC"
 "feature = schema" = "RGPOT_HAS_SCHEMA"
+"feature = mdi" = "RGPOT_HAS_MDI"
 
 [export]
 # Named by the documentation of rgpot_potential_hvp,
@@ -28,7 +29,7 @@ documentation_style = "doxy"
 # rgpot_potential_set_hessian_callback and rgpot_potential_set_taylor_jet,
 # not by a signature.
 include = ["rgpot_hvp_scheme_t", "HessianVectorCallback", "rgpot_hessian_scheme_t", "HessianCallback", "rgpot_taylor_jet_fn", "rgpot_interval_t"]
-exclude = []
+exclude = ["BOHR_TO_ANGSTROM", "EV_TO_HARTREE"]
 
 [export.rename]
 

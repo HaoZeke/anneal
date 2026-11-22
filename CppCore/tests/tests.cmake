@@ -110,7 +110,7 @@ rgpot_test_set_feature(tsan RGPOT_TEST_TSAN)
 rgpot_test_set_feature(isa_variants RGPOT_ISA_SPECS AND NOT RGPOT_RPC_CLIENT_ONLY)
 rgpot_test_set_feature(toplevel RGPOT_IS_TOP_LEVEL)
 foreach(feature water xtb tblite dftd3 dftd4 xckernel long_range expr
-                metatomic skala rust_core probe)
+                metatomic skala rust_core mdi probe)
   set(RGPOT_TEST_FEATURE_${feature} FALSE)
 endforeach()
 

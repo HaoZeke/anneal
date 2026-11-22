@@ -54,6 +54,7 @@ _rt_atoms = {
     'metatomic': has_metatomic,
     'uma': has_uma,
     'rust_core': get_option('with_rust_core'),
+    'mdi': mdi_enabled,
 }
 _rt_tests = []
 _rt_kw = {}

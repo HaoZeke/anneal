@@ -27,6 +27,7 @@ crate-type = ["staticlib"]
 
 [features]
 rpc = ["rgpot-core/rpc"]
+mdi = ["rgpot-core/mdi"]
 cache = ["rgpot-core/cache"]
 
 [dependencies]

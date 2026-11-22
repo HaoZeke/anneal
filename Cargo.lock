@@ -737,9 +737,11 @@ dependencies = [
  "dlpk",
  "eindir-core",
  "futures",
+ "libc",
  "libloading",
  "maryada",
  "ndarray",
+ "tempfile",
  "tokio",
  "tokio-util",
 ]

@@ -70,6 +70,8 @@ pub mod taylor;
 pub mod tensor;
 pub mod types;
 pub mod version;
+#[cfg(feature = "mdi")]
+pub mod units;
 
 #[cfg(feature = "schema")]
 #[allow(dead_code, non_snake_case, unused_parens, clippy::all)]
@@ -93,3 +95,6 @@ pub mod profile;
 
 #[cfg(feature = "rpc")]
 pub mod rpc;
+
+#[cfg(feature = "mdi")]
+pub mod mdi;

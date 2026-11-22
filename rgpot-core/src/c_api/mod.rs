@@ -43,6 +43,9 @@ pub mod types;
 #[cfg(feature = "rpc")]
 pub mod rpc;
 
+#[cfg(feature = "mdi")]
+pub mod mdi;
+
 // Re-export eindir lifecycle functions at the c_api level so cbindgen picks them up.
 #[cfg(feature = "schema")]
 pub use crate::eindir::rgpot_potential_set_peer_capabilities;

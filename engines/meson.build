@@ -3,7 +3,7 @@
 
 fs = import('fs')
 engines_inc = include_directories('.')
-rgpot_inc = include_directories('../CppCore', '../include')
+rgpot_inc = include_directories('../CppCore', '../include', '../rgpot-core/include')
 # include_directories() rejects an absolute path that sits inside the
 # source tree. A pixi prefix and a LAMMPS checkout under the workspace
 # both do. A path relative to this file is accepted; a path outside the
@@ -45,6 +45,16 @@ pot_spec_dep = declare_dependency(
     include_directories: [engines_inc, rgpot_inc],
     compile_args: pot_spec_args,
 )
+if mdi_enabled
+    rgpot_mdi = executable(
+        'rgpot-mdi',
+        files('rgpot_mdi.cpp'),
+        dependencies: [pot_spec_dep, rgpot_rust_lib],
+        link_with: rgpot,
+        cpp_args: _args,
+        install: not meson.is_subproject(),
+    )
+endif
 rgpot_eval = executable(
     'rgpot-eval',
     files('rgpot_eval.cpp'),
@@ -52,6 +62,29 @@ rgpot_eval = executable(
     link_with: rgpot,
     cpp_args: _args,
 )
+if mdi_enabled
+    _mdi_python = find_program('python3')
+    _mdi_python_probe = run_command(
+        _mdi_python,
+        '-c',
+        'import mdi',
+        check: false,
+    )
+    if _mdi_python_probe.returncode() == 0
+        test(
+            'mdi_concrete_potentials',
+            _mdi_python,
+            args: [
+                files('mdi_roundtrip.py'),
+                rgpot_mdi,
+                rgpot_eval,
+            ],
+            timeout: 120,
+        )
+    else
+        message('MDI TCP test skipped: pymdi is not installed')
+    endif
+endif
 
 # i-PI driver client: answers an i-PI server with any pot_spec potential.
 if has_ipi

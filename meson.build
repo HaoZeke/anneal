@@ -100,6 +100,11 @@ if has_cbe
 endif
 
 rpc_enabled = get_option('with_rpc') or get_option('with_rpc_client_only')
+mdi_enabled = get_option('with_mdi')
+
+if mdi_enabled and not get_option('with_rust_core')
+    error('with_mdi=true needs with_rust_core=true')
+endif
 
 if get_option('with_rpc_client_only')
     _args += ['-DRGPOT_RPC_CLIENT_ONLY=TRUE']
@@ -784,6 +789,10 @@ if get_option('with_rust_core')
     endif
     if get_option('with_cache')
         _cargo_features += ['cache']
+    endif
+    if mdi_enabled
+        _cargo_features += ['mdi']
+        _args += ['-DRGPOT_HAS_MDI=TRUE']
     endif
 
     _rgpot_core_dir = meson.current_source_dir() / 'rgpot-core'
