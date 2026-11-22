@@ -1156,8 +1156,7 @@ pub struct Symmetrise {
 }
 
 const ESTABLISHED_SYMMETRY_ORDERS: usize = 5;
-const SYMMETRY_ORDER_BUCKETS: usize = ESTABLISHED_SYMMETRY_ORDERS + 1;
-const SYMMETRY_TAIL_BUCKETS: usize = SYMMETRY_ORDER_BUCKETS;
+const SYMMETRY_TAIL_BUCKETS: usize = 1 << 16;
 
 fn symmetry_order_from_draw(orders: &[usize], established_order: usize, blend_draw: f64) -> usize {
     let established = orders.len().min(ESTABLISHED_SYMMETRY_ORDERS);
@@ -1179,10 +1178,10 @@ fn symmetry_order_and_blend<R: Rng + ?Sized>(orders: &[usize], rng: &mut R) -> (
     let blend_draw = rng.random::<f64>();
     let blend = 0.3 + 0.4 * blend_draw;
     // Draw among the established orders first, exactly as the five-order
-    // library did. Only its upper boundary can open a size-independent sixth
-    // bucket. The existing blend draw supplies that decision, so retained
-    // orders also retain the random stream. The bucket maps uniformly over
-    // every larger order.
+    // library did. Only its upper boundary can open one fixed escape interval
+    // out of 2^16. The existing blend draw supplies that size-independent
+    // decision, so retained orders also retain the random stream. The escape
+    // interval maps uniformly over every larger order.
     let order = symmetry_order_from_draw(orders, established_order, blend_draw);
     (order, blend)
 }
@@ -1288,20 +1287,18 @@ mod cluster_move_tests {
                 tail_orders.insert(order);
             }
         }
-        for count in &counts[..4] {
+        for count in &counts[..5] {
             assert!((11_000..=13_000).contains(count), "{counts:?}");
         }
-        assert!((9_000..=11_000).contains(&counts[4]), "{counts:?}");
-        assert!((1_500..=2_500).contains(&counts[5]), "{counts:?}");
-        assert_eq!(tail_orders.len(), orders.len() - established.len());
+        assert!(counts[5] <= 4, "{counts:?}");
         for tail in 0..orders.len() - established.len() {
             let draw = (tail as f64 + 0.5)
                 / (SYMMETRY_TAIL_BUCKETS * (orders.len() - established.len())) as f64;
-            assert_eq!(
-                symmetry_order_from_draw(&orders, established[4], draw),
-                orders[established.len() + tail]
-            );
+            let selected = symmetry_order_from_draw(&orders, established[4], draw);
+            assert_eq!(selected, orders[established.len() + tail]);
+            tail_orders.insert(selected);
         }
+        assert_eq!(tail_orders.len(), orders.len() - established.len());
     }
 
     #[test]
