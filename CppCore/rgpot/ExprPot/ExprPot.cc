@@ -225,7 +225,7 @@ void ExprPot::forceImpl(const ForceInput &in, ForceOut *out) const {
     if (!std::isfinite(childVars[i])) {
       allFiniteVar = false;
     } else {
-      accVar += weight * childVars[i];
+      accVar += weight * weight * childVars[i];
     }
   }
   out->variance = allFiniteVar ? accVar : 0.0;
