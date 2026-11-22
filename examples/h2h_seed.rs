@@ -1,10 +1,12 @@
 //! One head-to-head seed with its trace and its lowest geometry.
 //!
-//! Usage: `h2h_seed <lj|morse|tip4p> <n> <rho> <budget> <seed> <arm> <stop> <prefix>`
+//! Usage: `h2h_seed <lj|morse|tip4p> <n> <rho> <budget> <seed> <arm> <stop> <prefix> [keep]`
 //!
 //! `arm` is `recommended` or `base` for the `cluster_hopping` presets.
 //! `stop` is an energy at which the run ends early, or `-` to spend the
-//! whole budget.
+//! whole budget. `keep`, when given, is passed to
+//! `Ledger::keep_recent_evidence`, and an `h2h_evidence` line reports what
+//! was kept and dropped.
 //!
 //! Each run starts as in the ABCluster head-to-head. Atoms come from
 //! `random_cluster_in_radius` at the radius and separation of
@@ -207,7 +209,10 @@ fn xyz(symbols: &[&str], coords: &[f64], comment: &str) -> String {
 fn main() {
     anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().skip(1).collect();
-    assert_eq!(args.len(), 8, "see the usage line in the source");
+    assert!(
+        matches!(args.len(), 8 | 9),
+        "see the usage line in the source"
+    );
     let kind = args[0].as_str();
     let n: usize = args[1].parse().expect("n");
     let rho: f64 = args[2].parse().expect("rho");
@@ -216,6 +221,7 @@ fn main() {
     let arm = args[5].as_str();
     let stop_at: Option<f64> = (args[6] != "-").then(|| args[6].parse().expect("stop energy"));
     let prefix = &args[7];
+    let keep: Option<usize> = args.get(8).map(|cap| cap.parse().expect("keep"));
 
     let water = kind == "tip4p";
     let (model, start) = if water {
@@ -259,6 +265,9 @@ fn main() {
         pot_ns: AtomicU64::new(0),
     };
     let mut ledger = Ledger::with_stop(budget, stop);
+    if let Some(cap) = keep {
+        ledger.keep_recent_evidence(cap);
+    }
     let started = Instant::now();
     let out: Outcome = match (water, arm) {
         (true, _) => {
@@ -339,6 +348,15 @@ fn main() {
         seen.lowest,
         out.basins,
     );
+    if let Some(cap) = keep {
+        println!(
+            "h2h_evidence keep={cap} quench_boundaries={} dropped_quench_boundaries={} accepted_transitions={} dropped_transitions={}",
+            ledger.quench_boundaries().len(),
+            ledger.dropped_quench_boundaries(),
+            out.accepted_transitions.len(),
+            out.dropped_transitions,
+        );
+    }
     if water {
         std::fs::write(
             format!("{prefix}.gmin"),

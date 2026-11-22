@@ -196,6 +196,78 @@ enum AdoptionHistory {
     Observed(Option<HistoryReport>),
 }
 
+/// Run evidence in execution order, optionally limited to its newest
+/// entries.
+///
+/// Without a cap every entry is kept, as before caps existed. With one, the
+/// view is the newest `cap` entries and the older ones are counted as
+/// dropped. Storage is trimmed back to `cap` once it reaches twice that, so
+/// the trim costs amortised constant time per entry.
+#[derive(Debug, Clone)]
+struct Retained<T> {
+    items: Vec<T>,
+    cap: Option<usize>,
+    recorded: usize,
+}
+
+impl<T> Retained<T> {
+    fn new(cap: Option<usize>) -> Self {
+        Self {
+            items: Vec::new(),
+            cap,
+            recorded: 0,
+        }
+    }
+
+    fn push(&mut self, item: T) {
+        self.recorded += 1;
+        match self.cap {
+            None => self.items.push(item),
+            Some(0) => {}
+            Some(cap) => {
+                if self.items.len() >= cap.saturating_mul(2) {
+                    self.items.drain(..self.items.len() - cap);
+                }
+                self.items.push(item);
+            }
+        }
+    }
+
+    fn set_cap(&mut self, cap: Option<usize>) {
+        self.cap = cap;
+        let drop = self.items.len() - self.as_slice().len();
+        self.items.drain(..drop);
+    }
+
+    fn as_slice(&self) -> &[T] {
+        let keep = self
+            .cap
+            .map_or(self.items.len(), |cap| cap.min(self.items.len()));
+        &self.items[self.items.len() - keep..]
+    }
+
+    /// Entries recorded after the first `recorded` that are still kept.
+    fn since(&self, recorded: usize) -> &[T] {
+        let view = self.as_slice();
+        let first = self.recorded - view.len();
+        &view[recorded.saturating_sub(first).min(view.len())..]
+    }
+
+    fn recorded(&self) -> usize {
+        self.recorded
+    }
+
+    fn dropped(&self) -> usize {
+        self.recorded - self.as_slice().len()
+    }
+
+    fn into_vec(mut self) -> Vec<T> {
+        let drop = self.items.len() - self.as_slice().len();
+        self.items.drain(..drop);
+        self.items
+    }
+}
+
 /// Read-only scientific state exposed at a charged-work checkpoint.
 ///
 /// A checkpoint observes the live chain in place. It does not end the run,
@@ -612,7 +684,9 @@ pub struct Ledger {
     pub best: f64,
     /// State attaining [`Ledger::best`].
     pub best_state: Option<Array1<f64>>,
-    quench_boundaries: Vec<QuenchBoundary>,
+    quench_boundaries: Retained<QuenchBoundary>,
+    /// Newest quench boundaries and accepted transitions a run keeps.
+    evidence_cap: Option<usize>,
     diagnostic_quench: bool,
     /// Energy at or below which the hop may stop.
     target: Option<f64>,
@@ -692,7 +766,8 @@ impl Ledger {
             fract: 0.0,
             best: f64::INFINITY,
             best_state: None,
-            quench_boundaries: Vec::new(),
+            quench_boundaries: Retained::new(None),
+            evidence_cap: None,
             diagnostic_quench: false,
             target: None,
             stop: None,
@@ -836,7 +911,31 @@ impl Ledger {
     pub fn slice(&self, budget: usize) -> Self {
         let mut child = Self::new(budget);
         child.stop = self.stop.clone();
+        if let Some(cap) = self.evidence_cap {
+            child.keep_recent_evidence(cap);
+        }
         child
+    }
+
+    /// Keep only the newest `cap` quench boundaries on this ledger, and the
+    /// newest `cap` accepted transitions of a run charged to it.
+    ///
+    /// Without this call both grow with the budget. With it, memory holds
+    /// at most twice `cap` of each, [`Ledger::quench_boundaries`] and
+    /// [`Outcome::accepted_transitions`] are the newest `cap` in execution
+    /// order, and [`Ledger::dropped_quench_boundaries`] and
+    /// [`Outcome::dropped_transitions`] count the older ones. A checkpoint
+    /// sees the kept entries recorded since the one before. The search
+    /// itself never reads either record, so the cap changes a run only
+    /// through a checkpoint that acts on what it is shown.
+    pub fn keep_recent_evidence(&mut self, cap: usize) {
+        self.evidence_cap = Some(cap);
+        self.quench_boundaries.set_cap(Some(cap));
+    }
+
+    /// The cap set by [`Ledger::keep_recent_evidence`], if any.
+    pub fn evidence_cap(&self) -> Option<usize> {
+        self.evidence_cap
     }
 
     /// Binds this ledger's stop on the running thread, if it has one.
@@ -1114,8 +1213,16 @@ impl Ledger {
     }
 
     /// Relaxation boundaries recorded against this ledger in execution order.
+    ///
+    /// Under [`Ledger::keep_recent_evidence`] these are the newest ones.
     pub fn quench_boundaries(&self) -> &[QuenchBoundary] {
-        &self.quench_boundaries
+        self.quench_boundaries.as_slice()
+    }
+
+    /// Relaxation boundaries recorded but no longer kept under
+    /// [`Ledger::keep_recent_evidence`]. Zero without a cap.
+    pub fn dropped_quench_boundaries(&self) -> usize {
+        self.quench_boundaries.dropped()
     }
 }
 
@@ -1144,7 +1251,12 @@ pub struct Outcome {
     /// Energy belonging to [`Outcome::final_state`].
     pub final_energy: f64,
     /// Accepted live-chain edges in execution order.
+    ///
+    /// Under [`Ledger::keep_recent_evidence`] these are the newest ones.
     pub accepted_transitions: Vec<AcceptedTransition>,
+    /// Accepted transitions the run made but did not keep under
+    /// [`Ledger::keep_recent_evidence`]. Zero without a cap.
+    pub dropped_transitions: usize,
     /// Hops taken.
     pub hops: usize,
     /// Trials rejected by screening before a full relaxation.
@@ -4827,7 +4939,7 @@ where
     let mut orbit_duplicates = 0usize;
     let mut orbit_gain = 0.0_f64;
     let surface_hops = (0usize, 0usize, 0.0_f64);
-    let mut accepted_transitions = Vec::new();
+    let mut accepted_transitions = Retained::new(ledger.evidence_cap);
     // All live-state replacement consumes one complete destination record.
     // Ordinary hops supply their paid history report; auxiliary adoptions
     // observe their paid certificate once without issuing another PES call.
@@ -5911,8 +6023,8 @@ where
                     current_gradient: current_validation_gradient.as_ref().map(|g| g.view()),
                     best_state: ledger.best_state.as_ref().map(|state| state.view()),
                     best_energy: ledger.best,
-                    quench_boundaries: &ledger.quench_boundaries[checkpoint_quench_start..],
-                    accepted_transitions: &accepted_transitions[checkpoint_transition_start..],
+                    quench_boundaries: ledger.quench_boundaries.since(checkpoint_quench_start),
+                    accepted_transitions: accepted_transitions.since(checkpoint_transition_start),
                     charged: ledger.spent(),
                     remaining: ledger.remaining(),
                     hops,
@@ -5920,8 +6032,8 @@ where
                 };
                 let checkpoint_action = checkpoint(snapshot);
                 checkpoint_hops = hops;
-                checkpoint_quench_start = ledger.quench_boundaries.len();
-                checkpoint_transition_start = accepted_transitions.len();
+                checkpoint_quench_start = ledger.quench_boundaries.recorded();
+                checkpoint_transition_start = accepted_transitions.recorded();
                 next_checkpoint = ledger
                     .spent()
                     .checked_div(interval)
@@ -9817,7 +9929,8 @@ where
         best_state: ledger.best_state.clone(),
         final_state: Some(x.clone()),
         final_energy: e,
-        accepted_transitions,
+        dropped_transitions: accepted_transitions.dropped(),
+        accepted_transitions: accepted_transitions.into_vec(),
         hops,
         screened_out,
         basins: n_basins,
