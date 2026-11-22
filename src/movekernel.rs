@@ -1158,6 +1158,11 @@ pub struct Symmetrise {
 const ESTABLISHED_SYMMETRY_ORDERS: usize = 5;
 const SYMMETRY_TAIL_BUCKETS: usize = ESTABLISHED_SYMMETRY_ORDERS + 2;
 
+fn symmetry_tail_weight(draw: f64) -> f64 {
+    let squared = draw * draw;
+    squared * (0.05 + 0.95 * draw)
+}
+
 fn symmetry_order_from_draw(orders: &[usize], established_order: usize, blend_draw: f64) -> usize {
     let established = orders.len().min(ESTABLISHED_SYMMETRY_ORDERS);
     if orders.len() == established {
@@ -1167,7 +1172,7 @@ fn symmetry_order_from_draw(orders: &[usize], established_order: usize, blend_dr
     if established_order != orders[established - 1] || tail_draw >= 1.0 {
         return established_order;
     }
-    let weighted = tail_draw * tail_draw * tail_draw;
+    let weighted = symmetry_tail_weight(tail_draw);
     let tail = ((weighted * (orders.len() - established) as f64) as usize)
         .min(orders.len() - established - 1);
     orders[established + tail]
@@ -1181,8 +1186,8 @@ fn symmetry_order_and_blend<R: Rng + ?Sized>(orders: &[usize], rng: &mut R) -> (
     // Draw among the established orders first, exactly as the five-order
     // library did. Only the highest established order can open one fixed
     // seventh bucket that replaces it with the size-independent general-order
-    // tail. The escape interval weights every larger order, favouring its
-    // lower end.
+    // tail. A 95% cubic and 5% quadratic map reaches every larger order while
+    // favouring the lower end.
     let order = symmetry_order_from_draw(orders, established_order, blend_draw);
     (order, blend)
 }
@@ -1295,7 +1300,16 @@ mod cluster_move_tests {
         assert!((1_500..=2_500).contains(&counts[5]), "{counts:?}");
         for tail in 0..orders.len() - established.len() {
             let weighted = (tail as f64 + 0.5) / (orders.len() - established.len()) as f64;
-            let draw = weighted.cbrt() / SYMMETRY_TAIL_BUCKETS as f64;
+            let (mut low, mut high) = (0.0, 1.0);
+            for _ in 0..64 {
+                let mid = 0.5 * (low + high);
+                if symmetry_tail_weight(mid) < weighted {
+                    low = mid;
+                } else {
+                    high = mid;
+                }
+            }
+            let draw = 0.5 * (low + high) / SYMMETRY_TAIL_BUCKETS as f64;
             let selected = symmetry_order_from_draw(&orders, established[4], draw);
             assert_eq!(selected, orders[established.len() + tail]);
             tail_orders.insert(selected);
