@@ -55,6 +55,11 @@ on:
         required: false
         type: string
         default: '[{"name":"3.14t","image":"ghcr.io/nascheme/numpy-tsan:3.14t@sha256:f6dd658f1a155be35e27b182cac97c2a77c4b2d62bacb81753beaba725978149","build_numpy":"false"}]'
+      pytest-args:
+        description: Extra arguments appended to the pytest invocation.
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -95,6 +100,7 @@ jobs:
           RUST_TOOLCHAIN: ${{ inputs.rust-toolchain }}
           APT_PACKAGES: ${{ inputs.apt-packages }}
           SETUP_SCRIPT: ${{ inputs.setup-script }}
+          PYTEST_ARGS: ${{ inputs.pytest-args }}
           IMAGE: ${{ matrix.target.image }}
           BUILD_NUMPY: ${{ matrix.target.build_numpy }}
           BOOTSTRAP_CPYTHON: ${{ matrix.target.bootstrap }}
@@ -274,14 +280,17 @@ jobs:
           # https://github.com/numpy/numpy/blob/30483388e8c07f1abd45b47c534801e9207d2643/tools/ci/tsan_suppressions.txt
           export OPENBLAS_NUM_THREADS=1
           export TSAN_OPTIONS="halt_on_error=1 allocator_may_return_null=1 suppressions=${SUP}"
+          mapfile -t extra_args < <("$PY" -c 'import os, shlex; [print(p) for p in shlex.split(os.environ.get("PYTEST_ARGS", ""))]')
           "$PY" -m pytest -s "/src/${PKG}/${TEST_PATH}" \
             --junitxml=/tsan-host/pytest-serial.xml \
+            "${extra_args[@]}" \
             --timeout=180 \
             -o faulthandler_timeout=120
           "$PY" -m pytest -s "/src/${PKG}/${TEST_PATH}" \
             --junitxml=/tsan-host/pytest-parallel.xml \
             --parallel-threads=4 \
             --iterations=5 \
+            "${extra_args[@]}" \
             --timeout=180 \
             -o faulthandler_timeout=120
           EOF
@@ -293,7 +302,7 @@ jobs:
           docker run --rm \
             --security-opt seccomp=unconfined \
             -e PKG -e TEST_PATH -e IMPORTS -e EXTRAS -e RUST_CRATE -e RUST_ARCHIVE -e TSAN_CMAKE_ARGS -e RUST_TOOLCHAIN \
-            -e APT_PACKAGES -e SETUP_SCRIPT -e BUILD_NUMPY -e BOOTSTRAP_CPYTHON \
+            -e APT_PACKAGES -e SETUP_SCRIPT -e PYTEST_ARGS -e BUILD_NUMPY -e BOOTSTRAP_CPYTHON \
             -v "$GITHUB_WORKSPACE":/src \
             -v "${tsan_dir}":/tsan-host \
             -w /src \
