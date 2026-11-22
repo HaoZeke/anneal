@@ -204,7 +204,7 @@ def test_cluster_search_custom_bonds():
         lambda x: rigid_energy_grad(x)[0],
         lambda x: rigid_energy_grad(x)[1],
         n,
-        8,
+        600,
         seed=0,
         recommended=False,
         start=start,
@@ -212,9 +212,8 @@ def test_cluster_search_custom_bonds():
         bonds=[[0, 1], [1, 2]],
     )
     assert np.asarray(out["best"]).shape == (6 * n,)
-    energy = rigid_energy_grad(out["best"])[0]
-    assert out["best_energy"] == pytest.approx(energy)
-    assert np.isfinite(out["best_energy"])
+    assert out["best_energy"] <= rigid_energy_grad(start)[0]
+    assert out["best_energy"] == pytest.approx(rigid_energy_grad(out["best"])[0])
 
 
 def test_cluster_search_ras_flag_exists_and_recommended_defaults():
