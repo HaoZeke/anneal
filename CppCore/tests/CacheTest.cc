@@ -13,6 +13,7 @@
 #ifdef RGPOT_HAS_DFTD4
 #include "rgpot/D4Pot/D4Pot.hpp"
 #endif
+#include "TestTempDir.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
 #include "rgpot/PotentialCache.hpp"
 
@@ -51,7 +52,8 @@ TEST_CASE("Potential caching with rgpot", "[Potential]") {
     // Setup RocksDB Manually
     rocksdb::Options options;
     options.create_if_missing = true;
-    std::string db_path = "/tmp/rgpot_test_rocksdb_manual";
+    rgpot::tests::TestTempDir dir("rgpot-test-rocksdb-manual");
+    std::string db_path = (dir.path() / "cache-db").string();
     rocksdb::DestroyDB(db_path, options);
 #if RGPOT_ROCKSDB_UNIQUE_PTR_OPEN
     std::unique_ptr<rocksdb::DB> db;
@@ -84,7 +86,8 @@ TEST_CASE("Potential caching with rgpot", "[Potential]") {
   }
 
   SECTION("Managed DB Life-cycle (Path String)") {
-    std::string db_path = "/tmp/rgpot_test_rocksdb_managed";
+    rgpot::tests::TestTempDir dir("rgpot-test-rocksdb-managed");
+    std::string db_path = (dir.path() / "cache-db").string();
     // Ensure clean state
     rocksdb::Options opts;
     rocksdb::DestroyDB(db_path, opts);
@@ -111,7 +114,8 @@ TEST_CASE("Potential caching with rgpot", "[Potential]") {
   }
 
   SECTION("Persistence (Close and Reopen)") {
-    std::string db_path = "/tmp/rgpot_test_rocksdb_persist";
+    rgpot::tests::TestTempDir dir("rgpot-test-rocksdb-persist");
+    std::string db_path = (dir.path() / "cache-db").string();
     rocksdb::Options opts;
     rocksdb::DestroyDB(db_path, opts);
 
@@ -176,7 +180,8 @@ TEST_CASE("Cache keys separate parameter sets", "[Potential][cache]") {
 
   REQUIRE(potWide->paramsKey() != potNarrow->paramsKey());
 
-  std::string db_path = "/tmp/rgpot_test_rocksdb_params";
+  rgpot::tests::TestTempDir dir("rgpot-test-rocksdb-params");
+  std::string db_path = (dir.path() / "cache-db").string();
   rocksdb::Options opts;
   rocksdb::DestroyDB(db_path, opts);
   auto pcache = rgpot::cache::PotentialCache(db_path);
@@ -196,6 +201,13 @@ TEST_CASE("Cache keys separate parameter sets", "[Potential][cache]") {
   auto [eNarrow2, fNarrow2, vNarrow2] = (*potNarrow)(positions, types, box);
   REQUIRE(eWide2 == eWide);
   REQUIRE(eNarrow2 == eNarrow);
+}
+
+TEST_CASE("Cache test temp helper creates distinct directories",
+          "[Potential][cache][tempdir]") {
+  const rgpot::tests::TestTempDir first("rgpot-cache-unique");
+  const rgpot::tests::TestTempDir second("rgpot-cache-unique");
+  REQUIRE(first.path() != second.path());
 }
 
 namespace {

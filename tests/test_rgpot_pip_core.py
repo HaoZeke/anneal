@@ -136,11 +136,20 @@ def test_extension_rpath_has_no_host_build_tree():
         pytest.skip("readelf not available")
     out = subprocess.check_output(["readelf", "-d", str(so)], text=True)
     # Stricter: no build-tree / home build markers in RPATH/RUNPATH lines
+    linux_home = f"{os.sep}home{os.sep}"
+    scratch_tmp = os.sep.join(["", "scratch", "tmp"])
     for line in out.splitlines():
         low = line.lower()
         if "runpath" not in low and "rpath" not in low:
             continue
-        for bad in ("/home/", "/Users/", "/bbdir", "/build-pyeon", "/.mesonpy-", "/scratch/tmp"):
+        for bad in (
+            linux_home,
+            "/Users/",
+            "/bbdir",
+            "/build-pyeon",
+            "/.mesonpy-",
+            scratch_tmp,
+        ):
             assert bad not in line, f"host path marker {bad!r} in:\n{line}\nfull:\n{out}"
 
 

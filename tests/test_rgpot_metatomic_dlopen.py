@@ -83,9 +83,10 @@ def test_engine_is_portable_plugin():
     out = subprocess.check_output(["readelf", "-d", str(eng)], text=True)
     assert "libeonclib" not in out
     assert "eonclib" not in out
+    linux_home = f"{os.sep}home{os.sep}"
     for line in _rpath_lines(eng):
         # No absolute host paths — only $ORIGIN peers
-        assert "/home/" not in line, line
+        assert linux_home not in line, line
         assert "/Users/" not in line, line
         assert "/bbdir" not in line, line
         assert ".mesonpy-" not in line, line

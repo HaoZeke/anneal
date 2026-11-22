@@ -252,10 +252,10 @@ private:
   EnvGuard m_tempdir{"TEMPDIR"};
 };
 
-// Entries of /tmp missing from `before` that hold a file named like one
+// Entries of the process temporary directory missing from `before` that hold a file named like one
 // under `unpacked`, or carry `sha` in their name: what an unpack leaves
 // there, as torch's loader does in its mkdtemp directory. Other processes
-// add entries to /tmp too, so a new name alone shows nothing.
+// add entries there too, so a new name alone shows nothing.
 std::vector<std::string> unpacks_in_tmp(const std::set<std::string> &before,
                                         const fs::path &unpacked,
                                         const std::string &sha) {
@@ -267,7 +267,7 @@ std::vector<std::string> unpacks_in_tmp(const std::set<std::string> &before,
     if (it->is_regular_file(kind))
       files.insert(it->path().filename().string());
   }
-  const fs::path tmp("/tmp");
+  const fs::path tmp = fs::temp_directory_path();
   std::vector<std::string> out;
   for (const auto &entry : listing(tmp)) {
     if (before.count(entry) != 0)
@@ -578,7 +578,7 @@ TEST_CASE("RGPOT_CACHE_DIR unpacks without touching the temporary directory",
   Scratch s;
   const PrivateTemp temp(s.path / "tmp");
   REQUIRE(fs::equivalent(fs::temp_directory_path(), temp.path));
-  const auto tmp_before = listing("/tmp");
+  const auto tmp_before = listing(temp.path);
   const auto data = zip(fake_members("w0"));
   const auto pkg = write_package(s.path, "fake.pt2", data);
   set_env(unpack::kCacheDirEnv, (s.path / "env-cache").string());

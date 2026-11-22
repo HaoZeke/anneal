@@ -82,11 +82,10 @@ std::set<std::string> temp_listing() {
   std::set<std::string> out;
   std::error_code ec;
   const auto sys = fs::temp_directory_path(ec);
-  if (!ec)
+  if (!ec) {
     for (const auto &name : listing(sys))
       out.insert(sys.string() + "|" + name);
-  for (const auto &name : listing("/tmp"))
-    out.insert("/tmp|" + name);
+  }
   return out;
 }
 

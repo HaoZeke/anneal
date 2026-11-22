@@ -363,7 +363,7 @@ def selftest() -> int:
             args = parse_cli(
                 [
                     "cmake",
-                    "/tmp/build",
+                    "/work/build",
                     "tests=1",
                     "--ctest",
                     "/usr/bin/ctest",
@@ -372,7 +372,7 @@ def selftest() -> int:
                 ]
             )
             self.assertEqual(args.system, "cmake")
-            self.assertEqual(args.build, Path("/tmp/build"))
+            self.assertEqual(args.build, Path("/work/build"))
             self.assertEqual(args.ctest, "/usr/bin/ctest")
             self.assertEqual(args.features, ["tests=1", "core=0", "python=1"])
 
@@ -380,16 +380,16 @@ def selftest() -> int:
             args = parse_cli(
                 [
                     "meson",
-                    "/tmp/meson-build",
+                    "/work/meson-build",
                     "tests=1",
                     "--list",
-                    "/tmp/out.txt",
+                    "/work/out.txt",
                     "core=1",
                 ]
             )
             self.assertEqual(args.system, "meson")
-            self.assertEqual(args.build, Path("/tmp/meson-build"))
-            self.assertEqual(args.list, Path("/tmp/out.txt"))
+            self.assertEqual(args.build, Path("/work/meson-build"))
+            self.assertEqual(args.list, Path("/work/out.txt"))
             self.assertEqual(args.features, ["tests=1", "core=1"])
 
             before = parse_cli(
@@ -397,12 +397,12 @@ def selftest() -> int:
                     "--ctest",
                     "custom-ctest",
                     "cmake",
-                    "/tmp/cmake-build",
+                    "/work/cmake-build",
                     "tests=0",
                 ]
             )
             self.assertEqual(before.ctest, "custom-ctest")
-            self.assertEqual(before.build, Path("/tmp/cmake-build"))
+            self.assertEqual(before.build, Path("/work/cmake-build"))
             self.assertEqual(before.features, ["tests=0"])
 
         def test_missing_build_or_extra_lint_args_fail(self) -> None:

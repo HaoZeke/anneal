@@ -7,10 +7,10 @@ use rgpot_core::Potentials_capnp::potential_result;
 
 #[test]
 fn candidates_are_prefix_parameterized() {
-    let nwchem = library_candidates("nwchemc", Some("/opt/lib/libnwchemc.so"));
+    let nwchem = library_candidates("nwchemc", Some("/vendor/lib/libnwchemc.so"));
     let cpmd = library_candidates("cpmdc", None);
 
-    assert_eq!(nwchem[0], "/opt/lib/libnwchemc.so");
+    assert_eq!(nwchem[0], "/vendor/lib/libnwchemc.so");
     assert!(nwchem.iter().any(|path| path == "libnwchemc.so"));
     assert!(cpmd.iter().any(|path| path == "libcpmdc.so"));
     assert!(!cpmd.iter().any(|path| path.contains("nwchem")));

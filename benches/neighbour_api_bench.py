@@ -21,6 +21,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -30,7 +31,7 @@ CUTOFF = 5.0
 LATTICE = 3.615
 REPEATS = 7
 ROOT = Path(__file__).resolve().parents[1]
-BINARY = Path("/tmp/rgpot-prof/neighbour_api_rgpot")
+BINARY = Path(tempfile.gettempdir()) / "rgpot-prof" / "neighbour_api_rgpot"
 
 
 def fcc(n: int) -> tuple[np.ndarray, np.ndarray]:

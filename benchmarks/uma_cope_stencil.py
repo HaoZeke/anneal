@@ -12,8 +12,8 @@ Example:
     python benchmarks/uma_cope_stencil.py \
       --engine build-uma/CppCore/libuma_engine.so \
       --schema CppCore/rgpot/rpc/Potentials.capnp \
-      --package single=/tmp/cope-b0.pt2 \
-      --package b8=/tmp/cope-b8.pt2 \
+      --package single=$TMPDIR/cope-b0.pt2 \
+      --package b8=$TMPDIR/cope-b8.pt2 \
       --repeats 3 \
       --out benchmarks/uma_cope_stencil.csv
 """

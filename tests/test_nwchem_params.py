@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import tempfile
 from pathlib import Path
 
 import capnp
@@ -14,6 +15,7 @@ SCHEMA_PATH = SCRIPT_DIR / "../CppCore/rgpot/rpc/Potentials.capnp"
 pot_capnp = capnp.load(str(SCHEMA_PATH))
 
 sys.path.insert(0, str(SCRIPT_DIR))
+from _temp_paths import temp_path_str  # noqa: E402
 from nwchem_params import (  # noqa: E402
     configure_nwchem,
     make_nwchem_params,
@@ -58,7 +60,7 @@ def test_make_nwchem_params_fields(monkeypatch) -> None:
     assert params.nwchemRoot == "/env/nwchem"
 
 
-def test_make_potential_config_nwchem_arm() -> None:
+def test_make_potential_config_nwchem_arm(tmp_path: Path) -> None:
     cfg = make_potential_config_nwchem(
         pot_capnp,
         basis="sto-3g",
@@ -66,15 +68,15 @@ def test_make_potential_config_nwchem_arm() -> None:
         scf_type="rhf",
         charge=0,
         multiplicity=1,
-        engine_path="/opt/libnwchemc.so",
-        nwchem_root="/opt/nwchem",
+        engine_path=temp_path_str(tmp_path, "lib/libnwchemc.so"),
+        nwchem_root=temp_path_str(tmp_path, "nwchem"),
     )
     assert cfg.which() == "nwchem"
     assert cfg.nwchem.basis == "sto-3g"
     assert cfg.nwchem.theory == "scf"
     assert cfg.nwchem.scfType == "rhf"
-    assert cfg.nwchem.enginePath == "/opt/libnwchemc.so"
-    assert cfg.nwchem.nwchemRoot == "/opt/nwchem"
+    assert cfg.nwchem.enginePath == temp_path_str(tmp_path, "lib/libnwchemc.so")
+    assert cfg.nwchem.nwchemRoot == temp_path_str(tmp_path, "nwchem")
 
 
 def test_make_potential_config_none_arm() -> None:
@@ -82,7 +84,7 @@ def test_make_potential_config_none_arm() -> None:
     assert cfg.which() == "none"
 
 
-def test_configure_nwchem_async_round_trip() -> None:
+def test_configure_nwchem_async_round_trip(tmp_path: Path) -> None:
     pot = FakePotential()
     ok, msg = asyncio.run(
         configure_nwchem(
@@ -93,8 +95,8 @@ def test_configure_nwchem_async_round_trip() -> None:
             scf_type="uhf",
             charge=1,
             multiplicity=2,
-            engine_path="/tmp/libnwchemc.so",
-            nwchem_root="/tmp/nwchem",
+            engine_path=temp_path_str(tmp_path, "libnwchemc.so"),
+            nwchem_root=temp_path_str(tmp_path, "nwchem"),
         )
     )
     assert ok is True
@@ -105,8 +107,8 @@ def test_configure_nwchem_async_round_trip() -> None:
     assert pot.config.nwchem.scfType == "uhf"
     assert pot.config.nwchem.charge == 1
     assert pot.config.nwchem.multiplicity == 2
-    assert pot.config.nwchem.enginePath == "/tmp/libnwchemc.so"
-    assert pot.config.nwchem.nwchemRoot == "/tmp/nwchem"
+    assert pot.config.nwchem.enginePath == temp_path_str(tmp_path, "libnwchemc.so")
+    assert pot.config.nwchem.nwchemRoot == temp_path_str(tmp_path, "nwchem")
 
 
 def test_nwchem_params_flat_serialize_round_trip() -> None:
@@ -136,8 +138,10 @@ if __name__ == "__main__":
 
     with pytest.MonkeyPatch.context() as monkeypatch:
         test_make_nwchem_params_fields(monkeypatch)
-    test_make_potential_config_nwchem_arm()
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        test_make_potential_config_nwchem_arm(root)
+        test_configure_nwchem_async_round_trip(root)
     test_make_potential_config_none_arm()
-    test_configure_nwchem_async_round_trip()
     test_nwchem_params_flat_serialize_round_trip()
     print("test_nwchem_params: all ok")
