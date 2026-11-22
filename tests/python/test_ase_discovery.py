@@ -22,10 +22,38 @@ def test_calculators_are_registered_with_ase() -> None:
     assert names.count("rgpot_rpc") == 1
 
 
-def _run_isolated(code: str) -> None:
+def _run_isolated(code: str, env: dict[str, str] | None = None) -> None:
     subprocess.run(
-        [sys.executable, "-c", code], check=True, env=os.environ.copy()
+        [sys.executable, "-c", code],
+        check=True,
+        env=os.environ.copy() if env is None else env,
     )
+
+
+def _require_ase_plugins() -> None:
+    try:
+        import ase._4.plugins  # noqa: F401
+    except ImportError:
+        pytest.skip("ASE does not provide the experimental plugin API")
+
+
+def _plugin_entry_env(tmp_path: Path, dist_name: str) -> dict[str, str]:
+    """Point a fresh interpreter at an ``ase.plugins`` entry for rgpot.ase."""
+    dist_info = tmp_path / f"{dist_name}-0.dist-info"
+    dist_info.mkdir()
+    (dist_info / "METADATA").write_text(
+        f"Metadata-Version: 2.1\nName: {dist_name}\nVersion: 0\n",
+        encoding="utf-8",
+    )
+    (dist_info / "entry_points.txt").write_text(
+        f"[ase.plugins]\n{dist_name} = rgpot.ase\n",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(tmp_path), env.get("PYTHONPATH", "")]
+    ).rstrip(os.pathsep)
+    return env
 
 
 def test_registry_registration_is_idempotent() -> None:
@@ -124,25 +152,8 @@ def test_lazy_calculator_plugins_resolve() -> None:
 
 
 def test_ase_entry_point_scan_import_order(tmp_path: Path) -> None:
-    try:
-        import ase._4.plugins  # noqa: F401
-    except ImportError:
-        pytest.skip("ASE does not provide the experimental plugin API")
-
-    dist_info = tmp_path / "rgpot_import_order_test-0.dist-info"
-    dist_info.mkdir()
-    (dist_info / "METADATA").write_text(
-        "Metadata-Version: 2.1\nName: rgpot-import-order-test\nVersion: 0\n",
-        encoding="utf-8",
-    )
-    (dist_info / "entry_points.txt").write_text(
-        "[ase.plugins]\nrgpot-import-order-test = rgpot.ase\n",
-        encoding="utf-8",
-    )
-    env = os.environ.copy()
-    env["PYTHONPATH"] = os.pathsep.join(
-        [str(tmp_path), env.get("PYTHONPATH", "")]
-    ).rstrip(os.pathsep)
+    _require_ase_plugins()
+    env = _plugin_entry_env(tmp_path, "rgpot-import-order-test")
     code = """
 from ase._4.plugins import plugins
 import rgpot.ase as rgpot_ase
@@ -152,4 +163,69 @@ assert by_name["rgpot"]() is rgpot_ase.RgpotCalculator
 assert by_name["rgpot_rpc"]() is rgpot_ase.RgpotRpcCalculator
 assert rgpot_ase.__ase_plugins__ is rgpot_ase.__ase_plugins__
 """
-    subprocess.run([sys.executable, "-c", code], check=True, env=env)
+    _run_isolated(code, env)
+
+
+def test_plugins_keep_module_when_read_before_plugin_api(
+    tmp_path: Path,
+) -> None:
+    _require_ase_plugins()
+    env = _plugin_entry_env(tmp_path, "rgpot-plugin-reentry-test")
+    code = """
+import sys
+
+assert "ase._4.plugins" not in sys.modules
+import rgpot.ase as rgpot_ase
+
+assert "ase._4.plugins" not in sys.modules
+plugins = rgpot_ase.__ase_plugins__
+assert rgpot_ase.__ase_plugins__ is plugins
+ours = [
+    plugin for plugin in plugins if plugin.name in {"rgpot", "rgpot_rpc"}
+]
+assert {plugin.name for plugin in ours} == {"rgpot", "rgpot_rpc"}
+assert all(plugin.module is not None for plugin in ours)
+"""
+    _run_isolated(code, env)
+
+
+def test_concurrent_plugin_reads_return_the_same_object(tmp_path: Path) -> None:
+    _require_ase_plugins()
+    env = _plugin_entry_env(tmp_path, "rgpot-plugin-threads-test")
+    code = """
+import sys
+import threading
+
+assert "ase._4.plugins" not in sys.modules
+import rgpot.ase as rgpot_ase
+
+assert "ase._4.plugins" not in sys.modules
+count = 16
+barrier = threading.Barrier(count, timeout=60)
+found = []
+errors = []
+lock = threading.Lock()
+
+
+def read():
+    try:
+        barrier.wait()
+        plugins = rgpot_ase.__ase_plugins__
+        with lock:
+            found.append(plugins)
+    except Exception as exc:
+        with lock:
+            errors.append(exc)
+
+
+threads = [threading.Thread(target=read) for _ in range(count)]
+for thread in threads:
+    thread.start()
+for thread in threads:
+    thread.join()
+
+assert not errors, errors
+assert len(found) == count
+assert all(plugins is found[0] for plugins in found)
+"""
+    _run_isolated(code, env)

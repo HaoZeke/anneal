@@ -23,7 +23,7 @@ __all__ = [
 def _make_ase_plugins() -> set[Any]:
     """Build ASE 3.29 calculator plugins without importing its API eagerly."""
     try:
-        from ase._4.plugins.plugin import CalculatorPlugin  # pyright: ignore[reportMissingImports]
+        from ase._4.plugins.plugin import CalculatorPlugin  # pyright: ignore[reportMissingImports]  # ASE<3.29
     except ImportError:
         return set()
     citation = "https://github.com/OmniPotentRPC/rgpot"
@@ -44,6 +44,8 @@ def _make_ase_plugins() -> set[Any]:
 def __getattr__(name: str) -> Any:
     if name == "__ase_plugins__":
         plugins = _make_ase_plugins()
-        globals()[name] = plugins
-        return plugins
+        # The import above re-enters through ASE's entry-point scan and
+        # stores the plugins it bound to this module. Keep that set.
+        # setdefault also makes the first store win across threads.
+        return globals().setdefault(name, plugins)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
