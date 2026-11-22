@@ -209,7 +209,7 @@ jobs:
             unzip -qo "${whl}" -d "${tmp}"
             tag=$(basename "${whl}" .whl)
             while IFS= read -r f; do
-              if file "${f}" | grep -q ELF; then
+              if file "${f}" | grep ELF >/dev/null; then
                 cp -a "${f}" "isa-audit-libs/${tag}--$(basename "${f}")"
               fi
             done < <(find "${tmp}" -type f \( \
@@ -224,7 +224,7 @@ jobs:
             name="${f##*--}"
             case "${name}" in
               librgpot*|_core*)
-                if readelf -S "${f}" | grep -q '\.symtab'; then
+                if readelf -S "${f}" | grep '\.symtab' >/dev/null; then
                   echo "symtab: ${f}"
                 else
                   echo "NO SYMTAB: ${f}" >&2
