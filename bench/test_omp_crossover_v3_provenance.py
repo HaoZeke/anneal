@@ -126,7 +126,7 @@ def resolved_commit_tree(
     if resolved is not None:
         if isinstance(arm_pins, dict) and pinned is None:
             raise SystemExit(f"{arm}: commit is not pinned: {sha}")
-        if pinned is not None and pinned != resolved and is_shallow_git(repo):
+        if pinned != resolved:
             raise SystemExit(
                 f"{arm}: pinned tree {pinned} does not match commit tree {resolved}"
             )
