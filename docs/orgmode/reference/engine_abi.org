@@ -60,8 +60,9 @@ Every library above exports
 =rgpot_engine_abi_compatible=, =rgpot_engine_name=, =rgpot_engine_version=, =rgpot_engine_model_digest=,
 =rgpot_engine_caps=,
 =rgpot_engine_last_error=, =rgpot_engine_set_num_threads=, =rgpot_engine_set_charge_spin=, =rgpot_engine_select_orbitals=,
-=rgpot_engine_copy_orbitals=, =rgpot_engine_last_components= and
-=rgpot_engine_component_name=.
+=rgpot_engine_copy_orbitals=, =rgpot_engine_last_components=,
+=rgpot_engine_component_name=, =rgpot_engine_set_cache= and
+=rgpot_engine_cache_counts=.
 Only =libcomposite_engine= has components; the others report none.
 None of them exports =rgpot_engine_model_state=, =rgpot_engine_set_callbacks=,
 =rgpot_engine_hint= or =rgpot_engine_neighbor_options=.
