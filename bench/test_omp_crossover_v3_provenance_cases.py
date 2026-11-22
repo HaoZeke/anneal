@@ -107,12 +107,16 @@ def run_checker(
     payload: dict,
     repo: Path = ROOT,
     pins: dict[str, Any] | None = None,
+    report_text: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     with tempfile.TemporaryDirectory() as directory:
         record = Path(directory) / SOURCE_JSON.name
         report = Path(directory) / REPORT_NAME
         record.write_text(json.dumps(payload) + "\n", encoding="utf-8")
-        report.write_bytes(SOURCE_REPORT.read_bytes())
+        if report_text is None:
+            report.write_bytes(SOURCE_REPORT.read_bytes())
+        else:
+            report.write_text(report_text, encoding="utf-8")
         command = [
             sys.executable,
             str(CHECKER),
@@ -159,9 +163,15 @@ def require_tree_rejection(result: subprocess.CompletedProcess[str], arm: str, r
 
 
 def require_exact_rejection(result: subprocess.CompletedProcess[str], expected: str) -> None:
-    text = (result.stdout + result.stderr).strip()
+    merged = (result.stdout + result.stderr).strip()
+    lines = [
+        line
+        for line in merged.splitlines()
+        if not line.startswith("provenance: repository history is absent;")
+    ]
+    text = "\n".join(lines).strip()
     if result.returncode == 0 or text != expected:
-        raise SystemExit(f"expected exact rejection {expected!r}, got {result.returncode} {text!r}")
+        raise SystemExit(f"expected exact rejection {expected!r}, got {result.returncode} {merged!r}")
 
 
 def require_missing_arm(result: subprocess.CompletedProcess[str], arm: str) -> None:
@@ -187,6 +197,12 @@ def require_invalid_field(
     result: subprocess.CompletedProcess[str], arm: str, field: str, value: object
 ) -> None:
     require_exact_rejection(result, f"{arm}: arm record has invalid {field}: {value!r}")
+
+
+def require_contains_rejection(result: subprocess.CompletedProcess[str], text: str) -> None:
+    merged = result.stdout + result.stderr
+    if result.returncode == 0 or text not in merged:
+        raise SystemExit(f"expected rejection containing {text!r}, got {result.returncode} {merged!r}")
 
 
 def require_commit_rejection(
@@ -369,6 +385,76 @@ def check_cases(original: dict, repo: Path) -> None:
     changed_team["name"] = "renamed-team"
     require_named_rejection(run_checker(renamed_arm, repo=repo), "team-1", "renamed-team")
 
+    duplicate_arm = json.loads(json.dumps(original))
+    duplicate_arm["metadata"]["arms"].append(json.loads(json.dumps(duplicate_arm["metadata"]["arms"][0])))
+    require_exact_rejection(
+        run_checker(duplicate_arm, repo=repo),
+        "metadata arms contain duplicate arm: stock",
+    )
+
+    whitespace_name = json.loads(json.dumps(original))
+    changed_team = next(arm for arm in whitespace_name["metadata"]["arms"] if arm["name"] == "team-1")
+    changed_team["name"] = "team 1"
+    require_exact_rejection(
+        run_checker(whitespace_name, repo=repo),
+        "metadata arm: arm name has whitespace: 'team 1'",
+    )
+
+    empty_name = json.loads(json.dumps(original))
+    changed_team = next(arm for arm in empty_name["metadata"]["arms"] if arm["name"] == "team-1")
+    changed_team["name"] = ""
+    require_exact_rejection(
+        run_checker(empty_name, repo=repo),
+        "metadata arm: arm name is invalid: ''",
+    )
+
+    bad_hex_sha = json.loads(json.dumps(original))
+    changed_team = next(arm for arm in bad_hex_sha["metadata"]["arms"] if arm["name"] == "team-1")
+    changed_team["sha"] = "0" * 39 + "g"
+    changed_team["commit_sha"] = "0" * 39 + "g"
+    require_invalid_field(
+        run_checker(bad_hex_sha, repo=repo), "team-1", "sha", "0" * 39 + "g"
+    )
+
+    bad_hex_tree = json.loads(json.dumps(original))
+    changed_team = next(arm for arm in bad_hex_tree["metadata"]["arms"] if arm["name"] == "team-1")
+    changed_team["tree"] = "A" * 40
+    changed_team["commit_tree"] = "A" * 40
+    require_invalid_field(run_checker(bad_hex_tree, repo=repo), "team-1", "tree", "A" * 40)
+
+    bad_identity = json.loads(json.dumps(original))
+    bad_identity["identity"]["configured_team_min_atoms"] = 0
+    require_exact_rejection(
+        run_checker(bad_identity, repo=repo),
+        "identity has invalid configured_team_min_atoms: 0",
+    )
+
+    identity_mismatch = json.loads(json.dumps(original))
+    identity_mismatch["identity"]["configured_team_min_atoms"] = 2
+    require_exact_rejection(
+        run_checker(identity_mismatch, repo=repo),
+        "team-1: recorded threshold 1 does not match identity configured_team_min_atoms 2",
+    )
+
+    report_lines = SOURCE_REPORT.read_text(encoding="utf-8").splitlines()
+    table_start = next(i for i, line in enumerate(report_lines) if line.startswith("|Arm|"))
+    table_end = table_start + 2
+    while table_end < len(report_lines) and report_lines[table_end].startswith("|"):
+        table_end += 1
+    duplicate_report_lines = report_lines[:table_end] + ["|team-1|duplicate|"] + report_lines[table_end:]
+    duplicate_report = "\n".join(duplicate_report_lines) + "\n"
+    require_exact_rejection(
+        run_checker(original, repo=repo, report_text=duplicate_report),
+        "report arm table has duplicate arm: team-1",
+    )
+
+    empty_report_lines = report_lines[:table_end] + ["||blank|"] + report_lines[table_end:]
+    empty_report = "\n".join(empty_report_lines) + "\n"
+    require_exact_rejection(
+        run_checker(original, repo=repo, report_text=empty_report),
+        "report arm table has an empty arm name",
+    )
+
 
 def check_absent_commit_forgeries(original: dict[str, Any], repo: Path) -> None:
     arms = {arm["name"]: arm for arm in original["metadata"]["arms"]}
@@ -413,6 +499,20 @@ def check_absent_commit_forgeries(original: dict[str, Any], repo: Path) -> None:
         "team-1: pinned manifest has no arm entry",
     )
 
+    missing_commit_pin = json.loads(SOURCE_PINS.read_text(encoding="utf-8"))
+    del missing_commit_pin["team-1"][team["sha"]]
+    missing_pin_result = run_checker(original, repo=repo, pins=missing_commit_pin)
+    if commit_resolves(repo, team["sha"]):
+        require_exact_rejection(
+            missing_pin_result,
+            f"team-1: commit is not pinned: {team['sha']}",
+        )
+    else:
+        require_exact_rejection(
+            missing_pin_result,
+            f"team-1: commit does not resolve and has no pin: {team['sha']}",
+        )
+
     mismatched_pin = json.loads(SOURCE_PINS.read_text(encoding="utf-8"))
     mismatched_pin["team-1"][team["sha"]] = forged_tree
     require_tree_rejection(
@@ -420,6 +520,21 @@ def check_absent_commit_forgeries(original: dict[str, Any], repo: Path) -> None:
         "team-1",
         team["tree"],
         forged_tree,
+    )
+
+    whitespace_arm_pin = json.loads(SOURCE_PINS.read_text(encoding="utf-8"))
+    whitespace_arm_pin["team 1"] = whitespace_arm_pin["team-1"]
+    del whitespace_arm_pin["team-1"]
+    require_exact_rejection(
+        run_checker(original, repo=repo, pins=whitespace_arm_pin),
+        "pinned manifest: arm name has whitespace: 'team 1'",
+    )
+
+    bad_thresholds = json.loads(SOURCE_PINS.read_text(encoding="utf-8"))
+    bad_thresholds["kTeamMinAtoms"]["team-1"] = 0
+    require_exact_rejection(
+        run_checker(original, repo=repo, pins=bad_thresholds),
+        "pinned manifest has invalid kTeamMinAtoms for 'team-1'",
     )
 
 
@@ -446,10 +561,7 @@ def main() -> None:
     del forged_pins["team-1"]
     forged = run_checker(original, repo=ROOT, pins=forged_pins)
     stock = next(arm for arm in original["metadata"]["arms"] if arm["name"] == "stock")
-    if repo_enforces_commit_resolution(ROOT, original):
-        require_acceptance(forged, "git-backed provenance with forged pins")
-    else:
-        require_tree_rejection(forged, "stock", stock["tree"], "f" * 40)
+    require_tree_rejection(forged, "stock", stock["tree"], "f" * 40)
     with tempfile.TemporaryDirectory() as partial_git_dir:
         partial_repo = Path(partial_git_dir)
         subprocess.run(
@@ -486,6 +598,10 @@ def main() -> None:
         check_substituted_head(original, shallow_repo, head_sha, head_tree)
         with tempfile.TemporaryDirectory() as no_git_repo:
             no_git_path = Path(no_git_repo)
+            no_git_ok = run_checker(original, repo=no_git_path)
+            require_acceptance(no_git_ok, "original provenance record without git history")
+            if "repository history is absent" not in (no_git_ok.stdout + no_git_ok.stderr):
+                raise SystemExit("history-absent fallback was not reported explicitly")
             check_cases(original, no_git_path)
             check_absent_commit_forgeries(original, no_git_path)
             check_substituted_head(original, no_git_path, head_sha, head_tree)
@@ -529,10 +645,14 @@ def inflated_team_threshold(original: dict[str, Any], threshold: int) -> dict[st
 def check_substituted_head(
     original: dict[str, Any], repo: Path, head_sha: str, head_tree: str
 ) -> None:
+    configured = original["identity"]["configured_team_min_atoms"]
     swapped = run_checker(
-        substituted_team(original, head_sha, head_tree, 8192), repo=repo
+        substituted_team(original, head_sha, head_tree, configured), repo=repo
     )
-    if commit_resolves(repo, head_sha):
+    merged = swapped.stdout + swapped.stderr
+    if "stock: commit does not resolve" in merged:
+        require_contains_rejection(swapped, "commit does not resolve")
+    elif commit_resolves(repo, head_sha):
         require_exact_rejection(swapped, f"team-1: commit is not pinned: {head_sha}")
     else:
         require_exact_rejection(
