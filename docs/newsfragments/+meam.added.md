@@ -1,0 +1,2 @@
+<!-- Copyright 2023--present rgpot developers -->
+`MEAMPot` is the modified embedded-atom method of Baskes, Phys. Rev. B 46, 2727 (1992), doi:10.1103/PhysRevB.46.2727, with the second-neighbour form of Lee and Baskes, Phys. Rev. B 62, 8564 (2000), doi:10.1103/PhysRevB.62.8564. It reads the library and parameter files of the LAMMPS `pair_style meam`, handles periodic and triclinic cells with every image inside the cutoff, and writes the energy, the forces and the stress. Energy, forces and virial match LAMMPS to 1e-11 on the reference sets of the test suite.

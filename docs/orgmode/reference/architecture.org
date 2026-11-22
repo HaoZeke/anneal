@@ -142,6 +142,11 @@ See =docs/orgmode/howto/ipi.org=.
   read from LAMMPS tables.
 See [[file:eam_table.org][Tabulated EAM and Finnis-Sinclair potentials]].
 
+- =MEAMPot= (=PotType::MEAM=, =CppCore/rgpot/MEAM/=) :: Modified embedded-atom
+  method with first and second neighbours, driven by LAMMPS meam library and
+  parameter files.
+See [[file:meam.org][Modified embedded-atom method]].
+
 - =TIP4PPot=, =SPCEPot=, =TIP4PPtPot= (=-Dwith_water=true=) :: Flexible TIP4P,
   SPC/E and TIP4P on platinum, in =CppCore/rgpot/Water/=.
 

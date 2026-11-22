@@ -208,6 +208,25 @@ class.
   opened, when the file does not parse as =format=, and when =skin= is negative
   or not finite.
 
+*** =rgpot::MEAMConfig=
+
+- Inputs :: =library= (the LAMMPS meam library file, no default), =parameters=
+  (the parameter file, empty for none), =elements= (the library entries to use,
+  in the order the parameter file indexes them; empty takes the whole library),
+  =atomic_numbers= (one per entry; empty reads each from the leading symbol of
+  the entry name), =periodic= (count every image within reach, default true),
+  =stress= (write the stress, default false).
+- Units :: eV and Angstrom, as the files.
+- Outputs :: the parameters of =rgpot::MEAMPot=.
+  See [[file:meam.org][Modified embedded-atom method]].
+- Errors :: the constructor throws =std::invalid_argument= for a file that
+  cannot be opened or does not parse.
+  It throws the same for a library that lacks a requested element, for
+  =atomic_numbers= without one entry per element, and for a parameter set the
+  model cannot build (=ibar= 2, or =nn2= on a C11 pair).
+  =forceImpl= throws it for an atom whose number no element has and for a
+  singular cell.
+
 *** =rgpot::EMTConfig=
 
 - Inputs :: =rasmussen= (default false): true selects the Rasmussen parameter
@@ -351,10 +370,10 @@ A sentence after the fields names a class whose behaviour differs in detail.
 
 - Applies to :: rgpot::D2CpmdPot, rgpot::D2Pot, rgpot::EAMPot,
   rgpot::EAMTablePot, rgpot::EMTPot, rgpot::ExprPot, rgpot::LJClusterPot,
-  rgpot::LJPot, rgpot::MorsePot, rgpot::SPCEPot, rgpot::StillingerWeberSi,
-  rgpot::SuttonChenPot, rgpot::TIP4PPot, rgpot::TIP4PPtPot, rgpot::TersoffSiC,
-  rgpot::ZBLPot, rgpot::lr::CoulombPot, rgpot::lr::DispersionPot,
-  rgpot::lr::NlhPot
+  rgpot::LJPot, rgpot::MEAMPot, rgpot::MorsePot, rgpot::SPCEPot,
+  rgpot::StillingerWeberSi, rgpot::SuttonChenPot, rgpot::TIP4PPot,
+  rgpot::TIP4PPtPot, rgpot::TersoffSiC, rgpot::ZBLPot, rgpot::lr::CoulombPot,
+  rgpot::lr::DispersionPot, rgpot::lr::NlhPot
 - Inputs :: none.
 - Units :: none.
 - Outputs :: a 64-bit FNV-1a hash of the parameters and a kernel version,
@@ -1040,6 +1059,63 @@ This class is built with =-Dwith_eam_table=true=.
   so far.
   A call that keeps the list does not count, and the two stages, which run on
   the host's list, build none.
+- Errors :: none.
+
+*** =rgpot::MEAMPot=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+explicit MEAMPot(const MEAMConfig &config);
+MEAMPot(MEAMModel model, bool periodic, bool stress,
+        std::vector<int> atomic_numbers = {});
+#+end_src
+
+- Inputs :: a =rgpot::MEAMConfig=, or a built =rgpot::MEAMModel= with the
+  =periodic= and =stress= flags and one atomic number per element of the model.
+  An empty =atomic_numbers= reads each from the leading symbol of the library
+  name.
+- Units :: eV and Angstrom.
+  Stress in eV/Angstrom^3.
+- Outputs :: the MEAM or 2NN MEAM energy and its exact analytic forces.
+  Each atom picks its element by its atomic number.
+  With =stress= set and a cell of positive volume the force call writes the
+  Cauchy stress.
+  The instance keeps nothing between calls, so one instance serves concurrent
+  callers.
+  See [[file:meam.org][Modified embedded-atom method]].
+- Errors :: =std::invalid_argument= with a message starting =MEAM:= or
+  =MEAMPot:=.
+  The constructors throw it in the cases of =rgpot::MEAMConfig=, and for a
+  negative atomic number.
+  The force call throws it for an atomic number that no element has, for a null
+  input buffer, for a periodic cell that is singular, and for a cell so thin
+  that the image count of the reach is too large.
+
+*** =rgpot::MEAMPot::cutoff=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] double cutoff() const noexcept;
+#+end_src
+
+- Inputs :: none.
+- Units :: Angstrom.
+- Outputs :: the radial cutoff rc of the model.
+  Screening atoms reach further, to rc times the root of the largest ellipse
+  bound.
+- Errors :: none.
+
+*** =rgpot::MEAMPot::model=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] const MEAMModel &model() const noexcept;
+#+end_src
+
+- Inputs :: none.
+- Units :: as in =rgpot::MEAMConfig=.
+- Outputs :: the =rgpot::MEAMModel= the instance was built with: the mixed
+  parameters, the reference densities and the pair tables.
 - Errors :: none.
 
 *** =rgpot::SuttonChenPot=

@@ -483,6 +483,9 @@ if not get_option('with_rpc_client_only')
     subdir('rgpot/Tersoff')  # 'tersoff_sic': 1989 Tersoff Si-C
     rgpotentials += [tersoff_sic]
 
+    subdir('rgpot/MEAM')  # 'meam': Baskes MEAM and Lee-Baskes 2NN MEAM
+    rgpotentials += [meam]
+
     subdir('rgpot/EMT')  # 'asap_emt'
     rgpotentials += [asap_emt]
 

@@ -1,0 +1,36 @@
+library.meam, Ni.meam, SiC.meam, library_2nn.meam,
+MoCoNiVFeAlCr_2nn.meam and AlSiMgCuFe.meam in this directory are copied
+unchanged from the potentials/ directory of LAMMPS at tag
+stable_30Sep2026_update1.
+
+The README of LAMMPS at that tag carries this copyright notice:
+
+Copyright (2003) Sandia Corporation.  Under the terms of Contract
+DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
+certain rights in this software.  This software is distributed under
+the GNU General Public License.
+
+Those six files are distributed under the GNU General Public License,
+version 2, the license of the LAMMPS distribution at that tag.
+COPYING in this directory is the full text of that license.
+
+Those six files come WITHOUT ANY WARRANTY; without even the implied
+warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+Sections 11 and 12 of COPYING give the terms.
+
+library.meam: Baskes, Phys. Rev. B 46, 2727 (1992), and the further
+parameter sets listed in the file.
+Ni.meam: parameter file of the LAMMPS examples/meam directory.
+SiC.meam: parameter file for the Si-C pair of the same directory.
+library_2nn.meam, MoCoNiVFeAlCr_2nn.meam: Wang, Kwon, Kim et al., npj
+Comput. Mater. 9, 60 (2023), second-neighbour MEAM for Mo, Co, Ni, V, Fe,
+Al and Cr.
+AlSiMgCuFe.meam: Jelinek, Groh, Horstemeyer, Houze, Kim, Wagner, Moitra and
+Baskes, Phys. Rev. B 85, 245102 (2012), second-neighbour MEAM for the AlS,
+SiS, MgS, CuS and FeS entries of library.meam.
+
+COPYING and this notice cover only those six files.
+make_lammps_ref.py, the opts_*.meam files, the *.ref files and the reader
+sources in this repository stay under the MIT license. The *.ref files
+hold numbers computed by LAMMPS pair_style meam. They record the LAMMPS
+version on their first line.
