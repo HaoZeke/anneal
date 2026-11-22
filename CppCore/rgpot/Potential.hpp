@@ -63,8 +63,10 @@ public:
    * @param box The simulation cell vectors.
    * @return A pair containing the energy and the force matrix.
    */
-  /// Energy, forces, and optional uncertainty scale (eV). See derived
-  /// Potential::operator() for variance semantics.
+  /// Energy, forces, and an optional variance in the square of the energy
+  /// unit (eV^2) or of the force unit (eV^2/Angstrom^2); one square root gives
+  /// a scale in eV or eV/Angstrom. See derived Potential::operator() for what
+  /// each potential stores.
   virtual std::tuple<double, types::AtomMatrix, double>
   operator()(const types::AtomMatrix &positions,
              const std::vector<int> &atmtypes,
@@ -204,6 +206,8 @@ public:
    *         Metatomic stores the square of the energy_uncertainty mean, or
    *         the mean-square force residual over orientations. Variance is 0
    *         when unused. Callers that want an RMS take one square root.
+   *         A weighted sum (ExprPot, SumPot) scales each term's variance by
+   *         the square of its weight.
    */
   std::tuple<double, types::AtomMatrix, double>
   operator()(const types::AtomMatrix &positions,

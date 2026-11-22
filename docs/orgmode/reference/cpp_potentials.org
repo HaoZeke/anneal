@@ -1661,8 +1661,8 @@ ExprPot(std::string expression, std::vector<Term> terms);
   child's energy.
 - Outputs :: a potential whose energy is f(E_0, E_1, ...) over the children.
   The expression and each derivative are compiled once in the constructor.
-  The variance is the sum of each child's variance times its derivative, or 0
-  when any child variance is not finite.
+  The variance is the sum of each child's variance times the square of its
+  derivative, or 0 when any child variance is not finite.
   =caps()= is the least reentrant of the children, periodic only when every
   child is.
   The force call does not write a stress.

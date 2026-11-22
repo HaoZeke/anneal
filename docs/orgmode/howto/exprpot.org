@@ -98,8 +98,9 @@ At construct, Lepton compiles the energy once and
 =ParsedExpression::differentiate(name)= once per term.
 A force call evaluates each child, then applies the chain rule
 =F = sum_i (df/dE_i) F_i=.
-The variance is =sum_i (df/dE_i) var_i= with the same weights; when any child
-variance is not finite, the variance is 0.
+The variance is =sum_i (df/dE_i)^2 var_i=: a weighted sum of terms scales a
+variance by the square of the weight, as for independent errors.
+When any child variance is not finite, the variance is 0.
 There is no finite-difference force path.
 =dEnergyDTerm(name)= (Python =d_energy_d_term=) returns =df/dE_name= at the last
 child energies, and throws =std::invalid_argument= for a name that is not a

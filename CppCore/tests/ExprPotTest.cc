@@ -250,7 +250,8 @@ TEST_CASE("ExprPot product uses child energies in analytic weights", "[expr]") {
   REQUIRE_THAT(maxAbsForceDiff(f_expr, expected), WithinAbs(0.0, 1e-12));
 }
 
-TEST_CASE("ExprPot variance uses the same analytic weights", "[expr]") {
+TEST_CASE("ExprPot variance scales with the square of the analytic weights",
+          "[expr]") {
   const AtomMatrix f_a{{1.0, 0.0, 0.0}, {-1.0, 0.0, 0.0}};
   const AtomMatrix f_b{{0.0, 2.0, 0.0}, {0.0, -2.0, 0.0}};
   const auto positions = twoAtomPositions();
@@ -264,9 +265,32 @@ TEST_CASE("ExprPot variance uses the same analytic weights", "[expr]") {
     rgpot::ExprPot pot("2*a + b", std::move(terms));
     auto [e, f, v] = pot(positions, atmtypes, box);
     REQUIRE_THAT(e, WithinAbs(4.0, 0.0));
-    REQUIRE_THAT(v, WithinAbs(2.0 * 1.5 + 4.0, 0.0));
+    REQUIRE_THAT(v, WithinAbs(2.0 * 2.0 * 1.5 + 1.0 * 1.0 * 4.0, 0.0));
     REQUIRE_THAT(f(0, 0), WithinAbs(2.0, 0.0));
     REQUIRE_THAT(f(0, 1), WithinAbs(2.0, 0.0));
+  }
+  SECTION("a fractional and a negative weight") {
+    std::vector<rgpot::ExprPot::Term> terms;
+    terms.emplace_back("a", std::make_unique<StubPot>(1.0, 1.5, f_a));
+    terms.emplace_back("b", std::make_unique<StubPot>(2.0, 4.0, f_b));
+    rgpot::ExprPot pot("0.5*a - 3*b", std::move(terms));
+    auto [e, f, v] = pot(positions, atmtypes, box);
+    (void)e;
+    (void)f;
+    REQUIRE_THAT(v, WithinAbs(0.5 * 0.5 * 1.5 + 3.0 * 3.0 * 4.0, 1e-12));
+    REQUIRE(v > 0.0);
+  }
+  SECTION("a nonlinear expression weights by the derivative at the energies") {
+    std::vector<rgpot::ExprPot::Term> terms;
+    terms.emplace_back("a", std::make_unique<StubPot>(3.0, 1.5, f_a));
+    terms.emplace_back("b", std::make_unique<StubPot>(2.0, 4.0, f_b));
+    rgpot::ExprPot pot("a*b", std::move(terms));
+    auto [e, f, v] = pot(positions, atmtypes, box);
+    (void)e;
+    (void)f;
+    REQUIRE_THAT(pot.dEnergyDTerm("a"), WithinAbs(2.0, 0.0));
+    REQUIRE_THAT(pot.dEnergyDTerm("b"), WithinAbs(3.0, 0.0));
+    REQUIRE_THAT(v, WithinAbs(2.0 * 2.0 * 1.5 + 3.0 * 3.0 * 4.0, 1e-12));
   }
   SECTION("non-finite child variance is zero") {
     std::vector<rgpot::ExprPot::Term> terms;

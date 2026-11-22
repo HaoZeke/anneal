@@ -10,6 +10,10 @@
 
 // An SO(3) force-component scatter of 0.005 eV/A is a variance of 2.5e-5.
 // Storing the RMS makes a later square root a fourth root (0.0707 eV/A).
+//
+// These cases pin the arithmetic of the two helpers only; they pass whatever
+// MetatomicPot::forceImpl stores. The stored value itself is asserted in
+// MetatomicPotTest.cc, on the variance that the SO(3) force call returns.
 
 TEST_CASE("SO(3) force scatter is stored as variance, not RMS", "[variance]") {
   constexpr double rms = 0.005;
