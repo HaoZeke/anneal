@@ -220,6 +220,7 @@ _py_ase_schema = custom_target(
 py.install_sources(
     files(
         'rgpot/ase/__init__.py',
+        'rgpot/ase/_registry.py',
         'rgpot/ase/anneal.py',
         'rgpot/ase/calculator.py',
         'rgpot/ase/claim.py',

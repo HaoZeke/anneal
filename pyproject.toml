@@ -48,6 +48,9 @@ metatomic = [
 ase = ["ase>=3.23"]
 test = ["pytest>=7", "numpy>=1.24", "hypothesis>=6", "pytest-timeout>=2"]
 
+[project.entry-points."ase.plugins"]
+rgpot = "rgpot.ase"
+
 [build-system]
 requires = [
   "meson-python>=0.16",

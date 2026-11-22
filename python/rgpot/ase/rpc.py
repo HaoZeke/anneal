@@ -20,6 +20,7 @@ from typing import Any
 import numpy as np
 from ase.calculators.calculator import Calculator, all_changes
 
+from rgpot.ase._registry import register_calculator as _register_calculator
 from rgpot.ase.claim import ConnectionClaim
 
 def _capnp() -> Any:
@@ -199,3 +200,6 @@ class RgpotRpcCalculator(Calculator):
             self.results["energy"] = energy
             self.results["free_energy"] = energy
             self.results["forces"] = forces
+
+
+_register_calculator("rgpot_rpc", RgpotRpcCalculator)

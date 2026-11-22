@@ -9,6 +9,7 @@ from typing import Any
 
 from rgpot.ase.anneal import AnnealOptimizer, AnnealRunner
 from rgpot.ase.calculator import RgpotCalculator, available_kinds
+from rgpot.ase.rpc import RgpotRpcCalculator
 
 __all__ = [
     "AnnealOptimizer",
@@ -19,9 +20,30 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str) -> Any:
-    if name == "RgpotRpcCalculator":
-        from rgpot.ase.rpc import RgpotRpcCalculator
+def _make_ase_plugins() -> set[Any]:
+    """Build ASE 3.29 calculator plugins without importing its API eagerly."""
+    try:
+        from ase._4.plugins.plugin import CalculatorPlugin  # pyright: ignore[reportMissingImports]
+    except ImportError:
+        return set()
+    citation = "https://github.com/OmniPotentRPC/rgpot"
+    return {
+        CalculatorPlugin(
+            name="rgpot",
+            citation=citation,
+            implementation="rgpot.ase.calculator.RgpotCalculator",
+        ),
+        CalculatorPlugin(
+            name="rgpot_rpc",
+            citation=citation,
+            implementation="rgpot.ase.rpc.RgpotRpcCalculator",
+        ),
+    }
 
-        return RgpotRpcCalculator
+
+def __getattr__(name: str) -> Any:
+    if name == "__ase_plugins__":
+        plugins = _make_ase_plugins()
+        globals()[name] = plugins
+        return plugins
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

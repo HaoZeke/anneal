@@ -22,6 +22,15 @@ The =rgpot.has_*= entries below name the flag for each one.
 | =rgpot.ase.available_kinds()= | Kind strings =RgpotCalculator= accepts in this build |
 | =rgpot.lammps.FixExternal= | LAMMPS =fix external= frontend |
 
+Importing =rgpot.ase= registers =RgpotCalculator= as ="rgpot"= and
+=RgpotRpcCalculator= as ="rgpot_rpc"= in ASE's calculator registry.
+Thus =ase.calculators.calculator.get_calculator_class("rgpot")= and the
+=rgpot_rpc= lookup return those classes.
+Installed wheels also expose =rgpot.ase= through the =ase.plugins= entry-point
+group.
+On ASE 3.29 its lazy =__ase_plugins__= set contains a =CalculatorPlugin= for
+each class; earlier ASE releases keep the set empty.
+
 =RgpotCalculator.calculate_many(frames)= returns one dict per frame.
 =threads= selects the worker count; 0 uses the hardware concurrency.
 Results for energy and forces match one call per frame, bit for bit.

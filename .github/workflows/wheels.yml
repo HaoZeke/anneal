@@ -185,7 +185,7 @@ jobs:
         id: py314t
         with:
           python-version: "3.14t"
-      - name: Import each repaired linux wheel without LD_LIBRARY_PATH
+      - name: Import each repaired linux wheel without LD_LIBRARY_PATH and run the wheel tests, including the ASE plugin test
         shell: bash
         env:
           PY_310: ${{ steps.py310.outputs.python-path }}
