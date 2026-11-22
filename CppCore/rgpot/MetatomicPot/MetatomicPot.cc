@@ -4,6 +4,7 @@
 #include "rgpot/MetatomicPot/MetatomicPot.hpp"
 #include "rgpot/MetatomicPot/ForceVariance.hpp"
 #include "rgpot/MetatomicPot/vesin_compat.hpp"
+#include "rgpot/ParamHash.hpp"
 #include "rgpot/nlist/NeighbourList.hpp"
 #include "vesin.h"
 #include <ATen/CPUGeneratorImpl.h>
@@ -176,8 +177,45 @@ void apply_torch_determinism_policy(TorchDeterminismPolicy policy) {
   ctx.setAllowTF32CuDNN(false);
 }
 
+namespace {
+
+// Bump when the way a model's output is produced changes without a change to
+// the settings below.
+constexpr uint64_t kMetatomicKernelVersion = 1;
+
+// Check consistency and the engine path do not change what the model returns,
+// so they stay out of the key. Everything else the model sees is in it.
+uint64_t metatomic_params_key(const MetatomicConfig &c) {
+  Fnv1a fp;
+  fp.u64(kMetatomicKernelVersion);
+  fp.str(c.model_path);
+  fp.str(c.device);
+  fp.str(c.length_unit);
+  fp.str(c.extensions_directory);
+  fp.f64(c.uncertainty_threshold);
+  fp.str(c.dtype_override);
+  fp.b8(c.random_rotation);
+  fp.i64(c.n_symmetry_rotations);
+  fp.b8(c.so3_probe_scatter);
+  fp.i64(static_cast<int64_t>(c.torch_determinism));
+  fp.str(c.task_name);
+  fp.i64(c.charge);
+  fp.i64(c.spin);
+  fp.b8(c.attach_system_extras);
+  return fp.h;
+}
+
+} // namespace
+
+void MetatomicPot::setChargeSpin(int charge, int spin) {
+  m_config.charge = charge;
+  m_config.spin = spin;
+  m_params_key.store(metatomic_params_key(m_config), std::memory_order_release);
+}
+
 MetatomicPot::MetatomicPot(const MetatomicConfig &config)
     : Potential(PotType::Metatomic), m_config(config),
+      m_params_key(metatomic_params_key(config)),
       m_model(torch::jit::Module()),
       m_device(torch::Device(c10::DeviceType::CPU)) {
 

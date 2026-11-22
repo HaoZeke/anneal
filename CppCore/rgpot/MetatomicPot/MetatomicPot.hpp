@@ -6,6 +6,8 @@
 // (enum VesinDevice, no Options.algorithm) and 0.5+ (struct VesinDevice
 // {type, device_id}, Options.algorithm) via type traits in vesin_compat.hpp.
 
+#include <atomic>
+#include <cstdint>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -45,9 +47,16 @@ public:
   /// Rotations stay on the per-system path, which owns that average.
   void forceBatchImpl(const ForceBatch &batch) const override;
 
-  void setChargeSpin(int charge, int spin) {
-    m_config.charge = charge;
-    m_config.spin = spin;
+  /// Change the charge and multiplicity the model reads. The parameter key
+  /// follows, so a result cached under the previous values is never served for
+  /// the new ones.
+  void setChargeSpin(int charge, int spin);
+
+  /// Fingerprint of every setting that can change a result: the model, device,
+  /// units, dtype, orientation averaging, determinism policy, task head, the
+  /// charge and the spin multiplicity.
+  [[nodiscard]] uint64_t paramsKey() const noexcept override {
+    return m_params_key.load(std::memory_order_acquire);
   }
 
   /// Whether the model reads the charge (rgpot::charge) and the multiplicity
@@ -69,6 +78,7 @@ public:
 
 private:
   MetatomicConfig m_config;
+  std::atomic<uint64_t> m_params_key{0};
 
   mutable metatensor_torch::Module m_model;
   metatomic_torch::ModelCapabilities m_capabilities;

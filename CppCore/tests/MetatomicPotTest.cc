@@ -12,6 +12,10 @@
 #include <string>
 #include <vector>
 
+#ifdef RGPOT_HAS_CACHE
+#include "TestTempDir.hpp"
+#include "rgpot/PotentialCache.hpp"
+#endif
 #include "rgpot/MetatomicPot/MetatomicPot.hpp"
 #include "rgpot/MetatomicPot/vesin_compat.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
@@ -560,3 +564,70 @@ TEST_CASE("MetatomicDlopen loads engine and matches linked pot energy",
   REQUIRE(std::isfinite(o2.energy));
   REQUIRE(o1.energy == Catch::Approx(o2.energy).margin(1e-5));
 }
+
+#ifdef RGPOT_HAS_CACHE
+TEST_CASE("MetatomicPot cache key follows charge and spin",
+          "[metatomic][cache]") {
+  rgpot::MetatomicConfig cfg;
+  cfg.model_path = "data/lj38/lennard-jones.pt";
+  cfg.device = "cpu";
+  cfg.length_unit = "angstrom";
+  rgpot::MetatomicPot pot(cfg);
+
+  AtomMatrix positions(N_ATOMS, 3);
+  for (int i = 0; i < N_ATOMS; ++i)
+    for (int j = 0; j < 3; ++j)
+      positions(i, j) = lj13_pos[i * 3 + j];
+  std::vector<int> atmtypes(lj13_atmnrs, lj13_atmnrs + N_ATOMS);
+  std::array<std::array<double, 3>, 3> box = {
+      {{101.9424, 0.0, 0.0}, {0.0, 103.1426, 0.0}, {0.0, 0.0, 102.6055}}};
+  const rgpot::ForceInput input{static_cast<size_t>(N_ATOMS), positions.data(),
+                                atmtypes.data(), box.front().data()};
+  const auto key_for = [&] {
+    return rgpot::cache::result_key(input, rgpot::PotType::Metatomic,
+                                    pot.paramsKey())
+        .hash;
+  };
+
+  const uint64_t first_params = pot.paramsKey();
+  const uint64_t first_key = key_for();
+  REQUIRE(first_params != 0);
+
+  rgpot::tests::TestTempDir directory("rgpot-metatomic-key");
+  rgpot::cache::PotentialCache cache((directory.path() / "results").string());
+  pot.setCache(&cache);
+
+  (void)pot(positions, atmtypes, box);
+  REQUIRE(cache.counts().computed == 1);
+  REQUIRE(cache.counts().served == 0);
+  (void)pot(positions, atmtypes, box);
+  REQUIRE(cache.counts().computed == 1);
+  REQUIRE(cache.counts().served == 1);
+
+  pot.setChargeSpin(-1, 3);
+  REQUIRE(pot.paramsKey() != first_params);
+  REQUIRE(key_for() != first_key);
+  (void)pot(positions, atmtypes, box);
+  REQUIRE(cache.counts().computed == 2);
+  REQUIRE(cache.counts().served == 1);
+  (void)pot(positions, atmtypes, box);
+  REQUIRE(cache.counts().computed == 2);
+  REQUIRE(cache.counts().served == 2);
+
+  pot.setChargeSpin(-1, 1);
+  const uint64_t charge_only = key_for();
+  pot.setChargeSpin(0, 3);
+  const uint64_t spin_only = key_for();
+  REQUIRE(charge_only != first_key);
+  REQUIRE(spin_only != first_key);
+  REQUIRE(charge_only != spin_only);
+
+  pot.setChargeSpin(0, 1);
+  REQUIRE(pot.paramsKey() == first_params);
+  REQUIRE(key_for() == first_key);
+  (void)pot(positions, atmtypes, box);
+  REQUIRE(cache.counts().computed == 2);
+  REQUIRE(cache.counts().served == 3);
+  pot.setCache(nullptr);
+}
+#endif

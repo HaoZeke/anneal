@@ -37,6 +37,7 @@
 #include "rgpot/Water/WaterPots.hpp"
 #endif
 #include "rgpot/engine_c_abi.h"
+#include "TestTempDir.hpp"
 #include "rgpot/rpc/Potentials.capnp.h"
 #include "rgpot/types/AtomMatrix.hpp"
 
@@ -1091,6 +1092,69 @@ TEST_CASE("metatomic charge and spin reach a model that reads them",
   REQUIRE(e.set_charge_spin(pot, 1, 2) == 0);
   CHECK(pair_energy(e, pot) == Catch::Approx(14.5));
   e.destroy(pot);
+}
+
+TEST_CASE("metatomic result cache never serves across a charge or spin change",
+          "[engine][metatomic][charge][cache]") {
+  Engine e;
+  if (!open_engine("METATOMIC", e)) {
+    SKIP("no metatomic engine in this build");
+  }
+#ifndef RGPOT_HAS_CACHE
+  SKIP("this build has no result cache");
+#else
+  auto set_cache = sym<decltype(&rgpot_engine_set_cache)>(
+      e.handle, "rgpot_engine_set_cache");
+  auto cache_counts = sym<decltype(&rgpot_engine_cache_counts)>(
+      e.handle, "rgpot_engine_cache_counts");
+  const auto counts = [&](RgpotEnginePot *pot) {
+    uint64_t computed = 0;
+    uint64_t served = 0;
+    REQUIRE(cache_counts(pot, &computed, &served) == 0);
+    return std::pair{computed, served};
+  };
+  using Counts = std::pair<uint64_t, uint64_t>;
+
+  std::string error;
+  RgpotEnginePot *pot =
+      create(e, metatomic_params(mta_model("MTA_CHARGE_SPIN_PT")), &error);
+  INFO(error);
+  REQUIRE(pot != nullptr);
+  rgpot::tests::TestTempDir directory("rgpot-metatomic-cache");
+  const std::string db = (directory.path() / "results").string();
+  REQUIRE(set_cache(pot, db.c_str()) == 0);
+
+  CHECK(pair_energy(e, pot) == Catch::Approx(3.5));
+  CHECK(counts(pot) == Counts{1, 0});
+  CHECK(pair_energy(e, pot) == Catch::Approx(3.5));
+  CHECK(counts(pot) == Counts{1, 1});
+
+  // A stale hit would answer 3.5 here. The new charge and spin are a new key,
+  // so the kernel runs again.
+  REQUIRE(e.set_charge_spin(pot, -1, 3) == 0);
+  CHECK(pair_energy(e, pot) == Catch::Approx(-4.5));
+  CHECK(counts(pot) == Counts{2, 1});
+  CHECK(pair_energy(e, pot) == Catch::Approx(-4.5));
+  CHECK(counts(pot) == Counts{2, 2});
+  const auto batch = pair_batch_energies(e, pot);
+  CHECK(batch[0] == Catch::Approx(-4.5));
+  CHECK(batch[1] == Catch::Approx(-4.5));
+  CHECK(counts(pot).first == 2);
+
+  // Each of the charge and the spin changes the key on its own, and returning
+  // to the first values finds the first entry again.
+  REQUIRE(e.set_charge_spin(pot, -1, 1) == 0);
+  CHECK(pair_energy(e, pot) == Catch::Approx(-6.5));
+  CHECK(counts(pot).first == 3);
+  REQUIRE(e.set_charge_spin(pot, 0, 3) == 0);
+  CHECK(pair_energy(e, pot) == Catch::Approx(5.5));
+  CHECK(counts(pot).first == 4);
+  REQUIRE(e.set_charge_spin(pot, 0, 1) == 0);
+  const auto served = counts(pot).second;
+  CHECK(pair_energy(e, pot) == Catch::Approx(3.5));
+  CHECK(counts(pot) == Counts{4, served + 1});
+  e.destroy(pot);
+#endif
 }
 
 TEST_CASE("metatomic engine refuses a charge or spin its model does not read",
