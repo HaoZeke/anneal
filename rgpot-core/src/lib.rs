@@ -3,6 +3,7 @@
 
 // C-style names are intentional for cbindgen compatibility.
 #![allow(non_camel_case_types)]
+#![allow(rustdoc::redundant_explicit_links)]
 
 //! # rgpot-core
 //!
