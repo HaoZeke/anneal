@@ -683,6 +683,17 @@ TEST_CASE("skala engine", "[engine][skala]") {
   REQUIRE(e.set_charge_spin(pot, -1, 2) == 0);
   REQUIRE(e.set_num_threads(pot, 1, 1) == 3);
   e.destroy(pot);
+
+  for (const int bad : {0, -1}) {
+    INFO("multiplicity " << bad);
+    capnp::MallocMessageBuilder invalid;
+    auto params = invalid.initRoot<::NWChemParams>();
+    params.setMultiplicity(bad);
+    std::string error;
+    pot = create(e, capnp::messageToFlatArray(invalid), &error);
+    REQUIRE(pot == nullptr);
+    REQUIRE(error.find(">= 1") != std::string::npos);
+  }
 }
 
 TEST_CASE("xtb engine matches the generic table contract", "[engine][xtb]") {
@@ -824,6 +835,14 @@ TEST_CASE("metatomic charge and spin reach a model that reads them",
   }
   const std::string model = mta_model("MTA_CHARGE_SPIN_PT");
   std::string error;
+  for (const int bad : {0, -1}) {
+    INFO("spin " << bad);
+    RgpotEnginePot *invalid =
+        create(e, metatomic_params(model, 0, bad), &error);
+    REQUIRE(invalid == nullptr);
+    REQUIRE(error.find(">= 1") != std::string::npos);
+    REQUIRE(error.find(std::to_string(bad)) != std::string::npos);
+  }
   RgpotEnginePot *pot = create(e, metatomic_params(model), &error);
   INFO(error);
   REQUIRE(pot != nullptr);

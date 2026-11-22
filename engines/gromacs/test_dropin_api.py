@@ -355,6 +355,7 @@ def _named_engine(path: Path) -> Path:
         "#include <string.h>\n"
         "typedef struct RgpotEnginePot RgpotEnginePot;\n"
         "static int g_charge = -7, g_spin = -7, g_calls = 0;\n"
+        "static const char *g_error = \"\";\n"
         "int rgpot_engine_abi_version(void) { return 1; }\n"
         "const char *rgpot_engine_name(void) {\n"
         "  const char *name = getenv(\"RGPOT_FAKE_ENGINE_NAME\");\n"
@@ -378,12 +379,26 @@ def _named_engine(path: Path) -> Path:
         "  return 0;\n"
         "}\n"
         "int rgpot_engine_set_charge_spin(RgpotEnginePot *pot, int charge, int spin) {\n"
-        "  int min_spin = strcmp(rgpot_engine_name(), \"uma\") == 0 ? 0 : 1;\n"
-        "  (void)pot;\n"
-        "  if (spin < min_spin) return 3;\n"
-        "  g_charge = charge; g_spin = spin; g_calls += 1; return 0;\n"
+        "  const char *name = rgpot_engine_name();\n"
+        "  int min_spin = strcmp(name, \"uma\") == 0 ? 0 : 1;\n"
+        "  (void)pot; g_calls += 1;\n"
+        "  if (spin < min_spin) {\n"
+        "    g_error = strcmp(name, \"skala\") == 0\n"
+        "      ? \"skala spin multiplicity must be >= 1\"\n"
+        "      : \"metatomic spin multiplicity must be >= 1\";\n"
+        "    return 3;\n"
+        "  }\n"
+        "  g_charge = charge; g_spin = spin; g_error = \"\"; return 0;\n"
         "}\n"
-        "void recorded_reset(void) { g_charge = -7; g_spin = -7; g_calls = 0; }\n"
+        "size_t rgpot_engine_last_error(const RgpotEnginePot *pot, char *buf, size_t len) {\n"
+        "  size_t n = strlen(g_error), m = n;\n"
+        "  (void)pot;\n"
+        "  if (buf && len) { if (m >= len) m = len - 1; memcpy(buf, g_error, m); buf[m] = 0; }\n"
+        "  return n;\n"
+        "}\n"
+        "void recorded_reset(void) {\n"
+        "  g_charge = -7; g_spin = -7; g_calls = 0; g_error = \"\";\n"
+        "}\n"
         "int recorded_charge(void) { return g_charge; }\n"
         "int recorded_spin(void) { return g_spin; }\n"
         "int recorded_calls(void) { return g_calls; }\n"
@@ -416,7 +431,6 @@ def _encode_config(tmp_path: Path, schema: str, text: str) -> Path:
     ("uma", "UmaParams", "(spin = 2)", 0, 1, None),
     ("metatomic", "MetatomicParams", "()", -1, 1, (-1, 1)),
     ("metatomic", "MetatomicParams", "(spin = 3)", 2, 1, (2, 3)),
-    ("metatomic", "MetatomicParams", "(spin = 0)", -1, 3, (-1, 3)),
     ("skala", "NWChemParams", "()", -1, 1, (-1, 1)),
     ("skala", "NWChemParams", "(multiplicity = 3)", -1, 1, (-1, 3)),
     ("skala", "NWChemParams", "(multiplicity = 5)", 0, 1, None),
@@ -447,22 +461,40 @@ def test_engine_route_reads_an_explicit_spin_from_the_config_message(
 
 @pytest.mark.skipif(not shutil.which("capnp") or not SCHEMA_PATH or not SCHEMA_PATH.is_file(),
                     reason="needs capnp and the built effective Potentials.capnp")
-@pytest.mark.parametrize("engine,schema,text,spin,minimum", [
-    ("metatomic", "MetatomicParams", "(spin = 0)", 0, 1),
-    ("metatomic", "MetatomicParams", "(spin = -2)", -2, 1),
-    ("skala", "NWChemParams", "(multiplicity = 0)", 0, 1),
-    ("nwchem", "NWChemParams", "(multiplicity = 0)", 0, 1),
-    ("uma", "UmaParams", "(spin = -1)", -1, 0),
+@pytest.mark.parametrize("engine,schema,text,spin,minimum,multiplicity", [
+    ("metatomic", "MetatomicParams", "(spin = 0)", 0, 1, 3),
+    ("metatomic", "MetatomicParams", "(spin = -2)", -2, 1, 1),
+    ("skala", "NWChemParams", "(multiplicity = 0)", 0, 1, 3),
+    ("nwchem", "NWChemParams", "(multiplicity = 0)", 0, 1, 1),
+    ("uma", "UmaParams", "(spin = -1)", -1, 0, 1),
 ])
 def test_engine_route_refuses_a_config_spin_below_the_layout_minimum(
-        tmp_path, monkeypatch, engine, schema, text, spin, minimum):
+        tmp_path, monkeypatch, engine, schema, text, spin, minimum, multiplicity):
     monkeypatch.setenv("RGPOT_FAKE_ENGINE_NAME", engine)
     config = _encode_config(tmp_path, schema, text)
     so = _named_engine(tmp_path / "libnamed_engine.so")
-    why = refused(tmp_path, f"    ENGINE {so}\n    CONFIG {config}", charge=-1)
+    why = refused(tmp_path, f"    ENGINE {so}\n    CONFIG {config}", charge=-1,
+                  multiplicity=multiplicity)
     assert f"the CONFIG message sets spin {spin}" in why
     assert f"the {engine} engine needs a spin of at least {minimum}" in why
     assert "refused CHARGE" not in why
+
+
+@pytest.mark.skipif(not shutil.which("capnp") or not SCHEMA_PATH or not SCHEMA_PATH.is_file(),
+                    reason="needs capnp and the built effective Potentials.capnp")
+@pytest.mark.parametrize("engine,schema", [
+    ("metatomic", "MetatomicParams"),
+    ("skala", "NWChemParams"),
+])
+def test_engine_route_reports_family_rejection_of_qmi_spin_zero(
+        tmp_path, monkeypatch, engine, schema):
+    monkeypatch.setenv("RGPOT_FAKE_ENGINE_NAME", engine)
+    config = _encode_config(tmp_path, schema, "()")
+    so = _named_engine(tmp_path / "libnamed_engine.so")
+    why = refused(tmp_path, f"    ENGINE {so}\n    CONFIG {config}",
+                  charge=-1, multiplicity=0)
+    assert "refused CHARGE -1 and spin 0 from input MULTIPLICITY 0 (status 3)" in why
+    assert f"{engine} spin multiplicity must be >= 1" in why
 
 
 def engine_force(config: Path, symbols, x_ang, box_ang):
