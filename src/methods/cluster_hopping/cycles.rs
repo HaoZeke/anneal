@@ -14,8 +14,8 @@ use rand::Rng;
 
 use crate::rigid_body::RigidBodyGeometry;
 
-/// An O to H distance under this, in angstroms, between different molecules
-/// is a hydrogen bond.
+/// Cartesian O to H distance, in angstroms, under which two molecules share
+/// a hydrogen bond. Rigid readers use the body's derived contact instead.
 const BOND: f64 = 2.5;
 
 /// Oxygen and hydrogen site indices of a water geometry: exactly one site
@@ -50,14 +50,24 @@ pub(crate) fn lab_sites(
 
 /// Donated hydrogen bonds of every molecule, as the acceptor and which of
 /// the two hydrogens donates (0 or 1).
-fn donations(sites: &[Vec<[f64; 3]>], o: usize, h: [usize; 2]) -> Vec<Vec<(usize, usize)>> {
+///
+/// `cutoff` is the body's derived contact, the same length
+/// [`rigid_donations`] uses. A fixed 2.5 Å sat about 0.03 Å above the
+/// TIP4P O-H plus H-H length, so a contact in that gap was a bond here
+/// and not on the archive walk.
+fn donations(
+    sites: &[Vec<[f64; 3]>],
+    o: usize,
+    h: [usize; 2],
+    cutoff: f64,
+) -> Vec<Vec<(usize, usize)>> {
     let n = sites.len();
     (0..n)
         .map(|i| {
             let mut out = Vec::new();
             for j in (0..n).filter(|&j| j != i) {
                 for (which, &s) in h.iter().enumerate() {
-                    if norm(sub(sites[i][s], sites[j][o])) < BOND {
+                    if norm(sub(sites[i][s], sites[j][o])) < cutoff {
                         out.push((j, which));
                     }
                 }
@@ -95,11 +105,14 @@ pub(crate) fn reverse_cycle<R: Rng + ?Sized>(
     let Some((o, h)) = water_sites(geometry) else {
         return false;
     };
+    let Some(definition) = cycle_geometry(geometry) else {
+        return false;
+    };
     if n < 2 || x.len() != 6 * n {
         return false;
     }
     let sites = lab_sites(geometry, n, x.view());
-    let donated = donations(&sites, o, h);
+    let donated = donations(&sites, o, h, definition.donation_cutoff);
     let donors: Vec<usize> = (0..n).filter(|&i| !donated[i].is_empty()).collect();
     if donors.is_empty() {
         return false;
@@ -263,9 +276,18 @@ fn direction(a: [f64; 3]) -> Option<[f64; 3]> {
     along.iter().all(|value| value.is_finite()).then_some(along)
 }
 
+/// Sine of the smallest opening [`frame_rotation`] still treats as a plane.
+///
+/// `|a × b|` of two unit vectors is that sine. The cross product of values
+/// near one errs by a few `f64::EPSILON`, about 1e-15. This floor is a
+/// million times that error and a millionth of a radian, so a pair that is
+/// flat in double precision is refused and a bond angle, whose sine is
+/// tenths, is kept.
+const FRAME_SINE_FLOOR: f64 = 1.0e-6;
+
 /// Whether two unit vectors span a plane, so a frame through them exists.
 fn spans(a: [f64; 3], b: [f64; 3]) -> bool {
-    norm(cross(a, b)) >= 1e-6
+    norm(cross(a, b)) >= FRAME_SINE_FLOOR
 }
 
 /// The rotation that takes the frame of `from` onto the frame of `to`.
@@ -456,7 +478,7 @@ pub(crate) fn reverse_cycle_cartesian<R: rand::Rng + ?Sized>(
         let bonded = unit(sub(h_donating, oxygen));
         let other = unit(sub(h_other, oxygen));
         let target = unit(sub(sites[prev][0], oxygen));
-        if norm(cross(target, other)) < 1e-6 {
+        if !spans(target, other) {
             return false;
         }
         turns.push((k, oxygen, frame_rotation((bonded, other), (target, other))));
@@ -517,6 +539,9 @@ fn cycle_geometry(geometry: &RigidBodyGeometry) -> Option<CycleGeometry> {
         degrees[a] += 1;
         degrees[b] += 1;
     }
+    // The lowest index wins a tie. The scan meets sites in order and
+    // replaces the anchor only on a strictly higher degree, so the choice
+    // does not depend on bond order or on the visitor.
     let mut anchor = 0;
     for site in 1..degrees.len() {
         if degrees[site] > degrees[anchor] {
@@ -795,11 +820,13 @@ pub(crate) mod tests {
     ) -> (BTreeSet<(usize, usize)>, BTreeSet<(usize, usize)>) {
         let g = geometry();
         let (o, h) = water_sites(&g).expect("water");
-        let directed: BTreeSet<(usize, usize)> = donations(&lab_sites(&g, n, x.view()), o, h)
-            .iter()
-            .enumerate()
-            .flat_map(|(i, out)| out.iter().map(move |&(j, _)| (i, j)))
-            .collect();
+        let cutoff = cycle_geometry(&g).expect("water").donation_cutoff;
+        let directed: BTreeSet<(usize, usize)> =
+            donations(&lab_sites(&g, n, x.view()), o, h, cutoff)
+                .iter()
+                .enumerate()
+                .flat_map(|(i, out)| out.iter().map(move |&(j, _)| (i, j)))
+                .collect();
         let undirected = directed
             .iter()
             .map(|&(i, j)| (i.min(j), i.max(j)))
@@ -1280,5 +1307,78 @@ pub(crate) mod tests {
             }
         }
         assert!(matched, "a bare cycle should reverse for some seed");
+    }
+
+    #[test]
+    fn rigid_readers_share_the_derived_contact() {
+        let g = geometry();
+        let definition = cycle_geometry(&g).expect("water");
+        let sites = g.sites();
+        let oxygen = sites[0];
+        let reach = sites[1..]
+            .iter()
+            .map(|site| norm(sub(*site, oxygen)))
+            .fold(0.0_f64, f64::max);
+        let spread = sites[1..]
+            .iter()
+            .enumerate()
+            .flat_map(|(i, a)| sites[i + 2..].iter().map(move |b| norm(sub(*a, *b))))
+            .fold(reach, f64::max);
+        let derived = reach + spread;
+        assert!((definition.donation_cutoff - derived).abs() < 1e-12);
+        assert!(
+            derived < BOND,
+            "the derived contact {derived} is not inside the old 2.5 Å cutoff"
+        );
+        let (o, h) = water_sites(&g).expect("water");
+        let flat = Array1::zeros(12);
+        let mut sites = lab_sites(&g, 2, flat.view());
+        let gap = 0.5 * (derived + BOND);
+        sites[1][o] = [gap, 0.0, 0.0];
+        sites[0][h[0]] = [0.0, 0.0, 0.0];
+        let donated = donations(&sites, o, h, definition.donation_cutoff);
+        assert!(
+            donated[0].is_empty(),
+            "a contact between the derived length and 2.5 Å is still a bond"
+        );
+        sites[1][o] = [0.5 * derived, 0.0, 0.0];
+        let donated = donations(&sites, o, h, definition.donation_cutoff);
+        assert!(
+            !donated[0].is_empty(),
+            "a contact inside the derived length is not a bond"
+        );
+    }
+
+    #[test]
+    fn the_anchor_tie_goes_to_the_lowest_index() {
+        let sites = vec![
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ];
+        let species = vec![6, 1, 1, 1];
+        let bonds = vec![[0, 1], [1, 2], [2, 3], [3, 0]];
+        let g = RigidBodyGeometry::new_bonded(sites, species, bonds).expect("square");
+        let definition = cycle_geometry(&g).expect("cycle");
+        assert_eq!(definition.anchor, 0);
+        assert_eq!(definition.donors, vec![1, 3]);
+    }
+
+    #[test]
+    fn a_frame_on_the_sine_floor_is_the_boundary() {
+        let along = [1.0, 0.0, 0.0];
+        let at = |sine: f64| {
+            let other = [(1.0 - sine * sine).sqrt(), sine, 0.0];
+            (along, other)
+        };
+        let below = FRAME_SINE_FLOOR * (1.0 - 1.0e-6);
+        assert!(!spans(at(below).0, at(below).1));
+        let floor = at(FRAME_SINE_FLOOR);
+        assert!(spans(floor.0, floor.1));
+        let turn = frame_rotation(floor, floor);
+        assert!(turn.iter().flatten().all(|value| value.is_finite()));
+        let open = at(0.5);
+        assert!(spans(open.0, open.1));
     }
 }
