@@ -58,19 +58,33 @@ width gets =ok=false= and leaves the pot as it was.
 
 With =potserv <port> MullerBrown=, the =mullerBrown= arm rebuilds the surface.
 The six list fields are =amplitude=, =a=, =b=, =c=, =x0= and =y0=.
-Each is empty or holds exactly four finite values.
-An empty list selects that parameter's published default.
-It never keeps a value from an earlier =configure=.
-Every call describes the whole surface.
-Any other length, or a non-finite value, gets =ok=false=.
-The pot then stays as it was.
 Their schema names are =MullerBrownParams.amplitude=, =MullerBrownParams.a=,
 =MullerBrownParams.b=, =MullerBrownParams.c=, =MullerBrownParams.x0= and
 =MullerBrownParams.y0=.
-The =libclassical_engine= takes the same arm in =BuiltinParams.config=.
-It does so when =name= is =muller_brown=.
-It reads an empty list the same way.
-Any other arm gets =ok=false= and leaves the surface as it was.
+
+The parameter rule is the same wherever these lists are set.
+Each call describes the whole surface.
+Nothing carries over from an earlier call or from the pot it replaces.
+A list that is empty, or not set, takes its published default.
+A list of four finite values replaces that default.
+Any other length, or a non-finite value, is an error.
+An unset list reads as an empty one, so the wire cannot tell them apart.
+That leaves no way to keep a value from an earlier call.
+
+The rule applies to these entry points.
+- =configure= on a =MullerBrown= server.
+  An error, or any arm other than =mullerBrown=, gets =ok=false= and leaves the
+  pot as it was.
+- The classical engine reads =BuiltinParams.config= when =name= is
+  =muller_brown=.
+  An arm that does not belong on a builtin is refused with an error that names
+  it.
+- The =rgpot.MullerBrownPot= constructor.
+  An error raises =ValueError=.
+- =rgpot::MullerBrownConfig=, whose members start at the published defaults.
+  A field that is not assigned stays at its default.
+- =rgpot_builtin_muller_brown_new=, where a NULL config is the defaults.
+  Its arrays are fixed at four values, so it has no empty form.
 
 ** Composite arm (=PotentialConfig.composite= / =CompositeParams=)
 

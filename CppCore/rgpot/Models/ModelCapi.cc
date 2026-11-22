@@ -154,9 +154,9 @@ rgpot_muller_brown_config_default(rgpot_muller_brown_config *config) {
 extern "C" rgpot_builtin_model *
 rgpot_builtin_muller_brown_new(const rgpot_muller_brown_config *config) {
   return guardedNew([=]() -> rgpot_builtin_model * {
-    const rgpot::MullerBrownConfig native =
-        config == nullptr ? rgpot::MullerBrownConfig{}
-                          : mullerBrownConfig(*config);
+    const rgpot::MullerBrownConfig native = config == nullptr
+                                                ? rgpot::MullerBrownConfig{}
+                                                : mullerBrownConfig(*config);
     auto potential = std::make_unique<rgpot::MullerBrownPot>(native);
     return new rgpot_builtin_model{std::move(potential), 2};
   });
