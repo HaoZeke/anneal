@@ -152,7 +152,7 @@ fn configured_external_engine_passes_the_abi_check() {
         RgpotEngineAbiStamp::HOST,
         RgpotEngineAbiStamp {
             abi_major: 1,
-            abi_minor: 5,
+            abi_minor: 6,
             layout_revision: 1,
         }
     );
@@ -1326,7 +1326,7 @@ fn a_missing_abi_stamp_symbol_is_served_as_minor_zero() {
 
 #[test]
 fn minor_4_plugin_is_served_without_component_exports_minor_5_gets_them_and_newer_is_rejected() {
-    assert_eq!(ENGINE_ABI_MINOR, 5);
+    assert_eq!(ENGINE_ABI_MINOR, 6);
 
     // A minor-4 plugin omits rgpot_engine_last_components and
     // rgpot_engine_component_name; the host serves it, resolves those symbols
@@ -1374,7 +1374,13 @@ fn minor_4_plugin_is_served_without_component_exports_minor_5_gets_them_and_newe
     // and calls them.
     let minor5_path = build("harmonic_stamp_minor5", &["FIXTURE_ABI_MINOR=5"]);
     let mut minor5 = load(&minor5_path);
-    assert_eq!(minor5.abi_stamp(), RgpotEngineAbiStamp::HOST);
+    assert_eq!(
+        minor5.abi_stamp(),
+        RgpotEngineAbiStamp {
+            abi_minor: 5,
+            ..RgpotEngineAbiStamp::HOST
+        }
+    );
     assert!(minor5.symbols().last_components.is_some());
     assert!(minor5.symbols().component_name.is_some());
     assert_eq!(minor5.component_name(0).expect("component 0"), "harmonic");
@@ -2482,4 +2488,157 @@ fn a_fatal_engine_code_wins_over_a_recoverable_oracle_failure() {
         }
     );
     assert_poisoned_without_an_extra_force(&mut session, &path, &error);
+}
+
+#[test]
+fn result_cache_queries_preserve_native_status_and_counter_width() {
+    use rgpot_core::engine::EngineCacheCounts;
+
+    let mut engine = load(&build("harmonic_cache", &["FIXTURE_CACHE"]));
+    assert_eq!(
+        engine.cache_counts().unwrap_err(),
+        EngineError::Unsupported {
+            operation: "rgpot_engine_cache_counts",
+            message: "cache detached".into()
+        }
+    );
+    engine
+        .set_cache(Some(Path::new("cache/geometry results")))
+        .unwrap();
+    assert_eq!(
+        engine.cache_counts().unwrap(),
+        EngineCacheCounts {
+            computed: 1_u64 << 32,
+            served: 7,
+        }
+    );
+    engine.set_cache(None).unwrap();
+    assert!(matches!(
+        engine.cache_counts(),
+        Err(EngineError::Unsupported { .. })
+    ));
+
+    let mut older = load(&build("harmonic_no_cache", &["FIXTURE_ABI_MINOR=5"]));
+    assert!(matches!(
+        older.set_cache(None),
+        Err(EngineError::Unsupported {
+            operation: "rgpot_engine_set_cache",
+            ..
+        })
+    ));
+    assert!(matches!(
+        older.cache_counts(),
+        Err(EngineError::Unsupported {
+            operation: "rgpot_engine_cache_counts",
+            ..
+        })
+    ));
+}
+
+const CACHE_DIRECTORY: &str = "cache/geometry results";
+
+fn one_atom_request() -> EngineRequest<'static> {
+    EngineRequest {
+        positions: &[1.0, 2.0, 3.0],
+        atomic_numbers: &[1],
+        box_matrix: &CELL,
+    }
+}
+
+#[test]
+fn a_session_attaches_queries_and_clears_a_result_cache() {
+    use rgpot_core::engine::EngineCacheCounts;
+
+    let mut session = load_session(&build("harmonic_session_cache", &["FIXTURE_CACHE"]));
+    assert_eq!(
+        session.cache_counts().unwrap_err(),
+        EngineError::Unsupported {
+            operation: "rgpot_engine_cache_counts",
+            message: "cache detached".into()
+        }
+    );
+
+    session.attach_cache(Path::new(CACHE_DIRECTORY)).unwrap();
+    assert_eq!(
+        session.cache_counts().unwrap(),
+        EngineCacheCounts {
+            computed: 1_u64 << 32,
+            served: 7,
+        }
+    );
+    session
+        .force(&one_atom_request(), None)
+        .expect("an evaluation with a cache attached");
+
+    session.clear_cache().unwrap();
+    assert!(matches!(
+        session.cache_counts(),
+        Err(EngineError::Unsupported { .. })
+    ));
+    session
+        .force(&one_atom_request(), None)
+        .expect("an evaluation after the cache is cleared");
+}
+
+#[test]
+fn a_refused_cache_attachment_is_recoverable_and_keeps_the_session_usable() {
+    let mut session = load_session(&build("harmonic_session_refused", &["FIXTURE_CACHE"]));
+    let refused = session
+        .attach_cache(Path::new("another/directory"))
+        .expect_err("the fixture refuses an unexpected directory");
+    assert!(
+        matches!(&refused, EngineError::Recoverable { code, .. } if *code == ENGINE_ERR_INVALID),
+        "{refused:?}"
+    );
+    assert!(session.cache_counts().is_err());
+    session
+        .force(&one_atom_request(), None)
+        .expect("a refused attachment does not poison the session");
+    session.attach_cache(Path::new(CACHE_DIRECTORY)).unwrap();
+    assert_eq!(session.cache_counts().unwrap().served, 7);
+}
+
+#[test]
+fn a_cache_path_with_a_null_byte_never_reaches_the_engine() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let mut session = load_session(&build("harmonic_session_null_path", &["FIXTURE_CACHE"]));
+    let path = Path::new(OsStr::from_bytes(b"cache/geometry\0results"));
+    assert_eq!(
+        session.attach_cache(path).unwrap_err(),
+        EngineError::Invalid("cache path contains a null byte".into())
+    );
+    session
+        .force(&one_atom_request(), None)
+        .expect("the session stays usable");
+}
+
+#[test]
+fn a_session_on_an_engine_without_cache_exports_reports_unsupported() {
+    let mut session = load_session(&build("harmonic_session_no_cache", &[]));
+    assert!(matches!(
+        session.attach_cache(Path::new(CACHE_DIRECTORY)),
+        Err(EngineError::Unsupported {
+            operation: "rgpot_engine_set_cache",
+            ..
+        })
+    ));
+    assert!(matches!(
+        session.clear_cache(),
+        Err(EngineError::Unsupported {
+            operation: "rgpot_engine_set_cache",
+            ..
+        })
+    ));
+    assert!(matches!(
+        session.cache_counts(),
+        Err(EngineError::Unsupported {
+            operation: "rgpot_engine_cache_counts",
+            ..
+        })
+    ));
+    session
+        .force(&one_atom_request(), None)
+        .expect("an engine without a cache still evaluates");
 }

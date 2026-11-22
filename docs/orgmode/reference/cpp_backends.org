@@ -1050,8 +1050,28 @@ void setChargeSpin(int charge, int spin);
 - Units :: none.
 - Outputs :: none; later forces attach these values under the names the model
   reads (see =readsCharge= and =readsSpin=).
+  The result-cache key from =paramsKey= is recomputed, so a result cached under
+  the previous pair is not served for the new one.
 - Errors :: none; a value the model does not read has no effect, and
   =libmetatomic_engine= refuses such a value without calling this.
+
+*** =rgpot::MetatomicPot::paramsKey=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] uint64_t paramsKey() const noexcept override;
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: a 64-bit FNV-1a hash of every setting the model sees.
+  These are the model path, device, length unit, extensions directory,
+  uncertainty threshold, dtype override, rotation averaging, determinism policy,
+  task name, extras flag, charge and spin, together with a kernel version.
+  Instances that differ in these values get different result-cache keys, and
+  =setChargeSpin= changes the key.
+  The consistency check and the engine path are not part of the hash.
+- Errors :: none.
 
 *** =rgpot::MetatomicPot::readsCharge=
 

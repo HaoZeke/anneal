@@ -11,6 +11,7 @@
 
 #include "rgpot/PotentialCache.hpp"
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <iostream>
 #include <memory>
@@ -18,9 +19,31 @@
 #include <stdexcept>
 #include <vector>
 
+// memcpy-based word loads preserve C++ aliasing rules for typed input arrays.
+#ifndef XXH_FORCE_MEMORY_ACCESS
+#define XXH_FORCE_MEMORY_ACCESS 0
+#endif
+#define XXH_INLINE_ALL
+#include <xxhash.h>
+
 namespace rgpot::cache {
 
 namespace {
+// Versioned storage keys keep entries formed with a different hash protocol
+// in a separate RocksDB namespace. The key is one version byte and the 64-bit
+// hash in little-endian order, so its width and byte order do not depend on
+// the platform.
+constexpr size_t storage_key_bytes = 1 + sizeof(uint64_t);
+
+std::array<char, storage_key_bytes> storage_key(const KeyHash &key) {
+  std::array<char, storage_key_bytes> bytes{};
+  bytes[0] = 2;
+  for (size_t i = 0; i < sizeof(uint64_t); ++i) {
+    bytes[1 + i] = static_cast<char>((key.hash >> (8 * i)) & 0xffU);
+  }
+  return bytes;
+}
+
 constexpr char result_marker[] = "RGPOTR1";
 constexpr size_t result_metadata_bytes =
     sizeof(result_marker) + 10 * sizeof(double) + 1;
@@ -29,6 +52,21 @@ size_t energy_force_bytes(size_t n_atoms) {
   return (1 + 3 * n_atoms) * sizeof(double);
 }
 } // namespace
+
+KeyHash result_key(const ForceInput &input, PotType type, uint64_t parameters) {
+  const std::array<uint64_t, 4> identity{
+      input.nAtoms, static_cast<uint64_t>(type), parameters, input.box != nullptr};
+  XXH3_state_t state;
+  XXH3_INITSTATE(&state);
+  XXH3_64bits_reset(&state);
+  XXH3_64bits_update(&state, identity.data(), sizeof(identity));
+  XXH3_64bits_update(&state, input.pos, input.nAtoms * 3 * sizeof(double));
+  XXH3_64bits_update(&state, input.atmnrs, input.nAtoms * sizeof(int));
+  if (input.box) {
+    XXH3_64bits_update(&state, input.box, 9 * sizeof(double));
+  }
+  return KeyHash(XXH3_64bits_digest(&state));
+}
 
 bool PotentialCache::has_result_metadata(const std::string &value,
                                          size_t n_atoms) {
@@ -77,7 +115,8 @@ void PotentialCache::add_serialized(const KeyHash &key, const ForceOut &out,
     std::memcpy(metadata + sizeof(double), out.stress, sizeof(out.stress));
     buffer.back() = 1;
   }
-  db_->Put(rocksdb::WriteOptions(), key.slice(),
+  const auto bytes = storage_key(key);
+  db_->Put(rocksdb::WriteOptions(), rocksdb::Slice(bytes.data(), bytes.size()),
            rocksdb::Slice(buffer.data(), buffer.size()));
 }
 
@@ -179,7 +218,8 @@ void PotentialCache::add_serialized(const KeyHash &kv, double energy,
               forces.size() * sizeof(double));
 
   rocksdb::Slice value(buffer.data(), buffer.size());
-  db_->Put(rocksdb::WriteOptions(), kv.slice(), value);
+  const auto bytes = storage_key(kv);
+  db_->Put(rocksdb::WriteOptions(), rocksdb::Slice(bytes.data(), bytes.size()), value);
 }
 
 /**
@@ -194,7 +234,8 @@ std::optional<std::string> PotentialCache::find(const KeyHash &kv) {
   if (!db_)
     return std::nullopt;
   std::string value;
-  rocksdb::Status s = db_->Get(rocksdb::ReadOptions(), kv.slice(), &value);
+  const auto bytes = storage_key(kv);
+  rocksdb::Status s = db_->Get(rocksdb::ReadOptions(), rocksdb::Slice(bytes.data(), bytes.size()), &value);
   if (s.ok()) {
     return value;
   }

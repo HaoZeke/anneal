@@ -7,6 +7,7 @@
 #include <limits>
 #include <memory>
 #include <random>
+#include <type_traits>
 
 #include "rgpot/D2Pot/D2CpmdPot.hpp"
 #include "rgpot/D2Pot/D2Pot.hpp"
@@ -303,6 +304,115 @@ void checkResultMetadata(const rgpot::ForceInput &in,
   }
 }
 } // namespace
+
+namespace {
+class FingerprintedPotential : public rgpot::Potential<FingerprintedPotential> {
+public:
+  FingerprintedPotential(rgpot::PotType type, uint64_t fingerprint, double energy)
+      : Potential(type), fingerprint_(fingerprint), energy_(energy) {}
+
+  uint64_t paramsKey() const noexcept override { return fingerprint_; }
+
+  void forceImpl(const rgpot::ForceInput &, rgpot::ForceOut *out) const override {
+    out->energy = energy_;
+  }
+
+private:
+  uint64_t fingerprint_;
+  double energy_;
+};
+} // namespace
+
+TEST_CASE("Persistent cache keys distinguish ordered potential identities across callers",
+          "[Potential][cache][identity]") {
+  using rgpot::PotType;
+  FingerprintedPotential a(PotType::CuH2, static_cast<uint64_t>(PotType::LJ), 1.25);
+  FingerprintedPotential b(PotType::LJ, static_cast<uint64_t>(PotType::CuH2), 2.5);
+  FingerprintedPotential c(PotType::LJ, UINT64_C(0x1234567800000001), 3.75);
+  rgpot::types::AtomMatrix positions(1, 3);
+  positions(0, 0) = 0.125;
+  positions(0, 1) = 0.25;
+  positions(0, 2) = 0.5;
+  const std::vector<int> species{1};
+  const std::array<std::array<double, 3>, 3> box{{{6, 0, 0}, {0, 7, 0}, {0, 0, 8}}};
+  const auto path = resultCachePath();
+  {
+    rgpot::cache::PotentialCache cold(path);
+    rgpot::ForceInput input{1, positions.data(), species.data(), box.front().data()};
+    double forces[3] = {};
+    rgpot::ForceOut output{};
+    output.F = forces;
+    for (auto *pot : {&a, &b, &c}) {
+      pot->setCache(&cold);
+      pot->forceBatch({1, &input, &output});
+      pot->setCache(nullptr);
+    }
+    REQUIRE(cold.counts().computed == 3);
+    REQUIRE(cold.counts().served == 0);
+  }
+  {
+    rgpot::cache::PotentialCache warm(path);
+    using Case = std::pair<FingerprintedPotential *, double>;
+    for (const auto &[pot, energy] : {Case{&c, 3.75}, Case{&b, 2.5}, Case{&a, 1.25}}) {
+      pot->setCache(&warm);
+      const auto answer = (*pot)(positions, species, box);
+      REQUIRE(std::get<0>(answer) == energy);
+      pot->setCache(nullptr);
+    }
+    REQUIRE(warm.counts().computed == 0);
+    REQUIRE(warm.counts().served == 3);
+  }
+  REQUIRE(rocksdb::DestroyDB(path, rocksdb::Options()).ok());
+}
+
+static_assert(std::is_same_v<decltype(rgpot::cache::KeyHash::hash), uint64_t>,
+              "cache keys are 64 bits wide on every platform");
+
+TEST_CASE("Stored cache keys are a version byte and a little-endian 64-bit hash",
+          "[Potential][cache][key]") {
+  using rgpot::PotType;
+  FingerprintedPotential pot(PotType::LJ, UINT64_C(0x0123456789abcdef), 1.5);
+  rgpot::types::AtomMatrix positions(1, 3);
+  positions(0, 0) = 0.125;
+  positions(0, 1) = 0.25;
+  positions(0, 2) = 0.5;
+  const std::vector<int> species{1};
+  const std::array<std::array<double, 3>, 3> box{{{6, 0, 0}, {0, 7, 0}, {0, 0, 8}}};
+  const auto path = resultCachePath();
+  {
+    rgpot::cache::PotentialCache cache(path);
+    pot.setCache(&cache);
+    (void)pot(positions, species, box);
+    pot.setCache(nullptr);
+  }
+  const rgpot::ForceInput input{1, positions.data(), species.data(),
+                                box.front().data()};
+  const uint64_t hash =
+      rgpot::cache::result_key(input, PotType::LJ, pot.paramsKey()).hash;
+
+  rocksdb::DB *raw = nullptr;
+  REQUIRE(rocksdb::DB::OpenForReadOnly(rocksdb::Options(), path, &raw).ok());
+  std::unique_ptr<rocksdb::DB> db(raw);
+  std::unique_ptr<rocksdb::Iterator> entries(
+      db->NewIterator(rocksdb::ReadOptions()));
+  size_t count = 0;
+  for (entries->SeekToFirst(); entries->Valid(); entries->Next()) {
+    ++count;
+    const std::string key = entries->key().ToString();
+    REQUIRE(key.size() == 1 + sizeof(uint64_t));
+    REQUIRE(static_cast<unsigned char>(key[0]) == 2);
+    uint64_t stored = 0;
+    for (size_t i = 0; i < sizeof(uint64_t); ++i) {
+      stored |= static_cast<uint64_t>(static_cast<unsigned char>(key[1 + i]))
+                << (8 * i);
+    }
+    REQUIRE(stored == hash);
+  }
+  REQUIRE(count == 1);
+  entries.reset();
+  db.reset();
+  REQUIRE(rocksdb::DestroyDB(path, rocksdb::Options()).ok());
+}
 
 TEST_CASE("Cached force batches retain result metadata through misses and hits",
           "[Potential][cache][stress]") {
