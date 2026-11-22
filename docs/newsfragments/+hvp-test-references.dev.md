@@ -1,0 +1,1 @@
+Hessian-vector tests compare the LJ product with a closed-form 12-6 Hessian and a force finite difference, the CuH2 product with wrapped periodic pairs, and the RPC unit smoke with the energy gradient and curvature.

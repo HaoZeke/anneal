@@ -14,6 +14,7 @@
 
 #include <catch2/catch_all.hpp>
 
+#include "DenseHessianOracle.hpp"
 #include "rgpot/HessianVector.hpp"
 #include "rgpot/LennardJones/LJClusterPot.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
@@ -203,7 +204,12 @@ TEST_CASE("from_impl keeps LJClusterPot Auto on finite differences", "[hvp]") {
 }
 
 TEST_CASE("from_impl registers the analytic product of LJPot", "[hvp]") {
-  LJPot lj;
+  // Well depth and zero crossing differ from 1, so a swapped or dropped
+  // parameter changes the product. The 20 A cell keeps every image beyond
+  // the 15 A cutoff, leaving the three direct pairs.
+  const double u0 = 0.7;
+  const double psi = 1.1;
+  LJPot lj(rgpot::LJConfig{.u0 = u0, .cutoff = 15.0, .psi = psi});
   auto pot = PotentialHandle::from_impl(lj);
   std::array<double, 9> pos{
       0.0, 0.0, 0.0, 1.2, 0.1, 0.0, 0.3, 1.1, 0.2};
@@ -225,6 +231,64 @@ TEST_CASE("from_impl registers the analytic product of LJPot", "[hvp]") {
                     .box = box.data()};
   lj.hessianVectorImpl(legacy, direction.data(), want.data());
   CHECK(hv == want);
+
+  // The handle forwarding hessianVectorImpl is only plumbing. What makes
+  // the product right is agreement with the closed form 12-6 Hessian, built
+  // here from the pair energy alone, and with a finite difference of forces.
+  const std::size_t n = atmnrs.size();
+  std::vector<double> closed(3 * n, 0.0);
+  std::vector<double> magnitude(3 * n, 0.0);
+  for (std::size_t i = 0; i < n; ++i) {
+    for (std::size_t j = i + 1; j < n; ++j) {
+      double d[3];
+      double r2 = 0.0;
+      for (std::size_t k = 0; k < 3; ++k) {
+        d[k] = pos[3 * i + k] - pos[3 * j + k];
+        r2 += d[k] * d[k];
+      }
+      const double r = std::sqrt(r2);
+      // phi = 4 u0 [(psi/r)^12 - (psi/r)^6], differentiated by hand.
+      const double phi1 = 4.0 * u0 *
+                          (-12.0 * std::pow(psi, 12) * std::pow(r, -13) +
+                           6.0 * std::pow(psi, 6) * std::pow(r, -7));
+      const double phi2 = 4.0 * u0 *
+                          (156.0 * std::pow(psi, 12) * std::pow(r, -14) -
+                           42.0 * std::pow(psi, 6) * std::pow(r, -8));
+      double along = 0.0;
+      double w[3];
+      for (std::size_t k = 0; k < 3; ++k) {
+        w[k] = direction[3 * i + k] - direction[3 * j + k];
+        along += d[k] / r * w[k];
+      }
+      for (std::size_t k = 0; k < 3; ++k) {
+        const double radial = phi2 * along * d[k] / r;
+        const double tangential = phi1 / r * (w[k] - along * d[k] / r);
+        closed[3 * i + k] += radial + tangential;
+        closed[3 * j + k] -= radial + tangential;
+        const double size = std::abs(radial) + std::abs(tangential);
+        magnitude[3 * i + k] += size;
+        magnitude[3 * j + k] += size;
+      }
+    }
+  }
+  // Each component sums at most two pairs of products and powers, a few
+  // dozen roundings of the summed magnitudes.
+  const double eps = std::numeric_limits<double>::epsilon();
+  const std::vector<double> x(pos.begin(), pos.end());
+  const std::vector<int> z(atmnrs.begin(), atmnrs.end());
+  const auto oracle = finiteDifferenceOracle(lj, x, z, box, direction);
+  for (std::size_t k = 0; k < hv.size(); ++k) {
+    CHECK(std::abs(hv[k] - closed[k]) <= 32.0 * eps * magnitude[k]);
+    CHECK(std::abs(hv[k] - oracle.product[k]) <= oracle.bound[k]);
+  }
+  // The product must stand clear of the bound it is checked against.
+  double largest = 0.0;
+  double loosest = 0.0;
+  for (std::size_t k = 0; k < closed.size(); ++k) {
+    largest = std::max(largest, std::abs(closed[k]));
+    loosest = std::max(loosest, oracle.bound[k]);
+  }
+  CHECK(largest > loosest);
 }
 
 TEST_CASE("from_impl registers the analytic product of DoubleWellPot", "[hvp]") {
