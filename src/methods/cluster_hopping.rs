@@ -3467,6 +3467,16 @@ fn rigid_centres_clear(state: ArrayView1<f64>, n: usize, min_d: f64) -> bool {
     true
 }
 
+/// Records a rigid quench when its centres clear half a contact.
+///
+/// A clash can undercut every separated cage. The record used to run
+/// before that test, and the clash became the reported incumbent.
+fn record_if_centres_clear(ledger: &mut Ledger, cfg: &Config, energy: f64, state: ArrayView1<f64>) {
+    if rigid_centres_clear(state, cfg.n_points, 0.5 * cfg.min_separation) {
+        ledger.record(energy, state);
+    }
+}
+
 fn rigid_step_scale(scale: f64, accepted: usize, trials: usize) -> f64 {
     if trials == 0 {
         return scale;
@@ -3646,19 +3656,42 @@ mod rigid_step_tests {
         let patience = cfg.restart_patience * RIGID_CAGE_WINDOWS;
         let budget = patience + 1 + 24;
         // Each call creeps lower by far less than a rigid new lowest, so the
-        // main chain still stalls and every quench is a new incumbent.
+        // main chain still stalls. Its own hop has no centre test and still
+        // records a clash. The side walk starts on the next call, and a clash
+        // there is not an incumbent.
         let energy = |call: usize| -1.0 - 1.0e-6 * call as f64;
-        let (outcome, ledger) = drive(&cfg, spread(4), budget, |call, _| energy(call));
+        let gap = 0.5 * cfg.min_separation;
+        let mut clashes = Vec::new();
+        let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+            let _ = ledger.charge();
+            let call = ledger.spent();
+            if !super::rigid_centres_clear(x, cfg.n_points, gap) {
+                clashes.push(call);
+            }
+            (energy(call), x.to_owned())
+        };
+        let mut ledger = Ledger::new(budget);
+        let mut rng = StdRng::seed_from_u64(3);
+        let outcome =
+            run(&cfg, spread(4).view(), &mut ledger, &mut relax, &mut rng).expect("valid");
         assert_eq!(outcome.charged, budget);
         assert!(
             outcome.hops < budget - 1,
             "the run never entered its side walk"
         );
-        let found: Vec<(usize, f64)> = (1..=budget).map(|call| (call, energy(call))).collect();
+        let side_from = patience + 2;
+        assert!(
+            clashes.iter().any(|call| *call >= side_from),
+            "the side walk never quenched a centre clash"
+        );
+        let found: Vec<(usize, f64)> = (1..=budget)
+            .filter(|call| *call < side_from || !clashes.contains(call))
+            .map(|call| (call, energy(call)))
+            .collect();
         assert_eq!(
             ledger.encounters(),
             found.as_slice(),
-            "a quench was not stamped with the call that found it"
+            "a clear quench was not stamped with the call that found it"
         );
     }
 
@@ -3703,6 +3736,135 @@ mod rigid_step_tests {
             outcome.hops, archive,
             "the archive walk ended before its bound on coincident bodies"
         );
+    }
+
+    /// Four centres of a regular tetrahedron, 2.8 apart, rotations at zero.
+    fn tetra_centres() -> Array1<f64> {
+        let raw = [
+            [1.0, 1.0, 1.0],
+            [1.0, -1.0, -1.0],
+            [-1.0, 1.0, -1.0],
+            [-1.0, -1.0, 1.0],
+        ];
+        let mut edge = 0.0_f64;
+        for k in 0..3 {
+            let delta = raw[0][k] - raw[1][k];
+            edge += delta * delta;
+        }
+        let scale = 2.8 / edge.sqrt();
+        let mut state = Array1::zeros(24);
+        for (body, point) in raw.iter().enumerate() {
+            for k in 0..3 {
+                state[3 * body + k] = point[k] * scale;
+            }
+        }
+        state
+    }
+
+    #[test]
+    fn an_overlapping_shell_quench_does_not_become_the_incumbent() {
+        let n = 4;
+        let mut cfg = Config::recommended_tip4p(n);
+        cfg.restart_patience = 1;
+        cfg.relax_steps = 1;
+        cfg.move_library = MoveLibrary::RigidBody {
+            n_molecules: n,
+            translate_step: 1.0e-6,
+            rotate_step: std::f64::consts::PI / 3.0,
+            local: true,
+            reverse_cycles: false,
+            relocate: false,
+        };
+        cfg.rigid_body_geometry = None;
+        let start = tetra_centres();
+        let gap = 0.5 * cfg.min_separation;
+        let angle = 3.0 * std::f64::consts::PI / 3.0;
+        assert!(
+            (0..3).any(|axis| {
+                !super::rigid_centres_clear(
+                    super::rigid_shell_turn(start.view(), n, axis, angle).view(),
+                    n,
+                    gap,
+                )
+            }),
+            "the shell turn never built an overlapping candidate"
+        );
+        let clear_energy = -1.0;
+        let overlap_energy = -80.0;
+        let mut offered = 0usize;
+        let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+            let _ = ledger.charge();
+            if super::rigid_centres_clear(x, n, gap) {
+                (clear_energy, start.clone())
+            } else {
+                offered += 1;
+                (overlap_energy, x.to_owned())
+            }
+        };
+        let patience = cfg.restart_patience * RIGID_CAGE_WINDOWS;
+        let mut ledger = Ledger::new(patience + 16);
+        let mut rng = StdRng::seed_from_u64(11);
+        let outcome = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("valid");
+        assert!(offered > 0, "the side walk never quenched an overlap");
+        assert_eq!(outcome.best, clear_energy);
+        assert_eq!(ledger.best, clear_energy);
+        let held = ledger
+            .best_state
+            .expect("the clear cage stays the incumbent");
+        assert!(super::rigid_centres_clear(held.view(), n, gap));
+        assert!(
+            outcome
+                .improvements
+                .iter()
+                .all(|(_, _, _, energy)| *energy > overlap_energy + 1.0)
+        );
+    }
+
+    #[test]
+    fn an_overlapping_archive_quench_does_not_become_the_incumbent() {
+        let n = 4;
+        let mut cfg = Config::recommended_tip4p(n);
+        cfg.relax_steps = 1;
+        cfg.rigid_body_geometry = Some(crate::potentials::Tip4pCluster::new(n).rigid_geometry());
+        let clear = spread(n);
+        let overlap = Array1::zeros(6 * n);
+        let kernels = vec![super::ClusterMove::RigidOrientAll {
+            n_molecules: n,
+            step: 0.2,
+        }];
+        let mut ledger = Ledger::new(8);
+        ledger.record(-1.0, clear.view());
+        let mut relax = |ledger: &mut Ledger, _x: ArrayView1<f64>, _steps: usize| {
+            let _ = ledger.charge();
+            (-50.0, overlap.clone())
+        };
+        let mut archive = crate::methods::stall_archive::StallArchive::new(4, 8);
+        super::stall_bridge::walk_armed_rigid_archive(
+            &cfg,
+            &mut ledger,
+            &mut relax,
+            &mut archive,
+            &kernels,
+            super::ClusterMove::propose_scaled,
+            -1.0,
+            clear.view(),
+            0,
+            cfg.min_separation / 50.0,
+            1.0,
+            5.0e-2,
+            100,
+        );
+        assert!(ledger.spent() > 0, "the archive walk never quenched");
+        assert_eq!(ledger.best, -1.0);
+        assert_eq!(ledger.encounters(), &[(0, -1.0)]);
+        let held = ledger
+            .best_state
+            .expect("the clear cage stays the incumbent");
+        assert!(super::rigid_centres_clear(
+            held.view(),
+            n,
+            0.5 * cfg.min_separation
+        ));
     }
 }
 
@@ -5619,7 +5781,7 @@ where
                         contain_trial(cfg, &mut trial, cfg.n_points);
                         let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
                         if quenched.is_finite() && relaxed.len() == $state.len() {
-                            ledger.record(quenched, relaxed.view());
+                            record_if_centres_clear(ledger, cfg, quenched, relaxed.view());
                             let rise = (quenched - $energy) / cfg.temperature.max(1e-12);
                             if rise <= 0.0 || $rng.random::<f64>() < (-rise).exp() {
                                 $energy = quenched;
@@ -5645,7 +5807,7 @@ where
                         let trial = rigid_shell_turn(side_state.view(), cfg.n_points, axis, angle);
                         let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
                         if quenched.is_finite() && relaxed.len() == side_state.len() {
-                            ledger.record(quenched, relaxed.view());
+                            record_if_centres_clear(ledger, cfg, quenched, relaxed.view());
                             if rigid_centres_clear(
                                 relaxed.view(),
                                 cfg.n_points,
@@ -5723,7 +5885,7 @@ where
                                 rigid_shell_turn(side_state.view(), cfg.n_points, axis, angle);
                             let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
                             if quenched.is_finite() && relaxed.len() == side_state.len() {
-                                ledger.record(quenched, relaxed.view());
+                                record_if_centres_clear(ledger, cfg, quenched, relaxed.view());
                                 if rigid_centres_clear(
                                     relaxed.view(),
                                     cfg.n_points,

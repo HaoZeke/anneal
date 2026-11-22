@@ -115,7 +115,7 @@ pub(super) fn walk_armed_rigid_archive(
         if !quenched.is_finite() || relaxed.len() != side_state.len() {
             break;
         }
-        ledger.record(quenched, relaxed.view());
+        super::record_if_centres_clear(ledger, cfg, quenched, relaxed.view());
         let improved = quenched < branch_best - new_lowest;
         if improved {
             branch_best = quenched;
