@@ -493,17 +493,26 @@ def main(argv: list[str]) -> int:
     names = tuple(args.system) if args.system else SYSTEMS
     wanted = set(args.code) if args.code else None
     revision, sw_build_key = read_built_gmin_provenance(args.svnrev, args.source)
-    default_tersoff_source = args.source.with_name("gmin-tersoff-source.txt")
-    tersoff_source = args.tersoff_source or (
-        default_tersoff_source if default_tersoff_source.is_file() else args.source
-    )
-    tersoff_revision, tc_build_key = read_built_gmin_provenance(
-        args.svnrev, tersoff_source
-    )
-    if tersoff_revision != revision:
-        raise SystemExit(
-            f"GMIN-tersoff revision {tersoff_revision} != GMIN revision {revision}"
+    tc_build_key = ""
+    if args.tersoff_source is not None or any(
+        name.startswith("tc") for name in names
+    ):
+        tersoff_source = (
+            args.tersoff_source
+            if args.tersoff_source is not None
+            else args.source.with_name("gmin-tersoff-source.txt")
         )
+        if not tersoff_source.is_file():
+            raise FileNotFoundError(
+                f"missing GMIN-tersoff source metadata: {tersoff_source}"
+            )
+        tersoff_revision, tc_build_key = read_built_gmin_provenance(
+            args.svnrev, tersoff_source
+        )
+        if tersoff_revision != revision:
+            raise SystemExit(
+                f"GMIN-tersoff revision {tersoff_revision} != GMIN revision {revision}"
+            )
     head = args.head_file.read_text().strip()
     machine = machine_columns()
     heads = {"binary": head, "before_binary": ""}

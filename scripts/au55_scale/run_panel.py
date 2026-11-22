@@ -24,6 +24,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         break
 from machine_provenance import (  # noqa: E402
     read_built_gmin_provenance,
+    require_gmin_build_key,
     validate_saved_gmin_provenance,
 )
 
@@ -132,30 +133,47 @@ def run_anneal(binary: Path, seed: int) -> dict[str, str]:
     return parse_row(text)
 
 
+DEFAULT_GMIN_SVNREV = Path("/work/metal-darby/src/wales/GMIN/source/SVNREV")
+DEFAULT_GMIN_SOURCE = Path("/work/metal-darby/gmin-source.txt")
+
+
 def _resolve_gmin_provenance(
     svnrev: Path | None = None, gmin_source: Path | None = None
 ) -> tuple[str, str]:
     svnrev_path = svnrev or Path(
-        os.environ.get(
-            "GMIN_SVNREV_FILE", "/work/gmin-h2h/src/wales/GMIN/source/SVNREV"
-        )
+        os.environ.get("GMIN_SVNREV_FILE", str(DEFAULT_GMIN_SVNREV))
     )
     source_path = gmin_source or Path(
-        os.environ.get("GMIN_SOURCE_FILE", "/work/gmin-h2h/gmin-source.txt")
+        os.environ.get("GMIN_SOURCE_FILE", str(DEFAULT_GMIN_SOURCE))
     )
     return read_built_gmin_provenance(svnrev_path, source_path)
+
+
+def _validate_caller_gmin_provenance(
+    gmin_revision: str | None, gmin_build_key: str | None
+) -> tuple[str, str]:
+    if not isinstance(gmin_revision, str) or not gmin_revision.strip():
+        raise ValueError("missing expected GMIN revision")
+    return (
+        gmin_revision.strip(),
+        require_gmin_build_key(gmin_build_key, "expected gmin_build_key"),
+    )
 
 
 def stored_gmin(
     root: Path,
     *,
-    gmin_revision: str = "",
-    gmin_build_key: str = "",
+    gmin_revision: str | None = None,
+    gmin_build_key: str | None = None,
 ) -> list[dict[str, str]]:
+    if gmin_revision is not None or gmin_build_key is not None:
+        gmin_revision, gmin_build_key = _validate_caller_gmin_provenance(
+            gmin_revision, gmin_build_key
+        )
     path = root / "bench" / "au55-gupta" / "seeds.csv"
     if not path.is_file():
         return []
-    if not gmin_revision or not gmin_build_key:
+    if gmin_revision is None and gmin_build_key is None:
         gmin_revision, gmin_build_key = _resolve_gmin_provenance()
     rows = []
     with path.open() as handle:
