@@ -52,16 +52,49 @@ pub fn orbit_candidates(
     core_fraction: f64,
     min_separation: f64,
 ) -> Vec<Array1<f64>> {
+    orbit_candidates_for(
+        false,
+        x,
+        n_points,
+        core,
+        tolerance,
+        merge_radius,
+        core_fraction,
+        min_separation,
+    )
+}
+
+pub(crate) fn orbit_candidates_for(
+    detected_symmetry: bool,
+    x: ArrayView1<f64>,
+    n_points: usize,
+    core: crate::methods::cluster_hopping::OrbitCore,
+    tolerance: f64,
+    merge_radius: f64,
+    core_fraction: f64,
+    min_separation: f64,
+) -> Vec<Array1<f64>> {
     use crate::methods::cluster_hopping::OrbitCore;
     let fraction = || {
-        on_new_basin(
-            x,
-            n_points,
-            tolerance,
-            merge_radius,
-            core_fraction,
-            min_separation,
-        )
+        if detected_symmetry {
+            crate::symmetrise::orbit_complete_core_detected(
+                x,
+                n_points,
+                tolerance,
+                merge_radius,
+                core_fraction,
+                min_separation,
+            )
+        } else {
+            on_new_basin(
+                x,
+                n_points,
+                tolerance,
+                merge_radius,
+                core_fraction,
+                min_separation,
+            )
+        }
     };
     let shells = |spec: &crate::symmetrise::ShellCore| {
         crate::symmetrise::orbit_complete_shells(x, n_points, spec, merge_radius, min_separation)

@@ -737,6 +737,11 @@ pub struct Config {
     /// from the inertia tensor. A detected inversion is one of those
     /// operations and has no separate orientation search.
     pub continuous_symmetry: ContinuousSymmetry,
+    /// Project onto detected symmetry operations rather than the fixed
+    /// fivefold/inversion template library, and scan all orders the point
+    /// count can hold rather than `[2, 3, 4, 5, 6]`.
+    #[serde(skip_serializing_if = "is_false")]
+    pub detected_symmetry: bool,
     /// Largest deviation at which an approximate symmetry is worth using.
     pub symmetry_tolerance: f64,
     /// Coordinate-space radius used to merge points after symmetrisation.
@@ -2095,6 +2100,13 @@ impl Config {
         self
     }
 
+    /// Opts into template-free symmetry detection across all orders the point
+    /// count can hold.
+    pub fn with_detected_symmetry(mut self) -> Self {
+        self.detected_symmetry = true;
+        self
+    }
+
     /// Lennard-Jones preset expressed against declared physical scales.
     ///
     /// ```
@@ -2196,6 +2208,7 @@ impl Config {
             symmetrise_core_fraction: 0.6,
             point_symmetrise_every_accept: false,
             continuous_symmetry: ContinuousSymmetry::Off,
+            detected_symmetry: false,
             symmetry_tolerance: LennardJonesPreset::SYMMETRY_TOLERANCE * length_scale,
             symmetry_merge_radius: LennardJonesPreset::SYMMETRY_MERGE_RADIUS * length_scale,
             symmetrise_patience: 2_000,

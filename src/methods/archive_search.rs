@@ -137,14 +137,17 @@ fn symmetry_polish(
         return None;
     }
     let n = x.len() / 3;
-    let orders = crate::symmetrise::orders_held(n);
+    let orders = [2usize, 3, 4, 5, 6];
     let mut cands: Vec<crate::symmetrise::Candidate> = Vec::new();
-    for &order in &orders {
+    for order in orders {
         if let Some(c) = crate::symmetrise::detect(x, n, &[order], cfg.symmetry_tolerance) {
             cands.push(c);
         }
     }
-    let group = crate::symmetrise::generate_group(&cands, 60);
+    let group = match crate::symmetrise::generate_group(&cands, 60) {
+        Ok(group) => group,
+        Err(err) => err.elements,
+    };
     let y = if group.len() > 1 {
         crate::symmetrise::symmetrise_group(x, n, &group, cfg.merge_radius.max(0.5))
     } else {

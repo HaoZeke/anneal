@@ -385,6 +385,13 @@ impl MoveLibrary {
                 fallback_step: LennardJonesPreset::SINGLE_POINT_STEP * cfg.length_scale,
             });
         }
+        if cfg.detected_symmetry {
+            for kernel in &mut kernels {
+                if let ClusterMove::Symmetrise(sym) = kernel {
+                    sym.orders = crate::symmetrise::orders_held(sym.n_points);
+                }
+            }
+        }
         kernels
     }
 
@@ -1681,7 +1688,7 @@ impl ClusterMove {
             ClusterMove::ShellRotate(ShellRotate { n_points: n }),
             ClusterMove::Symmetrise(Symmetrise {
                 n_points: n,
-                orders: crate::symmetrise::orders_held(n),
+                orders: vec![2, 3, 4, 5, 6],
                 pair_cutoff: symmetrise_cutoff,
             }),
         ]
@@ -1747,7 +1754,7 @@ impl ClusterMove {
             }),
             ClusterMove::Symmetrise(Symmetrise {
                 n_points: n,
-                orders: crate::symmetrise::orders_held(n),
+                orders: vec![2, 3, 4, 5, 6],
                 pair_cutoff: symmetrise_cutoff,
             }),
         ]
@@ -2236,8 +2243,12 @@ impl ClusterMove {
             } => {
                 let n = *n_points;
                 if n >= 3 {
-                    let orders = crate::symmetrise::orders_held(n);
-                    let cands = crate::symmetrise::detect_all(x, n, &orders, *tolerance);
+                    let cands = crate::symmetrise::detect_all_crystallographic(
+                        x,
+                        n,
+                        &[2, 3, 4, 5, 6],
+                        *tolerance,
+                    );
                     if !cands.is_empty() {
                         // One generator per distinct axis, lowest deviation
                         // first, at most three: two generate every axial and
@@ -2259,7 +2270,10 @@ impl ClusterMove {
                                 break;
                             }
                         }
-                        let group = crate::symmetrise::generate_group(&gens, 48);
+                        let group = match crate::symmetrise::generate_group(&gens, 48) {
+                            Ok(g) => g,
+                            Err(e) => e.elements,
+                        };
                         let y = if group.len() > 1 {
                             crate::symmetrise::symmetrise_group(x, n, &group, *pair_cutoff)
                         } else {

@@ -6106,6 +6106,7 @@ where
                             step: cfg.escape_amplitude.max(0.15),
                             max_steps: cfg.escape_max_climb.max(48),
                             overshoot: cfg.escape_overshoot.max(1.0),
+                            detected_symmetry: cfg.detected_symmetry,
                             ..crate::methods::activation::Activation::default()
                         };
                         crate::methods::activation::activate_from_origin(
@@ -6163,6 +6164,7 @@ where
                             step: cfg.escape_amplitude.max(0.15),
                             max_steps: cfg.escape_max_climb.max(16),
                             overshoot: cfg.escape_overshoot.max(1.0),
+                            detected_symmetry: cfg.detected_symmetry,
                             ..crate::methods::activation::Activation::default()
                         };
                         crate::methods::activation::activate(
@@ -6466,8 +6468,12 @@ where
                         None
                     } else {
                         new_incumbent = false;
-                        crate::csm::propose(x.view(), classes)
-                            .map(|projected| projected.coordinates)
+                        if cfg.detected_symmetry {
+                            crate::csm::propose(x.view(), classes)
+                        } else {
+                            crate::csm::propose_templates(x.view(), classes)
+                        }
+                        .map(|projected| projected.coordinates)
                     }
                 }
                 ContinuousSymmetry::Off => None,
@@ -8810,7 +8816,8 @@ where
                 .zip(history.as_deref_mut())
                 .is_none_or(|(m, h)| h.claim_completion(m))
         {
-            let candidates = crate::packing::orbit_candidates(
+            let candidates = crate::packing::orbit_candidates_for(
+                cfg.detected_symmetry,
                 x.view(),
                 n,
                 cfg.orbit_core,
@@ -9047,39 +9054,88 @@ where
                 if n < 2 {
                     continue;
                 }
-                let orders: Vec<usize> = (2..=n).collect();
-                let cands =
-                    crate::symmetrise::detect_orders(x.view(), n, &orders, cfg.symmetry_tolerance);
-                let group = crate::symmetrise::generate_group(&cands, 60);
-                let detected_orders: Vec<usize> =
-                    cands.iter().map(|candidate| candidate.order).collect();
-                let symmetrised_state = if group.len() > 1 {
-                    Some(match cfg.species.as_deref() {
-                        Some(species) if species.len() == n => {
-                            crate::symmetrise::symmetrise_group_within(
+                let symmetrised_state = if cfg.detected_symmetry {
+                    let orders: Vec<usize> = (2..=n).collect();
+                    let cands = crate::symmetrise::detect_orders(
+                        x.view(),
+                        n,
+                        &orders,
+                        cfg.symmetry_tolerance,
+                    );
+                    let detected_orders: Vec<usize> =
+                        cands.iter().map(|candidate| candidate.order).collect();
+                    match crate::symmetrise::generate_group(&cands, 120) {
+                        Ok(group) if group.len() > 1 => Some(match cfg.species.as_deref() {
+                            Some(species) if species.len() == n => {
+                                crate::symmetrise::symmetrise_group_within(
+                                    x.view(),
+                                    n,
+                                    &group,
+                                    cfg.symmetry_merge_radius,
+                                    species,
+                                )
+                            }
+                            _ => crate::symmetrise::symmetrise_group(
                                 x.view(),
                                 n,
                                 &group,
                                 cfg.symmetry_merge_radius,
-                                species,
-                            )
-                        }
-                        _ => crate::symmetrise::symmetrise_group(
+                            ),
+                        }),
+                        Ok(_) => crate::symmetrise::symmetrise_detected(
                             x.view(),
                             n,
-                            &group,
+                            &detected_orders,
+                            cfg.symmetry_tolerance,
                             cfg.symmetry_merge_radius,
-                        ),
-                    })
+                        )
+                        .map(|(y, _)| y),
+                        Err(_) => None,
+                    }
                 } else {
-                    crate::symmetrise::symmetrise_detected(
-                        x.view(),
-                        n,
-                        &detected_orders,
-                        cfg.symmetry_tolerance,
-                        cfg.symmetry_merge_radius,
-                    )
-                    .map(|(y, _)| y)
+                    let mut cands: Vec<crate::symmetrise::Candidate> = Vec::new();
+                    for order in [2usize, 3, 4, 5, 6] {
+                        if let Some(c) = crate::symmetrise::detect_crystallographic(
+                            x.view(),
+                            n,
+                            &[order],
+                            cfg.symmetry_tolerance,
+                        ) {
+                            cands.push(c);
+                        }
+                    }
+                    let group = match crate::symmetrise::generate_group(&cands, 60) {
+                        Ok(group) => group,
+                        Err(err) => err.elements,
+                    };
+                    if group.len() > 1 {
+                        Some(match cfg.species.as_deref() {
+                            Some(species) if species.len() == n => {
+                                crate::symmetrise::symmetrise_group_within(
+                                    x.view(),
+                                    n,
+                                    &group,
+                                    cfg.symmetry_merge_radius,
+                                    species,
+                                )
+                            }
+                            _ => crate::symmetrise::symmetrise_group(
+                                x.view(),
+                                n,
+                                &group,
+                                cfg.symmetry_merge_radius,
+                            ),
+                        })
+                    } else {
+                        crate::symmetrise::symmetrise_detected_crystallographic(
+                            x.view(),
+                            n,
+                            &[2, 3, 4, 5, 6],
+                            cfg.symmetry_tolerance,
+                            cfg.symmetry_merge_radius,
+                        )
+                        .map(|(y, _)| y)
+                    }
                 };
                 if let Some(y) = symmetrised_state {
                     let (es, xs) = relax(ledger, y.view(), cfg.relax_steps);
@@ -9300,6 +9356,7 @@ where
                     max_steps: cfg.escape_max_climb,
                     lanczos_steps: cfg.escape_lanczos_steps,
                     epsilon: cfg.escape_epsilon,
+                    detected_symmetry: cfg.detected_symmetry,
                     ..Activation::default()
                 };
                 let sign = if rng.random::<bool>() { 1.0 } else { -1.0 };
@@ -10529,6 +10586,7 @@ mod tests {
         plain.continuous_symmetry = ContinuousSymmetry::Off;
         let mut measured = plain.clone();
         measured.continuous_symmetry = ContinuousSymmetry::Measure { interval: 1 };
+        measured.detected_symmetry = true;
         let count = |cfg: &Config| {
             let mut calls = 0usize;
             let mut ledger = Ledger::new(12);

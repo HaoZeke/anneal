@@ -381,3 +381,34 @@ fn pair_scaling_is_general_and_lennard_jones_is_unchanged() {
     assert!((morse.length_scale - 2.0_f64.powf(-1.0 / 6.0)).abs() < 1e-15);
     assert!(morse.start_radius() < stock.start_radius());
 }
+
+#[test]
+fn with_detected_symmetry_opts_in_and_tracks_safe6_counter() {
+    let stock = Config::recommended(13);
+    assert!(!stock.detected_symmetry);
+    assert!(!stock.resolved_json().unwrap().contains("detected_symmetry"));
+
+    let opted = Config::recommended(13).with_detected_symmetry();
+    assert!(opted.detected_symmetry);
+    assert!(
+        opted
+            .resolved_json()
+            .unwrap()
+            .contains(r#""detected_symmetry":true"#)
+    );
+    assert_ne!(
+        opted.resolved_sha256().unwrap(),
+        stock.resolved_sha256().unwrap()
+    );
+
+    let before = anneal_core::symmetrise::safe6_nearest_index_calls();
+    let pot = anneal_core::potentials::PairPotential::lennard_jones(13);
+    let mut ledger = anneal_core::methods::cluster_hopping::Ledger::new(250);
+    let _ = anneal_core::methods::cluster_search::search(&pot, &opted, &mut ledger, 7)
+        .expect("short opted search");
+    let after = anneal_core::symmetrise::safe6_nearest_index_calls();
+    assert!(
+        after > before,
+        "opt-in detected_symmetry path must exercise safe6 (before={before}, after={after})"
+    );
+}
