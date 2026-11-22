@@ -1040,6 +1040,19 @@ where
         let quench_tric = tric
             .as_mut()
             .filter(|tric| use_tric && tric.atoms() * 3 == x.len());
+        // An empty memory opens at one coordinate unit along the steepest
+        // direction. On a declared bond that trial is shortened to the
+        // longest step the bond check still accepts. A library with no
+        // such bond keeps the solver's own opening.
+        match wall {
+            CallWall::Covalent {
+                species,
+                groups,
+                reactive: false,
+                bond_tolerance,
+            } => opt.keep_declared_bonds(species, groups, bond_tolerance),
+            _ => opt.clear_bond_limit(),
+        }
         let (f, xr) = if molecular_anc {
             let (f, xr, _) = crate::methods::anc_quench::anc_minimize_watched(
                 x,
@@ -1064,9 +1077,12 @@ where
                 (None, Some(pre)) => {
                     // The reduced gradient has other units, so the solver's own
                     // test is off and the stop reads the Cartesian one.
+                    // The bond ceiling is a Cartesian length, so it stays off
+                    // while the step is in the reduced coordinate.
                     let origin = x.to_owned();
                     let gtol = opt.gtol;
                     opt.gtol = 0.0;
+                    opt.clear_bond_limit();
                     let (f, zr, _) = opt.minimize_watched(
                         Array1::zeros(x.len()).view(),
                         iters,
@@ -1083,6 +1099,15 @@ where
                         },
                     );
                     opt.gtol = gtol;
+                    if let CallWall::Covalent {
+                        species,
+                        groups,
+                        reactive: false,
+                        bond_tolerance,
+                    } = wall
+                    {
+                        opt.keep_declared_bonds(species, groups, bond_tolerance);
+                    }
                     (f, pre.expand(origin.view(), zr.view()))
                 }
             }
