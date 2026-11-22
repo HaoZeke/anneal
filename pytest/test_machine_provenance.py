@@ -13,6 +13,7 @@ from machine_provenance import (  # noqa: E402
     aggregate_machine_columns,
     csv_fields,
     require_csv_schema,
+    validate_saved_row_identity,
 )
 
 ACTIVE_ROW_WRITERS = (
@@ -800,3 +801,961 @@ def test_provenance_runners_and_summaries_run_without_scipy(monkeypatch):
     ab_summary = ablation.summarise("priors-off", ablation_rows)
     assert len(ab_summary) == 2
     assert 0.0 <= float(ab_summary[1]["fisher_p"]) <= 1.0
+
+
+def test_validate_saved_row_identity_requires_every_arm_field_to_agree(tmp_path):
+    row_path = tmp_path / "anneal-2000.row"
+    base = {
+        "system": "lj38",
+        "code": "anneal",
+        "arm": "anneal",
+        "seed": "2000",
+        "budget": "400000",
+    }
+    validate_saved_row_identity(
+        base,
+        path=row_path,
+        system="lj38",
+        arm="anneal",
+        seed=2000,
+        budget=400_000,
+    )
+
+    for bad_row, expected_tokens in (
+        ({**base, "code": "anneal", "arm": "gmin"}, ("arm", "arm='gmin'")),
+        ({**base, "code": "gmin", "arm": "anneal"}, ("arm", "code", "code='gmin'")),
+        ({**base, "code": "anneal", "arm": ""}, ("arm", "arm=''")),
+        ({**base, "code": "", "arm": "anneal"}, ("arm", "code", "code=''")),
+        ({**base, "code": "anneal", "arm": None}, ("arm", "arm=''")),
+        ({"system": "lj38", "seed": "2000", "budget": "400000"}, ("arm",)),
+    ):
+        with pytest.raises(ValueError) as exc_info:
+            validate_saved_row_identity(
+                bad_row,
+                path=row_path,
+                system="lj38",
+                arm="anneal",
+                seed=2000,
+                budget=400_000,
+            )
+        msg = str(exc_info.value)
+        assert str(row_path) in msg
+        for token in expected_tokens:
+            assert token in msg
+
+
+EIGHT_VALIDATED_RUNNERS = (
+    "gmin_h2h",
+    "morse_h2h",
+    "gad_published",
+    "covalent_h2h",
+    "growpal_h2h",
+    "growpal_h2h_v2",
+    "metal_h2h",
+    "metal_darby",
+)
+
+SAVED_ROW_MUTATIONS = (
+    "system",
+    "native_arm",
+    "code_matches_arm_disagrees",
+    "arm_matches_code_disagrees",
+    "seed",
+    "budget",
+)
+
+
+def _write_dict_csv(path: Path, row: dict[str, str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(row.keys()), lineterminator="\n")
+        writer.writeheader()
+        writer.writerow(row)
+
+
+def _write_executable(path: Path, body: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/usr/bin/env bash\nset -euo pipefail\n" + body)
+    path.chmod(0o755)
+    return path
+
+
+def _mutate_row_for_field(
+    valid_row: dict[str, str],
+    *,
+    native_arm_key: str,
+    expected_arm: str,
+    wrong_arm: str,
+    wrong_system: str,
+    wrong_seed: int,
+    wrong_budget: int,
+    mutation: str,
+) -> tuple[dict[str, str], tuple[str, ...]]:
+    if mutation == "system":
+        return {**valid_row, "system": wrong_system}, ("system",)
+    if mutation == "native_arm":
+        return {**valid_row, native_arm_key: wrong_arm}, ("arm", native_arm_key)
+    if mutation == "code_matches_arm_disagrees":
+        return {**valid_row, "code": expected_arm, "arm": wrong_arm}, ("arm",)
+    if mutation == "arm_matches_code_disagrees":
+        return {**valid_row, "code": wrong_arm, "arm": expected_arm}, ("arm", "code")
+    if mutation == "seed":
+        return {**valid_row, "seed": str(wrong_seed)}, ("seed",)
+    if mutation == "budget":
+        return {**valid_row, "budget": str(wrong_budget)}, ("budget",)
+    raise AssertionError(f"unknown mutation {mutation!r}")
+
+
+def _runner_saved_row_spec(runner_id: str, machine: dict[str, str], seed: int = 2000):
+    if runner_id == "gmin_h2h":
+        mod = _load_module("rej_gmin_h2h", "scripts/gmin_h2h/run_campaign.py")
+        row = {
+            "system": "lj98",
+            "code": "anneal",
+            "seed": str(seed),
+            "budget": "4000000",
+            "hit": "1",
+            "evals_to_hit": "12000",
+            "charged": "12000",
+            "gradient_passes": "",
+            "energy_only_entries": "",
+            "wall_s": "0.500000",
+            "best": "-543.665361",
+            "pot_s": "0.400000",
+            "gmin_url": "",
+            "gmin_revision": "",
+            "gmin_build_key": "",
+            "anneal_head": "head-1",
+            "code_revision": "head-1",
+            "host": "bench",
+            **machine,
+        }
+        return (
+            mod,
+            row,
+            "code",
+            "anneal",
+            "gmin",
+            "lj104",
+            seed + 1,
+            800_000,
+            lambda p: mod.load_saved(
+                p,
+                "lj98",
+                seed,
+                "anneal",
+                4_000_000,
+                machine["machine_id"],
+                machine["cpu_model"],
+                code_revision="head-1",
+                gmin_url="https://example.invalid/gmin.tar.gz",
+                gmin_build_key="b" * 64,
+            ),
+        )
+    if runner_id == "morse_h2h":
+        mod = _load_module("rej_morse_h2h", "scripts/morse_h2h/run_campaign.py")
+        row = {
+            "system": "m38r14",
+            "code": "anneal",
+            "seed": str(seed),
+            "budget": "400000",
+            "hit": "1",
+            "evals_to_hit": "15000",
+            "charged": "15000",
+            "wall_s": "0.600000",
+            "best": "-144.321054",
+            "pot_s": "0.500000",
+            "outside_s": "0.100000",
+            "gmin_url": "",
+            "gmin_revision": "",
+            "anneal_head": "head-1",
+            "code_revision": "head-1",
+            "host": "bench",
+            **machine,
+        }
+        return (
+            mod,
+            row,
+            "code",
+            "anneal",
+            "gmin",
+            "m55r14",
+            seed + 1,
+            1_000_000,
+            lambda p: mod.load_saved(
+                p,
+                "m38r14",
+                seed,
+                "anneal",
+                400_000,
+                machine=machine,
+                url="https://example.invalid/gmin.tar.gz",
+                revision="svn-1",
+                head="head-1",
+            ),
+        )
+    if runner_id == "gad_published":
+        mod = _load_module("rej_gad_published", "scripts/gad_published/run_campaign.py")
+        row = {
+            "system": "lj38",
+            "code": "anneal",
+            "seed": str(seed),
+            "budget": "400000",
+            "hit": "1",
+            "evals_to_hit": "10000",
+            "charged": "10000",
+            "wall_s": "0.500000",
+            "best": "-173.928427",
+            "pot_s": "0.400000",
+            "outside_s": "0.100000",
+            "code_revision": "head-1",
+            "host": "bench",
+            **machine,
+        }
+        return (
+            mod,
+            row,
+            "code",
+            "anneal",
+            "gmin",
+            "lj31",
+            seed + 1,
+            100_000,
+            lambda p: mod.saved_rerun(
+                p,
+                38,
+                seed,
+                "anneal",
+                mod.BUDGET,
+                code_revision="head-1",
+                machine=machine,
+            ),
+        )
+    if runner_id == "covalent_h2h":
+        mod = _load_module("rej_covalent_h2h", "scripts/covalent_h2h/run_campaign.py")
+        row = {
+            "system": "sw10",
+            "code": "anneal",
+            "seed": str(seed),
+            "budget": "100000",
+            "hit": "1",
+            "evals_to_hit": "5000",
+            "charged": "5000",
+            "wall_s": "0.300000",
+            "best": "-20.000000",
+            "pot_s": "0.200000",
+            "outside_s": "0.100000",
+            "code_revision": "head-1",
+            "host": "bench",
+            **machine,
+        }
+        return (
+            mod,
+            row,
+            "code",
+            "anneal",
+            "gmin",
+            "sw13",
+            seed + 1,
+            400_000,
+            lambda p: mod.load_saved(
+                p,
+                "sw10",
+                seed,
+                "anneal",
+                100_000,
+                machine=machine,
+            ),
+        )
+    if runner_id == "growpal_h2h":
+        mod = _load_module("rej_growpal_h2h", "scripts/growpal_h2h/run_campaign.py")
+        row = {
+            "system": "lj38",
+            "arm": "anneal",
+            "seed": str(seed),
+            "budget": "400000",
+            "hit": "1",
+            "evals_to_hit": "12000",
+            "charged": "12000",
+            "wall_s": "0.500000",
+            "pot_s": "0.400000",
+            "inside_us": "33.3333",
+            "outside_us": "8.3333",
+            "best": "-173.928427",
+            "stop": "hit",
+            "reached": "1",
+            "code_revision": "head-1",
+            "host": "bench",
+            **machine,
+        }
+        return (
+            mod,
+            row,
+            "arm",
+            "anneal",
+            "growpal",
+            "lj75",
+            seed + 1,
+            4_000_000,
+            lambda p: mod.load_saved(
+                p,
+                "lj38",
+                seed,
+                "anneal",
+                400_000,
+                machine=machine,
+            ),
+        )
+    if runner_id == "growpal_h2h_v2":
+        mod = _load_module("rej_growpal_h2h_v2", "scripts/growpal_h2h_v2/run_campaign.py")
+        row = {
+            "system": "lj38",
+            "arm": "anneal",
+            "seed": str(seed),
+            "budget": "400000",
+            "hit": "1",
+            "evals_to_hit": "12000",
+            "charged": "12000",
+            "wall_s": "0.500000",
+            "pot_s": "0.400000",
+            "outside_s": "0.100000",
+            "inside_us": "33.3333",
+            "outside_us": "8.3333",
+            "process_s": "0.500000",
+            "best": "-173.928427",
+            "stop": "hit",
+            "reached": "1",
+            "code_revision": "head-1",
+            "host": "bench",
+            **machine,
+        }
+        return (
+            mod,
+            row,
+            "arm",
+            "anneal",
+            "growpal",
+            "lj55",
+            seed + 1,
+            1_000_000,
+            lambda p: mod.load_saved(p, "lj38", seed, "anneal", 400_000),
+        )
+    if runner_id == "metal_h2h":
+        mod = _load_module("rej_metal_h2h", "scripts/metal_h2h/run_campaign.py")
+        row = {
+            "system": "zn38",
+            "code": "anneal",
+            "seed": str(seed),
+            "budget": "400000",
+            "hit": "1",
+            "evals_to_hit": "10000",
+            "charged": "10000",
+            "wall_s": "0.500000",
+            "best": "-65.000000",
+            "pot_s": "0.400000",
+            "outside_s": "0.100000",
+            "pot_per_eval_s": "0.000040000",
+            "outside_per_eval_s": "0.000010000",
+        }
+        return (
+            mod,
+            row,
+            "code",
+            "anneal",
+            "ase",
+            "zn55",
+            seed + 1,
+            900_000,
+            lambda p: mod.load_saved(p, "zn38", seed, "anneal", 400_000),
+        )
+    if runner_id == "metal_darby":
+        mod = _load_module("rej_metal_darby", "scripts/metal_h2h/run_darby.py")
+        row = {
+            "system": "cu19au19",
+            "code": "anneal",
+            "seed": str(seed),
+            "budget": "400000",
+            "hit": "1",
+            "evals_to_hit": "10000",
+            "charged": "10000",
+            "wall_s": "0.500000",
+            "best": "-122.991484",
+            "pot_s": "0.400000",
+            "outside_s": "0.100000",
+            "pot_per_eval_s": "0.000040000",
+            "outside_per_eval_s": "0.000010000",
+        }
+        return (
+            mod,
+            row,
+            "code",
+            "anneal",
+            "gmin",
+            "au38",
+            seed + 1,
+            1_000_000,
+            lambda p: mod.load_saved(p, "cu19au19", seed, "anneal", 400_000),
+        )
+    raise AssertionError(f"unknown runner {runner_id!r}")
+
+
+@pytest.mark.parametrize("runner_id", EIGHT_VALIDATED_RUNNERS)
+@pytest.mark.parametrize("mutation", SAVED_ROW_MUTATIONS)
+def test_all_eight_runners_reject_bad_saved_row_for_every_validated_field(
+    tmp_path, runner_id, mutation
+):
+    machine = {"machine_id": "a" * 64, "cpu_model": "Example CPU"}
+    (
+        _mod,
+        valid_row,
+        native_arm_key,
+        expected_arm,
+        wrong_arm,
+        wrong_system,
+        wrong_seed,
+        wrong_budget,
+        loader,
+    ) = _runner_saved_row_spec(runner_id, machine)
+
+    good_path = tmp_path / runner_id / "valid.row"
+    _write_dict_csv(good_path, valid_row)
+    assert loader(good_path) is not None
+
+    bad_row, expected_tokens = _mutate_row_for_field(
+        valid_row,
+        native_arm_key=native_arm_key,
+        expected_arm=expected_arm,
+        wrong_arm=wrong_arm,
+        wrong_system=wrong_system,
+        wrong_seed=wrong_seed,
+        wrong_budget=wrong_budget,
+        mutation=mutation,
+    )
+    bad_path = tmp_path / runner_id / f"bad-{mutation}.row"
+    _write_dict_csv(bad_path, bad_row)
+    with pytest.raises(ValueError) as exc_info:
+        loader(bad_path)
+    msg = str(exc_info.value)
+    assert str(bad_path) in msg
+    for token in expected_tokens:
+        assert token in msg
+
+
+@pytest.mark.parametrize("runner_id", EIGHT_VALIDATED_RUNNERS)
+@pytest.mark.parametrize("mutation", SAVED_ROW_MUTATIONS)
+def test_all_eight_runners_main_rejects_bad_saved_row_for_every_validated_field(
+    tmp_path, monkeypatch, runner_id, mutation
+):
+    import os
+    import types
+
+    from gmin_pin import REVISION, TARBALL_SHA256
+    from machine_provenance import machine_columns
+
+    real_uname = os.uname()
+    fake_uname = os.uname_result(
+        (
+            real_uname.sysname,
+            "bench",
+            real_uname.release,
+            real_uname.version,
+            real_uname.machine,
+        )
+    )
+    monkeypatch.setattr(os, "uname", lambda: fake_uname)
+    machine = machine_columns()
+
+    work = tmp_path / runner_id / mutation
+    work.mkdir(parents=True, exist_ok=True)
+    head_file = work / "head.txt"
+    head_file.write_text("head-1\n")
+    noop_bin = _write_executable(work / "noop", "exit 1\n")
+
+    if runner_id == "covalent_h2h":
+        covalent_preview = _load_module(
+            f"preview_{runner_id}_{mutation}", "scripts/covalent_h2h/run_campaign.py"
+        )
+        target_seed = covalent_preview.schedule(
+            ("sw10",),
+            covalent_preview.SEEDS,
+            lambda _name: ("anneal",),
+            covalent_preview.SCHEDULE_SEED,
+        )[0][1]
+    else:
+        target_seed = 2000
+
+    (
+        mod,
+        valid_row,
+        native_arm_key,
+        expected_arm,
+        wrong_arm,
+        wrong_system,
+        wrong_seed,
+        wrong_budget,
+        _loader,
+    ) = _runner_saved_row_spec(runner_id, machine, seed=target_seed)
+
+    gmin_source_text = (
+        f"url=https://example.invalid/gmin.tar.gz\n"
+        f"revision={REVISION}\n"
+        f"svnrev={REVISION}\n"
+        f"tarball_sha256={TARBALL_SHA256}\n"
+        f"build_key={'b' * 64}\n"
+    )
+    if runner_id == "gmin_h2h":
+        binary = _write_executable(
+            work / "h2h_bin",
+            'if [ "$1" = "budget" ]; then printf "4000000\\n-543.665361\\n"; exit 0; fi\nexit 1\n',
+        )
+        source = work / "source.txt"
+        source.write_text(gmin_source_text)
+        svnrev = work / "GMIN.svnrev"
+        svnrev.write_text(f"{REVISION}\n")
+        data = work / "data"
+        data.write_text("SLOPPYCONV 1.0D-4\n")
+        runs = work / "camp" / "runs"
+        starts = work / "starts"
+        coord = starts / "lj98" / "seed-2000.xyz"
+        coord.parent.mkdir(parents=True, exist_ok=True)
+        coord.write_text("98\n\n")
+        saved_path = runs / "lj98" / "anneal-2000.row"
+        argv = [
+            "run_campaign.py",
+            "--binary",
+            str(binary),
+            "--gmin",
+            str(noop_bin),
+            "--data",
+            str(data),
+            "--source",
+            str(source),
+            "--svnrev",
+            str(svnrev),
+            "--head-file",
+            str(head_file),
+            "--runs",
+            str(runs),
+            "--starts",
+            str(starts),
+            "--size",
+            "98",
+            "--seed",
+            "2000",
+            "--arm",
+            "anneal",
+        ]
+    elif runner_id == "morse_h2h":
+        binary = _write_executable(
+            work / "morse_bin",
+            'if [ "$1" = "budget" ]; then printf "400000\\n-144.321054\\n14.0\\n"; exit 0; fi\nexit 1\n',
+        )
+        source = work / "source.txt"
+        source.write_text(gmin_source_text)
+        svnrev = work / "GMIN.svnrev"
+        svnrev.write_text(f"{REVISION}\n")
+        data = work / "data"
+        data.write_text("SLOPPYCONV 1.0D-4\n")
+        runs = work / "camp" / "runs"
+        starts = work / "starts"
+        coord = starts / "m38r14" / "seed-2000.xyz"
+        coord.parent.mkdir(parents=True, exist_ok=True)
+        coord.write_text("38\n\n")
+        saved_path = runs / "m38r14" / "anneal-2000.row"
+        argv = [
+            "run_campaign.py",
+            "--binary",
+            str(binary),
+            "--gmin",
+            str(noop_bin),
+            "--data",
+            str(data),
+            "--source",
+            str(source),
+            "--svnrev",
+            str(svnrev),
+            "--head-file",
+            str(head_file),
+            "--runs",
+            str(runs),
+            "--starts",
+            str(starts),
+            "--system",
+            "m38r14",
+            "--seed",
+            "2000",
+            "--arm",
+            "anneal",
+        ]
+    elif runner_id == "gad_published":
+        monkeypatch.setattr(mod, "gad_rows", lambda _zip: [])
+        source = work / "source.txt"
+        source.write_text(gmin_source_text)
+        svnrev = work / "GMIN.svnrev"
+        svnrev.write_text(f"{REVISION}\n")
+        data = work / "data"
+        data.write_text("SLOPPYCONV 1.0D-4\n")
+        zip_path = work / "deposit.zip"
+        zip_path.write_bytes(b"")
+        runs = work / "camp" / "runs"
+        saved_path = runs / "lj38" / "anneal-2000.row"
+        argv = [
+            "run_campaign.py",
+            "--binary",
+            str(noop_bin),
+            "--gmin",
+            str(noop_bin),
+            "--data",
+            str(data),
+            "--zip",
+            str(zip_path),
+            "--source",
+            str(source),
+            "--svnrev",
+            str(svnrev),
+            "--head-file",
+            str(head_file),
+            "--runs",
+            str(runs),
+            "--size",
+            "38",
+            "--seed",
+            "2000",
+            "--arm",
+            "anneal",
+        ]
+    elif runner_id == "covalent_h2h":
+        binary = _write_executable(
+            work / "cov_bin",
+            'if [ "$1" = "budget" ]; then printf "100000\\n-20.0\\n10\\n"; exit 0; fi\n'
+            'if [ "$1" = "scales" ]; then printf "1.0\\n1.0\\n2.5\\n"; exit 0; fi\n'
+            "exit 1\n",
+        )
+        source = work / "source.txt"
+        source.write_text(gmin_source_text)
+        svnrev = work / "GMIN.svnrev"
+        svnrev.write_text(f"{REVISION}\n")
+        data = work / "data"
+        data.write_text("SLOPPYCONV 5.0D-3\nTIGHTCONV 1.0D-3\nSW\n")
+        runs = work / "camp" / "runs"
+        starts = work / "starts"
+        for seed in mod.SEEDS:
+            coord = starts / "sw10" / f"seed-{seed}.xyz"
+            coord.parent.mkdir(parents=True, exist_ok=True)
+            coord.write_text("10\n\n")
+            _write_dict_csv(
+                runs / "sw10" / f"anneal-{seed}.row",
+                {**valid_row, "seed": str(seed)},
+            )
+        saved_path = runs / "sw10" / f"anneal-{target_seed}.row"
+        argv = [
+            "run_campaign.py",
+            "--binary",
+            str(binary),
+            "--library",
+            str(work / "lib.so"),
+            "--gmin",
+            str(noop_bin),
+            "--data",
+            str(data),
+            "--gmin-tersoff",
+            str(noop_bin),
+            "--carbon-data",
+            str(data),
+            "--ase",
+            str(noop_bin),
+            "--source",
+            str(source),
+            "--svnrev",
+            str(svnrev),
+            "--head-file",
+            str(head_file),
+            "--runs",
+            str(runs),
+            "--starts",
+            str(starts),
+            "--rows",
+            str(work / "rows.csv"),
+            "--summary",
+            str(work / "summary.csv"),
+            "--system",
+            "sw10",
+            "--code",
+            "anneal",
+        ]
+    elif runner_id == "growpal_h2h":
+        monkeypatch.setitem(
+            sys.modules,
+            "growpal_arm",
+            types.SimpleNamespace(assert_budget_stops_lbfgs=lambda: None),
+        )
+        binary = _write_executable(
+            work / "gp_bin",
+            'if [ "$1" = "budget" ]; then printf "400000\\n-173.928427\\n"; exit 0; fi\nexit 1\n',
+        )
+        source = work / "source.txt"
+        source.write_text(
+            "growpal_version=0.1.0\naegon_version=0.1.0\ngrowpal_source=sdist\n"
+        )
+        seeds_xyz = work / "seeds.xyz"
+        seeds_xyz.write_text("")
+        runs = work / "camp" / "runs"
+        rows_dir = work / "camp" / "rows"
+        saved_path = rows_dir / "lj38" / "anneal-2000.row"
+        argv = [
+            "run_campaign.py",
+            "--binary",
+            str(binary),
+            "--source",
+            str(source),
+            "--seeds-xyz",
+            str(seeds_xyz),
+            "--head-file",
+            str(head_file),
+            "--runs",
+            str(runs),
+            "--rows",
+            str(rows_dir),
+            "--size",
+            "38",
+            "--seed",
+            "2000",
+            "--arm",
+            "anneal",
+        ]
+    elif runner_id == "growpal_h2h_v2":
+        bin_dir = work / "bin"
+        _write_executable(
+            bin_dir / "h2h_gmin_proof",
+            'if [ "$1" = "budget" ]; then printf "400000\\n-173.928427\\n"; exit 0; fi\nexit 1\n',
+        )
+        _write_executable(bin_dir / "h2h_morse", "exit 1\n")
+        py_stub = _write_executable(work / "py_stub", "exit 0\n")
+        source = work / "source.txt"
+        source.write_text(
+            "growpal_version=0.1.0\n"
+            "growpal_sdist_sha256=aa\n"
+            "growpal_commit=bb\n"
+            "aegon_version=0.1.0\n"
+            "aegon_sdist_sha256=cc\n"
+            "ase_version=3.23.0\n"
+        )
+        seeds_xyz = work / "seeds.xyz"
+        seeds_xyz.write_text("")
+        runs = work / "runs"
+        out_dir = work / "out"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / "identity.csv").write_text(",".join(mod.IDENTITY_FIELDS) + "\n")
+        saved_path = out_dir / "rows" / "lj38" / "anneal-2000.row"
+        argv = [
+            "run_campaign.py",
+            "--bin-dir",
+            str(bin_dir),
+            "--python",
+            str(py_stub),
+            "--source",
+            str(source),
+            "--seeds-xyz",
+            str(seeds_xyz),
+            "--head-file",
+            str(head_file),
+            "--runs",
+            str(runs),
+            "--out",
+            str(out_dir),
+            "--system",
+            "lj38",
+            "--seed",
+            "2000",
+            "--arm",
+            "anneal",
+        ]
+    elif runner_id == "metal_h2h":
+        binary = _write_executable(
+            work / "metal_bin",
+            'if [ "$1" = "budget" ]; then printf "400000\\n-65.0\\n"; exit 0; fi\nexit 1\n',
+        )
+        runs = work / "camp" / "runs"
+        logs = work / "camp" / "logs"
+        saved_path = runs / "zn38" / "anneal-2000.row"
+        argv = [
+            "run_campaign.py",
+            "--binary",
+            str(binary),
+            "--ga",
+            str(noop_bin),
+            "--runs",
+            str(runs),
+            "--logs",
+            str(logs),
+            "--head-file",
+            str(head_file),
+            "--system",
+            "zn38",
+            "--seed",
+            "2000",
+            "--arm",
+            "anneal",
+        ]
+    elif runner_id == "metal_darby":
+        monkeypatch.setattr(Path, "cwd", classmethod(lambda _cls: Path("/work")))
+        monkeypatch.setattr(mod, "check_potentials", lambda *_args: None)
+        source = work / "source.txt"
+        source.write_text(gmin_source_text)
+        svnrev = work / "GMIN.svnrev"
+        svnrev.write_text(f"{REVISION}\n")
+        runs = work / "runs"
+        logs = work / "logs"
+        coord = runs / "cu19au19" / "start-2000.xyz"
+        coord.parent.mkdir(parents=True, exist_ok=True)
+        coord.write_text("38\n\n")
+        saved_path = runs / "cu19au19" / "anneal-2000.row"
+        argv = [
+            "--binary",
+            str(noop_bin),
+            "--gmin",
+            str(noop_bin),
+            "--fixtures",
+            str(work / "fixtures"),
+            "--runs",
+            str(runs),
+            "--logs",
+            str(logs),
+            "--summary",
+            str(work / "summary.csv"),
+            "--source",
+            str(source),
+            "--svnrev",
+            str(svnrev),
+            "--head-file",
+            str(head_file),
+            "--only",
+            "cu19au19",
+            "2000",
+            "anneal",
+        ]
+    else:
+        raise AssertionError(f"unknown runner {runner_id!r}")
+
+    _write_dict_csv(saved_path, valid_row)
+    assert mod.main(argv) == 0
+
+    bad_row, expected_tokens = _mutate_row_for_field(
+        valid_row,
+        native_arm_key=native_arm_key,
+        expected_arm=expected_arm,
+        wrong_arm=wrong_arm,
+        wrong_system=wrong_system,
+        wrong_seed=wrong_seed,
+        wrong_budget=wrong_budget,
+        mutation=mutation,
+    )
+    _write_dict_csv(saved_path, bad_row)
+    with pytest.raises(ValueError) as exc_info:
+        mod.main(argv)
+    msg = str(exc_info.value)
+    assert str(saved_path) in msg
+    for token in expected_tokens:
+        assert token in msg
+
+
+def test_native_headerless_and_h2h_row_formats_reject_every_bad_field(tmp_path):
+    metal = _load_module("native_metal_h2h", "scripts/metal_h2h/run_campaign.py")
+    darby = _load_module("native_metal_darby", "scripts/metal_h2h/run_darby.py")
+    gmin_h2h = _load_module("native_gmin_h2h", "scripts/gmin_h2h/run_campaign.py")
+    morse_h2h = _load_module("native_morse_h2h", "scripts/morse_h2h/run_campaign.py")
+    gad = _load_module("native_gad_published", "scripts/gad_published/run_campaign.py")
+
+    metal_ok = tmp_path / "metal-ok.row"
+    metal_ok.write_text(
+        "zn38,anneal,2000,400000,1,10000,10000,0.5,-65.0,0.4,0.1,4e-5,1e-5\n"
+    )
+    assert metal.load_saved(metal_ok, "zn38", 2000, "anneal", 400_000) is not None
+
+    for idx, (bad_line, field_token) in enumerate(
+        (
+            ("zn55,anneal,2000,400000,1,10000,10000,0.5,-65.0,0.4,0.1,4e-5,1e-5\n", "system"),
+            ("zn38,gmin,2000,400000,1,10000,10000,0.5,-65.0,0.4,0.1,4e-5,1e-5\n", "code"),
+            ("zn38,anneal,2001,400000,1,10000,10000,0.5,-65.0,0.4,0.1,4e-5,1e-5\n", "seed"),
+            ("zn38,anneal,2000,900000,1,10000,10000,0.5,-65.0,0.4,0.1,4e-5,1e-5\n", "budget"),
+        )
+    ):
+        bad_path = tmp_path / f"metal-bad-{idx}.row"
+        bad_path.write_text(bad_line)
+        with pytest.raises(ValueError) as exc_info:
+            metal.load_saved(bad_path, "zn38", 2000, "anneal", 400_000)
+        assert field_token in str(exc_info.value)
+
+    darby_gmin_ok = tmp_path / "darby-gmin-ok.row"
+    darby_gmin_ok.write_text(
+        "h2h_row system=cu19au19 code=gmin seed=2000 budget=400000 hit=1 "
+        "evals_to_hit=10000 charged=10000 gradient_passes=10000 energy_only_entries=5 "
+        "best=-122.991484 wall_s=0.5 pot_s=0.4\n"
+    )
+    assert darby.load_saved(darby_gmin_ok, "cu19au19", 2000, "gmin", 400_000) is not None
+
+    for idx, (bad_kv, field_token) in enumerate(
+        (
+            (
+                "h2h_row system=au38 code=gmin seed=2000 budget=400000 hit=1 "
+                "evals_to_hit=10000 charged=10000 best=-122.991484 wall_s=0.5 pot_s=0.4\n",
+                "system",
+            ),
+            (
+                "h2h_row system=cu19au19 code=gmin arm=anneal seed=2000 budget=400000 hit=1 "
+                "evals_to_hit=10000 charged=10000 best=-122.991484 wall_s=0.5 pot_s=0.4\n",
+                "arm",
+            ),
+            (
+                "h2h_row system=cu19au19 arm=anneal seed=2000 budget=400000 hit=1 "
+                "evals_to_hit=10000 charged=10000 best=-122.991484 wall_s=0.5 pot_s=0.4\n",
+                "arm",
+            ),
+            (
+                "h2h_row system=cu19au19 seed=2000 budget=400000 hit=1 "
+                "evals_to_hit=10000 charged=10000 best=-122.991484 wall_s=0.5 pot_s=0.4\n",
+                "arm",
+            ),
+            (
+                "h2h_row system=cu19au19 code=gmin seed=2001 budget=400000 hit=1 "
+                "evals_to_hit=10000 charged=10000 best=-122.991484 wall_s=0.5 pot_s=0.4\n",
+                "seed",
+            ),
+            (
+                "h2h_row system=cu19au19 code=gmin seed=2000 budget=900000 hit=1 "
+                "evals_to_hit=10000 charged=10000 best=-122.991484 wall_s=0.5 pot_s=0.4\n",
+                "budget",
+            ),
+        )
+    ):
+        bad_path = tmp_path / f"darby-bad-{idx}.row"
+        bad_path.write_text(bad_kv)
+        with pytest.raises(ValueError) as exc_info:
+            darby.load_saved(bad_path, "cu19au19", 2000, "gmin", 400_000)
+        assert field_token in str(exc_info.value)
+
+    contradictory_kv = (
+        "h2h_row system=lj38 code=gmin arm=anneal seed=2000 budget=400000 hit=1 "
+        "evals_to_hit=10000 charged=10000 best=-173.928427 wall_s=0.5 pot_s=0.4\n"
+    )
+    kv_path = tmp_path / "contradictory-kv.row"
+    kv_path.write_text(contradictory_kv)
+    machine = {"machine_id": "a" * 64, "cpu_model": "Example CPU"}
+    with pytest.raises(ValueError, match="arm"):
+        gmin_h2h.load_saved(
+            kv_path,
+            "lj38",
+            2000,
+            "gmin",
+            400_000,
+            "a" * 64,
+            "Example CPU",
+            code_revision="svn-1",
+            gmin_build_key="b" * 64,
+        )
+    with pytest.raises(ValueError, match="arm"):
+        morse_h2h.load_saved(
+            kv_path, "lj38", 2000, "gmin", 400_000, machine=machine, revision="svn-1"
+        )
+    with pytest.raises(ValueError, match="arm"):
+        gad.saved_rerun(kv_path, 38, 2000, "gmin", 400_000, code_revision="svn-1", machine=machine)

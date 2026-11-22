@@ -662,3 +662,47 @@ def test_load_saved_refuses_mismatched_or_absent_stored_gmin_build_key(tmp_path)
         )
         is None
     )
+
+    import csv
+
+    contradictory = tmp_path / "contradictory-arm.row"
+    with contradictory.open("w", newline="") as handle:
+        fields = [*campaign.PER_SEED_FIELDS, "arm"]
+        writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
+        writer.writeheader()
+        writer.writerow(
+            {
+                "system": "lj38",
+                "code": "anneal",
+                "arm": "gmin",
+                "seed": "2000",
+                "budget": "400000",
+                "hit": "1",
+                "evals_to_hit": "12000",
+                "charged": "12000",
+                "gradient_passes": "",
+                "energy_only_entries": "",
+                "wall_s": "0.5",
+                "best": "-173.928427",
+                "pot_s": "0.4",
+                "gmin_url": "",
+                "gmin_revision": "",
+                "gmin_build_key": "",
+                "anneal_head": "head-rev-1",
+                "code_revision": "head-rev-1",
+                "host": "bench",
+                "machine_id": "a" * 64,
+                "cpu_model": "Example CPU",
+            }
+        )
+    with pytest.raises(ValueError, match=r"saved row arm mismatch \(arm\)"):
+        campaign.load_saved(
+            contradictory,
+            "lj38",
+            2000,
+            "anneal",
+            400_000,
+            "a" * 64,
+            "Example CPU",
+            code_revision="head-rev-1",
+        )
