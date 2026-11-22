@@ -10,7 +10,7 @@ process on core 0 (`taskset -c 0`, one thread, every other process moved
 to cores 1-7), `sudo unshare --uts` with hostname `bench`. For each
 Lennard-Jones system the seeds run in order, anneal then GMIN on the
 same seed. On Au55, M55 (ρ=6, 14) and M80 (ρ=6, 14), session
-`20261121T133601Z` (`record/gmin-184/`) ran anneal develop
+`20261121T133601Z` (directory `record/gmin-184/`) ran anneal develop
 `9837358ae1027067ff654fac8b48969020853452` against the
 `2026-11-21T03:01:22Z` GMIN tarball (sha256
 `0d9917600ecda72b2176253d0e838bcb58ec6e38902ef7d0affc7e7e7eba8f39`) in
@@ -87,8 +87,9 @@ is already omitted as censored, and `hit` and `evals_to_hit` are unaffected.
   `bash scripts/gmin_panel/enter_bench.sh --summarize --tex`.
 - Session `20261121T133601Z` is recorded at
   `e4341de058b73366f2d7b5f17995da283d57bad6`, tree
-  `63d1488f465fff1e65ce9b338641ef945fad75a9`, on `record/gmin-184`.
-  That commit holds `enter.sh`, `apply_patches.py` and `run_record.py`.
+  `63d1488f465fff1e65ce9b338641ef945fad75a9`. The record is the ref
+  `refs/audit/record/gmin-184`. That commit holds `enter.sh`,
+  `apply_patches.py` and `run_record.py`.
   Its parent is `b8190ce61a64ff6cb61ee6bfc656b0657d78494d`. The rows
   keep `harness_revision`
   `9837358ae1027067ff654fac8b48969020853452`, the anneal commit the

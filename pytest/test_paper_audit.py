@@ -1430,6 +1430,28 @@ def test_a_record_ref_is_fetched_into_the_audit_namespace(tmp_path, monkeypatch)
     assert fetches[0][-2] == "--"
 
 
+def test_the_gmin_record_is_fetched_by_its_ref(tmp_path, monkeypatch):
+    need_origin()
+    seen = []
+    real = audit_mod.git
+
+    def wrapped(*args, **kwargs):
+        seen.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(audit_mod, "git", wrapped)
+    monkeypatch.setattr(audit_mod, "_FETCH_RECORDS", True)
+    audit_mod._record_ref_status.cache_clear()
+    audit_mod.origin_record_heads.cache_clear()
+    audit_mod.origin_audit_record_refs.cache_clear()
+    registry(tmp_path, monkeypatch, [(audit_mod.GMIN_RECORD_REF, audit_mod.GMIN_RECORD_SHA, audit_mod.GMIN_RECORD_TREE)])
+    assert record_drifts() == set()
+    fetches = [args for args in seen if args and args[0] == "fetch"]
+    assert fetches == [("fetch", "--quiet", "--no-tags", "origin", "refs/audit/record/gmin-184")]
+    registry_text = (ROOT / "bench/record-refs.csv").read_text()
+    assert "\nrecord/gmin-184," not in registry_text
+
+
 def test_a_record_ref_cannot_choose_its_fetch_destination(tmp_path, monkeypatch):
     calls = []
     real = audit_mod.git
@@ -1476,6 +1498,7 @@ def test_the_gmin_panel_session_rows_keep_their_harness():
     assert sum(r["code"] == "gmin" for r in session) == 60
     registry = (ROOT / audit_mod.RECORD_REFS).read_text()
     assert f"{audit_mod.GMIN_RECORD_REF},{audit_mod.GMIN_RECORD_SHA},{audit_mod.GMIN_RECORD_TREE}" in registry
+    assert "\nrecord/gmin-184," not in registry
 
 
 def test_a_short_external_revision_is_reported():

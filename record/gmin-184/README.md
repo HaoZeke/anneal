@@ -5,7 +5,8 @@ Both arms of Au55, M55 and M80, on one core, from develop
 `15032ef401fb681e230d27c7b315d89f7ac53e4e`. The harness that holds
 `enter.sh`, `apply_patches.py` and `run_record.py` is commit
 `e4341de058b73366f2d7b5f17995da283d57bad6`, tree
-`63d1488f465fff1e65ce9b338641ef945fad75a9`, on `record/gmin-184`.
+`63d1488f465fff1e65ce9b338641ef945fad75a9`. The record is the ref
+`refs/audit/record/gmin-184`.
 Its parent is `b8190ce61a64ff6cb61ee6bfc656b0657d78494d`. The develop
 commit above is an ancestor of that record commit, and it is the
 `harness_revision` the panel rows keep. Rust 1.88.0,

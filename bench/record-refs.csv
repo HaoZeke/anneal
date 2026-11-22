@@ -1,9 +1,10 @@
-# Record branches on origin whose commits printed numbers may rest on. A
-# row counts only when origin holds the ref at this SHA, git fetch origin
-# brings it, and the commit has this tree. A row with no tree is expected
-# and fails until the ref is pushed and its tree recorded.
+# Record refs on origin whose commits printed numbers may rest on. A
+# branch row is record/<name>. A ref that is not a branch names the full
+# ref, refs/audit/record/<name>. A row counts only when origin holds that
+# ref at this SHA, git fetch origin brings it, and the commit has this
+# tree. A row with no tree is expected and fails until the tree is recorded.
 ref,sha,tree
 record/repro-pin,9a30f3190b3bb7040c675a904f8388eb68224151,4cf101da6fe8f4d1069f5cb472413bd7e232d69c
 record/sc-h2h-harness,d59b0b6cf02fc300ff618f79d65da365128eed5a,16f50956905ca7fc7f51459ef36fb336eebb1d1b
 record/cov-floor2-si13,c1c02d1646a71267e0f6c02cfcfcc07d5b88d9b4,0991c54d8dfbc8bfa2d0ff8847f0a004649f3e9a
-record/gmin-184,e4341de058b73366f2d7b5f17995da283d57bad6,63d1488f465fff1e65ce9b338641ef945fad75a9
+refs/audit/record/gmin-184,e4341de058b73366f2d7b5f17995da283d57bad6,63d1488f465fff1e65ce9b338641ef945fad75a9

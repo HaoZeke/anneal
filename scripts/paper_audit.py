@@ -639,7 +639,7 @@ GMIN_PANEL_README = "bench/gmin-panel/README.md"
 # The scripts that drove them are on the record commit below, whose
 # parent is b8190ce6. 9837358a is an ancestor, not that parent.
 GMIN_PANEL_SESSION = "9837358ae1027067ff654fac8b48969020853452"
-GMIN_RECORD_REF = "record/gmin-184"
+GMIN_RECORD_REF = "refs/audit/record/gmin-184"
 GMIN_RECORD_SHA = "e4341de058b73366f2d7b5f17995da283d57bad6"
 GMIN_RECORD_TREE = "63d1488f465fff1e65ce9b338641ef945fad75a9"
 GMIN_RECORD_PARENT = "b8190ce61a64ff6cb61ee6bfc656b0657d78494d"
@@ -828,8 +828,10 @@ def gmin_panel_readme(audit: Audit, panel: object, groups: dict) -> None:
     audit.said(GMIN_PANEL_README, GMIN_RECORD_SHA)
     audit.said(GMIN_PANEL_README, GMIN_RECORD_TREE)
     audit.said(GMIN_PANEL_README, GMIN_RECORD_PARENT)
+    audit.said(GMIN_PANEL_README, GMIN_RECORD_REF)
     audit.said(GMIN_RECORD_README, GMIN_RECORD_SHA)
     audit.said(GMIN_RECORD_README, GMIN_RECORD_PARENT)
+    audit.said(GMIN_RECORD_README, GMIN_RECORD_REF)
     registry = (ROOT / RECORD_REFS).read_text()
     registered = f"{GMIN_RECORD_REF},{GMIN_RECORD_SHA},{GMIN_RECORD_TREE}"
     audit.record(registered in registry, RECORD_REFS, "gmin-184 record", registered, "registered")
@@ -3879,11 +3881,13 @@ def _verified_aliases() -> tuple[tuple[str, str], ...]:
     return tuple(verified_aliases(Audit(), table, index).items())
 
 
-# Network reads of record/* are off unless main() is passed --fetch-records.
-# The fetch writes one fixed ref, never a name taken from the registry.
+# Network reads of record refs are off unless main() is passed --fetch-records.
+# A record/<name> branch is fetched into one fixed ref. A refs/audit/record/<name>
+# ref is fetched by that name.
 _FETCH_RECORDS = False
 _AUDIT_FETCH_REF = "refs/audit/record/fetched"
 _RECORD_REF_NAME = re.compile(r"record/[A-Za-z0-9][A-Za-z0-9._-]*")
+_AUDIT_RECORD_REF_NAME = re.compile(r"refs/audit/record/[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
 def record_ref_name(ref: str) -> bool:
@@ -3899,6 +3903,19 @@ def record_ref_name(ref: str) -> bool:
     return git("check-ref-format", "--branch", ref).returncode == 0
 
 
+def audit_record_ref_name(ref: str) -> bool:
+    """True when ref is the full name refs/audit/record/<name>.
+
+    The same rejects as a branch row: a colon, .., a trailing dot, or a
+    .lock suffix never reaches a fetch argument.
+    """
+    if _AUDIT_RECORD_REF_NAME.fullmatch(ref) is None:
+        return False
+    if ".." in ref or ref.endswith(".") or ref.endswith(".lock"):
+        return False
+    return git("check-ref-format", ref).returncode == 0
+
+
 @functools.cache
 def origin_record_heads() -> dict[str, str]:
     """The record/* branches on origin, by name. Empty when origin cannot be reached, so every registry row fails."""
@@ -3906,6 +3923,15 @@ def origin_record_heads() -> dict[str, str]:
     if out.returncode != 0:
         return {}
     return {ref.removeprefix("refs/heads/"): sha for sha, ref in (line.split("\t") for line in out.stdout.splitlines())}
+
+
+@functools.cache
+def origin_audit_record_refs() -> dict[str, str]:
+    """The refs/audit/record/* refs on origin, by full name. Empty when origin cannot be reached."""
+    out = git("ls-remote", "origin", "refs/audit/record/*")
+    if out.returncode != 0:
+        return {}
+    return {ref: sha for sha, ref in (line.split("\t") for line in out.stdout.splitlines())}
 
 
 def record_ref_status(path: str) -> tuple[tuple[str, str, tuple[tuple[str, bool, str, str], ...]], ...]:
@@ -3922,13 +3948,22 @@ def _record_ref_status(root: Path, path: str, fetch_records: bool) -> tuple[tupl
         table = list(csv.DictReader(line for line in handle if not line.startswith("#")))
     if not table:
         return ()
-    heads = origin_record_heads() if fetch_records else {}
+    heads = {}
+    if fetch_records:
+        heads.update(origin_record_heads())
+        heads.update(origin_audit_record_refs())
     out = []
     for row in table:
         ref, sha, tree = row["ref"].strip(), row["sha"].strip(), row["tree"].strip()
-        named = record_ref_name(ref) and bool(re.fullmatch(r"[0-9a-f]{40}", sha))
+        as_branch = record_ref_name(ref)
+        as_ref = audit_record_ref_name(ref)
+        named = (as_branch or as_ref) and bool(re.fullmatch(r"[0-9a-f]{40}", sha))
         fetched = False
-        if named and fetch_records:
+        if named and fetch_records and as_ref:
+            fetch = git("fetch", "--quiet", "--no-tags", "origin", ref)
+            tip = git("rev-parse", "--verify", "--quiet", "FETCH_HEAD").stdout.strip()
+            fetched = fetch.returncode == 0 and tip == sha
+        elif named and fetch_records:
             spec = f"+refs/heads/{ref}:{_AUDIT_FETCH_REF}"
             fetch = git("fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "origin", "--", spec)
             tip = git("rev-parse", "--verify", "--quiet", _AUDIT_FETCH_REF).stdout.strip()
@@ -3936,7 +3971,8 @@ def _record_ref_status(root: Path, path: str, fetch_records: bool) -> tuple[tupl
         present = git("cat-file", "-e", f"{sha}^{{commit}}").returncode == 0 if named else False
         actual = git("rev-parse", "--verify", "--quiet", f"{sha}^{{tree}}").stdout.strip() if present else ""
         out.append((ref, sha, (
-            (f"{ref} is a record ref with a full SHA", named, f"{ref} {sha}", "record/<name> and 40 hex digits"),
+            (f"{ref} is a record ref with a full SHA", named, f"{ref} {sha}",
+             "record/<name> or refs/audit/record/<name>, and 40 hex digits"),
             (f"{ref} is on origin at {sha[:8]}", heads.get(ref) == sha, heads.get(ref, "absent"), sha),
             (f"{ref} fetches", fetched, "fetched" if fetched else "fails", "fetched"),
             (f"{ref} has tree {tree[:8] or 'unrecorded'}", bool(tree) and actual == tree, actual or "absent",
@@ -4368,7 +4404,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--pre-submission", action="store_true",
                         help="fail while any [RERUN: item N] tag remains in the manuscript, the SI or the cover letter")
     parser.add_argument("--fetch-records", action="store_true",
-                        help="fetch record/* from origin into refs/audit/record/fetched")
+                        help="fetch record branches into refs/audit/record/fetched, and refs/audit/record/* by name")
     args = parser.parse_args(argv)
     global _FETCH_RECORDS
     _FETCH_RECORDS = args.fetch_records
