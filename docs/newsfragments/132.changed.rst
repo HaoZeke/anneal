@@ -1,0 +1,2 @@
+Make the pinned GMIN build reproducible, fetch its immutable archive
+from the paper dataset, and summarize new runs against that pin.
