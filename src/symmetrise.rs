@@ -213,17 +213,18 @@ fn gap_ball_holds(distance: f64, gap: f64) -> bool {
 
 /// Squared displacement when the image lies strictly inside half the gap.
 ///
-/// The nearest other atom is `gap` away. An image closer than half that is
-/// closer to the source atom than to any other, and this squared length is
-/// the one the nearest-image scan records for the source. A tie, or a
-/// displacement that only meets the half gap, falls through to the scan,
-/// which keeps the earlier index.
+/// The nearest other atom is `gap` away. An image closer than half that,
+/// by more than the rounding in the squared length, is closer to the
+/// source atom than to any other, and this squared length is the one the
+/// nearest-image scan records for the source. A tie, a length within the
+/// rounding of the half gap, or a displacement that only meets the half
+/// gap, falls through to the scan, which keeps the earlier index.
 fn image_on_self(here: [f64; 3], image: [f64; 3], gap: f64) -> Option<f64> {
-    if !gap.is_finite() || gap <= 0.0 {
-        return None;
-    }
     let self_d2 = squared_offset(image, here[0], here[1], here[2]);
-    (self_d2 < gap * 0.25).then_some(self_d2)
+    // The bare test `self_d2 < gap * 0.25` accepts the farther atom when
+    // the quarter-gap product rounds up by one ulp. The same slack the
+    // hinted partner uses refuses that boundary and the scan decides.
+    gap_ball_holds(self_d2, gap).then_some(self_d2)
 }
 
 fn normalise(v: [f64; 3]) -> Option<[f64; 3]> {
@@ -3420,6 +3421,11 @@ mod shell_tests {
         let chosen = cloud.nearest_for_exchange(0, image, 0, 1, gap);
         assert_eq!(chosen.0, full.0);
         assert_eq!(chosen.1.to_bits(), full.1.to_bits());
+        let hinted_here = [cloud.xs[1], cloud.ys[1], cloud.zs[1]];
+        assert!(
+            image_on_self(hinted_here, image, gap).is_none(),
+            "the unslacked half-gap test would skip the scan"
+        );
 
         // The same one-ulp split on a real nearest-neighbour gap. The image
         // is the floating-point midpoint of the two atoms.
@@ -3452,6 +3458,11 @@ mod shell_tests {
         let chosen = cloud.nearest_for_exchange(0, image, 0, 1, gaps[1]);
         assert_eq!(chosen.0, full.0);
         assert_eq!(chosen.1.to_bits(), full.1.to_bits());
+        let hinted_here = [cloud.xs[1], cloud.ys[1], cloud.zs[1]];
+        assert!(
+            image_on_self(hinted_here, image, gaps[1]).is_none(),
+            "the unslacked half-gap test would skip the scan"
+        );
     }
 
     /// Indices 1 and 4 are the same distance from the origin. The scalar
@@ -3576,6 +3587,19 @@ mod shell_tests {
                     let chosen = cloud.nearest_for_exchange(0, image, 0, hint, gaps[hint]);
                     proptest::prop_assert_eq!(chosen.0, full.0);
                     proptest::prop_assert_eq!(chosen.1.to_bits(), full.1.to_bits());
+                    let here = cloud.point(hint);
+                    if let Some(self_d2) = image_on_self(here, image, gaps[hint]) {
+                        proptest::prop_assert_eq!(full.0, hint);
+                        proptest::prop_assert_eq!(full.1.to_bits(), self_d2.to_bits());
+                    }
+                }
+                let here = cloud.point(0);
+                let inside = [here[0] + 1.0e-3, here[1], here[2]];
+                if gaps[0] > 1.0e-3 {
+                    let self_d2 = image_on_self(here, inside, gaps[0]).unwrap();
+                    let scanned = cloud.nearest_index(inside);
+                    proptest::prop_assert_eq!(scanned.0, 0);
+                    proptest::prop_assert_eq!(scanned.1.to_bits(), self_d2.to_bits());
                 }
             }
         }
