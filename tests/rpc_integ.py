@@ -662,8 +662,32 @@ async def run_hvp_unit_smoke(port):
     return True
 
 
+MULLER_BROWN_PUBLISHED = {
+    "amplitude": [-200.0, -100.0, -170.0, 15.0],
+    "a": [-1.0, -1.0, -6.5, 0.7],
+    "b": [0.0, 0.0, 11.0, 0.6],
+    "c": [-10.0, -10.0, -6.5, 0.7],
+    "x0": [1.0, 0.0, -0.5, -1.0],
+    "y0": [0.0, 0.5, 1.5, 1.0],
+}
+
+
+def muller_brown_energy(x, y, **lists):
+    """The Muller-Brown energy; a list not given is the published one."""
+    p = {**MULLER_BROWN_PUBLISHED, **lists}
+    return sum(
+        p["amplitude"][i]
+        * math.exp(
+            p["a"][i] * (x - p["x0"][i]) ** 2
+            + p["b"][i] * (x - p["x0"][i]) * (y - p["y0"][i])
+            + p["c"][i] * (y - p["y0"][i]) ** 2
+        )
+        for i in range(4)
+    )
+
+
 async def run_muller_brown_configure(port):
-    """An empty list in configure(mullerBrown) selects the published default."""
+    """configure(mullerBrown) describes the whole surface on every call."""
     for _ in range(10):
         try:
             connection = await capnp.AsyncIoStream.create_connection(
@@ -690,19 +714,39 @@ async def run_muller_brown_configure(port):
 
     defaults = (await pot.calculate(fip)).result.energy
 
-    cfg = pot_capnp.PotentialConfig.new_message()
-    amplitude = cfg.init("mullerBrown").init("amplitude", 4)
-    for i, value in enumerate([-400.0, -200.0, -340.0, 30.0]):
-        amplitude[i] = value
-    reply = await pot.configure(cfg)
-    assert reply.ok, reply.message
-    doubled = (await pot.calculate(fip)).result.energy
-    assert math.isclose(doubled, 2.0 * defaults, rel_tol=1e-12)
+    async def configure_muller_brown(**lists):
+        cfg = pot_capnp.PotentialConfig.new_message()
+        params = cfg.init("mullerBrown")
+        for name, values in lists.items():
+            slots = params.init(name, len(values))
+            for i, value in enumerate(values):
+                slots[i] = value
+        reply = await pot.configure(cfg)
+        assert reply.ok, reply.message
+        return (await pot.calculate(fip)).result.energy
 
-    reply = await pot.configure(potential_config_arm("mullerBrown"))
-    print(f"Muller-Brown configure(empty lists): ok={reply.ok} msg={reply.message}")
-    assert reply.ok, reply.message
-    assert (await pot.calculate(fip)).result.energy == defaults
+    # Each call describes the whole surface: override, then empty, then partial.
+    x, y = 0.23, -0.17
+    override = {
+        "amplitude": [-400.0, -200.0, -340.0, 30.0],
+        "x0": [2.0, 1.0, 0.0, -1.0],
+    }
+    expected = muller_brown_energy(x, y, **override)
+    assert expected != muller_brown_energy(x, y)
+    energy = await configure_muller_brown(**override)
+    assert math.isclose(energy, expected, rel_tol=1e-12), (energy, expected)
+
+    energy = await configure_muller_brown()
+    print(f"Muller-Brown configure(empty lists): energy={energy}")
+    assert energy == defaults
+
+    partial = {"a": [-2.0, -2.0, -13.0, 1.4]}
+    expected = muller_brown_energy(x, y, **partial)
+    assert expected != defaults
+    energy = await configure_muller_brown(**partial)
+    assert math.isclose(energy, expected, rel_tol=1e-12), (energy, expected)
+
+    assert await configure_muller_brown(amplitude=[], a=[], x0=[]) == defaults
 
     bad = pot_capnp.PotentialConfig.new_message()
     bad.init("mullerBrown").init("a", 3)
