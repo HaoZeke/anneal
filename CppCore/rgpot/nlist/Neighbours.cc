@@ -32,7 +32,7 @@ void invertCell(const double *cell, double inv[9], double dual_norm[3]);
 namespace {
 
 int axisCount(double length, double edge) {
-  if (!(length > 0.0) || !(edge > 0.0)) {
+  if (!(length > 0.0) || !(edge > 0.0) || !(length > edge)) {
     return 1;
   }
   auto n = static_cast<long>(std::floor(length / edge));
@@ -159,9 +159,11 @@ void Neighbours::buildCells(const double *xyz, std::size_t n) {
       !orthorhombicCell(box_)) {
     double dual_norm[3]{};
     invertCell(box_, frac_inv, dual_norm);
+    constexpr double kFracEdgeSlack =
+        1.0 + 16.0 * std::numeric_limits<double>::epsilon();
     int naxis[3] = {1, 1, 1};
     for (int k = 0; k < 3; ++k) {
-      const double frac_edge = edge * dual_norm[k];
+      const double frac_edge = (edge * dual_norm[k]) * kFracEdgeSlack;
       if (periodic_[k]) {
         frac_origin[k] = 0.0;
         frac_span[k] = 1.0;

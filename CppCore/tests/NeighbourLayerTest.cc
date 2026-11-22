@@ -1714,3 +1714,91 @@ TEST_CASE("disproportionate open rows with a small shear match brute force",
     }
   }
 }
+
+TEST_CASE("fractional bin edges keep nextafter cutoff pairs across exact bin boundaries",
+          "[nlist][triclinic][boundary]") {
+  setThreads("1");
+  const double cutoff = 1.0;
+  const double d_below = std::nextafter(cutoff, 0.0);
+  // Column 0 of cell^-1 is (0.1, -0.075, 0) with exact Euclidean norm 0.125 =
+  // 1/8. Without an ulp cushion on frac_edge, axisCount(1.0, 0.125) selects 8
+  // fractional bins and rounding in r * frac_inv places pairs at distance
+  // nextafter(cutoff, 0) two bins apart.
+  const double cell[9] = {10.0, 0.0, 0.0, 7.5, 10.0, 0.0, 0.0, 0.0, 10.0};
+
+  const std::vector<double> direct_pair = {
+      1.2499999999999996, 0.0, 5.0,
+      2.0499999999999994, -0.60000000000000009, 5.0,
+  };
+  const std::vector<double> wrapped_pair = {
+      1.2499999999999996, 0.0, 0.25,
+      2.0499999999999994, -0.60000000000000009, 10.25,
+  };
+  for (const auto &periodic :
+       {std::array<bool, 3>{true, true, true},
+        std::array<bool, 3>{true, true, false}}) {
+    const auto ref = bruteAllImages(direct_pair, cell, cutoff, periodic);
+    REQUIRE(ref.size() == 1);
+    REQUIRE(std::sqrt(ref.at({0, 1})) == d_below);
+    for (const auto mode :
+         {rgpot::nlist::Mode::Stream, rgpot::nlist::Mode::Stored,
+          rgpot::nlist::Mode::Auto}) {
+      rgpot::nlist::Spec spec;
+      spec.cutoff = cutoff;
+      spec.skin = 0.0;
+      spec.periodic = periodic;
+      spec.image = rgpot::nlist::Image::Round;
+      spec.mode = mode;
+      rgpot::nlist::Neighbours cells;
+      cells.update(direct_pair.data(), direct_pair.size() / 3, cell, spec);
+      requireSamePairs(walkedPairs(cells, direct_pair.size() / 3, cutoff), ref);
+    }
+  }
+  {
+    const std::array<bool, 3> periodic{true, true, true};
+    const auto ref = bruteAllImages(wrapped_pair, cell, cutoff, periodic);
+    REQUIRE(ref.size() == 1);
+    REQUIRE(std::sqrt(ref.at({0, 1})) <= d_below);
+    for (const auto mode :
+         {rgpot::nlist::Mode::Stream, rgpot::nlist::Mode::Stored,
+          rgpot::nlist::Mode::Auto}) {
+      rgpot::nlist::Spec spec;
+      spec.cutoff = cutoff;
+      spec.skin = 0.0;
+      spec.periodic = periodic;
+      spec.image = rgpot::nlist::Image::Round;
+      spec.mode = mode;
+      rgpot::nlist::Neighbours cells;
+      cells.update(wrapped_pair.data(), wrapped_pair.size() / 3, cell, spec);
+      requireSamePairs(walkedPairs(cells, wrapped_pair.size() / 3, cutoff),
+                       ref);
+    }
+  }
+
+  // Open axis 0 with anchor atoms spanning fractional [0, 1] so the open axis
+  // hits the same 1 / 0.125 = 8 bin boundary without the ulp cushion.
+  const std::vector<double> open_axis_pos = {
+      1.2499999999999996, 0.0, 5.0,
+      2.0499999999999994, -0.60000000000000009, 5.0,
+      0.0, 0.0, 0.0,
+      10.0, 0.0, 8.5,
+  };
+  const std::array<bool, 3> open_a{false, true, true};
+  const auto open_ref = bruteAllImages(open_axis_pos, cell, cutoff, open_a);
+  REQUIRE(open_ref.count({0, 1}) == 1);
+  REQUIRE(std::sqrt(open_ref.at({0, 1})) == d_below);
+  for (const auto mode :
+       {rgpot::nlist::Mode::Stream, rgpot::nlist::Mode::Stored,
+        rgpot::nlist::Mode::Auto}) {
+    rgpot::nlist::Spec spec;
+    spec.cutoff = cutoff;
+    spec.skin = 0.0;
+    spec.periodic = open_a;
+    spec.image = rgpot::nlist::Image::Round;
+    spec.mode = mode;
+    rgpot::nlist::Neighbours cells;
+    cells.update(open_axis_pos.data(), open_axis_pos.size() / 3, cell, spec);
+    requireSamePairs(walkedPairs(cells, open_axis_pos.size() / 3, cutoff),
+                     open_ref);
+  }
+}
