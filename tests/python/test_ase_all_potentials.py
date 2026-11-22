@@ -13,6 +13,8 @@ import threading
 from dataclasses import dataclass
 from typing import Callable
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 from ase import Atoms
@@ -100,6 +102,15 @@ def copper_hydrogen_cluster() -> Atoms:
     )
 
 
+def copper_cluster() -> Atoms:
+    return Atoms(
+        "Cu3",
+        positions=[[5.0, 5.0, 5.0], [7.55, 5.0, 5.0], [6.28, 7.2, 5.1]],
+        cell=[18.0, 19.0, 20.0],
+        pbc=False,
+    )
+
+
 def water_hydrogen_cluster() -> Atoms:
     return Atoms(
         numbers=[1, 1, 8, 1],
@@ -123,6 +134,38 @@ CASES = [
     PotentialCase("gromacs", pair_cluster),
     PotentialCase("openmm", pair_cluster),
 ]
+
+CU_FUNCFL = (
+    Path(__file__).resolve().parents[2]
+    / "CppCore"
+    / "tests"
+    / "data"
+    / "eam_table"
+    / "Cu_u3.eam"
+)
+
+CASES += [
+    PotentialCase("d2", water_hydrogen_cluster),
+    PotentialCase("d2cpmd", water_hydrogen_cluster),
+    PotentialCase(
+        "sum",
+        pair_cluster,
+        {
+            "terms": [
+                {"kind": "lj", "cutoff": 8.0},
+                {"kind": "morse", "weight": 0.5, "cutoff": 8.0},
+            ]
+        },
+    ),
+]
+if getattr(rgpot, "has_eam_table", True):
+    CASES.append(
+        PotentialCase(
+            "eam_table",
+            copper_cluster,
+            {"file": str(CU_FUNCFL), "format": "funcfl"},
+        )
+    )
 
 if rgpot.has_expr:
     CASES.append(
