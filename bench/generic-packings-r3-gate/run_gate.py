@@ -315,9 +315,16 @@ def run(args) -> int:
                 raise SystemExit(f"missing text hash for {name} {driver}")
     harness = sha256_file(Path(__file__))
     instrumentation = sha256_file(Path(args.instrumentation))
-    session = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     rows_path = Path(args.rows)
     existing = read_rows(rows_path)
+    prior_sessions = {row["session"] for row in existing}
+    if len(prior_sessions) > 1:
+        raise SystemExit("journal contains more than one session")
+    session = (
+        next(iter(prior_sessions))
+        if prior_sessions
+        else time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    )
     done = {(row["system"], row["arm"], row["seed"]) for row in existing}
     replacements = {}
     for row in existing:
