@@ -12,6 +12,15 @@ PY="${PY:-python}"
 ROOT="${ROOT:-${GITHUB_WORKSPACE:-$(pwd)}}"
 cd "${ROOT}"
 
+# CppCore/meson.build queries git, and ase pulls matplotlib -> pillow;
+# free-threaded tags without a pillow wheel build pillow from source and
+# require libjpeg-dev and zlib1g-dev.
+if command -v dpkg >/dev/null 2>&1 && [ -f "${ROOT}/ci/gha/apt-install.sh" ]; then
+  if ! dpkg -s git libjpeg-dev zlib1g-dev >/dev/null 2>&1; then
+    bash "${ROOT}/ci/gha/apt-install.sh" git libjpeg-dev zlib1g-dev
+  fi
+fi
+
 "${PY}" -m pip install -U pip
 "${PY}" -m pip install 'nanobind==3.1.0' 'ase>=3.23' meson ninja
 if ! "${PY}" -c 'import numpy' >/dev/null 2>&1; then
