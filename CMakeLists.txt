@@ -1,4 +1,8 @@
-cmake_minimum_required(VERSION 3.16)
+# Policy max is the newest CMake this tree is tested with (3.31.8).
+# That makes CMP0110 NEW on the directory stack, so CTest keeps a spaced
+# name such as "CuH2 Utils Test" as one test. CMake 3.16 through 3.18
+# still configure. They have no CMP0110, so a spaced name stays unquoted.
+cmake_minimum_required(VERSION 3.16...3.31.8)
 
 if(POLICY CMP0110)
   cmake_policy(SET CMP0110 NEW)

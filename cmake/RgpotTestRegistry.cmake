@@ -19,11 +19,11 @@
 # RGPOT_TEST_FEATURE_<feature> holds each feature's value in this
 # configuration and has to be set before the functions run.
 
-# A test name may hold spaces ("CuH2 Utils Test"). The functions below keep
-# the policies set here.
-if(POLICY CMP0110)
-  cmake_policy(SET CMP0110 NEW)
-endif()
+# A test name may hold spaces ("CuH2 Utils Test"). CTest quotes it when
+# CMP0110 is NEW on the directory policy stack at generation.
+# cmake_minimum_required in the top level CMakeLists.txt sets that
+# stack. A setting in this file is popped when include() returns, and
+# ctest then keeps the first word of the name.
 
 get_filename_component(RGPOT_TEST_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 set(RGPOT_TEST_REGISTRY "${RGPOT_TEST_ROOT}/CppCore/tests/registry.txt")
