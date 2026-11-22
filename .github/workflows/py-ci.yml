@@ -81,7 +81,7 @@ jobs:
       extras: ase
       skip-install: true
       check-stub: false
-      typecheck-requires: "ase>=3.23"
+      typecheck-requires: "ase>=3.23 mpi4py>=4"
 
   rgpot-pytest:
     name: rgpot python (meson)
