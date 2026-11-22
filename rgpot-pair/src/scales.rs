@@ -246,13 +246,8 @@ mod tests {
             ),
         ];
         for (name, metal, published_depth) in rows {
-            let (radius, depth) = sutton_chen_scales(
-                metal.epsilon,
-                metal.c,
-                metal.a,
-                metal.n,
-                metal.m,
-            );
+            let (radius, depth) =
+                sutton_chen_scales(metal.epsilon, metal.c, metal.a, metal.n, metal.m);
             let lattice_constant = radius * 2.0_f64.sqrt();
             assert!(
                 (lattice_constant - metal.a).abs() < 1e-5,
