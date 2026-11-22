@@ -90,6 +90,19 @@ def _load_module_from_path(name: str, path: Path):
     return module
 
 
+def _missing_source_files(repo_root: Path, paths: tuple[Path, ...]) -> list[str]:
+    """Repo-relative names of paths that are not files in this tree."""
+    missing: list[str] = []
+    for path in paths:
+        if path.is_file():
+            continue
+        try:
+            missing.append(path.relative_to(repo_root).as_posix())
+        except ValueError:
+            missing.append(str(path))
+    return missing
+
+
 def test_calculator_and_basecalculator_inheritance() -> None:
     from rgpot.ase.rpc import RgpotRpcCalculator
 
@@ -447,6 +460,11 @@ def test_rpc_shim_and_ase_helpers_contract() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     helpers_path = repo_root / "CppCore" / "rgpot" / "rpc" / "ase_helpers.py"
     shim_path = repo_root / "CppCore" / "rgpot" / "rpc" / "ase_calculator.py"
+    # Checkout scripts beside the RPC sources. meson does not install them
+    # into the rgpot package, and the wheel test tree does not contain CppCore.
+    missing = _missing_source_files(repo_root, (helpers_path, shim_path))
+    if missing:
+        pytest.skip("source file is not in this tree: " + ", ".join(missing))
 
     helpers = _load_module_from_path("_test_ase_helpers_contract", helpers_path)
     try:
