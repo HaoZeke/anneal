@@ -10,6 +10,7 @@ import subprocess
 from pathlib import Path
 
 REPORT_NAME = "rgpot_omp_crossover_v3_report.md"
+PINS_PATH = Path(__file__).with_name("omp_crossover_v3_pins.json")
 
 
 def arms_in_report(text: str) -> set[str]:
@@ -42,8 +43,56 @@ def has_git(repo: Path) -> bool:
     )
     return probe.returncode == 0
 
+def is_shallow_git(repo: Path) -> bool:
+    if not has_git(repo):
+        return False
+    probe = subprocess.run(
+        ["git", "rev-parse", "--is-shallow-repository"],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+    )
+    return probe.returncode == 0 and probe.stdout.strip() == "true"
 
-def resolved_commit_tree(repo: Path, arm: str, sha: str, fallback_tree: str) -> str:
+def require_non_empty_string(arm: str, field: str, value: object) -> str:
+    if not isinstance(value, str) or not value:
+        raise SystemExit(f"{arm}: arm record has invalid {field}: {value!r}")
+    return value
+
+
+def require_int_not_bool(arm: str, field: str, value: object) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise SystemExit(f"{arm}: arm record has invalid {field}: {value!r}")
+    return value
+
+
+def recorded_commit_trees(record: list[dict]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for arm in record:
+        sha = arm.get("commit_sha")
+        commit_tree = arm.get("commit_tree")
+        if isinstance(sha, str) and sha and isinstance(commit_tree, str) and commit_tree and sha not in out:
+            out[sha] = commit_tree
+    return out
+
+
+def recorded_tree_thresholds(record: list[dict]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for arm in record:
+        tree = arm.get("commit_tree") or arm.get("tree")
+        threshold = arm.get("tree_threshold")
+        if isinstance(tree, str) and tree and isinstance(threshold, int) and not isinstance(threshold, bool):
+            if tree not in out:
+                out[tree] = threshold
+    return out
+
+
+def resolved_commit_tree(
+    repo: Path, arm: str, sha: str, fallback_trees: dict[str, str]
+) -> str:
+def resolved_commit_tree(
+    repo: Path, arm: str, sha: str, pins: dict[str, dict[str, str]]
+) -> tuple[str, bool]:
     if has_git(repo):
         commit = subprocess.run(
             ["git", "rev-parse", "--verify", f"{sha}^{{commit}}"],
@@ -58,8 +107,16 @@ def resolved_commit_tree(repo: Path, arm: str, sha: str, fallback_tree: str) -> 
                 check=True,
                 text=True,
                 capture_output=True,
-            ).stdout.strip()
-    return fallback_tree
+            ).stdout.strip(), True
+        if not is_shallow_git(repo):
+            raise SystemExit(f"{arm}: commit does not resolve: {sha}")
+    arm_pins = pins.get(arm)
+    if not isinstance(arm_pins, dict):
+        raise SystemExit(f"{arm}: commit does not resolve: {sha}")
+    pinned = arm_pins.get(sha)
+    if not isinstance(pinned, str) or not pinned:
+        raise SystemExit(f"{arm}: commit does not resolve: {sha}")
+    return pinned, False
 
 
 def tree_file(repo: Path, tree: str, path: str) -> str:
@@ -72,7 +129,9 @@ def tree_file(repo: Path, tree: str, path: str) -> str:
     return result.stdout if result.returncode == 0 else ""
 
 
-def tree_threshold(repo: Path, arm: str, tree: str, fallback_threshold: int) -> int:
+def tree_threshold(
+    repo: Path, arm: str, tree: str, fallback_threshold: int, commit_present: bool
+) -> int:
     if has_git(repo):
         present = subprocess.run(
             ["git", "cat-file", "-e", f"{tree}^{{tree}}"],
@@ -93,10 +152,17 @@ def tree_threshold(repo: Path, arm: str, tree: str, fallback_threshold: int) -> 
             if match is None:
                 raise SystemExit(f"{arm}: tree {tree} has no kTeamMinAtoms value")
             return int(match.group(1))
+    if commit_present:
+        raise SystemExit(f"{arm}: resolved commit tree is unavailable: {tree}")
     return fallback_threshold
 
 
-def check_provenance(repo: Path, payload: dict, report_text: str) -> None:
+def check_provenance(
+    repo: Path,
+    payload: dict,
+    report_text: str,
+    pins: dict[str, dict[str, str]],
+) -> None:
     record = payload["metadata"]["arms"]
     record_names = [arm["name"] for arm in record]
     report_names = arms_in_report(report_text)
@@ -112,7 +178,9 @@ def check_provenance(repo: Path, payload: dict, report_text: str) -> None:
             raise SystemExit(f"{name}: arm record is missing required key sha")
         if "commit_sha" not in arm:
             raise SystemExit(f"{name}: arm record is missing required key commit_sha")
-        if arm["sha"] != arm["commit_sha"]:
+        sha = require_non_empty_string(name, "sha", arm["sha"])
+        commit_sha = require_non_empty_string(name, "commit_sha", arm["commit_sha"])
+        if sha != commit_sha:
             raise SystemExit(
                 f"{name}: recorded sha {arm['sha']} does not match commit_sha {arm['commit_sha']}"
             )
@@ -128,19 +196,23 @@ def check_provenance(repo: Path, payload: dict, report_text: str) -> None:
             raise SystemExit(f"{name}: arm record is missing required key tree_threshold")
         if "threshold" not in arm:
             raise SystemExit(f"{name}: arm record is missing required key threshold")
+        tree = require_non_empty_string(name, "tree", arm["tree"])
+        require_non_empty_string(name, "commit_tree", arm["commit_tree"])
+        require_int_not_bool(name, "tree_threshold", arm["tree_threshold"])
+        threshold = require_int_not_bool(name, "threshold", arm["threshold"])
         if arm["threshold"] != arm["tree_threshold"]:
             raise SystemExit(
                 f"{name}: recorded threshold {arm['threshold']} "
                 f"does not match tree_threshold {arm['tree_threshold']}"
             )
-        recorded = arm.get("tree")
-        actual = resolved_commit_tree(repo, name, arm["sha"], arm["commit_tree"])
+        recorded = tree
+        actual, commit_present = resolved_commit_tree(repo, name, sha, pins)
         if recorded != actual:
             raise SystemExit(f"{name}: recorded tree {recorded} does not match commit tree {actual}")
-        actual_threshold = tree_threshold(repo, name, recorded, int(arm["tree_threshold"]))
-        if arm["threshold"] != actual_threshold:
+        actual_threshold = tree_threshold(repo, name, recorded, threshold, commit_present)
+        if threshold != actual_threshold:
             raise SystemExit(
-                f"{name}: recorded threshold {arm['threshold']} "
+                f"{name}: recorded threshold {threshold} "
                 f"does not match tree threshold {actual_threshold}"
             )
 
@@ -155,6 +227,7 @@ def main() -> None:
     )
     parser.add_argument("--json-relative", type=Path)
     parser.add_argument("--report", type=Path)
+    parser.add_argument("--pins", type=Path, default=PINS_PATH)
     args = parser.parse_args()
     repo = args.repo.resolve()
     json_path = args.json if args.json.is_absolute() else repo / args.json
@@ -169,7 +242,13 @@ def main() -> None:
         report_path = repo / args.report
     if not report_path.is_file():
         raise SystemExit(f"report is missing: {report_path.name}")
-    check_provenance(repo, payload, report_path.read_text(encoding="utf-8"))
+    pins_path = args.pins if args.pins.is_absolute() else repo / args.pins
+    if not pins_path.is_file():
+        raise SystemExit(f"pinned manifest is missing: {pins_path}")
+    pins = json.loads(pins_path.read_text(encoding="utf-8"))
+    if not isinstance(pins, dict):
+        raise SystemExit("pinned manifest must be a JSON object")
+    check_provenance(repo, payload, report_path.read_text(encoding="utf-8"), pins)
 
 
 if __name__ == "__main__":
