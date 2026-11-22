@@ -1,6 +1,7 @@
 #![cfg(unix)]
 
 use std::ffi::{c_int, c_long};
+use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -829,6 +830,23 @@ fn typed_status_does_not_retry_from_error_text() {
         .expect_err("recoverable input");
     assert_eq!(error.engine_status(), Some(EngineStatus::from_code(1)));
     assert_eq!(observer.native_calls() - before, 2);
+}
+
+#[test]
+fn status_codes_round_trip_in_range_and_saturate_beyond_it() {
+    for code in [0, 1, -1, 2, -2, c_int::MAX, c_int::MIN] {
+        assert_eq!(
+            EngineStatus::from_code(EngineStatus::from_code(code).code()),
+            EngineStatus::from_code(code)
+        );
+        assert_eq!(EngineStatus::from_code(code).code(), code);
+    }
+    let huge = NonZeroU32::new(u32::MAX).expect("nonzero");
+    assert_eq!(
+        EngineStatus::RecoverableInputFailure(huge).code(),
+        c_int::MAX
+    );
+    assert_eq!(EngineStatus::FatalInstanceFailure(huge).code(), c_int::MIN);
 }
 
 unsafe extern "C" fn stub_abi_version() -> c_int {

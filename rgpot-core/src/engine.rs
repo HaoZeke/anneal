@@ -120,7 +120,10 @@ impl EngineStatus {
     }
 
     /// The C ABI return code. Its sign is the class of the status, so
-    /// `from_code(status.code())` is the same status.
+    /// `from_code(status.code())` is the same status for every status
+    /// [`Self::from_code`] produces. A failure built directly with a magnitude
+    /// beyond the range of `c_int` saturates to `c_int::MAX` or `c_int::MIN`,
+    /// so that code is not the exact magnitude and does not round-trip.
     pub const fn code(self) -> c_int {
         match self {
             Self::Success => 0,
