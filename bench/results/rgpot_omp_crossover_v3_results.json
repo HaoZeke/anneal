@@ -20871,5 +20871,8 @@
       "potential": "emt",
       "reason": "EMT rejects this periodic cell size"
     }
-  ]
+  ],
+  "identity": {
+    "configured_team_min_atoms": 1
+  }
 }

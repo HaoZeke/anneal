@@ -77,8 +77,8 @@ Radial radial(const Curve &curve, double r) {
   const double t = std::exp(-curve.exponent * (r - curve.re));
   const double dt = -curve.exponent * t;
   const double d2t = curve.exponent * curve.exponent * t;
-  const double cs = curve.de / (1.0 + curve.sato);
-  const double ct = curve.de / (1.0 - curve.sato);
+  const double cs = curve.de;
+  const double ct = 0.5 * curve.de * (1.0 - curve.sato) / (1.0 + curve.sato);
   const double es = cs * (t * t - 2.0 * t);
   const double et = ct * (t * t + 2.0 * t);
   const double des = cs * (2.0 * t - 2.0) * dt;
@@ -159,16 +159,20 @@ ModelEvaluation leps(std::span<const double> x, std::span<const double> v,
 
 std::array<Curve, 3> curves(LepsSystem system) {
   if (system == LepsSystem::HH2) {
+    // Whitlock, Muckerman and Roberts, J. Chem. Phys. 60, 3658-3673
+    // (1974), doi:10.1063/1.1681586.
     const Curve hh{0.17446, 1.40083, 1.027, 0.132};
     return {hh, hh, hh};
   }
   if (system == LepsSystem::FH2) {
+    // Whitlock and Muckerman, J. Chem. Phys. 61, 4618-4629 (1974),
+    // doi:10.1063/1.1681780.
     const Curve fh{0.225138, 1.732879, 1.1742, 0.167};
     const Curve hh{0.17451914, 1.4019877, 1.0277, 0.106};
     return {fh, hh, fh};
   }
   // Hartree and Bohr. Spectroscopic Morse curves and Sato parameters from
-  // Connor, Mayne and Whitehead, J. Chem. Phys. 72, 6209 (1980).
+  // Connor, Jakubetz, Manz and Whitehead, J. Chem. Phys. 72, 6209 (1980).
   const Curve hcl{0.16963487116282344, 2.4085504321417757,
                   0.9886770766652772, 0.067};
   const Curve cl2{0.09238779594959665, 3.7565865631435686,

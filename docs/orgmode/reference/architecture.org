@@ -116,10 +116,10 @@ The C++ classes are in =FortranPots.hpp=, in the namespace =rgpot::fortranpots=:
 |--------------+-------------+---------------------------------------------------------------|
 | =CuH2Pot=    | =CuH2=      | Copper-hydrogen EAM                                           |
 | =EDIPPot=    | =EDIP=      | Environment-dependent interatomic potential for silicon       |
-| =LenoskyPot= | =LenoskySi= | Lenosky silicon                                               |
+| =LenoskyPot= | =LenoskySi= | Cubic-spline MEAM silicon force-matched to LDA                |
 | =EAMAlPot=   | =EAMAl=     | EAM aluminium                                                 |
 | =FeHePot=    | =FeHe=      | Fe-He embedded atom                                           |
-| =WaterHPot=  | =WaterH=    | TIP4P water with a hydrogen atom                              |
+| =WaterHPot=  | =WaterH=    | Andersson's =potH-H2O= surface for H among water molecules    |
 | =SWPot=      | =SWSi=      | Stillinger-Weber silicon with eOn's epsilon                   |
 | =TersoffPot= | =TersoffSi= | Tersoff silicon: Fortran gather, or =TersoffSiC= for other Z |
 

@@ -2058,7 +2058,8 @@ energy -5.217864006173226 eV within 1e-12.
   when the neighbour table reports a failure.
 
 The potential is Bazant, Kaxiras and Justo, Physical Review B 56, 8542-8552
-(1997), doi:10.1103/PhysRevB.56.8542.
+(1997),
+doi:10.1103/PhysRevB.56.8542, with the parameters from Table I of Justo, Bazant, Kaxiras, Bulatov and Yip, Physical Review B 58, 2539-2550 (1998), doi:10.1103/PhysRevB.58.2539.
 Eight silicon atoms in a 20 Angstrom cube give -18.838135 eV within a relative
 1e-4.
 
