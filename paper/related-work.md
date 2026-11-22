@@ -1465,3 +1465,11 @@ The same authors already show that the released GEOM-DRUGS reference ensemble is
 The release APIs were also unchanged on 21 November 2026: CREST remains `v3.0.2`, AGOX remains tagged at `v3.11.1`, ASE remains tagged at `3.29.0`, and pele remains `v0.1.2`. The former `ksags/GOFEE` release and tag endpoints returned 404, and current GitHub and GitLab repository searches found no official standalone GOFEE release repository; GOFEE remains available through AGOX. The searches again found no official GitHub or GitLab release repository for de Souza's GOAT or for GMIN.
 
 Cite `vahediahmarConformerSelection2026` beside `vahediahmarGeomDrugs2026`.
+
+## 2026-11-22 — AlphaFold-guided protein conformational ensembles
+
+Ren, Liu, Yan, Tang, Li, and Wang, Journal of Chemical Theory and Computation (21 November 2026), doi:10.1021/acs.jctc.6c01861, introduce EnsemblePAE, which turns AlphaFold predicted-aligned-error values into heterogeneous native interactions for coarse-grained simulations. The abstract reports alternative-conformation benchmarks on allosteric proteins and 106 proteins from DynDom, performance comparable to BioEmu, and metastable folding intermediates missed by the conventional structure-based models they compare.
+
+This is protein conformational-ensemble sampling from an AlphaFold structure, not small-molecule conformer global optimisation. It reports no Lennard-Jones energy, TIP4P energy, GFN2-xTB water-hexamer energy, or sealed motif count, so it does not contradict the Cambridge targets, 121 of 192, 97 of 192, or the polished hexamer gaps. It does not fill the ASE, AGOX, and GMIN comparison kit. A head-to-head would be on one of the protein conformational-transition benchmarks against BioEmu or the conventional structure-based models, not on the current cluster or CREST benchmarks; no new head-to-head is needed for the manuscript.
+
+Cite `renEnsemblePae2026` only if the conformer discussion is broadened to protein ensembles.
