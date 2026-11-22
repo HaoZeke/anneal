@@ -165,6 +165,15 @@ pub struct AcceptedTransition {
 /// within the merge radius of the held structure by the chain's own region
 /// identity. The merge radius alone is not enough: structures that far apart
 /// in one region differ in what a completion finds on them.
+///
+/// An entry keeps the coordinates and the energy, not the descriptor. A
+/// descriptor is a sorted pair spectrum, quadratic in the number of points,
+/// and a chain that visits many fruitless minima would otherwise carry one
+/// per visit for the whole run. The coordinates are linear in the number of
+/// points, as is every state the run already keeps per accepted edge. The
+/// energy is compared first and nearly always settles the question, so the
+/// descriptor of a held structure is rebuilt only for an entry whose energy
+/// matches, and it is the same descriptor the stored form would have been.
 #[derive(Default)]
 struct FruitlessMinima {
     held: Vec<(f64, Array1<f64>)>,
@@ -182,9 +191,10 @@ impl FruitlessMinima {
         x: ArrayView1<f64>,
     ) -> bool {
         let mut described: Option<Array1<f64>> = None;
-        self.held.iter().rev().any(|(held, centre)| {
+        self.held.iter().rev().any(|(held, structure)| {
             Self::same_energy(*held, energy) && {
                 let d = described.get_or_insert_with(|| identity.describe(x));
+                let centre = identity.describe(structure.view());
                 d.len() == centre.len()
                     && d.iter()
                         .zip(centre.iter())
@@ -196,13 +206,14 @@ impl FruitlessMinima {
         })
     }
 
-    fn insert(
-        &mut self,
-        identity: &BasinIndex<ClusterFingerprint>,
-        energy: f64,
-        x: ArrayView1<f64>,
-    ) {
-        self.held.push((energy, identity.describe(x)));
+    fn insert(&mut self, energy: f64, x: ArrayView1<f64>) {
+        self.held.push((energy, x.to_owned()));
+    }
+
+    /// Coordinates and energies held, as numbers.
+    #[cfg(test)]
+    fn retained_numbers(&self) -> usize {
+        self.held.iter().map(|(_, x)| 1 + x.len()).sum()
     }
 }
 
@@ -10006,7 +10017,7 @@ where
                     cfg.min_separation,
                 );
                 if found.is_none() && chain_alone {
-                    fruitless.insert(&identity, e, x.view());
+                    fruitless.insert(e, x.view());
                 }
                 found
             }
@@ -15619,13 +15630,77 @@ mod tests {
         let x = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
         let mut held = FruitlessMinima::default();
         assert!(!held.holds(&identity, -3.0, x.view()));
-        held.insert(&identity, -3.0, x.view());
+        held.insert(-3.0, x.view());
         assert!(held.holds(&identity, -3.0, x.view()));
         let relaxed = x.mapv(|v| v + 1e-7 * (v * 13.0).sin());
         assert!(held.holds(&identity, -3.0 + 1e-11, relaxed.view()));
         assert!(!held.holds(&identity, -3.0 + 1e-5, x.view()));
         let stretched = x.mapv(|v| 1.5 * v);
         assert!(!held.holds(&identity, -3.0, stretched.view()));
+    }
+
+    /// The memo keeps what is linear in the points, not the quadratic
+    /// descriptor, so the number it retains per entry does not grow with the
+    /// square of the cluster, and every answer it gives is the one a memo
+    /// that stored the descriptors would give.
+    #[test]
+    fn the_fruitless_memo_retains_coordinates_and_answers_as_descriptors_would() {
+        for n in [8usize, 30, 55] {
+            let cfg = Config::for_cluster(n);
+            let identity =
+                BasinIndex::new(ClusterFingerprint::for_keying(n, false), cfg.merge_radius);
+            let mut rng = StdRng::seed_from_u64(31 + n as u64);
+            let mut held = FruitlessMinima::default();
+            let mut reference: Vec<(f64, Array1<f64>)> = Vec::new();
+            let reference_holds = |reference: &[(f64, Array1<f64>)], e: f64, x: &Array1<f64>| {
+                let d = identity.describe(x.view());
+                reference.iter().any(|(held_e, centre)| {
+                    FruitlessMinima::same_energy(*held_e, e)
+                        && (d
+                            .iter()
+                            .zip(centre.iter())
+                            .map(|(a, b)| (a - b) * (a - b))
+                            .sum::<f64>()
+                            .sqrt()
+                            <= identity.merge_radius())
+                })
+            };
+            let entries = 40;
+            let mut energies = Vec::new();
+            let mut structures = Vec::new();
+            for k in 0..entries {
+                let x = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+                let e = -1.0 - 0.37 * (k % 7) as f64;
+                energies.push(e);
+                structures.push(x);
+            }
+            for (e, x) in energies.iter().zip(&structures) {
+                let seen = held.holds(&identity, *e, x.view());
+                assert_eq!(seen, reference_holds(&reference, *e, x));
+                if !seen {
+                    held.insert(*e, x.view());
+                    reference.push((*e, identity.describe(x.view())));
+                }
+            }
+            for (e, x) in energies.iter().zip(&structures) {
+                assert!(held.holds(&identity, *e, x.view()));
+                assert_eq!(
+                    held.holds(&identity, *e + 1e-4, x.view()),
+                    reference_holds(&reference, *e + 1e-4, x)
+                );
+                let moved = x.mapv(|v| v + 1e-8 * (v * 7.0).cos());
+                assert_eq!(
+                    held.holds(&identity, *e, moved.view()),
+                    reference_holds(&reference, *e, &moved)
+                );
+            }
+            assert_eq!(held.held.len(), reference.len());
+            assert_eq!(held.retained_numbers(), held.held.len() * (1 + 3 * n));
+            if n >= 30 {
+                let descriptor = n * (n - 1) / 2;
+                assert!(1 + 3 * n < descriptor, "{n}");
+            }
+        }
     }
 
     /// A structure whose positions are an octahedron and whose species are
