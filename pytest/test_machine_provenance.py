@@ -500,7 +500,9 @@ def test_remaining_gmin_runners_emit_machine_id_and_cpu_model(tmp_path):
         gad.saved_rerun(
             gad_row_path,
             38,
+            2000,
             "anneal",
+            gad.BUDGET,
             code_revision="head-1",
             machine=machine_a,
         )
@@ -510,14 +512,35 @@ def test_remaining_gmin_runners_emit_machine_id_and_cpu_model(tmp_path):
         gad.saved_rerun(
             gad_row_path,
             38,
+            2000,
             "anneal",
+            gad.BUDGET,
             code_revision="head-2",
             machine=machine_a,
         )
         is None
     )
+    for bad_args, match in (
+        ((31, 2000, "anneal", gad.BUDGET), "saved row system mismatch"),
+        ((38, 2001, "anneal", gad.BUDGET), "saved row seed mismatch"),
+        ((38, 2000, "gmin", gad.BUDGET), "saved row arm mismatch"),
+        ((38, 2000, "anneal", 100_000), "saved row budget mismatch"),
+    ):
+        with pytest.raises(ValueError, match=match):
+            gad.saved_rerun(
+                gad_row_path,
+                *bad_args,
+                code_revision="head-1",
+                machine=machine_a,
+            )
     gad_rec = gad.saved_rerun(
-        gad_row_path, 38, "anneal", code_revision="head-1", machine=machine_a
+        gad_row_path,
+        38,
+        2000,
+        "anneal",
+        gad.BUDGET,
+        code_revision="head-1",
+        machine=machine_a,
     )
     gad_summary = gad.summarise([gad_rec], "head-1", "svn-1", "bench", machine_b)
     assert gad_summary[0]["machine_id"] == "a" * 64
@@ -582,7 +605,9 @@ def test_remaining_gmin_runners_emit_machine_id_and_cpu_model(tmp_path):
         morse_h2h.load_saved(
             mh_saved,
             "m38r14",
+            2000,
             "gmin",
+            400_000,
             machine=machine_b,
             url="https://example.invalid/gmin",
             revision="svn-1",
@@ -593,17 +618,35 @@ def test_remaining_gmin_runners_emit_machine_id_and_cpu_model(tmp_path):
         morse_h2h.load_saved(
             mh_saved,
             "m38r14",
+            2000,
             "gmin",
+            400_000,
             machine=machine_b,
             url="https://example.invalid/gmin",
             revision="svn-2",
         )
         is None
     )
+    for bad_args, match in (
+        (("m55r14", 2000, "gmin", 400_000), "saved row system mismatch"),
+        (("m38r14", 2001, "gmin", 400_000), "saved row seed mismatch"),
+        (("m38r14", 2000, "anneal", 400_000), "saved row arm mismatch"),
+        (("m38r14", 2000, "gmin", 1_000_000), "saved row budget mismatch"),
+    ):
+        with pytest.raises(ValueError, match=match):
+            morse_h2h.load_saved(
+                mh_saved,
+                *bad_args,
+                machine=machine_b,
+                url="https://example.invalid/gmin",
+                revision="svn-1",
+            )
     mh_loaded = morse_h2h.load_saved(
         mh_saved,
         "m38r14",
+        2000,
         "gmin",
+        400_000,
         machine=machine_b,
         url="https://example.invalid/gmin",
         revision="svn-1",

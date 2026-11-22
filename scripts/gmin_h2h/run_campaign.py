@@ -31,7 +31,10 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
-from machine_provenance import machine_provenance  # noqa: E402
+from machine_provenance import (  # noqa: E402
+    machine_provenance,
+    validate_saved_row_identity,
+)
 from gmin_pin import TARBALL_SHA256, read_svnrev  # noqa: E402
 
 PAPER_BUDGETS = {
@@ -137,6 +140,12 @@ def schedule(
 
 def system_name(n: int) -> str:
     return f"lj{n}"
+
+
+def system_size(system: str) -> int:
+    if not system.startswith("lj") or not system[2:].isdigit():
+        raise ValueError(f"invalid LJ system name {system!r}")
+    return int(system[2:])
 
 
 def load_source(path: Path) -> tuple[str, str]:
@@ -504,10 +513,30 @@ def job_paths(runs: Path, n: int, seed: int, arm: str) -> tuple[Path, Path]:
     return directory / f"{arm}-{seed}.row", directory / f"{arm}-{seed}.log"
 
 
+def _parse_saved_row(text: str, arm: str) -> dict[str, str]:
+    lines = [line for line in text.splitlines() if line.strip()]
+    for index, line in enumerate(lines[:-1]):
+        if line.startswith("system,code,seed,budget,"):
+            return next(csv.DictReader(lines[index : index + 2]))
+    if any(line.startswith("h2h_row ") for line in lines):
+        row = parse_gmin(text)
+        row.setdefault("code", "gmin")
+        return row
+    if any(",anneal," in line for line in lines):
+        return parse_anneal(text)
+    if arm == "anneal":
+        return parse_anneal(text)
+    row = parse_gmin(text)
+    row.setdefault("code", "gmin")
+    return row
+
+
 def load_saved(
     path: Path,
-    n: int,
+    system: str,
+    seed: int,
     arm: str,
+    budget: int,
     machine_id: str,
     cpu_model: str,
     *,
@@ -515,17 +544,33 @@ def load_saved(
     gmin_url: str = "",
     gmin_build_key: str = "",
 ) -> dict | None:
+    n = system_size(system)
     if not path.is_file():
         return None
     text = path.read_text().strip()
     if not text:
         return None
-    if arm == "anneal":
-        row = parse_anneal(text)
-    else:
-        row = parse_gmin(text)
-        if "gradient_passes" not in row or "energy_only_entries" not in row:
+    row = _parse_saved_row(text, arm)
+    validate_saved_row_identity(
+        row,
+        path=path,
+        system=system,
+        arm=arm,
+        seed=seed,
+        budget=budget,
+    )
+    if arm == "gmin":
+        if (
+            not str(row.get("gradient_passes", "")).strip()
+            or not str(row.get("energy_only_entries", "")).strip()
+        ):
             return None
+        if (
+            int(row["gradient_passes"]) != int(row["charged"])
+            or not 0 <= int(row["gradient_passes"]) <= budget
+            or int(row["energy_only_entries"]) < 0
+        ):
+            raise ValueError(f"{path}: invalid gmin counters: {row}")
     if row.get("machine_id") != machine_id or row.get("cpu_model") != cpu_model:
         return None
     if not code_revision or row.get("code_revision") != code_revision:
@@ -650,8 +695,10 @@ def main(argv: list[str]) -> int:
         existing = (
             load_saved(
                 saved,
-                n,
+                system_name(n),
+                seed,
                 arm,
+                budget,
                 machine_id,
                 cpu_model,
                 code_revision=expected_revision,

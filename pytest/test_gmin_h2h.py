@@ -227,8 +227,10 @@ def test_load_saved_requires_matching_producer_revisions_and_build_key(tmp_path)
 
     loaded_anneal = campaign.load_saved(
         anneal_path,
-        38,
+        "lj38",
+        2000,
         "anneal",
+        400_000,
         "a" * 64,
         "Example CPU",
         code_revision="head-rev-1",
@@ -238,8 +240,10 @@ def test_load_saved_requires_matching_producer_revisions_and_build_key(tmp_path)
     assert (
         campaign.load_saved(
             anneal_path,
-            38,
+            "lj38",
+            2000,
             "anneal",
+            400_000,
             "a" * 64,
             "Example CPU",
             code_revision="head-rev-2",
@@ -252,8 +256,10 @@ def test_load_saved_requires_matching_producer_revisions_and_build_key(tmp_path)
     assert (
         campaign.load_saved(
             untagged_anneal,
-            38,
+            "lj38",
+            2000,
             "anneal",
+            400_000,
             "a" * 64,
             "Example CPU",
             code_revision="head-rev-1",
@@ -287,8 +293,10 @@ def test_load_saved_requires_matching_producer_revisions_and_build_key(tmp_path)
 
     loaded_gmin = campaign.load_saved(
         gmin_path,
-        38,
+        "lj38",
+        2000,
         "gmin",
+        400_000,
         "a" * 64,
         "Example CPU",
         code_revision="svn-100",
@@ -301,8 +309,10 @@ def test_load_saved_requires_matching_producer_revisions_and_build_key(tmp_path)
     assert (
         campaign.load_saved(
             gmin_path,
-            38,
+            "lj38",
+            2000,
             "gmin",
+            400_000,
             "a" * 64,
             "Example CPU",
             code_revision="svn-101",
@@ -314,8 +324,10 @@ def test_load_saved_requires_matching_producer_revisions_and_build_key(tmp_path)
     assert (
         campaign.load_saved(
             gmin_path,
-            38,
+            "lj38",
+            2000,
             "gmin",
+            400_000,
             "a" * 64,
             "Example CPU",
             code_revision="svn-100",
@@ -324,6 +336,164 @@ def test_load_saved_requires_matching_producer_revisions_and_build_key(tmp_path)
         )
         is None
     )
+
+
+def _write_valid_saved_pair(tmp_path: Path) -> tuple[Path, Path]:
+    anneal_path = tmp_path / "anneal-2000.row"
+    campaign.write_per_seed_row(
+        anneal_path,
+        {
+            "system": "lj98",
+            "code": "anneal",
+            "seed": "2000",
+            "budget": "4000000",
+            "hit": "1",
+            "evals_to_hit": "12000",
+            "charged": "12000",
+            "wall_s": "0.5",
+            "best": "-543.665361",
+            "pot_s": "0.4",
+        },
+        "a" * 64,
+        "Example CPU",
+        anneal_head="head-rev-1",
+    )
+    gmin_path = tmp_path / "gmin-2000.row"
+    campaign.write_per_seed_row(
+        gmin_path,
+        {
+            "system": "lj98",
+            "code": "gmin",
+            "seed": "2000",
+            "budget": "4000000",
+            "hit": "1",
+            "evals_to_hit": "18000",
+            "charged": "18000",
+            "gradient_passes": "18000",
+            "energy_only_entries": "12",
+            "wall_s": "0.8",
+            "best": "-543.665361",
+            "pot_s": "0.7",
+        },
+        "a" * 64,
+        "Example CPU",
+        gmin_url="https://example.invalid/gmin.tar.gz",
+        gmin_revision="svn-100",
+        gmin_build_key="b" * 64,
+    )
+    return anneal_path, gmin_path
+
+
+def test_load_saved_refuses_mismatched_system(tmp_path):
+    anneal_path, gmin_path = _write_valid_saved_pair(tmp_path)
+    with pytest.raises(ValueError, match="saved row system mismatch"):
+        campaign.load_saved(
+            anneal_path,
+            "lj104",
+            2000,
+            "anneal",
+            4_000_000,
+            "a" * 64,
+            "Example CPU",
+            code_revision="head-rev-1",
+        )
+    with pytest.raises(ValueError, match="saved row system mismatch"):
+        campaign.load_saved(
+            gmin_path,
+            "lj104",
+            2000,
+            "gmin",
+            4_000_000,
+            "a" * 64,
+            "Example CPU",
+            code_revision="svn-100",
+            gmin_url="https://example.invalid/gmin.tar.gz",
+            gmin_build_key="b" * 64,
+        )
+
+
+def test_load_saved_refuses_mismatched_seed(tmp_path):
+    anneal_path, gmin_path = _write_valid_saved_pair(tmp_path)
+    with pytest.raises(ValueError, match="saved row seed mismatch"):
+        campaign.load_saved(
+            anneal_path,
+            "lj98",
+            2001,
+            "anneal",
+            4_000_000,
+            "a" * 64,
+            "Example CPU",
+            code_revision="head-rev-1",
+        )
+    with pytest.raises(ValueError, match="saved row seed mismatch"):
+        campaign.load_saved(
+            gmin_path,
+            "lj98",
+            2001,
+            "gmin",
+            4_000_000,
+            "a" * 64,
+            "Example CPU",
+            code_revision="svn-100",
+            gmin_url="https://example.invalid/gmin.tar.gz",
+            gmin_build_key="b" * 64,
+        )
+
+
+def test_load_saved_refuses_mismatched_arm(tmp_path):
+    anneal_path, gmin_path = _write_valid_saved_pair(tmp_path)
+    with pytest.raises(ValueError, match="saved row arm mismatch"):
+        campaign.load_saved(
+            anneal_path,
+            "lj98",
+            2000,
+            "gmin",
+            4_000_000,
+            "a" * 64,
+            "Example CPU",
+            code_revision="svn-100",
+            gmin_url="https://example.invalid/gmin.tar.gz",
+            gmin_build_key="b" * 64,
+        )
+    with pytest.raises(ValueError, match="saved row arm mismatch"):
+        campaign.load_saved(
+            gmin_path,
+            "lj98",
+            2000,
+            "anneal",
+            4_000_000,
+            "a" * 64,
+            "Example CPU",
+            code_revision="head-rev-1",
+        )
+
+
+def test_load_saved_refuses_mismatched_budget(tmp_path):
+    anneal_path, gmin_path = _write_valid_saved_pair(tmp_path)
+    with pytest.raises(ValueError, match="saved row budget mismatch"):
+        campaign.load_saved(
+            anneal_path,
+            "lj98",
+            2000,
+            "anneal",
+            1_000_000,
+            "a" * 64,
+            "Example CPU",
+            code_revision="head-rev-1",
+        )
+    with pytest.raises(ValueError, match="saved row budget mismatch"):
+        campaign.load_saved(
+            gmin_path,
+            "lj98",
+            2000,
+            "gmin",
+            1_000_000,
+            "a" * 64,
+            "Example CPU",
+            code_revision="svn-100",
+            gmin_url="https://example.invalid/gmin.tar.gz",
+            gmin_build_key="b" * 64,
+        )
 
 
 def test_summarise_preserves_row_revisions_and_refuses_relabeling():

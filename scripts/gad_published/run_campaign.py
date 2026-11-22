@@ -42,6 +42,7 @@ from machine_provenance import (  # noqa: E402
     aggregate_machine_columns,
     machine_columns,
     require_csv_schema,
+    validate_saved_row_identity,
 )
 
 BUDGET = 400_000
@@ -579,10 +580,31 @@ def load_source(path: Path) -> str:
     return revision
 
 
+def _parse_saved_row(text: str, arm: str) -> dict[str, str]:
+    lines = [line for line in text.splitlines() if line.strip()]
+    for index, line in enumerate(lines[:-1]):
+        if line.startswith("system,code,seed,budget,"):
+            return next(csv.DictReader(lines[index : index + 2]))
+    if any(line.startswith("h2h_row ") for line in lines):
+        row = parse_gmin(text)
+        row.setdefault("code", "gmin")
+        return row
+    for candidate in ("anneal", "gad"):
+        if any(f",{candidate}," in line for line in lines):
+            return parse_anneal(text, candidate)
+    if arm == "gmin":
+        row = parse_gmin(text)
+        row.setdefault("code", "gmin")
+        return row
+    return parse_anneal(text, arm)
+
+
 def saved_rerun(
     path: Path,
     n: int,
+    seed: int,
     arm: str,
+    budget: int = BUDGET,
     *,
     code_revision: str,
     machine: dict[str, str],
@@ -590,7 +612,15 @@ def saved_rerun(
     if not path.is_file() or path.stat().st_size == 0:
         return None
     text = path.read_text()
-    row = parse_gmin(text) if arm == "gmin" else parse_anneal(text, arm)
+    row = _parse_saved_row(text, arm)
+    validate_saved_row_identity(
+        row,
+        path=path,
+        system=f"lj{n}",
+        arm=arm,
+        seed=seed,
+        budget=budget,
+    )
     if (
         row.get("machine_id") != machine["machine_id"]
         or row.get("cpu_model") != machine["cpu_model"]
@@ -755,7 +785,9 @@ def main(argv: list[str]) -> int:
         existing = saved_rerun(
             saved,
             n,
+            seed,
             arm,
+            BUDGET,
             code_revision=arm_revision,
             machine=machine,
         )

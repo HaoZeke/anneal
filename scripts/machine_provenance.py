@@ -121,3 +121,48 @@ def require_csv_schema(path: Path, fieldnames: Iterable[str]) -> None:
         raise RuntimeError(
             f"{path} has legacy columns; write new benchmark rows to a new table"
         )
+
+
+def validate_saved_row_identity(
+    row: Mapping[str, object],
+    *,
+    path: Path | None = None,
+    system: str,
+    arm: str,
+    seed: int,
+    budget: int,
+) -> None:
+    """Reject a saved per-seed row whose system, arm, seed, or budget mismatches."""
+    where = f"{path}: " if path is not None else ""
+    actual_system = str(row.get("system", "")).strip()
+    if actual_system != system:
+        raise ValueError(
+            f"{where}saved row system mismatch: got {actual_system!r}, expected {system!r}"
+        )
+    actual_arm = str(row.get("code") or row.get("arm") or "").strip()
+    if actual_arm != arm:
+        raise ValueError(
+            f"{where}saved row arm mismatch: got {actual_arm!r}, expected {arm!r}"
+        )
+    raw_seed = str(row.get("seed", "")).strip()
+    try:
+        actual_seed = int(raw_seed)
+    except ValueError as error:
+        raise ValueError(
+            f"{where}saved row seed mismatch: got {raw_seed!r}, expected {seed}"
+        ) from error
+    if actual_seed != seed:
+        raise ValueError(
+            f"{where}saved row seed mismatch: got {actual_seed}, expected {seed}"
+        )
+    raw_budget = str(row.get("budget", "")).strip()
+    try:
+        actual_budget = int(raw_budget)
+    except ValueError as error:
+        raise ValueError(
+            f"{where}saved row budget mismatch: got {raw_budget!r}, expected {budget}"
+        ) from error
+    if actual_budget != budget:
+        raise ValueError(
+            f"{where}saved row budget mismatch: got {actual_budget}, expected {budget}"
+        )

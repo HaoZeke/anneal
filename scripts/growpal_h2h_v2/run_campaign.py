@@ -39,7 +39,11 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
-from machine_provenance import aggregate_machine_columns, machine_columns  # noqa: E402
+from machine_provenance import (  # noqa: E402
+    aggregate_machine_columns,
+    machine_columns,
+    validate_saved_row_identity,
+)
 
 # (system, binary, budget, Cambridge minimum, GrowPAL length per anneal length)
 SYSTEMS = (
@@ -612,6 +616,14 @@ def main(argv: list[str]) -> int:
         existing = read_rows(saved)
         if existing:
             row = existing[0]
+            validate_saved_row_identity(
+                row,
+                path=saved,
+                system=system,
+                arm=arm,
+                seed=seed,
+                budget=budget,
+            )
             if not row.get("machine_id") or not row.get("cpu_model"):
                 raise RuntimeError(f"{saved} is a legacy row; use a new campaign directory")
             note(progress, f"skip {system} {arm} {seed} hit={row['hit']} evals={row['evals_to_hit']}")

@@ -27,7 +27,10 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
-from machine_provenance import machine_columns  # noqa: E402
+from machine_provenance import (  # noqa: E402
+    machine_columns,
+    validate_saved_row_identity,
+)
 
 SYSTEMS = ("zn38", "zn55", "zn75", "zn80", "cu19au19")
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
@@ -389,6 +392,14 @@ def main(argv: list[str]) -> int:
         saved.parent.mkdir(parents=True, exist_ok=True)
         if saved.is_file() and saved.stat().st_size > 0:
             row = parse_row(saved.read_text())
+            validate_saved_row_identity(
+                row,
+                path=saved,
+                system=system,
+                arm=arm,
+                seed=seed,
+                budget=budget,
+            )
             result = as_result(row)
             rows.append(result)
             note(progress, f"skip {system} {arm} seed {seed} hit {int(result['hit'])}")

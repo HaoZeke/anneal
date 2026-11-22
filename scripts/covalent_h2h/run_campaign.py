@@ -36,7 +36,11 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
-from machine_provenance import machine_columns, require_csv_schema  # noqa: E402
+from machine_provenance import (  # noqa: E402
+    machine_columns,
+    require_csv_schema,
+    validate_saved_row_identity,
+)
 from gmin_pin import read_built_revision  # noqa: E402
 
 SYSTEMS = ("sw10", "sw13", "sw20", "tc10", "tc20")
@@ -485,6 +489,14 @@ def main(argv: list[str]) -> int:
         saved.parent.mkdir(parents=True, exist_ok=True)
         if saved.is_file() and saved.read_text().strip():
             row = next(csv.DictReader(saved.read_text().splitlines()))
+            validate_saved_row_identity(
+                row,
+                path=saved,
+                system=name,
+                arm=code,
+                seed=seed,
+                budget=budget,
+            )
             if (
                 row.get("machine_id") != machine["machine_id"]
                 or row.get("cpu_model") != machine["cpu_model"]

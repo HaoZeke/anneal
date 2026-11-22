@@ -35,6 +35,7 @@ from machine_provenance import (  # noqa: E402
     aggregate_machine_columns,
     machine_columns,
     require_csv_schema,
+    validate_saved_row_identity,
 )
 
 # (name, n, rho, budget, cambridge energy)
@@ -467,10 +468,30 @@ def job_paths(runs: Path, name: str, seed: int, arm: str):
     return directory / f"{arm}-{seed}.row", directory / f"{arm}-{seed}.log"
 
 
+def _parse_saved_row(text: str, arm: str) -> dict[str, str]:
+    lines = [line for line in text.splitlines() if line.strip()]
+    for index, line in enumerate(lines[:-1]):
+        if line.startswith("system,code,seed,budget,"):
+            return next(csv.DictReader(lines[index : index + 2]))
+    if any(line.startswith("h2h_row ") for line in lines):
+        row = parse_gmin(text)
+        row.setdefault("code", "gmin")
+        return row
+    if any(",anneal," in line for line in lines):
+        return parse_anneal(text)
+    if arm == "anneal":
+        return parse_anneal(text)
+    row = parse_gmin(text)
+    row.setdefault("code", "gmin")
+    return row
+
+
 def load_saved(
     path: Path,
     name: str,
+    seed: int,
     arm: str,
+    budget: int,
     *,
     machine: dict[str, str] | None = None,
     url: str = "",
@@ -481,7 +502,15 @@ def load_saved(
         return None
     expected_machine = dict(machine) if machine is not None else machine_columns()
     text = path.read_text()
-    row = parse_anneal(text) if arm == "anneal" else parse_gmin(text)
+    row = _parse_saved_row(text, arm)
+    validate_saved_row_identity(
+        row,
+        path=path,
+        system=name,
+        arm=arm,
+        seed=seed,
+        budget=budget,
+    )
     if (
         row.get("machine_id") != expected_machine["machine_id"]
         or row.get("cpu_model") != expected_machine["cpu_model"]
@@ -577,7 +606,9 @@ def main(argv: list[str]) -> int:
         existing = load_saved(
             saved,
             name,
+            seed,
             arm,
+            budget,
             machine=machine,
             url=url,
             revision=revision,

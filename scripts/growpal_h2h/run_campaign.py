@@ -30,7 +30,10 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
-from machine_provenance import machine_columns  # noqa: E402
+from machine_provenance import (  # noqa: E402
+    machine_columns,
+    validate_saved_row_identity,
+)
 
 PAPER_BUDGETS = {
     38: 400_000,
@@ -460,12 +463,20 @@ def main(argv: list[str]) -> int:
         saved = seed_path(args.rows, n, seed, arm)
         log = args.runs / system_name(n) / f"{arm}-{seed}.log"
         existing = load_seed(saved)
-        if existing is not None and (
-            existing.get("machine_id") != machine["machine_id"]
-            or existing.get("cpu_model") != machine["cpu_model"]
-        ):
-            raise RuntimeError(f"{saved} is a legacy or different-machine row")
         if existing is not None:
+            validate_saved_row_identity(
+                existing,
+                path=saved,
+                system=system_name(n),
+                arm=arm,
+                seed=seed,
+                budget=budget,
+            )
+            if (
+                existing.get("machine_id") != machine["machine_id"]
+                or existing.get("cpu_model") != machine["cpu_model"]
+            ):
+                raise RuntimeError(f"{saved} is a legacy or different-machine row")
             rows.append(existing)
             note(
                 progress,

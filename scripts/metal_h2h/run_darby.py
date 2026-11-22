@@ -30,7 +30,10 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
-from machine_provenance import machine_columns  # noqa: E402
+from machine_provenance import (  # noqa: E402
+    machine_columns,
+    validate_saved_row_identity,
+)
 from gmin_pin import read_built_revision  # noqa: E402
 
 PAPER_BUDGETS = {
@@ -319,7 +322,17 @@ def parse_gmin(text: str) -> dict[str, str]:
         fields[key] = value
     if "hit" not in fields or "best" not in fields:
         raise ValueError(f"no gmin row in {text!r}")
+    fields.setdefault("code", "gmin")
     return fields
+
+
+def _parse_saved_row(text: str, arm: str) -> dict[str, str]:
+    lines = [line for line in text.splitlines() if line.strip()]
+    if any(line.startswith("h2h_row ") for line in lines):
+        return parse_gmin(text)
+    if any(",anneal," in line for line in lines):
+        return parse_anneal(text)
+    return parse_gmin(text) if arm == "gmin" else parse_anneal(text)
 
 
 def as_result(system: str, arm: str, row: dict[str, str]) -> dict:
@@ -436,7 +449,15 @@ def main(argv: list[str]) -> int:
             )
         if saved.is_file() and saved.stat().st_size > 0:
             text = saved.read_text()
-            row = parse_gmin(text) if arm == "gmin" else parse_anneal(text)
+            row = _parse_saved_row(text, arm)
+            validate_saved_row_identity(
+                row,
+                path=saved,
+                system=system,
+                arm=arm,
+                seed=seed,
+                budget=budget,
+            )
         else:
             print(f"run {system} {arm} seed {seed}", flush=True)
             if arm == "anneal":
