@@ -108,22 +108,17 @@ jobs:
             echo "TSan image is empty" >&2
             exit 1
           fi
-          # TSan re-executes with ASLR disabled when the layout still
-          # clashes; the default seccomp profile blocks that personality
-          # call inside the container.
-          docker run --rm -i \
-            --security-opt seccomp=unconfined \
-            -e PKG -e TEST_PATH -e IMPORTS -e EXTRAS -e RUST_CRATE -e RUST_ARCHIVE -e TSAN_CMAKE_ARGS -e RUST_TOOLCHAIN \
-            -e APT_PACKAGES -e SETUP_SCRIPT -e BUILD_NUMPY -e BOOTSTRAP_CPYTHON \
-            -v "$GITHUB_WORKSPACE":/src -w /src \
-            "$IMAGE" \
-            bash -s << 'EOF'
+          tsan_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/py-tsan.XXXXXX")"
+          trap 'rm -rf "${tsan_dir}"' EXIT
+          cat > "${tsan_dir}/run.sh" << 'EOF'
+          #!/usr/bin/env bash
           set -euo pipefail
+          trap 'chmod -R a+rwX /tsan-host 2>/dev/null || true' EXIT
           if [ -n "${BOOTSTRAP_CPYTHON:-}" ]; then
             # cpython-tsan:3.13t lists an amd64 manifest the registry does
             # not serve. Build that interpreter here instead.
-            bash /src/ci/gha/apt-install.sh build-essential clang pkg-config libffi-dev libssl-dev \
-              zlib1g-dev libsqlite3-dev libbz2-dev liblzma-dev libreadline-dev ca-certificates curl xz-utils
+            bash /src/ci/gha/apt-install.sh build-essential clang git pkg-config libffi-dev libssl-dev \
+              libjpeg-dev zlib1g-dev libsqlite3-dev libbz2-dev liblzma-dev libreadline-dev ca-certificates curl xz-utils
             curl -fsSL -o /tmp/cpython.tar.gz \
               "https://github.com/python/cpython/archive/refs/tags/v${BOOTSTRAP_CPYTHON}.tar.gz"
             rm -rf "/tmp/cpython-${BOOTSTRAP_CPYTHON}"
@@ -202,8 +197,8 @@ jobs:
             "$PY" -m pip install hypothesis
           fi
           if [ "${BUILD_NUMPY:-false}" = "true" ]; then
-            bash /src/ci/gha/apt-install.sh pkg-config libopenblas-dev
-            "$PY" -m pip install 'numpy>=2' --no-binary=numpy
+            bash /src/ci/gha/apt-install.sh pkg-config
+            "$PY" -m pip install 'numpy>=2' --no-binary=numpy -Csetup-args=-Dallow-noblas=true
           elif ! "$PY" -c 'import numpy' >/dev/null 2>&1; then
             "$PY" -m pip install 'numpy>=1.24'
           fi
@@ -259,19 +254,69 @@ jobs:
           SUP=/tmp/suppressions_free_threading.txt
           curl -fsSL -o "${SUP}" \
             https://raw.githubusercontent.com/python/cpython/bf397e272c2bee639c3ba0208c221f7dd9447bb6/Tools/tsan/suppressions_free_threading.txt
+          if [ -n "${BOOTSTRAP_CPYTHON:-}" ] && [ -f "/tmp/cpython-${BOOTSTRAP_CPYTHON}/Tools/tsan/suppressions_free_threading.txt" ]; then
+            cat "/tmp/cpython-${BOOTSTRAP_CPYTHON}/Tools/tsan/suppressions_free_threading.txt" >> "${SUP}"
+          fi
+          if "$PY" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 13) else 1)'; then
+            # CPython 3.13's intern_common adjusts refcounts and interned state
+            # after PyDict_SetDefaultRef without LOCK_INTERNED (added in 3.14).
+            printf '\nrace:intern_common\n' >> "${SUP}"
+          fi
           if [ -f /work/tsan_suppressions/numpy.txt ]; then
             cat /work/tsan_suppressions/numpy.txt >> "${SUP}"
+          else
+            curl -fsSL \
+              https://raw.githubusercontent.com/numpy/numpy/30483388e8c07f1abd45b47c534801e9207d2643/tools/ci/tsan_suppressions.txt \
+              >> "${SUP}"
           fi
-          # Upstream suppressions, pinned to a commit rather than the 3.14 branch:
+          # Upstream suppressions, pinned to commits rather than moving branches:
           # https://github.com/python/cpython/blob/bf397e272c2bee639c3ba0208c221f7dd9447bb6/Tools/tsan/suppressions_free_threading.txt
-          # https://github.com/numpy/numpy/blob/main/tools/ci/tsan_suppressions.txt
+          # https://github.com/numpy/numpy/blob/30483388e8c07f1abd45b47c534801e9207d2643/tools/ci/tsan_suppressions.txt
+          export OPENBLAS_NUM_THREADS=1
           export TSAN_OPTIONS="halt_on_error=1 allocator_may_return_null=1 suppressions=${SUP}"
           "$PY" -m pytest -s "/src/${PKG}/${TEST_PATH}" \
+            --junitxml=/tsan-host/pytest-serial.xml \
             --timeout=180 \
             -o faulthandler_timeout=120
           "$PY" -m pytest -s "/src/${PKG}/${TEST_PATH}" \
+            --junitxml=/tsan-host/pytest-parallel.xml \
             --parallel-threads=4 \
             --iterations=5 \
             --timeout=180 \
             -o faulthandler_timeout=120
           EOF
+          chmod +x "${tsan_dir}/run.sh"
+          # TSan re-executes with ASLR disabled when the layout still
+          # clashes; the default seccomp profile blocks that personality
+          # call inside the container. Run the mounted script instead of
+          # bash -s so child builds inside the container cannot consume stdin.
+          docker run --rm \
+            --security-opt seccomp=unconfined \
+            -e PKG -e TEST_PATH -e IMPORTS -e EXTRAS -e RUST_CRATE -e RUST_ARCHIVE -e TSAN_CMAKE_ARGS -e RUST_TOOLCHAIN \
+            -e APT_PACKAGES -e SETUP_SCRIPT -e BUILD_NUMPY -e BOOTSTRAP_CPYTHON \
+            -v "$GITHUB_WORKSPACE":/src \
+            -v "${tsan_dir}":/tsan-host \
+            -w /src \
+            "$IMAGE" \
+            bash /tsan-host/run.sh
+          python3 - "${tsan_dir}/pytest-serial.xml" "${tsan_dir}/pytest-parallel.xml" << 'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          for report in sys.argv[1:]:
+              root = ET.parse(report).getroot()
+              suites = [root] if root.tag == "testsuite" else list(root.findall("testsuite"))
+              if not suites:
+                  raise SystemExit(f"{report}: no testsuite element found")
+              ran = sum(int(s.attrib.get("tests", "0")) for s in suites)
+              skipped = sum(int(s.attrib.get("skipped", "0")) for s in suites)
+              errors = sum(int(s.attrib.get("errors", "0")) for s in suites)
+              failures = sum(int(s.attrib.get("failures", "0")) for s in suites)
+              print(f"{report}: tests={ran} skipped={skipped} errors={errors} failures={failures}")
+              if ran <= 0 or ran <= skipped:
+                  raise SystemExit(
+                      f"{report}: pytest did not execute non-skipped tests (tests={ran}, skipped={skipped})"
+                  )
+              if errors or failures:
+                  raise SystemExit(f"{report}: pytest reported errors={errors} failures={failures}")
+          PY

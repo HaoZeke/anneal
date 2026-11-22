@@ -16,7 +16,13 @@ else:
     raise SystemExit("readcon pin is not a version or a git rev")
 PY
 )"
-VENV="${READCON_GOLDEN_VENV:-/tmp/readcon-golden}"
+tmp_root="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
+if [[ ! -d "$tmp_root" || ! -w "$tmp_root" ]]; then
+  echo "readcon golden: ${tmp_root} is not a writable directory" >&2
+  exit 1
+fi
+VENV=$(mktemp -d "${tmp_root}/readcon-golden.XXXXXX")
+trap 'rm -rf "$VENV"' EXIT
 uv venv "$VENV"
 uv pip install --python "$VENV/bin/python" \
   pytest numpy ase \

@@ -108,6 +108,61 @@ endif
 cc = meson.get_compiler('c')
 cppc = meson.get_compiler('cpp')
 
+# LeakSanitizer suppressions name ___kmp_allocate_align in the libomp this
+# clang linked. A pixi environment puts another llvm-openmp on
+# LD_LIBRARY_PATH, and that library is what the loader opens when the
+# binary only has a RUNPATH. DT_RPATH is searched first, so the suppression
+# is resolved against the libomp next to this compiler.
+if host_system == 'linux' and 'address' in get_option('b_sanitize')
+    _compiler_id = cppc.get_id()
+    if _compiler_id == 'clang' or _compiler_id == 'clang-cl'
+        _llvm_res = run_command(
+            cppc.cmd_array(),
+            '-print-resource-dir',
+            check: false,
+        )
+        if _llvm_res.returncode() != 0 or _llvm_res.stdout().strip() == ''
+            error(
+                'address sanitizer: ' + ' '.join(cppc.cmd_array()) + ' -print-resource-dir failed',
+            )
+        endif
+        _fs_omp = import('fs')
+        _omp_libdir = _fs_omp.parent(
+            _fs_omp.parent(_llvm_res.stdout().strip()),
+        )
+        if not (
+            _fs_omp.exists(_omp_libdir / 'libomp.so')
+            or _fs_omp.exists(_omp_libdir / 'libomp.so.5')
+        )
+            warning(
+                'address sanitizer: no libomp in ' + _omp_libdir + ' (the compiler resource directory)',
+            )
+        else
+            add_project_link_arguments(
+                '-Wl,--disable-new-dtags',
+                '-Wl,-rpath,' + _omp_libdir,
+                language: ['c', 'cpp'],
+            )
+        endif
+    endif
+endif
+
+# Non-atomic gcov counters go negative when OpenMP threads share an arc.
+# lcov 2 treats that as an error. Atomic updates are the counter fix.
+if get_option('b_coverage')
+    _atomic_profile_cpp = cppc.get_supported_arguments(
+        ['-fprofile-update=atomic'],
+    )
+    _atomic_profile_c = cc.get_supported_arguments(['-fprofile-update=atomic'])
+    if _atomic_profile_cpp.length() == 0 or _atomic_profile_c.length() == 0
+        error(
+            'b_coverage requires -fprofile-update=atomic; ' + cppc.get_id() + ' did not accept it',
+        )
+    endif
+    add_project_arguments(_atomic_profile_c, language: 'c')
+    add_project_arguments(_atomic_profile_cpp, language: 'cpp')
+endif
+
 # Dependencies
 # libm for Unix systems
 m_dep = cppc.find_library('m', required: false)

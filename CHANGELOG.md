@@ -1691,7 +1691,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pair sums of one geometry now agree bit for bit between a cold scan and a cached CSR list.
   In 3.4.0 those two orders could differ in the last bits, and repeated eOn NEB runs differed at 1e-12 eV.
 
-## [3.4.0](https://github.com/OmniPotentRPC/rgpot/tree/3.4.0) - 2026-09-30
+## [3.4.0](https://github.com/OmniPotentRPC/rgpot/tree/v3.4.0) - 2026-09-30
 
 ### Added
 
@@ -1721,7 +1721,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - calculatorsUseMpi follows MPI_Initialized. A refused calculator split reports the MPI_COMM_WORLD size and a negative group index.
 
 
-## [3.3.0](https://github.com/OmniPotentRPC/rgpot/tree/3.3.0) - 2026-09-28
+## [3.3.0](https://github.com/OmniPotentRPC/rgpot/tree/v3.3.0) - 2026-09-28
 
 ### Added
 
@@ -1747,7 +1747,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OIDC trusted publishing on tag v* and workflow_dispatch. ([#76](https://github.com/OmniPotentRPC/rgpot/issues/76))
 
 
-## [3.2.0](https://github.com/OmniPotentRPC/rgpot/tree/3.2.0) - 2026-09-13
+## [3.2.0](https://github.com/OmniPotentRPC/rgpot/tree/v3.2.0) - 2026-09-13
 
 ### Added
 
@@ -1769,21 +1769,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - UmaPot clears PT_GNU_STACK PF_X on AOTI wrapper.so before dlopen, so Elja-traced ``.pt2`` packages load on hosts that refuse an executable stack. ``scripts/export_uma_aoti.py`` applies the same rewrite at mint time.
 
 
-## [3.1.2](https://github.com/OmniPotentRPC/rgpot/tree/3.1.2) - 2026-09-04
+## [3.1.2](https://github.com/OmniPotentRPC/rgpot/tree/v3.1.2) - 2026-09-04
 
 ### Fixed
 
 - D3/D4 in the wheel are built from pinned meson wraps (static s-dftd3 / dftd4), not a conda prefix. The dftd4 wrap uses OpenBLAS as its LAPACK. ``pip install`` no longer needs vendored ``libblas`` from micromamba.
 
 
-## [3.1.1](https://github.com/OmniPotentRPC/rgpot/tree/3.1.1) - 2026-09-04
+## [3.1.1](https://github.com/OmniPotentRPC/rgpot/tree/v3.1.1) - 2026-09-04
 
 ### Added
 
 - The PyPI wheel compiles ExprPot, D3Pot, D4Pot, and XcKernel and vendors ``s-dftd3`` / ``dftd4``. ``import rgpot`` exposes those classes (``has_expr`` / ``has_dftd3`` / ``has_dftd4`` / ``has_xckernel``).
 
 
-## [3.1.0](https://github.com/OmniPotentRPC/rgpot/tree/3.1.0) - 2026-09-04
+## [3.1.0](https://github.com/OmniPotentRPC/rgpot/tree/v3.1.0) - 2026-09-04
 
 ### Added
 
@@ -1852,7 +1852,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--tda-rpa` regen pins PySCF to one OpenMP thread and replays committed MOs so live `gen_vind` / `gen_tdhf_operation` can meet exclusive 1e-17 against the sigma pins.
 
 
-## [3.0.2](https://github.com/OmniPotentRPC/rgpot/tree/3.0.2) - 2026-08-08
+## [3.0.2](https://github.com/OmniPotentRPC/rgpot/tree/v3.0.2) - 2026-08-08
 
 ### Fixed
 
@@ -1864,7 +1864,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus a RUNPATH into site-packages torch/metatensor/vesin.
 
 
-## [3.0.1](https://github.com/OmniPotentRPC/rgpot/tree/3.0.1) - 2026-07-26
+## [3.0.1](https://github.com/OmniPotentRPC/rgpot/tree/v3.0.1) - 2026-07-26
 
 ### Fixed
 
@@ -1877,7 +1877,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   other dependency.
 
 
-## [3.0.0](https://github.com/OmniPotentRPC/rgpot/tree/3.0.0) - 2026-07-26
+## [3.0.0](https://github.com/OmniPotentRPC/rgpot/tree/v3.0.0) - 2026-07-26
 
 ### Added
 
@@ -2020,7 +2020,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Marked as an upstream candidate alongside the other local vesin patches.
 
 
-## [2.5.3](https://github.com/OmniPotentRPC/rgpot/tree/2.5.3) - 2026-07-20
+## [2.5.3](https://github.com/OmniPotentRPC/rgpot/tree/v2.5.3) - 2026-07-20
 
 ### Fixed
 
@@ -2031,7 +2031,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   client frontend product without a live server.
 
 
-## [2.5.2](https://github.com/OmniPotentRPC/rgpot/tree/2.5.2) - 2026-07-18
+## [2.5.2](https://github.com/OmniPotentRPC/rgpot/tree/v2.5.2) - 2026-07-18
 
 ### Fixed
 
@@ -2040,7 +2040,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runtime libvesin is 0.6 and the engine was built for 0.5.
 
 
-## [2.5.0](https://github.com/OmniPotentRPC/rgpot/tree/2.5.0) - 2026-07-17
+## [2.5.0](https://github.com/OmniPotentRPC/rgpot/tree/v2.5.0) - 2026-07-17
 
 ### Added
 
@@ -2085,7 +2085,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SoftGilRelease in the metatomic C ABI only calls PyEval_SaveThread when PyGILState_Check is true, so nested GIL release from pyeonclient Job.run is safe.
 
 
-## [2.2.1](https://github.com/OmniPotentRPC/rgpot/tree/2.2.1) - 2026-07-06
+## [2.2.1](https://github.com/OmniPotentRPC/rgpot/tree/v2.2.1) - 2026-07-06
 
 ### Fixed
 
@@ -2093,7 +2093,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ``std::array`` box flattening in ``Potential`` (``C1083`` / ``C2676``).
 
 
-## [2.2.0](https://github.com/OmniPotentRPC/rgpot/tree/2.2.0) - 2026-07-05
+## [2.2.0](https://github.com/OmniPotentRPC/rgpot/tree/v2.2.0) - 2026-07-05
 
 ### Added
 
@@ -2113,7 +2113,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `publish = false` guard is gone.
 
 
-## [2.1.0](https://github.com/OmniPotentRPC/rgpot/tree/2.1.0) - 2026-07-03
+## [2.1.0](https://github.com/OmniPotentRPC/rgpot/tree/v2.1.0) - 2026-07-03
 
 ### Added
 
@@ -2128,7 +2128,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Release-prepare CI no longer runs `cargo publish --dry-run` for `rgpot-core` while it depends on git-only `dlpk` / `eindir-core` (not on crates.io). The job uses `cargo check -p rgpot-core --locked`, and `package.publish` is `false` until registry deps exist. ([#42](https://github.com/OmniPotentRPC/rgpot/issues/42))
 
 
-## [2.0.0](https://github.com/OmniPotentRPC/rgpot/tree/2.0.0) - 2026-06-26
+## [2.0.0](https://github.com/OmniPotentRPC/rgpot/commit/18861eb01915a02a477fd40e87a921c675ae6200) - 2026-06-26
 
 > Channel note: `v2.0.0` was prepared on `main` but never tagged or published;
 > the content below first ships in `v2.1.0`.
@@ -2153,7 +2153,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - NWChemPot is now a pure consumer of the split [`nwchemc`](https://github.com/OmniPotentRPC/nwchemc) engine: the in-tree NWChem embed (`nwchem_c_abi.c`, `nwchem_embed_c_api.f90`, `nwchem_embed_legacy.F`) and the `-Dwith_nwchem`/`-Dnwchem_root`/`-Dnwchem_target` build options are removed. The frontend always builds and `dlopen`s `libnwchemc.so`; the capnp schema is synced byte-for-byte to nwchemc's canonical superset so a flat `NWChemParams` round-trips with no field loss.
 
 
-## [1.2.0](https://github.com/OmniPotentRPC/rgpot/tree/1.2.0) - 2026-06-24
+## [1.2.0](https://github.com/OmniPotentRPC/rgpot/tree/v1.2.0) - 2026-06-24
 
 ### Added
 
@@ -2179,7 +2179,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MetatomicPot: target vesin 0.5+ ``VesinDevice`` struct (``{VesinDeviceKind, device_id}``, pass ``VesinDevice{VesinCPU, 0}``) and zero-initialized ``VesinOptions`` (``sorted`` / ``algorithm``).
 
 
-## [1.1.0](https://github.com/OmniPotentRPC/rgpot/tree/1.1.0) - 2026-03-29
+## [1.1.0](https://github.com/OmniPotentRPC/rgpot/tree/v1.1.0) - 2026-03-29
 
 ### Added
 
@@ -2189,14 +2189,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Shared unit conversion header (``rgpot/units.hpp``) with CODATA 2018 physical constants for Angstrom/Bohr, Hartree/eV, and Boltzmann conversions. ([#38](https://github.com/OmniPotentRPC/rgpot/issues/38))
 
 
-## [1.0.3](https://github.com/OmniPotentRPC/rgpot/tree/1.0.3) - 2026-03-01
+## [1.0.3](https://github.com/OmniPotentRPC/rgpot/tree/v1.0.3) - 2026-03-01
 
 ### Fixed
 
 - MSVC/clang-cl compatibility: use ``/W3`` instead of GCC/Clang warning flags and skip ``-lstdc++`` link arg on Windows ([#31](https://github.com/OmniPotentRPC/rgpot/issues/31))
 
 
-## [1.0.2](https://github.com/OmniPotentRPC/rgpot/tree/1.0.2) - 2026-03-01
+## [1.0.2](https://github.com/OmniPotentRPC/rgpot/tree/v1.0.2) - 2026-03-01
 
 ### Added
 
@@ -2207,7 +2207,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI dependency bumps and cleanup to prevent trailing whitespace in generated headers ([#29](https://github.com/OmniPotentRPC/rgpot/issues/29))
 
 
-## [1.0.0](https://github.com/OmniPotentRPC/rgpot/tree/1.0.0) - 2026-02-15
+## [1.0.0](https://github.com/OmniPotentRPC/rgpot/tree/v1.0.0) - 2026-02-15
 
 ### Added
 

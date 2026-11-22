@@ -18,6 +18,28 @@ if command -v g++ >/dev/null; then
   fi
 fi
 
+# The compiler's own libomp, not whichever libomp.so LD_LIBRARY_PATH finds.
+# DT_RPATH is searched before LD_LIBRARY_PATH, so the suppression names the
+# ___kmp_allocate_align in that library.
+resource=$("$cxx" -print-resource-dir)
+omp_libdir=$(cd "$(dirname "$(dirname "$resource")")" && pwd)
+if [[ ! -e "$omp_libdir/libomp.so" && ! -e "$omp_libdir/libomp.so.5" ]]; then
+  echo "libomp not found in $omp_libdir" >&2
+  exit 1
+fi
+if [[ -n "${ASAN_SYMBOLIZER_PATH:-}" ]]; then
+  if [[ ! -x "$ASAN_SYMBOLIZER_PATH" ]]; then
+    echo "ASAN_SYMBOLIZER_PATH is not executable: $ASAN_SYMBOLIZER_PATH" >&2
+    exit 1
+  fi
+elif command -v llvm-symbolizer >/dev/null 2>&1; then
+  ASAN_SYMBOLIZER_PATH=$(command -v llvm-symbolizer)
+else
+  echo "llvm-symbolizer was not found" >&2
+  exit 1
+fi
+export ASAN_SYMBOLIZER_PATH
+
 cat >"$work/leak.cc" <<'EOF'
 #include <stdlib.h>
 
@@ -44,8 +66,23 @@ int main() {
 EOF
 
 "$cxx" -std=c++20 -O0 -g -fsanitize=address -fopenmp \
-  "${runtime_args[@]}" -I"$root/CppCore/tests" "$work/leak.cc" -o "$work/leak"
+  "${runtime_args[@]}" \
+  -Wl,--disable-new-dtags \
+  -Wl,-rpath,"${omp_libdir}" \
+  -I"$root/CppCore/tests" "$work/leak.cc" -o "$work/leak"
 ldd "$work/leak" | grep -E 'libomp\.so' >/dev/null
+loaded=$(ldd "$work/leak" | awk '/libomp/{print $3; exit}')
+case "$loaded" in
+  "$omp_libdir"/*) ;;
+  *)
+    echo "loaded libomp $loaded, expected $omp_libdir" >&2
+    exit 1
+    ;;
+esac
+if ! readelf -d "$work/leak" | grep -q 'Library rpath:'; then
+  echo "binary has no DT_RPATH" >&2
+  exit 1
+fi
 
 set +e
 OMP_NUM_THREADS=4 ASAN_OPTIONS=detect_leaks=1 \
