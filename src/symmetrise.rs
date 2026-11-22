@@ -156,6 +156,7 @@ fn nearest_tail(
 }
 
 /// Scalar tail of a distance-only nearest-image scan. See [`nearest_tail`].
+#[cfg(all(target_arch = "x86_64", anneal_avx512))]
 #[inline(never)]
 fn distance_tail(
     xs: &[f64],
