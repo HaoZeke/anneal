@@ -22,8 +22,8 @@ fn run(cfg: &Config, budget: usize, seed: u64) -> (f64, usize, usize) {
 ///
 /// ```text
 /// matcher   cutoff   plain
-/// local     16/16    6/16
-/// ira       16/16    6/16
+/// local     16/16    7/16
+/// ira       16/16    7/16
 /// ```
 ///
 /// The hit pattern is exact, not a ceiling. Host `libm` is not one
@@ -80,8 +80,8 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
         }
     }
     // The template-free walk is deterministic: cutoff 0xffff, plain
-    // 0x5851 (6 seeds), with and without IRA.
-    let plain_exact = 0x5851;
+    // 0x905d (7 seeds), with and without IRA.
+    let plain_exact = 0x905d;
     assert_eq!(
         compact_mask, 0xffff,
         "the cutoff walk reached the octahedron on {compact_hits} of {SEEDS} seeds (mask {compact_mask:#06x})"

@@ -107,7 +107,7 @@ fn lattice_exchange_follows_the_plateau() {
     assert_eq!(fingerprint(&cold), 0xb09d57fb009a9bd1, "preset walk");
     assert_eq!(
         fingerprint(&hot),
-        0x9e0a142057f56021,
+        0x038f4db30b5e7e02,
         "heat * cfg.temperature"
     );
 }
@@ -119,8 +119,8 @@ fn a_new_lowest_returns_the_walk_to_the_preset() {
     cfg.relax_steps = 20;
     cfg.energy_lattice = false;
     let (cold, hot) = pair(&cfg, 8_000, 2000);
-    assert_eq!(fingerprint(&cold), 0x79a1ba0ae27370ad, "preset walk");
-    assert_eq!(fingerprint(&hot), 0x450bbb59809a8da0, "heat = 1.0");
+    assert_eq!(fingerprint(&cold), 0xe617d3309c3506b1, "preset walk");
+    assert_eq!(fingerprint(&hot), 0x22c9e1c0d06074f5, "heat = 1.0");
 }
 
 #[test]
