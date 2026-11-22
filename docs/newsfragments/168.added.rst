@@ -1,7 +1,8 @@
 ``Ledger::keep_evidence_until_shown()`` lets a caller that reads neither
 record keep a run's quench boundaries and accepted transitions only
 until a checkpoint has shown them, and none when the run has no
-checkpoint, so a long run's memory stays flat. The default still keeps
+checkpoint, so a long run's memory stays flat. Boundaries recorded on
+the ledger outside a run are kept, and the default still keeps
 everything. ``Ledger::keep_recent_evidence(cap)`` keeps the newest
 ``cap`` of each, and ``Ledger::keep_all_evidence()`` restores the
 default. ``Ledger::dropped_quench_boundaries`` and

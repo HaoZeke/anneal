@@ -199,8 +199,9 @@ enum AdoptionHistory {
 /// How much run evidence a ledger keeps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Keep {
-    /// Within a run, keep an entry until a checkpoint has shown it, and
-    /// none when no checkpoint will. Outside a run, keep every entry.
+    /// Within a run, keep an entry recorded in it until a checkpoint has
+    /// shown it, and none when no checkpoint will. Entries recorded
+    /// outside a run are kept.
     Shown,
     /// Keep the newest entries, at most this many.
     Recent(usize),
@@ -211,7 +212,8 @@ enum Keep {
 /// Run evidence in execution order, kept as [`Keep`] says.
 ///
 /// `run` is `None` outside a run, and inside one says whether a checkpoint
-/// will show the entries. Under [`Keep::Recent`] storage is trimmed back to
+/// will show the entries; the first `floor` entries were recorded before
+/// the run began. Under [`Keep::Recent`] storage is trimmed back to
 /// the cap once it reaches twice that, so the trim costs amortised constant
 /// time per entry. Every entry is counted, kept or not.
 #[derive(Debug, Clone)]
@@ -219,7 +221,15 @@ struct Retained<T> {
     items: Vec<T>,
     keep: Keep,
     run: Option<bool>,
+    floor: usize,
     recorded: usize,
+}
+
+/// The run state a [`Retained`] had before a run entered it.
+#[derive(Debug, Clone, Copy)]
+struct OuterRun {
+    run: Option<bool>,
+    floor: usize,
 }
 
 impl<T> Retained<T> {
@@ -228,6 +238,7 @@ impl<T> Retained<T> {
             items: Vec::new(),
             keep,
             run,
+            floor: 0,
             recorded: 0,
         }
     }
@@ -255,17 +266,29 @@ impl<T> Retained<T> {
         self.keep = keep;
         let drop = self.items.len() - self.as_slice().len();
         self.items.drain(..drop);
+        self.floor = self.floor.saturating_sub(drop);
     }
 
-    /// Enter or leave a run, returning the previous state.
-    fn enter(&mut self, run: Option<bool>) -> Option<bool> {
-        std::mem::replace(&mut self.run, run)
+    /// Enter a run, returning the state [`Retained::leave`] restores.
+    fn enter(&mut self, run: Option<bool>) -> OuterRun {
+        let outer = OuterRun {
+            run: self.run,
+            floor: self.floor,
+        };
+        self.run = run;
+        self.floor = self.items.len();
+        outer
     }
 
-    /// A checkpoint has shown every kept entry.
+    fn leave(&mut self, outer: OuterRun) {
+        self.run = outer.run;
+        self.floor = outer.floor.min(self.items.len());
+    }
+
+    /// A checkpoint has shown every kept entry of the current run.
     fn shown(&mut self) {
-        if self.keep == Keep::Shown {
-            self.items.clear();
+        if self.keep == Keep::Shown && self.run.is_some() {
+            self.items.truncate(self.floor);
         }
     }
 
@@ -963,7 +986,8 @@ impl Ledger {
     ///
     /// This is the opt-in for a caller that reads neither record after a
     /// run, and lets a long run hold its memory flat. Checkpoints see what
-    /// they would see under [`Ledger::keep_all_evidence`]. After a run
+    /// they would see under [`Ledger::keep_all_evidence`], and boundaries
+    /// recorded on the ledger outside a run are kept. After a run
     /// [`Ledger::quench_boundaries`] and [`Outcome::accepted_transitions`]
     /// hold only what its last checkpoint had yet to show, so a caller
     /// that reads them must not opt in. [`Ledger::dropped_quench_boundaries`]
@@ -1268,7 +1292,8 @@ impl Ledger {
     ///
     /// By default every boundary is kept. Under
     /// [`Ledger::keep_evidence_until_shown`] a run keeps only those its last
-    /// checkpoint had yet to show; under [`Ledger::keep_recent_evidence`] these are the newest.
+    /// checkpoint had yet to show, after the boundaries recorded before it;
+    /// under [`Ledger::keep_recent_evidence`] these are the newest.
     pub fn quench_boundaries(&self) -> &[QuenchBoundary] {
         self.quench_boundaries.as_slice()
     }
@@ -4436,13 +4461,11 @@ where
     R: Rng + ?Sized,
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
 {
-    let outer = ledger
-        .quench_boundaries
-        .enter(Some(checkpoint_interval.is_some()));
-    let outcome = run_watched(
+    let scope = InRun::enter(ledger, checkpoint_interval.is_some());
+    run_watched(
         cfg,
         start,
-        ledger,
+        &mut *scope.ledger,
         relax,
         grad,
         energy_grad,
@@ -4452,9 +4475,27 @@ where
         checkpoint_interval,
         checkpoint,
         rng,
-    );
-    ledger.quench_boundaries.enter(outer);
-    outcome
+    )
+}
+
+/// A ledger inside a run. Dropping it, on return or while unwinding,
+/// restores the run state its quench boundaries had before.
+struct InRun<'l> {
+    ledger: &'l mut Ledger,
+    outer: OuterRun,
+}
+
+impl<'l> InRun<'l> {
+    fn enter(ledger: &'l mut Ledger, checkpointed: bool) -> Self {
+        let outer = ledger.quench_boundaries.enter(Some(checkpointed));
+        Self { ledger, outer }
+    }
+}
+
+impl Drop for InRun<'_> {
+    fn drop(&mut self) {
+        self.ledger.quench_boundaries.leave(self.outer);
+    }
 }
 
 /// [`run_full`] with the ledger told whether a checkpoint will see this
