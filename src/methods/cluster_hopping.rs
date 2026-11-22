@@ -2997,7 +2997,9 @@ fn stall_arms(cfg: &Config) -> Vec<&'static str> {
         .then_some("restart"),
         (cfg.cap_twist
             && !cfg.move_library.is_rigid_body()
-            && cfg.move_library.declared_groups().is_none())
+            && cfg.move_library.declared_groups().is_none()
+            && cfg.active_region.is_none()
+            && cfg.frozen.is_none())
         .then_some("cap"),
     ]
     .into_iter()
@@ -11170,6 +11172,26 @@ mod tests {
         let rigid = atomic.with_rigid_bodies(crate::potentials::gmin_water_geometry());
         assert!(rigid.cap_twist);
         assert!(!stall_arms(&rigid).contains(&"cap"));
+    }
+
+    #[test]
+    fn a_bounded_chain_has_no_cap_turn_among_its_stall_arms() {
+        let mut atomic = Config::recommended(6);
+        atomic.cap_twist = true;
+        let mut active = atomic.clone();
+        active.active_region = Some((vec![0], 1));
+        assert!(!stall_arms(&active).contains(&"cap"));
+        atomic.frozen = Some(vec![false; atomic.n_points]);
+        assert!(!stall_arms(&atomic).contains(&"cap"));
+    }
+
+    #[test]
+    fn flexible_declared_groups_have_no_cap_turn_stall_arm() {
+        let mut flexible =
+            Config::recommended_molecular(vec![6; 6], vec![vec![0, 1, 2], vec![3, 4, 5]], 1.0);
+        flexible.cap_twist = true;
+        assert!(flexible.move_library.declared_groups().is_some());
+        assert!(!stall_arms(&flexible).contains(&"cap"));
     }
 
     #[test]

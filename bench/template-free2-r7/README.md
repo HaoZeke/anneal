@@ -95,12 +95,12 @@ charged calls and best energy (`flag-off-rows.csv`, `raw/flag-off/`).
 
 A development screen of the same design drew the cap's side and sense
 after the axis was found, not before, and had no tie rule. It hit lj75
-on 17 of the 21 seeds it finished (`raw/screen-leave/`; three runs were
+on 19 of the 23 seeds it finished (`raw/screen-leave/`; one run was
 cut off). The committed code draws pivot, side and sense up front and
 prefers the higher order on a tie within 1e-9. The committed code with
 a strict tie reproduces the campaign's CT row on all 24 lj75 seeds, so
 the tie rule never changed a trajectory here; the screen binary
-reproduces its own screen rows (`rng-order-rows.csv`). The gap from 17
+reproduces its own screen rows (`rng-order-rows.csv`). The gap from 19
 to 12 lj75 hits is between two random streams of one method.
 
 ### What did not work

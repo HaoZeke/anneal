@@ -70,6 +70,11 @@ fn generate(g: &str, x: ArrayView1<f64>, n: usize, rng: &mut StdRng) -> Option<A
     match g {
         "observed" => Some(lattice::candidate(lattice::Source::Observed, x, n, rng)),
         "twin" => Some(anneal_core::twin::propose(x, n, rng)),
+        "cap" => Some(anneal_core::cap_twist::propose(x, n, rng)),
+        "cap2" => {
+            let y = anneal_core::cap_twist::propose(x, n, rng);
+            Some(anneal_core::cap_twist::propose(y.view(), n, rng))
+        }
         "random_shell" => {
             let (scale, shells) = lattice::shells(x, 1.35);
             let mut counts: Vec<usize> = shells.iter().map(|s| s.len()).collect();
