@@ -159,10 +159,14 @@ ModelEvaluation leps(std::span<const double> x, std::span<const double> v,
 
 std::array<Curve, 3> curves(LepsSystem system) {
   if (system == LepsSystem::HH2) {
+    // Whitlock, Muckerman and Roberts, J. Chem. Phys. 60, 3658-3673
+    // (1974), doi:10.1063/1.1681586.
     const Curve hh{0.17446, 1.40083, 1.027, 0.132};
     return {hh, hh, hh};
   }
   if (system == LepsSystem::FH2) {
+    // Whitlock and Muckerman, J. Chem. Phys. 61, 4618-4629 (1974),
+    // doi:10.1063/1.1681780.
     const Curve fh{0.225138, 1.732879, 1.1742, 0.167};
     const Curve hh{0.17451914, 1.4019877, 1.0277, 0.106};
     return {fh, hh, fh};

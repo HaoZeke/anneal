@@ -6,7 +6,7 @@
 ! BSD-3-Clause, copyright the eOn Development Team; the scaffolding around
 ! them came from S. Goedecker.
 
-!> Lenosky tight-binding-fit silicon in gather form.
+!> Lenosky cubic-spline MEAM silicon, force-matched to LDA, in gather form.
 !!
 !! Atom `i` carries a pair sum and an embedding term evaluated at a local
 !! density built from two- and three-body pieces:

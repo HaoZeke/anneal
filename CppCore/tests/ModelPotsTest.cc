@@ -225,23 +225,50 @@ TEST_CASE("LEPS presets match a collinear dense analytic oracle") {
   }
 }
 
+TEST_CASE("LEPS gradients match central energy differences") {
+  constexpr double kStepAngstrom = 1e-6;
+  constexpr double kGradientToleranceEvPerAngstrom = 2e-7;
+  const std::array<double, 9> x{0.1, 0.2, -0.1, 1.8, -0.3,
+                                 0.2, 3.2, 0.4, -0.2};
+  const std::array<double, 9> zeroDirection{};
+  for (const auto system : {rgpot::LepsSystem::HH2, rgpot::LepsSystem::HCl2,
+                            rgpot::LepsSystem::FH2}) {
+    rgpot::LepsPot pot(system);
+    const auto gradient = pot.evaluateCoordinates(x, zeroDirection).gradient;
+    for (std::size_t i = 0; i < x.size(); ++i) {
+      auto plus = x;
+      auto minus = x;
+      plus[i] += kStepAngstrom;
+      minus[i] -= kStepAngstrom;
+      const double central =
+          (pot.evaluateCoordinates(plus, zeroDirection).energy -
+           pot.evaluateCoordinates(minus, zeroDirection).energy) /
+          (2.0 * kStepAngstrom);
+      REQUIRE(std::abs(gradient[i] - central) <=
+              kGradientToleranceEvPerAngstrom *
+                  (1.0 + std::abs(central)));
+    }
+  }
+}
+
 TEST_CASE("LEPS presets reproduce published collinear saddle positions and barriers") {
   struct SaddleCase {
     rgpot::LepsSystem system;
     double rAbBohr;
     double rBcBohr;
     double rEqBcBohr;
+    double deBcHartree;
     double expectedBarrierEv;
   };
   constexpr double kAsymptoticSeparationBohr = 200.0;
   constexpr double kPublishedBarrierToleranceEv = 0.002;
   constexpr std::array<SaddleCase, 3> cases{{
       {rgpot::LepsSystem::HH2, 1.761167421479969, 1.761167421479969,
-       1.40083, 0.434181570445937},
+       1.40083, 0.17446, 0.434181570445937},
       {rgpot::LepsSystem::HCl2, 4.249704311427898, 3.782504018033288,
-       3.7565865631435686, 0.065180935874998},
+       3.7565865631435686, 0.09238779594959665, 0.065180935874998},
       {rgpot::LepsSystem::FH2, 2.912665520731471, 1.439595744501899,
-       1.4019877, 0.046150511500620},
+       1.4019877, 0.17451914, 0.046150511500620},
   }};
   const std::array<double, 9> zeroDirection{};
   for (const auto &tc : cases) {
@@ -259,8 +286,10 @@ TEST_CASE("LEPS presets reproduce published collinear saddle positions and barri
     const auto atReactant = pot.evaluateCoordinates(reactant, zeroDirection);
     for (double g : atSaddle.gradient)
       close(g, 0.0, 1.0);
+    close(atReactant.energy,
+          -tc.deBcHartree * rgpot::units::HARTREE_TO_EV,
+          tc.deBcHartree * rgpot::units::HARTREE_TO_EV);
     const double barrier = atSaddle.energy - atReactant.energy;
-    close(barrier, tc.expectedBarrierEv, 1.0);
     REQUIRE(std::abs(barrier - tc.expectedBarrierEv) <=
             kPublishedBarrierToleranceEv);
   }
