@@ -504,10 +504,17 @@ def test_rpc_calculator_contract_when_potserv_exists(potserv_server) -> None:
     from rgpot.ase import RgpotRpcCalculator
 
     if potserv_server.potential == "CuH2":
-        atoms = bulk("Cu", "fcc", a=3.6, cubic=False)
+        atoms = bulk("Cu", "fcc", a=3.6, cubic=True).repeat(3)
         atoms.rattle(0.05, seed=1)
+        ref_pot = rgpot.CuH2Pot()
     else:
-        atoms = _argon_bulk(repeat=1)
+        atoms = lj_dimer()
+        ref_pot = rgpot.LJPot()
+
+    ref_atoms = atoms.copy()
+    ref_atoms.calc = RgpotCalculator(ref_pot)
+    ref_energy = ref_atoms.get_potential_energy()
+    ref_forces = ref_atoms.get_forces()
 
     calc = RgpotRpcCalculator(host=potserv_server.host, port=potserv_server.port)
     try:
@@ -517,7 +524,17 @@ def test_rpc_calculator_contract_when_potserv_exists(potserv_server) -> None:
         energy = atoms.get_potential_energy()
         forces = atoms.get_forces()
         assert isinstance(energy, float)
+        assert np.isfinite(energy)
         assert forces.shape == (len(atoms), 3)
+        assert np.all(np.isfinite(forces))
+        assert np.max(np.abs(forces)) > 0.0
+        np.testing.assert_allclose(forces.sum(axis=0), 0.0, atol=SUM_RULE_ATOL)
+        np.testing.assert_allclose(
+            energy, ref_energy, rtol=1e-12, atol=EXACT_MATCH_ATOL
+        )
+        np.testing.assert_allclose(
+            forces, ref_forces, rtol=1e-12, atol=EXACT_MATCH_ATOL
+        )
         assert calc.check_state(atoms) == []
 
         moved = atoms.copy()
