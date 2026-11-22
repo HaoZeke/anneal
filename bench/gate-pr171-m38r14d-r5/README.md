@@ -104,4 +104,48 @@ difference. It is not a gate clause.
 
 ## Verdict
 
-Filled only after the fresh session is complete.
+PASS. The fresh session contains 864 initial attempts
+and no replacements. Every attempt exited zero, was
+conclusive, and ran on core 0. All nine cells pass the
+three original clauses and the corrected like-counter
+rule.
+
+The statistics output uses W = W+ for Wilcoxon. For
+each cell, the code draws six paired bootstrap ratios:
+charged B/A, charged A2/A, calls B/A, wall B/A,
+outside B/A, and outside A2/A.
+
+| cell / driver | hits A/A2/B | charged B/A (band) | outside B/A | verdict |
+| --- | ---: | ---: | ---: | --- |
+| lj75 / gmin proof | 7/7/7 | 1.000000 (1.000000) | 1.014735 | PASS |
+| lj98 / gmin proof | 16/16/16 | 1.000000 (1.000000) | 0.998008 | PASS |
+| m55r14 / morse | 18/18/18 | 1.000000 (1.000000) | 1.042822 | PASS |
+| m80r14 / morse | 15/15/15 | 1.000000 (1.000000) | 1.030170 | PASS |
+| m30r14 / morse | 17/17/17 | 1.000000 (1.000000) | 1.035224 | PASS |
+| m38r6 / morse | 24/24/24 | 1.000000 (1.000000) | 1.006777 | PASS |
+| m38r14 / morse | 11/11/24 | 0.106436 (1.000000) | 0.950888 | PASS |
+| m38r14 / seed | 24/24/24 | 0.849222 (1.000000) | 0.996084 | PASS |
+| lj75 / seed | 24/24/24 | 1.000000 (1.000000) | 1.028189 | PASS |
+
+Every like-counter mismatch rate is zero, so every
+cell passes the zero A/A2 rate band. The target-cell B
+path counter is 24 and is non-zero.
+
+The report-only search mismatch counts are two for
+m55r14 morse, 19 for m38r14 morse, nine for m38r14
+seed, and three for lj75 seed. All other cells have
+zero. Printed-best scoring differs from seen.lowest
+on five m38r14 seed rows and all 24 lj75 seed rows.
+
+For the separate base issue, seen.lowest gives the
+LJ75 seed driver 24/24 hits in 2,345 through 143,083
+calls. Printed out.best gives 0/24. The proof driver
+gets 7/24 with its four-million-call cap.
+
+For m80r14 seed 2006, all four arms hit with calls and
+charged both equal to 3,802,858. This confirms the
+reported claim.
+
+Peak RssAnon is 286,019,584 bytes and is the gated
+memory value. Peak ru_maxrss and VmHWM are both
+291,057,664 bytes and are report-only.
