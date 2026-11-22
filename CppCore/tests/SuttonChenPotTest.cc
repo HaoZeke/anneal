@@ -729,12 +729,20 @@ TEST_CASE("pair-term limit keeps threaded row walks when three-phase is skipped"
   auto [low_energy, low_forces, low_teams] = run_eval("4", low_limit);
   REQUIRE(std::memcmp(&low_energy, &ref_low_energy, sizeof(double)) == 0);
   REQUIRE(same_bits(low_forces, ref_low_forces));
+#if defined(_OPENMP)
   REQUIRE(low_teams > 0);
+#else
+  REQUIRE(low_teams == 0);
+#endif
 
   auto [mid_energy, mid_forces, mid_teams] = run_eval("4", mid_limit);
   REQUIRE(std::memcmp(&mid_energy, &ref_mid_energy, sizeof(double)) == 0);
   REQUIRE(same_bits(mid_forces, ref_mid_forces));
+#if defined(_OPENMP)
   REQUIRE(mid_teams > 0);
+#else
+  REQUIRE(mid_teams == 0);
+#endif
 
   // A limit of 0 skips the three-phase workspace and runs the two-pass row
   // walk with zero kept pair terms.
@@ -743,7 +751,11 @@ TEST_CASE("pair-term limit keeps threaded row walks when three-phase is skipped"
   auto [zero_energy, zero_forces, zero_teams] = run_eval("4", 0);
   REQUIRE(std::memcmp(&zero_energy, &ref_zero_energy, sizeof(double)) == 0);
   REQUIRE(same_bits(zero_forces, ref_zero_forces));
+#if defined(_OPENMP)
   REQUIRE(zero_teams > 0);
+#else
+  REQUIRE(zero_teams == 0);
+#endif
 
   // When the limit is below est_half_pairs, the three-phase workspace is
   // skipped before buildStoredHalfIndex, leaving the thread-local workspace
@@ -776,16 +788,26 @@ TEST_CASE("pair-term limit keeps threaded row walks when three-phase is skipped"
                           {atom_e.data(), atom_v.data()});
     REQUIRE_FALSE(accepted.listReused());
     const auto snap_built = rgpot::detail::suttonChenWorkspaceSnapshot();
+#if defined(_OPENMP)
     CHECK(snap_built.index_builds == 1);
     CHECK(snap_built.total_up == total_up);
     CHECK(snap_built.index_capacity_bytes > 0);
+#else
+    CHECK(snap_built.index_builds == 0);
+    CHECK(snap_built.total_up == 0);
+    CHECK(snap_built.index_capacity_bytes == 0);
+#endif
     CHECK(snap_built.scratch_capacity_bytes == 0);
 
     accepted.forcePerAtom({n, pos.data(), nullptr, box}, &out,
                           {atom_e.data(), atom_v.data()});
     REQUIRE(accepted.listReused());
     const auto snap_reused = rgpot::detail::suttonChenWorkspaceSnapshot();
+#if defined(_OPENMP)
     CHECK(snap_reused.index_builds == 1);
+#else
+    CHECK(snap_reused.index_builds == 0);
+#endif
     CHECK(snap_reused.scratch_capacity_bytes == 0);
 
     rgpot::detail::releaseSuttonChenWorkspace();
@@ -1395,6 +1417,8 @@ TEST_CASE("Sutton-Chen matches one-thread bits at 1, 2, 4 and 8 threads across V
           } else {
             CHECK(rgpot::teamsOpened() == before_reuse);
           }
+#else
+          CHECK(rgpot::teamsOpened() == before_reuse);
 #endif
 
           pot.forceImpl({n, past_skin.data(), nullptr, box}, &probe);
