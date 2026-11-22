@@ -37,6 +37,9 @@ struct RgpotEnginePot {
   int evaluated;
   unsigned long long model_state;
   RgpotEngineCallbacks callbacks;
+#ifdef FIXTURE_CACHE
+  int cache_attached;
+#endif
   char error[128];
 };
 
@@ -85,6 +88,28 @@ RgpotEnginePot *rgpot_engine_create(const void *config, size_t config_len,
   memcpy(&pot->k, config, sizeof(double));
   return pot;
 }
+
+#ifdef FIXTURE_CACHE
+int rgpot_engine_set_cache(RgpotEnginePot *pot, const char *path) {
+  if (path && strcmp(path, "cache/geometry results") != 0) {
+    snprintf(pot->error, sizeof pot->error, "unexpected cache path");
+    return RGPOT_ENGINE_ERR_INVALID;
+  }
+  pot->cache_attached = path != NULL;
+  return RGPOT_ENGINE_OK;
+}
+
+int rgpot_engine_cache_counts(RgpotEnginePot *pot, uint64_t *computed,
+                              uint64_t *served) {
+  if (!pot->cache_attached) {
+    snprintf(pot->error, sizeof pot->error, "cache detached");
+    return RGPOT_ENGINE_ERR_UNSUPPORTED;
+  }
+  *computed = (uint64_t)UINT32_MAX + 1;
+  *served = 7;
+  return RGPOT_ENGINE_OK;
+}
+#endif
 
 void rgpot_engine_destroy(RgpotEnginePot *pot) {
   destroyed += 1;

@@ -2355,3 +2355,48 @@ fn a_fatal_engine_code_wins_over_a_recoverable_oracle_failure() {
     );
     assert_poisoned_without_an_extra_force(&mut session, &path, &error);
 }
+
+#[test]
+fn result_cache_queries_preserve_native_status_and_counter_width() {
+    use rgpot_core::engine::EngineCacheCounts;
+
+    let mut engine = load(&build("harmonic_cache", &["FIXTURE_CACHE"]));
+    assert_eq!(
+        engine.cache_counts().unwrap_err(),
+        EngineError::Unsupported {
+            operation: "rgpot_engine_cache_counts",
+            message: "cache detached".into()
+        }
+    );
+    engine
+        .set_cache(Some(Path::new("cache/geometry results")))
+        .unwrap();
+    assert_eq!(
+        engine.cache_counts().unwrap(),
+        EngineCacheCounts {
+            computed: 1_u64 << 32,
+            served: 7,
+        }
+    );
+    engine.set_cache(None).unwrap();
+    assert!(matches!(
+        engine.cache_counts(),
+        Err(EngineError::Unsupported { .. })
+    ));
+
+    let mut older = load(&build("harmonic_no_cache", &["FIXTURE_ABI_MINOR=5"]));
+    assert!(matches!(
+        older.set_cache(None),
+        Err(EngineError::Unsupported {
+            operation: "rgpot_engine_set_cache",
+            ..
+        })
+    ));
+    assert!(matches!(
+        older.cache_counts(),
+        Err(EngineError::Unsupported {
+            operation: "rgpot_engine_cache_counts",
+            ..
+        })
+    ));
+}
