@@ -583,15 +583,19 @@ if not get_option('with_rpc_client_only')
             else
                 _so_export_archive = rgpot_rust_target[0].full_path()
             endif
+            # scripts/ lives at the repository root. This file is in
+            # CppCore, so a bare scripts/ path would miss both files.
             _so_export_args = [
-                files('scripts/check_rgpot_exports.py'),
+                meson.project_source_root() / 'scripts' / 'check_rgpot_exports.py',
                 rgpot.full_path(),
                 _so_export_archive,
-                files('scripts/abi_core_baseline.txt'),
+                meson.project_source_root() / 'scripts' / 'abi_core_baseline.txt',
             ]
             if _so_export_whole
                 _so_export_args += ['--whole-archive']
-                _so_export_args += files('scripts/abi_baseline_fast.txt')
+                _so_export_args += [
+                    meson.project_source_root() / 'scripts' / 'abi_baseline_fast.txt',
+                ]
             endif
             test(
                 'rgpot_so_exports',
