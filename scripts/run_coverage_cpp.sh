@@ -40,7 +40,7 @@ meson test -C "$BUILD" --print-errorlogs \
 LCOV_MAJOR=$(lcov --version | sed -n 's/.*LCOV version \([0-9][0-9]*\)\..*/\1/p')
 LCOV_ARGS=()
 if [[ "${LCOV_MAJOR:-0}" -ge 2 ]]; then
-  LCOV_ARGS+=(--rc branch_coverage=1 --ignore-errors inconsistent,mismatch,negative)
+  LCOV_ARGS+=(--rc branch_coverage=1 --ignore-errors "inconsistent,mismatch,negative")
 else
   LCOV_ARGS+=(--rc lcov_branch_coverage=1)
 fi
