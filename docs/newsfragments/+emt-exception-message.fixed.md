@@ -1,0 +1,1 @@
+The Asap `Exception` class in `EMT` now stores its message in a `std::string` member and returns `const std::string &` from `Exception::GetMessage`, avoiding `thread_local` message clobbering across concurrent `GetMessage` calls and double deletion on copy assignment.

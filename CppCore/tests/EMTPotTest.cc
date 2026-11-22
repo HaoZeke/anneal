@@ -9,12 +9,15 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include <catch2/catch_all.hpp>
 
-#include "rgpot/ForceStructs.hpp"
+#include "rgpot/EMT/Asap/Exception.h"
 #include "rgpot/EMT/EMTPot.hpp"
+#include "rgpot/ForceStructs.hpp"
 #include "rgpot/Slices.hpp"
 
 #include "rgpot/EMT/Asap/Atoms.h"
@@ -373,4 +376,36 @@ TEST_CASE("EMT OpenMP force path is bit-identical across threads", "[emt][thread
 #endif
     CHECK(countBitDiffs(runEval(pot, large_rebuild, large.z, large.box), ref_large_rebuild) == 0);
   }
+}
+
+TEST_CASE("EMT Exception owns its message across concurrent views and copies",
+          "[emt]") {
+  Exception first("first: ");
+  first << 108;
+  Exception second("second: ");
+  second << 256;
+
+  const auto &first_msg = first.GetMessage();
+  const auto &second_msg = second.GetMessage();
+  CHECK(std::string_view(first_msg) == "first: 108");
+  CHECK(std::string_view(second_msg) == "second: 256");
+
+  Exception copied(first);
+  copied << " copied";
+  CHECK(std::string_view(first.GetMessage()) == "first: 108");
+  CHECK(std::string_view(copied.GetMessage()) == "first: 108 copied");
+
+  Exception assigned("initial message exceeding small string buffer capacity");
+  assigned = second;
+  assigned << " assigned";
+  CHECK(std::string_view(second.GetMessage()) == "second: 256");
+  CHECK(std::string_view(assigned.GetMessage()) == "second: 256 assigned");
+  CHECK(std::string_view(first_msg) == "first: 108");
+
+  Exception moved(std::move(copied));
+  CHECK(std::string_view(moved.GetMessage()) == "first: 108 copied");
+
+  Exception move_assigned("other");
+  move_assigned = std::move(assigned);
+  CHECK(std::string_view(move_assigned.GetMessage()) == "second: 256 assigned");
 }

@@ -893,8 +893,7 @@ int main(int argc, char **argv) {
     std::cout << "}\n";
     return 0;
   } catch (const Exception &err) {
-    const char *raw = err.GetMessage();
-    const std::string message = raw == nullptr ? std::string() : std::string(raw);
+    const std::string &message = err.GetMessage();
     if (message.empty()) {
       std::cerr << "error: unknown EMT exception\n";
     } else {
