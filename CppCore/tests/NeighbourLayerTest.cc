@@ -3,12 +3,14 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <map>
+#include <new>
 #include <random>
 #include <stdexcept>
 #include <utility>
@@ -28,6 +30,25 @@
 #if defined(_OPENMP)
 #include <omp.h>
 #endif
+
+namespace {
+
+std::atomic<std::uint64_t> allocationCalls{0};
+
+} // namespace
+
+void *operator new(std::size_t size) {
+  void *memory = std::malloc(size == 0 ? 1 : size);
+  if (memory == nullptr) {
+    throw std::bad_alloc();
+  }
+  allocationCalls.fetch_add(1, std::memory_order_relaxed);
+  return memory;
+}
+
+void operator delete(void *memory) noexcept { std::free(memory); }
+
+void operator delete(void *memory, std::size_t) noexcept { std::free(memory); }
 
 namespace {
 
@@ -432,6 +453,37 @@ std::vector<double> shearedFcc(int n, double a, const double cell[9]) {
 }
 
 } // namespace
+
+TEST_CASE("repeated orthorhombic stream updates do not add staging allocations",
+          "[nlist][stream][allocation]") {
+  setThreads("1");
+  auto first = fccBlock(10, 5, 4, 2.0);
+  auto second = first;
+  second[0] += 0.1;
+  const std::size_t n = first.size() / 3;
+  const double cell[9] = {20.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 8.0};
+  rgpot::nlist::Spec spec;
+  spec.cutoff = 3.0;
+  spec.skin = 0.0;
+  spec.periodic = {true, true, true};
+  spec.mode = rgpot::nlist::Mode::Stream;
+
+  rgpot::nlist::Neighbours cells;
+  cells.update(first.data(), n, cell, spec);
+  cells.update(second.data(), n, cell, spec);
+  for (int step = 0; step < 8; ++step) {
+    const auto before = allocationCalls.load(std::memory_order_relaxed);
+    const auto &positions = step % 2 == 0 ? first : second;
+    cells.update(positions.data(), n, cell, spec);
+    const auto growth =
+        allocationCalls.load(std::memory_order_relaxed) - before;
+    // The Cartesian builder retains all neighbour-list arrays. Its only
+    // allocations are the existing temporary fill array and Linux memory
+    // availability probe; a transactional Neighbours object adds four.
+    REQUIRE(growth <= 2);
+  }
+  setThreads("");
+}
 
 TEST_CASE("a short cutoff stream matches the direct pair sum",
           "[nlist][stream][direct]") {

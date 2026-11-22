@@ -10,7 +10,6 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
-#include <type_traits>
 #include <utility>
 
 #if defined(_WIN32)
@@ -50,6 +49,37 @@ int axisCount(double length, double edge) {
 bool orthorhombicCell(const double box[9]) {
   return box[1] == 0.0 && box[2] == 0.0 && box[3] == 0.0 && box[5] == 0.0 &&
          box[6] == 0.0 && box[7] == 0.0;
+}
+
+struct FractionalPlan {
+  int axes[3]{1, 1, 1};
+  double origin[3]{0.0, 0.0, 0.0};
+  double span[3]{1.0, 1.0, 1.0};
+  bool prefix_ready = false;
+  bool cache_previous = false;
+};
+
+struct FractionalWorkspace {
+  std::vector<double> coordinate;
+  std::vector<std::int32_t> cell;
+  std::vector<std::int32_t> start;
+  double box[9]{};
+  double inverse[9]{};
+  double dual_norm[3]{};
+  bool inverse_valid = false;
+  double cached_box[9]{};
+  bool cached_periodic[3]{};
+  double cached_edge = 0.0;
+  int cached_axes[3]{1, 1, 1};
+  bool cells_valid = false;
+};
+
+FractionalWorkspace &fractionalWorkspace() {
+  // update() and its cell build are one synchronous operation. A workspace
+  // per calling thread is therefore reusable without changing Neighbours'
+  // public object layout or sharing mutable data between update threads.
+  thread_local FractionalWorkspace workspace;
+  return workspace;
 }
 
 } // namespace
@@ -148,189 +178,31 @@ void Neighbours::buildCells(const double *xyz, std::size_t n) {
            static_cast<double>(nz_) * static_cast<double>(sizeof(std::int32_t));
   };
   set_axes();
-  double frac_inv[9]{};
-  double frac_origin[3] = {0.0, 0.0, 0.0};
-  double frac_span[3] = {1.0, 1.0, 1.0};
-  double ref[3] = {0.0, 0.0, 0.0};
-  bool use_frac = false;
-  // Project one atom relative to the coordinate-minimum origin `ref`, wrapping
-  // along periodic lattice vectors when any periodic projection exceeds 2
-  // cells. Subtracting `ref` cancels any rigid translation (exact under
-  // Sterbenz's lemma for large offsets), keeping the error bounded by the
-  // cell-local extent instead of |r|. The rounding error per endpoint is at
-  // most 2*eps*(|px*B_{0,k}| + |py*B_{1,k}| + |pz*B_{2,k}|) from subtraction
-  // ((eps/2)|p|) and the 3-term dot product (3*(eps/2)*sum|t_c|), plus
-  // 2*eps*(sum|m_j*H_{j,c}|*|B_{c,k}| + pre + post) per wrapping pass when
-  // unwrapped atoms sit multiple periodic cells from `ref`.
-  auto project_frac = [&](std::size_t a, double s[3], double err[3]) {
-    double px = xyz[3 * a] - ref[0];
-    double py = xyz[3 * a + 1] - ref[1];
-    double pz = xyz[3 * a + 2] - ref[2];
-    auto eval_s = [&](double rx, double ry, double rz, double out_s[3],
-                      double out_abs[3]) {
-      for (int k = 0; k < 3; ++k) {
-        const double t0 = rx * frac_inv[k];
-        const double t1 = ry * frac_inv[3 + k];
-        const double t2 = rz * frac_inv[6 + k];
-        const double sk = (t0 + t1) + t2;
-        const double absk = std::abs(t0) + std::abs(t1) + std::abs(t2);
-        if (!std::isfinite(sk) || !std::isfinite(absk)) {
-          throw std::invalid_argument("fractional coordinate must be finite");
-        }
-        out_s[k] = sk;
-        out_abs[k] = absk;
-      }
-    };
-    double abs_sum[3]{};
-    eval_s(px, py, pz, s, abs_sum);
-    constexpr double eps = std::numeric_limits<double>::epsilon();
-    for (int k = 0; k < 3; ++k) {
-      err[k] = 2.0 * eps * abs_sum[k];
-    }
-    for (int pass = 0; pass < 3; ++pass) {
-      bool need_wrap = false;
-      double m[3] = {0.0, 0.0, 0.0};
-      for (int k = 0; k < 3; ++k) {
-        if (periodic_[k] && std::abs(s[k]) > 2.0) {
-          m[k] = std::round(s[k]);
-          if (m[k] != 0.0) {
-            need_wrap = true;
-          }
-        }
-      }
-      if (!need_wrap) {
-        break;
-      }
-      const double mx = m[0] * box_[0] + m[1] * box_[3] + m[2] * box_[6];
-      const double my = m[0] * box_[1] + m[1] * box_[4] + m[2] * box_[7];
-      const double mz = m[0] * box_[2] + m[1] * box_[5] + m[2] * box_[8];
-      if (!std::isfinite(mx) || !std::isfinite(my) || !std::isfinite(mz)) {
-        break;
-      }
-      const double mx_abs = std::abs(m[0] * box_[0]) +
-                            std::abs(m[1] * box_[3]) + std::abs(m[2] * box_[6]);
-      const double my_abs = std::abs(m[0] * box_[1]) +
-                            std::abs(m[1] * box_[4]) + std::abs(m[2] * box_[7]);
-      const double mz_abs = std::abs(m[0] * box_[2]) +
-                            std::abs(m[1] * box_[5]) + std::abs(m[2] * box_[8]);
-      px -= mx;
-      py -= my;
-      pz -= mz;
-      double wrap_abs[3]{};
-      eval_s(px, py, pz, s, wrap_abs);
-      for (int k = 0; k < 3; ++k) {
-        const double h_abs = mx_abs * std::abs(frac_inv[k]) +
-                             my_abs * std::abs(frac_inv[3 + k]) +
-                             mz_abs * std::abs(frac_inv[6 + k]);
-        if (!std::isfinite(h_abs)) {
-          throw std::invalid_argument("fractional coordinate must be finite");
-        }
-        err[k] += 2.0 * eps * (abs_sum[k] + h_abs + wrap_abs[k]);
-        abs_sum[k] = wrap_abs[k];
-      }
-    }
-  };
-  // Cartesian bins only when every off-diagonal entry is zero. A periodic
-  // or partially periodic sheared cell uses the minimum image inverse; open
-  // axes are not wrapped and get bins spanning the actual fractional
-  // coordinate range. Failure in the inverse raises and does not fall
-  // through to the Cartesian bins.
-  if ((periodic_[0] || periodic_[1] || periodic_[2]) &&
-      !orthorhombicCell(box_)) {
-    double dual_norm[3]{};
-    invertCell(box_, frac_inv, dual_norm);
-    double max_err[3] = {0.0, 0.0, 0.0};
-    double lo[3] = {0.0, 0.0, 0.0};
-    double hi[3] = {0.0, 0.0, 0.0};
-    if (n > 0) {
-      ref[0] = xyz[0];
-      ref[1] = xyz[1];
-      ref[2] = xyz[2];
-      for (std::size_t a = 0; a < n; ++a) {
-        for (int c = 0; c < 3; ++c) {
-          const double v = xyz[3 * a + static_cast<std::size_t>(c)];
-          if (!std::isfinite(v)) {
-            throw std::invalid_argument("fractional coordinate must be finite");
-          }
-          if (v < ref[c]) {
-            ref[c] = v;
-          }
-        }
-      }
-      for (std::size_t a = 0; a < n; ++a) {
-        double s[3]{};
-        double err[3]{};
-        project_frac(a, s, err);
-        for (int k = 0; k < 3; ++k) {
-          if (err[k] > max_err[k]) {
-            max_err[k] = err[k];
-          }
-          if (!periodic_[k]) {
-            if (a == 0 || s[k] < lo[k]) {
-              lo[k] = s[k];
-            }
-            if (a == 0 || s[k] > hi[k]) {
-              hi[k] = s[k];
-            }
-          }
-        }
-      }
-    }
-    constexpr double eps = std::numeric_limits<double>::epsilon();
-    constexpr double kFracEdgeSlack = 1.0 + 16.0 * eps;
-    int naxis[3] = {1, 1, 1};
-    for (int k = 0; k < 3; ++k) {
-      // Cushion covers 16-ulp bin-edge rounding, both endpoints' projection
-      // errors (2 * max_err[k]), and up to 2*eps from [0, 1) wrap / span ratio.
-      const double base_edge =
-          (edge * dual_norm[k]) * kFracEdgeSlack + 2.0 * max_err[k] + 2.0 * eps;
-      if (periodic_[k]) {
-        frac_origin[k] = 0.0;
-        frac_span[k] = 1.0;
-        naxis[k] = axisCount(1.0, base_edge);
-      } else if (n > 0) {
-        const double extent = hi[k] - lo[k];
-        if (!std::isfinite(extent)) {
-          throw std::invalid_argument("fractional coordinate must be finite");
-        }
-        const double frac_edge = base_edge + 2.0 * eps * extent;
-        frac_origin[k] = lo[k];
-        frac_span[k] = extent > frac_edge ? extent : frac_edge;
-        naxis[k] = axisCount(frac_span[k], frac_edge);
-      }
-    }
-    nx_ = naxis[0];
-    ny_ = naxis[1];
-    nz_ = naxis[2];
-    use_frac = true;
-  }
   const auto avail = availableBytes();
   if (avail > 0 && bytes_of() > static_cast<double>(avail)) {
-    if (!use_frac) {
-      bool any_open = false;
-      for (int k = 0; k < 3; ++k) {
-        if (periodic_[k] || n == 0) {
-          continue;
-        }
-        any_open = true;
-        double lo = xyz[static_cast<std::size_t>(k)];
-        double hi = lo;
-        for (std::size_t a = 1; a < n; ++a) {
-          const double v = xyz[3 * a + static_cast<std::size_t>(k)];
-          if (v < lo) {
-            lo = v;
-          }
-          if (v > hi) {
-            hi = v;
-          }
-        }
-        const double extent = hi - lo;
-        span[k] = extent > edge ? extent : edge;
-        origin[k] = lo;
+    bool any_open = false;
+    for (int k = 0; k < 3; ++k) {
+      if (periodic_[k] || n == 0) {
+        continue;
       }
-      if (any_open) {
-        set_axes();
+      any_open = true;
+      double lo = xyz[static_cast<std::size_t>(k)];
+      double hi = lo;
+      for (std::size_t a = 1; a < n; ++a) {
+        const double v = xyz[3 * a + static_cast<std::size_t>(k)];
+        if (v < lo) {
+          lo = v;
+        }
+        if (v > hi) {
+          hi = v;
+        }
       }
+      const double extent = hi - lo;
+      span[k] = extent > edge ? extent : edge;
+      origin[k] = lo;
+    }
+    if (any_open) {
+      set_axes();
     }
     if (bytes_of() > static_cast<double>(avail)) {
       nx_ = ny_ = nz_ = 1;
@@ -359,44 +231,9 @@ void Neighbours::buildCells(const double *xyz, std::size_t n) {
     return i;
   };
   for (std::size_t a = 0; a < n; ++a) {
-    int ix = 0;
-    int iy = 0;
-    int iz = 0;
-    if (use_frac) {
-      auto bin_frac = [&](double s, int k, int naxis) {
-        if (!std::isfinite(s)) {
-          throw std::invalid_argument("fractional coordinate must be finite");
-        }
-        if (naxis <= 1) {
-          return 0;
-        }
-        if (!periodic_[k]) {
-          return bin(s - frac_origin[k], frac_span[k], naxis);
-        }
-        double wrapped = s - std::floor(s);
-        if (!(wrapped >= 0.0) || wrapped >= 1.0) {
-          wrapped = 0.0;
-        }
-        auto i = static_cast<int>(wrapped * static_cast<double>(naxis));
-        if (i >= naxis) {
-          i = naxis - 1;
-        }
-        if (i < 0) {
-          i = 0;
-        }
-        return i;
-      };
-      double s[3]{};
-      double err[3]{};
-      project_frac(a, s, err);
-      ix = bin_frac(s[0], 0, nx_);
-      iy = bin_frac(s[1], 1, ny_);
-      iz = bin_frac(s[2], 2, nz_);
-    } else {
-      ix = bin(xyz[3 * a] - origin[0], span[0], nx_);
-      iy = bin(xyz[3 * a + 1] - origin[1], span[1], ny_);
-      iz = bin(xyz[3 * a + 2] - origin[2], span[2], nz_);
-    }
+    const int ix = bin(xyz[3 * a] - origin[0], span[0], nx_);
+    const int iy = bin(xyz[3 * a + 1] - origin[1], span[1], ny_);
+    const int iz = bin(xyz[3 * a + 2] - origin[2], span[2], nz_);
     const int id = (ix * ny_ + iy) * nz_ + iz;
     cell_of_[a] = id;
     ++cell_start_[static_cast<std::size_t>(id) + 1];
@@ -410,6 +247,369 @@ void Neighbours::buildCells(const double *xyz, std::size_t n) {
     const auto c = static_cast<std::size_t>(cell_of_[a]);
     cell_atoms_[static_cast<std::size_t>(fill[c]++)] =
         static_cast<std::int32_t>(a);
+  }
+}
+
+void prepareFractionalCells(const double *xyz, std::size_t n,
+                            const double *box9, const bool periodic[3],
+                            double edge, FractionalPlan &plan) {
+  auto &workspace = fractionalWorkspace();
+  if (workspace.cells_valid && workspace.cached_edge == edge &&
+      workspace.coordinate.size() == 3 * n &&
+      std::memcmp(workspace.cached_box, box9, sizeof(workspace.cached_box)) ==
+          0 &&
+      std::memcmp(workspace.cached_periodic, periodic,
+                  sizeof(workspace.cached_periodic)) == 0 &&
+      std::memcmp(workspace.coordinate.data(), xyz, 3 * n * sizeof(double)) ==
+          0) {
+    plan.axes[0] = workspace.cached_axes[0];
+    plan.axes[1] = workspace.cached_axes[1];
+    plan.axes[2] = workspace.cached_axes[2];
+    plan.prefix_ready = true;
+    plan.cache_previous = true;
+    return;
+  }
+  workspace.cells_valid = false;
+  double inv[9]{};
+  double dual_norm[3]{};
+  if (workspace.inverse_valid &&
+      std::memcmp(workspace.box, box9, sizeof(workspace.box)) == 0) {
+    std::memcpy(inv, workspace.inverse, sizeof(inv));
+    std::memcpy(dual_norm, workspace.dual_norm, sizeof(dual_norm));
+  } else {
+    invertCell(box9, inv, dual_norm);
+    std::memcpy(workspace.box, box9, sizeof(workspace.box));
+    std::memcpy(workspace.inverse, inv, sizeof(workspace.inverse));
+    std::memcpy(workspace.dual_norm, dual_norm, sizeof(workspace.dual_norm));
+    workspace.inverse_valid = true;
+  }
+  auto &fractional = workspace.coordinate;
+
+  double max_err[3] = {0.0, 0.0, 0.0};
+  double lo[3] = {0.0, 0.0, 0.0};
+  double hi[3] = {0.0, 0.0, 0.0};
+  const double ref[3] = {
+      n > 0 ? xyz[0] : 0.0,
+      n > 0 ? xyz[1] : 0.0,
+      n > 0 ? xyz[2] : 0.0,
+  };
+  constexpr double eps = std::numeric_limits<double>::epsilon();
+  constexpr double kFracEdgeSlack = 1.0 + 16.0 * eps;
+  const bool lower_triangular = inv[1] == 0.0 && inv[2] == 0.0 && inv[5] == 0.0;
+  auto project = [&](double px, double py, double pz, double s[3]) {
+    if (lower_triangular) {
+      s[0] = (px * inv[0] + py * inv[3]) + pz * inv[6];
+      s[1] = py * inv[4] + pz * inv[7];
+      s[2] = pz * inv[8];
+      return;
+    }
+    s[0] = (px * inv[0] + py * inv[3]) + pz * inv[6];
+    s[1] = (px * inv[1] + py * inv[4]) + pz * inv[7];
+    s[2] = (px * inv[2] + py * inv[5]) + pz * inv[8];
+  };
+
+  if (periodic[0] && periodic[1] && periodic[2]) {
+    const double coordinate_bound[3] = {
+        2.0 * (std::abs(box9[0]) + std::abs(box9[3]) + std::abs(box9[6])),
+        2.0 * (std::abs(box9[1]) + std::abs(box9[4]) + std::abs(box9[7])),
+        2.0 * (std::abs(box9[2]) + std::abs(box9[5]) + std::abs(box9[8])),
+    };
+    for (int k = 0; k < 3; ++k) {
+      const double error = 2.0 * eps *
+                           (coordinate_bound[0] * std::abs(inv[k]) +
+                            coordinate_bound[1] * std::abs(inv[3 + k]) +
+                            coordinate_bound[2] * std::abs(inv[6 + k]));
+      const double frac_edge =
+          (edge * dual_norm[k]) * kFracEdgeSlack + 2.0 * error + 2.0 * eps;
+      plan.axes[k] = axisCount(1.0, frac_edge);
+    }
+    auto grid_bytes = [&]() {
+      return static_cast<double>(plan.axes[0]) *
+             static_cast<double>(plan.axes[1]) *
+             static_cast<double>(plan.axes[2]) *
+             static_cast<double>(sizeof(std::int32_t));
+    };
+    const auto avail = availableBytes();
+    if (avail > 0 && grid_bytes() > static_cast<double>(avail)) {
+      plan.axes[0] = plan.axes[1] = plan.axes[2] = 1;
+    }
+    auto prepare_grid = [&]() {
+      const auto ncells = static_cast<std::size_t>(plan.axes[0]) *
+                          static_cast<std::size_t>(plan.axes[1]) *
+                          static_cast<std::size_t>(plan.axes[2]);
+      workspace.cell.resize(n);
+      workspace.start.assign(ncells + 1, 0);
+    };
+    prepare_grid();
+    bool within_bound = true;
+    for (std::size_t a = 0; a < n; ++a) {
+      const double px = xyz[3 * a] - ref[0];
+      const double py = xyz[3 * a + 1] - ref[1];
+      const double pz = xyz[3 * a + 2] - ref[2];
+      double s[3];
+      project(px, py, pz, s);
+      if (std::abs(px) > coordinate_bound[0] ||
+          std::abs(py) > coordinate_bound[1] ||
+          std::abs(pz) > coordinate_bound[2]) {
+        within_bound = false;
+      }
+      int axis[3]{};
+      for (int k = 0; k < 3; ++k) {
+        if (!std::isfinite(s[k])) {
+          throw std::invalid_argument("fractional coordinate must be finite");
+        }
+        const double wrapped = s[k] - std::floor(s[k]);
+        axis[k] = std::clamp(
+            static_cast<int>(wrapped * static_cast<double>(plan.axes[k])), 0,
+            plan.axes[k] - 1);
+      }
+      const int id =
+          (axis[0] * plan.axes[1] + axis[1]) * plan.axes[2] + axis[2];
+      workspace.cell[a] = id;
+      ++workspace.start[static_cast<std::size_t>(id) + 1];
+    }
+    if (!within_bound) {
+      const int provisional[3] = {
+          plan.axes[0],
+          plan.axes[1],
+          plan.axes[2],
+      };
+      double max_delta[3] = {0.0, 0.0, 0.0};
+      for (std::size_t a = 0; a < n; ++a) {
+        max_delta[0] = std::max(max_delta[0], std::abs(xyz[3 * a] - ref[0]));
+        max_delta[1] =
+            std::max(max_delta[1], std::abs(xyz[3 * a + 1] - ref[1]));
+        max_delta[2] =
+            std::max(max_delta[2], std::abs(xyz[3 * a + 2] - ref[2]));
+      }
+      for (int k = 0; k < 3; ++k) {
+        const double error = 2.0 * eps *
+                             (max_delta[0] * std::abs(inv[k]) +
+                              max_delta[1] * std::abs(inv[3 + k]) +
+                              max_delta[2] * std::abs(inv[6 + k]));
+        const double frac_edge =
+            (edge * dual_norm[k]) * kFracEdgeSlack + 2.0 * error + 2.0 * eps;
+        plan.axes[k] = axisCount(1.0, frac_edge);
+      }
+      if (avail > 0 && grid_bytes() > static_cast<double>(avail)) {
+        plan.axes[0] = plan.axes[1] = plan.axes[2] = 1;
+      }
+      const bool changed = plan.axes[0] != provisional[0] ||
+                           plan.axes[1] != provisional[1] ||
+                           plan.axes[2] != provisional[2];
+      if (!changed) {
+        return;
+      }
+      prepare_grid();
+      for (std::size_t a = 0; a < n; ++a) {
+        const double px = xyz[3 * a] - ref[0];
+        const double py = xyz[3 * a + 1] - ref[1];
+        const double pz = xyz[3 * a + 2] - ref[2];
+        double s[3];
+        project(px, py, pz, s);
+        int axis[3]{};
+        for (int k = 0; k < 3; ++k) {
+          const double wrapped = s[k] - std::floor(s[k]);
+          axis[k] = std::clamp(
+              static_cast<int>(wrapped * static_cast<double>(plan.axes[k])), 0,
+              plan.axes[k] - 1);
+        }
+        const int id =
+            (axis[0] * plan.axes[1] + axis[1]) * plan.axes[2] + axis[2];
+        workspace.cell[a] = id;
+        ++workspace.start[static_cast<std::size_t>(id) + 1];
+      }
+    }
+    return;
+  }
+
+  fractional.resize(3 * n);
+  double max_delta[3] = {0.0, 0.0, 0.0};
+  double max_fraction[3] = {0.0, 0.0, 0.0};
+  bool finite = true;
+
+  for (std::size_t a = 0; a < n; ++a) {
+    const double px = xyz[3 * a] - ref[0];
+    const double py = xyz[3 * a + 1] - ref[1];
+    const double pz = xyz[3 * a + 2] - ref[2];
+    double s[3];
+    project(px, py, pz, s);
+    max_delta[0] = std::max(max_delta[0], std::abs(px));
+    max_delta[1] = std::max(max_delta[1], std::abs(py));
+    max_delta[2] = std::max(max_delta[2], std::abs(pz));
+    for (int k = 0; k < 3; ++k) {
+      fractional[3 * a + static_cast<std::size_t>(k)] = s[k];
+      finite = finite && std::isfinite(s[k]);
+      max_fraction[k] = std::max(max_fraction[k], std::abs(s[k]));
+      if (a == 0 || s[k] < lo[k]) {
+        lo[k] = s[k];
+      }
+      if (a == 0 || s[k] > hi[k]) {
+        hi[k] = s[k];
+      }
+    }
+  }
+  if (!finite) {
+    throw std::invalid_argument("fractional coordinate must be finite");
+  }
+
+  const bool needs_wrapping = (periodic[0] && max_fraction[0] > 2.0) ||
+                              (periodic[1] && max_fraction[1] > 2.0) ||
+                              (periodic[2] && max_fraction[2] > 2.0);
+  if (needs_wrapping) {
+    lo[0] = lo[1] = lo[2] = 0.0;
+    hi[0] = hi[1] = hi[2] = 0.0;
+    for (std::size_t a = 0; a < n; ++a) {
+      double px = xyz[3 * a] - ref[0];
+      double py = xyz[3 * a + 1] - ref[1];
+      double pz = xyz[3 * a + 2] - ref[2];
+      double s[3] = {
+          fractional[3 * a],
+          fractional[3 * a + 1],
+          fractional[3 * a + 2],
+      };
+      double err[3] = {
+          2.0 * eps *
+              (std::abs(px * inv[0]) + std::abs(py * inv[3]) +
+               std::abs(pz * inv[6])),
+          2.0 * eps *
+              (std::abs(px * inv[1]) + std::abs(py * inv[4]) +
+               std::abs(pz * inv[7])),
+          2.0 * eps *
+              (std::abs(px * inv[2]) + std::abs(py * inv[5]) +
+               std::abs(pz * inv[8])),
+      };
+      for (int pass = 0; pass < 3; ++pass) {
+        double m[3] = {0.0, 0.0, 0.0};
+        bool wrap = false;
+        for (int k = 0; k < 3; ++k) {
+          if (periodic[k] && std::abs(s[k]) > 2.0) {
+            m[k] = std::round(s[k]);
+            wrap = wrap || m[k] != 0.0;
+          }
+        }
+        if (!wrap) {
+          break;
+        }
+        const double before_abs[3] = {
+            std::abs(px * inv[0]) + std::abs(py * inv[3]) +
+                std::abs(pz * inv[6]),
+            std::abs(px * inv[1]) + std::abs(py * inv[4]) +
+                std::abs(pz * inv[7]),
+            std::abs(px * inv[2]) + std::abs(py * inv[5]) +
+                std::abs(pz * inv[8]),
+        };
+        const double mx = m[0] * box9[0] + m[1] * box9[3] + m[2] * box9[6];
+        const double my = m[0] * box9[1] + m[1] * box9[4] + m[2] * box9[7];
+        const double mz = m[0] * box9[2] + m[1] * box9[5] + m[2] * box9[8];
+        if (!std::isfinite(mx) || !std::isfinite(my) || !std::isfinite(mz)) {
+          throw std::invalid_argument("fractional coordinate must be finite");
+        }
+        const double image_xyz[3] = {
+            std::abs(m[0] * box9[0]) + std::abs(m[1] * box9[3]) +
+                std::abs(m[2] * box9[6]),
+            std::abs(m[0] * box9[1]) + std::abs(m[1] * box9[4]) +
+                std::abs(m[2] * box9[7]),
+            std::abs(m[0] * box9[2]) + std::abs(m[1] * box9[5]) +
+                std::abs(m[2] * box9[8]),
+        };
+        px -= mx;
+        py -= my;
+        pz -= mz;
+        project(px, py, pz, s);
+        for (int k = 0; k < 3; ++k) {
+          const double after_abs = std::abs(px * inv[k]) +
+                                   std::abs(py * inv[3 + k]) +
+                                   std::abs(pz * inv[6 + k]);
+          const double image_abs = image_xyz[0] * std::abs(inv[k]) +
+                                   image_xyz[1] * std::abs(inv[3 + k]) +
+                                   image_xyz[2] * std::abs(inv[6 + k]);
+          if (!std::isfinite(s[k]) || !std::isfinite(image_abs) ||
+              !std::isfinite(after_abs)) {
+            throw std::invalid_argument("fractional coordinate must be finite");
+          }
+          err[k] += 2.0 * eps * (before_abs[k] + image_abs + after_abs);
+        }
+      }
+      for (int k = 0; k < 3; ++k) {
+        fractional[3 * a + static_cast<std::size_t>(k)] = s[k];
+        max_err[k] = std::max(max_err[k], err[k]);
+        if (!periodic[k]) {
+          if (a == 0 || s[k] < lo[k]) {
+            lo[k] = s[k];
+          }
+          if (a == 0 || s[k] > hi[k]) {
+            hi[k] = s[k];
+          }
+        }
+      }
+    }
+  }
+  for (int k = 0; k < 3; ++k) {
+    const double unwrapped_error =
+        2.0 * eps *
+        (max_delta[0] * std::abs(inv[k]) + max_delta[1] * std::abs(inv[3 + k]) +
+         max_delta[2] * std::abs(inv[6 + k]));
+    max_err[k] = std::max(max_err[k], unwrapped_error);
+  }
+
+  for (int k = 0; k < 3; ++k) {
+    const double base_edge =
+        (edge * dual_norm[k]) * kFracEdgeSlack + 2.0 * max_err[k] + 2.0 * eps;
+    if (periodic[k]) {
+      plan.axes[k] = axisCount(1.0, base_edge);
+      continue;
+    }
+    if (n > 0) {
+      const double extent = hi[k] - lo[k];
+      if (!std::isfinite(extent)) {
+        throw std::invalid_argument("fractional coordinate must be finite");
+      }
+      const double frac_edge = base_edge + 2.0 * eps * extent;
+      plan.origin[k] = lo[k];
+      plan.span[k] = extent > frac_edge ? extent : frac_edge;
+      plan.axes[k] = axisCount(plan.span[k], frac_edge);
+    }
+  }
+  const double bytes = static_cast<double>(plan.axes[0]) *
+                       static_cast<double>(plan.axes[1]) *
+                       static_cast<double>(plan.axes[2]) *
+                       static_cast<double>(sizeof(std::int32_t));
+  const auto avail = availableBytes();
+  if (avail > 0 && bytes > static_cast<double>(avail)) {
+    plan.axes[0] = plan.axes[1] = plan.axes[2] = 1;
+  }
+  const auto ncells = static_cast<std::size_t>(plan.axes[0]) *
+                      static_cast<std::size_t>(plan.axes[1]) *
+                      static_cast<std::size_t>(plan.axes[2]);
+  workspace.cell.resize(n);
+  workspace.start.assign(ncells + 1, 0);
+  auto bin = [](double x, double length, int naxis) {
+    if (!(length > 0.0) || naxis <= 1) {
+      return 0;
+    }
+    double t = x / length * static_cast<double>(naxis);
+    if (!(t >= 0.0)) {
+      t = 0.0;
+    }
+    return std::clamp(static_cast<int>(t), 0, naxis - 1);
+  };
+  for (std::size_t a = 0; a < n; ++a) {
+    int axis[3]{};
+    for (int k = 0; k < 3; ++k) {
+      const double s = fractional[3 * a + static_cast<std::size_t>(k)];
+      if (periodic[k]) {
+        const double wrapped = s - std::floor(s);
+        axis[k] = std::clamp(
+            static_cast<int>(wrapped * static_cast<double>(plan.axes[k])), 0,
+            plan.axes[k] - 1);
+      } else {
+        axis[k] = bin(s - plan.origin[k], plan.span[k], plan.axes[k]);
+      }
+    }
+    const int id = (axis[0] * plan.axes[1] + axis[1]) * plan.axes[2] + axis[2];
+    workspace.cell[a] = id;
+    ++workspace.start[static_cast<std::size_t>(id) + 1];
   }
 }
 
@@ -578,114 +778,231 @@ void Neighbours::buildStored(const double *xyz, std::size_t n,
 
 void Neighbours::update(const double *xyz, std::size_t n, const double *box9,
                         const Spec &spec) {
-  static_assert(std::is_nothrow_move_assignable_v<Neighbours>);
+  const bool sheared = !orthorhombicCell(box9);
+  if (!sheared) {
+    // Keep the established orthorhombic path in place: it neither constructs
+    // a transactional neighbour object nor touches fractional workspace.
+    xyz_ = xyz;
+    bool wrapped = false;
+    if (reusable(xyz, n, box9, spec, wrapped)) {
+      reused_ = true;
+      if (wrapped) {
+        buildCells(xyz, n);
+      }
+      return;
+    }
+    reused_ = false;
+    n_ = n;
+    std::memcpy(box_, box9, sizeof(box_));
+    len_[0] = box9[0];
+    len_[1] = box9[4];
+    len_[2] = box9[8];
+    for (int k = 0; k < 3; ++k) {
+      periodic_[k] =
+          spec.periodic[static_cast<std::size_t>(k)] && len_[k] > 0.0;
+      inv_[k] = periodic_[k] ? 1.0 / len_[k] : 0.0;
+    }
+    image_ = spec.image;
+    use_general_ = image_ == Image::General;
+    if (use_general_) {
+      general_ = MinimumImage(box9, spec.periodic);
+    }
+    search_ = spec.cutoff + spec.skin;
+    if (!(search_ > 0.0)) {
+      search_ = 0.0;
+    }
+    key_.cutoff = spec.cutoff;
+    key_.skin = spec.skin;
+    key_.image = spec.image;
+    key_.mode = spec.mode;
+    key_.periodic = spec.periodic;
+    off_.clear();
+    nbr_.clear();
+    streaming_ = true;
+    if (n < 2 || !(search_ > 0.0)) {
+      streaming_ = false;
+      mode_ = Mode::Stored;
+      off_.assign(n + 1, 0);
+      nbr_.clear();
+      built_ = true;
+      ref_.assign(xyz, xyz + 3 * n);
+      return;
+    }
+    if (std::isinf(search_)) {
+      mode_ = Mode::Stream;
+      built_ = true;
+      return;
+    }
+    buildCells(xyz, n);
+    if (spec.mode == Mode::Stream) {
+      streaming_ = true;
+      mode_ = Mode::Stream;
+      built_ = true;
+      ref_.assign(xyz, xyz + 3 * n);
+      return;
+    }
+    const std::uint64_t bound = candidateBound();
+    const auto avail = availableBytes();
+    const auto index_bytes = static_cast<std::uint64_t>(sizeof(std::int32_t));
+    const bool bounded = bound <= static_cast<std::uint64_t>(0x7fffffff);
+    const bool over_budget = avail > 0 && bound > avail / index_bytes;
+    const bool fits = bounded && !over_budget;
+    const bool want_store =
+        spec.mode == Mode::Stored ? fits : spec.mode == Mode::Auto && fits;
+    if (want_store) {
+      buildStored(xyz, n, bound);
+      streaming_ = false;
+      mode_ = Mode::Stored;
+      ++builds_;
+    } else {
+      streaming_ = true;
+      mode_ = Mode::Stream;
+    }
+    built_ = true;
+    ref_.assign(xyz, xyz + 3 * n);
+    return;
+  }
+
+  auto build_fractional_cells = [&](const FractionalPlan &plan) {
+    auto &workspace = fractionalWorkspace();
+    const int previous_axes[3] = {nx_, ny_, nz_};
+    nx_ = plan.axes[0];
+    ny_ = plan.axes[1];
+    nz_ = plan.axes[2];
+    const auto ncells = static_cast<std::size_t>(nx_) *
+                        static_cast<std::size_t>(ny_) *
+                        static_cast<std::size_t>(nz_);
+    cell_of_.swap(workspace.cell);
+    cell_start_.swap(workspace.start);
+    if (!plan.prefix_ready) {
+      for (std::size_t c = 0; c < ncells; ++c) {
+        cell_start_[c + 1] += cell_start_[c];
+      }
+    }
+    cell_atoms_.assign(n, 0);
+    std::vector<std::int32_t> fill(cell_start_.begin(), cell_start_.end() - 1);
+    for (std::size_t a = 0; a < n; ++a) {
+      const auto c = static_cast<std::size_t>(cell_of_[a]);
+      cell_atoms_[static_cast<std::size_t>(fill[c]++)] =
+          static_cast<std::int32_t>(a);
+    }
+    if (plan.cache_previous && ref_.size() == 3 * n) {
+      workspace.coordinate.assign(ref_.begin(), ref_.end());
+      std::memcpy(workspace.cached_box, box_, sizeof(workspace.cached_box));
+      std::memcpy(workspace.cached_periodic, periodic_,
+                  sizeof(workspace.cached_periodic));
+      workspace.cached_edge = search_;
+      workspace.cached_axes[0] = previous_axes[0];
+      workspace.cached_axes[1] = previous_axes[1];
+      workspace.cached_axes[2] = previous_axes[2];
+      workspace.cells_valid = true;
+    } else {
+      workspace.cells_valid = false;
+    }
+  };
+
   bool wrapped = false;
   if (reusable(xyz, n, box9, spec, wrapped)) {
-    // The tile walk takes the image of a pair from the bins of its atoms,
-    // and a wrapped atom left its bin on the far side of the cell.
     if (wrapped) {
-      Neighbours staged;
-      staged.n_ = n_;
-      std::memcpy(staged.box_, box_, sizeof(box_));
-      std::memcpy(staged.len_, len_, sizeof(len_));
-      std::memcpy(staged.periodic_, periodic_, sizeof(periodic_));
-      staged.search_ = search_;
-      staged.buildCells(xyz, n);
-      nx_ = staged.nx_;
-      ny_ = staged.ny_;
-      nz_ = staged.nz_;
-      cell_of_.swap(staged.cell_of_);
-      cell_start_.swap(staged.cell_start_);
-      cell_atoms_.swap(staged.cell_atoms_);
+      FractionalPlan plan;
+      prepareFractionalCells(xyz, n, box_, periodic_, search_, plan);
+      build_fractional_cells(plan);
     }
     xyz_ = xyz;
     reused_ = true;
     return;
   }
-  Neighbours staged;
-  staged.xyz_ = xyz;
-  staged.builds_ = builds_;
-  staged.reused_ = false;
-  staged.n_ = n;
-  std::memcpy(staged.box_, box9, sizeof(staged.box_));
-  staged.len_[0] = box9[0];
-  staged.len_[1] = box9[4];
-  staged.len_[2] = box9[8];
+
+  bool next_periodic[3]{};
   for (int k = 0; k < 3; ++k) {
-    staged.periodic_[k] =
-        spec.periodic[static_cast<std::size_t>(k)] && staged.len_[k] > 0.0;
-    staged.inv_[k] = staged.periodic_[k] ? 1.0 / staged.len_[k] : 0.0;
+    next_periodic[k] =
+        spec.periodic[static_cast<std::size_t>(k)] && box9[4 * k] > 0.0;
   }
-  const bool sheared = !orthorhombicCell(box9);
-  staged.image_ = spec.image;
-  staged.use_general_ = staged.image_ == Image::General || sheared;
-  if (staged.use_general_) {
-    staged.general_ = MinimumImage(box9, spec.periodic);
+  const bool same_general = built_ && use_general_ &&
+                            key_.periodic == spec.periodic &&
+                            std::memcmp(box_, box9, sizeof(box_)) == 0;
+  MinimumImage next_general =
+      same_general ? general_ : MinimumImage(box9, spec.periodic);
+  double next_search = spec.cutoff + spec.skin;
+  if (!(next_search > 0.0)) {
+    next_search = 0.0;
   }
-  staged.search_ = spec.cutoff + spec.skin;
-  if (!(staged.search_ > 0.0)) {
-    staged.search_ = 0.0;
+  const bool fractional_path =
+      next_periodic[0] || next_periodic[1] || next_periodic[2];
+  FractionalPlan plan;
+  plan.cache_previous = same_general;
+  if (fractional_path && n >= 2 && next_search > 0.0 &&
+      !std::isinf(next_search)) {
+    prepareFractionalCells(xyz, n, box9, next_periodic, next_search, plan);
   }
-  staged.key_.cutoff = spec.cutoff;
-  staged.key_.skin = spec.skin;
-  staged.key_.image = spec.image;
-  staged.key_.mode = spec.mode;
-  staged.key_.periodic = spec.periodic;
-  staged.streaming_ = true;
-  if (n < 2 || !(staged.search_ > 0.0)) {
-    staged.streaming_ = false;
-    staged.mode_ = Mode::Stored;
-    staged.off_.assign(n + 1, 0);
-    staged.built_ = true;
-    staged.ref_.assign(xyz, xyz + 3 * n);
-    *this = std::move(staged);
+
+  xyz_ = xyz;
+  reused_ = false;
+  n_ = n;
+  std::memcpy(box_, box9, sizeof(box_));
+  len_[0] = box9[0];
+  len_[1] = box9[4];
+  len_[2] = box9[8];
+  for (int k = 0; k < 3; ++k) {
+    periodic_[k] = next_periodic[k];
+    inv_[k] = periodic_[k] ? 1.0 / len_[k] : 0.0;
+  }
+  image_ = spec.image;
+  use_general_ = true;
+  general_ = std::move(next_general);
+  search_ = next_search;
+  key_.cutoff = spec.cutoff;
+  key_.skin = spec.skin;
+  key_.image = spec.image;
+  key_.mode = spec.mode;
+  key_.periodic = spec.periodic;
+  off_.clear();
+  nbr_.clear();
+  streaming_ = true;
+  if (n < 2 || !(search_ > 0.0)) {
+    streaming_ = false;
+    mode_ = Mode::Stored;
+    off_.assign(n + 1, 0);
+    built_ = true;
+    ref_.assign(xyz, xyz + 3 * n);
     return;
   }
-  // Every pair is a candidate, so the walks need neither bins nor a list,
-  // and the coordinates never invalidate the update. allPairs() reads
-  // this state back.
-  if (std::isinf(staged.search_)) {
-    staged.mode_ = Mode::Stream;
-    staged.built_ = true;
-    *this = std::move(staged);
+  if (std::isinf(search_)) {
+    mode_ = Mode::Stream;
+    built_ = true;
     return;
   }
-  staged.buildCells(xyz, n);
-  // A stream never stores the pairs, so the candidate count is unused.
-  // Counting it walks every stencil the search is about to walk.
+  if (fractional_path) {
+    build_fractional_cells(plan);
+  } else {
+    buildCells(xyz, n);
+  }
   if (spec.mode == Mode::Stream) {
-    staged.streaming_ = true;
-    staged.mode_ = Mode::Stream;
-    staged.built_ = true;
-    staged.ref_.assign(xyz, xyz + 3 * n);
-    *this = std::move(staged);
+    streaming_ = true;
+    mode_ = Mode::Stream;
+    built_ = true;
+    ref_.assign(xyz, xyz + 3 * n);
     return;
   }
-  const std::uint64_t bound = staged.candidateBound();
+  const std::uint64_t bound = candidateBound();
   const auto avail = availableBytes();
   const auto index_bytes = static_cast<std::uint64_t>(sizeof(std::int32_t));
-  // Zero means the probe failed, not that the machine has no free memory.
-  // An explicit stored list, and Auto, still keep the index in that case.
   const bool bounded = bound <= static_cast<std::uint64_t>(0x7fffffff);
   const bool over_budget = avail > 0 && bound > avail / index_bytes;
   const bool fits = bounded && !over_budget;
-  // The stream keeps the bins. The list adds one index per candidate.
-  // Auto stores only when that index fits. A short cutoff that does not
-  // fit the 27-slot stencil keeps the smaller mask in the same cache.
   const bool want_store =
       spec.mode == Mode::Stored ? fits : spec.mode == Mode::Auto && fits;
   if (want_store) {
-    staged.buildStored(xyz, n, bound);
-    staged.streaming_ = false;
-    staged.mode_ = Mode::Stored;
-    ++staged.builds_;
+    buildStored(xyz, n, bound);
+    streaming_ = false;
+    mode_ = Mode::Stored;
+    ++builds_;
   } else {
-    staged.streaming_ = true;
-    staged.mode_ = Mode::Stream;
+    streaming_ = true;
+    mode_ = Mode::Stream;
   }
-  staged.built_ = true;
-  staged.ref_.assign(xyz, xyz + 3 * n);
-  *this = std::move(staged);
+  built_ = true;
+  ref_.assign(xyz, xyz + 3 * n);
 }
 
 } // namespace rgpot::nlist
