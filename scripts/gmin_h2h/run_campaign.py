@@ -35,7 +35,12 @@ from machine_provenance import (  # noqa: E402
     machine_provenance,
     validate_saved_row_identity,
 )
-from gmin_pin import TARBALL_SHA256, read_svnrev  # noqa: E402
+from gmin_pin import (  # noqa: E402
+    TARBALL_SHA256,
+    read_built_revision,
+    read_svnrev,
+    require_build_key,
+)
 
 PAPER_BUDGETS = {
     98: 4_000_000,
@@ -359,6 +364,7 @@ def run_gmin(
         or int(row["energy_only_entries"]) < 0
     ):
         raise RuntimeError(f"invalid gmin counters: {row}")
+    verified_key = require_build_key(build_key, "gmin build_key")
     return write_per_seed_row(
         saved,
         row,
@@ -367,7 +373,7 @@ def run_gmin(
         code_revision=revision,
         gmin_url=url,
         gmin_revision=revision,
-        gmin_build_key=build_key,
+        gmin_build_key=verified_key,
     )
 
 
@@ -545,6 +551,11 @@ def load_saved(
     gmin_build_key: str = "",
 ) -> dict | None:
     n = system_size(system)
+    expected_build_key = (
+        require_build_key(gmin_build_key, "expected gmin_build_key")
+        if arm == "gmin"
+        else ""
+    )
     if not path.is_file():
         return None
     text = path.read_text().strip()
@@ -585,7 +596,8 @@ def load_saved(
             return None
         if gmin_url and row.get("gmin_url") != gmin_url:
             return None
-        if gmin_build_key and row.get("gmin_build_key") != gmin_build_key:
+        stored_build_key = (row.get("gmin_build_key") or "").strip()
+        if stored_build_key != expected_build_key:
             return None
     return as_result(n, arm, row)
 
@@ -631,6 +643,24 @@ def self_test() -> None:
     print("ok")
 
 
+def load_source_metadata(source_path: Path, svnrev_path: Path) -> tuple[str, str, str]:
+    url, recorded_revision = load_source(source_path)
+    revision = read_built_revision(svnrev_path, source_path)
+    source = dict(
+        line.split("=", 1)
+        for line in source_path.read_text().splitlines()
+        if "=" in line
+    )
+    if recorded_revision != revision or source.get("svnrev") != revision:
+        raise ValueError(f"{source_path} does not describe {svnrev_path}")
+    if source.get("tarball_sha256") != TARBALL_SHA256:
+        raise ValueError(f"{source_path} has another GMIN tarball")
+    build_key = require_build_key(
+        source.get("build_key", ""), f"{source_path} build_key"
+    )
+    return url, revision, build_key
+
+
 def main(argv: list[str]) -> int:
     if len(argv) == 2 and argv[1] == "--self-test":
         self_test()
@@ -663,18 +693,10 @@ def main(argv: list[str]) -> int:
             raise SystemExit(
                 f"LJ{n} budget {args.budget} is not the paper budget {PAPER_BUDGETS[n]}"
             )
-    url, recorded_revision = load_source(args.source)
-    revision = read_svnrev(args.svnrev)
-    source = dict(
-        line.split("=", 1)
-        for line in args.source.read_text().splitlines()
-        if "=" in line
-    )
-    if recorded_revision != revision or source.get("svnrev") != revision:
-        raise SystemExit(f"{args.source} does not describe {args.svnrev}")
-    if source.get("tarball_sha256") != TARBALL_SHA256:
-        raise SystemExit(f"{args.source} has another GMIN tarball")
-    build_key = source.get("build_key", "").strip()
+    try:
+        url, revision, build_key = load_source_metadata(args.source, args.svnrev)
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
     head = args.head_file.read_text().strip()
     machine_id, cpu_model = machine_provenance()
     progress = args.runs.parent / "progress.txt"

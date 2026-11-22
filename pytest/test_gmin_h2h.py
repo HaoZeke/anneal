@@ -566,3 +566,99 @@ def test_summarise_preserves_row_revisions_and_refuses_relabeling():
             "a" * 64,
             "Example CPU",
         )
+
+
+def test_load_saved_and_source_refuse_missing_expected_gmin_build_key(tmp_path):
+    _anneal_path, gmin_path = _write_valid_saved_pair(tmp_path)
+    for bad_key in ("", "not-a-sha256", "b" * 63):
+        with pytest.raises(ValueError, match="expected gmin_build_key"):
+            campaign.load_saved(
+                gmin_path,
+                "lj98",
+                2000,
+                "gmin",
+                4_000_000,
+                "a" * 64,
+                "Example CPU",
+                code_revision="svn-100",
+                gmin_url="https://example.invalid/gmin.tar.gz",
+                gmin_build_key=bad_key,
+            )
+
+    svnrev = tmp_path / "SVNREV"
+    svnrev.write_text(f"{campaign.read_svnrev.__globals__['REVISION']}\n")
+    source_no_key = tmp_path / "gmin-source-missing-key.txt"
+    source_no_key.write_text(
+        f"url=https://example.invalid/gmin.tar.gz\n"
+        f"revision={svnrev.read_text().strip()}\n"
+        f"svnrev={svnrev.read_text().strip()}\n"
+        f"tarball_sha256={campaign.TARBALL_SHA256}\n"
+    )
+    with pytest.raises(ValueError, match="build_key"):
+        campaign.load_source_metadata(source_no_key, svnrev)
+
+    source_with_key = tmp_path / "gmin-source-valid.txt"
+    source_with_key.write_text(
+        source_no_key.read_text() + f"build_key={'b' * 64}\n"
+    )
+    url, rev, key = campaign.load_source_metadata(source_with_key, svnrev)
+    assert url == "https://example.invalid/gmin.tar.gz"
+    assert rev == svnrev.read_text().strip()
+    assert key == "b" * 64
+
+
+def test_load_saved_refuses_mismatched_or_absent_stored_gmin_build_key(tmp_path):
+    _anneal_path, gmin_path = _write_valid_saved_pair(tmp_path)
+    assert (
+        campaign.load_saved(
+            gmin_path,
+            "lj98",
+            2000,
+            "gmin",
+            4_000_000,
+            "a" * 64,
+            "Example CPU",
+            code_revision="svn-100",
+            gmin_url="https://example.invalid/gmin.tar.gz",
+            gmin_build_key="c" * 64,
+        )
+        is None
+    )
+
+    unkeyed_gmin = tmp_path / "gmin-unkeyed.row"
+    campaign.write_per_seed_row(
+        unkeyed_gmin,
+        {
+            "system": "lj98",
+            "code": "gmin",
+            "seed": "2000",
+            "budget": "4000000",
+            "hit": "1",
+            "evals_to_hit": "18000",
+            "charged": "18000",
+            "gradient_passes": "18000",
+            "energy_only_entries": "12",
+            "wall_s": "0.8",
+            "best": "-543.665361",
+            "pot_s": "0.7",
+        },
+        "a" * 64,
+        "Example CPU",
+        gmin_url="https://example.invalid/gmin.tar.gz",
+        gmin_revision="svn-100",
+    )
+    assert (
+        campaign.load_saved(
+            unkeyed_gmin,
+            "lj98",
+            2000,
+            "gmin",
+            4_000_000,
+            "a" * 64,
+            "Example CPU",
+            code_revision="svn-100",
+            gmin_url="https://example.invalid/gmin.tar.gz",
+            gmin_build_key="b" * 64,
+        )
+        is None
+    )

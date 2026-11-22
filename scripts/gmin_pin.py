@@ -98,6 +98,14 @@ def read_build_key(metadata: Path | None = None, key_file: Path | None = None) -
     return file_key
 
 
+def require_build_key(value: str, label: str = "build_key") -> str:
+    """Validate and return a 64-hex GMIN build key, rejecting absent or malformed values."""
+    cleaned = str(value).strip()
+    if not BUILD_KEY_RE.fullmatch(cleaned):
+        raise ValueError(f"missing or invalid {label}: {value!r}")
+    return cleaned
+
+
 def read_built_revision(svnrev: Path, metadata: Path | None = None) -> str:
     """Read a built SVNREV and optionally verify its generated source note."""
     revision = read_svnrev(svnrev)
@@ -111,10 +119,7 @@ def read_built_revision(svnrev: Path, metadata: Path | None = None) -> str:
             raise ValueError(f"{metadata} does not describe {svnrev}")
         if source.get("tarball_sha256") != TARBALL_SHA256:
             raise ValueError(f"{metadata} has another GMIN tarball")
-        if "build_key" in source and not BUILD_KEY_RE.fullmatch(
-            source["build_key"].strip()
-        ):
-            raise ValueError(f"{metadata} has an invalid build_key")
+        require_build_key(source.get("build_key", ""), f"{metadata} build_key")
     return revision
 
 

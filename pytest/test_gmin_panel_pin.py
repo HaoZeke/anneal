@@ -22,6 +22,7 @@ from gmin_pin import (  # noqa: E402
     TARBALL_SHA256,
     compute_build_key,
     read_build_key,
+    read_built_revision,
     read_svnrev,
 )
 from morse_gmin.run_panel import gmin_line  # noqa: E402
@@ -101,6 +102,15 @@ def test_read_build_key_rejects_missing_or_mismatched_metadata(tmp_path: Path) -
 
     key_file.write_text("d" * 64 + "\n")
     assert read_build_key(meta, key_file) == ""
+
+    svnrev = tmp_path / "SVNREV"
+    svnrev.write_text(f"{REVISION}\n")
+    meta_missing_key = tmp_path / "gmin-source-no-key.txt"
+    meta_missing_key.write_text(
+        f"revision={REVISION}\nsvnrev={REVISION}\ntarball_sha256={TARBALL_SHA256}\n"
+    )
+    with pytest.raises(ValueError, match="build_key"):
+        read_built_revision(svnrev, meta_missing_key)
 
 
 def test_fake_built_svnrev_flows_into_code_revision(tmp_path: Path) -> None:
