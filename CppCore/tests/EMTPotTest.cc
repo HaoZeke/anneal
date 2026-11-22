@@ -10,6 +10,7 @@
 #include <cstring>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <catch2/catch_all.hpp>
@@ -381,6 +382,8 @@ TEST_CASE("EMT Exception keeps its message per object and per copy",
           "[emt]") {
   static_assert(sizeof(Exception) == sizeof(void *),
                 "Exception is a single pointer in the installed header");
+  static_assert(noexcept(std::declval<const Exception &>().GetMessage()),
+                "GetMessage must remain noexcept");
 
   Exception first("first: ");
   first << 108;
@@ -389,6 +392,7 @@ TEST_CASE("EMT Exception keeps its message per object and per copy",
 
   const char *first_msg = first.GetMessage();
   const char *second_msg = second.GetMessage();
+  CHECK(first.GetMessage() == first_msg);
   CHECK(std::string_view(first_msg) == "first: 108");
   CHECK(std::string_view(second_msg) == "second: 256");
 
@@ -403,6 +407,9 @@ TEST_CASE("EMT Exception keeps its message per object and per copy",
   CHECK(std::string_view(second.GetMessage()) == "second: 256");
   CHECK(std::string_view(assigned.GetMessage()) == "second: 256 assigned");
   CHECK(std::string_view(first_msg) == "first: 108");
+
+  first << " updated";
+  CHECK(std::string_view(first.GetMessage()) == "first: 108 updated");
 
   Exception &self = assigned;
   assigned = self;

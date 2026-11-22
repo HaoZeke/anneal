@@ -45,9 +45,13 @@ Exception::~Exception() { delete buffer(message); }
 
 const char *Exception::GetMessage() const noexcept {
   MessageStream *owner = buffer(message);
-  std::string current = owner->str();
-  if (current != owner->text) {
-    owner->text = std::move(current);
+  try {
+    std::string current = owner->str();
+    if (current != owner->text) {
+      owner->text = std::move(current);
+    }
+  } catch (...) {
+    return owner->text.c_str();
   }
   return owner->text.c_str();
 }
