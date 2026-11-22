@@ -1115,9 +1115,10 @@ pub struct Config {
     /// On a stall the learned stall allocator can draw it beside the trail,
     /// the climb and the restart, and on a call-plateau leave a second
     /// allocator draws it against the climb. The incumbent's cap is turned,
-    /// quenched and taken whatever its energy. The axis, its order and the cap come
-    /// from the structure, see [`crate::cap_twist`]. Off in the paper
-    /// preset, so a default chain draws the same calls. Atomic chains only.
+    /// quenched and taken whatever its energy. The axis, its order and the cap
+    /// come from the structure, see [`crate::cap_twist`]. Off in the paper
+    /// preset, so a default chain draws the same calls. Unlabelled atomic
+    /// chains only.
     #[serde(skip_serializing_if = "is_false")]
     pub cap_twist: bool,
     /// Exchange descent after every full quench of a labelled cluster.

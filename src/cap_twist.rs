@@ -11,8 +11,9 @@
 //! Every quantity is read off the configuration: the length scale from the
 //! nearest-neighbour distance, the pivot from the better-coordinated points,
 //! the axis and its order from the pivot's own neighbour shell, and the cap
-//! as the points beyond half a layer from the pivot along that axis. No
-//! structure, motif or size enters.
+//! as the points beyond half a layer from the pivot along that axis. An axis
+//! is accepted only when the rotated shell has a one-to-one match within the
+//! local misfit threshold. No structure, motif or size enters.
 
 use ndarray::{Array1, ArrayView1};
 use rand::Rng;
@@ -26,6 +27,9 @@ const ORDERS: [usize; 4] = [3, 4, 5, 6];
 
 /// Scores closer than this, in nearest-neighbour units, are a tie.
 const TIE: f64 = 1e-9;
+
+/// Largest shell-image mismatch accepted as a local rotational symmetry.
+const AXIS_MISFIT: f64 = 0.2;
 
 /// A proposal: `x` with one cap turned, or `x` itself when no cap is found.
 pub fn propose<R: Rng + ?Sized>(x: ArrayView1<f64>, n: usize, rng: &mut R) -> Array1<f64> {
@@ -151,16 +155,10 @@ fn local_axis(shell: &[[f64; 3]]) -> Option<([f64; 3], usize)> {
         for order in ORDERS {
             let angle = 2.0 * std::f64::consts::PI / order as f64;
             let (s, c) = angle.sin_cos();
-            let mut total = 0.0;
-            for q in shell {
-                let r = rotate(*q, axis, s, c);
-                let near = shell
-                    .iter()
-                    .map(|t| dist2(r, *t))
-                    .fold(f64::INFINITY, f64::min);
-                total += near;
-            }
-            let score = (total / m as f64).sqrt();
+            let rotated: Vec<[f64; 3]> = shell.iter().map(|q| rotate(*q, axis, s, c)).collect();
+            let Some(score) = bijective_misfit(&rotated, shell, AXIS_MISFIT) else {
+                continue;
+            };
             // Within rounding of a tie the higher order wins: an icosahedral
             // shell maps onto itself under its threefold axes as well as its
             // fivefold ones, and the fivefold is the axis its stacking turns
@@ -173,6 +171,58 @@ fn local_axis(shell: &[[f64; 3]]) -> Option<([f64; 3], usize)> {
         }
     }
     best.map(|(axis, order, _)| (axis, order))
+}
+
+/// RMS mismatch of a one-to-one map from `rotated` onto `shell`.
+fn bijective_misfit(rotated: &[[f64; 3]], shell: &[[f64; 3]], tolerance: f64) -> Option<f64> {
+    if rotated.len() != shell.len() || rotated.is_empty() {
+        return None;
+    }
+    fn augment(
+        source: usize,
+        rotated: &[[f64; 3]],
+        shell: &[[f64; 3]],
+        tolerance2: f64,
+        seen: &mut [bool],
+        assigned: &mut [Option<usize>],
+    ) -> bool {
+        for target in 0..shell.len() {
+            if seen[target] || dist2(rotated[source], shell[target]) > tolerance2 {
+                continue;
+            }
+            seen[target] = true;
+            let held = assigned[target];
+            if held.is_none()
+                || augment(
+                    held.expect("occupied target"),
+                    rotated,
+                    shell,
+                    tolerance2,
+                    seen,
+                    assigned,
+                )
+            {
+                assigned[target] = Some(source);
+                return true;
+            }
+        }
+        false
+    }
+
+    let tolerance2 = tolerance * tolerance;
+    let mut assigned = vec![None; shell.len()];
+    for source in 0..rotated.len() {
+        let mut seen = vec![false; shell.len()];
+        if !augment(source, rotated, shell, tolerance2, &mut seen, &mut assigned) {
+            return None;
+        }
+    }
+    let total: f64 = assigned
+        .iter()
+        .enumerate()
+        .map(|(target, source)| dist2(rotated[source.expect("complete match")], shell[target]))
+        .sum();
+    Some((total / shell.len() as f64).sqrt())
 }
 
 fn rotate(v: [f64; 3], k: [f64; 3], s: f64, c: f64) -> [f64; 3] {
@@ -326,20 +376,21 @@ mod tests {
     #[test]
     fn the_cap_moves_rigidly_and_the_rest_stays() {
         let mut r = StdRng::seed_from_u64(3);
-        let x = crate::methods::cluster_hopping::random_cluster_in_radius(38, 2.2, 0.7, &mut r);
+        let x = icosahedron();
+        let n = x.len() / 3;
         let mut changed = 0;
         for _ in 0..50 {
-            let y = propose(x.view(), 38, &mut r);
+            let y = propose(x.view(), n, &mut r);
             assert_eq!(y.len(), x.len());
-            let moved: Vec<bool> = (0..38)
+            let moved: Vec<bool> = (0..n)
                 .map(|i| (0..3).any(|k| y[3 * i + k] != x[3 * i + k]))
                 .collect();
             if moved.iter().any(|&m| m) {
                 changed += 1;
                 assert!(!moved.iter().all(|&m| m));
             }
-            for i in 0..38 {
-                for j in 0..38 {
+            for i in 0..n {
+                for j in 0..n {
                     if moved[i] == moved[j] {
                         let a = dist2(point(x.view(), i), point(x.view(), j)).sqrt();
                         let b = dist2(point(y.view(), i), point(y.view(), j)).sqrt();
@@ -359,5 +410,37 @@ mod tests {
         let y = Array1::from(vec![0.0; 12]);
         assert_eq!(propose(y.view(), 4, &mut r), y);
         assert_eq!(propose(x.view(), 4, &mut r), x);
+    }
+
+    #[test]
+    fn an_irregular_shell_has_no_rotational_axis() {
+        let shell = [
+            [1.00, 0.00, 0.00],
+            [0.17, 1.13, 0.29],
+            [-0.91, 0.31, 0.83],
+            [0.44, -0.78, -1.19],
+            [-0.36, -1.07, 0.52],
+            [0.71, 0.63, -0.74],
+        ];
+        assert_eq!(local_axis(&shell), None);
+    }
+
+    #[test]
+    fn an_axis_match_must_be_bijective() {
+        let rotated = [[0.00, 0.0, 0.0], [0.01, 0.0, 0.0], [1.00, 0.0, 0.0]];
+        let shell = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]];
+        let nearest_rms = (rotated
+            .iter()
+            .map(|point| {
+                shell
+                    .iter()
+                    .map(|site| dist2(*point, *site))
+                    .fold(f64::INFINITY, f64::min)
+            })
+            .sum::<f64>()
+            / shell.len() as f64)
+            .sqrt();
+        assert!(nearest_rms < 0.1);
+        assert_eq!(bijective_misfit(&rotated, &shell, 0.1), None);
     }
 }

@@ -1102,7 +1102,7 @@ impl Ledger {
 pub struct ArmCount {
     /// Short name of the proposal kernel.
     pub move_type: String,
-    /// Proposals handed to the quench.
+    /// Proposals drawn, including identities refused before a quench.
     pub proposed: usize,
     /// Proposals the acceptance test kept, after a tabu veto.
     pub accepted: usize,
@@ -1307,7 +1307,7 @@ pub struct Outcome {
     pub unconverged_records: usize,
     /// Per-arm draws, accepts and best quenched value, in library order.
     pub arms: Vec<(String, usize, usize, f64)>,
-    /// Every quenched proposal, by move type, in first-seen order.
+    /// Every drawn proposal, by move type, in first-seen order.
     pub proposal_counts: Vec<ArmCount>,
     /// Delayed acceptance: first stages run, first-stage rejections (each a
     /// quench not paid), second stages run, and second-stage rejections (the
@@ -2998,6 +2998,7 @@ fn stall_arms(cfg: &Config) -> Vec<&'static str> {
         (cfg.cap_twist
             && !cfg.move_library.is_rigid_body()
             && cfg.move_library.declared_groups().is_none()
+            && cfg.species.is_none()
             && cfg.active_region.is_none()
             && cfg.frozen.is_none())
         .then_some("cap"),
@@ -3319,12 +3320,13 @@ const RIGID_ACCEPT_BLOCK: usize = 50;
 /// walk itself is capped at the same length so the main chain resumes.
 const RIGID_CAGE_WINDOWS: usize = 40;
 
-/// Seats in a rigid basin index.
+/// Seats retained by each local basin index.
 ///
 /// The lookup walks every seat the triangle test cannot skip, so an open
 /// list makes every later hop slower. Past this many seats a new region
-/// reuses the latest one. The cap is not applied to an atomic cluster.
-const RIGID_BASIN_CAP: usize = 2_048;
+/// reuses the latest one. The fixed bound applies to every system and does
+/// not encode a cluster size or species count.
+const BASIN_INDEX_CAP: usize = 2_048;
 /// Orientation steps in the shell turn that opens the second walk.
 ///
 /// Two steps still quench back into the cage. Three steps, the preset
@@ -4785,12 +4787,10 @@ where
         ClusterFingerprint::of_config(cfg, &canonical_reference),
         cfg.merge_radius,
     );
-    if cfg.move_library.is_rigid_body() {
-        identity.set_cap(RIGID_BASIN_CAP);
-        bias.cap_basins(RIGID_BASIN_CAP);
-        for parked in &mut biases {
-            parked.cap_basins(RIGID_BASIN_CAP);
-        }
+    identity.set_cap(BASIN_INDEX_CAP);
+    bias.cap_basins(BASIN_INDEX_CAP);
+    for parked in &mut biases {
+        parked.cap_basins(BASIN_INDEX_CAP);
     }
     if cfg.minima_hopping {
         let initial_basin = identity.basin_of(x.view());
@@ -9259,37 +9259,43 @@ where
             stall_outcome = Some(stalled_from - e);
         }
         if stall_response.map(|arm| stall_arms[arm] == "cap") == Some(true) {
-            quiet = 0;
-            longest_quiet = 0;
+            begin_arm(&mut arm_counts, "cap");
             let turned = crate::cap_twist::propose(x.view(), n, rng);
-            let (ec, xc) = relax(ledger, turned.view(), cfg.relax_steps);
-            let cap_gradient = record_quenched_answer(
-                cfg,
-                ledger,
-                &mut grad,
-                ec,
-                xc.view(),
-                &mut unconverged_records,
-            );
-            hops += 1;
-            stall_escapes += 1;
-            cap_escapes += 1;
-            if ec < e {
-                stall_escape_gain += e - ec;
+            if !hop_is_identity(x.view(), turned.view()) {
+                quiet = 0;
+                longest_quiet = 0;
+                let (ec, xc) = relax(ledger, turned.view(), cfg.relax_steps);
+                let cap_gradient = record_quenched_answer(
+                    cfg,
+                    ledger,
+                    &mut grad,
+                    ec,
+                    xc.view(),
+                    &mut unconverged_records,
+                );
+                hops += 1;
+                stall_escapes += 1;
+                cap_escapes += 1;
+                if ec < e {
+                    stall_escape_gain += e - ec;
+                }
+                finish_arm(&mut arm_counts, "cap", true, ec < stalled_from);
+                // Taken whatever its energy, as the trail is: the turned cap
+                // is a different stacking, and its value is that it is one.
+                adopt_minimum!(
+                    ec,
+                    xc,
+                    cap_gradient,
+                    None,
+                    AdoptionHistory::Fresh,
+                    None,
+                    Some("stall-cap"),
+                    hops
+                );
+                stall_outcome = Some(stalled_from - e);
+            } else {
+                finish_arm(&mut arm_counts, "cap", false, false);
             }
-            // Taken whatever its energy, as the trail is: the turned cap is
-            // a different stacking, and its value is that it is one.
-            adopt_minimum!(
-                ec,
-                xc,
-                cap_gradient,
-                None,
-                AdoptionHistory::Fresh,
-                None,
-                Some("stall-cap"),
-                hops
-            );
-            stall_outcome = Some(stalled_from - e);
         }
         if stall_response.map(|arm| stall_arms[arm] == "climb") == Some(true) {
             quiet = 0;
@@ -11192,6 +11198,14 @@ mod tests {
         flexible.cap_twist = true;
         assert!(flexible.move_library.declared_groups().is_some());
         assert!(!stall_arms(&flexible).contains(&"cap"));
+    }
+
+    #[test]
+    fn a_species_labelled_chain_has_no_cap_turn_stall_arm() {
+        let mut binary = Config::recommended(6).with_species(vec![1, 1, 1, 2, 2, 2], None);
+        binary.cap_twist = true;
+        assert!(binary.species.is_some());
+        assert!(!stall_arms(&binary).contains(&"cap"));
     }
 
     #[test]

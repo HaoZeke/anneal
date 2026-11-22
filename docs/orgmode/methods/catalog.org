@@ -345,7 +345,7 @@ stopped improving, each answering a different way of being stuck.
   icosahedral-to-decahedral twist; about a three-fold axis the
   fcc-to-hcp stacking change. A learned allocator draws it against
   the climb on each call-plateau leave and as one more stall arm.
-  Off by default; atomic chains only.
+  Off by default; unlabelled atomic chains only.
 - Funnel tracking (=track_funnels=, config.rs:244; src/funnel_spectral.rs):
   builds a transition graph on accepted hops keyed by basin identity;
   =Partition= (src/funnel_spectral.rs:43) and =FunnelSpectrum=
