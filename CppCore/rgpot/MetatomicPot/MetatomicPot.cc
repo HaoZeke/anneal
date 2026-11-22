@@ -2,10 +2,11 @@
 // Copyright 2023--present rgpot developers
 
 #include "rgpot/MetatomicPot/MetatomicPot.hpp"
+#include "rgpot/MetatomicPot/ForceVariance.hpp"
 #include "rgpot/MetatomicPot/vesin_compat.hpp"
 #include "rgpot/nlist/NeighbourList.hpp"
-#include <ATen/CPUGeneratorImpl.h>
 #include "vesin.h"
+#include <ATen/CPUGeneratorImpl.h>
 
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
@@ -517,24 +518,25 @@ void MetatomicPot::forceImpl(const ForceInput &in, ForceOut *out) const {
               in.nAtoms * 3 * sizeof(double));
 
   if (have_model_uq) {
-    // Model energy_uncertainty mean (eV); callers may use as force floor at
-    // unit length (angstrom) — that is an explicit energy->force scale choice.
-    out->variance = model_uq_variance;
+    // energy_uncertainty is an RMS-like energy scale (eV). The variance slot
+    // stores its square, so one square root recovers the reported scale.
+    out->variance = modelUncertaintyVariance(model_uq_variance);
   } else if (n_passes > 1 && !force_samples.empty()) {
-    // RMS force residual over orientations (eV/A): proper force-scale
-    // uncertainty for criterion smearing. Energy orientation scatter can be
-    // several eV on non-invariant evaluations and must not raise force tol.
+    // Mean-square force residual over orientations (eV^2/A^2). The square
+    // root is the force-scale uncertainty used for criterion smearing.
+    // Energy orientation scatter can be several eV on non-invariant
+    // evaluations and must not raise the force tolerance.
     double acc2 = 0.0;
     const double n_comp = static_cast<double>(nAtoms) * 3.0 *
                           static_cast<double>(force_samples.size());
     // Deviation reference: the output force -- the orientation-average in
     // averaging mode, the unrotated force in probe mode. Either way the
-    // RMS measures how much orientation moves the force actually used.
+    // residual measures how much orientation moves the force actually used.
     for (const auto &F_i : force_samples) {
       auto d = F_i - forces_acc;
       acc2 += d.square().sum().item<double>();
     }
-    out->variance = (n_comp > 0.0) ? std::sqrt(acc2 / n_comp) : 0.0;
+    out->variance = forceScatterVariance(acc2, n_comp);
   } else {
     out->variance = 0.0;
   }

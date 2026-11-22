@@ -200,9 +200,10 @@ public:
    * @param positions The atomic coordinates.
    * @param atmtypes The atomic numbers.
    * @param box The simulation cell vectors.
-   * @return Energy, force matrix, and optional model/orientation variance
-   *         (e.g. metatomic energy_uncertainty mean or multi-rotation energy
-   *         sample variance). Variance is 0 when unused.
+   * @return Energy, force matrix, and optional model/orientation variance.
+   *         Metatomic stores the square of the energy_uncertainty mean, or
+   *         the mean-square force residual over orientations. Variance is 0
+   *         when unused. Callers that want an RMS take one square root.
    */
   std::tuple<double, types::AtomMatrix, double>
   operator()(const types::AtomMatrix &positions,
