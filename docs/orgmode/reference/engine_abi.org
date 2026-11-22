@@ -66,6 +66,23 @@ Only =libcomposite_engine= has components; the others report none.
 None of them exports =rgpot_engine_model_state=, =rgpot_engine_set_callbacks=,
 =rgpot_engine_hint= or =rgpot_engine_neighbor_options=.
 
+** Persistent result cache and evaluation counts
+
+Probe for =rgpot_engine_set_cache= and =rgpot_engine_cache_counts= when loading
+a plugin. Pass an engine handle and a database directory to the setter before
+submitting force calls. Use a separate directory for each model and parameter
+set. A cache-enabled build opens or creates the directory. The handle owns the
+open database until detachment (a null path) or destruction.
+
+Read the two unsigned 64-bit counters after all requests in a phase return.
+=computed= counts geometry results produced by the kernel. =served= counts
+geometry results supplied by the cache. One successful batch can contribute
+to both counters. Take differences between snapshots to measure a phase.
+Attaching an existing database starts both counters at zero and retains its
+stored results. A count query returns status 3 when the handle has no active
+cache. Older plugins can omit the symbols. Record counters as unavailable in
+both cases.
+
 ** Identity and version
 
 *** =rgpot_engine_abi_version=
