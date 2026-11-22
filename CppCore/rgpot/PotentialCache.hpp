@@ -10,6 +10,7 @@
  */
 
 #include "rgpot/ForceStructs.hpp"
+#include "rgpot/pot_types.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
 #include <atomic>
 #include <cstdint>
@@ -51,6 +52,9 @@ struct KeyHash {
     return rocksdb::Slice(reinterpret_cast<const char *>(&hash), sizeof(hash));
   }
 };
+
+/// Hash the ordered geometry, species, cell and potential identity.
+KeyHash result_key(const ForceInput &input, PotType type, uint64_t parameters);
 
 /**
  * @brief Evaluations a cache handle has answered, split by origin.

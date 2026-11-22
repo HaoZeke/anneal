@@ -21,13 +21,8 @@
 // clang-format on
 
 #ifdef RGPOT_HAS_CACHE
-#ifndef XXH_FORCE_MEMORY_ACCESS
-#define XXH_FORCE_MEMORY_ACCESS 0
-#endif
-#define XXH_INLINE_ALL
 #include "rgpot/CalculatorGroup.hpp"
 #include "rgpot/PotentialCache.hpp"
-#include <xxhash.h>
 #endif
 
 #include "rgpot/ForceStructs.hpp"
@@ -433,26 +428,7 @@ private:
    * collide.
    */
   [[nodiscard]] rgpot::cache::KeyHash cacheKey(const ForceInput &fi) const {
-    size_t hash_val = 0;
-    hash_val ^= XXH3_64bits(fi.pos, fi.nAtoms * 3 * sizeof(double));
-    hash_val ^= XXH3_64bits(fi.atmnrs, fi.nAtoms * sizeof(int));
-    if (fi.box != nullptr) {
-      hash_val ^= XXH3_64bits(fi.box, 9 * sizeof(double));
-    } else {
-      static constexpr char kNonPeriodic[] = "rgpot::non-periodic";
-      hash_val ^= XXH3_64bits(kNonPeriodic, sizeof(kNonPeriodic));
-    }
-    const size_t type_val = static_cast<size_t>(m_type);
-    std::array<unsigned char, sizeof(type_val)> type_bytes{};
-    std::memcpy(type_bytes.data(), &type_val, sizeof(type_val));
-    hash_val ^= XXH3_64bits(type_bytes.data(), type_bytes.size());
-    // Parameter fingerprint: two instances of one PotType with different
-    // configs must never share cache entries.
-    const uint64_t params_val = paramsKey();
-    std::array<unsigned char, sizeof(params_val)> params_bytes{};
-    std::memcpy(params_bytes.data(), &params_val, sizeof(params_val));
-    hash_val ^= XXH3_64bits(params_bytes.data(), params_bytes.size());
-    return rgpot::cache::KeyHash(hash_val);
+    return rgpot::cache::result_key(fi, m_type, paramsKey());
   }
 
   rgpot::cache::PotentialCache *_cache =
