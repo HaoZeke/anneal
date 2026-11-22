@@ -11,8 +11,18 @@ name: CI (orchestrator)
 on:
   push:
     branches: [main, develop]
+    paths-ignore:
+      - docs/**
+      - '**/*.md'
+      - newsfragments/**
+      - LICENSE
   pull_request:
     branches: [main, develop]
+    paths-ignore:
+      - docs/**
+      - '**/*.md'
+      - newsfragments/**
+      - LICENSE
   workflow_dispatch:
   # was docs_quality.yml weekly; keep link/prose hygiene on a schedule
   schedule:
