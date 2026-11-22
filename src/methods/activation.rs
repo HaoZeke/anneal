@@ -2901,11 +2901,6 @@ where
     } else {
         return origin.to_owned();
     };
-    if which % 4 >= 2 {
-        for component in &mut mode {
-            *component = -*component;
-        }
-    }
     if !renormalize_mode(&mut mode, origin) {
         return origin.to_owned();
     }
