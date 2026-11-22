@@ -6,7 +6,7 @@ diff --git a/Potentials.capnp b/Potentials.capnp
    cutoff @3 :Float64 = 9.5;
  }
  
-+# Four entries per list. An empty list keeps the published defaults.
++# Four entries per list, or none. The PotentialConfig arms page has the rule.
 +struct MullerBrownParams {
 +  amplitude @0 :List(Float64);
 +  a @1 :List(Float64);

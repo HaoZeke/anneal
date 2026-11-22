@@ -648,7 +648,7 @@ rgpot.MullerBrownPot(amplitude=[-200, -100, -170, 15], a=[-1, -1, -6.5, 0.7], b=
 #+end_src
 
 - Inputs :: each parameter is four finite numbers or an empty sequence.
-  An empty sequence selects that parameter's published default.
+  The [[file:potential_config.org][Muller-Brown arm]] has the rule.
   Positions need at least one atom; only its x and y coordinates are active.
   Defaults are =amplitude=(-200, -100, -170, 15)=, =a=(-1, -1, -6.5, 0.7)=,
   =b=(0, 0, 11, 0.6)=, =c=(-10, -10, -6.5, 0.7)=, =x0=(1, 0, -0.5, -1)= and
