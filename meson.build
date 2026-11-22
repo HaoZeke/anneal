@@ -792,7 +792,6 @@ if get_option('with_rust_core')
     endif
     if mdi_enabled
         _cargo_features += ['mdi']
-        _args += ['-DRGPOT_HAS_MDI=TRUE']
     endif
 
     _rgpot_core_dir = meson.current_source_dir() / 'rgpot-core'

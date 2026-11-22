@@ -55,8 +55,10 @@ communicator ABI and stream socket before applying `TCP_NODELAY`.
 
 Rust embedders can enable `rgpot-core`'s `mdi` feature and call
 `serve_mdi(potential, &MdiEngineConfig::default().with_options(...))`. C and
-C++ embedders call `rgpot_mdi_server_start`. `RGPOT_MDI_LIBRARY` supplies the
-shared-library path when neither API receives one explicitly.
+C++ embedders call `rgpot_mdi_server_start`, which every build exports: a
+library compiled without the `mdi` feature returns `RGPOT_RPC_ERROR` and an
+`rgpot_last_error()` message that names the feature. `RGPOT_MDI_LIBRARY`
+supplies the shared-library path when neither API receives one explicitly.
 
 ## Commands and units
 

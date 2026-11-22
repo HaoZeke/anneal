@@ -43,7 +43,6 @@ pub mod types;
 #[cfg(feature = "rpc")]
 pub mod rpc;
 
-#[cfg(feature = "mdi")]
 pub mod mdi;
 
 // Re-export eindir lifecycle functions at the c_api level so cbindgen picks them up.

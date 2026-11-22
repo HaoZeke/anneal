@@ -460,9 +460,23 @@ mod tests {
             "rgpot_potential_hessian",
             "rgpot_potential_derivative_caps",
             "rgpot_potential_derivative_counts",
+            "rgpot_mdi_server_start",
         ] {
             assert!(baseline.lines().any(|l| l == name), "baseline lacks {name}");
         }
+    }
+
+    /// Minor 9 promises `rgpot_mdi_server_start` to every library, so the
+    /// header declares it with no feature guard and no `mdi` define exists.
+    #[test]
+    fn the_mdi_export_is_declared_in_every_build() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        let header = std::fs::read_to_string(format!("{root}/include/rgpot.h")).unwrap();
+        assert!(header.contains("rgpot_mdi_server_start("));
+        assert!(
+            !header.contains("RGPOT_HAS_MDI"),
+            "rgpot_mdi_server_start must not depend on a build feature"
+        );
     }
 
     /// A library built without the schema feature lacks these names, so the

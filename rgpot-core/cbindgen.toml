@@ -21,7 +21,6 @@ documentation_style = "doxy"
 [defines]
 "feature = rpc" = "RGPOT_HAS_RPC"
 "feature = schema" = "RGPOT_HAS_SCHEMA"
-"feature = mdi" = "RGPOT_HAS_MDI"
 
 [export]
 # Named by the documentation of rgpot_potential_hvp,

@@ -1,8 +1,8 @@
 # Copyright 2023--present rgpot developers
 """The shared library's rgpot_* export count stays at the measured pin.
 
-51 for a normal link of librgpot_core.a, 104 when librgpot_bundle.a is
-linked with --whole-archive. The extra 53 are the public C ABI in the
+51 for a normal link of librgpot_core.a, 105 when librgpot_bundle.a is
+linked with --whole-archive. The extra 54 are the public C ABI in the
 core baseline plus the four fast-list entry points. Two of the umbrella
 exports are the Muller-Brown entry points.
 """
@@ -25,17 +25,17 @@ def _baseline(name: str) -> set[str]:
 
 def test_pinned_counts():
     assert exports.CORE_ONLY_EXPORTS == 51
-    assert exports.BUNDLE_EXPORTS == 104
-    assert exports.BUNDLE_EXPORTS - exports.CORE_ONLY_EXPORTS == 53
+    assert exports.BUNDLE_EXPORTS == 105
+    assert exports.BUNDLE_EXPORTS - exports.CORE_ONLY_EXPORTS == 54
 
 
 def test_baselines_are_the_public_archive_set():
     core = _baseline("abi_core_baseline.txt")
     fast = _baseline("abi_baseline_fast.txt")
-    assert len(core) == 49
+    assert len(core) == 50
     assert len(fast) == 4
     assert core.isdisjoint(fast)
-    assert len(core | fast) == 53
+    assert len(core | fast) == 54
 
 
 def test_whole_archive_exports_the_public_set():
@@ -73,7 +73,7 @@ def test_count_mismatch_names_the_pin():
     wanted = {f"rgpot_abi_{index}" for index in range(extra)}
     exported = {f"rgpot_cxx_{index}" for index in range(exports.BUNDLE_EXPORTS)}
     exported.update(wanted)
-    with pytest.raises(SystemExit, match="expected 104"):
+    with pytest.raises(SystemExit, match="expected 105"):
         exports.evaluate(exported, wanted, wanted, whole=True)
 
 
