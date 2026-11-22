@@ -1473,3 +1473,11 @@ Ren, Liu, Yan, Tang, Li, and Wang, Journal of Chemical Theory and Computation (2
 This is protein conformational-ensemble sampling from an AlphaFold structure, not small-molecule conformer global optimisation. It reports no Lennard-Jones energy, TIP4P energy, GFN2-xTB water-hexamer energy, or sealed motif count, so it does not contradict the Cambridge targets, 121 of 192, 97 of 192, or the polished hexamer gaps. It does not fill the ASE, AGOX, and GMIN comparison kit. A head-to-head would be on one of the protein conformational-transition benchmarks against BioEmu or the conventional structure-based models, not on the current cluster or CREST benchmarks; no new head-to-head is needed for the manuscript.
 
 Cite `renEnsemblePae2026` only if the conformer discussion is broadened to protein ensembles.
+
+## 2026-11-22 — GFN2-xTB odorant conformer ensembles
+
+Shang, ChemRxiv (20 November 2026), doi:10.26434/chemrxiv.15012459/v2, builds room-temperature GFN2-xTB conformer ensembles for flexible odorants and tests whether odor breadth tracks accessible three-dimensional shape. For 1,821 flexible molecules the workflow keeps a 200-conformer ceiling; the abstract says conformational entropy saturates by 28 conformers and that three-dimensional neural representations do not beat capacity-matched two-dimensional graphs once chain topology is controlled.
+
+The work is small-molecule ensemble generation and odor-psychophysics benchmarking, not atomic-cluster global optimisation. It reports no Lennard-Jones energy, TIP4P energy, GFN2-xTB water-hexamer motif count, or Cambridge cluster minimum, so it does not contradict the sealed maps, 121 of 192, 97 of 192, or the polished hexamer gaps. It situates GFN2-xTB conformer pools beside the manifold conformer discussion without filling the ASE, AGOX, and GMIN kit.
+
+Cite `shangFodorant2026` beside `moshchenkovCrestEntropy2026` and `vahediahmarGeomDrugs2026`.
