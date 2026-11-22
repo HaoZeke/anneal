@@ -70,19 +70,53 @@ None of them exports =rgpot_engine_model_state=, =rgpot_engine_set_callbacks=,
 ** Persistent result cache and evaluation counts
 
 Probe for =rgpot_engine_set_cache= and =rgpot_engine_cache_counts= when loading
-a plugin. Pass an engine handle and a database directory to the setter before
-submitting force calls. Use a separate directory for each model and parameter
-set. A cache-enabled build opens or creates the directory. The handle owns the
-open database until detachment (a null path) or destruction.
+a plugin.
+Pass an engine handle and a database directory to the setter before submitting
+force calls.
+A cache-enabled build opens or creates the directory.
+The handle owns the open database until detachment (a null path) or destruction.
+
+Each stored result is keyed by the potential type, a fingerprint of the
+potential's parameters, and the geometry.
+A potential that overrides its parameter fingerprint gets a new key whenever a
+setting that changes its output changes.
+The metatomic engine does this for its model path, device, length unit, dtype,
+determinism policy, task name, extras and every other setting the model sees.
+Calling =rgpot_engine_set_charge_spin= on it changes the fingerprint, so the
+next query is a miss that computes under the new charge and spin.
+Returning to an earlier charge and spin serves the earlier results again.
+Use a separate directory for each model when the engine does not fingerprint its
+parameters.
+
+The key is a fixed 64-bit hash, stored as one version byte followed by eight
+little-endian bytes.
+The key layout does not depend on the width of =size_t= on the host.
+Keys written on a 64-bit little-endian host keep their bytes.
+
+The database has no size cap and never evicts on its own.
+Its size is bounded by the number of distinct geometries that the caller
+submits.
+To bound it, detach the cache and delete the directory, or attach a fresh
+directory.
+Deleting the directory discards every stored result and does not corrupt a later
+attachment.
+The ABI has no call that sets a cap.
 
 Read the two unsigned 64-bit counters after all requests in a phase return.
-=computed= counts geometry results produced by the kernel. =served= counts
-geometry results supplied by the cache. One successful batch can contribute
-to both counters. Take differences between snapshots to measure a phase.
+=computed= counts geometry results produced by the kernel.
+=served= counts geometry results supplied by the cache.
+One successful batch can contribute to both counters.
+Take differences between snapshots to measure a phase.
 Attaching an existing database starts both counters at zero and retains its
-stored results. A count query returns status 3 when the handle has no active
-cache. Older plugins can omit the symbols. Record counters as unavailable in
-both cases.
+stored results.
+A count query returns status 3 when the handle has no active cache.
+Older plugins can omit the symbols.
+Record counters as unavailable in both cases.
+
+On Windows the engine opens the path as UTF-8.
+A caller must pass a path that is valid Unicode, and the Rust loader refuses any
+other path with an invalid-argument error.
+On other platforms the loader passes the path bytes unchanged.
 
 *** =rgpot_engine_set_cache=
 
@@ -92,8 +126,10 @@ int rgpot_engine_set_cache(RgpotEnginePot *pot, const char *path);
 #+end_src
 
 - Inputs :: a handle and a database path, or a null path to detach.
+  The path is UTF-8 on Windows.
 - Units :: none.
 - Outputs :: a successful call replaces the current attachment.
+  Detaching leaves the stored results on disk.
 - Errors :: 1 for an invalid argument, 2 when opening fails, 3 for a build
   without cache support or a composite potential with per-term records.
   An open failure preserves the current attachment.
@@ -1340,6 +1376,14 @@ the handle as a =PotentialImpl=.
   ones are kept alive until the engine is destroyed, because an engine built
   before the header forbade it may have retained them.
   Dropping the session destroys the engine before it frees any callbacks.
+- =EngineSession::attach_cache(path)=, =EngineSession::cache_counts()= and
+  =EngineSession::clear_cache()= :: Attach a result cache, read its counts, and detach it through =rgpot_engine_set_cache=
+  and =rgpot_engine_cache_counts=.
+  =cache_counts()= returns =(computed, served)= and reports
+  =EngineError::Unsupported= when no cache is attached or the plugin lacks the
+  symbols.
+  =clear_cache()= detaches the cache and leaves its entries on disk.
+  Each call goes through the same fatal-failure handling as a force call.
 - =EngineSession::model_state()= and =EngineSession::hint(message)= :: Read =rgpot_engine_model_state=
   (zero when the engine lacks it) and send a typed hint through
   =rgpot_engine_hint=.

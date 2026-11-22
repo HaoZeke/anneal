@@ -172,9 +172,12 @@ RGPOT_ENGINE_API int rgpot_engine_force(
 /* ------------------------------------------------------------------ */
 
 /** Attach a persistent result cache. Use a separate directory for each
- * model and parameter set. A successful attachment starts the counters at
- * zero. The handle owns the cache. A null path detaches it. A failure
- * leaves the existing attachment intact. Requires exclusive use of pot.
+ * model unless the engine fingerprints its parameters, as the metatomic engine
+ * does, including the charge and spin. A successful attachment starts the
+ * counters at zero. The handle owns the cache. A null path detaches it and
+ * leaves the stored results on disk. A failure leaves the existing attachment
+ * intact. The cache has no size cap and never evicts; remove the directory to
+ * bound it. The path is UTF-8 on Windows. Requires exclusive use of pot.
  * Returns 3 for a build without cache support or a composite handle whose
  * per-term records the result cache cannot preserve. */
 RGPOT_ENGINE_API int rgpot_engine_set_cache(RgpotEnginePot *pot,
