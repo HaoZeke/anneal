@@ -10,7 +10,6 @@
 #include <cstring>
 #include <string>
 #include <string_view>
-#include <utility>
 #include <vector>
 
 #include <catch2/catch_all.hpp>
@@ -378,15 +377,18 @@ TEST_CASE("EMT OpenMP force path is bit-identical across threads", "[emt][thread
   }
 }
 
-TEST_CASE("EMT Exception owns its message across concurrent views and copies",
+TEST_CASE("EMT Exception keeps its message per object and per copy",
           "[emt]") {
+  static_assert(sizeof(Exception) == sizeof(void *),
+                "Exception is a single pointer in the installed header");
+
   Exception first("first: ");
   first << 108;
   Exception second("second: ");
   second << 256;
 
-  const auto &first_msg = first.GetMessage();
-  const auto &second_msg = second.GetMessage();
+  const char *first_msg = first.GetMessage();
+  const char *second_msg = second.GetMessage();
   CHECK(std::string_view(first_msg) == "first: 108");
   CHECK(std::string_view(second_msg) == "second: 256");
 
@@ -402,10 +404,10 @@ TEST_CASE("EMT Exception owns its message across concurrent views and copies",
   CHECK(std::string_view(assigned.GetMessage()) == "second: 256 assigned");
   CHECK(std::string_view(first_msg) == "first: 108");
 
-  Exception moved(std::move(copied));
-  CHECK(std::string_view(moved.GetMessage()) == "first: 108 copied");
+  Exception &self = assigned;
+  assigned = self;
+  CHECK(std::string_view(assigned.GetMessage()) == "second: 256 assigned");
 
-  Exception move_assigned("other");
-  move_assigned = std::move(assigned);
-  CHECK(std::string_view(move_assigned.GetMessage()) == "second: 256 assigned");
+  Exception null_message(nullptr);
+  CHECK(std::string_view(null_message.GetMessage()).empty());
 }

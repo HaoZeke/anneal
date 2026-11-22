@@ -2,7 +2,7 @@
 #define _EXCEPTION_H
 
 #include <sstream>
-#include <string>
+using std::stringstream;
 
 // this Exception class can be used as follows:
 //
@@ -13,21 +13,17 @@
 class Exception {
 public:
   Exception(char const *m);
-  Exception(const Exception &) = default;
-  Exception(Exception &&) noexcept = default;
-  Exception &operator=(const Exception &) = default;
-  Exception &operator=(Exception &&) noexcept = default;
-  ~Exception() = default;
+  Exception(const Exception &ex);
+  Exception &operator=(const Exception &ex);
+  ~Exception();
   template <class T> Exception &operator<<(const T &x) {
-    std::ostringstream out;
-    out << x;
-    message += out.str();
+    *message << x;
     return *this;
   }
-  const std::string &GetMessage() const noexcept;
+  const char *GetMessage() const noexcept;
 
 private:
-  std::string message;
+  stringstream *message;
 };
 
 #endif // _EXCEPTION_H
