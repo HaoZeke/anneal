@@ -1156,7 +1156,7 @@ pub struct Symmetrise {
 }
 
 const ESTABLISHED_SYMMETRY_ORDERS: usize = 5;
-const SYMMETRY_TAIL_BUCKETS: usize = 1 << 16;
+const SYMMETRY_TAIL_BUCKETS: usize = 1 << 30;
 
 fn symmetry_order_from_draw(orders: &[usize], established_order: usize, blend_draw: f64) -> usize {
     let established = orders.len().min(ESTABLISHED_SYMMETRY_ORDERS);
@@ -1179,7 +1179,7 @@ fn symmetry_order_and_blend<R: Rng + ?Sized>(orders: &[usize], rng: &mut R) -> (
     let blend = 0.3 + 0.4 * blend_draw;
     // Draw among the established orders first, exactly as the five-order
     // library did. Only its upper boundary can open one fixed escape interval
-    // out of 2^16. The existing blend draw supplies that size-independent
+    // out of 2^30. The existing blend draw supplies that size-independent
     // decision, so retained orders also retain the random stream. The escape
     // interval maps uniformly over every larger order.
     let order = symmetry_order_from_draw(orders, established_order, blend_draw);
