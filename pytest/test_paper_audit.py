@@ -343,33 +343,33 @@ def test_a_retired_rerun_sentence_is_reported():
     assert [r[2] for r in audit.drifts()] == ["retired claim"]
 
 
-def sc_code_revisions(audit, path, system, arm):
-    """The code revisions shown on the passing code-revision checks of one printed Sutton-Chen row."""
+def sc_code_revisions(audit, path, system, arm, label="code revision"):
+    """Values shown on the passing revision checks of one printed Sutton-Chen row."""
     return [r[3] for r in audit.results
-            if r[0] == "OK" and r[2] == "code revision" and r[1].startswith(f"{path}:") and r[1].endswith(f" {system} {arm}")]
+            if r[0] == "OK" and r[2] == label and r[1].startswith(f"{path}:") and r[1].endswith(f" {system} {arm}")]
 
 
 def test_an_old_sutton_chen_gmin_cell_is_reported():
     audit = audit_mod.Audit()
     text = audit.text(SC_N12)
-    audit.text_cache[SC_N12] = text.replace("| sc126-38 | gmin | 61fa67cf | 12/12 |", "| sc126-38 | gmin | 61fa67cf | 1/12 |")
+    audit.text_cache[SC_N12] = text.replace("| sc126-38 | gmin | 9cbec1a4 | 12/12 |", "| sc126-38 | gmin | 9cbec1a4 | 1/12 |")
     audit_mod.head_to_head(audit)
     assert [(r[1].split()[-2:], r[2], r[3], r[4]) for r in audit.drifts()] == [(["sc126-38", "gmin"], "hits", "1/12", "12/12")]
-    assert sc_code_revisions(audit, SC_N12, "sc126-38", "gmin") == ["61fa67cf"]
+    assert sc_code_revisions(audit, SC_N12, "sc126-38", "gmin", "gmin pin") == ["9cbec1a4"]
 
 
 def test_a_dropped_sutton_chen_rerun_row_is_reported():
     kept = audit_mod.Audit()
     audit_mod.head_to_head(kept)
-    assert sc_code_revisions(kept, SC_N12, "sc108-38", "gmin") == ["61fa67cf"]
+    assert sc_code_revisions(kept, SC_N12, "sc108-38", "gmin", "gmin pin") == ["9cbec1a4"]
     audit = audit_mod.Audit()
     text = audit.text(SC_N12)
-    old = "| sc108-38 | gmin | 61fa67cf | 3/12 | 400000 |  |  |\n"
+    old = "| sc108-38 | gmin | 9cbec1a4 | 3/12 | 400000 |  |  |\n"
     assert old in text
     audit.text_cache[SC_N12] = text.replace(old, "")
     audit_mod.head_to_head(audit)
     assert [(r[1], r[2], r[3], r[4]) for r in audit.drifts()] == [(SC_N12, "table row sc108-38 gmin", "missing", "shown")]
-    assert sc_code_revisions(audit, SC_N12, "sc108-38", "gmin") == []
+    assert sc_code_revisions(audit, SC_N12, "sc108-38", "gmin", "gmin pin") == []
 
 
 def test_the_printed_sutton_chen_gmin_rows_have_one_harness():
@@ -460,7 +460,21 @@ def test_the_sutton_chen_code_revision_comes_from_the_rows():
     audit_mod.head_to_head(audit)
     labels = [r[2] for r in audit.drifts()]
     assert "the rerun code revision is an ancestor of HEAD" in labels
-    assert labels.count("code revision") == 36
+    # Anneal rows name code_revision. GMIN rows name gmin_pin, so a rewritten
+    # code_revision drifts the nine anneal rows in each of the two READMEs.
+    assert labels.count("code revision") == 18
+    assert "gmin pin" not in labels
+
+
+def test_a_wrong_printed_gmin_pin_is_reported():
+    audit = audit_mod.Audit()
+    for path in (SC_N12, "bench/paper-rerun/sc-h2h/README.md"):
+        audit.text_cache[path] = audit.text(path).replace("| gmin | 9cbec1a4 |", "| gmin | 61fa67cf |")
+    audit_mod.head_to_head(audit)
+    pins = [r for r in audit.drifts() if r[2] == "gmin pin"]
+    assert len(pins) == 18
+    assert {r[3] for r in pins} == {"61fa67cf"}
+    assert {r[4] for r in pins} == {"9cbec1a4"}
 
 
 @pytest.mark.parametrize("shown", ["61fa67cfNOT_A_COMMIT", "61fa67cf0", "61fa", "develop"])

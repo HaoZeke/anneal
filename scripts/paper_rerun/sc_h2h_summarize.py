@@ -187,13 +187,15 @@ def trim(text: str) -> str:
 
 def readme(rows: list[dict[str, str]], summary: list[dict[str, str]]) -> str:
     revision = rows[0]["code_revision"][:8] if rows else ""
+    pins = sorted({row["gmin_pin"] for row in rows if row["arm"] == "gmin" and row.get("gmin_pin")})
+    pin = pins[0][:8] if len(pins) == 1 else ""
     lines = [
         "# Sutton-Chen head-to-head rerun",
         "",
         "Anneal against GMIN on the printed cells: reduced Sutton-Chen 12-6, 10-8 and 9-6",
         "at 38, 55 and 80 atoms, seeds 2000-2011, at `PAPER_BUDGETS` in",
         "`scripts/metal_h2h/run_sc.py`. One session, serial, ABBA by seed, cpu 0.",
-        f"Code revision `{revision}`.",
+        f"Code revision `{revision}`. GMIN rows are pin `{pin}`.",
         "",
         "A hit is best <= reference + 0.001 (`scripts/target_tol.py`, `DEFAULT_HIT_TOL`).",
         "Fisher is two-sided exact on hits. Mann-Whitney is two-sided on calls with the",
@@ -214,7 +216,7 @@ def readme(rows: list[dict[str, str]], summary: list[dict[str, str]]) -> str:
             "| {system} | {arm} | {revision} | {hits} | {calls} | {fisher} | {calls_p} |".format(
                 system=row["system"],
                 arm=row["arm"],
-                revision=revision,
+                revision=pin if row["arm"] == "gmin" else revision,
                 hits=row["hits_over_n"],
                 calls=trim(row["calls_median"]),
                 fisher=trim(row["fisher_p_vs_gmin"]),

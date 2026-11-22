@@ -2240,9 +2240,19 @@ def sc_rerun_against_rows(audit: Audit) -> None:
             audit.cell(where, column, line[column], value[column])
 
 
+def sc_gmin_pin(audit: Audit) -> str:
+    """The one GMIN pin the rerun rows record. Empty when they disagree."""
+    pins = sorted({r["gmin_pin"].strip() for r in audit.rows(SC_RERUN_ROWS) if r["arm"] == "gmin"})
+    return pins[0] if len(pins) == 1 else ""
+
+
 def sc_develop_table(audit: Audit, path: str, code: str) -> None:
-    """The printed Sutton-Chen counts are the develop rerun, at its code revision."""
+    """The printed Sutton-Chen counts are the develop rerun.
+
+    Anneal rows name the code revision. GMIN rows name the GMIN pin.
+    """
     summary = sc_rerun_summary(audit)
+    pin = sc_gmin_pin(audit)
     shown = {}
     for line, row in md_table(audit, path, "System | Arm | Code revision"):
         shown[(row["System"], row["Arm"])] = (line, row)
@@ -2255,8 +2265,16 @@ def sc_develop_table(audit: Audit, path: str, code: str) -> None:
             continue
         line, cell = got
         where = f"{path}:{line} {row['system']} {row['arm']}"
-        audit.record(bool(code) and commit_of(cell["Code revision"].strip().strip("`")) == code, where,
-                     "code revision", cell["Code revision"], code[:8])
+        shown_rev = cell["Code revision"].strip().strip("`")
+        if row["arm"] == "gmin":
+            # The printed GMIN cell is the pin in the rows' gmin_pin column.
+            # code_revision on those rows is the anneal commit the cells
+            # were rerun beside, which is not the executable GMIN ran.
+            audit.record(bool(pin) and len(shown_rev) >= 7 and pin.startswith(shown_rev), where,
+                         "gmin pin", shown_rev, pin[:8])
+        else:
+            audit.record(bool(code) and commit_of(shown_rev) == code, where,
+                         "code revision", shown_rev, code[:8])
         audit.cell(where, "hits", cell["Hits"], row["hits_over_n"])
         audit.cell(where, "calls median", cell["Calls median"], float(row["calls_median"]))
         if row["fisher_p_vs_gmin"] or cell["Fisher p"].strip():
