@@ -1468,6 +1468,7 @@ def main(argv: list[str]) -> int:
     run_p.add_argument("--work", type=Path, required=True)
     run_p.add_argument("--logs", type=Path, required=True)
     run_p.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_S)
+    run_p.add_argument("--resume", action="store_true")
 
     sum_p = sub.add_parser("summarize")
     sum_p.add_argument("--rows", type=Path, required=True)
@@ -1482,8 +1483,19 @@ def main(argv: list[str]) -> int:
     if args.cmd == "summarize":
         return summarize(args.rows, args.summary, repo_root, args.hosts, args.readme, args.compiler)
 
-    if read_rows(args.rows):
-        raise SystemExit("rows.csv already holds rows; the journal is append-only and never resumed")
+    existing_rows = read_rows(args.rows)
+    if existing_rows and not args.resume:
+        raise SystemExit("rows.csv already holds rows; pass --resume to append missing rows")
+    completed = {
+        (row["cell"], row["observation"], int(row["seed"]))
+        for row in existing_rows
+        if row["superseded"] == "0"
+    }
+    if len(completed) != len(existing_rows):
+        raise SystemExit("resume needs unique active rows with no superseded entries")
+    for row in existing_rows:
+        if OBSERVATION_ARMS.get(row["observation"]) != row["arm"]:
+            raise SystemExit("resume found an observation with the wrong arm")
     verify_core0()
     env = child_env()
     cells = build_cells(repo_root)
@@ -1515,6 +1527,7 @@ def main(argv: list[str]) -> int:
             "core": 0,
             "thread_env": {k: env[k] for k in sorted(env) if k.endswith("_THREADS")},
             "timeout_s": args.timeout,
+            "resume_rows": len(existing_rows),
         },
     )
 
@@ -1523,11 +1536,13 @@ def main(argv: list[str]) -> int:
     )
 
     total_jobs = len(cells) * len(SEEDS) * len(OBSERVATIONS)
-    sequence = 0
+    sequence = len(existing_rows)
     for cell in cells:
         for seed in SEEDS:
             rotation = (seed - SEEDS[0]) % len(OBSERVATIONS)
             for slot, observation in enumerate(observation_order(seed), start=1):
+                if (cell.system, observation, seed) in completed:
+                    continue
                 arm = OBSERVATION_ARMS[observation]
                 sequence += 1
                 row = run_one(
