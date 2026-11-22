@@ -1155,29 +1155,38 @@ pub struct Symmetrise {
     pub pair_cutoff: f64,
 }
 
-fn symmetry_order_and_blend<R: Rng + ?Sized>(orders: &[usize], rng: &mut R) -> (usize, f64) {
-    const ESTABLISHED_ORDERS: usize = 5;
-    const ORDER_BUCKETS: usize = ESTABLISHED_ORDERS + 1;
+const ESTABLISHED_SYMMETRY_ORDERS: usize = 5;
+const SYMMETRY_ORDER_BUCKETS: usize = ESTABLISHED_SYMMETRY_ORDERS + 1;
+const SYMMETRY_TAIL_BUCKETS: usize = SYMMETRY_ORDER_BUCKETS
+    * SYMMETRY_ORDER_BUCKETS
+    * SYMMETRY_ORDER_BUCKETS
+    * SYMMETRY_ORDER_BUCKETS;
 
-    let established = orders.len().min(ESTABLISHED_ORDERS);
+fn symmetry_order_from_draw(orders: &[usize], established_order: usize, blend_draw: f64) -> usize {
+    let established = orders.len().min(ESTABLISHED_SYMMETRY_ORDERS);
+    if orders.len() == established {
+        return established_order;
+    }
+    let tail_draw = blend_draw * SYMMETRY_TAIL_BUCKETS as f64;
+    if established_order != orders[established - 1] || tail_draw >= 1.0 {
+        return established_order;
+    }
+    let tail = ((tail_draw * (orders.len() - established) as f64) as usize)
+        .min(orders.len() - established - 1);
+    orders[established + tail]
+}
+
+fn symmetry_order_and_blend<R: Rng + ?Sized>(orders: &[usize], rng: &mut R) -> (usize, f64) {
+    let established = orders.len().min(ESTABLISHED_SYMMETRY_ORDERS);
     let established_order = orders[rng.random_range(0..established)];
     let blend_draw = rng.random::<f64>();
     let blend = 0.3 + 0.4 * blend_draw;
-    if orders.len() == established {
-        return (established_order, blend);
-    }
     // Draw among the established orders first, exactly as the five-order
-    // library did. Only its upper boundary can open a size-independent sixth
-    // bucket, using the existing blend draw so a retained order also retains
-    // the random stream. The bucket maps uniformly over every larger order.
-    let tail_draw = blend_draw * ORDER_BUCKETS as f64;
-    let order = if established_order == orders[established - 1] && tail_draw < 1.0 {
-        let tail = ((tail_draw * (orders.len() - established) as f64) as usize)
-            .min(orders.len() - established - 1);
-        orders[established + tail]
-    } else {
-        established_order
-    };
+    // library did. Only its upper boundary can open the general tail, after
+    // four nested size-independent sixth buckets. The existing blend draw
+    // supplies those digits, so retained orders also retain the random stream.
+    // The final bucket maps uniformly over every larger order.
+    let order = symmetry_order_from_draw(orders, established_order, blend_draw);
     (order, blend)
 }
 
@@ -1262,7 +1271,8 @@ mod cluster_move_tests {
             let mut actual_rng = StdRng::seed_from_u64(seed);
             let (actual_order, _) = symmetry_order_and_blend(&orders, &mut actual_rng);
             assert_eq!(actual_rng.random::<u64>(), expected_next);
-            if expected_order != established[4] || blend_draw * 6.0 >= 1.0 {
+            if expected_order != established[4] || blend_draw * SYMMETRY_TAIL_BUCKETS as f64 >= 1.0
+            {
                 assert_eq!(actual_order, expected_order);
             } else {
                 assert!(actual_order > established[4]);
@@ -1284,9 +1294,17 @@ mod cluster_move_tests {
         for count in &counts[..4] {
             assert!((11_000..=13_000).contains(count), "{counts:?}");
         }
-        assert!((9_000..=11_000).contains(&counts[4]), "{counts:?}");
-        assert!((1_500..=2_500).contains(&counts[5]), "{counts:?}");
-        assert_eq!(tail_orders.len(), orders.len() - established.len());
+        assert!((11_000..=13_000).contains(&counts[4]), "{counts:?}");
+        assert!(counts[5] < 30, "{counts:?}");
+        assert!(tail_orders.len() <= counts[5]);
+        for tail in 0..orders.len() - established.len() {
+            let draw = (tail as f64 + 0.5)
+                / (SYMMETRY_TAIL_BUCKETS * (orders.len() - established.len())) as f64;
+            assert_eq!(
+                symmetry_order_from_draw(&orders, established[4], draw),
+                orders[established.len() + tail]
+            );
+        }
     }
 
     #[test]
