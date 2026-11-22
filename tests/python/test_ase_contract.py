@@ -292,10 +292,8 @@ def test_nonperiodic_pt7_ignores_cell() -> None:
     np.testing.assert_allclose(mixed.get_forces(), bare.get_forces(), atol=1e-12)
 
 
-def test_rpc_bfgs_when_potserv_exists(tmp_path: Path) -> None:
-    binary = os.environ.get("RGPOT_POTSERV_BIN")
-    if not binary or not Path(binary).is_file():
-        pytest.skip("RGPOT_POTSERV_BIN is not set")
+@pytest.mark.rpc
+def test_rpc_bfgs_when_potserv_exists(tmp_path: Path, potserv_factory) -> None:
     if not rgpot.has_fortran_pots:
         pytest.skip("this build has no Fortran potentials")
     from rgpot.ase import RgpotRpcCalculator
@@ -305,8 +303,9 @@ def test_rpc_bfgs_when_potserv_exists(tmp_path: Path) -> None:
     BFGS(atoms, logfile=None, trajectory=None).run(fmax=0.05, steps=200)
     in_process = float(atoms.get_potential_energy())
 
+    srv = potserv_factory("EAMAl")
     rpc_atoms = pt7()
-    rpc = RgpotRpcCalculator.spawn(binary, potential="EAMAl")
+    rpc = RgpotRpcCalculator(host=srv.host, port=srv.port)
     try:
         rpc_atoms.calc = rpc
         BFGS(rpc_atoms, logfile=None, trajectory=None).run(fmax=0.05, steps=200)

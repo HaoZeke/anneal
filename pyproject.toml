@@ -113,6 +113,7 @@ python_files = ["test_*.py"]
 markers = [
   "thread_unsafe: mutates process-wide thread state (OpenMP or a pool)",
   "iterations: pytest-run-parallel repeat count for one test",
+  "rpc: requires the potserv RPC server binary and pycapnp",
 ]
 
 [[tool.mypy.overrides]]
