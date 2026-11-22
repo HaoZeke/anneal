@@ -375,8 +375,10 @@ bool setParams(const ::NWChemParams::Reader &params);
 - Errors :: no exception of its own; a false return covers a missing engine and
   a refusal.
 
-A library that is already loaded is kept, so a changed =enginePath= has no
-effect after the first successful load.
+A library that is already loaded is kept while =enginePath= is empty or names
+that same library.
+A non-empty =enginePath= that differs from the loaded library is loaded in its
+place, and a failed load leaves no engine loaded, so the call returns false.
 
 *** =rgpot::NWChemPot::getParams=
 
@@ -478,8 +480,9 @@ explicit SkalaPot(const SkalaConfig &config);
   from =NWChemPot=.
 
 The owned =NWChemPot= is default-constructed first, so a library found by the
-environment search is kept and =engine_path= is used only when that search
-fails.
+environment search is kept while =engine_path= is empty.
+A non-empty =engine_path= is passed on as =enginePath=, and that library is
+loaded in place of the one the search found.
 The build option is =-Dwith_skala=true= and it needs =-Dwith_rpc=true=.
 
 *** =rgpot::SkalaPot::config=
