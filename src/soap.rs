@@ -2101,7 +2101,9 @@ unsafe fn nearest_image_avx(px: f64, py: f64, pz: f64, tx: &[f64], ty: &[f64], t
                 _mm256_add_pd(_mm256_mul_pd(dx, dx), _mm256_mul_pd(dy, dy)),
                 _mm256_mul_pd(dz, dz),
             );
-            acc = _mm256_min_pd(acc, d2);
+            // x86 min returns its second operand for an unordered lane.
+            // Keeping the accumulator there matches `f64::min`.
+            acc = _mm256_min_pd(d2, acc);
             j += 4;
         }
         let mut tmp = [0.0_f64; 4];
@@ -4638,6 +4640,32 @@ mod tests {
                 assert_eq!(left.0, right.0);
                 assert_eq!(left.1.to_bits(), right.1.to_bits());
             }
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn avx_nearest_image_matches_scalar_for_non_finite_values_and_ties() {
+        if !std::is_x86_feature_detected!("avx") {
+            return;
+        }
+        let tx = [0.0, 0.0, 1.0, f64::INFINITY, f64::NAN, -2.0, -2.0];
+        let ty = [0.0; 7];
+        let tz = [0.0; 7];
+        for [px, py, pz] in [
+            [0.0, 0.0, 0.0],
+            [-2.0, 0.0, 0.0],
+            [f64::NAN, 0.0, 0.0],
+            [f64::INFINITY, 0.0, 0.0],
+            [f64::NEG_INFINITY, 0.0, 0.0],
+        ] {
+            let scalar = nearest_image_scalar(px, py, pz, &tx, &ty, &tz);
+            let vector = unsafe { nearest_image_avx(px, py, pz, &tx, &ty, &tz) };
+            assert_eq!(
+                scalar.to_bits(),
+                vector.to_bits(),
+                "query [{px:?}, {py:?}, {pz:?}]"
+            );
         }
     }
 }

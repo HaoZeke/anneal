@@ -365,7 +365,9 @@ impl Cloud {
                     _mm256_mul_pd(dz, dz),
                 );
                 let closer = _mm256_cmp_pd(distance, lane_best, _CMP_LT_OQ);
-                lane_best = _mm256_min_pd(lane_best, distance);
+                // x86 min selects its second operand when either lane is NaN.
+                // Keep the accumulated scalar-style minimum in that position.
+                lane_best = _mm256_min_pd(distance, lane_best);
                 lane_best_index = _mm256_blendv_pd(lane_best_index, lane_index, closer);
                 lane_index = _mm256_add_pd(lane_index, four);
             }
@@ -585,7 +587,8 @@ impl Cloud {
                     _mm256_add_pd(_mm256_mul_pd(dx, dx), _mm256_mul_pd(dy, dy)),
                     _mm256_mul_pd(dz, dz),
                 );
-                best_lanes = _mm256_min_pd(best_lanes, distance);
+                // An unordered distance is not a strict scalar improvement.
+                best_lanes = _mm256_min_pd(distance, best_lanes);
             }
             index += 4;
         }
@@ -624,7 +627,7 @@ impl Cloud {
         let dz = image[2] - here[2];
         let self_distance = (dx * dx + dy * dy) + dz * dz;
         let mut best = self.nearest_squared_range(image, 0, source);
-        let mut matches = false;
+        let mut matches = source == 0;
         if self_distance < best {
             best = self_distance;
             matches = true;
@@ -746,7 +749,8 @@ impl Cloud {
                             _mm256_add_pd(_mm256_mul_pd(dx, dx), _mm256_mul_pd(dy, dy)),
                             _mm256_mul_pd(dz, dz),
                         );
-                        best[lane] = _mm256_min_pd(best[lane], distance);
+                        // An unordered distance is not a strict scalar improvement.
+                        best[lane] = _mm256_min_pd(distance, best[lane]);
                     }
                 }
                 index += 4;
@@ -2181,6 +2185,11 @@ mod tests {
             if n > 4 {
                 queries.push(cloud.point(1));
             }
+            queries.extend([
+                [f64::NAN, 0.0, 0.0],
+                [f64::INFINITY, 0.0, 0.0],
+                [f64::NEG_INFINITY, 0.0, 0.0],
+            ]);
             for query in queries {
                 let scalar = cloud.nearest_index_scalar(query);
                 let vector = unsafe { cloud.nearest_index_avx2(query) };
@@ -2189,6 +2198,27 @@ mod tests {
                     (vector.0, vector.1.to_bits()),
                     "n={n} query={query:?}"
                 );
+                let squared = unsafe { cloud.nearest_squared_avx2(query) };
+                assert_eq!(
+                    scalar.1.to_bits(),
+                    squared.to_bits(),
+                    "squared n={n} query={query:?}"
+                );
+                #[cfg(anneal_avx512)]
+                if std::is_x86_feature_detected!("avx512f") {
+                    let wide_index = unsafe { cloud.nearest_index_avx512(query) };
+                    assert_eq!(
+                        (scalar.0, scalar.1.to_bits()),
+                        (wide_index.0, wide_index.1.to_bits()),
+                        "avx512 index n={n} query={query:?}"
+                    );
+                    let wide_squared = unsafe { cloud.nearest_squared_avx512(query) };
+                    assert_eq!(
+                        scalar.1.to_bits(),
+                        wide_squared.to_bits(),
+                        "avx512 squared n={n} query={query:?}"
+                    );
+                }
                 for source in 0..n {
                     let matched = cloud.nearest_matches_index(query, source);
                     assert_eq!(
@@ -2197,6 +2227,65 @@ mod tests {
                         "n={n} source={source} query={query:?}"
                     );
                 }
+            }
+        }
+
+        let cloud = Cloud {
+            xs: vec![
+                0.0,
+                0.0,
+                1.0,
+                f64::INFINITY,
+                f64::NEG_INFINITY,
+                f64::NAN,
+                2.0,
+                3.0,
+                4.0,
+            ],
+            ys: vec![0.0; 9],
+            zs: vec![0.0; 9],
+            gaps: std::cell::RefCell::new(None),
+        };
+        let queries = [
+            [0.0, 0.0, 0.0],
+            [2.5, 0.0, 0.0],
+            [f64::NAN, 0.0, 0.0],
+            [f64::INFINITY, 0.0, 0.0],
+            [f64::NEG_INFINITY, 0.0, 0.0],
+        ];
+        let mut batched = [0.0; 5];
+        unsafe { cloud.nearest_squared_batch_avx2(&queries, &mut batched) };
+        for (query, batch) in queries.into_iter().zip(batched) {
+            let scalar = cloud.nearest_index_scalar(query);
+            let vector = unsafe { cloud.nearest_index_avx2(query) };
+            assert_eq!(
+                (scalar.0, scalar.1.to_bits()),
+                (vector.0, vector.1.to_bits()),
+                "adversarial query={query:?}"
+            );
+            assert_eq!(
+                scalar.1.to_bits(),
+                unsafe { cloud.nearest_squared_avx2(query) }.to_bits(),
+                "adversarial squared query={query:?}"
+            );
+            assert_eq!(
+                scalar.1.to_bits(),
+                batch.to_bits(),
+                "adversarial batch query={query:?}"
+            );
+            #[cfg(anneal_avx512)]
+            if std::is_x86_feature_detected!("avx512f") {
+                let wide_index = unsafe { cloud.nearest_index_avx512(query) };
+                assert_eq!(
+                    (scalar.0, scalar.1.to_bits()),
+                    (wide_index.0, wide_index.1.to_bits()),
+                    "adversarial avx512 index query={query:?}"
+                );
+                assert_eq!(
+                    scalar.1.to_bits(),
+                    unsafe { cloud.nearest_squared_avx512(query) }.to_bits(),
+                    "adversarial avx512 squared query={query:?}"
+                );
             }
         }
     }
