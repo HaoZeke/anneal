@@ -37,11 +37,11 @@ enum class PotType {
   ZBL,         //!<  Screened nuclear repulsion (Ziegler-Biersack-Littmark).
   SWSi,        //!<  Stillinger-Weber silicon. eOn epsilon, 2.3149945 eV.
   EDIP,        //!<  Environment-dependent interatomic potential (silicon).
-  LenoskySi,   //!<  Lenosky tight-binding-fit silicon.
+  LenoskySi,   //!<  Lenosky cubic-spline MEAM silicon, force-matched to LDA.
   TersoffSi,   //!<  Tersoff silicon; 1989 Si-C when any Z is not 14.
   EAMAl,       //!<  Double-exponential EAM aluminium.
   FeHe,        //!<  Fe-He embedded atom with species-dependent terms.
-  WaterH,      //!<  TIP4P water with an interacting hydrogen atom.
+  WaterH,      //!<  Andersson potH-H2O surface for one H atom in water.
   D3,          //!<  Grimme DFT-D3 via s-dftd3 (in-process Potential summand).
   D4,          //!<  Grimme DFT-D4 via dftd4 (in-process Potential summand).
   Expr,        //!<  Lepton expression over named Potential children.
