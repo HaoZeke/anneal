@@ -3281,6 +3281,7 @@ mod tests {
         let potential = PairPotential::lennard_jones(5);
         let cfg = Config::for_cluster(5);
         let mut ledger = Ledger::new(180);
+        ledger.keep_all_evidence();
         let start = Array1::from_vec(vec![
             0.0, 0.0, 0.0, 1.2, 0.2, 0.0, 0.2, 1.3, 0.1, -0.4, 0.5, 1.1, 0.7, -0.6, 0.8,
         ]);
@@ -3988,6 +3989,7 @@ mod tests {
         let pot = PairPotential::lennard_jones(13);
         let cfg = Config::for_cluster(13);
         let mut ledger = Ledger::new(20_000);
+        ledger.keep_all_evidence();
         let _ = search(&pot, &cfg, &mut ledger, 5);
         let validated: Vec<_> = ledger
             .quench_boundaries()

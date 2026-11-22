@@ -196,35 +196,53 @@ enum AdoptionHistory {
     Observed(Option<HistoryReport>),
 }
 
-/// Run evidence in execution order, optionally limited to its newest
-/// entries.
+/// How much run evidence a ledger keeps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Keep {
+    /// Within a run, keep an entry until a checkpoint has shown it, and
+    /// none when no checkpoint will. Outside a run, keep every entry.
+    Shown,
+    /// Keep the newest entries, at most this many.
+    Recent(usize),
+    /// Keep every entry.
+    All,
+}
+
+/// Run evidence in execution order, kept as [`Keep`] says.
 ///
-/// Without a cap every entry is kept, as before caps existed. With one, the
-/// view is the newest `cap` entries and the older ones are counted as
-/// dropped. Storage is trimmed back to `cap` once it reaches twice that, so
-/// the trim costs amortised constant time per entry.
+/// `run` is `None` outside a run, and inside one says whether a checkpoint
+/// will show the entries. Under [`Keep::Recent`] storage is trimmed back to
+/// the cap once it reaches twice that, so the trim costs amortised constant
+/// time per entry. Every entry is counted, kept or not.
 #[derive(Debug, Clone)]
 struct Retained<T> {
     items: Vec<T>,
-    cap: Option<usize>,
+    keep: Keep,
+    run: Option<bool>,
     recorded: usize,
 }
 
 impl<T> Retained<T> {
-    fn new(cap: Option<usize>) -> Self {
+    fn new(keep: Keep, run: Option<bool>) -> Self {
         Self {
             items: Vec::new(),
-            cap,
+            keep,
+            run,
             recorded: 0,
         }
     }
 
     fn push(&mut self, item: T) {
         self.recorded += 1;
-        match self.cap {
-            None => self.items.push(item),
-            Some(0) => {}
-            Some(cap) => {
+        match self.keep {
+            Keep::All => self.items.push(item),
+            Keep::Shown => {
+                if self.run != Some(false) {
+                    self.items.push(item);
+                }
+            }
+            Keep::Recent(0) => {}
+            Keep::Recent(cap) => {
                 if self.items.len() >= cap.saturating_mul(2) {
                     self.items.drain(..self.items.len() - cap);
                 }
@@ -233,16 +251,29 @@ impl<T> Retained<T> {
         }
     }
 
-    fn set_cap(&mut self, cap: Option<usize>) {
-        self.cap = cap;
+    fn set_keep(&mut self, keep: Keep) {
+        self.keep = keep;
         let drop = self.items.len() - self.as_slice().len();
         self.items.drain(..drop);
     }
 
+    /// Enter or leave a run, returning the previous state.
+    fn enter(&mut self, run: Option<bool>) -> Option<bool> {
+        std::mem::replace(&mut self.run, run)
+    }
+
+    /// A checkpoint has shown every kept entry.
+    fn shown(&mut self) {
+        if self.keep == Keep::Shown {
+            self.items.clear();
+        }
+    }
+
     fn as_slice(&self) -> &[T] {
-        let keep = self
-            .cap
-            .map_or(self.items.len(), |cap| cap.min(self.items.len()));
+        let keep = match self.keep {
+            Keep::Recent(cap) => cap.min(self.items.len()),
+            Keep::Shown | Keep::All => self.items.len(),
+        };
         &self.items[self.items.len() - keep..]
     }
 
@@ -685,8 +716,8 @@ pub struct Ledger {
     /// State attaining [`Ledger::best`].
     pub best_state: Option<Array1<f64>>,
     quench_boundaries: Retained<QuenchBoundary>,
-    /// Newest quench boundaries and accepted transitions a run keeps.
-    evidence_cap: Option<usize>,
+    /// How many quench boundaries and accepted transitions a run keeps.
+    evidence: Keep,
     diagnostic_quench: bool,
     /// Energy at or below which the hop may stop.
     target: Option<f64>,
@@ -766,8 +797,8 @@ impl Ledger {
             fract: 0.0,
             best: f64::INFINITY,
             best_state: None,
-            quench_boundaries: Retained::new(None),
-            evidence_cap: None,
+            quench_boundaries: Retained::new(Keep::Shown, None),
+            evidence: Keep::Shown,
             diagnostic_quench: false,
             target: None,
             stop: None,
@@ -911,17 +942,30 @@ impl Ledger {
     pub fn slice(&self, budget: usize) -> Self {
         let mut child = Self::new(budget);
         child.stop = self.stop.clone();
-        if let Some(cap) = self.evidence_cap {
-            child.keep_recent_evidence(cap);
-        }
+        child.evidence = self.evidence;
+        child.quench_boundaries.set_keep(self.evidence);
         child
+    }
+
+    /// Keep every quench boundary on this ledger and every accepted
+    /// transition of a run charged to it.
+    ///
+    /// This is the opt-in for a caller that reads
+    /// [`Ledger::quench_boundaries`] or [`Outcome::accepted_transitions`]
+    /// after a run: both then hold the whole run, and memory grows with the
+    /// budget. By default a run keeps an entry only until a checkpoint has
+    /// shown it, and keeps none when it has no checkpoint; boundaries
+    /// recorded outside a run are kept. The search itself never reads
+    /// either record, so the choice does not change the run.
+    pub fn keep_all_evidence(&mut self) {
+        self.evidence = Keep::All;
+        self.quench_boundaries.set_keep(Keep::All);
     }
 
     /// Keep only the newest `cap` quench boundaries on this ledger, and the
     /// newest `cap` accepted transitions of a run charged to it.
     ///
-    /// Without this call both grow with the budget. With it, memory holds
-    /// at most twice `cap` of each, [`Ledger::quench_boundaries`] and
+    /// Memory holds at most twice `cap` of each, [`Ledger::quench_boundaries`] and
     /// [`Outcome::accepted_transitions`] are the newest `cap` in execution
     /// order, and [`Ledger::dropped_quench_boundaries`] and
     /// [`Outcome::dropped_transitions`] count the older ones. A checkpoint
@@ -929,13 +973,8 @@ impl Ledger {
     /// itself never reads either record, so the cap changes a run only
     /// through a checkpoint that acts on what it is shown.
     pub fn keep_recent_evidence(&mut self, cap: usize) {
-        self.evidence_cap = Some(cap);
-        self.quench_boundaries.set_cap(Some(cap));
-    }
-
-    /// The cap set by [`Ledger::keep_recent_evidence`], if any.
-    pub fn evidence_cap(&self) -> Option<usize> {
-        self.evidence_cap
+        self.evidence = Keep::Recent(cap);
+        self.quench_boundaries.set_keep(Keep::Recent(cap));
     }
 
     /// Binds this ledger's stop on the running thread, if it has one.
@@ -1214,13 +1253,17 @@ impl Ledger {
 
     /// Relaxation boundaries recorded against this ledger in execution order.
     ///
-    /// Under [`Ledger::keep_recent_evidence`] these are the newest ones.
+    /// By default a run keeps a boundary only until a checkpoint has shown
+    /// it, so after a run these are the ones recorded since its last
+    /// checkpoint, or none when it had no checkpoint. Boundaries recorded
+    /// outside a run are kept. [`Ledger::keep_all_evidence`] keeps every
+    /// one; under [`Ledger::keep_recent_evidence`] these are the newest.
     pub fn quench_boundaries(&self) -> &[QuenchBoundary] {
         self.quench_boundaries.as_slice()
     }
 
-    /// Relaxation boundaries recorded but no longer kept under
-    /// [`Ledger::keep_recent_evidence`]. Zero without a cap.
+    /// Relaxation boundaries recorded but not kept. Zero under
+    /// [`Ledger::keep_all_evidence`].
     pub fn dropped_quench_boundaries(&self) -> usize {
         self.quench_boundaries.dropped()
     }
@@ -1252,10 +1295,13 @@ pub struct Outcome {
     pub final_energy: f64,
     /// Accepted live-chain edges in execution order.
     ///
-    /// Under [`Ledger::keep_recent_evidence`] these are the newest ones.
+    /// By default these are the edges made since the run's last checkpoint,
+    /// or none when it had no checkpoint. [`Ledger::keep_all_evidence`]
+    /// keeps every edge; under [`Ledger::keep_recent_evidence`] these are
+    /// the newest.
     pub accepted_transitions: Vec<AcceptedTransition>,
-    /// Accepted transitions the run made but did not keep under
-    /// [`Ledger::keep_recent_evidence`]. Zero without a cap.
+    /// Accepted transitions the run made but did not keep. Zero under
+    /// [`Ledger::keep_all_evidence`].
     pub dropped_transitions: usize,
     /// Hops taken.
     pub hops: usize,
@@ -4368,6 +4414,47 @@ fn run_full<'g, R, H>(
     start: ArrayView1<f64>,
     ledger: &mut Ledger,
     relax: Relax<'_>,
+    grad: Option<&mut GradFn<'g>>,
+    energy_grad: Option<&mut EnergyGradFn<'g>>,
+    external_bias: Option<&mut BasinBias<ClusterFingerprint>>,
+    settle: Option<Settle<'_>>,
+    history: Option<&mut dyn HistoryHook>,
+    checkpoint_interval: Option<usize>,
+    checkpoint: &mut H,
+    rng: &mut R,
+) -> Result<Outcome, SearchError>
+where
+    R: Rng + ?Sized,
+    H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
+{
+    let outer = ledger
+        .quench_boundaries
+        .enter(Some(checkpoint_interval.is_some()));
+    let outcome = run_watched(
+        cfg,
+        start,
+        ledger,
+        relax,
+        grad,
+        energy_grad,
+        external_bias,
+        settle,
+        history,
+        checkpoint_interval,
+        checkpoint,
+        rng,
+    );
+    ledger.quench_boundaries.enter(outer);
+    outcome
+}
+
+/// [`run_full`] with the ledger told whether a checkpoint will see this
+/// run's quench boundaries.
+fn run_watched<'g, R, H>(
+    cfg: &Config,
+    start: ArrayView1<f64>,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
     mut grad: Option<&mut GradFn<'g>>,
     mut energy_grad: Option<&mut EnergyGradFn<'g>>,
     external_bias: Option<&mut BasinBias<ClusterFingerprint>>,
@@ -4939,7 +5026,8 @@ where
     let mut orbit_duplicates = 0usize;
     let mut orbit_gain = 0.0_f64;
     let surface_hops = (0usize, 0usize, 0.0_f64);
-    let mut accepted_transitions = Retained::new(ledger.evidence_cap);
+    let mut accepted_transitions =
+        Retained::new(ledger.evidence, Some(checkpoint_interval.is_some()));
     // All live-state replacement consumes one complete destination record.
     // Ordinary hops supply their paid history report; auxiliary adoptions
     // observe their paid certificate once without issuing another PES call.
@@ -6034,6 +6122,8 @@ where
                 checkpoint_hops = hops;
                 checkpoint_quench_start = ledger.quench_boundaries.recorded();
                 checkpoint_transition_start = accepted_transitions.recorded();
+                ledger.quench_boundaries.shown();
+                accepted_transitions.shown();
                 next_checkpoint = ledger
                     .spent()
                     .checked_div(interval)
@@ -10699,6 +10789,7 @@ mod tests {
                 crate::catalog::offer_known_minimum(-100.0, &known);
             }
             let mut ledger = Ledger::new(80);
+            ledger.keep_all_evidence();
             let mut rng = StdRng::seed_from_u64(1234);
             let start = random_cluster(
                 cfg.n_points,
@@ -12190,6 +12281,7 @@ mod tests {
     fn outcome_keeps_live_energy_and_accepted_trajectory_edges() {
         let cfg = Config::for_cluster(6);
         let mut ledger = Ledger::new(4000);
+        ledger.keep_all_evidence();
         let mut relax = toy_relax;
         let out = optimize(&cfg, &mut ledger, &mut relax, 19).expect("finite start");
 
@@ -12217,6 +12309,7 @@ mod tests {
     fn validated_accepted_transitions_retain_their_fresh_gradient() {
         let cfg = Config::for_cluster(6);
         let mut ledger = Ledger::new(4000);
+        ledger.keep_all_evidence();
         let mut relax = toy_relax;
         let mut grad = |ledger: &mut Ledger, x: ArrayView1<f64>| {
             ledger.charge().then(|| Array1::zeros(x.len()))

@@ -17,6 +17,7 @@ fn walk(cfg: &Config, budget: usize, seed: u64) -> Outcome {
     let mut rng = StdRng::seed_from_u64(seed);
     let start = random_cluster_in_radius(ATOMS, cfg.start_radius(), cfg.min_separation, &mut rng);
     let mut ledger = Ledger::new(budget);
+    ledger.keep_all_evidence();
     let mut optimiser = WarmLbfgs::default();
     let mut relax = |led: &mut Ledger, x: ndarray::ArrayView1<f64>, iterations: usize| {
         optimiser.forget();

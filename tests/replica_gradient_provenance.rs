@@ -47,6 +47,7 @@ fn independently_initialized_rung_retains_its_own_gradient_on_activation() {
         Some(harmonic_evaluation(state).1)
     };
     let mut ledger = Ledger::new(100);
+    ledger.keep_all_evidence();
     let mut rng = StdRng::seed_from_u64(0x6a72_6164);
     let outcome = run_with_gradient(
         &cfg,

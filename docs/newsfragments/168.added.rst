@@ -1,6 +1,7 @@
-``Ledger::keep_recent_evidence(cap)`` keeps only the newest ``cap``
-quench boundaries on the ledger and the newest ``cap`` accepted
-transitions of a run charged to it. ``Ledger::dropped_quench_boundaries``
-and ``Outcome::dropped_transitions`` count the older ones. Without the
-call both records grow with the budget, as before. ``h2h_seed`` takes the
-cap as an optional ninth argument.
+``Ledger::keep_all_evidence()`` keeps every quench boundary and accepted
+transition of a run, and ``Ledger::keep_recent_evidence(cap)`` keeps the
+newest ``cap`` of each. ``Ledger::dropped_quench_boundaries`` and
+``Outcome::dropped_transitions`` count what was not kept.
+``RelaxStats::plain_holds`` and ``RelaxStats::hold_lifts`` count the
+plain-surface holds a failed restraint block began and the holds lifted
+again. ``h2h_seed`` takes the cap as an optional ninth argument.

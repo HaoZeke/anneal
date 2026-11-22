@@ -37,6 +37,7 @@ fn trajectory_hash() -> String {
     let mut rng = StdRng::seed_from_u64(SEED);
     let start = random_cluster_in_radius(ATOMS, cfg.start_radius(), cfg.min_separation, &mut rng);
     let mut ledger = Ledger::new(BUDGET);
+    ledger.keep_all_evidence();
     let mut optimiser = WarmLbfgs::default();
     let mut relax = |led: &mut Ledger, x: ndarray::ArrayView1<f64>, iterations: usize| {
         optimiser.forget();

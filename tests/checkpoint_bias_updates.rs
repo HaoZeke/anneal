@@ -54,6 +54,7 @@ fn run(action: CheckpointAction) -> (Outcome, BasinBias<ClusterFingerprint>, Vec
     );
     let mut calls = Vec::new();
     let mut ledger = Ledger::new(128);
+    ledger.keep_all_evidence();
     let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _| {
         if ledger.charge() {
             calls.push(x.to_owned());

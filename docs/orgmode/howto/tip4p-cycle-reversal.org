@@ -33,6 +33,7 @@ The Python =Config= has no switch for this move.
 * Count accepted hops per move
 
 =Outcome::accepted_transitions= records every accepted hop with the name of the move that proposed it.
+A run keeps that record only when its ledger asks for it with =Ledger::keep_all_evidence=; by default a run without a checkpoint keeps none.
 This program runs one start with the move on and then off, at 200,000 calls each.
 The objective is =GminTip4p=, so the program installs its body frame with =gmin_water_geometry=.
 The move finds the hydrogens through that geometry.
@@ -57,6 +58,7 @@ fn main() {
             *reverse_cycles = reverse;
         }
         let mut ledger = Ledger::new(200_000);
+        ledger.keep_all_evidence();
         let (out, _) = search_from(&water, &cfg, &mut ledger, start.view(), 1).expect("finite start");
         let mut accepted: BTreeMap<&str, usize> = BTreeMap::new();
         for t in &out.accepted_transitions {

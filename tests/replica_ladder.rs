@@ -20,7 +20,9 @@ const BUDGET: usize = 30_000;
 const SEEDS: u64 = 8;
 
 fn lj_run_with(cfg: &Config, seed: u64, budget: usize, gradient: bool) -> Outcome {
-    lj_run_on(cfg, seed, &mut Ledger::new(budget), gradient)
+    let mut ledger = Ledger::new(budget);
+    ledger.keep_all_evidence();
+    lj_run_on(cfg, seed, &mut ledger, gradient)
 }
 
 fn lj_run_on(cfg: &Config, seed: u64, ledger: &mut Ledger, gradient: bool) -> Outcome {

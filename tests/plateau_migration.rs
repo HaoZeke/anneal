@@ -122,6 +122,7 @@ fn a_recommended_binary_plateau_migrates_to_the_stored_lower_seat() {
         }
     };
     let mut ledger = Ledger::new(4_000);
+    ledger.keep_all_evidence();
     let mut rng = StdRng::seed_from_u64(11);
     let mut checks = 0_usize;
     let mut checkpoint = |_snapshot: anneal_core::methods::cluster_hopping::ChainCheckpoint<'_>| {

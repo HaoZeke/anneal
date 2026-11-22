@@ -299,6 +299,7 @@ fn run_hopping(
     config.symmetrise_on_stall = moves.symmetrise_on_stall;
     config.continuous_symmetry = moves.continuous_symmetry;
     let mut ledger = Ledger::new(budget);
+    ledger.keep_all_evidence();
     let mut optimizer = WarmLbfgs::default();
     let mut relax = |ledger: &mut Ledger, start: ArrayView1<'_, f64>, steps: usize| {
         let before = ledger.spent();
@@ -544,6 +545,7 @@ fn run_minima_hopping_with_history<'a>(
         min_well_rms: 0.0,
     };
     let mut ledger = Ledger::new(budget);
+    ledger.keep_all_evidence();
     let mut optimizer = WarmLbfgs::default();
     let initial_quench_start = ledger.spent();
     let initial_quench_steps = ledger.remaining().saturating_sub(1);

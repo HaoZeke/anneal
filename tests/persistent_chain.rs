@@ -36,7 +36,9 @@ fn no_action_checkpoints_are_identical_to_an_uninterrupted_run() {
     let mut uninterrupted_rng = seeding_rng.clone();
     let mut checkpointed_rng = seeding_rng;
     let mut uninterrupted_ledger = Ledger::new(4_000);
+    uninterrupted_ledger.keep_all_evidence();
     let mut checkpointed_ledger = Ledger::new(4_000);
+    checkpointed_ledger.keep_all_evidence();
     let mut uninterrupted_bias = fresh_bias(&cfg);
     let mut checkpointed_bias = fresh_bias(&cfg);
     let mut uninterrupted_relax = toy_relax;
@@ -178,6 +180,7 @@ fn checkpoint_boundary_proposal_is_quenched_and_chain_continues() {
     let mut rng = StdRng::seed_from_u64(0xb0_0d_a7);
     let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
     let mut ledger = Ledger::new(4_000);
+    ledger.keep_all_evidence();
     let mut bias = fresh_bias(&cfg);
     let mut relax = toy_relax;
     let proposed = start.mapv(|value| 1.1 * value);
@@ -352,6 +355,7 @@ fn unvalidated_screen_result_never_becomes_the_live_chain_state() {
     let start = Array1::from(vec![-0.6, 0.0, 0.0, 0.6, 0.0, 0.0]);
     let screened = &start + 0.25;
     let mut ledger = Ledger::new(100);
+    ledger.keep_all_evidence();
     let mut rng = StdRng::seed_from_u64(0x5c_4e_e7);
     let mut relax_calls = 0usize;
     let mut relax = |ledger: &mut Ledger, _state: ArrayView1<f64>, steps: usize| {
@@ -460,7 +464,9 @@ fn checkpoint_external_adopt_charges_the_work_then_moves_the_live_chain() {
     let mut boundary_rng = seeding_rng.clone();
     let mut external_rng = seeding_rng;
     let mut boundary_ledger = Ledger::new(6_000);
+    boundary_ledger.keep_all_evidence();
     let mut external_ledger = Ledger::new(6_000);
+    external_ledger.keep_all_evidence();
     let mut boundary_bias = fresh_bias(&cfg);
     let mut external_bias = fresh_bias(&cfg);
     let mut boundary_relax = toy_relax;

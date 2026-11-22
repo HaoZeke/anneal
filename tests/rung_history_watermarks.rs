@@ -99,6 +99,7 @@ fn each_rung_accounts_for_foreign_history_visits_in_its_own_bias() {
             CheckpointAction::Continue
         };
         let mut ledger = Ledger::new(64);
+        ledger.keep_all_evidence();
         let mut rng = StdRng::seed_from_u64(0x7275_6e67);
         let outcome = run_with_history_at_checkpoints(
             &cfg,

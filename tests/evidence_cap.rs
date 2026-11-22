@@ -1,10 +1,11 @@
-//! The run evidence a ledger keeps, with and without a cap.
+//! The run evidence a ledger keeps.
 //!
-//! Without [`Ledger::keep_recent_evidence`] every quench boundary and
-//! accepted transition is kept. The digest below pins that full record,
-//! checkpoint slices included, as the run produced it before caps existed.
-//! A cap keeps the newest entries and counts the rest, and the run itself
-//! is the same to the bit.
+//! Under [`Ledger::keep_all_evidence`] every quench boundary and accepted
+//! transition is kept. The digest below pins that full record, checkpoint
+//! slices included, as the run produced it when every ledger kept it all.
+//! By default a run keeps an entry only until a checkpoint has shown it,
+//! and [`Ledger::keep_recent_evidence`] keeps the newest entries. Either
+//! way the rest is counted, and the run itself is the same to the bit.
 //!
 //! As in `lj_trajectory_pin.rs`, the scalar dot path is forced so the
 //! digest is one trajectory on every target.
@@ -13,7 +14,7 @@ use anneal_core::methods::cluster_hopping::{
     AcceptedTransition, ChainCheckpoint, CheckpointAction, Config, Ledger, Outcome, QuenchBoundary,
     QuenchStatus, random_cluster_in_radius,
 };
-use anneal_core::methods::cluster_search::search_from_with_checkpoint;
+use anneal_core::methods::cluster_search::{search_from, search_from_with_checkpoint};
 use anneal_core::potentials::PairPotential;
 use ndarray::ArrayView1;
 use rand::SeedableRng;
@@ -26,6 +27,13 @@ const BUDGET: usize = 30_000;
 const INTERVAL: usize = 2_000;
 const PINNED: &str = "ea91af5356221b4304b28eec4d2984656fcc8491b7b43b6add2461a0866df9e1";
 
+#[derive(Clone, Copy)]
+enum Keep {
+    Default,
+    All,
+    Recent(usize),
+}
+
 struct Run {
     outcome: Outcome,
     boundaries: Vec<QuenchBoundary>,
@@ -33,16 +41,23 @@ struct Run {
     checkpoints: Vec<(usize, Vec<QuenchBoundary>, Vec<AcceptedTransition>)>,
 }
 
-fn run(cap: Option<usize>) -> Run {
+fn ledger(keep: Keep) -> Ledger {
+    let mut ledger = Ledger::new(BUDGET);
+    match keep {
+        Keep::Default => {}
+        Keep::All => ledger.keep_all_evidence(),
+        Keep::Recent(cap) => ledger.keep_recent_evidence(cap),
+    }
+    ledger
+}
+
+fn run(keep: Keep) -> Run {
     let _ = rgmin::vecops::force_simd_path("scalar");
     let cfg = Config::recommended(ATOMS);
     let potential = PairPotential::lennard_jones(ATOMS);
     let mut rng = StdRng::seed_from_u64(SEED);
     let start = random_cluster_in_radius(ATOMS, cfg.start_radius(), cfg.min_separation, &mut rng);
-    let mut ledger = Ledger::new(BUDGET);
-    if let Some(cap) = cap {
-        ledger.keep_recent_evidence(cap);
-    }
+    let mut ledger = ledger(keep);
     let mut checkpoints = Vec::new();
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
         checkpoints.push((
@@ -163,17 +178,106 @@ fn newest<T>(items: &[T], cap: usize) -> &[T] {
     &items[items.len() - cap.min(items.len())..]
 }
 
+fn same_trajectory(a: &Outcome, b: &Outcome) -> bool {
+    let mut x = Sha256::new();
+    let mut y = Sha256::new();
+    trajectory(&mut x, a);
+    trajectory(&mut y, b);
+    x.finalize() == y.finalize()
+}
+
 #[test]
-fn the_default_ledger_keeps_every_record_as_before() {
-    let full = run(None);
+fn keeping_all_evidence_keeps_every_record_as_before() {
+    let full = run(Keep::All);
     assert_eq!(full.dropped_boundaries, 0);
     assert_eq!(full.outcome.dropped_transitions, 0);
     assert_eq!(digest(&full), PINNED);
 }
 
 #[test]
+fn by_default_a_run_keeps_what_its_checkpoints_have_yet_to_show() {
+    let full = run(Keep::All);
+    let kept = run(Keep::Default);
+    assert!(
+        same_trajectory(&full.outcome, &kept.outcome),
+        "the default changed the trajectory"
+    );
+    assert_eq!(kept.checkpoints.len(), full.checkpoints.len());
+    for ((charged, b_kept, t_kept), (charged_full, b_full, t_full)) in
+        kept.checkpoints.iter().zip(&full.checkpoints)
+    {
+        assert_eq!(charged, charged_full);
+        assert_eq!(
+            b_kept.iter().map(boundary_bits).collect::<Vec<_>>(),
+            b_full.iter().map(boundary_bits).collect::<Vec<_>>(),
+            "checkpoint at {charged} saw other boundaries"
+        );
+        assert_eq!(
+            t_kept.iter().map(transition_bits).collect::<Vec<_>>(),
+            t_full.iter().map(transition_bits).collect::<Vec<_>>(),
+            "checkpoint at {charged} saw other transitions"
+        );
+    }
+    let shown_boundaries: usize = full.checkpoints.iter().map(|(_, b, _)| b.len()).sum();
+    let shown_transitions: usize = full.checkpoints.iter().map(|(_, _, t)| t.len()).sum();
+    assert!(shown_boundaries > 0 && shown_transitions > 0);
+    assert_eq!(
+        kept.boundaries
+            .iter()
+            .map(boundary_bits)
+            .collect::<Vec<_>>(),
+        full.boundaries[shown_boundaries..]
+            .iter()
+            .map(boundary_bits)
+            .collect::<Vec<_>>(),
+        "the default did not keep exactly the boundaries after the last checkpoint"
+    );
+    assert_eq!(
+        kept.outcome
+            .accepted_transitions
+            .iter()
+            .map(transition_bits)
+            .collect::<Vec<_>>(),
+        full.outcome.accepted_transitions[shown_transitions..]
+            .iter()
+            .map(transition_bits)
+            .collect::<Vec<_>>(),
+        "the default did not keep exactly the transitions after the last checkpoint"
+    );
+    assert_eq!(kept.dropped_boundaries, shown_boundaries);
+    assert_eq!(kept.outcome.dropped_transitions, shown_transitions);
+}
+
+#[test]
+fn by_default_a_run_without_a_checkpoint_keeps_no_evidence() {
+    let _ = rgmin::vecops::force_simd_path("scalar");
+    let cfg = Config::recommended(ATOMS);
+    let potential = PairPotential::lennard_jones(ATOMS);
+    let mut rng = StdRng::seed_from_u64(SEED);
+    let start = random_cluster_in_radius(ATOMS, cfg.start_radius(), cfg.min_separation, &mut rng);
+    let mut all = ledger(Keep::All);
+    let (full, _) =
+        search_from(&potential, &cfg, &mut all, start.view(), SEED).expect("finite start");
+    let mut default = ledger(Keep::Default);
+    let (kept, _) =
+        search_from(&potential, &cfg, &mut default, start.view(), SEED).expect("finite start");
+    assert!(
+        same_trajectory(&full, &kept),
+        "the default changed the trajectory"
+    );
+    assert!(!all.quench_boundaries().is_empty() && !full.accepted_transitions.is_empty());
+    assert!(default.quench_boundaries().is_empty());
+    assert!(kept.accepted_transitions.is_empty());
+    assert_eq!(
+        default.dropped_quench_boundaries(),
+        all.quench_boundaries().len()
+    );
+    assert_eq!(kept.dropped_transitions, full.accepted_transitions.len());
+}
+
+#[test]
 fn a_cap_keeps_the_newest_records_and_counts_the_rest() {
-    let full = run(None);
+    let full = run(Keep::All);
     assert!(
         full.boundaries.len() > 4 && full.outcome.accepted_transitions.len() > 4,
         "the run is too short to test a cap: {} boundaries, {} transitions",
@@ -191,14 +295,9 @@ fn a_cap_keeps_the_newest_records_and_counts_the_rest() {
         .len()
         .max(full.outcome.accepted_transitions.len());
     for cap in [0, 1, 3, largest - 1, largest, usize::MAX] {
-        let kept = run(Some(cap));
-        let mut a = Sha256::new();
-        let mut b = Sha256::new();
-        trajectory(&mut a, &full.outcome);
-        trajectory(&mut b, &kept.outcome);
-        assert_eq!(
-            a.finalize(),
-            b.finalize(),
+        let kept = run(Keep::Recent(cap));
+        assert!(
+            same_trajectory(&full.outcome, &kept.outcome),
             "cap {cap} changed the trajectory"
         );
 

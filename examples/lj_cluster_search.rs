@@ -2250,6 +2250,9 @@ fn main() {
     let mut total_charged = 0usize;
     for seed in seed0..(seed0 + seeds) {
         let mut ledger = Ledger::new(budget);
+        if std::env::var_os("ANNEAL_MINIMA_DB").is_some() {
+            ledger.keep_all_evidence();
+        }
         // The driver owns the search; the numerics under it are the caller's.
         // A hand-rolled steepest descent with backtracking cost 830 charged
         // evaluations per hop here against about 79 for a quasi-Newton

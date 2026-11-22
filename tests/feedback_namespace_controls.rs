@@ -134,6 +134,7 @@ fn run_trace(
         CheckpointAction::Continue
     };
     let mut ledger = Ledger::new(32);
+    ledger.keep_all_evidence();
     let mut rng = StdRng::seed_from_u64(17);
     let out = run_with_history_at_checkpoints(
         &cfg,

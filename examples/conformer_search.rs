@@ -696,6 +696,7 @@ fn main() {
                         )
                     });
                     let mut ledger = Ledger::new(budget);
+                    ledger.keep_all_evidence();
                     let (outcome, stats) = search_from_with_history(
                         &objective,
                         cfg,
