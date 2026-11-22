@@ -3517,6 +3517,88 @@ mod shell_tests {
         );
     }
 
+    /// Reported half-gap tie. Atom 1 is the published bits. Atom 2 sits one
+    /// ulp off `-atom1 / 3`, so its order-2 image is equidistant from atom 2
+    /// and atom 1 while `gap * 0.25` rounds up. The unslacked self test
+    /// accepts atom 2 and the order comes back `None`. The scan keeps atom 1.
+    ///
+    /// The reference residuals round to 6.5236 and 8.2276. The slacked ball
+    /// falls through, so both orders stay on the reference and the best order
+    /// is 2.
+    #[test]
+    fn half_gap_tie_keeps_the_reported_order() {
+        let points = [
+            [
+                f64::from_bits(0x402d_c289_aa42_6bf2),
+                f64::from_bits(0x401a_cfcd_5227_cf7f),
+                0.0,
+            ],
+            [
+                f64::from_bits(0xc014_976b_d600_144f),
+                f64::from_bits(0x4020_a4cf_0ab4_43e6),
+                0.0,
+            ],
+            [
+                f64::from_bits(0x3ffb_748f_c800_1b14),
+                f64::from_bits(0xc006_3114_0e45_afde),
+                0.0,
+            ],
+            [
+                f64::from_bits(0xc026_e565_b842_652c),
+                f64::from_bits(0xc028_8070_b036_bfae),
+                0.0,
+            ],
+        ];
+        let mut coords = Vec::with_capacity(12);
+        for point in points {
+            coords.extend(point);
+        }
+        let x = Array1::from(coords);
+        let n = 4;
+        let axis = [0.0, 0.0, 1.0];
+        let cloud = Cloud::from_view(x.view(), n);
+        assert_eq!(cloud.xs[1].to_bits(), points[1][0].to_bits());
+        assert_eq!(cloud.ys[1].to_bits(), points[1][1].to_bits());
+        assert_eq!(cloud.zs[1].to_bits(), 0);
+        let gaps = cloud.gaps().clone();
+        let here = cloud.point(2);
+        let image = rotate(here, axis, std::f64::consts::PI);
+        let self_d2 = squared_offset(image, here[0], here[1], here[2]);
+        assert!(
+            self_d2 < gaps[2] * 0.25,
+            "the reported tie is inside the unslacked quarter gap"
+        );
+        let scan = cloud.nearest_index_scalar(image);
+        assert_eq!(scan.0, 1, "the scan keeps the earlier atom");
+        assert!(
+            image_on_self(here, image, gaps[2]).is_none(),
+            "the slacked ball must leave this tie to the scan"
+        );
+        for order in [2usize, 3] {
+            let reference = split_exchange(&cloud, axis, order, f64::INFINITY);
+            let got = cloud.symmetry_deviation(axis, order, f64::INFINITY);
+            assert_eq!(
+                got.map(f64::to_bits),
+                reference.map(f64::to_bits),
+                "order {order} got={got:?} reference={reference:?}"
+            );
+            let value = reference.expect("reference residual");
+            let rounded = (value * 10_000.0).round() / 10_000.0;
+            let expect = if order == 2 { 6.5236 } else { 8.2276 };
+            assert_eq!(rounded, expect, "order {order} residual {value}");
+        }
+        assert_eq!(best_order_about(x.view(), n, axis, &[2, 3]), Some(2));
+        let found = detect_all(x.view(), n, &[2, 3], 9.0);
+        assert!(
+            found.iter().any(|candidate| candidate.order == 2),
+            "detect_all missed order 2: {found:?}"
+        );
+        assert!(
+            found.iter().any(|candidate| candidate.order == 3),
+            "detect_all missed order 3: {found:?}"
+        );
+    }
+
     /// A NaN chunk must not replace a finite lane or freeze its index.
     ///
     /// Twelve points. The first chunk is 10, the second is NaN, the third
