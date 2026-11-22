@@ -421,7 +421,12 @@ pub struct EngineCaps {
 /// The symbols of one engine library. `abi_version`, `create`, `destroy` and
 /// `force` are required by the header; the optional entries are probed and may
 /// be absent.
+///
+/// The struct is `#[non_exhaustive]`, so a symbol added to the ABI later does
+/// not break callers. Build one with [`EngineSymbols::new`] and the `with_*`
+/// methods, one per optional symbol.
 #[derive(Clone, Copy)]
+#[non_exhaustive]
 pub struct EngineSymbols {
     /// Required symbol `rgpot_engine_abi_version`.
     pub abi_version: AbiVersionFn,
@@ -451,6 +456,105 @@ pub struct EngineSymbols {
     pub set_callbacks: Option<SetCallbacksFn>,
     /// Optional symbol `rgpot_engine_hint`.
     pub hint: Option<HintFn>,
+}
+
+impl EngineSymbols {
+    /// A symbol table with the four required symbols and every optional one
+    /// absent.
+    #[must_use]
+    pub fn new(
+        abi_version: AbiVersionFn,
+        create: CreateFn,
+        destroy: DestroyFn,
+        force: ForceFn,
+    ) -> Self {
+        Self {
+            abi_version,
+            abi_stamp: None,
+            create,
+            destroy,
+            force,
+            force_batch: None,
+            hvp: None,
+            caps: None,
+            last_error: None,
+            last_components: None,
+            component_name: None,
+            model_state: None,
+            set_callbacks: None,
+            hint: None,
+        }
+    }
+
+    /// Provide the optional symbol `rgpot_engine_abi_stamp`.
+    #[must_use]
+    pub fn with_abi_stamp(mut self, abi_stamp: AbiStampFn) -> Self {
+        self.abi_stamp = Some(abi_stamp);
+        self
+    }
+
+    /// Provide the optional symbol `rgpot_engine_force_batch`.
+    #[must_use]
+    pub fn with_force_batch(mut self, force_batch: ForceBatchFn) -> Self {
+        self.force_batch = Some(force_batch);
+        self
+    }
+
+    /// Provide the optional symbol `rgpot_engine_hvp`.
+    #[must_use]
+    pub fn with_hvp(mut self, hvp: HvpFn) -> Self {
+        self.hvp = Some(hvp);
+        self
+    }
+
+    /// Provide the optional symbol `rgpot_engine_caps`.
+    #[must_use]
+    pub fn with_caps(mut self, caps: CapsFn) -> Self {
+        self.caps = Some(caps);
+        self
+    }
+
+    /// Provide the optional symbol `rgpot_engine_last_error`.
+    #[must_use]
+    pub fn with_last_error(mut self, last_error: LastErrorFn) -> Self {
+        self.last_error = Some(last_error);
+        self
+    }
+
+    /// Provide the optional symbol `rgpot_engine_last_components`.
+    #[must_use]
+    pub fn with_last_components(mut self, last_components: LastComponentsFn) -> Self {
+        self.last_components = Some(last_components);
+        self
+    }
+
+    /// Provide the optional symbol `rgpot_engine_component_name`.
+    #[must_use]
+    pub fn with_component_name(mut self, component_name: ComponentNameFn) -> Self {
+        self.component_name = Some(component_name);
+        self
+    }
+
+    /// Provide the optional symbol `rgpot_engine_model_state`.
+    #[must_use]
+    pub fn with_model_state(mut self, model_state: ModelStateFn) -> Self {
+        self.model_state = Some(model_state);
+        self
+    }
+
+    /// Provide the optional symbol `rgpot_engine_set_callbacks`.
+    #[must_use]
+    pub fn with_set_callbacks(mut self, set_callbacks: SetCallbacksFn) -> Self {
+        self.set_callbacks = Some(set_callbacks);
+        self
+    }
+
+    /// Provide the optional symbol `rgpot_engine_hint`.
+    #[must_use]
+    pub fn with_hint(mut self, hint: HintFn) -> Self {
+        self.hint = Some(hint);
+        self
+    }
 }
 
 /// Why an engine could not be loaded or an evaluation failed.
