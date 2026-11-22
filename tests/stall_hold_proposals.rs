@@ -54,6 +54,8 @@ fn a_flat_stall_uses_only_general_lean_burst_actions() {
         .iter()
         .map(|step| step.action.as_str())
         .collect();
+    assert_eq!(outcome.dropped_transitions, 0);
+    assert!(!actions.is_empty(), "the stall accepted no move");
     assert!(
         actions
             .iter()

@@ -1,7 +1,7 @@
 use anneal_core::bias::BasinBias;
 use anneal_core::methods::cluster_hopping::{
-    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger, random_cluster,
-    run_with_bias, run_with_bias_at_checkpoints, run_with_gradient,
+    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger, QuenchStatus,
+    random_cluster, run_with_bias, run_with_bias_at_checkpoints, run_with_gradient,
 };
 use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
@@ -17,6 +17,37 @@ fn toy_relax(ledger: &mut Ledger, state: ArrayView1<f64>, steps: usize) -> (f64,
     }
     let energy = relaxed.iter().map(|value| value * value).sum();
     (energy, relaxed)
+}
+
+fn recording_relax(
+    ledger: &mut Ledger,
+    state: ArrayView1<f64>,
+    steps: usize,
+) -> (f64, Array1<f64>) {
+    let before = ledger.spent();
+    let (energy, relaxed) = toy_relax(ledger, state, steps);
+    let gradient = relaxed.mapv(|value| 2.0 * value);
+    ledger.record_quench_boundary(before, energy, relaxed.clone(), Some(gradient));
+    (energy, relaxed)
+}
+
+type BoundaryRecord = (QuenchStatus, usize, u64, Vec<u64>, Option<Vec<u64>>);
+
+fn boundary_record(ledger: &Ledger) -> Vec<BoundaryRecord> {
+    let bits = |values: ArrayView1<f64>| values.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+    ledger
+        .quench_boundaries()
+        .iter()
+        .map(|boundary| {
+            (
+                boundary.status(),
+                boundary.charged_calls(),
+                boundary.energy().to_bits(),
+                bits(boundary.state()),
+                boundary.gradient().map(bits),
+            )
+        })
+        .collect()
 }
 
 fn fresh_bias(cfg: &Config) -> BasinBias<ClusterFingerprint> {
@@ -112,8 +143,8 @@ fn checkpoint_external_work_is_charged_without_fabricating_a_proposal() {
     let mut external_ledger = Ledger::new(10_000);
     let mut baseline_bias = fresh_bias(&cfg);
     let mut external_bias = fresh_bias(&cfg);
-    let mut baseline_relax = toy_relax;
-    let mut external_relax = toy_relax;
+    let mut baseline_relax = recording_relax;
+    let mut external_relax = recording_relax;
     let mut baseline_checkpoint = |_: ChainCheckpoint<'_>| CheckpointAction::Continue;
 
     let baseline = run_with_bias_at_checkpoints(
@@ -165,7 +196,18 @@ fn checkpoint_external_work_is_charged_without_fabricating_a_proposal() {
     assert_eq!(external.final_energy, baseline.final_energy);
     assert_eq!(external.final_state, baseline.final_state);
     assert_eq!(external.hops, baseline.hops);
+    assert!(!baseline.accepted_transitions.is_empty());
+    assert_eq!(baseline.dropped_transitions, 0);
+    assert_eq!(external.dropped_transitions, 0);
     assert_eq!(external.accepted_transitions, baseline.accepted_transitions);
+    assert!(!baseline_ledger.quench_boundaries().is_empty());
+    assert_eq!(baseline_ledger.dropped_quench_boundaries(), 0);
+    assert_eq!(external_ledger.dropped_quench_boundaries(), 0);
+    assert_eq!(
+        boundary_record(&external_ledger),
+        boundary_record(&baseline_ledger),
+        "settling external work changed the quench boundaries"
+    );
     assert_eq!(
         external_rng.random::<u64>(),
         baseline_rng.random::<u64>(),

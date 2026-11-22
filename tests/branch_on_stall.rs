@@ -54,7 +54,15 @@ fn same(a: &Outcome, b: &Outcome) -> bool {
         && a.charged == b.charged
         && a.hops == b.hops
         && a.improvements == b.improvements
-        && a.accepted_transitions.len() == b.accepted_transitions.len()
+        && a.accepted_transitions == b.accepted_transitions
+}
+
+fn kept_every_transition(outcome: &Outcome) {
+    assert!(
+        !outcome.accepted_transitions.is_empty(),
+        "the walk accepted no transition"
+    );
+    assert_eq!(outcome.dropped_transitions, 0);
 }
 
 #[test]
@@ -77,7 +85,11 @@ fn a_branch_that_never_fires_leaves_the_walk_unchanged() {
     let mut on = off.clone();
     on.branch_on_stall = true;
     let budget = 6_000;
-    assert!(same(&search(&off, budget), &search(&on, budget)));
+    let walk = search(&off, budget);
+    let branched = search(&on, budget);
+    kept_every_transition(&walk);
+    kept_every_transition(&branched);
+    assert!(same(&walk, &branched));
 }
 
 #[test]
@@ -90,6 +102,8 @@ fn a_branch_stays_inside_the_budget_and_repeats() {
     let walk = search(&off, budget);
     let first = search(&on, budget);
     let again = search(&on, budget);
+    kept_every_transition(&first);
+    kept_every_transition(&again);
     assert!(same(&first, &again));
     assert!(first.charged <= budget);
     // The branches spend calls the walk would have hopped with.
