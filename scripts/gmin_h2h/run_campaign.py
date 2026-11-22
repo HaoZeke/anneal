@@ -32,7 +32,6 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 from machine_provenance import (  # noqa: E402
-    SavedRowProvenanceMismatch,
     machine_provenance,
     read_built_gmin_source,
     require_gmin_build_key,
@@ -577,6 +576,14 @@ def load_saved(
         budget=budget,
     )
     if arm == "gmin":
+        validate_saved_gmin_provenance(
+            row,
+            path=path,
+            revision=code_revision,
+            build_key=gmin_build_key,
+            url=gmin_url,
+            revision_fields=("code_revision", "gmin_revision"),
+        )
         if (
             not str(row.get("gradient_passes", "")).strip()
             or not str(row.get("energy_only_entries", "")).strip()
@@ -598,19 +605,6 @@ def load_saved(
         if row.get("anneal_head") != code_revision:
             return None
         if row.get("head") and row["head"] != code_revision:
-            return None
-    else:
-        try:
-            validate_saved_gmin_provenance(
-                row,
-                path=path,
-                revision=code_revision,
-                build_key=gmin_build_key,
-                url=gmin_url,
-                revision_fields=("code_revision", "gmin_revision"),
-            )
-        except SavedRowProvenanceMismatch as mismatch:
-            print(str(mismatch), file=sys.stderr)
             return None
     return as_result(n, arm, row)
 

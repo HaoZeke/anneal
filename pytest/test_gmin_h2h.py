@@ -13,7 +13,10 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from machine_provenance import MACHINE_ID_SALT  # noqa: E402
+from machine_provenance import (  # noqa: E402
+    MACHINE_ID_SALT,
+    SavedRowProvenanceMismatch,
+)
 
 RUNNER = ROOT / "scripts" / "gmin_h2h" / "run_campaign.py"
 SPEC = importlib.util.spec_from_file_location("gmin_h2h_campaign", RUNNER)
@@ -306,7 +309,7 @@ def test_load_saved_requires_matching_producer_revisions_and_build_key(tmp_path)
     assert loaded_gmin is not None
     assert loaded_gmin["code_revision"] == "svn-100"
     assert loaded_gmin["gmin_build_key"] == "b" * 64
-    assert (
+    with pytest.raises(SavedRowProvenanceMismatch, match="code_revision"):
         campaign.load_saved(
             gmin_path,
             "lj38",
@@ -319,9 +322,7 @@ def test_load_saved_requires_matching_producer_revisions_and_build_key(tmp_path)
             gmin_url="https://example.invalid/gmin.tar.gz",
             gmin_build_key="b" * 64,
         )
-        is None
-    )
-    assert (
+    with pytest.raises(SavedRowProvenanceMismatch, match="gmin_build_key"):
         campaign.load_saved(
             gmin_path,
             "lj38",
@@ -334,8 +335,6 @@ def test_load_saved_requires_matching_producer_revisions_and_build_key(tmp_path)
             gmin_url="https://example.invalid/gmin.tar.gz",
             gmin_build_key="c" * 64,
         )
-        is None
-    )
 
 
 def _write_valid_saved_pair(tmp_path: Path) -> tuple[Path, Path]:
@@ -609,7 +608,7 @@ def test_load_saved_and_source_refuse_missing_expected_gmin_build_key(tmp_path):
 
 def test_load_saved_refuses_mismatched_or_absent_stored_gmin_build_key(tmp_path):
     _anneal_path, gmin_path = _write_valid_saved_pair(tmp_path)
-    assert (
+    with pytest.raises(SavedRowProvenanceMismatch, match="gmin_build_key"):
         campaign.load_saved(
             gmin_path,
             "lj98",
@@ -622,8 +621,6 @@ def test_load_saved_refuses_mismatched_or_absent_stored_gmin_build_key(tmp_path)
             gmin_url="https://example.invalid/gmin.tar.gz",
             gmin_build_key="c" * 64,
         )
-        is None
-    )
 
     unkeyed_gmin = tmp_path / "gmin-unkeyed.row"
     campaign.write_per_seed_row(
@@ -647,7 +644,7 @@ def test_load_saved_refuses_mismatched_or_absent_stored_gmin_build_key(tmp_path)
         gmin_url="https://example.invalid/gmin.tar.gz",
         gmin_revision="svn-100",
     )
-    assert (
+    with pytest.raises(SavedRowProvenanceMismatch, match="gmin_build_key"):
         campaign.load_saved(
             unkeyed_gmin,
             "lj98",
@@ -660,8 +657,6 @@ def test_load_saved_refuses_mismatched_or_absent_stored_gmin_build_key(tmp_path)
             gmin_url="https://example.invalid/gmin.tar.gz",
             gmin_build_key="b" * 64,
         )
-        is None
-    )
 
     import csv
 

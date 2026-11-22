@@ -629,11 +629,6 @@ def saved_rerun(
         seed=seed,
         budget=budget,
     )
-    if (
-        row.get("machine_id") != machine["machine_id"]
-        or row.get("cpu_model") != machine["cpu_model"]
-    ):
-        return None
     if arm == "gmin":
         validate_saved_gmin_provenance(
             row,
@@ -641,6 +636,12 @@ def saved_rerun(
             revision=code_revision,
             build_key=gmin_build_key,
         )
+    if (
+        row.get("machine_id") != machine["machine_id"]
+        or row.get("cpu_model") != machine["cpu_model"]
+    ):
+        return None
+    if arm == "gmin":
         return rerun_record(n, arm, row)
     if row.get("code_revision") != code_revision:
         return None

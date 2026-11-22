@@ -533,11 +533,6 @@ def load_saved(
         seed=seed,
         budget=budget,
     )
-    if (
-        row.get("machine_id") != expected_machine["machine_id"]
-        or row.get("cpu_model") != expected_machine["cpu_model"]
-    ):
-        return None
     if arm == "gmin":
         validate_saved_gmin_provenance(
             row,
@@ -547,6 +542,12 @@ def load_saved(
             url=url,
             revision_fields=("code_revision", "gmin_revision"),
         )
+    if (
+        row.get("machine_id") != expected_machine["machine_id"]
+        or row.get("cpu_model") != expected_machine["cpu_model"]
+    ):
+        return None
+    if arm == "gmin":
         return as_result(name, arm, row)
     code_revision = (row.get("code_revision") or "").strip()
     if not code_revision:
