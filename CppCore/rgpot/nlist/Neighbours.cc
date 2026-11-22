@@ -80,7 +80,7 @@ struct FractionalWorkspace {
   bool cells_valid = false;
 };
 
-FractionalWorkspace &fractionalWorkspace() {
+RGPOT_SKEW_SECTION FractionalWorkspace &fractionalWorkspace() {
   // update() and its cell build are one synchronous operation. A workspace
   // per calling thread is therefore reusable without changing Neighbours'
   // public object layout or sharing mutable data between update threads.
@@ -260,9 +260,10 @@ void Neighbours::buildCells(const double *xyz, std::size_t n) {
   cell_start_[0] = 0;
 }
 
-void prepareFractionalCells(const double *xyz, std::size_t n,
-                            const double *box9, const bool periodic[3],
-                            double edge, FractionalPlan &plan) {
+RGPOT_SKEW_SECTION void
+prepareFractionalCells(const double *xyz, std::size_t n, const double *box9,
+                       const bool periodic[3], double edge,
+                       FractionalPlan &plan) {
   auto &workspace = fractionalWorkspace();
   if (workspace.cells_valid && workspace.cached_edge == edge &&
       workspace.coordinate.size() == 3 * n &&
@@ -869,8 +870,9 @@ void Neighbours::updateOrthorhombic(const double *xyz, std::size_t n,
   ref_.assign(xyz, xyz + 3 * n);
 }
 
-void Neighbours::update(const double *xyz, std::size_t n, const double *box9,
-                        const Spec &spec) {
+RGPOT_SKEW_SECTION void Neighbours::update(const double *xyz, std::size_t n,
+                                           const double *box9,
+                                           const Spec &spec) {
   const bool same_cell =
       built_ && std::memcmp(box_, box9, sizeof(box_)) == 0;
   const bool skewed =
