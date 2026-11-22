@@ -6,8 +6,10 @@
 // backend reports (0 shared, 1 per instance, 2 process serial), the second
 // byte clears the optional charge/spin, thread, orbital-selection and
 // orbital-copy hooks, and the third byte names the model file in
-// RGPOT_ENGINE_STUB_MODEL. The library exports how many calls were inside the
-// backend at once.
+// RGPOT_ENGINE_STUB_MODEL. Byte 3 is zero when the analytic Hessian-vector
+// product is off. Byte 4 is nonzero when byte 5 is an explicit spin: 0 is
+// a real value there, and it is not the same as leaving byte 4 clear. The
+// library exports how many calls were inside the backend at once.
 
 #include "rgpot/engine/EngineTable.hpp"
 #include "rgpot/engine_c_abi.h"
@@ -78,8 +80,14 @@ namespace rgpot::engine {
 
 const char *backend_name() { return "stub"; }
 
-Created create(const void *config, std::size_t) {
+Created create(const void *config, std::size_t config_len) {
   const auto *bytes = static_cast<const unsigned char *>(config);
+  // An explicit spin is part of the configuration, visible before any
+  // rgpot_engine_set_charge_spin. A clear flag leaves the recorded spin
+  // alone, which is 0 after stub_reset and is not a configured value.
+  if (bytes != nullptr && config_len >= 6 && bytes[4] != 0) {
+    g_spin = bytes[5];
+  }
   Created out;
   auto backend = std::make_unique<Backend>();
   backend->pot = std::make_unique<StubPot>(static_cast<Reentrancy>(bytes[0]),
@@ -88,6 +96,9 @@ Created create(const void *config, std::size_t) {
     backend->set_charge_spin = [](int charge, int spin) {
       if (charge == 99) {
         throw rgpot::engine::Unsupported("charge 99 refused");
+      }
+      if (spin == 101) {
+        throw rgpot::engine::Unsupported("spin 101 refused");
       }
       g_charge = charge;
       g_spin = spin;

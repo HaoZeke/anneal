@@ -40,9 +40,26 @@ keep whatever the GROMACS force field gives them.
 =grompp= already removes the QM-QM nonbonded pairs and bonded terms, so the QM
 region interacts only through rgpot.
 A =POTENTIAL= needs =CHARGE 0= and =MULTIPLICITY 1=.
-An =ENGINE= gets both through =rgpot_engine_set_charge_spin=; when the engine
-lacks that call or the call returns 3, the input needs =CHARGE 0= and
-=MULTIPLICITY 1= too.
+An =ENGINE= keeps a spin its =CONFIG= set explicitly when the qmi =MULTIPLICITY=
+is 1, the value =grompp= writes unless it is changed.
+That covers =CHARGE -1= with =MULTIPLICITY 1= as well as the default pair
+=CHARGE 0= and =MULTIPLICITY 1=.
+=rgpot_engine_set_charge_spin= takes the charge and the spin together and the
+ABI has no getter, so the drop-in reads that spin back out of the =CONFIG=
+message it already loaded.
+A =CHARGE= other than 0 is applied with the configured spin.
+The default pair is left on the =CONFIG=, so the call is skipped and the
+configured spin stays.
+Only a =MULTIPLICITY= other than 1 replaces the spin, and it is sent with the
+qmi charge.
+When the =CONFIG= leaves the spin at its schema default, the qmi charge and
+multiplicity are both applied.
+A spin the =CONFIG= sets below the least its engine accepts is refused at
+start-up and never rewritten: 0 is valid for =uma=, and =metatomic=, =skala= and
+=nwchem= need 1 or more.
+When the engine lacks =rgpot_engine_set_charge_spin= or the call returns 3, a
+charge other than 0 or a multiplicity other than 1 is refused and the file needs
+=CHARGE 0= and =MULTIPLICITY 1=.
 
 ** Errors
 

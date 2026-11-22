@@ -30,6 +30,7 @@ LIB = os.environ.get("RGPOT_GROMACS_DROPIN", "")
 EVAL = os.environ.get("RGPOT_EVAL", "")
 ENGINE = os.environ.get("RGPOT_CLASSICAL_ENGINE", "")
 SCHEMA = os.environ.get("RGPOT_CAPNP_SCHEMA", "")
+STUB_ENGINE = os.environ.get("RGPOT_ENGINE_STUB", "")
 
 pytestmark = pytest.mark.skipif(not (LIB and EVAL),
                                 reason="needs RGPOT_GROMACS_DROPIN and RGPOT_EVAL")
@@ -115,6 +116,21 @@ def reference(spec, symbols, x_nm, box_nm):
 def assert_close(e, f, e_ref, f_ref, rel=1e-12):
     assert abs(e - e_ref) <= rel * max(abs(e_ref), 1.0), (e, e_ref)
     assert np.max(np.abs(f - f_ref)) <= rel * max(np.max(np.abs(f_ref)), 1.0)
+
+
+def stub_config(path: Path, *, reentrancy: int = 0, no_hooks: int = 0, model: int = 0,
+                with_hvp: int = 1, spin: int | None = None) -> Path:
+    """The 8-byte config tests/engine_stub.cc reads.
+
+    ``spin`` is an explicit engine spin. 0 is a real value. Omit it when the
+    config does not set one; that is not the same as spin 0.
+    """
+    if spin is not None and not 0 <= int(spin) <= 255:
+        raise ValueError(spin)
+    flag = 0 if spin is None else 1
+    value = 0 if spin is None else int(spin)
+    path.write_bytes(bytes([reentrancy, no_hooks, model, with_hvp, flag, value, 0, 0]))
+    return path
 
 
 def test_version():
@@ -216,6 +232,269 @@ def test_engine_route_matches_the_engine(tmp_path):
     shim.close()
     e_ref, f_ref = engine_force(config, symbols, dc.wrap(x, box) * 10, box * 10)
     assert_close(e, f, e_ref * dc.KJ_PER_EV, f_ref * dc.KJ_PER_EV * 10)
+
+
+def _bare_engine(path: Path, *, refuses_charge_spin: bool = False) -> Path:
+    """An engine library with no setter, or one that rejects charge/spin."""
+    cc = shutil.which("cc") or shutil.which("gcc")
+    if cc is None:
+        pytest.skip("needs a C compiler")
+    src = path.parent / "bare_engine.c"
+    refusal = (
+        "#include <string.h>\n"
+        "int rgpot_engine_set_charge_spin(RgpotEnginePot *pot, int charge, int spin) {\n"
+        "  (void)pot; (void)charge; (void)spin; return 3;\n"
+        "}\n"
+        "size_t rgpot_engine_last_error(const RgpotEnginePot *pot, char *buf, size_t len) {\n"
+        "  const char *s = \"spin multiplicity must be >= 1\";\n"
+        "  size_t n = strlen(s), m = n;\n"
+        "  (void)pot;\n"
+        "  if (buf && len) { if (m >= len) m = len - 1; memcpy(buf, s, m); buf[m] = 0; }\n"
+        "  return n;\n"
+        "}\n"
+        if refuses_charge_spin else ""
+    )
+    src.write_text(
+        "#include <stddef.h>\n"
+        "typedef struct RgpotEnginePot RgpotEnginePot;\n"
+        "int rgpot_engine_abi_version(void) { return 1; }\n"
+        "RgpotEnginePot *rgpot_engine_create(const void *config, size_t config_len,\n"
+        "                                     char *errbuf, size_t errlen) {\n"
+        "  (void)config; (void)config_len; (void)errbuf; (void)errlen;\n"
+        "  return (RgpotEnginePot *)1;\n"
+        "}\n"
+        "void rgpot_engine_destroy(RgpotEnginePot *pot) { (void)pot; }\n"
+        "int rgpot_engine_force(RgpotEnginePot *pot, long n_atoms, const double *positions,\n"
+        "                       const int *atomic_nrs, double *forces, double *energy,\n"
+        "                       double *variance, const double *box, void *transform,\n"
+        "                       void *transform_user) {\n"
+        "  (void)pot; (void)n_atoms; (void)positions; (void)atomic_nrs; (void)forces;\n"
+        "  (void)energy; (void)variance; (void)box; (void)transform; (void)transform_user;\n"
+        "  return 0;\n"
+        "}\n"
+        + refusal
+    )
+    done = subprocess.run(
+        [cc, "-shared", "-fPIC", "-o", str(path), str(src)],
+        capture_output=True, text=True, check=False)
+    assert done.returncode == 0, done.stderr
+    return path
+
+
+def test_engine_without_charge_spin_refuses_a_nondefault_charge(tmp_path):
+    so = _bare_engine(tmp_path / "libbare_engine.so")
+    why = refused(tmp_path, f"    ENGINE {so}", charge=-1)
+    assert "CHARGE 0 and MULTIPLICITY 1" in why
+    assert "takes no charge or spin" in why
+
+
+def test_engine_spin_validation_failure_reports_the_backend_reason(tmp_path):
+    so = _bare_engine(tmp_path / "librefusing_engine.so", refuses_charge_spin=True)
+    why = refused(tmp_path, f"    ENGINE {so}", multiplicity=0)
+    assert "refused CHARGE 0 and spin 0 from input MULTIPLICITY 0 (status 3)" in why
+    assert "spin multiplicity must be >= 1" in why
+
+
+def _stub_charge_spin(work: Path, *, spin: int | None, charge: int, multiplicity: int):
+    """Run one engine step and return the charge and spin the stub recorded."""
+    work.mkdir(parents=True, exist_ok=True)
+    symbols = ["Ar", "Ar"]
+    x = np.array([[0.1, 0.2, 0.3], [0.6, 0.5, 0.4]], dtype=float)
+    box = np.eye(3) * 1.5
+    config = stub_config(work / "stub.bin", spin=spin)
+    stub = ctypes.CDLL(STUB_ENGINE)
+    stub.stub_reset()
+    inp = write_input(work, f"    ENGINE {STUB_ENGINE}\n    CONFIG {config}",
+                      symbols, x, charge=charge, multiplicity=multiplicity)
+    shim = Shim(inp, work / "out.log")
+    shim.step(x, box)
+    shim.close()
+    return stub.stub_charge(), stub.stub_spin()
+
+
+@pytest.mark.skipif(not STUB_ENGINE, reason="needs RGPOT_ENGINE_STUB")
+def test_engine_route_keeps_explicit_engine_spin_when_qmi_uses_defaults(tmp_path):
+    # CHARGE 0 and MULTIPLICITY 1 are left on the CONFIG. The call is skipped
+    # and the explicit spin stays.
+    assert _stub_charge_spin(tmp_path, spin=4, charge=0, multiplicity=1) == (0, 4)
+
+
+@pytest.mark.skipif(not STUB_ENGINE, reason="needs RGPOT_ENGINE_STUB")
+def test_engine_route_keeps_explicit_spin_0_when_qmi_sets_only_the_charge(tmp_path):
+    # MULTIPLICITY 1 is the grompp default even beside CHARGE -1. The charge
+    # is applied and the explicit spin 0 stays.
+    assert _stub_charge_spin(tmp_path, spin=0, charge=-1, multiplicity=1) == (-1, 0)
+
+
+@pytest.mark.skipif(not STUB_ENGINE, reason="needs RGPOT_ENGINE_STUB")
+def test_engine_route_nondefault_multiplicity_overrides_configured_spin(tmp_path):
+    assert _stub_charge_spin(tmp_path, spin=0, charge=-1, multiplicity=3) == (-1, 3)
+
+
+@pytest.mark.skipif(not STUB_ENGINE, reason="needs RGPOT_ENGINE_STUB")
+def test_engine_route_without_explicit_spin_uses_the_qmi_values(tmp_path):
+    # No byte-4 flag: the zero the stub starts from is not a configured spin.
+    # The qmi charge and multiplicity are both applied, including a
+    # multiplicity of 1.
+    assert _stub_charge_spin(tmp_path / "one", spin=None, charge=-1, multiplicity=1) == (-1, 1)
+    assert _stub_charge_spin(tmp_path / "both", spin=None, charge=2, multiplicity=4) == (2, 4)
+
+
+def _named_engine(path: Path) -> Path:
+    """An engine named by RGPOT_FAKE_ENGINE_NAME that records set_charge_spin.
+
+    Like the real engines, it refuses a spin below 1 unless it is named uma.
+    """
+    cc = shutil.which("cc") or shutil.which("gcc")
+    if cc is None:
+        pytest.skip("needs a C compiler")
+    src = path.parent / "named_engine.c"
+    src.write_text(
+        "#include <stddef.h>\n"
+        "#include <stdlib.h>\n"
+        "#include <string.h>\n"
+        "typedef struct RgpotEnginePot RgpotEnginePot;\n"
+        "static int g_charge = -7, g_spin = -7, g_calls = 0;\n"
+        "static const char *g_error = \"\";\n"
+        "int rgpot_engine_abi_version(void) { return 1; }\n"
+        "const char *rgpot_engine_name(void) {\n"
+        "  const char *name = getenv(\"RGPOT_FAKE_ENGINE_NAME\");\n"
+        "  return name != 0 ? name : \"uma\";\n"
+        "}\n"
+        "RgpotEnginePot *rgpot_engine_create(const void *config, size_t config_len,\n"
+        "                                     char *errbuf, size_t errlen) {\n"
+        "  (void)config; (void)config_len; (void)errbuf; (void)errlen;\n"
+        "  return (RgpotEnginePot *)1;\n"
+        "}\n"
+        "void rgpot_engine_destroy(RgpotEnginePot *pot) { (void)pot; }\n"
+        "int rgpot_engine_force(RgpotEnginePot *pot, long n_atoms, const double *positions,\n"
+        "                       const int *atomic_nrs, double *forces, double *energy,\n"
+        "                       double *variance, const double *box, void *transform,\n"
+        "                       void *transform_user) {\n"
+        "  (void)pot; (void)positions; (void)atomic_nrs; (void)box;\n"
+        "  (void)transform; (void)transform_user;\n"
+        "  if (forces) { for (long i = 0; i < 3 * n_atoms; ++i) forces[i] = 0.0; }\n"
+        "  if (energy) *energy = 0.0;\n"
+        "  if (variance) *variance = 0.0;\n"
+        "  return 0;\n"
+        "}\n"
+        "int rgpot_engine_set_charge_spin(RgpotEnginePot *pot, int charge, int spin) {\n"
+        "  const char *name = rgpot_engine_name();\n"
+        "  int min_spin = strcmp(name, \"uma\") == 0 ? 0 : 1;\n"
+        "  (void)pot; g_calls += 1;\n"
+        "  if (spin < min_spin) {\n"
+        "    g_error = strcmp(name, \"skala\") == 0\n"
+        "      ? \"skala spin multiplicity must be >= 1\"\n"
+        "      : \"metatomic spin multiplicity must be >= 1\";\n"
+        "    return 3;\n"
+        "  }\n"
+        "  g_charge = charge; g_spin = spin; g_error = \"\"; return 0;\n"
+        "}\n"
+        "size_t rgpot_engine_last_error(const RgpotEnginePot *pot, char *buf, size_t len) {\n"
+        "  size_t n = strlen(g_error), m = n;\n"
+        "  (void)pot;\n"
+        "  if (buf && len) { if (m >= len) m = len - 1; memcpy(buf, g_error, m); buf[m] = 0; }\n"
+        "  return n;\n"
+        "}\n"
+        "void recorded_reset(void) {\n"
+        "  g_charge = -7; g_spin = -7; g_calls = 0; g_error = \"\";\n"
+        "}\n"
+        "int recorded_charge(void) { return g_charge; }\n"
+        "int recorded_spin(void) { return g_spin; }\n"
+        "int recorded_calls(void) { return g_calls; }\n"
+    )
+    done = subprocess.run(
+        [cc, "-shared", "-fPIC", "-o", str(path), str(src)],
+        capture_output=True, text=True, check=False)
+    assert done.returncode == 0, done.stderr
+    return path
+
+
+SCHEMA_PATH = Path(SCHEMA) if SCHEMA else None
+
+
+def _encode_config(tmp_path: Path, schema: str, text: str) -> Path:
+    blob = subprocess.run(["capnp", "encode", str(SCHEMA_PATH), schema],
+                          input=text.encode(), capture_output=True, check=True).stdout
+    config = tmp_path / "params.bin"
+    config.write_bytes(blob)
+    return config
+
+
+@pytest.mark.skipif(not shutil.which("capnp") or not SCHEMA_PATH or not SCHEMA_PATH.is_file(),
+                    reason="needs capnp and the built effective Potentials.capnp")
+@pytest.mark.parametrize("engine,schema,text,charge,multiplicity,expect", [
+    pytest.param("uma", "UmaParams", '(spin = 0, cacheDir = "unused")',
+                 -1, 1, (-1, 0), id="uma-effective-schema-spin-zero"),
+    ("uma", "UmaParams", "(spin = 0)", -1, 3, (-1, 3)),
+    ("uma", "UmaParams", "()", -1, 1, (-1, 1)),
+    ("uma", "UmaParams", "(spin = 2)", 0, 1, None),
+    ("metatomic", "MetatomicParams", "()", -1, 1, (-1, 1)),
+    ("metatomic", "MetatomicParams", "(spin = 3)", 2, 1, (2, 3)),
+    ("skala", "NWChemParams", "()", -1, 1, (-1, 1)),
+    ("skala", "NWChemParams", "(multiplicity = 3)", -1, 1, (-1, 3)),
+    ("skala", "NWChemParams", "(multiplicity = 5)", 0, 1, None),
+    ("nwchem", "NWChemParams", "()", -1, 4, (-1, 4)),
+])
+def test_engine_route_reads_an_explicit_spin_from_the_config_message(
+        tmp_path, monkeypatch, engine, schema, text, charge, multiplicity, expect):
+    """The same rule as the stub, read from the engine's own params message."""
+    monkeypatch.setenv("RGPOT_FAKE_ENGINE_NAME", engine)
+    config = _encode_config(tmp_path, schema, text)
+    so = _named_engine(tmp_path / "libnamed_engine.so")
+    lib = ctypes.CDLL(so)
+    lib.recorded_reset()
+    symbols = ["Ar", "Ar"]
+    x = np.array([[0.1, 0.2, 0.3], [0.6, 0.5, 0.4]], dtype=float)
+    box = np.eye(3) * 1.5
+    inp = write_input(tmp_path, f"    ENGINE {so}\n    CONFIG {config}", symbols, x,
+                      charge=charge, multiplicity=multiplicity)
+    shim = Shim(inp, tmp_path / "out.log")
+    shim.step(x, box)
+    shim.close()
+    if expect is None:
+        assert lib.recorded_calls() == 0
+    else:
+        assert lib.recorded_calls() == 1
+        assert (lib.recorded_charge(), lib.recorded_spin()) == expect
+
+
+@pytest.mark.skipif(not shutil.which("capnp") or not SCHEMA_PATH or not SCHEMA_PATH.is_file(),
+                    reason="needs capnp and the built effective Potentials.capnp")
+@pytest.mark.parametrize("engine,schema,text,spin,minimum,multiplicity", [
+    ("metatomic", "MetatomicParams", "(spin = 0)", 0, 1, 3),
+    ("metatomic", "MetatomicParams", "(spin = -2)", -2, 1, 1),
+    ("skala", "NWChemParams", "(multiplicity = 0)", 0, 1, 3),
+    ("nwchem", "NWChemParams", "(multiplicity = 0)", 0, 1, 1),
+    ("uma", "UmaParams", "(spin = -1)", -1, 0, 1),
+])
+def test_engine_route_refuses_a_config_spin_below_the_layout_minimum(
+        tmp_path, monkeypatch, engine, schema, text, spin, minimum, multiplicity):
+    monkeypatch.setenv("RGPOT_FAKE_ENGINE_NAME", engine)
+    config = _encode_config(tmp_path, schema, text)
+    so = _named_engine(tmp_path / "libnamed_engine.so")
+    why = refused(tmp_path, f"    ENGINE {so}\n    CONFIG {config}", charge=-1,
+                  multiplicity=multiplicity)
+    assert f"the CONFIG message sets spin {spin}" in why
+    assert f"the {engine} engine needs a spin of at least {minimum}" in why
+    assert "refused CHARGE" not in why
+
+
+@pytest.mark.skipif(not shutil.which("capnp") or not SCHEMA_PATH or not SCHEMA_PATH.is_file(),
+                    reason="needs capnp and the built effective Potentials.capnp")
+@pytest.mark.parametrize("engine,schema", [
+    ("metatomic", "MetatomicParams"),
+    ("skala", "NWChemParams"),
+])
+def test_engine_route_reports_family_rejection_of_qmi_spin_zero(
+        tmp_path, monkeypatch, engine, schema):
+    monkeypatch.setenv("RGPOT_FAKE_ENGINE_NAME", engine)
+    config = _encode_config(tmp_path, schema, "()")
+    so = _named_engine(tmp_path / "libnamed_engine.so")
+    why = refused(tmp_path, f"    ENGINE {so}\n    CONFIG {config}",
+                  charge=-1, multiplicity=0)
+    assert "refused CHARGE -1 and spin 0 from input MULTIPLICITY 0 (status 3)" in why
+    assert f"{engine} spin multiplicity must be >= 1" in why
 
 
 def engine_force(config: Path, symbols, x_ang, box_ang):

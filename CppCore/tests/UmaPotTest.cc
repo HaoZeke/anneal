@@ -135,6 +135,59 @@ TEST_CASE("UmaPot paramsKey changes with charge and path", "[UmaPot]") {
   REQUIRE(b.paramsKey() != k0);
 }
 
+TEST_CASE("UmaPot validates spin bounds per task without rewriting spin 0",
+          "[UmaPot][spin]") {
+  rgpot::UmaConfig omat;
+  omat.model_path = "unused.pt2";
+  omat.task_name = "omat";
+  omat.spin = 0;
+  rgpot::UmaPot periodic(omat);
+  REQUIRE(periodic.config().spin == 0);
+  REQUIRE_NOTHROW(periodic.setChargeSpin(0, 0));
+  REQUIRE(periodic.config().spin == 0);
+  REQUIRE_THROWS_AS(periodic.setChargeSpin(0, -1), std::invalid_argument);
+  REQUIRE(periodic.config().spin == 0);
+
+  rgpot::UmaConfig omol;
+  omol.model_path = "unused.pt2";
+  omol.task_name = "omol";
+  omol.spin = 0;
+  rgpot::UmaPot mol(omol);
+  REQUIRE(mol.config().spin == 0);
+  REQUIRE_NOTHROW(mol.setChargeSpin(0, 0));
+  REQUIRE(mol.config().spin == 0);
+  REQUIRE_THROWS_AS(mol.setChargeSpin(0, -1), std::invalid_argument);
+  REQUIRE_THROWS_AS(mol.setChargeSpin(0, rgpot::kUmaSpinMax + 1),
+                    std::invalid_argument);
+  REQUIRE(mol.config().spin == 0);
+}
+
+TEST_CASE("UmaPot constructor refuses a spin outside 0 to 100",
+          "[UmaPot][spin]") {
+  for (const char *task : {"omol", "omat"}) {
+    for (const int bad : {-1, rgpot::kUmaSpinMax + 1}) {
+      rgpot::UmaConfig cfg;
+      cfg.model_path = "unused.pt2";
+      cfg.task_name = task;
+      cfg.spin = bad;
+      REQUIRE_THROWS_AS(rgpot::UmaPot(cfg), std::invalid_argument);
+      REQUIRE_THROWS_WITH(
+          rgpot::UmaPot(cfg),
+          Catch::Matchers::ContainsSubstring(
+              "spin must be an integer from 0 to 100; got " +
+              std::to_string(bad)));
+    }
+  }
+
+  rgpot::UmaConfig edge;
+  edge.model_path = "unused.pt2";
+  edge.spin = rgpot::kUmaSpinMax;
+  REQUIRE_NOTHROW(rgpot::UmaPot(edge));
+  edge.spin = 0;
+  rgpot::UmaPot zero(edge);
+  REQUIRE(zero.config().spin == 0);
+}
+
 // Metadata as scripts/export_uma_aoti.py embeds it for Baker HCN.
 static std::unordered_map<std::string, std::string> hcn_metadata() {
   return {{"task_name", "omol"},  {"charge", "0"},

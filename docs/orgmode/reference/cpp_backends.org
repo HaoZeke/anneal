@@ -1143,14 +1143,16 @@ That figure is the test's parity pin, not a value from the paper.
 - Inputs ::
   =model_path= (default empty; an AOTInductor =.pt2= package from =scripts/export_uma_aoti.py=), =task_name=
   (default =omol=), =device= (default =cpu=), =charge= (default 0), =spin=
-  (multiplicity, default 1), =cutoff= (default 6.0),
+  (integer from 0 to 100, default 1), =cutoff= (default 6.0),
   =max_neighbors= (default 300), =cache_dir= (default empty; the root of the
   persistent cache the package is unpacked into).
 - Units :: =cutoff= in Angstrom; =charge= in elementary charges; the other
   fields have no unit.
 - Outputs :: a plain struct read by =UmaPot=.
 - Errors :: =UmaPot= throws =std::runtime_error= when =model_path= is empty or
-  does not end in =.pt2=.
+  does not end in =.pt2=, and
+  =std::invalid_argument= (via =rgpot::validate_uma_spin_for_task=) when =spin=
+  is outside =[0, 100]=.
   The first force throws =std::runtime_error= when the cache root cannot be
   created or the package cannot be unpacked into it.
   An empty
@@ -1163,6 +1165,20 @@ That figure is the test's parity pin, not a value from the paper.
   when present.
   A =task_name=, =charge= or =spin= that disagrees with the package metadata
   makes each force throw =rgpot::UmaContractError=.
+
+*** =rgpot::validate_uma_spin_for_task=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void validate_uma_spin_for_task(std::string_view task_name, int spin,
+                                std::string_view where = "UmaPot");
+#+end_src
+
+- Inputs :: =task_name=, the UMA head name; =spin=, the integer spin; =where=,
+  the caller prefix for error messages (default =UmaPot=).
+- Units :: none.
+- Outputs :: none; accepted values are not modified.
+- Errors :: throws =std::invalid_argument= when =spin= is outside =[0, 100]=.
 
 *** =rgpot::UmaPot=
 
@@ -1180,7 +1196,8 @@ explicit UmaPot(const UmaConfig &config);
 - Outputs :: a potential that builds a neighbour list and runs the compiled
   graph.
 - Errors :: =std::runtime_error= from the constructor when =model_path= is empty
-  or does not end in =.pt2=.
+  or does not end in =.pt2=, and
+  =std::invalid_argument= when =spin= violates =rgpot::validate_uma_spin_for_task=.
   The package loads on the first force; loader errors and =std::runtime_error=
   for bad dtype metadata surface there.
   A force throws =rgpot::UmaContractError= when charge, spin, task or
@@ -1211,11 +1228,13 @@ The build option is
 void setChargeSpin(int charge, int spin);
 #+end_src
 
-- Inputs :: =charge= in elementary charges and =spin= as the multiplicity.
+- Inputs :: =charge= in elementary charges and =spin= (integer in =[0, 100]=).
 - Units :: none.
 - Outputs :: none; the config is updated and =paramsKey= is recomputed.
-- Errors :: none here; the next force throws =rgpot::UmaContractError= when the
-  package was exported for other values.
+- Errors :: throws
+  =std::invalid_argument= without mutating the config when =spin= violates =rgpot::validate_uma_spin_for_task=;
+  the next force throws =rgpot::UmaContractError= when the package was exported
+  for other values.
 
 *** =rgpot::UmaPot::posDtypeName=
 

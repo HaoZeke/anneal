@@ -26,7 +26,7 @@ Created create(const void *config, std::size_t config_len) {
       c.basis = params.getBasis().cStr();
     }
     c.charge = params.getCharge();
-    c.multiplicity = params.getMultiplicity() > 0 ? params.getMultiplicity() : 1;
+    c.multiplicity = params.getMultiplicity();
     c.engine_path = params.getEnginePath().cStr();
     c.nwchem_root = params.getNwchemRoot().cStr();
     auto backend = std::make_unique<Backend>();
@@ -34,6 +34,10 @@ Created create(const void *config, std::size_t config_len) {
     SkalaPot *raw = pot.get();
     backend->pot = std::move(pot);
     backend->set_charge_spin = [raw](int charge, int spin) {
+      if (spin < 1) {
+        throw Unsupported("skala spin multiplicity must be >= 1; got " +
+                          std::to_string(spin));
+      }
       raw->setChargeMultiplicity(charge, spin);
     };
     out.backend = std::move(backend);
