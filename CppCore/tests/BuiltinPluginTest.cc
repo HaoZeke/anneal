@@ -129,6 +129,19 @@ TEST_CASE("Sutton-Chen reads periodic from its configuration", "[builtin]") {
           directEnergy(in, direct));
 }
 
+TEST_CASE("Sutton-Chen rejects unsafe integer configuration values",
+          "[builtin]") {
+  const auto *desc = pluginNamed("sutton-chen");
+  for (const char *config : {"{\"n\":1e20}", "{\"n\":inf}", "{\"n\":nan}"}) {
+    rgpot_plugin_instance *instance = nullptr;
+    REQUIRE(desc->create(config, &instance) == RGPOT_PLUGIN_INVALID_PARAM);
+    REQUIRE(instance == nullptr);
+    REQUIRE(
+        std::string(rgpot::forceLastError()) ==
+        "invalid parameter: config integer is not finite or is out of range");
+  }
+}
+
 #ifdef RGPOT_HAS_EAM_TABLE
 
 TEST_CASE("tabulated EAM reads a path and a format", "[builtin]") {

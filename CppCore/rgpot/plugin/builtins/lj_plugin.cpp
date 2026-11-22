@@ -12,7 +12,9 @@
 #endif
 
 #include <charconv>
+#include <cmath>
 #include <exception>
+#include <limits>
 #include <new>
 #include <string>
 #include <utility>
@@ -219,6 +221,13 @@ bool takeInt(const Field &field, int &dest, std::string &error) {
     return false;
   }
   const double number = field.value.number;
+  if (!std::isfinite(number) ||
+      number < static_cast<double>(std::numeric_limits<int>::min()) ||
+      number > static_cast<double>(std::numeric_limits<int>::max())) {
+    error =
+        "invalid parameter: config integer is not finite or is out of range";
+    return false;
+  }
   const int asInt = static_cast<int>(number);
   if (static_cast<double>(asInt) != number) {
     error = "invalid parameter: config value is invalid";
