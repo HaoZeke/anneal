@@ -1802,3 +1802,132 @@ TEST_CASE("fractional bin edges keep nextafter cutoff pairs across exact bin bou
                      open_ref);
   }
 }
+
+namespace {
+
+void requireMatchesBuilder(const rgpot::nlist::Neighbours &got,
+                           const rgpot::nlist::Neighbours &fresh,
+                           std::size_t n) {
+  REQUIRE(got.mode() == fresh.mode());
+  REQUIRE(got.streaming() == fresh.streaming());
+  REQUIRE(got.allPairs() == fresh.allPairs());
+  REQUIRE(got.slots() == fresh.slots());
+  REQUIRE(got.offsets() == fresh.offsets());
+  REQUIRE(got.neighbours() == fresh.neighbours());
+  REQUIRE(halfVisits(got, n) == halfVisits(fresh, n));
+  REQUIRE(directedVisits(got, n) == directedVisits(fresh, n));
+  for (std::size_t a = 0; a < n; ++a) {
+    Visits got_atom;
+    Visits fresh_atom;
+    got.forAtom(static_cast<std::int32_t>(a), into(got_atom));
+    fresh.forAtom(static_cast<std::int32_t>(a), into(fresh_atom));
+    REQUIRE(got_atom == fresh_atom);
+  }
+  std::vector<Visits> got_team(3);
+  std::vector<Visits> fresh_team(3);
+  got.forRowTeam(
+      3, [&](int s, std::int32_t i, std::int32_t j, double dx, double dy,
+             double dz, double r2) {
+        into(got_team[static_cast<std::size_t>(s)])(i, j, dx, dy, dz, r2);
+      });
+  fresh.forRowTeam(
+      3, [&](int s, std::int32_t i, std::int32_t j, double dx, double dy,
+             double dz, double r2) {
+        into(fresh_team[static_cast<std::size_t>(s)])(i, j, dx, dy, dz, r2);
+      });
+  REQUIRE(got_team == fresh_team);
+}
+
+} // namespace
+
+TEST_CASE("failed Neighbours::update leaves prior state intact and matches a fresh builder",
+          "[nlist][triclinic][transactional]") {
+  setThreads("1");
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const double cell_a[9] = {10.0, 0.0, 0.0, 6.0, 10.0, 0.0, 0.0, 0.0, 10.0};
+  const double cell_b[9] = {10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 6.0, 0.0, 10.0};
+  const double singular_cell[9] = {0.0, 0.0, 0.0, 6.0, 10.0, 0.0, 0.0, 0.0, 10.0};
+  const double nan_cell[9] = {nan, 0.0, 0.0, 6.0, 10.0, 0.0, 0.0, 0.0, 10.0};
+  double ill_cell[9];
+  cancellingCell(1.0, ill_cell);
+
+  const std::vector<double> pos_a = {
+      0.5, 0.2, 5.0,
+      6.5, 9.9, 5.0,
+      2.0, 2.0, 0.1,
+      2.3, 2.1, 0.2,
+  };
+  const std::vector<double> pos_c = {
+      0.2, 5.0, 0.2,
+      6.2, 5.0, 9.9,
+      4.0, 4.0, 4.0,
+      4.4, 4.2, 4.1,
+      7.0, 7.0, 7.0,
+  };
+  const std::size_t n_a = pos_a.size() / 3;
+  const std::size_t n_c = pos_c.size() / 3;
+  std::vector<double> pos_nan = pos_a;
+  pos_nan[0] = nan;
+  std::vector<double> pos_more(24, 1.0);
+
+  for (const auto mode :
+       {rgpot::nlist::Mode::Stored, rgpot::nlist::Mode::Stream,
+        rgpot::nlist::Mode::Auto}) {
+    for (const double skin : {0.0, 0.4}) {
+      rgpot::nlist::Spec spec;
+      spec.cutoff = 1.5;
+      spec.skin = skin;
+      spec.periodic = {true, true, true};
+      spec.image = rgpot::nlist::Image::Round;
+      spec.mode = mode;
+
+      rgpot::nlist::Neighbours cells;
+      cells.update(pos_a.data(), n_a, cell_a, spec);
+      rgpot::nlist::Neighbours fresh_a;
+      fresh_a.update(pos_a.data(), n_a, cell_a, spec);
+      requireMatchesBuilder(cells, fresh_a, n_a);
+
+      // 1. Valid -> throwing bad cells (ill-conditioned in buildCells with
+      // larger n, singular in MinimumImage, NaN cell) -> prior state intact,
+      // then valid build on cell_b matches a fresh builder.
+      REQUIRE_THROWS_AS(cells.update(pos_more.data(), pos_more.size() / 3,
+                                     ill_cell, spec),
+                        std::invalid_argument);
+      requireMatchesBuilder(cells, fresh_a, n_a);
+
+      REQUIRE_THROWS_AS(cells.update(pos_a.data(), n_a, singular_cell, spec),
+                        std::invalid_argument);
+      requireMatchesBuilder(cells, fresh_a, n_a);
+
+      REQUIRE_THROWS_AS(cells.update(pos_a.data(), n_a, nan_cell, spec),
+                        std::invalid_argument);
+      requireMatchesBuilder(cells, fresh_a, n_a);
+
+      // 2. Valid -> NaN position on a new cell_b (throws inside fractional
+      // binning) -> valid pos_a on cell_b. A non-transactional update that
+      // wrote box_ = cell_b and cleared off_/nbr_ while keeping built_ = true
+      // and ref_ = pos_a would falsely treat this valid call as reusable.
+      REQUIRE_THROWS_AS(cells.update(pos_nan.data(), n_a, cell_b, spec),
+                        std::invalid_argument);
+      requireMatchesBuilder(cells, fresh_a, n_a);
+
+      cells.update(pos_a.data(), n_a, cell_b, spec);
+      REQUIRE_FALSE(cells.reused());
+      rgpot::nlist::Neighbours fresh_b;
+      fresh_b.update(pos_a.data(), n_a, cell_b, spec);
+      requireMatchesBuilder(cells, fresh_b, n_a);
+
+      // 3. Valid -> NaN position on the same cell_b and spec (throws in
+      // reusable skin fold or fractional binning) -> valid build on pos_c.
+      REQUIRE_THROWS_AS(cells.update(pos_nan.data(), n_a, cell_b, spec),
+                        std::invalid_argument);
+      requireMatchesBuilder(cells, fresh_b, n_a);
+
+      cells.update(pos_c.data(), n_c, cell_a, spec);
+      REQUIRE_FALSE(cells.reused());
+      rgpot::nlist::Neighbours fresh_c;
+      fresh_c.update(pos_c.data(), n_c, cell_a, spec);
+      requireMatchesBuilder(cells, fresh_c, n_c);
+    }
+  }
+}

@@ -10,6 +10,8 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
+#include <utility>
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -476,73 +478,90 @@ void Neighbours::buildStored(const double *xyz, std::size_t n,
 
 void Neighbours::update(const double *xyz, std::size_t n, const double *box9,
                         const Spec &spec) {
-  xyz_ = xyz;
+  static_assert(std::is_nothrow_move_assignable_v<Neighbours>);
   bool wrapped = false;
   if (reusable(xyz, n, box9, spec, wrapped)) {
-    reused_ = true;
     // The tile walk takes the image of a pair from the bins of its atoms,
     // and a wrapped atom left its bin on the far side of the cell.
     if (wrapped) {
-      buildCells(xyz, n);
+      Neighbours staged;
+      staged.n_ = n_;
+      std::memcpy(staged.box_, box_, sizeof(box_));
+      std::memcpy(staged.len_, len_, sizeof(len_));
+      std::memcpy(staged.periodic_, periodic_, sizeof(periodic_));
+      staged.search_ = search_;
+      staged.buildCells(xyz, n);
+      nx_ = staged.nx_;
+      ny_ = staged.ny_;
+      nz_ = staged.nz_;
+      cell_of_.swap(staged.cell_of_);
+      cell_start_.swap(staged.cell_start_);
+      cell_atoms_.swap(staged.cell_atoms_);
     }
+    xyz_ = xyz;
+    reused_ = true;
     return;
   }
-  reused_ = false;
-  n_ = n;
-  std::memcpy(box_, box9, sizeof(box_));
-  len_[0] = box9[0];
-  len_[1] = box9[4];
-  len_[2] = box9[8];
+  Neighbours staged;
+  staged.xyz_ = xyz;
+  staged.builds_ = builds_;
+  staged.reused_ = false;
+  staged.n_ = n;
+  std::memcpy(staged.box_, box9, sizeof(staged.box_));
+  staged.len_[0] = box9[0];
+  staged.len_[1] = box9[4];
+  staged.len_[2] = box9[8];
   for (int k = 0; k < 3; ++k) {
-    periodic_[k] = spec.periodic[static_cast<std::size_t>(k)] && len_[k] > 0.0;
-    inv_[k] = periodic_[k] ? 1.0 / len_[k] : 0.0;
+    staged.periodic_[k] =
+        spec.periodic[static_cast<std::size_t>(k)] && staged.len_[k] > 0.0;
+    staged.inv_[k] = staged.periodic_[k] ? 1.0 / staged.len_[k] : 0.0;
   }
   const bool sheared = !orthorhombicCell(box9);
-  image_ = spec.image;
-  use_general_ = image_ == Image::General || sheared;
-  if (use_general_) {
-    general_ = MinimumImage(box9, spec.periodic);
+  staged.image_ = spec.image;
+  staged.use_general_ = staged.image_ == Image::General || sheared;
+  if (staged.use_general_) {
+    staged.general_ = MinimumImage(box9, spec.periodic);
   }
-  search_ = spec.cutoff + spec.skin;
-  if (!(search_ > 0.0)) {
-    search_ = 0.0;
+  staged.search_ = spec.cutoff + spec.skin;
+  if (!(staged.search_ > 0.0)) {
+    staged.search_ = 0.0;
   }
-  key_.cutoff = spec.cutoff;
-  key_.skin = spec.skin;
-  key_.image = spec.image;
-  key_.mode = spec.mode;
-  key_.periodic = spec.periodic;
-  off_.clear();
-  nbr_.clear();
-  streaming_ = true;
-  if (n < 2 || !(search_ > 0.0)) {
-    streaming_ = false;
-    mode_ = Mode::Stored;
-    off_.assign(n + 1, 0);
-    nbr_.clear();
-    built_ = true;
-    ref_.assign(xyz, xyz + 3 * n);
+  staged.key_.cutoff = spec.cutoff;
+  staged.key_.skin = spec.skin;
+  staged.key_.image = spec.image;
+  staged.key_.mode = spec.mode;
+  staged.key_.periodic = spec.periodic;
+  staged.streaming_ = true;
+  if (n < 2 || !(staged.search_ > 0.0)) {
+    staged.streaming_ = false;
+    staged.mode_ = Mode::Stored;
+    staged.off_.assign(n + 1, 0);
+    staged.built_ = true;
+    staged.ref_.assign(xyz, xyz + 3 * n);
+    *this = std::move(staged);
     return;
   }
   // Every pair is a candidate, so the walks need neither bins nor a list,
   // and the coordinates never invalidate the update. allPairs() reads
   // this state back.
-  if (std::isinf(search_)) {
-    mode_ = Mode::Stream;
-    built_ = true;
+  if (std::isinf(staged.search_)) {
+    staged.mode_ = Mode::Stream;
+    staged.built_ = true;
+    *this = std::move(staged);
     return;
   }
-  buildCells(xyz, n);
+  staged.buildCells(xyz, n);
   // A stream never stores the pairs, so the candidate count is unused.
   // Counting it walks every stencil the search is about to walk.
   if (spec.mode == Mode::Stream) {
-    streaming_ = true;
-    mode_ = Mode::Stream;
-    built_ = true;
-    ref_.assign(xyz, xyz + 3 * n);
+    staged.streaming_ = true;
+    staged.mode_ = Mode::Stream;
+    staged.built_ = true;
+    staged.ref_.assign(xyz, xyz + 3 * n);
+    *this = std::move(staged);
     return;
   }
-  const std::uint64_t bound = candidateBound();
+  const std::uint64_t bound = staged.candidateBound();
   const auto avail = availableBytes();
   const auto index_bytes = static_cast<std::uint64_t>(sizeof(std::int32_t));
   // Zero means the probe failed, not that the machine has no free memory.
@@ -556,16 +575,17 @@ void Neighbours::update(const double *xyz, std::size_t n, const double *box9,
   const bool want_store =
       spec.mode == Mode::Stored ? fits : spec.mode == Mode::Auto && fits;
   if (want_store) {
-    buildStored(xyz, n, bound);
-    streaming_ = false;
-    mode_ = Mode::Stored;
-    ++builds_;
+    staged.buildStored(xyz, n, bound);
+    staged.streaming_ = false;
+    staged.mode_ = Mode::Stored;
+    ++staged.builds_;
   } else {
-    streaming_ = true;
-    mode_ = Mode::Stream;
+    staged.streaming_ = true;
+    staged.mode_ = Mode::Stream;
   }
-  built_ = true;
-  ref_.assign(xyz, xyz + 3 * n);
+  staged.built_ = true;
+  staged.ref_.assign(xyz, xyz + 3 * n);
+  *this = std::move(staged);
 }
 
 } // namespace rgpot::nlist
