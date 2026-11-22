@@ -37,16 +37,19 @@ pub(super) fn walk_armed_rigid_archive(
     new_lowest: f64,
     archive_end: usize,
 ) {
+    super::rigid_diag_note_archive();
     let key = super::rigid_cage_key(x, cfg.n_points, cage_quantum);
     cage_archive.offer_cage(e, x, key);
-    if let Some(best) = ledger.best_state.as_ref() {
+    if let Some(best) = ledger.walker_state() {
         let best_key = super::rigid_cage_key(best.view(), cfg.n_points, cage_quantum);
-        cage_archive.offer_cage(ledger.best, best.view(), best_key);
+        cage_archive.offer_cage(ledger.walker_best(), best.view(), best_key);
     }
     let (mut side_energy, mut side_state) = match cage_archive.escape_other_cage(key) {
         Some((energy, state)) if state.len() == x.len() => (energy, state),
-        _ => match ledger.best_state.as_ref() {
-            Some(best) if best.len() == x.len() && ledger.best <= e => (ledger.best, best.clone()),
+        _ => match ledger.walker_state() {
+            Some(best) if best.len() == x.len() && ledger.walker_best() <= e => {
+                (ledger.walker_best(), best.clone())
+            }
             _ => (e, x.to_owned()),
         },
     };

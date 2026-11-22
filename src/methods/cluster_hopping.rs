@@ -613,6 +613,16 @@ pub struct Ledger {
     pub best: f64,
     /// State attaining [`Ledger::best`].
     pub best_state: Option<Array1<f64>>,
+    /// Lowest value the main chain recorded.
+    ///
+    /// An auxiliary walk may publish a lower minimum. The stall clock and
+    /// the escape target stay on this one, which is the minimum the chain
+    /// itself quenched.
+    walker_best: f64,
+    walker_state: Option<Array1<f64>>,
+    /// When set, a gradient check may reuse a value the relaxation already
+    /// paid for and must not charge another evaluation.
+    gradient_reuse_only: bool,
     quench_boundaries: Vec<QuenchBoundary>,
     diagnostic_quench: bool,
     /// Energy at or below which the hop may stop.
@@ -679,6 +689,9 @@ impl Ledger {
             fract: 0.0,
             best: f64::INFINITY,
             best_state: None,
+            walker_best: f64::INFINITY,
+            walker_state: None,
+            gradient_reuse_only: false,
             quench_boundaries: Vec::new(),
             diagnostic_quench: false,
             target: None,
@@ -919,6 +932,41 @@ impl Ledger {
     /// improvement. The charged count has to be the one at this call: a
     /// later push would time the minimum after work that did not find it.
     pub fn record(&mut self, value: f64, state: ArrayView1<f64>) {
+        if value.is_finite() && value < self.walker_best {
+            self.walker_best = value;
+            self.walker_state = Some(state.to_owned());
+        }
+        self.record_published(value, state);
+    }
+
+    /// Records an auxiliary quench into the published incumbent only.
+    ///
+    /// The main chain's stall clock and escape target stay where the chain
+    /// itself quenched. A lower auxiliary minimum can still be the answer
+    /// and can still meet the stop target.
+    pub(crate) fn record_auxiliary(&mut self, value: f64, state: ArrayView1<f64>) {
+        self.record_published(value, state);
+    }
+
+    /// Lowest energy the main chain recorded, ignoring auxiliary walks.
+    pub(crate) fn walker_best(&self) -> f64 {
+        self.walker_best
+    }
+
+    /// Geometry of [`Ledger::walker_best`].
+    pub(crate) fn walker_state(&self) -> Option<&Array1<f64>> {
+        self.walker_state.as_ref()
+    }
+
+    pub(crate) fn set_gradient_reuse_only(&mut self, on: bool) {
+        self.gradient_reuse_only = on;
+    }
+
+    pub(crate) fn gradient_reuse_only(&self) -> bool {
+        self.gradient_reuse_only
+    }
+
+    fn record_published(&mut self, value: f64, state: ArrayView1<f64>) {
         if value.is_finite() && value < self.best {
             self.best = value;
             self.best_state = Some(state.to_owned());
@@ -3467,13 +3515,69 @@ fn rigid_centres_clear(state: ArrayView1<f64>, n: usize, min_d: f64) -> bool {
     true
 }
 
+/// Counts of the rigid side walks, one search at a time.
+///
+/// The archive-entry breakpoint sees only the later walk. These counts
+/// also cover the shell walk and every auxiliary record decision, and a
+/// rigid search prints them once so each TIP4P cell carries the same line.
+#[derive(Clone, Copy, Default)]
+struct RigidPathDiag {
+    shell: u64,
+    archive: u64,
+    recorded: u64,
+    withhold_nonfinite: u64,
+    withhold_insane: u64,
+    withhold_overlap: u64,
+    withhold_gradient: u64,
+}
+
+thread_local! {
+    static RIGID_PATH_DIAG: std::cell::Cell<RigidPathDiag> =
+        const { std::cell::Cell::new(RigidPathDiag {
+            shell: 0,
+            archive: 0,
+            recorded: 0,
+            withhold_nonfinite: 0,
+            withhold_insane: 0,
+            withhold_overlap: 0,
+            withhold_gradient: 0,
+        }) };
+}
+
+fn rigid_diag_reset() {
+    RIGID_PATH_DIAG.with(|cell| cell.set(RigidPathDiag::default()));
+}
+
+fn rigid_diag_update(update: impl FnOnce(&mut RigidPathDiag)) {
+    RIGID_PATH_DIAG.with(|cell| {
+        let mut diag = cell.get();
+        update(&mut diag);
+        cell.set(diag);
+    });
+}
+
+fn rigid_diag_note_shell() {
+    rigid_diag_update(|diag| diag.shell += 1);
+}
+
+fn rigid_diag_note_archive() {
+    rigid_diag_update(|diag| diag.archive += 1);
+}
+
+fn rigid_diag_take() -> RigidPathDiag {
+    RIGID_PATH_DIAG.with(|cell| cell.replace(RigidPathDiag::default()))
+}
+
 /// Records an auxiliary rigid quench when it can be the incumbent.
 ///
 /// The energy and the coordinates have to be finite and sane, the centres
 /// have to clear half a contact, and a supplied gradient has to meet the
 /// rigid record tolerance. A caller that did not pass a gradient is not
-/// given a stationarity test. Returns whether the ledger's target is now
-/// reached, so the walk can stop before another evaluation.
+/// given a stationarity test. A gradient the relaxation already paid for
+/// is reused; a missing one is not a new evaluation. The record updates
+/// the published incumbent and not the main chain's escape target.
+/// Returns whether the ledger's target is now reached, so the walk can
+/// stop before another evaluation.
 fn record_auxiliary_rigid(
     cfg: &Config,
     ledger: &mut Ledger,
@@ -3481,17 +3585,31 @@ fn record_auxiliary_rigid(
     energy: f64,
     state: ArrayView1<f64>,
 ) -> bool {
-    let geometry_ok = quench_is_sane(cfg, energy, state)
-        && rigid_centres_clear(state, cfg.n_points, 0.5 * cfg.min_separation);
-    let stationary = !geometry_ok
-        || match grad.as_deref_mut() {
-            None => true,
-            Some(evaluate) => evaluate(ledger, state)
-                .is_some_and(|values| answer_gradient_ok(cfg, values.view(), state.len())),
-        };
-    if geometry_ok && stationary {
-        ledger.record(energy, state);
+    if !energy.is_finite() {
+        rigid_diag_update(|diag| diag.withhold_nonfinite += 1);
+        return ledger.target_reached();
     }
+    if !quench_is_sane(cfg, energy, state) {
+        rigid_diag_update(|diag| diag.withhold_insane += 1);
+        return ledger.target_reached();
+    }
+    if !rigid_centres_clear(state, cfg.n_points, 0.5 * cfg.min_separation) {
+        rigid_diag_update(|diag| diag.withhold_overlap += 1);
+        return ledger.target_reached();
+    }
+    ledger.set_gradient_reuse_only(true);
+    let stationary = match grad.as_deref_mut() {
+        None => true,
+        Some(evaluate) => evaluate(ledger, state)
+            .is_some_and(|values| answer_gradient_ok(cfg, values.view(), state.len())),
+    };
+    ledger.set_gradient_reuse_only(false);
+    if !stationary {
+        rigid_diag_update(|diag| diag.withhold_gradient += 1);
+        return ledger.target_reached();
+    }
+    ledger.record_auxiliary(energy, state);
+    rigid_diag_update(|diag| diag.recorded += 1);
     ledger.target_reached()
 }
 
@@ -3946,6 +4064,13 @@ mod rigid_step_tests {
             clear.view(),
         ));
         assert_eq!(ledger.best, -80.0);
+        assert_eq!(
+            ledger.walker_best(),
+            -1.0,
+            "an auxiliary record moved the chain's own minimum"
+        );
+        let held = ledger.walker_state().expect("the chain keeps its geometry");
+        assert_eq!(held.as_slice(), clear.as_slice());
     }
 
     #[test]
@@ -5551,7 +5676,11 @@ where
     let mut checkpoint_transition_start = 0usize;
     let mut next_checkpoint = checkpoint_interval;
     let mut next_reoccupy = cfg.reoccupy_interval;
-    let mut best_seen = ledger.best;
+    let mut best_seen = if cfg.move_library.is_rigid_body() {
+        ledger.walker_best()
+    } else {
+        ledger.best
+    };
     // Energy last polished by an unlike-pair quench. `NaN` until the first
     // binary incumbent, so a one-species chain never enters the sweep.
     let mut polished_best = f64::NAN;
@@ -5607,8 +5736,9 @@ where
     let mut cage_walked = false;
     let mut archive_walked = false;
     let mut stall_book = cfg.move_library.is_rigid_body().then(|| {
+        rigid_diag_reset();
         Box::new(RigidStallBook {
-            archive_best_seen: ledger.best,
+            archive_best_seen: ledger.walker_best(),
             charged_at_archive_best: ledger.spent(),
         })
     });
@@ -5662,8 +5792,15 @@ where
         } else {
             1e-9
         };
-        if ledger.best < best_seen - new_lowest {
-            best_seen = ledger.best;
+        // The stall clock follows the main chain. An auxiliary minimum can
+        // be lower and still must not restart this clock or the heat.
+        let chain_best = if cfg.move_library.is_rigid_body() {
+            ledger.walker_best()
+        } else {
+            ledger.best
+        };
+        if chain_best < best_seen - new_lowest {
+            best_seen = chain_best;
             charged_at_best = ledger.spent();
             heat = 1.0;
             hops_at_lowest = hops;
@@ -5673,7 +5810,7 @@ where
         if cfg.move_library.is_rigid_body()
             && let Some(book) = stall_book.as_mut()
         {
-            note_rigid_stall_best(book, ledger.best, ledger.spent(), new_lowest);
+            note_rigid_stall_best(book, chain_best, ledger.spent(), new_lowest);
         }
         // Every unlike pair, quenched, kept when it is lower. One random
         // exchange every fourth hop does not finish the ordering. Absent
@@ -5908,6 +6045,7 @@ where
             && ledger.spent().saturating_sub(charged_at_best) >= cage_patience
         {
             cage_walked = true;
+            rigid_diag_note_shell();
             let shell_mark = ledger.spent();
             // Start from the walker itself. Touching the shared cage archive
             // here would change the later walk's destination.
@@ -6010,9 +6148,9 @@ where
             // is what reaches the contact the walker's own shell does not.
             if !ledger.stopped() && ledger.remaining() > 0 && !ledger.target_reached() {
                 cage_archive.offer_cage(e, x.view(), key);
-                if let Some(best) = ledger.best_state.as_ref() {
+                if let Some(best) = ledger.walker_state() {
                     cage_archive.offer_cage(
-                        ledger.best,
+                        ledger.walker_best(),
                         best.view(),
                         rigid_cage_key(best.view(), cfg.n_points, cage_quantum),
                     );
@@ -6112,10 +6250,8 @@ where
             // Leaving them on the quiet clock would start the later walk
             // before the main chain has actually stalled.
             let shell_spent = ledger.spent().saturating_sub(shell_mark);
-            best_seen = best_seen.min(ledger.best);
             charged_at_best = charged_at_best.saturating_add(shell_spent);
             if let Some(book) = stall_book.as_mut() {
-                book.archive_best_seen = book.archive_best_seen.min(ledger.best);
                 book.charged_at_archive_best =
                     book.charged_at_archive_best.saturating_add(shell_spent);
             }
@@ -6158,22 +6294,18 @@ where
             if ledger.target_reached() {
                 break HopStop::Target;
             }
-            best_seen = best_seen.min(ledger.best);
-            if let Some(book) = stall_book.as_mut() {
-                book.archive_best_seen = book.archive_best_seen.min(ledger.best);
-            }
         }
         if cfg.move_library.is_rigid_body()
             && crate::methods::rigid_quench::stalled(hops, hops_at_lowest)
         {
             // The stop target is never read here, and no cluster is drawn.
-            // The walker moves to the lowest minimum it has already quenched
-            // that is neither its own nor a recent stall destination. The
-            // ledger best is offered at every stall, so a walker away from
-            // it goes back there unless it did so in the last few stalls.
+            // The walker moves to the lowest minimum the main chain quenched
+            // that is neither its own nor a recent stall destination. An
+            // auxiliary minimum is not offered: escaping to it is what moves
+            // the chain off the walk that found the reference.
             hops_at_lowest = hops;
-            if let Some(state) = ledger.best_state.as_ref() {
-                stall_archive.offer(ledger.best, state.view());
+            if let Some(state) = ledger.walker_state() {
+                stall_archive.offer(ledger.walker_best(), state.view());
             }
             if let Some((energy, state)) = stall_archive.escape(e)
                 && state.len() == x.len()
@@ -6205,8 +6337,8 @@ where
             // The proposals have stopped lowering the best. Leave from
             // another stored minimum instead of the basin the chain is in.
             last_basin_restart = hops;
-            if let Some(state) = ledger.best_state.as_ref() {
-                stall_archive.offer(ledger.best, state.view());
+            if let Some(state) = ledger.walker_state() {
+                stall_archive.offer(ledger.walker_best(), state.view());
             }
             if let Some((energy, state)) = stall_archive.escape(e)
                 && state.len() == x.len()
@@ -7125,12 +7257,19 @@ where
         }
         // A leave or a symmetry quench can lower the best after the loop
         // head has passed. The proposal below then uses the preset.
-        if ledger.best < best_seen - 1e-9 {
-            best_seen = ledger.best;
+        // An auxiliary minimum is not that leave: heating on it changes
+        // the step the main chain would have kept.
+        let chain_now = if cfg.move_library.is_rigid_body() {
+            ledger.walker_best()
+        } else {
+            ledger.best
+        };
+        if chain_now < best_seen - 1e-9 {
+            best_seen = chain_now;
             heat = 1.0;
         }
         // Gap to the incumbent, which is what the law scales the window by.
-        let gap = (e - ledger.best).abs().max(1e-12);
+        let gap = (e - chain_now).abs().max(1e-12);
         let held = if cfg.budget_window {
             law.temperature(gap, ledger.remaining())
         } else {
@@ -7682,12 +7821,16 @@ where
         if basin_hold > 0 {
             basin_hold -= 1;
         } else if cfg.incumbent_gap > 0.0
-            && e > ledger.best + cfg.incumbent_gap
-            && let Some(state) = ledger.best_state.clone()
+            && e > chain_now + cfg.incumbent_gap
+            && let Some(state) = (if cfg.move_library.is_rigid_body() {
+                ledger.walker_state().cloned()
+            } else {
+                ledger.best_state.clone()
+            })
             && state.len() == x.len()
         {
             x = state;
-            e = ledger.best;
+            e = chain_now;
         }
         let mut trial = if let Some(t) = hmc_trial {
             t
@@ -8336,7 +8479,16 @@ where
             // means a vanishing depth.
             sur.observe_full(x_new.view(), n, e_new, 0.0, e_new);
         }
-        let improved = e_new < ledger.best - STRICT_IMPROVEMENT;
+        // The reward and the quiet clock follow the main chain. An auxiliary
+        // minimum is published, and it is not an improvement the chain made.
+        // Paying the move allocator for it, or withholding that payment,
+        // changes the arm the next hop draws.
+        let chain_incumbent = if cfg.move_library.is_rigid_body() {
+            ledger.walker_best()
+        } else {
+            ledger.best
+        };
+        let improved = e_new < chain_incumbent - STRICT_IMPROVEMENT;
         // A structure the ledger records can be reported as the run's answer,
         // so it has to be a minimum. Two paths reach here with one that is not.
         //
@@ -8691,9 +8843,17 @@ where
                             cfg.n_points,
                             0.5 * cfg.min_separation,
                         );
+                    // The kick follows the main chain's incumbent. An
+                    // auxiliary minimum would mark a real cage change as
+                    // uncompetitive and shrink the step.
+                    let kick_best = if cfg.move_library.is_rigid_body() {
+                        ledger.walker_best()
+                    } else {
+                        ledger.best
+                    };
                     let competitive = !cfg.move_library.is_rigid_body()
-                        || (cage_changed && e_new <= ledger.best + cfg.temperature)
-                        || e_new < ledger.best - 5.0e-2;
+                        || (cage_changed && e_new <= kick_best + cfg.temperature)
+                        || e_new < kick_best - 5.0e-2;
                     feedback.observe_driver_local_scored(Some(from), reached, competitive);
                     reached != from && feedback.accept(delta)
                 };
@@ -9073,7 +9233,14 @@ where
                 // How close the move brought the chain to the best it knows.
                 // Dense, because every hop produces one, and informative,
                 // because its size says how deep rather than merely whether.
-                depth_allocator.update(k, -(e_new - ledger.best));
+                // An auxiliary minimum is not that best: the gap would pay
+                // the arm for a quench the chain did not make.
+                let depth_floor = if cfg.move_library.is_rigid_body() {
+                    ledger.walker_best()
+                } else {
+                    ledger.best
+                };
+                depth_allocator.update(k, -(e_new - depth_floor));
             }
             // A rigid accept that only moves centres, or only turns a
             // hydrogen-bond cycle, is not evidence the arm is useful.
@@ -10379,6 +10546,19 @@ where
         None => Vec::new(),
     };
     let final_radius = bias.merge_radius();
+    if cfg.move_library.is_rigid_body() {
+        let diag = rigid_diag_take();
+        eprintln!(
+            "rigid_diag shell={} archive={} recorded={} withhold_nonfinite={} withhold_insane={} withhold_overlap={} withhold_gradient={}",
+            diag.shell,
+            diag.archive,
+            diag.recorded,
+            diag.withhold_nonfinite,
+            diag.withhold_insane,
+            diag.withhold_overlap,
+            diag.withhold_gradient,
+        );
+    }
     if let Some(slot) = carried {
         // Handed back so the next chain inherits what this one learned.
         *slot = bias;

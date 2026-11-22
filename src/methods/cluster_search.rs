@@ -237,6 +237,12 @@ where
         if reused.is_some() {
             return reused;
         }
+        // An auxiliary check that missed the paid gradient must not spend
+        // a call. Charging it would move every later hop off the chain
+        // that quenched without this walk.
+        if led.gradient_reuse_only() {
+            return None;
+        }
         if !led.charge() {
             return None;
         }
