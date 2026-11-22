@@ -164,7 +164,7 @@ is not the hash.
 | 3.5.1   | 1, 0, 1         | 4                    |
 | 3.6.0   | 1, 1, 1         | 6                    |
 | 3.7.0   | 1, 2, 1         | 6                    |
-| next    | 1, 7, 1         | 9                    |
+| next    | 1, 9, 1         | 9                    |
 
 3.6.0 raised the minor for =rgpot_eindir_abi_compatible=; a caller built against
 minor 0 still matches it.
@@ -196,6 +196,10 @@ The product takes its scheme as an =int=, so a library of minor 6 refuses the
 new values with =RGPOT_INVALID_PARAMETER= instead of misreading them.
 No existing struct changes and the new state lives behind =fused_cache=, so the
 layout revision stays at 1.
+It raises the minor to 9 for the =rgpot_mdi_server_start= export.
+The symbol is present in every build, so a library that reports minor 9 has it.
+A build without the Cargo feature =mdi= answers the call with =RGPOT_RPC_ERROR=
+and a message that names the feature.
 
 The ledger notes that soversion 3 was the 3.4.0 layout, which 3.5.0 reused after
 the layout changed, and that 4 is the 3.5.0 layout, shipped from 3.5.1.
