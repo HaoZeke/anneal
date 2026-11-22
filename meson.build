@@ -134,15 +134,16 @@ if host_system == 'linux' and 'address' in get_option('b_sanitize')
             _fs_omp.exists(_omp_libdir / 'libomp.so')
             or _fs_omp.exists(_omp_libdir / 'libomp.so.5')
         )
-            error(
+            warning(
                 'address sanitizer: no libomp in ' + _omp_libdir + ' (the compiler resource directory)',
             )
+        else
+            add_project_link_arguments(
+                '-Wl,--disable-new-dtags',
+                '-Wl,-rpath,' + _omp_libdir,
+                language: ['c', 'cpp'],
+            )
         endif
-        add_project_link_arguments(
-            '-Wl,--disable-new-dtags',
-            '-Wl,-rpath,' + _omp_libdir,
-            language: ['c', 'cpp'],
-        )
     endif
 endif
 
