@@ -20,6 +20,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from gmin_pin import REVISION, TARBALL_SHA256  # noqa: E402
+from machine_provenance import SavedRowProvenanceMismatch  # noqa: E402
 
 EXPECTED_KEY = "b" * 64
 WRONG_KEY = "c" * 64
@@ -1936,3 +1937,681 @@ def test_au55_scale_and_morse14_h2h_reject_mismatched_build_key_and_reuse_matchi
         ],
     )
     assert ("m55r14", 2000) in morse14.load_gmin(morse14_csv)
+
+
+def test_covalent_h2h_resolves_tersoff_source_only_when_needed_and_raises_if_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    covalent = _load_module("rnext7_covalent", "scripts/covalent_h2h/run_campaign.py")
+    _patch_bench_env(monkeypatch, covalent)
+    monkeypatch.setattr(covalent, "SEEDS", (2000,))
+
+    svnrev, sw_source = _write_gmin_meta(
+        tmp_path / "meta", build_key=EXPECTED_KEY, prefix="gmin"
+    )
+    assert not (sw_source.parent / "gmin-tersoff-source.txt").exists()
+
+    head_file = tmp_path / "head"
+    head_file.write_text(f"{FAKE_HEAD}\n")
+    dummy = tmp_path / "dummy"
+    dummy.write_text("#!/bin/sh\nexit 99\n")
+
+    def _fake_binary_lines(_binary: Path, mode: str, name: str) -> list[str]:
+        if mode == "budget":
+            return [str(covalent.PAPER_BUDGETS[name]), "-30.0", "10"]
+        if mode == "scales":
+            return ["1.0", "1.0", "5.0"]
+        raise AssertionError(f"unexpected binary_lines {mode}")
+
+    monkeypatch.setattr(covalent, "binary_lines", _fake_binary_lines)
+    monkeypatch.setattr(
+        covalent,
+        "run_gmin",
+        lambda *_a, **_kw: (_ for _ in ()).throw(
+            AssertionError("GMIN binary must not be executed")
+        ),
+    )
+
+    starts = tmp_path / "starts"
+    for sys_name in ("sw10", "tc10"):
+        start_xyz = starts / sys_name / "seed-2000.xyz"
+        start_xyz.parent.mkdir(parents=True, exist_ok=True)
+        start_xyz.write_text("10\n\n")
+
+    runs = tmp_path / "runs"
+    _write_csv_with_fields(
+        runs / "sw10" / "gmin-2000.row",
+        covalent.ROW_FIELDS,
+        [
+            {
+                "system": "sw10",
+                "code": "gmin",
+                "seed": "2000",
+                "budget": str(covalent.PAPER_BUDGETS["sw10"]),
+                "hit": "1",
+                "evals_to_hit": "5000",
+                "charged": "5000",
+                "wall_s": "0.400000",
+                "best": "-30.000000",
+                "pot_s": "0.300000",
+                "outside_s": "0.100000",
+                "code_revision": REVISION,
+                "gmin_build_key": EXPECTED_KEY,
+                "host": "bench",
+                **FAKE_MACHINE,
+            }
+        ],
+    )
+
+    base_argv = [
+        "run_campaign.py",
+        "--binary",
+        str(dummy),
+        "--library",
+        str(dummy),
+        "--gmin",
+        str(dummy),
+        "--data",
+        str(dummy),
+        "--gmin-tersoff",
+        str(dummy),
+        "--carbon-data",
+        str(dummy),
+        "--ase",
+        str(dummy),
+        "--source",
+        str(sw_source),
+        "--svnrev",
+        str(svnrev),
+        "--head-file",
+        str(head_file),
+        "--runs",
+        str(runs),
+        "--starts",
+        str(starts),
+        "--code",
+        "gmin",
+    ]
+
+    # SW-only run with no gmin-tersoff-source.txt succeeds without Tersoff metadata.
+    assert (
+        covalent.main(
+            [
+                *base_argv,
+                "--rows",
+                str(tmp_path / "sw10-rows.csv"),
+                "--summary",
+                str(tmp_path / "sw10-summary.csv"),
+                "--system",
+                "sw10",
+            ]
+        )
+        == 0
+    )
+
+    # Requesting tc* when gmin-tersoff-source.txt is missing must raise, never fall back.
+    with pytest.raises(FileNotFoundError, match="gmin-tersoff-source\\.txt"):
+        covalent.main(
+            [
+                *base_argv,
+                "--rows",
+                str(tmp_path / "tc10-rows.csv"),
+                "--summary",
+                str(tmp_path / "tc10-summary.csv"),
+                "--system",
+                "tc10",
+            ]
+        )
+
+    # Default SYSTEMS includes tc*, so missing gmin-tersoff-source.txt also raises.
+    with pytest.raises(FileNotFoundError, match="gmin-tersoff-source\\.txt"):
+        covalent.main(
+            [
+                *base_argv,
+                "--rows",
+                str(tmp_path / "all-rows.csv"),
+                "--summary",
+                str(tmp_path / "all-summary.csv"),
+            ]
+        )
+
+    # Explicit --tersoff-source on an SW-only run must still be resolved and raise if missing.
+    missing_tersoff = tmp_path / "missing-tersoff-source.txt"
+    with pytest.raises(FileNotFoundError, match="missing-tersoff-source\\.txt"):
+        covalent.main(
+            [
+                *base_argv,
+                "--tersoff-source",
+                str(missing_tersoff),
+                "--rows",
+                str(tmp_path / "explicit-rows.csv"),
+                "--summary",
+                str(tmp_path / "explicit-summary.csv"),
+                "--system",
+                "sw10",
+            ]
+        )
+
+
+def test_au55_scale_defaults_to_metal_darby_and_matches_enter_bench(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    au55 = _load_module("rnext7_au55_defaults", "scripts/au55_scale/run_panel.py")
+    monkeypatch.delenv("GMIN_SVNREV_FILE", raising=False)
+    monkeypatch.delenv("GMIN_SOURCE_FILE", raising=False)
+
+    captured: list[tuple[Path, Path]] = []
+
+    def _capture_read(svnrev_path: Path, source_path: Path) -> tuple[str, str]:
+        captured.append((svnrev_path, source_path))
+        return REVISION, EXPECTED_KEY
+
+    monkeypatch.setattr(au55, "read_built_gmin_provenance", _capture_read)
+    assert au55._resolve_gmin_provenance() == (REVISION, EXPECTED_KEY)
+    assert captured == [
+        (
+            Path("/work/metal-darby/src/wales/GMIN/source/SVNREV"),
+            Path("/work/metal-darby/gmin-source.txt"),
+        )
+    ]
+
+    enter_text = (ROOT / "scripts" / "au55_scale" / "enter_bench.sh").read_text()
+    assert "/work/metal-darby" in enter_text
+    assert "/work/gmin-h2h" not in enter_text
+    assert "GMIN_SVNREV_FILE=" in enter_text
+    assert "GMIN_SOURCE_FILE=" in enter_text
+
+
+def test_au55_scale_and_morse14_h2h_validate_partial_caller_provenance_without_disk_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    au55 = _load_module("rnext7_au55_partial", "scripts/au55_scale/run_panel.py")
+    morse14 = _load_module(
+        "rnext7_morse14_partial", "scripts/morse14_h2h/run_panel.py"
+    )
+    _patch_bench_env(monkeypatch, au55, morse14)
+
+    svnrev, gmin_source = _write_gmin_meta(tmp_path / "meta", build_key=EXPECTED_KEY)
+    monkeypatch.setenv("GMIN_SVNREV_FILE", str(svnrev))
+    monkeypatch.setenv("GMIN_SOURCE_FILE", str(gmin_source))
+
+    fake_root = tmp_path / "repo"
+    au55_csv = fake_root / "bench" / "au55-gupta" / "seeds.csv"
+    au55_fields = list(au55.SEED_FIELDS) + [
+        "code_revision",
+        "gmin_build_key",
+        "host",
+        "machine_id",
+        "cpu_model",
+    ]
+    _write_csv_with_fields(
+        au55_csv,
+        au55_fields,
+        [
+            {
+                "system": "au55",
+                "code": "gmin",
+                "seed": "2000",
+                "budget": "1000000",
+                "hit": "1",
+                "evals_to_hit": "20000",
+                "charged": "20000",
+                "wall_s": "0.600000",
+                "best": "-191.03085280",
+                "pot_s": "0.500000",
+                "outside_s": "0.100000",
+                "code_revision": REVISION,
+                "gmin_build_key": EXPECTED_KEY,
+                "host": "bench",
+                **FAKE_MACHINE,
+            }
+        ],
+    )
+
+    morse14_csv = fake_root / "bench" / "morse-h2h" / "seeds.csv"
+    morse14_fields = list(morse14.ROW_FIELDS) + [
+        col
+        for col in ("gmin_build_key", "machine_id", "cpu_model")
+        if col not in morse14.ROW_FIELDS
+    ]
+    _write_csv_with_fields(
+        morse14_csv,
+        morse14_fields,
+        [
+            {
+                "system": "m55r14",
+                "code": "gmin",
+                "seed": "2000",
+                "budget": "1000000",
+                "hit": "1",
+                "evals_to_hit": "20000",
+                "charged": "20000",
+                "wall_s": "0.600000",
+                "best": "-220.646208",
+                "pot_s": "0.500000",
+                "outside_s": "0.100000",
+                "code_revision": REVISION,
+                "gmin_build_key": EXPECTED_KEY,
+                "host": "bench",
+                **FAKE_MACHINE,
+            }
+        ],
+    )
+
+    # Both None -> resolves from disk.
+    assert len(au55.stored_gmin(fake_root)) == 1
+    assert ("m55r14", 2000) in morse14.load_gmin(morse14_csv)
+
+    # Forbid disk resolution whenever either caller argument is not None.
+    for mod in (au55, morse14):
+        monkeypatch.setattr(
+            mod,
+            "_resolve_gmin_provenance",
+            lambda *_a, **_kw: (_ for _ in ()).throw(
+                AssertionError("must not fall back to _resolve_gmin_provenance")
+            ),
+        )
+
+    bad_pairs: tuple[tuple[str | None, str | None, str], ...] = (
+        (REVISION, "", "expected gmin_build_key"),
+        (REVISION, None, "expected gmin_build_key"),
+        (REVISION, "not-a-sha256", "expected gmin_build_key"),
+        ("", EXPECTED_KEY, "missing expected GMIN revision"),
+        (None, EXPECTED_KEY, "missing expected GMIN revision"),
+        ("", "", "missing expected GMIN revision"),
+    )
+    for bad_rev, bad_key, pattern in bad_pairs:
+        with pytest.raises(ValueError, match=pattern):
+            au55.stored_gmin(
+                fake_root, gmin_revision=bad_rev, gmin_build_key=bad_key
+            )
+        with pytest.raises(ValueError, match=pattern):
+            morse14.load_gmin(
+                morse14_csv, gmin_revision=bad_rev, gmin_build_key=bad_key
+            )
+
+    # Valid explicit pair succeeds without touching disk.
+    assert (
+        len(
+            au55.stored_gmin(
+                fake_root, gmin_revision=REVISION, gmin_build_key=EXPECTED_KEY
+            )
+        )
+        == 1
+    )
+    assert ("m55r14", 2000) in morse14.load_gmin(
+        morse14_csv, gmin_revision=REVISION, gmin_build_key=EXPECTED_KEY
+    )
+
+
+def test_gad_published_and_morse_h2h_reject_legacy_row_before_machine_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gad = _load_module("rnext7_gad", "scripts/gad_published/run_campaign.py")
+    morse = _load_module("rnext7_morse", "scripts/morse_h2h/run_campaign.py")
+    _patch_bench_env(monkeypatch, gad, morse)
+
+    other_machine = {"machine_id": "9" * 64, "cpu_model": "Other Machine CPU"}
+
+    # 1. Legacy h2h_row text format (no machine_id/cpu_model, no code_revision/gmin_build_key).
+    gad_legacy = tmp_path / "gad-legacy-gmin-2000.row"
+    gad_legacy.write_text(
+        "h2h_row system=lj38 code=gmin seed=2000 budget=100000 hit=1 "
+        "evals_to_hit=4000 charged=4000 wall_s=0.3 best=-173.928427 pot_s=0.2\n"
+    )
+    with pytest.raises(SavedRowProvenanceMismatch, match="code_revision"):
+        gad.saved_rerun(
+            gad_legacy,
+            38,
+            2000,
+            "gmin",
+            100_000,
+            code_revision=REVISION,
+            gmin_build_key=EXPECTED_KEY,
+            machine=FAKE_MACHINE,
+        )
+
+    morse_legacy = tmp_path / "morse-legacy-gmin-2000.row"
+    morse_legacy.write_text(
+        "h2h_row system=m30r6 code=gmin seed=2000 budget=100000 hit=1 "
+        "evals_to_hit=4000 charged=4000 wall_s=0.3 best=-106.835790 pot_s=0.2\n"
+    )
+    with pytest.raises(SavedRowProvenanceMismatch, match="code_revision"):
+        morse.load_saved(
+            morse_legacy,
+            "m30r6",
+            2000,
+            "gmin",
+            100_000,
+            machine=FAKE_MACHINE,
+            url="https://example.invalid/gmin.tar.gz",
+            revision=REVISION,
+            gmin_build_key=EXPECTED_KEY,
+        )
+
+    # 2. CSV row from a different machine with mismatched gmin_build_key also raises
+    # SavedRowProvenanceMismatch instead of returning None on machine_id.
+    gad_other_bad = tmp_path / "gad-other-bad.row"
+    _write_csv_with_fields(
+        gad_other_bad,
+        gad.PER_SEED_FIELDS,
+        [
+            {
+                "system": "lj38",
+                "code": "gmin",
+                "seed": "2000",
+                "budget": "100000",
+                "hit": "1",
+                "evals_to_hit": "4000",
+                "charged": "4000",
+                "wall_s": "0.3",
+                "best": "-173.928427",
+                "pot_s": "0.2",
+                "code_revision": REVISION,
+                "gmin_build_key": WRONG_KEY,
+                "host": "bench",
+                **other_machine,
+            }
+        ],
+    )
+    with pytest.raises(SavedRowProvenanceMismatch, match="gmin_build_key"):
+        gad.saved_rerun(
+            gad_other_bad,
+            38,
+            2000,
+            "gmin",
+            100_000,
+            code_revision=REVISION,
+            gmin_build_key=EXPECTED_KEY,
+            machine=FAKE_MACHINE,
+        )
+
+    morse_other_bad = tmp_path / "morse-other-bad.row"
+    _write_csv_with_fields(
+        morse_other_bad,
+        morse.PER_SEED_FIELDS,
+        [
+            {
+                "system": "m30r6",
+                "code": "gmin",
+                "seed": "2000",
+                "budget": "100000",
+                "hit": "1",
+                "evals_to_hit": "4000",
+                "charged": "4000",
+                "wall_s": "0.3",
+                "best": "-106.835790",
+                "pot_s": "0.2",
+                "outside_s": "0.1",
+                "gmin_url": "https://example.invalid/gmin.tar.gz",
+                "gmin_revision": REVISION,
+                "gmin_build_key": WRONG_KEY,
+                "anneal_head": "",
+                "code_revision": REVISION,
+                "host": "bench",
+                **other_machine,
+            }
+        ],
+    )
+    with pytest.raises(SavedRowProvenanceMismatch, match="gmin_build_key"):
+        morse.load_saved(
+            morse_other_bad,
+            "m30r6",
+            2000,
+            "gmin",
+            100_000,
+            machine=FAKE_MACHINE,
+            url="https://example.invalid/gmin.tar.gz",
+            revision=REVISION,
+            gmin_build_key=EXPECTED_KEY,
+        )
+
+    # 3. When GMIN provenance matches, a different machine still returns None cleanly.
+    _write_csv_with_fields(
+        gad_other_bad,
+        gad.PER_SEED_FIELDS,
+        [
+            {
+                "system": "lj38",
+                "code": "gmin",
+                "seed": "2000",
+                "budget": "100000",
+                "hit": "1",
+                "evals_to_hit": "4000",
+                "charged": "4000",
+                "wall_s": "0.3",
+                "best": "-173.928427",
+                "pot_s": "0.2",
+                "code_revision": REVISION,
+                "gmin_build_key": EXPECTED_KEY,
+                "host": "bench",
+                **other_machine,
+            }
+        ],
+    )
+    assert (
+        gad.saved_rerun(
+            gad_other_bad,
+            38,
+            2000,
+            "gmin",
+            100_000,
+            code_revision=REVISION,
+            gmin_build_key=EXPECTED_KEY,
+            machine=FAKE_MACHINE,
+        )
+        is None
+    )
+
+    _write_csv_with_fields(
+        morse_other_bad,
+        morse.PER_SEED_FIELDS,
+        [
+            {
+                "system": "m30r6",
+                "code": "gmin",
+                "seed": "2000",
+                "budget": "100000",
+                "hit": "1",
+                "evals_to_hit": "4000",
+                "charged": "4000",
+                "wall_s": "0.3",
+                "best": "-106.835790",
+                "pot_s": "0.2",
+                "outside_s": "0.1",
+                "gmin_url": "https://example.invalid/gmin.tar.gz",
+                "gmin_revision": REVISION,
+                "gmin_build_key": EXPECTED_KEY,
+                "anneal_head": "",
+                "code_revision": REVISION,
+                "host": "bench",
+                **other_machine,
+            }
+        ],
+    )
+    assert (
+        morse.load_saved(
+            morse_other_bad,
+            "m30r6",
+            2000,
+            "gmin",
+            100_000,
+            machine=FAKE_MACHINE,
+            url="https://example.invalid/gmin.tar.gz",
+            revision=REVISION,
+            gmin_build_key=EXPECTED_KEY,
+        )
+        is None
+    )
+
+
+def test_gmin_h2h_raises_on_provenance_mismatch_and_legacy_row_before_machine_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gmin_h2h = _load_module("rnext7_gmin_h2h", "scripts/gmin_h2h/run_campaign.py")
+    _patch_bench_env(monkeypatch, gmin_h2h)
+    monkeypatch.setattr(
+        gmin_h2h,
+        "machine_provenance",
+        lambda *_a, **_kw: (FAKE_MACHINE["machine_id"], FAKE_MACHINE["cpu_model"]),
+    )
+    monkeypatch.setattr(gmin_h2h, "ARMS", ("gmin",))
+    monkeypatch.setattr(gmin_h2h, "SEEDS", (2000,))
+    monkeypatch.setattr(
+        gmin_h2h,
+        "binary_budget",
+        lambda _binary, n: (gmin_h2h.PAPER_BUDGETS[n], -543.665361),
+    )
+    monkeypatch.setattr(
+        gmin_h2h,
+        "write_start",
+        lambda _binary, _n, _seed, coords: (
+            coords.parent.mkdir(parents=True, exist_ok=True),
+            coords.write_text("98\n\n"),
+        ),
+    )
+    monkeypatch.setattr(
+        gmin_h2h,
+        "run_gmin",
+        lambda *_a, **_kw: (_ for _ in ()).throw(
+            AssertionError("gmin_h2h must raise on provenance mismatch, never rerun")
+        ),
+    )
+
+    svnrev, gmin_source = _write_gmin_meta(tmp_path / "meta", build_key=EXPECTED_KEY)
+    head_file = tmp_path / "head"
+    head_file.write_text(f"{FAKE_HEAD}\n")
+    dummy = tmp_path / "dummy"
+    dummy.write_text("#!/bin/sh\nexit 99\n")
+    runs = tmp_path / "runs"
+    starts = tmp_path / "starts"
+    row_path = runs / "lj98" / "gmin-2000.row"
+    row_path.parent.mkdir(parents=True, exist_ok=True)
+
+    argv = [
+        "run_campaign.py",
+        "--binary",
+        str(dummy),
+        "--gmin",
+        str(dummy),
+        "--data",
+        str(dummy),
+        "--source",
+        str(gmin_source),
+        "--svnrev",
+        str(svnrev),
+        "--head-file",
+        str(head_file),
+        "--runs",
+        str(runs),
+        "--starts",
+        str(starts),
+        "--summary",
+        str(tmp_path / "results.csv"),
+        "--size",
+        "98",
+        "--seed",
+        "2000",
+        "--arm",
+        "gmin",
+    ]
+
+    # 1. Legacy h2h_row file (no counters, no machine_id, no provenance) raises via main().
+    row_path.write_text(
+        "h2h_row system=lj98 code=gmin seed=2000 budget=4000000 hit=1 "
+        "evals_to_hit=18000 charged=18000 wall_s=0.8 best=-543.665361 pot_s=0.7\n"
+    )
+    with pytest.raises(SavedRowProvenanceMismatch, match="code_revision"):
+        gmin_h2h.main(argv)
+
+    # 2. Different-machine CSV row with mismatched gmin_build_key raises via main().
+    gmin_h2h.write_per_seed_row(
+        row_path,
+        {
+            "system": "lj98",
+            "code": "gmin",
+            "seed": "2000",
+            "budget": "4000000",
+            "hit": "1",
+            "evals_to_hit": "18000",
+            "charged": "18000",
+            "gradient_passes": "18000",
+            "energy_only_entries": "12",
+            "wall_s": "0.8",
+            "best": "-543.665361",
+            "pot_s": "0.7",
+        },
+        "9" * 64,
+        "Other Machine CPU",
+        gmin_url="https://example.invalid/gmin.tar.bz2",
+        gmin_revision=REVISION,
+        gmin_build_key=WRONG_KEY,
+    )
+    with pytest.raises(SavedRowProvenanceMismatch, match="gmin_build_key"):
+        gmin_h2h.main(argv)
+
+    # 3. Same-machine CSV row with mismatched gmin_build_key raises via main() (never reruns).
+    gmin_h2h.write_per_seed_row(
+        row_path,
+        {
+            "system": "lj98",
+            "code": "gmin",
+            "seed": "2000",
+            "budget": "4000000",
+            "hit": "1",
+            "evals_to_hit": "18000",
+            "charged": "18000",
+            "gradient_passes": "18000",
+            "energy_only_entries": "12",
+            "wall_s": "0.8",
+            "best": "-543.665361",
+            "pot_s": "0.7",
+        },
+        FAKE_MACHINE["machine_id"],
+        FAKE_MACHINE["cpu_model"],
+        gmin_url="https://example.invalid/gmin.tar.bz2",
+        gmin_revision=REVISION,
+        gmin_build_key=WRONG_KEY,
+    )
+    with pytest.raises(SavedRowProvenanceMismatch, match="gmin_build_key"):
+        gmin_h2h.main(argv)
+
+    # 4. Matching provenance on same machine reuses cleanly; on different machine returns None.
+    gmin_h2h.write_per_seed_row(
+        row_path,
+        {
+            "system": "lj98",
+            "code": "gmin",
+            "seed": "2000",
+            "budget": "4000000",
+            "hit": "1",
+            "evals_to_hit": "18000",
+            "charged": "18000",
+            "gradient_passes": "18000",
+            "energy_only_entries": "12",
+            "wall_s": "0.8",
+            "best": "-543.665361",
+            "pot_s": "0.7",
+        },
+        FAKE_MACHINE["machine_id"],
+        FAKE_MACHINE["cpu_model"],
+        gmin_url="https://example.invalid/gmin.tar.bz2",
+        gmin_revision=REVISION,
+        gmin_build_key=EXPECTED_KEY,
+    )
+    assert gmin_h2h.main(argv) == 0
+    assert (
+        gmin_h2h.load_saved(
+            row_path,
+            "lj98",
+            2000,
+            "gmin",
+            4_000_000,
+            "9" * 64,
+            "Other Machine CPU",
+            code_revision=REVISION,
+            gmin_url="https://example.invalid/gmin.tar.bz2",
+            gmin_build_key=EXPECTED_KEY,
+        )
+        is None
+    )
