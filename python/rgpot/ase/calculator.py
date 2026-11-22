@@ -45,7 +45,7 @@ from __future__ import annotations
 import itertools
 import math
 import re
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Sequence, SupportsFloat, SupportsIndex
 
 import numpy as np
 from ase.atoms import Atoms
@@ -263,7 +263,12 @@ def _kernel_cutoff(potential: Any) -> float:
         return _checked_cutoff(name, _KERNEL_CUTOFF_ANGSTROM[name])
     native = getattr(potential, "native_cutoff", None)
     if callable(native):
-        return _checked_cutoff(name, float(native()) * _NANOMETRE_IN_ANGSTROM)
+        raw_native = native()
+        if not isinstance(raw_native, (SupportsFloat, SupportsIndex)):
+            raise TypeError(
+                f"{name}.native_cutoff() returned {raw_native!r}; expected a number"
+            )
+        return _checked_cutoff(name, float(raw_native) * _NANOMETRE_IN_ANGSTROM)
     cutoff = getattr(potential, "cutoff", None)
     if cutoff is not None and not callable(cutoff):
         return _checked_cutoff(name, cutoff)
