@@ -11,7 +11,9 @@ static PLACEMENT_PAD: [u8; 65536] = [0xA5; 65536];
 pub fn placement_pad_byte() -> u8 {
     #[cfg(feature = "placement-pad")]
     {
-        std::hint::black_box(PLACEMENT_PAD[0])
+        let pad = std::hint::black_box(&PLACEMENT_PAD);
+        let idx = std::hint::black_box(0usize);
+        std::hint::black_box(pad[idx])
     }
     #[cfg(not(feature = "placement-pad"))]
     {
