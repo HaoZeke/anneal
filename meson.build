@@ -181,16 +181,21 @@ if get_option('b_coverage')
     add_project_arguments(_atomic_profile_c, language: 'c')
     add_project_arguments(_atomic_profile_cpp, language: 'cpp')
     # Fortran kernels are called from those same OpenMP regions.
+    # Pass -fprofile-update=atomic when the Fortran compiler accepts it.
+    # gcc must accept it. Other compilers get an explicit message that
+    # atomic profile updates are unavailable.
     if has_fortran
-        _atomic_profile_fc = fc.get_supported_arguments(
-            ['-fprofile-update=atomic'],
-        )
-        if _atomic_profile_fc.length() == 0
+        if fc.has_argument('-fprofile-update=atomic')
+            add_project_arguments('-fprofile-update=atomic', language: 'fortran')
+        elif fc.get_id() == 'gcc'
             error(
                 'b_coverage requires -fprofile-update=atomic; ' + fc.get_id() + ' did not accept it',
             )
+        else
+            message(
+                'atomic profile updates are unavailable for Fortran compiler ' + fc.get_id(),
+            )
         endif
-        add_project_arguments(_atomic_profile_fc, language: 'fortran')
     endif
 endif
 
