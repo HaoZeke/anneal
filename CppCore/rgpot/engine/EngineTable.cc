@@ -188,6 +188,10 @@ int rgpot_engine_set_cache(RgpotEnginePot *pot, const char *path) {
   if (!pot || (path && !*path)) {
     return fail(pot, 1, "invalid result cache argument");
   }
+  if (path && pot->backend->components) {
+    return fail(pot, RGPOT_ENGINE_ERR_UNSUPPORTED,
+                "the result cache does not store per-term component records");
+  }
 #ifdef RGPOT_HAS_CACHE
   try {
     std::unique_ptr<rgpot::cache::PotentialCache> cache;

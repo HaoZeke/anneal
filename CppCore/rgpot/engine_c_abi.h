@@ -175,7 +175,8 @@ RGPOT_ENGINE_API int rgpot_engine_force(
  * model and parameter set. A successful attachment starts the counters at
  * zero. The handle owns the cache. A null path detaches it. A failure
  * leaves the existing attachment intact. Requires exclusive use of pot.
- * Returns 3 when this build has no result cache support. */
+ * Returns 3 for a build without cache support or a composite handle whose
+ * per-term records the result cache cannot preserve. */
 RGPOT_ENGINE_API int rgpot_engine_set_cache(RgpotEnginePot *pot,
                                             const char *path);
 

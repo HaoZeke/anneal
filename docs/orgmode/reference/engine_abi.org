@@ -94,7 +94,8 @@ int rgpot_engine_set_cache(RgpotEnginePot *pot, const char *path);
 - Units :: none.
 - Outputs :: a successful call replaces the current attachment.
 - Errors :: 1 for an invalid argument, 2 when opening fails, 3 for a build
-  without cache support. An open failure preserves the current attachment.
+  without cache support or a composite potential with per-term records.
+  An open failure preserves the current attachment.
 
 *** =rgpot_engine_cache_counts=
 

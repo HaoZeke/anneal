@@ -729,6 +729,9 @@ TEST_CASE("composite engine sums weighted terms and reports each",
                                &error);
   INFO(error);
   REQUIRE(pot != nullptr);
+  auto set_cache = sym<decltype(&rgpot_engine_set_cache)>(
+      e.handle, "rgpot_engine_set_cache");
+  REQUIRE(set_cache(pot, "composite-cache") == RGPOT_ENGINE_ERR_UNSUPPORTED);
   RgpotEngineCaps caps;
   caps.size = sizeof(caps);
   REQUIRE(e.caps(pot, &caps) == 0);
