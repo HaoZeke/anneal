@@ -322,17 +322,53 @@ def parse_gmin(text: str) -> dict[str, str]:
         fields[key] = value
     if "hit" not in fields or "best" not in fields:
         raise ValueError(f"no gmin row in {text!r}")
-    fields.setdefault("code", "gmin")
     return fields
 
 
 def _parse_saved_row(text: str, arm: str) -> dict[str, str]:
     lines = [line for line in text.splitlines() if line.strip()]
+    for index, line in enumerate(lines[:-1]):
+        cols = next(csv.reader([line]), [])
+        if "system" in cols and ("code" in cols or "arm" in cols) and "seed" in cols:
+            return next(csv.DictReader(lines[index : index + 2]))
     if any(line.startswith("h2h_row ") for line in lines):
         return parse_gmin(text)
     if any(",anneal," in line for line in lines):
         return parse_anneal(text)
+    anneal_header = (
+        "system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,"
+        "pot_s,outside_s,pot_per_eval_s,outside_per_eval_s"
+    )
+    anneal_cols = anneal_header.split(",")
+    candidates = [
+        line
+        for line in lines
+        if len(next(csv.reader([line]), [])) == len(anneal_cols)
+    ]
+    if len(candidates) == 1:
+        return next(csv.DictReader([anneal_header, candidates[0]]))
     return parse_gmin(text) if arm == "gmin" else parse_anneal(text)
+
+
+def load_saved(
+    path: Path,
+    system: str,
+    seed: int,
+    arm: str,
+    budget: int,
+) -> dict[str, str] | None:
+    if not path.is_file() or path.stat().st_size == 0:
+        return None
+    row = _parse_saved_row(path.read_text(), arm)
+    validate_saved_row_identity(
+        row,
+        path=path,
+        system=system,
+        arm=arm,
+        seed=seed,
+        budget=budget,
+    )
+    return row
 
 
 def as_result(system: str, arm: str, row: dict[str, str]) -> dict:
@@ -447,17 +483,9 @@ def main(argv: list[str]) -> int:
                 [str(args.binary), "coords", system, str(seed), str(coords)],
                 check=True,
             )
-        if saved.is_file() and saved.stat().st_size > 0:
-            text = saved.read_text()
-            row = _parse_saved_row(text, arm)
-            validate_saved_row_identity(
-                row,
-                path=saved,
-                system=system,
-                arm=arm,
-                seed=seed,
-                budget=budget,
-            )
+        saved_row = load_saved(saved, system, seed, arm, budget)
+        if saved_row is not None:
+            row = saved_row
         else:
             print(f"run {system} {arm} seed {seed}", flush=True)
             if arm == "anneal":

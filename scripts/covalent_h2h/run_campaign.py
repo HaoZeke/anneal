@@ -410,6 +410,35 @@ def self_test() -> None:
     print("ok")
 
 
+def load_saved(
+    path: Path,
+    system: str,
+    seed: int,
+    code: str,
+    budget: int,
+    *,
+    machine: dict[str, str] | None = None,
+) -> dict[str, str] | None:
+    if not path.is_file() or not path.read_text().strip():
+        return None
+    expected_machine = dict(machine) if machine is not None else machine_columns()
+    row = next(csv.DictReader(path.read_text().splitlines()))
+    validate_saved_row_identity(
+        row,
+        path=path,
+        system=system,
+        arm=code,
+        seed=seed,
+        budget=budget,
+    )
+    if (
+        row.get("machine_id") != expected_machine["machine_id"]
+        or row.get("cpu_model") != expected_machine["cpu_model"]
+    ):
+        raise RuntimeError(f"{path} is a legacy or different-machine row")
+    return row
+
+
 def main(argv: list[str]) -> int:
     if len(argv) == 2 and argv[1] == "--self-test":
         self_test()
@@ -487,23 +516,10 @@ def main(argv: list[str]) -> int:
         saved = args.runs / name / f"{code}-{seed}.row"
         log = args.runs / name / f"{code}-{seed}.log"
         saved.parent.mkdir(parents=True, exist_ok=True)
-        if saved.is_file() and saved.read_text().strip():
-            row = next(csv.DictReader(saved.read_text().splitlines()))
-            validate_saved_row_identity(
-                row,
-                path=saved,
-                system=name,
-                arm=code,
-                seed=seed,
-                budget=budget,
-            )
-            if (
-                row.get("machine_id") != machine["machine_id"]
-                or row.get("cpu_model") != machine["cpu_model"]
-            ):
-                raise RuntimeError(f"{saved} is a legacy or different-machine row")
-            rows.append(row)
-            note(progress, f"skip {name} code={code} seed={seed} hit={row['hit']}")
+        existing = load_saved(saved, name, seed, code, budget, machine=machine)
+        if existing is not None:
+            rows.append(existing)
+            note(progress, f"skip {name} code={code} seed={seed} hit={existing['hit']}")
             continue
         note(progress, f"start {name} code={code} seed={seed} budget={budget}")
         if code in ANNEAL:

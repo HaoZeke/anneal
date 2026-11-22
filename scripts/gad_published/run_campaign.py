@@ -583,20 +583,15 @@ def load_source(path: Path) -> str:
 def _parse_saved_row(text: str, arm: str) -> dict[str, str]:
     lines = [line for line in text.splitlines() if line.strip()]
     for index, line in enumerate(lines[:-1]):
-        if line.startswith("system,code,seed,budget,"):
+        cols = next(csv.reader([line]), [])
+        if "system" in cols and ("code" in cols or "arm" in cols) and "seed" in cols:
             return next(csv.DictReader(lines[index : index + 2]))
     if any(line.startswith("h2h_row ") for line in lines):
-        row = parse_gmin(text)
-        row.setdefault("code", "gmin")
-        return row
+        return parse_gmin(text)
     for candidate in ("anneal", "gad"):
         if any(f",{candidate}," in line for line in lines):
             return parse_anneal(text, candidate)
-    if arm == "gmin":
-        row = parse_gmin(text)
-        row.setdefault("code", "gmin")
-        return row
-    return parse_anneal(text, arm)
+    return parse_gmin(text) if arm == "gmin" else parse_anneal(text, arm)
 
 
 def saved_rerun(

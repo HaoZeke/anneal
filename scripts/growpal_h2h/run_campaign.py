@@ -410,6 +410,35 @@ def seed_path(rows: Path, n: int, seed: int, arm: str) -> Path:
     return rows / system_name(n) / f"{arm}-{seed}.row"
 
 
+def load_saved(
+    path: Path,
+    system: str,
+    seed: int,
+    arm: str,
+    budget: int,
+    *,
+    machine: dict[str, str] | None = None,
+) -> dict[str, str] | None:
+    existing = load_seed(path)
+    if existing is None:
+        return None
+    expected_machine = dict(machine) if machine is not None else machine_columns()
+    validate_saved_row_identity(
+        existing,
+        path=path,
+        system=system,
+        arm=arm,
+        seed=seed,
+        budget=budget,
+    )
+    if (
+        existing.get("machine_id") != expected_machine["machine_id"]
+        or existing.get("cpu_model") != expected_machine["cpu_model"]
+    ):
+        raise RuntimeError(f"{path} is a legacy or different-machine row")
+    return existing
+
+
 def main(argv: list[str]) -> int:
     if len(argv) == 2 and argv[1] == "--self-test":
         self_test()
@@ -462,21 +491,15 @@ def main(argv: list[str]) -> int:
             raise SystemExit(f"binary budget {binary_calls} != paper budget {budget}")
         saved = seed_path(args.rows, n, seed, arm)
         log = args.runs / system_name(n) / f"{arm}-{seed}.log"
-        existing = load_seed(saved)
+        existing = load_saved(
+            saved,
+            system_name(n),
+            seed,
+            arm,
+            budget,
+            machine=machine,
+        )
         if existing is not None:
-            validate_saved_row_identity(
-                existing,
-                path=saved,
-                system=system_name(n),
-                arm=arm,
-                seed=seed,
-                budget=budget,
-            )
-            if (
-                existing.get("machine_id") != machine["machine_id"]
-                or existing.get("cpu_model") != machine["cpu_model"]
-            ):
-                raise RuntimeError(f"{saved} is a legacy or different-machine row")
             rows.append(existing)
             note(
                 progress,

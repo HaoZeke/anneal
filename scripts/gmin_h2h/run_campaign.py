@@ -522,19 +522,26 @@ def job_paths(runs: Path, n: int, seed: int, arm: str) -> tuple[Path, Path]:
 def _parse_saved_row(text: str, arm: str) -> dict[str, str]:
     lines = [line for line in text.splitlines() if line.strip()]
     for index, line in enumerate(lines[:-1]):
-        if line.startswith("system,code,seed,budget,"):
+        cols = next(csv.reader([line]), [])
+        if "system" in cols and ("code" in cols or "arm" in cols) and "seed" in cols:
             return next(csv.DictReader(lines[index : index + 2]))
     if any(line.startswith("h2h_row ") for line in lines):
-        row = parse_gmin(text)
-        row.setdefault("code", "gmin")
-        return row
+        return parse_gmin(text)
     if any(",anneal," in line for line in lines):
         return parse_anneal(text)
-    if arm == "anneal":
-        return parse_anneal(text)
-    row = parse_gmin(text)
-    row.setdefault("code", "gmin")
-    return row
+    anneal_header = (
+        "system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,"
+        "head,tree,cpu,pins"
+    )
+    anneal_cols = anneal_header.split(",")
+    candidates = [
+        line
+        for line in lines
+        if len(next(csv.reader([line]), [])) == len(anneal_cols)
+    ]
+    if len(candidates) == 1:
+        return next(csv.DictReader([anneal_header, candidates[0]]))
+    return parse_anneal(text) if arm == "anneal" else parse_gmin(text)
 
 
 def load_saved(

@@ -552,6 +552,32 @@ def uncapped(args) -> int:
     return 0
 
 
+def load_saved(
+    path: Path,
+    system: str,
+    seed: int,
+    arm: str,
+    budget: int,
+) -> dict[str, str] | None:
+    existing = read_rows(path)
+    if not existing:
+        return None
+    if len(existing) != 1:
+        raise RuntimeError(f"{path} has {len(existing)} rows")
+    row = existing[0]
+    validate_saved_row_identity(
+        row,
+        path=path,
+        system=system,
+        arm=arm,
+        seed=seed,
+        budget=budget,
+    )
+    if not row.get("machine_id") or not row.get("cpu_model"):
+        raise RuntimeError(f"{path} is a legacy row; use a new campaign directory")
+    return row
+
+
 def main(argv: list[str]) -> int:
     if len(argv) == 2 and argv[1] == "--self-test":
         self_test()
@@ -613,19 +639,8 @@ def main(argv: list[str]) -> int:
     for system, seed, arm in order:
         budget = PAPER_BUDGETS[system]
         saved = args.out / "rows" / system / f"{arm}-{seed}.row"
-        existing = read_rows(saved)
-        if existing:
-            row = existing[0]
-            validate_saved_row_identity(
-                row,
-                path=saved,
-                system=system,
-                arm=arm,
-                seed=seed,
-                budget=budget,
-            )
-            if not row.get("machine_id") or not row.get("cpu_model"):
-                raise RuntimeError(f"{saved} is a legacy row; use a new campaign directory")
+        row = load_saved(saved, system, seed, arm, budget)
+        if row is not None:
             note(progress, f"skip {system} {arm} {seed} hit={row['hit']} evals={row['evals_to_hit']}")
         else:
             note(progress, f"start {system} {arm} {seed} budget={budget}")

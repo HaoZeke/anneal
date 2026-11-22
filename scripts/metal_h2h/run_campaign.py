@@ -135,6 +135,45 @@ def parse_row(text: str) -> dict[str, str]:
     return next(csv.DictReader([",".join(ROW_FIELDS), data[0]]))
 
 
+def _parse_saved_row(text: str) -> dict[str, str]:
+    lines = [line for line in text.splitlines() if line.strip()]
+    for index, line in enumerate(lines[:-1]):
+        cols = next(csv.reader([line]), [])
+        if "system" in cols and ("code" in cols or "arm" in cols) and "seed" in cols:
+            return next(csv.DictReader(lines[index : index + 2]))
+    if any(",anneal," in line or ",ase," in line for line in lines):
+        return parse_row(text)
+    candidates = [
+        line
+        for line in lines
+        if len(next(csv.reader([line]), [])) == len(ROW_FIELDS)
+    ]
+    if len(candidates) == 1:
+        return next(csv.DictReader([",".join(ROW_FIELDS), candidates[0]]))
+    return parse_row(text)
+
+
+def load_saved(
+    path: Path,
+    system: str,
+    seed: int,
+    arm: str,
+    budget: int,
+) -> dict | None:
+    if not path.is_file() or path.stat().st_size == 0:
+        return None
+    row = _parse_saved_row(path.read_text())
+    validate_saved_row_identity(
+        row,
+        path=path,
+        system=system,
+        arm=arm,
+        seed=seed,
+        budget=budget,
+    )
+    return as_result(row)
+
+
 def _env(budget: int) -> dict[str, str]:
     env = os.environ.copy()
     env["H2H_BUDGET"] = str(budget)
@@ -390,17 +429,8 @@ def main(argv: list[str]) -> int:
         log = args.logs / f"{index:02d}-{system}-seed{seed}-{arm}.log"
         saved = args.runs / system / f"{arm}-{seed}.row"
         saved.parent.mkdir(parents=True, exist_ok=True)
-        if saved.is_file() and saved.stat().st_size > 0:
-            row = parse_row(saved.read_text())
-            validate_saved_row_identity(
-                row,
-                path=saved,
-                system=system,
-                arm=arm,
-                seed=seed,
-                budget=budget,
-            )
-            result = as_result(row)
+        result = load_saved(saved, system, seed, arm, budget)
+        if result is not None:
             rows.append(result)
             note(progress, f"skip {system} {arm} seed {seed} hit {int(result['hit'])}")
             continue

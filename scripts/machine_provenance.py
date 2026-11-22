@@ -132,35 +132,48 @@ def validate_saved_row_identity(
     seed: int,
     budget: int,
 ) -> None:
-    """Reject a saved per-seed row whose system, arm, seed, or budget mismatches."""
+    """Reject a saved per-seed row whose system, arm/code, seed, or budget mismatches."""
     where = f"{path}: " if path is not None else ""
-    actual_system = str(row.get("system", "")).strip()
+    raw_system = row.get("system")
+    actual_system = "" if raw_system is None else str(raw_system).strip()
     if actual_system != system:
         raise ValueError(
             f"{where}saved row system mismatch: got {actual_system!r}, expected {system!r}"
         )
-    actual_arm = str(row.get("code") or row.get("arm") or "").strip()
-    if actual_arm != arm:
+    arm_fields = tuple(field for field in ("code", "arm") if field in row)
+    if not arm_fields:
         raise ValueError(
-            f"{where}saved row arm mismatch: got {actual_arm!r}, expected {arm!r}"
+            f"{where}saved row arm mismatch: missing 'code'/'arm', expected {arm!r}"
         )
-    raw_seed = str(row.get("seed", "")).strip()
+    arm_values = {
+        field: ("" if row[field] is None else str(row[field]).strip())
+        for field in arm_fields
+    }
+    for field, actual_arm in arm_values.items():
+        if actual_arm != arm:
+            detail = ", ".join(f"{key}={val!r}" for key, val in arm_values.items())
+            raise ValueError(
+                f"{where}saved row arm mismatch ({field}): got {detail}, expected {arm!r}"
+            )
+    raw_seed = row.get("seed")
+    seed_text = "" if raw_seed is None else str(raw_seed).strip()
     try:
-        actual_seed = int(raw_seed)
+        actual_seed = int(seed_text)
     except ValueError as error:
         raise ValueError(
-            f"{where}saved row seed mismatch: got {raw_seed!r}, expected {seed}"
+            f"{where}saved row seed mismatch: got {seed_text!r}, expected {seed}"
         ) from error
     if actual_seed != seed:
         raise ValueError(
             f"{where}saved row seed mismatch: got {actual_seed}, expected {seed}"
         )
-    raw_budget = str(row.get("budget", "")).strip()
+    raw_budget = row.get("budget")
+    budget_text = "" if raw_budget is None else str(raw_budget).strip()
     try:
-        actual_budget = int(raw_budget)
+        actual_budget = int(budget_text)
     except ValueError as error:
         raise ValueError(
-            f"{where}saved row budget mismatch: got {raw_budget!r}, expected {budget}"
+            f"{where}saved row budget mismatch: got {budget_text!r}, expected {budget}"
         ) from error
     if actual_budget != budget:
         raise ValueError(
