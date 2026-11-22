@@ -446,7 +446,6 @@ TEST_CASE("Strict MetatomicPot SO3 n=4 holds to a few ulp across matched "
 
   auto [e1, f1, v1] = pot(positions, atmtypes, box);
   auto [e2, f2, v2] = pot(positions, atmtypes, box);
-  (void)v1;
   (void)v2;
 
   // Stable to a few ulp on CPU under Strict. The energy is a sum over the
@@ -467,6 +466,15 @@ TEST_CASE("Strict MetatomicPot SO3 n=4 holds to a few ulp across matched "
       REQUIRE_THAT(f2(i, j), Catch::Matchers::WithinAbs(f1(i, j), f_tol));
     }
   }
+
+  // The variance slot holds the mean-square force deviation over the four
+  // orientations. The Lennard-Jones model is rotation invariant, so that
+  // deviation is rounding noise: an RMS no larger than f_tol, hence a variance
+  // no larger than f_tol squared. Storing the RMS in the slot instead leaves
+  // about 1.6e-9, five orders of magnitude above this bound.
+  REQUIRE(std::isfinite(v1));
+  REQUIRE(v1 >= 0.0);
+  REQUIRE(v1 <= f_tol * f_tol);
 }
 
 TEST_CASE("Strict MetatomicPot SO3 n=4 CUDA matched forces when available",

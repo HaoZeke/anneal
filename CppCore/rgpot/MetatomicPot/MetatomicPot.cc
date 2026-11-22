@@ -379,7 +379,7 @@ void MetatomicPot::forceImpl(const ForceInput &in, ForceOut *out) const {
   if (n_passes > 1) {
     force_samples.reserve(static_cast<size_t>(n_passes));
   }
-  double model_uq_variance = 0.0;
+  double model_uq_mean = 0.0;
   bool have_model_uq = false;
 
   for (long i_pass = 0; i_pass < n_passes; ++i_pass) {
@@ -472,7 +472,7 @@ void MetatomicPot::forceImpl(const ForceInput &in, ForceOut *out) const {
         auto flat_uncertainty =
             uncertainty_block->values().reshape({-1}).to(torch::kCPU);
         if (flat_uncertainty.numel() > 0) {
-          model_uq_variance =
+          model_uq_mean =
               flat_uncertainty.to(torch::kFloat64).mean().item<double>();
           have_model_uq = true;
         }
@@ -520,7 +520,7 @@ void MetatomicPot::forceImpl(const ForceInput &in, ForceOut *out) const {
   if (have_model_uq) {
     // energy_uncertainty is an RMS-like energy scale (eV). The variance slot
     // stores its square, so one square root recovers the reported scale.
-    out->variance = modelUncertaintyVariance(model_uq_variance);
+    out->variance = modelUncertaintyVariance(model_uq_mean);
   } else if (n_passes > 1 && !force_samples.empty()) {
     // Mean-square force residual over orientations (eV^2/A^2). The square
     // root is the force-scale uncertainty used for criterion smearing.
