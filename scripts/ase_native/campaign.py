@@ -80,7 +80,6 @@ def _pin() -> None:
         os.environ[name] = "1"
     os.environ["OMP_DYNAMIC"] = "FALSE"
     os.environ["MKL_DYNAMIC"] = "FALSE"
-    os.environ["LJOS_SEAT"] = "benchbot"
     if __name__ != "__main__":
         return
     allowed = _cpus_allowed()
