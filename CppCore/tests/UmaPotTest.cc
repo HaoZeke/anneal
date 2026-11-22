@@ -162,6 +162,32 @@ TEST_CASE("UmaPot validates spin bounds per task without rewriting spin 0",
   REQUIRE(mol.config().spin == 0);
 }
 
+TEST_CASE("UmaPot constructor refuses a spin outside 0 to 100",
+          "[UmaPot][spin]") {
+  for (const char *task : {"omol", "omat"}) {
+    for (const int bad : {-1, rgpot::kUmaSpinMax + 1}) {
+      rgpot::UmaConfig cfg;
+      cfg.model_path = "unused.pt2";
+      cfg.task_name = task;
+      cfg.spin = bad;
+      REQUIRE_THROWS_AS(rgpot::UmaPot(cfg), std::invalid_argument);
+      REQUIRE_THROWS_WITH(
+          rgpot::UmaPot(cfg),
+          Catch::Matchers::ContainsSubstring(
+              "spin must be an integer from 0 to 100; got " +
+              std::to_string(bad)));
+    }
+  }
+
+  rgpot::UmaConfig edge;
+  edge.model_path = "unused.pt2";
+  edge.spin = rgpot::kUmaSpinMax;
+  REQUIRE_NOTHROW(rgpot::UmaPot(edge));
+  edge.spin = 0;
+  rgpot::UmaPot zero(edge);
+  REQUIRE(zero.config().spin == 0);
+}
+
 // Metadata as scripts/export_uma_aoti.py embeds it for Baker HCN.
 static std::unordered_map<std::string, std::string> hcn_metadata() {
   return {{"task_name", "omol"},  {"charge", "0"},
