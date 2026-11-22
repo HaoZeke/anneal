@@ -169,7 +169,6 @@ public:
   [[nodiscard]] const Table &table() const noexcept { return table_; }
   [[nodiscard]] std::uint64_t builds() const noexcept { return builds_; }
   [[nodiscard]] bool reused() const noexcept { return reused_; }
-  [[nodiscard]] bool unchanged() const noexcept { return unchanged_; }
 
 private:
   Table table_;
@@ -180,7 +179,6 @@ private:
   std::uint64_t builds_ = 0;
   bool have_ = false;
   bool reused_ = false;
-  bool unchanged_ = false;
 };
 
 /// Walk pairs for one central atom, or one cluster of four, at a time

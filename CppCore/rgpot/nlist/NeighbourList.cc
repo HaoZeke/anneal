@@ -540,7 +540,6 @@ void Builder::update(const double *positions, std::size_t n, const double *box9,
                      const Query &query) {
   check_geometry(positions, n, box9, query);
   reused_ = false;
-  unchanged_ = false;
   if (have_ && n_ == n && query_.cutoff == query.cutoff && query_.skin == query.skin &&
       query_.shape == query.shape && query_.cut == query.cut &&
       query_.periodic == query.periodic && query_.fields.shifts == query.fields.shifts &&
@@ -549,7 +548,6 @@ void Builder::update(const double *positions, std::size_t n, const double *box9,
     if (std::memcmp(box_, box9, sizeof(box_)) == 0 &&
         (n == 0 || std::memcmp(ref_.data(), positions, 3 * n * sizeof(double)) == 0)) {
       reused_ = true;
-      unchanged_ = true;
       return;
     }
     const double search = search_radius(query);

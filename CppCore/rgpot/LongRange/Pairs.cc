@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <stdexcept>
 #include <vector>
 
@@ -38,6 +39,10 @@ void vacuum_box(const double *pos, std::size_t n, double reach, double *box9) {
 
 struct DualList::Skin {
   nlist::Builder builder;
+  std::vector<double> emitted_pos;
+  double emitted_box[9]{};
+  std::size_t emitted_n = 0;
+  bool emitted = false;
 };
 
 DualList::DualList(double short_cut, double long_cut, double skin)
@@ -71,9 +76,17 @@ void DualList::fill(Skin &skin, double cutoff, const double *pos, std::size_t n,
   query.fields.distances = false;
   skin.builder.update(pos, n, box9, query);
   *rebuilt = !skin.builder.reused();
-  if (skin.builder.unchanged()) {
+  if (skin.emitted && skin.emitted_n == n &&
+      std::memcmp(skin.emitted_box, box9, sizeof(skin.emitted_box)) == 0 &&
+      (n == 0 || std::memcmp(skin.emitted_pos.data(), pos, 3 * n * sizeof(double)) == 0)) {
     return;
   }
+  const auto mark_emitted = [&]() {
+    skin.emitted_pos.assign(pos, pos + 3 * n);
+    std::memcpy(skin.emitted_box, box9, sizeof(skin.emitted_box));
+    skin.emitted_n = n;
+    skin.emitted = true;
+  };
 
   const nlist::View candidates = skin.builder.table().view();
   const std::size_t m = candidates.first.size();
@@ -105,6 +118,7 @@ void DualList::fill(Skin &skin, double cutoff, const double *pos, std::size_t n,
         out->push_back(Pair{i, j, x, y, z, std::sqrt(r2)});
       }
     }
+    mark_emitted();
     return;
   }
   std::vector<std::vector<Pair>> local(static_cast<std::size_t>(nt));
@@ -145,20 +159,33 @@ void DualList::fill(Skin &skin, double cutoff, const double *pos, std::size_t n,
   for (const auto &part : local) {
     out->insert(out->end(), part.begin(), part.end());
   }
+  mark_emitted();
 }
 
 void DualList::update(const double *pos, std::size_t n, const double *box,
                       bool periodic) {
   short_rebuilt_ = false;
   long_rebuilt_ = false;
+  const auto clear_emitted = [](Skin *skin) {
+    if (skin == nullptr) {
+      return;
+    }
+    skin->emitted = false;
+    skin->emitted_pos.clear();
+    skin->emitted_n = 0;
+  };
   if (n == 0) {
     short_.clear();
     long_.clear();
+    clear_emitted(short_skin_.get());
+    clear_emitted(long_skin_.get());
     return;
   }
   if (n == 1 && (!periodic || box == nullptr)) {
     short_.clear();
     long_.clear();
+    clear_emitted(short_skin_.get());
+    clear_emitted(long_skin_.get());
     return;
   }
   if (pos == nullptr) {

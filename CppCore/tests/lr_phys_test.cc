@@ -22,6 +22,7 @@
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #ifdef _OPENMP
@@ -63,6 +64,16 @@ void check_close(double got, double ref, double tol, const char *what) {
     std::cerr << "FAIL " << what << " got " << got << " ref " << ref << " err " << err << '\n';
     ++g_fails;
   }
+}
+
+std::vector<std::tuple<int, int, double, double, double, double>>
+pair_signature(const std::vector<rgpot::lr::Pair> &pairs) {
+  std::vector<std::tuple<int, int, double, double, double, double>> out;
+  out.reserve(pairs.size());
+  for (const auto &p : pairs) {
+    out.emplace_back(p.i, p.j, p.x, p.y, p.z, p.r);
+  }
+  return out;
 }
 
 struct Eval {
@@ -270,6 +281,70 @@ void test_lists() {
   lists.update(pos.data(), n, large_box, true);
   check(lists.short_rebuilt() && lists.long_rebuilt(), "a large move rebuilds the skin");
   check_matches_brute(pos, large_box, "large move matches brute force");
+}
+
+void test_duallist_skin_sequences() {
+  const double box[9] = {8.0, 0.0, 0.0, 0.0, 8.0, 0.0, 0.0, 0.0, 8.0};
+
+  {
+    DualList lists(1.0, 1.0, 1.0);
+    const std::vector<double> A = {1.0, 1.0, 1.0, 1.9, 1.0, 1.0};
+    const std::vector<double> B = {1.0, 1.0, 1.0, 2.2, 1.0, 1.0};
+    const int n = 2;
+
+    lists.update(A.data(), n, box, true);
+    const auto a_ref = pair_signature(lists.short_pairs());
+    check(!a_ref.empty(), "A has short-range pairs");
+    lists.update(B.data(), n, box, true);
+    check(lists.short_pairs().empty(), "B leaves the short cutoff");
+    lists.update(A.data(), n, box, true);
+    check(pair_signature(lists.short_pairs()) == a_ref, "A->B->A restores A pairs");
+  }
+
+  {
+    DualList lists(1.0, 1.0, 1.0);
+    const std::vector<double> A = {1.0, 1.0, 1.0, 1.9, 1.0, 1.0};
+    const int n = 2;
+    lists.update(A.data(), n, box, true);
+    const auto a_ref = pair_signature(lists.short_pairs());
+    lists.update(nullptr, 0, box, true);
+    check(lists.short_pairs().empty(), "n=0 clears the pair list");
+    lists.update(A.data(), n, box, true);
+    check(pair_signature(lists.short_pairs()) == a_ref, "A->(n=0)->A restores A pairs");
+  }
+
+  {
+    DualList lists(1.0, 1.0, 1.0);
+    const std::vector<double> A = {1.0, 1.0, 1.0, 2.2, 1.0, 1.0};
+    const std::vector<double> B = {1.0, 1.0, 1.0, 1.9, 1.0, 1.0};
+    const int n = 2;
+    lists.update(A.data(), n, box, true);
+    lists.update(B.data(), n, box, true);
+    check(!lists.short_pairs().empty(), "B enters the short cutoff");
+    auto &poison = const_cast<std::vector<rgpot::lr::Pair> &>(lists.short_pairs());
+    poison[0].r = -123.0;
+    lists.update(B.data(), n, box, true);
+    check(!lists.short_rebuilt() && !lists.long_rebuilt(), "A->B->B keeps the skin candidates");
+    check(lists.short_pairs()[0].r == -123.0, "A->B->B skips refiltering");
+  }
+
+  {
+    const double periodic_box[9] = {4.0, 0.0, 0.0, 0.0, 4.0, 0.0, 0.0, 0.0, 4.0};
+    const std::vector<double> A = {0.1, 0.0, 0.0, 3.9, 0.0, 0.0};
+    const int n = 2;
+    DualList lists(1.0, 1.0, 0.5);
+    DualList fresh(1.0, 1.0, 0.5);
+    lists.update(A.data(), n, periodic_box, true);
+    lists.update(nullptr, 0, nullptr, false);
+    check(lists.short_pairs().empty() && lists.long_pairs().empty(),
+          "periodic->non-periodic clears the emitted lists");
+    lists.update(A.data(), n, periodic_box, true);
+    fresh.update(A.data(), n, periodic_box, true);
+    check(lists.short_pairs().size() == fresh.short_pairs().size(),
+          "periodic->non-periodic->periodic short count matches a fresh build");
+    check(lists.long_pairs().size() == fresh.long_pairs().size(),
+          "periodic->non-periodic->periodic long count matches a fresh build");
+  }
 }
 
 void test_madelung() {
@@ -1879,6 +1954,7 @@ int main() {
 #endif
   try {
     test_lists();
+    test_duallist_skin_sequences();
     test_madelung();
     test_dispersion_lattice_sum();
     test_forces_and_stress();

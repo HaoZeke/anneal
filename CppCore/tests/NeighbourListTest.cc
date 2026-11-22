@@ -521,14 +521,12 @@ TEST_CASE("a small cell change reuses the builder and a large change rebuilds",
   rgpot::nlist::Builder builder;
   builder.update(pos.data(), n, box, query);
   REQUIRE_FALSE(builder.reused());
-  REQUIRE_FALSE(builder.unchanged());
   REQUIRE(builder.builds() == 1);
   REQUIRE(filter_strict(builder.table(), pos, box) ==
           brute(pos, box, cutoff, false, true, periodic));
 
   builder.update(pos.data(), n, box, query);
   REQUIRE(builder.reused());
-  REQUIRE(builder.unchanged());
   REQUIRE(builder.builds() == 1);
 
   const double small_box[9] = {8.03, 0.21, 0.0, 0.1, 8.48, 0.15, 0.0, -0.09, 7.82};
@@ -541,7 +539,6 @@ TEST_CASE("a small cell change reuses the builder and a large change rebuilds",
       std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
   REQUIRE(elapsed < 1.0);
   REQUIRE(builder.reused());
-  REQUIRE_FALSE(builder.unchanged());
   REQUIRE(builder.builds() == 1);
   REQUIRE(filter_strict(builder.table(), pos, small_box) ==
           brute(pos, small_box, cutoff, false, true, periodic));
@@ -549,7 +546,6 @@ TEST_CASE("a small cell change reuses the builder and a large change rebuilds",
   const double large_box[9] = {8.6, 0.2, 0.0, 0.1, 9.1, 0.15, 0.0, -0.1, 8.4};
   builder.update(pos.data(), n, large_box, query);
   REQUIRE_FALSE(builder.reused());
-  REQUIRE_FALSE(builder.unchanged());
   REQUIRE(builder.builds() == 2);
   REQUIRE(filter_strict(builder.table(), pos, large_box) ==
           brute(pos, large_box, cutoff, false, true, periodic));

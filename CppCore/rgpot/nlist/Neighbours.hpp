@@ -89,19 +89,22 @@ struct Spec {
     return withinSkin(reference, current, n, skin);
   }
   double corner = 0.0;
-  for (int bits = 0; bits < 8; ++bits) {
-    const double b[3] = {
-        (bits & 1) ? span[0] : 0.0,
-        ((bits >> 1) & 1) ? span[1] : 0.0,
-        ((bits >> 2) & 1) ? span[2] : 0.0,
-    };
+  for (int s1 : {-1, 1}) {
+    for (int s2 : {-1, 1}) {
+      const double b[3] = {span[0], static_cast<double>(s1) * span[1],
+                           static_cast<double>(s2) * span[2]};
     double d[3] = {};
     for (int a = 0; a < 3; ++a) {
       for (int c = 0; c < 3; ++c) {
         d[c] += b[a] * (current_box[3 * a + c] - reference_box[3 * a + c]);
       }
     }
-    corner = std::max(corner, std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]));
+      const double norm = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+      if (!std::isfinite(norm)) {
+        return false;
+      }
+      corner = std::max(corner, norm);
+    }
   }
   if (corner > 0.0 && !(skin > 0.0)) {
     return false;
