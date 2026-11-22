@@ -185,7 +185,7 @@ Required symbol.
 - Units :: none.
 - Outputs :: three =unsigned short= fields:
   =abi_major= (=RGPOT_ENGINE_ABI_VERSION=, 1),
-  =abi_minor= (=RGPOT_ENGINE_ABI_MINOR=, 5) and
+  =abi_minor= (=RGPOT_ENGINE_ABI_MINOR=, 6) and
   =layout_revision= (=RGPOT_ENGINE_ABI_LAYOUT_REVISION=, 1).
 - Errors :: none.
 
@@ -210,6 +210,7 @@ Minor 4 added =rgpot_engine_hvp= and the trailing =RgpotEngineCaps.analytic_hvp=
 field.
 Minor 5 added =RgpotEngineComponent=,
 =rgpot_engine_last_components= and =rgpot_engine_component_name=.
+Minor 6 adds =rgpot_engine_set_cache= and =rgpot_engine_cache_counts=.
 The version does not cover the Cap'n Proto params schema, the tensor runtime the
 engine links, or the model.
 
@@ -1315,7 +1316,7 @@ No second engine abstraction is added: =EnginePotential::into_potential= wraps
 the handle as a =PotentialImpl=.
 
 - =ENGINE_ABI_VERSION=, =ENGINE_ABI_MINOR=,
-  =ENGINE_ABI_LAYOUT_REVISION= :: Host ABI identity (=1=, =5=, =1=) matching =RGPOT_ENGINE_ABI_VERSION=,
+  =ENGINE_ABI_LAYOUT_REVISION= :: Host ABI identity (=1=, =6=, =1=) matching =RGPOT_ENGINE_ABI_VERSION=,
   =RGPOT_ENGINE_ABI_MINOR= and =RGPOT_ENGINE_ABI_LAYOUT_REVISION=.
 - =RgpotEngineAbiStamp= :: Compatibility stamp (=abi_major=, =abi_minor=,
   =layout_revision=) with =RgpotEngineAbiStamp::HOST= and =serves(host)= accepting any plugin of the same major and layout revision whose minor is at most =host.abi_minor=

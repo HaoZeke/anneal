@@ -57,7 +57,7 @@ use crate::types::{rgpot_force_input_t, rgpot_force_out_t};
 /// The ABI major this loader speaks, `RGPOT_ENGINE_ABI_VERSION` of the header.
 pub const ENGINE_ABI_VERSION: c_int = 1;
 /// The ABI minor this loader advertises, `RGPOT_ENGINE_ABI_MINOR` of the header.
-pub const ENGINE_ABI_MINOR: u16 = 5;
+pub const ENGINE_ABI_MINOR: u16 = 6;
 /// The struct layout revision this loader expects, `RGPOT_ENGINE_ABI_LAYOUT_REVISION` of the header.
 pub const ENGINE_ABI_LAYOUT_REVISION: u16 = 1;
 /// Engine code meaning an argument is invalid.
