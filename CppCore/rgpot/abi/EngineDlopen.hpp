@@ -56,6 +56,9 @@ struct CandidateOptions {
   bool include_dir_envs = false;
   bool exclusive_explicit = false;
   bool platform_only_soname = false;
+  /// When an environment variable names a library, do not also try the
+  /// default file names. An explicit path still follows exclusive_explicit.
+  bool exclusive_env = false;
 };
 
 inline std::vector<std::string>
@@ -69,10 +72,14 @@ engine_candidates(const std::string &stem, const std::string &explicit_path,
       return out;
     }
   }
+  const std::size_t before_env = out.size();
   for (const char *var : env_vars) {
     if (const char *e = std::getenv(var); e && *e) {
       out.emplace_back(e);
     }
+  }
+  if (opts.exclusive_env && out.size() > before_env) {
+    return out;
   }
   if (opts.platform_only_soname) {
 #ifdef _WIN32

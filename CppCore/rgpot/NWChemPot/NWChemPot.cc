@@ -91,7 +91,8 @@ bool try_load_engine(EngineBundle &b, const std::string &engine_path) {
   b = EngineBundle{};
   const auto cands = abi::engine_candidates(
       "nwchemc", engine_path,
-      {"NWCHEMC_LIBRARY", "RGPOT_NWCHEMC_ENGINE", "RGPOT_NWCHEM_ENGINE"});
+      {"NWCHEMC_LIBRARY", "RGPOT_NWCHEMC_ENGINE", "RGPOT_NWCHEM_ENGINE"},
+      abi::CandidateOptions{.exclusive_explicit = true, .exclusive_env = true});
   std::string eng_err;
   if (!b.profile.open_candidates("nwchemc", cands, &eng_err)) {
     b.load_error = "libnwchemc not loaded: " + eng_err;
