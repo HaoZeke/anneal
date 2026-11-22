@@ -625,6 +625,52 @@ def test_an_unmapped_revision_in_any_benchmark_table_fails(monkeypatch):
     ]
 
 
+def test_recorded_revision_cell_gaps_match_the_tree():
+    assert audit_mod.revision_cell_gaps() == audit_mod.RECORDED_REVISION_CELL_GAPS
+
+
+def test_a_malformed_revision_cell_is_rejected():
+    tables = [("bench/example/rows.csv", [{"code_revision": "not-a-sha"}])]
+    assert audit_mod.revision_cell_gaps(tables) == {
+        ("bench/example/rows.csv", "code_revision", "not-a-sha"): 1
+    }
+    short = [("bench/example/rows.csv", [{"code_revision": "abc123"}])]
+    assert audit_mod.revision_cell_gaps(short) == {
+        ("bench/example/rows.csv", "code_revision", "abc123"): 1
+    }
+    upper = [("bench/example/rows.csv", [{"code_revision": "A" * 40}])]
+    assert ("bench/example/rows.csv", "code_revision", "A" * 40) in audit_mod.revision_cell_gaps(upper)
+
+
+def test_an_empty_required_revision_cell_is_rejected():
+    tables = [("bench/example/rows.csv", [{"code_revision": "", "harness_revision": "", "head": "unknown"}])]
+    assert audit_mod.revision_cell_gaps(tables) == {
+        ("bench/example/rows.csv", "code_revision", ""): 1,
+        ("bench/example/rows.csv", "head", "unknown"): 1,
+    }
+
+
+def test_an_empty_harness_revision_is_allowed():
+    tables = [("bench/example/rows.csv", [{"harness_revision": "  "}])]
+    assert audit_mod.revision_cell_gaps(tables) == {}
+
+
+def test_a_new_malformed_revision_cell_fails_the_audit(monkeypatch):
+    tables = audit_mod.revision_row_tables()
+    altered = []
+    for path, rows in tables:
+        if path == "bench/ase-nonlj/summary.csv":
+            rows = [dict(row) for row in rows]
+            rows[0]["code_revision"] = "not-a-sha"
+        altered.append((path, rows))
+    monkeypatch.setattr(audit_mod, "revision_row_tables", lambda: altered)
+    audit = audit_mod.Audit()
+    audit_mod.all_revision_provenance(audit)
+    assert [row[2] for row in audit.drifts() if row[1] == "revision cells"] == [
+        "malformed and required-empty revision cells match the record"
+    ]
+
+
 def test_an_uncited_unpushed_revision_is_reported(monkeypatch):
     unpushed = dict(audit_mod.UNPUSHED)
     unpushed["f" * 40] = "not cited anywhere"

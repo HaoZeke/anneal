@@ -3376,6 +3376,32 @@ def revision_values(value: str) -> list[str]:
     return re.findall(r"(?<![0-9a-f])[0-9a-f]{7,64}(?![0-9a-f])", value or "")
 
 
+# A non-empty revision cell is one lower-case hex string of 7 to 64 digits,
+# the same span revision_values extracts, and nothing else. A prefix, a
+# word, or a second token is malformed.
+_REVISION_CELL = re.compile(r"^[0-9a-f]{7,64}$")
+
+# harness_revision is the harness commit. Rows that predate the column
+# leave it blank, which provenance already names. Every other revision
+# column names the commit the row claims, so a blank cell fails. The
+# sentinel "unknown" is a blank: it is not a SHA.
+EMPTY_REVISION_ALLOWED = frozenset({"harness_revision"})
+
+# Cells already in the tree that are not a hex SHA, or are blank in a
+# required column. Counts, not a waiver inside the extractor: the scan
+# must equal this map. A new bad cell fails, and a recorded cell that
+# disappears fails.
+RECORDED_REVISION_CELL_GAPS = {
+    ("bench/ase-gofee-h2h/results.csv", "head", "unknown"): 3,
+    ("bench/gold-gupta/seeds.csv", "code_revision", ""): 120,
+    ("bench/occat-h2h/seeds.csv", "code_revision", ""): 138,
+    ("bench/perf-quench9/rows.csv", "code_revision", "lemma"): 72,
+    ("bench/water-gmin/rows.csv", "code_revision",
+     "gmin-aac1548a8aec13b53ad12a8d6904625081685d2e"): 60,
+    ("data/sc96_78_hits.csv", "code_revision", ""): 64,
+}
+
+
 def revision_row_tables() -> list[tuple[str, list[dict[str, str]]]]:
     """Every CSV or TSV below the paper, benchmark, data, results and record trees."""
     tables = []
@@ -3400,15 +3426,55 @@ def revision_row_tables() -> list[tuple[str, list[dict[str, str]]]]:
     return tables
 
 
-def all_revision_provenance(audit: Audit) -> None:
-    """Every revision-like cell in every row table is on origin, aliased, external, or mapped."""
-    citations: dict[str, set[str]] = defaultdict(set)
-    for path, rows in revision_row_tables():
+def revision_cell_gaps(tables: list[tuple[str, list[dict[str, str]]]] | None = None) -> dict[tuple[str, str, str], int]:
+    """Counts of malformed cells and of blank cells in a required column.
+
+    A blank harness_revision is allowed. "unknown" counts as blank on
+    every column, including harness_revision.
+    """
+    counts: dict[tuple[str, str, str], int] = defaultdict(int)
+    for path, rows in revision_row_tables() if tables is None else tables:
+        if not rows:
+            continue
+        columns = [column for column in ALL_REVISION_COLUMNS if column in rows[0]]
         for row in rows:
-            for column in ALL_REVISION_COLUMNS:
-                for value in revision_values(row.get(column, "")):
-                    if not external_pin(value):
-                        citations[value].add(path)
+            for column in columns:
+                value = (row.get(column) or "").strip()
+                if value == "" or value == "unknown":
+                    if column in EMPTY_REVISION_ALLOWED and value == "":
+                        continue
+                    token = "" if value == "" else "unknown"
+                    counts[(path, column, token)] += 1
+                    continue
+                if _REVISION_CELL.fullmatch(value) is None:
+                    counts[(path, column, value)] += 1
+    return dict(counts)
+
+
+def all_revision_provenance(audit: Audit) -> None:
+    """Every revision cell is a hex SHA and reachable, or a recorded gap.
+
+    A non-empty cell must be one lower-case hex string of 7 to 64 digits.
+    Anything else is malformed and fails closed. An empty cell is allowed
+    only in harness_revision; a blank required cell fails. Cells that are
+    already malformed or blank in a required column must match
+    RECORDED_REVISION_CELL_GAPS exactly. A well-formed cell is on origin,
+    aliased, external, or mapped.
+    """
+    citations: dict[str, set[str]] = defaultdict(set)
+    tables = revision_row_tables()
+    gaps = revision_cell_gaps(tables)
+    audit.record(gaps == RECORDED_REVISION_CELL_GAPS, "revision cells",
+                 "malformed and required-empty revision cells match the record",
+                 f"{sum(RECORDED_REVISION_CELL_GAPS.values())} recorded",
+                 f"{sum(gaps.values())} found")
+    for path, rows in tables:
+        columns = [column for column in ALL_REVISION_COLUMNS if column in rows[0]]
+        for row in rows:
+            for column in columns:
+                value = (row.get(column) or "").strip()
+                if _REVISION_CELL.fullmatch(value) and not external_pin(value):
+                    citations[value].add(path)
     names = sorted(citations)
     table = alias_table()
     index = alias_index(names, table)
