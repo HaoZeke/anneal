@@ -1,8 +1,9 @@
 # Copyright 2023--present rgpot developers
 """The shared library's rgpot_* export count stays at the measured pin.
 
-49 for a normal link of librgpot_core.a, 95 when librgpot_bundle.a is
-linked with --whole-archive. The extra 46 are the public C ABI.
+51 for a normal link of librgpot_core.a, 97 when librgpot_bundle.a is
+linked with --whole-archive. The extra 46 are the public C ABI. Two of
+the umbrella exports are the Muller-Brown entry points.
 """
 
 from __future__ import annotations
@@ -22,8 +23,8 @@ def _baseline(name: str) -> set[str]:
 
 
 def test_pinned_counts():
-    assert exports.CORE_ONLY_EXPORTS == 49
-    assert exports.BUNDLE_EXPORTS == 95
+    assert exports.CORE_ONLY_EXPORTS == 51
+    assert exports.BUNDLE_EXPORTS == 97
     assert exports.BUNDLE_EXPORTS - exports.CORE_ONLY_EXPORTS == 46
 
 
@@ -68,7 +69,7 @@ def test_count_mismatch_names_the_pin():
     wanted = {f"rgpot_abi_{index}" for index in range(46)}
     exported = {f"rgpot_cxx_{index}" for index in range(exports.BUNDLE_EXPORTS)}
     exported.update(wanted)
-    with pytest.raises(SystemExit, match="expected 95"):
+    with pytest.raises(SystemExit, match="expected 97"):
         exports.evaluate(exported, wanted, wanted, whole=True)
 
 
