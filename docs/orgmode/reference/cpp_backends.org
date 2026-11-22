@@ -1018,9 +1018,9 @@ explicit MetatomicPot(const MetatomicConfig &config);
 - Units :: positions are passed unchanged and declared to the model in
   =length_unit=; the energy is requested in eV.
   With the default
-  =length_unit= that is Angstrom in, eV and eV/Angstrom out. =variance= is the mean model =energy_uncertainty=
-  in eV when that output is used, else the RMS force spread over rotations in
-  eV/Angstrom, else 0.
+  =length_unit= that is Angstrom in, eV and eV/Angstrom out. =variance= is the square of the mean model =energy_uncertainty=
+  in eV^2 when that output is used, else the mean-square force residual over
+  rotations in (eV/Angstrom)^2, else 0.
 - Outputs :: a potential that evaluates the model in process with libtorch.
 - Errors :: the constructor throws what metatomic raises when the model cannot
   be loaded, and =std::runtime_error= for a model dtype other than =float32= or
