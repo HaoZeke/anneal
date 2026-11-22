@@ -1,0 +1,2 @@
+machine_id,cpu_model,logical_cpus,kernel,arch
+9eb296774121518feb1b187b0f6a109a42de7a5dd39e62ccd37d6e7d329604b8,Intel(R) Xeon(R) Processor,8,6.12.113+,x86_64
