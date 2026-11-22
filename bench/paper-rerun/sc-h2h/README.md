@@ -38,3 +38,10 @@ Earlier numbers whose revision is not reachable were removed. They remain on
 | sc96-80 | gmin | 9cbec1a4 | 1/12 | 1000000 |  |  |
 
 Rows: 216.
+
+The rows file is blob `8e6d73ea528b6c68ecf7be18b49d15254c42b83a`.
+Harness blob `ac6b3c85b4eb435c4787a8a7425ab7e6858f9b34` writes the GMIN pin
+`9cbec1a446352bc9ef064bd2b1a5767194655919` into `code_revision` on GMIN rows.
+Commit `c2afa54b00421482de4e67c70ab8a02462bf4509` relabelled those cells to
+the anneal revision `61fa67cf380e46876b569da45e7cc091647a775b` after the run.
+The GMIN binary was pin `9cbec1a446352bc9ef064bd2b1a5767194655919`.

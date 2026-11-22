@@ -2149,6 +2149,15 @@ def summary_against_rows(audit: Audit, summary: str, per_seed: str, arm_key: str
 SC_RERUN_SUMMARY = "bench/paper-rerun/sc-h2h/summary.csv"
 SC_RERUN_ROWS = "bench/paper-rerun/sc-h2h/rows.csv"
 SC_RERUN_MANIFEST = "bench/paper-rerun/sc-h2h/manifest.csv"
+# The committed rows blob, and the commit that stopped writing the GMIN pin
+# into code_revision. The exception is these two and nothing else.
+SC_H2H_ROWS_BLOB = "8e6d73ea528b6c68ecf7be18b49d15254c42b83a"
+SC_H2H_RELABEL = "c2afa54b00421482de4e67c70ab8a02462bf4509"
+SC_H2H_HARNESS_BLOB = "ac6b3c85b4eb435c4787a8a7425ab7e6858f9b34"
+SC_H2H_GMIN_PIN = "9cbec1a446352bc9ef064bd2b1a5767194655919"
+SC_H2H_CODE = "61fa67cf380e46876b569da45e7cc091647a775b"
+SC_H2H_README = "bench/paper-rerun/sc-h2h/README.md"
+SC_N12_README = "bench/metal-cluster-h2h/sc-n12/README.md"
 
 
 def side_rows(audit: Audit, path: str) -> list[dict[str, str]]:
@@ -2205,6 +2214,58 @@ def sc_rerun_tests(rows: list[dict[str, str]]) -> list[dict[str, object]]:
                 if tested and arm == "anneal" else None,
             })
     return out
+
+
+def sc_h2h_relabel_commit(commit: str) -> bool:
+    """True when commit changed the harness from writing the GMIN pin.
+
+    The parent of that commit holds harness blob ac6b3c85, which assigns
+    GMIN_PIN on the GMIN arm. The commit itself assigns CODE_REVISION on
+    every arm. Any other commit is not the recorded relabel.
+    """
+    if commit_of(commit) != commit:
+        return False
+    parent = git("rev-parse", "--verify", "--quiet", f"{commit}^").stdout.strip()
+    if not parent:
+        return False
+    before = git("rev-parse", "--verify", "--quiet", f"{parent}:scripts/paper_rerun/sc_h2h.py").stdout.strip()
+    after = git("rev-parse", "--verify", "--quiet", f"{commit}:scripts/paper_rerun/sc_h2h.py").stdout.strip()
+    if before != SC_H2H_HARNESS_BLOB or not after or after == before:
+        return False
+    old = git("show", f"{parent}:scripts/paper_rerun/sc_h2h.py").stdout
+    new = git("show", f"{commit}:scripts/paper_rerun/sc_h2h.py").stdout
+    wrote_pin = "code = GMIN_PIN" in old and f'GMIN_PIN = "{SC_H2H_GMIN_PIN}"' in old
+    writes_code = "code = GMIN_PIN" not in new and "CODE_REVISION" in new
+    return wrote_pin and writes_code
+
+
+def sc_h2h_code_relabel(audit: Audit) -> None:
+    """GMIN code_revision may be the anneal SHA only for one recorded file.
+
+    Harness blob ac6b3c85 writes the GMIN pin into code_revision. Commit
+    c2afa54b relabelled the committed rows, blob 8e6d73ea, to the anneal
+    SHA. A different relabel commit, or any other rows blob, is held to
+    the pin and fails closed.
+    """
+    blob = git("hash-object", str(ROOT / SC_RERUN_ROWS)).stdout.strip()
+    audit.record(blob == SC_H2H_ROWS_BLOB, SC_RERUN_ROWS, "rows blob", blob, SC_H2H_ROWS_BLOB)
+    relabel = sc_h2h_relabel_commit(SC_H2H_RELABEL)
+    audit.record(relabel, SC_RERUN_ROWS, "relabel commit", SC_H2H_RELABEL,
+                 "the commit that writes the anneal SHA into every code_revision")
+    rows = audit.rows(SC_RERUN_ROWS)
+    gmin = [r for r in rows if r["arm"] == "gmin"]
+    codes = sorted({r["code_revision"].strip() for r in gmin})
+    pins = sorted({r["gmin_pin"].strip() for r in gmin})
+    blobs = sorted({r["harness_blob"].strip() for r in rows})
+    expect = SC_H2H_CODE if blob == SC_H2H_ROWS_BLOB and relabel else SC_H2H_GMIN_PIN
+    audit.record(codes == [expect] and pins == [SC_H2H_GMIN_PIN] and blobs == [SC_H2H_HARNESS_BLOB],
+                 SC_RERUN_ROWS, "gmin code_revision relabel", " ".join(codes) or "absent", expect)
+    for path in (SC_H2H_README, SC_N12_README):
+        audit.said(path, f"blob `{SC_H2H_ROWS_BLOB}`")
+        audit.said(path, f"Harness blob `{SC_H2H_HARNESS_BLOB}`")
+        audit.said(path, f"Commit `{SC_H2H_RELABEL}`")
+        audit.said(path, f"anneal revision `{SC_H2H_CODE}`")
+        audit.said(path, f"pin `{SC_H2H_GMIN_PIN}`")
 
 
 def sc_h2h_harness_blob(audit: Audit) -> None:
@@ -2305,6 +2366,7 @@ def head_to_head(audit: Audit) -> None:
     path = "bench/metal-cluster-h2h/sc-n12/README.md"
     sc_rerun_against_rows(audit)
     sc_h2h_harness_blob(audit)
+    sc_h2h_code_relabel(audit)
     code = sc_rerun_code(audit)
     sc_develop_table(audit, path, code)
     sc_develop_table(audit, "bench/paper-rerun/sc-h2h/README.md", code)

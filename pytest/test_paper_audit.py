@@ -384,6 +384,48 @@ def test_a_sutton_chen_harness_blob_off_its_revision_is_reported():
     assert drifted[0][2] == "ac6b3c85b4eb435c4787a8a7425ab7e6858f9b34"
 
 
+def test_a_different_sutton_chen_relabel_is_rejected(monkeypatch):
+    parent = "3f759aa8409fb49ad09e2b45d143dab2d21ae53c"
+    monkeypatch.setattr(audit_mod, "SC_H2H_RELABEL", parent)
+    audit = audit_mod.Audit()
+    audit_mod.sc_h2h_code_relabel(audit)
+    drifts = {r[2] for r in audit.drifts()}
+    assert "relabel commit" in drifts
+    assert "gmin code_revision relabel" in drifts
+    shown = [r for r in audit.drifts() if r[2] == "gmin code_revision relabel"]
+    assert shown[0][4] == audit_mod.SC_H2H_GMIN_PIN
+
+
+def test_a_new_sutton_chen_rows_blob_is_rejected(monkeypatch):
+    real = audit_mod.git
+
+    def wrapped(*args, **kwargs):
+        if args and args[0] == "hash-object":
+            done = real(*args, **kwargs)
+            done.stdout = "f" * 40 + "\n"
+            return done
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(audit_mod, "git", wrapped)
+    audit = audit_mod.Audit()
+    audit_mod.sc_h2h_code_relabel(audit)
+    drifts = {r[2]: r for r in audit.drifts()}
+    assert drifts["rows blob"][3] == "f" * 40
+    assert drifts["gmin code_revision relabel"][4] == audit_mod.SC_H2H_GMIN_PIN
+
+
+def test_an_edited_sutton_chen_gmin_code_revision_is_rejected():
+    audit = audit_mod.Audit()
+    row = next(r for r in audit.rows(SC_RERUN_ROWS) if r["arm"] == "gmin")
+    row["code_revision"] = "0" * 40
+    audit_mod.sc_h2h_code_relabel(audit)
+    drifts = [r for r in audit.drifts() if r[2] == "gmin code_revision relabel"]
+    assert len(drifts) == 1
+    assert "0" * 40 in drifts[0][3]
+    assert not any(r[2] == "rows blob" for r in audit.drifts())
+    assert not any(r[2] == "relabel commit" for r in audit.drifts())
+
+
 def test_the_sutton_chen_harness_blob_matches_the_cited_harness():
     audit = audit_mod.Audit()
     audit_mod.sc_h2h_harness_blob(audit)
