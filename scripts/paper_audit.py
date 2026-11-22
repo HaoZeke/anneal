@@ -3764,6 +3764,26 @@ def _verified_aliases() -> tuple[tuple[str, str], ...]:
     return tuple(verified_aliases(Audit(), table, index).items())
 
 
+# Network reads of record/* are off unless main() is passed --fetch-records.
+# The fetch writes one fixed ref, never a name taken from the registry.
+_FETCH_RECORDS = False
+_AUDIT_FETCH_REF = "refs/audit/record/fetched"
+_RECORD_REF_NAME = re.compile(r"record/[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def record_ref_name(ref: str) -> bool:
+    """True when ref is a single record/<name> git will accept as a branch.
+
+    A colon, a dash option, .., a trailing dot, or a .lock suffix is
+    rejected before it can reach a fetch refspec.
+    """
+    if _RECORD_REF_NAME.fullmatch(ref) is None:
+        return False
+    if ".." in ref or ref.endswith(".") or ref.endswith(".lock"):
+        return False
+    return git("check-ref-format", "--branch", ref).returncode == 0
+
+
 @functools.cache
 def origin_record_heads() -> dict[str, str]:
     """The record/* branches on origin, by name. Empty when origin cannot be reached, so every registry row fails."""
@@ -3776,25 +3796,29 @@ def origin_record_heads() -> dict[str, str]:
 def record_ref_status(path: str) -> tuple[tuple[str, str, tuple[tuple[str, bool, str, str], ...]], ...]:
     """Each registered record ref with its checks: it is a record ref named by a full SHA, origin holds it at
     that SHA, git fetch origin brings it here, and its tree is the registered one."""
-    return _record_ref_status(ROOT, path)
+    return _record_ref_status(ROOT, path, _FETCH_RECORDS)
 
 
 @functools.cache
-def _record_ref_status(root: Path, path: str) -> tuple[tuple[str, str, tuple[tuple[str, bool, str, str], ...]], ...]:
+def _record_ref_status(root: Path, path: str, fetch_records: bool) -> tuple[tuple[str, str, tuple[tuple[str, bool, str, str], ...]], ...]:
     if not (root / path).exists():
         return ()
     with (root / path).open(newline="") as handle:
         table = list(csv.DictReader(line for line in handle if not line.startswith("#")))
     if not table:
         return ()
-    heads = origin_record_heads()
+    heads = origin_record_heads() if fetch_records else {}
     out = []
     for row in table:
         ref, sha, tree = row["ref"].strip(), row["sha"].strip(), row["tree"].strip()
-        named = ref.startswith("record/") and bool(re.fullmatch(r"[0-9a-f]{40}", sha))
-        fetch = git("fetch", "--quiet", "--no-tags", "origin", f"refs/heads/{ref}") if named else None
+        named = record_ref_name(ref) and bool(re.fullmatch(r"[0-9a-f]{40}", sha))
+        fetched = False
+        if named and fetch_records:
+            spec = f"+refs/heads/{ref}:{_AUDIT_FETCH_REF}"
+            fetch = git("fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "origin", "--", spec)
+            tip = git("rev-parse", "--verify", "--quiet", _AUDIT_FETCH_REF).stdout.strip()
+            fetched = fetch.returncode == 0 and tip == sha
         present = git("cat-file", "-e", f"{sha}^{{commit}}").returncode == 0 if named else False
-        fetched = bool(fetch) and fetch.returncode == 0 and present
         actual = git("rev-parse", "--verify", "--quiet", f"{sha}^{{tree}}").stdout.strip() if present else ""
         out.append((ref, sha, (
             (f"{ref} is a record ref with a full SHA", named, f"{ref} {sha}", "record/<name> and 40 hex digits"),
@@ -4228,7 +4252,13 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--write-revision-map", action="store_true", help=f"rewrite {REVISION_MAP} from the rows")
     parser.add_argument("--pre-submission", action="store_true",
                         help="fail while any [RERUN: item N] tag remains in the manuscript, the SI or the cover letter")
+    parser.add_argument("--fetch-records", action="store_true",
+                        help="fetch record/* from origin into refs/audit/record/fetched")
     args = parser.parse_args(argv)
+    global _FETCH_RECORDS
+    _FETCH_RECORDS = args.fetch_records
+    _record_ref_status.cache_clear()
+    origin_record_heads.cache_clear()
     return run(args.report, args.write_revision_map, args.pre_submission)
 
 

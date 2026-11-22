@@ -284,7 +284,9 @@ jobs:
       # needs the full history and every branch the alias table names. A
       # branch that cannot be fetched fails here; the audit itself refuses a
       # shallow clone or a missing alias commit with exit status 2, and any
-      # drift or unlisted unpushed revision with exit status 1.
+      # drift or unlisted unpushed revision with exit status 1. Record refs
+      # are fetched only with --fetch-records, and only into
+      # refs/audit/record/fetched.
       - name: Paper audit
         if: ${{ !cancelled() }}
         run: |
@@ -297,7 +299,7 @@ jobs:
               exit 1
             }
           done
-          python3 scripts/paper_audit.py
+          python3 scripts/paper_audit.py --fetch-records
 
   test:
     name: Test (${{ matrix.os }}, py ${{ matrix.python-version }})

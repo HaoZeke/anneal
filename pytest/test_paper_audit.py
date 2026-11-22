@@ -16,6 +16,9 @@ ROOT = Path(__file__).resolve().parent.parent
 SPEC = importlib.util.spec_from_file_location("paper_audit", ROOT / "scripts" / "paper_audit.py")
 audit_mod = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(audit_mod)
+# The suite checks origin record refs. main() leaves the fetch off unless
+# --fetch-records is passed; tests that call the functions set it here.
+audit_mod._FETCH_RECORDS = True
 
 CHECKS = (
     audit_mod.manuscript_ablation,
@@ -1290,7 +1293,12 @@ def test_a_registry_row_off_origin_is_flagged(tmp_path, monkeypatch):
     parent = git("rev-parse", f"{REPRO_PIN}^").stdout.strip()
     tree = git("rev-parse", f"{parent}^{{tree}}").stdout.strip()
     registry(tmp_path, monkeypatch, [("record/repro-pin", parent, tree)])
-    assert record_drifts() == {f"record/repro-pin is on origin at {parent[:8]}"}
+    # The fetch lands on refs/audit/record/fetched, which is the branch tip,
+    # not this parent. A local copy of the parent is not a successful fetch.
+    assert record_drifts() == {
+        f"record/repro-pin is on origin at {parent[:8]}",
+        "record/repro-pin fetches",
+    }
     assert not audit_mod.harness_reachable("9a30f319")
 
 
@@ -1306,6 +1314,69 @@ def test_a_registry_row_origin_does_not_hold_is_flagged(tmp_path, monkeypatch):
     registry(tmp_path, monkeypatch, [("record/no-such-ref-r184", "1" * 40, "2" * 40)])
     assert record_drifts() == {"record/no-such-ref-r184 is on origin at 11111111", "record/no-such-ref-r184 fetches",
                                "record/no-such-ref-r184 has tree 22222222"}
+
+
+def test_record_refs_are_not_fetched_unless_asked(tmp_path, monkeypatch):
+    calls = []
+    real = audit_mod.git
+
+    def wrapped(*args, **kwargs):
+        calls.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(audit_mod, "git", wrapped)
+    monkeypatch.setattr(audit_mod, "_FETCH_RECORDS", False)
+    audit_mod._record_ref_status.cache_clear()
+    audit_mod.origin_record_heads.cache_clear()
+    registry(tmp_path, monkeypatch, [("record/repro-pin", REPRO_PIN, "0" * 40)])
+    assert "record/repro-pin fetches" in record_drifts()
+    assert "record/repro-pin is on origin at " + REPRO_PIN[:8] in record_drifts()
+    assert not any(args and args[0] in {"fetch", "ls-remote"} for args in calls)
+
+
+def test_a_record_ref_is_fetched_into_the_audit_namespace(tmp_path, monkeypatch):
+    need_origin()
+    seen = []
+    real = audit_mod.git
+
+    def wrapped(*args, **kwargs):
+        seen.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(audit_mod, "git", wrapped)
+    monkeypatch.setattr(audit_mod, "_FETCH_RECORDS", True)
+    audit_mod._record_ref_status.cache_clear()
+    tree = git("rev-parse", f"{REPRO_PIN}^{{tree}}").stdout.strip()
+    registry(tmp_path, monkeypatch, [("record/repro-pin", REPRO_PIN, tree)])
+    assert record_drifts() == set()
+    fetches = [args for args in seen if args and args[0] == "fetch"]
+    assert len(fetches) == 1
+    assert fetches[0][-1] == "+refs/heads/record/repro-pin:refs/audit/record/fetched"
+    assert fetches[0][-2] == "--"
+
+
+def test_a_record_ref_cannot_choose_its_fetch_destination(tmp_path, monkeypatch):
+    calls = []
+    real = audit_mod.git
+
+    def wrapped(*args, **kwargs):
+        calls.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(audit_mod, "git", wrapped)
+    monkeypatch.setattr(audit_mod, "_FETCH_RECORDS", True)
+    audit_mod._record_ref_status.cache_clear()
+    for ref in (
+        "record/repro-pin:refs/heads/main",
+        "record/../main",
+        "--upload-pack=touch",
+        "record/repro-pin.lock",
+    ):
+        calls.clear()
+        registry(tmp_path, monkeypatch, [(ref, REPRO_PIN, "0" * 40)])
+        audit_mod._record_ref_status.cache_clear()
+        assert f"{ref} is a record ref with a full SHA" in record_drifts()
+        assert not any(args and args[0] == "fetch" for args in calls)
 
 
 def test_a_registry_row_that_is_not_a_record_ref_is_flagged(tmp_path, monkeypatch):
