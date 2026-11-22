@@ -156,22 +156,18 @@ int main(void) {
             if (
                 _libatomic_dep.found()
                 and cc.links(
-                    _atomic_or_src,
+                _atomic_or_src,
                     dependencies: _libatomic_dep,
                     name: '__atomic_fetch_or with libatomic',
-                )
+                            )
             )
                 _deps += _libatomic_dep
                 message(
-                    'libc++ '
-                    + _libcpp_ver
-                    + ' (< 19): std::atomic_ref unavailable, using __atomic_fetch_or with libatomic',
+                    'libc++ ' + _libcpp_ver + ' (< 19): std::atomic_ref unavailable, using __atomic_fetch_or with libatomic',
                 )
             else
                 error(
-                    'libc++ '
-                    + _libcpp_ver
-                    + ' (< 190000) lacks std::atomic_ref and __atomic_fetch_or does not link, with or without libatomic; upgrade to libc++ 19 or newer',
+                    'libc++ ' + _libcpp_ver + ' (< 190000) lacks std::atomic_ref and __atomic_fetch_or does not link, with or without libatomic; upgrade to libc++ 19 or newer',
                 )
             endif
         endif

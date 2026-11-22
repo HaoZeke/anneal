@@ -60,6 +60,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -1178,7 +1179,21 @@ def aoti_package(exported, path: Path, metadata=None):
             }
         }
     _honor_omp_threads()
-    fn(canonicalize_strided_slices(exported), **kwargs)
+    canonical = canonicalize_strided_slices(exported)
+    prev_cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
+    # AotCodeCompiler hashes generated C++ source without aot_inductor.metadata
+    # and writes <stem>_metadata.json into cache_dir() before invoking the C++
+    # compiler. Isolate TORCHINDUCTOR_CACHE_DIR per package so concurrent builds
+    # of identical graphs cannot overwrite each other's metadata mid-compile.
+    with tempfile.TemporaryDirectory(prefix="rgpot-aoti-cache-") as tmp_cache_dir:
+        os.environ["TORCHINDUCTOR_CACHE_DIR"] = tmp_cache_dir
+        try:
+            fn(canonical, **kwargs)
+        finally:
+            if prev_cache_dir is None:
+                os.environ.pop("TORCHINDUCTOR_CACHE_DIR", None)
+            else:
+                os.environ["TORCHINDUCTOR_CACHE_DIR"] = prev_cache_dir
     clear_pt2_execstack(path)
     return path
 

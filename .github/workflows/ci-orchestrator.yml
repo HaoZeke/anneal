@@ -521,8 +521,8 @@ jobs:
       - name: Install LLVM OpenMP 18
         run: |
           bash ci/gha/apt-install.sh --no-install-recommends \
-            clang-18 libclang-rt-18-dev libomp-18-dev
-          dpkg-query -W clang-18 libclang-rt-18-dev libomp-18-dev
+            clang-18 llvm-18 libclang-rt-18-dev libomp-18-dev
+          dpkg-query -W clang-18 llvm-18 libclang-rt-18-dev libomp-18-dev
       - name: Build and test OpenMP under LeakSanitizer
         shell: pixi run bash -e {0}
         run: |
