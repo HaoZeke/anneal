@@ -10,7 +10,11 @@ import re
 import shlex
 import socket
 import subprocess
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
 HARTREE_EV = 27.211386245988
 ETEMP_K = 3000
@@ -171,7 +175,7 @@ def main() -> None:
                 result="converged",
                 fresh_energy_Eh=f"{energy_eh:.12f}",
                 fresh_energy_eV=f"{energy_ev:.8f}",
-                hit=str(energy_ev <= args.reference + 0.001).lower(),
+                hit=str(energy_hits(energy_ev, args.reference, DEFAULT_HIT_TOL)).lower(),
             )
         )
     append(args.out, rows)
