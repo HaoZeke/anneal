@@ -222,3 +222,17 @@ GET https://api.openalex.org/works/https://doi.org/10.1021/acs.jpca.6c04688
 GET https://api.openalex.org/works/https://doi.org/10.1038/s41467-026-79241-x
 GET https://api.openalex.org/works/https://doi.org/10.1021/acs.jctc.6c01678
 GET https://api.openalex.org/works/https://doi.org/10.26434/chemrxiv.15012459/v2
+
+Author-name check for zhangRangeTs2026 (retrieved 2026-11-22 21:34 UTC):
+GET https://api.crossref.org/works/10.21203/rs.3.rs-11175345/v1
+  author[1]: given "Roger", family "Rousseau" (no middle initial)
+GET https://www.researchsquare.com/article/rs-11175345/v1
+  author line: "Difan Zhang, Roger Rousseau, Vassiliki-Alexandra Glezakou"
+GET https://api.crossref.org/works/10.1063/5.0288910
+  author[2]: given "Roger", family "Rousseau", ORCID 0000-0003-1947-0478
+GET https://pub.orcid.org/v3.0/0000-0003-1947-0478/person
+  given-names "Roger", family-name "Rousseau", no credit or other names
+GET https://api.crossref.org/works?filter=orcid:0000-0003-1947-0478&rows=200
+  72 works; the ORCID-linked author is given "Roger" on all 72
+GET https://doi.org/10.1063/5.0288910 (AIP landing page): HTTP 403, not read
+No checked record gives a middle initial, so the bib entry uses "Rousseau, Roger".
