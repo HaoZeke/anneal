@@ -75,6 +75,11 @@ jobs:
   # LLVM flang would be a second CRT and a separate DLL repair path, so
   # this caller drops that runner instead of adding a toolchain.
   py-wheels:
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.ref == 'refs/heads/main'
+      || startsWith(github.ref, 'refs/tags/')
+      || contains(github.event.pull_request.labels.*.name, 'ci:full')
     uses: ./.github/workflows/py-wheels.yml
     with:
       package-dir: .
@@ -91,7 +96,12 @@ jobs:
   kernel-count:
     name: Fortran kernels in the linux wheel
     needs: py-wheels
-    if: always()
+    if: >-
+      always()
+      && (github.event_name == 'workflow_dispatch'
+        || github.ref == 'refs/heads/main'
+        || startsWith(github.ref, 'refs/tags/')
+        || contains(github.event.pull_request.labels.*.name, 'ci:full'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -241,6 +251,11 @@ jobs:
           path: isa-audit-libs/
 
   isa-libs-macos:
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.ref == 'refs/heads/main'
+      || startsWith(github.ref, 'refs/tags/')
+      || contains(github.event.pull_request.labels.*.name, 'ci:full')
     name: macOS libraries for the ISA audit
     needs: py-wheels
     runs-on: macos-15
@@ -372,6 +387,11 @@ jobs:
           path: isa-audit-libs/
 
   wheel-import-arm:
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.ref == 'refs/heads/main'
+      || startsWith(github.ref, 'refs/tags/')
+      || contains(github.event.pull_request.labels.*.name, 'ci:full')
     name: Import each repaired arm wheel without LD_LIBRARY_PATH
     needs: py-wheels
     runs-on: ubuntu-24.04-arm
@@ -449,6 +469,11 @@ jobs:
       baseline: x86-64
 
   isa-audit-macos:
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.ref == 'refs/heads/main'
+      || startsWith(github.ref, 'refs/tags/')
+      || contains(github.event.pull_request.labels.*.name, 'ci:full')
     name: isa audit (macos arm64)
     needs: isa-libs-macos
     permissions:

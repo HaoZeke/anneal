@@ -63,6 +63,11 @@ jobs:
       setup-script: .github/scripts/rgpot_reduced_build.sh
 
   rgpot-tsan:
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.ref == 'refs/heads/main'
+      || startsWith(github.ref, 'refs/tags/')
+      || contains(github.event.pull_request.labels.*.name, 'ci:full')
     uses: ./.github/workflows/py-tsan.yml
     with:
       package-dir: .
@@ -133,6 +138,11 @@ jobs:
             --timeout=180 -o faulthandler_timeout=120
 
   wheels:
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.ref == 'refs/heads/main'
+      || startsWith(github.ref, 'refs/tags/')
+      || contains(github.event.pull_request.labels.*.name, 'ci:full')
     uses: ./.github/workflows/py-wheels.yml
     with:
       package-dir: bind
@@ -141,6 +151,11 @@ jobs:
       extras: test
 
   wheels-template:
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.ref == 'refs/heads/main'
+      || startsWith(github.ref, 'refs/tags/')
+      || contains(github.event.pull_request.labels.*.name, 'ci:full')
     uses: ./.github/workflows/py-wheels.yml
     with:
       package-dir: ci/python-template/rust-core
@@ -168,6 +183,11 @@ jobs:
       rust-crate-dir: examples/rust-core-demo
 
   tsan:
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.ref == 'refs/heads/main'
+      || startsWith(github.ref, 'refs/tags/')
+      || contains(github.event.pull_request.labels.*.name, 'ci:full')
     uses: ./.github/workflows/py-tsan.yml
     with:
       package-dir: bind
@@ -177,6 +197,11 @@ jobs:
       tsan-cmake-args: -DRGBIND_TSAN=ON
 
   tsan-template:
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.ref == 'refs/heads/main'
+      || startsWith(github.ref, 'refs/tags/')
+      || contains(github.event.pull_request.labels.*.name, 'ci:full')
     uses: ./.github/workflows/py-tsan.yml
     with:
       package-dir: ci/python-template/rust-core
@@ -223,6 +248,11 @@ jobs:
           ./schedule_test
 
   rust-demo:
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.ref == 'refs/heads/main'
+      || startsWith(github.ref, 'refs/tags/')
+      || contains(github.event.pull_request.labels.*.name, 'ci:full')
     name: rust-core demo wheel
     runs-on: ubuntu-latest
     timeout-minutes: 90
