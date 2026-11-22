@@ -19,13 +19,33 @@ BUILD = ROOT / "scripts" / "gmin_panel" / "build_gmin.sh"
 sys.path.insert(0, str(ROOT / "scripts"))
 from gmin_pin import (  # noqa: E402
     REVISION,
+    SNAPSHOT,
     TARBALL_SHA256,
+    URL,
     compute_build_key,
     read_build_key,
     read_built_revision,
     read_svnrev,
+    shell_assignments,
 )
 from morse_gmin.run_panel import gmin_line  # noqa: E402
+
+
+def test_shared_pin_locks_concrete_snapshot_revision_and_tarball_digest() -> None:
+    assert SNAPSHOT == "2026-11-19"
+    assert REVISION == "9cbec1a446352bc9ef064bd2b1a5767194655919"
+    assert (
+        TARBALL_SHA256
+        == "ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776"
+    )
+    assert URL == "http://www-wales.ch.cam.ac.uk/svn.tar.bz2"
+    shell = shell_assignments()
+    assert "GMIN_PIN_SNAPSHOT=2026-11-19" in shell
+    assert "GMIN_PIN_REVISION=9cbec1a446352bc9ef064bd2b1a5767194655919" in shell
+    assert (
+        "GMIN_PIN_TARBALL_SHA256="
+        "ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776"
+    ) in shell
 
 
 def test_every_gmin_builder_loads_the_shared_pin_and_build_key() -> None:
@@ -144,7 +164,7 @@ def test_a_local_tarball_with_the_wrong_sha256_is_refused(tmp_path: Path, how: s
     proc = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True, check=False)
     assert proc.returncode == 1
     assert "tarball sha256 mismatch:" in proc.stderr
-    assert TARBALL_SHA256 in proc.stderr
+    assert "ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776" in proc.stderr
     assert not work.exists()
 
 
