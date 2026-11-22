@@ -2985,6 +2985,11 @@ class RevisionIndex:
         absent = "0" * 40
         blobs = sorted({b for ps in pairs.values() for m1, b1, m2, b2 in ps for m, b in ((m1, b1), (m2, b2))
                         if b != absent and m != "160000"})
+        # A blobless clone leaves these blobs with the promisor remote. An
+        # alternate object directory cannot fetch them, so bring them into
+        # this repository before the scratch tree is built.
+        if blobs:
+            git("cat-file", "--batch-check", stdin="".join(f"{b}\n" for b in blobs))
         objects = git("rev-parse", "--path-format=absolute", "--git-path", "objects").stdout.strip()
         with tempfile.TemporaryDirectory() as scratch:
             env = dict(os.environ, GIT_OBJECT_DIRECTORY=scratch, GIT_ALTERNATE_OBJECT_DIRECTORIES=objects)
