@@ -54,7 +54,8 @@ int axisCount(double length, double edge) {
 
 bool orthorhombicCell(const double box[9]) {
   return box[1] == 0.0 && box[2] == 0.0 && box[3] == 0.0 && box[5] == 0.0 &&
-         box[6] == 0.0 && box[7] == 0.0;
+         box[6] == 0.0 && box[7] == 0.0 && box[0] >= 0.0 && box[4] >= 0.0 &&
+         box[8] >= 0.0;
 }
 
 struct FractionalPlan {
@@ -945,16 +946,15 @@ RGPOT_SKEW_SECTION void Neighbours::update(const double *xyz, std::size_t n,
     return;
   }
 
-  bool next_periodic[3]{};
-  for (int k = 0; k < 3; ++k) {
-    next_periodic[k] =
-        spec.periodic[static_cast<std::size_t>(k)] && box9[4 * k] > 0.0;
-  }
   const bool same_general = built_ && use_general_ &&
                             key_.periodic == spec.periodic &&
                             std::memcmp(box_, box9, sizeof(box_)) == 0;
   MinimumImage next_general =
       same_general ? general_ : MinimumImage(box9, spec.periodic);
+  bool next_periodic[3]{};
+  for (int k = 0; k < 3; ++k) {
+    next_periodic[k] = spec.periodic[static_cast<std::size_t>(k)];
+  }
   double next_search = spec.cutoff + spec.skin;
   if (!(next_search > 0.0)) {
     next_search = 0.0;
@@ -977,7 +977,7 @@ RGPOT_SKEW_SECTION void Neighbours::update(const double *xyz, std::size_t n,
   len_[2] = box9[8];
   for (int k = 0; k < 3; ++k) {
     periodic_[k] = next_periodic[k];
-    inv_[k] = periodic_[k] ? 1.0 / len_[k] : 0.0;
+    inv_[k] = periodic_[k] && len_[k] > 0.0 ? 1.0 / len_[k] : 0.0;
   }
   // General minimum image owns every skewed fold, leaving the Cartesian
   // inverse unused. Its sign bit caches the cell classification without
