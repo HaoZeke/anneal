@@ -39,7 +39,7 @@
 //! library. Engine implementations must therefore release library-owned
 //! callbacks, threads, and other process state from `rgpot_engine_destroy`.
 
-use std::ffi::{c_char, c_int, c_long, c_uint, c_ushort, c_void};
+use std::ffi::{c_char, c_int, c_long, c_uint, c_ushort, c_void, CString};
 use std::fmt;
 use std::mem::ManuallyDrop;
 use std::num::NonZeroU32;
@@ -720,8 +720,32 @@ fn transform_parts(
     }
 }
 
+/// Geometry results obtained from one attached rgpot result cache.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EngineCacheCounts {
+    /// Geometry results evaluated by the kernel.
+    pub computed: u64,
+    /// Geometry results read from the cache.
+    pub served: u64,
+}
+
+type SetCache = unsafe extern "C" fn(*mut RgpotEnginePot, *const c_char) -> c_int;
+type CacheCounts = unsafe extern "C" fn(*mut RgpotEnginePot, *mut u64, *mut u64) -> c_int;
+
+/// Encode the schema's BuiltinParams message for an engine's default potential.
+#[cfg(feature = "schema")]
+pub fn builtin_params(name: &str) -> Vec<u8> {
+    let mut message = capnp::message::Builder::new_default();
+    message
+        .init_root::<crate::Potentials_capnp::builtin_params::Builder>()
+        .set_name(name);
+    capnp::serialize::write_message_to_words(&message)
+}
+
 /// One engine instance behind the generic engine C ABI.
 pub struct EnginePotential {
+    set_cache: Option<SetCache>,
+    cache_counts: Option<CacheCounts>,
     symbols: EngineSymbols,
     stamp: RgpotEngineAbiStamp,
     handle: NonNull<RgpotEnginePot>,
@@ -747,6 +771,8 @@ impl EnginePotential {
             .map_err(|why| EngineError::Load(format!("{}: {why}", path.display())))?;
         let symbols = unsafe { resolve(&library)? };
         let mut engine = unsafe { Self::from_symbols(symbols, config)? };
+        engine.set_cache = unsafe { optional(&library, "rgpot_engine_set_cache") };
+        engine.cache_counts = unsafe { optional(&library, "rgpot_engine_cache_counts") };
         engine.library = Some(ManuallyDrop::new(library));
         Ok(engine)
     }
@@ -805,6 +831,8 @@ impl EnginePotential {
                 stamp,
                 handle,
                 fatal: OnceLock::new(),
+                set_cache: None,
+                cache_counts: None,
                 library: None,
             }),
             None => Err(EngineError::Create(text_of(&errbuf))),
@@ -1056,6 +1084,57 @@ impl EnginePotential {
         self.settle(code, None)?;
         finite_product(&hv_out)?;
         Ok(hv_out)
+    }
+
+    /// Attach a persistent result cache or detach it with `None`.
+    /// The directory is dedicated to one model and its parameters.
+    pub fn set_cache(&mut self, path: Option<&Path>) -> Result<(), EngineError> {
+        self.check_alive()?;
+        let operation = "rgpot_engine_set_cache";
+        let set = self
+            .set_cache
+            .ok_or_else(|| unsupported_symbol(operation))?;
+        let path = path
+            .map(|p| CString::new(p.as_os_str().as_encoded_bytes()))
+            .transpose()
+            .map_err(|_| EngineError::Invalid("cache path contains a null byte".into()))?;
+        let code = unsafe {
+            set(
+                self.handle.as_ptr(),
+                path.as_ref().map_or(std::ptr::null(), |s| s.as_ptr()),
+            )
+        };
+        self.cache_status(operation, code)
+    }
+
+    /// Read the engine's kernel-computed and cache-served geometry counts.
+    /// An unattached cache or an unavailable query returns [`EngineError::Unsupported`].
+    pub fn cache_counts(&self) -> Result<EngineCacheCounts, EngineError> {
+        self.check_alive()?;
+        let operation = "rgpot_engine_cache_counts";
+        let read = self
+            .cache_counts
+            .ok_or_else(|| unsupported_symbol(operation))?;
+        let mut counts = EngineCacheCounts::default();
+        let code = unsafe {
+            read(
+                self.handle.as_ptr(),
+                &mut counts.computed,
+                &mut counts.served,
+            )
+        };
+        self.cache_status(operation, code)?;
+        Ok(counts)
+    }
+
+    fn cache_status(&self, operation: &'static str, code: c_int) -> Result<(), EngineError> {
+        if code == ENGINE_ERR_UNSUPPORTED {
+            return Err(EngineError::Unsupported {
+                operation,
+                message: self.last_error_text(code),
+            });
+        }
+        self.settle(code, None)
     }
 
     /// Per-term record of the last successful force call on a composite engine
@@ -1660,16 +1739,17 @@ fn text_of(buffer: &[c_char]) -> String {
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
+unsafe fn optional<T: Copy>(library: &Library, name: &str) -> Option<T> {
+    unsafe { library.get::<T>(format!("{name}\0").as_bytes()) }
+        .ok()
+        .map(|symbol| *symbol)
+}
+
 unsafe fn resolve(library: &Library) -> Result<EngineSymbols, EngineError> {
     unsafe fn required<T: Copy>(library: &Library, name: &str) -> Result<T, EngineError> {
         let symbol = unsafe { library.get::<T>(format!("{name}\0").as_bytes()) }
             .map_err(|_| EngineError::Missing(name.to_owned()))?;
         Ok(*symbol)
-    }
-    unsafe fn optional<T: Copy>(library: &Library, name: &str) -> Option<T> {
-        unsafe { library.get::<T>(format!("{name}\0").as_bytes()) }
-            .ok()
-            .map(|symbol| *symbol)
     }
     Ok(EngineSymbols {
         abi_version: unsafe { required(library, "rgpot_engine_abi_version")? },
