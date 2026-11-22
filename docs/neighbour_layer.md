@@ -168,7 +168,15 @@ calls `MinimumImage`.
 The list holds partner indices and each walk takes the image from the current coordinates, so the move is measured to the nearest periodic image of the reference position: an atom that the caller wraps back through a face of the cell has moved by its step, not by a cell vector, and keeps the list.
 The bins are redone after such a wrap.
 A change of the cell, of the atom count or of the spec rebuilds the list.
-`Builder`, whose table stores the image shifts, still rebuilds when an atom wraps.
+`Builder` accepts coordinates any whole number of cells outside the box.
+It folds every periodic coordinate into the primary cell in fractional space before binning and the image search.
+The stored shift of a pair is then reported for the coordinates as given, `S = S' + W_i - W_j` with `W` the whole cells folded off each atom, and the vector and distance are `r_j - r_i + S H` from those coordinates.
+`build`, `Walk`, `Builder`, the batch build and the C ABI all keep that relation, so a consumer that forms vectors from its own positions and the shifts, such as the Fortran bridge, metatomic or UMA, sees the right image.
+A coordinate more than 2^29 cells from the origin is rejected with `Code::Box`.
+The skin test measures each folded atom from the image of its folded reference nearest it, `r' - J H` with `J` the rounded change of its fractions, so whole-cell drift and a step across a face of the cell count as the step alone.
+The shifts of a kept pair table are then rewritten in place for the basis `W + J`.
+A cluster table, whose four lanes share one shift, is searched again when that basis changes, which is when an atom's coordinates as given move by whole cells, for instance when the caller wraps it.
+The same update reuses the table across a cell change when the largest image displacement, at every sign of the shift stencil, fits in the skin together with the atom moves.
 `Mode::Stream` walks the 27 neighbouring cells and stores no pair list.
 The bins are reused only when the geometry is identical.
 `Mode::Auto` stores when the candidate index array fits in `MemAvailable` and in a 32-bit offset, and streams otherwise.

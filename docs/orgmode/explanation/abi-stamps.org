@@ -137,7 +137,8 @@ Covered types:
 - =Reentrancy= and =PotType=
 - =PotentialBase=, =Potential<Derived>= (through one probe instantiation),
   =LJPot=, =LJClusterPot=, =MorsePot=, =ZBLPot=, =SuttonChenPot=, =SumPot=,
-  =lr::SumPot=, =D2Pot=, =D2CpmdPot=, =MullerBrownPot=
+  =lr::SumPot=, =D2Pot=, =D2CpmdPot=, =MullerBrownPot=, =nlist::Builder=,
+  =nlist::Walk=
 - with the cache: =cache::EvalCounts= and =cache::PotentialCache=
 
 The classes of the optional backends are not covered (xtb, tblite, dftd3, dftd4,
@@ -223,4 +224,6 @@ after =hessianVectorImpl=.
 The vtable changed, so =kCxxLayoutRevision= is 2.
 It also stamps =MullerBrownConfig= and =MullerBrownPot=.
 The zero-argument =MullerBrownPot= constructor remains its own symbol.
+It also stamps =nlist::Builder= and =nlist::Walk=, which move their state behind
+a pointer so each is one pointer wide.
 A program linked against soversion 8 does not load =librgpot.so.9=.

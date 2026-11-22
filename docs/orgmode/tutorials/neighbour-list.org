@@ -12,7 +12,9 @@ Positions and the cutoff share a length unit.
 The library does not convert.
 The cell is nine doubles, lattice vectors as rows, the same order as an ASE cell
 written row-major.
-A pair vector is =r_j - r_i + S H=.
+A pair vector is =r_j - r_i + S H= for the positions as passed.
+The periodic components are folded into the cell before the search, and =S= is
+reported for the unfolded positions.
 An atom is never paired with itself at shift zero.
 
 A pair list is a half shell or a full shell.
@@ -71,8 +73,14 @@ pairs 1 energy -1.000000
 
 =pairs= is a set of spans into =table=.
 The next =build= into that table invalidates it.
-=Builder= keeps its table while every atom has moved by at most half the skin
-and the cell and the query are unchanged.
+=Builder= keeps its table while atom moves and the image shifts, including both
+signs of the stencil, stay inside the skin and the query is unchanged.
+Positions may lie any whole number of cells outside the box.
+The builder folds periodic coordinates in fractional space before it searches.
+The skin test measures each atom from the image of its reference nearest it, so
+whole-cell drift and a step across a face of the cell count as the step alone.
+Their shifts follow the positions of each update, so =r_j - r_i + S H= stays the
+pair vector.
 
 ** A three-body angle
 
@@ -202,8 +210,15 @@ and =system= says which system owns each pair.
 A positive skin with a strict cut returns =RGPOT_NLIST_SKIN=.
 The list would have no buffer.
 =rgpot_nlist_builder_open=, =rgpot_nlist_builder_update= and
-=rgpot_nlist_builder_close= keep the list and set =reused= while every atom has
-moved by at most half the skin.
+=rgpot_nlist_builder_close= keep the list under the rule of =Builder= and set
+=reused= when it was kept.
+That is while the request is unchanged and the atom moves fit in the skin
+together with the image moves of a cell change, at both signs of the stored
+shifts.
+Each atom is measured from the image of its reference nearest it, so moving an
+atom by whole cells keeps a pair list; a cluster list is searched again.
+With a skin of 0 the list is kept only when the folded coordinates and =box9=
+did not change.
 =nlist_verlet.c= is that loop.
 
 ** Next steps

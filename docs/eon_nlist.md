@@ -4,8 +4,11 @@ eOn potentials that today call `vesin_neighbors` can use the same request
 through the C ABI. The Cap'n Proto schema carries the same request, but no
 server in this repository answers it yet. Both speak the columns
 `first`, `second`, `shift`, `vector`, `distance` (and `mask` for a
-cluster). Indices are zero-based. The vector is `r_j - r_i + S H`, which
-is the layout a Fortran `(3, npairs)` array already has.
+cluster). Indices are zero-based. The vector is `r_j - r_i + S H` for the
+positions as passed, which is the layout a Fortran `(3, npairs)` array
+already has. Periodic components are folded into the cell before the
+search, and `S` is reported for the unfolded positions, so an atom that
+eOn has not wrapped keeps the same relation.
 
 ## C ABI
 
@@ -85,10 +88,14 @@ int main(void) {
 }
 ```
 
-`reused == 1` means every atom was still within half the skin, so the
-stored list was kept. The columns are then those of the last rebuild:
-the pairs reach out to cutoff + skin, and `vector` and `distance` belong
-to the positions of that rebuild, not of this call.
+`reused == 1` means the atom moves, together with the image moves of
+any cell change, still fit in the skin, so the stored list was kept. A
+cell change does not by itself rebuild the list. Each atom is measured
+from the image of its reference nearest it, so wrapping an atom back into
+the cell keeps the list. The
+pairs then reach out to cutoff + skin, `shift` is relative to the
+positions of this call, and `vector` and `distance` belong to the
+positions of the last rebuild.
 `rgpot_nlist_fortran_build` is the Fortran gather. Each
 `rgpot_nlist_fortran_list` keeps its own builder. It rebuilds `r_j - r_i + S H` from the stored keys and the
 positions of each call, and drops pairs that are not strictly inside the
