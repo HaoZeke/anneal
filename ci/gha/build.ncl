@@ -132,6 +132,7 @@ let fast_nlist_off_build_test =
   rustup toolchain install "${msrv}" --profile minimal
   export RUSTUP_TOOLCHAIN="${msrv}"
   rustc -V | grep -F "rustc ${msrv}."
+  uv run --no-project --with pytest pytest -q tests/test_build_rust_core.py
   meson setup bbdir \
     -Dwith_tests=true \
     -Dwith_eam_table=true \
@@ -309,14 +310,14 @@ in
           uses = P.install_action,
           with = { tool = "cargo-nextest" },
         },
-        { name = "potctl unit tests", run = "cargo test -p potctl" },
+        { name = "potctl unit tests", run = "cargo test --locked -p potctl" },
         S.run_pixi m%"
-          cargo nextest run -p rgpot-core
-          cargo nextest run -p rgpot-core --all-features
+          cargo nextest run --locked -p rgpot-core
+          cargo nextest run --locked -p rgpot-core --all-features
         "%
         & { name = "Run Rust tests (nextest)" },
         S.run_pixi m%"
-          cargo test --doc -p rgpot-core
+          cargo test --locked --doc -p rgpot-core
         "%
         & { name = "Run Rust doc-tests" },
         S.run_pixi "bash tools/check_header_drift.sh"

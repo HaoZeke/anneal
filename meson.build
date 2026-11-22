@@ -967,7 +967,9 @@ if has_fast_nlist
     # without linking the object a second time.
     if _fast_as_object
         fastnlist_dep = declare_dependency(
-            sources: _fast_bundled ? [_fastnlist_tgt[0], _fastnlist_tgt[1]] : [_fastnlist_tgt[0]],
+            sources: _fast_bundled ? [_fastnlist_tgt[0], _fastnlist_tgt[1]] : [
+                _fastnlist_tgt[0],
+            ],
             link_args: _fast_native,
         )
         fastnlist_native_dep = declare_dependency(
@@ -1060,11 +1062,11 @@ if get_option('with_rust_core')
 
     _deps += [rgpot_rust_lib, thread_dep, dl_dep]
 
-    # librgpot links the archive and keeps only the members it references,
-    # so the C ABI is checked on the archive cargo writes: the symbols it
-    # holds are what a consumer can link, whether or not librgpot pulled
-    # them in. rgpot-bundle re-exports rgpot-core, so the same baseline
-    # covers both layouts.
+    # The C ABI is checked on the archive cargo writes. A normal link keeps
+    # only members librgpot references, and it references none of these
+    # names. The bundle layout whole-archives that archive, so the shared
+    # library exports the names; rgpot_so_exports pins the count. The bundle
+    # re-exports rgpot-core, so one baseline covers both archives.
     if host_machine.system() == 'linux'
         test(
             'abi_core_symbols',

@@ -30,12 +30,24 @@ The layout revision moves when an exported struct changes size, field order or
 field type; callers and libraries with different layout revisions never match.
 
 The stamp is not an ELF soversion.
-In a Meson build with =with_rust_core=, =librgpot= links the static archive
-=librgpot_core.a= and keeps only the archive members it references.
-The archive holds the whole C ABI, and the Meson test =abi_core_symbols= checks
-it.
-With the fast pair list on, the archive is =librgpot_bundle.a=, which carries
-the same C ABI next to the pair list.
+In a Meson build with =with_rust_core= and the fast pair list off, =librgpot=
+links the static archive =librgpot_core.a= and keeps only the archive members it
+references.
+The umbrella references none of that archive's C ABI, so the shared library
+exports 49 =rgpot_*= symbols, all of them from the rest of the umbrella.
+The archive still holds the whole C ABI, and the Meson test =abi_core_symbols=
+checks the archive rather than the shared library.
+With the fast pair list on, the archive is =librgpot_bundle.a=.
+It defines 46 =rgpot_*= symbols: the same C ABI, plus the four fast-list entry
+points.
+Every one of those names is public
+(=scripts/abi_core_baseline.txt= and =scripts/abi_baseline_fast.txt=).
+The umbrella links this archive with =--whole-archive=, or with
+=-force_load= on Darwin, so those 46 symbols are exported as well and the shared library exports 95 =rgpot_*=
+symbols.
+A process that also loads a separate rgpot-core shared library then has two
+definitions of those names.
+The Meson test =rgpot_so_exports= pins both export counts.
 
 ** Scope
 

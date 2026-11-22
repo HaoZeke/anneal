@@ -469,6 +469,7 @@ jobs:
           rustup toolchain install "${msrv}" --profile minimal
           export RUSTUP_TOOLCHAIN="${msrv}"
           rustc -V | grep -F "rustc ${msrv}."
+          uv run --no-project --with pytest pytest -q tests/test_build_rust_core.py
           meson setup bbdir \
             -Dwith_tests=true \
             -Dwith_eam_table=true \
@@ -647,15 +648,15 @@ jobs:
         with:
           tool: cargo-nextest
       - name: potctl unit tests
-        run: cargo test -p potctl
+        run: cargo test --locked -p potctl
       - name: Run Rust tests (nextest)
         shell: pixi run bash -e {0}
         run: |
-          cargo nextest run -p rgpot-core
-          cargo nextest run -p rgpot-core --all-features
+          cargo nextest run --locked -p rgpot-core
+          cargo nextest run --locked -p rgpot-core --all-features
       - name: Run Rust doc-tests
         shell: pixi run bash -e {0}
-        run: cargo test --doc -p rgpot-core
+        run: cargo test --locked --doc -p rgpot-core
       - name: Check rgpot.h is what cbindgen generates
         shell: pixi run bash -e {0}
         run: bash tools/check_header_drift.sh

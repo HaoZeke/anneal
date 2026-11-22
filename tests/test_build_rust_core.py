@@ -79,9 +79,10 @@ def _run(tmp_path: Path, cargo: Path, *extra: str, monkeypatch) -> dict:
 
 def test_core_only_builds_on_188(rust_188, monkeypatch):
     tmp_path, cargo = rust_188
-    _run(tmp_path, cargo, monkeypatch=monkeypatch)
+    log = _run(tmp_path, cargo, monkeypatch=monkeypatch)
     assert (tmp_path / "librgpot_core.a").read_bytes() == b"!<arch>\n"
     assert (tmp_path / "rgpot_rust_built.h").is_file()
+    assert "--locked" in log["argv"]
 
 
 def test_fast_toolchain_needs_189(rust_188, monkeypatch):
