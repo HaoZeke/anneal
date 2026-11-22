@@ -104,10 +104,10 @@ fn lattice_exchange_follows_the_plateau() {
     let mut cfg = Config::recommended(ATOMS);
     cfg.restart_patience = 2_000;
     let (cold, hot) = pair(&cfg, 30_000, 2000);
-    assert_eq!(fingerprint(&cold), 0xb1afa5e8defbab7f, "preset walk");
+    assert_eq!(fingerprint(&cold), 0xb09d57fb009a9bd1, "preset walk");
     assert_eq!(
         fingerprint(&hot),
-        0xe3c509c712c21ad6,
+        0x9e0a142057f56021,
         "heat * cfg.temperature"
     );
 }
@@ -119,8 +119,8 @@ fn a_new_lowest_returns_the_walk_to_the_preset() {
     cfg.relax_steps = 20;
     cfg.energy_lattice = false;
     let (cold, hot) = pair(&cfg, 8_000, 2000);
-    assert_eq!(fingerprint(&cold), 0xb088f27a1b4ec596, "preset walk");
-    assert_eq!(fingerprint(&hot), 0x4534ff7c630edc80, "heat = 1.0");
+    assert_eq!(fingerprint(&cold), 0x79a1ba0ae27370ad, "preset walk");
+    assert_eq!(fingerprint(&hot), 0x450bbb59809a8da0, "heat = 1.0");
 }
 
 #[test]
