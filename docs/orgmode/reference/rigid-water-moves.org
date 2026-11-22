@@ -73,9 +73,9 @@ It labels the three sites 8, 1 and 1, so =rcycle= is on there too.
 
 - The geometry must have exactly one site of atomic number 8 and two of atomic number 1.
   Otherwise the library does not offer =rcycle=.
-- A hydrogen bond is a donor site within the body's derived contact of another body's anchor.
-  That contact is the longest anchor-to-donor bond plus the widest donor-donor separation.
-  For the TIP4P frame it is the O-H length plus the H-H length, about 2.47 angstroms.
+- A hydrogen bond is a donor site within the body's contact of another body's anchor.
+  That contact is the longest anchor-to-donor bond plus the widest donor-donor separation, and it is not tighter than the cycle move's own threshold of 2.5 angstroms.
+  The TIP4P span is the O-H length plus the H-H length, about 2.47 angstroms, so the shared contact on that frame is 2.5 angstroms.
   The donor is the molecule of the hydrogen.
   A stem donor whose anchor lies inside one further bond length of the closing body can join the cycle on the archive walk.
 - A walk from a random donor follows a random donated bond at each step.

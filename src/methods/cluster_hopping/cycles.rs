@@ -14,8 +14,10 @@ use rand::Rng;
 
 use crate::rigid_body::RigidBodyGeometry;
 
-/// Cartesian O to H distance, in angstroms, under which two molecules share
-/// a hydrogen bond. Rigid readers use the body's derived contact instead.
+/// O to H distance, in angstroms, under which two molecules share a
+/// hydrogen bond. The rigid contact is never tighter than this: a body's
+/// own span can be wider, and a shorter span would drop a contact the
+/// cycle move already counts.
 const BOND: f64 = 2.5;
 
 /// Oxygen and hydrogen site indices of a water geometry: exactly one site
@@ -51,10 +53,10 @@ pub(crate) fn lab_sites(
 /// Donated hydrogen bonds of every molecule, as the acceptor and which of
 /// the two hydrogens donates (0 or 1).
 ///
-/// `cutoff` is the body's derived contact, the same length
-/// [`rigid_donations`] uses. A fixed 2.5 Å sat about 0.03 Å above the
-/// TIP4P O-H plus H-H length, so a contact in that gap was a bond here
-/// and not on the archive walk.
+/// `cutoff` is the shared rigid contact, the same length
+/// [`rigid_donations`] uses. It is the body's span, or [`BOND`] when
+/// that span is shorter, so both readers count the contacts the cycle
+/// move counted.
 fn donations(
     sites: &[Vec<[f64; 3]>],
     o: usize,
@@ -512,8 +514,9 @@ const REWIRE_OO_MAX: f64 = 3.5;
 ///
 /// The anchor is the most-connected site of the bond graph and the donors
 /// are its bonded neighbours. A donor within `donation_cutoff` of another
-/// body's anchor donates to it: the longest anchor-to-donor bond plus the
-/// widest separation of two donors. Adding the longest bond once more gives
+/// body's anchor donates to it. That cutoff is the longest anchor-to-donor
+/// bond plus the widest donor-donor separation, and it is not tighter than
+/// the cycle move's own threshold. Adding the longest bond once more gives
 /// `stem_window`, the anchor separation at which a straight stem contact can
 /// still close onto a cycle. None of these identifies a chemical species.
 struct CycleGeometry {
@@ -577,7 +580,12 @@ fn cycle_geometry(geometry: &RigidBodyGeometry) -> Option<CycleGeometry> {
                 .map(move |&b| norm(sub(geometry.sites()[a], geometry.sites()[b])))
         })
         .fold(reach, f64::max);
-    let donation_cutoff = reach + spread;
+    // The span is the body's own reach. The cycle move already counts a
+    // donor inside `BOND`, and TIP4P's span sits about 0.03 Å under that,
+    // so the tighter span would change which contacts the walk reads.
+    // A body whose span is wider keeps the span.
+    let span = reach + spread;
+    let donation_cutoff = span.max(BOND);
     (donation_cutoff > 0.0 && donation_cutoff.is_finite()).then_some(CycleGeometry {
         anchor,
         donors,
@@ -1324,28 +1332,49 @@ pub(crate) mod tests {
             .enumerate()
             .flat_map(|(i, a)| sites[i + 2..].iter().map(move |b| norm(sub(*a, *b))))
             .fold(reach, f64::max);
-        let derived = reach + spread;
-        assert!((definition.donation_cutoff - derived).abs() < 1e-12);
+        let span = reach + spread;
         assert!(
-            derived < BOND,
-            "the derived contact {derived} is not inside the old 2.5 Å cutoff"
+            span < BOND,
+            "TIP4P's span {span} is not under the cycle threshold"
+        );
+        assert!(
+            (definition.donation_cutoff - BOND).abs() < 1e-12,
+            "the shared contact is {}, not the cycle threshold",
+            definition.donation_cutoff
         );
         let (o, h) = water_sites(&g).expect("water");
         let flat = Array1::zeros(12);
         let mut sites = lab_sites(&g, 2, flat.view());
-        let gap = 0.5 * (derived + BOND);
+        let gap = 0.5 * (span + BOND);
         sites[1][o] = [gap, 0.0, 0.0];
         sites[0][h[0]] = [0.0, 0.0, 0.0];
         let donated = donations(&sites, o, h, definition.donation_cutoff);
-        assert!(
-            donated[0].is_empty(),
-            "a contact between the derived length and 2.5 Å is still a bond"
+        let rigid = rigid_donations(&sites, &definition);
+        assert_eq!(
+            donated, rigid,
+            "the two readers disagree on the gap contact"
         );
-        sites[1][o] = [0.5 * derived, 0.0, 0.0];
-        let donated = donations(&sites, o, h, definition.donation_cutoff);
         assert!(
             !donated[0].is_empty(),
-            "a contact inside the derived length is not a bond"
+            "a contact under the cycle threshold is not a bond"
+        );
+        sites[1][o] = [BOND + 0.05, 0.0, 0.0];
+        let donated = donations(&sites, o, h, definition.donation_cutoff);
+        assert!(
+            donated[0].is_empty(),
+            "a contact past the cycle threshold is still a bond"
+        );
+        let long = RigidBodyGeometry::new_bonded(
+            vec![[0.0, 0.0, 0.0], [3.0, 0.0, 0.0], [0.0, 3.0, 0.0]],
+            vec![6, 1, 1],
+            vec![[0, 1], [0, 2]],
+        )
+        .expect("long bonds");
+        let wide = cycle_geometry(&long).expect("cycle");
+        let wide_span = 3.0 + 18.0_f64.sqrt();
+        assert!(
+            (wide.donation_cutoff - wide_span).abs() < 1e-12,
+            "a span wider than the cycle threshold was replaced"
         );
     }
 
