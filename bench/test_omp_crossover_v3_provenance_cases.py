@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CHECKER = ROOT / "bench" / "test_omp_crossover_v3_provenance.py"
 SOURCE_JSON = ROOT / "bench" / "results" / "rgpot_omp_crossover_v3_results.json"
 SOURCE_REPORT = ROOT / "bench" / "results" / "rgpot_omp_crossover_v3_report.md"
+SOURCE_PINS = ROOT / "bench" / "omp_crossover_v3_pins.json"
 REPORT_NAME = "rgpot_omp_crossover_v3_report.md"
 
 
@@ -31,38 +32,100 @@ def has_git() -> bool:
     )
 
 
-def commit_tree(arm: dict) -> str:
-    if has_git():
-        return subprocess.run(
-            ["git", "rev-parse", f"{arm['sha']}^{{tree}}"],
-            cwd=ROOT,
-            check=True,
+def repo_has_git(repo: Path) -> bool:
+    if not (repo / ".git").exists():
+        return False
+    return (
+        subprocess.run(
+            ["git", "rev-parse", "--git-dir"],
+            cwd=repo,
             text=True,
             capture_output=True,
-        ).stdout.strip()
+        ).returncode
+        == 0
+    )
+
+
+def repo_is_shallow(repo: Path) -> bool:
+    if not repo_has_git(repo):
+        return False
+    probe = subprocess.run(
+        ["git", "rev-parse", "--is-shallow-repository"],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+    )
+    return probe.returncode == 0 and probe.stdout.strip() == "true"
+
+
+def repo_enforces_commit_resolution(repo: Path, original: dict) -> bool:
+    if not repo_has_git(repo) or repo_is_shallow(repo):
+        return False
+    for arm in original["metadata"]["arms"]:
+        sha = arm.get("commit_sha")
+        if not isinstance(sha, str) or not sha:
+            continue
+        probe = subprocess.run(
+            ["git", "cat-file", "-e", f"{sha}^{{commit}}"],
+            cwd=repo,
+            text=True,
+            capture_output=True,
+        )
+        if probe.returncode == 0:
+            return True
+    return False
+
+
+def commit_tree(arm: dict) -> str:
+    if has_git():
+        resolved = subprocess.run(
+            ["git", "rev-parse", "--verify", f"{arm['sha']}^{{tree}}"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+        if resolved.returncode == 0:
+            return resolved.stdout.strip()
     return str(arm.get("commit_tree") or arm["tree"])
 
 
 def object_tree(revision: str, fallback_seed: str) -> str:
     if has_git():
-        return subprocess.run(
-            ["git", "rev-parse", revision],
+        resolved = subprocess.run(
+            ["git", "rev-parse", "--verify", revision],
             cwd=ROOT,
-            check=True,
             text=True,
             capture_output=True,
-        ).stdout.strip()
+        )
+        if resolved.returncode == 0:
+            return resolved.stdout.strip()
     return hashlib.sha1(fallback_seed.encode("utf-8")).hexdigest()
 
 
-def run_checker(payload: dict, repo: Path = ROOT) -> subprocess.CompletedProcess[str]:
+def run_checker(
+    payload: dict,
+    repo: Path = ROOT,
+    pins: dict | None = None,
+) -> subprocess.CompletedProcess[str]:
     with tempfile.TemporaryDirectory() as directory:
         record = Path(directory) / SOURCE_JSON.name
         report = Path(directory) / REPORT_NAME
         record.write_text(json.dumps(payload) + "\n", encoding="utf-8")
         report.write_bytes(SOURCE_REPORT.read_bytes())
+        command = [
+            sys.executable,
+            str(CHECKER),
+            "--repo",
+            str(repo),
+            "--json",
+            str(record),
+        ]
+        if pins is not None:
+            pins_path = Path(directory) / SOURCE_PINS.name
+            pins_path.write_text(json.dumps(pins) + "\n", encoding="utf-8")
+            command.extend(["--pins", str(pins_path)])
         return subprocess.run(
-            [sys.executable, str(CHECKER), "--repo", str(repo), "--json", str(record)],
+            command,
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -110,8 +173,19 @@ def require_named_rejection(
     require_exact_rejection(result, f"arm set mismatch: missing {missing}; extra {extra}")
 
 
+def require_acceptance(result: subprocess.CompletedProcess[str], context: str) -> None:
+    if result.returncode != 0:
+        raise SystemExit(f"{context} failed: {(result.stdout + result.stderr).strip()}")
+
+
 def require_missing_sha(result: subprocess.CompletedProcess[str], arm: str) -> None:
     require_exact_rejection(result, f"{arm}: arm record is missing required key sha")
+
+
+def require_invalid_field(
+    result: subprocess.CompletedProcess[str], arm: str, field: str, value: object
+) -> None:
+    require_exact_rejection(result, f"{arm}: arm record has invalid {field}: {value!r}")
 
 
 def require_commit_rejection(
@@ -149,8 +223,7 @@ def require_threshold_rejection(
 
 def check_cases(original: dict, repo: Path) -> None:
     accepted = run_checker(json.loads(json.dumps(original)), repo=repo)
-    if accepted.returncode != 0:
-        raise SystemExit(accepted.stderr.strip())
+    require_acceptance(accepted, "original provenance record")
 
     arms = {arm["name"]: arm for arm in original["metadata"]["arms"]}
     team = arms["team-1"]
@@ -228,7 +301,50 @@ def check_cases(original: dict, repo: Path) -> None:
     )
     missing_sha = "0" * 40
     changed_team["sha"] = missing_sha
+    changed_team["commit_sha"] = missing_sha
     require_commit_rejection(run_checker(unresolved_commit, repo=repo), "team-1", missing_sha)
+
+    empty_sha = json.loads(json.dumps(original))
+    changed_team = next(arm for arm in empty_sha["metadata"]["arms"] if arm["name"] == "team-1")
+    changed_team["sha"] = ""
+    changed_team["commit_sha"] = ""
+    require_invalid_field(run_checker(empty_sha, repo=repo), "team-1", "sha", "")
+
+    null_sha = json.loads(json.dumps(original))
+    changed_team = next(arm for arm in null_sha["metadata"]["arms"] if arm["name"] == "team-1")
+    changed_team["sha"] = None
+    changed_team["commit_sha"] = None
+    require_invalid_field(run_checker(null_sha, repo=repo), "team-1", "sha", None)
+
+    empty_tree = json.loads(json.dumps(original))
+    changed_team = next(arm for arm in empty_tree["metadata"]["arms"] if arm["name"] == "team-1")
+    changed_team["tree"] = ""
+    changed_team["commit_tree"] = ""
+    require_invalid_field(run_checker(empty_tree, repo=repo), "team-1", "tree", "")
+
+    null_tree = json.loads(json.dumps(original))
+    changed_team = next(arm for arm in null_tree["metadata"]["arms"] if arm["name"] == "team-1")
+    changed_team["tree"] = None
+    changed_team["commit_tree"] = None
+    require_invalid_field(run_checker(null_tree, repo=repo), "team-1", "tree", None)
+
+    wrong_type_tree = json.loads(json.dumps(original))
+    changed_team = next(
+        arm for arm in wrong_type_tree["metadata"]["arms"] if arm["name"] == "team-1"
+    )
+    changed_team["tree"] = 123
+    changed_team["commit_tree"] = 123
+    require_invalid_field(run_checker(wrong_type_tree, repo=repo), "team-1", "tree", 123)
+
+    bool_threshold = json.loads(json.dumps(original))
+    changed_team = next(
+        arm for arm in bool_threshold["metadata"]["arms"] if arm["name"] == "team-1"
+    )
+    changed_team["threshold"] = True
+    changed_team["tree_threshold"] = True
+    require_invalid_field(
+        run_checker(bool_threshold, repo=repo), "team-1", "tree_threshold", True
+    )
 
     wrong_threshold = json.loads(json.dumps(original))
     changed_team = next(
@@ -253,6 +369,59 @@ def check_cases(original: dict, repo: Path) -> None:
     require_named_rejection(run_checker(renamed_arm, repo=repo), "team-1", "renamed-team")
 
 
+def check_absent_commit_forgeries(original: dict, repo: Path) -> None:
+    arms = {arm["name"]: arm for arm in original["metadata"]["arms"]}
+    team = arms["team-1"]
+    forged_tree = "1" * 40
+
+    coordinated_tree_forgery = json.loads(json.dumps(original))
+    changed_team = next(
+        arm
+        for arm in coordinated_tree_forgery["metadata"]["arms"]
+        if arm["name"] == "team-1"
+    )
+    changed_team["tree"] = forged_tree
+    changed_team["commit_tree"] = forged_tree
+    require_tree_rejection(
+        run_checker(coordinated_tree_forgery, repo=repo),
+        "team-1",
+        forged_tree,
+        team["tree"],
+    )
+
+    coordinated_commit_forgery = json.loads(json.dumps(original))
+    changed_team = next(
+        arm
+        for arm in coordinated_commit_forgery["metadata"]["arms"]
+        if arm["name"] == "team-1"
+    )
+    forged_sha = "0" * 40
+    changed_team["sha"] = forged_sha
+    changed_team["commit_sha"] = forged_sha
+    changed_team["tree"] = forged_tree
+    changed_team["commit_tree"] = forged_tree
+    require_exact_rejection(
+        run_checker(coordinated_commit_forgery, repo=repo),
+        f"team-1: commit does not resolve and has no pin: {forged_sha}",
+    )
+
+    missing_arm_pin = json.loads(SOURCE_PINS.read_text(encoding="utf-8"))
+    del missing_arm_pin["team-1"]
+    require_exact_rejection(
+        run_checker(original, repo=repo, pins=missing_arm_pin),
+        "team-1: pinned manifest has no arm entry",
+    )
+
+    mismatched_pin = json.loads(SOURCE_PINS.read_text(encoding="utf-8"))
+    mismatched_pin["team-1"][team["sha"]] = forged_tree
+    require_tree_rejection(
+        run_checker(original, repo=repo, pins=mismatched_pin),
+        "team-1",
+        team["tree"],
+        forged_tree,
+    )
+
+
 def main() -> None:
     bare = run_bare_checker()
     if bare.returncode != 0:
@@ -267,8 +436,50 @@ def main() -> None:
 
     original = json.loads(SOURCE_JSON.read_text(encoding="utf-8"))
     check_cases(original, ROOT)
+    forged_pins = json.loads(SOURCE_PINS.read_text(encoding="utf-8"))
+    for arm_pins in forged_pins.values():
+        for sha in arm_pins:
+            arm_pins[sha] = "f" * 40
+    del forged_pins["team-1"]
+    require_acceptance(
+        run_checker(original, repo=ROOT, pins=forged_pins),
+        "git-backed provenance with forged pins",
+    )
+    with tempfile.TemporaryDirectory() as partial_git_dir:
+        partial_repo = Path(partial_git_dir)
+        subprocess.run(
+            ["git", "init", "-q"],
+            cwd=partial_repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=test",
+                "-c",
+                "user.email=test@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "initial",
+            ],
+            cwd=partial_repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        check_cases(original, partial_repo)
+        check_absent_commit_forgeries(original, partial_repo)
     with tempfile.TemporaryDirectory() as no_git_repo:
-        check_cases(original, Path(no_git_repo))
+        no_git_path = Path(no_git_repo)
+        check_cases(original, no_git_path)
+        check_absent_commit_forgeries(original, no_git_path)
 
 
 if __name__ == "__main__":
