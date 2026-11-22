@@ -242,11 +242,18 @@ def main() -> int:
         raise SystemExit("A and A2 must be independent builds")
 
     probe(builds, args.sc_lib)
-    session = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stored = common.read_rows(args.rows)
+    prior_sessions = {row["session"] for row in stored}
+    if len(prior_sessions) > 1:
+        raise SystemExit("stored rows contain more than one session")
+    session = (
+        prior_sessions.pop()
+        if prior_sessions
+        else dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    )
     journal(args.journal, session, "restart", detail="orchestrator start")
     machine = common.machine_id()
     harness = common.blob_of(Path(__file__))
-    stored = common.read_rows(args.rows)
     done = {row_key(row) for row in stored}
     completed_cells = 0
 
