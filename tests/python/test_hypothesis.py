@@ -23,6 +23,23 @@ def _types(n: int) -> np.ndarray:
     return np.ones(n, dtype=np.int32)
 
 
+@st.composite
+def _two_atom_positions(
+    draw: st.DrawFn, *, min_separation: float = 1.0e-6
+) -> np.ndarray:
+    span = st.floats(
+        min_value=min_separation,
+        max_value=8.0,
+        allow_nan=False,
+        allow_infinity=False,
+        allow_subnormal=False,
+    )
+    dx = draw(st.one_of(span, st.floats(min_value=-8.0, max_value=-min_separation)))
+    dy = draw(st.floats(min_value=-8.0, max_value=8.0, allow_nan=False, allow_infinity=False))
+    dz = draw(st.floats(min_value=-8.0, max_value=8.0, allow_nan=False, allow_infinity=False))
+    return np.array([[0.0, 0.0, 0.0], [dx, dy, dz]], dtype=np.float64)
+
+
 @settings(max_examples=40, deadline=None)
 @given(
     st.lists(
@@ -73,6 +90,18 @@ def test_wrong_shape_names_both_shapes() -> None:
     box = np.zeros((2, 2), dtype=np.float64)
     with pytest.raises(ValueError, match=r"box: expected shape \(3, 3\), got \(2, 2\)"):
         pot.evaluate(positions, _types(2), box)
+
+
+@settings(max_examples=40, deadline=None)
+@given(positions=_two_atom_positions(min_separation=1.0e-4))
+def test_two_atom_lj_evaluate_stays_finite_with_minimum_separation(
+    positions: np.ndarray,
+) -> None:
+    pot = rgpot.LJPot()
+    out = pot.evaluate(positions, _types(2), _box())
+    assert np.isfinite(float(out["energy"]))
+    forces = np.asarray(out["forces"], dtype=np.float64)
+    assert np.all(np.isfinite(forces))
 
 
 def test_nan_energy_is_numerical_error() -> None:
