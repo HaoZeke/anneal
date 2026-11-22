@@ -1619,6 +1619,20 @@ native_psi()
 - Outputs :: the expression string given to the constructor.
 - Errors :: none.
 
+*** =rgpot.ExprPot.cutoff=
+
+- Inputs :: none; a read-only property.
+- Units :: Angstrom.
+- Outputs :: the largest cutoff among the terms: the periodic cell width the
+  expression needs to exceed twice for a minimum-image kernel to see every
+  neighbour.
+  A term given as a kind string or as a dict with no ="cutoff"= key counts the
+  default cutoff of its class.
+  A ="d2"=, ="d2cpmd"=, ="d3"= or ="d4"= term needs no wider cell and counts 0.
+  An expression of only those terms reports 0.0.
+- Errors :: none; an unknown kind already raised =ValueError= in the
+  constructor.
+
 *** =rgpot.ExprPot.d_energy_d_term=
 
 #+attr_rgpot: signature
@@ -1635,6 +1649,18 @@ d_energy_d_term(name)
   A call through =evaluate_batch= does not update it.
 - Errors :: a name that is not a term raises =ValueError=
   =ExprPot name 'NAME' is not a term=.
+
+*** =rgpot.SumPot.cutoff=
+
+- Inputs :: none; a read-only property.
+- Units :: Angstrom.
+- Outputs :: the largest cutoff among the enabled terms, counted as for
+  =ExprPot.cutoff=.
+  A disabled term is not counted.
+  A sum with no enabled term, or only terms that need no wider cell, reports
+  0.0.
+- Errors :: none; an unknown kind on an enabled term already raised
+  =ValueError= in the constructor.
 
 *** =rgpot.SumPot.components=
 

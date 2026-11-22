@@ -1174,6 +1174,12 @@ class SumPot:
         Weighted sum of child potentials. terms is a list of kind strings or dicts with kind, name (term<i>), weight (1.0, sign allowed), enabled (True) and the kind's fields as for ExprPot. A disabled term is never built or evaluated.
         """
 
+    @property
+    def cutoff(self) -> float:
+        """
+        Largest minimum-image cutoff of the enabled terms, in Angstrom: the periodic cell width the sum needs to exceed twice. A term with no such radius (d2, d2cpmd, d3, d4) counts 0, and a sum of only those is 0.
+        """
+
     def components(self) -> list:
         """
         Per-term record of this thread's last call: name, weight, enabled, evaluated, energy (eV, before the weight), forces (N, 3), variance and stress (3, 3, or None).
@@ -1245,6 +1251,12 @@ class ExprPot:
 
     @property
     def expression(self) -> str: ...
+
+    @property
+    def cutoff(self) -> float:
+        """
+        Largest minimum-image cutoff of the terms, in Angstrom: the periodic cell width the expression needs to exceed twice. A term with no such radius (d2, d2cpmd, d3, d4) counts 0, and an expression of only those is 0.
+        """
 
     def d_energy_d_term(self, name: str) -> float: ...
 

@@ -43,6 +43,7 @@ differentiates. A caller with no volume keeps the padded box's stress.
 from __future__ import annotations
 
 import itertools
+import math
 import re
 from typing import Any, Iterable, Sequence
 
@@ -88,10 +89,15 @@ _FACTORY_DEFAULTS = {
     },
 }
 
-# Neighbour cutoffs of the bound kernels, in Angstrom, for kernels whose
-# binding has no config()["cutoff"]. WaterH has no cutoff, so an open
-# cell for it uses the 100 Angstrom floor and a periodic cell is not
-# tiled.
+# Cutoffs, in Angstrom, of the bound kernels whose binding publishes none
+# through ``cutoff``, ``native_cutoff`` or ``config()["cutoff"]``. A cell
+# narrower than twice the value is tiled for a minimum-image kernel. A 0.0
+# entry is a statement that no wider cell is needed: the kernel sums every
+# image itself (D2Pot, D4Pot), is not periodic (D3Pot), has no cutoff
+# (WaterHPot), is defined by a single minimum image (D2CpmdPot), or hands the
+# geometry to an engine that owns the neighbour search (IPIPot, LammpsPot). A
+# class that is in neither this table nor one of the three published forms
+# has no known cutoff, and :func:`_kernel_cutoff` raises for it.
 _KERNEL_CUTOFF_ANGSTROM = {
     "SWPot": 1.8 * 2.0951,
     "StillingerWeberSi": 1.8 * 2.0951,
@@ -103,7 +109,16 @@ _KERNEL_CUTOFF_ANGSTROM = {
     "FeHePot": 5.4,
     "CuH2Pot": 6.1,
     "WaterHPot": 0.0,
+    "D2Pot": 0.0,
+    "D2CpmdPot": 0.0,
+    "D3Pot": 0.0,
+    "D4Pot": 0.0,
+    "IPIPot": 0.0,
+    "LammpsPot": 0.0,
 }
+
+# GromacsPot and OpenMMPot report ``native_cutoff()`` in nanometres.
+_NANOMETRE_IN_ANGSTROM = 10.0
 
 _OPEN_BOX_FLOOR_ANGSTROM = 100.0
 
@@ -223,29 +238,46 @@ def _spec_of(potential: Any) -> tuple[str, dict[str, Any]] | None:
     return None
 
 
-def _kernel_cutoff(
-    potential: Any, parameters: dict[str, Any] | None = None
-) -> float:
-    """Cutoff the open box and the supercell have to clear, in Angstrom."""
+def _checked_cutoff(name: str, value: Any) -> float:
+    cutoff = float(value)
+    if not math.isfinite(cutoff) or cutoff < 0.0:
+        raise ValueError(
+            f"{name} reports the cutoff {cutoff!r}; it must be finite and not "
+            "negative"
+        )
+    return cutoff
+
+
+def _kernel_cutoff(potential: Any) -> float:
+    """Cutoff the open box and the supercell have to clear, in Angstrom.
+
+    The potential publishes it as ``native_cutoff()`` (nanometres), a
+    ``cutoff`` property (``EAMTablePot``, ``ExprPot``, ``SumPot``) or
+    ``config()["cutoff"]``. A kernel that has none of these is looked up in
+    ``_KERNEL_CUTOFF_ANGSTROM``. A kernel in no source raises ``ValueError``:
+    a cutoff of 0 would skip the tiling a minimum-image kernel needs and
+    return the wrong energy in a short cell, without a message.
+    """
+    name = type(potential).__name__
+    if name in _KERNEL_CUTOFF_ANGSTROM:
+        return _checked_cutoff(name, _KERNEL_CUTOFF_ANGSTROM[name])
+    native = getattr(potential, "native_cutoff", None)
+    if callable(native):
+        return _checked_cutoff(name, float(native()) * _NANOMETRE_IN_ANGSTROM)
     cutoff = getattr(potential, "cutoff", None)
-    if cutoff is not None:
-        return float(cutoff)
+    if cutoff is not None and not callable(cutoff):
+        return _checked_cutoff(name, cutoff)
     config = getattr(potential, "config", None)
     if callable(config):
         cfg = config()
-        if isinstance(cfg, dict) and "cutoff" in cfg:
-            return float(cfg["cutoff"])
-    params = parameters or {}
-    cutoffs = [
-        float(term["cutoff"])
-        for term in dict(params.get("terms") or {}).values()
-        if isinstance(term, dict) and "cutoff" in term
-    ]
-    if "cutoff" in params:
-        cutoffs.append(float(params["cutoff"]))
-    if cutoffs:
-        return max(cutoffs)
-    return float(_KERNEL_CUTOFF_ANGSTROM.get(type(potential).__name__, 0.0))
+        if isinstance(cfg, dict) and cfg.get("cutoff") is not None:
+            return _checked_cutoff(name, cfg["cutoff"])
+    raise ValueError(
+        f"cannot determine the cutoff of {name}: it has no cutoff property, "
+        "native_cutoff() or config()['cutoff'], and no built-in entry. "
+        "Without it the calculator cannot tile a short periodic cell, so it "
+        "refuses the potential instead of assuming 0"
+    )
 
 
 def _caps(potential: Any) -> dict[str, Any]:
@@ -561,8 +593,7 @@ class RgpotCalculator(Calculator):
 
     def _configure(self) -> None:
         pot = self._potential
-        params = self._spec[1] if self._spec is not None else None
-        self._cutoff = _kernel_cutoff(pot, params)
+        self._cutoff = _kernel_cutoff(pot)
         self._caps = _caps(pot)
         self._kernel_periodic = bool(self._caps.get("periodic", True))
         self._name = type(pot).__name__

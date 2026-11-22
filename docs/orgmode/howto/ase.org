@@ -153,10 +153,19 @@ Stress is the virial over the caller's cell volume, which is the cell
 =calculate_numerical_stress= strains.
 A cluster or slab with no volume keeps the padded box's stress.
 
-The cutoff is =config()["cutoff"]= where the binding has one, and otherwise the
-kernel's published cutoff.
-A kernel with no known cutoff (D3, D4 and WaterH) is not tiled.
-For =ExprPot=, the largest cutoff in its term specifications is used.
+The cutoff is the =native_cutoff()= of a GROMACS or OpenMM engine, the =cutoff=
+property of =EAMTablePot=, =ExprPot= and =SumPot=, or =config()["cutoff"]=.
+A kernel with none of these has a built-in entry.
+=ExprPot= and =SumPot= report the largest cutoff among their enabled terms,
+whether the term is a kind string, a dict without a ="cutoff"= key, which takes
+the class default, or a dict with one.
+It is the same for an object built in Python and one made from a kind string.
+A kernel that sums every image itself (D2, D4), is not periodic (D3), has no
+cutoff (WaterH), is defined by one minimum image (D2 CPMD) or runs in an
+external engine (i-PI, LAMMPS) has the built-in entry 0 and is not tiled.
+A potential with no cutoff in any of these forms raises =ValueError= when the
+calculator is built, because a cutoff of 0 would skip the tiling and give the
+wrong energy in a short cell.
 Its cluster box is the 100 Angstrom cube while the cluster spans less than 50
 Angstrom, and twice the extent beyond that.
 =ljcluster=, D3 and D4 have free boundaries and raise =ValueError= for a
