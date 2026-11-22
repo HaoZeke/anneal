@@ -71,17 +71,32 @@ fn centroid(x: ArrayView1<f64>, n: usize) -> [f64; 3] {
 
 /// Rotates `v` about a unit `axis` by `angle`, by Rodrigues' formula.
 fn rotate(v: [f64; 3], axis: [f64; 3], angle: f64) -> [f64; 3] {
-    // Host `sin` and `cos` of the same angle are not one function on glibc
-    // and libSystem, and this rotation places the symmetrised points.
-    rotate_trig(v, axis, libm::sin(angle), libm::cos(angle))
+    rotate_by(v, axis, Turn::of(angle))
 }
 
-/// [`rotate`] with the sine and cosine of the angle already in hand.
-///
-/// The arithmetic is the Rodrigues formula, one sine and one cosine for the
-/// whole turn. A scan that builds an image per atom was calling `sin` and
-/// `cos` once per atom on the same angle.
-fn rotate_trig(v: [f64; 3], axis: [f64; 3], s: f64, co: f64) -> [f64; 3] {
+/// Sine and cosine of a rotation angle, taken once for every point the
+/// rotation moves.
+#[derive(Debug, Clone, Copy)]
+struct Turn {
+    s: f64,
+    co: f64,
+}
+
+impl Turn {
+    fn of(angle: f64) -> Self {
+        // Host `sin` and `cos` of the same angle are not one function on
+        // glibc and libSystem, and this rotation places the symmetrised
+        // points.
+        Self {
+            s: libm::sin(angle),
+            co: libm::cos(angle),
+        }
+    }
+}
+
+/// [`rotate`] with the sine and cosine already taken.
+fn rotate_by(v: [f64; 3], axis: [f64; 3], turn: Turn) -> [f64; 3] {
+    let Turn { s, co } = turn;
     let dot = v[0] * axis[0] + v[1] * axis[1] + v[2] * axis[2];
     let cross = [
         axis[1] * v[2] - axis[2] * v[1],
@@ -475,11 +490,9 @@ impl Cloud {
         if n == 0 || order < 2 {
             return None;
         }
-        let angle = 2.0 * std::f64::consts::PI / order as f64;
+        let turn = Turn::of(2.0 * std::f64::consts::PI / order as f64);
         let sine = libm::sin(std::f64::consts::PI / order as f64);
         let scale = 4.0 * sine * sine;
-        let s = libm::sin(angle);
-        let co = libm::cos(angle);
         let gaps = self.gaps();
         let mut total = 0.0;
         let mut moved = false;
@@ -490,7 +503,7 @@ impl Cloud {
             let chord_sq = scale * self.perp_sq_at(index, axis);
             let axial = !gap.is_finite() || gap <= 0.0 || chord_sq < gap * 0.25;
             let here = self.point(index);
-            let image = rotate_trig(here, axis, s, co);
+            let image = rotate_by(here, axis, turn);
             // An image inside half the nearest-neighbour gap is closer to its
             // own atom than to any other, which is the answer the scan would
             // return. The squared length is the same multiply-add.
@@ -752,16 +765,14 @@ impl Cloud {
         if n == 0 || order < 2 {
             return None;
         }
-        let angle = 2.0 * std::f64::consts::PI / order as f64;
-        let s = libm::sin(angle);
-        let co = libm::cos(angle);
+        let turn = Turn::of(2.0 * std::f64::consts::PI / order as f64);
         let mut total = 0.0;
         // A finite cap usually dies on the first image that misses. Measuring
         // that image alone stops there. A cap that stays open, or no cap,
         // scans several images per pass over the coordinates.
         if cap.is_finite() {
             for index in 0..n {
-                total += self.nearest_one(rotate_trig(self.point(index), axis, s, co));
+                total += self.nearest_one(rotate_by(self.point(index), axis, turn));
                 if total > cap * cap * n as f64 {
                     let partial = (total / n as f64).sqrt();
                     if root_is_past_cap(partial, cap, n) {
@@ -776,7 +787,7 @@ impl Cloud {
         while index < n {
             let width = (n - index).min(4);
             for lane in 0..width {
-                stored[lane] = rotate_trig(self.point(index + lane), axis, s, co);
+                stored[lane] = rotate_by(self.point(index + lane), axis, turn);
             }
             if !self.accumulate(&stored[..width], cap, &mut total) {
                 return None;
@@ -1097,6 +1108,7 @@ pub fn symmetrise(x: ArrayView1<f64>, n: usize, cand: &Candidate, pair_cutoff: f
     }
     let c = centroid(x, n);
     let angle = 2.0 * std::f64::consts::PI / cand.order as f64;
+    let step = Turn::of(angle);
     let rel =
         |a: usize| -> [f64; 3] { [x[3 * a] - c[0], x[3 * a + 1] - c[1], x[3 * a + 2] - c[2]] };
 
@@ -1111,7 +1123,7 @@ pub fn symmetrise(x: ArrayView1<f64>, n: usize, cand: &Candidate, pair_cutoff: f
         let mut cur = a;
         let mut closed = true;
         for _ in 1..cand.order {
-            let w = rotate(rel(cur), cand.axis, angle);
+            let w = rotate_by(rel(cur), cand.axis, step);
             let mut best = usize::MAX;
             let mut best_d = f64::INFINITY;
             for b in 0..n {
