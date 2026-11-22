@@ -200,6 +200,7 @@ on:
   push:
     branches:
     - main
+    - develop
     paths:
     - potctl/**
     - .github/workflows/cosmo-potctl.yml
@@ -210,6 +211,8 @@ on:
     - .github/actions/ensure-potctl/**
     - .github/actions/restore-ci-tools/**
     - ci/gha/**
+    tags:
+    - '*'
   workflow_dispatch: {}
 permissions:
   contents: read

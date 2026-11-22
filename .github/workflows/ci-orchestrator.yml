@@ -11,6 +11,8 @@ name: CI (orchestrator)
 on:
   push:
     branches: [main, develop]
+    tags:
+      - '*'
     paths-ignore:
       - docs/**
       - '**/*.md'

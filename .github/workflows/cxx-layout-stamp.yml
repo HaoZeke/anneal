@@ -12,6 +12,8 @@ on:
       - LICENSE
   push:
     branches: [main, develop]
+    tags:
+      - '*'
     paths-ignore:
       - docs/**
       - '**/*.md'

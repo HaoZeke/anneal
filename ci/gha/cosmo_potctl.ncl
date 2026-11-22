@@ -149,7 +149,7 @@ in
   on = {
     pull_request = { paths = cosmo_paths },
     workflow_dispatch = {},
-    push = { branches = ["main"], paths = cosmo_paths },
+    push = { branches = ["main", "develop"], tags = ["*"], paths = cosmo_paths },
   },
   concurrency = S.concurrency_cancel,
   permissions = { contents = "read" },

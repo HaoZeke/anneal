@@ -4,7 +4,7 @@ let P = S.pins in
 {
   name = "Build and Deploy Documentation",
   on = {
-    push = { branches = ["main"], tags = ["*"] },
+    push = { branches = ["main", "develop"], tags = ["*"] },
     pull_request = {},
     schedule = [{ cron = "0 8 * * 1" }],
   },

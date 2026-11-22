@@ -16,6 +16,8 @@ name: Coverage
 on:
   push:
     branches: [main, develop]
+    tags:
+      - '*'
     paths-ignore:
       - docs/**
       - '**/*.md'

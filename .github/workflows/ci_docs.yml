@@ -67,6 +67,7 @@ on:
   push:
     branches:
     - main
+    - develop
     tags:
     - '*'
   schedule:
