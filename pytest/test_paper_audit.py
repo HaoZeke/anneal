@@ -77,6 +77,7 @@ def test_covalent_provenance_tables_are_audited(audited):
         "bench/covalent-h2h/gfn2/floor-gate-c2de652d.csv",
         "bench/covalent-h2h/gfn2/floor-gate-land1.csv",
         "bench/covalent-h2h/gfn2/si20-censoring.csv",
+        "bench/covalent-h2h/gfn2/si20-fresh-rescore.csv",
         "bench/covalent-h2h/gfn2/si20-panel.csv",
         "bench/covalent-h2h/gfn2/si20-starts.csv",
         "bench/covalent-h2h/gfn2/superseded.csv",

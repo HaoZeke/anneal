@@ -1046,6 +1046,19 @@ anneal with `H2H_WALL_S` at three times CREST's slowest wall
 (`gfn2/si20-panel.csv`). The cap was 64,786.423781 s. Ten CREST runs
 completed and two are censored; all twelve anneal runs completed.
 
+The original CREST timing was not an idle-machine measurement. CREST used
+core 0 while seven floor-gate searches occupied cores 1--7. Anneal's panel
+ran later, serially on core 0 without that floor gate. CREST's legacy xtb
+driver uses its 250-SCC-iteration default and has no failed-SCC rescue.
+Anneal allows 500 iterations and its engine's high-electronic-temperature
+path. CREST also had no 100,000-call stop: five completed runs crossed that
+budget, reaching as many as 233,257 calls. Thus the recorded wall and call
+comparison does not hold SCC handling, machine load, or the call cap equal.
+A replacement CREST campaign was not run: injecting a reliable mid-process
+call cap and the engine's SCC handling into CREST's legacy subprocess driver
+requires a different driver, and the original completed and censored runs
+already consumed more than 35 serial core-hours.
+
 - The seeds. On seven of 2000-2011, 2000, 2001, 2002, 2004, 2006, 2007
   and 2011, xtb 6.7.1 at 3000 K does not converge the start's SCC in its
   default 250 iterations, and CREST, whose xtb runs with that default,
@@ -1054,13 +1067,15 @@ completed and two are censored; all twelve anneal runs completed.
   first twelve seeds whose start converges: 2003, 2005, 2008, 2009, 2010,
   2012, 2013, 2014, 2018, 2019, 2020 and 2021. The rows of the other
   seeds stay in the file and the summary leaves them out.
-- CREST stopped seeds 2008 and 2010 after 219 calls and 2012 after 245 on
-  a topology change: a random start is not a bonded molecule, and its
-  first optimisation forms bonds the start did not have. From `d09da9d9`
-  CREST runs with `-noreftopo`, which in CREST 3.0.2 only makes that
-  check adopt the new topology and go on. `gfn2/superseded.csv` names the
-  three rows; they are run again, and the summary and the wall cap leave
-  the old rows out.
+- The first seed-2008, 2010 and 2012 rows stopped on a topology change.
+  `gfn2/superseded.csv` names them. With `-noreftopo`, the final 2008,
+  2010 and 2014 runs exit 1 after 219 calls and produce no best: the
+  219-call pre-optimisation succeeds, then CREST's initial in-run
+  optimisation reaches xtb's 250-cycle limit and its SCC does not
+  converge before any countable energy. Seed 2012 passes that stage, then
+  exits 1 at 5,746 calls after six trial metadynamics restart failures;
+  the final trial reports an unstable MD emergency exit. These are
+  failed runs with no energy, not misses assigned an invented energy.
 - Seed 2009: no hit after 183,839 calls and 15,311 s, best -922.038 eV,
   above the ring.
 - Seed 2003 is censored, not a miss or a timeout. CREST was still
@@ -1074,6 +1089,11 @@ completed and two are censored; all twelve anneal runs completed.
   running after 19,835.549 s and 2,024 xtb log records when
   `crest_rotamers_0.xyz` crossed the 1 GiB corruption guard. It has no
   final energy or exit code.
+- Seed 2018 exits 2 after 127,577 calls. Its second multilevel
+  optimisation receives an empty rotamer pool, `cregen.out.tmp` reports
+  zero atoms and zero structures, and `remaining_in` ends on a Fortran
+  end-of-file error. The resulting `crest_best.xyz` contains zero atoms,
+  so it has no scoreable energy.
 - Seed 2005 records a hit at call 108,256 (13,710 s) at -959.85629642
   eV, 36.9 eV below the ring, on a planar flake with a shortest pair of
   1.846 Å. xtb at 3000 K does not converge that geometry's SCC from a
@@ -1082,24 +1102,38 @@ completed and two are censored; all twelve anneal runs completed.
   -868.99 eV. The energy is that of CREST's optimisation, whose SCC
   starts from the step before. `gfn2/false-hits.csv` names the row, and
   the summary counts it as a miss at its budget.
+- `gfn2/si20-fresh-rescore.csv` applies one identical fresh single point
+  to the retained final bests of both arms: GFN2, 3,000 K, accuracy 0.01,
+  500 SCC iterations, no warm wavefunction and no rescue. It records a
+  row for every seed, including SCC failures, zero-atom files, censored
+  runs and best files not retained after the disk cleanup. Consequently
+  no missing or failed score is silently dropped or replaced by an
+  energy. The two cleaned-up CREST bests, seeds 2005 and 2009, cannot be
+  re-scored; their absence is recorded rather than reconstructed.
 - Both arms stop at the ring, -922.98227162 eV
   (`gfn2/minima/si20-ring.xyz`). It is the panel's reference only if
   anneal or CREST reaches it on more seeds than the two of the reference
   search. Anneal reaches it on all twelve panel seeds, so it is the panel
   reference.
 
-The final result, after excluding the two censored CREST runs rather than
-turning them into misses and counting CREST seed 2005's non-reproducible
-energy as a miss, is:
+The Illinois dimer fix changes the charged calibration from 45 calls to 25,
+so all twelve anneal cells were rerun. All twelve new best geometries
+converge under the fresh protocol and are below the ring. None of CREST's
+three retained, valid best geometries is below it; the other nine rows
+record why no score is available. Counting every selected seed in the
+hit denominator gives:
 
 | code | hits / 12 | completed | censored | median calls | median wall s | median inside s | median outside s | inside ms/call | outside ms/call | Fisher p | Mann-Whitney p |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| anneal general | 12/12 | 12 | 0 | 4,948.5 | 1,879.698 | 1,879.628 | 0.092 | 435.4741 | 0.0164 | — | — |
-| CREST | 0/12 | 10 | 2 | 117,916.5 | 12,995.712 | 12,948.455 | 23.122 | 98.5552 | 0.1915 | 1.54644e-6 | 3.78992e-5 |
+| anneal general | 12/12 | 12 | 0 | 7,592.5 | 3,040.205 | 3,040.134 | 0.071 | 509.1190 | 0.0122 | — | — |
+| CREST | 0/12 | 10 | 2 | 117,916.5 | 12,995.712 | 12,948.455 | 23.122 | 98.5552 | 0.1915 | 7.39602e-7 | 1.02171e-5 |
 
-The tests compare CREST's ten completed runs with anneal's twelve runs.
 The Mann-Whitney test is two-sided, asymptotic and tie-corrected, with
-every miss ranked after every hit.
+every miss, failure, unavailable best and censoring ranked after every hit.
+Restricting CREST to its ten completed processes, as the earlier table did,
+gives Fisher \(p=1.54644\times10^{-6}\) and Mann-Whitney
+\(p=3.76887\times10^{-5}\). Time medians use those ten completed CREST
+processes; there is no invented time for the censored runs.
 
 ## Pins
 

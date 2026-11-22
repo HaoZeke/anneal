@@ -168,10 +168,11 @@ KNOWN_GAPS = {
                                               "revision ccd69256 is not in this repository; revision cd1456c1 is not "
                                               "in this repository",
     "bench/covalent-h2h/gfn2/si20-starts.csv": "revision 35d2292c is not in this repository",
-    "bench/covalent-h2h/gfn2/superseded.csv": "revision recorded; no host column; revision 35d2292c is not in this "
+    "bench/covalent-h2h/gfn2/superseded.csv": "host empty or unknown on some rows; revision 35d2292c is not in this "
                                               "repository; revision 522e2de7 is not in this repository; revision "
                                               "5855af26 is not in this repository; revision 6fff2974 is not in this "
-                                              "repository; revision 75a18090 is not in this repository",
+                                              "repository; revision 75a18090 is not in this repository; revision "
+                                              "cd1456c1 is not in this repository",
     "bench/covalent-h2h/gfn2/rows.csv": "revision 5351f272 is not in this repository; revision ce1e7a46 is not in "
                                         "this repository",
     "bench/ase-gofee-h2h/results.csv": "revision recorded; no host column; head unrecorded on some rows; revision "
@@ -2230,6 +2231,7 @@ def covalent_gfn2(audit: Audit) -> None:
     audit.rows("bench/covalent-h2h/gfn2/floor-gate-land1.csv")
     audit.rows("bench/covalent-h2h/gfn2/si20-panel.csv")
     audit.rows("bench/covalent-h2h/gfn2/si20-censoring.csv")
+    audit.rows("bench/covalent-h2h/gfn2/si20-fresh-rescore.csv")
     audit.rows("bench/covalent-h2h/gfn2/si20-starts.csv")
     audit.rows("bench/covalent-h2h/gfn2/superseded.csv")
     named = {(r["system"], r["code"], r["code_revision"], r["seed"]): r
@@ -2516,7 +2518,7 @@ def provenance(audit: Audit) -> dict[str, str]:
         elif not hosts:
             problems.append("revision recorded; no host column")
         for column in revs + hosts:
-            if any(r[column].strip() in ("", "unknown") for r in rows):
+            if any((r[column] or "").strip() in ("", "unknown") for r in rows):
                 what = "unrecorded" if column in revs else "empty or unknown"
                 problems.append(f"{column} {what} on some rows")
         for column in revs:
