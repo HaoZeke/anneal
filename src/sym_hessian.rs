@@ -1141,7 +1141,7 @@ mod tests {
 
     fn group_of(x: ArrayView1<f64>, n: usize) -> Vec<SiteSymmetry> {
         let cands = detect_all(x, n, &[2, 3, 5], 0.05);
-        let group = generate_group(&cands, 200);
+        let group = generate_group(&cands, 200).expect("closed point group");
         site_symmetries(x, n, &group, 1e-6)
     }
 

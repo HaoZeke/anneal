@@ -26,7 +26,23 @@
 //! structure with no approximate symmetry is left alone, which is the case
 //! where the random version does its damage.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use ndarray::{Array1, ArrayView1};
+
+/// Nearest-image lookups on the safe6 exchange path.
+///
+/// Stall symmetrisation and the continuous-symmetry scan both resolve a
+/// rotated point here. The count is process-wide and always on, so a bench
+/// can print it after a timed run.
+static SAFE6_NEAREST_INDEX: AtomicU64 = AtomicU64::new(0);
+
+/// How many safe6 nearest-image lookups this process has made.
+pub fn safe6_nearest_index_calls() -> u64 {
+    SAFE6_NEAREST_INDEX.load(Ordering::Relaxed)
+}
+
+const ROTATION_ORDERS: [usize; 5] = [2, 3, 4, 5, 6];
 
 /// An approximate rotational symmetry a structure was found to have.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -168,11 +184,11 @@ fn sum_past_cap(total: f64, n: usize, cap: f64) -> bool {
         return false;
     }
     let gate = cap * (1.0 + 1.0e-6);
-    let edge = gate * gate * (n as f64);
-    // A gate whose square underflows is not a bound: `total > 0` would
-    // reject a sum the square root still keeps. Only a normal edge is
-    // already on the reject side of that comparison.
-    if edge.is_normal() && total > edge {
+    let gate_sq = gate * gate;
+    let edge = gate_sq * (n as f64);
+    // If either `gate^2` or `edge` leaves the normal range, subnormal
+    // rounding can place `edge` below `gate^2 * n`, so defer to the root.
+    if gate_sq.is_normal() && edge.is_normal() && total > edge {
         return true;
     }
     (total / n as f64).sqrt() >= gate
@@ -289,6 +305,18 @@ struct Cloud {
     /// A higher order about the same axis is a shorter turn, so it is
     /// rejected for the same reason and does not need to be scored.
     motionless: std::cell::Cell<bool>,
+    /// Nearest-image lookups made through `nearest_for_exchange` on this cloud,
+    /// flushed to `SAFE6_NEAREST_INDEX` once on drop.
+    nearest_calls: std::cell::Cell<u64>,
+}
+
+impl Drop for Cloud {
+    fn drop(&mut self) {
+        let calls = self.nearest_calls.get();
+        if calls > 0 {
+            SAFE6_NEAREST_INDEX.fetch_add(calls, Ordering::Relaxed);
+        }
+    }
 }
 
 /// Last partner of each atom about one axis.
@@ -346,6 +374,7 @@ impl Cloud {
             axis_ratio: std::cell::RefCell::new(None),
             axis_space: std::cell::RefCell::new(Vec::new()),
             motionless: std::cell::Cell::new(false),
+            nearest_calls: std::cell::Cell::new(0),
         }
     }
 
@@ -485,12 +514,14 @@ impl Cloud {
     }
 
     fn perp_sq_at(&self, index: usize, axis: [f64; 3]) -> f64 {
-        let along = self.xs[index] * axis[0] + self.ys[index] * axis[1] + self.zs[index] * axis[2];
-        let radius_sq = self.xs[index] * self.xs[index]
-            + self.ys[index] * self.ys[index]
-            + self.zs[index] * self.zs[index]
-            - along * along;
-        radius_sq.max(0.0)
+        let x = self.xs[index];
+        let y = self.ys[index];
+        let z = self.zs[index];
+        let along = x * axis[0] + y * axis[1] + z * axis[2];
+        let px = x - along * axis[0];
+        let py = y - along * axis[1];
+        let pz = z - along * axis[2];
+        px * px + py * py + pz * pz
     }
 
     /// An atom can leave its site when its chord reaches half its own
@@ -611,6 +642,7 @@ impl Cloud {
         hint: usize,
         hint_gap: f64,
     ) -> (usize, f64) {
+        self.nearest_calls.set(self.nearest_calls.get() + 1);
         if hint < self.xs.len() {
             let distance = squared_offset(image, self.xs[hint], self.ys[hint], self.zs[hint]);
             if gap_ball_holds(distance, hint_gap) {
@@ -655,7 +687,9 @@ impl Cloud {
         true
     }
 
+    #[cfg(test)]
     fn symmetry_deviation(&self, axis: [f64; 3], order: usize, cap: f64) -> Option<f64> {
+        self.motionless.set(false);
         let turn = OrderTurn::new(order)?;
         self.deviation_with(axis, &turn, cap)
     }
@@ -1252,7 +1286,10 @@ pub fn best_order_about(
         if order >= dead {
             continue;
         }
-        let Some(deviation) = cloud.symmetry_deviation(axis, order, f64::INFINITY) else {
+        let Some(turn) = OrderTurn::new(order) else {
+            continue;
+        };
+        let Some(deviation) = cloud.deviation_with(axis, &turn, f64::INFINITY) else {
             remember_motionless(&cloud, order, &mut dead);
             continue;
         };
@@ -1305,6 +1342,76 @@ pub fn detect_orders(
             out.push(candidate);
         }
     }
+    out
+}
+
+/// Best rotation using the raw crystallographic scan (`[2..=6]`, no exchange guard).
+pub(crate) fn detect_crystallographic(
+    x: ArrayView1<f64>,
+    n: usize,
+    orders: &[usize],
+    tolerance: f64,
+) -> Option<Candidate> {
+    let mut best: Option<Candidate> = None;
+    let cloud = Cloud::from_view(x, n);
+    for axis in candidate_axes(x, n) {
+        for &order in orders {
+            let Some(d) = cloud.rotation_deviation(axis, order, tolerance) else {
+                continue;
+            };
+            if d < tolerance && best.map(|b| d < b.deviation).unwrap_or(true) {
+                best = Some(Candidate {
+                    axis,
+                    order,
+                    improper: false,
+                    deviation: d,
+                });
+            }
+        }
+    }
+    best
+}
+
+/// All approximate symmetries using the raw crystallographic scan.
+pub(crate) fn detect_all_crystallographic(
+    x: ArrayView1<f64>,
+    n: usize,
+    orders: &[usize],
+    tolerance: f64,
+) -> Vec<Candidate> {
+    let mut out = Vec::new();
+    let cloud = Cloud::from_view(x, n);
+    for axis in candidate_axes(x, n) {
+        for &order in orders {
+            let Some(d) = cloud.rotation_deviation(axis, order, tolerance) else {
+                continue;
+            };
+            if d < tolerance {
+                out.push(Candidate {
+                    axis,
+                    order,
+                    improper: false,
+                    deviation: d,
+                });
+            }
+        }
+        let Some(d) = cloud.plane_deviation(axis, tolerance) else {
+            continue;
+        };
+        if d < tolerance {
+            out.push(Candidate {
+                axis,
+                order: 1,
+                improper: true,
+                deviation: d,
+            });
+        }
+    }
+    out.sort_by(|a, b| {
+        a.deviation
+            .partial_cmp(&b.deviation)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     out
 }
 
@@ -1515,6 +1622,28 @@ fn act(r: &Rot, v: [f64; 3]) -> [f64; 3] {
     ]
 }
 
+/// Error returned when [`generate_group`] reaches `cap` before the generated
+/// operation set closes under composition.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GroupCapExceeded {
+    /// Operations collected up to `cap`, which are not closed under composition.
+    pub elements: Vec<Rot>,
+    /// Element cap that stopped generation.
+    pub cap: usize,
+}
+
+impl std::fmt::Display for GroupCapExceeded {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "generated symmetry set hit cap {} without closing under composition",
+            self.cap
+        )
+    }
+}
+
+impl std::error::Error for GroupCapExceeded {}
+
 /// The rotation group generated by a set of approximate symmetries.
 ///
 /// A point group is not an axis, and this is the difference between the scheme
@@ -1524,12 +1653,19 @@ fn act(r: &Rot, v: [f64; 3]) -> [f64; 3] {
 /// tetrahedral, it makes it axially symmetric, which is a different and much
 /// weaker constraint.
 ///
-/// Closed by repeated multiplication until nothing new appears or `cap` is
-/// reached. The cap is a guard against a set of axes that are not quite
-/// commensurate generating an unbounded pseudo-group out of rounding; the
-/// icosahedral rotation group has sixty elements, so anything past that is a
-/// sign the detection was loose rather than a real group.
-pub fn generate_group(cands: &[Candidate], cap: usize) -> Vec<Rot> {
+/// Closed by repeated multiplication until nothing new appears; returns
+/// [`GroupCapExceeded`] if a distinct product would exceed `cap`. The cap is a
+/// guard against a set of axes that are not quite commensurate generating an
+/// unbounded pseudo-group out of rounding; the icosahedral rotation group has
+/// sixty elements, so anything past that is a sign the detection was loose
+/// rather than a real group.
+pub fn generate_group(cands: &[Candidate], cap: usize) -> Result<Vec<Rot>, GroupCapExceeded> {
+    if cap == 0 {
+        return Err(GroupCapExceeded {
+            elements: Vec::new(),
+            cap,
+        });
+    }
     let identity: Rot = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
     let mut group: Vec<Rot> = vec![identity];
     let mut gens: Vec<Rot> = Vec::new();
@@ -1547,26 +1683,26 @@ pub fn generate_group(cands: &[Candidate], cap: usize) -> Vec<Rot> {
         }
     }
     let mut changed = true;
-    while changed && group.len() < cap {
+    while changed {
         changed = false;
         let snapshot = group.clone();
         for a in &snapshot {
             for g in &gens {
                 let p = mul(a, g);
                 if !group.iter().any(|q| same(q, &p)) {
+                    if group.len() >= cap {
+                        return Err(GroupCapExceeded {
+                            elements: group,
+                            cap,
+                        });
+                    }
                     group.push(p);
                     changed = true;
-                    if group.len() >= cap {
-                        break;
-                    }
                 }
-            }
-            if group.len() >= cap {
-                break;
             }
         }
     }
-    group
+    Ok(group)
 }
 
 /// Makes `x` symmetric under a whole group, not one rotation.
@@ -1712,8 +1848,7 @@ pub fn symmetrise_core(
             core[3 * k + d] = x[3 * a + d];
         }
     }
-    let orders = orders_held(m);
-    let cands = detect_all(core.view(), m, &orders, tolerance);
+    let cands = detect_all_crystallographic(core.view(), m, &ROTATION_ORDERS, tolerance);
     if cands.is_empty() {
         return None;
     }
@@ -1731,7 +1866,10 @@ pub fn symmetrise_core(
             break;
         }
     }
-    let group = generate_group(&gens, 48);
+    let group = match generate_group(&gens, 48) {
+        Ok(group) => group,
+        Err(err) => err.elements,
+    };
     let sym_core = if group.len() > 1 {
         symmetrise_group(core.view(), m, &group, pair_cutoff)
     } else {
@@ -1917,6 +2055,53 @@ pub fn orbit_complete_core(
     core_fraction: f64,
     min_separation: f64,
 ) -> Option<Array1<f64>> {
+    orbit_complete_core_with_orders(
+        x,
+        n,
+        &ROTATION_ORDERS,
+        tolerance,
+        pair_cutoff,
+        core_fraction,
+        min_separation,
+        false,
+    )
+}
+
+pub(crate) fn orbit_complete_core_detected(
+    x: ArrayView1<f64>,
+    n: usize,
+    tolerance: f64,
+    pair_cutoff: f64,
+    core_fraction: f64,
+    min_separation: f64,
+) -> Option<Array1<f64>> {
+    let m = ((n as f64) * core_fraction.clamp(0.1, 1.0))
+        .round()
+        .max(4.0) as usize;
+    let orders = orders_held(m.min(n));
+    orbit_complete_core_with_orders(
+        x,
+        n,
+        &orders,
+        tolerance,
+        pair_cutoff,
+        core_fraction,
+        min_separation,
+        true,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn orbit_complete_core_with_orders(
+    x: ArrayView1<f64>,
+    n: usize,
+    orders: &[usize],
+    tolerance: f64,
+    pair_cutoff: f64,
+    core_fraction: f64,
+    min_separation: f64,
+    detected_symmetry: bool,
+) -> Option<Array1<f64>> {
     if n < 4 {
         return None;
     }
@@ -1938,8 +2123,11 @@ pub fn orbit_complete_core(
             core[3 * k + d] = x[3 * a + d];
         }
     }
-    let orders = orders_held(m);
-    let cands = detect_all(core.view(), m, &orders, tolerance);
+    let cands = if detected_symmetry {
+        detect_all(core.view(), m, orders, tolerance)
+    } else {
+        detect_all_crystallographic(core.view(), m, orders, tolerance)
+    };
     if cands.is_empty() {
         return None;
     }
@@ -1957,7 +2145,10 @@ pub fn orbit_complete_core(
             break;
         }
     }
-    let group = generate_group(&gens, 48);
+    let group = match generate_group(&gens, 48) {
+        Ok(group) => group,
+        Err(err) => err.elements,
+    };
     if group.len() < 2 {
         return None;
     }
@@ -2097,6 +2288,10 @@ fn inverse(a: &Rot) -> Option<Rot> {
         }
     }
     Some(o)
+}
+
+pub(crate) fn candidate_op(c: &Candidate) -> Rot {
+    operation(c)
 }
 
 fn operation(c: &Candidate) -> Rot {
@@ -2306,6 +2501,17 @@ pub fn symmetrise_detected(
     pair_cutoff: f64,
 ) -> Option<(Array1<f64>, Candidate)> {
     let cand = detect(x, n, orders, tolerance)?;
+    Some((symmetrise(x, n, &cand, pair_cutoff), cand))
+}
+
+pub(crate) fn symmetrise_detected_crystallographic(
+    x: ArrayView1<f64>,
+    n: usize,
+    orders: &[usize],
+    tolerance: f64,
+    pair_cutoff: f64,
+) -> Option<(Array1<f64>, Candidate)> {
+    let cand = detect_crystallographic(x, n, orders, tolerance)?;
     Some((symmetrise(x, n, &cand, pair_cutoff), cand))
 }
 
@@ -2552,7 +2758,8 @@ mod tests {
                 },
             ],
             200,
-        );
+        )
+        .expect("closed tetrahedral group");
         assert_eq!(
             td.len(),
             24,
@@ -2587,7 +2794,8 @@ mod tests {
                 },
             ],
             200,
-        );
+        )
+        .expect("closed octahedral group");
         assert_eq!(
             oh.len(),
             48,
@@ -2617,7 +2825,8 @@ mod tests {
                 },
             ],
             200,
-        );
+        )
+        .expect("closed rotation subgroup");
         assert_eq!(
             t.len(),
             12,
@@ -2746,7 +2955,7 @@ mod tests {
                 deviation: 0.0,
             },
         ];
-        let g = generate_group(&gens, 120);
+        let g = generate_group(&gens, 120).expect("closed tetrahedral rotation group");
         assert_eq!(
             g.len(),
             12,
@@ -2772,7 +2981,7 @@ mod tests {
                 deviation: 0.0,
             },
         ];
-        let g = generate_group(&gens, 120);
+        let g = generate_group(&gens, 120).expect("closed octahedral rotation group");
         assert_eq!(
             g.len(),
             24,
@@ -2803,7 +3012,7 @@ mod tests {
                 deviation: 0.0,
             },
         ];
-        let group = generate_group(&gens, 120);
+        let group = generate_group(&gens, 120).expect("closed octahedral rotation group");
         let full = symmetrise_group(x.view(), 6, &group, 1.0);
 
         // Measured against a symmetry the single-axis pass did not use.
@@ -2834,7 +3043,7 @@ mod tests {
                 deviation: 0.0,
             },
         ];
-        let group = generate_group(&gens, 120);
+        let group = generate_group(&gens, 120).expect("closed octahedral rotation group");
         let y = symmetrise_group(x.view(), 6, &group, 1.0);
         for (p, q) in x.iter().zip(y.iter()) {
             assert!((p - q).abs() < 1e-9, "{p} moved to {q}");
@@ -2859,8 +3068,13 @@ mod tests {
                 deviation: 0.0,
             },
         ];
-        let g = generate_group(&gens, 60);
-        assert!(g.len() <= 60, "group ran to {}", g.len());
+        let err = generate_group(&gens, 60).unwrap_err();
+        assert!(
+            err.elements.len() <= 60,
+            "group ran to {}",
+            err.elements.len()
+        );
+        assert_eq!(err.cap, 60);
     }
 
     #[test]
@@ -2924,7 +3138,7 @@ mod orbit_tests {
                 deviation: 0.0,
             },
         ];
-        let group = generate_group(&axes, 48);
+        let group = generate_group(&axes, 48).expect("closed octahedral rotation group");
         assert!(group.len() >= 8);
         assert!(complete_orbits(x.view(), 6, &group, 0.2, 0.5).is_none());
         x[15] = 0.15;
@@ -3062,7 +3276,9 @@ mod shell_tests {
                 deviation: 0.0,
             },
         ];
-        assert_eq!(generate_group(&near, EXACT_CAP).len(), EXACT_CAP);
+        let err = generate_group(&near, EXACT_CAP).unwrap_err();
+        assert_eq!(err.elements.len(), EXACT_CAP);
+        assert_eq!(err.cap, EXACT_CAP);
         let gens: Vec<Rot> = near.iter().map(operation).collect();
         assert_eq!(close_group(&gens, 0.27, 120).len(), 10);
         assert_eq!(close_group(&gens, EXACT_CLOSURE, 120).len(), 120);
@@ -3372,6 +3588,7 @@ mod shell_tests {
             axis_ratio: std::cell::RefCell::new(None),
             axis_space: std::cell::RefCell::new(Vec::new()),
             motionless: std::cell::Cell::new(false),
+            nearest_calls: std::cell::Cell::new(0),
         }
     }
 
@@ -3892,6 +4109,46 @@ mod shell_tests {
             by_root,
             "a flushed edge leaves the decision to the square root"
         );
+        // Subnormal `total` strictly below `gate`: `by_root == false`.
+        let cap = 1.0e-160;
+        let n = 1usize;
+        let gate = cap * (1.0 + 1.0e-6);
+        let total = 1.0e-322;
+        let by_root = (total / n as f64).sqrt() >= gate;
+        assert!(!by_root);
+        assert!(!sum_past_cap(total, n, cap));
+
+        let cap = 1.0e-155;
+        let n = 1usize;
+        let gate = cap * (1.0 + 1.0e-6);
+        let edge = gate * gate * (n as f64);
+        assert!(!edge.is_normal());
+        let total = (cap * cap * (n as f64)).next_up();
+        assert!(total > cap * cap * (n as f64));
+        let by_root = (total / n as f64).sqrt() >= gate;
+        assert!(!by_root);
+        assert_eq!(
+            sum_past_cap(total, n, cap),
+            by_root,
+            "a subnormal sum above cap^2 and below gate must return false"
+        );
+        // `gate * gate` is subnormal while `edge = gate * gate * n` is normal:
+        // subnormal rounding drops `edge.next_up()` below `n * gate^2`.
+        let cap = 1.080_815_173_557_515_7e-154;
+        let n = 2usize;
+        let gate = cap * (1.0 + 1.0e-6);
+        let gate_sq = gate * gate;
+        let edge = gate_sq * (n as f64);
+        assert!(!gate_sq.is_normal());
+        assert!(edge.is_normal());
+        let total = edge.next_up();
+        assert!(total > cap * cap * (n as f64));
+        let by_root = (total / n as f64).sqrt() >= gate;
+        assert!(!by_root);
+        assert!(
+            !sum_past_cap(total, n, cap),
+            "subnormal gate^2 must defer to sqrt instead of trusting edge"
+        );
     }
 
     /// `detect`, `detect_all` and `detect_orders` keep the base split's bits.
@@ -4199,5 +4456,40 @@ mod shell_tests {
         }
         let n = coords.len() / 3;
         (Array1::from(coords), n)
+    }
+
+    #[test]
+    fn motionless_pruning_avoids_cancellation_on_long_axial_points() {
+        let coords = vec![
+            1.0e8, 1.0, 0.0, 1.0e8, -1.0, 0.0, -1.0e8, 1.0, 0.0, -1.0e8, -1.0, 0.0,
+        ];
+        let x = Array1::from(coords);
+        let n = 4;
+        let axis = [1.0, 0.0, 0.0];
+        let cloud = Cloud::from_view(x.view(), n);
+        let turn = OrderTurn::new(2).expect("order 2");
+        assert!(
+            !cloud.cannot_leave_fast(axis, &turn),
+            "cannot_leave_fast cancelled perpendicular component on (±1e8, ±1, 0)"
+        );
+        let got = cloud.symmetry_deviation(axis, 2, 1.0);
+        let scalar = scalar_exchange(&cloud, axis, 2, 1.0);
+        assert_eq!(got.map(f64::to_bits), scalar.map(f64::to_bits));
+        assert!(got.is_some_and(|d| d < 1e-12), "got={got:?}");
+        let detected = detect_orders(x.view(), n, &[2], 0.1);
+        assert!(
+            detected
+                .iter()
+                .any(|c| c.order == 2 && !c.improper && c.axis[0].abs() > 0.999),
+            "detect_orders missed exact order-2 exchange about x: {detected:?}"
+        );
+    }
+
+    #[test]
+    fn best_order_about_ignores_invalid_order_after_motionless() {
+        let coords = vec![1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, -2.0, 0.0];
+        let x = Array1::from(coords);
+        let axis = [0.0, 0.0, 1.0];
+        assert_eq!(best_order_about(x.view(), 4, axis, &[10, 1, 2]), Some(2));
     }
 }
