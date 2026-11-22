@@ -344,6 +344,7 @@ impl PyBasinBias {
         self.inner.missing_mass()
     }
 
+    /// Euclidean merge radius for basin assignment.
     #[getter]
     fn merge_radius(&self) -> f64 {
         self.inner.merge_radius()
@@ -360,6 +361,7 @@ impl PyBasinBias {
         Ok(())
     }
 
+    /// Base hill height deposited on each basin visit.
     #[getter]
     fn height(&self) -> f64 {
         self.inner.height()
@@ -376,6 +378,7 @@ impl PyBasinBias {
         Ok(())
     }
 
+    /// Accumulated bias depth at basin index `i`.
     fn well_depth(&self, i: usize) -> PyResult<f64> {
         if i >= self.inner.n_basins() {
             return Err(pyo3::exceptions::PyIndexError::new_err(format!(
@@ -386,6 +389,7 @@ impl PyBasinBias {
         Ok(self.inner.well_depth(i))
     }
 
+    /// Recorded basins as `(center, depth)` pairs in creation order.
     fn wells<'py>(&self, py: Python<'py>) -> Vec<(Bound<'py, PyArray1<f64>>, f64)> {
         self.inner
             .wells()
@@ -394,6 +398,7 @@ impl PyBasinBias {
             .collect()
     }
 
+    /// Up to `count` basins ordered by descending accumulated depth.
     fn deepest_wells<'py>(
         &self,
         py: Python<'py>,
@@ -406,6 +411,7 @@ impl PyBasinBias {
             .collect()
     }
 
+    /// Retains at most `cap` basins, keeping the deepest wells.
     fn cap_basins(&mut self, cap: usize) {
         self.inner.cap_basins(cap);
     }
@@ -969,6 +975,10 @@ fn run_hmc(
 }
 
 /// Refines a supplied starting point with bounded L-BFGS polish.
+///
+/// Returns a dict with `best_pos`, `best_val`, `n_evals`, `n_grads`,
+/// `projected_grad_norm`, `projected_stationary`, and `best_grad` (gradient at
+/// `best_pos`, or `None` when no gradient was evaluated there).
 #[pyfunction]
 #[pyo3(signature = (obj_fn, grad_fn, low, high, x0, max_fevals = 200, step0 = 1.0, grad_tol = 1e-8))]
 fn polish(
@@ -1698,7 +1708,10 @@ fn gle_langevin_result_to_dict(
 
 /// GLE-thermostatted Langevin annealing: gradient-driven BAB dynamics with a
 /// colored-noise (generalized Langevin) thermostat that flattens the sampling
-/// efficiency across the curvature band. Returns `{best_pos, best_val, n_evals}`.
+/// efficiency across the curvature band.
+///
+/// Returns a dict with `best_pos`, `best_val`, `n_evals`, `omega0`, `dt`,
+/// `preconditioner_diag`, and `n_preconditioner_grads`.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, grad_fn, low, high, max_fevals, seed=0,
                     omega0=None, dt=0.2, n_epochs=40, x0=None))]
@@ -1741,6 +1754,9 @@ fn gle_langevin(
 }
 
 /// GLE-Langevin annealing with a diagonal adaptive coordinate preconditioner.
+///
+/// Returns a dict with `best_pos`, `best_val`, `n_evals`, `omega0`, `dt`,
+/// `preconditioner_diag`, and `n_preconditioner_grads`.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, grad_fn, low, high, max_fevals, seed=0,
                     omega0=None, dt=0.2, n_epochs=40, x0=None,
@@ -1794,6 +1810,9 @@ fn gle_langevin_preconditioned(
 }
 
 /// GLE-Langevin annealing using an `eindir` native objective/gradient handle.
+///
+/// Returns a dict with `best_pos`, `best_val`, `n_evals`, `omega0`, `dt`,
+/// `preconditioner_diag`, and `n_preconditioner_grads`.
 #[pyfunction]
 #[pyo3(signature = (objective, max_fevals, seed=0, omega0=None, dt=0.2,
                     n_epochs=40, x0=None))]
@@ -1836,6 +1855,9 @@ fn gle_langevin_objective(
 }
 
 /// Preconditioned GLE-Langevin annealing using a native objective/gradient handle.
+///
+/// Returns a dict with `best_pos`, `best_val`, `n_evals`, `omega0`, `dt`,
+/// `preconditioner_diag`, and `n_preconditioner_grads`.
 #[pyfunction]
 #[pyo3(signature = (objective, max_fevals, seed=0, omega0=None, dt=0.2,
                     n_epochs=40, x0=None, preconditioner_probes=None))]
@@ -1915,16 +1937,21 @@ fn recommend_target_n(budget: usize, dim: usize) -> usize {
     crate::methods::dmc_population::recommend_target_n(budget, dim)
 }
 
-/// Classical population-controlled diffusion search (DMC-inspired arm).
-///
-/// Walkers, diffusion proposals, weight-based branch/kill, and population
-/// control to a target size. Not quantum DMC.
-///
-/// When `x0` is provided, walker 0 is seeded at that point (clipped into the
-/// box), matching the protocol anchor used by classical SA and dual annealing.
 const _: () = assert!(crate::methods::dmc_population::DEFAULT_STEPS_PER_CONTROL == 2);
 const _: () = assert!(crate::methods::dmc_population::DEFAULT_BETA0.to_bits() == 1.0_f64.to_bits());
 
+/// Classical population-controlled diffusion search (DMC-inspired arm).
+///
+/// Walkers, diffusion proposals, weight-based branch/kill, and population
+/// control to a target size (`target_n`, defaulting to
+/// `recommend_target_n(budget, dim)` when `None`) every `steps_per_control`
+/// diffusion steps starting from inverse temperature `beta0`. Not quantum DMC.
+/// When `grad_fn` is provided, proposals include gradient drift and polish.
+/// When `x0` is provided, walker 0 is seeded at that point (clipped into the
+/// box), matching the protocol anchor used by classical SA and dual annealing.
+///
+/// Returns a dict with `best_val`, `best_pos`, `n_evals`, `n_grads`,
+/// `final_population`, and `controls`.
 #[pyfunction]
 #[pyo3(signature = (
     obj_fn,
@@ -2333,13 +2360,37 @@ fn build_box_hop_configs(
     Ok((config, coverage, any_coverage_override))
 }
 
-/// Communicating box hops: Gaussian kick, quench, shared Euclidean history.
+/// Communicating box hops: escape, L-BFGS quench, and Euclidean minimum history.
 ///
-/// Four (or `replicas`) algebraic hops divide one work-unit budget. They
-/// share a Euclidean minimum history and Goedecker escape feedback. This is
-/// not cluster hopping: the move is a reflected Gaussian on the box. A
-/// callback raising `BaseException` that is not an `Exception` stops the
-/// ensemble at once and is re-raised. The best point found is kept.
+/// Four (or `replicas`) algebraic hop chains divide one work-unit `budget`
+/// over `[low, high]`, optionally seeded from `x0`, using `grad_fn` for
+/// quenches and optional Langevin escapes. They maintain a `"shared"`,
+/// `"private"`, or `"none"` Euclidean minimum `history` (`membership`
+/// `"accepted"` or `"all"`, tolerance `identity_tol`, visit policy
+/// `shared_visit_policy`, and bias count `shared_deposits`) with Goedecker
+/// escape feedback. By default (`escape=None` or `"gaussian"`) the escape move
+/// is a reflected Gaussian kick on the box; `escape="langevin"` runs a bounded
+/// GLE-Langevin escape controlled by `langevin_steps`, `langevin_omega0`,
+/// `langevin_dt`, `langevin_noise`, and `langevin_friction`. Evaluated-region
+/// peer separation is configured by `coverage_shared`, `coverage_radius`,
+/// `coverage_neighbors`, `coverage_height`, `coverage_well_tempering`, and
+/// `coverage_peer_weight`. This is not cluster hopping. A callback raising
+/// `BaseException` that is not an `Exception` stops the ensemble at once and
+/// is re-raised; the best point found is kept.
+///
+/// Returns a dict with `best_val`, `best_pos`, `charged`, `n_evals`,
+/// `n_grads`, `hops`, `history_observations`, `history_minima`,
+/// `history_attempts`, `history_refusals`, `history_seconds`,
+/// `shared_deposits`, `coverage_observations`, `coverage_published`,
+/// `coverage_applied_foreign`, `coverage_capped_foreign`,
+/// `coverage_regions_per_chain`, `coverage_recrossings`,
+/// `coverage_peer_recrossings`, `coverage_peer_only_recrossings`,
+/// `coverage_escape_updates`, `coverage_novel_arrivals`,
+/// `coverage_novelty_updates`, `coverage_published_samples`,
+/// `coverage_applied_foreign_samples`, `coverage_sample_peer_checks`,
+/// `coverage_sample_anchor_overlaps`, `coverage_sample_anchor_only_overlaps`,
+/// `coverage_sample_overlaps`, `coverage_repelled_proposals`,
+/// `coverage_constrained_repulsions`, and `coverage_decisions`.
 #[pyfunction]
 #[pyo3(signature = (
     obj_fn,
@@ -2519,10 +2570,33 @@ fn box_ensemble_optimize(
     Ok(out.into())
 }
 
-/// Box search split on gradient: hop-and-quench, or the values-only portfolio.
+/// Box search split on gradient: hop-and-quench, values-only hop chains, or
+/// the values-only portfolio.
 ///
-/// A callback raising `BaseException` that is not an `Exception` stops the
-/// search at once and is re-raised. The best point found is kept.
+/// Accepts the same box, `budget`, `seed`, `grad_fn`, `x0`, `replicas`,
+/// `history`, `membership`, `identity_tol`, `shared_deposits`,
+/// `shared_visit_policy`, `escape` (`"gaussian"` or `"langevin"` with
+/// `langevin_steps`, `langevin_omega0`, `langevin_dt`, `langevin_noise`,
+/// `langevin_friction`), and `coverage_*` (`coverage_shared`,
+/// `coverage_radius`, `coverage_neighbors`, `coverage_height`,
+/// `coverage_well_tempering`, `coverage_peer_weight`) parameters as
+/// `box_ensemble_optimize`, while allowing `grad_fn=None`. A callback raising
+/// `BaseException` that is not an `Exception` stops the search at once and is
+/// re-raised; the best point found is kept.
+///
+/// Returns a dict with `best_val`, `best_pos`, `charged`, `n_evals`,
+/// `n_grads`, `hops`, `history_observations`, `history_minima`,
+/// `history_attempts`, `history_refusals`, `history_seconds`,
+/// `coverage_observations`, `coverage_published`, `coverage_applied_foreign`,
+/// `coverage_capped_foreign`, `coverage_regions_per_chain`,
+/// `coverage_recrossings`, `coverage_peer_recrossings`,
+/// `coverage_peer_only_recrossings`, `coverage_escape_updates`,
+/// `coverage_novel_arrivals`, `coverage_novelty_updates`,
+/// `coverage_published_samples`, `coverage_applied_foreign_samples`,
+/// `coverage_sample_peer_checks`, `coverage_sample_anchor_overlaps`,
+/// `coverage_sample_anchor_only_overlaps`, `coverage_sample_overlaps`,
+/// `coverage_repelled_proposals`, `coverage_constrained_repulsions`, and
+/// `coverage_decisions`.
 #[pyfunction]
 #[pyo3(signature = (
     obj_fn,
@@ -2803,7 +2877,29 @@ fn coverage_neighbor_count(value: &Bound<'_, PyAny>) -> PyResult<usize> {
 ///   budget: combined objective + gradient evaluation budget.
 ///   seed: RNG seed.
 ///   grad_fn: optional gradient callable; enables the gradient arms
-///            and the final polish.
+///     and the final polish.
+///   noise_sigma: optional stochastic evaluation noise scale for OSA
+///     acceptance; `None` uses exact Metropolis.
+///   policy: `"auto"` (feature-based regime routing) or `"legacy"`.
+///   x0: optional starting point clipped onto `[low, high]`.
+///   replicas: number of portfolio controllers sharing `budget`.
+///   coverage_shared: share global proposal samples across replicas at arm
+///     checkpoints when `replicas > 1`.
+///   coverage_radius: peer-interaction radius in normalized RMS box units.
+///   coverage_neighbors: cyclic peer-ring radius (`0` is all-to-all).
+///   coverage_height: well-tempered coverage deposit height.
+///   coverage_well_tempering: well-tempering factor (`> 1`).
+///   coverage_peer_weight: weight applied to foreign peer samples.
+///
+/// Returns:
+///   A dict with `best_pos`, `best_val`, `n_evals`, `n_grads`, `arm_pulls`,
+///   `arm_successes`, and `hop_state` (`(pos, val)` or `None`). When
+///   `replicas > 1`, also includes `replicas` (per-replica result dicts),
+///   `charged`, `coverage_published_samples`,
+///   `coverage_applied_foreign_samples`, `coverage_sample_peer_checks`,
+///   `coverage_sample_anchor_overlaps`,
+///   `coverage_sample_anchor_only_overlaps`, `coverage_sample_overlaps`,
+///   `coverage_repelled_proposals`, and `coverage_constrained_repulsions`.
 ///
 /// A callback raising `BaseException` that is not an `Exception` stops the
 /// portfolio at once and is re-raised. The best point found is kept.
@@ -2945,7 +3041,12 @@ fn global_optimize(
     portfolio_result_to_dict(py, result)
 }
 
-/// Runs the portfolio global optimizer with a native objective handle.
+/// Runs the portfolio global optimizer with a native `Objective` handle.
+///
+/// Accepts `objective`, `budget`, `seed`, `use_gradient`, `noise_sigma`, `x0`,
+/// and keyword-only `policy` (`"auto"` or `"legacy"`). Returns a dict with
+/// `best_pos`, `best_val`, `n_evals`, `n_grads`, `arm_pulls`, `arm_successes`,
+/// and `hop_state`.
 #[pyfunction]
 #[pyo3(signature = (
     objective,
@@ -3310,11 +3411,11 @@ fn osa_acceptance_rate(
 // Measured cluster-search layer.
 // ---------------------------------------------------------------------------
 
-/// Driver settings for the cluster-search layer.
-///
-/// Construct with `Config.recommended`, `Config.derived`, or
-/// `Config.for_cluster`. The recommended stack is the measured
 /// Work ledger: every objective or gradient evaluation is one charged unit.
+///
+/// Tracks `budget`, `spent`, `remaining`, `best`, `best_state`, optional
+/// `target` (`stop_below`), `target_reached`, `stopped`,
+/// `answer_polish_calls`, `start_redraws`, and recorded basin `encounters`.
 #[pyclass(name = "Ledger")]
 pub struct PyLedger {
     inner: crate::methods::cluster_hopping::Ledger,
@@ -3899,43 +4000,82 @@ fn rigid_probe(
     }
 }
 
-/// Runs the measured cluster-search layer on a user energy and gradient.
+/// Runs the measured cluster-search layer on a Python callback pair or native
+/// cluster potential.
 ///
-/// `recommended=True` uses `Config.recommended(n)`; otherwise
-/// `Config.for_cluster(n)`. `communicating=True` uses
-/// `Config.communicating(n)` and overrides both. A charged central-difference
-/// probe distinguishes gradients from force-valued callbacks when the budget
-/// can cover it. Every objective or gradient evaluation is charged to a ledger
-/// of `budget` units. Returns `{best, best_energy, hops, nve_unavailable}`.
-/// `nve_unavailable` is set when a constant-energy escape was requested and
-/// the `rgsaddle` feature is off. The `python` feature enables it.
-/// `ras=True` runs residual archive search on `Config.recommended(n)` and
-/// also reports `charged`, `floors`, `returned`, `events`, and
-/// `nve_unavailable`.
+/// Without `config`, `groups`, or `water_sites`, preset selection follows
+/// `ras=True` (residual archive search on the recommended preset), else
+/// `communicating=True` (`Config.communicating(n)`, overriding `derived` and
+/// `recommended`), else `derived=True` (`Config.derived(n)`, overriding
+/// `recommended`), else `Config.recommended(n)` when `recommended=True` or
+/// `Config.for_cluster(n)` when `recommended=False`. When `grad_fn` is a Python
+/// callable and `budget >= 4`, a 3-evaluation central-difference probe orients
+/// gradients versus force-valued callbacks (`-grad E`). Every objective or
+/// gradient evaluation is charged to a `Ledger` of `budget` units.
+/// `nve_unavailable` is set when a constant-energy escape was requested and the
+/// `rgsaddle` feature is off (`python` enables it).
+///
+/// Scaling (`length_scale` and `energy_scale`):
+///   Both are optional positive finite floats that default to `1.0` when unset
+///   (`scale = length_scale or 1.0`, `escale = energy_scale or 1.0`). When
+///   `config`, `groups`, and `water_sites` are all unset and either scale is
+///   supplied:
+///   - `ras=True` or `recommended=True` builds
+///     `Config.recommended_with_scales(n, scale, escale)`.
+///   - `derived=True` starts from
+///     `Config.recommended_with_scales(n, scale, escale)` and sets
+///     `budget_window=True`, `bayes_screen=True`, and the cost-asymmetric
+///     screen threshold.
+///   - `communicating=True` starts from
+///     `Config.for_cluster_with_scales(n, scale, escale)` and sets
+///     `allocate_moves=True`, `return_screen=True`,
+///     `orbit_complete_on_new=True`, `orbit_core="fraction"`,
+///     `shared_deposits=0`, `shared_visit_policy="recognition"`,
+///     `surfaces=[TwoPhase.relative(0.7, escale / scale**4)]` for `n < 98`,
+///     and `continuous_symmetry=("measure", 10)`.
+///   - `recommended=False` (with `derived=False`, `communicating=False`,
+///     `ras=False`) builds `Config.for_cluster_with_scales(n, scale, escale)`.
+///   Stock `species` and `rigid` runs preserve those scales rather than
+///   discarding them: `rigid=True` calls `with_rigid_bodies` with the stock
+///   GMIN water-site offsets multiplied by `scale`, and `species` calls
+///   `with_species(species, sigmas)` on the scaled preset. Non-rigid callable
+///   box bounds also scale with `cfg.length_scale` (rigid callable bounds use
+///   `4 * max(cfg.container, 1.0)`). `groups` rejects `length_scale` and passes
+///   `energy_scale` (default `1.0`) to `Config.recommended_molecular` or
+///   `Config.for_molecular`. Both `water_sites` and `config` reject
+///   `length_scale` and `energy_scale`.
 ///
 /// Args:
-///   obj_fn: Python callable `f(numpy.ndarray) -> float`.
-///   grad_fn: Python gradient or force callable `g(numpy.ndarray) -> numpy.ndarray`.
-///   n: number of points. A Cartesian state is `3n`. `rigid=True` or
-///     `water_sites` is `n` bodies and a `6n` state.
-///   budget: charged evaluations.
+///   obj_fn: Python callable `f(numpy.ndarray) -> float`, or a native cluster
+///     potential (`PairPotential`, `BinaryLennardJones`, `SuttonChen`,
+///     `Gupta`, `Tip4pCluster`, or `GminTip4p`).
+///   grad_fn: Python gradient or force callable
+///     `g(numpy.ndarray) -> numpy.ndarray`, or `None` when `obj_fn` is a
+///     native cluster potential.
+///   n: number of points (`>= 2`). A Cartesian state is `3n`; `rigid=True`,
+///     `water_sites`, or a rigid `config` uses `n` bodies and a `6n` state.
+///   budget: charged objective and gradient evaluations (`>= 1`).
 ///   seed: RNG seed.
 ///   recommended: measured stack when true, Wales-Doye baseline when false.
 ///   derived: cost-asymmetric Bayes screen and budget-window temperature
 ///     on top of the measured flags. Overrides `recommended` when true.
 ///   communicating: orbit plus recognition. Overrides `recommended` and
 ///     `derived` when true. Not `Config.recommended`.
-///   ras: residual archive search on the recommended preset. Keyword-only;
-///     default false. Does not change `Config.recommended`.
+///   ras: residual archive search on the recommended preset (or an explicit
+///     Cartesian single-species `config`). Keyword-only; default false.
 ///   start: optional flat start. Cartesian length is `3n`. A rigid or water
 ///     start is `6n`, block Rodrigues unless `layout` is `interleaved`.
-///   length_scale: optional physical length. When set with the recommended
-///     preset, hops use `with_scales` instead of the reduced LJ container.
-///     Ignored once `species` or `rigid` selects a chart: those keep the
-///     stock preset and adapt geometry afterwards. Excluded by `water_sites`.
-///   species: optional label per point. Two or more labels add a swap move.
-///     A wide diameter ratio also tries one downhill unlike-pair exchange
-///     beside the escape.
+///   length_scale: optional positive finite physical length scale (default
+///     `1.0` when `energy_scale` is set). Scaled into the cluster preset and
+///     preserved on stock `species` and `rigid` runs. Excluded by
+///     `water_sites`, `groups`, and `config`.
+///   energy_scale: optional positive finite physical energy scale (default
+///     `1.0` when `length_scale` or `groups` is set). Scaled into cluster and
+///     molecular (`groups`) presets, including stock `species` and `rigid`
+///     runs. Excluded by `water_sites` and `config`.
+///   species: optional label per point (`len == n`). Two or more labels add a
+///     swap move. A wide diameter ratio also tries one downhill unlike-pair
+///     exchange beside the escape.
 ///   sigmas: optional Lennard-Jones diameter per point, same length as
 ///     `species`. Large diameters are swapped out of the inner shell.
 ///   rigid: when true, `n` is the number of rigid bodies and the hop state
@@ -3963,28 +4103,62 @@ fn rigid_probe(
 ///     `Config.communicating_tip4p(n)`, `Config.recommended_tip4p(n)`, or
 ///     `Config.for_tip4p(n)` when both are false, with these sites as the
 ///     rigid geometry. Needs `start`. Excludes `ras`, `derived`,
-///     `length_scale`, `rigid`, `species`, `sigmas`, and a non-block layout.
+///     `length_scale`, `energy_scale`, `rigid`, `species`, `sigmas`, and a
+///     non-block layout.
 ///   groups: optional atom indices of each rigid group of a molecular
-///     search. The presets become `Config::recommended_molecular` or, with
-///     `recommended=False`, `Config::for_molecular`, at energy scale one.
-///     Needs `species` and `start`. Excludes `ras`, `derived`,
-///     `communicating`, `length_scale`, `rigid`, `sigmas`, `water_sites`
-///     and a non-block layout.
-///   local_step: `lbfgs`, `tric` or `auto`, `Config::local_step` of a
-///     `groups` search. Unset keeps the preset's: `auto` for
-///     `recommended=True`, L-BFGS otherwise. The result's `local_step` is
-///     the quench in force at the end, and `quench_seconds` the measured
-///     seconds per potential call and per TRIC step under `auto`.
-///   ring_moves: `Config::ring_moves` of a `groups` search, ring crankshafts
+///     search. The presets become `Config.recommended_molecular` or, with
+///     `recommended=False`, `Config.for_molecular`, at `energy_scale`
+///     (default `1.0`). Needs `species` and `start`. Excludes `ras`,
+///     `derived`, `communicating`, `length_scale`, `rigid`, `sigmas`,
+///     `water_sites`, and a non-block layout.
+///   local_step: `lbfgs`, `tric` or `auto`, `Config.local_step` of a
+///     `groups` search (`lbfgs` is also accepted without `groups`). Unset
+///     keeps the preset's: `auto` for `recommended=True`, L-BFGS otherwise.
+///     The result's `local_step` is the quench in force at the end, and
+///     `quench_seconds` the measured seconds per potential call and per TRIC
+///     step under `auto`.
+///   ring_moves: `Config.ring_moves` of a `groups` search, ring crankshafts
 ///     beside the torsion move. Unset keeps the preset's: on for
 ///     `recommended=True`, off otherwise.
-///   hold_stereocentres: `Config::hold_stereocentres` of a `groups` search,
+///   hold_stereocentres: `Config.hold_stereocentres` of a `groups` search,
 ///     a quench step that inverts a stereocentre is refused. Unset keeps
 ///     the preset's: on for `recommended=True`, off otherwise.
-///   measured_energy_scale: `Config::measured_energy_scale` of a `groups`
+///   measured_energy_scale: `Config.measured_energy_scale` of a `groups`
 ///     search, the temperature and deposit height are read from the opening
 ///     hops. Unset keeps the preset's: on for `recommended=True`, off
 ///     otherwise.
+///   config: explicit `Config` instance (`config.n_points == n`). Mutually
+///     exclusive with preset-modifier arguments (`derived`, `communicating`,
+///     `length_scale`, `energy_scale`, `species`, `sigmas`, `rigid`,
+///     `water_sites`, `groups`, `local_step`, `ring_moves`,
+///     `hold_stereocentres`, `measured_energy_scale`). Molecular configs
+///     require `start`; `ras=True` requires a Cartesian single-species config.
+///
+/// Returns:
+///   When `ras=False` (default), a dict with 35 fields:
+///   - `best`, `best_energy`: lowest minimum coordinates (in `layout`) and
+///     energy.
+///   - `final`, `final_energy`: final chain coordinates (`numpy.ndarray` or
+///     `None`) and energy.
+///   - `spent`, `hops`, `accepted`, `basins`, `screened_out`, `restarts`:
+///     ledger evaluations spent and basin-hopping counters.
+///   - `visit_counts`, `escape_scale`, `escape_threshold`, `merge_radius`,
+///     `mean_step`, `arms`, `improvements`, `stop`, `quenched`,
+///     `energy_trace`, `nve_unavailable`: basin visit counts, final adaptive
+///     scales, move-arm counters, `(hop, charged, basin, energy)` improvement
+///     records, optional stop reason code, optional per-hop quenched energies
+///     and energy trace, and NVE availability flag.
+///   - `local_step`, `quench_seconds`, `converged`, `capped`, `screens`,
+///     `screen_charged`, `full_charged`, `check_charged`, `overlap_rejected`,
+///     `refused`, `screen_steps_taken`: active quench method (`"lbfgs"` or
+///     `"tric"`), optional `(pot_s, tric_s)` timing pair, and quench/screen
+///     counters.
+///   - `search_seconds`, `polish_seconds`, `polish_calls`: wall-clock phase
+///     durations in seconds and answer-polish evaluations.
+///
+///   When `ras=True`, a dict with 12 fields: `best`, `best_energy`, `hops`,
+///   `charged`, `screens`, `same_floor`, `artn`, `best_at`, `floors`,
+///   `returned`, `events`, and `nve_unavailable`.
 ///
 /// A callback raising `BaseException` that is not an `Exception`, such as
 /// `KeyboardInterrupt`, stops the search at once. The best state found is
@@ -4578,10 +4752,13 @@ fn cluster_search(
 ///
 /// With `method="lbfgs"` that quench is `WarmLbfgs` with an empty memory and
 /// the 64-probe line search of a species search; with `method="tric"` it is
-/// `TricOpt` over the atomic numbers `species`. Both stop when the largest
-/// gradient component is below `gtol`. `fg_fn(x)` returns
-/// `(energy, gradient)`; each call is one evaluation. Returns
-/// `{x, energy, calls}`.
+/// `TricOpt` over the atomic numbers `species` (`len == len(x0) // 3`). Both
+/// stop when the largest gradient component is below `gtol` or at `max_iter`
+/// iterations/evaluations. `fg_fn` is either a Python callable
+/// `fg_fn(x) -> (energy, gradient)` (each call is one evaluation) or a native
+/// cluster potential (`PairPotential`, `BinaryLennardJones`, `SuttonChen`,
+/// `Gupta`, `Tip4pCluster`, or `GminTip4p`). Returns a dict with `x`,
+/// `energy`, and `calls`.
 #[pyfunction]
 #[pyo3(signature = (fg_fn, x0, gtol, max_iter = 10000, method = "lbfgs", species = None))]
 fn quench(

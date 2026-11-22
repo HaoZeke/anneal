@@ -3071,6 +3071,7 @@ impl PyClusterConfig {
         self.inner.superbasin_features = value;
     }
 
+    /// Rigid-body site geometry dict `{"sites": (M, 3), "species": list[int]}` or `None`.
     #[getter]
     fn rigid_body_geometry(&self, py: Python<'_>) -> PyResult<Option<Py<PyDict>>> {
         self.inner
@@ -3090,6 +3091,7 @@ impl PyClusterConfig {
         Ok(())
     }
 
+    /// Optional two-phase relaxation schedule dict or `None`.
     #[getter]
     fn two_phase(&self, py: Python<'_>) -> PyResult<Option<Py<PyDict>>> {
         self.inner
@@ -3109,6 +3111,7 @@ impl PyClusterConfig {
         Ok(())
     }
 
+    /// Per-replica two-phase relaxation schedules for communicating searches.
     #[getter]
     fn surfaces(&self, py: Python<'_>) -> PyResult<Vec<Py<PyDict>>> {
         self.inner
@@ -3126,6 +3129,7 @@ impl PyClusterConfig {
         Ok(())
     }
 
+    /// Optional lattice-reoccupation stage configuration dict or `None`.
     #[getter]
     fn reoccupy(&self, py: Python<'_>) -> PyResult<Option<Py<PyDict>>> {
         self.inner
@@ -3145,6 +3149,7 @@ impl PyClusterConfig {
         Ok(())
     }
 
+    /// Optional Hamiltonian Monte Carlo escape configuration dict or `None`.
     #[getter]
     fn hmc(&self, py: Python<'_>) -> PyResult<Option<Py<PyDict>>> {
         self.inner

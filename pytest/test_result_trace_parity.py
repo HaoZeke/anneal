@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import inspect
 import math
+import re
 
 import numpy as np
 import pytest
@@ -200,3 +202,164 @@ def test_polish_box_portfolio_and_ase_charged_fields():
     opt = Anneal(atoms, logfile=None, mode="search", budget=120, seed=0)
     opt.step()
     assert opt.charged > 0
+
+
+def test_core_docstrings_match_live_result_fields():
+    # Every public callable and class on anneal._core must carry a docstring.
+    for name in sorted(dir(anneal._core)):
+        if name.startswith("_"):
+            continue
+        obj = getattr(anneal._core, name)
+        if callable(obj):
+            assert getattr(obj, "__doc__", None), f"anneal._core.{name} has no __doc__"
+
+    # 1. anneal._core.cluster_search (standard + ras=True) vs live result dicts.
+    pot = anneal.PairPotential.lennard_jones(4)
+    cs_out = anneal._core.cluster_search(pot, None, 4, 120, seed=0)
+    cs_core_doc = anneal._core.cluster_search.__doc__ or ""
+    cs_wrap_doc = anneal.cluster_search.__doc__ or ""
+    for key in sorted(cs_out.keys()):
+        assert f"`{key}`" in cs_core_doc, (
+            f"anneal._core.cluster_search.__doc__ missing result key {key!r}"
+        )
+        assert f"``{key}``" in cs_wrap_doc, (
+            f"anneal.cluster_search.__doc__ missing result key {key!r}"
+        )
+    assert "Returns `{best, best_energy, hops, nve_unavailable}`" not in cs_core_doc
+    assert "Ignored once" not in cs_core_doc
+    assert "at energy scale one" not in cs_core_doc
+
+    try:
+        ras_out = anneal._core.cluster_search(pot, None, 4, 200, seed=0, ras=True)
+    except ValueError as exc:
+        assert "graphkey" in str(exc)
+    else:
+        for key in sorted(ras_out.keys()):
+            assert f"`{key}`" in cs_core_doc, (
+                f"anneal._core.cluster_search.__doc__ missing ras=True key {key!r}"
+            )
+            assert f"``{key}``" in cs_wrap_doc, (
+                f"anneal.cluster_search.__doc__ missing ras=True key {key!r}"
+            )
+
+    # 2. anneal._core.Ledger docstring must describe Ledger (no orphaned Config text).
+    ledger_doc = anneal._core.Ledger.__doc__ or ""
+    assert "Config.recommended" not in ledger_doc
+    assert "Driver settings" not in ledger_doc
+    for attr in (
+        "budget",
+        "spent",
+        "remaining",
+        "best",
+        "best_state",
+        "target",
+        "target_reached",
+        "stopped",
+        "answer_polish_calls",
+        "start_redraws",
+        "encounters",
+    ):
+        assert f"`{attr}`" in ledger_doc, f"Ledger.__doc__ missing {attr!r}"
+
+    # 3. Other touched _core optimizer/quench docstrings vs live result dicts.
+    low = np.full(3, -2.0, dtype=np.float64)
+    high = np.full(3, 2.0, dtype=np.float64)
+    x0 = np.array([1.2, -0.8, 0.5], dtype=np.float64)
+
+    q_x0 = np.array(
+        [0.0, 0.0, 0.0, 1.12, 0.0, 0.0, 0.56, 0.97, 0.0, 0.56, 0.32, 0.91],
+        dtype=np.float64,
+    )
+    q_out = anneal._core.quench(pot, q_x0, 1e-4)
+    q_doc = anneal._core.quench.__doc__ or ""
+    for key in sorted(q_out.keys()):
+        assert f"`{key}`" in q_doc, f"quench.__doc__ missing {key!r}"
+    assert "PairPotential" in q_doc
+
+    pol_out = anneal._core.polish(_sphere, _sphere_grad, low, high, x0, max_fevals=60)
+    for key in sorted(pol_out.keys()):
+        assert f"`{key}`" in (anneal._core.polish.__doc__ or ""), (
+            f"_core.polish.__doc__ missing {key!r}"
+        )
+        assert f"``{key}``" in (anneal.polish.__doc__ or ""), (
+            f"polish.__doc__ missing {key!r}"
+        )
+
+    gle_out = anneal._core.gle_langevin(_sphere, _sphere_grad, low, high, 60, seed=1)
+    for fn in (
+        anneal._core.gle_langevin,
+        anneal._core.gle_langevin_preconditioned,
+        anneal._core.gle_langevin_objective,
+        anneal._core.gle_langevin_preconditioned_objective,
+    ):
+        doc = fn.__doc__ or ""
+        for key in sorted(gle_out.keys()):
+            assert f"`{key}`" in doc, f"{fn.__name__}.__doc__ missing {key!r}"
+    for fn in (
+        anneal.gle_langevin,
+        anneal.gle_langevin_preconditioned,
+        anneal.gle_langevin_objective,
+        anneal.gle_langevin_preconditioned_objective,
+    ):
+        doc = fn.__doc__ or ""
+        for key in sorted(gle_out.keys()):
+            assert re.search(rf"\b{re.escape(key)}\b", doc), (
+                f"anneal.{fn.__name__}.__doc__ missing {key!r}"
+            )
+
+    dmc_out = anneal._core.dmc_population_optimize(_sphere, low, high, 80, seed=1)
+    for key in sorted(dmc_out.keys()):
+        assert f"`{key}`" in (anneal._core.dmc_population_optimize.__doc__ or ""), (
+            f"_core.dmc_population_optimize.__doc__ missing {key!r}"
+        )
+        assert re.search(
+            rf"\b{re.escape(key)}\b",
+            anneal.dmc_population_optimize.__doc__ or "",
+        ), f"dmc_population_optimize.__doc__ missing {key!r}"
+
+    box_out = anneal._core.box_ensemble_optimize(
+        _sphere, low, high, 100, seed=1, grad_fn=_sphere_grad, replicas=2
+    )
+    box_doc = anneal._core.box_ensemble_optimize.__doc__ or ""
+    assert "langevin" in box_doc
+    for key in sorted(box_out.keys()):
+        assert f"`{key}`" in box_doc, (
+            f"_core.box_ensemble_optimize.__doc__ missing {key!r}"
+        )
+
+    ens_out = anneal._core.ensemble_optimize(
+        _sphere, low, high, 100, seed=1, grad_fn=_sphere_grad, replicas=2
+    )
+    ens_doc = anneal._core.ensemble_optimize.__doc__ or ""
+    assert "langevin" in ens_doc
+    for key in sorted(ens_out.keys()):
+        assert f"`{key}`" in ens_doc, (
+            f"_core.ensemble_optimize.__doc__ missing {key!r}"
+        )
+
+    go_single = anneal._core.global_optimize(
+        _sphere, low, high, 120, seed=1, grad_fn=_sphere_grad
+    )
+    go_multi = anneal._core.global_optimize(
+        _sphere, low, high, 120, seed=1, grad_fn=_sphere_grad, replicas=2
+    )
+    go_doc = anneal._core.global_optimize.__doc__ or ""
+    go_wrap_doc = anneal.global_optimize.__doc__ or ""
+    for key in sorted(set(go_single.keys()) | set(go_multi.keys())):
+        assert f"`{key}`" in go_doc, (
+            f"_core.global_optimize.__doc__ missing {key!r}"
+        )
+        assert f"``{key}``" in go_wrap_doc, (
+            f"global_optimize.__doc__ missing {key!r}"
+        )
+    for param in inspect.signature(anneal._core.global_optimize).parameters:
+        assert re.search(rf"\b{re.escape(param)}\b", go_doc), (
+            f"_core.global_optimize.__doc__ missing parameter {param!r}"
+        )
+    for key in sorted(go_single.keys()):
+        assert f"`{key}`" in (anneal._core.global_optimize_objective.__doc__ or ""), (
+            f"_core.global_optimize_objective.__doc__ missing {key!r}"
+        )
+        assert f"``{key}``" in (anneal.global_optimize_objective.__doc__ or ""), (
+            f"global_optimize_objective.__doc__ missing {key!r}"
+        )

@@ -526,22 +526,53 @@ def test_cluster_search_invalid_stock_inputs_and_docstring():
     with pytest.raises(ValueError, match="sigmas must be finite and positive"):
         anneal.cluster_search(lj4, None, 4, 50, species=[1, 1, 2, 2], sigmas=[1.0, 0.0, 1.0, 1.0])
 
-    doc = anneal.cluster_search.__doc__ or ""
-    for key in (
-        "best_energy",
-        "final",
-        "final_energy",
-        "spent",
-        "basins",
-        "screened_out",
-        "improvements",
-        "energy_trace",
-        "polish_calls",
-        "energy_scale",
-        "config",
+    out = anneal._core.cluster_search(lj4, None, 4, 120, seed=1)
+    assert len(out) == 35
+    ras_keys: set[str] = set()
+    try:
+        ras_out = anneal._core.cluster_search(lj4, None, 4, 200, seed=1, ras=True)
+    except ValueError as exc:
+        assert "graphkey" in str(exc)
+    else:
+        assert len(ras_out) == 12
+        ras_keys = set(ras_out.keys())
+
+    core_doc = anneal._core.cluster_search.__doc__ or ""
+    wrap_doc = anneal.cluster_search.__doc__ or ""
+    assert core_doc, "anneal._core.cluster_search.__doc__ must be populated"
+    assert wrap_doc, "anneal.cluster_search.__doc__ must be populated"
+
+    for key in sorted(set(out.keys()) | ras_keys):
+        assert f"`{key}`" in core_doc, (
+            f"anneal._core.cluster_search.__doc__ missing result key {key!r}"
+        )
+        assert f"``{key}``" in wrap_doc, (
+            f"anneal.cluster_search.__doc__ missing result key {key!r}"
+        )
+
+    for param in inspect.signature(anneal._core.cluster_search).parameters:
+        assert re.search(rf"\b{re.escape(param)}\b", core_doc), (
+            f"anneal._core.cluster_search.__doc__ missing parameter {param!r}"
+        )
+        assert re.search(rf"\b{re.escape(param)}\b", wrap_doc), (
+            f"anneal.cluster_search.__doc__ missing parameter {param!r}"
+        )
+
+    for doc_name, doc in (
+        ("anneal._core.cluster_search.__doc__", core_doc),
+        ("anneal.cluster_search.__doc__", wrap_doc),
     ):
-        assert key in doc, f"cluster_search docstring missing {key!r}"
-    assert "Ignored when ``species`` or ``rigid`` is set" not in doc
+        assert "Ignored once" not in doc, f"stale scaling claim in {doc_name}"
+        assert "Ignored when" not in doc, f"stale scaling claim in {doc_name}"
+        assert "at energy scale one" not in doc, f"stale groups scale claim in {doc_name}"
+        for expected in (
+            "recommended_with_scales",
+            "for_cluster_with_scales",
+            "with_species",
+            "length_scale",
+            "energy_scale",
+        ):
+            assert expected in doc, f"{doc_name} missing scaling detail {expected!r}"
 
 
 def test_config_exposes_every_rust_struct_field():

@@ -309,13 +309,25 @@ def cluster_search(
       start: optional flat start. Cartesian length is ``3n``. A rigid or
         water start is ``6n``. When set, hops use ``search_from`` instead of
         a random compact cluster.
-      length_scale: optional physical length scale applied to the preset
-        (including ``species`` and ``rigid`` stock runs) so physical-unit
-        clusters are not crushed into the reduced LJ container. Excluded by
+      length_scale: optional positive finite physical length scale (default
+        ``1.0`` when ``energy_scale`` is set). When neither ``config``,
+        ``groups``, nor ``water_sites`` is set and either scale is supplied,
+        presets are constructed at ``(scale, escale)`` via
+        ``Config.recommended_with_scales`` (for ``ras=True``,
+        ``recommended=True``, and ``derived=True`` with ``budget_window``,
+        ``bayes_screen``, and the cost-asymmetric threshold) or
+        ``Config.for_cluster_with_scales`` (for ``recommended=False`` and
+        ``communicating=True``, scaling its ``TwoPhase`` surface stiffness as
+        ``escale / scale**4`` for ``n < 98``). Stock ``species`` and
+        ``rigid`` runs preserve those scales: ``rigid=True`` scales the stock
+        GMIN water-site offsets by ``scale``, and ``species`` attaches
+        ``with_species(species, sigmas)`` to the scaled preset. Excluded by
         ``water_sites``, ``groups``, and ``config``.
-      energy_scale: optional physical energy scale applied to preset
-        temperatures, deposit heights, screen margins, and molecular presets.
-        Excluded by ``water_sites`` and ``config``.
+      energy_scale: optional positive finite physical energy scale (default
+        ``1.0`` when ``length_scale`` or ``groups`` is set). Scaled into
+        cluster presets (including stock ``species`` and ``rigid`` runs) and
+        passed to ``recommended_molecular`` / ``for_molecular`` under
+        ``groups``. Excluded by ``water_sites`` and ``config``.
       species: optional label per point. Two or more labels add a swap move.
         A wide diameter ratio also tries one downhill unlike-pair exchange
         beside the escape.
@@ -540,7 +552,11 @@ def polish(
     step0: float = 1.0,
     grad_tol: float = 1e-8,
 ):
-    """Refine ``x0`` with bounded L-BFGS (two-loop, Armijo backtrack)."""
+    """Refine ``x0`` with bounded L-BFGS (two-loop, Armijo backtrack).
+
+    Returns a dict with ``best_pos``, ``best_val``, ``n_evals``, ``n_grads``,
+    ``projected_grad_norm``, ``projected_stationary``, and ``best_grad``.
+    """
     out = _core_polish(
         obj_fn,
         grad_fn,
@@ -866,7 +882,7 @@ def gle_langevin(
     estimated from local gradient curvature over the provided bounds. This
     handles ill-conditioning the way the
     ``1/sqrt(D)`` scale handles dimension. Returns ``{best_pos, best_val,
-    n_evals, omega0, dt}``.
+    n_evals, omega0, dt, preconditioner_diag, n_preconditioner_grads}``.
     """
     omega_arg = None if omega0 is None else float(omega0)
     out = _core_gle_langevin(
@@ -898,7 +914,11 @@ def gle_langevin_objective(
     n_epochs: int = 40,
     x0=None,
 ):
-    """GLE-Langevin annealing with a native ``PyObjective`` gradient handle."""
+    """GLE-Langevin annealing with a native ``PyObjective`` gradient handle.
+
+    Returns ``{best_pos, best_val, n_evals, omega0, dt, preconditioner_diag,
+    n_preconditioner_grads}``.
+    """
     omega_arg = None if omega0 is None else float(omega0)
     out = _core_gle_langevin_objective(
         objective,
@@ -930,7 +950,11 @@ def gle_langevin_preconditioned(
     x0=None,
     preconditioner_probes: int | None = None,
 ):
-    """GLE-Langevin with an adaptive diagonal coordinate preconditioner."""
+    """GLE-Langevin with an adaptive diagonal coordinate preconditioner.
+
+    Returns ``{best_pos, best_val, n_evals, omega0, dt, preconditioner_diag,
+    n_preconditioner_grads}``.
+    """
     omega_arg = None if omega0 is None else float(omega0)
     probe_arg = None if preconditioner_probes is None else int(preconditioner_probes)
     out = _core_gle_langevin_preconditioned(
@@ -964,7 +988,11 @@ def gle_langevin_preconditioned_objective(
     x0=None,
     preconditioner_probes: int | None = None,
 ):
-    """Preconditioned GLE-Langevin with a native ``PyObjective`` gradient handle."""
+    """Preconditioned GLE-Langevin with a native ``PyObjective`` gradient handle.
+
+    Returns ``{best_pos, best_val, n_evals, omega0, dt, preconditioner_diag,
+    n_preconditioner_grads}``.
+    """
     omega_arg = None if omega0 is None else float(omega0)
     probe_arg = None if preconditioner_probes is None else int(preconditioner_probes)
     out = _core_gle_langevin_preconditioned_objective(
@@ -1134,8 +1162,18 @@ def box_ensemble_optimize(
 ):
     """Communicating box hops on SharedDesignHistory / MinimumHistory.
 
-    Requires ``grad_fn``. Kick and quench in the box. Without a gradient
-    use ``ensemble_optimize`` (portfolio). Not cluster hopping.
+    Requires ``grad_fn``. Runs ``escape="gaussian"`` (default reflected
+    Gaussian kick) or ``escape="langevin"`` (GLE-Langevin escape controlled by
+    ``langevin_*``) followed by L-BFGS quench on the box, with ``history`` /
+    ``membership`` / ``identity_tol`` / ``shared_visit_policy`` /
+    ``shared_deposits`` minimum-history controls and ``coverage_*`` peer
+    separation. Without a gradient use ``ensemble_optimize``. Not cluster
+    hopping.
+
+    Returns ``best_val``, ``best_pos``, ``charged``, ``n_evals``, ``n_grads``,
+    ``hops``, ``history_observations``, ``history_minima``,
+    ``history_attempts``, ``history_refusals``, ``history_seconds``,
+    ``shared_deposits``, ``coverage_*`` counters, and ``coverage_decisions``.
     """
     low_arr = np.asarray(low, dtype=np.float64)
     high_arr = np.asarray(high, dtype=np.float64)
@@ -1211,8 +1249,10 @@ def ensemble_optimize(
 
     The returned dictionary retains ``best_val``, ``best_pos``, separate
     ``n_evals`` / ``n_grads``, their sum ``charged``, ``hops``, minimum-history
-    diagnostics, and evaluated-region ``coverage_*`` counters. Coverage is
-    not a count of certified minima.
+    diagnostics (``history_observations``, ``history_minima``,
+    ``history_attempts``, ``history_refusals``, ``history_seconds``),
+    evaluated-region ``coverage_*`` counters, and ``coverage_decisions``.
+    Coverage is not a count of certified minima.
 
     ``coverage_shared`` overrides sharing independently of ``history``;
     ``coverage_radius`` sets the normalized RMS parameter distance.
@@ -1608,6 +1648,9 @@ def dmc_population_optimize(
         Optional starting point for walker 0 (protocol anchor / incumbent).
     beta0 :
         Initial inverse-temperature scale (default ``1.0``).
+
+    Returns ``{best_val, best_pos, n_evals, n_grads, final_population,
+    controls}``.
     """
     out = _core_dmc_population_optimize(
         obj_fn,
@@ -1755,14 +1798,21 @@ def global_optimize(
       coverage_neighbors: direct cyclic neighbourhood radius. Zero is all-to-all;
         one admits the two adjacent chain identities without forwarding samples.
         This does not remove the shared arm-checkpoint barrier.
+      coverage_height: well-tempered coverage deposit height.
+      coverage_well_tempering: well-tempering factor (``> 1``).
+      coverage_peer_weight: weight applied to foreign peer samples.
 
     ``obj_fn`` and ``grad_fn`` are only called inside ``[low, high]``: a
     point an arm proposes outside is mirror-reflected into the box, and the
     gradient there is reflected with it. Peer separation moves global
     candidates, not derivative stencils or raw objective values. Returns a
     dict with ``best_pos``, ``best_val``, ``n_evals``, ``n_grads``,
-    ``arm_pulls``, and ``arm_successes``. Multiple replicas also report
-    individual results, ``charged`` work and coverage sample counters.
+    ``arm_pulls``, ``arm_successes``, and ``hop_state``. Multiple replicas also
+    report ``replicas``, ``charged``, and ``coverage_*`` sample counters
+    (``coverage_published_samples``, ``coverage_applied_foreign_samples``,
+    ``coverage_sample_peer_checks``, ``coverage_sample_anchor_overlaps``,
+    ``coverage_sample_anchor_only_overlaps``, ``coverage_sample_overlaps``,
+    ``coverage_repelled_proposals``, ``coverage_constrained_repulsions``).
     """
     # int() truncates a float, so 1.5 would run as 1. A neighbour count is whole.
     if not isinstance(coverage_neighbors, (int, np.integer)):
@@ -1802,7 +1852,11 @@ def global_optimize_objective(
     noise_sigma: float | None = None,
     policy: str = "auto",
 ):
-    """Portfolio global optimizer over a native ``PyObjective`` handle."""
+    """Portfolio global optimizer over a native ``PyObjective`` handle.
+
+    Returns a dict with ``best_pos``, ``best_val``, ``n_evals``, ``n_grads``,
+    ``arm_pulls``, ``arm_successes``, and ``hop_state``.
+    """
     out = _core_global_optimize_objective(
         objective,
         int(budget),
