@@ -141,5 +141,124 @@ seed 2002 is retained even if it repeats the earlier 1.5 versus
 
 ## Results
 
-R2 not yet run. The earlier zero-row partial kit is superseded by this
-preregistered protocol.
+This section is generated from `rows.csv` by `run_gate.py summarize`.
+
+29 cells, twenty-four seeds, eight observations, 473 rows, 27 inconclusive. Gate verdict: **INCONCLUSIVE**. 2 cells pass, 0 fail and 27 are inconclusive.
+
+- Clause (a), trajectory identity, fails on: none.
+- Clause (b), hit loss, fails on: none.
+- Clause (c), outside time per call, fails on: none.
+- Clause (d), peak RssAnon, fails on: none.
+- Clause (e), fixed-ring execution, fails on: none.
+
+`Traj` counts B observations and A2 observations that match A.
+Hits are A, A2, B1 and B2, re-derived from `best`. Outside is the median time outside
+energy calls per charged call. Its B/A ratio carries the bootstrap
+95% interval, and the limit is the clause (c) bound. RssAnon carries
+the paired-seed bootstrap interval. VmHWM and `ru_maxrss` never gate.
+
+| Cell | Identity B, A2 | Hits A, A2, B1, B2 | Outside B/A [95% CI] | Outside A2/A [95% CI] | Outside limit | RssAnon B/A [95% CI] | RssAnon A2/A [95% CI] | RSS limit | Bound A, A2, B sum | Verdict |
+| --- | --- | --- | --- | --- | ---: | --- | --- | ---: | --- | --- |
+| lj38 | 48, 48 | 23, 23, 23, 23 | 0.95681 [0.955351, 0.964258] | 0.996125 [0.993897, 1.00124] | 1.1 | 1.0067 [0.998737, 1.01166] | 0.998885 [0.998686, 1.00126] | 1.05 | 0, 0, 74248 | PASS |
+| lj75 | 48, 48 | 7, 7, 7, 7 | 0.934832 [0.923506, 0.94898] | 1.00101 [0.988502, 1.01186] | 1.1 | 1.00249 [1.00109, 1.00326] | 1 [0.999069, 1.00074] | 1.05 | 0, 0, 1420120 | PASS |
+| lj98 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
+| lj102 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
+| lj104 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
+| blj105n38 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
+| blj105n55 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
+| blj115n38 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
+| blj115n55 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
+| m55r6 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
+| m55r14 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
+| m80r6 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
+| m80r14 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
+| sc126-38 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
+| sc126-55 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
+| tip4p8 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
+| tip4p9 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
+| tip4p10 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
+| tip4p11 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
+| tip4p12 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
+| tip4p13 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
+| tip4p14 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
+| tip4p15 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
+| tip4p16 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
+| tip4p17 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
+| tip4p18 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
+| tip4p19 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
+| tip4p20 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
+| tip4p21 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
+
+### Trajectory differences
+
+None in complete cells. Incomplete cells were not compared.
+
+### Inconclusive rows
+
+- lj98: incomplete panel (89 of 192 rows)
+- lj102: incomplete panel (0 of 192 rows)
+- lj104: incomplete panel (0 of 192 rows)
+- blj105n38: incomplete panel (0 of 192 rows)
+- blj105n55: incomplete panel (0 of 192 rows)
+- blj115n38: incomplete panel (0 of 192 rows)
+- blj115n55: incomplete panel (0 of 192 rows)
+- m55r6: incomplete panel (0 of 192 rows)
+- m55r14: incomplete panel (0 of 192 rows)
+- m80r6: incomplete panel (0 of 192 rows)
+- m80r14: incomplete panel (0 of 192 rows)
+- sc126-38: incomplete panel (0 of 192 rows)
+- sc126-55: incomplete panel (0 of 192 rows)
+- tip4p8: incomplete panel (0 of 192 rows)
+- tip4p9: incomplete panel (0 of 192 rows)
+- tip4p10: incomplete panel (0 of 192 rows)
+- tip4p11: incomplete panel (0 of 192 rows)
+- tip4p12: incomplete panel (0 of 192 rows)
+- tip4p13: incomplete panel (0 of 192 rows)
+- tip4p14: incomplete panel (0 of 192 rows)
+- tip4p15: incomplete panel (0 of 192 rows)
+- tip4p16: incomplete panel (0 of 192 rows)
+- tip4p17: incomplete panel (0 of 192 rows)
+- tip4p18: incomplete panel (0 of 192 rows)
+- tip4p19: incomplete panel (0 of 192 rows)
+- tip4p20: incomplete panel (0 of 192 rows)
+- tip4p21: incomplete panel (0 of 192 rows)
+
+### Internal and external peak disagreements
+
+None over 2 MiB.
+
+### blj105n38 RssAnon modes
+
+| Seed | A for B/A | B | A for A2/A | A2 |
+| ---: | --- | --- | --- | --- |
+| 2000 | not run | not run | not run | not run |
+| 2001 | not run | not run | not run | not run |
+| 2002 | not run | not run | not run | not run |
+| 2003 | not run | not run | not run | not run |
+| 2004 | not run | not run | not run | not run |
+| 2005 | not run | not run | not run | not run |
+| 2006 | not run | not run | not run | not run |
+| 2007 | not run | not run | not run | not run |
+| 2008 | not run | not run | not run | not run |
+| 2009 | not run | not run | not run | not run |
+| 2010 | not run | not run | not run | not run |
+| 2011 | not run | not run | not run | not run |
+| 2012 | not run | not run | not run | not run |
+| 2013 | not run | not run | not run | not run |
+| 2014 | not run | not run | not run | not run |
+| 2015 | not run | not run | not run | not run |
+| 2016 | not run | not run | not run | not run |
+| 2017 | not run | not run | not run | not run |
+| 2018 | not run | not run | not run | not run |
+| 2019 | not run | not run | not run | not run |
+| 2020 | not run | not run | not run | not run |
+| 2021 | not run | not run | not run | not run |
+| 2022 | not run | not run | not run | not run |
+| 2023 | not run | not run | not run | not run |
+
+| Arm | ~28 MiB | ~32 MiB | Other |
+| --- | ---: | ---: | ---: |
+| A for B/A | 0 | 0 | 0 |
+| B | 0 | 0 | 0 |
+| A for A2/A | 0 | 0 | 0 |
+| A2 | 0 | 0 | 0 |
