@@ -141,11 +141,12 @@ let P = import "pins.ncl" in
   eval "$(potctl ci darwin-env)"
 "%,
 
-  concurrency_ref = fun group_prefix =>
-    {
-      group = "%{group_prefix}-${{ github.ref }}",
-      "cancel-in-progress" = true,
-    },
+  # One group per workflow and pull request. A superseded run is cancelled.
+  # A push to main, or any tag, is left to finish.
+  concurrency_cancel = {
+    group = "${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}",
+    "cancel-in-progress" = "${{ github.event_name == 'pull_request' || (github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/')) }}",
+  },
 
   # Push stays on main. Pull requests also target develop, the integration branch.
   on_main_pr = {

@@ -35,7 +35,7 @@ in
     },
     pull_request = { paths = release_paths },
   },
-  concurrency = S.concurrency_ref "release-prepare",
+  concurrency = S.concurrency_cancel,
   permissions = { contents = "read" },
   env = { CI_TOOLS_ARTIFACT = "ci-tools-${{ github.sha }}-Linux" },
   jobs = {

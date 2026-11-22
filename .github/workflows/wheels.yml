@@ -4,8 +4,8 @@ name: Wheels
 # with no tag and no main-branch source behind it. Tag-driven builds keep the
 # artifact and the tag describing each other.
 concurrency:
-  group: wheels-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/')) }}
 
 on:
   workflow_dispatch:

@@ -10,6 +10,7 @@ let P = S.pins in
   },
   # Workflow stays read-only. The deploy job opts into contents: write.
   permissions = { contents = "read" },
+  concurrency = S.concurrency_cancel,
   jobs = {
     build_docs = {
       name = "Build documentation",

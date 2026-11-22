@@ -183,10 +183,7 @@ in
 {
   name = "Build Matrix",
   on = S.on_main_pr,
-  concurrency = {
-    group = "${{ github.workflow }}-${{ github.ref }}",
-    "cancel-in-progress" = true,
-  },
+  concurrency = S.concurrency_cancel,
   # build_and_test: no in-tree NWChem; dlopens libnwchemc. Frontend + stub always compile.
   # Suite nwchem energy/grad needs external libnwchemc; stub probe always runs.
   jobs = {

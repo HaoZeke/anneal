@@ -151,7 +151,7 @@ in
     workflow_dispatch = {},
     push = { branches = ["main"], paths = cosmo_paths },
   },
-  concurrency = S.concurrency_ref "cosmo-potctl",
+  concurrency = S.concurrency_cancel,
   permissions = { contents = "read" },
   env = { COSMO_REF = "master" },
   jobs = {
