@@ -112,6 +112,12 @@ UNPUSHED = {
                                                 "covalent-general r3 kit",
     "e5e21199c8fd3c085bc316b2235b8839522552c4": "an early local floor-gate runner; its rows survive in the "
                                                 "covalent-general r3 kit",
+    "67d4e3adbd6d7d186796383bb0460a82d4687f29": "the local binary revision of the corrected serial Si20 panel before "
+                                                "the final message-only rewrite; the covalent-general r3 kit has "
+                                                "the same source tree",
+    "0458d692270ece75a17bba6778288968eb485a86": "the local fresh-rescoring script revision before the final "
+                                                "message-only rewrite; the covalent-general r3 kit has the same "
+                                                "source tree",
     "b49341e308e6e98e39a2ea7bcc7fbf743f6c45ac": "the build head of the recommended arm of the ASE panel, first cited by "
                                                 "70c0ad6c; no pushed branch holds it",
     "5a7f629d79be88b9d3f0cb2c6665062bda4ac625": "the build head of the cluster-preset and ASE arms of the Lennard-Jones "
@@ -161,12 +167,13 @@ KNOWN_GAPS = {
                                                     "not in this repository",
     "bench/covalent-h2h/gfn2/si20-censoring.csv": "revision 35d2292c is not in this repository; revision 522e2de7 is "
                                                   "not in this repository",
+    "bench/covalent-h2h/gfn2/si20-fresh-rescore.csv": "revision 0458d692 is not in this repository",
     "bench/covalent-h2h/gfn2/si20-panel.csv": "revision 35d2292c is not in this repository; revision 522e2de7 is not "
                                               "in this repository; revision 5855af26 is not in this repository; "
-                                              "revision 6fff2974 is not in this repository; revision 6fff2974 is not "
-                                              "in this repository; revision 75a18090 is not in this repository; "
-                                              "revision ccd69256 is not in this repository; revision cd1456c1 is not "
-                                              "in this repository",
+                                              "revision 67d4e3ad is not in this repository; revision 6fff2974 is not "
+                                              "in this repository; revision 6fff2974 is not in this repository; "
+                                              "revision 75a18090 is not in this repository; revision ccd69256 is not "
+                                              "in this repository; revision cd1456c1 is not in this repository",
     "bench/covalent-h2h/gfn2/si20-starts.csv": "revision 35d2292c is not in this repository",
     "bench/covalent-h2h/gfn2/superseded.csv": "host empty or unknown on some rows; revision 35d2292c is not in this "
                                               "repository; revision 522e2de7 is not in this repository; revision "

@@ -1,4 +1,6 @@
 revision,why,row_file,system,arm,revision_column,rows,seed_min,seed_max
+0458d692270ece75a17bba6778288968eb485a86,the local fresh-rescoring script revision before the final message-only rewrite; the covalent-general r3 kit has the same source tree,bench/covalent-h2h/gfn2/si20-fresh-rescore.csv,si20,anneal-general,code_revision,12,2003,2021
+0458d692270ece75a17bba6778288968eb485a86,the local fresh-rescoring script revision before the final message-only rewrite; the covalent-general r3 kit has the same source tree,bench/covalent-h2h/gfn2/si20-fresh-rescore.csv,si20,crest,code_revision,12,2003,2021
 0f988569b49afe162e2f5ffd71b2ab45d0b3afec,"an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own",bench/ase-gofee-h2h/results.csv,lj38,paper,head,1,2000,2000
 0f988569b49afe162e2f5ffd71b2ab45d0b3afec,"an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own",bench/ase-gofee-h2h/results.csv,lj75,agox_gofee,head,1,2005,2005
 0f988569b49afe162e2f5ffd71b2ab45d0b3afec,"an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own",bench/ase-gofee-h2h/results.csv,lj75,ase_mh,head,1,2003,2003
@@ -93,6 +95,7 @@ revision,why,row_file,system,arm,revision_column,rows,seed_min,seed_max
 5a7f629d79be88b9d3f0cb2c6665062bda4ac625,"the build head of the cluster-preset and ASE arms of the Lennard-Jones ASE panel, first cited by b70e3269; no pushed branch holds it",bench/ase-recommended/summary.csv,lj98,anneal,code_revision,1,,
 5a7f629d79be88b9d3f0cb2c6665062bda4ac625,"the build head of the cluster-preset and ASE arms of the Lennard-Jones ASE panel, first cited by b70e3269; no pushed branch holds it",bench/ase-recommended/summary.csv,lj98,ase_bh,code_revision,1,,
 5a7f629d79be88b9d3f0cb2c6665062bda4ac625,"the build head of the cluster-preset and ASE arms of the Lennard-Jones ASE panel, first cited by b70e3269; no pushed branch holds it",bench/ase-recommended/summary.csv,lj98,ase_mh,code_revision,1,,
+67d4e3adbd6d7d186796383bb0460a82d4687f29,the local binary revision of the corrected serial Si20 panel before the final message-only rewrite; the covalent-general r3 kit has the same source tree,bench/covalent-h2h/gfn2/si20-panel.csv,si20,anneal-general,code_revision,12,2003,2021
 6fff2974b02c3bef48007a73aeae18932b9c0660,a mistyped local revision in the Si20 correction; the provenance error is retained and superseded in the covalent-general r3 kit,bench/covalent-h2h/gfn2/si20-panel.csv,si20,crest,code_revision,1,2018,2018
 6fff2974b02c3bef48007a73aeae18932b9c0660,a mistyped local revision in the Si20 correction; the provenance error is retained and superseded in the covalent-general r3 kit,bench/covalent-h2h/gfn2/superseded.csv,si20,crest,code_revision,1,2018,2018
 6fff2974b5a595d4d21f58478b433bfdbfc8ec60,the corrected local Si20 parser revision; its derived row survives in the covalent-general r3 kit,bench/covalent-h2h/gfn2/si20-panel.csv,si20,crest,code_revision,1,2018,2018
