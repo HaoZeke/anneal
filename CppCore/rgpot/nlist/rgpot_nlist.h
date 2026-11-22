@@ -10,8 +10,12 @@
  * Positions and cutoff are one length unit. The library does not
  * convert. box9 is nine doubles, lattice vectors as rows, the ASE cell
  * in row-major order: ax ay az bx by bz cx cy cz. The pair vector is
- * r_j - r_i + S H, with S the integer shift. A pair of an atom with
- * itself at shift zero is never returned.
+ * r_j - r_i + S H, with S the integer shift and r the positions as the
+ * caller passed them. Periodic coordinates may lie any whole number of
+ * cells outside the box. The search folds them into the cell first and
+ * then reports S for the unfolded positions, so the relation holds for
+ * every input. A pair of an atom with itself at shift zero is never
+ * returned.
  *
  * rgpot_nlist_build and rgpot_nlist_walk_pull may be called on different
  * objects at the same time. One walk, and the buffers of one build, are
@@ -143,16 +147,18 @@ int32_t rgpot_nlist_build_systems(const double *positions, const int32_t *counts
                                   rgpot_nlist_soa *out, int32_t *system,
                                   size_t *count, size_t *needed);
 
-/* A builder keeps the last list while the atom count and request are
- * unchanged, the current image extent does not exceed the previous one,
- * and 2 * max_disp + corner <= skin. max_disp is the largest atom
- * displacement since the search; corner is the largest displacement of
- * the four antipodal corners +span0 with +/-span1 and +/-span2.
- * Skin 0 rebuilds unless the coordinates and the cell match. open returns
- * a code and writes *builder. update fills out the same way
- * rgpot_nlist_build does after a search. When the stored list is kept,
- * *reused is 1 and the vector and distance columns still describe the
- * geometry of the last search. close frees the builder. */
+/* A builder keeps the last list and skips the search while the atom
+ * moves, and the image moves of a cell change at every sign of the
+ * stored shifts, fit in the skin. Each atom is measured from the image
+ * of its reference nearest it, so moving an atom by whole cells or
+ * wrapping it back across a face keeps a pair list; a cluster list is
+ * searched again when an atom moves by whole cells. Skin 0 rebuilds
+ * unless the folded coordinates and box9 match.
+ * open returns a code and writes *builder. update fills out the same
+ * way rgpot_nlist_build does after a search. When the stored list is
+ * kept, *reused is 1, shift is relative to the positions of this call,
+ * and the vector and distance columns still describe the geometry of
+ * the last search. close frees the builder. */
 typedef struct rgpot_nlist_builder rgpot_nlist_builder;
 
 int32_t rgpot_nlist_builder_open(rgpot_nlist_builder **builder);
@@ -167,9 +173,10 @@ int32_t rgpot_nlist_builder_update(rgpot_nlist_builder *builder,
 void rgpot_nlist_builder_close(rgpot_nlist_builder *builder);
 
 /* Fortran gather bridge. One list keeps a builder. The search runs at
- * cutoff + skin and is reused while every atom stays within half the
- * skin. Each call writes the pairs that are strictly inside `cutoff`
- * for the positions passed in, with vectors in Fortran (3, npairs)
+ * cutoff + skin and is reused under the rule of the builder above. Each
+ * call writes the pairs that are strictly inside `cutoff` for the
+ * positions passed in, r_j - r_i + S H from those positions and the
+ * stored shifts, with vectors in Fortran (3, npairs)
  * order: x, y, z of pair 0, then pair 1. Indices are zero-based.
  * A null `first` only sets *count. `periodic` is three ints, 0 or 1. */
 typedef struct rgpot_nlist_fortran_list rgpot_nlist_fortran_list;
