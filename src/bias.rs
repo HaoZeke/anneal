@@ -193,14 +193,24 @@ mod tests {
     }
 
     #[test]
-    fn a_capped_index_reuses_the_latest_seat() {
+    #[should_panic(expected = "basin index capacity exhausted")]
+    fn a_capped_index_refuses_to_alias_a_new_basin() {
         let mut index = BasinIndex::new(Raw, 0.1).with_cap(2);
         assert_eq!(index.basin_of(array![0.0].view()), 0);
         assert_eq!(index.basin_of(array![1.0].view()), 1);
         assert_eq!(index.n_basins(), 2);
-        assert_eq!(index.basin_of(array![5.0].view()), 1);
-        assert_eq!(index.n_basins(), 2);
         assert!(index.seats_full());
+        index.basin_of(array![5.0].view());
+    }
+
+    #[test]
+    #[should_panic(expected = "basin index capacity exhausted")]
+    fn a_capped_bias_refuses_to_alias_a_new_deposit() {
+        let mut bias = BasinBias::new(Raw, 0.1, 1.0, 5.0);
+        bias.cap_basins(2);
+        bias.deposit(array![0.0].view(), 1.0);
+        bias.deposit(array![1.0].view(), 1.0);
+        bias.deposit(array![5.0].view(), 1.0);
     }
 
     fn identity_projector_2d() -> WellTemperedBias {
@@ -428,12 +438,12 @@ impl<F: Fingerprint> BasinIndex<F> {
         }
     }
 
-    /// Stops opening seats once `cap` regions are registered.
+    /// Refuses to open seats once `cap` regions are registered.
     ///
     /// A lookup walks every seat that the triangle test cannot skip. An
-    /// uncapped index makes that walk longer on every later hop. Past the
-    /// cap a region that matches no seat reuses the latest one, so the
-    /// walk stops growing. The cap is at least one.
+    /// uncapped index makes that walk longer on every later hop. A new region
+    /// beyond the cap panics instead of aliasing an existing seat. The cap is
+    /// at least one.
     pub fn with_cap(mut self, cap: usize) -> Self {
         self.cap = Some(cap.max(1));
         self
@@ -581,9 +591,7 @@ impl<F: Fingerprint> BasinIndex<F> {
 
     /// Registers a descriptor as a new basin and returns its index.
     pub fn push(&mut self, d: Array1<f64>) -> usize {
-        if self.seats_full() {
-            return self.centres.len().saturating_sub(1);
-        }
+        assert!(!self.seats_full(), "basin index capacity exhausted");
         self.keys.push(self.metric.key(d.view()));
         if d.len() > 32 {
             self.centre_suffix
@@ -609,7 +617,6 @@ impl<F: Fingerprint> BasinIndex<F> {
         let d = self.describe(x);
         let i = match self.lookup(d.view()) {
             Some(i) => i,
-            None if self.seats_full() => self.centres.len().saturating_sub(1),
             None => self.push(d),
         };
         self.bump(i);
@@ -1676,11 +1683,6 @@ impl<F: Fingerprint> BasinBias<F> {
             self.increment(i, denom, temp, 1.0, true);
             return i;
         }
-        if self.index.seats_full() {
-            let i = self.index.n_basins().saturating_sub(1);
-            self.increment(i, denom, temp, 1.0, true);
-            return i;
-        }
         self.index.push(s.to_owned());
         self.v.push(self.w0);
         self.deposit_counts.push(1);
@@ -1703,7 +1705,6 @@ impl<F: Fingerprint> BasinBias<F> {
         let denom = (self.gamma - 1.0) * temp;
         let i = match self.lookup(s) {
             Some(i) => i,
-            None if self.index.seats_full() => self.index.n_basins().saturating_sub(1),
             None => {
                 self.index.push(s.to_owned());
                 self.v.push(scale * self.w0);

@@ -123,8 +123,8 @@ fn point(x: ArrayView1<f64>, i: usize) -> [f64; 3] {
 /// Candidates are the directions to each shell point, to each pair
 /// midpoint and to each triangle centroid of mutually bonded points, which
 /// is where a vertex, edge or face axis of a shell lies. The score is the
-/// root-mean-square distance from each turned point to its nearest shell
-/// point.
+/// RMS distance under [`bijective_misfit`]; every one-to-one match must lie
+/// within [`AXIS_MISFIT`].
 fn local_axis(shell: &[[f64; 3]]) -> Option<([f64; 3], usize)> {
     let m = shell.len();
     if m < 3 {

@@ -3320,13 +3320,12 @@ const RIGID_ACCEPT_BLOCK: usize = 50;
 /// walk itself is capped at the same length so the main chain resumes.
 const RIGID_CAGE_WINDOWS: usize = 40;
 
-/// Seats retained by each local basin index.
+/// Seats retained by each rigid-body basin index.
 ///
 /// The lookup walks every seat the triangle test cannot skip, so an open
-/// list makes every later hop slower. Past this many seats a new region
-/// reuses the latest one. The fixed bound applies to every system and does
-/// not encode a cluster size or species count.
-const BASIN_INDEX_CAP: usize = 2_048;
+/// list makes every later hop slower. Atomic indexes remain uncapped because
+/// basin identities participate in their search trajectory.
+const RIGID_BASIN_CAP: usize = 2_048;
 /// Orientation steps in the shell turn that opens the second walk.
 ///
 /// Two steps still quench back into the cage. Three steps, the preset
@@ -4787,10 +4786,12 @@ where
         ClusterFingerprint::of_config(cfg, &canonical_reference),
         cfg.merge_radius,
     );
-    identity.set_cap(BASIN_INDEX_CAP);
-    bias.cap_basins(BASIN_INDEX_CAP);
-    for parked in &mut biases {
-        parked.cap_basins(BASIN_INDEX_CAP);
+    if cfg.move_library.is_rigid_body() {
+        identity.set_cap(RIGID_BASIN_CAP);
+        bias.cap_basins(RIGID_BASIN_CAP);
+        for parked in &mut biases {
+            parked.cap_basins(RIGID_BASIN_CAP);
+        }
     }
     if cfg.minima_hopping {
         let initial_basin = identity.basin_of(x.view());

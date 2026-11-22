@@ -153,7 +153,7 @@ fn frozen_atoms_are_bit_identical_when_cap_twist_is_requested() {
 }
 
 #[test]
-fn basin_indexes_stay_bounded_during_cap_search() {
+fn an_atomic_cap_search_keeps_every_basin() {
     const BASIN_CAP: usize = 2_048;
     let mut source = StdRng::seed_from_u64(23);
     let start = random_cluster_in_radius(4, 1.4, 0.4, &mut source);
@@ -161,8 +161,24 @@ fn basin_indexes_stay_bounded_during_cap_search() {
     cfg.merge_radius = 1.0e-12;
     let outcome = run_identity_relax(&cfg, &start, 10_000, 29);
     assert!(
-        outcome.basins <= BASIN_CAP,
-        "{} basins exceeded the memory cap",
+        outcome.basins > BASIN_CAP,
+        "{} basins show that the atomic index was capped",
+        outcome.basins
+    );
+}
+
+#[test]
+fn a_default_atomic_path_never_caps() {
+    const RIGID_BASIN_CAP: usize = 2_048;
+    let mut source = StdRng::seed_from_u64(31);
+    let start = random_cluster_in_radius(4, 1.4, 0.4, &mut source);
+    let mut cfg = Config::recommended(4);
+    assert!(!cfg.cap_twist);
+    cfg.merge_radius = 1.0e-12;
+    let outcome = run_identity_relax(&cfg, &start, 10_000, 37);
+    assert!(
+        outcome.basins > RIGID_BASIN_CAP,
+        "{} basins show that the default atomic index was capped",
         outcome.basins
     );
 }
