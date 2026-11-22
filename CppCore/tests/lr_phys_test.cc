@@ -119,6 +119,82 @@ double fd_force(auto &&energy, std::vector<double> pos, std::size_t i, double st
   return -(ep - em) / (2.0 * step);
 }
 
+void check_periodic_dispersion_self_images(DispersionKind kind, const char *name,
+                                           bool check_stress) {
+  DispersionConfig cfg;
+  cfg.kind = kind;
+  cfg.functional = "pbe";
+  cfg.atm = false;
+  cfg.periodic = true;
+  cfg.cutoff = 7.4;
+  cfg.short_cutoff = 2.0;
+  cfg.lib_disp2 = 12.0;
+  cfg.lib_disp3 = 12.0;
+  cfg.lib_cn = 12.0;
+  const double box[9] = {5, 0, 0, 0, 5, 0, 0, 0, 5};
+  std::vector<double> pos = {0.4, 0.5, 0.6, 1.6, 0.7, 0.8};
+  const std::vector<int> z = {6, 8};
+  DispersionPot pot(cfg);
+  const Eval cell = run(pot, pos, z, box);
+  std::cout << "CASE " << name << "_periodic_self_images " << cell.energy << '\n';
+
+  constexpr int repeat = 3;
+  std::vector<double> super_pos;
+  std::vector<int> super_z;
+  for (int ix = 0; ix < repeat; ++ix) {
+    for (int iy = 0; iy < repeat; ++iy) {
+      for (int iz = 0; iz < repeat; ++iz) {
+        for (std::size_t atom = 0; atom < z.size(); ++atom) {
+          super_pos.insert(super_pos.end(),
+                           {pos[3 * atom] + 5.0 * ix, pos[3 * atom + 1] + 5.0 * iy,
+                            pos[3 * atom + 2] + 5.0 * iz});
+          super_z.push_back(z[atom]);
+        }
+      }
+    }
+  }
+  const double super_box[9] = {15, 0, 0, 0, 15, 0, 0, 0, 15};
+  DispersionPot super(cfg);
+  const Eval explicit_cell = run(super, super_pos, super_z, super_box);
+  const std::string energy_what =
+      std::string(name) + " periodic self-image energy matches an explicit supercell";
+  check_close(cell.energy, explicit_cell.energy / (repeat * repeat * repeat), 2e-9,
+              energy_what.c_str());
+
+  for (int axis = 0; axis < 3; ++axis) {
+    double net = 0.0;
+    for (std::size_t atom = 0; atom < z.size(); ++atom) {
+      net += cell.f[3 * atom + static_cast<std::size_t>(axis)];
+    }
+    const std::string net_what = std::string(name) + " periodic self-image net force";
+    check_close(net, 0.0, 2e-10, net_what.c_str());
+  }
+  for (std::size_t i = 0; i < pos.size(); ++i) {
+    const double force = fd_force(
+        [&](const std::vector<double> &p) { return run(pot, p, z, box).energy; }, pos, i, 1e-6);
+    const std::string force_what = std::string(name) + " periodic self-image force";
+    check_close(cell.f[i], force, 3e-5, force_what.c_str());
+  }
+
+  if (check_stress) {
+    check(cell.has_stress, (std::string(name) + " periodic self-image stress is set").c_str());
+    const double eps = 1e-6;
+    auto strained_energy = [&](double strain) {
+      std::vector<double> moved = pos;
+      double strained_box[9];
+      std::copy(box, box + 9, strained_box);
+      strained_box[0] *= 1.0 + strain;
+      for (std::size_t i = 0; i < moved.size(); i += 3) {
+        moved[i] *= 1.0 + strain;
+      }
+      return run(pot, moved, z, strained_box).energy;
+    };
+    const double dedstrain = (strained_energy(eps) - strained_energy(-eps)) / (2.0 * eps);
+    const std::string stress_what = std::string(name) + " periodic self-image xx stress";
+    check_close(cell.stress[0], dedstrain / 125.0, 5e-5, stress_what.c_str());
+  }
+}
+
 void test_lists() {
   DualList lists(3.0, 6.0, 0.4);
   std::mt19937_64 rng(1);
@@ -678,6 +754,7 @@ void test_library_dispersion() {
         [&](const std::vector<double> &p) { return run(d3, p, z, nullptr).energy; }, pos, i, 1e-6);
     check_close(e.f[i], f, 2e-5, "D3 force");
   }
+  check_periodic_dispersion_self_images(DispersionKind::D3BJ, "d3", true);
   }
 #else
   std::cout << "CASE d3_water skipped\n";
@@ -713,6 +790,8 @@ void test_library_dispersion() {
   rgpot::lr::d4_evaluate(pos.data(), z.data(), pos.size() / 3, nullptr, false, 0.0, bj, 60.0 * bohr,
                          40.0 * bohr, 30.0 * bohr, &native, nF, nstrain);
   check_close(native, e.energy, 1e-8, "native D4 matches dftd4 on water");
+  // The native periodic D4 path does not currently calculate strain.
+  check_periodic_dispersion_self_images(DispersionKind::D4, "d4", false);
   }
 #else
   std::cout << "CASE d4_water skipped\n";
