@@ -395,8 +395,8 @@ int rgpot_engine_set_charge_spin(RgpotEnginePot *pot, int charge, int spin);
   classical, MOPAC, NWChem and XTB libraries, and Metatomic with a model that
   reads neither.
   Returns 3 for a value the backend or task cannot take (for example =spin= 0 on
-  Metatomic or Skala, or =spin= above 100 on UMA), with the reason
-  in =rgpot_engine_last_error=; the values in force do not change.
+  Metatomic or Skala, or =spin= above 100 on UMA), with the reason in
+  =rgpot_engine_last_error=; the values in force do not change.
   For Metatomic the reason is
   =the model reads no charge (rgpot::charge), so charge <n> cannot reach it= or
   the same sentence for the spin multiplicity.
