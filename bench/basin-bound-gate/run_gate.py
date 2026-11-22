@@ -1159,6 +1159,8 @@ def render_readme_results(
     lines.extend(["", "### Trajectory differences", ""])
     if traj_diffs:
         lines.extend(f"- {item}" for item in traj_diffs)
+    elif any(row["verdict"] == "INCONCLUSIVE" for row in scored):
+        lines.append("None in complete cells. Incomplete cells were not compared.")
     else:
         lines.append(
             f"None. On all {len(scored)} cells and {len(SEEDS)} seeds, both B "
@@ -1211,7 +1213,14 @@ def render_readme_results(
             ("A2A_A1", "A2A_A2"),
             ("A2A_A21", "A2A_A22"),
         ):
-            pair = [indexed[(str(seed), observation)] for observation in observations]
+            pair = [
+                indexed[(str(seed), observation)]
+                for observation in observations
+                if (str(seed), observation) in indexed
+            ]
+            if len(pair) != len(observations):
+                cells.append("not run")
+                continue
             peak = max(float(row["rss_anon_kb"]) for row in pair)
             label = mode(max(pair, key=lambda row: float(row["rss_anon_kb"])))
             cells.append(f"{label} ({peak / 1024:.1f})")
@@ -1232,7 +1241,13 @@ def render_readme_results(
     for arm, observations in mode_groups:
         labels = []
         for seed in SEEDS:
-            pair = [indexed[(str(seed), observation)] for observation in observations]
+            pair = [
+                indexed[(str(seed), observation)]
+                for observation in observations
+                if (str(seed), observation) in indexed
+            ]
+            if len(pair) != len(observations):
+                continue
             labels.append(mode(max(pair, key=lambda row: float(row["rss_anon_kb"]))))
         lines.append(
             f"| {arm} | {labels.count('~28')} | {labels.count('~32')} | "
