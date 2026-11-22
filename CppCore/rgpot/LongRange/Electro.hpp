@@ -118,7 +118,9 @@ public:
   void forceImpl(const ForceInput &in, ForceOut *out) const override;
 
   [[nodiscard]] PotCaps caps() const noexcept override {
-    return {.reentrancy = Reentrancy::PerInstance, .periodic = true, .stress = true};
+    return {.reentrancy = Reentrancy::PerInstance,
+            .periodic = cfg_.periodic && cfg_.method != CoulombMethod::DSF,
+            .stress = true};
   }
 
   [[nodiscard]] uint64_t paramsKey() const noexcept override { return params_; }

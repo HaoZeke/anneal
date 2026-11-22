@@ -20,6 +20,8 @@ struct NlhConfig {
 
 class NlhPot final : public Potential<NlhPot> {
 public:
+  static constexpr bool kCellOptional = true;
+
   explicit NlhPot(NlhConfig cfg = {});
 
   void forceImpl(const ForceInput &in, ForceOut *out) const override;

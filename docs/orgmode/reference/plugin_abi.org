@@ -21,9 +21,34 @@ or =.dll=) in sorted order, with =RTLD_NOW | RTLD_LOCAL= on POSIX, and calls
 A library without that symbol is skipped.
 A descriptor that fails validation is skipped with a line
 =[rgpot] invalid plugin PATH: REASON= on standard error.
-A plugin whose name is already registered is skipped; the first one keeps the
-name.
-The registry always holds the built-in plugin =lennard-jones=.
+A plugin whose name is already registered is refused.
+The existing registration, including a built-in, keeps the name.
+The host prints =[rgpot] plugin name collision PATH: NAME is already registered=
+on standard error and =load_plugin= returns false.
+The registry always holds the built-in plugins =lennard-jones=,
+=classical-morse= and =sutton-chen=.
+When tabulated EAM is built it also holds =eam-funcfl= and =eam-setfl=.
+=lennard-jones= ignores its configuration string.
+=classical-morse= reads a flat JSON object whose keys are =De=, =a=, =re=,
+=cutoff= and =switch_width=; a null string, an empty string or ="{}"= selects
+the potential's defaults.
+=sutton-chen= reads =epsilon=, =c=, =a=, =n=, =m=, =cutoff=, =periodic= and
+=stress=.
+Its default is periodic, unlike the C++ struct, because the plugin advertises
+=RGPOT_CAP_PERIODIC=; ="periodic": false= clears that capability and allows a
+null cell.
+=eam-funcfl= and =eam-setfl= read =path=, =format= (=funcfl=, =setfl= or =fs=),
+=periodic=, =stress= and =skin=.
+A string that is not a JSON object is the table path.
+A missing path is rejected.
+An unknown or duplicate key is rejected.
+A built-in =calculate= returns =RGPOT_PLUGIN_INVALID_PARAM= when =n_atoms= is
+zero or when =positions=, =atomic_numbers=, =forces= or, because that potential
+is periodic, =cell= is null.
+A zero-atom call is reported as =nAtoms must be positive=, including when
+=forces= is also null.
+=last_error= is the message of the last failure.
+A later successful =calculate= does not clear it.
 Nothing in =librgpot= calls =discover= on its own; the C++ host calls it.
 =rgpot::plugin::create_from_plugin= turns a descriptor and a configuration
 string, ="{}"= by default, into a potential.

@@ -1,0 +1,1 @@
+The built-in plugin registry now includes classical-morse and sutton-chen, and eam-funcfl and eam-setfl when tabulated EAM is built. Each one reads a flat JSON configuration. An external plugin whose name is already registered is refused, and the existing plugin is kept.

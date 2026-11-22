@@ -85,6 +85,22 @@ Eval run(Pot &pot, const std::vector<double> &pos, const std::vector<int> &z, co
   return e;
 }
 
+template <class Pot>
+Eval run_batch(Pot &pot, const std::vector<double> &pos,
+               const std::vector<int> &z, const double *box) {
+  Eval e;
+  e.f.assign(pos.size(), 0.0);
+  ForceInput in{pos.size() / 3, pos.data(), z.data(), box};
+  ForceOut out{};
+  out.F = e.f.data();
+  rgpot::ForceBatch batch{1, &in, &out};
+  pot.forceBatch(batch);
+  e.energy = out.energy;
+  e.has_stress = out.has_stress != 0;
+  std::copy(out.stress, out.stress + 9, e.stress);
+  return e;
+}
+
 #if !defined(RGPOT_HAS_DFTD3) || !defined(RGPOT_HAS_DFTD4)
 void check_unlinked(DispersionPot &pot, const std::vector<double> &pos, const std::vector<int> &z,
                     const char *what) {
@@ -327,6 +343,47 @@ void test_dsf() {
   check_close(dedr, (ep - em) / (2.0 * step), 1e-6, "SO3LR erf derivative");
 }
 
+void test_public_null_cell_calls() {
+  const std::vector<double> pos = {0, 0, 0, 1.2, 0.2, -0.1, 2.5, 1.0, 0.4};
+  const std::vector<int> z = {1, 1, 8};
+
+  DispersionConfig dcfg;
+  dcfg.kind = DispersionKind::QDO;
+  dcfg.periodic = false;
+  dcfg.cutoff = 12;
+  dcfg.short_cutoff = 3;
+  DispersionPot dispersion(dcfg);
+  check(std::isfinite(run_batch(dispersion, pos, z, nullptr).energy),
+        "public dispersion batch accepts a molecule");
+
+  NlhPot nlh;
+  check(std::isfinite(run_batch(nlh, pos, z, nullptr).energy),
+        "public NLH batch accepts a molecule");
+
+  CoulombConfig ccfg;
+  ccfg.method = CoulombMethod::DSF;
+  ccfg.periodic = false;
+  ccfg.cutoff = 8;
+  ccfg.alpha = 0.25;
+  ccfg.short_cutoff = 3;
+  const auto charges =
+      std::make_shared<FixedCharges>(std::vector<double>{0.3, -0.4, 0.1}, 0.0);
+  CoulombPot coulomb(ccfg, charges);
+  check(std::isfinite(run_batch(coulomb, pos, z, nullptr).energy),
+        "public Coulomb batch accepts a molecule");
+
+  ccfg.method = CoulombMethod::Ewald;
+  ccfg.periodic = true;
+  CoulombPot ewald(ccfg, charges);
+  bool threw = false;
+  try {
+    run_batch(ewald, pos, z, nullptr);
+  } catch (const std::invalid_argument &ex) {
+    threw = std::string(ex.what()) == "invalid parameter: box is null";
+  }
+  check(threw, "public periodic Ewald batch requires a cell");
+}
+
 void test_qdo_nlh_mbd() {
   std::vector<double> pos = {0, 0, 0, 1.4, 0.1, 0.0, 0.2, 1.6, 0.3};
   std::vector<int> z = {6, 1, 8};
@@ -378,6 +435,8 @@ void test_qdo_nlh_mbd() {
 
 class Bias final : public rgpot::Potential<Bias> {
 public:
+  static constexpr bool kCellOptional = true;
+
   Bias() : rgpot::Potential<Bias>(rgpot::PotType::UNKNOWN) {}
   void forceImpl(const ForceInput &in, ForceOut *out) const override {
     out->energy = 0.5;
@@ -1739,6 +1798,7 @@ int main() {
     test_madelung();
     test_forces_and_stress();
     test_dsf();
+    test_public_null_cell_calls();
     test_qdo_nlh_mbd();
     test_library_dispersion();
     test_sum_and_charge();

@@ -81,4 +81,86 @@ void zeroForceOut(const size_t &nAtoms, ForceOut *efvd);
  */
 void checkParams(const ForceInput &params);
 
+/// Same numeric value as @c RGPOT_PLUGIN_INVALID_PARAM and
+/// @c RGPOT_INVALID_PARAMETER.
+constexpr int kInvalidParameter = 1;
+
+/**
+ * @brief Store the reason of a failed force call on this thread.
+ *
+ * A null or empty @a reason does nothing. The plugin ABI describes
+ * @c last_error as the message of the last failure and does not say a
+ * later success clears it, so a successful call must not pass null here.
+ * The pointer from @c forceLastError stays valid until the next
+ * non-empty call on this thread.
+ */
+void setForceLastError(const char *reason) noexcept;
+
+/// Reason stored by the last failed force call on this thread.
+/// Empty until the first failure. Not cleared by a later success.
+const char *forceLastError() noexcept;
+
+/**
+ * @brief Reject an input that would read a null buffer, with no force output.
+ *
+ * For a call that has no force array, such as a Hessian-vector product. A
+ * system with no atoms is named first, then a null position or species
+ * pointer, then a null cell when @a needsCell is set. Each stores a message
+ * and returns @c kInvalidParameter. A usable input returns 0 and leaves the
+ * stored message unchanged.
+ */
+int rejectInputCall(const ForceInput &in, bool needsCell);
+
+/// Throw @c std::invalid_argument with the stored message when
+/// @c rejectInputCall rejects @a in.
+void guardInputCall(const ForceInput &in, bool needsCell);
+
+/**
+ * @brief Reject a force call that would read a null buffer.
+ *
+ * A system with no atoms is rejected first, with its own message, before
+ * the force pointer is read. An empty force allocation has a null data
+ * pointer, and that call must not be reported as a null force buffer.
+ * After that, a null @a out or force array, a null position or species
+ * pointer, or a null cell when @a needsCell is set, stores a message and
+ * returns @c kInvalidParameter. A usable call returns 0 and leaves the
+ * stored message unchanged.
+ */
+int rejectForceCall(const ForceInput &in, const ForceOut *out,
+                    bool needsCell);
+
+/// Throw @c std::invalid_argument with the stored message when
+/// @c rejectForceCall rejects @a in and @a out.
+void guardForceCall(const ForceInput &in, const ForceOut *out,
+                    bool needsCell);
+
+/// @c pot.caps().periodic when the kernel reports it, otherwise true,
+/// which is the default of @c PotCaps.
+template <class Pot> bool kernelPeriodic(const Pot &pot) {
+  if constexpr (requires { pot.caps().periodic; }) {
+    return pot.caps().periodic;
+  } else {
+    return true;
+  }
+}
+
+/// True when @p Pot declares @c kCellOptional: a kernel that supports a
+/// periodic cell and also evaluates an open system when it gets none, such
+/// as a molecular dispersion sum. @c caps().periodic says what a kernel
+/// supports, not what a call must supply, so such a kernel states the second
+/// on its own.
+template <class Pot> constexpr bool kernelCellOptional() {
+  if constexpr (requires { Pot::kCellOptional; }) {
+    return Pot::kCellOptional;
+  } else {
+    return false;
+  }
+}
+
+/// Whether a call without a cell is an error for @p pot: the kernel is
+/// periodic and does not declare @c kCellOptional.
+template <class Pot> bool kernelNeedsCell(const Pot &pot) {
+  return kernelPeriodic(pot) && !kernelCellOptional<Pot>();
+}
+
 } // namespace rgpot

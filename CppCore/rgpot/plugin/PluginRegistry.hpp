@@ -2,10 +2,10 @@
 // MIT License
 // Copyright 2023--present rgpot developers
 
-#include <rgpot/plugin.h>
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <rgpot/plugin.h>
 #include <string>
 #include <vector>
 
@@ -23,7 +23,9 @@ public:
   static PluginRegistry &instance();
   /// Load descriptors from the directories named by RGPOT_PLUGIN_PATH.
   void discover();
-  /// Return false for an invalid library or an existing plugin name.
+  /// Return false for an invalid library or a name that is already
+  /// registered. A collision keeps the existing plugin, including a
+  /// built-in, and prints the reason on standard error.
   bool load_plugin(const std::string &path);
   /// The descriptor and callbacks must have static lifetime.
   void register_builtin(const rgpot_plugin_descriptor_t *desc);
@@ -31,7 +33,8 @@ public:
   /// Returned entries remain valid across further registrations.
   const LoadedPlugin *find(const std::string &name) const;
   /// Keep a registered descriptor's library mapped for a live instance.
-  std::shared_ptr<void> retain_library(const rgpot_plugin_descriptor_t *desc) const;
+  std::shared_ptr<void>
+  retain_library(const rgpot_plugin_descriptor_t *desc) const;
 
   PluginRegistry(const PluginRegistry &) = delete;
   PluginRegistry &operator=(const PluginRegistry &) = delete;

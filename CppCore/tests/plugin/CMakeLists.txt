@@ -1,9 +1,11 @@
 add_library(rgpot_null SHARED ../../examples/plugins/null_plugin.c)
 add_library(rgpot_morse SHARED ../../examples/plugins/morse_plugin.c)
+add_library(rgpot_lj_collision SHARED lj_collision_plugin.c)
 add_library(rgpot_coulomb SHARED ../../examples/plugins/coulomb_plugin.f90
                                     ../../examples/plugins/coulomb_plugin_wrapper.c)
 add_library(rgpot_plugin_lifetime SHARED ../plugin_lifetime_fixture.c)
-foreach(_plugin rgpot_null rgpot_morse rgpot_coulomb rgpot_plugin_lifetime)
+foreach(_plugin rgpot_null rgpot_morse rgpot_lj_collision rgpot_coulomb
+                rgpot_plugin_lifetime)
   target_include_directories(${_plugin} PRIVATE "${PROJECT_SOURCE_DIR}/include")
   set_target_properties(${_plugin} PROPERTIES PREFIX "lib")
 endforeach()

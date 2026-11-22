@@ -12,13 +12,27 @@
 
 namespace rgpot::plugin {
 const rgpot_plugin_descriptor_t *builtinLennardJones();
+const rgpot_plugin_descriptor_t *builtinClassicalMorse();
+const rgpot_plugin_descriptor_t *builtinSuttonChen();
+#ifdef RGPOT_HAS_EAM_TABLE
+const rgpot_plugin_descriptor_t *builtinEamFuncfl();
+const rgpot_plugin_descriptor_t *builtinEamSetfl();
+#endif
 
 PluginRegistry &PluginRegistry::instance() {
   static PluginRegistry registry;
   return registry;
 }
 
-PluginRegistry::PluginRegistry() { register_builtin(builtinLennardJones()); }
+PluginRegistry::PluginRegistry() {
+  register_builtin(builtinLennardJones());
+  register_builtin(builtinClassicalMorse());
+  register_builtin(builtinSuttonChen());
+#ifdef RGPOT_HAS_EAM_TABLE
+  register_builtin(builtinEamFuncfl());
+  register_builtin(builtinEamSetfl());
+#endif
+}
 
 void PluginRegistry::discover() {
   const char *path = std::getenv("RGPOT_PLUGIN_PATH");
@@ -61,7 +75,8 @@ bool PluginRegistry::load_plugin(const std::string &path) {
   const std::shared_ptr<void> library(
       static_cast<void *>(handle),
       [](void *value) { dynlib::close(static_cast<dynlib::Handle>(value)); });
-  const auto init = dynlib::loadSym<rgpot_plugin_init_fn>(handle, "rgpot_plugin_init");
+  const auto init =
+      dynlib::loadSym<rgpot_plugin_init_fn>(handle, "rgpot_plugin_init");
   if (!init)
     return false;
   const rgpot_plugin_descriptor_t *descriptor = nullptr;
@@ -69,19 +84,24 @@ bool PluginRegistry::load_plugin(const std::string &path) {
     descriptor = init();
     detail::checkedDescriptor(descriptor);
   } catch (const std::exception &error) {
-    std::cerr << "[rgpot] invalid plugin " << path << ": " << error.what() << '\n';
+    std::cerr << "[rgpot] invalid plugin " << path << ": " << error.what()
+              << '\n';
     return false;
   }
   std::lock_guard lock(m_mutex);
   for (const auto &plugin : m_plugins) {
-    if (std::string(plugin.desc->name) == descriptor->name)
+    if (std::string(plugin.desc->name) == descriptor->name) {
+      std::cerr << "[rgpot] plugin name collision " << path << ": "
+                << descriptor->name << " is already registered\n";
       return false;
+    }
   }
   m_plugins.push_back({static_cast<void *>(handle), descriptor, path, library});
   return true;
 }
 
-void PluginRegistry::register_builtin(const rgpot_plugin_descriptor_t *descriptor) {
+void PluginRegistry::register_builtin(
+    const rgpot_plugin_descriptor_t *descriptor) {
   detail::checkedDescriptor(descriptor);
   std::lock_guard lock(m_mutex);
   for (const auto &plugin : m_plugins) {

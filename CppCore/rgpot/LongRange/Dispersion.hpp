@@ -90,6 +90,8 @@ std::unique_ptr<DispersionModel> make_dispersion(DispersionKind kind);
 
 class DispersionPot final : public Potential<DispersionPot> {
 public:
+  static constexpr bool kCellOptional = true;
+
   explicit DispersionPot(DispersionConfig cfg, std::shared_ptr<RatioSource> ratios = nullptr,
                          std::shared_ptr<RatioResponse> response = nullptr);
 

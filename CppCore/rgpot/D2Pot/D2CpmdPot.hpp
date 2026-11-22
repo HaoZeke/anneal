@@ -77,6 +77,10 @@ D2CpmdConfig d2_cpmd_config_for(std::string_view functional);
  */
 class D2CpmdPot final : public Potential<D2CpmdPot> {
 public:
+  /// A call with no cell is an open molecule, not an error; see
+  /// @c kernelCellOptional.
+  static constexpr bool kCellOptional = true;
+
   explicit D2CpmdPot(D2CpmdConfig cfg = {});
 
   void forceImpl(const ForceInput &in, ForceOut *out) const override;

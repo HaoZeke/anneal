@@ -9,7 +9,16 @@
  */
 
 #include "PotHelpers.hpp"
+#include <rgpot/plugin.h>
 #include <stdexcept>
+#include <string>
+
+#ifdef RGPOT_HAS_RUST_CORE
+#include "rgpot/eindir_abi.hpp"
+extern "C" {
+#include <rgpot.h>
+}
+#endif
 
 namespace rgpot {
 
@@ -44,6 +53,69 @@ void checkParams(const ForceInput &params) {
   // Simple sanity check
   if (params.nAtoms <= 0) {
     throw std::runtime_error("Can't work with zero atoms in force call");
+  }
+}
+
+namespace {
+thread_local std::string g_force_error;
+
+int fail(const char *reason) {
+  g_force_error = reason;
+  return kInvalidParameter;
+}
+} // namespace
+
+static_assert(kInvalidParameter ==
+              static_cast<int>(RGPOT_PLUGIN_INVALID_PARAM));
+#ifdef RGPOT_HAS_RUST_CORE
+static_assert(kInvalidParameter == static_cast<int>(RGPOT_INVALID_PARAMETER));
+#endif
+
+void setForceLastError(const char *reason) noexcept {
+  if (reason == nullptr || reason[0] == '\0') {
+    return;
+  }
+  g_force_error = reason;
+}
+
+const char *forceLastError() noexcept { return g_force_error.c_str(); }
+
+int rejectInputCall(const ForceInput &in, bool needsCell) {
+  if (in.nAtoms == 0) {
+    return fail("invalid parameter: nAtoms must be positive");
+  }
+  if (in.pos == nullptr) {
+    return fail("invalid parameter: positions is null");
+  }
+  if (in.atmnrs == nullptr) {
+    return fail("invalid parameter: atomic numbers are null");
+  }
+  if (needsCell && in.box == nullptr) {
+    return fail("invalid parameter: box is null");
+  }
+  return 0;
+}
+
+int rejectForceCall(const ForceInput &in, const ForceOut *out,
+                    bool needsCell) {
+  // A zero-atom call often has no force allocation, and that null must not
+  // become the reported error, so the force pointer is read only for atoms.
+  if (in.nAtoms != 0 && (out == nullptr || out->F == nullptr)) {
+    return fail("invalid parameter: forces are null");
+  }
+  return rejectInputCall(in, needsCell);
+}
+
+void guardInputCall(const ForceInput &in, bool needsCell) {
+  if (rejectInputCall(in, needsCell) != 0) {
+    throw std::invalid_argument(forceLastError());
+  }
+}
+
+void guardForceCall(const ForceInput &in, const ForceOut *out,
+                    bool needsCell) {
+  if (rejectForceCall(in, out, needsCell) != 0) {
+    throw std::invalid_argument(forceLastError());
   }
 }
 
