@@ -214,6 +214,12 @@ def test_suite_covers_every_advertised_potential_type() -> None:
     if rgpot.has_ipi:
         # IPIPot needs a live driver and has its own test below.
         covered_types.add("IPIPot")
+    if hasattr(rgpot, "MullerBrownPot"):
+        # A non-periodic surface: the cell-relaxation cases do not apply.
+        mb = RgpotCalculator("mullerbrown")
+        assert mb._cutoff == 0.0
+        assert mb._kernel_periodic is False
+        covered_types.add(type(mb.potential).__name__)
     assert factory_types == covered_types
 
 
@@ -236,6 +242,25 @@ def test_engine_factory_defaults_tile_like_lj(kind: str) -> None:
     for operation in (pickle.dumps, copy.copy, copy.deepcopy):
         with pytest.raises(TypeError, match="cannot pickle"):
             operation(direct_object)
+
+
+def test_muller_brown_matches_its_surface_and_refuses_a_periodic_cell() -> None:
+    atoms = Atoms(
+        "H2",
+        positions=[[-0.558, 1.442, 9.0], [4.0, 5.0, 6.0]],
+        cell=[18.0, 19.0, 20.0],
+        pbc=False,
+    )
+    atoms.calc = RgpotCalculator("mullerbrown")
+    assert atoms.get_potential_energy() == pytest.approx(-146.70, abs=0.01)
+    np.testing.assert_allclose(
+        atoms.get_forces(),
+        calculate_numerical_forces(atoms, eps=1e-5),
+        atol=2e-6,
+    )
+    atoms.pbc = True
+    with pytest.raises(ValueError, match="has no periodic boundaries"):
+        atoms.get_potential_energy()
 
 
 @ALL_CASES

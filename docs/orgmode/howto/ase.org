@@ -160,9 +160,10 @@ A kernel with none of these has a built-in entry.
 whether the term is a kind string, a dict without a ="cutoff"= key, which takes
 the class default, or a dict with one.
 It is the same for an object built in Python and one made from a kind string.
-A kernel that sums every image itself (D2, D4), is not periodic (D3), has no
-cutoff (WaterH), is defined by one minimum image (D2 CPMD) or runs in an
-external engine (i-PI, LAMMPS) has the built-in entry 0 and is not tiled.
+A kernel that sums every image itself (D2, D4), is not periodic (D3,
+Muller-Brown), has no cutoff (WaterH), is defined by one minimum image (D2 CPMD)
+or runs in an external engine (i-PI, LAMMPS) has the built-in entry 0 and is not
+tiled.
 A potential with no cutoff in any of these forms raises =ValueError= when the
 calculator is built, because a cutoff of 0 would skip the tiling and give the
 wrong energy in a short cell.
