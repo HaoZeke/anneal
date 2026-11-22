@@ -9,6 +9,7 @@ object reports more than one rank.
 
 from __future__ import annotations
 
+import importlib
 from typing import Any, Callable, Mapping, Sequence, cast
 
 import numpy as np
@@ -87,7 +88,7 @@ def _mpi_world(comm: Any, size: int) -> Any:
         if size <= 1:
             return None
         try:
-            from mpi4py import MPI
+            MPI = importlib.import_module("mpi4py").MPI
         except ImportError as exc:
             raise RuntimeError(
                 f"LAMMPS runs on {size} MPI ranks; rgpot.lammps needs mpi4py "
@@ -390,7 +391,9 @@ class FixExternal:
                     break
             assert problem is not None
         broadcast = comm.bcast(problem, root=0)
-        return str(broadcast)
+        if broadcast is not None and not isinstance(broadcast, str):
+            raise TypeError("MPI broadcast returned a non-string error report")
+        return broadcast
 
     def _step(self, nlocal: int, tag: Any, x: Any, f: Any) -> None:
         lmp: Any = self._lmp
