@@ -1157,10 +1157,7 @@ pub struct Symmetrise {
 
 const ESTABLISHED_SYMMETRY_ORDERS: usize = 5;
 const SYMMETRY_ORDER_BUCKETS: usize = ESTABLISHED_SYMMETRY_ORDERS + 1;
-const SYMMETRY_TAIL_BUCKETS: usize = SYMMETRY_ORDER_BUCKETS
-    * SYMMETRY_ORDER_BUCKETS
-    * SYMMETRY_ORDER_BUCKETS
-    * SYMMETRY_ORDER_BUCKETS;
+const SYMMETRY_TAIL_BUCKETS: usize = SYMMETRY_ORDER_BUCKETS;
 
 fn symmetry_order_from_draw(orders: &[usize], established_order: usize, blend_draw: f64) -> usize {
     let established = orders.len().min(ESTABLISHED_SYMMETRY_ORDERS);
@@ -1182,10 +1179,10 @@ fn symmetry_order_and_blend<R: Rng + ?Sized>(orders: &[usize], rng: &mut R) -> (
     let blend_draw = rng.random::<f64>();
     let blend = 0.3 + 0.4 * blend_draw;
     // Draw among the established orders first, exactly as the five-order
-    // library did. Only its upper boundary can open the general tail, after
-    // four nested size-independent sixth buckets. The existing blend draw
-    // supplies those digits, so retained orders also retain the random stream.
-    // The final bucket maps uniformly over every larger order.
+    // library did. Only its upper boundary can open a size-independent sixth
+    // bucket. The existing blend draw supplies that decision, so retained
+    // orders also retain the random stream. The bucket maps uniformly over
+    // every larger order.
     let order = symmetry_order_from_draw(orders, established_order, blend_draw);
     (order, blend)
 }
@@ -1294,9 +1291,9 @@ mod cluster_move_tests {
         for count in &counts[..4] {
             assert!((11_000..=13_000).contains(count), "{counts:?}");
         }
-        assert!((11_000..=13_000).contains(&counts[4]), "{counts:?}");
-        assert!(counts[5] < 30, "{counts:?}");
-        assert!(tail_orders.len() <= counts[5]);
+        assert!((9_000..=11_000).contains(&counts[4]), "{counts:?}");
+        assert!((1_500..=2_500).contains(&counts[5]), "{counts:?}");
+        assert_eq!(tail_orders.len(), orders.len() - established.len());
         for tail in 0..orders.len() - established.len() {
             let draw = (tail as f64 + 0.5)
                 / (SYMMETRY_TAIL_BUCKETS * (orders.len() - established.len())) as f64;
