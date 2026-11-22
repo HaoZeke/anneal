@@ -145,8 +145,9 @@ int32_t rgpot_nlist_build_systems(const double *positions, const int32_t *counts
 
 /* A builder keeps the last list while the atom count and request are
  * unchanged, the current image extent does not exceed the previous one,
- * and both checks stay inside half the skin: every atom displacement and
- * the four antipodal corner shifts (+span0 with +/-span1 and +/-span2).
+ * and 2 * max_disp + corner <= skin. max_disp is the largest atom
+ * displacement since the search; corner is the largest displacement of
+ * the four antipodal corners +span0 with +/-span1 and +/-span2.
  * Skin 0 rebuilds unless the coordinates and the cell match. open returns
  * a code and writes *builder. update fills out the same way
  * rgpot_nlist_build does after a search. When the stored list is kept,

@@ -304,9 +304,13 @@ int32_t rgpot_nlist_builder_update(rgpot_nlist_builder *builder,
   =reused= may be null.
 - Units :: as =rgpot_nlist_build=.
 - Outputs :: =*reused= is 1 when the stored list was kept, else 0.
-  The list is kept when =n=, =box9= and every request field are unchanged and
-  every atom has moved by at most =skin / 2= since the last search.
-  With =skin= 0 that means the coordinates did not move.
+  The list is kept when =n= and every request field are unchanged, the current
+  image extent does not exceed the previous one, and
+  =2 * max_disp + corner <= skin=.
+  =max_disp= is the largest atom displacement since the search;
+  =corner= is the largest displacement of the four antipodal corners
+  =+span0= with =±span1= and =±span2= under the box change.
+  With =skin= 0 that means the coordinates and cell did not change.
   =out=, =*count=, =*needed= and the size probe behave as in
   =rgpot_nlist_build=.
   On a kept list every column, =vector= and =distance= included, describes the
