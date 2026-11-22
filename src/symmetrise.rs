@@ -26,25 +26,7 @@
 //! structure with no approximate symmetry is left alone, which is the case
 //! where the random version does its damage.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use ndarray::{Array1, ArrayView1};
-
-/// Nearest-image lookups on the safe6 exchange path.
-///
-/// Stall symmetrisation and the continuous-symmetry scan both resolve a
-/// rotated point here. The count is process-wide and always on, so a bench
-/// can print it after a timed run.
-static SAFE6_NEAREST_INDEX: AtomicU64 = AtomicU64::new(0);
-
-/// How many safe6 nearest-image lookups this process has made.
-pub fn safe6_nearest_index_calls() -> u64 {
-    SAFE6_NEAREST_INDEX.load(Ordering::Relaxed)
-}
-
-fn note_safe6_nearest() {
-    SAFE6_NEAREST_INDEX.fetch_add(1, Ordering::Relaxed);
-}
 
 /// An approximate rotational symmetry a structure was found to have.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -187,7 +169,10 @@ fn sum_past_cap(total: f64, n: usize, cap: f64) -> bool {
     }
     let gate = cap * (1.0 + 1.0e-6);
     let edge = gate * gate * (n as f64);
-    if total > edge {
+    // A gate whose square underflows is not a bound: `total > 0` would
+    // reject a sum the square root still keeps. Only a normal edge is
+    // already on the reject side of that comparison.
+    if edge.is_normal() && total > edge {
         return true;
     }
     (total / n as f64).sqrt() >= gate
@@ -553,6 +538,12 @@ impl Cloud {
         if std::is_x86_feature_detected!("avx2") {
             return unsafe { self.nearest_index_avx2(image) };
         }
+        self.nearest_index_lanes(image)
+    }
+
+    /// Portable four-lane walk. Strict `<` inside a lane keeps the earlier
+    /// index, and the lanes then reduce by distance and then by index.
+    fn nearest_index_lanes(&self, image: [f64; 3]) -> (usize, f64) {
         let mut lane = [f64::INFINITY; 4];
         let mut who = [0usize; 4];
         let (xs, xs_tail) = self.xs.as_chunks::<4>();
@@ -620,7 +611,6 @@ impl Cloud {
         hint: usize,
         hint_gap: f64,
     ) -> (usize, f64) {
-        note_safe6_nearest();
         if hint < self.xs.len() {
             let distance = squared_offset(image, self.xs[hint], self.ys[hint], self.zs[hint]);
             if gap_ball_holds(distance, hint_gap) {
@@ -871,7 +861,10 @@ impl Cloud {
                 )
             };
             let mask = _mm256_movemask_pd(_mm256_cmp_pd(distance, best_lanes, _CMP_LT_OQ));
-            best_lanes = _mm256_min_pd(best_lanes, distance);
+            // `min_pd` returns its second operand when either lane is NaN.
+            // The running minimum has to be that operand, or one NaN chunk
+            // replaces every finite lane and the index array stays stale.
+            best_lanes = _mm256_min_pd(distance, best_lanes);
             if mask & 1 != 0 {
                 who[0] = index;
             }
@@ -932,7 +925,7 @@ impl Cloud {
                     _mm256_add_pd(_mm256_mul_pd(dx, dx), _mm256_mul_pd(dy, dy)),
                     _mm256_mul_pd(dz, dz),
                 );
-                best_lanes = _mm256_min_pd(best_lanes, distance);
+                best_lanes = _mm256_min_pd(distance, best_lanes);
             }
             index += 4;
         }
@@ -1016,7 +1009,7 @@ impl Cloud {
                             _mm256_add_pd(_mm256_mul_pd(dx, dx), _mm256_mul_pd(dy, dy)),
                             _mm256_mul_pd(dz, dz),
                         );
-                        best[lane] = _mm256_min_pd(best[lane], distance);
+                        best[lane] = _mm256_min_pd(distance, best[lane]);
                     }
                 }
                 index += 4;
@@ -3465,6 +3458,109 @@ mod shell_tests {
         );
     }
 
+    /// Four centred atoms, the second at the reported bits, axis along z.
+    ///
+    /// Order 2's reference residual is `sqrt(2)`. Order 3 maps an atom to
+    /// itself off the axis, so the reference is `None`. A self test that
+    /// accepts the boundary skips the scan and empties `best_order_about`
+    /// and `detect_all`. The slacked ball falls through, and both orders
+    /// keep the reference bits.
+    #[test]
+    fn half_gap_midpoint_keeps_the_reference_order() {
+        let atom1 = [
+            f64::from_bits(0xc014_976b_d600_144f),
+            f64::from_bits(0x4020_a4cf_0ab4_43e6),
+            0.0,
+        ];
+        let points = [
+            [1.0, 0.0, 0.0],
+            atom1,
+            [0.0, 1.0, 0.0],
+            [-1.0 - atom1[0], -1.0 - atom1[1], -atom1[2]],
+        ];
+        let mut coords = Vec::with_capacity(12);
+        for point in points {
+            coords.extend(point);
+        }
+        let x = Array1::from(coords);
+        let n = 4;
+        let axis = [0.0, 0.0, 1.0];
+        let cloud = Cloud::from_view(x.view(), n);
+        assert_eq!(cloud.xs[1].to_bits(), atom1[0].to_bits());
+        assert_eq!(cloud.ys[1].to_bits(), atom1[1].to_bits());
+        assert_eq!(cloud.zs[1].to_bits(), 0);
+        let order2 = split_exchange(&cloud, axis, 2, f64::INFINITY);
+        let got2 = cloud.symmetry_deviation(axis, 2, f64::INFINITY);
+        assert_eq!(
+            got2.map(f64::to_bits),
+            order2.map(f64::to_bits),
+            "order 2 got={got2:?} reference={order2:?}"
+        );
+        assert_eq!(
+            order2.map(f64::to_bits),
+            Some(2.0_f64.sqrt().to_bits()),
+            "order 2 reference {order2:?}"
+        );
+        let order3 = split_exchange(&cloud, axis, 3, f64::INFINITY);
+        let got3 = cloud.symmetry_deviation(axis, 3, f64::INFINITY);
+        assert!(order3.is_none(), "order 3 reference {order3:?}");
+        assert!(got3.is_none(), "order 3 got {got3:?}");
+        assert_eq!(best_order_about(x.view(), n, axis, &[2, 3]), Some(2));
+        let found = detect_all(x.view(), n, &[2, 3], 2.0);
+        assert!(
+            found.iter().any(|candidate| candidate.order == 2),
+            "detect_all missed order 2: {found:?}"
+        );
+        assert!(
+            found.iter().all(|candidate| candidate.order != 3),
+            "detect_all kept a self-mapping order 3: {found:?}"
+        );
+    }
+
+    /// A NaN chunk must not replace a finite lane or freeze its index.
+    ///
+    /// Twelve points. The first chunk is 10, the second is NaN, the third
+    /// is 2. The scalar walk returns index 8 at squared distance 4. `min_pd`
+    /// keeps the second operand of a NaN pair, so the running minimum has
+    /// to be that operand or the index stays 0.
+    #[test]
+    fn a_nan_chunk_keeps_the_scalar_index() {
+        let mut coords = vec![0.0; 36];
+        for index in 0..4 {
+            coords[3 * index] = 10.0;
+        }
+        for index in 4..8 {
+            coords[3 * index] = f64::NAN;
+        }
+        for index in 8..12 {
+            coords[3 * index] = 2.0;
+        }
+        let cloud = placed_cloud(
+            &(0..12)
+                .map(|index| {
+                    [
+                        coords[3 * index],
+                        coords[3 * index + 1],
+                        coords[3 * index + 2],
+                    ]
+                })
+                .collect::<Vec<_>>(),
+        );
+        let image = [0.0, 0.0, 0.0];
+        let scalar = cloud.nearest_index_scalar(image);
+        assert_eq!(scalar.0, 8);
+        assert_eq!(scalar.1.to_bits(), 4.0_f64.to_bits());
+        let lanes = cloud.nearest_index_lanes(image);
+        assert_eq!(lanes.0, scalar.0);
+        assert_eq!(lanes.1.to_bits(), scalar.1.to_bits());
+        #[cfg(target_arch = "x86_64")]
+        if std::is_x86_feature_detected!("avx2") {
+            let avx = unsafe { cloud.nearest_index_avx2(image) };
+            assert_eq!(avx.0, scalar.0, "avx2 index");
+            assert_eq!(avx.1.to_bits(), scalar.1.to_bits(), "avx2 distance");
+        }
+    }
+
     /// Indices 1 and 4 are the same distance from the origin. The scalar
     /// walk returns the earlier one.
     #[test]
@@ -3698,6 +3794,22 @@ mod shell_tests {
                 }
             }
         }
+        // The squared gate underflows. A positive subnormal sum is above
+        // that flushed edge and still below the square-root comparison.
+        let cap = 1.0e-180;
+        let n = 1usize;
+        let gate = cap * (1.0 + 1.0e-6);
+        let edge = gate * gate * (n as f64);
+        assert_eq!(edge, 0.0);
+        let total = 1.0e-300;
+        assert!(total > cap * cap * (n as f64));
+        let by_root = (total / n as f64).sqrt() >= gate;
+        assert!(by_root);
+        assert_eq!(
+            sum_past_cap(total, n, cap),
+            by_root,
+            "a flushed edge leaves the decision to the square root"
+        );
     }
 
     /// `detect`, `detect_all` and `detect_orders` keep the base split's bits.

@@ -339,10 +339,6 @@ fn main() {
         seen.lowest,
         out.basins,
     );
-    println!(
-        "safe6_nearest_index={}",
-        anneal_core::symmetrise::safe6_nearest_index_calls()
-    );
     if water {
         std::fs::write(
             format!("{prefix}.gmin"),

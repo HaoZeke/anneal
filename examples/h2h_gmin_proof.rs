@@ -108,10 +108,6 @@ fn cmd_run(args: &[String]) -> i32 {
         cpu_model(),
         cpu_pins(),
     );
-    println!(
-        "safe6_nearest_index={}",
-        anneal_core::symmetrise::safe6_nearest_index_calls()
-    );
     0
 }
 
