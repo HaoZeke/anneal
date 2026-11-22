@@ -58,11 +58,15 @@ if grep -q "^SF:${ROOT}/include/" "$OUT"; then
   EXTRACT_PATTERNS+=("${ROOT}/include/*")
 fi
 # Meson compiles a copy of rgpot_sw.f90 in the build tree, and that copy
-# includes sw_centred_body.inc. gcov records those paths under the build
-# directory, so the source-tree pattern above drops them.
+# includes sw_centred_body.inc by basename. gcov records the copy under
+# CppCore/rgpot/fortran and the include at the build directory root, so
+# the source-tree pattern above drops both.
 BUILD_ABS="$(cd "$BUILD" && pwd)"
 if [[ -d "${BUILD_ABS}/CppCore/rgpot/fortran" ]]; then
   EXTRACT_PATTERNS+=("${BUILD_ABS}/CppCore/rgpot/fortran/*")
+fi
+if grep -q "^SF:${BUILD_ABS}/sw_centred_body.inc$" "$OUT"; then
+  EXTRACT_PATTERNS+=("${BUILD_ABS}/sw_centred_body.inc")
 fi
 TMP=$(mktemp)
 trap 'rm -f "$TMP"' EXIT
