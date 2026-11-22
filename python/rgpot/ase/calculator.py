@@ -51,6 +51,8 @@ from ase.atoms import Atoms
 from ase.calculators.calculator import Calculator, all_changes
 from ase.calculators.singlepoint import SinglePointCalculator
 
+from rgpot.ase._registry import register_calculator as _register_calculator
+
 _ASE_KEYS = {
     "restart",
     "ignore_bad_restart_file",
@@ -729,3 +731,6 @@ class RgpotCalculator(Calculator):
                 }
                 atoms.calc = SinglePointCalculator(atoms, **spc_kw)
         return rows
+
+
+_register_calculator("rgpot", RgpotCalculator)
