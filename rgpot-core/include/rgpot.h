@@ -101,6 +101,11 @@ typedef struct DLManagedTensorVersioned DLManagedTensorVersioned;
 #define ENGINE_ABI_LAYOUT_REVISION 1
 
 /**
+ * Engine code meaning an argument is invalid.
+ */
+#define ENGINE_ERR_INVALID 1
+
+/**
  * Engine code meaning the backend does not support the requested operation.
  */
 #define ENGINE_ERR_UNSUPPORTED 3

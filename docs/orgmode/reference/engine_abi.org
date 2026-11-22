@@ -709,8 +709,25 @@ int rgpot_engine_set_callbacks(RgpotEnginePot *pot,
 - Errors :: the header defines no codes beyond the three-valued convention.
 
 Optional symbol.
-=ctx= must outlive the handle or the next call that replaces it.
-A learning engine requires an oracle before the first evaluation.
+A NULL =callbacks= pointer clears the registration.
+On success the engine copies the struct and uses the new =ctx= from then on.
+It must not use a previously registered =ctx= after the call returns, so the
+host may free that =ctx= once a replacing or clearing call has returned zero.
+The new =ctx= must stay valid until a later successful call replaces or clears
+it, or until =rgpot_engine_destroy= returns.
+On a nonzero return the previous registration remains in effect and the engine
+must not retain the supplied struct or its =ctx=, so the host may free that
+=ctx=.
+Engines built before the header said so, under the same 1.5 identity, may have
+kept a refused =ctx=.
+A host that cannot tell must keep every =ctx= it supplied valid until
+=rgpot_engine_destroy= returns; =EngineSession= does that for refused contexts.
+=rgpot_engine_create= takes no callbacks, so they can be registered only on a
+handle it has already returned.
+A learning engine therefore creates without an oracle and requires one before
+the first evaluation.
+An evaluation that needs the oracle before one is registered fails with a
+nonzero code.
 Must not run concurrently with another call on the same handle.
 
 *** =rgpot_engine_hint=
@@ -1226,12 +1243,14 @@ the handle as a =PotentialImpl=.
   =RgpotEngineComponent= of the header.
 - =CoordTransformFn=, =AbiVersionFn=, =AbiStampFn=, =CreateFn=, =DestroyFn=,
   =ForceFn=, =ForceBatchFn=, =HvpFn=, =CapsFn=, =LastErrorFn=,
-  =LastComponentsFn=, =ComponentNameFn= :: =extern "C"= function-pointer types
-  matching the C declarations above.
+  =LastComponentsFn=, =ComponentNameFn=, =ModelStateFn=, =SetCallbacksFn=,
+  =HintFn= :: =extern "C"= function-pointer types matching the C declarations
+  above.
 - =EngineSymbols= :: Resolved symbol table holding required
   (=abi_version=, =create=, =destroy=, =force=) and optional (=abi_stamp=,
   =force_batch=, =hvp=, =caps=, =last_error=,
-  =last_components=, =component_name=) function pointers.
+  =last_components=, =component_name=, =model_state=, =set_callbacks=, =hint=)
+  function pointers.
 - =EngineError= :: Typed error enum covering =Load=, =Missing=, =Abi=
   (=expected=, =found=), =AbiStamp= (=expected=, =found=), =Create=, =Invalid=,
   =Unsupported=, =Recoverable= (=code=, =message=), and =Fatal= (=code=,
@@ -1257,6 +1276,29 @@ the handle as a =PotentialImpl=.
   =EngineError::Fatal= without calling into native code, while dropping the
   handle still calls =rgpot_engine_destroy= once to release the =RgpotEnginePot=
   allocation.
+- =EngineSession= :: Owns the callbacks of one =EnginePotential=.
+  It borrows a =CoordinateTransform= only for the duration of each =force= or
+  =force_batch= call and never keeps it.
+  A callback or transform failure during a call is considered before the code
+  the engine returns.
+  A fatal failure from either side wins over a recoverable one.
+  The first fatal failure poisons the handle, and every later call returns that
+  =EngineError::Fatal= with the same code and message.
+  A failure reported without a message carries one that names its code.
+- =EngineSession::set_callbacks(callbacks)= :: Registers owned callbacks, or clears them with =None=, which passes a NULL table to =rgpot_engine_set_callbacks=.
+  On success the session installs the new callbacks first and then drops the old
+  ones, so the engine never holds a context the session has freed.
+  A panic in the old callbacks' destructor is caught and reported as a fatal
+  failure, which poisons the session; it never unwinds out of the call.
+  On a nonzero return the previous callbacks stay registered and the refused
+  ones are kept alive until the engine is destroyed, because an engine built
+  before the header forbade it may have retained them.
+  Dropping the session destroys the engine before it frees any callbacks.
+- =EngineSession::model_state()= and =EngineSession::hint(message)= :: Read =rgpot_engine_model_state=
+  (zero when the engine lacks it) and send a typed hint through
+  =rgpot_engine_hint=.
+  The message of a failed hint is the one the engine wrote to the error buffer,
+  or one naming the code when it wrote none.
 - =EnginePotential::caps()= / =EnginePotential::hvp(&request, direction)= ::
   Reads the size-prefixed engine capability structure and dispatches the exact
   product.

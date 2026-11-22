@@ -79,7 +79,10 @@ typedef struct RgpotEnginePot RgpotEnginePot;
  * Optional host-side transform applied by the engine to its scratch
  * copy of (positions, box) before evaluation. positions holds
  * 3*nAtoms doubles, box 9 doubles (row-major). Return 0 on success;
- * nonzero aborts the force call with that code.
+ * nonzero aborts the force call with that code. A batch engine may invoke the
+ * transform concurrently for different systems. Each invocation completes
+ * before the force or force_batch call returns; the engine must not retain the
+ * function pointer, user pointer, positions, or box.
  */
 typedef int (*rgpot_engine_coord_transform)(void *user, long nAtoms,
                                             double *positions, double *box);
@@ -235,10 +238,26 @@ typedef struct {
 } RgpotEngineCallbacks;
 
 /**
- * Register host callbacks. The struct is copied; ctx must outlive the
- * potential or a subsequent call replacing it. Learning engines
- * require an oracle before the first evaluation and fail create-time
- * validation without one.
+ * Register host callbacks. A NULL callbacks pointer clears the registration.
+ *
+ * On success the struct is copied and the engine uses the new ctx from then
+ * on. It must not use a previously registered ctx after the call returns, so
+ * the host may free that ctx once a replacing or clearing call has returned
+ * zero. The new ctx must stay valid until a later successful call replaces or
+ * clears it, or until rgpot_engine_destroy returns.
+ *
+ * On nonzero return the previous registration remains in effect and the
+ * engine must not retain the supplied struct or its ctx, so the host may free
+ * that ctx. Engines built before this was stated, under the same 1.5 identity,
+ * may have kept it; a host that cannot tell must keep every ctx it supplied
+ * valid until rgpot_engine_destroy returns. EngineSession in rgpot-core does
+ * that for refused contexts.
+ *
+ * rgpot_engine_create takes no callbacks, so a host can register them only on
+ * a handle that create has already returned. A learning engine therefore
+ * creates without an oracle and requires one before its first evaluation: an
+ * evaluation that needs the oracle before one is registered fails with a
+ * nonzero code.
  */
 RGPOT_ENGINE_API int rgpot_engine_set_callbacks(
     RgpotEnginePot *pot, const RgpotEngineCallbacks *callbacks);

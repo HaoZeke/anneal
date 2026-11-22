@@ -2,11 +2,14 @@
 
 use std::ffi::c_int;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use rgpot_core::engine::{
-    EngineError, EnginePotential, EngineRequest, RgpotEngineAbiStamp, RgpotEngineCaps,
-    RgpotEngineComponent, ENGINE_ABI_LAYOUT_REVISION, ENGINE_ABI_MINOR, ENGINE_ABI_VERSION,
-    ENGINE_ERR_UNSUPPORTED,
+    AcquireReason, CoordinateTransform, EngineCallbacks, EngineError, EngineEvaluation,
+    EngineFailure, EnginePotential, EngineRequest, EngineSession, EngineStatus,
+    RgpotEngineAbiStamp, RgpotEngineCaps, RgpotEngineComponent, ENGINE_ABI_LAYOUT_REVISION,
+    ENGINE_ABI_MINOR, ENGINE_ABI_VERSION, ENGINE_ERR_INVALID, ENGINE_ERR_UNSUPPORTED,
 };
 use rgpot_core::hvp::rgpot_hvp_scheme_t;
 use rgpot_core::status::rgpot_status_t;
@@ -18,6 +21,44 @@ use rgpot_core::types::{rgpot_force_input_t, rgpot_force_out_t};
 
 const SPRING: f64 = 2.5;
 const CELL: [f64; 9] = [10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0];
+
+#[cfg(feature = "cpmd-fixture")]
+#[derive(Debug)]
+enum CpmdFixtureError {
+    MissingEnvironment(&'static str),
+    Read(std::io::Error),
+    Engine(EngineError),
+}
+
+#[cfg(feature = "cpmd-fixture")]
+impl std::fmt::Display for CpmdFixtureError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingEnvironment(name) => {
+                write!(f, "required CPMD fixture variable {name} is not set")
+            }
+            Self::Read(error) => write!(f, "read CPMD fixture parameters: {error}"),
+            Self::Engine(error) => error.fmt(f),
+        }
+    }
+}
+
+#[cfg(feature = "cpmd-fixture")]
+impl std::error::Error for CpmdFixtureError {}
+
+#[cfg(feature = "cpmd-fixture")]
+impl From<std::io::Error> for CpmdFixtureError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Read(error)
+    }
+}
+
+#[cfg(feature = "cpmd-fixture")]
+impl From<EngineError> for CpmdFixtureError {
+    fn from(error: EngineError) -> Self {
+        Self::Engine(error)
+    }
+}
 
 fn build(name: &str, defines: &[&str]) -> PathBuf {
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/harmonic_engine.c");
@@ -128,6 +169,11 @@ fn configured_external_engine_passes_the_abi_check() {
     }
 }
 
+fn load_session(path: &Path) -> EngineSession {
+    // SAFETY: `path` names the fixture compiled from the ABI header above.
+    unsafe { EngineSession::load(path, &config()) }.expect("load the harmonic engine session")
+}
+
 struct FixtureObserver(libloading::Library);
 
 impl FixtureObserver {
@@ -156,6 +202,28 @@ fn library_is_mapped(path: &Path) -> bool {
     maps.lines()
         .filter_map(|line| line.split_whitespace().last())
         .any(|mapped| Path::new(mapped) == canonical)
+}
+
+fn batch_calls(path: &Path) -> c_int {
+    let library = unsafe { libloading::Library::new(path) }.expect("reopen the fixture");
+    let count: libloading::Symbol<unsafe extern "C" fn() -> c_int> =
+        unsafe { library.get(b"fixture_batch_call_count\0") }.expect("batch call count symbol");
+    unsafe { count() }
+}
+
+fn null_callback_clears(path: &Path) -> c_int {
+    let library = unsafe { libloading::Library::new(path) }.expect("reopen the fixture");
+    let count: libloading::Symbol<unsafe extern "C" fn() -> c_int> =
+        unsafe { library.get(b"fixture_null_callback_clear_count\0") }
+            .expect("null callback clear count symbol");
+    unsafe { count() }
+}
+
+fn last_oracle_rc(path: &Path) -> c_int {
+    let library = unsafe { libloading::Library::new(path) }.expect("reopen the fixture");
+    let value: libloading::Symbol<unsafe extern "C" fn() -> c_int> =
+        unsafe { library.get(b"fixture_last_oracle_rc\0") }.expect("oracle code symbol");
+    unsafe { value() }
 }
 
 fn unsupported_code(path: &Path) -> c_int {
@@ -187,6 +255,527 @@ fn force_is_the_harmonic_energy_and_minus_the_gradient() {
     assert!(all_within_roundoff(&answer.forces, &expected));
 }
 
+struct Shift;
+
+impl CoordinateTransform for Shift {
+    fn transform(
+        &mut self,
+        positions: &mut [f64],
+        _box_matrix: &mut [f64; 9],
+    ) -> Result<(), EngineFailure> {
+        for value in positions {
+            *value += 1.0;
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn session_transform_changes_only_engine_scratch() {
+    let path = build("harmonic_session_transform", &[]);
+    let mut session = load_session(&path);
+    let positions = [1.0, 2.0, 3.0];
+    let mut shift = Shift;
+    let answer = session
+        .force(
+            &EngineRequest {
+                positions: &positions,
+                atomic_numbers: &[1],
+                box_matrix: &CELL,
+            },
+            Some(&mut shift),
+        )
+        .expect("transformed force");
+    assert_eq!(positions, [1.0, 2.0, 3.0]);
+    assert_eq!(answer.energy.to_bits(), 36.25f64.to_bits());
+    assert_eq!(answer.forces, [-5.0, -7.5, -10.0]);
+}
+
+#[derive(Default)]
+struct CallbackRecord {
+    acquisitions: Vec<AcquireReason>,
+    states: Vec<u64>,
+}
+
+struct Oracle {
+    record: Arc<Mutex<CallbackRecord>>,
+}
+
+impl EngineCallbacks for Oracle {
+    fn oracle(&mut self, request: &EngineRequest<'_>) -> Result<EngineEvaluation, EngineFailure> {
+        Ok(EngineEvaluation {
+            energy: request.positions.iter().sum(),
+            forces: request.positions.iter().map(|value| -*value).collect(),
+        })
+    }
+
+    fn on_acquire(&mut self, reason: AcquireReason) {
+        self.record
+            .lock()
+            .expect("callback record")
+            .acquisitions
+            .push(reason);
+    }
+
+    fn on_model_update(&mut self, model_state: u64) {
+        self.record
+            .lock()
+            .expect("callback record")
+            .states
+            .push(model_state);
+    }
+}
+
+#[test]
+fn session_owns_callbacks_and_reports_model_state() {
+    let path = build("harmonic_session_callbacks", &[]);
+    let record = Arc::new(Mutex::new(CallbackRecord::default()));
+    let mut session = load_session(&path);
+    session
+        .set_callbacks(Some(Box::new(Oracle {
+            record: Arc::clone(&record),
+        })))
+        .expect("set callbacks");
+    let answer = session
+        .force(
+            &EngineRequest {
+                positions: &[1.0, 2.0, 3.0],
+                atomic_numbers: &[1],
+                box_matrix: &CELL,
+            },
+            None,
+        )
+        .expect("oracle force");
+    assert_eq!(answer.energy, 6.0);
+    assert_eq!(answer.forces, [-1.0, -2.0, -3.0]);
+    assert_eq!(session.model_state().expect("model state"), 1);
+    let record = record.lock().expect("callback record");
+    assert_eq!(record.acquisitions, [AcquireReason::Variance]);
+    assert_eq!(record.states, [1]);
+}
+
+#[test]
+fn failed_callback_replacement_keeps_old_registration_and_none_passes_null() {
+    let path = build("harmonic_callback_transaction", &[]);
+    let old = Arc::new(Mutex::new(CallbackRecord::default()));
+    let replacement = Arc::new(Mutex::new(CallbackRecord::default()));
+    let mut session = load_session(&path);
+    session
+        .set_callbacks(Some(Box::new(Oracle {
+            record: Arc::clone(&old),
+        })))
+        .expect("set initial callbacks");
+
+    let error = session
+        .set_callbacks(Some(Box::new(Oracle {
+            record: Arc::clone(&replacement),
+        })))
+        .expect_err("fixture refuses callback replacement");
+    assert_eq!(
+        error,
+        EngineError::Recoverable {
+            code: 2,
+            message: "callback replacement refused".into(),
+        }
+    );
+    session
+        .force(
+            &EngineRequest {
+                positions: &[1.0, 2.0, 3.0],
+                atomic_numbers: &[1],
+                box_matrix: &CELL,
+            },
+            None,
+        )
+        .expect("old oracle remains registered");
+    assert_eq!(
+        old.lock().expect("old callback record").acquisitions,
+        [AcquireReason::Variance]
+    );
+    assert!(replacement
+        .lock()
+        .expect("replacement callback record")
+        .acquisitions
+        .is_empty());
+
+    let before = null_callback_clears(&path);
+    session.set_callbacks(None).expect("clear callbacks");
+    assert_eq!(null_callback_clears(&path), before + 1);
+    let answer = session
+        .force(
+            &EngineRequest {
+                positions: &[1.0, 0.0, 0.0],
+                atomic_numbers: &[1],
+                box_matrix: &CELL,
+            },
+            None,
+        )
+        .expect("harmonic force after clearing callbacks");
+    assert_eq!(answer.energy.to_bits(), 1.25f64.to_bits());
+}
+
+/// An oracle that reports when it is dropped, and can panic when it is.
+struct Tracked {
+    dropped: Arc<AtomicBool>,
+    oracle_calls: Arc<AtomicUsize>,
+    panic_on_drop: bool,
+}
+
+impl Tracked {
+    fn new(panic_on_drop: bool) -> (Self, Arc<AtomicBool>, Arc<AtomicUsize>) {
+        let dropped = Arc::new(AtomicBool::new(false));
+        let oracle_calls = Arc::new(AtomicUsize::new(0));
+        let tracked = Self {
+            dropped: Arc::clone(&dropped),
+            oracle_calls: Arc::clone(&oracle_calls),
+            panic_on_drop,
+        };
+        (tracked, dropped, oracle_calls)
+    }
+}
+
+impl EngineCallbacks for Tracked {
+    fn oracle(&mut self, request: &EngineRequest<'_>) -> Result<EngineEvaluation, EngineFailure> {
+        self.oracle_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(EngineEvaluation {
+            energy: request.positions.iter().sum(),
+            forces: request.positions.iter().map(|value| -*value).collect(),
+        })
+    }
+}
+
+impl Drop for Tracked {
+    fn drop(&mut self) {
+        self.dropped.store(true, Ordering::SeqCst);
+        if self.panic_on_drop && !std::thread::panicking() {
+            panic!("callback destructor panic for fixture");
+        }
+    }
+}
+
+fn force_one(session: &mut EngineSession) -> Result<EngineEvaluation, EngineError> {
+    session.force(
+        &EngineRequest {
+            positions: &[1.0, 2.0, 3.0],
+            atomic_numbers: &[1],
+            box_matrix: &CELL,
+        },
+        None,
+    )
+}
+
+#[test]
+fn a_panicking_destructor_of_replaced_callbacks_does_not_unwind_out_of_the_swap() {
+    let path = build(
+        "harmonic_callback_replacement_destructor",
+        &["ACCEPT_CALLBACK_REPLACEMENT"],
+    );
+    let (old, old_dropped, _) = Tracked::new(true);
+    let (new, new_dropped, new_calls) = Tracked::new(false);
+    let mut session = load_session(&path);
+    session
+        .set_callbacks(Some(Box::new(old)))
+        .expect("set initial callbacks");
+
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        session.set_callbacks(Some(Box::new(new)))
+    }));
+    let error = outcome
+        .expect("the destructor panic must not unwind out of set_callbacks")
+        .expect_err("a panicking destructor is reported");
+    assert_eq!(
+        error,
+        EngineError::Fatal {
+            code: -1,
+            message: "callback destructor panicked".into(),
+        }
+    );
+    assert!(old_dropped.load(Ordering::SeqCst));
+    assert!(
+        !new_dropped.load(Ordering::SeqCst),
+        "the registered replacement must stay owned by the session"
+    );
+    assert_eq!(force_one(&mut session), Err(error));
+    assert_eq!(new_calls.load(Ordering::SeqCst), 0);
+
+    let dropped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || drop(session)));
+    assert!(dropped.is_ok(), "dropping the session must not panic");
+    assert!(new_dropped.load(Ordering::SeqCst));
+}
+
+#[test]
+fn clearing_callbacks_whose_destructor_panics_is_contained_and_reported() {
+    let path = build("harmonic_callback_clear_destructor", &[]);
+    let (old, old_dropped, _) = Tracked::new(true);
+    let mut session = load_session(&path);
+    session
+        .set_callbacks(Some(Box::new(old)))
+        .expect("set initial callbacks");
+
+    let outcome =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| session.set_callbacks(None)));
+    let error = outcome
+        .expect("the destructor panic must not unwind out of set_callbacks")
+        .expect_err("a panicking destructor is reported");
+    assert!(matches!(error, EngineError::Fatal { code: -1, .. }));
+    assert!(old_dropped.load(Ordering::SeqCst));
+    assert_eq!(null_callback_clears(&path), 1);
+}
+
+#[test]
+fn a_refused_callback_context_stays_alive_until_the_engine_is_destroyed() {
+    let path = build(
+        "harmonic_callback_refused_retained",
+        &["RETAIN_REFUSED_CALLBACKS"],
+    );
+    let observer = FixtureObserver::open(&path);
+    let (old, old_dropped, old_calls) = Tracked::new(false);
+    let (refused, refused_dropped, refused_calls) = Tracked::new(true);
+    let mut session = load_session(&path);
+    session
+        .set_callbacks(Some(Box::new(old)))
+        .expect("set initial callbacks");
+    session
+        .set_callbacks(Some(Box::new(refused)))
+        .expect_err("the fixture refuses the replacement");
+
+    assert!(
+        !refused_dropped.load(Ordering::SeqCst),
+        "an engine that kept the refused context must not see it freed"
+    );
+    force_one(&mut session).expect("the engine evaluates through the context it kept");
+    assert_eq!(old_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(refused_calls.load(Ordering::SeqCst), 1);
+    assert!(!old_dropped.load(Ordering::SeqCst));
+
+    let dropped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || drop(session)));
+    assert!(
+        dropped.is_ok(),
+        "a panicking destructor must not escape the drop"
+    );
+    assert_eq!(observer.destroyed(), 1);
+    assert!(refused_dropped.load(Ordering::SeqCst));
+    assert!(old_dropped.load(Ordering::SeqCst));
+}
+
+struct PanicOracle;
+
+impl EngineCallbacks for PanicOracle {
+    fn oracle(&mut self, _request: &EngineRequest<'_>) -> Result<EngineEvaluation, EngineFailure> {
+        panic!("oracle panic for fixture")
+    }
+}
+
+struct PanicModelUpdate;
+
+impl EngineCallbacks for PanicModelUpdate {
+    fn oracle(&mut self, request: &EngineRequest<'_>) -> Result<EngineEvaluation, EngineFailure> {
+        Ok(EngineEvaluation {
+            energy: 0.0,
+            forces: vec![0.0; request.positions.len()],
+        })
+    }
+
+    fn on_model_update(&mut self, _model_state: u64) {
+        panic!("model update panic for fixture")
+    }
+}
+
+struct PanicTransform;
+
+impl CoordinateTransform for PanicTransform {
+    fn transform(
+        &mut self,
+        _positions: &mut [f64],
+        _box_matrix: &mut [f64; 9],
+    ) -> Result<(), EngineFailure> {
+        panic!("transform panic for fixture")
+    }
+}
+
+/// Every later call on a poisoned session returns `expected`, code and
+/// message, without reaching the engine.
+fn assert_poisoned_without_an_extra_force(
+    session: &mut EngineSession,
+    path: &Path,
+    expected: &EngineError,
+) {
+    assert!(
+        matches!(expected, EngineError::Fatal { .. }),
+        "{expected:?}"
+    );
+    let observer = FixtureObserver::open(path);
+    let before = observer.native_calls();
+    for _ in 0..2 {
+        let error = session
+            .force(
+                &EngineRequest {
+                    positions: &[1.0, 0.0, 0.0],
+                    atomic_numbers: &[1],
+                    box_matrix: &CELL,
+                },
+                None,
+            )
+            .expect_err("fatal session remains poisoned");
+        assert_eq!(&error, expected);
+    }
+    assert_eq!(session.model_state().as_ref(), Err(expected));
+    assert_eq!(session.hint(&[1]).as_ref(), Err(expected));
+    assert_eq!(observer.native_calls(), before);
+}
+
+#[test]
+fn oracle_panic_is_fatal_and_poisons_the_session() {
+    let path = build("harmonic_oracle_panic", &[]);
+    let mut session = load_session(&path);
+    session
+        .set_callbacks(Some(Box::new(PanicOracle)))
+        .expect("set panic callback");
+    let error = session
+        .force(
+            &EngineRequest {
+                positions: &[1.0, 0.0, 0.0],
+                atomic_numbers: &[1],
+                box_matrix: &CELL,
+            },
+            None,
+        )
+        .expect_err("oracle panic is fatal");
+    assert_eq!(
+        error,
+        EngineError::Fatal {
+            code: -1,
+            message: "oracle callback panicked".into(),
+        }
+    );
+    assert_poisoned_without_an_extra_force(&mut session, &path, &error);
+}
+
+#[test]
+fn transform_panic_is_fatal_and_poisons_the_session() {
+    let path = build("harmonic_transform_panic", &[]);
+    let mut session = load_session(&path);
+    let error = session
+        .force(
+            &EngineRequest {
+                positions: &[1.0, 0.0, 0.0],
+                atomic_numbers: &[1],
+                box_matrix: &CELL,
+            },
+            Some(&mut PanicTransform),
+        )
+        .expect_err("transform panic is fatal");
+    assert_eq!(
+        error,
+        EngineError::Fatal {
+            code: -1,
+            message: "coordinate transform panicked".into(),
+        }
+    );
+    assert_poisoned_without_an_extra_force(&mut session, &path, &error);
+}
+
+#[test]
+fn hint_reports_status_updates_state_and_surfaces_callback_panics() {
+    let path = build("harmonic_hint", &[]);
+    let mut session = load_session(&path);
+    session.hint(&[1]).expect("valid hint");
+    assert_eq!(session.model_state().expect("model state"), 1);
+    let error = session.hint(&[0xff]).expect_err("fixture refuses hint");
+    assert_eq!(
+        error,
+        EngineError::Recoverable {
+            code: 2,
+            message: "hint refused".into(),
+        }
+    );
+    assert_eq!(session.model_state().expect("model state"), 1);
+
+    let panic_path = build("harmonic_hint_callback_panic", &[]);
+    let mut panic_session = load_session(&panic_path);
+    panic_session
+        .set_callbacks(Some(Box::new(PanicModelUpdate)))
+        .expect("set model-update callback");
+    let error = panic_session
+        .hint(&[1])
+        .expect_err("model-update callback panic is fatal");
+    assert_eq!(
+        error,
+        EngineError::Fatal {
+            code: -1,
+            message: "model-update callback panicked".into(),
+        }
+    );
+    assert_poisoned_without_an_extra_force(&mut panic_session, &panic_path, &error);
+}
+
+#[test]
+fn native_fatal_status_poisons_an_engine_session() {
+    let path = build("harmonic_session_fatal_once", &["FATAL_ONCE"]);
+    let observer = FixtureObserver::open(&path);
+    let mut session = load_session(&path);
+    let error = session
+        .force(
+            &EngineRequest {
+                positions: &[1.0, 0.0, 0.0],
+                atomic_numbers: &[1],
+                box_matrix: &CELL,
+            },
+            None,
+        )
+        .expect_err("fixture fires one fatal status");
+    assert_eq!(
+        error,
+        EngineError::Fatal {
+            code: -7,
+            message: "fatal once".into(),
+        }
+    );
+    let before = observer.native_calls();
+    let later = session
+        .force(
+            &EngineRequest {
+                positions: &[1.0, 0.0, 0.0],
+                atomic_numbers: &[1],
+                box_matrix: &CELL,
+            },
+            None,
+        )
+        .expect_err("session remains poisoned");
+    assert_eq!(later, error);
+    assert_eq!(observer.native_calls(), before);
+}
+
+#[test]
+fn typed_status_does_not_retry_from_error_text() {
+    assert_eq!(EngineStatus::from_code(0), EngineStatus::Success);
+    assert!(matches!(
+        EngineStatus::from_code(2),
+        EngineStatus::RecoverableInputFailure(magnitude) if magnitude.get() == 2
+    ));
+    assert!(matches!(
+        EngineStatus::from_code(-2),
+        EngineStatus::FatalInstanceFailure(magnitude) if magnitude.get() == 2
+    ));
+
+    let path = build("harmonic_session_no_retry", &[]);
+    let observer = FixtureObserver::open(&path);
+    let mut session = load_session(&path);
+    let before = observer.native_calls();
+    let error = session
+        .force(
+            &EngineRequest {
+                positions: &[0.0, 0.0, 0.0],
+                atomic_numbers: &[0],
+                box_matrix: &CELL,
+            },
+            None,
+        )
+        .expect_err("recoverable input");
+    assert_eq!(error.engine_status(), Some(EngineStatus::from_code(1)));
+    assert_eq!(observer.native_calls() - before, 2);
+}
+
 #[test]
 fn batch_is_the_same_answer_as_one_call_per_system() {
     let path = build("harmonic_batch", &[]);
@@ -198,9 +787,11 @@ fn batch_is_the_same_answer_as_one_call_per_system() {
     positions.extend_from_slice(&second);
     let mut boxes = CELL.to_vec();
     boxes.extend_from_slice(&CELL);
+    let before = batch_calls(&path);
     let batch = engine
         .force_batch(&numbers, &positions, &boxes)
         .expect("batch");
+    assert_eq!(batch_calls(&path), before + 1);
     assert_eq!(batch.len(), 2);
     for (system, one) in [first, second].iter().enumerate() {
         let single = engine
@@ -210,13 +801,66 @@ fn batch_is_the_same_answer_as_one_call_per_system() {
                 box_matrix: &CELL,
             })
             .expect("single");
-        assert!(within_roundoff(
-            batch[system].energy,
-            single.energy,
-            3 * one.len()
-        ));
-        assert!(all_within_roundoff(&batch[system].forces, &single.forces));
+        assert_eq!(batch[system].energy.to_bits(), single.energy.to_bits());
+        assert_eq!(
+            batch[system]
+                .forces
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            single
+                .forces
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        );
     }
+}
+
+#[cfg(feature = "cpmd-fixture")]
+#[test]
+#[ignore = "needs RGPOT_ENGINE_CPMD_FIXTURE and RGPOT_ENGINE_CPMD_PARAMS; run with --ignored"]
+fn cpmd_fixture_batch_preserves_single_call_bits_and_order() -> Result<(), CpmdFixtureError> {
+    let engine_path = std::env::var_os("RGPOT_ENGINE_CPMD_FIXTURE").ok_or(
+        CpmdFixtureError::MissingEnvironment("RGPOT_ENGINE_CPMD_FIXTURE"),
+    )?;
+    let params_path = std::env::var_os("RGPOT_ENGINE_CPMD_PARAMS").ok_or(
+        CpmdFixtureError::MissingEnvironment("RGPOT_ENGINE_CPMD_PARAMS"),
+    )?;
+    let config = std::fs::read(params_path)?;
+    let positions = [0.0, 0.0, 0.0, 0.8, 0.1, 0.0, 1.5, -0.2, 0.3, 0.1, 0.4, -0.7];
+    let numbers = [7, 1];
+    let mut boxes = CELL.to_vec();
+    boxes.extend_from_slice(&CELL);
+
+    // SAFETY: this feature deliberately trusts the externally supplied CPMD
+    // fixture to implement the versioned engine ABI.
+    let mut singles = unsafe { EngineSession::load(Path::new(&engine_path), &config) }?;
+    let first = singles.force(
+        &EngineRequest {
+            positions: &positions[..6],
+            atomic_numbers: &numbers,
+            box_matrix: &CELL,
+        },
+        None,
+    )?;
+    let second = singles.force(
+        &EngineRequest {
+            positions: &positions[6..],
+            atomic_numbers: &numbers,
+            box_matrix: &CELL,
+        },
+        None,
+    )?;
+
+    // SAFETY: the same trusted CPMD fixture is loaded into a fresh instance.
+    let mut batch = unsafe { EngineSession::load(Path::new(&engine_path), &config) }?;
+    let answers = batch.force_batch(&numbers, &positions, &boxes, None)?;
+    assert_eq!(answers[0].energy.to_bits(), first.energy.to_bits());
+    assert_eq!(answers[1].energy.to_bits(), second.energy.to_bits());
+    assert_eq!(answers[0].forces, first.forces);
+    assert_eq!(answers[1].forces, second.forces);
+    Ok(())
 }
 
 #[test]
@@ -1250,4 +1894,464 @@ fn coincident_pair_reports_recoverable_eval_error_and_internal_status() {
         rgpot_tensor_free(sep_input.atomic_numbers);
         rgpot_tensor_free(sep_input.box_matrix);
     }
+}
+
+struct SuccessStatusFailure;
+
+impl CoordinateTransform for SuccessStatusFailure {
+    fn transform(
+        &mut self,
+        _positions: &mut [f64],
+        _box_matrix: &mut [f64; 9],
+    ) -> Result<(), EngineFailure> {
+        Err(EngineFailure {
+            status: EngineStatus::Success,
+            message: "failure with success status".into(),
+        })
+    }
+}
+
+#[test]
+fn transform_failure_with_success_status_is_an_error() {
+    let path = build("harmonic_transform_success_status", &[]);
+    let mut session = load_session(&path);
+    let answer = session.force(
+        &EngineRequest {
+            positions: &[1.0, 2.0, 3.0],
+            atomic_numbers: &[1],
+            box_matrix: &CELL,
+        },
+        Some(&mut SuccessStatusFailure),
+    );
+    assert!(matches!(answer, Err(EngineError::Invalid(_))), "{answer:?}");
+}
+
+#[test]
+fn status_encoding_has_one_sign_per_class_and_round_trips() {
+    let samples = [
+        c_int::MIN,
+        c_int::MIN + 1,
+        -1000,
+        -7,
+        -2,
+        -1,
+        0,
+        1,
+        2,
+        3,
+        7,
+        1000,
+        c_int::MAX - 1,
+        c_int::MAX,
+    ];
+    for code in samples {
+        let status = EngineStatus::from_code(code);
+        assert_eq!(status.code(), code, "code {code}");
+        assert_eq!(EngineStatus::from_code(status.code()), status);
+        match status {
+            EngineStatus::Success => assert_eq!(code, 0),
+            EngineStatus::RecoverableInputFailure(magnitude) => {
+                assert!(code > 0, "code {code}");
+                assert_eq!(magnitude.get(), code.unsigned_abs());
+            }
+            EngineStatus::FatalInstanceFailure(magnitude) => {
+                assert!(code < 0, "code {code}");
+                assert_eq!(magnitude.get(), code.unsigned_abs());
+            }
+        }
+    }
+
+    assert_eq!(
+        EngineStatus::recoverable(2),
+        Some(EngineStatus::from_code(2))
+    );
+    assert_eq!(EngineStatus::recoverable(0), None);
+    assert_eq!(EngineStatus::recoverable(-2), None);
+    assert_eq!(EngineStatus::fatal(-2), Some(EngineStatus::from_code(-2)));
+    assert_eq!(EngineStatus::fatal(0), None);
+    assert_eq!(EngineStatus::fatal(2), None);
+    assert_eq!(
+        EngineStatus::Success.or_invalid().code(),
+        ENGINE_ERR_INVALID
+    );
+    assert_eq!(EngineStatus::from_code(-4).or_invalid().code(), -4);
+}
+
+#[test]
+fn engine_errors_report_a_status_of_their_own_class() {
+    let recoverable = EngineError::Recoverable {
+        code: 5,
+        message: String::new(),
+    };
+    let fatal = EngineError::Fatal {
+        code: -5,
+        message: String::new(),
+    };
+    assert_eq!(
+        recoverable.engine_status(),
+        Some(EngineStatus::from_code(5))
+    );
+    assert_eq!(fatal.engine_status(), Some(EngineStatus::from_code(-5)));
+    let contradictory = EngineError::Recoverable {
+        code: -5,
+        message: String::new(),
+    };
+    assert_eq!(contradictory.engine_status(), None);
+}
+
+struct ScriptedOracle {
+    answer: Result<EngineEvaluation, EngineFailure>,
+}
+
+impl EngineCallbacks for ScriptedOracle {
+    fn oracle(&mut self, _request: &EngineRequest<'_>) -> Result<EngineEvaluation, EngineFailure> {
+        self.answer.clone()
+    }
+}
+
+fn oracle_force(
+    name: &str,
+    answer: Result<EngineEvaluation, EngineFailure>,
+) -> (
+    PathBuf,
+    EngineSession,
+    Result<EngineEvaluation, EngineError>,
+) {
+    oracle_force_with(name, &[], answer)
+}
+
+fn oracle_force_with(
+    name: &str,
+    defines: &[&str],
+    answer: Result<EngineEvaluation, EngineFailure>,
+) -> (
+    PathBuf,
+    EngineSession,
+    Result<EngineEvaluation, EngineError>,
+) {
+    let path = build(name, defines);
+    let mut session = load_session(&path);
+    session
+        .set_callbacks(Some(Box::new(ScriptedOracle { answer })))
+        .expect("set callbacks");
+    let answer = session.force(
+        &EngineRequest {
+            positions: &[1.0, 2.0, 3.0],
+            atomic_numbers: &[1],
+            box_matrix: &CELL,
+        },
+        None,
+    );
+    (path, session, answer)
+}
+
+#[test]
+fn oracle_failure_with_success_status_reaches_native_code_as_an_error() {
+    let (path, session, answer) = oracle_force(
+        "harmonic_oracle_success_status",
+        Err(EngineFailure {
+            status: EngineStatus::Success,
+            message: "failure with success status".into(),
+        }),
+    );
+    assert_eq!(last_oracle_rc(&path), ENGINE_ERR_INVALID);
+    assert_eq!(
+        answer,
+        Err(EngineError::Recoverable {
+            code: ENGINE_ERR_INVALID,
+            message: "failure with success status".into(),
+        })
+    );
+    assert_eq!(session.model_state().expect("model state"), 0);
+}
+
+#[test]
+fn every_oracle_failure_status_reaches_native_code_as_its_own_nonzero_code() {
+    let (path, session, answer) = oracle_force(
+        "harmonic_oracle_recoverable",
+        Err(EngineFailure {
+            status: EngineStatus::from_code(5),
+            message: "oracle refused this geometry".into(),
+        }),
+    );
+    assert_eq!(last_oracle_rc(&path), 5);
+    assert_eq!(
+        answer
+            .expect_err("recoverable oracle failure")
+            .engine_status(),
+        Some(EngineStatus::from_code(5))
+    );
+    assert_eq!(session.model_state().expect("model state"), 0);
+
+    let (path, mut session, answer) = oracle_force(
+        "harmonic_oracle_fatal",
+        Err(EngineFailure {
+            status: EngineStatus::from_code(-9),
+            message: "oracle lost its backend".into(),
+        }),
+    );
+    assert_eq!(last_oracle_rc(&path), -9);
+    let error = answer.expect_err("fatal oracle failure");
+    assert_eq!(
+        error,
+        EngineError::Fatal {
+            code: -9,
+            message: "oracle lost its backend".into(),
+        }
+    );
+    assert_poisoned_without_an_extra_force(&mut session, &path, &error);
+
+    let (path, _session, answer) = oracle_force(
+        "harmonic_oracle_wrong_length",
+        Ok(EngineEvaluation {
+            energy: 1.0,
+            forces: vec![0.0],
+        }),
+    );
+    assert_eq!(last_oracle_rc(&path), ENGINE_ERR_INVALID);
+    assert!(
+        matches!(answer, Err(EngineError::Recoverable { code, .. }) if code == ENGINE_ERR_INVALID),
+        "{answer:?}"
+    );
+}
+
+#[test]
+fn oracle_output_that_is_not_finite_is_an_error_not_a_success() {
+    let cases = [
+        ("energy_nan", f64::NAN, vec![0.0, 0.0, 0.0], "energy"),
+        ("energy_inf", f64::INFINITY, vec![0.0, 0.0, 0.0], "energy"),
+        (
+            "force_nan",
+            1.0,
+            vec![0.0, f64::NAN, 0.0],
+            "force at element 1",
+        ),
+        (
+            "force_inf",
+            1.0,
+            vec![0.0, 0.0, f64::NEG_INFINITY],
+            "force at element 2",
+        ),
+    ];
+    for (name, energy, forces, what) in cases {
+        let (path, session, answer) = oracle_force(
+            &format!("harmonic_oracle_{name}"),
+            Ok(EngineEvaluation { energy, forces }),
+        );
+        assert_eq!(last_oracle_rc(&path), ENGINE_ERR_INVALID, "{name}");
+        match answer {
+            Err(EngineError::Recoverable { code, message }) => {
+                assert_eq!(code, ENGINE_ERR_INVALID, "{name}");
+                assert!(message.contains(what), "{name}: {message}");
+                assert!(message.contains("not finite"), "{name}: {message}");
+            }
+            other => panic!("{name}: expected a recoverable error, got {other:?}"),
+        }
+        assert_eq!(session.model_state().expect("model state"), 0, "{name}");
+    }
+}
+
+#[test]
+fn a_finite_oracle_answer_still_succeeds() {
+    let (path, session, answer) = oracle_force(
+        "harmonic_oracle_finite",
+        Ok(EngineEvaluation {
+            energy: -2.5,
+            forces: vec![0.5, -0.5, 0.0],
+        }),
+    );
+    assert_eq!(last_oracle_rc(&path), 0);
+    let answer = answer.expect("finite oracle answer");
+    assert_eq!(answer.energy, -2.5);
+    assert_eq!(answer.forces, [0.5, -0.5, 0.0]);
+    assert_eq!(session.model_state().expect("model state"), 1);
+}
+
+#[test]
+fn a_fatal_oracle_failure_is_latched_over_the_engines_own_fatal_code() {
+    let (path, mut session, answer) = oracle_force_with(
+        "harmonic_oracle_fatal_then_engine_fatal",
+        &["FATAL_AFTER_HOST_FAILURE"],
+        Err(EngineFailure {
+            status: EngineStatus::from_code(-9),
+            message: "oracle lost its backend".into(),
+        }),
+    );
+    assert_eq!(last_oracle_rc(&path), -9);
+    let error = answer.expect_err("fatal oracle failure");
+    assert_eq!(
+        error,
+        EngineError::Fatal {
+            code: -9,
+            message: "oracle lost its backend".into(),
+        }
+    );
+    assert_poisoned_without_an_extra_force(&mut session, &path, &error);
+}
+
+#[test]
+fn a_fatal_hint_with_an_empty_error_buffer_latches_a_message_naming_the_code() {
+    let path = build("harmonic_hint_fatal_without_message", &[]);
+    let mut session = load_session(&path);
+    let error = session.hint(&[0xfe]).expect_err("fixture fails the hint");
+    assert_eq!(
+        error,
+        EngineError::Fatal {
+            code: -5,
+            message: "rgpot_engine_hint failed with code -5 and wrote no message".into(),
+        }
+    );
+    assert_poisoned_without_an_extra_force(&mut session, &path, &error);
+}
+
+struct AcquirePanicThenRefuse;
+
+impl EngineCallbacks for AcquirePanicThenRefuse {
+    fn oracle(&mut self, _request: &EngineRequest<'_>) -> Result<EngineEvaluation, EngineFailure> {
+        Err(EngineFailure {
+            status: EngineStatus::from_code(5),
+            message: "oracle refused this geometry".into(),
+        })
+    }
+
+    fn on_acquire(&mut self, _reason: AcquireReason) {
+        panic!("acquisition panic for fixture")
+    }
+}
+
+#[test]
+fn a_recoverable_oracle_failure_does_not_replace_an_earlier_acquisition_panic() {
+    let path = build("harmonic_acquire_panic_then_refuse", &[]);
+    let mut session = load_session(&path);
+    session
+        .set_callbacks(Some(Box::new(AcquirePanicThenRefuse)))
+        .expect("set callbacks");
+    let error = session
+        .force(
+            &EngineRequest {
+                positions: &[1.0, 2.0, 3.0],
+                atomic_numbers: &[1],
+                box_matrix: &CELL,
+            },
+            None,
+        )
+        .expect_err("acquisition panic is fatal");
+    assert_eq!(last_oracle_rc(&path), 5);
+    assert_eq!(
+        error,
+        EngineError::Fatal {
+            code: -1,
+            message: "acquisition callback panicked".into(),
+        }
+    );
+    assert_poisoned_without_an_extra_force(&mut session, &path, &error);
+}
+
+/// Fails each call with the next status of `script`.
+struct ScriptedTransform {
+    script: Vec<EngineFailure>,
+}
+
+impl CoordinateTransform for ScriptedTransform {
+    fn transform(
+        &mut self,
+        _positions: &mut [f64],
+        _box_matrix: &mut [f64; 9],
+    ) -> Result<(), EngineFailure> {
+        Err(self.script.remove(0))
+    }
+}
+
+#[test]
+fn a_later_fatal_transform_failure_wins_over_an_earlier_recoverable_one() {
+    let path = build(
+        "harmonic_batch_transform_recoverable_then_fatal",
+        &["BATCH_ALL_SYSTEMS"],
+    );
+    let mut session = load_session(&path);
+    let mut transform = ScriptedTransform {
+        script: vec![
+            EngineFailure {
+                status: EngineStatus::from_code(4),
+                message: "first system refused".into(),
+            },
+            EngineFailure {
+                status: EngineStatus::from_code(-6),
+                message: "transform lost its frame".into(),
+            },
+        ],
+    };
+    let boxes: Vec<f64> = CELL.iter().chain(CELL.iter()).copied().collect();
+    let error = session
+        .force_batch(
+            &[1],
+            &[1.0, 0.0, 0.0, 2.0, 0.0, 0.0],
+            &boxes,
+            Some(&mut transform),
+        )
+        .expect_err("fatal transform failure");
+    assert!(transform.script.is_empty());
+    assert_eq!(
+        error,
+        EngineError::Fatal {
+            code: -6,
+            message: "transform lost its frame".into(),
+        }
+    );
+    assert_poisoned_without_an_extra_force(&mut session, &path, &error);
+}
+
+#[test]
+fn a_fatal_engine_code_wins_over_a_recoverable_transform_failure() {
+    let path = build(
+        "harmonic_transform_recoverable_engine_fatal",
+        &["FATAL_AFTER_HOST_FAILURE"],
+    );
+    let mut session = load_session(&path);
+    let mut transform = ScriptedTransform {
+        script: vec![EngineFailure {
+            status: EngineStatus::from_code(4),
+            message: "transform refused".into(),
+        }],
+    };
+    let error = session
+        .force(
+            &EngineRequest {
+                positions: &[1.0, 2.0, 3.0],
+                atomic_numbers: &[1],
+                box_matrix: &CELL,
+            },
+            Some(&mut transform),
+        )
+        .expect_err("fatal engine code");
+    assert_eq!(
+        error,
+        EngineError::Fatal {
+            code: -8,
+            message: "host failure left the engine unusable".into(),
+        }
+    );
+    assert_poisoned_without_an_extra_force(&mut session, &path, &error);
+}
+
+#[test]
+fn a_fatal_engine_code_wins_over_a_recoverable_oracle_failure() {
+    let (path, mut session, answer) = oracle_force_with(
+        "harmonic_oracle_recoverable_engine_fatal",
+        &["FATAL_AFTER_HOST_FAILURE"],
+        Err(EngineFailure {
+            status: EngineStatus::from_code(5),
+            message: "oracle refused this geometry".into(),
+        }),
+    );
+    assert_eq!(last_oracle_rc(&path), 5);
+    let error = answer.expect_err("fatal engine code");
+    assert_eq!(
+        error,
+        EngineError::Fatal {
+            code: -8,
+            message: "host failure left the engine unusable".into(),
+        }
+    );
+    assert_poisoned_without_an_extra_force(&mut session, &path, &error);
 }

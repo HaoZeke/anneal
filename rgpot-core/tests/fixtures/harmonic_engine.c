@@ -2,7 +2,10 @@
  * E = k/2 sum x^2 over all coordinates, F = -k x. The create message is one
  * native-endian double, k. An atomic number of zero fails the evaluation with
  * a recoverable code, a negative one with a fatal code. Compile definitions
- * drop symbols or change the ABI major. */
+ * drop symbols or change the ABI major. ACCEPT_CALLBACK_REPLACEMENT makes a
+ * second callback registration succeed. RETAIN_REFUSED_CALLBACKS makes the
+ * refused one stay registered although the call fails, as an engine written
+ * before the header forbade it might. */
 #include "rgpot/engine_c_abi.h"
 
 #include <math.h>
@@ -32,17 +35,25 @@ struct RgpotEnginePot {
   double k;
   double last_energy;
   int evaluated;
+  unsigned long long model_state;
+  RgpotEngineCallbacks callbacks;
   char error[128];
 };
 
 static int destroyed = 0;
 static int native_calls = 0;
+static int batch_calls = 0;
+static int null_callback_clears = 0;
+static int last_oracle_rc = -1000000;
 #ifdef FATAL_ONCE
 static int fatal_once_fired = 0;
 #endif
 
 int fixture_destroy_count(void) { return destroyed; }
 int fixture_native_call_count(void) { return native_calls; }
+int fixture_batch_call_count(void) { return batch_calls; }
+int fixture_null_callback_clear_count(void) { return null_callback_clears; }
+int fixture_last_oracle_rc(void) { return last_oracle_rc; }
 int fixture_unsupported_code(void) { return RGPOT_ENGINE_ERR_UNSUPPORTED; }
 
 int rgpot_engine_abi_version(void) { return FIXTURE_ABI; }
@@ -87,27 +98,69 @@ int rgpot_engine_force(RgpotEnginePot *pot, long n, const double *positions,
                        rgpot_engine_coord_transform transform, void *user) {
   long i;
   double e = 0.0;
+  double *scratch = NULL;
+  double scratch_box[9];
   native_calls += 1;
   (void)variance;
-  (void)box;
-  (void)transform;
-  (void)user;
+  if (transform != NULL) {
+    int rc;
+    scratch = malloc((size_t)(3 * n) * sizeof(double));
+    memcpy(scratch, positions, (size_t)(3 * n) * sizeof(double));
+    memcpy(scratch_box, box, sizeof scratch_box);
+    rc = transform(user, n, scratch, scratch_box);
+    if (rc != 0) {
+      free(scratch);
+#ifdef FATAL_AFTER_HOST_FAILURE
+      snprintf(pot->error, sizeof pot->error, "host failure left the engine unusable");
+      return -8;
+#else
+      return rc;
+#endif
+    }
+    positions = scratch;
+    box = scratch_box;
+  }
 #ifdef FATAL_ONCE
   if (!fatal_once_fired) {
     fatal_once_fired = 1;
     snprintf(pot->error, sizeof pot->error, "fatal once");
+    free(scratch);
     return -7;
   }
 #endif
   for (i = 0; i < n; i++) {
     if (atomic_nrs[i] == 0) {
       snprintf(pot->error, sizeof pot->error, "atom %ld has atomic number 0", i);
+      free(scratch);
       return 1;
     }
     if (atomic_nrs[i] < 0) {
       snprintf(pot->error, sizeof pot->error, "atom %ld has a negative atomic number", i);
+      free(scratch);
       return -1;
     }
+  }
+  if (pot->callbacks.oracle != NULL) {
+    int rc;
+    if (pot->callbacks.on_acquire != NULL)
+      pot->callbacks.on_acquire(pot->callbacks.ctx, RGPOT_ACQUIRE_VARIANCE);
+    rc = pot->callbacks.oracle(pot->callbacks.ctx, n, positions, atomic_nrs,
+                               forces, energy, box);
+    last_oracle_rc = rc;
+#ifdef FATAL_AFTER_HOST_FAILURE
+    if (rc != 0) {
+      snprintf(pot->error, sizeof pot->error, "host failure left the engine unusable");
+      free(scratch);
+      return -8;
+    }
+#endif
+    if (rc == 0) {
+      pot->model_state += 1;
+      if (pot->callbacks.on_model_update != NULL)
+        pot->callbacks.on_model_update(pot->callbacks.ctx, pot->model_state);
+    }
+    free(scratch);
+    return rc;
   }
 #ifdef REJECT_COINCIDENT
   {
@@ -119,6 +172,7 @@ int rgpot_engine_force(RgpotEnginePot *pot, long n, const double *positions,
         double dz = positions[3 * i + 2] - positions[3 * j + 2];
         if (!(dx * dx + dy * dy + dz * dz > 0.0)) {
           snprintf(pot->error, sizeof pot->error, "coincident atoms");
+          free(scratch);
           return RGPOT_ENGINE_ERR_EVAL;
         }
       }
@@ -133,6 +187,7 @@ int rgpot_engine_force(RgpotEnginePot *pot, long n, const double *positions,
   pot->last_energy = e;
   pot->evaluated = 1;
   pot->error[0] = '\0';
+  free(scratch);
   return 0;
 }
 #endif
@@ -145,17 +200,66 @@ int rgpot_engine_force_batch(RgpotEnginePot *pot, long n_systems, long n,
                              rgpot_engine_coord_transform transform,
                              void *user) {
   long s;
+  int first = 0;
   native_calls += 1;
+  batch_calls += 1;
   (void)variances;
   for (s = 0; s < n_systems; s++) {
     int rc = rgpot_engine_force(pot, n, positions + 3 * n * s, atomic_nrs,
                                 forces + 3 * n * s, energies + s, NULL,
                                 boxes + 9 * s, transform, user);
+#ifdef BATCH_ALL_SYSTEMS
+    if (rc != 0 && first == 0) first = rc;
+#else
     if (rc != 0) return rc;
+#endif
   }
-  return 0;
+  return first;
 }
 #endif
+
+unsigned long long rgpot_engine_model_state(const RgpotEnginePot *pot) {
+  return pot->model_state;
+}
+
+int rgpot_engine_set_callbacks(RgpotEnginePot *pot,
+                               const RgpotEngineCallbacks *callbacks) {
+  if (pot == NULL) return RGPOT_ENGINE_ERR_INVALID;
+  if (callbacks == NULL) {
+    null_callback_clears += 1;
+    memset(&pot->callbacks, 0, sizeof pot->callbacks);
+    return RGPOT_ENGINE_OK;
+  }
+#ifndef ACCEPT_CALLBACK_REPLACEMENT
+  if (pot->callbacks.oracle != NULL) {
+    snprintf(pot->error, sizeof pot->error, "callback replacement refused");
+#ifdef RETAIN_REFUSED_CALLBACKS
+    pot->callbacks = *callbacks;
+#endif
+    return RGPOT_ENGINE_ERR_EVAL;
+  }
+#endif
+  pot->callbacks = *callbacks;
+  return RGPOT_ENGINE_OK;
+}
+
+int rgpot_engine_hint(RgpotEnginePot *pot, const void *msg, size_t msg_len,
+                      char *errbuf, size_t errlen) {
+  const unsigned char *bytes = msg;
+  if (pot == NULL || msg == NULL || msg_len == 0) {
+    snprintf(errbuf, errlen, "invalid hint");
+    return RGPOT_ENGINE_ERR_INVALID;
+  }
+  if (bytes[0] == 0xff) {
+    snprintf(errbuf, errlen, "hint refused");
+    return RGPOT_ENGINE_ERR_EVAL;
+  }
+  if (bytes[0] == 0xfe) return -5;
+  pot->model_state += 1;
+  if (pot->callbacks.on_model_update != NULL)
+    pot->callbacks.on_model_update(pot->callbacks.ctx, pot->model_state);
+  return RGPOT_ENGINE_OK;
+}
 
 #ifndef NO_LAST_ERROR
 size_t rgpot_engine_last_error(const RgpotEnginePot *pot, char *buf, size_t len) {

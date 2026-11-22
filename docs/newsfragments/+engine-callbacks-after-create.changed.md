@@ -1,0 +1,3 @@
+<!-- Copyright 2023--present rgpot developers -->
+
+The engine C ABI header and reference now say that `rgpot_engine_create` takes no callbacks, so a host registers an oracle with `rgpot_engine_set_callbacks` on the handle create returned, and a learning engine that needs one fails its evaluations until then. `EngineSession::load` documents the same order.
