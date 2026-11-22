@@ -132,8 +132,8 @@ RGPOT_CPMDC_API void cpmdc_session_destroy(CPMDCSession *session);
  *         `cpmdc_last_error` is not declared here. This note covers only the
  *         stub and the reference fake: the stub does not define
  *         `cpmdc_last_error`, and the reference fake stores one string that a
- *         failing select sets and a successful select clears. Other engines are
- *         not described.
+ *         failing select or session create sets and a successful select or
+ *         session create clears. Other engines are not described.
  */
 RGPOT_CPMDC_API int cpmdc_session_select_orbitals(CPMDCSession *session,
                                                   long long key);

@@ -233,6 +233,8 @@ const Vec *EMT::GetCartesianForces() {
     const int slices = rgpot::teamSize(static_cast<std::size_t>(nAtoms));
     if (str == 0 &&
         nAtoms >= static_cast<int>(rgpot::kTeamMinAtoms)) {
+      counters.forces = atoms->GetChangeCounter();
+      VERB("f");
       const int maxnblen = nblist->MaxNeighborListLength();
       std::vector<int> other_buf(static_cast<std::size_t>(maxnblen));
       std::vector<Vec> rnb_buf(static_cast<std::size_t>(maxnblen));

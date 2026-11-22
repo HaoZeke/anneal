@@ -17,6 +17,11 @@
 #include "rgpot/EMT/EMTPot.hpp"
 #include "rgpot/Slices.hpp"
 
+#include "rgpot/EMT/Asap/Atoms.h"
+#include "rgpot/EMT/Asap/EMT.h"
+#include "rgpot/EMT/Asap/SuperCell.h"
+#include "rgpot/EMT/Asap/Vec.h"
+
 using Catch::Matchers::WithinAbs;
 
 TEST_CASE("EMT energy matches the copper cluster pin", "[emt]") {
@@ -202,7 +207,122 @@ std::vector<double> shifted(const std::vector<double> &pos, double step) {
   return out;
 }
 
+constexpr bool kPeriodic[3] = {true, true, true};
+
+// Writes a marker over the force buffer EMT keeps. A later call that
+// returns the marker came from the cache, and one that overwrites it
+// recomputed.
+class MarkableEMT : public EMT {
+public:
+  MarkableEMT() : EMT(nullptr) {}
+
+  static constexpr double kMarker = 1234.5;
+
+  void markForces() {
+    for (Vec &f : force) {
+      f[0] = f[1] = f[2] = kMarker;
+    }
+  }
+};
+
+struct DirectEmt {
+  Vec basis[3];
+  SuperCell cell;
+  Atoms atoms;
+  MarkableEMT emt;
+
+  explicit DirectEmt(const FccBox &sys)
+      : basis{Vec(sys.box[0], sys.box[1], sys.box[2]),
+              Vec(sys.box[3], sys.box[4], sys.box[5]),
+              Vec(sys.box[6], sys.box[7], sys.box[8])},
+        cell(basis, kPeriodic),
+        atoms(reinterpret_cast<const Vec *>(sys.pos.data()),
+              static_cast<int>(sys.z.size()), &cell) {
+    atoms.SetAtomicNumbers(sys.z.data());
+    atoms.SetUnitCell(basis, true);
+    atoms.SetCalculator(&emt);
+  }
+
+  void move(const std::vector<double> &pos) {
+    atoms.SetCartesianPositions(reinterpret_cast<const Vec *>(pos.data()));
+    atoms.SetUnitCell(basis, true);
+  }
+
+  std::vector<double> forces(std::size_t n) {
+    const Vec *f = emt.GetCartesianForces();
+    std::vector<double> out(3 * n);
+    for (std::size_t i = 0; i < n; ++i) {
+      for (int k = 0; k < 3; ++k) {
+        out[3 * i + static_cast<std::size_t>(k)] = f[i][k];
+      }
+    }
+    return out;
+  }
+};
+
+std::size_t countBitDiffs(const std::vector<double> &a,
+                          const std::vector<double> &b) {
+  std::size_t diffs = a.size() == b.size() ? 0 : 1;
+  for (std::size_t k = 0; k < std::min(a.size(), b.size()); ++k) {
+    diffs += (f64Bits(a[k]) == f64Bits(b[k])) ? 0 : 1;
+  }
+  return diffs;
+}
+
 } // namespace
+
+TEST_CASE("EMT direct repeated force calls reuse the cached forces",
+          "[emt][threads]") {
+  ThreadGuard guard;
+  const auto large = fccCu(13, 3.615 / std::sqrt(2.0));
+  const std::size_t n = large.z.size();
+  REQUIRE(n >= rgpot::kTeamMinAtoms);
+  const auto moved = shifted(large.pos, 0.02);
+
+  std::vector<double> ref_forces;
+  std::vector<double> ref_moved;
+  for (const char *th : {"1", "4"}) {
+    INFO("OMP_NUM_THREADS=" << th);
+    ThreadGuard::set(th);
+
+    DirectEmt direct(large);
+    const auto first = direct.forces(n);
+
+    direct.emt.markForces();
+    const double marker = MarkableEMT::kMarker;
+    const Vec *again = direct.emt.GetCartesianForces();
+    bool cached = true;
+    for (std::size_t i = 0; i < n; ++i) {
+      for (int k = 0; k < 3; ++k) {
+        cached = cached && f64Bits(again[i][k]) == f64Bits(marker);
+      }
+    }
+    CHECK(cached);
+    const auto before = rgpot::teamsOpened();
+    CHECK(direct.emt.GetCartesianForces() == again);
+    CHECK(rgpot::teamsOpened() == before);
+
+    // A moved atom set is a new evaluation, not the cached one.
+    direct.move(moved);
+    const auto after_move = direct.forces(n);
+    CHECK(countBitDiffs(after_move, first) != 0);
+
+    // The same forces, bit for bit, as an evaluation through EMTPot.
+    rgpot::EMTPot pot;
+    const auto through_pot = runEval(pot, large.pos, large.z, large.box);
+    CHECK(countBitDiffs(first, through_pot.forces) == 0);
+    const auto through_pot_moved = runEval(pot, moved, large.z, large.box);
+    CHECK(countBitDiffs(after_move, through_pot_moved.forces) == 0);
+
+    if (ref_forces.empty()) {
+      ref_forces = first;
+      ref_moved = after_move;
+    } else {
+      CHECK(countBitDiffs(first, ref_forces) == 0);
+      CHECK(countBitDiffs(after_move, ref_moved) == 0);
+    }
+  }
+}
 
 TEST_CASE("EMT OpenMP force path is bit-identical across threads", "[emt][threads]") {
   ThreadGuard guard;
