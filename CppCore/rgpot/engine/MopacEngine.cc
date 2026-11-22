@@ -19,6 +19,15 @@ Created create(const void *config, std::size_t config_len) {
                   builtin.name + "'";
       return out;
     }
+    if (builtin.xtb) {
+      throw std::invalid_argument(
+          "BuiltinParams.config arm xtb does not match potential 'mopac'");
+    }
+    if (builtin.mullerBrown) {
+      throw std::invalid_argument(
+          "BuiltinParams.config arm mullerBrown does not match potential "
+          "'mopac'");
+    }
     MOPACPot::Config c;
     c.engine_path = builtin.library;
     auto backend = std::make_unique<Backend>();

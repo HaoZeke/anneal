@@ -1,0 +1,28 @@
+# Copyright 2023--present rgpot developers
+diff --git a/Potentials.capnp b/Potentials.capnp
+--- a/Potentials.capnp
++++ b/Potentials.capnp
+@@ -2556,6 +2556,17 @@ struct MorseParams {
+   cutoff @3 :Float64 = 9.5;
+ }
+ 
++# Four entries per list. An empty list keeps the published defaults.
++struct MullerBrownParams {
++  amplitude @0 :List(Float64);
++  a @1 :List(Float64);
++  b @2 :List(Float64);
++  c @3 :List(Float64);
++  x0 @4 :List(Float64);
++  y0 @5 :List(Float64);
++}
++
+ struct ZBLParams {
+   cutInner @0 :Float64 = 2.0;
+   cutGlobal @1 :Float64 = 2.5;
+@@ -2717,5 +2728,6 @@ struct PotentialConfig {
+     d2 @19 :D2Params;               # rgpot::D2Pot, Grimme 2006 lattice sum
+     d2cpmd @20 :D2CpmdParams;       # rgpot::D2CpmdPot, CPMD's minimum-image D2
++    mullerBrown @21 :MullerBrownParams;
+   }
+   # Normalized overlay applied BEFORE the native arm; native settings win.
+   common @3 :CommonMethodSpec;

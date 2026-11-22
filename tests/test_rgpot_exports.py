@@ -1,8 +1,10 @@
 # Copyright 2023--present rgpot developers
 """The shared library's rgpot_* export count stays at the measured pin.
 
-49 for a normal link of librgpot_core.a, 95 when librgpot_bundle.a is
-linked with --whole-archive. The extra 46 are the public C ABI.
+51 for a normal link of librgpot_core.a, 104 when librgpot_bundle.a is
+linked with --whole-archive. The extra 53 are the public C ABI in the
+core baseline plus the four fast-list entry points. Two of the umbrella
+exports are the Muller-Brown entry points.
 """
 
 from __future__ import annotations
@@ -22,22 +24,23 @@ def _baseline(name: str) -> set[str]:
 
 
 def test_pinned_counts():
-    assert exports.CORE_ONLY_EXPORTS == 49
-    assert exports.BUNDLE_EXPORTS == 95
-    assert exports.BUNDLE_EXPORTS - exports.CORE_ONLY_EXPORTS == 46
+    assert exports.CORE_ONLY_EXPORTS == 51
+    assert exports.BUNDLE_EXPORTS == 104
+    assert exports.BUNDLE_EXPORTS - exports.CORE_ONLY_EXPORTS == 53
 
 
 def test_baselines_are_the_public_archive_set():
     core = _baseline("abi_core_baseline.txt")
     fast = _baseline("abi_baseline_fast.txt")
-    assert len(core) == 42
+    assert len(core) == 49
     assert len(fast) == 4
     assert core.isdisjoint(fast)
-    assert len(core | fast) == 46
+    assert len(core | fast) == 53
 
 
 def test_whole_archive_exports_the_public_set():
-    wanted = {f"rgpot_abi_{index}" for index in range(46)}
+    extra = exports.BUNDLE_EXPORTS - exports.CORE_ONLY_EXPORTS
+    wanted = {f"rgpot_abi_{index}" for index in range(extra)}
     umbrella = {f"rgpot_cxx_{index}" for index in range(exports.CORE_ONLY_EXPORTS)}
     exports.evaluate(umbrella | wanted, wanted, wanted, whole=True)
 
@@ -57,7 +60,8 @@ def test_core_only_rejects_an_archive_symbol():
 
 
 def test_whole_archive_rejects_a_dropped_name():
-    wanted = {f"rgpot_abi_{index}" for index in range(46)}
+    extra = exports.BUNDLE_EXPORTS - exports.CORE_ONLY_EXPORTS
+    wanted = {f"rgpot_abi_{index}" for index in range(extra)}
     umbrella = {f"rgpot_cxx_{index}" for index in range(exports.CORE_ONLY_EXPORTS)}
     exported = (umbrella | wanted) - {"rgpot_abi_0"}
     with pytest.raises(SystemExit, match="dropped public"):
@@ -65,10 +69,11 @@ def test_whole_archive_rejects_a_dropped_name():
 
 
 def test_count_mismatch_names_the_pin():
-    wanted = {f"rgpot_abi_{index}" for index in range(46)}
+    extra = exports.BUNDLE_EXPORTS - exports.CORE_ONLY_EXPORTS
+    wanted = {f"rgpot_abi_{index}" for index in range(extra)}
     exported = {f"rgpot_cxx_{index}" for index in range(exports.BUNDLE_EXPORTS)}
     exported.update(wanted)
-    with pytest.raises(SystemExit, match="expected 95"):
+    with pytest.raises(SystemExit, match="expected 104"):
         exports.evaluate(exported, wanted, wanted, whole=True)
 
 

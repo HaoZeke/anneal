@@ -76,6 +76,7 @@ class MpiPefSession;
 #endif
 #include "rgpot/rpc/CompositeConfigure.hpp"
 #include "rgpot/rpc/MorseConfigure.hpp"
+#include "rgpot/rpc/MullerBrownConfigure.hpp"
 #include "rgpot/rpc/PotentialConfigArm.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
 #include "rgpot/types/adapters/capnp/capnp_adapter.hpp"
@@ -87,9 +88,11 @@ class MpiPefSession;
 #define RGPOT_OWN_ARM_TAIL "D2 and D2Cpmd"
 #endif
 #ifdef RGPOT_HAS_CP2K
-constexpr const char *kOwnArmBackends = "NWChem, CPMD, CP2K, Morse, Composite, " RGPOT_OWN_ARM_TAIL;
+constexpr const char *kOwnArmBackends =
+    "NWChem, CPMD, CP2K, Morse, Composite, MullerBrown, " RGPOT_OWN_ARM_TAIL;
 #else
-constexpr const char *kOwnArmBackends = "NWChem, CPMD, Morse, Composite, " RGPOT_OWN_ARM_TAIL;
+constexpr const char *kOwnArmBackends =
+    "NWChem, CPMD, Morse, Composite, MullerBrown, " RGPOT_OWN_ARM_TAIL;
 #endif
 #undef RGPOT_OWN_ARM_TAIL
 #ifdef RGPOT_POTSERV_MPI
@@ -123,6 +126,8 @@ private:
   rgpot::D2Pot *m_d2 = nullptr;
   /// Set when the backend is D2Cpmd; configure() replaces the pot.
   rgpot::D2CpmdPot *m_d2cpmd = nullptr;
+  /// Set when the backend is Muller-Brown; configure() replaces the surface.
+  rgpot::MullerBrownPot *m_muller_brown = nullptr;
 #ifdef RGPOT_HAS_DFTD4
   /// Set when the backend is D4; configure() replaces the pot.
   rgpot::D4Pot *m_d4 = nullptr;
@@ -148,7 +153,8 @@ public:
         m_morse(dynamic_cast<rgpot::MorsePot *>(m_potential.get())),
         m_sum(dynamic_cast<rgpot::SumPot *>(m_potential.get())),
         m_d2(dynamic_cast<rgpot::D2Pot *>(m_potential.get())),
-        m_d2cpmd(dynamic_cast<rgpot::D2CpmdPot *>(m_potential.get()))
+        m_d2cpmd(dynamic_cast<rgpot::D2CpmdPot *>(m_potential.get())),
+        m_muller_brown(dynamic_cast<rgpot::MullerBrownPot *>(m_potential.get()))
 #ifdef RGPOT_HAS_DFTD4
         ,
         m_d4(dynamic_cast<rgpot::D4Pot *>(m_potential.get()))
@@ -426,6 +432,16 @@ public:
       results.setMessage(applied.message);
       return kj::READY_NOW;
     }
+    if (m_muller_brown) {
+      auto applied = rgpot::rpc::configureMullerBrown(cfg);
+      if (applied.replacement) {
+        m_muller_brown = applied.replacement.get();
+        m_potential = std::move(applied.replacement);
+      }
+      results.setOk(applied.ok);
+      results.setMessage(applied.message);
+      return kj::READY_NOW;
+    }
     if (!appliesOwnArm()) {
       if (cfg.which() == ::PotentialConfig::NONE) {
         results.setOk(true);
@@ -471,6 +487,11 @@ public:
  * ./potserv <port> <PotentialType>
  * @endcode
  *
+ * PotentialType is one of LJ, LJCluster, Morse, ZBL, Eckart, MullerBrown,
+ * ModifiedMullerBrown, LEPS-HH2, LEPS-HCl2, LEPS-FH2, DoubleWell,
+ * CoupledProtonWell, Composite, D2 and D2Cpmd, plus the backends this build
+ * compiled in. The printed usage line is the same list.
+ *
  * @param argc Argument count.
  * @param argv Argument vector.
  * @return 0 on success, 1 on initialization failure.
@@ -482,7 +503,9 @@ int runServer(int argc, char *argv[]
 ) {
   if (argc < 3) {
     std::cerr << "Usage: " << argv[0] << " <port> <PotentialType>" << std::endl;
-    std::cerr << "  Available PotentialTypes: LJ, LJCluster, Morse, ZBL, Composite, D2, D2Cpmd"
+    std::cerr << "  Available PotentialTypes: LJ, LJCluster, Morse, ZBL, Eckart, "
+                 "MullerBrown, ModifiedMullerBrown, LEPS-HH2, LEPS-HCl2, "
+                 "LEPS-FH2, Composite, D2, D2Cpmd"
 #ifdef RGPOT_HAS_FORTRAN_POTS
               << ", CuH2"
 #endif

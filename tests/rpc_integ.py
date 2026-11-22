@@ -662,6 +662,58 @@ async def run_hvp_unit_smoke(port):
     return True
 
 
+async def run_muller_brown_configure(port):
+    """An empty list in configure(mullerBrown) selects the published default."""
+    for _ in range(10):
+        try:
+            connection = await capnp.AsyncIoStream.create_connection(
+                host="localhost", port=port
+            )
+            break
+        except OSError:
+            await asyncio.sleep(0.5)
+    else:
+        print("Muller-Brown configure: failed to connect to server.")
+        return False
+
+    client = capnp.TwoPartyClient(connection)
+    pot = client.bootstrap().cast_as(pot_capnp.Potential)
+    fip = pot_capnp.ForceInput.new_message()
+    fip.init("pos", 3)
+    for i, value in enumerate([0.23, -0.17, 0.0]):
+        fip.pos[i] = value
+    fip.init("atmnrs", 1)
+    fip.atmnrs[0] = 1
+    fip.init("box", 9)
+    for i, b in enumerate([40.0, 0.0, 0.0, 0.0, 40.0, 0.0, 0.0, 0.0, 40.0]):
+        fip.box[i] = b
+
+    defaults = (await pot.calculate(fip)).result.energy
+
+    cfg = pot_capnp.PotentialConfig.new_message()
+    amplitude = cfg.init("mullerBrown").init("amplitude", 4)
+    for i, value in enumerate([-400.0, -200.0, -340.0, 30.0]):
+        amplitude[i] = value
+    reply = await pot.configure(cfg)
+    assert reply.ok, reply.message
+    doubled = (await pot.calculate(fip)).result.energy
+    assert math.isclose(doubled, 2.0 * defaults, rel_tol=1e-12)
+
+    reply = await pot.configure(potential_config_arm("mullerBrown"))
+    print(f"Muller-Brown configure(empty lists): ok={reply.ok} msg={reply.message}")
+    assert reply.ok, reply.message
+    assert (await pot.calculate(fip)).result.energy == defaults
+
+    bad = pot_capnp.PotentialConfig.new_message()
+    bad.init("mullerBrown").init("a", 3)
+    reply = await pot.configure(bad)
+    assert not reply.ok and "four values" in reply.message, reply.message
+    assert (await pot.calculate(fip)).result.energy == defaults
+
+    await refuse_every_arm(pot, "Muller-Brown", applied=("mullerBrown",))
+    return True
+
+
 async def run_model_surface_smoke(port, name):
     for _ in range(10):
         try:
@@ -778,6 +830,30 @@ def main():
     if not morse_ok:
         sys.exit(1)
     print("Morse configure passed.")
+
+    muller_port = args.port + 12
+    print(f"Starting Muller-Brown server: {args.server_bin} {muller_port} MullerBrown")
+    muller_proc = subprocess.Popen(
+        [args.server_bin, str(muller_port), "MullerBrown"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        muller_ok = asyncio.run(capnp.run(run_muller_brown_configure(muller_port)))
+    except BaseException as e:
+        print(f"Muller-Brown configure exception: {type(e).__name__}: {e}")
+        traceback.print_exc()
+        muller_proc.kill()
+        out, err = muller_proc.communicate(timeout=30)
+        print("Server stdout:", out.decode(errors="replace")[-4000:])
+        print("Server stderr:", err.decode(errors="replace")[-4000:])
+        muller_ok = False
+    finally:
+        muller_proc.kill()
+        muller_proc.wait()
+    if not muller_ok:
+        sys.exit(1)
+    print("Muller-Brown configure passed.")
 
     model_port = args.port + 6
     for name in ("DoubleWell", "CoupledProtonWell"):

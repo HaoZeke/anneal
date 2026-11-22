@@ -18,6 +18,8 @@
 #include <capnp/serialize.h>
 #include <kj/io.h>
 
+#include "rgpot/Models/ModelPots.hpp"
+#include "rgpot/rpc/PotentialConfigArm.hpp"
 #include "rgpot/rpc/Potentials.capnp.h"
 #include "rgpot/XTBPot/XTBConfig.hpp"
 
@@ -27,6 +29,9 @@ struct Builtin {
   std::string name;    ///< Lowercased.
   std::string library; ///< Optional explicit engine library path.
   std::optional<rgpot::XTBConfig> xtb; ///< Present for the XTB config arm.
+  /// Present for the Muller-Brown config arm. Empty lists keep the published
+  /// defaults carried by MullerBrownConfig.
+  std::optional<rgpot::MullerBrownConfig> mullerBrown;
 };
 
 inline Builtin read_builtin(const void *config, std::size_t config_len) {
@@ -65,6 +70,30 @@ inline Builtin read_builtin(const void *config, std::size_t config_len) {
     target.charge = source.getCharge();
     target.uhf = source.getUhf();
     out.xtb = target;
+  }
+  if (native.which() == ::PotentialConfig::MULLER_BROWN) {
+    out.mullerBrown.emplace();
+    const auto wire = native.getMullerBrown();
+    const auto copy = [](const auto &source, auto &target,
+                         const char *name) {
+      if (source.size() == 0)
+        return;
+      if (source.size() != target.size())
+        throw std::invalid_argument(std::string("Muller-Brown ") + name +
+                                    " must contain four values");
+      std::copy(source.begin(), source.end(), target.begin());
+    };
+    copy(wire.getAmplitude(), out.mullerBrown->amplitude, "amplitude");
+    copy(wire.getA(), out.mullerBrown->a, "a");
+    copy(wire.getB(), out.mullerBrown->b, "b");
+    copy(wire.getC(), out.mullerBrown->c, "c");
+    copy(wire.getX0(), out.mullerBrown->x0, "x0");
+    copy(wire.getY0(), out.mullerBrown->y0, "y0");
+  } else if (native.which() != ::PotentialConfig::NONE &&
+             native.which() != ::PotentialConfig::XTB) {
+    throw std::invalid_argument(
+        "BuiltinParams.config arm " + rgpot::rpc::potentialConfigArm(native) +
+        " does not match a builtin potential");
   }
   return out;
 }

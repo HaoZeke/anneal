@@ -15,6 +15,7 @@
 #endif
 #include "TestTempDir.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
+#include "rgpot/Models/ModelPots.hpp"
 #include "rgpot/PotentialCache.hpp"
 
 #include <rocksdb/db.h>
@@ -208,6 +209,53 @@ TEST_CASE("Cache test temp helper creates distinct directories",
   const rgpot::tests::TestTempDir first("rgpot-cache-unique");
   const rgpot::tests::TestTempDir second("rgpot-cache-unique");
   REQUIRE(first.path() != second.path());
+}
+
+TEST_CASE("Cache keys separate Muller-Brown parameter sets",
+          "[Potential][cache][muller]") {
+  rgpot::types::AtomMatrix positions(1, 3);
+  positions(0, 0) = 0.2;
+  positions(0, 1) = 0.3;
+  positions(0, 2) = 0.0;
+  std::vector<int> types{1};
+  std::array<std::array<double, 3>, 3> box{};
+
+  auto published = std::make_shared<rgpot::MullerBrownPot>();
+  rgpot::MullerBrownConfig scaled;
+  for (double &value : scaled.amplitude)
+    value *= 2.0;
+  auto other = std::make_shared<rgpot::MullerBrownPot>(scaled);
+  REQUIRE(published->paramsKey() != 0);
+  REQUIRE(published->paramsKey() != other->paramsKey());
+
+  auto [barePublished, barePublishedForce, barePublishedVariance] =
+      (*published)(positions, types, box);
+  auto [bareOther, bareOtherForce, bareOtherVariance] =
+      (*other)(positions, types, box);
+  REQUIRE(bareOther != barePublished);
+
+  rgpot::tests::TestTempDir dir("rgpot-test-rocksdb-muller");
+  const std::string db_path = (dir.path() / "cache-db").string();
+  rocksdb::Options opts;
+  rocksdb::DestroyDB(db_path, opts);
+  auto pcache = rgpot::cache::PotentialCache(db_path);
+  published->setCache(&pcache);
+  other->setCache(&pcache);
+
+  auto [cachedPublished, cachedPublishedForce, cachedPublishedVariance] =
+      (*published)(positions, types, box);
+  auto [cachedOther, cachedOtherForce, cachedOtherVariance] =
+      (*other)(positions, types, box);
+  REQUIRE(cachedPublished == barePublished);
+  REQUIRE(cachedOther == bareOther);
+  REQUIRE(cachedPublished != cachedOther);
+
+  auto [againPublished, againPublishedForce, againPublishedVariance] =
+      (*published)(positions, types, box);
+  auto [againOther, againOtherForce, againOtherVariance] =
+      (*other)(positions, types, box);
+  REQUIRE(againPublished == barePublished);
+  REQUIRE(againOther == bareOther);
 }
 
 namespace {

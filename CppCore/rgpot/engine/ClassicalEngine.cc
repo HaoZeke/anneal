@@ -2,7 +2,9 @@
 // BuiltinParams names the potential: lj, ljcluster, morse, zbl and, when the
 // water option is on, tip4p, spce, tip4p_pt. When the Fortran kernels are
 // built: sw, edip, lenosky, tersoff, eamal, fehe, cuh2, waterh. Every
-// potential takes its default parameters.
+// potential takes its default parameters, except muller_brown, which reads
+// BuiltinParams.config.mullerBrown. An arm that names another potential is
+// an error.
 
 #include "rgpot/engine/BuiltinParams.hpp"
 #include "rgpot/engine/EngineTable.hpp"
@@ -32,6 +34,15 @@ Created create(const void *config, std::size_t config_len) {
     const Builtin builtin = read_builtin(config, config_len);
     std::unique_ptr<PotentialBase> pot;
     const std::string &n = builtin.name;
+    if (builtin.mullerBrown && n != "muller_brown") {
+      throw std::invalid_argument(
+          "BuiltinParams.config arm mullerBrown does not match potential '" +
+          n + "'");
+    }
+    if (builtin.xtb) {
+      throw std::invalid_argument(
+          "BuiltinParams.config arm xtb does not match potential '" + n + "'");
+    }
     if (n == "lj") {
       pot = std::make_unique<LJPot>();
     } else if (n == "ljcluster") {
@@ -43,7 +54,8 @@ Created create(const void *config, std::size_t config_len) {
     } else if (n == "eckart") {
       pot = std::make_unique<EckartPot>();
     } else if (n == "muller_brown") {
-      pot = std::make_unique<MullerBrownPot>();
+      pot = std::make_unique<MullerBrownPot>(
+          builtin.mullerBrown.value_or(MullerBrownConfig{}));
     } else if (n == "modified_muller_brown") {
       pot = std::make_unique<ModifiedMullerBrownPot>();
     } else if (n == "leps_hh2") {

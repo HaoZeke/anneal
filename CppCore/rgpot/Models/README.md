@@ -21,6 +21,12 @@ The non-LEPS models use eV for energy and angstrom for coordinates.
 LEPS evaluates its published equations in hartree and bohr, then converts
 energy, force, and Hessian-vector products to rgpot units.
 
+Muller-Brown uses the first atom's x and y coordinates. Its z force and every
+force on later atoms are zero. `MullerBrownConfig` exposes all six four-value
+parameter arrays and defaults to the values of K. Müller and L. D. Brown,
+*Theoret. Chim. Acta* **53**, 75-93 (1979),
+doi:10.1007/BF00547608.
+
 The H + Cl2 LEPS constants are:
 
 | curve | De (hartree) | re (bohr) | exponent (bohr^-1) | Sato |
@@ -36,6 +42,7 @@ Lifecycle:
 
 1. Construct with one of:
    - `rgpot_builtin_model_new(kind)` for fixed built-ins
+   - `rgpot_builtin_muller_brown_new(...)` for configurable Muller-Brown
    - `rgpot_builtin_double_well_new(...)` for a parameterized quartic well
    - `rgpot_builtin_coupled_proton_well_new(...)` for a parameterized coupled well
 2. Read dimensions with `rgpot_builtin_model_dimensions(model)`.
