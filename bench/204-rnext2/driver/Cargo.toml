@@ -1,0 +1,34 @@
+[package]
+name = "rnext2-gate-driver"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[features]
+default = []
+placement-pad = []
+
+[dependencies]
+anneal-core = { path = "../../.." }
+libloading = "0.8.9"
+ndarray = "0.17.2"
+rand = "0.9.5"
+rgpot-pair = { git = "https://github.com/OmniPotentRPC/rgpot", rev = "8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e" }
+
+[[bin]]
+name = "h2h_lj"
+path = "src/bin/h2h_lj.rs"
+
+[[bin]]
+name = "h2h_morse"
+path = "src/bin/h2h_morse.rs"
+
+[[bin]]
+name = "h2h_sc"
+path = "src/bin/h2h_sc.rs"
+
+[[bin]]
+name = "h2h_blj"
+path = "src/bin/h2h_blj.rs"
