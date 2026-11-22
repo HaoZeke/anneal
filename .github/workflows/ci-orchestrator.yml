@@ -522,13 +522,19 @@ jobs:
       - name: Install LLVM OpenMP 18
         run: |
           bash ci/gha/apt-install.sh --no-install-recommends \
-            clang-18 llvm-18 libclang-rt-18-dev libomp-18-dev
-          dpkg-query -W clang-18 llvm-18 libclang-rt-18-dev libomp-18-dev
+            clang-18 libclang-rt-18-dev libomp-18-dev llvm-18
+          dpkg-query -W clang-18 libclang-rt-18-dev libomp-18-dev llvm-18
+          test -x /usr/lib/llvm-18/bin/llvm-symbolizer
+          echo "/usr/lib/llvm-18/bin" >> "$GITHUB_PATH"
       - name: Build and test OpenMP under LeakSanitizer
         shell: pixi run bash -e {0}
+        env:
+          ASAN_SYMBOLIZER_PATH: /usr/lib/llvm-18/bin/llvm-symbolizer
         run: |
           export CC=/usr/bin/clang-18
           export CXX=/usr/bin/clang++-18
+          test -x "$ASAN_SYMBOLIZER_PATH"
+          command -v llvm-symbolizer
           # Clang leaves __asan_* unresolved in librgpot.so. Meson's
           # default -Wl,--no-undefined then fails the link. The layout
           # sanitizer script sets the same option for Clang.
