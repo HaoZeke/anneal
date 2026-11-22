@@ -252,7 +252,14 @@ def test_gmin_panel_rejects_mixed_gmin_revisions_and_emits_machine_columns(tmp_p
     assert "machine_id" in panel.ROW_FIELDS
     assert "cpu_model" in panel.ROW_FIELDS
 
-    def make_row(code: str, seed: int, code_revision: str, machine_id: str, cpu_model: str):
+    def make_row(
+        code: str,
+        seed: int,
+        code_revision: str,
+        machine_id: str,
+        cpu_model: str,
+        gmin_build_key: str | None = None,
+    ):
         return {
             "system": "lj38",
             "code": code,
@@ -267,6 +274,11 @@ def test_gmin_panel_rejects_mixed_gmin_revisions_and_emits_machine_columns(tmp_p
             "pot_s": "0.400000",
             "outside_s": "0.100000",
             "code_revision": code_revision,
+            "gmin_build_key": (
+                ("c" * 64 if code == "gmin" else "")
+                if gmin_build_key is None
+                else gmin_build_key
+            ),
             "harness_revision": "head-rev",
             "host": "bench-a" if code != "gmin" else "bench-b",
             "machine_id": machine_id,
@@ -291,6 +303,24 @@ def test_gmin_panel_rejects_mixed_gmin_revisions_and_emits_machine_columns(tmp_p
         panel.panel_groups(mixed_rows, "head-rev")
     with pytest.raises(RuntimeError, match="mixed code_revision"):
         losses2.selected(mixed_rows, "lj38", "gmin", "head-rev", "base-rev")
+
+    mixed_key_rows = [
+        make_row("anneal", seed, "head-rev", "a" * 64, "CPU A") for seed in panel.SEEDS
+    ] + [
+        make_row(
+            "gmin",
+            seed,
+            "svn-100",
+            "b" * 64,
+            "CPU B",
+            gmin_build_key="c" * 64 if seed != panel.SEEDS[-1] else "d" * 64,
+        )
+        for seed in panel.SEEDS
+    ]
+    with pytest.raises((RuntimeError, ValueError), match="gmin_build_key"):
+        panel.panel_groups(mixed_key_rows, "head-rev")
+    with pytest.raises((RuntimeError, ValueError), match="gmin_build_key"):
+        losses2.selected(mixed_key_rows, "lj38", "gmin", "head-rev", "base-rev")
 
     clean_rows = [
         make_row("anneal", seed, "head-rev", "a" * 64, "CPU A") for seed in panel.SEEDS
@@ -365,6 +395,7 @@ def test_tip4p_budget_preserves_reused_gmin_provenance_and_aggregates_summary(tm
         "pot_s",
         "outside_s",
         "code_revision",
+        "gmin_build_key",
         "host",
         "machine_id",
         "cpu_model",
@@ -388,15 +419,19 @@ def test_tip4p_budget_preserves_reused_gmin_provenance_and_aggregates_summary(tm
                     "pot_s": "1.000000",
                     "outside_s": "0.200000",
                     "code_revision": "svn-remote",
+                    "gmin_build_key": "c" * 64,
                     "host": "remote-host",
                     "machine_id": "b" * 64,
                     "cpu_model": "Remote CPU",
                 }
             )
 
-    reused = budget_mod.load_reuse(gmin_csv, "svn-remote")
+    reused = budget_mod.load_reuse(gmin_csv, "svn-remote", "c" * 64)
     assert len(reused) == len(budget_mod.SEEDS)
-    assert budget_mod.load_reuse(gmin_csv, "svn-other") == {}
+    with pytest.raises(ValueError, match="code_revision"):
+        budget_mod.load_reuse(gmin_csv, "svn-other", "c" * 64)
+    with pytest.raises(ValueError, match="gmin_build_key"):
+        budget_mod.load_reuse(gmin_csv, "svn-remote", "d" * 64)
 
     local_machine = {"machine_id": "a" * 64, "cpu_model": "Local CPU"}
     rows = []
@@ -409,6 +444,7 @@ def test_tip4p_budget_preserves_reused_gmin_provenance_and_aggregates_summary(tm
             seed=seed,
             head="anneal-head-1",
             revision="svn-remote",
+            gmin_build_key="c" * 64,
             host="local-host",
             machine=local_machine,
             reused=True,
@@ -417,6 +453,7 @@ def test_tip4p_budget_preserves_reused_gmin_provenance_and_aggregates_summary(tm
         assert gmin_row["machine_id"] == "b" * 64
         assert gmin_row["cpu_model"] == "Remote CPU"
         assert gmin_row["code_revision"] == "svn-remote"
+        assert gmin_row["gmin_build_key"] == "c" * 64
         rows.append(gmin_row)
 
         anneal_row = budget_mod.build_budget_row(
@@ -453,6 +490,7 @@ def test_tip4p_budget_preserves_reused_gmin_provenance_and_aggregates_summary(tm
             seed=budget_mod.SEEDS[0],
             head="anneal-head-1",
             revision="svn-remote",
+            gmin_build_key="c" * 64,
             host="local-host",
             machine=local_machine,
             reused=True,
@@ -570,6 +608,7 @@ def test_remaining_gmin_runners_emit_machine_id_and_cpu_model(tmp_path):
                 400_000,
                 -118.432844,
                 "svn-1",
+                gmin_build_key="c" * 64,
                 host="bench-b",
                 machine=machine_b,
             )
@@ -600,6 +639,7 @@ def test_remaining_gmin_runners_emit_machine_id_and_cpu_model(tmp_path):
         machine=machine_b,
         url="https://example.invalid/gmin",
         revision="svn-1",
+        gmin_build_key="c" * 64,
         host="bench-b",
     )
     assert (
@@ -612,10 +652,11 @@ def test_remaining_gmin_runners_emit_machine_id_and_cpu_model(tmp_path):
             machine=machine_b,
             url="https://example.invalid/gmin",
             revision="svn-1",
+            gmin_build_key="c" * 64,
         )
         is not None
     )
-    assert (
+    with pytest.raises(ValueError, match="code_revision"):
         morse_h2h.load_saved(
             mh_saved,
             "m38r14",
@@ -625,9 +666,20 @@ def test_remaining_gmin_runners_emit_machine_id_and_cpu_model(tmp_path):
             machine=machine_b,
             url="https://example.invalid/gmin",
             revision="svn-2",
+            gmin_build_key="c" * 64,
         )
-        is None
-    )
+    with pytest.raises(ValueError, match="gmin_build_key"):
+        morse_h2h.load_saved(
+            mh_saved,
+            "m38r14",
+            2000,
+            "gmin",
+            400_000,
+            machine=machine_b,
+            url="https://example.invalid/gmin",
+            revision="svn-1",
+            gmin_build_key="d" * 64,
+        )
     for bad_args, match in (
         (("m55r14", 2000, "gmin", 400_000), "saved row system mismatch"),
         (("m38r14", 2001, "gmin", 400_000), "saved row seed mismatch"),
@@ -641,6 +693,7 @@ def test_remaining_gmin_runners_emit_machine_id_and_cpu_model(tmp_path):
                 machine=machine_b,
                 url="https://example.invalid/gmin",
                 revision="svn-1",
+                gmin_build_key="c" * 64,
             )
     mh_loaded = morse_h2h.load_saved(
         mh_saved,
@@ -651,6 +704,7 @@ def test_remaining_gmin_runners_emit_machine_id_and_cpu_model(tmp_path):
         machine=machine_b,
         url="https://example.invalid/gmin",
         revision="svn-1",
+        gmin_build_key="c" * 64,
     )
     mh_summary = morse_h2h.summarise(
         [mh_loaded], (2000,), "https://example.invalid/gmin", "svn-1", "head-1", machine_a
@@ -677,6 +731,7 @@ def test_remaining_gmin_runners_emit_machine_id_and_cpu_model(tmp_path):
                 "pot_s": "0.8",
                 "outside_s": "0.2",
                 "code_revision": "head-1",
+                "gmin_build_key": "",
                 "host": "bench-a",
                 **machine_a,
             }
@@ -695,6 +750,7 @@ def test_remaining_gmin_runners_emit_machine_id_and_cpu_model(tmp_path):
                 "pot_s": "1.0",
                 "outside_s": "0.2",
                 "code_revision": "svn-1",
+                "gmin_build_key": "c" * 64,
                 "host": "bench-b",
                 **machine_b,
             }
@@ -732,6 +788,7 @@ def test_provenance_runners_and_summaries_run_without_scipy(monkeypatch):
                 "pot_s": "0.8",
                 "outside_s": "0.2",
                 "code_revision": "head-1",
+                "gmin_build_key": "",
                 "host": "bench-a",
                 **machine_a,
             }
@@ -750,6 +807,7 @@ def test_provenance_runners_and_summaries_run_without_scipy(monkeypatch):
                 "pot_s": "1.6",
                 "outside_s": "0.4",
                 "code_revision": "svn-1",
+                "gmin_build_key": "c" * 64,
                 "host": "bench-b",
                 **machine_b,
             }
@@ -1182,8 +1240,10 @@ def _runner_saved_row_spec(runner_id: str, machine: dict[str, str], seed: int = 
             "best": "-122.991484",
             "pot_s": "0.400000",
             "outside_s": "0.100000",
-            "pot_per_eval_s": "0.000040000",
-            "outside_per_eval_s": "0.000010000",
+            "code_revision": "head-1",
+            "gmin_build_key": "",
+            "host": "bench",
+            **machine,
         }
         return (
             mod,
@@ -1194,7 +1254,15 @@ def _runner_saved_row_spec(runner_id: str, machine: dict[str, str], seed: int = 
             "au38",
             seed + 1,
             1_000_000,
-            lambda p: mod.load_saved(p, "cu19au19", seed, "anneal", 400_000),
+            lambda p: mod.load_saved(
+                p,
+                "cu19au19",
+                seed,
+                "anneal",
+                400_000,
+                code_revision="head-1",
+                machine=machine,
+            ),
         )
     raise AssertionError(f"unknown runner {runner_id!r}")
 
@@ -1690,9 +1758,36 @@ def test_native_headerless_and_h2h_row_formats_reject_every_bad_field(tmp_path):
     darby_gmin_ok.write_text(
         "h2h_row system=cu19au19 code=gmin seed=2000 budget=400000 hit=1 "
         "evals_to_hit=10000 charged=10000 gradient_passes=10000 energy_only_entries=5 "
-        "best=-122.991484 wall_s=0.5 pot_s=0.4\n"
+        f"best=-122.991484 wall_s=0.5 pot_s=0.4 code_revision=svn-1 gmin_build_key={'b' * 64}\n"
     )
-    assert darby.load_saved(darby_gmin_ok, "cu19au19", 2000, "gmin", 400_000) is not None
+    assert (
+        darby.load_saved(
+            darby_gmin_ok,
+            "cu19au19",
+            2000,
+            "gmin",
+            400_000,
+            code_revision="svn-1",
+            gmin_build_key="b" * 64,
+        )
+        is not None
+    )
+    darby_gmin_unkeyed = tmp_path / "darby-gmin-unkeyed.row"
+    darby_gmin_unkeyed.write_text(
+        "h2h_row system=cu19au19 code=gmin seed=2000 budget=400000 hit=1 "
+        "evals_to_hit=10000 charged=10000 best=-122.991484 wall_s=0.5 pot_s=0.4 "
+        "code_revision=svn-1\n"
+    )
+    with pytest.raises(ValueError, match="gmin_build_key"):
+        darby.load_saved(
+            darby_gmin_unkeyed,
+            "cu19au19",
+            2000,
+            "gmin",
+            400_000,
+            code_revision="svn-1",
+            gmin_build_key="b" * 64,
+        )
 
     for idx, (bad_kv, field_token) in enumerate(
         (
@@ -1731,7 +1826,15 @@ def test_native_headerless_and_h2h_row_formats_reject_every_bad_field(tmp_path):
         bad_path = tmp_path / f"darby-bad-{idx}.row"
         bad_path.write_text(bad_kv)
         with pytest.raises(ValueError) as exc_info:
-            darby.load_saved(bad_path, "cu19au19", 2000, "gmin", 400_000)
+            darby.load_saved(
+                bad_path,
+                "cu19au19",
+                2000,
+                "gmin",
+                400_000,
+                code_revision="svn-1",
+                gmin_build_key="b" * 64,
+            )
         assert field_token in str(exc_info.value)
 
     contradictory_kv = (
