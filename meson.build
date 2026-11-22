@@ -146,6 +146,22 @@ if host_system == 'linux' and 'address' in get_option('b_sanitize')
     endif
 endif
 
+# Non-atomic gcov counters go negative when OpenMP threads share an arc.
+# lcov 2 treats that as an error. Atomic updates are the counter fix.
+if get_option('b_coverage')
+    _atomic_profile_cpp = cppc.get_supported_arguments(
+        ['-fprofile-update=atomic'],
+    )
+    _atomic_profile_c = cc.get_supported_arguments(['-fprofile-update=atomic'])
+    if _atomic_profile_cpp.length() == 0 or _atomic_profile_c.length() == 0
+        error(
+            'b_coverage requires -fprofile-update=atomic; ' + cppc.get_id() + ' did not accept it',
+        )
+    endif
+    add_project_arguments(_atomic_profile_c, language: 'c')
+    add_project_arguments(_atomic_profile_cpp, language: 'cpp')
+endif
+
 # Dependencies
 # libm for Unix systems
 m_dep = cppc.find_library('m', required: false)

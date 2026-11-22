@@ -19,12 +19,15 @@ if [[ ! -d "$BUILD" ]]; then
   exit 1
 fi
 
-# lcov 2 reports template instances in toolchain headers as inconsistent;
-# that one class is tolerated, every other lcov error fails the script.
+# Same lcov 2 classes as scripts/run_coverage_cpp.sh. lcov 1.15 does not
+# accept these names, so they are passed only for 2.x.
+#   inconsistent: template instances in toolchain headers
+#   mismatch: mismatched exception tag, bits/vector.tcc
+#   negative: non-atomic OpenMP arc counters
 LCOV_MAJOR=$(lcov --version | sed -n 's/.*LCOV version \([0-9][0-9]*\)\..*/\1/p')
 LCOV_ARGS=()
 if [[ "${LCOV_MAJOR:-0}" -ge 2 ]]; then
-  LCOV_ARGS+=(--ignore-errors inconsistent)
+  LCOV_ARGS+=(--ignore-errors inconsistent,mismatch,negative)
 fi
 
 echo "==> extract Fortran kernels from meson coverage tree $BUILD"
