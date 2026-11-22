@@ -7,8 +7,10 @@
 #include <capnp/serialize.h>
 #include <kj/array.h>
 
-#include "rgpot/NWChemPot/DynLib.hpp"
 #include "rgpot/NWChemPot/nwchem_c_abi.h"
+#include "rgpot/abi/CapnpParamsHelper.hpp"
+#include "rgpot/abi/EngineDlopen.hpp"
+#include "rgpot/abi/ProfileLoader.hpp"
 #include "rgpot/rpc/PotentialConfigArm.hpp"
 #include "rgpot/units.hpp"
 
@@ -30,36 +32,6 @@ namespace {
 using EnergyGradientFn = NWChemCResult (*)(int, const double *, const int *,
                                            const void *, size_t, double *);
 using SetParamsFn = int (*)(const void *, size_t);
-using VersionFn = const char *(*)(void);
-using AvailableFn = int (*)(void);
-
-struct ParamsView {
-  const void *data = nullptr;
-  size_t size = 0;
-};
-
-std::vector<std::string>
-engine_lib_candidates(const std::string &explicit_path) {
-  std::vector<std::string> out;
-  if (!explicit_path.empty()) {
-    out.emplace_back(explicit_path);
-    return out;
-  }
-  if (const char *e = std::getenv("NWCHEMC_LIBRARY"); e && *e)
-    out.emplace_back(e);
-  if (const char *e = std::getenv("RGPOT_NWCHEMC_ENGINE"); e && *e)
-    out.emplace_back(e);
-  if (const char *e = std::getenv("RGPOT_NWCHEM_ENGINE"); e && *e)
-    out.emplace_back(e);
-  if (!out.empty())
-    return out;
-  out.emplace_back("libnwchemc.so");
-  out.emplace_back("./libnwchemc.so");
-  out.emplace_back("libnwchemc.dylib");
-  out.emplace_back("./libnwchemc.dylib");
-  out.emplace_back("nwchemc.dll");
-  return out;
-}
 
 void apply_env_hints(const std::string &nwchem_root) {
   if (!nwchem_root.empty()) {
@@ -75,11 +47,9 @@ void apply_env_hints(const std::string &nwchem_root) {
 }
 
 struct EngineBundle {
-  DynLib engine_lib;
+  abi::ProfileLoader profile;
   EnergyGradientFn energy_gradient = nullptr;
   SetParamsFn set_params = nullptr;
-  VersionFn version = nullptr;
-  AvailableFn available = nullptr;
   std::string load_error;
   // Explicit enginePath the current function table was loaded from; empty when
   // it came from the environment seams or the default names.
@@ -94,8 +64,8 @@ void retain_engine(EngineBundle &bundle) {
   struct RetainedEngine {
     EnergyGradientFn energy_gradient;
     SetParamsFn set_params;
-    VersionFn version;
-    AvailableFn available;
+    abi::ProfileLoader::VersionFn version;
+    abi::ProfileLoader::AvailableFn available;
     DynLib library;
   };
   static std::mutex mutex;
@@ -106,47 +76,33 @@ void retain_engine(EngineBundle &bundle) {
   for (const auto &engine : *engines) {
     if (engine.energy_gradient == bundle.energy_gradient &&
         engine.set_params == bundle.set_params &&
-        engine.version == bundle.version &&
-        engine.available == bundle.available) {
-      bundle.engine_lib.close();
+        engine.version == bundle.profile.version &&
+        engine.available == bundle.profile.available) {
+      bundle.profile.lib().close();
       return;
     }
   }
   engines->push_back({bundle.energy_gradient, bundle.set_params,
-                      bundle.version, bundle.available,
-                      std::move(bundle.engine_lib)});
+                      bundle.profile.version, bundle.profile.available,
+                      std::move(bundle.profile.lib())});
 }
 
 bool try_load_engine(EngineBundle &b, const std::string &engine_path) {
-  b.load_error.clear();
-  b.loaded_path.clear();
-  b.loaded = false;
-  b.energy_gradient = nullptr;
-  b.set_params = nullptr;
-  b.version = nullptr;
-  b.available = nullptr;
-
-  bool eng_ok = false;
+  b = EngineBundle{};
+  const auto cands = abi::engine_candidates(
+      "nwchemc", engine_path,
+      {"NWCHEMC_LIBRARY", "RGPOT_NWCHEMC_ENGINE", "RGPOT_NWCHEM_ENGINE"},
+      abi::CandidateOptions{.exclusive_explicit = true, .exclusive_env = true});
   std::string eng_err;
-  for (const auto &cand : engine_lib_candidates(engine_path)) {
-    try {
-      b.engine_lib.open(cand);
-      eng_ok = true;
-      break;
-    } catch (const std::exception &ex) {
-      eng_err = ex.what();
-    }
-  }
-  if (!eng_ok) {
+  if (!b.profile.open_candidates("nwchemc", cands, &eng_err)) {
     b.load_error = "libnwchemc not loaded: " + eng_err;
     return false;
   }
 
   b.energy_gradient =
-      b.engine_lib.sym_optional<EnergyGradientFn>("nwchemc_energy_gradient");
-  b.set_params = b.engine_lib.sym_optional<SetParamsFn>("nwchemc_set_params");
-  b.version = b.engine_lib.sym_optional<VersionFn>("nwchemc_version");
-  b.available = b.engine_lib.sym_optional<AvailableFn>("nwchemc_available");
+      b.profile.lib().sym_optional<EnergyGradientFn>("nwchemc_energy_gradient");
+  b.set_params =
+      b.profile.lib().sym_optional<SetParamsFn>("nwchemc_set_params");
 
   if (!b.energy_gradient) {
     b.load_error = "engine missing nwchemc_energy_gradient";
@@ -176,44 +132,14 @@ serialize_params_for_abi(const ::NWChemParams::Reader &params) {
   auto out = msg.getRoot<::NWChemParams>();
   out.setEnginePath("");
   out.setNwchemRoot("");
-  auto words = ::capnp::messageToFlatArray(msg);
-  std::vector<::capnp::word> flat(words.size());
-  std::memcpy(flat.data(), words.begin(),
-              words.size() * sizeof(::capnp::word));
-  return flat;
-}
-
-// Full params for getParams() / host bookkeeping (includes enginePath).
-std::vector<::capnp::word>
-serialize_params(const ::NWChemParams::Reader &params) {
-  ::capnp::MallocMessageBuilder msg;
-  msg.setRoot(params);
-  auto words = ::capnp::messageToFlatArray(msg);
-  std::vector<::capnp::word> out(words.size());
-  std::memcpy(out.data(), words.begin(), words.size() * sizeof(::capnp::word));
-  return out;
-}
-
-std::vector<::capnp::word> default_params() {
-  ::capnp::MallocMessageBuilder msg;
-  auto params = msg.initRoot<::NWChemParams>();
-  return serialize_params(params.asReader());
-}
-
-ParamsView params_view(const std::vector<::capnp::word> &words) {
-  ParamsView view;
-  if (!words.empty()) {
-    view.data = words.data();
-    view.size = words.size() * sizeof(::capnp::word);
-  }
-  return view;
+  return abi::serialize_capnp(out.asReader());
 }
 
 bool push_params_to_engine(EngineBundle &b,
                            const std::vector<::capnp::word> &params_words) {
   if (!b.set_params)
     return false;
-  const ParamsView view = params_view(params_words);
+  const abi::BytesView view = abi::words_view(params_words);
   return b.set_params(view.data, view.size) == 0;
 }
 
@@ -279,7 +205,7 @@ struct NWChemPot::Impl {
   mutable std::vector<double> grad_scratch;
 
   void store(const ::NWChemParams::Reader &params) {
-    params_words = serialize_params(params);
+    params_words = abi::serialize_capnp(params);
     abi_params_words = serialize_params_for_abi(params);
   }
 };
@@ -394,32 +320,20 @@ EngineBundle &probe_engine_bundle() {
 }
 
 bool NWChemPot::probeAvailable() {
-  std::lock_guard<std::mutex> lock(g_probe_mu);
-  if (g_probe_done)
-    return g_probe_ok;
-  EngineBundle &tmp = probe_engine_bundle();
-  if (!tmp.loaded)
-    g_probe_ok = try_load_engine(tmp, "");
-  else
-    g_probe_ok = true;
-  g_probe_done = true;
-  return g_probe_ok;
+  return abi::probe_once(g_probe_mu, g_probe_done, g_probe_ok, [] {
+    EngineBundle &tmp = probe_engine_bundle();
+    return tmp.loaded || try_load_engine(tmp, "");
+  });
 }
 
 bool NWChemPot::abiAvailable() {
-  std::lock_guard<std::mutex> lock(g_probe_mu);
-  if (g_abi_probe_done)
-    return g_abi_probe_ok;
-  EngineBundle &tmp = probe_engine_bundle();
-  if (!tmp.loaded && !try_load_engine(tmp, "")) {
-    g_abi_probe_ok = false;
-  } else if (tmp.available) {
-    g_abi_probe_ok = tmp.available() != 0;
-  } else {
-    g_abi_probe_ok = false;
-  }
-  g_abi_probe_done = true;
-  return g_abi_probe_ok;
+  return abi::probe_once(g_probe_mu, g_abi_probe_done, g_abi_probe_ok, [] {
+    EngineBundle &tmp = probe_engine_bundle();
+    if (!tmp.loaded && !try_load_engine(tmp, "")) {
+      return false;
+    }
+    return tmp.profile.available != nullptr && tmp.profile.available() != 0;
+  });
 }
 
 void NWChemPot::forceImpl(const ForceInput &in, ForceOut *out) const {
@@ -437,9 +351,9 @@ void NWChemPot::forceImpl(const ForceInput &in, ForceOut *out) const {
 
   std::vector<double> &grad = impl_->grad_scratch;
   grad.assign(static_cast<size_t>(n) * 3u, 0.0);
-  const ParamsView params = params_view(impl_->abi_params_words.empty()
-                                            ? impl_->params_words
-                                            : impl_->abi_params_words);
+  const abi::BytesView params = abi::words_view(
+      impl_->abi_params_words.empty() ? impl_->params_words
+                                      : impl_->abi_params_words);
   NWChemCResult res = impl_->bundle.energy_gradient(
       n, in.pos, in.atmnrs, params.data, params.size, grad.data());
 

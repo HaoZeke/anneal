@@ -11,11 +11,13 @@
 
 #include <catch2/catch_all.hpp>
 
+#include "TestFixtures.hpp"
 #include "rgpot/ZBL/ZBLPot.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
 
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
+using rgpot::test_fixtures::cubicCell;
 using rgpot::types::AtomMatrix;
 
 namespace {
@@ -25,10 +27,6 @@ namespace {
 /// generates it, client/unit_tests/ZBLPotTest.cpp consumes it).
 AtomMatrix siAuDimer() {
   return AtomMatrix{{9.40, 9.35, 9.30}, {10.60, 10.65, 10.70}};
-}
-
-std::array<std::array<double, 3>, 3> cubicCell(double side) {
-  return {{{side, 0.0, 0.0}, {0.0, side, 0.0}, {0.0, 0.0, side}}};
 }
 
 } // namespace

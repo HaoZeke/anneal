@@ -14,11 +14,10 @@
 #include "rgpot/CentreTerms.hpp"
 #include "rgpot/ParamHash.hpp"
 #include "rgpot/nlist/NeighbourList.hpp"
+#include "rgpot/nlist/ThreeBodyCommon.hpp"
 #include "rgpot/stress.hpp"
 
-#include <algorithm>
 #include <cmath>
-#include <cstring>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -133,13 +132,7 @@ void radial(const TersoffSiC::Pair &p, double r, Bond &b) {
 
 double cosine(const Bond &a, const Bond &b) {
   const double inv = 1.0 / (a.r * b.r);
-  double c = (a.x * b.x + a.y * b.y + a.z * b.z) * inv;
-  if (c > 1.0) {
-    c = 1.0;
-  } else if (c < -1.0) {
-    c = -1.0;
-  }
-  return c;
+  return nlist::clampCosine((a.x * b.x + a.y * b.y + a.z * b.z) * inv);
 }
 
 /// The terms of centre i. Every directed bond is kept: the 1989 sum
@@ -335,28 +328,13 @@ void TersoffSiC::evaluate(const double *positions, const int *atomic_numbers,
   const int n = static_cast<int>(n_atoms);
   const double cut2 = kMaxCut * kMaxCut;
 
-  const double skin =
-      (neighbors != nullptr && neighbors->skin > 0.0)
-          ? neighbors->skin
-          : (mode_ == nlist::Mode::Stream ? 0.0 : kMaxCut / 5.0);
-  const auto before = cells.builds();
-  nlist::updateCells(cells, positions, n_atoms, box, kMaxCut, skin,
-                     nlist::Image::Round, mode_, {true, true, true});
-  if (neighbors != nullptr && neighbors->skin > 0.0 &&
-      (cells.builds() != before || !neighbors->built)) {
-    neighbors->ref.assign(positions, positions + 3 * n_atoms);
-    std::memcpy(neighbors->box, box, 9 * sizeof(double));
-    neighbors->n = n_atoms;
-    neighbors->cutoff = kMaxCut;
-    neighbors->skin_used = neighbors->skin;
-    neighbors->built = true;
-  }
+  nlist::updateThreeBodyCells(cells, positions, n_atoms, box, kMaxCut, mode_,
+                              neighbors);
 
   const int *kind = sc.kind.data();
   // One atom of bonds. The stream reads the bins, so the scratch is that
   // atom. The stored call reads the index row.
   auto load = [&](int i, std::vector<Bond> &nb) {
-    nb.clear();
     const int ki = kind[i];
     auto take = [&](std::int32_t, std::int32_t j, double dx, double dy,
                     double dz, double r2) {
@@ -372,13 +350,7 @@ void TersoffSiC::evaluate(const double *positions, const int *atomic_numbers,
       radial(pij, r, forth);
       nb.push_back(forth);
     };
-    if (cells.streaming()) {
-      cells.forAtom(static_cast<std::int32_t>(i), take);
-    } else {
-      nlist::visitDirected(cells, i, static_cast<std::int64_t>(i) + 1, take);
-    }
-    std::sort(nb.begin(), nb.end(),
-              [](const Bond &a, const Bond &b) { return a.j < b.j; });
+    nlist::collectAtomBonds(cells, i, nb, take);
   };
 
   if (n_atoms < kTeamMinAtoms) {

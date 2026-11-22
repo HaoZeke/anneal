@@ -27,6 +27,7 @@
 // clang-format on
 
 #include "rgpot/EAMTable/EAMTablePot.hpp"
+#include "rgpot/PairEval.hpp"
 #include "rgpot/nlist/NeighbourList.hpp"
 #include "rgpot/stress.hpp"
 
@@ -394,8 +395,6 @@ void EAMTablePot::compute(const ForceInput &in, ForceOut *out,
     el[i] = static_cast<std::size_t>(a);
   }
 
-  static constexpr double free_box[9] = {1.0e6, 0.0, 0.0, 0.0,  1.0e6,
-                                         0.0,   0.0, 0.0, 1.0e6};
   const double *box = in.box;
   if (m_periodic) {
     const double vol = cellVolume(box);
@@ -418,7 +417,7 @@ void EAMTablePot::compute(const ForceInput &in, ForceOut *out,
       }
     }
   } else {
-    box = free_box;
+    box = freeBoxOrCell(nullptr);
   }
   nlist::Neighbours &cells = m_neighbours;
   const double cut2 = t.cutoff * t.cutoff;

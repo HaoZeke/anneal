@@ -26,6 +26,7 @@
 #include <cmath>
 #include <vector>
 
+#include "TestFixtures.hpp"
 #include "rgpot/StillingerWeber/SWSi.hpp"
 #include "rgpot/Tersoff/TersoffSiC.hpp"
 #include "rgpot/fortran/FortranPots.hpp"
@@ -36,6 +37,7 @@
 
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
+using rgpot::test_fixtures::maxForceNorm;
 using rgpot::types::AtomMatrix;
 
 namespace {
@@ -72,17 +74,7 @@ AtomMatrix feBcc() {
 
 /// The 20 Angstrom cube every fixture above sits in.
 std::array<std::array<double, 3>, 3> cube20() {
-  return {{{20.0, 0.0, 0.0}, {0.0, 20.0, 0.0}, {0.0, 0.0, 20.0}}};
-}
-
-double maxForceNorm(const AtomMatrix &forces) {
-  double worst = 0.0;
-  for (size_t i = 0; i < forces.rows(); ++i) {
-    const double n2 = forces(i, 0) * forces(i, 0) +
-                      forces(i, 1) * forces(i, 1) + forces(i, 2) * forces(i, 2);
-    worst = std::max(worst, std::sqrt(n2));
-  }
-  return worst;
+  return rgpot::test_fixtures::cubicCell(20.0);
 }
 
 void requireNoNetForce(const AtomMatrix &forces) {

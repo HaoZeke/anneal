@@ -10,8 +10,10 @@
 
 #include "rgpot/CP2KPot/CP2KDeck.hpp"
 #include "rgpot/CP2KPot/cp2kc_abi.h"
-#include "rgpot/NWChemPot/DynLib.hpp"
 #include "rgpot/ParamHash.hpp"
+#include "rgpot/abi/CapnpParamsHelper.hpp"
+#include "rgpot/abi/DynLib.hpp"
+#include "rgpot/abi/EngineDlopen.hpp"
 #include "rgpot/rpc/PotentialConfigArm.hpp"
 #include "rgpot/units.hpp"
 
@@ -50,22 +52,6 @@ using CalculateFn = int (*)(CP2KCSession *, int, const double *, const double *,
                             double *, double *, char *, size_t);
 using SessionDestroyFn = void (*)(CP2KCSession *);
 
-std::vector<std::string>
-engine_lib_candidates(const std::string &explicit_path) {
-  std::vector<std::string> out;
-  if (!explicit_path.empty())
-    out.emplace_back(explicit_path);
-  if (const char *e = std::getenv("CP2KC_LIBRARY"); e && *e)
-    out.emplace_back(e);
-  if (const char *e = std::getenv("RGPOT_CP2K_ENGINE"); e && *e)
-    out.emplace_back(e);
-  out.emplace_back("libcp2kc_rgpot.so");
-  out.emplace_back("./libcp2kc_rgpot.so");
-  out.emplace_back("libcp2kc_rgpot.dylib");
-  out.emplace_back("./libcp2kc_rgpot.dylib");
-  return out;
-}
-
 struct EngineBundle {
   DynLib engine_lib;
   AbiVersionFn abi_version = nullptr;
@@ -83,19 +69,11 @@ struct EngineBundle {
 
 bool try_load_engine(EngineBundle &b, const std::string &engine_path) {
   b = EngineBundle{};
+  const auto cands = abi::engine_candidates(
+      "cp2kc_rgpot", engine_path, {"CP2KC_LIBRARY", "RGPOT_CP2K_ENGINE"},
+      abi::CandidateOptions{.include_dll = false});
   std::string err;
-  bool opened = false;
-  for (const auto &cand : engine_lib_candidates(engine_path)) {
-    try {
-      b.engine_lib.open(cand);
-      b.loaded_path = cand;
-      opened = true;
-      break;
-    } catch (const std::exception &ex) {
-      err = ex.what();
-    }
-  }
-  if (!opened) {
+  if (!abi::open_first_candidate(b.engine_lib, cands, &b.loaded_path, &err)) {
     b.load_error = "libcp2kc_rgpot not loaded: " + err;
     return false;
   }
@@ -128,44 +106,9 @@ bool try_load_engine(EngineBundle &b, const std::string &engine_path) {
 }
 
 bool register_engine_adopter(const EngineBundle &b) {
-  if (!b.adopt_comm)
-    return true;
-  struct PinnedEngine {
-    DynLib library;
-    AdoptCommFn callback;
-  };
-  // The registry keeps one handle per callback until process exit, as
-  // CPMDPot does: a registered callback must stay mapped.
-  static auto *engines = new std::vector<PinnedEngine>;
-  static std::mutex mutex;
-  std::lock_guard<std::mutex> lock(mutex);
-  for (const auto &engine : *engines) {
-    if (engine.callback == b.adopt_comm)
-      return addCalculatorCommAdopter(engine.callback);
-  }
-  DynLib library(b.loaded_path);
-  if (library.sym_optional<AdoptCommFn>("cp2kc_adopt_calculator_comm") !=
-      b.adopt_comm)
-    throw std::runtime_error(
-        "CP2K communicator callback changed while loading");
-  engines->push_back({std::move(library), b.adopt_comm});
-  return addCalculatorCommAdopter(b.adopt_comm);
-}
-
-std::vector<::capnp::word>
-serialize_params(const ::CP2KParams::Reader &params) {
-  ::capnp::MallocMessageBuilder msg;
-  msg.setRoot(params);
-  auto words = ::capnp::messageToFlatArray(msg);
-  std::vector<::capnp::word> out(words.size());
-  std::memcpy(out.data(), words.begin(), words.size() * sizeof(::capnp::word));
-  return out;
-}
-
-std::vector<::capnp::word> default_params() {
-  ::capnp::MallocMessageBuilder msg;
-  auto params = msg.initRoot<::CP2KParams>();
-  return serialize_params(params.asReader());
+  return abi::register_calculator_adopter(
+      b.loaded_path, "cp2kc_adopt_calculator_comm", b.adopt_comm,
+      "CP2K communicator callback changed while loading");
 }
 
 void copy_text_list(::capnp::List<::capnp::Text>::Reader in,
@@ -295,7 +238,7 @@ struct CP2KPot::Impl {
   }
 
   void store(const ::CP2KParams::Reader &params) {
-    params_words = serialize_params(params);
+    params_words = abi::serialize_capnp(params);
     recomputeParamsKey();
     engine_path = params.getEnginePath().cStr();
     params_error.clear();
@@ -348,7 +291,7 @@ void CP2KPot::Impl::createSession(const ForceInput &in) {
 }
 
 CP2KPot::CP2KPot() : Potential(PotType::CP2K), impl_(new Impl) {
-  impl_->params_words = default_params();
+  impl_->params_words = abi::default_capnp_words<::CP2KParams>();
   impl_->recomputeParamsKey();
   (void)impl_->load();
 }
@@ -371,7 +314,7 @@ uint64_t CP2KPot::paramsKey() const noexcept {
 }
 
 bool CP2KPot::setParams(const ::CP2KParams::Reader &params) {
-  const auto next = serialize_params(params);
+  const auto next = abi::serialize_capnp(params);
   const bool same = next.size() == impl_->params_words.size() &&
                     std::memcmp(next.data(), impl_->params_words.data(),
                                 next.size() * sizeof(::capnp::word)) == 0;
@@ -443,13 +386,10 @@ std::string CP2KPot::loadError() const {
 std::string CP2KPot::runDirectory() const { return impl_->run_dir.string(); }
 
 bool CP2KPot::probeAvailable() {
-  std::lock_guard<std::mutex> lock(g_probe_mu);
-  if (!g_probe_done) {
+  return abi::probe_once(g_probe_mu, g_probe_done, g_probe_ok, [] {
     EngineBundle tmp;
-    g_probe_ok = try_load_engine(tmp, "");
-    g_probe_done = true;
-  }
-  return g_probe_ok;
+    return try_load_engine(tmp, "");
+  });
 }
 
 int CP2KPot::bindCalculators(int ranks_per_calc) {

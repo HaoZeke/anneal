@@ -524,10 +524,9 @@ void bind_default_pot(nb::module_ &m, const char *name) {
 }
 #endif
 
-nb::tuple stillinger_weber_energy_gradient(rgpot::StillingerWeberSi &self,
-                                           const F64 &positions,
-                                           nb::handle atom_types,
-                                           const F64 &box) {
+template <typename Pot>
+nb::tuple energy_gradient_call(Pot &self, const F64 &positions,
+                               nb::handle atom_types, const F64 &box) {
   if (box.ndim() != 2 || box.shape(0) != 3 || box.shape(1) != 3) {
     throw std::invalid_argument("box must have shape (3, 3)");
   }
@@ -578,57 +577,60 @@ nb::tuple stillinger_weber_energy_gradient(rgpot::StillingerWeberSi &self,
       "positions must have shape (n_atoms, 3) or (n_config, n_atoms, 3)");
 }
 
-nb::tuple tersoff_sic_energy_gradient(rgpot::TersoffSiC &self,
-                                      const F64 &positions,
-                                      nb::handle atom_types, const F64 &box) {
-  if (box.ndim() != 2 || box.shape(0) != 3 || box.shape(1) != 3) {
-    throw std::invalid_argument("box must have shape (3, 3)");
-  }
-  const double *cell = box.data();
-  auto own = [](double *buf) {
-    return nb::capsule(
-        buf, [](void *p) noexcept { delete[] static_cast<double *>(p); });
-  };
-  if (positions.ndim() == 2) {
-    if (positions.shape(1) != 3) {
-      throw std::invalid_argument("positions must have shape (n_atoms, 3)");
-    }
-    const auto n = static_cast<std::size_t>(positions.shape(0));
-    const std::vector<int> species = rgpot::pybind::read_types(atom_types, n);
-    auto *grad = new double[std::max<std::size_t>(n * 3, 1)]();
-    double energy = 0.0;
-    rgpot::pybind::run_detached([&] {
-      self.energyAndGradient(positions.data(), species.data(), cell, n, &energy,
-                             grad);
-      return 0;
-    });
-    auto arr =
-        nb::ndarray<nb::numpy, double, nb::c_contig>(grad, {n, 3}, own(grad));
-    return nb::make_tuple(energy, arr);
-  }
-  if (positions.ndim() == 3) {
-    if (positions.shape(2) != 3) {
-      throw std::invalid_argument(
-          "positions must have shape (n_config, n_atoms, 3)");
-    }
-    const auto n_config = static_cast<std::size_t>(positions.shape(0));
-    const auto n = static_cast<std::size_t>(positions.shape(1));
-    const std::vector<int> species = rgpot::pybind::read_types(atom_types, n);
-    auto *energies = new double[std::max<std::size_t>(n_config, 1)]();
-    auto *grads = new double[std::max<std::size_t>(n_config * n * 3, 1)]();
-    rgpot::pybind::run_detached([&] {
-      self.energyAndGradientBatch(n_config, positions.data(), species.data(),
-                                  cell, n, energies, grads);
-      return 0;
-    });
-    auto earr = nb::ndarray<nb::numpy, double, nb::c_contig>(
-        energies, {n_config}, own(energies));
-    auto garr = nb::ndarray<nb::numpy, double, nb::c_contig>(
-        grads, {n_config, n, 3}, own(grads));
-    return nb::make_tuple(earr, garr);
-  }
-  throw std::invalid_argument(
-      "positions must have shape (n_atoms, 3) or (n_config, n_atoms, 3)");
+template <typename Pot, typename Cfg>
+auto bind_lj_like(nb::module_ &m, const char *name, const char *init_doc) {
+  auto cls = nb::class_<PotHolder<Pot>>(m, name);
+  cls.def(
+      "__init__",
+      [](PotHolder<Pot> *self, double u0, double cutoff, double psi,
+         double switch_width) {
+        new (self) PotHolder<Pot>([=] {
+          Cfg cfg;
+          cfg.u0 = u0;
+          cfg.cutoff = cutoff;
+          cfg.psi = psi;
+          cfg.switch_width = switch_width;
+          return std::make_unique<Pot>(cfg);
+        });
+      },
+      nb::arg("u0") = 1.0, nb::arg("cutoff") = 15.0, nb::arg("psi") = 1.0,
+      nb::arg("switch_width") = 0.0, init_doc);
+  cls.def("config", [](const PotHolder<Pot> &self) {
+    const Cfg &cfg = self.primary().config();
+    nb::dict out;
+    out["u0"] = cfg.u0;
+    out["cutoff"] = cfg.cutoff;
+    out["psi"] = cfg.psi;
+    out["switch_width"] = cfg.switch_width;
+    return out;
+  });
+  return cls;
+}
+
+template <typename Pot>
+void bind_md_native_pot(nb::module_ &m, const char *name,
+                        const char *unit_label) {
+  auto cls = nb::class_<Pot>(m, name);
+  cls.def(
+      "__call__",
+      [](Pot &self, const F64 &positions, nb::handle atom_types,
+         const F64 &box) {
+        auto geom = rgpot::pybind::read_geom(positions, atom_types, box);
+        return rgpot::pybind::call_detached(self, geom);
+      },
+      nb::arg("positions").noconvert(), nb::arg("atom_types"),
+      nb::arg("box").noconvert(),
+      "Energy, forces and variance. Positions are Angstrom, energy is eV.");
+  cls.def("native_u0", &Pot::nativeU0,
+          (std::string("Well depth stored for ") + unit_label + ", kJ/mol.")
+              .c_str());
+  cls.def("native_cutoff", &Pot::nativeCutoff,
+          (std::string("Cutoff stored for ") + unit_label + ", nanometres.")
+              .c_str());
+  cls.def("native_psi", &Pot::nativePsi,
+          (std::string("Zero crossing stored for ") + unit_label +
+           ", nanometres.")
+              .c_str());
 }
 
 } // namespace
@@ -781,35 +783,12 @@ NB_MODULE(_core, m) {
       .def("reset_counts", &rgpot::cache::PotentialCache::reset_counts);
 #endif
 
-  auto lj = nb::class_<PotHolder<rgpot::LJPot>>(m, "LJPot");
-  lj.def(
-      "__init__",
-      [](PotHolder<rgpot::LJPot> *self, double u0, double cutoff, double psi,
-         double switch_width) {
-        new (self) PotHolder<rgpot::LJPot>([=] {
-          rgpot::LJConfig cfg;
-          cfg.u0 = u0;
-          cfg.cutoff = cutoff;
-          cfg.psi = psi;
-          cfg.switch_width = switch_width;
-          return std::make_unique<rgpot::LJPot>(cfg);
-        });
-      },
-      nb::arg("u0") = 1.0, nb::arg("cutoff") = 15.0, nb::arg("psi") = 1.0,
-      nb::arg("switch_width") = 0.0,
+  auto lj = bind_lj_like<rgpot::LJPot, rgpot::LJConfig>(
+      m, "LJPot",
       "Shifted 12-6 Lennard-Jones. u0 is the well depth (eV), cutoff "
       "and psi are Angstrom. A positive switch_width (Angstrom) "
       "replaces the shift with the C^2 quintic switch over "
       "[cutoff - switch_width, cutoff]; it must not exceed cutoff.");
-  lj.def("config", [](const PotHolder<rgpot::LJPot> &self) {
-    const rgpot::LJConfig &cfg = self.primary().config();
-    nb::dict out;
-    out["u0"] = cfg.u0;
-    out["cutoff"] = cfg.cutoff;
-    out["psi"] = cfg.psi;
-    out["switch_width"] = cfg.switch_width;
-    return out;
-  });
 #ifdef RGPOT_HAS_CACHE
   lj.def(
       "set_cache",
@@ -822,36 +801,13 @@ NB_MODULE(_core, m) {
 
   // Same call surface as LJPot. Both classes are already in librgpot;
   // this is the binding a caller of the wheel uses.
-  auto cluster = nb::class_<PotHolder<rgpot::LJClusterPot>>(m, "LJClusterPot");
-  cluster.def(
-      "__init__",
-      [](PotHolder<rgpot::LJClusterPot> *self, double u0, double cutoff,
-         double psi, double switch_width) {
-        new (self) PotHolder<rgpot::LJClusterPot>([=] {
-          rgpot::LJClusterConfig cfg;
-          cfg.u0 = u0;
-          cfg.cutoff = cutoff;
-          cfg.psi = psi;
-          cfg.switch_width = switch_width;
-          return std::make_unique<rgpot::LJClusterPot>(cfg);
-        });
-      },
-      nb::arg("u0") = 1.0, nb::arg("cutoff") = 15.0, nb::arg("psi") = 1.0,
-      nb::arg("switch_width") = 0.0,
+  auto cluster = bind_lj_like<rgpot::LJClusterPot, rgpot::LJClusterConfig>(
+      m, "LJClusterPot",
       "Free-boundary shifted 12-6 Lennard-Jones. u0 is the well depth "
       "(eV), cutoff and psi are Angstrom. An input cell does not fold "
       "pair vectors. A positive switch_width (Angstrom) replaces the "
       "shift with the C^2 quintic switch over "
       "[cutoff - switch_width, cutoff]; it must not exceed cutoff.");
-  cluster.def("config", [](const PotHolder<rgpot::LJClusterPot> &self) {
-    const rgpot::LJClusterConfig &cfg = self.primary().config();
-    nb::dict out;
-    out["u0"] = cfg.u0;
-    out["cutoff"] = cfg.cutoff;
-    out["psi"] = cfg.psi;
-    out["switch_width"] = cfg.switch_width;
-    return out;
-  });
   rgpot::pybind::bind_calls(cluster);
 
   auto morse_cls = nb::class_<PotHolder<rgpot::MorsePot>>(m, "MorsePot");
@@ -1073,7 +1029,7 @@ NB_MODULE(_core, m) {
           nb::arg("box").noconvert(),
           "Energy, forces, variance, and the Cauchy stress, shape (3, 3), "
           "in eV/Angstrom^3. The kernel runs detached.")
-      .def("energy_gradient", &stillinger_weber_energy_gradient,
+      .def("energy_gradient", &energy_gradient_call<rgpot::StillingerWeberSi>,
            nb::arg("positions").noconvert(), nb::arg("atom_types"),
            nb::arg("box").noconvert(),
            "Energy and dE/dx. positions is (n_atoms, 3) or "
@@ -1100,7 +1056,7 @@ NB_MODULE(_core, m) {
           nb::arg("box").noconvert(),
           "Return (energy, forces, variance) for one configuration. "
           "Forces are -dE/dx.")
-      .def("energy_gradient", &tersoff_sic_energy_gradient,
+      .def("energy_gradient", &energy_gradient_call<rgpot::TersoffSiC>,
            nb::arg("positions").noconvert(), nb::arg("atom_types"),
            nb::arg("box").noconvert(),
            "Energy and dE/dx. positions is (n_atoms, 3) or "
@@ -1481,40 +1437,8 @@ NB_MODULE(_core, m) {
       nb::arg("positions").noconvert(), nb::arg("atom_types"),
       nb::arg("box").noconvert(),
       "Energy, forces and variance. Positions are Angstrom, energy is eV.");
-  auto gromacs = nb::class_<rgpot::GromacsPot>(m, "GromacsPot");
-  gromacs.def(
-      "__call__",
-      [](rgpot::GromacsPot &self, const F64 &positions, nb::handle atom_types,
-         const F64 &box) {
-        auto geom = rgpot::pybind::read_geom(positions, atom_types, box);
-        return rgpot::pybind::call_detached(self, geom);
-      },
-      nb::arg("positions").noconvert(), nb::arg("atom_types"),
-      nb::arg("box").noconvert(),
-      "Energy, forces and variance. Positions are Angstrom, energy is eV.");
-  gromacs.def("native_u0", &rgpot::GromacsPot::nativeU0,
-              "Well depth stored for GROMACS, kJ/mol.");
-  gromacs.def("native_cutoff", &rgpot::GromacsPot::nativeCutoff,
-              "Cutoff stored for GROMACS, nanometres.");
-  gromacs.def("native_psi", &rgpot::GromacsPot::nativePsi,
-              "Zero crossing stored for GROMACS, nanometres.");
-  auto openmm = nb::class_<rgpot::OpenMMPot>(m, "OpenMMPot");
-  openmm.def(
-      "__call__",
-      [](rgpot::OpenMMPot &self, const F64 &positions, nb::handle atom_types,
-         const F64 &box) {
-        auto geom = rgpot::pybind::read_geom(positions, atom_types, box);
-        return rgpot::pybind::call_detached(self, geom);
-      },
-      nb::arg("positions").noconvert(), nb::arg("atom_types"),
-      nb::arg("box").noconvert(),
-      "Energy, forces and variance. Positions are Angstrom, energy is eV.");
-  openmm.def("native_u0", &rgpot::OpenMMPot::nativeU0,
-             "Well depth stored for OpenMM, kJ/mol.");
-  openmm.def("native_cutoff", &rgpot::OpenMMPot::nativeCutoff,
-             "Cutoff stored for OpenMM, nanometres.");
-  openmm.def("native_psi", &rgpot::OpenMMPot::nativePsi,
-             "Zero crossing stored for OpenMM, nanometres.");
+  bind_md_native_pot<rgpot::GromacsPot>(m, "GromacsPot", "GROMACS");
+  bind_md_native_pot<rgpot::OpenMMPot>(m, "OpenMMPot", "OpenMM");
 
   auto make_cfg = [](double u0, double cutoff, double psi,
                      const std::string &engine_path) {

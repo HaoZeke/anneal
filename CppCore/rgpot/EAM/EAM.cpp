@@ -23,6 +23,36 @@
 #include <string>
 #include <vector>
 
+namespace {
+
+inline void evalDensityAndMorse(double beta1, double beta2, double alphaM,
+                                double Rm, double Dm, double r2, bool do_pair,
+                                double &dens_term, double &fscale,
+                                double &phi_r, double &fcomp_scale) {
+  const double r = std::sqrt(r2);
+  const double invR = 1.0 / r;
+  const double r6 = r2 * r2 * r2;
+  const double exp_b1 = std::exp(-beta1 * r);
+  const double exp_b2 = std::exp(-2.0 * beta2 * r);
+  const double rho_pair = exp_b1 + 512.0 * exp_b2;
+  dens_term = r6 * rho_pair;
+  const double r5 = r2 * r2 * r;
+  const double mag =
+      6.0 * r5 * rho_pair +
+      r6 * (-beta1 * exp_b1 - 1024.0 * beta2 * exp_b2);
+  fscale = -mag * invR;
+  if (do_pair) {
+    const double expArg = std::exp(-alphaM * (r - Rm));
+    const double d = 1.0 - expArg;
+    phi_r = Dm * d * d - Dm;
+    // d(phi)/dr = -mag_force, so the force on i is
+    // -(d phi/dr) (r_i - r_j) / r = mag_force (r_i - r_j) / r.
+    fcomp_scale = 2.0 * alphaM * Dm * d * (d - 1.0) * invR;
+  }
+}
+
+} // namespace
+
 void EAM::cleanMemory() {
   std::vector<double>().swap(wrapped_);
   std::vector<Delta>().swap(deltas_);
@@ -158,12 +188,6 @@ void EAM::accumulate(long i, const int *atomicNrs, double *F, double &U,
   deltas.clear();
   const element_parameters epar = get_element_parameters(atomicNrs[i]);
   const double cutoff2 = epar.r_cut * epar.r_cut;
-  const double half0 = box_len_[0] * 0.5;
-  const double half1 = box_len_[1] * 0.5;
-  const double half2 = box_len_[2] * 0.5;
-  const double xi = wrapped_[static_cast<std::size_t>(3 * i)];
-  const double yi = wrapped_[static_cast<std::size_t>(3 * i + 1)];
-  const double zi = wrapped_[static_cast<std::size_t>(3 * i + 2)];
   double dens = 0.0;
   double dix = 0.0;
   double diy = 0.0;
@@ -179,53 +203,27 @@ void EAM::accumulate(long i, const int *atomicNrs, double *F, double &U,
     const long j =
         stream ? stream_ids[static_cast<std::size_t>(p)]
                : nbr[static_cast<std::size_t>(p)];
-    double dx = xi - wrapped_[static_cast<std::size_t>(3 * j)];
-    double dy = yi - wrapped_[static_cast<std::size_t>(3 * j + 1)];
-    double dz = zi - wrapped_[static_cast<std::size_t>(3 * j + 2)];
-    if (dx > half0) {
-      dx -= box_len_[0];
-    } else if (dx < -half0) {
-      dx += box_len_[0];
-    }
-    if (dy > half1) {
-      dy -= box_len_[1];
-    } else if (dy < -half1) {
-      dy += box_len_[1];
-    }
-    if (dz > half2) {
-      dz -= box_len_[2];
-    } else if (dz < -half2) {
-      dz += box_len_[2];
-    }
-    const double r2 = dx * dx + dy * dy + dz * dz;
+    double dx = 0.0;
+    double dy = 0.0;
+    double dz = 0.0;
+    double r2 = 0.0;
+    geometry(i, j, dx, dy, dz, r2);
     if (r2 > cutoff2) {
       continue;
     }
-    const double r = std::sqrt(r2);
-    const double r6 = r2 * r2 * r2;
-    const double exp_b1 = std::exp(-epar.beta1 * r);
-    const double exp_b2 = std::exp(-2.0 * epar.beta2 * r);
-    const double rho_pair = exp_b1 + 512.0 * exp_b2;
-    dens += r6 * rho_pair;
-    const double r5 = r2 * r2 * r;
-    const double mag_force_den =
-        6.0 * r5 * rho_pair +
-        r6 * (-epar.beta1 * exp_b1 - 1024.0 * epar.beta2 * exp_b2);
-    const double invR = 1.0 / r;
-    const double fscale = -mag_force_den * invR;
+    double dens_term = 0.0;
+    double fscale = 0.0;
+    double phi_r = 0.0;
+    double fcomp_scale = 0.0;
+    evalDensityAndMorse(epar.beta1, epar.beta2, epar.alphaM, epar.Rm, epar.Dm,
+                        r2, j > i, dens_term, fscale, phi_r, fcomp_scale);
+    dens += dens_term;
     dix += fscale * dx;
     diy += fscale * dy;
     diz += fscale * dz;
     deltas.push_back(
         Delta{j, -fscale * dx, -fscale * dy, -fscale * dz});
     if (j > i) {
-      const double expArg = std::exp(-epar.alphaM * (r - epar.Rm));
-      const double d = 1.0 - expArg;
-      const double phi_r = epar.Dm * d * d - epar.Dm;
-      // d(phi)/dr = -mag_force, so the force on i is
-      // -(d phi/dr) (r_i - r_j) / r = mag_force (r_i - r_j) / r.
-      const double mag_force = 2.0 * epar.alphaM * epar.Dm * d * (d - 1.0);
-      const double fcomp_scale = mag_force * invR;
       F[3 * i] += fcomp_scale * dx;
       F[3 * i + 1] += fcomp_scale * dy;
       F[3 * i + 2] += fcomp_scale * dz;
@@ -338,28 +336,20 @@ void EAM::evaluateStoredParallel(long N, const int *atomicNrs, double *F,
         if (r2 > cutoff2) {
           continue;
         }
-        const double r = std::sqrt(r2);
-        const double r6 = r2 * r2 * r2;
-        const double exp_b1 = std::exp(-epar.beta1 * r);
-        const double exp_b2 = std::exp(-2.0 * epar.beta2 * r);
-        const double rho_pair = exp_b1 + 512.0 * exp_b2;
-        dens += r6 * rho_pair;
-        const double r5 = r2 * r2 * r;
-        const double mag_force_den =
-            6.0 * r5 * rho_pair +
-            r6 * (-epar.beta1 * exp_b1 - 1024.0 * epar.beta2 * exp_b2);
-        const double invR = 1.0 / r;
-        const double fscale = -mag_force_den * invR;
+        double dens_term = 0.0;
+        double fscale = 0.0;
+        double phi_r = 0.0;
+        double fcomp = 0.0;
+        evalDensityAndMorse(epar.beta1, epar.beta2, epar.alphaM, epar.Rm,
+                            epar.Dm, r2, j > i, dens_term, fscale, phi_r,
+                            fcomp);
+        dens += dens_term;
         dix += fscale * dx;
         diy += fscale * dy;
         diz += fscale * dz;
         fscale_[s] = fscale;
         if (j > i) {
-          const double expArg = std::exp(-epar.alphaM * (r - epar.Rm));
-          const double d = 1.0 - expArg;
-          const double phi_r = epar.Dm * d * d - epar.Dm;
-          const double mag_force = 2.0 * epar.alphaM * epar.Dm * d * (d - 1.0);
-          morse_[s] = mag_force * invR;
+          morse_[s] = fcomp;
           energy += phi_r;
         }
       }

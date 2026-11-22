@@ -18,6 +18,7 @@
 
 #include <catch2/catch_all.hpp>
 
+#include "TestFixtures.hpp"
 #include "rgpot/StillingerWeber/SWSi.hpp"
 #include "rgpot/nlist/HalfShell.hpp"
 #include "rgpot/stress.hpp"
@@ -25,9 +26,12 @@
 
 using Catch::Matchers::WithinAbs;
 using rgpot::StillingerWeberSi;
+using rgpot::test_fixtures::appendDiamond;
 using rgpot::types::AtomMatrix;
 
 namespace {
+
+auto cubic(double a) { return rgpot::test_fixtures::cubicCell(a); }
 
 double df2du(double u) {
   const double s = 1.0 / (u - StillingerWeberSi::kCut);
@@ -50,28 +54,6 @@ double pairMinimumU() {
     u -= d1 / d2;
   }
   return u;
-}
-
-std::array<std::array<double, 3>, 3> cubic(double a) {
-  return {{{a, 0.0, 0.0}, {0.0, a, 0.0}, {0.0, 0.0, a}}};
-}
-
-void appendDiamond(std::vector<double> &pos, int nrep, double a0) {
-  const double basis[8][3] = {{0.0, 0.0, 0.0},    {0.5, 0.5, 0.0},
-                              {0.5, 0.0, 0.5},    {0.0, 0.5, 0.5},
-                              {0.25, 0.25, 0.25}, {0.75, 0.75, 0.25},
-                              {0.75, 0.25, 0.75}, {0.25, 0.75, 0.75}};
-  for (int ix = 0; ix < nrep; ++ix) {
-    for (int iy = 0; iy < nrep; ++iy) {
-      for (int iz = 0; iz < nrep; ++iz) {
-        for (const auto &b : basis) {
-          pos.push_back((ix + b[0]) * a0);
-          pos.push_back((iy + b[1]) * a0);
-          pos.push_back((iz + b[2]) * a0);
-        }
-      }
-    }
-  }
 }
 
 } // namespace
