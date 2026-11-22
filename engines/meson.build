@@ -49,7 +49,7 @@ if mdi_enabled
     rgpot_mdi = executable(
         'rgpot-mdi',
         files('rgpot_mdi.cpp'),
-        dependencies: [pot_spec_dep, rgpot_rust_lib],
+        dependencies: [pot_spec_dep, rgpot_rust_lib, thread_dep, dl_dep],
         link_with: rgpot,
         cpp_args: _args,
         install: not meson.is_subproject(),
@@ -62,7 +62,7 @@ rgpot_eval = executable(
     link_with: rgpot,
     cpp_args: _args,
 )
-if mdi_enabled
+if mdi_enabled and get_option('with_tests')
     _mdi_python = find_program('python3')
     _mdi_python_probe = run_command(
         _mdi_python,

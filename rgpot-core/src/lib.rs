@@ -69,9 +69,9 @@ pub mod status;
 pub mod taylor;
 pub mod tensor;
 pub mod types;
-pub mod version;
 #[cfg(feature = "mdi")]
 pub mod units;
+pub mod version;
 
 #[cfg(feature = "schema")]
 #[allow(dead_code, non_snake_case, unused_parens, clippy::all)]
