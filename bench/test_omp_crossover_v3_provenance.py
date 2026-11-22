@@ -54,6 +54,20 @@ def is_shallow_git(repo: Path) -> bool:
     )
     return probe.returncode == 0 and probe.stdout.strip() == "true"
 
+
+def has_known_recorded_commit(repo: Path, recorded_trees: dict[str, str]) -> bool:
+    for candidate in recorded_trees:
+        probe = subprocess.run(
+            ["git", "cat-file", "-e", f"{candidate}^{{commit}}"],
+            cwd=repo,
+            text=True,
+            capture_output=True,
+        )
+        if probe.returncode == 0:
+            return True
+    return False
+
+
 def require_non_empty_string(arm: str, field: str, value: object) -> str:
     if not isinstance(value, str) or not value:
         raise SystemExit(f"{arm}: arm record has invalid {field}: {value!r}")
@@ -86,12 +100,12 @@ def recorded_tree_thresholds(record: list[dict]) -> dict[str, int]:
                 out[tree] = threshold
     return out
 
-
 def resolved_commit_tree(
-    repo: Path, arm: str, sha: str, fallback_trees: dict[str, str]
-) -> str:
-def resolved_commit_tree(
-    repo: Path, arm: str, sha: str, pins: dict[str, dict[str, str]]
+    repo: Path,
+    arm: str,
+    sha: str,
+    recorded_trees: dict[str, str],
+    pins: dict[str, dict[str, str]],
 ) -> tuple[str, bool]:
     if has_git(repo):
         commit = subprocess.run(
@@ -108,14 +122,14 @@ def resolved_commit_tree(
                 text=True,
                 capture_output=True,
             ).stdout.strip(), True
-        if not is_shallow_git(repo):
+        if has_known_recorded_commit(repo, recorded_trees) and not is_shallow_git(repo):
             raise SystemExit(f"{arm}: commit does not resolve: {sha}")
     arm_pins = pins.get(arm)
     if not isinstance(arm_pins, dict):
-        raise SystemExit(f"{arm}: commit does not resolve: {sha}")
+        raise SystemExit(f"{arm}: pinned manifest has no arm entry")
     pinned = arm_pins.get(sha)
     if not isinstance(pinned, str) or not pinned:
-        raise SystemExit(f"{arm}: commit does not resolve: {sha}")
+        raise SystemExit(f"{arm}: commit does not resolve and has no pin: {sha}")
     return pinned, False
 
 
@@ -172,6 +186,7 @@ def check_provenance(
         missing_text = ", ".join(missing) if missing else "(none)"
         extra_text = ", ".join(extra) if extra else "(none)"
         raise SystemExit(f"arm set mismatch: missing {missing_text}; extra {extra_text}")
+    recorded_trees = recorded_commit_trees(record)
     for arm in record:
         name = arm["name"] if isinstance(arm.get("name"), str) and arm.get("name") else "<unnamed>"
         if "sha" not in arm:
@@ -206,7 +221,7 @@ def check_provenance(
                 f"does not match tree_threshold {arm['tree_threshold']}"
             )
         recorded = tree
-        actual, commit_present = resolved_commit_tree(repo, name, sha, pins)
+        actual, commit_present = resolved_commit_tree(repo, name, sha, recorded_trees, pins)
         if recorded != actual:
             raise SystemExit(f"{name}: recorded tree {recorded} does not match commit tree {actual}")
         actual_threshold = tree_threshold(repo, name, recorded, threshold, commit_present)
