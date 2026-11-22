@@ -658,7 +658,63 @@ async def run_hvp_unit_smoke(port):
         assert np.max(np.abs(hvp - fd)) <= bar, (
             f"{unit} HVP mismatch: got={hvp[0]} fd={fd[0]} bar={bar}"
         )
-    print("HVP unit smoke: bohr and nm finite differences agree.")
+
+        # The comparison above cannot see a sign flip applied to the force
+        # and the product together, since both sides flip. The energy is not
+        # touched by either conversion, so it fixes the absolute sign and
+        # unit scale: F = -dE/dx and H = d^2E/dx^2, in caller units.
+        eps = np.finfo(np.float64).eps
+        energies = []
+
+        async def energy_at(shift):
+            result = await pot.calculate(_force_input(point + shift, unit))
+            energies.append(abs(float(result.result.energy)))
+            return float(result.result.energy)
+
+        at_point = await pot.calculate(_force_input(point, unit))
+        force = float(np.array(at_point.result.forces, dtype=np.float64)[0])
+        e_here = await energy_at(0.0)
+
+        step = np.cbrt(eps) * (1.0 + abs(point))
+        slopes = [
+            (await energy_at(h) - await energy_at(-h)) / (2.0 * h)
+            for h in (step, step / 2.0)
+        ]
+        # The h/2 slope keeps a third of the gap between the two slopes as
+        # truncation; the rounding is eps times the energy over the step.
+        slope_bar = abs(slopes[0] - slopes[1]) + eps * max(energies) / (step / 2.0)
+        assert abs(force) > slope_bar, (
+            f"{unit} force {force} is not resolved by the slope bar {slope_bar}"
+        )
+        assert abs(force + slopes[1]) <= slope_bar, (
+            f"{unit} force {force} is not -dE/dx = {-slopes[1]} (bar={slope_bar})"
+        )
+        e_along = await energy_at(step * np.sign(force))
+        assert e_along < e_here, (
+            f"{unit} energy rose along the force: {e_here} -> {e_along}"
+        )
+
+        energies.clear()
+        span = np.sqrt(np.sqrt(eps)) * (1.0 + abs(point))
+        curvatures = [
+            (await energy_at(t) - 2.0 * e_here + await energy_at(-t)) / t**2
+            for t in (span, span / 2.0)
+        ]
+        curvature_bar = abs(curvatures[0] - curvatures[1]) + (
+            4.0 * eps * max(energies + [abs(e_here)]) / (span / 2.0) ** 2
+        )
+        # One atom along x: H v = (d^2E/dx^2) * v.
+        assert abs(curvatures[1]) > curvature_bar, (
+            f"{unit} curvature {curvatures[1]} is not resolved by {curvature_bar}"
+        )
+        assert abs(hvp[0] / direction - curvatures[1]) <= curvature_bar, (
+            f"{unit} HVP {hvp[0]} is not (d^2E/dx^2) v = "
+            f"{curvatures[1] * direction} (bar={curvature_bar * abs(direction)})"
+        )
+    print(
+        "HVP unit smoke: bohr and nm finite differences agree, and the force "
+        "and product match the energy's own gradient and curvature."
+    )
     return True
 
 
