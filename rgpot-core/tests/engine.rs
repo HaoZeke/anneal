@@ -710,6 +710,60 @@ fn hint_reports_status_updates_state_and_surfaces_callback_panics() {
 }
 
 #[test]
+fn a_panic_in_a_retained_refused_callback_is_fatal() {
+    let path = build(
+        "harmonic_refused_model_update_panic",
+        &["RETAIN_REFUSED_CALLBACKS"],
+    );
+    let (old, _, _) = Tracked::new(false);
+    let mut session = load_session(&path);
+    session
+        .set_callbacks(Some(Box::new(old)))
+        .expect("set initial callbacks");
+    session
+        .set_callbacks(Some(Box::new(PanicModelUpdate)))
+        .expect_err("the fixture refuses the replacement");
+
+    let error = session
+        .hint(&[1])
+        .expect_err("the retained refused callback panics in the model update");
+    assert_eq!(
+        error,
+        EngineError::Fatal {
+            code: -1,
+            message: "model-update callback panicked".into(),
+        }
+    );
+    assert_poisoned_without_an_extra_force(&mut session, &path, &error);
+}
+
+#[test]
+fn a_panic_in_a_retained_refused_oracle_is_fatal() {
+    let path = build(
+        "harmonic_refused_oracle_panic",
+        &["RETAIN_REFUSED_CALLBACKS"],
+    );
+    let (old, _, _) = Tracked::new(false);
+    let mut session = load_session(&path);
+    session
+        .set_callbacks(Some(Box::new(old)))
+        .expect("set initial callbacks");
+    session
+        .set_callbacks(Some(Box::new(PanicOracle)))
+        .expect_err("the fixture refuses the replacement");
+
+    let error = force_one(&mut session).expect_err("the retained refused oracle panics");
+    assert_eq!(
+        error,
+        EngineError::Fatal {
+            code: -1,
+            message: "oracle callback panicked".into(),
+        }
+    );
+    assert_poisoned_without_an_extra_force(&mut session, &path, &error);
+}
+
+#[test]
 fn native_fatal_status_poisons_an_engine_session() {
     let path = build("harmonic_session_fatal_once", &["FATAL_ONCE"]);
     let observer = FixtureObserver::open(&path);

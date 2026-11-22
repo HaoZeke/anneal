@@ -630,13 +630,14 @@ fn described(failure: EngineFailure) -> String {
 }
 
 /// The decisive failure the host reported during one native call, from the
-/// transform and then the registered callbacks.
+/// transform and then the registered callbacks, including any refused state
+/// the engine kept registered.
 fn host_failure(
     transform: Option<&TransformCall<'_>>,
-    callbacks: Option<&CallbackState>,
+    callbacks: HostCallbacks<'_>,
 ) -> Option<EngineFailure> {
     let mut decisive = transform.and_then(TransformCall::take_failure);
-    if let Some(failure) = callbacks.and_then(CallbackState::take_failure) {
+    if let Some(failure) = callbacks.take_failure() {
         keep_decisive(&mut decisive, failure);
     }
     decisive
@@ -832,14 +833,14 @@ impl EnginePotential {
         request: &EngineRequest<'_>,
         transform: Option<&mut dyn CoordinateTransform>,
     ) -> Result<EngineEvaluation, EngineError> {
-        self.force_with_host(request, transform, None)
+        self.force_with_host(request, transform, HostCallbacks::NONE)
     }
 
     fn force_with_host(
         &mut self,
         request: &EngineRequest<'_>,
         transform: Option<&mut dyn CoordinateTransform>,
-        callbacks: Option<&CallbackState>,
+        callbacks: HostCallbacks<'_>,
     ) -> Result<EngineEvaluation, EngineError> {
         self.check_alive()?;
         let n_atoms = request.atomic_numbers.len();
@@ -895,7 +896,13 @@ impl EnginePotential {
         boxes: &[f64],
         transform: Option<&mut dyn CoordinateTransform>,
     ) -> Result<Vec<EngineEvaluation>, EngineError> {
-        self.force_batch_with_host(atomic_numbers, positions, boxes, transform, None)
+        self.force_batch_with_host(
+            atomic_numbers,
+            positions,
+            boxes,
+            transform,
+            HostCallbacks::NONE,
+        )
     }
 
     fn force_batch_with_host(
@@ -904,7 +911,7 @@ impl EnginePotential {
         positions: &[f64],
         boxes: &[f64],
         transform: Option<&mut dyn CoordinateTransform>,
-        callbacks: Option<&CallbackState>,
+        callbacks: HostCallbacks<'_>,
     ) -> Result<Vec<EngineEvaluation>, EngineError> {
         self.check_alive()?;
         let batch = self
@@ -1233,6 +1240,53 @@ impl CallbackState {
     }
 }
 
+/// Every callback state an engine may still call: the registered one and the
+/// refused ones an older engine kept.
+#[derive(Clone, Copy)]
+struct HostCallbacks<'a> {
+    active: Option<&'a CallbackState>,
+    refused: &'a [Box<CallbackState>],
+}
+
+impl<'a> HostCallbacks<'a> {
+    const NONE: Self = Self {
+        active: None,
+        refused: &[],
+    };
+
+    fn new(active: &'a Option<Box<CallbackState>>, refused: &'a RefusedCallbacks) -> Self {
+        Self {
+            active: active.as_deref(),
+            refused: &refused.0,
+        }
+    }
+
+    fn states(self) -> impl Iterator<Item = &'a CallbackState> {
+        self.active
+            .into_iter()
+            .chain(self.refused.iter().map(|state| &**state))
+    }
+
+    /// The decisive recorded failure, drained from every state so none is
+    /// left to surface in a later call.
+    fn take_failure(self) -> Option<EngineFailure> {
+        let mut decisive = None;
+        for failure in self.states().filter_map(CallbackState::take_failure) {
+            keep_decisive(&mut decisive, failure);
+        }
+        decisive
+    }
+
+    /// The decisive recorded fatal failure. Recoverable ones stay recorded.
+    fn take_fatal(self) -> Option<EngineFailure> {
+        let mut decisive = None;
+        for failure in self.states().filter_map(CallbackState::take_fatal) {
+            keep_decisive(&mut decisive, failure);
+        }
+        decisive
+    }
+}
+
 unsafe extern "C" fn oracle_trampoline(
     ctx: *mut c_void,
     n_atoms: c_long,
@@ -1404,9 +1458,11 @@ impl EngineSession {
         request: &EngineRequest<'_>,
         transform: Option<&mut dyn CoordinateTransform>,
     ) -> Result<EngineEvaluation, EngineError> {
-        let answer = self
-            .engine
-            .force_with_host(request, transform, self.callbacks.as_deref());
+        let answer = self.engine.force_with_host(
+            request,
+            transform,
+            HostCallbacks::new(&self.callbacks, &self.refused),
+        );
         self.finish(answer)
     }
 
@@ -1423,7 +1479,7 @@ impl EngineSession {
             positions,
             boxes,
             transform,
-            self.callbacks.as_deref(),
+            HostCallbacks::new(&self.callbacks, &self.refused),
         );
         self.finish(answer)
     }
@@ -1433,7 +1489,9 @@ impl EngineSession {
     /// `None` is represented by a null callback-table pointer. If native
     /// replacement fails, the previous owned callbacks remain registered and
     /// the refused ones are kept alive until the engine is destroyed, in case
-    /// an older engine retained them.
+    /// an older engine retained them. A failure recorded by a refused state
+    /// that the engine still calls is reported like one from the registered
+    /// callbacks.
     /// A failure the previous callbacks recorded and no call has reported yet
     /// is reported here, since a successful replacement drops them. So is a
     /// panic in their destructor, which poisons the session like any other
@@ -1474,10 +1532,7 @@ impl EngineSession {
             std::ptr::null()
         };
         let code = unsafe { set_callbacks(self.engine.handle.as_ptr(), raw_ptr) };
-        let mut failure = self
-            .callbacks
-            .as_deref()
-            .and_then(CallbackState::take_failure);
+        let mut failure = HostCallbacks::new(&self.callbacks, &self.refused).take_failure();
         if let Some(replacement) = next.as_deref().and_then(CallbackState::take_failure) {
             keep_decisive(&mut failure, replacement);
         }
@@ -1550,7 +1605,7 @@ impl EngineSession {
                 error.len(),
             )
         };
-        let failure = host_failure(None, self.callbacks.as_deref());
+        let failure = host_failure(None, HostCallbacks::new(&self.callbacks, &self.refused));
         self.engine.settle_with(code, failure, || {
             let text = text_of(&error);
             if text.is_empty() {
@@ -1569,11 +1624,7 @@ impl EngineSession {
         if matches!(answer, Err(EngineError::Fatal { .. })) {
             return answer;
         }
-        match self
-            .callbacks
-            .as_deref()
-            .and_then(CallbackState::take_fatal)
-        {
+        match HostCallbacks::new(&self.callbacks, &self.refused).take_fatal() {
             Some(failure) => {
                 let code = failure.status.code();
                 Err(self.engine.poison(code, described(failure)))
