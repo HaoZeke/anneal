@@ -72,13 +72,15 @@ Destroy every handle before the process exits.
 
 The Meson build makes the engine libraries when =-Dwith_rpc=true=, because the
 params messages need the Cap'n Proto schema.
-=libclassical_engine=, =libmopac_engine= and =libnwchem_engine= need only that.
+=libclassical_engine=, =libcomposite_engine=,
+=libmopac_engine= and =libnwchem_engine= need only that.
 =libxtb_engine= also needs =-Dwith_xtb=true=,
 =libskala_engine= =-Dwith_skala=true=, and
 =libmetatomic_engine= =-Dwith_metatomic=true=.
 =libuma_engine= needs =-Dwith_metatomic=true= and is not built with
 =-Dwith_python=true=.
-The classical, MOPAC, NWChem and Skala libraries are not built on Windows.
+The classical, composite, MOPAC, NWChem and Skala libraries are not built on
+Windows.
 
 The =umaenginebld= pixi environment has the rpc, metatomic and xtb dependencies.
 CI builds and tests every engine with the =potctl= command line tool (a cargo
@@ -120,7 +122,7 @@ meson test -C bbdir-uma-engine --print-errorlogs EngineTableTest
 
 The tests find the libraries through environment variables that Meson sets:
 =RGPOT_ENGINE_STUB= and
-=RGPOT_ENGINE_STUB_MODEL= for =EngineAdapterTest=, =RGPOT_ENGINE_CLASSICAL=, =RGPOT_ENGINE_MOPAC=, =RGPOT_ENGINE_NWCHEM=, =RGPOT_ENGINE_XTB=, =RGPOT_ENGINE_SKALA=, =RGPOT_ENGINE_METATOMIC= and =RGPOT_ENGINE_EXPECT= for =EngineTableTest=, and =RGPOT_UMA_ENGINE=
+=RGPOT_ENGINE_STUB_MODEL= for =EngineAdapterTest=, =RGPOT_ENGINE_CLASSICAL=, =RGPOT_ENGINE_COMPOSITE=, =RGPOT_ENGINE_MOPAC=, =RGPOT_ENGINE_NWCHEM=, =RGPOT_ENGINE_XTB=, =RGPOT_ENGINE_SKALA=, =RGPOT_ENGINE_METATOMIC= and =RGPOT_ENGINE_EXPECT= for =EngineTableTest=, and =RGPOT_UMA_ENGINE=
 for =UmaEngineTest=.
 With =RGPOT_ENGINE_METATOMIC= Meson also sets
 =MTA_CHARGE_SPIN_PT=, =MTA_CHARGE_PT=, =MTA_SPIN_PT=, =MTA_PLAIN_PT= and =MTA_UNDECLARED_PT=

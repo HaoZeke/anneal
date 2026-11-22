@@ -17,7 +17,8 @@ It is a union whose arms and ordinals are =none= @0, =nwchem= @1, =cpmd= @2,
 @17, =composite= @18, =d2= @19 and =d2cpmd= @20.
 =composite=, =d2= and =d2cpmd= are local additions
 (=CppCore/rgpot/rpc/local/composite.diff=, =d2.diff= and =d2cpmd.diff=) to the
-pinned schema, as is =D4Params.periodic= (=d4-periodic.diff=).
+pinned schema, as are =D4Params.periodic= (=d4-periodic.diff=) and
+=D2CpmdParams.symmetry= (=d2cpmd-symmetry.diff=).
 Outside the union, =common= @3 is a =CommonMethodSpec= overlay.
 Geometry stays on =ForceInput=; =configure(config)= applies method and backend
 setup only.

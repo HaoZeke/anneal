@@ -31,9 +31,12 @@ It is **not** a geometry PES.
   `chi` / `dchi` / weights over potserv in this slice.
 - Grimme D3/D4 stay in-process `Potential` summands (`D3Pot` / `D4Pot`).
   Do not fold them into `contract` or `applyFxc`. The schema carries
-  `PotentialConfig.d3` @12 / `.d4` @13, but nothing applies them: every potserv
-  backend refuses both arms in `configure()`. A DFT host adds D4 as the Edisp
-  term next to this kernel and VV10 (rgpot-8mse).
+  `PotentialConfig.d3` @12 and `PotentialConfig.d4` @13: nothing applies `d3`
+  (every `potserv` backend refuses it in `configure()`), while on a build with
+  dftd4 `PotentialConfig.d4` configures `potserv <port> D4` (rebuilding its
+  `D4Pot` from `D4Params`, including `periodic` for a 3D lattice and stress)
+  and a `d4` builtin term in `PotentialConfig.composite`. A DFT host adds D4 as
+  the Edisp term next to this kernel and VV10 (rgpot-8mse).
 - The default wheel and default meson build do **not** ship the Python
   generator. `with_xckernel` defaults to false.
 
