@@ -122,6 +122,16 @@ def require_commit_rejection(
         raise SystemExit(f"unresolvable commit for {arm} was not rejected: {sha}")
 
 
+def require_sha_mismatch(
+    result: subprocess.CompletedProcess[str], arm: str, recorded: str, committed: str
+) -> None:
+    text = result.stdout + result.stderr
+    if result.returncode == 0 or arm not in text or recorded not in text or committed not in text:
+        raise SystemExit(
+            f"{arm} was not rejected with recorded sha {recorded} and commit_sha {committed}"
+        )
+
+
 def require_threshold_rejection(
     result: subprocess.CompletedProcess[str], arm: str, recorded: int, actual: int
 ) -> None:
@@ -188,8 +198,23 @@ def check_cases(original: dict, repo: Path) -> None:
     swapped_commit = json.loads(json.dumps(original))
     swapped_team = next(arm for arm in swapped_commit["metadata"]["arms"] if arm["name"] == "team-1")
     swapped_team["sha"] = stock["sha"]
-    require_tree_rejection(
-        run_checker(swapped_commit, repo=repo), "team-1", team_tree, stock_tree
+    require_sha_mismatch(
+        run_checker(swapped_commit, repo=repo),
+        "team-1",
+        stock["sha"],
+        team["commit_sha"],
+    )
+
+    coordinated_swap = json.loads(json.dumps(original))
+    swapped_team = next(arm for arm in coordinated_swap["metadata"]["arms"] if arm["name"] == "team-1")
+    swapped_team["sha"] = stock["sha"]
+    swapped_team["tree"] = stock["tree"]
+    swapped_team["threshold"] = stock["threshold"]
+    require_sha_mismatch(
+        run_checker(coordinated_swap, repo=repo),
+        "team-1",
+        stock["sha"],
+        team["commit_sha"],
     )
 
     omitted_sha = json.loads(json.dumps(original))
