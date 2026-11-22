@@ -23,7 +23,8 @@ from rgpot.ase import RgpotCalculator
 from rgpot.ase.calculator import _call, _kernel_cutoff
 
 needs_expr = pytest.mark.skipif(
-    not rgpot.has_expr, reason="this build has no ExprPot"
+    not rgpot.has_expr,
+    reason="rgpot.has_expr is False (built without -Dwith_expr)",
 )
 
 LJ_DEFAULT_CUTOFF = 15.0
@@ -247,12 +248,15 @@ def test_sum_pot_cutoff_counts_only_enabled_terms() -> None:
     assert rgpot.SumPot([{"kind": "lj", "enabled": False}]).cutoff == 0.0
 
 
-@needs_expr
-def test_unknown_term_kind_is_an_error_not_a_zero_cutoff() -> None:
-    with pytest.raises(ValueError, match="unknown child kind: nope"):
-        rgpot.ExprPot("a", {"a": "nope"})
+def test_unknown_sumpot_term_kind_is_an_error_not_a_zero_cutoff() -> None:
     with pytest.raises(ValueError, match="unknown child kind: nope"):
         rgpot.SumPot(["nope"])
+
+
+@needs_expr
+def test_unknown_expr_term_kind_is_an_error_not_a_zero_cutoff() -> None:
+    with pytest.raises(ValueError, match="unknown child kind: nope"):
+        rgpot.ExprPot("a", {"a": "nope"})
 
 
 class _NoCutoff:

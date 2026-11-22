@@ -158,7 +158,7 @@ CASES += [
         },
     ),
 ]
-if getattr(rgpot, "has_eam_table", True):
+if rgpot.has_eam_table:
     CASES.append(
         PotentialCase(
             "eam_table",
@@ -211,8 +211,9 @@ def test_suite_covers_every_advertised_potential_type() -> None:
         for factory in _potential_factories().values()
     }
     covered_types = {type(case.calculator().potential).__name__ for case in CASES}
-    # IPIPot needs a live driver and has its own test below.
-    covered_types.add("IPIPot")
+    if rgpot.has_ipi:
+        # IPIPot needs a live driver and has its own test below.
+        covered_types.add("IPIPot")
     assert factory_types == covered_types
 
 
@@ -344,7 +345,10 @@ def test_partial_periodicity_works_or_raises_clearly(case: PotentialCase) -> Non
             atoms.get_potential_energy()
 
 
-@pytest.mark.skipif(not rgpot.has_ipi, reason="this build has no IPIPot")
+@pytest.mark.skipif(
+    not rgpot.has_ipi,
+    reason="rgpot.has_ipi is False (built without -Dwith_ipi)",
+)
 def test_ipipot_forces_stress_cache_and_pickle_error(tmp_path) -> None:
     socket_name = f"rgpot_ase_{os.getpid()}_{tmp_path.name}"
     atoms = pair_cluster()

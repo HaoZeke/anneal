@@ -335,10 +335,19 @@ double child_cutoff(const ChildSpec &spec) {
   if (spec.kind == "morse") {
     return morse_config_from(spec).cutoff;
   }
-  if (spec.kind == "d2" || spec.kind == "d2cpmd" || spec.kind == "d3" ||
-      spec.kind == "d4") {
+  if (spec.kind == "d2" || spec.kind == "d2cpmd") {
     return 0.0;
   }
+#ifdef RGPOT_HAS_DFTD3
+  if (spec.kind == "d3") {
+    return 0.0;
+  }
+#endif
+#ifdef RGPOT_HAS_DFTD4
+  if (spec.kind == "d4") {
+    return 0.0;
+  }
+#endif
   throw std::invalid_argument("unknown child kind: " + spec.kind);
 }
 
