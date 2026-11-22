@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Install each repaired wheel into a fresh venv and run the checks that
-# py-wheels.yml's CIBW_TEST_COMMAND replaces.
+# py-wheels.yml's CIBW_TEST_COMMAND replaces. That includes
+# tests/test_ase_plugin_wheel.py. The wheel is installed with its ase extra,
+# and the test skips itself on an ASE release without the plugin API.
 # The venv is started with LD_LIBRARY_PATH, DYLD_LIBRARY_PATH, and
 # LIBRARY_PATH unset, so the import has to stand on the wheel's own
 # runpath.
@@ -38,11 +40,12 @@ for whl in "${wheels[@]}"; do
   venv=$(mktemp -d)
   "${py}" -m venv "${venv}"
   "${venv}/bin/python" -m pip install -q -U pip
-  "${venv}/bin/python" -m pip install -q pytest numpy "${whl}"
+  "${venv}/bin/python" -m pip install -q pytest numpy "${whl}[ase]"
   env -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH -u LIBRARY_PATH -u PYTHONPATH \
     "${venv}/bin/python" -c \
     "import rgpot; assert rgpot.has_expr and rgpot.has_dftd3 and rgpot.has_dftd4 and rgpot.has_xckernel, (rgpot.has_expr, rgpot.has_dftd3, rgpot.has_dftd4, rgpot.has_xckernel); print(rgpot.__file__, len(rgpot.XcKernel.catalog()))"
   env -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH -u LIBRARY_PATH -u PYTHONPATH \
-    "${venv}/bin/python" -m pytest -q "${root}/tests/test_rgpot_pip_core.py"
+    "${venv}/bin/python" -m pytest -q "${root}/tests/test_rgpot_pip_core.py" \
+    "${root}/tests/test_ase_plugin_wheel.py"
   rm -rf "${venv}"
 done
