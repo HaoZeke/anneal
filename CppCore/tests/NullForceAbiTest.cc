@@ -340,6 +340,24 @@ TEST_CASE("the LJ trampoline rejects a null cell", "[null-force]") {
   rgpot_force_input_free(&input);
 }
 
+TEST_CASE("the LJ HVP trampoline rejects a null cell", "[null-force]") {
+  rgpot::LJPot pot;
+  auto handle = rgpot::PotentialHandle::from_impl(pot);
+  double pos[6] = {0.0, 0.0, 0.0, 1.5, 0.0, 0.0};
+  int species[2] = {1, 1};
+  double direction[6] = {1.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+  double product[6] = {};
+  rgpot_force_input_t input =
+      rgpot_force_input_create(2, pos, species, nullptr);
+  rgpot_tensor_free(input.box_matrix);
+  input.box_matrix = nullptr;
+  REQUIRE(rgpot_potential_hvp(handle.raw(), &input, direction, 0.0,
+                              RGPOT_HVP_ANALYTIC,
+                              product) == RGPOT_INVALID_PARAMETER);
+  REQUIRE(std::string(rgpot_last_error()) == "invalid parameter: box is null");
+  rgpot_force_input_free(&input);
+}
+
 TEST_CASE("the D2 trampoline accepts a null cell", "[null-force]") {
   rgpot::D2Pot pot;
   double pos[6] = {0.0, 0.0, 0.0, 3.0, 0.0, 0.0};
