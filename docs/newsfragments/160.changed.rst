@@ -1,0 +1,5 @@
+An auxiliary rigid quench is recorded only when it is finite, sane,
+stationary and clear of a centre clash, and a walk that has reached its
+target spends no further evaluations. A rigid contact uses the body's
+derived cutoff, a failed chain reversal is not a move, and a custom body
+can declare its bonds.
