@@ -2,9 +2,11 @@
 
 from importlib.metadata import entry_points
 
+import pytest
+
 
 def test_installed_wheel_exposes_ase_plugins() -> None:
-    from ase._4.plugins import PluginCollection
+    plugins = pytest.importorskip("ase._4.plugins")
     from ase.calculators.calculator import get_calculator_class
 
     import rgpot.ase as ase_module
@@ -20,7 +22,7 @@ def test_installed_wheel_exposes_ase_plugins() -> None:
 
     by_name = {
         plugin.name: plugin
-        for plugin in PluginCollection.from_entry_points().calculators
+        for plugin in plugins.PluginCollection.from_entry_points().calculators
     }
     assert by_name["rgpot"]() is ase_module.RgpotCalculator
     assert by_name["rgpot_rpc"]() is ase_module.RgpotRpcCalculator
