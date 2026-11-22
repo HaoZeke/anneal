@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
+#include <filesystem>
 #include <limits>
 #include <sstream>
 #include <string>
@@ -459,6 +460,63 @@ TEST_CASE("classical engine LJPot reports coincident atoms as evaluation errors"
                   nullptr, kBox.data(), nullptr, nullptr) == RGPOT_ENGINE_OK);
   REQUIRE(error_of(e, pot).empty());
   e.destroy(pot);
+}
+
+TEST_CASE("classical engine reports the origin of geometry results",
+          "[engine][classical][cache]") {
+  Engine e;
+  REQUIRE(open_engine("CLASSICAL", e));
+  auto set = sym<decltype(&rgpot_engine_set_cache)>(e.handle,
+                                                    "rgpot_engine_set_cache");
+  auto counts = sym<decltype(&rgpot_engine_cache_counts)>(
+      e.handle, "rgpot_engine_cache_counts");
+  auto make = [&] {
+    return std::unique_ptr<RgpotEnginePot, decltype(e.destroy)>(
+        create(e, builtin_params("lj")), e.destroy);
+  };
+  {
+    auto pot = make();
+    REQUIRE(pot);
+    uint64_t computed = 0, served = 0;
+    REQUIRE(counts(pot.get(), &computed, &served) == 3);
+#ifdef RGPOT_HAS_CACHE
+    auto dir = (std::filesystem::temp_directory_path() /
+                "rgpot-engine-cache-XXXXXX").string();
+    REQUIRE(mkdtemp(dir.data()));
+    const auto db = dir + "/results";
+    REQUIRE(set(pot.get(), db.c_str()) == 0);
+    auto eval = [&](const std::vector<double> &positions) {
+      std::vector<double> forces(positions.size());
+      double energy = 0.;
+      REQUIRE(e.force(pot.get(), kZ.size(), positions.data(), kZ.data(),
+                      forces.data(), &energy, nullptr, kBox.data(), nullptr,
+                      nullptr) == 0);
+      return std::make_pair(energy, forces);
+    };
+    const auto reference = eval(kCluster);
+    REQUIRE(eval(kCluster) == reference);
+    auto moved = kCluster;
+    moved[0] += 0.05;
+    REQUIRE(eval(moved) != reference);
+    REQUIRE(counts(pot.get(), &computed, &served) == 0);
+    REQUIRE(computed == 2);
+    REQUIRE(served == 1);
+    pot.reset();
+    pot = make();
+    REQUIRE(pot);
+    REQUIRE(set(pot.get(), db.c_str()) == 0);
+    REQUIRE(eval(kCluster) == reference);
+    REQUIRE(counts(pot.get(), &computed, &served) == 0);
+    REQUIRE(computed == 0);
+    REQUIRE(served == 1);
+    REQUIRE(set(pot.get(), nullptr) == 0);
+    REQUIRE(counts(pot.get(), &computed, &served) == 3);
+    std::filesystem::remove_all(dir);
+#else
+    REQUIRE(set(pot.get(), "result-cache") == 3);
+#endif
+  }
+  dlclose(e.handle);
 }
 
 TEST_CASE("one classical handle serves many threads", "[engine][classical][threads]") {

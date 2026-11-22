@@ -127,6 +127,9 @@ public:
   void add_serialized(const KeyHash &key, double energy,
                       const rgpot::types::AtomMatrix &forces);
 
+  /// Whether the constructor opened the database.
+  [[nodiscard]] bool is_open() const { return db_ != nullptr; }
+
   /// Result records retain the energy/force prefix and append versioned
   /// variance and stress metadata. Energy/force-only records remain readable.
   static bool has_result_metadata(const std::string &value, size_t n_atoms);

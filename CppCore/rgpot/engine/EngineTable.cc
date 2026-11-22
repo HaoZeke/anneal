@@ -79,6 +79,9 @@ void copy_message(const std::string &message, char *buf, size_t len) {
 } // namespace
 
 struct RgpotEnginePot {
+#ifdef RGPOT_HAS_CACHE
+  std::unique_ptr<rgpot::cache::PotentialCache> cache;
+#endif
   std::unique_ptr<rgpot::engine::Backend> backend;
   rgpot::PotCaps caps;
 
@@ -180,6 +183,50 @@ RgpotEnginePot *rgpot_engine_create(const void *config, size_t config_len,
 }
 
 void rgpot_engine_destroy(RgpotEnginePot *pot) { delete pot; }
+
+int rgpot_engine_set_cache(RgpotEnginePot *pot, const char *path) {
+  if (!pot || (path && !*path)) {
+    return fail(pot, 1, "invalid result cache argument");
+  }
+#ifdef RGPOT_HAS_CACHE
+  try {
+    std::unique_ptr<rgpot::cache::PotentialCache> cache;
+    if (path) {
+      cache = std::make_unique<rgpot::cache::PotentialCache>(path);
+      if (!cache->is_open()) {
+        return fail(pot, 2, std::string("cannot open result cache: ") + path);
+      }
+    }
+    pot->backend->pot->setCache(cache.get());
+    pot->cache = std::move(cache);
+    pot->clear_error();
+    return 0;
+  } catch (const std::exception &e) {
+    return fail(pot, 2, e.what());
+  } catch (...) {
+    return fail(pot, 2, "unknown result cache error");
+  }
+#else
+  return fail(pot, 3, "result cache support is disabled");
+#endif
+}
+
+int rgpot_engine_cache_counts(RgpotEnginePot *pot, uint64_t *computed,
+                              uint64_t *served) {
+  if (!pot || !computed || !served) {
+    return fail(pot, 1, "invalid result count argument");
+  }
+#ifdef RGPOT_HAS_CACHE
+  if (pot->cache) {
+    const auto counts = pot->cache->counts();
+    *computed = counts.computed;
+    *served = counts.served;
+    pot->clear_error();
+    return 0;
+  }
+#endif
+  return fail(pot, 3, "no result cache attached");
+}
 
 int rgpot_engine_force(RgpotEnginePot *pot, long nAtoms,
                        const double *positions, const int *atomicNrs,

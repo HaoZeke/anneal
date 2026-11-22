@@ -38,7 +38,7 @@
  * parallelism from a backend that reports 1 or 2 creates one handle per
  * worker (1 only). rgpot_engine_set_num_threads,
  * rgpot_engine_set_charge_spin, rgpot_engine_set_callbacks,
- * rgpot_engine_hint and rgpot_engine_destroy must not run concurrently with
+ * rgpot_engine_set_cache, rgpot_engine_hint and rgpot_engine_destroy must not run concurrently with
  * a call on the same handle. rgpot_engine_last_error and
  * rgpot_engine_model_digest may run at any time.
  * - Capability discovery is by symbol presence: entry points marked
@@ -58,6 +58,7 @@
 #pragma once
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -169,6 +170,21 @@ RGPOT_ENGINE_API int rgpot_engine_force(
 /* ------------------------------------------------------------------ */
 /* Optional symbols: probe with dlsym; absence means unsupported.     */
 /* ------------------------------------------------------------------ */
+
+/** Attach a persistent result cache. Use a separate directory for each
+ * model and parameter set. A successful attachment starts the counters at
+ * zero. The handle owns the cache. A null path detaches it. A failure
+ * leaves the existing attachment intact. Requires exclusive use of pot.
+ * Returns 3 when this build has no result cache support. */
+RGPOT_ENGINE_API int rgpot_engine_set_cache(RgpotEnginePot *pot,
+                                            const char *path);
+
+/** Read kernel-computed and cache-served geometry results since attachment.
+ * Returns 3 when no cache is attached. For an exact interval, wait for all
+ * outstanding evaluations before sampling. */
+RGPOT_ENGINE_API int rgpot_engine_cache_counts(RgpotEnginePot *pot,
+                                               uint64_t *computed,
+                                               uint64_t *served);
 
 /**
  * Analytic Hessian-vector product H(positions) * direction, in eV/Angstrom
