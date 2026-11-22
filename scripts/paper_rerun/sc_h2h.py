@@ -30,6 +30,13 @@ from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
 CODE_REVISION = "61fa67cf380e46876b569da45e7cc091647a775b"
 GMIN_PIN = "9cbec1a446352bc9ef064bd2b1a5767194655919"
+# sha256 of the 2026-11-19 public tarball whose source/SVNREV is GMIN_PIN.
+# scripts/gmin_panel/build_gmin.sh records the same digest as TARBALL_SHA256.
+GMIN_TARBALL_SHA256 = "ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776"
+# sha256 of the GMIN executable this harness runs. No measured digest of
+# that binary is in the tree, so the constant stays empty and the arm
+# refuses until a digest is recorded beside the pin.
+GMIN_BINARY_SHA256 = ""
 SEEDS = tuple(range(2000, 2012))
 ARMS = ("anneal", "gmin")
 # Set before any job. A full 80-atom budget is far under this.
@@ -334,6 +341,40 @@ def gmin_revision(source: Path | None) -> str | None:
     return None
 
 
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def gmin_artifact_error(binary: Path | None, tarball: Path | None, source: Path | None) -> str | None:
+    """None when the executable and the source tarball match the pin.
+
+    The SVNREV pin is bound to the source tarball by GMIN_TARBALL_SHA256
+    and to the executable by GMIN_BINARY_SHA256. A missing file, an
+    unrecorded binary digest, or a mismatched digest refuses the run.
+    The source file's svnrev line must still equal the pin.
+    """
+    if not GMIN_BINARY_SHA256:
+        return "binary sha256 is not recorded beside the pin"
+    if binary is None or not binary.is_file():
+        return "binary absent"
+    if tarball is None or not tarball.is_file():
+        return "tarball absent"
+    tarball_digest = file_sha256(tarball)
+    if tarball_digest != GMIN_TARBALL_SHA256:
+        return f"tarball sha256 {tarball_digest} is not {GMIN_TARBALL_SHA256}"
+    binary_digest = file_sha256(binary)
+    if binary_digest != GMIN_BINARY_SHA256:
+        return f"binary sha256 {binary_digest} is not {GMIN_BINARY_SHA256}"
+    built = gmin_revision(source)
+    if built != GMIN_PIN:
+        return f"svnrev {built or 'absent'} is not {GMIN_PIN}"
+    return None
+
+
 def main(argv: list[str]) -> int:
     pin_affinity()
     os.environ.update(THREAD_ENV)
@@ -349,11 +390,12 @@ def main(argv: list[str]) -> int:
     binary = Path(os.environ["SC_H2H_ANNEAL"])
     gmin = Path(os.environ["SC_H2H_GMIN"]) if os.environ.get("SC_H2H_GMIN") else None
     source = Path(os.environ["SC_H2H_GMIN_SOURCE"]) if os.environ.get("SC_H2H_GMIN_SOURCE") else None
-    built = gmin_revision(source)
-    gmin_ok = bool(gmin and gmin.is_file() and built == GMIN_PIN)
+    tarball = Path(os.environ["SC_H2H_GMIN_TARBALL"]) if os.environ.get("SC_H2H_GMIN_TARBALL") else None
+    refused = gmin_artifact_error(gmin, tarball, source)
+    gmin_ok = refused is None
     if not gmin_ok:
         print(
-            f"gmin arm not runnable: pin {GMIN_PIN} binary source is {built or 'absent'}",
+            f"gmin arm not runnable: pin {GMIN_PIN} {refused}",
             flush=True,
         )
     host = machine_id()
