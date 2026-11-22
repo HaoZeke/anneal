@@ -1462,4 +1462,6 @@ Vahediahmar, Zweig, Zhang, and Azizi, bioRxiv (20 November 2026), doi:10.64898/2
 
 The same authors already show that the released GEOM-DRUGS reference ensemble is incomplete on GFN2-xTB, filed as `vahediahmarGeomDrugs2026`. This new method selects from a pool that already exists; it does not generate a missing basin or establish that the reference states are complete. It reports no Lennard-Jones energy, TIP4P energy, GFN2-xTB water-hexamer energy, or sealed motif count, so it does not contradict the Cambridge targets, 121 of 192, or 97 of 192. It does not fill the ASE, AGOX, and GMIN comparison kit and does not require a new head-to-head on the current benchmarks.
 
+The release APIs were also unchanged on 21 November 2026: CREST remains `v3.0.2`, AGOX remains tagged at `v3.11.1`, ASE remains tagged at `3.29.0`, and pele remains `v0.1.2`. The former `ksags/GOFEE` release and tag endpoints returned 404, and current GitHub and GitLab repository searches found no official standalone GOFEE release repository; GOFEE remains available through AGOX. The searches again found no official GitHub or GitLab release repository for de Souza's GOAT or for GMIN.
+
 Cite `vahediahmarConformerSelection2026` beside `vahediahmarGeomDrugs2026`.
