@@ -197,7 +197,9 @@ def test_cluster_search_water_sites_validation():
 
 def test_cluster_search_custom_bonds():
     n = 2
-    start = np.zeros(6 * n)
+    start = np.concatenate(
+        [np.array([0.0, 0.0, 0.0, 3.4, 0.0, 0.0]), np.full(3 * n, 0.3)]
+    )
     out = cluster_search(
         lambda x: rigid_energy_grad(x)[0],
         lambda x: rigid_energy_grad(x)[1],
@@ -207,9 +209,11 @@ def test_cluster_search_custom_bonds():
         recommended=False,
         start=start,
         water_sites=WATER_SITES,
-        bonds=[[0, 1], [0, 2]],
+        bonds=[[0, 1], [1, 2]],
     )
     assert np.asarray(out["best"]).shape == (6 * n,)
+    energy = rigid_energy_grad(out["best"])[0]
+    assert out["best_energy"] == pytest.approx(energy)
     assert np.isfinite(out["best_energy"])
 
 
