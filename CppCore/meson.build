@@ -569,8 +569,8 @@ if not get_option('with_rpc_client_only')
         install: not meson.is_subproject(),
     )
 
-    # 51 rgpot_* exports when the rust archive is linked normally, 97 when
-    # the bundle is whole-archived. The extra 46 are the public C ABI.
+    # 51 rgpot_* exports when the rust archive is linked normally, 104 when
+    # the bundle is whole-archived. The extra 53 are the public C ABI.
     # Two of the umbrella exports are the Muller-Brown entry points.
     if get_option('with_rust_core') and host_machine.system() == 'linux'
         _so_export_whole = false
@@ -592,10 +592,12 @@ if not get_option('with_rpc_client_only')
                 meson.project_source_root() / 'scripts' / 'abi_core_baseline.txt',
             ]
             if _so_export_whole
-                _so_export_args += ['--whole-archive']
+                # The flag ends the positional baseline list, so the fast
+                # baseline has to come before it.
                 _so_export_args += [
                     meson.project_source_root() / 'scripts' / 'abi_baseline_fast.txt',
                 ]
+                _so_export_args += ['--whole-archive']
             endif
             test(
                 'rgpot_so_exports',
