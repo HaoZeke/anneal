@@ -374,6 +374,12 @@ def run_crest(
         calls += int(count)
     best_file = out / "crest_best.xyz"
     best = first_frame_energy(best_file) if best_file.is_file() else float("inf")
+    # A failed arm still records the last geometry it made available.
+    final_geometry = best_file
+    if not final_geometry.is_file():
+        final_geometry = out / "start.xyz"
+    if not final_geometry.is_file():
+        final_geometry = start
     hit = energy_hits(best, REFERENCE[system], HIT_TOL)
     return {
         "system": system,
@@ -387,7 +393,7 @@ def run_crest(
         "best": best,
         "pot_s": inside,
         "outside_s": max(wall - inside, 0.0),
-        "_geometry": best_file,
+        "_geometry": final_geometry,
     }
 
 
