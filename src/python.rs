@@ -20,7 +20,7 @@
 
 use ndarray::{Array1, ArrayView1};
 use numpy::{PyArray1, PyReadonlyArray1};
-use pyo3::exceptions::{PyTypeError, PyValueError};
+use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyFloat};
 use rand::SeedableRng;
@@ -3783,7 +3783,7 @@ fn cluster_archive_search<O: eindir_core::gradient::DifferentiableObjective<f64>
             &mut rng,
         )
     }))
-    .map_err(|payload| PyValueError::new_err(panic_payload_message(payload)))?;
+    .map_err(search_panic_error)?;
     let dim = 3 * cfg.n_points;
     let best = out
         .best_state
@@ -3893,6 +3893,44 @@ pub(crate) fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> S
         s.clone()
     } else {
         "internal panic in native cluster kernel".to_owned()
+    }
+}
+
+/// A panic whose text is a caller mistake, not a broken invariant.
+///
+/// The search still `assert`s a few contracts (a symmetry projection on a
+/// frozen set, two rungs with delayed acceptance, shape keying without
+/// that build). Those stay `ValueError`. Anything else is an internal
+/// failure and must not be reported as bad input.
+fn panic_is_bad_input(msg: &str) -> bool {
+    const MARKERS: &[&str] = &[
+        "call floor must be a positive distance",
+        "call-floor elements must name every point",
+        "continuous-symmetry interval must be positive",
+        "continuous-symmetry projection requires a free non-periodic point set",
+        "continuous-symmetry classes must match n_points",
+        "delayed acceptance needs a single chain",
+        "shape keying needs the `ira` feature",
+        "screen_steps must be strictly less than relax_steps",
+        "length_scale must be finite and positive",
+        "energy_scale must be finite and positive",
+        "species must not be empty",
+        "species must have known covalent radii",
+        "a rigid cluster needs at least two bodies",
+        "checkpoint interval must be positive",
+        "a shared bias and a replica ladder are different things",
+        "interleaved TIP4P state is 6 per molecule",
+        "block TIP4P state is 6 per molecule",
+    ];
+    MARKERS.iter().any(|marker| msg.contains(marker))
+}
+
+fn search_panic_error(payload: Box<dyn std::any::Any + Send>) -> PyErr {
+    let msg = panic_payload_message(payload);
+    if panic_is_bad_input(&msg) {
+        PyValueError::new_err(msg)
+    } else {
+        PyRuntimeError::new_err(msg)
     }
 }
 
@@ -4300,6 +4338,9 @@ fn cluster_search(
         return Err(PyValueError::new_err("measured_energy_scale needs groups"));
     }
     if let Some(groups) = groups.as_ref() {
+        if groups.is_empty() || groups.iter().any(|group| group.is_empty()) {
+            return Err(PyValueError::new_err("groups must name at least one atom"));
+        }
         if ras || derived || communicating || length_scale.is_some() {
             return Err(PyValueError::new_err(
                 "groups excludes ras, derived, communicating and length_scale",
@@ -4567,10 +4608,9 @@ fn cluster_search(
                 run.map(|pair| (pair, crate::methods::cluster_search::last_search_phase()))
                     .map_err(|err| err.to_string())
             }))
-            .map_err(panic_payload_message)
         })
-        .and_then(|res| res)
-        .map_err(PyValueError::new_err)?
+        .map_err(search_panic_error)?
+        .map_err(|err| PyValueError::new_err(err.to_string()))?
     } else {
         let grad_fn = grad_fn.expect("checked grad_fn is Some");
         let gradient_scale = if budget >= 4 {
@@ -4668,7 +4708,7 @@ fn cluster_search(
         }));
         errors.finish(py)?;
         let res = res
-            .map_err(|payload| PyValueError::new_err(panic_payload_message(payload)))?
+            .map_err(search_panic_error)?
             .map_err(|err| PyValueError::new_err(err.to_string()))?;
         let phase = crate::methods::cluster_search::last_search_phase();
         (res, phase)

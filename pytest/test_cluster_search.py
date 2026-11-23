@@ -332,6 +332,36 @@ def test_quench_tric_needs_one_label_per_atom():
         quench(lambda x: flexible_water(x, 2), WATER_DIMER, 1e-3, method="bfgs")
 
 
+def test_cluster_search_splits_input_errors_from_invariant_failures():
+    """Bad input stays ValueError. A kernel panic that is not a caller
+    contract is RuntimeError."""
+    lj4 = pytest.importorskip("anneal").PairPotential.lennard_jones(4)
+    with pytest.raises(ValueError, match="free non-periodic"):
+        cfg = Config.recommended(4)
+        cfg.frozen = [True, False, False, False]
+        cfg.continuous_symmetry = ("measure", 10)
+        cluster_search(lj4, None, 4, 20, seed=1, config=cfg)
+    with pytest.raises(ValueError, match="single chain"):
+        cfg = Config.recommended(4)
+        cfg.delayed_acceptance = True
+        cfg.replicas = 2
+        cluster_search(lj4, None, 4, 20, seed=1, config=cfg)
+    with pytest.raises(ValueError, match="ira"):
+        cfg = Config.recommended(4)
+        cfg.shape_keyed = True
+        cluster_search(lj4, None, 4, 20, seed=1, config=cfg)
+    with pytest.raises(ValueError, match="at least one atom"):
+        cluster_search(lj4, None, 4, 20, seed=1, groups=[])
+    with pytest.raises(ValueError, match="at least one atom"):
+        cluster_search(lj4, None, 4, 20, seed=1, groups=[[]])
+    # The binding accepts this keying. The linked kernel was not built
+    # with the spherical expansion, and it panics rather than invent one.
+    with pytest.raises(RuntimeError, match="featomic"):
+        cfg = Config.recommended(4)
+        cfg.keying = "q4"
+        cluster_search(lj4, None, 4, 20, seed=1, config=cfg)
+
+
 def test_cluster_search_tric_local_step():
     def energy(x):
         return flexible_water(x, 2)[0]
