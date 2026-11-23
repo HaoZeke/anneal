@@ -1075,8 +1075,7 @@ unsafe fn load_resident(path: &Path, config: &[u8]) -> Result<EnginePotential, E
     };
 
     if let Some(resident) = cached {
-        let mut engine =
-            unsafe { EnginePotential::from_symbols(resident.symbols.clone(), config)? };
+        let mut engine = unsafe { EnginePotential::from_symbols(resident.symbols, config)? };
         unsafe { engine.attach(resident) };
         return Ok(engine);
     }
@@ -1085,7 +1084,7 @@ unsafe fn load_resident(path: &Path, config: &[u8]) -> Result<EnginePotential, E
         let library = unsafe { open_library(&canonical) }
             .map_err(|why| EngineError::Load(format!("{}: {why}", path.display())))?;
         let symbols = unsafe { resolve(&library)? };
-        let engine = unsafe { EnginePotential::from_symbols(symbols.clone(), config)? };
+        let engine = unsafe { EnginePotential::from_symbols(symbols, config)? };
         let unload_refusal = unsafe { unload_refusal(&library, &symbols) };
         let pin = match unload_refusal {
             None => None,
