@@ -203,12 +203,19 @@ def summarize_cell(spec, rows: list[dict[str, str]]) -> dict[str, str]:
     aa = abs(rss_ap - rss_a)
     pad_vals: list[float] = []
     pad_missing = False
+    # Each pad row is one seed. Compare it with A at that same seed.
+    same_seed = [row for row in rows_a if int(row["seed"]) == PLACEMENT_SEED]
+    if len(same_seed) != 1:
+        pad_missing = True
+        a_seed_rss = rss_a
+    else:
+        a_seed_rss = float(same_seed[0]["rss_anon_kb"])
     for arm, _size in PLACEMENT_PADS:
         placed = ok_arm(rows, cell, arm)
         if len(placed) != 1 or int(placed[0]["seed"]) != PLACEMENT_SEED:
             pad_missing = True
             continue
-        pad_vals.append(abs(float(placed[0]["rss_anon_kb"]) - rss_a))
+        pad_vals.append(abs(float(placed[0]["rss_anon_kb"]) - a_seed_rss))
     place = max(pad_vals) if pad_vals and not pad_missing else None
     band = max(aa, place) if place is not None else None
 
