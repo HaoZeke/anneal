@@ -489,3 +489,54 @@ def test_default_source_metadata_resolves_to_existing_file_across_built_trees(
 
     with pytest.raises(ValueError, match="cannot derive gmin-source\\.txt"):
         default_source_metadata(tmp_path / "flat" / "SVNREV")
+
+
+def test_build_gmin_sc_records_cap_patches_compilers_flags_and_binary_sha256(
+    tmp_path: Path,
+) -> None:
+    repo, _tarball, base_env, _counter = _make_builder_sandbox(tmp_path)
+    sc_work = tmp_path / "sc-work"
+    darby_work = tmp_path / "darby-work"
+    env = dict(
+        base_env,
+        GMIN_SC_WORK=str(sc_work),
+        GMIN_DARBY_WORK=str(darby_work),
+        CC="clang-stub",
+        CXX="clang++-stub",
+        FFLAGS="-O3",
+        FCFLAGS="-ffree-line-length-none",
+        CFLAGS="-O2",
+        CXXFLAGS="-O2 -fno-rtti",
+        CPPFLAGS="-DNDEBUG",
+        LDFLAGS="-Wl,--as-needed",
+    )
+    subprocess.run(
+        ["bash", str(repo / "scripts/metal_h2h/build_gmin_sc.sh")],
+        cwd=repo,
+        env=env,
+        check=True,
+    )
+    note_lines = (sc_work / "gmin-source.txt").read_text().splitlines()
+    for rel_key, rel_path in (
+        ("cap", "bench/lj104-lattice/v2/h2h_cap.f90"),
+        ("patch", "bench/lj104-lattice/v2/h2h-gmin.patch"),
+        ("patch", "bench/metal-cluster-h2h/gmin-bgupta.patch"),
+        ("patch", "bench/metal-cluster-h2h/gmin-sc-time.patch"),
+    ):
+        digest = hashlib.sha256((repo / rel_path).read_bytes()).hexdigest()
+        assert f"{rel_key}={rel_path} {digest}" in note_lines
+
+    bin_digest = hashlib.sha256((sc_work / "bin" / "GMIN").read_bytes()).hexdigest()
+    for expected_line in (
+        "fc=gfortran",
+        "cc=clang-stub",
+        "cxx=clang++-stub",
+        "fflags=-O3",
+        "fcflags=-ffree-line-length-none",
+        "cflags=-O2",
+        "cxxflags=-O2 -fno-rtti",
+        "cppflags=-DNDEBUG",
+        "ldflags=-Wl,--as-needed",
+        f"binary_sha256={bin_digest}",
+    ):
+        assert expected_line in note_lines

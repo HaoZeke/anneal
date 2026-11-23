@@ -100,19 +100,29 @@ if [[ -z $blas ]]; then
   echo "GMIN is not linked against OpenBLAS" >&2
   exit 1
 fi
-cat > "$WORK/gmin-source.txt" << EOF
-url=$GMIN_PIN_URL
-revision=$revision
-svnrev=$revision
-tarball_sha256=$tarball_sha256
-build_key=$BUILD_KEY
-potential=SC
-cmake=${CMAKE_FLAGS[*]}
-gfortran=$GFORTRAN_VER
-fflags=$FFLAGS_VAL
-cflags=$CFLAGS_VAL
-cxxflags=$CXXFLAGS_VAL
-ldflags=$LDFLAGS_VAL
-blas=$(readlink -f "$blas")
-EOF
+{
+  echo "url=$GMIN_PIN_URL"
+  echo "revision=$revision"
+  echo "svnrev=$revision"
+  echo "tarball_sha256=$tarball_sha256"
+  echo "build_key=$BUILD_KEY"
+  echo "potential=SC"
+  echo "cap=${CAP_SOURCE#"$ROOT"/} $(sha256sum "$CAP_SOURCE" | awk '{print $1}')"
+  echo "patch=${CAP#"$ROOT"/} $(sha256sum "$CAP" | awk '{print $1}')"
+  echo "patch=${DARBY_TIME#"$ROOT"/} $(sha256sum "$DARBY_TIME" | awk '{print $1}')"
+  echo "patch=${TIME#"$ROOT"/} $(sha256sum "$TIME" | awk '{print $1}')"
+  echo "cmake=${CMAKE_FLAGS[*]}"
+  echo "fc=$FC_BIN"
+  echo "cc=$CC_BIN"
+  echo "cxx=$CXX_BIN"
+  echo "gfortran=$GFORTRAN_VER"
+  echo "fflags=$FFLAGS_VAL"
+  echo "fcflags=$FCFLAGS_VAL"
+  echo "cflags=$CFLAGS_VAL"
+  echo "cxxflags=$CXXFLAGS_VAL"
+  echo "cppflags=$CPPFLAGS_VAL"
+  echo "ldflags=$LDFLAGS_VAL"
+  echo "blas=$(readlink -f "$blas")"
+  echo "binary_sha256=$(sha256sum "$WORK/bin/GMIN" | awk '{print $1}')"
+} > "$WORK/gmin-source.txt"
 echo "gmin build_key=$BUILD_KEY binary=$WORK/bin/GMIN"
