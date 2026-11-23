@@ -14,12 +14,13 @@ class Exception {
 public:
   Exception(char const *m);
   Exception(const Exception &ex);
+  Exception &operator=(const Exception &ex);
   ~Exception();
   template <class T> Exception &operator<<(const T &x) {
     *message << x;
     return *this;
   }
-  const char *GetMessage() const;
+  const char *GetMessage() const noexcept;
 
 private:
   stringstream *message;
