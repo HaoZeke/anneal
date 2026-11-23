@@ -10,7 +10,9 @@ import numpy as np
 import pytest
 
 import rgpot
+from ase import Atoms
 from ase.build import bulk
+from ase.calculators.emt import EMT
 from rgpot.ase import RgpotCalculator
 
 CLUSTER = np.array(
@@ -218,3 +220,76 @@ def test_a_changed_cell_gives_the_same_result_as_a_fresh_instance(strain: float)
     fresh_energy, fresh_forces, _ = rgpot.EMTPot()(positions, numbers, cell)
     assert energy == pytest.approx(fresh_energy, abs=1e-9)
     np.testing.assert_allclose(forces, fresh_forces, atol=1e-9, rtol=0.0)
+
+
+def test_copper_cluster_matches_the_pinned_values() -> None:
+    """The EMTPotTest.cc case: E = 5.129167 eV and max |F| = 1.914263 eV/A."""
+    energy, forces, variance = rgpot.EMTPot()(CLUSTER, COPPER, CUBE)
+    assert energy == pytest.approx(5.129167, abs=1e-6)
+    assert np.linalg.norm(forces, axis=1).max() == pytest.approx(1.914263, abs=1e-6)
+    assert variance == 0.0
+
+
+def test_the_pin_separates_the_two_parameter_providers() -> None:
+    energy, _, _ = rgpot.EMTPot(rasmussen=True)(CLUSTER, COPPER, CUBE)
+    assert abs(energy - 5.129167) > 0.1
+
+
+# ASE's EMT carries the same Jacobsen, Stoltze and Norskov parameters as the
+# default Asap provider, so the two agree to rounding when both use Asap's
+# neighbour list cutoff, 1.045 times the Fermi cutoff. ASE's own default,
+# the Fermi cutoff plus 0.5 Angstrom, keeps the fourth copper shell and moves
+# the bulk energy by about 5 meV per atom. ASE has no Rasmussen parameters
+# and no Mg, so those are not compared.
+ASE_LATTICE = {"Al": 4.05, "Cu": 3.61, "Ag": 4.09, "Au": 4.08, "Ni": 3.52, "Pd": 3.89, "Pt": 3.92}
+
+
+def _ase_emt() -> EMT:
+    return EMT(asap_cutoff=True)
+
+
+def test_copper_cluster_matches_ase_emt() -> None:
+    atoms = Atoms("Cu4", positions=CLUSTER, cell=[20.0, 20.0, 20.0], pbc=True)
+    atoms.calc = _ase_emt()
+    energy, forces, _ = rgpot.EMTPot()(CLUSTER, COPPER, CUBE)
+    assert energy == pytest.approx(atoms.get_potential_energy(), abs=1e-6)
+    np.testing.assert_allclose(forces, atoms.get_forces(), atol=1e-6, rtol=0.0)
+
+
+@pytest.mark.parametrize("symbol", sorted(ASE_LATTICE))
+def test_bulk_matches_ase_emt(symbol: str) -> None:
+    atoms = bulk(symbol, "fcc", a=ASE_LATTICE[symbol], cubic=True)
+    atoms.rattle(0.05, seed=2)
+    reference = atoms.copy()
+    reference.calc = _ase_emt()
+    atoms.calc = RgpotCalculator("emt")
+    assert atoms.get_potential_energy() == pytest.approx(
+        reference.get_potential_energy(), abs=1e-6
+    )
+    np.testing.assert_allclose(
+        atoms.get_forces(), reference.get_forces(), atol=2e-6, rtol=0.0
+    )
+
+
+def test_copper_gold_alloy_matches_ase_emt() -> None:
+    atoms = bulk("Cu", "fcc", a=3.8, cubic=True)
+    atoms.symbols[[0, 2]] = "Au"
+    atoms.rattle(0.05, seed=3)
+    reference = atoms.copy()
+    reference.calc = _ase_emt()
+    atoms.calc = RgpotCalculator("emt")
+    assert atoms.get_potential_energy() == pytest.approx(
+        reference.get_potential_energy(), abs=1e-6
+    )
+    np.testing.assert_allclose(
+        atoms.get_forces(), reference.get_forces(), atol=2e-6, rtol=0.0
+    )
+
+
+def test_numerical_stress_matches_the_ase_analytic_stress() -> None:
+    atoms = bulk("Cu", "fcc", a=3.61, cubic=True)
+    atoms.rattle(0.05, seed=2)
+    reference = atoms.copy()
+    reference.calc = _ase_emt()
+    atoms.calc = RgpotCalculator("emt", numerical_stress=True)
+    np.testing.assert_allclose(atoms.get_stress(), reference.get_stress(), atol=1e-6, rtol=0.0)
