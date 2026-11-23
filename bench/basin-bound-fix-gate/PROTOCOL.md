@@ -121,7 +121,39 @@ and read back before its sha256 is accepted.
 
 ## Cells
 
-Chosen after the probe. The list is not known in this commit.
+The probe is seed 2000 at budget 20000, arm A then arm B. Twenty-seven
+cells return status ok. On each of those, A and B record the same
+merge-radius count and the same best bits. `sc126-38` and `sc126-55`
+exit before the search because the Sutton-Chen pair library is not
+installed, so this probe does not show whether they reach the path.
+They are not timed cells.
+
+B counts, highest first among cells that ran: tip4p10 1773, tip4p21
+1566, tip4p17 1292, tip4p16 1255, tip4p13 1207, tip4p12 1193,
+tip4p11 1145, tip4p14 1139, tip4p15 1043, tip4p8 923, tip4p18 870,
+tip4p20 853, tip4p19 653, m55r6 625, lj38 424, m80r6 264, lj98 165,
+lj104 163, lj75 150, lj102 147, tip4p9 139, m55r14 131, blj105n55 45,
+m80r14 43, blj115n38 35, blj115n55 24, blj105n38 24.
+
+The timed list, after keeping lj38, lj75, m80r14 and tip4p10 and
+capping at 10, is:
+
+1. tip4p10
+2. tip4p21
+3. tip4p17
+4. tip4p16
+5. tip4p13
+6. tip4p12
+7. tip4p11
+8. lj38
+9. lj75
+10. m80r14
+
+The seed count is six, 2000 through 2005. Twelve seeds do not fit on
+one core. At eight observations, the earlier panel's median elapsed
+for m80r14, lj75, tip4p21, tip4p17 and tip4p16 is already more than
+five hours at twelve seeds. Six is the minimum that still runs every
+chosen cell.
 
 ## Results
 
