@@ -909,13 +909,12 @@ where
         let compacted;
         let surface = match surfaces.as_mut() {
             Some(portfolio) => {
-                let chosen = portfolio.begin(screening);
+                let chosen = portfolio.begin_holding_failed_restraint(screening);
                 if portfolio.take_block_opened() {
                     led.block_opened = true;
                 }
                 if portfolio.take_restraint_block_failed() {
                     led.revert_unrestrained = true;
-                    portfolio.hold_plain();
                 }
                 (stats.plain_holds, stats.hold_lifts) = portfolio.holds_and_lifts();
                 chosen

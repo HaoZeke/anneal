@@ -875,9 +875,18 @@ impl SurfacePortfolio {
     /// the block is spent, with the finished block's improvement credited
     /// to the arm that walked it.
     pub fn begin(&mut self, screening: bool) -> Option<TwoPhase> {
+        self.begin_with_plain_hold(screening, false)
+    }
+
+    /// Begin a relaxation, putting a failed restraint block directly on a
+    /// plain hold when `hold_failed` is set.
+    fn begin_with_plain_hold(&mut self, screening: bool, hold_failed: bool) -> Option<TwoPhase> {
         if screening {
             if self.hops_in_block >= self.block {
-                self.settle_block();
+                let failed_restraint = self.settle_block();
+                if failed_restraint && hold_failed {
+                    self.hold_plain();
+                }
             }
             self.hops_in_block += 1;
         }
@@ -909,6 +918,10 @@ impl SurfacePortfolio {
         self.held.and_then(|arm| self.arms[arm])
     }
 
+    pub(crate) fn begin_holding_failed_restraint(&mut self, screening: bool) -> Option<TwoPhase> {
+        self.begin_with_plain_hold(screening, true)
+    }
+
     /// Records what a full relaxation on the held arm reached against the
     /// run's best.
     pub fn observe(&mut self, screening: bool, reached: f64, best: f64) {
@@ -924,7 +937,8 @@ impl SurfacePortfolio {
         }
     }
 
-    fn settle_block(&mut self) {
+    fn settle_block(&mut self) -> bool {
+        let mut failed_restraint = false;
         if let Some(arm) = self.held.take() {
             // The signed gap between the run's best when the block opened
             // and the lowest structure the block relaxed to: positive by the
@@ -947,6 +961,7 @@ impl SurfacePortfolio {
             {
                 self.restraint_block_failed = true;
                 self.failed_arm = Some(arm);
+                failed_restraint = true;
             }
             if let Some(key) = self.block_source.take() {
                 self.credit_source(key, arm, reward);
@@ -957,6 +972,7 @@ impl SurfacePortfolio {
         self.settled_blocks += 1;
         self.block_lowest = f64::INFINITY;
         self.hops_in_block = 0;
+        failed_restraint
     }
 
     /// Draws taken per arm, the plain surface first.
@@ -1262,6 +1278,22 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_plain_hold_opens_before_another_block() {
+        let restraint = TwoPhase::diameter(2.0, 1.0);
+        let mut portfolio = SurfacePortfolio::with_block(&[restraint], 11, 1);
+        portfolio.begin(true);
+        assert!(portfolio.take_block_opened());
+        portfolio.held = Some(1);
+        portfolio.block_start_best = 0.0;
+        portfolio.observe(false, 1.0, 0.0);
+
+        assert_eq!(portfolio.begin_holding_failed_restraint(true), None);
+        assert!(portfolio.take_restraint_block_failed());
+        assert_eq!(portfolio.held, Some(0));
+        assert!(portfolio.take_block_opened());
     }
 
     #[test]
