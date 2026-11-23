@@ -360,6 +360,9 @@ MEAMPot::MEAMPot(MEAMModel model, bool periodic, bool stress,
 }
 
 void MEAMPot::forceImpl(const ForceInput &in, ForceOut *out) const {
+  if (out == nullptr) {
+    bad("null output buffer");
+  }
   out->energy = 0.0;
   out->variance = 0.0;
   out->has_stress = 0;
