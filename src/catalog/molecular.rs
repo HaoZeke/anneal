@@ -561,15 +561,15 @@ pub const PETMAD_MODEL_NAME: &str = "pet-mad-xs-v1.5.0.pt";
 /// Device recorded for the PET-MAD force call.
 pub const PETMAD_DEVICE: &str = "cpu";
 
-/// rgpot-core checksum in `Cargo.lock`. The crate is registry 3.5.1.
-pub const RGPOT_REV: &str = "df34626c5c9d888c234e6a0921e7e6c0335561ec50460fcf74e4b77772c89ede";
+/// rgpot-core commit in `Cargo.lock`. The crate is the git pin of 3.7.0.
+pub const RGPOT_REV: &str = "3aa8f9caf87dce22a5e1d74f4a06c9779d0c2212";
 
 /// rgpot-core version this tree links.
-pub const RGPOT_VERSION: &str = "3.5.1";
+pub const RGPOT_VERSION: &str = "3.7.0";
 
 /// rgpot commit of the GFN2 engine (`libxtb_engine.so`).
 ///
-/// The registry crate stays [`RGPOT_VERSION`]. The calculator that reuses
+/// The crate is the same commit, [`RGPOT_VERSION`]. The calculator that reuses
 /// an SCC wavefunction is this engine, not the crate.
 pub const RGPOT_XTB_ENGINE_REV: &str = "3aa8f9caf87dce22a5e1d74f4a06c9779d0c2212";
 
