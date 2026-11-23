@@ -40,7 +40,8 @@
 use crate::structure::Template;
 use ndarray::{Array1, ArrayView1};
 use rand::Rng;
-use std::collections::HashSet;
+use std::cmp::{Ordering, Reverse};
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::f64::consts::PI;
 
 /// Where the local order to grow comes from.
@@ -504,23 +505,72 @@ fn distance2(a: &[f64; 3], b: &[f64; 3]) -> f64 {
 /// that `k` lies inside the sphere with `ij` as its diameter.
 fn observed_contact_graph(x: ArrayView1<f64>) -> Vec<Vec<usize>> {
     let n = x.len() / 3;
-    let mut distances = vec![vec![0.0; n]; n];
+    let mut graph = vec![Vec::new(); n];
+    if n <= 1 {
+        return graph;
+    }
+    let points: Vec<[f64; 3]> = (0..n)
+        .map(|i| [x[3 * i], x[3 * i + 1], x[3 * i + 2]])
+        .collect();
+    let mut distances = vec![0.0; n * n];
     for i in 0..n {
-        let a = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
         for j in (i + 1)..n {
-            let b = [x[3 * j], x[3 * j + 1], x[3 * j + 2]];
-            distances[i][j] = distance2(&a, &b);
-            distances[j][i] = distances[i][j];
+            let d2 = distance2(&points[i], &points[j]);
+            distances[i * n + j] = d2;
+            distances[j * n + i] = d2;
         }
     }
-    let mut graph = vec![Vec::new(); n];
+    let k = 16.min(n - 1);
+    let mut lo = points[0];
+    let mut hi = points[0];
+    for point in &points[1..] {
+        for axis in 0..3 {
+            lo[axis] = lo[axis].min(point[axis]);
+            hi[axis] = hi[axis].max(point[axis]);
+        }
+    }
+    let max_span = (0..3)
+        .map(|axis| hi[axis] - lo[axis])
+        .fold(0.0_f64, f64::max);
+    let side = 4.0 * max_span;
+    let near = if max_span > 0.0 && side.is_finite() {
+        let shifted: Vec<[f64; 3]> = points
+            .iter()
+            .map(|point| std::array::from_fn(|axis| (point[axis] - lo[axis]) + 0.25 * side))
+            .collect();
+        let hint = (max_span / (n as f64).cbrt().max(1.0)).max(side * 1.0e-2);
+        linkcell::Cell::ortho(side, side, side)
+            .ok()
+            .and_then(|cell| linkcell::knearest(&shifted, &cell, k, None, Some(hint)).ok())
+    } else {
+        None
+    };
+    let blocked_in = |i: usize, j: usize, edge: f64, candidates: &[usize]| {
+        candidates
+            .iter()
+            .copied()
+            .any(|m| m != i && m != j && distances[i * n + m] + distances[j * n + m] < edge)
+    };
     for i in 0..n {
         for j in (i + 1)..n {
-            let edge = distances[i][j];
-            if edge > 0.0
-                && !(0..n)
-                    .filter(|&k| k != i && k != j)
-                    .any(|k| distances[i][k] + distances[j][k] < edge)
+            let edge = distances[i * n + j];
+            if !(edge > 0.0 && edge.is_finite()) {
+                continue;
+            }
+            if let Some(rows) = near.as_ref() {
+                if blocked_in(i, j, edge, &rows[i].indices)
+                    || blocked_in(i, j, edge, &rows[j].indices)
+                {
+                    continue;
+                }
+                if rows[i].indices.len() == n - 1 {
+                    graph[i].push(j);
+                    graph[j].push(i);
+                    continue;
+                }
+            }
+            if !(0..n)
+                .any(|m| m != i && m != j && distances[i * n + m] + distances[j * n + m] < edge)
             {
                 graph[i].push(j);
                 graph[j].push(i);
@@ -528,6 +578,18 @@ fn observed_contact_graph(x: ArrayView1<f64>) -> Vec<Vec<usize>> {
         }
     }
     graph
+}
+
+fn cross3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+fn dot3(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a.into_iter().zip(b).map(|(u, v)| u * v).sum()
 }
 
 fn basis_is_well_conditioned(basis: &[[f64; 3]; 3]) -> bool {
@@ -563,81 +625,203 @@ fn lattice_point(site: [i32; 3], basis: &[[f64; 3]; 3]) -> [f64; 3] {
     })
 }
 
-fn lattice_neighbours(site: [i32; 3]) -> impl Iterator<Item = [i32; 3]> {
-    (0..3).flat_map(move |axis| {
-        [-1, 1].map(move |step| {
-            let mut neighbour = site;
-            neighbour[axis] += step;
-            neighbour
-        })
-    })
+fn lattice_neighbours_checked(site: [i32; 3]) -> Option<[[i32; 3]; 6]> {
+    Some([
+        [site[0].checked_sub(1)?, site[1], site[2]],
+        [site[0].checked_add(1)?, site[1], site[2]],
+        [site[0], site[1].checked_sub(1)?, site[2]],
+        [site[0], site[1].checked_add(1)?, site[2]],
+        [site[0], site[1], site[2].checked_sub(1)?],
+        [site[0], site[1], site[2].checked_add(1)?],
+    ])
 }
 
-fn candidate_from_basis(basis: &[[f64; 3]; 3], centre: [f64; 3], n: usize) -> Array1<f64> {
+#[derive(Clone, Copy)]
+struct FrontierSite {
+    radius2: f64,
+    site: [i32; 3],
+}
+
+impl PartialEq for FrontierSite {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Eq for FrontierSite {}
+
+impl PartialOrd for FrontierSite {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for FrontierSite {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.radius2
+            .total_cmp(&other.radius2)
+            .then_with(|| self.site.cmp(&other.site))
+    }
+}
+
+fn candidate_from_basis(basis: &[[f64; 3]; 3], centre: [f64; 3], n: usize) -> Option<Array1<f64>> {
+    if n == 0 {
+        return Some(Array1::zeros(0));
+    }
+    if !basis_is_well_conditioned(basis) || centre.iter().any(|value| !value.is_finite()) {
+        return None;
+    }
+    let reciprocal = [
+        cross3(basis[1], basis[2]),
+        cross3(basis[2], basis[0]),
+        cross3(basis[0], basis[1]),
+    ];
+    let determinant = dot3(basis[0], reciprocal[0]);
+    if !determinant.is_finite() || determinant == 0.0 {
+        return None;
+    }
+    let fractional = [0, 1, 2].map(|axis| dot3(centre, reciprocal[axis]) / determinant);
+    if fractional.iter().any(|value| !value.is_finite()) {
+        return None;
+    }
+    let seed = fractional.map(f64::round);
+    if seed.iter().any(|value| !value.is_finite()) {
+        return None;
+    }
+    let shift: [f64; 3] = [0, 1, 2].map(|axis| {
+        (0..3)
+            .map(|vector| seed[vector] * basis[vector][axis])
+            .sum()
+    });
+    if shift.iter().any(|value| !value.is_finite()) {
+        return None;
+    }
+    for vector in basis {
+        let step2 = distance2(vector, &[0.0; 3]);
+        let roundtrip = [0, 1, 2].map(|axis| (shift[axis] + vector[axis]) - shift[axis]);
+        if !step2.is_finite()
+            || step2 == 0.0
+            || distance2(&roundtrip, vector) > f64::EPSILON * step2
+        {
+            return None;
+        }
+    }
+    let local_centre = if seed == [0.0; 3] {
+        centre
+    } else {
+        [0, 1, 2].map(|axis| {
+            (0..3)
+                .map(|vector| (fractional[vector] - seed[vector]) * basis[vector][axis])
+                .sum()
+        })
+    };
+    if local_centre.iter().any(|value| !value.is_finite()) {
+        return None;
+    }
+    let seed_radius2 = distance2(&[0.0; 3], &local_centre);
+    if !seed_radius2.is_finite() {
+        return None;
+    }
+    let max_sites = 64usize.saturating_mul(n.saturating_add(4));
     let mut sites = vec![[0; 3]];
-    let mut occupied = HashSet::from([[0; 3]]);
-    let mut frontier: HashSet<[i32; 3]> = lattice_neighbours([0; 3]).collect();
-    while sites
-        .iter()
-        .filter(|&&site| lattice_neighbours(site).all(|other| occupied.contains(&other)))
-        .count()
-        < n
-    {
-        let next = frontier
-            .iter()
-            .copied()
-            .min_by(|a, b| {
-                distance2(&lattice_point(*a, basis), &centre)
-                    .total_cmp(&distance2(&lattice_point(*b, basis), &centre))
-                    .then_with(|| a.cmp(b))
-            })
-            .expect("a finite lattice always has a frontier");
-        frontier.remove(&next);
-        occupied.insert(next);
-        for neighbour in lattice_neighbours(next) {
-            if !occupied.contains(&neighbour) {
-                frontier.insert(neighbour);
+    let mut radii = vec![seed_radius2];
+    let mut index_of: HashMap<[i32; 3], usize> = HashMap::from([([0; 3], 0)]);
+    let mut queued: HashSet<[i32; 3]> = HashSet::from([[0; 3]]);
+    let mut frontier: BinaryHeap<Reverse<FrontierSite>> = BinaryHeap::new();
+    for neighbour in lattice_neighbours_checked([0; 3])? {
+        let radius2 = distance2(&lattice_point(neighbour, basis), &local_centre);
+        if !radius2.is_finite() {
+            return None;
+        }
+        queued.insert(neighbour);
+        frontier.push(Reverse(FrontierSite {
+            radius2,
+            site: neighbour,
+        }));
+    }
+    let mut degree: Vec<u8> = vec![0];
+    let mut interior = 0usize;
+    while interior < n {
+        if sites.len() >= max_sites {
+            return None;
+        }
+        let Reverse(next) = frontier.pop()?;
+        let slot = sites.len();
+        sites.push(next.site);
+        radii.push(next.radius2);
+        index_of.insert(next.site, slot);
+        let mut here_degree = 0u8;
+        for neighbour in lattice_neighbours_checked(next.site)? {
+            if let Some(&other) = index_of.get(&neighbour) {
+                here_degree += 1;
+                degree[other] += 1;
+                if degree[other] == 6 {
+                    interior += 1;
+                }
+            } else if queued.insert(neighbour) {
+                let radius2 = distance2(&lattice_point(neighbour, basis), &local_centre);
+                if !radius2.is_finite() {
+                    return None;
+                }
+                frontier.push(Reverse(FrontierSite {
+                    radius2,
+                    site: neighbour,
+                }));
             }
         }
-        sites.push(next);
+        degree.push(here_degree);
+        if here_degree == 6 {
+            interior += 1;
+        }
     }
-    let radii: Vec<f64> = sites
-        .iter()
-        .map(|&site| distance2(&lattice_point(site, basis), &centre))
-        .collect();
-    let mut alive = occupied;
-    while alive.len() > n {
-        let worst = sites
-            .iter()
-            .enumerate()
-            .filter(|(_, site)| alive.contains(*site))
-            .min_by(|(i, a), (j, b)| {
-                let coordination = |site| {
-                    lattice_neighbours(site)
-                        .filter(|neighbour| alive.contains(neighbour))
-                        .count()
-                };
-                coordination(**a)
-                    .cmp(&coordination(**b))
-                    .then_with(|| radii[*j].total_cmp(&radii[*i]))
-                    .then_with(|| a.cmp(b))
-            })
-            .map(|(_, site)| *site)
-            .expect("a live site remains while peeling");
-        alive.remove(&worst);
+    let m = sites.len();
+    let mut neighbours_of: Vec<Vec<usize>> = vec![Vec::new(); m];
+    for (i, &site) in sites.iter().enumerate() {
+        for neighbour in lattice_neighbours_checked(site)? {
+            if let Some(&j) = index_of.get(&neighbour) {
+                neighbours_of[i].push(j);
+            }
+        }
+    }
+    let mut live_degree: Vec<usize> = neighbours_of.iter().map(Vec::len).collect();
+    let mut alive = vec![true; m];
+    let mut live = m;
+    while live > n {
+        let worst = (0..m).filter(|&i| alive[i]).min_by(|&i, &j| {
+            live_degree[i]
+                .cmp(&live_degree[j])
+                .then_with(|| radii[j].total_cmp(&radii[i]))
+                .then_with(|| sites[i].cmp(&sites[j]))
+        })?;
+        alive[worst] = false;
+        live -= 1;
+        for &j in &neighbours_of[worst] {
+            if alive[j] {
+                live_degree[j] -= 1;
+            }
+        }
     }
     let mut out = Array1::zeros(3 * n);
-    for (i, site) in sites
+    for (i, (_, site)) in sites
         .into_iter()
-        .filter(|site| alive.contains(site))
+        .enumerate()
+        .filter(|(idx, _)| alive[*idx])
         .enumerate()
     {
         let point = lattice_point(site, basis);
         for axis in 0..3 {
-            out[3 * i + axis] = point[axis];
+            let coord = if seed == [0.0; 3] {
+                point[axis]
+            } else {
+                shift[axis] + point[axis]
+            };
+            if !coord.is_finite() {
+                return None;
+            }
+            out[3 * i + axis] = coord;
         }
     }
-    out
+    Some(out)
 }
 
 /// One compact lattice body generated by a primitive basis observed in `x`.
@@ -656,11 +840,25 @@ pub fn observed_basis_candidate(
         return None;
     }
     let graph = observed_contact_graph(x);
-    let centre = (0..n).max_by_key(|&i| (graph[i].len(), std::cmp::Reverse(i)))?;
+    let centre = (0..n).max_by_key(|&i| (graph[i].len(), Reverse(i)))?;
     let shell = &graph[centre];
     let origin = [x[3 * centre], x[3 * centre + 1], x[3 * centre + 2]];
-    let body_centre =
-        [0, 1, 2].map(|axis| x.iter().skip(axis).step_by(3).sum::<f64>() / n as f64 - origin[axis]);
+    let body_centre = [0, 1, 2].map(|axis| {
+        let sum: f64 = x.iter().skip(axis).step_by(3).sum();
+        let mean = if sum.is_finite() {
+            sum / n as f64
+        } else {
+            x.iter()
+                .skip(axis)
+                .step_by(3)
+                .map(|value| *value / n as f64)
+                .sum()
+        };
+        mean - origin[axis]
+    });
+    if body_centre.iter().any(|value| !value.is_finite()) {
+        return None;
+    }
     let mut best = None;
     for i in 0..shell.len() {
         for j in (i + 1)..shell.len() {
@@ -674,17 +872,8 @@ pub fn observed_basis_candidate(
                 if !basis_is_well_conditioned(&basis) {
                     continue;
                 }
-                let cross = [
-                    basis[1][1] * basis[2][2] - basis[1][2] * basis[2][1],
-                    basis[1][2] * basis[2][0] - basis[1][0] * basis[2][2],
-                    basis[1][0] * basis[2][1] - basis[1][1] * basis[2][0],
-                ];
-                let volume = basis[0]
-                    .iter()
-                    .zip(cross)
-                    .map(|(component, cofactor)| component * cofactor)
-                    .sum::<f64>()
-                    .abs();
+                let cross = cross3(basis[1], basis[2]);
+                let volume = dot3(basis[0], cross).abs();
                 let points =
                     [a, b, c].map(|point| [x[3 * point], x[3 * point + 1], x[3 * point + 2]]);
                 let edges = [
@@ -695,8 +884,15 @@ pub fn observed_basis_candidate(
                     distance2(&points[0], &points[2]),
                     distance2(&points[1], &points[2]),
                 ];
-                let longest = edges.iter().copied().max_by(f64::total_cmp)?;
                 let total = edges.iter().sum::<f64>();
+                if !volume.is_finite()
+                    || !(volume > 0.0)
+                    || !total.is_finite()
+                    || edges.iter().any(|edge| !edge.is_finite())
+                {
+                    continue;
+                }
+                let longest = edges.iter().copied().max_by(f64::total_cmp)?;
                 if best
                     .as_ref()
                     .is_none_or(|(best_longest, best_total, best_volume, _)| {
@@ -712,7 +908,7 @@ pub fn observed_basis_candidate(
             }
         }
     }
-    let (_, _, volume, basis) = best?;
+    let (_, _, _, basis) = best?;
     let contact_lengths = graph.iter().enumerate().flat_map(|(i, neighbours)| {
         neighbours
             .iter()
@@ -728,55 +924,75 @@ pub fn observed_basis_candidate(
         (f64::INFINITY, f64::NEG_INFINITY),
         |(shortest, longest), length| (shortest.min(length), longest.max(length)),
     );
+    if !shortest.is_finite() || !longest.is_finite() || !(longest > 0.0) {
+        return None;
+    }
     let contact_spread = longest - shortest;
-    let cross = |a: [f64; 3], b: [f64; 3]| {
-        [
-            a[1] * b[2] - a[2] * b[1],
-            a[2] * b[0] - a[0] * b[2],
-            a[0] * b[1] - a[1] * b[0],
-        ]
-    };
-    let dot = |a: [f64; 3], b: [f64; 3]| a.into_iter().zip(b).map(|(u, v)| u * v).sum::<f64>();
+    if !contact_spread.is_finite() {
+        return None;
+    }
     let reciprocal = [
-        cross(basis[1], basis[2]),
-        cross(basis[2], basis[0]),
-        cross(basis[0], basis[1]),
+        cross3(basis[1], basis[2]),
+        cross3(basis[2], basis[0]),
+        cross3(basis[0], basis[1]),
     ];
-    let determinant = dot(basis[0], reciprocal[0]);
-    let residuals: Vec<f64> = (0..n)
-        .map(|point| {
-            let offset = [0, 1, 2].map(|axis| x[3 * point + axis] - origin[axis]);
-            let nearest =
-                [0, 1, 2].map(|axis| (dot(offset, reciprocal[axis]) / determinant).round());
-            let fitted = [0, 1, 2].map(|axis| {
-                (0..3)
-                    .map(|vector| nearest[vector] * basis[vector][axis])
-                    .sum()
-            });
-            distance2(&offset, &fitted).sqrt()
-        })
-        .collect();
+    let determinant = dot3(basis[0], reciprocal[0]);
+    if !determinant.is_finite() || determinant == 0.0 {
+        return None;
+    }
+    let mut residuals = Vec::with_capacity(n);
+    for point in 0..n {
+        let offset = [0, 1, 2].map(|axis| x[3 * point + axis] - origin[axis]);
+        if offset.iter().any(|value| !value.is_finite()) {
+            return None;
+        }
+        let nearest = [0, 1, 2].map(|axis| (dot3(offset, reciprocal[axis]) / determinant).round());
+        if nearest.iter().any(|value| !value.is_finite()) {
+            return None;
+        }
+        let fitted: [f64; 3] = [0, 1, 2].map(|axis| {
+            (0..3)
+                .map(|vector| nearest[vector] * basis[vector][axis])
+                .sum()
+        });
+        if fitted.iter().any(|value| !value.is_finite()) {
+            return None;
+        }
+        let residual = distance2(&offset, &fitted).sqrt();
+        if !residual.is_finite() {
+            return None;
+        }
+        residuals.push(residual);
+    }
     let max_degree = graph.iter().map(Vec::len).max()?;
+    let residual_floor = f64::EPSILON.sqrt() * longest;
+    let core_tolerance = contact_spread.max(residual_floor);
     let registered_core = residuals
         .iter()
         .enumerate()
         .filter(|(point, _)| graph[*point].len() == max_degree)
-        .all(|(_, residual)| *residual <= contact_spread);
-    let mut ordered = residuals.clone();
+        .all(|(_, residual)| *residual <= core_tolerance);
+    let mut ordered = residuals;
     ordered.sort_by(f64::total_cmp);
     let span = ordered.last()? - ordered.first()?;
+    if !span.is_finite() {
+        return None;
+    }
     let mut gaps: Vec<f64> = ordered.windows(2).map(|pair| pair[1] - pair[0]).collect();
     gaps.sort_by(f64::total_cmp);
     let median_gap = gaps[gaps.len() / 2];
     let largest_gap = *gaps.last()?;
     // A lattice gap must exceed the spread expected if every adjacent residual
     // had the observed median gap; the point count supplies that expectation.
-    let quantized = span == 0.0 || largest_gap > gaps.len() as f64 * median_gap;
+    // An exact crystal whose residuals differ only by floating-point roundoff
+    // has no defect gap to separate; the half-significand floor bounds that
+    // roundoff on the observed contact scale.
+    let quantized = span <= residual_floor || largest_gap > gaps.len() as f64 * median_gap;
     let coherent = registered_core && (!require_quantized_residuals || quantized);
     if !coherent {
         return None;
     }
-    (volume > 0.0).then(|| candidate_from_basis(&basis, body_centre, n))
+    candidate_from_basis(&basis, body_centre, n)
 }
 
 #[cfg(test)]
@@ -1106,31 +1322,130 @@ mod tests {
 
     #[test]
     fn observed_contacts_match_a_brute_force_gabriel_graph() {
-        let points = [
+        let mut r = rng();
+        let small = vec![
             [0.0, 0.0, 0.0],
             [1.0, 0.0, 0.0],
             [0.2, 0.9, 0.1],
             [0.8, 0.7, 0.6],
             [-0.4, 0.3, 0.8],
         ];
-        let x = Array1::from_iter(points.into_iter().flatten());
-        let actual = observed_contact_graph(x.view());
-        let mut expected = vec![Vec::new(); points.len()];
-        for i in 0..points.len() {
-            for j in (i + 1)..points.len() {
-                let midpoint = [0, 1, 2].map(|axis| (points[i][axis] + points[j][axis]) / 2.0);
-                let radius2 = distance2(&points[i], &points[j]) / 4.0;
-                let blocked = points
-                    .iter()
-                    .enumerate()
-                    .filter(|(k, _)| *k != i && *k != j)
-                    .any(|(_, point)| distance2(point, &midpoint) < radius2);
-                if !blocked {
-                    expected[i].push(j);
-                    expected[j].push(i);
+        let large: Vec<[f64; 3]> = (0..60)
+            .map(|_| [r.random::<f64>(), r.random::<f64>(), r.random::<f64>()])
+            .collect();
+        for points in [small, large] {
+            let x = Array1::from_iter(points.iter().copied().flatten());
+            let actual = observed_contact_graph(x.view());
+            let mut expected = vec![Vec::new(); points.len()];
+            for i in 0..points.len() {
+                for j in (i + 1)..points.len() {
+                    let edge = distance2(&points[i], &points[j]);
+                    let blocked = edge <= 0.0
+                        || !edge.is_finite()
+                        || (0..points.len()).filter(|&k| k != i && k != j).any(|k| {
+                            distance2(&points[i], &points[k]) + distance2(&points[j], &points[k])
+                                < edge
+                        });
+                    if !blocked {
+                        expected[i].push(j);
+                        expected[j].push(i);
+                    }
+                }
+            }
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn observed_growth_accepts_an_exact_multishell_crystal() {
+        // Integer face-centred cubic sites have identical contact lengths
+        // (`sqrt(2)`), so `contact_spread` is zero while multi-shell
+        // fractional projections carry floating-point roundoff.
+        let mut sites = Vec::new();
+        for x in -2i32..=2 {
+            for y in -2i32..=2 {
+                for z in -2i32..=2 {
+                    if (x + y + z).rem_euclid(2) == 0 && x * x + y * y + z * z <= 6 {
+                        sites.push([f64::from(x), f64::from(y), f64::from(z)]);
+                    }
                 }
             }
         }
-        assert_eq!(actual, expected);
+        let n = sites.len();
+        assert!(n >= 40);
+        let exact = Array1::from_iter(sites.iter().copied().flatten());
+        let rebuilt = observed_basis_candidate(exact.view(), true)
+            .expect("an exact crystal with zero contact spread must reconstruct");
+        assert_eq!(rebuilt.len(), 3 * n);
+        assert!(rebuilt.iter().all(|value| value.is_finite()));
+
+        let mut r = rng();
+        let rot = random_rotation(&mut r);
+        let rotated = Array1::from_iter(sites.iter().flat_map(|site| {
+            [0, 1, 2].map(|axis| (0..3).map(|k| rot[axis][k] * site[k]).sum::<f64>() + 3.7)
+        }));
+        let rotated_rebuilt = observed_basis_candidate(rotated.view(), true)
+            .expect("rigid motion roundoff must not disqualify an exact crystal");
+        assert_eq!(rotated_rebuilt.len(), 3 * n);
+        assert!((nearest_neighbour_scale(rotated_rebuilt.view()) - 2.0_f64.sqrt()).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn observed_growth_seeds_near_an_outlier_shifted_centroid() {
+        let basis = [
+            [1.0, 0.0, 0.0],
+            [0.5, 3.0_f64.sqrt() / 2.0, 0.0],
+            [0.5, 3.0_f64.sqrt() / 6.0, (2.0_f64 / 3.0).sqrt()],
+        ];
+        let local = candidate_from_basis(&basis, [0.1, -0.2, 0.15], 19).expect("local seed");
+        let far_centre = [
+            10_000.0 * basis[0][0] + 0.1,
+            10_000.0 * basis[0][1] - 0.2,
+            10_000.0 * basis[0][2] + 0.15,
+        ];
+        let shifted = candidate_from_basis(&basis, far_centre, 19).expect("shifted seed");
+        assert_eq!(shifted.len(), local.len());
+        let shifted_mean =
+            [0, 1, 2].map(|axis| shifted.iter().skip(axis).step_by(3).sum::<f64>() / 19.0);
+        assert!((shifted_mean[0] - far_centre[0]).abs() < 2.0);
+        for (a, b) in spectrum(local.view(), 19)
+            .into_iter()
+            .zip(spectrum(shifted.view(), 19))
+        {
+            assert!((a - b).abs() < 1.0e-9);
+        }
+        assert!(
+            candidate_from_basis(&basis, [1.0e20, 0.0, 0.0], 19).is_none(),
+            "a shift that erases the basis spacing must be refused"
+        );
+
+        let mut with_outlier = packed(38);
+        let tail = with_outlier.len() - 3;
+        with_outlier[tail] = 50_000.0;
+        let candidate = observed_basis_candidate(with_outlier.view(), false)
+            .expect("registered core with an outlier shifts its seed without runaway growth");
+        assert_eq!(candidate.len(), with_outlier.len());
+        assert!(candidate.iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn observed_growth_rejects_overflowing_scales_and_skewed_growth() {
+        let base = packed(19);
+        for scale in [1.0e200, 1.0e307] {
+            let huge = base.mapv(|value| value * scale);
+            assert!(
+                huge.iter().all(|value| value.is_finite()),
+                "fixture coordinates at {scale:e} must stay finite"
+            );
+            assert!(observed_basis_candidate(huge.view(), false).is_none());
+            assert!(observed_basis_candidate(huge.view(), true).is_none());
+        }
+
+        // Orthogonal vectors with extreme aspect ratio have unit normalized
+        // determinant, while Euclidean sphere growth floods the short plane
+        // before reaching +/-basis[2]; the site cap stops that runaway growth.
+        let anisotropic = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0e4]];
+        assert!(basis_is_well_conditioned(&anisotropic));
+        assert!(candidate_from_basis(&anisotropic, [0.0; 3], 13).is_none());
     }
 }
