@@ -21,6 +21,7 @@ def test_version_and_exports():
     assert rgpot.__version__
     assert callable(rgpot.evaluate_lj)
     assert rgpot.LJPot is not None
+    assert rgpot.EMTPot is not None
     assert rgpot.LJClusterPot is not None
     assert rgpot.MorsePot is not None
 

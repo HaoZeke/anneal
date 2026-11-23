@@ -570,9 +570,22 @@ def test_eam_al_matches_ase_eam(repeat: int) -> None:
 # --- any bound potential ---------------------------------------------------
 
 
+def test_emt_is_available_to_the_ase_calculator() -> None:
+    atoms = bulk("Cu", "fcc", a=3.6, cubic=True)
+    atoms.rattle(0.02, seed=3)
+    atoms.set_cell([20.0, 20.0, 20.0], scale_atoms=False)
+    atoms.center()
+    atoms.calc = RgpotCalculator("emt", numerical_stress=True)
+    assert isinstance(atoms.calc.potential, rgpot.EMTPot)
+    assert atoms.calc.potential.config() == {"rasmussen": False}
+    assert np.isfinite(atoms.get_potential_energy())
+    assert np.all(np.isfinite(atoms.get_forces()))
+    assert np.all(np.isfinite(atoms.get_stress()))
+
+
 def test_kind_strings_cover_the_bound_classes() -> None:
     kinds = available_kinds()
-    for kind in ("lj", "ljcluster", "morse"):
+    for kind in ("emt", "lj", "ljcluster", "morse"):
         assert kind in kinds
     by_kind = RgpotCalculator("Morse", **CU)
     by_class = RgpotCalculator("MorsePot", **CU)
