@@ -42,9 +42,19 @@ constexpr double kKe = units::HARTREE_TO_EV * units::BOHR_TO_ANGSTROM;
 constexpr double kPi = std::numbers::pi;
 
 // Mesh slices while real space shares the call. Zero means one slice per
-// pool thread. The mesh then keeps the group's decompositions, so its bits
-// do not depend on whether the group got a full team.
+// pool thread (or spme_slice_limit() during an SPME evaluation). The mesh
+// then keeps the group's decompositions, so its bits do not depend on
+// whether the group got a full team.
 int &mesh_group_limit() {
+  static int limit = 0;
+  return limit;
+}
+
+// Slice count chosen by pme_team() for the current SPME evaluation. Keeping
+// it here alongside poolThreads() ensures a serial (-Duse_openmp=false) build,
+// where resizePool() is a no-op, honors caller_team() in the non-beside SPME
+// path just as the beside path honors mesh_cap.
+int &spme_slice_limit() {
   static int limit = 0;
   return limit;
 }
@@ -76,7 +86,11 @@ void mesh_group_sync(int npart) {
 
 int thread_count() {
   const int grouped = mesh_group_limit();
-  return grouped > 0 ? grouped : poolThreads();
+  if (grouped > 0) {
+    return grouped;
+  }
+  const int spme = spme_slice_limit();
+  return spme > 0 ? spme : poolThreads();
 }
 
 bool grouped() { return mesh_group_limit() > 0; }
@@ -1871,13 +1885,22 @@ void evaluate_electrostatics(CoulombMethod method, const CoulombConfig &cfg, con
     throw std::invalid_argument("Ewald kmax must be at least 1");
   }
   const CellGeom cell = cell_from_box(box);
+  struct ResetLimit {
+    int &slot;
+    int prev;
+    ~ResetLimit() { slot = prev; }
+  };
+  const ResetLimit reset_spme{spme_slice_limit(), spme_slice_limit()};
+  const ResetLimit reset_group{mesh_group_limit(), mesh_group_limit()};
   if (method == CoulombMethod::SPME) {
     // A request of eight on a short mesh is a team of four. Shrink the
     // pool before any phase so the spare workers are not created and do
     // not sit in an active wait outside a smaller region.
     const int requested = std::max(caller_team(), thread_count());
     const int npoints = std::min(cfg.grid[0], std::min(cfg.grid[1], cfg.grid[2]));
-    resizePool(pme_team(static_cast<int>(n), npoints, requested));
+    const int team = pme_team(static_cast<int>(n), npoints, requested);
+    resizePool(team);
+    spme_slice_limit() = team;
   }
   // Two threads on a short mesh: one thread in the transform does not
   // beat one thread, so the second thread runs real space beside it.

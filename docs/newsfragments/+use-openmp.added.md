@@ -1,0 +1,1 @@
+Setting `use_openmp` to false builds the cell walk and the potentials serially. `librgpot` and a consumer of its dependency then get neither the OpenMP flag nor the runtime, and the regions guarded by `_OPENMP` run on one thread.

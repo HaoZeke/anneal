@@ -840,6 +840,7 @@ TEST_CASE("MorsePot OpenMP threaded and serial paths agree across build, Verlet 
       CHECK(par_pot.listReused());
       const std::size_t retained_front = par_pot.retainedPairs();
       const auto snap_front = rgpot::detail::morseStoredSplitSnapshot();
+#if defined(_OPENMP)
       REQUIRE(snap_front.atoms == n);
       REQUIRE(snap_front.slices == slices);
       REQUIRE(snap_front.total_up >= 4096);
@@ -854,6 +855,13 @@ TEST_CASE("MorsePot OpenMP threaded and serial paths agree across build, Verlet 
         CHECK(snap_front.p1_splits[s] > 0);
         CHECK(snap_front.p1_splits[s] <= m);
       }
+#else
+      (void)m;
+      REQUIRE(snap_front.atoms == 0);
+      REQUIRE(snap_front.slices == 0);
+      REQUIRE(snap_front.total_up == 0);
+      REQUIRE(snap_front.total_inc == 0);
+#endif
       CHECK(countBitDiffs(got_front, ref_front) == 0);
 
       // First call on pos_back forces a Verlet rebuild with identical totals
@@ -868,6 +876,7 @@ TEST_CASE("MorsePot OpenMP threaded and serial paths agree across build, Verlet 
       CHECK(par_pot.retainedPairs() == retained_front);
 
       const auto snap_back = rgpot::detail::morseStoredSplitSnapshot();
+#if defined(_OPENMP)
       CHECK(snap_back.owner == snap_front.owner);
       CHECK(snap_back.build_id == snap_front.build_id + 1);
       CHECK(snap_back.atoms == snap_front.atoms);
@@ -882,6 +891,12 @@ TEST_CASE("MorsePot OpenMP threaded and serial paths agree across build, Verlet 
         CHECK(snap_back.p1_splits[s] >= n - m);
         CHECK(snap_back.p1_splits[s] < n);
       }
+#else
+      CHECK(snap_back.atoms == 0);
+      CHECK(snap_back.slices == 0);
+      CHECK(snap_back.total_up == 0);
+      CHECK(snap_back.total_inc == 0);
+#endif
       CHECK(countBitDiffs(got_back, ref_back) == 0);
     }
   }
@@ -993,6 +1008,7 @@ TEST_CASE("MorsePot workspace shrinks retained capacities when a smaller "
   (void)large_got;
 
   const auto snap_large = rgpot::detail::morseStoredSplitSnapshot();
+#if defined(_OPENMP)
   REQUIRE(snap_large.total_up > 500000);
   REQUIRE(snap_large.up_off_cap >= large_sys.z.size() + 1);
   REQUIRE(snap_large.lo_off_cap >= large_sys.z.size() + 1);
@@ -1001,6 +1017,9 @@ TEST_CASE("MorsePot workspace shrinks retained capacities when a smaller "
   REQUIRE(snap_large.pair_forces_cap >= snap_large.total_up);
   REQUIRE(snap_large.pair_he_cap >= snap_large.total_up);
   REQUIRE(snap_large.pair_hv_cap >= 6 * snap_large.total_up);
+#else
+  REQUIRE(snap_large.total_up == 0);
+#endif
   REQUIRE(snap_large.row_e_cap >= large_sys.z.size());
   REQUIRE(snap_large.row_s_cap >= 6 * large_sys.z.size());
 
@@ -1066,6 +1085,7 @@ TEST_CASE("MorsePot workspace shrinks retained capacities when a smaller "
   const auto med_got = runFullEval(pot, med_pos, med_z, med_box);
   const auto snap_med = rgpot::detail::morseStoredSplitSnapshot();
   CHECK(countBitDiffs(med_got, med_want) == 0);
+#if defined(_OPENMP)
   REQUIRE(snap_med.total_up >= 4096);
   REQUIRE(snap_med.total_up * 4 < snap_large.total_up);
   CHECK(snap_med.lo_u_cap < snap_large.lo_u_cap);
@@ -1073,6 +1093,9 @@ TEST_CASE("MorsePot workspace shrinks retained capacities when a smaller "
   CHECK(snap_med.pair_forces_cap < snap_large.pair_forces_cap);
   CHECK(snap_med.pair_he_cap < snap_large.pair_he_cap);
   CHECK(snap_med.pair_hv_cap < snap_large.pair_hv_cap);
+#else
+  REQUIRE(snap_med.total_up == 0);
+#endif
 
   // 3. Also verify that the atom-indexed buffers (up_off, lo_off, lo_count,
   // row_e, row_s) shrink when an evaluation with > 4 * kTeamMinAtoms atoms
@@ -1104,17 +1127,21 @@ TEST_CASE("MorsePot workspace shrinks retained capacities when a smaller "
   const std::vector<int> wide_z(n_wide, 29);
   (void)runFullEval(pot, wide_pos, wide_z, wide_box);
   const auto snap_wide = rgpot::detail::morseStoredSplitSnapshot();
+#if defined(_OPENMP)
   REQUIRE(snap_wide.up_off_cap >= n_wide + 1);
   REQUIRE(snap_wide.lo_off_cap >= n_wide + 1);
   REQUIRE(snap_wide.lo_count_cap >= n_wide);
+#endif
   REQUIRE(snap_wide.row_e_cap >= n_wide);
   REQUIRE(snap_wide.row_s_cap >= 6 * n_wide);
 
   (void)runFullEval(pot, med_pos, med_z, med_box);
   const auto snap_after_wide = rgpot::detail::morseStoredSplitSnapshot();
+#if defined(_OPENMP)
   CHECK(snap_after_wide.up_off_cap < snap_wide.up_off_cap);
   CHECK(snap_after_wide.lo_off_cap < snap_wide.lo_off_cap);
   CHECK(snap_after_wide.lo_count_cap < snap_wide.lo_count_cap);
+#endif
   CHECK(snap_after_wide.row_e_cap < snap_wide.row_e_cap);
   CHECK(snap_after_wide.row_s_cap < snap_wide.row_s_cap);
 
@@ -1156,6 +1183,7 @@ rgpot::MorseConfig cuVacancyConfig() {
 
 void requireScratchAboveCap(const rgpot::detail::MorseSplitSnapshot &snap,
                             std::size_t cap) {
+#if defined(_OPENMP)
   REQUIRE(snap.total_up > cap * 64);
   REQUIRE(snap.slices > 1);
   REQUIRE(snap.up_off_cap > cap);
@@ -1166,6 +1194,10 @@ void requireScratchAboveCap(const rgpot::detail::MorseSplitSnapshot &snap,
   REQUIRE(snap.pair_forces_cap > cap);
   REQUIRE(snap.pair_he_cap > cap);
   REQUIRE(snap.pair_hv_cap > cap);
+#else
+  REQUIRE(snap.total_up == 0);
+  REQUIRE(snap.slices == 0);
+#endif
   REQUIRE(snap.row_e_cap > cap);
   REQUIRE(snap.row_s_cap > cap);
 }

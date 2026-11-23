@@ -150,11 +150,15 @@ void agree(const char *label, const std::vector<double> &pos,
     pot.setNeighbourMode(rgpot::nlist::Mode::Stored);
     const Snapshot got = evaluate(pot, pos, z, box);
     REQUIRE(apart(got, ref) == 0);
+#if defined(_OPENMP)
     if (std::string(th) == "1" || !large) {
       REQUIRE(rgpot::teamsOpened() == before);
     } else {
       REQUIRE(rgpot::teamsOpened() > before);
     }
+#else
+    REQUIRE(rgpot::teamsOpened() == before);
+#endif
 
     const Snapshot reused = evaluate(pot, inside, z, box);
     REQUIRE(pot.listReused());
@@ -256,21 +260,30 @@ TEST_CASE("a stored neighbour index matches one thread", "[threads][nlist]") {
     const bool one = std::string(th) == "1";
     const auto before = rgpot::teamsOpened();
     const auto periodic_got = buildList(large, large_box, periodic);
+#if defined(_OPENMP)
     if (one) {
       REQUIRE(rgpot::teamsOpened() == before);
     } else {
       REQUIRE(rgpot::teamsOpened() > before);
     }
+#else
+    (void)one;
+    REQUIRE(rgpot::teamsOpened() == before);
+#endif
     REQUIRE(periodic_got.offsets() == periodic_ref.offsets());
     REQUIRE(periodic_got.neighbours() == periodic_ref.neighbours());
 
     const auto open_before = rgpot::teamsOpened();
     const auto open_got = buildList(large, huge, open);
+#if defined(_OPENMP)
     if (one) {
       REQUIRE(rgpot::teamsOpened() == open_before);
     } else {
       REQUIRE(rgpot::teamsOpened() > open_before);
     }
+#else
+    REQUIRE(rgpot::teamsOpened() == open_before);
+#endif
     REQUIRE(open_got.offsets() == open_ref.offsets());
     REQUIRE(open_got.neighbours() == open_ref.neighbours());
 
