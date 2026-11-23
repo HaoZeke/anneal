@@ -27,6 +27,15 @@ of 0 writes nothing.
 One handle holds one potential.
 Each potential serialises the force calls of its own instance with a mutex.
 
+An engine library stays resident once a constructor opens it.
+The constructors open it with
+=RTLD_NODELETE= and never call =dlclose=, so =rgpot_external_potential_free=
+destroys the engine instance and leaves the library mapped.
+A backend may keep OpenMP, CUDA, MPI, GROMACS, LAMMPS or OpenMM state that does
+not survive an unload.
+A later constructor that opens the same file gets the dynamic linker's existing
+handle.
+
 ** Unit factors
 
 *** =rgpot_md_kj_per_ev=
@@ -89,6 +98,10 @@ rgpot_external_potential *rgpot_lammps_potential(const char *engine_path,
   ("engine library was not opened: " and the reason for each candidate) or when
   =rgpot_engine_create= returns null (its message, or "rgpot_engine_create
   failed").
+  Returns null and writes =err=, without trying the next candidate, when the
+  opened file cannot be identified through =dladdr= and =realpath=, or when its
+  canonical path was loaded before and now names another inode ("was replaced
+  after it was loaded").
 
 *** =rgpot_gromacs_potential=
 
@@ -115,8 +128,8 @@ rgpot_external_potential *rgpot_gromacs_potential(const char *engine_path,
   kJ/mol energy and the (kJ/mol)/nm forces back to eV and eV/Angstrom.
 - Errors :: returns null and writes =err= for a =u0=, =cutoff= or =psi= that is
   not positive and finite, a library that does not open or lacks one of the
-  three symbols, or a failed =rgpot_engine_create=, with the messages of
-  =rgpot_lammps_potential=.
+  three symbols, a library that cannot be identified or was replaced, or a
+  failed =rgpot_engine_create=, with the messages of =rgpot_lammps_potential=.
 
 *** =rgpot_openmm_potential=
 

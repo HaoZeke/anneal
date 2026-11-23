@@ -1471,55 +1471,194 @@ fn dropping_the_instance_destroys_the_engine() {
     assert_eq!(observer.destroyed(), before + 1);
 }
 
+/// `dl_iterate_phdr` entries whose object file name is `name`.
 #[cfg(target_os = "linux")]
-#[test]
-fn dropping_the_instance_unloads_the_library() {
-    let path = build("harmonic_unload", &[]);
-    assert!(!library_is_mapped(&path));
+fn link_maps_named(name: &str) -> usize {
+    use std::ffi::{c_char, c_void, CStr};
 
-    for iteration in 0..200 {
-        let engine = load(&path);
-        assert!(
-            library_is_mapped(&path),
-            "fixture is not mapped while iteration {iteration} is alive"
-        );
-        drop(engine);
-        assert!(
-            !library_is_mapped(&path),
-            "fixture remains mapped after iteration {iteration}"
-        );
+    #[repr(C)]
+    struct DlPhdrInfo {
+        _addr: usize,
+        name: *const c_char,
     }
+
+    struct Hits<'a> {
+        name: &'a str,
+        count: usize,
+    }
+
+    unsafe extern "C" fn visit(info: *mut DlPhdrInfo, _size: usize, data: *mut c_void) -> c_int {
+        let hits = unsafe { &mut *data.cast::<Hits<'_>>() };
+        let name = unsafe { (*info).name };
+        if !name.is_null() {
+            let object = unsafe { CStr::from_ptr(name) }.to_string_lossy();
+            if Path::new(object.as_ref()).file_name() == Some(hits.name.as_ref()) {
+                hits.count += 1;
+            }
+        }
+        0
+    }
+
+    extern "C" {
+        fn dl_iterate_phdr(
+            callback: unsafe extern "C" fn(*mut DlPhdrInfo, usize, *mut c_void) -> c_int,
+            data: *mut c_void,
+        ) -> c_int;
+    }
+
+    let mut hits = Hits { name, count: 0 };
+    unsafe { dl_iterate_phdr(visit, (&mut hits as *mut Hits<'_>).cast()) };
+    hits.count
+}
+
+fn file_name(path: &Path) -> &str {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .expect("fixture file name")
 }
 
 #[cfg(target_os = "linux")]
 #[test]
-fn load_failures_unload_the_library() {
+fn dropping_the_instance_keeps_the_library_resident() {
+    let path = build("harmonic_resident", &[]);
+    assert!(!library_is_mapped(&path));
+    let request = EngineRequest {
+        positions: &[1.0, 0.0, 0.0],
+        atomic_numbers: &[1],
+        box_matrix: &CELL,
+    };
+
+    let first = load(&path);
+    let create = first.symbols().create as usize;
+    drop(first);
+    for iteration in 0..200 {
+        let mut engine = load(&path);
+        assert_eq!(
+            engine.symbols().create as usize,
+            create,
+            "iteration {iteration} resolved another copy of the plugin"
+        );
+        engine.force(&request).expect("force on a reused plugin");
+        drop(engine);
+        drop(load(&path).into_potential());
+        assert!(
+            library_is_mapped(&path),
+            "fixture was unmapped after iteration {iteration}"
+        );
+    }
+    assert_eq!(link_maps_named(file_name(&path)), 1);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn every_path_to_one_file_shares_one_registry_entry() {
+    let path = build("harmonic_aliases", &[]);
+    let dir = path.parent().expect("fixture directory");
+    let symlink = dir.join("libharmonic_aliases_symlink.so");
+    let hardlink = dir.join("libharmonic_aliases_hardlink.so");
+    for alias in [&symlink, &hardlink] {
+        let _ = std::fs::remove_file(alias);
+    }
+    std::os::unix::fs::symlink(&path, &symlink).expect("symlink the fixture");
+    std::fs::hard_link(&path, &hardlink).expect("hard-link the fixture");
+    let dotted = dir
+        .join("..")
+        .join(dir.file_name().expect("fixture directory name"))
+        .join(file_name(&path));
+
+    let engines: Vec<EnginePotential> = [&path, &symlink, &hardlink, &dotted]
+        .into_iter()
+        .map(|alias| load(alias))
+        .collect();
+    let create = engines[0].symbols().create as usize;
+    for engine in &engines {
+        assert_eq!(engine.symbols().create as usize, create);
+    }
+    assert_eq!(link_maps_named(file_name(&path)), 1);
+    assert_eq!(link_maps_named(file_name(&hardlink)), 0);
+    assert_eq!(link_maps_named(file_name(&symlink)), 0);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_file_replaced_at_a_loaded_path_is_refused() {
+    let path = build("harmonic_replaced", &[]);
+    let mut engine = load(&path);
+
+    let next = build("harmonic_replaced_next", &[]);
+    let staging = path.with_extension("staging");
+    std::fs::copy(&next, &staging).expect("stage the replacement");
+    std::fs::rename(&staging, &path).expect("replace the fixture");
+
+    let error = unsafe { EnginePotential::load(&path, &config()) }
+        .err()
+        .expect("a replaced file must be refused");
+    match &error {
+        EngineError::Load(text) => assert!(text.contains("was replaced"), "{text}"),
+        other => panic!("expected EngineError::Load, got {other:?}"),
+    }
+
+    let request = EngineRequest {
+        positions: &[1.0, 0.0, 0.0],
+        atomic_numbers: &[1],
+        box_matrix: &CELL,
+    };
+    engine
+        .force(&request)
+        .expect("the resident plugin still evaluates");
+    load(&next)
+        .force(&request)
+        .expect("the new file loads from its own path");
+}
+
+#[test]
+fn a_bare_library_name_is_refused() {
+    let path = build("harmonic_bare", &[]);
+    let error = unsafe { EnginePotential::load(Path::new(file_name(&path)), &config()) }
+        .err()
+        .expect("a bare library name must be refused");
+    match &error {
+        EngineError::Load(text) => assert!(text.contains("bare library name"), "{text}"),
+        other => panic!("expected EngineError::Load, got {other:?}"),
+    }
+    #[cfg(target_os = "linux")]
+    assert!(!library_is_mapped(&path));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn load_failures_stay_resident_and_repeat_their_error() {
     let failures = [
         (
-            build("harmonic_unload_missing", &["NO_FORCE", "NO_BATCH"]),
+            build("harmonic_failed_missing", &["NO_FORCE", "NO_BATCH"]),
             config().to_vec(),
         ),
         (
-            build("harmonic_unload_abi", &["FIXTURE_ABI=2"]),
+            build("harmonic_failed_abi", &["FIXTURE_ABI=2"]),
             config().to_vec(),
         ),
         (
-            build("harmonic_unload_stamp", &["FIXTURE_ABI_LAYOUT=2"]),
+            build("harmonic_failed_stamp", &["FIXTURE_ABI_LAYOUT=2"]),
             config().to_vec(),
         ),
-        (build("harmonic_unload_create", &[]), vec![1, 2, 3]),
+        (build("harmonic_failed_create", &[]), vec![1, 2, 3]),
     ];
 
     for (path, config) in failures {
         assert!(!library_is_mapped(&path));
-        unsafe { EnginePotential::load(&path, &config) }
+        let first = unsafe { EnginePotential::load(&path, &config) }
             .err()
             .expect("fixture must fail to load");
         assert!(
-            !library_is_mapped(&path),
-            "{} remains mapped after load failed",
+            library_is_mapped(&path),
+            "{} was unmapped after load failed",
             path.display()
         );
+        let again = unsafe { EnginePotential::load(&path, &config) }
+            .err()
+            .expect("fixture must fail to load again");
+        assert_eq!(again, first);
+        assert_eq!(link_maps_named(file_name(&path)), 1);
     }
 }
 

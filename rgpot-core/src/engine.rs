@@ -35,17 +35,30 @@
 //! native registration lifetime, and transform invocations are serialized
 //! even when an engine parallelizes a batch.
 //!
-//! Dropping the handle destroys the engine instance before unloading its
-//! library. Engine implementations must therefore release library-owned
-//! callbacks, threads, and other process state from `rgpot_engine_destroy`.
+//! Dropping the handle destroys the engine instance. The library stays
+//! resident: [`EnginePotential::load`] keeps one process-wide registry entry
+//! per file, keyed by device and inode, that holds the `dlopen` handle and the
+//! resolved [`EngineSymbols`]. The library is opened with `RTLD_NODELETE` and
+//! the loader never calls `dlclose` on it. A backend may own threads, OpenMP
+//! or CUDA runtimes, MPI state, TLS destructors or `atexit` handlers that call
+//! into the library after its last instance is gone, and a tensor runtime
+//! crashes if `dlclose` runs its static teardown. Loading the same file again,
+//! through any path, reuses the entry without another `dlopen`.
+//!
+//! The registry refuses two loads it cannot key safely. A path whose file was
+//! replaced after it was loaded names a new inode while the dynamic linker
+//! would hand back the old mapping, and a bare library name is resolved by the
+//! loader's search path rather than the filesystem. Both are
+//! [`EngineError::Load`].
 
+use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_long, c_uint, c_ushort, c_void, CString};
 use std::fmt;
 use std::mem::ManuallyDrop;
 use std::num::NonZeroU32;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard, OnceLock};
 
 use libloading::Library;
 
@@ -858,7 +871,115 @@ pub struct EnginePotential {
     stamp: RgpotEngineAbiStamp,
     handle: NonNull<RgpotEnginePot>,
     fatal: OnceLock<Poisoned>,
-    library: Option<ManuallyDrop<Library>>,
+    library: Option<Arc<Resident>>,
+}
+
+/// The file a plugin was loaded from.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum FileIdentity {
+    #[cfg(unix)]
+    Inode { dev: u64, ino: u64 },
+    #[cfg(not(unix))]
+    Path(PathBuf),
+}
+
+/// One loaded plugin file. The handle is never closed.
+struct Resident {
+    _library: ManuallyDrop<Library>,
+    symbols: Result<EngineSymbols, EngineError>,
+}
+
+#[derive(Default)]
+struct Registry {
+    by_file: HashMap<FileIdentity, Arc<Resident>>,
+    by_path: HashMap<PathBuf, FileIdentity>,
+}
+
+static REGISTRY: LazyLock<Mutex<Registry>> = LazyLock::new(Mutex::default);
+
+fn registry() -> MutexGuard<'static, Registry> {
+    REGISTRY
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn canonical_path(path: &Path) -> Result<PathBuf, EngineError> {
+    if path
+        .parent()
+        .is_none_or(|parent| parent.as_os_str().is_empty())
+    {
+        return Err(EngineError::Load(format!(
+            "{}: a bare library name is resolved by the dynamic loader's search path, \
+             so its file cannot be identified before it is opened; pass a path to the file",
+            path.display()
+        )));
+    }
+    std::fs::canonicalize(path)
+        .map_err(|why| EngineError::Load(format!("{}: {why}", path.display())))
+}
+
+#[cfg(unix)]
+fn file_identity(canonical: &Path) -> Result<FileIdentity, EngineError> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::metadata(canonical)
+        .map_err(|why| EngineError::Load(format!("{}: {why}", canonical.display())))?;
+    Ok(FileIdentity::Inode {
+        dev: meta.dev(),
+        ino: meta.ino(),
+    })
+}
+
+#[cfg(not(unix))]
+fn file_identity(canonical: &Path) -> Result<FileIdentity, EngineError> {
+    Ok(FileIdentity::Path(canonical.to_path_buf()))
+}
+
+#[cfg(unix)]
+unsafe fn open_resident(path: &Path) -> Result<Library, libloading::Error> {
+    use libloading::os::unix::{Library as UnixLibrary, RTLD_LAZY, RTLD_LOCAL};
+    unsafe { UnixLibrary::open(Some(path), RTLD_LAZY | RTLD_LOCAL | libc::RTLD_NODELETE) }
+        .map(Library::from)
+}
+
+#[cfg(not(unix))]
+unsafe fn open_resident(path: &Path) -> Result<Library, libloading::Error> {
+    unsafe { Library::new(path) }
+}
+
+/// The registry entry for the file at `path`, opening it on first use.
+///
+/// The registry lock is held across `dlopen`, so a plugin's static
+/// constructors must not load engines through this loader.
+unsafe fn resident_library(path: &Path) -> Result<Arc<Resident>, EngineError> {
+    let canonical = canonical_path(path)?;
+    let identity = file_identity(&canonical)?;
+    let mut registry = registry();
+    if let Some(known) = registry.by_path.get(&canonical) {
+        if *known != identity {
+            return Err(EngineError::Load(format!(
+                "{}: the file was replaced after it was loaded, and the loaded plugin stays \
+                 resident; load the new file from another path or restart the process",
+                canonical.display()
+            )));
+        }
+    }
+    if let Some(resident) = registry.by_file.get(&identity) {
+        let resident = Arc::clone(resident);
+        registry.by_path.insert(canonical, identity);
+        return Ok(resident);
+    }
+    let library = unsafe { open_resident(&canonical) }
+        .map_err(|why| EngineError::Load(format!("{}: {why}", path.display())))?;
+    let symbols = unsafe { resolve(&library) };
+    let resident = Arc::new(Resident {
+        _library: ManuallyDrop::new(library),
+        symbols,
+    });
+    registry
+        .by_file
+        .insert(identity.clone(), Arc::clone(&resident));
+    registry.by_path.insert(canonical, identity);
+    Ok(resident)
 }
 
 // The instance is used by one caller at a time through `&mut self`. The
@@ -870,18 +991,23 @@ impl EnginePotential {
     /// Open the engine library at `path` and create an instance from the
     /// backend's configuration message.
     ///
+    /// The library stays resident for the life of the process, including
+    /// after a load that fails its ABI check or `rgpot_engine_create`. A later
+    /// load of the same file reuses it. `path` must name the file: a bare
+    /// library name, or a path whose file was replaced since it was loaded,
+    /// is [`EngineError::Load`].
+    ///
     /// # Safety
     ///
     /// The library must implement the engine C ABI with the signatures of
     /// this module, and `config` must be the message its create call reads.
     pub unsafe fn load(path: &Path, config: &[u8]) -> Result<Self, EngineError> {
-        let library = unsafe { Library::new(path) }
-            .map_err(|why| EngineError::Load(format!("{}: {why}", path.display())))?;
-        let symbols = unsafe { resolve(&library)? };
+        let resident = unsafe { resident_library(path)? };
+        let symbols = resident.symbols.clone()?;
         let mut engine = unsafe { Self::from_symbols(symbols, config)? };
-        engine.set_cache = unsafe { optional(&library, "rgpot_engine_set_cache") };
-        engine.cache_counts = unsafe { optional(&library, "rgpot_engine_cache_counts") };
-        engine.library = Some(ManuallyDrop::new(library));
+        engine.set_cache = unsafe { optional(&resident._library, "rgpot_engine_set_cache") };
+        engine.cache_counts = unsafe { optional(&resident._library, "rgpot_engine_cache_counts") };
+        engine.library = Some(resident);
         Ok(engine)
     }
 
@@ -1319,7 +1445,8 @@ impl EnginePotential {
     }
 
     /// The instance as a [`PotentialImpl`]. The handle owns the engine and
-    /// destroys it on drop. Calls through the handle are serialized. When
+    /// destroys it on drop, and holds the same resident registry entry as
+    /// [`Self::load`]. Calls through the handle are serialized. When
     /// both the optional capability and HVP symbols are present and
     /// `analytic_hvp` is advertised, the handle also receives an analytic
     /// Hessian-vector callback.
@@ -1862,16 +1989,10 @@ impl EngineSession {
 /// still reads from `pot` afterwards, and every handle created by
 /// `rgpot_engine_create` is freed by `rgpot_engine_destroy`). `Drop` therefore
 /// still calls `rgpot_engine_destroy` once on a poisoned handle, serialized by
-/// `&mut self`.
+/// `&mut self`. The library stays resident afterwards.
 impl Drop for EnginePotential {
     fn drop(&mut self) {
         unsafe { (self.symbols.destroy)(self.handle.as_ptr()) };
-        if let Some(library) = &mut self.library {
-            // SAFETY: the engine instance has been destroyed, and no vtable,
-            // callback, or function pointer from the library is used after
-            // this point. The remaining fields contain only host-owned data.
-            unsafe { ManuallyDrop::drop(library) };
-        }
     }
 }
 

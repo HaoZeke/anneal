@@ -9,13 +9,22 @@
 #include "rgpot/plugin/DynLib.hpp"
 
 #include <array>
+#include <cerrno>
+#include <climits>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <map>
 #include <mutex>
 #include <stdexcept>
 #include <utility>
 #include <vector>
+
+#if !defined(_WIN32)
+#include <dlfcn.h>
+#include <sys/stat.h>
+#endif
 
 namespace rgpot {
 namespace {
@@ -55,6 +64,60 @@ std::string last_dl() {
   return text.empty() ? "dlopen failed" : text;
 }
 
+// Engine libraries stay resident: they are opened with RTLD_NODELETE and never
+// closed, because a backend may keep OpenMP, CUDA, MPI, GROMACS or OpenMM state
+// that does not survive dlclose. A later open of the same file returns the
+// dynamic linker's existing handle.
+dyn::Handle open_resident(const std::string &path) {
+#if defined(_WIN32)
+  return dyn::open(path.c_str());
+#else
+  return dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL | RTLD_NODELETE);
+#endif
+}
+
+// Records the file that holds `anchor` under its canonical path. A bare
+// soname is identified through the file the dynamic linker mapped. A file
+// replaced at a path that was already loaded names a new inode while the
+// linker keeps the old mapping, so it is refused.
+void check_resident(const void *anchor, const std::string &path) {
+#if defined(_WIN32)
+  (void)anchor;
+  (void)path;
+#else
+  Dl_info info{};
+  if (dladdr(anchor, &info) == 0 || info.dli_fname == nullptr ||
+      info.dli_fname[0] == '\0') {
+    throw std::runtime_error(path +
+                             ": the dynamic linker did not report the file "
+                             "it loaded, so the engine cannot be identified");
+  }
+  char canonical[PATH_MAX];
+  struct stat st {};
+  if (realpath(info.dli_fname, canonical) == nullptr ||
+      stat(canonical, &st) != 0) {
+    throw std::runtime_error(path + ": cannot identify the loaded file " +
+                             info.dli_fname + ": " + std::strerror(errno));
+  }
+  struct FileId {
+    dev_t dev;
+    ino_t ino;
+  };
+  static std::mutex mutex;
+  static auto *seen = new std::map<std::string, FileId>();
+  std::lock_guard<std::mutex> lock(mutex);
+  const auto [it, inserted] =
+      seen->emplace(canonical, FileId{st.st_dev, st.st_ino});
+  if (!inserted &&
+      (it->second.dev != st.st_dev || it->second.ino != st.st_ino)) {
+    throw std::runtime_error(
+        path + ": " + canonical +
+        " was replaced after it was loaded, and the loaded engine stays "
+        "resident; load the new file from another path or restart the process");
+  }
+#endif
+}
+
 struct Loaded {
   dyn::Handle library = nullptr;
   EngineCreate create = nullptr;
@@ -66,9 +129,6 @@ struct Loaded {
   ~Loaded() {
     if (pot != nullptr && destroy != nullptr) {
       destroy(pot);
-    }
-    if (library != nullptr) {
-      dyn::close(library);
     }
   }
 
@@ -86,9 +146,6 @@ struct Loaded {
     if (this != &other) {
       if (pot != nullptr && destroy != nullptr) {
         destroy(pot);
-      }
-      if (library != nullptr) {
-        dyn::close(library);
       }
       library = other.library;
       create = other.create;
@@ -110,7 +167,7 @@ Loaded open_library(const std::vector<std::string> &paths, bool native) {
   }
   std::string tried;
   for (const std::string &path : paths) {
-    dyn::Handle handle = dyn::open(path.c_str());
+    dyn::Handle handle = open_resident(path);
     if (handle == nullptr) {
       tried += path + ": " + last_dl() + "; ";
       continue;
@@ -132,10 +189,10 @@ Loaded open_library(const std::vector<std::string> &paths, bool native) {
     if (!have) {
       tried += path + ": missing " +
                (native ? "rgpot_md_native_force" : "rgpot_engine_force") + "; ";
-      dyn::close(handle);
       loaded.library = nullptr;
       continue;
     }
+    check_resident(reinterpret_cast<const void *>(loaded.create), path);
     return loaded;
   }
   throw std::runtime_error("engine library was not opened: " + tried);

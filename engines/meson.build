@@ -772,6 +772,11 @@ if openmm_opt.allowed() and python3_engines.found()
                 build_rpath: openmm_libdir,
                 install_rpath: openmm_libdir,
                 install: not meson.is_subproject(),
+                # OpenMM platforms keep CUDA and OpenCL contexts and loaded
+                # plugins alive; a dlclose of the engine must not unmap them.
+                link_args: cppc.get_supported_link_arguments(
+                    ['-Wl,-z,nodelete'],
+                ),
             )
             standalone_engine_plugins += openmm_engine
             external_env.set('RGPOT_OPENMM_ENGINE', openmm_engine.full_path())

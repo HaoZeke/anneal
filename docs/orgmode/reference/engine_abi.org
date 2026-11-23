@@ -1324,6 +1324,41 @@ Enable the =engine= feature on =rgpot-core= to expose
 No second engine abstraction is added: =EnginePotential::into_potential= wraps
 the handle as a =PotentialImpl=.
 
+*** Plugin lifetime
+
+Engine plugins stay resident.
+The loader keeps one process-wide registry entry per plugin file, keyed by the
+device and inode of the canonical path.
+An entry holds the =dlopen= handle and the resolved =EngineSymbols=.
+A later load of the same file through any path, symlink or hard link reuses the
+entry and does not call =dlopen= again.
+The library is opened with =RTLD_NODELETE=, and the loader never calls =dlclose=
+on it.
+Dropping an =EnginePotential=, or the =PotentialImpl= built from it, calls
+=rgpot_engine_destroy= and leaves the library mapped.
+
+A backend may keep OpenMP or CUDA runtimes, Torch thread pools, MPI state,
+GROMACS, LAMMPS or OpenMM state, TLS destructors or =atexit= handlers that call
+into the library after its last instance is gone.
+Unmapping such a library crashes the process later, or at exit.
+A load that fails its ABI check or =rgpot_engine_create= also stays resident,
+because the library's static constructors have already run, and a second attempt
+returns the same error.
+
+Two loads are refused with =EngineError::Load=:
+
+- A path whose file was replaced after it was loaded :: The path names a new
+  inode, but the dynamic linker would return the mapping of the old one.
+  Load the new file from another path, or restart the process.
+- A bare library name such as =libuma_engine.so= :: The dynamic loader resolves
+  it through its search path rather than the filesystem, so the file cannot be
+  identified before it is opened.
+  Pass a path that names the file.
+
+=libuma_engine=, =libmetatomic_engine=, =libxtb_engine=, =libopenmm_engine=,
+=libnwchem_engine= and =libskala_engine= are also linked with =-z nodelete=, so
+a host that does call =dlclose= on them leaves them mapped.
+
 - =ENGINE_ABI_VERSION=, =ENGINE_ABI_MINOR=,
   =ENGINE_ABI_LAYOUT_REVISION= :: Host ABI identity (=1=, =6=, =1=) matching =RGPOT_ENGINE_ABI_VERSION=,
   =RGPOT_ENGINE_ABI_MINOR= and =RGPOT_ENGINE_ABI_LAYOUT_REVISION=.
@@ -1356,9 +1391,15 @@ the handle as a =PotentialImpl=.
 - =EngineEvaluation= :: Output containing =energy= (eV) and =forces=
   (eV/Angstrom, row-major =[n_atoms, 3]=).
 - =EnginePotential::load(path, config)= /
-  =EnginePotential::from_symbols(symbols, config)= :: Verifies =rgpot_engine_abi_version() ==
-  ENGINE_ABI_VERSION=, resolves the optional
-  =rgpot_engine_abi_stamp= (treating an engine without it as minor 0, layout 1) and requires =stamp.serves(RgpotEngineAbiStamp::HOST)=, copies =config= into an 8-byte-aligned =Vec<u64>= buffer (so engines that cast =config= to =capnp::word= never receive an unaligned pointer), and calls =rgpot_engine_create=.
+  =EnginePotential::from_symbols(symbols, config)= :: =load= takes the resident
+  registry entry for =path=, opening the file on first use.
+  Both verify
+  =rgpot_engine_abi_version() == ENGINE_ABI_VERSION=, resolve the optional =rgpot_engine_abi_stamp=
+  (treating an engine without it as minor 0, layout 1) and require
+  =stamp.serves(RgpotEngineAbiStamp::HOST)=, copy =config= into an
+  8-byte-aligned =Vec<u64>= buffer (so engines that cast =config= to
+  =capnp::word= never receive an unaligned pointer), and call
+  =rgpot_engine_create=.
   =EnginePotential::abi_stamp()= returns the resolved stamp.
 - =EnginePotential::force(&request)= and
   =EnginePotential::force_batch(&atomic_numbers, &positions, &boxes)= ::

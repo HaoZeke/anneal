@@ -64,8 +64,12 @@ A message whose length is not a multiple of 8 bytes is refused with a reason in
 =errbuf=.
 
 Do not =dlclose= an engine: the tensor runtime keeps process-wide state.
-=libuma_engine.so= is linked with =-z nodelete=, so a =dlclose= leaves it
-mapped.
+=libuma_engine.so=, =libmetatomic_engine.so=,
+=libxtb_engine.so=, =libopenmm_engine.so=,
+=libnwchem_engine.so= and =libskala_engine.so= are linked with =-z nodelete=, so
+a =dlclose= leaves them mapped.
+The Rust loader and the =LammpsPot=, =GromacsPot= and =OpenMMPot= constructors
+open every engine with =RTLD_NODELETE= and never close it.
 Destroy every handle before the process exits.
 
 ** Build and test the engine libraries

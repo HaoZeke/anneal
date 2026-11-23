@@ -33,6 +33,10 @@ double rgpot_md_nm_per_angstrom(void);
  * liblammps_engine.so and liblj_engine.so. The plugin stays the backend: the constructor
  * dlopens it and calls rgpot_engine_force. Returns NULL and writes
  * err on failure.
+ *
+ * Every constructor opens its engine with RTLD_NODELETE and never closes it,
+ * so the library stays mapped after rgpot_external_potential_free. A file
+ * replaced at a path that was already loaded is refused.
  */
 rgpot_external_potential *rgpot_lammps_potential(const char *engine_path,
                                                 double u0, double cutoff,

@@ -800,6 +800,11 @@ if not get_option('with_rpc_client_only')
             include_directories: _incdirs,
             gnu_symbol_visibility: 'default',
             install: not meson.is_subproject(),
+            # NWChem keeps MPI and Fortran runtime state; a dlclose of the engine
+            # must not unmap it.
+            link_args: meson.get_compiler('cpp').get_supported_link_arguments(
+                ['-Wl,-z,nodelete'],
+            ),
         )
         _cpmd_dl = dependency('dl', required: false)
         if not _cpmd_dl.found()
@@ -830,6 +835,11 @@ if not get_option('with_rpc_client_only')
                 include_directories: _incdirs,
                 gnu_symbol_visibility: 'default',
                 install: not meson.is_subproject(),
+                # NWChem keeps MPI and Fortran runtime state; a dlclose of the
+                # engine must not unmap it.
+                link_args: meson.get_compiler('cpp').get_supported_link_arguments(
+                    ['-Wl,-z,nodelete'],
+                ),
             )
         endif
     endif

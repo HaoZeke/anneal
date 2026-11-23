@@ -66,6 +66,11 @@ if has_xtb
         include_directories: _incdirs + [xtb_inc],
         install: not meson.is_subproject(),
         gnu_symbol_visibility: 'default',
+        # The OpenMP and Fortran runtimes keep threads and process state; a
+        # dlclose of the engine must not unmap them.
+        link_args: meson.get_compiler('cpp').get_supported_link_arguments(
+            ['-Wl,-z,nodelete'],
+        ),
     )
 
     xtb_engine_dep = declare_dependency(
