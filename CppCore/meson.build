@@ -2597,7 +2597,13 @@ if get_option('with_tests')
         endif
         if _rpc_stack and host_system != 'windows'
             engine_table_env = environment()
-            engine_table_expect = ['CLASSICAL', 'COMPOSITE', 'MOPAC', 'NWCHEM', 'CPMD']
+            engine_table_expect = [
+                'CLASSICAL',
+                'COMPOSITE',
+                'MOPAC',
+                'NWCHEM',
+                'CPMD',
+            ]
             engine_table_depends = [
                 classical_engine,
                 composite_engine,
