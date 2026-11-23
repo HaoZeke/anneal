@@ -4994,10 +4994,9 @@ where
     // A side reconstruction may win the answer without becoming the walk's
     // incumbent. It is merged only after the walk has finished.
     let mut observed_basis_best: Option<(f64, Array1<f64>)> = None;
-    // Calls charged by side reconstructions, hidden from the walk's stall
-    // clocks. They join the walk only while it is still taking charges. A
-    // reconstruction that reached the target was moved on before its record;
-    // one that missed is not added after that close.
+    // Calls charged by side reconstructions, carried so `branch_on_stall`
+    // measures the walk's own progress while the stall clocks advance by the
+    // same cost.
     let mut observed_basis_spent = 0usize;
     // Multiple of the preset temperature the walk hops at. It stays one
     // unless `plateau_heat` is on.
@@ -5643,7 +5642,10 @@ where
                 .is_some_and(|target| crate::energy_hits(ledger.best, target, 1e-3))
             && !ledger.target_reached()
         {
-            let walked = ledger.spent().saturating_sub(branch_spent);
+            let walked = ledger
+                .spent()
+                .saturating_sub(branch_spent)
+                .saturating_sub(observed_basis_spent);
             if ledger.best < branch_seen - BRANCH_LOWER * ledger.best.abs().max(1.0) {
                 branch_gap = branch_gap.max(walked.saturating_sub(branch_low_at));
                 branch_seen = ledger.best;
@@ -9275,8 +9277,8 @@ where
                     // The slice is the room left on the walk, not its original
                     // allocation. The caller's stop is shared so a flag raised
                     // inside the quench refuses every later charge.
-                    let mut side_ledger = Ledger::new(ledger.remaining());
-                    side_ledger.stop = ledger.stop.clone();
+                    let before = ledger.spent();
+                    let mut side_ledger = ledger.slice(ledger.remaining());
                     let (basis_energy, basis_state) =
                         relax(&mut side_ledger, candidate.view(), cfg.relax_steps);
                     let sane = !basis_state.is_empty()
@@ -9303,24 +9305,24 @@ where
                     } else {
                         None
                     };
+                    ledger.charge_many(side_ledger.spent());
+                    let cost = ledger.spent().saturating_sub(before);
+                    observed_basis_spent = observed_basis_spent.saturating_add(cost);
+                    charged_at_best = charged_at_best.saturating_add(cost);
+                    last_polish_spent = last_polish_spent.saturating_add(cost);
+                    next_reoccupy = next_reoccupy.saturating_add(cost);
+                    reorder_wait = reorder_wait.saturating_add(cost);
                     let recordable = sane && (!required || gradient.is_some());
                     if !recordable {
                         unconverged_records += 1;
-                    }
-                    let side_spent = side_ledger.spent();
-                    ledger.budget = ledger.budget.saturating_sub(side_spent);
-                    observed_basis_spent = observed_basis_spent.saturating_add(side_spent);
-                    // Recording settles the quench that already ran. It is not
-                    // another side call, so an empty remainder does not drop it.
-                    if recordable && ledger.below_target(basis_energy) {
-                        ledger.budget = ledger.budget.saturating_add(observed_basis_spent);
-                        ledger.spent = ledger.spent.saturating_add(observed_basis_spent);
-                        observed_basis_spent = 0;
+                    } else if ledger.below_target(basis_energy) {
+                        // Recording settles the quench that already ran. It is
+                        // not another side call, so an empty remainder does not
+                        // drop it.
                         ledger.record(basis_energy, basis_state.view());
-                    } else if recordable
-                        && observed_basis_best
-                            .as_ref()
-                            .is_none_or(|(energy, _)| basis_energy < *energy)
+                    } else if observed_basis_best
+                        .as_ref()
+                        .is_none_or(|(energy, _)| basis_energy < *energy)
                     {
                         observed_basis_best = Some((basis_energy, basis_state));
                     }
@@ -9842,14 +9844,6 @@ where
         }
     };
 
-    ledger.budget = ledger.budget.saturating_add(observed_basis_spent);
-    // The hit record already includes a reconstruction that reached the
-    // target. A miss was withheld from the walk's clocks and is not charged
-    // onto the ledger after that close, so the hit's call count stays the
-    // one the search reported when it stopped.
-    if !ledger.target_reached() {
-        ledger.spent = ledger.spent.saturating_add(observed_basis_spent);
-    }
     if let Some((energy, state)) = observed_basis_best
         && energy < ledger.best
         && !ledger.target_reached()
@@ -10840,56 +10834,88 @@ mod tests {
     }
 
     #[test]
-    fn a_missed_basis_probe_is_not_charged_after_the_target_hit() {
-        let cfg = quiet_basis_search(4);
+    fn a_missed_basis_probe_is_counted_before_later_records() {
+        let mut cfg = quiet_basis_search(4);
+        cfg.calibrated_screen = false;
+        cfg.screen_margin = f64::INFINITY;
+        cfg.finish_improving = false;
         let budget = 400;
         let mut ledger = Ledger::new(budget);
         ledger.stop_below(-10.0);
         let tetra = regular_tetrahedron();
-        let probed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let probed_flag = probed.clone();
-        let mut side_charges = 0usize;
+        let mut probed = false;
         let mut seen_parent = false;
+        let mut real_charges = 0usize;
+        let mut side_charges = 0usize;
+        let mut post_probe_full = 0usize;
+        let mut walk_improvement_at = 0usize;
+        let mut target_hit_at = 0usize;
         let mut relax = |led: &mut Ledger, _x: ArrayView1<f64>, steps: usize| {
+            let opening = !seen_parent;
             let side = led.spent() == 0 && seen_parent;
-            if side {
-                probed_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-            } else {
+            if !side {
                 seen_parent = true;
             }
             for _ in 0..steps {
                 if !led.charge() {
                     break;
                 }
+                real_charges += 1;
                 if side {
                     side_charges += 1;
                 }
             }
-            let energy = if side || !probed_flag.load(std::sync::atomic::Ordering::Relaxed) {
-                -(led.spent().min(4) as f64)
+            let energy = if opening {
+                -1.0
+            } else if side {
+                probed = true;
+                -2.0
+            } else if probed && steps == cfg.relax_steps {
+                post_probe_full += 1;
+                if post_probe_full == 1 {
+                    walk_improvement_at = real_charges;
+                    -5.0
+                } else {
+                    target_hit_at = real_charges;
+                    -12.0
+                }
             } else {
-                -(led.spent() as f64)
+                -1.0
             };
             (energy, tetra.clone())
         };
         let mut rng = StdRng::seed_from_u64(11);
         let outcome = run(&cfg, tetra.view(), &mut ledger, &mut relax, &mut rng).expect("search");
+        assert!(probed, "the stall must probe a basis before the hit");
+        assert_eq!(side_charges, cfg.relax_steps);
         assert!(
-            probed.load(std::sync::atomic::Ordering::Relaxed),
-            "the stall must probe a basis before the hit"
+            walk_improvement_at > side_charges && target_hit_at > walk_improvement_at,
+            "the walk must record an intermediate minimum and a later target hit after the probe"
         );
-        assert!(side_charges > 0, "the probe charged no calls");
-        let (_, at, _, energy) = outcome
+        let (_, mid_at, _, _) = outcome
+            .improvements
+            .iter()
+            .find(|(_, _, _, energy)| *energy == -5.0)
+            .copied()
+            .expect("the walk records an intermediate improvement after the missed probe");
+        assert_eq!(
+            mid_at, walk_improvement_at,
+            "intermediate improvement at {mid_at} dropped the missed probe's {side_charges} calls"
+        );
+        let (_, hit_at, _, _) = outcome
             .improvements
             .iter()
             .find(|(_, _, _, energy)| *energy <= -10.0)
             .copied()
             .expect("the walk reaches the target");
-        assert!(energy <= -10.0);
         assert_eq!(
-            at, outcome.charged,
-            "side calls {side_charges} were charged after the hit"
+            hit_at, target_hit_at,
+            "target hit row at {hit_at} did not match real evaluations {target_hit_at}"
         );
+        assert_eq!(outcome.charged, real_charges);
+        assert_eq!(ledger.spent(), real_charges);
+        assert_eq!(ledger.budget(), budget);
+        assert_eq!(hit_at, outcome.charged);
     }
 
     #[test]
