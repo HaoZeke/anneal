@@ -141,10 +141,10 @@ GET https://uspex-team.org/en/uspex/news
 GET https://uspex-team.org/en/news
 
 Result: USPEX 26.5 (released 17 November 2026) adds a fixed- and
-variable-composition molecules and nanoclusters module; four new verified
-literature records were added (doi:10.1038/s41467-026-79241-x,
-doi:10.1021/accountsmr.6c00279, doi:10.1038/s41524-026-02333-1,
-arXiv:2611.24088). Other monitored releases (CREST v3.0.2, xtb v6.8.0,
+variable-composition molecules and nanoclusters module. This run adds two
+verified literature records (doi:10.1021/accountsmr.6c00279,
+arXiv:2611.24088) and re-confirms two filed earlier
+(doi:10.1038/s41467-026-79241-x, doi:10.1038/s41524-026-02333-1). Other monitored releases (CREST v3.0.2, xtb v6.8.0,
 AGOX v3.11.1, ASE 3.29.0, pele v0.1.2, ABCluster v3.4, and ORCA 6.1.1)
 are unchanged.
 
