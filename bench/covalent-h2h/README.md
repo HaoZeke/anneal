@@ -779,6 +779,34 @@ the same calls on Si10 seeds 2002, 2006 and 2011 and C10 seeds 2000,
 2002 and 2004. A tree with uncommitted changes to the build is refused,
 so the revision names the binary.
 
+Each new row also keeps its final geometry. `gfn2_crest.py` copies the
+run's last structure to `gfn2/finals/<system>/<code>-<seed>-<revision>-<digest>.xyz`,
+named by the anneal revision and the first 16 hex digits of the file's
+sha256, and refuses to replace a file with other contents. CREST rows
+keep `crest_best.xyz`, or the start when it wrote none. The rows file
+gains these columns:
+
+| column | meaning |
+|---|---|
+| `scc_rejected` | calls the engine returned no energy for: SCC not converged (rc -4), a rejected answer (rc -2) or a dead worker. Empty for CREST |
+| `geometry_rejected` | calls the handle refused before xtb because a pair was inside its floor. Empty for CREST |
+| `geometry` | the final's path under `gfn2/`, relative |
+| `geometry_sha256` | sha256 of that file |
+| `standalone_scc_converged` | `true` when standalone xtb converged the SCC on the final |
+| `standalone_xtb_eV` | that single point in eV, `nan` when xtb printed no energy |
+| `min_distance_A` | the shortest pair distance in the final |
+
+The rescore is `xtb --gfn 2 --sp` on a copy of the final at the settings
+of the search: electronic temperature 3000 K, `--acc 0.01` and at most
+500 SCC iterations. That is the SCC threshold. It counts as not
+converged when xtb exits non-zero, writes `.sccnotconverged` or prints
+that it did not converge. A hit whose final does not converge is
+recorded as a miss, charged the full budget and ranked after every hit,
+as a row in `false-hits.csv` is, so the energy the search saw is not
+counted unless xtb reproduces it. `scripts/paper_audit.py` checks that
+every geometry file exists, matches its sha256, and that the SCC and
+distance columns hold usable values.
+
 ### With the call floor
 
 The rgpot handle refuses a call with a pair inside 0.90 Å. With the
