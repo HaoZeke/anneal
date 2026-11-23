@@ -278,7 +278,7 @@ fn declared_elements_raise_the_floor_to_their_covalent_fraction() {
     cfg.call_floor = Some(0.9);
     cfg.call_floor_elements = Some(vec![14, 14]);
     let wall = CallWall::of(&cfg);
-    let floor = crate::methods::cluster_hopping::element_call_floor(14, 14, 0.9);
+    let floor = crate::methods::cluster_hopping::element_call_floor(14, 14);
     assert!(wall.refuses(pair(1.2).view()));
     assert!(wall.refuses(pair(floor).view()));
     assert!(!wall.refuses(pair(floor + 1.0e-6).view()));

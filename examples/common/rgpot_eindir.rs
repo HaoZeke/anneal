@@ -80,7 +80,7 @@ fn geometry_has_short_pair(positions: &[f64], atomic_numbers: &[i32], absolute: 
         ((a + 1)..n).any(|b| {
             let za = u32::try_from(atomic_numbers[a]).unwrap_or(0);
             let zb = u32::try_from(atomic_numbers[b]).unwrap_or(0);
-            let floor = element_call_floor(za, zb, absolute);
+            let floor = element_call_floor(za, zb);
             pair_distance_a(positions, a, b) <= floor
         })
     })
@@ -171,6 +171,15 @@ mod tests {
 
         let overlap = [0.0, 0.0, 0.0, 0.50, 0.0, 0.0];
         assert!(refuses_geometry(&overlap, &[8, 1]));
+    }
+
+    #[test]
+    fn species_guard_accepts_hydrogen_and_rejects_its_overlap() {
+        let hydrogen = [0.0, 0.0, 0.0, 0.741, 0.0, 0.0];
+        assert!(!refuses_geometry(&hydrogen, &[1, 1]));
+
+        let overlap = [0.0, 0.0, 0.0, 0.30, 0.0, 0.0];
+        assert!(refuses_geometry(&overlap, &[1, 1]));
     }
 
     #[test]
