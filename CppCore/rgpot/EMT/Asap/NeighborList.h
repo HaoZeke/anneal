@@ -1,6 +1,7 @@
 // Emacs: this is -*- C++ -*-
 
 #include "Image.h"
+#include <memory>
 #include <vector>
 using std::vector;
 
@@ -103,8 +104,8 @@ private:
   Vec *positions; ///< A pointer into the positions array of the atoms.
   vector<Vec> referencePositions; ///< The positions at the last update.
   vector<Image> images;           ///< The images of neighbors through PBC.
-  int *neighborList;              ///< The actual neighbor list.
+  std::unique_ptr<int[]> neighborList; ///< The actual neighbor list.
   int nMax;                       ///< The size of the neighborList array.
-  int *indices;   ///< Offsets into neighborList giving each atom's neighbors.
+  std::unique_ptr<int[]> indices; ///< Offsets into neighborList per atom.
   int maxlistlen; ///< The length of the longest neighbor list of an atom.
 };

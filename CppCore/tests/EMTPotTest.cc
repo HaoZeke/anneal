@@ -4,11 +4,13 @@
 // Copper FCC cluster pin from eOn EMTCuTest / point_emt_cu.dat.
 
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <new>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -28,6 +30,40 @@
 #include "rgpot/EMT/Asap/Vec.h"
 
 using Catch::Matchers::WithinAbs;
+
+namespace {
+
+std::atomic<long> g_liveBlocks{0};
+
+} // namespace
+
+void *operator new(std::size_t size) {
+  void *block = std::malloc(size == 0 ? 1 : size);
+  if (block == nullptr) {
+    throw std::bad_alloc();
+  }
+  g_liveBlocks.fetch_add(1, std::memory_order_relaxed);
+  return block;
+}
+
+void operator delete(void *block) noexcept {
+  if (block != nullptr) {
+    g_liveBlocks.fetch_sub(1, std::memory_order_relaxed);
+    std::free(block);
+  }
+}
+
+void operator delete(void *block, std::size_t) noexcept {
+  ::operator delete(block);
+}
+
+void *operator new[](std::size_t size) { return ::operator new(size); }
+
+void operator delete[](void *block) noexcept { ::operator delete(block); }
+
+void operator delete[](void *block, std::size_t) noexcept {
+  ::operator delete(block);
+}
 
 TEST_CASE("EMT energy matches the copper cluster pin", "[emt]") {
   const std::vector<std::array<double, 3>> xyz = {{
@@ -395,6 +431,29 @@ TEST_CASE("EMT recovers after a cell that Asap refuses", "[emt][errors]") {
   REQUIRE_THROWS_AS(pot(positions, copper, thin), std::invalid_argument);
   const auto [energy, forces, variance] = pot(positions, copper, kCube);
   REQUIRE_THAT(energy, WithinAbs(5.129167, 5e-4));
+}
+
+TEST_CASE("EMT frees what a refused neighbour list construction allocated",
+          "[emt][errors]") {
+  const auto positions = copperCluster();
+  const std::vector<int> copper(4, 29);
+  const Box thin = {{{6.0, 0.0, 0.0}, {0.0, 20.0, 0.0}, {0.0, 0.0, 20.0}}};
+  rgpot::EMTPot pot;
+  REQUIRE_THROWS_AS(pot(positions, copper, thin), std::invalid_argument);
+
+  constexpr int kAttempts = 32;
+  int refused = 0;
+  const long before = g_liveBlocks.load();
+  for (int attempt = 0; attempt < kAttempts; ++attempt) {
+    try {
+      (void)pot(positions, copper, thin);
+    } catch (const std::invalid_argument &) {
+      ++refused;
+    }
+  }
+  const long after = g_liveBlocks.load();
+  CHECK(refused == kAttempts);
+  CHECK(after == before);
 }
 
 TEST_CASE("EMT of zero atoms is a zero result", "[emt][errors]") {
