@@ -43,7 +43,7 @@ pub struct rgpot_abi_stamp_t {
 /// ABI major of this build.
 pub const RGPOT_ABI_VERSION_MAJOR: u16 = 1;
 /// ABI minor of this build.
-pub const RGPOT_ABI_VERSION_MINOR: u16 = 9;
+pub const RGPOT_ABI_VERSION_MINOR: u16 = 10;
 /// Layout revision of this build.
 pub const RGPOT_ABI_LAYOUT_REVISION: u16 = 1;
 
@@ -214,13 +214,25 @@ mod tests {
     #[test]
     fn the_minor_counts_the_mdi_export() {
         assert_eq!(RGPOT_ABI_VERSION_MAJOR, 1);
-        assert_eq!(RGPOT_ABI_VERSION_MINOR, 9);
-        assert_eq!(rgpot_abi_stamp().abi_minor, 9);
+        assert_eq!(unsafe { rgpot_abi_compatible(&stamp(1, 9, 1)) }, 1);
         assert_eq!(RGPOT_ABI_LAYOUT_REVISION, 1);
         for earlier in 0..RGPOT_ABI_VERSION_MINOR {
             assert_eq!(unsafe { rgpot_abi_compatible(&stamp(1, earlier, 1)) }, 1);
         }
-        assert_eq!(unsafe { rgpot_abi_compatible(&stamp(1, 10, 1)) }, 0);
+    }
+
+    /// `rgpot_rpc_client_select_orbitals` is additive behind `RGPOT_HAS_RPC`,
+    /// so the minor moves to 10 and every earlier caller still matches.
+    #[test]
+    fn the_minor_counts_the_rpc_orbital_selection_export() {
+        assert_eq!(RGPOT_ABI_VERSION_MAJOR, 1);
+        assert_eq!(RGPOT_ABI_VERSION_MINOR, 10);
+        assert_eq!(rgpot_abi_stamp().abi_minor, 10);
+        assert_eq!(RGPOT_ABI_LAYOUT_REVISION, 1);
+        for earlier in 0..RGPOT_ABI_VERSION_MINOR {
+            assert_eq!(unsafe { rgpot_abi_compatible(&stamp(1, earlier, 1)) }, 1);
+        }
+        assert_eq!(unsafe { rgpot_abi_compatible(&stamp(1, 11, 1)) }, 0);
     }
 
     fn stamp(major: u16, minor: u16, layout: u16) -> rgpot_abi_stamp_t {
@@ -356,6 +368,7 @@ mod tests {
             "typedef struct rgpot_derivative_counts_t {",
             "rgpot_potential_derivative_caps(const struct rgpot_potential_t *pot,",
             "rgpot_potential_derivative_counts(const struct rgpot_potential_t *pot,",
+            "rgpot_rpc_client_select_orbitals(rgpot_rpc_client_t *client,",
         ] {
             assert!(flat.contains(f), "rgpot.h lacks {f}");
         }

@@ -63,7 +63,7 @@ typedef struct DLManagedTensorVersioned DLManagedTensorVersioned;
 /**
  * ABI minor of this build.
  */
-#define RGPOT_ABI_VERSION_MINOR 9
+#define RGPOT_ABI_VERSION_MINOR 10
 
 /**
  * Layout revision of this build.
@@ -1130,8 +1130,8 @@ rgpot_rpc_calculate_hvp(rgpot_rpc_client_t *client,
  *
  * `client` must be null or a pointer from `rgpot_rpc_client_new`.
  */
-enum rgpot_status_t
-rgpot_rpc_client_select_orbitals(rgpot_rpc_client_t *client, int64_t key);
+enum rgpot_status_t rgpot_rpc_client_select_orbitals(rgpot_rpc_client_t *client,
+                                                     int64_t key);
 #endif
 
 #if (defined(RGPOT_HAS_RPC) && defined(RGPOT_HAS_RPC))
