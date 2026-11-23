@@ -69,6 +69,8 @@ CLASSES = (
     ("CppCore/rgpot/D2Pot/D2Pot.hpp", "D2Pot"),
     ("CppCore/rgpot/D2Pot/D2CpmdPot.hpp", "D2CpmdPot"),
     ("CppCore/rgpot/nlist/Neighbours.hpp", "Neighbours"),
+    ("CppCore/rgpot/nlist/NeighbourList.hpp", "Builder"),
+    ("CppCore/rgpot/nlist/NeighbourList.hpp", "Walk"),
     ("CppCore/rgpot/simd/from_cache.hpp", "CachedPairs"),
 )
 

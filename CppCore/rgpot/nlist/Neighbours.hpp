@@ -60,11 +60,15 @@ struct Spec {
 [[nodiscard]] std::uint64_t availableBytes();
 
 /// True when every atom has moved by at most half of `skin` from
-/// `reference`. Skin 0 is true only when the coordinates match. The same
-/// test decides `Builder::update`'s reused flag.
+/// `reference`. Skin 0 is true only when the coordinates match. A
+/// negative or non-finite skin returns false, so the list is not reused.
+/// Coordinates are compared as supplied. `Builder` folds periodic coordinates
+/// before this test. The same test decides `Builder::update`'s reused flag
+/// when the cell is unchanged.
 [[nodiscard]] inline bool withinSkin(const double *reference, const double *current,
                                      std::size_t n, double skin) noexcept {
-  if (!(skin >= 0.0)) {
+  // A negative or infinite skin is not a buffer. NaN fails both tests.
+  if (!std::isfinite(skin) || !(skin >= 0.0)) {
     return false;
   }
   const double limit2 = 0.25 * skin * skin;
@@ -72,41 +76,69 @@ struct Spec {
     const double dx = current[3 * a] - reference[3 * a];
     const double dy = current[3 * a + 1] - reference[3 * a + 1];
     const double dz = current[3 * a + 2] - reference[3 * a + 2];
-    if (dx * dx + dy * dy + dz * dz > limit2) {
+    if (!(dx * dx + dy * dy + dz * dz <= limit2)) {
       return false;
     }
   }
   return true;
 }
 
-/// Cell-aware Verlet skin check across a box deformation from
-/// `reference_box` to `current_box`.
+/// Cell-aware Verlet check for a deformation from `reference_box` to
+/// `current_box`.
+///
+/// `span[k]` is the largest absolute image index stored on axis k, so
+/// every stored shift lies in the box [-span, span]^3. An open axis has
+/// span 0. The cell's part of a pair displacement is
+/// d(s) = sum_a s_a * (H_a - H_a_ref), which is linear in the shift.
+/// The Euclidean norm of a linear map is convex, and a convex function
+/// on a box attains its maximum at a corner. Those corners are the eight
+/// sign combinations of span, not the positive corners {0, span}^3. A
+/// mixed-sign corner is strictly farther when two lattice vectors move
+/// in opposite directions, and a list reused from the positive corners
+/// then drops a pair. The maximum is subtracted from the skin and the
+/// remainder bounds the atoms, the same half-skin test as a fixed cell.
+/// sum_a span_a * ||dH_a|| is also an upper bound, by the triangle
+/// inequality, but it is larger whenever the lattice-vector changes are
+/// not parallel. The corner value is the exact maximum and the loop is
+/// the same size as the check it replaces, so that is the bound used.
+///
+/// A negative or non-finite skin returns false and the list is rebuilt.
+/// Coordinates are compared as supplied. `Builder` supplies coordinates
+/// folded along every periodic axis.
 [[nodiscard]] inline bool withinSkin(const double *reference, const double *current,
                                      std::size_t n, const double *reference_box,
                                      const double *current_box, const double span[3],
                                      double skin) noexcept {
+  // A negative or infinite skin is not a buffer. NaN fails both tests.
+  if (!std::isfinite(skin) || !(skin >= 0.0)) {
+    return false;
+  }
   if (std::memcmp(reference_box, current_box, 9 * sizeof(double)) == 0) {
     return withinSkin(reference, current, n, skin);
   }
   double corner = 0.0;
-  for (int s1 : {-1, 1}) {
-    for (int s2 : {-1, 1}) {
-      const double b[3] = {span[0], static_cast<double>(s1) * span[1],
-                           static_cast<double>(s2) * span[2]};
+  for (int bits = 0; bits < 8; ++bits) {
+    // One corner of [-span, span]^3. The shift box is centred on the
+    // origin because image indices run from -span to +span.
+    const double s[3] = {
+        (bits & 1) ? span[0] : -span[0],
+        ((bits >> 1) & 1) ? span[1] : -span[1],
+        ((bits >> 2) & 1) ? span[2] : -span[2],
+    };
     double d[3] = {};
     for (int a = 0; a < 3; ++a) {
       for (int c = 0; c < 3; ++c) {
-        d[c] += b[a] * (current_box[3 * a + c] - reference_box[3 * a + c]);
+        d[c] += s[a] * (current_box[3 * a + c] - reference_box[3 * a + c]);
       }
     }
-      const double norm = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
-      if (!std::isfinite(norm)) {
-        return false;
-      }
-      corner = std::max(corner, norm);
+    const double distance = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    if (!std::isfinite(distance)) {
+      return false;
     }
+    corner = std::max(corner, distance);
   }
-  if (corner > 0.0 && !(skin > 0.0)) {
+  // The image alone already spends the skin. Atom motion cannot be negative.
+  if (!(corner <= skin)) {
     return false;
   }
   return withinSkin(reference, current, n, skin - corner);
@@ -153,6 +185,11 @@ public:
   [[nodiscard]] std::uint64_t builds() const noexcept { return builds_; }
   /// Stored pair index. A stream leaves this empty.
   [[nodiscard]] std::size_t slots() const noexcept { return nbr_.size(); }
+  /// Number of spatial bins in the current cell grid.
+  [[nodiscard]] std::size_t cellCount() const noexcept {
+    return static_cast<std::size_t>(nx_) * static_cast<std::size_t>(ny_) *
+           static_cast<std::size_t>(nz_);
+  }
   [[nodiscard]] const std::vector<std::int32_t> &offsets() const noexcept {
     return off_;
   }

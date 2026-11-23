@@ -650,8 +650,9 @@ void energyAndGradient(const double *positions, const int *atomic_numbers,
   dE/dx.
   The force is the negative of the gradient.
   A null =neighbors= rebuilds the pairs on every call; a list is reused while
-  the atom count, cutoff and box are unchanged and every atom has moved by at
-  most half the skin.
+  each atom has moved by at most half its skin and the cell is unchanged.
+  That list is an =nlist::NeighborList=, which rebuilds on any cell change,
+  unlike the variable-cell rule of =nlist::Builder=.
 - Errors :: throws
   =std::invalid_argument= for a null =energy=, or for a null =positions=, =box= or =gradient= when =n_atoms=
   > 0.

@@ -8,11 +8,34 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <new>
 #include <string>
 #include <utility>
 
 namespace rgpot::nlist {
+
+// Periodic coordinates are folded into the primary cell before both binning
+// and image enumeration. `frac` holds those folded fractional coordinates.
+// A pair within `search` has |df_k + S_k| at most `reach[k]`, since the
+// distance is at least that times the cell height, so the shifts to try are
+// those around -df. `span` bounds |S_k| over every pair. `cell_pos` aliases
+// the caller's positions when they are already folded and `wrapped` otherwise.
+// `wrap` holds the whole cells W_i taken off each atom, r'_i = r_i - W_i H,
+// three per atom, and is empty when every atom was already inside.
+struct Frame {
+  double normal[3][3]{};
+  double reach[3]{};
+  bool periodic[3]{};
+  int span[3]{};
+  std::vector<double> frac;
+  std::vector<double> wrapped;
+  std::vector<std::int32_t> wrap;
+  const double *caller = nullptr;
+  bool geometry = true;
+  const double *cell_pos = nullptr;
+};
+
 namespace {
 
 struct Rec {
@@ -147,6 +170,159 @@ void shift_bounds(const double *box, const std::array<bool, 3> &periodic,
   }
 }
 
+// 2^29 cells keeps every shift, and a shift plus a span, inside an int32.
+constexpr double kMaxCells = 536870912.0;
+
+void lattice_normals(const double *box, const std::array<bool, 3> &periodic, double search,
+                     double normal[3][3], double reach[3], bool on[3]) {
+  const double a[3] = {box[0], box[1], box[2]};
+  const double b[3] = {box[3], box[4], box[5]};
+  const double c[3] = {box[6], box[7], box[8]};
+  const double cross[3][3] = {
+      {b[1] * c[2] - b[2] * c[1], b[2] * c[0] - b[0] * c[2], b[0] * c[1] - b[1] * c[0]},
+      {c[1] * a[2] - c[2] * a[1], c[2] * a[0] - c[0] * a[2], c[0] * a[1] - c[1] * a[0]},
+      {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]},
+  };
+  const double det = a[0] * cross[0][0] + a[1] * cross[0][1] + a[2] * cross[0][2];
+  for (int k = 0; k < 3; ++k) {
+    on[k] = periodic[static_cast<std::size_t>(k)] && det != 0.0;
+    const double norm = std::sqrt(cross[k][0] * cross[k][0] + cross[k][1] * cross[k][1] +
+                                  cross[k][2] * cross[k][2]);
+    for (int c2 = 0; c2 < 3; ++c2) {
+      normal[k][c2] = on[k] ? cross[k][c2] / det : 0.0;
+    }
+    reach[k] = on[k] && search > 0.0 ? search * norm / std::fabs(det) : 0.0;
+  }
+}
+
+// Folded fractional extent of the atoms on each periodic axis, and the span
+// that bounds |S_k| for any pair inside `search`. `frac` receives the raw
+// fractions so make_frame can fold the Cartesian positions. Rejects a
+// coordinate whose shift would not fit an int32.
+void image_span(const double *pos, std::size_t n, const double *box,
+                const std::array<bool, 3> &periodic, double search, int span[3],
+                std::vector<double> *frac) {
+  double normal[3][3];
+  double reach[3];
+  bool on[3];
+  lattice_normals(box, periodic, search, normal, reach, on);
+  double lo[3] = {0.0, 0.0, 0.0};
+  double hi[3] = {0.0, 0.0, 0.0};
+  if (frac != nullptr) {
+    frac->assign(3 * n, 0.0);
+  }
+  for (std::size_t i = 0; i < n; ++i) {
+    for (int k = 0; k < 3; ++k) {
+      if (!on[k]) {
+        continue;
+      }
+      const double f = pos[3 * i] * normal[k][0] + pos[3 * i + 1] * normal[k][1] +
+                       pos[3 * i + 2] * normal[k][2];
+      if (!(std::fabs(f) <= kMaxCells)) {
+        throw Error(Code::Box, "a periodic coordinate is not finite or lies more than 2^29 "
+                               "cells from the origin");
+      }
+      const double folded = f - std::floor(f);
+      if (i == 0 || folded < lo[k]) {
+        lo[k] = folded;
+      }
+      if (i == 0 || folded > hi[k]) {
+        hi[k] = folded;
+      }
+      if (frac != nullptr) {
+        (*frac)[3 * i + static_cast<std::size_t>(k)] = f;
+      }
+    }
+  }
+  for (int k = 0; k < 3; ++k) {
+    if (!on[k] || !(search > 0.0)) {
+      span[k] = 0;
+      continue;
+    }
+    const double bound = std::ceil(reach[k] + (hi[k] - lo[k]));
+    if (!(bound <= kMaxCells)) {
+      throw Error(Code::Cutoff, "the search spans more than 2^29 periodic images");
+    }
+    span[k] = static_cast<int>(bound);
+  }
+}
+
+Frame make_frame(const double *pos, std::size_t n, const double *box,
+                 const std::array<bool, 3> &periodic, double search, const Fields &fields) {
+  Frame frame;
+  frame.geometry = fields.vectors || fields.distances;
+  lattice_normals(box, periodic, search, frame.normal, frame.reach, frame.periodic);
+  image_span(pos, n, box, periodic, search, frame.span, &frame.frac);
+  frame.caller = pos;
+  frame.cell_pos = pos;
+  bool inside = true;
+  for (std::size_t i = 0; i < n && inside; ++i) {
+    for (int k = 0; k < 3; ++k) {
+      const double f = frame.frac[3 * i + static_cast<std::size_t>(k)];
+      if (frame.periodic[k] && !(f >= 0.0 && f < 1.0)) {
+        inside = false;
+        break;
+      }
+    }
+  }
+  if (inside) {
+    return frame;
+  }
+  frame.wrapped.assign(pos, pos + 3 * n);
+  frame.wrap.assign(3 * n, 0);
+  for (std::size_t i = 0; i < n; ++i) {
+    for (int k = 0; k < 3; ++k) {
+      if (!frame.periodic[k]) {
+        continue;
+      }
+      const auto u = static_cast<std::size_t>(k);
+      const double cells = std::floor(frame.frac[3 * i + u]);
+      frame.frac[3 * i + u] -= cells;
+      frame.wrap[3 * i + u] = static_cast<std::int32_t>(cells);
+      for (int c = 0; c < 3; ++c) {
+        frame.wrapped[3 * i + static_cast<std::size_t>(c)] -= cells * box[3 * k + c];
+      }
+    }
+  }
+  frame.cell_pos = frame.wrapped.data();
+  return frame;
+}
+
+// Applies the whole-cell offsets W of `wrap` to a pair shift.
+void caller_shift(const std::int32_t *wrap, std::size_t i, std::size_t j, int &sa, int &sb,
+                  int &sc) {
+  sa += wrap[3 * i] - wrap[3 * j];
+  sb += wrap[3 * i + 1] - wrap[3 * j + 1];
+  sc += wrap[3 * i + 2] - wrap[3 * j + 2];
+}
+
+// Rewrites the shifts of a pair table by the per-atom offsets in `wrap`.
+void caller_shifts(Table &table, const std::int32_t *wrap) {
+  for (std::size_t p = 0; p < table.size(); ++p) {
+    caller_shift(wrap, static_cast<std::size_t>(table.first[p]),
+                 static_cast<std::size_t>(table.second[p]), table.shift[3 * p],
+                 table.shift[3 * p + 1], table.shift[3 * p + 2]);
+  }
+}
+
+// Shifts S_k in [lo, hi] for the pair (i, j). A non-periodic axis has 0.
+void shift_range(const Frame &frame, std::size_t i, std::size_t j, int lo[3], int hi[3]) {
+  // Widens the window by a rounding of the fractional coordinates. The
+  // distance test decides each image.
+  constexpr double kSlack = 1e-9;
+  for (int k = 0; k < 3; ++k) {
+    if (!frame.periodic[k] || !(frame.reach[k] > 0.0)) {
+      lo[k] = 0;
+      hi[k] = 0;
+      continue;
+    }
+    const auto u = static_cast<std::size_t>(k);
+    const double df = frame.frac[3 * j + u] - frame.frac[3 * i + u];
+    lo[k] = static_cast<int>(std::ceil(-df - frame.reach[k] - kSlack));
+    hi[k] = static_cast<int>(std::floor(-df + frame.reach[k] + kSlack));
+  }
+}
+
 void image_vector(const double *pos, std::size_t i, std::size_t j, int sa, int sb,
                   int sc, const double *box, double &vx, double &vy, double &vz) {
   vx = pos[3 * j] - pos[3 * i];
@@ -158,6 +334,25 @@ void image_vector(const double *pos, std::size_t i, std::size_t j, int sa, int s
         static_cast<double>(sc) * box[7];
   vz += static_cast<double>(sa) * box[2] + static_cast<double>(sb) * box[5] +
         static_cast<double>(sc) * box[8];
+}
+
+// The search runs on the folded coordinates and finds S' with
+// r'_j - r'_i + S' H. The caller's positions give the same image with
+// S = S' + W_i - W_j, and the vector and distance are taken from those
+// positions, so a table holds r_j - r_i + S H for the coordinates as
+// given. A query that stores neither vectors nor distances keeps the folded
+// ones. Every |W| is at most 2^29 and so is |S'|, so S fits an int32.
+void to_caller(const Frame &frame, const double *box, std::size_t i, std::size_t j, int &sa,
+               int &sb, int &sc, double &vx, double &vy, double &vz, double &dist) {
+  if (frame.wrap.empty()) {
+    return;
+  }
+  caller_shift(frame.wrap.data(), i, j, sa, sb, sc);
+  if (!frame.geometry) {
+    return;
+  }
+  image_vector(frame.caller, i, j, sa, sb, sc, box, vx, vy, vz);
+  dist = std::sqrt(vx * vx + vy * vy + vz * vz);
 }
 
 int axis_shift(double delta, double inv, bool periodic) {
@@ -191,8 +386,10 @@ bool one_minimum_image(const double *box, const Query &query, double search) {
   return true;
 }
 
-Neighbours prepare_cells(const double *pos, std::size_t n, const double *box,
-                         const Query &query) {
+// The cells and image walks see `frame.cell_pos`, which is inside the cell on
+// every periodic axis.
+void prepare_cells(Neighbours &cells, const Frame &frame, std::size_t n, const double *box,
+                   const Query &query) {
   Spec spec;
   spec.cutoff = search_radius(query);
   spec.skin = 0;
@@ -201,18 +398,17 @@ Neighbours prepare_cells(const double *pos, std::size_t n, const double *box,
                        box[6] != 0.0 || box[7] != 0.0;
   spec.image = sheared ? Image::General : Image::Round;
   spec.mode = Mode::Stream;
-  Neighbours cells;
-  cells.update(pos, n, box, spec);
-  return cells;
+  cells.update(frame.cell_pos, n, box, spec);
 }
 
 // Cell-list candidates from Neighbours, then the same image test the brute
-// force used. A box at least two cutoffs wide has one image, so the folded
-// vector is that image. A narrower or sheared cell retries the shift stencil
-// on those candidates only.
+// force used. A box at least two cutoffs wide has one image, the nearest one,
+// and its shift is rounded from the folded coordinates. A narrower or
+// sheared cell tries the shifts of `shift_range` on those candidates only.
+// Every vector is r_j + S H - r_i from the folded coordinates.
 template <typename Fn>
 void each_cell(const Neighbours &cells, const double *pos, const double *box,
-               const Query &query, const int nmax[3], bool one_image, std::size_t begin,
+               const Query &query, const Frame &frame, bool one_image, std::size_t begin,
                std::size_t end, Fn &&fn) {
   auto accept = [&](std::int32_t i, std::int32_t j, int sa, int sb, int sc, double vx,
                     double vy, double vz) {
@@ -230,16 +426,21 @@ void each_cell(const Neighbours &cells, const double *pos, const double *box,
                            box[8] > 0.0 ? 1.0 / box[8] : 0.0};
     // forHalf is keep_half when a single image exists: j < i is dropped
     // and a self pair is not emitted.
-    auto take = [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz, double r2) {
-      if (!accept_distance(r2, query)) {
-        return;
-      }
+    auto take = [&](std::int32_t i, std::int32_t j, double, double, double, double) {
       const auto ui = static_cast<std::size_t>(i);
       const auto uj = static_cast<std::size_t>(j);
       const int sa = axis_shift(pos[3 * ui] - pos[3 * uj], inv[0], query.periodic[0]);
       const int sb = axis_shift(pos[3 * ui + 1] - pos[3 * uj + 1], inv[1], query.periodic[1]);
       const int sc = axis_shift(pos[3 * ui + 2] - pos[3 * uj + 2], inv[2], query.periodic[2]);
-      fn(i, j, sa, sb, sc, -dx, -dy, -dz, std::sqrt(r2));
+      double vx = 0;
+      double vy = 0;
+      double vz = 0;
+      image_vector(pos, ui, uj, sa, sb, sc, box, vx, vy, vz);
+      const double r2 = vx * vx + vy * vy + vz * vz;
+      if (!accept_distance(r2, query)) {
+        return;
+      }
+      fn(i, j, sa, sb, sc, vx, vy, vz, std::sqrt(r2));
     };
     if (full_shell(query)) {
       cells.forDirected(static_cast<std::int64_t>(begin), static_cast<std::int64_t>(end), take);
@@ -250,9 +451,13 @@ void each_cell(const Neighbours &cells, const double *pos, const double *box,
   }
   cells.forDirected(static_cast<std::int64_t>(begin), static_cast<std::int64_t>(end),
                     [&](std::int32_t i, std::int32_t j, double, double, double, double) {
-                      for (int sa = -nmax[0]; sa <= nmax[0]; ++sa) {
-                        for (int sb = -nmax[1]; sb <= nmax[1]; ++sb) {
-                          for (int sc = -nmax[2]; sc <= nmax[2]; ++sc) {
+                      int lo[3];
+                      int hi[3];
+                      shift_range(frame, static_cast<std::size_t>(i),
+                                  static_cast<std::size_t>(j), lo, hi);
+                      for (int sa = lo[0]; sa <= hi[0]; ++sa) {
+                        for (int sb = lo[1]; sb <= hi[1]; ++sb) {
+                          for (int sc = lo[2]; sc <= hi[2]; ++sc) {
                             double vx = 0;
                             double vy = 0;
                             double vz = 0;
@@ -265,9 +470,12 @@ void each_cell(const Neighbours &cells, const double *pos, const double *box,
                       }
                     });
   for (std::size_t i = begin; i < end; ++i) {
-    for (int sa = -nmax[0]; sa <= nmax[0]; ++sa) {
-      for (int sb = -nmax[1]; sb <= nmax[1]; ++sb) {
-        for (int sc = -nmax[2]; sc <= nmax[2]; ++sc) {
+    int lo[3];
+    int hi[3];
+    shift_range(frame, i, i, lo, hi);
+    for (int sa = lo[0]; sa <= hi[0]; ++sa) {
+      for (int sb = lo[1]; sb <= hi[1]; ++sb) {
+        for (int sc = lo[2]; sc <= hi[2]; ++sc) {
           if (sa == 0 && sb == 0 && sc == 0) {
             continue;
           }
@@ -283,17 +491,17 @@ void each_cell(const Neighbours &cells, const double *pos, const double *box,
   }
 }
 
+// The shift is kept whether or not the query stores it: merge_clusters
+// tells the images of one partner apart by it.
 void push_rec(std::vector<Rec> &out, const Query &query, std::int32_t first,
               std::int32_t second, int sa, int sb, int sc, double vx, double vy,
               double vz, double dist, std::uint8_t mask) {
   Rec rec;
   rec.first = first;
   rec.second = second;
-  if (query.fields.shifts) {
-    rec.shift[0] = sa;
-    rec.shift[1] = sb;
-    rec.shift[2] = sc;
-  }
+  rec.shift[0] = sa;
+  rec.shift[1] = sb;
+  rec.shift[2] = sc;
   if (query.fields.vectors) {
     rec.vector[0] = vx;
     rec.vector[1] = vy;
@@ -352,7 +560,7 @@ void merge_clusters(std::vector<Rec> &rows) {
 }
 
 void collect(const Neighbours &cells, const double *pos, std::size_t n, const double *box,
-             const Query &query, const int nmax[3], bool one_image, std::size_t begin,
+             const Query &query, const Frame &frame, bool one_image, std::size_t begin,
              std::size_t end, std::vector<Rec> &out) {
   if (clustered(query)) {
     const std::size_t c0 = begin & ~std::size_t{3};
@@ -360,12 +568,14 @@ void collect(const Neighbours &cells, const double *pos, std::size_t n, const do
     Query full = query;
     full.shape = Pairs{Shell::Full};
     std::vector<Rec> raw;
-    each_cell(cells, pos, box, full, nmax, one_image, c0, c1,
+    each_cell(cells, pos, box, full, frame, one_image, c0, c1,
               [&](std::int32_t i, std::int32_t j, int sa, int sb, int sc, double vx, double vy,
                   double vz, double dist) {
                 if (static_cast<std::size_t>(i) < begin || static_cast<std::size_t>(i) >= end) {
                   return;
                 }
+                to_caller(frame, box, static_cast<std::size_t>(i), static_cast<std::size_t>(j),
+                          sa, sb, sc, vx, vy, vz, dist);
                 const auto lane = static_cast<unsigned>(i & 3);
                 push_rec(raw, query, i & ~std::int32_t{3}, j, sa, sb, sc, vx, vy, vz, dist,
                          static_cast<std::uint8_t>(1u << lane));
@@ -374,9 +584,11 @@ void collect(const Neighbours &cells, const double *pos, std::size_t n, const do
     out.insert(out.end(), raw.begin(), raw.end());
     return;
   }
-  each_cell(cells, pos, box, query, nmax, one_image, begin, end,
+  each_cell(cells, pos, box, query, frame, one_image, begin, end,
             [&](std::int32_t i, std::int32_t j, int sa, int sb, int sc, double vx, double vy,
                 double vz, double dist) {
+              to_caller(frame, box, static_cast<std::size_t>(i), static_cast<std::size_t>(j), sa,
+                        sb, sc, vx, vy, vz, dist);
               push_rec(out, query, i, j, sa, sb, sc, vx, vy, vz, dist, 0xff);
             });
 }
@@ -534,144 +746,338 @@ void move_columns(Table &table, Columns &cols) {
   table.device = 0;
 }
 
+// Fills `table` from a frame of these positions. The query has passed
+// check_geometry, and `table` is cleared only here.
+void search_frame(Table &table, const Frame &frame, std::size_t n, const double *box9,
+                  const Query &query);
+
 } // namespace
+
+struct BuilderState {
+  Table table;
+  std::vector<double> ref;
+  std::vector<double> ref_frac;
+  std::vector<std::int32_t> wrap;
+  double box[9]{};
+  Query query{};
+  int span[3]{};
+  std::size_t n = 0;
+  std::uint64_t builds = 0;
+  std::uint64_t frames = 0;
+  bool have = false;
+  bool reused = false;
+  bool unchanged = false;
+
+  // Moves the stored shifts from the wrap of the table to `now`. A pair row
+  // takes the difference of its two atoms. A cluster row shares one shift
+  // among four atoms, so a cluster list whose wrap changed is searched
+  // again and this returns false.
+  bool rewrap(const std::vector<std::int32_t> &now) {
+    // An empty wrap is all zeros.
+    const auto zero = [](const std::vector<std::int32_t> &w) {
+      return std::all_of(w.begin(), w.end(), [](std::int32_t x) { return x == 0; });
+    };
+    if (now == wrap || (zero(now) && zero(wrap))) {
+      wrap = now;
+      return true;
+    }
+    if (clustered(query)) {
+      return false;
+    }
+    if (!table.shift.empty()) {
+      const std::size_t atoms = 3 * n;
+      std::vector<std::int32_t> delta(atoms, 0);
+      for (std::size_t k = 0; k < atoms; ++k) {
+        delta[k] = (now.empty() ? 0 : now[k]) - (wrap.empty() ? 0 : wrap[k]);
+      }
+      caller_shifts(table, delta.data());
+    }
+    wrap = now;
+    return true;
+  }
+
+  // Puts each folded atom on the image nearest its folded reference. The
+  // whole cells J between the two fractions are taken off a copy in
+  // `moved`, and the shifts of that copy have the basis W + J in `basis`.
+  // An atom that crosses a face of the cell then moves by its step and not
+  // by a lattice vector. Returns the coordinates for the skin test.
+  const double *nearest(const Frame &frame, const double *box9,
+                        std::vector<std::int32_t> &basis, std::vector<double> &moved) const {
+    basis = frame.wrap;
+    for (std::size_t i = 0; i < n; ++i) {
+      for (int k = 0; k < 3; ++k) {
+        if (!frame.periodic[k]) {
+          continue;
+        }
+        const std::size_t at = 3 * i + static_cast<std::size_t>(k);
+        const double jump = std::round(frame.frac[at] - ref_frac[at]);
+        if (jump == 0.0) {
+          continue;
+        }
+        if (moved.empty()) {
+          moved.assign(frame.cell_pos, frame.cell_pos + 3 * n);
+        }
+        if (basis.empty()) {
+          basis.assign(3 * n, 0);
+        }
+        basis[at] += static_cast<std::int32_t>(jump);
+        for (int c = 0; c < 3; ++c) {
+          moved[3 * i + static_cast<std::size_t>(c)] -= jump * box9[3 * k + c];
+        }
+      }
+    }
+    return moved.empty() ? frame.cell_pos : moved.data();
+  }
+
+  void update(const double *positions, std::size_t natoms, const double *box9,
+              const Query &q) {
+    check_geometry(positions, natoms, box9, q);
+    const Frame frame = make_frame(positions, natoms, box9, q.periodic, search_radius(q), q.fields);
+    ++frames;
+    const double *current = frame.cell_pos;
+    reused = false;
+    unchanged = false;
+    if (have && n == natoms && query.cutoff == q.cutoff && query.skin == q.skin &&
+        query.shape == q.shape && query.cut == q.cut && query.periodic == q.periodic &&
+        query.fields.shifts == q.fields.shifts && query.fields.vectors == q.fields.vectors &&
+        query.fields.distances == q.fields.distances) {
+      const bool same_box = std::memcmp(box, box9, sizeof(box)) == 0;
+      if (same_box &&
+          (natoms == 0 || std::memcmp(ref.data(), current, 3 * natoms * sizeof(double)) == 0)) {
+        if (rewrap(frame.wrap)) {
+          reused = true;
+          unchanged = true;
+          return;
+        }
+      } else {
+        bool fits = true;
+        if (!same_box) {
+          // A cell change that needs a wider folded-image span rebuilds.
+          fits = frame.span[0] <= span[0] && frame.span[1] <= span[1] &&
+                 frame.span[2] <= span[2];
+        }
+        const double reach[3] = {
+            static_cast<double>(span[0]),
+            static_cast<double>(span[1]),
+            static_cast<double>(span[2]),
+        };
+        std::vector<std::int32_t> basis;
+        std::vector<double> moved;
+        const double *near = fits ? nearest(frame, box9, basis, moved) : current;
+        if (fits && withinSkin(ref.data(), near, natoms, box, box9, reach, q.skin) &&
+            rewrap(basis)) {
+          reused = true;
+          return;
+        }
+      }
+    }
+    search_frame(table, frame, natoms, box9, q);
+    std::copy(frame.span, frame.span + 3, span);
+    ref.clear();
+    if (natoms != 0) {
+      ref.assign(current, current + 3 * natoms);
+    }
+    ref_frac = frame.frac;
+    wrap = frame.wrap;
+    std::memcpy(box, box9, sizeof(box));
+    query = q;
+    n = natoms;
+    have = true;
+    ++builds;
+  }
+};
+
+Builder::Builder() : state_(std::make_unique<BuilderState>()) {}
+
+Builder::~Builder() = default;
+
+Builder::Builder(const Builder &other)
+    : state_(other.state_ ? std::make_unique<BuilderState>(*other.state_)
+                          : std::make_unique<BuilderState>()) {}
+
+Builder &Builder::operator=(const Builder &other) {
+  if (this != &other) {
+    Builder copy(other);
+    state_ = std::move(copy.state_);
+  }
+  return *this;
+}
+
+Builder::Builder(Builder &&other) noexcept = default;
+
+Builder &Builder::operator=(Builder &&other) noexcept = default;
 
 void Builder::update(const double *positions, std::size_t n, const double *box9,
                      const Query &query) {
-  check_geometry(positions, n, box9, query);
-  reused_ = false;
-  if (have_ && n_ == n && query_.cutoff == query.cutoff && query_.skin == query.skin &&
-      query_.shape == query.shape && query_.cut == query.cut &&
-      query_.periodic == query.periodic && query_.fields.shifts == query.fields.shifts &&
-      query_.fields.vectors == query.fields.vectors &&
-      query_.fields.distances == query.fields.distances) {
-    if (std::memcmp(box_, box9, sizeof(box_)) == 0 &&
-        (n == 0 || std::memcmp(ref_.data(), positions, 3 * n * sizeof(double)) == 0)) {
-      reused_ = true;
-      return;
-    }
-    const double search = search_radius(query);
-    int ref_nmax[3];
-    int cur_nmax[3];
-    shift_bounds(box_, query.periodic, search, ref_nmax);
-    shift_bounds(box9, query.periodic, search, cur_nmax);
-    const double span[3] = {
-        static_cast<double>(ref_nmax[0]),
-        static_cast<double>(ref_nmax[1]),
-        static_cast<double>(ref_nmax[2]),
-    };
-    if (cur_nmax[0] <= ref_nmax[0] && cur_nmax[1] <= ref_nmax[1] &&
-        cur_nmax[2] <= ref_nmax[2] &&
-        withinSkin(ref_.data(), positions, n, box_, box9, span, query.skin)) {
-      reused_ = true;
-      return;
-    }
+  if (!state_) {
+    state_ = std::make_unique<BuilderState>();
   }
-  build(table_, positions, n, box9, query);
-  ref_.assign(positions, positions + 3 * n);
-  std::memcpy(box_, box9, sizeof(box_));
-  query_ = query;
-  n_ = n;
-  have_ = true;
-  ++builds_;
+  state_->update(positions, n, box9, query);
 }
+
+const Table &Builder::table() const noexcept {
+  static const Table empty{};
+  return state_ ? state_->table : empty;
+}
+
+std::uint64_t Builder::builds() const noexcept { return state_ ? state_->builds : 0; }
+
+std::uint64_t Builder::frames() const noexcept { return state_ ? state_->frames : 0; }
+
+bool Builder::reused() const noexcept { return state_ && state_->reused; }
+
+bool Builder::unchanged() const noexcept { return state_ && state_->unchanged; }
+
+struct WalkState {
+  const double *pos = nullptr;
+  std::size_t n = 0;
+  double box[9]{};
+  Query query{};
+  Frame frame;
+  bool one_image = false;
+  Neighbours cells;
+  std::size_t atom = 0;
+  std::vector<std::int32_t> hold_first;
+  std::vector<std::int32_t> hold_second;
+  std::vector<std::int32_t> hold_shift;
+  std::vector<double> hold_vector;
+  std::vector<double> hold_distance;
+  std::vector<std::uint8_t> hold_mask;
+  std::size_t hold_at = 0;
+  bool finished = false;
+
+  std::size_t pull(Buffers dest, bool &done);
+};
 
 Walk::Walk(const double *positions, std::size_t n, const double *box9, const Query &query)
-    : pos_(positions), n_(n), query_(query) {
+    : state_(std::make_unique<WalkState>()) {
   check_geometry(positions, n, box9, query);
-  std::memcpy(box_, box9, sizeof(box_));
-  shift_bounds(box_, query_.periodic, search_radius(query_), nmax_);
-  one_image_ = one_minimum_image(box_, query_, search_radius(query_));
-  cells_ = prepare_cells(positions, n, box9, query_);
+  WalkState &w = *state_;
+  w.n = n;
+  w.query = query;
+  std::memcpy(w.box, box9, sizeof(w.box));
+  w.frame = make_frame(positions, n, w.box, w.query.periodic, search_radius(w.query),
+                       w.query.fields);
+  w.pos = w.frame.cell_pos;
+  w.one_image = one_minimum_image(w.box, w.query, search_radius(w.query));
+  prepare_cells(w.cells, w.frame, n, w.box, w.query);
 }
 
+Walk::~Walk() = default;
+
+Walk::Walk(Walk &&other) noexcept = default;
+
+Walk &Walk::operator=(Walk &&other) noexcept = default;
+
 std::size_t Walk::pull(Buffers dest, bool &done) {
+  if (!state_) {
+    throw Error(Code::Null, "the walk was moved from");
+  }
+  return state_->pull(dest, done);
+}
+
+std::size_t WalkState::pull(Buffers dest, bool &done) {
   const std::size_t cap = dest.first.size();
   if (cap > 0 && dest.second.size() != cap) {
     throw Error(Code::Short, "first and second buffers have different lengths");
   }
-  if (cap > 0 && query_.fields.shifts && dest.shift.size() < cap * 3) {
+  if (cap > 0 && query.fields.shifts && dest.shift.size() < cap * 3) {
     throw Error(Code::Short, "shift buffer needs 3 entries per pair");
   }
-  if (cap > 0 && query_.fields.vectors && dest.vector.size() < cap * 3) {
+  if (cap > 0 && query.fields.vectors && dest.vector.size() < cap * 3) {
     throw Error(Code::Short, "vector buffer needs 3 entries per pair");
   }
-  if (cap > 0 && query_.fields.distances && dest.distance.size() < cap) {
+  if (cap > 0 && query.fields.distances && dest.distance.size() < cap) {
     throw Error(Code::Short, "distance buffer is shorter than the pair buffer");
   }
-  if (cap > 0 && clustered(query_) && dest.mask.size() < cap) {
+  if (cap > 0 && clustered(query) && dest.mask.size() < cap) {
     throw Error(Code::Short, "a cluster list needs one mask byte per pair");
   }
-  if (finished_ || cap == 0) {
-    done = finished_;
+  if (finished || cap == 0) {
+    done = finished;
     return 0;
   }
   auto stash = [&](const std::vector<Rec> &rows) {
+    const bool shifts = query.fields.shifts;
     for (const Rec &rec : rows) {
-      hold_first_.push_back(rec.first);
-      hold_second_.push_back(rec.second);
-      hold_shift_.push_back(rec.shift[0]);
-      hold_shift_.push_back(rec.shift[1]);
-      hold_shift_.push_back(rec.shift[2]);
-      hold_vector_.push_back(rec.vector[0]);
-      hold_vector_.push_back(rec.vector[1]);
-      hold_vector_.push_back(rec.vector[2]);
-      hold_distance_.push_back(rec.distance);
-      hold_mask_.push_back(rec.mask);
+      hold_first.push_back(rec.first);
+      hold_second.push_back(rec.second);
+      hold_shift.push_back(shifts ? rec.shift[0] : 0);
+      hold_shift.push_back(shifts ? rec.shift[1] : 0);
+      hold_shift.push_back(shifts ? rec.shift[2] : 0);
+      hold_vector.push_back(rec.vector[0]);
+      hold_vector.push_back(rec.vector[1]);
+      hold_vector.push_back(rec.vector[2]);
+      hold_distance.push_back(rec.distance);
+      hold_mask.push_back(rec.mask);
     }
   };
   std::size_t written = 0;
   while (written < cap) {
-    if (hold_at_ >= hold_first_.size()) {
-      hold_first_.clear();
-      hold_second_.clear();
-      hold_shift_.clear();
-      hold_vector_.clear();
-      hold_distance_.clear();
-      hold_mask_.clear();
-      hold_at_ = 0;
-      if (atom_ >= n_) {
-        finished_ = true;
+    if (hold_at >= hold_first.size()) {
+      hold_first.clear();
+      hold_second.clear();
+      hold_shift.clear();
+      hold_vector.clear();
+      hold_distance.clear();
+      hold_mask.clear();
+      hold_at = 0;
+      if (atom >= n) {
+        finished = true;
         break;
       }
       const std::size_t end = std::min(
-          n_, atom_ + (clustered(query_) ? std::size_t{4} : std::size_t{1}));
+          n, atom + (clustered(query) ? std::size_t{4} : std::size_t{1}));
       std::vector<Rec> rows;
-      collect(cells_, pos_, n_, box_, query_, nmax_, one_image_, atom_, end, rows);
-      atom_ = end;
+      collect(cells, pos, n, box, query, frame, one_image, atom, end, rows);
+      atom = end;
       stash(rows);
-      if (hold_first_.empty()) {
+      if (hold_first.empty()) {
         continue;
       }
     }
-    dest.first[written] = hold_first_[hold_at_];
-    dest.second[written] = hold_second_[hold_at_];
+    dest.first[written] = hold_first[hold_at];
+    dest.second[written] = hold_second[hold_at];
     if (dest.shift.size() >= (written + 1) * 3) {
-      dest.shift[3 * written] = hold_shift_[3 * hold_at_];
-      dest.shift[3 * written + 1] = hold_shift_[3 * hold_at_ + 1];
-      dest.shift[3 * written + 2] = hold_shift_[3 * hold_at_ + 2];
+      dest.shift[3 * written] = hold_shift[3 * hold_at];
+      dest.shift[3 * written + 1] = hold_shift[3 * hold_at + 1];
+      dest.shift[3 * written + 2] = hold_shift[3 * hold_at + 2];
     }
     if (dest.vector.size() >= (written + 1) * 3) {
-      dest.vector[3 * written] = hold_vector_[3 * hold_at_];
-      dest.vector[3 * written + 1] = hold_vector_[3 * hold_at_ + 1];
-      dest.vector[3 * written + 2] = hold_vector_[3 * hold_at_ + 2];
+      dest.vector[3 * written] = hold_vector[3 * hold_at];
+      dest.vector[3 * written + 1] = hold_vector[3 * hold_at + 1];
+      dest.vector[3 * written + 2] = hold_vector[3 * hold_at + 2];
     }
     if (written < dest.distance.size()) {
-      dest.distance[written] = hold_distance_[hold_at_];
+      dest.distance[written] = hold_distance[hold_at];
     }
     if (written < dest.mask.size()) {
-      dest.mask[written] = hold_mask_[hold_at_];
+      dest.mask[written] = hold_mask[hold_at];
     }
-    ++hold_at_;
+    ++hold_at;
     ++written;
   }
-  done = finished_ && hold_at_ >= hold_first_.size();
+  done = finished && hold_at >= hold_first.size();
   return written;
 }
 
 void build(Table &table, const double *positions, std::size_t n, const double *box9,
            const Query &query) {
   check_geometry(positions, n, box9, query);
+  if (n == 0 || !(query.cutoff > 0.0)) {
+    table = Table{};
+    table.stored = true;
+    return;
+  }
+  const Frame frame =
+      make_frame(positions, n, box9, query.periodic, search_radius(query), query.fields);
+  search_frame(table, frame, n, box9, query);
+}
+
+namespace {
+
+void search_frame(Table &table, const Frame &frame, std::size_t n, const double *box9,
+                  const Query &query) {
   table = Table{};
   if (n == 0 || !(query.cutoff > 0.0)) {
     table.stored = true;
@@ -703,10 +1109,13 @@ void build(Table &table, const double *positions, std::size_t n, const double *b
       cols.distance.reserve(slots);
     }
     for (std::size_t i = 0; i < n; ++i) {
-      for (std::size_t j = 0; j < n; ++j) {
-        for (int sa = -nmax[0]; sa <= nmax[0]; ++sa) {
-          for (int sb = -nmax[1]; sb <= nmax[1]; ++sb) {
-            for (int sc = -nmax[2]; sc <= nmax[2]; ++sc) {
+      for (std::size_t j = full ? 0 : i; j < n; ++j) {
+        int lo[3];
+        int hi[3];
+        shift_range(frame, i, j, lo, hi);
+        for (int sa = lo[0]; sa <= hi[0]; ++sa) {
+          for (int sb = lo[1]; sb <= hi[1]; ++sb) {
+            for (int sc = lo[2]; sc <= hi[2]; ++sc) {
               const auto ii = static_cast<std::int32_t>(i);
               const auto jj = static_cast<std::int32_t>(j);
               if (!full && !keep_half(ii, jj, sa, sb, sc)) {
@@ -715,18 +1124,23 @@ void build(Table &table, const double *positions, std::size_t n, const double *b
               double vx = 0;
               double vy = 0;
               double vz = 0;
-              image_vector(positions, i, j, sa, sb, sc, box9, vx, vy, vz);
+              image_vector(frame.cell_pos, i, j, sa, sb, sc, box9, vx, vy, vz);
               const double r2 = vx * vx + vy * vy + vz * vz;
               if (!accept_distance(r2, query)) {
                 continue;
               }
+              double dist = std::sqrt(r2);
+              int ta = sa;
+              int tb = sb;
+              int tc = sc;
+              to_caller(frame, box9, i, j, ta, tb, tc, vx, vy, vz, dist);
               cols.first.push_back(ii);
               cols.second.push_back(jj);
               cols.mask.push_back(0xff);
               if (query.fields.shifts) {
-                cols.shift.push_back(sa);
-                cols.shift.push_back(sb);
-                cols.shift.push_back(sc);
+                cols.shift.push_back(ta);
+                cols.shift.push_back(tb);
+                cols.shift.push_back(tc);
               }
               if (query.fields.vectors) {
                 cols.vector.push_back(vx);
@@ -734,7 +1148,7 @@ void build(Table &table, const double *positions, std::size_t n, const double *b
                 cols.vector.push_back(vz);
               }
               if (query.fields.distances) {
-                cols.distance.push_back(std::sqrt(r2));
+                cols.distance.push_back(dist);
               }
             }
           }
@@ -744,7 +1158,8 @@ void build(Table &table, const double *positions, std::size_t n, const double *b
     move_columns(table, cols);
     return;
   }
-  const Neighbours cells = prepare_cells(positions, n, box9, query);
+  Neighbours cells;
+  prepare_cells(cells, frame, n, box9, query);
   const int nt = teamSize(n);
   if (!clustered(query)) {
     std::vector<Columns> parts(static_cast<std::size_t>(std::max(nt, 1)));
@@ -773,9 +1188,11 @@ void build(Table &table, const double *positions, std::size_t n, const double *b
       auto *distance = cols.distance.data();
       std::size_t count = 0;
       Columns extra;
-      each_cell(cells, positions, box9, query, nmax, one_image, begin, end,
+      each_cell(cells, frame.cell_pos, box9, query, frame, one_image, begin, end,
                 [&](std::int32_t i, std::int32_t j, int sa, int sb, int sc, double vx,
                     double vy, double vz, double dist) {
+                  to_caller(frame, box9, static_cast<std::size_t>(i),
+                            static_cast<std::size_t>(j), sa, sb, sc, vx, vy, vz, dist);
                   if (count == slots) {
                     extra.first.push_back(i);
                     extra.second.push_back(j);
@@ -916,19 +1333,28 @@ void build(Table &table, const double *positions, std::size_t n, const double *b
     const double inv2 = box9[8] > 0.0 ? 1.0 / box9[8] : 0.0;
     cells.forCellTeam(
         !full, nt,
-        [&](int thread, std::int32_t i, std::int32_t j, double dx, double dy, double dz,
-            double r2) {
+        [&](int thread, std::int32_t i, std::int32_t j, double, double, double, double) {
+          const auto ui = static_cast<std::size_t>(i);
+          const auto uj = static_cast<std::size_t>(j);
+          int sa =
+              axis_shift(frame.cell_pos[3 * ui] - frame.cell_pos[3 * uj], inv0,
+                         query.periodic[0]);
+          int sb =
+              axis_shift(frame.cell_pos[3 * ui + 1] - frame.cell_pos[3 * uj + 1], inv1,
+                         query.periodic[1]);
+          int sc =
+              axis_shift(frame.cell_pos[3 * ui + 2] - frame.cell_pos[3 * uj + 2], inv2,
+                         query.periodic[2]);
+          double vx = 0;
+          double vy = 0;
+          double vz = 0;
+          image_vector(frame.cell_pos, ui, uj, sa, sb, sc, box9, vx, vy, vz);
+          const double r2 = vx * vx + vy * vy + vz * vz;
           if (!accept_distance(r2, query)) {
             return;
           }
-          const auto ui = static_cast<std::size_t>(i);
-          const auto uj = static_cast<std::size_t>(j);
-          const int sa = axis_shift(positions[3 * ui] - positions[3 * uj], inv0, query.periodic[0]);
-          const int sb =
-              axis_shift(positions[3 * ui + 1] - positions[3 * uj + 1], inv1, query.periodic[1]);
-          const int sc =
-              axis_shift(positions[3 * ui + 2] - positions[3 * uj + 2], inv2, query.periodic[2]);
-          const double dist = std::sqrt(r2);
+          double dist = std::sqrt(r2);
+          to_caller(frame, box9, ui, uj, sa, sb, sc, vx, vy, vz, dist);
           const auto t = static_cast<std::size_t>(thread);
           auto &cursor = cursors[t];
           if (cursor.count == slice) {
@@ -941,9 +1367,9 @@ void build(Table &table, const double *positions, std::size_t n, const double *b
               extra[t].shift.push_back(sc);
             }
             if (query.fields.vectors) {
-              extra[t].vector.push_back(-dx);
-              extra[t].vector.push_back(-dy);
-              extra[t].vector.push_back(-dz);
+              extra[t].vector.push_back(vx);
+              extra[t].vector.push_back(vy);
+              extra[t].vector.push_back(vz);
             }
             if (query.fields.distances) {
               extra[t].distance.push_back(dist);
@@ -960,9 +1386,9 @@ void build(Table &table, const double *positions, std::size_t n, const double *b
             cols.shift[3 * p + 2] = sc;
           }
           if (query.fields.vectors) {
-            cols.vector[3 * p] = -dx;
-            cols.vector[3 * p + 1] = -dy;
-            cols.vector[3 * p + 2] = -dz;
+            cols.vector[3 * p] = vx;
+            cols.vector[3 * p + 1] = vy;
+            cols.vector[3 * p + 2] = vz;
           }
           if (query.fields.distances) {
             cols.distance[p] = dist;
@@ -989,11 +1415,11 @@ void build(Table &table, const double *positions, std::size_t n, const double *b
   }
   std::vector<std::vector<Rec>> parts(static_cast<std::size_t>(std::max(nt, 1)));
   if (nt <= 1) {
-    collect(cells, positions, n, box9, query, nmax, one_image, 0, n, parts[0]);
+    collect(cells, frame.cell_pos, n, box9, query, frame, one_image, 0, n, parts[0]);
   } else {
     forEachSlice(nt, [&](int t) {
       const auto range = partition(static_cast<std::int64_t>(n), t, nt);
-      collect(cells, positions, n, box9, query, nmax, one_image,
+      collect(cells, frame.cell_pos, n, box9, query, frame, one_image,
               static_cast<std::size_t>(range.begin), static_cast<std::size_t>(range.end),
               parts[static_cast<std::size_t>(t)]);
     });
@@ -1008,23 +1434,25 @@ void build(Table &table, const double *positions, std::size_t n, const double *b
   store_records(table, query, rows);
 }
 
+} // namespace
+
 void buildByAtom(Table &table, const double *positions, std::size_t n, const double *box9,
                  const Query &query) {
   check_geometry(positions, n, box9, query);
-  table = Table{};
   if (n == 0 || !(query.cutoff > 0.0) || n < 512 || clustered(query)) {
     build(table, positions, n, box9, query);
     return;
   }
-  int nmax[3];
   const double search = search_radius(query);
-  shift_bounds(box9, query.periodic, search, nmax);
   const bool one_image = one_minimum_image(box9, query, search);
-  const Neighbours cells = prepare_cells(positions, n, box9, query);
+  const Frame frame = make_frame(positions, n, box9, query.periodic, search, query.fields);
+  table = Table{};
+  Neighbours cells;
+  prepare_cells(cells, frame, n, box9, query);
   std::vector<Rec> rows;
   rows.reserve(n * 8);
   for (std::size_t i = 0; i < n; ++i) {
-    collect(cells, positions, n, box9, query, nmax, one_image, i, i + 1, rows);
+    collect(cells, frame.cell_pos, n, box9, query, frame, one_image, i, i + 1, rows);
   }
   store_records(table, query, rows);
 }

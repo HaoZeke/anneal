@@ -47,9 +47,11 @@ struct DualList::Skin {
 
 DualList::DualList(double short_cut, double long_cut, double skin)
     : short_cut_(short_cut), long_cut_(long_cut), skin_(skin) {
-  if (!(short_cut > 0.0) || !(long_cut > 0.0) || !(skin >= 0.0)) {
-    throw std::invalid_argument(
-        "cutoffs must be positive and skin non-negative");
+  if (!(short_cut > 0.0) || !(long_cut > 0.0)) {
+    throw std::invalid_argument("cutoffs must be positive");
+  }
+  if (!std::isfinite(skin) || skin < 0.0) {
+    throw std::invalid_argument("skin must be finite and non-negative");
   }
   if (short_cut > long_cut) {
     throw std::invalid_argument("short cutoff exceeds the long cutoff");
@@ -166,30 +168,22 @@ void DualList::update(const double *pos, std::size_t n, const double *box,
                       bool periodic) {
   short_rebuilt_ = false;
   long_rebuilt_ = false;
-  const auto clear_emitted = [](Skin *skin) {
-    if (skin == nullptr) {
-      return;
-    }
-    skin->emitted = false;
-    skin->emitted_pos.clear();
-    skin->emitted_n = 0;
-  };
-  if (n == 0) {
+  // Dropping the skins on an empty or single molecular-atom call forces the
+  // next non-trivial geometry to rebuild instead of reusing stale state.
+  if (n == 0 || (n == 1 && (!periodic || box == nullptr))) {
     short_.clear();
     long_.clear();
-    clear_emitted(short_skin_.get());
-    clear_emitted(long_skin_.get());
-    return;
-  }
-  if (n == 1 && (!periodic || box == nullptr)) {
-    short_.clear();
-    long_.clear();
-    clear_emitted(short_skin_.get());
-    clear_emitted(long_skin_.get());
+    short_skin_.reset();
+    long_skin_.reset();
     return;
   }
   if (pos == nullptr) {
     throw std::invalid_argument("positions are null");
+  }
+  for (std::size_t k = 0; k < 3 * n; ++k) {
+    if (!std::isfinite(pos[k])) {
+      throw std::invalid_argument("positions must be finite");
+    }
   }
   const double *use = box;
   if (!periodic || box == nullptr) {

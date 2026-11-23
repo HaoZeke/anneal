@@ -49,6 +49,9 @@ The Verlet skin is 1 Angstrom for =LJPot= and one fifth of the cutoff for
 =LJClusterPot= and =MorsePot=; a stream uses no skin.
 A stored list is reused while every atom has moved by at most half the skin and
 the cell, the atom count and the settings are unchanged.
+That is the rule of =nlist::Neighbours=.
+=nlist::Builder=, behind the C ABI and the long-range =DualList=, also keeps its
+table across a cell change whose image moves fit in the skin.
 
 - =StillingerWeberSi= (=PotType::SWSi1985=) :: Stillinger-Weber silicon with the
   1985 parameters (Phys. Rev. B 31, 5262).

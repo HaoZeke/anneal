@@ -15,7 +15,11 @@ the one the caller uses.
 =box9= is nine doubles, the lattice vectors as rows:
 =ax ay az bx by bz cx cy cz=.
 The pair vector of =(i, j)= at integer shift =S= is =r_j - r_i + S H=, with =H=
-the rows of =box9=.
+the rows of =box9= and =r= the positions as passed.
+The periodic components are folded into the cell first, and the search runs on
+the folded coordinates.
+=S= is then reported for the positions as passed, so a coordinate any whole
+number of cells outside the box still satisfies the relation.
 A pair of an atom with itself at shift zero is never returned.
 
 Different objects may be used from different threads at the same time.
@@ -304,17 +308,20 @@ int32_t rgpot_nlist_builder_update(rgpot_nlist_builder *builder,
   =reused= may be null.
 - Units :: as =rgpot_nlist_build=.
 - Outputs :: =*reused= is 1 when the stored list was kept, else 0.
-  The list is kept when =n= and every request field are unchanged, the current
-  image extent does not exceed the previous one, and =2 * max_disp + corner <=
-  skin=.
-  =max_disp= is the largest atom displacement since the search; =corner= is the
-  largest displacement of the four antipodal corners =+span0= with =±span1= and
-  =±span2= under the box change.
-  With =skin= 0 that means the coordinates and cell did not change.
+  The list is kept when =n= and every request field are unchanged and the atom
+  moves fit in the skin together with the image moves of a cell change.
+  The image move is the largest displacement of a stored shift between the old
+  and the new =box9=, at every sign of the shift; the atoms may then move by
+  half of what that leaves.
+  Each atom is measured from the image of its reference nearest it, so moving an
+  atom by whole cells, or wrapping it back across a face, keeps a pair list.
+  A cluster list is searched again when an atom moves by whole cells.
+  With =skin= 0 the list is kept only when the folded coordinates and =box9= did
+  not change.
   =out=, =*count=, =*needed= and the size probe behave as in
   =rgpot_nlist_build=.
-  On a kept list every column, =vector= and =distance= included, describes the
-  geometry of the last search.
+  On a kept list =shift= is relative to the positions of this call, and =vector=
+  and =distance= describe the geometry of the last search.
 - Errors :: =RGPOT_NLIST_NULL= for a null =builder=.
   The other codes as in =rgpot_nlist_build=.
   A rejected geometry leaves the stored list as it was.
@@ -392,8 +399,9 @@ int32_t rgpot_nlist_fortran_build(rgpot_nlist_fortran_list *list,
 
 The list keeps a builder that searches at =cutoff + skin= with a loose cut when
 =skin > 0=, and at =cutoff= with a strict cut when =skin= is 0.
-The search is reused while every atom stays within =skin / 2= of the last
-search.
+The search is reused under the rule of
+=rgpot_nlist_builder_update=, and each call forms =r_j - r_i + S H= from the
+positions it was given.
 
 ** Cap'n Proto messages
 
