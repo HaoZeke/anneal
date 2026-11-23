@@ -13,7 +13,6 @@ import pytest
 from ase.calculators.calculator import PropertyNotImplementedError
 from ase.filters import FrechetCellFilter
 from ase.optimize import BFGS
-
 from rgpot.ase import RgpotCalculator, RgpotRpcCalculator
 from support import lj_crystal, lj_dimer, si_crystal
 
@@ -34,6 +33,22 @@ def _triclinic_lj() -> Any:
         scale_atoms=False,
     )
     return atoms
+
+
+def _configure_composite(rpc: RgpotRpcCalculator, backend: str | None) -> None:
+    config = rpc._schema.PotentialConfig.new_message()
+    terms = config.init("composite").init("terms", 0 if backend is None else 1)
+    if backend is not None:
+        term = terms[0]
+        term.name = backend
+        term.init("pot").init("builtin").name = backend
+
+    async def configure() -> tuple[bool, str]:
+        reply = await rpc._pot.configure(config)
+        return bool(reply.ok), str(reply.message)
+
+    ok, message = rpc._loop.run_until_complete(configure())
+    assert ok, message
 
 
 @pytest.mark.parametrize(
@@ -118,3 +133,23 @@ def test_rpc_stress_reflects_server_capability() -> None:
             match="does not provide stress",
         ):
             atoms.get_stress()
+
+
+def test_rpc_stress_capability_follows_reconfigure() -> None:
+    atoms = _triclinic_lj()
+    with RgpotRpcCalculator.spawn(_server_binary(), potential="Composite") as rpc:
+        assert "stress" not in rpc.implemented_properties
+        _configure_composite(rpc, "d2")
+
+        atoms.calc = rpc
+        stress = atoms.get_stress()
+        assert stress.shape == (6,)
+        assert "stress" in rpc.implemented_properties
+
+        _configure_composite(rpc, None)
+        with pytest.raises(
+            PropertyNotImplementedError,
+            match="does not provide stress",
+        ):
+            atoms.get_stress()
+        assert "stress" not in rpc.implemented_properties

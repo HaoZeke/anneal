@@ -15,7 +15,7 @@ import os
 import socket
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 import numpy as np
 from ase.calculators.calculator import (
@@ -73,7 +73,11 @@ class RgpotRpcCalculator(Calculator):
         overrides it for one calculation.
     """
 
-    implemented_properties = ["energy", "free_energy", "forces"]
+    implemented_properties = [  # noqa: RUF012
+        "energy",
+        "free_energy",
+        "forces",
+    ]
     # The connection is a session (F3), not the pure protocol.
     reentrant = False
 
@@ -146,7 +150,7 @@ class RgpotRpcCalculator(Calculator):
                 self._closed = True
                 try:
                     self._loop.run_until_complete(self._kj.__aexit__(None, None, None))
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
                 self._loop.close()
             if self._server_proc is not None:
@@ -154,7 +158,7 @@ class RgpotRpcCalculator(Calculator):
                 self._server_proc.wait()
                 self._server_proc = None
 
-    def __enter__(self) -> RgpotRpcCalculator:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -169,18 +173,7 @@ class RgpotRpcCalculator(Calculator):
                 )
                 client = _capnp().TwoPartyClient(connection)
                 self._pot = client.bootstrap().cast_as(self._schema.Potential)
-                reply = await self._pot.getCapabilities()
-                operations = {
-                    str(getattr(operation, "name", operation))
-                    .rsplit(".", 1)[-1]
-                    .lower()
-                    for operation in reply.capabilities.operations
-                }
-                self._server_has_stress = "stress" in operations
-                properties = ["energy", "free_energy", "forces"]
-                if self._server_has_stress:
-                    properties.append("stress")
-                self.implemented_properties = properties
+                await self._refresh_capabilities_async()
                 return
             except OSError as exc:
                 last_err = exc
@@ -189,6 +182,18 @@ class RgpotRpcCalculator(Calculator):
             "RgpotRpcCalculator: could not connect to "
             f"{self._host}:{self._port}: {last_err}"
         )
+
+    async def _refresh_capabilities_async(self) -> None:
+        reply = await self._pot.getCapabilities()
+        operations = {
+            str(getattr(operation, "name", operation)).rsplit(".", 1)[-1].lower()
+            for operation in reply.capabilities.operations
+        }
+        self._server_has_stress = "stress" in operations
+        properties = ["energy", "free_energy", "forces"]
+        if self._server_has_stress:
+            properties.append("stress")
+        self.implemented_properties = properties
 
     async def _calculate_async(
         self,
@@ -237,11 +242,14 @@ class RgpotRpcCalculator(Calculator):
         atoms: Any = None,
         allow_calculation: bool = True,
     ) -> Any:
-        if name == "stress" and not self._server_has_stress:
-            raise PropertyNotImplementedError(
-                "RgpotRpcCalculator: the connected server potential "
-                "does not provide stress"
-            )
+        if name == "stress":
+            with self._claim:
+                self._loop.run_until_complete(self._refresh_capabilities_async())
+                if not self._server_has_stress:
+                    raise PropertyNotImplementedError(
+                        "RgpotRpcCalculator: the connected server potential "
+                        "does not provide stress"
+                    )
         return super().get_property(name, atoms, allow_calculation)
 
     def select_orbitals(self, key: int) -> None:
@@ -255,6 +263,7 @@ class RgpotRpcCalculator(Calculator):
         system_changes: Any = all_changes,
     ) -> None:
         with self._claim:
+            self._loop.run_until_complete(self._refresh_capabilities_async())
             super().calculate(atoms, properties, system_changes)
             frame = self.atoms
             assert frame is not None
