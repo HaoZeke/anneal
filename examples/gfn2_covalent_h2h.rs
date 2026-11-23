@@ -101,11 +101,63 @@ fn evaluate(pot: &RgpotObjective, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
     pair
 }
 
-/// The handle's answer to a geometry it refuses, without charging for it.
-///
-/// A line search reads the non-finite value as an uphill step and shortens it.
-fn refused(x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
-    rgpot_eindir::refuses_geometry(&x.to_vec()).then(|| (f64::NAN, Array1::zeros(x.len())))
+/// One call of the search's handle.
+enum Call {
+    /// The ledger is closed.
+    Spent,
+    /// The handle has no energy here: it refused the geometry before xtb,
+    /// uncharged, or the SCC did not converge. The eindir wrapper leaves its
+    /// gradient buffer at zero then, which is not a gradient.
+    Refused,
+    Answer(f64, Array1<f64>),
+}
+
+fn call(pot: &Mutex<RgpotObjective>, led: &mut Ledger, x: ArrayView1<f64>) -> Call {
+    if rgpot_eindir::refuses_geometry(&x.to_vec()) {
+        return Call::Refused;
+    }
+    if !led.charge() {
+        return Call::Spent;
+    }
+    let (energy, gradient) = evaluate(&pot.lock().expect("pot"), x);
+    classify(energy, gradient)
+}
+
+/// What the handle returned: an answer only when the energy and every
+/// gradient component are finite.
+fn classify(energy: f64, gradient: Array1<f64>) -> Call {
+    if energy.is_finite() && gradient.iter().all(|value| value.is_finite()) {
+        Call::Answer(energy, gradient)
+    } else {
+        Call::Refused
+    }
+}
+
+/// A line search's evaluation: a refusal is a non-finite value, which it
+/// reads as an uphill step and shortens.
+fn line_search_call(
+    pot: &Mutex<RgpotObjective>,
+    led: &mut Ledger,
+    x: ArrayView1<f64>,
+) -> Option<(f64, Array1<f64>)> {
+    match call(pot, led, x) {
+        Call::Spent => None,
+        Call::Refused => Some((f64::NAN, Array1::from_elem(x.len(), f64::NAN))),
+        Call::Answer(energy, gradient) => Some((energy, gradient)),
+    }
+}
+
+/// The search's gradient: none where the handle has no energy, so a refused
+/// geometry is neither certified as a minimum nor climbed from.
+fn gradient_call(
+    pot: &Mutex<RgpotObjective>,
+    led: &mut Ledger,
+    x: ArrayView1<f64>,
+) -> Option<Array1<f64>> {
+    match call(pot, led, x) {
+        Call::Answer(_, gradient) => Some(gradient),
+        Call::Spent | Call::Refused => None,
+    }
 }
 
 /// Bond length over 2^(1/6) and well depth of the homonuclear dimer.
@@ -259,26 +311,11 @@ fn main() {
     let mut optimiser = WarmLbfgs::default();
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
         optimiser.forget();
-        let (value, relaxed, _) = optimiser.minimize(x, iterations, |v| {
-            if let Some(refused) = refused(v) {
-                return Some(refused);
-            }
-            if !led.charge() {
-                return None;
-            }
-            Some(evaluate(&pot.lock().expect("pot"), v))
-        });
+        let (value, relaxed, _) =
+            optimiser.minimize(x, iterations, |v| line_search_call(&pot, led, v));
         (value, relaxed)
     };
-    let mut grad = |led: &mut Ledger, v: ArrayView1<f64>| {
-        if let Some((_, gradient)) = refused(v) {
-            return Some(gradient);
-        }
-        if !led.charge() {
-            return None;
-        }
-        Some(evaluate(&pot.lock().expect("pot"), v).1)
-    };
+    let mut grad = |led: &mut Ledger, v: ArrayView1<f64>| gradient_call(&pot, led, v);
     let outcome: Outcome = run_with_gradient(
         &cfg,
         start.view(),
@@ -327,5 +364,154 @@ fn main() {
             &format!("anneal {:.10} eV", outcome.best),
         )
         .expect("best xyz");
+    }
+}
+
+/// Against real xtb: `RGPOT_XTB_ENGINE` names `libxtb_engine.so` and
+/// `LD_LIBRARY_PATH` its libxtb. They fail without it rather than skip.
+///
+/// ```text
+/// cargo test --release --features rgpot-ex --example gfn2_covalent_h2h
+/// ```
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const BOX: [f64; 9] = [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0];
+
+    /// A compact Si13 whose fresh SCC does not converge at 300 K or at the
+    /// bench's 3000 K, with no pair inside the handle's 0.90 Å.
+    const SI13_SCC_FAILS: [f64; 39] = [
+        -0.5957572740562841,
+        -1.2217069293964795,
+        0.9865349689621185,
+        0.9268266042665285,
+        -0.41172432716729984,
+        1.9085195608484748,
+        1.4304528902425964,
+        -0.8898970109587083,
+        -1.4687854013128288,
+        -2.061061354262374,
+        0.10173279503140154,
+        2.031372579410227,
+        2.182068219042771,
+        -1.1714298473684326,
+        -0.09782090194581013,
+        -2.0431916393136964,
+        -1.5406026489486877,
+        0.5675528708204733,
+        -0.12620548020935812,
+        2.4894767753651057,
+        0.4037140818031978,
+        1.692028451833346,
+        0.07660959382815108,
+        -1.5992042413638194,
+        0.17221464522341975,
+        -0.7660468031333149,
+        0.03260001162428287,
+        0.4126836999357364,
+        0.7854169146804258,
+        0.5561469335403733,
+        0.9008056093258453,
+        1.529545514981933,
+        -1.716409892035046,
+        1.7029756306265302,
+        -1.8943662564254033,
+        0.6001958426248252,
+        -0.7392478901300448,
+        0.8037416796483207,
+        -1.0011518294499242,
+    ];
+
+    fn handle(z: i32, n: usize) -> Mutex<RgpotObjective> {
+        let mut pot = RgpotObjective::xtb_fresh(&vec![z; n], BOX);
+        pot.restart();
+        Mutex::new(pot)
+    }
+
+    fn silicon_pair(r: f64) -> Array1<f64> {
+        Array1::from(vec![0.0, 0.0, 0.0, r, 0.0, 0.0])
+    }
+
+    #[test]
+    fn the_wrappers_zero_buffer_after_a_failed_call_is_refused_not_answered() {
+        let zeros = Array1::<f64>::zeros(6);
+        assert!(matches!(classify(f64::NAN, zeros.clone()), Call::Refused));
+        assert!(matches!(classify(f64::INFINITY, zeros), Call::Refused));
+    }
+
+    #[test]
+    fn a_nonfinite_gradient_component_is_refused() {
+        let gradient = Array1::from(vec![0.1, f64::NAN, -0.1]);
+        assert!(matches!(classify(-3.0, gradient), Call::Refused));
+        let gradient = Array1::from(vec![0.1, f64::NEG_INFINITY, -0.1]);
+        assert!(matches!(classify(-3.0, gradient), Call::Refused));
+    }
+
+    #[test]
+    fn a_finite_answer_keeps_its_gradient_and_a_zero_one_is_a_real_answer() {
+        let gradient = Array1::from(vec![0.25, -0.5, 0.0]);
+        match classify(-3.0, gradient.clone()) {
+            Call::Answer(energy, returned) => {
+                assert_eq!(energy, -3.0);
+                assert_eq!(returned, gradient);
+            }
+            _ => panic!("a finite energy and gradient is an answer"),
+        }
+        assert!(matches!(
+            classify(-3.0, Array1::zeros(6)),
+            Call::Answer(_, _)
+        ));
+    }
+
+    #[test]
+    fn a_geometry_refused_before_xtb_has_no_gradient_and_costs_nothing() {
+        let pot = handle(14, 2);
+        let x = silicon_pair(0.5);
+        let mut ledger = Ledger::new(10);
+        assert!(gradient_call(&pot, &mut ledger, x.view()).is_none());
+        let (energy, _) = line_search_call(&pot, &mut ledger, x.view()).expect("a refusal");
+        assert!(!energy.is_finite());
+        assert_eq!(ledger.spent(), 0);
+    }
+
+    #[test]
+    fn an_scc_that_does_not_converge_has_no_gradient() {
+        let pot = handle(14, 13);
+        let x = Array1::from(SI13_SCC_FAILS.to_vec());
+        assert!(!rgpot_eindir::refuses_geometry(&SI13_SCC_FAILS));
+        let (energy, gradient) = evaluate(&pot.lock().expect("pot"), x.view());
+        assert!(energy.is_nan());
+        assert!(gradient.iter().all(|value| *value == 0.0));
+
+        let mut ledger = Ledger::new(10);
+        assert!(gradient_call(&pot, &mut ledger, x.view()).is_none());
+        assert_eq!(ledger.spent(), 1);
+        let (energy, _) = line_search_call(&pot, &mut ledger, x.view()).expect("a refusal");
+        assert!(!energy.is_finite());
+        assert_eq!(ledger.spent(), 2);
+    }
+
+    #[test]
+    fn a_bound_geometry_has_its_gradient() {
+        let pot = handle(14, 2);
+        let x = silicon_pair(2.3);
+        let mut ledger = Ledger::new(10);
+        let gradient = gradient_call(&pot, &mut ledger, x.view()).expect("an answer");
+        let (energy, along) = line_search_call(&pot, &mut ledger, x.view()).expect("an answer");
+        assert!(energy.is_finite());
+        assert_eq!(gradient, along);
+        assert!(gradient.iter().all(|value| value.is_finite()));
+        assert!(gradient[3].abs() > 1e-3);
+        assert_eq!(ledger.spent(), 2);
+    }
+
+    #[test]
+    fn a_closed_ledger_ends_the_search_rather_than_refuse() {
+        let pot = handle(14, 2);
+        let x = silicon_pair(2.3);
+        let mut ledger = Ledger::new(0);
+        assert!(gradient_call(&pot, &mut ledger, x.view()).is_none());
+        assert!(line_search_call(&pot, &mut ledger, x.view()).is_none());
     }
 }
