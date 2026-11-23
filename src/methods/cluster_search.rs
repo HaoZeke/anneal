@@ -4521,4 +4521,89 @@ mod tests {
             min_pair_distance(geometry.view())
         );
     }
+
+    /// Evaluations the potential performed, counted apart from the ledger.
+    struct Tally {
+        inner: PairPotential,
+        calls: std::sync::atomic::AtomicUsize,
+        stop_after: usize,
+        stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl eindir_core::Objective<f64> for Tally {
+        fn dim(&self) -> usize {
+            eindir_core::Objective::dim(&self.inner)
+        }
+        fn bounds(&self) -> &eindir_core::Bounds<f64> {
+            self.inner.bounds()
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            self.value_and_gradient(x).0
+        }
+    }
+
+    impl eindir_core::Gradient<f64> for Tally {
+        fn dim(&self) -> usize {
+            eindir_core::Objective::dim(self)
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            self.value_and_gradient(x).1
+        }
+    }
+
+    impl DifferentiableObjective<f64> for Tally {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            use std::sync::atomic::Ordering;
+            let made = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+            if made >= self.stop_after {
+                self.stop.store(true, Ordering::SeqCst);
+            }
+            self.inner.value_and_gradient(x)
+        }
+    }
+
+    /// Charged calls and potential evaluations of one search.
+    fn charged_and_evaluated(
+        energy_lattice: bool,
+        budget: usize,
+        stop_after: usize,
+        seed: u64,
+    ) -> (usize, usize) {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        let mut cfg = Config::recommended(38);
+        cfg.energy_lattice = energy_lattice;
+        let stop = Arc::new(AtomicBool::new(false));
+        let objective = Tally {
+            inner: PairPotential::lennard_jones(cfg.n_points),
+            calls: AtomicUsize::new(0),
+            stop_after,
+            stop: Arc::clone(&stop),
+        };
+        let mut ledger = Ledger::with_stop(budget, stop);
+        search(&objective, &cfg, &mut ledger, seed).expect("finite start");
+        (ledger.spent(), objective.calls.load(Ordering::SeqCst))
+    }
+
+    /// Every charge is an evaluation unless the energy lattice is on. That
+    /// kernel sums pair rows itself and charges them as the fraction of one
+    /// full evaluation they cost, a documented unit, so with it on the ledger
+    /// reads at least the potential's own call count.
+    #[test]
+    fn charged_calls_are_potential_evaluations_apart_from_lattice_pair_sums() {
+        for seed in [2000, 2001, 2002] {
+            let (spent, calls) = charged_and_evaluated(false, 6_000, usize::MAX, seed);
+            assert_eq!(spent, calls, "seed {seed}: budget run");
+            assert_eq!(spent, 6_000, "seed {seed}: the budget was not spent");
+            let (spent, calls) = charged_and_evaluated(false, 400_000, 2_500, seed);
+            assert_eq!(spent, calls, "seed {seed}: run closed by a caller stop");
+            assert_eq!(spent, 2_500, "seed {seed}: the stop did not close the run");
+        }
+        let (spent, calls) = charged_and_evaluated(true, 30_000, usize::MAX, 2001);
+        assert!(
+            spent > calls,
+            "the lattice kernel's pair sums were not charged: {spent} against {calls}"
+        );
+        assert_eq!(spent, 30_000);
+    }
 }
