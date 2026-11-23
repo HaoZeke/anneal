@@ -4826,9 +4826,10 @@ where
         }
     }
     if cfg.minima_hopping {
-        let initial_basin = identity.basin_of(x.view());
-        feedback.register_driver_local_initial(initial_basin);
-        here = Some(initial_basin);
+        here = identity.basin_of(x.view());
+        if let Some(initial_basin) = here {
+            feedback.register_driver_local_initial(initial_basin);
+        }
     }
     // The history's identity of the occupied minimum, numbered by the history
     // and not by `identity`: under a shared history the numbering is the
@@ -4909,14 +4910,15 @@ where
                     history_observations += 1;
                     history_new += usize::from(report.is_new);
                     if cfg.minima_hopping {
-                        let reached = match destination.local_minimum {
-                            Some(reached) => reached,
-                            None => identity.basin_of(destination.coordinates.view()),
-                        };
-                        destination.local_minimum = Some(reached);
+                        let reached = destination
+                            .local_minimum
+                            .or_else(|| identity.basin_of(destination.coordinates.view()));
+                        destination.local_minimum = reached;
                         match cfg.shared_visit_policy {
                             SharedVisitPolicy::Tabu => {
-                                feedback.remember_driver_local(reached);
+                                if let Some(reached) = reached {
+                                    feedback.remember_driver_local(reached);
+                                }
                                 feedback.observe_shared(
                                     history_here,
                                     report.minimum,
@@ -4925,7 +4927,9 @@ where
                                 );
                             }
                             SharedVisitPolicy::Recognition => {
-                                feedback.observe_driver_local(here, reached);
+                                if let Some(reached) = reached {
+                                    feedback.observe_driver_local(here, reached);
+                                }
                             }
                         }
                     } else if let Some((from, reached)) = local_feedback {
@@ -5249,9 +5253,9 @@ where
                         eq,
                         xq,
                         gradient,
-                        Some(reached),
+                        reached,
                         AdoptionHistory::Fresh,
-                        Some((Some(from_basin), reached)),
+                        reached.map(|reached| (from_basin, reached)),
                         Some("homotop"),
                         hops
                     );
@@ -6343,14 +6347,14 @@ where
                         &mut unconverged_records,
                     );
                     let reached = identity.basin_of(hole_state.view());
-                    let from = here.unwrap_or_else(|| identity.basin_of(from_state.view()));
+                    let from = here.or_else(|| identity.basin_of(from_state.view()));
                     adopt_minimum!(
                         hole_energy,
                         hole_state,
                         hole_gradient,
-                        Some(reached),
+                        reached,
                         AdoptionHistory::Fresh,
-                        Some((Some(from), reached)),
+                        reached.map(|reached| (from, reached)),
                         None,
                         hops
                     );
@@ -6432,14 +6436,14 @@ where
                     if adopt {
                         hops += 1;
                         let reached = identity.basin_of(proposal_state.view());
-                        let from = here.unwrap_or_else(|| identity.basin_of(from_state.view()));
+                        let from = here.or_else(|| identity.basin_of(from_state.view()));
                         adopt_minimum!(
                             proposal_energy,
                             proposal_state.clone(),
                             validation_gradient.clone(),
-                            Some(reached),
+                            reached,
                             AdoptionHistory::Fresh,
-                            Some((Some(from), reached)),
+                            reached.map(|reached| (from, reached)),
                             None,
                             hops
                         );
@@ -6556,15 +6560,15 @@ where
                 }
                 if adopted {
                     continuous_symmetry_gain += e - candidate_energy;
-                    let from_basin = here.unwrap_or_else(|| identity.basin_of(x.view()));
+                    let from_basin = here.or_else(|| identity.basin_of(x.view()));
                     let reached = identity.basin_of(candidate.view());
                     adopt_minimum!(
                         candidate_energy,
                         candidate.clone(),
                         candidate_gradient.clone(),
-                        Some(reached),
+                        reached,
                         AdoptionHistory::Fresh,
-                        Some((Some(from_basin), reached)),
+                        reached.map(|reached| (from_basin, reached)),
                         None,
                         hops
                     );
@@ -6758,15 +6762,15 @@ where
                             &mut unconverged_records,
                         );
                         if gradient.is_some() || !gradient_required {
-                            let from_basin = here.unwrap_or_else(|| identity.basin_of(x.view()));
+                            let from_basin = here.or_else(|| identity.basin_of(x.view()));
                             let reached = identity.basin_of(xq.view());
                             adopt_minimum!(
                                 eq,
                                 xq,
                                 gradient,
-                                Some(reached),
+                                reached,
                                 AdoptionHistory::Fresh,
-                                Some((Some(from_basin), reached)),
+                                reached.map(|reached| (from_basin, reached)),
                                 Some("doye-exchange"),
                                 hops
                             );
@@ -7996,7 +8000,10 @@ where
         // hop can be recorded as an edge from here to there. Taken only when
         // the tracker is on, since it costs a descriptor and a lookup.
         let here_before = if cfg.track_funnels || superbasin.is_some() {
-            Some(*here.get_or_insert_with(|| identity.basin_of(x.view())))
+            if here.is_none() {
+                here = identity.basin_of(x.view());
+            }
+            here
         } else {
             None
         };
@@ -8015,18 +8022,21 @@ where
         // moves. Tilting that sequence is the lever the measurements leave
         // standing.
         let (pave_old, pave_new) = if let Some(pave) = pave.as_mut() {
-            let from = *here.get_or_insert_with(|| identity.basin_of(x.view()));
+            if here.is_none() {
+                here = identity.basin_of(x.view());
+            }
+            let from = here;
             let reached = identity.basin_of(x_new.view());
-            let old = x
-                .as_slice()
-                .map(|slice| {
+            let old = from
+                .zip(x.as_slice())
+                .map(|(from, slice)| {
                     pave.community(from as u64, slice);
                     pave.potential(from as u64)
                 })
                 .unwrap_or(0.0);
-            let new = x_new
-                .as_slice()
-                .map(|slice| {
+            let new = reached
+                .zip(x_new.as_slice())
+                .map(|(reached, slice)| {
                     pave.community(reached as u64, slice);
                     pave.potential(reached as u64)
                 })
@@ -8126,9 +8136,14 @@ where
         // at fifteen basins.
         let mut trial_local_minimum = here;
         let accept = if cfg.minima_hopping {
-            let from = *here.get_or_insert_with(|| identity.basin_of(x.view()));
+            if here.is_none() {
+                here = identity.basin_of(x.view());
+            }
+            let from = here;
             if unquenched {
-                feedback.observe_driver_local(Some(from), from);
+                if let Some(from) = from {
+                    feedback.observe_driver_local(Some(from), from);
+                }
                 false
             } else {
                 // Threshold on the *biased* rise. Adapts like Goedecker's E_diff
@@ -8140,9 +8155,15 @@ where
                     // controller: a minimum first found by another chain is
                     // known here too, and only a minimum new under the
                     // membership policy is offered to the threshold.
+                    // A quench the capped index has no seat for lies outside
+                    // every basin this chain has registered. The controller
+                    // has no identity to record it under, so it is not fed
+                    // back, and it is new to this chain.
                     let visit = match cfg.shared_visit_policy {
                         SharedVisitPolicy::Tabu => {
-                            feedback.remember_driver_local(reached);
+                            if let Some(reached) = reached {
+                                feedback.remember_driver_local(reached);
+                            }
                             feedback.observe_shared(
                                 history_here,
                                 report.minimum,
@@ -8150,9 +8171,10 @@ where
                                 report.visits,
                             )
                         }
-                        SharedVisitPolicy::Recognition => {
-                            feedback.observe_driver_local(Some(from), reached)
-                        }
+                        SharedVisitPolicy::Recognition => match reached {
+                            Some(reached) => feedback.observe_driver_local(from, reached),
+                            None => Visit::New,
+                        },
                     };
                     visit == Visit::New && feedback.accept(delta)
                 } else {
@@ -8170,11 +8192,13 @@ where
                     let competitive = !cfg.move_library.is_rigid_body()
                         || (cage_changed && e_new <= ledger.best + cfg.temperature)
                         || e_new < ledger.best - 5.0e-2;
-                    feedback.observe_driver_local_scored(Some(from), reached, competitive);
-                    reached != from && feedback.accept(delta)
+                    if let Some(reached) = reached {
+                        feedback.observe_driver_local_scored(from, reached, competitive);
+                    }
+                    reached.is_none_or(|reached| Some(reached) != from) && feedback.accept(delta)
                 };
                 if ok {
-                    trial_local_minimum = Some(reached);
+                    trial_local_minimum = reached;
                 }
                 ok
             }
@@ -8371,8 +8395,8 @@ where
             // the chain actually made.
             if let Some(pave) = pave.as_mut()
                 && let Some(slice) = x_new.as_slice()
+                && let Some(reached) = identity.basin_of(x_new.view())
             {
-                let reached = identity.basin_of(x_new.view());
                 pave.deposit(
                     reached as u64,
                     slice,
@@ -8757,7 +8781,7 @@ where
             held_bits.clear();
             held_bits.extend(x.iter().map(|value| value.to_bits()));
             held_cv = Some(if accept { s_new.clone() } else { s_old.clone() });
-            held_seat = Some(landed_seat);
+            held_seat = landed_seat;
             held_count = bias.n_basins();
         }
         // Visits other chains made to the minimum this quench reached, paid
@@ -9010,9 +9034,8 @@ where
         // Where the chain stands after the acceptance test, computed once for
         // every consumer that wants it.
         let landed = if accept && here_before.is_some() {
-            let now = identity.basin_of(x.view());
-            here = Some(now);
-            Some(now)
+            here = identity.basin_of(x.view());
+            here
         } else {
             None
         };
@@ -9435,10 +9458,9 @@ where
                         let from = if directed_source.is_some() {
                             identity.basin_of(source.view())
                         } else {
-                            here.unwrap_or_else(|| identity.basin_of(x.view()))
+                            here.or_else(|| identity.basin_of(x.view()))
                         };
-                        let reached = identity.basin_of(xe.view());
-                        Some((Some(from), reached))
+                        identity.basin_of(xe.view()).map(|reached| (from, reached))
                     } else {
                         None
                     };
@@ -9534,8 +9556,10 @@ where
         // reason.
         if cfg.superbasin_escape && hops >= sb_last_jump + cfg.superbasin_period {
             sb_last_jump = hops;
-            let from = *here.get_or_insert_with(|| identity.basin_of(x.view()));
-            if let Some(sb) = superbasin.as_mut() {
+            if here.is_none() {
+                here = identity.basin_of(x.view());
+            }
+            if let (Some(sb), Some(from)) = (superbasin.as_mut(), here) {
                 // Refusal is the normal outcome and is not a failure: the
                 // algebra declines when the graph is too small, too well mixed,
                 // or has no exit with a structure stored, and each of those is
