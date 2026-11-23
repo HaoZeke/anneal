@@ -264,6 +264,22 @@ A second thread that enters =calculate= while the first still holds the
 connection gets =RuntimeError=.
 The old import =ase_calculator.RgpotCalculator= warns and re-exports this class.
 
+The calculator reads the server capabilities when it connects.
+It always provides =energy=, =free_energy= and =forces=.
+=free_energy= equals =energy=.
+It provides =stress= when the server potential reports that capability.
+
+Stress uses ASE Voigt order, units and sign.
+It is available only for a fully periodic three-dimensional cell.
+A non-periodic cell raises =PropertyNotImplementedError=.
+A server potential without stress raises the same error.
+Cell filters and barostats can use a stress-capable remote potential.
+
+A request that includes stress uses =calculateStress=.
+Its reply also carries energy and forces.
+Energy, forces and stress therefore take one RPC round trip for one geometry.
+The calculator stores all three results in ASE's cache.
+
 ** Annealing helper
 
 =AnnealRunner= calls =anneal.global_optimize= and writes the best geometry back
