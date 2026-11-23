@@ -2635,6 +2635,35 @@ if get_option('with_tests')
                 depends: [external_refcount_engine, external_refcount_empty],
                 kwargs: _rt_kw['external_engine_refcount'],
             )
+            external_reentrant_engine = shared_library(
+                'external_reentrant_engine',
+                sources: ['tests/external_reentrant_engine.c'],
+                dependencies: [_dl_dep],
+                include_directories: _incdirs,
+                c_args: ['-DRGPOT_ENGINE_BUILD'],
+                install: false,
+            )
+            test(
+                'external_constructor_reentry',
+                executable(
+                    'external_constructor_reentry',
+                    sources: ['tests/external_constructor_reentry.cpp'],
+                    dependencies: [rgpot_dep],
+                    include_directories: _incdirs + ['.'],
+                    cpp_args: test_args,
+                    export_dynamic: true,
+                    link_language: 'cpp',
+                ),
+                args: [
+                    external_reentrant_engine.full_path(),
+                    external_refcount_engine.full_path(),
+                ],
+                depends: [
+                    external_reentrant_engine,
+                    external_refcount_engine,
+                ],
+                kwargs: _rt_kw['external_constructor_reentry'],
+            )
         endif
         if _rpc_stack and host_system != 'windows'
             engine_table_env = environment()

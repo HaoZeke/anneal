@@ -263,8 +263,32 @@ int main(int argc, char **argv) {
     rgpot_external_potential_free(replaced);
     return 1;
   }
+
+  const fs::path target_a = scratch / "liblj_engine_target_a.so";
+  const fs::path target_b = scratch / "liblj_engine_target_b.so";
+  const fs::path alias = scratch / "liblj_engine_alias.so";
+  fs::copy_file(argv[1], target_a, fs::copy_options::overwrite_existing);
+  fs::copy_file(argv[1], target_b, fs::copy_options::overwrite_existing);
+  fs::create_symlink(target_a, alias);
+  rgpot_external_potential *through_alias =
+      rgpot_lammps_potential(alias.c_str(), 1.0, 8.0, 1.0, err, sizeof(err));
+  if (through_alias == nullptr) {
+    std::fprintf(stderr, "symlinked engine: %s\n", err);
+    return 1;
+  }
+  rgpot_external_potential_free(through_alias);
+  fs::remove(alias);
+  fs::create_symlink(target_b, alias);
+  err[0] = '\0';
+  rgpot_external_potential *retargeted =
+      rgpot_lammps_potential(alias.c_str(), 1.0, 8.0, 1.0, err, sizeof(err));
+  if (retargeted != nullptr || std::strstr(err, "retargeted") == nullptr) {
+    std::fprintf(stderr, "retargeted symlink error was: %s\n", err);
+    rgpot_external_potential_free(retargeted);
+    return 1;
+  }
   fs::remove_all(scratch);
-  std::printf("a replaced engine file is refused\n");
+  std::printf("replaced files and retargeted symlinks are refused\n");
 #endif
   return 0;
 }

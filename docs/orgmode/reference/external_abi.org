@@ -30,8 +30,8 @@ Each potential serialises the force calls of its own instance with a mutex.
 An engine library stays resident once a constructor opens it.
 The first successful open is kept and marked =RTLD_NODELETE=, so the mapping
 stays resident after =dlclose= and a later constructor of the same file reuses
-that open instead of taking another reference; an open that does not become
-the resident engine is closed.
+that open instead of taking another reference.
+An open that does not become the resident engine is closed.
 =rgpot_external_potential_free= destroys the engine instance and leaves the
 library mapped.
 A backend may keep OpenMP, CUDA, MPI, GROMACS, LAMMPS or OpenMM state that does

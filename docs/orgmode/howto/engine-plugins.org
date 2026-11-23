@@ -68,8 +68,12 @@ Do not =dlclose= an engine: the tensor runtime keeps process-wide state.
 =libxtb_engine.so=, =libopenmm_engine.so=,
 =libnwchem_engine.so= and =libskala_engine.so= are linked with =-z nodelete=, so
 a =dlclose= leaves them mapped.
-The Rust loader and the =LammpsPot=, =GromacsPot= and =OpenMMPot= constructors
-open every engine with =RTLD_NODELETE= and never close it.
+The Rust loader keeps one registry handle and a separate =RTLD_NODELETE= pin for
+each resident engine.
+The =LammpsPot=, =GromacsPot= and =OpenMMPot= constructors likewise keep one
+resident handle and one =RTLD_NODELETE= pin.
+Every temporary open is balanced with a close, including an attempt that loses a
+publication race or fails validation.
 Destroy every handle before the process exits.
 
 ** Build and test the engine libraries

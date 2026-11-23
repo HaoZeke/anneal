@@ -6,7 +6,28 @@
 
 #include "rgpot/engine_c_abi.h"
 
+#include <stdio.h>
 #include <stdlib.h>
+
+static void record_lifecycle(const char *event) {
+  const char *path = getenv("RGPOT_EXTERNAL_LIFECYCLE_LOG");
+  if (path == NULL || path[0] == '\0') {
+    return;
+  }
+  FILE *log = fopen(path, "a");
+  if (log != NULL) {
+    fprintf(log, "%s\n", event);
+    fclose(log);
+  }
+}
+
+__attribute__((constructor)) static void engine_load(void) {
+  record_lifecycle("engine load");
+}
+
+__attribute__((destructor)) static void engine_unload(void) {
+  record_lifecycle("engine unload");
+}
 
 RgpotEnginePot *rgpot_engine_create(const void *config, size_t config_len,
                                     char *errbuf, size_t errlen) {

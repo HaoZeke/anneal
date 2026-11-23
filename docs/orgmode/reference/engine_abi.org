@@ -1415,8 +1415,8 @@ a host that does call =dlclose= on them leaves them mapped.
 - =CoordTransformFn=, =AbiVersionFn=, =AbiStampFn=, =CreateFn=, =DestroyFn=,
   =ForceFn=, =ForceBatchFn=, =HvpFn=, =CapsFn=, =LastErrorFn=,
   =LastComponentsFn=, =ComponentNameFn=, =ModelStateFn=, =SetCallbacksFn=,
-  =HintFn=, =UnloadPolicyFn= :: =extern "C"= function-pointer types matching
-  the C declarations above.
+  =HintFn=, =UnloadPolicyFn= :: =extern "C"= function-pointer types matching the
+  C declarations above.
 - =EngineSymbols= :: Resolved symbol table holding required
   (=abi_version=, =create=, =destroy=, =force=) and optional (=abi_stamp=,
   =force_batch=, =hvp=, =caps=, =last_error=,

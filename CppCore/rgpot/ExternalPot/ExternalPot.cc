@@ -300,6 +300,19 @@ void ensure_current(const ResidentEntry &entry, const std::string &path) {
         " was replaced after it was loaded, and the loaded engine stays "
         "resident; load the new file from another path or restart the process");
   }
+  if (!canonical_file(path).empty()) {
+    struct stat requested {};
+    if (stat(path.c_str(), &requested) != 0) {
+      throw std::runtime_error(path + ": cannot identify the requested file: " +
+                               std::strerror(errno));
+    }
+    if (requested.st_dev != entry.dev || requested.st_ino != entry.ino) {
+      throw std::runtime_error(
+          path +
+          ": the requested path was replaced or retargeted after it loaded "
+          "another engine; use a new path or restart the process");
+    }
+  }
 #endif
 }
 
@@ -416,14 +429,15 @@ Loaded open_library(const std::vector<std::string> &paths, bool native) {
   if (paths.empty()) {
     throw std::runtime_error("no engine library to open");
   }
-  // Held across dlopen: a library constructor must not open another engine.
   ResidentTable &table = residents();
-  std::lock_guard<std::mutex> lock(table.mutex);
   std::string tried;
   for (const std::string &path : paths) {
-    if (LibraryHandle cached = find_resident(table, path)) {
-      Loaded loaded;
-      loaded.library = std::move(cached);
+    Loaded loaded;
+    {
+      std::lock_guard<std::mutex> lock(table.mutex);
+      loaded.library = find_resident(table, path);
+    }
+    if (loaded.library) {
       bind_symbols(loaded, native);
       if (!have_symbols(loaded, native)) {
         tried += path + ": missing " +
@@ -433,7 +447,11 @@ Loaded open_library(const std::vector<std::string> &paths, bool native) {
       }
       return loaded;
     }
-    Loaded loaded;
+
+    // dlopen runs library initializers. Keep them outside the registry lock:
+    // an initializer may construct another external potential and consult
+    // this table. Publish only after dlopen has completed and every required
+    // symbol has been resolved.
     loaded.library = open_attempt(path);
     if (!loaded.library) {
       tried += path + ": " + last_dl() + "; ";
@@ -445,9 +463,12 @@ Loaded open_library(const std::vector<std::string> &paths, bool native) {
                (native ? "rgpot_md_native_force" : "rgpot_engine_force") + "; ";
       continue;
     }
-    loaded.library = publish_resident(
-        table, path, loaded.library,
-        reinterpret_cast<const void *>(loaded.create));
+    {
+      std::lock_guard<std::mutex> lock(table.mutex);
+      loaded.library = publish_resident(
+          table, path, loaded.library,
+          reinterpret_cast<const void *>(loaded.create));
+    }
     return loaded;
   }
   throw std::runtime_error("engine library was not opened: " + tried);

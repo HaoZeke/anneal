@@ -64,7 +64,8 @@ use std::mem::ManuallyDrop;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
-use std::sync::{Arc, LazyLock, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Condvar, LazyLock, Mutex, MutexGuard, OnceLock};
+use std::thread::ThreadId;
 
 use libloading::Library;
 
@@ -903,20 +904,27 @@ enum FileIdentity {
 struct Resident {
     library: ManuallyDrop<Library>,
     _pin: Option<ManuallyDrop<Library>>,
-    symbols: Result<EngineSymbols, EngineError>,
+    symbols: EngineSymbols,
     unload_refusal: Option<String>,
+}
+
+enum RegistryEntry {
+    Loading { owner: ThreadId },
+    Ready(Arc<Resident>),
 }
 
 #[derive(Default)]
 struct Registry {
-    by_file: HashMap<FileIdentity, Arc<Resident>>,
+    by_file: HashMap<FileIdentity, RegistryEntry>,
     by_path: HashMap<PathBuf, FileIdentity>,
 }
 
-static REGISTRY: LazyLock<Mutex<Registry>> = LazyLock::new(Mutex::default);
+static REGISTRY: LazyLock<(Mutex<Registry>, Condvar)> =
+    LazyLock::new(|| (Mutex::default(), Condvar::new()));
 
 fn registry() -> MutexGuard<'static, Registry> {
     REGISTRY
+        .0
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
@@ -979,13 +987,7 @@ unsafe fn pin_library(_path: &Path) -> Result<Option<Library>, libloading::Error
 
 /// Why the library may not be unloaded, or `None` when it declares itself
 /// unload-safe through `rgpot_engine_unload_policy`.
-unsafe fn unload_refusal(
-    library: &Library,
-    symbols: &Result<EngineSymbols, EngineError>,
-) -> Option<String> {
-    let Ok(symbols) = symbols else {
-        return Some("the plugin did not resolve the required engine symbols".into());
-    };
+unsafe fn unload_refusal(library: &Library, symbols: &EngineSymbols) -> Option<String> {
     let Some(policy) =
         (unsafe { optional::<UnloadPolicyFn>(library, "rgpot_engine_unload_policy") })
     else {
@@ -1021,54 +1023,119 @@ fn replaced(canonical: &Path) -> EngineError {
     ))
 }
 
-/// The registry entry for the file at `path`, opening it on first use.
+/// Create an engine from the registry entry for `path`, opening it on first use.
 ///
-/// The registry lock is held across `dlopen`, so a plugin's static
-/// constructors must not load engines through this loader.
-unsafe fn resident_library(path: &Path) -> Result<Arc<Resident>, EngineError> {
+/// A loading entry makes concurrent callers wait without holding the mutex
+/// across `dlopen`. The completed library is published only after its symbols,
+/// ABI stamp and first engine instance have all been validated.
+unsafe fn load_resident(path: &Path, config: &[u8]) -> Result<EnginePotential, EngineError> {
     let canonical = canonical_path(path)?;
     let identity = file_identity(&canonical)?;
-    let mut registry = registry();
-    if registry
-        .by_path
-        .get(&canonical)
-        .is_some_and(|known| *known != identity)
-    {
-        return Err(replaced(&canonical));
-    }
-    if let Some(resident) = registry.by_file.get(&identity) {
-        let resident = Arc::clone(resident);
-        registry.by_path.insert(canonical, identity);
-        return Ok(resident);
-    }
-    let library = unsafe { open_library(&canonical) }
-        .map_err(|why| EngineError::Load(format!("{}: {why}", path.display())))?;
-    let symbols = unsafe { resolve(&library) };
-    let unload_refusal = unsafe { unload_refusal(&library, &symbols) };
-    let pin = match unload_refusal {
-        None => None,
-        Some(_) => match unsafe { pin_library(&canonical) } {
-            Ok(pin) => pin.map(ManuallyDrop::new),
-            Err(why) => {
-                std::mem::forget(library);
+    let owner = std::thread::current().id();
+
+    let cached = loop {
+        let mut registry = registry();
+        if registry
+            .by_path
+            .get(&canonical)
+            .is_some_and(|known| *known != identity)
+        {
+            return Err(replaced(&canonical));
+        }
+        match registry.by_file.get(&identity) {
+            Some(RegistryEntry::Ready(resident)) => {
+                let resident = Arc::clone(resident);
+                registry.by_path.insert(canonical.clone(), identity.clone());
+                break Some(resident);
+            }
+            Some(RegistryEntry::Loading {
+                owner: loading_owner,
+            }) if *loading_owner == owner => {
                 return Err(EngineError::Load(format!(
-                    "{}: RTLD_NODELETE could not be set: {why}",
+                    "{}: the plugin initializer recursively loaded the same file",
                     path.display()
                 )));
             }
-        },
+            Some(RegistryEntry::Loading { .. }) => {
+                drop(
+                    REGISTRY
+                        .1
+                        .wait(registry)
+                        .unwrap_or_else(|poisoned| poisoned.into_inner()),
+                );
+            }
+            None => {
+                registry
+                    .by_file
+                    .insert(identity.clone(), RegistryEntry::Loading { owner });
+                registry.by_path.insert(canonical.clone(), identity.clone());
+                break None;
+            }
+        }
     };
-    let resident = Arc::new(Resident {
-        library: ManuallyDrop::new(library),
-        _pin: pin,
-        symbols,
-        unload_refusal,
+
+    if let Some(resident) = cached {
+        let mut engine =
+            unsafe { EnginePotential::from_symbols(resident.symbols.clone(), config)? };
+        unsafe { engine.attach(resident) };
+        return Ok(engine);
+    }
+
+    let attempt = (|| {
+        let library = unsafe { open_library(&canonical) }
+            .map_err(|why| EngineError::Load(format!("{}: {why}", path.display())))?;
+        let symbols = unsafe { resolve(&library)? };
+        let engine = unsafe { EnginePotential::from_symbols(symbols.clone(), config)? };
+        let unload_refusal = unsafe { unload_refusal(&library, &symbols) };
+        let pin = match unload_refusal {
+            None => None,
+            Some(_) => unsafe { pin_library(&canonical) }
+                .map_err(|why| {
+                    EngineError::Load(format!(
+                        "{}: RTLD_NODELETE could not be set: {why}",
+                        path.display()
+                    ))
+                })?
+                .map(ManuallyDrop::new),
+        };
+        Ok((
+            Resident {
+                library: ManuallyDrop::new(library),
+                _pin: pin,
+                symbols,
+                unload_refusal,
+            },
+            engine,
+        ))
+    })()
+    .and_then(|pair| {
+        if file_identity(&canonical)? != identity {
+            return Err(replaced(&canonical));
+        }
+        Ok(pair)
     });
-    registry
-        .by_file
-        .insert(identity.clone(), Arc::clone(&resident));
-    registry.by_path.insert(canonical, identity);
-    Ok(resident)
+
+    let mut registry = registry();
+    match attempt {
+        Ok((resident, mut engine)) => {
+            let resident = Arc::new(resident);
+            registry.by_file.insert(
+                identity.clone(),
+                RegistryEntry::Ready(Arc::clone(&resident)),
+            );
+            registry.by_path.insert(canonical, identity);
+            REGISTRY.1.notify_all();
+            drop(registry);
+            unsafe { engine.attach(resident) };
+            Ok(engine)
+        }
+        Err(error) => {
+            registry.by_file.remove(&identity);
+            registry.by_path.retain(|_, known| *known != identity);
+            REGISTRY.1.notify_all();
+            Err(error)
+        }
+    }
 }
 
 // The instance is used by one caller at a time through `&mut self`. The
@@ -1080,24 +1147,31 @@ impl EnginePotential {
     /// Open the engine library at `path` and create an instance from the
     /// backend's configuration message.
     ///
-    /// The library stays resident for the life of the process, including
-    /// after a load that fails its ABI check or `rgpot_engine_create`. A later
-    /// load of the same file reuses it. `path` must name the file: a bare
-    /// library name, or a path whose file was replaced since it was loaded,
-    /// is [`EngineError::Load`].
+    /// A library is published to the resident registry only after its required
+    /// symbols and ABI identity validate and its first instance is created.
+    /// Failed first attempts are closed and removed from the loading table. A
+    /// later load of a published file reuses it. `path` must name the file: a
+    /// bare library name, or a path whose file was replaced since it was
+    /// loaded, is [`EngineError::Load`].
     ///
     /// # Safety
     ///
     /// The library must implement the engine C ABI with the signatures of
     /// this module, and `config` must be the message its create call reads.
     pub unsafe fn load(path: &Path, config: &[u8]) -> Result<Self, EngineError> {
-        let resident = unsafe { resident_library(path)? };
-        let symbols = resident.symbols.clone()?;
-        let mut engine = unsafe { Self::from_symbols(symbols, config)? };
-        engine.set_cache = unsafe { optional(&resident.library, "rgpot_engine_set_cache") };
-        engine.cache_counts = unsafe { optional(&resident.library, "rgpot_engine_cache_counts") };
-        engine.library = Some(resident);
-        Ok(engine)
+        unsafe { load_resident(path, config) }
+    }
+
+    /// Keep `resident` open for this instance and resolve the optional cache
+    /// exports it provides.
+    ///
+    /// # Safety
+    ///
+    /// `resident` must be the library whose symbols created this instance.
+    unsafe fn attach(&mut self, resident: Arc<Resident>) {
+        self.set_cache = unsafe { optional(&resident.library, "rgpot_engine_set_cache") };
+        self.cache_counts = unsafe { optional(&resident.library, "rgpot_engine_cache_counts") };
+        self.library = Some(resident);
     }
 
     /// Unload the plugin file at `path`: remove its registry entry and
@@ -1133,15 +1207,27 @@ impl EnginePotential {
                 )))
             }
         }
-        let Some(resident) = registry.by_file.remove(&identity) else {
-            return Err(EngineError::Invalid(format!(
-                "{}: this plugin was not loaded",
-                canonical.display()
-            )));
+        let resident = match registry.by_file.remove(&identity) {
+            Some(RegistryEntry::Ready(resident)) => resident,
+            Some(loading @ RegistryEntry::Loading { .. }) => {
+                registry.by_file.insert(identity, loading);
+                return Err(EngineError::Invalid(format!(
+                    "{}: this plugin is still loading",
+                    canonical.display()
+                )));
+            }
+            None => {
+                return Err(EngineError::Invalid(format!(
+                    "{}: this plugin was not loaded",
+                    canonical.display()
+                )))
+            }
         };
         if let Some(why) = &resident.unload_refusal {
             let message = format!("{}: {why}; the plugin stays loaded", canonical.display());
-            registry.by_file.insert(identity, resident);
+            registry
+                .by_file
+                .insert(identity, RegistryEntry::Ready(resident));
             return Err(EngineError::Unsupported {
                 operation: "rgpot_engine_unload_policy",
                 message,
@@ -1151,7 +1237,9 @@ impl EnginePotential {
             Ok(resident) => resident,
             Err(shared) => {
                 let live = Arc::strong_count(&shared) - 1;
-                registry.by_file.insert(identity, shared);
+                registry
+                    .by_file
+                    .insert(identity, RegistryEntry::Ready(shared));
                 return Err(EngineError::Invalid(format!(
                     "{}: {live} engine instance(s) still use this plugin",
                     canonical.display()

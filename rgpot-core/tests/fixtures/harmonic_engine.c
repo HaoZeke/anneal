@@ -49,8 +49,28 @@ static int native_calls = 0;
 static int batch_calls = 0;
 static int null_callback_clears = 0;
 static int last_oracle_rc = -1000000;
+#ifdef REENTER_IN_INITIALIZER
+static int initializer_reentry_failed = 0;
+#endif
 #ifdef FATAL_ONCE
 static int fatal_once_fired = 0;
+#endif
+
+#ifdef REENTER_IN_INITIALIZER
+__attribute__((constructor)) static void reenter_from_initializer(void) {
+  const char *address = getenv("RGPOT_FIXTURE_INIT_CALLBACK");
+  uintptr_t raw;
+  int (*callback)(void);
+  if (address == NULL) {
+    initializer_reentry_failed = 1;
+    return;
+  }
+  raw = (uintptr_t)strtoull(address, NULL, 16);
+  memcpy(&callback, &raw, sizeof(callback));
+  if (callback == NULL || callback() != 0) {
+    initializer_reentry_failed = 1;
+  }
+}
 #endif
 
 int fixture_destroy_count(void) { return destroyed; }
@@ -75,6 +95,13 @@ RgpotEngineAbiStamp rgpot_engine_abi_stamp(void) {
 RgpotEnginePot *rgpot_engine_create(const void *config, size_t config_len,
                                     char *errbuf, size_t errlen) {
   RgpotEnginePot *pot;
+#ifdef REENTER_IN_INITIALIZER
+  if (initializer_reentry_failed) {
+    snprintf(errbuf, errlen,
+             "harmonic engine: initializer could not load another engine");
+    return NULL;
+  }
+#endif
   if (config == NULL || config_len != sizeof(double)) {
     snprintf(errbuf, errlen, "harmonic engine: config is %zu bytes, need %zu",
              config_len, sizeof(double));

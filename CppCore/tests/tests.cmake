@@ -577,6 +577,30 @@ if(_on)
     COMMAND external_engine_refcount
             $<TARGET_FILE:external_refcount_engine>
             $<TARGET_FILE:external_refcount_empty>)
+
+  add_library(external_reentrant_engine SHARED
+              CppCore/tests/external_reentrant_engine.c)
+  target_include_directories(external_reentrant_engine PRIVATE
+                             "${RGPOT_TEST_ROOT}/CppCore")
+  target_compile_definitions(external_reentrant_engine PRIVATE
+                             RGPOT_ENGINE_BUILD)
+  target_link_libraries(external_reentrant_engine PRIVATE ${CMAKE_DL_LIBS})
+  add_executable(external_constructor_reentry
+                 CppCore/tests/external_constructor_reentry.cpp)
+  target_include_directories(external_constructor_reentry PRIVATE
+                             "${RGPOT_TEST_ROOT}/CppCore"
+                             "${RGPOT_TEST_ROOT}/include")
+  target_compile_definitions(external_constructor_reentry PRIVATE
+                             ${_rgpot_test_definitions})
+  target_compile_features(external_constructor_reentry PRIVATE cxx_std_20)
+  target_link_libraries(external_constructor_reentry PRIVATE
+                        ${_rgpot_test_libs})
+  set_target_properties(external_constructor_reentry
+                        PROPERTIES ENABLE_EXPORTS ON)
+  rgpot_add_test(external_constructor_reentry
+    COMMAND external_constructor_reentry
+            $<TARGET_FILE:external_reentrant_engine>
+            $<TARGET_FILE:external_refcount_engine>)
 endif()
 
 add_subdirectory(CppCore/tests/plugin)

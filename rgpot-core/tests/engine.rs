@@ -5,6 +5,7 @@ use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use rgpot_core::engine::{
     AcquireReason, CoordTransformFn, CoordinateTransform, EngineCallbacks, EngineError,
@@ -1625,9 +1626,69 @@ fn a_bare_library_name_is_refused() {
     assert!(!library_is_mapped(&path));
 }
 
+static INITIALIZER_REENTRY_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+extern "C" fn initializer_reentry_callback() -> c_int {
+    std::panic::catch_unwind(|| {
+        let path = INITIALIZER_REENTRY_PATH
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+            .expect("initializer reentry path");
+        unsafe { EnginePotential::load(&path, &config()) }.map(drop)
+    })
+    .map_or(1, |result| if result.is_ok() { 0 } else { 1 })
+}
+
+#[test]
+fn an_initializer_can_load_another_engine_without_holding_the_registry_lock() {
+    const TEST_NAME: &str =
+        "an_initializer_can_load_another_engine_without_holding_the_registry_lock";
+    if std::env::var_os("RGPOT_INITIALIZER_REENTRY_CHILD").is_none() {
+        let mut child = std::process::Command::new(
+            std::env::current_exe().expect("path to the engine test executable"),
+        )
+        .args(["--exact", TEST_NAME, "--nocapture"])
+        .env("RGPOT_INITIALIZER_REENTRY_CHILD", "1")
+        .spawn()
+        .expect("spawn the initializer reentry child");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(status) = child.try_wait().expect("wait for reentry child") {
+                assert!(
+                    status.success(),
+                    "initializer reentry child failed: {status}"
+                );
+                return;
+            }
+            if Instant::now() >= deadline {
+                child.kill().expect("kill deadlocked reentry child");
+                child.wait().expect("reap deadlocked reentry child");
+                panic!("plugin initializer deadlocked while loading another engine");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    let outer = build("harmonic_initializer_reentry", &["REENTER_IN_INITIALIZER"]);
+    let inner = build("harmonic_initializer_inner", &[]);
+    *INITIALIZER_REENTRY_PATH
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(inner);
+    std::env::set_var(
+        "RGPOT_FIXTURE_INIT_CALLBACK",
+        format!("{:x}", initializer_reentry_callback as usize),
+    );
+    drop(load(&outer));
+    std::env::remove_var("RGPOT_FIXTURE_INIT_CALLBACK");
+    *INITIALIZER_REENTRY_PATH
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+}
+
 #[cfg(target_os = "linux")]
 #[test]
-fn load_failures_stay_resident_and_repeat_their_error() {
+fn failed_first_loads_are_closed_and_can_be_retried() {
     let failures = [
         (
             build("harmonic_failed_missing", &["NO_FORCE", "NO_BATCH"]),
@@ -1650,15 +1711,16 @@ fn load_failures_stay_resident_and_repeat_their_error() {
             .err()
             .expect("fixture must fail to load");
         assert!(
-            library_is_mapped(&path),
-            "{} was unmapped after load failed",
+            !library_is_mapped(&path),
+            "{} stayed mapped after load failed",
             path.display()
         );
         let again = unsafe { EnginePotential::load(&path, &config) }
             .err()
             .expect("fixture must fail to load again");
         assert_eq!(again, first);
-        assert_eq!(link_maps_named(file_name(&path)), 1);
+        assert!(!library_is_mapped(&path));
+        assert_eq!(link_maps_named(file_name(&path)), 0);
     }
 }
 
