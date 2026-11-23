@@ -1058,6 +1058,19 @@ rule gmin_panel:
         bash scripts/gmin_panel/enter_bench.sh --summarize --tex
         """
 
+# Sutton–Chen Au35, Au38 and Au55 against public PyPhysTree c-MCTS.
+# Not part of `rule all`.
+#   snakemake -s workflow/Snakefile cmcts_au
+rule cmcts_au:
+    output:
+        "bench/cmcts-au/seeds.csv",
+        "bench/cmcts-au/summary.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/cmcts_au/enter.sh
+        """
+
 
 # Paired (H2O)16 rows. Not part of `rule all`. The script rewrites the
 # summary from the committed seeds and does not start a search.
