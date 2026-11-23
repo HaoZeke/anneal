@@ -61,7 +61,7 @@ For =GminTip4p=, set it to =gmin_water_geometry()=, as =examples/h2h_seed= does.
   The archive walk still reverses a chain from the declared bonds when that arm is absent.
   A quench from that walk, or from the shell walk, can lower the published minimum.
   It does not reset the main chain's stall clock, it does not pay the move allocator, and a stall escape returns to a minimum the main chain quenched.
-  Every rigid search prints one =rigid_diag= line with the shell entries, the archive entries, and the auxiliary records kept or withheld.
+  A rigid search prints nothing. It returns the shell entries, the archive entries, and the auxiliary records kept or withheld in =Outcome::rigid_path=, and the Python =cluster_search= puts them in its =rigid_path= dict.
 
 * Presets
 

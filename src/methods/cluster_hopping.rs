@@ -1402,6 +1402,8 @@ pub struct Outcome {
     /// The energy bias as the run left it, under [`Config::energy_bias`] once
     /// its first sample has filled.
     pub energy_bias: Option<crate::dos::EnergyBias>,
+    /// Rigid side-walk counts for this search; `None` for an atomic library.
+    pub rigid_path: Option<RigidPathDiag>,
 }
 
 /// Relaxes `x`, charging every evaluation, and stopping when the budget ends.
@@ -3533,17 +3535,24 @@ fn rigid_centres_clear(state: ArrayView1<f64>, n: usize, min_d: f64) -> bool {
 /// Counts of the rigid side walks, one search at a time.
 ///
 /// The archive-entry breakpoint sees only the later walk. These counts
-/// also cover the shell walk and every auxiliary record decision, and a
-/// rigid search prints them once so each TIP4P cell carries the same line.
-#[derive(Clone, Copy, Default)]
-struct RigidPathDiag {
-    shell: u64,
-    archive: u64,
-    recorded: u64,
-    withhold_nonfinite: u64,
-    withhold_insane: u64,
-    withhold_overlap: u64,
-    withhold_gradient: u64,
+/// also cover the shell walk and every auxiliary record decision. A rigid
+/// search returns them in [`Outcome::rigid_path`] and prints nothing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RigidPathDiag {
+    /// Shell walks entered.
+    pub shell: u64,
+    /// Archive walks entered.
+    pub archive: u64,
+    /// Auxiliary quenches kept as incumbent candidates.
+    pub recorded: u64,
+    /// Auxiliary quenches withheld for a non-finite energy.
+    pub withhold_nonfinite: u64,
+    /// Auxiliary quenches withheld for an insane energy or geometry.
+    pub withhold_insane: u64,
+    /// Auxiliary quenches withheld for two centres closer than half a contact.
+    pub withhold_overlap: u64,
+    /// Auxiliary quenches withheld for a gradient above the record tolerance.
+    pub withhold_gradient: u64,
 }
 
 thread_local! {
@@ -3912,6 +3921,67 @@ mod rigid_step_tests {
             }
         }
         state
+    }
+
+    fn stalled_rigid_search() -> Outcome {
+        let n = 4;
+        let mut cfg = Config::recommended_tip4p(n);
+        cfg.restart_patience = 1;
+        cfg.relax_steps = 1;
+        cfg.move_library = MoveLibrary::RigidBody {
+            n_molecules: n,
+            translate_step: 1.0e-6,
+            rotate_step: std::f64::consts::PI / 3.0,
+            local: true,
+            reverse_cycles: false,
+            relocate: false,
+        };
+        cfg.rigid_body_geometry = None;
+        let start = tetra_centres();
+        let mut relax = |ledger: &mut Ledger, _x: ArrayView1<f64>, _steps: usize| {
+            let _ = ledger.charge();
+            (-1.0, start.clone())
+        };
+        let patience = cfg.restart_patience * RIGID_CAGE_WINDOWS;
+        let mut ledger = Ledger::new(patience + 16);
+        let mut rng = StdRng::seed_from_u64(11);
+        run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("valid")
+    }
+
+    #[test]
+    fn a_rigid_search_returns_its_side_walk_counts() {
+        let diag = stalled_rigid_search()
+            .rigid_path
+            .expect("a rigid search reports its counts");
+        assert!(diag.shell > 0, "the shell walk never ran: {diag:?}");
+        assert!(diag.recorded > 0, "no auxiliary quench was kept: {diag:?}");
+    }
+
+    #[test]
+    fn a_rigid_search_writes_nothing_to_stderr_by_default() {
+        const CHILD: &str = "ANNEAL_RIGID_STDERR_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            assert!(stalled_rigid_search().rigid_path.is_some());
+            return;
+        }
+        let run = std::process::Command::new(std::env::current_exe().expect("test binary"))
+            .args([
+                "--exact",
+                "methods::cluster_hopping::rigid_step_tests::a_rigid_search_writes_nothing_to_stderr_by_default",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .env_remove("ANNEAL_HOP_TRACE")
+            .output()
+            .expect("spawn the test binary");
+        let stdout = String::from_utf8_lossy(&run.stdout);
+        assert!(run.status.success(), "child failed: {stdout}");
+        assert!(stdout.contains("1 passed"), "child ran no test: {stdout}");
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        assert!(
+            stderr.is_empty(),
+            "a rigid search wrote to stderr: {stderr}"
+        );
     }
 
     #[test]
@@ -10645,19 +10715,7 @@ where
         None => Vec::new(),
     };
     let final_radius = bias.merge_radius();
-    if RIGID {
-        let diag = rigid_diag_take();
-        eprintln!(
-            "rigid_diag shell={} archive={} recorded={} withhold_nonfinite={} withhold_insane={} withhold_overlap={} withhold_gradient={}",
-            diag.shell,
-            diag.archive,
-            diag.recorded,
-            diag.withhold_nonfinite,
-            diag.withhold_insane,
-            diag.withhold_overlap,
-            diag.withhold_gradient,
-        );
-    }
+    let rigid_path = RIGID.then(rigid_diag_take);
     if let Some(slot) = carried {
         // Handed back so the next chain inherits what this one learned.
         *slot = bias;
@@ -10827,6 +10885,7 @@ where
             r
         }),
         energy_bias: ebias,
+        rigid_path,
     })
 }
 

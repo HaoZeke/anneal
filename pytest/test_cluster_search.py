@@ -169,6 +169,34 @@ def test_cluster_search_water_sites(preset):
     assert out["best_energy"] == pytest.approx(rigid_energy_grad(out["best"])[0])
 
 
+def test_cluster_search_water_sites_is_quiet_and_reports_the_walks(capfd):
+    n = 3
+    start = np.concatenate(
+        [np.array([0.0, 0.0, 0.0, 3.4, 0.0, 0.0, 0.0, 3.4, 0.0]), np.full(3 * n, 0.3)]
+    )
+    capfd.readouterr()
+    out = cluster_search(
+        lambda x: rigid_energy_grad(x)[0],
+        lambda x: rigid_energy_grad(x)[1],
+        n,
+        600,
+        seed=0,
+        start=start,
+        water_sites=WATER_SITES,
+    )
+    captured = capfd.readouterr()
+    assert captured.err == ""
+    assert set(out["rigid_path"]) == {
+        "shell",
+        "archive",
+        "recorded",
+        "withhold_nonfinite",
+        "withhold_insane",
+        "withhold_overlap",
+        "withhold_gradient",
+    }
+
+
 def test_cluster_search_water_sites_validation():
     f = lambda x: rigid_energy_grad(x)[0]  # noqa: E731
     g = lambda x: rigid_energy_grad(x)[1]  # noqa: E731

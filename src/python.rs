@@ -3922,6 +3922,17 @@ fn cluster_search(
     dict.set_item("hops", out.hops)?;
     dict.set_item("accepted", out.accepted)?;
     dict.set_item("nve_unavailable", out.nve_unavailable)?;
+    if let Some(path) = out.rigid_path {
+        let counts = PyDict::new(py);
+        counts.set_item("shell", path.shell)?;
+        counts.set_item("archive", path.archive)?;
+        counts.set_item("recorded", path.recorded)?;
+        counts.set_item("withhold_nonfinite", path.withhold_nonfinite)?;
+        counts.set_item("withhold_insane", path.withhold_insane)?;
+        counts.set_item("withhold_overlap", path.withhold_overlap)?;
+        counts.set_item("withhold_gradient", path.withhold_gradient)?;
+        dict.set_item("rigid_path", counts)?;
+    }
     let quench = match stats.local_step {
         LocalStep::Tric => "tric",
         _ => "lbfgs",

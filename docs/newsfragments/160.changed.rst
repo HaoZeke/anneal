@@ -10,3 +10,7 @@ The archive walk no longer indexes past its kernels when every arm
 reverses a chain, and it ends when it has no proposer.
 A rigid search restores its separate chain incumbent on a ledger that
 an atomic search had cleared.
+The rigid search no longer prints a rigid_diag line to stderr. Its
+side-walk counts are returned in the outcome as rigid_path, and the
+Python cluster_search carries them as a rigid_path dict for a rigid
+body. A test checks that a rigid search writes nothing to stderr.
