@@ -437,7 +437,7 @@ rule covalent_h2h:
 # twelve seeds, 1e5 calls, 3000 K electronic temperature; Si13 and Si20
 # run once they have a reference. Needs xtb 6.7.1, CREST and rgpot's
 # libxtb_engine.so (paths in the script). Not part of `rule all`.
-# Rows and summaries are appended to bench/covalent-h2h/gfn2/rows.csv and
+# Rows and summaries are appended to bench/covalent-h2h/gfn2/rows-v2.csv and
 # summaries.csv; the output is a stamp under /work, because Snakemake
 # deletes declared outputs before a job and would take the rows with it.
 #   snakemake -s workflow/Snakefile covalent_gfn2_crest
