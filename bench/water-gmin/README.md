@@ -13,7 +13,17 @@ The driver is `scripts/tip4p_h2h/enter_water_gmin.sh`, the Snakemake rule is
 
 Both arms open the same molecular centres: `h2h_seed` writes the start it
 draws for a seed and GMIN reads it as its `coords`; every row carries the
-start's sha1. One charged evaluation is one entry to the potential. A run
+start's sha1. In the pre-correction rows below (recorded in
+`85987cd95f143bd1277c4f399360975c3952390e` with
+`bench/lj104-lattice/v2/h2h-gmin.patch` from
+`465e583be21e9b82befc94ff01cf931a13f8f0a9`,
+`a31221a67883d20032a029e34e3d81bd62c5bcb786c97fff02a9c234adc34553`),
+anneal charged one `value_and_gradient` pass while GMIN's cap counted every
+entry to `POTENTIAL` (`GRADT=true` and `GRADT=false` alike); in the current
+in-tree `h2h-gmin.patch`
+(`3bf5d49a0a1cb0512a228212482e76e98195946096ceae3b54e88ca4a43b7189`), GMIN
+caps `GRADT=true` `gradient_passes` and reports `GRADT=false`
+`energy_only_entries` separately. A run
 stops at the Cambridge Cluster Database header plus 0.001 kJ/mol or at the
 budget. Anneal scores the lowest energy it evaluates, GMIN the lowest quench.
 
