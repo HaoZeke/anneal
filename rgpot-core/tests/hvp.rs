@@ -841,7 +841,14 @@ fn hvp_allows_an_absent_cell_tensor_for_molecular_callbacks() {
 
     let mut hv = vec![0.0; v.len()];
     let status = unsafe {
-        rgpot_potential_hvp(handle.pot, &input, v.as_ptr(), 0.0, ANALYTIC, hv.as_mut_ptr())
+        rgpot_potential_hvp(
+            handle.pot,
+            &input,
+            v.as_ptr(),
+            0.0,
+            ANALYTIC,
+            hv.as_mut_ptr(),
+        )
     };
     assert_eq!(status, rgpot_status_t::RGPOT_SUCCESS);
     assert_eq!(handle.morse.hvp_calls.load(Ordering::SeqCst), 1);
