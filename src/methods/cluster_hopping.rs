@@ -1569,6 +1569,23 @@ pub fn structure_is_sane(x: ArrayView1<f64>, min_sep: f64) -> bool {
     x.iter().all(|value| value.is_finite()) && min_pair_distance(x) >= min_sep
 }
 
+/// Whether every pair clears the shortest bond its atomic numbers permit.
+///
+/// The bound comes from [`shortest_bond_length`], so it follows the existing
+/// covalent-radius table and admits multiple bonds. `absolute` remains the
+/// fallback for an unknown element.
+pub fn clears_species_sanity(x: ArrayView1<f64>, elements: &[u32], absolute: f64) -> bool {
+    let n = x.len() / 3;
+    x.len() == 3 * elements.len()
+        && x.iter().all(|value| value.is_finite())
+        && (0..n).all(|a| {
+            ((a + 1)..n).all(|b| {
+                let floor = shortest_bond_length(elements[a], elements[b]).max(absolute);
+                pair_distance(x, a, b) > floor
+            })
+        })
+}
+
 /// Whether every coordinate is finite and every pair lies past `floor`.
 pub fn clears_call_floor(x: ArrayView1<f64>, floor: f64) -> bool {
     x.iter().all(|value| value.is_finite()) && min_pair_distance(x) > floor
@@ -2443,6 +2460,11 @@ pub(crate) fn separate_contacts(
 }
 
 fn quench_is_sane(cfg: &Config, energy: f64, x: ArrayView1<f64>) -> bool {
+    if let Some(elements) = cfg.call_floor_elements.as_deref()
+        && !clears_species_sanity(x, elements, cfg.call_floor.unwrap_or(OVERLAP_CALL_LIMIT))
+    {
+        return false;
+    }
     let minimum = if cfg.species.is_some() {
         OVERLAP_SEPARATION
     } else {
@@ -13545,6 +13567,19 @@ mod call_floor_tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn species_sanity_rejects_compression_but_keeps_multiple_bonds() {
+        let silicon = [14, 14];
+        let compressed = Array1::from(vec![0.0, 0.0, 0.0, 1.60, 0.0, 0.0]);
+        let physical = Array1::from(vec![0.0, 0.0, 0.0, 2.20, 0.0, 0.0]);
+        assert!(!clears_species_sanity(compressed.view(), &silicon, FLOOR));
+        assert!(clears_species_sanity(physical.view(), &silicon, FLOOR));
+
+        let carbon = [6, 6];
+        let triple = Array1::from(vec![0.0, 0.0, 0.0, 1.20, 0.0, 0.0]);
+        assert!(clears_species_sanity(triple.view(), &carbon, FLOOR));
     }
 
     #[test]

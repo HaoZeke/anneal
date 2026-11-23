@@ -19,8 +19,8 @@
 //! probe runs on a two-atom handle and is charged to the same ledger. There
 //! is no pair-range cut, because dispersion has no finite reach.
 //! The call floor is the handle's 0.90 Å, raised pair by pair to
-//! `element_call_floor` of the atomic numbers: 1.55 Å for Si–Si and 1.06 Å
-//! for C–C.
+//! the shortest bond derived from the atomic numbers' covalent radii:
+//! 1.71 Å for Si–Si and 1.17 Å for C–C.
 //!
 //! The start is a random cluster in the scaled start radius from
 //! `StdRng::seed_from_u64(seed)`. `H2H_START_ONLY=1` writes it to
@@ -104,8 +104,9 @@ fn evaluate(pot: &RgpotObjective, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
 /// The handle's answer to a geometry it refuses, without charging for it.
 ///
 /// A line search reads the non-finite value as an uphill step and shortens it.
-fn refused(x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
-    rgpot_eindir::refuses_geometry(&x.to_vec()).then(|| (f64::NAN, Array1::zeros(x.len())))
+fn refused(pot: &RgpotObjective, x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
+    pot.refuses_geometry(x.as_slice().unwrap_or(&[]))
+        .then(|| (f64::NAN, Array1::zeros(x.len())))
 }
 
 /// Bond length over 2^(1/6) and well depth of the homonuclear dimer.
@@ -260,24 +261,26 @@ fn main() {
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
         optimiser.forget();
         let (value, relaxed, _) = optimiser.minimize(x, iterations, |v| {
-            if let Some(refused) = refused(v) {
+            let pot = pot.lock().expect("pot");
+            if let Some(refused) = refused(&pot, v) {
                 return Some(refused);
             }
             if !led.charge() {
                 return None;
             }
-            Some(evaluate(&pot.lock().expect("pot"), v))
+            Some(evaluate(&pot, v))
         });
         (value, relaxed)
     };
     let mut grad = |led: &mut Ledger, v: ArrayView1<f64>| {
-        if let Some((_, gradient)) = refused(v) {
+        let pot = pot.lock().expect("pot");
+        if let Some((_, gradient)) = refused(&pot, v) {
             return Some(gradient);
         }
         if !led.charge() {
             return None;
         }
-        Some(evaluate(&pot.lock().expect("pot"), v).1)
+        Some(evaluate(&pot, v).1)
     };
     let outcome: Outcome = run_with_gradient(
         &cfg,

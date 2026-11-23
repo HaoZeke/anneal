@@ -15,6 +15,7 @@
 use anneal_core::catalog::FreshEvaluation;
 use anneal_core::catalog::molecular::{GFN2_ACCURACY, GFN2_MAX_ITERATIONS, RGPOT_XTB_ENGINE_REV};
 use anneal_core::compatibility::{AbiStamp, EngineDescriptor, ProtocolVersion};
+use anneal_core::methods::cluster_hopping::{OVERLAP_CALL_LIMIT, shortest_bond_length};
 use eindir_core::ffi::{EindirObjectiveWrapper, eindir_core_abi_compatible, eindir_objective_t};
 use eindir_core::gradient::DifferentiableObjective;
 use libloading::{Library, Symbol};
@@ -35,7 +36,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 pub(crate) const OVERLAP_SEPARATION_A: f64 = 0.35;
 /// Same gate as `OVERLAP_CALL_LIMIT`. Below a covalent O–H, above the shell
 /// where xtb's SCC fails.
-pub(crate) const OVERLAP_CALL_LIMIT_A: f64 = 0.90;
+pub(crate) const OVERLAP_CALL_LIMIT_A: f64 = OVERLAP_CALL_LIMIT;
 
 static SCC_REJECTED: AtomicUsize = AtomicUsize::new(0);
 static GEOMETRY_REJECTED: AtomicUsize = AtomicUsize::new(0);
@@ -66,8 +67,23 @@ fn note_geometry_rejected(min_pair_a: f64) {
 ///
 /// A caller that charges per call asks this first, so a geometry the handle
 /// will not evaluate costs nothing.
-pub(crate) fn refuses_geometry(positions: &[f64]) -> bool {
-    min_pair_distance_a(positions) <= OVERLAP_CALL_LIMIT_A
+pub(crate) fn refuses_geometry(positions: &[f64], atomic_numbers: &[i32]) -> bool {
+    geometry_has_short_pair(positions, atomic_numbers, OVERLAP_CALL_LIMIT_A)
+}
+
+fn geometry_has_short_pair(positions: &[f64], atomic_numbers: &[i32], absolute: f64) -> bool {
+    let n = positions.len() / 3;
+    if atomic_numbers.len() < n {
+        return min_pair_distance_a(positions) <= absolute;
+    }
+    (0..n).any(|a| {
+        ((a + 1)..n).any(|b| {
+            let za = u32::try_from(atomic_numbers[a]).unwrap_or(0);
+            let zb = u32::try_from(atomic_numbers[b]).unwrap_or(0);
+            let floor = shortest_bond_length(za, zb).max(absolute);
+            pair_distance_a(positions, a, b) <= floor
+        })
+    })
 }
 
 fn min_pair_distance_a(positions: &[f64]) -> f64 {
@@ -78,20 +94,40 @@ fn min_pair_distance_a(positions: &[f64]) -> f64 {
     let mut best = f64::INFINITY;
     for i in 0..n {
         for j in (i + 1)..n {
-            let dx = positions[3 * i] - positions[3 * j];
-            let dy = positions[3 * i + 1] - positions[3 * j + 1];
-            let dz = positions[3 * i + 2] - positions[3 * j + 2];
-            best = best.min((dx * dx + dy * dy + dz * dz).sqrt());
+            best = best.min(pair_distance_a(positions, i, j));
         }
     }
     best
 }
 
+fn pair_distance_a(positions: &[f64], a: usize, b: usize) -> f64 {
+    let dx = positions[3 * a] - positions[3 * b];
+    let dy = positions[3 * a + 1] - positions[3 * b + 1];
+    let dz = positions[3 * a + 2] - positions[3 * b + 2];
+    (dx * dx + dy * dy + dz * dz).sqrt()
+}
+
 const GFN2: i32 = 3;
+const RGPOT_XTB_RC_SCC_NOT_CONVERGED: i32 = -4;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    unsafe extern "C" fn scc_failure(
+        _pot: *mut c_void,
+        _n: i64,
+        _positions: *const f64,
+        _atomic_numbers: *const i32,
+        _gradient: *mut f64,
+        _energy: *mut f64,
+        _variance: *mut f64,
+        _cell: *const f64,
+    ) -> i32 {
+        RGPOT_XTB_RC_SCC_NOT_CONVERGED
+    }
+
+    unsafe extern "C" fn reset_noop(_pot: *mut c_void) {}
 
     #[test]
     fn descriptor_maps_the_eindir_stamp_and_optional_build_identity() {
@@ -115,6 +151,32 @@ mod tests {
         assert_eq!(descriptor.abi.dlpack_minor, 4);
         assert_eq!(descriptor.abi.features, 0b101);
         assert_eq!(descriptor.build_identity.as_deref(), Some("rgpot@abc123"));
+    }
+
+    #[test]
+    fn species_guard_uses_covalent_radii() {
+        let compressed_si = [0.0, 0.0, 0.0, 1.60, 0.0, 0.0];
+        let physical_si = [0.0, 0.0, 0.0, 2.20, 0.0, 0.0];
+        assert!(refuses_geometry(&compressed_si, &[14, 14]));
+        assert!(!refuses_geometry(&physical_si, &[14, 14]));
+
+        let carbon_triple_bond = [0.0, 0.0, 0.0, 1.20, 0.0, 0.0];
+        assert!(!refuses_geometry(&carbon_triple_bond, &[6, 6]));
+    }
+
+    #[test]
+    fn worker_rejects_a_reported_scc_failure() {
+        let mut worker = XtbWorker::spawn(scc_failure, reset_noop, std::ptr::null_mut());
+        let mut gradient = [0.0; 6];
+        let result = worker.evaluate(
+            2,
+            &[0.0, 0.0, 0.0, 2.0, 0.0, 0.0],
+            &[14, 14],
+            &[0.0; 9],
+            &mut gradient,
+        );
+        assert!(matches!(result, Err(WorkerFail::SccNotConverged)));
+        worker.shutdown();
     }
 }
 
@@ -266,6 +328,7 @@ unsafe fn xtb_worker_main(
 
 enum WorkerFail {
     Dead,
+    SccNotConverged,
     Rejected,
 }
 
@@ -338,6 +401,7 @@ impl XtbWorker {
     ) -> Result<(f64, f64), WorkerFail> {
         match self.exchange(n, positions, atomic_numbers, cell, forces) {
             Ok(answer) => Ok(answer),
+            Err(WorkerFail::SccNotConverged) => Err(WorkerFail::SccNotConverged),
             Err(WorkerFail::Rejected) => Err(WorkerFail::Rejected),
             Err(WorkerFail::Dead) => {
                 let force = self.force;
@@ -390,6 +454,9 @@ impl XtbWorker {
         if !read_full(self.from_child, force_bytes) {
             return Err(WorkerFail::Dead);
         }
+        if rc == RGPOT_XTB_RC_SCC_NOT_CONVERGED {
+            return Err(WorkerFail::SccNotConverged);
+        }
         if rc != 0 || !energy.is_finite() || forces.iter().any(|value| !value.is_finite()) {
             return Err(WorkerFail::Rejected);
         }
@@ -415,6 +482,7 @@ struct XtbKernel {
     destroy: Symbol<'static, XtbDestroy>,
     worker: XtbWorker,
     evaluations: usize,
+    atomic_numbers: Vec<i32>,
     /// Calls with a pair at or inside this distance are refused before xtb.
     overlap_limit_a: f64,
     /// Force buffer reused across calls. The owned DLPack tensor copies
@@ -505,7 +573,7 @@ unsafe extern "C" fn xtb_callback(
     let atomic_numbers = unsafe { std::slice::from_raw_parts(z, n) };
     let cell = unsafe { std::slice::from_raw_parts(boxp, 9) };
     let min_pair = min_pair_distance_a(positions);
-    if min_pair <= kernel.overlap_limit_a {
+    if geometry_has_short_pair(positions, atomic_numbers, kernel.overlap_limit_a) {
         // xtb's SCC aborts when a trial step stacks two atoms. That geometry
         // is not an energy the search can record. The caller turns the error
         // into an uphill step and shortens it, so a finite quench stays eligible.
@@ -534,8 +602,12 @@ unsafe extern "C" fn xtb_callback(
             .evaluate(n, positions, atomic_numbers, cell, &mut kernel.scratch)
         {
             Ok(answer) => answer,
-            Err(_) => {
+            Err(WorkerFail::SccNotConverged) => {
                 note_scc_rejected(min_pair);
+                kernel.scratch.fill(f64::NAN);
+                return rgpot_status_t::RGPOT_INTERNAL_ERROR;
+            }
+            Err(WorkerFail::Dead | WorkerFail::Rejected) => {
                 kernel.scratch.fill(f64::NAN);
                 return rgpot_status_t::RGPOT_INTERNAL_ERROR;
             }
@@ -607,6 +679,14 @@ impl Drop for RgpotObjective {
 }
 
 impl RgpotObjective {
+    pub(crate) fn refuses_geometry(&self, coordinates: &[f64]) -> bool {
+        if self.xtb.is_null() {
+            return false;
+        }
+        let kernel = unsafe { &*self.xtb };
+        geometry_has_short_pair(coordinates, &kernel.atomic_numbers, kernel.overlap_limit_a)
+    }
+
     pub(crate) fn wrapper(&self) -> EindirObjectiveWrapper<'_> {
         let stamp = rgpot_eindir_abi_stamp();
         assert_eq!(
@@ -733,6 +813,7 @@ impl RgpotObjective {
             destroy,
             worker,
             evaluations: 0,
+            atomic_numbers: atmnrs.to_vec(),
             overlap_limit_a,
             scratch: Vec::new(),
         });
