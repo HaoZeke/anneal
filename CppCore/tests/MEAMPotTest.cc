@@ -567,6 +567,17 @@ TEST_CASE("MEAMPot rejects bad input and keys its parameters", "[meam]") {
   const double box[9] = {20, 0, 0, 0, 20, 0, 0, 0, 20};
   REQUIRE_THROWS_WITH(ni.forceImpl(rgpot::ForceInput{z.size(), pos.data(), z.data(), box}, nullptr),
                       Catch::Matchers::ContainsSubstring("null output buffer"));
+  rgpot::ForceOut missing{};
+  missing.energy = 4.0;
+  REQUIRE_THROWS_WITH(
+      ni.forceImpl(rgpot::ForceInput{z.size(), pos.data(), z.data(), box},
+                   &missing),
+      Catch::Matchers::ContainsSubstring("null force buffer"));
+  REQUIRE(missing.energy == 4.0);
+  rgpot::ForceOut none{};
+  REQUIRE_NOTHROW(
+      ni.forceImpl(rgpot::ForceInput{0, nullptr, nullptr, nullptr}, &none));
+  REQUIRE(none.energy == 0.0);
   REQUIRE_THROWS_AS(eval(ni, pos, bad_z, box), std::invalid_argument);
   REQUIRE_THROWS_AS(make_pot("library.meam", "", {"Ni", "Ni", "Xx"}), std::invalid_argument);
 }
