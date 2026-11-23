@@ -15,7 +15,7 @@ import os
 import socket
 import subprocess
 from pathlib import Path
-from typing import Any, Self
+from typing import Any
 
 import numpy as np
 from ase.calculators.calculator import (
@@ -158,7 +158,7 @@ class RgpotRpcCalculator(Calculator):
                 self._server_proc.wait()
                 self._server_proc = None
 
-    def __enter__(self) -> Self:
+    def __enter__(self) -> "RgpotRpcCalculator":
         return self
 
     def __exit__(self, *exc: object) -> None:
