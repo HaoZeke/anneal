@@ -244,8 +244,16 @@ void TersoffSiC::forceImpl(const ForceInput &in, ForceOut *out) const {
   for (double &s : out->stress) {
     s = 0.0;
   }
-  if (in.nAtoms > 0 && (in.pos == nullptr || in.box == nullptr ||
-                        in.atmnrs == nullptr || out->F == nullptr)) {
+  if (in.nAtoms > 0 && in.pos == nullptr) {
+    throw std::invalid_argument("TersoffSiC: null positions");
+  }
+  if (in.nAtoms > 0 && in.box == nullptr) {
+    throw std::invalid_argument("TersoffSiC: null cell");
+  }
+  if (in.nAtoms > 0 && in.atmnrs == nullptr) {
+    throw std::invalid_argument("TersoffSiC: atomic numbers are required");
+  }
+  if (in.nAtoms > 0 && out->F == nullptr) {
     throw std::invalid_argument("TersoffSiC: null force buffer");
   }
   double strain[6] = {};

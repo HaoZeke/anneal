@@ -558,3 +558,14 @@ TEST_CASE("Tersoff 1989 stress with a held list and without a pair",
     REQUIRE(component == 0.0);
   }
 }
+
+TEST_CASE("Tersoff 1989 names a missing species buffer",
+          "[TersoffSiC][stress]") {
+  const double position[3] = {1.0, 2.0, 3.0};
+  const double cell[9] = {20, 0, 0, 0, 20, 0, 0, 0, 20};
+  double force[3] = {};
+  rgpot::ForceOut out{force, 0.0, 0.0, {}, 0};
+  const TersoffSiC pot;
+  REQUIRE_THROWS_WITH(pot.forceImpl({1, position, nullptr, cell}, &out),
+                      "TersoffSiC: atomic numbers are required");
+}
