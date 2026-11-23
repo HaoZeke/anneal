@@ -225,6 +225,7 @@ def main(argv: list[str]) -> int:
         cargo, "rustc", "--lib", "--release",
         "--manifest-path", str(root / "Cargo.toml"),
         "--target-dir", target_dir,
+        "--no-default-features",
     ]
     # meson lists Cargo.lock as an input: the build is always locked.
     cmd.append("--locked")
@@ -274,7 +275,7 @@ def main(argv: list[str]) -> int:
     foreign = sorted({
         line.split()[-1] for line in listing.splitlines()
         if line.strip() and not line.split()[-1].startswith("anneal_")
-        and line.split()[-1].startswith(("eindir_", "rgmin_", "rgsaddle_"))
+        and line.split()[-1].startswith(("eindir_", "rgmin_", "rgsaddle_", "rkr_", "rkrdb_"))
     })
     if foreign:
         subprocess.check_call(

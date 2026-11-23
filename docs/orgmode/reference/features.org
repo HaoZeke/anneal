@@ -1,7 +1,17 @@
 #+TITLE: Cargo features
 #+OPTIONS: toc:nil todo:nil num:nil author:nil ^:nil
 
-The library builds with no features. Each flag below is off until named to Cargo. The command is the check that compiles that flag.
+The library enables =catalog= by default (=default = ["catalog"]=). Every other flag below is off until named to Cargo. The command is the check that compiles that flag.
+
+* =catalog= (default)
+
+Durable =readcon-db= minima and PES network corpora (=minima_db= and =pes_db=), backed by =readcon-core= and =readcon-db=. Kept on by default so existing consumers and CLI examples see no public API change.
+
+Downstream Rust crates that already link another version of =readcon-db= can disable it with =default-features = false= (or =--no-default-features=) so =anneal-core= omits =readcon-core= and =readcon-db= along with their unmangled =rkr_*= and =rkrdb_*= C symbols:
+
+#+begin_src sh
+cargo check --locked --no-default-features
+#+end_src
 
 * =ira=
 

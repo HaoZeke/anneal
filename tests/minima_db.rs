@@ -1,3 +1,5 @@
+#![cfg(feature = "catalog")]
+
 use anneal_core::minima_db::{MinimaCorpus, MinimaSet, MinimaUnits};
 use ndarray::Array1;
 

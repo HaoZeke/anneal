@@ -35,9 +35,12 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(Corrosion)
 
 # The C ABI is the `capi` feature. Without it the imported library has
-# no anneal_* exports and a C consumer cannot link.
+# no anneal_* exports and a C consumer cannot link. Omit default features
+# so the C archive does not pull in readcon-core/readcon-db or their
+# unmangled rkr_*/rkrdb_* symbols.
 corrosion_import_crate(MANIFEST_PATH ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
                        CRATES anneal-core
+                       NO_DEFAULT_FEATURES
                        FEATURES capi)
 # Corrosion >=0.5 mirrors cargo's post-1.79 dash-to-underscore rule for
 # library target names, so the imported target is `anneal_core` even though

@@ -19,35 +19,35 @@
 //! `DIMER_ROTATIONS` override the search and the dimer. `PAPER_OUT` is the
 //! directory for one manifest per seed.
 
-#[cfg(feature = "rgsaddle")]
+#[cfg(all(feature = "rgsaddle", feature = "catalog"))]
 mod common;
 
-#[cfg(feature = "rgsaddle")]
+#[cfg(all(feature = "rgsaddle", feature = "catalog"))]
 use std::path::{Path, PathBuf};
 
-#[cfg(feature = "rgsaddle")]
+#[cfg(all(feature = "rgsaddle", feature = "catalog"))]
 use anneal_core::methods::cluster_hopping::{Config, Ledger, covalent_radius};
-#[cfg(feature = "rgsaddle")]
+#[cfg(all(feature = "rgsaddle", feature = "catalog"))]
 use anneal_core::methods::cluster_search::search_from;
-#[cfg(feature = "rgsaddle")]
+#[cfg(all(feature = "rgsaddle", feature = "catalog"))]
 use anneal_core::run_manifest::RunManifest;
-#[cfg(feature = "rgsaddle")]
+#[cfg(all(feature = "rgsaddle", feature = "catalog"))]
 use common::slab::{adsorbate_groups, place_adsorbates, read_system};
-#[cfg(any(test, feature = "rgsaddle"))]
+#[cfg(any(test, all(feature = "rgsaddle", feature = "catalog")))]
 use eindir_core::Objective;
-#[cfg(any(test, feature = "rgsaddle"))]
+#[cfg(any(test, all(feature = "rgsaddle", feature = "catalog")))]
 use eindir_core::bounds::Bounds;
-#[cfg(any(test, feature = "rgsaddle"))]
+#[cfg(any(test, all(feature = "rgsaddle", feature = "catalog")))]
 use eindir_core::gradient::{DifferentiableObjective, Gradient};
-#[cfg(any(test, feature = "rgsaddle"))]
+#[cfg(any(test, all(feature = "rgsaddle", feature = "catalog")))]
 use ndarray::{Array1, ArrayView1};
 
-#[cfg(feature = "rgsaddle")]
+#[cfg(all(feature = "rgsaddle", feature = "catalog"))]
 const ENERGY_WINDOW_EV: f64 = 0.05;
-#[cfg(feature = "rgsaddle")]
+#[cfg(all(feature = "rgsaddle", feature = "catalog"))]
 const RMSD_WINDOW_A: f64 = 0.1;
 
-#[cfg(any(test, feature = "rgsaddle"))]
+#[cfg(any(test, all(feature = "rgsaddle", feature = "catalog")))]
 #[derive(Clone, Copy, Debug)]
 struct MorseParams {
     depth: f64,
@@ -59,7 +59,7 @@ struct MorseParams {
     periodic: [bool; 3],
 }
 
-#[cfg(any(test, feature = "rgsaddle"))]
+#[cfg(any(test, all(feature = "rgsaddle", feature = "catalog")))]
 fn parse_problem(text: &str) -> Result<MorseParams, String> {
     let mut depth = None;
     let mut alpha = None;
@@ -130,7 +130,7 @@ fn parse_problem(text: &str) -> Result<MorseParams, String> {
 /// `morse/smooth/linear`: Morse minus its cutoff value minus `(r-rc)` times
 /// the cutoff derivative. Pairs are `i < j`. A periodic axis rounds half to
 /// even, which is `nearbyint` in the OptBench pair sum.
-#[cfg(any(test, feature = "rgsaddle"))]
+#[cfg(any(test, all(feature = "rgsaddle", feature = "catalog")))]
 fn morse_smooth(x: ArrayView1<f64>, params: &MorseParams, cell: [f64; 3]) -> (f64, Array1<f64>) {
     let n = x.len() / 3;
     let cutoff2 = params.cutoff * params.cutoff;
@@ -171,7 +171,7 @@ fn morse_smooth(x: ArrayView1<f64>, params: &MorseParams, cell: [f64; 3]) -> (f6
     (energy, gradient)
 }
 
-#[cfg(any(test, feature = "rgsaddle"))]
+#[cfg(any(test, all(feature = "rgsaddle", feature = "catalog")))]
 struct Surface {
     params: MorseParams,
     cell: [f64; 3],
@@ -180,7 +180,7 @@ struct Surface {
     bounds: Bounds<f64>,
 }
 
-#[cfg(any(test, feature = "rgsaddle"))]
+#[cfg(any(test, all(feature = "rgsaddle", feature = "catalog")))]
 impl Surface {
     fn energy_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
         let mut placed = x.to_owned();
@@ -203,7 +203,7 @@ impl Surface {
     }
 }
 
-#[cfg(any(test, feature = "rgsaddle"))]
+#[cfg(any(test, all(feature = "rgsaddle", feature = "catalog")))]
 impl Objective<f64> for Surface {
     fn dim(&self) -> usize {
         self.template.len()
@@ -216,7 +216,7 @@ impl Objective<f64> for Surface {
     }
 }
 
-#[cfg(any(test, feature = "rgsaddle"))]
+#[cfg(any(test, all(feature = "rgsaddle", feature = "catalog")))]
 impl Gradient<f64> for Surface {
     fn dim(&self) -> usize {
         self.template.len()
@@ -226,14 +226,14 @@ impl Gradient<f64> for Surface {
     }
 }
 
-#[cfg(any(test, feature = "rgsaddle"))]
+#[cfg(any(test, all(feature = "rgsaddle", feature = "catalog")))]
 impl DifferentiableObjective<f64> for Surface {
     fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
         self.energy_gradient(x)
     }
 }
 
-#[cfg(feature = "rgsaddle")]
+#[cfg(all(feature = "rgsaddle", feature = "catalog"))]
 fn env_usize(key: &str, default: usize) -> usize {
     std::env::var(key)
         .ok()
@@ -241,7 +241,7 @@ fn env_usize(key: &str, default: usize) -> usize {
         .unwrap_or(default)
 }
 
-#[cfg(feature = "rgsaddle")]
+#[cfg(all(feature = "rgsaddle", feature = "catalog"))]
 fn hardware_model() -> String {
     std::fs::read_to_string("/proc/cpuinfo")
         .ok()
@@ -255,7 +255,7 @@ fn hardware_model() -> String {
         .unwrap_or_else(|| "unknown".to_owned())
 }
 
-#[cfg(feature = "rgsaddle")]
+#[cfg(all(feature = "rgsaddle", feature = "catalog"))]
 fn command_text(program: &str, args: &[&str]) -> String {
     std::process::Command::new(program)
         .args(args)
@@ -267,7 +267,7 @@ fn command_text(program: &str, args: &[&str]) -> String {
         .unwrap_or_else(|| "unavailable".to_owned())
 }
 
-#[cfg(feature = "rgsaddle")]
+#[cfg(all(feature = "rgsaddle", feature = "catalog"))]
 fn provenance_json(arm: &str, seed: u64, budget: usize) -> String {
     let cores = std::thread::available_parallelism()
         .map(|n| n.get())
@@ -284,7 +284,7 @@ fn provenance_json(arm: &str, seed: u64, budget: usize) -> String {
     )
 }
 
-#[cfg(feature = "rgsaddle")]
+#[cfg(all(feature = "rgsaddle", feature = "catalog"))]
 fn mobile_of(full: &Array1<f64>, mobile: &[usize]) -> Array1<f64> {
     let mut out = Array1::zeros(3 * mobile.len());
     for (slot, &atom) in mobile.iter().enumerate() {
@@ -295,7 +295,7 @@ fn mobile_of(full: &Array1<f64>, mobile: &[usize]) -> Array1<f64> {
     out
 }
 
-#[cfg(all(feature = "rgsaddle", feature = "ira"))]
+#[cfg(all(feature = "rgsaddle", feature = "catalog", feature = "ira"))]
 fn rmsd(a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
     let n = a.len() / 3;
     if n == 0 || a.len() != b.len() {
@@ -309,7 +309,7 @@ fn rmsd(a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
     (sum / n as f64).sqrt()
 }
 
-#[cfg(feature = "rgsaddle")]
+#[cfg(all(feature = "rgsaddle", feature = "catalog"))]
 fn permutation_rmsd(reference: ArrayView1<f64>, query: ArrayView1<f64>) -> f64 {
     let n = reference.len() / 3;
     if n == 0 || query.len() != reference.len() || n > 8 {
@@ -348,7 +348,7 @@ fn permutation_rmsd(reference: ArrayView1<f64>, query: ArrayView1<f64>) -> f64 {
     best
 }
 
-#[cfg(feature = "rgsaddle")]
+#[cfg(all(feature = "rgsaddle", feature = "catalog"))]
 fn island_rmsd(reference: ArrayView1<f64>, query: ArrayView1<f64>) -> (f64, &'static str) {
     #[cfg(feature = "ira")]
     {
@@ -360,20 +360,20 @@ fn island_rmsd(reference: ArrayView1<f64>, query: ArrayView1<f64>) -> (f64, &'st
     (permutation_rmsd(reference, query), "cartesian-permutation")
 }
 
-#[cfg(feature = "rgsaddle")]
+#[cfg(all(feature = "rgsaddle", feature = "catalog"))]
 struct Geometry {
     energy: f64,
     mobile: Array1<f64>,
     saddle: bool,
 }
 
-#[cfg(feature = "rgsaddle")]
+#[cfg(all(feature = "rgsaddle", feature = "catalog"))]
 fn is_saddle_path(path: &Path) -> bool {
     path.components()
         .any(|component| matches!(component.as_os_str().to_str(), Some("saddle" | "saddles")))
 }
 
-#[cfg(feature = "rgsaddle")]
+#[cfg(all(feature = "rgsaddle", feature = "catalog"))]
 fn collect_con(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -390,7 +390,7 @@ fn collect_con(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-#[cfg(feature = "rgsaddle")]
+#[cfg(all(feature = "rgsaddle", feature = "catalog"))]
 fn load_references(root: &Path, params: &MorseParams) -> Vec<Geometry> {
     let mut files = Vec::new();
     collect_con(root, &mut files);
@@ -413,19 +413,19 @@ fn load_references(root: &Path, params: &MorseParams) -> Vec<Geometry> {
     loaded
 }
 
-#[cfg(feature = "rgsaddle")]
+#[cfg(all(feature = "rgsaddle", feature = "catalog"))]
 fn matched(found_e: f64, found: ArrayView1<f64>, reference: &Geometry) -> bool {
     let (deviation, _) = island_rmsd(reference.mobile.view(), found);
     (found_e - reference.energy).abs() <= ENERGY_WINDOW_EV && deviation <= RMSD_WINDOW_A
 }
 
-#[cfg(any(test, feature = "rgsaddle"))]
+#[cfg(any(test, all(feature = "rgsaddle", feature = "catalog")))]
 /// Free atoms split into layers when neighbouring z values differ by more
 /// than this. The heptamer is the smallest layer. The other free layers are
 /// the movable substrate.
 const LAYER_GAP_A: f64 = 1.0;
 
-#[cfg(any(test, feature = "rgsaddle"))]
+#[cfg(any(test, all(feature = "rgsaddle", feature = "catalog")))]
 fn island_layer(base: &Array1<f64>, free: &[usize]) -> Vec<usize> {
     let mut ordered = free.to_vec();
     ordered.sort_by(|&a, &b| {
@@ -458,7 +458,7 @@ fn island_layer(base: &Array1<f64>, free: &[usize]) -> Vec<usize> {
         .unwrap_or_default()
 }
 
-#[cfg(feature = "rgsaddle")]
+#[cfg(all(feature = "rgsaddle", feature = "catalog"))]
 fn configure(species: &[u32], island: &[usize], base: &Array1<f64>, arm: &str) -> Config {
     let groups = adsorbate_groups(base, species, island);
     let mut cfg = if arm == "plain" {
@@ -481,16 +481,16 @@ fn configure(species: &[u32], island: &[usize], base: &Array1<f64>, arm: &str) -
 
 fn main() {
     anneal_core::install_rgpot_kernels!();
-    #[cfg(not(feature = "rgsaddle"))]
+    #[cfg(not(all(feature = "rgsaddle", feature = "catalog")))]
     {
-        eprintln!("pt111_heptamer requires the rgsaddle feature");
+        eprintln!("pt111_heptamer requires the rgsaddle and catalog features");
         std::process::exit(2);
     }
-    #[cfg(feature = "rgsaddle")]
+    #[cfg(all(feature = "rgsaddle", feature = "catalog"))]
     drive();
 }
 
-#[cfg(feature = "rgsaddle")]
+#[cfg(all(feature = "rgsaddle", feature = "catalog"))]
 fn drive() {
     let args: Vec<String> = std::env::args().collect();
     let con = args.get(1).cloned().unwrap_or_else(|| {
@@ -669,7 +669,7 @@ fn drive() {
     );
 }
 
-#[cfg(feature = "rgsaddle")]
+#[cfg(all(feature = "rgsaddle", feature = "catalog"))]
 fn certify_edge(
     surface: &Surface,
     mobile: &[usize],
