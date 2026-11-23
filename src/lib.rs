@@ -20,6 +20,21 @@
 //! traits, Boltzmann / Fast / Tsallis points, and the SaVariant tuple)
 //! consumed by the Python `anneal` package via pyo3.
 
+#[cfg(target_arch = "x86_64")]
+pub(crate) fn avx_available() -> bool {
+    !cfg!(anneal_force_scalar) && std::is_x86_feature_detected!("avx")
+}
+
+#[cfg(target_arch = "x86_64")]
+pub(crate) fn avx2_available() -> bool {
+    !cfg!(anneal_force_scalar) && std::is_x86_feature_detected!("avx2")
+}
+
+#[cfg(all(target_arch = "x86_64", anneal_avx512))]
+pub(crate) fn avx512_available() -> bool {
+    !cfg!(anneal_force_scalar) && std::is_x86_feature_detected!("avx512f")
+}
+
 /// Shared CSA bank over Cap'n Proto. Optional; process-local bank stays default.
 #[cfg(feature = "bank-rpc")]
 pub mod bank_rpc;

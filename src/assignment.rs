@@ -37,7 +37,6 @@ pub(crate) fn certified_assignment(
     costs: &[f64],
     n: usize,
 ) -> Option<(Vec<usize>, Option<Certificate>)> {
-    ASSIGNMENT_IS_UNIQUE.with(|cell| cell.set(false));
     if n == 0 {
         return costs.is_empty().then(|| (Vec::new(), None));
     }
@@ -133,7 +132,7 @@ unsafe fn scan_columns(
     column: usize,
 ) -> (f64, usize) {
     #[cfg(target_arch = "x86_64")]
-    if std::is_x86_feature_detected!("avx2") {
+    if crate::avx2_available() {
         return unsafe {
             scan_avx2(
                 row,
@@ -311,7 +310,7 @@ fn adjust_reduced(
     row_potential: &mut [f64],
 ) {
     #[cfg(target_arch = "x86_64")]
-    if std::is_x86_feature_detected!("avx2") {
+    if crate::avx2_available() {
         unsafe {
             adjust_reduced_avx2(
                 delta,
@@ -487,18 +486,12 @@ pub(crate) fn strict_unique_row_minima(costs: &[f64], n: usize) -> Option<Vec<us
 }
 
 pub(crate) fn successive_shortest_paths(costs: &[f64], n: usize) -> Option<Vec<usize>> {
-    successive_shortest_paths_scanned(costs, n).map(|(assignment, unique)| {
-        ASSIGNMENT_IS_UNIQUE.with(|cell| cell.set(unique));
-        assignment
-    })
+    solve_shortest_paths(costs, n, None).map(|(assignment, _)| assignment)
 }
 
 /// Same permutation as [`successive_shortest_paths`] without the uniqueness scan.
 ///
-/// A fivefold residual only uses the permutation. The alternating-cycle
-/// search that feeds the inverse-operation cache does not change it, and
-/// that cache reads the flag only after its own call to
-/// [`minimum_cost_assignment`].
+/// A fivefold residual only uses the permutation.
 pub(crate) fn successive_shortest_paths_matching(costs: &[f64], n: usize) -> Option<Vec<usize>> {
     solve_shortest_paths(costs, n, None).map(|(assignment, _)| assignment)
 }
@@ -525,6 +518,7 @@ fn forced_kuhn_munkres(costs: &[f64], n: usize) -> Option<(Vec<usize>, Option<Ce
 #[derive(Clone, Copy)]
 enum Separation {
     /// More than dual noise: no other optimal edge.
+    #[cfg(test)]
     Noise,
     /// More than a Kuhn-Munkres walk can fall short of the optimum.
     KuhnMunkres,
@@ -537,18 +531,7 @@ fn kuhn_munkres_tolerance(costs: &[f64]) -> f64 {
     scale * 1e-9
 }
 
-/// Whether the last successful dense scan had no other optimal edge.
-///
-/// A Kuhn-Munkres result reports false: the smaller walks keep that
-/// solver's own tie break, and an inverse permutation is not reused.
-pub(crate) fn last_dense_optimum_was_unique() -> bool {
-    ASSIGNMENT_IS_UNIQUE.with(|cell| cell.get())
-}
-
-std::thread_local! {
-    static ASSIGNMENT_IS_UNIQUE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
+#[cfg(test)]
 fn successive_shortest_paths_scanned(costs: &[f64], n: usize) -> Option<(Vec<usize>, bool)> {
     solve_shortest_paths(costs, n, Some(Separation::Noise))
         .map(|(assignment, certificate)| (assignment, certificate.is_some()))
@@ -726,6 +709,7 @@ fn optimum_is_unique(
         costs[row * n + column] - row_potential[row + 1] - column_potential[column + 1]
     };
     let slack = match separation {
+        #[cfg(test)]
         Separation::Noise => {
             let mut scale = 1.0_f64;
             for value in costs {
@@ -813,7 +797,7 @@ fn phase_delta(
     columns_seen: &[bool],
 ) -> f64 {
     #[cfg(target_arch = "x86_64")]
-    if std::is_x86_feature_detected!("avx2") {
+    if crate::avx2_available() {
         return unsafe {
             phase_delta_avx2(
                 n,
@@ -1015,7 +999,7 @@ fn augment_tight(
         // column the scalar walk would enter. The slack bits match that walk.
         #[cfg(target_arch = "x86_64")]
         if column + 4 <= n
-            && std::is_x86_feature_detected!("avx2")
+            && crate::avx2_available()
             && unsafe {
                 group_ineligible(
                     row,
