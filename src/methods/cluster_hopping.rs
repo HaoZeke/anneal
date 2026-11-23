@@ -13473,6 +13473,68 @@ mod call_floor_tests {
     }
 
     #[test]
+    fn a_result_that_arrives_after_the_stop_is_recorded_only_when_it_is_sane() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+        const ATOMS: usize = 4;
+        const COLLAPSED_ENERGY: f64 = -1000.0;
+        let tetrahedron = |edge: f64| {
+            let a = edge / 2.0_f64.sqrt();
+            Array1::from(vec![a, a, a, a, -a, -a, -a, a, -a, -a, -a, a])
+        };
+        let sane = tetrahedron(1.6);
+        assert!(min_pair_distance(sane.view()) > 1.064);
+        let mut collapsed = sane.clone();
+        for axis in 0..3 {
+            collapsed[3 + axis] = collapsed[axis] + if axis == 0 { 0.1 } else { 0.0 };
+        }
+
+        let mut stopped_runs = 0;
+        for stop_call in 2..=6usize {
+            let mut cfg = Config::for_cluster(ATOMS);
+            cfg.call_floor = Some(FLOOR);
+            cfg.call_floor_elements = Some(vec![6; ATOMS]);
+            assert!(quench_is_sane(&cfg, -1.0, sane.view()));
+            assert!(!quench_is_sane(&cfg, COLLAPSED_ENERGY, collapsed.view()));
+
+            let flag = Arc::new(AtomicBool::new(false));
+            let calls = AtomicUsize::new(0);
+            let stopper = flag.clone();
+            let mut relax = |_: &mut Ledger, _: ArrayView1<f64>, _: usize| {
+                let call = calls.fetch_add(1, Ordering::Relaxed) + 1;
+                if call == stop_call {
+                    stopper.store(true, Ordering::Relaxed);
+                    (COLLAPSED_ENERGY, collapsed.clone())
+                } else {
+                    (-1.0 - 0.01 * call as f64, sane.clone())
+                }
+            };
+            let mut ledger = Ledger::with_stop(1_000_000, flag.clone());
+            let mut rng = StdRng::seed_from_u64(5);
+            let outcome =
+                run(&cfg, sane.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
+            if !flag.load(Ordering::Relaxed) {
+                continue;
+            }
+            stopped_runs += 1;
+            assert!(
+                ledger.best > COLLAPSED_ENERGY / 2.0,
+                "stop at call {stop_call} recorded the collapsed geometry: {}",
+                ledger.best
+            );
+            assert!(
+                outcome.unconverged_records >= 1,
+                "stop at call {stop_call} barred nothing"
+            );
+        }
+        assert!(
+            stopped_runs >= 2,
+            "the stop was reached on {stopped_runs} runs"
+        );
+    }
+
+    #[test]
     fn a_zero_step_read_inside_the_floor_is_refused_where_it_stands() {
         let mut cfg = Config::for_cluster(2);
         cfg.call_floor = Some(FLOOR);
