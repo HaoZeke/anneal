@@ -8,7 +8,7 @@
 #include <dlfcn.h>
 
 static_assert(RGPOT_ENGINE_ABI_VERSION == 1);
-static_assert(RGPOT_ENGINE_ABI_MINOR == 6);
+static_assert(RGPOT_ENGINE_ABI_MINOR == 7);
 static_assert(RGPOT_ENGINE_ABI_LAYOUT_REVISION == 1);
 static_assert(sizeof(RgpotEngineAbiStamp) == 3 * sizeof(unsigned short));
 static_assert(offsetof(RgpotEngineAbiStamp, abi_major) == 0);

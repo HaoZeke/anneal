@@ -187,7 +187,7 @@ Required symbol.
 - Units :: none.
 - Outputs :: three =unsigned short= fields:
   =abi_major= (=RGPOT_ENGINE_ABI_VERSION=, 1),
-  =abi_minor= (=RGPOT_ENGINE_ABI_MINOR=, 6) and
+  =abi_minor= (=RGPOT_ENGINE_ABI_MINOR=, 7) and
   =layout_revision= (=RGPOT_ENGINE_ABI_LAYOUT_REVISION=, 1).
 - Errors :: none.
 
@@ -1410,7 +1410,7 @@ A later =load= opens the file again.
 a host that does call =dlclose= on them leaves them mapped.
 
 - =ENGINE_ABI_VERSION=, =ENGINE_ABI_MINOR=,
-  =ENGINE_ABI_LAYOUT_REVISION= :: Host ABI identity (=1=, =6=, =1=) matching =RGPOT_ENGINE_ABI_VERSION=,
+  =ENGINE_ABI_LAYOUT_REVISION= :: Host ABI identity (=1=, =7=, =1=) matching =RGPOT_ENGINE_ABI_VERSION=,
   =RGPOT_ENGINE_ABI_MINOR= and =RGPOT_ENGINE_ABI_LAYOUT_REVISION=.
 - =ENGINE_UNLOAD_RESIDENT=, =ENGINE_UNLOAD_SAFE=,
   =ENGINE_UNLOAD_POLICY_MINOR= :: =RGPOT_ENGINE_UNLOAD_RESIDENT= (=0=),
