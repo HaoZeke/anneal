@@ -1,3 +1,5 @@
+# MIT License
+# Copyright 2023--present rgpot developers
 """rgpot.EMTPot: the Asap effective-medium potential from Python."""
 
 from __future__ import annotations
