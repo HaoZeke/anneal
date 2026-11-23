@@ -3223,6 +3223,17 @@ if get_option('with_tests')
                     ),
                 )
             endforeach
+            dsf_phys_bench = executable(
+                'dsf_phys_bench',
+                sources: ['../bench/PR372/dsf_phys_bench.cc'],
+                dependencies: test_deps,
+                include_directories: _incdirs + ['.'],
+                cpp_args: test_args,
+                link_with: _linkto,
+                link_language: 'cpp',
+                build_rpath: _metatomic_build_rpath,
+                install: false,
+            )
             benchmark(
                 'lr_phys_bench',
                 lr_phys_bench,
