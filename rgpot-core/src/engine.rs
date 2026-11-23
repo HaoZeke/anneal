@@ -1195,58 +1195,63 @@ impl EnginePotential {
     pub unsafe fn unload(path: &Path) -> Result<(), EngineError> {
         let canonical = canonical_path(path)?;
         let identity = file_identity(&canonical)?;
-        let mut registry = registry();
-        match registry.by_path.get(&canonical) {
-            Some(known) if *known != identity => return Err(replaced(&canonical)),
-            Some(_) => {}
-            None => {
-                return Err(EngineError::Invalid(format!(
-                    "{}: this plugin was not loaded",
-                    canonical.display()
-                )))
+        let library = {
+            let mut registry = registry();
+            match registry.by_path.get(&canonical) {
+                Some(known) if *known != identity => return Err(replaced(&canonical)),
+                Some(_) => {}
+                None => {
+                    return Err(EngineError::Invalid(format!(
+                        "{}: this plugin was not loaded",
+                        canonical.display()
+                    )))
+                }
             }
-        }
-        let resident = match registry.by_file.remove(&identity) {
-            Some(RegistryEntry::Ready(resident)) => resident,
-            Some(loading @ RegistryEntry::Loading { .. }) => {
-                registry.by_file.insert(identity, loading);
-                return Err(EngineError::Invalid(format!(
-                    "{}: this plugin is still loading",
-                    canonical.display()
-                )));
-            }
-            None => {
-                return Err(EngineError::Invalid(format!(
-                    "{}: this plugin was not loaded",
-                    canonical.display()
-                )))
-            }
-        };
-        if let Some(why) = &resident.unload_refusal {
-            let message = format!("{}: {why}; the plugin stays loaded", canonical.display());
-            registry
-                .by_file
-                .insert(identity, RegistryEntry::Ready(resident));
-            return Err(EngineError::Unsupported {
-                operation: "rgpot_engine_unload_policy",
-                message,
-            });
-        }
-        let resident = match Arc::try_unwrap(resident) {
-            Ok(resident) => resident,
-            Err(shared) => {
-                let live = Arc::strong_count(&shared) - 1;
+            let resident = match registry.by_file.remove(&identity) {
+                Some(RegistryEntry::Ready(resident)) => resident,
+                Some(loading @ RegistryEntry::Loading { .. }) => {
+                    registry.by_file.insert(identity, loading);
+                    return Err(EngineError::Invalid(format!(
+                        "{}: this plugin is still loading",
+                        canonical.display()
+                    )));
+                }
+                None => {
+                    return Err(EngineError::Invalid(format!(
+                        "{}: this plugin was not loaded",
+                        canonical.display()
+                    )))
+                }
+            };
+            if let Some(why) = &resident.unload_refusal {
+                let message = format!("{}: {why}; the plugin stays loaded", canonical.display());
                 registry
                     .by_file
-                    .insert(identity, RegistryEntry::Ready(shared));
-                return Err(EngineError::Invalid(format!(
-                    "{}: {live} engine instance(s) still use this plugin",
-                    canonical.display()
-                )));
+                    .insert(identity, RegistryEntry::Ready(resident));
+                return Err(EngineError::Unsupported {
+                    operation: "rgpot_engine_unload_policy",
+                    message,
+                });
             }
+            let resident = match Arc::try_unwrap(resident) {
+                Ok(resident) => resident,
+                Err(shared) => {
+                    let live = Arc::strong_count(&shared) - 1;
+                    registry
+                        .by_file
+                        .insert(identity, RegistryEntry::Ready(shared));
+                    return Err(EngineError::Invalid(format!(
+                        "{}: {live} engine instance(s) still use this plugin",
+                        canonical.display()
+                    )));
+                }
+            };
+            registry.by_path.retain(|_, known| *known != identity);
+            ManuallyDrop::into_inner(resident.library)
         };
-        registry.by_path.retain(|_, known| *known != identity);
-        ManuallyDrop::into_inner(resident.library)
+        // The registry lock is released: dlclose runs the library's destructors
+        // and takes the dynamic loader's lock, and either may load an engine.
+        library
             .close()
             .map_err(|why| EngineError::Load(format!("{}: {why}", canonical.display())))
     }

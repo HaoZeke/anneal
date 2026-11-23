@@ -1640,34 +1640,46 @@ extern "C" fn initializer_reentry_callback() -> c_int {
     .map_or(1, |result| if result.is_ok() { 0 } else { 1 })
 }
 
+/// Re-runs the calling test in a child process and reports whether this
+/// process is that child. The parent returns `true` once the child succeeds
+/// and panics if it fails or does not finish in time, which is how a deadlock
+/// shows. The child returns `false` and runs the body of the test.
+fn run_in_child(test_name: &str, marker: &str, deadlock: &str) -> bool {
+    if std::env::var_os(marker).is_some() {
+        return false;
+    }
+    let mut child = std::process::Command::new(
+        std::env::current_exe().expect("path to the engine test executable"),
+    )
+    .args(["--exact", test_name, "--nocapture"])
+    .env(marker, "1")
+    .spawn()
+    .expect("spawn the child test process");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some(status) = child.try_wait().expect("wait for the child test process") {
+            assert!(status.success(), "{test_name} child failed: {status}");
+            return true;
+        }
+        if Instant::now() >= deadline {
+            child.kill().expect("kill the deadlocked child");
+            child.wait().expect("reap the deadlocked child");
+            panic!("{deadlock}");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
 #[test]
 fn an_initializer_can_load_another_engine_without_holding_the_registry_lock() {
     const TEST_NAME: &str =
         "an_initializer_can_load_another_engine_without_holding_the_registry_lock";
-    if std::env::var_os("RGPOT_INITIALIZER_REENTRY_CHILD").is_none() {
-        let mut child = std::process::Command::new(
-            std::env::current_exe().expect("path to the engine test executable"),
-        )
-        .args(["--exact", TEST_NAME, "--nocapture"])
-        .env("RGPOT_INITIALIZER_REENTRY_CHILD", "1")
-        .spawn()
-        .expect("spawn the initializer reentry child");
-        let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            if let Some(status) = child.try_wait().expect("wait for reentry child") {
-                assert!(
-                    status.success(),
-                    "initializer reentry child failed: {status}"
-                );
-                return;
-            }
-            if Instant::now() >= deadline {
-                child.kill().expect("kill deadlocked reentry child");
-                child.wait().expect("reap deadlocked reentry child");
-                panic!("plugin initializer deadlocked while loading another engine");
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
+    if run_in_child(
+        TEST_NAME,
+        "RGPOT_INITIALIZER_REENTRY_CHILD",
+        "plugin initializer deadlocked while loading another engine",
+    ) {
+        return;
     }
 
     let outer = build("harmonic_initializer_reentry", &["REENTER_IN_INITIALIZER"]);
@@ -1725,6 +1737,56 @@ fn failed_first_loads_are_closed_and_can_be_retried() {
 }
 
 const UNLOAD_SAFE: &str = "FIXTURE_UNLOAD_POLICY=RGPOT_ENGINE_UNLOAD_SAFE";
+
+static FINALIZER_REENTRY_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+extern "C" fn finalizer_reentry_callback() -> c_int {
+    std::panic::catch_unwind(|| {
+        let path = FINALIZER_REENTRY_PATH
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+            .expect("finalizer reentry path");
+        unsafe { EnginePotential::load(&path, &config()) }.map(drop)
+    })
+    .map_or(1, |result| if result.is_ok() { 0 } else { 1 })
+}
+
+/// The destructor of an unloaded plugin may load another engine, which needs
+/// the registry lock, so `unload` must not hold it across `dlclose`.
+#[cfg(target_os = "linux")]
+#[test]
+fn unload_closes_the_library_without_holding_the_registry_lock() {
+    const TEST_NAME: &str = "unload_closes_the_library_without_holding_the_registry_lock";
+    if run_in_child(
+        TEST_NAME,
+        "RGPOT_FINALIZER_REENTRY_CHILD",
+        "unload deadlocked: the plugin destructor could not load another engine",
+    ) {
+        return;
+    }
+
+    let outer = build(
+        "harmonic_finalizer_reentry",
+        &["REENTER_IN_FINALIZER", UNLOAD_SAFE],
+    );
+    let inner = build("harmonic_finalizer_inner", &[]);
+    *FINALIZER_REENTRY_PATH
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(inner.clone());
+    std::env::set_var(
+        "RGPOT_FIXTURE_FINI_CALLBACK",
+        format!("{:x}", finalizer_reentry_callback as *const () as usize),
+    );
+    drop(load(&outer));
+    unsafe { EnginePotential::unload(&outer) }.expect("unload the plugin");
+    std::env::remove_var("RGPOT_FIXTURE_FINI_CALLBACK");
+    assert!(!library_is_mapped(&outer));
+    assert!(
+        library_is_mapped(&inner),
+        "the destructor did not load the other engine"
+    );
+}
 
 fn unload_refusal(path: &Path) -> String {
     match unsafe { EnginePotential::unload(path) } {

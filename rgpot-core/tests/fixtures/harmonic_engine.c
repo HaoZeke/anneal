@@ -6,7 +6,9 @@
  * second callback registration succeed. RETAIN_REFUSED_CALLBACKS makes the
  * refused one stay registered although the call fails, as an engine written
  * before the header forbade it might. FIXTURE_UNLOAD_POLICY exports
- * rgpot_engine_unload_policy returning that value. */
+ * rgpot_engine_unload_policy returning that value. REENTER_IN_FINALIZER
+ * calls the function whose address is in RGPOT_FIXTURE_FINI_CALLBACK from the
+ * library destructor, which runs when the library is unloaded. */
 #include "rgpot/engine_c_abi.h"
 
 #include <math.h>
@@ -54,6 +56,25 @@ static int initializer_reentry_failed = 0;
 #endif
 #ifdef FATAL_ONCE
 static int fatal_once_fired = 0;
+#endif
+
+#ifdef REENTER_IN_FINALIZER
+__attribute__((destructor)) static void reenter_from_finalizer(void) {
+  const char *address = getenv("RGPOT_FIXTURE_FINI_CALLBACK");
+  uintptr_t raw;
+  int (*callback)(void);
+  if (address == NULL) {
+    fputs("harmonic engine: RGPOT_FIXTURE_FINI_CALLBACK is not set\n", stderr);
+    abort();
+  }
+  raw = (uintptr_t)strtoull(address, NULL, 16);
+  memcpy(&callback, &raw, sizeof(callback));
+  if (callback == NULL || callback() != 0) {
+    fputs("harmonic engine: the finalizer could not load another engine\n",
+          stderr);
+    abort();
+  }
+}
 #endif
 
 #ifdef REENTER_IN_INITIALIZER
