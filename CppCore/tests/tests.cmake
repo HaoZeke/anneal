@@ -601,6 +601,21 @@ if(_on)
     COMMAND external_constructor_reentry
             $<TARGET_FILE:external_reentrant_engine>
             $<TARGET_FILE:external_refcount_engine>)
+
+  add_executable(external_close_unlocked
+                 CppCore/tests/external_close_unlocked.cpp)
+  target_include_directories(external_close_unlocked PRIVATE
+                             "${RGPOT_TEST_ROOT}/CppCore"
+                             "${RGPOT_TEST_ROOT}/include")
+  target_compile_definitions(external_close_unlocked PRIVATE
+                             ${_rgpot_test_definitions})
+  target_compile_features(external_close_unlocked PRIVATE cxx_std_20)
+  target_link_libraries(external_close_unlocked PRIVATE ${_rgpot_test_libs})
+  set_target_properties(external_close_unlocked
+                        PROPERTIES ENABLE_EXPORTS ON)
+  rgpot_add_test(external_close_unlocked
+    COMMAND external_close_unlocked
+            $<TARGET_FILE:external_refcount_engine>)
 endif()
 
 add_subdirectory(CppCore/tests/plugin)

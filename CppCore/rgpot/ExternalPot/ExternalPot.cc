@@ -463,12 +463,18 @@ Loaded open_library(const std::vector<std::string> &paths, bool native) {
                (native ? "rgpot_md_native_force" : "rgpot_engine_force") + "; ";
       continue;
     }
+    // When another constructor published this file first, the handle opened
+    // above is redundant and is closed on assignment. dlclose takes the
+    // dynamic loader's lock, which a library initializer may hold while it
+    // waits for the table mutex, so the assignment happens after unlocking.
+    LibraryHandle resident;
     {
       std::lock_guard<std::mutex> lock(table.mutex);
-      loaded.library = publish_resident(
+      resident = publish_resident(
           table, path, loaded.library,
           reinterpret_cast<const void *>(loaded.create));
     }
+    loaded.library = std::move(resident);
     return loaded;
   }
   throw std::runtime_error("engine library was not opened: " + tried);

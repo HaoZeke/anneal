@@ -346,6 +346,7 @@ mdi_concrete_potentials | tests core posix python mdi pymdi | custom timeout=120
 external_potentials | core posix | custom timeout=120 | @engines
 external_engine_refcount | tests core linux | custom timeout=120 |
 external_constructor_reentry | tests core linux | custom timeout=10 |
+external_close_unlocked | tests core linux | custom timeout=30 |
 engine_abi_stamps | core posix | custom | @engines
 engine_abi_stamp_rust_loader | core posix rustc probe | custom timeout=900 | @engines
 ipi_driver_ase | core posix ipi probe | custom timeout=600 | @engines

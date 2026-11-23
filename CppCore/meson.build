@@ -2664,6 +2664,21 @@ if get_option('with_tests')
                 ],
                 kwargs: _rt_kw['external_constructor_reentry'],
             )
+            test(
+                'external_close_unlocked',
+                executable(
+                    'external_close_unlocked',
+                    sources: ['tests/external_close_unlocked.cpp'],
+                    dependencies: [rgpot_dep, dependency('threads')],
+                    include_directories: _incdirs + ['.'],
+                    cpp_args: test_args,
+                    export_dynamic: true,
+                    link_language: 'cpp',
+                ),
+                args: [external_refcount_engine.full_path()],
+                depends: [external_refcount_engine],
+                kwargs: _rt_kw['external_close_unlocked'],
+            )
         endif
         if _rpc_stack and host_system != 'windows'
             engine_table_env = environment()
