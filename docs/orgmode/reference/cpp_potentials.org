@@ -1207,14 +1207,21 @@ explicit EMTPot(const EMTConfig &config);
   (46), Ag (47), Pt (78) and Au (79).
   The Rasmussen provider covers Al (13), Cu (29), Ag (47) and Au (79).
   The cell is periodic in every direction.
-  The kernel is rebuilt when the atom count or any atomic number changes.
+  The kernel keeps its neighbour list for one cell and one list of atomic
+  numbers, and is rebuilt when either changes.
   Below =rgpot::kTeamMinAtoms= the force path runs on one thread.
   From =rgpot::kTeamMinAtoms= up it uses OpenMP with per-atom row ownership and
   a second incoming-partner reduction pass, so energies and forces match the
   one-thread bits at 1, 2, 4 and 8 threads.
   The force call does not write a stress.
-- Errors :: an element the provider does not cover throws the Asap =Exception=
-  class, which does not derive from =std::exception=.
+  Zero atoms give energy 0 and no forces.
+- Errors :: an element the provider does not cover, a cell too thin for the
+  kernel, a cell that is singular or not finite, and positions that are not
+  finite throw =std::invalid_argument= with a message that starts =EMTPot:=.
+  An energy or a force that is not finite, which two atoms at one point
+  cause, throws =std::domain_error=.
+  A call that threw leaves no state behind, and the Asap =Exception= class,
+  which does not derive from =std::exception=, never escapes.
 
 Parameter source: Jacobsen, Norskov and Puska, Phys.
 Rev. B 35, 7423 (1987), doi:10.1103/PhysRevB.35.7423.
