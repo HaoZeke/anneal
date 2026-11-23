@@ -127,6 +127,8 @@ ROW_FIELDS = [
     "best",
     "pot_s",
     "outside_s",
+    "scc_rejected",
+    "geometry_rejected",
     "geometry",
     "geometry_sha256",
     "standalone_scc_converged",
@@ -219,6 +221,8 @@ def run_anneal(binary: Path, system: str, seed: int, out: Path) -> dict:
         "best": float(row["best_eV"]),
         "pot_s": float(row["pot_s"]),
         "outside_s": float(row["outside_s"]),
+        "scc_rejected": int(row["scc_rejected"]),
+        "geometry_rejected": int(row["geometry_rejected"]),
         "_geometry": out / "best.xyz",
     }
 
@@ -393,6 +397,8 @@ def run_crest(
         "best": best,
         "pot_s": inside,
         "outside_s": max(wall - inside, 0.0),
+        "scc_rejected": "",
+        "geometry_rejected": "",
         "_geometry": final_geometry,
     }
 
