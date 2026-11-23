@@ -607,6 +607,17 @@ if (
         env: nested_meson_env,
         timeout: 300,
     )
+    test(
+        'gromacs_missing_include',
+        python3_engines,
+        args: [
+            files('test_gromacs_missing_include.py'),
+            meson.project_source_root(),
+            meson_prog.full_path(),
+        ],
+        env: nested_meson_env,
+        timeout: 300,
+    )
     if has_fortran
         test(
             'fortran_sw_module_order',
@@ -831,6 +842,13 @@ if engine_test_cargo.found() and not engine_test_sanitized
     )
 endif
 
+# Optional header for gromacs_unit_reference. A conda or pip prefix has an
+# include directory. A uv isolated build does not
+# (…/uv/builds-v0/…/include), and include_directories() errors on a missing
+# directory, so the directory is checked before it is added.
+# dependency('gromacs', required: false) is the pkg-config probe. A missing
+# GROMACS takes that not-found path and configure continues. Requesting
+# GROMACS still errors above when gmx or the PLUMED module is missing.
 gromacs_inc = ''
 if python3_engines.found()
     _gmx_inc = run_command(
@@ -843,9 +861,17 @@ if python3_engines.found()
         gromacs_inc = _gmx_inc.stdout().strip()
     endif
 endif
+gromacs_dep = dependency('gromacs', required: false)
+gromacs_unit_inc = [engines_inc, rgpot_inc]
+gromacs_unit_deps = []
+gromacs_unit_ready = false
 # A prefix inside the consumer source tree makes include_directories()
 # reject the path before the header check. Skip it; the test is optional.
-if gromacs_inc != '' and not gromacs_inc.startswith(meson.global_source_root())
+if (
+    gromacs_inc != ''
+    and fs.is_dir(gromacs_inc)
+    and not gromacs_inc.startswith(meson.global_source_root())
+)
     gromacs_headers = include_directories(
         gromacs_inc.startswith(project_root + '/') ? fs.relative_to(
             gromacs_inc,
@@ -856,15 +882,28 @@ if gromacs_inc != '' and not gromacs_inc.startswith(meson.global_source_root())
         'gromacs/math/units.h',
         include_directories: gromacs_headers,
     )
-        test(
-            'gromacs_unit_reference',
-            executable(
-                'test_gromacs_units',
-                files('test_gromacs_units.cpp'),
-                include_directories: [engines_inc, rgpot_inc, gromacs_headers],
-                cpp_args: _args,
-            ),
-            timeout: 30,
-        )
+        gromacs_unit_inc += [gromacs_headers]
+        gromacs_unit_ready = true
     endif
+endif
+if (
+    not gromacs_unit_ready
+    and gromacs_dep.found()
+    and cppc.has_header('gromacs/math/units.h', dependencies: gromacs_dep)
+)
+    gromacs_unit_deps += [gromacs_dep]
+    gromacs_unit_ready = true
+endif
+if gromacs_unit_ready
+    test(
+        'gromacs_unit_reference',
+        executable(
+            'test_gromacs_units',
+            files('test_gromacs_units.cpp'),
+            include_directories: gromacs_unit_inc,
+            dependencies: gromacs_unit_deps,
+            cpp_args: _args,
+        ),
+        timeout: 30,
+    )
 endif
