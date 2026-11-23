@@ -170,7 +170,8 @@ The bins are redone after such a wrap.
 A change of the cell, of the atom count or of the spec rebuilds the list.
 `Builder` accepts coordinates any whole number of cells outside the box.
 It folds every periodic coordinate into the primary cell in fractional space before binning and the image search.
-The stored shift of a pair is then reported for the coordinates as given, `S = S' + W_i - W_j` with `W` the whole cells folded off each atom, and the vector and distance are `r_j - r_i + S H` from those coordinates.
+The stored shift of a pair is then reported for the coordinates as given, `S = S' + W_i - W_j` with `W` the whole cells folded off each atom, and, on a fresh search, the vector and distance are `r_j - r_i + S H` from those coordinates.
+When the table is kept, only the shifts are rewritten; the vector and distance are stale and describe the geometry of the last search until a full rebuild.
 `build`, `Walk`, `Builder`, the batch build and the C ABI all keep that relation, so a consumer that forms vectors from its own positions and the shifts, such as the Fortran bridge, metatomic or UMA, sees the right image.
 A coordinate more than 2^29 cells from the origin is rejected with `Code::Box`.
 The skin test measures each folded atom from the image of its folded reference nearest it, `r' - J H` with `J` the rounded change of its fractions, so whole-cell drift and a step across a face of the cell count as the step alone.

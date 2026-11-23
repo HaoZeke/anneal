@@ -130,7 +130,11 @@ struct Buffers {
 /// Owning table. The arrays are the storage a caller can wrap without
 /// copying. Pair `p` has `vector = r_j - r_i + S H`, with `S` the three
 /// entries of `shift` and `r` the positions passed to the build, also when
-/// they lie whole cells outside the box. `device` is 0 for host memory. A
+/// they lie whole cells outside the box. That relation holds for the
+/// positions of the latest search. After a reused update only `shift`
+/// follows the new positions; `vector` and `distance` still describe the
+/// geometry of the last search and are stale until a full rebuild.
+/// `device` is 0 for host memory. A
 /// GPU fill would use the same layout and a non-zero device id; this build
 /// fills host memory.
 struct Table {
@@ -170,7 +174,11 @@ struct WalkState;
 /// folded before the search, and the skin test measures each atom from the
 /// image of its reference nearest it, so whole-cell drift and a step across
 /// a face of the cell count as the step alone. The stored shifts follow the
-/// positions of the latest update: a pair list rewrites them in place. A
+/// positions of the latest update: a pair list rewrites them in place. That
+/// is all a reused update rewrites. `vector` and `distance` are not
+/// refreshed, so they describe the geometry of the last search, and a caller
+/// that needs them for the new positions forms them from `shift` or forces a
+/// rebuild. A
 /// cluster list, whose four lanes share one shift, is searched again when
 /// an atom's coordinates as given move by whole cells, as when the caller
 /// wraps it. A negative or non-finite skin is rejected before that test. Throws Error
