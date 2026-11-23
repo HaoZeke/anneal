@@ -41,6 +41,8 @@
 #   mdi           with_mdi / RGPOT_WITH_MDI
 #   pymdi         mdi is on and python can import mdi, the MDI driver
 #   rust_core     meson-only features (meson options of the same name)
+#   so_exports    rgpot_so_exports is registered: Linux, the Rust core, the
+#                 full library, and not a static fast-list object
 #   probe         an optional program or module the build looks for: the
 #                 test may be absent even when the rest of the gate holds
 #
@@ -336,7 +338,7 @@ SkalaPotTest | tests core rpc skala | custom suite=skala workdir=. | @skala
 PotentialHvpTest | tests core rust_core | unit potential_hvp_test PotentialHvpTest.cc | @rust_core
 PotentialHessianTest | tests core rust_core | unit potential_hessian_test PotentialHessianTest.cc | @rust_core
 abi_core_symbols | rust_core linux | custom | @rust_core
-rgpot_so_exports | core rust_core linux | custom | @rust_core
+rgpot_so_exports | so_exports | custom | @rust_core
 EAMTableCAbiTest | tests rust_core | custom | @rust_core
 EAMTableHandleTest | tests core rust_core | unit eam_table_handle_test EAMTableHandleTest.cc | @rust_core
 EngineTableTest | tests core rpc posix | custom workdir=. | @engine_plugins

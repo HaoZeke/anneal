@@ -138,6 +138,11 @@ def pytest_configure(config) -> None:
         "markers",
         "rpc: requires the potserv RPC server binary and pycapnp",
     )
+    # Import after this directory is on sys.path. Test modules then see the
+    # rootdir pytest chose. A checkout used as that rootdir is the source tree.
+    import repo_data
+
+    repo_data.PYTEST_ROOT = Path(config.rootpath).resolve()
 
 
 @pytest.fixture

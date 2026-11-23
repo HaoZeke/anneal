@@ -1481,6 +1481,7 @@ if get_option('with_tests') and _rt_atoms['python']
         'mpi': _mpi_dep.found(),
         'mpiexec': find_program('mpirun', 'mpiexec', required: false).found(),
         'linux': host_system == 'linux',
+        'so_exports': rgpot_registers_so_exports,
         'posix': host_system != 'windows',
         'capnp_tool': find_program('capnp', required: false).found(),
         'rustc': find_program('rustc', required: false).found(),

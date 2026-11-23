@@ -30,6 +30,14 @@ on:
         required: false
         type: string
         default: ""
+      project-root-env:
+        description: >
+          Environment variable set to the cibuildwheel {project} directory
+          for the test command. Empty leaves the command unchanged. The
+          test shell is POSIX sh, which is what the Linux and macOS runners use.
+        required: false
+        type: string
+        default: ""
       os:
         description: JSON array of runner labels. The default is ubuntu-latest, ubuntu-24.04-arm, macos-15, and windows-2022.
         required: false
@@ -141,7 +149,9 @@ jobs:
           # An empty test-requires input does not set CIBW_TEST_REQUIRES, so the
           # package table is used. A non-empty input was appended above.
           CIBW_TEST_SOURCES: ${{ inputs.package-dir }}/${{ inputs.test-path }} ${{ inputs.package-dir }}/_ci ${{ inputs.extra-test-sources }}
-          CIBW_TEST_COMMAND: python ${{ inputs.package-dir }}/_ci/check_f1.py && python -m pytest -q ${{ inputs.package-dir }}/${{ inputs.test-path }} ${{ inputs.pytest-args }} --timeout=180 -o faulthandler_timeout=120
+          # {project} is expanded by cibuildwheel. project-root-env names the
+          # checkout for tests whose data is not inside the temp test tree.
+          CIBW_TEST_COMMAND: ${{ inputs.project-root-env != '' && format('export {0}="{{project}}" && ', inputs.project-root-env) || '' }}python ${{ inputs.package-dir }}/_ci/check_f1.py && python -m pytest -q ${{ inputs.package-dir }}/${{ inputs.test-path }} ${{ inputs.pytest-args }} --timeout=180 -o faulthandler_timeout=120
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
