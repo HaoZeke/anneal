@@ -58,6 +58,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
 - [[file:reference/presets-and-advanced.org][Presets and advanced drivers]] gives the parameter surface.
 - [[file:reference/features.org][Cargo features]] lists every feature flag with the command that compiles it.
 - The generated Rust API starts at [[file:reference/rust-api.org][Rust API Reference]] and follows the =anneal-core= crate modules.
+- [[file:reference/python-api.org][Python API]] describes the =anneal= package, its type stubs and its exceptions.
 - [[file:used_by.org][Used by]] links the reproducibility harness that regenerates the CUTEst tables and figures.
 
 #+begin_export rst
@@ -127,6 +128,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
 
    spec
    reference/rust-api
+   reference/python-api
    reference/glossary
    reference/presets-and-advanced
    reference/features

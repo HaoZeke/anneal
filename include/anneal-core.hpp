@@ -21,7 +21,8 @@ inline const char* version() noexcept {
 }
 
 /// A callback may return `ANNEAL_STOPPED` (see the generated
-/// `anneal-core.h`) to end `anneal_box_minimize` at once. The best point
-/// found is written, and that status is what the call returns.
+/// `anneal-core.h`) to end `anneal_box_minimize` or
+/// `anneal_box_minimize_ex` at once. The best point found is written, and
+/// that status is what the call returns.
 
 }  // namespace anneal

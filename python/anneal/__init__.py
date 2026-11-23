@@ -32,28 +32,44 @@ A callback that raises BaseException other than Exception, such as
 KeyboardInterrupt or a harness stop, ends the search at once. The best
 state found is kept, and the exception is re-raised. An ordinary
 Exception is scored as the worst value.
+
+Input that a call rejects raises a subclass of ``AnnealError``, which is a
+``ValueError``: ``InvalidArgumentError``, and ``BoundsError`` for a box.
+``cluster_search`` and the TIP4P presets of ``Config`` also raise the
+builtin ``MemoryError`` when the allocator refuses the memory the first hop
+of the search needs, and ``InvalidArgumentError`` when ``n`` is so large that
+the length of the state does not fit in a machine word.
 """
 
 import json
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from anneal._core import (
+    AnnealError,
     BasinBias,
     Boltzmann,
-    Bounds,
+    Bounds as _CoreBounds,
+    BoundsError,
     Config,
+    ConfigError,
     DEFAULT_HIT_TOL,
     SEARCH_HIT_TOL,
     EpochLine,
     Fast,
+    FeatureUnavailableError,
     Gsa,
     History,
+    InvalidArgumentError,
     Ledger,
+    NoFiniteStartError,
     PyObjective,
+    RemovedConfigKeyError,
     __version__,
     cluster_search as _core_cluster_search,
     energy_hits,
+    make_bounds as _make_bounds,
     low_discrepancy_points as _core_low_discrepancy_points,
     pilot_draws_qmc as _core_pilot_draws_qmc,
     polish as _core_polish,
@@ -95,6 +111,34 @@ from anneal.tvm_ffi import (
 )
 
 
+if TYPE_CHECKING:
+    from anneal._core import Bounds as Bounds
+else:
+
+    class _BoundsMeta(type):
+        """Build the box through ``make_bounds`` and stay the class it returns."""
+
+        def __call__(cls, low, high, slack=1e-6):
+            return _make_bounds(low, high, slack)
+
+        def __instancecheck__(cls, instance):
+            return isinstance(instance, _CoreBounds)
+
+        def __subclasscheck__(cls, subclass):
+            return issubclass(subclass, _CoreBounds)
+
+    class Bounds(metaclass=_BoundsMeta):
+        """A box ``low <= x <= high`` with a ``slack`` on its faces.
+
+        A pair of different lengths, an inverted pair, a coordinate that is
+        not a number or a negative or NaN ``slack`` raises ``BoundsError``.
+        The value is the ``Bounds`` of the ``eindir-core`` crate, so it is
+        what ``PyObjective`` takes.
+        """
+
+        __slots__ = ()
+
+
 def _flat(value):
     """A contiguous float64 vector from any array-like, flattened in C order."""
     return np.ascontiguousarray(np.asarray(value, dtype=np.float64).reshape(-1))
@@ -105,11 +149,11 @@ def _flat_or_none(value):
 
 
 def _count(name, value, minimum):
-    """A whole number of at least ``minimum``, or a ValueError naming it."""
+    """A whole number of at least ``minimum``, or an InvalidArgumentError naming it."""
     count = int(value)
     if count != value or count < minimum:
         msg = f"{name} must be a whole number of at least {minimum}, got {value!r}"
-        raise ValueError(msg)
+        raise InvalidArgumentError(msg)
     return count
 
 
@@ -120,7 +164,7 @@ def _max_evals(value):
     count = int(value)
     if count != value or count < 1:
         msg = f"max_evals must be a whole number of calls, at least 1, got {value!r}"
-        raise ValueError(msg)
+        raise InvalidArgumentError(msg)
     return count
 
 
@@ -263,6 +307,8 @@ def cluster_search(
     ring_moves: bool | None = None,
     hold_stereocentres: bool | None = None,
     measured_energy_scale: bool | None = None,
+    config: Config | None = None,
+    full: bool = False,
 ):
     """Run the measured cluster-search layer.
 
@@ -341,18 +387,45 @@ def cluster_search(
         deposit height from the median quenched energy change of its opening
         hops instead of an energy scale of one. ``None`` keeps the preset's:
         on for ``recommended=True``, off otherwise.
+      config: a ``Config`` to run as it stands, from any preset and any
+        ``replace``. ``n`` must equal ``config.n_points``. The config carries
+        what ``derived``, ``communicating``, ``rigid``, ``length_scale``,
+        ``species``, ``sigmas``, ``water_sites``, ``groups``, ``local_step``,
+        ``ring_moves``, ``hold_stereocentres`` and ``measured_energy_scale``
+        would set, so passing any of them with ``config`` raises
+        ``InvalidArgumentError``, and ``recommended`` is not read. A config
+        with rigid bodies searches the ``6 * n`` chart and starts from a
+        compact placement when ``start`` is ``None``. A molecular config
+        needs ``start``.
+      full: return every field of the Rust ``Outcome`` instead of the short
+        result below.
 
     A callback raising a ``BaseException`` that is not an ``Exception``, such
     as ``KeyboardInterrupt`` or a harness stop, ends the search at once.
     The best geometry found is kept, and the exception is re-raised here.
 
-    Returns a dict with ``best`` (flat coordinates in the state layout),
-    ``best_energy``, ``hops``, ``accepted``, ``nve_unavailable``,
-    ``local_step`` and ``quench_seconds``. ``accepted`` counts the hops the
-    acceptance rule took. ``nve_unavailable`` is true when a constant-energy
-    (NVE) escape was requested and that escape is not compiled; the
-    ``python`` feature compiles it. ``quench_seconds`` is ``None`` unless
-    ``local_step="auto"`` timed a potential call and a TRIC step, in seconds.
+    Returns a dict. The short result has ``best`` (flat coordinates in the
+    state layout), ``best_energy``, ``hops``, ``accepted`` (the hops the
+    acceptance rule took), ``nve_unavailable`` (true when a constant-energy
+    escape was requested and is not compiled; the ``python`` feature compiles
+    it), ``local_step`` and ``quench_seconds`` (``None`` unless
+    ``local_step="auto"`` timed a potential call and a TRIC step, in
+    seconds).
+
+    With ``full=True`` the dict also has one key for every other field of the
+    Rust ``Outcome``: ``final_state``, ``final_energy``, ``charged``,
+    ``basins``, ``returned``, the ``accepted_transitions`` list of dicts,
+    ``proposal_counts``, the counters of each move family, and the optional
+    reports ``superbasin``, ``superbasin_counts``, ``superbasin_archive``,
+    ``energy_trace``, ``funnel``, ``transport``, ``delayed``, ``hmc`` and
+    ``energy_bias``, which are ``None`` or empty when their feature was off.
+    A tuple field of the struct is a tuple, and a structured report is a dict
+    of its fields. ``stop`` is the lower-case code of the reason the search
+    ended (``budget``, ``target``, ``caller_stop``, ``retired``,
+    ``nve_unavailable``, ``max_hops`` or ``no_trajectory``), and
+    ``stop_reason`` is the text a checkpoint gave when ``stop`` is
+    ``retired``. In the Outcome the struct's ``best_state`` is ``best`` and
+    its ``best`` is ``best_energy``.
     """
     start_arr = None if start is None else np.asarray(start, dtype=np.float64).reshape(-1)
     args = (
@@ -388,6 +461,10 @@ def cluster_search(
         kwargs["hold_stereocentres"] = bool(hold_stereocentres)
     if measured_energy_scale is not None:
         kwargs["measured_energy_scale"] = bool(measured_energy_scale)
+    if config is not None:
+        kwargs["config"] = config
+    if full:
+        kwargs["full"] = True
     out = _core_cluster_search(*args, **kwargs)
     out["best"] = np.asarray(out["best"], dtype=np.float64)
     return out
@@ -961,11 +1038,52 @@ def box_ensemble_optimize(
     replicas: int = 4,
     history: str = "shared",
     membership: str = "accepted",
+    *,
+    identity_tol=None,
+    shared_deposits=None,
+    shared_visit_policy=None,
+    escape=None,
+    langevin_steps=None,
+    langevin_omega0=None,
+    langevin_dt=None,
+    langevin_friction=None,
+    coverage_shared=None,
+    coverage_radius=None,
+    coverage_neighbors=None,
+    coverage_height=None,
+    coverage_well_tempering=None,
+    coverage_peer_weight=None,
 ):
     """Communicating box hops on SharedDesignHistory / MinimumHistory.
 
     Requires ``grad_fn``. Kick and quench in the box. Without a gradient
     use ``ensemble_optimize`` (portfolio). Not cluster hopping.
+
+    The result has ``best_val``, ``best_pos``, ``charged`` (``n_evals`` plus
+    ``n_grads``), ``hops``, the minimum-history counters, ``shared_deposits``
+    and the ``coverage_*`` counters.
+
+    Settings beyond ``replicas``, ``history`` and ``membership`` (``None``
+    keeps the default; a value outside its range raises
+    ``InvalidArgumentError``):
+
+    - ``identity_tol``: scaled max-norm that identifies two quenched points
+      as one minimum (positive; default ``1e-3``).
+    - ``shared_deposits``: foreign coverage visits paid into each receiving
+      region per hop boundary (default 8; zero disables incoming deposits).
+    - ``shared_visit_policy``: ``"tabu"`` (default; peer visits mark a basin
+      known and inflate escape) or ``"recognition"`` (peer visits only
+      identify the basin).
+    - ``escape``: ``"gaussian"`` (default) or ``"langevin"``, persistent
+      Langevin noise that integrates forces and so needs ``grad_fn``.
+      ``langevin_steps`` (default 16), ``langevin_omega0`` (0.2) and
+      ``langevin_dt`` (0.01) configure it; ``langevin_friction`` selects
+      scalar white noise with that damping rate, and ``None`` the colored
+      noise. They are refused with the Gaussian escape.
+    - ``coverage_shared``, ``coverage_radius``, ``coverage_neighbors``,
+      ``coverage_height`` (nonnegative), ``coverage_well_tempering`` (above
+      one) and ``coverage_peer_weight`` (nonnegative): the evaluated-region
+      coverage, independent of the minimum ledger.
     """
     low_arr = np.asarray(low, dtype=np.float64)
     high_arr = np.asarray(high, dtype=np.float64)
@@ -981,6 +1099,20 @@ def box_ensemble_optimize(
         int(replicas),
         str(history),
         str(membership),
+        identity_tol=identity_tol,
+        shared_deposits=shared_deposits,
+        shared_visit_policy=shared_visit_policy,
+        escape=escape,
+        langevin_steps=langevin_steps,
+        langevin_omega0=langevin_omega0,
+        langevin_dt=langevin_dt,
+        langevin_friction=langevin_friction,
+        coverage_shared=coverage_shared,
+        coverage_radius=coverage_radius,
+        coverage_neighbors=coverage_neighbors,
+        coverage_height=coverage_height,
+        coverage_well_tempering=coverage_well_tempering,
+        coverage_peer_weight=coverage_peer_weight,
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -998,9 +1130,20 @@ def ensemble_optimize(
     history: str = "shared",
     membership: str = "accepted",
     *,
+    identity_tol=None,
+    shared_deposits=None,
+    shared_visit_policy=None,
+    escape=None,
+    langevin_steps=None,
+    langevin_omega0=None,
+    langevin_dt=None,
+    langevin_friction=None,
     coverage_shared=None,
     coverage_radius=None,
     coverage_neighbors=None,
+    coverage_height=None,
+    coverage_well_tempering=None,
+    coverage_peer_weight=None,
 ):
     """Search on a design box.
 
@@ -1018,10 +1161,32 @@ def ensemble_optimize(
     ``coverage_radius`` sets the normalized RMS parameter distance.
     ``coverage_neighbors`` restricts both sample and deposit delivery to direct
     cyclic neighbours: zero is all-to-all, one selects the two adjacent chains.
-    Explicit coverage controls select native hop chains, including for one
-    replica. With no coverage controls, the one-replica values-only portfolio
-    remains the convenience policy. Coverage requires no gradient and does not
+    Explicit coverage controls, and any of the settings below, select native
+    hop chains, including for one replica. With none of them, the
+    one-replica values-only portfolio remains the convenience policy. Coverage requires no gradient and does not
     restrict the optional minimum ledger or forward received observations.
+
+    Settings beyond ``replicas``, ``history`` and ``membership`` (``None``
+    keeps the default; a value outside its range raises
+    ``InvalidArgumentError``):
+
+    - ``identity_tol``: scaled max-norm that identifies two quenched points
+      as one minimum (positive; default ``1e-3``).
+    - ``shared_deposits``: foreign coverage visits paid into each receiving
+      region per hop boundary (default 8; zero disables incoming deposits).
+    - ``shared_visit_policy``: ``"tabu"`` (default; peer visits mark a basin
+      known and inflate escape) or ``"recognition"`` (peer visits only
+      identify the basin).
+    - ``escape``: ``"gaussian"`` (default) or ``"langevin"``, persistent
+      Langevin noise that integrates forces and so needs ``grad_fn``.
+      ``langevin_steps`` (default 16), ``langevin_omega0`` (0.2) and
+      ``langevin_dt`` (0.01) configure it; ``langevin_friction`` selects
+      scalar white noise with that damping rate, and ``None`` the colored
+      noise. They are refused with the Gaussian escape.
+    - ``coverage_shared``, ``coverage_radius``, ``coverage_neighbors``,
+      ``coverage_height`` (nonnegative), ``coverage_well_tempering`` (above
+      one) and ``coverage_peer_weight`` (nonnegative): the evaluated-region
+      coverage, independent of the minimum ledger.
 
     Coordinates are design variables regardless of dimension. Atomic
     symmetry-aware proposals require the explicit ``cluster_search`` adapter.
@@ -1040,9 +1205,20 @@ def ensemble_optimize(
         int(replicas),
         str(history),
         str(membership),
+        identity_tol=identity_tol,
+        shared_deposits=shared_deposits,
+        shared_visit_policy=shared_visit_policy,
+        escape=escape,
+        langevin_steps=langevin_steps,
+        langevin_omega0=langevin_omega0,
+        langevin_dt=langevin_dt,
+        langevin_friction=langevin_friction,
         coverage_shared=coverage_shared,
         coverage_radius=coverage_radius,
         coverage_neighbors=coverage_neighbors,
+        coverage_height=coverage_height,
+        coverage_well_tempering=coverage_well_tempering,
+        coverage_peer_weight=coverage_peer_weight,
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -1201,11 +1377,11 @@ def _scipy_bounds_to_low_high(bounds, dim):
         if arr.ndim == 2 and arr.shape == (dim, 2):
             low, high = arr[:, 0].copy(), arr[:, 1].copy()
         elif arr.ndim == 1 and arr.size == dim:
-            raise ValueError("bounds must be pairs (low, high) per coordinate")
+            raise BoundsError("bounds must be pairs (low, high) per coordinate")
         else:
-            raise ValueError(f"bounds shape {arr.shape} does not match dimension {dim}")
+            raise BoundsError(f"bounds shape {arr.shape} does not match dimension {dim}")
     if low.size != dim or high.size != dim:
-        raise ValueError(f"bounds length {low.size} does not match x0 length {dim}")
+        raise BoundsError(f"bounds length {low.size} does not match x0 length {dim}")
     return low, high
 
 
@@ -1260,12 +1436,12 @@ def minimize(
     x0_arr = np.asarray(x0, dtype=np.float64).reshape(-1)
     dim = int(x0_arr.size)
     if dim < 1:
-        raise ValueError("x0 must be nonempty")
+        raise InvalidArgumentError("x0 must be nonempty")
     low, high = _scipy_bounds_to_low_high(bounds, dim)
     if budget is None:
         budget = max(32, 80 * dim)
     if replicas < 1:
-        raise ValueError("replicas must be positive")
+        raise InvalidArgumentError("replicas must be positive")
     archive = open_parameter_store(store)
     if archive is not None:
         observed = [
@@ -1553,21 +1729,28 @@ def global_optimize_objective(
 
 
 __all__ = [
+    "AnnealError",
     "BasinBias",
     "Boltzmann",
     "Bounds",
+    "BoundsError",
     "Config",
+    "ConfigError",
     "DEFAULT_HIT_TOL",
     "SEARCH_HIT_TOL",
     "DeviceHistory",
     "EnsembleHistory",
     "EpochLine",
     "Fast",
+    "FeatureUnavailableError",
     "Gsa",
     "History",
+    "InvalidArgumentError",
     "LandfoldMap",
     "Ledger",
+    "NoFiniteStartError",
     "PyObjective",
+    "RemovedConfigKeyError",
     "Anneal",
     "cluster_search",
     "energy_hits",

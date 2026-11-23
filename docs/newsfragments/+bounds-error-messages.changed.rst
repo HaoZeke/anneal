@@ -1,0 +1,1 @@
+The ``BoundsError`` that ``anneal.Bounds`` raises names what it found: the two lengths when they differ, the index of the first coordinate that is not a number or whose ``low`` is above its ``high``, and the value of a ``slack`` that is negative or NaN.

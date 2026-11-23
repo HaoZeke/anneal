@@ -126,7 +126,7 @@ pub(crate) fn reverse_cycle<R: Rng + ?Sized>(
         let bonded = unit(sub(sites[k][h[which]], oxygen));
         let other = unit(sub(sites[k][h[1 - which]], oxygen));
         let target = unit(sub(sites[prev][o], oxygen));
-        if norm(cross(target, other)) < 1e-6 {
+        if !turn_is_defined(sub(sites[prev][o], oxygen), bonded, other, target) {
             return false;
         }
         turns.push((k, oxygen, frame_rotation((bonded, other), (target, other))));
@@ -142,6 +142,21 @@ pub(crate) fn reverse_cycle<R: Rng + ?Sized>(
         }
     }
     true
+}
+
+/// Smallest oxygen-oxygen separation, in angstroms, that names a direction.
+const MIN_SEPARATION: f64 = 1e-3;
+
+/// Whether the frames of a turn exist.
+///
+/// `gap` is the vector to the previous oxygen. Two oxygens on top of one
+/// another have no direction between them, and normalising that gap gives
+/// NaN, which every comparison below it would let through. The tests are
+/// written so that NaN fails them.
+fn turn_is_defined(gap: [f64; 3], bonded: [f64; 3], other: [f64; 3], target: [f64; 3]) -> bool {
+    norm(gap) >= MIN_SEPARATION
+        && norm(cross(target, other)) >= 1e-6
+        && norm(cross(bonded, other)) >= 1e-6
 }
 
 /// The rotation that takes the frame of `from` onto the frame of `to`.
@@ -294,7 +309,7 @@ pub(crate) fn reverse_cycle_cartesian<R: rand::Rng + ?Sized>(
         let bonded = unit(sub(h_donating, oxygen));
         let other = unit(sub(h_other, oxygen));
         let target = unit(sub(sites[prev][0], oxygen));
-        if norm(cross(target, other)) < 1e-6 {
+        if !turn_is_defined(sub(sites[prev][0], oxygen), bonded, other, target) {
             return false;
         }
         turns.push((k, oxygen, frame_rotation((bonded, other), (target, other))));
@@ -586,6 +601,44 @@ mod tests {
         assert_eq!(undirected_after, undirected);
         let backward: BTreeSet<(usize, usize)> = forward.iter().map(|&(i, j)| (j, i)).collect();
         assert_eq!(directed_after, backward);
+    }
+
+    /// Molecules on top of one another have no oxygen direction to turn
+    /// toward. A minimiser on a quadratic objective drives every centre to
+    /// the origin and every rotation to zero, which is this state.
+    #[test]
+    fn molecules_on_top_of_one_another_have_no_cycle_to_reverse() {
+        for n in [2usize, 3, 5] {
+            for noise in [0.0, 1.0e-16, 1.0e-9] {
+                for seed in 0..24 {
+                    let mut x = Array1::zeros(6 * n);
+                    for i in 0..3 * n {
+                        x[i] = noise * ((i % 3) as f64 - 1.0);
+                    }
+                    let before = x.clone();
+                    let mut rng = StdRng::seed_from_u64(seed);
+                    let turned = reverse_cycle(&geometry(), n, &mut x, &mut rng);
+                    assert!(
+                        x.iter().all(|v| v.is_finite()),
+                        "n={n} noise={noise} seed={seed} turned={turned}: {x:?}"
+                    );
+                    assert!(!turned, "n={n} noise={noise} seed={seed}");
+                    assert_eq!(x, before);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn coincident_cartesian_waters_have_no_cycle_to_reverse() {
+        let groups = vec![vec![0, 1, 2], vec![3, 4, 5], vec![6, 7, 8]];
+        for seed in 0..24 {
+            let mut x = Array1::zeros(27);
+            let before = x.clone();
+            let mut rng = StdRng::seed_from_u64(seed);
+            assert!(!reverse_cycle_cartesian(&groups, &mut x, &mut rng));
+            assert_eq!(x, before);
+        }
     }
 
     #[test]

@@ -7,6 +7,8 @@ from typing import Any, Callable
 import array_api_compat as _array_api_compat
 import numpy as np
 
+from anneal._core import InvalidArgumentError
+
 
 @dataclass(frozen=True)
 class DeviceHistory:
@@ -48,7 +50,7 @@ class DeviceHistory:
 def _array_namespace(*arrays: Any) -> Any:
     values = tuple(array for array in arrays if array is not None)
     if not values:
-        raise ValueError("At least one array is required")
+        raise InvalidArgumentError("At least one array is required")
     try:
         return _array_api_compat.array_namespace(*values, use_compat=True)
     except ValueError:
@@ -160,13 +162,13 @@ def _objective_value(value: Any, *, xp: Any, device: Any, dtype: Any) -> Any:
     if isinstance(value, np.generic):
         array = _asarray(value, xp=xp, device=device, dtype=dtype)
     elif isinstance(value, bool | int | float | complex):
-        raise ValueError("device objectives must return an Array API array")
+        raise InvalidArgumentError("device objectives must return an Array API array")
     elif _array_api_compat.is_array_api_obj(value) or hasattr(value, "__dlpack__"):
         array = _asarray(value, xp=xp, device=device, dtype=dtype)
     else:
-        raise ValueError("device objectives must return an Array API array")
+        raise InvalidArgumentError("device objectives must return an Array API array")
     if array.shape != ():
-        raise ValueError("device objectives must return a scalar Array API array")
+        raise InvalidArgumentError("device objectives must return a scalar Array API array")
     return array
 
 
@@ -223,16 +225,16 @@ def _ensemble_objective_value(
     value: Any, n_chains: int, *, xp: Any, device: Any, dtype: Any
 ) -> Any:
     if isinstance(value, bool | int | float | complex):
-        raise ValueError("device objectives must return an Array API array")
+        raise InvalidArgumentError("device objectives must return an Array API array")
     if not (
         _array_api_compat.is_array_api_obj(value)
         or hasattr(value, "__dlpack__")
         or isinstance(value, np.ndarray)
     ):
-        raise ValueError("device objectives must return an Array API array")
+        raise InvalidArgumentError("device objectives must return an Array API array")
     array = _asarray(value, xp=xp, device=device, dtype=dtype)
     if array.shape != (n_chains,):
-        raise ValueError(
+        raise InvalidArgumentError(
             f"batched device objectives must return shape ({n_chains},), got {array.shape}"
         )
     return array

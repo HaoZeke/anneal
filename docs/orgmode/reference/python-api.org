@@ -1,0 +1,458 @@
+#+TITLE: Python API
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+
+#+begin_export rst
+==========
+Python API
+==========
+#+end_export
+
+The package is =anneal=. The compiled module underneath it is
+=anneal._core=; =python/anneal/__init__.py= re-exports its classes and wraps
+most of its functions. Install it with =maturin develop --features python=
+(see [[file:../bindings.org][Bindings]]).
+
+* Type stubs
+
+=python/anneal/_core.pyi= describes every class, function and constant of
+=anneal._core=, and =python/anneal/py.typed= marks the package as typed. The
+stubs are checked against the compiled module by =pytest/test_stubs.py=, which
+reads the stub with =ast= and compares it with the module's names, argument
+kinds, defaults and class members. The same file runs =mypy.stubtest= when mypy
+is installed.
+
+A binding added to =src/python.rs= without a matching stub entry fails that
+test. Add the entry in the same commit.
+
+#+begin_src python
+from pathlib import Path
+
+import anneal
+import anneal._core as core
+
+stub = Path(anneal.__file__).with_name("_core.pyi")
+assert stub.is_file()
+assert "def cluster_search(" in stub.read_text()
+assert set(core.__all__) >= {"cluster_search", "Config", "Ledger"}
+#+end_src
+
+* Errors
+
+Every error that =anneal= raises for rejected input derives from
+=anneal.AnnealError=, which derives from =ValueError=. An =except ValueError=
+clause that worked before keeps working. The classes name what to fix.
+
+- =AnnealError= :: the base class.
+- =InvalidArgumentError= :: an argument has a value, length or combination
+  the call cannot use, or a number of points whose state length does not fit
+  in a machine word. Most checks raise this class.
+- =BoundsError= :: a kind of =InvalidArgumentError= for a box that is empty,
+  has sides of different lengths, has a bound that is not a number, not
+  finite or not ordered, or has a negative or NaN =slack=.
+- =ConfigError= :: =Config.validate_json= or =Config.validate_toml= could not
+  read the text. The =key= attribute is =<json>= or =<toml>=.
+- =RemovedConfigKeyError= :: a kind of =ConfigError= for a key that a past
+  release removed. The =key= attribute holds the dotted path of the key.
+- =NoFiniteStartError= :: =cluster_search= found no finite start. The
+  =attempts= attribute counts the quenches it tried.
+- =FeatureUnavailableError= :: the call needs a Cargo feature that this
+  build lacks, such as =ras=True= without =graphkey=.
+
+A wrong type still raises =TypeError=. An exception that an objective raises
+passes through unchanged. A missing file raises =OSError=.
+
+** MemoryError
+
+=MemoryError= is the builtin, and it is not an =AnnealError=. The input is
+valid and the machine cannot hold what the call builds from it, so the call
+can succeed on a larger machine or with a smaller =n=. The message names =n=
+and the number of bytes that the allocator refused. The calls that raise it
+are =cluster_search= and the TIP4P presets of =Config=. A state length that
+overflows a machine word is not a memory error: it raises
+=InvalidArgumentError=, because no machine could hold it. The size that
+=cluster_search= asks for is described under "Boxes and states".
+
+** Which call raises which error
+
+| Call                          | Raises                                                      |
+|-------------------------------+-------------------------------------------------------------|
+| =cluster_search=              | =InvalidArgumentError=, =MemoryError=, =NoFiniteStartError= |
+| =Config.for_tip4p=            | =InvalidArgumentError=, =MemoryError=                       |
+| =Config.recommended_tip4p=    | =InvalidArgumentError=, =MemoryError=                       |
+| =Config.communicating_tip4p=  | =InvalidArgumentError=, =MemoryError=                       |
+| =anneal._core.make_bounds=    | =BoundsError=                                               |
+
+The table lists the errors that the docstrings of =anneal._core= name for
+each call, and =pytest/test_errors_page.py= fails when the two differ.
+=pytest/test_public_names.py= runs the calls that the table gives
+=InvalidArgumentError= or =MemoryError= with an =n= the machine cannot hold.
+
+The =Bounds= of the =eindir-core= crate, called as =anneal._core.Bounds=, is not
+checked by =anneal=. With =eindir-core= 0.6.0 it asserts on the inputs above
+and the panic arrives as =PanicException=, which derives from
+=BaseException= and skips =except Exception=. Build a box with
+=anneal.Bounds=, which calls =make_bounds= and raises =BoundsError= for the same
+inputs.
+
+#+begin_src python
+import numpy as np
+
+import anneal
+
+
+def f(x):
+    return float(np.sum(np.asarray(x) ** 2))
+
+
+try:
+    anneal.run(f, np.ones(1), np.zeros(1), anneal.Boltzmann())
+except anneal.BoundsError as err:
+    assert isinstance(err, ValueError)
+    assert "strictly less" in str(err)
+else:
+    raise AssertionError("an inverted box must raise")
+
+try:
+    anneal.Config.validate_json('{"ring": {"reseed_hops": 1}}')
+except anneal.RemovedConfigKeyError as err:
+    assert err.key == "ring.reseed_hops"
+else:
+    raise AssertionError("a removed key must raise")
+#+end_src
+
+A call that needs more memory than any machine has raises =MemoryError=, and
+one whose state length overflows a machine word raises
+=InvalidArgumentError=.
+
+#+begin_src python
+import anneal
+
+try:
+    anneal.Config.recommended_tip4p(10**15)
+except MemoryError as err:
+    assert not isinstance(err, anneal.AnnealError)
+else:
+    raise AssertionError("a state of 6e15 numbers must not be built")
+
+try:
+    anneal.Config.recommended_tip4p(2**64 - 1)
+except anneal.InvalidArgumentError as err:
+    assert isinstance(err, ValueError)
+else:
+    raise AssertionError("a state length past a machine word must raise")
+#+end_src
+
+* Boxes and states
+
+Every function that takes =low= and =high= checks the box before it searches.
+Sides of different lengths raise =InvalidArgumentError=, a bound that is NaN
+or a =low= above =high= raises =BoundsError=. Neither case reaches Rust
+code that would panic: a panic arrives in Python as =PanicException=, which
+derives from =BaseException= and skips =except Exception=.
+
+=BasinBias.potential= and =BasinBias.deposit= take a state of =3 * n_points=
+coordinates and raise =InvalidArgumentError= for any other length.
+
+=cluster_search= and the =Config= presets for rigid TIP4P waters size their
+buffers from =n=. A state of =3 * n= numbers, or =6 * n= for rigid bodies, that
+does not fit in a machine word raises =InvalidArgumentError=. =cluster_search=
+also asks the allocator for what its first hop holds before it builds
+anything. =anneal_core::memory::first_hop_bytes= adds up the vectors of one
+state length that the hop keeps (the curvature memory of the quench, the
+occupied, trial and best states, the records of the hop), the vectors of one
+number per pair of points that recognise a basin and fill the table of
+sorted spectra, and the table that the symmetry move sorts, which has an
+entry for every atom and site pair. Each is counted from the types and
+constants of the code that holds it, and
+=tests/first_hop_allocation.rs= fails when the sum is less than the bytes a
+real first hop holds. =MemoryError= means the allocator refused it. No
+largest =n= is built in, so the same call succeeds on a machine that can hold
+the working set. A run that grows its history past the first hop is still
+left to the allocator and the operating system.
+
+=anneal.Bounds(low, high, slack=1e-6)= checks its arrays before it builds the
+box, which is the =Bounds= of the =eindir-core= crate. Sides of different
+lengths, an inverted pair, a coordinate that is not a number and a negative or
+NaN =slack= raise =BoundsError=. A pair of equal values is a face of zero
+width, and an infinite side is allowed. =eindir-core= 0.6.0 asserts instead,
+so =anneal._core.Bounds= called directly still panics on those inputs.
+=anneal.Bounds= is a class for =isinstance= and =issubclass=, and its value
+is what =PyObjective= takes.
+
+#+begin_src python
+import numpy as np
+
+import anneal
+
+try:
+    anneal.polish(
+        lambda x: float(np.sum(x**2)),
+        lambda x: 2 * x,
+        np.ones(2),
+        np.zeros(2),
+        np.zeros(2),
+    )
+except anneal.BoundsError:
+    pass
+else:
+    raise AssertionError("an inverted box must raise")
+
+try:
+    anneal.Bounds(np.ones(2), np.zeros(2))
+except anneal.BoundsError:
+    pass
+else:
+    raise AssertionError("an inverted Bounds must raise")
+
+bias = anneal.BasinBias(3)
+try:
+    bias.potential(np.zeros(8))
+except anneal.InvalidArgumentError as err:
+    assert "3 * 3 = 9" in str(err)
+else:
+    raise AssertionError("a state of the wrong length must raise")
+#+end_src
+
+* Box ensembles
+
+=box_ensemble_optimize= and =ensemble_optimize= take, beside =replicas=,
+=history= and =membership=, every setting of the Rust =BoxEnsembleConfig=,
+=GleEscapeConfig= and =BoxCoverageConfig= as keywords.
+=pytest/test_box_ensemble_tuning.py= reads the three structs and fails when a
+field has no keyword.
+
+| Keyword                                        | Sets                                                    |
+|------------------------------------------------+---------------------------------------------------------|
+| =identity_tol=                                 | scaled max-norm that makes two quenches one minimum     |
+| =shared_deposits=                              | foreign visits paid per region per hop boundary         |
+| =shared_visit_policy=                          | ="tabu"= or ="recognition"=                             |
+| =escape=                                       | ="gaussian"= or ="langevin"=                            |
+| =langevin_steps=, =langevin_omega0=,           | the Langevin segment; =langevin_friction= selects       |
+| =langevin_dt=, =langevin_friction=             | white noise, and =None= the colored noise               |
+| =coverage_shared=, =coverage_neighbors=        | who receives coverage                                   |
+| =coverage_radius=, =coverage_height=,          | region size, deposit height, well-tempering factor      |
+| =coverage_well_tempering=,                     | and peer weight                                         |
+| =coverage_peer_weight=                         |                                                         |
+
+=escape="langevin"= integrates forces and needs =grad_fn=. Any of the
+keywords selects hop chains in =ensemble_optimize=, also for one values-only
+replica. A value that Rust asserts on, such as =identity_tol=0= or a
+=coverage_well_tempering= of 1, raises =InvalidArgumentError= before the
+first callback. =box_ensemble_optimize= also reports =charged=, the sum of
+=n_evals= and =n_grads=.
+
+#+begin_src python
+import numpy as np
+import anneal
+
+def energy(x):
+    return float(np.sum(np.cos(3.0 * x)))
+
+def gradient(x):
+    return -3.0 * np.sin(3.0 * x)
+
+low, high = np.full(2, -5.0), np.full(2, 5.0)
+out = anneal.box_ensemble_optimize(
+    energy, low, high, budget=600, seed=1, grad_fn=gradient,
+    escape="langevin", langevin_steps=8, shared_deposits=0,
+)
+assert out["charged"] == out["n_evals"] + out["n_grads"] <= 600
+assert out["shared_deposits"] == 0
+#+end_src
+
+* Ledger
+
+=anneal.Ledger(budget)= is the charged-work account of a search. Beside
+=budget=, =spent=, =remaining= and =best= it reads =best_state= (a copy),
+=encounters= (the =(spent, energy)= pair at each new incumbent, at most 512)
+and =target=, and it takes charges and records:
+
+| Member                              | Does                                                        |
+|-------------------------------------+-------------------------------------------------------------|
+| =charge()=                          | one evaluation; =False= when the budget is gone             |
+| =charge_many(n)=                    | =n= at once; what fits is charged, =False= if some did not  |
+| =charge_frac(f)=                    | a fraction; a whole unit each time the sum crosses one      |
+| =record(value, state)=              | keeps the lowest finite value and its state                 |
+| =replace_best(value, state)=        | moves both together, as a reoptimized geometry does         |
+| =stop_below(e)=, =below_target(e)=, | the target a search stops at                                |
+| =target_reached=                    |                                                             |
+| =record_quench_boundary(...)=       | one relaxation: validated with a fresh gradient, else rejected |
+| =quench_boundaries=                 | the recorded boundaries, as dicts                           |
+| =grant(extra)=                      | adds evaluations to the budget for work after the ceiling   |
+| =slice(budget)=                     | a ledger with its own spend, settled back with =charge_many= |
+
+=stop_below= and =replace_best= raise =InvalidArgumentError= for a value that
+Rust would ignore without a word. =record= appends every finite value to the
+file that =ANNEAL_MIN_DUMP= names, when it is set.
+=pytest/test_ledger.py= reads the Rust =impl Ledger= and fails when a public
+method is neither reached here nor named there as belonging to a search
+driver.
+
+#+begin_src python
+import numpy as np
+import anneal
+
+ledger = anneal.Ledger(10)
+ledger.charge_many(3)
+ledger.record(4.0, np.zeros(2))
+ledger.charge_many(2)
+ledger.record(1.5, np.ones(2))
+assert ledger.encounters == [(3, 4.0), (5, 1.5)]
+assert ledger.best == 1.5 and ledger.remaining == 5
+child = ledger.slice(3)
+child.charge_many(3)
+ledger.charge_many(child.spent)
+assert ledger.spent == 8
+#+end_src
+
+* Configuration
+
+=anneal.Config= wraps the Rust =cluster_hopping::Config=. A preset builds
+one; =field_names()=, =get=, =to_dict= and =replace= read and change its
+settings; =resolved_json= and =resolved_sha256= give the canonical record
+that a run log can store.
+
+** Presets
+
+| Constructor                                       | Builds                                              |
+|---------------------------------------------------+-----------------------------------------------------|
+| =recommended(n)=                                  | the measured default                                |
+| =recommended_with_scales(n, length, energy)=      | the same in declared units                          |
+| =recommended_for_pair(n, pair, rho=None)=         | the same for ="lennard_jones"= or ="morse"=         |
+| =derived(n)=                                      | the cost-asymmetric screen and budget-window heat   |
+| =communicating(n)=                                | orbit completion and recognition                    |
+| =for_cluster(n)=, =for_cluster_with_scales(...)=  | the plain Wales-Doye protocol                       |
+| =for_cluster_dual_core(n)=                        | the plain protocol plus the dual orbit core         |
+| =with_scales(n, length, energy)=                  | the bare scaled configuration                       |
+| =packing_superbasin(n)=                           | the occupancy preset for packing harvests           |
+| =for_tip4p(n)=, =communicating_tip4p(n)=,         | rigid TIP4P waters                                  |
+| =recommended_tip4p(n)=                            |                                                     |
+| =for_molecular(species, groups, energy_scale)=,   | molecules with groups of atoms                      |
+| =recommended_molecular(...)=                      |                                                     |
+
+A preset returns a new =Config=. =with_dual_orbit_core()=, =with_species=
+and =with_flexible_molecules= return a changed copy. A constructor that
+Rust would answer with a panic raises =InvalidArgumentError= instead.
+=repr= names the call chain, for example
+=Config.recommended(13).replace(relax_steps=500)=.
+
+** Settings
+
+=Config.field_names()= lists every setting by name. =get(name)= returns a
+number, a flag or a name as a Python value, and a structured setting as plain
+lists and dicts. =reoccupy= and =hmc= hold native objects, so =get= reports
+whether they are set. =replace(**settings)= changes the scalar ones: flags,
+finite numbers, whole numbers and the two optional numbers. It refuses
+=n_points=, which sets the state length, and the structured settings, which
+a preset sets. =pytest/test_config_fields.py= reads =config.rs= and fails
+when a field of the struct has no entry.
+
+A setting that the search asserts on is checked where it is set, and a value
+outside its range raises =InvalidArgumentError= naming the setting. Without
+this check the Rust assert would reach Python as =PanicException=.
+
+| Setting                                              | Accepted values       |
+|------------------------------------------------------+-----------------------|
+| =theta=                                              | strictly in (0, 2)    |
+| =calibrate_quantile=, =bayes_threshold=              | in [0, 1)             |
+| =contextual_floor=, =bayes_exploration=              | in [0, 1]             |
+| =diversity_floor=                                    | in (0, 1]             |
+| =bias_gamma=                                         | above 1               |
+| =bias_height=                                        | at least 0            |
+| =height_revisits=, =length_scale=, =merge_radius=,   | positive              |
+| =call_floor=                                         |                       |
+| =shape_keyed=                                        | =True= needs the =ira= build feature, else =FeatureUnavailableError= |
+
+#+begin_src python
+import anneal
+
+cfg = anneal.Config.recommended(13)
+assert "relax_steps" in anneal.Config.field_names()
+assert cfg.get("relax_steps") == 1000
+assert cfg.get("move_library") == "lean_burst"
+
+short = cfg.replace(relax_steps=500)
+assert short.get("relax_steps") == 500
+assert cfg.get("relax_steps") == 1000
+assert repr(short) == "Config.recommended(13).replace(relax_steps=500)"
+assert short.resolved_sha256() != cfg.resolved_sha256()
+
+morse = anneal.Config.recommended_for_pair(13, "morse", rho=6.0)
+assert morse.get("length_scale") < 1.0
+#+end_src
+
+** Reading a Config and making it rigid
+
+Five read-only properties report what a preset decided: =monoatomic= (every
+atom is one element), =packing_cna_applies= (the CNA 555 and icosahedral
+diagnostics make sense: a monoatomic cluster, not a molecule or a slab),
+=start_radius= (radius of the initial cluster sphere), =proposal_arms=
+(arms of the proposal mixture) and the method =packing_surface()=, a dict of
+the four packing-mutate flags =twin_as_move=, =orbit_on_new=, =angular= and
+=psym_on_new=.
+
+=with_rigid_bodies(sites, species)= returns a copy whose state is rigid
+bodies, centres then rotations, so the state has =6 * n_points= entries.
+=sites= is an =(m, 3)= float array of body-frame positions and =species= the
+positive label of each site. The Cartesian surfaces are cleared, the
+orientation moves replace the Cartesian library, and the container grows to
+fit the body. Geometry that Rust would refuse, a shape other than =(m, 3)=,
+a missing or zero label or a coordinate that is not finite, raises
+=InvalidArgumentError=. =pytest/test_config_methods.py= reads =impl Config=
+and fails when a public method is neither reached nor named as plumbing
+for the Rust binaries.
+
+#+begin_src python
+import numpy as np
+import anneal
+
+sites = np.array([[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]])
+rigid = anneal.Config.recommended(4).with_rigid_bodies(sites, [8, 1, 1])
+assert rigid.rigid_body and not rigid.packing_cna_applies
+assert rigid.start_radius > anneal.Config.recommended(4).start_radius
+assert anneal.Config.recommended(13).monoatomic
+assert set(rigid.packing_surface()) == {
+    "twin_as_move", "orbit_on_new", "angular", "psym_on_new",
+}
+#+end_src
+
+** Searching with a Config
+
+=cluster_search(..., config=cfg)= runs the search a =Config= describes, so
+that every setting above reaches the search, not only the few that have a
+keyword. The config fixes the cluster size, the move library, the species
+and the scales, so =n= must equal =cfg.n_points= and the keywords that
+describe them (=recommended=False=, =derived=, =communicating=, =rigid=,
+=length_scale=, =species=, =sigmas=, =water_sites=, =groups=, =local_step=,
+=ring_moves=, =hold_stereocentres=, =measured_energy_scale=) raise
+=InvalidArgumentError= beside it. A molecular config also needs =start=.
+
+The result is short by default: =best=, =best_energy=, =hops=, =accepted=,
+=nve_unavailable=, =local_step= and =quench_seconds=. With =full=True= it
+is the whole Rust =Outcome=: every field has a key, with
+=best_energy= for the lowest value, =best= for its state and =final_state=
+for the live chain. =stop= is the code for why the run ended
+(="budget"=, ="target"=, ="max_hops"=, ="retired"= with =stop_reason=, or
+=None=). The optional reports (=superbasin=, =superbasin_counts=,
+=superbasin_archive=, =energy_bias=, =delayed=, =energy_trace=, =hmc=) are
+empty unless the config asks for them. =pytest/test_cluster_search_config.py=
+reads the =Outcome= struct and fails when a field has no key.
+
+#+begin_src python
+import numpy as np
+import anneal
+
+def energy(x):
+    return float(np.sum(x ** 2))
+
+def gradient(x):
+    return 2.0 * x
+
+cfg = anneal.Config.recommended(4).replace(max_hops=3)
+out = anneal.cluster_search(
+    energy, gradient, n=4, budget=2000, seed=1, config=cfg, full=True
+)
+assert out["stop"] == "max_hops" and out["hops"] <= 3
+assert out["final_state"].shape == (12,)
+assert len(out["visit_counts"]) == 3
+#+end_src
