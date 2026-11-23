@@ -15,8 +15,8 @@ written row-major.
 A pair vector is =r_j - r_i + S H= for the positions as passed.
 The periodic components are folded into the cell before the search, and =S= is
 reported for the unfolded positions.
-That holds for a fresh search; a kept list is different, as described under
-the skin in C below.
+That holds for a fresh search; a kept list is different, as described under the
+skin in C below.
 An atom is never paired with itself at shift zero.
 
 A pair list is a half shell or a full shell.
