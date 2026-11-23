@@ -184,12 +184,84 @@ impl Bias for WellTemperedBias {
 mod tests {
     use super::*;
     use ndarray::array;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct Raw;
     impl Fingerprint for Raw {
         fn describe(&self, x: ArrayView1<f64>) -> Array1<f64> {
             x.to_owned()
         }
+    }
+
+    struct CountedLine {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl BasinMetric for CountedLine {
+        fn distance(&self, a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            (a[0] - b[0]).abs()
+        }
+    }
+
+    fn operation_cost(centres: usize) -> (usize, usize, usize) {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut index = BasinIndex::new(Raw, 0.25).with_metric(Box::new(CountedLine {
+            calls: Arc::clone(&calls),
+        }));
+        for i in 0..centres {
+            assert_eq!(index.push(array![2.0 * i as f64]), Some(i));
+        }
+        let insert_calls_per_basin = calls.load(Ordering::Relaxed).div_ceil(centres);
+        let query = array![-1.0];
+        calls.store(0, Ordering::Relaxed);
+        assert!(
+            index
+                .centres
+                .iter()
+                .rev()
+                .all(|centre| index.metric.distance_bounded(
+                    centre.view(),
+                    query.view(),
+                    index.merge_radius
+                ) > index.merge_radius)
+        );
+        let linear = calls.load(Ordering::Relaxed);
+        calls.store(0, Ordering::Relaxed);
+        assert_eq!(index.lookup(query.view()), None);
+        (
+            linear,
+            calls.load(Ordering::Relaxed),
+            insert_calls_per_basin,
+        )
+    }
+
+    #[test]
+    fn index_work_is_sublinear_in_the_number_of_basins() {
+        let small_n = 256;
+        let large_n = 4_096;
+        let (small_linear, small, small_insert) = operation_cost(small_n);
+        let (large_linear, large, large_insert) = operation_cost(large_n);
+        eprintln!(
+            "basin lookup distance calls per miss: \
+             linear n={small_n}: {small_linear}, tree n={small_n}: {small}; \
+             linear n={large_n}: {large_linear}, tree n={large_n}: {large}; \
+             tree insertion calls per basin: n={small_n}: {small_insert}, \
+             n={large_n}: {large_insert}"
+        );
+        assert_eq!((small_linear, large_linear), (small_n, large_n));
+        assert!(large < large_linear);
+        assert!(
+            large * small_n < small * large_n,
+            "distance work scaled linearly: {small} calls at {small_n}, \
+             {large} calls at {large_n}"
+        );
+        assert!(
+            large_insert * small_n < small_insert * large_n,
+            "insertion work scaled linearly: {small_insert} calls per basin at {small_n}, \
+             {large_insert} calls per basin at {large_n}"
+        );
     }
 
     #[test]
@@ -403,6 +475,168 @@ pub struct BasinBias<F: Fingerprint> {
     pub entropic: bool,
 }
 
+/// A dynamically balanced ball tree over basin descriptors.
+///
+/// Every node's ball contains every descriptor below it. Lookup can therefore
+/// discard a whole subtree by the triangle inequality, while rotations after
+/// an imbalanced insertion keep both lookup and insertion sublinear.
+struct MetricTree {
+    pivot: usize,
+    radius: f64,
+    size: usize,
+    nearer: Option<Box<Self>>,
+    farther: Option<Box<Self>>,
+}
+
+impl MetricTree {
+    fn singleton(pivot: usize) -> Self {
+        Self {
+            pivot,
+            radius: 0.0,
+            size: 1,
+            nearer: None,
+            farther: None,
+        }
+    }
+
+    fn distance(
+        metric: &dyn BasinMetric,
+        centres: &[Array1<f64>],
+        left: usize,
+        right: usize,
+    ) -> f64 {
+        let distance = metric.distance(centres[left].view(), centres[right].view());
+        if distance.is_finite() {
+            distance
+        } else {
+            f64::INFINITY
+        }
+    }
+
+    fn build(metric: &dyn BasinMetric, centres: &[Array1<f64>], mut indices: Vec<usize>) -> Self {
+        let pivot = indices.pop().expect("a metric tree is built from a basin");
+        if indices.is_empty() {
+            return Self::singleton(pivot);
+        }
+
+        let mut by_distance: Vec<(usize, f64)> = indices
+            .into_iter()
+            .map(|index| (index, Self::distance(metric, centres, pivot, index)))
+            .collect();
+        by_distance.sort_unstable_by(|(left_i, left_d), (right_i, right_d)| {
+            left_d.total_cmp(right_d).then_with(|| left_i.cmp(right_i))
+        });
+        let radius = by_distance
+            .iter()
+            .map(|(_, distance)| *distance)
+            .fold(0.0, f64::max);
+        let farther = by_distance.split_off(by_distance.len().div_ceil(2));
+        let nearer = by_distance;
+        let nearer = (!nearer.is_empty()).then(|| {
+            Box::new(Self::build(
+                metric,
+                centres,
+                nearer.into_iter().map(|(index, _)| index).collect(),
+            ))
+        });
+        let farther = (!farther.is_empty()).then(|| {
+            Box::new(Self::build(
+                metric,
+                centres,
+                farther.into_iter().map(|(index, _)| index).collect(),
+            ))
+        });
+        let mut tree = Self {
+            pivot,
+            radius,
+            size: 1,
+            nearer,
+            farther,
+        };
+        tree.refresh();
+        tree
+    }
+
+    fn refresh(&mut self) {
+        self.size = 1;
+        for child in [&self.nearer, &self.farther].into_iter().flatten() {
+            self.size += child.size;
+        }
+    }
+
+    fn collect_indices(&self, indices: &mut Vec<usize>) {
+        indices.push(self.pivot);
+        if let Some(child) = &self.nearer {
+            child.collect_indices(indices);
+        }
+        if let Some(child) = &self.farther {
+            child.collect_indices(indices);
+        }
+    }
+
+    fn insert(&mut self, index: usize, metric: &dyn BasinMetric, centres: &[Array1<f64>]) {
+        let distance = Self::distance(metric, centres, self.pivot, index);
+        self.radius = self.radius.max(distance);
+
+        match (&mut self.nearer, &mut self.farther) {
+            (slot @ None, _) | (_, slot @ None) => {
+                *slot = Some(Box::new(Self::singleton(index)));
+            }
+            (Some(nearer), Some(farther)) => {
+                let to_nearer = Self::distance(metric, centres, nearer.pivot, index);
+                let to_farther = Self::distance(metric, centres, farther.pivot, index);
+                let nearer_growth = (to_nearer - nearer.radius).max(0.0);
+                let farther_growth = (to_farther - farther.radius).max(0.0);
+                if nearer_growth < farther_growth
+                    || (nearer_growth == farther_growth && nearer.size <= farther.size)
+                {
+                    nearer.insert(index, metric, centres);
+                } else {
+                    farther.insert(index, metric, centres);
+                }
+            }
+        }
+        self.refresh();
+
+        let largest_child = self
+            .nearer
+            .iter()
+            .chain(&self.farther)
+            .map(|child| child.size)
+            .max()
+            .unwrap_or(0);
+        if largest_child.saturating_mul(3) > self.size.saturating_mul(2) {
+            let mut indices = Vec::with_capacity(self.size);
+            self.collect_indices(&mut indices);
+            *self = Self::build(metric, centres, indices);
+        }
+    }
+
+    fn collect_candidates(
+        &self,
+        metric: &dyn BasinMetric,
+        centres: &[Array1<f64>],
+        query: ArrayView1<f64>,
+        merge_radius: f64,
+        candidates: &mut Vec<(usize, f64)>,
+    ) {
+        let bound = self.radius + merge_radius;
+        let distance = metric.distance_bounded(centres[self.pivot].view(), query, bound);
+        let rounding = 64.0 * f64::EPSILON * bound.abs().max(1.0);
+        if distance.is_finite() && distance > bound + rounding {
+            return;
+        }
+
+        candidates.push((self.pivot, distance));
+        if let Some(child) = &self.nearer {
+            child.collect_candidates(metric, centres, query, merge_radius, candidates);
+        }
+        if let Some(child) = &self.farther {
+            child.collect_candidates(metric, centres, query, merge_radius, candidates);
+        }
+    }
+}
+
 /// Which fingerprint-defined region a state occupies, with no potential attached.
 ///
 /// The region-indexing half of [`BasinBias`], split out because more than one
@@ -438,6 +672,8 @@ pub struct BasinIndex<F: Fingerprint> {
     /// Largest entry magnitude of each centre, which bounds the rounding
     /// of its block sums. Infinite for a centre with a non-finite entry.
     centre_magnitude: Vec<f64>,
+    /// Exact metric tree over every centre.
+    tree: Option<Box<MetricTree>>,
     visits: Vec<u64>,
     /// Most seats the index opens. `None` grows with every new region.
     cap: Option<usize>,
@@ -458,6 +694,7 @@ impl<F: Fingerprint> BasinIndex<F> {
             centre_blocks: Vec::new(),
             block_start: Vec::new(),
             centre_magnitude: Vec::new(),
+            tree: None,
             visits: Vec::new(),
             cap: None,
         }
@@ -494,6 +731,13 @@ impl<F: Fingerprint> BasinIndex<F> {
             .iter()
             .map(|c| self.metric.key(c.view()))
             .collect();
+        self.tree = (!self.centres.is_empty()).then(|| {
+            Box::new(MetricTree::build(
+                self.metric.as_ref(),
+                &self.centres,
+                (0..self.centres.len()).collect(),
+            ))
+        });
         self
     }
 
@@ -589,7 +833,19 @@ impl<F: Fingerprint> BasinIndex<F> {
         let dk = self.metric.key(d);
         let bounded = self.metric.is_euclidean() && aggregate_rounding_is_small(d.len());
         let mut blocks: Option<BlockSums> = None;
-        for (i, c) in self.centres.iter().enumerate().rev() {
+        let mut candidates = Vec::new();
+        if let Some(tree) = &self.tree {
+            tree.collect_candidates(
+                self.metric.as_ref(),
+                &self.centres,
+                d,
+                self.merge_radius,
+                &mut candidates,
+            );
+        }
+        candidates.sort_unstable_by_key(|(index, _)| std::cmp::Reverse(*index));
+        for (i, distance) in candidates {
+            let c = &self.centres[i];
             if c.len() != d.len() {
                 continue;
             }
@@ -607,7 +863,7 @@ impl<F: Fingerprint> BasinIndex<F> {
             if self.suffix_separates(i, d) {
                 continue;
             }
-            if self.metric.distance_bounded(c.view(), d, self.merge_radius) <= self.merge_radius {
+            if distance <= self.merge_radius {
                 return Some(i);
             }
         }
@@ -633,7 +889,13 @@ impl<F: Fingerprint> BasinIndex<F> {
         self.centre_magnitude.push(blocks.magnitude);
         self.centres.push(d);
         self.visits.push(0);
-        Some(self.centres.len() - 1)
+        let index = self.centres.len() - 1;
+        if let Some(tree) = &mut self.tree {
+            tree.insert(index, self.metric.as_ref(), &self.centres);
+        } else {
+            self.tree = Some(Box::new(MetricTree::singleton(index)));
+        }
+        Some(index)
     }
 
     /// Records another visit to `i`.
