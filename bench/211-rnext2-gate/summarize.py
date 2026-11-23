@@ -286,7 +286,6 @@ def aggregate(rows: list[dict[str, str]]) -> list[dict[str, str]]:
                 "first_diff": first_diff,
             }
         )
-        del b_deterministic
     return summaries
 
 
