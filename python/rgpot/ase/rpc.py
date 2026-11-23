@@ -18,10 +18,16 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from ase.calculators.calculator import Calculator, all_changes
+from ase.calculators.calculator import (
+    Calculator,
+    PropertyNotImplementedError,
+    all_changes,
+)
 
 from rgpot.ase._registry import register_calculator as _register_calculator
+from rgpot.ase.calculator import _voigt
 from rgpot.ase.claim import ConnectionClaim
+
 
 def _capnp() -> Any:
     """Import capnp on first use so the module imports without the package."""
@@ -53,7 +59,7 @@ def _free_port() -> int:
 
 
 class RgpotRpcCalculator(Calculator):
-    """ASE calculator that evaluates energy and forces through potserv.
+    """ASE calculator that evaluates a potential through potserv.
 
     Parameters
     ----------
@@ -67,7 +73,11 @@ class RgpotRpcCalculator(Calculator):
         overrides it for one calculation.
     """
 
-    implemented_properties = ["energy", "free_energy", "forces"]
+    implemented_properties = [  # noqa: RUF012
+        "energy",
+        "free_energy",
+        "forces",
+    ]
     # The connection is a session (F3), not the pure protocol.
     reentrant = False
 
@@ -93,6 +103,7 @@ class RgpotRpcCalculator(Calculator):
         self._kj = _capnp().kj_loop()
         self._closed = False
         self._pot: Any = None
+        self._server_has_stress = False
         self._loop.run_until_complete(self._kj.__aenter__())
         try:
             self._loop.run_until_complete(self._connect())
@@ -139,7 +150,7 @@ class RgpotRpcCalculator(Calculator):
                 self._closed = True
                 try:
                     self._loop.run_until_complete(self._kj.__aexit__(None, None, None))
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
                 self._loop.close()
             if self._server_proc is not None:
@@ -147,7 +158,7 @@ class RgpotRpcCalculator(Calculator):
                 self._server_proc.wait()
                 self._server_proc = None
 
-    def __enter__(self) -> RgpotRpcCalculator:
+    def __enter__(self) -> "RgpotRpcCalculator":
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -162,13 +173,27 @@ class RgpotRpcCalculator(Calculator):
                 )
                 client = _capnp().TwoPartyClient(connection)
                 self._pot = client.bootstrap().cast_as(self._schema.Potential)
+                await self._refresh_capabilities_async()
                 return
             except OSError as exc:
                 last_err = exc
                 await asyncio.sleep(0.25)
         raise RuntimeError(
-            f"RgpotRpcCalculator: could not connect to {self._host}:{self._port}: {last_err}"
+            "RgpotRpcCalculator: could not connect to "
+            f"{self._host}:{self._port}: {last_err}"
         )
+
+    async def _refresh_capabilities_async(self) -> None:
+        reply = await self._pot.getCapabilities()
+        operations = {
+            str(getattr(operation, "name", operation)).rsplit(".", 1)[-1].lower()
+            for operation in reply.capabilities.operations
+        }
+        self._server_has_stress = "stress" in operations
+        properties = ["energy", "free_energy", "forces"]
+        if self._server_has_stress:
+            properties.append("stress")
+        self.implemented_properties = properties
 
     async def _calculate_async(
         self,
@@ -176,7 +201,10 @@ class RgpotRpcCalculator(Calculator):
         numbers: Any,
         box: Any,
         orbital_key: int | None = None,
-    ) -> tuple[float, np.ndarray]:
+        *,
+        request_stress: bool = False,
+        accept_stress: bool = False,
+    ) -> dict[str, Any]:
         fip = self._schema.ForceInput.new_message()
         fip.pos = np.asarray(positions, dtype=float).ravel().tolist()
         fip.atmnrs = [int(z) for z in numbers]
@@ -184,10 +212,45 @@ class RgpotRpcCalculator(Calculator):
         if orbital_key is not None:
             fip.hasOrbitalKey = True
             fip.orbitalKey = int(orbital_key)
-        result = await self._pot.calculate(fip)
-        energy = float(result.result.energy)
-        forces = np.array(result.result.forces, dtype=float).reshape(-1, 3)
-        return energy, forces
+        reply = (
+            await self._pot.calculateStress(fip)
+            if request_stress
+            else await self._pot.calculate(fip)
+        )
+        result = reply.result
+        energy = float(result.energy)
+        evaluated: dict[str, Any] = {
+            "energy": energy,
+            "free_energy": energy,
+            "forces": np.array(result.forces, dtype=float).reshape(-1, 3),
+        }
+        if accept_stress:
+            tensor = np.asarray(result.stress, dtype=float)
+            if tensor.size != 9:
+                if request_stress:
+                    raise PropertyNotImplementedError(
+                        "RgpotRpcCalculator: the connected server potential "
+                        "returned no stress"
+                    )
+            else:
+                evaluated["stress"] = _voigt(tensor)
+        return evaluated
+
+    def get_property(
+        self,
+        name: str,
+        atoms: Any = None,
+        allow_calculation: bool = True,
+    ) -> Any:
+        if name == "stress":
+            with self._claim:
+                self._loop.run_until_complete(self._refresh_capabilities_async())
+                if not self._server_has_stress:
+                    raise PropertyNotImplementedError(
+                        "RgpotRpcCalculator: the connected server potential "
+                        "does not provide stress"
+                    )
+        return super().get_property(name, atoms, allow_calculation)
 
     def select_orbitals(self, key: int) -> None:
         """Select the image or bead whose orbitals following calls use."""
@@ -200,26 +263,38 @@ class RgpotRpcCalculator(Calculator):
         system_changes: Any = all_changes,
     ) -> None:
         with self._claim:
+            self._loop.run_until_complete(self._refresh_capabilities_async())
             super().calculate(atoms, properties, system_changes)
             frame = self.atoms
             assert frame is not None
             cell = frame.cell
+            wants_stress = "stress" in set(properties)
+            fully_periodic = cell.rank == 3 and bool(np.all(frame.pbc))
+            if wants_stress and not self._server_has_stress:
+                raise PropertyNotImplementedError(
+                    "RgpotRpcCalculator: the connected server potential "
+                    "does not provide stress"
+                )
+            if wants_stress and not fully_periodic:
+                raise PropertyNotImplementedError(
+                    "RgpotRpcCalculator: stress requires a fully periodic "
+                    "three-dimensional cell"
+                )
             if cell.rank == 3:
                 box = np.asarray(cell.array)
             else:
                 box = np.eye(3) * 100.0
             orbital_key = frame.info.get("rgpot_orbital_key", self._orbital_key)
-            energy, forces = self._loop.run_until_complete(
+            evaluated = self._loop.run_until_complete(
                 self._calculate_async(
                     frame.get_positions(),
                     frame.get_atomic_numbers(),
                     box,
                     orbital_key,
+                    request_stress=wants_stress,
+                    accept_stress=self._server_has_stress and fully_periodic,
                 )
             )
-            self.results["energy"] = energy
-            self.results["free_energy"] = energy
-            self.results["forces"] = forces
-
+            self.results.update(evaluated)
 
 _register_calculator("rgpot_rpc", RgpotRpcCalculator)

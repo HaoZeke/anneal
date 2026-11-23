@@ -68,11 +68,12 @@ class MpiPefSession;
 #include "rgpot/Models/ModelPots.hpp"
 #include "rgpot/NWChemPot/NWChemPot.hpp"
 #include "rgpot/Potential.hpp"
-#include "rgpot/abi/Handshake.hpp"
+#include "rgpot/StillingerWeber/SWSi.hpp"
 #include "rgpot/ZBL/ZBLPot.hpp"
 #ifdef RGPOT_HAS_CBE
 #include "rgpot/CBEPot/CBEPot.hpp"
 #endif
+#include "rgpot/abi/Handshake.hpp"
 #ifdef RGPOT_HAS_IPI
 #include "rgpot/IPIPot/IPIPot.hpp"
 #endif
@@ -189,38 +190,13 @@ public:
         m_cp2k(static_cast<rgpot::CP2KPot *>(m_potential.get())), m_pef(pef) {}
 #endif
 
-  /**
-   * @brief Reports what this server speaks, so a client can refuse an
-   * incompatible peer before the first calculate call.
-   */
-  kj::Promise<void> getCapabilities(GetCapabilitiesContext context) override {
-    auto caps = context.getResults().initCapabilities();
-    caps.setBackendName("rgpot");
-    caps.setBackendVersion(RGPOT_BUILD_VERSION);
-    caps.setAvailable(true);
-    auto ops = caps.initOperations(m_potential->caps().analyticHvp ? 3 : 2);
-    ops.set(0, ::Capabilities::Operation::ENERGY);
-    ops.set(1, ::Capabilities::Operation::FORCES);
-    if (m_potential->caps().analyticHvp)
-      ops.set(2, ::Capabilities::Operation::HESSIAN_VECTOR);
-    rgpot::abi::fill_compatibility(caps);
-    return kj::READY_NOW;
-  }
+private:
+  template <typename Context>
+  kj::Promise<void> calculateImpl(Context context, bool requireStress) {
+    const bool stressCapable = m_potential->caps().stress;
+    KJ_REQUIRE(!requireStress || stressCapable,
+               "the selected potential does not provide stress");
 
-  /**
-   * @details
-   * This method performs the following translation steps:
-   * 1. Extracts the @c ForceInput (fip) from the RPC context.
-   * 2. Validates the size of the atomic number list.
-   * 3. Converts Cap'n Proto lists into native @c AtomMatrix and @c std::vector
-   * types.
-   * 4. Executes the calculation via the @c PotentialBase virtual operator.
-   * 5. Populates the @c PotentialResult with energy and force data.
-   *
-   * @param context The Cap'n Proto RPC call context.
-   * @return An asynchronous promise for completion.
-   */
-  kj::Promise<void> calculate(CalculateContext context) override {
     auto fip = context.getParams().getFip();
     const size_t numAtoms = fip.getPos().size() / 3;
 
@@ -229,8 +205,10 @@ public:
     // Unit conversion factors (caller units -> internal angstrom/eV)
     std::string lengthUnit = fip.getLengthUnit();
     std::string energyUnit = fip.getEnergyUnit();
-    double len_to_angstrom = rgpot::units::unit_conversion_factor(lengthUnit, "angstrom");
-    double ev_to_caller = rgpot::units::unit_conversion_factor("eV", energyUnit);
+    double len_to_angstrom =
+        rgpot::units::unit_conversion_factor(lengthUnit, "angstrom");
+    double ev_to_caller =
+        rgpot::units::unit_conversion_factor("eV", energyUnit);
     // F_caller = dE_caller/dx_caller
     //          = (d(E*E_eV)/d(x_A/len_to_angstrom))
     //          = ev_to_caller * len_to_angstrom * F_A.
@@ -239,7 +217,6 @@ public:
     rgpot::types::AtomMatrix nativePositions =
         rgpot::types::adapt::capnp::convertPositionsFromCapnp(fip.getPos(),
                                                               numAtoms);
-    // Convert positions from caller's length unit to angstrom
     if (len_to_angstrom != 1.0) {
       for (size_t i = 0; i < numAtoms * 3; ++i) {
         nativePositions.data()[i] *= len_to_angstrom;
@@ -251,7 +228,6 @@ public:
             fip.getAtmnrs());
     std::array<std::array<double, 3>, 3> nativeBoxMatrix =
         rgpot::types::adapt::capnp::convertBoxMatrixFromCapnp(fip.getBox());
-    // Convert box from caller's length unit to angstrom
     if (len_to_angstrom != 1.0) {
       for (auto &row : nativeBoxMatrix)
         for (auto &val : row)
@@ -300,14 +276,13 @@ public:
               "orbitalKey is supported only by CPMD and CP2K backends");
         }
       }
-      m_potential->forceBatch(rgpot::ForceBatch{.nSystems = 1, .in = &in_native, .out = &out_native});
+      m_potential->forceBatch(
+          rgpot::ForceBatch{.nSystems = 1, .in = &in_native, .out = &out_native});
       return out_native;
     };
     out_native = evaluate();
 
-    // Convert results to caller's units
-    auto result = context.getResults();
-    auto pres = result.initResult();
+    auto pres = context.getResults().initResult();
     pres.setEnergy(out_native.energy * ev_to_caller);
 
     auto forcesList = pres.initForces(numAtoms * 3);
@@ -320,27 +295,77 @@ public:
       forcesList.set(i, nativeForces[i]);
     }
 
-    bool has_stress = out_native.has_stress != 0;
+    bool hasStress = out_native.has_stress != 0;
     double stress[9] = {};
-    if (has_stress) {
+    if (hasStress) {
       std::copy(out_native.stress, out_native.stress + 9, stress);
     }
 #ifdef RGPOT_HAS_IPI
-    if (!has_stress && m_ipi != nullptr) {
-      has_stress = m_ipi->copyStress(stress);
+    if (!hasStress && m_ipi != nullptr) {
+      hasStress = m_ipi->copyStress(stress);
     }
 #endif
-    if (has_stress) {
-      // sigma_caller = sigma_eV/A^3 * (eV -> caller) * (A -> caller length)^3
-      const double stress_to_caller = ev_to_caller * len_to_angstrom *
-                                      len_to_angstrom * len_to_angstrom;
+    if (hasStress) {
+      // sigma_caller = sigma_eV/A^3 * (eV -> caller) *
+      //                (A -> caller length)^3
+      const double stress_to_caller =
+          ev_to_caller * len_to_angstrom * len_to_angstrom * len_to_angstrom;
       auto stressList = pres.initStress(9);
       for (unsigned int i = 0; i < 9; ++i) {
         stressList.set(i, stress[i] * stress_to_caller);
       }
     }
 
+    KJ_REQUIRE(!requireStress || hasStress,
+               "the selected potential returned no stress");
     return kj::READY_NOW;
+  }
+
+public:
+  /**
+   * @brief Reports what this server speaks, so a client can refuse an
+   * incompatible peer before the first calculate call.
+   */
+  kj::Promise<void> getCapabilities(GetCapabilitiesContext context) override {
+    auto caps = context.getResults().initCapabilities();
+    caps.setBackendName("rgpot");
+    caps.setBackendVersion(RGPOT_BUILD_VERSION);
+    caps.setAvailable(true);
+    const bool hasHvp = m_potential->caps().analyticHvp;
+    const bool hasStress = m_potential->caps().stress;
+    auto ops = caps.initOperations(2 + (hasHvp ? 1u : 0u) + (hasStress ? 1u : 0u));
+    unsigned int opIdx = 0;
+    ops.set(opIdx++, ::Capabilities::Operation::ENERGY);
+    ops.set(opIdx++, ::Capabilities::Operation::FORCES);
+    if (hasHvp) {
+      ops.set(opIdx++, ::Capabilities::Operation::HESSIAN_VECTOR);
+    }
+    if (hasStress) {
+      ops.set(opIdx++, ::Capabilities::Operation::STRESS);
+    }
+    rgpot::abi::fill_compatibility(caps);
+    return kj::READY_NOW;
+  }
+
+  /**
+   * @details
+   * This method performs the following translation steps:
+   * 1. Extracts the @c ForceInput (fip) from the RPC context.
+   * 2. Validates the size of the atomic number list.
+   * 3. Converts Cap'n Proto lists into native @c AtomMatrix and @c std::vector
+   * types.
+   * 4. Executes the calculation via the @c PotentialBase virtual operator.
+   * 5. Populates the @c PotentialResult with energy and force data.
+   *
+   * @param context The Cap'n Proto RPC call context.
+   * @return An asynchronous promise for completion.
+   */
+  kj::Promise<void> calculate(CalculateContext context) override {
+    return calculateImpl(kj::mv(context), false);
+  }
+
+  kj::Promise<void> calculateStress(CalculateStressContext context) override {
+    return calculateImpl(kj::mv(context), true);
   }
 
   kj::Promise<void> calculateHvp(CalculateHvpContext context) override {
@@ -524,9 +549,10 @@ int runServer(int argc, char *argv[]
 ) {
   if (argc < 3) {
     std::cerr << "Usage: " << argv[0] << " <port> <PotentialType>" << std::endl;
-    std::cerr << "  Available PotentialTypes: LJ, LJCluster, Morse, ZBL, Eckart, "
-                 "MullerBrown, ModifiedMullerBrown, LEPS-HH2, LEPS-HCl2, "
-                 "LEPS-FH2, Composite, D2, D2Cpmd"
+    std::cerr
+        << "  Available PotentialTypes: LJ, LJCluster, Morse, SWSi, ZBL, Eckart, "
+           "MullerBrown, ModifiedMullerBrown, LEPS-HH2, LEPS-HCl2, "
+           "LEPS-FH2, Composite, D2, D2Cpmd"
 #ifdef RGPOT_HAS_FORTRAN_POTS
               << ", CuH2, EAMAl"
 #endif
@@ -606,6 +632,9 @@ int runServer(int argc, char *argv[]
   } else if (pot_type == "Morse") {
     std::cout << "Loading Morse potential (Pt parameters)..." << std::endl;
     potential_to_use = std::make_unique<rgpot::MorsePot>();
+  } else if (pot_type == "SWSi") {
+    std::cout << "Loading Stillinger-Weber silicon potential..." << std::endl;
+    potential_to_use = std::make_unique<rgpot::StillingerWeberSi>();
   } else if (pot_type == "ZBL") {
     std::cout << "Loading ZBL potential..." << std::endl;
     potential_to_use = std::make_unique<rgpot::ZBLPot>();

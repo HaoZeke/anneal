@@ -138,7 +138,11 @@ jobs:
           meson install -C /tmp/rgpot-ci-build --skip-subprojects
           export RGPOT_POTSERV_BIN=/tmp/rgpot-ci-build/CppCore/potserv
           export REQUIRE_RPC=1
+          /tmp/rgpot-ci/bin/python -m pytest -q \
+            tests/python/test_ase_rpc.py \
+            --timeout=180 -o faulthandler_timeout=120
           /tmp/rgpot-ci/bin/python -m pytest -q tests/python \
+            --ignore=tests/python/test_ase_rpc.py \
             tests/test_rgpot_d2.py tests/test_rgpot_d4.py \
             tests/test_rgpot_sumpot.py \
             --timeout=180 -o faulthandler_timeout=120
