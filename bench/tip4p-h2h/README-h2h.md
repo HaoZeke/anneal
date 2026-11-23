@@ -23,9 +23,9 @@ and gradient passes (`gradient_passes`, matching anneal's
 separately in `energy_only_entries` without consuming the cap. A hit is a
 quenched energy at or
 below the reference plus 0.001 kJ/mol. The references are the Cambridge
-Cluster Database TIP4P headers, which the database lists for n ≤ 21; (H₂O)₂₅
-is not in the database, so its hit is scored against the lowest energy either
-arm reached in the session and no early stop is armed.
+Cluster Database TIP4P headers, which the database lists for n ≤ 21.
+Size 25 has no independent reference and is
+unscored.
 
 GMIN is built from source by `scripts/gmin_h2h/build_gmin.sh` at revision
 `aac1548a`, gfortran 13.3.0, reference BLAS/LAPACK, with NEWTIP, TIPID 4,

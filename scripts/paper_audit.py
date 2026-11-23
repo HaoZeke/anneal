@@ -616,6 +616,11 @@ def gmin_ranked_wall(left: list[dict[str, str]], right: list[dict[str, str]]) ->
     )
 
 
+# The GMIN source revision on the committed panel rows. New builds record
+# the pin in gmin_pin; this selects the rows the paper quotes.
+PANEL_GMIN_REVISION = "aac1548a8aec13b53ad12a8d6904625081685d2e"
+
+
 def gmin_panel_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[dict[str, str]]]]:
     """The latest panel row of each system, arm and seed, in seed order, after row validation."""
     spec = importlib.util.spec_from_file_location("gmin_panel", ROOT / "scripts/gmin_panel/run_panel.py")
@@ -628,7 +633,7 @@ def gmin_panel_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[
     latest: dict[tuple[str, str], dict[int, dict[str, str]]] = {}
     bad_rows: list[str] = []
     def invalid_row(index: int, r: dict[str, str]) -> str | None:
-        if r["code"] == "gmin" and r["code_revision"] != panel.GMIN_REV:
+        if r["code"] == "gmin" and r["code_revision"] != PANEL_GMIN_REVISION:
             return None
         system = r["system"]
         budget = panel.PAPER_BUDGETS.get(system)
@@ -655,7 +660,7 @@ def gmin_panel_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[
         if reason := invalid_row(index, r):
             bad_rows.append(reason)
     for index, r in enumerate(rows, start=2):
-        if r["code"] == "gmin" and r["code_revision"] != panel.GMIN_REV:
+        if r["code"] == "gmin" and r["code_revision"] != PANEL_GMIN_REVISION:
             continue
         system = r["system"]
         budget = panel.PAPER_BUDGETS.get(system)
