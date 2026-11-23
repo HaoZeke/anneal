@@ -117,14 +117,18 @@ fn point(x: ArrayView1<f64>, i: usize) -> [f64; 3] {
     [x[3 * i], x[3 * i + 1], x[3 * i + 2]]
 }
 
-/// The axis through the origin, and its order, under which `shell` is
-/// closest to mapping onto itself.
+/// The axis through the origin, and its order, whose turn by 2 pi / k
+/// gives `shell` the lowest misfit onto itself.
 ///
-/// Candidates are the directions to each shell point, to each pair
-/// midpoint and to each triangle centroid of mutually bonded points, which
-/// is where a vertex, edge or face axis of a shell lies. The score is the
-/// RMS distance under [`bijective_misfit`]; every one-to-one match must lie
-/// within [`AXIS_MISFIT`].
+/// Candidate directions run to each shell point, to the midpoint of each
+/// pair within [`SHELL`] of each other, and to the centroid of each
+/// triangle of such pairs, which is where a vertex, edge or face axis of
+/// a shell lies. For each candidate and each order in [`ORDERS`] the shell
+/// is turned by 2 pi / k and scored by [`bijective_misfit`] against itself
+/// with [`AXIS_MISFIT`] as the pair bound; a turn with no such match is
+/// not a candidate. The lowest score wins, and a score within [`TIE`] of
+/// it goes to the higher order. `None` for fewer than three points or when
+/// no candidate turn matches.
 fn local_axis(shell: &[[f64; 3]]) -> Option<([f64; 3], usize)> {
     let m = shell.len();
     if m < 3 {
@@ -173,7 +177,14 @@ fn local_axis(shell: &[[f64; 3]]) -> Option<([f64; 3], usize)> {
     best.map(|(axis, order, _)| (axis, order))
 }
 
-/// RMS mismatch of a one-to-one map from `rotated` onto `shell`.
+/// RMS distance of a one-to-one match of `rotated` onto `shell` in which
+/// every matched pair is within `tolerance`.
+///
+/// The match is the first perfect matching that augmenting paths find over
+/// the pairs within `tolerance`, taken in index order, not the one of least
+/// RMS, so the score is bounded by `tolerance` but is not minimal. `None`
+/// when the two lengths differ, the shell is empty, or no perfect matching
+/// within `tolerance` exists.
 fn bijective_misfit(rotated: &[[f64; 3]], shell: &[[f64; 3]], tolerance: f64) -> Option<f64> {
     if rotated.len() != shell.len() || rotated.is_empty() {
         return None;
