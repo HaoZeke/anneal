@@ -10,6 +10,8 @@ import numpy as np
 import pytest
 
 import rgpot
+from ase.build import bulk
+from rgpot.ase import RgpotCalculator
 
 CLUSTER = np.array(
     [
@@ -171,3 +173,28 @@ def test_a_numerical_error_leaves_the_instance_usable() -> None:
     fresh_energy, fresh_forces, _ = rgpot.EMTPot()(CLUSTER, COPPER, CUBE)
     assert energy == fresh_energy
     np.testing.assert_array_equal(forces, fresh_forces)
+
+
+def test_calculator_tiles_the_primitive_copper_cube() -> None:
+    atoms = bulk("Cu", "fcc", a=3.6, cubic=True)
+    atoms.calc = RgpotCalculator("emt")
+    energy = atoms.get_potential_energy()
+    large = atoms.repeat(4)
+    reference, _, _ = rgpot.EMTPot()(large.positions, [29] * len(large), large.cell.array)
+    assert energy == pytest.approx(reference / 64, rel=1e-12)
+    np.testing.assert_allclose(atoms.get_forces(), 0.0, atol=1e-10)
+
+
+@pytest.mark.parametrize(
+    ("rasmussen", "numbers"),
+    [(False, [1, 12, 13, 28, 29, 46, 47, 78, 79]), (True, [13, 29, 47, 79])],
+    ids=["default", "rasmussen"],
+)
+def test_every_covered_element_tiles_to_a_cell_asap_accepts(
+    rasmussen: bool, numbers: list[int]
+) -> None:
+    for number in numbers:
+        atoms = bulk("Cu", "sc", a=3.2, cubic=True)
+        atoms.numbers[:] = number
+        atoms.calc = RgpotCalculator(rgpot.EMTPot(rasmussen=rasmussen))
+        assert np.isfinite(atoms.get_potential_energy()), number
