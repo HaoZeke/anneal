@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright 2023--present rgpot developers
 """A missing Python include directory must not fail configure.
 
@@ -59,15 +58,29 @@ def _drop_include(prefix: Path) -> None:
         shutil.rmtree(include)
 
 
-def _path_without(names: set[str], path: str) -> str:
+def _path_without(names: set[str], path: str, shadow_root: Path) -> str:
+    """Return ``path`` with the executables in ``names`` hidden.
+
+    A conda or pixi prefix keeps ``gmx`` in the same ``bin`` directory as the
+    compilers, so a directory that holds ``gmx`` cannot simply be dropped. Such
+    a directory is replaced by a shadow directory under ``shadow_root`` that
+    links every entry except the hidden ones. Directories without any of the
+    names stay as they are.
+    """
     kept = []
-    for entry in path.split(os.pathsep):
+    for index, entry in enumerate(path.split(os.pathsep)):
         if not entry:
             continue
         directory = Path(entry)
-        if any((directory / name).exists() for name in names):
+        if not any((directory / name).exists() for name in names):
+            kept.append(entry)
             continue
-        kept.append(entry)
+        shadow = shadow_root / f"path-{index}"
+        shadow.mkdir(parents=True)
+        for child in directory.iterdir():
+            if child.name not in names:
+                (shadow / child.name).symlink_to(child)
+        kept.append(str(shadow))
     return os.pathsep.join(kept)
 
 
@@ -76,6 +89,7 @@ def _setup(meson: list[str], cwd: Path, build: Path, env: dict[str, str]) -> sub
         [*meson, "setup", str(build)],
         cwd=cwd,
         env=env,
+        check=False,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -101,7 +115,7 @@ def main() -> int:
         parent.mkdir()
         try:
             venv.create(prefix_root, with_pip=False)
-        except Exception as exc:
+        except (OSError, subprocess.SubprocessError) as exc:
             print(
                 f"gromacs_missing_include could not create a Python venv ({exc}); "
                 "ensure python3-venv is installed",
@@ -169,7 +183,12 @@ def main() -> int:
         hidden["PATH"] = _path_without(
             {"gmx", "gmx_d", "gmx.exe"},
             str(py_prefix / "bin") + os.pathsep + os.environ.get("PATH", ""),
+            Path(work) / "hidden-path",
         )
+        leaked = shutil.which("gmx", path=hidden["PATH"])
+        if leaked is not None:
+            print(f"gmx is still on the hidden PATH: {leaked}", file=sys.stderr)
+            return 1
         requested = _setup(meson, parent, parent / "build-enabled", hidden)
         if requested.returncode == 0:
             print(requested.stdout, file=sys.stderr)
