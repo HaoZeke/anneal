@@ -424,6 +424,8 @@ mod tests {
                 "RGPOT_ENGINE_ABI_LAYOUT_REVISION",
                 "ENGINE_ABI_LAYOUT_REVISION",
             ),
+            ("RGPOT_ENGINE_UNLOAD_RESIDENT", "ENGINE_UNLOAD_RESIDENT"),
+            ("RGPOT_ENGINE_UNLOAD_SAFE", "ENGINE_UNLOAD_SAFE"),
         ] {
             assert_eq!(
                 define_value(&generated, mirrored),

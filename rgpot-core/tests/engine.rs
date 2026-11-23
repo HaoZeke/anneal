@@ -11,7 +11,7 @@ use rgpot_core::engine::{
     EngineEvaluation, EngineFailure, EnginePotential, EngineRequest, EngineSession, EngineStatus,
     EngineSymbols, RgpotEngineAbiStamp, RgpotEngineCaps, RgpotEngineComponent, RgpotEnginePot,
     ENGINE_ABI_LAYOUT_REVISION, ENGINE_ABI_MINOR, ENGINE_ABI_VERSION, ENGINE_ERR_INVALID,
-    ENGINE_ERR_UNSUPPORTED,
+    ENGINE_ERR_UNSUPPORTED, ENGINE_UNLOAD_POLICY_MINOR,
 };
 use rgpot_core::hvp::rgpot_hvp_scheme_t;
 use rgpot_core::status::rgpot_status_t;
@@ -1660,6 +1660,170 @@ fn load_failures_stay_resident_and_repeat_their_error() {
         assert_eq!(again, first);
         assert_eq!(link_maps_named(file_name(&path)), 1);
     }
+}
+
+const UNLOAD_SAFE: &str = "FIXTURE_UNLOAD_POLICY=RGPOT_ENGINE_UNLOAD_SAFE";
+
+fn unload_refusal(path: &Path) -> String {
+    match unsafe { EnginePotential::unload(path) } {
+        Err(EngineError::Unsupported { operation, message }) => {
+            assert_eq!(operation, "rgpot_engine_unload_policy");
+            message
+        }
+        other => panic!("expected the unload to be refused, got {other:?}"),
+    }
+}
+
+#[test]
+fn unload_is_refused_without_the_policy_symbol() {
+    let path = build("harmonic_unload_no_policy", &[]);
+    let create = load(&path).symbols().create as usize;
+    let message = unload_refusal(&path);
+    assert!(message.contains("is not exported"), "{message}");
+    #[cfg(target_os = "linux")]
+    assert!(library_is_mapped(&path));
+    assert_eq!(load(&path).symbols().create as usize, create);
+}
+
+#[test]
+fn unload_is_refused_for_a_resident_policy_or_a_stamp_before_the_policy_minor() {
+    let older_minor = format!("FIXTURE_ABI_MINOR={}", ENGINE_UNLOAD_POLICY_MINOR - 1);
+    for (name, defines, reason) in [
+        (
+            "harmonic_unload_resident_policy",
+            vec!["FIXTURE_UNLOAD_POLICY=RGPOT_ENGINE_UNLOAD_RESIDENT"],
+            "returned 0",
+        ),
+        (
+            "harmonic_unload_older_minor",
+            vec![UNLOAD_SAFE, older_minor.as_str()],
+            "is ignored",
+        ),
+        (
+            "harmonic_unload_no_stamp",
+            vec![UNLOAD_SAFE, "NO_STAMP"],
+            "is ignored",
+        ),
+    ] {
+        let path = build(name, &defines);
+        drop(load(&path));
+        let message = unload_refusal(&path);
+        assert!(message.contains(reason), "{name}: {message}");
+        #[cfg(target_os = "linux")]
+        assert!(library_is_mapped(&path), "{name} was unmapped");
+    }
+}
+
+#[test]
+fn an_unload_safe_plugin_is_unloaded_only_without_live_instances() {
+    let path = build("harmonic_unload_safe", &[UNLOAD_SAFE]);
+    let not_loaded = unsafe { EnginePotential::unload(&path) }.unwrap_err();
+    assert!(
+        matches!(&not_loaded, EngineError::Invalid(text) if text.contains("was not loaded")),
+        "{not_loaded:?}"
+    );
+
+    let engine = load(&path);
+    let potential = load(&path).into_potential();
+    let busy = unsafe { EnginePotential::unload(&path) }.unwrap_err();
+    assert!(
+        matches!(&busy, EngineError::Invalid(text) if text.contains("2 engine instance(s)")),
+        "{busy:?}"
+    );
+    drop(engine);
+    let busy = unsafe { EnginePotential::unload(&path) }.unwrap_err();
+    assert!(
+        matches!(&busy, EngineError::Invalid(text) if text.contains("1 engine instance(s)")),
+        "{busy:?}"
+    );
+    drop(potential);
+
+    unsafe { EnginePotential::unload(&path) }.expect("unload the unload-safe plugin");
+    #[cfg(target_os = "linux")]
+    assert!(!library_is_mapped(&path));
+    let mut again = load(&path);
+    let answer = again
+        .force(&EngineRequest {
+            positions: &[1.0, 0.0, 0.0],
+            atomic_numbers: &[1],
+            box_matrix: &CELL,
+        })
+        .expect("force after a reload");
+    assert!(within_roundoff(answer.energy, 0.5 * SPRING, 3));
+}
+
+/// The load and unload loop the sanitizer run exercises.
+#[test]
+fn an_unload_safe_plugin_survives_repeated_load_and_unload() {
+    let path = build("harmonic_unload_loop", &[UNLOAD_SAFE]);
+    let request = EngineRequest {
+        positions: &[0.5, -1.0, 2.0],
+        atomic_numbers: &[1],
+        box_matrix: &CELL,
+    };
+    for iteration in 0..200 {
+        let mut engine = load(&path);
+        engine.force(&request).expect("force");
+        drop(engine);
+        drop(load(&path).into_potential());
+        unsafe { EnginePotential::unload(&path) }
+            .unwrap_or_else(|why| panic!("unload {iteration}: {why}"));
+        #[cfg(target_os = "linux")]
+        assert!(
+            !library_is_mapped(&path),
+            "fixture stayed mapped after unload {iteration}"
+        );
+    }
+}
+
+/// Median nanoseconds per load, create, destroy cycle for a resident plugin
+/// and for an unload-safe plugin that is unloaded every cycle. Run with
+/// `cargo test --release --features engine --test engine -- --ignored
+/// load_cycle_cost --nocapture`.
+#[test]
+#[ignore = "timing measurement; prints medians instead of asserting"]
+fn load_cycle_cost() {
+    const CYCLES: u32 = 2000;
+    const RUNS: usize = 11;
+    let resident = build("harmonic_cost_resident", &[]);
+    let unloadable = build("harmonic_cost_unload", &[UNLOAD_SAFE]);
+    let median = |mut samples: Vec<f64>| {
+        samples.sort_by(f64::total_cmp);
+        samples[samples.len() / 2]
+    };
+    let time = |cycle: &dyn Fn()| {
+        cycle();
+        let mut runs = Vec::with_capacity(RUNS);
+        for _ in 0..RUNS {
+            let start = std::time::Instant::now();
+            for _ in 0..CYCLES {
+                cycle();
+            }
+            runs.push(start.elapsed().as_nanos() as f64 / f64::from(CYCLES));
+        }
+        runs
+    };
+    let resident_runs = time(&|| drop(load(&resident)));
+    let unload_runs = time(&|| {
+        drop(load(&unloadable));
+        unsafe { EnginePotential::unload(&unloadable) }.expect("unload");
+    });
+    println!(
+        "resident: median {:.0} ns/cycle over {RUNS} runs of {CYCLES} cycles {:?}",
+        median(resident_runs.clone()),
+        resident_runs
+            .iter()
+            .map(|ns| ns.round() as u64)
+            .collect::<Vec<_>>()
+    );
+    println!(
+        "unload:   median {:.0} ns/cycle over {RUNS} runs of {CYCLES} cycles {:?}",
+        median(unload_runs.clone()),
+        unload_runs
+            .iter()
+            .map(|ns| ns.round() as u64)
+            .collect::<Vec<_>>()
+    );
 }
 
 #[test]

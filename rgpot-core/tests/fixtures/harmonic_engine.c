@@ -5,7 +5,8 @@
  * drop symbols or change the ABI major. ACCEPT_CALLBACK_REPLACEMENT makes a
  * second callback registration succeed. RETAIN_REFUSED_CALLBACKS makes the
  * refused one stay registered although the call fails, as an engine written
- * before the header forbade it might. */
+ * before the header forbade it might. FIXTURE_UNLOAD_POLICY exports
+ * rgpot_engine_unload_policy returning that value. */
 #include "rgpot/engine_c_abi.h"
 
 #include <math.h>
@@ -426,4 +427,8 @@ size_t rgpot_engine_component_name(const RgpotEnginePot *pot, long index,
   }
   return full;
 }
+#endif
+
+#ifdef FIXTURE_UNLOAD_POLICY
+int rgpot_engine_unload_policy(void) { return FIXTURE_UNLOAD_POLICY; }
 #endif

@@ -50,6 +50,12 @@
 //! would hand back the old mapping, and a bare library name is resolved by the
 //! loader's search path rather than the filesystem. Both are
 //! [`EngineError::Load`].
+//!
+//! A plugin that exports `rgpot_engine_unload_policy` returning
+//! [`ENGINE_UNLOAD_SAFE`], with an ABI stamp of minor
+//! [`ENGINE_UNLOAD_POLICY_MINOR`] or later, is opened without `RTLD_NODELETE`
+//! and can be unloaded with the `unsafe` [`EnginePotential::unload`]. It stays
+//! resident until then. Every other plugin is refused.
 
 use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_long, c_uint, c_ushort, c_void, CString};
@@ -77,6 +83,13 @@ pub const ENGINE_ABI_LAYOUT_REVISION: u16 = 1;
 pub const ENGINE_ERR_INVALID: c_int = 1;
 /// Engine code meaning the backend does not support the requested operation.
 pub const ENGINE_ERR_UNSUPPORTED: c_int = 3;
+/// `RGPOT_ENGINE_UNLOAD_RESIDENT`: the library must stay loaded.
+pub const ENGINE_UNLOAD_RESIDENT: c_int = 0;
+/// `RGPOT_ENGINE_UNLOAD_SAFE`: the library may be unloaded after its last
+/// instance is destroyed.
+pub const ENGINE_UNLOAD_SAFE: c_int = 1;
+/// The first ABI minor that defines `rgpot_engine_unload_policy`.
+pub const ENGINE_UNLOAD_POLICY_MINOR: u16 = 7;
 
 const ERROR_CAPACITY: usize = 1024;
 
@@ -311,6 +324,8 @@ pub type LastComponentsFn = unsafe extern "C" fn(
 /// `rgpot_engine_component_name`.
 pub type ComponentNameFn =
     unsafe extern "C" fn(*const RgpotEnginePot, c_long, *mut c_char, usize) -> usize;
+/// `rgpot_engine_unload_policy`.
+pub type UnloadPolicyFn = unsafe extern "C" fn() -> c_int;
 
 /// Raw `RgpotEngineComponent` from `rgpot/engine_c_abi.h`.
 #[repr(C)]
@@ -883,10 +898,13 @@ enum FileIdentity {
     Path(PathBuf),
 }
 
-/// One loaded plugin file. The handle is never closed.
+/// One loaded plugin file. The handle is closed only by
+/// [`EnginePotential::unload`], and only when `unload_refusal` is `None`.
 struct Resident {
-    _library: ManuallyDrop<Library>,
+    library: ManuallyDrop<Library>,
+    _pin: Option<ManuallyDrop<Library>>,
     symbols: Result<EngineSymbols, EngineError>,
+    unload_refusal: Option<String>,
 }
 
 #[derive(Default)]
@@ -935,15 +953,72 @@ fn file_identity(canonical: &Path) -> Result<FileIdentity, EngineError> {
 }
 
 #[cfg(unix)]
-unsafe fn open_resident(path: &Path) -> Result<Library, libloading::Error> {
+unsafe fn open_library(path: &Path) -> Result<Library, libloading::Error> {
     use libloading::os::unix::{Library as UnixLibrary, RTLD_LAZY, RTLD_LOCAL};
-    unsafe { UnixLibrary::open(Some(path), RTLD_LAZY | RTLD_LOCAL | libc::RTLD_NODELETE) }
-        .map(Library::from)
+    unsafe { UnixLibrary::open(Some(path), RTLD_LAZY | RTLD_LOCAL) }.map(Library::from)
 }
 
 #[cfg(not(unix))]
-unsafe fn open_resident(path: &Path) -> Result<Library, libloading::Error> {
+unsafe fn open_library(path: &Path) -> Result<Library, libloading::Error> {
     unsafe { Library::new(path) }
+}
+
+/// Marks the already open library at `path` `RTLD_NODELETE`. The returned
+/// handle is never closed.
+#[cfg(unix)]
+unsafe fn pin_library(path: &Path) -> Result<Option<Library>, libloading::Error> {
+    use libloading::os::unix::{Library as UnixLibrary, RTLD_LAZY, RTLD_LOCAL};
+    let flags = RTLD_LAZY | RTLD_LOCAL | libc::RTLD_NOLOAD | libc::RTLD_NODELETE;
+    unsafe { UnixLibrary::open(Some(path), flags) }.map(|pin| Some(Library::from(pin)))
+}
+
+#[cfg(not(unix))]
+unsafe fn pin_library(_path: &Path) -> Result<Option<Library>, libloading::Error> {
+    Ok(None)
+}
+
+/// Why the library may not be unloaded, or `None` when it declares itself
+/// unload-safe through `rgpot_engine_unload_policy`.
+unsafe fn unload_refusal(
+    library: &Library,
+    symbols: &Result<EngineSymbols, EngineError>,
+) -> Option<String> {
+    let Ok(symbols) = symbols else {
+        return Some("the plugin did not resolve the required engine symbols".into());
+    };
+    let Some(policy) =
+        (unsafe { optional::<UnloadPolicyFn>(library, "rgpot_engine_unload_policy") })
+    else {
+        return Some("rgpot_engine_unload_policy is not exported".into());
+    };
+    let major = unsafe { (symbols.abi_version)() };
+    let stamp = symbols.abi_stamp.map(|abi_stamp| unsafe { abi_stamp() });
+    match stamp {
+        Some(stamp)
+            if major == ENGINE_ABI_VERSION
+                && stamp.serves(RgpotEngineAbiStamp::HOST)
+                && stamp.abi_minor >= ENGINE_UNLOAD_POLICY_MINOR => {}
+        _ => {
+            return Some(format!(
+                "the plugin's ABI stamp does not serve this loader at minor \
+                 {ENGINE_UNLOAD_POLICY_MINOR} or later, so rgpot_engine_unload_policy is ignored"
+            ))
+        }
+    }
+    match unsafe { policy() } {
+        ENGINE_UNLOAD_SAFE => None,
+        code => Some(format!(
+            "rgpot_engine_unload_policy returned {code}, not RGPOT_ENGINE_UNLOAD_SAFE"
+        )),
+    }
+}
+
+fn replaced(canonical: &Path) -> EngineError {
+    EngineError::Load(format!(
+        "{}: the file was replaced after it was loaded, and the loaded plugin stays \
+         resident; load the new file from another path or restart the process",
+        canonical.display()
+    ))
 }
 
 /// The registry entry for the file at `path`, opening it on first use.
@@ -954,26 +1029,40 @@ unsafe fn resident_library(path: &Path) -> Result<Arc<Resident>, EngineError> {
     let canonical = canonical_path(path)?;
     let identity = file_identity(&canonical)?;
     let mut registry = registry();
-    if let Some(known) = registry.by_path.get(&canonical) {
-        if *known != identity {
-            return Err(EngineError::Load(format!(
-                "{}: the file was replaced after it was loaded, and the loaded plugin stays \
-                 resident; load the new file from another path or restart the process",
-                canonical.display()
-            )));
-        }
+    if registry
+        .by_path
+        .get(&canonical)
+        .is_some_and(|known| *known != identity)
+    {
+        return Err(replaced(&canonical));
     }
     if let Some(resident) = registry.by_file.get(&identity) {
         let resident = Arc::clone(resident);
         registry.by_path.insert(canonical, identity);
         return Ok(resident);
     }
-    let library = unsafe { open_resident(&canonical) }
+    let library = unsafe { open_library(&canonical) }
         .map_err(|why| EngineError::Load(format!("{}: {why}", path.display())))?;
     let symbols = unsafe { resolve(&library) };
+    let unload_refusal = unsafe { unload_refusal(&library, &symbols) };
+    let pin = match unload_refusal {
+        None => None,
+        Some(_) => match unsafe { pin_library(&canonical) } {
+            Ok(pin) => pin.map(ManuallyDrop::new),
+            Err(why) => {
+                std::mem::forget(library);
+                return Err(EngineError::Load(format!(
+                    "{}: RTLD_NODELETE could not be set: {why}",
+                    path.display()
+                )));
+            }
+        },
+    };
     let resident = Arc::new(Resident {
-        _library: ManuallyDrop::new(library),
+        library: ManuallyDrop::new(library),
+        _pin: pin,
         symbols,
+        unload_refusal,
     });
     registry
         .by_file
@@ -1005,10 +1094,74 @@ impl EnginePotential {
         let resident = unsafe { resident_library(path)? };
         let symbols = resident.symbols.clone()?;
         let mut engine = unsafe { Self::from_symbols(symbols, config)? };
-        engine.set_cache = unsafe { optional(&resident._library, "rgpot_engine_set_cache") };
-        engine.cache_counts = unsafe { optional(&resident._library, "rgpot_engine_cache_counts") };
+        engine.set_cache = unsafe { optional(&resident.library, "rgpot_engine_set_cache") };
+        engine.cache_counts = unsafe { optional(&resident.library, "rgpot_engine_cache_counts") };
         engine.library = Some(resident);
         Ok(engine)
+    }
+
+    /// Unload the plugin file at `path`: remove its registry entry and
+    /// `dlclose` it.
+    ///
+    /// Only a plugin that exports `rgpot_engine_unload_policy` returning
+    /// [`ENGINE_UNLOAD_SAFE`], with an ABI stamp of minor
+    /// [`ENGINE_UNLOAD_POLICY_MINOR`] or later, can be unloaded. Any other
+    /// plugin stays resident and the call returns [`EngineError::Unsupported`]
+    /// for `rgpot_engine_unload_policy`. A plugin that was not loaded through
+    /// [`Self::load`], or that still has a live [`EnginePotential`] or a
+    /// [`PotentialImpl`] built from one, is [`EngineError::Invalid`]. A path
+    /// whose file was replaced since it was loaded is [`EngineError::Load`].
+    /// A later [`Self::load`] of the file opens it again.
+    ///
+    /// # Safety
+    ///
+    /// The plugin's declaration must be true: once this returns, no thread,
+    /// TLS destructor, `atexit` handler or callback of the library may run,
+    /// and no function pointer taken from it, including a copy of
+    /// [`Self::symbols`], may be called.
+    pub unsafe fn unload(path: &Path) -> Result<(), EngineError> {
+        let canonical = canonical_path(path)?;
+        let identity = file_identity(&canonical)?;
+        let mut registry = registry();
+        match registry.by_path.get(&canonical) {
+            Some(known) if *known != identity => return Err(replaced(&canonical)),
+            Some(_) => {}
+            None => {
+                return Err(EngineError::Invalid(format!(
+                    "{}: this plugin was not loaded",
+                    canonical.display()
+                )))
+            }
+        }
+        let Some(resident) = registry.by_file.remove(&identity) else {
+            return Err(EngineError::Invalid(format!(
+                "{}: this plugin was not loaded",
+                canonical.display()
+            )));
+        };
+        if let Some(why) = &resident.unload_refusal {
+            let message = format!("{}: {why}; the plugin stays loaded", canonical.display());
+            registry.by_file.insert(identity, resident);
+            return Err(EngineError::Unsupported {
+                operation: "rgpot_engine_unload_policy",
+                message,
+            });
+        }
+        let resident = match Arc::try_unwrap(resident) {
+            Ok(resident) => resident,
+            Err(shared) => {
+                let live = Arc::strong_count(&shared) - 1;
+                registry.by_file.insert(identity, shared);
+                return Err(EngineError::Invalid(format!(
+                    "{}: {live} engine instance(s) still use this plugin",
+                    canonical.display()
+                )));
+            }
+        };
+        registry.by_path.retain(|_, known| *known != identity);
+        ManuallyDrop::into_inner(resident.library)
+            .close()
+            .map_err(|why| EngineError::Load(format!("{}: {why}", canonical.display())))
     }
 
     /// Create an instance from symbols already in hand. [`Self::load`] is

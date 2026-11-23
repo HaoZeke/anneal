@@ -475,6 +475,22 @@ RGPOT_ENGINE_API size_t rgpot_engine_component_name(const RgpotEnginePot *pot,
                                                     long index, char *buf,
                                                     size_t len);
 
+#define RGPOT_ENGINE_UNLOAD_RESIDENT 0
+#define RGPOT_ENGINE_UNLOAD_SAFE 1
+
+/**
+ * Unload policy of the library, minor 7. A host keeps every engine library
+ * loaded for the life of the process unless this returns
+ * RGPOT_ENGINE_UNLOAD_SAFE and rgpot_engine_abi_stamp reports minor 7 or
+ * later. Only then may the host dlclose the library, and only after
+ * rgpot_engine_destroy has returned for every handle. Return
+ * RGPOT_ENGINE_UNLOAD_SAFE only when no thread, TLS destructor, atexit
+ * handler or callback of the library outlives its last handle and it links
+ * no runtime that keeps process state (OpenMP, CUDA, Torch, MPI, GROMACS,
+ * LAMMPS, OpenMM).
+ */
+RGPOT_ENGINE_API int rgpot_engine_unload_policy(void);
+
 #ifdef __cplusplus
 }
 #endif

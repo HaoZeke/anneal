@@ -111,6 +111,22 @@ typedef struct DLManagedTensorVersioned DLManagedTensorVersioned;
 #define ENGINE_ERR_UNSUPPORTED 3
 
 /**
+ * `RGPOT_ENGINE_UNLOAD_RESIDENT`: the library must stay loaded.
+ */
+#define ENGINE_UNLOAD_RESIDENT 0
+
+/**
+ * `RGPOT_ENGINE_UNLOAD_SAFE`: the library may be unloaded after its last
+ * instance is destroyed.
+ */
+#define ENGINE_UNLOAD_SAFE 1
+
+/**
+ * The first ABI minor that defines `rgpot_engine_unload_policy`.
+ */
+#define ENGINE_UNLOAD_POLICY_MINOR 7
+
+/**
  * Which kind of failure a fused evaluation ended in.
  */
 typedef enum rgpot_fused_error_kind_t {

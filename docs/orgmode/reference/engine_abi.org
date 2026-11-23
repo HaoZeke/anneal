@@ -66,7 +66,8 @@ Every library above exports
 =rgpot_engine_cache_counts=.
 Only =libcomposite_engine= has components; the others report none.
 None of them exports =rgpot_engine_model_state=, =rgpot_engine_set_callbacks=,
-=rgpot_engine_hint= or =rgpot_engine_neighbor_options=.
+=rgpot_engine_hint=,
+=rgpot_engine_neighbor_options= or =rgpot_engine_unload_policy=.
 
 ** Persistent result cache and evaluation counts
 
@@ -212,6 +213,8 @@ field.
 Minor 5 added =RgpotEngineComponent=,
 =rgpot_engine_last_components= and =rgpot_engine_component_name=.
 Minor 6 adds =rgpot_engine_set_cache= and =rgpot_engine_cache_counts=.
+Minor 7 adds =rgpot_engine_unload_policy=, =RGPOT_ENGINE_UNLOAD_RESIDENT= and
+=RGPOT_ENGINE_UNLOAD_SAFE=.
 The version does not cover the Cap'n Proto params schema, the tensor runtime the
 engine links, or the model.
 
@@ -600,6 +603,32 @@ size_t rgpot_engine_component_name(const RgpotEnginePot *pot, long index,
   a null =pot=, an engine that is not a sum, and an index outside the terms.
 
 Optional symbol, minor 5.
+
+*** =rgpot_engine_unload_policy=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_engine_unload_policy(void);
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs ::
+  =RGPOT_ENGINE_UNLOAD_SAFE= (1) when the library may be unloaded after its last handle is destroyed, or =RGPOT_ENGINE_UNLOAD_RESIDENT=
+  (0) when it must stay loaded.
+- Errors :: none; the call cannot fail.
+
+Optional symbol, minor 7.
+Without it every engine library stays loaded for the life of the process.
+A host honours the answer only from an engine whose
+=rgpot_engine_abi_stamp= reports minor 7 or later, and unloads only after =rgpot_engine_destroy=
+has returned for every handle.
+Return =RGPOT_ENGINE_UNLOAD_SAFE= only when no thread, TLS destructor, =atexit=
+handler or callback of the library outlives its last handle, and the library
+links no runtime that keeps process state, such as OpenMP, CUDA, Torch, MPI,
+GROMACS, LAMMPS or OpenMM.
+No engine in this repository exports it.
+
 ** Evaluation
 
 *** =rgpot_engine_coord_transform=
@@ -1355,6 +1384,18 @@ Two loads are refused with =EngineError::Load=:
   identified before it is opened.
   Pass a path that names the file.
 
+A plugin can opt out of residency.
+When it exports
+=rgpot_engine_unload_policy= returning =RGPOT_ENGINE_UNLOAD_SAFE= and its stamp
+reports minor 7 or later, the loader opens it without =RTLD_NODELETE=.
+It still stays loaded until the =unsafe= =EnginePotential::unload(path)= removes
+its registry entry and calls =dlclose=.
+=unload= returns =EngineError::Unsupported= for =rgpot_engine_unload_policy=
+when the plugin has not opted in, and =EngineError::Invalid= while an
+=EnginePotential= or a =PotentialImpl= built from it is alive or when the file
+was never loaded.
+A later =load= opens the file again.
+
 =libuma_engine=, =libmetatomic_engine=, =libxtb_engine=, =libopenmm_engine=,
 =libnwchem_engine= and =libskala_engine= are also linked with =-z nodelete=, so
 a host that does call =dlclose= on them leaves them mapped.
@@ -1362,6 +1403,9 @@ a host that does call =dlclose= on them leaves them mapped.
 - =ENGINE_ABI_VERSION=, =ENGINE_ABI_MINOR=,
   =ENGINE_ABI_LAYOUT_REVISION= :: Host ABI identity (=1=, =6=, =1=) matching =RGPOT_ENGINE_ABI_VERSION=,
   =RGPOT_ENGINE_ABI_MINOR= and =RGPOT_ENGINE_ABI_LAYOUT_REVISION=.
+- =ENGINE_UNLOAD_RESIDENT=, =ENGINE_UNLOAD_SAFE=,
+  =ENGINE_UNLOAD_POLICY_MINOR= :: =RGPOT_ENGINE_UNLOAD_RESIDENT= (=0=),
+  =RGPOT_ENGINE_UNLOAD_SAFE= (=1=), and the first minor (=7=) that defines =rgpot_engine_unload_policy=.
 - =RgpotEngineAbiStamp= :: Compatibility stamp (=abi_major=, =abi_minor=,
   =layout_revision=) with =RgpotEngineAbiStamp::HOST= and =serves(host)= accepting any plugin of the same major and layout revision whose minor is at most =host.abi_minor=
   (rejecting plugins with a newer minor than the host's).
@@ -1371,8 +1415,8 @@ a host that does call =dlclose= on them leaves them mapped.
 - =CoordTransformFn=, =AbiVersionFn=, =AbiStampFn=, =CreateFn=, =DestroyFn=,
   =ForceFn=, =ForceBatchFn=, =HvpFn=, =CapsFn=, =LastErrorFn=,
   =LastComponentsFn=, =ComponentNameFn=, =ModelStateFn=, =SetCallbacksFn=,
-  =HintFn= :: =extern "C"= function-pointer types matching the C declarations
-  above.
+  =HintFn=, =UnloadPolicyFn= :: =extern "C"= function-pointer types matching
+  the C declarations above.
 - =EngineSymbols= :: Resolved symbol table holding required
   (=abi_version=, =create=, =destroy=, =force=) and optional (=abi_stamp=,
   =force_batch=, =hvp=, =caps=, =last_error=,
@@ -1452,3 +1496,9 @@ a host that does call =dlclose= on them leaves them mapped.
   a finite-difference fallback.
 - =EnginePotential::into_potential(self)= :: Converts the instance into a =PotentialImpl= callback handle, serializes calls to its engine instance, and registers an analytic callback on the underlying =rgpot_potential_t= only when both =rgpot_engine_caps= and =rgpot_engine_hvp= are exported and =analytic_hvp=
   is true.
+- =unsafe EnginePotential::unload(path)= :: Removes the registry entry of a
+  plugin that declared itself unload-safe and calls =dlclose=, as described
+  under the plugin lifetime above.
+  The caller vouches for the declaration: no thread, TLS destructor, =atexit=
+  handler or callback of the library may run afterwards, and no function pointer
+  taken from it may be called.
