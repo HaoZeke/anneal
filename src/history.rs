@@ -51,6 +51,9 @@ pub struct State {
     pub best: FPair<f64>,
 }
 
+/// Most epochs [`History::with_capacity`] reserves up front.
+const RESERVED_EPOCHS: usize = 1 << 16;
+
 /// Run history returned by `run_rs`: per-epoch summary lines plus the
 /// best-seen `(pos, val)` pair across the full run.
 #[derive(Clone, Debug)]
@@ -64,12 +67,16 @@ pub struct History {
 }
 
 impl History {
-    /// Constructs an empty `History` with the given epoch capacity.
+    /// Constructs an empty `History` with room for `n_epochs` epochs, up to
+    /// a bound beyond which it grows as they arrive.
     pub fn with_capacity(n_epochs: usize, best: FPair<f64>) -> Self {
+        // A hint only: a run asked for more epochs than memory holds must
+        // still start, and grows the record as the epochs arrive.
+        let reserved = n_epochs.min(RESERVED_EPOCHS);
         Self {
-            epochs: Vec::with_capacity(n_epochs),
+            epochs: Vec::with_capacity(reserved),
             best,
-            stationarity_flags: Vec::with_capacity(n_epochs),
+            stationarity_flags: Vec::with_capacity(reserved),
         }
     }
 
@@ -132,7 +139,18 @@ pub fn trajectory_stationarity_flags(values: &[f64]) -> Vec<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::trajectory_stationarity_flags;
+    use super::{FPair, History, RESERVED_EPOCHS, trajectory_stationarity_flags};
+
+    #[test]
+    fn an_epoch_count_past_memory_reserves_a_bounded_record() {
+        let best = FPair {
+            pos: ndarray::Array1::zeros(2),
+            val: 0.0,
+        };
+        let history = History::with_capacity(usize::MAX, best.clone());
+        assert!(history.epochs.capacity() <= 2 * RESERVED_EPOCHS);
+        assert!(History::with_capacity(8, best).epochs.capacity() >= 8);
+    }
 
     #[test]
     fn flags_a_sustained_mean_shift_at_the_change_point() {

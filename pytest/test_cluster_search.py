@@ -367,3 +367,29 @@ def test_cluster_search_auto_quench_takes_tric_for_a_slow_gradient():
     call, step = out["quench_seconds"]
     assert out["local_step"] == "tric", (call, step)
     assert call > step
+
+
+@pytest.mark.parametrize(
+    "groups, species, message",
+    [
+        ([[2, 1, 0], [3, 4, 5]], [8, 1, 1] * 2, "increasing"),
+        ([[0, 1, 2], [3, 4, 6]], [8, 1, 1] * 2, "past the last"),
+        ([[0, 1, 2], [3, 4, 5]], [0, 0, 0] * 2, "covalent"),
+    ],
+)
+def test_cluster_search_refuses_bad_groups_before_any_call(groups, species, message):
+    import anneal
+
+    calls = []
+
+    def energy(x):
+        calls.append(1)
+        return flexible_water(x, 2)[0]
+
+    def grad(x):
+        calls.append(1)
+        return flexible_water(x, 2)[1]
+
+    with pytest.raises(anneal.InvalidArgumentError, match=message):
+        cluster_search(energy, grad, 6, 200, start=WATER_DIMER, species=species, groups=groups, seed=2)
+    assert calls == []

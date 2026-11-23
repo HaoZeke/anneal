@@ -19,20 +19,27 @@
 #![allow(clippy::too_many_arguments)]
 
 use ndarray::{Array1, ArrayView1};
-use numpy::{PyArray1, PyReadonlyArray1};
-use pyo3::exceptions::{PyTypeError, PyValueError};
+use numpy::{PyArray1, PyReadonlyArray1, PyReadonlyArray2};
+use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyFloat};
 use rand::SeedableRng;
 
-use eindir_core::py_objective::{PyBounds as EindirPyBounds, PyObjective};
 use eindir_core::{Bounds, Objective};
 
 use crate::history::History;
 use crate::variant::{boltzmann_in_box, fast_in_box, gsa_in_box};
 
+use errors::{bounds_error, config_error, invalid_argument, search_error};
+use objective::{PyBounds, PyObjective};
+
+mod box_tuning;
+mod config_fields;
 mod device;
+mod errors;
 mod landfold;
+mod objective;
+mod outcome;
 mod portfolio_peers;
 
 /// Drop the GIL before native search that may call back into Python.
@@ -50,33 +57,35 @@ where
 
 /// Validate a box for methods that sample every coordinate uniformly.
 fn validate_box_bounds(low: &[f64], high: &[f64]) -> PyResult<()> {
-    validate_box_domain(low, high, false)
+    check_box(low, high, false)
 }
 
-/// Fixed coordinates are valid only for drivers that preserve those axes.
-fn validate_box_domain(low: &[f64], high: &[f64], allow_fixed: bool) -> PyResult<()> {
+/// The one rule for a box from Python, raising `BoundsError`: equal
+/// lengths, at least one axis, every side finite with a finite width, and
+/// each low at most its high, or strictly less unless `allow_fixed`.
+pub(crate) fn check_box(low: &[f64], high: &[f64], allow_fixed: bool) -> PyResult<()> {
     if low.len() != high.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
+        return Err(bounds_error(format!(
+            "low and high must have the same length (got {} and {})",
+            low.len(),
+            high.len()
+        )));
     }
     if low.is_empty() {
-        return Err(PyValueError::new_err(
-            "bounds must have at least one dimension",
-        ));
+        return Err(bounds_error("bounds must have at least one dimension"));
     }
     let mut total_width = 0.0;
     for (i, (&lo, &hi)) in low.iter().zip(high.iter()).enumerate() {
         // Reflection folds with period 2 (hi - lo), and the drivers average
         // widths across axes, so both must stay finite.
         if !lo.is_finite() || !hi.is_finite() || !(2.0 * (hi - lo)).is_finite() {
-            return Err(PyValueError::new_err(format!(
-                "bounds must be finite, with a finite width, at dimension {i}"
+            return Err(bounds_error(format!(
+                "bounds must be finite, with a finite width, at dimension {i} (got {lo}, {hi})"
             )));
         }
         total_width += hi - lo;
         if !total_width.is_finite() {
-            return Err(PyValueError::new_err(
+            return Err(bounds_error(
                 "the box is too wide: the sum of its widths is not finite",
             ));
         }
@@ -86,12 +95,109 @@ fn validate_box_domain(low: &[f64], high: &[f64], allow_fixed: bool) -> PyResult
             } else {
                 "strictly less than"
             };
-            return Err(PyValueError::new_err(format!(
-                "low[{i}] must be {relation} high[{i}] (got {lo}, {hi})"
+            return Err(bounds_error(format!(
+                "bounds out of order: low[{i}] must be {relation} high[{i}] (got {lo}, {hi})"
             )));
         }
     }
     Ok(())
+}
+
+/// Build a box through [`check_box`], so `Bounds::new` never sees the
+/// inputs it asserts on and no draw or reflection becomes NaN.
+fn checked_box(
+    low: Vec<f64>,
+    high: Vec<f64>,
+    slack: f64,
+    allow_fixed: bool,
+) -> PyResult<Bounds<f64>> {
+    check_box(&low, &high, allow_fixed)?;
+    if !slack.is_finite() || slack < 0.0 {
+        return Err(bounds_error(format!(
+            "slack must be finite and non-negative (got {slack})"
+        )));
+    }
+    Ok(Bounds::new(
+        Array1::from_vec(low),
+        Array1::from_vec(high),
+        slack,
+    ))
+}
+
+/// A box that may hold fixed axes, for the drivers that keep them.
+fn checked_bounds(low: Vec<f64>, high: Vec<f64>, slack: f64) -> PyResult<Bounds<f64>> {
+    checked_box(low, high, slack, true)
+}
+
+/// Refuses a start whose length is not the box dimension.
+fn check_start_length(name: &str, values: &[f64], dim: usize) -> PyResult<()> {
+    if values.len() == dim {
+        Ok(())
+    } else {
+        Err(invalid_argument(format!(
+            "{name} length {} does not match dimension {dim}",
+            values.len()
+        )))
+    }
+}
+
+/// Refuses a scalar that is not finite and strictly positive. Written as
+/// a finiteness test, since a comparison such as `x <= 0.0` passes NaN.
+fn positive_finite(name: &str, value: f64) -> PyResult<()> {
+    if value.is_finite() && value > 0.0 {
+        Ok(())
+    } else {
+        Err(invalid_argument(format!(
+            "{name} must be positive and finite (got {value})"
+        )))
+    }
+}
+
+/// Refuses a scalar that is not finite and non-negative.
+fn non_negative_finite(name: &str, value: f64) -> PyResult<()> {
+    if value.is_finite() && value >= 0.0 {
+        Ok(())
+    } else {
+        Err(invalid_argument(format!(
+            "{name} must be non-negative and finite (got {value})"
+        )))
+    }
+}
+
+/// Refuses a fraction outside `[0, 1]`, NaN included.
+fn unit_fraction(name: &str, value: f64) -> PyResult<()> {
+    if (0.0..=1.0).contains(&value) {
+        Ok(())
+    } else {
+        Err(invalid_argument(format!(
+            "{name} must lie in [0, 1] (got {value})"
+        )))
+    }
+}
+
+/// Refuses a request whose working set cannot be allocated, as
+/// `MemoryError`, before the native code would abort on it. `elements`
+/// is `None` when the count already overflowed `usize`.
+fn reservable(what: &str, elements: Option<usize>) -> PyResult<()> {
+    let fits = elements.is_some_and(|n| Vec::<f64>::new().try_reserve_exact(n).is_ok());
+    if fits {
+        Ok(())
+    } else {
+        Err(pyo3::exceptions::PyMemoryError::new_err(format!(
+            "{what} is too large to allocate"
+        )))
+    }
+}
+
+/// Refuses a point with a NaN or infinite coordinate.
+fn check_finite(name: &str, values: &[f64]) -> PyResult<()> {
+    match values.iter().position(|value| !value.is_finite()) {
+        Some(i) => Err(invalid_argument(format!(
+            "{name}[{i}] is not finite (got {})",
+            values[i]
+        ))),
+        None => Ok(()),
+    }
 }
 
 fn py_view1<'py>(py: Python<'py>, x: ArrayView1<f64>) -> Bound<'py, PyArray1<f64>> {
@@ -103,7 +209,7 @@ fn py_view1<'py>(py: Python<'py>, x: ArrayView1<f64>) -> Bound<'py, PyArray1<f64
 
 fn require_positive_budget(budget: usize) -> PyResult<()> {
     if budget == 0 {
-        Err(PyValueError::new_err("budget must be positive"))
+        Err(invalid_argument("budget must be positive"))
     } else {
         Ok(())
     }
@@ -124,28 +230,28 @@ fn parse_box_domain(
     x0: Option<PyReadonlyArray1<'_, f64>>,
     allow_fixed: bool,
 ) -> PyResult<(Bounds<f64>, usize, Option<Array1<f64>>)> {
-    let low_vec = low.as_slice()?.to_vec();
-    let high_vec = high.as_slice()?.to_vec();
-    validate_box_domain(&low_vec, &high_vec, allow_fixed)?;
-    let dim = low_vec.len();
+    let bounds = checked_box(
+        low.as_slice()?.to_vec(),
+        high.as_slice()?.to_vec(),
+        1e-9,
+        allow_fixed,
+    )?;
+    let dim = bounds.dims;
     let x0 = if let Some(x0) = x0 {
         let sl = x0.as_slice()?;
         if sl.len() != dim {
-            return Err(PyValueError::new_err(format!(
+            return Err(invalid_argument(format!(
                 "x0 length {} does not match dimension {}",
                 sl.len(),
                 dim
             )));
         }
+        check_finite("x0", sl)?;
         Some(Array1::from_vec(sl.to_vec()))
     } else {
         None
     };
-    Ok((
-        Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9),
-        dim,
-        x0,
-    ))
+    Ok((bounds, dim, x0))
 }
 
 struct ParsedBoxSearch {
@@ -167,21 +273,22 @@ fn parse_box_search(
 ) -> PyResult<ParsedBoxSearch> {
     require_positive_budget(budget)?;
     if replicas == 0 {
-        return Err(PyValueError::new_err("replicas must be positive"));
+        return Err(invalid_argument("replicas must be positive"));
     }
     let (bounds, dim, x0) = parse_box_domain(low, high, x0, true)?;
+    reservable("a replica state per replica", replicas.checked_mul(dim))?;
     let history = match history {
         "none" | "no" => crate::methods::ensemble::HistoryMode::None,
         "private" => crate::methods::ensemble::HistoryMode::Private,
         "shared" => crate::methods::ensemble::HistoryMode::Shared,
         other => {
-            return Err(PyValueError::new_err(format!(
+            return Err(invalid_argument(format!(
                 "history must be none, private, or shared, got {other:?}"
             )));
         }
     };
     let membership = crate::methods::minima_hopping::HistoryMembership::parse(Some(membership))
-        .map_err(PyValueError::new_err)?;
+        .map_err(invalid_argument)?;
     Ok(ParsedBoxSearch {
         bounds,
         dim,
@@ -193,7 +300,7 @@ fn parse_box_search(
 
 fn validate_max_evals(max_evals: Option<usize>) -> PyResult<()> {
     if max_evals == Some(0) {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "max_evals must be at least 1: the start costs one evaluation",
         ));
     }
@@ -212,7 +319,7 @@ fn read_x0(
     };
     let values = x0.as_slice()?.to_vec();
     if values.len() != low.len() {
-        return Err(PyValueError::new_err(format!(
+        return Err(invalid_argument(format!(
             "x0 has length {} but low and high have length {}",
             values.len(),
             low.len()
@@ -220,10 +327,10 @@ fn read_x0(
     }
     for (i, &v) in values.iter().enumerate() {
         if !v.is_finite() {
-            return Err(PyValueError::new_err(format!("x0[{i}] is not finite")));
+            return Err(invalid_argument(format!("x0[{i}] is not finite")));
         }
         if v < low[i] || v > high[i] {
-            return Err(PyValueError::new_err(format!(
+            return Err(invalid_argument(format!(
                 "x0[{i}] = {v} lies outside [{}, {}]",
                 low[i], high[i]
             )));
@@ -259,6 +366,28 @@ fn read_x0(
 #[pyclass(name = "BasinBias")]
 pub struct PyBasinBias {
     inner: crate::bias::BasinBias<crate::bias::SortedPairs>,
+    n_points: usize,
+}
+
+impl PyBasinBias {
+    fn state<'a>(
+        &self,
+        x: &'a numpy::PyReadonlyArray1<f64>,
+    ) -> PyResult<ndarray::ArrayView1<'a, f64>> {
+        let slice = x
+            .as_slice()
+            .map_err(|_| invalid_argument("x must be contiguous"))?;
+        if slice.len() != 3 * self.n_points {
+            return Err(invalid_argument(format!(
+                "x has length {}, but {} points need 3 * {} = {}",
+                slice.len(),
+                self.n_points,
+                self.n_points,
+                3 * self.n_points
+            )));
+        }
+        Ok(ndarray::ArrayView1::from(slice))
+    }
 }
 
 #[pymethods]
@@ -267,12 +396,13 @@ impl PyBasinBias {
     #[pyo3(signature = (n_points, merge_radius = 1e-2, w0 = 0.25, gamma = 5.0))]
     fn new(n_points: usize, merge_radius: f64, w0: f64, gamma: f64) -> PyResult<Self> {
         if n_points < 2 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "n_points must be at least 2",
-            ));
+            return Err(invalid_argument("n_points must be at least 2"));
         }
-        if !(gamma > 1.0) || !(w0 > 0.0) || !(merge_radius > 0.0) {
-            return Err(pyo3::exceptions::PyValueError::new_err(
+        if !(gamma.is_finite() && gamma > 1.0)
+            || !(w0.is_finite() && w0 > 0.0)
+            || !(merge_radius.is_finite() && merge_radius > 0.0)
+        {
+            return Err(invalid_argument(
                 "require gamma > 1, w0 > 0, merge_radius > 0",
             ));
         }
@@ -283,6 +413,7 @@ impl PyBasinBias {
                 w0,
                 gamma,
             ),
+            n_points,
         })
     }
 
@@ -292,10 +423,7 @@ impl PyBasinBias {
     /// core is built against, so the buffer is reborrowed through a slice.
     fn potential(&self, x: numpy::PyReadonlyArray1<f64>) -> PyResult<f64> {
         use crate::bias::Bias;
-        let slice = x
-            .as_slice()
-            .map_err(|_| pyo3::exceptions::PyValueError::new_err("x must be contiguous"))?;
-        let v = ndarray::ArrayView1::from(slice);
+        let v = self.state(&x)?;
         let s = self.inner.cv(v);
         Ok(self.inner.potential(s.view()))
     }
@@ -303,13 +431,10 @@ impl PyBasinBias {
     /// Raise the bias on the basin containing `x`, registering it if unseen.
     fn deposit(&mut self, x: numpy::PyReadonlyArray1<f64>, temp: f64) -> PyResult<()> {
         use crate::bias::Bias;
-        if !(temp > 0.0) {
-            return Err(pyo3::exceptions::PyValueError::new_err("temp must be > 0"));
+        if !(temp.is_finite() && temp > 0.0) {
+            return Err(invalid_argument("temp must be > 0 and finite"));
         }
-        let slice = x
-            .as_slice()
-            .map_err(|_| pyo3::exceptions::PyValueError::new_err("x must be contiguous"))?;
-        let v = ndarray::ArrayView1::from(slice);
+        let v = self.state(&x)?;
         let s = self.inner.cv(v);
         self.inner.deposit(s.view(), temp);
         Ok(())
@@ -840,24 +965,33 @@ fn run_hmc(
     let high_vec = high.as_slice()?.to_vec();
     validate_box_bounds(&low_vec, &high_vec)?;
     let dim = low_vec.len();
+    positive_finite("t_init", t_init)?;
+    positive_finite("epsilon", epsilon)?;
+    if l_steps < 1 {
+        return Err(invalid_argument("l_steps must be at least 1"));
+    }
+    if !q.is_finite() {
+        return Err(invalid_argument(format!("q must be finite (got {q})")));
+    }
     let q_max = 1.0 + 2.0 / dim as f64;
     if q > 1.0 && q >= q_max {
-        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+        return Err(invalid_argument(format!(
             "q-Gaussian momentum requires q < 1 + 2/dim = {q_max} for dim = {dim}; got q = {q}"
         )));
     }
     let x0_arr = if let Some(arr) = x0 {
         let values = arr.as_slice()?.to_vec();
         if values.len() != dim {
-            return Err(pyo3::exceptions::PyValueError::new_err(
+            return Err(invalid_argument(
                 "x0 must have the same length as low and high",
             ));
         }
+        check_finite("x0", &values)?;
         Some(Array1::from_vec(values))
     } else {
         None
     };
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
@@ -909,23 +1043,17 @@ fn polish(
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     let x0_vec = x0.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() || low_vec.len() != x0_vec.len() {
-        return Err(PyValueError::new_err(
-            "low, high, and x0 must have the same length",
-        ));
-    }
+    check_box(&low_vec, &high_vec, true)?;
+    check_start_length("x0", &x0_vec, low_vec.len())?;
+    check_finite("x0", &x0_vec)?;
     if max_fevals < 1 {
-        return Err(PyValueError::new_err("max_fevals must be positive"));
+        return Err(invalid_argument("max_fevals must be positive"));
     }
-    if step0 <= 0.0 {
-        return Err(PyValueError::new_err("step0 must be positive"));
-    }
-    if grad_tol < 0.0 {
-        return Err(PyValueError::new_err("grad_tol must be non-negative"));
-    }
+    positive_finite("step0", step0)?;
+    non_negative_finite("grad_tol", grad_tol)?;
 
     let dim = low_vec.len();
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
@@ -968,28 +1096,18 @@ fn qmc_polish(
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
-    }
+    check_box(&low_vec, &high_vec, true)?;
     if n_starts < 1 {
-        return Err(PyValueError::new_err("n_starts must be positive"));
+        return Err(invalid_argument("n_starts must be positive"));
     }
     if max_fevals_per_start < 1 {
-        return Err(PyValueError::new_err(
-            "max_fevals_per_start must be positive",
-        ));
+        return Err(invalid_argument("max_fevals_per_start must be positive"));
     }
-    if step0 <= 0.0 {
-        return Err(PyValueError::new_err("step0 must be positive"));
-    }
-    if grad_tol < 0.0 {
-        return Err(PyValueError::new_err("grad_tol must be non-negative"));
-    }
+    positive_finite("step0", step0)?;
+    non_negative_finite("grad_tol", grad_tol)?;
 
     let dim = low_vec.len();
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
@@ -1042,7 +1160,7 @@ fn qmc_polish_result_to_dict(
     Ok(out.into())
 }
 
-/// Refines QMC starts using an `eindir` native objective/gradient handle.
+/// Refines QMC starts over a `PyObjective` built with `grad_fn`.
 #[pyfunction]
 #[pyo3(signature = (objective, n_starts, max_fevals_per_start, seed = 0, step0 = 1.0, grad_tol = 1e-8, top_k = 0))]
 fn qmc_polish_objective(
@@ -1056,23 +1174,21 @@ fn qmc_polish_objective(
     top_k: usize,
 ) -> PyResult<Py<PyDict>> {
     if n_starts < 1 {
-        return Err(PyValueError::new_err("n_starts must be positive"));
+        return Err(invalid_argument("n_starts must be positive"));
     }
     if max_fevals_per_start < 1 {
-        return Err(PyValueError::new_err(
-            "max_fevals_per_start must be positive",
-        ));
+        return Err(invalid_argument("max_fevals_per_start must be positive"));
     }
-    if step0 <= 0.0 {
-        return Err(PyValueError::new_err("step0 must be positive"));
-    }
-    if grad_tol < 0.0 {
-        return Err(PyValueError::new_err("grad_tol must be non-negative"));
-    }
+    positive_finite("step0", step0)?;
+    non_negative_finite("grad_tol", grad_tol)?;
 
+    let obj = objective.callable(py);
+    let errors = obj.errors();
+    let grad = objective.gradient(py, &errors, "qmc_polish_objective")?;
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let result = crate::qmc_projected_gradient_polish(
-        &*objective,
-        &*objective,
+        &obj,
+        &grad,
         n_starts,
         max_fevals_per_start,
         seed,
@@ -1080,6 +1196,7 @@ fn qmc_polish_objective(
         grad_tol,
         top_k,
     );
+    errors.finish(py)?;
     qmc_polish_result_to_dict(py, result)
 }
 
@@ -1100,42 +1217,33 @@ fn qmc_best1bin_scout(
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
-    }
-    if low_vec.is_empty() {
-        return Err(PyValueError::new_err(
-            "bounds must have at least one dimension",
-        ));
-    }
+    check_box(&low_vec, &high_vec, true)?;
     if max_evals < 1 {
-        return Err(PyValueError::new_err("max_evals must be positive"));
+        return Err(invalid_argument("max_evals must be positive"));
     }
     if population_size < 4 {
-        return Err(PyValueError::new_err("population_size must be at least 4"));
+        return Err(invalid_argument("population_size must be at least 4"));
     }
     if max_evals < population_size {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "max_evals must cover the initial population",
         ));
     }
     if !weight_min.is_finite() || weight_min < 0.0 {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "weight_min must be finite and non-negative",
         ));
     }
     if !weight_span.is_finite() || weight_span < 0.0 {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "weight_span must be finite and non-negative",
         ));
     }
     if !crossover_rate.is_finite() || !(0.0..=1.0).contains(&crossover_rate) {
-        return Err(PyValueError::new_err("crossover_rate must be in [0, 1]"));
+        return Err(invalid_argument("crossover_rate must be in [0, 1]"));
     }
 
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
@@ -1152,7 +1260,7 @@ fn qmc_best1bin_scout(
     qmc_polish_result_to_dict(py, result)
 }
 
-/// Runs a QMC best/1/bin scout using an `eindir` native objective handle.
+/// Runs a QMC best/1/bin scout over a `PyObjective`.
 #[pyfunction]
 #[pyo3(signature = (objective, max_evals, seed = 0, population_size = 30, weight_min = 0.5, weight_span = 0.5, crossover_rate = 0.7))]
 fn qmc_best1bin_scout_objective(
@@ -1166,32 +1274,35 @@ fn qmc_best1bin_scout_objective(
     crossover_rate: f64,
 ) -> PyResult<Py<PyDict>> {
     if max_evals < 1 {
-        return Err(PyValueError::new_err("max_evals must be positive"));
+        return Err(invalid_argument("max_evals must be positive"));
     }
     if population_size < 4 {
-        return Err(PyValueError::new_err("population_size must be at least 4"));
+        return Err(invalid_argument("population_size must be at least 4"));
     }
     if max_evals < population_size {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "max_evals must cover the initial population",
         ));
     }
     if !weight_min.is_finite() || weight_min < 0.0 {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "weight_min must be finite and non-negative",
         ));
     }
     if !weight_span.is_finite() || weight_span < 0.0 {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "weight_span must be finite and non-negative",
         ));
     }
     if !crossover_rate.is_finite() || !(0.0..=1.0).contains(&crossover_rate) {
-        return Err(PyValueError::new_err("crossover_rate must be in [0, 1]"));
+        return Err(invalid_argument("crossover_rate must be in [0, 1]"));
     }
 
+    let obj = objective.callable(py);
+    let errors = obj.errors();
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let result = crate::qmc_best1bin_scout(
-        &*objective,
+        &obj,
         max_evals,
         seed,
         population_size,
@@ -1199,6 +1310,7 @@ fn qmc_best1bin_scout_objective(
         weight_span,
         crossover_rate,
     );
+    errors.finish(py)?;
     qmc_polish_result_to_dict(py, result)
 }
 
@@ -1210,19 +1322,19 @@ fn validate_qmc_gsa_global_search_args(
     q_a: f64,
 ) -> PyResult<()> {
     if max_evals < 1 {
-        return Err(PyValueError::new_err("max_evals must be positive"));
+        return Err(invalid_argument("max_evals must be positive"));
     }
     if n_chains < 1 {
-        return Err(PyValueError::new_err("n_chains must be positive"));
+        return Err(invalid_argument("n_chains must be positive"));
     }
     if !t_init.is_finite() || t_init <= 0.0 {
-        return Err(PyValueError::new_err("t_init must be finite and positive"));
+        return Err(invalid_argument("t_init must be finite and positive"));
     }
     if !(q_v > 1.0 && q_v < 3.0) {
-        return Err(PyValueError::new_err("q_v must lie in (1, 3)"));
+        return Err(invalid_argument("q_v must lie in (1, 3)"));
     }
     if !q_a.is_finite() {
-        return Err(PyValueError::new_err("q_a must be finite"));
+        return Err(invalid_argument("q_a must be finite"));
     }
     Ok(())
 }
@@ -1245,16 +1357,11 @@ fn qmc_gsa_global_search(
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
-    }
     validate_box_bounds(&low_vec, &high_vec)?;
     validate_qmc_gsa_global_search_args(max_evals, n_chains, t_init, q_v, q_a)?;
     let start = read_x0(x0, &low_vec, &high_vec)?;
 
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
@@ -1272,7 +1379,7 @@ fn qmc_gsa_global_search(
     qmc_polish_result_to_dict(py, result)
 }
 
-/// Runs bounded QMC-initialized GSA using a native objective handle.
+/// Runs bounded QMC-initialized GSA over a `PyObjective`.
 #[pyfunction]
 #[pyo3(signature = (objective, max_evals, seed = 0, n_chains = 30, t_init = 1.0, q_v = 2.62, q_a = 1.7, x0 = None))]
 fn qmc_gsa_global_search_objective(
@@ -1287,15 +1394,14 @@ fn qmc_gsa_global_search_objective(
     x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
     validate_qmc_gsa_global_search_args(max_evals, n_chains, t_init, q_v, q_a)?;
-    let bounds = <PyObjective as Objective<f64>>::bounds(&objective);
-    let start = read_x0(
-        x0,
-        bounds.low.as_slice().expect("contiguous bounds"),
-        bounds.high.as_slice().expect("contiguous bounds"),
-    )?;
+    let bounds = objective.box_bounds();
+    let start = read_x0(x0, &bounds.low.to_vec(), &bounds.high.to_vec())?;
 
+    let obj = objective.callable(py);
+    let errors = obj.errors();
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let result = crate::qmc_gsa_global_search_from(
-        &*objective,
+        &obj,
         max_evals,
         seed,
         n_chains,
@@ -1304,6 +1410,7 @@ fn qmc_gsa_global_search_objective(
         q_a,
         start.as_ref().map(|x| x.view()),
     );
+    errors.finish(py)?;
     qmc_polish_result_to_dict(py, result)
 }
 
@@ -1325,29 +1432,22 @@ fn qmc_trust_region_poll(
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     let center_vec = center.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() || low_vec.len() != center_vec.len() {
-        return Err(PyValueError::new_err(
-            "low, high, and center must have the same length",
-        ));
-    }
-    if low_vec.is_empty() {
-        return Err(PyValueError::new_err(
-            "bounds must have at least one dimension",
-        ));
-    }
+    check_box(&low_vec, &high_vec, true)?;
+    check_start_length("center", &center_vec, low_vec.len())?;
+    check_finite("center", &center_vec)?;
     if max_evals < 1 {
-        return Err(PyValueError::new_err("max_evals must be positive"));
+        return Err(invalid_argument("max_evals must be positive"));
     }
     if !radius_fraction.is_finite() || radius_fraction < 0.0 {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "radius_fraction must be finite and non-negative",
         ));
     }
     if n_levels < 1 {
-        return Err(PyValueError::new_err("n_levels must be positive"));
+        return Err(invalid_argument("n_levels must be positive"));
     }
 
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
@@ -1364,7 +1464,7 @@ fn qmc_trust_region_poll(
     qmc_polish_result_to_dict(py, result)
 }
 
-/// Runs a local shifted-QMC trust-region poll using a native objective handle.
+/// Runs a local shifted-QMC trust-region poll over a `PyObjective`.
 #[pyfunction]
 #[pyo3(signature = (objective, center, max_evals, seed = 0, radius_fraction = 0.0, n_levels = 3, points_per_level = 0))]
 fn qmc_trust_region_poll_objective(
@@ -1378,25 +1478,29 @@ fn qmc_trust_region_poll_objective(
     points_per_level: usize,
 ) -> PyResult<Py<PyDict>> {
     let center_vec = center.as_slice()?.to_vec();
-    if center_vec.len() != objective.dim() {
-        return Err(PyValueError::new_err(
+    if center_vec.len() != objective.dims() {
+        return Err(invalid_argument(
             "center dimension must match objective bounds",
         ));
     }
+    check_finite("center", &center_vec)?;
     if max_evals < 1 {
-        return Err(PyValueError::new_err("max_evals must be positive"));
+        return Err(invalid_argument("max_evals must be positive"));
     }
     if !radius_fraction.is_finite() || radius_fraction < 0.0 {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "radius_fraction must be finite and non-negative",
         ));
     }
     if n_levels < 1 {
-        return Err(PyValueError::new_err("n_levels must be positive"));
+        return Err(invalid_argument("n_levels must be positive"));
     }
 
+    let obj = objective.callable(py);
+    let errors = obj.errors();
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let result = crate::qmc_trust_region_poll(
-        &*objective,
+        &obj,
         Array1::from_vec(center_vec),
         max_evals,
         seed,
@@ -1404,6 +1508,7 @@ fn qmc_trust_region_poll_objective(
         n_levels,
         points_per_level,
     );
+    errors.finish(py)?;
     qmc_polish_result_to_dict(py, result)
 }
 
@@ -1426,31 +1531,21 @@ fn shifted_qmc_polish(
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
-    }
+    check_box(&low_vec, &high_vec, true)?;
     if n_starts < 1 {
-        return Err(PyValueError::new_err("n_starts must be positive"));
+        return Err(invalid_argument("n_starts must be positive"));
     }
     if max_fevals_per_start < 1 {
-        return Err(PyValueError::new_err(
-            "max_fevals_per_start must be positive",
-        ));
+        return Err(invalid_argument("max_fevals_per_start must be positive"));
     }
     if n_replicates < 1 {
-        return Err(PyValueError::new_err("n_replicates must be positive"));
+        return Err(invalid_argument("n_replicates must be positive"));
     }
-    if step0 <= 0.0 {
-        return Err(PyValueError::new_err("step0 must be positive"));
-    }
-    if grad_tol < 0.0 {
-        return Err(PyValueError::new_err("grad_tol must be non-negative"));
-    }
+    positive_finite("step0", step0)?;
+    non_negative_finite("grad_tol", grad_tol)?;
 
     let dim = low_vec.len();
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
@@ -1507,27 +1602,42 @@ fn additive_independence(
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
-    }
+    check_box(&low_vec, &high_vec, true)?;
     if max_fevals < 1 {
-        return Err(PyValueError::new_err("max_fevals must be positive"));
+        return Err(invalid_argument("max_fevals must be positive"));
     }
     if degree < 1 {
-        return Err(PyValueError::new_err("degree must be positive"));
+        return Err(invalid_argument("degree must be positive"));
     }
+    unit_fraction("local_frac", local_frac)?;
+    let dim = low_vec.len();
+    let block = max_fevals / n_epochs.clamp(1, max_fevals);
+    reservable(
+        "a max_fevals / n_epochs block of proposals",
+        block.checked_mul(dim),
+    )?;
+    reservable(
+        "a degree this high",
+        degree
+            .checked_add(1)
+            .and_then(|terms| terms.checked_mul(dim)),
+    )?;
+    reservable(
+        "a grid_m this fine",
+        grid_m
+            .checked_add(1)
+            .and_then(|cells| cells.checked_mul(dim)),
+    )?;
     // The backfitting fit reuses every pilot point across all coordinates, so
     // the pilot scales with the per-coordinate degree, not the dimension. A
     // dimension-scaled pilot would swallow the whole budget on high-dimensional
     // CUTEst problems and leave nothing to sample.
     let pilot = if n_pilot == 0 {
-        (32 * degree).max(256)
+        degree.saturating_mul(32).max(256)
     } else {
         n_pilot
     };
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
@@ -1553,13 +1663,9 @@ fn estimate_gle_omega0(
 ) -> PyResult<f64> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
-    }
+    check_box(&low_vec, &high_vec, true)?;
     let dim = low_vec.len();
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
@@ -1578,22 +1684,23 @@ fn gle_langevin_x0(
     };
     let values = x0.as_slice()?.to_vec();
     if values.len() != dim {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "x0 must have the same length as the bounds",
         ));
     }
     if values.iter().any(|value| !value.is_finite()) {
-        return Err(PyValueError::new_err("x0 must contain only finite values"));
+        return Err(invalid_argument("x0 must contain only finite values"));
     }
     Ok(Some(Array1::from_vec(values)))
 }
 
-fn validate_gle_args(max_fevals: usize, omega0: Option<f64>) -> PyResult<()> {
+fn validate_gle_args(max_fevals: usize, omega0: Option<f64>, dt: f64) -> PyResult<()> {
     if max_fevals < 1 {
-        return Err(PyValueError::new_err("max_fevals must be positive"));
+        return Err(invalid_argument("max_fevals must be positive"));
     }
+    positive_finite("dt", dt)?;
     if omega0.is_some_and(|omega| !omega.is_finite() || omega <= 0.0) {
-        return Err(PyValueError::new_err("omega0 must be positive"));
+        return Err(invalid_argument("omega0 must be positive"));
     }
     Ok(())
 }
@@ -1638,15 +1745,11 @@ fn gle_langevin(
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
-    }
-    validate_gle_args(max_fevals, omega0)?;
+    check_box(&low_vec, &high_vec, true)?;
+    validate_gle_args(max_fevals, omega0, dt)?;
     let dim = low_vec.len();
     let x0 = gle_langevin_x0(x0, dim)?;
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
@@ -1682,15 +1785,11 @@ fn gle_langevin_preconditioned(
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
-    }
-    validate_gle_args(max_fevals, omega0)?;
+    check_box(&low_vec, &high_vec, true)?;
+    validate_gle_args(max_fevals, omega0, dt)?;
     let dim = low_vec.len();
     let x0 = gle_langevin_x0(x0, dim)?;
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
@@ -1713,7 +1812,7 @@ fn gle_langevin_preconditioned(
     gle_langevin_result_to_dict(py, result)
 }
 
-/// GLE-Langevin annealing using an `eindir` native objective/gradient handle.
+/// GLE-Langevin annealing over a `PyObjective` built with `grad_fn`.
 #[pyfunction]
 #[pyo3(signature = (objective, max_fevals, seed=0, omega0=None, dt=0.2,
                     n_epochs=40, x0=None))]
@@ -1728,34 +1827,22 @@ fn gle_langevin_objective(
     n_epochs: usize,
     x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
-    validate_gle_args(max_fevals, omega0)?;
-    let x0 = gle_langevin_x0(x0, objective.dim())?;
+    validate_gle_args(max_fevals, omega0, dt)?;
+    let x0 = gle_langevin_x0(x0, objective.dims())?;
+    let obj = objective.callable(py);
+    let errors = obj.errors();
+    let grad = objective.gradient(py, &errors, "gle_langevin_objective")?;
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let result = if let Some(omega0) = omega0 {
-        crate::methods::gle_langevin_sa(
-            &*objective,
-            &*objective,
-            seed,
-            max_fevals,
-            omega0,
-            dt,
-            n_epochs,
-            x0,
-        )
+        crate::methods::gle_langevin_sa(&obj, &grad, seed, max_fevals, omega0, dt, n_epochs, x0)
     } else {
-        crate::methods::gle_langevin_adaptive_sa(
-            &*objective,
-            &*objective,
-            seed,
-            max_fevals,
-            dt,
-            n_epochs,
-            x0,
-        )
+        crate::methods::gle_langevin_adaptive_sa(&obj, &grad, seed, max_fevals, dt, n_epochs, x0)
     };
+    errors.finish(py)?;
     gle_langevin_result_to_dict(py, result)
 }
 
-/// Preconditioned GLE-Langevin annealing using a native objective/gradient handle.
+/// Preconditioned GLE-Langevin annealing over a `PyObjective` built with `grad_fn`.
 #[pyfunction]
 #[pyo3(signature = (objective, max_fevals, seed=0, omega0=None, dt=0.2,
                     n_epochs=40, x0=None, preconditioner_probes=None))]
@@ -1771,23 +1858,18 @@ fn gle_langevin_preconditioned_objective(
     x0: Option<PyReadonlyArray1<'_, f64>>,
     preconditioner_probes: Option<usize>,
 ) -> PyResult<Py<PyDict>> {
-    validate_gle_args(max_fevals, omega0)?;
-    let x0 = gle_langevin_x0(x0, objective.dim())?;
+    validate_gle_args(max_fevals, omega0, dt)?;
+    let x0 = gle_langevin_x0(x0, objective.dims())?;
+    let obj = objective.callable(py);
+    let errors = obj.errors();
+    let grad = objective.gradient(py, &errors, "gle_langevin_preconditioned_objective")?;
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let result = if let Some(omega0) = omega0 {
-        crate::methods::gle_langevin_sa(
-            &*objective,
-            &*objective,
-            seed,
-            max_fevals,
-            omega0,
-            dt,
-            n_epochs,
-            x0,
-        )
+        crate::methods::gle_langevin_sa(&obj, &grad, seed, max_fevals, omega0, dt, n_epochs, x0)
     } else {
         crate::methods::gle_langevin_preconditioned_sa(
-            &*objective,
-            &*objective,
+            &obj,
+            &grad,
             seed,
             max_fevals,
             dt,
@@ -1796,6 +1878,7 @@ fn gle_langevin_preconditioned_objective(
             preconditioner_probes,
         )
     };
+    errors.finish(py)?;
     gle_langevin_result_to_dict(py, result)
 }
 
@@ -2007,12 +2090,23 @@ fn coverage_decisions_dict<'py>(
 ///
 /// Four (or `replicas`) algebraic hops divide one work-unit budget. They
 /// share a Euclidean minimum history and Goedecker escape feedback. This is
-/// not cluster hopping: the move is a reflected Gaussian on the box. A
-/// callback raising `BaseException` that is not an `Exception` stops the
-/// ensemble at once and is re-raised. The best point found is kept.
+/// not cluster hopping: the move is a reflected Gaussian on the box unless
+/// `escape="langevin"` integrates forces instead. `identity_tol`,
+/// `shared_deposits`, `shared_visit_policy`, the `langevin_*` settings and
+/// the `coverage_*` settings are the fields of `BoxEnsembleConfig`,
+/// `GleEscapeConfig` and `BoxCoverageConfig`. A value outside the range Rust
+/// asserts on raises `InvalidArgumentError`. A callback raising
+/// `BaseException` that is not an `Exception` stops the ensemble at once and
+/// is re-raised. The best point found is kept.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, x0 = None,
-                    replicas = 4, history = "shared", membership = "accepted"))]
+                    replicas = 4, history = "shared", membership = "accepted", *,
+                    identity_tol = None, shared_deposits = None, shared_visit_policy = None,
+                    escape = None, langevin_steps = None, langevin_omega0 = None,
+                    langevin_dt = None, langevin_friction = None,
+                    coverage_shared = None, coverage_radius = None, coverage_neighbors = None,
+                    coverage_height = None, coverage_well_tempering = None,
+                    coverage_peer_weight = None))]
 #[allow(clippy::too_many_arguments)]
 fn box_ensemble_optimize(
     py: Python<'_>,
@@ -2026,21 +2120,49 @@ fn box_ensemble_optimize(
     replicas: usize,
     history: &str,
     membership: &str,
+    identity_tol: Option<f64>,
+    shared_deposits: Option<usize>,
+    shared_visit_policy: Option<&str>,
+    escape: Option<&str>,
+    langevin_steps: Option<usize>,
+    langevin_omega0: Option<f64>,
+    langevin_dt: Option<f64>,
+    langevin_friction: Option<f64>,
+    coverage_shared: Option<bool>,
+    coverage_radius: Option<f64>,
+    coverage_neighbors: Option<usize>,
+    coverage_height: Option<f64>,
+    coverage_well_tempering: Option<f64>,
+    coverage_peer_weight: Option<f64>,
 ) -> PyResult<Py<PyDict>> {
     let parsed = parse_box_search(low, high, budget, replicas, x0, history, membership)?;
     let seed_view = parsed.x0.as_ref().map(|a| a.view());
-    let config = crate::methods::box_hopping::BoxEnsembleConfig {
+    let base = crate::methods::box_hopping::BoxEnsembleConfig {
         replicas,
         budget,
         history: parsed.history,
         membership: parsed.membership,
-        identity_tol: crate::methods::box_hopping::IDENTITY_TOL,
-        shared_deposits: 8,
-        shared_visit_policy: crate::methods::minima_hopping::SharedVisitPolicy::Tabu,
         ..crate::methods::box_hopping::BoxEnsembleConfig::default()
     };
+    let tuning = box_tuning::BoxTuning {
+        identity_tol,
+        shared_deposits,
+        shared_visit_policy,
+        escape,
+        langevin_steps,
+        langevin_omega0,
+        langevin_dt,
+        langevin_friction,
+        coverage_shared,
+        coverage_radius,
+        coverage_neighbors,
+        coverage_height,
+        coverage_well_tempering,
+        coverage_peer_weight,
+    };
+    let box_tuning::Resolved { config, coverage } = tuning.resolve(base, grad_fn.is_some())?;
     let Some(grad_fn) = grad_fn else {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "box_ensemble_optimize requires grad_fn; use ensemble_optimize without a gradient",
         ));
     };
@@ -2049,12 +2171,18 @@ fn box_ensemble_optimize(
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let dim = parsed.dim;
     let grad = CallablePyGradient::new(grad_fn, dim, &errors);
-    let result = with_replica_threads(py, || {
-        crate::methods::box_hopping::box_ensemble_optimize(&obj, &grad, seed, seed_view, &config)
+    let result = with_replica_threads(py, || match coverage.as_ref() {
+        Some(coverage) => crate::methods::box_hopping::box_ensemble_optimize_with_coverage(
+            &obj, &grad, seed, seed_view, &config, coverage,
+        ),
+        None => crate::methods::box_hopping::box_ensemble_optimize(
+            &obj, &grad, seed, seed_view, &config,
+        ),
     });
     let out = PyDict::new(py);
     out.set_item("best_val", result.best_val)?;
     out.set_item("best_pos", py_view1(py, result.best_pos.view()))?;
+    out.set_item("charged", result.n_evals + result.n_grads)?;
     out.set_item("n_evals", result.n_evals)?;
     out.set_item("n_grads", result.n_grads)?;
     out.set_item("hops", result.hops)?;
@@ -2128,12 +2256,21 @@ fn box_ensemble_optimize(
 
 /// Box search split on gradient: hop-and-quench, or the values-only portfolio.
 ///
+/// Any of the tuning settings of `box_ensemble_optimize` selects hop chains,
+/// including for one values-only replica. `escape="langevin"` needs
+/// `grad_fn`.
+///
 /// A callback raising `BaseException` that is not an `Exception` stops the
 /// search at once and is re-raised. The best point found is kept.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, x0 = None,
                     replicas = 4, history = "shared", membership = "accepted", *,
-                    coverage_shared = None, coverage_radius = None, coverage_neighbors = None))]
+                    coverage_shared = None, coverage_radius = None, coverage_neighbors = None,
+                    identity_tol = None, shared_deposits = None, shared_visit_policy = None,
+                    escape = None, langevin_steps = None, langevin_omega0 = None,
+                    langevin_dt = None, langevin_friction = None,
+                    coverage_height = None, coverage_well_tempering = None,
+                    coverage_peer_weight = None))]
 #[allow(clippy::too_many_arguments)]
 fn ensemble_optimize(
     py: Python<'_>,
@@ -2150,13 +2287,19 @@ fn ensemble_optimize(
     coverage_shared: Option<bool>,
     coverage_radius: Option<f64>,
     coverage_neighbors: Option<usize>,
+    identity_tol: Option<f64>,
+    shared_deposits: Option<usize>,
+    shared_visit_policy: Option<&str>,
+    escape: Option<&str>,
+    langevin_steps: Option<usize>,
+    langevin_omega0: Option<f64>,
+    langevin_dt: Option<f64>,
+    langevin_friction: Option<f64>,
+    coverage_height: Option<f64>,
+    coverage_well_tempering: Option<f64>,
+    coverage_peer_weight: Option<f64>,
 ) -> PyResult<Py<PyDict>> {
     let parsed = parse_box_search(low, high, budget, replicas, x0, history, membership)?;
-    if coverage_radius.is_some_and(|radius| !radius.is_finite() || radius <= 0.0) {
-        return Err(PyValueError::new_err(
-            "coverage radius must be finite and positive",
-        ));
-    }
     let seed_view = parsed.x0.as_ref().map(|a| a.view());
     let obj = CallableObjective::new(obj_fn, parsed.bounds);
     let errors = obj.errors();
@@ -2164,30 +2307,33 @@ fn ensemble_optimize(
     let dim = parsed.dim;
     let history_mode = parsed.history;
     let membership = parsed.membership;
-    let coverage =
-        (coverage_shared.is_some() || coverage_radius.is_some() || coverage_neighbors.is_some())
-            .then(|| {
-                let defaults = crate::methods::box_hopping::BoxCoverageConfig::default();
-                crate::methods::box_hopping::BoxCoverageConfig {
-                    shared: coverage_shared.unwrap_or(matches!(
-                        history_mode,
-                        crate::methods::ensemble::HistoryMode::Shared
-                    )),
-                    radius: coverage_radius.unwrap_or(defaults.radius),
-                    neighbors: coverage_neighbors.unwrap_or(defaults.neighbors),
-                    ..defaults
-                }
-            });
+    let base = crate::methods::box_hopping::BoxEnsembleConfig {
+        replicas,
+        budget,
+        history: history_mode,
+        membership,
+        ..Default::default()
+    };
+    let tuning = box_tuning::BoxTuning {
+        identity_tol,
+        shared_deposits,
+        shared_visit_policy,
+        escape,
+        langevin_steps,
+        langevin_omega0,
+        langevin_dt,
+        langevin_friction,
+        coverage_shared,
+        coverage_radius,
+        coverage_neighbors,
+        coverage_height,
+        coverage_well_tempering,
+        coverage_peer_weight,
+    };
+    let box_tuning::Resolved { config, coverage } = tuning.resolve(base, grad_fn.is_some())?;
     let result = with_replica_threads(py, || {
         let grad = grad_fn.map(|fn_| CallablePyGradient::new(fn_, dim, &errors));
         if let Some(coverage) = coverage.as_ref() {
-            let config = crate::methods::box_hopping::BoxEnsembleConfig {
-                replicas,
-                budget,
-                history: history_mode,
-                membership,
-                ..Default::default()
-            };
             crate::methods::box_hopping::ensemble_hop_optimize_with_config(
                 &obj,
                 grad.as_ref(),
@@ -2304,7 +2450,7 @@ fn bfwt_optimize(
 ) -> PyResult<Py<PyDict>> {
     require_positive_budget(budget)?;
     if !barrier_hat.is_finite() || barrier_hat < 0.0 {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "barrier_hat must be a finite non-negative float",
         ));
     }
@@ -2402,35 +2548,33 @@ fn global_optimize(
     let high_vec = high.as_slice()?.to_vec();
     validate_box_bounds(&low_vec, &high_vec)?;
     if budget == 0 {
-        return Err(PyValueError::new_err("budget must be positive"));
+        return Err(invalid_argument("budget must be positive"));
     }
     let start = read_x0(x0, &low_vec, &high_vec)?;
     let dim = low_vec.len();
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     if let Some(sigma) = noise_sigma
         && (sigma <= 0.0 || !sigma.is_finite())
     {
-        return Err(PyValueError::new_err(
-            "noise_sigma must be positive and finite",
-        ));
+        return Err(invalid_argument("noise_sigma must be positive and finite"));
     }
     let pol = match policy {
         "auto" | "Auto" | "" => crate::PortfolioPolicy::Auto,
         "legacy" | "Legacy" => crate::PortfolioPolicy::Legacy,
         other => {
-            return Err(PyValueError::new_err(format!(
+            return Err(invalid_argument(format!(
                 "policy must be 'auto' or 'legacy', got {other:?}"
             )));
         }
     };
     if replicas == 0 {
-        return Err(PyValueError::new_err("replicas must be positive"));
+        return Err(invalid_argument("replicas must be positive"));
     }
     if !coverage_radius.is_finite() || coverage_radius <= 0.0 {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "coverage_radius must be positive and finite",
         ));
     }
@@ -2480,7 +2624,8 @@ fn global_optimize(
     portfolio_result_to_dict(py, result)
 }
 
-/// Runs the portfolio global optimizer with a native objective handle.
+/// Runs the portfolio global optimizer over a `PyObjective`. With
+/// `use_gradient`, the `PyObjective` must have a `grad_fn`.
 #[pyfunction]
 #[pyo3(signature = (objective, budget, seed = 0, use_gradient = true, noise_sigma = None, x0 = None))]
 fn global_optimize_objective(
@@ -2493,44 +2638,35 @@ fn global_optimize_objective(
     x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
     if budget == 0 {
-        return Err(PyValueError::new_err("budget must be positive"));
+        return Err(invalid_argument("budget must be positive"));
     }
     if let Some(sigma) = noise_sigma
         && (sigma <= 0.0 || !sigma.is_finite())
     {
-        return Err(PyValueError::new_err(
-            "noise_sigma must be positive and finite",
-        ));
+        return Err(invalid_argument("noise_sigma must be positive and finite"));
     }
-    let bounds = <PyObjective as Objective<f64>>::bounds(&objective);
-    let start = read_x0(
-        x0,
-        bounds.low.as_slice().expect("contiguous bounds"),
-        bounds.high.as_slice().expect("contiguous bounds"),
-    )?;
+    let bounds = objective.box_bounds();
+    let start = read_x0(x0, &bounds.low.to_vec(), &bounds.high.to_vec())?;
+    let obj = objective.callable(py);
+    let errors = obj.errors();
+    let grad = if use_gradient {
+        Some(objective.gradient(py, &errors, "global_optimize_objective with use_gradient")?)
+    } else {
+        None
+    };
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let x0_view = start.as_ref().map(|x| x.view());
     let policy = crate::PortfolioPolicy::Auto;
-    let result = if use_gradient {
-        crate::portfolio_optimize_from(
-            &*objective,
-            Some(&*objective),
-            budget,
-            seed,
-            noise_sigma,
-            policy,
-            x0_view,
-        )
-    } else {
-        crate::portfolio_optimize_from::<_, PyObjective>(
-            &*objective,
-            None,
-            budget,
-            seed,
-            noise_sigma,
-            policy,
-            x0_view,
-        )
-    };
+    let result = crate::portfolio_optimize_from(
+        &obj,
+        grad.as_ref(),
+        budget,
+        seed,
+        noise_sigma,
+        policy,
+        x0_view,
+    );
+    errors.finish(py)?;
     portfolio_result_to_dict(py, result)
 }
 
@@ -2559,24 +2695,24 @@ impl Preset {
             Preset::Gsa(p) => (p.t_init, 1.0, "scale"),
         };
         if !(t_init.is_finite() && t_init > 0.0) {
-            return Err(PyValueError::new_err(format!(
+            return Err(invalid_argument(format!(
                 "t_init must be positive and finite, got {t_init}"
             )));
         }
         if !(scale.is_finite() && scale > 0.0) {
-            return Err(PyValueError::new_err(format!(
+            return Err(invalid_argument(format!(
                 "{scale_name} must be positive and finite, got {scale}"
             )));
         }
         if let Preset::Gsa(p) = self {
             if !(p.q_v > 1.0 && p.q_v < 3.0) {
-                return Err(PyValueError::new_err(format!(
+                return Err(invalid_argument(format!(
                     "q_v must lie in (1, 3), got {}",
                     p.q_v
                 )));
             }
             if !p.q_a.is_finite() {
-                return Err(PyValueError::new_err("q_a must be finite"));
+                return Err(invalid_argument("q_a must be finite"));
             }
         }
         Ok(())
@@ -2626,24 +2762,24 @@ fn run(
     preset.validate()?;
     validate_max_evals(max_evals)?;
     let start = read_x0(x0, &low_vec, &high_vec)?;
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let history = match preset {
         Preset::Boltzmann(p) => {
             let v = boltzmann_in_box(obj, p.t_init, p.sigma)
-                .map_err(|e| PyValueError::new_err(format!("{e}")))?;
+                .map_err(|e| invalid_argument(format!("{e}")))?;
             crate::runner::run_rs_variant_from(v, n_epochs, steps_per_epoch, seed, start, max_evals)
         }
         Preset::Fast(p) => {
             let v = fast_in_box(obj, p.t_init, p.gamma)
-                .map_err(|e| PyValueError::new_err(format!("{e}")))?;
+                .map_err(|e| invalid_argument(format!("{e}")))?;
             crate::runner::run_rs_variant_from(v, n_epochs, steps_per_epoch, seed, start, max_evals)
         }
         Preset::Gsa(p) => {
             let v = gsa_in_box(obj, p.t_init, p.q_v, p.q_a)
-                .map_err(|e| PyValueError::new_err(format!("{e}")))?;
+                .map_err(|e| invalid_argument(format!("{e}")))?;
             crate::runner::run_rs_variant_from(v, n_epochs, steps_per_epoch, seed, start, max_evals)
         }
     };
@@ -2662,26 +2798,8 @@ fn low_discrepancy_points(
 ) -> PyResult<Vec<Vec<f64>>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
-    }
-    if low_vec.is_empty() {
-        return Err(PyValueError::new_err(
-            "bounds must have at least one dimension",
-        ));
-    }
-    if low_vec
-        .iter()
-        .zip(high_vec.iter())
-        .any(|(&lo, &hi)| hi < lo)
-    {
-        return Err(PyValueError::new_err(
-            "each upper bound must be greater than or equal to the lower bound",
-        ));
-    }
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 0.0);
+    reservable("n points", n.checked_mul(low_vec.len()))?;
+    let bounds = checked_bounds(low_vec, high_vec, 0.0)?;
     let points = eindir_core::low_discrepancy_points(&bounds, n, skip);
     Ok(points.outer_iter().map(|row| row.to_vec()).collect())
 }
@@ -2690,6 +2808,7 @@ fn low_discrepancy_points(
 #[pyfunction]
 #[pyo3(signature = (n, seed = 42))]
 fn pilot_draws_qmc(n: usize, seed: u64) -> PyResult<Vec<Vec<f64>>> {
+    reservable("n draws", n.checked_mul(3))?;
     let prior = crate::methods::PilotPrior::default();
     let draws = crate::methods::pilot_draws_qmc(&prior, n, seed);
     Ok(draws
@@ -2723,39 +2842,17 @@ fn run_qmc(
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     validate_max_evals(max_evals)?;
-    if low_vec.len() != high_vec.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
-    }
-    if low_vec.is_empty() {
-        return Err(PyValueError::new_err(
-            "bounds must have at least one dimension",
-        ));
-    }
-    if low_vec.iter().zip(high_vec.iter()).any(|(&lo, &hi)| {
-        !lo.is_finite() || !hi.is_finite() || !(2.0 * (hi - lo)).is_finite() || hi < lo
-    }) || !low_vec
-        .iter()
-        .zip(high_vec.iter())
-        .map(|(&lo, &hi)| hi - lo)
-        .sum::<f64>()
-        .is_finite()
-    {
-        return Err(PyValueError::new_err(
-            "each bound must be finite and each upper bound must be greater than or equal to the lower bound",
-        ));
-    }
+    check_box(&low_vec, &high_vec, true)?;
     preset.validate()?;
     let start = read_x0(x0, &low_vec, &high_vec)?;
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let bounds = checked_bounds(low_vec, high_vec, 1e-9)?;
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let history = match preset {
         Preset::Boltzmann(p) => {
             let v = boltzmann_in_box(obj, p.t_init, p.sigma)
-                .map_err(|e| PyValueError::new_err(format!("{e}")))?;
+                .map_err(|e| invalid_argument(format!("{e}")))?;
             crate::runner::run_rs_qmc_variant_from(
                 v,
                 n_starts,
@@ -2768,7 +2865,7 @@ fn run_qmc(
         }
         Preset::Fast(p) => {
             let v = fast_in_box(obj, p.t_init, p.gamma)
-                .map_err(|e| PyValueError::new_err(format!("{e}")))?;
+                .map_err(|e| invalid_argument(format!("{e}")))?;
             crate::runner::run_rs_qmc_variant_from(
                 v,
                 n_starts,
@@ -2781,7 +2878,7 @@ fn run_qmc(
         }
         Preset::Gsa(p) => {
             let v = gsa_in_box(obj, p.t_init, p.q_v, p.q_a)
-                .map_err(|e| PyValueError::new_err(format!("{e}")))?;
+                .map_err(|e| invalid_argument(format!("{e}")))?;
             crate::runner::run_rs_qmc_variant_from(
                 v,
                 n_starts,
@@ -2812,11 +2909,14 @@ fn osa_acceptance_rate(
     c_star: f64,
     seed: u64,
 ) -> PyResult<(f64, f64)> {
-    if temp.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
-        return Err(PyValueError::new_err("temp must be positive"));
-    }
-    if sigma.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
-        return Err(PyValueError::new_err("sigma must be positive"));
+    positive_finite("temp", temp)?;
+    positive_finite("sigma", sigma)?;
+    for (name, value) in [("delta", delta), ("c_star", c_star)] {
+        if !value.is_finite() {
+            return Err(invalid_argument(format!(
+                "{name} must be finite (got {value})"
+            )));
+        }
     }
     let osa = crate::noise_accept::OsaAccept::with_params(c_star, 100_000);
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
@@ -2829,15 +2929,52 @@ fn osa_acceptance_rate(
 
 /// Driver settings for the cluster-search layer.
 ///
-/// Construct with `Config.recommended`, `Config.derived`, or
-/// `Config.for_cluster`. The recommended stack is the measured
-/// default: composed surface relocations, depth-rewarded move
-/// allocation, and tabu on stall.
+/// Build one with a preset such as `Config.recommended(n)`,
+/// `Config.derived(n)` or `Config.for_cluster(n)`; `Config.field_names()`
+/// lists every setting. `get`, `to_dict` and `replace` read and change the
+/// scalar ones. `recommended` is the measured default: composed surface
+/// relocations, depth-rewarded move allocation and tabu on stall. Pass the
+/// result to `cluster_search(config=...)`.
 #[pyclass(name = "Config")]
 #[derive(Clone)]
 pub struct PyClusterConfig {
     inner: crate::methods::cluster_hopping::Config,
-    recommended: bool,
+    origin: String,
+}
+
+fn check_points(n: usize) -> PyResult<()> {
+    if n < 2 {
+        return Err(invalid_argument("n must be at least 2"));
+    }
+    Ok(())
+}
+
+fn check_scales(length_scale: f64, energy_scale: f64) -> PyResult<()> {
+    if !(length_scale.is_finite() && length_scale > 0.0) {
+        return Err(invalid_argument("length_scale must be finite and positive"));
+    }
+    if !(energy_scale.is_finite() && energy_scale > 0.0) {
+        return Err(invalid_argument("energy_scale must be finite and positive"));
+    }
+    Ok(())
+}
+
+impl PyClusterConfig {
+    /// A config the search can run; see `Config::validate`.
+    fn new(inner: crate::methods::cluster_hopping::Config, origin: String) -> PyResult<Self> {
+        inner
+            .validate()
+            .map_err(|err| errors::invalid_config(&err))?;
+        Ok(Self { inner, origin })
+    }
+
+    fn chained(
+        &self,
+        inner: crate::methods::cluster_hopping::Config,
+        step: String,
+    ) -> PyResult<Self> {
+        Self::new(inner, format!("{}.{step}", self.origin))
+    }
 }
 
 #[pymethods]
@@ -2845,74 +2982,330 @@ impl PyClusterConfig {
     /// Measured configuration for `n` points.
     #[staticmethod]
     fn recommended(n: usize) -> PyResult<Self> {
-        if n < 2 {
-            return Err(PyValueError::new_err("n must be at least 2"));
-        }
-        Ok(Self {
-            inner: crate::methods::cluster_hopping::Config::recommended(n),
-            recommended: true,
-        })
+        check_points(n)?;
+        Self::new(
+            crate::methods::cluster_hopping::Config::recommended(n),
+            format!("recommended({n})"),
+        )
     }
 
     /// Communicating paper arm: orbit kernel plus recognition, not recommended.
     #[staticmethod]
     fn communicating(n: usize) -> PyResult<Self> {
-        if n < 2 {
-            return Err(PyValueError::new_err("n must be at least 2"));
-        }
-        Ok(Self {
-            inner: crate::methods::cluster_hopping::Config::communicating(n),
-            recommended: false,
-        })
+        check_points(n)?;
+        Self::new(
+            crate::methods::cluster_hopping::Config::communicating(n),
+            format!("communicating({n})"),
+        )
     }
 
     /// Recommended flags with the cost-asymmetric screen and budget-window
     /// temperature. Not the measured configuration.
     #[staticmethod]
     fn derived(n: usize) -> PyResult<Self> {
-        if n < 2 {
-            return Err(PyValueError::new_err("n must be at least 2"));
-        }
-        Ok(Self {
-            inner: crate::methods::cluster_hopping::Config::derived(n),
-            recommended: true,
-        })
+        check_points(n)?;
+        Self::new(
+            crate::methods::cluster_hopping::Config::derived(n),
+            format!("derived({n})"),
+        )
     }
 
     /// Plain Wales-Doye protocol for `n` points (comparison baseline).
     #[staticmethod]
     fn for_cluster(n: usize) -> PyResult<Self> {
-        if n < 2 {
-            return Err(PyValueError::new_err("n must be at least 2"));
-        }
-        Ok(Self {
-            inner: crate::methods::cluster_hopping::Config::for_cluster(n),
-            recommended: false,
-        })
+        check_points(n)?;
+        Self::new(
+            crate::methods::cluster_hopping::Config::for_cluster(n),
+            format!("for_cluster({n})"),
+        )
     }
 
     /// The communicating arm on `n` rigid TIP4P waters.
     #[staticmethod]
     fn communicating_tip4p(n: usize) -> PyResult<Self> {
-        if n < 2 {
-            return Err(PyValueError::new_err("n must be at least 2"));
-        }
-        Ok(Self {
-            inner: crate::methods::cluster_hopping::Config::communicating_tip4p(n),
-            recommended: false,
-        })
+        check_points(n)?;
+        Self::new(
+            crate::methods::cluster_hopping::Config::communicating_tip4p(n),
+            format!("communicating_tip4p({n})"),
+        )
     }
 
     /// The recommended arm on `n` rigid TIP4P waters.
     #[staticmethod]
     fn recommended_tip4p(n: usize) -> PyResult<Self> {
-        if n < 2 {
-            return Err(PyValueError::new_err("n must be at least 2"));
+        check_points(n)?;
+        Self::new(
+            crate::methods::cluster_hopping::Config::recommended_tip4p(n),
+            format!("recommended_tip4p({n})"),
+        )
+    }
+
+    /// The plain protocol on `n` rigid TIP4P waters.
+    #[staticmethod]
+    fn for_tip4p(n: usize) -> PyResult<Self> {
+        check_points(n)?;
+        Self::new(
+            crate::methods::cluster_hopping::Config::for_tip4p(n),
+            format!("for_tip4p({n})"),
+        )
+    }
+
+    /// Plain protocol with every length in `length_scale` and every energy in
+    /// `energy_scale`.
+    #[staticmethod]
+    fn with_scales(n: usize, length_scale: f64, energy_scale: f64) -> PyResult<Self> {
+        check_points(n)?;
+        check_scales(length_scale, energy_scale)?;
+        Self::new(
+            crate::methods::cluster_hopping::Config::with_scales(n, length_scale, energy_scale),
+            format!("with_scales({n}, {length_scale:?}, {energy_scale:?})"),
+        )
+    }
+
+    /// `recommended` in declared units.
+    #[staticmethod]
+    fn recommended_with_scales(n: usize, length_scale: f64, energy_scale: f64) -> PyResult<Self> {
+        check_points(n)?;
+        check_scales(length_scale, energy_scale)?;
+        Self::new(
+            crate::methods::cluster_hopping::Config::recommended_with_scales(
+                n,
+                length_scale,
+                energy_scale,
+            ),
+            format!("recommended_with_scales({n}, {length_scale:?}, {energy_scale:?})"),
+        )
+    }
+
+    /// `for_cluster` in declared units.
+    #[staticmethod]
+    fn for_cluster_with_scales(n: usize, length_scale: f64, energy_scale: f64) -> PyResult<Self> {
+        check_points(n)?;
+        check_scales(length_scale, energy_scale)?;
+        Self::new(
+            crate::methods::cluster_hopping::Config::for_cluster_with_scales(
+                n,
+                length_scale,
+                energy_scale,
+            ),
+            format!("for_cluster_with_scales({n}, {length_scale:?}, {energy_scale:?})"),
+        )
+    }
+
+    /// `recommended` for a pair potential: `"lennard_jones"`, or `"morse"`
+    /// with its range parameter `rho`.
+    #[staticmethod]
+    #[pyo3(signature = (n, pair, rho = None))]
+    fn recommended_for_pair(n: usize, pair: &str, rho: Option<f64>) -> PyResult<Self> {
+        use crate::potentials::PairKind;
+        check_points(n)?;
+        let kind = match (pair, rho) {
+            ("lennard_jones", None) => PairKind::LennardJones,
+            ("lennard_jones", Some(_)) => {
+                return Err(invalid_argument("lennard_jones takes no rho"));
+            }
+            ("morse", Some(rho)) if rho.is_finite() && rho > 0.0 => PairKind::Morse { rho },
+            ("morse", _) => {
+                return Err(invalid_argument("morse needs a finite positive rho"));
+            }
+            (other, _) => {
+                return Err(invalid_argument(format!(
+                    "pair must be \"lennard_jones\" or \"morse\", got {other:?}"
+                )));
+            }
+        };
+        Self::new(
+            crate::methods::cluster_hopping::Config::recommended_for_pair(n, kind),
+            match rho {
+                Some(rho) => format!("recommended_for_pair({n}, {pair:?}, rho={rho:?})"),
+                None => format!("recommended_for_pair({n}, {pair:?})"),
+            },
+        )
+    }
+
+    /// Plain protocol with the dual orbit core, opt-in.
+    #[staticmethod]
+    fn for_cluster_dual_core(n: usize) -> PyResult<Self> {
+        check_points(n)?;
+        Self::new(
+            crate::methods::cluster_hopping::Config::for_cluster_dual_core(n),
+            format!("for_cluster_dual_core({n})"),
+        )
+    }
+
+    /// Superbasin occupancy preset for packing harvests.
+    #[staticmethod]
+    fn packing_superbasin(n: usize) -> PyResult<Self> {
+        check_points(n)?;
+        Self::new(
+            crate::methods::cluster_hopping::Config::packing_superbasin(n),
+            format!("packing_superbasin({n})"),
+        )
+    }
+
+    /// Plain protocol over molecules: one species label per atom and the atom
+    /// indices of each rigid-or-flexible group.
+    #[staticmethod]
+    #[pyo3(signature = (species, groups, energy_scale = 1.0))]
+    fn for_molecular(
+        species: Vec<u32>,
+        groups: Vec<Vec<usize>>,
+        energy_scale: f64,
+    ) -> PyResult<Self> {
+        let origin = format!(
+            "for_molecular({} atoms, {} groups, energy_scale={energy_scale:?})",
+            species.len(),
+            groups.len()
+        );
+        let inner = crate::methods::cluster_hopping::Config::try_for_molecular(
+            species,
+            groups,
+            energy_scale,
+        )
+        .map_err(|err| errors::invalid_config(&err))?;
+        Self::new(inner, origin)
+    }
+
+    /// `for_molecular` with the measured allocation and stall controls.
+    #[staticmethod]
+    #[pyo3(signature = (species, groups, energy_scale = 1.0))]
+    fn recommended_molecular(
+        species: Vec<u32>,
+        groups: Vec<Vec<usize>>,
+        energy_scale: f64,
+    ) -> PyResult<Self> {
+        let origin = format!(
+            "recommended_molecular({} atoms, {} groups, energy_scale={energy_scale:?})",
+            species.len(),
+            groups.len()
+        );
+        let inner = crate::methods::cluster_hopping::Config::try_recommended_molecular(
+            species,
+            groups,
+            energy_scale,
+        )
+        .map_err(|err| errors::invalid_config(&err))?;
+        Self::new(inner, origin)
+    }
+
+    /// A copy with the dual orbit core.
+    fn with_dual_orbit_core(&self) -> PyResult<Self> {
+        self.chained(
+            self.inner.clone().with_dual_orbit_core(),
+            "with_dual_orbit_core()".to_owned(),
+        )
+    }
+
+    /// A copy that carries species labels and optional per-atom diameters.
+    #[pyo3(signature = (species, sigma = None))]
+    fn with_species(&self, species: Vec<u32>, sigma: Option<Vec<f64>>) -> PyResult<Self> {
+        let n = self.inner.n_points;
+        if species.len() != n {
+            return Err(invalid_argument(format!(
+                "species has {} labels but the config has {n} points",
+                species.len()
+            )));
         }
-        Ok(Self {
-            inner: crate::methods::cluster_hopping::Config::recommended_tip4p(n),
-            recommended: true,
-        })
+        if let Some(values) = sigma.as_ref() {
+            if values.len() != n {
+                return Err(invalid_argument(format!(
+                    "sigma has {} entries but the config has {n} points",
+                    values.len()
+                )));
+            }
+            if !values.iter().all(|value| value.is_finite() && *value > 0.0) {
+                return Err(invalid_argument("sigma must be finite and positive"));
+            }
+        }
+        let step = if sigma.is_some() {
+            "with_species(labels, sigma)"
+        } else {
+            "with_species(labels)"
+        };
+        self.chained(
+            self.inner.clone().with_species(species, sigma),
+            step.to_owned(),
+        )
+    }
+
+    /// A copy that merges the groups of each covalent fragment of `start`, or
+    /// `None` when the groups already stand.
+    fn with_flexible_molecules(&self, start: PyReadonlyArray1<'_, f64>) -> PyResult<Option<Self>> {
+        let slice = start.as_slice()?;
+        let molecular = matches!(
+            self.inner.move_library,
+            crate::methods::cluster_hopping::MoveLibrary::Molecular { .. }
+        );
+        let expected = 3 * self.inner.n_points;
+        if molecular && slice.len() != expected {
+            return Err(invalid_argument(format!(
+                "start has length {} but the config needs 3 * {} = {expected}",
+                slice.len(),
+                self.inner.n_points
+            )));
+        }
+        check_finite("start", slice)?;
+        self.inner
+            .with_flexible_molecules(ArrayView1::from(slice))
+            .map(|inner| self.chained(inner, "with_flexible_molecules(start)".to_owned()))
+            .transpose()
+    }
+
+    /// Every setting name, sorted.
+    #[staticmethod]
+    fn field_names() -> Vec<&'static str> {
+        config_fields::field_names()
+    }
+
+    /// The value of one setting. A structured setting comes back as plain
+    /// Python data. `reoccupy` and `hmc` hold native objects, so they report
+    /// whether they are set.
+    fn get(&self, py: Python<'_>, name: &str) -> PyResult<Py<PyAny>> {
+        config_fields::get(py, &self.inner, name)
+    }
+
+    /// Every setting as a dict, as `get` returns them.
+    fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        let dict = PyDict::new(py);
+        for name in config_fields::field_names() {
+            dict.set_item(name, config_fields::get(py, &self.inner, name)?)?;
+        }
+        Ok(dict.into())
+    }
+
+    /// A copy with scalar settings changed: `cfg.replace(relax_steps=500)`.
+    /// A structured setting, and `n_points`, come from a preset instead. A
+    /// value outside the range the search asserts on raises
+    /// `InvalidArgumentError`.
+    #[pyo3(signature = (**fields))]
+    fn replace(&self, fields: Option<&Bound<'_, PyDict>>) -> PyResult<Self> {
+        let mut inner = self.inner.clone();
+        let mut steps = Vec::new();
+        if let Some(fields) = fields {
+            for (key, value) in fields.iter() {
+                let name: String = key.extract()?;
+                config_fields::set(&mut inner, &name, &value)?;
+                steps.push(format!("{name}={}", value.repr()?));
+            }
+        }
+        if steps.is_empty() {
+            return Ok(self.clone());
+        }
+        self.chained(inner, format!("replace({})", steps.join(", ")))
+    }
+
+    /// Canonical versioned JSON of the resolved configuration.
+    fn resolved_json(&self) -> PyResult<String> {
+        self.inner
+            .resolved_json()
+            .map_err(|err| errors::anneal_error(err.to_string()))
+    }
+
+    /// SHA-256 of `resolved_json`, lowercase hexadecimal.
+    fn resolved_sha256(&self) -> PyResult<String> {
+        self.inner
+            .resolved_sha256()
+            .map_err(|err| errors::anneal_error(err.to_string()))
     }
 
     /// Points in a state; the state length is `3 * n_points`, or `6 *
@@ -2926,6 +3319,81 @@ impl PyClusterConfig {
     #[getter]
     fn rigid_body(&self) -> bool {
         self.inner.rigid_body_geometry.is_some()
+    }
+
+    /// True when every atom is the same element.
+    #[getter]
+    fn monoatomic(&self) -> bool {
+        self.inner.monoatomic()
+    }
+
+    /// Whether the CNA 555 and icosahedral packing diagnostics apply: a
+    /// monoatomic cluster, not a molecule, a slab or two elements.
+    #[getter]
+    fn packing_cna_applies(&self) -> bool {
+        self.inner.packing_cna_applies()
+    }
+
+    /// Radius of the initial cluster sphere, in the units of the preset.
+    #[getter]
+    fn start_radius(&self) -> f64 {
+        self.inner.start_radius()
+    }
+
+    /// Number of arms in the proposal mixture.
+    #[getter]
+    fn proposal_arms(&self) -> usize {
+        self.inner.proposal_kernel().len()
+    }
+
+    /// The packing-mutate flags as a dict of four bools: `twin_as_move`,
+    /// `orbit_on_new`, `angular` and `psym_on_new`.
+    fn packing_surface(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        let surface = self.inner.packing_surface();
+        let out = PyDict::new(py);
+        out.set_item("twin_as_move", surface.twin_as_move)?;
+        out.set_item("orbit_on_new", surface.orbit_on_new)?;
+        out.set_item("angular", surface.angular)?;
+        out.set_item("psym_on_new", surface.psym_on_new)?;
+        Ok(out.unbind())
+    }
+
+    /// A copy whose state is rigid bodies: centres, then rotations.
+    /// `sites` holds the body-frame position of every site, one row of
+    /// three numbers each, and `species` the positive label of each site.
+    fn with_rigid_bodies(
+        &self,
+        sites: PyReadonlyArray2<'_, f64>,
+        species: Vec<u32>,
+    ) -> PyResult<Self> {
+        if self.inner.n_points < 2 {
+            return Err(invalid_argument(format!(
+                "a rigid cluster needs at least two bodies, the config has {}",
+                self.inner.n_points
+            )));
+        }
+        let view = sites.as_array();
+        if view.ncols() != 3 {
+            return Err(invalid_argument(format!(
+                "sites must have shape (m, 3), not (m, {})",
+                view.ncols()
+            )));
+        }
+        let rows: Vec<[f64; 3]> = view
+            .rows()
+            .into_iter()
+            .map(|r| [r[0], r[1], r[2]])
+            .collect();
+        let geometry =
+            crate::rigid_body::RigidBodyGeometry::new(rows, species).map_err(|reason| {
+                invalid_argument(format!(
+                    "{reason}: sites need one positive species each and finite coordinates"
+                ))
+            })?;
+        self.chained(
+            self.inner.clone().with_rigid_bodies(geometry),
+            "with_rigid_bodies(sites, species)".to_owned(),
+        )
     }
 
     /// How far above the incumbent a screened trial may land.
@@ -3005,32 +3473,18 @@ impl PyClusterConfig {
     #[staticmethod]
     fn validate_json(text: &str) -> PyResult<()> {
         crate::methods::cluster_hopping::Config::validate_json_keys(text)
-            .map_err(|err| PyValueError::new_err(err.to_string()))
+            .map_err(|err| config_error(&err))
     }
 
     /// Reject TOML configurations that set removed structure-prior keys.
     #[staticmethod]
     fn validate_toml(text: &str) -> PyResult<()> {
         crate::methods::cluster_hopping::Config::validate_toml_keys(text)
-            .map_err(|err| PyValueError::new_err(err.to_string()))
+            .map_err(|err| config_error(&err))
     }
 
     fn __repr__(&self) -> String {
-        if self.inner.bayes_screen && self.inner.budget_window {
-            format!("Config.derived({})", self.inner.n_points)
-        } else if !self.inner.surfaces.is_empty()
-            && self.inner.orbit_complete_on_new
-            && matches!(
-                self.inner.shared_visit_policy,
-                crate::methods::minima_hopping::SharedVisitPolicy::Recognition
-            )
-        {
-            format!("Config.communicating({})", self.inner.n_points)
-        } else if self.recommended {
-            format!("Config.recommended({})", self.inner.n_points)
-        } else {
-            format!("Config.for_cluster({})", self.inner.n_points)
-        }
+        format!("Config.{}", self.origin)
     }
 }
 
@@ -3050,7 +3504,8 @@ impl PyLedger {
         }
     }
 
-    /// Charged evaluations the ledger was created with.
+    /// Charged evaluations the ledger may spend: the budget it was created
+    /// with, plus whatever `grant` added.
     #[getter]
     fn budget(&self) -> usize {
         self.inner.budget()
@@ -3072,6 +3527,160 @@ impl PyLedger {
     #[getter]
     fn best(&self) -> f64 {
         self.inner.best
+    }
+
+    /// A copy of the state that attains `best`, or `None`.
+    #[getter]
+    fn best_state<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f64>>> {
+        self.inner
+            .best_state
+            .as_ref()
+            .map(|state| PyArray1::from_vec(py, state.to_vec()))
+    }
+
+    /// The `(spent, energy)` pair at each new incumbent, in order. At most
+    /// 512 are kept.
+    #[getter]
+    fn encounters(&self) -> Vec<(usize, f64)> {
+        self.inner.encounters().to_vec()
+    }
+
+    /// The energy `stop_below` installed, or `None`.
+    #[getter]
+    fn target(&self) -> Option<f64> {
+        self.inner.target()
+    }
+
+    /// Whether `best` has reached `target`.
+    #[getter]
+    fn target_reached(&self) -> bool {
+        self.inner.target_reached()
+    }
+
+    /// Whether `energy` has reached `target`.
+    fn below_target(&self, energy: f64) -> bool {
+        self.inner.below_target(energy)
+    }
+
+    /// Stop a search once a recorded energy is at or below `energy`. A
+    /// threshold that is not finite raises `InvalidArgumentError`.
+    fn stop_below(&mut self, energy: f64) -> PyResult<()> {
+        if !energy.is_finite() {
+            return Err(invalid_argument(format!(
+                "the threshold must be finite, got {energy}"
+            )));
+        }
+        self.inner.stop_below(energy);
+        Ok(())
+    }
+
+    /// Charge one evaluation. Returns `False` when the budget is gone.
+    fn charge(&mut self) -> bool {
+        self.inner.charge()
+    }
+
+    /// Charge `n` evaluations at once. Returns `False` when the budget ran
+    /// out partway; what fits is still charged.
+    fn charge_many(&mut self, n: usize) -> bool {
+        self.inner.charge_many(n)
+    }
+
+    /// Charge a fraction of an evaluation. Fractions add up, and one whole
+    /// evaluation is charged each time the sum crosses one. A fraction that
+    /// is not positive and finite charges nothing. Returns `False` when the
+    /// budget is gone.
+    fn charge_frac(&mut self, frac: f64) -> bool {
+        self.inner.charge_frac(frac)
+    }
+
+    /// Record `value` at `state`. It becomes `best` when it is finite and
+    /// lower, and then adds an entry to `encounters`. When `ANNEAL_MIN_DUMP`
+    /// names a file, every finite value is also appended to it.
+    fn record(&mut self, value: f64, state: PyReadonlyArray1<'_, f64>) -> PyResult<()> {
+        self.inner
+            .record(value, ArrayView1::from(state.as_slice()?));
+        Ok(())
+    }
+
+    /// Replace `best` and its state together, as a reoptimized geometry
+    /// does. A value or state that is not finite raises
+    /// `InvalidArgumentError`.
+    fn replace_best(&mut self, value: f64, state: PyReadonlyArray1<'_, f64>) -> PyResult<()> {
+        let view = ArrayView1::from(state.as_slice()?);
+        if !value.is_finite() || view.iter().any(|component| !component.is_finite()) {
+            return Err(invalid_argument(
+                "replace_best needs a finite value and a finite state",
+            ));
+        }
+        self.inner.replace_best(value, view);
+        Ok(())
+    }
+
+    /// Add `extra` evaluations to the budget, for work after the ceiling.
+    fn grant(&mut self, extra: usize) {
+        self.inner.grant(extra);
+    }
+
+    /// Record one relaxation that started when `spent` was `charged_before`
+    /// and ended at `energy` and `state`. `gradient` is the fresh check of
+    /// the minimum. Without a finite gradient of the state's length, or with
+    /// a non-finite energy or state, the boundary is `"rejected"`, and it
+    /// keeps its charged work. Returns `False`, and records nothing, when no
+    /// evaluation was charged since `charged_before`.
+    #[pyo3(signature = (charged_before, energy, state, gradient = None))]
+    fn record_quench_boundary(
+        &mut self,
+        charged_before: usize,
+        energy: f64,
+        state: PyReadonlyArray1<'_, f64>,
+        gradient: Option<PyReadonlyArray1<'_, f64>>,
+    ) -> PyResult<bool> {
+        let state = Array1::from_vec(state.as_slice()?.to_vec());
+        let gradient = match gradient {
+            Some(values) => Some(Array1::from_vec(values.as_slice()?.to_vec())),
+            None => None,
+        };
+        Ok(self
+            .inner
+            .record_quench_boundary(charged_before, energy, state, gradient))
+    }
+
+    /// The relaxation boundaries recorded so far, in order. Each is a dict
+    /// with `status` (`"validated"` or `"rejected"`), `charged_calls`,
+    /// `energy`, `state` and `gradient` (`None` unless validated).
+    #[getter]
+    fn quench_boundaries<'py>(&self, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict>>> {
+        use crate::methods::cluster_hopping::QuenchStatus;
+        self.inner
+            .quench_boundaries()
+            .iter()
+            .map(|boundary| {
+                let item = PyDict::new(py);
+                let status = match boundary.status() {
+                    QuenchStatus::Validated => "validated",
+                    QuenchStatus::Rejected => "rejected",
+                };
+                item.set_item("status", status)?;
+                item.set_item("charged_calls", boundary.charged_calls())?;
+                item.set_item("energy", boundary.energy())?;
+                item.set_item("state", PyArray1::from_vec(py, boundary.state().to_vec()))?;
+                item.set_item(
+                    "gradient",
+                    boundary
+                        .gradient()
+                        .map(|values| PyArray1::from_vec(py, values.to_vec())),
+                )?;
+                Ok(item)
+            })
+            .collect()
+    }
+
+    /// A ledger with its own spend and `budget`, for work that is settled
+    /// back with `charge_many`.
+    fn slice(&self, budget: usize) -> Self {
+        Self {
+            inner: self.inner.slice(budget),
+        }
     }
 
     fn __repr__(&self) -> String {
@@ -3209,7 +3818,7 @@ fn cluster_gradient_scale(
         }
     };
     if at.is_none() && probe.len() != 3 * cfg.n_points {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "could not construct a gradient-orientation probe",
         ));
     }
@@ -3356,7 +3965,7 @@ fn cluster_archive_search(
     _ledger: &mut crate::methods::cluster_hopping::Ledger,
     _seed: u64,
 ) -> PyResult<Py<PyDict>> {
-    Err(PyValueError::new_err(
+    Err(errors::feature_unavailable(
         "ras=True requires building with the graphkey feature",
     ))
 }
@@ -3546,6 +4155,11 @@ fn rigid_probe(
 ///     search, the temperature and deposit height are read from the opening
 ///     hops. Unset keeps the preset's: on for `recommended=True`, off
 ///     otherwise.
+///   config: a `Config` to run as it stands. `n` must equal its `n_points`,
+///     and a keyword that it already decides is refused.
+///   full: return every field of `Outcome`, not only `best`, `best_energy`,
+///     `hops`, `accepted`, `nve_unavailable`, `local_step` and
+///     `quench_seconds`.
 ///
 /// A callback raising `BaseException` that is not an `Exception`, such as
 /// `KeyboardInterrupt`, stops the search at once. The best state found is
@@ -3575,6 +4189,8 @@ fn rigid_probe(
     ring_moves = None,
     hold_stereocentres = None,
     measured_energy_scale = None,
+    config = None,
+    full = false,
 ))]
 fn cluster_search(
     py: Python<'_>,
@@ -3600,118 +4216,163 @@ fn cluster_search(
     ring_moves: Option<bool>,
     hold_stereocentres: Option<bool>,
     measured_energy_scale: Option<bool>,
+    config: Option<PyRef<'_, PyClusterConfig>>,
+    full: bool,
 ) -> PyResult<Py<PyDict>> {
-    use crate::methods::cluster_hopping::Config;
+    use crate::methods::cluster_hopping::{Config, MoveLibrary};
     use crate::methods::tric_opt::LocalStep;
+
+    let config = config.map(|held| held.inner.clone());
+    if let Some(cfg) = config.as_ref() {
+        if cfg.n_points != n {
+            return Err(invalid_argument(format!(
+                "n is {n} but the config has {} points",
+                cfg.n_points
+            )));
+        }
+        let carried = [
+            ("recommended=False", !recommended),
+            ("derived", derived),
+            ("communicating", communicating),
+            ("rigid", rigid),
+            ("length_scale", length_scale.is_some()),
+            ("species", species.is_some()),
+            ("sigmas", sigmas.is_some()),
+            ("water_sites", water_sites.is_some()),
+            ("groups", groups.is_some()),
+            ("local_step", local_step.is_some()),
+            ("ring_moves", ring_moves.is_some()),
+            ("hold_stereocentres", hold_stereocentres.is_some()),
+            ("measured_energy_scale", measured_energy_scale.is_some()),
+        ];
+        let clashing: Vec<&str> = carried
+            .iter()
+            .filter_map(|(name, given)| given.then_some(*name))
+            .collect();
+        if !clashing.is_empty() {
+            return Err(invalid_argument(format!(
+                "config carries {}; set them on the Config instead",
+                clashing.join(", ")
+            )));
+        }
+    }
+    let rigid = config
+        .as_ref()
+        .map_or(rigid, |cfg| cfg.rigid_body_geometry.is_some());
+    let from_config = config.is_some();
+    let molecular_config = config
+        .as_ref()
+        .is_some_and(|cfg| matches!(cfg.move_library, MoveLibrary::Molecular { .. }));
+    let has_species = config
+        .as_ref()
+        .map_or(species.is_some(), |cfg| cfg.species.is_some());
+    if molecular_config && start.is_none() {
+        return Err(invalid_argument("a molecular config needs a start"));
+    }
 
     let local_step = match local_step {
         None => None,
         Some("lbfgs") => Some(LocalStep::Lbfgs),
         Some(name @ ("tric" | "auto")) if groups.is_none() => {
-            return Err(PyValueError::new_err(format!(
+            return Err(invalid_argument(format!(
                 "local_step={name:?} needs groups"
             )));
         }
         Some("tric") => Some(LocalStep::Tric),
         Some("auto") => Some(LocalStep::Auto),
         Some(other) => {
-            return Err(PyValueError::new_err(format!(
+            return Err(invalid_argument(format!(
                 "local_step must be \"lbfgs\", \"tric\" or \"auto\", got {other:?}"
             )));
         }
     };
 
     if ring_moves.is_some() && groups.is_none() {
-        return Err(PyValueError::new_err("ring_moves needs groups"));
+        return Err(invalid_argument("ring_moves needs groups"));
     }
     if hold_stereocentres.is_some() && groups.is_none() {
-        return Err(PyValueError::new_err("hold_stereocentres needs groups"));
+        return Err(invalid_argument("hold_stereocentres needs groups"));
     }
     if measured_energy_scale.is_some() && groups.is_none() {
-        return Err(PyValueError::new_err("measured_energy_scale needs groups"));
+        return Err(invalid_argument("measured_energy_scale needs groups"));
     }
     if let Some(groups) = groups.as_ref() {
         if ras || derived || communicating || length_scale.is_some() {
-            return Err(PyValueError::new_err(
+            return Err(invalid_argument(
                 "groups excludes ras, derived, communicating and length_scale",
             ));
         }
         if rigid || sigmas.is_some() || water_sites.is_some() || layout != "block" {
-            return Err(PyValueError::new_err(
+            return Err(invalid_argument(
                 "groups excludes rigid, sigmas, water_sites and a non-block layout",
             ));
         }
         if species.as_ref().is_none_or(|labels| labels.len() != n) {
-            return Err(PyValueError::new_err(
-                "groups needs one species label per atom",
-            ));
+            return Err(invalid_argument("groups needs one species label per atom"));
         }
         if start.is_none() {
-            return Err(PyValueError::new_err("groups needs a start"));
+            return Err(invalid_argument("groups needs a start"));
         }
-        if groups.iter().flatten().any(|&atom| atom >= n) {
-            return Err(PyValueError::new_err("a group names an atom past n"));
-        }
+        crate::methods::cluster_hopping::check_molecular_groups(groups, n)
+            .map_err(|err| errors::invalid_config(&err))?;
     }
     if n < 2 {
-        return Err(PyValueError::new_err("n must be at least 2"));
+        return Err(invalid_argument("n must be at least 2"));
     }
     if budget < 1 {
-        return Err(PyValueError::new_err("budget must be positive"));
+        return Err(invalid_argument("budget must be positive"));
     }
     if let Some(scale) = length_scale
         && (!scale.is_finite() || scale <= 0.0)
     {
-        return Err(PyValueError::new_err(
-            "length_scale must be finite and positive",
-        ));
+        return Err(invalid_argument("length_scale must be finite and positive"));
     }
     if rigid && species.is_some() {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "rigid bodies and species swaps are different charts",
         ));
     }
     if sigmas.is_some() && species.is_none() {
-        return Err(PyValueError::new_err("sigmas require species"));
+        return Err(invalid_argument("sigmas require species"));
     }
     if layout != "block" && layout != "interleaved" {
-        return Err(PyValueError::new_err("layout must be block or interleaved"));
+        return Err(invalid_argument("layout must be block or interleaved"));
     }
     if !rigid && layout != "block" {
-        return Err(PyValueError::new_err(
+        return Err(invalid_argument(
             "interleaved layout is the rigid-body chart",
         ));
     }
-    if ras && (rigid || species.is_some()) {
-        return Err(PyValueError::new_err("ras is the cartesian archive search"));
+    if ras && (rigid || has_species || molecular_config) {
+        return Err(invalid_argument("ras is the cartesian archive search"));
     }
     let water = match water_sites {
         None => None,
         Some(sites) => {
             let sl = sites.as_slice()?;
             if sl.len() != 9 {
-                return Err(PyValueError::new_err(format!(
+                return Err(invalid_argument(format!(
                     "water_sites length {} must be 9 (O, H, H)",
                     sl.len()
                 )));
             }
             if ras || derived || length_scale.is_some() {
-                return Err(PyValueError::new_err(
+                return Err(invalid_argument(
                     "water_sites excludes ras, derived and length_scale",
                 ));
             }
             if rigid || species.is_some() || sigmas.is_some() || layout != "block" {
-                return Err(PyValueError::new_err(
+                return Err(invalid_argument(
                     "water_sites excludes rigid, species, sigmas and a non-block layout",
                 ));
             }
             if start.is_none() {
-                return Err(PyValueError::new_err("water_sites needs a start"));
+                return Err(invalid_argument("water_sites needs a start"));
             }
             let sites = sl.chunks(3).map(|c| [c[0], c[1], c[2]]).collect();
             Some(
                 crate::rigid_body::RigidBodyGeometry::new(sites, vec![8, 1, 1])
-                    .map_err(PyValueError::new_err)?,
+                    .map_err(invalid_argument)?,
             )
         }
     };
@@ -3722,7 +4383,7 @@ fn cluster_search(
         Some(start) => {
             let sl = start.as_slice()?;
             if sl.len() != dim {
-                return Err(PyValueError::new_err(format!(
+                return Err(invalid_argument(format!(
                     "start length {} must be {} = {}",
                     sl.len(),
                     if rigid_chart { "6*n" } else { "3*n" },
@@ -3734,16 +4395,19 @@ fn cluster_search(
         None => None,
     };
     let scale = length_scale.unwrap_or(1.0);
-    let molecular = groups.is_some();
-    let stock = (species.is_some() || rigid) && !molecular;
+    let molecular = groups.is_some() || molecular_config;
+    let stock = (species.is_some() || rigid) && !molecular && !from_config;
     let has_water = water.is_some();
-    let mut cfg = if let Some(groups) = groups {
+    let mut cfg = if let Some(cfg) = config {
+        cfg
+    } else if let Some(groups) = groups {
         let labels = species.clone().unwrap_or_default();
         let mut cfg = if recommended {
-            Config::recommended_molecular(labels, groups, 1.0)
+            Config::try_recommended_molecular(labels, groups, 1.0)
         } else {
-            Config::for_molecular(labels, groups, 1.0)
-        };
+            Config::try_for_molecular(labels, groups, 1.0)
+        }
+        .map_err(|err| errors::invalid_config(&err))?;
         if let Some(step) = local_step {
             cfg.local_step = step;
         }
@@ -3801,13 +4465,14 @@ fn cluster_search(
             cfg = cfg.with_species(labels, sigmas);
         }
     }
+    cfg.validate().map_err(|err| errors::invalid_config(&err))?;
     let errors: std::sync::Arc<CallbackErrors> = std::sync::Arc::default();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let mut ledger =
         crate::methods::cluster_hopping::Ledger::with_stop(budget, errors.abort_flag());
     if let Some(limit) = target {
         if !limit.is_finite() {
-            return Err(PyValueError::new_err("target must be finite"));
+            return Err(invalid_argument("target must be finite"));
         }
         ledger.stop_below(limit);
     }
@@ -3843,7 +4508,7 @@ fn cluster_search(
             Array1::from_elem(dim, extent),
             0.0,
         )
-    } else if molecular {
+    } else if molecular || from_config {
         cluster_bounds(n, dim, cfg.length_scale)
     } else {
         cluster_bounds(n, dim, scale)
@@ -3885,23 +4550,30 @@ fn cluster_search(
     } else {
         crate::methods::cluster_search::search(&obj, &cfg, &mut ledger, seed)
     }
-    .map_err(|err| PyValueError::new_err(err.to_string()))?;
+    .map_err(|err| search_error(&err))?;
     errors.finish(py)?;
+    let to_layout = |block: Vec<f64>| {
+        if interleaved {
+            crate::potentials::interleaved_gmin_from_block(&block)
+        } else {
+            block
+        }
+    };
     let best_block = out
         .best_state
+        .as_ref()
         .map(|value| value.to_vec())
         .unwrap_or_else(|| vec![0.0; dim]);
-    let best = if interleaved {
-        crate::potentials::interleaved_gmin_from_block(&best_block)
-    } else {
-        best_block
-    };
     let dict = PyDict::new(py);
-    dict.set_item("best", PyArray1::from_vec(py, best))?;
-    dict.set_item("best_energy", out.best)?;
-    dict.set_item("hops", out.hops)?;
-    dict.set_item("accepted", out.accepted)?;
-    dict.set_item("nve_unavailable", out.nve_unavailable)?;
+    dict.set_item("best", PyArray1::from_vec(py, to_layout(best_block)))?;
+    if full {
+        outcome::fill(py, &dict, &out, &to_layout)?;
+    } else {
+        dict.set_item("best_energy", out.best)?;
+        dict.set_item("hops", out.hops)?;
+        dict.set_item("accepted", out.accepted)?;
+        dict.set_item("nve_unavailable", out.nve_unavailable)?;
+    }
     let quench = match stats.local_step {
         LocalStep::Tric => "tric",
         _ => "lbfgs",
@@ -3931,8 +4603,9 @@ fn quench(
     species: Option<Vec<u32>>,
 ) -> PyResult<Py<PyDict>> {
     if !gtol.is_finite() || gtol <= 0.0 {
-        return Err(PyValueError::new_err("gtol must be finite and positive"));
+        return Err(invalid_argument("gtol must be finite and positive"));
     }
+    check_finite("x0", x0.as_slice()?)?;
     let start = Array1::from_vec(x0.as_slice()?.to_vec());
     let dim = start.len();
     let tric = match (method, species) {
@@ -3943,12 +4616,12 @@ fn quench(
             Some(tric)
         }
         ("tric", _) => {
-            return Err(PyValueError::new_err(
+            return Err(invalid_argument(
                 "method=\"tric\" needs one species label per atom of x0",
             ));
         }
         (other, _) => {
-            return Err(PyValueError::new_err(format!(
+            return Err(invalid_argument(format!(
                 "method must be \"lbfgs\" or \"tric\", got {other:?}"
             )));
         }
@@ -3969,7 +4642,7 @@ fn quench(
         match out {
             Ok((e, g)) if g.len() == dim => Some((e, Array1::from_vec(g))),
             Ok(_) => {
-                failure = Some(PyValueError::new_err(format!(
+                failure = Some(invalid_argument(format!(
                     "fg_fn must return a gradient of {dim} numbers"
                 )));
                 None
@@ -4018,6 +4691,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("DEFAULT_HIT_TOL", crate::DEFAULT_HIT_TOL)?;
     m.add("SEARCH_HIT_TOL", crate::SEARCH_HIT_TOL)?;
     m.add_function(wrap_pyfunction!(energy_hits, m)?)?;
+    errors::register(m)?;
     device::register(m)?;
     landfold::register(m)?;
     m.add_class::<PyBasinBias>()?;
@@ -4028,7 +4702,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyHistory>()?;
     m.add_class::<PyClusterConfig>()?;
     m.add_class::<PyLedger>()?;
-    m.add_class::<EindirPyBounds>()?;
+    m.add_class::<PyBounds>()?;
     m.add_class::<PyObjective>()?;
     m.add_function(wrap_pyfunction!(cluster_search, m)?)?;
     m.add_function(wrap_pyfunction!(quench, m)?)?;

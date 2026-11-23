@@ -4,17 +4,18 @@
 //! [`crate::landfold`] for Python.
 
 use numpy::{PyArray1, PyArray2, PyArrayMethods, PyReadonlyArray2};
-use pyo3::exceptions::{PyOSError, PyValueError};
+use pyo3::exceptions::PyOSError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+use super::errors::invalid_argument;
 use crate::landfold as lf;
 use crate::landfold::{Landfold, LandfoldConfig, LandfoldError, LandfoldMap, LandfoldMetric};
 
 fn py_err(err: LandfoldError) -> PyErr {
     match err {
         LandfoldError::Read(msg) => PyOSError::new_err(msg),
-        other => PyValueError::new_err(other.to_string()),
+        other => invalid_argument(other.to_string()),
     }
 }
 
@@ -83,7 +84,7 @@ fn config(
         "l1" => LandfoldMetric::L1,
         "l2" => LandfoldMetric::L2,
         other => {
-            return Err(PyValueError::new_err(format!(
+            return Err(invalid_argument(format!(
                 "metric must be 'l1' or 'l2', not {other:?}"
             )));
         }
@@ -108,12 +109,12 @@ fn config(
 fn on_pool<T: Send>(threads: Option<usize>, work: impl FnOnce() -> T + Send) -> PyResult<T> {
     match threads {
         None => Ok(work()),
-        Some(0) => Err(PyValueError::new_err("threads must be at least 1")),
+        Some(0) => Err(invalid_argument("threads must be at least 1")),
         Some(t) => rayon::ThreadPoolBuilder::new()
             .num_threads(t)
             .build()
             .map(|pool| pool.install(work))
-            .map_err(|err| PyValueError::new_err(err.to_string())),
+            .map_err(|err| invalid_argument(err.to_string())),
     }
 }
 
@@ -246,7 +247,7 @@ fn landfold_book<'py>(
     out.set_item(
         "rows",
         PyArray2::from_vec2(py, &descriptors.rows)
-            .map_err(|err| PyValueError::new_err(err.to_string()))?,
+            .map_err(|err| invalid_argument(err.to_string()))?,
     )?;
     out.set_item("family", PyArray1::from_slice(py, &descriptors.family))?;
     let community: Vec<i64> = descriptors

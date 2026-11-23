@@ -22,6 +22,14 @@ line_endings = "LF"
 # constants mention), not symbols this crate exports.
 [export]
 item_types = ["enums", "structs", "unions", "typedefs", "opaque", "functions"]
+# The option structs carry these as int32_t, so that an unknown value is
+# refused instead of undefined; no field names them, so list them here.
+include = [
+    "anneal_box_history_t",
+    "anneal_box_membership_t",
+    "anneal_box_visit_policy_t",
+    "anneal_box_coverage_t",
+]
 exclude = [
     "gpr_version_components",
     "gpr_atoms_create_simple",

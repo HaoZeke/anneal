@@ -8,7 +8,8 @@
 
 use anneal_core::dos::EnergyBias;
 use anneal_core::methods::cluster_hopping::{
-    Config, ContinuousSymmetry, Ledger, MoveLibrary, Outcome, optimize, optimize_with_gradient, run,
+    Config, ContinuousSymmetry, Ledger, MoveLibrary, Outcome, SearchError, optimize,
+    optimize_with_gradient, run,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
@@ -24,6 +25,15 @@ fn lj_run_with(cfg: &Config, seed: u64, budget: usize, gradient: bool) -> Outcom
 }
 
 fn lj_run_on(cfg: &Config, seed: u64, ledger: &mut Ledger, gradient: bool) -> Outcome {
+    lj_try_run_on(cfg, seed, ledger, gradient).expect("finite start")
+}
+
+fn lj_try_run_on(
+    cfg: &Config,
+    seed: u64,
+    ledger: &mut Ledger,
+    gradient: bool,
+) -> Result<Outcome, SearchError> {
     let pot = PairPotential::lennard_jones(cfg.n_points);
     let mut opt = WarmLbfgs::default();
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
@@ -49,9 +59,8 @@ fn lj_run_on(cfg: &Config, seed: u64, ledger: &mut Ledger, gradient: bool) -> Ou
             Some(pot.value_and_gradient(x).1)
         };
         optimize_with_gradient(cfg, ledger, &mut relax, Some(&mut grad), seed)
-            .expect("finite start")
     } else {
-        optimize(cfg, ledger, &mut relax, seed).expect("finite start")
+        optimize(cfg, ledger, &mut relax, seed)
     }
 }
 
@@ -404,15 +413,11 @@ fn a_ladder_refuses_delayed_acceptance() {
     );
     cfg.replicas = 2;
     let mut ledger = Ledger::new(2_000);
-    let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        lj_run_on(&cfg, 0, &mut ledger, false)
-    }))
-    .expect_err("a ladder ran under delayed acceptance");
-    let message = refused
-        .downcast_ref::<&str>()
-        .map(|s| s.to_string())
-        .or_else(|| refused.downcast_ref::<String>().cloned())
-        .unwrap_or_default();
+    let message = match lj_try_run_on(&cfg, 0, &mut ledger, false) {
+        Err(SearchError::InvalidConfig(reason)) => reason.0,
+        Err(other) => panic!("refused for another reason: {other}"),
+        Ok(_) => panic!("a ladder ran under delayed acceptance"),
+    };
     assert!(
         message.starts_with("delayed acceptance needs a single chain"),
         "refused with {message:?}"

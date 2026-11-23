@@ -19,7 +19,7 @@ import os
 
 import numpy as np
 
-from anneal._core import LandfoldMap
+from anneal._core import InvalidArgumentError, LandfoldMap
 from anneal._core import landfold as _core_landfold
 from anneal._core import landfold_book as _core_landfold_book
 
@@ -47,7 +47,7 @@ def landfold(rows, **kwargs):
     """
     arr = np.ascontiguousarray(rows, dtype=np.float64)
     if arr.ndim != 2:
-        raise ValueError(f"rows must be a 2-D array, not {arr.ndim}-D")
+        raise InvalidArgumentError(f"rows must be a 2-D array, not {arr.ndim}-D")
     return _core_landfold(arr, **_options(kwargs))
 
 

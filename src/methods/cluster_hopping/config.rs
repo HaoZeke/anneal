@@ -296,6 +296,47 @@ impl std::fmt::Display for RemovedConfigKeyError {
 
 impl std::error::Error for RemovedConfigKeyError {}
 
+/// A [`Config`] the search cannot run, with the reason.
+///
+/// [`Config::validate`] and the `try_*` molecular constructors return it
+/// for the settings and groups that the search would otherwise assert on.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{0}")]
+pub struct InvalidConfig(pub String);
+
+/// Check the rigid groups of a molecular move library over `n_atoms`
+/// atoms: each group names at least one atom, its indices strictly
+/// increase, and every index is below `n_atoms`.
+///
+/// ```
+/// use anneal_core::methods::cluster_hopping::check_molecular_groups;
+/// assert!(check_molecular_groups(&[vec![0, 1, 2]], 3).is_ok());
+/// assert!(check_molecular_groups(&[vec![2, 1, 0]], 3).is_err());
+/// assert!(check_molecular_groups(&[vec![0, 3]], 3).is_err());
+/// ```
+pub fn check_molecular_groups(groups: &[Vec<usize>], n_atoms: usize) -> Result<(), InvalidConfig> {
+    for (g, group) in groups.iter().enumerate() {
+        if group.is_empty() {
+            return Err(InvalidConfig(format!(
+                "group {g} must name at least one atom"
+            )));
+        }
+        if let Some(&atom) = group.iter().find(|&&atom| atom >= n_atoms) {
+            return Err(InvalidConfig(format!(
+                "group {g} names atom {atom}, past the last of {n_atoms} atoms"
+            )));
+        }
+        if let Some(pair) = group.windows(2).find(|pair| pair[0] >= pair[1]) {
+            return Err(InvalidConfig(format!(
+                "group {g} must list its atoms in increasing order, without repeats \
+                 ({} then {})",
+                pair[0], pair[1]
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Parsed `H2H_PRIORS` setting after rejecting removed prior switches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PriorSwitches {
@@ -2493,15 +2534,49 @@ impl Config {
     /// assert_eq!(cfg.n_points, 3);
     /// assert!(!cfg.ring_moves);
     /// ```
+    ///
+    /// # Panics
+    ///
+    /// For the inputs [`Config::try_for_molecular`] refuses.
     pub fn for_molecular(species: Vec<u32>, groups: Vec<Vec<usize>>, energy_scale: f64) -> Self {
-        assert!(!species.is_empty(), "species must not be empty");
+        Self::try_for_molecular(species, groups, energy_scale).unwrap_or_else(|err| panic!("{err}"))
+    }
+
+    /// [`Config::for_molecular`], or why it cannot be built: no species,
+    /// no species with a known covalent radius, an energy scale that is not
+    /// finite and positive, or groups that [`check_molecular_groups`]
+    /// refuses.
+    ///
+    /// ```
+    /// use anneal_core::methods::cluster_hopping::Config;
+    /// assert!(Config::try_for_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0).is_ok());
+    /// assert!(Config::try_for_molecular(vec![8, 1, 1], vec![vec![2, 1, 0]], 1.0).is_err());
+    /// ```
+    pub fn try_for_molecular(
+        species: Vec<u32>,
+        groups: Vec<Vec<usize>>,
+        energy_scale: f64,
+    ) -> Result<Self, InvalidConfig> {
+        if species.is_empty() {
+            return Err(InvalidConfig("species must not be empty".into()));
+        }
+        if !(energy_scale.is_finite() && energy_scale > 0.0) {
+            return Err(InvalidConfig(format!(
+                "energy_scale must be finite and positive, got {energy_scale}"
+            )));
+        }
         let length_scale = MolecularPreset::COVALENT_DIAMETER
             * species
                 .iter()
                 .copied()
                 .map(covalent_radius)
                 .fold(0.0_f64, f64::max);
-        assert!(length_scale > 0.0, "species must have known covalent radii");
+        if !(length_scale > 0.0) {
+            return Err(InvalidConfig(
+                "species must have known covalent radii".into(),
+            ));
+        }
+        check_molecular_groups(&groups, species.len())?;
         let mut cfg = Self::with_scales(species.len(), length_scale, energy_scale);
         cfg.group_cutoff = MolecularPreset::GROUP_CUTOFF * length_scale;
         let is_water = groups.iter().all(|g| g.len() == 3)
@@ -2509,9 +2584,12 @@ impl Config {
                 g.iter()
                     .zip([8u32, 1, 1])
                     .all(|(&a, z)| species.get(a).copied() == Some(z))
-                    || g.iter()
-                        .zip([8u32, 1, 1])
-                        .all(|(&a, z)| species.get(3 * i + (a - g[0])).copied() == Some(z))
+                    || g.iter().zip([8u32, 1, 1]).all(|(&a, z)| {
+                        a.checked_sub(g[0])
+                            .and_then(|offset| 3_usize.checked_mul(i)?.checked_add(offset))
+                            .and_then(|index| species.get(index).copied())
+                            == Some(z)
+                    })
             });
         cfg.move_library = MoveLibrary::Molecular {
             groups: groups.clone(),
@@ -2519,7 +2597,7 @@ impl Config {
             reverse_cycles: is_water,
         };
         cfg.species = Some(species);
-        cfg
+        Ok(cfg)
     }
 
     /// Measured allocation and stall controls over a molecular move library.
@@ -2536,12 +2614,27 @@ impl Config {
     /// assert!(cfg.ring_moves && cfg.hold_stereocentres && cfg.measured_energy_scale);
     /// assert_eq!(cfg.local_step, LocalStep::Auto);
     /// ```
+    ///
+    /// # Panics
+    ///
+    /// For the inputs [`Config::try_for_molecular`] refuses.
     pub fn recommended_molecular(
         species: Vec<u32>,
         groups: Vec<Vec<usize>>,
         energy_scale: f64,
     ) -> Self {
-        let mut cfg = Self::for_molecular(species, groups, energy_scale);
+        Self::try_recommended_molecular(species, groups, energy_scale)
+            .unwrap_or_else(|err| panic!("{err}"))
+    }
+
+    /// [`Config::recommended_molecular`], or why
+    /// [`Config::try_for_molecular`] refuses its inputs.
+    pub fn try_recommended_molecular(
+        species: Vec<u32>,
+        groups: Vec<Vec<usize>>,
+        energy_scale: f64,
+    ) -> Result<Self, InvalidConfig> {
+        let mut cfg = Self::try_for_molecular(species, groups, energy_scale)?;
         cfg.allocate_moves = true;
         cfg.depth_reward = true;
         cfg.tabu_on_stall = true;
@@ -2572,7 +2665,7 @@ impl Config {
             cfg.keying = Keying::SoapPacking;
             cfg.merge_radius = crate::featomic_hop::SOAP_PACK_MERGE;
         }
-        cfg
+        Ok(cfg)
     }
 
     /// The same search with each flexible molecule as one group, when
@@ -2670,6 +2763,85 @@ impl Config {
             reverse_cycles: *reverse_cycles,
         };
         Some(cfg)
+    }
+
+    /// Why the search cannot run this configuration, if it cannot.
+    ///
+    /// Covers the combinations the search used to assert on: delayed
+    /// acceptance over a replica ladder, molecular groups that
+    /// [`check_molecular_groups`] refuses for `n_points` atoms, a call
+    /// floor that is not a positive distance or whose elements do not name
+    /// every point, a continuous-symmetry projection it cannot apply, and
+    /// shape keying without the `ira` feature. The search entry points
+    /// return [`super::SearchError::InvalidConfig`] for the same reasons.
+    ///
+    /// ```
+    /// use anneal_core::methods::cluster_hopping::Config;
+    /// let mut cfg = Config::recommended(13);
+    /// assert!(cfg.validate().is_ok());
+    /// cfg.delayed_acceptance = true;
+    /// cfg.replicas = 2;
+    /// assert!(cfg.validate().is_err());
+    /// ```
+    pub fn validate(&self) -> Result<(), InvalidConfig> {
+        if self.delayed_acceptance && self.replicas > 1 {
+            return Err(InvalidConfig(format!(
+                "delayed acceptance needs a single chain, not replicas={}: a hop its \
+                 surrogate decides weighs the bare energy and one it abstains on weighs \
+                 the biases, so no swap between rungs can be balanced",
+                self.replicas
+            )));
+        }
+        if let MoveLibrary::Molecular { groups, .. } = &self.move_library {
+            check_molecular_groups(groups, self.n_points)?;
+        }
+        if let Some(floor) = self.call_floor
+            && !(floor.is_finite() && floor > 0.0)
+        {
+            return Err(InvalidConfig(format!(
+                "the call floor must be a finite positive distance, not {floor}"
+            )));
+        }
+        if let Some(elements) = self.call_floor_elements.as_ref()
+            && elements.len() != self.n_points
+        {
+            return Err(InvalidConfig(format!(
+                "the call-floor elements name {} points but the config has {}",
+                elements.len(),
+                self.n_points
+            )));
+        }
+        if let ContinuousSymmetry::Inversion { interval }
+        | ContinuousSymmetry::Measure { interval, .. } = self.continuous_symmetry
+        {
+            if interval == 0 {
+                return Err(InvalidConfig(
+                    "continuous-symmetry interval must be positive".into(),
+                ));
+            }
+            if self.active_region.is_some() || self.frozen.is_some() {
+                return Err(InvalidConfig(
+                    "continuous-symmetry projection requires a free non-periodic point set".into(),
+                ));
+            }
+            if let Some(species) = self.species.as_ref()
+                && species.len() != self.n_points
+            {
+                return Err(InvalidConfig(format!(
+                    "continuous-symmetry classes have {} labels but the config has {} points",
+                    species.len(),
+                    self.n_points
+                )));
+            }
+        }
+        if cfg!(not(feature = "ira")) && self.shape_keyed {
+            return Err(InvalidConfig(
+                "shape keying needs the `ira` feature; without it the threshold would \
+                 silently remain a descriptor-space number"
+                    .into(),
+            ));
+        }
+        Ok(())
     }
 
     /// Radius of the preset's initial cluster sphere.
