@@ -437,6 +437,24 @@ def test_an_unnamed_gfn2_false_hit_is_reported():
     assert {"hits", "median calls", "best", "GFN2 paper Si10 Mann-Whitney p"} <= drifted
 
 
+def test_a_gfn2_row_without_its_geometry_is_reported():
+    audit = audit_mod.Audit()
+    path = "bench/covalent-h2h/gfn2/rows.csv"
+    audit.read[path] = [
+        {
+            "geometry": "finals/si20/missing.xyz",
+            "geometry_sha256": "",
+            "standalone_scc_converged": "true",
+            "standalone_xtb_eV": "-1.0",
+            "min_distance_A": "2.0",
+        }
+    ]
+    audit_mod.gfn2_geometry_files(audit)
+    assert [(row[1], row[2]) for row in audit.drifts()] == [
+        (f"{path}:2", "final geometry file")
+    ]
+
+
 SC_N12_ROWS = ("bench/metal-cluster-h2h/sc-n12/results.csv", "bench/metal-cluster-h2h/sc-n12/seeds.csv")
 CONF_FIX4 = "bench/openconf-h2h/conf-fix4/seeds.csv"
 ASE_GOFEE = "bench/ase-gofee-h2h/results.csv"
