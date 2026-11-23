@@ -140,3 +140,34 @@ def test_non_finite_positions_are_a_value_error_not_an_abort() -> None:
     )
     assert run.returncode == 0, run.stderr
     assert "positions" in run.stdout
+
+
+def _coincident() -> np.ndarray:
+    xyz = CLUSTER.copy()
+    xyz[1] = xyz[0]
+    return xyz
+
+
+@pytest.mark.parametrize("how", ["call", "evaluate", "evaluate_batch", "hvp_centre"])
+def test_coincident_atoms_raise_a_numerical_error(how: str) -> None:
+    pot = rgpot.EMTPot()
+    xyz = _coincident()
+    with pytest.raises(rgpot.NumericalError):
+        if how == "call":
+            pot(xyz, COPPER, CUBE)
+        elif how == "evaluate":
+            pot.evaluate(xyz, COPPER, CUBE)
+        elif how == "evaluate_batch":
+            pot.evaluate_batch([xyz], [COPPER], [CUBE])
+        else:
+            pot.hvp_centre(xyz, COPPER, CUBE)
+
+
+def test_a_numerical_error_leaves_the_instance_usable() -> None:
+    pot = rgpot.EMTPot()
+    with pytest.raises(rgpot.NumericalError):
+        pot(_coincident(), COPPER, CUBE)
+    energy, forces, _ = pot(CLUSTER, COPPER, CUBE)
+    fresh_energy, fresh_forces, _ = rgpot.EMTPot()(CLUSTER, COPPER, CUBE)
+    assert energy == fresh_energy
+    np.testing.assert_array_equal(forces, fresh_forces)

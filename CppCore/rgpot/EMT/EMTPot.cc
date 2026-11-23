@@ -112,12 +112,25 @@ void EMTPot::forceImpl(const ForceInput &in, ForceOut *out) const {
     EMT *emt = m_state->emt.get();
     atoms->SetCartesianPositions(reinterpret_cast<Vec *>(pos.data()));
     atoms->SetUnitCell(basis, true);
-    out->energy = emt->GetPotentialEnergy();
+    const double energy = emt->GetPotentialEnergy();
     const Vec *forces = emt->GetCartesianForces();
+    if (!std::isfinite(energy)) {
+      throw std::domain_error("EMTPot: the energy is not finite");
+    }
+    for (long k = 0; k < n; ++k) {
+      for (int d = 0; d < 3; ++d) {
+        if (!std::isfinite(forces[k][d])) {
+          throw std::domain_error("EMTPot: a force is not finite");
+        }
+      }
+    }
+    out->energy = energy;
     std::memcpy(out->F, forces, static_cast<size_t>(n) * sizeof(Vec));
   } catch (const Exception &error) {
     m_state.reset();
     refuse(error.GetMessage());
+  } catch (const std::domain_error &) {
+    throw;
   } catch (...) {
     m_state.reset();
     throw;

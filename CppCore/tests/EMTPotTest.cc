@@ -433,6 +433,17 @@ TEST_CASE("EMT refuses non-finite positions", "[emt][errors]") {
   REQUIRE_THROWS_AS(pot(positions, copper, kCube), std::invalid_argument);
 }
 
+TEST_CASE("EMT reports coincident atoms as std::domain_error",
+          "[emt][errors]") {
+  auto positions = copperCluster();
+  for (int k = 0; k < 3; ++k) {
+    positions(1, k) = positions(0, k);
+  }
+  const std::vector<int> copper(4, 29);
+  rgpot::EMTPot pot;
+  REQUIRE_THROWS_AS(pot(positions, copper, kCube), std::domain_error);
+}
+
 TEST_CASE("EMT OpenMP force path is bit-identical across threads", "[emt][threads]") {
   ThreadGuard guard;
   rgpot::EMTPot sanity;

@@ -1,1 +1,3 @@
 `EMTPot` no longer crashes after a refused call. An element the provider does not cover, a cell too thin for the kernel, a singular or non-finite cell and non-finite positions raise `std::invalid_argument` in C++ and `ValueError` in Python, and the next call starts from a clean state. A call with zero atoms returns zero energy and no forces.
+
+`EMTPot` raises `std::domain_error` when atoms sit on top of each other and the forces are not finite, and Python reports it as `rgpot.NumericalError` from `__call__`, `evaluate` and `evaluate_batch`. Before, the call returned NaN forces without an error.
