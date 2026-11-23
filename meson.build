@@ -198,10 +198,36 @@ endif
 # libm for Unix systems
 m_dep = cppc.find_library('m', required: false)
 _deps += m_dep
+# Identify the active C++ standard library before reading its version macro.
+# Meson versions which predate get_define()'s empty result for an undefined
+# macro report an error instead, so test the symbol first. On Unix, an absent
+# _LIBCPP_VERSION is the documented libstdc++ case.
+_libcpp_ver = ''
+if host_system != 'windows'
+    if not cppc.has_header('version')
+        error(
+            'cannot identify the C++ standard library: <version> is unavailable',
+        )
+    endif
+    if cppc.has_header_symbol('version', '_LIBCPP_VERSION')
+        _libcpp_ver = cppc.get_define(
+            '_LIBCPP_VERSION',
+            prefix: '#include <version>',
+        ).strip()
+        if _libcpp_ver == ''
+            error(
+                'cannot identify the C++ standard library: _LIBCPP_VERSION was found but its value is empty',
+            )
+        endif
+    else
+        message('_LIBCPP_VERSION is absent from <version>; using libstdc++')
+    endif
+endif
+
 # Match the active C++ standard library (libc++ or libstdc++) on Unix hosts.
 _cxx_rt_flag = ''
 if host_system != 'windows'
-    if cppc.get_define('_LIBCPP_VERSION', prefix: '#include <version>') != ''
+    if _libcpp_ver != ''
         _cxx_rt_dep = cppc.find_library('c++', required: false)
         if _cxx_rt_dep.found()
             _cxx_rt_flag = '-lc++'
@@ -218,11 +244,6 @@ if host_system != 'windows'
 endif
 
 if not get_option('with_rpc_client_only')
-    _libcpp_ver = cppc.get_define(
-        '_LIBCPP_VERSION',
-        prefix: '#include <version>',
-        args: cppc.get_supported_arguments(['-std=c++20', '/std:c++20']),
-    ).strip()
     if _libcpp_ver != '' and _libcpp_ver.to_int() < 190000
         # compiles() never links. On targets where __atomic_fetch_or is a
         # libcall, the builtin needs libatomic or the library fails at link.
