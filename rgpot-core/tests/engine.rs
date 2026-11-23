@@ -1738,6 +1738,55 @@ fn failed_first_loads_are_closed_and_can_be_retried() {
 
 const UNLOAD_SAFE: &str = "FIXTURE_UNLOAD_POLICY=RGPOT_ENGINE_UNLOAD_SAFE";
 
+/// A plugin whose file is replaced while its first engine is created is
+/// refused, and the handle opened for that attempt is closed rather than kept.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_file_replaced_during_load_is_refused_and_its_handle_is_closed() {
+    for (name, defines) in [
+        (
+            "harmonic_swap_in_create_safe",
+            vec!["REPLACE_SELF_IN_CREATE", UNLOAD_SAFE],
+        ),
+        (
+            "harmonic_swap_in_create_resident",
+            vec!["REPLACE_SELF_IN_CREATE"],
+        ),
+    ] {
+        let path = build(name, &defines);
+        let replacement = build(&format!("{name}_next"), &[]);
+        let staged = PathBuf::from(format!("{}.next", path.display()));
+        std::fs::copy(&replacement, &staged).expect("stage the replacement");
+
+        let error = unsafe { EnginePotential::load(&path, &config()) }
+            .err()
+            .expect("a file replaced during load must be refused");
+        match &error {
+            EngineError::Load(text) => assert!(text.contains("was replaced"), "{name}: {text}"),
+            other => panic!("{name}: expected EngineError::Load, got {other:?}"),
+        }
+        assert_eq!(
+            link_maps_named(file_name(&path)),
+            0,
+            "{name}: the refused attempt kept its handle open"
+        );
+
+        let not_loaded = unsafe { EnginePotential::unload(&path) }.unwrap_err();
+        assert!(
+            matches!(&not_loaded, EngineError::Invalid(text) if text.contains("was not loaded")),
+            "{name}: {not_loaded:?}"
+        );
+        let mut engine = load(&path);
+        engine
+            .force(&EngineRequest {
+                positions: &[1.0, 0.0, 0.0],
+                atomic_numbers: &[1],
+                box_matrix: &CELL,
+            })
+            .expect("the replacement file loads and evaluates");
+    }
+}
+
 static FINALIZER_REENTRY_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 extern "C" fn finalizer_reentry_callback() -> c_int {

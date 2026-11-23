@@ -6,11 +6,20 @@
  * second callback registration succeed. RETAIN_REFUSED_CALLBACKS makes the
  * refused one stay registered although the call fails, as an engine written
  * before the header forbade it might. FIXTURE_UNLOAD_POLICY exports
- * rgpot_engine_unload_policy returning that value. REENTER_IN_FINALIZER
+ * rgpot_engine_unload_policy returning that value. REPLACE_SELF_IN_CREATE
+ * makes the first create call rename "<its own file>.next" over its own file,
+ * as a build that rewrites the plugin while it loads would. REENTER_IN_FINALIZER
  * calls the function whose address is in RGPOT_FIXTURE_FINI_CALLBACK from the
  * library destructor, which runs when the library is unloaded. */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE 1
+#endif
+
 #include "rgpot/engine_c_abi.h"
 
+#include <dlfcn.h>
+
+#include <errno.h>
 #include <math.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -116,6 +125,23 @@ RgpotEngineAbiStamp rgpot_engine_abi_stamp(void) {
 RgpotEnginePot *rgpot_engine_create(const void *config, size_t config_len,
                                     char *errbuf, size_t errlen) {
   RgpotEnginePot *pot;
+#ifdef REPLACE_SELF_IN_CREATE
+  {
+    Dl_info info;
+    char next[4096];
+    if (dladdr((void *)&rgpot_engine_create, &info) == 0 ||
+        info.dli_fname == NULL) {
+      snprintf(errbuf, errlen, "harmonic engine: cannot locate its own file");
+      return NULL;
+    }
+    snprintf(next, sizeof next, "%s.next", info.dli_fname);
+    if (rename(next, info.dli_fname) != 0) {
+      snprintf(errbuf, errlen, "harmonic engine: cannot replace %s: %s",
+               info.dli_fname, strerror(errno));
+      return NULL;
+    }
+  }
+#endif
 #ifdef REENTER_IN_INITIALIZER
   if (initializer_reentry_failed) {
     snprintf(errbuf, errlen,

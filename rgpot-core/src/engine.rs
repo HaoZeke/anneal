@@ -1080,61 +1080,97 @@ unsafe fn load_resident(path: &Path, config: &[u8]) -> Result<EnginePotential, E
         return Ok(engine);
     }
 
-    let attempt = (|| {
-        let library = unsafe { open_library(&canonical) }
-            .map_err(|why| EngineError::Load(format!("{}: {why}", path.display())))?;
-        let symbols = unsafe { resolve(&library)? };
-        let engine = unsafe { EnginePotential::from_symbols(symbols, config)? };
-        let unload_refusal = unsafe { unload_refusal(&library, &symbols) };
-        let pin = match unload_refusal {
-            None => None,
-            Some(_) => unsafe { pin_library(&canonical) }
-                .map_err(|why| {
-                    EngineError::Load(format!(
-                        "{}: RTLD_NODELETE could not be set: {why}",
-                        path.display()
-                    ))
-                })?
-                .map(ManuallyDrop::new),
-        };
-        Ok((
-            Resident {
-                library: ManuallyDrop::new(library),
-                _pin: pin,
-                symbols,
-                unload_refusal,
-            },
-            engine,
-        ))
-    })()
-    .and_then(|pair| {
-        if file_identity(&canonical)? != identity {
-            return Err(replaced(&canonical));
-        }
-        Ok(pair)
-    });
+    // From here until `publish`, dropping the claim removes the loading entry
+    // and wakes the waiting threads, on an error return and on an unwind alike.
+    let claim = LoadClaim {
+        canonical,
+        identity,
+        published: false,
+    };
+    let (resident, mut engine) = unsafe { open_unpublished(path, &claim, config)? };
+    let resident = Arc::new(resident);
+    claim.publish(Arc::clone(&resident));
+    unsafe { engine.attach(resident) };
+    Ok(engine)
+}
 
-    let mut registry = registry();
-    match attempt {
-        Ok((resident, mut engine)) => {
-            let resident = Arc::new(resident);
-            registry.by_file.insert(
-                identity.clone(),
-                RegistryEntry::Ready(Arc::clone(&resident)),
-            );
-            registry.by_path.insert(canonical, identity);
-            REGISTRY.1.notify_all();
-            drop(registry);
-            unsafe { engine.attach(resident) };
-            Ok(engine)
-        }
-        Err(error) => {
-            registry.by_file.remove(&identity);
-            registry.by_path.retain(|_, known| *known != identity);
-            REGISTRY.1.notify_all();
-            Err(error)
-        }
+/// The loading entry a thread owns for one plugin file.
+///
+/// Another thread that wants the same file waits while the entry exists. A
+/// claim dropped before [`Self::publish`] removes the entry and wakes those
+/// threads, so a load that fails or panics never leaves them blocked.
+struct LoadClaim {
+    canonical: PathBuf,
+    identity: FileIdentity,
+    published: bool,
+}
+
+impl LoadClaim {
+    /// Replace the loading entry with the finished plugin and wake the waiters.
+    fn publish(mut self, resident: Arc<Resident>) {
+        let mut registry = registry();
+        registry
+            .by_file
+            .insert(self.identity.clone(), RegistryEntry::Ready(resident));
+        registry
+            .by_path
+            .insert(self.canonical.clone(), self.identity.clone());
+        self.published = true;
+        REGISTRY.1.notify_all();
     }
+}
+
+impl Drop for LoadClaim {
+    fn drop(&mut self) {
+        if self.published {
+            return;
+        }
+        let mut registry = registry();
+        registry.by_file.remove(&self.identity);
+        registry.by_path.retain(|_, known| *known != self.identity);
+        REGISTRY.1.notify_all();
+    }
+}
+
+/// Open the plugin, validate it and create its first engine, without touching
+/// the registry.
+///
+/// Every handle is an owned [`Library`] until the last check passes, so each
+/// early return and each unwind closes it. The locals drop in reverse
+/// declaration order: the engine is destroyed while the library it calls into
+/// is still open. Only the success path moves the handles into [`Resident`],
+/// which never closes them.
+unsafe fn open_unpublished(
+    path: &Path,
+    claim: &LoadClaim,
+    config: &[u8],
+) -> Result<(Resident, EnginePotential), EngineError> {
+    let library = unsafe { open_library(&claim.canonical) }
+        .map_err(|why| EngineError::Load(format!("{}: {why}", path.display())))?;
+    let symbols = unsafe { resolve(&library)? };
+    let engine = unsafe { EnginePotential::from_symbols(symbols, config)? };
+    if file_identity(&claim.canonical)? != claim.identity {
+        return Err(replaced(&claim.canonical));
+    }
+    let unload_refusal = unsafe { unload_refusal(&library, &symbols) };
+    let pin = match unload_refusal {
+        None => None,
+        Some(_) => unsafe { pin_library(&claim.canonical) }.map_err(|why| {
+            EngineError::Load(format!(
+                "{}: RTLD_NODELETE could not be set: {why}",
+                path.display()
+            ))
+        })?,
+    };
+    Ok((
+        Resident {
+            library: ManuallyDrop::new(library),
+            _pin: pin.map(ManuallyDrop::new),
+            symbols,
+            unload_refusal,
+        },
+        engine,
+    ))
 }
 
 // The instance is used by one caller at a time through `&mut self`. The
@@ -2482,6 +2518,7 @@ unsafe extern "C" fn engine_hessian_vector_callback(
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
 
     struct CountingTransform {
         calls: AtomicUsize,
@@ -2565,5 +2602,60 @@ mod tests {
         assert!(call.take_failure().is_none());
         drop(call);
         assert_eq!(transform.calls.load(Ordering::SeqCst), THREADS);
+    }
+
+    /// A load that panics after it claimed a file must not leave the loading
+    /// entry behind, or every later load of the file waits for it forever.
+    #[cfg(unix)]
+    #[test]
+    fn a_claim_dropped_by_a_panic_wakes_the_threads_waiting_on_the_file() {
+        let file = std::env::temp_dir().join(format!("rgpot-claim-{}.so", std::process::id()));
+        std::fs::write(&file, b"not a shared object").expect("write the stand-in plugin");
+        let canonical = canonical_path(&file).expect("canonical path");
+        let identity = file_identity(&canonical).expect("file identity");
+        {
+            let mut registry = registry();
+            registry.by_file.insert(
+                identity.clone(),
+                RegistryEntry::Loading {
+                    owner: std::thread::current().id(),
+                },
+            );
+            registry.by_path.insert(canonical.clone(), identity.clone());
+        }
+        let claim = LoadClaim {
+            canonical: canonical.clone(),
+            identity: identity.clone(),
+            published: false,
+        };
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let waiter_path = file.clone();
+        let waiter = std::thread::spawn(move || {
+            let result = unsafe { load_resident(&waiter_path, &[]) }.map(drop);
+            sender.send(result).expect("report the waiter's result");
+        });
+        assert!(
+            receiver.recv_timeout(Duration::from_millis(300)).is_err(),
+            "a load of a file that is still loading must wait"
+        );
+
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            let _claim = claim;
+            panic!("the plugin initializer panicked");
+        }));
+        assert!(unwound.is_err());
+
+        let result = receiver
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the waiting thread was not woken by the unwound claim");
+        assert!(matches!(result, Err(EngineError::Load(_))), "{result:?}");
+        waiter.join().expect("join the waiting thread");
+        {
+            let registry = registry();
+            assert!(!registry.by_file.contains_key(&identity));
+            assert!(!registry.by_path.contains_key(&canonical));
+        }
+        std::fs::remove_file(&file).expect("remove the stand-in plugin");
     }
 }
