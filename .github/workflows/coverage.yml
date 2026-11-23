@@ -40,6 +40,9 @@ permissions:
 
 env:
   PIXi_VERSION: v0.70.2
+  # coverage-cpp and coverage-fortran both run scripts/run_coverage_cpp.sh.
+  # One value here, so the Fortran job cannot fall back to the script default.
+  RGPOT_COV_TIMEOUT_MULTIPLIER: "4"
 
 jobs:
   coverage-rust:
@@ -124,8 +127,7 @@ jobs:
         env:
           RGPOT_COV_BUILDDIR: bbdir-cov
         run: |
-          RGPOT_COV_TIMEOUT_MULTIPLIER=4 \
-            bash scripts/run_coverage_cpp.sh cpp_lcov.info
+          bash scripts/run_coverage_cpp.sh cpp_lcov.info
           test -s cpp_lcov.info
           # Fortran kernel hits from the same tree (the pot tests drive them)
           bash scripts/run_coverage_fortran.sh fortran_lcov.info
