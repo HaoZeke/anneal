@@ -1370,14 +1370,21 @@ A backend may keep OpenMP or CUDA runtimes, Torch thread pools, MPI state,
 GROMACS, LAMMPS or OpenMM state, TLS destructors or =atexit= handlers that call
 into the library after its last instance is gone.
 Unmapping such a library crashes the process later, or at exit.
-A load that fails its ABI check or =rgpot_engine_create= also stays resident,
-because the library's static constructors have already run, and a second attempt
-returns the same error.
+A load that fails its required-symbol check, its ABI check or
+=rgpot_engine_create= does not stay resident.
+The loader destroys any engine the attempt created, closes the handle, and keeps
+no registry entry for the file.
+A later load of the same file opens it again, runs its static constructors
+again, and returns the same error.
+A library linked with =-z nodelete= stays mapped after that close, as it does
+after any =dlclose=.
 
 Two loads are refused with =EngineError::Load=:
 
 - A path whose file was replaced after it was loaded :: The path names a new
   inode, but the dynamic linker would return the mapping of the old one.
+  A file replaced while its first load runs is refused the same way, and the
+  handle of that attempt is closed.
   Load the new file from another path, or restart the process.
 - A bare library name such as =libuma_engine.so= :: The dynamic loader resolves
   it through its search path rather than the filesystem, so the file cannot be
@@ -1394,6 +1401,8 @@ its registry entry and calls =dlclose=.
 when the plugin has not opted in, and =EngineError::Invalid= while an
 =EnginePotential= or a =PotentialImpl= built from it is alive or when the file
 was never loaded.
+=unload= releases the registry lock before it calls =dlclose=, so a destructor
+of the plugin may load another engine.
 A later =load= opens the file again.
 
 =libuma_engine=, =libmetatomic_engine=, =libxtb_engine=, =libopenmm_engine=,
