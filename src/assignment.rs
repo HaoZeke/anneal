@@ -486,7 +486,7 @@ pub(crate) fn strict_unique_row_minima(costs: &[f64], n: usize) -> Option<Vec<us
 }
 
 pub(crate) fn successive_shortest_paths(costs: &[f64], n: usize) -> Option<Vec<usize>> {
-    successive_shortest_paths_scanned(costs, n).map(|(assignment, _)| assignment)
+    solve_shortest_paths(costs, n, None).map(|(assignment, _)| assignment)
 }
 
 /// Same permutation as [`successive_shortest_paths`] without the uniqueness scan.
@@ -518,6 +518,7 @@ fn forced_kuhn_munkres(costs: &[f64], n: usize) -> Option<(Vec<usize>, Option<Ce
 #[derive(Clone, Copy)]
 enum Separation {
     /// More than dual noise: no other optimal edge.
+    #[cfg(test)]
     Noise,
     /// More than a Kuhn-Munkres walk can fall short of the optimum.
     KuhnMunkres,
@@ -530,6 +531,7 @@ fn kuhn_munkres_tolerance(costs: &[f64]) -> f64 {
     scale * 1e-9
 }
 
+#[cfg(test)]
 fn successive_shortest_paths_scanned(costs: &[f64], n: usize) -> Option<(Vec<usize>, bool)> {
     solve_shortest_paths(costs, n, Some(Separation::Noise))
         .map(|(assignment, certificate)| (assignment, certificate.is_some()))
@@ -707,6 +709,7 @@ fn optimum_is_unique(
         costs[row * n + column] - row_potential[row + 1] - column_potential[column + 1]
     };
     let slack = match separation {
+        #[cfg(test)]
         Separation::Noise => {
             let mut scale = 1.0_f64;
             for value in costs {
