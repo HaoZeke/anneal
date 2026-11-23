@@ -791,12 +791,14 @@ mod tests {
 
     #[test]
     fn projection_retains_one_match_row_for_related_turns() {
-        let ops = turns_about_z(12);
-        let turns = orientation_turns(&ops, &ops);
-        let last_use = last_orientation_uses(&turns);
-        let rows = last_use.into_iter().flatten().count();
-        assert_eq!(rows, 1);
-        assert_eq!(rows * ops.len(), ops.len());
+        for order in [12, 24, 48, 96] {
+            let ops = turns_about_z(order);
+            let turns = orientation_turns(&ops, &ops);
+            let last_use = last_orientation_uses(&turns);
+            assert_eq!(last_use.iter().flatten().count(), 1);
+            assert_eq!(last_use[0], Some(order - 1));
+            assert!(last_use[1..].iter().all(Option::is_none));
+        }
     }
 
     fn turns_about_z(order: usize) -> Vec<[[f64; 3]; 3]> {
