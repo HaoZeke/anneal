@@ -2977,8 +2977,10 @@ where
 /// DepthAllocator documents as failing to switch a wrong arm off.
 /// Every arm is domain-free: the trail is the objective's own descent
 /// history, the climb needs a gradient alone, the restart draws fresh
-/// coordinates. With one arm enabled the allocator is never consulted,
-/// so single-flag behaviour is unchanged.
+/// coordinates. An arm that cannot act is redrawn among the arms not
+/// yet tried for that stall, and only the arm that acts is scored, on
+/// the energy that action reached. With one arm enabled the allocator
+/// is never consulted, so single-flag behaviour is unchanged.
 fn stall_arms(cfg: &Config) -> Vec<&'static str> {
     [
         cfg.trail_on_stall.then_some("trail"),
@@ -2997,6 +2999,77 @@ fn stall_arms(cfg: &Config) -> Vec<&'static str> {
     .into_iter()
     .flatten()
     .collect()
+}
+
+/// Whether `name` can move the chain with what the stall already knows.
+///
+/// The trail leaves through a recorded entry. With none, the draw cannot
+/// act, and scoring it would teach the posterior about a move that did
+/// not happen. The climb and the restart are attempted as drawn: a climb
+/// may still decline inside its own attempt.
+fn stall_arm_ready(name: &str, entry_recorded: bool) -> bool {
+    match name {
+        "trail" => entry_recorded,
+        _ => true,
+    }
+}
+
+/// The stall arm that may act.
+///
+/// `drawn` stands when that arm can move the chain. Otherwise the draw is
+/// set aside and another arm is taken from those not yet tried for this
+/// stall. A directed leave is not a bandit draw, and a single arm has
+/// nothing to redraw to, so `bandit == false` returns `drawn` unchanged.
+/// Nothing is scored here. The caller scores the arm that acts, on the
+/// energy that action reached.
+fn redraw_idle_stall_arm<R: Rng + ?Sized>(
+    allocator: &crate::allocate::DepthAllocator,
+    arms: &[&str],
+    drawn: Option<usize>,
+    entry_recorded: bool,
+    bandit: bool,
+    rng: &mut R,
+) -> Option<usize> {
+    if !bandit {
+        return drawn;
+    }
+    let mut closed = vec![false; arms.len()];
+    let mut arm = drawn;
+    while let Some(index) = arm {
+        if stall_arm_ready(arms[index], entry_recorded) {
+            return Some(index);
+        }
+        closed[index] = true;
+        if closed.iter().all(|shut| *shut) {
+            return None;
+        }
+        arm = Some(allocator.select_where(rng, |candidate| !closed[candidate]));
+    }
+    None
+}
+
+fn note_stall_reward(
+    allocator: &mut crate::allocate::DepthAllocator,
+    arm: usize,
+    name: &'static str,
+    gain: f64,
+) {
+    allocator.update(arm, gain);
+    #[cfg(test)]
+    STALL_SCORES.with(|scores| scores.borrow_mut().push((name, gain)));
+    #[cfg(not(test))]
+    let _ = name;
+}
+
+#[cfg(test)]
+thread_local! {
+    static STALL_SCORES: std::cell::RefCell<Vec<(&'static str, f64)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[cfg(test)]
+fn take_stall_scores() -> Vec<(&'static str, f64)> {
+    STALL_SCORES.with(|scores| std::mem::take(&mut *scores.borrow_mut()))
 }
 
 fn directed_stall_source(
@@ -9137,7 +9210,7 @@ where
         // the last one the cap allows. The climb can take up to three, one
         // per lattice growth and one for its activation quench, so each of
         // those rechecks.
-        let stall_response = if !hop_room(hops) {
+        let drawn = if !hop_room(hops) {
             None
         } else if directed_leave {
             stall_arms.iter().position(|arm| *arm == "climb")
@@ -9150,6 +9223,17 @@ where
         } else {
             None
         };
+        // A drawn arm that cannot move the chain is not this stall's
+        // response. Redraw among the arms not yet tried. Only the arm
+        // that then acts is scored, on the energy it reached.
+        let stall_response = redraw_idle_stall_arm(
+            &stall_allocator,
+            &stall_arms,
+            drawn,
+            basin_entry.is_some(),
+            !directed_leave && stall_arms.len() > 1,
+            rng,
+        );
         let stalled_from = e;
         let mut stall_outcome: Option<f64> = None;
         if stall_response.map(|arm| stall_arms[arm] == "restart") == Some(true) {
@@ -9356,7 +9440,7 @@ where
             charged_at_best = ledger.spent();
         }
         if let (Some(arm), Some(gain)) = (stall_response, stall_outcome) {
-            stall_allocator.update(arm, gain);
+            note_stall_reward(&mut stall_allocator, arm, stall_arms[arm], gain);
         }
         // A new best is the one state worth sharing, and the census a shared
         // run identifies basins in was calibrated at the share tolerance,
@@ -11102,6 +11186,116 @@ mod tests {
         let rigid = atomic.with_rigid_bodies(crate::potentials::gmin_water_geometry());
         assert!(rigid.restart_on_stall);
         assert!(!stall_arms(&rigid).contains(&"restart"));
+    }
+
+    /// A drawn trail with no entry is not the stall. The draw is replaced
+    /// from the arms not yet tried, and a trail that does have an entry
+    /// keeps the draw.
+    #[test]
+    fn a_trail_without_an_entry_is_not_the_stall_arm() {
+        let arms = ["trail", "restart"];
+        let allocator = crate::allocate::DepthAllocator::new(arms.len());
+        for seed in 0..64u64 {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let served = redraw_idle_stall_arm(&allocator, &arms, Some(0), false, true, &mut rng);
+            assert_eq!(
+                arms[served.expect("the restart can act")],
+                "restart",
+                "seed {seed}"
+            );
+            let kept = redraw_idle_stall_arm(&allocator, &arms, Some(0), true, true, &mut rng);
+            assert_eq!(arms[kept.expect("the trail can act")], "trail");
+        }
+        let mut rng = StdRng::seed_from_u64(1);
+        let single = redraw_idle_stall_arm(&allocator, &arms, Some(0), false, false, &mut rng);
+        assert_eq!(single, Some(0), "a directed leave is not redrawn");
+        let none = redraw_idle_stall_arm(&allocator, &["trail"], Some(0), false, true, &mut rng);
+        assert_eq!(none, None, "an idle trail with no other arm does not act");
+    }
+
+    /// The reward written for a trail that acts is the energy that trail
+    /// reached, one number per escape, in the order the escapes happened.
+    #[test]
+    fn an_applicable_trail_is_scored_on_the_energy_it_reached() {
+        let _ = take_stall_scores();
+        let mut cfg = Config::for_cluster(6);
+        cfg.trail_on_stall = true;
+        cfg.escape_on_stall = false;
+        cfg.restart_on_stall = false;
+        cfg.return_screen = false;
+        cfg.bayes_screen = false;
+        cfg.calibrated_screen = false;
+        cfg.symmetrise_on_stall = false;
+        cfg.tabu_on_stall = false;
+        cfg.orbit_complete_on_new = false;
+        cfg.energy_lattice = false;
+        cfg.prior_soap = false;
+        cfg.escape_stall_patience = 1;
+        cfg.escape_stall_factor = 0.0;
+        cfg.screen_steps = 1;
+        cfg.relax_steps = 1;
+        cfg.continuous_symmetry = ContinuousSymmetry::Off;
+        cfg.surfaces.clear();
+        let mut rng = StdRng::seed_from_u64(0x7a11);
+        let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+        let mut ledger = Ledger::new(800);
+        let mut bias = BasinBias::new(
+            ClusterFingerprint::for_keying(cfg.n_points, cfg.shape_keyed),
+            cfg.merge_radius,
+            cfg.bias_height,
+            cfg.bias_gamma,
+        );
+        let mut relax = |ledger: &mut Ledger, state: ArrayView1<f64>, steps: usize| {
+            for _ in 0..steps {
+                if !ledger.charge() {
+                    break;
+                }
+            }
+            let energy = state.iter().map(|value| value * value).sum();
+            (energy, state.to_owned())
+        };
+        let outcome = run_with_bias(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            None,
+            &mut bias,
+            &mut rng,
+        )
+        .expect("finite start");
+        let scores = take_stall_scores();
+        let trails: Vec<_> = outcome
+            .accepted_transitions
+            .iter()
+            .filter(|edge| edge.action == "stall-trail")
+            .collect();
+        let trail_scores: Vec<f64> = scores
+            .iter()
+            .filter(|(name, _)| *name == "trail")
+            .map(|(_, reward)| *reward)
+            .collect();
+        assert_eq!(outcome.trail_escapes, trails.len());
+        assert_eq!(trail_scores.len(), trails.len());
+        assert!(
+            !trails.is_empty(),
+            "the trail never acted, so its score was not observed"
+        );
+        assert!(
+            scores.iter().all(|(name, _)| *name == "trail"),
+            "an arm other than the trail was scored: {scores:?}"
+        );
+        let mut moved = false;
+        for (edge, reward) in trails.iter().zip(trail_scores) {
+            let real = edge.from_energy - edge.to_energy;
+            assert!(real.is_finite());
+            assert_eq!(reward, real);
+            moved |= edge.from_energy != edge.to_energy;
+        }
+        assert!(
+            moved,
+            "every trail score was zero, so a stand-in reward would pass"
+        );
     }
 
     #[test]
