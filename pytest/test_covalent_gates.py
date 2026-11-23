@@ -99,20 +99,99 @@ def test_a_floor_gate_reference_without_a_source_is_refused():
         floor_gate.validate_reference_sources({"sample": -12.5}, {"sample": ""})
 
 
-def test_crest_rescore_reproduces_the_committed_row(tmp_path):
+def synthetic_rescore_rows():
+    return [
+        {
+            "system": "sample",
+            "code": "anneal-general",
+            "seed": "1",
+            "budget": "100",
+            "charged": "10",
+            "best": "-10.0",
+        },
+        {
+            "system": "sample",
+            "code": "anneal-general",
+            "seed": "2",
+            "budget": "100",
+            "charged": "0",
+            "best": "inf",
+        },
+        {
+            "system": "sample",
+            "code": "crest",
+            "seed": "1",
+            "budget": "20",
+            "charged": "20",
+            "best": "-9.0",
+        },
+        {
+            "system": "sample",
+            "code": "crest",
+            "seed": "2",
+            "budget": "30",
+            "charged": "5",
+            "best": "-8.0",
+        },
+        {
+            "system": "sample",
+            "code": "crest",
+            "seed": "3",
+            "budget": "0",
+            "charged": "0",
+            "best": "",
+        },
+    ]
+
+
+def test_rescore_labels_stop_modes_and_no_results(tmp_path, monkeypatch):
     pytest.importorskip("scipy.stats")
     crest = load("gfn2_crest", "scripts/covalent_h2h/gfn2_crest.py")
-    gfn2 = ROOT / "bench" / "covalent-h2h" / "gfn2"
-    history = [gfn2 / "seeds.csv", gfn2 / "rows.csv"]
+    monkeypatch.setitem(crest.REFERENCE, "sample", -10.0)
+    source = write(tmp_path / "rows.csv", synthetic_rescore_rows())
     out = tmp_path / "rescore.csv"
-    crest.rescore(history, out, "si13", -624.70446339, "0" * 40, "bench")
-    crest.rescore(history, out, "si13", crest.REFERENCE["si13"], "0" * 40, "bench")
-    ring, reference = read(out)
-    keys = ("system", "code", "reference_eV", "runs", "hits", "seeds")
-    assert {k: ring[k] for k in keys} == {k: read(gfn2 / "rescore.csv")[0][k] for k in keys}
-    assert (reference["runs"], reference["hits"]) == ("6", "4")
+    crest.rescore([source], out, "sample", -9.5, "0" * 40, "")
+    by_code = {row["code"]: row for row in read(out)}
+
+    anneal = by_code["anneal-general"]
+    assert (anneal["runs"], anneal["hits"]) == ("2", "1")
+    assert anneal["no_result"] == "1"
+    assert anneal["no_result_seeds"] == "2"
+    assert "1 runs stopped at the -10.00000000 stop target" in anneal["stop_note"]
+    assert anneal["median_charged_all"] == "5.0"
+    assert anneal["median_charged_ran"] == "10.0"
+
+    other = by_code["crest"]
+    assert (other["runs"], other["hits"]) == ("3", "0")
+    assert other["no_result"] == "1"
+    assert other["no_result_seeds"] == "3"
+    assert "1 runs ran to their own end" in other["stop_note"]
+    assert "1 runs stopped short of their recorded budget" in other["stop_note"]
+    assert other["median_budget_all"] == "20.0"
+    assert other["median_budget_ran"] == "25.0"
     with pytest.raises(SystemExit, match="no CREST rows"):
-        crest.rescore(history, out, "si20", -922.98227162, "0" * 40, "bench")
+        crest.rescore([source], out, "other", -1.0, "0" * 40, "")
+
+
+def test_rescore_preserves_the_legacy_file(tmp_path, monkeypatch):
+    pytest.importorskip("scipy.stats")
+    crest = load("gfn2_crest_legacy", "scripts/covalent_h2h/gfn2_crest.py")
+    monkeypatch.setitem(crest.REFERENCE, "sample", -10.0)
+    source = write(tmp_path / "rows.csv", synthetic_rescore_rows())
+    committed = ROOT / "bench" / "covalent-h2h" / "gfn2" / "rescore.csv"
+    legacy = tmp_path / "rescore.csv"
+    legacy.write_bytes(committed.read_bytes())
+    before = legacy.read_bytes()
+
+    crest.rescore([source], legacy, "sample", -9.5, "0" * 40, "")
+
+    assert legacy.read_bytes() == before
+    future = tmp_path / "rescore-v2.csv"
+    written = read(future)
+    assert len(written) == 2
+    assert list(written[0]) == crest.RESCORE_FIELDS
+    assert written[0]["machine_id"]
+    assert written[0]["cpu_model"]
 
 
 def test_the_committed_panel_is_the_same_on_every_seed(capsys):
