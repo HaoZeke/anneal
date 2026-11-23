@@ -946,9 +946,12 @@ impl Ledger {
         self.record_published(value, state);
     }
 
-    /// An atomic search has one incumbent, so it does not keep a second copy.
-    fn use_one_incumbent(&mut self) {
-        self.chain_is_separate = false;
+    /// Sets whether the main chain keeps an incumbent apart from the
+    /// published one. An atomic search has one incumbent and keeps no second
+    /// copy; a rigid search keeps both. Each search states which it is, so a
+    /// ledger that an earlier atomic search cleared is restored here.
+    fn set_chain_is_separate(&mut self, separate: bool) {
+        self.chain_is_separate = separate;
     }
 
     /// Records an auxiliary quench into the published incumbent only.
@@ -5032,9 +5035,7 @@ where
 {
     // Chosen once, with the copy of this search. An atomic library never
     // evaluates the rigid arms and never keeps a second incumbent.
-    if !RIGID {
-        ledger.use_one_incumbent();
-    }
+    ledger.set_chain_is_separate(RIGID);
     let _caller_stop = ledger.bind_stop();
     let mut floored = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
         relax_off_call_floor(cfg, &mut *relax, led, x, steps)
@@ -12898,6 +12899,37 @@ mod tests {
             "an atomic search stored a chain copy of its incumbent"
         );
         assert_eq!(ledger.walker_best(), f64::INFINITY);
+    }
+
+    #[test]
+    fn a_rigid_search_restores_the_separate_chain_incumbent() {
+        let n = 4;
+        let mut cfg = Config::recommended_tip4p(n);
+        cfg.restart_patience = 1;
+        cfg.relax_steps = 1;
+        let start = Array1::from_iter(
+            (0..6 * n).map(|k| if k < 3 * n { 3.0 * (k / 3) as f64 } else { 0.0 }),
+        );
+        let mut ledger = Ledger::new(40);
+        ledger.set_chain_is_separate(false);
+        ledger.record(-1.0, start.view());
+        assert!(
+            ledger.walker_state().is_none(),
+            "a ledger on one incumbent kept a chain copy"
+        );
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+            let _ = led.charge();
+            (-2.0, x.to_owned())
+        };
+        let mut rng = StdRng::seed_from_u64(5);
+        let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("valid");
+        assert!(out.rigid_path.is_some());
+        assert_eq!(ledger.walker_best(), -2.0);
+        assert!(
+            ledger.walker_state().is_some(),
+            "the rigid search left the chain incumbent unrecorded"
+        );
+        assert_eq!(ledger.best, -2.0);
     }
 
     #[test]

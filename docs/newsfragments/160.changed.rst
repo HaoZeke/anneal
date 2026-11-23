@@ -8,3 +8,5 @@ on TIP4P it stays 2.5 angstroms. A failed chain reversal is not a move,
 and a custom body can declare its bonds.
 The archive walk no longer indexes past its kernels when every arm
 reverses a chain, and it ends when it has no proposer.
+A rigid search restores its separate chain incumbent on a ledger that
+an atomic search had cleared.
