@@ -2962,6 +2962,7 @@ fn claim_observed_basis_probe(
     seen: &mut std::collections::HashSet<usize>,
 ) -> bool {
     !cfg.move_library.is_rigid_body()
+        && !cfg.move_library.is_molecular()
         && cfg.active_region.is_none()
         && cfg.frozen.is_none()
         && side_call_allowed(ledger)
@@ -10698,7 +10699,58 @@ mod tests {
         assert!(!claim_observed_basis_probe(
             &active, &ledger, 10, 3, &mut seen
         ));
+
+        let molecular = Config::recommended_molecular(
+            vec![8, 1, 1, 8, 1, 1],
+            vec![vec![0, 1, 2], vec![3, 4, 5]],
+            1.0,
+        );
+        assert!(!claim_observed_basis_probe(
+            &molecular, &ledger, 10, 4, &mut seen
+        ));
+
+        let mut reactive = Config::recommended(6);
+        reactive.move_library = MoveLibrary::Molecular {
+            groups: Vec::new(),
+            reactive: true,
+            reverse_cycles: false,
+        };
+        assert!(!claim_observed_basis_probe(
+            &reactive, &ledger, 10, 5, &mut seen
+        ));
         assert!(seen.is_empty());
+    }
+
+    #[test]
+    fn molecular_search_skips_observed_basis_probes() {
+        let mut cfg = quiet_basis_search(4);
+        cfg.species = Some(vec![6, 1, 1, 1]);
+        cfg.move_library = MoveLibrary::Molecular {
+            groups: vec![vec![0, 1, 2, 3]],
+            reactive: false,
+            reverse_cycles: false,
+        };
+        let tetra = regular_tetrahedron();
+        let mut ledger = Ledger::new(200);
+        let mut seen_parent = false;
+        let mut side_calls = 0usize;
+        let mut relax = |led: &mut Ledger, _x: ArrayView1<f64>, steps: usize| {
+            let side = led.spent() == 0 && seen_parent;
+            if side {
+                side_calls += 1;
+            } else {
+                seen_parent = true;
+            }
+            for _ in 0..steps {
+                if !led.charge() {
+                    break;
+                }
+            }
+            (0.0, tetra.clone())
+        };
+        let mut rng = StdRng::seed_from_u64(11);
+        run(&cfg, tetra.view(), &mut ledger, &mut relax, &mut rng).expect("search");
+        assert_eq!(side_calls, 0);
     }
 
     #[test]
