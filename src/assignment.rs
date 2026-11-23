@@ -37,7 +37,6 @@ pub(crate) fn certified_assignment(
     costs: &[f64],
     n: usize,
 ) -> Option<(Vec<usize>, Option<Certificate>)> {
-    ASSIGNMENT_IS_UNIQUE.with(|cell| cell.set(false));
     if n == 0 {
         return costs.is_empty().then(|| (Vec::new(), None));
     }
@@ -487,18 +486,12 @@ pub(crate) fn strict_unique_row_minima(costs: &[f64], n: usize) -> Option<Vec<us
 }
 
 pub(crate) fn successive_shortest_paths(costs: &[f64], n: usize) -> Option<Vec<usize>> {
-    successive_shortest_paths_scanned(costs, n).map(|(assignment, unique)| {
-        ASSIGNMENT_IS_UNIQUE.with(|cell| cell.set(unique));
-        assignment
-    })
+    successive_shortest_paths_scanned(costs, n).map(|(assignment, _)| assignment)
 }
 
 /// Same permutation as [`successive_shortest_paths`] without the uniqueness scan.
 ///
-/// A fivefold residual only uses the permutation. The alternating-cycle
-/// search that feeds the inverse-operation cache does not change it, and
-/// that cache reads the flag only after its own call to
-/// [`minimum_cost_assignment`].
+/// A fivefold residual only uses the permutation.
 pub(crate) fn successive_shortest_paths_matching(costs: &[f64], n: usize) -> Option<Vec<usize>> {
     solve_shortest_paths(costs, n, None).map(|(assignment, _)| assignment)
 }
@@ -535,18 +528,6 @@ fn kuhn_munkres_tolerance(costs: &[f64]) -> f64 {
         .iter()
         .fold(1.0_f64, |largest, value| largest.max(value.abs()));
     scale * 1e-9
-}
-
-/// Whether the last successful dense scan had no other optimal edge.
-///
-/// A Kuhn-Munkres result reports false: the smaller walks keep that
-/// solver's own tie break, and an inverse permutation is not reused.
-pub(crate) fn last_dense_optimum_was_unique() -> bool {
-    ASSIGNMENT_IS_UNIQUE.with(|cell| cell.get())
-}
-
-std::thread_local! {
-    static ASSIGNMENT_IS_UNIQUE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 fn successive_shortest_paths_scanned(costs: &[f64], n: usize) -> Option<(Vec<usize>, bool)> {

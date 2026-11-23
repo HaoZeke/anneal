@@ -35,19 +35,19 @@ pub fn project(
     }
     let (centred, centroid, scale) = centre_and_scale(x, n)?;
     let mut best: Option<(f64, [[f64; 3]; 3], Vec<[f64; 3]>)> = None;
-    let mut solved: Vec<Vec<Matched>> = Vec::with_capacity(orientations.len());
+    let turns = orientation_turns(orientations, ops);
+    let last_use = last_orientation_uses(&turns);
+    // Keep permutations only for orientations that a later orientation
+    // actually uses as a conjugacy hint. The previous rectangular cache held
+    // every assignment for every orientation until projection returned.
+    let mut solved: Vec<Option<Vec<Matched>>> = (0..orientations.len()).map(|_| None).collect();
     for (index, rotation) in orientations.iter().enumerate() {
         let y = apply_all(rotation, &centred);
         // An orientation that is an earlier one turned by an operation of
         // the group poses each operation's problem as the earlier one posed
         // the operation conjugated by that turn. A transposed operation
         // poses the transposed problem.
-        let turn = (0..index).find_map(|earlier| {
-            let relative = matmul(*rotation, transpose(orientations[earlier]));
-            ops.iter()
-                .find(|op| matrix_close(op, &relative))
-                .map(|turn| (earlier, *turn))
-        });
+        let turn = turns[index];
         let mut here: Vec<Matched> = Vec::with_capacity(ops.len());
         let mut hat = vec![[0.0; 3]; n];
         for (op_index, op) in ops.iter().enumerate() {
@@ -56,7 +56,7 @@ pub fn project(
                 ops.iter()
                     .position(|other| matrix_close(other, &conjugate))
                     .map(|other| Hint {
-                        matched: &solved[earlier][other],
+                        matched: &solved[earlier].as_ref().expect("referenced orientation")[other],
                         transposed: false,
                     })
             });
@@ -79,7 +79,14 @@ pub fn project(
             }
             here.push(matched);
         }
-        solved.push(here);
+        if last_use[index].is_some() {
+            solved[index] = Some(here);
+        }
+        if let Some((earlier, _)) = turn
+            && last_use[earlier] == Some(index)
+        {
+            solved[earlier] = None;
+        }
         let order = ops.len() as f64;
         let mut residual = 0.0;
         let mut norm = 0.0;
@@ -114,6 +121,34 @@ pub fn project(
     Some((coordinates, measure))
 }
 
+fn orientation_turns(
+    orientations: &[[[f64; 3]; 3]],
+    ops: &[[[f64; 3]; 3]],
+) -> Vec<Option<(usize, [[f64; 3]; 3])>> {
+    orientations
+        .iter()
+        .enumerate()
+        .map(|(index, rotation)| {
+            (0..index).find_map(|earlier| {
+                let relative = matmul(*rotation, transpose(orientations[earlier]));
+                ops.iter()
+                    .find(|op| matrix_close(op, &relative))
+                    .map(|turn| (earlier, *turn))
+            })
+        })
+        .collect()
+}
+
+fn last_orientation_uses(turns: &[Option<(usize, [[f64; 3]; 3])>]) -> Vec<Option<usize>> {
+    let mut last_use = vec![None; turns.len()];
+    for (index, turn) in turns.iter().enumerate() {
+        if let Some((earlier, _)) = turn {
+            last_use[*earlier] = Some(index);
+        }
+    }
+    last_use
+}
+
 /// Pair distance below which an average is a coordinate singularity.
 pub const SINGULAR_PAIR: f64 = 1.0e-2;
 
@@ -138,7 +173,6 @@ pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjectio
         return cached;
     }
     let orientations = inertia_orientations(x, classes.len())?;
-    clear_op_cache();
     let ops = detected_ops(x);
     let best = project(x, classes, &ops, &orientations).and_then(|(coordinates, measure)| {
         (closest_pair(&coordinates) >= SINGULAR_PAIR).then_some(GroupProjection {
@@ -261,14 +295,6 @@ fn is_identity(op: &[[f64; 3]; 3]) -> bool {
     true
 }
 
-struct SolvedOp {
-    y: Vec<u64>,
-    classes: Vec<u32>,
-    op: [[f64; 3]; 3],
-    matched: Matched,
-    unique: bool,
-}
-
 /// One operation's permutation and, per class block in label order, the
 /// certificate that forced it.
 #[derive(Clone)]
@@ -298,25 +324,6 @@ struct Hint<'a> {
     transposed: bool,
 }
 
-std::thread_local! {
-    static OP_CACHE: std::cell::RefCell<Vec<SolvedOp>> = const { std::cell::RefCell::new(Vec::new()) };
-}
-
-fn clear_op_cache() {
-    OP_CACHE.with(|slot| slot.borrow_mut().clear());
-}
-
-fn coordinate_bits(y: &[[f64; 3]]) -> Vec<u64> {
-    y.iter().flatten().map(|value| value.to_bits()).collect()
-}
-
-fn same_matrix(left: &[[f64; 3]; 3], right: &[[f64; 3]; 3]) -> bool {
-    left.iter()
-        .flatten()
-        .zip(right.iter().flatten())
-        .all(|(left, right)| left.to_bits() == right.to_bits())
-}
-
 fn matrix_close(left: &[[f64; 3]; 3], right: &[[f64; 3]; 3]) -> bool {
     left.iter()
         .flatten()
@@ -330,48 +337,6 @@ fn invert_perm(perm: &[usize]) -> Vec<usize> {
         inverse[column] = row;
     }
     inverse
-}
-
-fn recall_op(y: &[[f64; 3]], classes: &[u32], op: &[[f64; 3]; 3]) -> Option<Matched> {
-    let bits = coordinate_bits(y);
-    let transposed = transpose(*op);
-    OP_CACHE.with(|slot| {
-        let slot = slot.borrow();
-        for saved in slot.iter().rev() {
-            if saved.y != bits || saved.classes != classes {
-                continue;
-            }
-            if same_matrix(&saved.op, op) {
-                return Some(saved.matched.clone());
-            }
-            if saved.unique && matrix_close(&saved.op, &transposed) {
-                return Some(saved.matched.inverse());
-            }
-        }
-        None
-    })
-}
-
-fn remember_op(
-    y: &[[f64; 3]],
-    classes: &[u32],
-    op: &[[f64; 3]; 3],
-    matched: &Matched,
-    unique: bool,
-) {
-    OP_CACHE.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        if slot.len() > 800 {
-            slot.clear();
-        }
-        slot.push(SolvedOp {
-            y: coordinate_bits(y),
-            classes: classes.to_vec(),
-            op: *op,
-            matched: matched.clone(),
-            unique,
-        });
-    });
 }
 
 fn match_operated(
@@ -393,9 +358,6 @@ fn match_operated(
             blocks: vec![None; blocks.len()],
         });
     }
-    if let Some(saved) = recall_op(y, classes, op) {
-        return Some(saved);
-    }
     let images: Vec<[f64; 3]> = y.iter().map(|point| mul_vec(op, *point)).collect();
     let hinted = hint.map(|hint| {
         if hint.transposed {
@@ -412,7 +374,6 @@ fn match_operated(
     }
     let mut assignment = vec![usize::MAX; n];
     let mut certificates = Vec::with_capacity(blocks.len());
-    let mut unique = true;
     for (block, atoms) in blocks.values().enumerate() {
         let width = atoms.len();
         let mut costs = vec![0.0; width * width];
@@ -438,11 +399,6 @@ fn match_operated(
             Some((local, certificate)) => (local, Some(certificate)),
             None => certified_assignment(&costs, width)?,
         };
-        // Below 98 atoms the recorded permutation is Kuhn-Munkres. Its
-        // tie break is not the inverse of the transposed problem, so the
-        // cache reuses an inverse only for a unique dense optimum. A
-        // certificate is checked against the costs it is reused with.
-        unique &= width >= 98 && crate::assignment::last_dense_optimum_was_unique();
         for (row_i, &col_i) in local.iter().enumerate() {
             assignment[atoms[row_i]] = atoms[col_i];
         }
@@ -451,12 +407,10 @@ fn match_operated(
     if assignment.contains(&usize::MAX) {
         return None;
     }
-    let matched = Matched {
+    Some(Matched {
         assignment,
         blocks: certificates,
-    };
-    remember_op(y, classes, op, &matched, unique);
-    Some(matched)
+    })
 }
 
 pub(crate) fn identity() -> [[f64; 3]; 3] {
@@ -823,7 +777,6 @@ mod tests {
         ] {
             let orientations = inertia_orientations(x.view(), classes.len()).expect("axes");
             for ops in [turns_about_z(4), turns_about_z(3), inversion_ops()] {
-                clear_op_cache();
                 let (coordinates, measure) =
                     project(x.view(), &classes, &ops, &orientations).expect("projection");
                 let (walked, walked_measure) =
@@ -834,6 +787,16 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn projection_retains_one_match_row_for_related_turns() {
+        let ops = turns_about_z(12);
+        let turns = orientation_turns(&ops, &ops);
+        let last_use = last_orientation_uses(&turns);
+        let rows = last_use.into_iter().flatten().count();
+        assert_eq!(rows, 1);
+        assert_eq!(rows * ops.len(), ops.len());
     }
 
     fn turns_about_z(order: usize) -> Vec<[[f64; 3]; 3]> {
