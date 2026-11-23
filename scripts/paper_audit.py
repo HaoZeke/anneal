@@ -118,6 +118,7 @@ KNOWN_GAPS = {
     "results/cross-field-hits.csv": "revision and host unrecorded (no revision or host column)",
     "bench/tip4p-water-rates/rates-a24ba760.csv": "revision unrecorded (no revision column)",
     "bench/tip4p-water-rates/rates.csv": "revision unrecorded (no revision column)",
+    "bench/tip4p-h2h/rows-h2h-r2.csv": "revision recorded; no host column",
     "paper/jctc/data/system_visuals/references.csv": "revision and host unrecorded (no revision or host column)",
     "bench/gad-published/summary.csv": "revision recorded; no host column",
     "bench/morse-panel/seeds.csv": "revision and host unrecorded (no revision or host column)",
