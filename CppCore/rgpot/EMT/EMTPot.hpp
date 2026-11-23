@@ -7,6 +7,7 @@
 // Development Team.
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include "rgpot/ParamHash.hpp"
@@ -44,16 +45,10 @@ public:
   void forceImpl(const ForceInput &in, ForceOut *out) const override;
 
 private:
-  void reset() const;
-
   EMTConfig m_config;
   uint64_t m_paramsKey = 0;
-  mutable long m_nAtoms = 0;
-  mutable std::vector<int> m_numbers;
-  mutable void *m_cell = nullptr;
-  mutable void *m_atoms = nullptr;
-  mutable void *m_provider = nullptr;
-  mutable void *m_emt = nullptr;
+  struct State;
+  mutable std::unique_ptr<State> m_state;
 };
 
 } // namespace rgpot

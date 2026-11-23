@@ -20,9 +20,7 @@ NeighborList::NeighborList(Atoms *a, double rCut, double driftfactor,
   // Driftfactor defaults to 0.05, but is set to 0.0 by CNA and friends
   if (verbose > 2)
     cerr << "NeighborList::NeighborList beginning" << endl;
-  indices = 0;
   Allocate(); // Initializes nAtoms and nSize
-  neighborList = 0;
   rCut2 = rCut * rCut;
   double drift = driftfactor * rCut;
   drift2 = drift * drift;
@@ -53,12 +51,7 @@ NeighborList::NeighborList(Atoms *a, double rCut, double driftfactor,
   CheckAndUpdateNeighborList();
 }
 
-NeighborList::~NeighborList() {
-  if (indices != 0)
-    delete[] indices;
-  if (neighborList != 0)
-    delete[] neighborList;
-}
+NeighborList::~NeighborList() = default;
 
 void NeighborList::Allocate() {
   nAtoms = atoms->GetNumberOfRealAtoms();
@@ -76,9 +69,7 @@ void NeighborList::Allocate() {
 
   if (ghostAtoms != 0)
     nSize += ghostAtoms->GetNumberOfGhosts(); // Yes!
-  if (indices != 0)
-    delete[] indices;
-  indices = new int[nAtoms + 1];
+  indices.reset(new int[nAtoms + 1]);
 }
 
 /// \bug Changing the supercell while scaling the atomic positions has
@@ -128,16 +119,15 @@ void NeighborList::MakeList() {
 
   // delete old images and old neighbor lists:
   images.resize(0);
-  if (neighborList != 0)
-    delete[] neighborList;
+  neighborList.reset();
 
   // make space for new neighbor lists slightly bigger than the last one:
   //  nMax += int(0.15 * nMax) + 100;
   nMax += static_cast<int>(0.25 * nMax) + 100;
-  neighborList = new int[nMax];
+  neighborList.reset(new int[nMax]);
 
   // make the new neighbor list and new image atoms:
-  cellList.MakeNeighborList(neighborList, indices, nMax, images);
+  cellList.MakeNeighborList(neighborList.get(), indices.get(), nMax, images);
 
   atoms->SetNumberOfImages(images.size());
   // this could have changed the adress of positions. Get it again:
@@ -251,5 +241,5 @@ int NeighborList::GetNeighbors(int a1, int *neighbors, Vec *diffs,
 
 const int *NeighborList::GetList(int a, int &n) {
   n = indices[a + 1] - indices[a];
-  return neighborList + indices[a];
+  return neighborList.get() + indices[a];
 }

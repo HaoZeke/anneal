@@ -259,6 +259,8 @@ def _fd_cases():
         ("sw-cluster", lambda: RgpotCalculator("sw"), lambda: cluster("Si", 5.431, "diamond", 4.8)),
         ("eam-bulk", lambda: RgpotCalculator("eam_al", numerical_stress=True), al_small),
         ("eam-cluster", lambda: RgpotCalculator("eam_al", numerical_stress=True), lambda: cluster("Al", 4.05, "fcc", 4.5)),
+        ("emt-bulk", lambda: RgpotCalculator("emt", numerical_stress=True), cu_small),
+        ("emt-cluster", lambda: RgpotCalculator("emt", numerical_stress=True), lambda: cluster("Cu", 3.6, "fcc", 4.5)),
     ]
     marks = {"sw": needs_fortran, "eam": needs_fortran}
     for name, calc, geometry in cases:
@@ -282,6 +284,13 @@ def si_small() -> Atoms:
 def al_small() -> Atoms:
     """Four-atom fcc cell, far narrower than twice the 7.1 Angstrom cutoff."""
     atoms = sheared(bulk("Al", "fcc", a=4.05, cubic=True))
+    atoms.rattle(0.05, seed=3)
+    return atoms
+
+
+def cu_small() -> Atoms:
+    """Four-atom sheared fcc cell, far narrower than twice the EMT cutoff."""
+    atoms = sheared(bulk("Cu", "fcc", a=3.6, cubic=True))
     atoms.rattle(0.05, seed=3)
     return atoms
 
@@ -570,9 +579,22 @@ def test_eam_al_matches_ase_eam(repeat: int) -> None:
 # --- any bound potential ---------------------------------------------------
 
 
+def test_emt_is_available_to_the_ase_calculator() -> None:
+    atoms = bulk("Cu", "fcc", a=3.6, cubic=True)
+    atoms.rattle(0.02, seed=3)
+    atoms.set_cell([20.0, 20.0, 20.0], scale_atoms=False)
+    atoms.center()
+    atoms.calc = RgpotCalculator("emt", numerical_stress=True)
+    assert isinstance(atoms.calc.potential, rgpot.EMTPot)
+    assert atoms.calc.potential.config() == {"rasmussen": False}
+    assert np.isfinite(atoms.get_potential_energy())
+    assert np.all(np.isfinite(atoms.get_forces()))
+    assert np.all(np.isfinite(atoms.get_stress()))
+
+
 def test_kind_strings_cover_the_bound_classes() -> None:
     kinds = available_kinds()
-    for kind in ("lj", "ljcluster", "morse"):
+    for kind in ("emt", "lj", "ljcluster", "morse"):
         assert kind in kinds
     by_kind = RgpotCalculator("Morse", **CU)
     by_class = RgpotCalculator("MorsePot", **CU)
@@ -581,17 +603,17 @@ def test_kind_strings_cover_the_bound_classes() -> None:
         RgpotCalculator("morse", epsilon=1.0)
 
 
-@needs_fortran
 @pytest.mark.parametrize(
     ("kind", "symbol", "lattice", "a"),
     [
-        ("sw", "Si", "diamond", 5.431),
-        ("stillingerwebersi", "Si", "diamond", 5.431),
-        ("edip", "Si", "diamond", 5.431),
-        ("lenosky", "Si", "diamond", 5.431),
-        ("tersoff", "Si", "diamond", 5.431),
-        ("tersoffsic", "Si", "diamond", 5.431),
-        ("eam_al", "Al", "fcc", 4.05),
+        pytest.param("sw", "Si", "diamond", 5.431, marks=needs_fortran),
+        pytest.param("stillingerwebersi", "Si", "diamond", 5.431, marks=needs_fortran),
+        pytest.param("edip", "Si", "diamond", 5.431, marks=needs_fortran),
+        pytest.param("lenosky", "Si", "diamond", 5.431, marks=needs_fortran),
+        pytest.param("tersoff", "Si", "diamond", 5.431, marks=needs_fortran),
+        pytest.param("tersoffsic", "Si", "diamond", 5.431, marks=needs_fortran),
+        pytest.param("eam_al", "Al", "fcc", 4.05, marks=needs_fortran),
+        ("emt", "Cu", "fcc", 3.6),
     ],
 )
 def test_bundled_kinds_are_tiling_invariant(kind: str, symbol: str, lattice: str, a: float) -> None:

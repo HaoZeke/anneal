@@ -22,6 +22,7 @@ from ase.calculators.fd import (
     calculate_numerical_forces,
     calculate_numerical_stress,
 )
+from ase.calculators.emt import EMT
 from ase.calculators.lj import LennardJones
 from ase.calculators.socketio import SocketClient
 from ase.constraints import FixAtoms
@@ -131,6 +132,7 @@ CASES = [
     PotentialCase("morse", pair_cluster),
     PotentialCase("stillingerwebersi", silicon_cluster),
     PotentialCase("tersoffsic", silicon_cluster),
+    PotentialCase("emt", copper_cluster),
     PotentialCase("gromacs", pair_cluster),
     PotentialCase("openmm", pair_cluster),
 ]
@@ -221,6 +223,25 @@ def test_suite_covers_every_advertised_potential_type() -> None:
         assert mb._kernel_periodic is False
         covered_types.add(type(mb.potential).__name__)
     assert factory_types == covered_types
+
+
+def test_emt_energy_and_forces_match_ase_emt() -> None:
+    atoms = copper_cluster()
+    atoms.calc = RgpotCalculator("emt")
+    energy = atoms.get_potential_energy()
+    forces = atoms.get_forces()
+    assert energy == pytest.approx(4.602126, abs=1e-6)
+    assert np.max(np.linalg.norm(forces, axis=1)) == pytest.approx(
+        2.296119, abs=1e-5
+    )
+    np.testing.assert_allclose(forces.sum(axis=0), 0.0, atol=1e-8)
+
+    reference = copper_cluster()
+    reference.calc = EMT(asap_cutoff=True)
+    assert energy == pytest.approx(reference.get_potential_energy(), abs=1e-6)
+    np.testing.assert_allclose(
+        forces, reference.get_forces(), atol=1e-6, rtol=0.0
+    )
 
 
 @pytest.mark.parametrize("kind", ["gromacs", "openmm"])

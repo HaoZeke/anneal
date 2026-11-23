@@ -1,0 +1,1 @@
+`rgpot.EMTPot` brings the Asap effective-medium potential to Python, with `config`, `caps`, `evaluate`, `evaluate_batch` and the `hvp` family, and `RgpotCalculator("emt")` uses it with a kernel cutoff of 6.855 Angstrom, so a small cell such as cubic copper with `a=3.6` is tiled. Energies and forces agree with ASE's `EMT` when that is built with `asap_cutoff=True`.

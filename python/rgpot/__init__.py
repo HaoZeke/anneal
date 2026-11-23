@@ -23,6 +23,7 @@ import rgpot._core as _core
 
 __version__: str = str(getattr(_core, "__version__", "0"))
 LJPot = _core.LJPot
+EMTPot = _core.EMTPot
 rgpot_lammps_potential = _core.rgpot_lammps_potential
 rgpot_gromacs_potential = _core.rgpot_gromacs_potential
 rgpot_openmm_potential = _core.rgpot_openmm_potential
@@ -194,6 +195,7 @@ def evaluate_metatomic(
 
 __all__ = [
     "LJPot",
+    "EMTPot",
     "LJClusterPot",
     "MorsePot",
     "D2Pot",

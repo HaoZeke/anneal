@@ -4,10 +4,14 @@
 // Copper FCC cluster pin from eOn EMTCuTest / point_emt_cu.dat.
 
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
+#include <new>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -26,6 +30,40 @@
 #include "rgpot/EMT/Asap/Vec.h"
 
 using Catch::Matchers::WithinAbs;
+
+namespace {
+
+std::atomic<long> g_liveBlocks{0};
+
+} // namespace
+
+void *operator new(std::size_t size) {
+  void *block = std::malloc(size == 0 ? 1 : size);
+  if (block == nullptr) {
+    throw std::bad_alloc();
+  }
+  g_liveBlocks.fetch_add(1, std::memory_order_relaxed);
+  return block;
+}
+
+void operator delete(void *block) noexcept {
+  if (block != nullptr) {
+    g_liveBlocks.fetch_sub(1, std::memory_order_relaxed);
+    std::free(block);
+  }
+}
+
+void operator delete(void *block, std::size_t) noexcept {
+  ::operator delete(block);
+}
+
+void *operator new[](std::size_t size) { return ::operator new(size); }
+
+void operator delete[](void *block) noexcept { ::operator delete(block); }
+
+void operator delete[](void *block, std::size_t) noexcept {
+  ::operator delete(block);
+}
 
 TEST_CASE("EMT energy matches the copper cluster pin", "[emt]") {
   const std::vector<std::array<double, 3>> xyz = {{
@@ -323,6 +361,193 @@ TEST_CASE("EMT direct repeated force calls reuse the cached forces",
     } else {
       CHECK(countBitDiffs(first, ref_forces) == 0);
       CHECK(countBitDiffs(after_move, ref_moved) == 0);
+    }
+  }
+}
+
+namespace {
+
+using Box = std::array<std::array<double, 3>, 3>;
+
+rgpot::types::AtomMatrix copperCluster() {
+  const std::array<std::array<double, 3>, 4> xyz = {{
+      {8.1925, 8.1925, 8.1925},
+      {10.0, 10.0, 8.1925},
+      {10.0, 8.1925, 10.0},
+      {8.1925, 10.0, 10.0},
+  }};
+  rgpot::types::AtomMatrix positions(4, 3);
+  for (int i = 0; i < 4; ++i) {
+    for (int k = 0; k < 3; ++k) {
+      positions(i, k) = xyz[static_cast<size_t>(i)][static_cast<size_t>(k)];
+    }
+  }
+  return positions;
+}
+
+constexpr Box kCube = {{
+    {20.0, 0.0, 0.0},
+    {0.0, 20.0, 0.0},
+    {0.0, 0.0, 20.0},
+}};
+
+} // namespace
+
+TEST_CASE("EMT turns an Asap exception into std::invalid_argument",
+          "[emt][errors]") {
+  const auto positions = copperCluster();
+  const std::vector<int> carbon(4, 6);
+  rgpot::EMTPot pot;
+  REQUIRE_THROWS_AS(pot(positions, carbon, kCube), std::invalid_argument);
+  REQUIRE_THROWS_WITH(pot(positions, carbon, kCube),
+                      Catch::Matchers::ContainsSubstring("EMT"));
+}
+
+TEST_CASE("EMT keeps no state from a call that threw", "[emt][errors]") {
+  const auto positions = copperCluster();
+  const std::vector<int> carbon(4, 6);
+  const std::vector<int> copper(4, 29);
+  rgpot::EMTPot pot;
+  for (int attempt = 0; attempt < 3; ++attempt) {
+    REQUIRE_THROWS_AS(pot(positions, carbon, kCube), std::invalid_argument);
+  }
+  const auto [e_after, f_after, v_after] = pot(positions, copper, kCube);
+  rgpot::EMTPot fresh;
+  const auto [e_fresh, f_fresh, v_fresh] = fresh(positions, copper, kCube);
+  REQUIRE(e_after == e_fresh);
+  for (int i = 0; i < 4; ++i) {
+    for (int k = 0; k < 3; ++k) {
+      REQUIRE(f_after(i, k) == f_fresh(i, k));
+    }
+  }
+}
+
+TEST_CASE("EMT recovers after a cell that Asap refuses", "[emt][errors]") {
+  const auto positions = copperCluster();
+  const std::vector<int> copper(4, 29);
+  const Box thin = {{{6.0, 0.0, 0.0}, {0.0, 20.0, 0.0}, {0.0, 0.0, 20.0}}};
+  rgpot::EMTPot pot;
+  (void)pot(positions, copper, kCube);
+  REQUIRE_THROWS_AS(pot(positions, copper, thin), std::invalid_argument);
+  const auto [energy, forces, variance] = pot(positions, copper, kCube);
+  REQUIRE_THAT(energy, WithinAbs(5.129167, 5e-4));
+}
+
+TEST_CASE("EMT frees what a refused neighbour list construction allocated",
+          "[emt][errors]") {
+  const auto positions = copperCluster();
+  const std::vector<int> copper(4, 29);
+  const Box thin = {{{6.0, 0.0, 0.0}, {0.0, 20.0, 0.0}, {0.0, 0.0, 20.0}}};
+  rgpot::EMTPot pot;
+  REQUIRE_THROWS_AS(pot(positions, copper, thin), std::invalid_argument);
+
+  constexpr int kAttempts = 32;
+  int refused = 0;
+  const long before = g_liveBlocks.load();
+  for (int attempt = 0; attempt < kAttempts; ++attempt) {
+    try {
+      (void)pot(positions, copper, thin);
+    } catch (const std::invalid_argument &) {
+      ++refused;
+    }
+  }
+  const long after = g_liveBlocks.load();
+  CHECK(refused == kAttempts);
+  CHECK(after == before);
+}
+
+TEST_CASE("EMT rejects zero atoms", "[emt][errors]") {
+  rgpot::types::AtomMatrix none(0, 3);
+  const std::vector<int> nothing;
+  rgpot::EMTPot pot;
+  REQUIRE_THROWS_AS(pot(none, nothing, kCube), std::invalid_argument);
+  REQUIRE_THROWS_WITH(
+      pot(none, nothing, kCube),
+      Catch::Matchers::ContainsSubstring("nAtoms must be positive"));
+}
+
+TEST_CASE("EMT refuses a cell it cannot invert", "[emt][errors]") {
+  const auto positions = copperCluster();
+  const std::vector<int> copper(4, 29);
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const std::array<Box, 4> bad = {{
+      {{{0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}}},
+      {{{20.0, 0.0, 0.0}, {40.0, 0.0, 0.0}, {0.0, 0.0, 20.0}}},
+      {{{20.0, 0.0, 0.0}, {0.0, 20.0, 0.0}, {20.0, 20.0, 0.0}}},
+      {{{20.0, 0.0, 0.0}, {0.0, nan, 0.0}, {0.0, 0.0, 20.0}}},
+  }};
+  rgpot::EMTPot pot;
+  for (const Box &box : bad) {
+    REQUIRE_THROWS_AS(pot(positions, copper, box), std::invalid_argument);
+  }
+  const auto [energy, forces, variance] = pot(positions, copper, kCube);
+  REQUIRE_THAT(energy, WithinAbs(5.129167, 5e-4));
+}
+
+TEST_CASE("EMT refuses non-finite positions", "[emt][errors]") {
+  auto positions = copperCluster();
+  positions(2, 1) = std::numeric_limits<double>::infinity();
+  const std::vector<int> copper(4, 29);
+  rgpot::EMTPot pot;
+  REQUIRE_THROWS_AS(pot(positions, copper, kCube), std::invalid_argument);
+}
+
+TEST_CASE("EMT reports coincident atoms as std::domain_error",
+          "[emt][errors]") {
+  auto positions = copperCluster();
+  for (int k = 0; k < 3; ++k) {
+    positions(1, k) = positions(0, k);
+  }
+  const std::vector<int> copper(4, 29);
+  rgpot::EMTPot pot;
+  REQUIRE_THROWS_AS(pot(positions, copper, kCube), std::domain_error);
+}
+
+TEST_CASE("EMT follows a change of the cell between calls", "[emt]") {
+  constexpr int kRepeat = 4;
+  constexpr double kLattice = 3.61;
+  const std::array<std::array<double, 3>, 4> basis = {{
+      {0.0, 0.0, 0.0},
+      {0.0, 0.5, 0.5},
+      {0.5, 0.0, 0.5},
+      {0.5, 0.5, 0.0},
+  }};
+  const int n = 4 * kRepeat * kRepeat * kRepeat;
+  rgpot::types::AtomMatrix strained(n, 3);
+  rgpot::types::AtomMatrix relaxed(n, 3);
+  int at = 0;
+  for (int i = 0; i < kRepeat; ++i) {
+    for (int j = 0; j < kRepeat; ++j) {
+      for (int k = 0; k < kRepeat; ++k) {
+        for (const auto &site : basis) {
+          const std::array<double, 3> frac = {i + site[0], j + site[1],
+                                              k + site[2]};
+          for (int d = 0; d < 3; ++d) {
+            const double wobble = 0.03 * std::sin(1.7 * at + 2.3 * d);
+            relaxed(at, d) = kLattice * frac[static_cast<size_t>(d)] + wobble;
+            strained(at, d) = 1.05 * relaxed(at, d);
+          }
+          ++at;
+        }
+      }
+    }
+  }
+  const std::vector<int> copper(static_cast<size_t>(n), 29);
+  const double side = kLattice * kRepeat;
+  const Box cube = {{{side, 0.0, 0.0}, {0.0, side, 0.0}, {0.0, 0.0, side}}};
+  const Box stretched = {
+      {{1.05 * side, 0.0, 0.0}, {0.0, 1.05 * side, 0.0}, {0.0, 0.0, 1.05 * side}}};
+
+  rgpot::EMTPot reused;
+  (void)reused(relaxed, copper, cube);
+  const auto [e_reused, f_reused, v_reused] = reused(strained, copper, stretched);
+  rgpot::EMTPot fresh;
+  const auto [e_fresh, f_fresh, v_fresh] = fresh(strained, copper, stretched);
+
+  REQUIRE_THAT(e_reused, WithinAbs(e_fresh, 1e-9));
+  for (int i = 0; i < n; ++i) {
+    for (int d = 0; d < 3; ++d) {
+      REQUIRE_THAT(f_reused(i, d), WithinAbs(f_fresh(i, d), 1e-9));
     }
   }
 }
