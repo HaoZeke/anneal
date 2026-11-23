@@ -13462,6 +13462,31 @@ mod call_floor_tests {
     use super::*;
     use crate::methods::warm_lbfgs::WarmLbfgs;
     use crate::potentials::PairPotential;
+    use rand::RngCore;
+
+    /// Every `random::<f64>()` is the same value, so a rejection draw can
+    /// place the first point and no other.
+    struct ConstantBits(u64);
+
+    impl RngCore for ConstantBits {
+        fn next_u32(&mut self) -> u32 {
+            self.next_u64() as u32
+        }
+
+        fn next_u64(&mut self) -> u64 {
+            self.0
+        }
+
+        fn fill_bytes(&mut self, dest: &mut [u8]) {
+            let mut offset = 0;
+            while offset < dest.len() {
+                let bytes = self.next_u64().to_le_bytes();
+                let n = (dest.len() - offset).min(8);
+                dest[offset..offset + n].copy_from_slice(&bytes[..n]);
+                offset += n;
+            }
+        }
+    }
 
     const POINTS: usize = 13;
     const FLOOR: f64 = 0.9;
@@ -13662,6 +13687,75 @@ mod call_floor_tests {
         for i in 0..4 {
             for j in (i + 1)..4 {
                 assert!(distance(&x, i, j) + 1.0e-12 >= 1.4);
+            }
+        }
+    }
+
+    fn points_of(x: &Array1<f64>) -> Vec<[f64; 3]> {
+        (0..x.len() / 3)
+            .map(|i| [x[3 * i], x[3 * i + 1], x[3 * i + 2]])
+            .collect()
+    }
+
+    /// The requested sphere cannot hold the points, so the draw has to grow
+    /// it. The grown points are not the collinear fallback.
+    #[test]
+    fn random_cluster_in_radius_expands_a_sphere_that_cannot_hold_the_points() {
+        let n = 5;
+        let radius = 0.05;
+        let sep = 1.2;
+        let mut rng = StdRng::seed_from_u64(11);
+        let x = random_cluster_in_radius(n, radius, sep, &mut rng);
+        assert_eq!(x.len(), 3 * n);
+        for i in 0..n {
+            for j in (i + 1)..n {
+                assert!(
+                    distance(&x, i, j) + 1.0e-12 >= sep,
+                    "points {i} and {j} overlap"
+                );
+            }
+        }
+        let pts = points_of(&x);
+        assert!(
+            pts.iter()
+                .any(|p| (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt() > radius + 1.0e-8),
+            "every point still lies in the original sphere"
+        );
+        let off_axis = pts
+            .iter()
+            .filter(|p| p[1].abs() > 1.0e-8 || p[2].abs() > 1.0e-8)
+            .count();
+        assert!(
+            off_axis >= 3,
+            "expansion collapsed onto the fallback line ({off_axis} points off axis)"
+        );
+    }
+
+    /// A generator that repeats one sample accepts the first point and then
+    /// nothing. The remaining points are the line fallback.
+    #[test]
+    fn random_cluster_in_radius_falls_back_to_a_separated_line() {
+        let n = 4;
+        let sep = 1.5;
+        let mut rng = ConstantBits(0);
+        let x = random_cluster_in_radius(n, 2.0, sep, &mut rng);
+        assert_eq!(x.len(), 3 * n);
+        let pts = points_of(&x);
+        for i in 1..n {
+            assert!(
+                pts[i][1].abs() < 1.0e-12 && pts[i][2].abs() < 1.0e-12,
+                "point {i} is not on the fallback line: {:?}",
+                pts[i]
+            );
+            let step = pts[i][0] - pts[i - 1][0];
+            assert!(
+                (step - sep).abs() < 1.0e-9,
+                "fallback step {step} is not {sep}"
+            );
+        }
+        for i in 0..n {
+            for j in (i + 1)..n {
+                assert!(distance(&x, i, j) + 1.0e-12 >= sep);
             }
         }
     }
