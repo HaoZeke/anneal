@@ -122,8 +122,9 @@ jobs:
           trap 'chmod -R a+rwX /tsan-host 2>/dev/null || true' EXIT
           if [ -n "${BOOTSTRAP_CPYTHON:-}" ]; then
             # cpython-tsan:3.13t lists an amd64 manifest the registry does
-            # not serve. Build that interpreter here instead.
-            bash /src/ci/gha/apt-install.sh build-essential clang git pkg-config libffi-dev libssl-dev \
+            # not serve. Build that interpreter here instead. Install llvm
+            # so llvm-symbolizer is on PATH and TSan suppressions match.
+            bash /src/ci/gha/apt-install.sh build-essential clang llvm git pkg-config libffi-dev libssl-dev \
               libjpeg-dev zlib1g-dev libsqlite3-dev libbz2-dev liblzma-dev libreadline-dev ca-certificates curl xz-utils
             curl -fsSL -o /tmp/cpython.tar.gz \
               "https://github.com/python/cpython/archive/refs/tags/v${BOOTSTRAP_CPYTHON}.tar.gz"
@@ -278,6 +279,14 @@ jobs:
           # Upstream suppressions, pinned to commits rather than moving branches:
           # https://github.com/python/cpython/blob/bf397e272c2bee639c3ba0208c221f7dd9447bb6/Tools/tsan/suppressions_free_threading.txt
           # https://github.com/numpy/numpy/blob/30483388e8c07f1abd45b47c534801e9207d2643/tools/ci/tsan_suppressions.txt
+          if [ -n "${BOOTSTRAP_CPYTHON:-}" ] && ! command -v llvm-symbolizer >/dev/null 2>&1; then
+            for sym in /usr/lib/llvm-*/bin/llvm-symbolizer; do
+              if [ -x "${sym}" ]; then
+                export PATH="$(dirname "${sym}"):${PATH}"
+                break
+              fi
+            done
+          fi
           export OPENBLAS_NUM_THREADS=1
           export TSAN_OPTIONS="halt_on_error=1 allocator_may_return_null=1 suppressions=${SUP}"
           mapfile -t extra_args < <("$PY" -c 'import os, shlex; [print(p) for p in shlex.split(os.environ.get("PYTEST_ARGS", ""))]')
