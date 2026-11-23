@@ -276,13 +276,8 @@ fn main() {
     };
     let mut grad = |led: &mut Ledger, v: ArrayView1<f64>| {
         let pot = pot.lock().expect("pot");
-        if let Some((_, gradient)) = refused(&pot, v) {
-            return Some(gradient);
-        }
-        if !led.charge() {
-            return None;
-        }
-        Some(evaluate(&pot, v).1)
+        let refused = pot.refuses_geometry(v.as_slice().unwrap_or(&[]));
+        rgpot_eindir::certified_gradient(refused, || led.charge(), || evaluate(&pot, v))
     };
     let outcome: Outcome = run_with_gradient(
         &cfg,

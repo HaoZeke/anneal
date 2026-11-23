@@ -86,6 +86,24 @@ fn geometry_has_short_pair(positions: &[f64], atomic_numbers: &[i32], absolute: 
     })
 }
 
+/// The gradient a search may certify an answer with, or `None`.
+///
+/// A geometry the handle refuses, a call the budget cannot pay for and an
+/// evaluation with a non-finite energy or gradient give no gradient. A
+/// zero vector in their place would read as a converged stationary point.
+/// `refused` and `charge` run first, and `evaluate` only when both allow it.
+pub(crate) fn certified_gradient(
+    refused: bool,
+    charge: impl FnOnce() -> bool,
+    evaluate: impl FnOnce() -> (f64, ndarray::Array1<f64>),
+) -> Option<ndarray::Array1<f64>> {
+    if refused || !charge() {
+        return None;
+    }
+    let (energy, gradient) = evaluate();
+    (energy.is_finite() && gradient.iter().all(|value| value.is_finite())).then_some(gradient)
+}
+
 fn min_pair_distance_a(positions: &[f64]) -> f64 {
     let n = positions.len() / 3;
     if n < 2 {
@@ -254,6 +272,46 @@ mod tests {
                 "{elements:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_refused_or_nan_call_gives_no_gradient() {
+        use ndarray::Array1;
+        let finite = || (-1.0, Array1::from(vec![0.1, -0.2]));
+        let answer = certified_gradient(false, || true, finite);
+        assert_eq!(answer, Some(Array1::from(vec![0.1, -0.2])));
+
+        let mut charged = false;
+        let mut evaluated = false;
+        let refused = certified_gradient(
+            true,
+            || {
+                charged = true;
+                true
+            },
+            || {
+                evaluated = true;
+                finite()
+            },
+        );
+        assert!(refused.is_none() && !charged && !evaluated);
+
+        let mut evaluated = false;
+        let unpaid = certified_gradient(
+            false,
+            || false,
+            || {
+                evaluated = true;
+                finite()
+            },
+        );
+        assert!(unpaid.is_none() && !evaluated);
+
+        let nan_energy = certified_gradient(false, || true, || (f64::NAN, Array1::zeros(2)));
+        assert!(nan_energy.is_none());
+        let nan_gradient =
+            certified_gradient(false, || true, || (-1.0, Array1::from(vec![f64::NAN, 0.0])));
+        assert!(nan_gradient.is_none());
     }
 
     #[test]
