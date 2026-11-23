@@ -197,6 +197,69 @@ def test_cluster_search_water_sites_is_quiet_and_reports_the_walks(capfd):
     }
 
 
+def test_cluster_search_rigid_path_on_early_stop_and_none_for_atomic():
+    n = 3
+    start = np.concatenate(
+        [np.array([0.0, 0.0, 0.0, 3.4, 0.0, 0.0, 0.0, 3.4, 0.0]), np.full(3 * n, 0.3)]
+    )
+    expected_keys = {
+        "shell",
+        "archive",
+        "recorded",
+        "withhold_nonfinite",
+        "withhold_insane",
+        "withhold_overlap",
+        "withhold_gradient",
+    }
+
+    early_budget = cluster_search(
+        lambda x: rigid_energy_grad(x)[0],
+        lambda x: rigid_energy_grad(x)[1],
+        n,
+        1,
+        seed=0,
+        start=start,
+        water_sites=WATER_SITES,
+    )
+    assert early_budget["hops"] == 0
+    assert set(early_budget["rigid_path"]) == expected_keys
+
+    early_target = cluster_search(
+        lambda x: rigid_energy_grad(x)[0],
+        lambda x: rigid_energy_grad(x)[1],
+        n,
+        600,
+        seed=0,
+        start=start,
+        water_sites=WATER_SITES,
+        target=1.0e6,
+    )
+    assert early_target["hops"] == 0
+    assert set(early_target["rigid_path"]) == expected_keys
+
+    rigid_flag = cluster_search(
+        lambda x: rigid_energy_grad(x)[0],
+        lambda x: rigid_energy_grad(x)[1],
+        n,
+        1,
+        seed=0,
+        start=start,
+        rigid=True,
+    )
+    assert rigid_flag["hops"] == 0
+    assert set(rigid_flag["rigid_path"]) == expected_keys
+
+    atomic = cluster_search(lj_energy, lj_grad, n, 1, seed=0)
+    assert atomic["hops"] == 0
+    assert atomic.get("rigid_path") is None
+    assert "rigid_path" not in atomic
+
+    atomic_full = cluster_search(lj_energy, lj_grad, n, 200, seed=0)
+    assert atomic_full["hops"] > 0
+    assert atomic_full.get("rigid_path") is None
+    assert "rigid_path" not in atomic_full
+
+
 def test_cluster_search_water_sites_validation():
     f = lambda x: rigid_energy_grad(x)[0]  # noqa: E731
     g = lambda x: rigid_energy_grad(x)[1]  # noqa: E731

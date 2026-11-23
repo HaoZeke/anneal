@@ -6,8 +6,9 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use anneal_core::hmc::hop::HopConfig;
 use anneal_core::hmc::metric::MetricKind;
 use anneal_core::methods::cluster_hopping::{
-    ChainCheckpoint, CheckpointAction, Config, ContinuousSymmetry, HopStop, Ledger, Outcome, run,
-    run_with_energy_gradient, run_with_energy_gradient_at_checkpoints, run_with_gradient,
+    ChainCheckpoint, CheckpointAction, Config, ContinuousSymmetry, HopStop, Ledger, Outcome,
+    RigidPathDiag, run, run_with_energy_gradient, run_with_energy_gradient_at_checkpoints,
+    run_with_gradient,
 };
 use ndarray::{Array1, ArrayView1, array, s};
 use rand::SeedableRng;
@@ -82,6 +83,33 @@ fn a_stop_raised_before_the_opening_quench_is_a_caller_stop() {
     let out = flat_run(&bare(3), &mut ledger);
     assert_eq!(out.stop, Some(HopStop::CallerStop));
     assert_eq!(out.charged, 0);
+    assert!(out.rigid_path.is_none());
+}
+
+#[test]
+fn a_rigid_search_stopped_in_the_opening_quench_keeps_rigid_path() {
+    let cfg = quiet(Config::for_tip4p(2));
+    let rest = array![-1.5, 0.0, 0.0, 1.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let mut rng = StdRng::seed_from_u64(5);
+
+    let mut before = Ledger::with_stop(32, Arc::new(AtomicBool::new(true)));
+    let mut relax = flat;
+    let out_before = run(&cfg, rest.view(), &mut before, &mut relax, &mut rng)
+        .expect("caller stop is not a refused start");
+    assert_eq!(out_before.stop, Some(HopStop::CallerStop));
+    assert_eq!(out_before.rigid_path, Some(RigidPathDiag::default()));
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let mut refused = |ledger: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+        assert!(ledger.charge());
+        stop.store(true, Ordering::Relaxed);
+        (f64::NAN, x.to_owned())
+    };
+    let mut inside = Ledger::with_stop(32, Arc::clone(&stop));
+    let out_inside = run(&cfg, rest.view(), &mut inside, &mut refused, &mut rng)
+        .expect("caller stop inside refused start is not a refused start");
+    assert_eq!(out_inside.stop, Some(HopStop::CallerStop));
+    assert_eq!(out_inside.rigid_path, Some(RigidPathDiag::default()));
 }
 
 #[test]
