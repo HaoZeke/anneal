@@ -57,6 +57,10 @@ _rt_atoms = {
     'mdi': mdi_enabled,
     'pymdi': has_pymdi,
 }
+# Flipped only in the block that registers rgpot_so_exports. The registry
+# feature of the same name is this value, so a static fast-list object,
+# which does not register the pin, does not have to list it.
+rgpot_registers_so_exports = false
 _rt_tests = []
 _rt_kw = {}
 _tsan_supp = meson.project_source_root() / 'CppCore' / 'tests' / 'tsan.supp'
@@ -699,6 +703,7 @@ if not get_option('with_rpc_client_only')
                 ]
                 _so_export_args += ['--whole-archive']
             endif
+            rgpot_registers_so_exports = true
             test(
                 'rgpot_so_exports',
                 find_program('python3'),
