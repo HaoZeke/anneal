@@ -681,7 +681,7 @@ unsafe extern "C" fn rgpot_grad_cb(
 ///   (may be NULL; defaults to [-50, 50] per dimension).
 ///
 /// The caller must eventually pass the returned pointer to
-/// [`rgpot_potential_free`].
+/// [`rgpot_potential_free`](crate::c_api::potential::rgpot_potential_free).
 ///
 /// # Safety
 ///

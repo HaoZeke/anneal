@@ -16,7 +16,7 @@
 //!    retrieves it with [`rgpot_last_error()`]. The pointer is valid until
 //!    the next `rgpot_*` call on the same thread.
 //!
-//! 3. **[`catch_unwind`]** — A wrapper used inside every `extern "C"`
+//! 3. **`catch_unwind`** — A wrapper used inside every `extern "C"`
 //!    function to catch Rust panics before they unwind across the FFI
 //!    boundary (which is undefined behaviour). Caught panics become
 //!    `RGPOT_INTERNAL_ERROR` with the panic message stored for retrieval.

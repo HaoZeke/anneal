@@ -31,11 +31,14 @@ if ! "${PY}" -c 'import numpy' >/dev/null 2>&1; then
   env -u CFLAGS -u CXXFLAGS -u FFLAGS -u FCFLAGS -u LDFLAGS \
     "${PY}" -m pip install 'numpy'
 fi
+PIP_SCIPY_ARGS=()
 if "${PY}" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 13) and hasattr(sys, "_is_gil_enabled") and not sys._is_gil_enabled() else 1)'; then
   # Current SciPy, Pillow, Matplotlib, ContourPy, and KiwiSolver dropped
-  # cp313t wheels; pin to the latest releases with cp313t wheels before ase.
+  # cp313t wheels; pin to the latest releases with cp313t wheels before ase,
+  # and forbid source builds of scipy so pip never falls back to an sdist.
+  PIP_SCIPY_ARGS=(--only-binary=scipy)
   env -u CFLAGS -u CXXFLAGS -u FFLAGS -u FCFLAGS -u LDFLAGS \
-    "${PY}" -m pip install \
+    "${PY}" -m pip install "${PIP_SCIPY_ARGS[@]}" \
       'scipy>=1.15,<1.18' \
       'pillow>=11,<12.3' \
       'matplotlib>=3.9,<3.11.2' \
@@ -43,7 +46,8 @@ if "${PY}" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 13)
       'kiwisolver>=1.4,<1.5.1'
 fi
 env -u CFLAGS -u CXXFLAGS -u FFLAGS -u FCFLAGS -u LDFLAGS \
-  "${PY}" -m pip install 'nanobind==3.1.0' 'ase>=3.23' meson ninja
+  "${PY}" -m pip install ${PIP_SCIPY_ARGS[@]+"${PIP_SCIPY_ARGS[@]}"} \
+    'nanobind==3.1.0' 'ase>=3.23' meson ninja
 
 SITE="$("${PY}" -c 'import site; print(site.getsitepackages()[0])')"
 EXE="$("${PY}" -c 'import sys; print(sys.executable)')"
