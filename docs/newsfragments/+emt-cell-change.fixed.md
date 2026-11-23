@@ -1,0 +1,1 @@
+`EMTPot` returns the energy and forces of the new cell when the cell changes between calls with the same species. Asap's neighbour list does not notice a new cell, so the kernel kept the old pairs and a strain of 5% gave an energy tens of eV off. Numerical stress through `RgpotCalculator` with `"emt"` now agrees with ASE's `EMT`.

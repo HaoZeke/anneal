@@ -8,6 +8,7 @@
 #include "Vec.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <memory>
@@ -20,6 +21,7 @@ namespace rgpot {
 // Members are released in reverse order: the calculator first, the
 // provider it may borrow last.
 struct EMTPot::State {
+  std::array<double, 9> box;
   std::vector<int> numbers;
   std::unique_ptr<EMTRasmussenParameterProvider> provider;
   std::unique_ptr<Atoms> atoms;
@@ -88,11 +90,14 @@ void EMTPot::forceImpl(const ForceInput &in, ForceOut *out) const {
       Vec(in.box[6], in.box[7], in.box[8]),
   };
   try {
-    if (!m_state || !std::equal(in.atmnrs, in.atmnrs + n,
-                                m_state->numbers.begin(),
-                                m_state->numbers.end())) {
+    // Asap's neighbour list does not notice a new cell, so the cached
+    // objects serve one cell and one species list only.
+    if (!m_state || !std::equal(in.box, in.box + 9, m_state->box.begin()) ||
+        !std::equal(in.atmnrs, in.atmnrs + n, m_state->numbers.begin(),
+                    m_state->numbers.end())) {
       bool periodic[3] = {true, true, true};
       auto next = std::make_unique<State>();
+      std::copy(in.box, in.box + 9, next->box.begin());
       next->numbers.assign(in.atmnrs, in.atmnrs + n);
       next->cell = std::make_unique<SuperCell>(basis, periodic);
       next->atoms = std::make_unique<Atoms>(reinterpret_cast<Vec *>(pos.data()),

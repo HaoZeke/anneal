@@ -444,6 +444,55 @@ TEST_CASE("EMT reports coincident atoms as std::domain_error",
   REQUIRE_THROWS_AS(pot(positions, copper, kCube), std::domain_error);
 }
 
+TEST_CASE("EMT follows a change of the cell between calls", "[emt]") {
+  constexpr int kRepeat = 4;
+  constexpr double kLattice = 3.61;
+  const std::array<std::array<double, 3>, 4> basis = {{
+      {0.0, 0.0, 0.0},
+      {0.0, 0.5, 0.5},
+      {0.5, 0.0, 0.5},
+      {0.5, 0.5, 0.0},
+  }};
+  const int n = 4 * kRepeat * kRepeat * kRepeat;
+  rgpot::types::AtomMatrix strained(n, 3);
+  rgpot::types::AtomMatrix relaxed(n, 3);
+  int at = 0;
+  for (int i = 0; i < kRepeat; ++i) {
+    for (int j = 0; j < kRepeat; ++j) {
+      for (int k = 0; k < kRepeat; ++k) {
+        for (const auto &site : basis) {
+          const std::array<double, 3> frac = {i + site[0], j + site[1],
+                                              k + site[2]};
+          for (int d = 0; d < 3; ++d) {
+            const double wobble = 0.03 * std::sin(1.7 * at + 2.3 * d);
+            relaxed(at, d) = kLattice * frac[static_cast<size_t>(d)] + wobble;
+            strained(at, d) = 1.05 * relaxed(at, d);
+          }
+          ++at;
+        }
+      }
+    }
+  }
+  const std::vector<int> copper(static_cast<size_t>(n), 29);
+  const double side = kLattice * kRepeat;
+  const Box cube = {{{side, 0.0, 0.0}, {0.0, side, 0.0}, {0.0, 0.0, side}}};
+  const Box stretched = {
+      {{1.05 * side, 0.0, 0.0}, {0.0, 1.05 * side, 0.0}, {0.0, 0.0, 1.05 * side}}};
+
+  rgpot::EMTPot reused;
+  (void)reused(relaxed, copper, cube);
+  const auto [e_reused, f_reused, v_reused] = reused(strained, copper, stretched);
+  rgpot::EMTPot fresh;
+  const auto [e_fresh, f_fresh, v_fresh] = fresh(strained, copper, stretched);
+
+  REQUIRE_THAT(e_reused, WithinAbs(e_fresh, 1e-9));
+  for (int i = 0; i < n; ++i) {
+    for (int d = 0; d < 3; ++d) {
+      REQUIRE_THAT(f_reused(i, d), WithinAbs(f_fresh(i, d), 1e-9));
+    }
+  }
+}
+
 TEST_CASE("EMT OpenMP force path is bit-identical across threads", "[emt][threads]") {
   ThreadGuard guard;
   rgpot::EMTPot sanity;

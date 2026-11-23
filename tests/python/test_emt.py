@@ -198,3 +198,23 @@ def test_every_covered_element_tiles_to_a_cell_asap_accepts(
         atoms.numbers[:] = number
         atoms.calc = RgpotCalculator(rgpot.EMTPot(rasmussen=rasmussen))
         assert np.isfinite(atoms.get_potential_energy()), number
+
+
+@pytest.mark.parametrize("strain", [1e-6, 1e-3, 0.05])
+def test_a_changed_cell_gives_the_same_result_as_a_fresh_instance(strain: float) -> None:
+    atoms = bulk("Cu", "fcc", a=3.61, cubic=True).repeat(4)
+    atoms.rattle(0.05, seed=2)
+    numbers = [29] * len(atoms)
+    gradient = np.eye(3)
+    gradient[0, 0] += strain
+    gradient[1, 2] += 0.5 * strain
+    gradient[2, 1] += 0.5 * strain
+    cell = atoms.cell.array @ gradient
+    positions = atoms.positions @ gradient
+
+    reused = rgpot.EMTPot()
+    reused(atoms.positions, numbers, atoms.cell.array)
+    energy, forces, _ = reused(positions, numbers, cell)
+    fresh_energy, fresh_forces, _ = rgpot.EMTPot()(positions, numbers, cell)
+    assert energy == pytest.approx(fresh_energy, abs=1e-9)
+    np.testing.assert_allclose(forces, fresh_forces, atol=1e-9, rtol=0.0)
