@@ -8728,6 +8728,8 @@ where
         if cfg.point_symmetrise_on_new
             && accept
             && hop_room(hops)
+            && !ledger.target_reached()
+            && !ledger.stopped()
             && (moved_basin || cfg.point_symmetrise_every_accept)
             && let Some(y) = crate::symmetrise::symmetrise_core(
                 x.view(),
@@ -8783,6 +8785,8 @@ where
         if cfg.packing_surface().orbit_on_new
             && accept
             && hop_room(hops)
+            && !ledger.target_reached()
+            && !ledger.stopped()
             && (moved_basin || cfg.point_symmetrise_every_accept)
             && history_here
                 .zip(history.as_deref_mut())
@@ -8798,6 +8802,9 @@ where
                 cfg.min_separation,
             );
             for (k, y) in candidates.iter().enumerate() {
+                if ledger.target_reached() || ledger.stopped() {
+                    break;
+                }
                 if candidates[..k]
                     .iter()
                     .any(|earlier| hop_is_identity(earlier.view(), y.view()))
@@ -8900,6 +8907,8 @@ where
         // again and lands on the shelf with the same odds.
         if cfg.jump_on_stall
             && hop_room(hops)
+            && !ledger.target_reached()
+            && !ledger.stopped()
             && cfg.jump_patience > 0
             && quiet >= cfg.jump_patience
             && quiet.is_multiple_of(cfg.jump_patience)
@@ -8973,6 +8982,8 @@ where
         // (Hop.cloning_dominates). The jump replaces the state and its
         // energy and nothing else; Metropolis continues raw.
         if quiet >= seam_patience
+            && !ledger.target_reached()
+            && !ledger.stopped()
             && let Some(bank) = seam.as_ref()
             && let Some((_, frontier_energy, frontier_state)) =
                 bank.restart(0.25, rng.random::<f64>())
@@ -8993,7 +9004,12 @@ where
             restarts += 1;
             continue;
         }
-        if cfg.symmetrise_on_stall && stuck && hop_room(hops) {
+        if cfg.symmetrise_on_stall
+            && stuck
+            && hop_room(hops)
+            && !ledger.target_reached()
+            && !ledger.stopped()
+        {
             let withhold = cfg.active_region.is_some() || cfg.frozen.is_some();
             if withhold {
                 // Withhold Ih-preserving symmetrise on a packing cluster,
@@ -9115,7 +9131,7 @@ where
         // the last one the cap allows. The climb can take up to three, one
         // per lattice growth and one for its activation quench, so each of
         // those rechecks.
-        let stall_response = if !hop_room(hops) {
+        let stall_response = if !hop_room(hops) || ledger.target_reached() || ledger.stopped() {
             None
         } else if directed_leave {
             stall_arms.iter().position(|arm| *arm == "climb")
@@ -9327,13 +9343,12 @@ where
                     {
                         observed_basis_best = Some((basis_energy, basis_state));
                     }
-                    if ledger.stopped() || side_ledger.stopped() {
+                    if ledger.target_reached() || ledger.stopped() || side_ledger.stopped() {
                         break HopStop::of_closed(ledger);
                     }
                 }
             }
-            if stall_outcome.is_none()
-                && hop_room(hops)
+            if hop_room(hops)
                 && side_call_allowed(ledger)
                 && let Some(g) = grad.as_deref_mut()
             {
@@ -9445,6 +9460,8 @@ where
             && ledger.spent().saturating_sub(last_polish_spent)
                 >= cfg.polish_records.saturating_mul(4);
         if cfg.polish_records > 0
+            && !ledger.target_reached()
+            && !ledger.stopped()
             && (improved_record || visit_due)
             && let Some(best_state) = if improved_record {
                 ledger.best_state.clone()
@@ -9466,8 +9483,13 @@ where
                 && quench_is_sane(cfg, polished_energy, polished_state.view())
             {
                 let validated = match grad.as_deref_mut() {
-                    Some(gradient) => gradient(ledger, polished_state.view())
-                        .is_some_and(|g| answer_gradient_ok(cfg, g.view(), polished_state.len())),
+                    Some(gradient) => {
+                        !ledger.target_reached()
+                            && !ledger.stopped()
+                            && gradient(ledger, polished_state.view()).is_some_and(|g| {
+                                answer_gradient_ok(cfg, g.view(), polished_state.len())
+                            })
+                    }
                     None => true,
                 };
                 if validated {
@@ -9479,6 +9501,9 @@ where
                     unconverged_records += 1;
                 }
             }
+        }
+        if ledger.target_reached() || ledger.stopped() {
+            break HopStop::of_closed(ledger);
         }
         // Offered on a period rather than behind the energy stall the other
         // escapes use, because this mechanism carries its own trapping test and
@@ -9789,7 +9814,7 @@ where
                         t.view(),
                         cfg.path_images,
                         |img| {
-                            if ledger.remaining() == 0 {
+                            if !side_call_allowed(ledger) {
                                 return None;
                             }
                             let (ev, xv) = relax(ledger, img, cfg.relax_steps);
@@ -11010,6 +11035,124 @@ mod tests {
             "the hit clock {at} dropped the probe's {side_charges} calls"
         );
         assert_eq!(at, outcome.charged);
+    }
+
+    #[test]
+    fn a_target_hit_in_basis_probe_stops_before_tail_stages() {
+        let mut cfg = quiet_basis_search(4);
+        cfg.polish_records = 7;
+        cfg.superbasin_escape = true;
+        cfg.superbasin_period = 1;
+        cfg.replicas = 2;
+        cfg.swap_period = 2;
+        cfg.ladder_pilot = 2;
+        cfg.path_on_stall = true;
+        cfg.max_hops = Some(4);
+        let mut ledger = Ledger::new(400);
+        ledger.stop_below(-10.0);
+        let tetra = regular_tetrahedron();
+        let mut seen_parent = false;
+        let mut polish_calls = 0usize;
+        let mut climb_grad_calls = 0usize;
+        let mut hit_probe_done = false;
+        let mut relax = |led: &mut Ledger, _x: ArrayView1<f64>, steps: usize| {
+            if steps == cfg.polish_records {
+                polish_calls += 1;
+            }
+            let side = led.spent() == 0 && seen_parent;
+            if !side {
+                seen_parent = true;
+            }
+            for _ in 0..steps {
+                if !led.charge() {
+                    break;
+                }
+            }
+            let energy = if side { -100.0 } else { 0.0 };
+            (energy, tetra.clone())
+        };
+        let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| {
+            if hit_probe_done {
+                climb_grad_calls += 1;
+            }
+            let side = led.budget() < 400;
+            let out = led.charge().then(|| Array1::zeros(x.len()));
+            if side {
+                hit_probe_done = true;
+            }
+            out
+        };
+        let mut rng = StdRng::seed_from_u64(11);
+        let outcome = run_with_gradient(
+            &cfg,
+            tetra.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut rng,
+        )
+        .expect("search");
+        assert!(hit_probe_done, "the observed-basis probe must hit target");
+        assert_eq!(outcome.stop, Some(HopStop::Target));
+        assert_eq!(polish_calls, 0, "polish_records ran after probe target hit");
+        assert_eq!(
+            climb_grad_calls, 0,
+            "stall-climb or tail gradient ran after probe target hit"
+        );
+        assert_eq!(
+            outcome.swaps_tried, 0,
+            "replica swaps ran after target was reached"
+        );
+    }
+
+    #[test]
+    fn a_post_hop_target_hit_skips_polish_swaps_and_tail_stages() {
+        let mut cfg = quiet_basis_search(4);
+        cfg.escape_on_stall = false;
+        cfg.restart_on_stall = true;
+        cfg.stall_patience = 1;
+        cfg.polish_records = 7;
+        cfg.superbasin_escape = true;
+        cfg.superbasin_period = 1;
+        cfg.replicas = 2;
+        cfg.swap_period = 1;
+        cfg.ladder_pilot = 1;
+        cfg.path_on_stall = true;
+        cfg.max_hops = Some(2);
+        let mut ledger = Ledger::new(400);
+        ledger.stop_below(-10.0);
+        let tetra = regular_tetrahedron();
+        let mut calls = 0usize;
+        let mut polish_calls = 0usize;
+        let mut post_target_calls = 0usize;
+        let mut relax = |led: &mut Ledger, _x: ArrayView1<f64>, steps: usize| {
+            if led.target_reached() {
+                post_target_calls += 1;
+            }
+            if steps == cfg.polish_records {
+                polish_calls += 1;
+            }
+            calls += 1;
+            for _ in 0..steps {
+                if !led.charge() {
+                    break;
+                }
+            }
+            // Opening quench (1), rung-1 opening quench (2), hop 1 (3), then
+            // stall-restart (4) hits the target on the final allowed hop.
+            let energy = if calls >= 4 { -20.0 } else { 0.0 };
+            (energy, tetra.clone())
+        };
+        let mut rng = StdRng::seed_from_u64(11);
+        let outcome = run(&cfg, tetra.view(), &mut ledger, &mut relax, &mut rng).expect("search");
+        assert_eq!(outcome.stop, Some(HopStop::Target));
+        assert_eq!(outcome.best, -20.0);
+        assert_eq!(polish_calls, 0, "polish_records ran after target hit");
+        assert_eq!(post_target_calls, 0, "relax ran after target was reached");
+        assert_eq!(
+            outcome.swaps_tried, 0,
+            "replica swaps ran after target was reached"
+        );
     }
 
     #[test]
