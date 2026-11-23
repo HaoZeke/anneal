@@ -33,6 +33,43 @@ use std::time::Instant;
 
 const HIT_TOL: f64 = anneal_core::DEFAULT_HIT_TOL;
 
+/// FNV-1a 64 over the little-endian bits of each recorded energy, in order.
+fn recorded_energy_hash(out: &Outcome) -> (u64, usize) {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut recorded = 0usize;
+    for (_, _, _, energy) in &out.improvements {
+        recorded += 1;
+        for byte in energy.to_bits().to_le_bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    (hash, recorded)
+}
+
+fn gate_record_line(out: &Outcome, outside_s: f64) -> String {
+    let (hash, recorded) = recorded_energy_hash(out);
+    let (returned, known, fresh) = out.visit_counts;
+    format!(
+        "gate_record unconverged={} energy_hash={hash:016x} n_recorded={recorded} best={:.16e} best_bits={:016x} hops={} basins={} visits={returned}-{known}-{fresh} outside_s={outside_s:.6} charged={}",
+        out.unconverged_records,
+        out.best,
+        out.best.to_bits(),
+        out.hops,
+        out.basins,
+        out.charged,
+    )
+}
+
+fn gate_energies_line(out: &Outcome) -> String {
+    let mut line = String::from("gate_energies");
+    for (_, _, _, energy) in &out.improvements {
+        line.push(' ');
+        line.push_str(&format!("{:016x}", energy.to_bits()));
+    }
+    line
+}
+
 fn main() {
     anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -108,6 +145,9 @@ fn cmd_run(args: &[String]) -> i32 {
         cpu_model(),
         cpu_pins(),
     );
+    let outside_s = (wall - pot_s).max(0.0);
+    println!("{}", gate_record_line(&outcome, outside_s));
+    println!("{}", gate_energies_line(&outcome));
     0
 }
 
