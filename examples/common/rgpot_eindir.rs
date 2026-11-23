@@ -684,7 +684,12 @@ impl RgpotObjective {
             return false;
         }
         let kernel = unsafe { &*self.xtb };
-        geometry_has_short_pair(coordinates, &kernel.atomic_numbers, kernel.overlap_limit_a)
+        let refused =
+            geometry_has_short_pair(coordinates, &kernel.atomic_numbers, kernel.overlap_limit_a);
+        if refused {
+            note_geometry_rejected(min_pair_distance_a(coordinates));
+        }
+        refused
     }
 
     pub(crate) fn wrapper(&self) -> EindirObjectiveWrapper<'_> {
