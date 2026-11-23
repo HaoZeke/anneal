@@ -94,6 +94,8 @@ fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
                     | "surfaces"
                     | "path"
                     | "trail"
+                    | "retrynoop"
+                    | "alignstall"
                     | "rscreen"
                     | "soapclass"
                     | "soapmean"
@@ -166,6 +168,13 @@ fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
     let nosym = opts.contains(&"nosym");
     assert!(!(sym && nosym), "sym and nosym are contradictory");
     cfg.symmetrise_on_stall = (cfg.symmetrise_on_stall || sym) && !nosym;
+
+    // Named leaves. Absent from the command line, both stay as the
+    // configuration set them, which is off for every preset, and the
+    // resolved document omits them.
+    cfg.retry_noop_stall_leave = cfg.retry_noop_stall_leave || opts.contains(&"retrynoop");
+    cfg.align_directed_stall_source =
+        cfg.align_directed_stall_source || opts.contains(&"alignstall");
 }
 
 /// Occupancy catalog: leftover-SOAP packing key plus AS-KMC height
@@ -343,6 +352,33 @@ mod option_tests {
         apply_boolean_options(&mut cfg, &["height", "climb"]);
         assert!(cfg.adaptive_height);
         assert!(cfg.escape_on_stall);
+    }
+
+    #[test]
+    fn stall_leave_switches_are_opt_in_and_absent_from_the_default_document() {
+        for mut cfg in [Config::for_cluster(102), Config::recommended(102)] {
+            let before = cfg.resolved_json().expect("resolved configuration");
+            apply_boolean_options(&mut cfg, &["base"]);
+            assert!(!cfg.retry_noop_stall_leave);
+            assert!(!cfg.align_directed_stall_source);
+            let after = cfg.resolved_json().expect("resolved configuration");
+            assert_eq!(after, before);
+            assert!(!before.contains("retry_noop_stall_leave"));
+            assert!(!before.contains("align_directed_stall_source"));
+        }
+
+        let mut retry = Config::for_cluster(102);
+        apply_boolean_options(&mut retry, &["retrynoop"]);
+        assert!(retry.retry_noop_stall_leave);
+        assert!(!retry.align_directed_stall_source);
+
+        let mut both = Config::for_cluster(102);
+        apply_boolean_options(&mut both, &["alignstall", "retrynoop"]);
+        assert!(both.retry_noop_stall_leave);
+        assert!(both.align_directed_stall_source);
+        let named = both.resolved_json().expect("resolved configuration");
+        assert!(named.contains("\"retry_noop_stall_leave\":true"));
+        assert!(named.contains("\"align_directed_stall_source\":true"));
     }
 
     #[test]
