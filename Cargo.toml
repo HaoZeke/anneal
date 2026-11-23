@@ -117,7 +117,7 @@ libm = { version = "0.2.16", default-features = false }
 # the kernels; binaries here install them through
 # anneal_core::install_rgpot_kernels!. Not on crates.io, so it is a
 # dev-dependency, which cargo package drops.
-rgpot-pair = { git = "https://github.com/OmniPotentRPC/rgpot", rev = "8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e" }
+rgpot-pair = { git = "https://github.com/OmniPotentRPC/rgpot", rev = "3aa8f9caf87dce22a5e1d74f4a06c9779d0c2212" }
 criterion = { version = "0.6", features = ["html_reports"] }
 proptest  = "1"
 tempfile = "3"
