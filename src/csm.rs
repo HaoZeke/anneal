@@ -1120,7 +1120,13 @@ mod tests {
             (near, vec![0u32; 7]),
         ] {
             let orientations = inertia_orientations(x.view(), classes.len()).expect("axes");
-            for ops in [turns_about_z(4), turns_about_z(3), inversion_ops()] {
+            for ops in [
+                d5h_ops(),
+                cyclic_about_z(5),
+                turns_about_z(4),
+                turns_about_z(3),
+                inversion_ops(),
+            ] {
                 clear_op_cache();
                 let (coordinates, measure) =
                     project(x.view(), &classes, &ops, &orientations).expect("projection");
@@ -1412,5 +1418,163 @@ mod tests {
         );
         let second = propose(ico.view(), &classes).expect("cached projection");
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn octahedron_measure_is_zero_and_a_shift_is_not() {
+        let octahedron = Array1::from_vec(vec![
+            1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+            -1.0,
+        ]);
+        let classes = vec![0; 6];
+        let (_, exact) =
+            project(octahedron.view(), &classes, &inversion_ops(), &[identity()]).unwrap();
+        assert!(exact < 1e-10, "{exact}");
+        let mut shifted = octahedron.clone();
+        shifted[0] += 0.3;
+        let (_, noisy) =
+            project(shifted.view(), &classes, &inversion_ops(), &[identity()]).unwrap();
+        assert!(noisy > 1e-3, "{noisy}");
+        let chosen = propose_templates(octahedron.view(), &classes).expect("library");
+        assert_eq!(chosen.group, "C_i");
+        assert!(chosen.measure < 1e-8, "{}", chosen.measure);
+    }
+
+    fn ungated_projection(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjection> {
+        let orientations =
+            inertia_orientations_with(x, classes.len(), std::f64::consts::TAU / 5.0)?;
+        clear_op_cache();
+        let mut best: Option<(usize, GroupProjection)> = None;
+        for (rank, name, ops) in [
+            (2, "D_5h", d5h_ops()),
+            (1, "C_5", cyclic_about_z(5)),
+            (0, "C_i", inversion_ops()),
+        ] {
+            let Some((coordinates, measure)) = project(x, classes, &ops, &orientations) else {
+                continue;
+            };
+            if closest_pair(&coordinates) < SINGULAR_PAIR {
+                continue;
+            }
+            let replace = match &best {
+                None => true,
+                Some((incumbent_rank, incumbent)) => {
+                    measure < incumbent.measure
+                        || (measure == incumbent.measure && rank < *incumbent_rank)
+                }
+            };
+            if replace {
+                best = Some((
+                    rank,
+                    GroupProjection {
+                        coordinates,
+                        measure,
+                        group: name,
+                    },
+                ));
+            }
+        }
+        best.map(|(_, projection)| projection)
+    }
+
+    fn assert_same_projection(gated: &GroupProjection, full: &GroupProjection) {
+        assert_eq!(gated.group, full.group);
+        assert_eq!(gated.measure.to_bits(), full.measure.to_bits());
+        assert_eq!(gated.coordinates.len(), full.coordinates.len());
+        for (left, right) in gated.coordinates.iter().zip(full.coordinates.iter()) {
+            assert_eq!(left.to_bits(), right.to_bits(), "{left} vs {right}");
+        }
+    }
+
+    #[test]
+    fn inversion_is_skipped_only_when_it_cannot_change_the_group() {
+        let octahedron = Array1::from_vec(vec![
+            1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+            -1.0,
+        ]);
+        let mut noisy = bipyramid();
+        noisy[2] += 0.25;
+        let mut chiral = Array1::zeros(36);
+        for atom in 0..12 {
+            let angle = 0.47 * atom as f64;
+            chiral[3 * atom] = (0.4 + 0.05 * atom as f64) * angle.cos();
+            chiral[3 * atom + 1] = (0.35 + 0.04 * atom as f64) * angle.sin();
+            chiral[3 * atom + 2] = 0.15 * atom as f64 - 0.8;
+        }
+        for x in [octahedron, noisy, chiral] {
+            let classes = vec![0; x.len() / 3];
+            let full = ungated_projection(x.view(), &classes).expect("full");
+            clear_op_cache();
+            let gated = propose_templates(x.view(), &classes).expect("gated");
+            assert_same_projection(&gated, &full);
+            let orientations =
+                inertia_orientations_with(x.view(), classes.len(), std::f64::consts::TAU / 5.0)
+                    .expect("axes");
+            let (centred, _, _) = centre_and_scale(x.view(), classes.len()).expect("centre");
+            let bound = inversion_lower_measure(&centred, &orientations);
+            let (_, solved) =
+                project(x.view(), &classes, &inversion_ops(), &orientations).expect("inversion");
+            assert!(
+                bound <= solved + 1.0e-9 * (1.0 + solved),
+                "bound {bound} exceeds the solved inversion measure {solved}"
+            );
+        }
+        let mut noisy = bipyramid();
+        noisy[2] += 0.25;
+        let classes = vec![0; 7];
+        let orientations =
+            inertia_orientations_with(noisy.view(), 7, std::f64::consts::TAU / 5.0).expect("axes");
+        let (centred, _, _) = centre_and_scale(noisy.view(), 7).expect("centre");
+        let bound = inversion_lower_measure(&centred, &orientations);
+        let (_, fivefold) =
+            project(noisy.view(), &classes, &d5h_ops(), &orientations).expect("d5h");
+        let margin = 1.0e-6 * (1.0 + fivefold);
+        assert!(
+            bound > fivefold + margin,
+            "the noisy bipyramid should settle inversion without the assignment, bound {bound} fivefold {fivefold}"
+        );
+    }
+
+    #[test]
+    fn pentagonal_bipyramid_selects_d5h_and_ignores_labels() {
+        let x = bipyramid();
+        let classes = vec![0; 7];
+        let projection = propose_templates(x.view(), &classes).expect("projection");
+        assert!(projection.measure < 1e-8, "{}", projection.measure);
+        let (_, d5h) = project(
+            x.view(),
+            &classes,
+            &d5h_ops(),
+            &inertia_orientations_with(x.view(), 7, std::f64::consts::TAU / 5.0).expect("axes"),
+        )
+        .expect("d5h");
+        assert!(d5h < 1e-8, "{d5h}");
+        let mut reversed = Array1::zeros(x.len());
+        for atom in 0..7 {
+            for axis in 0..3 {
+                reversed[3 * atom + axis] = x[3 * (6 - atom) + axis];
+            }
+        }
+        let flipped = propose_templates(reversed.view(), &classes).expect("relabelled");
+        assert!((flipped.measure - projection.measure).abs() < 1e-8);
+        let mut noisy = x.clone();
+        noisy[2] += 0.25;
+        let shifted = propose_templates(noisy.view(), &classes).expect("noisy");
+        assert!(shifted.measure > 1e-3, "{}", shifted.measure);
+    }
+
+    #[test]
+    fn d5h_has_twenty_orthogonal_operations() {
+        let ops = d5h_ops();
+        assert_eq!(ops.len(), 20);
+        for op in ops {
+            let gram = matmul(op, transpose(op));
+            for row in 0..3 {
+                for col in 0..3 {
+                    let want = if row == col { 1.0 } else { 0.0 };
+                    assert!((gram[row][col] - want).abs() < 1e-10);
+                }
+            }
+        }
     }
 }
