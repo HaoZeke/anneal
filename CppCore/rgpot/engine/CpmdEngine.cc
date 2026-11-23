@@ -29,13 +29,14 @@ Created create(const void *config, std::size_t config_len) {
     auto pot = std::make_unique<CPMDPot>(reader.getRoot<::CPMDParams>());
     backend->pot = std::move(pot);
     auto *raw = static_cast<CPMDPot *>(backend->pot.get());
-    backend->select_orbitals = [raw](long long key) {
-      raw->selectOrbitals(static_cast<std::int64_t>(key));
-      if (!raw->keepsOrbitalsPerKey()) {
-        throw std::runtime_error(
-            "CPMD engine does not keep orbitals per key");
-      }
-    };
+    if (raw->keepsOrbitalsPerKey()) {
+      backend->select_orbitals = [raw](long long key) {
+        if (!raw->keepsOrbitalsPerKey()) {
+          throw Unsupported("CPMD engine does not keep orbitals per key");
+        }
+        raw->selectOrbitals(static_cast<std::int64_t>(key));
+      };
+    }
     out.backend = std::move(backend);
   } catch (const std::exception &e) {
     out.error = e.what();

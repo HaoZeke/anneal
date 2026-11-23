@@ -888,6 +888,11 @@ TEST_CASE("cpmd engine keeps orbitals separate by caller key",
   RgpotEnginePot *pot = create(e, capnp::messageToFlatArray(msg));
   REQUIRE(pot != nullptr);
 
+  RgpotEngineCaps caps{};
+  caps.size = sizeof(caps);
+  REQUIRE(e.caps(pot, &caps) == 0);
+  REQUIRE(caps.orbital_selection == 1);
+
   const char *fake_path = std::getenv("RGPOT_CPMD_ENGINE");
   REQUIRE(fake_path != nullptr);
   void *fake = dlopen(fake_path, RTLD_NOW | RTLD_LOCAL);
@@ -914,6 +919,50 @@ TEST_CASE("cpmd engine keeps orbitals separate by caller key",
   REQUIRE(evaluate(7) == 2);
 
   dlclose(fake);
+  e.destroy(pot);
+}
+
+TEST_CASE("cpmd engine omits orbital selection when the engine lacks it",
+          "[engine][cpmd][abi]") {
+  Engine e;
+  REQUIRE(open_engine("CPMD", e));
+
+  struct EnvRestore {
+    const char *name;
+    std::string value;
+    bool had = false;
+    explicit EnvRestore(const char *n) : name(n) {
+      if (const char *v = std::getenv(n)) {
+        had = true;
+        value = v;
+      }
+      unsetenv(n);
+    }
+    ~EnvRestore() {
+      if (had) {
+        setenv(name, value.c_str(), 1);
+      } else {
+        unsetenv(name);
+      }
+    }
+  };
+  EnvRestore guard1("CPMDC_LIBRARY");
+  EnvRestore guard2("RGPOT_CPMDC_ENGINE");
+  EnvRestore guard3("RGPOT_CPMD_ENGINE");
+
+  capnp::MallocMessageBuilder msg;
+  auto p = msg.initRoot<::CPMDParams>();
+  p.setFunctional("BLYP");
+  p.setEnginePath("/nonexistent/libcpmdc.so");
+  RgpotEnginePot *pot = create(e, capnp::messageToFlatArray(msg));
+  REQUIRE(pot != nullptr);
+
+  RgpotEngineCaps caps{};
+  caps.size = sizeof(caps);
+  REQUIRE(e.caps(pot, &caps) == 0);
+  REQUIRE(caps.orbital_selection == 0);
+  REQUIRE(e.select_orbitals(pot, 7) == RGPOT_ENGINE_ERR_UNSUPPORTED);
+  REQUIRE(error_of(e, pot) == "backend has no orbital selection");
   e.destroy(pot);
 }
 
