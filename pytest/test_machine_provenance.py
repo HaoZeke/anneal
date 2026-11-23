@@ -2109,3 +2109,155 @@ def test_au55_scale_and_morse14_h2h_write_machine_provenance_rows_and_summaries(
         and r["cpu_model"] == f"{machine_cur['cpu_model']};{machine_stored['cpu_model']}"
         for r in m14_sum
     )
+
+
+def test_metal_h2h_persists_row_provenance_and_marks_legacy_reused_rows_unknown(
+    tmp_path, monkeypatch
+):
+    from types import SimpleNamespace
+
+    metal = _load_module("metal_h2h_row_prov_mod", "scripts/metal_h2h/run_campaign.py")
+
+    def fake_campaign_run(
+        work: Path,
+        *,
+        head: str,
+        machine: dict[str, str],
+        seeds: tuple[int, ...],
+        summary_path: Path,
+    ) -> list[dict[str, str]]:
+        head_file = work / "anneal-head"
+        head_file.write_text(head + "\n")
+        monkeypatch.setattr(metal, "binary_budget", lambda _bin, _sys: (20000, -10.0))
+
+        def fake_run_arm(
+            _bin, _ga, system, seed, budget, arm, log, _scratch
+        ) -> dict[str, str]:
+            line = (
+                f"{system},{arm},{seed},{budget},1,500,500,"
+                "0.250,-10.0,0.200,0.050,4e-4,1e-4"
+            )
+            log.parent.mkdir(parents=True, exist_ok=True)
+            log.write_text(line + "\n")
+            return metal.parse_row(line)
+
+        monkeypatch.setattr(metal, "run_arm", fake_run_arm)
+        monkeypatch.setattr(metal, "machine_columns", lambda: dict(machine))
+        monkeypatch.setattr(
+            metal.os, "uname", lambda: SimpleNamespace(nodename="bench")
+        )
+        seed_flags: list[str] = []
+        for seed in seeds:
+            seed_flags.extend(["--seed", str(seed)])
+        assert (
+            metal.main(
+                [
+                    "run_campaign.py",
+                    "--binary",
+                    str(work / "h2h_metal"),
+                    "--ga",
+                    str(work / "ase_ga.py"),
+                    "--runs",
+                    str(work / "runs"),
+                    "--logs",
+                    str(work / "logs"),
+                    "--head-file",
+                    str(head_file),
+                    "--summary",
+                    str(summary_path),
+                    "--system",
+                    "zn38",
+                    "--arm",
+                    "anneal",
+                    *seed_flags,
+                ]
+            )
+            == 0
+        )
+        with summary_path.open() as handle:
+            reader = csv.DictReader(handle)
+            assert reader.fieldnames == metal.SUMMARY_FIELDS
+            return list(reader)
+
+    work_measure = tmp_path / "measure"
+    work_measure.mkdir()
+    measured_machine = {"machine_id": "1" * 64, "cpu_model": "Measured CPU"}
+    summary_measured = fake_campaign_run(
+        work_measure,
+        head="rev-measured-111",
+        machine=measured_machine,
+        seeds=(0,),
+        summary_path=work_measure / "summary-initial.csv",
+    )
+
+    saved_seed0 = work_measure / "runs" / "zn38" / "anneal-0.row"
+    with saved_seed0.open() as handle:
+        saved_reader = csv.DictReader(handle)
+        assert saved_reader.fieldnames == metal.ROW_FIELDS
+        saved_rows = list(saved_reader)
+    assert len(saved_rows) == 1
+    assert saved_rows[0]["anneal_head"] == "rev-measured-111"
+    assert saved_rows[0]["code_revision"] == "rev-measured-111"
+    assert saved_rows[0]["host"] == "bench"
+    assert saved_rows[0]["machine_id"] == measured_machine["machine_id"]
+    assert saved_rows[0]["cpu_model"] == measured_machine["cpu_model"]
+    assert summary_measured[0]["anneal_head"] == "rev-measured-111"
+    assert summary_measured[0]["code_revision"] == "rev-measured-111"
+    assert summary_measured[0]["host"] == "bench"
+    assert summary_measured[0]["machine_id"] == measured_machine["machine_id"]
+    assert summary_measured[0]["cpu_model"] == measured_machine["cpu_model"]
+
+    metal.write_saved_row(
+        saved_seed0,
+        saved_rows[0],
+        anneal_head="rev-measured-111",
+        code_revision="rev-measured-111",
+        host="host-measured",
+        machine=measured_machine,
+    )
+    reused_summary = fake_campaign_run(
+        work_measure,
+        head="rev-current-999",
+        machine={"machine_id": "9" * 64, "cpu_model": "Current CPU"},
+        seeds=(0,),
+        summary_path=work_measure / "summary-reused.csv",
+    )
+    assert reused_summary[0]["anneal_head"] == "rev-measured-111"
+    assert reused_summary[0]["code_revision"] == "rev-measured-111"
+    assert reused_summary[0]["host"] == "host-measured"
+    assert reused_summary[0]["machine_id"] == measured_machine["machine_id"]
+    assert reused_summary[0]["cpu_model"] == measured_machine["cpu_model"]
+
+    work_legacy = tmp_path / "legacy"
+    legacy_runs = work_legacy / "runs" / "zn38"
+    legacy_runs.mkdir(parents=True)
+    (legacy_runs / "anneal-0.row").write_text(
+        "zn38,anneal,0,20000,1,400,400,0.200,-10.0,0.150,0.050,3e-4,1e-4\n"
+    )
+    (legacy_runs / "anneal-1.row").write_text(
+        ",".join(metal.CORE_ROW_FIELDS)
+        + "\nzn38,anneal,1,20000,1,600,600,0.300,-10.0,0.250,0.050,4e-4,1e-4\n"
+    )
+    legacy_summary = fake_campaign_run(
+        work_legacy,
+        head="rev-current-999",
+        machine={"machine_id": "9" * 64, "cpu_model": "Current CPU"},
+        seeds=(0, 1),
+        summary_path=work_legacy / "summary-legacy.csv",
+    )
+    assert len(legacy_summary) == 1
+    for field in ("anneal_head", "code_revision", "host", "machine_id", "cpu_model"):
+        assert legacy_summary[0][field] == "unknown"
+
+    mixed_summary = fake_campaign_run(
+        work_legacy,
+        head="rev-fresh-222",
+        machine={"machine_id": "2" * 64, "cpu_model": "Fresh CPU"},
+        seeds=(0, 2),
+        summary_path=work_legacy / "summary-mixed.csv",
+    )
+    assert mixed_summary[0]["anneal_head"] == "rev-fresh-222;unknown"
+    assert mixed_summary[0]["code_revision"] == "rev-fresh-222;unknown"
+    assert mixed_summary[0]["host"] == "bench;unknown"
+    assert mixed_summary[0]["machine_id"] == f"{'2' * 64};unknown"
+    assert mixed_summary[0]["cpu_model"] == "Fresh CPU;unknown"
