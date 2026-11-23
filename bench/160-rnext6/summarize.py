@@ -155,6 +155,11 @@ def aggregate(
         rss_ba: list[float] = []
         rss_a2a: list[float] = []
         calls: dict[str, list[float]] = {"A": [], "A2": [], "B": []}
+        call_scores: dict[str, list[float]] = {
+            "A": [],
+            "A2": [],
+            "B": [],
+        }
         hits: dict[str, int] = {"A": 0, "A2": 0, "B": 0}
         rss_values: dict[str, list[float]] = {"A": [], "A2": [], "B": []}
         for seed in gate.SEEDS:
@@ -183,7 +188,8 @@ def aggregate(
             for arm, selected in (("A", a), ("A2", a2), ("B", b_rows[0])):
                 hit = int(selected["hit"])
                 hits[arm] += hit
-                calls[arm].append(
+                calls[arm].append(float(selected["calls"]))
+                call_scores[arm].append(
                     float(selected["calls"]) if hit else gate.BUDGET + 1
                 )
             rss_values["A"].append(a_rss)
@@ -250,7 +256,10 @@ def aggregate(
                 "median_calls_a2": fmt(type7(calls["A2"])),
                 "median_calls_b": fmt(type7(calls["B"])),
                 "mannwhitney_b_slower_p": fmt(
-                    mannwhitney_b_slower(calls["A"], calls["B"])
+                    mannwhitney_b_slower(
+                        call_scores["A"],
+                        call_scores["B"],
+                    )
                 ),
                 "outside_ratio_b_a": fmt(b_time),
                 "outside_ratio_b_a_ci_low": fmt(b_time_low),
