@@ -5,8 +5,7 @@ arXiv results were sorted by submittedDate descending and screened over the
 used from-pub-date:2026-09-23,until-pub-date:2026-11-22 (both broad and
 journal-filtered), from-created-date:2026-11-20/21, and preprint-prefix
 sweeps (from-created-date:2026-11-18). Repeated requests after HTTP 429
-responses used the same URL and are listed once. The supplied vetted-account
-X result returned no posts in the preceding 24 hours and was not rerun.
+responses used the same URL and are listed once.
 
 arXiv API:
 GET https://export.arxiv.org/api/query?search_query=all%3A%22cluster%20global%20optimization%22%20OR%20all%3A%22cluster%20global%20optimisation%22&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
