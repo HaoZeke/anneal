@@ -14,6 +14,11 @@ import pytest
 
 import anneal
 
+# Measured from the native search on LJ4, n=4, budget=120, seed=29,
+# length_scale=2, energy_scale=3: energy -5.9999999948323985, 2 hops.
+SEED_29_ENERGY = -5.9999999948323985
+SEED_29_HOPS = 2
+
 
 def test_with_scales_defaults_match_rust_config_exactly():
     cfg = anneal.Config.with_scales(13, 1.0, 1.0)
@@ -359,7 +364,9 @@ def test_scaled_native_four_point_lj_seed_29_regression():
     )
     assert out["best"].shape == (12,)
     assert np.all(np.isfinite(out["best"]))
-    assert math.isfinite(out["best_energy"])
+    # Filled from a run of this seed, budget, and scale.
+    assert out["best_energy"] == pytest.approx(SEED_29_ENERGY, abs=1e-9)
+    assert out["hops"] == SEED_29_HOPS
 
     for seed in (0, 7, 13, 29, 41):
         res = anneal.cluster_search(
@@ -373,6 +380,69 @@ def test_scaled_native_four_point_lj_seed_29_regression():
         )
         assert res["best"].shape == (12,)
         assert math.isfinite(res["best_energy"])
+
+
+def test_scaled_communicating_and_derived_presets_match_explicit_config():
+    """Scaled communicating and derived presets follow the same fields a
+    caller would set by hand, and the search agrees with that config."""
+    lj4 = anneal.PairPotential.lennard_jones(4)
+    scale, escale = 2.0, 3.0
+    n, budget, seed = 4, 80, 2
+
+    unit = anneal.cluster_search(lj4, None, n, budget, seed=seed, communicating=True)
+    scaled = anneal.cluster_search(
+        lj4,
+        None,
+        n,
+        budget,
+        seed=seed,
+        communicating=True,
+        length_scale=scale,
+        energy_scale=escale,
+    )
+    explicit = anneal.Config.for_cluster_with_scales(n, scale, escale)
+    explicit.allocate_moves = True
+    explicit.return_screen = True
+    explicit.orbit_complete_on_new = True
+    explicit.orbit_core = "fraction"
+    explicit.shared_deposits = 0
+    explicit.shared_visit_policy = "recognition"
+    explicit.surfaces = [("relative", 0.7, escale / scale**4)]
+    explicit.continuous_symmetry = ("measure", 10)
+    assert explicit.temperature == pytest.approx(0.8 * escale)
+    assert explicit.merge_radius == pytest.approx(0.7 * scale)
+    assert explicit.surfaces[0]["beta"] == pytest.approx(escale / scale**4)
+    by_hand = anneal.cluster_search(lj4, None, n, budget, seed=seed, config=explicit)
+    assert scaled["merge_radius"] == pytest.approx(scale * unit["merge_radius"])
+    assert scaled["escape_threshold"] == pytest.approx(escale * unit["escape_threshold"])
+    assert scaled["best_energy"] == pytest.approx(by_hand["best_energy"], rel=0, abs=1e-12)
+    assert scaled["hops"] == by_hand["hops"]
+
+    unit_d = anneal.cluster_search(lj4, None, n, budget, seed=seed, derived=True)
+    scaled_d = anneal.cluster_search(
+        lj4,
+        None,
+        n,
+        budget,
+        seed=seed,
+        derived=True,
+        length_scale=scale,
+        energy_scale=escale,
+    )
+    derived = anneal.Config.recommended_with_scales(n, scale, escale)
+    derived.budget_window = True
+    derived.bayes_screen = True
+    screen, relax = derived.screen_steps, derived.relax_steps
+    derived.bayes_threshold = (relax - screen) / (2 * relax - screen)
+    assert derived.budget_window is True
+    assert derived.bayes_screen is True
+    assert derived.relax_steps == 1000
+    assert derived.temperature == pytest.approx(0.8 * escale)
+    by_hand_d = anneal.cluster_search(lj4, None, n, budget, seed=seed, config=derived)
+    assert scaled_d["merge_radius"] == pytest.approx(scale * unit_d["merge_radius"])
+    assert scaled_d["escape_threshold"] == pytest.approx(escale * unit_d["escape_threshold"])
+    assert scaled_d["best_energy"] == pytest.approx(by_hand_d["best_energy"], rel=0, abs=1e-12)
+    assert scaled_d["hops"] == by_hand_d["hops"]
 
 
 def _sorted_pair_distances(flat: np.ndarray) -> np.ndarray:
@@ -587,6 +657,134 @@ def test_cluster_search_invalid_stock_inputs_and_docstring():
             assert expected in doc, f"{doc_name} missing scaling detail {expected!r}"
 
 
+_STRING_ALTS = (
+    "off",
+    "on",
+    "lbfgs",
+    "tric",
+    "auto",
+    "atomic",
+    "lean",
+    "wales_doye",
+    "distances",
+    "q4q6",
+    "soap",
+    "uniform",
+    "posterior",
+    "recognition",
+    "tabu",
+    "fraction",
+    "shells",
+    "both",
+    "shipped",
+    "cyclic",
+    "reversible",
+    "flexible",
+    "independent",
+    "non_reversible",
+    "lean_burst",
+    "measure",
+    "inversion",
+    "relative",
+    "fixed",
+)
+
+
+def _none_candidates(field: str, n: int) -> list[object]:
+    if field in {"target_energy", "call_floor"}:
+        return [-1.5, 0.4]
+    if field == "pair_range":
+        return [(4.0, 1.2)]
+    if field == "species":
+        return [[1] * n]
+    if field == "species_sigma":
+        return [[1.1] * n]
+    if field == "frozen":
+        return [[False] * n]
+    if field == "call_floor_elements":
+        return [[6] * n]
+    if field == "active_region":
+        return [([0], 1)]
+    if field == "two_phase":
+        return [("relative", 0.66, 0.4)]
+    if field == "hmc":
+        return ["identity"]
+    if field == "reoccupy":
+        return ["lennard_jones"]
+    if field == "continuous_symmetry":
+        return [("inversion", 4)]
+    if field == "surfaces":
+        return [[("relative", 0.66, 0.2)]]
+    return [True, 1, 0.4, "on"]
+
+
+def _nondefault_candidates(field: str, current: object, n: int) -> list[object]:
+    if isinstance(current, bool):
+        return [not current]
+    if isinstance(current, int):
+        return [current + 1, current + 3, current - 1 if current else 2]
+    if isinstance(current, float):
+        # A bound such as (0, 1) rejects a larger value and accepts a
+        # smaller one. Try both directions.
+        if current:
+            return [current * 0.5, current * 1.25, current + 0.25]
+        return [0.4, 0.5, 1.25]
+    if isinstance(current, str):
+        return [item for item in _STRING_ALTS if item != current]
+    if current is None:
+        return _none_candidates(field, n)
+    if field == "surfaces":
+        return [[("relative", 0.66, 0.4)], []]
+    if field == "species":
+        return [[2] * n, [1, 2] + [1] * (n - 2)]
+    if field == "species_sigma":
+        return [[1.2] * n]
+    if field == "frozen":
+        return [[True] + [False] * (n - 1)]
+    if field == "call_floor_elements":
+        return [[8] * n]
+    if field == "active_region":
+        return [([1, 2], 2)]
+    if field == "continuous_symmetry":
+        return [("inversion", 7), ("measure", 20)]
+    if field == "two_phase":
+        return [("fixed", 1.1, 0.2, 0.1, True), ("relative", 0.4, 0.2)]
+    if field == "hmc":
+        return [{"metric": "identity", "warmup_hops": 4, "max_depth": 2}]
+    if field == "reoccupy":
+        return [{"kind": "lennard_jones", "patience": 3}]
+    if field == "pair_range":
+        return [(3.5, 1.1), (5.0, 1.4)]
+    if isinstance(current, (list, tuple)) and current and isinstance(current[0], (int, float)):
+        bumped = list(current)
+        bumped[0] = current[0] + (1 if isinstance(current[0], int) else 0.25)
+        return [bumped]
+    if isinstance(current, dict):
+        return []
+    return []
+
+
+def _set_nondefault(cfg: anneal.Config, field: str, current: object) -> bool:
+    """Store a legal value other than ``current`` and read it back."""
+    for cand in _nondefault_candidates(field, current, cfg.n_points):
+        try:
+            setattr(cfg, field, cand)
+        except (TypeError, ValueError):
+            continue
+        got = getattr(cfg, field)
+        if got == current:
+            continue
+        try:
+            setattr(cfg, field, got)
+        except (TypeError, ValueError, AttributeError):
+            continue
+        again = getattr(cfg, field)
+        if again != got:
+            continue
+        return True
+    return False
+
+
 def test_config_exposes_every_rust_struct_field():
     repo_root = Path(__file__).resolve().parents[1]
     cfg_rs = (repo_root / "src" / "methods" / "cluster_hopping" / "config.rs").read_text(
@@ -610,17 +808,26 @@ def test_config_exposes_every_rust_struct_field():
     missing_getters = sorted(rust_fields - py_getters)
     assert not missing_getters, f"anneal.Config is missing Rust Config getters: {missing_getters}"
 
-    # Every mutable Rust field round-trips; geometry changes must use with_rigid_bodies().
+    # Every mutable Rust field accepts a value other than the one it already
+    # holds, reads that value back, and restores. Geometry changes must use
+    # with_rigid_bodies().
     cfg = anneal.Config.recommended_with_scales(13, 2.0, 3.0)
     before = cfg.resolved_json()
     read_only: set[str] = set()
+    stuck: list[str] = []
     for field in sorted(rust_fields):
         val = getattr(cfg, field)
         try:
             setattr(cfg, field, val)
         except AttributeError:
             read_only.add(field)
+            continue
+        placed = _set_nondefault(cfg, field, val)
+        setattr(cfg, field, val)
+        if not placed:
+            stuck.append(f"{field}={val!r}")
     assert read_only == {"n_points", "rigid_body_geometry"}
+    assert not stuck, "no non-default value stuck for:\n" + "\n".join(stuck)
     assert cfg.resolved_json() == before
 
 

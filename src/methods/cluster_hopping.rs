@@ -13818,6 +13818,9 @@ mod call_floor_tests {
         let (out, _stats) =
             crate::methods::cluster_search::search(&pot, &cfg, &mut ledger, 29).unwrap();
         assert_eq!(out.best_state.as_ref().unwrap().len(), 12);
-        assert!(out.best.is_finite());
+        // This seed reaches the four-point minimum. The hop count pins the
+        // walk; a shape check stays green if the search takes another path.
+        assert!((out.best - -5.9999999948323985).abs() < 1.0e-12);
+        assert_eq!(out.hops, 2);
     }
 }
