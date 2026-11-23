@@ -881,14 +881,13 @@ impl<F: Fingerprint> BasinIndex<F> {
                     .iter()
                     .enumerate()
                     .rev()
-                    .filter_map(|(i, centre)| {
-                        (centre.len() == d.len()).then(|| {
-                            (
-                                i,
-                                self.metric
-                                    .distance_bounded(centre.view(), d, self.merge_radius),
-                            )
-                        })
+                    .filter(|(_, centre)| centre.len() == d.len())
+                    .map(|(i, centre)| {
+                        (
+                            i,
+                            self.metric
+                                .distance_bounded(centre.view(), d, self.merge_radius),
+                        )
                     }),
             );
         }
