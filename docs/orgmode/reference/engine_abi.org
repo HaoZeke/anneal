@@ -1297,6 +1297,8 @@ int rgpot_mta_force(RgpotMtaPot *pot, long nAtoms,
 - Inputs :: as =rgpot_xtb_force=, with an =RgpotMtaPot= handle.
 - Units :: as =MetatomicPot=: Angstrom in, eV and eV/Angstrom out with the
   default =length_unit=.
+  The =*variance= is eV^2, or eV^2 per Angstrom squared without model
+  uncertainty.
 - Outputs :: 0, with =*energy=, =forces= and =*variance=, the =MetatomicPot=
   variance, written.
 - Errors :: 1 for a null handle, a null pointer other than =variance=, or
