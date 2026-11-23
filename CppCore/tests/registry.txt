@@ -153,6 +153,7 @@ TersoffZblBuildTest | tests core | unit tersoff_zbl_build_test TersoffZblBuildTe
 StreamParityTest | tests core | unit stream_parity_test StreamParityTest.cc fp_contract=off timeout=900 |
 ExternalPotFactoryFailureTest | tests core | unit external_pot_factory_failure_test ExternalPotFactoryFailureTest.cc |
 NeighbourListTest | tests core | unit neighbour_list_test NeighbourListTest.cc |
+TriclinicNlistTest | tests core | unit triclinic_nlist_test TriclinicNlistTest.cc timeout=180 |
 VesinEmptyResetTest | tests core | unit vesin_empty_reset_test VesinEmptyResetTest.cc |
 EAMCellVerletTest | tests core | unit eam_cell_verlet_test EAMCellVerletTest.cc fp_contract=off |
 ManyBodyForceTest | tests core | unit many_body_force_test ManyBodyForceTest.cc |

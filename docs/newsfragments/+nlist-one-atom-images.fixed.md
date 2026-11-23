@@ -1,0 +1,2 @@
+<!-- Copyright 2023--present rgpot developers -->
+`nlist::build` lists every periodic image inside the cutoff for a one-atom cell and for a periodic cell narrower than twice the cutoff, including an atom's images of itself. A periodic orthorhombic neighbour search folds each coordinate into the cell before Cartesian binning, so an atom outside the box is found with its image inside. Pair kernels still sum one nearest image of each distinct pair. Sheared cells stay on the fractional grid.
