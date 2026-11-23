@@ -101,6 +101,27 @@ def test_crest_rescore_reproduces_the_committed_row(tmp_path):
         crest.rescore(history, out, "si20", -922.98227162, "0" * 40, "bench")
 
 
+def test_gfn2_final_geometry_is_kept_beside_the_row(tmp_path, monkeypatch):
+    pytest.importorskip("scipy.stats")
+    crest = load("gfn2_geometry", "scripts/covalent_h2h/gfn2_crest.py")
+    source = tmp_path / "run" / "best.xyz"
+    source.parent.mkdir()
+    source.write_text("2\nfinal\nSi 0 0 0\nSi 2.25 0 0\n")
+    monkeypatch.setattr(
+        crest, "standalone_rescore", lambda _xtb, _geometry: (True, -12.5)
+    )
+    rows = tmp_path / "results" / "rows-v2.csv"
+    row = {"system": "si20", "code": "anneal-general", "seed": 2000}
+    fields = crest.record_final_geometry(
+        rows, row, source, tmp_path / "xtb", "1" * 40
+    )
+    geometry = rows.parent / fields["geometry"]
+    assert geometry.read_bytes() == source.read_bytes()
+    assert fields["standalone_scc_converged"] == "true"
+    assert fields["standalone_xtb_eV"] == "-12.50000000"
+    assert fields["min_distance_A"] == "2.25000000"
+
+
 def test_the_committed_panel_is_the_same_on_every_seed(capsys):
     pytest.importorskip("scipy.stats")
     arm_gate.summary(argparse.Namespace(rows=PANEL_ROWS, arms=["develop", "floor"]))
