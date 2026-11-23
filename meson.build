@@ -199,20 +199,36 @@ endif
 m_dep = cppc.find_library('m', required: false)
 _deps += m_dep
 # Identify the active C++ standard library before reading its version macro.
-# Meson versions which predate get_define()'s empty result for an undefined
-# macro report an error instead, so test the symbol first. On Unix, an absent
-# _LIBCPP_VERSION is the documented libstdc++ case.
+# get_define() returns '' for a macro that is not defined (Meson 0.40 and
+# later) and only errors when preprocessing fails, so an empty result cannot
+# separate libstdc++ from a libc++ whose macro has no value. Test the symbol
+# first: absent means libstdc++, present with an empty value is an error.
+#
+# Every non-Windows host is probed. On Windows only clang and clang-cl are
+# probed, because they can be configured with libc++ (clang-cl with
+# -stdlib=libc++, llvm-mingw, MSYS2 CLANG64). MSVC proper (cl.exe, id 'msvc')
+# and the other Windows toolchains use their own runtime and are skipped.
 _libcpp_ver = ''
-if host_system != 'windows'
-    if not cppc.has_header('version')
+_probe_libcpp = (
+    host_system != 'windows'
+    or cppc.get_id() in ['clang', 'clang-cl']
+)
+_libcpp_probe_args = cppc.get_supported_arguments(['-std=c++20', '/std:c++20'])
+if _probe_libcpp
+    if not cppc.has_header('version', args: _libcpp_probe_args)
         error(
             'cannot identify the C++ standard library: <version> is unavailable',
         )
     endif
-    if cppc.has_header_symbol('version', '_LIBCPP_VERSION')
+    if cppc.has_header_symbol(
+        'version',
+        '_LIBCPP_VERSION',
+        args: _libcpp_probe_args,
+    )
         _libcpp_ver = cppc.get_define(
             '_LIBCPP_VERSION',
             prefix: '#include <version>',
+            args: _libcpp_probe_args,
         ).strip()
         if _libcpp_ver == ''
             error(
