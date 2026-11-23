@@ -2680,7 +2680,7 @@ impl Config {
     /// Liquid-density start radius scaled by [`Self::length_scale`], species
     /// diameters, and [`Self::min_separation`].
     pub fn liquid_start_radius(&self, n: usize) -> f64 {
-        let unit = portable_cbrt(3.0 * n as f64 / (4.0 * std::f64::consts::PI * 0.7));
+        let unit = super::liquid_sphere_radius(n);
         let sep_scale = if self.min_separation.is_finite() && self.min_separation > 0.0 {
             self.min_separation / LennardJonesPreset::MIN_SEPARATION
         } else {

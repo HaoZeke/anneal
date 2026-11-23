@@ -65,6 +65,29 @@ pub(crate) fn portable_cbrt(x: f64) -> f64 {
     libm::cbrt(x)
 }
 
+/// Reduced number density of a fresh liquid-like cluster sphere.
+///
+/// This is the packing density inside the draw, not the pair-separation
+/// floor. [`Config::liquid_start_radius`] and dynamic lattice search both
+/// use it, so the two starts agree before any separation rescaling.
+pub(crate) const LIQUID_START_DENSITY: f64 = 0.7;
+
+/// Radius of a sphere that holds `n` points at [`LIQUID_START_DENSITY`].
+///
+/// The cube root is `libm::cbrt`. A seeded draw that used the platform
+/// cube root would not be the same geometry on every host.
+pub(crate) fn liquid_sphere_radius(n: usize) -> f64 {
+    portable_cbrt(3.0 * n as f64 / (4.0 * std::f64::consts::PI * LIQUID_START_DENSITY))
+}
+
+/// Pair-separation floor of the Lennard-Jones preset, in reduced units.
+///
+/// Liquid density and this floor are different numbers. A draw that
+/// divides a wider `min_separation` by the density treats 0.7 as a length.
+pub(crate) fn preset_min_separation() -> f64 {
+    preset::LennardJonesPreset::MIN_SEPARATION
+}
+
 use crate::allocate::{BudgetWindowTemperature, FlooredThompson};
 use crate::bias::{
     AdaptiveHeight, BasinBias, BasinIndex, Bias, Fingerprint, SiteEnergies, SortedPairs,
