@@ -3,12 +3,21 @@
 # Copyright 2023--present rgpot developers
 
 import re
-from pathlib import Path
+
+import pytest
+
+from repo_data import source_file, source_root
 
 
-ROOT = Path(__file__).resolve().parents[2]
-VESIN = ROOT / "third_party" / "vesin"
-POTCTL_CI = ROOT / "potctl" / "src" / "ci.rs"
+_ROOT = source_root()
+VESIN = source_file(_ROOT, "third_party/vesin/VERSION").parent
+POTCTL_CI = source_file(_ROOT, "potctl/src/ci.rs")
+source_file(_ROOT, "third_party/vesin/vesin-single-build.cpp")
+
+pytestmark = pytest.mark.skipif(
+    _ROOT is None,
+    reason="rgpot source tree is not available",
+)
 
 
 def _read_vendored_version() -> str:

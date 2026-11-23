@@ -13,11 +13,18 @@ from ase import Atoms
 import rgpot
 from rgpot.ase import RgpotCalculator, available_kinds
 
+from repo_data import source_file, source_root
 
-ROOT = Path(__file__).resolve().parents[2]
-CU_FUNCFL = ROOT / "CppCore" / "tests" / "data" / "eam_table" / "Cu_u3.eam"
-CU_REFERENCE = (
-    ROOT / "CppCore" / "tests" / "data" / "eam_table" / "cu_u3_cubic.ref"
+
+_ROOT = source_root()
+_EAM = "CppCore/tests/data/eam_table"
+CU_FUNCFL = source_file(_ROOT, f"{_EAM}/Cu_u3.eam")
+CU_REFERENCE = source_file(_ROOT, f"{_EAM}/cu_u3_cubic.ref")
+MALFORMED_FUNCFL = source_file(_ROOT, f"{_EAM}/malformed_funcfl.eam")
+
+pytestmark = pytest.mark.skipif(
+    _ROOT is None,
+    reason="rgpot source tree is not available",
 )
 
 needs_eam_table = pytest.mark.skipif(
@@ -101,7 +108,7 @@ def test_one_calculator_evaluates_on_real_os_threads() -> None:
     [
         (CU_FUNCFL, "lammps"),
         (CU_FUNCFL.with_name("no_such_table.eam"), "funcfl"),
-        (CU_FUNCFL.with_name("malformed_funcfl.eam"), "funcfl"),
+        (MALFORMED_FUNCFL, "funcfl"),
         (CU_FUNCFL, "setfl"),
     ],
 )

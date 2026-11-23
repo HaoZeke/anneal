@@ -81,11 +81,12 @@ jobs:
       import-names: rgpot._core
       test-path: tests/python
       # tests/python/test_cpu_scaling.py runs scripts/cpu_scaling.py from the
-      # repository root, tests/python/test_eam_table_binding.py reads
-      # CppCore/tests/data/eam_table, and
-      # tests/python/test_vendored_vesin_version.py reads third_party/vesin and
-      # potctl/src/ci.rs. The wheel test tree is only the copied sources.
+      # copied tree. The EAM table and vendored vesin tests read the checkout
+      # named by RGPOT_PROJECT, which is the project directory beside the
+      # temp directory the test command runs in. The copied fixtures cover
+      # the same files when that variable is unset and the copy is complete.
       extra-test-sources: scripts/cpu_scaling.py CppCore/tests/data/eam_table third_party/vesin/VERSION third_party/vesin/vesin-single-build.cpp potctl/src/ci.rs
+      project-root-env: RGPOT_PROJECT
       extras: ase
       test-requires: pytest-timeout hypothesis
       pytest-args: '-m "not rpc"'
