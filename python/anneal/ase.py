@@ -82,7 +82,18 @@ class PotentialCalculator(_base_ase_calculator()):
             atoms = self.atoms
         if atoms is None:
             raise ValueError("atoms must be provided to calculate")
-        self.atoms = atoms
+        # ASE compares the stored atoms with the caller's. Keeping the
+        # caller's object makes a later in-place move look unchanged, so
+        # the cached energy is reused. ``Calculator.calculate`` stores a copy.
+        base = _base_ase_calculator()
+        if base is not object and isinstance(self, base) and hasattr(atoms, "copy"):
+            if system_changes is None:
+                super().calculate(atoms, properties)
+            else:
+                super().calculate(atoms, properties, system_changes)
+            atoms = self.atoms
+        else:
+            self.atoms = atoms.copy() if hasattr(atoms, "copy") else atoms
         pos = np.asarray(atoms.get_positions(), dtype=np.float64)
         energy, grad = self._eval_and_grad(pos.reshape(-1))
         self.results = {
@@ -91,10 +102,22 @@ class PotentialCalculator(_base_ase_calculator()):
             "forces": -grad.reshape(pos.shape),
         }
 
+    def _uses_ase_cache(self, atoms) -> bool:
+        base = _base_ase_calculator()
+        return (
+            base is not object
+            and isinstance(self, base)
+            and atoms is not None
+            and hasattr(atoms, "copy")
+            and hasattr(atoms, "arrays")
+        )
+
     def get_potential_energy(self, atoms=None, force_consistent: bool = False) -> float:
         target = self.atoms if atoms is None else atoms
         if target is None:
             raise ValueError("atoms must be provided")
+        if self._uses_ase_cache(target):
+            return float(super().get_potential_energy(target, force_consistent))
         self.calculate(target, properties=("energy", "forces"))
         return float(self.results["energy"])
 
@@ -102,6 +125,8 @@ class PotentialCalculator(_base_ase_calculator()):
         target = self.atoms if atoms is None else atoms
         if target is None:
             raise ValueError("atoms must be provided")
+        if self._uses_ase_cache(target):
+            return np.asarray(super().get_forces(target), dtype=np.float64).copy()
         self.calculate(target, properties=("energy", "forces"))
         return np.asarray(self.results["forces"], dtype=np.float64).copy()
 

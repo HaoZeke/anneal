@@ -316,3 +316,33 @@ def test_potential_calculator_standalone_and_with_ase():
     opt = anneal.Anneal(atoms, budget=400, seed=7, mode="search", logfile=None)
     assert opt.run(fmax=1e-4) is True
     assert anneal.energy_hits(atoms.get_potential_energy(), -6.0)
+
+
+def test_potential_calculator_refreshes_after_in_place_move():
+    """An in-place move must not reuse the energy cached for the old geometry."""
+    ase_mod = pytest.importorskip("ase")
+    lj4 = anneal.PairPotential.lennard_jones(4)
+    edge = 2.0 ** (1.0 / 6.0)
+    pts = np.array(
+        [
+            [1.0, 1.0, 1.0],
+            [1.0, -1.0, -1.0],
+            [-1.0, 1.0, -1.0],
+            [-1.0, -1.0, 1.0],
+        ],
+        dtype=np.float64,
+    )
+    pts -= pts.mean(axis=0)
+    pts *= 0.996 * edge / np.linalg.norm(pts[0] - pts[1])
+    atoms = ase_mod.Atoms("Ar4", positions=pts.copy())
+    atoms.calc = anneal.PotentialCalculator(lj4)
+    before = float(atoms.get_potential_energy())
+    atoms.positions[0, 0] += 0.35
+    moved = float(atoms.get_potential_energy())
+    fresh = atoms.copy()
+    fresh.calc = anneal.PotentialCalculator(lj4)
+    truth = float(fresh.get_potential_energy())
+    direct = float(lj4.eval(np.asarray(atoms.get_positions(), dtype=np.float64).ravel()))
+    assert moved == pytest.approx(truth, rel=0, abs=1e-12)
+    assert moved == pytest.approx(direct, rel=0, abs=1e-12)
+    assert moved != pytest.approx(before, rel=1e-6, abs=1e-6)
