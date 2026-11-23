@@ -33,7 +33,8 @@ system without a reference is refused.
 Rows are appended to ``--rows`` with the anneal revision, the host, the
 binary hashes, and a content-addressed final XYZ under ``finals/`` beside
 the row file. The final is rescored by standalone xtb at the same settings;
-its SCC status, energy and minimum pair distance are recorded. A file with
+its SCC status, energy and minimum pair distance are recorded, and a hit
+whose standalone SCC did not converge is recorded as a miss. A file with
 another header is refused, never rewritten. ``--history`` names earlier
 rows files, such as ``seeds.csv``, read alongside it. ``--summary`` appends
 one line per system and code over
@@ -321,6 +322,19 @@ def record_final_geometry(
     }
 
 
+def require_standalone_scc(row: dict, final: dict[str, object]) -> dict:
+    """A hit whose final geometry does not converge standalone is a miss.
+
+    The search saw an energy at that geometry, but a single point of the
+    same file at the same settings did not converge, so the energy is not
+    one xtb reproduces. The row is charged the full budget, as a false hit
+    is in ``false-hits.csv``, and ranks after every hit.
+    """
+    if row["hit"] == "true" and final["standalone_scc_converged"] != "true":
+        return dict(row, hit="false", evals_to_hit=row["budget"])
+    return row
+
+
 def run_crest(
     crest: Path, xtb: Path, python: str, system: str, seed: int, start: Path, out: Path
 ) -> dict:
@@ -560,15 +574,15 @@ def main() -> None:
             else:
                 row = run_anneal(args.anneal, system, seed, where)
             geometry = row.pop("_geometry")
-            row.update(
-                record_final_geometry(
-                    args.rows,
-                    row,
-                    geometry,
-                    args.xtb,
-                    revision,
-                )
+            final = record_final_geometry(
+                args.rows,
+                row,
+                geometry,
+                args.xtb,
+                revision,
             )
+            row = require_standalone_scc(row, final)
+            row.update(final)
             row.update(pins, date=datetime.date.today().isoformat())
             append_rows(args.rows, ROW_FIELDS + PROVENANCE_FIELDS, [row])
             print(
