@@ -789,6 +789,11 @@ struct DiagnosticQuench<'a> {
     previous: bool,
 }
 
+pub(crate) struct RecordSuspension<'a> {
+    ledger: &'a mut Ledger,
+    previous: bool,
+}
+
 impl std::ops::Deref for DiagnosticQuench<'_> {
     type Target = Ledger;
 
@@ -806,6 +811,26 @@ impl std::ops::DerefMut for DiagnosticQuench<'_> {
 impl Drop for DiagnosticQuench<'_> {
     fn drop(&mut self) {
         self.ledger.diagnostic_quench = self.previous;
+    }
+}
+
+impl std::ops::Deref for RecordSuspension<'_> {
+    type Target = Ledger;
+
+    fn deref(&self) -> &Self::Target {
+        self.ledger
+    }
+}
+
+impl std::ops::DerefMut for RecordSuspension<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.ledger
+    }
+}
+
+impl Drop for RecordSuspension<'_> {
+    fn drop(&mut self) {
+        self.ledger.suspend_record = self.previous;
     }
 }
 
@@ -1045,6 +1070,14 @@ impl Ledger {
     fn diagnostic_scope(&mut self) -> DiagnosticQuench<'_> {
         let previous = std::mem::replace(&mut self.diagnostic_quench, true);
         DiagnosticQuench {
+            ledger: self,
+            previous,
+        }
+    }
+
+    pub(crate) fn suspend_recording(&mut self) -> RecordSuspension<'_> {
+        let previous = std::mem::replace(&mut self.suspend_record, true);
+        RecordSuspension {
             ledger: self,
             previous,
         }
@@ -10664,6 +10697,23 @@ mod tests {
         assert_eq!(mine.release_tail(&mut mine_held), 10);
         assert_eq!(mine.budget(), 50);
         assert_eq!(yours.budget(), 50);
+    }
+
+    #[test]
+    fn recording_suspension_is_restored_after_a_panic() {
+        let mut ledger = Ledger::new(10);
+        let state = Array1::from(vec![1.0, 2.0, 3.0]);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut suspended = ledger.suspend_recording();
+            suspended.record(-1.0, state.view());
+            panic!("stop a speculative quench");
+        }));
+
+        assert!(result.is_err());
+        assert!(!ledger.suspend_record);
+        ledger.record(-2.0, state.view());
+        assert_eq!(ledger.best, -2.0);
+        assert_eq!(ledger.best_state.as_ref(), Some(&state));
     }
 
     #[test]

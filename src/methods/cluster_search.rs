@@ -1195,13 +1195,13 @@ where
             opening = prior.clone();
             call_seconds = 0.0;
             timed_calls = 0;
-            led.suspend_record = true;
+            let mut suspended = led.suspend_recording();
             let x = bare.view();
             let preconditioner = species.and_then(|z| BondPreconditioner::new(x, z));
             let quench_tric = tric
                 .as_mut()
                 .filter(|tric| use_tric && tric.atoms() * 3 == x.len());
-            let spent_at = led.spent();
+            let spent_at = suspended.spent();
             let (f2, xr2) = {
                 let mut evaluate = |v: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
                     if let Some(check) = opening.take_if(|check| check.at == v) {
@@ -1209,10 +1209,10 @@ where
                         *last.borrow_mut() = Some(check);
                         return Some(answer);
                     }
-                    let clock = deciding.then(|| (led.spent(), std::time::Instant::now()));
+                    let clock = deciding.then(|| (suspended.spent(), std::time::Instant::now()));
                     let answered = charge_rejecting_repeat_failure(
                         objective,
-                        led,
+                        &mut suspended,
                         stats,
                         v,
                         &mut anchor,
@@ -1222,10 +1222,10 @@ where
                         &mut failure,
                     );
                     if let Some((spent, started)) = clock
-                        && led.spent() > spent
+                        && suspended.spent() > spent
                     {
                         call_seconds += started.elapsed().as_secs_f64();
-                        timed_calls += led.spent() - spent;
+                        timed_calls += suspended.spent() - spent;
                     }
                     let (energy, gradient, physical) = answered?;
                     remember(v, energy, &gradient, physical);
@@ -1324,7 +1324,7 @@ where
                 stats.probe_steps += at;
                 stats.probe_error += (claim - f2).abs();
             }
-            let cost = led.spent() - spent_at;
+            let cost = suspended.spent() - spent_at;
             if screening {
                 stats.screen_charged += cost;
                 stats.screen_steps_taken += pred.len();
@@ -1336,19 +1336,19 @@ where
             } else {
                 f2
             };
-            let (f2, xr2) = if led.stopped()
+            let (f2, xr2) = if suspended.stopped()
                 && let Some((energy, state)) = best_physical.borrow().clone()
                 && energy < f2
                 && state.iter().all(|value| value.is_finite())
             {
-                led.record(energy, state.view());
+                suspended.record(energy, state.view());
                 (energy, state)
             } else {
                 (f2, xr2)
             };
             // `target` is the incumbent before either quench of this hop.
             let plain_lowers = f2 < target && f2 < restrained_energy;
-            led.suspend_record = false;
+            drop(suspended);
             if plain_lowers {
                 led.record(f2, xr2.view());
                 f = f2;
