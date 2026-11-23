@@ -1,0 +1,13 @@
+diff --git a/Potentials.capnp b/Potentials.capnp
+index aa4a3a6..34dc2ba 100644
+--- a/Potentials.capnp
++++ b/Potentials.capnp
+@@ -27,6 +27,8 @@ struct ForceInput {
+   multiplicity @8 :Int32 = 1;       # @brief Per-step spin multiplicity when hasMultiplicity is true.
+   # Optional. Old clients leave it unset and no neighbour list is returned.
+   neighbors @9 :NeighborRequest;
++  hasOrbitalKey @10 :Bool = false;  # @brief Select keyed orbitals for this image or bead.
++  orbitalKey @11 :Int64 = 0;        # @brief Per-step orbital key when hasOrbitalKey is true.
+ }
+ 
+ # @struct PotentialResult

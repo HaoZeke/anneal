@@ -45,6 +45,7 @@ potential from the params message) and =rgpot::engine::backend_name=.
 | =libcomposite_engine= | =CompositeParams= | =composite= | a weighted sum: each =CompositeTerm= names its child with a =PotentialSpec=, the =builtin= arm for =lj=, =morse=, =zbl=, =d2=, =d2cpmd=, =d4= (on a build with dftd4) and a nested =composite= (with their config arms) or the =cpmd= arm; a disabled term is not built |
 | =libmopac_engine= | =BuiltinParams= | =mopac= | MOPAC; =name= is empty or =mopac=, =library= is the path of =libmopacc= |
 | =libnwchem_engine= | =NWChemParams= | =nwchem= | NWChem through =libnwchemc= |
+| =libcpmd_engine= | =CPMDParams= | =cpmd= | CPMD through =libcpmdc= |
 | =libskala_engine= | =NWChemParams= | =skala= | Skala XC on NWChem; reads =basis=, =charge=, =multiplicity=, =enginePath= and =nwchemRoot= |
 
 =BuiltinParams.name= is compared in lower case.
@@ -53,7 +54,7 @@ The Metatomic and XTB libraries also export their own tables
 NWChem and CPMD keep the prefix-parameterized profile ABI that =NWChemPot= and
 =CPMDPot= load, and MOPAC keeps =mopac_c_abi.h=.
 The plugin interface in =include/rgpot/plugin.h= is a separate family. tblite,
-dftd3, dftd4, ExprPot, XcKernel, CPMD and CP2K have no engine library.
+dftd3, dftd4, ExprPot, XcKernel and CP2K have no engine library.
 
 Every library above exports
 =rgpot_engine_force_batch=, =rgpot_engine_hvp=, =rgpot_engine_abi_stamp=,
@@ -501,9 +502,11 @@ Must not run concurrently with another call on the same handle.
 int rgpot_engine_select_orbitals(RgpotEnginePot *pot, long long key);
 #+end_src
 
-- Inputs :: =pot=, a handle; =key=, the orbital slot identifier.
+- Inputs :: =pot=, a handle; =key=, the signed image or bead identifier.
 - Units :: none.
 - Outputs :: 0 on success.
+  The next force call uses the orbitals stored for =key= and parks the orbitals
+  of the key it leaves.
   On CPMD backends, seeding a key means choosing the next SCF initial guess from
   the session's current converged orbitals or from the orbitals last converged
   under that key.
@@ -516,6 +519,11 @@ int rgpot_engine_select_orbitals(RgpotEnginePot *pot, long long key);
   =rgpot_engine_last_error=.
 
 Optional symbol.
+=libcpmd_engine= routes this call directly to =CPMDPot::selectOrbitals=; it does
+not keep a second orbital table.
+The RPC equivalent sets =ForceInput.hasOrbitalKey= and =ForceInput.orbitalKey=
+on every keyed calculation.
+Must not run concurrently with another call on the same handle.
 
 *** =rgpot_engine_copy_orbitals=
 
@@ -592,7 +600,6 @@ size_t rgpot_engine_component_name(const RgpotEnginePot *pot, long index,
   a null =pot=, an engine that is not a sum, and an index outside the terms.
 
 Optional symbol, minor 5.
-
 ** Evaluation
 
 *** =rgpot_engine_coord_transform=

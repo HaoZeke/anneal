@@ -801,6 +801,24 @@ if not get_option('with_rpc_client_only')
             gnu_symbol_visibility: 'default',
             install: not meson.is_subproject(),
         )
+        _cpmd_dl = dependency('dl', required: false)
+        if not _cpmd_dl.found()
+            _cpmd_dl = meson.get_compiler('cpp').find_library(
+                'dl',
+                required: false,
+            )
+        endif
+        cpmd_engine = shared_library(
+            'cpmd_engine',
+            [_engine_common, files('rgpot/engine/CpmdEngine.cc')],
+            dependencies: _engine_deps + [_cpmd_dl],
+            link_with: [rgpot_core],
+            link_whole: [cpmdpot],
+            cpp_args: _engine_args,
+            include_directories: _incdirs,
+            gnu_symbol_visibility: 'default',
+            install: not meson.is_subproject(),
+        )
         if has_skala
             skala_engine = shared_library(
                 'skala_engine',
@@ -2579,12 +2597,20 @@ if get_option('with_tests')
         endif
         if _rpc_stack and host_system != 'windows'
             engine_table_env = environment()
-            engine_table_expect = ['CLASSICAL', 'COMPOSITE', 'MOPAC', 'NWCHEM']
+            engine_table_expect = [
+                'CLASSICAL',
+                'COMPOSITE',
+                'MOPAC',
+                'NWCHEM',
+                'CPMD',
+            ]
             engine_table_depends = [
                 classical_engine,
                 composite_engine,
                 mopac_engine,
                 nwchem_engine,
+                cpmd_engine,
+                cpmdc_fake_engine,
             ]
             engine_table_env.set(
                 'RGPOT_ENGINE_CLASSICAL',
@@ -2598,6 +2624,14 @@ if get_option('with_tests')
             engine_table_env.set(
                 'RGPOT_ENGINE_NWCHEM',
                 nwchem_engine.full_path(),
+            )
+            engine_table_env.set(
+                'RGPOT_ENGINE_CPMD',
+                cpmd_engine.full_path(),
+            )
+            engine_table_env.set(
+                'RGPOT_CPMD_ENGINE',
+                cpmdc_fake_engine.full_path(),
             )
             if has_skala
                 engine_table_expect += ['SKALA']

@@ -1327,6 +1327,7 @@ if not meson.is_subproject() and get_option('with_tests')
             'classical_engine',
             'mopac_engine',
             'nwchem_engine',
+            'cpmd_engine',
             'skala_engine',
             'server',
             'mpi_server',

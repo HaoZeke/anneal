@@ -63,7 +63,7 @@ typedef struct DLManagedTensorVersioned DLManagedTensorVersioned;
 /**
  * ABI minor of this build.
  */
-#define RGPOT_ABI_VERSION_MINOR 9
+#define RGPOT_ABI_VERSION_MINOR 10
 
 /**
  * Layout revision of this build.
@@ -1120,6 +1120,18 @@ enum rgpot_status_t
 rgpot_rpc_calculate_hvp(rgpot_rpc_client_t *client,
                         const struct rgpot_force_input_t *input,
                         const double *direction, double *product);
+#endif
+
+#if (defined(RGPOT_HAS_RPC) && defined(RGPOT_HAS_RPC))
+/**
+ * Select the image or bead whose keyed orbitals following calls should use.
+ *
+ * # Safety
+ *
+ * `client` must be null or a pointer from `rgpot_rpc_client_new`.
+ */
+enum rgpot_status_t rgpot_rpc_client_select_orbitals(rgpot_rpc_client_t *client,
+                                                     int64_t key);
 #endif
 
 #if (defined(RGPOT_HAS_RPC) && defined(RGPOT_HAS_RPC))

@@ -13,6 +13,7 @@
 #include <capnp/serialize.h>
 
 #include <array>
+#include <cstdint>
 #include <cstring>
 #include <optional>
 #include <string>
@@ -50,7 +51,8 @@ public:
   MpiPefSession &operator=(const MpiPefSession &) = delete;
 
   Result calculate(const types::AtomMatrix &positions,
-                   const std::vector<int> &numbers, const Box &box) {
+                   const std::vector<int> &numbers, const Box &box,
+                   std::optional<std::int64_t> orbital_key = std::nullopt) {
     // Root-only preparation precedes the command, so a local exception cannot
     // leave workers waiting for a payload that will never be sent.
     if (positions.cols() != 3 || positions.rows() != numbers.size())
@@ -59,11 +61,14 @@ public:
                                     positions.data() + positions.rows() * 3);
     std::vector<int> atom_numbers(numbers);
     std::vector<double> cell(9);
+    std::vector<std::int64_t> orbital_keys;
+    if (orbital_key)
+      orbital_keys.push_back(*orbital_key);
     static_assert(sizeof(Box) == 9 * sizeof(double));
     std::memcpy(cell.data(), &box, sizeof(box));
     int command = Calculate;
     host_.broadcastCommand(command);
-    return calculateReceived(coordinates, atom_numbers, cell);
+    return calculateReceived(coordinates, atom_numbers, cell, orbital_keys);
   }
 
   std::string configure(const ::PotentialConfig::Reader &parameters) {
@@ -90,7 +95,8 @@ public:
           std::vector<double> coordinates;
           std::vector<int> numbers;
           std::vector<double> cell;
-          (void)calculateReceived(coordinates, numbers, cell);
+          std::vector<std::int64_t> orbital_keys;
+          (void)calculateReceived(coordinates, numbers, cell, orbital_keys);
         } else if (command == Configure) {
           std::vector<std::uint64_t> words;
           (void)configureReceived(words);
@@ -109,16 +115,20 @@ private:
 
   Result calculateReceived(std::vector<double> &coordinates,
                            std::vector<int> &numbers,
-                           std::vector<double> &cell) {
+                           std::vector<double> &cell,
+                           std::vector<std::int64_t> &orbital_keys) {
     host_.broadcast(coordinates);
     host_.broadcast(numbers);
     host_.broadcast(cell);
+    host_.broadcast(orbital_keys);
     std::optional<types::AtomMatrix> positions;
     Box box{};
     host_.collective([&] {
       if (numbers.empty() || numbers.size() > INT_MAX / 3 ||
           coordinates.size() != numbers.size() * 3 || cell.size() != 9)
         throw std::runtime_error("invalid collective force geometry");
+      if (orbital_keys.size() > 1)
+        throw std::runtime_error("invalid collective orbital key");
       if (!engineAvailable())
         throw std::runtime_error("collective engine is unavailable");
       positions.emplace(numbers.size(), 3);
@@ -127,7 +137,11 @@ private:
       std::memcpy(&box, cell.data(), sizeof(box));
     });
     std::optional<Result> result;
-    host_.collective([&] { result.emplace(potential_(*positions, numbers, box)); });
+    host_.collective([&] {
+      if (!orbital_keys.empty())
+        selectOrbitals(orbital_keys.front());
+      result.emplace(potential_(*positions, numbers, box));
+    });
     return std::move(*result);
   }
 
@@ -154,6 +168,21 @@ private:
       return cp2k_->available();
 #endif
     return nwchem_ ? nwchem_->available() : cpmd_->available();
+  }
+
+  void selectOrbitals(std::int64_t key) {
+#ifdef RGPOT_HAS_CP2K
+    if (cp2k_) {
+      cp2k_->selectOrbitals(key);
+      return;
+    }
+#endif
+    if (cpmd_) {
+      cpmd_->selectOrbitals(key);
+      return;
+    }
+    throw std::runtime_error(
+        "orbital key is supported only by CPMD and CP2K backends");
   }
 
   bool applyConfig(const ::PotentialConfig::Reader &parameters,

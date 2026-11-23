@@ -32,6 +32,7 @@
  * @ingroup rgpot_cpp
  */
 
+#include <cstdint>
 #include <string>
 
 #include "rgpot.h"
@@ -109,6 +110,13 @@ public:
 
   RpcClient(const RpcClient &) = delete;
   RpcClient &operator=(const RpcClient &) = delete;
+
+  /**
+   * @brief Select the image or bead whose orbitals following calls should use.
+   */
+  void select_orbitals(std::int64_t key) {
+    detail::check_status(rgpot_rpc_client_select_orbitals(handle_, key));
+  }
 
   /**
    * @brief Perform a remote force/energy calculation.

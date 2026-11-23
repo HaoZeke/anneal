@@ -1981,3 +1981,5 @@ MullerBrownParams @3 field c :List(Float64) local
 MullerBrownParams @4 field x0 :List(Float64) local
 MullerBrownParams @5 field y0 :List(Float64) local
 PotentialConfig @21 arm mullerBrown :MullerBrownParams local
+ForceInput @10 field hasOrbitalKey :Bool local
+ForceInput @11 field orbitalKey :Int64 local

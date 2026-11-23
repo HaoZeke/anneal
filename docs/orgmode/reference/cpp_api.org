@@ -638,6 +638,19 @@ CalcResult calculate(const InputSpec &input);
 - Errors :: throws =rgpot::Error= when =rgpot_rpc_calculate= returns a
   non-success status, for example "RPC error" on a transport or server failure.
 
+*** =rgpot::RpcClient::select_orbitals=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void select_orbitals(std::int64_t key);
+#+end_src
+
+- Inputs :: =key=, a signed image or bead identifier.
+- Units :: none.
+- Outputs :: none; following =calculate= calls carry the key.
+- Errors :: throws =rgpot::Error= when =rgpot_rpc_client_select_orbitals=
+  returns a non-success status.
+
 ** CppCore/rgpot/Potential.hpp: rgpot::PotentialBase
 
 *** =rgpot::PotentialBase=

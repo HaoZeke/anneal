@@ -28,6 +28,7 @@ use crate::types::{rgpot_force_input_t, rgpot_force_out_t};
 pub struct RpcClient {
     runtime: Runtime,
     addr: String,
+    orbital_key: Option<i64>,
 }
 
 impl RpcClient {
@@ -39,7 +40,13 @@ impl RpcClient {
         Ok(Self {
             runtime,
             addr: format!("{host}:{port}"),
+            orbital_key: None,
         })
+    }
+
+    /// Select the image or bead whose orbitals following calls should use.
+    pub fn select_orbitals(&mut self, key: i64) {
+        self.orbital_key = Some(key);
     }
 
     /// Perform a synchronous RPC calculation.
@@ -118,9 +125,13 @@ impl RpcClient {
                 atm_builder.set(i as u32, val);
             }
 
-            let mut box_builder = fip.init_box(9);
+            let mut box_builder = fip.reborrow().init_box(9);
             for (i, &val) in box_data.iter().enumerate() {
                 box_builder.set(i as u32, val);
+            }
+            if let Some(key) = self.orbital_key {
+                fip.set_has_orbital_key(true);
+                fip.set_orbital_key(key);
             }
         }
 

@@ -33,6 +33,8 @@ struct PotClient {
   kj::WaitScope *wait_scope;    //!< Reference to the client wait scope.
   std::string last_error;       //!< Buffer for the most recent error message.
   bool server_checked = false;  //!< True once the server passed the handshake.
+  bool has_orbital_key = false; //!< Whether following requests name a key.
+  int64_t orbital_key = 0;      //!< Image or bead key sent with each request.
 
   /**
    * @brief Constructor for PotClient.
@@ -97,6 +99,15 @@ void pot_client_free(PotClient *client) {
   }
 }
 
+int32_t pot_client_select_orbitals(PotClient *client, int64_t key) {
+  if (!client)
+    return -1;
+  client->last_error.clear();
+  client->has_orbital_key = true;
+  client->orbital_key = key;
+  return 0;
+}
+
 /**
  * @details
  * This function performs the following steps:
@@ -145,6 +156,10 @@ int32_t pot_calculate(PotClient *client, int32_t natoms, const double *pos,
     fip.setPos(pos_view);
     fip.setAtmnrs(atm_view);
     fip.setBox(box_view);
+    if (client->has_orbital_key) {
+      fip.setHasOrbitalKey(true);
+      fip.setOrbitalKey(client->orbital_key);
+    }
 
     // ---------------------------------------------------------
 
