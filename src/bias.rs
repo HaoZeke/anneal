@@ -215,7 +215,7 @@ mod tests {
             calls: Arc::clone(&calls),
         }));
         for i in 0..centres {
-            assert_eq!(index.push(array![2.0 * i as f64]), Some(i));
+            assert_eq!(index.push(array![2.0 * i as f64]), i);
         }
         let insert_calls_per_basin = calls.load(Ordering::Relaxed).div_ceil(centres);
         let query = array![-1.0];
@@ -279,8 +279,8 @@ mod tests {
         }
 
         let mut index = BasinIndex::new(Raw, 0.1).with_metric(Box::new(SameLengthOnly));
-        assert_eq!(index.basin_of(array![0.0].view()), Some(0));
-        assert_eq!(index.basin_of(array![0.0, 0.0].view()), Some(1));
+        assert_eq!(index.basin_of(array![0.0].view()), 0);
+        assert_eq!(index.basin_of(array![0.0, 0.0].view()), 1);
         assert_eq!(index.lookup(array![0.05].view()), Some(0));
         assert_eq!(index.lookup(array![0.05, 0.05].view()), Some(1));
     }
@@ -333,15 +333,15 @@ mod tests {
                 .with_metric(Box::new(EuclideanNoKey));
             for centre in &centres {
                 let next = keyed.n_basins();
-                assert_eq!(keyed.push(centre.clone()), Some(next));
-                assert_eq!(unkeyed.push(centre.clone()), Some(next));
+                assert_eq!(keyed.push(centre.clone()), next);
+                assert_eq!(unkeyed.push(centre.clone()), next);
             }
             assert!(keyed.tree.is_none(), "a keyed metric does not build a tree");
             assert!(unkeyed.tree.is_some(), "a keyless metric keeps the tree");
             assert!(keyed.seats_full() && unkeyed.seats_full());
             let refused = Array1::from(vec![100.0; dim]);
-            assert_eq!(keyed.push(refused.clone()), None);
-            assert_eq!(unkeyed.push(refused.clone()), None);
+            assert_eq!(keyed.push(refused.clone()), cap - 1);
+            assert_eq!(unkeyed.push(refused.clone()), cap - 1);
             assert_eq!(keyed.n_basins(), cap);
             assert_eq!(unkeyed.n_basins(), cap);
 
@@ -367,55 +367,49 @@ mod tests {
             assert_eq!(
                 keyed.lookup(Array1::from(vec![100.0; dim]).view()),
                 None,
-                "a refused seat is not aliased"
+                "lookup does not invent a seat"
+            );
+            assert_eq!(keyed.n_basins(), cap);
+            assert_eq!(
+                keyed.basin_of(Array1::from(vec![100.0; dim]).view()),
+                cap - 1
             );
         }
     }
 
     #[test]
-    fn a_capped_index_refuses_a_new_basin_without_aliasing_it() {
+    fn a_capped_index_reuses_the_latest_seat() {
         let mut index = BasinIndex::new(Raw, 0.1).with_cap(2);
-        assert_eq!(index.basin_of(array![0.0].view()), Some(0));
-        assert_eq!(index.basin_of(array![1.0].view()), Some(1));
-        assert!(index.seats_full());
-        for _ in 0..3 {
-            assert_eq!(index.basin_of(array![5.0].view()), None);
-            assert_eq!(index.push(array![5.0]), None);
-        }
+        assert_eq!(index.basin_of(array![0.0].view()), 0);
+        assert_eq!(index.basin_of(array![1.0].view()), 1);
         assert_eq!(index.n_basins(), 2);
-        assert_eq!(index.lookup(array![5.0].view()), None, "no alias");
-        assert_eq!(index.visits(0), 1);
-        assert_eq!(index.visits(1), 1);
-        assert_eq!(index.centre(0), array![0.0].view());
-        assert_eq!(index.centre(1), array![1.0].view());
-        assert_eq!(index.basin_of(array![0.05].view()), Some(0));
-        assert_eq!(index.basin_of(array![0.95].view()), Some(1));
-        assert_eq!(index.lookup(array![0.5].view()), None);
-        assert_eq!(index.visits(0), 2);
+        assert_eq!(index.basin_of(array![5.0].view()), 1);
+        assert_eq!(index.n_basins(), 2);
+        assert!(index.seats_full());
         assert_eq!(index.visits(1), 2);
+        assert_eq!(index.centre(1), array![1.0].view());
     }
 
     #[test]
-    fn a_capped_bias_drops_a_deposit_it_has_no_seat_for() {
+    fn a_capped_bias_deposits_on_the_latest_seat() {
         let mut bias = BasinBias::new(Raw, 0.1, 1.0, 5.0);
         bias.cap_basins(2);
         bias.deposit(array![0.0].view(), 1.0);
         bias.deposit(array![1.0].view(), 1.0);
-        let depths = [bias.well_depth(0), bias.well_depth(1)];
+        let first = bias.well_depth(0);
+        let before = bias.well_depth(1);
         bias.deposit(array![5.0].view(), 1.0);
         bias.deposit_scaled_n(array![5.0].view(), 1.0, 1.0, 4);
-        assert_eq!(bias.deposit_at(array![5.0].view(), None, 1.0), None);
-        bias.import_well(array![5.0], 3.0);
-        bias.merge_wells(&[(array![5.0], 3.0)], 0.5, false);
+        assert_eq!(bias.deposit_at(array![5.0].view(), None, 1.0), 1);
+        let aliased = bias.well_depth(1);
+        bias.import_well(array![9.0], 1.0e9);
+        bias.merge_wells(&[(array![9.0], 1.0e9)], 0.5, false);
         assert_eq!(bias.n_basins(), 2);
-        assert_eq!(bias.potential(array![5.0].view()), 0.0, "no alias");
-        assert_eq!(bias.locate(array![5.0].view()), (0.0, None));
-        assert_eq!([bias.well_depth(0), bias.well_depth(1)], depths);
-        assert_eq!(bias.potential(array![0.05].view()), depths[0]);
-        assert_eq!(bias.potential(array![0.95].view()), depths[1]);
-        bias.deposit(array![0.05].view(), 1.0);
-        assert!(bias.well_depth(0) > depths[0]);
-        assert_eq!(bias.well_depth(1), depths[1]);
+        assert!(aliased > before);
+        assert_eq!(bias.well_depth(1), aliased);
+        assert_eq!(bias.well_depth(0), first);
+        assert_eq!(bias.potential(array![0.05].view()), bias.well_depth(0));
+        assert_eq!(bias.potential(array![0.95].view()), bias.well_depth(1));
     }
 
     fn identity_projector_2d() -> WellTemperedBias {
@@ -820,12 +814,12 @@ impl<F: Fingerprint> BasinIndex<F> {
         }
     }
 
-    /// Refuses to open seats once `cap` regions are registered.
+    /// Stops opening seats once `cap` regions are registered.
     ///
     /// A lookup walks every seat that the triangle test cannot skip. An
-    /// uncapped index makes that walk longer on every later hop. A new region
-    /// beyond the cap is refused a seat rather than aliased onto an existing
-    /// one. The cap is at least one.
+    /// uncapped index makes that walk longer on every later hop. Past the
+    /// cap a region that matches no seat reuses the latest one, so the
+    /// walk stops growing. The cap is at least one.
     pub fn with_cap(mut self, cap: usize) -> Self {
         self.cap = Some(cap.max(1));
         self
@@ -1072,11 +1066,10 @@ impl<F: Fingerprint> BasinIndex<F> {
 
     /// Registers a descriptor as a new basin and returns its index.
     ///
-    /// `None` once [`Self::seats_full`]: the descriptor gets no seat and
-    /// the index is left exactly as it was.
-    pub fn push(&mut self, d: Array1<f64>) -> Option<usize> {
+    /// Past the cap the latest seat is reused and the index is left unchanged.
+    pub fn push(&mut self, d: Array1<f64>) -> usize {
         if self.seats_full() {
-            return None;
+            return self.centres.len().saturating_sub(1);
         }
         self.keys.push(self.metric.key(d.view()));
         if d.len() > 32 {
@@ -1099,7 +1092,7 @@ impl<F: Fingerprint> BasinIndex<F> {
         } else {
             self.tree = None;
         }
-        Some(index)
+        index
     }
 
     /// Records another visit to `i`.
@@ -1110,13 +1103,17 @@ impl<F: Fingerprint> BasinIndex<F> {
     /// Index of the basin holding `x`, opening one if it is new, and counting
     /// the visit.
     ///
-    /// `None` when `x` is in no registered basin and the cap refuses a new
-    /// seat. Nothing is counted then.
-    pub fn basin_of(&mut self, x: ArrayView1<f64>) -> Option<usize> {
+    /// Past the cap a descriptor that matches no seat reuses the latest one
+    /// and that visit is counted there.
+    pub fn basin_of(&mut self, x: ArrayView1<f64>) -> usize {
         let d = self.describe(x);
-        let i = self.lookup(d.view()).or_else(|| self.push(d))?;
+        let i = match self.lookup(d.view()) {
+            Some(i) => i,
+            None if self.seats_full() => self.centres.len().saturating_sub(1),
+            None => self.push(d),
+        };
         self.bump(i);
-        Some(i)
+        i
     }
 
     /// Number of distinct basins registered so far.
@@ -2032,10 +2029,6 @@ impl<F: Fingerprint> BasinBias<F> {
     }
 
     /// Caps the basin index this bias deposits into.
-    ///
-    /// Past the cap a deposit outside every seat is dropped: the descriptor
-    /// feels no bias, which is what it felt before the deposit, and no other
-    /// seat is charged for it.
     pub fn cap_basins(&mut self, cap: usize) {
         self.index.set_cap(cap);
     }
@@ -2085,7 +2078,8 @@ impl<F: Fingerprint> BasinBias<F> {
         }
         for (centre, depth) in opened {
             // Opened after the scan so a foreign well cannot match itself.
-            if self.lookup(centre.view()).is_none() && self.index.push(centre).is_some() {
+            if self.lookup(centre.view()).is_none() && !self.index.seats_full() {
+                self.index.push(centre);
                 self.v.push(depth);
                 self.deposit_counts.push(0);
             }
@@ -2107,12 +2101,12 @@ impl<F: Fingerprint> BasinBias<F> {
                     self.v[i] = height;
                 }
             }
-            None => {
-                if self.index.push(descriptor).is_some() {
-                    self.v.push(height);
-                    self.deposit_counts.push(0);
-                }
+            None if !self.index.seats_full() => {
+                self.index.push(descriptor);
+                self.v.push(height);
+                self.deposit_counts.push(0);
             }
+            None => {}
         }
     }
 }
@@ -2175,24 +2169,24 @@ impl<F: Fingerprint> BasinBias<F> {
     /// A known seat is incremented in place. An unknown descriptor is
     /// opened without a second scan. The seat after the deposit is what
     /// the next lookup of this descriptor returns, until another seat
-    /// is opened. `None` when the cap refuses an unknown descriptor a
-    /// seat, and the deposit is dropped.
-    pub fn deposit_at(
-        &mut self,
-        s: ArrayView1<f64>,
-        known: Option<usize>,
-        temp: f64,
-    ) -> Option<usize> {
+    /// is opened. Past the cap an unknown descriptor reuses the latest seat.
+    pub fn deposit_at(&mut self, s: ArrayView1<f64>, known: Option<usize>, temp: f64) -> usize {
         let denom = (self.gamma - 1.0) * temp;
         if let Some(i) = known {
             self.increment(i, denom, temp, 1.0, true);
-            return Some(i);
+            return i;
         }
-        let i = self.index.push(s.to_owned())?;
+        if self.index.seats_full() {
+            let i = self.index.n_basins().saturating_sub(1);
+            self.increment(i, denom, temp, 1.0, true);
+            return i;
+        }
+        self.index.push(s.to_owned());
         self.v.push(self.w0);
         self.deposit_counts.push(1);
+        let i = self.index.n_basins() - 1;
         self.index.bump(i);
-        Some(i)
+        i
     }
 
     fn deposit_counted(
@@ -2209,12 +2203,12 @@ impl<F: Fingerprint> BasinBias<F> {
         let denom = (self.gamma - 1.0) * temp;
         let i = match self.lookup(s) {
             Some(i) => i,
+            None if self.index.seats_full() => self.index.n_basins().saturating_sub(1),
             None => {
-                let Some(i) = self.index.push(s.to_owned()) else {
-                    return;
-                };
+                self.index.push(s.to_owned());
                 self.v.push(scale * self.w0);
                 self.deposit_counts.push(1);
+                let i = self.index.n_basins() - 1;
                 if local {
                     self.index.bump(i);
                 }

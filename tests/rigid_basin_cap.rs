@@ -3,8 +3,8 @@
 //!
 //! The rigid path seats at most a fixed number of basins. With a merge
 //! radius small enough that every quench is a new basin, a run reaches the
-//! cap early, and every later unmatched basin has to be refused a seat
-//! rather than abort the run or be charged to a seat it is not in.
+//! cap early. Later unmatched quenches reuse the latest seat, so the run
+//! neither aborts nor opens another basin.
 
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, MoveLibrary, Outcome, run_with_gradient,
@@ -54,6 +54,17 @@ fn a_rigid_chain_runs_on_past_its_basin_cap() {
         outcome.hops
     );
     assert_eq!(outcome.basins, RIGID_BASIN_CAP);
+    // A miss past the cap reuses the latest seat, so it is same or known.
+    // Counting it as new is the refusal the cap used to do.
+    let (same, known, new) = outcome.visit_counts;
+    assert!(
+        new <= RIGID_BASIN_CAP,
+        "new visits {new} exceed the cap; a later basin was not aliased"
+    );
+    assert!(
+        same + known > 0,
+        "no revisit was recorded, so the cap was not reused"
+    );
     assert!(outcome.best.is_finite());
 }
 
@@ -69,5 +80,14 @@ fn the_recommended_tip4p_tetramer_runs_on_past_its_basin_cap() {
     let outcome = run_identity_relax(&cfg, &start, 10_000, 61);
     assert!(outcome.hops > RIGID_BASIN_CAP, "{} hops", outcome.hops);
     assert_eq!(outcome.basins, RIGID_BASIN_CAP);
+    let (same, known, new) = outcome.visit_counts;
+    assert!(
+        new <= RIGID_BASIN_CAP,
+        "new visits {new} exceed the cap; a later basin was not aliased"
+    );
+    assert!(
+        same + known > 0,
+        "no revisit was recorded, so the cap was not reused"
+    );
     assert!(outcome.best.is_finite());
 }
