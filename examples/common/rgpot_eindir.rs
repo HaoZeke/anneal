@@ -129,6 +129,64 @@ mod tests {
 
     unsafe extern "C" fn reset_noop(_pot: *mut c_void) {}
 
+    unsafe extern "C" fn engine_rejected(
+        _pot: *mut c_void,
+        _n: i64,
+        _positions: *const f64,
+        _atomic_numbers: *const i32,
+        _gradient: *mut f64,
+        energy: *mut f64,
+        _variance: *mut f64,
+        _cell: *const f64,
+    ) -> i32 {
+        unsafe { *energy = -1.0 };
+        -2
+    }
+
+    unsafe extern "C" fn engine_dies(
+        _pot: *mut c_void,
+        _n: i64,
+        _positions: *const f64,
+        _atomic_numbers: *const i32,
+        _gradient: *mut f64,
+        _energy: *mut f64,
+        _variance: *mut f64,
+        _cell: *const f64,
+    ) -> i32 {
+        unsafe { _exit(1) }
+    }
+
+    fn pair_call(force: XtbForce) -> (Option<(f64, f64)>, usize, Vec<f64>) {
+        let mut worker = XtbWorker::spawn(force, reset_noop, std::ptr::null_mut());
+        let mut forces = vec![0.0; 6];
+        let before = scc_rejected_count();
+        let evaluation = worker.evaluate(
+            2,
+            &[0.0, 0.0, 0.0, 2.0, 0.0, 0.0],
+            &[14, 14],
+            &[0.0; 9],
+            &mut forces,
+        );
+        let answer = answer_or_reject(evaluation, &mut forces, 2.0);
+        let counted = scc_rejected_count() - before;
+        worker.shutdown();
+        (answer, counted, forces)
+    }
+
+    #[test]
+    fn every_engine_failure_is_counted_and_returns_no_energy() {
+        for (name, force) in [
+            ("not converged, rc -4", scc_failure as XtbForce),
+            ("rejected, rc -2", engine_rejected as XtbForce),
+            ("dead worker", engine_dies as XtbForce),
+        ] {
+            let (answer, counted, forces) = pair_call(force);
+            assert!(answer.is_none(), "{name} returned an energy");
+            assert_eq!(counted, 1, "{name} was not counted in scc_rejected");
+            assert!(forces.iter().all(|value| value.is_nan()), "{name}");
+        }
+    }
+
     #[test]
     fn descriptor_maps_the_eindir_stamp_and_optional_build_identity() {
         let stamp = eindir_core::ffi::eindir_abi_stamp_t {
@@ -580,6 +638,26 @@ fn first_existing(cands: &[PathBuf]) -> PathBuf {
         .unwrap_or_else(|| cands[cands.len() - 1].clone())
 }
 
+/// The worker's answer, or `None` for an evaluation that gave no energy.
+///
+/// An unconverged SCC, a rejected answer and a dead worker are the same to
+/// the search: the call was charged and returned nothing, so each is counted
+/// as an SCC rejection and leaves no force behind.
+fn answer_or_reject(
+    evaluation: Result<(f64, f64), WorkerFail>,
+    scratch: &mut [f64],
+    min_pair_a: f64,
+) -> Option<(f64, f64)> {
+    match evaluation {
+        Ok(answer) => Some(answer),
+        Err(_) => {
+            note_scc_rejected(min_pair_a);
+            scratch.fill(f64::NAN);
+            None
+        }
+    }
+}
+
 unsafe extern "C" fn xtb_callback(
     user: *mut c_void,
     input: *const rgpot_force_input_t,
@@ -630,22 +708,13 @@ unsafe extern "C" fn xtb_callback(
             );
         }
     }
-    let (energy, var) =
-        match kernel
+    let evaluation =
+        kernel
             .worker
-            .evaluate(n, positions, atomic_numbers, cell, &mut kernel.scratch)
-        {
-            Ok(answer) => answer,
-            Err(WorkerFail::SccNotConverged) => {
-                note_scc_rejected(min_pair);
-                kernel.scratch.fill(f64::NAN);
-                return rgpot_status_t::RGPOT_INTERNAL_ERROR;
-            }
-            Err(WorkerFail::Dead | WorkerFail::Rejected) => {
-                kernel.scratch.fill(f64::NAN);
-                return rgpot_status_t::RGPOT_INTERNAL_ERROR;
-            }
-        };
+            .evaluate(n, positions, atomic_numbers, cell, &mut kernel.scratch);
+    let Some((energy, var)) = answer_or_reject(evaluation, &mut kernel.scratch, min_pair) else {
+        return rgpot_status_t::RGPOT_INTERNAL_ERROR;
+    };
     out.energy = energy;
     out.variance = var;
     out.forces = unsafe { rgpot_tensor_owned_cpu_f64_2d(kernel.scratch.as_ptr(), n as i64, 3) };
