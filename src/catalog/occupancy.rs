@@ -1268,9 +1268,22 @@ pub fn ring_novelty(origin: (usize, usize, usize), trial: (usize, usize, usize))
 
 /// Atom weight when leaving `origin`.
 ///
-/// Atoms are weighted by incidence in ring orders that are currently rare.
-/// This favours local ring novelty instead of privileging one fixed order.
+/// Five-rings, when the occupied packing has them, are the Franzblau
+/// fivefold signature: extras move those atoms. Otherwise extras move
+/// three-rings. Uniform incidence is a global scale and does not steer.
 pub fn ring_leave_weight(origin: (usize, usize, usize), atom: [u32; 3]) -> f64 {
+    if origin.2 > 0 {
+        1.0 + f64::from(atom[2])
+    } else {
+        1.0 + f64::from(atom[0])
+    }
+}
+
+/// Opt-in atom weight favouring incidence in ring orders rare at `origin`.
+///
+/// Used only when the caller explicitly requests rare-order weighting rather
+/// than the default fivefold/three-ring preference in [`ring_leave_weight`].
+pub fn rare_ring_leave_weight(origin: (usize, usize, usize), atom: [u32; 3]) -> f64 {
     let baseline = [
         1.0 / (1.0 + origin.0 as f64),
         1.0 / (1.0 + origin.1 as f64),
@@ -1287,6 +1300,12 @@ pub fn ring_leave_weight(origin: (usize, usize, usize), atom: [u32; 3]) -> f64 {
 /// holes and packing kicks do. A uniform ring support is a global
 /// scale; the hop's RMS cap removes it.
 pub fn lens_ring_displacement(coordinates: &[f64], dr: &mut [f64]) {
+    lens_ring_displacement_with(coordinates, dr, false);
+}
+
+/// Opt-in variant of [`lens_ring_displacement`] selecting between the
+/// default [`ring_leave_weight`] and [`rare_ring_leave_weight`].
+pub fn lens_ring_displacement_with(coordinates: &[f64], dr: &mut [f64], rare_rings: bool) {
     if coordinates.len() != dr.len() {
         return;
     }
@@ -1298,7 +1317,11 @@ pub fn lens_ring_displacement(coordinates: &[f64], dr: &mut [f64]) {
         return;
     }
     for (i, &incidence) in census.atom.iter().enumerate() {
-        let weight = ring_leave_weight(census.profile, incidence);
+        let weight = if rare_rings {
+            rare_ring_leave_weight(census.profile, incidence)
+        } else {
+            ring_leave_weight(census.profile, incidence)
+        };
         dr[3 * i] *= weight;
         dr[3 * i + 1] *= weight;
         dr[3 * i + 2] *= weight;
@@ -2043,15 +2066,16 @@ mod tests {
         in_interface_ensemble, interface_ladder, is_occupancy_leave_action, leave_crossing_slices,
         leave_defers, leave_shot_accepted, leftover_birth_probability, leftover_dwell_from_census,
         leftover_esty_stable, leftover_esty_var, leftover_hatch_stable, leftover_lambda,
-        leftover_sat_dwell, occupancy_book_holes, occupancy_compact, occupancy_complete,
-        occupancy_complete_at, occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes,
-        occupancy_fes_delta, occupancy_fes_from_histograms, occupancy_is_cluster,
-        occupancy_landfold_floor, occupancy_leave_adopt, occupancy_leave_by_birth,
-        occupancy_leave_by_ei, occupancy_leave_new_class, occupancy_leave_target,
-        occupancy_map_floor, occupancy_map_fold, occupancy_retire, occupancy_retire_at,
-        occupancy_ring_class_changed, occupancy_ring_floor, occupancy_sparsify_book, packing_role,
-        pitman_yor_p_new, promote_one_sided, published_energy_score, retis_exchange_adjacent,
-        retis_should_swap, ring_leave_weight, ring_novelty, seat_extras,
+        leftover_sat_dwell, lens_ring_displacement, lens_ring_displacement_with,
+        occupancy_book_holes, occupancy_compact, occupancy_complete, occupancy_complete_at,
+        occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes, occupancy_fes_delta,
+        occupancy_fes_from_histograms, occupancy_is_cluster, occupancy_landfold_floor,
+        occupancy_leave_adopt, occupancy_leave_by_birth, occupancy_leave_by_ei,
+        occupancy_leave_new_class, occupancy_leave_target, occupancy_map_floor, occupancy_map_fold,
+        occupancy_retire, occupancy_retire_at, occupancy_ring_class_changed, occupancy_ring_floor,
+        occupancy_sparsify_book, packing_role, pitman_yor_p_new, promote_one_sided,
+        published_energy_score, rare_ring_leave_weight, retis_exchange_adjacent, retis_should_swap,
+        ring_leave_weight, ring_novelty, seat_extras,
     };
 
     /// L1 distances of the unit-square corners have a repeated Torgerson
@@ -3066,13 +3090,27 @@ mod tests {
     }
 
     #[test]
-    fn ring_leave_weight_favors_novel_ring_orders() {
+    fn ring_leave_weight_breaks_pentagons_on_ico_and_triangles_on_oh() {
         let ico = (165, 17, 6);
         let oh = (152, 22, 0);
         assert!(ring_leave_weight(ico, [0, 0, 3]) > ring_leave_weight(ico, [10, 0, 0]));
-        assert!(ring_leave_weight(oh, [0, 0, 1]) > ring_leave_weight(oh, [0, 2, 0]));
+        assert!(ring_leave_weight(oh, [4, 0, 0]) > ring_leave_weight(oh, [0, 2, 0]));
         assert_eq!(ring_novelty(ico, ico), 0);
         assert!(ring_novelty(ico, oh) > 0);
+    }
+
+    #[test]
+    fn rare_ring_leave_weight_favors_novel_ring_orders() {
+        let ico = (165, 17, 6);
+        let oh = (152, 22, 0);
+        assert!(rare_ring_leave_weight(ico, [0, 0, 3]) > rare_ring_leave_weight(ico, [10, 0, 0]));
+        assert!(rare_ring_leave_weight(oh, [0, 0, 1]) > rare_ring_leave_weight(oh, [0, 2, 0]));
+        let coords = vec![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1, 0.0, 1.1, 1.1, 0.0];
+        let mut dr_default = vec![1.0; coords.len()];
+        let mut dr_opt_in = vec![1.0; coords.len()];
+        lens_ring_displacement(&coords, &mut dr_default);
+        lens_ring_displacement_with(&coords, &mut dr_opt_in, false);
+        assert_eq!(dr_default, dr_opt_in);
     }
 
     #[test]
