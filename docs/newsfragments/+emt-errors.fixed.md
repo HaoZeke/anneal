@@ -1,0 +1,1 @@
+`EMTPot` no longer crashes after a refused call. An element the provider does not cover, a cell too thin for the kernel, a singular or non-finite cell and non-finite positions raise `std::invalid_argument` in C++ and `ValueError` in Python, and the next call starts from a clean state. A call with zero atoms returns zero energy and no forces.
