@@ -1,0 +1,12 @@
+# The ABCluster 3.4 Linux release, as downloaded from the official page
+# http://www.zhjun-sci.com/abcluster.html ("Download Current Release").
+# The executable link needs no registration and no licence step.
+# The source tarball needs a registration form and was not downloaded.
+version=3.4
+url=http://zhjun-sci.com/abcluster/exe/ABCluster-3.4-Linux.tar.gz
+tarball_sha256=00079b73409942fe694378124ce995ee027601e82d31f8c03c678f75fd2cafdd
+atom_sha256=bb7baac3dac1789e4b53cfbc0e2f82f81ae3c1405c96dd209906212ddf573e6e
+# The release commit, as printed by the release's geom. atom prints none.
+commit=80d5ceed91bf42a2739729691c5e478181afee5f
+# atom is "atom 3.4, official version", compiled 2026-01-06 16:59:01 with
+# g++ 9.3.0 -O2 -Os -fno-exceptions --std=c++11 -fopenmp.
