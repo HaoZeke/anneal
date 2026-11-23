@@ -3,6 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <stdexcept>
 #include <string>
@@ -13,8 +14,11 @@
 #include "rgpot/HessianVector.hpp"
 #include "rgpot/LennardJones/LJClusterPot.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
+#include "rgpot/Morse/MorsePot.hpp"
 #include "rgpot/PerAtom.hpp"
 #include "rgpot/PotHelpers.hpp"
+#include "rgpot/SuttonChen/SuttonChenPot.hpp"
+#include "rgpot/ZBL/ZBLPot.hpp"
 #include "rgpot/plugin/PluginRegistry.hpp"
 #include "rgpot/pot_caps.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
@@ -241,6 +245,82 @@ TEST_CASE("per-atom evaluation rejects a missing species buffer",
                                   rgpot::PerAtomOut{energy, nullptr});
       },
       "invalid parameter: atomic numbers are null");
+}
+
+namespace {
+
+/// A direct forcePerAtom call with one unusable buffer throws and leaves
+/// the force and per-atom arrays as they were.
+template <typename Pot>
+void requirePerAtomGuard(const Pot &pot, bool readsSpecies) {
+  constexpr double kSentinel = 7.0;
+  double pos[6] = {0.0, 0.0, 0.0, 1.5, 0.0, 0.0};
+  int species[2] = {1, 1};
+  double box[9];
+  fillCell(box);
+
+  auto attempt = [&](const rgpot::ForceInput &in, bool withForces,
+                     const char *message) {
+    double forces[6];
+    double energy[2];
+    double virial[12];
+    std::fill(forces, forces + 6, kSentinel);
+    std::fill(energy, energy + 2, kSentinel);
+    std::fill(virial, virial + 12, kSentinel);
+    rgpot::ForceOut out{};
+    out.F = withForces ? forces : nullptr;
+    out.energy = kSentinel;
+    requireRejected(
+        [&] { pot.forcePerAtom(in, &out, rgpot::PerAtomOut{energy, virial}); },
+        message);
+    REQUIRE(out.energy == kSentinel);
+    for (const double f : forces) {
+      REQUIRE(f == kSentinel);
+    }
+    for (const double e : energy) {
+      REQUIRE(e == kSentinel);
+    }
+    for (const double w : virial) {
+      REQUIRE(w == kSentinel);
+    }
+  };
+
+  attempt({2, nullptr, species, box}, true,
+          "invalid parameter: positions is null");
+  attempt({2, pos, species, box}, false, "invalid parameter: forces are null");
+  attempt({0, pos, species, box}, true,
+          "invalid parameter: nAtoms must be positive");
+
+  if (readsSpecies) {
+    attempt({2, pos, nullptr, box}, true,
+            "invalid parameter: atomic numbers are null");
+  } else {
+    double forces[6] = {};
+    double energy[2] = {};
+    rgpot::ForceOut out{};
+    out.F = forces;
+    REQUIRE_NOTHROW(pot.forcePerAtom({2, pos, nullptr, box}, &out,
+                                     rgpot::PerAtomOut{energy, nullptr}));
+  }
+
+  rgpot::ForceOut none{};
+  REQUIRE_THROWS_AS(pot.forcePerAtom({2, pos, species, box}, nullptr,
+                                     rgpot::PerAtomOut{}),
+                    std::invalid_argument);
+  REQUIRE_THROWS_AS(
+      pot.forcePerAtom({2, pos, species, box}, &none, rgpot::PerAtomOut{}),
+      std::invalid_argument);
+}
+
+} // namespace
+
+TEST_CASE("direct forcePerAtom members validate before writing",
+          "[null-force]") {
+  requirePerAtomGuard(rgpot::LJPot{}, false);
+  requirePerAtomGuard(rgpot::LJClusterPot{}, false);
+  requirePerAtomGuard(rgpot::MorsePot{}, false);
+  requirePerAtomGuard(rgpot::ZBLPot{}, true);
+  requirePerAtomGuard(rgpot::SuttonChenPot{}, false);
 }
 
 TEST_CASE("a Hessian product rejects a missing species buffer",

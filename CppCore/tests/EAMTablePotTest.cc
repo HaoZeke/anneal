@@ -243,6 +243,31 @@ TEST_CASE("funcfl Cu_u3 matches LAMMPS pair_style eam", "[EAMTable]") {
                 1e-10, 1e-10, 1e-13);
 }
 
+TEST_CASE("forcePerAtom validates its buffers before it writes",
+          "[EAMTable]") {
+  const rgpot::EAMTablePot pot = cu_u3(true, false);
+  const std::vector<double> pos{0.0, 0.0, 0.0, 2.5, 0.0, 0.0};
+  const std::vector<int> z{29, 29};
+  const double box[9] = {20.0, 0.0, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0, 20.0};
+  std::vector<double> forces(6, 7.0);
+  std::vector<double> eatom(2, 7.0);
+  rgpot::ForceOut out{};
+  out.F = forces.data();
+  const rgpot::PerAtomOut atoms{eatom.data(), nullptr};
+
+  REQUIRE_THROWS_AS(
+      pot.forcePerAtom({2, pos.data(), nullptr, box}, &out, atoms),
+      std::invalid_argument);
+  REQUIRE_THROWS_AS(
+      pot.forcePerAtom({2, nullptr, z.data(), box}, &out, atoms),
+      std::invalid_argument);
+  REQUIRE_THROWS_AS(
+      pot.forcePerAtom({2, pos.data(), z.data(), nullptr}, &out, atoms),
+      std::invalid_argument);
+  REQUIRE(forces == std::vector<double>(6, 7.0));
+  REQUIRE(eatom == std::vector<double>(2, 7.0));
+}
+
 TEST_CASE("setfl CuNi matches LAMMPS pair_style eam/alloy", "[EAMTable]") {
   const rgpot::EAMTablePot pot(
       {.path = kData + "eam_table/CuNi.eam.alloy", .stress = true});

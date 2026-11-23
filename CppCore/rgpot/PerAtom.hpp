@@ -16,6 +16,13 @@
  * offer per-atom output where it exists without a new virtual on
  * @c PotentialBase. Potentials without the member are unchanged.
  *
+ * Every member makes the checks of @c guardForceCall before it writes
+ * @c ForceOut or the per-atom arrays, so a null buffer, a null cell on a
+ * periodic kernel or a system with no atoms throws
+ * @c std::invalid_argument and leaves all outputs untouched. A kernel
+ * that does not read the species, such as Lennard-Jones, Morse and
+ * Sutton-Chen, accepts a null species pointer.
+ *
  * Pair terms go half to each atom. An embedding term F(rho_i) belongs to
  * atom i alone. The per-atom virial is W_i, energy units, with
  * sum_i W_i = -V sigma = -dE/dstrain: a pair whose force on atom i is
