@@ -16,6 +16,7 @@
 #include "rgpot/PerAtom.hpp"
 #include "rgpot/PotHelpers.hpp"
 #include "rgpot/plugin/PluginRegistry.hpp"
+#include "rgpot/pot_caps.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
 
 #ifdef RGPOT_HAS_RUST_CORE
@@ -45,6 +46,32 @@ void fillCell(double *box) {
     box[i] = values[i];
   }
 }
+
+template <bool Periodic> struct AnalyticProbe {
+  mutable int hessianCalls = 0;
+
+  [[nodiscard]] rgpot::PotCaps caps() const {
+    rgpot::PotCaps c;
+    c.periodic = Periodic;
+    c.analyticHvp = true;
+    return c;
+  }
+
+  void forceImpl(const rgpot::ForceInput &in, rgpot::ForceOut *out) const {
+    for (std::size_t i = 0; i < 3 * in.nAtoms; ++i) {
+      out->F[i] = 0.0;
+    }
+    out->energy = 0.0;
+  }
+
+  void hessianVectorImpl(const rgpot::ForceInput &in, const double *v,
+                         double *hv) const {
+    ++hessianCalls;
+    for (std::size_t i = 0; i < 3 * in.nAtoms; ++i) {
+      hv[i] = v[i];
+    }
+  }
+};
 
 } // namespace
 
@@ -241,6 +268,50 @@ TEST_CASE("a Hessian product rejects a missing cell on a periodic kernel",
   rgpot::ForceInput in{2, pos, species, nullptr};
   requireRejected([&] { cache.apply(pot, in, direction, product); },
                   "invalid parameter: box is null");
+}
+
+TEST_CASE("an analytic Hessian product rejects a missing species buffer",
+          "[null-force]") {
+  rgpot::HessianVectorCache cache;
+  AnalyticProbe<true> pot;
+  double pos[6] = {0.0, 0.0, 0.0, 1.5, 0.0, 0.0};
+  double box[9];
+  fillCell(box);
+  double direction[6] = {1.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+  double product[6] = {};
+  rgpot::ForceInput in{2, pos, nullptr, box};
+  requireRejected(
+      [&] {
+        cache.apply(pot, in, direction, product, 0.0,
+                    rgpot::HvpScheme::Analytic);
+      },
+      "invalid parameter: atomic numbers are null");
+  REQUIRE(pot.hessianCalls == 0);
+
+  int species[2] = {1, 1};
+  in.atmnrs = species;
+  cache.apply(pot, in, direction, product, 0.0, rgpot::HvpScheme::Analytic);
+  REQUIRE(pot.hessianCalls == 1);
+  REQUIRE(product[0] == 1.0);
+}
+
+TEST_CASE("an analytic Hessian product rejects a null cell only when periodic",
+          "[null-force]") {
+  rgpot::HessianVectorCache cache;
+  double pos[6] = {0.0, 0.0, 0.0, 1.5, 0.0, 0.0};
+  int species[2] = {1, 1};
+  double direction[6] = {1.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+  double product[6] = {};
+  rgpot::ForceInput in{2, pos, species, nullptr};
+
+  AnalyticProbe<true> periodic;
+  requireRejected([&] { cache.apply(periodic, in, direction, product); },
+                  "invalid parameter: box is null");
+  REQUIRE(periodic.hessianCalls == 0);
+
+  AnalyticProbe<false> cluster;
+  REQUIRE_NOTHROW(cache.apply(cluster, in, direction, product));
+  REQUIRE(cluster.hessianCalls == 1);
 }
 
 TEST_CASE("the built-in LJ plugin rejects null positions", "[null-force]") {
