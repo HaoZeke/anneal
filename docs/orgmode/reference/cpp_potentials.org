@@ -1218,8 +1218,8 @@ explicit EMTPot(const EMTConfig &config);
 - Errors :: an element the provider does not cover, a cell too thin for the
   kernel, a cell that is singular or not finite, and positions that are not
   finite throw =std::invalid_argument= with a message that starts =EMTPot:=.
-  An energy or a force that is not finite, which two atoms at one point
-  cause, throws =std::domain_error=.
+  An energy or a force that is not finite, which two atoms at one point cause,
+  throws =std::domain_error=.
   A call that threw leaves no state behind, and the Asap =Exception= class,
   which does not derive from =std::exception=, never escapes.
 

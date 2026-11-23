@@ -680,16 +680,16 @@ rgpot.EMTPot(rasmussen=False)
 #+end_src
 
 - Inputs :: =rasmussen= selects the parameter provider.
-  False is the Asap default provider, which covers H (1), Mg (12), Al (13),
-  Ni (28), Cu (29), Pd (46), Ag (47), Pt (78) and Au (79).
+  False is the Asap default provider, which covers H (1), Mg (12), Al (13), Ni
+  (28), Cu (29), Pd (46), Ag (47), Pt (78) and Au (79).
   True is the Rasmussen provider, which covers Al, Cu, Ag and Au.
   =atom_types= are atomic numbers and the kernel uses them.
 - Units :: energy eV, forces eV/Angstrom, lengths Angstrom.
 - Outputs :: the effective-medium theory energy and forces of the vendored Asap
   kernel, on a cell that is periodic in every direction.
-  Each cell height has to exceed twice 1.1 times 1.045 times the Fermi cutoff
-  of the widest element present: 10.97 Angstrom for copper and 13.71 Angstrom
-  for magnesium.
+  Each cell height has to exceed twice 1.1 times 1.045 times the Fermi cutoff of
+  the widest element present: 10.97 Angstrom for copper and 13.71 Angstrom for
+  magnesium.
   =RgpotCalculator= tiles a narrower cell, and the kernel refuses it.
   =evaluate= returns =stress= =None=, and =caps()["stress"]= is false.
   The kernel keeps its neighbour list for one cell and one list of atomic
@@ -697,8 +697,8 @@ rgpot.EMTPot(rasmussen=False)
   changes.
   The four-atom copper cluster of =EMTPotTest= gives 5.129167 eV and a largest
   force norm of 1.914263 eV/Angstrom with the default provider.
-  ASE's =EMT= has the same parameters for the elements both cover, and agrees
-  to 1e-6 when it is built with =asap_cutoff=True=.
+  ASE's =EMT= has the same parameters for the elements both cover, and agrees to
+  1e-6 when it is built with =asap_cutoff=True=.
 - Errors :: an element the provider does not cover, a cell too thin for the
   kernel, a cell that is singular or not finite, and positions that are not
   finite raise =ValueError= with a message that starts =EMTPot:=.
