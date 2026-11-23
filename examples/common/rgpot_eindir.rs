@@ -86,6 +86,16 @@ fn geometry_has_short_pair(positions: &[f64], atomic_numbers: &[i32], absolute: 
     })
 }
 
+/// Bond length at which a dimer scan of element `z` starts.
+///
+/// One scan step past the pair's call floor, so the first probe is a call
+/// the handle makes. A fixed start inside that floor, 1.0 A for Si, is
+/// refused as NaN and ends the scan before it begins.
+pub(crate) fn dimer_scan_start(z: i32) -> f64 {
+    let z = u32::try_from(z).unwrap_or(0);
+    1.05 * element_call_floor(z, z, OVERLAP_CALL_LIMIT_A)
+}
+
 /// The gradient a search may certify an answer with, or `None`.
 ///
 /// A geometry the handle refuses, a call the budget cannot pay for and an
@@ -272,6 +282,18 @@ mod tests {
                 "{elements:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_dimer_scan_starts_outside_the_call_floor() {
+        for z in [1, 6, 7, 8, 14, 16, 29] {
+            let start = dimer_scan_start(z);
+            let dimer = [0.0, 0.0, 0.0, start, 0.0, 0.0];
+            assert!(!refuses_geometry(&dimer, &[z, z]), "z = {z} at {start}");
+            assert!(start > OVERLAP_CALL_LIMIT_A, "z = {z}");
+        }
+        assert!(refuses_geometry(&[0.0, 0.0, 0.0, 1.0, 0.0, 0.0], &[14, 14]));
+        assert!(dimer_scan_start(14) > 1.55);
     }
 
     #[test]

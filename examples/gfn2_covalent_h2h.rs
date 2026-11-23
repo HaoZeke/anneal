@@ -127,7 +127,7 @@ fn dimer_scales(z: i32, mut charge: impl FnMut() -> bool) -> Option<(f64, f64)> 
     };
     let mut probe = |r: f64| charge().then(|| at(r));
     let far = probe(FAR_A)?.0;
-    let mut r = 1.0_f64;
+    let mut r = rgpot_eindir::dimer_scan_start(z);
     let mut before = probe(r)?;
     let (mut lo, mut hi, mut slope_lo, mut slope_hi) = loop {
         let next = 1.05 * r;
