@@ -903,17 +903,25 @@ impl Ledger {
         !self.stopped() && self.spent < self.budget
     }
 
-    /// Charges `n` units at once, returning `false` when the budget ran out
-    /// partway.
+    /// Charges `n` completed evaluations, returning `false` when they do not
+    /// fit or a stop is already raised.
     ///
     /// For a caller that ran work against a sub-ledger and is settling up. The
     /// alternative, handing the real ledger to the inner run, makes any budget
     /// arithmetic inside it see the whole campaign's budget rather than the
     /// slice it was given.
+    ///
+    /// [`Ledger::remaining`] is zero while a stop is raised, and also once the
+    /// budget is spent. Settlement does not consult it. Every completed
+    /// evaluation is added, and a count past the budget stays on
+    /// [`Ledger::spent`] as overspend. The return is still false in that case,
+    /// and when a stop is raised and `n` is not zero, so a caller can refuse
+    /// further work without dropping the debt.
     pub fn charge_many(&mut self, n: usize) -> bool {
-        let room = self.remaining();
-        self.spent += n.min(room);
-        n <= room
+        let numeric_room = self.budget.saturating_sub(self.spent);
+        let accepts = n <= if self.stopped() { 0 } else { numeric_room };
+        self.spent = self.spent.saturating_add(n);
+        accepts
     }
 
     /// Records a value and its state when it improves the incumbent.
@@ -5394,11 +5402,12 @@ where
                     evaluate(ledger, cut_state.view())
                         .filter(|values| answer_gradient_ok(cfg, values.view(), cut_state.len()))
                 });
-                if !gradient_required || cut_gradient.is_some() {
-                    if ledger
-                        .target()
-                        .is_some_and(|target| crate::energy_hits(cut_energy, target, 0.0))
-                    {
+                // A target hit is a record on the opening quench and on a hop.
+                // The packing offer used to require a converged gradient
+                // first, so the same hit could be dropped here.
+                let hit_target = ledger.below_target(cut_energy);
+                if hit_target || !gradient_required || cut_gradient.is_some() {
+                    if hit_target {
                         ledger.record(cut_energy, cut_state.view());
                         ledger.stamp_encounter(cut_energy, cut_at);
                         if improvements.len() < 512 {
@@ -6045,6 +6054,13 @@ where
                 let mut inner_cfg = cfg.clone();
                 inner_cfg.branch_on_stall = false;
                 inner_cfg.target_energy = None;
+                // The parent already quenched the generic packing catalogue.
+                // Leaving the lattice flag set repeats that probe on the
+                // branch slice, and the repeat is settled through the same
+                // side ledger a stop can close. The branch is a fresh
+                // descent, so it walks without the flag and without the
+                // lattice move the flag also installs.
+                inner_cfg.energy_lattice = false;
                 let before = ledger.spent();
                 let ran = run_with_gradient(
                     &inner_cfg,
@@ -11042,6 +11058,223 @@ mod tests {
         );
         assert_eq!(outcome.stop, Some(HopStop::Target));
         assert_eq!(outcome.charged, ledger.spent());
+    }
+
+    #[test]
+    fn a_stopped_ledger_keeps_every_settled_evaluation() {
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut open = Ledger::with_stop(10, std::sync::Arc::clone(&stop));
+        assert!(open.charge_many(2));
+        assert_eq!(open.spent(), 2);
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        assert!(!open.charge_many(4), "a stop must refuse further work");
+        assert_eq!(
+            open.spent(),
+            6,
+            "a stop dropped completed evaluations, spent {}",
+            open.spent()
+        );
+        assert!(
+            open.charge_many(0),
+            "settling nothing while stopped refused an empty charge"
+        );
+        assert_eq!(open.spent(), 6);
+
+        let mut dry = Ledger::new(3);
+        assert!(dry.charge_many(3));
+        assert!(!dry.charge_many(2), "a charge past the budget was accepted");
+        assert_eq!(
+            dry.spent(),
+            5,
+            "a spent budget dropped the overrun, spent {}",
+            dry.spent()
+        );
+    }
+
+    #[test]
+    fn a_stop_during_the_packing_probe_charges_every_completed_evaluation() {
+        let n = 6usize;
+        let mut cfg = Config::for_cluster(n);
+        cfg.energy_lattice = true;
+        cfg.max_hops = Some(1);
+        cfg.relax_steps = 1;
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut ledger = Ledger::with_stop(2_000, std::sync::Arc::clone(&stop));
+        let mut calls = 0usize;
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+            if !led.charge() {
+                return (f64::NAN, x.to_owned());
+            }
+            calls += 1;
+            if calls >= 3 {
+                stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            (-1.0, x.to_owned())
+        };
+        let start = Array1::zeros(3 * n);
+        let mut rng = StdRng::seed_from_u64(2);
+        let outcome = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("start");
+        assert!(calls >= 3, "the probe never charged, calls {calls}");
+        assert_eq!(
+            ledger.spent(),
+            calls,
+            "settlement dropped probe evaluations: spent {} of {calls}",
+            ledger.spent()
+        );
+        assert_eq!(outcome.charged, calls);
+        assert_eq!(outcome.stop, Some(HopStop::CallerStop));
+    }
+
+    #[test]
+    fn a_packing_target_hit_is_kept_when_the_gradient_is_not_converged() {
+        let n = 8usize;
+        let mut cfg = Config::for_cluster(n);
+        cfg.energy_lattice = true;
+        cfg.max_hops = Some(2);
+        cfg.relax_steps = 4;
+        cfg.record_gradient = 1.0e-6;
+        let far_threshold = 0.5 * f64::EPSILON.sqrt().recip();
+        let start = Array1::from_iter((0..3 * n).map(|index| index as f64 * 0.17));
+        let mut ledger = Ledger::new(4_000);
+        ledger.stop_below(-10.0);
+        // The opening quench stays above the target. Every later full
+        // quench, including the packing offer, is at the target. A hop
+        // that records the target increments the hop count; the packing
+        // offer returns before any hop.
+        let mut relax_calls = 0usize;
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            if !led.charge() {
+                return (f64::NAN, x.to_owned());
+            }
+            relax_calls += 1;
+            let far = (2..n).any(|atom| x[3 * atom + 1].abs() > far_threshold);
+            if steps == 0 && far {
+                let distance = (x[3] - x[0]).abs();
+                return ((distance - 2.0).powi(2), x.to_owned());
+            }
+            if relax_calls == 1 {
+                return (0.0, x.to_owned());
+            }
+            (-20.0, x.to_owned())
+        };
+        let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| {
+            if !led.charge() {
+                return None;
+            }
+            Some(Array1::from_elem(x.len(), 1.0))
+        };
+        let mut rng = StdRng::seed_from_u64(5);
+        let outcome = run_with_gradient(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut rng,
+        )
+        .expect("start");
+        assert_eq!(outcome.best, -20.0);
+        assert_eq!(outcome.stop, Some(HopStop::Target));
+        assert_eq!(outcome.hops, 0);
+        // The opening quench is not a target and its gradient is refused, so
+        // the counter starts at one. The packing hit must not add another.
+        assert_eq!(outcome.unconverged_records, 1);
+        assert_eq!(outcome.charged, ledger.spent());
+    }
+
+    #[test]
+    fn a_stall_branch_does_not_rerun_packings_and_charges_a_stop() {
+        fn walk(branch: bool, stop_branch: bool) -> (usize, usize, usize, Vec<usize>, HopStop) {
+            let n = 8usize;
+            let mut cfg = Config::for_cluster(n);
+            cfg.energy_lattice = true;
+            // The lattice move charges outside the relaxation. Displacement
+            // keeps every charge on the closure so the ledger can be matched
+            // to it, and the packing probe still runs.
+            cfg.displacement_only = true;
+            cfg.branch_on_stall = branch;
+            cfg.restart_patience = 1;
+            cfg.relax_steps = 4;
+            let parent_budget = 800usize;
+            let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let mut ledger = Ledger::with_stop(parent_budget, std::sync::Arc::clone(&stop));
+            let far_threshold = 0.5 * f64::EPSILON.sqrt().recip();
+            let expected = binary_geometry::packing_candidates(n, 2.0);
+            let mut calls = 0usize;
+            let mut pair_probes = 0usize;
+            let mut branch_calls = 0usize;
+            let mut packing_counts = vec![0usize; expected.len()];
+            let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+                if !led.charge() {
+                    return (f64::NAN, x.to_owned());
+                }
+                calls += 1;
+                if led.budget() != parent_budget {
+                    branch_calls += 1;
+                    if stop_branch && branch_calls == 2 {
+                        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
+                }
+                let far = (2..n).any(|atom| x[3 * atom + 1].abs() > far_threshold);
+                if steps == 0 && far {
+                    pair_probes += 1;
+                    let distance = (x[3] - x[0]).abs();
+                    return ((distance - 2.0).powi(2), x.to_owned());
+                }
+                for (index, packing) in expected.iter().enumerate() {
+                    let max_diff = x
+                        .iter()
+                        .zip(packing.iter())
+                        .map(|(left, right)| (left - right).abs())
+                        .fold(0.0_f64, f64::max);
+                    if max_diff < 1.0e-4 {
+                        packing_counts[index] += 1;
+                        return (-50.0 - index as f64, x.to_owned());
+                    }
+                }
+                (-1.0, x.to_owned())
+            };
+            let start = Array1::from_iter((0..3 * n).map(|index| index as f64 * 0.13));
+            let mut rng = StdRng::seed_from_u64(9);
+            let outcome =
+                run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("start");
+            assert_eq!(
+                ledger.spent(),
+                calls,
+                "branch {branch} stop {stop_branch} spent {} of {calls} (branch calls {branch_calls})",
+                ledger.spent()
+            );
+            assert_eq!(outcome.charged, calls);
+            (
+                calls,
+                outcome.hops,
+                pair_probes,
+                packing_counts,
+                outcome.stop.expect("stop"),
+            )
+        }
+
+        let (_off_calls, off_hops, off_probes, off_packings, _) = walk(false, false);
+        let (_on_calls, on_hops, on_probes, on_packings, _) = walk(true, false);
+        assert!(
+            on_hops < off_hops,
+            "the stall branch did not spend, {on_hops} hops against {off_hops}"
+        );
+        assert_eq!(
+            on_probes, off_probes,
+            "a stall branch repeated pair probes: {on_probes} against {off_probes}"
+        );
+        assert_eq!(
+            on_packings, off_packings,
+            "a stall branch repeated packings: {on_packings:?} against {off_packings:?}"
+        );
+        assert!(off_probes > 0, "the parent packing probe did not run");
+
+        let (_stopped_calls, _stopped_hops, stopped_probes, stopped_packings, stopped) =
+            walk(true, true);
+        assert_eq!(stopped, HopStop::CallerStop);
+        assert_eq!(stopped_probes, off_probes);
+        assert_eq!(stopped_packings, off_packings);
     }
 
     #[test]
