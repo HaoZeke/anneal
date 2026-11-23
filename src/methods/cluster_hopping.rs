@@ -7549,8 +7549,10 @@ where
             // The caller already stopped. This screen paid for `e_screen`,
             // and dropping it returns an older minimum above an energy the
             // run computed.
-            if e_screen.is_finite() {
+            if quench_is_sane(cfg, e_screen, x_screen.view()) {
                 ledger.record(e_screen, x_screen.view());
+            } else {
+                unconverged_records += 1;
             }
             break HopStop::of_closed(ledger);
         }
@@ -7736,8 +7738,10 @@ where
             out
         };
         if ledger.stopped() {
-            if e_new.is_finite() {
+            if quench_is_sane(cfg, e_new, x_new.view()) {
                 ledger.record(e_new, x_new.view());
+            } else {
+                unconverged_records += 1;
             }
             break HopStop::of_closed(ledger);
         }
