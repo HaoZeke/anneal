@@ -23,9 +23,14 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from machine_provenance import (  # noqa: E402
+    aggregate_machine_columns,
+    machine_columns,
+    machine_fieldnames,
     read_built_gmin_provenance,
+    require_csv_schema,
     require_gmin_build_key,
     validate_saved_gmin_provenance,
+    with_machine_provenance,
 )
 
 SYSTEM = "au55"
@@ -45,6 +50,9 @@ SEED_FIELDS = [
     "pot_s",
     "outside_s",
 ]
+ROW_FIELDS = machine_fieldnames(
+    SEED_FIELDS + ["code_revision", "gmin_build_key", "host"]
+)
 
 
 def median(values: list[float]) -> float:
@@ -186,7 +194,7 @@ def stored_gmin(
                 revision=gmin_revision,
                 build_key=gmin_build_key,
             )
-            cleaned = {field: row[field] for field in SEED_FIELDS}
+            cleaned = {field: row.get(field, "") for field in ROW_FIELDS}
             cleaned["hit"] = "1" if row["hit"] in ("1", "true") else "0"
             rows.append(cleaned)
     return rows
@@ -201,7 +209,7 @@ def summarise(anneal: list[dict[str, str]], gmin: list[dict[str, str]], path: Pa
 
     anneal_hits = hits(anneal)
     gmin_hits = hits(gmin)
-    fields = [
+    base_fields = [
         "arm",
         "hits",
         "n",
@@ -212,6 +220,10 @@ def summarise(anneal: list[dict[str, str]], gmin: list[dict[str, str]], path: Pa
         "outside_median_s",
         "reference",
     ]
+    anneal_machine = aggregate_machine_columns(anneal) if anneal else {}
+    gmin_machine = aggregate_machine_columns(gmin) if gmin else {}
+    has_machine = bool(anneal_machine or gmin_machine)
+    unknown_machine = {"machine_id": "unknown", "cpu_model": "unknown"}
     lines = [
         {
             "arm": "anneal",
@@ -223,6 +235,11 @@ def summarise(anneal: list[dict[str, str]], gmin: list[dict[str, str]], path: Pa
             "pot_median_s": f"{median(column(anneal, 'pot_s')):.6f}",
             "outside_median_s": f"{median(column(anneal, 'outside_s')):.6f}",
             "reference": f"{REFERENCE:.8f}",
+            **(
+                anneal_machine or unknown_machine
+                if has_machine
+                else {}
+            ),
         }
     ]
     if gmin:
@@ -237,9 +254,16 @@ def summarise(anneal: list[dict[str, str]], gmin: list[dict[str, str]], path: Pa
                 "pot_median_s": f"{median(column(gmin, 'pot_s')):.6f}",
                 "outside_median_s": f"{median(column(gmin, 'outside_s')):.6f}",
                 "reference": f"{REFERENCE:.8f}",
+                **(
+                    gmin_machine or unknown_machine
+                    if has_machine
+                    else {}
+                ),
             }
         )
+    fields = machine_fieldnames(base_fields) if has_machine else base_fields
     path.parent.mkdir(parents=True, exist_ok=True)
+    require_csv_schema(path, fields)
     with path.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
         writer.writeheader()
@@ -262,7 +286,24 @@ def main() -> int:
     gmin_revision, gmin_build_key = _resolve_gmin_provenance(
         args.svnrev, args.gmin_source
     )
-    anneal = [run_anneal(binary, seed) for seed in SEEDS]
+    head = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    host = os.uname().nodename
+    machine = machine_columns()
+    anneal = [
+        {
+            **with_machine_provenance(run_anneal(binary, seed)),
+            "code_revision": head,
+            "gmin_build_key": "",
+            "host": host,
+            **machine,
+        }
+        for seed in SEEDS
+    ]
     gmin = stored_gmin(
         root, gmin_revision=gmin_revision, gmin_build_key=gmin_build_key
     )
@@ -272,8 +313,9 @@ def main() -> int:
         rows.extend(row for row in gmin if int(row["seed"]) == seed)
     out = root / "bench" / "au55-scale"
     out.mkdir(parents=True, exist_ok=True)
+    require_csv_schema(out / "seeds.csv", ROW_FIELDS)
     with (out / "seeds.csv").open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=SEED_FIELDS, lineterminator="\n")
+        writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
     summarise(anneal, gmin, out / "summary.csv")

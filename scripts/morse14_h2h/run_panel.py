@@ -25,7 +25,11 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 from machine_provenance import (  # noqa: E402
+    aggregate_machine_columns,
+    machine_columns,
+    machine_fieldnames,
     read_built_gmin_provenance,
+    require_csv_schema,
     require_gmin_build_key,
     validate_saved_gmin_provenance,
 )
@@ -49,7 +53,9 @@ SEED_FIELDS = [
     "pot_s",
     "outside_s",
 ]
-ROW_FIELDS = SEED_FIELDS + ["code_revision", "gmin_build_key", "host"]
+ROW_FIELDS = machine_fieldnames(
+    SEED_FIELDS + ["code_revision", "gmin_build_key", "host"]
+)
 
 
 def type7(ordered: list[float], p: float) -> float:
@@ -98,11 +104,42 @@ def fisher_two_sided(hits_a: int, n_a: int, hits_b: int, n_b: int) -> float:
 
 
 def mann_whitney(left: list[float], right: list[float]) -> float:
-    from scipy.stats import mannwhitneyu
-
     if not left or not right:
         return float("nan")
-    return float(mannwhitneyu(left, right, alternative="two-sided", method="asymptotic", use_continuity=True).pvalue)
+    try:
+        from scipy.stats import mannwhitneyu
+    except ModuleNotFoundError:
+        mannwhitneyu = None
+    if mannwhitneyu is not None:
+        return float(
+            mannwhitneyu(
+                left,
+                right,
+                alternative="two-sided",
+                method="asymptotic",
+                use_continuity=True,
+            ).pvalue
+        )
+    n1, n2 = len(left), len(right)
+    pooled = sorted(left + right)
+    n = n1 + n2
+    rank: dict[float, float] = {}
+    ties = 0.0
+    i = 0
+    while i < n:
+        j = i
+        while j + 1 < n and pooled[j + 1] == pooled[i]:
+            j += 1
+        rank[pooled[i]] = (i + j + 2) / 2.0
+        t = j - i + 1
+        ties += t**3 - t
+        i = j + 1
+    u = sum(rank[v] for v in left) - n1 * (n1 + 1) / 2.0
+    var = n1 * n2 / 12.0 * ((n + 1) - ties / (n * (n - 1)))
+    if var <= 0.0:
+        return 1.0
+    dev = max(abs(u - n1 * n2 / 2.0) - 0.5, 0.0)
+    return min(1.0, math.erfc(dev / math.sqrt(var) / math.sqrt(2.0)))
 
 
 def binary_path(root: Path) -> Path:
@@ -227,14 +264,15 @@ def gmin_row(stored: dict[str, str]) -> dict[str, str]:
 
 def write_rows(path: Path, rows: list[dict[str, str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    require_csv_schema(path, ROW_FIELDS)
     with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS)
+        writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
 
 
 def summarise(rows: list[dict[str, str]], path: Path) -> None:
-    fields = [
+    base_fields = [
         "system",
         "anneal_hits",
         "anneal_n",
@@ -267,6 +305,7 @@ def summarise(rows: list[dict[str, str]], path: Path) -> None:
         def column(group: list[dict[str, str]], name: str) -> list[float]:
             return [float(row[name]) for row in group]
 
+        both = anneal + gmin
         lines.append(
             {
                 "system": system,
@@ -275,9 +314,9 @@ def summarise(rows: list[dict[str, str]], path: Path) -> None:
                 "gmin_hits": str(hits(gmin_shared)),
                 "gmin_n": str(len(gmin_shared)),
                 "gmin_reused": " ".join(str(seed) for seed in shared),
-                "fisher_p": f"{fisher_two_sided(hits(anneal_shared), len(anneal_shared), hits(gmin_shared), len(gmin_shared)):.6g}",
-                "mannwhitney_p_evals": f"{mann_whitney(column(anneal_shared, 'evals_to_hit'), column(gmin_shared, 'evals_to_hit')):.6g}",
-                "mannwhitney_p_wall": f"{mann_whitney(column(anneal_shared, 'wall_s'), column(gmin_shared, 'wall_s')):.6g}",
+                "fisher_p": f"{fisher_two_sided(hits(anneal_shared), len(anneal_shared), hits(gmin_shared), len(gmin_shared)):.6g}" if shared else "",
+                "mannwhitney_p_evals": f"{mann_whitney(column(anneal_shared, 'evals_to_hit'), column(gmin_shared, 'evals_to_hit')):.6g}" if shared else "",
+                "mannwhitney_p_wall": f"{mann_whitney(column(anneal_shared, 'wall_s'), column(gmin_shared, 'wall_s')):.6g}" if shared else "",
                 "anneal_evals_median": f"{median(column(anneal, 'evals_to_hit')):.6f}",
                 "gmin_evals_median": f"{median(column(gmin, 'evals_to_hit')):.6f}" if gmin else "",
                 "anneal_wall_median_s": f"{median(column(anneal, 'wall_s')):.6f}",
@@ -286,10 +325,18 @@ def summarise(rows: list[dict[str, str]], path: Path) -> None:
                 "anneal_outside_median_s": f"{median(column(anneal, 'outside_s')):.6f}",
                 "gmin_pot_median_s": f"{median(column(gmin, 'pot_s')):.6f}" if gmin else "",
                 "gmin_outside_median_s": f"{median(column(gmin, 'outside_s')):.6f}" if gmin else "",
+                **aggregate_machine_columns(both),
             }
         )
+    fields = (
+        machine_fieldnames(base_fields)
+        if lines and "machine_id" in lines[0]
+        else base_fields
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    require_csv_schema(path, fields)
     with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
         writer.writeheader()
         writer.writerows(lines)
 
@@ -310,11 +357,20 @@ def panel(
     head = subprocess.run(
         ["git", "-C", str(root), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
     ).stdout.strip()
+    host = os.uname().nodename
+    machine = machine_columns()
     rows: list[dict[str, str]] = []
     for system in SYSTEMS:
         for seed in SEEDS:
             anneal = run_anneal(binary, system, seed)
-            anneal.update({"code_revision": head, "gmin_build_key": "", "host": os.uname().nodename})
+            anneal.update(
+                {
+                    "code_revision": head,
+                    "gmin_build_key": "",
+                    "host": host,
+                    **machine,
+                }
+            )
             print(",".join(anneal[field] for field in SEED_FIELDS), flush=True)
             rows.append(anneal)
             stored = archive.get((system, seed))
