@@ -24,6 +24,10 @@
 //!   changed key. A plain retry of a failed geometry returns the stored
 //!   failure, so a warm-start retry of a failed energy needs a setting that
 //!   differs from the one that failed.
+//! - The exception is a request the engine refused with
+//!   `RGPOT_INVALID_PARAMETER`. That is a validation error, not an outcome
+//!   at the geometry, so it is never stored and the next request with the
+//!   same key runs the engine again.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
@@ -95,6 +99,19 @@ impl FusedError {
             Self::Engine { status, .. } => *status,
             Self::Invalid { .. } => rgpot_status_t::RGPOT_INVALID_PARAMETER,
         }
+    }
+
+    /// Whether the engine refused the request itself, with
+    /// `RGPOT_INVALID_PARAMETER`, instead of failing at the geometry. Such a
+    /// failure says nothing about the energy there, so it is never stored.
+    pub fn is_validation(&self) -> bool {
+        matches!(
+            self,
+            Self::Engine {
+                status: rgpot_status_t::RGPOT_INVALID_PARAMETER,
+                ..
+            }
+        )
     }
 
     /// The message the first failure carried.
@@ -321,6 +338,10 @@ impl<V: Clone> FusedCache<V> {
     /// Answer a request: the stored outcome when `key` matches the entry,
     /// otherwise the outcome of `engine`, which replaces the entry.
     ///
+    /// A failure for which [`FusedError::is_validation`] holds is returned
+    /// without replacing the entry, so the next request with the same key
+    /// runs the engine again.
+    ///
     /// The entry stays locked while `engine` runs, so concurrent requests
     /// for one key run the engine once.
     pub fn evaluate<F>(&self, key: FusedKey, engine: F) -> (Result<V, FusedError>, FusedSource)
@@ -336,6 +357,9 @@ impl<V: Clone> FusedCache<V> {
         }
         self.computed.fetch_add(1, Ordering::Relaxed);
         let outcome = engine();
+        if matches!(&outcome, Err(error) if error.is_validation()) {
+            return (outcome, FusedSource::Computed);
+        }
         *entry = Some(Entry {
             key,
             outcome: outcome.clone(),
@@ -418,6 +442,58 @@ mod tests {
         assert_eq!(calls.get(), 2);
         assert_eq!(cache.computed(), 2);
         assert_eq!(cache.served(), 2);
+    }
+
+    #[test]
+    fn a_validation_error_is_not_stored() {
+        let cache = FusedCache::<f64>::new();
+        let calls = Cell::new(0u32);
+        let x = positions();
+        let refuse = || {
+            calls.set(calls.get() + 1);
+            Err(FusedError::from_status(
+                rgpot_status_t::RGPOT_INVALID_PARAMETER,
+                "invalid parameter: box is null",
+            ))
+        };
+        let (first, source) = cache.evaluate(key(&cache, &x), refuse);
+        assert!(first.unwrap_err().is_validation());
+        assert_eq!(source, FusedSource::Computed);
+        assert!(cache.stored_error().is_none());
+        let (_, source) = cache.evaluate(key(&cache, &x), refuse);
+        assert_eq!(source, FusedSource::Computed);
+        assert_eq!(calls.get(), 2);
+
+        let ok = || {
+            calls.set(calls.get() + 1);
+            Ok(2.5)
+        };
+        let (value, source) = cache.evaluate(key(&cache, &x), ok);
+        assert_eq!(value, Ok(2.5));
+        assert_eq!(source, FusedSource::Computed);
+        assert_eq!(calls.get(), 3);
+        let (value, source) = cache.evaluate(key(&cache, &x), ok);
+        assert_eq!(value, Ok(2.5));
+        assert_eq!(source, FusedSource::Stored);
+        assert_eq!(calls.get(), 3);
+        assert_eq!(cache.served(), 1);
+    }
+
+    #[test]
+    fn a_validation_error_keeps_the_entry_of_another_key() {
+        let cache = FusedCache::<f64>::new();
+        let x = positions();
+        let _ = cache.evaluate(key(&cache, &x), || Ok(1.5));
+        let moved = [0.3, -1.7, 2.9, 4.1, -0.05, 7.4];
+        let _ = cache.evaluate(key(&cache, &moved), || {
+            Err(FusedError::from_status(
+                rgpot_status_t::RGPOT_INVALID_PARAMETER,
+                "refused",
+            ))
+        });
+        let (value, source) = cache.evaluate(key(&cache, &x), || panic!("must not run"));
+        assert_eq!(value, Ok(1.5));
+        assert_eq!(source, FusedSource::Stored);
     }
 
     #[test]

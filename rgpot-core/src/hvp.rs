@@ -15,8 +15,10 @@
 //! numbers, the cell and the engine settings. `k` forward products at one
 //! centre therefore cost `k + 1` force calls instead of `2k`. A centre that
 //! failed is stored as well, so asking for it again returns the failure
-//! without a second call. Another geometry, species list, cell or engine
-//! setting is a new centre, and
+//! without a second call, unless the engine refused the request as
+//! invalid. That failure is not stored, and the next request runs the
+//! engine again. Another geometry, species list, cell or engine setting
+//! is a new centre, and
 //! [`rgpot_potential_t::invalidate_hvp_centre`] makes the next one new when
 //! the potential itself changes. A potential that knows its Hessian
 //! registers a [`HessianVectorCallback`] and the products make no force
