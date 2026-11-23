@@ -23,7 +23,9 @@ from gmin_pin import (  # noqa: E402
     TARBALL_SHA256,
     URL,
     compute_build_key,
+    default_source_metadata,
     read_build_key,
+    read_built_provenance,
     read_built_revision,
     read_svnrev,
     shell_assignments,
@@ -447,3 +449,43 @@ def test_gmin_panel_entry_scripts_pass_extracted_gmin_src_svnrev(tmp_path: Path)
         resolved = Path(raw_arg.replace(var_name, str(work), 1))
         assert resolved.is_file(), f"{script_name} points at missing {resolved}"
         assert read_svnrev(resolved) == REVISION
+
+
+def test_default_source_metadata_resolves_to_existing_file_across_built_trees(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import gmin_pin
+
+    repo, tarball, base_env, _counter = _make_builder_sandbox(tmp_path)
+    monkeypatch.setattr(
+        gmin_pin,
+        "TARBALL_SHA256",
+        hashlib.sha256(tarball.read_bytes()).hexdigest(),
+    )
+    h2h_work = tmp_path / "gmin-h2h"
+    panel_work = tmp_path / "gmin-panel"
+    subprocess.run(
+        ["bash", str(repo / "scripts/gmin_h2h/build_gmin.sh")],
+        cwd=repo,
+        env=dict(base_env, GMIN_H2H_WORK=str(h2h_work)),
+        check=True,
+    )
+    subprocess.run(
+        ["bash", str(repo / "scripts/gmin_panel/build_gmin.sh")],
+        cwd=repo,
+        env=dict(base_env, GMIN_PANEL_WORK=str(panel_work)),
+        check=True,
+    )
+
+    for work, extract_dir in ((h2h_work, "src"), (panel_work, "gmin-src")):
+        svnrev = work / extract_dir / "wales" / "GMIN" / "source" / "SVNREV"
+        assert svnrev.is_file()
+        resolved = default_source_metadata(svnrev)
+        assert resolved == work / "gmin-source.txt"
+        assert resolved.is_file()
+        rev, key = read_built_provenance(svnrev, resolved)
+        assert rev == REVISION
+        assert len(key) == 64
+
+    with pytest.raises(ValueError, match="cannot derive gmin-source\\.txt"):
+        default_source_metadata(tmp_path / "flat" / "SVNREV")
