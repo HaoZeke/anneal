@@ -1677,7 +1677,7 @@ fn an_initializer_can_load_another_engine_without_holding_the_registry_lock() {
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(inner);
     std::env::set_var(
         "RGPOT_FIXTURE_INIT_CALLBACK",
-        format!("{:x}", initializer_reentry_callback as usize),
+        format!("{:x}", initializer_reentry_callback as *const () as usize),
     );
     drop(load(&outer));
     std::env::remove_var("RGPOT_FIXTURE_INIT_CALLBACK");
