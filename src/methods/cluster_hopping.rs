@@ -2482,6 +2482,17 @@ fn answer_gradient_ok(cfg: &Config, gradient: ArrayView1<f64>, dimensions: usize
     }
 }
 
+/// Whether a quench that returned `energy` ends the run.
+///
+/// A target reached or a caller stop raised inside a quench cuts it short.
+/// The point it returns is the lowest the potential answered, paid for, and
+/// the run's answer, whether or not it is a minimum: nothing is left to
+/// descend it further or to charge a certifying gradient. The same rule
+/// takes the walk's own target hits in [`run_full`].
+fn closes_run(ledger: &Ledger, energy: f64) -> bool {
+    ledger.below_target(energy) || ledger.stopped()
+}
+
 /// Records an auxiliary quench without restricting exploratory adoption.
 fn record_quenched_answer(
     cfg: &Config,
@@ -2501,7 +2512,7 @@ fn record_quenched_answer(
     } else {
         None
     };
-    if sane && (!required || gradient.is_some()) {
+    if sane && (closes_run(ledger, energy) || !required || gradient.is_some()) {
         ledger.record(energy, state);
     } else {
         *unresolved += 1;
@@ -9334,7 +9345,8 @@ where
                     last_polish_spent = last_polish_spent.saturating_add(cost);
                     next_reoccupy = next_reoccupy.saturating_add(cost);
                     reorder_wait = reorder_wait.saturating_add(cost);
-                    let recordable = sane && (!required || gradient.is_some());
+                    let recordable = sane
+                        && (closes_run(ledger, basis_energy) || !required || gradient.is_some());
                     if !recordable {
                         unconverged_records += 1;
                     } else if ledger.below_target(basis_energy) {
@@ -11110,6 +11122,152 @@ mod tests {
             .copied()
             .expect("the walk reaches the target");
         assert_eq!(at, potential_calls);
+    }
+
+    /// The quiet basis search under a potential that tracks the lowest energy
+    /// it ever returned with the geometry, and raises the caller stop when
+    /// that reaches the target. Gradients are zero, so every point the walk
+    /// asks about is a converged minimum except the closed run's last one.
+    fn run_tracking_the_potential_minimum(
+        hit_energy: f64,
+    ) -> (Outcome, (f64, Array1<f64>), Array1<f64>) {
+        let cfg = quiet_basis_search(4);
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut ledger = Ledger::with_stop(400, stop.clone());
+        ledger.stop_below(-10.0);
+        let tetra = regular_tetrahedron();
+        let probed_state = tetra.mapv(|value| 1.25 * value);
+        let mut seen_parent = false;
+        let mut lowest: (f64, Array1<f64>) = (f64::INFINITY, tetra.clone());
+        let mut relax = |led: &mut Ledger, _x: ArrayView1<f64>, steps: usize| {
+            let side = led.spent() == 0 && seen_parent;
+            if !side {
+                seen_parent = true;
+            }
+            for _ in 0..steps {
+                if !led.charge() {
+                    break;
+                }
+            }
+            let (energy, state) = if side {
+                (hit_energy, probed_state.clone())
+            } else {
+                (0.0, tetra.clone())
+            };
+            if energy < lowest.0 {
+                lowest = (energy, state.clone());
+            }
+            if energy <= -10.0 {
+                stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            (energy, state)
+        };
+        let mut grad =
+            |led: &mut Ledger, x: ArrayView1<f64>| led.charge().then(|| Array1::zeros(x.len()));
+        let mut rng = StdRng::seed_from_u64(11);
+        let outcome = run_with_gradient(
+            &cfg,
+            tetra.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut rng,
+        )
+        .expect("search");
+        (outcome, lowest, probed_state)
+    }
+
+    #[test]
+    fn a_probe_that_closes_the_run_reports_the_lowest_energy_the_potential_returned() {
+        let (outcome, (lowest, at), probed_state) = run_tracking_the_potential_minimum(-100.0);
+        assert_eq!(lowest, -100.0, "the stall must probe a basis");
+        assert_eq!(at, probed_state);
+        assert_eq!(outcome.stop, Some(HopStop::Target));
+        assert_eq!(
+            outcome.best, lowest,
+            "the run closed on {lowest} and reported {}",
+            outcome.best
+        );
+        assert_eq!(outcome.best_state.as_ref(), Some(&at));
+    }
+
+    #[test]
+    fn a_closed_run_keeps_a_hit_that_has_no_converged_gradient() {
+        let cfg = quiet_basis_search(4);
+        let state = regular_tetrahedron();
+        let hit = -100.0;
+        for (name, refuses) in [("steep", false), ("refused", true)] {
+            let mut ledger = Ledger::new(100);
+            ledger.stop_below(-10.0);
+            let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| {
+                if refuses {
+                    return None;
+                }
+                led.charge().then(|| Array1::from_elem(x.len(), 1.0))
+            };
+            let mut unresolved = 0usize;
+            let mut evaluate: Option<&mut GradFn<'_>> = Some(&mut grad);
+            record_quenched_answer(
+                &cfg,
+                &mut ledger,
+                &mut evaluate,
+                hit,
+                state.view(),
+                &mut unresolved,
+            );
+            assert_eq!(ledger.best, hit, "{name}: a target hit was dropped");
+            assert_eq!(ledger.best_state.as_ref(), Some(&state), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_quench_cut_by_a_caller_stop_is_recorded_without_a_converged_gradient() {
+        let cfg = quiet_basis_search(4);
+        let state = regular_tetrahedron();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let mut ledger = Ledger::with_stop(100, stop);
+        let mut grad = |led: &mut Ledger, _: ArrayView1<f64>| {
+            led.charge();
+            None
+        };
+        let mut unresolved = 0usize;
+        let mut evaluate: Option<&mut GradFn<'_>> = Some(&mut grad);
+        record_quenched_answer(
+            &cfg,
+            &mut ledger,
+            &mut evaluate,
+            -3.0,
+            state.view(),
+            &mut unresolved,
+        );
+        assert_eq!(ledger.best, -3.0);
+        assert_eq!(ledger.best_state.as_ref(), Some(&state));
+    }
+
+    #[test]
+    fn an_open_run_still_needs_a_converged_gradient_to_record() {
+        let cfg = quiet_basis_search(4);
+        let state = regular_tetrahedron();
+        let mut ledger = Ledger::new(100);
+        ledger.stop_below(-10.0);
+        let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| {
+            led.charge().then(|| Array1::from_elem(x.len(), 1.0))
+        };
+        let mut unresolved = 0usize;
+        let mut evaluate: Option<&mut GradFn<'_>> = Some(&mut grad);
+        record_quenched_answer(
+            &cfg,
+            &mut ledger,
+            &mut evaluate,
+            -3.0,
+            state.view(),
+            &mut unresolved,
+        );
+        assert!(
+            ledger.best.is_infinite(),
+            "an unconverged quench was recorded"
+        );
+        assert_eq!(unresolved, 1);
     }
 
     #[test]
