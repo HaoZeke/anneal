@@ -107,13 +107,16 @@ const char *forceLastError() noexcept;
  * system with no atoms is named first, then a null position or species
  * pointer, then a null cell when @a needsCell is set. Each stores a message
  * and returns @c kInvalidParameter. A usable input returns 0 and leaves the
- * stored message unchanged.
+ * stored message unchanged. A kernel that never reads the species passes
+ * @a needsSpecies false and may be called with a null species pointer.
  */
-int rejectInputCall(const ForceInput &in, bool needsCell);
+int rejectInputCall(const ForceInput &in, bool needsCell,
+                    bool needsSpecies = true);
 
 /// Throw @c std::invalid_argument with the stored message when
 /// @c rejectInputCall rejects @a in.
-void guardInputCall(const ForceInput &in, bool needsCell);
+void guardInputCall(const ForceInput &in, bool needsCell,
+                    bool needsSpecies = true);
 
 /**
  * @brief Reject a force call that would read a null buffer.
@@ -124,15 +127,16 @@ void guardInputCall(const ForceInput &in, bool needsCell);
  * After that, a null @a out or force array, a null position or species
  * pointer, or a null cell when @a needsCell is set, stores a message and
  * returns @c kInvalidParameter. A usable call returns 0 and leaves the
- * stored message unchanged.
+ * stored message unchanged. A kernel that never reads the species passes
+ * @a needsSpecies false and may be called with a null species pointer.
  */
 int rejectForceCall(const ForceInput &in, const ForceOut *out,
-                    bool needsCell);
+                    bool needsCell, bool needsSpecies = true);
 
 /// Throw @c std::invalid_argument with the stored message when
 /// @c rejectForceCall rejects @a in and @a out.
 void guardForceCall(const ForceInput &in, const ForceOut *out,
-                    bool needsCell);
+                    bool needsCell, bool needsSpecies = true);
 
 /// @c pot.caps().periodic when the kernel reports it, otherwise true,
 /// which is the default of @c PotCaps.

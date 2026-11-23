@@ -3,6 +3,7 @@
 
 #include "rgpot/IPIPot/IPIWire.hpp"
 
+#include "rgpot/stress.hpp"
 #include "rgpot/units.hpp"
 
 #include <fcntl.h>
@@ -46,23 +47,7 @@ std::string headerText(const char *got) {
   return text;
 }
 
-double cellVolume(const double *box) {
-  if (box == nullptr) {
-    return 0.0;
-  }
-  const double m00 = box[0];
-  const double m01 = box[1];
-  const double m02 = box[2];
-  const double m10 = box[3];
-  const double m11 = box[4];
-  const double m12 = box[5];
-  const double m20 = box[6];
-  const double m21 = box[7];
-  const double m22 = box[8];
-  return std::abs(m00 * (m11 * m22 - m12 * m21) -
-                  m01 * (m10 * m22 - m12 * m20) +
-                  m02 * (m10 * m21 - m11 * m20));
-}
+double cellVolume(const double *box) { return rgpot::cellVolume(box); }
 
 Deadline Deadline::after(double seconds, const char *who) {
   if (!(seconds >= 0.0) || !std::isfinite(seconds)) {

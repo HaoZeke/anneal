@@ -504,7 +504,7 @@ namespace {
 /// An engine that counts its calls, fails on demand, and reports the
 /// settings its answer depends on.
 struct MockEngine {
-  enum class Mode { Ok, Scc, Other };
+  enum class Mode { Ok, Scc, Other, Invalid };
   mutable std::uint64_t calls = 0;
   Mode mode = Mode::Ok;
   rgpot::FusedSettingsSpec settings;
@@ -516,6 +516,9 @@ struct MockEngine {
     }
     if (mode == Mode::Other) {
       throw std::runtime_error("mock engine failure");
+    }
+    if (mode == Mode::Invalid) {
+      throw std::invalid_argument("mock validation error");
     }
     out->energy = 1.0 + in.pos[0];
     out->variance = 0.0;
@@ -676,4 +679,50 @@ TEST_CASE("a failure stored under one setting is rerun under another",
   engine.settings.sccMaxIterations = 500;
   CHECK_NOTHROW(cache.centre(engine, f.input()));
   CHECK(engine.calls == 2);
+}
+
+TEST_CASE("a validation error is never cached and the next call recomputes",
+          "[fused]") {
+  Frame f;
+  MockEngine engine;
+  engine.mode = MockEngine::Mode::Invalid;
+  HessianVectorCache cache;
+  CHECK_THROWS_AS(cache.centre(engine, f.input()), std::invalid_argument);
+  CHECK_THROWS_AS(cache.centre(engine, f.input()), std::invalid_argument);
+  CHECK(engine.calls == 2);
+  CHECK(cache.counts().centreReused == 0);
+
+  engine.mode = MockEngine::Mode::Ok;
+  const auto centre = cache.centre(engine, f.input());
+  CHECK(engine.calls == 3);
+  CHECK(centre.energy == 1.0 + f.x[0]);
+  CHECK_NOTHROW(cache.centre(engine, f.input()));
+  CHECK(engine.calls == 3);
+  CHECK(cache.counts().centreReused == 1);
+}
+
+TEST_CASE("a validation error leaves the stored entry alone", "[fused]") {
+  rgpot::FusedCache<int> cache;
+  Frame f;
+  const rgpot::FusedKey stored = cache.key(f.input(), {});
+  CHECK(cache.evaluate(stored, [] { return 7; }).second ==
+        rgpot::FusedSource::Computed);
+
+  Frame moved = f;
+  moved.x[0] += 1.0;
+  const rgpot::FusedKey other = cache.key(moved.input(), {});
+  CHECK_THROWS_AS(cache.evaluate(other,
+                                 []() -> int {
+                                   throw std::invalid_argument("bad request");
+                                 }),
+                  std::invalid_argument);
+
+  int calls = 0;
+  const auto [value, source] = cache.evaluate(stored, [&] {
+    ++calls;
+    return 8;
+  });
+  CHECK(value == 7);
+  CHECK(source == rgpot::FusedSource::Stored);
+  CHECK(calls == 0);
 }

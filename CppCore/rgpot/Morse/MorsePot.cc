@@ -364,6 +364,7 @@ void MorsePot::forceImpl(const ForceInput &in, ForceOut *out) const {
 }
 
 void MorsePot::forcePerAtom(const ForceInput &in, ForceOut *out, const PerAtomOut &atoms) const {
+  guardForceCall(in, out, kernelNeedsCell(*this), false);
   clearPerAtom(atoms, in.nAtoms);
   compute(in, out, &atoms);
 }

@@ -846,8 +846,10 @@ enum rgpot_status_t rgpot_potential_set_ad_hvp_callback(
  * # Safety
  *
  * NULL pointers, an unknown scheme, a negative or non-finite step and
- * overlapping buffers return `RGPOT_INVALID_PARAMETER`. Otherwise `pot`
- * must be a live handle, `input` must point to a valid
+ * overlapping buffers return `RGPOT_INVALID_PARAMETER`. So does an input
+ * that `rgpot_potential_calculate` refuses: a missing positions or
+ * species buffer, or no atoms. A missing cell is left to the callback.
+ * Otherwise `pot` must be a live handle, `input` must point to a valid
  * `rgpot_force_input_t` whose tensors stay alive for the call, and
  * `direction` and `hv_out` must point to `3 * n_atoms` readable and
  * writable doubles.

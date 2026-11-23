@@ -430,6 +430,8 @@ public:
   rgpot_potential_t *raw() const { return handle_; }
 
 private:
+  friend struct TrampolineAccess; //!< Lets a test call a trampoline directly.
+
   rgpot_potential_t *handle_; //!< Owned opaque handle (may be @c nullptr
                               //!< after move).
 
@@ -551,11 +553,28 @@ private:
     }
   }
 
+  /// True, with a stored message, when @a user_data is null. The callbacks
+  /// below read the cell requirement from it before anything else.
+  static bool nullPotential(const void *user_data) {
+    if (user_data != nullptr) {
+      return false;
+    }
+    rgpot_set_last_error("invalid parameter: potential is null");
+    return true;
+  }
+
   /// @c HessianVectorCallback over @c Impl::hessianVectorImpl.
   template <typename Impl>
   static rgpot_status_t
   hvp_trampoline(void *user_data, const rgpot_force_input_t *input,
                  const double *direction, double *hv_out) {
+    if (nullPotential(user_data)) {
+      return RGPOT_INVALID_PARAMETER;
+    }
+    if (direction == nullptr || hv_out == nullptr) {
+      rgpot_set_last_error("invalid parameter: direction or output is null");
+      return RGPOT_INVALID_PARAMETER;
+    }
     const auto *self = static_cast<const Impl *>(user_data);
     if (input != nullptr && input->positions != nullptr &&
         input->positions->dl_tensor.shape != nullptr) {
@@ -577,6 +596,9 @@ private:
   static rgpot_status_t
   ad_hvp_trampoline(void *user_data, const rgpot_force_input_t *input,
                     const double *direction, double *hv_out) {
+    if (nullPotential(user_data)) {
+      return RGPOT_INVALID_PARAMETER;
+    }
     const auto *self = static_cast<const Impl *>(user_data);
     return guarded(input, "unknown exception in the potential dual-number HVP",
                    [&](const ::rgpot::ForceInput &in) {
@@ -589,6 +611,9 @@ private:
   static rgpot_status_t hessian_trampoline(void *user_data,
                                            const rgpot_force_input_t *input,
                                            double *hessian_out) {
+    if (nullPotential(user_data)) {
+      return RGPOT_INVALID_PARAMETER;
+    }
     const auto *self = static_cast<const Impl *>(user_data);
     return guarded(input, "unknown exception in the potential Hessian",
                    [&](const ::rgpot::ForceInput &in) {
@@ -601,6 +626,9 @@ private:
   static rgpot_status_t ad_hessian_trampoline(void *user_data,
                                               const rgpot_force_input_t *input,
                                               double *hessian_out) {
+    if (nullPotential(user_data)) {
+      return RGPOT_INVALID_PARAMETER;
+    }
     const auto *self = static_cast<const Impl *>(user_data);
     return guarded(input,
                    "unknown exception in the potential dual-number Hessian",

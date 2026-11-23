@@ -15,8 +15,10 @@
 //! numbers, the cell and the engine settings. `k` forward products at one
 //! centre therefore cost `k + 1` force calls instead of `2k`. A centre that
 //! failed is stored as well, so asking for it again returns the failure
-//! without a second call. Another geometry, species list, cell or engine
-//! setting is a new centre, and
+//! without a second call, unless the engine refused the request as
+//! invalid. That failure is not stored, and the next request runs the
+//! engine again. Another geometry, species list, cell or engine setting
+//! is a new centre, and
 //! [`rgpot_potential_t::invalidate_hvp_centre`] makes the next one new when
 //! the potential itself changes. A potential that knows its Hessian
 //! registers a [`HessianVectorCallback`] and the products make no force
@@ -50,6 +52,7 @@ use std::os::raw::c_void;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use crate::c_api::potential::force_input_defect;
 use crate::eindir::rgpot_potential_t;
 use crate::fused::{lock, FusedError, FusedSource};
 use crate::status::rgpot_status_t;
@@ -202,8 +205,15 @@ pub(crate) struct Geometry {
 }
 
 /// Copy the positions, species and cell of `input` after checking them.
-/// Species and cell are optional, as for the force callback.
+///
+/// The input must pass `force_input_defect`, the check that
+/// `rgpot_potential_calculate` makes, so a missing species buffer and an
+/// empty system are refused here as they are on the C++ side. A missing
+/// cell is left to the callback, so molecular potentials stay callable.
 pub(crate) unsafe fn read_geometry(input: &rgpot_force_input_t) -> Result<Geometry, HvpError> {
+    if let Some(why) = unsafe { force_input_defect(input) } {
+        return Err(invalid(why));
+    }
     let n_atoms = unsafe { input.n_atoms() }.ok_or_else(|| invalid("positions: tensor is NULL"))?;
     let dim = n_atoms
         .checked_mul(3)

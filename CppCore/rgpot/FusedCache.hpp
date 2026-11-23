@@ -24,6 +24,9 @@
  * - A retry reruns the engine only through a changed setting, which is a
  *   changed key. A plain retry of a failed geometry rethrows the stored
  *   failure.
+ * - A validation error, a @c std::invalid_argument, is never stored. It
+ *   says the request was malformed, not what the engine computes at that
+ *   geometry, so the next request with the same key runs the engine again.
  *
  * @ingroup rgpot_cpp
  */
@@ -36,6 +39,7 @@
 #include <exception>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <variant>
@@ -122,9 +126,10 @@ public:
    *        entry, otherwise the outcome of @a engine, which replaces it.
    *
    * @a engine returns a @c V or throws a @c std::exception. A stored
-   * failure is rethrown as the exception object the engine threw. The entry
-   * stays locked while @a engine runs, so concurrent requests for one key
-   * run the engine once.
+   * failure is rethrown as the exception object the engine threw. A
+   * @c std::invalid_argument is rethrown without being stored and leaves
+   * the previous entry as it was. The entry stays locked while @a engine
+   * runs, so concurrent requests for one key run the engine once.
    */
   template <typename Engine>
   std::pair<V, FusedSource> evaluate(const FusedKey &key, Engine &&engine) {
@@ -137,6 +142,8 @@ public:
     Outcome outcome;
     try {
       outcome = V(engine());
+    } catch (const std::invalid_argument &) {
+      throw;
     } catch (const std::exception &) {
       outcome = std::current_exception();
     }

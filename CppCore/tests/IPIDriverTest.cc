@@ -17,6 +17,7 @@
 #include <cstring>
 #include <filesystem>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -439,6 +440,19 @@ TEST_CASE("IPIDriver connects over TCP and serves repeated steps",
   server.header("EXIT");
   REQUIRE(thread.join().empty());
   CHECK(driver.evaluations() == 5);
+}
+
+TEST_CASE("the wire cell volume is zero for a cell it cannot measure",
+          "[ipi_driver]") {
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const double inf = std::numeric_limits<double>::infinity();
+  const double empty[9] = {};
+  const double with_nan[9] = {nan, 0, 0, 0, 5, 0, 0, 0, 5};
+  const double with_inf[9] = {inf, 0, 0, 0, 5, 0, 0, 0, 5};
+  CHECK(wire::cellVolume(nullptr) == 0.0);
+  CHECK(wire::cellVolume(empty) == 0.0);
+  CHECK(wire::cellVolume(with_nan) == 0.0);
+  CHECK(wire::cellVolume(with_inf) == 0.0);
 }
 
 TEST_CASE("IPIDriver rejects batched INIT requests", "[ipi_driver]") {
