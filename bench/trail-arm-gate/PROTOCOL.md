@@ -16,12 +16,12 @@ The delivery base is commit
   `7b20cd761457c3644c424a75a58e9d535e18aa63`, tree
   `34c4de6ad5d38a06b30f0c59cd2baae36c1fa613`.
 - Measured B adds only a gate counter, commit
-  `a9d29043288d5c38609df2d145f4a7521121f659`, tree
-  `3e7a8865393be494fd84bea68ee1011798b2ea0c`.
+  `6d37bb671d2072636aa612145e7066235281e748`, tree
+  `baaa2f0e996c3839d47b7833ea14ef3481eaaa86`.
 
-The counter uses thread-local integer cells. It counts entries to the
-stall bandit and idle trail redraws, then prints the totals during
-process teardown when `ANNEAL_TRAIL_ARM_GATE=1`. It does not consume
+The counter uses relaxed process-wide integers. It counts entries to
+the stall bandit and idle trail redraws, then prints the totals from a
+C exit callback when `ANNEAL_TRAIL_ARM_GATE=1`. It does not consume
 random numbers or change control flow.
 
 All three arms are separate worktrees. The gate harness is a fourth
