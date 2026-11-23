@@ -5,6 +5,10 @@
  * through a callback exported by the test executable.
  */
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE 1
+#endif
+
 #include "rgpot/engine_c_abi.h"
 
 #include <dlfcn.h>
