@@ -132,6 +132,27 @@ pub struct FlooredThompson {
     t: usize,
 }
 
+/// Arm whose score is highest.
+///
+/// `start` stands when no score beats it, which is an empty list or a NaN
+/// score. An equal score keeps the earlier arm.
+pub(crate) fn highest_draw<I, F>(start: usize, arms: I, mut score: F) -> usize
+where
+    I: IntoIterator<Item = usize>,
+    F: FnMut(usize) -> f64,
+{
+    let mut best = start;
+    let mut best_score = f64::NEG_INFINITY;
+    for arm in arms {
+        let draw = score(arm);
+        if draw > best_score {
+            best_score = draw;
+            best = arm;
+        }
+    }
+    best
+}
+
 impl FlooredThompson {
     /// Allocator over `n_arms`.
     pub fn new(n_arms: usize) -> Self {
@@ -215,27 +236,13 @@ impl FlooredThompson {
                 open_arms[drawn]
             };
         }
-        let mut best = if unrestricted { 0 } else { open_arms[0] };
-        let mut best_draw = f64::NEG_INFINITY;
-        let candidates: &[usize] = if unrestricted { &[] } else { &open_arms };
+        let mut score = |k| sample_beta(self.alpha[k], self.beta[k], rng);
         if unrestricted {
-            for k in 0..self.len() {
-                let draw = sample_beta(self.alpha[k], self.beta[k], rng);
-                if draw > best_draw {
-                    best_draw = draw;
-                    best = k;
-                }
-            }
-            return best;
+            highest_draw(0, 0..self.len(), &mut score)
+        } else {
+            let start = open_arms[0];
+            highest_draw(start, open_arms.iter().copied(), &mut score)
         }
-        for &k in candidates {
-            let draw = sample_beta(self.alpha[k], self.beta[k], rng);
-            if draw > best_draw {
-                best_draw = draw;
-                best = k;
-            }
-        }
-        best
     }
 
     /// Records whether the chosen arm succeeded.
@@ -553,6 +560,42 @@ mod discovery_accounting_tests {
 mod tests {
     use super::*;
     use rand::{SeedableRng, rngs::StdRng};
+
+    /// The joined helper draws the same arms as the split loops.
+    ///
+    /// Recorded from those loops before they were joined. Seed
+    /// `0x1810_0118`, 32 draws. The mask cycles through every arm, every
+    /// arm but 0, every arm but 1, the even arms, and arm 3. `tail` is the
+    /// next `u64` from the generator.
+    #[test]
+    fn a_fixed_seed_matches_the_split_loops() {
+        let masks: [fn(usize) -> bool; 5] = [
+            |_| true,
+            |arm| arm != 0,
+            |arm| arm != 1,
+            |arm| arm % 2 == 0,
+            |arm| arm == 3,
+        ];
+        let mut alloc = FlooredThompson::new(5);
+        let mut rng = StdRng::seed_from_u64(0x1810_0118);
+        let mut seen = Vec::new();
+        for step in 0..32 {
+            let open = masks[step % masks.len()];
+            let arm = alloc.select_where(&mut rng, open);
+            seen.push(arm);
+            alloc.update(arm, step % 3 != 0);
+        }
+        assert_eq!(
+            seen,
+            [
+                0, 2, 4, 0, 3, 1, 4, 4, 2, 3, 2, 2, 2, 4, 3, 0, 2, 3, 2, 3, 0, 3, 0, 2, 3, 4, 2, 4,
+                2, 3, 2, 3,
+            ]
+        );
+        assert_eq!(rng.random::<u64>(), 4_839_392_699_103_929_460);
+        assert_eq!(alloc.t, 32);
+        assert_eq!(alloc.pulls(), &[5, 1, 11, 9, 6]);
+    }
 
     #[test]
     fn an_open_thompson_draw_does_not_allocate() {
@@ -988,6 +1031,18 @@ mod depth_allocator_tests {
         let allocator = DepthAllocator::new(3);
         let mut rng = StdRng::seed_from_u64(5);
         allocator.select_where(&mut rng, |_| false);
+    }
+
+    /// `select` on an allocator with no arms is the call the old code had.
+    ///
+    /// The loop did not run, so the draw came back as arm 0. The panic is
+    /// that result failing at run time.
+    #[test]
+    #[should_panic(expected = "at least one arm must be open")]
+    fn an_empty_depth_allocator_select_is_rejected() {
+        let allocator = DepthAllocator::new(0);
+        let mut rng = StdRng::seed_from_u64(5);
+        let _ = allocator.select(&mut rng);
     }
 
     #[test]
