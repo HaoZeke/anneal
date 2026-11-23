@@ -1148,10 +1148,48 @@ impl MoveKernel<f64> for ShellRotate {
 pub struct Symmetrise {
     /// Points in the state.
     pub n_points: usize,
-    /// Rotation orders to draw from, for example `[2, 3, 4, 5, 6]`.
+    /// Rotation orders to draw from. A library passes every order the
+    /// point count can hold.
     pub orders: Vec<usize>,
     /// Largest separation at which a point and an image are considered partners.
     pub pair_cutoff: f64,
+}
+
+const ESTABLISHED_SYMMETRY_ORDERS: usize = 5;
+const SYMMETRY_TAIL_BUCKETS: usize = ESTABLISHED_SYMMETRY_ORDERS + 2;
+
+fn symmetry_tail_weight(draw: f64) -> f64 {
+    let squared = draw * draw;
+    squared * (0.05 + 0.95 * draw)
+}
+
+fn symmetry_order_from_draw(orders: &[usize], established_order: usize, blend_draw: f64) -> usize {
+    let established = orders.len().min(ESTABLISHED_SYMMETRY_ORDERS);
+    if orders.len() == established {
+        return established_order;
+    }
+    let tail_draw = blend_draw * SYMMETRY_TAIL_BUCKETS as f64;
+    if established_order != orders[established - 1] || tail_draw >= 1.0 {
+        return established_order;
+    }
+    let weighted = symmetry_tail_weight(tail_draw);
+    let tail = ((weighted * (orders.len() - established) as f64) as usize)
+        .min(orders.len() - established - 1);
+    orders[established + tail]
+}
+
+fn symmetry_order_and_blend<R: Rng + ?Sized>(orders: &[usize], rng: &mut R) -> (usize, f64) {
+    let established = orders.len().min(ESTABLISHED_SYMMETRY_ORDERS);
+    let established_order = orders[rng.random_range(0..established)];
+    let blend_draw = rng.random::<f64>();
+    let blend = 0.3 + 0.4 * blend_draw;
+    // Draw among the established orders first, exactly as the five-order
+    // library did. Only the highest established order can open one fixed
+    // seventh bucket that replaces it with the size-independent general-order
+    // tail. A 95% cubic and 5% quadratic map reaches every larger order while
+    // favouring the lower end.
+    let order = symmetry_order_from_draw(orders, established_order, blend_draw);
+    (order, blend)
 }
 
 impl MoveKernel<f64> for Symmetrise {
@@ -1163,9 +1201,8 @@ impl MoveKernel<f64> for Symmetrise {
         }
         let c = centroid(i, n);
         let axis = random_unit(rng);
-        let order = self.orders[rng.random_range(0..self.orders.len())];
+        let (order, blend) = symmetry_order_and_blend(&self.orders, rng);
         let angle = 2.0 * std::f64::consts::PI / order.max(1) as f64;
-        let blend = 0.3 + 0.4 * rng.random::<f64>();
 
         let rotated: Vec<[f64; 3]> = (0..n)
             .map(|a| {
@@ -1212,6 +1249,72 @@ mod cluster_move_tests {
 
     fn com(x: &Array1<f64>, n: usize) -> [f64; 3] {
         centroid(x.view(), n)
+    }
+
+    #[test]
+    fn symmetry_orders_keep_the_established_draw_and_bound_the_tail() {
+        let established = [2, 3, 4, 5, 6];
+        for seed in 0..128 {
+            let mut expected_rng = StdRng::seed_from_u64(seed);
+            let expected_order = established[expected_rng.random_range(0..established.len())];
+            let expected_blend = 0.3 + 0.4 * expected_rng.random::<f64>();
+            let mut actual_rng = StdRng::seed_from_u64(seed);
+            let actual = symmetry_order_and_blend(&established, &mut actual_rng);
+            assert_eq!(actual.0, expected_order);
+            assert_eq!(actual.1.to_bits(), expected_blend.to_bits());
+        }
+
+        let orders: Vec<usize> = (2..=101).collect();
+        for seed in 0..128 {
+            let mut expected_rng = StdRng::seed_from_u64(seed);
+            let expected_order = established[expected_rng.random_range(0..established.len())];
+            let blend_draw = expected_rng.random::<f64>();
+            let expected_next = expected_rng.random::<u64>();
+            let mut actual_rng = StdRng::seed_from_u64(seed);
+            let (actual_order, _) = symmetry_order_and_blend(&orders, &mut actual_rng);
+            assert_eq!(actual_rng.random::<u64>(), expected_next);
+            if expected_order != established[4] || blend_draw * SYMMETRY_TAIL_BUCKETS as f64 >= 1.0
+            {
+                assert_eq!(actual_order, expected_order);
+            } else {
+                assert!(actual_order > established[4]);
+            }
+        }
+
+        let mut rng = StdRng::seed_from_u64(0x243f_6a88_85a3_08d3);
+        let mut counts = [0_usize; 6];
+        let mut tail_orders = std::collections::BTreeSet::new();
+        for _ in 0..60_000 {
+            let (order, _) = symmetry_order_and_blend(&orders, &mut rng);
+            if order <= 6 {
+                counts[order - 2] += 1;
+            } else {
+                counts[5] += 1;
+                tail_orders.insert(order);
+            }
+        }
+        for count in &counts[..4] {
+            assert!((11_000..=13_000).contains(count), "{counts:?}");
+        }
+        assert!((9_000..=11_000).contains(&counts[4]), "{counts:?}");
+        assert!((1_500..=2_500).contains(&counts[5]), "{counts:?}");
+        for tail in 0..orders.len() - established.len() {
+            let weighted = (tail as f64 + 0.5) / (orders.len() - established.len()) as f64;
+            let (mut low, mut high) = (0.0, 1.0);
+            for _ in 0..64 {
+                let mid = 0.5 * (low + high);
+                if symmetry_tail_weight(mid) < weighted {
+                    low = mid;
+                } else {
+                    high = mid;
+                }
+            }
+            let draw = 0.5 * (low + high) / SYMMETRY_TAIL_BUCKETS as f64;
+            let selected = symmetry_order_from_draw(&orders, established[4], draw);
+            assert_eq!(selected, orders[established.len() + tail]);
+            tail_orders.insert(selected);
+        }
+        assert_eq!(tail_orders.len(), orders.len() - established.len());
     }
 
     #[test]

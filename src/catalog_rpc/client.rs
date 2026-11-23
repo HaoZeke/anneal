@@ -523,7 +523,7 @@ impl CatalogClient {
         }
     }
 
-    /// Report one chain's motif class and energy to the shared table.
+    /// Report one chain's descriptor class and energy to the shared table.
     pub fn report_core_class(
         &mut self,
         event_sequence: u64,

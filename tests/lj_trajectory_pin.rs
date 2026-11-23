@@ -12,8 +12,8 @@
 //! depth-rewarded arm, and the pair force go through that `libm`, and
 //! this test forces rgmin's scalar dots.
 //!
-//! The fivefold assignment is the built-in one on every build, so the
-//! hash is `6e277f86…` with and without IRA.
+//! The assignment is the built-in one on every build, so linking IRA
+//! does not change this hash.
 
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, random_cluster_in_radius, run_with_gradient,
@@ -89,7 +89,8 @@ fn trajectory_hash() -> String {
 fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     anneal_core::install_rgpot_kernels!();
     let hash = trajectory_hash();
-    // The general move library is deterministic on every build.
-    let expected = "5cd9c95765eadc45efa5879002be9a7430a81b9d82d5bf19509dcabc5578b65c";
+    // The general move library is deterministic on every build. Established
+    // orders keep their draw while the upper order can open the general tail.
+    let expected = "7babb82e15897c1517f0d918ecf855a5dee32ee990dceb69a097597a8f39ba84";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }
