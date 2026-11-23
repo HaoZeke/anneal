@@ -34,6 +34,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from machine_provenance import machine_columns, require_csv_schema  # noqa: E402
 
 REFERENCE = {"si13": -599.34546694, "c20": -1148.85383633}
+REFERENCE_SOURCE = {
+    "si13": "scripts/covalent_h2h/gfn2_crest.py REFERENCE",
+    "c20": "scripts/covalent_h2h/gfn2_crest.py REFERENCE",
+}
+
+
+def validate_reference_sources(references, sources):
+    """Refuse a gate reference without a nonempty citation."""
+    if set(references) != set(sources):
+        raise ValueError("reference and source systems differ")
+    for system, source in sources.items():
+        if not source.strip():
+            raise ValueError(f"{system} has no reference source")
+
+
+validate_reference_sources(REFERENCE, REFERENCE_SOURCE)
 EXAMPLE_FIELDS = [
     "system", "code", "seed", "budget", "hit", "evals_to_hit", "charged",
     "probe_calls", "wall_s", "best", "pot_s", "outside_s", "pot_per_eval_s",

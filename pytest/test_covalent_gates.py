@@ -85,6 +85,20 @@ def test_a_panel_system_one_arm_left_out_or_short_of_a_seed_loses(tmp_path, caps
     assert verdict(capsys) == "floor loses: lj38 h2h_gmin_proof seeds, lj55 h2h_gmin_proof seeds"
 
 
+def test_floor_gate_references_are_cited_and_compared_by_tolerance():
+    crest = load("gfn2_crest_ref", "scripts/covalent_h2h/gfn2_crest.py")
+    references = {"sample": -12.5}
+    sources = {"sample": "synthetic fixture"}
+    floor_gate.validate_reference_sources(references, sources)
+    assert crest.energy_hits(references["sample"], -12.5, 0.0)
+    assert crest.energy_hits(-12.5, references["sample"], 0.0)
+
+
+def test_a_floor_gate_reference_without_a_source_is_refused():
+    with pytest.raises(ValueError, match="sample has no reference source"):
+        floor_gate.validate_reference_sources({"sample": -12.5}, {"sample": ""})
+
+
 def test_crest_rescore_reproduces_the_committed_row(tmp_path):
     pytest.importorskip("scipy.stats")
     crest = load("gfn2_crest", "scripts/covalent_h2h/gfn2_crest.py")
