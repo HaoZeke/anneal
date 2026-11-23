@@ -83,7 +83,9 @@ fn plateau_config(cap_twist: bool) -> Config {
 #[test]
 fn a_chain_that_asks_for_the_cap_turn_leaves_plateaus_through_it() {
     anneal_core::install_rgpot_kernels!();
-    let outcome = run(&plateau_config(true), 80_000, 2003);
+    // A turn that finds no axis is redrawn as a climb, and all ten cap
+    // draws in this seed's first 80k calls find none.
+    let outcome = run(&plateau_config(true), 160_000, 2003);
     assert!(
         outcome.cap_escapes >= 1,
         "no cap turn in {} stall escapes",

@@ -3008,6 +3008,38 @@ fn stall_arms(cfg: &Config) -> Vec<&'static str> {
     .collect()
 }
 
+/// Draws the arm that answers a stall, or `None` when every arm is a no-op.
+///
+/// `acts` proposes for the drawn arm and says whether the proposal moves
+/// the state. A no-op is not scored: its zero deepening would outrank the
+/// real escapes, which are taken whatever their energy and so mostly land
+/// higher, and a no-op the allocator rewarded would keep being bought. As
+/// with an identity SOAP kernel, the arm is not an arm for this state, so
+/// the draw is repeated over the arms not yet tried.
+fn draw_stall_arm<R, F>(
+    allocator: &crate::allocate::DepthAllocator,
+    rng: &mut R,
+    mut acts: F,
+) -> Option<usize>
+where
+    R: Rng + ?Sized,
+    F: FnMut(usize, &mut R) -> bool,
+{
+    let mut tried: Vec<usize> = Vec::new();
+    while tried.len() < allocator.arms() {
+        let arm = if tried.is_empty() {
+            allocator.select(rng)
+        } else {
+            allocator.select_where(rng, |arm| !tried.contains(&arm))
+        };
+        if acts(arm, rng) {
+            return Some(arm);
+        }
+        tried.push(arm);
+    }
+    None
+}
+
 fn directed_stall_source(
     align: bool,
     directed_leave: bool,
@@ -9155,22 +9187,39 @@ where
         // per lattice growth and one for its activation quench, so each of
         // those rechecks.
         let mut leave_pick: Option<usize> = None;
-        let stall_response = if !hop_room(hops) {
-            None
-        } else if directed_leave && leave_arms.len() > 1 {
-            let pick = leave_allocator.select(rng);
-            leave_pick = Some(pick);
-            Some(leave_arms[pick])
-        } else if directed_leave {
-            stall_arms.iter().position(|arm| *arm == "climb")
-        } else if stuck && !stall_arms.is_empty() {
-            Some(if stall_arms.len() > 1 {
-                stall_allocator.select(rng)
+        let cap_arm = stall_arms.iter().position(|arm| *arm == "cap");
+        let mut cap_turn: Option<Array1<f64>> = None;
+        let stall_response = {
+            let mut acts = |arm: usize, rng: &mut R| {
+                if Some(arm) != cap_arm {
+                    return true;
+                }
+                begin_arm(&mut arm_counts, "cap");
+                let turned = crate::cap_twist::propose(x.view(), n, rng);
+                if hop_is_identity(x.view(), turned.view()) {
+                    finish_arm(&mut arm_counts, "cap", false, false);
+                    false
+                } else {
+                    cap_turn = Some(turned);
+                    true
+                }
+            };
+            if !hop_room(hops) {
+                None
+            } else if directed_leave && leave_arms.len() > 1 {
+                leave_pick = draw_stall_arm(&leave_allocator, rng, |pick, rng| {
+                    acts(leave_arms[pick], rng)
+                });
+                leave_pick.map(|pick| leave_arms[pick])
+            } else if directed_leave {
+                stall_arms.iter().position(|arm| *arm == "climb")
+            } else if stuck && stall_arms.len() > 1 {
+                draw_stall_arm(&stall_allocator, rng, &mut acts)
+            } else if stuck && !stall_arms.is_empty() {
+                Some(0).filter(|&arm| acts(arm, rng))
             } else {
-                0
-            })
-        } else {
-            None
+                None
+            }
         };
         let stalled_from = e;
         let mut stall_outcome: Option<f64> = None;
@@ -9259,44 +9308,38 @@ where
             );
             stall_outcome = Some(stalled_from - e);
         }
-        if stall_response.map(|arm| stall_arms[arm] == "cap") == Some(true) {
-            begin_arm(&mut arm_counts, "cap");
-            let turned = crate::cap_twist::propose(x.view(), n, rng);
-            if !hop_is_identity(x.view(), turned.view()) {
-                quiet = 0;
-                longest_quiet = 0;
-                let (ec, xc) = relax(ledger, turned.view(), cfg.relax_steps);
-                let cap_gradient = record_quenched_answer(
-                    cfg,
-                    ledger,
-                    &mut grad,
-                    ec,
-                    xc.view(),
-                    &mut unconverged_records,
-                );
-                hops += 1;
-                stall_escapes += 1;
-                cap_escapes += 1;
-                if ec < e {
-                    stall_escape_gain += e - ec;
-                }
-                finish_arm(&mut arm_counts, "cap", true, ec < stalled_from);
-                // Taken whatever its energy, as the trail is: the turned cap
-                // is a different stacking, and its value is that it is one.
-                adopt_minimum!(
-                    ec,
-                    xc,
-                    cap_gradient,
-                    None,
-                    AdoptionHistory::Fresh,
-                    None,
-                    Some("stall-cap"),
-                    hops
-                );
-                stall_outcome = Some(stalled_from - e);
-            } else {
-                finish_arm(&mut arm_counts, "cap", false, false);
+        if let Some(turned) = cap_turn.take() {
+            quiet = 0;
+            longest_quiet = 0;
+            let (ec, xc) = relax(ledger, turned.view(), cfg.relax_steps);
+            let cap_gradient = record_quenched_answer(
+                cfg,
+                ledger,
+                &mut grad,
+                ec,
+                xc.view(),
+                &mut unconverged_records,
+            );
+            hops += 1;
+            stall_escapes += 1;
+            cap_escapes += 1;
+            if ec < e {
+                stall_escape_gain += e - ec;
             }
+            finish_arm(&mut arm_counts, "cap", true, ec < stalled_from);
+            // Taken whatever its energy, as the trail is: the turned cap
+            // is a different stacking, and its value is that it is one.
+            adopt_minimum!(
+                ec,
+                xc,
+                cap_gradient,
+                None,
+                AdoptionHistory::Fresh,
+                None,
+                Some("stall-cap"),
+                hops
+            );
+            stall_outcome = Some(stalled_from - e);
         }
         if stall_response.map(|arm| stall_arms[arm] == "climb") == Some(true) {
             quiet = 0;
@@ -11207,6 +11250,62 @@ mod tests {
         binary.cap_twist = true;
         assert!(binary.species.is_some());
         assert!(!stall_arms(&binary).contains(&"cap"));
+    }
+
+    #[test]
+    fn a_no_op_stall_arm_is_redrawn_and_the_serving_arm_is_scored() {
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(41);
+        let mut allocator = crate::allocate::DepthAllocator::new(2);
+        let (mut no_ops, mut served) = (0usize, [0usize; 2]);
+        for _ in 0..400 {
+            let arm = draw_stall_arm(&allocator, &mut rng, |arm, _| {
+                no_ops += usize::from(arm == 1);
+                arm != 1
+            })
+            .expect("the climb always acts");
+            served[arm] += 1;
+            allocator.update(arm, -1.0);
+        }
+        assert!(no_ops > 0, "the no-op arm was never drawn");
+        assert_eq!(served, [400, 0]);
+        let means = allocator.means();
+        assert!((means[0] + 1.0).abs() < 1e-6, "means {means:?}");
+        assert_eq!(means[1], 0.0, "a no-op must not be scored");
+        assert_eq!(
+            draw_stall_arm(&allocator, &mut rng, |_, _| false),
+            None,
+            "no arm acts"
+        );
+    }
+
+    #[test]
+    fn a_cap_arm_is_scored_when_it_acts_and_retired_when_it_loses() {
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(43);
+        let mut allocator = crate::allocate::DepthAllocator::new(2);
+        let (mut cap_served, mut late_cap) = (0usize, 0usize);
+        for stall in 0..800 {
+            let cap_applies = stall % 2 == 1;
+            let arm = draw_stall_arm(&allocator, &mut rng, |arm, _| arm != 1 || cap_applies)
+                .expect("the climb always acts");
+            assert!(arm != 1 || cap_applies, "a no-op cap served a stall");
+            allocator.update(arm, if arm == 1 { -5.0 } else { -1.0 });
+            cap_served += usize::from(arm == 1);
+            if stall >= 600 {
+                late_cap += usize::from(arm == 1);
+            }
+        }
+        assert!(cap_served > 0, "the applicable cap was never scored");
+        let means = allocator.means();
+        assert!(
+            (means[1] + 5.0).abs() < 1e-5,
+            "the cap posterior must hold its real outcomes: {means:?}"
+        );
+        assert!(
+            late_cap < 20,
+            "the losing cap still served {late_cap} of 200"
+        );
     }
 
     #[test]
