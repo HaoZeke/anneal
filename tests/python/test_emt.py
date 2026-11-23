@@ -81,18 +81,22 @@ def test_a_refused_cell_leaves_no_state_behind() -> None:
     assert pot(CLUSTER, COPPER, CUBE)[0] == energy
 
 
-def test_zero_atoms_is_a_zero_result() -> None:
+def test_zero_atoms_is_rejected() -> None:
     run = isolated(
         """
         import numpy as np
         import rgpot
 
-        energy, forces, variance = rgpot.EMTPot()(np.empty((0, 3)), [], np.eye(3) * 20.0)
-        print(energy, forces.shape, variance)
+        try:
+            rgpot.EMTPot()(np.empty((0, 3)), [], np.eye(3) * 20.0)
+        except ValueError as error:
+            print(error)
+        else:
+            raise SystemExit("no error")
         """
     )
     assert run.returncode == 0, run.stderr
-    assert run.stdout.split() == ["0.0", "(0,", "3)", "0.0"]
+    assert "nAtoms must be positive" in run.stdout
 
 
 @pytest.mark.parametrize(

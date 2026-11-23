@@ -456,14 +456,14 @@ TEST_CASE("EMT frees what a refused neighbour list construction allocated",
   CHECK(after == before);
 }
 
-TEST_CASE("EMT of zero atoms is a zero result", "[emt][errors]") {
+TEST_CASE("EMT rejects zero atoms", "[emt][errors]") {
   rgpot::types::AtomMatrix none(0, 3);
   const std::vector<int> nothing;
   rgpot::EMTPot pot;
-  const auto [energy, forces, variance] = pot(none, nothing, kCube);
-  REQUIRE(energy == 0.0);
-  REQUIRE(forces.rows() == 0);
-  REQUIRE(variance == 0.0);
+  REQUIRE_THROWS_AS(pot(none, nothing, kCube), std::invalid_argument);
+  REQUIRE_THROWS_WITH(
+      pot(none, nothing, kCube),
+      Catch::Matchers::ContainsSubstring("nAtoms must be positive"));
 }
 
 TEST_CASE("EMT refuses a cell it cannot invert", "[emt][errors]") {

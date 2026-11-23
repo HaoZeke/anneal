@@ -78,8 +78,7 @@ void EMTPot::forceImpl(const ForceInput &in, ForceOut *out) const {
   out->variance = 0.0;
   out->has_stress = 0;
   if (n == 0) {
-    out->energy = 0.0;
-    return;
+    throw std::invalid_argument("invalid parameter: nAtoms must be positive");
   }
   checkBox(in.box);
   checkPositions(in.pos, n);

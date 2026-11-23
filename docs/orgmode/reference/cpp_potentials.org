@@ -1214,10 +1214,11 @@ explicit EMTPot(const EMTConfig &config);
   a second incoming-partner reduction pass, so energies and forces match the
   one-thread bits at 1, 2, 4 and 8 threads.
   The force call does not write a stress.
-  Zero atoms give energy 0 and no forces.
 - Errors :: an element the provider does not cover, a cell too thin for the
   kernel, a cell that is singular or not finite, and positions that are not
   finite throw =std::invalid_argument= with a message that starts =EMTPot:=.
+  Zero atoms throw =std::invalid_argument=
+  (=invalid parameter: nAtoms must be positive=).
   An energy or a force that is not finite, which two atoms at one point cause,
   throws =std::domain_error=.
   A call that threw leaves no state behind, and the Asap =Exception= class,

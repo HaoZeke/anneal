@@ -702,7 +702,7 @@ rgpot.EMTPot(rasmussen=False)
 - Errors :: an element the provider does not cover, a cell too thin for the
   kernel, a cell that is singular or not finite, and positions that are not
   finite raise =ValueError= with a message that starts =EMTPot:=.
-  No atoms returns energy 0, an empty force array and variance 0.
+  No atoms raises =ValueError= (=invalid parameter: nAtoms must be positive=).
   Two atoms at the same position raise =rgpot.NumericalError=, as does a
   non-finite energy.
   A call that raised leaves no state behind.
