@@ -399,16 +399,20 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def append_rows(path: Path, fields: list[str], rows: list[dict]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    new = not path.is_file() or path.stat().st_size == 0
-    if not new:
+def require_append_schema(path: Path, fields: list[str]) -> None:
+    if path.is_file() and path.stat().st_size:
         with open(path, newline="") as handle:
             header = next(csv.reader(handle))
         if header != fields:
             raise SystemExit(
                 f"{path} has another header; rows are appended, never rewritten"
             )
+
+
+def append_rows(path: Path, fields: list[str], rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    new = not path.is_file() or path.stat().st_size == 0
+    require_append_schema(path, fields)
     with open(path, "a", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
         if new:
@@ -485,6 +489,7 @@ def main() -> None:
             raise SystemExit(f"{system} has no reference")
     if host != "bench":
         raise SystemExit("hostname is not bench")
+    require_append_schema(args.rows, [*ROW_FIELDS, *PROVENANCE_FIELDS])
     os.environ["RGPOT_XTB_ETEMP"] = f"{ETEMP}"
     os.environ["OMP_NUM_THREADS"] = "1"
     python = os.environ.get("PANEL_PYTHON", "/usr/bin/python3")
