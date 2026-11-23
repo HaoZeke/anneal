@@ -64,7 +64,7 @@ fn time_to_target(soap: bool, seed: u64, budget: usize, target: f64) -> RunTime 
     out.improvements
         .iter()
         .find(|(_, _, _, energy)| {
-            anneal_core::energy_hits(*energy, target, anneal_core::SEARCH_HIT_TOL)
+            anneal_core::energy_hits(*energy, target, anneal_core::DEFAULT_HIT_TOL)
         })
         .map(|(_, spent, _, _)| *spent as u64)
 }

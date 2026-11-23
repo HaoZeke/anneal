@@ -103,6 +103,9 @@ pub fn print_report(
             if hit { "  SOLVED" } else { "" }
         );
     }
+    // The ensemble SOLVED marker, `tally.solved` and `first_target_calls` moved
+    // from reference + 1e-3 to reference + 1e-4. All three follow `ens.target`
+    // with no extra slack; the LJ driver sets that target.
     let hit = report.solved(ens.target);
     tally.seeds += 1;
     if hit {

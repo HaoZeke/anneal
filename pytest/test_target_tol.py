@@ -79,6 +79,7 @@ def test_shared_helpers_handle_boundary_below_target_and_nonfinite(fn, default_t
 
 
 def test_search_hit_tol_is_one_source_across_python_and_rust():
+    """The ensemble SOLVED marker, `tally.solved` and `first_target_calls` moved from reference + 1e-3 to reference + 1e-4."""
     assert py_target_tol.SEARCH_HIT_TOL == 1.0e-4
     assert anneal.SEARCH_HIT_TOL == py_target_tol.SEARCH_HIT_TOL
     assert py_target_tol.SEARCH_HIT_TOL < py_target_tol.DEFAULT_HIT_TOL

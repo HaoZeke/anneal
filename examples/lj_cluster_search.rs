@@ -7623,8 +7623,9 @@ fn run_history_ensembles(
     let ens = config_from_env(
         replicas,
         budget,
-        // Same window as the solved flags. The default is wider and would
-        // record a discovery those flags reject.
+        // The ensemble SOLVED marker, `tally.solved` and `first_target_calls` moved
+        // from reference + 1e-3 to reference + 1e-4. Solved flags and first
+        // encounters were already scored at 1e-4, so this level matches them.
         reference.map(|r| r + anneal_core::SEARCH_HIT_TOL),
     );
     let mut cfg = cfg.clone();
