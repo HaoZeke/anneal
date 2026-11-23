@@ -31,23 +31,39 @@ else:
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = SCRIPT_DIR.parent
-SCHEMA_DIR = tempfile.TemporaryDirectory()
-SCHEMA_PATH = Path(SCHEMA_DIR.name) / "Potentials.capnp"
-subprocess.run(
-    [
-        sys.executable,
-        str(ROOT / "CppCore/rgpot/rpc/schema_ledger.py"),
-        "apply",
-        "--root",
-        str(ROOT),
-        "--schema",
-        str(ROOT / "CppCore/rgpot/rpc/Potentials.capnp"),
-        "--out",
-        str(SCHEMA_PATH),
-    ],
-    check=True,
-)
-pot_capnp = capnp.load(str(SCHEMA_PATH))
+_SCHEMA_CACHE: dict[str, object] = {}
+
+
+def _get_pot_capnp():
+    cached = _SCHEMA_CACHE.get("pot_capnp")
+    if cached is not None:
+        return cached
+    tmpdir = tempfile.TemporaryDirectory()
+    schema_path = Path(tmpdir.name) / "Potentials.capnp"
+    subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "CppCore/rgpot/rpc/schema_ledger.py"),
+            "apply",
+            "--root",
+            str(ROOT),
+            "--schema",
+            str(ROOT / "CppCore/rgpot/rpc/Potentials.capnp"),
+            "--out",
+            str(schema_path),
+        ],
+        check=True,
+    )
+    loaded = capnp.SchemaParser().load(str(schema_path))
+    _SCHEMA_CACHE["tmpdir"] = tmpdir
+    _SCHEMA_CACHE["pot_capnp"] = loaded
+    return loaded
+
+
+@pytest.fixture(scope="module")
+def pot_capnp_schema():
+    return _get_pot_capnp()
+
 
 sys.path.insert(0, str(SCRIPT_DIR))
 from cpmd_params import configure_cpmd  # noqa: E402
@@ -94,7 +110,7 @@ async def _connect(port: int, retries: int = 20):
     raise RuntimeError(f"failed to connect to potserv on port {port}")
 
 
-async def _water_force_input():
+async def _water_force_input(pot_capnp):
     fip = pot_capnp.ForceInput.new_message()
     # O-H-H water-ish (angstrom)
     pos = [0.0, 0.0, 0.0, 0.96, 0.0, 0.0, -0.24, 0.93, 0.0]
@@ -120,6 +136,7 @@ async def _run_backend(
     pot_name: str,
     engine_env: dict[str, str],
     configure_fn,
+    pot_capnp,
     orbital_keys: tuple[int, ...] = (),
 ):
     env = os.environ.copy()
@@ -141,7 +158,7 @@ async def _run_backend(
         ok, msg = await configure_fn(pot)
         assert ok, f"configure({pot_name}) failed: {msg}"
 
-        fip = await _water_force_input()
+        fip = await _water_force_input(pot_capnp)
         result = await pot.calculate(fip)
         energy = float(result.result.energy)
         forces = list(result.result.forces)
@@ -163,12 +180,13 @@ async def _run_backend(
         proc.wait(timeout=5)
 
 
-def test_nwchem_rpc_configure_and_calculate() -> None:
+def test_nwchem_rpc_configure_and_calculate(pot_capnp_schema=None) -> None:
     potserv = _require_env("RGPOT_POTSERV")
     engine = _pick_engine(
         "NWChem", "NWCHEMC_LIBRARY", "RGPOT_NWCHEMC_ENGINE", "RGPOT_NWCHEM_ENGINE"
     )
     port = int(os.environ.get("RGPOT_E2E_NWCHEM_PORT", "19101"))
+    pot_capnp = pot_capnp_schema if pot_capnp_schema is not None else _get_pot_capnp()
 
     async def cfg(pot):
         return await configure_nwchem(
@@ -192,6 +210,7 @@ def test_nwchem_rpc_configure_and_calculate() -> None:
                     "RGPOT_NWCHEM_ENGINE": engine,
                 },
                 cfg,
+                pot_capnp,
             )
         )
     )
@@ -200,12 +219,13 @@ def test_nwchem_rpc_configure_and_calculate() -> None:
     print(f"NWChem E2E energy={energy} forces0={forces[0]}")
 
 
-def test_cpmd_rpc_configure_and_calculate() -> None:
+def test_cpmd_rpc_configure_and_calculate(pot_capnp_schema=None) -> None:
     potserv = _require_env("RGPOT_POTSERV")
     engine = _pick_engine(
         "CPMD", "CPMDC_LIBRARY", "RGPOT_CPMDC_ENGINE", "RGPOT_CPMD_ENGINE"
     )
     port = int(os.environ.get("RGPOT_E2E_CPMD_PORT", "19102"))
+    pot_capnp = pot_capnp_schema if pot_capnp_schema is not None else _get_pot_capnp()
 
     async def cfg(pot):
         return await configure_cpmd(
@@ -228,6 +248,7 @@ def test_cpmd_rpc_configure_and_calculate() -> None:
                     "RGPOT_CPMD_ENGINE": engine,
                 },
                 cfg,
+                pot_capnp,
                 (7, 19, 7),
             )
         )
