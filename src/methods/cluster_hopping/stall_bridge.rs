@@ -67,6 +67,9 @@ pub(super) fn walk_armed_rigid_archive(
         .filter(|geometry| super::cycles::has_contact_cycles(geometry));
     let chain_arm = geometry.is_some() && !kernels.iter().any(ClusterMove::reverses_directed_cycle);
     let arms = kernels.len() + usize::from(chain_arm);
+    if arms == 0 {
+        return;
+    }
     let reverses = |arm: usize| arm == kernels.len() || kernels[arm].reverses_directed_cycle();
     let mut bandit = FlooredThompson::new(arms);
     let mut branch_best = side_energy;
@@ -113,8 +116,14 @@ pub(super) fn walk_armed_rigid_archive(
                     break;
                 }
             }
+            // The chain-reversal arm sits past the last kernel and has no
+            // proposer. When every arm reverses a chain, the first kernel
+            // proposes, and with no kernel at all the walk ends.
+            let Some(kernel) = kernels.get(arm).or_else(|| kernels.first()) else {
+                break;
+            };
             trial = propose(
-                &kernels[arm],
+                kernel,
                 side_state.view(),
                 cfg.temperature,
                 orient_scale,

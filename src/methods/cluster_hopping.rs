@@ -4020,6 +4020,45 @@ mod rigid_step_tests {
     }
 
     #[test]
+    fn the_archive_walk_survives_an_identity_hop_with_no_kernel() {
+        let n = 4;
+        let mut cfg = Config::recommended_tip4p(n);
+        cfg.relax_steps = 1;
+        cfg.rigid_body_geometry = Some(crate::potentials::Tip4pCluster::new(n).rigid_geometry());
+        let clear = spread(n);
+        let walk = |cfg: &Config| {
+            let mut ledger = Ledger::new(8);
+            ledger.record(-1.0, clear.view());
+            let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+                let _ = ledger.charge();
+                (-1.0, x.to_owned())
+            };
+            let mut archive = crate::methods::stall_archive::StallArchive::new(4, 8);
+            let mut grad = None;
+            super::stall_bridge::walk_armed_rigid_archive(
+                cfg,
+                &mut ledger,
+                &mut relax,
+                &mut grad,
+                &mut archive,
+                &[],
+                super::ClusterMove::propose_scaled,
+                -1.0,
+                clear.view(),
+                0,
+                cfg.min_separation / 50.0,
+                1.0,
+                5.0e-2,
+                100,
+            );
+            ledger.spent()
+        };
+        assert_eq!(walk(&cfg), 0, "a walk with no proposer still evaluated");
+        cfg.rigid_body_geometry = None;
+        assert_eq!(walk(&cfg), 0, "a walk with no arm still evaluated");
+    }
+
+    #[test]
     fn an_auxiliary_record_refuses_non_finite_non_stationary_and_overlapping() {
         let n = 4;
         let cfg = Config::recommended_tip4p(n);
