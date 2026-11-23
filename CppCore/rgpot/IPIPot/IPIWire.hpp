@@ -39,7 +39,8 @@ bool sameHeader(const char *got, const Header &want);
 /// Printable form of a received header, trailing spaces removed.
 std::string headerText(const char *got);
 
-/// Absolute volume of a row-major 3x3 cell. A null or singular cell is 0.
+/// Absolute volume of a row-major 3x3 cell, @c rgpot::cellVolume: a null,
+/// singular or non finite cell is 0.
 double cellVolume(const double *box);
 
 using Clock = std::chrono::steady_clock;

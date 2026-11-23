@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -21,6 +23,7 @@
 #include "rgpot/ZBL/ZBLPot.hpp"
 #include "rgpot/plugin/PluginRegistry.hpp"
 #include "rgpot/pot_caps.hpp"
+#include "rgpot/stress.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
 
 #ifdef RGPOT_HAS_RUST_CORE
@@ -321,6 +324,48 @@ TEST_CASE("direct forcePerAtom members validate before writing",
   requirePerAtomGuard(rgpot::MorsePot{}, false);
   requirePerAtomGuard(rgpot::ZBLPot{}, true);
   requirePerAtomGuard(rgpot::SuttonChenPot{}, false);
+}
+
+TEST_CASE("cellVolume gives zero for a cell without a volume", "[null-force]") {
+  double box[9];
+  fillCell(box);
+  REQUIRE(rgpot::cellVolume(box) == 8000.0);
+
+  REQUIRE(rgpot::cellVolume(nullptr) == 0.0);
+
+  double empty[9] = {};
+  REQUIRE(rgpot::cellVolume(empty) == 0.0);
+
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const double inf = std::numeric_limits<double>::infinity();
+  for (const double bad : {nan, inf, -inf}) {
+    for (int k : {0, 4, 8, 1, 5}) {
+      double broken[9];
+      fillCell(broken);
+      broken[k] = bad;
+      const double volume = rgpot::cellVolume(broken);
+      REQUIRE(volume == 0.0);
+      REQUIRE_FALSE(std::isnan(volume));
+    }
+  }
+
+  double huge[9] = {1.0e200, 0.0, 0.0, 0.0, 1.0e200, 0.0, 0.0, 0.0, 1.0e200};
+  REQUIRE(rgpot::cellVolume(huge) == 0.0);
+}
+
+TEST_CASE("a cell without a volume publishes no stress", "[null-force]") {
+  const double inf = std::numeric_limits<double>::infinity();
+  double box[9];
+  fillCell(box);
+  box[0] = inf;
+  const double strain[6] = {1.0, 1.0, 1.0, 0.0, 0.0, 0.0};
+  rgpot::ForceOut out{};
+  out.has_stress = 1;
+  rgpot::publishCauchyStress(&out, strain, rgpot::cellVolume(box));
+  REQUIRE(out.has_stress == 0);
+  for (const double s : out.stress) {
+    REQUIRE(s == 0.0);
+  }
 }
 
 TEST_CASE("a Hessian product rejects a missing species buffer",

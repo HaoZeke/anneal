@@ -21,10 +21,21 @@
 
 namespace rgpot {
 
-/// Absolute cell volume. The 3×3 box is row-major, index = 3 * row + column.
+/**
+ * Absolute cell volume. The 3×3 box is row-major, index = 3 * row + column.
+ *
+ * Zero is the error value, and every caller tests `volume > 0.0`. A null
+ * box, an empty (singular) box, a box with a non finite entry and a box
+ * whose volume overflows all give exactly 0.0, never NaN or infinity.
+ */
 inline double cellVolume(const double *box) {
   if (box == nullptr) {
     return 0.0;
+  }
+  for (int i = 0; i < 9; ++i) {
+    if (!std::isfinite(box[i])) {
+      return 0.0;
+    }
   }
   const double m00 = box[0];
   const double m01 = box[1];
@@ -35,9 +46,10 @@ inline double cellVolume(const double *box) {
   const double m20 = box[6];
   const double m21 = box[7];
   const double m22 = box[8];
-  return std::abs(m00 * (m11 * m22 - m12 * m21) -
-                  m01 * (m10 * m22 - m12 * m20) +
-                  m02 * (m10 * m21 - m11 * m20));
+  const double volume = std::abs(m00 * (m11 * m22 - m12 * m21) -
+                                 m01 * (m10 * m22 - m12 * m20) +
+                                 m02 * (m10 * m21 - m11 * m20));
+  return std::isfinite(volume) ? volume : 0.0;
 }
 
 /// Add one pair to the six Voigt components of dE/dε: xx, yy, zz, yz, xz, xy.
