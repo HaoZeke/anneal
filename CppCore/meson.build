@@ -2605,6 +2605,37 @@ if get_option('with_tests')
                 kwargs: _rt_kw['EngineAdapterTest'],
             )
         endif
+        if host_system == 'linux'
+            external_refcount_engine = shared_library(
+                'external_refcount_engine',
+                sources: ['tests/external_refcount_engine.c'],
+                include_directories: _incdirs,
+                c_args: ['-DRGPOT_ENGINE_BUILD'],
+                install: false,
+            )
+            external_refcount_empty = shared_library(
+                'external_refcount_empty',
+                sources: ['tests/external_refcount_empty.c'],
+                install: false,
+            )
+            test(
+                'external_engine_refcount',
+                executable(
+                    'external_engine_refcount',
+                    sources: ['tests/external_engine_refcount.cpp'],
+                    dependencies: [rgpot_dep],
+                    include_directories: _incdirs + ['.'],
+                    cpp_args: test_args,
+                    link_language: 'cpp',
+                ),
+                args: [
+                    external_refcount_engine.full_path(),
+                    external_refcount_empty.full_path(),
+                ],
+                depends: [external_refcount_engine, external_refcount_empty],
+                kwargs: _rt_kw['external_engine_refcount'],
+            )
+        endif
         if _rpc_stack and host_system != 'windows'
             engine_table_env = environment()
             engine_table_expect = [

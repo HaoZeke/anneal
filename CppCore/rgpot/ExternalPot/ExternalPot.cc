@@ -9,6 +9,7 @@
 #include "rgpot/plugin/DynLib.hpp"
 
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <climits>
 #include <cmath>
@@ -64,62 +65,109 @@ std::string last_dl() {
   return text.empty() ? "dlopen failed" : text;
 }
 
-// Engine libraries stay resident: they are opened with RTLD_NODELETE and never
-// closed, because a backend may keep OpenMP, CUDA, MPI, GROMACS or OpenMM state
-// that does not survive dlclose. A later open of the same file returns the
-// dynamic linker's existing handle.
-dyn::Handle open_resident(const std::string &path) {
+// One dlclose per successful dlopen. glibc ignores dlclose once an object is
+// RTLD_NODELETE and leaves the loader reference in place, so a constructor
+// that opened with that flag on every call would raise the reference forever.
+// An attempt is opened without the flag and closed if it does not become the
+// resident engine. The resident open is pinned RTLD_NODELETE, which keeps the
+// mapping and its code loaded, and a later constructor copies that handle.
+void close_library(void *handle) noexcept {
+  if (handle == nullptr) {
+    return;
+  }
 #if defined(_WIN32)
-  return dyn::open(path.c_str());
+  if (FreeLibrary(reinterpret_cast<HMODULE>(handle)) == 0) {
+    std::fprintf(stderr, "FreeLibrary failed: %lu\n",
+                 static_cast<unsigned long>(GetLastError()));
+  }
 #else
-  return dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL | RTLD_NODELETE);
+  dlerror();
+  if (dlclose(handle) != 0) {
+    const char *msg = dlerror();
+    std::fprintf(stderr, "dlclose failed: %s\n",
+                 msg != nullptr && msg[0] != '\0' ? msg : "dlclose failed");
+  }
 #endif
 }
 
-// Records the file that holds `anchor` under its canonical path. A bare
-// soname is identified through the file the dynamic linker mapped. A file
-// replaced at a path that was already loaded names a new inode while the
-// linker keeps the old mapping, so it is refused.
-void check_resident(const void *anchor, const std::string &path) {
-#if defined(_WIN32)
-  (void)anchor;
-  (void)path;
-#else
-  Dl_info info{};
-  if (dladdr(anchor, &info) == 0 || info.dli_fname == nullptr ||
-      info.dli_fname[0] == '\0') {
-    throw std::runtime_error(path +
-                             ": the dynamic linker did not report the file "
-                             "it loaded, so the engine cannot be identified");
+// Copies share one loader reference. A move leaves the source empty so it
+// does not close. The last owner closes, from its destructor and not by
+// throwing.
+class LibraryHandle {
+public:
+  LibraryHandle() noexcept = default;
+  explicit LibraryHandle(void *raw) : ref_(nullptr) {
+    if (raw == nullptr) {
+      return;
+    }
+    try {
+      auto *created = new Ref;
+      created->raw = raw;
+      created->count.store(1, std::memory_order_relaxed);
+      ref_ = created;
+    } catch (...) {
+      close_library(raw);
+      throw;
+    }
   }
-  char canonical[PATH_MAX];
-  struct stat st {};
-  if (realpath(info.dli_fname, canonical) == nullptr ||
-      stat(canonical, &st) != 0) {
-    throw std::runtime_error(path + ": cannot identify the loaded file " +
-                             info.dli_fname + ": " + std::strerror(errno));
+  ~LibraryHandle() { release(); }
+
+  LibraryHandle(const LibraryHandle &other) noexcept : ref_(other.ref_) {
+    retain();
   }
-  struct FileId {
-    dev_t dev;
-    ino_t ino;
+  LibraryHandle &operator=(const LibraryHandle &other) noexcept {
+    if (this != &other) {
+      release();
+      ref_ = other.ref_;
+      retain();
+    }
+    return *this;
+  }
+  LibraryHandle(LibraryHandle &&other) noexcept : ref_(other.ref_) {
+    other.ref_ = nullptr;
+  }
+  LibraryHandle &operator=(LibraryHandle &&other) noexcept {
+    if (this != &other) {
+      release();
+      ref_ = other.ref_;
+      other.ref_ = nullptr;
+    }
+    return *this;
+  }
+
+  void *get() const noexcept { return ref_ != nullptr ? ref_->raw : nullptr; }
+  explicit operator bool() const noexcept { return get() != nullptr; }
+
+private:
+  struct Ref {
+    void *raw = nullptr;
+    std::atomic<unsigned> count{0};
   };
-  static std::mutex mutex;
-  static auto *seen = new std::map<std::string, FileId>();
-  std::lock_guard<std::mutex> lock(mutex);
-  const auto [it, inserted] =
-      seen->emplace(canonical, FileId{st.st_dev, st.st_ino});
-  if (!inserted &&
-      (it->second.dev != st.st_dev || it->second.ino != st.st_ino)) {
-    throw std::runtime_error(
-        path + ": " + canonical +
-        " was replaced after it was loaded, and the loaded engine stays "
-        "resident; load the new file from another path or restart the process");
+
+  void retain() noexcept {
+    if (ref_ != nullptr) {
+      ref_->count.fetch_add(1, std::memory_order_relaxed);
+    }
   }
-#endif
+  void release() noexcept {
+    Ref *held = ref_;
+    ref_ = nullptr;
+    if (held != nullptr &&
+        held->count.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+      close_library(held->raw);
+      delete held;
+    }
+  }
+
+  Ref *ref_ = nullptr;
+};
+
+dyn::Handle as_dyn(void *handle) {
+  return reinterpret_cast<dyn::Handle>(handle);
 }
 
 struct Loaded {
-  dyn::Handle library = nullptr;
+  LibraryHandle library;
   EngineCreate create = nullptr;
   EngineDestroy destroy = nullptr;
   EngineForce force = nullptr;
@@ -136,63 +184,270 @@ struct Loaded {
   Loaded(const Loaded &) = delete;
   Loaded &operator=(const Loaded &) = delete;
   Loaded(Loaded &&other) noexcept
-      : library(other.library), create(other.create), destroy(other.destroy),
-        force(other.force), native(other.native), pot(other.pot) {
-    other.library = nullptr;
-    other.pot = nullptr;
+      : library(std::move(other.library)), create(other.create),
+        destroy(other.destroy), force(other.force), native(other.native),
+        pot(other.pot) {
+    other.create = nullptr;
     other.destroy = nullptr;
+    other.force = nullptr;
+    other.native = nullptr;
+    other.pot = nullptr;
   }
   Loaded &operator=(Loaded &&other) noexcept {
     if (this != &other) {
       if (pot != nullptr && destroy != nullptr) {
         destroy(pot);
       }
-      library = other.library;
+      library = std::move(other.library);
       create = other.create;
       destroy = other.destroy;
       force = other.force;
       native = other.native;
       pot = other.pot;
-      other.library = nullptr;
-      other.pot = nullptr;
+      other.create = nullptr;
       other.destroy = nullptr;
+      other.force = nullptr;
+      other.native = nullptr;
+      other.pot = nullptr;
     }
     return *this;
   }
 };
 
+struct ResidentEntry {
+  LibraryHandle library;
+  LibraryHandle pin;
+  std::string canonical;
+#if !defined(_WIN32)
+  dev_t dev = 0;
+  ino_t ino = 0;
+#endif
+};
+
+struct ResidentTable {
+  std::mutex mutex;
+  std::map<std::string, ResidentEntry> by_canon;
+  std::map<std::string, std::string> request_to_canon;
+};
+
+ResidentTable &residents() {
+  static ResidentTable table;
+  return table;
+}
+
+std::string canonical_file(const std::string &path) {
+#if defined(_WIN32)
+  return path;
+#else
+  char buf[PATH_MAX];
+  if (realpath(path.c_str(), buf) == nullptr) {
+    return {};
+  }
+  return buf;
+#endif
+}
+
+struct FileIdentity {
+  std::string canonical;
+#if !defined(_WIN32)
+  dev_t dev = 0;
+  ino_t ino = 0;
+#endif
+};
+
+FileIdentity identify_loaded(const void *anchor, const std::string &path) {
+#if defined(_WIN32)
+  (void)anchor;
+  FileIdentity id;
+  id.canonical = path;
+  return id;
+#else
+  Dl_info info{};
+  if (dladdr(anchor, &info) == 0 || info.dli_fname == nullptr ||
+      info.dli_fname[0] == '\0') {
+    throw std::runtime_error(path +
+                             ": the dynamic linker did not report the file "
+                             "it loaded, so the engine cannot be identified");
+  }
+  char canonical[PATH_MAX];
+  struct stat st {};
+  if (realpath(info.dli_fname, canonical) == nullptr ||
+      stat(canonical, &st) != 0) {
+    throw std::runtime_error(path + ": cannot identify the loaded file " +
+                             info.dli_fname + ": " + std::strerror(errno));
+  }
+  FileIdentity id;
+  id.canonical = canonical;
+  id.dev = st.st_dev;
+  id.ino = st.st_ino;
+  return id;
+#endif
+}
+
+void ensure_current(const ResidentEntry &entry, const std::string &path) {
+#if defined(_WIN32)
+  (void)entry;
+  (void)path;
+#else
+  struct stat st {};
+  if (stat(entry.canonical.c_str(), &st) != 0) {
+    throw std::runtime_error(path + ": cannot identify the loaded file " +
+                             entry.canonical + ": " + std::strerror(errno));
+  }
+  if (st.st_dev != entry.dev || st.st_ino != entry.ino) {
+    throw std::runtime_error(
+        path + ": " + entry.canonical +
+        " was replaced after it was loaded, and the loaded engine stays "
+        "resident; load the new file from another path or restart the process");
+  }
+#endif
+}
+
+// `table.mutex` is held by the caller.
+LibraryHandle find_resident(ResidentTable &table, const std::string &path) {
+  std::string key = canonical_file(path);
+  if (key.empty()) {
+    key = path;
+  }
+  auto direct = table.by_canon.find(key);
+  if (direct == table.by_canon.end()) {
+    auto alias = table.request_to_canon.find(key);
+    if (alias == table.request_to_canon.end()) {
+      alias = table.request_to_canon.find(path);
+    }
+    if (alias == table.request_to_canon.end()) {
+      return {};
+    }
+    direct = table.by_canon.find(alias->second);
+    if (direct == table.by_canon.end()) {
+      return {};
+    }
+  }
+  ensure_current(direct->second, path);
+  return direct->second.library;
+}
+
+LibraryHandle pin_resident(const std::string &path) {
+#if defined(_WIN32)
+  HMODULE pinned = nullptr;
+  if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_PIN, path.c_str(),
+                         &pinned) == 0 ||
+      pinned == nullptr) {
+    throw std::runtime_error(path +
+                             ": the engine library could not be pinned: " +
+                             dyn::error());
+  }
+  return LibraryHandle(reinterpret_cast<void *>(pinned));
+#else
+  dlerror();
+  void *pin = dlopen(path.c_str(),
+                     RTLD_NOW | RTLD_LOCAL | RTLD_NOLOAD | RTLD_NODELETE);
+  if (pin == nullptr) {
+    throw std::runtime_error(path + ": RTLD_NODELETE could not be set: " +
+                             last_dl());
+  }
+  return LibraryHandle(pin);
+#endif
+}
+
+// `table.mutex` is held by the caller.
+LibraryHandle publish_resident(ResidentTable &table, const std::string &path,
+                               const LibraryHandle &opened,
+                               const void *anchor) {
+  const FileIdentity id = identify_loaded(anchor, path);
+  auto existing = table.by_canon.find(id.canonical);
+  if (existing != table.by_canon.end()) {
+    ensure_current(existing->second, path);
+    table.request_to_canon[path] = id.canonical;
+    return existing->second.library;
+  }
+  ResidentEntry entry;
+  entry.library = opened;
+  entry.pin = pin_resident(path);
+  entry.canonical = id.canonical;
+#if !defined(_WIN32)
+  entry.dev = id.dev;
+  entry.ino = id.ino;
+#endif
+  auto [it, inserted] = table.by_canon.emplace(id.canonical, std::move(entry));
+  if (!inserted) {
+    throw std::runtime_error(path + ": the engine file was registered twice");
+  }
+  table.request_to_canon[path] = id.canonical;
+  const std::string via = canonical_file(path);
+  if (!via.empty()) {
+    table.request_to_canon[via] = id.canonical;
+  }
+  return it->second.library;
+}
+
+LibraryHandle open_attempt(const std::string &path) {
+#if defined(_WIN32)
+  void *raw = reinterpret_cast<void *>(dyn::open(path.c_str()));
+#else
+  void *raw = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+#endif
+  if (raw == nullptr) {
+    return {};
+  }
+  return LibraryHandle(raw);
+}
+
+void bind_symbols(Loaded &loaded, bool native) {
+  void *handle = loaded.library.get();
+  loaded.create =
+      dyn::loadSym<EngineCreate>(as_dyn(handle), "rgpot_engine_create");
+  loaded.destroy =
+      dyn::loadSym<EngineDestroy>(as_dyn(handle), "rgpot_engine_destroy");
+  if (native) {
+    loaded.native =
+        dyn::loadSym<NativeForce>(as_dyn(handle), "rgpot_md_native_force");
+  } else {
+    loaded.force = dyn::loadSym<EngineForce>(as_dyn(handle), "rgpot_engine_force");
+  }
+}
+
+bool have_symbols(const Loaded &loaded, bool native) {
+  return loaded.create != nullptr && loaded.destroy != nullptr &&
+         (native ? loaded.native != nullptr : loaded.force != nullptr);
+}
+
 Loaded open_library(const std::vector<std::string> &paths, bool native) {
   if (paths.empty()) {
     throw std::runtime_error("no engine library to open");
   }
+  // Held across dlopen: a library constructor must not open another engine.
+  ResidentTable &table = residents();
+  std::lock_guard<std::mutex> lock(table.mutex);
   std::string tried;
   for (const std::string &path : paths) {
-    dyn::Handle handle = open_resident(path);
-    if (handle == nullptr) {
+    if (LibraryHandle cached = find_resident(table, path)) {
+      Loaded loaded;
+      loaded.library = std::move(cached);
+      bind_symbols(loaded, native);
+      if (!have_symbols(loaded, native)) {
+        tried += path + ": missing " +
+                 (native ? "rgpot_md_native_force" : "rgpot_engine_force") +
+                 "; ";
+        continue;
+      }
+      return loaded;
+    }
+    Loaded loaded;
+    loaded.library = open_attempt(path);
+    if (!loaded.library) {
       tried += path + ": " + last_dl() + "; ";
       continue;
     }
-    Loaded loaded;
-    loaded.library = handle;
-    loaded.create = dyn::loadSym<EngineCreate>(handle, "rgpot_engine_create");
-    loaded.destroy =
-        dyn::loadSym<EngineDestroy>(handle, "rgpot_engine_destroy");
-    if (native) {
-      loaded.native =
-          dyn::loadSym<NativeForce>(handle, "rgpot_md_native_force");
-    } else {
-      loaded.force = dyn::loadSym<EngineForce>(handle, "rgpot_engine_force");
-    }
-    const bool have =
-        loaded.create != nullptr && loaded.destroy != nullptr &&
-        (native ? loaded.native != nullptr : loaded.force != nullptr);
-    if (!have) {
+    bind_symbols(loaded, native);
+    if (!have_symbols(loaded, native)) {
       tried += path + ": missing " +
                (native ? "rgpot_md_native_force" : "rgpot_engine_force") + "; ";
-      loaded.library = nullptr;
       continue;
     }
-    check_resident(reinterpret_cast<const void *>(loaded.create), path);
+    loaded.library = publish_resident(
+        table, path, loaded.library,
+        reinterpret_cast<const void *>(loaded.create));
     return loaded;
   }
   throw std::runtime_error("engine library was not opened: " + tried);

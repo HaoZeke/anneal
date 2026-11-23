@@ -34,9 +34,11 @@ double rgpot_md_nm_per_angstrom(void);
  * dlopens it and calls rgpot_engine_force. Returns NULL and writes
  * err on failure.
  *
- * Every constructor opens its engine with RTLD_NODELETE and never closes it,
- * so the library stays mapped after rgpot_external_potential_free. A file
- * replaced at a path that was already loaded is refused.
+ * The first successful open of an engine file is kept and marked
+ * RTLD_NODELETE, so the library stays mapped after
+ * rgpot_external_potential_free and a later constructor of that file reuses
+ * the open. An open that does not become the resident engine is closed.
+ * A file replaced at a path that was already loaded is refused.
  */
 rgpot_external_potential *rgpot_lammps_potential(const char *engine_path,
                                                 double u0, double cutoff,

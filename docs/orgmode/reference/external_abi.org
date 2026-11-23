@@ -28,9 +28,12 @@ One handle holds one potential.
 Each potential serialises the force calls of its own instance with a mutex.
 
 An engine library stays resident once a constructor opens it.
-The constructors open it with
-=RTLD_NODELETE= and never call =dlclose=, so =rgpot_external_potential_free=
-destroys the engine instance and leaves the library mapped.
+The first successful open is kept and marked =RTLD_NODELETE=, so the mapping
+stays resident after =dlclose= and a later constructor of the same file reuses
+that open instead of taking another reference; an open that does not become
+the resident engine is closed.
+=rgpot_external_potential_free= destroys the engine instance and leaves the
+library mapped.
 A backend may keep OpenMP, CUDA, MPI, GROMACS, LAMMPS or OpenMM state that does
 not survive an unload.
 A later constructor that opens the same file gets the dynamic linker's existing
@@ -160,7 +163,7 @@ void rgpot_external_potential_free(rgpot_external_potential *pot);
 - Inputs :: =pot=, a handle from a constructor, or null.
 - Units :: none.
 - Outputs :: destroys the potential, calls the engine's =rgpot_engine_destroy=
-  when there is one, and closes its library.
+  when there is one, and leaves its library mapped.
 - Errors :: none; a null =pot= is ignored.
 
 *** =rgpot_external_potential_energy_forces=

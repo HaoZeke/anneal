@@ -555,6 +555,30 @@ if(_on)
                 "RGPOT_ENGINE_STUB_MODEL=${CMAKE_CURRENT_BINARY_DIR}/engine_stub_model.bin")
 endif()
 
+rgpot_test_enabled(external_engine_refcount _on)
+if(_on)
+  add_library(external_refcount_engine SHARED
+              CppCore/tests/external_refcount_engine.c)
+  target_include_directories(external_refcount_engine PRIVATE
+                             "${RGPOT_TEST_ROOT}/CppCore")
+  target_compile_definitions(external_refcount_engine PRIVATE RGPOT_ENGINE_BUILD)
+  add_library(external_refcount_empty SHARED
+              CppCore/tests/external_refcount_empty.c)
+  add_executable(external_engine_refcount
+                 CppCore/tests/external_engine_refcount.cpp)
+  target_include_directories(external_engine_refcount PRIVATE
+                             "${RGPOT_TEST_ROOT}/CppCore"
+                             "${RGPOT_TEST_ROOT}/include")
+  target_compile_definitions(external_engine_refcount PRIVATE
+                             ${_rgpot_test_definitions})
+  target_compile_features(external_engine_refcount PRIVATE cxx_std_20)
+  target_link_libraries(external_engine_refcount PRIVATE ${_rgpot_test_libs})
+  rgpot_add_test(external_engine_refcount
+    COMMAND external_engine_refcount
+            $<TARGET_FILE:external_refcount_engine>
+            $<TARGET_FILE:external_refcount_empty>)
+endif()
+
 add_subdirectory(CppCore/tests/plugin)
 
 # The MOPAC frontend over a fake engine. The empty-variable case cannot
