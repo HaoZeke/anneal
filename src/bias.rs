@@ -285,6 +285,93 @@ mod tests {
         assert_eq!(index.lookup(array![0.05, 0.05].view()), Some(1));
     }
 
+    /// Euclidean distance with no triangle key, so the ball tree is the index.
+    struct EuclideanNoKey;
+
+    impl BasinMetric for EuclideanNoKey {
+        fn distance(&self, a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
+            EuclideanMetric.distance(a, b)
+        }
+
+        fn distance_bounded(&self, a: ArrayView1<f64>, b: ArrayView1<f64>, bound: f64) -> f64 {
+            EuclideanMetric.distance_bounded(a, b, bound)
+        }
+
+        fn is_euclidean(&self) -> bool {
+            true
+        }
+    }
+
+    /// Newest centre whose plain Euclidean distance is within `radius`.
+    fn exhaustive_scan(
+        centres: &[Array1<f64>],
+        query: ArrayView1<f64>,
+        radius: f64,
+    ) -> Option<usize> {
+        centres.iter().enumerate().rev().find_map(|(i, centre)| {
+            (centre.len() == query.len()
+                && EuclideanMetric.distance(centre.view(), query) <= radius)
+                .then_some(i)
+        })
+    }
+
+    #[test]
+    fn lookup_matches_the_exhaustive_scan_at_the_seat_cap() {
+        let radius = 0.5;
+        let cap = 4;
+        for dim in [8usize, 40] {
+            let centres: Vec<Array1<f64>> = (0..cap)
+                .map(|i| {
+                    let mut value = vec![0.0; dim];
+                    value[0] = i as f64 * 10.0;
+                    Array1::from(value)
+                })
+                .collect();
+            let mut keyed = BasinIndex::new(Raw, radius).with_cap(cap);
+            let mut unkeyed = BasinIndex::new(Raw, radius)
+                .with_cap(cap)
+                .with_metric(Box::new(EuclideanNoKey));
+            for centre in &centres {
+                let next = keyed.n_basins();
+                assert_eq!(keyed.push(centre.clone()), Some(next));
+                assert_eq!(unkeyed.push(centre.clone()), Some(next));
+            }
+            assert!(keyed.tree.is_none(), "a keyed metric does not build a tree");
+            assert!(unkeyed.tree.is_some(), "a keyless metric keeps the tree");
+            assert!(keyed.seats_full() && unkeyed.seats_full());
+            let refused = Array1::from(vec![100.0; dim]);
+            assert_eq!(keyed.push(refused.clone()), None);
+            assert_eq!(unkeyed.push(refused.clone()), None);
+            assert_eq!(keyed.n_basins(), cap);
+            assert_eq!(unkeyed.n_basins(), cap);
+
+            let mut on_radius = centres[cap - 1].to_vec();
+            on_radius[1] += radius;
+            let mut outside = centres[cap - 1].to_vec();
+            outside[1] += radius + 1.0e-6;
+            let mut older = centres[0].to_vec();
+            older[1] += radius * 0.5;
+            let queries = [
+                centres[0].clone(),
+                centres[cap - 1].clone(),
+                Array1::from(on_radius),
+                Array1::from(outside),
+                Array1::from(older),
+                refused,
+            ];
+            for query in &queries {
+                let want = exhaustive_scan(&centres, query.view(), radius);
+                assert_eq!(keyed.lookup(query.view()), want, "keyed dim {dim}");
+                assert_eq!(unkeyed.lookup(query.view()), want, "tree dim {dim}");
+            }
+            assert_eq!(
+                keyed.lookup(Array1::from(vec![100.0; dim]).view()),
+                None,
+                "a refused seat is not aliased"
+            );
+        }
+    }
+
     #[test]
     fn a_capped_index_refuses_a_new_basin_without_aliasing_it() {
         let mut index = BasinIndex::new(Raw, 0.1).with_cap(2);
@@ -764,14 +851,28 @@ impl<F: Fingerprint> BasinIndex<F> {
             .iter()
             .map(|c| self.metric.key(c.view()))
             .collect();
-        self.tree = (self.metric.is_euclidean() && !self.centres.is_empty()).then(|| {
+        self.tree = self.fresh_tree();
+        self
+    }
+
+    /// Ball tree for a Euclidean metric that publishes no triangle key.
+    ///
+    /// A key rejects a centre with one subtraction, and the block bound
+    /// rejects the rest without a pivot distance. Building the tree on
+    /// top of those bounds repeats a full descriptor read per centre.
+    /// With no key the pivot distance is the only bound, and the tree
+    /// is the index.
+    fn fresh_tree(&self) -> Option<Box<MetricTree>> {
+        (self.metric.is_euclidean()
+            && !self.centres.is_empty()
+            && self.keys.iter().all(Option::is_none))
+        .then(|| {
             Box::new(MetricTree::build(
                 self.metric.as_ref(),
                 &self.centres,
                 (0..self.centres.len()).collect(),
             ))
-        });
-        self
+        })
     }
 
     /// Descriptor of a state.
@@ -862,7 +963,15 @@ impl<F: Fingerprint> BasinIndex<F> {
     /// skipped without reading its descriptor when the sums over 32-entry
     /// blocks already put it outside the radius. That bound allows for the
     /// rounding of the sums, so the answer is the one the plain walk gives.
+    ///
+    /// When the metric also supplies a key, the walk itself is newest
+    /// first and forms a distance only for a centre the key, the blocks
+    /// and the suffix all keep. The ball tree stays for a Euclidean
+    /// metric with no key: there the pivot distance is the only bound.
     pub fn lookup(&self, d: ArrayView1<f64>) -> Option<usize> {
+        if self.metric.is_euclidean() && self.keys.iter().any(Option::is_some) {
+            return self.lookup_keyed(d);
+        }
         let dk = self.metric.key(d);
         let bounded = self.metric.is_euclidean() && aggregate_rounding_is_small(d.len());
         let mut blocks: Option<BlockSums> = None;
@@ -893,13 +1002,23 @@ impl<F: Fingerprint> BasinIndex<F> {
         }
         candidates.sort_unstable_by_key(|(index, _)| std::cmp::Reverse(*index));
         for (i, distance) in candidates {
-            let c = &self.centres[i];
-            if c.len() != d.len() {
+            if self.centre_inside(i, d, dk, bounded, &mut blocks, distance) {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    /// Newest centre the key, the block bound and the suffix all keep,
+    /// and whose bounded distance lies inside the radius.
+    fn lookup_keyed(&self, d: ArrayView1<f64>) -> Option<usize> {
+        let dk = self.metric.key(d);
+        let bounded = self.metric.is_euclidean() && aggregate_rounding_is_small(d.len());
+        let mut blocks: Option<BlockSums> = None;
+        for (i, centre) in self.centres.iter().enumerate().rev() {
+            if centre.len() != d.len() {
                 continue;
             }
-            // Exact, not a heuristic: the reverse triangle inequality says a
-            // centre whose key differs by more than the radius is further away
-            // than the radius, so skipping it cannot change the answer.
             if let (Some(k), Some(ck)) = (dk, self.keys[i])
                 && (k - ck).abs() > self.merge_radius
             {
@@ -911,11 +1030,44 @@ impl<F: Fingerprint> BasinIndex<F> {
             if self.suffix_separates(i, d) {
                 continue;
             }
+            let distance = self
+                .metric
+                .distance_bounded(centre.view(), d, self.merge_radius);
             if distance <= self.merge_radius {
                 return Some(i);
             }
         }
         None
+    }
+
+    fn centre_inside(
+        &self,
+        i: usize,
+        d: ArrayView1<f64>,
+        dk: Option<f64>,
+        bounded: bool,
+        blocks: &mut Option<BlockSums>,
+        distance: f64,
+    ) -> bool {
+        let centre = &self.centres[i];
+        if centre.len() != d.len() {
+            return false;
+        }
+        // Exact, not a heuristic: the reverse triangle inequality says a
+        // centre whose key differs by more than the radius is further away
+        // than the radius, so skipping it cannot change the answer.
+        if let (Some(k), Some(ck)) = (dk, self.keys[i])
+            && (k - ck).abs() > self.merge_radius
+        {
+            return false;
+        }
+        if bounded && self.blocks_separate(i, blocks.get_or_insert_with(|| BlockSums::of(d))) {
+            return false;
+        }
+        if self.suffix_separates(i, d) {
+            return false;
+        }
+        distance <= self.merge_radius
     }
 
     /// Registers a descriptor as a new basin and returns its index.
@@ -938,12 +1090,14 @@ impl<F: Fingerprint> BasinIndex<F> {
         self.centres.push(d);
         self.visits.push(0);
         let index = self.centres.len() - 1;
-        if self.metric.is_euclidean() {
+        if self.metric.is_euclidean() && self.keys.iter().all(Option::is_none) {
             if let Some(tree) = &mut self.tree {
                 tree.insert(index, self.metric.as_ref(), &self.centres);
             } else {
                 self.tree = Some(Box::new(MetricTree::singleton(index)));
             }
+        } else {
+            self.tree = None;
         }
         Some(index)
     }
