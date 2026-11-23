@@ -865,10 +865,15 @@ impl Ledger {
     /// alternative, handing the real ledger to the inner run, makes any budget
     /// arithmetic inside it see the whole campaign's budget rather than the
     /// slice it was given.
+    ///
+    /// The calls were made before this settles, so a caller stop raised while
+    /// they ran does not void them: the debt is paid up to the budget, and
+    /// only the return value reports the closed ledger.
     pub fn charge_many(&mut self, n: usize) -> bool {
-        let room = self.remaining();
-        self.spent += n.min(room);
-        n <= room
+        let open_room = self.remaining();
+        let owed_room = self.budget.saturating_sub(self.spent);
+        self.spent += n.min(owed_room);
+        n <= open_room
     }
 
     /// Records a value and its state when it improves the incumbent.
@@ -10850,6 +10855,7 @@ mod tests {
         let mut side_charges = 0usize;
         let charges_after = std::sync::atomic::AtomicUsize::new(0);
         let gradient_after = std::sync::atomic::AtomicUsize::new(0);
+        let performed = std::sync::atomic::AtomicUsize::new(0);
         let mut relax = |led: &mut Ledger, _x: ArrayView1<f64>, steps: usize| {
             let side = led.spent() == 0 && seen_parent;
             if !side {
@@ -10865,6 +10871,7 @@ mod tests {
                 if !led.charge() {
                     break;
                 }
+                performed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if side {
                     side_charges += 1;
                     if side_charges == 2 {
@@ -10882,10 +10889,14 @@ mod tests {
                 }
                 return None;
             }
-            led.charge().then(|| Array1::zeros(x.len()))
+            let out = led.charge().then(|| Array1::zeros(x.len()));
+            if out.is_some() {
+                performed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            out
         };
         let mut rng = StdRng::seed_from_u64(11);
-        run_with_gradient(
+        let outcome = run_with_gradient(
             &cfg,
             tetra.view(),
             &mut ledger,
@@ -10894,6 +10905,12 @@ mod tests {
             &mut rng,
         )
         .expect("search");
+        let performed = performed.load(std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(
+            outcome.charged, performed,
+            "the run reports {} charged calls but the potential ran {performed}",
+            outcome.charged
+        );
         assert!(
             side_charges >= 2,
             "the stall must enter the observed-basis probe"
@@ -10995,15 +11012,26 @@ mod tests {
         assert_eq!(hit_at, outcome.charged);
     }
 
-    #[test]
-    fn a_basis_probe_that_reaches_the_target_keeps_its_calls_on_the_hit_clock() {
+    /// Runs the quiet basis search with a potential that raises the caller
+    /// stop when it returns an energy at or below the target, as a harness
+    /// does. Every evaluation the potential performs is counted here, apart
+    /// from the ledger, so the ledger's clocks are checked against work done.
+    /// `side_energy` is what the first reconstruction after the opening
+    /// quench returns; `walk_hit` makes the walk's own quench reach the
+    /// target after that probe instead.
+    fn run_counting_potential_calls(
+        side_energy: f64,
+        walk_hit: bool,
+    ) -> (Outcome, Ledger, usize, usize) {
         let cfg = quiet_basis_search(4);
-        let budget = 400;
-        let mut ledger = Ledger::new(budget);
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut ledger = Ledger::with_stop(400, stop.clone());
         ledger.stop_below(-10.0);
         let tetra = regular_tetrahedron();
         let mut seen_parent = false;
-        let mut side_charges = 0usize;
+        let mut probed = false;
+        let mut potential_calls = 0usize;
+        let mut side_calls = 0usize;
         let mut relax = |led: &mut Ledger, _x: ArrayView1<f64>, steps: usize| {
             let side = led.spent() == 0 && seen_parent;
             if !side {
@@ -11013,16 +11041,42 @@ mod tests {
                 if !led.charge() {
                     break;
                 }
+                potential_calls += 1;
                 if side {
-                    side_charges += 1;
+                    side_calls += 1;
                 }
             }
-            let energy = if side { -100.0 } else { 0.0 };
+            let energy = if side {
+                probed = true;
+                side_energy
+            } else if walk_hit && probed && steps == cfg.relax_steps {
+                -100.0
+            } else {
+                0.0
+            };
+            if energy <= -10.0 {
+                stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
             (energy, tetra.clone())
         };
         let mut rng = StdRng::seed_from_u64(11);
         let outcome = run(&cfg, tetra.view(), &mut ledger, &mut relax, &mut rng).expect("search");
-        assert!(side_charges > 0, "the stall must probe a basis");
+        assert!(probed, "the stall must probe a basis");
+        (outcome, ledger, potential_calls, side_calls)
+    }
+
+    #[test]
+    fn a_basis_probe_that_reaches_the_target_keeps_its_calls_on_the_hit_clock() {
+        let (outcome, ledger, potential_calls, side_calls) =
+            run_counting_potential_calls(-100.0, false);
+        assert!(side_calls > 0, "the stall must charge the probe");
+        assert_eq!(outcome.stop, Some(HopStop::Target));
+        assert_eq!(
+            outcome.charged, potential_calls,
+            "the run reports {} charged calls but the potential ran {potential_calls}",
+            outcome.charged
+        );
+        assert_eq!(ledger.spent(), potential_calls);
         let (_, at, _, energy) = outcome
             .improvements
             .iter()
@@ -11030,11 +11084,32 @@ mod tests {
             .copied()
             .expect("the probe reaches the target");
         assert_eq!(energy, -100.0);
-        assert!(
-            at >= side_charges,
-            "the hit clock {at} dropped the probe's {side_charges} calls"
+        assert_eq!(
+            at, potential_calls,
+            "the hit row at {at} dropped part of the {potential_calls} potential calls"
         );
-        assert_eq!(at, outcome.charged);
+    }
+
+    #[test]
+    fn a_missed_probe_stays_charged_when_a_later_walk_target_closes_the_run() {
+        let (outcome, ledger, potential_calls, side_calls) =
+            run_counting_potential_calls(-2.0, true);
+        assert!(side_calls > 0, "the stall must charge the probe");
+        assert_eq!(outcome.stop, Some(HopStop::Target));
+        assert_eq!(outcome.best, -100.0);
+        assert_eq!(
+            outcome.charged, potential_calls,
+            "the run reports {} charged calls but the potential ran {potential_calls}",
+            outcome.charged
+        );
+        assert_eq!(ledger.spent(), potential_calls);
+        let (_, at, _, _) = outcome
+            .improvements
+            .iter()
+            .find(|(_, _, _, energy)| *energy <= -10.0)
+            .copied()
+            .expect("the walk reaches the target");
+        assert_eq!(at, potential_calls);
     }
 
     #[test]
