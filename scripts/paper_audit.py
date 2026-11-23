@@ -100,6 +100,9 @@ UNPUSHED = {
                                                 "reruns, first cited by 93e17b69; no pushed branch holds it",
     "90b88235fe54abace3bde32789582eb6573ed40a": "the build head of the Morse ASE panel, first cited by c3bcdc01; no pushed "
                                                 "branch holds it",
+    "5445c4f7d6333792dc792482f9a2a082970b9685": "the cap-turn arm of the template-free2 r7 campaign, first cited by "
+                                                "aa10a14c; no pushed branch or audit ref holds it, and aa10a14c's parent "
+                                                "403c3d00 is on another base",
 }
 
 KNOWN_GAPS = {
@@ -158,6 +161,8 @@ KNOWN_GAPS = {
     "bench/gmin-panel/rows.csv": "revision 1ce3ab64 is not in this repository",
     "bench/gmin-panel/summary.csv": "revision 1ce3ab64 is not in this repository",
     "bench/morse-panel/template-free-rows.csv": "revision 1ce3ab64 is not in this repository",
+    "bench/template-free2-r7/rows.csv": "revision 5445c4f7 is not in this repository",
+    "bench/template-free2-r7/flag-off-rows.csv": "revision 5445c4f7 is not in this repository",
     "paper/jctc/data/lj55_lj98/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "paper/jctc/data/literature.tsv": "revision and host unrecorded (no revision or host column)",
     "paper/jctc/data/lj75_gmin/gmin-lj75-sym-starts-1-200.csv": "revision and host unrecorded (no revision or host "
@@ -3116,6 +3121,32 @@ def revision_map_text(rows: list[dict[str, str]]) -> str:
     return buffer.getvalue()
 
 
+def cap_turn_campaign(audit: Audit) -> None:
+    """The r7 cap-turn table follows its rows and quotes no McNemar p for the unrecorded build."""
+    readme = "bench/template-free2-r7/README.md"
+    rows = audit.rows("bench/template-free2-r7/rows.csv")
+    audit.rows("bench/template-free2-r7/flag-off-rows.csv")
+    hits: dict[tuple[str, str], dict[int, int]] = defaultdict(dict)
+    for r in rows:
+        hits[(r["cell"], r["arm"])][int(r["seed"])] = int(r["hit"])
+    audit.said(readme, "| cell | base | CT | Fisher p | base only | CT only | outside/call ratio |")
+    totals = [0, 0, 0, 0, 0]
+    for cell in ("lj38", "m38r14", "m55r14", "lj75", "lj98", "lj102", "lj103", "lj104"):
+        base, arm = hits[(cell, "base")], hits[(cell, "CT")]
+        seeds = sorted(set(base) & set(arm))
+        n, hb, ha = len(seeds), sum(base[s] for s in seeds), sum(arm[s] for s in seeds)
+        ob = sum(1 for s in seeds if base[s] and not arm[s])
+        oa = sum(1 for s in seeds if arm[s] and not base[s])
+        totals = [t + v for t, v in zip(totals, (n, hb, ha, ob, oa))]
+        audit.said(readme, f"| {cell} | {hb}/{n} | {ha}/{n} | {fisher(hb, n, ha, n):.2g} | {ob} | {oa} |")
+    n, hb, ha, ob, oa = totals
+    audit.said(readme, f"| all | {hb}/{n} | {ha}/{n} | | {ob} | {oa} | |")
+    audit.said(readme, "No McNemar p is given for the cap turn")
+    text = audit.text(readme)
+    audit.record("3.2e-5" not in text, readme, "the pooled McNemar p of the unrecorded build is withdrawn", "absent",
+                 "present" if "3.2e-5" in text else "absent")
+
+
 def au55_superseded(audit: Audit) -> None:
     """Each row of rows.csv that rows-for-cluster.csv replaces is listed, and no other row is."""
     old = audit.rows("bench/ase-au55/rows.csv")
@@ -3253,7 +3284,8 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
     for check in (manuscript_ablation, selection_tables, manuscript_retry, manuscript_gmin, manuscript_tip4p, manuscript_hexamer,
                   manuscript_cross_field, supporting_information, release, paper_0120, gad_published, openconf,
                   head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, lj_large, bench_prose,
-                  manuscript_ase, panel_references, generated_tables, supporting_gmin, supporting_numbers, au55_superseded, manuscript_new, manuscript_followups, cover_letter):
+                  manuscript_ase, panel_references, generated_tables, supporting_gmin, supporting_numbers, au55_superseded, manuscript_new, manuscript_followups, cover_letter,
+                  cap_turn_campaign):
         check(audit)
     if write_map:
         (ROOT / REVISION_MAP).write_text(revision_map_text(revision_map_rows(audit)))

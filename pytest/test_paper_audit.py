@@ -46,6 +46,7 @@ CHECKS = (
     audit_mod.manuscript_new,
     audit_mod.manuscript_followups,
     audit_mod.cover_letter,
+    audit_mod.cap_turn_campaign,
     audit_mod.rerun_claims,
     audit_mod.rerun_check,
     audit_mod.revision_map,

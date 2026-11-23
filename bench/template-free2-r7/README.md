@@ -50,31 +50,47 @@ The drivers turn it on with `H2H_CAP_TWIST=1`.
 
 ### Campaign
 
-Base is 4d2fa0f4 (develop 9837358a plus r6 commits 1-2), arm `CT` is
-5445c4f7 with `H2H_CAP_TWIST=1`. Seeds 2000-2023, arm order rotating
-with the seed.
+Base is 4d2fa0f4 (develop 9837358a plus r6 commits 1-2). Arm `CT` ran
+with `H2H_CAP_TWIST=1` from a build whose revision is unrecorded. Its
+rows cite 5445c4f7, but no branch or audit ref holds that commit, the
+run logs record the head as `unknown`, and `run_cells.py` writes
+whatever revision it is given on the command line. aa10a14c, the commit
+that added these rows, sits on 403c3d00, which is the cap turn on
+91732899. That base carries source changes that 4d2fa0f4 does not, so
+403c3d00 is not shown to be the build either. The rows stay as written,
+and `scripts/paper_audit.py` lists 5445c4f7 as an unpushed revision.
+Seeds 2000-2023, arm order rotating with the seed.
 
     python3 run_cells.py rows.csv lj38,m38r14,m55r14,lj75,lj98,lj102,lj103,lj104 \
         2000:2023 base=<4d2fa0f4 examples>=4d2fa0f4... \
         CT=<5445c4f7 examples>=5445c4f7...=H2H_CAP_TWIST:1
     python3 summarise.py rows.csv base CT concurrent.csv
 
-| cell | base | CT | Fisher p | base only | CT only | McNemar p | outside/call ratio |
-|---|---|---|---|---|---|---|---|
-| lj38 | 23/24 | 23/24 | 1 | 1 | 1 | 1 | 0.998 |
-| m38r14 | 11/24 | 19/24 | 0.036 | 1 | 9 | 0.021 | 0.959 |
-| m55r14 | 18/24 | 18/24 | 1 | 5 | 5 | 1 | 0.993 |
-| lj75 | 7/24 | 12/24 | 0.24 | 3 | 8 | 0.23 | 1.003 |
-| lj98 | 16/24 | 24/24 | 0.0039 | 0 | 8 | 0.0078 | 1.058 |
-| lj102 | 11/24 | 18/24 | 0.075 | 3 | 10 | 0.092 | 1.016 |
-| lj103 | 13/24 | 18/24 | 0.23 | 5 | 10 | 0.30 | 0.968 |
-| lj104 | 11/24 | 16/24 | 0.24 | 4 | 9 | 0.27 | 0.994 |
-| all | 110/192 | 148/192 | | 22 | 60 | 3.2e-5 | |
+| cell | base | CT | Fisher p | base only | CT only | outside/call ratio |
+|---|---|---|---|---|---|---|
+| lj38 | 23/24 | 23/24 | 1 | 1 | 1 | 0.998 |
+| m38r14 | 11/24 | 19/24 | 0.036 | 1 | 9 | 0.959 |
+| m55r14 | 18/24 | 18/24 | 1 | 5 | 5 | 0.993 |
+| lj75 | 7/24 | 12/24 | 0.24 | 3 | 8 | 1.003 |
+| lj98 | 16/24 | 24/24 | 0.0039 | 0 | 8 | 1.058 |
+| lj102 | 11/24 | 18/24 | 0.075 | 3 | 10 | 1.016 |
+| lj103 | 13/24 | 18/24 | 0.23 | 5 | 10 | 0.968 |
+| lj104 | 11/24 | 16/24 | 0.24 | 4 | 9 | 0.994 |
+| all | 110/192 | 148/192 | | 22 | 60 | |
+
+The table describes the unrecorded CT build against 4d2fa0f4 and
+nothing later. No McNemar p is given for the cap turn: the branch head
+has changed the stall draw since (a turn that does not move the state is
+now redrawn, and the leave and stall allocators score the arm that
+acts), and no rows have been run at that head, so no p value here
+measures it.
+The Fisher p values compare the same two builds and carry the same
+limit.
 
 The outside ratio is the type-7 median over seeds of
 (wall_s - pot_s) / charged, CT over base. No cell loses a hit and the
-largest ratio is 1.058 (lj98), so the default-on bar (no hit loss,
-outside at most 1.10x) is met. The cap stays opt-in in this series.
+largest ratio is 1.058 (lj98), so that build met the default-on bar (no
+hit loss, outside at most 1.10x). The cap stays opt-in in this series.
 
 No row shows a pause: every row's elapsed time is within 10 % and a
 second of its wall time. Two short side jobs ran on cores 2-7 while the
@@ -86,10 +102,11 @@ them in, the ratios are 0.995 and 1.018.
 
 ### Flag off is the base
 
-The 5445c4f7 binaries without the variable were run on all 24 seeds of
-lj38, m38r14, m55r14, lj75 and lj98 and on seeds 2000-2005 of lj102 to
-lj104. All 138 runs match the base rows on budget, hit, calls to hit,
-charged calls and best energy (`flag-off-rows.csv`, `raw/flag-off/`).
+The CT binaries, cited as 5445c4f7, were run without the variable on
+all 24 seeds of lj38, m38r14, m55r14, lj75 and lj98 and on seeds
+2000-2005 of lj102 to lj104. All 138 runs match the base rows on
+budget, hit, calls to hit, charged calls and best energy
+(`flag-off-rows.csv`, `raw/flag-off/`).
 
 ### Draw order and the tie rule
 
