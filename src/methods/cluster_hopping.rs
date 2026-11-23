@@ -1571,16 +1571,18 @@ pub fn structure_is_sane(x: ArrayView1<f64>, min_sep: f64) -> bool {
 
 /// Whether every pair clears the shortest bond its atomic numbers permit.
 ///
-/// The bound comes from [`shortest_bond_length`], so it follows the existing
-/// covalent-radius table and admits multiple bonds. `absolute` remains the
-/// fallback for an unknown element.
+/// The bound is [`element_call_floor`], the one [`CallFloor`] applies, so a
+/// pair the search opens to its floor is never refused here. It is
+/// [`COVALENT_CALL_FRACTION`] of the summed covalent radii, below every
+/// bond order and below a physical O-H, and never below `absolute`, which
+/// remains the fallback for an unknown element.
 pub fn clears_species_sanity(x: ArrayView1<f64>, elements: &[u32], absolute: f64) -> bool {
     let n = x.len() / 3;
     x.len() == 3 * elements.len()
         && x.iter().all(|value| value.is_finite())
         && (0..n).all(|a| {
             ((a + 1)..n).all(|b| {
-                let floor = shortest_bond_length(elements[a], elements[b]).max(absolute);
+                let floor = element_call_floor(elements[a], elements[b], absolute);
                 pair_distance(x, a, b) > floor
             })
         })
@@ -13576,14 +13578,69 @@ mod call_floor_tests {
     #[test]
     fn species_sanity_rejects_compression_but_keeps_multiple_bonds() {
         let silicon = [14, 14];
-        let compressed = Array1::from(vec![0.0, 0.0, 0.0, 1.60, 0.0, 0.0]);
+        let compressed = Array1::from(vec![0.0, 0.0, 0.0, 1.40, 0.0, 0.0]);
+        let at_floor = Array1::from(vec![0.0, 0.0, 0.0, 1.60, 0.0, 0.0]);
         let physical = Array1::from(vec![0.0, 0.0, 0.0, 2.20, 0.0, 0.0]);
         assert!(!clears_species_sanity(compressed.view(), &silicon, FLOOR));
+        assert!(clears_species_sanity(at_floor.view(), &silicon, FLOOR));
         assert!(clears_species_sanity(physical.view(), &silicon, FLOOR));
 
         let carbon = [6, 6];
         let triple = Array1::from(vec![0.0, 0.0, 0.0, 1.20, 0.0, 0.0]);
         assert!(clears_species_sanity(triple.view(), &carbon, FLOOR));
+    }
+
+    #[test]
+    fn species_sanity_accepts_a_physical_water_bond_and_refuses_a_collapsed_pair() {
+        let water = [8, 1, 1];
+        let at = |oh: f64| Array1::from(vec![0.0, 0.0, 0.0, oh, 0.0, 0.0, -0.24, 0.93, 0.0]);
+        assert!(clears_species_sanity(at(0.957).view(), &water, FLOOR));
+        assert!(clears_species_sanity(at(0.97).view(), &water, FLOOR));
+        assert!(!clears_species_sanity(at(0.60).view(), &water, FLOOR));
+        assert!(!clears_species_sanity(at(0.85).view(), &water, FLOOR));
+
+        let mut cfg = Config::for_cluster(3);
+        cfg.call_floor = Some(FLOOR);
+        cfg.call_floor_elements = Some(water.to_vec());
+        assert!(quench_is_sane(&cfg, -1.0, at(0.957).view()));
+        assert!(!quench_is_sane(&cfg, -1.0, at(0.60).view()));
+    }
+
+    #[test]
+    fn no_pair_is_floored_above_a_physical_bond_for_its_elements() {
+        for (za, zb, length) in [
+            (8u32, 1u32, 0.957),
+            (1, 1, 0.741),
+            (7, 1, 1.012),
+            (9, 1, 0.917),
+            (6, 6, 1.20),
+            (14, 14, 2.20),
+        ] {
+            assert!(element_call_floor(za, zb, 0.0) < length, "{za}-{zb}");
+        }
+        assert!(element_call_floor(8, 1, FLOOR) < 0.957);
+    }
+
+    #[test]
+    fn a_geometry_the_call_floor_opened_is_sane_for_the_species_check() {
+        for elements in [vec![14u32; 3], vec![6; 3], vec![8, 1, 1]] {
+            let floor = CallFloor {
+                absolute: FLOOR,
+                elements: Some(&elements),
+            };
+            let mut x = Array1::from(vec![0.0, 0.0, 0.0, 0.7, 0.0, 0.0, 0.3, 0.8, 0.0]);
+            assert!(!floor.clears(x.view()));
+            assert!(!clears_species_sanity(x.view(), &elements, FLOOR));
+            assert!(floor.open(&mut x, None));
+            assert!(
+                clears_species_sanity(x.view(), &elements, FLOOR),
+                "{elements:?}"
+            );
+            let mut cfg = Config::for_cluster(3);
+            cfg.call_floor = Some(FLOOR);
+            cfg.call_floor_elements = Some(elements.clone());
+            assert!(quench_is_sane(&cfg, -1.0, x.view()), "{elements:?}");
+        }
     }
 
     #[test]

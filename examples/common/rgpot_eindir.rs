@@ -15,7 +15,7 @@
 use anneal_core::catalog::FreshEvaluation;
 use anneal_core::catalog::molecular::{GFN2_ACCURACY, GFN2_MAX_ITERATIONS, RGPOT_XTB_ENGINE_REV};
 use anneal_core::compatibility::{AbiStamp, EngineDescriptor, ProtocolVersion};
-use anneal_core::methods::cluster_hopping::{OVERLAP_CALL_LIMIT, shortest_bond_length};
+use anneal_core::methods::cluster_hopping::{OVERLAP_CALL_LIMIT, element_call_floor};
 use eindir_core::ffi::{EindirObjectiveWrapper, eindir_core_abi_compatible, eindir_objective_t};
 use eindir_core::gradient::DifferentiableObjective;
 use libloading::{Library, Symbol};
@@ -80,7 +80,7 @@ fn geometry_has_short_pair(positions: &[f64], atomic_numbers: &[i32], absolute: 
         ((a + 1)..n).any(|b| {
             let za = u32::try_from(atomic_numbers[a]).unwrap_or(0);
             let zb = u32::try_from(atomic_numbers[b]).unwrap_or(0);
-            let floor = shortest_bond_length(za, zb).max(absolute);
+            let floor = element_call_floor(za, zb, absolute);
             pair_distance_a(positions, a, b) <= floor
         })
     })
@@ -155,13 +155,47 @@ mod tests {
 
     #[test]
     fn species_guard_uses_covalent_radii() {
-        let compressed_si = [0.0, 0.0, 0.0, 1.60, 0.0, 0.0];
+        let compressed_si = [0.0, 0.0, 0.0, 1.40, 0.0, 0.0];
+        let at_floor_si = [0.0, 0.0, 0.0, 1.60, 0.0, 0.0];
         let physical_si = [0.0, 0.0, 0.0, 2.20, 0.0, 0.0];
         assert!(refuses_geometry(&compressed_si, &[14, 14]));
+        assert!(!refuses_geometry(&at_floor_si, &[14, 14]));
         assert!(!refuses_geometry(&physical_si, &[14, 14]));
 
         let carbon_triple_bond = [0.0, 0.0, 0.0, 1.20, 0.0, 0.0];
         assert!(!refuses_geometry(&carbon_triple_bond, &[6, 6]));
+    }
+
+    #[test]
+    fn a_physical_water_bond_is_called_and_a_collapsed_pair_is_not() {
+        let water = [8, 1, 1];
+        let bond = |oh: f64| [0.0, 0.0, 0.0, oh, 0.0, 0.0, -0.24, 0.93, 0.0];
+        assert!(!refuses_geometry(&bond(0.957), &water));
+        assert!(!refuses_geometry(&bond(0.97), &water));
+        assert!(refuses_geometry(&bond(0.60), &water));
+        assert!(refuses_geometry(&bond(0.85), &water));
+
+        let collapsed_oo = [0.0, 0.0, 0.0, 0.9, 0.0, 0.0];
+        assert!(refuses_geometry(&collapsed_oo, &[8, 8]));
+    }
+
+    #[test]
+    fn a_geometry_the_call_floor_opened_is_not_refused() {
+        use anneal_core::methods::cluster_hopping::CallFloor;
+        for elements in [vec![14u32; 3], vec![6; 3], vec![8, 1, 1]] {
+            let floor = CallFloor {
+                absolute: OVERLAP_CALL_LIMIT_A,
+                elements: Some(&elements),
+            };
+            let mut x = ndarray::Array1::from(vec![0.0, 0.0, 0.0, 0.7, 0.0, 0.0, 0.3, 0.8, 0.0]);
+            let numbers: Vec<i32> = elements.iter().map(|&z| z as i32).collect();
+            assert!(refuses_geometry(x.as_slice().unwrap(), &numbers));
+            assert!(floor.open(&mut x, None));
+            assert!(
+                !refuses_geometry(x.as_slice().unwrap(), &numbers),
+                "{elements:?}"
+            );
+        }
     }
 
     #[test]

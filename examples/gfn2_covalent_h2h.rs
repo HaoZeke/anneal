@@ -19,8 +19,10 @@
 //! probe runs on a two-atom handle and is charged to the same ledger. There
 //! is no pair-range cut, because dispersion has no finite reach.
 //! The call floor is the handle's 0.90 Å, raised pair by pair to
-//! the shortest bond derived from the atomic numbers' covalent radii:
-//! 1.71 Å for Si–Si and 1.17 Å for C–C.
+//! `element_call_floor` of the atomic numbers: 0.70 of the summed covalent
+//! radii, 1.55 Å for Si–Si and 1.06 Å for C–C. The handle's own guard and
+//! the search's sanity check use the same floor, so a pair the search has
+//! opened is never refused.
 //!
 //! The start is a random cluster in the scaled start radius from
 //! `StdRng::seed_from_u64(seed)`. `H2H_START_ONLY=1` writes it to
