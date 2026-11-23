@@ -143,7 +143,7 @@ seed 2002 is retained even if it repeats the earlier 1.5 versus
 
 This section is generated from `rows.csv` by `run_gate.py summarize`.
 
-29 cells, twenty-four seeds, eight observations, 473 rows, 27 inconclusive. Gate verdict: **INCONCLUSIVE**. 2 cells pass, 0 fail and 27 are inconclusive.
+29 cells, twenty-four seeds, eight observations, 5568 rows, 0 inconclusive. Gate verdict: **PASS**. 29 cells pass, 0 fail and 0 are inconclusive.
 
 - Clause (a), trajectory identity, fails on: none.
 - Clause (b), hit loss, fails on: none.
@@ -161,67 +161,41 @@ the paired-seed bootstrap interval. VmHWM and `ru_maxrss` never gate.
 | --- | --- | --- | --- | --- | ---: | --- | --- | ---: | --- | --- |
 | lj38 | 48, 48 | 23, 23, 23, 23 | 0.95681 [0.955351, 0.964258] | 0.996125 [0.993897, 1.00124] | 1.1 | 1.0067 [0.998737, 1.01166] | 0.998885 [0.998686, 1.00126] | 1.05 | 0, 0, 74248 | PASS |
 | lj75 | 48, 48 | 7, 7, 7, 7 | 0.934832 [0.923506, 0.94898] | 1.00101 [0.988502, 1.01186] | 1.1 | 1.00249 [1.00109, 1.00326] | 1 [0.999069, 1.00074] | 1.05 | 0, 0, 1420120 | PASS |
-| lj98 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
-| lj102 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
-| lj104 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
-| blj105n38 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
-| blj105n55 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
-| blj115n38 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
-| blj115n55 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
-| m55r6 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
-| m55r14 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
-| m80r6 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
-| m80r14 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
-| sc126-38 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
-| sc126-55 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
-| tip4p8 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
-| tip4p9 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
-| tip4p10 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
-| tip4p11 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
-| tip4p12 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
-| tip4p13 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
-| tip4p14 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
-| tip4p15 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
-| tip4p16 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
-| tip4p17 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
-| tip4p18 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
-| tip4p19 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
-| tip4p20 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
-| tip4p21 | nan, nan | nan, nan, nan, nan | nan [nan, nan] | nan [nan, nan] | 1.1 | nan [nan, nan] | nan [nan, nan] | 1.05 | 0, 0, 0 | INCONCLUSIVE |
+| lj98 | 48, 48 | 16, 16, 16, 16 | 0.93787 [0.935145, 0.947883] | 1.00191 [0.99767, 1.00693] | 1.1 | 1.00356 [0.999842, 1.00645] | 1.00021 [0.999118, 1.00127] | 1.05 | 0, 0, 990870 | PASS |
+| lj102 | 48, 48 | 11, 11, 11, 11 | 0.940321 [0.928975, 0.947913] | 0.999359 [0.996333, 1.00978] | 1.1 | 1.00203 [1.00029, 1.00448] | 0.998959 [0.997815, 1.00178] | 1.05 | 0, 0, 1320320 | PASS |
+| lj104 | 48, 48 | 11, 11, 11, 11 | 0.935139 [0.932869, 0.946007] | 0.999572 [0.992892, 1.00303] | 1.1 | 1.00198 [1.00065, 1.00351] | 1.0009 [0.997456, 1.00173] | 1.05 | 0, 0, 1243522 | PASS |
+| blj105n38 | 48, 48 | 3, 3, 3, 3 | 1.00434 [1.00171, 1.01433] | 0.999408 [0.99517, 1.01393] | 1.1 | 0.938705 [0.883335, 1.11496] | 1 [0.999934, 1.00013] | 1.05 | 0, 0, 60512 | PASS |
+| blj105n55 | 48, 48 | 24, 24, 24, 24 | 1.00589 [0.983701, 1.03891] | 0.997229 [0.990087, 1.00448] | 1.1 | 1.00023 [0.98181, 1.13123] | 1 [0.999871, 1.00008] | 1.05 | 0, 0, 38848 | PASS |
+| blj115n38 | 48, 48 | 23, 23, 23, 23 | 1.01753 [1.01007, 1.03468] | 0.999177 [0.997822, 1.02729] | 1.1 | 1.00768 [1.00018, 1.01638] | 0.999918 [0.999832, 1] | 1.05 | 0, 0, 22600 | PASS |
+| blj115n55 | 48, 48 | 0, 0, 0, 0 | 1.00088 [0.985578, 1.01217] | 0.998582 [0.991157, 1.00213] | 1.1 | 0.998846 [0.911094, 1.04225] | 1.00003 [0.999897, 1.00005] | 1.05 | 0, 0, 552326 | PASS |
+| m55r6 | 48, 48 | 24, 24, 24, 24 | 0.964158 [0.957832, 0.973685] | 1.00218 [0.99715, 1.0027] | 1.1 | 1 [0.991853, 1.01879] | 1 [0.989754, 1.00204] | 1.05 | 0, 0, 13964 | PASS |
+| m55r14 | 48, 48 | 18, 18, 18, 18 | 0.960229 [0.944167, 0.971419] | 0.992702 [0.989918, 1.00293] | 1.1 | 1.01034 [1.00652, 1.01436] | 1 [0.998522, 1.00151] | 1.05 | 0, 0, 326704 | PASS |
+| m80r6 | 48, 48 | 24, 24, 24, 24 | 0.940541 [0.920525, 0.971504] | 1.00157 [0.995804, 1.00295] | 1.1 | 1.01075 [1.00543, 1.01525] | 1.00077 [0.999083, 1.00147] | 1.05 | 0, 0, 429612 | PASS |
+| m80r14 | 48, 48 | 15, 15, 15, 15 | 0.938289 [0.930167, 0.951197] | 1.00436 [0.995017, 1.0071] | 1.1 | 1.0016 [1.00114, 1.00255] | 0.999454 [0.999033, 1.00096] | 1.05 | 0, 0, 1950818 | PASS |
+| sc126-38 | 48, 48 | 24, 24, 24, 24 | 1.00637 [0.998863, 1.01299] | 0.997537 [0.976729, 1.00312] | 1.1 | 1.00102 [0.994733, 1.00885] | 1.00102 [0.997788, 1.00216] | 1.05 | 0, 0, 72582 | PASS |
+| sc126-55 | 48, 48 | 24, 24, 24, 24 | 1.01674 [1.002, 1.02352] | 1.00131 [0.995656, 1.00961] | 1.1 | 1.00487 [0.991014, 1.01485] | 1 [0.997768, 1] | 1.05 | 0, 0, 32726 | PASS |
+| tip4p8 | 48, 48 | 24, 24, 24, 24 | 1.00392 [0.994561, 1.02214] | 1.00047 [0.987278, 1.01409] | 1.1 | 1.00912 [0.993711, 1.0302] | 1.00303 [0.993421, 1.01266] | 1.05 | 0, 0, 9732 | PASS |
+| tip4p9 | 48, 48 | 24, 24, 24, 24 | 1.02681 [1.01463, 1.03765] | 0.999778 [0.990493, 1.0041] | 1.1 | 1.01114 [0.98995, 1.02041] | 0.99446 [0.993865, 1.00641] | 1.05 | 0, 0, 10644 | PASS |
+| tip4p10 | 48, 48 | 24, 24, 24, 24 | 1.04094 [1.02837, 1.05264] | 0.992421 [0.987966, 1.00533] | 1.1 | 1.01278 [1, 1.02] | 1.00319 [0.992701, 1.00347] | 1.05 | 0, 0, 25020 | PASS |
+| tip4p11 | 48, 48 | 24, 24, 24, 24 | 1.03802 [1.03391, 1.04706] | 1.00286 [0.997643, 1.00892] | 1.1 | 1.01564 [1.01209, 1.02037] | 0.999588 [0.998912, 1.00094] | 1.05 | 0, 0, 148986 | PASS |
+| tip4p12 | 48, 48 | 24, 24, 24, 24 | 1.04354 [1.0347, 1.04789] | 1.00322 [0.989557, 1.01255] | 1.1 | 1.01371 [1.00973, 1.02033] | 0.999404 [0.998504, 1] | 1.05 | 0, 0, 98762 | PASS |
+| tip4p13 | 48, 48 | 24, 24, 24, 24 | 1.04053 [1.03586, 1.04568] | 1.00169 [0.995808, 1.00458] | 1.1 | 1.0108 [1.00783, 1.01538] | 1.00059 [0.999867, 1.00131] | 1.05 | 0, 0, 196670 | PASS |
+| tip4p14 | 48, 48 | 24, 24, 24, 24 | 1.046 [1.03827, 1.05368] | 1.00534 [0.997977, 1.00831] | 1.1 | 1.01392 [1.01046, 1.01995] | 0.999792 [0.998746, 1.00017] | 1.05 | 0, 0, 146282 | PASS |
+| tip4p15 | 48, 48 | 15, 15, 15, 15 | 1.04444 [1.03684, 1.04876] | 1.0017 [0.995866, 1.01784] | 1.1 | 1.00746 [1.00292, 1.01279] | 1.00007 [0.999823, 1.00021] | 1.05 | 0, 0, 887522 | PASS |
+| tip4p16 | 48, 48 | 7, 7, 7, 7 | 1.03825 [1.03114, 1.05344] | 1.00395 [0.995723, 1.00514] | 1.1 | 1.00769 [1.00242, 1.00957] | 0.999939 [0.999743, 1.00011] | 1.05 | 0, 0, 1264404 | PASS |
+| tip4p17 | 48, 48 | 9, 9, 9, 9 | 1.04009 [1.02864, 1.04367] | 1.00209 [0.992741, 1.0045] | 1.1 | 1.00306 [1.00221, 1.00802] | 1.00002 [0.999845, 1.00018] | 1.05 | 0, 0, 1046088 | PASS |
+| tip4p18 | 48, 48 | 5, 5, 5, 5 | 1.03738 [1.03074, 1.04407] | 1.00119 [0.996692, 1.00308] | 1.1 | 1.00601 [1.0018, 1.00773] | 0.999963 [0.999921, 1.00018] | 1.05 | 0, 0, 1288888 | PASS |
+| tip4p19 | 48, 48 | 12, 12, 12, 12 | 1.03462 [1.02795, 1.04435] | 0.998372 [0.997096, 1.00963] | 1.1 | 1.00623 [1.00225, 1.00828] | 1.0001 [0.999553, 1.00017] | 1.05 | 0, 0, 1059852 | PASS |
+| tip4p20 | 48, 48 | 6, 6, 6, 6 | 1.04517 [1.0321, 1.05326] | 1.00156 [0.988075, 1.00485] | 1.1 | 1.00503 [1.00283, 1.00846] | 0.999984 [0.999906, 1.00006] | 1.05 | 0, 0, 1274852 | PASS |
+| tip4p21 | 48, 48 | 1, 1, 1, 1 | 1.03996 [1.01522, 1.04566] | 1.00045 [0.998864, 1.00609] | 1.1 | 1.0054 [1.00295, 1.00645] | 1.00005 [0.999913, 1.00018] | 1.05 | 0, 0, 1506276 | PASS |
 
 ### Trajectory differences
 
-None in complete cells. Incomplete cells were not compared.
+None. On all 29 cells and 24 seeds, both B observations and A2 match A.
 
 ### Inconclusive rows
 
-- lj98: incomplete panel (89 of 192 rows)
-- lj102: incomplete panel (0 of 192 rows)
-- lj104: incomplete panel (0 of 192 rows)
-- blj105n38: incomplete panel (0 of 192 rows)
-- blj105n55: incomplete panel (0 of 192 rows)
-- blj115n38: incomplete panel (0 of 192 rows)
-- blj115n55: incomplete panel (0 of 192 rows)
-- m55r6: incomplete panel (0 of 192 rows)
-- m55r14: incomplete panel (0 of 192 rows)
-- m80r6: incomplete panel (0 of 192 rows)
-- m80r14: incomplete panel (0 of 192 rows)
-- sc126-38: incomplete panel (0 of 192 rows)
-- sc126-55: incomplete panel (0 of 192 rows)
-- tip4p8: incomplete panel (0 of 192 rows)
-- tip4p9: incomplete panel (0 of 192 rows)
-- tip4p10: incomplete panel (0 of 192 rows)
-- tip4p11: incomplete panel (0 of 192 rows)
-- tip4p12: incomplete panel (0 of 192 rows)
-- tip4p13: incomplete panel (0 of 192 rows)
-- tip4p14: incomplete panel (0 of 192 rows)
-- tip4p15: incomplete panel (0 of 192 rows)
-- tip4p16: incomplete panel (0 of 192 rows)
-- tip4p17: incomplete panel (0 of 192 rows)
-- tip4p18: incomplete panel (0 of 192 rows)
-- tip4p19: incomplete panel (0 of 192 rows)
-- tip4p20: incomplete panel (0 of 192 rows)
-- tip4p21: incomplete panel (0 of 192 rows)
+None. Every run exited 0 with timing and RssAnon recorded.
 
 ### Internal and external peak disagreements
 
@@ -231,34 +205,34 @@ None over 2 MiB.
 
 | Seed | A for B/A | B | A for A2/A | A2 |
 | ---: | --- | --- | --- | --- |
-| 2000 | not run | not run | not run | not run |
-| 2001 | not run | not run | not run | not run |
-| 2002 | not run | not run | not run | not run |
-| 2003 | not run | not run | not run | not run |
-| 2004 | not run | not run | not run | not run |
-| 2005 | not run | not run | not run | not run |
-| 2006 | not run | not run | not run | not run |
-| 2007 | not run | not run | not run | not run |
-| 2008 | not run | not run | not run | not run |
-| 2009 | not run | not run | not run | not run |
-| 2010 | not run | not run | not run | not run |
-| 2011 | not run | not run | not run | not run |
-| 2012 | not run | not run | not run | not run |
-| 2013 | not run | not run | not run | not run |
-| 2014 | not run | not run | not run | not run |
-| 2015 | not run | not run | not run | not run |
-| 2016 | not run | not run | not run | not run |
-| 2017 | not run | not run | not run | not run |
-| 2018 | not run | not run | not run | not run |
-| 2019 | not run | not run | not run | not run |
-| 2020 | not run | not run | not run | not run |
-| 2021 | not run | not run | not run | not run |
-| 2022 | not run | not run | not run | not run |
-| 2023 | not run | not run | not run | not run |
+| 2000 | ~32 (31.4) | ~28 (27.3) | ~32 (31.4) | ~32 (31.4) |
+| 2001 | ~28 (27.4) | ~28 (27.4) | ~28 (27.4) | ~28 (27.4) |
+| 2002 | other (22.4) | other (22.4) | other (22.4) | other (22.4) |
+| 2003 | ~32 (30.9) | ~32 (30.8) | ~32 (30.9) | ~32 (30.9) |
+| 2004 | ~28 (26.7) | ~28 (26.8) | ~28 (26.7) | ~28 (26.7) |
+| 2005 | ~28 (27.4) | ~28 (27.5) | ~28 (27.4) | ~28 (27.4) |
+| 2006 | ~28 (27.5) | ~28 (27.5) | ~28 (27.5) | ~28 (27.5) |
+| 2007 | ~28 (27.3) | ~28 (27.3) | ~28 (27.3) | ~28 (27.3) |
+| 2008 | other (22.9) | other (22.9) | other (22.9) | other (23.0) |
+| 2009 | ~28 (27.0) | ~32 (31.0) | ~28 (27.0) | ~28 (27.0) |
+| 2010 | ~28 (27.0) | ~28 (27.1) | ~28 (27.0) | ~28 (27.0) |
+| 2011 | ~32 (31.4) | ~28 (27.5) | ~32 (31.4) | ~32 (31.4) |
+| 2012 | ~32 (31.4) | ~32 (31.2) | ~32 (31.4) | ~32 (31.4) |
+| 2013 | ~32 (31.3) | ~32 (31.1) | ~32 (31.3) | ~32 (31.3) |
+| 2014 | ~28 (27.2) | ~28 (27.2) | ~28 (27.2) | ~28 (27.2) |
+| 2015 | ~32 (31.2) | ~32 (31.2) | ~32 (31.2) | ~32 (31.2) |
+| 2016 | ~32 (31.2) | ~32 (31.1) | ~32 (31.2) | ~32 (31.2) |
+| 2017 | ~28 (27.7) | ~32 (31.4) | ~28 (27.7) | ~28 (27.7) |
+| 2018 | ~32 (31.0) | ~32 (30.8) | ~32 (31.0) | ~32 (31.0) |
+| 2019 | ~32 (31.5) | ~32 (30.9) | ~32 (31.5) | ~32 (31.5) |
+| 2020 | ~32 (30.9) | ~32 (31.3) | ~32 (30.9) | ~32 (30.9) |
+| 2021 | ~32 (31.7) | ~28 (27.2) | ~32 (31.7) | ~32 (31.7) |
+| 2022 | ~32 (31.1) | ~32 (31.4) | ~32 (31.1) | ~32 (31.1) |
+| 2023 | ~28 (27.4) | ~28 (27.4) | ~28 (27.4) | ~28 (27.4) |
 
 | Arm | ~28 MiB | ~32 MiB | Other |
 | --- | ---: | ---: | ---: |
-| A for B/A | 0 | 0 | 0 |
-| B | 0 | 0 | 0 |
-| A for A2/A | 0 | 0 | 0 |
-| A2 | 0 | 0 | 0 |
+| A for B/A | 10 | 12 | 2 |
+| B | 11 | 11 | 2 |
+| A for A2/A | 10 | 12 | 2 |
+| A2 | 10 | 12 | 2 |
