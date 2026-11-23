@@ -26,6 +26,7 @@ std::atomic<int> g_inside{0};
 std::atomic<int> g_max{0};
 std::atomic<int> g_charge{0};
 std::atomic<int> g_spin{0};
+std::atomic<long long> g_orbital_key{0};
 
 class StubPot : public rgpot::PotentialBase {
 public:
@@ -114,6 +115,7 @@ Created create(const void *config, std::size_t config_len) {
         throw rgpot::engine::Unsupported("orbital key refused");
       if (key == -2)
         throw std::runtime_error("orbital selection failed");
+      g_orbital_key = key;
     };
     backend->copy_orbitals = [](long long from_key, long long to_key) {
       if (from_key == -1)
@@ -140,7 +142,9 @@ RGPOT_ENGINE_API void stub_reset(void) {
   g_inside = 0;
   g_charge = 0;
   g_spin = 0;
+  g_orbital_key = 0;
 }
 RGPOT_ENGINE_API int stub_charge(void) { return g_charge.load(); }
 RGPOT_ENGINE_API int stub_spin(void) { return g_spin.load(); }
+RGPOT_ENGINE_API long long stub_orbital_key(void) { return g_orbital_key.load(); }
 }

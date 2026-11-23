@@ -53,6 +53,7 @@ struct Stub {
                           double *, long) = nullptr;
   size_t (*component_name)(const RgpotEnginePot *, long, char *,
                            size_t) = nullptr;
+  long long (*orbital_key)() = nullptr;
   int (*max_concurrent)() = nullptr;
   void (*reset)() = nullptr;
   int (*charge)() = nullptr;
@@ -99,6 +100,7 @@ Stub &stub() {
         h, "rgpot_engine_last_components");
     out.component_name =
         sym<decltype(out.component_name)>(h, "rgpot_engine_component_name");
+    out.orbital_key = sym<long long (*)()>(h, "stub_orbital_key");
     out.max_concurrent = sym<int (*)()>(h, "stub_max_concurrent");
     out.reset = sym<void (*)()>(h, "stub_reset");
     out.charge = sym<int (*)()>(h, "stub_charge");
@@ -419,18 +421,37 @@ TEST_CASE("charge, spin and thread settings reach the backend",
   s.destroy(bare);
 }
 
+TEST_CASE("an orbital key reaches the backend that keeps one per call",
+          "[engine][adapter]") {
+  Stub &s = stub();
+  RgpotEnginePot *pot = make(s, 0);
+  REQUIRE(s.select_orbitals(pot, 17) == 0);
+  REQUIRE(s.orbital_key() == 17);
+  REQUIRE(s.select_orbitals(pot, -1) == 3);
+  REQUIRE(error_of(s, pot).find("refused") != std::string::npos);
+  REQUIRE(s.orbital_key() == 17);
+  s.destroy(pot);
+
+  RgpotEnginePot *bare = make(s, 0, 1);
+  REQUIRE(s.select_orbitals(bare, 4) == 3);
+  REQUIRE(error_of(s, bare) == "backend has no orbital selection");
+  s.destroy(bare);
+}
+
 TEST_CASE("orbital hooks report success and adapter errors",
           "[engine][adapter]") {
   Stub &s = stub();
   RgpotEnginePot *pot = make(s, 0);
 
   REQUIRE(s.select_orbitals(pot, 7) == 0);
+  REQUIRE(s.orbital_key() == 7);
   REQUIRE(s.copy_orbitals(pot, 7, 8) == 0);
   REQUIRE(s.select_orbitals(nullptr, 7) == 1);
   REQUIRE(s.copy_orbitals(nullptr, 7, 8) == 1);
 
   REQUIRE(s.select_orbitals(pot, -1) == 3);
   REQUIRE(error_of(s, pot).find("refused") != std::string::npos);
+  REQUIRE(s.orbital_key() == 7);
   REQUIRE(s.copy_orbitals(pot, -1, 8) == 3);
   REQUIRE(error_of(s, pot).find("refused") != std::string::npos);
 

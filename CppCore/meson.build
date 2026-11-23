@@ -801,6 +801,21 @@ if not get_option('with_rpc_client_only')
             gnu_symbol_visibility: 'default',
             install: not meson.is_subproject(),
         )
+        _cpmd_dl = dependency('dl', required: false)
+        if not _cpmd_dl.found()
+            _cpmd_dl = meson.get_compiler('cpp').find_library('dl', required: false)
+        endif
+        cpmd_engine = shared_library(
+            'cpmd_engine',
+            [_engine_common, files('rgpot/engine/CpmdEngine.cc')],
+            dependencies: _engine_deps + [_cpmd_dl],
+            link_with: [rgpot_core],
+            link_whole: [cpmdpot],
+            cpp_args: _engine_args,
+            include_directories: _incdirs,
+            gnu_symbol_visibility: 'default',
+            install: not meson.is_subproject(),
+        )
         if has_skala
             skala_engine = shared_library(
                 'skala_engine',

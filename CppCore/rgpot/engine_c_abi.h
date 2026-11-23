@@ -37,9 +37,10 @@
  * the process across all handles of the library. A host that wants
  * parallelism from a backend that reports 1 or 2 creates one handle per
  * worker (1 only). rgpot_engine_set_num_threads,
- * rgpot_engine_set_charge_spin, rgpot_engine_set_callbacks,
- * rgpot_engine_set_cache, rgpot_engine_hint and rgpot_engine_destroy must not run concurrently with
- * a call on the same handle. rgpot_engine_last_error and
+ * rgpot_engine_set_charge_spin, rgpot_engine_select_orbitals,
+ * rgpot_engine_set_callbacks, rgpot_engine_set_cache, rgpot_engine_hint
+ * and rgpot_engine_destroy must not run concurrently with a call on the
+ * same handle. rgpot_engine_last_error and
  * rgpot_engine_model_digest may run at any time.
  * - Capability discovery is by symbol presence: entry points marked
  *   optional are probed with dlsym. An absent symbol means the engine
@@ -389,14 +390,18 @@ RGPOT_ENGINE_API int rgpot_engine_set_charge_spin(RgpotEnginePot *pot,
                                                   int charge, int spin);
 
 /**
- * Select the active orbital key for subsequent evaluations.
+ * Name the calculation the next force belongs to. A backend that keeps a
+ * converged wavefunction per key (a band image, a ring-polymer bead) parks
+ * the one it is leaving and restores the one stored under `key`. A key with
+ * nothing stored starts from the wavefunction already in hand.
  * On CPMD backends, accepting a key seeds the next SCF from the session's
  * current converged orbitals or from the orbitals stored for that key.
  * Returns 0 on success (clearing last_error), 1 when pot is NULL (invalid
  * argument, leaving last_error unchanged), 2 when the backend's
  * orbital-selection hook fails with an exception, and 3 when the backend has
  * no orbital selection or refuses key through Unsupported; codes 2 and 3
- * record the reason in last_error.
+ * record the reason in last_error. Must not run concurrently with a force
+ * on the same handle.
  */
 RGPOT_ENGINE_API int rgpot_engine_select_orbitals(RgpotEnginePot *pot,
                                                   long long key);
