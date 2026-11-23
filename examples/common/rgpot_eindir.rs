@@ -184,7 +184,7 @@ mod tests {
         unsafe { _exit(1) }
     }
 
-    fn pair_call(force: XtbForce) -> (Option<(f64, f64)>, usize, Vec<f64>) {
+    fn pair_call(force: XtbForce) -> (Result<(f64, f64), rgpot_status_t>, usize, Vec<f64>) {
         let mut worker = XtbWorker::spawn(force, reset_noop, std::ptr::null_mut());
         let mut forces = vec![0.0; 6];
         let before = scc_rejected_count();
@@ -209,10 +209,26 @@ mod tests {
             ("dead worker", engine_dies as XtbForce),
         ] {
             let (answer, counted, forces) = pair_call(force);
-            assert!(answer.is_none(), "{name} returned an energy");
+            assert!(answer.is_err(), "{name} returned an energy");
             assert_eq!(counted, 1, "{name} was not counted in scc_rejected");
             assert!(forces.iter().all(|value| value.is_nan()), "{name}");
         }
+    }
+
+    #[test]
+    fn an_unconverged_scc_is_its_own_status_and_other_failures_are_not() {
+        assert_eq!(
+            pair_call(scc_failure).0,
+            Err(rgpot_status_t::RGPOT_SCC_NOT_CONVERGED)
+        );
+        assert_eq!(
+            pair_call(engine_rejected).0,
+            Err(rgpot_status_t::RGPOT_INTERNAL_ERROR)
+        );
+        assert_eq!(
+            pair_call(engine_dies).0,
+            Err(rgpot_status_t::RGPOT_INTERNAL_ERROR)
+        );
     }
 
     #[test]
@@ -718,22 +734,27 @@ fn first_existing(cands: &[PathBuf]) -> PathBuf {
         .unwrap_or_else(|| cands[cands.len() - 1].clone())
 }
 
-/// The worker's answer, or `None` for an evaluation that gave no energy.
+/// The worker's answer, or the status of an evaluation that gave no energy.
 ///
 /// An unconverged SCC, a rejected answer and a dead worker are the same to
 /// the search: the call was charged and returned nothing, so each is counted
-/// as an SCC rejection and leaves no force behind.
+/// as an SCC rejection and leaves no force behind. Only the status differs.
+/// An unconverged SCC is `RGPOT_SCC_NOT_CONVERGED`, so a caller of rgpot can
+/// tell it from a fault; the other two are `RGPOT_INTERNAL_ERROR`.
 fn answer_or_reject(
     evaluation: Result<(f64, f64), WorkerFail>,
     scratch: &mut [f64],
     min_pair_a: f64,
-) -> Option<(f64, f64)> {
+) -> Result<(f64, f64), rgpot_status_t> {
     match evaluation {
-        Ok(answer) => Some(answer),
-        Err(_) => {
+        Ok(answer) => Ok(answer),
+        Err(failure) => {
             note_scc_rejected(min_pair_a);
             scratch.fill(f64::NAN);
-            None
+            Err(match failure {
+                WorkerFail::SccNotConverged => rgpot_status_t::RGPOT_SCC_NOT_CONVERGED,
+                WorkerFail::Dead | WorkerFail::Rejected => rgpot_status_t::RGPOT_INTERNAL_ERROR,
+            })
         }
     }
 }
@@ -792,8 +813,9 @@ unsafe extern "C" fn xtb_callback(
         kernel
             .worker
             .evaluate(n, positions, atomic_numbers, cell, &mut kernel.scratch);
-    let Some((energy, var)) = answer_or_reject(evaluation, &mut kernel.scratch, min_pair) else {
-        return rgpot_status_t::RGPOT_INTERNAL_ERROR;
+    let (energy, var) = match answer_or_reject(evaluation, &mut kernel.scratch, min_pair) {
+        Ok(answer) => answer,
+        Err(status) => return status,
     };
     out.energy = energy;
     out.variance = var;
