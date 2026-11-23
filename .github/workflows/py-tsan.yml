@@ -66,6 +66,11 @@ permissions:
 
 jobs:
   tsan:
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.ref == 'refs/heads/main'
+      || startsWith(github.ref, 'refs/tags/')
+      || contains(github.event.pull_request.labels.*.name, 'ci:full')
     name: T2 cpython_sanity ${{ matrix.target.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 120

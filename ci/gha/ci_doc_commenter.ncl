@@ -9,6 +9,7 @@ let P = S.pins in
       types = ["completed"],
     },
   },
+  concurrency = S.concurrency_cancel,
   jobs = {
     pr_comment = {
       "if" = "github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success'",

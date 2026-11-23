@@ -1,0 +1,1 @@
+Build and test workflows skip documentation-only changes. A superseded run is cancelled except on main and tags. Wheels, thread sanitizer, address and leak sanitizer, and the macOS ISA audit run on main, tags, a manual dispatch, or a pull request labeled ci:full.

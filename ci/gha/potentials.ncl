@@ -127,7 +127,7 @@ in
     pull_request = { branches = ["main", "develop"] },
     workflow_dispatch = {},
   },
-  concurrency = S.concurrency_ref "potentials",
+  concurrency = S.concurrency_cancel,
   jobs = {
     "ci-tools" = S.job_ci_tools_os_matrix [P.ubuntu],
     tight_binding = {

@@ -23,7 +23,7 @@ let P = S.pins in
       ],
     },
   },
-  concurrency = S.concurrency_ref "towncrier",
+  concurrency = S.concurrency_cancel,
   permissions = { contents = "read", "pull-requests" = "read" },
   jobs = {
     fragments = {

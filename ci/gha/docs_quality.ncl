@@ -9,7 +9,7 @@ let P = S.pins in
     pull_request = {},
     schedule = [{ cron = "15 7 * * 1" }],
   },
-  concurrency = S.concurrency_ref "docs-quality",
+  concurrency = S.concurrency_cancel,
   permissions = { contents = "read" },
   jobs = {
     snapper = {

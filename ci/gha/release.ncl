@@ -5,6 +5,7 @@ let P = S.pins in
   name = "Release",
   on = { push = { tags = ["v*"] } },
   permissions = { contents = "write" },
+  concurrency = S.concurrency_cancel,
   env = { CI_TOOLS_ARTIFACT = "ci-tools-${{ github.sha }}-Linux" },
   jobs = {
     tools = S.job_tools_linux "false" "Stage portable potctl (Linux musl + upload)",

@@ -149,9 +149,9 @@ in
   on = {
     pull_request = { paths = cosmo_paths },
     workflow_dispatch = {},
-    push = { branches = ["main"], paths = cosmo_paths },
+    push = { branches = ["main", "develop"], tags = ["*"], paths = cosmo_paths },
   },
-  concurrency = S.concurrency_ref "cosmo-potctl",
+  concurrency = S.concurrency_cancel,
   permissions = { contents = "read" },
   env = { COSMO_REF = "master" },
   jobs = {

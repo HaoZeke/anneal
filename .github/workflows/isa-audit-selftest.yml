@@ -5,23 +5,30 @@ name: ISA audit self-test
 # same workflow with uses: OmniPotentRPC/rgpot/.github/workflows/isa-audit.yml@<sha>.
 
 on:
-  # main and develop, and only when the audit or its workflow changes.
-  # pull_request stays unfiltered so a caller PR still proves the gate.
+  # A branch push runs only when the audit or its workflow changes.
+  # A pull request still runs unless the change is docs-only.
   push:
     branches:
       - main
       - develop
+    tags:
+      - '*'
     paths:
       - "ci/isa-audit/**"
       - ".github/workflows/isa-audit.yml"
       - ".github/workflows/isa-audit-selftest.yml"
       - "rgpot/isa-allow.toml"
   pull_request:
+    paths-ignore:
+      - docs/**
+      - '**/*.md'
+      - newsfragments/**
+      - LICENSE
   workflow_dispatch:
 
 concurrency:
-  group: isa-audit-selftest-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/')) }}
 
 permissions:
   contents: read

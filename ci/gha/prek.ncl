@@ -5,7 +5,7 @@ let P = S.pins in
 {
   name = "prek",
   on = S.on_main_pr_any,
-  concurrency = S.concurrency_ref "prek",
+  concurrency = S.concurrency_cancel,
   jobs = {
     prek = {
       "runs-on" = P.ubuntu,
