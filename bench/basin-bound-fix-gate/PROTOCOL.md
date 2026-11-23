@@ -157,4 +157,56 @@ chosen cell.
 
 ## Results
 
-This section is replaced from `rows.csv` by `run_gate.py summarize`.
+This section is generated from `rows.csv` by `run_gate.py summarize`.
+
+10 cells, 6 seeds, eight observations, 480 rows, 0 inconclusive. Gate verdict: **PASS**. 10 cells pass, 0 fail and 0 are inconclusive.
+
+Trajectory differences are listed below. A difference does not by
+itself fail a cell. A hit-count or call-score drop fails only when
+its one-sided p-value is below 0.05.
+
+- Hit loss, fails on: none.
+- Outside-time upper bound above 1.10, fails on: none.
+- RssAnon lower bound above its limit, fails on: none.
+
+Hits seed are seeds where both B/A replicates hit. Hits obs are the
+raw B/A observation counts. Outside is the median time outside energy
+calls per charged call. The hard outside limit is 1.10. The noise
+limit is max(1.10, A2/A upper). RssAnon fails only when its B/A lower
+bound is above max(1.10, A2/A upper). Bound counts entries to the
+merge-radius block test.
+
+| Cell | Traj B, A2 | Hits seed A, B | Hits obs A, B | Fisher p | MW p | Outside B/A [95% CI] | Noise limit | Within noise | RssAnon B/A [95% CI] | RSS limit | Bound A, A2, B | Verdict |
+| --- | --- | --- | --- | ---: | ---: | --- | ---: | --- | --- | ---: | --- | --- |
+| tip4p10 | 12, 12 | 6, 6 | 12, 12 | 1 | 0.532246 | 0.987408 [0.945758, 1.06183] | 1.13723 | 1 | 1.0071 [1.00236, 1.01109] | 1.1 | 76464, 38232, 38232 | PASS |
+| tip4p21 | 12, 12 | 0, 0 | 0, 0 | 1 | 1 | 1.01003 [0.984167, 1.02637] | 1.1 | 1 | 1.00476 [1.00392, 1.00557] | 1.1 | 56370016, 28185008, 28185008 | PASS |
+| tip4p17 | 12, 12 | 2, 2 | 4, 4 | 0.727273 | 0.538138 | 0.994997 [0.941179, 1.01825] | 1.1 | 1 | 1.00304 [1.00246, 1.0053] | 1.1 | 43951636, 21975818, 21975818 | PASS |
+| tip4p16 | 12, 12 | 1, 1 | 2, 2 | 0.772727 | 0.549185 | 0.999542 [0.972082, 1.01197] | 1.1 | 1 | 1.00256 [1.00107, 1.00456] | 1.1 | 44600108, 22300054, 22300054 | PASS |
+| tip4p13 | 12, 12 | 6, 6 | 12, 12 | 1 | 0.532246 | 1.01847 [0.975767, 1.04453] | 1.1 | 1 | 1.0023 [0.997801, 1.0039] | 1.1 | 1642200, 821100, 821100 | PASS |
+| tip4p12 | 12, 12 | 6, 6 | 12, 12 | 1 | 0.532246 | 0.997159 [0.946935, 1.0204] | 1.1 | 1 | 1.00223 [0.99696, 1.00844] | 1.1 | 410232, 205116, 205116 | PASS |
+| tip4p11 | 12, 12 | 6, 6 | 12, 12 | 1 | 0.532246 | 0.982197 [0.977895, 1.00236] | 1.1 | 1 | 0.999078 [0.99361, 1.00072] | 1.1 | 2142144, 1071072, 1071072 | PASS |
+| lj38 | 12, 12 | 6, 6 | 12, 12 | 1 | 0.532246 | 0.976908 [0.961586, 1.02313] | 1.1 | 1 | 1.00304 [0.999008, 1.00725] | 1.1 | 622424, 311212, 311212 | PASS |
+| lj75 | 12, 12 | 2, 2 | 4, 4 | 0.727273 | 0.538138 | 0.9763 [0.972718, 0.994951] | 1.1 | 1 | 1.00744 [1.00729, 1.00992] | 1.1 | 126734392, 63367196, 63367196 | PASS |
+| m80r14 | 12, 12 | 3, 3 | 6, 6 | 0.71645 | 0.534259 | 0.951445 [0.93241, 0.97866] | 1.1 | 1 | 1.01305 [1.00953, 1.01436] | 1.1 | 263138796, 131569398, 131569398 | PASS |
+
+### Trajectory differences
+
+None. On all 10 cells and 6 seeds, both B observations and A2 match A.
+
+### Inconclusive rows
+
+None. Every run exited 0 with timing and RssAnon recorded.
+
+### Internal and external peak disagreements
+
+None over 2 MiB.
+
+### What changed
+
+No timed cell and no timed seed differs. Both B replicates match the
+first A replicate on evals, charged, calls to a hit and best bits, and
+A2 matches A. The merge-radius count on B equals the count on A2. The
+A total is twice that, because A has four observations and B has two.
+The overflow arithmetic did not move a search outcome on this panel.
+The bound path ran on every arm, and these descriptors sit far below
+the magnitude where a squared gap overflows.
