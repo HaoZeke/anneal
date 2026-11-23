@@ -9,6 +9,8 @@
  */
 
 #include <algorithm>
+#include <cstdint>
+#include <optional>
 #include <sstream>
 #include <vector>
 
@@ -256,6 +258,11 @@ public:
           val *= len_to_angstrom;
     }
 
+    const std::optional<std::int64_t> orbitalKey =
+        fip.getHasOrbitalKey()
+            ? std::optional<std::int64_t>(fip.getOrbitalKey())
+            : std::nullopt;
+
     // Potential always computes in eV/angstrom.
     std::vector<double> nativeForces(numAtoms * 3, 0.0);
     rgpot::ForceInput in_native{numAtoms, nativePositions.data(),
@@ -267,7 +274,8 @@ public:
       if (m_pef) {
         try {
           auto [energy, forces, variance] =
-              m_pef->calculate(nativePositions, nativeAtomTypes, nativeBoxMatrix);
+              m_pef->calculate(nativePositions, nativeAtomTypes, nativeBoxMatrix,
+                               orbitalKey);
           rgpot::ForceOut out{};
           out.F = nativeForces.data();
           out.energy = energy;
@@ -279,6 +287,19 @@ public:
         }
       }
 #endif
+      if (orbitalKey) {
+        if (m_cpmd) {
+          m_cpmd->selectOrbitals(*orbitalKey);
+#ifdef RGPOT_HAS_CP2K
+        } else if (m_cp2k) {
+          m_cp2k->selectOrbitals(*orbitalKey);
+#endif
+        } else {
+          throw KJ_EXCEPTION(
+              FAILED,
+              "orbitalKey is supported only by CPMD and CP2K backends");
+        }
+      }
       m_potential->forceBatch(rgpot::ForceBatch{.nSystems = 1, .in = &in_native, .out = &out_native});
       return out_native;
     };

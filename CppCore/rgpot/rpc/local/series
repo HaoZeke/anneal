@@ -43,3 +43,7 @@ d2cpmd-symmetry.diff
 #
 # muller-brown.diff: MullerBrownParams and PotentialConfig.mullerBrown @21.
 muller-brown.diff
+#
+# orbital-key.diff: ForceInput.hasOrbitalKey @10 and orbitalKey @11 select
+# per-image or per-bead orbital state for CPMD and CP2K.
+orbital-key.diff

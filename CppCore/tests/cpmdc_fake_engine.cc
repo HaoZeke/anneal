@@ -29,6 +29,7 @@ struct CPMDCSession {
   bool has_orbital_key = false;
   double orbital_state = 0.0;
   std::unordered_map<long long, double> orbital_store;
+  std::unordered_map<long long, long long> orbital_generations;
 };
 
 namespace {
@@ -68,14 +69,16 @@ bool force_input_ok(const ::ForceInput::Reader &input, size_t *force_count,
   return std::isfinite(*cell_zz) && *cell_zz > 0.0;
 }
 
-std::vector<unsigned char> make_result(size_t force_count, double cell_zz) {
+std::vector<unsigned char> make_result(size_t force_count, double cell_zz,
+                                       long long orbital_generation = 0) {
   ::capnp::MallocMessageBuilder msg;
   auto result = msg.initRoot<::PotentialResult>();
   const double hartree = cpmd_stress_oracle::sessionHartree(cell_zz);
   result.setEnergy(hartree * rgpot::units::HARTREE_TO_EV);
   auto forces = result.initForces(static_cast<unsigned int>(force_count));
   for (unsigned int i = 0; i < forces.size(); ++i)
-    forces.set(i, 0.011 + 0.001 * static_cast<double>(i));
+    forces.set(i, 0.011 + 0.001 * static_cast<double>(i) +
+                      0.001 * static_cast<double>(orbital_generation));
   auto stress = result.initStress(9);
   for (unsigned int i = 0; i < 9; ++i)
     stress.set(i,
@@ -109,6 +112,7 @@ constexpr long long kNoOrbitalKey = -1000000;
 long long g_last_orbital_key = kNoOrbitalKey;
 double g_last_initial_orbital_state = -1.0;
 double g_last_final_orbital_state = -1.0;
+long long g_last_orbital_generation = 0;
 // Text returned by cpmdc_last_error. A failing select or session create
 // stores its reason, and a successful select or session create clears it,
 // so a test can tell this fake from one that ignores the call and always
@@ -340,15 +344,20 @@ CPMDCResult cpmdc_session_calculate_result(
                                          force_input_capnp_size_bytes, reader),
                         &force_count, &cell_zz))
       return fail_result("invalid fake ForceInput");
-    const auto result_bytes = make_result(force_count, cell_zz);
     g_last_initial_orbital_state = session->orbital_state;
     g_last_orbital_key =
         session->has_orbital_key ? session->orbital_key : kNoOrbitalKey;
+    g_last_orbital_generation =
+        session->has_orbital_key
+            ? ++session->orbital_generations[session->orbital_key]
+            : 0;
     session->orbital_state = cell_zz + static_cast<double>(force_count) * 1e-3;
     if (session->has_orbital_key) {
       session->orbital_store[session->orbital_key] = session->orbital_state;
     }
     g_last_final_orbital_state = session->orbital_state;
+    const auto result_bytes =
+        make_result(force_count, cell_zz, g_last_orbital_generation);
     const size_t required = result_bytes.size();
     *potential_result_capnp_size_bytes = required;
     if (potential_result_capnp == nullptr ||
@@ -433,6 +442,12 @@ RGPOT_FAKE_ONLY double cpmdc_fake_last_initial_orbital_state(void) {
 
 RGPOT_FAKE_ONLY double cpmdc_fake_last_final_orbital_state(void) {
   return g_last_final_orbital_state;
+}
+
+// Test-only generation of the selected key's wavefunction. Each key starts
+// independently at one; selecting a previous key resumes its own sequence.
+RGPOT_FAKE_ONLY long long cpmdc_fake_last_orbital_generation(void) {
+  return g_last_orbital_generation;
 }
 
 RGPOT_FAKE_ONLY const char *cpmdc_last_error(void) {

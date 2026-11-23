@@ -21,7 +21,7 @@ from pathlib import Path
 BASE = (
     'backendName = "cpmdc", backendVersion = "1.2", abiVersion = 3, '
     'available = true, operations = [energy, forces], '
-    'protocolFamily = "rgpot.potentials", protocolMajor = 1, protocolMinor = 0, '
+    'protocolFamily = "rgpot.potentials", protocolMajor = 1, protocolMinor = 1, '
     'schemaId = "0xbd1f89fa17369103", bridgeAbiMajor = 1, bridgeLayout = 1, '
     "dlpackMajor = 1, bridgeFeatures = 3"
 )

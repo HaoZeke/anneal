@@ -62,6 +62,9 @@ class RgpotRpcCalculator(Calculator):
     server_proc:
         Optional managed process this calculator stops on :meth:`close`.
         Prefer :meth:`spawn`.
+    orbital_key:
+        Optional image or bead key. ``atoms.info["rgpot_orbital_key"]``
+        overrides it for one calculation.
     """
 
     implemented_properties = ["energy", "free_energy", "forces"]
@@ -74,12 +77,14 @@ class RgpotRpcCalculator(Calculator):
         port: int = 12345,
         *,
         server_proc: subprocess.Popen[bytes] | None = None,
+        orbital_key: int | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self._host = host
         self._port = int(port)
         self._server_proc = server_proc
+        self._orbital_key = None if orbital_key is None else int(orbital_key)
         self._claim = ConnectionClaim("RgpotRpcCalculator")
 
         self._schema = _capnp().load(str(_schema_path()))
@@ -166,16 +171,27 @@ class RgpotRpcCalculator(Calculator):
         )
 
     async def _calculate_async(
-        self, positions: Any, numbers: Any, box: Any
+        self,
+        positions: Any,
+        numbers: Any,
+        box: Any,
+        orbital_key: int | None = None,
     ) -> tuple[float, np.ndarray]:
         fip = self._schema.ForceInput.new_message()
         fip.pos = np.asarray(positions, dtype=float).ravel().tolist()
         fip.atmnrs = [int(z) for z in numbers]
         fip.box = np.asarray(box, dtype=float).ravel()[:9].tolist()
+        if orbital_key is not None:
+            fip.hasOrbitalKey = True
+            fip.orbitalKey = int(orbital_key)
         result = await self._pot.calculate(fip)
         energy = float(result.result.energy)
         forces = np.array(result.result.forces, dtype=float).reshape(-1, 3)
         return energy, forces
+
+    def select_orbitals(self, key: int) -> None:
+        """Select the image or bead whose orbitals following calls use."""
+        self._orbital_key = int(key)
 
     def calculate(
         self,
@@ -192,9 +208,13 @@ class RgpotRpcCalculator(Calculator):
                 box = np.asarray(cell.array)
             else:
                 box = np.eye(3) * 100.0
+            orbital_key = frame.info.get("rgpot_orbital_key", self._orbital_key)
             energy, forces = self._loop.run_until_complete(
                 self._calculate_async(
-                    frame.get_positions(), frame.get_atomic_numbers(), box
+                    frame.get_positions(),
+                    frame.get_atomic_numbers(),
+                    box,
+                    orbital_key,
                 )
             )
             self.results["energy"] = energy

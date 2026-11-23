@@ -50,6 +50,15 @@ POT_BRIDGE_API PotClient *pot_client_init(const char *host, int32_t port);
 POT_BRIDGE_API void pot_client_free(PotClient *client);
 
 /**
+ * @brief Select the keyed orbitals used by following calculations.
+ * @param client The opaque client handle.
+ * @param key Image or bead key.
+ * @return 0 on success, non-zero when @a client is invalid.
+ */
+POT_BRIDGE_API int32_t pot_client_select_orbitals(PotClient *client,
+                                                  int64_t key);
+
+/**
  * @brief Executes a remote potential calculation.
  * @pre The @a client must be successfully initialized.
  * @param client The opaque client handle.

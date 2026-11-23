@@ -31,6 +31,7 @@ A tests build produces the stand-in engine and the server:
 #+attr_rgpot: output paths of the built engine and server
 #+begin_example
 bbdir/CppCore/libcpmdc_fake_engine.so
+bbdir/CppCore/libcpmd_engine.so
 bbdir/CppCore/potserv
 #+end_example
 
@@ -61,6 +62,39 @@ given value by more than 1e-12.
 Point =RGPOT_CPMD_ENGINE= at a =libcpmdc.so= built from the CPMD archive to
 evaluate the same file with CPMD, and leave out =--expect=.
 Read the energy the command prints.
+
+** Keep orbitals separate for images and beads
+
+CPMD sessions can retain a converged wavefunction under a signed 64-bit
+=orbital key=. Use one stable key for each NEB image, instanton image, or
+ring-polymer bead. Before evaluating through the engine C ABI, select the key:
+
+#+attr_rgpot: skip C ABI call sequence; compiled by the engine tests
+#+begin_src cpp
+rgpot_engine_select_orbitals(engine, image_index);
+rgpot_engine_force(engine, natoms, positions, atomic_numbers,
+                   forces, &energy, NULL, box, NULL, NULL);
+#+end_src
+
+Selecting a new key starts from the wavefunction currently in hand. Leaving a
+key parks its converged orbitals, and selecting that key again restores them.
+The key is session state, so call =rgpot_engine_select_orbitals= on the same
+engine handle before each image or bead evaluation.
+
+RPC carries the key on each =ForceInput= as =hasOrbitalKey= and =orbitalKey=.
+The Python RPC calculator sets those fields from either
+=orbital_key= or =atoms.info["rgpot_orbital_key"]=:
+
+#+attr_rgpot: syntax
+#+begin_src python
+calculator = RgpotRpcCalculator(port=12345, orbital_key=0)
+image.info["rgpot_orbital_key"] = image_index
+image.calc = calculator
+energy = image.get_potential_energy()
+#+end_src
+
+Call =calculator.select_orbitals(bead_index)= when one calculator is reused
+serially and the key does not live on the =Atoms= object.
 
 ** Next steps
 
