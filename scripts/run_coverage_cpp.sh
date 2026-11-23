@@ -29,8 +29,55 @@ meson setup "$BUILD" \
   --buildtype=debug
 
 meson compile -C "$BUILD"
-meson test -C "$BUILD" --print-errorlogs \
-  --timeout-multiplier "${RGPOT_COV_TIMEOUT_MULTIPLIER:-1}"
+
+# The workflow sets RGPOT_COV_TIMEOUT_MULTIPLIER once for every job that
+# runs this script. NeighbourLayerTest's registry timeout is 120s. Four
+# multiples is 480s, and a coverage run used 440s of that. One extra
+# multiple is 600s. That stays on this test: raising the shared multiplier
+# would stretch every other timeout, including ones already at 1200s.
+COV_MULT="${RGPOT_COV_TIMEOUT_MULTIPLIER:-1}"
+if [[ ! "$COV_MULT" =~ ^[0-9]+([.][0-9]+)?$ ]] || ! awk -v v="$COV_MULT" 'BEGIN { exit !(v+0 > 0) }'; then
+  echo "ERROR: RGPOT_COV_TIMEOUT_MULTIPLIER must be a positive number, got ${COV_MULT}" >&2
+  exit 1
+fi
+NEIGH_MULT="$COV_MULT"
+if [[ "$COV_MULT" =~ ^[0-9]+$ ]] && [[ "$COV_MULT" -gt 1 ]]; then
+  NEIGH_MULT=$((COV_MULT + 1))
+fi
+echo "==> meson test timeout multiplier ${COV_MULT} (NeighbourLayerTest ${NEIGH_MULT})"
+if [[ "$NEIGH_MULT" == "$COV_MULT" ]]; then
+  meson test -C "$BUILD" --print-errorlogs \
+    --timeout-multiplier "$COV_MULT"
+else
+  list_file=$(mktemp)
+  meson test -C "$BUILD" --list --no-rebuild > "$list_file"
+  rest=()
+  have_neigh=0
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    name="${line##*:}"
+    if [[ "$name" == "NeighbourLayerTest" ]]; then
+      have_neigh=1
+    else
+      rest+=("$name")
+    fi
+  done < "$list_file"
+  rm -f "$list_file"
+  status=0
+  if [[ "$have_neigh" -eq 0 || ${#rest[@]} -eq 0 ]]; then
+    meson test -C "$BUILD" --print-errorlogs \
+      --timeout-multiplier "$COV_MULT" || status=$?
+  else
+    meson test -C "$BUILD" --print-errorlogs --no-rebuild \
+      --timeout-multiplier "$COV_MULT" "${rest[@]}" || status=$?
+    echo "==> NeighbourLayerTest timeout multiplier ${NEIGH_MULT}"
+    meson test -C "$BUILD" --print-errorlogs --no-rebuild \
+      --timeout-multiplier "$NEIGH_MULT" NeighbourLayerTest || status=$?
+  fi
+  if [[ "$status" -ne 0 ]]; then
+    exit "$status"
+  fi
+fi
 
 # lcov 2 renamed the branch-coverage rc option and rejects the old name.
 # Skipping compiler-generated exception-unwind branches prevents mismatched
