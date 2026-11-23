@@ -41,11 +41,11 @@ anneal; alone when no binaries are given, over ``--systems``, and with
 ``--false-hits`` names rows, by system, code, revision and seed, whose hit
 is not the geometry's energy; the summary counts them as misses at their
 budget. ``--rescore SYSTEM ENERGY_EV`` appends both codes' hits to
-``--rescored``, over the same files, against another reference. Each
-line records stop modes, no-result rows, and separate medians for runs
-that produced a result and all rows. A legacy rescore file is left
-unchanged and new rows go to a sibling whose name ends in ``-v2``.
-No p-value is computed.
+``--rescored``, over the same files and with the same revision and
+false-hit filters, against another reference. Each line records stop
+modes, no-result rows, and separate medians for runs that produced a
+result and all rows. A legacy rescore file is left unchanged and new
+rows go to a sibling whose name ends in ``-v2``. No p-value is computed.
 Time per call skips a run that made no call.
 Anneal stops at the reference and its miss is the full budget. CREST that
 writes ``crest_best.xyz`` runs to its own end; its energy is the first
@@ -104,13 +104,11 @@ AUTOEV = 27.21138505
 # calls on six seeds each; the C10 minimum is the cumulenic ring, every
 # bond 1.285 angstrom. C20: the cage, every atom three-coordinated, from
 # one anneal run without the call floor (seed 2006 at 1e5 calls); no
-# other run of either code has reached it. Si13: anneal from a fresh SCC
-# on every call at 30000 calls, reached by seeds 3002-3005. Si20 has none
-# yet.
+# other run of either code has reached it. Si13 and Si20 have no valid
+# reference yet.
 REFERENCE = {
     "si10": -460.68373809,
     "c10": -571.32273783,
-    "si13": -599.34546694,
     "c20": -1148.85383633,
 }
 SCHEDULE_SEED = 20261114
@@ -361,6 +359,8 @@ def main() -> None:
             float(args.rescore[1]),
             revision,
             host,
+            args.anneal_revision,
+            args.false_hits,
         )
         return
     if args.summary is not None and not any((args.anneal, args.crest, args.xtb)):
@@ -504,6 +504,48 @@ def ranked_calls(runs: list[dict]) -> list[float]:
     ]
 
 
+def filter_rows(
+    table: list[dict],
+    anneal_revision: str | None,
+    false_hits: Path | None,
+) -> list[dict]:
+    """Select anneal's revision and replace named false-hit measurements."""
+    if anneal_revision is not None:
+        table = [
+            row
+            for row in table
+            if row["code"] != "anneal-general"
+            or row.get("code_revision") == anneal_revision
+        ]
+    if false_hits is None:
+        return table
+    with open(false_hits, newline="") as handle:
+        named = {
+            (row["system"], row["code"], row["code_revision"], row["seed"]): row
+            for row in csv.DictReader(handle)
+        }
+    corrected = []
+    for row in table:
+        key = (
+            row["system"],
+            row["code"],
+            row.get("code_revision", ""),
+            row["seed"],
+        )
+        false_hit = named.get(key)
+        corrected.append(
+            row
+            if false_hit is None
+            else dict(
+                row,
+                hit="false",
+                evals_to_hit=row["budget"],
+                best=false_hit["xtb_eV"],
+            )
+        )
+    return corrected
+
+
 def summarise(
     paths: list[Path],
     summary: Path,
@@ -524,26 +566,7 @@ def summarise(
         if path.is_file():
             with open(path, newline="") as handle:
                 table.extend(csv.DictReader(handle))
-    if anneal_revision is not None:
-        table = [
-            row
-            for row in table
-            if row["code"] != "anneal-general"
-            or row.get("code_revision") == anneal_revision
-        ]
-    if false_hits is not None:
-        with open(false_hits, newline="") as handle:
-            named = {
-                (row["system"], row["code"], row["code_revision"], row["seed"])
-                for row in csv.DictReader(handle)
-            }
-        table = [
-            dict(row, hit="false", evals_to_hit=row["budget"])
-            if (row["system"], row["code"], row.get("code_revision", ""), row["seed"])
-            in named
-            else row
-            for row in table
-        ]
+    table = filter_rows(table, anneal_revision, false_hits)
     date = datetime.date.today().isoformat()
     lines = []
     for system in systems or SYSTEMS:
@@ -761,6 +784,8 @@ def rescore(
     reference: float,
     revision: str,
     host: str,
+    anneal_revision: str | None = None,
+    false_hits: Path | None = None,
 ) -> None:
     """Append each code's hits against another reference.
 
@@ -775,6 +800,7 @@ def rescore(
                     row for row in csv.DictReader(handle)
                     if row["system"] == system
                 )
+    table = filter_rows(table, anneal_revision, false_hits)
     stop = REFERENCE.get(system)
     lines = []
     provenance = {

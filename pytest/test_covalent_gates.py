@@ -44,17 +44,20 @@ def verdict(capsys) -> str:
 
 
 def test_a_floor_gate_arm_short_of_a_seed_loses(tmp_path, capsys):
-    rows = [r for r in read(FLOOR_GATE_ROWS) if r["system"] == "si13"]
+    rows = [r for r in read(FLOOR_GATE_ROWS) if r["system"] == "c20"]
     rows = [r for r in rows if not (r["arm"] == "floor" and r["seed"] == "2003")]
     floor_gate.summary(argparse.Namespace(rows=write(tmp_path / "rows.csv", rows), arms=["base", "floor"]))
-    assert verdict(capsys) == "floor loses: si13 seeds"
+    assert verdict(capsys) == "floor loses: c20 seeds"
 
 
-def test_a_system_only_the_base_arm_ran_loses_the_floor_gate(tmp_path, capsys):
-    rows = [r for r in read(FLOOR_GATE_ROWS) if not (r["arm"] == "floor" and r["system"] == "c20")]
-    rows = [r for r in rows if r["system"] == "c20" or r["arm"] == "base"]
+def test_voided_si13_rows_do_not_enter_the_floor_gate(tmp_path, capsys):
+    rows = read(FLOOR_GATE_ROWS)
+    rows = [
+        r for r in rows
+        if not (r["system"] == "c20" and r["arm"] == "floor" and r["seed"] == "2003")
+    ]
     floor_gate.summary(argparse.Namespace(rows=write(tmp_path / "rows.csv", rows), arms=["base", "floor"]))
-    assert verdict(capsys) == "floor loses: si13 seeds, c20 seeds"
+    assert verdict(capsys) == "floor loses: c20 seeds"
 
 
 def test_a_floor_gate_run_without_calls_is_summarised(tmp_path, capsys):
@@ -72,8 +75,9 @@ def test_the_committed_floor_gate_loses_nowhere(capsys):
     pytest.importorskip("scipy.stats")
     floor_gate.summary(argparse.Namespace(rows=FLOOR_GATE_ROWS, arms=["base", "floor"]))
     out = capsys.readouterr().out
-    assert "si13 base: hits 12/12, median calls to hit 1896.5, SCC failures 1646/27222 (6.05%)" in out
-    assert "si13 floor: hits 12/12, median calls to hit 2206.5, SCC failures 878/30392 (2.89%)" in out
+    assert "si13" not in out
+    assert "c20 base: hits 0/12" in out
+    assert "c20 floor: hits 0/12" in out
     assert out.strip().splitlines()[-1] == "floor loses: nowhere"
 
 
@@ -97,6 +101,18 @@ def test_floor_gate_references_are_cited_and_compared_by_tolerance():
 def test_a_floor_gate_reference_without_a_source_is_refused():
     with pytest.raises(ValueError, match="sample has no reference source"):
         floor_gate.validate_reference_sources({"sample": -12.5}, {"sample": ""})
+
+
+@pytest.mark.parametrize(
+    ("references", "sources"),
+    [
+        ({"sample": -12.5}, {}),
+        ({}, {"sample": "synthetic fixture"}),
+    ],
+)
+def test_floor_gate_reference_source_key_mismatches_are_refused(references, sources):
+    with pytest.raises(ValueError, match="reference and source systems differ"):
+        floor_gate.validate_reference_sources(references, sources)
 
 
 def synthetic_rescore_rows():
@@ -173,7 +189,69 @@ def test_rescore_labels_stop_modes_and_no_results(tmp_path, monkeypatch):
         crest.rescore([source], out, "other", -1.0, "0" * 40, "")
 
 
-def test_rescore_preserves_the_legacy_file(tmp_path, monkeypatch):
+def test_arm_calls_without_a_stop_classifies_only_row_endings():
+    crest = load("gfn2_crest_no_stop", "scripts/covalent_h2h/gfn2_crest.py")
+    rows = synthetic_rescore_rows()[2:4]
+
+    calls = crest.arm_calls(rows, None)
+
+    assert "1 runs ran to their own end" in calls["stop_note"]
+    assert "1 runs stopped short of their recorded budget" in calls["stop_note"]
+    assert "stop target" not in calls["stop_note"]
+
+
+def test_arm_calls_with_all_no_results_has_empty_ran_medians():
+    crest = load("gfn2_crest_no_results", "scripts/covalent_h2h/gfn2_crest.py")
+    rows = [synthetic_rescore_rows()[1], synthetic_rescore_rows()[4]]
+
+    calls = crest.arm_calls(rows, None)
+
+    assert calls["no_result"] == "2"
+    assert calls["median_budget_ran"] == ""
+    assert calls["median_charged_ran"] == ""
+    assert "2 produced no result" in calls["stop_note"]
+
+
+def test_rescore_filters_revision_and_false_hits(tmp_path, monkeypatch):
+    crest = load("gfn2_crest_filters", "scripts/covalent_h2h/gfn2_crest.py")
+    monkeypatch.setitem(crest.REFERENCE, "sample", -10.0)
+    rows = synthetic_rescore_rows()
+    for row in rows:
+        row["code_revision"] = "keep"
+    stale = dict(rows[0], seed="3", code_revision="stale", best="-20.0")
+    source = write(tmp_path / "rows.csv", [*rows, stale])
+    false_hits = write(
+        tmp_path / "false-hits.csv",
+        [{
+            "system": "sample",
+            "code": "anneal-general",
+            "code_revision": "keep",
+            "seed": "1",
+            "recorded_eV": "-10.0",
+            "xtb_eV": "-8.0",
+            "evidence": "fixture",
+        }],
+    )
+    out = tmp_path / "rescore.csv"
+
+    crest.rescore(
+        [source],
+        out,
+        "sample",
+        -9.5,
+        "0" * 40,
+        "",
+        anneal_revision="keep",
+        false_hits=false_hits,
+    )
+
+    by_code = {row["code"]: row for row in read(out)}
+    assert (by_code["anneal-general"]["runs"], by_code["anneal-general"]["hits"]) == ("2", "0")
+    assert by_code["anneal-general"]["seeds"] == "1 2"
+    assert by_code["crest"]["runs"] == "3"
+
+
+def test_rescore_preserves_legacy_and_appends_v2_rows(tmp_path, monkeypatch):
     pytest.importorskip("scipy.stats")
     crest = load("gfn2_crest_legacy", "scripts/covalent_h2h/gfn2_crest.py")
     monkeypatch.setitem(crest.REFERENCE, "sample", -10.0)
@@ -184,14 +262,16 @@ def test_rescore_preserves_the_legacy_file(tmp_path, monkeypatch):
     before = legacy.read_bytes()
 
     crest.rescore([source], legacy, "sample", -9.5, "0" * 40, "")
+    crest.rescore([source], legacy, "sample", -9.5, "1" * 40, "")
 
     assert legacy.read_bytes() == before
     future = tmp_path / "rescore-v2.csv"
     written = read(future)
-    assert len(written) == 2
+    assert len(written) == 4
     assert list(written[0]) == crest.RESCORE_FIELDS
     assert written[0]["machine_id"]
     assert written[0]["cpu_model"]
+    assert {row["code_revision"] for row in written} == {"0" * 40, "1" * 40}
 
 
 def test_the_committed_panel_is_the_same_on_every_seed(capsys):

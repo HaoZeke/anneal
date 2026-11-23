@@ -33,9 +33,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from machine_provenance import machine_columns, require_csv_schema  # noqa: E402
 
-REFERENCE = {"si13": -599.34546694, "c20": -1148.85383633}
+REFERENCE = {"c20": -1148.85383633}
 REFERENCE_SOURCE = {
-    "si13": "scripts/covalent_h2h/gfn2_crest.py REFERENCE",
     "c20": "scripts/covalent_h2h/gfn2_crest.py REFERENCE",
 }
 
@@ -115,7 +114,10 @@ def run(args):
 
 def summary(args):
     with open(args.rows) as handle:
-        rows = list(csv.DictReader(handle))
+        rows = [
+            row for row in csv.DictReader(handle)
+            if row["system"] in REFERENCE
+        ]
     base, other = args.arms
     lost = []
     for system in sorted({r["system"] for r in rows}, reverse=True):
