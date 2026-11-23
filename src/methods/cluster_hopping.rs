@@ -1569,18 +1569,18 @@ pub fn structure_is_sane(x: ArrayView1<f64>, min_sep: f64) -> bool {
     x.iter().all(|value| value.is_finite()) && min_pair_distance(x) >= min_sep
 }
 
-/// Whether every pair clears the shortest bond its atomic numbers permit.
+/// Whether every pair clears its species-aware objective call floor.
 ///
-/// The bound comes from [`shortest_bond_length`], so it follows the existing
-/// covalent-radius table and admits multiple bonds. `absolute` remains the
-/// fallback for an unknown element.
+/// The bound is [`COVALENT_CALL_FRACTION`] of the summed covalent radii,
+/// never below `absolute`. This admits physical bonds, including O–H, while
+/// still rejecting overlaps that are too compressed for the objective.
 pub fn clears_species_sanity(x: ArrayView1<f64>, elements: &[u32], absolute: f64) -> bool {
     let n = x.len() / 3;
     x.len() == 3 * elements.len()
         && x.iter().all(|value| value.is_finite())
         && (0..n).all(|a| {
             ((a + 1)..n).all(|b| {
-                let floor = shortest_bond_length(elements[a], elements[b]).max(absolute);
+                let floor = element_call_floor(elements[a], elements[b], absolute);
                 pair_distance(x, a, b) > floor
             })
         })
@@ -2036,7 +2036,10 @@ pub fn declared_group_lost_a_bond(
 
 #[cfg(test)]
 mod call_wall_tests {
-    use super::{declared_group_lost_a_bond, inside_molecular_call_wall, molecular_call_floor};
+    use super::{
+        clears_species_sanity, declared_group_lost_a_bond, inside_molecular_call_wall,
+        molecular_call_floor,
+    };
     use ndarray::Array1;
 
     #[test]
@@ -2110,6 +2113,18 @@ mod call_wall_tests {
         let expected = (super::COVALENT_CALL_FRACTION * (0.66 + 0.31)).max(0.90);
         assert!((oh - expected).abs() < 1.0e-12);
         assert!((molecular_call_floor(7, 1, false) - 1.02).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn species_sanity_accepts_water_and_rejects_an_overlap() {
+        let water = Array1::from(vec![
+            0.0, 0.0, 0.0, 0.957, 0.0, 0.0, -0.239_012, 0.926_675, 0.0,
+        ]);
+        assert!(clears_species_sanity(water.view(), &[8, 1, 1], 0.90));
+
+        let mut overlap = water;
+        overlap[3] = 0.50;
+        assert!(!clears_species_sanity(overlap.view(), &[8, 1, 1], 0.90));
     }
 
     #[test]
@@ -11942,6 +11957,45 @@ mod tests {
     }
 
     #[test]
+    fn a_stopped_screen_does_not_record_an_overlapping_molecule() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let mut cfg = Config::for_cluster(2);
+        cfg.max_hops = Some(1);
+        cfg.screen_steps = 1;
+        cfg.relax_steps = 1;
+        cfg.return_screen = false;
+        cfg.screen_margin = f64::INFINITY;
+        cfg.call_floor = Some(0.90);
+        cfg.call_floor_elements = Some(vec![8, 1]);
+        let start = Array1::from(vec![0.0, 0.0, 0.0, 1.50, 0.0, 0.0]);
+        let overlap = Array1::from(vec![0.0, 0.0, 0.0, 0.50, 0.0, 0.0]);
+        let stop = Arc::new(AtomicBool::new(false));
+        let mut calls = 0usize;
+        let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+            assert!(ledger.charge());
+            calls += 1;
+            if calls == 1 {
+                (0.0, x.to_owned())
+            } else {
+                stop.store(true, Ordering::Relaxed);
+                (-10.0, overlap.clone())
+            }
+        };
+        let mut ledger = Ledger::with_stop(16, Arc::clone(&stop));
+        let mut rng = StdRng::seed_from_u64(49);
+
+        let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng)
+            .expect("a stopped screen returns an outcome");
+
+        assert_eq!(out.stop, Some(HopStop::CallerStop));
+        assert_eq!(out.best, 0.0);
+        assert_eq!(ledger.best, 0.0);
+        assert_eq!(out.unconverged_records, 1);
+    }
+
+    #[test]
     fn unconverged_trial_is_not_an_improvement_or_first_encounter() {
         let mut cfg = Config::for_cluster(2);
         cfg.max_hops = Some(1);
@@ -13576,9 +13630,11 @@ mod call_floor_tests {
     #[test]
     fn species_sanity_rejects_compression_but_keeps_multiple_bonds() {
         let silicon = [14, 14];
-        let compressed = Array1::from(vec![0.0, 0.0, 0.0, 1.60, 0.0, 0.0]);
+        let compressed = Array1::from(vec![0.0, 0.0, 0.0, 1.50, 0.0, 0.0]);
+        let above_floor = Array1::from(vec![0.0, 0.0, 0.0, 1.60, 0.0, 0.0]);
         let physical = Array1::from(vec![0.0, 0.0, 0.0, 2.20, 0.0, 0.0]);
         assert!(!clears_species_sanity(compressed.view(), &silicon, FLOOR));
+        assert!(clears_species_sanity(above_floor.view(), &silicon, FLOOR));
         assert!(clears_species_sanity(physical.view(), &silicon, FLOOR));
 
         let carbon = [6, 6];

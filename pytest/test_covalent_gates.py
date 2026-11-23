@@ -122,6 +122,31 @@ def test_gfn2_final_geometry_is_kept_beside_the_row(tmp_path, monkeypatch):
     assert fields["min_distance_A"] == "2.25000000"
 
 
+def test_unconverged_standalone_final_cannot_count_as_a_hit():
+    crest = load("gfn2_hit", "scripts/covalent_h2h/gfn2_crest.py")
+    row = {
+        "budget": 100_000,
+        "hit": "true",
+        "evals_to_hit": 745,
+        "standalone_scc_converged": "false",
+    }
+
+    crest.enforce_converged_hit(row)
+
+    assert row["hit"] == "false"
+    assert row["evals_to_hit"] == 100_000
+
+
+def test_gfn2_v2_rows_use_the_append_schema():
+    crest = load("gfn2_schema", "scripts/covalent_h2h/gfn2_crest.py")
+    path = ROOT / "bench" / "covalent-h2h" / "gfn2" / "rows-v2.csv"
+
+    with path.open(newline="") as handle:
+        header = next(csv.reader(handle))
+
+    assert header == crest.ROW_FIELDS + crest.PROVENANCE_FIELDS
+
+
 def test_the_committed_panel_is_the_same_on_every_seed(capsys):
     pytest.importorskip("scipy.stats")
     arm_gate.summary(argparse.Namespace(rows=PANEL_ROWS, arms=["develop", "floor"]))

@@ -3,8 +3,8 @@
 # GFN2-xTB silicon and carbon clusters, anneal's general arm against
 # CREST, one UTS namespace, hostname bench, one core (GFN2_CORE, default
 # 0), working directory under /work. Arguments go to gfn2_crest.py;
-# GFN2_CODES picks the arms. Rows and summaries are appended to rows.csv
-# and summaries.csv, never rewritten, and seeds.csv is read as history.
+# GFN2_CODES picks the arms. Rows and summaries are appended to rows-v2.csv
+# and summaries.csv, never rewritten; seeds.csv and rows.csv are history.
 # GFN2_ROWS and GFN2_SUMMARY move them off bench/covalent-h2h/gfn2. A tree
 # with uncommitted changes to the build is refused, so the revision names
 # the binary.
@@ -20,7 +20,7 @@ ENGINE=${RGPOT_XTB_ENGINE:-/work/rgpot-xtb-build/CppCore/rgpot/XTBPot/libxtb_eng
 LIB=${GFN2_LD_LIBRARY_PATH:-/work/mamba/xtb/lib}
 TARGET=${CARGO_TARGET_DIR:-/work/pin/tip}
 CODES=${GFN2_CODES:-anneal-general crest}
-ROWS=${GFN2_ROWS:-$OUT/rows.csv}
+ROWS=${GFN2_ROWS:-$OUT/rows-v2.csv}
 SUMMARY=${GFN2_SUMMARY:-$OUT/summaries.csv}
 CORE=${GFN2_CORE:-0}
 PY=${GFN2_PYTHON:-/usr/bin/python3}
@@ -54,7 +54,8 @@ cd $WORK
 exec taskset -c $CORE $PY -u $HERE/gfn2_crest.py \\
   --anneal $WORK/bin/gfn2_covalent_h2h --crest $CREST --xtb $XTB \\
   --engine $ENGINE --head-file $WORK/anneal-head \\
-  --out $WORK/runs --rows $ROWS --history $OUT/seeds.csv --summary $SUMMARY \\
+  --out $WORK/runs --rows $ROWS --history $OUT/seeds.csv $OUT/rows.csv \\
+  --summary $SUMMARY \\
   --codes $CODES "\$@"
 EOF
 chmod +x "$WORK/bin/inside.sh"

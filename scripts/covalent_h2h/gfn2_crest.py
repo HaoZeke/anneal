@@ -321,6 +321,13 @@ def record_final_geometry(
     }
 
 
+def enforce_converged_hit(row: dict) -> None:
+    """A hit must have a converged standalone SCC on its final geometry."""
+    if row["standalone_scc_converged"] != "true":
+        row["hit"] = "false"
+        row["evals_to_hit"] = row["budget"]
+
+
 def run_crest(
     crest: Path, xtb: Path, python: str, system: str, seed: int, start: Path, out: Path
 ) -> dict:
@@ -569,6 +576,7 @@ def main() -> None:
                     revision,
                 )
             )
+            enforce_converged_hit(row)
             row.update(pins, date=datetime.date.today().isoformat())
             append_rows(args.rows, ROW_FIELDS + PROVENANCE_FIELDS, [row])
             print(

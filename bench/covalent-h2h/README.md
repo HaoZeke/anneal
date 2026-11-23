@@ -763,11 +763,14 @@ for the paper is that one:
 
 `scripts/covalent_h2h/gfn2_enter_bench.sh` builds the example and runs
 both codes (`GFN2_CODES` picks them, `GFN2_CORE` the core). New rows are
-appended to `gfn2/rows.csv` with the anneal revision, the host and the
-CREST, xtb and engine sha256, and each run appends one line per system
-and code to `gfn2/summaries.csv` over `seeds.csv` and `rows.csv`, with
+appended to `gfn2/rows-v2.csv` with the anneal revision, the host, the
+retained final-geometry diagnostics and the CREST, xtb and engine
+sha256. The older `gfn2/rows.csv` remains append-only history under its
+original schema. Each run appends one line per system and code to
+`gfn2/summaries.csv` over `seeds.csv`, `rows.csv` and `rows-v2.csv`, with
 Fisher's exact test on hits and a two-sided Mann-Whitney on calls to the
-hit against anneal, a miss ranked after every hit. Neither file is rewritten, and the Snakemake rules
+hit against anneal, a miss ranked after every hit. No history file is
+rewritten, and the Snakemake rules
 `covalent_gfn2_crest` and `covalent_gfn2_crest_si10_n12` output a stamp
 under `/work`. The CREST rows were measured on `8b4a2592` from starts that
 are identical byte for byte on `bb486bfd`. On `f2a628c0` anneal takes
