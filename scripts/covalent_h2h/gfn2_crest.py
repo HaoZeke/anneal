@@ -777,6 +777,12 @@ def rescore(
                 )
     stop = REFERENCE.get(system)
     lines = []
+    provenance = {
+        "code_revision": revision,
+        "host": host,
+        **machine_columns(),
+        "date": datetime.date.today().isoformat(),
+    }
     for code in CODES:
         runs = [row for row in table if row["code"] == code]
         if not runs:
@@ -805,10 +811,7 @@ def rescore(
                     str(seed)
                     for seed in sorted(int(row["seed"]) for row in runs)
                 ),
-                "code_revision": revision,
-                "host": host,
-                **machine_columns(),
-                "date": datetime.date.today().isoformat(),
+                **provenance,
             }
         )
     if not any(line["code"] == "crest" for line in lines):
