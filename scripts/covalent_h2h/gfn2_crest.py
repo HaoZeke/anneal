@@ -502,14 +502,14 @@ def median(runs: list[dict], key: str) -> float:
 
 def per_call_ms(runs: list[dict], key: str) -> float:
     """Median time per call over the runs that made a call."""
-    return type7(
-        [
-            float(row[key]) / int(row["charged"]) * 1e3
-            for row in runs
-            if int(row["charged"])
-        ],
-        0.5,
-    )
+    samples = [
+        float(row[key]) / int(row["charged"]) * 1e3
+        for row in runs
+        if int(row["charged"])
+    ]
+    if not samples:
+        return float("nan")
+    return type7(samples, 0.5)
 
 
 def ranked_calls(runs: list[dict]) -> list[float]:
@@ -693,6 +693,8 @@ def self_test() -> None:
             raise SystemExit("minima columns")
     if abs(type7([1.0, 2.0, 3.0, 4.0], 0.5) - 2.5) > 1e-12:
         raise SystemExit("type 7")
+    if not math.isnan(per_call_ms([{"charged": "0", "pot_s": "1", "outside_s": "1"}], "pot_s")):
+        raise SystemExit("no calls")
     if two_sided_mw([5.0, 5.0], [5.0, 5.0]) != 1.0:
         raise SystemExit("tied mann-whitney")
     with tempfile.TemporaryDirectory() as scratch:
