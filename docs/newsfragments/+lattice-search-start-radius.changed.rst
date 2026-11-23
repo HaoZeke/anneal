@@ -1,7 +1,6 @@
-``lattice_search::run`` now draws starts with the same liquid-density
-radius and 0.85 preset pair floor as cluster configuration. A finite
-``min_separation`` above 0.85 scales the radius by
-``min_separation / 0.85``; a value at or below 0.85 leaves the radius
-unscaled. This changes starts for every ``min_separation`` above 0.7:
-values through 0.85 are no longer enlarged, and larger values use the
-pair floor rather than the liquid density as their length scale.
+``lattice_search::run`` now scales the radius of its random starts when
+``min_separation`` is wider than the Lennard-Jones preset pair floor of
+0.85. The radius is multiplied by ``min_separation / 0.85``, so starts
+spread out for larger separations. At or below 0.85, including the
+default 0.5, the radius is unchanged. A non-finite ``min_separation``
+also leaves it unchanged.
