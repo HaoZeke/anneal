@@ -335,10 +335,12 @@ def test_potential_calculator_refreshes_after_in_place_move():
     pts -= pts.mean(axis=0)
     pts *= 0.996 * edge / np.linalg.norm(pts[0] - pts[1])
     atoms = ase_mod.Atoms("Ar4", positions=pts.copy())
-    atoms.calc = anneal.PotentialCalculator(lj4)
-    before = float(atoms.get_potential_energy())
+    calc = anneal.PotentialCalculator(lj4)
+    atoms.calc = calc
+    before = float(calc.get_property("energy", atoms))
     atoms.positions[0, 0] += 0.35
-    moved = float(atoms.get_potential_energy())
+    assert calc.calculation_required(atoms, ["energy"]) is True
+    moved = float(calc.get_property("energy", atoms))
     fresh = atoms.copy()
     fresh.calc = anneal.PotentialCalculator(lj4)
     truth = float(fresh.get_potential_energy())
