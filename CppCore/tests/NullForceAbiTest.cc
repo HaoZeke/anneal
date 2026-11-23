@@ -370,6 +370,48 @@ rgpot_status_t callTrampoline(Pot &pot, rgpot_force_input_t *input) {
 
 } // namespace
 
+namespace rgpot {
+struct TrampolineAccess {
+  template <typename Impl>
+  static HessianVectorCallback hessianVector() {
+    return &PotentialHandle::hvp_trampoline<Impl>;
+  }
+};
+} // namespace rgpot
+
+TEST_CASE("the Hessian trampoline rejects null pointer arguments",
+          "[null-force]") {
+  using Probe = AnalyticProbe<true>;
+  const auto callback = rgpot::TrampolineAccess::hessianVector<Probe>();
+  Probe pot;
+  double pos[6] = {0.0, 0.0, 0.0, 1.5, 0.0, 0.0};
+  int species[2] = {1, 1};
+  double box[9];
+  fillCell(box);
+  rgpot_force_input_t input = rgpot_force_input_create(2, pos, species, box);
+  double direction[6] = {1.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+  double product[6] = {};
+
+  REQUIRE(callback(nullptr, &input, direction, product) ==
+          RGPOT_INVALID_PARAMETER);
+  REQUIRE(std::string(rgpot_last_error()) ==
+          "invalid parameter: potential is null");
+
+  REQUIRE(callback(&pot, &input, nullptr, product) == RGPOT_INVALID_PARAMETER);
+  REQUIRE(std::string(rgpot_last_error()) ==
+          "invalid parameter: direction or output is null");
+
+  REQUIRE(callback(&pot, &input, direction, nullptr) ==
+          RGPOT_INVALID_PARAMETER);
+  REQUIRE(std::string(rgpot_last_error()) ==
+          "invalid parameter: direction or output is null");
+  REQUIRE(pot.hessianCalls == 0);
+
+  REQUIRE(callback(&pot, &input, direction, product) == RGPOT_SUCCESS);
+  REQUIRE(pot.hessianCalls == 1);
+  rgpot_force_input_free(&input);
+}
+
 TEST_CASE("the LJ trampoline rejects null species data", "[null-force]") {
   rgpot::LJPot pot;
   double pos[6] = {0.0, 0.0, 0.0, 1.5, 0.0, 0.0};
