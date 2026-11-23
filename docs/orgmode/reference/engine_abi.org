@@ -60,7 +60,8 @@ Every library above exports
 =rgpot_engine_force_batch=, =rgpot_engine_hvp=, =rgpot_engine_abi_stamp=,
 =rgpot_engine_abi_compatible=, =rgpot_engine_name=, =rgpot_engine_version=, =rgpot_engine_model_digest=,
 =rgpot_engine_caps=,
-=rgpot_engine_last_error=, =rgpot_engine_set_num_threads=, =rgpot_engine_set_charge_spin=, =rgpot_engine_select_orbitals=,
+=rgpot_engine_last_error=, =rgpot_engine_set_num_threads=,
+=rgpot_engine_set_charge_spin=, =rgpot_engine_select_orbitals=,
 =rgpot_engine_copy_orbitals=, =rgpot_engine_last_components=,
 =rgpot_engine_component_name=, =rgpot_engine_set_cache= and
 =rgpot_engine_cache_counts=.
@@ -504,11 +505,12 @@ int rgpot_engine_select_orbitals(RgpotEnginePot *pot, long long key);
 
 - Inputs :: =pot=, a handle; =key=, the signed image or bead identifier.
 - Units :: none.
-- Outputs :: 0 on success. The next force call uses the orbitals stored for
-  =key= and parks the orbitals of the key it leaves.
-  On CPMD backends, seeding a key means choosing the next SCF initial guess from
-  the session's current converged orbitals or from the orbitals last converged
-  under that key.
+- Outputs :: 0 on success.
+  The next force call uses the orbitals stored for =key= and parks the orbitals
+  of the key it leaves.
+  On CPMD backends, seeding a key means choosing the next SCF initial guess
+  from the session's current converged orbitals or from the orbitals last
+  converged under that key.
 - Errors :: returns 1 for a null =pot= (no message).
   Returns 3 when the backend has no orbital-selection primitive, with
   =backend has no orbital selection= in =rgpot_engine_last_error=.
@@ -518,10 +520,10 @@ int rgpot_engine_select_orbitals(RgpotEnginePot *pot, long long key);
   =rgpot_engine_last_error=.
 
 Optional symbol.
-=libcpmd_engine= routes this call directly to =CPMDPot::selectOrbitals=; it
-does not keep a second orbital table.
-The RPC equivalent sets =ForceInput.hasOrbitalKey= and
-=ForceInput.orbitalKey= on every keyed calculation.
+=libcpmd_engine= routes this call directly to =CPMDPot::selectOrbitals=; it does
+not keep a second orbital table.
+The RPC equivalent sets =ForceInput.hasOrbitalKey= and =ForceInput.orbitalKey=
+on every keyed calculation.
 Must not run concurrently with another call on the same handle.
 
 *** =rgpot_engine_copy_orbitals=

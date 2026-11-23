@@ -648,8 +648,8 @@ void select_orbitals(std::int64_t key);
 - Inputs :: =key=, a signed image or bead identifier.
 - Units :: none.
 - Outputs :: none; following =calculate= calls carry the key.
-- Errors :: throws =rgpot::Error= when
-  =rgpot_rpc_client_select_orbitals= returns a non-success status.
+- Errors :: throws =rgpot::Error= when =rgpot_rpc_client_select_orbitals=
+  returns a non-success status.
 
 ** CppCore/rgpot/Potential.hpp: rgpot::PotentialBase
 

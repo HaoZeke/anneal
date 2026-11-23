@@ -803,7 +803,10 @@ if not get_option('with_rpc_client_only')
         )
         _cpmd_dl = dependency('dl', required: false)
         if not _cpmd_dl.found()
-            _cpmd_dl = meson.get_compiler('cpp').find_library('dl', required: false)
+            _cpmd_dl = meson.get_compiler('cpp').find_library(
+                'dl',
+                required: false,
+            )
         endif
         cpmd_engine = shared_library(
             'cpmd_engine',

@@ -66,8 +66,9 @@ Read the energy the command prints.
 ** Keep orbitals separate for images and beads
 
 CPMD sessions can retain a converged wavefunction under a signed 64-bit
-=orbital key=. Use one stable key for each NEB image, instanton image, or
-ring-polymer bead. Before evaluating through the engine C ABI, select the key:
+=orbital key=.
+Use one stable key for each NEB image, instanton image, or ring-polymer bead.
+Before evaluating through the engine C ABI, select the key:
 
 #+attr_rgpot: skip C ABI call sequence; compiled by the engine tests
 #+begin_src cpp
@@ -76,8 +77,9 @@ rgpot_engine_force(engine, natoms, positions, atomic_numbers,
                    forces, &energy, NULL, box, NULL, NULL);
 #+end_src
 
-Selecting a new key starts from the wavefunction currently in hand. Leaving a
-key parks its converged orbitals, and selecting that key again restores them.
+Selecting a new key starts from the wavefunction currently in hand.
+Leaving a key parks its converged orbitals, and selecting that key again
+restores them.
 The key is session state, so call =rgpot_engine_select_orbitals= on the same
 engine handle before each image or bead evaluation.
 
