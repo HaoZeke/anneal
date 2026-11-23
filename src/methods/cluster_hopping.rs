@@ -3656,7 +3656,8 @@ fn rigid_step_scale(scale: f64, accepted: usize, trials: usize) -> f64 {
 mod rigid_step_tests {
     use super::cycles::tests::{bond_sets, tadpole};
     use super::{
-        Config, HopStop, Ledger, MoveLibrary, Outcome, RIGID_CAGE_WINDOWS, rigid_step_scale, run,
+        Config, HopStop, Ledger, MoveLibrary, Outcome, RIGID_CAGE_WINDOWS, RigidPathDiag,
+        rigid_step_scale, run,
     };
     use ndarray::{Array1, ArrayView1};
     use rand::SeedableRng;
@@ -3955,6 +3956,87 @@ mod rigid_step_tests {
             .expect("a rigid search reports its counts");
         assert!(diag.shell > 0, "the shell walk never ran: {diag:?}");
         assert!(diag.recorded > 0, "no auxiliary quench was kept: {diag:?}");
+    }
+
+    #[test]
+    fn a_rigid_search_stopped_during_opening_quench_keeps_rigid_path() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let n = 4;
+        let mut cfg = Config::recommended_tip4p(n);
+        cfg.relax_steps = 1;
+        cfg.rigid_body_geometry = None;
+        let start = tetra_centres();
+
+        // Stopped before the opening quench begins.
+        let mut stopped_before = Ledger::with_stop(16, Arc::new(AtomicBool::new(true)));
+        let mut relax = |ledger: &mut Ledger, _x: ArrayView1<f64>, _steps: usize| {
+            let _ = ledger.charge();
+            (-1.0, start.clone())
+        };
+        let mut rng = StdRng::seed_from_u64(11);
+        let out_before = run(
+            &cfg,
+            start.view(),
+            &mut stopped_before,
+            &mut relax,
+            &mut rng,
+        )
+        .expect("caller stop is not a refused start");
+        assert_eq!(out_before.stop, Some(HopStop::CallerStop));
+        assert_eq!(out_before.rigid_path, Some(RigidPathDiag::default()));
+
+        // Stopped inside a refused opening quench, even with prior thread-local activity.
+        assert!(stalled_rigid_search().rigid_path.is_some());
+        let flag = Arc::new(AtomicBool::new(false));
+        let mut refused_relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+            assert!(ledger.charge());
+            flag.store(true, Ordering::Relaxed);
+            (f64::NAN, x.to_owned())
+        };
+        let mut stopped_inside = Ledger::with_stop(16, Arc::clone(&flag));
+        let out_inside = run(
+            &cfg,
+            start.view(),
+            &mut stopped_inside,
+            &mut refused_relax,
+            &mut rng,
+        )
+        .expect("caller stop inside refused start returns outcome");
+        assert_eq!(out_inside.stop, Some(HopStop::CallerStop));
+        assert_eq!(out_inside.rigid_path, Some(RigidPathDiag::default()));
+
+        // Stopped at the opening quench by a 1-call budget or immediate target hit.
+        let mut tiny_budget = Ledger::new(1);
+        let out_budget =
+            run(&cfg, start.view(), &mut tiny_budget, &mut relax, &mut rng).expect("valid start");
+        assert_eq!(out_budget.stop, Some(HopStop::Budget));
+        assert_eq!(out_budget.hops, 0);
+        assert_eq!(out_budget.rigid_path, Some(RigidPathDiag::default()));
+
+        let mut target_ledger = Ledger::new(16);
+        target_ledger.stop_below(0.0);
+        let out_target =
+            run(&cfg, start.view(), &mut target_ledger, &mut relax, &mut rng).expect("valid start");
+        assert_eq!(out_target.stop, Some(HopStop::Target));
+        assert_eq!(out_target.hops, 0);
+        assert_eq!(out_target.rigid_path, Some(RigidPathDiag::default()));
+
+        // Atomic search stopped during the opening quench keeps rigid_path = None.
+        let atomic = Config::for_cluster(n);
+        let atomic_start = Array1::zeros(3 * n);
+        let mut atomic_stop = Ledger::with_stop(16, Arc::new(AtomicBool::new(true)));
+        let out_atomic = run(
+            &atomic,
+            atomic_start.view(),
+            &mut atomic_stop,
+            &mut relax,
+            &mut rng,
+        )
+        .expect("caller stop is not a refused start");
+        assert_eq!(out_atomic.stop, Some(HopStop::CallerStop));
+        assert!(out_atomic.rigid_path.is_none());
     }
 
     #[test]
@@ -4950,7 +5032,11 @@ fn improvements_from_encounters(
 ///
 /// The ledger may hold no finite minimum yet. The search still returns
 /// that record, and it does not draw another start.
-fn outcome_when_start_was_stopped(ledger: &Ledger, x: &Array1<f64>, energy: f64) -> Outcome {
+fn outcome_when_start_was_stopped<const RIGID: bool>(
+    ledger: &Ledger,
+    x: &Array1<f64>,
+    energy: f64,
+) -> Outcome {
     Outcome {
         best: ledger.best,
         best_state: ledger.best_state.clone(),
@@ -4958,6 +5044,7 @@ fn outcome_when_start_was_stopped(ledger: &Ledger, x: &Array1<f64>, energy: f64)
         final_energy: energy,
         charged: ledger.spent(),
         stop: Some(HopStop::CallerStop),
+        rigid_path: RIGID.then(rigid_diag_take),
         ..Outcome::default()
     }
 }
@@ -5106,6 +5193,9 @@ where
     // Chosen once, with the copy of this search. An atomic library never
     // evaluates the rigid arms and never keeps a second incumbent.
     ledger.set_chain_is_separate(RIGID);
+    if RIGID {
+        rigid_diag_reset();
+    }
     let _caller_stop = ledger.bind_stop();
     let mut floored = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
         relax_off_call_floor(cfg, &mut *relax, led, x, steps)
@@ -5186,7 +5276,7 @@ where
         // `remaining` is also zero when the caller has stopped. That is a
         // finished search, not a potential that refused every start.
         if ledger.stopped() {
-            return Ok(outcome_when_start_was_stopped(ledger, &x, e));
+            return Ok(outcome_when_start_was_stopped::<RIGID>(ledger, &x, e));
         }
         if attempt > 0 {
             if ledger.remaining() == 0 {
@@ -5212,7 +5302,7 @@ where
         x = quenched.1;
         if !e.is_finite() {
             if ledger.stopped() {
-                return Ok(outcome_when_start_was_stopped(ledger, &x, e));
+                return Ok(outcome_when_start_was_stopped::<RIGID>(ledger, &x, e));
             }
             if attempt + 1 == attempts {
                 return Err(SearchError::NoFiniteStart {
@@ -5236,7 +5326,7 @@ where
     }
     if !e.is_finite() {
         if ledger.stopped() {
-            return Ok(outcome_when_start_was_stopped(ledger, &x, e));
+            return Ok(outcome_when_start_was_stopped::<RIGID>(ledger, &x, e));
         }
         return Err(SearchError::NoFiniteStart { attempts });
     }
@@ -5916,7 +6006,6 @@ where
     let mut cage_walked = false;
     let mut archive_walked = false;
     let mut stall_book = if RIGID {
-        rigid_diag_reset();
         Some(Box::new(RigidStallBook {
             archive_best_seen: ledger.walker_best(),
             charged_at_archive_best: ledger.spent(),

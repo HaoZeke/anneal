@@ -2248,7 +2248,7 @@ where
     use crate::bank_rpc::BankClient;
     use crate::bias::BasinBias;
     use crate::diversity::DiversityAnnealer;
-    use crate::methods::cluster_hopping::{ClusterFingerprint, run_with_bias};
+    use crate::methods::cluster_hopping::{ClusterFingerprint, RigidPathDiag, run_with_bias};
     use rand::Rng;
 
     let mut stats = RelaxStats::default();
@@ -2305,6 +2305,10 @@ where
     let mut catalog_best = f64::INFINITY;
     let mut catalog_size = 0usize;
     let mut stall = 0u32;
+    let mut rigid_path = cfg
+        .move_library
+        .is_rigid_body()
+        .then(RigidPathDiag::default);
     while ledger.remaining() > 0 {
         let progress = 1.0 - ledger.remaining() as f64 / total.max(1) as f64;
         let pull = adopt_bank || slices == 0 || slices.is_multiple_of(sync_every);
@@ -2484,6 +2488,15 @@ where
         screened_out += out.screened_out;
         returned += out.returned;
         slices += 1;
+        if let (Some(total), Some(slice_diag)) = (&mut rigid_path, out.rigid_path) {
+            total.shell += slice_diag.shell;
+            total.archive += slice_diag.archive;
+            total.recorded += slice_diag.recorded;
+            total.withhold_nonfinite += slice_diag.withhold_nonfinite;
+            total.withhold_insane += slice_diag.withhold_insane;
+            total.withhold_overlap += slice_diag.withhold_overlap;
+            total.withhold_gradient += slice_diag.withhold_gradient;
+        }
         for (h, c, b, e) in out.improvements {
             if improvements.len() >= 512 {
                 break;
@@ -2525,6 +2538,7 @@ where
         returned,
         charged: ledger.spent(),
         improvements,
+        rigid_path,
         ..Outcome::default()
     };
     Ok(finish_search(
