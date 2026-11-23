@@ -5,32 +5,30 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 from pathlib import Path
-import subprocess
 import sys
-import tempfile
 import types
 
-import capnp
 import numpy as np
 
 ROOT = Path(__file__).parents[1]
-SCHEMA_DIR = tempfile.TemporaryDirectory()
-SCHEMA_PATH = Path(SCHEMA_DIR.name) / "Potentials.capnp"
-subprocess.run(
-    [
-        sys.executable,
-        str(ROOT / "CppCore/rgpot/rpc/schema_ledger.py"),
-        "apply",
-        "--root",
-        str(ROOT),
-        "--schema",
-        str(ROOT / "CppCore/rgpot/rpc/Potentials.capnp"),
-        "--out",
-        str(SCHEMA_PATH),
-    ],
-    check=True,
-)
-SCHEMA = capnp.load(str(SCHEMA_PATH))
+
+
+class ForceInputMessage:
+    hasOrbitalKey = False
+    orbitalKey = 0
+
+
+class ForceInputFactory:
+    @staticmethod
+    def new_message() -> ForceInputMessage:
+        return ForceInputMessage()
+
+
+class Schema:
+    ForceInput = ForceInputFactory
+
+
+SCHEMA = Schema()
 
 
 def _rpc_calculator_class():
