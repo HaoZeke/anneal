@@ -571,7 +571,7 @@ pub const RGPOT_VERSION: &str = "3.5.1";
 ///
 /// The registry crate stays [`RGPOT_VERSION`]. The calculator that reuses
 /// an SCC wavefunction is this engine, not the crate.
-pub const RGPOT_XTB_ENGINE_REV: &str = "8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e";
+pub const RGPOT_XTB_ENGINE_REV: &str = "3aa8f9caf87dce22a5e1d74f4a06c9779d0c2212";
 
 /// eindir-core checksum in `Cargo.lock`. The crate is registry 0.6.0.
 pub const EINDIR_REV: &str = "e330e3abad9c1a597b144d40eb4b07ab3511d79f7d2cdbbcb37a44662f974db0";
@@ -1535,7 +1535,7 @@ mod water_hexamer_tests {
         assert!(lock.contains(EINDIR_REV));
         assert_eq!(
             RGPOT_XTB_ENGINE_REV,
-            "8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e"
+            "3aa8f9caf87dce22a5e1d74f4a06c9779d0c2212"
         );
         assert_eq!(RGPOT_XTB_ENGINE_REV.len(), 40);
         assert_eq!(PBE_DISPERSION, "none named");
