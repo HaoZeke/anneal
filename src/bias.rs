@@ -377,6 +377,137 @@ mod tests {
         }
     }
 
+    /// A custom metric has no ball tree. The walk must reject on the key
+    /// before asking for a distance, then stop at the newest centre inside
+    /// the radius.
+    #[test]
+    fn a_custom_metric_stops_at_the_newest_in_radius_hit() {
+        struct CountingShape {
+            calls: Arc<AtomicUsize>,
+        }
+        impl BasinMetric for CountingShape {
+            fn distance(&self, a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                EuclideanMetric.distance(a, b)
+            }
+
+            fn distance_bounded(&self, a: ArrayView1<f64>, b: ArrayView1<f64>, _bound: f64) -> f64 {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                EuclideanMetric.distance(a, b)
+            }
+
+            fn key(&self, v: ArrayView1<f64>) -> Option<f64> {
+                v.first().copied()
+            }
+        }
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut index = BasinIndex::new(Raw, 0.5).with_metric(Box::new(CountingShape {
+            calls: Arc::clone(&calls),
+        }));
+        // 0 is the closest. 1 is inside the radius and newer. 2 is inside
+        // the key window and outside the radius. 3 is the newest and the
+        // key alone puts it outside.
+        index.push(array![0.0, 0.0]);
+        index.push(array![0.2, 0.0]);
+        index.push(array![0.4, 0.4]);
+        index.push(array![9.0, 0.0]);
+        assert!(index.tree.is_none(), "a custom metric keeps no tree");
+        calls.store(0, Ordering::SeqCst);
+        assert_eq!(index.lookup(array![0.0, 0.0].view()), Some(1));
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "the key skip and the early stop leave two distances"
+        );
+        calls.store(0, Ordering::SeqCst);
+        assert_eq!(index.lookup(array![0.2, 0.0].view()), Some(2));
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "the newest centre inside the radius is the only distance"
+        );
+    }
+
+    #[test]
+    fn the_metric_tree_matches_linear_newest_first_lookup() {
+        fn axis(dim: usize, head: f64) -> Array1<f64> {
+            let mut value = vec![0.0; dim];
+            value[0] = head;
+            Array1::from(value)
+        }
+
+        let radius = 0.5;
+        let dim = 8;
+        let mut index = BasinIndex::new(Raw, radius).with_metric(Box::new(EuclideanNoKey));
+        let mut centres = Vec::new();
+        for head in [0.0, -radius, radius, 2.0] {
+            let centre = axis(dim, head);
+            centres.push(centre.clone());
+            index.push(centre);
+        }
+        assert!(
+            index.tree.is_some(),
+            "a keyless Euclidean metric keeps the tree"
+        );
+        // From the origin, index 0 is interior, 1 and 2 sit on the radius,
+        // and 3 is outside. The newer boundary centre wins.
+        let origin = axis(dim, 0.0);
+        assert_eq!(
+            EuclideanMetric.distance(centres[2].view(), origin.view()),
+            radius
+        );
+        assert_eq!(index.lookup(origin.view()), Some(2));
+        assert_eq!(
+            index.lookup(origin.view()),
+            exhaustive_scan(&centres, origin.view(), radius)
+        );
+        // Both boundary centres are exactly one radius from the origin, so
+        // the same query is a tie. A query on the far boundary of the newer
+        // centre still accepts that centre and refuses the older one.
+        let outside = axis(dim, radius + radius);
+        assert_eq!(
+            EuclideanMetric.distance(centres[2].view(), outside.view()),
+            radius
+        );
+        assert!(EuclideanMetric.distance(centres[0].view(), outside.view()) > radius);
+        assert_eq!(index.lookup(outside.view()), Some(2));
+        assert_eq!(
+            index.lookup(outside.view()),
+            exhaustive_scan(&centres, outside.view(), radius)
+        );
+
+        let mut state = 0x5A17_u64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / (1u64 << 53) as f64
+        };
+        for dim in [8usize, 48] {
+            for radius in [0.2, 0.5, 1.5] {
+                let centres: Vec<Array1<f64>> = (0..40)
+                    .map(|_| Array1::from((0..dim).map(|_| next() * 2.0 - 1.0).collect::<Vec<_>>()))
+                    .collect();
+                let mut index = BasinIndex::new(Raw, radius).with_metric(Box::new(EuclideanNoKey));
+                for centre in &centres {
+                    index.push(centre.clone());
+                }
+                assert!(index.tree.is_some());
+                let mut queries = centres.clone();
+                queries.push(axis(dim, 0.0));
+                queries.push(axis(dim, radius));
+                for query in &queries {
+                    assert_eq!(
+                        index.lookup(query.view()),
+                        exhaustive_scan(&centres, query.view(), radius),
+                        "dim {dim} radius {radius}"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn a_capped_index_reuses_the_latest_seat() {
         let mut index = BasinIndex::new(Raw, 0.1).with_cap(2);
@@ -936,64 +1067,43 @@ impl<F: Fingerprint> BasinIndex<F> {
         false
     }
 
-    /// Index of the nearest registered basin within `merge_radius`.
+    /// Index of the newest registered basin within `merge_radius`.
     ///
-    /// Most recently added first, returning the first centre inside the radius
-    /// rather than scanning for the nearest.
+    /// The answer is the first centre inside the radius when centres are
+    /// read newest first, rather than the nearest centre.
     ///
-    /// Both parts matter once the metric costs anything. A chain revisits the
-    /// basin it is already in far more often than any other, measured at
-    /// roughly nineteen proposals in twenty near a deep minimum, so the recent
-    /// end is where the answer almost always is. And a merge radius asks
-    /// whether any centre is within it, not which is closest, so the scan can
-    /// stop at the first hit.
+    /// A chain revisits the basin it is already in far more often than any
+    /// other, measured at roughly nineteen proposals in twenty near a deep
+    /// minimum, so the recent end is where the answer almost always is. A
+    /// merge radius asks whether any centre is within it, so the linear
+    /// walk stops at the first hit.
     ///
-    /// With Euclidean distance the exhaustive scan was free and the
-    /// distinction did not show. With a shape distance at milliseconds per
-    /// comparison it is the difference between one call and one per basin, and
-    /// the exhaustive version did not finish an LJ38 run.
+    /// With Euclidean distance an exhaustive scan was cheap. A shape
+    /// distance costs milliseconds per comparison, and the full shape scan
+    /// did not finish an LJ38 run.
     ///
-    /// For a metric whose [`BasinMetric::is_euclidean`] is true, a centre is
-    /// skipped without reading its descriptor when the sums over 32-entry
-    /// blocks already put it outside the radius. That bound allows for the
-    /// rounding of the sums, so the answer is the one the plain walk gives.
-    ///
-    /// When the metric also supplies a key, the walk itself is newest
-    /// first and forms a distance only for a centre the key, the blocks
-    /// and the suffix all keep. The ball tree stays for a Euclidean
-    /// metric with no key: there the pivot distance is the only bound.
+    /// A metric with no ball tree, including a custom shape distance, walks
+    /// newest first. The key, the block sums and the suffix run before any
+    /// distance, and the first centre inside the radius is the answer. A
+    /// Euclidean metric that publishes a key uses that same walk. A
+    /// Euclidean metric with no key keeps the ball tree: the pivot distance
+    /// is its bound, and the same filters then run on the centres the tree
+    /// returns.
     pub fn lookup(&self, d: ArrayView1<f64>) -> Option<usize> {
-        if self.metric.is_euclidean() && self.keys.iter().any(Option::is_some) {
+        let Some(tree) = &self.tree else {
             return self.lookup_keyed(d);
-        }
+        };
         let dk = self.metric.key(d);
         let bounded = self.metric.is_euclidean() && aggregate_rounding_is_small(d.len());
         let mut blocks: Option<BlockSums> = None;
         let mut candidates = Vec::new();
-        if let Some(tree) = &self.tree {
-            tree.collect_candidates(
-                self.metric.as_ref(),
-                &self.centres,
-                d,
-                self.merge_radius,
-                &mut candidates,
-            );
-        } else {
-            candidates.extend(
-                self.centres
-                    .iter()
-                    .enumerate()
-                    .rev()
-                    .filter(|(_, centre)| centre.len() == d.len())
-                    .map(|(i, centre)| {
-                        (
-                            i,
-                            self.metric
-                                .distance_bounded(centre.view(), d, self.merge_radius),
-                        )
-                    }),
-            );
-        }
+        tree.collect_candidates(
+            self.metric.as_ref(),
+            &self.centres,
+            d,
+            self.merge_radius,
+            &mut candidates,
+        );
         candidates.sort_unstable_by_key(|(index, _)| std::cmp::Reverse(*index));
         for (i, distance) in candidates {
             if self.centre_inside(i, d, dk, bounded, &mut blocks, distance) {
@@ -1005,6 +1115,11 @@ impl<F: Fingerprint> BasinIndex<F> {
 
     /// Newest centre the key, the block bound and the suffix all keep,
     /// and whose bounded distance lies inside the radius.
+    ///
+    /// Every metric that does not keep a ball tree uses this walk: a
+    /// Euclidean metric that publishes a key, and a custom metric. The
+    /// filters run before the distance, and the scan returns at the first
+    /// hit.
     fn lookup_keyed(&self, d: ArrayView1<f64>) -> Option<usize> {
         let dk = self.metric.key(d);
         let bounded = self.metric.is_euclidean() && aggregate_rounding_is_small(d.len());
