@@ -2949,14 +2949,14 @@ fn claim_observed_basis_probe(
     cfg: &Config,
     ledger: &Ledger,
     evidence: usize,
-    basin: usize,
+    basin: impl FnOnce() -> usize,
     seen: &mut std::collections::HashSet<usize>,
 ) -> bool {
     !cfg.move_library.is_rigid_body()
         && cfg.active_region.is_none()
         && cfg.frozen.is_none()
         && ledger.remaining() >= evidence
-        && seen.insert(basin)
+        && seen.insert(basin())
 }
 
 /// Each rung's temperature as a multiple of the one a single chain would hop
@@ -9249,52 +9249,51 @@ where
                 directed_leave,
                 ledger.best_state.as_ref(),
             );
-            if directed_leave && hop_room(hops) {
-                let source_basin = *here.get_or_insert_with(|| identity.basin_of(x.view()));
-                if claim_observed_basis_probe(
+            if directed_leave
+                && hop_room(hops)
+                && claim_observed_basis_probe(
                     cfg,
                     ledger,
                     basis_evidence,
-                    source_basin,
+                    || *here.get_or_insert_with(|| identity.basin_of(x.view())),
                     &mut observed_basis_seen,
-                ) && let Some(candidate) =
-                    crate::lattice::observed_basis_candidate(x.view(), true)
-                {
-                    let mut side_ledger = Ledger::new(ledger.remaining());
-                    side_ledger.stop = ledger.stop.clone();
-                    let (basis_energy, basis_state) =
-                        relax(&mut side_ledger, candidate.view(), cfg.relax_steps);
-                    let sane = !basis_state.is_empty()
-                        && quench_is_sane(cfg, basis_energy, basis_state.view());
-                    let required = grad.is_some();
-                    let gradient = if sane {
-                        grad.as_deref_mut().and_then(|evaluate| {
-                            evaluate(&mut side_ledger, basis_state.view()).filter(|values| {
-                                answer_gradient_ok(cfg, values.view(), basis_state.len())
-                            })
+                )
+                && let Some(candidate) = crate::lattice::observed_basis_candidate(x.view(), true)
+            {
+                let mut side_ledger = Ledger::new(ledger.remaining());
+                side_ledger.stop = ledger.stop.clone();
+                let (basis_energy, basis_state) =
+                    relax(&mut side_ledger, candidate.view(), cfg.relax_steps);
+                let sane = !basis_state.is_empty()
+                    && quench_is_sane(cfg, basis_energy, basis_state.view());
+                let required = grad.is_some();
+                let gradient = if sane {
+                    grad.as_deref_mut().and_then(|evaluate| {
+                        evaluate(&mut side_ledger, basis_state.view()).filter(|values| {
+                            answer_gradient_ok(cfg, values.view(), basis_state.len())
                         })
-                    } else {
-                        None
-                    };
-                    let recordable = sane && (!required || gradient.is_some());
-                    if !recordable {
-                        unconverged_records += 1;
-                    }
-                    let side_spent = side_ledger.spent();
-                    ledger.budget = ledger.budget.saturating_sub(side_spent);
-                    observed_basis_spent = observed_basis_spent.saturating_add(side_spent);
-                    if recordable && ledger.below_target(basis_energy) {
-                        ledger.budget = ledger.budget.saturating_add(observed_basis_spent);
-                        ledger.spent = ledger.spent.saturating_add(observed_basis_spent);
-                        observed_basis_spent = 0;
-                        ledger.record(basis_energy, basis_state.view());
-                    } else if recordable
-                        && observed_basis_best
-                            .as_ref()
-                            .is_none_or(|(energy, _)| basis_energy < *energy)
-                    {
-                        observed_basis_best = Some((basis_energy, basis_state));
-                    }
+                    })
+                } else {
+                    None
+                };
+                let recordable = sane && (!required || gradient.is_some());
+                if !recordable {
+                    unconverged_records += 1;
+                }
+                let side_spent = side_ledger.spent();
+                ledger.budget = ledger.budget.saturating_sub(side_spent);
+                observed_basis_spent = observed_basis_spent.saturating_add(side_spent);
+                if recordable && ledger.below_target(basis_energy) {
+                    ledger.budget = ledger.budget.saturating_add(observed_basis_spent);
+                    ledger.spent = ledger.spent.saturating_add(observed_basis_spent);
+                    observed_basis_spent = 0;
+                    ledger.record(basis_energy, basis_state.view());
+                } else if recordable
+                    && observed_basis_best
+                        .as_ref()
+                        .is_none_or(|(energy, _)| basis_energy < *energy)
+                {
+                    observed_basis_best = Some((basis_energy, basis_state));
                 }
             }
             if stall_outcome.is_none()
@@ -10613,9 +10612,27 @@ mod tests {
         let cfg = Config::recommended(6);
         let ledger = Ledger::new(20);
         let mut seen = std::collections::HashSet::new();
-        assert!(claim_observed_basis_probe(&cfg, &ledger, 10, 7, &mut seen));
-        assert!(!claim_observed_basis_probe(&cfg, &ledger, 10, 7, &mut seen));
-        assert!(claim_observed_basis_probe(&cfg, &ledger, 10, 8, &mut seen));
+        assert!(claim_observed_basis_probe(
+            &cfg,
+            &ledger,
+            10,
+            || 7,
+            &mut seen
+        ));
+        assert!(!claim_observed_basis_probe(
+            &cfg,
+            &ledger,
+            10,
+            || 7,
+            &mut seen
+        ));
+        assert!(claim_observed_basis_probe(
+            &cfg,
+            &ledger,
+            10,
+            || 8,
+            &mut seen
+        ));
     }
 
     #[test]
@@ -10624,7 +10641,22 @@ mod tests {
         let mut ledger = Ledger::new(20);
         assert!(ledger.charge_many(11));
         let mut seen = std::collections::HashSet::new();
-        assert!(!claim_observed_basis_probe(&cfg, &ledger, 10, 7, &mut seen));
+        let basin_calls = std::cell::Cell::new(0);
+        assert!(!claim_observed_basis_probe(
+            &cfg,
+            &ledger,
+            10,
+            || {
+                basin_calls.set(basin_calls.get() + 1);
+                7
+            },
+            &mut seen
+        ));
+        assert_eq!(
+            basin_calls.get(),
+            0,
+            "a rejected probe must skip basin identity"
+        );
         assert!(seen.is_empty(), "a deferred basin must remain eligible");
     }
 
@@ -10635,19 +10667,31 @@ mod tests {
         let rigid =
             Config::recommended(6).with_rigid_bodies(crate::potentials::gmin_water_geometry());
         assert!(!claim_observed_basis_probe(
-            &rigid, &ledger, 10, 1, &mut seen
+            &rigid,
+            &ledger,
+            10,
+            || 1,
+            &mut seen
         ));
 
         let mut frozen = Config::recommended(6);
         frozen.frozen = Some(vec![false; 6]);
         assert!(!claim_observed_basis_probe(
-            &frozen, &ledger, 10, 2, &mut seen
+            &frozen,
+            &ledger,
+            10,
+            || 2,
+            &mut seen
         ));
 
         let mut active = Config::recommended(6);
         active.active_region = Some((vec![0], 0));
         assert!(!claim_observed_basis_probe(
-            &active, &ledger, 10, 3, &mut seen
+            &active,
+            &ledger,
+            10,
+            || 3,
+            &mut seen
         ));
         assert!(seen.is_empty());
     }

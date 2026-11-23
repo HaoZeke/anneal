@@ -40,7 +40,7 @@
 use crate::structure::Template;
 use ndarray::{Array1, ArrayView1};
 use rand::Rng;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::f64::consts::PI;
 
 /// Where the local order to grow comes from.
@@ -592,8 +592,11 @@ fn four_point_frames(n: usize) -> usize {
 
 fn candidate_from_basis(basis: &[[f64; 3]; 3], centre: [f64; 3], n: usize) -> Option<Array1<f64>> {
     let mut sites = vec![[0; 3]];
+    let mut radii = vec![distance2(&lattice_point([0; 3], basis), &centre)];
     let mut occupied = HashSet::from([[0; 3]]);
-    let mut frontier: HashSet<[i32; 3]> = lattice_neighbours([0; 3]).collect();
+    let mut frontier: HashMap<[i32; 3], f64> = lattice_neighbours([0; 3])
+        .map(|site| (site, distance2(&lattice_point(site, basis), &centre)))
+        .collect();
     // The finished body holds `C(n, 4)` distinct 4-point frames. The cloud
     // stops at that many sites: another site is not a new frame the body can
     // name, and a flat basis would otherwise keep the frontier moving without
@@ -606,49 +609,51 @@ fn candidate_from_basis(basis: &[[f64; 3]; 3], centre: [f64; 3], n: usize) -> Op
             .count()
             < n
     {
-        let Some(next) = frontier.iter().copied().min_by(|a, b| {
-            distance2(&lattice_point(*a, basis), &centre)
-                .total_cmp(&distance2(&lattice_point(*b, basis), &centre))
-                .then_with(|| a.cmp(b))
-        }) else {
+        let Some((next, radius)) = frontier
+            .iter()
+            .min_by(|(a, radius_a), (b, radius_b)| {
+                radius_a.total_cmp(radius_b).then_with(|| a.cmp(b))
+            })
+            .map(|(&site, &radius)| (site, radius))
+        else {
             break;
         };
         frontier.remove(&next);
         occupied.insert(next);
         for neighbour in lattice_neighbours(next) {
             if !occupied.contains(&neighbour) {
-                frontier.insert(neighbour);
+                frontier
+                    .entry(neighbour)
+                    .or_insert_with(|| distance2(&lattice_point(neighbour, basis), &centre));
             }
         }
         sites.push(next);
+        radii.push(radius);
     }
     // The frame count was reached before n sites existed, so there is no
     // further site to add and no body to peel.
     if sites.len() < n {
         return None;
     }
-    let radii: Vec<f64> = sites
-        .iter()
-        .map(|&site| distance2(&lattice_point(site, basis), &centre))
-        .collect();
     let mut alive = occupied;
     while alive.len() > n {
         let worst = sites
             .iter()
             .enumerate()
             .filter(|(_, site)| alive.contains(*site))
-            .min_by(|(i, a), (j, b)| {
-                let coordination = |site| {
-                    lattice_neighbours(site)
-                        .filter(|neighbour| alive.contains(neighbour))
-                        .count()
-                };
-                coordination(**a)
-                    .cmp(&coordination(**b))
+            .map(|(index, site)| {
+                let coordination = lattice_neighbours(*site)
+                    .filter(|neighbour| alive.contains(neighbour))
+                    .count();
+                (index, site, coordination)
+            })
+            .min_by(|(i, a, coordination_a), (j, b, coordination_b)| {
+                coordination_a
+                    .cmp(coordination_b)
                     .then_with(|| radii[*j].total_cmp(&radii[*i]))
                     .then_with(|| a.cmp(b))
             })
-            .map(|(_, site)| *site)
+            .map(|(_, site, _)| *site)
             .expect("a live site remains while peeling");
         alive.remove(&worst);
     }
@@ -830,6 +835,92 @@ mod tests {
             }
         }
         x
+    }
+
+    fn reference_candidate_from_basis(
+        basis: &[[f64; 3]; 3],
+        centre: [f64; 3],
+        n: usize,
+    ) -> Option<Array1<f64>> {
+        let mut sites = vec![[0; 3]];
+        let mut occupied = HashSet::from([[0; 3]]);
+        let mut frontier: HashSet<[i32; 3]> = lattice_neighbours([0; 3]).collect();
+        let frames = four_point_frames(n);
+        while sites.len() < frames
+            && sites
+                .iter()
+                .filter(|&&site| lattice_neighbours(site).all(|other| occupied.contains(&other)))
+                .count()
+                < n
+        {
+            let next = frontier.iter().copied().min_by(|a, b| {
+                distance2(&lattice_point(*a, basis), &centre)
+                    .total_cmp(&distance2(&lattice_point(*b, basis), &centre))
+                    .then_with(|| a.cmp(b))
+            })?;
+            frontier.remove(&next);
+            occupied.insert(next);
+            for neighbour in lattice_neighbours(next) {
+                if !occupied.contains(&neighbour) {
+                    frontier.insert(neighbour);
+                }
+            }
+            sites.push(next);
+        }
+        if sites.len() < n {
+            return None;
+        }
+        let radii: Vec<f64> = sites
+            .iter()
+            .map(|&site| distance2(&lattice_point(site, basis), &centre))
+            .collect();
+        let mut alive = occupied;
+        while alive.len() > n {
+            let worst = sites
+                .iter()
+                .enumerate()
+                .filter(|(_, site)| alive.contains(*site))
+                .min_by(|(i, a), (j, b)| {
+                    let coordination = |site| {
+                        lattice_neighbours(site)
+                            .filter(|neighbour| alive.contains(neighbour))
+                            .count()
+                    };
+                    coordination(**a)
+                        .cmp(&coordination(**b))
+                        .then_with(|| radii[*j].total_cmp(&radii[*i]))
+                        .then_with(|| a.cmp(b))
+                })
+                .map(|(_, site)| *site)?;
+            alive.remove(&worst);
+        }
+        let mut out = Array1::zeros(3 * n);
+        for (i, site) in sites
+            .into_iter()
+            .filter(|site| alive.contains(site))
+            .enumerate()
+        {
+            let point = lattice_point(site, basis);
+            for axis in 0..3 {
+                out[3 * i + axis] = point[axis];
+            }
+        }
+        Some(out)
+    }
+
+    #[test]
+    fn cached_lattice_cloud_matches_the_direct_construction() {
+        let basis = [
+            [1.0, 0.0, 0.0],
+            [0.5, 3.0_f64.sqrt() / 2.0, 0.0],
+            [0.5, 3.0_f64.sqrt() / 6.0, (2.0_f64 / 3.0).sqrt()],
+        ];
+        for (centre, n) in [([0.0, 0.0, 0.0], 8), ([0.37, -0.21, 0.14], 13)] {
+            assert_eq!(
+                candidate_from_basis(&basis, centre, n),
+                reference_candidate_from_basis(&basis, centre, n)
+            );
+        }
     }
 
     /// Every source has to produce exactly the requested count, or the move
