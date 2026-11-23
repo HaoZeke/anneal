@@ -129,7 +129,7 @@ pub unsafe extern "C" fn rgpot_potential_calculate(
 /// # Safety
 ///
 /// `input` must be a non-null `rgpot_force_input_t`.
-unsafe fn force_input_defect(input: *const rgpot_force_input_t) -> Option<&'static str> {
+pub(crate) unsafe fn force_input_defect(input: *const rgpot_force_input_t) -> Option<&'static str> {
     let input = unsafe { &*input };
     if input.positions.is_null() {
         return Some("invalid parameter: positions is null");
