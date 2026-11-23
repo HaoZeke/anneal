@@ -15,6 +15,7 @@ on:
       - ".github/scripts/rgpot_reduced_build.sh"
       - "third_party/vesin/**"
       - "CppCore/rgpot/fortran/**"
+      - "CppCore/rgpot/rpc/**"
       - "CppCore/rgpot/PotHelpers.hpp"
       - "CppCore/rgpot/PotentialCache.hpp"
       - "CppCore/rgpot/PotentialCache.cc"
@@ -32,6 +33,7 @@ on:
       - ".github/scripts/rgpot_reduced_build.sh"
       - "third_party/vesin/**"
       - "CppCore/rgpot/fortran/**"
+      - "CppCore/rgpot/rpc/**"
       - "CppCore/rgpot/PotHelpers.hpp"
       - "CppCore/rgpot/PotentialCache.hpp"
       - "CppCore/rgpot/PotentialCache.cc"
@@ -59,6 +61,7 @@ jobs:
       python: '["3.13t","3.14t","3.15t"]'
       apt-packages: gfortran g++ pkg-config
       setup-script: .github/scripts/rgpot_reduced_build.sh
+      pytest-args: '-m "not rpc"'
 
   rgpot-tsan:
     uses: ./.github/workflows/py-tsan.yml
@@ -69,6 +72,7 @@ jobs:
       extras: ase
       apt-packages: gfortran git libjpeg-dev zlib1g-dev
       setup-script: .github/scripts/rgpot_reduced_build.sh
+      pytest-args: '-m "not rpc"'
       images: '[{"name":"3.13t","image":"ubuntu:24.04@sha256:f610ab94648195aa356059f5b41d6085c9d4d903c072430cdd1af7bdb646106b","build_numpy":"true","bootstrap":"3.13.12"},{"name":"3.14t","image":"ghcr.io/nascheme/numpy-tsan:3.14t@sha256:f6dd658f1a155be35e27b182cac97c2a77c4b2d62bacb81753beaba725978149","build_numpy":"false","bootstrap":""}]'
 
   rgpot-typing:
@@ -93,14 +97,14 @@ jobs:
         run: |
           set -euo pipefail
           bash ci/gha/apt-install.sh gfortran g++ pkg-config ninja-build meson \
-            python3-dev python3-venv libopenblas-dev
+            python3-dev python3-venv libopenblas-dev capnproto libcapnp-dev
       - name: Reduced-feature build and pytest
         run: |
           set -euo pipefail
           python3 -m venv /tmp/rgpot-ci
           /tmp/rgpot-ci/bin/pip install -U pip
           /tmp/rgpot-ci/bin/pip install 'nanobind==3.1.0' 'numpy' 'ase>=3.23' \
-            pytest pytest-timeout hypothesis
+            pycapnp pytest pytest-timeout hypothesis
           site=$(/tmp/rgpot-ci/bin/python -c 'import site; print(site.getsitepackages()[0])')
           export PYTHONPATH="${site}:${PWD}/tests/python"
           meson setup /tmp/rgpot-ci-build \
@@ -111,7 +115,7 @@ jobs:
             -Dwith_eam_table=true \
             -Dwith_fortran_pots=enabled \
             -Dwith_metatomic=false \
-            -Dwith_rpc=false \
+            -Dwith_rpc=true \
             -Dwith_tests=false \
             -Dwith_examples=false \
             -Dwith_dftd3=false \
@@ -125,6 +129,8 @@ jobs:
             --buildtype=release
           meson compile -C /tmp/rgpot-ci-build
           meson install -C /tmp/rgpot-ci-build --skip-subprojects
+          export RGPOT_POTSERV_BIN=/tmp/rgpot-ci-build/CppCore/potserv
+          export REQUIRE_RPC=1
           /tmp/rgpot-ci/bin/python -m pytest -q tests/python \
             tests/test_rgpot_d2.py tests/test_rgpot_d4.py \
             tests/test_rgpot_sumpot.py \

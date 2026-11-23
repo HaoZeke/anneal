@@ -507,7 +507,7 @@ int runServer(int argc, char *argv[]
                  "MullerBrown, ModifiedMullerBrown, LEPS-HH2, LEPS-HCl2, "
                  "LEPS-FH2, Composite, D2, D2Cpmd"
 #ifdef RGPOT_HAS_FORTRAN_POTS
-              << ", CuH2"
+              << ", CuH2, EAMAl"
 #endif
 #ifdef RGPOT_HAS_IPI
               << ", IPI:unix:<path>, IPI:tcp:<host>:<port>"
@@ -570,6 +570,9 @@ int runServer(int argc, char *argv[]
   if (pot_type == "CuH2") {
     std::cout << "Loading CuH2 potential..." << std::endl;
     potential_to_use = std::make_unique<rgpot::fortranpots::CuH2Pot>();
+  } else if (pot_type == "EAMAl") {
+    std::cout << "Loading EAMAl potential..." << std::endl;
+    potential_to_use = std::make_unique<rgpot::fortranpots::EAMAlPot>();
   } else
 #endif // RGPOT_HAS_FORTRAN_POTS
       if (pot_type == "LJ") {

@@ -45,6 +45,11 @@ on:
         required: false
         type: string
         default: '["3.14t","3.15t"]'
+      pytest-args:
+        description: Extra arguments appended to the pytest invocation.
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -130,10 +135,14 @@ jobs:
       - name: T1 pytest-run-parallel
         shell: bash
         working-directory: ${{ inputs.package-dir }}
+        env:
+          PYTEST_ARGS: ${{ inputs.pytest-args }}
         run: |
           set -euo pipefail
+          mapfile -t extra_args < <(python -c 'import os, shlex; [print(p) for p in shlex.split(os.environ.get("PYTEST_ARGS", ""))]')
           python -m pytest "${{ inputs.test-path }}" \
             --parallel-threads=auto \
             --iterations=${{ inputs.iterations }} \
+            "${extra_args[@]}" \
             --timeout=180 \
             -o faulthandler_timeout=120
