@@ -1,4 +1,5 @@
 #![warn(missing_docs)]
+#![cfg_attr(doc, deny(missing_docs))]
 // Fixed-axis tensor contractions are written with index notation so each loop
 // follows the corresponding equation and preserves its bounds visibly.
 #![allow(clippy::needless_range_loop)]
@@ -60,7 +61,6 @@ pub mod accept;
 pub mod ace;
 /// Stan-style windowed adaptation: `trait Adapter<T, S>`.
 pub mod adapter;
-/// Cost-augmenting bias operators (well-tempered metadynamics, etc.).
 /// Proposal allocation and the budget-window temperature law.
 pub mod allocate;
 /// Dense minimum-cost bipartite assignment.
@@ -197,7 +197,6 @@ pub mod nng_rpc;
 pub mod noise_accept;
 /// Packing mutates: twin a dense plane, or close orbits on a new basin.
 pub mod packing;
-/// The pure-Rust SA driver loop.
 /// Multi-step paths between minima, where one hop cannot cross.
 pub mod path;
 /// Durable readcon-db snapshots of exact minimum--saddle networks.
