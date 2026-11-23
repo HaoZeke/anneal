@@ -25,6 +25,8 @@
 //! and [`crate::movekernel::Symmetrise`] do, and which of them pays at a given
 //! stage is decided online rather than fixed.
 
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+
 use ndarray::{Array1, ArrayView1};
 use rand::Rng;
 use rand::SeedableRng;
@@ -580,16 +582,93 @@ impl HopStop {
     }
 }
 
+/// Budget shared by a ledger and the [`TailHold`] guards taken from it.
+///
+/// The guard cannot borrow the ledger: a search keeps using the ledger
+/// while the hold is alive. The account is the part both can reach. Drop
+/// returns calls through it, and the ledger reads the same budget.
+///
+/// Guards are `Send` and drop on any thread, so the two counters change
+/// together under one lock. Each of hide, restore and grant reads the
+/// counters, does arithmetic and writes them back. Run as separate atomic
+/// loads and stores, concurrent drops overwrite one another and leave calls
+/// hidden for good. The critical sections are a few integer operations that
+/// cannot panic, so a poisoned lock still holds consistent counters.
+#[derive(Debug)]
+struct TailAccount {
+    counts: Mutex<TailCounts>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TailCounts {
+    budget: usize,
+    held: usize,
+}
+
+impl TailAccount {
+    fn new(budget: usize) -> Self {
+        Self {
+            counts: Mutex::new(TailCounts { budget, held: 0 }),
+        }
+    }
+
+    fn counts(&self) -> MutexGuard<'_, TailCounts> {
+        self.counts.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn budget(&self) -> usize {
+        self.counts().budget
+    }
+
+    #[cfg(test)]
+    fn held(&self) -> usize {
+        self.counts().held
+    }
+
+    fn grant(&self, extra: usize) {
+        let mut counts = self.counts();
+        counts.budget = counts.budget.saturating_add(extra);
+    }
+
+    /// Hide up to `reserve` calls of the room left after `spent`, and return
+    /// how many were hidden. A reserve larger than the room is cut to it.
+    fn hide(&self, reserve: usize, spent: usize) -> usize {
+        let mut counts = self.counts();
+        let room = counts.budget.saturating_sub(spent);
+        let hidden = reserve.min(room);
+        counts.budget -= hidden;
+        counts.held = counts.held.saturating_add(hidden);
+        hidden
+    }
+
+    /// Put `calls` back, and no more than the account still records as held.
+    fn restore(&self, calls: usize) -> usize {
+        if calls == 0 {
+            return 0;
+        }
+        let mut counts = self.counts();
+        let credit = calls.min(counts.held);
+        counts.held -= credit;
+        counts.budget = counts.budget.saturating_add(credit);
+        credit
+    }
+}
+
 /// Calls hidden from a hop by [`Ledger::hold_tail`], owned by the caller
 /// that held them.
 ///
-/// Only a ledger builds one, and it can be neither copied nor cloned, so a
-/// caller can restore only the calls it held. [`Ledger::release_tail`] empties
-/// it: a second release of the same hold restores nothing.
+/// The hold is a guard. While it is alive those calls stay out of the hop.
+/// Dropping it puts back whatever it still keeps, so an early return or an
+/// error cannot leave them hidden. [`Ledger::release_tail`] puts them back
+/// early and leaves the guard empty: a second release restores nothing, and
+/// the later drop does not credit those calls again. Only a ledger builds
+/// one, and it can be neither copied nor cloned. Releasing it on another
+/// ledger restores nothing and leaves the guard intact, so its own drop
+/// still returns the calls to the ledger that hid them.
 #[derive(Debug)]
-#[must_use = "held calls stay hidden from the hop until the hold is released"]
+#[must_use = "dropping the hold returns its calls; keep it bound while they should stay hidden"]
 pub struct TailHold {
-    ledger: u64,
+    account: Arc<TailAccount>,
     calls: usize,
 }
 
@@ -598,12 +677,24 @@ impl TailHold {
     pub fn calls(&self) -> usize {
         self.calls
     }
+
+    /// Return the calls this hold still keeps. A second call returns zero.
+    fn restore(&mut self) -> usize {
+        let calls = std::mem::take(&mut self.calls);
+        self.account.restore(calls)
+    }
+}
+
+impl Drop for TailHold {
+    fn drop(&mut self) {
+        self.restore();
+    }
 }
 
 /// Charged objective-work ledger with optional per-relaxation evidence.
 pub struct Ledger {
-    id: u64,
-    budget: usize,
+    /// Visible budget, and the calls [`TailHold`] guards currently hide.
+    account: Arc<TailAccount>,
     spent: usize,
     /// Fractional debt accumulated by partial-system evaluations, settled
     /// into whole charged units as it crosses one.
@@ -633,8 +724,6 @@ pub struct Ledger {
     answers: crate::methods::stall_archive::StallArchive,
     /// Calls the final polish charged after the hop returned.
     answer_polish_calls: usize,
-    /// Calls hidden from the hop by [`Ledger::hold_tail`].
-    held_tail: usize,
     /// Charged count and energy each time [`Ledger::record`] lowered the incumbent.
     ///
     /// The count is [`Ledger::spent`] at that call, before any later relaxation.
@@ -670,10 +759,8 @@ impl Drop for DiagnosticQuench<'_> {
 impl Ledger {
     /// Creates a ledger with `budget` charged evaluations.
     pub fn new(budget: usize) -> Self {
-        static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         Self {
-            id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-            budget,
+            account: Arc::new(TailAccount::new(budget)),
             spent: 0,
             fract: 0.0,
             best: f64::INFINITY,
@@ -690,7 +777,6 @@ impl Ledger {
             answer_limit: 0,
             answers: crate::methods::stall_archive::StallArchive::default(),
             answer_polish_calls: 0,
-            held_tail: 0,
             encounters: Vec::new(),
         }
     }
@@ -717,31 +803,36 @@ impl Ledger {
     /// Hide `reserve` calls from the hop so a final polish can spend them.
     ///
     /// A reserve larger than the room left is cut to that room. The returned
-    /// [`TailHold`] is the caller's claim on exactly the calls hidden;
-    /// [`Ledger::release_tail`] puts them back.
+    /// [`TailHold`] keeps exactly those calls hidden until it is dropped or
+    /// passed to [`Ledger::release_tail`]. Both put the same calls back.
+    /// Release leaves the hold empty, so the later drop does not put them
+    /// back a second time.
     pub fn hold_tail(&mut self, reserve: usize) -> TailHold {
-        let room = self.budget.saturating_sub(self.spent);
-        let reserve = reserve.min(room);
-        self.budget -= reserve;
-        self.held_tail = self.held_tail.saturating_add(reserve);
+        let hidden = self.account.hide(reserve, self.spent);
         TailHold {
-            ledger: self.id,
-            calls: reserve,
+            account: Arc::clone(&self.account),
+            calls: hidden,
         }
     }
 
     /// Restore the calls `hold` keeps hidden and return how many came back.
     ///
     /// Other holds are untouched. A hold already released, or one taken from
-    /// another ledger, restores nothing.
+    /// another ledger, restores nothing. A real release empties the hold, so
+    /// dropping it afterwards does not credit the ledger again. A foreign
+    /// ledger leaves the hold intact; dropping it still returns the calls to
+    /// the ledger that hid them.
     pub fn release_tail(&mut self, hold: &mut TailHold) -> usize {
-        if hold.ledger != self.id {
+        if !Arc::ptr_eq(&self.account, &hold.account) {
             return 0;
         }
-        let released = std::mem::take(&mut hold.calls).min(self.held_tail);
-        self.budget = self.budget.saturating_add(released);
-        self.held_tail -= released;
-        released
+        hold.restore()
+    }
+
+    /// Calls hidden from the hop by live [`TailHold`] guards.
+    #[cfg(test)]
+    fn held_tail(&self) -> usize {
+        self.account.held()
     }
 
     /// Charged calls spent tightening recorded answers after the hop.
@@ -858,7 +949,7 @@ impl Ledger {
 
     /// Charges one unit, returning `false` when the budget is gone.
     pub fn charge(&mut self) -> bool {
-        if self.spent >= self.budget || self.stopped() {
+        if self.spent >= self.budget() || self.stopped() {
             return false;
         }
         self.spent += 1;
@@ -882,7 +973,7 @@ impl Ledger {
             return false;
         }
         if !(frac > 0.0) || !frac.is_finite() {
-            return self.spent < self.budget;
+            return self.spent < self.budget();
         }
         self.fract += frac;
         while self.fract >= 1.0 {
@@ -891,7 +982,7 @@ impl Ledger {
                 return false;
             }
         }
-        !self.stopped() && self.spent < self.budget
+        !self.stopped() && self.spent < self.budget()
     }
 
     /// Charges `n` units at once, returning `false` when the budget ran out
@@ -1028,12 +1119,12 @@ impl Ledger {
     /// Those calls are still counted in [`Ledger::spent`]. A default search
     /// does not grant anything.
     pub fn grant(&mut self, extra: usize) {
-        self.budget = self.budget.saturating_add(extra);
+        self.account.grant(extra);
     }
 
     /// Charged evaluations the ledger was created with.
     pub fn budget(&self) -> usize {
-        self.budget
+        self.account.budget()
     }
 
     /// Charged evaluations remaining.
@@ -1041,7 +1132,7 @@ impl Ledger {
         if self.stopped() {
             return 0;
         }
-        self.budget.saturating_sub(self.spent)
+        self.budget().saturating_sub(self.spent)
     }
 
     /// Charged evaluations spent.
@@ -10362,12 +10453,12 @@ mod tests {
         assert_eq!(polish.calls(), 8);
         let mut fork = ledger.hold_tail(24);
         assert_eq!(fork.calls(), 24);
-        assert_eq!(ledger.held_tail, 32);
+        assert_eq!(ledger.held_tail(), 32);
         assert_eq!(ledger.release_tail(&mut fork), 24);
-        assert_eq!(ledger.held_tail, 8, "the molecular reserve was released");
+        assert_eq!(ledger.held_tail(), 8, "the molecular reserve was released");
         assert_eq!(ledger.budget(), 92);
         assert_eq!(ledger.release_tail(&mut polish), 8);
-        assert_eq!(ledger.held_tail, 0);
+        assert_eq!(ledger.held_tail(), 0);
         assert_eq!(ledger.budget(), 100);
 
         let mut short = Ledger::new(5);
@@ -10390,7 +10481,7 @@ mod tests {
             "a second release restored calls"
         );
         assert_eq!(
-            ledger.held_tail,
+            ledger.held_tail(),
             polish.calls(),
             "the second release took the molecular reserve"
         );
@@ -10404,12 +10495,253 @@ mod tests {
         let mut mine_held = mine.hold_tail(10);
         let mut yours_held = yours.hold_tail(10);
         assert_eq!(mine.release_tail(&mut yours_held), 0);
-        assert_eq!(mine.held_tail, 10);
+        assert_eq!(mine.held_tail(), 10);
         assert_eq!(yours_held.calls(), 10, "a foreign release emptied the hold");
         assert_eq!(yours.release_tail(&mut yours_held), 10);
         assert_eq!(mine.release_tail(&mut mine_held), 10);
         assert_eq!(mine.budget(), 50);
         assert_eq!(yours.budget(), 50);
+    }
+
+    #[test]
+    fn dropping_an_unreleased_hold_restores_the_budget() {
+        let mut ledger = Ledger::new(100);
+        let hold = ledger.hold_tail(8);
+        assert_eq!(hold.calls(), 8);
+        assert_eq!(ledger.budget(), 92);
+        assert_eq!(ledger.held_tail(), 8);
+        drop(hold);
+        assert_eq!(ledger.budget(), 100);
+        assert_eq!(ledger.held_tail(), 0);
+
+        let mut short = Ledger::new(5);
+        {
+            let cut = short.hold_tail(9);
+            assert_eq!(cut.calls(), 5);
+            assert_eq!(short.budget(), 0);
+        }
+        assert_eq!(short.budget(), 5, "dropping the cut reserve left it hidden");
+        assert_eq!(short.held_tail(), 0);
+    }
+
+    #[test]
+    fn an_early_return_drops_the_hold_and_restores_the_budget() {
+        fn leave_early(ledger: &mut Ledger) -> usize {
+            let hold = ledger.hold_tail(8);
+            let hidden = ledger.budget();
+            if hidden + hold.calls() == 100 {
+                return hidden;
+            }
+            0
+        }
+
+        let mut ledger = Ledger::new(100);
+        assert_eq!(leave_early(&mut ledger), 92);
+        assert_eq!(ledger.budget(), 100);
+        assert_eq!(ledger.held_tail(), 0);
+        assert_eq!(ledger.spent(), 0);
+    }
+
+    #[test]
+    fn an_error_return_drops_the_hold_and_restores_the_budget() {
+        fn refuse_while_held(hidden: usize, kept: usize) -> Result<(), &'static str> {
+            if hidden + kept == 100 {
+                Err("closed")
+            } else {
+                Ok(())
+            }
+        }
+
+        fn fail_closed(ledger: &mut Ledger) -> Result<usize, &'static str> {
+            let hold = ledger.hold_tail(8);
+            refuse_while_held(ledger.budget(), hold.calls())?;
+            Ok(ledger.remaining())
+        }
+
+        let mut ledger = Ledger::new(100);
+        assert!(ledger.charge());
+        assert_eq!(fail_closed(&mut ledger), Err("closed"));
+        assert_eq!(ledger.budget(), 100);
+        assert_eq!(ledger.held_tail(), 0);
+        assert_eq!(ledger.spent(), 1);
+        assert_eq!(ledger.remaining(), 99);
+    }
+
+    #[test]
+    fn releasing_a_hold_then_dropping_it_does_not_credit_twice() {
+        let mut ledger = Ledger::new(100);
+        let mut polish = ledger.hold_tail(8);
+        let fork = ledger.hold_tail(24);
+        assert_eq!(ledger.budget(), 68);
+        assert_eq!(ledger.release_tail(&mut polish), 8);
+        assert_eq!(polish.calls(), 0);
+        drop(polish);
+        assert_eq!(ledger.budget(), 76);
+        assert_eq!(ledger.held_tail(), 24);
+        assert_eq!(fork.calls(), 24);
+        drop(fork);
+        assert_eq!(ledger.budget(), 100);
+        assert_eq!(ledger.held_tail(), 0);
+
+        let mut again = Ledger::new(100);
+        let mut hold = again.hold_tail(8);
+        assert_eq!(again.release_tail(&mut hold), 8);
+        assert_eq!(again.release_tail(&mut hold), 0);
+        drop(hold);
+        assert_eq!(again.budget(), 100);
+        assert_eq!(again.held_tail(), 0);
+    }
+
+    #[test]
+    fn dropping_a_fork_tail_keeps_the_molecular_reserve() {
+        let mut ledger = Ledger::new(100);
+        let polish = ledger.hold_tail(8);
+        let fork = ledger.hold_tail(24);
+        assert_eq!(ledger.budget(), 68);
+        assert_eq!(ledger.held_tail(), 32);
+        drop(fork);
+        assert_eq!(polish.calls(), 8);
+        assert_eq!(ledger.budget(), 92);
+        assert_eq!(ledger.held_tail(), 8);
+        drop(polish);
+        assert_eq!(ledger.budget(), 100);
+        assert_eq!(ledger.held_tail(), 0);
+    }
+
+    #[test]
+    fn dropping_a_foreign_hold_restores_only_its_own_ledger() {
+        let mut mine = Ledger::new(50);
+        let mut yours = Ledger::new(50);
+        let mine_held = mine.hold_tail(10);
+        let mut yours_held = yours.hold_tail(10);
+        assert_eq!(mine.release_tail(&mut yours_held), 0);
+        assert_eq!(yours_held.calls(), 10, "a foreign release emptied the hold");
+        drop(yours_held);
+        assert_eq!(mine.budget(), 40);
+        assert_eq!(mine.held_tail(), 10);
+        assert_eq!(yours.budget(), 50);
+        assert_eq!(yours.held_tail(), 0);
+        drop(mine_held);
+        assert_eq!(mine.budget(), 50);
+        assert_eq!(mine.held_tail(), 0);
+    }
+
+    /// Rounds each concurrency test repeats. The unlocked account lost an
+    /// update in most rounds of the first test, so this is far past the
+    /// count that failed it.
+    const RACE_ROUNDS: usize = 300;
+
+    #[test]
+    fn concurrent_drops_of_independent_holds_restore_every_call() {
+        const THREADS: usize = 32;
+        for round in 0..RACE_ROUNDS {
+            let mut ledger = Ledger::new(THREADS);
+            let holds: Vec<TailHold> = (0..THREADS).map(|_| ledger.hold_tail(1)).collect();
+            assert_eq!(ledger.budget(), 0);
+            assert_eq!(ledger.held_tail(), THREADS);
+            let barrier = std::sync::Barrier::new(THREADS);
+            std::thread::scope(|scope| {
+                for hold in holds {
+                    let barrier = &barrier;
+                    scope.spawn(move || {
+                        barrier.wait();
+                        drop(hold);
+                    });
+                }
+            });
+            assert_eq!(ledger.budget(), THREADS, "round {round} lost a restore");
+            assert_eq!(ledger.held_tail(), 0, "round {round} left calls hidden");
+        }
+    }
+
+    #[test]
+    fn many_holds_dropped_on_few_threads_restore_every_call() {
+        const THREADS: usize = 4;
+        const HOLDS: usize = 20_000;
+        let mut ledger = Ledger::new(HOLDS);
+        let mut lots: Vec<Vec<TailHold>> = (0..THREADS).map(|_| Vec::new()).collect();
+        for index in 0..HOLDS {
+            lots[index % THREADS].push(ledger.hold_tail(1));
+        }
+        assert_eq!(ledger.budget(), 0);
+        assert_eq!(ledger.held_tail(), HOLDS);
+        let barrier = std::sync::Barrier::new(THREADS);
+        std::thread::scope(|scope| {
+            for lot in lots {
+                let barrier = &barrier;
+                scope.spawn(move || {
+                    barrier.wait();
+                    drop(lot);
+                });
+            }
+        });
+        assert_eq!(ledger.budget(), HOLDS);
+        assert_eq!(ledger.held_tail(), 0);
+    }
+
+    #[test]
+    fn drops_racing_grant_and_hold_tail_keep_the_budget_consistent() {
+        const THREADS: usize = 8;
+        const PER_THREAD: usize = 8;
+        const START: usize = THREADS * PER_THREAD;
+        const GRANTS: usize = 64;
+        for round in 0..RACE_ROUNDS {
+            let mut ledger = Ledger::new(START);
+            let mut lots: Vec<Vec<TailHold>> = (0..THREADS).map(|_| Vec::new()).collect();
+            for index in 0..START {
+                lots[index % THREADS].push(ledger.hold_tail(1));
+            }
+            assert_eq!(ledger.budget(), 0);
+            let barrier = std::sync::Barrier::new(THREADS + 1);
+            let mut taken = Vec::new();
+            std::thread::scope(|scope| {
+                for lot in lots {
+                    let barrier = &barrier;
+                    scope.spawn(move || {
+                        barrier.wait();
+                        for hold in lot {
+                            drop(hold);
+                        }
+                    });
+                }
+                barrier.wait();
+                for _ in 0..GRANTS {
+                    ledger.grant(1);
+                    taken.push(ledger.hold_tail(1));
+                }
+            });
+            let still_hidden: usize = taken.iter().map(TailHold::calls).sum();
+            assert_eq!(
+                ledger.held_tail(),
+                still_hidden,
+                "round {round}: held and the live holds disagree"
+            );
+            assert_eq!(
+                ledger.budget() + still_hidden,
+                START + GRANTS,
+                "round {round}: budget and held lost a call"
+            );
+            drop(taken);
+            assert_eq!(ledger.budget(), START + GRANTS, "round {round}");
+            assert_eq!(ledger.held_tail(), 0, "round {round}");
+        }
+    }
+
+    #[test]
+    fn a_reserve_larger_than_the_room_is_cut_and_never_underflows() {
+        let mut ledger = Ledger::new(10);
+        let first = ledger.hold_tail(25);
+        assert_eq!(first.calls(), 10);
+        assert_eq!(ledger.budget(), 0);
+        let second = ledger.hold_tail(3);
+        assert_eq!(second.calls(), 0, "a hold on an empty budget took calls");
+        assert_eq!(ledger.budget(), 0);
+        assert_eq!(ledger.held_tail(), 10);
+        drop(second);
+        assert_eq!(ledger.budget(), 0);
+        drop(first);
+        assert_eq!(ledger.budget(), 10);
+        assert_eq!(ledger.held_tail(), 0);
     }
 
     #[test]
