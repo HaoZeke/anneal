@@ -6,7 +6,7 @@
 //!
 //! This reproduces the published competitor method; it is not anneal's
 //! search and no preset reaches it. Its size table is experiment input,
-//! read from `table1.csv` (default `experiments/dls_published/table1.csv`
+//! read from `table1.csv` (default `data/dls_published/table1.csv`
 //! in this tree).
 //!
 //! `stop` is an energy that ends the run, or `-` to spend the budget.
@@ -44,11 +44,7 @@ fn main() {
     };
     let prefix = &args[5];
     let table_path = args.get(6).cloned().unwrap_or_else(|| {
-        concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/experiments/dls_published/table1.csv"
-        )
-        .to_owned()
+        concat!(env!("CARGO_MANIFEST_DIR"), "/data/dls_published/table1.csv").to_owned()
     });
     let table = Table1Rows::parse(&std::fs::read_to_string(&table_path).expect("table1 file"))
         .expect("table1 rows");
