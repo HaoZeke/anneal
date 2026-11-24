@@ -206,6 +206,14 @@ mod tests {
 
     #[test]
     fn mean_soap_calls_distinct_gold_minima_the_same_at_the_taboo_cutoff() {
+        if cfg!(anneal_packaged_without_rgpot_pair)
+            && crate::potentials::cluster_kernels().is_none()
+        {
+            use std::io::Write;
+            let msg = "warning: skipped methods::cluster_hopping::fingerprint::tests::mean_soap_calls_distinct_gold_minima_the_same_at_the_taboo_cutoff: rgpot-pair is an unpublished git dev-dependency omitted from the packaged .crate\n";
+            let _ = std::io::stderr().write_all(msg.as_bytes());
+            return;
+        }
         use crate::methods::warm_lbfgs::WarmLbfgs;
         use crate::potentials::{GOLD_Z, Gupta};
         use rand::SeedableRng;

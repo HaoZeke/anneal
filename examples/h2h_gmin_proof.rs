@@ -15,8 +15,10 @@
 //! spent. A miss is reported as the full budget. `pot_s` is the time
 //! spent inside the potential, summed over the charged evaluations.
 //! The configuration is `Config::recommended`. `H2H_PLATEAU_HEAT=1` heats
-//! a stalled walk; unset, the temperature stays on the preset. `[coords]`
-//! receives the start `run` quenches, one Cartesian line per atom.
+//! a stalled walk; unset, the temperature stays on the preset.
+//! `H2H_CAP_TWIST=1` adds the cap-turn stall response,
+//! `Config::cap_twist`. `[coords]` receives the start `run` quenches, one
+//! Cartesian line per atom.
 //!
 //! `coords` writes the start that `run` quenches, one Cartesian line per
 //! atom, so another code can open the same geometry.
@@ -79,6 +81,10 @@ fn cmd_run(args: &[String]) -> i32 {
     // `1` heats the walk on each call plateau. Unset leaves the preset.
     if std::env::var("H2H_PLATEAU_HEAT").is_ok_and(|value| value == "1") {
         cfg.plateau_heat = true;
+    }
+    // `1` adds the cap-turn stall response. Unset leaves the preset.
+    if std::env::var("H2H_CAP_TWIST").is_ok_and(|value| value == "1") {
+        cfg.cap_twist = true;
     }
     let start = start_of(&cfg, spec.n, seed);
     if let Some(path) = args.get(3)

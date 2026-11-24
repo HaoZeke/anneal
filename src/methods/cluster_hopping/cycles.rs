@@ -57,6 +57,7 @@ pub(crate) fn lab_sites(
 /// [`rigid_donations`] uses. It is the body's span, or [`BOND`] when
 /// that span is shorter, so both readers count the contacts the cycle
 /// move counted.
+#[cfg(test)]
 fn donations(
     sites: &[Vec<[f64; 3]>],
     o: usize,
@@ -79,94 +80,32 @@ fn donations(
         .collect()
 }
 
-/// Reverses the sense of a directed hydrogen-bond cycle.
+/// Reverses the sense of a directed contact cycle from the body's declared
+/// bonds, or from its water sites when no bonds are declared.
 ///
 /// A walk from a random donor follows a random donated bond at each step.
 /// It stops at a molecule it has visited, which closes a cycle. It never
 /// steps straight back to the molecule it came from. So every cycle has at
-/// least three molecules: two waters that donate to each other would keep
-/// the same two bonds when both turn.
+/// least three bodies: two bodies that donate to each other would keep
+/// the same two contacts when both turn.
 ///
-/// Each molecule on the cycle then turns about its oxygen. The turn maps
-/// the plane of its two hydrogens onto the plane of its other hydrogen and
-/// the direction to the previous oxygen, and it maps bisector onto
-/// bisector. That new pair of directions is not at the H-O-H angle, so the
-/// donating hydrogen ends close to that oxygen while the other hydrogen
-/// moves a little too.
-/// The quench settles both.
+/// Each body on the cycle then turns about its anchor. When two non-collinear
+/// donors exist, the turn maps the plane of the donating donor and another
+/// donor onto the plane of that other donor and the direction to the previous
+/// anchor, and maps bisector onto bisector. When only one donor direction
+/// spans a turn, the shortest rotation maps it onto the previous anchor.
+/// The quench settles the rest.
 ///
 /// The walk is not uniform over cycles, so the move has no proposal ratio.
-/// Returns `false`, with `x` unchanged, when the geometry is not a water or
-/// the walk finds no cycle.
+/// Returns `false`, with `x` unchanged, when the geometry has no cycle
+/// definition, the walk finds no cycle, or a turn is undefined.
 pub(crate) fn reverse_cycle<R: Rng + ?Sized>(
     geometry: &RigidBodyGeometry,
     n: usize,
     x: &mut Array1<f64>,
     rng: &mut R,
 ) -> bool {
-    let Some((o, h)) = water_sites(geometry) else {
-        return false;
-    };
-    let Some(definition) = cycle_geometry(geometry) else {
-        return false;
-    };
-    if n < 2 || x.len() != 6 * n {
-        return false;
-    }
-    let sites = lab_sites(geometry, n, x.view());
-    let donated = donations(&sites, o, h, definition.donation_cutoff);
-    let donors: Vec<usize> = (0..n).filter(|&i| !donated[i].is_empty()).collect();
-    if donors.is_empty() {
-        return false;
-    }
-    let mut path: Vec<(usize, usize)> = Vec::new();
-    let mut at = donors[rng.random_range(0..donors.len())];
-    let cycle = loop {
-        let back = path.last().map(|&(m, _)| m);
-        let out: Vec<(usize, usize)> = donated[at]
-            .iter()
-            .copied()
-            .filter(|&(j, _)| Some(j) != back)
-            .collect();
-        if out.is_empty() || path.len() > n {
-            return false;
-        }
-        let (next, which) = out[rng.random_range(0..out.len())];
-        path.push((at, which));
-        if let Some(start) = path.iter().position(|&(m, _)| m == next) {
-            break path.split_off(start);
-        }
-        at = next;
-    };
-    let mut turns = Vec::with_capacity(cycle.len());
-    for (s, &(k, which)) in cycle.iter().enumerate() {
-        let prev = cycle[(s + cycle.len() - 1) % cycle.len()].0;
-        let oxygen = sites[k][o];
-        let Some(bonded) = direction(sub(sites[k][h[which]], oxygen)) else {
-            return false;
-        };
-        let Some(other) = direction(sub(sites[k][h[1 - which]], oxygen)) else {
-            return false;
-        };
-        let Some(target) = direction(sub(sites[prev][o], oxygen)) else {
-            return false;
-        };
-        if !spans(bonded, other) || !spans(target, other) {
-            return false;
-        }
-        turns.push((k, oxygen, frame_rotation((bonded, other), (target, other))));
-    }
-    for (k, oxygen, turn) in turns {
-        let centre = [x[3 * k], x[3 * k + 1], x[3 * k + 2]];
-        let moved = add(oxygen, mat_vec(turn, sub(centre, oxygen)));
-        let base = 3 * n + 3 * k;
-        let w = crate::potentials::compose_rotation(turn, [x[base], x[base + 1], x[base + 2]]);
-        for a in 0..3 {
-            x[3 * k + a] = moved[a];
-            x[base + a] = w[a];
-        }
-    }
-    true
+    reverse_directed_cycle(geometry, n, x, rng, false)
 }
 
 /// Reverses a directed contact cycle from the body's declared bonds,
@@ -180,6 +119,16 @@ pub(crate) fn reverse_chain<R: Rng + ?Sized>(
     n: usize,
     x: &mut Array1<f64>,
     rng: &mut R,
+) -> bool {
+    reverse_directed_cycle(geometry, n, x, rng, true)
+}
+
+fn reverse_directed_cycle<R: Rng + ?Sized>(
+    geometry: &RigidBodyGeometry,
+    n: usize,
+    x: &mut Array1<f64>,
+    rng: &mut R,
+    bridge_stem: bool,
 ) -> bool {
     let Some(definition) = cycle_geometry(geometry) else {
         return false;
@@ -208,15 +157,19 @@ pub(crate) fn reverse_chain<R: Rng + ?Sized>(
         let (next, which) = out[rng.random_range(0..out.len())];
         path.push((at, which));
         if let Some(start) = path.iter().position(|&(m, _)| m == next) {
-            let last = path[path.len() - 1].0;
-            let cut = (0..start)
-                .find(|&c| {
-                    norm(sub(
-                        sites[path[c].0][definition.anchor],
-                        sites[last][definition.anchor],
-                    )) < definition.stem_window
-                })
-                .unwrap_or(start);
+            let cut = if bridge_stem {
+                let last = path[path.len() - 1].0;
+                (0..start)
+                    .find(|&c| {
+                        norm(sub(
+                            sites[path[c].0][definition.anchor],
+                            sites[last][definition.anchor],
+                        )) < definition.stem_window
+                    })
+                    .unwrap_or(start)
+            } else {
+                start
+            };
             break path.split_off(cut);
         }
         at = next;
@@ -845,7 +798,7 @@ pub(crate) mod tests {
     /// A ring of `n` waters with its oxygens in one plane, 2.8 angstroms apart.
     /// Each donates one hydrogen bond to the next and points its other
     /// hydrogen out of the plane.
-    fn ring(n: usize) -> Array1<f64> {
+    pub(crate) fn ring(n: usize) -> Array1<f64> {
         let g = geometry();
         let (o, h) = water_sites(&g).expect("water");
         let body = g.sites();
@@ -1409,5 +1362,203 @@ pub(crate) mod tests {
         assert!(turn.iter().flatten().all(|value| value.is_finite()));
         let open = at(0.5);
         assert!(spans(open.0, open.1));
+    }
+
+    fn place_anchored(
+        g: &RigidBodyGeometry,
+        x: &mut Array1<f64>,
+        n: usize,
+        i: usize,
+        primary_donor: usize,
+        secondary_donor: usize,
+        at: [f64; 3],
+        to: [f64; 3],
+    ) {
+        let anchor = cycle_geometry(g).expect("cycle geometry").anchor;
+        let body = g.sites();
+        let u1 = unit(sub(body[primary_donor], body[anchor]));
+        let u2 = unit(sub(body[secondary_donor], body[anchor]));
+        let angle = dot(u1, u2).acos();
+        let first = unit(sub(to, at));
+        let second = add(
+            scale(first, angle.cos()),
+            scale([0.0, 0.0, 1.0], angle.sin()),
+        );
+        let r = frame_rotation((u1, u2), (first, second));
+        let centre = sub(at, mat_vec(r, body[anchor]));
+        let w = crate::potentials::compose_rotation(r, [0.0; 3]);
+        for k in 0..3 {
+            x[3 * i + k] = centre[k];
+            x[3 * n + 3 * i + k] = w[k];
+        }
+    }
+
+    #[test]
+    fn reverse_cycle_rotates_about_declared_non_oxygen_anchor_and_moves_donors() {
+        let water = geometry();
+        let custom_anchor = RigidBodyGeometry::new_bonded(
+            water.sites().to_vec(),
+            vec![8, 1, 1],
+            vec![[0, 1], [1, 2]],
+        )
+        .expect("bonded body");
+        let definition = cycle_geometry(&custom_anchor).expect("cycle geometry");
+        assert_eq!(definition.anchor, 1);
+        assert_eq!(definition.donors, vec![0, 2]);
+
+        let n = 5;
+        let side = 3.8;
+        let radius = side / (2.0 * (std::f64::consts::PI / n as f64).sin());
+        let anchor_pos = |i: usize| {
+            let a = std::f64::consts::TAU * (i % n) as f64 / n as f64;
+            [radius * a.cos(), radius * a.sin(), 0.0]
+        };
+        let mut start = Array1::zeros(6 * n);
+        for i in 0..n {
+            place_anchored(
+                &custom_anchor,
+                &mut start,
+                n,
+                i,
+                2,
+                0,
+                anchor_pos(i),
+                anchor_pos(i + 1),
+            );
+        }
+        let forward: BTreeSet<(usize, usize)> = (0..n).map(|i| (i, (i + 1) % n)).collect();
+        assert_eq!(contacts(&custom_anchor, n, &start), forward);
+
+        let before_sites = lab_sites(&custom_anchor, n, start.view());
+        let mut moved = start.clone();
+        let mut rng = StdRng::seed_from_u64(4);
+        assert!(reverse_cycle(&custom_anchor, n, &mut moved, &mut rng));
+        let after_sites = lab_sites(&custom_anchor, n, moved.view());
+
+        let backward: BTreeSet<(usize, usize)> = forward.iter().map(|&(i, j)| (j, i)).collect();
+        assert_eq!(contacts(&custom_anchor, n, &moved), backward);
+        for k in 0..n {
+            assert!(
+                norm(sub(after_sites[k][1], before_sites[k][1])) < 1e-12,
+                "declared anchor moved on body {k}"
+            );
+            assert!(
+                norm(sub(after_sites[k][0], before_sites[k][0])) > 0.1,
+                "oxygen donor did not move on body {k}"
+            );
+            assert!(
+                norm(sub(after_sites[k][2], before_sites[k][2])) > 0.1,
+                "second donor did not move on body {k}"
+            );
+        }
+
+        let relabelled = RigidBodyGeometry::new_bonded(
+            water.sites().to_vec(),
+            vec![16, 9, 9],
+            water.bonds().to_vec(),
+        )
+        .expect("bonded body");
+        assert!(water_sites(&relabelled).is_none());
+        let ring_start = ring(n);
+        let mut relabelled_cycle = ring_start.clone();
+        let mut relabelled_chain = ring_start;
+        let mut rng_cycle = StdRng::seed_from_u64(4);
+        let mut rng_chain = StdRng::seed_from_u64(4);
+        assert!(reverse_cycle(
+            &relabelled,
+            n,
+            &mut relabelled_cycle,
+            &mut rng_cycle
+        ));
+        assert!(reverse_chain(
+            &relabelled,
+            n,
+            &mut relabelled_chain,
+            &mut rng_chain
+        ));
+        assert_eq!(relabelled_cycle, relabelled_chain);
+        assert_eq!(contacts(&relabelled, n, &relabelled_cycle), backward);
+
+        let linear = linear_body();
+        let mut tri = linear_triangle();
+        let mut rng_linear = StdRng::seed_from_u64(1);
+        assert!(reverse_cycle(&linear, 3, &mut tri, &mut rng_linear));
+        assert_eq!(
+            contacts(&linear, 3, &tri),
+            BTreeSet::from([(1, 0), (2, 1), (0, 2)])
+        );
+    }
+
+    #[test]
+    fn reverse_cycle_on_undeclared_water_matches_base_proposals() {
+        const BASE_BITS_5_4: [u64; 30] = [
+            4612501513048963138,
+            13810045615770823530,
+            4586391713669229993,
+            4605137106667018243,
+            4612209731907745825,
+            4586391713669229998,
+            13834537703091775865,
+            4609096443601732875,
+            4586391713669229997,
+            13834776959531386145,
+            13832139172218672790,
+            4586391713669230001,
+            4604362856564384805,
+            13835644661039560622,
+            4586391713669229998,
+            4605204277043608752,
+            4604619484753536695,
+            13835363449230012855,
+            4595544629711641860,
+            4606021038723677084,
+            13830393548981388402,
+            13823413319544387332,
+            4605158942161370655,
+            4596209843066129354,
+            13828818353332100794,
+            4601894269403234797,
+            4608843487552114293,
+            13831240174501017832,
+            13817280839482979189,
+            4612820526212942367,
+        ];
+
+        let water = geometry();
+        let undeclared = RigidBodyGeometry::new(water.sites().to_vec(), water.species().to_vec())
+            .expect("water");
+        assert!(undeclared.bonds().is_empty());
+
+        let n = 5;
+        let mut x_undeclared = ring(n);
+        let mut rng_undeclared = StdRng::seed_from_u64(4);
+        assert!(reverse_cycle(
+            &undeclared,
+            n,
+            &mut x_undeclared,
+            &mut rng_undeclared
+        ));
+        let actual_bits: Vec<u64> = x_undeclared.iter().map(|v| v.to_bits()).collect();
+        assert_eq!(actual_bits, BASE_BITS_5_4);
+
+        let mut x_declared = ring(n);
+        let mut rng_declared = StdRng::seed_from_u64(4);
+        assert!(reverse_cycle(&water, n, &mut x_declared, &mut rng_declared));
+        let declared_bits: Vec<u64> = x_declared.iter().map(|v| v.to_bits()).collect();
+        assert_eq!(actual_bits, declared_bits);
+
+        let start4 = ring(4);
+        for seed in 0..16 {
+            let mut a = start4.clone();
+            let mut b = start4.clone();
+            let mut rng_a = StdRng::seed_from_u64(seed);
+            let mut rng_b = StdRng::seed_from_u64(seed);
+            assert_eq!(
+                reverse_cycle(&undeclared, 4, &mut a, &mut rng_a),
+                reverse_cycle(&water, 4, &mut b, &mut rng_b),
+                "seed {seed}"
+            );
+            assert_eq!(a, b, "seed {seed}");
+        }
     }
 }

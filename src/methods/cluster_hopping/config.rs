@@ -1116,6 +1116,17 @@ pub struct Config {
     /// The move does not name a packing or a composition.
     #[serde(skip_serializing_if = "is_false")]
     pub general_collective: bool,
+    /// A cap turn about a local symmetry axis as one more stall response.
+    ///
+    /// On a stall the learned stall allocator can draw it beside the trail,
+    /// the climb and the restart, and on a call-plateau leave a second
+    /// allocator draws it against the climb. The incumbent's cap is turned,
+    /// quenched and taken whatever its energy. The axis, its order and the cap
+    /// come from the structure, see [`crate::cap_twist`]. Off in the paper
+    /// preset, so a default chain draws the same calls. Unlabelled atomic
+    /// chains only.
+    #[serde(skip_serializing_if = "is_false")]
+    pub cap_twist: bool,
     /// Exchange descent after every full quench of a labelled cluster.
     ///
     /// Unlike pairs are exchanged on the quenched geometry in a drawn
@@ -2249,6 +2260,7 @@ impl Config {
             anneal_diversity: false,
             prior_soap: true,
             general_collective: false,
+            cap_twist: false,
             homotop_descent: true,
             homotop_ranked: true,
             homotop_window: true,
