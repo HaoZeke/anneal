@@ -86,6 +86,13 @@ fn a_chain_without_a_plateau_walks_the_preset_trajectory() {
     assert_eq!(hot.accepted_transitions, cold.accepted_transitions);
 }
 
+/// `energy_lattice` is off, which also gates the generic packing probe
+/// in `run_full`, so these are the walks develop pins. They are not the
+/// walks the branch pinned before it merged develop (cold
+/// `0xa4cf0197d21e3961`, hot `0xca208bc0360518d7`). What moved them is
+/// develop's observed-basis stall probe, which withholds its side calls
+/// from the walk's budget: with that probe switched off in a scratch
+/// build, this test returns the older pair.
 #[test]
 fn metropolis_heat_follows_the_plateau() {
     let mut cfg = Config::recommended(ATOMS);
@@ -99,6 +106,20 @@ fn metropolis_heat_follows_the_plateau() {
     assert_eq!(hot_fp, 0xcc74d55e4c74ed2f, "PLATEAU_HEAT_CAP");
 }
 
+/// Two code paths meet in this walk, and each pin has a different cause.
+///
+/// Cold `0x100885ac118293e1` is the branch's walk. The generic packing
+/// probe changes it from develop's `0xfb5afaab4e40a443`; the observed-basis
+/// stall probe fires three times here and does not change it.
+///
+/// Hot `0x1a623a8e37ad1d43` is in neither parent of the merge that first
+/// pinned it. The branch before that merge pinned `0x44038697bde16fb7`
+/// and develop pinned `0xb2078435e4bed155`. It is the composition: the
+/// packing probe from this branch, and develop's observed-basis probe,
+/// whose side calls come out of the heated walk's budget and cost it one
+/// hop. With the observed-basis probe switched off in a scratch build the
+/// hot walk is `0x44038697bde16fb7` again; with the packing probe
+/// suppressed it is develop's value, asserted below.
 #[test]
 fn lattice_exchange_follows_the_plateau() {
     let mut cfg = Config::recommended(ATOMS);
@@ -110,8 +131,24 @@ fn lattice_exchange_follows_the_plateau() {
         0x1a623a8e37ad1d43,
         "heat * cfg.temperature"
     );
+
+    cfg.suppress_generic_packings = true;
+    let (cold, hot) = pair(&cfg, 30_000, 2000);
+    assert_eq!(
+        fingerprint(&cold),
+        0xfb5afaab4e40a443,
+        "without the packing probe the preset walk is develop's"
+    );
+    assert_eq!(
+        fingerprint(&hot),
+        0xb2078435e4bed155,
+        "without the packing probe the heated walk is develop's"
+    );
 }
 
+/// `energy_lattice` is off and the observed-basis probe never fires in
+/// this 8_000-call walk, so these pins are the same on develop, on the
+/// branch before and after its merges, and on the merged tree.
 #[test]
 fn a_new_lowest_returns_the_walk_to_the_preset() {
     let mut cfg = Config::recommended(ATOMS);
@@ -123,6 +160,11 @@ fn a_new_lowest_returns_the_walk_to_the_preset() {
     assert_eq!(fingerprint(&hot), 0x87b7ee9f3579cc7e, "heat = 1.0");
 }
 
+/// Both pins are the branch's walk. The generic packing probe is the only
+/// difference from develop (cold `0x3f6e77c9980269b9`, hot
+/// `0xc711fc71269b412d`): with the probe suppressed the walk is develop's,
+/// asserted below. The observed-basis probe does not fire in this
+/// 6_000-call walk, so develop's changes to it do not touch these.
 #[test]
 fn a_same_iteration_record_returns_to_the_preset() {
     let mut cfg = Config::recommended(ATOMS);
@@ -136,5 +178,18 @@ fn a_same_iteration_record_returns_to_the_preset() {
         fingerprint(&hot),
         0x4f443a96ed586f29,
         "same-iteration heat = 1.0"
+    );
+
+    cfg.suppress_generic_packings = true;
+    let (cold, hot) = pair(&cfg, 6_000, 10);
+    assert_eq!(
+        fingerprint(&cold),
+        0x3f6e77c9980269b9,
+        "without the packing probe the preset walk is develop's"
+    );
+    assert_eq!(
+        fingerprint(&hot),
+        0xc711fc71269b412d,
+        "without the packing probe the heated walk is develop's"
     );
 }
