@@ -12350,6 +12350,7 @@ mod tests {
         cfg.return_screen = false;
         cfg.bayes_screen = false;
         cfg.energy_lattice = false;
+        cfg.symmetry_completion_on_new = false;
         cfg.continuous_symmetry = ContinuousSymmetry::Off;
         cfg.soap_mode = SoapProposalMode::Off;
         cfg.prior_soap = false;
@@ -13353,6 +13354,7 @@ mod tests {
         cfg.bayes_screen = false;
         cfg.calibrated_screen = false;
         cfg.tabu_on_stall = false;
+        cfg.symmetry_completion_on_new = false;
         cfg.energy_lattice = false;
         cfg.prior_soap = false;
         cfg.escape_stall_patience = 1;
@@ -13434,6 +13436,7 @@ mod tests {
         cfg.bayes_screen = false;
         cfg.calibrated_screen = false;
         cfg.tabu_on_stall = false;
+        cfg.symmetry_completion_on_new = false;
         cfg.energy_lattice = false;
         cfg.prior_soap = false;
         cfg.escape_stall_patience = 1;
@@ -13512,6 +13515,7 @@ mod tests {
             cfg.return_screen = false;
             cfg.bayes_screen = false;
             cfg.calibrated_screen = false;
+            cfg.symmetry_completion_on_new = false;
             cfg.energy_lattice = false;
             cfg.prior_soap = false;
             cfg.escape_stall_patience = 5;
@@ -13588,6 +13592,7 @@ mod tests {
         cfg.return_screen = false;
         cfg.bayes_screen = false;
         cfg.calibrated_screen = false;
+        cfg.symmetry_completion_on_new = false;
         cfg.energy_lattice = false;
         cfg.prior_soap = false;
         cfg.escape_stall_patience = 4;
