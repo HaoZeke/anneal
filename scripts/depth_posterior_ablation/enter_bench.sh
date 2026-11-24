@@ -27,7 +27,8 @@ build_binary() {
       cargo +1.88.0 build --release --locked --example depth_ablation -j 4
   )
   cp -a /work/target/release/examples/depth_ablation "$BIN"
-  cp -a "$HERE/campaign.py" "$INNER"
+  cp -a "$HERE/campaign.py" "$WORK/campaign.py"
+  python3 "$ROOT/scripts/stage_python.py" "$WORK" --from "$HERE" --from "$ROOT/scripts"
   chmod +x "$BIN" "$INNER"
 }
 

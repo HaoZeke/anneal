@@ -18,6 +18,7 @@ bash "$ROOT/scripts/gmin_h2h/build_gmin.sh" --extra-patch "$HERE/newtip-timer.pa
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs" "$WORK/gm" "$OUTPUT"
 cp -a "$HERE/run_h2h.py" "$ROOT/scripts/target_tol.py" \
   "$ROOT/scripts/gmin_pin.py" "$ROOT/scripts/machine_provenance.py" "$WORK/bin/"
+python3 "$ROOT/scripts/stage_python.py" "$WORK/bin/" --from "$HERE" --from "$ROOT/scripts"
 cp -a "$ROOT/examples/h2h_gmin_tip4p.data" "$WORK/bin/h2h_gmin_tip4p.data"
 # A single-point data file for the reproduction check: no basin hops, and
 # CHECKD prints the energy at the input geometry.

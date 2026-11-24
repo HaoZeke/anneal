@@ -27,6 +27,7 @@ mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs"
 cp -a "$HERE/run_campaign.py" "$HERE/read_deposit.py" \
   "$HERE/gad_rerun.py" "$ROOT/scripts/target_tol.py" \
   "$ROOT/scripts/gmin_pin.py" "$ROOT/scripts/machine_provenance.py" "$WORK/bin/"
+python3 "$ROOT/scripts/stage_python.py" "$WORK/bin/" --from "$HERE" --from "$ROOT/scripts"
 chmod +x "$WORK/bin/gad_published" "$WORK/bin/GMIN"
 
 cat > "$WORK/bin/inside.sh" << EOF

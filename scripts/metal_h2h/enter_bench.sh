@@ -13,6 +13,7 @@ mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs" "$LOGS"
 cp -a "$HERE/run_campaign.py" "$HERE/ase_ga.py" "$HERE/gupta_calc.py" \
   "$HERE/check_match.py" "$ROOT/scripts/target_tol.py" \
   "$ROOT/scripts/machine_provenance.py" "$WORK/bin/"
+python3 "$ROOT/scripts/stage_python.py" "$WORK/bin/" --from "$HERE" --from "$ROOT/scripts"
 chmod +x "$WORK/bin/h2h_metal"
 
 cat > "$WORK/bin/inside.sh" << EOF

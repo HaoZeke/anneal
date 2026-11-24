@@ -13,6 +13,7 @@ bash "$HERE/build_gmin.sh"
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs" "$WORK/starts"
 cp -a "$HERE/run_campaign.py" "$ROOT/scripts/target_tol.py" \
   "$ROOT/scripts/gmin_pin.py" "$ROOT/scripts/machine_provenance.py" "$WORK/bin/"
+python3 "$ROOT/scripts/stage_python.py" "$WORK/bin/" --from "$HERE" --from "$ROOT/scripts"
 cp -a "$ROOT/examples/h2h_gmin_lj.data" "$WORK/bin/h2h_gmin_lj.data"
 chmod +x "$WORK/bin/h2h_gmin_proof" "$WORK/bin/GMIN"
 

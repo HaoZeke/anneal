@@ -56,6 +56,7 @@ for arm in develop branch; do
 done
 sha256sum "$WORK"/develop-bin/* "$WORK"/branch-bin/* > "$WORK/bin-sha256.txt"
 cp -f "$HERE/run_gate.py" "$WORK/run_gate.py"
+python3 "$ROOT/scripts/stage_python.py" "$WORK" --from "$HERE" --from "$ROOT/scripts"
 # Captured before HOME moves, so the summary can import scipy.
 user_site=$(python3 -c 'import site; print(site.getusersitepackages())')
 

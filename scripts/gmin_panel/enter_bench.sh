@@ -86,6 +86,7 @@ cp -f "$WORK/gmin-source.txt" "$OUT/gmin-source.txt"
 cp -f "$HERE/run_panel.py" "$ROOT/scripts/target_tol.py" \
   "$ROOT/scripts/gmin_pin.py" "$ROOT/scripts/machine_provenance.py" \
   "$ROOT/scripts/revision_reach.py" "$ROOT/scripts/atomic_write.py" "$WORK/"
+python3 "$ROOT/scripts/stage_python.py" "$WORK/" --from "$HERE" --from "$ROOT/scripts"
 cp -f "$ROOT/examples/h2h_gmin_lj.data" "$ROOT/examples/h2h_gmin_morse.data" "$WORK/"
 # Captured before HOME moves.
 user_site=$(python3 -c 'import site; print(site.getusersitepackages())')
