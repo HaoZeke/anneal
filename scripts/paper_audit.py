@@ -266,7 +266,7 @@ def tuned_gmin_harness_verified(row: dict[str, str]) -> bool:
     head_tuned = git("rev-parse", "HEAD:scripts/gmin_panel/tuned.py")
     if head_data.returncode != 0 or head_data.stdout.strip() != data_blob or head_tuned.returncode != 0:
         return False
-    if git("cat-file", "-e", f"{harness}^{{commit}}").returncode != 0:
+    if not commit_exists(harness):
         return False
     ref_data = git("rev-parse", f"{harness}:bench/gmin-tuned/inputs/{system}.data")
     ref_tuned = git("rev-parse", f"{harness}:scripts/gmin_panel/tuned.py")
@@ -4092,6 +4092,12 @@ def git(*args: str, stdin: str | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *args], cwd=ROOT, input=stdin, capture_output=True, text=True, check=False)
 
 
+def commit_exists(rev: str) -> bool:
+    """The object store holds a commit by this name, whether or not a ref reaches it."""
+    out = git("cat-file", "--batch-check", stdin=f"{rev}^{{commit}}\n").stdout.split()
+    return out[1:2] == ["commit"]
+
+
 def git_bytes(*args: str, stdin: bytes = b"", env: dict[str, str] | None = None) -> bytes:
     return subprocess.run(["git", *args], cwd=ROOT, input=stdin, capture_output=True, check=False, env=env).stdout
 
@@ -4892,7 +4898,7 @@ def manuscript_new(audit: Audit) -> None:
     newest = "5eb79cdcb0a986984dc7b487e5a3cc93224246f9"
     audit.record(newest in morse_revs, PAPER, "the Morse ASE rows carry the revision the commands build", newest[:8],
                  newest[:8] if newest in morse_revs else " ".join(sorted(r[:8] for r in morse_revs)))
-    held = subprocess.run(["git", "-C", str(ROOT), "cat-file", "-e", f"{newest}^{{commit}}"], check=False).returncode == 0
+    held = commit_exists(newest)
     audit.record(held, PAPER, "the Morse ASE revision is in this checkout", "held", "held" if held else "missing")
     audit.said("scripts/ase_nonlj/enter_bench.sh", 'ROWS=${ASE_NONLJ_ROWS:-$ROOT/bench/ase-nonlj/rows.csv}')
     audit.said("scripts/ase_nonlj/enter_bench.sh", "set ASE_NONLJ_REVISION to a reachable commit SHA")
