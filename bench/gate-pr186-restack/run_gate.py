@@ -61,6 +61,7 @@ ROW_FIELDS = [
     "wall_s", "inside_s", "outside_per_call_s", "rss_anon_kb", "peak_rss_anon_kb",
     "b_path_fired", "b_path_quenches", "b_path_spent",
     "energy", "energy_bits", "trajectory",
+    "arm_revision", "arm_tree", "arm_binary", "arm_binary_sha256",
     "machine_id", "base_ref", "base_tree", "harness_blobs", "error",
 ]
 
@@ -241,6 +242,42 @@ def provenance(repo: Path) -> dict[str, str]:
     return {"base_ref": BASE_REF, "base_tree": base_tree, "harness_blobs": " ".join(blobs)}
 
 
+def ext_binary(py_dir: Path) -> Path:
+    matches = sorted((py_dir / "anneal").glob("_core*.so"))
+    if len(matches) != 1:
+        raise SystemExit(f"expected one _core*.so under {py_dir / 'anneal'}, found {len(matches)}")
+    return matches[0]
+
+
+def arm_source_meta(src: Path, expected_tree: str) -> tuple[str, str]:
+    head_tree = git_text(src, "rev-parse", "HEAD^{tree}")
+    if head_tree == expected_tree:
+        return git_text(src, "rev-parse", "HEAD"), head_tree
+    parent_tree = git_text(src, "rev-parse", "HEAD~1^{tree}")
+    if parent_tree == expected_tree:
+        return git_text(src, "rev-parse", "HEAD~1"), parent_tree
+    raise SystemExit(f"arm source tree {head_tree} / {parent_tree} does not match {expected_tree}")
+
+
+def build_arm_provenance(args, base_tree: str) -> dict[str, dict[str, str]]:
+    sources = {"A": args.src_a, "B": args.src_b, "Ap": args.src_ap}
+    expected = {"A": base_tree, "B": B_TREE, "Ap": base_tree}
+    out: dict[str, dict[str, str]] = {}
+    for arm in ("A", "B", "Ap"):
+        rev, tree = arm_source_meta(sources[arm], expected[arm])
+        guard_bin = args.bin[arm]
+        ext_bin = ext_binary(args.py[arm])
+        out[arm] = {
+            "arm_revision": rev,
+            "arm_tree": tree,
+            "guard_binary": guard_bin.name,
+            "guard_sha256": sha256_file(guard_bin),
+            "ext_binary": ext_bin.name,
+            "ext_sha256": sha256_file(ext_bin),
+        }
+    return out
+
+
 def machine_id() -> str:
     for candidate in (Path("/etc/machine-id"), Path("/sys/class/dmi/id/product_uuid")):
         if candidate.is_file():
@@ -283,7 +320,7 @@ def log_line(journal: Path, text: str) -> None:
     print(text, flush=True)
 
 
-def run_molecule(args, job: dict, budget: int, ident: str, journal: Path) -> None:
+def run_molecule(args, job: dict, budget: int, ident: str, journal: Path, arm_meta: dict[str, str]) -> None:
     out = job_dir(args.run_dir, job)
     dest = out / "result.json"
     if result_ok(dest, ident):
@@ -308,6 +345,10 @@ def run_molecule(args, job: dict, budget: int, ident: str, journal: Path) -> Non
         "--arm", job["arm"],
         "--slot", str(job["slot"]),
         "--index", str(job["index"]),
+        "--arm-revision", arm_meta["arm_revision"],
+        "--arm-tree", arm_meta["arm_tree"],
+        "--arm-binary", arm_meta["ext_binary"],
+        "--arm-binary-sha256", arm_meta["ext_sha256"],
     ]
     started = time.perf_counter()
     proc = subprocess.run(cmd, env=env, capture_output=True, text=True)
@@ -341,6 +382,11 @@ def run_molecule(args, job: dict, budget: int, ident: str, journal: Path) -> Non
                 "b_path_fired": 0,
                 "b_path_quenches": 0,
                 "b_path_spent": 0,
+                "trajectory": hash_trace(out),
+                "arm_revision": arm_meta["arm_revision"],
+                "arm_tree": arm_meta["arm_tree"],
+                "arm_binary": arm_meta["ext_binary"],
+                "arm_binary_sha256": arm_meta["ext_sha256"],
                 "error": classify_error(proc.stderr) or "run failed",
                 "returncode": proc.returncode,
             },
@@ -449,6 +495,11 @@ def worker_molecule(args) -> int:
         "b_path_fired": b_path_fired,
         "b_path_quenches": b_path_quenches,
         "b_path_spent": b_path_spent,
+        "trajectory": hash_trace(out),
+        "arm_revision": args.arm_revision,
+        "arm_tree": args.arm_tree,
+        "arm_binary": args.arm_binary,
+        "arm_binary_sha256": args.arm_binary_sha256,
         "error": classify_error(str(raw_error)) if raw_error else "",
     }
     if payload["core"] != "0":
@@ -460,7 +511,7 @@ def worker_molecule(args) -> int:
     return 0 if not payload["error"] else 1
 
 
-def run_guard(args, job: dict, binary: Path, ident: str, journal: Path) -> None:
+def run_guard(args, job: dict, binary: Path, ident: str, journal: Path, arm_meta: dict[str, str]) -> None:
     out = job_dir(args.run_dir, job)
     dest = out / "result.json"
     if result_ok(dest, ident):
@@ -499,6 +550,10 @@ def run_guard(args, job: dict, binary: Path, ident: str, journal: Path) -> None:
                 "b_path_spent": 0,
                 "energy_bits": "",
                 "trajectory": "",
+                "arm_revision": arm_meta["arm_revision"],
+                "arm_tree": arm_meta["arm_tree"],
+                "arm_binary": arm_meta["guard_binary"],
+                "arm_binary_sha256": arm_meta["guard_sha256"],
                 "error": classify_error(proc.stderr) or "run failed",
                 "returncode": proc.returncode,
             },
@@ -530,6 +585,10 @@ def run_guard(args, job: dict, binary: Path, ident: str, journal: Path) -> None:
                 "b_path_spent": 0,
                 "energy_bits": gate["best_bits"],
                 "trajectory": gate["trajectory"],
+                "arm_revision": arm_meta["arm_revision"],
+                "arm_tree": arm_meta["arm_tree"],
+                "arm_binary": arm_meta["guard_binary"],
+                "arm_binary_sha256": arm_meta["guard_sha256"],
                 "error": "",
             },
         )
@@ -616,7 +675,7 @@ def score_molecules(run_dir: Path, jobs: list[dict]) -> dict[tuple, dict]:
                 "error": info.get("error") or "",
                 "core": info.get("core") or "",
                 "energy_bits": "",
-                "trajectory": hash_trace(job_dir(run_dir, {"phase": "session", "cell": cell, "seed": key[1], "arm": key[0]})),
+                "trajectory": info.get("trajectory") or hash_trace(job_dir(run_dir, {"phase": "session", "cell": cell, "seed": key[1], "arm": key[0]})),
             }
     return scored
 
@@ -655,10 +714,18 @@ def guard_identity(records: list[dict], cell: str, arm: str = "B") -> tuple[bool
     return (not bad), bad
 
 
-def assemble_records(run_dir: Path, jobs: list[dict], scored: dict, prov: dict, machine: str) -> list[dict]:
+def assemble_records(
+    run_dir: Path,
+    jobs: list[dict],
+    scored: dict,
+    prov: dict,
+    arm_prov: dict[str, dict[str, str]],
+    machine: str,
+) -> list[dict]:
     records = []
     for job in jobs:
         info = json.loads((job_dir(run_dir, job) / "result.json").read_text())
+        meta = arm_prov[job["arm"]]
         if job["kind"] == "molecule" and job["phase"] == "session":
             extra = scored[(job["cell"], job["arm"], job["seed"])]
             hit = extra["hit"]
@@ -677,6 +744,8 @@ def assemble_records(run_dir: Path, jobs: list[dict], scored: dict, prov: dict, 
             b_path_fired = extra["b_path_fired"]
             b_path_quenches = extra["b_path_quenches"]
             b_path_spent = extra["b_path_spent"]
+            arm_binary = info.get("arm_binary") or meta["ext_binary"]
+            arm_binary_sha256 = info.get("arm_binary_sha256") or meta["ext_sha256"]
         else:
             hit = int(info.get("hit") or 0)
             calls = int(info.get("calls") or 0)
@@ -694,6 +763,8 @@ def assemble_records(run_dir: Path, jobs: list[dict], scored: dict, prov: dict, 
             b_path_fired = int(info.get("b_path_fired") or 0)
             b_path_quenches = int(info.get("b_path_quenches") or 0)
             b_path_spent = int(info.get("b_path_spent") or 0)
+            arm_binary = info.get("arm_binary") or meta["guard_binary"]
+            arm_binary_sha256 = info.get("arm_binary_sha256") or meta["guard_sha256"]
         outside = outside_per_call(wall, inside, calls)
         records.append(
             {
@@ -719,6 +790,10 @@ def assemble_records(run_dir: Path, jobs: list[dict], scored: dict, prov: dict, 
                 "energy": energy,
                 "energy_bits": bits,
                 "trajectory": trajectory,
+                "arm_revision": info.get("arm_revision") or meta["arm_revision"],
+                "arm_tree": info.get("arm_tree") or meta["arm_tree"],
+                "arm_binary": arm_binary,
+                "arm_binary_sha256": arm_binary_sha256,
                 "machine_id": machine,
                 "base_ref": prov["base_ref"],
                 "base_tree": prov["base_tree"],
@@ -768,21 +843,9 @@ def write_sessions(path: Path, rows: list[tuple[str, str]]) -> None:
 def run(args) -> int:
     require_core()
     self_check()
-    b_head_tree = git_text(args.src_b, "rev-parse", "HEAD^{tree}")
-    if b_head_tree == B_HARNESS_TREE:
-        b_tree = git_text(args.src_b, "rev-parse", "HEAD~1^{tree}")
-    else:
-        b_tree = b_head_tree
-    if b_tree != B_TREE:
-        raise SystemExit("B tree does not match")
-    base_tree = git_text(args.repo, "rev-parse", f"{BASE_REF}^{{tree}}")
-    a_head_tree = git_text(args.src_a, "rev-parse", "HEAD^{tree}")
-    ap_head_tree = git_text(args.src_ap, "rev-parse", "HEAD^{tree}")
-    a_tree = a_head_tree if a_head_tree == base_tree else git_text(args.src_a, "rev-parse", "HEAD~1^{tree}")
-    ap_tree = ap_head_tree if ap_head_tree == base_tree else git_text(args.src_ap, "rev-parse", "HEAD~1^{tree}")
-    if a_head_tree != ap_head_tree or a_tree != base_tree or ap_tree != base_tree:
-        raise SystemExit("A and A2 are not the develop tree")
     prov = provenance(args.repo)
+    arm_prov = build_arm_provenance(args, prov["base_tree"])
+    b_head_tree = git_text(args.src_b, "rev-parse", "HEAD^{tree}")
     machine = machine_id()
     jobs = schedule()
     balances = check_balance(jobs)
@@ -793,16 +856,16 @@ def run(args) -> int:
     log_line(journal, f"seeds {SEEDS[0]}-{SEEDS[-1]} n {len(SEEDS)} cells {len(CELL_ORDER)}")
     log_line(journal, f"session {ident[:12]} jobs {len(jobs)}")
     for position, job in enumerate(jobs, 1):
+        meta = arm_prov[job["arm"]]
         if job["kind"] == "molecule":
-            run_molecule(args, job, budgets[(job["cell"], job["seed"])], ident, journal)
+            run_molecule(args, job, budgets[(job["cell"], job["seed"])], ident, journal, meta)
         else:
-            run_guard(args, job, args.bin[job["arm"]], ident, journal)
+            run_guard(args, job, args.bin[job["arm"]], ident, journal, meta)
         if position % 20 == 0:
             log_line(journal, f"progress {position}/{len(jobs)}")
     log_line(journal, "scoring molecules")
     scored = score_molecules(args.run_dir, jobs)
-    records = assemble_records(args.run_dir, jobs, scored, prov, machine)
-    builds = {arm: sha256_file(args.bin[arm]) for arm in ("A", "B", "Ap")}
+    records = assemble_records(args.run_dir, jobs, scored, prov, arm_prov, machine)
     sessions = [
         ("base_ref", prov["base_ref"]),
         ("base_tree", prov["base_tree"]),
@@ -816,9 +879,18 @@ def run(args) -> int:
         ("core", "0"),
         ("threads", "1"),
         ("schedule", ident),
-        ("build_a", builds["A"]),
-        ("build_b", builds["B"]),
-        ("build_a2", builds["Ap"]),
+        ("a_revision", arm_prov["A"]["arm_revision"]),
+        ("a_tree", arm_prov["A"]["arm_tree"]),
+        ("b_revision", arm_prov["B"]["arm_revision"]),
+        ("b_tree_resolved", arm_prov["B"]["arm_tree"]),
+        ("a2_revision", arm_prov["Ap"]["arm_revision"]),
+        ("a2_tree", arm_prov["Ap"]["arm_tree"]),
+        ("build_a", arm_prov["A"]["guard_sha256"]),
+        ("build_b", arm_prov["B"]["guard_sha256"]),
+        ("build_a2", arm_prov["Ap"]["guard_sha256"]),
+        ("ext_a", arm_prov["A"]["ext_sha256"]),
+        ("ext_b", arm_prov["B"]["ext_sha256"]),
+        ("ext_a2", arm_prov["Ap"]["ext_sha256"]),
     ]
     for cell, counts in balances.items():
         text = " ".join(f"{slot}:{arm}={count}" for (slot, arm), count in sorted(counts.items()))
@@ -864,6 +936,10 @@ def main() -> int:
     worker.add_argument("--arm", required=True)
     worker.add_argument("--slot", type=int, required=True)
     worker.add_argument("--index", type=int, required=True)
+    worker.add_argument("--arm-revision", default="")
+    worker.add_argument("--arm-tree", default="")
+    worker.add_argument("--arm-binary", default="")
+    worker.add_argument("--arm-binary-sha256", default="")
 
     args = parser.parse_args()
     if args.cmd == "schedule":
