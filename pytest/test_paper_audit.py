@@ -292,6 +292,20 @@ def test_an_uncharged_gmin_panel_miss_is_reported():
     assert "row invariants" in {r[2] for r in audit.drifts()}
 
 
+def test_a_stale_gmin_panel_source_patch_digest_is_reported():
+    audit = audit_mod.Audit()
+    path = "bench/gmin-panel/gmin-source.txt"
+    audit.text_cache[path] = audit.text(path).replace(
+        "patch=bench/lj104-lattice/v2/h2h-gmin.patch 3bf5d49a0a1cb0512a228212482e76e98195946096ceae3b54e88ca4a43b7189",
+        "patch=bench/lj104-lattice/v2/h2h-gmin.patch a31221a67883d20032a029e34e3d81bd62c5bcb786c97fff02a9c234adc34553",
+    )
+    panel, groups = audit_mod.gmin_panel_groups(audit)
+    audit_mod.gmin_panel_readme(audit, panel, groups)
+    assert [r[2] for r in audit.drifts()] == [
+        "in-tree patch sha256 bench/lj104-lattice/v2/h2h-gmin.patch"
+    ]
+
+
 def test_a_drifted_sutton_chen_howto_cell_is_reported():
     audit = audit_mod.Audit()
     path = audit_mod.SC96_78_HOWTO
