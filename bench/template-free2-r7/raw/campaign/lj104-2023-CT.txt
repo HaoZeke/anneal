@@ -1,0 +1,6 @@
+rc=0
+--- stdout ---
+system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,head,tree,cpu,pins,pot_s
+lj104,anneal,2023,4000000,true,360160,360160,9.513638,-582.08663347,unknown,unknown,Intel(R) Xeon(R) Processor,0,5.714973
+
+--- stderr ---
