@@ -25,7 +25,7 @@ and are not rewritten. A partial seal reports the row count of each table.
 - Primary OpenMP process binding is close, with places set to cores.
 - The machine table records the core count, whether the avx2 flag is
   present, the wait policy, the process binding, and the pin set.
-- It does not record a hostname.
+- It does not record the machine name.
 - There is no quick mode. Every timed point uses 25 repetitions.
 
 ## Workload
