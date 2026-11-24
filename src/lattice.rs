@@ -936,8 +936,22 @@ pub fn observed_basis_candidate(
     let centre = (0..n).max_by_key(|&i| (graph[i].len(), std::cmp::Reverse(i)))?;
     let shell = &graph[centre];
     let origin = [x[3 * centre], x[3 * centre + 1], x[3 * centre + 2]];
-    let body_centre =
-        [0, 1, 2].map(|axis| x.iter().skip(axis).step_by(3).sum::<f64>() / n as f64 - origin[axis]);
+    let body_centre = [0, 1, 2].map(|axis| {
+        let sum: f64 = x.iter().skip(axis).step_by(3).sum();
+        let mean = if sum.is_finite() {
+            sum / n as f64
+        } else {
+            x.iter()
+                .skip(axis)
+                .step_by(3)
+                .map(|value| *value / n as f64)
+                .sum()
+        };
+        mean - origin[axis]
+    });
+    if body_centre.iter().any(|value| !value.is_finite()) {
+        return None;
+    }
     let mut best = None;
     for i in 0..shell.len() {
         for j in (i + 1)..shell.len() {
@@ -972,8 +986,15 @@ pub fn observed_basis_candidate(
                     distance2(&points[0], &points[2]),
                     distance2(&points[1], &points[2]),
                 ];
-                let longest = edges.iter().copied().max_by(f64::total_cmp)?;
                 let total = edges.iter().sum::<f64>();
+                if !volume.is_finite()
+                    || !(volume > 0.0)
+                    || !total.is_finite()
+                    || edges.iter().any(|edge| !edge.is_finite())
+                {
+                    continue;
+                }
+                let longest = edges.iter().copied().max_by(f64::total_cmp)?;
                 if best
                     .as_ref()
                     .is_none_or(|(best_longest, best_total, best_volume, _)| {
@@ -989,7 +1010,7 @@ pub fn observed_basis_candidate(
             }
         }
     }
-    let (_, _, volume, basis) = best?;
+    let (_, _, _, basis) = best?;
     let contact_lengths = graph.iter().enumerate().flat_map(|(i, neighbours)| {
         neighbours
             .iter()
@@ -1005,7 +1026,13 @@ pub fn observed_basis_candidate(
         (f64::INFINITY, f64::NEG_INFINITY),
         |(shortest, longest), length| (shortest.min(length), longest.max(length)),
     );
+    if !shortest.is_finite() || !longest.is_finite() || !(longest > 0.0) {
+        return None;
+    }
     let contact_spread = longest - shortest;
+    if !contact_spread.is_finite() {
+        return None;
+    }
     let cross = |a: [f64; 3], b: [f64; 3]| {
         [
             a[1] * b[2] - a[2] * b[1],
@@ -1020,44 +1047,62 @@ pub fn observed_basis_candidate(
         cross(basis[0], basis[1]),
     ];
     let determinant = dot(basis[0], reciprocal[0]);
-    let residuals: Vec<f64> = (0..n)
-        .map(|point| {
-            let offset = [0, 1, 2].map(|axis| x[3 * point + axis] - origin[axis]);
-            let nearest =
-                [0, 1, 2].map(|axis| (dot(offset, reciprocal[axis]) / determinant).round());
-            let fitted = [0, 1, 2].map(|axis| {
-                (0..3)
-                    .map(|vector| nearest[vector] * basis[vector][axis])
-                    .sum()
-            });
-            distance2(&offset, &fitted).sqrt()
-        })
-        .collect();
+    if !determinant.is_finite() || determinant == 0.0 {
+        return None;
+    }
+    let mut residuals = Vec::with_capacity(n);
+    for point in 0..n {
+        let offset = [0, 1, 2].map(|axis| x[3 * point + axis] - origin[axis]);
+        if offset.iter().any(|value| !value.is_finite()) {
+            return None;
+        }
+        let nearest = [0, 1, 2].map(|axis| (dot(offset, reciprocal[axis]) / determinant).round());
+        if nearest.iter().any(|value| !value.is_finite()) {
+            return None;
+        }
+        let fitted: [f64; 3] = [0, 1, 2].map(|axis| {
+            (0..3)
+                .map(|vector| nearest[vector] * basis[vector][axis])
+                .sum()
+        });
+        if fitted.iter().any(|value| !value.is_finite()) {
+            return None;
+        }
+        let residual = distance2(&offset, &fitted).sqrt();
+        if !residual.is_finite() {
+            return None;
+        }
+        residuals.push(residual);
+    }
     let max_degree = graph.iter().map(Vec::len).max()?;
+    let residual_floor = f64::EPSILON.sqrt() * longest;
+    let core_tolerance = contact_spread.max(residual_floor);
     let registered_core = residuals
         .iter()
         .enumerate()
         .filter(|(point, _)| graph[*point].len() == max_degree)
-        .all(|(_, residual)| *residual <= contact_spread);
-    let mut ordered = residuals.clone();
+        .all(|(_, residual)| *residual <= core_tolerance);
+    let mut ordered = residuals;
     ordered.sort_by(f64::total_cmp);
     let span = ordered.last()? - ordered.first()?;
+    if !span.is_finite() {
+        return None;
+    }
     let mut gaps: Vec<f64> = ordered.windows(2).map(|pair| pair[1] - pair[0]).collect();
     gaps.sort_by(f64::total_cmp);
     let median_gap = gaps[gaps.len() / 2];
     let largest_gap = *gaps.last()?;
     // A lattice gap must exceed the spread expected if every adjacent residual
     // had the observed median gap; the point count supplies that expectation.
-    let quantized = span == 0.0 || largest_gap > gaps.len() as f64 * median_gap;
+    // An exact crystal whose residuals differ only by floating-point roundoff
+    // has no defect gap to separate; the half-significand floor bounds that
+    // roundoff on the observed contact scale.
+    let quantized = span <= residual_floor || largest_gap > gaps.len() as f64 * median_gap;
     let coherent = registered_core && (!require_quantized_residuals || quantized);
     if !coherent {
         return None;
     }
-    if volume > 0.0 {
-        candidate_from_basis(&basis, body_centre, n)
-    } else {
-        None
-    }
+    candidate_from_basis(&basis, body_centre, n)
 }
 
 #[cfg(test)]
@@ -1606,6 +1651,99 @@ mod tests {
         assert!(basis_is_well_conditioned(&anisotropic));
         let flat_cap = four_point_frames(13).min(64usize.saturating_mul(13 + 4));
         assert_eq!(flat_cap, 715);
+        assert!(candidate_from_basis(&anisotropic, [0.0; 3], 13).is_none());
+    }
+
+    #[test]
+    fn observed_growth_accepts_an_exact_multishell_crystal() {
+        // Integer face-centred cubic sites have identical contact lengths
+        // (`sqrt(2)`), so `contact_spread` is zero while multi-shell
+        // fractional projections carry floating-point roundoff.
+        let mut sites = Vec::new();
+        for x in -2i32..=2 {
+            for y in -2i32..=2 {
+                for z in -2i32..=2 {
+                    if (x + y + z).rem_euclid(2) == 0 && x * x + y * y + z * z <= 6 {
+                        sites.push([f64::from(x), f64::from(y), f64::from(z)]);
+                    }
+                }
+            }
+        }
+        let n = sites.len();
+        assert!(n >= 40);
+        let exact = Array1::from_iter(sites.iter().copied().flatten());
+        let rebuilt = observed_basis_candidate(exact.view(), true)
+            .expect("an exact crystal with zero contact spread must reconstruct");
+        assert_eq!(rebuilt.len(), 3 * n);
+        assert!(rebuilt.iter().all(|value| value.is_finite()));
+
+        let mut r = rng();
+        let rot = random_rotation(&mut r);
+        let rotated = Array1::from_iter(sites.iter().flat_map(|site| {
+            [0, 1, 2].map(|axis| (0..3).map(|k| rot[axis][k] * site[k]).sum::<f64>() + 3.7)
+        }));
+        let rotated_rebuilt = observed_basis_candidate(rotated.view(), true)
+            .expect("rigid motion roundoff must not disqualify an exact crystal");
+        assert_eq!(rotated_rebuilt.len(), 3 * n);
+        assert!((nearest_neighbour_scale(rotated_rebuilt.view()) - 2.0_f64.sqrt()).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn observed_growth_seeds_near_an_outlier_shifted_centroid() {
+        let basis = [
+            [1.0, 0.0, 0.0],
+            [0.5, 3.0_f64.sqrt() / 2.0, 0.0],
+            [0.5, 3.0_f64.sqrt() / 6.0, (2.0_f64 / 3.0).sqrt()],
+        ];
+        let local = candidate_from_basis(&basis, [0.1, -0.2, 0.15], 19).expect("local seed");
+        let far_centre = [
+            10_000.0 * basis[0][0] + 0.1,
+            10_000.0 * basis[0][1] - 0.2,
+            10_000.0 * basis[0][2] + 0.15,
+        ];
+        let shifted = candidate_from_basis(&basis, far_centre, 19).expect("shifted seed");
+        assert_eq!(shifted.len(), local.len());
+        let shifted_mean =
+            [0, 1, 2].map(|axis| shifted.iter().skip(axis).step_by(3).sum::<f64>() / 19.0);
+        assert!((shifted_mean[0] - far_centre[0]).abs() < 2.0);
+        for (a, b) in spectrum(local.view(), 19)
+            .into_iter()
+            .zip(spectrum(shifted.view(), 19))
+        {
+            assert!((a - b).abs() < 1.0e-9);
+        }
+        assert!(
+            candidate_from_basis(&basis, [1.0e20, 0.0, 0.0], 19).is_none(),
+            "a shift that erases the basis spacing must be refused"
+        );
+
+        let mut with_outlier = packed(38);
+        let tail = with_outlier.len() - 3;
+        with_outlier[tail] = 50_000.0;
+        let candidate = observed_basis_candidate(with_outlier.view(), false)
+            .expect("registered core with an outlier shifts its seed without runaway growth");
+        assert_eq!(candidate.len(), with_outlier.len());
+        assert!(candidate.iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn observed_growth_rejects_overflowing_scales_and_skewed_growth() {
+        let base = packed(19);
+        for scale in [1.0e200, 1.0e307] {
+            let huge = base.mapv(|value| value * scale);
+            assert!(
+                huge.iter().all(|value| value.is_finite()),
+                "fixture coordinates at {scale:e} must stay finite"
+            );
+            assert!(observed_basis_candidate(huge.view(), false).is_none());
+            assert!(observed_basis_candidate(huge.view(), true).is_none());
+        }
+
+        // Orthogonal vectors with extreme aspect ratio have unit normalized
+        // determinant, while Euclidean sphere growth floods the short plane
+        // before reaching +/-basis[2]; the site cap stops that runaway growth.
+        let anisotropic = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0e4]];
+        assert!(basis_is_well_conditioned(&anisotropic));
         assert!(candidate_from_basis(&anisotropic, [0.0; 3], 13).is_none());
     }
 }
