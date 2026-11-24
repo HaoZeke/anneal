@@ -108,9 +108,9 @@ the molecular cells are the evidence that B moved nothing.
    - `rustup toolchain install 1.88.0 --profile minimal` was run
      because only Rust 1.83.0 was pre-installed.
    - `scripts/openconf_h2h/setup_env.sh` defaults `MAMBA_EXE` and
-     `MAMBA_ROOT_PREFIX` to `/work/...`, which is not writable on
-     the build machine; `MAMBA_EXE` and `MAMBA_ROOT_PREFIX` were pointed to a
-     writable scratch directory alongside `OPENCONF_H2H_ENV`.
+     `MAMBA_ROOT_PREFIX` to a non-writable system prefix, so both were
+     pointed to a writable scratch directory alongside
+     `OPENCONF_H2H_ENV`.
    - `maturin` is installed inside `$OPENCONF_H2H_ENV/bin`, so step 4
      runs with `$OPENCONF_H2H_ENV/bin` prepended to `PATH`.
    - `rdff_count.c` compiled cleanly with `gcc -O2 -shared -fPIC ... -ldl`.
@@ -124,7 +124,7 @@ the molecular cells are the evidence that B moved nothing.
    - `guard_trace.rs` from the updated harness is copied into
      `examples/guard_trace.rs` of each arm before its release build.
 3. Peak in-process `RssAnon` (`peak_rss_anon_kb`):
-   - `guard_trace.rs` samples `/proc/self/status` `RssAnon:` at search
+   - `guard_trace.rs` samples procfs self status `RssAnon:` at search
      start, every 1024 potential calls (outside `PesClock`), and at
      search end while `outcome` is alive, emitting both `rss_anon_kb`
      and `peak_rss_anon_kb`.
@@ -143,4 +143,3 @@ the molecular cells are the evidence that B moved nothing.
 5. Default-preset parity reporting:
    - `analyze.py` also records `max_abs_dE` from `energy_bits` between
      B and A alongside the bit-level `identical` check.
-
