@@ -1,0 +1,2 @@
+m55r6-2001/latch-000.xyz incumbent -237.5845 best -238.4198 hits 0
+SUMMARY generator cap2 draws 100 gm_hits 0 below_incumbent 10 best -238.41978 ref -250.286609
