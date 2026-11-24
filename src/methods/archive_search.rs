@@ -137,17 +137,18 @@ fn symmetry_polish(
         return None;
     }
     let n = x.len() / 3;
-    let orders = [2usize, 3, 4, 5, 6];
+    let orders = if cfg.detected_symmetry {
+        crate::symmetrise::orders_held(n)
+    } else {
+        vec![2usize, 3, 4, 5, 6]
+    };
     let mut cands: Vec<crate::symmetrise::Candidate> = Vec::new();
-    for order in orders {
+    for &order in &orders {
         if let Some(c) = crate::symmetrise::detect(x, n, &[order], cfg.symmetry_tolerance) {
             cands.push(c);
         }
     }
-    let group = match crate::symmetrise::generate_group(&cands, 60) {
-        Ok(group) => group,
-        Err(err) => err.elements,
-    };
+    let group = crate::symmetrise::generate_closed_group(&cands, 60)?;
     let y = if group.len() > 1 {
         crate::symmetrise::symmetrise_group(x, n, &group, cfg.merge_radius.max(0.5))
     } else {
@@ -1023,7 +1024,8 @@ mod tests {
 
     #[test]
     fn symmetry_polish_does_not_mutate_the_caller_config() {
-        let rec = Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0);
+        let mut rec = Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0);
+        rec.detected_symmetry = true;
         let before = format!("{rec:?}");
         let mut rng = StdRng::seed_from_u64(4);
         let start = random_cluster(3, 0.7, rec.min_separation, &mut rng);

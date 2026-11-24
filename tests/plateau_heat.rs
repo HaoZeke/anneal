@@ -95,9 +95,9 @@ fn metropolis_heat_follows_the_plateau() {
     let (cold, hot) = pair(&cfg, 30_000, 2000);
     let cold_fp = fingerprint(&cold);
     let hot_fp = fingerprint(&hot);
-    assert_eq!(cold_fp, 0xc2e2c1ef481b1a93, "preset walk");
+    assert_eq!(cold_fp, 0xe4d92e7f1820d2a6, "preset walk");
     assert_ne!(hot_fp, cold_fp, "temperature *= heat");
-    assert_eq!(hot_fp, 0xcc74d55e4c74ed2f, "PLATEAU_HEAT_CAP");
+    assert_eq!(hot_fp, 0xf0e09a91f4489d48, "PLATEAU_HEAT_CAP");
 }
 
 #[test]
@@ -107,9 +107,9 @@ fn lattice_exchange_follows_the_plateau() {
     let (cold, hot) = pair(&cfg, 30_000, 2000);
     let cold_fp = fingerprint(&cold);
     let hot_fp = fingerprint(&hot);
-    assert_eq!(cold_fp, 0xfb5afaab4e40a443, "preset walk");
+    assert_eq!(cold_fp, 0x716719fb0b3b6c18, "preset walk");
     assert_ne!(hot_fp, cold_fp, "heat * cfg.temperature");
-    assert_eq!(hot_fp, 0xb2078435e4bed155, "heat * cfg.temperature");
+    assert_eq!(hot_fp, 0x028accb229ab5148, "heat * cfg.temperature");
 }
 
 #[test]
@@ -118,12 +118,12 @@ fn a_new_lowest_returns_the_walk_to_the_preset() {
     cfg.restart_patience = 80;
     cfg.relax_steps = 20;
     cfg.energy_lattice = false;
-    let (cold, hot) = pair(&cfg, 8_000, 2000);
+    let (cold, hot) = pair(&cfg, 8_000, 0);
     let cold_fp = fingerprint(&cold);
     let hot_fp = fingerprint(&hot);
-    assert_eq!(cold_fp, 0x79a1ba0ae27370ad, "preset walk");
+    assert_eq!(cold_fp, 0x18dfe2735eed30ba, "preset walk");
     assert_ne!(hot_fp, cold_fp, "heated plateau must diverge from cold");
-    assert_eq!(hot_fp, 0x87b7ee9f3579cc7e, "heat = 1.0");
+    assert_eq!(hot_fp, 0x3b818bdd2d273271, "heat = 1.0");
 }
 
 #[test]
@@ -133,13 +133,13 @@ fn a_same_iteration_record_returns_to_the_preset() {
     cfg.relax_steps = 40;
     cfg.general_collective = true;
     cfg.continuous_symmetry = ContinuousSymmetry::Measure { interval: 1 };
-    let (cold, hot) = pair(&cfg, 6_000, 10);
+    let (cold, hot) = pair(&cfg, 6_000, 0);
     let cold_fp = fingerprint(&cold);
     let hot_fp = fingerprint(&hot);
-    assert_eq!(cold_fp, 0x3f6e77c9980269b9, "preset walk");
+    assert_eq!(cold_fp, 0xc3417abb114a4738, "preset walk");
     assert_ne!(
         hot_fp, cold_fp,
         "cold and hot must stay distinct so the reset test tells the states apart"
     );
-    assert_eq!(hot_fp, 0xc711fc71269b412d, "same-iteration heat = 1.0");
+    assert_eq!(hot_fp, 0x8541905b8a6e9126, "same-iteration heat = 1.0");
 }

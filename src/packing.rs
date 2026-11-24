@@ -29,7 +29,8 @@ pub fn on_new_basin(
     core_fraction: f64,
     min_separation: f64,
 ) -> Option<Array1<f64>> {
-    crate::symmetrise::orbit_complete_core(
+    on_new_basin_for(
+        false,
         x,
         n_points,
         tolerance,
@@ -37,6 +38,37 @@ pub fn on_new_basin(
         core_fraction,
         min_separation,
     )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn on_new_basin_for(
+    detected_symmetry: bool,
+    x: ArrayView1<f64>,
+    n_points: usize,
+    tolerance: f64,
+    merge_radius: f64,
+    core_fraction: f64,
+    min_separation: f64,
+) -> Option<Array1<f64>> {
+    if detected_symmetry {
+        crate::symmetrise::orbit_complete_core_detected(
+            x,
+            n_points,
+            tolerance,
+            merge_radius,
+            core_fraction,
+            min_separation,
+        )
+    } else {
+        crate::symmetrise::orbit_complete_core(
+            x,
+            n_points,
+            tolerance,
+            merge_radius,
+            core_fraction,
+            min_separation,
+        )
+    }
 }
 
 /// The orbit completions `core` asks for, in the order they are quenched:
@@ -76,25 +108,15 @@ pub(crate) fn orbit_candidates_for(
 ) -> Vec<Array1<f64>> {
     use crate::methods::cluster_hopping::OrbitCore;
     let fraction = || {
-        if detected_symmetry {
-            crate::symmetrise::orbit_complete_core_detected(
-                x,
-                n_points,
-                tolerance,
-                merge_radius,
-                core_fraction,
-                min_separation,
-            )
-        } else {
-            on_new_basin(
-                x,
-                n_points,
-                tolerance,
-                merge_radius,
-                core_fraction,
-                min_separation,
-            )
-        }
+        on_new_basin_for(
+            detected_symmetry,
+            x,
+            n_points,
+            tolerance,
+            merge_radius,
+            core_fraction,
+            min_separation,
+        )
     };
     let shells = |spec: &crate::symmetrise::ShellCore| {
         crate::symmetrise::orbit_complete_shells(x, n_points, spec, merge_radius, min_separation)

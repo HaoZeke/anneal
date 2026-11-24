@@ -1055,7 +1055,8 @@ pub fn step_into_hole_escaping<R: Rng + ?Sized>(
         }
         dp *= step / dn;
         let mut dr = tikhonov(&s.mean_jac, dp.view(), LAMBDA);
-        if let Some(coords) = cur.as_slice()
+        if mobile.is_none()
+            && let Some(coords) = cur.as_slice()
             && let Some(delta) = dr.as_slice_mut()
         {
             crate::catalog::lens_ring_displacement(coords, delta);
@@ -1207,7 +1208,8 @@ fn packing_kick<R: Rng + ?Sized>(
     }
     u /= nrm;
     let mut dr = tikhonov(&s.mean_jac, u.view(), LAMBDA);
-    if let Some(coords) = x.as_slice()
+    if mobile.is_none()
+        && let Some(coords) = x.as_slice()
         && let Some(delta) = dr.as_slice_mut()
     {
         crate::catalog::lens_ring_displacement(coords, delta);

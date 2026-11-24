@@ -1314,23 +1314,28 @@ pub fn detect_orders(
 ) -> Vec<Candidate> {
     let cloud = Cloud::from_view(x, n);
     let axes = candidate_axes(x, n);
-    let mut dead = vec![usize::MAX; axes.len()];
-    let mut out = Vec::new();
-    for &order in orders {
-        let Some(turn) = OrderTurn::new(order) else {
-            continue;
-        };
-        let mut best: Option<Candidate> = None;
-        for (axis_at, &axis) in axes.iter().enumerate() {
-            if turn.order >= dead[axis_at] {
-                continue;
-            }
-            let Some(d) = cloud.deviation_with(axis, &turn, tolerance) else {
-                remember_motionless(&cloud, turn.order, &mut dead[axis_at]);
+    let turns: Vec<Option<OrderTurn>> = orders.iter().map(|&order| OrderTurn::new(order)).collect();
+    let mut best = vec![None; orders.len()];
+    for axis in axes {
+        let mut dead = usize::MAX;
+        for (turn, found) in turns.iter().zip(&mut best) {
+            let Some(turn) = turn else {
                 continue;
             };
-            if d < tolerance && best.as_ref().map(|b| d < b.deviation).unwrap_or(true) {
-                best = Some(Candidate {
+            if turn.order >= dead {
+                continue;
+            }
+            let Some(d) = cloud.deviation_with(axis, turn, tolerance) else {
+                remember_motionless(&cloud, turn.order, &mut dead);
+                continue;
+            };
+            if d < tolerance
+                && found
+                    .as_ref()
+                    .map(|candidate: &Candidate| d < candidate.deviation)
+                    .unwrap_or(true)
+            {
+                *found = Some(Candidate {
                     axis,
                     order: turn.order,
                     improper: false,
@@ -1338,11 +1343,8 @@ pub fn detect_orders(
                 });
             }
         }
-        if let Some(candidate) = best {
-            out.push(candidate);
-        }
     }
-    out
+    best.into_iter().flatten().collect()
 }
 
 /// Best rotation using the raw crystallographic scan (`[2..=6]`, no exchange guard).
@@ -1575,6 +1577,9 @@ pub fn symmetrise(x: ArrayView1<f64>, n: usize, cand: &Candidate, pair_cutoff: f
 /// A rotation as a 3x3 matrix, row-major.
 pub type Rot = [[f64; 3]; 3];
 
+const APPROXIMATE_GROUP_CLOSURE: f64 = 0.27;
+const POINT_GROUP_CAP: usize = 120;
+
 fn rot_matrix(axis: [f64; 3], angle: f64) -> Rot {
     let s = libm::sin(angle);
     let c = libm::cos(angle);
@@ -1705,6 +1710,25 @@ pub fn generate_group(cands: &[Candidate], cap: usize) -> Result<Vec<Rot>, Group
     Ok(group)
 }
 
+/// Generate a point group, using tolerant closure when approximate
+/// generators do not close under the exact comparison.
+pub(crate) fn generate_closed_group(cands: &[Candidate], cap: usize) -> Option<Vec<Rot>> {
+    match generate_group(cands, cap) {
+        Ok(group) => Some(group),
+        Err(err) if group_is_closed_within(&err.elements, APPROXIMATE_GROUP_CLOSURE) => {
+            Some(err.elements)
+        }
+        Err(_) => {
+            let generators: Vec<Rot> = cands.iter().map(operation).collect();
+            close_group_checked(
+                &generators,
+                APPROXIMATE_GROUP_CLOSURE,
+                cap.min(POINT_GROUP_CAP),
+            )
+        }
+    }
+}
+
 /// Makes `x` symmetric under a whole group, not one rotation.
 ///
 /// Each point's orbit is collected by applying every group element and taking
@@ -1826,6 +1850,19 @@ pub fn symmetrise_core(
     pair_cutoff: f64,
     core_fraction: f64,
 ) -> Option<Array1<f64>> {
+    symmetrise_core_for(false, x, n, tolerance, pair_cutoff, core_fraction)
+}
+
+/// Core symmetrisation selecting either the established crystallographic
+/// scan or template-free detection across every order the core can hold.
+pub(crate) fn symmetrise_core_for(
+    detected_symmetry: bool,
+    x: ArrayView1<f64>,
+    n: usize,
+    tolerance: f64,
+    pair_cutoff: f64,
+    core_fraction: f64,
+) -> Option<Array1<f64>> {
     if n < 4 {
         return None;
     }
@@ -1848,7 +1885,12 @@ pub fn symmetrise_core(
             core[3 * k + d] = x[3 * a + d];
         }
     }
-    let cands = detect_all_crystallographic(core.view(), m, &ROTATION_ORDERS, tolerance);
+    let cands = if detected_symmetry {
+        let orders = orders_held(m);
+        detect_all(core.view(), m, &orders, tolerance)
+    } else {
+        detect_all_crystallographic(core.view(), m, &ROTATION_ORDERS, tolerance)
+    };
     if cands.is_empty() {
         return None;
     }
@@ -1866,10 +1908,7 @@ pub fn symmetrise_core(
             break;
         }
     }
-    let group = match generate_group(&gens, 48) {
-        Ok(group) => group,
-        Err(err) => err.elements,
-    };
+    let group = generate_closed_group(&gens, 48)?;
     let sym_core = if group.len() > 1 {
         symmetrise_group(core.view(), m, &group, pair_cutoff)
     } else {
@@ -2145,10 +2184,7 @@ fn orbit_complete_core_with_orders(
             break;
         }
     }
-    let group = match generate_group(&gens, 48) {
-        Ok(group) => group,
-        Err(err) => err.elements,
-    };
+    let group = generate_closed_group(&gens, 48)?;
     if group.len() < 2 {
         return None;
     }
@@ -2377,6 +2413,29 @@ pub fn close_group(gens: &[Rot], closure: f64, cap: usize) -> Vec<Rot> {
         }
     }
     group
+}
+
+fn group_is_closed_within(group: &[Rot], closure: f64) -> bool {
+    !group.is_empty()
+        && group.iter().all(|a| {
+            group.iter().all(|b| {
+                let product = mul(a, b);
+                group.iter().any(|candidate| {
+                    (0..3)
+                        .all(|i| (0..3).all(|j| (candidate[i][j] - product[i][j]).abs() <= closure))
+                })
+            })
+        })
+}
+
+/// Close approximate generators, returning only a group closed within
+/// `closure` without exceeding `cap`.
+pub(crate) fn close_group_checked(gens: &[Rot], closure: f64, cap: usize) -> Option<Vec<Rot>> {
+    if cap == 0 {
+        return None;
+    }
+    let group = close_group(gens, closure, cap.saturating_add(1));
+    (group.len() <= cap && group_is_closed_within(&group, closure)).then_some(group)
 }
 
 /// The point group of the innermost shells of `x`, as [`ShellCore`]
@@ -3075,6 +3134,10 @@ mod tests {
             err.elements.len()
         );
         assert_eq!(err.cap, 60);
+        assert!(
+            generate_closed_group(&gens, 60).is_none(),
+            "an overflow prefix is not a closed group"
+        );
     }
 
     #[test]
@@ -3282,6 +3345,8 @@ mod shell_tests {
         let gens: Vec<Rot> = near.iter().map(operation).collect();
         assert_eq!(close_group(&gens, 0.27, 120).len(), 10);
         assert_eq!(close_group(&gens, EXACT_CLOSURE, 120).len(), 120);
+        let usable = generate_closed_group(&near, EXACT_CAP).expect("tolerantly closed group");
+        assert!(group_is_closed_within(&usable, APPROXIMATE_GROUP_CLOSURE));
     }
 
     /// Refinement replaces an operation by the orthogonal map that carries

@@ -9784,7 +9784,8 @@ where
             && accept
             && hop_room(hops)
             && (moved_basin || cfg.point_symmetrise_every_accept)
-            && let Some(y) = crate::symmetrise::symmetrise_core(
+            && let Some(y) = crate::symmetrise::symmetrise_core_for(
+                cfg.detected_symmetry,
                 x.view(),
                 n,
                 cfg.symmetry_tolerance,
@@ -10082,7 +10083,7 @@ where
                     continue;
                 }
                 let symmetrised_state = if cfg.detected_symmetry {
-                    let orders: Vec<usize> = (2..=n).collect();
+                    let orders = crate::symmetrise::orders_held(n);
                     let cands = crate::symmetrise::detect_orders(
                         x.view(),
                         n,
@@ -10091,8 +10092,8 @@ where
                     );
                     let detected_orders: Vec<usize> =
                         cands.iter().map(|candidate| candidate.order).collect();
-                    match crate::symmetrise::generate_group(&cands, 120) {
-                        Ok(group) if group.len() > 1 => Some(match cfg.species.as_deref() {
+                    match crate::symmetrise::generate_closed_group(&cands, 120) {
+                        Some(group) if group.len() > 1 => Some(match cfg.species.as_deref() {
                             Some(species) if species.len() == n => {
                                 crate::symmetrise::symmetrise_group_within(
                                     x.view(),
@@ -10109,7 +10110,7 @@ where
                                 cfg.symmetry_merge_radius,
                             ),
                         }),
-                        Ok(_) => crate::symmetrise::symmetrise_detected(
+                        Some(_) => crate::symmetrise::symmetrise_detected(
                             x.view(),
                             n,
                             &detected_orders,
@@ -10117,7 +10118,7 @@ where
                             cfg.symmetry_merge_radius,
                         )
                         .map(|(y, _)| y),
-                        Err(_) => None,
+                        None => None,
                     }
                 } else {
                     let mut cands: Vec<crate::symmetrise::Candidate> = Vec::new();
@@ -10131,11 +10132,9 @@ where
                             cands.push(c);
                         }
                     }
-                    let group = match crate::symmetrise::generate_group(&cands, 60) {
-                        Ok(group) => group,
-                        Err(err) => err.elements,
-                    };
-                    if group.len() > 1 {
+                    if let Some(group) = crate::symmetrise::generate_closed_group(&cands, 60)
+                        && group.len() > 1
+                    {
                         Some(match cfg.species.as_deref() {
                             Some(species) if species.len() == n => {
                                 crate::symmetrise::symmetrise_group_within(
@@ -13965,6 +13964,30 @@ mod tests {
     }
 
     #[test]
+    fn detected_symmetry_reaches_point_group_arms() {
+        let mut cfg = Config::for_cluster(7);
+        cfg.orbit_complete_on_new = false;
+        cfg.orbit_arm = true;
+        cfg.point_symmetrise = true;
+        cfg.detected_symmetry = true;
+        let kernels = search_kernels(&cfg);
+        assert!(kernels.iter().any(|kernel| matches!(
+            kernel,
+            ClusterMove::OrbitComplete {
+                detected_symmetry: true,
+                ..
+            }
+        )));
+        assert!(kernels.iter().any(|kernel| matches!(
+            kernel,
+            ClusterMove::PointSymmetrise {
+                detected_symmetry: true,
+                ..
+            }
+        )));
+    }
+
+    #[test]
     fn the_orbit_arm_steps_one_point_when_no_group_moves_anyone() {
         let cfg = Config::for_cluster(3);
         let kernel = ClusterMove::OrbitComplete {
@@ -13974,6 +13997,7 @@ mod tests {
             core_fraction: cfg.symmetrise_core_fraction,
             min_separation: cfg.min_separation,
             fallback_step: 0.1,
+            detected_symmetry: false,
         };
         let x = Array1::from(vec![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1, 0.0]);
         let mut rng = StdRng::seed_from_u64(7);

@@ -158,7 +158,6 @@ pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjectio
     // once at the identity avoids repeating the same assignment across
     // inertia orientations and lets the op cache reuse solved inverses.
     let best = detected_ops(x)
-        .filter(|ops| is_closed_within(ops, CSM_CLOSURE))
         .and_then(|ops| project_verified(x, classes, &ops, &[identity()]))
         .and_then(|(coordinates, measure)| {
             (closest_pair(&coordinates) >= SINGULAR_PAIR).then_some(GroupProjection {
@@ -211,10 +210,7 @@ const CSM_CLOSURE: f64 = 0.27;
 const CSM_GROUP_CAP: usize = 120;
 
 fn close_detected_ops(gens: &[[[f64; 3]; 3]]) -> Option<Vec<[[f64; 3]; 3]>> {
-    let group = crate::symmetrise::close_group(gens, CSM_CLOSURE, CSM_GROUP_CAP + 1);
-    if group.len() > CSM_GROUP_CAP || !is_closed_within(&group, CSM_CLOSURE) {
-        return None;
-    }
+    let group = crate::symmetrise::close_group_checked(gens, CSM_CLOSURE, CSM_GROUP_CAP)?;
     // The closure always contains the identity; one element means no
     // non-trivial symmetry was detected.
     (group.len() >= 2).then_some(group)

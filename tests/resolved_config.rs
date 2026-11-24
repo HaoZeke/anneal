@@ -1,4 +1,4 @@
-use anneal_core::methods::cluster_hopping::{ArmSelection, Config, SoapProposalMode};
+use anneal_core::methods::cluster_hopping::{ArmSelection, ClusterMove, Config, SoapProposalMode};
 use anneal_core::potentials::PairKind;
 
 #[test]
@@ -400,6 +400,25 @@ fn with_detected_symmetry_opts_in_and_tracks_safe6_counter() {
         opted.resolved_sha256().unwrap(),
         stock.resolved_sha256().unwrap()
     );
+    let mut routed = opted.clone();
+    routed.orbit_complete_on_new = false;
+    routed.orbit_arm = true;
+    routed.point_symmetrise = true;
+    let kernels = routed.move_library.kernels(&routed);
+    assert!(kernels.iter().any(|kernel| matches!(
+        kernel,
+        ClusterMove::OrbitComplete {
+            detected_symmetry: true,
+            ..
+        }
+    )));
+    assert!(kernels.iter().any(|kernel| matches!(
+        kernel,
+        ClusterMove::PointSymmetrise {
+            detected_symmetry: true,
+            ..
+        }
+    )));
 
     let before = anneal_core::symmetrise::safe6_nearest_index_calls();
     let pot = anneal_core::potentials::PairPotential::lennard_jones(13);
@@ -411,4 +430,24 @@ fn with_detected_symmetry_opts_in_and_tracks_safe6_counter() {
         after > before,
         "opt-in detected_symmetry path must exercise safe6 (before={before}, after={after})"
     );
+}
+
+#[test]
+fn detected_propose_matches_each_class_separately() {
+    let order = 7;
+    let mut coordinates = Vec::with_capacity(6 * order);
+    let mut classes = Vec::with_capacity(2 * order);
+    for (class, radius, height, phase) in [(0, 1.0, -0.4, 0.0), (1, 1.4, 0.4, 0.0)] {
+        for step in 0..order {
+            let angle = std::f64::consts::TAU * step as f64 / order as f64 + phase;
+            coordinates.extend([radius * angle.cos(), radius * angle.sin(), height]);
+            classes.push(class);
+        }
+    }
+    let coordinates = ndarray::Array1::from_vec(coordinates);
+    let projection =
+        anneal_core::csm::propose(coordinates.view(), &classes).expect("multi-class projection");
+    assert_eq!(projection.group, "detected");
+    assert!(projection.measure < 1.0e-12, "{}", projection.measure);
+    assert_eq!(projection.coordinates.len(), coordinates.len());
 }
