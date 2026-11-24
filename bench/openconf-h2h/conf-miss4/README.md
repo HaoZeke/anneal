@@ -23,21 +23,37 @@ time.
   one stamp for both arms. The local hash in that first stamp is no
   longer in the repository, and neither its tree nor its patch-id
   survives, so it is not used as evidence for two different revisions.
-- harness and guard: `5c40c711f6f49ce0950d6025349adcde7f17cdce`,
-  tree `89078345063859912c378bb5344b959b365331c6`. This commit adds
-  the baseline arm and paired statistics. The harness ran from it, but
-  its paired row stamp remains the wheel revision above. The guard
-  examples were built from this tree and the guard rows cite it. The
-  local guard hash in the first record is also gone, with no surviving
-  tree or patch-id, and is not cited.
+- guard and paired-statistics script:
+  `5c40c711f6f49ce0950d6025349adcde7f17cdce`, tree
+  `89078345063859912c378bb5344b959b365331c6`. The guard examples were
+  built from this tree and the guard rows cite it. This commit adds
+  only `scripts/openconf_h2h/paired_stats.py` and
+  `pytest/test_paired_stats.py`; `1dccb7eb` later changes both. It does
+  not touch the paired runner: `scripts/openconf_h2h/run_bench.py` is
+  the same blob, `61e041ae`, at this commit and at `259befae`, which is
+  its ancestor, so `git diff 259befae 5c40c711` of that file is empty.
+  The local guard hash in the first record is also gone, with no
+  surviving tree or patch-id, and is not cited.
+- where the paired runner code came from: `8da2e664f` added the
+  baseline (develop) arm, `paired --baseline` with its `build.sh` and
+  `paired_score.py` support. That commit is an ancestor of the base
+  `61fa67cf` and so not part of this series. `259befae` added the host
+  label in `bench_host.py` and its edit of `run_bench.py`.
+  These are where the code was introduced; `code_revision` below does
+  not record them.
 - `provenance.tsv` lists every repository revision the rows cite with
   its tree. The audit checks each tree, each commit object and
   reachability from an `origin` remote-tracking ref.
 - develop: `61fa67cf380e46876b569da45e7cc091647a775b`, built into its
   own wheel, the `develop` rows. The series is built on this revision.
 - openconf: rowansci/openconf `e32c5fa7b6e6aac944bda31c851be42e14340235`
-  (v0.0.19), the settings of `../paired`. Its `code_revision` is the
-  harness revision, which is this series.
+  (v0.0.19), the settings of `../paired`. Its `code_revision` is
+  `259befae`, the same as the anneal rows. `code_revision` records the
+  revision the row was produced at: `paired()` in `run_bench.py` reads
+  `bin/anneal-head` and writes it into the openconf and anneal rows,
+  and `bin/baseline-head` into the develop row. It is not the
+  revision of openconf, which `openconf_revision` records, and not the
+  commit that introduced any of the paired runner code.
 - host label `cloud-vm`, an 8-core virtual machine. The label is the
   `BENCH_HOST` the harness was given; `scripts/openconf_h2h/bench_host.py`
   writes only that label, `bench` or `unlabelled`, never a node name.
