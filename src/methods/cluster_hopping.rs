@@ -5406,14 +5406,18 @@ where
     }
 }
 
-/// Candidates the generic packing catalogue quenches, besides the axial one.
+/// Structures the generic packing catalogue quenches: seven in the candidate
+/// loop and the axial one after them. `binary_geometry::packing_candidates`
+/// returns all eight.
 const PACKING_CANDIDATES: usize = 8;
 
 /// Hops the walk makes before the generic packing catalogue is offered.
 ///
-/// The catalogue quenches `PACKING_CANDIDATES + 1` structures, about one hop
-/// each, and [`Config::packing_deferral`] sets the hops per structure. A capped
-/// walk offers it at its last hop at the latest.
+/// The catalogue quenches `PACKING_CANDIDATES` structures, about one hop
+/// each, after a pair-minimum search of at most one mantissa's worth of
+/// calls. The search is counted as one more hop-sized unit, so the offer
+/// comes after [`Config::packing_deferral`] times `PACKING_CANDIDATES + 1`
+/// hops. A capped walk offers it at its last hop at the latest.
 fn packing_offer_hops(cfg: &Config) -> usize {
     let wanted = cfg.packing_deferral.saturating_mul(PACKING_CANDIDATES + 1);
     cfg.max_hops

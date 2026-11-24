@@ -1423,12 +1423,15 @@ pub struct Config {
     /// Hops the walk makes for each structure the generic packing probe
     /// quenches before the probe is offered.
     ///
-    /// The probe quenches nine structures, about one hop each. At the default
-    /// of four the walk has spent about four times the probe's cost when it
-    /// is offered, so a walk that hits earlier never pays for it and one that
-    /// runs on pays about a quarter more at most. A capped walk offers the
-    /// probe at its last hop at the latest. Zero offers it before the first
-    /// hop. The rule reads no atom count, potential or structure.
+    /// The probe quenches eight structures, seven and the axial one, about
+    /// one hop each. It first measures the pair minimum, which is counted as
+    /// one more hop-sized unit, so the offer comes after this many hops times
+    /// nine. At the default of four the walk has spent about four times the
+    /// probe's cost when it is offered, so a walk that hits earlier never
+    /// pays for it and one that runs on pays about a quarter more at most. A
+    /// capped walk offers the probe at its last hop at the latest. Zero
+    /// offers it before the first hop. The rule reads no atom count,
+    /// potential or structure.
     #[serde(skip)]
     pub packing_deferral: usize,
     /// The parent search already quenched the generic packing catalogue.
