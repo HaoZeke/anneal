@@ -1432,6 +1432,17 @@ pub struct Config {
     /// capped walk offers the probe at its last hop at the latest. Zero
     /// offers it before the first hop. The rule reads no atom count,
     /// potential or structure.
+    ///
+    /// The probe is a known per-run cost on a walk that passes the offer
+    /// without a hit. Measured at the offer, it is 188 calls on Lennard-Jones
+    /// 38, 2069 on 75 and 2667 on 98, all charged to the ledger. A paired run
+    /// of 12 seeds against the tip before the probe read +2068 charged calls
+    /// on 75 (ratio 1.0009), +2667 on 98 (1.0034) and about +1951 per seed on
+    /// 102, with the same hits on every seed. The same probe takes the
+    /// 25 000-call Lennard-Jones 38 run from 0 of 12 hits to 12 of 12. The
+    /// offer is not skipped while the walk is still lowering its best: that
+    /// was tried, and it neither avoided the call on the larger clusters,
+    /// whose walks stall within the window, nor kept the 38 runs as fast.
     #[serde(skip)]
     pub packing_deferral: usize,
     /// The parent search already quenched the generic packing catalogue.
