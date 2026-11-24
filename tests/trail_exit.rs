@@ -94,6 +94,7 @@ fn a_trail_without_an_entry_never_serves_the_stall() {
     cfg.screen_steps = 1;
     cfg.relax_steps = 1;
     cfg.tabu_on_stall = false;
+    cfg.symmetry_completion_on_new = false;
     cfg.energy_lattice = false;
     cfg.prior_soap = false;
     cfg.continuous_symmetry = ContinuousSymmetry::Off;
@@ -150,6 +151,7 @@ fn a_redrawn_stall_that_exhausts_budget_keeps_finite_final_energy() {
     cfg.screen_steps = 1;
     cfg.relax_steps = 1;
     cfg.tabu_on_stall = false;
+    cfg.symmetry_completion_on_new = false;
     cfg.energy_lattice = false;
     cfg.prior_soap = false;
     cfg.continuous_symmetry = ContinuousSymmetry::Off;
