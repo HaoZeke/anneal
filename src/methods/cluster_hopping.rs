@@ -10403,11 +10403,14 @@ where
         // proposal. If the relaxed state passes `quench_is_sane`, the arm
         // resets `quiet`/`longest_quiet`, records `finish_arm(..., true,
         // improved)`, adopts the minimum, and sets `stall_outcome` so the
-        // bandit allocator updates on the reached depth. Any rejected or
+        // bandit allocator updates on the reached depth. A rejected or
         // uncompleted attempt records a failed proposal (`finish_arm(...,
-        // false, false)`), preserves `quiet`/`longest_quiet` and `basin_entry`,
-        // and leaves `stall_outcome = None` so the allocator receives no
-        // synthetic reward.
+        // false, false)`) and leaves `stall_outcome = None` so the allocator
+        // receives no synthetic reward; rejected quenches also preserve
+        // `quiet`/`longest_quiet` and `basin_entry`. On `climb`, paths that do
+        // not attempt a quench (guard false, `activate` returning `None`, or a
+        // multi-species seat move) reset `quiet`/`longest_quiet` as on
+        // `develop` so `stuck` does not refire on every subsequent iteration.
         let stalled_from = e;
         let mut stall_outcome: Option<f64> = None;
         if stall_response.map(|arm| stall_arms[arm] == "restart") == Some(true) {
@@ -10546,6 +10549,8 @@ where
             }
         }
         if stall_response.map(|arm| stall_arms[arm] == "climb") == Some(true) {
+            let mut climb_seat_moved = false;
+            let mut climb_quench_rejected = false;
             // A plateau return through the screen bank is only for a true
             // multi-label chain. A one-label run, even with frozen atoms or an
             // active region, stays on the ordinary activation path below.
@@ -10584,6 +10589,7 @@ where
                         here = None;
                         soft_cache = None;
                         basin_entry = None;
+                        climb_seat_moved = true;
                     }
                 }
             }
@@ -10676,8 +10682,6 @@ where
                         &mut unconverged_records,
                     );
                     if quench_is_sane(cfg, ee, xe.view()) {
-                        quiet = 0;
-                        longest_quiet = 0;
                         hops += 1;
                         stall_escapes += 1;
                         if ee < e {
@@ -10710,11 +10714,16 @@ where
                         );
                         stall_outcome = Some(stalled_from - e);
                     } else {
+                        climb_quench_rejected = true;
                         finish_arm(&mut arm_counts, "stall-climb", false, false);
                     }
                 } else {
                     finish_arm(&mut arm_counts, "stall-climb", false, false);
                 }
+            }
+            if climb_seat_moved || !climb_quench_rejected {
+                quiet = 0;
+                longest_quiet = 0;
             }
         }
         if cfg.retry_noop_stall_leave && leave_due && stall_outcome.is_some() {
@@ -12755,6 +12764,180 @@ mod tests {
         assert!(outcome.trail_escapes >= 1);
         assert_eq!(scores.len(), outcome.trail_escapes);
         assert!(outcome.final_energy.is_finite());
+    }
+
+    #[test]
+    fn a_gradient_free_climb_draw_resets_stall_quiet_clock() {
+        let distinct_state = |tag: usize, dim: usize| {
+            let mut v = Array1::zeros(dim);
+            v[0] = (tag as f64) * 10.0;
+            v
+        };
+        let run_case = |restart_on_stall: bool, max_hops: usize| {
+            let mut cfg = Config::for_cluster(6);
+            cfg.escape_on_stall = true;
+            cfg.trail_on_stall = false;
+            cfg.restart_on_stall = restart_on_stall;
+            cfg.symmetrise_on_stall = false;
+            cfg.tabu_on_stall = true;
+            cfg.tabu_capacity = 1000;
+            cfg.return_screen = false;
+            cfg.bayes_screen = false;
+            cfg.calibrated_screen = false;
+            cfg.orbit_complete_on_new = false;
+            cfg.energy_lattice = false;
+            cfg.prior_soap = false;
+            cfg.escape_stall_patience = 5;
+            cfg.escape_stall_factor = 0.0;
+            cfg.temperature = 1.0;
+            cfg.merge_radius = 1e-12;
+            cfg.screen_steps = 1;
+            cfg.relax_steps = 2;
+            cfg.max_hops = Some(max_hops);
+            cfg.continuous_symmetry = ContinuousSymmetry::Off;
+            cfg.surfaces.clear();
+            let mut rng = StdRng::seed_from_u64(0x6f72);
+            let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+            let mut ledger = Ledger::new(max_hops * 4 + 10);
+            let mut bias = BasinBias::new(
+                ClusterFingerprint::for_keying(cfg.n_points, cfg.shape_keyed),
+                cfg.merge_radius,
+                cfg.bias_height,
+                cfg.bias_gamma,
+            );
+            let mut quenches = 0usize;
+            let mut relax = |ledger: &mut Ledger, state: ArrayView1<f64>, steps: usize| {
+                quenches += 1;
+                for _ in 0..steps {
+                    if !ledger.charge() {
+                        break;
+                    }
+                }
+                (10.0, distinct_state(quenches, state.len()))
+            };
+            run_with_bias(
+                &cfg,
+                start.view(),
+                &mut ledger,
+                &mut relax,
+                None,
+                &mut bias,
+                &mut rng,
+            )
+            .expect("finite start")
+        };
+
+        let climb_only = run_case(false, 30);
+        assert_eq!(climb_only.hops, 30);
+        assert_eq!(climb_only.restarts, 0);
+        assert_eq!(
+            climb_only.tabu.0, 6,
+            "gradient-free climb must reset quiet so stalls space by patience=5: {:?}",
+            climb_only.tabu
+        );
+
+        let mixed = run_case(true, 60);
+        let main_hops = mixed.hops - mixed.restarts;
+        assert!(mixed.restarts >= 1);
+        assert!(mixed.restarts < mixed.tabu.0);
+        assert_eq!(
+            mixed.tabu.0,
+            main_hops / 5,
+            "mixed restart/climb stalls must stay spaced by patience=5: hops={}, restarts={}, tabu={:?}",
+            mixed.hops,
+            mixed.restarts,
+            mixed.tabu
+        );
+    }
+
+    #[test]
+    fn a_climb_seat_move_resets_stall_quiet_clock() {
+        let mut cfg = Config::for_cluster(6).with_species(vec![1, 2, 2, 2, 2, 2], None);
+        cfg.escape_on_stall = true;
+        cfg.trail_on_stall = false;
+        cfg.restart_on_stall = false;
+        cfg.symmetrise_on_stall = false;
+        cfg.tabu_on_stall = true;
+        cfg.tabu_capacity = 1000;
+        cfg.return_screen = false;
+        cfg.bayes_screen = false;
+        cfg.calibrated_screen = false;
+        cfg.orbit_complete_on_new = false;
+        cfg.energy_lattice = false;
+        cfg.prior_soap = false;
+        cfg.escape_stall_patience = 4;
+        cfg.escape_stall_factor = 0.0;
+        cfg.restart_patience = 19;
+        cfg.general_collective = false;
+        cfg.homotop_ranked = false;
+        cfg.homotop_descent = false;
+        cfg.finish_improving = false;
+        cfg.soap_mode = SoapProposalMode::Off;
+        cfg.screen_margin = f64::INFINITY;
+        cfg.temperature = 100.0;
+        cfg.merge_radius = 1e-12;
+        cfg.screen_steps = 1;
+        cfg.relax_steps = 2;
+        cfg.max_hops = Some(9);
+        cfg.continuous_symmetry = ContinuousSymmetry::Off;
+        cfg.surfaces.clear();
+        let mut rng = StdRng::seed_from_u64(0x5ea7);
+        let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+        let distinct_state = |tag: usize| {
+            let mut v = start.clone();
+            v[0] += (tag as f64) * 10.0;
+            v
+        };
+        let seat_state = distinct_state(2);
+        let mut ledger = Ledger::new(200);
+        let mut bias = BasinBias::new(
+            ClusterFingerprint::for_keying(cfg.n_points, cfg.shape_keyed),
+            cfg.merge_radius,
+            cfg.bias_height,
+            cfg.bias_gamma,
+        );
+        let mut screen_calls = 0usize;
+        let mut relax = |ledger: &mut Ledger, state: ArrayView1<f64>, steps: usize| {
+            for _ in 0..steps {
+                if !ledger.charge() {
+                    break;
+                }
+            }
+            if steps == 1 {
+                screen_calls += 1;
+                return (5.5, state.to_owned());
+            }
+            match screen_calls {
+                0 => (5.0, distinct_state(1)),
+                1 => (5.5, distinct_state(2)),
+                hop => (7.0, distinct_state(hop + 1)),
+            }
+        };
+        let mut grad_seen: Vec<Array1<f64>> = Vec::new();
+        let mut grad = |_ledger: &mut Ledger, state: ArrayView1<f64>| {
+            grad_seen.push(state.to_owned());
+            Some(Array1::zeros(state.len()))
+        };
+        let outcome = run_with_bias(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut bias,
+            &mut rng,
+        )
+        .expect("finite start");
+        assert!(
+            grad_seen.iter().filter(|s| **s == seat_state).count() >= 2,
+            "multi-species climb seat move did not fire"
+        );
+        assert_eq!(outcome.hops, 9);
+        assert_eq!(
+            outcome.tabu.0, 2,
+            "seat move must reset quiet so stalls space by patience=4: {:?}",
+            outcome.tabu
+        );
     }
 
     #[test]
