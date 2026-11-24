@@ -10,6 +10,7 @@ import json
 import math
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -219,8 +220,54 @@ def test_panel_reproduce_commands_and_session_metadata(tmp_path):
     assert row["campaign"] == "tip4p-gmin"
     assert row["command"] == command
     assert row["boot_id"] == Path("/proc/sys/kernel/random/boot_id").read_text().strip()
-    assert row["cpu_affinity"] == sorted(__import__("os").sched_getaffinity(0))
+    assert row["cpu_affinity"] == available_cpus()
     assert re.fullmatch(r"[0-9a-f]{40}", row["code_revision"])
+
+
+def available_cpus():
+    """The CPUs the session records, by the rule scripts/session_metadata.py applies."""
+    if hasattr(os, "sched_getaffinity"):
+        return sorted(os.sched_getaffinity(0))
+    return list(range(os.cpu_count() or 1))
+
+
+def session_metadata_module():
+    spec = importlib.util.spec_from_file_location("session_metadata_test", ROOT / "scripts" / "session_metadata.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_session_affinity_is_the_scheduler_affinity_where_the_os_has_one(monkeypatch):
+    module = session_metadata_module()
+    monkeypatch.setattr(os, "sched_getaffinity", lambda pid: {5, 2, 3}, raising=False)
+    monkeypatch.setattr(os, "cpu_count", lambda: 64)
+    assert module.cpu_affinity() == [2, 3, 5]
+
+
+def test_session_affinity_falls_back_to_the_cpu_count_without_a_scheduler_call(monkeypatch):
+    module = session_metadata_module()
+    monkeypatch.delattr(os, "sched_getaffinity", raising=False)
+    monkeypatch.setattr(os, "cpu_count", lambda: 4)
+    assert module.cpu_affinity() == [0, 1, 2, 3]
+    monkeypatch.setattr(os, "cpu_count", lambda: None)
+    assert module.cpu_affinity() == [0]
+
+
+def test_the_session_record_takes_its_affinity_from_that_rule(monkeypatch):
+    module = session_metadata_module()
+    monkeypatch.delattr(os, "sched_getaffinity", raising=False)
+    monkeypatch.setattr(os, "cpu_count", lambda: 3)
+    row = module.record("campaign", ["cmd"], ROOT)
+    assert row["cpu_affinity"] == [0, 1, 2] and row["cpu_affinity_text"] == "0,1,2"
+
+
+def test_the_crest_equal_session_is_pinned_only_where_taskset_exists(monkeypatch):
+    runner = crest_equal_runner()
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/taskset")
+    assert runner.pin_prefix("3") == ["taskset", "-c", "3"]
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    assert runner.pin_prefix("3") == []
 
 
 def test_an_untraced_number_fails_the_audit():
@@ -1838,14 +1885,14 @@ def crest_equal_runner():
 
 def test_the_crest_equal_runner_records_its_session_before_any_run(tmp_path):
     runner = crest_equal_runner()
-    core = str(min(__import__("os").sched_getaffinity(0)))
+    core = str(min(available_cpus()))
     out = tmp_path / "sessions.jsonl"
     runner.record_session(out, core, ["scripts/crest_equal/run_panel.py", "--seed", "2000"])
     row = json.loads(out.read_text())
     assert row["schema"] == "anneal-session-v2"
     assert row["campaign"] == "crest-equal-h2o6"
     assert row["command"] == ["scripts/crest_equal/run_panel.py", "--seed", "2000"]
-    assert row["cpu_affinity"] == [int(core)]
+    assert row["cpu_affinity"] == ([int(core)] if shutil.which("taskset") else available_cpus())
     assert set(row["compilers"]) == {"rustc", "cargo", "gfortran", "cc"}
 
 
@@ -2218,6 +2265,61 @@ def test_tblite_receipt_reads_package_metadata(tmp_path):
     assert receipt["metadata_sha256"] == hashlib.sha256(
         metadata.read_bytes()
     ).hexdigest()
+
+
+def test_tblite_receipt_falls_back_to_tomli_without_tomllib(tmp_path):
+    """Python 3.10 has no tomllib: the receipt reads the metadata through tomli there."""
+    metadata = tmp_path / "fpm.toml"
+    metadata.write_text('name = "tblite"\nversion = "0.7.0"\n')
+    code = (
+        "import importlib.abc, importlib.util, sys, types, tomllib\n"
+        "tomli = types.ModuleType('tomli')\n"
+        "tomli.loads = tomllib.loads\n"
+        "tomli.loaded_as = 'tomli'\n"
+        "sys.modules['tomli'] = tomli\n"
+        "sys.modules.pop('tomllib')\n"
+        "class NoTomllib(importlib.abc.MetaPathFinder):\n"
+        "    def find_spec(self, name, path=None, target=None):\n"
+        "        if name == 'tomllib':\n"
+        "            raise ImportError('tomllib is not part of this Python')\n"
+        "sys.meta_path.insert(0, NoTomllib())\n"
+        "spec = importlib.util.spec_from_file_location('tblite_receipt', sys.argv[1])\n"
+        "module = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(module)\n"
+        "assert module.tomllib.loaded_as == 'tomli'\n"
+        "print(module.receipt(open(sys.argv[2], 'rb').read())['version'])\n"
+    )
+    run = subprocess.run([sys.executable, "-c", code, str(ROOT / "paper/jctc/scripts/tblite_receipt.py"), str(metadata)], capture_output=True, text=True, check=False)
+    assert run.returncode == 0, run.stderr[-2000:]
+    assert run.stdout.strip() == "0.7.0"
+
+
+def test_the_test_dependencies_declare_tomli_for_python_310():
+    marker = "tomli>=2; python_version < '3.11'"
+    assert marker in (ROOT / "pyproject.toml").read_text()
+    assert marker in (ROOT / ".github/workflows/ci.yml").read_text()
+
+
+def test_a_template_switch_is_matched_as_a_word_without_a_regex_word_boundary(monkeypatch):
+    calls = []
+
+    def fake(*args, **kwargs):
+        calls.append(args)
+        return b"src/a.rs:    cfg.prior_core_extra = 1;\nsrc/b.rs:    if cfg.prior_core {\n"
+
+    monkeypatch.setattr(audit_mod, "git_bytes", fake)
+    assert audit_mod.reads_switch("rev", "prior_core")
+    assert not any("-E" in call or any("\\b" in part for part in call) for call in calls)
+    monkeypatch.setattr(audit_mod, "git_bytes", lambda *a, **k: b"src/a.rs: cfg.prior_core_extra = 1;\n")
+    assert not audit_mod.reads_switch("rev", "prior_core")
+    monkeypatch.setattr(audit_mod, "git_bytes", lambda *a, **k: b"")
+    assert not audit_mod.reads_switch("rev", "prior_core")
+
+
+def test_a_template_switch_in_an_old_revision_is_read_through_a_fixed_string_search():
+    for name in audit_mod.TEMPLATE_SWITCHES:
+        assert audit_mod.reads_switch("c2de652d", name)
+    assert not audit_mod.reads_switch("a24ba760", "prior_core")
 
 
 @pytest.mark.parametrize("path", ["CITATION.cff", ".zenodo.json"])

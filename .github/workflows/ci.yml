@@ -428,7 +428,7 @@ jobs:
       - name: Install maturin + pytest + array-api-strict
         run: |
           .venv/bin/python -m pip install --upgrade pip
-          .venv/bin/python -m pip install "maturin>=1.5,<2" pytest numpy scipy sympy array-api-strict
+          .venv/bin/python -m pip install "maturin>=1.5,<2" pytest numpy scipy sympy array-api-strict "tomli>=2; python_version < '3.11'"
           .venv/bin/python -c "import array_api_strict"
 
       - name: maturin develop

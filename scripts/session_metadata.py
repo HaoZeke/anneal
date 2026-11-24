@@ -103,8 +103,15 @@ def cpu_model() -> str | None:
     return platform.processor() or None
 
 
+def cpu_affinity() -> list[int]:
+    """The CPUs this process may run on; macOS has no affinity call, so every CPU counts."""
+    if hasattr(os, "sched_getaffinity"):
+        return sorted(os.sched_getaffinity(0))
+    return list(range(os.cpu_count() or 1))
+
+
 def record(campaign: str, command: list[str], root: Path, anneal_repro: Path | None = None) -> dict[str, object]:
-    affinity = sorted(os.sched_getaffinity(0))
+    affinity = cpu_affinity()
     return {
         "schema": "anneal-session-v2",
         "campaign": campaign,

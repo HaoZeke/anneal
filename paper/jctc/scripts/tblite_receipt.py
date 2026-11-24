@@ -7,9 +7,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import tomllib
 import urllib.request
 from pathlib import Path
+
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib
 
 
 COMMIT = "fa8a4416e8fe093d0075bc10ac875494c2a449a9"

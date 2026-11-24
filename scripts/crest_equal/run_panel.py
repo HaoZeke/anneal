@@ -703,13 +703,16 @@ def threads() -> None:
         os.environ[name] = "1"
 
 
+def pin_prefix(core: str) -> list[str]:
+    """The command that pins the session record to one core; macOS has no taskset, so it is unpinned there."""
+    return ["taskset", "-c", core] if shutil.which("taskset") else []
+
+
 def record_session(sessions: Path, core: str, command: list[str]) -> None:
     """Append this session's boot, affinity, toolchain and revision record before any search runs."""
     subprocess.run(
         [
-            "taskset",
-            "-c",
-            core,
+            *pin_prefix(core),
             sys.executable,
             str(SESSION_METADATA),
             "--output",

@@ -2334,6 +2334,16 @@ def crest_equal(audit: Audit) -> None:
 TEMPLATE_SWITCHES = ("prior_reseed", "prior_growth", "prior_core", "prior_motif")
 
 
+def reads_switch(revision: str, name: str) -> bool:
+    """Some file under src at the revision reads ``cfg.<name>`` as a whole word.
+
+    git grep -E leaves the word boundary to the platform regex library, and
+    the BSD one has no \\b. The pattern is fixed text and the match is made here."""
+    hits = git_bytes("grep", "-a", "-h", "-F", f"cfg.{name}", revision, "--", "src").decode(errors="replace")
+    word = re.compile(rf"cfg\.{name}\b")
+    return any(word.search(line) for line in hits.splitlines())
+
+
 def prior_switches(audit: Audit) -> None:
     """The current method exposes only prior_soap and rejects retired controls."""
     pattern = "|".join(rf"cfg\.{name}\b" for name in TEMPLATE_SWITCHES)
@@ -2351,8 +2361,7 @@ def prior_switches(audit: Audit) -> None:
     removed = git("merge-base", "--is-ancestor", "1c1b1238", "HEAD").returncode == 0
     audit.record(removed, PAPER, "the template removal is in this history", "1c1b1238", "1c1b1238" if removed else "absent")
     for revision in ("c2de652d", "e3ed7dad", "9a30f319", "beb89163"):
-        found = sorted({name for name in TEMPLATE_SWITCHES
-                        if git("grep", "-q", "-E", rf"cfg\.{name}\b", revision, "--", "src").returncode == 0})
+        found = sorted({name for name in TEMPLATE_SWITCHES if reads_switch(revision, name)})
         audit.record(len(found) == len(TEMPLATE_SWITCHES), PAPER, f"revision {revision} reads the template switches",
                      " ".join(sorted(TEMPLATE_SWITCHES)), " ".join(found) or "none")
     has = git("grep", "-q", "prior_core", "a24ba760", "--", "src").returncode == 0
