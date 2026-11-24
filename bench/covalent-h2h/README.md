@@ -737,9 +737,11 @@ Seed 2009's hit is not an energy of its geometry. Anneal stops at call
 from a reused wavefunction; the same geometry alone in the engine, and
 xtb 6.7.1 `--sp --etemp 3000`, give -449.050334 eV, 11.6 eV above the
 reference (`gfn2/scc-false-minimum/`, which reproduces it in three
-calls). `gfn2/false-hits.csv` names the row, and `--false-hits` counts it
-as a miss at the full budget, ranked after every hit. The Si10 number
-for the paper is that one:
+calls). `gfn2/false-hits.csv` names the row, and `--false-hits` counts
+it as a miss at the full budget, ranked after every hit, with `best`
+set to the `xtb_eV` of that file. `filter_rows` in
+`scripts/covalent_h2h/gfn2_crest.py` applies this to both `--summary`
+and `--rescore`. The Si10 number for the paper is that one:
 
 | system | code | hits | median calls | IQR | best / eV | median wall / s | inside / call | outside / call |
 |---|---|---|---|---|---|---|---|---|
@@ -811,12 +813,20 @@ that are identical byte for byte.
 The rows are in `gfn2/rows.csv` with the anneal revision in the code
 cell. Anneal ran through engine `04aceaa7`, whose sha256 the rows give.
 Both codes ran seeds 2000-2011 on C20 and 2000-2005 on Si13, serial on
-core 0 with hostname `bench`. On Si13 every anneal call starts its SCC
-from xtb's own guess (the engine's warm move set to zero, `ab93b60b`).
-The Si10, C10 and C20 rows were measured before that, with the engine
-reusing the previous call's wavefunction; their minima give the same
-energy from a fresh SCC to 1e-10 eV, but Si13 and Si20 minima do not
-(below).
+core 0 with hostname `bench`.
+
+The recorded Si13 GFN2 hit results are void. `gfn2/rows.csv` keeps
+them: 6 `anneal-general` rows and 6 `crest` rows on seeds 2000-2005,
+all at `c1c02d16`. Their hits count against -599.34546694 eV, the Si13
+reference those runs used: anneal seeds 2000, 2001, 2002 and 2004 end
+on it, `crest` seeds 2001-2004 within 1e-3 eV of it, and anneal seeds
+2005 and 2003 below it, at -617.18016907 and -624.70446339 eV. Seed
+2003 ends 25.36 eV below that reference, and xtb gives its structure
+-624.70443593 eV (`gfn2/minima.csv`). `gfn2/rescore.csv` rescores the
+`crest` rows against seed 2003's energy and finds 0 hits in 6 runs.
+That target is the best anneal energy on one seed. `REFERENCE` in
+`scripts/covalent_h2h/gfn2_crest.py` has no Si13 entry, so Si13 has no
+valid reference yet.
 
 - The C20 reference, -1148.85383633 eV, is a cage with every atom
   three-coordinated and bonds from 1.449 Å. One run found it: anneal
@@ -825,17 +835,10 @@ energy from a fresh SCC to 1e-10 eV, but Si13 and Si20 minima do not
   of either code has reached it: the 24 timed runs below, and six untimed
   anneal runs on seeds 3000-3005, three at 1e5 calls and three at 3e5.
   xtb 6.7.1 gives the cage the same energy from a fresh SCC, to 1e-9 Eh.
-- The Si13 reference, -599.34546694 eV, is the compact minimum anneal
-  reached with a fresh SCC on every call on four of six untimed seeds
-  (3002-3005 at 30000 calls; 3000 and 3001 were stopped before the end).
-  xtb 6.7.1 gives it -22.025539659 Eh.
-
 | system | code | hits | median calls | IQR | best / eV | median wall / s | inside / call | outside / call |
 |---|---|---|---|---|---|---|---|---|
 | C20 | anneal G, `5351f272` | 0/12 | 100,000 | 0 | -1148.292908 | 1866.6 | 18.54 ms | 0.005 ms |
 | C20 | CREST | 0/12 | 78,581.5 | 4,776.8 | -1146.770080 | 1545.1 | 19.30 ms | 0.307 ms |
-| Si13 | anneal G, `c1c02d16` | 6/6 | 1,974.5 | 825.8 | -624.704463 | 264.6 | 222.19 ms | 0.031 ms |
-| Si13 | CREST | 4/6 | 103,804.5 | 89,756 | -599.345440 | 4191.4 | 47.01 ms | 0.282 ms |
 
 - C20: neither code reaches the cage. Anneal's best is lower than
   CREST's on 134 of the 144 pairs of seeds (Mann-Whitney p = 0.0004 on
@@ -848,31 +851,9 @@ energy from a fresh SCC to 1e-10 eV, but Si13 and Si20 minima do not
   cores. The example of this series ends seeds 2005 and 2007 at the same
   energies after the same 1e5 calls, and repeats seeds 2000 and 2001 over
   their first 5000 calls.
-- Si13: anneal reaches the reference on all six seeds, in 683 to 2,487
-  calls, and CREST on four, in 95,213 to 143,630 (Fisher p = 0.45,
-  Mann-Whitney p = 0.005, a miss ranked after every hit). CREST's other
-  two seeds, 2000 and 2005, end before any search: the SCC of the xtb
-  `--opt` of the start does not converge in xtb's 250 iterations, and
-  their calls are 0. Measured on `c1c02d16`, serial on core 0 with
-  nothing else running. An anneal call costs 222 ms inside xtb against
-  CREST's 47 ms: from a fresh SCC, 0.5% to 15% of anneal's calls on these
-  seeds (366 of 2,487 on seed 2001) are SCCs that do not converge in 500
-  iterations, each about 2 s.
-- Anneal stops at the first energy at or below the reference, and seeds
-  2003 and 2005 stop below it, at -624.70446339 and -617.18016907 eV. The
-  first is an open ring in which every atom has one or two neighbours,
-  and xtb 6.7.1 gives it -22.957465589557 Eh from a fresh start. It is
-  the lowest Si13 minimum any run has reached, recorded in
-  `gfn2/minima.csv` with its structure in `gfn2/minima/si13-ring.xyz`.
-  Against it CREST hits on none of its six seeds (`gfn2/rescore.csv`,
-  from `--rescore si13 -624.70446339`). Anneal's rows are not rescored:
-  each stopped at the reference it ran with.
 - Si20 has no panel reference yet. With the engine reusing the previous
-  wavefunction, the Si13 and Si20 minima had energies a fresh SCC does
-  not reproduce: an Si13 minimum at -601.12421 eV is -593.51232 eV fresh,
-  and Si20 minima near -979 eV are near -868 eV. One Si13 search recorded
-  a planar sheet at -640.659 eV whose SCC does not converge from a fresh
-  start. Before the element floor, 74% of anneal's first 3,000 Si20 calls
+  wavefunction, its minima near -979 eV are near -868 eV from a fresh
+  SCC. Before the element floor, 74% of anneal's first 3,000 Si20 calls
   from a fresh SCC were SCCs that do not converge, nearly all on trials
   with a pair at 0.90-0.92 Å, just past the single floor.
 - Si20 reference search (`gfn2/si20-capped.csv`): the example on
@@ -905,23 +886,16 @@ on `bench/cov-floor2`; this series carries the same change on this base.
 
 - It was gated against `c1c02d16` on seeds 2000-2011 of Si13 and C20 at
   1e5 calls, both arms in one untimed session with eight runs at a time
-  (`gfn2/floor_gate.csv`). On Si13 both arms hit on all twelve seeds.
-  2.89% of the floor arm's calls are SCCs that do not converge, against
-  6.05%. Its median calls to hit is 2,207 against 1,897 (Mann-Whitney
-  p = 0.45). On C20 neither arm reaches the cage, no call fails its SCC
-  in either, and the median best is -1146.550 eV in both (p = 0.86). The
-  `c1c02d16` arm repeats the timed Si13 calls to hit seed for seed. The
-  Si10, C10, Si13 and C20 rows above are without it.
+  (`gfn2/floor_gate.csv`). On C20 neither arm reaches the cage, no call
+  fails its SCC in either, and the median best is -1146.550 eV in both
+  (p = 0.86). The Si10, C10 and C20 rows above are without it.
 - The same gate against develop `3c189e92` (`floor-gate/`, untimed,
   eight runs at a time), on this series as it was based on `3c189e92`
   (`bench/cov-floor-develop`). Develop's example has no Si13 or C20, so
   the GFN2 arms are `98a69388`, develop with the series up to the Si13
   rows, and `a52726af`, with the floor (`floor-gate/gfn2.csv`), pushed
-  as `51abe20f` and `c3566383` with the same trees. Both arms repeat the
-  `c1c02d16` gate seed for seed: on Si13 12/12 hits in each, SCC failures
-  2.89% of calls against 6.05%, median calls to hit 2,207 against 1,897
-  (p = 0.45). The floor arm takes more calls on six seeds, fewer on five
-  and the same on one. On C20 the two arms are 0/12 with no SCC failure,
+  as `51abe20f` and `c3566383` with the same trees. On C20 the two arms
+  are 0/12 with no SCC failure,
   median best -1146.550 eV (p = 0.86). The paper headline panel
   (`scripts/paper_0120/arm_gate.py`, LJ38 to LJ150, Au55 and M80 at ρ=6
   and 14, seeds 2000-2011, the paper budgets) ran on `3c189e92` and
@@ -932,7 +906,9 @@ on `bench/cov-floor2`; this series carries the same change on this base.
   those of `bench/paper-0120` on develop.
 
 `scripts/covalent_h2h/gfn2_floor_gate.py` runs a same-session gate of
-two example builds and summarises its rows.
+two example builds and summarises its rows. It skips the recorded Si13
+rows that `floor-gate/gfn2.csv` and `gfn2/floor_gate.csv` keep, since
+its own `REFERENCE` has no Si13 entry.
 
 ## Pins
 
@@ -970,8 +946,8 @@ Three first-parent commits changed it:
 - `tc20-bowl.xyz`, `tc20-flake.xyz`: the C20 bowl and the best unbiased flake.
 - `c10-96/`: the 96-seed C10 rows.
 - `gfn2/`: per-seed rows and summaries of GFN2-xTB Si10, C10, Si13 and
-  C20, anneal against CREST, CREST's rescore against the Si13 ring, the
-  lowest minima with their xtb energies, the element-floor gate, and
+  C20, anneal against CREST, the lowest minima with their xtb energies,
+  the element-floor gate, and
   the capped Si20 reference search with a fresh xtb single point of each
   best geometry.
 - `floor-gate/`: the element-floor gate against develop, GFN2 and the

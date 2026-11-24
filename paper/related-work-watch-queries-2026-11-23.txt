@@ -1,4 +1,4 @@
-Related-work watch queries run 2026-11-23
+Related-work watch queries run 2026-11-23, pass 1 (merged from #209)
 
 arXiv queries were sorted by submittedDate descending and screened over the
 two-week window 2026-11-08 through 2026-11-23 (plus 2026-11-07 via the
@@ -100,3 +100,467 @@ GET https://www.faccts.de/orca/
 GET https://www.faccts.de/news/
 GET https://www.faccts.de/docs/orca/6.1/manual/contents/preface/changes.html
 GET https://www.faccts.de/docs/orca/6.2/manual/
+
+Related-work watch queries run 2026-11-23, pass 2 (merged from #214)
+
+arXiv queries were sorted by submittedDate descending and screened over the
+30-day window 2026-10-24 through 2026-11-23 (plus id_list checks of 59 existing
+arXiv preprints without DOIs), then checked against paper/related-work.md,
+paper/related-work.bib, and paper/jctc/refs.bib. Two arXiv queries that hit
+HTTP 429 or read timeouts on the initial pass were explicitly retried and
+succeeded with HTTP 200. Crossref used from-pub-date:2026-10-24,
+until-pub-date:2026-11-23 (both 5-journal ISSN-filtered across JCTC, JCIM, JCP,
+CPC, and PCCP and unfiltered), J. Comput. Chem. and J. Global Optim. ISSN
+queries, ChemRxiv/bioRxiv/Zenodo prefix sweeps, and from-created-date:2026-11-18
+through 2026-11-20 recent-deposit sweeps. GitHub, GitLab, PyPI, FACCTs/ORCA,
+and Cambridge GMIN/OPTIM/CCD pages were checked on 2026-11-23.
+
+arXiv API:
+GET https://export.arxiv.org/api/query?search_query=all%3A%22cluster+global+optimization%22+OR+all%3A%22cluster+global+optimisation%22&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=all%3A%22basin+hopping%22+OR+all%3A%22basin-hopping%22&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=all%3A%22Lennard-Jones+cluster%22+OR+%28all%3A%22Lennard-Jones%22+AND+all%3Acluster%29&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=all%3A%22water+cluster%22+AND+%28all%3A%22global+optimization%22+OR+all%3A%22global+optimisation%22+OR+all%3A%22structure+search%22+OR+all%3A%22basin+hopping%22+OR+all%3Aconformer+OR+all%3Aisomer%29&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=all%3A%22TIP4P%22+OR+all%3A%22TTM2%22+OR+all%3A%22TTM3%22+OR+all%3A%22TTM2.1%22+OR+all%3A%22MB-pol%22&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=all%3A%22conformer+search%22+OR+all%3A%22conformational+search%22&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=all%3A%22minima+hopping%22+OR+all%3A%22minima-hopping%22&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=all%3AGOFEE+OR+all%3AAGOX+OR+%28all%3ACREST+AND+all%3AxTB%29+OR+%28all%3AGOAT+AND+all%3AORCA%29+OR+%28all%3AGOAT+AND+all%3Acluster%29+OR+%28all%3Apele+AND+all%3A%22basin+hopping%22%29+OR+%28all%3AGMIN+AND+all%3AWales%29+OR+%28all%3AASE+AND+all%3A%22basin+hopping%22%29&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=%28all%3Acluster+AND+%28all%3A%22global+optimization%22+OR+all%3A%22global+optimisation%22+OR+all%3A%22structure+search%22+OR+all%3A%22basin+hopping%22+OR+all%3A%22minima+hopping%22%29%29&start=0&max_results=200&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=cat%3Aphysics.chem-ph+OR+cat%3Aphysics.atm-clus+OR+cat%3Acond-mat.mtrl-sci+OR+cat%3Aphysics.comp-ph&start=0&max_results=200&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?id_list=2510.25938,2610.12523,2611.09925,2607.09555,2411.18087,2609.31533,2503.02331,2605.18364,2603.00011,2404.10492,2609.29413,2601.01261,2603.02428,2604.25908,2401.13953,2608.27680,2608.17149,2609.20592,2606.15830,2607.12134,2611.13143,2602.10233,2606.03405,2510.13448,2505.07357&max_results=50
+GET https://export.arxiv.org/api/query?id_list=2608.19404,2609.20777,2611.06237,2610.15190,2611.17776,2604.27636,2611.16990,2611.17670,2610.32968,2611.03699,2610.28996,2611.19365,2611.21489,2601.06444,2610.14999,2611.17462,2606.03199,2609.18093,2610.14239,2609.03193,2611.19696,2609.34592,2610.38517,2611.24807,2611.19072&max_results=50
+GET https://export.arxiv.org/api/query?id_list=2611.10564,2609.31277,2611.23760,2611.22050,2611.22332,2611.24188,2609.24720,2610.36280,2611.24744&max_results=50
+GET https://export.arxiv.org/api/query?id_list=2611.24088
+GET https://export.arxiv.org/api/query?id_list=2611.24097
+GET https://export.arxiv.org/api/query?id_list=2611.10378
+
+Crossref API:
+GET https://api.crossref.org/works?query.bibliographic=cluster%20global%20optimization&filter=from-pub-date:2026-10-24,until-pub-date:2026-11-23,issn:1549-9618,issn:1549-9626,issn:1549-9596,issn:1549-960X,issn:0021-9606,issn:1089-7690,issn:0010-4655,issn:1879-2944,issn:1463-9076,issn:1463-9084&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=basin%20hopping%20cluster&filter=from-pub-date:2026-10-24,until-pub-date:2026-11-23,issn:1549-9618,issn:1549-9626,issn:1549-9596,issn:1549-960X,issn:0021-9606,issn:1089-7690,issn:0010-4655,issn:1879-2944,issn:1463-9076,issn:1463-9084&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=Lennard-Jones%20cluster&filter=from-pub-date:2026-10-24,until-pub-date:2026-11-23,issn:1549-9618,issn:1549-9626,issn:1549-9596,issn:1549-960X,issn:0021-9606,issn:1089-7690,issn:0010-4655,issn:1879-2944,issn:1463-9076,issn:1463-9084&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=water%20cluster%20global%20optimization&filter=from-pub-date:2026-10-24,until-pub-date:2026-11-23,issn:1549-9618,issn:1549-9626,issn:1549-9596,issn:1549-960X,issn:0021-9606,issn:1089-7690,issn:0010-4655,issn:1879-2944,issn:1463-9076,issn:1463-9084&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=TIP4P%20water%20cluster&filter=from-pub-date:2026-10-24,until-pub-date:2026-11-23,issn:1549-9618,issn:1549-9626,issn:1549-9596,issn:1549-960X,issn:0021-9606,issn:1089-7690,issn:0010-4655,issn:1879-2944,issn:1463-9076,issn:1463-9084&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=conformer%20search&filter=from-pub-date:2026-10-24,until-pub-date:2026-11-23,issn:1549-9618,issn:1549-9626,issn:1549-9596,issn:1549-960X,issn:0021-9606,issn:1089-7690,issn:0010-4655,issn:1879-2944,issn:1463-9076,issn:1463-9084&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=minima%20hopping&filter=from-pub-date:2026-10-24,until-pub-date:2026-11-23,issn:1549-9618,issn:1549-9626,issn:1549-9596,issn:1549-960X,issn:0021-9606,issn:1089-7690,issn:0010-4655,issn:1879-2944,issn:1463-9076,issn:1463-9084&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=CREST%20GOAT%20AGOX%20GOFEE%20ASE%20pele%20GMIN%20cluster&filter=from-pub-date:2026-10-24,until-pub-date:2026-11-23,issn:1549-9618,issn:1549-9626,issn:1549-9596,issn:1549-960X,issn:0021-9606,issn:1089-7690,issn:0010-4655,issn:1879-2944,issn:1463-9076,issn:1463-9084&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?filter=from-pub-date:2026-10-24,issn:1549-9618,issn:1549-9626,issn:1549-9596,issn:1549-960X,issn:0021-9606,issn:1089-7690,issn:0010-4655,issn:1879-2944,issn:1463-9076,issn:1463-9084&query.bibliographic=%22basin%20hopping%22&rows=50&select=DOI,title,published,container-title
+GET https://api.crossref.org/works?filter=from-pub-date:2026-10-24,issn:1549-9618,issn:1549-9626,issn:1549-9596,issn:1549-960X,issn:0021-9606,issn:1089-7690,issn:0010-4655,issn:1879-2944,issn:1463-9076,issn:1463-9084&query.bibliographic=conformer&rows=50&select=DOI,title,published,container-title
+GET https://api.crossref.org/works?filter=from-pub-date:2026-10-24,issn:1549-9618,issn:1549-9626,issn:1549-9596,issn:1549-960X,issn:0021-9606,issn:1089-7690,issn:0010-4655,issn:1879-2944,issn:1463-9076,issn:1463-9084&query.bibliographic=cluster%20global&rows=50&select=DOI,title,published,container-title
+GET https://api.crossref.org/works?query.bibliographic=cluster%20global%20optimization&filter=from-pub-date:2026-10-24,until-pub-date:2026-11-23&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=basin%20hopping%20cluster&filter=from-pub-date:2026-10-24,until-pub-date:2026-11-23&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=Lennard-Jones%20cluster&filter=from-pub-date:2026-10-24,until-pub-date:2026-11-23&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=water%20cluster%20global%20optimization&filter=from-pub-date:2026-10-24,until-pub-date:2026-11-23&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=conformer%20search&filter=from-pub-date:2026-10-24,until-pub-date:2026-11-23&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=minima%20hopping&filter=from-pub-date:2026-10-24,until-pub-date:2026-11-23&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=CREST%20GOAT%20AGOX%20GOFEE%20cluster%20conformer&filter=from-pub-date:2026-10-24,until-pub-date:2026-11-23&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?filter=from-created-date:2026-11-20&rows=100&query.bibliographic=%22basin%20hopping%22%20OR%20%22Lennard-Jones%20cluster%22%20OR%20%22minima%20hopping%22%20OR%20%22water%20cluster%22%20OR%20%22conformer%20search%22%20OR%20%22GOFEE%22%20OR%20%22AGOX%22%20OR%20%22CREST%22%20OR%20%22GOAT%22&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?filter=from-created-date:2026-11-20,issn:1549-9618,issn:1549-9626,issn:1549-9596,issn:1549-960X,issn:0021-9606,issn:1089-7690,issn:0010-4655,issn:1879-2944,issn:1463-9076,issn:1463-9084&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?filter=prefix:10.26434,from-created-date:2026-11-15&sort=created&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?filter=prefix:10.64898,from-created-date:2026-11-20&query.bibliographic=conformer%20OR%20cluster%20OR%20water%20OR%20Lennard-Jones&rows=50&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?filter=from-pub-date:2026-10-24,issn:0192-8651,issn:1096-987X&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?filter=from-pub-date:2026-10-24,issn:0925-5001,issn:1573-2916&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22basin%20hopping%22&filter=from-created-date:2026-11-18&rows=50&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22Lennard-Jones%22%20cluster&filter=from-created-date:2026-11-18&rows=50&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22water%20cluster%22&filter=from-created-date:2026-11-18&rows=50&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22conformer%20search%22&filter=from-created-date:2026-11-18&rows=50&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=%22minima%20hopping%22&filter=from-created-date:2026-11-18&rows=50&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?query.bibliographic=AGOX%20GOFEE&filter=from-created-date:2026-11-18&rows=50&select=DOI,title,author,published,created,URL,type,container-title,abstract
+GET https://api.crossref.org/works?filter=prefix:10.5281,from-created-date:2026-11-15&query.bibliographic=Lennard-Jones&rows=50&select=DOI,title,author,published,created,abstract
+GET https://api.crossref.org/works?filter=prefix:10.5281,from-created-date:2026-11-15&query.bibliographic=%22basin%20hopping%22&rows=50&select=DOI,title,author,published,created,abstract
+GET https://api.crossref.org/works?filter=prefix:10.5281,from-created-date:2026-11-15&query.bibliographic=%22water%20cluster%22&rows=50&select=DOI,title,author,published,created,abstract
+GET https://api.crossref.org/works/10.1021/acs.jctc.6c01692
+GET https://api.crossref.org/works/10.1021/acs.jctc.6c01678
+GET https://api.crossref.org/works/10.26434/chemrxiv.15007659/v2
+GET https://api.crossref.org/works/10.26434/chemrxiv.15012596/v1
+GET https://api.crossref.org/works/10.1063/5.0350987
+GET https://api.crossref.org/works/10.1021/accountsmr.6c00279
+GET https://api.crossref.org/works/10.1021/jacs.6c17420
+
+GitHub, GitLab, PyPI, FACCTs/ORCA, and Cambridge release checks:
+GET https://api.github.com/repos/crest-lab/crest/releases?per_page=10
+GET https://api.github.com/repos/crest-lab/crest/commits?per_page=5
+GET https://api.github.com/repos/grimme-lab/xtb/releases?per_page=10
+GET https://api.github.com/repos/grimme-lab/xtb/releases?per_page=3
+GET https://api.github.com/repos/pele-python/pele/releases?per_page=10
+GET https://api.github.com/repos/pele-python/pele/tags?per_page=10
+GET https://api.github.com/repos/ksags/GOFEE/releases?per_page=10
+GET https://api.github.com/repos/ksags/GOFEE/tags?per_page=10
+GET https://api.github.com/search/repositories?q=GOFEE%20in%3Aname&per_page=20
+GET https://api.github.com/search/repositories?q=GOAT%20global%20optimization%20chemistry&per_page=20
+GET https://api.github.com/search/repositories?q=GMIN%20Wales%20cluster&per_page=20
+GET https://gitlab.com/api/v4/projects/agox%2Fagox/releases?per_page=10
+GET https://gitlab.com/api/v4/projects/agox%2Fagox/repository/tags?per_page=10
+GET https://gitlab.com/api/v4/projects/agox%2Fagox/repository/commits?per_page=5
+GET https://gitlab.com/api/v4/projects/ase%2Fase/releases?per_page=10
+GET https://gitlab.com/api/v4/projects/ase%2Fase/repository/tags?per_page=10
+GET https://gitlab.com/api/v4/projects/ase%2Fase/repository/commits?per_page=5
+GET https://gitlab.com/api/v4/projects?search=GOAT%20global%20optimization&simple=true&per_page=20
+GET https://gitlab.com/api/v4/projects?search=GMIN%20Wales&simple=true&per_page=20
+GET https://gitlab.com/api/v4/projects?search=GOFEE&simple=true&per_page=20
+GET https://pypi.org/pypi/ase/json
+GET https://pypi.org/pypi/agox/json
+GET https://pypi.org/pypi/pele/json
+GET https://www-wales.ch.cam.ac.uk/GMIN/
+GET https://www-wales.ch.cam.ac.uk/OPTIM/
+GET https://www-wales.ch.cam.ac.uk/software.html
+GET https://www-wales.ch.cam.ac.uk/CCD.html
+GET https://www.faccts.de/orca/
+GET https://www.faccts.de/news/
+
+Result: one verified record added (`heSrtio3Gcmc2026`). The other four
+verified records were already on develop (`unglertJaxrens2026`,
+`wenWaterHessian2026`, `huangDegauss3p2026`, `matoMolscrub2026`). No numbered
+release changed: CREST remains v3.0.2, xtb v6.8.0, AGOX v3.11.1, ASE 3.29.0,
+pele v0.1.2, ORCA 6.1.1, and GMIN/OPTIM pages remain dated 17 March 2022.
+
+Additional #216 watch queries, with exact URL duplicates omitted:
+Related-work watch queries run 2026-11-23
+
+The two-week target window ran from 2026-11-09 through 2026-11-23,
+with Crossref publication filters starting at 2026-11-01, Crossref
+from-created-date sweeps from 2026-11-14/16/19/20/21 (including full
+ISSN and ChemRxiv prefix:10.26434 harvests), and arXiv queries sorted
+by submittedDate/lastUpdatedDate descending (plus id_list checks for
+arXiv:2609.22077 cited by new deposits). Entries already in
+paper/related-work.md, paper/related-work.bib, or paper/jctc/refs.bib
+were skipped. Repeated retries after HTTP 429 or transient 403/5xx
+responses used the same URL and were listed once in the original watch.
+Exact request URLs already present above are not repeated in this section.
+
+arXiv API and HTML checks:
+GET http://export.arxiv.org/api/query?search_query=all%3A%22cluster+global+optimization%22+OR+all%3A%22cluster+global+optimisation%22&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?search_query=all%3A%22basin+hopping%22+OR+all%3A%22basin-hopping%22&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?search_query=all%3A%22Lennard-Jones+cluster%22+OR+%28all%3A%22Lennard-Jones%22+AND+all%3Acluster%29&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?search_query=all%3A%22water+cluster%22+AND+%28all%3A%22global+optimization%22+OR+all%3A%22global+optimisation%22+OR+all%3A%22structure+search%22+OR+all%3A%22basin+hopping%22+OR+all%3Aconformer+OR+all%3Aisomer+OR+all%3ATIP4P%29&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?search_query=all%3A%22TIP4P%22+AND+%28all%3Acluster+OR+all%3Ahexamer+OR+all%3Aglobal+OR+all%3Aminima%29&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?search_query=all%3A%22conformer+search%22+OR+all%3A%22conformational+search%22&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?search_query=all%3A%22minima+hopping%22+OR+all%3A%22minima-hopping%22&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?search_query=%28all%3AGOFEE+OR+all%3AAGOX+OR+%28all%3ACREST+AND+all%3AxTB%29+OR+%28all%3AGOAT+AND+all%3AORCA%29+OR+%28all%3AGOAT+AND+all%3Acluster%29+OR+%28all%3Apele+AND+all%3A%22basin+hopping%22%29+OR+%28all%3AGMIN+AND+all%3A%22basin+hopping%22%29%29&start=0&max_results=200&sortBy=submittedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?search_query=%28all%3A%22structure+search%22+OR+all%3A%22global+optimization%22+OR+all%3A%22global+optimisation%22%29+AND+%28all%3A%22machine+learning+potential%22+OR+all%3A%22machine-learned+potential%22+OR+all%3AMLIP+OR+all%3A%22neural+network+potential%22+OR+all%3A%22universal+potential%22%29&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?search_query=cat%3Aphysics.chem-ph+OR+cat%3Aphysics.atm-clus+OR+cat%3Acond-mat.mtrl-sci+OR+cat%3Aphysics.comp-ph&start=0&max_results=200&sortBy=submittedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?search_query=cat%3Aphysics.chem-ph+OR+cat%3Aphysics.atm-clus+OR+cat%3Acond-mat.mtrl-sci+OR+cat%3Aphysics.comp-ph&start=200&max_results=200&sortBy=submittedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?search_query=cat%3Aphysics.chem-ph+OR+cat%3Aphysics.atm-clus+OR+cat%3Acond-mat.mtrl-sci+OR+cat%3Aphysics.comp-ph&start=400&max_results=200&sortBy=submittedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?search_query=%28all%3Acluster+AND+%28all%3A%22global+optimization%22+OR+all%3A%22global+optimisation%22+OR+all%3A%22structure+search%22+OR+all%3A%22structure+prediction%22+OR+all%3A%22basin+hopping%22+OR+all%3A%22minima+hopping%22%29%29&start=0&max_results=200&sortBy=submittedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?search_query=%28all%3A%22Lennard-Jones%22+AND+all%3Acluster%29&start=0&max_results=200&sortBy=submittedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?search_query=%28all%3Awater+AND+all%3Acluster+AND+%28all%3Asearch+OR+all%3Aoptimization+OR+all%3Aoptimisation+OR+all%3Aglobal+OR+all%3ATIP4P+OR+all%3Ahexamer%29%29&start=0&max_results=200&sortBy=submittedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?search_query=%28%28all%3Aconformer+OR+all%3Aconformational%29+AND+%28all%3Asearch+OR+all%3Asampling+OR+all%3Ageneration+OR+all%3Aensemble%29%29&start=0&max_results=200&sortBy=submittedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?search_query=%28%28all%3A%22structure+search%22+OR+all%3A%22global+minimum%22+OR+all%3A%22global+minima%22+OR+all%3A%22global+optimization%22+OR+all%3A%22global+optimisation%22%29+AND+%28all%3AMLIP+OR+all%3AMACE+OR+all%3ACHGNet+OR+all%3AAIMNet2+OR+all%3A%22machine+learning%22+OR+all%3A%22machine-learned%22+OR+all%3A%22neural+network+potential%22%29%29&start=0&max_results=200&sortBy=submittedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?search_query=%28all%3AGOFEE+OR+all%3AAGOX+OR+%28all%3ACREST+AND+%28all%3Aconformer+OR+all%3Acluster+OR+all%3Axtb%29%29+OR+%28all%3AGOAT+AND+%28all%3AORCA+OR+all%3Acluster+OR+all%3Aconformer+OR+all%3Aoptimization+OR+all%3Aoptimisation%29%29+OR+%28all%3Apele+AND+all%3A%22basin+hopping%22%29+OR+%28all%3AGMIN+AND+%28all%3AWales+OR+all%3Abasin+OR+all%3Acluster%29%29%29&start=0&max_results=200&sortBy=submittedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?search_query=cat%3Acs.LG+AND+%28all%3Aconformer+OR+all%3Acluster+OR+all%3A%22crystal+structure%22+OR+all%3A%22molecular+structure%22+OR+all%3A%22potential+energy%22%29&start=0&max_results=200&sortBy=submittedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?search_query=cat%3Amath.OC+AND+%28all%3A%22Lennard-Jones%22+OR+all%3AThomson+OR+all%3Acluster%29&start=0&max_results=200&sortBy=submittedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?search_query=all%3A%22basin+hopping%22+OR+all%3A%22basin-hopping%22+OR+all%3A%22minima+hopping%22+OR+all%3A%22minima-hopping%22&start=0&max_results=100&sortBy=lastUpdatedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?search_query=%28all%3A%22Lennard-Jones%22+AND+all%3Acluster%29+OR+all%3A%22cluster+global+optimization%22+OR+all%3A%22cluster+global+optimisation%22&start=0&max_results=100&sortBy=lastUpdatedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?search_query=%28all%3Awater+AND+all%3Acluster+AND+%28all%3Asearch+OR+all%3Aoptimization+OR+all%3Aoptimisation+OR+all%3ATIP4P+OR+all%3Ahexamer%29%29&start=0&max_results=100&sortBy=lastUpdatedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?search_query=%28all%3A%22conformer+search%22+OR+all%3A%22conformational+search%22+OR+all%3A%22conformational+sampling%22+OR+all%3AGOFEE+OR+all%3AAGOX+OR+%28all%3ACREST+AND+all%3AxTB%29+OR+%28all%3AGOAT+AND+all%3AORCA%29%29&start=0&max_results=100&sortBy=lastUpdatedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?search_query=submittedDate%3A%5B202611200000+TO+202611240000%5D&start=0&max_results=20&sortBy=submittedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?id_list=2611.17776%2C2611.26186%2C2611.19301%2C2611.24347%2C2611.23608%2C2611.11084%2C2611.11649
+GET https://arxiv.org/html/2611.24088
+GET https://arxiv.org/html/2611.20591
+GET http://export.arxiv.org/api/query?search_query=all%3A%22SEEKER%22+AND+all%3A%22Barone%22&max_results=5
+GET http://export.arxiv.org/api/query?search_query=all%3A%22Tsvetaev%22+AND+all%3A%22Monte+Carlo%22&max_results=5
+GET http://export.arxiv.org/api/query?search_query=all%3A%22Fornagiel%22+AND+all%3A%22lonkit%22&max_results=5
+GET http://export.arxiv.org/api/query?search_query=all%3A%22Katherine+Xie%22+AND+all%3A%22Thomson%22&max_results=5
+GET http://export.arxiv.org/api/query?search_query=cat:physics.chem-ph&start=0&max_results=50&sortBy=submittedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?search_query=cat:physics.atm-clus&start=0&max_results=50&sortBy=submittedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?search_query=cat:cond-mat.mtrl-sci&start=0&max_results=50&sortBy=submittedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?search_query=cat:physics.comp-ph&start=0&max_results=50&sortBy=submittedDate&sortOrder=descending
+GET http://export.arxiv.org/api/query?id_list=2611.24088,2611.19301,2611.19321,2611.14287
+GET http://export.arxiv.org/api/query?id_list=2611.24088,2611.20591
+GET http://export.arxiv.org/api/query?id_list=2609.22077
+
+Crossref API search and harvest queries:
+GET https://api.crossref.org/works?query=cluster+global+optimization&filter=from-pub-date%3A2026-11-01&sort=published&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract
+GET https://api.crossref.org/works?query=basin+hopping+cluster&filter=from-pub-date%3A2026-11-01&sort=published&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract
+GET https://api.crossref.org/works?query=Lennard-Jones+cluster&filter=from-pub-date%3A2026-11-01&sort=published&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract
+GET https://api.crossref.org/works?query=water+cluster+global+optimization&filter=from-pub-date%3A2026-11-01&sort=published&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract
+GET https://api.crossref.org/works?query=TIP4P+cluster&filter=from-pub-date%3A2026-11-01&sort=published&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract
+GET https://api.crossref.org/works?query=conformer+search&filter=from-pub-date%3A2026-11-01&sort=published&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract
+GET https://api.crossref.org/works?query=minima+hopping&filter=from-pub-date%3A2026-11-01&sort=published&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract
+GET https://api.crossref.org/works?query=CREST+GOAT+AGOX+GOFEE+pele+GMIN+cluster+conformer&filter=from-pub-date%3A2026-11-01&sort=published&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract
+GET https://api.crossref.org/works?query=%22basin+hopping%22+OR+%22Lennard-Jones+cluster%22+OR+%22minima+hopping%22+OR+%22water+cluster%22+OR+%22TIP4P%22+OR+%22conformer+search%22+OR+%22conformational+search%22+OR+%22GOFEE%22+OR+%22AGOX%22+OR+%22CREST%22+OR+%22GOAT%22&filter=from-created-date%3A2026-11-20&sort=created&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract
+GET https://api.crossref.org/works?query=%22basin+hopping%22+OR+%22Lennard-Jones%22+OR+%22minima+hopping%22+OR+%22water+cluster%22+OR+%22conformer+search%22+OR+%22GOFEE%22+OR+%22AGOX%22&filter=from-index-date%3A2026-11-20&sort=created&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract
+GET https://api.crossref.org/works?query.bibliographic=%22cluster+global+optimization%22+OR+%22cluster+global+optimisation%22+OR+%22global+optimization%22+cluster&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&sort=published&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=%22basin+hopping%22+OR+%22basin-hopping%22&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&sort=published&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=%22Lennard-Jones+cluster%22+OR+%22Lennard-Jones+clusters%22+OR+%22Lennard-Jones%22+cluster&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&sort=published&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=%22water+cluster%22+OR+%22water+clusters%22+OR+%22water+hexamer%22+OR+%22TIP4P%22&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&sort=published&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=%22conformer+search%22+OR+%22conformational+search%22+OR+%22conformational+sampling%22+OR+%22conformer+generation%22&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&sort=published&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=%22minima+hopping%22+OR+%22minima-hopping%22&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&sort=published&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=GOFEE+OR+AGOX+OR+%28CREST+AND+%28xtb+OR+conformer%29%29+OR+%28GOAT+AND+%28ORCA+OR+cluster+OR+conformer%29%29+OR+%28GMIN+AND+Wales%29+OR+%28pele+AND+%22energy+landscape%22%29&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&sort=published&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query=cluster+global+optimization&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query=Lennard-Jones+cluster+global+minimum&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query=water+cluster+global+optimization+TIP4P+hexamer&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query=conformer+search+generation+xtb+CREST+GOAT&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=%22basin+hopping%22+OR+%22Lennard-Jones%22+OR+%22minima+hopping%22+OR+%22water+cluster%22+OR+%22water+hexamer%22+OR+%22TIP4P%22+OR+%22conformer+search%22+OR+%22conformational+search%22+OR+%22conformational+sampling%22+OR+%22conformer+generation%22+OR+%22GOFEE%22+OR+%22AGOX%22&filter=from-created-date%3A2026-11-20&sort=created&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query=cluster+global+optimization+OR+basin+hopping+OR+minima+hopping+OR+conformer+OR+water+cluster+OR+Lennard-Jones&filter=prefix%3A10.26434%2Cfrom-created-date%3A2026-11-09&sort=created&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query=conformer+OR+basin+hopping+OR+Lennard-Jones+OR+water+cluster+OR+global+optimization&filter=prefix%3A10.64898%2Cfrom-created-date%3A2026-11-09&sort=created&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=%22cluster%22+OR+%22conformer%22+OR+%22basin+hopping%22+OR+%22minima+hopping%22+OR+%22Lennard-Jones%22+OR+%22water+hexamer%22+OR+%22TIP4P%22+OR+%22global+optimization%22&filter=from-pub-date%3A2026-11-09%2Cuntil-pub-date%3A2026-11-23%2Cissn%3A1549-9618%2Cissn%3A1549-9626%2Cissn%3A1549-9596%2Cissn%3A1549-960X%2Cissn%3A0021-9606%2Cissn%3A1089-7690%2Cissn%3A0010-4655%2Cissn%3A1879-2944%2Cissn%3A1463-9076%2Cissn%3A1463-9084%2Cissn%3A0192-8651%2Cissn%3A1096-987X&sort=published&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=cluster+global+optimization&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&sort=published&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=basin+hopping+cluster&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&sort=published&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=Lennard-Jones+cluster&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&sort=published&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=water+cluster+global+optimization&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&sort=published&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=TIP4P+water+cluster&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&sort=published&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=conformer+search&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&sort=published&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=conformational+search&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&sort=published&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=minima+hopping&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&sort=published&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=CREST+GOAT+AGOX+GOFEE+cluster+conformer&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&sort=published&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=%22basin+hopping%22&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=%22Lennard-Jones%22+cluster&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=%22water+cluster%22+OR+%22water+hexamer%22&filter=from-pub-date%3A2026-11-09%2Cuntil-pub-date%3A2026-11-23&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=TIP4P+cluster&filter=from-pub-date%3A2026-11-09%2Cuntil-pub-date%3A2026-11-23&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=%22conformational+sampling%22+conformer&filter=from-pub-date%3A2026-11-09%2Cuntil-pub-date%3A2026-11-23&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=AGOX+GOFEE+global+optimization&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=CREST+GFN2-xTB+conformer&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=GOAT+ORCA+conformer+cluster&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=GMIN+Wales+energy+landscape+cluster&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query=%22basin+hopping%22&filter=from-created-date%3A2026-11-19&sort=created&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query=%22Lennard-Jones%22+cluster&filter=from-created-date%3A2026-11-19&sort=created&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query=%22minima+hopping%22&filter=from-created-date%3A2026-11-19&sort=created&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query=%22water+cluster%22&filter=from-created-date%3A2026-11-19&sort=created&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query=%22conformer+search%22&filter=from-created-date%3A2026-11-19&sort=created&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query=%22conformer+generation%22&filter=from-created-date%3A2026-11-19&sort=created&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query=%22conformational+sampling%22&filter=from-created-date%3A2026-11-19&sort=created&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query=AGOX+GOFEE&filter=from-created-date%3A2026-11-19&sort=created&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query=CREST+xTB&filter=from-created-date%3A2026-11-19&sort=created&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query=GOAT+ORCA&filter=from-created-date%3A2026-11-19&sort=created&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?filter=from-created-date%3A2026-11-20%2Cissn%3A1549-9618%2Cissn%3A1549-9626%2Cissn%3A1549-9596%2Cissn%3A1549-960X%2Cissn%3A0021-9606%2Cissn%3A1089-7690%2Cissn%3A0010-4655%2Cissn%3A1879-2944%2Cissn%3A1463-9076%2Cissn%3A1463-9084%2Cissn%3A0192-8651%2Cissn%3A1096-987X&sort=created&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=%22basin+hopping%22&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23%2Cissn%3A1549-9618%2Cissn%3A1549-9626%2Cissn%3A1549-9596%2Cissn%3A1549-960X%2Cissn%3A0021-9606%2Cissn%3A1089-7690%2Cissn%3A0010-4655%2Cissn%3A1879-2944%2Cissn%3A1463-9076%2Cissn%3A1463-9084%2Cissn%3A0192-8651%2Cissn%3A1096-987X%2Cissn%3A0925-5001%2Cissn%3A1573-2916%2Cissn%3A0026-8976%2Cissn%3A1362-3028%2Cissn%3A0009-2614%2Cissn%3A1873-4448%2Cissn%3A1432-881X%2Cissn%3A1432-2234%2Cissn%3A2469-9950%2Cissn%3A2469-9969%2Cissn%3A2470-0045%2Cissn%3A2470-0053%2Cissn%3A0031-9007%2Cissn%3A1079-7114%2Cissn%3A2475-9953%2Cissn%3A2635-098X%2Cissn%3A1040-7278%2Cissn%3A1572-8862%2Cissn%3A1388-0764%2Cissn%3A1572-896X%2Cissn%3A1089-5639%2Cissn%3A1520-5215%2Cissn%3A1948-7185%2Cissn%3A2041-1723%2Cissn%3A2041-6520%2Cissn%3A2041-6539%2Cissn%3A2662-8457%2Cissn%3A1755-4330%2Cissn%3A1755-4349&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=%22Lennard-Jones%22+cluster&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23%2Cissn%3A1549-9618%2Cissn%3A1549-9626%2Cissn%3A1549-9596%2Cissn%3A1549-960X%2Cissn%3A0021-9606%2Cissn%3A1089-7690%2Cissn%3A0010-4655%2Cissn%3A1879-2944%2Cissn%3A1463-9076%2Cissn%3A1463-9084%2Cissn%3A0192-8651%2Cissn%3A1096-987X%2Cissn%3A0925-5001%2Cissn%3A1573-2916%2Cissn%3A0026-8976%2Cissn%3A1362-3028%2Cissn%3A0009-2614%2Cissn%3A1873-4448%2Cissn%3A1432-881X%2Cissn%3A1432-2234%2Cissn%3A2469-9950%2Cissn%3A2469-9969%2Cissn%3A2470-0045%2Cissn%3A2470-0053%2Cissn%3A0031-9007%2Cissn%3A1079-7114%2Cissn%3A2475-9953%2Cissn%3A2635-098X%2Cissn%3A1040-7278%2Cissn%3A1572-8862%2Cissn%3A1388-0764%2Cissn%3A1572-896X%2Cissn%3A1089-5639%2Cissn%3A1520-5215%2Cissn%3A1948-7185%2Cissn%3A2041-1723%2Cissn%3A2041-6520%2Cissn%3A2041-6539%2Cissn%3A2662-8457%2Cissn%3A1755-4330%2Cissn%3A1755-4349&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=%22water+cluster%22&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23%2Cissn%3A1549-9618%2Cissn%3A1549-9626%2Cissn%3A1549-9596%2Cissn%3A1549-960X%2Cissn%3A0021-9606%2Cissn%3A1089-7690%2Cissn%3A0010-4655%2Cissn%3A1879-2944%2Cissn%3A1463-9076%2Cissn%3A1463-9084%2Cissn%3A0192-8651%2Cissn%3A1096-987X%2Cissn%3A0925-5001%2Cissn%3A1573-2916%2Cissn%3A0026-8976%2Cissn%3A1362-3028%2Cissn%3A0009-2614%2Cissn%3A1873-4448%2Cissn%3A1432-881X%2Cissn%3A1432-2234%2Cissn%3A2469-9950%2Cissn%3A2469-9969%2Cissn%3A2470-0045%2Cissn%3A2470-0053%2Cissn%3A0031-9007%2Cissn%3A1079-7114%2Cissn%3A2475-9953%2Cissn%3A2635-098X%2Cissn%3A1040-7278%2Cissn%3A1572-8862%2Cissn%3A1388-0764%2Cissn%3A1572-896X%2Cissn%3A1089-5639%2Cissn%3A1520-5215%2Cissn%3A1948-7185%2Cissn%3A2041-1723%2Cissn%3A2041-6520%2Cissn%3A2041-6539%2Cissn%3A2662-8457%2Cissn%3A1755-4330%2Cissn%3A1755-4349&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=TIP4P&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23%2Cissn%3A1549-9618%2Cissn%3A1549-9626%2Cissn%3A1549-9596%2Cissn%3A1549-960X%2Cissn%3A0021-9606%2Cissn%3A1089-7690%2Cissn%3A0010-4655%2Cissn%3A1879-2944%2Cissn%3A1463-9076%2Cissn%3A1463-9084%2Cissn%3A0192-8651%2Cissn%3A1096-987X%2Cissn%3A0925-5001%2Cissn%3A1573-2916%2Cissn%3A0026-8976%2Cissn%3A1362-3028%2Cissn%3A0009-2614%2Cissn%3A1873-4448%2Cissn%3A1432-881X%2Cissn%3A1432-2234%2Cissn%3A2469-9950%2Cissn%3A2469-9969%2Cissn%3A2470-0045%2Cissn%3A2470-0053%2Cissn%3A0031-9007%2Cissn%3A1079-7114%2Cissn%3A2475-9953%2Cissn%3A2635-098X%2Cissn%3A1040-7278%2Cissn%3A1572-8862%2Cissn%3A1388-0764%2Cissn%3A1572-896X%2Cissn%3A1089-5639%2Cissn%3A1520-5215%2Cissn%3A1948-7185%2Cissn%3A2041-1723%2Cissn%3A2041-6520%2Cissn%3A2041-6539%2Cissn%3A2662-8457%2Cissn%3A1755-4330%2Cissn%3A1755-4349&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=%22conformer%22+search+sampling+generation&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23%2Cissn%3A1549-9618%2Cissn%3A1549-9626%2Cissn%3A1549-9596%2Cissn%3A1549-960X%2Cissn%3A0021-9606%2Cissn%3A1089-7690%2Cissn%3A0010-4655%2Cissn%3A1879-2944%2Cissn%3A1463-9076%2Cissn%3A1463-9084%2Cissn%3A0192-8651%2Cissn%3A1096-987X%2Cissn%3A0925-5001%2Cissn%3A1573-2916%2Cissn%3A0026-8976%2Cissn%3A1362-3028%2Cissn%3A0009-2614%2Cissn%3A1873-4448%2Cissn%3A1432-881X%2Cissn%3A1432-2234%2Cissn%3A2469-9950%2Cissn%3A2469-9969%2Cissn%3A2470-0045%2Cissn%3A2470-0053%2Cissn%3A0031-9007%2Cissn%3A1079-7114%2Cissn%3A2475-9953%2Cissn%3A2635-098X%2Cissn%3A1040-7278%2Cissn%3A1572-8862%2Cissn%3A1388-0764%2Cissn%3A1572-896X%2Cissn%3A1089-5639%2Cissn%3A1520-5215%2Cissn%3A1948-7185%2Cissn%3A2041-1723%2Cissn%3A2041-6520%2Cissn%3A2041-6539%2Cissn%3A2662-8457%2Cissn%3A1755-4330%2Cissn%3A1755-4349&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=%22global+optimization%22+cluster&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23%2Cissn%3A1549-9618%2Cissn%3A1549-9626%2Cissn%3A1549-9596%2Cissn%3A1549-960X%2Cissn%3A0021-9606%2Cissn%3A1089-7690%2Cissn%3A0010-4655%2Cissn%3A1879-2944%2Cissn%3A1463-9076%2Cissn%3A1463-9084%2Cissn%3A0192-8651%2Cissn%3A1096-987X%2Cissn%3A0925-5001%2Cissn%3A1573-2916%2Cissn%3A0026-8976%2Cissn%3A1362-3028%2Cissn%3A0009-2614%2Cissn%3A1873-4448%2Cissn%3A1432-881X%2Cissn%3A1432-2234%2Cissn%3A2469-9950%2Cissn%3A2469-9969%2Cissn%3A2470-0045%2Cissn%3A2470-0053%2Cissn%3A0031-9007%2Cissn%3A1079-7114%2Cissn%3A2475-9953%2Cissn%3A2635-098X%2Cissn%3A1040-7278%2Cissn%3A1572-8862%2Cissn%3A1388-0764%2Cissn%3A1572-896X%2Cissn%3A1089-5639%2Cissn%3A1520-5215%2Cissn%3A1948-7185%2Cissn%3A2041-1723%2Cissn%3A2041-6520%2Cissn%3A2041-6539%2Cissn%3A2662-8457%2Cissn%3A1755-4330%2Cissn%3A1755-4349&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=%22global+optimisation%22+cluster&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23%2Cissn%3A1549-9618%2Cissn%3A1549-9626%2Cissn%3A1549-9596%2Cissn%3A1549-960X%2Cissn%3A0021-9606%2Cissn%3A1089-7690%2Cissn%3A0010-4655%2Cissn%3A1879-2944%2Cissn%3A1463-9076%2Cissn%3A1463-9084%2Cissn%3A0192-8651%2Cissn%3A1096-987X%2Cissn%3A0925-5001%2Cissn%3A1573-2916%2Cissn%3A0026-8976%2Cissn%3A1362-3028%2Cissn%3A0009-2614%2Cissn%3A1873-4448%2Cissn%3A1432-881X%2Cissn%3A1432-2234%2Cissn%3A2469-9950%2Cissn%3A2469-9969%2Cissn%3A2470-0045%2Cissn%3A2470-0053%2Cissn%3A0031-9007%2Cissn%3A1079-7114%2Cissn%3A2475-9953%2Cissn%3A2635-098X%2Cissn%3A1040-7278%2Cissn%3A1572-8862%2Cissn%3A1388-0764%2Cissn%3A1572-896X%2Cissn%3A1089-5639%2Cissn%3A1520-5215%2Cissn%3A1948-7185%2Cissn%3A2041-1723%2Cissn%3A2041-6520%2Cissn%3A2041-6539%2Cissn%3A2662-8457%2Cissn%3A1755-4330%2Cissn%3A1755-4349&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=CREST+GOAT+AGOX+GOFEE+GMIN+pele&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23%2Cissn%3A1549-9618%2Cissn%3A1549-9626%2Cissn%3A1549-9596%2Cissn%3A1549-960X%2Cissn%3A0021-9606%2Cissn%3A1089-7690%2Cissn%3A0010-4655%2Cissn%3A1879-2944%2Cissn%3A1463-9076%2Cissn%3A1463-9084%2Cissn%3A0192-8651%2Cissn%3A1096-987X%2Cissn%3A0925-5001%2Cissn%3A1573-2916%2Cissn%3A0026-8976%2Cissn%3A1362-3028%2Cissn%3A0009-2614%2Cissn%3A1873-4448%2Cissn%3A1432-881X%2Cissn%3A1432-2234%2Cissn%3A2469-9950%2Cissn%3A2469-9969%2Cissn%3A2470-0045%2Cissn%3A2470-0053%2Cissn%3A0031-9007%2Cissn%3A1079-7114%2Cissn%3A2475-9953%2Cissn%3A2635-098X%2Cissn%3A1040-7278%2Cissn%3A1572-8862%2Cissn%3A1388-0764%2Cissn%3A1572-896X%2Cissn%3A1089-5639%2Cissn%3A1520-5215%2Cissn%3A1948-7185%2Cissn%3A2041-1723%2Cissn%3A2041-6520%2Cissn%3A2041-6539%2Cissn%3A2662-8457%2Cissn%3A1755-4330%2Cissn%3A1755-4349&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?filter=from-created-date%3A2026-11-16%2Cissn%3A1549-9618%2Cissn%3A1549-9626%2Cissn%3A1549-9596%2Cissn%3A1549-960X%2Cissn%3A0021-9606%2Cissn%3A1089-7690%2Cissn%3A0010-4655%2Cissn%3A1879-2944%2Cissn%3A1463-9076%2Cissn%3A1463-9084%2Cissn%3A0192-8651%2Cissn%3A1096-987X%2Cissn%3A0925-5001%2Cissn%3A1573-2916%2Cissn%3A0026-8976%2Cissn%3A1362-3028%2Cissn%3A0009-2614%2Cissn%3A1873-4448%2Cissn%3A1432-881X%2Cissn%3A1432-2234%2Cissn%3A2469-9950%2Cissn%3A2469-9969%2Cissn%3A2470-0045%2Cissn%3A2470-0053%2Cissn%3A0031-9007%2Cissn%3A1079-7114%2Cissn%3A2475-9953%2Cissn%3A2635-098X%2Cissn%3A1040-7278%2Cissn%3A1572-8862%2Cissn%3A1388-0764%2Cissn%3A1572-896X%2Cissn%3A1089-5639%2Cissn%3A1520-5215%2Cissn%3A1948-7185%2Cissn%3A2041-1723%2Cissn%3A2041-6520%2Cissn%3A2041-6539%2Cissn%3A2662-8457%2Cissn%3A1755-4330%2Cissn%3A1755-4349&sort=created&order=desc&offset=0&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?filter=from-created-date%3A2026-11-16%2Cissn%3A1549-9618%2Cissn%3A1549-9626%2Cissn%3A1549-9596%2Cissn%3A1549-960X%2Cissn%3A0021-9606%2Cissn%3A1089-7690%2Cissn%3A0010-4655%2Cissn%3A1879-2944%2Cissn%3A1463-9076%2Cissn%3A1463-9084%2Cissn%3A0192-8651%2Cissn%3A1096-987X%2Cissn%3A0925-5001%2Cissn%3A1573-2916%2Cissn%3A0026-8976%2Cissn%3A1362-3028%2Cissn%3A0009-2614%2Cissn%3A1873-4448%2Cissn%3A1432-881X%2Cissn%3A1432-2234%2Cissn%3A2469-9950%2Cissn%3A2469-9969%2Cissn%3A2470-0045%2Cissn%3A2470-0053%2Cissn%3A0031-9007%2Cissn%3A1079-7114%2Cissn%3A2475-9953%2Cissn%3A2635-098X%2Cissn%3A1040-7278%2Cissn%3A1572-8862%2Cissn%3A1388-0764%2Cissn%3A1572-896X%2Cissn%3A1089-5639%2Cissn%3A1520-5215%2Cissn%3A1948-7185%2Cissn%3A2041-1723%2Cissn%3A2041-6520%2Cissn%3A2041-6539%2Cissn%3A2662-8457%2Cissn%3A1755-4330%2Cissn%3A1755-4349&sort=created&order=desc&offset=100&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?filter=from-created-date%3A2026-11-16%2Cissn%3A1549-9618%2Cissn%3A1549-9626%2Cissn%3A1549-9596%2Cissn%3A1549-960X%2Cissn%3A0021-9606%2Cissn%3A1089-7690%2Cissn%3A0010-4655%2Cissn%3A1879-2944%2Cissn%3A1463-9076%2Cissn%3A1463-9084%2Cissn%3A0192-8651%2Cissn%3A1096-987X%2Cissn%3A0925-5001%2Cissn%3A1573-2916%2Cissn%3A0026-8976%2Cissn%3A1362-3028%2Cissn%3A0009-2614%2Cissn%3A1873-4448%2Cissn%3A1432-881X%2Cissn%3A1432-2234%2Cissn%3A2469-9950%2Cissn%3A2469-9969%2Cissn%3A2470-0045%2Cissn%3A2470-0053%2Cissn%3A0031-9007%2Cissn%3A1079-7114%2Cissn%3A2475-9953%2Cissn%3A2635-098X%2Cissn%3A1040-7278%2Cissn%3A1572-8862%2Cissn%3A1388-0764%2Cissn%3A1572-896X%2Cissn%3A1089-5639%2Cissn%3A1520-5215%2Cissn%3A1948-7185%2Cissn%3A2041-1723%2Cissn%3A2041-6520%2Cissn%3A2041-6539%2Cissn%3A2662-8457%2Cissn%3A1755-4330%2Cissn%3A1755-4349&sort=created&order=desc&offset=200&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?filter=prefix%3A10.26434%2Cfrom-created-date%3A2026-11-14&sort=created&order=desc&offset=0&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?filter=prefix%3A10.26434%2Cfrom-created-date%3A2026-11-14&sort=created&order=desc&offset=100&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query=%22Lennard-Jones%22+cluster&filter=prefix%3A10.5281%2Cfrom-created-date%3A2026-11-01&sort=created&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query=%22basin+hopping%22&filter=prefix%3A10.5281%2Cfrom-created-date%3A2026-11-01&sort=created&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query=cluster+global+minimum+OR+global+optimization+OR+minima+hopping+OR+water+cluster&filter=prefix%3A10.5281%2Cfrom-created-date%3A2026-11-09&sort=created&order=desc&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=%22cluster+global+optimization%22&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=%22cluster+global+optimisation%22&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=%22Lennard-Jones+cluster%22&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=%22Lennard-Jones+clusters%22&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=%22water+hexamer%22&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=%22AGOX%22&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=%22GOFEE%22&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=%22GMIN%22&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=%22CREST%22+%22GFN2-xTB%22&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?query.bibliographic=%22GOAT%22+%22ORCA%22&filter=from-pub-date%3A2026-11-01%2Cuntil-pub-date%3A2026-11-23&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2CURL%2Ctype%2Ccontainer-title%2Cabstract%2Cvolume%2Cissue%2Cpage
+GET https://api.crossref.org/works?filter=prefix:10.26434,from-created-date:2026-11-14&sort=created&order=desc&offset=200&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract,volume,issue,page
+GET https://api.crossref.org/works?filter=prefix:10.26434,from-created-date:2026-11-14&sort=created&order=desc&offset=300&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract,volume,issue,page
+GET https://api.crossref.org/works?filter=prefix:10.26434,from-created-date:2026-11-14&sort=created&order=desc&offset=400&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract,volume,issue,page
+GET https://api.crossref.org/works?filter=from-created-date:2026-11-16,issn:1549-9618,issn:1549-9626,issn:1549-9596,issn:1549-960X,issn:0021-9606,issn:1089-7690,issn:0010-4655,issn:1879-2944,issn:1463-9076,issn:1463-9084,issn:0192-8651,issn:1096-987X,issn:0925-5001,issn:1573-2916,issn:0026-8976,issn:1362-3028,issn:0009-2614,issn:1873-4448,issn:1432-881X,issn:1432-2234,issn:2469-9950,issn:2469-9969,issn:2470-0045,issn:2470-0053,issn:0031-9007,issn:1079-7114,issn:2475-9953,issn:2635-098X,issn:1040-7278,issn:1572-8862,issn:1388-0764,issn:1572-896X,issn:1089-5639,issn:1520-5215,issn:1948-7185,issn:2041-1723,issn:2041-6520,issn:2041-6539,issn:2662-8457,issn:1755-4330,issn:1755-4349&sort=created&order=desc&offset=300&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract,volume,issue,page
+GET https://api.crossref.org/works?filter=from-created-date:2026-11-16,issn:1549-9618,issn:1549-9626,issn:1549-9596,issn:1549-960X,issn:0021-9606,issn:1089-7690,issn:0010-4655,issn:1879-2944,issn:1463-9076,issn:1463-9084,issn:0192-8651,issn:1096-987X,issn:0925-5001,issn:1573-2916,issn:0026-8976,issn:1362-3028,issn:0009-2614,issn:1873-4448,issn:1432-881X,issn:1432-2234,issn:2469-9950,issn:2469-9969,issn:2470-0045,issn:2470-0053,issn:0031-9007,issn:1079-7114,issn:2475-9953,issn:2635-098X,issn:1040-7278,issn:1572-8862,issn:1388-0764,issn:1572-896X,issn:1089-5639,issn:1520-5215,issn:1948-7185,issn:2041-1723,issn:2041-6520,issn:2041-6539,issn:2662-8457,issn:1755-4330,issn:1755-4349&sort=created&order=desc&offset=400&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract,volume,issue,page
+GET https://api.crossref.org/works?filter=from-created-date:2026-11-16,issn:1549-9618,issn:1549-9626,issn:1549-9596,issn:1549-960X,issn:0021-9606,issn:1089-7690,issn:0010-4655,issn:1879-2944,issn:1463-9076,issn:1463-9084,issn:0192-8651,issn:1096-987X,issn:0925-5001,issn:1573-2916,issn:0026-8976,issn:1362-3028,issn:0009-2614,issn:1873-4448,issn:1432-881X,issn:1432-2234,issn:2469-9950,issn:2469-9969,issn:2470-0045,issn:2470-0053,issn:0031-9007,issn:1079-7114,issn:2475-9953,issn:2635-098X,issn:1040-7278,issn:1572-8862,issn:1388-0764,issn:1572-896X,issn:1089-5639,issn:1520-5215,issn:1948-7185,issn:2041-1723,issn:2041-6520,issn:2041-6539,issn:2662-8457,issn:1755-4330,issn:1755-4349&sort=created&order=desc&offset=500&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract,volume,issue,page
+GET https://api.crossref.org/works?filter=from-created-date:2026-11-16,issn:1549-9618,issn:1549-9626,issn:1549-9596,issn:1549-960X,issn:0021-9606,issn:1089-7690,issn:0010-4655,issn:1879-2944,issn:1463-9076,issn:1463-9084,issn:0192-8651,issn:1096-987X,issn:0925-5001,issn:1573-2916,issn:0026-8976,issn:1362-3028,issn:0009-2614,issn:1873-4448,issn:1432-881X,issn:1432-2234,issn:2469-9950,issn:2469-9969,issn:2470-0045,issn:2470-0053,issn:0031-9007,issn:1079-7114,issn:2475-9953,issn:2635-098X,issn:1040-7278,issn:1572-8862,issn:1388-0764,issn:1572-896X,issn:1089-5639,issn:1520-5215,issn:1948-7185,issn:2041-1723,issn:2041-6520,issn:2041-6539,issn:2662-8457,issn:1755-4330,issn:1755-4349&sort=created&order=desc&offset=600&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract,volume,issue,page
+GET https://api.crossref.org/works?filter=from-created-date:2026-11-16,issn:1549-9618,issn:1549-9626,issn:1549-9596,issn:1549-960X,issn:0021-9606,issn:1089-7690,issn:0010-4655,issn:1879-2944,issn:1463-9076,issn:1463-9084,issn:0192-8651,issn:1096-987X,issn:0925-5001,issn:1573-2916,issn:0026-8976,issn:1362-3028,issn:0009-2614,issn:1873-4448,issn:1432-881X,issn:1432-2234,issn:2469-9950,issn:2469-9969,issn:2470-0045,issn:2470-0053,issn:0031-9007,issn:1079-7114,issn:2475-9953,issn:2635-098X,issn:1040-7278,issn:1572-8862,issn:1388-0764,issn:1572-896X,issn:1089-5639,issn:1520-5215,issn:1948-7185,issn:2041-1723,issn:2041-6520,issn:2041-6539,issn:2662-8457,issn:1755-4330,issn:1755-4349&sort=created&order=desc&offset=700&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract,volume,issue,page
+GET https://api.crossref.org/works?filter=from-created-date:2026-11-16,issn:1549-9618,issn:1549-9626,issn:1549-9596,issn:1549-960X,issn:0021-9606,issn:1089-7690,issn:0010-4655,issn:1879-2944,issn:1463-9076,issn:1463-9084,issn:0192-8651,issn:1096-987X,issn:0925-5001,issn:1573-2916,issn:0026-8976,issn:1362-3028,issn:0009-2614,issn:1873-4448,issn:1432-881X,issn:1432-2234,issn:2469-9950,issn:2469-9969,issn:2470-0045,issn:2470-0053,issn:0031-9007,issn:1079-7114,issn:2475-9953,issn:2635-098X,issn:1040-7278,issn:1572-8862,issn:1388-0764,issn:1572-896X,issn:1089-5639,issn:1520-5215,issn:1948-7185,issn:2041-1723,issn:2041-6520,issn:2041-6539,issn:2662-8457,issn:1755-4330,issn:1755-4349&sort=created&order=desc&offset=800&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract,volume,issue,page
+GET https://api.crossref.org/works?filter=from-created-date:2026-11-16,issn:1549-9618,issn:1549-9626,issn:1549-9596,issn:1549-960X,issn:0021-9606,issn:1089-7690,issn:0010-4655,issn:1879-2944,issn:1463-9076,issn:1463-9084,issn:0192-8651,issn:1096-987X,issn:0925-5001,issn:1573-2916,issn:0026-8976,issn:1362-3028,issn:0009-2614,issn:1873-4448,issn:1432-881X,issn:1432-2234,issn:2469-9950,issn:2469-9969,issn:2470-0045,issn:2470-0053,issn:0031-9007,issn:1079-7114,issn:2475-9953,issn:2635-098X,issn:1040-7278,issn:1572-8862,issn:1388-0764,issn:1572-896X,issn:1089-5639,issn:1520-5215,issn:1948-7185,issn:2041-1723,issn:2041-6520,issn:2041-6539,issn:2662-8457,issn:1755-4330,issn:1755-4349&sort=created&order=desc&offset=900&rows=100&select=DOI,title,author,published,created,URL,type,container-title,abstract,volume,issue,page
+GET https://api.crossref.org/works?query.author=Mikhail+V.+Kirov&filter=from-pub-date%3A2026-01-01&rows=20
+GET https://api.crossref.org/works?query.bibliographic=%22basin+hopping%22+OR+%22basin-hopping%22+OR+%22minima+hopping%22+OR+%22minima-hopping%22&filter=from-created-date%3A2026-11-21&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2Ccontainer-title%2Cabstract
+GET https://api.crossref.org/works?query.bibliographic=%22Lennard-Jones+cluster%22+OR+%22Lennard-Jones+clusters%22+OR+%22water+cluster%22+OR+%22water+hexamer%22+OR+%22TIP4P%22&filter=from-created-date%3A2026-11-21&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2Ccontainer-title%2Cabstract
+GET https://api.crossref.org/works?query.bibliographic=%22conformer+search%22+OR+%22conformational+search%22+OR+%22conformer+ensemble%22+OR+%22cluster+global+optimization%22+OR+%22cluster+global+optimisation%22&filter=from-created-date%3A2026-11-21&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2Ccontainer-title%2Cabstract
+GET https://api.crossref.org/works?query.bibliographic=CREST+OR+GOAT+OR+AGOX+OR+GOFEE+OR+%22GFN2-xTB%22+OR+%22local+optima+network%22&filter=from-created-date%3A2026-11-21&rows=100&select=DOI%2Ctitle%2Cauthor%2Cpublished%2Ccreated%2Ccontainer-title%2Cabstract
+
+Crossref API DOI verification queries:
+GET https://api.crossref.org/works/10.1002/jcc.70583
+GET https://api.crossref.org/works/10.1016/j.softx.2026.103209
+GET https://api.crossref.org/works/10.1039/d6cp02481e
+GET https://api.crossref.org/works/10.1039/d6ra08700k
+GET https://api.crossref.org/works/10.1039/d6cp03907c
+GET https://api.crossref.org/works/10.26434/chemrxiv.15012364/v1
+GET https://api.crossref.org/works/10.1021/jacs.6c14137
+GET https://api.crossref.org/works/10.1021/acs.cgd.6c01435
+GET https://api.crossref.org/works/10.1021/acs.chemmater.6c01853
+GET https://api.crossref.org/works/10.1021/acsomega.6c05744
+GET https://api.crossref.org/works/10.1021/jasms.6c00315
+GET https://api.crossref.org/works/10.1016/j.comptc.2026.116118
+GET https://api.crossref.org/works/10.1016/j.chemphys.2026.113289
+GET https://api.crossref.org/works/10.1039/d6dt02099b
+GET https://api.crossref.org/works/10.1002/jcc.70523
+GET https://api.crossref.org/works/10.1002/chem.71879
+GET https://api.crossref.org/works/10.1021/acs.jpcb.6c05188
+GET https://api.crossref.org/works/10.5281/zenodo.24336527
+GET https://api.crossref.org/works/10.1039/d6cp03129c
+GET https://api.crossref.org/works/10.5281/zenodo.24355940
+GET https://api.crossref.org/works/10.21203/rs.3.rs-11723965/v1
+GET https://api.crossref.org/works/10.1088/2632-2153/aec2a2
+GET https://api.crossref.org/works/10.1088/3050-287x/aec468
+GET https://api.crossref.org/works/10.1038/s41467-026-79241-x
+GET https://api.crossref.org/works/10.1021/acs.jpca.6c05320
+GET https://api.crossref.org/works/10.26434/chemrxiv.15012459/v2
+GET https://api.crossref.org/works/10.26434/chemrxiv.15011867/v2
+GET https://api.crossref.org/works/10.3390/molecules31224048
+GET https://api.crossref.org/works/10.1021/acs.jpca.6c05875
+GET https://api.crossref.org/works/10.1103/fnym-1ypn
+GET https://api.crossref.org/works/10.1021/acs.jctc.6c00213
+GET https://api.crossref.org/works/10.26434/chemrxiv.15012574/v1
+GET https://api.crossref.org/works/10.26434/chemrxiv.15012291/v1
+GET https://api.crossref.org/works/10.5281/zenodo.24355941
+
+OpenAlex, Semantic Scholar, EuropePMC, PubMed, DataCite, Unpaywall, Zenodo, and repository/landing verification:
+GET https://api.openalex.org/works/https://doi.org/10.1103/fnym-1ypn
+GET https://api.openalex.org/works/https://doi.org/10.1038/s41467-026-79241-x
+GET https://api.openalex.org/works/https://doi.org/10.1016/j.chemphys.2026.113289
+GET https://api.openalex.org/works/https://doi.org/10.1016/j.cplett.2026.143016
+GET https://api.openalex.org/works/https://doi.org/10.1038/s41467-026-79369-w
+GET https://api.openalex.org/works/https://doi.org/10.1038/s41467-026-79243-9
+GET https://api.openalex.org/works/https://doi.org/10.1007/s10876-026-03143-7
+GET https://api.openalex.org/works?search=%22Lennard-Jones+cluster%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works?search=%22basin+hopping%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works?search=%22minima+hopping%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works?search=%22water+cluster%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works?search=%22water+hexamer%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works?search=%22cluster+global+optimization%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works?search=%22conformer+search%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works?search=%22crystal+structure+prediction%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works?search=%22AGOX%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works?search=%22GOFEE%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works?search=%22CREST%22+%22GFN2-xTB%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works?search=%22GOAT%22+%22ORCA%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works?search=%22TIP4P%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works?search=%22conformer+generation%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works?search=%22conformational+search%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works?search=%22GMIN%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works?search=%22pele%22+%22basin+hopping%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works?search=%22ABCluster%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works?search=%22stochastic+surface+walking%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works?search=%22Thomson+problem%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works?search=%22genetic+algorithm%22+%22atomic+cluster%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works?search=%22particle+swarm%22+%22cluster%22+%22global+minimum%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works?search=%22Lennard-Jones%22+%22global+minimum%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works?search=%22Lennard-Jones%22+%22global+optimization%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works?search=%22water+cluster%22+%22global+minimum%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works?search=%22CREST%22+%22conformer%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works?search=%22GOAT%22+%22conformer%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works?search=%22g-xTB%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works?search=%22Monte+Carlo+tree+search%22+%22cluster%22&filter=from_publication_date%3A2026-11-08%2Cto_publication_date%3A2026-11-23&per-page=50&sort=publication_date%3Adesc
+GET https://api.openalex.org/works/https://doi.org/10.1002/jcc.70583
+GET https://api.openalex.org/works/https://doi.org/10.1016/j.softx.2026.103209
+GET https://api.openalex.org/works/https://doi.org/10.1039/d6cp02481e
+GET https://api.openalex.org/works/https://doi.org/10.1039/d6ra08700k
+GET https://api.openalex.org/works/https://doi.org/10.1039/d6cp03907c
+GET https://api.openalex.org/works/https://doi.org/10.26434/chemrxiv.15012364/v1
+GET https://api.openalex.org/works/https://doi.org/10.1021/jacs.6c14137
+GET https://api.openalex.org/works/https://doi.org/10.1021/acs.cgd.6c01435
+GET https://api.openalex.org/works/https://doi.org/10.1021/acs.chemmater.6c01853
+GET https://api.openalex.org/works/https://doi.org/10.1021/acsomega.6c05744
+GET https://api.openalex.org/works/https://doi.org/10.1021/jasms.6c00315
+GET https://api.openalex.org/works/https://doi.org/10.1016/j.comptc.2026.116118
+GET https://api.openalex.org/works/https://doi.org/10.1039/d6dt02099b
+GET https://api.openalex.org/works/https://doi.org/10.1002/jcc.70523
+GET https://api.openalex.org/works/https://doi.org/10.1002/chem.71879
+GET https://api.openalex.org/works/https://doi.org/10.1021/acs.jpcb.6c05188
+GET https://api.openalex.org/works/https://doi.org/10.5281/zenodo.24336527
+GET https://api.openalex.org/works/https://doi.org/10.1039/d6cp03129c
+GET https://api.openalex.org/works/https://doi.org/10.5281/zenodo.24355940
+GET https://api.openalex.org/works/https://doi.org/10.21203/rs.3.rs-11723965/v1
+GET https://api.openalex.org/works/https://doi.org/10.1088/2632-2153/aec2a2
+GET https://api.openalex.org/works/https://doi.org/10.1088/3050-287x/aec468
+GET https://api.openalex.org/works/https://doi.org/10.1021/acs.jpca.6c05320
+GET https://api.openalex.org/works/https://doi.org/10.1021/acs.jctc.6c01678
+GET https://api.openalex.org/works/https://doi.org/10.1063/5.0350987
+GET https://api.openalex.org/works/https://doi.org/10.26434/chemrxiv.15012459/v2
+GET https://api.openalex.org/works/https://doi.org/10.26434/chemrxiv.15007659/v2
+GET https://zenodo.org/api/records/24355940
+GET https://pubs.rsc.org/en/content/articlelanding/2026/cp/d6cp03129c
+GET https://pubs.rsc.org/en/content/articlelanding/2026/cp/d6cp02481e
+GET https://pubs.rsc.org/en/content/articlelanding/2026/ra/d6ra08700k
+GET https://www.researchsquare.com/article/rs-11723965/v1
+GET https://chemrxiv.org/engage/chemrxiv/public-api/v1/items/691c4e98b6c2c38f0e83440d
+GET https://api.elsevier.com/content/article/doi/10.1016/j.softx.2026.103209
+GET https://api.elsevier.com/content/article/doi/10.1016/j.chemphys.2026.113289
+GET https://chemrxiv.org/engage/chemrxiv/public-api/v1/items?term=FOdorant&limit=3
+GET https://chemrxiv.org/engage/chemrxiv/public-api/v1/items?term=MolScrub&limit=3
+GET https://chemrxiv.org/engage/chemrxiv/public-api/v1/items?term=Branching+Suppresses+Hydrogen-Bond+Cooperativity&limit=3
+GET https://api.github.com/search/repositories?q=lonkit&per_page=10
+GET https://api.semanticscholar.org/graph/v1/paper/DOI:10.1039/d6cp03129c?fields=title,authors,year,publicationDate,abstract,venue,externalIds
+GET https://api.semanticscholar.org/graph/v1/paper/DOI:10.1039/d6cp02481e?fields=title,authors,year,publicationDate,abstract,venue,externalIds
+GET https://api.semanticscholar.org/graph/v1/paper/DOI:10.1039/d6ra08700k?fields=title,authors,year,publicationDate,abstract,venue,externalIds
+GET https://api.semanticscholar.org/graph/v1/paper/DOI:10.1016/j.chemphys.2026.113289?fields=title,authors,year,publicationDate,abstract,venue,externalIds
+GET https://api.semanticscholar.org/graph/v1/paper/DOI:10.1016/j.softx.2026.103209?fields=title,authors,year,publicationDate,abstract,venue,externalIds
+GET https://api.github.com/repos/helix-agh/lonkit/readme
+GET https://api.github.com/repos/helix-agh/lonkit/git/trees/main?recursive=1
+GET https://api.github.com/search/repositories?q=Spectral+Monte+Carlo+sampling+Tsvetaev
+GET https://api.github.com/search/repositories?q=intramolecular+torsional+space+Barone+Lazzari
+GET https://api.github.com/search/repositories?q=PEACE+prototropic+Zheng+Heid
+GET https://api.github.com/repos/helix-agh/lonkit/contents/src/lonkit/continuous/sampling.py
+GET https://api.github.com/repos/helix-agh/lonkit/contents/examples/bioma/problems.py
+GET https://api.github.com/repos/helix-agh/lonkit/contents/docs/user-guide/sampling.md
+GET https://api.github.com/repos/helix-agh/lonkit/contents/CHANGELOG.md
+GET https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=EXT_ID%3A42978402&format=json&resultType=core
+GET https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=EXT_ID%3A43037190&format=json&resultType=core
+GET https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=PMC13730536&format=json&resultType=core
+GET https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=DOI%3A10.1039%2Fd6cp03129c&format=json&resultType=core
+GET https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=DOI%3A10.1039%2Fd6cp02481e&format=json&resultType=core
+GET https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=DOI%3A10.1016%2Fj.chemphys.2026.113289&format=json&resultType=core
+GET https://www.ebi.ac.uk/europepmc/webservices/rest/PMC13730536/fullTextXML
+GET https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=42978402,43037190,42979339&retmode=xml
+GET https://api.github.com/repos/helix-agh/lonkit/contents/src/lonkit/continuous/step_size.py
+GET https://api.github.com/repos/helix-agh/lonkit/contents/docs/user-guide/examples.md
+GET https://api.github.com/repos/helix-agh/lonkit/contents/pyproject.toml
+GET https://api.github.com/repos/helix-agh/lonkit/releases
+GET https://api.github.com/repos/helix-agh/lonkit/tags
+GET https://api.github.com/repos/helix-agh/lonkit/contents/docs/getting-started/concepts.md
+GET https://api.github.com/repos/helix-agh/lonkit/contents/docs/user-guide/analysis.md
+GET https://api.github.com/repos/helix-agh/lonkit/contents/src/lonkit/lon.py
+GET https://api.unpaywall.org/v2/10.1016/j.softx.2026.103209
+GET https://api.unpaywall.org/v2/10.1016/j.chemphys.2026.113289
+GET https://api.unpaywall.org/v2/10.1039/d6cp03129c
+GET https://api.unpaywall.org/v2/10.1039/d6cp02481e
+GET https://www.researchsquare.com/article/rs-11723965/v1.html
+GET https://api.openalex.org/works/https://doi.org/10.1021/acs.jctc.6c00213
+GET https://api.datacite.org/dois/10.5281/zenodo.24355940
+GET https://api.datacite.org/dois/10.5281/zenodo.24355941
+GET https://api.github.com/repos/alejandrozarco/thomson-n7-log/releases/tags/v2.8
+GET https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=DOI:10.3390/molecules31224048&format=json&resultType=core
+GET https://api.openalex.org/works/https://doi.org/10.3390/molecules31224048
+
+GitHub, GitLab, PyPI, FACCTs/ORCA, and Cambridge release checks (current as of 2026-11-23):
+GET https://api.github.com/repos/crest-lab/crest/releases?per_page=100
+GET https://api.github.com/repos/crest-lab/crest/tags?per_page=20
+GET https://api.github.com/repos/grimme-lab/xtb/releases?per_page=100
+GET https://api.github.com/repos/grimme-lab/xtb/tags?per_page=20
+GET https://api.github.com/repos/pele-python/pele/releases?per_page=100
+GET https://api.github.com/repos/pele-python/pele/tags?per_page=20
+GET https://api.github.com/repos/pele-python/pele/commits?per_page=5
+GET https://api.github.com/repos/grumpy-codes/agox/releases?per_page=100
+GET https://api.github.com/repos/grumpy-codes/agox/tags?per_page=20
+GET https://api.github.com/repos/grumpy-codes/agox
+GET https://api.github.com/users/rosenbrockc/repos?per_page=100
+GET https://api.github.com/repos/ksags/GOFEE/releases?per_page=100
+GET https://api.github.com/repos/ksags/GOFEE/tags?per_page=100
+GET https://api.github.com/search/repositories?q=GOFEE%20in%3Aname&per_page=100
+GET https://api.github.com/search/repositories?q=GOAT%20global%20optimization%20chemistry&per_page=100
+GET https://api.github.com/search/repositories?q=GMIN%20Wales%20cluster&per_page=100
+GET https://gitlab.com/api/v4/projects/agox%2Fagox/releases?per_page=100
+GET https://gitlab.com/api/v4/projects/agox%2Fagox/repository/tags?per_page=100
+GET https://gitlab.com/api/v4/projects/ase%2Fase/releases?per_page=100
+GET https://gitlab.com/api/v4/projects/ase%2Fase/repository/tags?per_page=100
+GET https://gitlab.com/api/v4/projects?search=GOAT%20global%20optimization&simple=true&per_page=100
+GET https://gitlab.com/api/v4/projects?search=GMIN%20Wales&simple=true&per_page=100
+GET https://gitlab.com/api/v4/projects?search=GOFEE&simple=true&per_page=100
+GET https://www.faccts.de/docs/orca/6.2/manual/
+GET https://api.github.com/users/grumpy-codes/repos?per_page=100
+GET https://api.github.com/search/repositories?q=agox%20in:name&per_page=50
+GET https://api.github.com/search/repositories?q=pele%20energy%20landscape&per_page=50
+GET https://www.faccts.de/docs/orca/6.1/manual/contents/preface/changes.html
+GET https://www-wales.ch.cam.ac.uk/~wales/CCD/an70.html
+GET https://api.github.com/users/grumpy-codes
+GET https://gitlab.com/api/v4/projects?search=agox&simple=true&per_page=20
+GET https://gitlab.com/api/v4/projects?search=pele&simple=true&per_page=20
+GET https://www-wales.ch.cam.ac.uk/~wales/CCD/Lennard-Jones/tables.150.html
+GET https://www-wales.ch.cam.ac.uk/wales/CCD/tables.html
+GET https://api.github.com/users/rosenbrockc/events?per_page=10
+
+Result: 17 verified records from #216 remained new after stacking:
+fornagielLonkit2026, lazzariSeeker2026, zhengPeace2026, gautamNucleobases2026, tsvetaevSpectralMc2026, hessmannGpff2026, claussMecobi2026, kryvonosEightPoints2026, xieThomson2026, zarcoRiesz2026, collignonCoWater2026, patkarMixedClusters2026, ramosEmbeddedWater2026, kirovSurfaceWater2026, qiaoPxrdCsp2026, tangWrongGroundState2026, ellisDorts9k2026. The unglertJaxrens2026, suarezDouQvib2026, matoMolscrub2026,
+shangFodorant2026, hernandezGlycineSsph2026, huangDegauss3p2026,
+caoCrystalFormerCsp2026, sparrowConstrainedCsp2026, and
+woodOverpredictionCsp2026 records were already on develop and
+were not duplicated. No manuscript wording or numeric claim changed.
+After stacking onto develop f7ca85ce, `qiaoPxrdCsp2026` is also filed
+there through #209, so its bib entry appears once and the 2026-11-23
+CSP and MLIP section still cites it.
