@@ -1,0 +1,71 @@
+diff --git a/src/assignment.rs b/src/assignment.rs
+index 36b3c6ffcd..3dbbf65927 100644
+--- a/src/assignment.rs
++++ b/src/assignment.rs
+@@ -680,6 +680,7 @@ unsafe fn solve_shortest_paths_loop_avx2(
+     min_reduced: &mut [f64],
+     used: &mut [u8],
+ ) -> bool {
++    crate::GATE_COUNTERS[0].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+     for row in 1..=n {
+         column_match[0] = row;
+         let mut column = 0usize;
+@@ -1233,6 +1234,7 @@ unsafe fn kuhn_munkres_loop_avx2(
+     rows_seen: &mut [u8],
+     columns_seen: &mut [u8],
+ ) -> bool {
++    crate::GATE_COUNTERS[1].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+     use std::arch::x86_64::{
+         _mm_cmpeq_epi8, _mm_cvtsi32_si128, _mm_setzero_si128, _mm256_add_pd, _mm256_blendv_pd,
+         _mm256_castsi256_pd, _mm256_cvtepi8_epi64, _mm256_loadu_pd, _mm256_min_pd, _mm256_set1_pd,
+@@ -1327,6 +1329,7 @@ unsafe fn kuhn_munkres_loop_avx2(
+ #[cfg(target_arch = "x86_64")]
+ #[target_feature(enable = "avx2")]
+ unsafe fn augment_tight_avx2(row: usize, ctx: &mut KmCtx) -> bool {
++    crate::GATE_COUNTERS[2].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+     use std::arch::x86_64::{
+         _CMP_NGT_UQ, _mm256_add_pd, _mm256_andnot_pd, _mm256_cmp_pd, _mm256_loadu_pd,
+         _mm256_movemask_pd, _mm256_set1_pd, _mm256_sub_pd,
+diff --git a/src/csm.rs b/src/csm.rs
+index 2460010614..d5b8731d8e 100644
+--- a/src/csm.rs
++++ b/src/csm.rs
+@@ -470,6 +470,7 @@ fn invert_perm(perm: &[usize]) -> Vec<usize> {
+ }
+ 
+ fn recall_op(y_bits: &[u64], y_hash: u64, classes: &[u32], op: &[[f64; 3]; 3]) -> Option<Matched> {
++    crate::GATE_COUNTERS[3].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+     let transposed = transpose(*op);
+     OP_CACHE.with(|slot| {
+         let slot = slot.borrow();
+diff --git a/src/lattice.rs b/src/lattice.rs
+index 4d61a7d8bb..fab01692c5 100644
+--- a/src/lattice.rs
++++ b/src/lattice.rs
+@@ -706,6 +706,7 @@ fn four_point_frames(n: usize) -> usize {
+ }
+ 
+ fn candidate_from_basis(basis: &[[f64; 3]; 3], centre: [f64; 3], n: usize) -> Option<Array1<f64>> {
++    crate::GATE_COUNTERS[4].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+     // The finished body holds `C(n, 4)` distinct 4-point frames. The cloud
+     // stops at that many sites: another site is not a new frame the body can
+     // name, and a flat basis would otherwise keep the frontier moving without
+diff --git a/src/lib.rs b/src/lib.rs
+index 8d3e375d9a..cf8ca5dce3 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -20,6 +20,14 @@
+ //! traits, Boltzmann / Fast / Tsallis points, and the SaVariant tuple)
+ //! consumed by the Python `anneal` package via pyo3.
+ 
++/// Gate path counters, in a fixed order.
++pub static GATE_COUNTERS: [std::sync::atomic::AtomicU64; 5] = [const { std::sync::atomic::AtomicU64::new(0) }; 5];
++
++/// Snapshot of the gate path counters.
++pub fn gate_counters() -> [u64; 5] {
++    std::array::from_fn(|i| GATE_COUNTERS[i].load(std::sync::atomic::Ordering::Relaxed))
++}
++
+ /// Shared CSA bank over Cap'n Proto. Optional; process-local bank stays default.
+ #[cfg(feature = "bank-rpc")]
+ pub mod bank_rpc;
