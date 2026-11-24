@@ -53,6 +53,8 @@ if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 from gmin_pin import REVISION as GMIN_PIN_REVISION  # noqa: E402
+from gmin_pin import SNAPSHOT as GMIN_PIN_SNAPSHOT  # noqa: E402
+from gmin_pin import TARBALL_SHA256 as GMIN_PIN_TARBALL_SHA256  # noqa: E402
 
 TEX = "paper/jctc/manuscript.tex"
 SI = "paper/jctc/si.tex"
@@ -853,6 +855,17 @@ GMIN_DEVELOP_HARNESS = "f009acc96bb95023eeb6e394e863630c752a5d05"
 GMIN_DEVELOP_SYSTEMS = ("au55", "m55r6", "m55r14", "m80r6", "m80r14")
 GMIN_DEVELOP_HOST = "e06d886d760e0a59870126b963636ff6408201594f2686f72deb66816fccadb3"
 GMIN_DEVELOP_SESSION = "20261120T072444Z"
+GMIN_SOURCE_NOTE = "bench/gmin-panel/gmin-source.txt"
+
+
+def gmin_rows_patch(audit: Audit) -> tuple[str, str, str]:
+    """The cap patch the committed GMIN rows were built with: path, commit and sha256 from rows_patch."""
+    for line in audit.text(GMIN_SOURCE_NOTE).splitlines():
+        if line.startswith("rows_patch="):
+            located, sha = line.removeprefix("rows_patch=").split()
+            path, commit = located.split("@")
+            return path, commit, sha
+    raise RuntimeError(f"{GMIN_SOURCE_NOTE} has no rows_patch line")
 
 
 def imported(audit: Audit, folder: str, name: str = "rows.csv", keys: tuple[str, str] = ("source", "blob")) -> str:
@@ -957,14 +970,21 @@ def gmin_rerun_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[
     audit.said(SI, f"LJ\\(_{{150}}\\) on\n\\texttt{{\\seqsplit{{{lj150}}}}},\nwhose record names no processor, memory, "
                    "or kernel;")
     audit.said(SI, "in alternating order by seed: six seeds with this code first and six with GMIN first.")
+    rows_patch, rows_patch_commit, rows_patch_sha = gmin_rows_patch(audit)
     for shard in GMIN_SHARDS:
         commit = dict(line.split(" ", 1) for line in audit.text(f"{GMIN_RERUN}/{shard}/PROVENANCE").splitlines())["commit"]
         for patch in ("bench/lj104-lattice/v2/h2h-gmin.patch", "scripts/morse_h2h/morse-timer.patch",
                       "bench/metal-cluster-h2h/gmin-bgupta.patch",
                       "examples/h2h_gmin_lj.data", "examples/h2h_gmin_morse.data"):
-            audit.cell(f"{GMIN_RERUN}/{shard}", f"{patch} at the record commit is the one at HEAD",
-                       git("rev-parse", f"HEAD:{patch}").stdout.strip(),
+            # The in-tree cap patch was replaced after these rows; they match the one rows_patch records.
+            held = rows_patch_commit if patch == rows_patch else "HEAD"
+            audit.cell(f"{GMIN_RERUN}/{shard}", f"{patch} at the record commit is the one at {held[:8]}",
+                       git("rev-parse", f"{held}:{patch}").stdout.strip(),
                        git("rev-parse", f"{commit}:{patch}").stdout.strip())
+    printed = git_bytes("show", f"{rows_patch_commit}:{rows_patch}")
+    audit.cell(GMIN_SOURCE_NOTE, "sha256 of rows_patch at its commit", rows_patch_sha,
+               hashlib.sha256(printed).hexdigest())
+    audit.said(SI, f"At both revisions the cap patch has sha256\n\\texttt{{\\seqsplit{{{rows_patch_sha}}}}}.")
     row_ids = {r["code_revision"] for r in rows if r["code"] == "gmin"}
     audit.cell(GMIN_RERUN, "one historical GMIN row identifier", "1", float(len(row_ids)))
     dates = {r.get("gmin_snapshot", "") for r in rows if r["code"] == "gmin" and r.get("gmin_snapshot")}
@@ -2345,17 +2365,14 @@ def gmin_patches(audit: Audit) -> None:
     audit.said(SI, ", ".join(f"\\path{{{n}}}" for n in want[:2]) + f", and \\path{{{want[2]}}}")
     audit.said(SI, f"tarball pin record the public tarball dated {GMIN_TARBALL_DATE}, sha256\n"
                    f"\\texttt{{\\seqsplit{{{GMIN_TARBALL_SHA256}}}}},")
-    legacy_marker = "SVN" + "REV"
-    audit.record(legacy_marker not in build and "\nREV=" not in build, "scripts/gmin_panel/build_gmin.sh",
-                 "the GMIN build uses no SVN or commit pin", "absent",
-                 "absent" if legacy_marker not in build and "\nREV=" not in build else "present")
-    audit.record(f"TARBALL_DATE={GMIN_TARBALL_DATE}" in build and
-                 f"TARBALL_SHA256={GMIN_TARBALL_SHA256}" in build,
-                 "scripts/gmin_panel/build_gmin.sh", "the GMIN build pins one dated tarball",
-                 f"{GMIN_TARBALL_DATE} {GMIN_TARBALL_SHA256}",
-                 f"{GMIN_TARBALL_DATE} {GMIN_TARBALL_SHA256}" if
-                 f"TARBALL_DATE={GMIN_TARBALL_DATE}" in build and
-                 f"TARBALL_SHA256={GMIN_TARBALL_SHA256}" in build else "other")
+    reads_pin = all(line in build for line in (
+        "PIN=$ROOT/scripts/gmin_pin.py", 'eval "$(python3 "$PIN" shell)"', "SNAPSHOT=$GMIN_PIN_SNAPSHOT",
+        "REV=$GMIN_PIN_REVISION", "TARBALL_SHA256=$GMIN_PIN_TARBALL_SHA256"))
+    audit.record(reads_pin, "scripts/gmin_panel/build_gmin.sh", "the GMIN build reads the one shared pin",
+                 "scripts/gmin_pin.py", "scripts/gmin_pin.py" if reads_pin else "other")
+    audit.cell("scripts/gmin_pin.py", "the shared pin is the dated tarball and the printed source identifier",
+               f"{GMIN_TARBALL_DATE} {GMIN_TARBALL_SHA256} {GMIN_TARBALL_SVNREV}",
+               f"{GMIN_PIN_SNAPSHOT} {GMIN_PIN_TARBALL_SHA256} {GMIN_PIN_REVISION}")
     audit.record("JP=1" in audit.text(want[0]), want[0], "the first patch sets the serial run index", "JP=1",
                  "JP=1" if "JP=1" in audit.text(want[0]) else "absent")
     audit.record("(\\texttt{JP=1})" in audit.text(SI), SI,
