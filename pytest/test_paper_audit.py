@@ -674,8 +674,63 @@ def test_an_unpushed_revision_needs_a_reason(tmp_path, monkeypatch):
     ]
 
 
-def remote_tip():
-    return git("for-each-ref", "--count=1", "--format=%(objectname)", "refs/remotes").stdout.strip()
+def remote_tip(cwd=ROOT):
+    """The tip of an audited remote branch: develop, then main, then the rest of the audited set.
+
+    A clone holds every branch of origin, and the audit counts a revision as
+    pushed only when one of its audited branches contains it; the first ref
+    in refs/remotes order is therefore not a tip the audit knows."""
+    audited = (*audit_mod.AUDIT_REMOTE_BRANCHES, *audit_mod.AUDIT_OPTIONAL_REMOTES)
+    for branch in dict.fromkeys(("develop", "main", *audited)):
+        found = subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}^{{commit}}"],
+                               cwd=cwd, capture_output=True, text=True, check=False)
+        if found.returncode == 0:
+            return found.stdout.strip()
+    pytest.fail("no audited remote branch is present: fetch develop from origin "
+                "(git fetch origin '+refs/heads/*:refs/remotes/origin/*')")
+
+
+def remote_layout(path, *branches):
+    """A repository whose refs/remotes hold one empty-tree commit for each named origin branch."""
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.org",
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.org"}
+
+    def run(*args, stdin=None):
+        return subprocess.run(["git", *args], cwd=path, input=stdin, capture_output=True, text=True, check=True,
+                              env=env).stdout.strip()
+
+    path.mkdir()
+    run("init", "-q")
+    tree = run("hash-object", "-t", "tree", "-w", "--stdin", stdin="")
+    tips = {}
+    for number, branch in enumerate(branches):
+        tips[branch] = run("commit-tree", tree, "-m", f"tip of {branch} {number}")
+        run("update-ref", f"refs/remotes/origin/{branch}", tips[branch])
+    return tips
+
+
+def test_the_remote_tip_is_an_audited_branch_whatever_sorts_first(tmp_path):
+    tips = remote_layout(tmp_path / "ci", "anneal-gmin-pin-followup3", "bench/crest-gaps", "main", "develop")
+    assert remote_tip(tmp_path / "ci") == tips["develop"]
+    assert remote_tip(tmp_path / "ci") != tips["anneal-gmin-pin-followup3"]
+    tips = remote_layout(tmp_path / "no-develop", "anneal-gmin-pin-followup3", "main")
+    assert remote_tip(tmp_path / "no-develop") == tips["main"]
+    tips = remote_layout(tmp_path / "audited-only", "anneal-gmin-pin-followup3", "fix/gmin-sc2", "bench/gmin-sc3")
+    assert remote_tip(tmp_path / "audited-only") == tips["bench/gmin-sc3"]
+
+
+def test_the_remote_tip_fails_clearly_when_no_audited_branch_is_present(tmp_path):
+    remote_layout(tmp_path / "foreign", "anneal-gmin-pin-followup3", "zzz")
+    with pytest.raises(pytest.fail.Exception, match="no audited remote branch is present"):
+        remote_tip(tmp_path / "foreign")
+    remote_layout(tmp_path / "bare")
+    with pytest.raises(pytest.fail.Exception, match="no audited remote branch is present"):
+        remote_tip(tmp_path / "bare")
+
+
+def test_the_remote_tip_of_this_clone_is_in_the_remote_closure(audited):
+    tip = remote_tip()
+    assert audit_mod.resolve_revisions(audited).index.on_remote(tip)
 
 
 def synthetic_audit(*rows, revisions=("code_revision", "code_tree")):
@@ -2407,3 +2462,4 @@ def test_tuned_gmin_tampered_harness_or_blob_fails(tmp_path, monkeypatch):
         audit = audit_mod.Audit()
         audit_mod.printed_harnesses(audit)
         assert any(row[1] == "tab:gmin-tuned" for row in audit.drifts())
+
