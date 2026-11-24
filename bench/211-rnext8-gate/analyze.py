@@ -185,8 +185,12 @@ def search_cell(name: str, rows: dict[str, dict[str, str]], censored: int) -> di
         "n_censored_rows": censored,
         "hits_a": a_hits,
         "hits_b": b_hits,
-        "hits_a2": sum(row["hit"] == "true" for row in arms["A2"].values()),
-        "hits_b2": sum(row["hit"] == "true" for row in arms["B2"].values()),
+        "hits_a2": sum(
+            arms["A2"][seed]["hit"] == "true" for seed in common if seed in arms["A2"]
+        ),
+        "hits_b2": sum(
+            arms["B2"][seed]["hit"] == "true" for seed in common if seed in arms["B2"]
+        ),
         "physical_a": sum(arms["A"][seed]["physical_hit"] == "true" for seed in common),
         "physical_b": sum(arms["B"][seed]["physical_hit"] == "true" for seed in common),
         "fisher_p": fisher_p,
@@ -346,9 +350,26 @@ def markdown(payload: dict[str, object]) -> str:
             f"| {arm} | {slab['combined_engine'][arm]} | {slab['withgrad_engine'][arm]} | {slab['grad_only_engine'][arm]} |"
         )
     lines.extend(["", "## GFN2 Si10 seed 2000", ""])
-    if not payload["gfn2_si10_seed_2000"]:
+    focus_rows = payload["gfn2_si10_seed_2000"]
+    if not focus_rows:
         lines.append("No row has been recorded.")
     else:
+        by_arm = {row["arm"]: row for row in focus_rows}
+        if "A" in by_arm and "B" in by_arm:
+            lines.append(
+                "Arm A best {abest} eV, detached {adet}, calls {acalls}. "
+                "Arm B best {bbest} eV, detached {bdet}, calls {bcalls}, "
+                "fresh SCC {bscc}. The temperature is the 300 K default.".format(
+                    abest=by_arm["A"]["best"],
+                    adet=by_arm["A"]["detached"],
+                    acalls=by_arm["A"]["calls"],
+                    bbest=by_arm["B"]["best"],
+                    bdet=by_arm["B"]["detached"],
+                    bcalls=by_arm["B"]["calls"],
+                    bscc=by_arm["B"]["scc_converged"],
+                )
+            )
+            lines.append("")
         lines.append(
             "| Arm | Hit | Physical | Best | Calls | Censored | Detached | NN min A | NN max A | SCC | Max force | Fresh eV |"
         )
