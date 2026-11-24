@@ -3109,10 +3109,20 @@ fn redraw_idle_stall_arm<R: Rng + ?Sized>(
     if !bandit {
         return drawn;
     }
-    if arms.len() > u64::BITS as usize {
-        let mut closed = vec![false; arms.len()];
+    let n = arms.len();
+    if n == 0 {
+        return None;
+    }
+    if n > u64::BITS as usize {
+        let mut closed = vec![false; n];
         let mut arm = drawn;
-        while let Some(index) = arm {
+        for _ in 0..n {
+            let candidate = arm?;
+            let index = if candidate < n && !closed[candidate] {
+                candidate
+            } else {
+                (0..n).find(|&i| !closed[i])?
+            };
             if stall_arm_ready(arms[index], entry_recorded) {
                 return Some(index);
             }
@@ -3124,14 +3134,20 @@ fn redraw_idle_stall_arm<R: Rng + ?Sized>(
         }
         return None;
     }
-    let full_mask = if arms.len() == u64::BITS as usize {
+    let full_mask = if n == u64::BITS as usize {
         u64::MAX
     } else {
-        (1u64 << arms.len()) - 1
+        (1u64 << n) - 1
     };
     let mut closed_mask = 0u64;
     let mut arm = drawn;
-    while let Some(index) = arm {
+    for _ in 0..n {
+        let candidate = arm?;
+        let index = if candidate < n && (closed_mask & (1u64 << candidate)) == 0 {
+            candidate
+        } else {
+            (0..n).find(|&i| (closed_mask & (1u64 << i)) == 0)?
+        };
         if stall_arm_ready(arms[index], entry_recorded) {
             return Some(index);
         }
@@ -3167,17 +3183,19 @@ where
         return None;
     }
     if n <= u64::BITS as usize {
-        let full_mask = if n == u64::BITS as usize {
-            u64::MAX
-        } else {
-            (1u64 << n) - 1
-        };
         let mut tried_mask = 0u64;
-        while tried_mask != full_mask {
-            let arm = if tried_mask == 0 {
+        for _ in 0..n {
+            let drawn = if tried_mask == 0 {
                 allocator.select(rng)
             } else {
                 allocator.select_where(rng, |arm| (tried_mask & (1u64 << arm)) == 0)
+            };
+            let arm = if drawn < n && (tried_mask & (1u64 << drawn)) == 0 {
+                drawn
+            } else if let Some(fallback) = (0..n).find(|&i| (tried_mask & (1u64 << i)) == 0) {
+                fallback
+            } else {
+                break;
             };
             if acts(arm, rng) {
                 return Some(arm);
@@ -3187,11 +3205,18 @@ where
         return None;
     }
     let mut tried = vec![false; n];
-    for _ in 0..n {
-        let arm = if tried.iter().all(|seen| !*seen) {
+    for step in 0..n {
+        let drawn = if step == 0 {
             allocator.select(rng)
         } else {
             allocator.select_where(rng, |arm| !tried[arm])
+        };
+        let arm = if drawn < n && !tried[drawn] {
+            drawn
+        } else if let Some(fallback) = (0..n).find(|&i| !tried[i]) {
+            fallback
+        } else {
+            break;
         };
         if acts(arm, rng) {
             return Some(arm);
@@ -12730,6 +12755,49 @@ mod tests {
             late_cap < 20,
             "the losing cap still served {late_cap} of 200"
         );
+    }
+
+    #[test]
+    fn all_nan_arm_scores_terminate_stall_draw() {
+        let mut rng = StdRng::seed_from_u64(47);
+        for n_arms in [3usize, 65] {
+            let mut allocator = crate::allocate::DepthAllocator::new(n_arms);
+            allocator.set_nan_scores();
+            let mut seen = Vec::new();
+            let none = draw_stall_arm(&allocator, &mut rng, |arm, _| {
+                seen.push(arm);
+                false
+            });
+            assert_eq!(none, None);
+            assert_eq!(seen.len(), n_arms);
+            let mut unique = seen.clone();
+            unique.sort_unstable();
+            unique.dedup();
+            assert_eq!(unique.len(), n_arms);
+
+            let mut seen_until_last = Vec::new();
+            let last = draw_stall_arm(&allocator, &mut rng, |arm, _| {
+                seen_until_last.push(arm);
+                arm == n_arms - 1
+            });
+            assert_eq!(last, Some(n_arms - 1));
+            assert_eq!(seen_until_last.len(), n_arms);
+        }
+
+        let arms = ["trail", "trail", "climb"];
+        let mut allocator = crate::allocate::DepthAllocator::new(arms.len());
+        allocator.set_nan_scores();
+        let served = redraw_idle_stall_arm(&allocator, &arms, Some(0), false, true, &mut rng);
+        assert_eq!(served, Some(2));
+        let none = redraw_idle_stall_arm(
+            &allocator,
+            &["trail", "trail", "trail"],
+            Some(0),
+            false,
+            true,
+            &mut rng,
+        );
+        assert_eq!(none, None);
     }
 
     #[test]

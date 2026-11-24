@@ -955,6 +955,11 @@ impl DepthAllocator {
     pub fn means(&self) -> Vec<f64> {
         self.mu.clone()
     }
+
+    #[cfg(test)]
+    pub(crate) fn set_nan_scores(&mut self) {
+        self.mu.fill(f64::NAN);
+    }
 }
 
 /// A Student-t draw with `nu` degrees of freedom, as a normal scaled by a
