@@ -29,26 +29,26 @@ def instrument(root: Path, candidate: bool) -> None:
             "    let mut gate_observed_basis_hits = 0usize;\n",
         )
         anchor = (
-            "                {\n"
-            "                    // The slice is the room left on the walk, not its original\n"
+            "            {\n"
+            "                // The slice is the room left on the walk, not its original\n"
         )
         text = replace_once(
             text,
             anchor,
-            "                {\n"
-            "                    gate_observed_basis_offered += 1;\n"
-            "                    // The slice is the room left on the walk, not its original\n",
+            "            {\n"
+            "                gate_observed_basis_offered += 1;\n"
+            "                // The slice is the room left on the walk, not its original\n",
         )
         anchor = (
-            "                    } else if ledger.below_target(basis_energy) {\n"
-            "                        // Recording settles the quench that already ran. It is\n"
+            "                } else if ledger.below_target(basis_energy) {\n"
+            "                    // Recording settles the quench that already ran. It is\n"
         )
         text = replace_once(
             text,
             anchor,
-            "                    } else if ledger.below_target(basis_energy) {\n"
-            "                        gate_observed_basis_hits += 1;\n"
-            "                        // Recording settles the quench that already ran. It is\n",
+            "                } else if ledger.below_target(basis_energy) {\n"
+            "                    gate_observed_basis_hits += 1;\n"
+            "                    // Recording settles the quench that already ran. It is\n",
         )
         values = (
             "gate_observed_basis_offered, gate_observed_basis_hits, "

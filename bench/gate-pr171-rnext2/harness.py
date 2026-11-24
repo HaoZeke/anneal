@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""Serial same-session runner for the PR 171 r-next gate."""
+"""Serial same-session runner for the PR 171 restack gate."""
 
 from __future__ import annotations
 
@@ -32,6 +32,7 @@ ROW_FIELDS = [
     "calls",
     "charged",
     "outside_s",
+    "outside_per_call_s",
     "child_user_s",
     "child_system_s",
     "pot_s",
@@ -195,7 +196,7 @@ def status_rss(pid: int) -> int:
 
 def execute(
     command: list[str], source: Path, env: dict[str, str], scratch: Path
-) -> tuple[int, str, str, resource.struct_rusage, int]:
+) -> tuple[int, str, str, resource.struct_rusage, int, float]:
     stdout_path = scratch / "stdout"
     stderr_path = scratch / "stderr"
     peak = 0
@@ -222,12 +223,14 @@ def execute(
                 break
             time.sleep(0.005)
     peak = max(peak, int(usage.ru_maxrss) * 1024)
+    wall = time.monotonic() - started
     return (
         proc.returncode,
         stdout_path.read_text(),
         stderr_path.read_text(),
         usage,
         peak,
+        wall,
     )
 
 
@@ -251,10 +254,10 @@ def append_jsonl(path: Path, row: dict[str, object]) -> None:
 
 def load_paths(args: argparse.Namespace) -> dict[str, dict[str, object]]:
     specs = {
-        "D": (args.src_d, args.bin_d, gate.BASE, gate.BASE_TREE),
-        "D2": (args.src_d, args.bin_d2, gate.BASE, gate.BASE_TREE),
-        "G": (args.src_g, args.bin_g, None, gate.PR_TREE),
-        "G2": (args.src_g, args.bin_g, None, gate.PR_TREE),
+        "A": (args.src_a, args.bin_a, gate.BASE, gate.BASE_TREE),
+        "A2": (args.src_a, args.bin_a2, gate.BASE, gate.BASE_TREE),
+        "B": (args.src_b, args.bin_b, None, gate.PR_TREE),
+        "B2": (args.src_b, args.bin_b, None, gate.PR_TREE),
     }
     paths = {}
     names = {binary_name(cell) for cell in gate.CELLS}
@@ -304,7 +307,7 @@ def run_one(
     counter = scratch / "counter"
     binary = info["bin"] / binary_name(cell)
     command = command_for(cell, binary, seed, scratch / "result")
-    code, stdout, stderr, usage, rss = execute(
+    code, stdout, stderr, usage, rss, wall = execute(
         command,
         info["source"],
         child_env(scratch, counter),
@@ -339,7 +342,9 @@ def run_one(
         newline="\n",
     )
     pot = float(parsed["pot_s"]) if parsed["pot_s"] else 0.0
-    outside = max(usage.ru_utime + usage.ru_stime - pot, 0.0)
+    outside = max(wall - pot, 0.0)
+    call_count = int(parsed["calls"]) if parsed["calls"] else 0
+    outside_per_call = outside / call_count if call_count else 0.0
     seen = parsed["seen_lowest"]
     out = parsed["out_best"]
     hit = (
@@ -371,6 +376,9 @@ def run_one(
         "calls": parsed["calls"],
         "charged": parsed["charged"],
         "outside_s": f"{outside:.9f}" if code == 0 else "",
+        "outside_per_call_s": (
+            f"{outside_per_call:.12g}" if code == 0 else ""
+        ),
         "child_user_s": f"{usage.ru_utime:.9f}",
         "child_system_s": f"{usage.ru_stime:.9f}",
         "pot_s": parsed["pot_s"],
@@ -419,11 +427,11 @@ def main() -> int:
     parser.add_argument("--sessions", type=Path, required=True)
     parser.add_argument("--hosts", type=Path, required=True)
     parser.add_argument("--logs", type=Path, required=True)
-    parser.add_argument("--src-d", type=Path, required=True)
-    parser.add_argument("--src-g", type=Path, required=True)
-    parser.add_argument("--bin-d", type=Path, required=True)
-    parser.add_argument("--bin-d2", type=Path, required=True)
-    parser.add_argument("--bin-g", type=Path, required=True)
+    parser.add_argument("--src-a", type=Path, required=True)
+    parser.add_argument("--src-b", type=Path, required=True)
+    parser.add_argument("--bin-a", type=Path, required=True)
+    parser.add_argument("--bin-a2", type=Path, required=True)
+    parser.add_argument("--bin-b", type=Path, required=True)
     args = parser.parse_args()
 
     for path in (args.rows.parent, args.sessions.parent, args.hosts.parent, args.logs):
@@ -446,7 +454,7 @@ def main() -> int:
             "session": session,
             "machine_id_sha256": machine,
             "base": gate.BASE,
-            "candidate": paths["G"]["head"],
+            "candidate": paths["B"]["head"],
             "candidate_tree": gate.PR_TREE,
             "core": 0,
             "seeds": {cell.name: list(cell.seeds) for cell in gate.CELLS},
