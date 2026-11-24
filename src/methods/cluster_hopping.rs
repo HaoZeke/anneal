@@ -13638,6 +13638,19 @@ mod call_floor_tests {
     }
 
     #[test]
+    fn element_aware_floor_honours_a_larger_absolute_floor() {
+        let elements = [1, 1];
+        let floor = CallFloor {
+            absolute: 0.50,
+            elements: Some(&elements),
+        };
+        let between = Array1::from(vec![0.0, 0.0, 0.0, 0.45, 0.0, 0.0]);
+        assert!(0.45 > element_call_floor(1, 1, 0.0));
+        assert!(!floor.clears(between.view()));
+        assert_eq!(floor.pair(0, 1), 0.50);
+    }
+
+    #[test]
     fn species_sanity_rejects_compression_but_keeps_multiple_bonds() {
         let silicon = [14, 14];
         let compressed = Array1::from(vec![0.0, 0.0, 0.0, 1.40, 0.0, 0.0]);

@@ -2229,13 +2229,14 @@ def gfn2_geometry_files(audit: Audit) -> None:
                 shown or "missing",
                 "existing tracked path",
             )
-            if exists and row.get("geometry_sha256"):
+            if exists:
+                shown_digest = row.get("geometry_sha256", "").strip()
                 digest = hashlib.sha256(geometry.read_bytes()).hexdigest()
                 audit.record(
-                    digest == row["geometry_sha256"],
+                    shown_digest == digest,
                     where,
                     "final geometry sha256",
-                    row["geometry_sha256"],
+                    shown_digest or "missing",
                     digest,
                 )
             converged = row.get("standalone_scc_converged", "").lower()

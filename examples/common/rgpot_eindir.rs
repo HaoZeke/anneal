@@ -269,6 +269,23 @@ mod tests {
     }
 
     #[test]
+    fn species_guard_keeps_an_explicit_floor_above_the_scaled_floor() {
+        let hydrogen_pair = [0.0, 0.0, 0.0, 0.45, 0.0, 0.0];
+        assert!(!geometry_has_short_pair(&hydrogen_pair, &[1, 1], 0.40));
+        assert!(geometry_has_short_pair(&hydrogen_pair, &[1, 1], 0.50));
+    }
+
+    #[test]
+    fn water_driver_guard_refuses_a_pair_below_its_declared_limit() {
+        let water = [0.0, 0.0, 0.0, 0.957, 0.0, 0.0, 1.297, 0.0, 0.0];
+        assert!(geometry_has_short_pair(
+            &water,
+            &[8, 1, 1],
+            OVERLAP_SEPARATION_A
+        ));
+    }
+
+    #[test]
     fn a_physical_water_bond_is_called_and_a_collapsed_pair_is_not() {
         let water = [8, 1, 1];
         let bond = |oh: f64| [0.0, 0.0, 0.0, oh, 0.0, 0.0, -0.24, 0.93, 0.0];

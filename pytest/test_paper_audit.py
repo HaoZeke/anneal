@@ -455,6 +455,31 @@ def test_a_gfn2_row_without_its_geometry_is_reported():
     ]
 
 
+def test_a_gfn2_row_without_its_geometry_digest_is_reported(tmp_path, monkeypatch):
+    directory = tmp_path / "bench" / "covalent-h2h" / "gfn2"
+    geometry = directory / "finals" / "si20" / "best.xyz"
+    geometry.parent.mkdir(parents=True)
+    geometry.write_text("2\nfinal\nSi 0 0 0\nSi 2.25 0 0\n")
+    rows = directory / "rows-v2.csv"
+    rows.write_text(
+        "geometry,geometry_sha256,standalone_scc_converged,"
+        "standalone_xtb_eV,min_distance_A\n"
+        "finals/si20/best.xyz,,true,-1.0,2.25\n"
+    )
+    monkeypatch.setattr(audit_mod, "ROOT", tmp_path)
+    audit = audit_mod.Audit()
+
+    audit_mod.gfn2_geometry_files(audit)
+
+    assert [(row[1], row[2], row[3]) for row in audit.drifts()] == [
+        (
+            "bench/covalent-h2h/gfn2/rows-v2.csv:2",
+            "final geometry sha256",
+            "missing",
+        )
+    ]
+
+
 SC_N12_ROWS = ("bench/metal-cluster-h2h/sc-n12/results.csv", "bench/metal-cluster-h2h/sc-n12/seeds.csv")
 CONF_FIX4 = "bench/openconf-h2h/conf-fix4/seeds.csv"
 ASE_GOFEE = "bench/ase-gofee-h2h/results.csv"
