@@ -1,0 +1,1448 @@
+From 1abf9d7f62a982368dec2cb53f72779b11d06fd3 Mon Sep 17 00:00:00 2001
+From: Rohit Goswami <rgoswami@ieee.org>
+Date: Mon, 23 Nov 2026 21:49:06 -0600
+Subject: [PATCH] bench: add the lj38 fixed-cost default-on gate
+
+Serial same-session gate for the lj38 fixed-cost change. It runs arms A,
+B and a second build of A in palindromic blocks on lj38 (24 seeds) and
+six default-preset cells (12 seeds), with a strict bit-identity check,
+seed-paired outside-time and peak RssAnon bootstraps, and a path
+counter patch for a separate non-timed build.
+---
+ bench/gate-lj38-fixed-cost/PROTOCOL.md       | 147 +++++
+ bench/gate-lj38-fixed-cost/analyze.py        | 219 +++++++
+ bench/gate-lj38-fixed-cost/guard_trace.rs    | 359 +++++++++++
+ bench/gate-lj38-fixed-cost/path-counter.diff |  71 +++
+ bench/gate-lj38-fixed-cost/run_gate.py       | 596 +++++++++++++++++++
+ 5 files changed, 1392 insertions(+)
+ create mode 100644 bench/gate-lj38-fixed-cost/PROTOCOL.md
+ create mode 100644 bench/gate-lj38-fixed-cost/analyze.py
+ create mode 100644 bench/gate-lj38-fixed-cost/guard_trace.rs
+ create mode 100644 bench/gate-lj38-fixed-cost/path-counter.diff
+ create mode 100644 bench/gate-lj38-fixed-cost/run_gate.py
+
+diff --git a/bench/gate-lj38-fixed-cost/PROTOCOL.md b/bench/gate-lj38-fixed-cost/PROTOCOL.md
+new file mode 100644
+index 0000000000..cfd8c1288a
+--- /dev/null
++++ b/bench/gate-lj38-fixed-cost/PROTOCOL.md
+@@ -0,0 +1,147 @@
++# lj38 fixed-cost default-on gate protocol
++
++Written before any data. Nothing here changes after the first run.
++
++## Subjects
++
++A is develop `9b65fda3972fd8c014bce886a3ea5c05956d64af`, tree
++`9b65fda3^{tree}`.
++
++B is `f9bbb5e86a67b7bbfaa629ac7378306f1f22cd1d`, tree
++`510c087e8c6e4c9aeedae202204a7919cee95a60`: five linear commits on A.
++The payload mbox replays them on A and gives that tree exactly, so the
++tree is the identity of B.
++
++A2 is a second, independent release build of A. In the row files it is
++the arm `Ap`.
++
++Bc is B plus a counter patch. It is not a timed arm. It only shows that
++the changed code paths run.
++
++The change touches `candidate_from_basis` (src/lattice.rs), the AVX2
++Kuhn-Munkres and shortest-path code (src/assignment.rs), the class
++blocks and op hashes (src/csm.rs), and drops `PackingBank`
++(src/methods/cluster_hopping.rs and its packing_bank.rs). It adds a
++newsfragment.
++
++## Host
++
++The changed code has AVX2 loops, so the session needs an AVX2 host.
++The runner refuses to start without the `avx2` flag. The CPU model and
++flags are recorded in sessions.csv.
++
++## Arms and schedule
++
++Cells run one at a time, serially, on core 0 (`taskset -c 0`). Every
++environment variable whose name ends in `_NUM_THREADS` is one. Release
++builds only. There is no quick mode, no warm-up, no retuning, no
++rescue, no hand-picking and no relabelling. No GMIN run is part of this
++gate.
++
++Seeds start at 2000. Each cell runs palindromic blocks of two seeds: A,
++B, A2 on the first seed, then A2, B, A on the second. Each arm has the
++same mean position in every cell. Budgets and stop levels are identical
++in every arm. All arms run on one VM in one session. A session that
++cannot finish is sealed as a partial and is not extended on another VM.
++
++## Cells
++
++Default-preset cells (stop at published minimum plus 0.001):
++
++| cell | n | seeds | budget | published minimum |
++|---|---|---|---|---|
++| lj38 | 24 | 2000-2023 | 400000 | -173.928427 |
++| m38r14d | 12 | 2000-2011 | 400000 | -144.321054 |
++| lj75 | 12 | 2000-2011 | 4000000 | -397.492331 |
++| lj98 | 12 | 2000-2011 | 4000000 | -543.665361 |
++| m80r6 | 12 | 2000-2011 | 4000000 | -378.333471 |
++| au55 | 12 | 2000-2011 | 1000000 | -191.03085280 |
++| hexamer | 12 | 2000-2011 | 500000 | -197.7805260034 |
++
++That is 96 runs per arm and 288 runs in all.
++
++## Measurements
++
++Every row records the hit, the budget, the calls to the hit (or the
++whole budget on a miss), the charged calls, wall seconds, seconds
++inside potential calls, outside seconds per call, the best-energy bits,
++the trajectory hash, and `RssAnon` in kB. Rows are append-only. A failed
++row is kept and makes its cell INCONCLUSIVE. There are no replacement
++runs.
++
++Memory is the peak `RssAnon`, read in-process: a sampler thread reads
++it every 10 ms for the whole run, and the end-of-run value is also
++taken. The row holds the larger as the peak and the end value as
++`rss_end_kb`. The sampler runs in every arm.
++
++Outside time per call is (wall minus inside) divided by calls. Outside
++time in total is wall minus inside. Both are reported for every cell,
++side by side.
++
++## Statistics
++
++Random procedures use seed 20261123 and 10000 seed-level bootstrap
++resamples. Every ratio is seed-paired B/A, summarised as a geometric
++mean with a 95 percent percentile interval. The same is computed for
++A2/A as the A/A band.
++
++1. Bit identity, strict. For every seed of every cell, A and B must
++   agree on the hit, the calls, the charged calls, the best-energy bits
++   and the trajectory hash. Any difference is a FIX. A against A2 is
++   checked the same way and a difference is reported as a note, because
++   it would mean the run is not repeatable.
++2. No hit loss. Fisher's exact test on hits (one-sided, B fewer) and a
++   one-sided Mann-Whitney test on calls with every miss scored as
++   budget + 1 (B larger). A hit loss is p < 0.05 in either test.
++3. Outside time, default-on bar. The ratio B/A has upper bound at most
++   1.10, for the per-call figure and for the total. Both versions are
++   reported: the strict one, upper at most 1.10, and the band one,
++   upper at most max(1.10, upper of A2/A). The verdict uses the band
++   version. A regression is real only if the lower bound is above both
++   1 and the upper of A2/A.
++4. Memory. The peak RssAnon ratio B/A. The one-sided gate fails only if
++   its lower bound exceeds max(1.10, upper of A2/A). Upper at most 1.10
++   is also reported.
++5. Early-stop artifact. A run that stops at a hit has fewer calls, so
++   its per-call outside time carries a fixed cost over fewer calls.
++   A cell with any early-stopped run is flagged. If the strict identity
++   rule holds, the calls of A and B are equal and per-call and total
++   ratios coincide; if they ever disagree, that is stated and neither is
++   relabelled.
++6. Builder smoke claim. The builder reports an lj38 per-call outside
++   ratio of about 0.92 against A. It is unverified. The lj38 cell
++   reports the ratio with its interval and whether the interval upper
++   is below 1; the claim is not an input to the verdict.
++
++## Path counter
++
++Bc counts entries to `solve_shortest_paths_loop_avx2`,
++`kuhn_munkres_loop_avx2`, `augment_tight_avx2`, `recall_op` in csm, and
++`candidate_from_basis`. After the session, Bc runs lj38 seed 2000, lj38
++seed 2001 and m38r14d seed 2000, serial on core 0. Each counter must be
++nonzero in the sum, and each Bc run must equal the timed B row of the
++same cell and seed on trajectory, energy bits, calls and charged calls.
++A zero counter is reported as unexercised and does not become a PASS
++for that path. The drop of `PackingBank` has no counter: the type no
++longer exists in B.
++
++## Verdict
++
++Per cell: FIX if any rule above fails, INCONCLUSIVE if rows are missing
++or errored, PASS-BAND if only the strict outside-time or memory bound is
++missed but the band version holds, otherwise PASS. A FIX is never
++relabelled as a PASS. The gate is PASS only if every cell is PASS or
++PASS-BAND and the path counter check holds.
++
++Energy agreement up to spectroscopic accuracy would be enough for a
++converged or repeatable quantity, and differences near 1e-9 are not
++flagged elsewhere. The identity fields in rule 1 are the default-parity
++bar and stay strict.
++
++## Known gaps
++
++- No molecular cells. The change is in cluster code and the default
++  cluster cells are where its paths run.
++- No simple-cubic or TIP4P cell beyond the water hexamer: those run in
++  other harnesses and are not in this one.
++- The counter build is run after the session and is not timed.
+diff --git a/bench/gate-lj38-fixed-cost/analyze.py b/bench/gate-lj38-fixed-cost/analyze.py
+new file mode 100644
+index 0000000000..75cb3e530d
+--- /dev/null
++++ b/bench/gate-lj38-fixed-cost/analyze.py
+@@ -0,0 +1,219 @@
++#!/usr/bin/env python3
++# Copyright (c) anneal developers
++"""Statistics for the lj38 fixed-cost gate, as fixed in PROTOCOL.md.
++
++Reads rows.csv written by run_gate.py. Writes analysis.csv and
++analysis.md next to it. Arm Ap in the rows is arm A2 in the protocol.
++"""
++
++from __future__ import annotations
++
++import argparse
++import csv
++import math
++import sys
++from pathlib import Path
++
++import numpy as np
++from scipy.stats import fisher_exact, mannwhitneyu
++
++BOOT_SEED = 20261123
++BOOT_DRAWS = 10_000
++CAP = 1.10
++ALPHA = 0.05
++
++
++def read_rows(path: Path) -> list[dict]:
++    with path.open(newline="") as handle:
++        return list(csv.DictReader(handle))
++
++
++def by_seed(rows: list[dict], cell: str, arm: str) -> dict[int, dict]:
++    return {int(r["seed"]): r for r in rows if r["cell"] == cell and r["arm"] == arm}
++
++
++def geomean_ci(ratios: np.ndarray) -> tuple[float, float, float]:
++    """Seed-paired geometric mean and 95 percent bootstrap interval."""
++    logs = np.log(ratios)
++    rng = np.random.default_rng(BOOT_SEED)
++    idx = rng.integers(0, len(logs), size=(BOOT_DRAWS, len(logs)))
++    means = np.exp(logs[idx].mean(axis=1))
++    lo, hi = np.percentile(means, [2.5, 97.5])
++    return float(np.exp(logs.mean())), float(lo), float(hi)
++
++
++def paired_ratio(num: dict[int, dict], den: dict[int, dict], key) -> np.ndarray:
++    seeds = sorted(set(num) & set(den))
++    out = []
++    for seed in seeds:
++        n, d = key(num[seed]), key(den[seed])
++        if not (n > 0 and d > 0 and math.isfinite(n) and math.isfinite(d)):
++            raise ValueError(f"non-positive or non-finite value at seed {seed}")
++        out.append(n / d)
++    return np.asarray(out)
++
++
++def per_call(row: dict) -> float:
++    return float(row["outside_per_call_s"])
++
++
++def total_outside(row: dict) -> float:
++    return float(row["wall_s"]) - float(row["inside_s"])
++
++
++def rss(row: dict) -> float:
++    return float(row["rss_anon_kb"])
++
++
++def calls_scored(row: dict) -> float:
++    hit = int(row["hit"])
++    return float(row["calls"]) if hit else float(row["budget"]) + 1.0
++
++
++def hit_tests(a: dict[int, dict], b: dict[int, dict]) -> tuple[float, float, int, int]:
++    seeds = sorted(set(a) & set(b))
++    ha = sum(int(a[s]["hit"]) for s in seeds)
++    hb = sum(int(b[s]["hit"]) for s in seeds)
++    n = len(seeds)
++    p_fisher = float(fisher_exact([[hb, n - hb], [ha, n - ha]], alternative="less")[1])
++    xa = [calls_scored(a[s]) for s in seeds]
++    xb = [calls_scored(b[s]) for s in seeds]
++    if len(set(xa + xb)) == 1:
++        p_mwu = 1.0
++    else:
++        p_mwu = float(mannwhitneyu(xb, xa, alternative="greater").pvalue)
++    return p_fisher, p_mwu, ha, hb
++
++
++def identical(a: dict[int, dict], b: dict[int, dict]) -> tuple[bool, list[int]]:
++    bad = []
++    for seed in sorted(a):
++        ra, rb = a[seed], b.get(seed)
++        if rb is None or any(ra[k] != rb[k] for k in ("trajectory", "energy_bits", "calls", "charged", "hit")) or ra["trajectory"] == "":
++            bad.append(seed)
++    return (not bad), bad
++
++
++def judge(rows: list[dict], cell: str) -> dict:
++    a, b, a2 = (by_seed(rows, cell, arm) for arm in ("A", "B", "Ap"))
++    res: dict = {"cell": cell, "n": len(a)}
++    seeds_ok = set(a) == set(b) == set(a2) and len(a) > 0
++    errors = [r for r in rows if r["cell"] == cell and r["error"] != ""]
++    res["complete"] = seeds_ok and not errors
++    if not res["complete"]:
++        res["verdict"] = "INCONCLUSIVE"
++        res["notes"] = f"incomplete or error rows: {len(errors)}"
++        return res
++    p_f, p_m, ha, hb = hit_tests(a, b)
++    p_f2, p_m2, _, ha2 = hit_tests(a, a2)
++    res.update(hits_a=ha, hits_b=hb, hits_a2=ha2, p_fisher=p_f, p_mwu=p_m, p_fisher_a2=p_f2, p_mwu_a2=p_m2)
++    res["hit_loss"] = p_f < ALPHA or p_m < ALPHA
++    notes = []
++    for tag, key in (("opc", per_call), ("tot", total_outside)):
++        gb = geomean_ci(paired_ratio(b, a, key))
++        ga = geomean_ci(paired_ratio(a2, a, key))
++        res[f"{tag}_ratio"], res[f"{tag}_lo"], res[f"{tag}_hi"] = gb
++        res[f"{tag}_aa"], res[f"{tag}_aa_lo"], res[f"{tag}_aa_hi"] = ga
++        res[f"{tag}_strict"] = gb[2] <= CAP
++        res[f"{tag}_band"] = gb[2] <= max(CAP, ga[2])
++        res[f"{tag}_regression"] = gb[1] > 1.0 and gb[1] > ga[2]
++    rb_, ra_ = paired_ratio(b, a, rss), paired_ratio(a2, a, rss)
++    gb, ga = geomean_ci(rb_), geomean_ci(ra_)
++    res["rss_ratio"], res["rss_lo"], res["rss_hi"] = gb
++    res["rss_aa_hi"] = ga[2]
++    res["rss_strict"] = gb[2] <= CAP
++    res["rss_fail"] = gb[1] > max(CAP, ga[2])
++    early = [r for r in list(a.values()) + list(b.values()) if int(r["hit"]) and float(r["calls"]) < float(r["budget"])]
++    res["early_stop_runs"] = len(early)
++    res["calls_ratio"] = geomean_ci(paired_ratio(b, a, lambda r: float(r["calls"])))[0]
++    if early:
++        notes.append("early-stop per-call artifact possible: read totals beside per-call")
++    if (res["opc_band"] != res["tot_band"]) or (res["opc_strict"] != res["tot_strict"]):
++        notes.append("per-call and total outside time disagree")
++    if res["calls_ratio"] and abs(res["calls_ratio"] - 1.0) > 0.02:
++        notes.append("calls differ between A and B")
++    if True:
++        ok2, bad2 = identical(a, a2)
++        res["a2_identical"] = ok2
++        if not ok2:
++            notes.append("A and A2 differ on seeds " + " ".join(map(str, bad2)) + " (run is not repeatable)")
++        ok, bad = identical(a, b)
++        res["identical"] = ok
++        res["mismatch"] = " ".join(map(str, bad))
++        if not ok:
++            notes.append("default-parity fields differ on seeds " + res["mismatch"])
++    failures = []
++    if res["hit_loss"]:
++        failures.append("hit loss")
++    if res["opc_regression"] or not res["opc_band"]:
++        failures.append("outside time (per call)")
++    if res["tot_regression"] or not res["tot_band"]:
++        failures.append("outside time (total)")
++    if res["rss_fail"]:
++        failures.append("memory")
++    if res.get("identical") is False:
++        failures.append("default parity")
++    res["failures"] = "; ".join(failures)
++    res["notes"] = "; ".join(notes)
++    if failures:
++        res["verdict"] = "FIX"
++    elif res["opc_strict"] and res["rss_strict"]:
++        res["verdict"] = "PASS"
++    else:
++        res["verdict"] = "PASS-BAND"
++    return res
++
++
++FIELDS = [
++    "cell", "n", "verdict", "failures", "notes", "hits_a", "hits_b", "hits_a2", "p_fisher", "p_mwu",
++    "opc_ratio", "opc_lo", "opc_hi", "opc_aa_hi", "tot_ratio", "tot_lo", "tot_hi", "tot_aa_hi",
++    "rss_ratio", "rss_lo", "rss_hi", "rss_aa_hi", "calls_ratio", "early_stop_runs", "identical", "mismatch", "a2_identical", "tot_strict", "opc_strict", "opc_band", "tot_band",
++]
++
++
++def fmt(v) -> str:
++    if isinstance(v, float):
++        return f"{v:.4g}"
++    return "" if v is None else str(v)
++
++
++def main() -> int:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("rows", type=Path)
++    args = parser.parse_args()
++    rows = read_rows(args.rows)
++    cells = list(dict.fromkeys(r["cell"] for r in rows))
++    results = [judge(rows, cell) for cell in cells]
++    out = args.rows.parent
++    with (out / "analysis.csv").open("w", newline="") as handle:
++        writer = csv.DictWriter(handle, fieldnames=FIELDS, lineterminator="\n", extrasaction="ignore")
++        writer.writeheader()
++        writer.writerows(results)
++    lines = [
++        "| cell | n | verdict | hits A/B/A2 | p Fisher | p MWU | out/call B/A [lo,hi] | A2/A hi | out total B/A [lo,hi] | RSS peak B/A [lo,hi] | identity A/B | notes |",
++        "|---|---|---|---|---|---|---|---|---|---|---|---|",
++    ]
++    for r in results:
++        if not r["complete"]:
++            lines.append(f"| {r['cell']} | {r['n']} | {r['verdict']} | | | | | | | | | {r['notes']} |")
++            continue
++        lines.append(
++            f"| {r['cell']} | {r['n']} | {r['verdict']} | {r['hits_a']}/{r['hits_b']}/{r['hits_a2']} "
++            f"| {fmt(r['p_fisher'])} | {fmt(r['p_mwu'])} "
++            f"| {fmt(r['opc_ratio'])} [{fmt(r['opc_lo'])},{fmt(r['opc_hi'])}] | {fmt(r['opc_aa_hi'])} "
++            f"| {fmt(r['tot_ratio'])} [{fmt(r['tot_lo'])},{fmt(r['tot_hi'])}] "
++            f"| {fmt(r['rss_ratio'])} [{fmt(r['rss_lo'])},{fmt(r['rss_hi'])}] "
++            f"| {'identical' if r.get('identical') else 'DIFFERS ' + r.get('mismatch', '')} "
++            f"| {r['failures'] or r['notes']} |"
++        )
++    worst = "FIX" if any(r["verdict"] in ("FIX", "INCONCLUSIVE") for r in results) else "PASS"
++    lines.append("")
++    lines.append(f"overall: {worst}")
++    text = "\n".join(lines) + "\n"
++    (out / "analysis.md").write_text(text)
++    sys.stdout.write(text)
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/bench/gate-lj38-fixed-cost/guard_trace.rs b/bench/gate-lj38-fixed-cost/guard_trace.rs
+new file mode 100644
+index 0000000000..17292d3458
+--- /dev/null
++++ b/bench/gate-lj38-fixed-cost/guard_trace.rs
+@@ -0,0 +1,359 @@
++// Copyright (c) anneal developers
++//! One default-preset guard seed, with a bit-level trajectory hash.
++//!
++//! Lennard-Jones and Morse use `PairPotential` and `Config::recommended`.
++//! The Morse 38 rho 14 and LJ98 cells use the same driver.
++//! Au55 uses `Gupta::copper_gold` and the species the metal example installs.
++//! The hexamer uses `GminTip4p` and `Config::recommended_tip4p`.
++//! Each run stops at the published minimum plus `DEFAULT_HIT_TOL`, or at
++//! the paper budget. Nothing else is changed.
++
++use anneal_core::methods::cluster_hopping::{
++    Config, Ledger, Outcome, random_cluster_in_radius, run_with_gradient,
++};
++use anneal_core::methods::cluster_search::search_from;
++use anneal_core::methods::warm_lbfgs::WarmLbfgs;
++use anneal_core::potentials::{
++    GminTip4p, Gupta, PairPotential, gmin_water_geometry, random_tip4p_cluster,
++};
++use eindir_core::Objective;
++use eindir_core::bounds::Bounds;
++use eindir_core::gradient::{DifferentiableObjective, Gradient};
++use ndarray::{Array1, ArrayView1};
++use rand::SeedableRng;
++use rand::rngs::StdRng;
++use sha2::{Digest, Sha256};
++use std::sync::atomic::{AtomicU64, Ordering};
++use std::time::Instant;
++
++const HIT_TOL: f64 = anneal_core::DEFAULT_HIT_TOL;
++
++struct Done {
++    budget: usize,
++    hit: bool,
++    calls: usize,
++    charged: usize,
++    wall_s: f64,
++    inside_s: f64,
++    best_bits: String,
++    trajectory: String,
++    rss_anon_kb: u64,
++    rss_end_kb: u64,
++}
++
++/// Highest `RssAnon` seen by the sampler, in kB.
++static RSS_PEAK_KB: AtomicU64 = AtomicU64::new(0);
++
++/// Nanoseconds inside potential energy and gradient calls.
++struct PesClock {
++    inside_ns: AtomicU64,
++}
++
++impl PesClock {
++    fn new() -> Self {
++        Self {
++            inside_ns: AtomicU64::new(0),
++        }
++    }
++
++    fn time<T>(&self, body: impl FnOnce() -> T) -> T {
++        let started = Instant::now();
++        let out = body();
++        let dt = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
++        self.inside_ns.fetch_add(dt, Ordering::Relaxed);
++        out
++    }
++
++    fn seconds(&self) -> f64 {
++        self.inside_ns.load(Ordering::Relaxed) as f64 * 1e-9
++    }
++}
++
++/// Times `value_and_gradient` at the potential boundary and forwards it.
++struct TimedPes<'a, P> {
++    inner: &'a P,
++    clock: &'a PesClock,
++}
++
++impl<P> Objective<f64> for TimedPes<'_, P>
++where
++    P: Objective<f64>,
++{
++    fn dim(&self) -> usize {
++        Objective::dim(self.inner)
++    }
++
++    fn bounds(&self) -> &Bounds<f64> {
++        self.inner.bounds()
++    }
++
++    fn eval(&self, x: ArrayView1<f64>) -> f64 {
++        self.clock.time(|| self.inner.eval(x))
++    }
++}
++
++impl<P> Gradient<f64> for TimedPes<'_, P>
++where
++    P: Gradient<f64>,
++{
++    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
++        self.clock.time(|| self.inner.grad(x))
++    }
++
++    fn dim(&self) -> usize {
++        Gradient::dim(self.inner)
++    }
++}
++
++impl<P> DifferentiableObjective<f64> for TimedPes<'_, P>
++where
++    P: DifferentiableObjective<f64>,
++{
++    fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
++        self.clock.time(|| self.inner.value_and_gradient(x))
++    }
++}
++
++fn main() {
++    anneal_core::install_rgpot_kernels!();
++    let core = affinity();
++    if core != "0" {
++        eprintln!("affinity {core}");
++        std::process::exit(3);
++    }
++    let mut args = std::env::args().skip(1);
++    let Some(system) = args.next() else {
++        eprintln!("need a system");
++        std::process::exit(2);
++    };
++    let Some(seed) = args.next().and_then(|text| text.parse::<u64>().ok()) else {
++        eprintln!("need a seed");
++        std::process::exit(2);
++    };
++    if args.next().is_some() {
++        eprintln!("too many arguments");
++        std::process::exit(2);
++    }
++    std::thread::spawn(|| {
++        loop {
++            RSS_PEAK_KB.fetch_max(rss_anon_kb(), Ordering::Relaxed);
++            std::thread::sleep(std::time::Duration::from_millis(10));
++        }
++    });
++    if let Err(err) = Config::check_removed_env() {
++        eprintln!("removed config: {err}");
++        std::process::exit(2);
++    }
++    let done = match system.as_str() {
++        "lj38" => run_lj(38, 400_000, -173.928427, seed),
++        "m38r14d" => run_morse(38, 14.0, 400_000, -144.321054, seed),
++        "lj75" => run_lj(75, 4_000_000, -397.492331, seed),
++        "lj98" => run_lj(98, 4_000_000, -543.665361, seed),
++        "m80r6" => run_morse(80, 6.0, 4_000_000, -378.333471, seed),
++        "au55" => run_gold(55, 1_000_000, -191.03085280, seed),
++        "hexamer" => run_hexamer(seed),
++        other => {
++            eprintln!("unknown system {other}");
++            std::process::exit(2);
++        }
++    };
++    println!(
++        "GATE system={system} seed={seed} budget={} hit={} calls={} charged={} wall_s={:.9} inside_s={:.9} best_bits={} trajectory={} rss_anon_kb={} rss_end_kb={} core={core}",
++        done.budget,
++        u8::from(done.hit),
++        done.calls,
++        done.charged,
++        done.wall_s,
++        done.inside_s,
++        done.best_bits,
++        done.trajectory,
++        done.rss_anon_kb,
++        done.rss_end_kb,
++    );
++    // GATE-COUNTER-HOOK
++}
++
++fn affinity() -> String {
++    let text = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
++    text.lines()
++        .find_map(|line| line.strip_prefix("Cpus_allowed_list:"))
++        .map(|rest| rest.trim().to_string())
++        .unwrap_or_default()
++}
++
++/// `RssAnon` of this process in kB.
++fn rss_anon_kb() -> u64 {
++    let text = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
++    text.lines()
++        .find_map(|line| line.strip_prefix("RssAnon:"))
++        .and_then(|rest| rest.split_whitespace().next())
++        .and_then(|num| num.parse::<u64>().ok())
++        .unwrap_or(0)
++}
++
++fn run_lj(n: usize, budget: usize, reference: f64, seed: u64) -> Done {
++    let cfg = Config::recommended(n);
++    let potential = PairPotential::lennard_jones(n);
++    run_lbfgs("lj", n, budget, reference, seed, cfg, &potential)
++}
++
++fn run_morse(n: usize, rho: f64, budget: usize, reference: f64, seed: u64) -> Done {
++    let cfg = Config::recommended(n);
++    let potential = PairPotential::morse(n, rho);
++    run_lbfgs("morse", n, budget, reference, seed, cfg, &potential)
++}
++
++fn run_gold(n: usize, budget: usize, reference: f64, seed: u64) -> Done {
++    let cfg = Config::recommended(n).with_species(Gupta::copper_gold_species(0, n), None);
++    let potential = Gupta::copper_gold(0, n);
++    run_lbfgs("au", n, budget, reference, seed, cfg, &potential)
++}
++
++fn run_lbfgs<P>(
++    _label: &str,
++    n: usize,
++    budget: usize,
++    reference: f64,
++    seed: u64,
++    cfg: Config,
++    potential: &P,
++) -> Done
++where
++    P: DifferentiableObjective<f64>,
++{
++    let mut rng = StdRng::seed_from_u64(seed);
++    let start = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, &mut rng);
++    let mut ledger = Ledger::new(budget);
++    ledger.stop_below(reference + HIT_TOL);
++    let mut optimiser = WarmLbfgs::default();
++    let clock = PesClock::new();
++    let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
++        optimiser.forget();
++        let (value, relaxed, _) = optimiser.minimize(x, iterations, |point| {
++            if !led.charge() {
++                return None;
++            }
++            Some(clock.time(|| potential.value_and_gradient(point)))
++        });
++        (value, relaxed)
++    };
++    let mut grad = |led: &mut Ledger, point: ArrayView1<f64>| {
++        if !led.charge() {
++            return None;
++        }
++        Some(clock.time(|| potential.value_and_gradient(point)).1)
++    };
++    let mut rng = StdRng::seed_from_u64(seed);
++    let started = Instant::now();
++    let outcome = run_with_gradient(
++        &cfg,
++        start.view(),
++        &mut ledger,
++        &mut relax,
++        Some(&mut grad),
++        &mut rng,
++    )
++    .expect("finite start");
++    finish(budget, reference, started, clock.seconds(), outcome)
++}
++
++fn run_hexamer(seed: u64) -> Done {
++    let n = 6usize;
++    let budget = 500_000usize;
++    let reference = -197.7805260034;
++    let mut cfg = Config::recommended_tip4p(n);
++    cfg.rigid_body_geometry = Some(gmin_water_geometry());
++    let mut rng = StdRng::seed_from_u64(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15).wrapping_add(3));
++    let start = random_tip4p_cluster(n, &mut rng);
++    let potential = GminTip4p::new(n);
++    let clock = PesClock::new();
++    let timed = TimedPes {
++        inner: &potential,
++        clock: &clock,
++    };
++    let mut ledger = Ledger::new(budget);
++    ledger.stop_below(reference + HIT_TOL);
++    let started = Instant::now();
++    let (outcome, _) =
++        search_from(&timed, &cfg, &mut ledger, start.view(), seed).expect("finite start");
++    finish(budget, reference, started, clock.seconds(), outcome)
++}
++
++fn finish(
++    budget: usize,
++    reference: f64,
++    started: Instant,
++    inside_s: f64,
++    outcome: Outcome,
++) -> Done {
++    let wall_s = started.elapsed().as_secs_f64();
++    let hit = anneal_core::energy_hits(outcome.best, reference, HIT_TOL);
++    let at_hit = outcome
++        .improvements
++        .iter()
++        .find(|(_, _, _, energy)| anneal_core::energy_hits(*energy, reference, HIT_TOL))
++        .map(|(_, spent, _, _)| *spent);
++    let rss_end = rss_anon_kb();
++    let calls = if hit {
++        at_hit.unwrap_or(outcome.charged).min(budget)
++    } else {
++        budget
++    };
++    Done {
++        budget,
++        hit,
++        calls,
++        charged: outcome.charged,
++        wall_s,
++        inside_s,
++        best_bits: format!("{:016x}", outcome.best.to_bits()),
++        trajectory: trajectory_hash(&outcome),
++        rss_anon_kb: RSS_PEAK_KB.load(Ordering::Relaxed).max(rss_end),
++        rss_end_kb: rss_end,
++    }
++}
++
++fn trajectory_hash(outcome: &Outcome) -> String {
++    let mut hasher = Sha256::new();
++    push_f64(&mut hasher, outcome.best);
++    push_f64(&mut hasher, outcome.final_energy);
++    push_usize(&mut hasher, outcome.charged);
++    push_usize(&mut hasher, outcome.hops);
++    push_usize(&mut hasher, outcome.basins);
++    push_usize(&mut hasher, outcome.accepted_transitions.len());
++    for edge in &outcome.accepted_transitions {
++        push_usize(&mut hasher, edge.hop);
++        hasher.update(edge.action.as_bytes());
++        hasher.update([0]);
++        push_f64(&mut hasher, edge.from_energy);
++        push_f64(&mut hasher, edge.to_energy);
++        hasher.update([u8::from(edge.adopted), u8::from(edge.validated)]);
++        for value in edge.from_state.iter() {
++            push_f64(&mut hasher, *value);
++        }
++        for value in edge.to_state.iter() {
++            push_f64(&mut hasher, *value);
++        }
++    }
++    push_usize(&mut hasher, outcome.improvements.len());
++    for (hop, spent, basins, energy) in &outcome.improvements {
++        push_usize(&mut hasher, *hop);
++        push_usize(&mut hasher, *spent);
++        push_usize(&mut hasher, *basins);
++        push_f64(&mut hasher, *energy);
++    }
++    let digest = hasher.finalize();
++    let mut text = String::with_capacity(digest.len() * 2);
++    for byte in digest {
++        text.push_str(&format!("{byte:02x}"));
++    }
++    text
++}
++
++fn push_f64(hasher: &mut Sha256, value: f64) {
++    hasher.update(value.to_le_bytes());
++}
++
++fn push_usize(hasher: &mut Sha256, value: usize) {
++    hasher.update((value as u64).to_le_bytes());
++}
+diff --git a/bench/gate-lj38-fixed-cost/path-counter.diff b/bench/gate-lj38-fixed-cost/path-counter.diff
+new file mode 100644
+index 0000000000..ac46ec80eb
+--- /dev/null
++++ b/bench/gate-lj38-fixed-cost/path-counter.diff
+@@ -0,0 +1,71 @@
++diff --git a/src/assignment.rs b/src/assignment.rs
++index 36b3c6ffcd..3dbbf65927 100644
++--- a/src/assignment.rs
+++++ b/src/assignment.rs
++@@ -680,6 +680,7 @@ unsafe fn solve_shortest_paths_loop_avx2(
++     min_reduced: &mut [f64],
++     used: &mut [u8],
++ ) -> bool {
+++    crate::GATE_COUNTERS[0].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
++     for row in 1..=n {
++         column_match[0] = row;
++         let mut column = 0usize;
++@@ -1233,6 +1234,7 @@ unsafe fn kuhn_munkres_loop_avx2(
++     rows_seen: &mut [u8],
++     columns_seen: &mut [u8],
++ ) -> bool {
+++    crate::GATE_COUNTERS[1].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
++     use std::arch::x86_64::{
++         _mm_cmpeq_epi8, _mm_cvtsi32_si128, _mm_setzero_si128, _mm256_add_pd, _mm256_blendv_pd,
++         _mm256_castsi256_pd, _mm256_cvtepi8_epi64, _mm256_loadu_pd, _mm256_min_pd, _mm256_set1_pd,
++@@ -1327,6 +1329,7 @@ unsafe fn kuhn_munkres_loop_avx2(
++ #[cfg(target_arch = "x86_64")]
++ #[target_feature(enable = "avx2")]
++ unsafe fn augment_tight_avx2(row: usize, ctx: &mut KmCtx) -> bool {
+++    crate::GATE_COUNTERS[2].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
++     use std::arch::x86_64::{
++         _CMP_NGT_UQ, _mm256_add_pd, _mm256_andnot_pd, _mm256_cmp_pd, _mm256_loadu_pd,
++         _mm256_movemask_pd, _mm256_set1_pd, _mm256_sub_pd,
++diff --git a/src/csm.rs b/src/csm.rs
++index 2460010614..d5b8731d8e 100644
++--- a/src/csm.rs
+++++ b/src/csm.rs
++@@ -470,6 +470,7 @@ fn invert_perm(perm: &[usize]) -> Vec<usize> {
++ }
++ 
++ fn recall_op(y_bits: &[u64], y_hash: u64, classes: &[u32], op: &[[f64; 3]; 3]) -> Option<Matched> {
+++    crate::GATE_COUNTERS[3].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
++     let transposed = transpose(*op);
++     OP_CACHE.with(|slot| {
++         let slot = slot.borrow();
++diff --git a/src/lattice.rs b/src/lattice.rs
++index 4d61a7d8bb..fab01692c5 100644
++--- a/src/lattice.rs
+++++ b/src/lattice.rs
++@@ -706,6 +706,7 @@ fn four_point_frames(n: usize) -> usize {
++ }
++ 
++ fn candidate_from_basis(basis: &[[f64; 3]; 3], centre: [f64; 3], n: usize) -> Option<Array1<f64>> {
+++    crate::GATE_COUNTERS[4].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
++     // The finished body holds `C(n, 4)` distinct 4-point frames. The cloud
++     // stops at that many sites: another site is not a new frame the body can
++     // name, and a flat basis would otherwise keep the frontier moving without
++diff --git a/src/lib.rs b/src/lib.rs
++index 8d3e375d9a..cf8ca5dce3 100644
++--- a/src/lib.rs
+++++ b/src/lib.rs
++@@ -20,6 +20,14 @@
++ //! traits, Boltzmann / Fast / Tsallis points, and the SaVariant tuple)
++ //! consumed by the Python `anneal` package via pyo3.
++ 
+++/// Gate path counters, in a fixed order.
+++pub static GATE_COUNTERS: [std::sync::atomic::AtomicU64; 5] = [const { std::sync::atomic::AtomicU64::new(0) }; 5];
+++
+++/// Snapshot of the gate path counters.
+++pub fn gate_counters() -> [u64; 5] {
+++    std::array::from_fn(|i| GATE_COUNTERS[i].load(std::sync::atomic::Ordering::Relaxed))
+++}
+++
++ /// Shared CSA bank over Cap'n Proto. Optional; process-local bank stays default.
++ #[cfg(feature = "bank-rpc")]
++ pub mod bank_rpc;
+diff --git a/bench/gate-lj38-fixed-cost/run_gate.py b/bench/gate-lj38-fixed-cost/run_gate.py
+new file mode 100644
+index 0000000000..e8b4550b15
+--- /dev/null
++++ b/bench/gate-lj38-fixed-cost/run_gate.py
+@@ -0,0 +1,596 @@
++#!/usr/bin/env python3
++# Copyright (c) anneal developers
++"""Same-session default-on gate for the lj38 fixed-cost change.
++
++One serial session on core 0. Arms A, B and A2 (a second release build
++of A) run on every cell in palindromic blocks. Cells use the default
++cluster presets. Each row records outside time, calls and in-process
++peak RssAnon. The statistics are
++in analyze.py and are fixed by PROTOCOL.md before any data.
++"""
++
++from __future__ import annotations
++
++import argparse
++import csv
++import hashlib
++import json
++import os
++import statistics
++import struct
++import subprocess
++import sys
++import time
++from collections import Counter
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[2]
++
++BASE_REF = "9b65fda3972fd8c014bce886a3ea5c05956d64af"
++B_COMMIT = "f9bbb5e86a67b7bbfaa629ac7378306f1f22cd1d"
++B_TREE = "510c087e8c6e4c9aeedae202204a7919cee95a60"
++FIRST_SEED = 2000
++N_SEEDS = {
++    "lj38": 24,
++    "m38r14d": 12,
++    "lj75": 12,
++    "lj98": 12,
++    "m80r6": 12,
++    "au55": 12,
++    "hexamer": 12,
++}
++MOLECULES: list[str] = []
++GUARDS = list(N_SEEDS)
++CELL_ORDER = MOLECULES + GUARDS
++GUARD_BUDGET = {
++    "lj38": 400_000,
++    "m38r14d": 400_000,
++    "lj75": 4_000_000,
++    "lj98": 4_000_000,
++    "m80r6": 4_000_000,
++    "au55": 1_000_000,
++    "hexamer": 500_000,
++}
++HARNESS_FILES = (
++    "bench/gate-lj38-fixed-cost/run_gate.py",
++    "bench/gate-lj38-fixed-cost/guard_trace.rs",
++    "bench/gate-lj38-fixed-cost/analyze.py",
++)
++ROW_FIELDS = [
++    "cell", "kind", "seed", "arm", "slot", "core", "hit", "budget", "calls", "charged",
++    "wall_s", "inside_s", "outside_per_call_s", "rss_anon_kb", "rss_end_kb", "energy", "energy_bits", "trajectory",
++    "machine_id", "base_ref", "base_tree", "harness_blobs", "error",
++]
++
++
++def kind_of(cell: str) -> str:
++    return "guard"
++
++
++def block(cell: str, pair: int) -> list[tuple[str, int, int]]:
++    first = FIRST_SEED + 2 * pair
++    second = first + 1
++    return [
++        ("A", first, 0),
++        ("B", first, 1),
++        ("Ap", first, 2),
++        ("Ap", second, 3),
++        ("B", second, 4),
++        ("A", second, 5),
++    ]
++
++
++def schedule() -> list[dict]:
++    jobs = []
++    index = 0
++    for pair in range(max(N_SEEDS.values()) // 2):
++        for cell in CELL_ORDER:
++            if pair >= N_SEEDS[cell] // 2:
++                continue
++            for arm, seed, slot in block(cell, pair):
++                jobs.append(
++                    {
++                        "cell": cell,
++                        "kind": kind_of(cell),
++                        "phase": "session",
++                        "seed": seed,
++                        "arm": arm,
++                        "slot": slot,
++                        "index": index,
++                        "block": pair,
++                    }
++                )
++                index += 1
++    return jobs
++
++
++def schedule_id(jobs: list[dict]) -> str:
++    blob = json.dumps(
++        [(j["cell"], j["seed"], j["arm"], j["slot"], j["index"]) for j in jobs],
++        separators=(",", ":"),
++    )
++    return hashlib.sha256(blob.encode()).hexdigest()
++
++
++def expected_balance(cell: str) -> Counter:
++    pairs = [(0, "A"), (5, "A"), (1, "B"), (4, "B"), (2, "Ap"), (3, "Ap")]
++    return Counter({pair: N_SEEDS[cell] // 2 for pair in pairs})
++
++
++def check_balance(jobs: list[dict]) -> dict[str, Counter]:
++    found = {}
++    for cell in CELL_ORDER:
++        mine = [j for j in jobs if j["cell"] == cell]
++        counts = Counter((j["slot"], j["arm"]) for j in mine)
++        want = expected_balance(cell)
++        if counts != want:
++            raise SystemExit(f"unbalanced {cell}: {counts} != {want}")
++        arms = sorted({j["arm"] for j in mine})
++        means = []
++        for arm in arms:
++            idx = [j["index"] for j in mine if j["arm"] == arm]
++            means.append(sum(idx) / len(idx))
++            if len(idx) != N_SEEDS[cell]:
++                raise SystemExit(f"{cell} {arm} has {len(idx)} runs")
++        if max(means) - min(means) > 1e-9:
++            raise SystemExit(f"unbalanced position {cell}: {means}")
++        found[cell] = counts
++    return found
++
++
++def outside_per_call(wall: float, inside: float, calls: int) -> float:
++    if calls <= 0:
++        return float("nan")
++    return (wall - inside) / calls
++
++
++def thread_env(extra: dict[str, str]) -> dict[str, str]:
++    kept = ("PATH", "HOME", "USER", "LANG", "LC_ALL", "TMPDIR", "RUSTUP_HOME", "CARGO_HOME")
++    env = {key: os.environ[key] for key in kept if key in os.environ}
++    env.update(
++        {
++            "OMP_NUM_THREADS": "1",
++            "MKL_NUM_THREADS": "1",
++            "OPENBLAS_NUM_THREADS": "1",
++            "GOTO_NUM_THREADS": "1",
++            "RAYON_NUM_THREADS": "1",
++            "NUMEXPR_NUM_THREADS": "1",
++            "VECLIB_MAXIMUM_THREADS": "1",
++            "BLIS_NUM_THREADS": "1",
++            "OMP_THREAD_LIMIT": "1",
++            "OMP_DYNAMIC": "FALSE",
++            "MKL_DYNAMIC": "FALSE",
++            "NUMBA_NUM_THREADS": "1",
++            "POLARS_MAX_THREADS": "1",
++            "JULIA_NUM_THREADS": "1",
++            "PYTHONUNBUFFERED": "1",
++            "PYTHONNOUSERSITE": "1",
++        }
++    )
++    env.update(extra)
++    return env
++
++
++def affinity() -> str:
++    text = Path("/proc/self/status").read_text()
++    for line in text.splitlines():
++        if line.startswith("Cpus_allowed_list:"):
++            return line.split(":", 1)[1].strip()
++    return ""
++
++
++def require_core() -> None:
++    if affinity() != "0":
++        raise SystemExit("this process is not pinned to core 0")
++
++
++def sha256_file(path: Path) -> str:
++    digest = hashlib.sha256()
++    with path.open("rb") as handle:
++        for chunk in iter(lambda: handle.read(1 << 20), b""):
++            digest.update(chunk)
++    return digest.hexdigest()
++
++
++def git_text(repo: Path, *args: str) -> str:
++    proc = subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True)
++    return proc.stdout.strip()
++
++
++def require_object(repo: Path, obj: str) -> None:
++    proc = subprocess.run(["git", "-C", str(repo), "cat-file", "-e", obj], capture_output=True)
++    if proc.returncode != 0:
++        raise SystemExit(f"git object missing: {obj}")
++
++
++def provenance(repo: Path) -> dict[str, str]:
++    require_object(repo, BASE_REF)
++    base_tree = git_text(repo, "rev-parse", f"{BASE_REF}^{{tree}}")
++    require_object(repo, base_tree)
++    blobs = []
++    for rel in HARNESS_FILES:
++        digest = git_text(repo, "hash-object", rel)
++        require_object(repo, digest)
++        blobs.append(f"{Path(rel).name}:{digest}")
++    return {"base_ref": BASE_REF, "base_tree": base_tree, "harness_blobs": " ".join(blobs)}
++
++
++def cpu_info() -> tuple[str, str]:
++    model, flags = "", ""
++    for line in Path("/proc/cpuinfo").read_text().splitlines():
++        if line.startswith("model name") and not model:
++            model = line.split(":", 1)[1].strip()
++        if line.startswith("flags") and not flags:
++            flags = line.split(":", 1)[1].strip()
++    return model, flags
++
++
++def machine_id() -> str:
++    for candidate in (Path("/etc/machine-id"), Path("/sys/class/dmi/id/product_uuid")):
++        if candidate.is_file():
++            return hashlib.sha256(candidate.read_bytes().strip()).hexdigest()
++    raise SystemExit("machine id is unavailable")
++
++
++def job_dir(run_dir: Path, job: dict) -> Path:
++    return run_dir / "jobs" / job["phase"] / job["cell"] / str(job["seed"]) / job["arm"]
++
++
++def result_ok(path: Path, ident: str) -> bool:
++    if not path.is_file():
++        return False
++    try:
++        data = json.loads(path.read_text())
++    except json.JSONDecodeError:
++        return False
++    return data.get("complete") is True and data.get("schedule") == ident
++
++
++def classify_error(text: str) -> str:
++    if "no finite start" in text or "finite start" in text:
++        return "no finite start"
++    if text.strip():
++        return "run failed"
++    return ""
++
++
++def write_result(path: Path, payload: dict) -> None:
++    path.parent.mkdir(parents=True, exist_ok=True)
++    path.write_text(json.dumps(payload, sort_keys=True) + "\n")
++
++
++def log_line(journal: Path, text: str) -> None:
++    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
++    line = f"{stamp} {text}\n"
++    with journal.open("a") as handle:
++        handle.write(line)
++    print(text, flush=True)
++
++
++def journal_raw(journal: Path, text: str) -> None:
++    with journal.open("a") as handle:
++        handle.write(text)
++        if not text.endswith("\n"):
++            handle.write("\n")
++
++
++def run_guard(args, job: dict, binary: Path, ident: str, journal: Path) -> None:
++    out = job_dir(args.run_dir, job)
++    dest = out / "result.json"
++    if result_ok(dest, ident):
++        return
++    out.mkdir(parents=True, exist_ok=True)
++    env = thread_env({})
++    cmd = ["taskset", "-c", "0", str(binary), job["cell"], str(job["seed"])]
++    proc = subprocess.run(cmd, env=env, capture_output=True, text=True)
++    if proc.stderr:
++        journal_raw(journal, proc.stderr)
++    gate = parse_gate(proc.stdout)
++    if gate is None or gate.get("core") != "0" or int(gate.get("budget", "0")) != GUARD_BUDGET[job["cell"]]:
++        write_result(
++            dest,
++            {
++                "complete": True,
++                "schedule": ident,
++                "cell": job["cell"],
++                "kind": "guard",
++                "phase": job["phase"],
++                "seed": job["seed"],
++                "arm": job["arm"],
++                "slot": job["slot"],
++                "index": job["index"],
++                "core": gate.get("core") if gate else "",
++                "budget": GUARD_BUDGET[job["cell"]],
++                "hit": 0,
++                "calls": 0,
++                "charged": 0,
++                "wall_s": 0.0,
++                "inside_s": 0.0,
++                "energy_bits": "",
++                "trajectory": "",
++                "error": classify_error(proc.stderr) or "run failed",
++                "returncode": proc.returncode,
++            },
++        )
++    else:
++        write_result(
++            dest,
++            {
++                "complete": True,
++                "schedule": ident,
++                "cell": job["cell"],
++                "kind": "guard",
++                "phase": job["phase"],
++                "seed": job["seed"],
++                "arm": job["arm"],
++                "slot": job["slot"],
++                "index": job["index"],
++                "core": gate["core"],
++                "budget": int(gate["budget"]),
++                "hit": int(gate["hit"]),
++                "calls": int(gate["calls"]),
++                "charged": int(gate["charged"]),
++                "wall_s": float(gate["wall_s"]),
++                "inside_s": float(gate["inside_s"]),
++                "rss_anon_kb": int(gate["rss_anon_kb"]),
++                "rss_end_kb": int(gate["rss_end_kb"]),
++                "energy_bits": gate["best_bits"],
++                "trajectory": gate["trajectory"],
++                "error": "",
++            },
++        )
++    log_line(
++        journal,
++        f"guard {job['cell']} seed {job['seed']} {job['arm']} slot {job['slot']} exit {proc.returncode}",
++    )
++
++
++def parse_gate(text: str) -> dict[str, str] | None:
++    for line in reversed(text.splitlines()):
++        if line.startswith("GATE "):
++            fields = {}
++            for part in line.split()[1:]:
++                key, value = part.split("=", 1)
++                fields[key] = value
++            return fields
++    return None
++
++
++def bits_to_float(text: str) -> float:
++    return struct.unpack("<d", int(text, 16).to_bytes(8, "little"))[0]
++
++
++def assemble_records(run_dir: Path, jobs: list[dict], prov: dict, machine: str) -> list[dict]:
++    records = []
++    for job in jobs:
++        info = json.loads((job_dir(run_dir, job) / "result.json").read_text())
++        if True:
++            hit = int(info.get("hit") or 0)
++            calls = int(info.get("calls") or 0)
++            charged = int(info.get("charged") or 0)
++            wall = float(info.get("wall_s") or 0.0)
++            inside = float(info.get("inside_s") or 0.0)
++            bits = info.get("energy_bits") or ""
++            energy = f"{bits_to_float(bits):.16e}" if bits else ""
++            trajectory = info.get("trajectory") or ""
++            error = info.get("error") or ""
++            core = info.get("core") or ""
++            budget = int(info.get("budget") or 0)
++            rss = int(info.get("rss_anon_kb") or 0)
++            rss_end = int(info.get("rss_end_kb") or 0)
++        outside = outside_per_call(wall, inside, calls)
++        records.append(
++            {
++                "cell": job["cell"],
++                "kind": job["kind"],
++                "phase": job["phase"],
++                "seed": job["seed"],
++                "arm": job["arm"],
++                "slot": job["slot"],
++                "core": core,
++                "hit": hit,
++                "budget": budget,
++                "calls": calls,
++                "charged": charged,
++                "wall_s": f"{wall:.9f}",
++                "inside_s": f"{inside:.9f}",
++                "outside_per_call_s": f"{outside:.9e}",
++                "rss_anon_kb": rss,
++                "rss_end_kb": rss_end,
++                "energy": energy,
++                "energy_bits": bits,
++                "trajectory": trajectory,
++                "machine_id": machine,
++                "base_ref": prov["base_ref"],
++                "base_tree": prov["base_tree"],
++                "harness_blobs": prov["harness_blobs"],
++                "error": error,
++            }
++        )
++    return records
++
++
++def write_csv(path: Path, records: list[dict]) -> None:
++    path.parent.mkdir(parents=True, exist_ok=True)
++    with path.open("w", newline="") as handle:
++        writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS, lineterminator="\n", extrasaction="ignore")
++        writer.writeheader()
++        for row in records:
++            writer.writerow(row)
++
++
++def self_check() -> None:
++    jobs = schedule()
++    check_balance(jobs)
++    want = sum(N_SEEDS.values()) * 3
++    if len(jobs) != want:
++        raise SystemExit(f"schedule length {len(jobs)} != {want}")
++
++
++def write_sessions(path: Path, rows: list[tuple[str, str]]) -> None:
++    with path.open("w", newline="") as handle:
++        writer = csv.writer(handle, lineterminator="\n")
++        writer.writerow(["key", "value"])
++        writer.writerows(rows)
++
++
++def run(args) -> int:
++    require_core()
++    if "avx2" not in cpu_info()[1].split():
++        raise SystemExit("host has no avx2; the changed code needs an avx2 host")
++    self_check()
++    b_tree = git_text(args.src_b, "rev-parse", "HEAD^{tree}")
++    if b_tree != B_TREE:
++        raise SystemExit("B tree does not match")
++    a_tree = git_text(args.src_a, "rev-parse", "HEAD^{tree}")
++    ap_tree = git_text(args.src_ap, "rev-parse", "HEAD^{tree}")
++    if a_tree != ap_tree or a_tree != git_text(args.repo, "rev-parse", f"{BASE_REF}^{{tree}}"):
++        raise SystemExit("A and A2 are not the develop tree")
++    prov = provenance(args.repo)
++    machine = machine_id()
++    jobs = schedule()
++    balances = check_balance(jobs)
++    ident = schedule_id(jobs)
++    journal = args.run_dir / "journal.log"
++    journal.parent.mkdir(parents=True, exist_ok=True)
++    log_line(journal, f"first seed {FIRST_SEED} n {dict(N_SEEDS)} cells {len(CELL_ORDER)}")
++    log_line(journal, f"session {ident[:12]} jobs {len(jobs)}")
++    for position, job in enumerate(jobs, 1):
++        run_guard(args, job, args.bin[job["arm"]], ident, journal)
++        if position % 20 == 0:
++            log_line(journal, f"progress {position}/{len(jobs)}")
++    records = assemble_records(args.run_dir, jobs, prov, machine)
++    builds = {arm: sha256_file(args.bin[arm]) for arm in ("A", "B", "Ap")}
++    sessions = [
++        ("base_ref", prov["base_ref"]),
++        ("base_tree", prov["base_tree"]),
++        ("b_commit", B_COMMIT),
++        ("b_tree", B_TREE),
++        ("harness_blobs", prov["harness_blobs"]),
++        ("machine_id", machine),
++        ("seeds_lj38", f"{FIRST_SEED}-{FIRST_SEED + N_SEEDS['lj38'] - 1}"),
++        ("seeds_others", f"{FIRST_SEED}-{FIRST_SEED + 11}"),
++        ("n", json.dumps(N_SEEDS, sort_keys=True)),
++        ("cpu_model", cpu_info()[0]),
++        ("cpu_flags", cpu_info()[1]),
++        ("avx2", str("avx2" in cpu_info()[1].split()).lower()),
++        ("core", "0"),
++        ("threads", "1"),
++        ("schedule", ident),
++        ("build_a", builds["A"]),
++        ("build_b", builds["B"]),
++        ("build_a2", builds["Ap"]),
++    ]
++    for cell, counts in balances.items():
++        text = " ".join(f"{slot}:{arm}={count}" for (slot, arm), count in sorted(counts.items()))
++        sessions.append((f"balance_{cell}", text))
++    for cell, budget in GUARD_BUDGET.items():
++        sessions.append((f"budget_{cell}", str(budget)))
++    write_csv(args.run_dir / "rows.csv", records)
++    write_csv(args.rows, records)
++    write_sessions(args.sessions, sessions)
++    log_line(journal, "rows written; run analyze.py on rows.csv")
++    return 0
++
++
++COUNTER_NAMES = [
++    "solve_shortest_paths_loop_avx2",
++    "kuhn_munkres_loop_avx2",
++    "augment_tight_avx2",
++    "csm_recall_op",
++    "candidate_from_basis",
++]
++COUNTER_RUNS = [("lj38", 2000), ("lj38", 2001), ("m38r14d", 2000)]
++
++
++def counters(args) -> int:
++    """Runs the counter build of B on a few seeds and checks the paths fire.
++
++    The counter build is not a timed arm. Its trajectory, energy bits,
++    calls and charged calls must equal the timed B row of the same seed.
++    """
++    require_core()
++    with args.rows.open(newline="") as handle:
++        rows = list(csv.DictReader(handle))
++    total = [0] * len(COUNTER_NAMES)
++    lines = []
++    ok = True
++    for cell, seed in COUNTER_RUNS:
++        proc = subprocess.run(
++            ["taskset", "-c", "0", str(args.bin_bc), cell, str(seed)],
++            env=thread_env({}),
++            capture_output=True,
++            text=True,
++        )
++        gate = parse_gate(proc.stdout)
++        counts = None
++        for line in proc.stdout.splitlines():
++            if line.startswith("COUNTERS "):
++                counts = [int(x) for x in line.split()[1:]]
++        if gate is None or counts is None or len(counts) != len(COUNTER_NAMES):
++            raise SystemExit(f"counter run failed for {cell} {seed}")
++        match = [r for r in rows if r["cell"] == cell and r["arm"] == "B" and int(r["seed"]) == seed]
++        same = len(match) == 1 and all(
++            str(match[0][k]) == str(v)
++            for k, v in (
++                ("trajectory", gate["trajectory"]),
++                ("energy_bits", gate["best_bits"]),
++                ("calls", gate["calls"]),
++                ("charged", gate["charged"]),
++            )
++        )
++        ok = ok and same
++        total = [a + b for a, b in zip(total, counts)]
++        lines.append([cell, seed, *counts, "identical_to_B" if same else "DIFFERS_FROM_B"])
++    lines.append(["total", "", *total, ""])
++    with args.out.open("w", newline="") as handle:
++        writer = csv.writer(handle, lineterminator="\n")
++        writer.writerow(["cell", "seed", *COUNTER_NAMES, "check"])
++        writer.writerows(lines)
++    zero = [n for n, c in zip(COUNTER_NAMES, total) if c == 0]
++    print("zero counters:", zero or "none")
++    print("counter build identical to timed B:", ok)
++    return 0 if ok and not zero else 1
++
++
++def main() -> int:
++    parser = argparse.ArgumentParser(description=__doc__)
++    sub = parser.add_subparsers(dest="cmd", required=True)
++
++    sub.add_parser("schedule")
++
++    run_p = sub.add_parser("run")
++    run_p.add_argument("--repo", type=Path, required=True)
++    run_p.add_argument("--run-dir", type=Path, required=True)
++    run_p.add_argument("--src-a", type=Path, required=True)
++    run_p.add_argument("--src-b", type=Path, required=True)
++    run_p.add_argument("--src-ap", type=Path, required=True)
++    run_p.add_argument("--bin-a", type=Path, required=True)
++    run_p.add_argument("--bin-b", type=Path, required=True)
++    run_p.add_argument("--bin-ap", type=Path, required=True)
++    run_p.add_argument("--rows", type=Path, required=True)
++    run_p.add_argument("--sessions", type=Path, required=True)
++
++    count_p = sub.add_parser("counters")
++    count_p.add_argument("--bin-bc", type=Path, required=True)
++    count_p.add_argument("--rows", type=Path, required=True)
++    count_p.add_argument("--out", type=Path, required=True)
++
++    args = parser.parse_args()
++    if args.cmd == "schedule":
++        self_check()
++        jobs = schedule()
++        counts = check_balance(jobs)
++        for cell, counter in counts.items():
++            text = " ".join(f"{slot}:{arm}={n}" for (slot, arm), n in sorted(counter.items()))
++            print(f"{cell} {text}")
++        print(f"jobs {len(jobs)} id {schedule_id(jobs)[:12]}")
++        return 0
++    if args.cmd == "counters":
++        return counters(args)
++    args.bin = {"A": args.bin_a, "B": args.bin_b, "Ap": args.bin_ap}
++    return run(args)
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+-- 
+2.47.3
+
