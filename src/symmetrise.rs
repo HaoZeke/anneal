@@ -374,10 +374,31 @@ pub fn operation_deviation(
     g: &Rot,
     cap: f64,
 ) -> Option<f64> {
-    if n == 0 {
-        return None;
+    OperationTest::new(x, n, classes).deviation(g, cap)
+}
+
+/// The points of one structure, laid out once, to measure many operations
+/// against: [`operation_deviation`] with the setup shared. Neither the
+/// operation nor the cap enters the layout, so a caller that tests a group
+/// of operations on one structure pays for it once and gets the same bits.
+pub struct OperationTest {
+    matcher: Option<Matcher>,
+}
+
+impl OperationTest {
+    /// The layout of `x`, with each point matched within its class.
+    pub fn new(x: ArrayView1<f64>, n: usize, classes: Option<&[u32]>) -> Self {
+        Self {
+            matcher: (n > 0).then(|| Matcher::new(x, n, classes)),
+        }
     }
-    Matcher::new(x, n, classes).deviation(cap, |cloud, cap| cloud.matrix_deviation(g, cap))
+
+    /// [`operation_deviation`] of `g` on the structure this was made from.
+    pub fn deviation(&self, g: &Rot, cap: f64) -> Option<f64> {
+        self.matcher
+            .as_ref()?
+            .deviation(cap, |cloud, cap| cloud.matrix_deviation(g, cap))
+    }
 }
 
 /// [`operation_deviation`] about `centre` instead of the centroid, with no
@@ -389,8 +410,29 @@ pub fn operation_deviation_about(
     centre: [f64; 3],
     cap: f64,
 ) -> Option<f64> {
-    let members: Vec<usize> = (0..n).collect();
-    Cloud::from_members(x, &members, centre).matrix_deviation(g, cap)
+    CentredOperationTest::new(x, n, centre).deviation(g, cap)
+}
+
+/// [`OperationTest`] about a chosen centre, with no classes: the layout of
+/// [`operation_deviation_about`] built once.
+pub struct CentredOperationTest {
+    cloud: Cloud,
+}
+
+impl CentredOperationTest {
+    /// The layout of `x` about `centre`.
+    pub fn new(x: ArrayView1<f64>, n: usize, centre: [f64; 3]) -> Self {
+        let members: Vec<usize> = (0..n).collect();
+        Self {
+            cloud: Cloud::from_members(x, &members, centre),
+        }
+    }
+
+    /// [`operation_deviation_about`] of `g` on the structure this was made
+    /// from.
+    pub fn deviation(&self, g: &Rot, cap: f64) -> Option<f64> {
+        self.cloud.matrix_deviation(g, cap)
+    }
 }
 
 /// Axes worth testing, taken from the structure rather than at random.
@@ -794,6 +836,76 @@ mod tests {
     use super::*;
     use ndarray::Array1;
 
+    /// A loose structure of fourteen points in two classes, with no symmetry
+    /// of its own, so every operation has a distinct nonzero deviation.
+    fn loose_structure() -> (Array1<f64>, Vec<u32>) {
+        let x: Vec<f64> = (0..14)
+            .flat_map(|i| {
+                let t = i as f64;
+                [
+                    (0.7 * t).sin() * (1.0 + 0.1 * t),
+                    (1.3 * t).cos() * 0.9 + 0.05 * t,
+                    (0.37 * t).sin() * 1.2 - 0.03 * t * t,
+                ]
+            })
+            .collect();
+        let classes: Vec<u32> = (0..14).map(|i| u32::from(i % 3 == 0)).collect();
+        (Array1::from(x), classes)
+    }
+
+    #[test]
+    fn a_shared_layout_measures_each_operation_as_a_fresh_one_does() {
+        let (x, classes) = loose_structure();
+        let n = 14;
+        let operations: Vec<Rot> = [
+            rot_matrix([0.0, 0.0, 1.0], 2.0 * std::f64::consts::PI / 3.0),
+            rot_matrix([1.0, 0.0, 0.0], std::f64::consts::PI),
+            mirror_matrix([0.0, 1.0, 0.0]),
+            rot_matrix([0.6, 0.0, 0.8], 2.0 * std::f64::consts::PI / 5.0),
+        ]
+        .to_vec();
+        for labels in [None, Some(classes.as_slice())] {
+            let test = OperationTest::new(x.view(), n, labels);
+            for g in &operations {
+                for cap in [f64::INFINITY, 1.5, 0.4, 0.05] {
+                    let fresh = Matcher::new(x.view(), n, labels)
+                        .deviation(cap, |cloud, cap| cloud.matrix_deviation(g, cap));
+                    let shared = test.deviation(g, cap);
+                    assert_eq!(
+                        shared.map(f64::to_bits),
+                        fresh.map(f64::to_bits),
+                        "cap {cap}, classes {}",
+                        labels.is_some()
+                    );
+                }
+            }
+        }
+        assert!(
+            OperationTest::new(x.view(), 0, None)
+                .deviation(&operations[0], f64::INFINITY)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_shared_layout_about_a_centre_measures_as_a_fresh_one_does() {
+        let (x, _) = loose_structure();
+        let n = 14;
+        let members: Vec<usize> = (0..n).collect();
+        let g = rot_matrix([0.0, 0.6, 0.8], 2.0 * std::f64::consts::PI / 4.0);
+        for centre in [[0.0; 3], [0.3, -0.2, 0.1], centroid(x.view(), n)] {
+            let test = CentredOperationTest::new(x.view(), n, centre);
+            for cap in [f64::INFINITY, 1.0, 0.1] {
+                let fresh =
+                    Cloud::from_members(x.view(), &members, centre).matrix_deviation(&g, cap);
+                assert_eq!(
+                    test.deviation(&g, cap).map(f64::to_bits),
+                    fresh.map(f64::to_bits)
+                );
+            }
+        }
+    }
+
     #[cfg(target_arch = "x86_64")]
     #[test]
     fn the_vector_nearest_image_matches_the_scalar_scan() {
@@ -963,9 +1075,8 @@ mod tests {
                 for order in 2..=7 {
                     let angle = 2.0 * std::f64::consts::PI / order as f64;
                     for cap in [0.02, 0.1, 0.3, 0.8, 5.0] {
-                        let want = atom_by_atom(&cloud, cap, |v| {
-                            rotate_by(v, axis, Turn::of(angle))
-                        });
+                        let want =
+                            atom_by_atom(&cloud, cap, |v| rotate_by(v, axis, Turn::of(angle)));
                         let got = cloud.rotation_deviation(axis, order, cap);
                         assert_eq!(got.map(f64::to_bits), want.map(f64::to_bits));
                         accepted += got.is_some() as usize;

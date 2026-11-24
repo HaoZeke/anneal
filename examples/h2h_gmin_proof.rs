@@ -22,9 +22,9 @@
 //! `H2H_NOSTOP=1` runs the whole budget after a hit, and `H2H_COMPLETION=off`
 //! runs without the symmetry completion of a new basin, `once` completes
 //! each basin once per chain, `framework` reads its group from the
-//! positions alone. `run` prints the
-//! bits of the best energy and the charged count on stderr, so two builds
-//! can be compared exactly.
+//! positions alone. `run` prints the bits of the best energy, the charged
+//! count and the completions quenched on stderr, so two builds can be
+//! compared exactly.
 //!
 //! `coords` writes the start that `run` quenches, one Cartesian line per
 //! atom, so another code can open the same geometry.
@@ -124,9 +124,11 @@ fn cmd_run(args: &[String]) -> i32 {
         .map(|(_, spent, _, _)| *spent);
     let evals = evals_to_hit(hit, at_hit.or(hit.then_some(outcome.charged)), budget);
     eprintln!(
-        "BITS best={:016x} charged={}",
+        "BITS best={:016x} charged={} completions={} gain={:.6}",
         outcome.best.to_bits(),
-        outcome.charged
+        outcome.charged,
+        outcome.symmetry_completions.0,
+        outcome.symmetry_completions.1
     );
     println!(
         "system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,head,tree,cpu,pins,pot_s"
