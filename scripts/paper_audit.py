@@ -4212,7 +4212,7 @@ def cover_letter(audit: Audit) -> None:
     audit.said(COVER, "Every printed number is computed from rows committed to the repository.")
 
 
-REFS_BLOB = "2d20e57c7a30f98926c6ee4c5b4da94796d91462"
+REFS_BLOB = "e73f824c8bd3f5244056165ba2d87cb450464845"
 # Wording the review of the first rewrite showed to overclaim; none may come back.
 OVERCLAIMS = ("same trap", "confined to one funnel", "cannot become the stored best", "cannot win",
               "basin-hopping setting", "one setting", "adds nothing", "does no better", "this setting",
