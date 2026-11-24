@@ -10,8 +10,6 @@ from __future__ import annotations
 import csv
 import math
 import os
-import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -128,7 +126,7 @@ def load(system: str) -> dict[str, list[dict[str, str]]]:
         charged = int(row["charged"])
         if not 0 < charged <= budget:
             raise SystemExit(f"invalid charged count {row}")
-        if not re.fullmatch(r"[0-9a-f]{40}", row["code_revision"]):
+        if not revision_reach.is_full_sha(row["code_revision"]):
             raise SystemExit(f"invalid revision {row}")
         hit = row["hit"] == "1"
         if row["hit"] not in {"0", "1"} or hit != bool(row["evals_to_hit"]):

@@ -41,17 +41,10 @@ HARNESS_FIELDS = (
     "harness_revision", "harness_commit", "code_revision", "head", "anneal_sha", "anneal_head",
     "anneal_revision", "gmin_revision",
 )
-EXTERNAL_REVISIONS = (
-    "aac1548a8aec13b53ad12a8d6904625081685d2e",
-    "9cbec1a446352bc9ef064bd2b1a5767194655919",
-    "8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e",
-    "71185263eb6a8130d1262fd76d90109f5fabdcf5",
-    "fa8a4416e8fe093d0075bc10ac875494c2a449a9",
-)
+EXTERNAL_REVISIONS = tuple(revision_reach.EXTERNAL_REVISIONS)
 WITHHELD_MARKS = ("% results not quoted: start", "% results not quoted: end")
 REASONS = ("harness not reachable", "rerun pending")
 MORSE = ("m55r6", "m55r14", "m80r6", "m80r14")
-HEX = re.compile(r"[0-9a-f]{7,40}")
 _MODULES: dict[str, object] = {}
 _ITEMS: list[tuple[str, str]] | None = None
 
@@ -82,27 +75,13 @@ def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
     return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, check=False)
 
 
-def external_pin(rev: str) -> bool:
-    """The revision is one of the external pins, or a prefix of one."""
-    rev = (rev or "").strip()
-    if not HEX.fullmatch(rev):
-        return False
-    return any(pin == rev or pin.startswith(rev) or rev.startswith(pin) for pin in EXTERNAL_REVISIONS)
-
-
-_EXTERNAL_FORM = re.compile(r"^https://[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+\.git@[0-9a-f]{40}$")
-
-
-def external_form(rev: str) -> bool:
-    """A repository URL and a full SHA."""
-    return _EXTERNAL_FORM.fullmatch((rev or "").strip()) is not None
+external_pin = revision_reach.external_pin
+external_form = revision_reach.external_form
 
 
 def harness_reachable(rev: str, repo: Path = REPO) -> bool:
-    """An ancestor of HEAD, an external pin, or a repository URL at a full SHA."""
-    if external_form(rev) or external_pin(rev):
-        return True
-    return revision_reach.commit_held(rev, repo)
+    """A full SHA that is an ancestor of HEAD, an external pin, or a repository URL at a full SHA."""
+    return revision_reach.revision_reachable(rev, repo)
 
 
 REVISION_FIELDS = (*HARNESS_FIELDS, "release_revision")
@@ -117,10 +96,10 @@ def revision_tokens(value: str | None) -> list[str]:
 def malformed_revision(value: str | None) -> str | None:
     """Why a revision field cannot name a commit, or None when it can.
 
-    A field is well formed when it holds one or more lowercase hex commits of
-    seven to forty characters, or a repository URL at a full SHA. Blank,
-    "unknown" and anything else is refused, as the paper audit counts a blank
-    or "unknown" revision as unrecorded.
+    A field is well formed when it holds one or more full lowercase SHAs of
+    forty characters, or a repository URL at a full SHA. Blank, "unknown", an
+    abbreviated SHA and anything else is refused, as the paper audit counts a
+    blank or "unknown" revision as unrecorded.
     """
     tokens = revision_tokens(value)
     if not tokens:
@@ -128,7 +107,9 @@ def malformed_revision(value: str | None) -> str | None:
     for token in tokens:
         if token.lower() == "unknown":
             return "unknown"
-        if not (HEX.fullmatch(token) or external_form(token)):
+        if revision_reach.is_abbreviated_sha(token):
+            return f"abbreviated SHA ({token!r}); a full 40-character SHA is required"
+        if not (revision_reach.is_full_sha(token) or external_form(token)):
             return f"not a commit ({token!r})"
     return None
 
@@ -139,20 +120,18 @@ def tuned_row(row: dict[str, str | None]) -> bool:
 
 
 def tuned_verified(row: dict[str, str | None], repo: Path) -> bool:
-    """The check paper_audit makes of a tuned-GMIN row, so a record lands exactly when the audit accepts it."""
-    audit = _module("paper_audit_ingest", "scripts/paper_audit.py")
-    return bool(audit.tuned_gmin_harness_verified({k: v or "" for k, v in row.items() if k}, repo))
+    """The check the paper audit makes of a tuned-GMIN row, one implementation, so a record lands exactly when the audit accepts it."""
+    return revision_reach.tuned_gmin_harness_verified({k: v or "" for k, v in row.items() if k}, repo)
 
 
 def tuned_pairs(rows: list[dict[str, str | None]], repo: Path) -> set[tuple[str, str]]:
     """The (harness commit, data blob) pairs of the rows the audit verifies, for those that pass."""
-    audit = _module("paper_audit_ingest", "scripts/paper_audit.py")
     return {
         ((row.get("harness_commit") or "").strip(), (row.get("data_blob") or "").strip())
         for row in rows
         if tuned_row(row)
-        and (row.get("system") or "").strip() in audit.TUNED_SYSTEMS
-        and (row.get("code") or "").strip() in audit.TUNED_CODES
+        and (row.get("system") or "").strip() in revision_reach.TUNED_SYSTEMS
+        and (row.get("code") or "").strip() in revision_reach.TUNED_CODES
         and tuned_verified(row, repo)
     }
 
@@ -161,8 +140,7 @@ def tuned_accepted(row: dict[str, str | None], pairs: set[tuple[str, str]], repo
     """A tuned row passes when the audit verifies it, or, for a control row the audit does not read, when
     a row the audit does verify names the same harness commit and data blob."""
     pair = ((row.get("harness_commit") or "").strip(), (row.get("data_blob") or "").strip())
-    audit = _module("paper_audit_ingest", "scripts/paper_audit.py")
-    if (row.get("system") or "").strip() in audit.TUNED_SYSTEMS and (row.get("code") or "").strip() in audit.TUNED_CODES:
+    if (row.get("system") or "").strip() in revision_reach.TUNED_SYSTEMS and (row.get("code") or "").strip() in revision_reach.TUNED_CODES:
         return tuned_verified(row, repo)
     return pair in pairs and harness_reachable((row.get("code_revision") or "").strip(), repo)
 
@@ -414,7 +392,7 @@ def install_rows(root: Path, blobs: dict[str, bytes]) -> None:
 def _check_name(branch: str, sha: str) -> None:
     if not re.fullmatch(r"[A-Za-z0-9._/-]+", branch) or branch.startswith(("/", ".")) or ".." in branch:
         raise SystemExit(f"refusing branch name {branch}")
-    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+    if not revision_reach.is_full_sha(sha):
         raise SystemExit("the record SHA must be 40 hex characters")
 
 

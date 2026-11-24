@@ -20,8 +20,6 @@ from __future__ import annotations
 import csv
 import math
 import os
-import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -91,26 +89,12 @@ def commit_held(revision: str) -> bool:
 
 
 # Pins of other projects. They are not commits of this repository.
-EXTERNAL_PINS = (
-    "aac1548a8aec13b53ad12a8d6904625081685d2e",
-    "9cbec1a446352bc9ef064bd2b1a5767194655919",
-    "8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e",
-    "71185263eb6a8130d1262fd76d90109f5fabdcf5",
-    "fa8a4416e8fe093d0075bc10ac875494c2a449a9",
-)
+EXTERNAL_PINS = tuple(revision_reach.EXTERNAL_REVISIONS)
 
 
 def revision_reachable(revision: str) -> bool:
-    """The revision is a commit here, or one of the external pins."""
-    revision = (revision or "").strip()
-    if commit_held(revision):
-        return True
-    if not re.fullmatch(r"[0-9a-f]{7,40}", revision):
-        return False
-    return any(
-        pin == revision or pin.startswith(revision) or revision.startswith(pin)
-        for pin in EXTERNAL_PINS
-    )
+    """A full SHA that is an ancestor of HEAD, an external pin, or a repository URL at a full SHA."""
+    return revision_reach.revision_reachable(revision, ROOT)
 
 
 def show_s(value: float) -> str:
@@ -862,48 +846,14 @@ def tuned_gmin_summary() -> list[dict[str, object]]:
 
 
 def tuned_gmin_harness_verified(row: dict[str, str]) -> bool:
-    """Verify a tuned-GMIN row: reachable code_revision, exact data_blob and tuned.py in HEAD."""
-    system = (row.get("system") or "").strip()
-    data_blob = (row.get("data_blob") or "").strip()
-    harness = (row.get("harness_commit") or "").strip()
-    code_rev = (row.get("code_revision") or "").strip()
-    if system not in {"lj98", "lj104"} or not data_blob or not harness:
-        return False
-    if not revision_reachable(code_rev):
-        return False
-    if revision_reachable(harness):
-        return True
-    def git_out(*args: str) -> tuple[int, str]:
-        proc = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True)
-        return proc.returncode, proc.stdout.strip()
-    rc_data, head_data = git_out("rev-parse", f"HEAD:bench/gmin-tuned/inputs/{system}.data")
-    rc_tuned, head_tuned = git_out("rev-parse", "HEAD:scripts/gmin_panel/tuned.py")
-    if rc_data != 0 or head_data != data_blob or rc_tuned != 0:
-        return False
-    if git_out("cat-file", "-e", f"{harness}^{{commit}}")[0] != 0:
-        return False
-    rc_rd, ref_data = git_out("rev-parse", f"{harness}:bench/gmin-tuned/inputs/{system}.data")
-    rc_rt, ref_tuned = git_out("rev-parse", f"{harness}:scripts/gmin_panel/tuned.py")
-    if rc_rd != 0 or ref_data != data_blob or rc_rt != 0 or ref_tuned != head_tuned:
-        return False
-    rc_base, base = git_out("merge-base", "HEAD", harness)
-    if rc_base != 0 or not base:
-        return False
-    rc_diff, diff_names = git_out("diff", "--name-only", base, harness)
-    if rc_diff != 0:
-        return False
-    if any(
-        name.startswith(("src/", "examples/")) or name in {"Cargo.toml", "Cargo.lock"}
-        for name in diff_names.splitlines()
-    ):
-        return False
-    return True
+    """Verify a tuned-GMIN row by the check the audit and the ingest of a record make."""
+    return revision_reach.tuned_gmin_harness_verified(row, ROOT)
 
 
 def tuned_gmin_block() -> str:
     used = [
         row for row in read(GMIN_TUNED)
-        if row["system"] in {"lj98", "lj104"} and row["code"] in {"anneal", "gmin"}
+        if row["system"] in revision_reach.TUNED_SYSTEMS and row["code"] in revision_reach.TUNED_CODES
     ]
     for row in used:
         if not tuned_gmin_harness_verified(row):

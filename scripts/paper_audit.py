@@ -57,7 +57,6 @@ if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 from codata2018 import BOLTZMANN_EV_PER_K, KJ_PER_KCAL  # noqa: E402
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
-from gmin_pin import REVISION as GMIN_PIN_REVISION  # noqa: E402
 import revision_reach  # noqa: E402
 
 TEX = "paper/jctc/manuscript.tex"
@@ -72,13 +71,7 @@ REVISION_COLUMNS = (
 HOST_COLUMNS = ("host",)
 MACHINE_PROVENANCE_COLUMNS = frozenset(("machine_id", "cpu_model"))
 # Revisions of other codes. The GMIN build scripts refuse a tarball whose SVNREV differs.
-EXTERNAL_REVISIONS = {
-    "aac1548a8aec13b53ad12a8d6904625081685d2e": "GMIN source/SVNREV",
-    GMIN_PIN_REVISION: "GMIN source/SVNREV (2026-11-19)",
-    "8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e": "rgpot pin",
-    "71185263eb6a8130d1262fd76d90109f5fabdcf5": "Hugging Face dataset revision",
-    "fa8a4416e8fe093d0075bc10ac875494c2a449a9": "tblite commit",
-}
+EXTERNAL_REVISIONS = revision_reach.EXTERNAL_REVISIONS
 # Local revisions that rows cite, each with the pushed commit it was rebuilt as.
 ALIASES = "bench/revision-aliases.csv"
 # Remote branches the alias table cites, plus develop. A missing one means
@@ -236,9 +229,6 @@ def collapse(text: str) -> str:
 _COMMIT_HELD: dict[str, bool] = {}
 
 
-_EXTERNAL_FORM = re.compile(r"^https://[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+\.git@[0-9a-f]{40}$")
-
-
 def commit_held(rev: str) -> bool:
     """The revision is an ancestor of HEAD, by the definition the generators and the ingest share."""
     if rev not in _COMMIT_HELD:
@@ -246,78 +236,25 @@ def commit_held(rev: str) -> bool:
     return _COMMIT_HELD[rev]
 
 
-def external_form(rev: str) -> bool:
-    """A repository URL and a full SHA, for a commit this repository does not contain."""
-    return _EXTERNAL_FORM.fullmatch((rev or "").strip()) is not None
-
-
-def external_pin(rev: str) -> bool:
-    """The revision is one of the external pins, or a prefix of one."""
-    rev = (rev or "").strip()
-    if not re.fullmatch(r"[0-9a-f]{7,40}", rev):
-        return False
-    return any(pin == rev or pin.startswith(rev) or rev.startswith(pin) for pin in EXTERNAL_REVISIONS)
+external_form = revision_reach.external_form
+external_pin = revision_reach.external_pin
+TUNED_SYSTEMS = revision_reach.TUNED_SYSTEMS
+TUNED_CODES = revision_reach.TUNED_CODES
 
 
 def harness_reachable(rev: str) -> bool:
-    """An ancestor of HEAD, an external pin, or a repository URL at a full SHA."""
-    return external_form(rev) or external_pin(rev) or commit_held(rev)
+    """A full SHA that is an ancestor of HEAD, an external pin, or a repository URL at a full SHA."""
+    return revision_reach.revision_reachable(rev, ROOT, commit_held)
 
 
-TUNED_SYSTEMS = frozenset({"lj98", "lj104"})
-TUNED_CODES = frozenset({"anneal", "gmin"})
+def claimed_commit_reachable(rev: str) -> bool:
+    """A commit a paper script names in prose: an ancestor of HEAD, or a pin, whether or not abbreviated."""
+    return external_pin(rev, abbreviated=True) or commit_held(rev)
 
 
 def tuned_gmin_harness_verified(row: dict[str, str], repo: Path = ROOT) -> bool:
-    """Verify a tuned-GMIN row: reachable code_revision, exact data_blob and tuned.py in HEAD.
-
-    ``repo`` is the repository whose HEAD holds the harness; the audit checks
-    its own, and the ingest of a record checks the one it installs into.
-    """
-
-    def run(*args: str, stdin: str | None = None) -> subprocess.CompletedProcess:
-        return subprocess.run(["git", "-C", str(repo), *args], input=stdin, capture_output=True, text=True, check=False)
-
-    def reachable(rev: str) -> bool:
-        return external_form(rev) or external_pin(rev) or revision_reach.commit_held(rev, repo)
-
-    system = (row.get("system") or "").strip()
-    data_blob = (row.get("data_blob") or "").strip()
-    harness = (row.get("harness_commit") or "").strip()
-    code_rev = (row.get("code_revision") or "").strip()
-    if system not in TUNED_SYSTEMS or not data_blob or not harness:
-        return False
-    if not reachable(code_rev):
-        return False
-    if reachable(harness):
-        return True
-    head_data = run("rev-parse", f"HEAD:bench/gmin-tuned/inputs/{system}.data")
-    head_tuned = run("rev-parse", "HEAD:scripts/gmin_panel/tuned.py")
-    if head_data.returncode != 0 or head_data.stdout.strip() != data_blob or head_tuned.returncode != 0:
-        return False
-    if harness.startswith("-"):
-        return False
-    held = run("cat-file", "--batch-check", stdin=f"{harness}^{{commit}}\n").stdout.split()
-    if held[1:2] != ["commit"]:
-        return False
-    ref_data = run("rev-parse", f"{harness}:bench/gmin-tuned/inputs/{system}.data")
-    ref_tuned = run("rev-parse", f"{harness}:scripts/gmin_panel/tuned.py")
-    if ref_data.returncode != 0 or ref_data.stdout.strip() != data_blob:
-        return False
-    if ref_tuned.returncode != 0 or ref_tuned.stdout.strip() != head_tuned.stdout.strip():
-        return False
-    base = run("merge-base", "HEAD", harness)
-    if base.returncode != 0 or not base.stdout.strip():
-        return False
-    diff = run("diff", "--name-only", base.stdout.strip(), harness)
-    if diff.returncode != 0:
-        return False
-    if any(
-        name.startswith(("src/", "examples/")) or name in {"Cargo.toml", "Cargo.lock"}
-        for name in diff.stdout.splitlines()
-    ):
-        return False
-    return True
+    """Verify a tuned-GMIN row. The check is shared with the ingest and the table generators."""
+    return revision_reach.tuned_gmin_harness_verified(row, repo, commit_held if repo == ROOT else None)
 
 
 def panel_rows_held(rows: list[dict[str, str]], *, anneal: bool) -> bool:
@@ -1000,7 +937,7 @@ def unheld_revision_prefixes(audit: Audit) -> set[str]:
             for column, value in row.items():
                 if column not in _REVISION_COLUMNS or not re.fullmatch(r"[0-9a-f]{8,40}", value or ""):
                     continue
-                if external_pin(value):
+                if external_pin(value, abbreviated=True):
                     continue
                 if not commit_held(value):
                     prefixes.add(value[:8])
@@ -6150,7 +6087,7 @@ def script_commit_hashes(audit: Audit) -> None:
                 if name != "RgpotRevision"
             )
         for revision in claimed:
-            if harness_reachable(revision):
+            if claimed_commit_reachable(revision):
                 continue
             failed = True
             audit.record(False, rel, HELD_NUMBER, "absent", revision[:12])

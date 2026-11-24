@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import csv
 import os
-import re
 import subprocess
 import sys
 import time
@@ -33,6 +32,7 @@ if str(ROOT / "scripts") not in sys.path:
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 from evaluator import evaluator_spec
 from machine_provenance import machine_columns  # noqa: E402
+import revision_reach  # noqa: E402
 
 sys.path.insert(0, str(ROOT / "scripts" / "ase_gofee_h2h"))
 from potential import (  # noqa: E402
@@ -227,7 +227,7 @@ def main() -> int:
     if SYSTEMS[system]["kind"] == "lj":
         check_lj()
     revision = os.environ.get("ASE_PANEL_REVISION", "")
-    if not re.fullmatch(r"[0-9a-f]{40}", revision):
+    if not revision_reach.is_full_sha(revision):
         print("ASE_PANEL_REVISION must be the full revision used to build the binaries", file=sys.stderr)
         return 2
     spec = SYSTEMS[system]
