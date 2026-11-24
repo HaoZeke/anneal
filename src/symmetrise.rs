@@ -360,6 +360,32 @@ impl Cloud {
         }
         Some((total / n as f64).sqrt())
     }
+
+    /// Points of the cloud whose image under `m` lies within `radius` of a
+    /// point of the cloud.
+    fn matrix_inliers(&self, m: &Rot, radius: f64) -> usize {
+        let n = self.xs.len();
+        let limit = radius * radius;
+        let mut count = 0usize;
+        let mut index = 0usize;
+        let mut stored = [[0.0; 3]; 4];
+        let mut distance = [0.0; 4];
+        while index < n {
+            let width = (n - index).min(4);
+            for lane in 0..width {
+                let v = self.point(index + lane);
+                stored[lane] = [
+                    m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
+                    m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
+                    m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
+                ];
+            }
+            self.nearest_squared_batch(&stored[..width], &mut distance[..width]);
+            count += distance[..width].iter().filter(|d| **d <= limit).count();
+            index += width;
+        }
+        count
+    }
 }
 
 /// How far `x` is from being symmetric under the orthogonal map `g`, about
@@ -432,6 +458,11 @@ impl CentredOperationTest {
     /// from.
     pub fn deviation(&self, g: &Rot, cap: f64) -> Option<f64> {
         self.cloud.matrix_deviation(g, cap)
+    }
+
+    /// How many points `g` takes to within `radius` of a point.
+    pub fn inliers(&self, g: &Rot, radius: f64) -> usize {
+        self.cloud.matrix_inliers(g, radius)
     }
 }
 

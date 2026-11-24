@@ -79,12 +79,15 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
             plain_mask |= 1 << seed;
         }
     }
-    // The walk is deterministic: cutoff 0xffff, plain 0x2082 (3 seeds), with
-    // and without IRA. An exact closure of the detected operations moved the
-    // plain mask from 0x5a02 (5 seeds). Skipping the completion of a minimum
-    // that gave nothing moved it from 0x0082 (2 seeds), and the two seeds it
-    // had are among the three it has.
-    let plain_exact = 0x2082;
+    // The walk is deterministic: cutoff 0xffff, plain 0x3120 (4 seeds), with
+    // and without IRA. The mask is a trajectory fingerprint of 16 seeds, not
+    // a rate: the same walk over seeds 0..1024 reaches the octahedron on 265
+    // seeds, and the builder-era search on 238 (0x240d on these 16). The
+    // completion that stands in for the builders reads the group of the
+    // core and keeps the operations the core carries; closing the group
+    // without that filter gives 0xb065 here and 292 of 1024, and costs the
+    // binary Lennard-Jones cells the calls the filter saves.
+    let plain_exact = 0x3120;
     assert_eq!(
         compact_mask, 0xffff,
         "the cutoff walk reached the octahedron on {compact_hits} of {SEEDS} seeds (mask {compact_mask:#06x})"
