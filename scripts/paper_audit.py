@@ -1895,6 +1895,10 @@ CONF_MISS4_LEDGER = ("spent", "screen", "full", "check", "quenches", "converged"
                      "overlap_rejected", "basins")
 CONF_MISS4_SCHEDULE_SEED = 20261115
 CONF_MISS4_STANDARD_SEEDS = tuple(range(2000, 2012))
+# This audit is merge-only: the first parent carries the measured series and
+# the second carries its develop base. Checking both parent histories keeps a
+# side-branch revision from passing merely because a later HEAD merged it.
+CONF_MISS4_PROVENANCE_MERGE = "c8581d69319a2f960c25ecb5f0261feb34a739b3"
 
 
 def derived_table(audit: Audit, path: str, delimiter: str = "\t") -> list[dict[str, str]]:
@@ -1962,6 +1966,29 @@ def conf_miss4(audit: Audit) -> None:
     paired_revisions = {r["code_revision"] for r in rows if r["arm"] in ("anneal", "openconf")}
     audit.record(len(paired_revisions) == 1, where, "anneal and openconf carry the paired runner's one revision",
                  "one revision", " ".join(sorted(r[:8] for r in paired_revisions)))
+    provenance_rows = derived_table(audit, f"{base}/provenance.tsv")
+    roles = {r["commit"]: r["role"] for r in provenance_rows}
+    merge_exists = git("cat-file", "-e", f"{CONF_MISS4_PROVENANCE_MERGE}^{{commit}}").returncode == 0
+    merge_parents = (
+        git("show", "-s", "--format=%P", CONF_MISS4_PROVENANCE_MERGE).stdout.split()
+        if merge_exists
+        else []
+    )
+    audit.record(merge_exists, base, "the documented provenance merge is a commit object",
+                 "commit", "commit" if merge_exists else "missing")
+    audit.record(len(merge_parents) == 2, base, "the documented provenance merge has two parents",
+                 "two parents", f"{len(merge_parents)} parents")
+    merge_on_origin = merge_exists and bool(
+        git("for-each-ref", "--count=1", "--contains", CONF_MISS4_PROVENANCE_MERGE,
+            "refs/remotes/origin").stdout.strip()
+    )
+    audit.record(merge_on_origin, base, "the documented provenance merge is reachable from origin",
+                 "reachable", "reachable" if merge_on_origin else "not reachable")
+    merge_on_head = merge_exists and git(
+        "merge-base", "--is-ancestor", CONF_MISS4_PROVENANCE_MERGE, "HEAD"
+    ).returncode == 0
+    audit.record(merge_on_head, base, "the documented provenance merge is an ancestor of HEAD",
+                 "ancestor", "ancestor" if merge_on_head else "not")
     for revision in sorted(cited):
         exists = git("cat-file", "-e", f"{revision}^{{commit}}").returncode == 0
         on_origin = exists and bool(
@@ -1971,10 +1998,15 @@ def conf_miss4(audit: Audit) -> None:
                      "commit", "commit" if exists else "missing")
         audit.record(on_origin, base, f"cited revision {revision[:8]} is reachable from origin",
                      "reachable", "reachable" if on_origin else "not reachable")
-        ok = git("merge-base", "--is-ancestor", revision, "HEAD").returncode == 0
-        audit.record(ok, base, f"cited revision {revision[:8]} is an ancestor of HEAD", "ancestor", "ancestor" if ok else "not")
+        parent_index = 1 if roles.get(revision) == "develop base" else 0
+        on_parent = (
+            exists
+            and len(merge_parents) == 2
+            and git("merge-base", "--is-ancestor", revision, merge_parents[parent_index]).returncode == 0
+        )
+        audit.record(on_parent, base, f"cited revision {revision[:8]} is on its provenance merge parent",
+                     "ancestor", "ancestor" if on_parent else "not")
 
-    provenance_rows = derived_table(audit, f"{base}/provenance.tsv")
     listed = {r["commit"] for r in provenance_rows}
     for r in provenance_rows:
         tree = git("rev-parse", f"{r['commit']}^{{tree}}").stdout.strip()

@@ -809,10 +809,37 @@ def test_a_conf_miss4_row_citing_a_missing_commit_is_reported():
     audit_mod.conf_miss4(audit)
     assert sorted(r[2] for r in audit.drifts()) == [
         "cited revision 01234567 is a commit object",
-        "cited revision 01234567 is an ancestor of HEAD",
+        "cited revision 01234567 is on its provenance merge parent",
         "cited revision 01234567 is reachable from origin",
         "every revision the rows cite is listed",
     ]
+
+
+def test_conf_miss4_requires_the_documented_two_parent_merge(monkeypatch):
+    monkeypatch.setattr(
+        audit_mod,
+        "CONF_MISS4_PROVENANCE_MERGE",
+        "5c40c711f6f49ce0950d6025349adcde7f17cdce",
+    )
+    audit = audit_mod.Audit()
+    audit_mod.conf_miss4(audit)
+    assert "the documented provenance merge has two parents" in {
+        r[2] for r in audit.drifts()
+    }
+
+
+def test_conf_miss4_checks_revisions_against_their_merge_parent():
+    audit = audit_mod.Audit()
+    path = f"{CONF_MISS4}/provenance.tsv"
+    audit.text_cache[path] = audit.text(path).replace(
+        "anneal and openconf rows; anneal wheel",
+        "develop base",
+        1,
+    )
+    audit_mod.conf_miss4(audit)
+    assert "cited revision 259befae is on its provenance merge parent" in {
+        r[2] for r in audit.drifts()
+    }
 
 
 def test_conf_miss4_requires_one_revision_for_both_paired_arms():

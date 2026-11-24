@@ -43,7 +43,12 @@ time.
   not record them.
 - `provenance.tsv` lists every repository revision the rows cite with
   its tree. The audit checks each tree, each commit object and
-  reachability from an `origin` remote-tracking ref.
+  reachability from an `origin` remote-tracking ref. This is a
+  merge-only audit: merge `c8581d69319a2f960c25ecb5f0261feb34a739b3`
+  has the measured series as its first parent and the develop line as
+  its second. The audit requires that exact two-parent merge in `HEAD`
+  and checks each cited revision against its assigned parent history;
+  unrelated ancestry through a later merge cannot satisfy it.
 - develop: `61fa67cf380e46876b569da45e7cc091647a775b`, built into its
   own wheel, the `develop` rows. The series is built on this revision.
 - openconf: rowansci/openconf `e32c5fa7b6e6aac944bda31c851be42e14340235`
