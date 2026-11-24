@@ -1,24 +1,31 @@
 // Copyright (c) anneal developers
-//! The generic packing catalogue is not part of a hit the walk records.
+//! The generic packing probe's potential calls are all on the ledger.
 //!
 //! Lennard-Jones 26, seed 2000, budget 30_000, stops at -108.315616.
-//! develop `9b65fda3972fd8c014bce886a3ea5c05956d64af` charges 502 at that
-//! hit. Settling the catalogue onto the parent before the walk charged
-//! 1433 for the same geometry and the same hop.
+//! The probe spends 931 potential calls before the walk. develop
+//! `983f6f69ea1555e51a71874870410966ac726616` has no probe and charges 502
+//! at the hit. With the probe the same geometry is hit at 502 + 931 = 1433,
+//! and the ledger, the improvement row and `outcome.charged` all say so.
 
 use anneal_core::methods::cluster_hopping::{Config, Ledger, run_with_gradient};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 const ATOMS: usize = 26;
 const SEED: u64 = 2000;
 const BUDGET: usize = 30_000;
 const REFERENCE: f64 = -108.315616;
 
+/// The energy-lattice arm charges its site scans straight to the ledger,
+/// with no potential call. This walk is charged four calls that way. develop
+/// shows the same four: 498 potential calls against 502 charged.
+const SITE_SCAN_CHARGE: usize = 4;
+
 #[test]
-fn a_walk_hit_keeps_develop_charged_count() {
+fn a_walk_hit_is_charged_for_every_potential_call_including_the_packing_probe() {
     anneal_core::install_rgpot_kernels!();
     let cfg = Config::recommended(ATOMS);
     let potential = PairPotential::lennard_jones(ATOMS);
@@ -29,6 +36,7 @@ fn a_walk_hit_keeps_develop_charged_count() {
         cfg.min_separation,
         &mut rng,
     );
+    let evaluations = AtomicUsize::new(0);
     let mut ledger = Ledger::new(BUDGET);
     ledger.stop_below(REFERENCE + anneal_core::DEFAULT_HIT_TOL);
     let mut optimiser = WarmLbfgs::default();
@@ -38,6 +46,7 @@ fn a_walk_hit_keeps_develop_charged_count() {
             if !led.charge() {
                 return None;
             }
+            evaluations.fetch_add(1, Ordering::Relaxed);
             Some(potential.value_and_gradient(point))
         });
         (value, relaxed)
@@ -46,6 +55,7 @@ fn a_walk_hit_keeps_develop_charged_count() {
         if !led.charge() {
             return None;
         }
+        evaluations.fetch_add(1, Ordering::Relaxed);
         Some(potential.value_and_gradient(point).1)
     };
     let mut rng = StdRng::seed_from_u64(SEED);
@@ -68,6 +78,12 @@ fn a_walk_hit_keeps_develop_charged_count() {
         "best {:.6}",
         outcome.best
     );
-    assert_eq!(at_hit, Some(502), "hit spend");
-    assert_eq!(outcome.charged, 502, "charged calls");
+    assert_eq!(at_hit, Some(1433), "hit spend");
+    assert_eq!(outcome.charged, 1433, "charged calls");
+    assert_eq!(outcome.charged, ledger.spent(), "outcome and ledger agree");
+    assert_eq!(
+        evaluations.load(Ordering::Relaxed) + SITE_SCAN_CHARGE,
+        ledger.spent(),
+        "every potential call is charged"
+    );
 }

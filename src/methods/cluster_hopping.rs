@@ -6380,12 +6380,6 @@ where
     // Energy, geometry, and the parent spend at the find. The catalogue's
     // charge is already on the ledger; adoption only has to record it.
     let mut pending_packing: Option<(f64, Array1<f64>, usize)> = None;
-    // `(spent before the catalogue, catalogue calls)`. Refunded when the
-    // walk, not the catalogue, reaches the stop target with budget left.
-    // A run that spends its budget keeps the charge: those calls took the
-    // place of the tail.
-    let mut catalogue_charge: Option<(usize, usize)> = None;
-    let mut catalogue_answered = false;
     let stop = loop {
         // A finished checkpoint interval is delivered before the budget
         // exit. The loop otherwise returns here with nothing left to
@@ -6435,7 +6429,6 @@ where
             ledger.charge_many(probe_spent);
             charged_at_best =
                 charged_at_best.saturating_add(ledger.spent().saturating_sub(charged_before));
-            catalogue_charge = Some((before, probe_spent));
             if let Some((cut_energy, cut_state, cut_offset)) = candidate {
                 let cut_at = before + cut_offset;
                 // A target hit is a record on the opening quench and on a hop.
@@ -6444,7 +6437,6 @@ where
                 let hit_target = ledger.below_target(cut_energy);
                 if hit_target || !gradient_required || cut_gradient.is_some() {
                     if hit_target {
-                        catalogue_answered = true;
                         ledger.record(cut_energy, cut_state.view());
                         ledger.stamp_encounter(cut_energy, cut_at);
                         if improvements.len() < 512 {
@@ -11311,31 +11303,11 @@ where
     if let Some((energy, state, found_at)) = pending_packing
         && energy < ledger.best - 1e-10
     {
-        catalogue_answered = true;
         ledger.record(energy, state.view());
         ledger.stamp_encounter(energy, found_at);
         if improvements.len() < 512 {
             improvements.push((hops, found_at, bias.n_basins(), energy));
         }
-    }
-
-    // The catalogue was charged before the walk so its calls occupy the
-    // same budget a full run spends. A target hit the walk records is not
-    // that tail: the charge is still on the ledger, and the hit time is
-    // later by exactly those calls. Put the hit back where the walk paid
-    // for it. A catalogue that is itself the answer keeps the charge.
-    if let Some((before, cost)) = catalogue_charge
-        && !catalogue_answered
-        && cost > 0
-        && ledger.target_reached()
-        && ledger.spent() < ledger.budget
-    {
-        for (spent, _) in &mut ledger.encounters {
-            if *spent > before {
-                *spent = spent.saturating_sub(cost);
-            }
-        }
-        ledger.spent = ledger.spent.saturating_sub(cost);
     }
 
     let n_basins = bias.n_basins();
