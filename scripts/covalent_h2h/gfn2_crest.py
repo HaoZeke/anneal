@@ -691,6 +691,20 @@ def _no_result(row: dict) -> bool:
     )
 
 
+def _rescore_class(row: dict, reference: float) -> str:
+    """Classify one run as ``hit``, ``no_result`` or ``miss``.
+
+    The three classes are mutually exclusive. A no-result row is
+    never a hit, including when it charged nothing and its energy
+    is finite.
+    """
+    if _no_result(row):
+        return "no_result"
+    if energy_hits(_best_energy(row), reference, HIT_TOL):
+        return "hit"
+    return "miss"
+
+
 def arm_calls(runs: list[dict], stop: float | None) -> dict[str, str]:
     """Record calls and classify the way each row stopped."""
     ordered = sorted(runs, key=lambda row: int(row["seed"]))
@@ -792,7 +806,9 @@ def rescore(
     """Append each code's hits against another reference.
 
     A hit is the recorded best energy, not the stored hit flag.
-    No-result rows remain misses. Stop modes and medians are recorded.
+    No-result rows remain misses. Each run is a hit, a no-result
+    or another miss, and those counters are mutually exclusive.
+    Stop modes and medians are recorded.
     """
     table = []
     for path in paths:
@@ -816,16 +832,14 @@ def rescore(
         if not runs:
             continue
         calls = arm_calls(runs, stop)
+        classes = [_rescore_class(row, reference) for row in runs]
         lines.append(
             {
                 "system": system,
                 "code": code,
                 "reference_eV": f"{reference:.8f}",
                 "runs": len(runs),
-                "hits": sum(
-                    energy_hits(_best_energy(row), reference, HIT_TOL)
-                    for row in runs
-                ),
+                "hits": sum(kind == "hit" for kind in classes),
                 "budgets": calls["budgets"],
                 "charged": calls["charged"],
                 "median_budget_all": calls["median_budget_all"],

@@ -189,6 +189,96 @@ def test_rescore_labels_stop_modes_and_no_results(tmp_path, monkeypatch):
         crest.rescore([source], out, "other", -1.0, "0" * 40, "")
 
 
+def test_rescore_counts_zero_charge_finite_energy_only_as_no_result(
+    tmp_path, monkeypatch
+):
+    crest = load("gfn2_crest_exclusive", "scripts/covalent_h2h/gfn2_crest.py")
+    monkeypatch.setitem(crest.REFERENCE, "sample", -9.5)
+    rows = [
+        {
+            "system": "sample",
+            "code": "anneal-general",
+            "seed": "1",
+            "budget": "100",
+            "charged": "0",
+            "best": "-9.5",
+        },
+        {
+            "system": "sample",
+            "code": "anneal-general",
+            "seed": "2",
+            "budget": "100",
+            "charged": "50",
+            "best": "-9.6",
+        },
+        {
+            "system": "sample",
+            "code": "anneal-general",
+            "seed": "3",
+            "budget": "80",
+            "charged": "80",
+            "best": "-1.0",
+        },
+        {
+            "system": "sample",
+            "code": "crest",
+            "seed": "1",
+            "budget": "10",
+            "charged": "10",
+            "best": "-1.0",
+        },
+        {
+            "system": "sample",
+            "code": "crest",
+            "seed": "4",
+            "budget": "40",
+            "charged": "0",
+            "best": "-100.0",
+        },
+    ]
+    source = write(tmp_path / "rows.csv", rows)
+    out = tmp_path / "rescore.csv"
+    crest.rescore([source], out, "sample", -9.5, "0" * 40, "")
+    by_code = {row["code"]: row for row in read(out)}
+
+    anneal = by_code["anneal-general"]
+    assert (anneal["runs"], anneal["hits"], anneal["no_result"]) == ("3", "1", "1")
+    assert anneal["no_result_seeds"] == "1"
+    assert "1 produced no result (seeds 1)" in anneal["stop_note"]
+    assert "stopped at the -9.50000000 stop target (seeds 2" in anneal["stop_note"]
+    assert "1 runs ran to their own end (seeds 3" in anneal["stop_note"]
+
+    other = by_code["crest"]
+    assert (other["runs"], other["hits"], other["no_result"]) == ("2", "0", "1")
+    assert other["no_result_seeds"] == "4"
+    assert "1 produced no result (seeds 4)" in other["stop_note"]
+    assert "1 runs ran to their own end (seeds 1" in other["stop_note"]
+    assert "stop target" not in other["stop_note"]
+
+    assert crest.energy_hits(-9.5, -9.5, crest.HIT_TOL)
+    assert crest.energy_hits(-100.0, -9.5, crest.HIT_TOL)
+    assert [crest._rescore_class(row, -9.5) for row in rows] == [
+        "no_result",
+        "hit",
+        "miss",
+        "miss",
+        "no_result",
+    ]
+    for code, written in by_code.items():
+        labels = [
+            crest._rescore_class(row, -9.5)
+            for row in rows
+            if row["code"] == code
+        ]
+        hits = int(written["hits"])
+        missing = int(written["no_result"])
+        rest = int(written["runs"]) - hits - missing
+        assert labels.count("hit") == hits
+        assert labels.count("no_result") == missing
+        assert labels.count("miss") == rest
+        assert hits + missing + rest == len(labels)
+
+
 def test_arm_calls_without_a_stop_classifies_only_row_endings():
     crest = load("gfn2_crest_no_stop", "scripts/covalent_h2h/gfn2_crest.py")
     rows = synthetic_rescore_rows()[2:4]
