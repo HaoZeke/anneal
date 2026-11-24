@@ -343,16 +343,18 @@ GET https://www.faccts.de/orca/
 GET https://www.faccts.de/news/
 GET https://www.faccts.de/docs/orca/6.2/manual/
 
-Result: verified and filed 21 new records (`akoaHpfLennardJones2026`,
+Result: verified and filed 20 new records (`akoaHpfLennardJones2026`,
 `dernEwfm2025`, `maillardPartition2025`, `neumanMdDisconnectivity2026`,
 `ronneAgedi2025`, `prachtIrmsd2025`, `zurekTtconf2025`, `nikitinChembl3d2026`,
 `grendaP31Nmr2026`, `tursunbadalovPosemend2026`, `barrettUnsupervised2026`,
 `somersShepherdScore2026`, `hasyimCofoldingTps2026`,
 `ramosLiquidWaterHyperpol2026`, `camarilloTip4pIce2026`,
 `ignatovWaterDescriptors2026`, `roldaoFluxional2026`, `santosTm13Her2026`,
-`ugartemendiaPtGeClusters2026`, `zhangCgtransformer2026`, `nguyenClff2026`)
+`zhangCgtransformer2026`, `nguyenClff2026`)
 plus the v3 update to `shangFodorant2026`. Four further candidates were already
 on file under `carareLandscape172025`, `christiansenGradientGc2025`,
 `pitfieldAugmentation2025`, and `ramosEmbeddedWater2026`, and were not filed
-again. Flagged `akoaHpfLennardJones2026` (`10.21203/rs.3.rs-11833624/v1`) for a
-new matched-budget unregularized LJ38/75/98/102-104 head-to-head.
+again. The ChemRxiv record 10.26434/chemrxiv.15012330 (Ugartemendia et al.)
+was checked and is left to the parallel watch. Flagged
+`akoaHpfLennardJones2026` (`10.21203/rs.3.rs-11833624/v1`) for a new
+matched-budget unregularized LJ38/75/98/102-104 head-to-head.
