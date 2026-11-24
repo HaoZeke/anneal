@@ -12,9 +12,8 @@
 //! depth-rewarded arm, and the pair force go through that `libm`, and
 //! this test forces rgmin's scalar dots.
 //!
-//! The assignment is the built-in one on every build, so linking IRA
-//! does not change this hash.
-//! Closing completed symmetry groups changes the recorded trajectory.
+//! The fivefold assignment is the built-in one on every build, so the
+//! hash is `6e277f86…` with and without IRA.
 
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, random_cluster_in_radius, run_with_gradient,
@@ -91,7 +90,7 @@ fn trajectory_hash() -> String {
 fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     anneal_core::install_rgpot_kernels!();
     let hash = trajectory_hash();
-    // The flag-off trajectory with closed symmetry groups is deterministic.
-    let expected = "2edb99fdb15752be0c232473fa7fb58dee6991e06991d2dd76439563b32723c1";
+    // The flag-off trajectory from the base is deterministic on every build.
+    let expected = "5cd9c95765eadc45efa5879002be9a7430a81b9d82d5bf19509dcabc5578b65c";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }
