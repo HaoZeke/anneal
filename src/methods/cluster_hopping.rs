@@ -6640,7 +6640,9 @@ where
     let mut branch_wait = 0usize;
     let mut branch_draws = 0u64;
     let mut branch_ends: Vec<f64> = Vec::new();
-    let mut branch_held: Option<(f64, Array1<f64>, usize)> = None;
+    // Energy, geometry, the parent spend at the find, and the hop and basin
+    // count the walk had when it was found.
+    let mut branch_held: Option<(f64, Array1<f64>, usize, usize, usize)> = None;
     // A primitive basis needs four observed points. Its evidence floor is the
     // number of distinct tetrahedra the current point count can present.
     let basis_evidence = (0..4).fold(1usize, |count, chosen| {
@@ -6702,9 +6704,11 @@ where
     // beats the incumbent is held until the walk finishes unless it already
     // hits the stop target, so a deep wrong-funnel packing does not trap
     // the walk at the hop where it was found.
-    // Energy, geometry, and the parent spend at the find. The catalogue's
-    // charge is already on the ledger; adoption only has to record it.
-    let mut pending_packing: Option<(f64, Array1<f64>, usize)> = None;
+    // Energy, geometry, the parent spend at the find, and the hop and basin
+    // count of the find. The catalogue's charge is already on the ledger;
+    // adoption only has to record it, at the hop it was found on and not
+    // the hop the walk ends on.
+    let mut pending_packing: Option<(f64, Array1<f64>, usize, usize, usize)> = None;
     let stop = loop {
         // A finished checkpoint interval is delivered before the budget
         // exit. The loop otherwise returns here with nothing left to
@@ -6779,7 +6783,7 @@ where
                         }
                         break HopStop::of_closed(ledger);
                     }
-                    pending_packing = Some((cut_energy, cut_state, cut_at));
+                    pending_packing = Some((cut_energy, cut_state, cut_at, hops, bias.n_basins()));
                 } else {
                     unconverged_records += 1;
                 }
@@ -7471,7 +7475,7 @@ where
                 }
                 let held_below = branch_held
                     .as_ref()
-                    .map_or(ledger.best, |(held, _, _)| held.min(ledger.best));
+                    .map_or(ledger.best, |(held, _, _, _, _)| held.min(ledger.best));
                 if ran.is_ok()
                     && branch.best < held_below - 1e-10
                     && let Some(state) = branch.best_state.clone()
@@ -7499,7 +7503,7 @@ where
                             improvements.push((hops, found_at, bias.n_basins(), energy));
                         }
                     } else {
-                        branch_held = Some((energy, state, found_at));
+                        branch_held = Some((energy, state, found_at, hops, bias.n_basins()));
                     }
                 }
                 let cost = ledger.spent().saturating_sub(before);
@@ -11778,22 +11782,22 @@ where
     {
         ledger.record(energy, state.view());
     }
-    if let Some((energy, state, found_at)) = branch_held
+    if let Some((energy, state, found_at, found_hop, found_basins)) = branch_held
         && energy < ledger.best - 1e-10
     {
         ledger.record(energy, state.view());
         if improvements.len() < 512 {
-            improvements.push((hops, found_at, bias.n_basins(), energy));
+            improvements.push((found_hop, found_at, found_basins, energy));
         }
     }
 
-    if let Some((energy, state, found_at)) = pending_packing
+    if let Some((energy, state, found_at, found_hop, found_basins)) = pending_packing
         && energy < ledger.best - 1e-10
     {
         ledger.record(energy, state.view());
         ledger.stamp_encounter(energy, found_at);
         if improvements.len() < 512 {
-            improvements.push((hops, found_at, bias.n_basins(), energy));
+            improvements.push((found_hop, found_at, found_basins, energy));
         }
     }
 
@@ -12670,6 +12674,69 @@ mod tests {
         assert_eq!(outcome.charged, evals);
         assert_eq!(ledger.spent(), evals);
         assert!(outcome.charged <= 2_000);
+    }
+
+    /// A packing found at the offer is adopted when the walk ends. Its row
+    /// in `improvements` names the hop the probe ran on, not the hop the walk
+    /// stopped on.
+    #[test]
+    fn an_adopted_packing_keeps_the_hop_it_was_found_on() {
+        let n = 23usize;
+        let mut species = vec![29u32; 11];
+        species.extend(std::iter::repeat_n(79u32, 12));
+        let mut cfg = Config::recommended(n).with_species(species, None);
+        cfg.max_hops = Some(6);
+        cfg.packing_deferral = 1;
+        let offer = packing_offer_hops(&cfg);
+        assert_eq!(offer, 5, "the offer is capped one hop below max_hops");
+        let mut start_rng = StdRng::seed_from_u64(11);
+        let start =
+            random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, &mut start_rng);
+        let far_threshold = 0.5 * f64::EPSILON.sqrt().recip();
+        let packings = binary_geometry::packing_candidates(n, 2.0);
+        let mut ledger = Ledger::new(4_000);
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            if !led.charge() {
+                return (f64::NAN, x.to_owned());
+            }
+            if steps == 0 && (2..n).any(|atom| x[3 * atom + 1].abs() > far_threshold) {
+                let distance = (x[3] - x[0]).abs();
+                return ((distance - 2.0).powi(2), x.to_owned());
+            }
+            for (index, packing) in packings.iter().enumerate() {
+                let worst = x
+                    .iter()
+                    .zip(packing.iter())
+                    .map(|(a, b)| (a - b).abs())
+                    .fold(0.0_f64, f64::max);
+                if worst < 1e-4 {
+                    return (-50.0 - index as f64, x.to_owned());
+                }
+            }
+            (-1.0, x.to_owned())
+        };
+        let mut grad =
+            |led: &mut Ledger, x: ArrayView1<f64>| led.charge().then(|| Array1::zeros(x.len()));
+        let mut rng = StdRng::seed_from_u64(11);
+        let outcome = run_with_gradient(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut rng,
+        )
+        .expect("finite start");
+        assert_eq!(outcome.hops, 6, "the walk runs to its cap");
+        assert!(outcome.best <= -57.0 + 1e-9, "best {}", outcome.best);
+        let row = outcome
+            .improvements
+            .iter()
+            .find(|(_, _, _, energy)| *energy == outcome.best)
+            .expect("the adopted packing is listed");
+        assert_eq!(row.0, offer, "the row carries the hop of the find");
+        assert_ne!(row.0, outcome.hops);
+        assert!(row.1 <= outcome.charged, "found within the charged work");
     }
 
     #[test]
