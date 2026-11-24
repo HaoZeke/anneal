@@ -10223,22 +10223,24 @@ where
             && let Some((_, frontier_energy, frontier_state)) =
                 bank.restart(0.25, rng.random::<f64>())
             && frontier_state.len() == x.len()
-            && frontier_energy.is_finite()
         {
-            adopt_minimum!(
-                frontier_energy,
-                Array1::from(frontier_state.to_vec()),
-                None,
-                None,
-                AdoptionHistory::Fresh,
-                None,
-                Some("seam-frontier"),
-                hops
-            );
-            quiet = 0;
-            longest_quiet = 0;
-            restarts += 1;
-            continue;
+            let frontier_coords = Array1::from(frontier_state.to_vec());
+            if quench_is_sane(cfg, frontier_energy, frontier_coords.view()) {
+                adopt_minimum!(
+                    frontier_energy,
+                    frontier_coords,
+                    None,
+                    None,
+                    AdoptionHistory::Fresh,
+                    None,
+                    Some("seam-frontier"),
+                    hops
+                );
+                quiet = 0;
+                longest_quiet = 0;
+                restarts += 1;
+                continue;
+            }
         }
         if cfg.symmetrise_on_stall && stuck && hop_room(hops) {
             let withhold = cfg.active_region.is_some() || cfg.frozen.is_some();
@@ -10401,9 +10403,20 @@ where
                 None
             }
         };
+        // Uniform failure rule for all stall arms (`restart`, `trail`, `cap`,
+        // `climb`): every arm that attempts an escape records `begin_arm` on
+        // proposal. If the relaxed state passes `quench_is_sane`, the arm
+        // resets `quiet`/`longest_quiet`, records `finish_arm(..., true,
+        // improved)`, adopts the minimum, and sets `stall_outcome` so the
+        // bandit allocator updates on the reached depth. Any rejected or
+        // uncompleted attempt records a failed proposal (`finish_arm(...,
+        // false, false)`), preserves `quiet`/`longest_quiet` and `basin_entry`,
+        // and leaves `stall_outcome = None` so the allocator receives no
+        // synthetic reward.
         let stalled_from = e;
         let mut stall_outcome: Option<f64> = None;
         if stall_response.map(|arm| stall_arms[arm] == "restart") == Some(true) {
+            begin_arm(&mut arm_counts, "stall-restart");
             let fresh = if let Some(groups) = cfg.move_library.declared_groups() {
                 // Keep each rigid group's internal geometry; only the
                 // packing is redrawn. An atomic redraw overlaps waters.
@@ -10425,6 +10438,7 @@ where
                 longest_quiet = 0;
                 hops += 1;
                 restarts += 1;
+                finish_arm(&mut arm_counts, "stall-restart", true, ef < stalled_from);
                 adopt_minimum!(
                     ef,
                     xf,
@@ -10436,11 +10450,14 @@ where
                     hops
                 );
                 stall_outcome = Some(stalled_from - e);
+            } else {
+                finish_arm(&mut arm_counts, "stall-restart", false, false);
             }
         }
         if stall_response.map(|arm| stall_arms[arm] == "trail") == Some(true)
-            && let Some(x_entry) = basin_entry.take()
+            && let Some(x_entry) = basin_entry.as_ref()
         {
+            begin_arm(&mut arm_counts, "stall-trail");
             // Outward is from the minimum toward the entry, continued past it
             // with noise, so the restart leans toward the ridge the chain
             // crossed on the way in rather than back down the funnel.
@@ -10469,6 +10486,7 @@ where
                 &mut unconverged_records,
             );
             if quench_is_sane(cfg, ee, xe.view()) {
+                basin_entry = None;
                 quiet = 0;
                 longest_quiet = 0;
                 hops += 1;
@@ -10477,6 +10495,7 @@ where
                 if ee < e {
                     stall_escape_gain += e - ee;
                 }
+                finish_arm(&mut arm_counts, "stall-trail", true, ee < stalled_from);
                 // Taken whatever its energy, exactly as the climb below: the
                 // chain has shown it cannot improve from where it stands.
                 adopt_minimum!(
@@ -10490,6 +10509,8 @@ where
                     hops
                 );
                 stall_outcome = Some(stalled_from - e);
+            } else {
+                finish_arm(&mut arm_counts, "stall-trail", false, false);
             }
         }
         if let Some(turned) = cap_turn.take() {
@@ -10530,8 +10551,6 @@ where
             }
         }
         if stall_response.map(|arm| stall_arms[arm] == "climb") == Some(true) {
-            quiet = 0;
-            longest_quiet = 0;
             // A plateau return through the screen bank is only for a true
             // multi-label chain. A one-label run, even with frozen atoms or an
             // active region, stays on the ordinary activation path below.
@@ -10630,6 +10649,7 @@ where
                 && !ledger.target_reached()
                 && let Some(g) = grad.as_deref_mut()
             {
+                begin_arm(&mut arm_counts, "stall-climb");
                 let scale = if cfg.minima_hopping {
                     feedback.escape()
                 } else {
@@ -10661,11 +10681,14 @@ where
                         &mut unconverged_records,
                     );
                     if quench_is_sane(cfg, ee, xe.view()) {
+                        quiet = 0;
+                        longest_quiet = 0;
                         hops += 1;
                         stall_escapes += 1;
                         if ee < e {
                             stall_escape_gain += e - ee;
                         }
+                        finish_arm(&mut arm_counts, "stall-climb", true, ee < stalled_from);
                         // Taken whatever its energy. The chain has already shown it
                         // cannot improve from where it is, so the value of the new
                         // structure is that it is somewhere else.
@@ -10691,7 +10714,11 @@ where
                             hops
                         );
                         stall_outcome = Some(stalled_from - e);
+                    } else {
+                        finish_arm(&mut arm_counts, "stall-climb", false, false);
                     }
+                } else {
+                    finish_arm(&mut arm_counts, "stall-climb", false, false);
                 }
             }
         }
@@ -12659,6 +12686,80 @@ mod tests {
             moved,
             "every trail score was zero, so a stand-in reward would pass"
         );
+    }
+
+    #[test]
+    fn a_rejected_trail_quench_keeps_basin_entry_and_records_failure() {
+        let _ = take_stall_scores();
+        let mut cfg = Config::for_cluster(6);
+        cfg.trail_on_stall = true;
+        cfg.escape_on_stall = false;
+        cfg.restart_on_stall = false;
+        cfg.return_screen = false;
+        cfg.bayes_screen = false;
+        cfg.calibrated_screen = false;
+        cfg.symmetrise_on_stall = false;
+        cfg.tabu_on_stall = false;
+        cfg.orbit_complete_on_new = false;
+        cfg.energy_lattice = false;
+        cfg.prior_soap = false;
+        cfg.escape_stall_patience = 1;
+        cfg.escape_stall_factor = 0.0;
+        cfg.temperature = 1e-6;
+        cfg.merge_radius = 1e-12;
+        cfg.screen_steps = 1;
+        cfg.relax_steps = 1;
+        cfg.continuous_symmetry = ContinuousSymmetry::Off;
+        cfg.surfaces.clear();
+        let mut rng = StdRng::seed_from_u64(0x7a11);
+        let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+        let mut ledger = Ledger::new(80);
+        let mut bias = BasinBias::new(
+            ClusterFingerprint::for_keying(cfg.n_points, cfg.shape_keyed),
+            cfg.merge_radius,
+            cfg.bias_height,
+            cfg.bias_gamma,
+        );
+        let mut quenches = 0usize;
+        let mut relax = |ledger: &mut Ledger, state: ArrayView1<f64>, steps: usize| {
+            quenches += 1;
+            for _ in 0..steps {
+                if !ledger.charge() {
+                    break;
+                }
+            }
+            match quenches {
+                1 => (10.0, Array1::zeros(state.len())),
+                2 | 3 => (5.0, state.to_owned()),
+                6 => (f64::INFINITY, state.to_owned()),
+                _ if quenches % 3 == 0 => (6.0, state.to_owned()),
+                _ => (100.0, state.to_owned()),
+            }
+        };
+        let outcome = run_with_bias(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            None,
+            &mut bias,
+            &mut rng,
+        )
+        .expect("finite start");
+        let scores = take_stall_scores();
+        let trail_row = outcome
+            .proposal_counts
+            .iter()
+            .find(|row| row.move_type == "stall-trail")
+            .expect("stall-trail proposal accounting");
+        assert!(
+            trail_row.proposed > trail_row.accepted,
+            "rejected trail quench must count as failed proposal: {trail_row:?}"
+        );
+        assert_eq!(trail_row.accepted, outcome.trail_escapes);
+        assert!(outcome.trail_escapes >= 1);
+        assert_eq!(scores.len(), outcome.trail_escapes);
+        assert!(outcome.final_energy.is_finite());
     }
 
     #[test]
