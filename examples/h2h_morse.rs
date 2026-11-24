@@ -10,7 +10,9 @@
 //! `[coords]` is an optional start, one Cartesian line per atom. Without
 //! it, `run` draws the start. `H2H_PAIR_SCALE=1` uses
 //! `Config::recommended_for_pair` in place of `Config::recommended`.
-//! `H2H_PLATEAU_HEAT=1` heats a stalled walk. Unset, both leave the preset.
+//! `H2H_PLATEAU_HEAT=1` heats a stalled walk. `H2H_CAP_TWIST=1` adds the
+//! cap-turn stall response, `Config::cap_twist`. Unset, each leaves the
+//! preset.
 //!
 //! The potential is the in-tree Morse pair, Doye and Wales' form with
 //! `epsilon = 1` and `r_0 = 1`. `rho` is the range. A hit is a quenched energy at
@@ -193,6 +195,10 @@ fn cmd_run(args: &[String]) -> i32 {
     // `1` heats the walk on each call plateau. Unset leaves the preset.
     if std::env::var("H2H_PLATEAU_HEAT").is_ok_and(|value| value == "1") {
         cfg.plateau_heat = true;
+    }
+    // `1` adds the cap-turn stall response. Unset leaves the preset.
+    if std::env::var("H2H_CAP_TWIST").is_ok_and(|value| value == "1") {
+        cfg.cap_twist = true;
     }
     let start = if let Some(path) = args.get(3) {
         match read_coords(path) {

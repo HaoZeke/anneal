@@ -1,0 +1,12 @@
+rc=0
+--- stdout ---
+system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,pot_s,outside_s
+m55r14,anneal,2007,1000000,false,1000000,1000000,17.234639,-220.51853338,12.482892,4.751748
+arm single draws 1548 accepts 303 best -220.512379
+arm surface draws 2071 accepts 766 best -220.512379
+arm sym draws 1740 accepts 425 best -220.510615
+arm burst draws 3339 accepts 662 best -220.518526
+arm soap draws 718 accepts 44 best -220.068569
+arm dls-kernel draws 4161 accepts 2985 best -220.518533
+
+--- stderr ---

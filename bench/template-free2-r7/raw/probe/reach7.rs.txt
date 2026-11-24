@@ -1,0 +1,106 @@
+// Copyright (c) anneal developers
+//! Scratch reach harness: quench candidates drawn from stalled structures.
+use anneal_core::methods::warm_lbfgs::WarmLbfgs;
+use anneal_core::potentials::PairPotential;
+use ndarray::{Array1, ArrayView1};
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
+
+fn read(path: &str) -> (usize, f64, Array1<f64>) {
+    let text = std::fs::read_to_string(path).unwrap();
+    let mut lines = text.lines();
+    let head: Vec<&str> = lines.next().unwrap().split_whitespace().collect();
+    let n: usize = head[0].parse().unwrap();
+    let e: f64 = head[1].parse().unwrap();
+    let mut v = Vec::new();
+    for l in lines.take(n) {
+        for t in l.split_whitespace() {
+            v.push(t.parse::<f64>().unwrap());
+        }
+    }
+    (n, e, Array1::from(v))
+}
+
+fn main() {
+    anneal_core::install_rgpot_kernels!();
+    let a: Vec<String> = std::env::args().skip(1).collect();
+    let pot_kind = a[0].clone();
+    let reference: f64 = a[1].parse().unwrap();
+    let generator = a[2].clone();
+    let draws: usize = a[3].parse().unwrap();
+    let files = &a[4..];
+    let mut rng = StdRng::seed_from_u64(7);
+    let mut hits = 0usize;
+    let mut total = 0usize;
+    let mut best = f64::INFINITY;
+    let mut below_incumbent = 0usize;
+    for f in files {
+        let (n, e_inc, x) = read(f);
+        let pot = match pot_kind.as_str() {
+            "lj" => PairPotential::lennard_jones(n),
+            "m6" => PairPotential::morse(n, 6.0),
+            "m14" => PairPotential::morse(n, 14.0),
+            _ => panic!(),
+        };
+        let mut file_hits = 0;
+        let mut file_best = f64::INFINITY;
+        for _ in 0..draws {
+            let y = generate(&generator, x.view(), n, &mut rng);
+            let Some(y) = y else { continue };
+            let mut opt = WarmLbfgs::default();
+            let (value, _, _) = opt.minimize(y.view(), 5000, |v| Some(pot.value_and_gradient(v)));
+            total += 1;
+            if value <= reference + 1e-3 {
+                hits += 1;
+                file_hits += 1;
+            }
+            if value < e_inc - 1e-6 {
+                below_incumbent += 1;
+            }
+            best = best.min(value);
+            file_best = file_best.min(value);
+        }
+        println!("{f} incumbent {e_inc:.4} best {file_best:.4} hits {file_hits}");
+    }
+    println!("SUMMARY generator {generator} draws {total} gm_hits {hits} below_incumbent {below_incumbent} best {best:.5} ref {reference}");
+}
+
+fn generate(g: &str, x: ArrayView1<f64>, n: usize, rng: &mut StdRng) -> Option<Array1<f64>> {
+    use anneal_core::lattice;
+    match g {
+        "observed" => Some(lattice::candidate(lattice::Source::Observed, x, n, rng)),
+        "twin" => Some(anneal_core::twin::propose(x, n, rng)),
+        "cap" => Some(anneal_core::cap_twist::propose(x, n, rng)),
+        "cap2" => {
+            let y = anneal_core::cap_twist::propose(x, n, rng);
+            Some(anneal_core::cap_twist::propose(y.view(), n, rng))
+        }
+        "random_shell" => {
+            let (scale, shells) = lattice::shells(x, 1.35);
+            let mut counts: Vec<usize> = shells.iter().map(|s| s.len()).collect();
+            counts.sort_unstable();
+            let median = counts[counts.len() / 2];
+            let pool: Vec<usize> = (0..shells.len()).filter(|&i| shells[i].len() >= median).collect();
+            let i = pool[rng.random_range(0..pool.len())];
+            lattice::candidate_from_offsets(&shells[i], scale, n, rng)
+        }
+        "random_shell_sym" => {
+            let (scale, shells) = lattice::shells(x, 1.35);
+            let mut counts: Vec<usize> = shells.iter().map(|s| s.len()).collect();
+            counts.sort_unstable();
+            let median = counts[counts.len() / 2];
+            let pool: Vec<usize> = (0..shells.len()).filter(|&i| shells[i].len() >= median).collect();
+            let i = pool[rng.random_range(0..pool.len())];
+            let mut off = shells[i].clone();
+            for o in shells[i].iter() {
+                let inv = [-o[0], -o[1], -o[2]];
+                if !off.iter().any(|p| (p[0]-inv[0]).powi(2)+(p[1]-inv[1]).powi(2)+(p[2]-inv[2]).powi(2) < 0.25) {
+                    off.push(inv);
+                }
+            }
+            lattice::candidate_from_offsets(&off, scale, n, rng)
+        }
+        "random_cluster" => Some(anneal_core::methods::cluster_hopping::random_cluster_in_radius(n, 1.0 * (n as f64).cbrt(), 0.7, rng)),
+        _ => panic!("generator"),
+    }
+}

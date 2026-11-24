@@ -26,16 +26,35 @@ import queue
 import socket
 import statistics
 import subprocess
+import sys
 import threading
 from pathlib import Path
 
-REFERENCE = {"si13": -599.34546694, "c20": -1148.85383633}
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from machine_provenance import machine_columns, require_csv_schema  # noqa: E402
+
+REFERENCE = {"c20": -1148.85383633}
+REFERENCE_SOURCE = {
+    "c20": "scripts/covalent_h2h/gfn2_crest.py REFERENCE",
+}
+
+
+def validate_reference_sources(references, sources):
+    """Refuse a gate reference without a nonempty citation."""
+    if set(references) != set(sources):
+        raise ValueError("reference and source systems differ")
+    for system, source in sources.items():
+        if not source.strip():
+            raise ValueError(f"{system} has no reference source")
+
+
+validate_reference_sources(REFERENCE, REFERENCE_SOURCE)
 EXAMPLE_FIELDS = [
     "system", "code", "seed", "budget", "hit", "evals_to_hit", "charged",
     "probe_calls", "wall_s", "best", "pot_s", "outside_s", "pot_per_eval_s",
     "outside_per_eval_s", "scc_rejected", "geometry_rejected",
 ]
-FIELDS = ["arm", *EXAMPLE_FIELDS, "code_revision", "host"]
+FIELDS = ["arm", *EXAMPLE_FIELDS, "code_revision", "host", "machine_id", "cpu_model"]
 
 
 def arm(text):
@@ -67,6 +86,7 @@ def run(args):
         for name, binary, revision in order:
             jobs.put((system, seed, name, binary, revision))
     host = socket.gethostname()
+    machine = machine_columns()
     lock = threading.Lock()
 
     def worker(core):
@@ -82,7 +102,7 @@ def run(args):
                 continue
             with lock, open(args.rows, "a", newline="") as handle:
                 csv.writer(handle, lineterminator="\n").writerow(
-                    [name, *fields, revision, host])
+                    [name, *fields, revision, host, machine["machine_id"], machine["cpu_model"]])
             print(f"{system} {name} {seed}: {','.join(fields)}", flush=True)
 
     threads = [threading.Thread(target=worker, args=(core,)) for core in range(args.cores)]
@@ -94,7 +114,10 @@ def run(args):
 
 def summary(args):
     with open(args.rows) as handle:
-        rows = list(csv.DictReader(handle))
+        rows = [
+            row for row in csv.DictReader(handle)
+            if row["system"] in REFERENCE
+        ]
     base, other = args.arms
     lost = []
     for system in sorted({r["system"] for r in rows}, reverse=True):
@@ -162,6 +185,7 @@ def main():
     report.add_argument("--arms", nargs=2, default=["base", "floor"])
     args = parser.parse_args()
     if args.command == "run":
+        require_csv_schema(args.rows, FIELDS)
         if not args.rows.exists() or args.rows.stat().st_size == 0:
             with open(args.rows, "a", newline="") as handle:
                 csv.writer(handle, lineterminator="\n").writerow(FIELDS)

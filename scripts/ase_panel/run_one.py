@@ -17,6 +17,7 @@ outside the potential, the cap, code_revision and host.
 
 from __future__ import annotations
 
+import csv
 import os
 import re
 import subprocess
@@ -31,6 +32,7 @@ if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 from evaluator import evaluator_spec
+from machine_provenance import machine_columns  # noqa: E402
 
 sys.path.insert(0, str(ROOT / "scripts" / "ase_gofee_h2h"))
 from potential import (  # noqa: E402
@@ -256,9 +258,9 @@ def main() -> int:
             budget,
         )
     cap = "" if row["cap_s"] == "" else f"{float(row['cap_s']):.6f}"
-    print(
-        ",".join(
-            [
+    machine = machine_columns()
+    csv.writer(sys.stdout, lineterminator="\n").writerow(
+        [
                 system,
                 arm,
                 str(seed),
@@ -274,10 +276,11 @@ def main() -> int:
                 hostname(),
                 row["stop"],
                 cap,
-            ]
-        ),
-        flush=True,
+                machine["machine_id"],
+                machine["cpu_model"],
+        ]
     )
+    sys.stdout.flush()
     print(f"boot_id={boot_id()}", flush=True)
     return 0
 

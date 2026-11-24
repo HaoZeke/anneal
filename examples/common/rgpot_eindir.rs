@@ -3,6 +3,12 @@
 //! Anneal does not evaluate XTB or CuH2. rgpot owns the kernel; eindir
 //! owns the objective surface; this file only constructs the IS-A handle
 //! the search already knows how to take.
+//!
+//! Sign convention at the engine boundary: every engine symbol loaded here
+//! (`rgpot_xtb_force`, `rgpot_cuh2_force`) writes the force, -∂E/∂x in
+//! eV/Å, and the callbacks publish that buffer to rgpot unchanged. rgpot
+//! negates it once to make the objective gradient ∂E/∂x. Nothing between
+//! the engine and rgpot negates again.
 
 #![allow(dead_code)]
 
@@ -123,11 +129,11 @@ struct XtbConfig {
 }
 
 type XtbCreate = unsafe extern "C" fn(*const XtbConfig, *mut u8, usize) -> *mut c_void;
-type XtbDestroy = unsafe extern "C" fn(*mut c_void);
-type XtbReset = unsafe extern "C" fn(*mut c_void);
+pub(crate) type XtbDestroy = unsafe extern "C" fn(*mut c_void);
+pub(crate) type XtbReset = unsafe extern "C" fn(*mut c_void);
 type XtbSetWarmMove = unsafe extern "C" fn(*mut c_void, f64);
 type XtbWarmMove = unsafe extern "C" fn(*const c_void) -> f64;
-type XtbForce = unsafe extern "C" fn(
+pub(crate) type XtbForce = unsafe extern "C" fn(
     *mut c_void,
     i64,
     *const f64,
@@ -230,7 +236,7 @@ unsafe fn xtb_worker_main(
         {
             unsafe { _exit(0) };
         }
-        let mut gradient = vec![0.0f64; 3 * n_atoms];
+        let mut forces = vec![0.0f64; 3 * n_atoms];
         let mut energy = 0.0f64;
         let mut variance = 0.0f64;
         let rc = unsafe {
@@ -239,20 +245,19 @@ unsafe fn xtb_worker_main(
                 n as i64,
                 positions.as_ptr(),
                 atomic_numbers.as_ptr(),
-                gradient.as_mut_ptr(),
+                forces.as_mut_ptr(),
                 &mut energy,
                 &mut variance,
                 cell.as_ptr(),
             )
         };
-        let mut message = Vec::with_capacity(4 + 8 + 8 + gradient.len() * 8);
+        let mut message = Vec::with_capacity(4 + 8 + 8 + forces.len() * 8);
         message.extend_from_slice(&rc.to_ne_bytes());
         message.extend_from_slice(&energy.to_ne_bytes());
         message.extend_from_slice(&variance.to_ne_bytes());
-        let grad_bytes = unsafe {
-            std::slice::from_raw_parts(gradient.as_ptr() as *const u8, gradient.len() * 8)
-        };
-        message.extend_from_slice(grad_bytes);
+        let force_bytes =
+            unsafe { std::slice::from_raw_parts(forces.as_ptr() as *const u8, forces.len() * 8) };
+        message.extend_from_slice(force_bytes);
         if !write_full(outgoing, &message) {
             unsafe { _exit(0) };
         }
@@ -322,16 +327,16 @@ impl XtbWorker {
         }
     }
 
-    /// One energy and gradient. A dead child is replaced; the geometry is not retried.
+    /// One energy and force. A dead child is replaced; the geometry is not retried.
     fn evaluate(
         &mut self,
         n: usize,
         positions: &[f64],
         atomic_numbers: &[i32],
         cell: &[f64],
-        gradient: &mut [f64],
+        forces: &mut [f64],
     ) -> Result<(f64, f64), WorkerFail> {
-        match self.exchange(n, positions, atomic_numbers, cell, gradient) {
+        match self.exchange(n, positions, atomic_numbers, cell, forces) {
             Ok(answer) => Ok(answer),
             Err(WorkerFail::Rejected) => Err(WorkerFail::Rejected),
             Err(WorkerFail::Dead) => {
@@ -351,7 +356,7 @@ impl XtbWorker {
         positions: &[f64],
         atomic_numbers: &[i32],
         cell: &[f64],
-        gradient: &mut [f64],
+        forces: &mut [f64],
     ) -> Result<(f64, f64), WorkerFail> {
         let mut request =
             Vec::with_capacity(8 + positions.len() * 8 + atomic_numbers.len() * 4 + 72);
@@ -379,13 +384,13 @@ impl XtbWorker {
         let rc = i32::from_ne_bytes(header[0..4].try_into().unwrap());
         let energy = f64::from_ne_bytes(header[4..12].try_into().unwrap());
         let variance = f64::from_ne_bytes(header[12..20].try_into().unwrap());
-        let grad_bytes = unsafe {
-            std::slice::from_raw_parts_mut(gradient.as_mut_ptr() as *mut u8, gradient.len() * 8)
+        let force_bytes = unsafe {
+            std::slice::from_raw_parts_mut(forces.as_mut_ptr() as *mut u8, forces.len() * 8)
         };
-        if !read_full(self.from_child, grad_bytes) {
+        if !read_full(self.from_child, force_bytes) {
             return Err(WorkerFail::Dead);
         }
-        if rc != 0 || !energy.is_finite() || gradient.iter().any(|value| !value.is_finite()) {
+        if rc != 0 || !energy.is_finite() || forces.iter().any(|value| !value.is_finite()) {
             return Err(WorkerFail::Rejected);
         }
         let _ = variance;
@@ -403,11 +408,9 @@ impl XtbWorker {
 }
 
 struct XtbKernel {
-    _lib: Library,
+    _lib: Option<Library>,
     pot: *mut c_void,
-    force: Symbol<'static, XtbForce>,
-    reset: Symbol<'static, XtbReset>,
-    destroy: Symbol<'static, XtbDestroy>,
+    destroy: XtbDestroy,
     worker: XtbWorker,
     evaluations: usize,
     /// Calls with a pair at or inside this distance are refused before xtb.
@@ -537,8 +540,6 @@ unsafe extern "C" fn xtb_callback(
         };
     out.energy = energy;
     out.variance = var;
-    // The engine buffer is xtb's ∂E/∂x. rgpot negates this tensor.
-    anneal_core::xtb_gradient::store_as_force(&mut kernel.scratch);
     out.forces = unsafe { rgpot_tensor_owned_cpu_f64_2d(kernel.scratch.as_ptr(), n as i64, 3) };
     rgpot_status_t::RGPOT_SUCCESS
 }
@@ -712,22 +713,40 @@ impl RgpotObjective {
                 "rgpot_xtb_set_warm_move"
             );
         }
-        let force =
-            unsafe { std::mem::transmute::<Symbol<XtbForce>, Symbol<'static, XtbForce>>(force) };
-        let reset =
-            unsafe { std::mem::transmute::<Symbol<XtbReset>, Symbol<'static, XtbReset>>(reset) };
-        let destroy = unsafe {
-            std::mem::transmute::<Symbol<XtbDestroy>, Symbol<'static, XtbDestroy>>(destroy)
-        };
         let force_fn: XtbForce = *force;
         let reset_fn: XtbReset = *reset;
+        let destroy_fn: XtbDestroy = *destroy;
+        let handle = Self::xtb_from_symbols(
+            atmnrs,
+            box_,
+            overlap_limit_a,
+            Some(lib),
+            pot,
+            force_fn,
+            reset_fn,
+            destroy_fn,
+        );
+        println!("  eindir objective from rgpot xtb ({})", path.display());
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+        handle
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn xtb_from_symbols(
+        atmnrs: &[i32],
+        box_: [f64; 9],
+        overlap_limit_a: f64,
+        lib: Option<Library>,
+        pot: *mut c_void,
+        force_fn: XtbForce,
+        reset_fn: XtbReset,
+        destroy_fn: XtbDestroy,
+    ) -> Self {
         let worker = XtbWorker::spawn(force_fn, reset_fn, pot);
         let kernel = Box::new(XtbKernel {
             _lib: lib,
             pot,
-            force,
-            reset,
-            destroy,
+            destroy: destroy_fn,
             worker,
             evaluations: 0,
             overlap_limit_a,
@@ -750,8 +769,6 @@ impl RgpotObjective {
             )
         };
         assert!(!handle.is_null(), "rgpot_potential_new_eindir xtb");
-        println!("  eindir objective from rgpot xtb ({})", path.display());
-        let _ = std::io::Write::flush(&mut std::io::stdout());
         Self {
             pot: handle,
             xtb: kernel_ptr,
