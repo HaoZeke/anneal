@@ -3302,13 +3302,12 @@ def cap_turn_outside_ratios(rows: list[dict[str, str]], skip: set[tuple[str, int
 
 
 def cap_turn_ratio_text(ratio: float) -> str:
-    """Three decimals, via the summary script's four-decimal print then half away from zero.
+    """Three decimals, rounded once from full precision, half away from zero.
 
-    ``summarise.py`` prints the ratio to four places. The README keeps three,
-    and a trailing 5 there rounds away from zero, so 0.9925 is written 0.993.
+    ``summarise.py`` prints the ratio to three places with the same rule,
+    so 0.992484 is written 0.992 rather than double-rounded via 0.9925.
     """
-    four = Decimal(f"{ratio:.4f}")
-    return format(four.quantize(Decimal("0.001"), rounding=ROUND_HALF_UP), "f")
+    return format(Decimal(str(ratio)).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP), "f")
 
 
 def _flag(value: str) -> bool:
