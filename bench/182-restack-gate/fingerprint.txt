@@ -1,0 +1,4 @@
+lattice_exchange_follows_the_plateau passed on B and on P.
+Cold fingerprint 0x100885ac118293e1 on both trees.
+Heated fingerprint 0x44038697bde16fb7 on P.
+Heated fingerprint 0x1a623a8e37ad1d43 on B.
