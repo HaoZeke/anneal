@@ -7,7 +7,10 @@
 A Morse pair has its minimum at 1, at every range.
 On reduced units, every length in the preset is 12% too wide for Morse.
 
-Pass the pair's own length scale instead:
+=Config::recommended_for_pair(n, kind)= is that rescaling at energy scale 1.
+Lennard-Jones stays =recommended=.
+Morse takes the pair minimum.
+The same call by hand:
 
 #+begin_src rust
 use anneal_core::methods::cluster_hopping::Config;
@@ -34,11 +37,11 @@ At rho = 6 the Morse well has the Lennard-Jones curvature once its minimum is fi
 =scripts/morse6_hits.py= runs the search below and writes one row per seed to =data/morse6_hits.csv=.
 The figure is written to =build/morse6/morse6-hits.svg= from that file.
 
-- N = 35: 4 hits at the pair length, 3 on reduced units, of 16 seeds.
-- N = 37: 12 hits at the pair length, 5 on reduced units, of 16 seeds.
-- N = 43: 10 hits at the pair length, 10 on reduced units, of 16 seeds.
-- N = 44: 9 hits at the pair length, 11 on reduced units, of 16 seeds.
-- N = 60: 14 hits at the pair length, 7 on reduced units, of 16 seeds.
+- N = 35: 7 hits at the pair length, 6 on reduced units, of 16 seeds.
+- N = 37: 10 hits at the pair length, 11 on reduced units, of 16 seeds.
+- N = 43: 9 hits at the pair length, 12 on reduced units, of 16 seeds.
+- N = 44: 12 hits at the pair length, 6 on reduced units, of 16 seeds.
+- N = 60: 13 hits at the pair length, 12 on reduced units, of 16 seeds.
 
 - Sizes: N = 35, 37, 43, 44 and 60 at rho = 6.
 - Seeds: 12000 to 12015.

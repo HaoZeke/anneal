@@ -375,9 +375,10 @@ fn main() {
                     };
                     if tip4p {
                         cfg.rigid_body_geometry = Some(
-                            anneal_core::rigid_body::RigidBodyGeometry::new(
+                            anneal_core::rigid_body::RigidBodyGeometry::new_bonded(
                                 tip4p_sites()[..3].to_vec(),
                                 vec![8, 1, 1],
+                                vec![[0, 1], [0, 2]],
                             )
                             .unwrap(),
                         );

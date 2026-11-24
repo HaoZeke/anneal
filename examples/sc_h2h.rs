@@ -16,8 +16,9 @@
 //! sc_h2h <iso|ens|iso-hop|ens-hop> <12-6|9-6|10-8> <n> <budget> <seed> <start-file> <reference> [replicas] [turn-calls]
 //! ```
 //!
-//! A `-hop` arm adds surface hops from each new lowest structure,
-//! `Config::surface_hop_on_best`, and is otherwise its base arm.
+//! A `-hop` arm sets `Config::surface_hop_on_best` and is otherwise its
+//! base arm. The hop loop records the flag and does not quench surface
+//! candidates.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};

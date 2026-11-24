@@ -92,6 +92,8 @@ called outside it. Pass =x0= to evaluate a known parameter vector first.
 An =x0= outside the box is refused.
 The initial state costs one objective call, so a complete run makes
 =1 + n_epochs * steps_per_epoch= calls.
+=max_evals=, when set, stops the run at that many calls.
+The default schedule is ~n_epochs=100~ and ~steps_per_epoch=200~.
 
 * Why this works
 

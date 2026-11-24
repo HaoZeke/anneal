@@ -664,6 +664,34 @@ impl Ord for FrontierSite {
     }
 }
 
+#[cfg(test)]
+fn lattice_neighbours(site: [i32; 3]) -> impl Iterator<Item = [i32; 3]> {
+    (0..3).flat_map(move |axis| {
+        [-1, 1].map(move |step| {
+            let mut neighbour = site;
+            neighbour[axis] += step;
+            neighbour
+        })
+    })
+}
+
+/// Distinct 4-point frames on `n` points, `C(n, 4)`.
+///
+/// The product of four consecutive integers is divisible by 24, so each
+/// division below is exact while the product fits. A product that does not
+/// fit saturates, and the cloud is then bounded by the largest count this
+/// process can store.
+fn four_point_frames(n: usize) -> usize {
+    if n < 4 {
+        return 0;
+    }
+    let mut frames = n as u128;
+    frames = frames.saturating_mul((n - 1) as u128) / 2;
+    frames = frames.saturating_mul((n - 2) as u128) / 3;
+    frames = frames.saturating_mul((n - 3) as u128) / 4;
+    usize::try_from(frames).unwrap_or(usize::MAX)
+}
+
 fn candidate_from_basis(basis: &[[f64; 3]; 3], centre: [f64; 3], n: usize) -> Option<Array1<f64>> {
     if n == 0 {
         return Some(Array1::zeros(0));
@@ -723,6 +751,16 @@ fn candidate_from_basis(basis: &[[f64; 3]; 3], centre: [f64; 3], n: usize) -> Op
         return None;
     }
     let max_sites = 64usize.saturating_mul(n.saturating_add(4));
+    // C(n, 4) names every 4-point frame in the body. Once that count can
+    // hold the requested body it caps the cloud, together with the
+    // proportional site cap. A frame count below the point count does not
+    // refuse a well-conditioned tetrahedron the site cap can still finish.
+    let frames = four_point_frames(n);
+    let cap = if frames >= n {
+        frames.min(max_sites)
+    } else {
+        max_sites
+    };
     let mut sites = vec![[0; 3]];
     let mut radii = vec![seed_radius2];
     let mut index_of: HashMap<[i32; 3], usize> = HashMap::from([([0; 3], 0)]);
@@ -742,7 +780,7 @@ fn candidate_from_basis(basis: &[[f64; 3]; 3], centre: [f64; 3], n: usize) -> Op
     let mut degree: Vec<u8> = vec![0];
     let mut interior = 0usize;
     while interior < n {
-        if sites.len() >= max_sites {
+        if sites.len() >= cap {
             return None;
         }
         let Reverse(next) = frontier.pop()?;
@@ -1000,6 +1038,7 @@ mod tests {
     use super::*;
     use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use std::collections::HashSet;
 
     fn rng() -> StdRng {
         StdRng::seed_from_u64(11)
@@ -1016,6 +1055,92 @@ mod tests {
             }
         }
         x
+    }
+
+    fn reference_candidate_from_basis(
+        basis: &[[f64; 3]; 3],
+        centre: [f64; 3],
+        n: usize,
+    ) -> Option<Array1<f64>> {
+        let mut sites = vec![[0; 3]];
+        let mut occupied = HashSet::from([[0; 3]]);
+        let mut frontier: HashSet<[i32; 3]> = lattice_neighbours([0; 3]).collect();
+        let frames = four_point_frames(n);
+        while sites.len() < frames
+            && sites
+                .iter()
+                .filter(|&&site| lattice_neighbours(site).all(|other| occupied.contains(&other)))
+                .count()
+                < n
+        {
+            let next = frontier.iter().copied().min_by(|a, b| {
+                distance2(&lattice_point(*a, basis), &centre)
+                    .total_cmp(&distance2(&lattice_point(*b, basis), &centre))
+                    .then_with(|| a.cmp(b))
+            })?;
+            frontier.remove(&next);
+            occupied.insert(next);
+            for neighbour in lattice_neighbours(next) {
+                if !occupied.contains(&neighbour) {
+                    frontier.insert(neighbour);
+                }
+            }
+            sites.push(next);
+        }
+        if sites.len() < n {
+            return None;
+        }
+        let radii: Vec<f64> = sites
+            .iter()
+            .map(|&site| distance2(&lattice_point(site, basis), &centre))
+            .collect();
+        let mut alive = occupied;
+        while alive.len() > n {
+            let worst = sites
+                .iter()
+                .enumerate()
+                .filter(|(_, site)| alive.contains(*site))
+                .min_by(|(i, a), (j, b)| {
+                    let coordination = |site| {
+                        lattice_neighbours(site)
+                            .filter(|neighbour| alive.contains(neighbour))
+                            .count()
+                    };
+                    coordination(**a)
+                        .cmp(&coordination(**b))
+                        .then_with(|| radii[*j].total_cmp(&radii[*i]))
+                        .then_with(|| a.cmp(b))
+                })
+                .map(|(_, site)| *site)?;
+            alive.remove(&worst);
+        }
+        let mut out = Array1::zeros(3 * n);
+        for (i, site) in sites
+            .into_iter()
+            .filter(|site| alive.contains(site))
+            .enumerate()
+        {
+            let point = lattice_point(site, basis);
+            for axis in 0..3 {
+                out[3 * i + axis] = point[axis];
+            }
+        }
+        Some(out)
+    }
+
+    #[test]
+    fn cached_lattice_cloud_matches_the_direct_construction() {
+        let basis = [
+            [1.0, 0.0, 0.0],
+            [0.5, 3.0_f64.sqrt() / 2.0, 0.0],
+            [0.5, 3.0_f64.sqrt() / 6.0, (2.0_f64 / 3.0).sqrt()],
+        ];
+        for (centre, n) in [([0.0, 0.0, 0.0], 8), ([0.37, -0.21, 0.14], 13)] {
+            assert_eq!(
+                candidate_from_basis(&basis, centre, n),
+                reference_candidate_from_basis(&basis, centre, n)
+            );
+        }
     }
 
     /// Every source has to produce exactly the requested count, or the move
@@ -1297,6 +1422,67 @@ mod tests {
         assert!(narrow.iter().all(|value| value.is_finite()));
         for (narrow, wide) in narrow.iter().zip(wide) {
             assert_eq!(wide, 2.0 * narrow);
+        }
+        assert!(narrow.iter().any(|value| *value != 0.0));
+
+        let basis = [
+            [1.0, 0.0, 0.0],
+            [0.5, 3.0_f64.sqrt() / 2.0, 0.0],
+            [0.5, 3.0_f64.sqrt() / 6.0, (2.0_f64 / 3.0).sqrt()],
+        ];
+        let mut coords = Vec::new();
+        for i in 0..2i32 {
+            for j in 0..2i32 {
+                for k in 0..2i32 {
+                    let index = [i, j, k];
+                    for axis in 0..3 {
+                        coords.push(
+                            (0..3)
+                                .map(|vector| f64::from(index[vector]) * basis[vector][axis])
+                                .sum(),
+                        );
+                    }
+                }
+            }
+        }
+        let grid = Array1::from_vec(coords);
+        let grid_narrow = observed_basis_candidate(grid.view(), true).expect("grid basis");
+        let grid_wide = observed_basis_candidate(grid.mapv(|value| 2.0 * value).view(), true)
+            .expect("scaled grid");
+        assert_eq!(grid_narrow.len(), grid.len());
+        assert!(grid_narrow.iter().any(|value| *value != 0.0));
+        assert!(grid_narrow.iter().all(|value| value.is_finite()));
+        for (narrow, wide) in grid_narrow.iter().zip(grid_wide) {
+            assert_eq!(wide, 2.0 * narrow);
+        }
+    }
+
+    #[test]
+    fn four_point_frames_count_distinct_subsets() {
+        assert_eq!(four_point_frames(3), 0);
+        assert_eq!(four_point_frames(4), 1);
+        assert_eq!(four_point_frames(5), 5);
+        assert_eq!(four_point_frames(6), 15);
+        assert_eq!(four_point_frames(8), 70);
+        assert_eq!(four_point_frames(26), 14_950);
+    }
+
+    #[test]
+    fn a_shallow_four_point_cluster_stops_at_the_frame_bound() {
+        let square = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0,
+        ]);
+        for offset in [1.0e-3, 1.0e-4] {
+            let mut lifted = square.clone();
+            lifted[11] = offset;
+            let started = std::time::Instant::now();
+            let candidate = observed_basis_candidate(lifted.view(), false);
+            let elapsed = started.elapsed();
+            assert!(
+                elapsed < std::time::Duration::from_secs(1),
+                "offset {offset} took {elapsed:?}"
+            );
+            assert!(candidate.is_none(), "offset {offset} still grew a body");
         }
     }
 
