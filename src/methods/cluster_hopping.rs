@@ -6539,14 +6539,24 @@ where
             ledger.charge_many(probe_spent);
             charged_at_best =
                 charged_at_best.saturating_add(ledger.spent().saturating_sub(charged_before));
-            if let Some((cut_energy, cut_state, cut_offset)) = candidate {
-                let cut_at = before + cut_offset;
-                // A target hit is a record on the opening quench and on a hop.
-                // The packing offer used to require a converged gradient
-                // first, so the same hit could be dropped here.
-                let hit_target = ledger.below_target(cut_energy);
-                if hit_target || !gradient_required || cut_gradient.is_some() {
-                    if hit_target {
+            if let Some((cut_energy, cut_state, cut_at_offset)) = candidate {
+                let cut_at = before + cut_at_offset;
+                // The same contract as every other quench: a target hit or a
+                // caller stop raised inside the probe closes the run and keeps
+                // the lowest point it paid for, with or without a certifying
+                // gradient. An open run needs a converged gradient when one
+                // is required.
+                let recordable = answer_is_recordable(
+                    cfg,
+                    ledger,
+                    cut_energy,
+                    cut_state.view(),
+                    false,
+                    gradient_required,
+                    cut_gradient.is_some(),
+                );
+                if recordable {
+                    if closes_run(ledger, cut_energy) {
                         ledger.record(cut_energy, cut_state.view());
                         ledger.stamp_encounter(cut_energy, cut_at);
                         if improvements.len() < 512 {
@@ -12880,6 +12890,70 @@ mod tests {
         // the counter starts at one. The packing hit must not add another.
         assert_eq!(outcome.unconverged_records, 1);
         assert_eq!(outcome.charged, ledger.spent());
+    }
+
+    #[test]
+    fn a_caller_stop_inside_the_packing_probe_keeps_the_lower_candidate() {
+        let n = 8usize;
+        let mut cfg = Config::for_cluster(n);
+        cfg.energy_lattice = true;
+        cfg.packing_deferral = 0;
+        cfg.max_hops = Some(2);
+        cfg.relax_steps = 4;
+        cfg.record_gradient = 1.0e-6;
+        let far_threshold = 0.5 * f64::EPSILON.sqrt().recip();
+        let start = Array1::from_iter((0..3 * n).map(|index| index as f64 * 0.17));
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut ledger = Ledger::with_stop(4_000, std::sync::Arc::clone(&stop));
+        // The opening quench is the first full relaxation and stays at zero,
+        // with a gradient that has not converged, so it is not recorded. The
+        // first packing quench is cut short by the caller's stop and returns
+        // a lower point. The gradient that would certify it is refused.
+        let mut full_quenches = 0usize;
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            if !led.charge() {
+                return (f64::NAN, x.to_owned());
+            }
+            let far = (2..n).any(|atom| x[3 * atom + 1].abs() > far_threshold);
+            if steps == 0 && far {
+                let distance = (x[3] - x[0]).abs();
+                return ((distance - 2.0).powi(2), x.to_owned());
+            }
+            full_quenches += 1;
+            if full_quenches == 1 {
+                return (0.0, x.to_owned());
+            }
+            stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            (-20.0, x.to_owned())
+        };
+        let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| {
+            if !led.charge() {
+                return None;
+            }
+            Some(Array1::from_elem(x.len(), 1.0))
+        };
+        let mut rng = StdRng::seed_from_u64(5);
+        let outcome = run_with_gradient(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut rng,
+        )
+        .expect("start");
+        assert_eq!(outcome.stop, Some(HopStop::CallerStop));
+        assert_eq!(
+            outcome.best, -20.0,
+            "a recordable lower candidate was dropped on a caller stop"
+        );
+        assert_eq!(outcome.hops, 0);
+        // Only the opening quench is unresolved: its gradient is refused.
+        // The candidate that the stop cut short must not add another.
+        assert_eq!(outcome.unconverged_records, 1);
+        assert_eq!(outcome.charged, ledger.spent());
+        let (_, _, _, energy) = *outcome.improvements.last().expect("the record is listed");
+        assert_eq!(energy, -20.0);
     }
 
     #[test]
