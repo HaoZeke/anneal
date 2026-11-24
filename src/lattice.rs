@@ -751,16 +751,11 @@ fn candidate_from_basis(basis: &[[f64; 3]; 3], centre: [f64; 3], n: usize) -> Op
         return None;
     }
     let max_sites = 64usize.saturating_mul(n.saturating_add(4));
-    // C(n, 4) names every 4-point frame in the body. Once that count can
-    // hold the requested body it caps the cloud, together with the
-    // proportional site cap. A frame count below the point count does not
-    // refuse a well-conditioned tetrahedron the site cap can still finish.
+    // C(n, 4) names every 4-point frame in the body. The cloud cannot contain
+    // more sites than the body has distinct frames, and the proportional site
+    // cap prevents excessive growth when that combinatorial bound is large.
     let frames = four_point_frames(n);
-    let cap = if frames >= n {
-        frames.min(max_sites)
-    } else {
-        max_sites
-    };
+    let cap = frames.min(max_sites);
     let mut sites = vec![[0; 3]];
     let mut radii = vec![seed_radius2];
     let mut index_of: HashMap<[i32; 3], usize> = HashMap::from([([0; 3], 0)]);
@@ -1401,35 +1396,15 @@ mod tests {
 
     #[test]
     fn observed_growth_uses_only_the_structure_it_is_given() {
-        let x = Array1::from_vec(vec![
-            0.0,
-            0.0,
-            0.0,
-            1.0,
-            0.0,
-            0.0,
-            0.5,
-            3.0_f64.sqrt() / 2.0,
-            0.0,
-            0.5,
-            3.0_f64.sqrt() / 6.0,
-            (2.0_f64 / 3.0).sqrt(),
-        ]);
-        let narrow = observed_basis_candidate(x.view(), true).expect("observed basis");
-        let wide = observed_basis_candidate(x.mapv(|value| 2.0 * value).view(), true)
-            .expect("scaled basis");
-        assert_eq!(narrow.len(), x.len());
-        assert!(narrow.iter().all(|value| value.is_finite()));
-        for (narrow, wide) in narrow.iter().zip(wide) {
-            assert_eq!(wide, 2.0 * narrow);
-        }
-        assert!(narrow.iter().any(|value| *value != 0.0));
-
         let basis = [
             [1.0, 0.0, 0.0],
             [0.5, 3.0_f64.sqrt() / 2.0, 0.0],
             [0.5, 3.0_f64.sqrt() / 6.0, (2.0_f64 / 3.0).sqrt()],
         ];
+        // One frame, C(4, 4) = 1, cannot hold a second site.
+        let tetra = Array1::from_iter(basis.into_iter().flatten().chain([0.0, 0.0, 0.0]));
+        assert!(observed_basis_candidate(tetra.view(), true).is_none());
+
         let mut coords = Vec::new();
         for i in 0..2i32 {
             for j in 0..2i32 {
@@ -1446,6 +1421,16 @@ mod tests {
             }
         }
         let grid = Array1::from_vec(coords);
+        let narrow = observed_basis_candidate(grid.view(), true).expect("observed basis");
+        let wide = observed_basis_candidate(grid.mapv(|value| 2.0 * value).view(), true)
+            .expect("scaled basis");
+        assert_eq!(narrow.len(), grid.len());
+        assert!(narrow.iter().all(|value| value.is_finite()));
+        for (narrow, wide) in narrow.iter().zip(wide) {
+            assert_eq!(wide, 2.0 * narrow);
+        }
+        assert!(narrow.iter().any(|value| *value != 0.0));
+
         let grid_narrow = observed_basis_candidate(grid.view(), true).expect("grid basis");
         let grid_wide = observed_basis_candidate(grid.mapv(|value| 2.0 * value).view(), true)
             .expect("scaled grid");
