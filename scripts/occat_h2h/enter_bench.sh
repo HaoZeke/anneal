@@ -28,9 +28,8 @@ if [[ ! -x $WORK/target/release/examples/h2h_gmin_proof || ! -x $WORK/target/rel
   )
 fi
 
-if [[ ! -x /work/gmin-h2h/bin/GMIN ]]; then
-  bash "$ROOT/scripts/gmin_h2h/build_gmin.sh"
-fi
+bash "$ROOT/scripts/gmin_h2h/build_gmin.sh"
+cp -a /work/gmin-h2h/gmin-source.txt "$WORK/gmin-source.txt"
 
 cat > "$WORK/inside.sh" << EOF
 #!/bin/bash
@@ -52,7 +51,9 @@ exec taskset -c 0 python3 -u $HERE/run_campaign.py \\
   --seeds $ROOT/bench/occat-h2h/seeds.csv \\
   --summary $ROOT/bench/occat-h2h/summary.csv \\
   --tests $ROOT/bench/occat-h2h/tests.csv \\
-  --work $WORK/runs
+  --work $WORK/runs \\
+  --svnrev /work/gmin-h2h/src/wales/GMIN/source/SVNREV \\
+  --gmin-source $WORK/gmin-source.txt
 EOF
 chmod +x "$WORK/inside.sh"
 

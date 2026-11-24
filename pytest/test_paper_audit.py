@@ -73,6 +73,74 @@ def test_provenance_gaps_are_exactly_the_listed_ones(audited):
     assert audit_mod.provenance(audited) == audit_mod.KNOWN_GAPS
 
 
+def test_new_machine_provenance_requires_a_digest_and_cpu_model():
+    audit = audit_mod.Audit()
+    audit.read["new.csv"] = [
+        {
+            "code_revision": "",
+            "host": "bench",
+            "machine_id": "not-a-digest",
+            "cpu_model": "",
+        }
+    ]
+
+    gap = audit_mod.provenance(audit)["new.csv"]
+
+    assert "cpu_model empty on some rows" in gap
+    assert "machine_id is not a salted sha256 on some rows" in gap
+
+
+def test_machine_provenance_accepts_aggregated_digests():
+    audit = audit_mod.Audit()
+    audit.read["summary.csv"] = [
+        {
+            "code_revision": "",
+            "host": "bench",
+            "machine_id": f"{'a' * 64};{'b' * 64}",
+            "cpu_model": "CPU A;CPU B",
+        }
+    ]
+
+    gap = audit_mod.provenance(audit)["summary.csv"]
+
+    assert "machine_id" not in gap
+
+
+def test_machine_schema_requires_both_stable_columns():
+    audit = audit_mod.Audit()
+    audit.read["missing-cpu.csv"] = [
+        {
+            "code_revision": next(iter(audit_mod.EXTERNAL_REVISIONS)),
+            "host": "bench",
+            "machine_id": "a" * 64,
+        }
+    ]
+    audit.read["missing-id.csv"] = [
+        {
+            "code_revision": next(iter(audit_mod.EXTERNAL_REVISIONS)),
+            "host": "bench",
+            "cpu_model": "Example CPU",
+        }
+    ]
+
+    gaps = audit_mod.provenance(audit)
+
+    assert "machine_id recorded; no cpu_model column" in gaps["missing-cpu.csv"]
+    assert "cpu_model recorded; no machine_id column" in gaps["missing-id.csv"]
+
+
+def test_legacy_schema_without_machine_columns_remains_exempt():
+    audit = audit_mod.Audit()
+    audit.read["old.csv"] = [
+        {
+            "code_revision": next(iter(audit_mod.EXTERNAL_REVISIONS)),
+            "host": "bench",
+        }
+    ]
+
+    assert "old.csv" not in audit_mod.provenance(audit)
+
+
 def test_untraced_numbers_are_still_quoted(audited):
     for path, fragment, _why in audit_mod.UNTRACED:
         assert audit_mod.collapse(fragment) in audit_mod.collapse((ROOT / path).read_text()), (path, fragment)
@@ -80,6 +148,85 @@ def test_untraced_numbers_are_still_quoted(audited):
 
 def test_script_exits_zero():
     assert audit_mod.run() == 0
+
+
+def workspace_version():
+    """The crate version, read the same way ``unauditable`` reads it."""
+    return re.search(r'^version = "([^"]+)"', (ROOT / "Cargo.toml").read_text(), re.M).group(1)
+
+
+def test_missing_release_tag_and_referenced_remote_stop_the_audit(monkeypatch):
+    real_git = audit_mod.git
+    version = workspace_version()
+    missing = {
+        f"refs/tags/v{version}",
+        "refs/remotes/origin/develop",
+    }
+
+    def without_required_refs(*args, stdin=None):
+        if args[:3] == ("show-ref", "--verify", "--quiet") and args[3] in missing:
+            return subprocess.CompletedProcess(["git", *args], 1, "", "")
+        return real_git(*args, stdin=stdin)
+
+    monkeypatch.setattr(audit_mod, "git", without_required_refs)
+    problems = audit_mod.unauditable()
+    assert f"the release tag v{version} is not present; fetch tags from origin" in problems
+    assert "the remote ref origin/develop is not present; fetch develop from origin" in problems
+
+
+def test_a_merged_branch_that_no_alias_names_is_not_required(monkeypatch, tmp_path):
+    """The remote closure is the named branches and the optional tips, no more.
+
+    A clone that never had, or no longer has, an optional tip is still
+    auditable. A tip that is present joins the closure. A remote branch that
+    neither the alias table nor the optional list names does not.
+    """
+    repo = tmp_path / "clone"
+    (repo / "bench").mkdir(parents=True)
+    (repo / "Cargo.toml").write_text('[package]\nversion = "0.0.1"\n')
+    (repo / "bench" / "revision-aliases.csv").write_text(
+        "local_revision,pushed_revision,branch_revision,branch,rows_commit,patch_id\n")
+
+    def run_git(*args):
+        done = subprocess.run(
+            ["git", "-c", "user.name=audit", "-c", "user.email=audit@example.invalid",
+             "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", *args],
+            cwd=repo, capture_output=True, text=True, check=True)
+        return done.stdout.strip()
+
+    def commit(message):
+        run_git("commit", "--allow-empty", "-m", message)
+        return run_git("rev-parse", "HEAD")
+
+    run_git("init", "--quiet")
+    root = commit("root")
+    run_git("tag", "v0.0.1")
+    for branch in ("develop", "bench/crest-gaps", "bench/gmin-sc3", "fix/gmin-sc", "fix/gmin-sc2"):
+        run_git("update-ref", f"refs/remotes/origin/{branch}", root)
+    run_git("checkout", "--quiet", "--detach")
+    optional = commit("tip kept by an optional remote")
+    run_git("checkout", "--quiet", "--detach", root)
+    unnamed = commit("tip on a branch nothing names")
+    run_git("checkout", "--quiet", "--detach", root)
+    run_git("update-ref", "refs/remotes/origin/topic/unnamed", unnamed)
+
+    monkeypatch.setattr(audit_mod, "ROOT", repo)
+    optional_ref = "refs/remotes/origin/record/repro-pin"
+
+    def index():
+        return audit_mod.RevisionIndex((root, optional, unnamed), (), (), ())
+
+    assert audit_mod.unauditable() == []
+    without_tip = index()
+    assert without_tip.on_remote(root)
+    assert not without_tip.on_remote(optional)
+    assert not without_tip.on_remote(unnamed), "an unnamed remote branch joined the closure"
+
+    run_git("update-ref", optional_ref, optional)
+    assert audit_mod.unauditable() == []
+    with_tip = index()
+    assert with_tip.on_remote(optional), "a present optional tip did not join the closure"
+    assert not with_tip.on_remote(unnamed), "an unnamed remote branch joined the closure"
 
 
 def test_a_drifted_table_cell_is_reported():

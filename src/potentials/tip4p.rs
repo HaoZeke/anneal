@@ -129,8 +129,12 @@ impl Tip4pCluster {
 
     /// O-H-H geometry in the objective's center-of-mass rotation chart.
     pub fn rigid_geometry(&self) -> crate::rigid_body::RigidBodyGeometry {
-        crate::rigid_body::RigidBodyGeometry::new(self.body[..3].to_vec(), vec![8, 1, 1])
-            .expect("water has finite O-H-H geometry")
+        crate::rigid_body::RigidBodyGeometry::new_bonded(
+            self.body[..3].to_vec(),
+            vec![8, 1, 1],
+            vec![[0, 1], [0, 2]],
+        )
+        .expect("water has finite O-H-H geometry")
     }
 
     /// Fold every rotation vector into the ball of radius `π`.

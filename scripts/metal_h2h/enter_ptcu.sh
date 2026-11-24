@@ -12,7 +12,8 @@ LOGS=$ROOT/bench/metal-cluster-h2h/ptcu-b3d03061/logs
 bash "$HERE/build_anneal.sh"
 bash "$HERE/build_gmin_darby.sh"
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs" "$LOGS" /work
-cp -a "$HERE/run_ptcu.py" "$ROOT/scripts/target_tol.py" "$WORK/bin/"
+cp -a "$HERE/run_ptcu.py" "$ROOT/scripts/target_tol.py" \
+  "$ROOT/scripts/gmin_pin.py" "$ROOT/scripts/machine_provenance.py" "$WORK/bin/"
 cp -a /work/metal-h2h/bin/h2h_metal "$WORK/bin/h2h_metal"
 cp -a /work/metal-darby/bin/GMIN "$WORK/bin/GMIN"
 cp -a /work/metal-darby/gmin-source.txt "$WORK/gmin-source.txt"
@@ -39,6 +40,7 @@ exec /usr/bin/python3 -u $WORK/bin/run_ptcu.py \\
   --summary $ROOT/bench/metal-cluster-h2h/ptcu-b3d03061/results.csv \\
   --seeds-out $ROOT/bench/metal-cluster-h2h/ptcu-b3d03061/seeds.csv \\
   --source $WORK/gmin-source.txt \\
+  --svnrev /work/metal-darby/src/wales/GMIN/source/SVNREV \\
   --head-file /work/metal-h2h/anneal-head \\
   "\$@"
 EOF
