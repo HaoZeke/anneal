@@ -71,8 +71,6 @@ import sys
 import time
 from pathlib import Path
 
-from scipy.stats import fisher_exact, mannwhitneyu
-
 for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
     if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
         sys.path.insert(0, str(_candidate))
@@ -470,6 +468,8 @@ def type7(values: list[float], p: float) -> float:
 def two_sided_mw(left: list[float], right: list[float]) -> float:
     if len(set(left) | set(right)) == 1:
         return 1.0
+    from scipy.stats import mannwhitneyu
+
     return float(
         mannwhitneyu(
             left,
@@ -607,6 +607,8 @@ def summarise(
                 "date": date,
             }
             if code != "anneal-general" and anneal:
+                from scipy.stats import fisher_exact
+
                 anneal_hits = sum(row["hit"] == "true" for row in anneal)
                 odds = [
                     [hits, len(runs) - hits],
