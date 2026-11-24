@@ -18,11 +18,14 @@ and are not rewritten. A partial seal reports the row count of each table.
 ## Machine controls
 
 - The process is pinned to logical CPUs 0 through 7 for the primary series.
+- The benchmark then pins worker i to logical CPU i.
 - Dynamic OpenMP teams are disabled.
 - Thread counts are 1, 2, 4, and 8.
 - Every BLAS thread limit that is set is 1.
 - Primary OpenMP wait policy is ACTIVE.
-- Primary OpenMP process binding is close, with places set to cores.
+- Primary OpenMP process binding is false, and places are not set. Close
+  and spread bindings collapse the allowed set to one CPU before the
+  benchmark counts cores, so they are not used.
 - The machine table records the core count, whether the avx2 flag is
   present, the wait policy, the process binding, and the pin set.
 - It does not record the machine name.
@@ -62,8 +65,8 @@ cell stalls.
 If a B-only stall appears, that cell is rerun for 10 rounds and 25
 repetitions in the same palindrome, twice:
 
-- passive: wait policy PASSIVE, still pinned the same way
-- free: wait policy ACTIVE, process not pinned, places not bound, and
+- passive: wait policy PASSIVE, still pinned the same way, binding false
+- free: wait policy ACTIVE, binding false, process not pinned, and
   per-thread affinity requests succeed without pinning
 
 A stall counts for the verdict only when the B-only stall remains in the
