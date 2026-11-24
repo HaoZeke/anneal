@@ -403,10 +403,10 @@ GET https://api.github.com/repos/helix-agh/lonkit/tags
 GET https://api.github.com/repos/helix-agh/lonkit/contents/docs/getting-started/concepts.md
 GET https://api.github.com/repos/helix-agh/lonkit/contents/docs/user-guide/analysis.md
 GET https://api.github.com/repos/helix-agh/lonkit/contents/src/lonkit/lon.py
-GET https://api.unpaywall.org/v2/10.1016/j.softx.2026.103209?email=rgoswami@ieee.org
-GET https://api.unpaywall.org/v2/10.1016/j.chemphys.2026.113289?email=rgoswami@ieee.org
-GET https://api.unpaywall.org/v2/10.1039/d6cp03129c?email=rgoswami@ieee.org
-GET https://api.unpaywall.org/v2/10.1039/d6cp02481e?email=rgoswami@ieee.org
+GET https://api.unpaywall.org/v2/10.1016/j.softx.2026.103209
+GET https://api.unpaywall.org/v2/10.1016/j.chemphys.2026.113289
+GET https://api.unpaywall.org/v2/10.1039/d6cp03129c
+GET https://api.unpaywall.org/v2/10.1039/d6cp02481e
 GET https://www.researchsquare.com/article/rs-11723965/v1.html
 GET https://api.openalex.org/works/https://doi.org/10.1021/acs.jctc.6c00213
 GET https://api.datacite.org/dois/10.5281/zenodo.24355940
