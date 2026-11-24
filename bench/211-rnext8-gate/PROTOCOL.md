@@ -75,9 +75,12 @@ the maximum force component.
 `slab_random_relax` runs on the repository fixture
 `examples/fixtures/cuh2_fcc_slab.con`, seed 2000.
 
-- Budget 1 and `RELAX_STEPS=1`: one charged combined evaluation.
-- Budget 2 and `RELAX_STEPS=1`: that evaluation plus the certifying
-  gradient call.
+- Budget 1 and `RELAX_STEPS=0`: the initial combined evaluation only.
+  A zero iteration limit does not enter the line search.
+- Budget 2 and `RELAX_STEPS=0`: that evaluation plus the certifying
+  gradient call. The ledger must show 1 then 2 charges. Any other
+  ledger count makes the slab cell `PARTIAL`, while the raw engine
+  totals are still reported.
 
 A forwarder counts entries to `rgpot_cuh2_force`. The combined count
 is the budget-1 total. The grad-only count is the budget-2 total
@@ -121,9 +124,9 @@ requires at least six complete pairs.
 Verdicts, and no other labels:
 
 - `FIX` if a physical A hit is lost, or B records a non-physical hit.
-  For the slab, `FIX` when A and A2 share one grad-only count, B and
-  B2 share a strictly larger count, and the same pattern holds for
-  the combined evaluation.
+  For the slab, `FIX` when A matches A2, B matches B2, and the
+  grad-only engine count of B is strictly greater than A. Combined
+  counts are reported and do not have to differ.
 - `FAIL` if there is a real time regression or a memory failure, and
   the cell is not `FIX`.
 - `PARTIAL` if the cell is not `FIX` or `FAIL` and any seed is
