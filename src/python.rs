@@ -3092,7 +3092,6 @@ const CALL_PHASE_FULL: u8 = 2;
 struct PythonCallCounts {
     total: std::sync::atomic::AtomicUsize,
     phase: std::sync::atomic::AtomicU8,
-    pending_gradient: std::sync::atomic::AtomicU8,
     screen: std::sync::atomic::AtomicUsize,
     full: std::sync::atomic::AtomicUsize,
     check: std::sync::atomic::AtomicUsize,
@@ -3105,8 +3104,6 @@ impl PythonCallCounts {
         } else {
             CALL_PHASE_FULL
         };
-        self.pending_gradient
-            .store(CALL_PHASE_OTHER, std::sync::atomic::Ordering::Relaxed);
         self.phase
             .store(phase, std::sync::atomic::Ordering::Relaxed);
     }
@@ -3114,31 +3111,23 @@ impl PythonCallCounts {
     fn end_relax(&self) {
         self.phase
             .store(CALL_PHASE_OTHER, std::sync::atomic::Ordering::Relaxed);
-        self.pending_gradient
-            .store(CALL_PHASE_OTHER, std::sync::atomic::Ordering::Relaxed);
     }
 
     fn record_energy(&self) {
         self.total
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let phase = self.phase.load(std::sync::atomic::Ordering::Relaxed);
-        self.pending_gradient
-            .store(phase, std::sync::atomic::Ordering::Relaxed);
         self.record_phase(phase);
     }
 
     fn record_gradient(&self) {
         self.total
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let phase = self.phase.load(std::sync::atomic::Ordering::Relaxed);
-        let pending = self
-            .pending_gradient
-            .swap(CALL_PHASE_OTHER, std::sync::atomic::Ordering::Relaxed);
-        if phase != CALL_PHASE_OTHER && pending != phase {
+        if crate::methods::cluster_search::in_confirm_gradient() {
             self.check
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         } else {
-            self.record_phase(phase);
+            self.record_phase(self.phase.load(std::sync::atomic::Ordering::Relaxed));
         }
     }
 

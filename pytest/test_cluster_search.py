@@ -410,6 +410,21 @@ def test_cluster_search_ras_true_uses_archive_outcome():
     assert out["charged"] > 0
     assert out["floors"] >= 1
 
+    finite_gradients = 10
+    gradient_calls = 0
+
+    def failing_gradient(x):
+        nonlocal gradient_calls
+        gradient_calls += 1
+        if gradient_calls > finite_gradients:
+            return np.full_like(np.asarray(x, dtype=np.float64), np.nan)
+        return lj_grad(x)
+
+    confirmed = core_cluster_search(
+        lj_energy, failing_gradient, 4, 300, seed=0, ras=True
+    )
+    assert confirmed["ledger"]["check"] > 0
+
 
 def flexible_water(x: np.ndarray, molecules: int):
     """Harmonic O-H and H-H springs and an O-O Lennard-Jones term, in eV and angstrom."""

@@ -55,6 +55,7 @@ pub struct SearchPhase {
 
 thread_local! {
     static LAST_SEARCH_PHASE: Cell<SearchPhase> = Cell::new(SearchPhase::default());
+    static IN_CONFIRM_GRADIENT: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Phase split from the most recent search on this thread.
@@ -64,6 +65,28 @@ pub fn last_search_phase() -> SearchPhase {
 
 fn remember_search_phase(phase: SearchPhase) {
     LAST_SEARCH_PHASE.with(|cell| cell.set(phase));
+}
+
+#[cfg(any(feature = "python", test))]
+pub(crate) fn in_confirm_gradient() -> bool {
+    IN_CONFIRM_GRADIENT.with(Cell::get)
+}
+
+struct ConfirmGradient {
+    previous: bool,
+}
+
+impl ConfirmGradient {
+    fn enter() -> Self {
+        let previous = IN_CONFIRM_GRADIENT.replace(true);
+        Self { previous }
+    }
+}
+
+impl Drop for ConfirmGradient {
+    fn drop(&mut self) {
+        IN_CONFIRM_GRADIENT.set(self.previous);
+    }
 }
 
 /// What a search did, beyond the outcome the driver reports.
@@ -731,6 +754,20 @@ fn warm_relax_with<'a, O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    warm_relax_impl(objective, cfg, stats, seed, paid, true)
+}
+
+fn warm_relax_impl<'a, O>(
+    objective: &'a O,
+    cfg: &'a Config,
+    stats: &'a mut RelaxStats,
+    seed: u64,
+    paid: PaidCheck,
+    reuse_confirm_gradient: bool,
+) -> impl FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + 'a
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
     let mut opt = WarmLbfgs::default();
     // A molecular line search that starts from steepest descent tries a
     // step of one coordinate unit. That climbs a bond, the Wolfe search
@@ -1203,7 +1240,7 @@ where
             if !energy.is_finite() {
                 return None;
             }
-            if let Some(gradient) = stored_gradient(&point.to_owned()) {
+            if reuse_confirm_gradient && let Some(gradient) = stored_gradient(&point.to_owned()) {
                 return gradient_is_converged(gradient.view(), cfg.record_gradient)
                     .then_some(gradient);
             }
@@ -1211,6 +1248,7 @@ where
                 return None;
             }
             stats.check_charged += 1;
+            let _confirm = ConfirmGradient::enter();
             finite_gradient(objective, point)
                 .filter(|gradient| gradient_is_converged(gradient.view(), cfg.record_gradient))
         };
@@ -4178,6 +4216,58 @@ mod tests {
         let at_end = points.iter().filter(|p| **p == x).count();
         assert_eq!(at_end, 1, "the end point was evaluated {at_end} times");
         assert_eq!(stats.check_charged, 0);
+    }
+
+    #[test]
+    fn confirm_gradients_are_marked_exactly() {
+        struct CountConfirm<'a> {
+            inner: &'a SpringChain,
+            confirm: std::sync::atomic::AtomicUsize,
+        }
+        impl eindir_core::Objective<f64> for CountConfirm<'_> {
+            fn dim(&self) -> usize {
+                eindir_core::Objective::dim(self.inner)
+            }
+            fn bounds(&self) -> &eindir_core::Bounds<f64> {
+                self.inner.bounds()
+            }
+            fn eval(&self, x: ArrayView1<f64>) -> f64 {
+                self.inner.eval(x)
+            }
+        }
+        impl eindir_core::gradient::Gradient<f64> for CountConfirm<'_> {
+            fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+                if in_confirm_gradient() {
+                    self.confirm
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                self.inner.grad(x)
+            }
+            fn dim(&self) -> usize {
+                eindir_core::Objective::dim(self.inner)
+            }
+        }
+        impl DifferentiableObjective<f64> for CountConfirm<'_> {
+            fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+                self.inner.value_and_gradient(x)
+            }
+        }
+
+        let chain = SpringChain::new(12);
+        let counted = CountConfirm {
+            inner: &chain,
+            confirm: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let cfg = Config::for_molecular(vec![6; 12], vec![(0..12).collect()], 1.0);
+        let mut stats = RelaxStats::default();
+        let mut led = Ledger::new(20_000);
+        let mut relax = warm_relax_impl(&counted, &cfg, &mut stats, 0, PaidCheck::default(), false);
+        relax(&mut led, chain.start().view(), cfg.relax_steps);
+        drop(relax);
+
+        let observed = counted.confirm.load(std::sync::atomic::Ordering::Relaxed);
+        assert!(observed > 0);
+        assert_eq!(stats.check_charged, observed);
     }
 
     /// An incumbent far below the chain's floor makes every screen hopeless.
