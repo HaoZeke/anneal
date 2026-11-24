@@ -44,7 +44,7 @@ class PotentialCalculator(_base_ase_calculator()):
     with ASE's minus-gradient sign convention and shape ``(N, 3)``.
     """
 
-    implemented_properties = ["energy", "forces"]
+    implemented_properties = ["energy", "free_energy", "forces"]
 
     def __init__(self, potential, **kwargs):
         if _base_ase_calculator() is not object:
@@ -61,6 +61,7 @@ class PotentialCalculator(_base_ase_calculator()):
         self.atoms = None
 
     def reset(self) -> None:
+        self.atoms = None
         self.results = {}
 
     def _eval_and_grad(self, flat: np.ndarray) -> tuple[float, np.ndarray]:
@@ -119,7 +120,8 @@ class PotentialCalculator(_base_ase_calculator()):
         if self._uses_ase_cache(target):
             return float(super().get_potential_energy(target, force_consistent))
         self.calculate(target, properties=("energy", "forces"))
-        return float(self.results["energy"])
+        key = "free_energy" if force_consistent else "energy"
+        return float(self.results[key])
 
     def get_forces(self, atoms=None) -> np.ndarray:
         target = self.atoms if atoms is None else atoms

@@ -348,3 +348,32 @@ def test_potential_calculator_refreshes_after_in_place_move():
     assert moved == pytest.approx(truth, rel=0, abs=1e-12)
     assert moved == pytest.approx(direct, rel=0, abs=1e-12)
     assert moved != pytest.approx(before, rel=1e-6, abs=1e-6)
+
+
+def test_potential_calculator_free_energy_and_reset():
+    ase_mod = pytest.importorskip("ase")
+    lj4 = anneal.PairPotential.lennard_jones(4)
+    pos = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [1.1, 0.0, 0.0],
+            [0.55, 0.95, 0.0],
+            [0.55, 0.32, 0.9],
+        ],
+        dtype=np.float64,
+    )
+    atoms = ase_mod.Atoms("Ar4", positions=pos.copy())
+    calc = anneal.PotentialCalculator(lj4)
+    atoms.calc = calc
+    assert "free_energy" in calc.implemented_properties
+    e = float(atoms.get_potential_energy())
+    fe = float(atoms.get_potential_energy(force_consistent=True))
+    assert fe == pytest.approx(e, rel=0, abs=1e-12)
+    assert float(calc.get_property("free_energy", atoms)) == pytest.approx(e, rel=0, abs=1e-12)
+    assert calc.atoms is not None
+    assert calc.results
+
+    calc.reset()
+    assert calc.atoms is None
+    assert calc.results == {}
+    assert float(calc.get_potential_energy(atoms)) == pytest.approx(e, rel=0, abs=1e-12)
