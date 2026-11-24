@@ -145,3 +145,37 @@ bar and stay strict.
 - No simple-cubic or TIP4P cell beyond the water hexamer: those run in
   other harnesses and are not in this one.
 - The counter build is run after the session and is not timed.
+
+## Addendum
+
+Written before any measured row. The sections above are unchanged.
+
+Release builds use toolchain 1.88.0. The develop tree builds the guard
+example with that toolchain, release and locked. The other arms use
+the same toolchain. The develop build succeeded before this addendum.
+
+The path-counter patch applies on B with no edit. The driver kept in
+the tree still has the marker comment, and that is the file the timed
+arms compile. The counter copy replaces only that comment with the
+print of the five counters. That copy was built before the session so
+a broken line could be fixed first. It compiled with no edit. It is
+not a timed arm, and it is not run until the timed session has ended.
+
+Two cells are added for strict identity only, because the change
+touches the lattice move, the assignment kernels and symmetry recall.
+They are not in the 288-job schedule. They run after that panel, on
+the same host and the same three arms, palindromic, twelve seeds from
+2000. Their rows are sealed separately. A difference on the hit, the
+calls, the charged calls, the best-energy bits or the trajectory hash
+is a FIX. Outside time and memory are not gates for these two cells.
+
+tip4p6 is the six-molecule TIP4P cell. It uses the hexamer driver:
+budget 500000, stop at -197.7805260034 plus 0.001.
+
+sc126-38 is the 12-6 simple-cubic cell of 38 points. Budget 400000,
+stop at -35419.9804 plus 0.001, recommended preset, in-tree
+Sutton-Chen potential. The search path is the atomic cluster preset.
+
+The measurement arms keep the develop tree and the B tree. Harness
+files on those arms are untracked copies, so the tree checks stay on
+those two trees.
