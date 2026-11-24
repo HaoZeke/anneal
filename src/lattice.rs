@@ -40,7 +40,10 @@
 use crate::structure::Template;
 use ndarray::{Array1, ArrayView1};
 use rand::Rng;
-use std::collections::{HashMap, HashSet};
+#[cfg(test)]
+use std::collections::HashSet;
+use std::collections::hash_map::Entry;
+use std::collections::{BinaryHeap, HashMap};
 use std::f64::consts::PI;
 
 /// Where the local order to grow comes from.
@@ -504,26 +507,28 @@ fn distance2(a: &[f64; 3], b: &[f64; 3]) -> f64 {
 /// that `k` lies inside the sphere with `ij` as its diameter.
 fn observed_contact_graph(x: ArrayView1<f64>) -> Vec<Vec<usize>> {
     let n = x.len() / 3;
-    let mut distances = vec![vec![0.0; n]; n];
+    let mut distances = vec![0.0; n * n];
     for i in 0..n {
         let a = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
         for j in (i + 1)..n {
             let b = [x[3 * j], x[3 * j + 1], x[3 * j + 2]];
-            distances[i][j] = distance2(&a, &b);
-            distances[j][i] = distances[i][j];
+            let d2 = distance2(&a, &b);
+            distances[i * n + j] = d2;
+            distances[j * n + i] = d2;
         }
     }
     let mut graph = vec![Vec::new(); n];
     for i in 0..n {
+        let row_i = &distances[i * n..(i + 1) * n];
         for j in (i + 1)..n {
-            let edge = distances[i][j];
-            if edge > 0.0
-                && !(0..n)
-                    .filter(|&k| k != i && k != j)
-                    .any(|k| distances[i][k] + distances[j][k] < edge)
-            {
-                graph[i].push(j);
-                graph[j].push(i);
+            let edge = row_i[j];
+            if edge > 0.0 {
+                let row_j = &distances[j * n..(j + 1) * n];
+                let blocked = (0..n).any(|k| k != i && k != j && row_i[k] + row_j[k] < edge);
+                if !blocked {
+                    graph[i].push(j);
+                    graph[j].push(i);
+                }
             }
         }
     }
@@ -563,6 +568,7 @@ fn lattice_point(site: [i32; 3], basis: &[[f64; 3]; 3]) -> [f64; 3] {
     })
 }
 
+#[cfg(test)]
 fn lattice_neighbours(site: [i32; 3]) -> impl Iterator<Item = [i32; 3]> {
     (0..3).flat_map(move |axis| {
         [-1, 1].map(move |step| {
@@ -571,6 +577,115 @@ fn lattice_neighbours(site: [i32; 3]) -> impl Iterator<Item = [i32; 3]> {
             neighbour
         })
     })
+}
+
+const NEIGHBOUR_OFFSETS: [[i32; 3]; 6] = [
+    [-1, 0, 0],
+    [1, 0, 0],
+    [0, -1, 0],
+    [0, 1, 0],
+    [0, 0, -1],
+    [0, 0, 1],
+];
+
+const IN_FRONTIER: u32 = u32::MAX;
+
+#[derive(Default)]
+struct SiteHasher(u64);
+
+impl std::hash::Hasher for SiteHasher {
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) {
+        for &byte in bytes {
+            self.0 = (self.0.rotate_left(5) ^ u64::from(byte)).wrapping_mul(0x517c_c1b7_2722_0a95);
+        }
+    }
+
+    #[inline]
+    fn write_u64(&mut self, i: u64) {
+        self.0 = (self.0.rotate_left(5) ^ i).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
+
+    #[inline]
+    fn write_usize(&mut self, i: usize) {
+        self.write_u64(i as u64);
+    }
+
+    #[inline]
+    fn write_i32(&mut self, i: i32) {
+        self.write_u64(i as u32 as u64);
+    }
+}
+
+type SiteMap = HashMap<[i32; 3], u32, std::hash::BuildHasherDefault<SiteHasher>>;
+
+#[derive(Clone, Copy)]
+struct FrontierSite {
+    radius: f64,
+    site: [i32; 3],
+}
+
+impl PartialEq for FrontierSite {
+    fn eq(&self, other: &Self) -> bool {
+        self.radius.to_bits() == other.radius.to_bits() && self.site == other.site
+    }
+}
+
+impl Eq for FrontierSite {}
+
+impl PartialOrd for FrontierSite {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for FrontierSite {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        other
+            .radius
+            .total_cmp(&self.radius)
+            .then_with(|| other.site.cmp(&self.site))
+    }
+}
+
+#[derive(Clone, Copy)]
+struct PeelSite {
+    coordination: u8,
+    radius: f64,
+    site: [i32; 3],
+    id: u32,
+}
+
+impl PartialEq for PeelSite {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.coordination == other.coordination
+            && self.radius.to_bits() == other.radius.to_bits()
+            && self.site == other.site
+    }
+}
+
+impl Eq for PeelSite {}
+
+impl PartialOrd for PeelSite {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for PeelSite {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        other
+            .coordination
+            .cmp(&self.coordination)
+            .then_with(|| self.radius.total_cmp(&other.radius))
+            .then_with(|| other.site.cmp(&self.site))
+    }
 }
 
 /// Distinct 4-point frames on `n` points, `C(n, 4)`.
@@ -591,76 +706,131 @@ fn four_point_frames(n: usize) -> usize {
 }
 
 fn candidate_from_basis(basis: &[[f64; 3]; 3], centre: [f64; 3], n: usize) -> Option<Array1<f64>> {
-    let mut sites = vec![[0; 3]];
-    let mut radii = vec![distance2(&lattice_point([0; 3], basis), &centre)];
-    let mut occupied = HashSet::from([[0; 3]]);
-    let mut frontier: HashMap<[i32; 3], f64> = lattice_neighbours([0; 3])
-        .map(|site| (site, distance2(&lattice_point(site, basis), &centre)))
-        .collect();
     // The finished body holds `C(n, 4)` distinct 4-point frames. The cloud
     // stops at that many sites: another site is not a new frame the body can
     // name, and a flat basis would otherwise keep the frontier moving without
     // ever enclosing one.
     let frames = four_point_frames(n);
-    while sites.len() < frames
-        && sites
-            .iter()
-            .filter(|&&site| lattice_neighbours(site).all(|other| occupied.contains(&other)))
-            .count()
-            < n
-    {
-        let Some((next, radius)) = frontier
-            .iter()
-            .min_by(|(a, radius_a), (b, radius_b)| {
-                radius_a.total_cmp(radius_b).then_with(|| a.cmp(b))
-            })
-            .map(|(&site, &radius)| (site, radius))
-        else {
+    if frames <= 1 {
+        return (n <= 1).then(|| Array1::zeros(3 * n));
+    }
+
+    let mut sites = vec![[0; 3]];
+    let mut radii = vec![distance2(&lattice_point([0; 3], basis), &centre)];
+    let mut coordination = vec![0u8];
+    let mut neighbors = vec![[IN_FRONTIER; 6]];
+    let mut site_state = SiteMap::default();
+    site_state.insert([0; 3], 0);
+    let mut frontier = BinaryHeap::new();
+    for offset in NEIGHBOUR_OFFSETS {
+        site_state.insert(offset, IN_FRONTIER);
+        frontier.push(FrontierSite {
+            radius: distance2(&lattice_point(offset, basis), &centre),
+            site: offset,
+        });
+    }
+    let mut interior = 0usize;
+
+    while sites.len() < frames && interior < n {
+        let Some(FrontierSite { radius, site: next }) = frontier.pop() else {
             break;
         };
-        frontier.remove(&next);
-        occupied.insert(next);
-        for neighbour in lattice_neighbours(next) {
-            if !occupied.contains(&neighbour) {
-                frontier
-                    .entry(neighbour)
-                    .or_insert_with(|| distance2(&lattice_point(neighbour, basis), &centre));
-            }
+        let Ok(next_id) = u32::try_from(sites.len()) else {
+            return None;
+        };
+        if next_id == IN_FRONTIER {
+            return None;
         }
+        let next_idx = next_id as usize;
         sites.push(next);
         radii.push(radius);
+        coordination.push(0);
+        neighbors.push([IN_FRONTIER; 6]);
+        site_state.insert(next, next_id);
+
+        for (dir, offset) in NEIGHBOUR_OFFSETS.iter().enumerate() {
+            let neighbour = [
+                next[0] + offset[0],
+                next[1] + offset[1],
+                next[2] + offset[2],
+            ];
+            match site_state.entry(neighbour) {
+                Entry::Occupied(entry) => {
+                    let state = *entry.get();
+                    if state != IN_FRONTIER {
+                        let nb_idx = state as usize;
+                        neighbors[next_idx][dir] = state;
+                        neighbors[nb_idx][dir ^ 1] = next_id;
+                        coordination[next_idx] += 1;
+                        if coordination[next_idx] == 6 {
+                            interior += 1;
+                        }
+                        coordination[nb_idx] += 1;
+                        if coordination[nb_idx] == 6 {
+                            interior += 1;
+                        }
+                    }
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(IN_FRONTIER);
+                    frontier.push(FrontierSite {
+                        radius: distance2(&lattice_point(neighbour, basis), &centre),
+                        site: neighbour,
+                    });
+                }
+            }
+        }
     }
     // The frame count was reached before n sites existed, so there is no
     // further site to add and no body to peel.
     if sites.len() < n {
         return None;
     }
-    let mut alive = occupied;
-    while alive.len() > n {
-        let worst = sites
-            .iter()
-            .enumerate()
-            .filter(|(_, site)| alive.contains(*site))
-            .map(|(index, site)| {
-                let coordination = lattice_neighbours(*site)
-                    .filter(|neighbour| alive.contains(neighbour))
-                    .count();
-                (index, site, coordination)
-            })
-            .min_by(|(i, a, coordination_a), (j, b, coordination_b)| {
-                coordination_a
-                    .cmp(coordination_b)
-                    .then_with(|| radii[*j].total_cmp(&radii[*i]))
-                    .then_with(|| a.cmp(b))
-            })
-            .map(|(_, site, _)| *site)
-            .expect("a live site remains while peeling");
-        alive.remove(&worst);
+
+    let mut alive = vec![true; sites.len()];
+    let mut alive_count = sites.len();
+    if alive_count > n {
+        let mut peel = BinaryHeap::from(
+            (0..sites.len())
+                .map(|id| PeelSite {
+                    coordination: coordination[id],
+                    radius: radii[id],
+                    site: sites[id],
+                    id: id as u32,
+                })
+                .collect::<Vec<_>>(),
+        );
+        while alive_count > n {
+            let entry = peel.pop().expect("a live site remains while peeling");
+            let idx = entry.id as usize;
+            if !alive[idx] || coordination[idx] != entry.coordination {
+                continue;
+            }
+            alive[idx] = false;
+            alive_count -= 1;
+            for nb in neighbors[idx] {
+                if nb != IN_FRONTIER {
+                    let nb_idx = nb as usize;
+                    if alive[nb_idx] {
+                        coordination[nb_idx] -= 1;
+                        peel.push(PeelSite {
+                            coordination: coordination[nb_idx],
+                            radius: radii[nb_idx],
+                            site: sites[nb_idx],
+                            id: nb,
+                        });
+                    }
+                }
+            }
+        }
     }
+
     let mut out = Array1::zeros(3 * n);
-    for (i, site) in sites
-        .into_iter()
-        .filter(|site| alive.contains(site))
+    for (i, &site) in sites
+        .iter()
+        .enumerate()
+        .filter(|(id, _)| alive[*id])
+        .map(|(_, site)| site)
         .enumerate()
     {
         let point = lattice_point(site, basis);
@@ -920,6 +1090,35 @@ mod tests {
                 candidate_from_basis(&basis, centre, n),
                 reference_candidate_from_basis(&basis, centre, n)
             );
+        }
+    }
+
+    #[test]
+    fn candidate_from_basis_matches_reference_at_cluster_sizes_and_ties() {
+        let fcc = [
+            [1.0, 0.0, 0.0],
+            [0.5, 3.0_f64.sqrt() / 2.0, 0.0],
+            [0.5, 3.0_f64.sqrt() / 6.0, (2.0_f64 / 3.0).sqrt()],
+        ];
+        let cubic = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        for basis in [fcc, cubic] {
+            for (centre, n) in [
+                ([0.0, 0.0, 0.0], 4),
+                ([0.0, 0.0, 0.0], 13),
+                ([0.0, 0.0, 0.0], 38),
+                ([0.19, -0.27, 0.11], 26),
+                ([0.19, -0.27, 0.11], 38),
+            ] {
+                let actual = candidate_from_basis(&basis, centre, n);
+                let expected = reference_candidate_from_basis(&basis, centre, n);
+                let actual_bits = actual
+                    .as_ref()
+                    .map(|arr| arr.iter().map(|v| v.to_bits()).collect::<Vec<_>>());
+                let expected_bits = expected
+                    .as_ref()
+                    .map(|arr| arr.iter().map(|v| v.to_bits()).collect::<Vec<_>>());
+                assert_eq!(actual_bits, expected_bits, "centre={centre:?} n={n}");
+            }
         }
     }
 
