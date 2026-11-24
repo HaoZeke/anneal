@@ -10,8 +10,9 @@ these provenance columns:
   note records the inputs feeding that key plus the built binary digest:
   `cap=`, `patch=` digests, compiler binaries (`fc=`, `cc=`, `cxx=`,
   `gfortran=`), compiler and CMake options (`cmake=`, `fflags=`, `fcflags=`,
-  `cflags=`, `cxxflags=`, `cppflags=`, `ldflags=`), `blas=`, and
-  `binary_sha256=`.  Saved GMIN rows are reused only when both
+  `cflags=`, `cxxflags=`, `cppflags=`, `ldflags=`), `blas=` with
+  `blas_sha256=` (the OpenBLAS library the built binary loads, found before
+  the key is computed), and `binary_sha256=`.  Saved GMIN rows are reused only when both
   `code_revision` and `gmin_build_key` match the current build; any mismatch
   is rejected naming the mismatched field.
 - `host` remains the UTS hostname for compatibility.  Bench runs normally
