@@ -17,6 +17,7 @@ import math
 import os
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
@@ -56,6 +57,26 @@ SEED_FIELDS = [
 ROW_FIELDS = machine_fieldnames(
     SEED_FIELDS + ["code_revision", "gmin_build_key", "host"]
 )
+SUMMARY_BASE_FIELDS = [
+    "system",
+    "anneal_hits",
+    "anneal_n",
+    "gmin_hits",
+    "gmin_n",
+    "gmin_reused",
+    "fisher_p",
+    "mannwhitney_p_evals",
+    "mannwhitney_p_wall",
+    "anneal_evals_median",
+    "gmin_evals_median",
+    "anneal_wall_median_s",
+    "gmin_wall_median_s",
+    "anneal_pot_median_s",
+    "anneal_outside_median_s",
+    "gmin_pot_median_s",
+    "gmin_outside_median_s",
+]
+SUMMARY_FIELDS = machine_fieldnames(SUMMARY_BASE_FIELDS)
 
 
 def type7(ordered: list[float], p: float) -> float:
@@ -262,35 +283,27 @@ def gmin_row(stored: dict[str, str]) -> dict[str, str]:
     return {field: stored.get(field, "") for field in ROW_FIELDS}
 
 
-def write_rows(path: Path, rows: list[dict[str, str]]) -> None:
+def write_rows(
+    path: Path,
+    rows: list[dict[str, str]],
+    *,
+    overwrite_legacy: bool = False,
+) -> None:
+    if not overwrite_legacy:
+        require_csv_schema(path, ROW_FIELDS)
     path.parent.mkdir(parents=True, exist_ok=True)
-    require_csv_schema(path, ROW_FIELDS)
     with path.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
 
 
-def summarise(rows: list[dict[str, str]], path: Path) -> None:
-    base_fields = [
-        "system",
-        "anneal_hits",
-        "anneal_n",
-        "gmin_hits",
-        "gmin_n",
-        "gmin_reused",
-        "fisher_p",
-        "mannwhitney_p_evals",
-        "mannwhitney_p_wall",
-        "anneal_evals_median",
-        "gmin_evals_median",
-        "anneal_wall_median_s",
-        "gmin_wall_median_s",
-        "anneal_pot_median_s",
-        "anneal_outside_median_s",
-        "gmin_pot_median_s",
-        "gmin_outside_median_s",
-    ]
+def summarise(
+    rows: list[dict[str, str]],
+    path: Path,
+    *,
+    overwrite_legacy: bool = False,
+) -> None:
     lines = []
     for system in SYSTEMS:
         anneal = [row for row in rows if row["system"] == system and row["code"] == "anneal"]
@@ -329,12 +342,13 @@ def summarise(rows: list[dict[str, str]], path: Path) -> None:
             }
         )
     fields = (
-        machine_fieldnames(base_fields)
+        SUMMARY_FIELDS
         if lines and "machine_id" in lines[0]
-        else base_fields
+        else SUMMARY_BASE_FIELDS
     )
+    if not overwrite_legacy:
+        require_csv_schema(path, fields)
     path.parent.mkdir(parents=True, exist_ok=True)
-    require_csv_schema(path, fields)
     with path.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
         writer.writeheader()
@@ -408,15 +422,52 @@ def one(
     print(",".join(run_anneal(binary_path(root), system, seed)[field] for field in SEED_FIELDS))
 
 
-def main() -> int:
+def _parse_argv(argv: Sequence[str] | None) -> list[str] | None:
+    if argv is None:
+        return None
+    items = list(argv)
+    if items and not items[0].startswith("-"):
+        return items[1:]
+    return items
+
+
+def run_panel(
+    root: Path,
+    *,
+    out_dir: Path | None = None,
+    svnrev: Path | None = None,
+    gmin_source: Path | None = None,
+    overwrite_legacy: bool = False,
+) -> tuple[Path, Path]:
+    root = root.resolve()
+    out = (out_dir or (root / "bench" / "morse14-h2h")).resolve()
+    seeds_path = out / "seeds.csv"
+    summary_path = out / "summary.csv"
+    if not overwrite_legacy:
+        require_csv_schema(seeds_path, ROW_FIELDS)
+        require_csv_schema(summary_path, SUMMARY_FIELDS)
+    rows = panel(root, svnrev=svnrev, gmin_source=gmin_source)
+    write_rows(seeds_path, rows, overwrite_legacy=overwrite_legacy)
+    summarise(rows, summary_path, overwrite_legacy=overwrite_legacy)
+    return seeds_path, summary_path
+
+
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    out_dir: Path | None = None,
+    overwrite_legacy: bool = False,
+) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--out", type=Path)
+    parser.add_argument("--overwrite-legacy", action="store_true")
     parser.add_argument("--system")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--arm")
     parser.add_argument("--svnrev", type=Path)
     parser.add_argument("--gmin-source", type=Path)
-    args = parser.parse_args()
+    args = parser.parse_args(_parse_argv(argv))
     root = args.root.resolve()
     if args.system or args.seed or args.arm:
         if not (args.system and args.seed is not None and args.arm):
@@ -430,10 +481,13 @@ def main() -> int:
             gmin_source=args.gmin_source,
         )
         return 0
-    out = root / "bench" / "morse14-h2h"
-    rows = panel(root, svnrev=args.svnrev, gmin_source=args.gmin_source)
-    write_rows(out / "seeds.csv", rows)
-    summarise(rows, out / "summary.csv")
+    run_panel(
+        root,
+        out_dir=out_dir if out_dir is not None else args.out,
+        svnrev=args.svnrev,
+        gmin_source=args.gmin_source,
+        overwrite_legacy=bool(overwrite_legacy or args.overwrite_legacy),
+    )
     return 0
 
 

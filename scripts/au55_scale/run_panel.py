@@ -16,6 +16,7 @@ import math
 import os
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
@@ -53,6 +54,18 @@ SEED_FIELDS = [
 ROW_FIELDS = machine_fieldnames(
     SEED_FIELDS + ["code_revision", "gmin_build_key", "host"]
 )
+SUMMARY_BASE_FIELDS = [
+    "arm",
+    "hits",
+    "n",
+    "fisher_p_vs_anneal",
+    "evals_median",
+    "wall_median_s",
+    "pot_median_s",
+    "outside_median_s",
+    "reference",
+]
+SUMMARY_FIELDS = machine_fieldnames(SUMMARY_BASE_FIELDS)
 
 
 def median(values: list[float]) -> float:
@@ -200,7 +213,13 @@ def stored_gmin(
     return rows
 
 
-def summarise(anneal: list[dict[str, str]], gmin: list[dict[str, str]], path: Path) -> None:
+def summarise(
+    anneal: list[dict[str, str]],
+    gmin: list[dict[str, str]],
+    path: Path,
+    *,
+    overwrite_legacy: bool = False,
+) -> None:
     def hits(rows: list[dict[str, str]]) -> int:
         return sum(row["hit"] == "1" for row in rows)
 
@@ -209,17 +228,6 @@ def summarise(anneal: list[dict[str, str]], gmin: list[dict[str, str]], path: Pa
 
     anneal_hits = hits(anneal)
     gmin_hits = hits(gmin)
-    base_fields = [
-        "arm",
-        "hits",
-        "n",
-        "fisher_p_vs_anneal",
-        "evals_median",
-        "wall_median_s",
-        "pot_median_s",
-        "outside_median_s",
-        "reference",
-    ]
     anneal_machine = aggregate_machine_columns(anneal) if anneal else {}
     gmin_machine = aggregate_machine_columns(gmin) if gmin else {}
     has_machine = bool(anneal_machine or gmin_machine)
@@ -261,31 +269,42 @@ def summarise(anneal: list[dict[str, str]], gmin: list[dict[str, str]], path: Pa
                 ),
             }
         )
-    fields = machine_fieldnames(base_fields) if has_machine else base_fields
+    fields = SUMMARY_FIELDS if has_machine else SUMMARY_BASE_FIELDS
+    if not overwrite_legacy:
+        require_csv_schema(path, fields)
     path.parent.mkdir(parents=True, exist_ok=True)
-    require_csv_schema(path, fields)
     with path.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
         writer.writeheader()
         writer.writerows(lines)
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--root", type=Path, required=True)
-    parser.add_argument("--seed", type=int)
-    parser.add_argument("--svnrev", type=Path)
-    parser.add_argument("--gmin-source", type=Path)
-    args = parser.parse_args()
-    root = args.root.resolve()
+def _parse_argv(argv: Sequence[str] | None) -> list[str] | None:
+    if argv is None:
+        return None
+    items = list(argv)
+    if items and not items[0].startswith("-"):
+        return items[1:]
+    return items
+
+
+def run_panel(
+    root: Path,
+    *,
+    out_dir: Path | None = None,
+    svnrev: Path | None = None,
+    gmin_source: Path | None = None,
+    overwrite_legacy: bool = False,
+) -> tuple[Path, Path]:
+    root = root.resolve()
+    out = (out_dir or (root / "bench" / "au55-scale")).resolve()
+    seeds_path = out / "seeds.csv"
+    summary_path = out / "summary.csv"
+    if not overwrite_legacy:
+        require_csv_schema(seeds_path, ROW_FIELDS)
+        require_csv_schema(summary_path, SUMMARY_FIELDS)
     binary = binary_path(root)
-    if args.seed is not None:
-        row = run_anneal(binary, args.seed)
-        print(",".join(row[field] for field in SEED_FIELDS), flush=True)
-        return 0
-    gmin_revision, gmin_build_key = _resolve_gmin_provenance(
-        args.svnrev, args.gmin_source
-    )
+    gmin_revision, gmin_build_key = _resolve_gmin_provenance(svnrev, gmin_source)
     head = subprocess.run(
         ["git", "-C", str(root), "rev-parse", "HEAD"],
         check=True,
@@ -311,14 +330,43 @@ def main() -> int:
     for seed in SEEDS:
         rows.extend(row for row in anneal if int(row["seed"]) == seed)
         rows.extend(row for row in gmin if int(row["seed"]) == seed)
-    out = root / "bench" / "au55-scale"
     out.mkdir(parents=True, exist_ok=True)
-    require_csv_schema(out / "seeds.csv", ROW_FIELDS)
-    with (out / "seeds.csv").open("w", newline="") as handle:
+    if not overwrite_legacy:
+        require_csv_schema(seeds_path, ROW_FIELDS)
+    with seeds_path.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
-    summarise(anneal, gmin, out / "summary.csv")
+    summarise(anneal, gmin, summary_path, overwrite_legacy=overwrite_legacy)
+    return seeds_path, summary_path
+
+
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    out_dir: Path | None = None,
+    overwrite_legacy: bool = False,
+) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--out", type=Path)
+    parser.add_argument("--overwrite-legacy", action="store_true")
+    parser.add_argument("--seed", type=int)
+    parser.add_argument("--svnrev", type=Path)
+    parser.add_argument("--gmin-source", type=Path)
+    args = parser.parse_args(_parse_argv(argv))
+    root = args.root.resolve()
+    if args.seed is not None:
+        row = run_anneal(binary_path(root), args.seed)
+        print(",".join(row[field] for field in SEED_FIELDS), flush=True)
+        return 0
+    run_panel(
+        root,
+        out_dir=out_dir if out_dir is not None else args.out,
+        svnrev=args.svnrev,
+        gmin_source=args.gmin_source,
+        overwrite_legacy=bool(overwrite_legacy or args.overwrite_legacy),
+    )
     return 0
 
 

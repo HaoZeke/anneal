@@ -23,6 +23,7 @@ import os
 import socket
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
@@ -367,11 +368,17 @@ def load_done(
     *,
     gmin_revision: str,
     gmin_build_key: str,
+    overwrite_legacy: bool = False,
 ) -> dict[tuple[str, str, int], dict[str, str]]:
     expected_key = require_gmin_build_key(gmin_build_key, "expected gmin_build_key")
     if not path.is_file() or path.stat().st_size == 0:
         return {}
-    require_csv_schema(path, FIELDS)
+    try:
+        require_csv_schema(path, FIELDS)
+    except RuntimeError:
+        if overwrite_legacy:
+            return {}
+        raise
     done = {}
     with path.open(newline="") as handle:
         for raw in csv.DictReader(handle):
@@ -441,13 +448,20 @@ def summarise(rows: list[dict[str, str]], reused: set[tuple[str, int]]) -> list[
     return out
 
 
-def write_summary(path: Path, rows: list[dict[str, str]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+def write_summary(
+    path: Path,
+    rows: list[dict[str, str]],
+    *,
+    overwrite_legacy: bool = False,
+) -> None:
     fields = (
         machine_fieldnames(SUMMARY_FIELDS)
         if not rows or "machine_id" in rows[0]
         else SUMMARY_FIELDS
     )
+    if not overwrite_legacy:
+        require_csv_schema(path, fields)
+    path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
         writer.writeheader()
@@ -556,8 +570,25 @@ def self_test() -> None:
     print("ok")
 
 
-def main() -> int:
-    if len(sys.argv) == 2 and sys.argv[1] == "--self-test":
+def _parse_argv(argv: Sequence[str] | None) -> list[str] | None:
+    if argv is None:
+        return None
+    items = list(argv)
+    if items and not items[0].startswith("-"):
+        return items[1:]
+    return items
+
+
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    out_dir: Path | None = None,
+    overwrite_legacy: bool = False,
+) -> int:
+    parsed_argv = _parse_argv(argv)
+    if (parsed_argv == ["--self-test"]) or (
+        parsed_argv is None and len(sys.argv) == 2 and sys.argv[1] == "--self-test"
+    ):
         self_test()
         return 0
     if socket.gethostname() != "bench":
@@ -565,6 +596,8 @@ def main() -> int:
         return 2
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--out", type=Path)
+    parser.add_argument("--overwrite-legacy", action="store_true")
     parser.add_argument("--work", type=Path, default=Path("/work/morse-gmin"))
     parser.add_argument("--gmin", type=Path, default=Path("/work/morse-gmin/bin/GMIN"))
     parser.add_argument("--svnrev", type=Path, default=Path("/work/gmin-h2h/src/wales/GMIN/source/SVNREV"))
@@ -576,11 +609,17 @@ def main() -> int:
     parser.add_argument("--system", action="append")
     parser.add_argument("--seed", type=int, action="append")
     parser.add_argument("--arm", choices=("anneal", "gmin", "both"), default="both")
-    args = parser.parse_args()
+    args = parser.parse_args(parsed_argv)
     root = args.root
-    bench = root / "bench" / "morse-gmin"
+    bench = (
+        out_dir if out_dir is not None else (args.out or (root / "bench" / "morse-gmin"))
+    ).resolve()
+    allow_overwrite = bool(overwrite_legacy or args.overwrite_legacy)
     seeds_path = bench / "seeds.csv"
     summary_path = bench / "summary.csv"
+    if not allow_overwrite:
+        require_csv_schema(seeds_path, FIELDS)
+        require_csv_schema(summary_path, machine_fieldnames(SUMMARY_FIELDS))
     binary = root.parent / "tmp" / "anneal-target" / "release" / "examples" / "h2h_morse"
     if not binary.is_file():
         raise SystemExit(f"missing {binary}")
@@ -592,7 +631,12 @@ def main() -> int:
     if not data.endswith("\n"):
         data += "\n"
     archives = load_archives(root, got, gmin_build_key)
-    done = load_done(seeds_path, gmin_revision=got, gmin_build_key=gmin_build_key)
+    done = load_done(
+        seeds_path,
+        gmin_revision=got,
+        gmin_build_key=gmin_build_key,
+        overwrite_legacy=allow_overwrite,
+    )
     rows = list(done.values())
     systems = [row for row in SYSTEMS if not args.system or row[0] in args.system]
     seeds = tuple(args.seed) if args.seed else SEEDS
@@ -645,7 +689,7 @@ def main() -> int:
                 )
     write_rows(seeds_path, rows)
     summary = summarise(rows, reused)
-    write_summary(summary_path, summary)
+    write_summary(summary_path, summary, overwrite_legacy=allow_overwrite)
     summary_fields = (
         machine_fieldnames(SUMMARY_FIELDS)
         if not summary or "machine_id" in summary[0]
