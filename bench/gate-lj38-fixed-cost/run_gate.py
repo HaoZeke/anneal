@@ -51,6 +51,16 @@ GUARD_BUDGET = {
     "au55": 1_000_000,
     "hexamer": 500_000,
 }
+# Separate from the 288-job panel. Strict identity only, sealed on its own.
+IDENTITY_N = {
+    "tip4p6": 12,
+    "sc126-38": 12,
+}
+IDENTITY_ORDER = list(IDENTITY_N)
+IDENTITY_BUDGET = {
+    "tip4p6": 500_000,
+    "sc126-38": 400_000,
+}
 HARNESS_FILES = (
     "bench/gate-lj38-fixed-cost/run_gate.py",
     "bench/gate-lj38-fixed-cost/guard_trace.rs",
@@ -80,19 +90,19 @@ def block(cell: str, pair: int) -> list[tuple[str, int, int]]:
     ]
 
 
-def schedule() -> list[dict]:
+def jobs_for(order: list[str], counts: dict[str, int], phase: str) -> list[dict]:
     jobs = []
     index = 0
-    for pair in range(max(N_SEEDS.values()) // 2):
-        for cell in CELL_ORDER:
-            if pair >= N_SEEDS[cell] // 2:
+    for pair in range(max(counts.values()) // 2):
+        for cell in order:
+            if pair >= counts[cell] // 2:
                 continue
             for arm, seed, slot in block(cell, pair):
                 jobs.append(
                     {
                         "cell": cell,
                         "kind": kind_of(cell),
-                        "phase": "session",
+                        "phase": phase,
                         "seed": seed,
                         "arm": arm,
                         "slot": slot,
@@ -104,6 +114,14 @@ def schedule() -> list[dict]:
     return jobs
 
 
+def schedule() -> list[dict]:
+    return jobs_for(CELL_ORDER, N_SEEDS, "session")
+
+
+def identity_schedule() -> list[dict]:
+    return jobs_for(IDENTITY_ORDER, IDENTITY_N, "identity")
+
+
 def schedule_id(jobs: list[dict]) -> str:
     blob = json.dumps(
         [(j["cell"], j["seed"], j["arm"], j["slot"], j["index"]) for j in jobs],
@@ -112,30 +130,40 @@ def schedule_id(jobs: list[dict]) -> str:
     return hashlib.sha256(blob.encode()).hexdigest()
 
 
-def expected_balance(cell: str) -> Counter:
+def expected_balance(cell: str, n_seeds: int) -> Counter:
     pairs = [(0, "A"), (5, "A"), (1, "B"), (4, "B"), (2, "Ap"), (3, "Ap")]
-    return Counter({pair: N_SEEDS[cell] // 2 for pair in pairs})
+    return Counter({pair: n_seeds // 2 for pair in pairs})
 
 
-def check_balance(jobs: list[dict]) -> dict[str, Counter]:
+def check_balance_for(jobs: list[dict], order: list[str], counts: dict[str, int]) -> dict[str, Counter]:
     found = {}
-    for cell in CELL_ORDER:
+    for cell in order:
         mine = [j for j in jobs if j["cell"] == cell]
-        counts = Counter((j["slot"], j["arm"]) for j in mine)
-        want = expected_balance(cell)
-        if counts != want:
-            raise SystemExit(f"unbalanced {cell}: {counts} != {want}")
+        got = Counter((j["slot"], j["arm"]) for j in mine)
+        want = expected_balance(cell, counts[cell])
+        if got != want:
+            raise SystemExit(f"unbalanced {cell}: {got} != {want}")
         arms = sorted({j["arm"] for j in mine})
         means = []
         for arm in arms:
             idx = [j["index"] for j in mine if j["arm"] == arm]
             means.append(sum(idx) / len(idx))
-            if len(idx) != N_SEEDS[cell]:
+            if len(idx) != counts[cell]:
                 raise SystemExit(f"{cell} {arm} has {len(idx)} runs")
         if max(means) - min(means) > 1e-9:
             raise SystemExit(f"unbalanced position {cell}: {means}")
-        found[cell] = counts
+        found[cell] = got
     return found
+
+
+def check_balance(jobs: list[dict]) -> dict[str, Counter]:
+    return check_balance_for(jobs, CELL_ORDER, N_SEEDS)
+
+
+def budget_of(cell: str) -> int:
+    if cell in GUARD_BUDGET:
+        return GUARD_BUDGET[cell]
+    return IDENTITY_BUDGET[cell]
 
 
 def outside_per_call(wall: float, inside: float, calls: int) -> float:
@@ -286,7 +314,7 @@ def run_guard(args, job: dict, binary: Path, ident: str, journal: Path) -> None:
     if proc.stderr:
         journal_raw(journal, proc.stderr)
     gate = parse_gate(proc.stdout)
-    if gate is None or gate.get("core") != "0" or int(gate.get("budget", "0")) != GUARD_BUDGET[job["cell"]]:
+    if gate is None or gate.get("core") != "0" or int(gate.get("budget", "0")) != budget_of(job["cell"]):
         write_result(
             dest,
             {
@@ -300,7 +328,7 @@ def run_guard(args, job: dict, binary: Path, ident: str, journal: Path) -> None:
                 "slot": job["slot"],
                 "index": job["index"],
                 "core": gate.get("core") if gate else "",
-                "budget": GUARD_BUDGET[job["cell"]],
+                "budget": budget_of(job["cell"]),
                 "hit": 0,
                 "calls": 0,
                 "charged": 0,
@@ -439,6 +467,10 @@ def run(args) -> int:
     if "avx2" not in cpu_info()[1].split():
         raise SystemExit("host has no avx2; the changed code needs an avx2 host")
     self_check()
+    identity = args.cmd == "identity"
+    counts_map = IDENTITY_N if identity else N_SEEDS
+    order = IDENTITY_ORDER if identity else CELL_ORDER
+    budgets = IDENTITY_BUDGET if identity else GUARD_BUDGET
     b_tree = git_text(args.src_b, "rev-parse", "HEAD^{tree}")
     if b_tree != B_TREE:
         raise SystemExit("B tree does not match")
@@ -448,12 +480,14 @@ def run(args) -> int:
         raise SystemExit("A and A2 are not the develop tree")
     prov = provenance(args.repo)
     machine = machine_id()
-    jobs = schedule()
-    balances = check_balance(jobs)
+    jobs = identity_schedule() if identity else schedule()
+    balances = check_balance_for(jobs, order, counts_map)
+    if len(jobs) != sum(counts_map.values()) * 3:
+        raise SystemExit(f"schedule length {len(jobs)}")
     ident = schedule_id(jobs)
     journal = args.run_dir / "journal.log"
     journal.parent.mkdir(parents=True, exist_ok=True)
-    log_line(journal, f"first seed {FIRST_SEED} n {dict(N_SEEDS)} cells {len(CELL_ORDER)}")
+    log_line(journal, f"first seed {FIRST_SEED} n {dict(counts_map)} cells {len(order)}")
     log_line(journal, f"session {ident[:12]} jobs {len(jobs)}")
     for position, job in enumerate(jobs, 1):
         run_guard(args, job, args.bin[job["arm"]], ident, journal)
@@ -470,7 +504,8 @@ def run(args) -> int:
         ("machine_id", machine),
         ("seeds_lj38", f"{FIRST_SEED}-{FIRST_SEED + N_SEEDS['lj38'] - 1}"),
         ("seeds_others", f"{FIRST_SEED}-{FIRST_SEED + 11}"),
-        ("n", json.dumps(N_SEEDS, sort_keys=True)),
+        ("n", json.dumps(counts_map, sort_keys=True)),
+        ("panel", "identity" if identity else "main"),
         ("cpu_model", cpu_info()[0]),
         ("cpu_flags", cpu_info()[1]),
         ("avx2", str("avx2" in cpu_info()[1].split()).lower()),
@@ -484,7 +519,7 @@ def run(args) -> int:
     for cell, counts in balances.items():
         text = " ".join(f"{slot}:{arm}={count}" for (slot, arm), count in sorted(counts.items()))
         sessions.append((f"balance_{cell}", text))
-    for cell, budget in GUARD_BUDGET.items():
+    for cell, budget in budgets.items():
         sessions.append((f"budget_{cell}", str(budget)))
     write_csv(args.run_dir / "rows.csv", records)
     write_csv(args.rows, records)
@@ -571,6 +606,18 @@ def main() -> int:
     run_p.add_argument("--rows", type=Path, required=True)
     run_p.add_argument("--sessions", type=Path, required=True)
 
+    ident_p = sub.add_parser("identity")
+    ident_p.add_argument("--repo", type=Path, required=True)
+    ident_p.add_argument("--run-dir", type=Path, required=True)
+    ident_p.add_argument("--src-a", type=Path, required=True)
+    ident_p.add_argument("--src-b", type=Path, required=True)
+    ident_p.add_argument("--src-ap", type=Path, required=True)
+    ident_p.add_argument("--bin-a", type=Path, required=True)
+    ident_p.add_argument("--bin-b", type=Path, required=True)
+    ident_p.add_argument("--bin-ap", type=Path, required=True)
+    ident_p.add_argument("--rows", type=Path, required=True)
+    ident_p.add_argument("--sessions", type=Path, required=True)
+
     count_p = sub.add_parser("counters")
     count_p.add_argument("--bin-bc", type=Path, required=True)
     count_p.add_argument("--rows", type=Path, required=True)
@@ -588,6 +635,10 @@ def main() -> int:
         return 0
     if args.cmd == "counters":
         return counters(args)
+    if args.cmd == "identity":
+        jobs = identity_schedule()
+        check_balance_for(jobs, IDENTITY_ORDER, IDENTITY_N)
+        print(f"identity jobs {len(jobs)} id {schedule_id(jobs)[:12]}")
     args.bin = {"A": args.bin_a, "B": args.bin_b, "Ap": args.bin_ap}
     return run(args)
 

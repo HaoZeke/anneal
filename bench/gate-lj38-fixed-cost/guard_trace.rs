@@ -14,7 +14,8 @@ use anneal_core::methods::cluster_hopping::{
 use anneal_core::methods::cluster_search::search_from;
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::{
-    GminTip4p, Gupta, PairPotential, gmin_water_geometry, random_tip4p_cluster,
+    GminTip4p, Gupta, PairPotential, SuttonChen, SuttonChenFamily, gmin_water_geometry,
+    random_tip4p_cluster,
 };
 use eindir_core::Objective;
 use eindir_core::bounds::Bounds;
@@ -151,7 +152,8 @@ fn main() {
         "lj98" => run_lj(98, 4_000_000, -543.665361, seed),
         "m80r6" => run_morse(80, 6.0, 4_000_000, -378.333471, seed),
         "au55" => run_gold(55, 1_000_000, -191.03085280, seed),
-        "hexamer" => run_hexamer(seed),
+        "hexamer" | "tip4p6" => run_hexamer(seed),
+        "sc126-38" => run_sc126_38(seed),
         other => {
             eprintln!("unknown system {other}");
             std::process::exit(2);
@@ -255,6 +257,19 @@ where
     )
     .expect("finite start");
     finish(budget, reference, started, clock.seconds(), outcome)
+}
+
+/// Sutton-Chen 12-6 cluster of 38, the short simple-cubic probe.
+///
+/// The stop and the budget are the published 12-6 row for 38 points.
+/// The search is the same atomic preset the other metal cells use.
+fn run_sc126_38(seed: u64) -> Done {
+    let n = 38usize;
+    let budget = 400_000usize;
+    let reference = -35419.9804;
+    let cfg = Config::recommended(n);
+    let potential = SuttonChen::new(n, SuttonChenFamily::Sc12_6);
+    run_lbfgs("sc", n, budget, reference, seed, cfg, &potential)
 }
 
 fn run_hexamer(seed: u64) -> Done {
