@@ -3587,7 +3587,7 @@ def covalent_gfn2(audit: Audit) -> None:
     gfn2_revision_tables(audit, path, header, paper[-1][0] + 1, rows, crest)
 
 
-GFN2_SYSTEMS = {"Si10": "si10", "C10": "c10", "Si13": "si13", "C20": "c20"}
+GFN2_SYSTEMS = {"Si10": "si10", "C10": "c10", "C20": "c20"}
 # (system, anneal revision, Fisher p, Mann-Whitney p, its sample, sentence that prints them). The sample is
 # "calls", calls to the hit with a miss ranked after every hit, or "best", the best energies. The sentence
 # is filled from the rows by gfn2_sentence_fields.
@@ -3601,10 +3601,6 @@ GFN2_REVISION_TESTS = (
     ("C20", "5351f272", "1", "0.0004", "best",
      "Anneal's best is lower than CREST's on {below} of the {pairs} pairs of seeds "
      "(Mann-Whitney p = {mw_p} on the best energies)"),
-    ("Si13", "c1c02d16", "0.45", "0.005", "calls",
-     "anneal reaches the reference on {anneal_share} seeds, in {anneal_calls} calls, and CREST on "
-     "{crest_hits_word}, in {crest_calls} (Fisher p = {fisher_p}, Mann-Whitney p = {mw_p}, a miss ranked "
-     "after every hit)"),
 )
 NUMBER_WORDS = ("no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve")
 

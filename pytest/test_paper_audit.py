@@ -633,12 +633,12 @@ def test_a_drifted_gfn2_paper_cell_is_reported():
     assert [r[2] for r in audit.drifts()] == ["median calls"]
 
 
-def test_a_drifted_gfn2_revision_table_cell_is_reported():
+def test_a_drifted_gfn2_c20_revision_table_cell_is_reported():
     audit = audit_mod.Audit()
     text = audit.text(GFN2_README)
-    old = "| Si13 | anneal G, `c1c02d16` | 6/6 | 1,974.5 |"
+    old = "| C20 | anneal G, `5351f272` | 0/12 | 100,000 |"
     assert old in text
-    audit.text_cache[GFN2_README] = text.replace(old, "| Si13 | anneal G, `c1c02d16` | 6/6 | 1,975.5 |")
+    audit.text_cache[GFN2_README] = text.replace(old, "| C20 | anneal G, `5351f272` | 0/12 | 99,999 |")
     audit_mod.covalent_gfn2(audit)
     assert [r[2] for r in audit.drifts()] == ["median calls"]
 
@@ -650,18 +650,18 @@ def test_a_gfn2_revision_table_the_audit_cannot_find_is_reported():
     end = text.index("\n", start)
     audit.text_cache[GFN2_README] = text[:start] + text[start:end].replace("best / eV", "best (eV)") + text[end:]
     audit_mod.covalent_gfn2(audit)
-    assert sorted((r[1].split()[-2], r[2]) for r in audit.drifts()) == [("C20", "GFN2 table row"),
-                                                                        ("Si13", "GFN2 table row")]
+    assert [(r[1].split()[-2], r[2]) for r in audit.drifts()] == [("C20", "GFN2 table row")]
 
 
-def test_a_gfn2_sentence_count_follows_the_rows():
-    # The latest CREST hit moves, and no table cell or p value with it.
+def test_voided_si13_rows_are_not_audited_as_valid_results():
     audit = audit_mod.Audit()
     rows = audit.rows("bench/covalent-h2h/gfn2/rows.csv")
     row = next(r for r in rows if r["system"] == "si13" and r["code"] == "crest" and r["evals_to_hit"] == "143630")
     row["evals_to_hit"] = "150000"
     audit_mod.covalent_gfn2(audit)
-    assert [(r[2], "143,630" in r[3]) for r in audit.drifts()] == [("prose", False)]
+    assert "Si13" not in audit_mod.GFN2_SYSTEMS
+    assert all(test[0] != "Si13" for test in audit_mod.GFN2_REVISION_TESTS)
+    assert not audit.drifts()
 
 
 def test_an_unnamed_gfn2_false_hit_is_reported():

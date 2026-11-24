@@ -1532,6 +1532,12 @@ Release-API checks on 23 November 2026 found no new numbered releases: `crest-la
 
 Cite `qiaoPxrdCsp2026` and `rinconOpalBench2026` only if periodic crystal-structure benchmarks are discussed; neither alters the Lennard-Jones or water-hexamer sections.
 
+## 2026-11-23 — SrTiO3 grain-boundary GCMC
+
+He, Masuda, Schankler, Zhou, and Rappe, arXiv:2611.24097 (18 November 2026), explore \(\Sigma 5(310)[001]\), \(\Sigma 5(210)[001]\), and \(\Sigma 17(410)[001]\) `SrTiO3` grain boundaries using grand canonical Monte Carlo with a universal machine-learning interatomic potential and density-functional refinement. This complements the `SrTiO3` grain-boundary minima-hopping studies already filed as `chouInterface2025` and `chouAllegro2026`, and does not report free-cluster or water-hexamer searches.
+
+Cite `heSrtio3Gcmc2026`.
+
 ## 2026-11-24 — FastCREST
 
 Dey, Kariyawasam, and Chowdhury, arXiv:2611.28599 (21 November 2026), introduce `FastCREST`, a hardware-accelerated execution of the CREST 3.0.2 conformer-search algorithm. The code moves the self-consistent-charge eigenproblem and three-body dispersion of the metadynamics and molecular-dynamics trajectories to a GPU. Batches of geometry optimisations run as Slurm arrays on CPU nodes. The abstract reports that energies agree with CREST 3.0.2 within \(1.01\times10^{-10}\) Eh and gradients within \(8.2\times10^{-11}\) Eh/bohr; controlled molecular-dynamics trajectories pass a prespecified equivalence test. The complete example also lifts the 200-cycle optimisation cap of CREST 3, so that run changes a default stopping condition as well as the hardware.
