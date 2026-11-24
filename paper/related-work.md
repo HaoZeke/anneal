@@ -1528,6 +1528,16 @@ The same 22 November 2026 verification pass confirmed the QVib article already f
 
 Cite `chenDynamicCluster2026` and `unglertJaxrens2026` with the dynamic-cluster and nested-sampling discussions, respectively.
 
+## 2026-11-23 — Crystal structure prediction and release check
+
+The 23 November pass also found `MolScrub` and the `GFN2-xTB` odorant ensembles, which are already filed above as `matoMolscrub2026` and `shangFodorant2026`; neither record is duplicated here.
+
+Qiao, Xie, Fan, Cun, Ling, She, Fu, Chen, Yuan, Jiang, Zhao, and Chen, ChemRxiv (16 November 2026), doi:10.26434/chemrxiv.15012291/v1, guide sequential organic crystal structure prediction (`CSP`) with experimental powder X-ray diffraction (`PXRD`) and predicted space-group probabilities, matching experimental crystal packings in 9 of 11 molecular-crystal cases while reducing median cost by 97.9 percent relative to exhaustive search over the 22 most common space groups. Rincón, González, Andrade, Velásquez, Ojeda, Puentes, Aparicio, Cárdenas, and Arbeláez, arXiv:2611.10380 (7 November 2026, revised 10 November 2026), introduce `OPAL-Bench` for polymorph-aware evaluation of seven `CSP` and two symmetry-informed `CSP` methods across four datasets alongside `OPAL-CSP`, an `SE(3)`-equivariant flow-matching baseline reaching a 55.5 percent match rate on `MP-20` at the standard tolerances (`s_tol` 0.5, `theta_tol` 10 degrees, `l_tol` 0.3) with one prediction per composition (arXiv v2, Table 4). Both concern periodic crystal structure prediction rather than free atomic or water clusters, contradict no manuscript claim, and require no new head-to-head.
+
+Release-API checks on 23 November 2026 found no new numbered releases: `crest-lab/crest` remains `v3.0.2` (master tip `cfdc301f`, 16 June 2026), `grimme-lab/xtb` remains `v6.8.0`, `agox/agox` remains tagged at `v3.11.1` on GitLab and PyPI (`dev` tip `22d94a6f`, 5 May 2026; `ksags/GOFEE` release and tag endpoints return 404 and GOFEE remains integrated in AGOX), `ase/ase` remains tagged at `3.29.0` on GitLab and PyPI (`master` tip `3ee253f9`, 18 November 2026), `pele-python/pele` remains `v0.1.2` on GitHub and PyPI (12 October 2026), FACCTs lists `ORCA 6.1.1` (`docs/orca/6.2/manual/` remains behind the FACCTs login gate), the Cambridge `GMIN/` page stays `Last-Modified` 17 March 2022 (`software.html` 13 September 2026, `CCD.html` 14 August 2026, daily `svn.tar.bz2` archive 22 November 2026), and GitHub/GitLab searches again found no official standalone release repository for de Souza's `GOAT` or for `GMIN`.
+
+Cite `qiaoPxrdCsp2026` and `rinconOpalBench2026` only if periodic crystal-structure benchmarks are discussed; neither alters the Lennard-Jones or water-hexamer sections.
+
 ## 2026-11-23 — SrTiO3 grain-boundary GCMC
 
 He, Masuda, Schankler, Zhou, and Rappe, arXiv:2611.24097 (18 November 2026), explore \(\Sigma 5(310)[001]\), \(\Sigma 5(210)[001]\), and \(\Sigma 17(410)[001]\) `SrTiO3` grain boundaries using grand canonical Monte Carlo with a universal machine-learning interatomic potential and density-functional refinement. This complements the `SrTiO3` grain-boundary minima-hopping studies already filed as `chouInterface2025` and `chouAllegro2026`, and does not report free-cluster or water-hexamer searches.
