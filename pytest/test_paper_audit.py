@@ -220,7 +220,8 @@ def test_panel_reproduce_commands_and_session_metadata(tmp_path):
     assert row["anneal_repro"] is None
     assert row["campaign"] == "tip4p-gmin"
     assert row["command"] == command
-    assert row["boot_id"] == Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    boot_id = Path("/proc/sys/kernel/random/boot_id")
+    assert row["boot_id"] == (boot_id.read_text().strip() if boot_id.is_file() else None)
     assert row["cpu_affinity"] == available_cpus()
     assert re.fullmatch(r"[0-9a-f]{40}", row["code_revision"])
 
