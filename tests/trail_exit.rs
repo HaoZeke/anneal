@@ -143,6 +143,107 @@ fn a_trail_without_an_entry_never_serves_the_stall() {
 }
 
 #[test]
+fn a_redrawn_stall_that_exhausts_budget_keeps_finite_final_energy() {
+    let mut cfg = stalling_config(true);
+    cfg.return_screen = true;
+    cfg.restart_on_stall = true;
+    cfg.escape_stall_patience = 1;
+    cfg.bayes_screen = false;
+    cfg.calibrated_screen = false;
+    cfg.screen_steps = 1;
+    cfg.relax_steps = 1;
+    cfg.symmetrise_on_stall = false;
+    cfg.tabu_on_stall = false;
+    cfg.orbit_complete_on_new = false;
+    cfg.energy_lattice = false;
+    cfg.prior_soap = false;
+    cfg.continuous_symmetry = ContinuousSymmetry::Off;
+    cfg.surfaces.clear();
+    for budget in 10..=24 {
+        let mut rng = StdRng::seed_from_u64(0x7a11);
+        let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+        let mut ledger = Ledger::new(budget);
+        let mut bias = fresh_bias(&cfg);
+        let mut relax = |ledger: &mut Ledger, state: ArrayView1<f64>, steps: usize| {
+            let mut charged = 0usize;
+            for _ in 0..steps {
+                if !ledger.charge() {
+                    break;
+                }
+                charged += 1;
+            }
+            if charged == 0 {
+                return (f64::INFINITY, state.to_owned());
+            }
+            (0.0, Array1::zeros(state.len()))
+        };
+        let outcome = run_with_bias(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            None,
+            &mut bias,
+            &mut rng,
+        )
+        .expect("finite start");
+        assert!(outcome.best.is_finite(), "budget {budget}");
+        assert!(
+            outcome.final_energy.is_finite(),
+            "budget {budget} gave non-finite final_energy {}",
+            outcome.final_energy
+        );
+        let final_state = outcome.final_state.as_ref().expect("final_state");
+        assert!(final_state.iter().all(|v| v.is_finite()));
+        assert!(
+            outcome
+                .accepted_transitions
+                .iter()
+                .all(|edge| edge.to_energy.is_finite()),
+            "budget {budget} recorded non-finite transition"
+        );
+    }
+}
+
+#[test]
+fn a_redrawn_climb_that_exhausts_budget_keeps_finite_final_energy() {
+    anneal_core::install_rgpot_kernels!();
+    use anneal_core::methods::cluster_search::search_from;
+    use anneal_core::potentials::PairPotential;
+    use eindir_core::Objective;
+
+    let pair = PairPotential::lennard_jones(6);
+    let mut cfg = Config::recommended(6);
+    cfg.escape_stall_patience = 1;
+    for seed in [2u64, 3, 4] {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let start = anneal_core::methods::cluster_hopping::random_cluster_in_radius(
+            6,
+            cfg.start_radius(),
+            cfg.min_separation,
+            &mut rng,
+        );
+        let mut ledger = Ledger::new(500);
+        let (out, _) =
+            search_from(&pair, &cfg, &mut ledger, start.view(), seed).expect("finite start");
+        assert!(out.best.is_finite(), "seed {seed}");
+        assert!(
+            out.final_energy.is_finite(),
+            "seed {seed} gave non-finite final_energy {}",
+            out.final_energy
+        );
+        let final_state = out.final_state.as_ref().expect("final_state");
+        assert!(final_state.iter().all(|v| v.is_finite()));
+        let eval_final = pair.eval(final_state.view());
+        assert!(
+            (eval_final - out.final_energy).abs() < 1e-6,
+            "seed {seed}: final_energy {} != eval(final_state) {eval_final}",
+            out.final_energy
+        );
+    }
+}
+
+#[test]
 fn the_trail_exit_is_off_unless_asked_for() {
     let cfg = stalling_config(false);
     let mut rng = StdRng::seed_from_u64(0x7a11);

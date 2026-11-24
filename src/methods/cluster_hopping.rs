@@ -5046,14 +5046,19 @@ where
             x0.view(),
             &mut unconverged_records,
         );
+        let (chain_e, chain_x, chain_g, pending_initial) = if quench_is_sane(cfg, e0, x0.view()) {
+            (e0, x0, gradient, true)
+        } else {
+            (e, x.clone(), current_validation_gradient.clone(), false)
+        };
         chains.push(OccupiedMinimum {
-            energy: e0,
-            coordinates: x0,
-            gradient,
+            energy: chain_e,
+            coordinates: chain_x,
+            gradient: chain_g,
             history_minimum: None,
             local_minimum: None,
             generation: 0,
-            pending_initial: true,
+            pending_initial,
         });
     }
     let mut screened_out = 0usize;
@@ -9072,6 +9077,7 @@ where
             && let Some((_, frontier_energy, frontier_state)) =
                 bank.restart(0.25, rng.random::<f64>())
             && frontier_state.len() == x.len()
+            && frontier_energy.is_finite()
         {
             adopt_minimum!(
                 frontier_energy,
@@ -9166,7 +9172,7 @@ where
                     );
                     hops += 1;
                     symmetrised += 1;
-                    if es < e {
+                    if es < e && quench_is_sane(cfg, es, xs.view()) {
                         symmetry_gain += e - es;
                         adopt_minimum!(
                             es,
@@ -9237,8 +9243,6 @@ where
         let stalled_from = e;
         let mut stall_outcome: Option<f64> = None;
         if stall_response.map(|arm| stall_arms[arm] == "restart") == Some(true) {
-            quiet = 0;
-            longest_quiet = 0;
             let fresh = if let Some(groups) = cfg.move_library.declared_groups() {
                 // Keep each rigid group's internal geometry; only the
                 // packing is redrawn. An atomic redraw overlaps waters.
@@ -9255,25 +9259,27 @@ where
                 xf.view(),
                 &mut unconverged_records,
             );
-            hops += 1;
-            restarts += 1;
-            adopt_minimum!(
-                ef,
-                xf,
-                restart_gradient,
-                None,
-                AdoptionHistory::Fresh,
-                None,
-                Some("stall-restart"),
-                hops
-            );
-            stall_outcome = Some(stalled_from - e);
+            if quench_is_sane(cfg, ef, xf.view()) {
+                quiet = 0;
+                longest_quiet = 0;
+                hops += 1;
+                restarts += 1;
+                adopt_minimum!(
+                    ef,
+                    xf,
+                    restart_gradient,
+                    None,
+                    AdoptionHistory::Fresh,
+                    None,
+                    Some("stall-restart"),
+                    hops
+                );
+                stall_outcome = Some(stalled_from - e);
+            }
         }
         if stall_response.map(|arm| stall_arms[arm] == "trail") == Some(true)
             && let Some(x_entry) = basin_entry.take()
         {
-            quiet = 0;
-            longest_quiet = 0;
             // Outward is from the minimum toward the entry, continued past it
             // with noise, so the restart leans toward the ridge the chain
             // crossed on the way in rather than back down the funnel.
@@ -9301,25 +9307,29 @@ where
                 xe.view(),
                 &mut unconverged_records,
             );
-            hops += 1;
-            stall_escapes += 1;
-            trail_escapes += 1;
-            if ee < e {
-                stall_escape_gain += e - ee;
+            if quench_is_sane(cfg, ee, xe.view()) {
+                quiet = 0;
+                longest_quiet = 0;
+                hops += 1;
+                stall_escapes += 1;
+                trail_escapes += 1;
+                if ee < e {
+                    stall_escape_gain += e - ee;
+                }
+                // Taken whatever its energy, exactly as the climb below: the
+                // chain has shown it cannot improve from where it stands.
+                adopt_minimum!(
+                    ee,
+                    xe,
+                    trail_gradient,
+                    None,
+                    AdoptionHistory::Fresh,
+                    None,
+                    Some("stall-trail"),
+                    hops
+                );
+                stall_outcome = Some(stalled_from - e);
             }
-            // Taken whatever its energy, exactly as the climb below: the
-            // chain has shown it cannot improve from where it stands.
-            adopt_minimum!(
-                ee,
-                xe,
-                trail_gradient,
-                None,
-                AdoptionHistory::Fresh,
-                None,
-                Some("stall-trail"),
-                hops
-            );
-            stall_outcome = Some(stalled_from - e);
         }
         if stall_response.map(|arm| stall_arms[arm] == "climb") == Some(true) {
             quiet = 0;
@@ -9403,36 +9413,38 @@ where
                         xe.view(),
                         &mut unconverged_records,
                     );
-                    hops += 1;
-                    stall_escapes += 1;
-                    if ee < e {
-                        stall_escape_gain += e - ee;
-                    }
-                    // Taken whatever its energy. The chain has already shown it
-                    // cannot improve from where it is, so the value of the new
-                    // structure is that it is somewhere else.
-                    let local_feedback = if cfg.minima_hopping {
-                        let from = if directed_source.is_some() {
-                            identity.basin_of(source.view())
+                    if quench_is_sane(cfg, ee, xe.view()) {
+                        hops += 1;
+                        stall_escapes += 1;
+                        if ee < e {
+                            stall_escape_gain += e - ee;
+                        }
+                        // Taken whatever its energy. The chain has already shown it
+                        // cannot improve from where it is, so the value of the new
+                        // structure is that it is somewhere else.
+                        let local_feedback = if cfg.minima_hopping {
+                            let from = if directed_source.is_some() {
+                                identity.basin_of(source.view())
+                            } else {
+                                here.unwrap_or_else(|| identity.basin_of(x.view()))
+                            };
+                            let reached = identity.basin_of(xe.view());
+                            Some((Some(from), reached))
                         } else {
-                            here.unwrap_or_else(|| identity.basin_of(x.view()))
+                            None
                         };
-                        let reached = identity.basin_of(xe.view());
-                        Some((Some(from), reached))
-                    } else {
-                        None
-                    };
-                    adopt_minimum!(
-                        ee,
-                        xe,
-                        escape_gradient,
-                        local_feedback.map(|(_, reached)| reached),
-                        AdoptionHistory::Fresh,
-                        local_feedback,
-                        Some("stall-climb"),
-                        hops
-                    );
-                    stall_outcome = Some(stalled_from - e);
+                        adopt_minimum!(
+                            ee,
+                            xe,
+                            escape_gradient,
+                            local_feedback.map(|(_, reached)| reached),
+                            AdoptionHistory::Fresh,
+                            local_feedback,
+                            Some("stall-climb"),
+                            hops
+                        );
+                        stall_outcome = Some(stalled_from - e);
+                    }
                 }
             }
         }
@@ -9518,7 +9530,9 @@ where
                 // or has no exit with a structure stored, and each of those is
                 // a case where jumping would push the chain out of a region it
                 // has not finished.
-                if let Ok(j) = sb.propose(from, rng) {
+                if let Ok(j) = sb.propose(from, rng)
+                    && quench_is_sane(cfg, j.energy, j.state.view())
+                {
                     quiet = 0;
                     longest_quiet = 0;
                     // No charged evaluations and no hop. The structure was
