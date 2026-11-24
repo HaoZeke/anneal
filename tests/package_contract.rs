@@ -133,7 +133,11 @@ fn walk_relative_files(root: &Path, dir: &Path, out: &mut Vec<String>) {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.file_name().is_some_and(|name| name == "target") {
+        if path
+            .file_name()
+            .is_some_and(|name| name == "target" || name == "__pycache__")
+            || path.extension().is_some_and(|extension| extension == "pyc")
+        {
             continue;
         }
         if path.is_dir() {
