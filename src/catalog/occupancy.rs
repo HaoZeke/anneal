@@ -1285,6 +1285,14 @@ pub fn ring_leave_weight(origin: (usize, usize, usize), atom: [u32; 3]) -> f64 {
 /// holes and packing kicks do. A uniform ring support is a global
 /// scale; the hop's RMS cap removes it.
 pub fn lens_ring_displacement(coordinates: &[f64], dr: &mut [f64]) {
+    lens_ring_displacement_using(coordinates, dr, ring_leave_weight);
+}
+
+fn lens_ring_displacement_using(
+    coordinates: &[f64],
+    dr: &mut [f64],
+    weight_for: fn((usize, usize, usize), [u32; 3]) -> f64,
+) {
     if coordinates.len() != dr.len() {
         return;
     }
@@ -1296,7 +1304,7 @@ pub fn lens_ring_displacement(coordinates: &[f64], dr: &mut [f64]) {
         return;
     }
     for (i, &incidence) in census.atom.iter().enumerate() {
-        let weight = ring_leave_weight(census.profile, incidence);
+        let weight = weight_for(census.profile, incidence);
         dr[3 * i] *= weight;
         dr[3 * i + 1] *= weight;
         dr[3 * i + 2] *= weight;
@@ -2041,15 +2049,16 @@ mod tests {
         in_interface_ensemble, interface_ladder, is_occupancy_leave_action, leave_crossing_slices,
         leave_defers, leave_shot_accepted, leftover_birth_probability, leftover_dwell_from_census,
         leftover_esty_stable, leftover_esty_var, leftover_hatch_stable, leftover_lambda,
-        leftover_sat_dwell, occupancy_book_holes, occupancy_compact, occupancy_complete,
-        occupancy_complete_at, occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes,
-        occupancy_fes_delta, occupancy_fes_from_histograms, occupancy_is_cluster,
-        occupancy_landfold_floor, occupancy_leave_adopt, occupancy_leave_by_birth,
-        occupancy_leave_by_ei, occupancy_leave_new_class, occupancy_leave_target,
-        occupancy_map_floor, occupancy_map_fold, occupancy_retire, occupancy_retire_at,
-        occupancy_ring_class_changed, occupancy_ring_floor, occupancy_sparsify_book, packing_role,
-        pitman_yor_p_new, promote_one_sided, published_energy_score, retis_exchange_adjacent,
-        retis_should_swap, ring_leave_weight, ring_novelty, seat_extras,
+        leftover_sat_dwell, lens_ring_displacement, lens_ring_displacement_using,
+        occupancy_book_holes, occupancy_compact, occupancy_complete, occupancy_complete_at,
+        occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes, occupancy_fes_delta,
+        occupancy_fes_from_histograms, occupancy_is_cluster, occupancy_landfold_floor,
+        occupancy_leave_adopt, occupancy_leave_by_birth, occupancy_leave_by_ei,
+        occupancy_leave_new_class, occupancy_leave_target, occupancy_map_floor, occupancy_map_fold,
+        occupancy_retire, occupancy_retire_at, occupancy_ring_class_changed, occupancy_ring_floor,
+        occupancy_sparsify_book, packing_role, pitman_yor_p_new, promote_one_sided,
+        published_energy_score, retis_exchange_adjacent, retis_should_swap, ring_leave_weight,
+        ring_novelty, seat_extras,
     };
 
     /// L1 distances of the unit-square corners have a repeated Torgerson
@@ -3071,6 +3080,16 @@ mod tests {
         assert!(ring_leave_weight(oh, [4, 0, 0]) > ring_leave_weight(oh, [0, 2, 0]));
         assert_eq!(ring_novelty(ico, ico), 0);
         assert!(ring_novelty(ico, oh) > 0);
+    }
+
+    #[test]
+    fn default_ring_lens_matches_explicit_default_weights() {
+        let coords = vec![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1, 0.0, 1.1, 1.1, 0.0];
+        let mut default = vec![1.0; coords.len()];
+        let mut explicit = default.clone();
+        lens_ring_displacement(&coords, &mut default);
+        lens_ring_displacement_using(&coords, &mut explicit, ring_leave_weight);
+        assert_eq!(default, explicit);
     }
 
     #[test]

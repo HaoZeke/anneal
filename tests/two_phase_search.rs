@@ -49,7 +49,8 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
     anneal_core::install_rgpot_kernels!();
     const SEEDS: u64 = 16;
     let budget = 30_000;
-    let mut plain = Config::recommended(38);
+    let recommended = Config::recommended(38);
+    let mut plain = recommended.clone();
     // The surface comparison is the LeanBurst walk. Stall exits are a
     // different measurement, and this walk does not grow a named template.
     // The 30_000-call bars above were measured at a 200-step quench.
@@ -60,6 +61,11 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
     plain.restart_on_stall = false;
     plain.bayes_screen = false;
     plain.surfaces.clear();
+    assert_ne!(plain.relax_steps, recommended.relax_steps);
+    assert!(recommended.trail_on_stall && recommended.escape_on_stall);
+    assert!(!plain.trail_on_stall && !plain.escape_on_stall);
+    assert!(!recommended.surfaces.is_empty());
+    assert!(plain.surfaces.is_empty());
     let mut compacted = plain.clone();
     compacted.two_phase = Some(TwoPhase::relative(0.7, 1.0));
     let mut compact_hits = 0usize;
