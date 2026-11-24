@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import Any, final
+from typing import Any, NoReturn, final
 
 import numpy as np
 import numpy.typing as npt
@@ -221,6 +221,7 @@ class SuttonChen:
 
 @final
 class Gupta:
+    def __new__(cls, _factory_only: NoReturn, /) -> Gupta: ...
     @staticmethod
     def zinc(n_points: int) -> Gupta: ...
     @staticmethod
@@ -343,6 +344,7 @@ class LandfoldMap:
 
 @final
 class Config:
+    def __new__(cls, _factory_only: NoReturn, /) -> Config: ...
     @staticmethod
     def recommended(n: int) -> Config: ...
     @staticmethod

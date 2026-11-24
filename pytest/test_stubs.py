@@ -274,6 +274,7 @@ def test_mypy_validates_stubs_and_typed_consumer(tmp_path: Path):
         "high = np.ones(2, dtype=np.float64)\n"
         "hist: anneal.History = anneal.run(lambda x: float(x.sum()), low, high, preset)\n"
         "hit: bool = anneal.energy_hits(-1.0, -1.0)\n"
+        "gupta: anneal.Gupta = anneal.Gupta.zinc(4)\n"
         "tip: anneal.GminTip4p = anneal.GminTip4p(2)\n"
         "cs: dict[str, object] = anneal.cluster_search(\n"
         "    tip,\n"
@@ -305,3 +306,34 @@ def test_mypy_validates_stubs_and_typed_consumer(tmp_path: Path):
     )
     assert bad_proc.returncode != 0
     assert "Cannot inherit from final class" in bad_proc.stdout
+
+    bad_direct = tmp_path / "bad_direct.py"
+    bad_direct.write_text(
+        "import anneal\n\n"
+        "g = anneal.Gupta()\n"
+        "c = anneal.Config()\n"
+        "g2 = anneal._core.Gupta()\n"
+        "c2 = anneal._core.Config()\n",
+        encoding="utf-8",
+    )
+    direct_proc = subprocess.run(
+        [sys.executable, "-m", "mypy", "--strict", str(bad_direct)],
+        capture_output=True,
+        text=True,
+    )
+    assert direct_proc.returncode != 0
+    assert direct_proc.stdout.count("[call-arg]") == 4
+
+
+def test_factory_only_classes_raise_type_error_on_direct_construction():
+    for cls in (
+        anneal.Gupta,
+        anneal.Config,
+        anneal._core.Gupta,
+        anneal._core.Config,
+    ):
+        with pytest.raises(TypeError):
+            cls()
+
+    assert anneal.Gupta.zinc(4).n_points == 4
+    assert anneal.Config.recommended(4).n_points == 4
