@@ -14,6 +14,7 @@
 //!
 //! The assignment is the built-in one on every build, so linking IRA
 //! does not change this hash.
+//! Closing completed symmetry groups changes the recorded trajectory.
 
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, random_cluster_in_radius, run_with_gradient,
@@ -90,6 +91,6 @@ fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     anneal_core::install_rgpot_kernels!();
     let hash = trajectory_hash();
     // The general move library is deterministic on every build.
-    let expected = "5cd9c95765eadc45efa5879002be9a7430a81b9d82d5bf19509dcabc5578b65c";
+    let expected = "2edb99fdb15752be0c232473fa7fb58dee6991e06991d2dd76439563b32723c1";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }
