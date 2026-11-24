@@ -278,10 +278,13 @@ mod tests {
     }
 
     #[test]
-    fn species_guard_keeps_an_explicit_floor_above_the_scaled_floor() {
-        let hydrogen_pair = [0.0, 0.0, 0.0, 0.45, 0.0, 0.0];
-        assert!(!geometry_has_short_pair(&hydrogen_pair, &[1, 1], 0.40));
-        assert!(geometry_has_short_pair(&hydrogen_pair, &[1, 1], 0.50));
+    fn a_physical_h2_is_called_and_a_collapsed_pair_is_not() {
+        let physical = [0.0, 0.0, 0.0, 0.741, 0.0, 0.0];
+        let collapsed = [0.0, 0.0, 0.0, 0.20, 0.0, 0.0];
+        assert!(!refuses_geometry(&physical, &[1, 1]));
+        assert!(refuses_geometry(&collapsed, &[1, 1]));
+        assert!(element_call_floor(1, 1, OVERLAP_CALL_LIMIT_A) < 0.741);
+        assert!(0.20 <= element_call_floor(1, 1, 0.0));
     }
 
     #[test]
@@ -300,8 +303,8 @@ mod tests {
         let bond = |oh: f64| [0.0, 0.0, 0.0, oh, 0.0, 0.0, -0.24, 0.93, 0.0];
         assert!(!refuses_geometry(&bond(0.957), &water));
         assert!(!refuses_geometry(&bond(0.97), &water));
+        assert!(!refuses_geometry(&bond(0.85), &water));
         assert!(refuses_geometry(&bond(0.60), &water));
-        assert!(refuses_geometry(&bond(0.85), &water));
 
         let collapsed_oo = [0.0, 0.0, 0.0, 0.9, 0.0, 0.0];
         assert!(refuses_geometry(&collapsed_oo, &[8, 8]));
@@ -315,7 +318,7 @@ mod tests {
                 absolute: OVERLAP_CALL_LIMIT_A,
                 elements: Some(&elements),
             };
-            let mut x = ndarray::Array1::from(vec![0.0, 0.0, 0.0, 0.7, 0.0, 0.0, 0.3, 0.8, 0.0]);
+            let mut x = ndarray::Array1::from(vec![0.0, 0.0, 0.0, 0.2, 0.0, 0.0, 0.1, 0.15, 0.0]);
             let numbers: Vec<i32> = elements.iter().map(|&z| z as i32).collect();
             assert!(refuses_geometry(x.as_slice().unwrap(), &numbers));
             assert!(floor.open(&mut x, None));
@@ -332,7 +335,8 @@ mod tests {
             let start = dimer_scan_start(z);
             let dimer = [0.0, 0.0, 0.0, start, 0.0, 0.0];
             assert!(!refuses_geometry(&dimer, &[z, z]), "z = {z} at {start}");
-            assert!(start > OVERLAP_CALL_LIMIT_A, "z = {z}");
+            let floor = element_call_floor(z as u32, z as u32, OVERLAP_CALL_LIMIT_A);
+            assert!(start > floor, "z = {z}");
         }
         assert!(refuses_geometry(&[0.0, 0.0, 0.0, 1.0, 0.0, 0.0], &[14, 14]));
         assert!(dimer_scan_start(14) > 1.55);

@@ -1640,8 +1640,8 @@ pub fn structure_is_sane(x: ArrayView1<f64>, min_sep: f64) -> bool {
 /// The bound is [`element_call_floor`], the one [`CallFloor`] applies, so a
 /// pair the search opens to its floor is never refused here. It is
 /// [`COVALENT_CALL_FRACTION`] of the summed covalent radii, below every
-/// bond order and below a physical O-H, and never below `absolute`, which
-/// remains the fallback for an unknown element.
+/// bond order and below a physical O–H and H–H. An element with no radius
+/// falls back to `absolute`.
 pub fn clears_species_sanity(x: ArrayView1<f64>, elements: &[u32], absolute: f64) -> bool {
     let n = x.len() / 3;
     x.len() == 3 * elements.len()
@@ -1660,25 +1660,28 @@ pub fn clears_call_floor(x: ArrayView1<f64>, floor: f64) -> bool {
 }
 
 /// Distance at or below which a pair of elements `za` and `zb` is not
-/// handed to an objective that refuses every pair at or inside `absolute`.
+/// handed to an objective.
 ///
-/// [`COVALENT_CALL_FRACTION`] of the summed covalent radii, the floor a
-/// declared bond has in [`molecular_call_floor`], below the shortest bond
-/// of any order, and never below `absolute`: Si–Si 1.55 Å, C–C 1.06 Å, and
-/// any pair with hydrogen stays at `absolute`. A trial that stacks two
-/// heavy atoms at `absolute` is a geometry the potential's SCC cannot
-/// converge, and each line-search probe there is a charged call that fails.
+/// [`COVALENT_CALL_FRACTION`] of the summed covalent radii: Si–Si 1.55 Å,
+/// C–C 1.06 Å, H–H 0.434 Å. The radii set that floor. Raising it to a
+/// blanket 0.90 Å refuses a physical H–H bond at 0.741 Å. An element with
+/// no radius keeps `absolute`.
 pub fn element_call_floor(za: u32, zb: u32, absolute: f64) -> f64 {
     let sum = moves::covalent_radius(za) + moves::covalent_radius(zb);
-    (COVALENT_CALL_FRACTION * sum).max(absolute)
+    let from_radii = COVALENT_CALL_FRACTION * sum;
+    if from_radii > 0.0 {
+        from_radii
+    } else {
+        absolute
+    }
 }
 
 /// The pair distances at or below which the objective is not called.
 ///
-/// [`Config::call_floor`] for every pair, raised pair by pair to
-/// [`element_call_floor`] where [`Config::call_floor_elements`] names the
-/// atoms. Without elements it is the single floor, and every test and
-/// opening is the one [`clears_call_floor`] and [`open_call_floor`] make.
+/// [`Config::call_floor`] for every pair, and [`element_call_floor`] where
+/// [`Config::call_floor_elements`] names the atoms. Without elements it is
+/// the single floor, and every test and opening is the one
+/// [`clears_call_floor`] and [`open_call_floor`] make.
 #[derive(Debug, Clone, Copy)]
 pub struct CallFloor<'a> {
     /// The floor every pair keeps, [`Config::call_floor`].
@@ -14844,17 +14847,26 @@ mod call_floor_tests {
     }
 
     #[test]
-    fn an_element_floor_sits_between_the_absolute_floor_and_any_bond() {
+    fn an_element_floor_is_the_scaled_covalent_radii() {
         assert!((element_call_floor(14, 14, FLOOR) - 0.70 * 2.22).abs() < 1.0e-12);
         assert!((element_call_floor(6, 6, FLOOR) - 0.70 * 1.52).abs() < 1.0e-12);
-        assert_eq!(element_call_floor(1, 1, FLOOR), FLOOR);
-        assert_eq!(element_call_floor(6, 1, FLOOR), FLOOR);
+        assert!((element_call_floor(1, 1, FLOOR) - 0.70 * 0.62).abs() < 1.0e-12);
+        assert!((element_call_floor(6, 1, FLOOR) - 0.70 * (0.76 + 0.31)).abs() < 1.0e-12);
         for za in 0..=96 {
             for zb in za..=96 {
                 let floor = element_call_floor(za, zb, FLOOR);
-                assert!(floor >= FLOOR, "{za}-{zb}");
+                let sum = super::moves::covalent_radius(za) + super::moves::covalent_radius(zb);
+                if sum > 0.0 {
+                    let from_radii = COVALENT_CALL_FRACTION * sum;
+                    assert!(
+                        (floor - from_radii).abs() < 1.0e-12,
+                        "{za}-{zb} floor {floor} was raised above {from_radii}"
+                    );
+                } else {
+                    assert_eq!(floor, FLOOR, "{za}-{zb}");
+                }
                 let shortest = shortest_bond_length(za, zb);
-                if za > 1 && shortest > FLOOR {
+                if shortest > floor {
                     assert!(floor < shortest, "{za}-{zb}");
                 }
             }
@@ -14862,16 +14874,27 @@ mod call_floor_tests {
     }
 
     #[test]
-    fn element_aware_floor_honours_a_larger_absolute_floor() {
-        let elements = [1, 1];
-        let floor = CallFloor {
-            absolute: 0.50,
+    fn a_physical_h2_clears_the_radius_floor_and_a_collapsed_pair_does_not() {
+        let absolute = OVERLAP_CALL_LIMIT;
+        let floor = element_call_floor(1, 1, absolute);
+        assert!((floor - 0.70 * 0.62).abs() < 1.0e-12);
+        assert!(floor < 0.741);
+        let elements = [1u32, 1];
+        let call = CallFloor {
+            absolute,
             elements: Some(&elements),
         };
-        let between = Array1::from(vec![0.0, 0.0, 0.0, 0.45, 0.0, 0.0]);
-        assert!(0.45 > element_call_floor(1, 1, 0.0));
-        assert!(!floor.clears(between.view()));
-        assert_eq!(floor.pair(0, 1), 0.50);
+        let physical = Array1::from(vec![0.0, 0.0, 0.0, 0.741, 0.0, 0.0]);
+        let collapsed = Array1::from(vec![0.0, 0.0, 0.0, 0.20, 0.0, 0.0]);
+        assert!(call.clears(physical.view()));
+        assert!(clears_species_sanity(physical.view(), &elements, absolute));
+        assert!(!call.clears(collapsed.view()));
+        assert!(!clears_species_sanity(
+            collapsed.view(),
+            &elements,
+            absolute
+        ));
+        assert!(0.20 <= element_call_floor(1, 1, 0.0));
     }
 
     #[test]
@@ -14895,8 +14918,8 @@ mod call_floor_tests {
         let at = |oh: f64| Array1::from(vec![0.0, 0.0, 0.0, oh, 0.0, 0.0, -0.24, 0.93, 0.0]);
         assert!(clears_species_sanity(at(0.957).view(), &water, FLOOR));
         assert!(clears_species_sanity(at(0.97).view(), &water, FLOOR));
+        assert!(clears_species_sanity(at(0.85).view(), &water, FLOOR));
         assert!(!clears_species_sanity(at(0.60).view(), &water, FLOOR));
-        assert!(!clears_species_sanity(at(0.85).view(), &water, FLOOR));
 
         let mut cfg = Config::for_cluster(3);
         cfg.call_floor = Some(FLOOR);
@@ -14916,6 +14939,10 @@ mod call_floor_tests {
             (14, 14, 2.20),
         ] {
             assert!(element_call_floor(za, zb, 0.0) < length, "{za}-{zb}");
+            assert!(
+                element_call_floor(za, zb, OVERLAP_CALL_LIMIT) < length,
+                "{za}-{zb} at the 0.90 A absolute"
+            );
         }
         assert!(element_call_floor(8, 1, FLOOR) < 0.957);
     }
@@ -14927,7 +14954,7 @@ mod call_floor_tests {
                 absolute: FLOOR,
                 elements: Some(&elements),
             };
-            let mut x = Array1::from(vec![0.0, 0.0, 0.0, 0.7, 0.0, 0.0, 0.3, 0.8, 0.0]);
+            let mut x = Array1::from(vec![0.0, 0.0, 0.0, 0.2, 0.0, 0.0, 0.1, 0.15, 0.0]);
             assert!(!floor.clears(x.view()));
             assert!(!clears_species_sanity(x.view(), &elements, FLOOR));
             assert!(floor.open(&mut x, None));

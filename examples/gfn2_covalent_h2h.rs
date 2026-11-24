@@ -19,9 +19,9 @@
 //! probe runs on a two-atom handle and is charged to the same ledger. There
 //! is no pair-range cut, because dispersion has no finite reach.
 //! The element floors are 0.70 of the summed covalent radii: 1.554 Å for
-//! Si–Si, 1.064 Å for C–C and 0.434 Å for H–H. The effective floor is the
-//! larger of that value and the handle's 0.90 Å absolute floor. The handle's
-//! guard and the search's sanity check use the same effective floor, so a
+//! Si–Si, 1.064 Å for C–C and 0.434 Å for H–H. The radii set the floor. A
+//! blanket 0.90 Å absolute would sit past a physical H–H bond at 0.741 Å.
+//! The handle's guard and the search's sanity check use that floor, so a
 //! pair the search has opened is never refused.
 //!
 //! The start is a random cluster in the scaled start radius from
