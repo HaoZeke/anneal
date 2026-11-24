@@ -78,6 +78,8 @@ pub mod calibrate;
 pub mod caller_stop;
 /// Declarative campaign configuration: TOML in, channels explicit.
 pub mod campaign;
+/// Turns a cap of a cluster about a local symmetry axis.
+pub mod cap_twist;
 /// Event catalogue keyed by local topology.
 pub mod catalog;
 /// Pure cooperative-catalog policy and target-free proposals.
@@ -266,8 +268,6 @@ pub mod universal_coverage;
 pub mod variant;
 /// Package version metadata.
 pub mod version;
-/// Sign between an xtb energy gradient and the rgpot force buffer.
-pub mod xtb_gradient;
 
 /// C ABI surface (cargo-c builds).
 #[cfg(feature = "capi")]
