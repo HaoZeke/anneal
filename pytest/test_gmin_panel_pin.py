@@ -265,9 +265,12 @@ def _make_builder_sandbox(tmp_path: Path) -> tuple[Path, Path, dict[str, str], P
         f"gmin.write_text('#!/usr/bin/env bash\\n# build=' + str(n) + ' sig=' + h + '\\n')\n"
         f"gmin.chmod(0o755)\n"
     )
+    fake_blas = stubs / "libopenblas.so.0"
+    fake_blas.write_bytes(b"fake-openblas-v1\n")
     (stubs / "ldd").write_text(
         "#!/usr/bin/env bash\n"
-        "echo '\tlibopenblas.so.0 => /usr/lib/libopenblas.so.0 (0x0)'\n"
+        f'blas="${{FAKE_BLAS_LIB:-{fake_blas}}}"\n'
+        "printf '\\tlibopenblas.so.0 => %s (0x0)\\n' \"$blas\"\n"
     )
     for tool in ("gfortran", "patch", "cmake", "make", "ldd"):
         (stubs / tool).chmod(0o755)
@@ -540,3 +543,54 @@ def test_build_gmin_sc_records_cap_patches_compilers_flags_and_binary_sha256(
         f"binary_sha256={bin_digest}",
     ):
         assert expected_line in note_lines
+
+
+def test_build_gmin_sc_key_follows_the_discovered_blas(tmp_path: Path) -> None:
+    repo, _tarball, base_env, counter = _make_builder_sandbox(tmp_path)
+    script = repo / "scripts/metal_h2h/build_gmin_sc.sh"
+    blas_a = tmp_path / "blas-a" / "libopenblas.so.0"
+    blas_b = tmp_path / "blas-b" / "libopenblas.so.0"
+    blas_a_new = tmp_path / "blas-a-new" / "libopenblas.so.0"
+    for path, content in (
+        (blas_a, b"openblas-0.3.26\n"),
+        (blas_b, b"openblas-0.3.26\n"),
+        (blas_a_new, b"openblas-0.3.27\n"),
+    ):
+        path.parent.mkdir()
+        path.write_bytes(content)
+
+    def build(work: Path, blas: Path) -> str:
+        env = dict(
+            base_env,
+            GMIN_SC_WORK=str(work),
+            GMIN_DARBY_WORK=str(tmp_path / "darby-work"),
+            FAKE_BLAS_LIB=str(blas),
+        )
+        subprocess.run(["bash", str(script)], cwd=repo, env=env, check=True)
+        key = read_build_key(work / "gmin-source.txt", work / "gmin-build-key")
+        assert key
+        return key
+
+    key_a = build(tmp_path / "work-a", blas_a)
+    assert build(tmp_path / "work-a-again", blas_a) == key_a
+
+    # A different library path with identical bytes is a different BLAS.
+    assert build(tmp_path / "work-b", blas_b) != key_a
+
+    # Another library at the same path is a different BLAS too.
+    work = tmp_path / "work-shared"
+    shared = tmp_path / "shared" / "libopenblas.so.0"
+    shared.parent.mkdir()
+    shared.write_bytes(blas_a.read_bytes())
+    shared_key = build(work, shared)
+    rebuilds = int(counter.read_text().strip())
+    assert build(work, shared) == shared_key
+    assert int(counter.read_text().strip()) == rebuilds
+    shared.write_bytes(blas_a_new.read_bytes())
+    assert build(work, shared) != shared_key
+    assert int(counter.read_text().strip()) > rebuilds
+
+    note = (work / "gmin-source.txt").read_text().splitlines()
+    new_sha = hashlib.sha256(blas_a_new.read_bytes()).hexdigest()
+    assert f"blas={shared}" in note
+    assert f"blas_sha256={new_sha}" in note

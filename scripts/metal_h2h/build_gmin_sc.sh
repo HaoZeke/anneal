@@ -62,18 +62,43 @@ KEY_ARGS=(
 for flag in "${CMAKE_FLAGS[@]}"; do
   KEY_ARGS+=("--option=$flag")
 done
-BUILD_KEY=$(python3 "$PIN" build-key "${KEY_ARGS[@]}")
-OLD_BUILD_KEY=$(
-  python3 "$PIN" read-build-key \
-    --metadata "$WORK/gmin-source.txt" \
-    --key-file "$BUILD_KEY_FILE"
-)
 
 # Basin-hopping is chaotic in the last bit, so the BLAS GMIN links is part of
 # the run: reference BLAS and OpenBLAS end the same seed on different minima.
 # The sc-n12 GMIN rows reproduce with OpenBLAS.
+# The BLAS is the one the binary loads, so it is found from the binary and
+# folded into the build key before the key is compared or recorded.
+discover_blas() {
+  local found
+  found=$(ldd "$1" 2>/dev/null | awk '/libopenblas/ && !seen++ {print $3}')
+  [[ -n $found ]] || return 1
+  BLAS=$(readlink -f "$found")
+  [[ -f $BLAS ]] || return 1
+  BLAS_SHA256=$(sha256sum "$BLAS" | awk '{print $1}')
+}
+compute_build_key() {
+  python3 "$PIN" build-key "${KEY_ARGS[@]}" \
+    "--option=blas=$BLAS" \
+    "--option=blas_sha256=$BLAS_SHA256"
+}
+
 mkdir -p "$WORK/bin"
-if [[ $OLD_BUILD_KEY != "$BUILD_KEY" || ! -x $WORK/bin/GMIN ]]; then
+BLAS=
+BLAS_SHA256=
+BUILD_KEY=
+need_rebuild=1
+if [[ -x $WORK/bin/GMIN ]] && discover_blas "$WORK/bin/GMIN"; then
+  BUILD_KEY=$(compute_build_key)
+  OLD_BUILD_KEY=$(
+    python3 "$PIN" read-build-key \
+      --metadata "$WORK/gmin-source.txt" \
+      --key-file "$BUILD_KEY_FILE"
+  )
+  if [[ $OLD_BUILD_KEY == "$BUILD_KEY" ]]; then
+    need_rebuild=0
+  fi
+fi
+if (( need_rebuild )); then
   rm -rf "$SRC"
   rm -f "$WORK/bin/GMIN" "$BUILD_KEY_FILE"
   mkdir -p "$SRC"
@@ -93,12 +118,12 @@ if [[ $OLD_BUILD_KEY != "$BUILD_KEY" || ! -x $WORK/bin/GMIN ]]; then
   )
   cp -a "$build/GMIN" "$WORK/bin/GMIN"
   chmod +x "$WORK/bin/GMIN"
+  if ! discover_blas "$WORK/bin/GMIN"; then
+    echo "GMIN is not linked against OpenBLAS" >&2
+    exit 1
+  fi
+  BUILD_KEY=$(compute_build_key)
   printf '%s\n' "$BUILD_KEY" > "$BUILD_KEY_FILE"
-fi
-blas=$(ldd "$WORK/bin/GMIN" | awk '/libopenblas/ {print $3}')
-if [[ -z $blas ]]; then
-  echo "GMIN is not linked against OpenBLAS" >&2
-  exit 1
 fi
 {
   echo "url=$GMIN_PIN_URL"
@@ -122,7 +147,8 @@ fi
   echo "cxxflags=$CXXFLAGS_VAL"
   echo "cppflags=$CPPFLAGS_VAL"
   echo "ldflags=$LDFLAGS_VAL"
-  echo "blas=$(readlink -f "$blas")"
+  echo "blas=$BLAS"
+  echo "blas_sha256=$BLAS_SHA256"
   echo "binary_sha256=$(sha256sum "$WORK/bin/GMIN" | awk '{print $1}')"
 } > "$WORK/gmin-source.txt"
 echo "gmin build_key=$BUILD_KEY binary=$WORK/bin/GMIN"
