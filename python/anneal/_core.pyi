@@ -407,6 +407,7 @@ class Config:
         self,
         sites: Sequence[Sequence[float]] | Sequence[float] | npt.NDArray[np.float64],
         species: Sequence[int],
+        bonds: Sequence[Sequence[int]] | None = None,
     ) -> Config: ...
     def with_flexible_molecules(
         self,
@@ -1068,6 +1069,7 @@ def cluster_search(
     layout: str = "block",
     target: float | None = None,
     water_sites: npt.NDArray[np.float64] | None = None,
+    bonds: list[list[int]] | None = None,
     groups: list[list[int]] | None = None,
     local_step: str | None = None,
     ring_moves: bool | None = None,

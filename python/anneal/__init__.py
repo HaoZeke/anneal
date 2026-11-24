@@ -365,7 +365,8 @@ def cluster_search(
         with ``recommended=False``, ``for_molecular``, scaled by
         ``energy_scale`` when given. Requires ``species`` and ``start``.
         Excludes ``ras``, ``derived``, ``communicating``, ``length_scale``,
-        ``rigid``, ``sigmas``, ``water_sites`` and a non-block layout.
+        ``rigid``, ``sigmas``, ``water_sites``, ``bonds`` and a non-block
+        layout.
       local_step: ``lbfgs``, ``tric`` or ``auto``, the optimizer of every
         quench of a ``groups`` search. ``tric`` relaxes in translation-rotation
         internal coordinates, in electronvolt and angstrom. ``auto`` times the
@@ -413,6 +414,11 @@ def cluster_search(
         ``local_step="auto"`` timed a potential call and a TRIC step.
       - ``search_seconds``, ``polish_seconds``, ``polish_calls``: wall-clock
         phase timings in seconds and final polish call count.
+      - ``rigid_path``: present on rigid searches (``rigid=True``,
+        ``water_sites``, or a rigid ``config``), a dict with ``shell``,
+        ``archive``, ``recorded``, ``withhold_nonfinite``,
+        ``withhold_insane``, ``withhold_overlap``, and ``withhold_gradient``
+        counts (absent for atomic and molecular searches).
 
       When ``ras=True``, a dict from the residual archive search containing
       ``best``, ``best_energy``, ``hops``, ``charged``, ``screens``,

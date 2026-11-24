@@ -214,12 +214,17 @@ def test_core_docstrings_match_live_result_fields():
         if callable(obj):
             assert getattr(obj, "__doc__", None), f"anneal._core.{name} has no __doc__"
 
-    # 1. anneal._core.cluster_search (standard + ras=True) vs live result dicts.
+    # 1. anneal._core.cluster_search (standard + rigid + ras=True) vs live result dicts.
     pot = anneal.PairPotential.lennard_jones(4)
     cs_out = anneal._core.cluster_search(pot, None, 4, 120, seed=0)
+    rigid_out = anneal._core.cluster_search(
+        anneal.GminTip4p(2), None, 2, 40, seed=0, rigid=True
+    )
+    assert "rigid_path" in rigid_out
+    rigid_path_keys = set(rigid_out["rigid_path"].keys())
     cs_core_doc = anneal._core.cluster_search.__doc__ or ""
     cs_wrap_doc = anneal.cluster_search.__doc__ or ""
-    for key in sorted(cs_out.keys()):
+    for key in sorted(set(cs_out.keys()) | set(rigid_out.keys()) | rigid_path_keys):
         assert f"`{key}`" in cs_core_doc, (
             f"anneal._core.cluster_search.__doc__ missing result key {key!r}"
         )

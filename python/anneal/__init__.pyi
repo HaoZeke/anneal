@@ -168,6 +168,7 @@ def cluster_search(
     layout: str = "block",
     target: float | None = None,
     water_sites: npt.ArrayLike | None = None,
+    bonds: Sequence[Sequence[int]] | None = None,
     groups: Sequence[Sequence[int]] | None = None,
     local_step: str | None = None,
     ring_moves: bool | None = None,

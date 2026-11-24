@@ -3999,8 +3999,12 @@ fn scaled_water_geometry(scale: f64) -> PyResult<crate::rigid_body::RigidBodyGeo
         .iter()
         .map(|s| [s[0] * scale, s[1] * scale, s[2] * scale])
         .collect();
-    crate::rigid_body::RigidBodyGeometry::new(sites, base.species().to_vec())
-        .map_err(PyValueError::new_err)
+    crate::rigid_body::RigidBodyGeometry::new_bonded(
+        sites,
+        base.species().to_vec(),
+        base.bonds().to_vec(),
+    )
+    .map_err(PyValueError::new_err)
 }
 
 fn rigid_probe(
@@ -4151,7 +4155,7 @@ fn rigid_probe(
 ///     `recommended=False`, `Config.for_molecular`, at `energy_scale`
 ///     (default `1.0`). Needs `species` and `start`. Excludes `ras`,
 ///     `derived`, `communicating`, `length_scale`, `rigid`, `sigmas`,
-///     `water_sites`, and a non-block layout.
+///     `water_sites`, `bonds`, and a non-block layout.
 ///   local_step: `lbfgs`, `tric` or `auto`, `Config.local_step` of a
 ///     `groups` search (`lbfgs` is also accepted without `groups`). Unset
 ///     keeps the preset's: `auto` for `recommended=True`, L-BFGS otherwise.
@@ -4171,12 +4175,13 @@ fn rigid_probe(
 ///   config: explicit `Config` instance (`config.n_points == n`). Mutually
 ///     exclusive with preset-modifier arguments (`derived`, `communicating`,
 ///     `length_scale`, `energy_scale`, `species`, `sigmas`, `rigid`,
-///     `water_sites`, `groups`, `local_step`, `ring_moves`,
+///     `water_sites`, `bonds`, `groups`, `local_step`, `ring_moves`,
 ///     `hold_stereocentres`, `measured_energy_scale`). Molecular configs
 ///     require `start`; `ras=True` requires a Cartesian single-species config.
 ///
 /// Returns:
-///   When `ras=False` (default), a dict with 35 fields:
+///   When `ras=False` (default), a dict with 35 fields (plus `rigid_path`
+///   on rigid searches):
 ///   - `best`, `best_energy`: lowest minimum coordinates (in `layout`) and
 ///     energy.
 ///   - `final`, `final_energy`: final chain coordinates (`numpy.ndarray` or
@@ -4196,6 +4201,10 @@ fn rigid_probe(
 ///     counters.
 ///   - `search_seconds`, `polish_seconds`, `polish_calls`: wall-clock phase
 ///     durations in seconds and answer-polish evaluations.
+///   - `rigid_path`: on rigid searches (`rigid=True`, `water_sites`, or a
+///     rigid `config`), a dict with `shell`, `archive`, `recorded`,
+///     `withhold_nonfinite`, `withhold_insane`, `withhold_overlap`, and
+///     `withhold_gradient` counts (absent for atomic and molecular searches).
 ///
 ///   When `ras=True`, a dict with 12 fields: `best`, `best_energy`, `hops`,
 ///   `charged`, `screens`, `same_floor`, `artn`, `best_at`, `floors`,
@@ -4285,6 +4294,7 @@ fn cluster_search(
             || sigmas.is_some()
             || rigid
             || water_sites.is_some()
+            || bonds.is_some()
             || groups.is_some()
             || local_step.is_some()
             || ring_moves.is_some()
@@ -4293,7 +4303,7 @@ fn cluster_search(
         {
             return Err(PyValueError::new_err(
                 "config excludes preset-modifier arguments (derived, communicating, length_scale, \
-                 energy_scale, species, sigmas, rigid, water_sites, groups, local_step, \
+                 energy_scale, species, sigmas, rigid, water_sites, bonds, groups, local_step, \
                  ring_moves, hold_stereocentres, measured_energy_scale); mutate config directly",
             ));
         }
@@ -4351,9 +4361,14 @@ fn cluster_search(
                 "groups excludes ras, derived, communicating and length_scale",
             ));
         }
-        if rigid || sigmas.is_some() || water_sites.is_some() || layout != "block" {
+        if rigid
+            || sigmas.is_some()
+            || water_sites.is_some()
+            || bonds.is_some()
+            || layout != "block"
+        {
             return Err(PyValueError::new_err(
-                "groups excludes rigid, sigmas, water_sites and a non-block layout",
+                "groups excludes rigid, sigmas, water_sites, bonds and a non-block layout",
             ));
         }
         if species.as_ref().is_none_or(|labels| labels.len() != n) {

@@ -387,8 +387,10 @@ fn parse_sites_vec(sites_any: &Bound<'_, PyAny>) -> PyResult<Vec<[f64; 3]>> {
 fn rigid_body_geometry_to_py(py: Python<'_>, geom: &RigidBodyGeometry) -> PyResult<Py<PyDict>> {
     let dict = PyDict::new(py);
     let sites: Vec<(f64, f64, f64)> = geom.sites().iter().map(|s| (s[0], s[1], s[2])).collect();
+    let bonds: Vec<[usize; 2]> = geom.bonds().to_vec();
     dict.set_item("sites", sites)?;
     dict.set_item("species", geom.species().to_vec())?;
+    dict.set_item("bonds", bonds)?;
     Ok(dict.into())
 }
 
@@ -1008,12 +1010,30 @@ impl PyClusterConfig {
         }
     }
 
-    /// Return a copy configured on a rigid centre-and-rotation chart.
-    fn with_rigid_bodies(&self, sites: &Bound<'_, PyAny>, species: Vec<u32>) -> PyResult<Self> {
+    /// Return a copy configured on a rigid centre-and-rotation chart with optional intrabody bonds.
+    #[pyo3(signature = (sites, species, bonds = None))]
+    fn with_rigid_bodies(
+        &self,
+        sites: &Bound<'_, PyAny>,
+        species: Vec<u32>,
+        bonds: Option<Vec<Vec<usize>>>,
+    ) -> PyResult<Self> {
         check_n_at_least_two(self.inner.n_points)?;
         let parsed_sites = parse_sites_vec(sites)?;
-        let geometry =
-            RigidBodyGeometry::new(parsed_sites, species).map_err(PyValueError::new_err)?;
+        let declared = match bonds {
+            None => Vec::new(),
+            Some(pairs) => pairs
+                .into_iter()
+                .map(|pair| {
+                    if pair.len() != 2 {
+                        return Err(PyValueError::new_err("a bond is two site indices"));
+                    }
+                    Ok([pair[0], pair[1]])
+                })
+                .collect::<PyResult<Vec<[usize; 2]>>>()?,
+        };
+        let geometry = RigidBodyGeometry::new_bonded(parsed_sites, species, declared)
+            .map_err(PyValueError::new_err)?;
         Ok(Self {
             inner: self.inner.clone().with_rigid_bodies(geometry),
             recommended: self.recommended,
@@ -3042,7 +3062,7 @@ impl PyClusterConfig {
         self.inner.superbasin_features = value;
     }
 
-    /// Rigid-body site geometry dict `{"sites": (M, 3), "species": list[int]}` or `None`.
+    /// Rigid-body site geometry dict `{"sites": (M, 3), "species": list[int], "bonds": list[list[int]]}` or `None`.
     #[getter]
     fn rigid_body_geometry(&self, py: Python<'_>) -> PyResult<Option<Py<PyDict>>> {
         self.inner

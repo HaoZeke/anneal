@@ -349,6 +349,19 @@ def test_cluster_search_scaled_presets_and_custom_config_match_rust():
         anneal.cluster_search(lj4, None, 5, 200, config=capped_cfg)
     with pytest.raises(ValueError, match="excludes"):
         anneal.cluster_search(lj4, None, 4, 200, config=capped_cfg, length_scale=1.2)
+    with pytest.raises(ValueError, match="config excludes"):
+        anneal.cluster_search(lj4, None, 4, 200, config=capped_cfg, bonds=[[0, 1], [0, 2]])
+    with pytest.raises(ValueError, match="excludes"):
+        anneal.cluster_search(
+            lj4,
+            None,
+            4,
+            200,
+            species=[8, 1, 1, 8],
+            groups=[[0, 1, 2], [3]],
+            start=np.zeros(12, dtype=np.float64),
+            bonds=[[0, 1], [0, 2]],
+        )
 
 
 def test_scaled_native_four_point_lj_seed_29_regression():
@@ -579,6 +592,8 @@ def test_scaled_stock_species_and_rigid_cluster_search_covariance():
     assert rigid_s["best_energy"] == pytest.approx(
         escale * rigid_u["best_energy"], rel=1e-5, abs=1e-5
     )
+    assert "rigid_path" in rigid_s
+    assert "rigid_path" in rigid_u
     assert np.allclose(
         _sorted_pair_distances(rigid_s["best"][:6]),
         scale * _sorted_pair_distances(rigid_u["best"][:6]),
@@ -598,6 +613,20 @@ def test_cluster_search_invalid_stock_inputs_and_docstring():
 
     out = anneal._core.cluster_search(lj4, None, 4, 120, seed=1)
     assert len(out) == 35
+    rigid_out = anneal._core.cluster_search(
+        anneal.GminTip4p(2), None, 2, 40, seed=1, rigid=True
+    )
+    assert "rigid_path" in rigid_out
+    rigid_path_keys = set(rigid_out["rigid_path"].keys())
+    assert rigid_path_keys == {
+        "shell",
+        "archive",
+        "recorded",
+        "withhold_nonfinite",
+        "withhold_insane",
+        "withhold_overlap",
+        "withhold_gradient",
+    }
 
     repo_root = Path(__file__).resolve().parents[1]
     py_rs = (repo_root / "src" / "python.rs").read_text(encoding="utf-8")
@@ -624,7 +653,7 @@ def test_cluster_search_invalid_stock_inputs_and_docstring():
     assert core_doc, "anneal._core.cluster_search.__doc__ must be populated"
     assert wrap_doc, "anneal.cluster_search.__doc__ must be populated"
 
-    for key in sorted(set(out.keys()) | ras_keys):
+    for key in sorted(set(out.keys()) | set(rigid_out.keys()) | rigid_path_keys | ras_keys):
         assert f"`{key}`" in core_doc, (
             f"anneal._core.cluster_search.__doc__ missing result key {key!r}"
         )
@@ -875,6 +904,7 @@ def test_config_structured_fields_roundtrip_and_execute():
     assert geom is not None
     assert geom["species"] == [8, 1, 1]
     assert len(geom["sites"]) == 3
+    assert geom["bonds"] == [[0, 1], [0, 2]]
 
     custom_rigid = anneal.Config.recommended(3).with_rigid_bodies(
         [[0.0, 0.0, 0.0], [0.0, 0.75, 0.58], [0.0, -0.75, 0.58]],
@@ -883,6 +913,20 @@ def test_config_structured_fields_roundtrip_and_execute():
     assert custom_rigid.rigid_body is True
     assert custom_rigid.rigid_body_geometry is not None
     assert custom_rigid.rigid_body_geometry["species"] == [8, 1, 1]
+    assert custom_rigid.rigid_body_geometry["bonds"] == []
+    bonded_rigid = anneal.Config.recommended(3).with_rigid_bodies(
+        [[0.0, 0.0, 0.0], [0.0, 0.75, 0.58], [0.0, -0.75, 0.58]],
+        [8, 1, 1],
+        bonds=[[2, 0], [0, 1]],
+    )
+    assert bonded_rigid.rigid_body_geometry is not None
+    assert bonded_rigid.rigid_body_geometry["bonds"] == [[0, 1], [0, 2]]
+    with pytest.raises(ValueError, match="no hub"):
+        anneal.Config.recommended(3).with_rigid_bodies(
+            [[0.0, 0.0, 0.0], [0.0, 0.75, 0.58], [0.0, -0.75, 0.58]],
+            [8, 1, 1],
+            bonds=[[1, 2]],
+        )
     with pytest.raises(AttributeError, match="not writable"):
         custom_rigid.rigid_body_geometry = None
     with pytest.raises(AttributeError, match="not writable"):

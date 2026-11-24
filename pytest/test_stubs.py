@@ -263,12 +263,27 @@ def test_mypy_validates_stubs_and_typed_consumer(tmp_path: Path):
         "from anneal.ase import Anneal\n"
         "\n"
         "cfg: anneal.Config = anneal.Config.recommended(6)\n"
+        "bonded_cfg: anneal.Config = cfg.with_rigid_bodies(\n"
+        "    [[0.0, 0.0, 0.0], [0.0, 0.75, 0.58], [0.0, -0.75, 0.58]],\n"
+        "    [8, 1, 1],\n"
+        "    bonds=[[0, 1], [0, 2]],\n"
+        ")\n"
         "led: anneal.Ledger = anneal.Ledger(100)\n"
         "preset: anneal.Boltzmann = anneal.Boltzmann(t_init=1.0, sigma=0.5)\n"
         "low = np.zeros(2, dtype=np.float64)\n"
         "high = np.ones(2, dtype=np.float64)\n"
         "hist: anneal.History = anneal.run(lambda x: float(x.sum()), low, high, preset)\n"
-        "hit: bool = anneal.energy_hits(-1.0, -1.0)\n",
+        "hit: bool = anneal.energy_hits(-1.0, -1.0)\n"
+        "tip: anneal.GminTip4p = anneal.GminTip4p(2)\n"
+        "cs: dict[str, object] = anneal.cluster_search(\n"
+        "    tip,\n"
+        "    None,\n"
+        "    2,\n"
+        "    20,\n"
+        "    start=np.zeros(12, dtype=np.float64),\n"
+        "    water_sites=[[0.0, 0.0, -0.0656], [0.0, 0.757, 0.5205], [0.0, -0.757, 0.5205]],\n"
+        "    bonds=[[0, 1], [0, 2]],\n"
+        ")\n",
         encoding="utf-8",
     )
     proc = subprocess.run(
