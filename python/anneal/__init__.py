@@ -279,6 +279,7 @@ def cluster_search(
     layout: str = "block",
     target: float | None = None,
     water_sites=None,
+    bonds=None,
     groups=None,
     local_step: str | None = None,
     ring_moves: bool | None = None,
@@ -356,6 +357,9 @@ def cluster_search(
         both false, ``Config.for_tip4p``. Requires ``start``. Excludes
         ``ras``, ``derived``, ``length_scale``, ``energy_scale``, ``rigid``,
         ``species``, ``sigmas``, and a non-block layout.
+      bonds: optional list of site-index pairs for that custom body. Unset
+        bonds are the two O-H contacts, ``[[0, 1], [0, 2]]``. A list with no
+        site joined to two others is refused. Requires ``water_sites``.
       groups: optional list of atom-index lists, one per rigid group of a
         molecular search. The presets become ``recommended_molecular`` and,
         with ``recommended=False``, ``for_molecular``, scaled by
@@ -441,6 +445,8 @@ def cluster_search(
         kwargs["target"] = float(target)
     if water_sites is not None:
         kwargs["water_sites"] = np.asarray(water_sites, dtype=np.float64).reshape(-1)
+    if bonds is not None:
+        kwargs["bonds"] = [[int(a), int(b)] for a, b in bonds]
     if groups is not None:
         kwargs["groups"] = [[int(atom) for atom in group] for group in groups]
     if local_step is not None:

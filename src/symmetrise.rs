@@ -71,10 +71,32 @@ fn centroid(x: ArrayView1<f64>, n: usize) -> [f64; 3] {
 
 /// Rotates `v` about a unit `axis` by `angle`, by Rodrigues' formula.
 fn rotate(v: [f64; 3], axis: [f64; 3], angle: f64) -> [f64; 3] {
-    // Host `sin` and `cos` of the same angle are not one function on glibc
-    // and libSystem, and this rotation places the symmetrised points.
-    let s = libm::sin(angle);
-    let co = libm::cos(angle);
+    rotate_by(v, axis, Turn::of(angle))
+}
+
+/// Sine and cosine of a rotation angle, taken once for every point the
+/// rotation moves.
+#[derive(Debug, Clone, Copy)]
+struct Turn {
+    s: f64,
+    co: f64,
+}
+
+impl Turn {
+    fn of(angle: f64) -> Self {
+        // Host `sin` and `cos` of the same angle are not one function on
+        // glibc and libSystem, and this rotation places the symmetrised
+        // points.
+        Self {
+            s: libm::sin(angle),
+            co: libm::cos(angle),
+        }
+    }
+}
+
+/// [`rotate`] with the sine and cosine already taken.
+fn rotate_by(v: [f64; 3], axis: [f64; 3], turn: Turn) -> [f64; 3] {
+    let Turn { s, co } = turn;
     let dot = v[0] * axis[0] + v[1] * axis[1] + v[2] * axis[2];
     let cross = [
         axis[1] * v[2] - axis[2] * v[1],
@@ -352,12 +374,12 @@ impl Cloud {
         if n == 0 || order < 2 {
             return None;
         }
-        let angle = 2.0 * std::f64::consts::PI / order as f64;
+        let turn = Turn::of(2.0 * std::f64::consts::PI / order as f64);
         let mut total = 0.0;
         let stop = cap.is_finite();
         if stop {
             for index in 0..n {
-                total += self.nearest_one(rotate(self.point(index), axis, angle));
+                total += self.nearest_one(rotate_by(self.point(index), axis, turn));
                 if total > cap * cap * n as f64 {
                     let partial = (total / n as f64).sqrt();
                     if partial >= cap * (1.0 + 1.0e-6) {
@@ -372,7 +394,7 @@ impl Cloud {
         while index < n {
             let width = (n - index).min(4);
             for lane in 0..width {
-                stored[lane] = rotate(self.point(index + lane), axis, angle);
+                stored[lane] = rotate_by(self.point(index + lane), axis, turn);
             }
             if !self.accumulate(&stored[..width], cap, &mut total) {
                 return None;
@@ -571,6 +593,7 @@ pub fn symmetrise(x: ArrayView1<f64>, n: usize, cand: &Candidate, pair_cutoff: f
     }
     let c = centroid(x, n);
     let angle = 2.0 * std::f64::consts::PI / cand.order as f64;
+    let step = Turn::of(angle);
     let rel =
         |a: usize| -> [f64; 3] { [x[3 * a] - c[0], x[3 * a + 1] - c[1], x[3 * a + 2] - c[2]] };
 
@@ -585,7 +608,7 @@ pub fn symmetrise(x: ArrayView1<f64>, n: usize, cand: &Candidate, pair_cutoff: f
         let mut cur = a;
         let mut closed = true;
         for _ in 1..cand.order {
-            let w = rotate(rel(cur), cand.axis, angle);
+            let w = rotate_by(rel(cur), cand.axis, step);
             let mut best = usize::MAX;
             let mut best_d = f64::INFINITY;
             for b in 0..n {
@@ -1508,6 +1531,103 @@ mod tests {
         wide.nearest_squared_batch(&images, &mut wide_batched);
         for (image, got) in images.iter().zip(wide_batched) {
             assert_eq!(wide.nearest_squared_scalar(*image).to_bits(), got.to_bits());
+        }
+    }
+
+    /// The rotation as it was, taking the sine and cosine for every point.
+    fn rotate_taking_trig_per_point(v: [f64; 3], axis: [f64; 3], angle: f64) -> [f64; 3] {
+        let s = libm::sin(angle);
+        let co = libm::cos(angle);
+        let dot = v[0] * axis[0] + v[1] * axis[1] + v[2] * axis[2];
+        let cross = [
+            axis[1] * v[2] - axis[2] * v[1],
+            axis[2] * v[0] - axis[0] * v[2],
+            axis[0] * v[1] - axis[1] * v[0],
+        ];
+        [
+            v[0] * co + cross[0] * s + axis[0] * dot * (1.0 - co),
+            v[1] * co + cross[1] * s + axis[1] * dot * (1.0 - co),
+            v[2] * co + cross[2] * s + axis[2] * dot * (1.0 - co),
+        ]
+    }
+
+    /// The deviation as it was: every image rotated with its own sine and
+    /// cosine, the same nearest-image scan and the same early stop.
+    fn deviation_taking_trig_per_point(
+        cloud: &Cloud,
+        axis: [f64; 3],
+        order: usize,
+        cap: f64,
+    ) -> Option<f64> {
+        let n = cloud.xs.len();
+        if n == 0 || order < 2 {
+            return None;
+        }
+        let angle = 2.0 * std::f64::consts::PI / order as f64;
+        let mut total = 0.0;
+        if cap.is_finite() {
+            for index in 0..n {
+                total += cloud.nearest_one(rotate_taking_trig_per_point(
+                    cloud.point(index),
+                    axis,
+                    angle,
+                ));
+                if total > cap * cap * n as f64 {
+                    let partial = (total / n as f64).sqrt();
+                    if partial >= cap * (1.0 + 1.0e-6) {
+                        return None;
+                    }
+                }
+            }
+            return Some((total / n as f64).sqrt());
+        }
+        let mut index = 0usize;
+        let mut stored = [[0.0; 3]; 4];
+        while index < n {
+            let width = (n - index).min(4);
+            for lane in 0..width {
+                stored[lane] = rotate_taking_trig_per_point(cloud.point(index + lane), axis, angle);
+            }
+            if !cloud.accumulate(&stored[..width], cap, &mut total) {
+                return None;
+            }
+            index += width;
+        }
+        Some((total / n as f64).sqrt())
+    }
+
+    #[test]
+    fn one_sine_and_cosine_per_rotation_leaves_every_deviation_unchanged() {
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / (1u64 << 53) as f64 - 0.5
+        };
+        for n in [1usize, 3, 4, 7, 13, 38, 49, 98] {
+            let x = Array1::from((0..3 * n).map(|_| 4.0 * next()).collect::<Vec<_>>());
+            let cloud = Cloud::from_view(x.view(), n);
+            for axis in candidate_axes(x.view(), n) {
+                for order in [0usize, 1, 2, 3, 4, 5, 6, 7] {
+                    for cap in [0.05, 0.3, 1.0, 3.0, f64::INFINITY] {
+                        let now = cloud.rotation_deviation(axis, order, cap);
+                        let before = deviation_taking_trig_per_point(&cloud, axis, order, cap);
+                        assert_eq!(
+                            now.map(f64::to_bits),
+                            before.map(f64::to_bits),
+                            "n {n} order {order} cap {cap}"
+                        );
+                    }
+                }
+                for angle in [0.3, -1.7, 2.0 * std::f64::consts::PI / 5.0] {
+                    let v = [next(), next(), next()];
+                    assert_eq!(
+                        rotate(v, axis, angle).map(f64::to_bits),
+                        rotate_taking_trig_per_point(v, axis, angle).map(f64::to_bits)
+                    );
+                }
+            }
         }
     }
 
