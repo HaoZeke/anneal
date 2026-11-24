@@ -1,0 +1,789 @@
+#!/usr/bin/env python3
+# Copyright (c) anneal developers
+"""Same-session restack gate for the conf-miss4 merge.
+
+One serial session on core 0. Arms A, B and A2 (a second release build
+of A) run on every cell in palindromic blocks. Molecules use the paired
+conformer hit rule. Guards use the default cluster presets. Each row
+records outside time, calls and in-process RssAnon. The statistics are
+in analyze.py and are fixed by PROTOCOL.md before any data.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import hashlib
+import json
+import os
+import statistics
+import struct
+import subprocess
+import sys
+import time
+from collections import Counter
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts" / "openconf_h2h"))
+sys.path.insert(0, str(ROOT / "scripts"))
+import h2h_common as hc  # noqa: E402
+from h2h_score import Molecule  # noqa: E402
+
+BASE_REF = "9b65fda3972fd8c014bce886a3ea5c05956d64af"
+B_COMMIT = "c8581d69319a2f960c25ecb5f0261feb34a739b3"
+B_TREE = "184736e2f596126ef71baca23d0ecdf756aaf77c"
+N_SEEDS = 12
+SEEDS = list(range(2000, 2000 + N_SEEDS))
+MOLECULES = ["rq3", "915", "xld", "fluvastatin", "z34", "amprenavir", "lopinavir", "lorlatinib"]
+GUARDS = ["lj38", "m38r14d", "lj75", "lj98", "m80r6", "au55", "hexamer"]
+CELL_ORDER = MOLECULES + GUARDS
+GUARD_BUDGET = {
+    "lj38": 400_000,
+    "m38r14d": 400_000,
+    "lj75": 4_000_000,
+    "lj98": 4_000_000,
+    "m80r6": 4_000_000,
+    "au55": 1_000_000,
+    "hexamer": 500_000,
+}
+HARNESS_FILES = (
+    "bench/gate-pr186-restack/run_gate.py",
+    "bench/gate-pr186-restack/guard_trace.rs",
+    "bench/gate-pr186-restack/analyze.py",
+)
+ROW_FIELDS = [
+    "cell", "kind", "seed", "arm", "slot", "core", "hit", "budget", "calls", "charged",
+    "wall_s", "inside_s", "outside_per_call_s", "rss_anon_kb", "energy", "energy_bits", "trajectory",
+    "machine_id", "base_ref", "base_tree", "harness_blobs", "error",
+]
+
+
+def kind_of(cell: str) -> str:
+    return "molecule" if cell in MOLECULES else "guard"
+
+
+def block(cell: str, pair: int) -> list[tuple[str, int, int]]:
+    first = 2000 + 2 * pair
+    second = first + 1
+    return [
+        ("A", first, 0),
+        ("B", first, 1),
+        ("Ap", first, 2),
+        ("Ap", second, 3),
+        ("B", second, 4),
+        ("A", second, 5),
+    ]
+
+
+def schedule() -> list[dict]:
+    jobs = []
+    index = 0
+    for pair in range(N_SEEDS // 2):
+        for cell in CELL_ORDER:
+            for arm, seed, slot in block(cell, pair):
+                jobs.append(
+                    {
+                        "cell": cell,
+                        "kind": kind_of(cell),
+                        "phase": "session",
+                        "seed": seed,
+                        "arm": arm,
+                        "slot": slot,
+                        "index": index,
+                        "block": pair,
+                    }
+                )
+                index += 1
+    return jobs
+
+
+def schedule_id(jobs: list[dict]) -> str:
+    blob = json.dumps(
+        [(j["cell"], j["seed"], j["arm"], j["slot"], j["index"]) for j in jobs],
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(blob.encode()).hexdigest()
+
+
+def expected_balance(cell: str) -> Counter:
+    pairs = [(0, "A"), (5, "A"), (1, "B"), (4, "B"), (2, "Ap"), (3, "Ap")]
+    return Counter({pair: N_SEEDS // 2 for pair in pairs})
+
+
+def check_balance(jobs: list[dict]) -> dict[str, Counter]:
+    found = {}
+    for cell in CELL_ORDER:
+        mine = [j for j in jobs if j["cell"] == cell]
+        counts = Counter((j["slot"], j["arm"]) for j in mine)
+        want = expected_balance(cell)
+        if counts != want:
+            raise SystemExit(f"unbalanced {cell}: {counts} != {want}")
+        arms = sorted({j["arm"] for j in mine})
+        means = []
+        for arm in arms:
+            idx = [j["index"] for j in mine if j["arm"] == arm]
+            means.append(sum(idx) / len(idx))
+            if len(idx) != N_SEEDS:
+                raise SystemExit(f"{cell} {arm} has {len(idx)} runs")
+        if max(means) - min(means) > 1e-9:
+            raise SystemExit(f"unbalanced position {cell}: {means}")
+        found[cell] = counts
+    return found
+
+
+def load_budgets() -> dict[tuple[str, int], int]:
+    files = [
+        ROOT / "bench" / "openconf-h2h" / "conf-fix4" / "n24" / "seeds.csv",
+        ROOT / "bench" / "openconf-h2h" / "conf-fix4" / "seeds.csv",
+        ROOT / "bench" / "openconf-h2h" / "conf-fix3" / "seeds.csv",
+        ROOT / "bench" / "openconf-h2h" / "conf-fix" / "seeds.csv",
+    ]
+    found: dict[tuple[str, int], int] = {}
+    for path in files:
+        with path.open(newline="") as handle:
+            for row in csv.DictReader(handle):
+                if row["arm"] != "anneal" or not row["budget"]:
+                    continue
+                key = (row["molecule"], int(row["seed"]))
+                found.setdefault(key, int(float(row["budget"])))
+    budgets = {}
+    for molecule in MOLECULES:
+        recorded = [found[(molecule, seed)] for seed in SEEDS if (molecule, seed) in found]
+        if not recorded:
+            raise SystemExit(f"no recorded budget for {molecule}")
+        centre = int(statistics.median(recorded))
+        for seed in SEEDS:
+            budgets[(molecule, seed)] = found.get((molecule, seed), centre)
+    return budgets
+
+
+def outside_per_call(wall: float, inside: float, calls: int) -> float:
+    if calls <= 0:
+        return float("nan")
+    return (wall - inside) / calls
+
+
+def thread_env(extra: dict[str, str]) -> dict[str, str]:
+    kept = ("PATH", "HOME", "USER", "LANG", "LC_ALL", "TMPDIR", "RUSTUP_HOME", "CARGO_HOME")
+    env = {key: os.environ[key] for key in kept if key in os.environ}
+    env.update(
+        {
+            "OMP_NUM_THREADS": "1",
+            "MKL_NUM_THREADS": "1",
+            "OPENBLAS_NUM_THREADS": "1",
+            "GOTO_NUM_THREADS": "1",
+            "RAYON_NUM_THREADS": "1",
+            "NUMEXPR_NUM_THREADS": "1",
+            "VECLIB_MAXIMUM_THREADS": "1",
+            "BLIS_NUM_THREADS": "1",
+            "OMP_THREAD_LIMIT": "1",
+            "OMP_DYNAMIC": "FALSE",
+            "MKL_DYNAMIC": "FALSE",
+            "NUMBA_NUM_THREADS": "1",
+            "POLARS_MAX_THREADS": "1",
+            "JULIA_NUM_THREADS": "1",
+            "PYTHONUNBUFFERED": "1",
+            "PYTHONNOUSERSITE": "1",
+        }
+    )
+    env.update(extra)
+    return env
+
+
+def affinity() -> str:
+    text = Path("/proc/self/status").read_text()
+    for line in text.splitlines():
+        if line.startswith("Cpus_allowed_list:"):
+            return line.split(":", 1)[1].strip()
+    return ""
+
+
+def require_core() -> None:
+    if affinity() != "0":
+        raise SystemExit("this process is not pinned to core 0")
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def git_text(repo: Path, *args: str) -> str:
+    proc = subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True)
+    return proc.stdout.strip()
+
+
+def require_object(repo: Path, obj: str) -> None:
+    proc = subprocess.run(["git", "-C", str(repo), "cat-file", "-e", obj], capture_output=True)
+    if proc.returncode != 0:
+        raise SystemExit(f"git object missing: {obj}")
+
+
+def provenance(repo: Path) -> dict[str, str]:
+    require_object(repo, BASE_REF)
+    base_tree = git_text(repo, "rev-parse", f"{BASE_REF}^{{tree}}")
+    require_object(repo, base_tree)
+    blobs = []
+    for rel in HARNESS_FILES:
+        digest = git_text(repo, "hash-object", rel)
+        require_object(repo, digest)
+        blobs.append(f"{Path(rel).name}:{digest}")
+    return {"base_ref": BASE_REF, "base_tree": base_tree, "harness_blobs": " ".join(blobs)}
+
+
+def machine_id() -> str:
+    for candidate in (Path("/etc/machine-id"), Path("/sys/class/dmi/id/product_uuid")):
+        if candidate.is_file():
+            return hashlib.sha256(candidate.read_bytes().strip()).hexdigest()
+    raise SystemExit("machine id is unavailable")
+
+
+def job_dir(run_dir: Path, job: dict) -> Path:
+    return run_dir / "jobs" / job["phase"] / job["cell"] / str(job["seed"]) / job["arm"]
+
+
+def result_ok(path: Path, ident: str) -> bool:
+    if not path.is_file():
+        return False
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return False
+    return data.get("complete") is True and data.get("schedule") == ident
+
+
+def classify_error(text: str) -> str:
+    if "no finite start" in text or "finite start" in text:
+        return "no finite start"
+    if text.strip():
+        return "run failed"
+    return ""
+
+
+def write_result(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, sort_keys=True) + "\n")
+
+
+def log_line(journal: Path, text: str) -> None:
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    line = f"{stamp} {text}\n"
+    with journal.open("a") as handle:
+        handle.write(line)
+    print(text, flush=True)
+
+
+def run_molecule(args, job: dict, budget: int, ident: str, journal: Path) -> None:
+    out = job_dir(args.run_dir, job)
+    dest = out / "result.json"
+    if result_ok(dest, ident):
+        return
+    out.mkdir(parents=True, exist_ok=True)
+    env = thread_env(
+        {
+            "PYTHONPATH": str(args.py[job["arm"]]),
+            "LD_PRELOAD": str(args.counter),
+            "LD_LIBRARY_PATH": str(args.rdkit_lib),
+        }
+    )
+    cmd = [
+        "taskset", "-c", "0",
+        sys.executable, str(Path(__file__).resolve()),
+        "worker-molecule",
+        "--cell", job["cell"],
+        "--seed", str(job["seed"]),
+        "--budget", str(budget),
+        "--out", str(out),
+        "--schedule", ident,
+        "--arm", job["arm"],
+        "--slot", str(job["slot"]),
+        "--index", str(job["index"]),
+    ]
+    started = time.perf_counter()
+    proc = subprocess.run(cmd, env=env, capture_output=True, text=True)
+    elapsed = time.perf_counter() - started
+    if proc.stdout:
+        journal_raw(journal, proc.stdout)
+    if proc.stderr:
+        journal_raw(journal, proc.stderr)
+    if not result_ok(dest, ident):
+        write_result(
+            dest,
+            {
+                "complete": True,
+                "schedule": ident,
+                "cell": job["cell"],
+                "kind": "molecule",
+                "phase": "session",
+                "seed": job["seed"],
+                "arm": job["arm"],
+                "slot": job["slot"],
+                "index": job["index"],
+                "core": affinity(),
+                "budget": budget,
+                "calls": 0,
+                "energy_calls": 0,
+                "grad_calls": 0,
+                "wall_s": elapsed,
+                "inside_s": 0.0,
+                "error": classify_error(proc.stderr) or "run failed",
+                "returncode": proc.returncode,
+            },
+        )
+    log_line(journal, f"molecule {job['cell']} seed {job['seed']} {job['arm']} slot {job['slot']} exit {proc.returncode}")
+
+
+def journal_raw(journal: Path, text: str) -> None:
+    with journal.open("a") as handle:
+        handle.write(text)
+        if not text.endswith("\n"):
+            handle.write("\n")
+
+
+def rss_anon_kb() -> int:
+    for line in Path("/proc/self/status").read_text().splitlines():
+        if line.startswith("RssAnon:"):
+            return int(line.split()[1])
+    return 0
+
+
+def worker_molecule(args) -> int:
+    require_core()
+    import h2h_job
+
+    row = hc.molecules()[args.cell]
+    out = args.out
+    out.mkdir(parents=True, exist_ok=True)
+    started = time.perf_counter()
+    error = ""
+    info: dict = {}
+    try:
+        info = h2h_job.run_anneal(row, args.seed, args.budget, out)
+    except Exception as err:
+        print(f"{type(err).__name__}: {err}", file=sys.stderr)
+        error = classify_error(str(err)) or "run failed"
+        info = {"wall_s": time.perf_counter() - started, "energy_calls": 0, "grad_calls": 0, "error": error}
+    calls = int(info.get("energy_calls") or 0) + int(info.get("grad_calls") or 0)
+    raw_error = info.get("error") or error or ""
+    if raw_error and not error:
+        print(str(raw_error), file=sys.stderr)
+    # Phase 0 of the force-field counter is the search potential. Embedding
+    # is a different phase and is not part of this inside time.
+    inside = float(info.get("pot_s") or 0.0)
+    payload = {
+        "complete": True,
+        "schedule": args.schedule,
+        "cell": args.cell,
+        "kind": "molecule",
+        "phase": "session",
+        "seed": args.seed,
+        "arm": args.arm,
+        "slot": args.slot,
+        "index": args.index,
+        "core": affinity(),
+        "budget": args.budget,
+        "calls": calls,
+        "energy_calls": int(info.get("energy_calls") or 0),
+        "grad_calls": int(info.get("grad_calls") or 0),
+        "wall_s": float(info.get("wall_s") or 0.0),
+        "inside_s": inside,
+        "best_kcal": None if info.get("best_kcal") is None else float(info["best_kcal"]),
+        "candidates": None if info.get("candidates") is None else int(info["candidates"]),
+        "rss_anon_kb": rss_anon_kb(),
+        "error": classify_error(str(raw_error)) if raw_error else "",
+    }
+    if payload["core"] != "0":
+        payload["error"] = "wrong core"
+        payload["complete"] = True
+        write_result(out / "result.json", payload)
+        return 3
+    write_result(out / "result.json", payload)
+    return 0 if not payload["error"] else 1
+
+
+def run_guard(args, job: dict, binary: Path, ident: str, journal: Path) -> None:
+    out = job_dir(args.run_dir, job)
+    dest = out / "result.json"
+    if result_ok(dest, ident):
+        return
+    out.mkdir(parents=True, exist_ok=True)
+    env = thread_env({})
+    cmd = ["taskset", "-c", "0", str(binary), job["cell"], str(job["seed"])]
+    proc = subprocess.run(cmd, env=env, capture_output=True, text=True)
+    if proc.stderr:
+        journal_raw(journal, proc.stderr)
+    gate = parse_gate(proc.stdout)
+    if gate is None or gate.get("core") != "0" or int(gate.get("budget", "0")) != GUARD_BUDGET[job["cell"]]:
+        write_result(
+            dest,
+            {
+                "complete": True,
+                "schedule": ident,
+                "cell": job["cell"],
+                "kind": "guard",
+                "phase": job["phase"],
+                "seed": job["seed"],
+                "arm": job["arm"],
+                "slot": job["slot"],
+                "index": job["index"],
+                "core": gate.get("core") if gate else "",
+                "budget": GUARD_BUDGET[job["cell"]],
+                "hit": 0,
+                "calls": 0,
+                "charged": 0,
+                "wall_s": 0.0,
+                "inside_s": 0.0,
+                "energy_bits": "",
+                "trajectory": "",
+                "error": classify_error(proc.stderr) or "run failed",
+                "returncode": proc.returncode,
+            },
+        )
+    else:
+        write_result(
+            dest,
+            {
+                "complete": True,
+                "schedule": ident,
+                "cell": job["cell"],
+                "kind": "guard",
+                "phase": job["phase"],
+                "seed": job["seed"],
+                "arm": job["arm"],
+                "slot": job["slot"],
+                "index": job["index"],
+                "core": gate["core"],
+                "budget": int(gate["budget"]),
+                "hit": int(gate["hit"]),
+                "calls": int(gate["calls"]),
+                "charged": int(gate["charged"]),
+                "wall_s": float(gate["wall_s"]),
+                "inside_s": float(gate["inside_s"]),
+                "rss_anon_kb": int(gate["rss_anon_kb"]),
+                "energy_bits": gate["best_bits"],
+                "trajectory": gate["trajectory"],
+                "error": "",
+            },
+        )
+    log_line(
+        journal,
+        f"guard {job['cell']} seed {job['seed']} {job['arm']} slot {job['slot']} exit {proc.returncode}",
+    )
+
+
+def parse_gate(text: str) -> dict[str, str] | None:
+    for line in reversed(text.splitlines()):
+        if line.startswith("GATE "):
+            fields = {}
+            for part in line.split()[1:]:
+                key, value = part.split("=", 1)
+                fields[key] = value
+            return fields
+    return None
+
+
+def bits_to_float(text: str) -> float:
+    return struct.unpack("<d", int(text, 16).to_bytes(8, "little"))[0]
+
+
+def polish_frames(mol: Molecule, directory: Path):
+    cache = directory / "polished.npz"
+    if cache.is_file():
+        data = np.load(cache)
+        return data["x"], data["e"], data["ok"]
+    path = directory / "candidates.xyz"
+    frames = hc.read_xyz(path) if path.is_file() else []
+    xs, es, ok = [], [], []
+    for _, coords, _ in frames:
+        px, pe, pv = mol.polish(coords)
+        xs.append(px)
+        es.append(pe)
+        ok.append(pv)
+    xs_arr = np.asarray(xs).reshape(-1, mol.mol.GetNumAtoms(), 3) if xs else np.zeros((0, mol.mol.GetNumAtoms(), 3))
+    es_arr = np.asarray(es, dtype=float)
+    ok_arr = np.asarray(ok, dtype=bool)
+    np.savez(cache, x=xs_arr, e=es_arr, ok=ok_arr)
+    return xs_arr, es_arr, ok_arr
+
+
+def score_molecules(run_dir: Path, jobs: list[dict]) -> dict[tuple, dict]:
+    rows = hc.molecules()
+    scored = {}
+    for cell in MOLECULES:
+        mol = Molecule(rows[cell])
+        mine = [j for j in jobs if j["cell"] == cell]
+        kept = {}
+        raw = {}
+        for job in mine:
+            directory = job_dir(run_dir, job)
+            info = json.loads((directory / "result.json").read_text())
+            xs, es, ok = polish_frames(mol, directory)
+            valid = [(x, float(e)) for x, e, flag in zip(xs, es, ok, strict=True) if flag]
+            key = (job["arm"], job["seed"])
+            kept[key] = mol.dedupe(valid)
+            raw[key] = info
+        pool = [item for items in kept.values() for item in items]
+        lowest = min(pool, key=lambda item: item[1]) if pool else None
+        for key, items in kept.items():
+            info = raw[key]
+            hit = bool(lowest is not None and any(mol.same(lowest, item) for item in items))
+            energy = min((e for _, e in items), default=None)
+            calls = int(info.get("calls") or 0)
+            wall = float(info.get("wall_s") or 0.0)
+            inside = float(info.get("inside_s") or 0.0)
+            scored[(cell, key[0], key[1])] = {
+                "hit": int(hit),
+                "energy": energy,
+                "calls": calls,
+                "charged": calls,
+                "wall_s": wall,
+                "inside_s": inside,
+                "outside_per_call_s": outside_per_call(wall, inside, calls),
+                "budget": int(info.get("budget") or 0),
+                "rss_anon_kb": int(info.get("rss_anon_kb") or 0),
+                "error": info.get("error") or "",
+                "core": info.get("core") or "",
+                "energy_bits": "",
+                "trajectory": hash_trace(job_dir(run_dir, {"phase": "session", "cell": cell, "seed": key[1], "arm": key[0]})),
+            }
+    return scored
+
+
+def hash_trace(directory: Path) -> str:
+    path = directory / "trace.xyz"
+    if not path.is_file():
+        return ""
+    return sha256_file(path)
+
+
+def rows_for(records: list[dict], cell: str, arm: str, phase: str = "session") -> list[dict]:
+    return [row for row in records if row["cell"] == cell and row["arm"] == arm and row["phase"] == phase]
+
+
+def identical_pair(records: list[dict], cell: str, arm: str, seed: int, phase_b: str = "session") -> bool:
+    a_rows = [row for row in rows_for(records, cell, "A") if int(row["seed"]) == seed and row["error"] == ""]
+    b_rows = [row for row in rows_for(records, cell, arm, phase_b) if int(row["seed"]) == seed and row["error"] == ""]
+    if len(a_rows) != 1 or len(b_rows) != 1:
+        return False
+    a, b = a_rows[0], b_rows[0]
+    return (
+        a["trajectory"] == b["trajectory"]
+        and a["trajectory"] != ""
+        and a["energy_bits"] == b["energy_bits"]
+        and int(float(a["charged"])) == int(float(b["charged"]))
+        and int(float(a["calls"])) == int(float(b["calls"]))
+    )
+
+
+def guard_identity(records: list[dict], cell: str, arm: str = "B") -> tuple[bool, list[int]]:
+    bad = []
+    for seed in SEEDS:
+        if not identical_pair(records, cell, arm, seed):
+            bad.append(seed)
+    return (not bad), bad
+
+
+def assemble_records(run_dir: Path, jobs: list[dict], scored: dict, prov: dict, machine: str) -> list[dict]:
+    records = []
+    for job in jobs:
+        info = json.loads((job_dir(run_dir, job) / "result.json").read_text())
+        if job["kind"] == "molecule" and job["phase"] == "session":
+            extra = scored[(job["cell"], job["arm"], job["seed"])]
+            hit = extra["hit"]
+            calls = extra["calls"]
+            charged = extra["charged"]
+            wall = extra["wall_s"]
+            inside = extra["inside_s"]
+            energy = "" if extra["energy"] is None else f"{extra['energy']:.6f}"
+            bits = ""
+            trajectory = extra["trajectory"]
+            error = extra["error"]
+            core = extra["core"]
+            budget = extra["budget"]
+            rss = extra["rss_anon_kb"]
+        else:
+            hit = int(info.get("hit") or 0)
+            calls = int(info.get("calls") or 0)
+            charged = int(info.get("charged") or 0)
+            wall = float(info.get("wall_s") or 0.0)
+            inside = float(info.get("inside_s") or 0.0)
+            bits = info.get("energy_bits") or ""
+            energy = f"{bits_to_float(bits):.16e}" if bits else ""
+            trajectory = info.get("trajectory") or ""
+            error = info.get("error") or ""
+            core = info.get("core") or ""
+            budget = int(info.get("budget") or 0)
+            rss = int(info.get("rss_anon_kb") or 0)
+        outside = outside_per_call(wall, inside, calls)
+        records.append(
+            {
+                "cell": job["cell"],
+                "kind": job["kind"],
+                "phase": job["phase"],
+                "seed": job["seed"],
+                "arm": job["arm"],
+                "slot": job["slot"],
+                "core": core,
+                "hit": hit,
+                "budget": budget,
+                "calls": calls,
+                "charged": charged,
+                "wall_s": f"{wall:.9f}",
+                "inside_s": f"{inside:.9f}",
+                "outside_per_call_s": f"{outside:.9e}",
+                "rss_anon_kb": rss,
+                "energy": energy,
+                "energy_bits": bits,
+                "trajectory": trajectory,
+                "machine_id": machine,
+                "base_ref": prov["base_ref"],
+                "base_tree": prov["base_tree"],
+                "harness_blobs": prov["harness_blobs"],
+                "error": error,
+            }
+        )
+    return records
+
+
+def write_csv(path: Path, records: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS, lineterminator="\n", extrasaction="ignore")
+        writer.writeheader()
+        for row in records:
+            writer.writerow(row)
+
+
+def self_check() -> None:
+    jobs = schedule()
+    check_balance(jobs)
+    want = len(CELL_ORDER) * N_SEEDS * 3
+    if len(jobs) != want:
+        raise SystemExit(f"schedule length {len(jobs)} != {want}")
+    load_budgets()
+
+
+def write_sessions(path: Path, rows: list[tuple[str, str]]) -> None:
+    with path.open("w", newline="") as handle:
+        writer = csv.writer(handle, lineterminator="\n")
+        writer.writerow(["key", "value"])
+        writer.writerows(rows)
+
+
+def run(args) -> int:
+    require_core()
+    self_check()
+    b_tree = git_text(args.src_b, "rev-parse", "HEAD^{tree}")
+    if b_tree != B_TREE:
+        raise SystemExit("B tree does not match")
+    a_tree = git_text(args.src_a, "rev-parse", "HEAD^{tree}")
+    ap_tree = git_text(args.src_ap, "rev-parse", "HEAD^{tree}")
+    if a_tree != ap_tree or a_tree != git_text(args.repo, "rev-parse", f"{BASE_REF}^{{tree}}"):
+        raise SystemExit("A and A2 are not the develop tree")
+    prov = provenance(args.repo)
+    machine = machine_id()
+    jobs = schedule()
+    balances = check_balance(jobs)
+    ident = schedule_id(jobs)
+    budgets = load_budgets()
+    journal = args.run_dir / "journal.log"
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    log_line(journal, f"seeds {SEEDS[0]}-{SEEDS[-1]} n {len(SEEDS)} cells {len(CELL_ORDER)}")
+    log_line(journal, f"session {ident[:12]} jobs {len(jobs)}")
+    for position, job in enumerate(jobs, 1):
+        if job["kind"] == "molecule":
+            run_molecule(args, job, budgets[(job["cell"], job["seed"])], ident, journal)
+        else:
+            run_guard(args, job, args.bin[job["arm"]], ident, journal)
+        if position % 20 == 0:
+            log_line(journal, f"progress {position}/{len(jobs)}")
+    log_line(journal, "scoring molecules")
+    scored = score_molecules(args.run_dir, jobs)
+    records = assemble_records(args.run_dir, jobs, scored, prov, machine)
+    builds = {arm: sha256_file(args.bin[arm]) for arm in ("A", "B", "Ap")}
+    sessions = [
+        ("base_ref", prov["base_ref"]),
+        ("base_tree", prov["base_tree"]),
+        ("b_commit", B_COMMIT),
+        ("b_tree", B_TREE),
+        ("harness_blobs", prov["harness_blobs"]),
+        ("machine_id", machine),
+        ("seeds", f"{SEEDS[0]}-{SEEDS[-1]}"),
+        ("n", str(N_SEEDS)),
+        ("core", "0"),
+        ("threads", "1"),
+        ("schedule", ident),
+        ("build_a", builds["A"]),
+        ("build_b", builds["B"]),
+        ("build_a2", builds["Ap"]),
+    ]
+    for cell, counts in balances.items():
+        text = " ".join(f"{slot}:{arm}={count}" for (slot, arm), count in sorted(counts.items()))
+        sessions.append((f"balance_{cell}", text))
+    for cell, budget in GUARD_BUDGET.items():
+        sessions.append((f"budget_{cell}", str(budget)))
+    write_csv(args.run_dir / "rows.csv", records)
+    write_csv(args.rows, records)
+    write_sessions(args.sessions, sessions)
+    log_line(journal, "rows written; run analyze.py on rows.csv")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    sub.add_parser("schedule")
+
+    run_p = sub.add_parser("run")
+    run_p.add_argument("--repo", type=Path, required=True)
+    run_p.add_argument("--run-dir", type=Path, required=True)
+    run_p.add_argument("--src-a", type=Path, required=True)
+    run_p.add_argument("--src-b", type=Path, required=True)
+    run_p.add_argument("--src-ap", type=Path, required=True)
+    run_p.add_argument("--bin-a", type=Path, required=True)
+    run_p.add_argument("--bin-b", type=Path, required=True)
+    run_p.add_argument("--bin-ap", type=Path, required=True)
+    run_p.add_argument("--py-a", type=Path, required=True)
+    run_p.add_argument("--py-b", type=Path, required=True)
+    run_p.add_argument("--py-ap", type=Path, required=True)
+    run_p.add_argument("--counter", type=Path, required=True)
+    run_p.add_argument("--rdkit-lib", type=Path, required=True)
+    run_p.add_argument("--rows", type=Path, required=True)
+    run_p.add_argument("--sessions", type=Path, required=True)
+
+    worker = sub.add_parser("worker-molecule")
+    worker.add_argument("--cell", required=True)
+    worker.add_argument("--seed", type=int, required=True)
+    worker.add_argument("--budget", type=int, required=True)
+    worker.add_argument("--out", type=Path, required=True)
+    worker.add_argument("--schedule", required=True)
+    worker.add_argument("--arm", required=True)
+    worker.add_argument("--slot", type=int, required=True)
+    worker.add_argument("--index", type=int, required=True)
+
+    args = parser.parse_args()
+    if args.cmd == "schedule":
+        self_check()
+        jobs = schedule()
+        counts = check_balance(jobs)
+        for cell, counter in counts.items():
+            text = " ".join(f"{slot}:{arm}={n}" for (slot, arm), n in sorted(counter.items()))
+            print(f"{cell} {text}")
+        print(f"jobs {len(jobs)} id {schedule_id(jobs)[:12]}")
+        return 0
+    if args.cmd == "worker-molecule":
+        return worker_molecule(args)
+    args.bin = {"A": args.bin_a, "B": args.bin_b, "Ap": args.bin_ap}
+    args.py = {"A": args.py_a, "B": args.py_b, "Ap": args.py_ap}
+    return run(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
