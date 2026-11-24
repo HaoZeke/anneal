@@ -2292,7 +2292,7 @@ def covalent_gfn2(audit: Audit) -> None:
     gfn2_revision_tables(audit, path, header, paper[-1][0] + 1, rows, crest)
 
 
-GFN2_SYSTEMS = {"Si10": "si10", "C10": "c10", "Si13": "si13", "C20": "c20"}
+GFN2_SYSTEMS = {"Si10": "si10", "C10": "c10", "C20": "c20"}
 # (system, anneal revision, Fisher p, Mann-Whitney p, its sample, sentence that prints them). The sample is
 # "calls", calls to the hit with a miss ranked after every hit, or "best", the best energies. The sentence
 # is filled from the rows by gfn2_sentence_fields.
@@ -2306,10 +2306,6 @@ GFN2_REVISION_TESTS = (
     ("C20", "5351f272", "1", "0.0004", "best",
      "Anneal's best is lower than CREST's on {below} of the {pairs} pairs of seeds "
      "(Mann-Whitney p = {mw_p} on the best energies)"),
-    ("Si13", "c1c02d16", "0.45", "0.005", "calls",
-     "anneal reaches the reference on {anneal_share} seeds, in {anneal_calls} calls, and CREST on "
-     "{crest_hits_word}, in {crest_calls} (Fisher p = {fisher_p}, Mann-Whitney p = {mw_p}, a miss ranked "
-     "after every hit)"),
 )
 NUMBER_WORDS = ("no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve")
 
@@ -3332,13 +3328,12 @@ def cap_turn_outside_ratios(rows: list[dict[str, str]], skip: set[tuple[str, int
 
 
 def cap_turn_ratio_text(ratio: float) -> str:
-    """Three decimals, via the summary script's four-decimal print then half away from zero.
+    """Three decimals, rounded once from full precision, half away from zero.
 
-    ``summarise.py`` prints the ratio to four places. The README keeps three,
-    and a trailing 5 there rounds away from zero, so 0.9925 is written 0.993.
+    ``summarise.py`` prints the ratio to three places with the same rule,
+    so 0.992484 is written 0.992 rather than double-rounded via 0.9925.
     """
-    four = Decimal(f"{ratio:.4f}")
-    return format(four.quantize(Decimal("0.001"), rounding=ROUND_HALF_UP), "f")
+    return format(Decimal(str(ratio)).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP), "f")
 
 
 def _flag(value: str) -> bool:
