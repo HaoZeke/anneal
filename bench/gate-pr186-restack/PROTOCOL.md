@@ -27,7 +27,7 @@ Seeds are 2000 through 2011, n = 12 per arm per cell. Each cell runs
 palindromic blocks of two seeds: A, B, A2 on the first seed, then A2,
 B, A on the second. Each arm has the same mean position in every cell.
 Budgets and stop levels are identical in every arm. All arms run on
-one VM in one session.
+one machine, one session.
 
 ## Cells
 
@@ -109,7 +109,7 @@ the molecular cells are the evidence that B moved nothing.
      because only Rust 1.83.0 was pre-installed.
    - `scripts/openconf_h2h/setup_env.sh` defaults `MAMBA_EXE` and
      `MAMBA_ROOT_PREFIX` to `/work/...`, which is not writable on
-     this host; `MAMBA_EXE` and `MAMBA_ROOT_PREFIX` were pointed to a
+     the build machine; `MAMBA_EXE` and `MAMBA_ROOT_PREFIX` were pointed to a
      writable scratch directory alongside `OPENCONF_H2H_ENV`.
    - `maturin` is installed inside `$OPENCONF_H2H_ENV/bin`, so step 4
      runs with `$OPENCONF_H2H_ENV/bin` prepended to `PATH`.
