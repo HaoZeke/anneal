@@ -2,7 +2,7 @@
 
 The immutable base A is develop
 `9b65fda3972fd8c014bce886a3ea5c05956d64af`, tree
-`a49a66d1b67b28b9842ac29301d4fe079431dd28`.  The restacked payload
+`a49a66d1422cfefa28012fd12e6729bc4e879d5f`.  The restacked payload
 applied as one squash commit is candidate B, tree
 `f172df01104c53c74daf6c74f63bf08c45d19b06`.  The harness checks both
 trees and records the candidate commit it ran.

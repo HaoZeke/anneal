@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 BASE = "9b65fda3972fd8c014bce886a3ea5c05956d64af"
-BASE_TREE = "a49a66d1b67b28b9842ac29301d4fe079431dd28"
+BASE_TREE = "a49a66d1422cfefa28012fd12e6729bc4e879d5f"
 PR_TREE = "f172df01104c53c74daf6c74f63bf08c45d19b06"
 SEEDS = tuple(range(2000, 2012))
 WATER_SEEDS = tuple(range(2000, 2024))
