@@ -1148,28 +1148,139 @@ mod diffusion_tests {
         );
     }
 
-    #[test]
-    fn tridiagonal_jacobi_matches_symmetric_eigen_bitwise() {
-        let diag = vec![4.2, -1.5, 0.3, 7.1, 2.0, -3.4, 5.5, 0.0];
-        let subdiag = vec![1.1, 0.0, 2.3, -0.8, 1.4, -1.9, 0.6];
-        let n = diag.len();
-        let mut dense = Array2::<f64>::zeros((n, n));
-        for i in 0..n {
-            dense[[i, i]] = diag[i];
-            if i + 1 < n {
-                dense[[i, i + 1]] = subdiag[i];
-                dense[[i + 1, i]] = subdiag[i];
+    fn reference_array2_eigen(a: ArrayView2<f64>, max_sweeps: usize) -> (Array1<f64>, Array2<f64>) {
+        let n = a.nrows();
+        let mut m = a.to_owned();
+        let mut v = Array2::<f64>::eye(n);
+        for _ in 0..max_sweeps {
+            let mut off = 0.0;
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    off += m[[i, j]] * m[[i, j]];
+                }
+            }
+            if off.sqrt() <= 1e-14 * (1.0 + m.diag().iter().map(|d| d.abs()).sum::<f64>()) {
+                break;
+            }
+            for p in 0..n {
+                for q in (p + 1)..n {
+                    let apq = m[[p, q]];
+                    if apq.abs() < 1e-300 {
+                        continue;
+                    }
+                    let theta = (m[[q, q]] - m[[p, p]]) / (2.0 * apq);
+                    let t = theta.signum() / (theta.abs() + (theta * theta + 1.0).sqrt());
+                    let c = 1.0 / (t * t + 1.0).sqrt();
+                    let s = t * c;
+                    for k in 0..n {
+                        let akp = m[[k, p]];
+                        let akq = m[[k, q]];
+                        m[[k, p]] = c * akp - s * akq;
+                        m[[k, q]] = s * akp + c * akq;
+                    }
+                    for k in 0..n {
+                        let apk = m[[p, k]];
+                        let aqk = m[[q, k]];
+                        m[[p, k]] = c * apk - s * aqk;
+                        m[[q, k]] = s * apk + c * aqk;
+                    }
+                    for k in 0..n {
+                        let vkp = v[[k, p]];
+                        let vkq = v[[k, q]];
+                        v[[k, p]] = c * vkp - s * vkq;
+                        v[[k, q]] = s * vkp + c * vkq;
+                    }
+                }
             }
         }
-        let (ref_vals, ref_vecs) = symmetric_eigen(dense.view(), 128);
-        let vals_only = tridiagonal_jacobi_values(&diag, &subdiag, 128);
-        let (vals, vecs) = tridiagonal_jacobi(&diag, &subdiag, 128);
-        assert_eq!(vals_only.len(), n);
-        for i in 0..n {
-            assert_eq!(vals_only[i].to_bits(), ref_vals[i].to_bits());
-            assert_eq!(vals[i].to_bits(), ref_vals[i].to_bits());
-            for row in 0..n {
-                assert_eq!(vecs[[row, i]].to_bits(), ref_vecs[[row, i]].to_bits());
+        let mut vals: Vec<(f64, usize)> = (0..n).map(|i| (m[[i, i]], i)).collect();
+        vals.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        let mut out_vals = Array1::zeros(n);
+        let mut out_vecs = Array2::zeros((n, n));
+        for (new, (val, old)) in vals.into_iter().enumerate() {
+            out_vals[new] = val;
+            for k in 0..n {
+                out_vecs[[k, new]] = v[[k, old]];
+            }
+        }
+        (out_vals, out_vecs)
+    }
+
+    #[test]
+    fn flat_jacobi_matches_symmetric_eigen_bitwise_across_sizes() {
+        use rand::rngs::StdRng;
+        use rand::{Rng, SeedableRng};
+
+        let mut rng = StdRng::seed_from_u64(0x5a17_cafe);
+        for n in [4usize, 8, 16] {
+            for case in 0..6 {
+                let mut dense = Array2::<f64>::zeros((n, n));
+                for i in 0..n {
+                    dense[[i, i]] = rng.random_range(-5.0..5.0);
+                    for j in (i + 1)..n {
+                        // Exercise decoupled blocks and exact zero off-diagonals.
+                        let val = if case == 0 || (case == 1 && (i + j).is_multiple_of(2)) {
+                            0.0
+                        } else {
+                            rng.random_range(-3.0..3.0)
+                        };
+                        dense[[i, j]] = val;
+                        dense[[j, i]] = val;
+                    }
+                }
+                let (ref_vals, ref_vecs) = reference_array2_eigen(dense.view(), 128);
+                let (flat_vals, flat_vecs) = symmetric_eigen(dense.view(), 128);
+                // Also cover non-contiguous views via transpose.
+                let (t_vals, t_vecs) = symmetric_eigen(dense.t(), 128);
+                for i in 0..n {
+                    assert_eq!(flat_vals[i].to_bits(), ref_vals[i].to_bits());
+                    assert_eq!(t_vals[i].to_bits(), ref_vals[i].to_bits());
+                    for row in 0..n {
+                        assert_eq!(flat_vecs[[row, i]].to_bits(), ref_vecs[[row, i]].to_bits());
+                        assert_eq!(t_vecs[[row, i]].to_bits(), ref_vecs[[row, i]].to_bits());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn tridiagonal_jacobi_matches_symmetric_eigen_bitwise() {
+        use rand::rngs::StdRng;
+        use rand::{Rng, SeedableRng};
+
+        let mut rng = StdRng::seed_from_u64(0x7c1d_1234);
+        for n in [4usize, 8, 16] {
+            for case in 0..6 {
+                let diag: Vec<f64> = (0..n).map(|_| rng.random_range(-6.0..6.0)).collect();
+                let subdiag: Vec<f64> = (0..n - 1)
+                    .map(|i| {
+                        if case == 0 || (case == 1 && i % 2 == 1) {
+                            0.0
+                        } else {
+                            rng.random_range(-3.0..3.0)
+                        }
+                    })
+                    .collect();
+                let mut dense = Array2::<f64>::zeros((n, n));
+                for i in 0..n {
+                    dense[[i, i]] = diag[i];
+                    if i + 1 < n {
+                        dense[[i, i + 1]] = subdiag[i];
+                        dense[[i + 1, i]] = subdiag[i];
+                    }
+                }
+                let (ref_vals, ref_vecs) = symmetric_eigen(dense.view(), 128);
+                let vals_only = tridiagonal_jacobi_values(&diag, &subdiag, 128);
+                let (vals, vecs) = tridiagonal_jacobi(&diag, &subdiag, 128);
+                assert_eq!(vals_only.len(), n);
+                for i in 0..n {
+                    assert_eq!(vals_only[i].to_bits(), ref_vals[i].to_bits());
+                    assert_eq!(vals[i].to_bits(), ref_vals[i].to_bits());
+                    for row in 0..n {
+                        assert_eq!(vecs[[row, i]].to_bits(), ref_vecs[[row, i]].to_bits());
+                    }
+                }
             }
         }
     }
