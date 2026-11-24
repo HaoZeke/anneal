@@ -3376,7 +3376,8 @@ fn claim_observed_basis_probe(
     basin: impl FnOnce() -> usize,
     seen: &mut std::collections::HashSet<usize>,
 ) -> bool {
-    !cfg.move_library.is_rigid_body()
+    cfg.observed_basis_probe
+        && !cfg.move_library.is_rigid_body()
         && !cfg.move_library.is_molecular()
         && cfg.active_region.is_none()
         && cfg.frozen.is_none()
@@ -12265,6 +12266,24 @@ mod tests {
             &mut seen
         ));
         assert!(seen.is_empty());
+
+        let mut off = Config::recommended(6);
+        off.observed_basis_probe = false;
+        assert!(!claim_observed_basis_probe(
+            &off,
+            &ledger,
+            10,
+            || 6,
+            &mut seen
+        ));
+        assert!(seen.is_empty());
+        assert!(claim_observed_basis_probe(
+            &Config::recommended(6),
+            &ledger,
+            10,
+            || 6,
+            &mut seen
+        ));
     }
 
     fn observed_basis_side_calls(cfg: &Config) -> usize {
