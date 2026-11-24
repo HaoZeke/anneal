@@ -91,6 +91,6 @@ fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     let hash = trajectory_hash();
     // The general move library is deterministic on every build under the
     // local-gap exchange proof.
-    let expected = "494e7103315a96bf63203e08d7a17403c6b2e8c4bdeedf5616129c6f493a1322";
+    let expected = "e6b339093188e1624087a273b98cd268c9f36ec8b9b9436755e782d9dca8681d";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }

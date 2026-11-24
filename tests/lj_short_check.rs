@@ -14,7 +14,9 @@
 //! feature build keeps the Hungarian record.
 //!
 //! Removing the fixed fivefold openings and changing the general symmetry
-//! order distribution move both short records.
+//! order distribution move both short records. Keeping the lower measure
+//! of the library and detected groups, and the best-fitting near-parallel
+//! direction, move them again.
 
 use anneal_core::methods::cluster_hopping::{Config, Ledger};
 use anneal_core::methods::cluster_search::search;
@@ -25,8 +27,8 @@ fn lj38_and_lj98_short_searches_stay_put() {
     anneal_core::install_rgpot_kernels!();
     // (n, seed, budget, best, hops, converged, capped)
     let cases: &[(usize, u64, usize, f64, usize, usize, usize)] = &[
-        (38, 1, 2500, -172.877_736_382_550_15, 31, 23, 25),
-        (98, 7, 2500, -533.540_586_029_386_5, 12, 11, 10),
+        (38, 1, 2500, -170.260_483_558_385_52, 24, 18, 19),
+        (98, 7, 2500, -520.107_879_491_539_2, 11, 10, 8),
     ];
     let mut records = Vec::new();
     for (n, seed, budget, best, hops, converged, capped) in cases {
@@ -61,7 +63,7 @@ fn lj38_and_lj98_short_searches_stay_put() {
         assert_eq!(stats.capped, *capped);
     }
     let expected = "\
-LJ38 -172.8777363825501538 31 23 25 2500
-LJ98 -533.5405860293865317 12 11 10 2500";
+LJ38 -170.2604835583855163 24 18 19 2500
+LJ98 -520.1078794915391654 11 10 8 2500";
     assert_eq!(records.join("\n"), expected);
 }

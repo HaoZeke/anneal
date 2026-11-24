@@ -4796,6 +4796,6 @@ mod tests {
             mix(&(*spent as u64).to_le_bytes());
             mix(&energy.to_bits().to_le_bytes());
         }
-        assert_eq!(state, 0x8ecb3cb05e092433);
+        assert_eq!(state, 0x1878157b9aef2b64);
     }
 }
