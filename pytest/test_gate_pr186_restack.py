@@ -30,6 +30,7 @@ def rows(
     path_draws: int = 0,
     path_spent: int = 0,
     calls_to_hit: int = 40,
+    a_path_absent: bool = False,
 ):
     out = []
     for arm in ("A", "B", "Ap"):
@@ -52,8 +53,14 @@ def rows(
                 "branch_on_stall": (
                     str(int(path_enabled)) if arm == "B" else "0"
                 ),
-                "b_path_draws": str(path_draws if arm == "B" else 0),
-                "b_path_spent": str(path_spent if arm == "B" else 0),
+                "b_path_draws": (
+                    "" if a_path_absent and arm != "B"
+                    else str(path_draws if arm == "B" else 0)
+                ),
+                "b_path_spent": (
+                    "" if a_path_absent and arm != "B"
+                    else str(path_spent if arm == "B" else 0)
+                ),
                 "trajectory": "same",
                 "energy_bits": "",
                 "error": "",
@@ -83,6 +90,19 @@ def test_enabled_conf_miss_path_requires_nonzero_counters():
     assert "conf-miss path" in result["failures"]
 
 
+def test_absent_path_counters_are_not_synthetic_zeros():
+    result = ANALYZE.judge(rows(a_path_absent=True), "rq3")
+    assert result["verdict"] == "PASS"
+    missing = rows()
+    for row in missing:
+        if row["arm"] == "B":
+            row["b_path_draws"] = ""
+            row["b_path_spent"] = ""
+    result = ANALYZE.judge(missing, "rq3")
+    assert result["verdict"] == "INCONCLUSIVE"
+    assert result["b_path_checkable"] == 0
+
+
 def test_gate_rejects_calls_to_hit_above_the_budget():
     result = ANALYZE.judge(rows(calls_to_hit=101), "rq3")
     assert result["verdict"] == "FIX"
@@ -98,19 +118,22 @@ def test_molecular_trace_records_charged_calls_at_first_hit():
     harvest.gradient(point, np.zeros(3))
     harvest.close()
     assert harvest.calls == 4
-    assert harvest.found == [2]
+    assert harvest.found == [4]
 
 
-def test_paired_calls_use_one_value_and_gradient_unit():
+def test_paired_calls_charge_every_energy_and_gradient_evaluation():
     counts = {"energy_calls": 7, "grad_calls": 3}
-    assert h2h_job.charged_value_gradient_calls(counts) == 3
-    assert paired_score.required_charged_calls({"charged_calls": 3}) == 3
+    assert h2h_job.charged_value_gradient_calls(counts) == 10
+    assert paired_score.required_charged_calls(counts) == 10
+    assert paired_score.required_charged_calls(
+        {**counts, "charged_calls": 3}
+    ) == 10
+    assert paired_score.call_budget({"budget": 5}, 10) == 10
+    assert paired_score.call_budget({}, 10) == 10
 
 
-def test_paired_calls_require_the_producer_column():
-    with np.testing.assert_raises_regex(ValueError, "charged_calls"):
-        paired_score.required_charged_calls(
-            {"energy_calls": 7, "grad_calls": 3}
-        )
+def test_paired_calls_require_raw_counter_columns():
+    with np.testing.assert_raises_regex(ValueError, "energy_calls and grad_calls"):
+        paired_score.required_charged_calls({"energy_calls": 7})
     with np.testing.assert_raises_regex(ValueError, "first-hit trace"):
         paired_score.required_first_hit(Path("job"), None, 5)

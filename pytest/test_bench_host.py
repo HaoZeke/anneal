@@ -81,7 +81,6 @@ def test_scoring_a_job_written_before_the_host_label_does_not_raise(tmp_path, mo
     job_dir.mkdir(parents=True)
     old = {
         "molecule": "fccf", "arm": "anneal", "seed": 1, "energy_calls": 10, "grad_calls": 10,
-        "charged_calls": 10,
         "wall_s": 1.0, "pot_s": 0.5, "outside_s": 0.5, "hostname": "workstation-17",
     }
     (job_dir / "job.json").write_text(json.dumps(old))

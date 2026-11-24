@@ -174,10 +174,16 @@ def judge(rows: list[dict], cell: str) -> dict:
     res["peak_rss_fail"] = pgb[1] > max(CAP, pga[2])
     path_checks = []
     path_enabled = 0
+    path_unavailable = 0
     for row in b.values():
         flag = row.get("branch_on_stall")
-        draws = int(row.get("b_path_draws") or 0)
-        spent = int(row.get("b_path_spent") or 0)
+        draws_text = row.get("b_path_draws")
+        spent_text = row.get("b_path_spent")
+        if draws_text in ("", None) or spent_text in ("", None):
+            path_unavailable += 1
+            continue
+        draws = int(draws_text)
+        spent = int(spent_text)
         if flag == "1":
             path_enabled += 1
             path_checks.append(draws > 0 and spent > 0)
@@ -186,9 +192,16 @@ def judge(rows: list[dict], cell: str) -> dict:
         else:
             path_checks.append(False)
     res["b_path_matches"] = sum(path_checks)
+    res["b_path_checkable"] = len(path_checks)
     res["b_path_enabled"] = path_enabled
-    res["b_path_draws_sum"] = sum(int(r.get("b_path_draws") or 0) for r in b.values())
-    res["b_path_spent_sum"] = sum(int(r.get("b_path_spent") or 0) for r in b.values())
+    res["b_path_draws_sum"] = sum(
+        int(r["b_path_draws"]) for r in b.values()
+        if r.get("b_path_draws") not in ("", None)
+    )
+    res["b_path_spent_sum"] = sum(
+        int(r["b_path_spent"]) for r in b.values()
+        if r.get("b_path_spent") not in ("", None)
+    )
     early = [
         r
         for r in list(a.values()) + list(b.values())
@@ -205,7 +218,9 @@ def judge(rows: list[dict], cell: str) -> dict:
     if res["calls_ratio"] and abs(res["calls_ratio"] - 1.0) > 0.02:
         notes.append("calls differ between A and B")
     kind = next(iter(a.values()))["kind"] if a else ""
-    if res["b_path_matches"] != res["n"]:
+    if path_unavailable:
+        notes.append(f"B conf-miss counters unavailable in {path_unavailable} rows")
+    elif res["b_path_matches"] != res["n"]:
         notes.append("B conf-miss counters disagree with the resolved configuration")
     if kind == "guard":
         ok, bad = identical(a, b)
@@ -228,12 +243,14 @@ def judge(rows: list[dict], cell: str) -> dict:
         failures.append("memory")
     if res.get("identical") is False:
         failures.append("default parity")
-    if res["b_path_matches"] != res["n"]:
+    if not path_unavailable and res["b_path_matches"] != res["n"]:
         failures.append("conf-miss path")
     res["failures"] = "; ".join(failures)
     res["notes"] = "; ".join(notes)
     if failures:
         res["verdict"] = "FIX"
+    elif path_unavailable:
+        res["verdict"] = "INCONCLUSIVE"
     elif res["opc_strict"] and res["rss_strict"] and res["peak_rss_strict"]:
         res["verdict"] = "PASS"
     else:
@@ -247,7 +264,7 @@ FIELDS = [
     "tot_ratio", "tot_lo", "tot_hi", "tot_aa_hi", "tot_strict", "tot_band", "tot_regression",
     "rss_ratio", "rss_lo", "rss_hi", "rss_aa_hi", "rss_strict", "rss_fail",
     "peak_rss_ratio", "peak_rss_lo", "peak_rss_hi", "peak_rss_aa_hi", "peak_rss_strict", "peak_rss_fail",
-    "b_path_matches", "b_path_enabled", "b_path_draws_sum", "b_path_spent_sum",
+    "b_path_matches", "b_path_checkable", "b_path_enabled", "b_path_draws_sum", "b_path_spent_sum",
     "calls_ratio", "early_stop_runs", "identical", "max_abs_dE", "mismatch",
 ]
 
@@ -279,7 +296,7 @@ def main() -> int:
             lines.append(f"| {r['cell']} | {r['n']} | {r['verdict']} | | | | | | | | | | {r['notes']} |")
             continue
         bpath = (
-            f"{r['b_path_matches']}/{r['n']} "
+            f"{r['b_path_matches']}/{r['b_path_checkable']} "
             f"({r['b_path_enabled']} enabled)"
         )
         lines.append(

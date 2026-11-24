@@ -34,8 +34,8 @@ struct Done {
     calls: usize,
     charged: usize,
     branch_on_stall: bool,
-    branch_draws: u64,
-    branch_spent: usize,
+    branch_draws: Option<u64>,
+    branch_spent: Option<u64>,
     wall_s: f64,
     inside_s: f64,
     best_bits: String,
@@ -196,8 +196,8 @@ fn main() {
         done.calls,
         done.charged,
         u8::from(done.branch_on_stall),
-        done.branch_draws,
-        done.branch_spent,
+        optional_count(done.branch_draws),
+        optional_count(done.branch_spent),
         done.wall_s,
         done.inside_s,
         done.best_bits,
@@ -213,6 +213,19 @@ fn affinity() -> String {
         .find_map(|line| line.strip_prefix("Cpus_allowed_list:"))
         .map(|rest| rest.trim().to_string())
         .unwrap_or_default()
+}
+
+fn optional_count(value: Option<u64>) -> String {
+    value.map_or_else(|| "na".to_owned(), |count| count.to_string())
+}
+
+fn outcome_counter(debug: &str, field: &str) -> Option<u64> {
+    let marker = format!("{field}: ");
+    let value = debug.split_once(&marker)?.1;
+    let digits = value
+        .split_once(|ch: char| !ch.is_ascii_digit())
+        .map_or(value, |(head, _)| head);
+    digits.parse().ok()
 }
 
 /// `RssAnon` of this process in kB, read while the search state is alive.
@@ -357,14 +370,15 @@ fn finish(
     } else {
         budget
     };
+    let outcome_debug = format!("{outcome:?}");
     Done {
         budget,
         hit,
         calls,
         charged: outcome.charged,
         branch_on_stall,
-        branch_draws: outcome.branch_draws,
-        branch_spent: outcome.branch_spent,
+        branch_draws: outcome_counter(&outcome_debug, "branch_draws"),
+        branch_spent: outcome_counter(&outcome_debug, "branch_spent"),
         wall_s,
         inside_s,
         best_bits: format!("{:016x}", outcome.best.to_bits()),

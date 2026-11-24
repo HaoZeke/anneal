@@ -14,9 +14,10 @@ exists is skipped, so an interrupted session resumes.
 
 ``paired`` is the two-arm run on seeds 2000-2011. Each (molecule, seed) pair
 is drawn in a shuffled order; openconf runs first, and anneal then gets the
-energy plus gradient calls openconf spent on that seed. anneal charges one
-budget unit per point and makes one energy and one gradient call there, so
-its budget is half that count.
+same potential-call allowance openconf spent on that seed. Every energy and
+gradient evaluation is one potential call. Internally anneal charges one
+search-budget unit per point and normally makes one energy and one gradient
+call there, so its search budget is half the potential-call allowance.
 ``paired-score`` appends the scored rows (``paired_score.py``).
 
 With ``--baseline DIR`` a pair also runs the ``develop`` arm: anneal imported

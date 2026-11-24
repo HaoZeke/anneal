@@ -380,7 +380,8 @@ def run_molecule(args, job: dict, budget: int, ident: str, journal: Path, arm_me
                 "slot": job["slot"],
                 "index": job["index"],
                 "core": affinity(),
-                "budget": budget,
+                "budget": 2 * budget,
+                "search_budget": budget,
                 "callback_calls": 0,
                 "calls_to_hit": None,
                 "charged": 0,
@@ -474,11 +475,7 @@ def worker_molecule(args) -> int:
         ledger = info.get("ledger") if isinstance(info.get("ledger"), dict) else None
     energy_calls = int(info.get("energy_calls") or 0)
     grad_calls = int(info.get("grad_calls") or 0)
-    charged = (
-        int(ledger.get("spent") or 0)
-        if isinstance(ledger, dict)
-        else max(energy_calls, grad_calls)
-    )
+    charged = energy_calls + grad_calls
     b_path_draws = int(ledger.get("branch_draws") or 0) if isinstance(ledger, dict) else 0
     b_path_spent = int(ledger.get("branch_spent") or 0) if isinstance(ledger, dict) else 0
     branch_on_stall = cs_res.get("branch_on_stall")
@@ -504,7 +501,8 @@ def worker_molecule(args) -> int:
         "slot": args.slot,
         "index": args.index,
         "core": affinity(),
-        "budget": args.budget,
+        "budget": 2 * args.budget,
+        "search_budget": args.budget,
         "callback_calls": callback_calls,
         "calls_to_hit": None,
         "charged": charged,
@@ -553,8 +551,6 @@ def run_guard(args, job: dict, binary: Path, ident: str, journal: Path, arm_meta
             int(gate.get("charged", "0")) > GUARD_BUDGET[job["cell"]]
             or int(gate.get("calls", "0")) > GUARD_BUDGET[job["cell"]]
             or gate.get("branch_on_stall") not in ("0", "1")
-            or gate.get("branch_draws") is None
-            or gate.get("branch_spent") is None
             or (
                 int(gate.get("hit", "0"))
                 and int(gate.get("calls", "0")) > int(gate.get("charged", "0"))
@@ -626,8 +622,8 @@ def run_guard(args, job: dict, binary: Path, ident: str, journal: Path, arm_meta
                 "rss_anon_kb": int(gate["rss_anon_kb"]),
                 "peak_rss_anon_kb": int(gate.get("peak_rss_anon_kb") or gate["rss_anon_kb"]),
                 "branch_on_stall": int(gate["branch_on_stall"]),
-                "b_path_draws": int(gate["branch_draws"]),
-                "b_path_spent": int(gate["branch_spent"]),
+                "b_path_draws": optional_gate_count(gate, "branch_draws"),
+                "b_path_spent": optional_gate_count(gate, "branch_spent"),
                 "energy_bits": gate["best_bits"],
                 "trajectory": gate["trajectory"],
                 "arm_revision": arm_meta["arm_revision"],
@@ -652,6 +648,11 @@ def parse_gate(text: str) -> dict[str, str] | None:
                 fields[key] = value
             return fields
     return None
+
+
+def optional_gate_count(gate: dict[str, str], key: str) -> int | None:
+    value = gate.get(key)
+    return None if value in (None, "na") else int(value)
 
 
 def bits_to_float(text: str) -> float:
@@ -851,8 +852,8 @@ def assemble_records(
             rss = int(info.get("rss_anon_kb") or 0)
             peak_rss = int(info.get("peak_rss_anon_kb") or rss)
             branch_on_stall = info.get("branch_on_stall")
-            b_path_draws = int(info.get("b_path_draws") or 0)
-            b_path_spent = int(info.get("b_path_spent") or 0)
+            b_path_draws = info.get("b_path_draws")
+            b_path_spent = info.get("b_path_spent")
             arm_binary = info.get("arm_binary") or meta["guard_binary"]
             arm_binary_sha256 = info.get("arm_binary_sha256") or meta["guard_sha256"]
         outside = outside_per_call(wall, inside, callback_calls)

@@ -10,7 +10,7 @@ run:
 
 - ``hit``: one of the run's reported conformers is the lowest reference
   conformer (heavy-atom RMSD under 0.25 Å, energy within 0.5 kcal/mol)
-- ``calls_to_hit``: charged value-and-gradient calls spent when the run's
+- ``calls_to_hit``: energy plus gradient evaluations spent when the run's
   trace first held a minimum that polishes to that conformer; a hit without
   that trace count is rejected
 - ``n_3kcal``: distinct conformers within 3 kcal/mol of E_ref
@@ -22,6 +22,11 @@ Fisher's exact test on hits and the Mann-Whitney U test on calls to hit
 (normal approximation with the tie and continuity corrections at every
 sample size), both two-sided, anneal against openconf in ``--stats`` and
 anneal against develop in ``--versus-develop``.
+
+``calls`` always means ``energy_calls + grad_calls``. ``budget`` retains
+the anneal driver's search-point budget for old rows; ``call_budget`` is
+the comparable potential-call allowance and is twice that search budget.
+Legacy ``job.json`` files need no ``charged_calls`` field to be rescored.
 """
 
 from __future__ import annotations
@@ -45,7 +50,8 @@ from h2h_score import WINDOW, Molecule, _fmt  # noqa: E402
 
 ARMS = ("anneal", "openconf", "develop")
 ROW_FIELDS = [
-    "molecule", "arm", "seed", "budget", "calls", "energy_calls", "grad_calls", "hit", "hit_mirror", "calls_to_hit",
+    "molecule", "arm", "seed", "budget", "call_budget", "calls", "energy_calls", "grad_calls",
+    "hit", "hit_mirror", "calls_to_hit",
     "delta_min_kcal", "n_3kcal", "reference_3kcal", "candidates", "invalid", "wall_s", "pot_s",
     "outside_s", "embed_s", "e_ref_kcal", "error", "openconf_revision", "code_revision", "host",
 ]
@@ -103,14 +109,31 @@ def first_hit(name: str, arm: str, job_dir: Path, lowest: tuple[np.ndarray, floa
 
 
 def required_charged_calls(info: dict) -> int:
-    """Read the producer's value-and-gradient count without guessing."""
+    """Count every potential evaluation from old or new job records."""
     try:
-        calls = int(info["charged_calls"])
+        energy = int(info["energy_calls"])
+        gradient = int(info["grad_calls"])
     except (KeyError, TypeError, ValueError) as error:
-        raise ValueError("job.json is missing a valid charged_calls") from error
-    if calls < 0:
-        raise ValueError("job.json charged_calls must be non-negative")
-    return calls
+        raise ValueError(
+            "job.json needs valid energy_calls and grad_calls; "
+            "rescore legacy jobs without adding charged_calls"
+        ) from error
+    if energy < 0 or gradient < 0:
+        raise ValueError("job.json energy_calls and grad_calls must be non-negative")
+    return energy + gradient
+
+
+def call_budget(info: dict, calls: int) -> int:
+    """Potential-call allowance, migrated from the paired search budget."""
+    if info.get("call_budget") is not None:
+        value = int(info["call_budget"])
+    elif info.get("budget") is not None:
+        value = 2 * int(info["budget"])
+    else:
+        value = calls
+    if value < 0:
+        raise ValueError("job.json call budget must be non-negative")
+    return value
 
 
 def required_first_hit(job_dir: Path, calls_to_hit: int | None, calls: int) -> int:
@@ -172,6 +195,11 @@ def score_runs(runs: Path, rows_path: Path, workers: int) -> None:
             if info["molecule"] != name or key in done:
                 continue
             calls = required_charged_calls(info)
+            calls_budget = call_budget(info, calls)
+            if info["arm"] in ("anneal", "develop") and calls > calls_budget:
+                raise ValueError(
+                    f"{job_dir}: calls {calls} exceeds call_budget {calls_budget}"
+                )
             hit = any(m.same(lowest, item) for item in mine)
             hit_mirror = hit or any(m.same_or_mirror(lowest, item) for item in mine)
             to_hit = None
@@ -184,6 +212,7 @@ def score_runs(runs: Path, rows_path: Path, workers: int) -> None:
                     "arm": info["arm"],
                     "seed": int(info["seed"]),
                     "budget": info.get("budget"),
+                    "call_budget": calls_budget,
                     "calls": calls,
                     "energy_calls": info["energy_calls"],
                     "grad_calls": info["grad_calls"],

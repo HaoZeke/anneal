@@ -51,10 +51,13 @@ Default-preset cells (stop at published minimum plus 0.001):
 Every row records the hit, charged budget units, full-run potential
 callback calls, calls to the first hit, wall seconds, seconds inside
 potential calls, outside seconds per callback, and `RssAnon` in kB read
-in-process while the search state is alive. A molecular first-hit count
-comes from the first matching trace minimum and uses paired
-energy/gradient calls as one charged unit. A hit without a trace count,
-or a charged or first-hit count above budget, fails the gate.
+in-process while the search state is alive. Every molecular energy and
+gradient evaluation is one charged potential call. The anneal driver
+receives half that potential-call allowance as its internal search-point
+budget because one point normally calls both callbacks. A molecular
+first-hit count comes from the first matching trace minimum in the same
+potential-call unit. A hit without a trace count, or a charged or
+first-hit count above the potential-call budget, fails the gate.
 
 Rows are append-only. A failed row is kept and makes its cell
 INCONCLUSIVE. There are no replacement runs. Each row carries the A and
@@ -107,9 +110,17 @@ is PASS or PASS-BAND.
 ## Conf-miss path requirement
 
 The payload reports the actual resolved `branch_on_stall` flag alongside
-the path's own `branch_draws` and `branch_spent` counters. When the flag
+the path's own `branch_draws` and `branch_spent` counters when that arm's
+result exposes them. An older arm reports the counters as absent, never
+as synthetic zero; absence is not a pass or a failure. A B row with
+absent counters is INCONCLUSIVE. When B exposes the counters and the flag
 is true, both counters must be nonzero. When it is false, both must be
 exactly zero. Generic ledger activity does not satisfy this requirement.
+
+The guard reads the optional counter names from `Outcome`'s debug output
+instead of referring to newer struct fields. The same source therefore
+builds against A, B and A2. A revision whose `Outcome` lacks the names
+prints `na` for both counters.
 
 The recommended molecular configuration used by this panel resolves
 `branch_on_stall` to false. Its molecular rows therefore check that the

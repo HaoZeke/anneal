@@ -65,7 +65,10 @@ time.
 - The panel ran serially on one pinned core. For each molecule and seed
   the openconf arm ran first; anneal and develop then ran in the order
   selected by the paired runner's seeded coin flip, each given the
-  budget `(energy_calls + grad_calls) // 2` of that openconf run.
+  search budget `(energy_calls + grad_calls) // 2` of that openconf run.
+  One anneal search-budget unit covers a point at which the wrapper calls
+  both energy and gradient, so its potential-call allowance is twice the
+  search budget.
   Develop ran first on 98 of the 192 pairs and anneal on 94. This is
   derived by replaying `PAIRED_SCHEDULE_SEED` over the molecule and
   seed pairs present in `rows.csv`, including the runner's preceding
@@ -73,8 +76,13 @@ time.
   of the host were busy with
   per-commit gates, example builds and the guard, so wall times here
   are not quiet-host times; hits, calls and energies do not depend on
-  them. The `budget` column of `rows.csv` is that budget, and it equals
-  `(energy_calls + grad_calls) // 2` of the seed's openconf row.
+  them. The committed `budget` column is the legacy search-point budget,
+  not the potential-call unit used by `calls`; for 915/openconf/2048 it
+  is 20066 while the paired allowance is 40132 potential calls. Current
+  rescoring adds `call_budget` and derives it as twice the search budget
+  from old `job.json` files. It derives `calls` directly as
+  `energy_calls + grad_calls`, so old files need no `charged_calls`
+  migration.
 - `rows.csv` was scored by `scripts/openconf_h2h/paired_score.py` after
   every candidate was polished; `hit` is its strict test (heavy-atom
   RMSD below 0.25 A and energy within 0.5 kcal/mol of the reference)
