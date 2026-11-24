@@ -12301,6 +12301,9 @@ mod tests {
     /// would put the two counts apart for a reason that has nothing to do
     /// with either probe. `energy_lattice` stays on, because it is what
     /// admits the packing probe.
+    ///
+    /// The same walk is then run with a stop target. The target is reached
+    /// with budget left, and the ledger still holds every potential call.
     #[test]
     fn a_basin_probe_and_a_packing_probe_in_one_run_are_both_charged() {
         use crate::methods::warm_lbfgs::WarmLbfgs;
@@ -12310,6 +12313,7 @@ mod tests {
         const ATOMS: usize = 26;
         const BUDGET: usize = 30_000;
         const SEED: u64 = 2000;
+        const REFERENCE: f64 = -108.315616;
 
         #[derive(Debug, PartialEq)]
         struct Tally {
@@ -12330,7 +12334,7 @@ mod tests {
             a.len() == b.len() && a.iter().zip(b).all(|(p, q)| (p - q).abs() < 1.0e-9)
         }
 
-        fn walk() -> Tally {
+        fn walk(stop_at_target: bool) -> Tally {
             let mut cfg = Config::recommended(ATOMS);
             cfg.restart_patience = 2_000;
             cfg.displacement_only = true;
@@ -12373,6 +12377,9 @@ mod tests {
                 &mut start_rng,
             );
             let mut ledger = Ledger::new(BUDGET);
+            if stop_at_target {
+                ledger.stop_below(REFERENCE + crate::DEFAULT_HIT_TOL);
+            }
             let mut opt = WarmLbfgs::default();
             let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
                 opt.forget();
@@ -12430,7 +12437,7 @@ mod tests {
             tally
         }
 
-        let first = walk();
+        let first = walk(false);
         assert!(
             first.pair_probes > 0 && first.packing_quenches > 0,
             "the packing probe never ran: {first:?}"
@@ -12452,7 +12459,41 @@ mod tests {
             first.packing_evaluations + first.basin_evaluations < first.evaluations,
             "the probes left the walk no calls of its own"
         );
-        assert_eq!(first, walk(), "the run is not deterministic");
+        assert_eq!(first, walk(false), "the run is not deterministic");
+
+        // Stopping at the target must not discount the probe. Displacement
+        // moves make no site scan, so the offset between the potential
+        // evaluation count and the ledger is exactly zero here.
+        let stopped = walk(true);
+        assert!(
+            stopped.pair_probes > 0 && stopped.packing_quenches > 0,
+            "the packing probe never ran before the stop: {stopped:?}"
+        );
+        assert!(
+            crate::energy_hits(
+                f64::from_bits(stopped.best),
+                REFERENCE,
+                crate::DEFAULT_HIT_TOL
+            ),
+            "the run did not reach the target: {stopped:?}"
+        );
+        assert!(
+            stopped.ledger_spent < BUDGET,
+            "the stop left budget unspent"
+        );
+        assert!(
+            stopped.packing_evaluations > 0,
+            "the packing probe made no potential calls"
+        );
+        assert_eq!(
+            stopped.charged, stopped.ledger_spent,
+            "outcome and ledger agree at the stop"
+        );
+        assert_eq!(
+            stopped.evaluations, stopped.ledger_spent,
+            "a stop at the target dropped potential calls from the ledger"
+        );
+        assert_eq!(stopped, walk(true), "the stopped run is not deterministic");
     }
 
     #[test]
