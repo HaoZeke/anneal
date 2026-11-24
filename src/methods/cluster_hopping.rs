@@ -15780,7 +15780,7 @@ mod call_floor_tests {
         const ATOMS: usize = 4;
         const COLLAPSED_ENERGY: f64 = -1000.0;
         let tetrahedron = |edge: f64| {
-            let a = edge / 2.0_f64.sqrt();
+            let a = edge / (2.0 * 2.0_f64.sqrt());
             Array1::from(vec![a, a, a, a, -a, -a, -a, a, -a, -a, -a, a])
         };
         let sane = tetrahedron(1.6);
