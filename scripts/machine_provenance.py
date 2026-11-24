@@ -9,6 +9,8 @@ import hashlib
 import io
 import os
 import re
+import shutil
+import subprocess
 import sys
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
@@ -25,12 +27,44 @@ class SavedRowProvenanceMismatch(ValueError):
     """Raised when a saved row disagrees with expected producer provenance."""
 
 
+def _probe(*command: str) -> str:
+    """The first line a platform tool prints, or an empty string when the tool is absent or fails."""
+    if shutil.which(command[0]) is None:
+        return ""
+    run = subprocess.run(command, capture_output=True, text=True, check=False)
+    lines = run.stdout.strip().splitlines() if run.returncode == 0 else []
+    return lines[0].strip() if lines else ""
+
+
+def macos_machine_id() -> str:
+    """IOPlatformUUID, the hardware UUID macOS has in place of /etc/machine-id."""
+    if sys.platform != "darwin":
+        return ""
+    out = subprocess.run(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
+                         capture_output=True, text=True, check=False).stdout if shutil.which("ioreg") else ""
+    found = re.search(r'"IOPlatformUUID"\s*=\s*"([^"]+)"', out)
+    return found.group(1) if found else ""
+
+
+def macos_cpu_model() -> str:
+    """The brand string macOS reports where there is no /proc/cpuinfo."""
+    if sys.platform != "darwin":
+        return ""
+    return " ".join(_probe("sysctl", "-n", "machdep.cpu.brand_string").split())
+
+
 def machine_provenance(
     machine_id_path: Path = MACHINE_ID_PATH,
     product_uuid_path: Path = PRODUCT_UUID_PATH,
     cpuinfo_path: Path = CPUINFO_PATH,
 ) -> tuple[str, str]:
-    """Return a salted machine digest and the normalized CPU model."""
+    """Return a salted machine digest and the normalized CPU model.
+
+    Linux reads /etc/machine-id, then the DMI product_uuid, and
+    /proc/cpuinfo. macOS has none of them and reads the hardware UUID and the
+    CPU brand string from ioreg and sysctl instead. A machine that offers no
+    identifier or no model still raises: a row never records an invented one.
+    """
     identifier = ""
     for path in (machine_id_path, product_uuid_path):
         if path.is_file():
@@ -38,8 +72,10 @@ def machine_provenance(
             if identifier:
                 break
     if not identifier:
+        identifier = macos_machine_id()
+    if not identifier:
         raise RuntimeError(
-            "neither /etc/machine-id nor the DMI product_uuid is available"
+            "neither /etc/machine-id, the DMI product_uuid nor the macOS hardware UUID is available"
         )
 
     cpu_model = ""
@@ -54,7 +90,9 @@ def machine_provenance(
                 cpu_model = fields[key]
                 break
     if not cpu_model:
-        raise RuntimeError("/proc/cpuinfo has no CPU model string")
+        cpu_model = macos_cpu_model()
+    if not cpu_model:
+        raise RuntimeError("neither /proc/cpuinfo nor sysctl has a CPU model string")
 
     digest = hashlib.sha256(MACHINE_ID_SALT + identifier.encode()).hexdigest()
     return digest, cpu_model

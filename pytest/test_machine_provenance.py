@@ -2,6 +2,7 @@
 """Shared benchmark machine-provenance helpers."""
 
 import csv
+import hashlib
 import sys
 from pathlib import Path
 
@@ -1862,3 +1863,62 @@ def test_native_headerless_and_h2h_row_formats_reject_every_bad_field(tmp_path):
         )
     with pytest.raises(ValueError, match="arm"):
         gad.saved_rerun(kv_path, 38, 2000, "gmin", 400_000, code_revision="svn-1", machine=machine)
+
+
+IOREG_OUTPUT = """+-o Root  <class IORegistryEntry, id 0x100000100, retain 36>
+  +-o MacBookPro  <class IOPlatformExpertDevice, id 0x10000020f, registered, matched, active, busy 0 (112 ms), retain 40>
+    {
+      "IOPlatformSerialNumber" = "C02XXXXXXXXX"
+      "IOPlatformUUID" = "11111111-2222-3333-4444-555555555555"
+    }
+"""
+
+
+def fake_macos(monkeypatch, tools):
+    """A host with no /etc/machine-id, DMI table or /proc/cpuinfo whose ioreg and sysctl answer from ``tools``."""
+    import types
+
+    import machine_provenance as mp
+
+    def which(name):
+        return f"/usr/bin/{name}" if name in tools else None
+
+    def run(command, **kwargs):
+        text = tools[command[0]]
+        return types.SimpleNamespace(returncode=0, stdout=text, stderr="")
+
+    monkeypatch.setattr(mp.sys, "platform", "darwin")
+    monkeypatch.setattr(mp, "shutil", types.SimpleNamespace(which=which))
+    monkeypatch.setattr(mp, "subprocess", types.SimpleNamespace(run=run))
+    return mp
+
+
+def test_machine_provenance_reads_the_hardware_uuid_and_brand_string_on_macos(tmp_path, monkeypatch):
+    mp = fake_macos(monkeypatch, {"ioreg": IOREG_OUTPUT, "sysctl": "Apple  M2 Pro\n"})
+    missing = tmp_path / "missing"
+    digest, cpu = mp.machine_provenance(missing, missing, missing)
+    assert digest == hashlib.sha256(mp.MACHINE_ID_SALT + b"11111111-2222-3333-4444-555555555555").hexdigest()
+    assert cpu == "Apple M2 Pro"
+    assert set(mp.machine_columns()) == {"machine_id", "cpu_model"}
+
+
+def test_machine_provenance_still_refuses_a_macos_host_that_names_nothing(tmp_path, monkeypatch):
+    missing = tmp_path / "missing"
+    mp = fake_macos(monkeypatch, {"ioreg": "no uuid here\n", "sysctl": "Apple M2 Pro\n"})
+    with pytest.raises(RuntimeError, match="hardware UUID"):
+        mp.machine_provenance(missing, missing, missing)
+    mp = fake_macos(monkeypatch, {"ioreg": IOREG_OUTPUT, "sysctl": "\n"})
+    with pytest.raises(RuntimeError, match="CPU model"):
+        mp.machine_provenance(missing, missing, missing)
+
+
+def test_machine_provenance_does_not_ask_macos_tools_on_other_systems(tmp_path, monkeypatch):
+    import machine_provenance as mp
+
+    monkeypatch.setattr(mp.sys, "platform", "linux")
+    missing = tmp_path / "missing"
+    with pytest.raises(RuntimeError, match="hardware UUID"):
+        mp.machine_provenance(missing, missing, missing)
+    monkeypatch.setattr(mp, "macos_machine_id", lambda: "unused")
+    with pytest.raises(RuntimeError, match="CPU model"):
+        mp.machine_provenance(missing, missing, missing)
