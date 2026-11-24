@@ -1,0 +1,4 @@
+series,cores,avx2,family,model,wait_policy,proc_bind,places,dynamic,blas_threads,pinned
+primary,8,1,6,207,ACTIVE,false,none,FALSE,1,0-7
+passive,8,1,6,207,PASSIVE,false,none,FALSE,1,0-7
+free,8,1,6,207,ACTIVE,false,none,FALSE,1,none
