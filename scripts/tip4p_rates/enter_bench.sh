@@ -74,7 +74,7 @@ cd /work
 {
   printf 'hostname=%s\n' "\$(python3 $ROOT/scripts/machine_provenance.py host-label)"
   printf 'cwd=%s\n' "\$(pwd)"
-  printf 'boot_id=%s\n' "\$(cat /proc/sys/kernel/random/boot_id)"
+  printf 'boot_id=%s\n' "\$(python3 $ROOT/scripts/machine_provenance.py boot-label)"
   printf 'uptime=%s\n' "\$(cat /proc/uptime)"
   $WORK/bin/inside.sh tip4p "\$n" 0 "\$budget" "\$seed" recommended "\$stop" "\$prefix"
 } > "\$log" 2>&1

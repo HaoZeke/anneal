@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from machine_provenance import host_label, machine_columns  # noqa: E402
+from machine_provenance import BOOT_ID_PATH, boot_label, host_label, machine_columns  # noqa: E402
 
 COMPILERS = {
     "rustc": ["rustc", "-V"],
@@ -42,6 +42,12 @@ def read_text(path: Path) -> str | None:
         return path.read_text().strip()
     except OSError:
         return None
+
+
+def boot_id_label(path: Path = BOOT_ID_PATH) -> str | None:
+    """The salted digest of the boot id at ``path``; null where the machine has none."""
+    text = read_text(path)
+    return boot_label(text) if text else None
 
 
 def git_revision(root: Path, ref: str = "HEAD") -> str | None:
@@ -196,7 +202,7 @@ def record(campaign: str, command: list[str], root: Path, anneal_repro: Path | N
         "schema": "anneal-session-v2",
         "campaign": campaign,
         "session_utc": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
-        "boot_id": read_text(Path("/proc/sys/kernel/random/boot_id")),
+        "boot_id": boot_id_label(),
         "hostname": host_label(socket.gethostname()),
         "kernel": platform.release(),
         "cpu_model": cpu_model(),

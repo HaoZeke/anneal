@@ -1,10 +1,12 @@
 # Copyright (c) anneal developers
-"""No raw host identity reaches a row or a report.
+"""No raw host identity reaches a row, a report or a log.
 
 A hostname goes through ``host_label``: the sandbox name ``bench`` as is, any
-other name as a salted digest. A line that reads the host any other way fails,
-with no exemption for a file. A line that must read it raw is exempt by its
-exact text and a reason.
+other name as a salted digest. The kernel boot id goes through ``boot_label``,
+a salted digest, and is read only inside ``scripts/machine_provenance.py``.
+Python, shell and Rust are all scanned. A line that reads the host any other
+way fails, with no exemption for a file. A line that must read it raw is
+exempt by its exact text and a reason.
 """
 
 from __future__ import annotations
@@ -27,7 +29,9 @@ READS = (
     re.compile(r"gethostname|gethostbyname|getfqdn|platform\.node\b|platform\.uname|os\.uname|\.nodename"),
     re.compile(r"kernel/hostname|/etc/hostname|\bHOSTNAME\b"),
     re.compile(r"""\(\s*\[\s*["']hostname["']|(?:run|call|Popen|getoutput|check_output)\(\s*["']hostname|["']uname["']\s*,\s*["']-[na]["']|Command::new\(\s*"hostname"\s*\)"""),
-    re.compile(r"\$\(\s*hostname\b|`\s*hostname\s*`|\bhostname\s*[>|]|^\s*hostname\s*$|uname\s+-[na]\b"),
+    re.compile(r"\$\(\s*hostname\b|`\s*hostname\s*`|\bhostname\s*[>|]|^\s*hostname\s*$|uname\s+-[a-z]*[na]\b"),
+    re.compile(r"hostnamectl|\bhostid\b|SLURMD_NODENAME|SLURM_(?:JOB_)?NODELIST|SLURM_SUBMIT_HOST"),
+    re.compile(r"random/boot_id|\bboot_id\s*=\s*\$\(\s*cat\b"),
 )
 WRAPPED = (
     re.compile(r"host_label\(\s*(?:socket\.gethostname\(\)|os\.uname\(\)\.nodename|platform\.node\(\))\s*\)"),
@@ -38,6 +42,9 @@ WRAPPED = (
         r'host_label::host_label\(&(?:first_line|read_trimmed)\("/proc/sys/kernel/hostname"\)\)'
     ),
     re.compile(r"host_label::host_label\(&hostname\(\)\)"),
+    re.compile(
+        r'host_label::boot_label\(&(?:first_line|read_trimmed)\("/proc/sys/kernel/random/boot_id"\)\)'
+    ),
 )
 TUNED_REASON = "frozen: the committed tuned rows are verified against this file's exact blob"
 EXEMPT = {
@@ -53,6 +60,18 @@ EXEMPT = {
         "examples/lj_lean_relax_budget.rs",
         'Command::new("hostname")',
     ): "the raw name feeds host_label in main and is written nowhere",
+    (
+        "scripts/gmin_panel/tuned.py",
+        'for path in (Path("/etc/machine-id"), Path("/proc/sys/kernel/random/boot_id")):',
+    ): TUNED_REASON + ", and both ids only feed a digest",
+    (
+        "examples/lj_board_row.rs",
+        'emit("boot_id_path=/proc/sys/kernel/random/boot_id");',
+    ): "names the file the boot label stands for and reads nothing",
+    (
+        "scripts/elja_hq_sci_molslab_bank.sh",
+        "HOST=${BANK_HOST:-$(hostname)}",
+    ): "the address the compute jobs dial, kept in their environment; every log line prints its host label",
 }
 
 
@@ -117,6 +136,14 @@ def test_the_guard_flags_the_reads_it_exists_for():
         'subprocess.check_output(["hostname"])',
         'subprocess.check_output("hostname", shell=True)',
         'os.environ["HOSTNAME"]',
+        "cat /proc/sys/kernel/random/boot_id > receipts/boot_id.txt",
+        'echo "boot_id=$(cat /proc/sys/kernel/random/boot_id)"',
+        'boot_id = Path("/proc/sys/kernel/random/boot_id").read_text().strip()',
+        'let boot_id = read_trimmed("/proc/sys/kernel/random/boot_id");',
+        "boot_id=$(cat \"$f\")",
+        "hostnamectl --static",
+        'echo "node=$SLURMD_NODENAME"',
+        "echo $(uname -srvmn)",
     ):
         assert flagged(line), line
     for line in (
@@ -126,6 +153,10 @@ def test_the_guard_flags_the_reads_it_exists_for():
         "sudo unshare --uts sh -c 'hostname bench; exec \"$@\"'",
         'assert fields.get("hostname") == "bench"',
         'rows.append({"host": info["hostname"]})',
+        'echo "boot_id=$(python3 "$here/machine_provenance.py" boot-label)"',
+        "boot_id = boot_label()",
+        'let boot_id = host_label::boot_label(&first_line(path));',
+        "uname -s",
     ):
         assert not flagged(line), line
 
@@ -141,6 +172,13 @@ def test_the_shell_reads_the_label_through_the_same_function():
         capture_output=True, text=True, check=False,
     )
     assert refused.returncode == 2 and refused.stdout == ""
+    if machine_provenance.BOOT_ID_PATH.is_file():
+        boot = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "machine_provenance.py"), "boot-label"],
+            capture_output=True, text=True, check=True,
+        )
+        assert boot.stdout.strip() == machine_provenance.boot_label()
+        assert machine_provenance.BOOT_ID_PATH.read_text().strip() not in boot.stdout
 
 
 def test_the_board_examples_use_the_digest_rule_of_the_python_label():
@@ -149,6 +187,10 @@ def test_the_board_examples_use_the_digest_rule_of_the_python_label():
     assert f'b"{salt}"' in source
     assert f'"{machine_provenance.SANDBOX_HOSTNAME}"' in source
     assert 'host_label("elja-compute-17").as_deref(),\n            Some("host-99fd2f34271ff224")' in source
+    boot_salt = machine_provenance.BOOT_LABEL_SALT.decode().replace("\0", "\\0")
+    assert f'b"{boot_salt}"' in source
+    assert "Some(\"boot-84eaa8c774326c3e\")" in source
+    assert machine_provenance.boot_label("00000000-1111-2222-3333-444444444444") == "boot-84eaa8c774326c3e"
     for example in ("lj_board_row", "lj55_board_arm", "lj_lean_relax_budget"):
         text = (ROOT / "examples" / f"{example}.rs").read_text()
         assert '#[path = "common/host_label.rs"]' in text, example

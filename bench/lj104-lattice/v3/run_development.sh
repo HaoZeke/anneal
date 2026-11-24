@@ -19,7 +19,7 @@ if [[ ! -f $work/receipts/T.txt ]]; then
   date '+%Y-%m-%dT%H:%M:%S%z' > "$work/receipts/T.txt"
   python3 "$(dirname "$0")/../../../scripts/machine_provenance.py" host-label > "$work/receipts/uts.txt"
   python3 "$(dirname "$0")/../../../scripts/machine_provenance.py" host-label > "$work/receipts/hostname.txt"
-  cat /proc/sys/kernel/random/boot_id > "$work/receipts/boot_id.txt"
+  python3 "$(dirname "$0")/../../../scripts/machine_provenance.py" boot-label > "$work/receipts/boot_id.txt"
   lscpu > "$work/receipts/lscpu.txt"
   cat /proc/meminfo > "$work/receipts/meminfo.txt"
   nproc > "$work/receipts/nproc.txt"
@@ -35,7 +35,7 @@ fi
 header() {
   echo "start=$(date '+%Y-%m-%dT%H:%M:%S%z')"
   echo "uts=$(python3 "$(dirname "$0")/../../../scripts/machine_provenance.py" host-label)"
-  echo "boot_id=$(cat /proc/sys/kernel/random/boot_id)"
+  echo "boot_id=$(python3 "$(dirname "$0")/../../../scripts/machine_provenance.py" boot-label)"
   echo "lj_dls_sha256=$(sha256sum "$bin/lj_dls" | awk '{print $1}')"
   echo "lj_requench_sha256=$(sha256sum "$bin/lj_requench" | awk '{print $1}')"
   echo "wrapper=sudo unshare --uts sh -c 'hostname bench; exec <cmd>'"

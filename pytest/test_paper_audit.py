@@ -18,6 +18,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+import machine_provenance  # noqa: E402
+
 SPEC = importlib.util.spec_from_file_location("paper_audit", ROOT / "scripts" / "paper_audit.py")
 audit_mod = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(audit_mod)
@@ -221,7 +224,9 @@ def test_panel_reproduce_commands_and_session_metadata(tmp_path):
     assert row["campaign"] == "tip4p-gmin"
     assert row["command"] == command
     boot_id = Path("/proc/sys/kernel/random/boot_id")
-    assert row["boot_id"] == (boot_id.read_text().strip() if boot_id.is_file() else None)
+    raw = boot_id.read_text().strip() if boot_id.is_file() else None
+    assert row["boot_id"] == (machine_provenance.boot_label(raw) if raw else None)
+    assert raw is None or raw not in out.read_text()
     assert row["cpu_affinity"] == available_cpus()
     assert re.fullmatch(r"[0-9a-f]{40}", row["code_revision"])
 
@@ -2071,7 +2076,9 @@ def test_the_session_record_names_its_openmp_runtime_and_checkout_state(tmp_path
 
 def test_a_missing_boot_id_is_recorded_as_null(tmp_path):
     module = session_metadata_module()
-    assert module.read_text(tmp_path / "boot_id") is None
+    assert module.boot_id_label(tmp_path / "boot_id") is None
+    (tmp_path / "boot_id").write_text("0123abcd-0000-4000-8000-000000000000\n")
+    assert module.boot_id_label(tmp_path / "boot_id") == machine_provenance.boot_label("0123abcd-0000-4000-8000-000000000000")
 
 
 def test_a_tip4p_separate_cores_claim_is_reported():

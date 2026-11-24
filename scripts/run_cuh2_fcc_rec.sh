@@ -38,7 +38,7 @@ capture() {
   printf 'host\n'
   python3 scripts/machine_provenance.py host-label
   printf 'boot_id\n'
-  cat /proc/sys/kernel/random/boot_id
+  python3 scripts/machine_provenance.py boot-label
   printf 'uptime\n'
   uptime
   printf 'cpuinfo_mhz\n'

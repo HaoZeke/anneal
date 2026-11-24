@@ -23,6 +23,8 @@ CPUINFO_PATH = Path("/proc/cpuinfo")
 MACHINE_FIELDS = ("machine_id", "cpu_model")
 HOST_LABEL_SALT = b"anneal-bench-host-label-v1\0"
 SANDBOX_HOSTNAME = "bench"
+BOOT_LABEL_SALT = b"anneal-bench-boot-label-v1\0"
+BOOT_ID_PATH = Path("/proc/sys/kernel/random/boot_id")
 GMIN_BUILD_KEY_RE = re.compile(r"[0-9a-f]{64}")
 
 
@@ -136,6 +138,23 @@ def host_label(hostname: str | None = None) -> str:
     if not name:
         raise RuntimeError("the hostname is empty")
     return "host-" + hashlib.sha256(HOST_LABEL_SALT + name.encode()).hexdigest()[:16]
+
+
+def boot_label(boot_id: str | None = None) -> str:
+    """The boot column of a row or report: a salted digest of the kernel boot id.
+
+    The boot id is a random identifier of one boot of one machine. A row keeps
+    it only to show that two measurements share a boot, which equal digests
+    still show, so it is recorded as ``boot-`` and the first sixteen digits of
+    its salted SHA-256, never raw. The default reads this machine's boot id;
+    a caller that has read it passes it in. A machine without one raises
+    ``OSError``, and an empty one ``RuntimeError``.
+    """
+    text = BOOT_ID_PATH.read_text() if boot_id is None else boot_id
+    name = text.strip()
+    if not name:
+        raise RuntimeError("the boot id is empty")
+    return "boot-" + hashlib.sha256(BOOT_LABEL_SALT + name.encode()).hexdigest()[:16]
 
 
 def with_machine_provenance(row: Mapping[str, object]) -> dict[str, object]:
@@ -423,11 +442,16 @@ def validate_gmin_group_provenance(
 
 
 def main(argv: list[str]) -> int:
-    """``host-label`` prints this machine's host label for the shell scripts that report it."""
-    if argv != ["host-label"]:
-        print("usage: machine_provenance.py host-label", file=sys.stderr)
+    """``host-label [NAME]`` and ``boot-label`` print the labels shell scripts report."""
+    if argv == ["host-label"]:
+        print(host_label())
+    elif len(argv) == 2 and argv[0] == "host-label":
+        print(host_label(argv[1]))
+    elif argv == ["boot-label"]:
+        print(boot_label())
+    else:
+        print("usage: machine_provenance.py host-label [NAME] | boot-label", file=sys.stderr)
         return 2
-    print(host_label())
     return 0
 
 

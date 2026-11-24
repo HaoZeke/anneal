@@ -112,8 +112,8 @@ fn read_trimmed(path: &str) -> String {
 /// Hostname and boot id, read when the run starts.
 fn announce_host() {
     let hostname = host_label::host_label(&read_trimmed("/proc/sys/kernel/hostname"));
-    let boot_id = read_trimmed("/proc/sys/kernel/random/boot_id");
-    let Some(hostname) = hostname.filter(|_| !boot_id.is_empty()) else {
+    let boot_id = host_label::boot_label(&read_trimmed("/proc/sys/kernel/random/boot_id"));
+    let (Some(hostname), Some(boot_id)) = (hostname, boot_id) else {
         eprintln!("host identity unread");
         std::process::exit(2);
     };

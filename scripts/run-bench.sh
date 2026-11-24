@@ -29,7 +29,7 @@ command_for() {
   local n="$1"
   local seed="$2"
   local side="$3"
-  printf '%s\n' "sudo unshare --uts sh -c 'hostname bench; cd /work; export OMP_NUM_THREADS=1; export MKL_NUM_THREADS=1; export OPENBLAS_NUM_THREADS=1; export NUMBA_NUM_THREADS=1; export VECLIB_MAXIMUM_THREADS=1; export BLIS_NUM_THREADS=1; export OMP_PROC_BIND=TRUE; export OMP_PLACES=cores; export RAYON_NUM_THREADS=1; boot_id=\$(cat /proc/sys/kernel/random/boot_id); uptime=\$(cat /proc/uptime); printf \"boot_id=%s\\n\" \"\$boot_id\"; printf \"uptime=%s\\n\" \"\$uptime\"; printf \"hostname=%s\\n\" \"\$(python3 $root/scripts/machine_provenance.py host-label)\"; printf \"boot_id=%s\\nuptime=%s\\nhostname=%s\\n\" \"\$boot_id\" \"\$uptime\" \"\$(python3 $root/scripts/machine_provenance.py host-label)\" > ${side}; exec /work/lj_board_row ${n} ${seed}'"
+  printf '%s\n' "sudo unshare --uts sh -c 'hostname bench; cd /work; export OMP_NUM_THREADS=1; export MKL_NUM_THREADS=1; export OPENBLAS_NUM_THREADS=1; export NUMBA_NUM_THREADS=1; export VECLIB_MAXIMUM_THREADS=1; export BLIS_NUM_THREADS=1; export OMP_PROC_BIND=TRUE; export OMP_PLACES=cores; export RAYON_NUM_THREADS=1; boot_id=\$(python3 $root/scripts/machine_provenance.py boot-label); uptime=\$(cat /proc/uptime); printf \"boot_id=%s\\n\" \"\$boot_id\"; printf \"uptime=%s\\n\" \"\$uptime\"; printf \"hostname=%s\\n\" \"\$(python3 $root/scripts/machine_provenance.py host-label)\"; printf \"boot_id=%s\\nuptime=%s\\nhostname=%s\\n\" \"\$boot_id\" \"\$uptime\" \"\$(python3 $root/scripts/machine_provenance.py host-label)\" > ${side}; exec /work/lj_board_row ${n} ${seed}'"
 }
 
 run_one() {
@@ -66,7 +66,7 @@ run_one() {
     echo "boot id missing" >&2
     exit 1
   fi
-  if ! grep -q '/proc/sys/kernel/random/boot_id' "$log"; then
+  if ! grep -q '^boot_id_path=' "$log"; then
     echo "boot id path missing" >&2
     exit 1
   fi

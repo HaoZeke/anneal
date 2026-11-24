@@ -43,7 +43,8 @@ fn main() {
     anneal_core::install_rgpot_kernels!();
     let hostname = host_label::host_label(&first_line("/proc/sys/kernel/hostname"))
         .unwrap_or_else(|| "absent".to_string());
-    let boot_id = first_line("/proc/sys/kernel/random/boot_id");
+    let boot_id = host_label::boot_label(&first_line("/proc/sys/kernel/random/boot_id"))
+        .unwrap_or_else(|| "absent".to_string());
     let uptime_s = first_line("/proc/uptime")
         .split_whitespace()
         .next()

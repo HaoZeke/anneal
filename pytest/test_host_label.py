@@ -1,10 +1,11 @@
 # Copyright (c) anneal developers
-"""``host_label`` writes the sandbox name as is and any other hostname as a salted digest."""
+"""``host_label`` writes the sandbox name as is and any other hostname as a salted digest; ``boot_label`` digests the boot id."""
 
 from __future__ import annotations
 
 import hashlib
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -34,3 +35,35 @@ def test_the_default_host_label_reads_this_machine(monkeypatch):
     assert machine_provenance.host_label() == machine_provenance.host_label("secret-node")
     monkeypatch.setattr(machine_provenance.socket, "gethostname", lambda: "bench")
     assert machine_provenance.host_label() == "bench"
+
+
+def test_a_boot_id_is_only_ever_a_salted_digest():
+    for boot_id in ("00000000-1111-2222-3333-444444444444", "ffffffff-eeee-4ddd-8ccc-bbbbbbbbbbbb"):
+        label = machine_provenance.boot_label(boot_id)
+        assert re.fullmatch(r"boot-[0-9a-f]{16}", label), label
+        assert label == "boot-" + hashlib.sha256(machine_provenance.BOOT_LABEL_SALT + boot_id.encode()).hexdigest()[:16]
+        assert boot_id not in label
+        assert machine_provenance.boot_label(boot_id + "\n") == label
+    assert machine_provenance.boot_label("00000000-1111-2222-3333-444444444444") == "boot-84eaa8c774326c3e"
+    assert machine_provenance.boot_label("a") != machine_provenance.boot_label("b")
+    assert machine_provenance.BOOT_LABEL_SALT != machine_provenance.HOST_LABEL_SALT
+    with pytest.raises(RuntimeError):
+        machine_provenance.boot_label(" \n")
+
+
+def test_the_default_boot_label_reads_this_machines_boot_id(monkeypatch, tmp_path):
+    path = tmp_path / "boot_id"
+    path.write_text("0123abcd-0000-4000-8000-000000000001\n")
+    monkeypatch.setattr(machine_provenance, "BOOT_ID_PATH", path)
+    assert machine_provenance.boot_label() == machine_provenance.boot_label("0123abcd-0000-4000-8000-000000000001")
+    monkeypatch.setattr(machine_provenance, "BOOT_ID_PATH", tmp_path / "missing")
+    with pytest.raises(OSError):
+        machine_provenance.boot_label()
+
+
+def test_the_label_command_names_a_host_it_is_given():
+    run = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "machine_provenance.py"), "host-label", "elja-compute-17"],
+        capture_output=True, text=True, check=True,
+    )
+    assert run.stdout.strip() == "host-99fd2f34271ff224"

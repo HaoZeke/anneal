@@ -23,7 +23,7 @@ MOL=${MOL_BIN:-$ROOT/target/release/examples/molecular_cluster}
 SLAB=${SLAB_BIN:-$ROOT/target/release/examples/slab_adsorption}
 SRV=${BANK_BIN:-$ROOT/target/release/examples/bank_server}
 CON=${SLAB_CON:-$ROOT/examples/fixtures/cuh2_fcc_slab.con}
-HOST=${BANK_HOST:-$(python3 "$ANNEAL_SCRIPTS/machine_provenance.py" host-label)}
+HOST=${BANK_HOST:-$(hostname)}
 CAP=${BANK_CAPACITY:-30}
 SLICE=${BANK_SLICE:-200}
 GCCLIB=${GCCLIB:-/opt/ohpc/pub/compiler/gcc/12.4.0/lib64}
@@ -78,7 +78,7 @@ submit_mol() {
   fi
   mkdir -p "$out"
   : >"$out/hq_submit.log"
-  echo "h2o${m} arm=${arm} budget=${budget} seeds=${seeds} target=${target} rpc=${HOST}:${port}" | tee -a "$out/hq_submit.log"
+  echo "h2o${m} arm=${arm} budget=${budget} seeds=${seeds} target=${target} rpc=$(python3 "$ANNEAL_SCRIPTS/machine_provenance.py" host-label "$HOST"):${port}" | tee -a "$out/hq_submit.log"
   hq submit \
     --name "h2o${m}-${arm}" \
     --array="0-${last}" \
@@ -107,7 +107,7 @@ submit_slab() {
   fi
   mkdir -p "$out"
   : >"$out/hq_submit.log"
-  echo "cuh2 arm=${arm} budget=${budget} seeds=${seeds} target=-415.971529 rpc=${HOST}:${port}" | tee -a "$out/hq_submit.log"
+  echo "cuh2 arm=${arm} budget=${budget} seeds=${seeds} target=-415.971529 rpc=$(python3 "$ANNEAL_SCRIPTS/machine_provenance.py" host-label "$HOST"):${port}" | tee -a "$out/hq_submit.log"
   hq submit \
     --name "cuh2-${arm}" \
     --array="0-${last}" \

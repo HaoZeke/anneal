@@ -56,7 +56,9 @@ The fresh result slices and session receipt are written below
 
 The recommended CuH2 slab on the FCC fixture, budget 2500, seeds 0 through 7,
 one process at a time.  The output logs and hardware receipt go below
-`/work/cuh2-fcc-rec`; the receipt's host line is the output of `hostname`:
+`/work/cuh2-fcc-rec`; the receipt's host line is the host label (`bench`, or a
+salted digest of any other host name) and its boot line the salted digest of
+the boot id:
 
     CUH2_FCC_REC_OUTPUT=/work/cuh2-fcc-rec \
       snakemake -s workflow/Snakefile cuh2_fcc_rec --cores 1 --force
@@ -65,8 +67,8 @@ The rule runs `scripts/run_cuh2_fcc_rec.sh`, which changes to the repository
 root itself.
 
 Each runner appends one JSON object per invocation to its `sessions.jsonl`
-beside the result rows.  The record includes `/proc/sys/kernel/random/boot_id`,
-the effective `sched_getaffinity` CPU list, UTC session start, host, kernel,
+beside the result rows.  The record includes the salted digest of `/proc/sys/kernel/random/boot_id`, the
+effective `sched_getaffinity` CPU list, UTC session start, host, kernel,
 CPU model, code revision and the exact Snakemake command above, the versions
 of rustc, cargo, gfortran and cc (null when one is not installed), the Python
 version, and the OpenMP libraries the dynamic loader resolves with

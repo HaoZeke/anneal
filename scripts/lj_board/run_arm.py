@@ -47,7 +47,7 @@ from boardlib import (
 
 import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from machine_provenance import host_label  # noqa: E402
+from machine_provenance import boot_label, host_label  # noqa: E402
 
 WALL = {"stop": False}
 
@@ -608,7 +608,7 @@ def main() -> int:
     journal = Journal(root / "provenance" / "launch-journal.tsv")
     command = "python3 scripts/lj_board/run_arm.py " + " ".join(sys.argv[1:])
     hostname_start = host_label(socket.gethostname())
-    boot_id_start = Path("/proc/sys/kernel/random/boot_id").read_text().splitlines()[0].strip()
+    boot_id_start = boot_label()
     uptime_start = Path("/proc/uptime").read_text().split()[0]
     print(f"hostname={hostname_start}", flush=True)
     print(f"boot_id={boot_id_start}", flush=True)

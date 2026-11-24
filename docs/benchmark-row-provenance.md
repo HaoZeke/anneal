@@ -22,6 +22,13 @@ these provenance columns:
   SHA-256 of the public salt `anneal-bench-host-label-v1\0` followed by
   the name.  No script records a raw hostname, and a test fails when one
   reads it another way.
+- A kernel boot id is written through `boot_label` in the same file, as
+  `boot-` and the first sixteen hexadecimal digits of the SHA-256 of the
+  public salt `anneal-bench-boot-label-v1\0` followed by the id, so two
+  measurements still show whether they share a boot.  Shell scripts call
+  `machine_provenance.py boot-label`, and the board examples carry the same
+  rule in `examples/common/host_label.rs`.  The raw id is read in that one
+  place, in Python, shell and Rust alike, and a test fails on any other read.
 - `machine_id` is lowercase hexadecimal SHA-256 of the public salt
   `anneal-bench-machine-id-v1\0` followed by the machine's identifier.
   On Linux the identifier is the stripped contents of `/etc/machine-id`;

@@ -26,7 +26,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
-from machine_provenance import host_label  # noqa: E402
+from machine_provenance import boot_label, host_label  # noqa: E402
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 sys.path.insert(0, str(ROOT / "scripts" / "ase_gofee_h2h"))
 from potential import (  # noqa: E402
@@ -58,7 +58,7 @@ def hostname() -> str:
 
 
 def boot_id() -> str:
-    return Path("/proc/sys/kernel/random/boot_id").read_text().splitlines()[0].strip()
+    return boot_label()
 
 
 def place(seed: int) -> np.ndarray:
