@@ -6,6 +6,7 @@ from __future__ import annotations
 import csv
 import importlib.util
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -27,7 +28,7 @@ def test_rows_are_complete_and_generated_reports_are_current():
             for rows in grouped[system].values()
         )
         assert all(SUMMARY.wall_censored(grouped[system][arm]) for arm in SUMMARY.ASE_ARMS)
-    subprocess.run(["python3", str(SCRIPT), "--check", "--tex"], cwd=ROOT, check=True)
+    subprocess.run([sys.executable, str(SCRIPT), "--check", "--tex"], cwd=ROOT, check=True)
 
 
 def test_wall_censored_ase_comparisons_have_no_rank_estimate():

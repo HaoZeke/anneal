@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import subprocess
+import sys
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -27,11 +28,11 @@ def test_rows_are_complete_and_reports_are_generated_from_them(system):
     grouped = SUMMARY.load(system)
     assert set(grouped) == set(SUMMARY.ARMS)
     assert all(tuple(int(row["seed"]) for row in rows) == SUMMARY.SEEDS for rows in grouped.values())
-    subprocess.run(["python3", str(SCRIPT), system, "--check"], cwd=ROOT, check=True)
+    subprocess.run([sys.executable, str(SCRIPT), system, "--check"], cwd=ROOT, check=True)
 
 
 def test_combined_recommended_summary_is_generated_from_the_same_rows():
-    subprocess.run(["python3", str(SCRIPT), "--all", "--check", "--tex"], cwd=ROOT, check=True)
+    subprocess.run([sys.executable, str(SCRIPT), "--all", "--check", "--tex"], cwd=ROOT, check=True)
 
 
 def test_aggregate_header_parses_quoted_cpu_model():

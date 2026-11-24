@@ -37,10 +37,14 @@ import json
 import math
 import os
 import sys
-import tomllib
 from pathlib import Path
 
 import numpy as np
+
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib
 
 for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
     if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
