@@ -12317,6 +12317,177 @@ mod tests {
         );
     }
 
+    /// The generic packing probe and the observed-basis stall probe both
+    /// run, and each one's calls are on the ledger.
+    ///
+    /// Lennard-Jones 26, seed 2000, a 2_000-call restart patience and a
+    /// budget the run spends in full. The packing probe is recognised by
+    /// its isolated-pair evaluations and by the packing geometries it
+    /// quenches. The observed-basis probe is recognised by quenching the
+    /// basis candidate of a minimum the walk had already returned. Every
+    /// potential evaluation is counted outside the ledger, so the ledger
+    /// has to agree with that count once both probes have settled their
+    /// side calls.
+    ///
+    /// The walk uses displacement moves only. The energy-lattice arm
+    /// charges its site scans to the ledger without a potential call, which
+    /// would put the two counts apart for a reason that has nothing to do
+    /// with either probe. `energy_lattice` stays on, because it is what
+    /// admits the packing probe.
+    #[test]
+    fn a_basin_probe_and_a_packing_probe_in_one_run_are_both_charged() {
+        use crate::methods::warm_lbfgs::WarmLbfgs;
+        use crate::potentials::PairPotential;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        const ATOMS: usize = 26;
+        const BUDGET: usize = 30_000;
+        const SEED: u64 = 2000;
+
+        #[derive(Debug, PartialEq)]
+        struct Tally {
+            evaluations: usize,
+            ledger_spent: usize,
+            charged: usize,
+            hops: usize,
+            best: u64,
+            pair_probes: usize,
+            packing_quenches: usize,
+            packing_evaluations: usize,
+            basin_quenches: usize,
+            basin_evaluations: usize,
+            accepted: Vec<AcceptedTransition>,
+        }
+
+        fn same(a: ArrayView1<f64>, b: &Array1<f64>) -> bool {
+            a.len() == b.len() && a.iter().zip(b).all(|(p, q)| (p - q).abs() < 1.0e-9)
+        }
+
+        fn walk() -> Tally {
+            let mut cfg = Config::recommended(ATOMS);
+            cfg.restart_patience = 2_000;
+            cfg.displacement_only = true;
+            let potential = PairPotential::lennard_jones(ATOMS);
+            let evaluations = AtomicUsize::new(0);
+            let far = 0.5 * f64::EPSILON.sqrt().recip();
+            let nearest = {
+                let mut opt = WarmLbfgs::default();
+                let mut side = Ledger::new(1_000);
+                let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+                    opt.forget();
+                    let (value, relaxed, _) = opt.minimize(x, steps, |point| {
+                        led.charge().then(|| potential.value_and_gradient(point))
+                    });
+                    (value, relaxed)
+                };
+                measured_pair_minimum(&mut side, &mut relax, ATOMS, f64::MANTISSA_DIGITS as usize)
+                    .expect("the pair minimum")
+            };
+            let packings = binary_geometry::packing_candidates(ATOMS, nearest);
+            let mut basis_candidates: Vec<Array1<f64>> = Vec::new();
+            let mut tally = Tally {
+                evaluations: 0,
+                ledger_spent: 0,
+                charged: 0,
+                hops: 0,
+                best: 0,
+                pair_probes: 0,
+                packing_quenches: 0,
+                packing_evaluations: 0,
+                basin_quenches: 0,
+                basin_evaluations: 0,
+                accepted: Vec::new(),
+            };
+            let mut start_rng = StdRng::seed_from_u64(SEED);
+            let start = random_cluster_in_radius(
+                ATOMS,
+                cfg.start_radius(),
+                cfg.min_separation,
+                &mut start_rng,
+            );
+            let mut ledger = Ledger::new(BUDGET);
+            let mut opt = WarmLbfgs::default();
+            let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+                opt.forget();
+                let before = evaluations.load(Ordering::Relaxed);
+                let (value, relaxed, _) = opt.minimize(x, steps, |point| {
+                    if !led.charge() {
+                        return None;
+                    }
+                    evaluations.fetch_add(1, Ordering::Relaxed);
+                    Some(potential.value_and_gradient(point))
+                });
+                let spent = evaluations.load(Ordering::Relaxed) - before;
+                if steps == 0 && (2..ATOMS).any(|atom| x[3 * atom + 1].abs() > far) {
+                    tally.pair_probes += 1;
+                    tally.packing_evaluations += spent;
+                } else if packings.iter().any(|packing| same(x, packing)) {
+                    tally.packing_quenches += 1;
+                    tally.packing_evaluations += spent;
+                } else if basis_candidates.iter().any(|basis| same(x, basis)) {
+                    tally.basin_quenches += 1;
+                    tally.basin_evaluations += spent;
+                }
+                if steps > 0
+                    && value.is_finite()
+                    && let Some(basis) =
+                        crate::lattice::observed_basis_candidate(relaxed.view(), true)
+                {
+                    basis_candidates.push(basis);
+                }
+                (value, relaxed)
+            };
+            let mut grad = |led: &mut Ledger, point: ArrayView1<f64>| {
+                if !led.charge() {
+                    return None;
+                }
+                evaluations.fetch_add(1, Ordering::Relaxed);
+                Some(potential.value_and_gradient(point).1)
+            };
+            let mut rng = StdRng::seed_from_u64(SEED);
+            let outcome = run_with_gradient(
+                &cfg,
+                start.view(),
+                &mut ledger,
+                &mut relax,
+                Some(&mut grad),
+                &mut rng,
+            )
+            .expect("finite start");
+            tally.evaluations = evaluations.load(Ordering::Relaxed);
+            tally.ledger_spent = ledger.spent();
+            tally.charged = outcome.charged;
+            tally.hops = outcome.hops;
+            tally.best = outcome.best.to_bits();
+            tally.accepted = outcome.accepted_transitions;
+            tally
+        }
+
+        let first = walk();
+        assert!(
+            first.pair_probes > 0 && first.packing_quenches > 0,
+            "the packing probe never ran: {first:?}"
+        );
+        assert!(
+            first.basin_quenches > 0 && first.basin_evaluations > 0,
+            "the observed-basis probe never ran: {first:?}"
+        );
+        assert_eq!(first.ledger_spent, BUDGET, "the run spends its budget");
+        assert_eq!(
+            first.charged, first.ledger_spent,
+            "outcome and ledger agree"
+        );
+        assert_eq!(
+            first.evaluations, first.ledger_spent,
+            "an evaluation made inside a probe is missing from the ledger"
+        );
+        assert!(
+            first.packing_evaluations + first.basin_evaluations < first.evaluations,
+            "the probes left the walk no calls of its own"
+        );
+        assert_eq!(first, walk(), "the run is not deterministic");
+    }
+
     #[test]
     fn a_stop_during_the_packing_probe_charges_every_completed_evaluation() {
         let n = 6usize;
