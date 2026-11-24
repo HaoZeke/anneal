@@ -1594,8 +1594,8 @@ mod tests {
         let cubic = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
         // C(5, 4) = 5 is above the one-frame early return, so the indexed
         // cloud is what stops. Five sites cannot enclose five interior sites.
-        assert_eq!(four_point_frames(5), 5);
-        assert!(5 < 64 * (5 + 4));
+        let small_cap = four_point_frames(5).min(64usize.saturating_mul(5 + 4));
+        assert_eq!(small_cap, 5);
         assert!(candidate_from_basis(&cubic, [0.0; 3], 5).is_none());
         assert!(candidate_from_basis(&cubic, [0.0; 3], 8).is_some());
 
@@ -1604,8 +1604,8 @@ mod tests {
         // and the interior count is still zero.
         let anisotropic = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0e4]];
         assert!(basis_is_well_conditioned(&anisotropic));
-        assert_eq!(four_point_frames(13), 715);
-        assert!(715 < 64 * (13 + 4));
+        let flat_cap = four_point_frames(13).min(64usize.saturating_mul(13 + 4));
+        assert_eq!(flat_cap, 715);
         assert!(candidate_from_basis(&anisotropic, [0.0; 3], 13).is_none());
     }
 }
