@@ -14,6 +14,7 @@ out of the timing, not the hits.
 """
 import csv, sys
 from collections import defaultdict
+from decimal import ROUND_HALF_UP, Decimal
 from math import comb
 
 
@@ -67,9 +68,10 @@ def main():
             return median([float(arms[label][s]["outside_s"]) / float(arms[label][s]["charged"])
                            for s in timed]) * 1e6
         pb, pa = per_call(base), per_call(arm)
+        ratio = format(Decimal(str(pa / pb)).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP), "f")
         n = len(seeds)
         print(f"{cell},{n},{len(timed)},{sum(hb)},{sum(ha)},{fisher(sum(hb), n, sum(ha), n):.4g},"
-              f"{ob},{oa},{mcnemar(ob, oa):.4g},{pb:.4f},{pa:.4f},{pa / pb:.4f}")
+              f"{ob},{oa},{mcnemar(ob, oa):.4g},{pb:.4f},{pa:.4f},{ratio}")
     print("paused rows:", paused or "none")
 
 

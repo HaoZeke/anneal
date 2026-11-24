@@ -5,13 +5,16 @@
 //! closure's `value_and_gradient` call and one on the gradient closure's.
 //! They do not read the ledger. After `run_with_gradient` returns, the
 //! ledger must hold at least as many calls as the potential saw
-//! (`raw <= spent`), and `outcome.charged` must equal `ledger.spent()`.
+//! (`raw <= spent + settled_beyond_cap`), and `outcome.charged` must equal
+//! `ledger.spent()`, which never passes the budget.
 //!
 //! `spent - raw` is not always zero. The energy-lattice arm sums pair
 //! energies over vacant sites with its own arithmetic, makes no call into
 //! the potential, and charges the work as a fraction of one evaluation
 //! (`Ledger::charge_frac`). `Ledger::priced` reports the whole units that
-//! settled that way, so the invariant is exact: `raw + priced == spent`.
+//! settled that way, so the invariant is exact:
+//! `raw + priced == spent + settled_beyond_cap`. The last term holds settled
+//! calls that did not fit under the budget, and it is zero in these runs.
 //! With the lattice arm off, `priced` is zero and `raw == spent`.
 
 use anneal_core::methods::cluster_hopping::{
@@ -39,6 +42,8 @@ struct Tally {
     outcome: Outcome,
     spent: usize,
     priced: usize,
+    beyond_cap: usize,
+    budget: usize,
     raw: usize,
 }
 
@@ -86,32 +91,41 @@ fn walk(cfg: &Config, n: usize, seed: u64, budget: usize, stop: bool) -> Tally {
         outcome,
         spent: ledger.spent(),
         priced: ledger.priced(),
+        beyond_cap: ledger.settled_beyond_cap(),
+        budget,
         raw: relaxed_calls.load(Ordering::Relaxed) + gradient_calls.load(Ordering::Relaxed),
     }
 }
 
 fn assert_parity(label: &str, tally: &Tally) {
     println!(
-        "{label}: raw {} priced {} spent {} hops {}",
-        tally.raw, tally.priced, tally.spent, tally.outcome.hops
+        "{label}: raw {} priced {} spent {} beyond cap {} hops {}",
+        tally.raw, tally.priced, tally.spent, tally.beyond_cap, tally.outcome.hops
     );
     assert_eq!(
         tally.outcome.charged, tally.spent,
         "{label}: outcome.charged and ledger.spent() differ"
     );
     assert!(
-        tally.raw <= tally.spent,
-        "{label}: the potential saw {} calls and the ledger holds {}",
+        tally.spent <= tally.budget,
+        "{label}: spent {} passed the budget {}",
+        tally.spent,
+        tally.budget
+    );
+    let settled = tally.spent + tally.beyond_cap;
+    assert!(
+        tally.raw <= settled,
+        "{label}: the potential saw {} calls and the ledger holds {settled}",
         tally.raw,
-        tally.spent
     );
     assert_eq!(
         tally.raw + tally.priced,
-        tally.spent,
-        "{label}: raw {} + priced {} != spent {}",
+        settled,
+        "{label}: raw {} + priced {} != spent {} + beyond cap {}",
         tally.raw,
         tally.priced,
-        tally.spent
+        tally.spent,
+        tally.beyond_cap
     );
 }
 
