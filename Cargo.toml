@@ -53,6 +53,8 @@ include = [
     "/profiles/**",
     "/pyproject.toml",
     "/scripts/**",
+    "!**/__pycache__/**",
+    "!**/*.pyc",
     "/src/**",
     "/tests/**",
     "/towncrier.toml",

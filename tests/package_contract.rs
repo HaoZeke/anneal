@@ -79,6 +79,8 @@ fn is_blocked_packaged_path(line: &str) -> bool {
         || line.starts_with("branding/")
         || line.starts_with("experiments/")
         || line.starts_with("vendor/")
+        || line.split('/').any(|component| component == "__pycache__")
+        || line.ends_with(".pyc")
 }
 
 fn assert_no_omitted_target_warnings(context: &str, stderr: &str) {
@@ -86,6 +88,26 @@ fn assert_no_omitted_target_warnings(context: &str, stderr: &str) {
         !stderr.contains("not included in the published package"),
         "{context} emitted omitted-target warnings:\n{stderr}"
     );
+}
+
+struct TemporaryFile(PathBuf);
+
+impl TemporaryFile {
+    fn create(path: PathBuf) -> Self {
+        fs::create_dir_all(path.parent().expect("temporary file parent"))
+            .expect("create temporary file parent");
+        fs::write(&path, b"package contract bytecode probe").expect("write temporary file");
+        Self(path)
+    }
+}
+
+impl Drop for TemporaryFile {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+        if let Some(parent) = self.0.parent() {
+            let _ = fs::remove_dir(parent);
+        }
+    }
 }
 
 fn extract_include_macro_paths(source: &str) -> Vec<&str> {
@@ -185,6 +207,11 @@ fn package_list_excludes_paper_and_bench() {
         return;
     }
 
+    let bytecode_probe = root
+        .join("scripts")
+        .join("__pycache__")
+        .join(format!("package_contract_{}.pyc", std::process::id()));
+    let _bytecode_probe = TemporaryFile::create(bytecode_probe);
     let target = tempfile::tempdir().expect("create temp target dir");
     let output = Command::new(cargo_bin())
         .arg("package")
