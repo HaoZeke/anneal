@@ -9,10 +9,13 @@ use std::cell::RefCell;
 use ndarray::{Array1, ArrayView1};
 
 /// Site geometry relative to the center used by the objective's rigid-body chart.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(try_from = "StoredRigidBody")]
 pub struct RigidBodyGeometry {
     sites: Vec<[f64; 3]>,
     species: Vec<u32>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    bonds: Vec<[usize; 2]>,
     #[serde(skip)]
     block_keys: Vec<(u32, u32)>,
     #[serde(skip)]
@@ -22,12 +25,52 @@ pub struct RigidBodyGeometry {
 impl RigidBodyGeometry {
     /// Declare actual site positions and chemical identities in the body frame.
     pub fn new(sites: Vec<[f64; 3]>, species: Vec<u32>) -> Result<Self, &'static str> {
+        Self::new_bonded(sites, species, Vec::new())
+    }
+
+    /// Declare site positions, chemical identities, and intrabody bonds.
+    ///
+    /// Each bond joins two distinct sites at different positions. A bond of
+    /// zero length has no direction, and a move that turns a body about its
+    /// bonds could not orient it. Bonds are canonicalized before the graph
+    /// is read: each pair is ordered, then the list is sorted and deduped.
+    /// A non-empty graph needs a hub, a site joined to at least two others.
+    /// An empty list is still a body.
+    pub fn new_bonded(
+        sites: Vec<[f64; 3]>,
+        species: Vec<u32>,
+        mut bonds: Vec<[usize; 2]>,
+    ) -> Result<Self, &'static str> {
         if sites.is_empty()
             || sites.len() != species.len()
             || species.contains(&0)
             || sites.iter().flatten().any(|value| !value.is_finite())
+            || bonds
+                .iter()
+                .any(|bond| bond[0] >= sites.len() || bond[1] >= sites.len() || bond[0] == bond[1])
         {
             return Err("invalid rigid-body site geometry");
+        }
+        if bonds
+            .iter()
+            .any(|&[a, b]| sites[a].iter().zip(&sites[b]).all(|(p, q)| p == q))
+        {
+            return Err("a rigid-body bond joins two sites at one position");
+        }
+        for bond in &mut bonds {
+            bond.sort_unstable();
+        }
+        bonds.sort_unstable();
+        bonds.dedup();
+        if !bonds.is_empty() {
+            let mut degree = vec![0usize; sites.len()];
+            for &[a, b] in &bonds {
+                degree[a] += 1;
+                degree[b] += 1;
+            }
+            if degree.iter().all(|&count| count < 2) {
+                return Err("a rigid-body bond graph has no hub");
+            }
         }
         let mut block_keys = Vec::new();
         for &a in &species {
@@ -50,6 +93,7 @@ impl RigidBodyGeometry {
         Ok(Self {
             sites,
             species,
+            bonds,
             block_keys,
             block_of_pair,
         })
@@ -103,6 +147,11 @@ impl RigidBodyGeometry {
     /// Atomic number of each site, in declaration order.
     pub fn species(&self) -> &[u32] {
         &self.species
+    }
+
+    /// Intrabody bonds as pairs of site indices.
+    pub fn bonds(&self) -> &[[usize; 2]] {
+        &self.bonds
     }
 
     /// Largest body-frame site distance from the centre.
@@ -184,5 +233,77 @@ impl RigidBodyGeometry {
             });
             Array1::from(flat)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RigidBodyGeometry;
+
+    #[test]
+    fn a_bond_between_sites_at_one_position_is_refused() {
+        let sites = vec![[0.0; 3], [0.0; 3], [1.0, 0.0, 0.0]];
+        let species = vec![6, 1, 1];
+        assert!(
+            RigidBodyGeometry::new_bonded(sites.clone(), species.clone(), vec![[0, 1], [0, 2]])
+                .is_err()
+        );
+        assert!(
+            RigidBodyGeometry::new_bonded(sites.clone(), species.clone(), vec![[1, 0]]).is_err()
+        );
+        let bonded =
+            RigidBodyGeometry::new_bonded(sites.clone(), species.clone(), vec![[0, 2], [2, 1]])
+                .expect("a bond of positive length");
+        assert_eq!(bonded.bonds(), &[[0, 2], [1, 2]]);
+        assert!(RigidBodyGeometry::new(sites, species).is_ok());
+    }
+
+    #[test]
+    fn a_bond_graph_with_no_hub_is_refused() {
+        let sites = vec![[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [2.0, 0.0, 0.0]];
+        let species = vec![6, 1, 1, 1];
+        let lone = RigidBodyGeometry::new_bonded(sites.clone(), species.clone(), vec![[0, 1]]);
+        assert_eq!(lone.unwrap_err(), "a rigid-body bond graph has no hub");
+        let reversed =
+            RigidBodyGeometry::new_bonded(sites.clone(), species.clone(), vec![[0, 1], [1, 0]]);
+        assert_eq!(reversed.unwrap_err(), "a rigid-body bond graph has no hub");
+        let matching = RigidBodyGeometry::new_bonded(sites, species, vec![[0, 1], [2, 3]]);
+        assert_eq!(matching.unwrap_err(), "a rigid-body bond graph has no hub");
+    }
+
+    #[test]
+    fn bonds_round_trip_through_json() {
+        let sites = vec![[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+        let species = vec![8, 1, 1];
+        let bonded =
+            RigidBodyGeometry::new_bonded(sites.clone(), species.clone(), vec![[2, 0], [0, 1]])
+                .expect("water bonds");
+        let text = serde_json::to_string(&bonded).expect("serialize");
+        let back: RigidBodyGeometry = serde_json::from_str(&text).expect("deserialize");
+        assert_eq!(back.bonds(), &[[0, 1], [0, 2]]);
+        assert_eq!(back.sites(), bonded.sites());
+        assert_eq!(back.species(), bonded.species());
+        let plain = RigidBodyGeometry::new(sites, species).expect("unbonded");
+        let text = serde_json::to_string(&plain).expect("serialize");
+        assert!(!text.contains("bonds"));
+        let back: RigidBodyGeometry = serde_json::from_str(&text).expect("deserialize");
+        assert!(back.bonds().is_empty());
+        assert_eq!(back.sites(), plain.sites());
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct StoredRigidBody {
+    sites: Vec<[f64; 3]>,
+    species: Vec<u32>,
+    #[serde(default)]
+    bonds: Vec<[usize; 2]>,
+}
+
+impl TryFrom<StoredRigidBody> for RigidBodyGeometry {
+    type Error = &'static str;
+
+    fn try_from(stored: StoredRigidBody) -> Result<Self, Self::Error> {
+        Self::new_bonded(stored.sites, stored.species, stored.bonds)
     }
 }

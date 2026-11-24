@@ -37,6 +37,20 @@ def test_summary_and_report_carry_no_rank_test():
     assert not hasattr(SUMMARY, "mann_whitney")
 
 
+def test_retained_summary_parses_quoted_cpu_model():
+    header = "code_revision,host,machine_id,cpu_model"
+    keep = SUMMARY.csv_fields(
+        ("old-revision", "bench", "a" * 64, "Example CPU, revision 2")
+    )
+    replace = SUMMARY.csv_fields(
+        (SUMMARY.REVISION, "bench", "a" * 64, "Example CPU, revision 2")
+    )
+
+    assert SUMMARY.retained_summary_lines(
+        [header, keep, replace], header, SUMMARY.REVISION
+    ) == [keep]
+
+
 def test_fisher_matches_the_panel_definition():
     assert SUMMARY.fisher(0, 10) == pytest.approx(6.730380752335834e-05)
 

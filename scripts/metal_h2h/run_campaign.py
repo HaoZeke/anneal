@@ -27,6 +27,12 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+from machine_provenance import (  # noqa: E402
+    machine_columns,
+    machine_fieldnames,
+    require_csv_schema,
+    validate_saved_row_identity,
+)
 
 SYSTEMS = ("zn38", "zn55", "zn75", "zn80", "cu19au19")
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
@@ -53,9 +59,11 @@ SUMMARY_FIELDS = [
     "anneal_head",
     "code_revision",
     "host",
+    "machine_id",
+    "cpu_model",
 ]
 
-ROW_FIELDS = [
+CORE_ROW_FIELDS = [
     "system",
     "code",
     "seed",
@@ -70,6 +78,10 @@ ROW_FIELDS = [
     "pot_per_eval_s",
     "outside_per_eval_s",
 ]
+
+ROW_FIELDS = machine_fieldnames(
+    [*CORE_ROW_FIELDS, "anneal_head", "code_revision", "host"]
+)
 
 
 def type7(sorted_values: list[float], p: float) -> float:
@@ -126,7 +138,77 @@ def parse_row(text: str) -> dict[str, str]:
     data = [line for line in text.splitlines() if ",anneal," in line or ",ase," in line]
     if len(data) != 1:
         raise ValueError(f"expected one result row, saw {len(data)} in {text!r}")
-    return next(csv.DictReader([",".join(ROW_FIELDS), data[0]]))
+    return next(csv.DictReader([",".join(CORE_ROW_FIELDS), data[0]]))
+
+
+def _parse_saved_row(text: str) -> dict[str, str]:
+    lines = [line for line in text.splitlines() if line.strip()]
+    for index, line in enumerate(lines[:-1]):
+        cols = next(csv.reader([line]), [])
+        if "system" in cols and ("code" in cols or "arm" in cols) and "seed" in cols:
+            return next(csv.DictReader(lines[index : index + 2]))
+    for fields in (ROW_FIELDS, CORE_ROW_FIELDS):
+        candidates = [
+            line
+            for line in lines
+            if len(next(csv.reader([line]), [])) == len(fields)
+        ]
+        if len(candidates) == 1:
+            return next(csv.DictReader([",".join(fields), candidates[0]]))
+    return parse_row(text)
+
+
+def _provenance_value(value: object) -> str:
+    text = "" if value is None else str(value).strip()
+    return text if text else "unknown"
+
+
+def write_saved_row(
+    path: Path,
+    row: dict[str, str],
+    *,
+    anneal_head: str,
+    code_revision: str,
+    host: str,
+    machine: dict[str, str],
+) -> dict[str, str]:
+    persisted = {
+        **{field: str(row[field]) for field in CORE_ROW_FIELDS},
+        "anneal_head": _provenance_value(anneal_head),
+        "code_revision": _provenance_value(code_revision),
+        "host": _provenance_value(host),
+        "machine_id": _provenance_value(machine.get("machine_id")),
+        "cpu_model": _provenance_value(machine.get("cpu_model")),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(
+            handle, fieldnames=ROW_FIELDS, lineterminator="\n"
+        )
+        writer.writeheader()
+        writer.writerow(persisted)
+    return persisted
+
+
+def load_saved(
+    path: Path,
+    system: str,
+    seed: int,
+    arm: str,
+    budget: int,
+) -> dict | None:
+    if not path.is_file() or path.stat().st_size == 0:
+        return None
+    row = _parse_saved_row(path.read_text())
+    validate_saved_row_identity(
+        row,
+        path=path,
+        system=system,
+        arm=arm,
+        seed=seed,
+        budget=budget,
+    )
+    return as_result(row)
 
 
 def _env(budget: int) -> dict[str, str]:
@@ -202,10 +284,23 @@ def as_result(row: dict[str, str]) -> dict:
         "pot_per": float(row["pot_per_eval_s"]),
         "outside_per": float(row["outside_per_eval_s"]),
         "charged": float(row["charged"]),
+        "anneal_head": _provenance_value(row.get("anneal_head")),
+        "code_revision": _provenance_value(row.get("code_revision")),
+        "host": _provenance_value(row.get("host")),
+        "machine_id": _provenance_value(row.get("machine_id")),
+        "cpu_model": _provenance_value(row.get("cpu_model")),
     }
 
 
-def summarise(rows: list[dict], seeds: tuple[int, ...], head: str) -> list[dict[str, str]]:
+def _summarise_provenance(group: list[dict], field: str) -> str:
+    values = {_provenance_value(item.get(field)) for item in group}
+    known = sorted(v for v in values if v != "unknown")
+    ordered = [*known, "unknown"] if "unknown" in values else known
+    return ";".join(ordered) if ordered else "unknown"
+
+
+def summarise(rows: list[dict], seeds: tuple[int, ...], head: str = "") -> list[dict[str, str]]:
+    del head
     grouped: dict[str, dict[str, list[dict]]] = {}
     for row in rows:
         grouped.setdefault(row["system"], {}).setdefault(row["arm"], []).append(row)
@@ -257,9 +352,11 @@ def summarise(rows: list[dict], seeds: tuple[int, ...], head: str) -> list[dict[
                     "outside_per_eval_s": f"{outside:.9f}",
                     "seeds": seed_text,
                     "schedule_seed": str(SCHEDULE_SEED),
-                    "anneal_head": head,
-                    "code_revision": head,
-                    "host": os.uname().nodename,
+                    "anneal_head": _summarise_provenance(group, "anneal_head"),
+                    "code_revision": _summarise_provenance(group, "code_revision"),
+                    "host": _summarise_provenance(group, "host"),
+                    "machine_id": _summarise_provenance(group, "machine_id"),
+                    "cpu_model": _summarise_provenance(group, "cpu_model"),
                 }
             )
     return out
@@ -267,6 +364,7 @@ def summarise(rows: list[dict], seeds: tuple[int, ...], head: str) -> list[dict[
 
 def write_summary(path: Path, rows: list[dict[str, str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    require_csv_schema(path, SUMMARY_FIELDS)
     with path.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=SUMMARY_FIELDS)
         writer.writeheader()
@@ -345,6 +443,9 @@ def self_test() -> None:
         raise SystemExit(f"hit median {anneal}")
     if summary[1]["wall_ratio"] != "2.000000":
         raise SystemExit(f"wall ratio {summary[1]}")
+    for key in ("anneal_head", "code_revision", "host", "machine_id", "cpu_model"):
+        if anneal[key] != "unknown":
+            raise SystemExit(f"expected unknown {key}, got {anneal[key]!r}")
     print("ok")
 
 
@@ -373,6 +474,8 @@ def main(argv: list[str]) -> int:
         if system not in SYSTEMS:
             raise SystemExit(f"unknown system {system}")
     head = args.head_file.read_text().strip()
+    host = os.uname().nodename
+    current_machine: dict[str, str] | None = None
     progress = args.runs.parent / "progress.txt"
     progress.parent.mkdir(parents=True, exist_ok=True)
     order = schedule(systems, seeds, arms, SCHEDULE_SEED)
@@ -383,9 +486,8 @@ def main(argv: list[str]) -> int:
         log = args.logs / f"{index:02d}-{system}-seed{seed}-{arm}.log"
         saved = args.runs / system / f"{arm}-{seed}.row"
         saved.parent.mkdir(parents=True, exist_ok=True)
-        if saved.is_file() and saved.stat().st_size > 0:
-            row = parse_row(saved.read_text())
-            result = as_result(row)
+        result = load_saved(saved, system, seed, arm, budget)
+        if result is not None:
             rows.append(result)
             note(progress, f"skip {system} {arm} seed {seed} hit {int(result['hit'])}")
             continue
@@ -400,8 +502,17 @@ def main(argv: list[str]) -> int:
             log,
             args.runs / system / f"{arm}-{seed}",
         )
-        saved.write_text(log.read_text())
-        result = as_result(raw)
+        if current_machine is None:
+            current_machine = machine_columns()
+        persisted = write_saved_row(
+            saved,
+            raw,
+            anneal_head=head,
+            code_revision=head,
+            host=host,
+            machine=current_machine,
+        )
+        result = as_result(persisted)
         rows.append(result)
         note(
             progress,
@@ -411,8 +522,8 @@ def main(argv: list[str]) -> int:
             f"outside_per {result['outside_per']:.6e}",
         )
         if args.summary:
-            write_summary(args.summary, summarise(rows, seeds, head))
-    text_rows = summarise(rows, seeds, head)
+            write_summary(args.summary, summarise(rows, seeds))
+    text_rows = summarise(rows, seeds)
     if args.summary:
         write_summary(args.summary, text_rows)
     writer = csv.DictWriter(sys.stdout, fieldnames=SUMMARY_FIELDS)

@@ -25,13 +25,26 @@ fn cff_value<'a>(source: &'a str, key: &str) -> &'a str {
         .unwrap_or_else(|| panic!("CITATION.cff {key}"))
 }
 
+fn source_manifest() -> String {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let orig = root.join("Cargo.toml.orig");
+    if orig.is_file() {
+        return std::fs::read_to_string(&orig)
+            .unwrap_or_else(|err| panic!("failed to read {}: {err}", orig.display()));
+    }
+    include_str!("../Cargo.toml").to_string()
+}
+
+fn is_unpacked_crate() -> bool {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("Cargo.toml.orig")
+        .is_file()
+}
+
 #[test]
 fn all_public_version_metadata_matches_manifest() {
-    let package_version = toml_value(
-        include_str!("../Cargo.toml"),
-        "[workspace.package]",
-        "version",
-    );
+    let root_manifest = source_manifest();
+    let package_version = toml_value(&root_manifest, "[workspace.package]", "version");
 
     assert_eq!(anneal_core::ANNEAL_VERSION, package_version);
     assert_eq!(
@@ -65,21 +78,32 @@ fn all_public_version_metadata_matches_manifest() {
 
     let lock = include_str!("../Cargo.lock");
     assert_eq!(lock_package_version(lock, "anneal-core"), package_version);
-    assert_eq!(lock_package_version(lock, "anneal-python"), package_version);
-    assert_eq!(
-        column_zero_version(include_str!("../Cargo.toml")),
-        package_version
-    );
-    let root_manifest = include_str!("../Cargo.toml");
+    if is_unpacked_crate() {
+        assert!(!lock.contains("name = \"anneal-python\""));
+    } else {
+        assert_eq!(lock_package_version(lock, "anneal-python"), package_version);
+    }
+    assert_eq!(column_zero_version(&root_manifest), package_version);
     assert!(root_manifest.contains("version.workspace = true"));
-    let python_manifest = include_str!("../crates/anneal-python/Cargo.toml");
-    assert!(python_manifest.contains("version.workspace = true"));
-    assert!(
-        !python_manifest
-            .lines()
-            .any(|line| line.starts_with("version = \"")),
-        "anneal-python has a handwritten version"
-    );
+    let python_manifest_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/anneal-python/Cargo.toml");
+    if is_unpacked_crate() && !python_manifest_path.is_file() {
+        use std::io::Write;
+        let msg = "warning: skipped subcheck crates/anneal-python/Cargo.toml in version_metadata::all_public_version_metadata_matches_manifest: Cargo omits nested subpackage directories from packaged .crate archives\n";
+        let _ = std::io::stderr().write_all(msg.as_bytes());
+    } else {
+        let python_manifest =
+            std::fs::read_to_string(&python_manifest_path).unwrap_or_else(|err| {
+                panic!("failed to read {}: {err}", python_manifest_path.display())
+            });
+        assert!(python_manifest.contains("version.workspace = true"));
+        assert!(
+            !python_manifest
+                .lines()
+                .any(|line| line.starts_with("version = \"")),
+            "anneal-python has a handwritten version"
+        );
+    }
 
     let readme = include_str!("../README.md");
     assert!(readme.contains(&format!("badge/version-{package_version}-")));
@@ -190,11 +214,8 @@ fn citation_exposes_the_software_concept_doi() {
 
 #[test]
 fn changelog_has_release_notes_for_the_public_version() {
-    let package_version = toml_value(
-        include_str!("../Cargo.toml"),
-        "[workspace.package]",
-        "version",
-    );
+    let root_manifest = source_manifest();
+    let package_version = toml_value(&root_manifest, "[workspace.package]", "version");
     let changelog = include_str!("../CHANGELOG.md");
     let towncrier = include_str!("../towncrier.toml");
 

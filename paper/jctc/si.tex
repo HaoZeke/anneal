@@ -103,6 +103,11 @@ which only sets the number of parallel build jobs, with three patches,
 \texttt{POTENTIAL} entries, time the potential, and, in the serial build, set
 the run index (\texttt{JP=1}) before its first use; no other line of GMIN
 changes.
+At both revisions the cap patch has sha256
+\texttt{\seqsplit{a31221a67883d20032a029e34e3d81bd62c5bcb786c97fff02a9c234adc34553}}.
+The in-tree \path{bench/lj104-lattice/v2/h2h-gmin.patch} has since been
+replaced by one whose cap counts only gradient passes, and every printed
+GMIN row predates that change.
 The recipe stamps the wall clock and the build directory into the binary, so the three shard binaries differ in their sha256 and share one \texttt{.text} section.
 For the printed rows, the hit is a quenched energy at or below the Cambridge
 Cluster Database minimum plus 0.001: besides the four printed Lennard-Jones

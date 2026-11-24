@@ -18,6 +18,7 @@ if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 from paired_stats import fisher_exact  # noqa: E402
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+from machine_provenance import csv_fields  # noqa: E402
 
 SEEDS = tuple(range(2000, 2012))
 ARMS = ("anneal", "recommended", "ase_bh", "ase_mh")
@@ -47,6 +48,7 @@ ROW_FIELDS = (
     "system", "arm", "seed", "budget", "hit", "evals_to_hit", "charged", "best",
     "wall_s", "inside_s", "outside_s", "code_revision", "host", "stop", "cap_s",
 )
+CURRENT_ROW_FIELDS = (*ROW_FIELDS, "machine_id", "cpu_model")
 
 
 def type7(ordered: list[float], probability: float) -> float:
@@ -78,7 +80,7 @@ def load(system: str) -> dict[str, list[dict[str, str]]]:
     for path in paths:
         with path.open(newline="") as handle:
             reader = csv.DictReader(handle)
-            if tuple(reader.fieldnames or ()) != ROW_FIELDS:
+            if tuple(reader.fieldnames or ()) not in (ROW_FIELDS, CURRENT_ROW_FIELDS):
                 raise SystemExit(f"{path}: unexpected columns {reader.fieldnames}")
             for row in reader:
                 if system != "au55" or (
@@ -287,6 +289,7 @@ AGGREGATE_HEADER = (
     "system,arm,hits,n,median_best,gap_to_reference,median_wall_s,median_inside_s,"
     "median_outside_s,fisher_p_bh,fisher_p_mh,wall_cap_s,code_revision,host"
 )
+CURRENT_AGGREGATE_HEADER = AGGREGATE_HEADER + ",machine_id,cpu_model"
 
 
 def aggregate_rows(system: str, summary: str) -> list[str]:
@@ -297,11 +300,35 @@ def aggregate_rows(system: str, summary: str) -> list[str]:
     revisions = {
         arm: {row["code_revision"] for row in rows} for arm, rows in load(system).items()
     }
+    provenance = {
+        arm: (
+            ";".join(sorted({row.get("machine_id", "") for row in rows if row.get("machine_id")})),
+            ";".join(sorted({row.get("cpu_model", "") for row in rows if row.get("cpu_model")})),
+        )
+        for arm, rows in load(system).items()
+    }
     out = []
     for row in csv.DictReader(summary.splitlines()):
         found = ";".join(sorted(revisions[row["arm"]]))
-        out.append(",".join([system, *(row[field] for field in fields), found, "bench"]))
+        values = [system, *(row[field] for field in fields), found, "bench"]
+        if all(provenance[row["arm"]]):
+            values.extend(provenance[row["arm"]])
+        out.append(csv_fields(values))
     return out
+
+
+def aggregate_header(rows: list[str]) -> str:
+    """Choose the aggregate schema from CSV-decoded row widths."""
+    widths = {len(next(csv.reader([row]))) for row in rows}
+    if len(widths) != 1:
+        raise SystemExit("cannot mix legacy and machine-provenance aggregate rows")
+    current_width = len(next(csv.reader([CURRENT_AGGREGATE_HEADER])))
+    legacy_width = len(next(csv.reader([AGGREGATE_HEADER])))
+    if widths == {current_width}:
+        return CURRENT_AGGREGATE_HEADER
+    if widths == {legacy_width}:
+        return AGGREGATE_HEADER
+    raise SystemExit(f"unexpected aggregate row width {next(iter(widths))}")
 
 
 def main() -> None:
@@ -314,7 +341,7 @@ def main() -> None:
     if any(system not in SYSTEMS for system in selected):
         raise SystemExit(f"unknown system {selection[0]}")
     outputs = {}
-    aggregate = [AGGREGATE_HEADER]
+    aggregate = []
     for system in selected:
         summary, report = render(system)
         directory = ROOT / "bench" / f"ase-{system}"
@@ -322,6 +349,7 @@ def main() -> None:
         outputs[directory / "README.md"] = report
         aggregate.extend(aggregate_rows(system, summary))
     if selected == list(SYSTEMS):
+        aggregate.insert(0, aggregate_header(aggregate))
         outputs[ROOT / "bench" / "ase-recommended" / "summary.csv"] = (
             "\n".join(aggregate) + "\n"
         )

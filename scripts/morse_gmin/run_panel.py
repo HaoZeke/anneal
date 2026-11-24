@@ -23,6 +23,7 @@ import os
 import socket
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
@@ -30,6 +31,16 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+from gmin_pin import read_svnrev  # noqa: E402
+from machine_provenance import (  # noqa: E402
+    aggregate_machine_columns,
+    machine_columns,
+    machine_fieldnames,
+    read_built_gmin_provenance,
+    require_csv_schema,
+    require_gmin_build_key,
+    validate_saved_gmin_provenance,
+)
 
 # Cambridge Cluster Database, Doye and Wales. The bold entry at that rho.
 # 30B and 30D' are the global minima at rho 6 and 14.
@@ -45,7 +56,6 @@ SYSTEMS = (
     ("m80r14", 80, 14.0, 4_000_000, -340.811371),
 )
 SEEDS = tuple(range(2000, 2012))
-GMIN_REV = "aac1548a8aec13b53ad12a8d6904625081685d2e"
 ARCHIVES = (
     "bench/morse-h2h/seeds.csv",
     "bench/morse14-h2h/seeds.csv",
@@ -64,7 +74,10 @@ FIELDS = [
     "pot_s",
     "outside_s",
     "code_revision",
+    "gmin_build_key",
     "host",
+    "machine_id",
+    "cpu_model",
 ]
 SUMMARY_FIELDS = [
     "system",
@@ -83,6 +96,7 @@ SUMMARY_FIELDS = [
     "anneal_outside_median_s",
     "gmin_pot_median_s",
     "gmin_outside_median_s",
+    "host",
 ]
 
 
@@ -197,7 +211,14 @@ def hit_bit(value: str) -> str:
     return "1" if value in ("1", "true", "True") else "0"
 
 
-def anneal_line(text: str, name: str, revision: str) -> dict[str, str]:
+def anneal_line(
+    text: str,
+    name: str,
+    revision: str,
+    *,
+    host: str | None = None,
+    machine: dict[str, str] | None = None,
+) -> dict[str, str]:
     rows = [line for line in text.splitlines() if line.startswith(name + ",anneal,")]
     if len(rows) != 1:
         raise RuntimeError(f"expected one anneal row for {name}, saw {len(rows)}")
@@ -210,6 +231,7 @@ def anneal_line(text: str, name: str, revision: str) -> dict[str, str]:
         evals = budget
     elif evals >= budget:
         evals = min(charged, budget)
+    stamped_machine = dict(machine) if machine is not None else machine_columns()
     return {
         "system": name,
         "code": "anneal",
@@ -223,11 +245,24 @@ def anneal_line(text: str, name: str, revision: str) -> dict[str, str]:
         "pot_s": cols[9],
         "outside_s": cols[10],
         "code_revision": revision,
-        "host": "bench",
+        "gmin_build_key": "",
+        "host": socket.gethostname() if host is None else host,
+        **stamped_machine,
     }
 
 
-def gmin_line(text: str, name: str, seed: int, budget: int, target: float) -> dict[str, str]:
+def gmin_line(
+    text: str,
+    name: str,
+    seed: int,
+    budget: int,
+    target: float,
+    revision: str,
+    *,
+    gmin_build_key: str = "",
+    host: str | None = None,
+    machine: dict[str, str] | None = None,
+) -> dict[str, str]:
     fields = {}
     for part in text.split()[1:]:
         if "=" not in part:
@@ -247,6 +282,12 @@ def gmin_line(text: str, name: str, seed: int, budget: int, target: float) -> di
     wall = float(fields["wall_s"])
     pot = float(fields.get("pot_s") or 0.0)
     outside = float(fields.get("outside_s") or max(wall - pot, 0.0))
+    stamped_machine = dict(machine) if machine is not None else machine_columns()
+    stamped_key = (
+        require_gmin_build_key(gmin_build_key, "gmin_build_key")
+        if gmin_build_key
+        else ""
+    )
     return {
         "system": name,
         "code": "gmin",
@@ -259,15 +300,19 @@ def gmin_line(text: str, name: str, seed: int, budget: int, target: float) -> di
         "best": f"{best:.8f}",
         "pot_s": f"{pot:.6f}",
         "outside_s": f"{outside:.6f}",
-        "code_revision": GMIN_REV,
-        "host": "bench",
+        "code_revision": revision,
+        "gmin_build_key": stamped_key,
+        "host": socket.gethostname() if host is None else host,
+        **stamped_machine,
     }
 
 
-def load_archives(root: Path, svnrev: str) -> dict[tuple[str, int], dict[str, str]]:
-    if svnrev != GMIN_REV:
-        print(f"GMIN SVNREV {svnrev} is not {GMIN_REV}; stored rows are not reused", flush=True)
-        return {}
+def load_archives(
+    root: Path,
+    svnrev: str,
+    gmin_build_key: str,
+) -> dict[tuple[str, int], dict[str, str]]:
+    expected_key = require_gmin_build_key(gmin_build_key, "expected gmin_build_key")
     wanted = {row[0]: row for row in SYSTEMS}
     found: dict[tuple[str, int], dict[str, str]] = {}
     for relative in ARCHIVES:
@@ -278,6 +323,10 @@ def load_archives(root: Path, svnrev: str) -> dict[tuple[str, int], dict[str, st
             for raw in csv.DictReader(handle):
                 if raw.get("code") != "gmin":
                     continue
+                machine_id = (raw.get("machine_id") or "").strip()
+                cpu_model = (raw.get("cpu_model") or "").strip()
+                if not machine_id or not cpu_model:
+                    continue
                 name = raw["system"]
                 if name not in wanted:
                     continue
@@ -286,6 +335,12 @@ def load_archives(root: Path, svnrev: str) -> dict[tuple[str, int], dict[str, st
                 seed = int(raw["seed"])
                 if seed not in SEEDS:
                     continue
+                validate_saved_gmin_provenance(
+                    raw,
+                    path=path,
+                    revision=svnrev,
+                    build_key=expected_key,
+                )
                 found[(name, seed)] = {
                     "system": name,
                     "code": "gmin",
@@ -298,24 +353,52 @@ def load_archives(root: Path, svnrev: str) -> dict[tuple[str, int], dict[str, st
                     "best": raw["best"],
                     "pot_s": raw["pot_s"],
                     "outside_s": raw["outside_s"],
-                    "code_revision": GMIN_REV,
-                    "host": "bench",
+                    "code_revision": svnrev,
+                    "gmin_build_key": expected_key,
+                    "host": (raw.get("host") or "").strip(),
+                    "machine_id": machine_id,
+                    "cpu_model": cpu_model,
                 }
     return found
 
 
-def load_done(path: Path) -> dict[tuple[str, str, int], dict[str, str]]:
-    if not path.is_file():
+def load_done(
+    path: Path,
+    *,
+    gmin_revision: str,
+    gmin_build_key: str,
+    overwrite_legacy: bool = False,
+) -> dict[tuple[str, str, int], dict[str, str]]:
+    expected_key = require_gmin_build_key(gmin_build_key, "expected gmin_build_key")
+    if not path.is_file() or path.stat().st_size == 0:
         return {}
+    try:
+        require_csv_schema(path, FIELDS)
+    except RuntimeError:
+        if overwrite_legacy:
+            return {}
+        raise
     done = {}
     with path.open(newline="") as handle:
         for raw in csv.DictReader(handle):
+            if not (raw.get("machine_id") or "").strip() or not (raw.get("cpu_model") or "").strip():
+                raise RuntimeError(f"{path} has a row missing machine_id or cpu_model")
+            if raw.get("code") == "gmin":
+                validate_saved_gmin_provenance(
+                    raw,
+                    path=path,
+                    revision=gmin_revision,
+                    build_key=expected_key,
+                )
             done[(raw["system"], raw["code"], int(raw["seed"]))] = {key: raw.get(key, "") for key in FIELDS}
     return done
 
 
 def write_rows(path: Path, rows: list[dict[str, str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    for row in rows:
+        if not str(row.get("machine_id", "")).strip() or not str(row.get("cpu_model", "")).strip():
+            raise ValueError("row is missing machine_id or cpu_model")
     ordered = sorted(rows, key=lambda row: (row["system"], row["code"], int(row["seed"])))
     with path.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=FIELDS, lineterminator="\n")
@@ -337,6 +420,8 @@ def summarise(rows: list[dict[str, str]], reused: set[tuple[str, int]]) -> list[
         ah = sum(row["hit"] == "1" for row in anneal)
         gh = sum(row["hit"] == "1" for row in gmin)
         reused_seeds = " ".join(str(seed) for seed in SEEDS if (name, seed) in reused)
+        both = anneal + gmin
+        hosts = sorted({row.get("host", "") for row in both if row.get("host", "")})
         out.append(
             {
                 "system": name,
@@ -355,15 +440,29 @@ def summarise(rows: list[dict[str, str]], reused: set[tuple[str, int]]) -> list[
                 "anneal_outside_median_s": f"{type7(col(anneal, 'outside_s')):.6f}",
                 "gmin_pot_median_s": f"{type7(col(gmin, 'pot_s')):.6f}",
                 "gmin_outside_median_s": f"{type7(col(gmin, 'outside_s')):.6f}",
+                "host": " ".join(hosts),
+                **aggregate_machine_columns(both),
             }
         )
     return out
 
 
-def write_summary(path: Path, rows: list[dict[str, str]]) -> None:
+def write_summary(
+    path: Path,
+    rows: list[dict[str, str]],
+    *,
+    overwrite_legacy: bool = False,
+) -> None:
+    fields = (
+        machine_fieldnames(SUMMARY_FIELDS)
+        if not rows or "machine_id" in rows[0]
+        else SUMMARY_FIELDS
+    )
+    if not overwrite_legacy:
+        require_csv_schema(path, fields)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=SUMMARY_FIELDS, lineterminator="\n")
+        writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
 
@@ -391,6 +490,8 @@ def run_gmin(
     budget: int,
     target: float,
     work: Path,
+    revision: str,
+    gmin_build_key: str,
 ) -> dict[str, str]:
     work.mkdir(parents=True, exist_ok=True)
     coords = work / "coords"
@@ -421,7 +522,15 @@ def run_gmin(
     row_path = work / "row.txt"
     if not row_path.is_file():
         raise RuntimeError(f"gmin {name} {seed} exited {proc.returncode}\n{(proc.stdout or '')[-500:]}")
-    return gmin_line(row_path.read_text(), name, seed, budget, target)
+    return gmin_line(
+        row_path.read_text(),
+        name,
+        seed,
+        budget,
+        target,
+        revision,
+        gmin_build_key=require_gmin_build_key(gmin_build_key, "gmin_build_key"),
+    )
 
 
 def git_head(root: Path) -> str:
@@ -432,10 +541,6 @@ def git_head(root: Path) -> str:
         text=True,
     )
     return proc.stdout.strip()
-
-
-def svnrev(path: Path) -> str:
-    return path.read_text().strip()
 
 
 def self_test() -> None:
@@ -464,8 +569,25 @@ def self_test() -> None:
     print("ok")
 
 
-def main() -> int:
-    if len(sys.argv) == 2 and sys.argv[1] == "--self-test":
+def _parse_argv(argv: Sequence[str] | None) -> list[str] | None:
+    if argv is None:
+        return None
+    items = list(argv)
+    if items and not items[0].startswith("-"):
+        return items[1:]
+    return items
+
+
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    out_dir: Path | None = None,
+    overwrite_legacy: bool = False,
+) -> int:
+    parsed_argv = _parse_argv(argv)
+    if (parsed_argv == ["--self-test"]) or (
+        parsed_argv is None and len(sys.argv) == 2 and sys.argv[1] == "--self-test"
+    ):
         self_test()
         return 0
     if socket.gethostname() != "bench":
@@ -473,29 +595,47 @@ def main() -> int:
         return 2
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--out", type=Path)
+    parser.add_argument("--overwrite-legacy", action="store_true")
     parser.add_argument("--work", type=Path, default=Path("/work/morse-gmin"))
     parser.add_argument("--gmin", type=Path, default=Path("/work/morse-gmin/bin/GMIN"))
     parser.add_argument("--svnrev", type=Path, default=Path("/work/gmin-h2h/src/wales/GMIN/source/SVNREV"))
+    parser.add_argument(
+        "--gmin-source",
+        type=Path,
+        default=Path(os.environ.get("GMIN_SOURCE_FILE", "/work/gmin-h2h/gmin-source.txt")),
+    )
     parser.add_argument("--system", action="append")
     parser.add_argument("--seed", type=int, action="append")
     parser.add_argument("--arm", choices=("anneal", "gmin", "both"), default="both")
-    args = parser.parse_args()
+    args = parser.parse_args(parsed_argv)
     root = args.root
-    bench = root / "bench" / "morse-gmin"
+    bench = (
+        out_dir if out_dir is not None else (args.out or (root / "bench" / "morse-gmin"))
+    ).resolve()
+    allow_overwrite = bool(overwrite_legacy or args.overwrite_legacy)
     seeds_path = bench / "seeds.csv"
     summary_path = bench / "summary.csv"
+    if not allow_overwrite:
+        require_csv_schema(seeds_path, FIELDS)
+        require_csv_schema(summary_path, machine_fieldnames(SUMMARY_FIELDS))
     binary = root.parent / "tmp" / "anneal-target" / "release" / "examples" / "h2h_morse"
     if not binary.is_file():
         raise SystemExit(f"missing {binary}")
     if not args.gmin.is_file():
         raise SystemExit(f"missing {args.gmin}")
     revision = git_head(root)
-    got = svnrev(args.svnrev)
+    got, gmin_build_key = read_built_gmin_provenance(args.svnrev, args.gmin_source)
     data = (root / "examples" / "h2h_gmin_morse.data").read_text()
     if not data.endswith("\n"):
         data += "\n"
-    archives = load_archives(root, got)
-    done = load_done(seeds_path)
+    archives = load_archives(root, got, gmin_build_key)
+    done = load_done(
+        seeds_path,
+        gmin_revision=got,
+        gmin_build_key=gmin_build_key,
+        overwrite_legacy=allow_overwrite,
+    )
     rows = list(done.values())
     systems = [row for row in SYSTEMS if not args.system or row[0] in args.system]
     seeds = tuple(args.seed) if args.seed else SEEDS
@@ -535,6 +675,8 @@ def main() -> int:
                     budget,
                     target,
                     args.work / name / f"gmin-{seed}",
+                    got,
+                    gmin_build_key,
                 )
                 rows.append(row)
                 done[(name, "gmin", seed)] = row
@@ -546,8 +688,13 @@ def main() -> int:
                 )
     write_rows(seeds_path, rows)
     summary = summarise(rows, reused)
-    write_summary(summary_path, summary)
-    writer = csv.DictWriter(sys.stdout, fieldnames=SUMMARY_FIELDS)
+    write_summary(summary_path, summary, overwrite_legacy=allow_overwrite)
+    summary_fields = (
+        machine_fieldnames(SUMMARY_FIELDS)
+        if not summary or "machine_id" in summary[0]
+        else SUMMARY_FIELDS
+    )
+    writer = csv.DictWriter(sys.stdout, fieldnames=summary_fields)
     writer.writeheader()
     writer.writerows(summary)
     return 0

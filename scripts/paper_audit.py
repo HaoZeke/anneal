@@ -11,11 +11,13 @@ A printed number agrees with a recomputed one when they differ by at most
 half a unit in the printed number's last digit. A bare integer below 10 is
 read as exact, so a printed p of 1 cannot stand for 0.6.
 
-Every row file read here is checked for a code revision and a host. A file
-without them, or whose revision is not in this repository, must be listed in
-``KNOWN_GAPS``. A revision that was rebuilt on push is read through its alias
-in ``ALIASES`` once the pushed equivalent is verified; one with no pushed
-equivalent is listed in ``UNPUSHED`` with the reason. Printed numbers no
+Every row file read here is checked for a code revision and a host. New row
+schemas that carry a physical ``machine_id`` must also carry ``cpu_model``;
+the compatibility ``host`` may be a UTS-namespace label. A file without the
+older provenance fields, or whose revision is not in this repository, must
+be listed in ``KNOWN_GAPS``. A revision that was rebuilt on push is read
+through its alias in ``ALIASES`` once the pushed equivalent is verified; one
+with no pushed equivalent is listed in ``UNPUSHED`` with the reason. Printed numbers no
 committed row backs are listed in ``UNTRACED``; their text must still be where
 the list says. The revision checks need the full history and the remote
 branches; a clone without them is refused, with exit status 2.
@@ -39,16 +41,18 @@ import random
 import re
 import statistics
 import subprocess
-import tarfile
 import sys
+import tarfile
 import tempfile
 from collections import defaultdict
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+from gmin_pin import REVISION as GMIN_PIN_REVISION  # noqa: E402
 
 TEX = "paper/jctc/manuscript.tex"
 SI = "paper/jctc/si.tex"
@@ -58,6 +62,12 @@ REVISION_COLUMNS = ("revision", "code_revision", "harness_revision", "head", "co
 HOST_COLUMNS = ("host", "machine", "machine_id", "machine_id_sha256")
 # Trees that rows cite in place of a commit, each with the record commit whose parent has that tree.
 RECORD_TREES = {"b12293b9d637dd32417be3aa482302e0f30dd594": "5c37c840ed2e9f9a2d881105363b33762b5cca31"}
+MACHINE_PROVENANCE_COLUMNS = frozenset(("machine_id", "cpu_model"))
+# Revisions of other codes. The GMIN build scripts refuse a tarball whose SVNREV differs.
+EXTERNAL_REVISIONS = {
+    "aac1548a8aec13b53ad12a8d6904625081685d2e": "GMIN source/SVNREV",
+    GMIN_PIN_REVISION: "GMIN source/SVNREV",
+}
 # Local revisions that rows cite, each with the pushed commit it was rebuilt as.
 ALIASES = "bench/revision-aliases.csv"
 REVISION_MAP = "bench/unreachable-revisions.csv"
@@ -453,8 +463,6 @@ def gmin_panel_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[
     latest: dict[tuple[str, str], dict[int, dict[str, str]]] = {}
     bad_rows: list[str] = []
     for index, r in enumerate(rows, start=2):
-        if r["code"] == "gmin" and r["code_revision"] != panel.GMIN_REV:
-            continue
         system = r["system"]
         budget = panel.PAPER_BUDGETS.get(system)
         ref = references.get(system)
@@ -492,6 +500,19 @@ def gmin_panel_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[
     hosts = {r["host"] for group in groups.values() for r in group}
     audit.cell("bench/gmin-panel/rows.csv", "host", " ".join(sorted(hosts)), "bench")
     return panel, groups
+
+
+def gmin_revision(groups: dict[tuple[str, str], list[dict[str, str]]]) -> str:
+    """Return the revision actually recorded by the selected GMIN rows."""
+    revisions = {
+        row["code_revision"]
+        for (_system, arm), rows in groups.items()
+        if arm == "gmin"
+        for row in rows
+    }
+    if len(revisions) != 1:
+        raise RuntimeError(f"GMIN panel has mixed revisions: {sorted(revisions)}")
+    return next(iter(revisions))
 
 
 def gmin_panel_summary(audit: Audit, panel: object, groups: dict) -> None:
@@ -624,7 +645,36 @@ def gmin_panel_readme(audit: Audit, panel: object, groups: dict) -> None:
     old_au = pick(rows, system="au55", code="gmin", session=first_session)
     new_session = groups[("au55", "gmin")][0]["session"]
     audit.said(GMIN_PANEL_README, GMIN_PANEL_REVISION)
-    audit.said(GMIN_PANEL_README, panel.GMIN_REV)
+    audit.said(GMIN_PANEL_README, gmin_revision(groups))
+    for sha in (
+        "63ee803397a625cb4b51218f5467f4baa2e6da6a",
+        "ac5cfc3fd39c2b29cb71ed53ca1b34b39d33f4c2",
+        "1c1b12384683485cf820d3a244151b48973dc0f7",
+        "465e583be21e9b82befc94ff01cf931a13f8f0a9",
+    ):
+        audit.said(GMIN_PANEL_README, sha)
+    source_note = "bench/gmin-panel/gmin-source.txt"
+    patch_lines = [
+        line.removeprefix("patch=").strip()
+        for line in audit.text(source_note).splitlines()
+        if line.startswith("patch=")
+    ]
+    audit.record(bool(patch_lines), source_note, "patch lines present", str(len(patch_lines)), ">= 1")
+    for entry in patch_lines:
+        rel_patch, _, recorded_sha = entry.partition(" ")
+        actual_sha = hashlib.sha256((ROOT / rel_patch).read_bytes()).hexdigest()
+        audit.record(
+            recorded_sha.strip() == actual_sha,
+            source_note,
+            f"in-tree patch sha256 {rel_patch}",
+            recorded_sha.strip(),
+            actual_sha,
+        )
+    audit.said(
+        source_note,
+        "rows_patch=bench/lj104-lattice/v2/h2h-gmin.patch@465e583be21e9b82befc94ff01cf931a13f8f0a9 "
+        "a31221a67883d20032a029e34e3d81bd62c5bcb786c97fff02a9c234adc34553",
+    )
     audit.said(GMIN_PANEL_README, f"adds the energy {dict((r[0], r[3]) for r in panel.SYSTEMS)['lj103']:.6f}")
     r0 = 2.884
     scale = r0 / 2.0 ** (1.0 / 6.0)
@@ -3477,7 +3527,7 @@ def covalent_gfn2(audit: Audit) -> None:
     gfn2_revision_tables(audit, path, header, paper[-1][0] + 1, rows, crest)
 
 
-GFN2_SYSTEMS = {"Si10": "si10", "C10": "c10", "Si13": "si13", "C20": "c20"}
+GFN2_SYSTEMS = {"Si10": "si10", "C10": "c10", "C20": "c20"}
 # (system, anneal revision, Fisher p, Mann-Whitney p, its sample, sentence that prints them). The sample is
 # "calls", calls to the hit with a miss ranked after every hit, or "best", the best energies. The sentence
 # is filled from the rows by gfn2_sentence_fields.
@@ -3491,10 +3541,6 @@ GFN2_REVISION_TESTS = (
     ("C20", "5351f272", "1", "0.0004", "best",
      "Anneal's best is lower than CREST's on {below} of the {pairs} pairs of seeds "
      "(Mann-Whitney p = {mw_p} on the best energies)"),
-    ("Si13", "c1c02d16", "0.45", "0.005", "calls",
-     "anneal reaches the reference on {anneal_share} seeds, in {anneal_calls} calls, and CREST on "
-     "{crest_hits_word}, in {crest_calls} (Fisher p = {fisher_p}, Mann-Whitney p = {mw_p}, a miss ranked "
-     "after every hit)"),
 )
 NUMBER_WORDS = ("no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve")
 
@@ -3771,6 +3817,7 @@ def provenance(audit: Audit) -> dict[str, str]:
         columns = set(rows[0]) if rows else set()
         revs = [c for c in REVISION_COLUMNS if c in columns]
         hosts = [c for c in HOST_COLUMNS if c in columns]
+        machines = MACHINE_PROVENANCE_COLUMNS & columns
         problems = []
         if not revs and not hosts:
             problems.append("revision and host unrecorded (no revision or host column)")
@@ -3782,16 +3829,33 @@ def provenance(audit: Audit) -> dict[str, str]:
             if any(r[column].strip() in ("", "unknown") for r in rows):
                 what = "unrecorded" if column in revs else "empty or unknown"
                 problems.append(f"{column} {what} on some rows")
+        if machines:
+            if machines != MACHINE_PROVENANCE_COLUMNS:
+                missing = sorted(MACHINE_PROVENANCE_COLUMNS - machines)
+                problems.append(
+                    f"{' and '.join(sorted(machines))} recorded; "
+                    f"no {' or '.join(missing)} column"
+                )
+            elif any(not r["cpu_model"].strip() for r in rows):
+                problems.append("cpu_model empty on some rows")
+            if "machine_id" in columns and any(
+                not all(
+                    re.fullmatch(r"[0-9a-f]{64}", value)
+                    for value in r["machine_id"].strip().split(";")
+                )
+                for r in rows
+            ):
+                problems.append("machine_id is not a salted sha256 on some rows")
         trees = set()
         for column in revs:
             for r in rows:
                 if external_gmin_identifier(r, column):
                     continue
-                value = r[column].strip()
-                if value in RECORD_TREES:
-                    trees.add(value)
-                elif re.fullmatch(r"[0-9a-f]{7,40}", value):
-                    revisions[value].add(path)
+                for value in r[column].strip().split(";"):
+                    if value in RECORD_TREES:
+                        trees.add(value)
+                    elif re.fullmatch(r"[0-9a-f]{7,40}", value) and value not in EXTERNAL_REVISIONS:
+                        revisions[value].add(path)
         for value in sorted(trees):
             held = git("rev-parse", f"{RECORD_TREES[value]}^^{{tree}}").stdout.strip()
             audit.record(held == value, path, f"tree {value[:8]} is the parent tree of record {RECORD_TREES[value][:8]}",
@@ -4740,6 +4804,237 @@ def revision_map_text(rows: list[dict[str, str]]) -> str:
     return buffer.getvalue()
 
 
+# The cap-turn summary's pooled McNemar p, withdrawn with the column.
+WITHDRAWN_POOLED_MCNEMAR = 3.2e-5
+CAP_TURN_README = "bench/template-free2-r7/README.md"
+CAP_TURN_ROWS = "bench/template-free2-r7/rows.csv"
+CAP_TURN_FLAG_OFF = "bench/template-free2-r7/flag-off-rows.csv"
+CAP_TURN_SKIP = "bench/template-free2-r7/concurrent.csv"
+# A plain number, scientific notation, or a mantissa times a power of ten.
+NUMBER_TOKEN = re.compile(
+    r"[-+]?(?:\d+\.\d*|\.\d+|\d+)\s*(?:\\times|×)\s*10\^\{?[-+]?\d+\}?"
+    r"|[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?"
+)
+
+
+def cap_turn_section(text: str) -> str:
+    """The cap-turn campaign write-up, after the fresh-seed McNemar table."""
+    marker = "## 2. The cap turn"
+    start = text.find(marker)
+    if start < 0:
+        return ""
+    rest = text[start + len(marker):]
+    nxt = rest.find("\n## ")
+    return text[start:] if nxt < 0 else text[start:start + len(marker) + nxt]
+
+
+def cap_turn_table_headers(section: str) -> list[str]:
+    """Header cells of every pipe table in the cap-turn section."""
+    headers: list[str] = []
+    pending = True
+    for line in section.splitlines():
+        if not line.startswith("|"):
+            pending = True
+            continue
+        if not pending:
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if cells and not all(set(cell) <= set("-: ") and cell for cell in cells):
+            headers.extend(cells)
+        pending = False
+    return headers
+
+
+def mcnemar_headers(headers) -> list[str]:
+    """Column names that are a McNemar column, ignoring case and separators."""
+    return [header for header in headers if "mcnemar" in str(header).casefold()]
+
+
+def _parsed_number(token: str) -> bool:
+    return parse(token.replace("×", r"\times")) is not None
+
+
+def numeric_tokens(text: str) -> list[str]:
+    """Numeric spellings in ``text``, including scientific and power-of-ten forms."""
+    return [match.group() for match in NUMBER_TOKEN.finditer(text) if _parsed_number(match.group())]
+
+
+def mcnemar_column_values(section: str) -> list[str]:
+    """Parsed numbers sitting under a McNemar header, in whatever format they use."""
+    values: list[str] = []
+    lines = section.splitlines()
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if not line.startswith("|"):
+            index += 1
+            continue
+        header = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        columns = [i for i, name in enumerate(header) if "mcnemar" in name.casefold()]
+        if not columns:
+            index += 1
+            continue
+        index += 1
+        if index < len(lines) and re.fullmatch(r"\|[\s:\-|]+\|", lines[index].strip()):
+            index += 1
+        while index < len(lines) and lines[index].startswith("|"):
+            cells = [cell.strip() for cell in lines[index].strip().strip("|").split("|")]
+            for column in columns:
+                if column < len(cells):
+                    values.extend(numeric_tokens(cells[column]))
+            index += 1
+    return values
+
+
+def mcnemar_p_values(section: str, rows: list[dict[str, str]]) -> list[str]:
+    """McNemar p values in the summary or the rows, in any numeric format."""
+    found = list(mcnemar_column_values(section))
+    for line in section.splitlines():
+        if "mcnemar" in line.casefold():
+            found.extend(numeric_tokens(line))
+    for row in rows:
+        for key, value in row.items():
+            if "mcnemar" in str(key).casefold():
+                found.extend(numeric_tokens(value))
+            elif "mcnemar" in value.casefold():
+                found.extend(numeric_tokens(value))
+    return found
+
+
+def withdrawn_pooled_spelling(text: str) -> str | None:
+    """A numeric token in ``text`` that denotes the withdrawn pooled p, or None."""
+    for token in numeric_tokens(text):
+        if agrees(token.replace("×", r"\times"), WITHDRAWN_POOLED_MCNEMAR):
+            return token
+    return None
+
+
+def cap_turn_skip(audit: Audit) -> set[tuple[str, int]]:
+    """Seeds left out of the timing, read as text so a seed list is not a result table."""
+    skip = set()
+    for line in audit.text(CAP_TURN_SKIP).splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or line.startswith("cell"):
+            continue
+        cell, seed = line.split(",", 2)[:2]
+        skip.add((cell, int(seed)))
+    return skip
+
+
+def cap_turn_outside_ratios(rows: list[dict[str, str]], skip: set[tuple[str, int]]) -> dict[str, float]:
+    """CT/base ratio of type-7 medians of (wall - pot) / charged, skip applied."""
+    by: dict[str, dict[str, dict[int, dict[str, str]]]] = defaultdict(dict)
+    for row in rows:
+        by[row["cell"]].setdefault(row["arm"], {})[int(row["seed"])] = row
+    ratios = {}
+    for cell, arms in by.items():
+        if "base" not in arms or "CT" not in arms:
+            continue
+        timed = [seed for seed in sorted(set(arms["base"]) & set(arms["CT"])) if (cell, seed) not in skip]
+        if not timed:
+            continue
+
+        def per_call(arm: str) -> list[float]:
+            return [(float(arms[arm][seed]["wall_s"]) - float(arms[arm][seed]["pot_s"]))
+                    / float(arms[arm][seed]["charged"]) for seed in timed]
+
+        ratios[cell] = median(per_call("CT")) / median(per_call("base"))
+    return ratios
+
+
+def cap_turn_ratio_text(ratio: float) -> str:
+    """Three decimals, rounded once from full precision, half away from zero.
+
+    ``summarise.py`` prints the ratio to three places with the same rule,
+    so 0.992484 is written 0.992 rather than double-rounded via 0.9925.
+    """
+    return format(Decimal(str(ratio)).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP), "f")
+
+
+def _flag(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes"}
+
+
+def cap_turn_flag_off_mismatches(base_rows: list[dict[str, str]], off_rows: list[dict[str, str]]) -> list[str]:
+    """Off-arm rows that disagree with the base arm on hit, charged calls, or identity."""
+    base = {(row["cell"], int(row["seed"])): row for row in base_rows if row.get("arm", "base") == "base"}
+    mismatches = []
+    for off in off_rows:
+        key = (off["cell"], int(off["seed"]))
+        row = base.get(key)
+        if row is None:
+            mismatches.append(f"{off['cell']} seed {off['seed']} has no base row")
+            continue
+        where = f"{off['cell']} seed {off['seed']}"
+        if _flag(off["hit"]) != _flag(row["hit"]):
+            mismatches.append(f"{where} hit")
+        if int(float(off["charged"])) != int(float(row["charged"])):
+            mismatches.append(f"{where} charged")
+        off_hash = off.get("best_bits", "").strip()
+        base_hash = row.get("best_bits", "").strip()
+        energy = "best" in off and "best" in row and off["best"].strip() and row["best"].strip()
+        hashed = bool(off_hash) and bool(base_hash)
+        if energy and not agrees(off["best"], float(row["best"])):
+            mismatches.append(f"{where} energy")
+        if hashed and off_hash != base_hash:
+            mismatches.append(f"{where} hash")
+        if not energy and not hashed:
+            mismatches.append(f"{where} identity")
+    return mismatches
+
+
+def cap_turn_campaign(audit: Audit) -> None:
+    """The r7 cap-turn table follows its rows and quotes no McNemar p for the unrecorded build."""
+    readme = CAP_TURN_README
+    rows = audit.rows(CAP_TURN_ROWS)
+    off_rows = audit.rows(CAP_TURN_FLAG_OFF)
+    hits: dict[tuple[str, str], dict[int, int]] = defaultdict(dict)
+    for r in rows:
+        hits[(r["cell"], r["arm"])][int(r["seed"])] = int(r["hit"])
+    audit.said(readme, "| cell | base | CT | Fisher p | base only | CT only | outside/call ratio |")
+    totals = [0, 0, 0, 0, 0]
+    for cell in ("lj38", "m38r14", "m55r14", "lj75", "lj98", "lj102", "lj103", "lj104"):
+        base, arm = hits[(cell, "base")], hits[(cell, "CT")]
+        seeds = sorted(set(base) & set(arm))
+        n, hb, ha = len(seeds), sum(base[s] for s in seeds), sum(arm[s] for s in seeds)
+        ob = sum(1 for s in seeds if base[s] and not arm[s])
+        oa = sum(1 for s in seeds if arm[s] and not base[s])
+        totals = [t + v for t, v in zip(totals, (n, hb, ha, ob, oa))]
+        audit.said(readme, f"| {cell} | {hb}/{n} | {ha}/{n} | {fisher(hb, n, ha, n):.2g} | {ob} | {oa} |")
+    n, hb, ha, ob, oa = totals
+    audit.said(readme, f"| all | {hb}/{n} | {ha}/{n} | | {ob} | {oa} | |")
+    audit.said(readme, "No McNemar p is given for the cap turn")
+
+    section = cap_turn_section(audit.text(readme))
+    row_headers = mcnemar_headers(rows[0].keys() if rows else [])
+    table_headers = mcnemar_headers(cap_turn_table_headers(section))
+    audit.record(not row_headers, CAP_TURN_ROWS, "the cap-turn rows have no McNemar column",
+                 "absent", " ".join(row_headers) or "absent")
+    audit.record(not table_headers, readme, "the cap-turn summary has no McNemar column",
+                 "absent", " ".join(table_headers) or "absent")
+    p_values = mcnemar_p_values(section, rows)
+    audit.record(not p_values, readme, "the cap-turn record states no McNemar p",
+                 "absent", p_values[0] if p_values else "absent")
+    pooled = withdrawn_pooled_spelling(section)
+    audit.record(pooled is None, readme, "the withdrawn pooled McNemar p is absent",
+                 "absent", pooled or "absent")
+
+    skip = cap_turn_skip(audit)
+    computed = cap_turn_outside_ratios(rows, skip)
+    recorded = {row["cell"]: row["outside/call ratio"].strip()
+                for _, row in md_table(audit, readme, "cell") if row.get("outside/call ratio", "").strip()}
+    for cell, shown in recorded.items():
+        audit.record(cell in computed and shown == cap_turn_ratio_text(computed[cell]), readme,
+                     f"{cell} outside/call ratio matches the rows", shown,
+                     cap_turn_ratio_text(computed[cell]) if cell in computed else "missing")
+    audit.record(set(recorded) == set(computed), readme, "every timed cell has an outside/call ratio",
+                 " ".join(sorted(recorded)), " ".join(sorted(computed)))
+
+    mismatches = cap_turn_flag_off_mismatches(rows, off_rows)
+    audit.record(not mismatches, CAP_TURN_FLAG_OFF, "flag-off rows match the base rows",
+                 "match", mismatches[0] if mismatches else "match")
+
+
 def revision_map(audit: Audit) -> None:
     """The committed map from each unreachable revision to its panel rows equals the rows."""
     rows = revision_map_rows(audit)
@@ -4791,7 +5086,8 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
     audit = Audit()
     for check in (paired_statistics, manuscript_gmin, withdrawn_benchmarks, supporting_information, release, paper_0120, gad_published, openconf,
                   head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, lj_large, bench_prose,
-                  manuscript_ase, manuscript_knockouts, manuscript_priors, panel_references, generated_tables, supporting_numbers, manuscript_new, manuscript_followups, cover_letter, science_claims, rigid_stall, presets_and_templates, no_anneal_restart, hexamer_provenance, template_era, outside_session, morse_g1, gmin_sources, g3_session, no_move_choice_claim):
+                  manuscript_ase, manuscript_knockouts, manuscript_priors, panel_references, generated_tables, supporting_numbers, manuscript_new, manuscript_followups, cover_letter, science_claims, rigid_stall, presets_and_templates, no_anneal_restart, hexamer_provenance, template_era, outside_session, morse_g1, gmin_sources, g3_session, no_move_choice_claim,
+                  cap_turn_campaign):
         check(audit)
     if write_map:
         (ROOT / REVISION_MAP).write_text(revision_map_text(revision_map_rows(audit)))

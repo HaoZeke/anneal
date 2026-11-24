@@ -1,0 +1,8 @@
+system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,pot_s,outside_s
+m55r14,anneal,2023,1000000,true,694780,694780,11.525153,-220.64620756,8.610830,2.914323
+arm single draws 1750 accepts 361 best -219.927731
+arm surface draws 1262 accepts 401 best -219.806258
+arm sym draws 1006 accepts 244 best -219.704896
+arm burst draws 2013 accepts 368 best -219.942415
+arm soap draws 387 accepts 32 best -219.517313
+arm dls-kernel draws 2642 accepts 1817 best -220.644370

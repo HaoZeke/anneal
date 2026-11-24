@@ -28,6 +28,22 @@ fn main() {
     }
     println!("cargo:rerun-if-changed=cbindgen.toml");
     println!("cargo:rerun-if-changed=include/");
+    println!("cargo:rerun-if-changed=Cargo.toml");
+    println!("cargo:rustc-check-cfg=cfg(anneal_packaged_without_rgpot_pair)");
+    let manifest_path =
+        std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"))
+            .join("Cargo.toml");
+    let manifest = std::fs::read_to_string(&manifest_path)
+        .unwrap_or_else(|err| panic!("failed to read {}: {err}", manifest_path.display()));
+    let has_rgpot_pair = manifest.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed.starts_with("rgpot-pair")
+            || trimmed == "[dev-dependencies.rgpot-pair]"
+            || trimmed == "[dependencies.rgpot-pair]"
+    });
+    if !has_rgpot_pair {
+        println!("cargo:rustc-cfg=anneal_packaged_without_rgpot_pair");
+    }
 
     // The `ira` feature links the IRA Fortran library. Its location is a build
     // input rather than a guess: a wrong default here fails at link time with a

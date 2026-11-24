@@ -49,10 +49,11 @@ def template_rows() -> list[dict[str, str]]:
 
 def groups(rows: list[dict[str, str]], revision: str, gmin: str,
            harness: str | None = None) -> dict[tuple[str, str], list[dict[str, str]]]:
-    PANEL.GMIN_REV = gmin
     out = PANEL.panel_groups(rows, revision, harness)
     for (system, code), group in out.items():
         PANEL.validate_group(group, system, code)
+        if code == "gmin" and {r["code_revision"] for r in group} != {gmin}:
+            raise SystemExit(f"template_era_table: {system} GMIN rows are not {gmin[:8]}")
     return out
 
 

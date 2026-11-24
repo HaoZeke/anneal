@@ -122,14 +122,12 @@ def develop_rows() -> list[dict[str, str]]:
 
 def summary() -> tuple[list[dict[str, str]], dict[str, dict[str, object]]]:
     data = rows()
-    PANEL.GMIN_REV = gmin_row_id(data)
     printed = [row for row in data if row["system"] in SYSTEMS]
     return PANEL.summarise(printed, REVISION), PANEL.paired_summary(printed, REVISION)
 
 
 def develop_summary() -> tuple[list[dict[str, str]], dict[str, dict[str, object]]]:
     data = develop_rows()
-    PANEL.GMIN_REV = gmin_row_id(data)
     return (PANEL.summarise(data, SUBMITTED, DEVELOP_HARNESS),
             PANEL.paired_summary(data, SUBMITTED, DEVELOP_HARNESS))
 

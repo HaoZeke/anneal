@@ -44,6 +44,7 @@ CHECKS = (
     audit_mod.manuscript_followups,
     audit_mod.cover_letter,
     audit_mod.science_claims,
+    audit_mod.cap_turn_campaign,
     audit_mod.rerun_claims,
     audit_mod.rerun_check,
     audit_mod.todo_check,
@@ -69,6 +70,74 @@ def test_every_table_cell_matches_its_rows(audited):
 
 def test_provenance_gaps_are_exactly_the_listed_ones(audited):
     assert audit_mod.provenance(audited) == audit_mod.KNOWN_GAPS
+
+
+def test_new_machine_provenance_requires_a_digest_and_cpu_model():
+    audit = audit_mod.Audit()
+    audit.read["new.csv"] = [
+        {
+            "code_revision": "",
+            "host": "bench",
+            "machine_id": "not-a-digest",
+            "cpu_model": "",
+        }
+    ]
+
+    gap = audit_mod.provenance(audit)["new.csv"]
+
+    assert "cpu_model empty on some rows" in gap
+    assert "machine_id is not a salted sha256 on some rows" in gap
+
+
+def test_machine_provenance_accepts_aggregated_digests():
+    audit = audit_mod.Audit()
+    audit.read["summary.csv"] = [
+        {
+            "code_revision": "",
+            "host": "bench",
+            "machine_id": f"{'a' * 64};{'b' * 64}",
+            "cpu_model": "CPU A;CPU B",
+        }
+    ]
+
+    gap = audit_mod.provenance(audit)["summary.csv"]
+
+    assert "machine_id" not in gap
+
+
+def test_machine_schema_requires_both_stable_columns():
+    audit = audit_mod.Audit()
+    audit.read["missing-cpu.csv"] = [
+        {
+            "code_revision": next(iter(audit_mod.EXTERNAL_REVISIONS)),
+            "host": "bench",
+            "machine_id": "a" * 64,
+        }
+    ]
+    audit.read["missing-id.csv"] = [
+        {
+            "code_revision": next(iter(audit_mod.EXTERNAL_REVISIONS)),
+            "host": "bench",
+            "cpu_model": "Example CPU",
+        }
+    ]
+
+    gaps = audit_mod.provenance(audit)
+
+    assert "machine_id recorded; no cpu_model column" in gaps["missing-cpu.csv"]
+    assert "cpu_model recorded; no machine_id column" in gaps["missing-id.csv"]
+
+
+def test_legacy_schema_without_machine_columns_remains_exempt():
+    audit = audit_mod.Audit()
+    audit.read["old.csv"] = [
+        {
+            "code_revision": next(iter(audit_mod.EXTERNAL_REVISIONS)),
+            "host": "bench",
+        }
+    ]
+
+    assert "old.csv" not in audit_mod.provenance(audit)
 
 
 def test_untraced_numbers_are_still_quoted(audited):
@@ -916,6 +985,20 @@ def test_an_uncharged_gmin_panel_miss_is_reported():
     assert "row invariants" in {r[2] for r in audit.drifts()}
 
 
+def test_a_stale_gmin_panel_source_patch_digest_is_reported():
+    audit = audit_mod.Audit()
+    path = "bench/gmin-panel/gmin-source.txt"
+    audit.text_cache[path] = audit.text(path).replace(
+        "patch=bench/lj104-lattice/v2/h2h-gmin.patch 3bf5d49a0a1cb0512a228212482e76e98195946096ceae3b54e88ca4a43b7189",
+        "patch=bench/lj104-lattice/v2/h2h-gmin.patch a31221a67883d20032a029e34e3d81bd62c5bcb786c97fff02a9c234adc34553",
+    )
+    panel, groups = audit_mod.gmin_panel_groups(audit)
+    audit_mod.gmin_panel_readme(audit, panel, groups)
+    assert [r[2] for r in audit.drifts()] == [
+        "in-tree patch sha256 bench/lj104-lattice/v2/h2h-gmin.patch"
+    ]
+
+
 def test_a_drifted_sutton_chen_howto_cell_is_reported():
     audit = audit_mod.Audit()
     path = audit_mod.SC96_78_HOWTO
@@ -1023,12 +1106,12 @@ def test_a_drifted_gfn2_paper_cell_is_reported():
     assert [r[2] for r in audit.drifts()] == ["median calls"]
 
 
-def test_a_drifted_gfn2_revision_table_cell_is_reported():
+def test_a_drifted_gfn2_c20_revision_table_cell_is_reported():
     audit = audit_mod.Audit()
     text = audit.text(GFN2_README)
-    old = "| Si13 | anneal G, `c1c02d16` | 6/6 | 1,974.5 |"
+    old = "| C20 | anneal G, `5351f272` | 0/12 | 100,000 |"
     assert old in text
-    audit.text_cache[GFN2_README] = text.replace(old, "| Si13 | anneal G, `c1c02d16` | 6/6 | 1,975.5 |")
+    audit.text_cache[GFN2_README] = text.replace(old, "| C20 | anneal G, `5351f272` | 0/12 | 99,999 |")
     audit_mod.covalent_gfn2(audit)
     assert [r[2] for r in audit.drifts()] == ["median calls"]
 
@@ -1040,18 +1123,18 @@ def test_a_gfn2_revision_table_the_audit_cannot_find_is_reported():
     end = text.index("\n", start)
     audit.text_cache[GFN2_README] = text[:start] + text[start:end].replace("best / eV", "best (eV)") + text[end:]
     audit_mod.covalent_gfn2(audit)
-    assert sorted((r[1].split()[-2], r[2]) for r in audit.drifts()) == [("C20", "GFN2 table row"),
-                                                                        ("Si13", "GFN2 table row")]
+    assert [(r[1].split()[-2], r[2]) for r in audit.drifts()] == [("C20", "GFN2 table row")]
 
 
-def test_a_gfn2_sentence_count_follows_the_rows():
-    # The latest CREST hit moves, and no table cell or p value with it.
+def test_voided_si13_rows_are_not_audited_as_valid_results():
     audit = audit_mod.Audit()
     rows = audit.rows("bench/covalent-h2h/gfn2/rows.csv")
     row = next(r for r in rows if r["system"] == "si13" and r["code"] == "crest" and r["evals_to_hit"] == "143630")
     row["evals_to_hit"] = "150000"
     audit_mod.covalent_gfn2(audit)
-    assert [(r[2], "143,630" in r[3]) for r in audit.drifts()] == [("prose", False)]
+    assert "Si13" not in audit_mod.GFN2_SYSTEMS
+    assert all(test[0] != "Si13" for test in audit_mod.GFN2_REVISION_TESTS)
+    assert not audit.drifts()
 
 
 def test_an_unnamed_gfn2_false_hit_is_reported():
@@ -1694,3 +1777,147 @@ def test_record_only_revisions_resolve_and_unpushed_ones_do_not():
     assert f"revision {traced[:8]}" not in gap
     assert f"revision {absent[:8]} is not in this repository" in gap
     assert f"revision {local[:8]} is not in this repository" in gap
+
+
+def _cap_turn_copies():
+    audit = audit_mod.Audit()
+    rows = [dict(row) for row in audit.rows(audit_mod.CAP_TURN_ROWS)]
+    off = [dict(row) for row in audit.rows(audit_mod.CAP_TURN_FLAG_OFF)]
+    return rows, off
+
+
+def test_cap_turn_record_matches_its_rows():
+    audit = audit_mod.Audit()
+    audit_mod.cap_turn_campaign(audit)
+    drift = audit.drifts()
+    assert not drift, "\n".join(f"{label} shown={shown} computed={value}" for _, _, label, shown, value in drift)
+    assert audit_mod.withdrawn_pooled_spelling(audit.text(audit_mod.CAP_TURN_README).split("## 2. The cap turn", 1)[1]) is None
+
+
+def test_a_mcnemar_column_in_the_cap_turn_rows_is_reported():
+    audit = audit_mod.Audit()
+    rows, _off = _cap_turn_copies()
+    for row in rows:
+        row["McNemar_p"] = "2.10e-2"
+    audit.read[audit_mod.CAP_TURN_ROWS] = rows
+    audit_mod.cap_turn_campaign(audit)
+    labels = {row[2] for row in audit.drifts()}
+    assert "the cap-turn rows have no McNemar column" in labels
+    assert "the cap-turn record states no McNemar p" in labels
+    assert "3.2e-5" not in "".join(row["McNemar_p"] for row in rows)
+
+
+def test_a_mcnemar_column_in_the_cap_turn_summary_is_reported():
+    audit = audit_mod.Audit()
+    text = audit.text(audit_mod.CAP_TURN_README)
+    extra = "\n| cell | MCNEMAR_P |\n| --- | --- |\n| lj38 | 1.000 |\n"
+    assert "3.2e-5" not in extra
+    audit.text_cache[audit_mod.CAP_TURN_README] = text + extra
+    audit_mod.cap_turn_campaign(audit)
+    labels = {row[2] for row in audit.drifts()}
+    assert "the cap-turn summary has no McNemar column" in labels
+    p = [row for row in audit.drifts() if row[2] == "the cap-turn record states no McNemar p"]
+    assert p and p[0][4] == "1.000"
+    assert not any("outside/call" in row[2] for row in audit.drifts())
+
+
+def test_a_mcnemar_p_written_beside_its_name_is_reported():
+    audit = audit_mod.Audit()
+    text = audit.text(audit_mod.CAP_TURN_README)
+    audit.text_cache[audit_mod.CAP_TURN_README] = text + "\nThe McNemar p was 2.1e-2.\n"
+    audit_mod.cap_turn_campaign(audit)
+    labels = {row[2] for row in audit.drifts()}
+    assert "the cap-turn record states no McNemar p" in labels
+    assert "the cap-turn summary has no McNemar column" not in labels
+    assert "the cap-turn rows have no McNemar column" not in labels
+
+
+@pytest.mark.parametrize("spelling", ["0.000032", "3.20e-05", "3.2 \\times 10^{-5}", "3.2 × 10^{-5}"])
+def test_a_reformatted_pooled_mcnemar_p_is_reported(spelling):
+    audit = audit_mod.Audit()
+    text = audit.text(audit_mod.CAP_TURN_README)
+    assert "3.2e-5" not in text
+    audit.text_cache[audit_mod.CAP_TURN_README] = text + f"\nWithdrawn pooled value {spelling}.\n"
+    audit_mod.cap_turn_campaign(audit)
+    drift = [row for row in audit.drifts() if row[2] == "the withdrawn pooled McNemar p is absent"]
+    assert len(drift) == 1
+    assert drift[0][4] == spelling
+    assert "3.2e-5" not in drift[0][4]
+
+
+def test_a_cap_turn_ratio_that_disagrees_with_the_rows_is_reported():
+    audit = audit_mod.Audit()
+    rows, _off = _cap_turn_copies()
+    for row in rows:
+        if row["cell"] == "lj38" and row["arm"] == "base":
+            row["wall_s"] = str(float(row["pot_s"]) + 10.0 * float(row["charged"]))
+    audit.read[audit_mod.CAP_TURN_ROWS] = rows
+    audit_mod.cap_turn_campaign(audit)
+    drift = [row for row in audit.drifts() if row[2] == "lj38 outside/call ratio matches the rows"]
+    assert len(drift) == 1
+    assert drift[0][3] == "0.998"
+    assert drift[0][4] != "0.998"
+
+
+def test_cap_turn_ratio_rounds_once_from_full_precision():
+    assert audit_mod.cap_turn_ratio_text(0.992484) == "0.992"
+    assert audit_mod.cap_turn_ratio_text(1.002459) == "1.002"
+    assert audit_mod.cap_turn_ratio_text(0.993487) == "0.993"
+    assert audit_mod.cap_turn_ratio_text(0.9925) == "0.993"
+
+    audit = audit_mod.Audit()
+    text = audit.text(audit_mod.CAP_TURN_README)
+    audit.text_cache[audit_mod.CAP_TURN_README] = text.replace(
+        "| m55r14 | 18/24 | 18/24 | 1 | 5 | 5 | 0.992 |",
+        "| m55r14 | 18/24 | 18/24 | 1 | 5 | 5 | 0.993 |",
+        1,
+    )
+    audit_mod.cap_turn_campaign(audit)
+    drift = [row for row in audit.drifts() if row[2] == "m55r14 outside/call ratio matches the rows"]
+    assert len(drift) == 1
+    assert drift[0][3] == "0.993"
+    assert drift[0][4] == "0.992"
+
+
+def _flag_off_drift(mutate):
+    audit = audit_mod.Audit()
+    rows, off = _cap_turn_copies()
+    mutate(rows, off)
+    audit.read[audit_mod.CAP_TURN_ROWS] = rows
+    audit.read[audit_mod.CAP_TURN_FLAG_OFF] = off
+    audit_mod.cap_turn_campaign(audit)
+    drift = [row for row in audit.drifts() if row[2] == "flag-off rows match the base rows"]
+    assert len(drift) == 1
+    return drift[0][4]
+
+
+def test_a_flag_off_hit_that_differs_from_base_is_reported():
+    def mutate(_rows, off):
+        off[0]["hit"] = "false" if off[0]["hit"].strip().lower() == "true" else "true"
+
+    assert "hit" in _flag_off_drift(mutate)
+
+
+def test_a_flag_off_charged_count_that_differs_from_base_is_reported():
+    def mutate(_rows, off):
+        off[0]["charged"] = str(int(off[0]["charged"]) + 1)
+
+    assert "charged" in _flag_off_drift(mutate)
+
+
+def test_a_flag_off_energy_that_differs_from_base_is_reported():
+    def mutate(_rows, off):
+        best = off[0]["best"]
+        off[0]["best"] = best[:-1] + ("0" if best[-1] != "0" else "1")
+
+    assert "energy" in _flag_off_drift(mutate)
+
+
+def test_a_flag_off_hash_that_differs_from_base_is_reported():
+    def mutate(rows, off):
+        base = next(row for row in rows if row["arm"] == "base" and row["cell"] == off[0]["cell"]
+                    and row["seed"] == off[0]["seed"])
+        bits = base["best_bits"]
+        off[0]["best_bits"] = bits[:-1] + ("0" if bits[-1] != "0" else "1")
+
+    assert "hash" in _flag_off_drift(mutate)

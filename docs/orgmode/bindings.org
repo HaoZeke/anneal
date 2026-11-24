@@ -43,7 +43,7 @@ script then forwards the caller's Cargo environment. On hosts where
 Meson passes =objcopy= and =nm=, it packs the final object with
 =ar crs=. On macOS and Windows it ships Cargo's archive as built.
 
-Set =ANNEAL_REPRODUCIBLE_ARCHIVE=1= to change three things.
+Set ~ANNEAL_REPRODUCIBLE_ARCHIVE=1~ to change three things.
 
 Archiver flags. On hosts where Meson passes =objcopy= and =nm=,
 the members are joined with =ld -r= and the archive that ships is
@@ -55,8 +55,8 @@ otherwise =llvm-ar=. On macOS and Windows, Meson passes an empty
 =objcopy= and =nm=, so no archiver runs: the copied Cargo archive's
 headers are rewritten in process and =AR= is ignored.
 
-Remapped prefixes. Cargo runs with =CARGO_INCREMENTAL=0= and
-=-Ccodegen-units=1=. =--remap-path-prefix= sends the source tree to
+Remapped prefixes. Cargo runs with ~CARGO_INCREMENTAL=0~ and
+~-Ccodegen-units=1~. =--remap-path-prefix= sends the source tree to
 =/source=, the Cargo target directory to =/build=, and
 =CARGO_HOME= (or =~/.cargo= when it is unset) to =/cargo=. When
 several prefixes match a path, rustc applies the last matching
