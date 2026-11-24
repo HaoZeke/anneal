@@ -26,3 +26,4 @@ fc1af066a915a80eb46a3bc478caaf155cc9b29f,"the build head of the Au55 cluster-pre
 89de725a337b6e37daef05877796ae8192fbf8e1,the local harness head of the LJ98-LJ150 AGOX seeds 2006 onward; it was not pushed
 c89653df3ae107e9814917bc6515e578e6788188,"the anneal harness head of the 12-seed Sutton-Chen panel in bench/metal-cluster-h2h/sc-n12; no pushed branch holds it and its rows record no tree"
 be3849e7811634aca67688da70f5413f9d860ec9,the Pt6Cu17 polish rerun head; no fetched origin head or pull-request head contains it
+5445c4f7d6333792dc792482f9a2a082970b9685,"the cap-turn arm of the template-free2 r7 campaign, first cited by aa10a14c; no pushed branch or audit ref holds it, and aa10a14c's parent 403c3d00 is on another base"

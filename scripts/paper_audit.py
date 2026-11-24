@@ -45,10 +45,11 @@ import random
 import re
 import struct
 import subprocess
-import tarfile
 import sys
+import tarfile
 import tempfile
 from collections import defaultdict
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -166,6 +167,8 @@ KNOWN_GAPS = {
     "bench/gmin-panel/rows.csv": "revision 1ce3ab64 is not in this repository",
     "bench/gmin-panel/summary.csv": "revision 1ce3ab64 is not in this repository",
     "bench/morse-panel/template-free-rows.csv": "revision 1ce3ab64 is not in this repository",
+    "bench/template-free2-r7/rows.csv": "revision 5445c4f7 is not in this repository",
+    "bench/template-free2-r7/flag-off-rows.csv": "revision 5445c4f7 is not in this repository",
     "paper/jctc/data/literature.tsv": "revision and host unrecorded (no revision or host column)",
     "bench/copper-slab/rows.csv": "revision and host unrecorded (no revision or host column)",
 }
@@ -5190,6 +5193,238 @@ def revision_map_text(rows: list[dict[str, str]]) -> str:
     return buffer.getvalue()
 
 
+# The cap-turn summary's pooled McNemar p, withdrawn with the column.
+WITHDRAWN_POOLED_MCNEMAR = 3.2e-5
+CAP_TURN_README = "bench/template-free2-r7/README.md"
+CAP_TURN_ROWS = "bench/template-free2-r7/rows.csv"
+CAP_TURN_FLAG_OFF = "bench/template-free2-r7/flag-off-rows.csv"
+CAP_TURN_SKIP = "bench/template-free2-r7/concurrent.csv"
+# A plain number, scientific notation, or a mantissa times a power of ten.
+NUMBER_TOKEN = re.compile(
+    r"[-+]?(?:\d+\.\d*|\.\d+|\d+)\s*(?:\\times|×)\s*10\^\{?[-+]?\d+\}?"
+    r"|[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?"
+)
+
+
+def cap_turn_section(text: str) -> str:
+    """The cap-turn campaign write-up, after the fresh-seed McNemar table."""
+    marker = "## 2. The cap turn"
+    start = text.find(marker)
+    if start < 0:
+        return ""
+    rest = text[start + len(marker):]
+    nxt = rest.find("\n## ")
+    return text[start:] if nxt < 0 else text[start:start + len(marker) + nxt]
+
+
+def cap_turn_table_headers(section: str) -> list[str]:
+    """Header cells of every pipe table in the cap-turn section."""
+    headers: list[str] = []
+    pending = True
+    for line in section.splitlines():
+        if not line.startswith("|"):
+            pending = True
+            continue
+        if not pending:
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if cells and not all(set(cell) <= set("-: ") and cell for cell in cells):
+            headers.extend(cells)
+        pending = False
+    return headers
+
+
+def mcnemar_headers(headers) -> list[str]:
+    """Column names that are a McNemar column, ignoring case and separators."""
+    return [header for header in headers if "mcnemar" in str(header).casefold()]
+
+
+def _parsed_number(token: str) -> bool:
+    return parse(token.replace("×", r"\times")) is not None
+
+
+def numeric_tokens(text: str) -> list[str]:
+    """Numeric spellings in ``text``, including scientific and power-of-ten forms."""
+    return [match.group() for match in NUMBER_TOKEN.finditer(text) if _parsed_number(match.group())]
+
+
+def mcnemar_column_values(section: str) -> list[str]:
+    """Parsed numbers sitting under a McNemar header, in whatever format they use."""
+    values: list[str] = []
+    lines = section.splitlines()
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if not line.startswith("|"):
+            index += 1
+            continue
+        header = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        columns = [i for i, name in enumerate(header) if "mcnemar" in name.casefold()]
+        if not columns:
+            index += 1
+            continue
+        index += 1
+        if index < len(lines) and re.fullmatch(r"\|[\s:\-|]+\|", lines[index].strip()):
+            index += 1
+        while index < len(lines) and lines[index].startswith("|"):
+            cells = [cell.strip() for cell in lines[index].strip().strip("|").split("|")]
+            for column in columns:
+                if column < len(cells):
+                    values.extend(numeric_tokens(cells[column]))
+            index += 1
+    return values
+
+
+def mcnemar_p_values(section: str, rows: list[dict[str, str]]) -> list[str]:
+    """McNemar p values in the summary or the rows, in any numeric format."""
+    found = list(mcnemar_column_values(section))
+    for line in section.splitlines():
+        if "mcnemar" in line.casefold():
+            found.extend(numeric_tokens(line))
+    for row in rows:
+        for key, value in row.items():
+            if "mcnemar" in str(key).casefold():
+                found.extend(numeric_tokens(value))
+            elif "mcnemar" in value.casefold():
+                found.extend(numeric_tokens(value))
+    return found
+
+
+def withdrawn_pooled_spelling(text: str) -> str | None:
+    """A numeric token in ``text`` that denotes the withdrawn pooled p, or None."""
+    for token in numeric_tokens(text):
+        if agrees(token.replace("×", r"\times"), WITHDRAWN_POOLED_MCNEMAR):
+            return token
+    return None
+
+
+def cap_turn_skip(audit: Audit) -> set[tuple[str, int]]:
+    """Seeds left out of the timing, read as text so a seed list is not a result table."""
+    skip = set()
+    for line in audit.text(CAP_TURN_SKIP).splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or line.startswith("cell"):
+            continue
+        cell, seed = line.split(",", 2)[:2]
+        skip.add((cell, int(seed)))
+    return skip
+
+
+def cap_turn_outside_ratios(rows: list[dict[str, str]], skip: set[tuple[str, int]]) -> dict[str, float]:
+    """CT/base ratio of type-7 medians of (wall - pot) / charged, skip applied."""
+    by: dict[str, dict[str, dict[int, dict[str, str]]]] = defaultdict(dict)
+    for row in rows:
+        by[row["cell"]].setdefault(row["arm"], {})[int(row["seed"])] = row
+    ratios = {}
+    for cell, arms in by.items():
+        if "base" not in arms or "CT" not in arms:
+            continue
+        timed = [seed for seed in sorted(set(arms["base"]) & set(arms["CT"])) if (cell, seed) not in skip]
+        if not timed:
+            continue
+
+        def per_call(arm: str) -> list[float]:
+            return [(float(arms[arm][seed]["wall_s"]) - float(arms[arm][seed]["pot_s"]))
+                    / float(arms[arm][seed]["charged"]) for seed in timed]
+
+        ratios[cell] = median(per_call("CT")) / median(per_call("base"))
+    return ratios
+
+
+def cap_turn_ratio_text(ratio: float) -> str:
+    """Three decimals, via the summary script's four-decimal print then half away from zero.
+
+    ``summarise.py`` prints the ratio to four places. The README keeps three,
+    and a trailing 5 there rounds away from zero, so 0.9925 is written 0.993.
+    """
+    four = Decimal(f"{ratio:.4f}")
+    return format(four.quantize(Decimal("0.001"), rounding=ROUND_HALF_UP), "f")
+
+
+def _flag(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes"}
+
+
+def cap_turn_flag_off_mismatches(base_rows: list[dict[str, str]], off_rows: list[dict[str, str]]) -> list[str]:
+    """Off-arm rows that disagree with the base arm on hit, charged calls, or identity."""
+    base = {(row["cell"], int(row["seed"])): row for row in base_rows if row.get("arm", "base") == "base"}
+    mismatches = []
+    for off in off_rows:
+        key = (off["cell"], int(off["seed"]))
+        row = base.get(key)
+        if row is None:
+            mismatches.append(f"{off['cell']} seed {off['seed']} has no base row")
+            continue
+        where = f"{off['cell']} seed {off['seed']}"
+        if _flag(off["hit"]) != _flag(row["hit"]):
+            mismatches.append(f"{where} hit")
+        if int(float(off["charged"])) != int(float(row["charged"])):
+            mismatches.append(f"{where} charged")
+        off_hash = off.get("best_bits", "").strip()
+        base_hash = row.get("best_bits", "").strip()
+        energy = "best" in off and "best" in row and off["best"].strip() and row["best"].strip()
+        hashed = bool(off_hash) and bool(base_hash)
+        if energy and not agrees(off["best"], float(row["best"])):
+            mismatches.append(f"{where} energy")
+        if hashed and off_hash != base_hash:
+            mismatches.append(f"{where} hash")
+        if not energy and not hashed:
+            mismatches.append(f"{where} identity")
+    return mismatches
+
+
+def cap_turn_campaign(audit: Audit) -> None:
+    """The r7 cap-turn table follows its rows and quotes no McNemar p for the unrecorded build."""
+    readme = CAP_TURN_README
+    rows = audit.rows(CAP_TURN_ROWS)
+    off_rows = audit.rows(CAP_TURN_FLAG_OFF)
+    hits: dict[tuple[str, str], dict[int, int]] = defaultdict(dict)
+    for r in rows:
+        hits[(r["cell"], r["arm"])][int(r["seed"])] = int(r["hit"])
+    audit.said(readme, "| cell | base | CT | Fisher p | base only | CT only | outside/call ratio |")
+    totals = [0, 0, 0, 0, 0]
+    for cell in ("lj38", "m38r14", "m55r14", "lj75", "lj98", "lj102", "lj103", "lj104"):
+        base, arm = hits[(cell, "base")], hits[(cell, "CT")]
+        seeds = sorted(set(base) & set(arm))
+        n, hb, ha = len(seeds), sum(base[s] for s in seeds), sum(arm[s] for s in seeds)
+        ob = sum(1 for s in seeds if base[s] and not arm[s])
+        oa = sum(1 for s in seeds if arm[s] and not base[s])
+        totals = [t + v for t, v in zip(totals, (n, hb, ha, ob, oa))]
+        audit.said(readme, f"| {cell} | {hb}/{n} | {ha}/{n} | {fisher(hb, n, ha, n):.2g} | {ob} | {oa} |")
+    n, hb, ha, ob, oa = totals
+    audit.said(readme, f"| all | {hb}/{n} | {ha}/{n} | | {ob} | {oa} | |")
+    audit.said(readme, "No McNemar p is given for the cap turn")
+
+    section = cap_turn_section(audit.text(readme))
+    row_headers = mcnemar_headers(rows[0].keys() if rows else [])
+    table_headers = mcnemar_headers(cap_turn_table_headers(section))
+    audit.record(not row_headers, CAP_TURN_ROWS, "the cap-turn rows have no McNemar column",
+                 "absent", " ".join(row_headers) or "absent")
+    audit.record(not table_headers, readme, "the cap-turn summary has no McNemar column",
+                 "absent", " ".join(table_headers) or "absent")
+    p_values = mcnemar_p_values(section, rows)
+    audit.record(not p_values, readme, "the cap-turn record states no McNemar p",
+                 "absent", p_values[0] if p_values else "absent")
+    pooled = withdrawn_pooled_spelling(section)
+    audit.record(pooled is None, readme, "the withdrawn pooled McNemar p is absent",
+                 "absent", pooled or "absent")
+
+    skip = cap_turn_skip(audit)
+    computed = cap_turn_outside_ratios(rows, skip)
+    recorded = {row["cell"]: row["outside/call ratio"].strip()
+                for _, row in md_table(audit, readme, "cell") if row.get("outside/call ratio", "").strip()}
+    for cell, shown in recorded.items():
+        audit.record(cell in computed and shown == cap_turn_ratio_text(computed[cell]), readme,
+                     f"{cell} outside/call ratio matches the rows", shown,
+                     cap_turn_ratio_text(computed[cell]) if cell in computed else "missing")
+    audit.record(set(recorded) == set(computed), readme, "every timed cell has an outside/call ratio",
+                 " ".join(sorted(recorded)), " ".join(sorted(computed)))
+
+    mismatches = cap_turn_flag_off_mismatches(rows, off_rows)
+    audit.record(not mismatches, CAP_TURN_FLAG_OFF, "flag-off rows match the base rows",
+                 "match", mismatches[0] if mismatches else "match")
+
+
 def au55_superseded(audit: Audit) -> None:
     """Each row of rows.csv that rows-for-cluster.csv replaces is listed, and no other row is."""
     old = audit.rows("bench/ase-au55/rows.csv")
@@ -6007,7 +6242,8 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
                   head_to_head, sc96_78_howto, stale_claims, tip4p_panel, reproduction_records, covalent_panels, covalent_gfn2,
                   printed_harnesses,
                   ase_gofee, lj_large, bench_prose,
-                  manuscript_ase, panel_references, generated_tables, sutton_chen, supporting_numbers, method_definitions, prior_switches, jctc_requirements, crest_equal, crest_equal_bench, au55_superseded, manuscript_new, manuscript_followups, manuscript_au55, cover_letter, manuscript_review, append_only_rows, tip4p_unscored, bibliography_keys, history_narration, conversion_literals, prose_receipt_lines, script_commit_hashes, figure_row_hashes):
+                  manuscript_ase, panel_references, generated_tables, sutton_chen, supporting_numbers, method_definitions, prior_switches, jctc_requirements, crest_equal, crest_equal_bench, au55_superseded, manuscript_new, manuscript_followups, manuscript_au55, cover_letter, manuscript_review, append_only_rows, tip4p_unscored, bibliography_keys, history_narration, conversion_literals, prose_receipt_lines, script_commit_hashes, figure_row_hashes,
+                  cap_turn_campaign):
         check(audit)
     if write_map:
         (ROOT / REVISION_MAP).write_text(revision_map_text(revision_map_rows(audit)))

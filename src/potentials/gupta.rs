@@ -312,6 +312,18 @@ impl DifferentiableObjective<f64> for Gupta {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+
+    fn skip_without_rgpot_kernels(test_name: &str) -> bool {
+        if cfg!(anneal_packaged_without_rgpot_pair) && super::super::cluster_kernels().is_none() {
+            let msg = format!(
+                "warning: skipped potentials::gupta::tests::{test_name}: rgpot-pair is an unpublished git dev-dependency omitted from the packaged .crate\n"
+            );
+            let _ = std::io::stderr().write_all(msg.as_bytes());
+            return true;
+        }
+        false
+    }
 
     fn coordinates(text: &str) -> Array1<f64> {
         let mut values = Vec::new();
@@ -356,6 +368,9 @@ mod tests {
 
     #[test]
     fn a_zinc_dimer_at_r0_is_the_closed_form() {
+        if skip_without_rgpot_kernels("a_zinc_dimer_at_r0_is_the_closed_form") {
+            return;
+        }
         let pot = Gupta::zinc(2);
         let x = Array1::from_vec(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
         let energy = pot.eval(x.view());
@@ -368,6 +383,9 @@ mod tests {
 
     #[test]
     fn a_platinum_dimer_at_r0_has_the_cleri_rosato_energy() {
+        if skip_without_rgpot_kernels("a_platinum_dimer_at_r0_has_the_cleri_rosato_energy") {
+            return;
+        }
         // At r = r0 the Cleri–Rosato sum for one pair is 2A − 2ξ.
         // Platinum: 2×0.2975 − 2×2.695 = −4.795 eV.
         let pot = Gupta::platinum(2);
@@ -391,6 +409,9 @@ mod tests {
 
     #[test]
     fn the_gradient_matches_a_central_difference() {
+        if skip_without_rgpot_kernels("the_gradient_matches_a_central_difference") {
+            return;
+        }
         let pot = Gupta::zinc(4);
         let x = Array1::from_vec(vec![
             0.0, 0.0, 0.0, 1.05, 0.02, 0.0, 0.4, 0.9, -0.1, 0.2, 0.3, 1.1,
@@ -413,6 +434,9 @@ mod tests {
 
     #[test]
     fn trait_methods_match_the_fused_evaluation() {
+        if skip_without_rgpot_kernels("trait_methods_match_the_fused_evaluation") {
+            return;
+        }
         let pot = Gupta::copper_gold(2, 2);
         let x = Array1::from_vec(vec![
             0.0, 0.0, 0.0, 2.6, 0.1, 0.0, 1.2, 2.3, 0.2, 1.3, 0.4, 2.5,
@@ -435,6 +459,9 @@ mod tests {
 
     #[test]
     fn zinc_reproduces_the_cambridge_minima() {
+        if skip_without_rgpot_kernels("zinc_reproduces_the_cambridge_minima") {
+            return;
+        }
         // Doye, Phys. Rev. B 68, 195418 (2003), as listed on the Cambridge
         // Cluster Database Gupta zinc table. The point files are in units of r0.
         let cases = [
@@ -491,6 +518,9 @@ mod tests {
 
     #[test]
     fn copper_gold_reproduces_the_cambridge_archive() {
+        if skip_without_rgpot_kernels("copper_gold_reproduces_the_cambridge_archive") {
+            return;
+        }
         // Cambridge Cluster Database CuAu_38, energies from the file headers.
         // The same Cleri–Rosato table hits every composition in that archive
         // to better than 1e-8; these five lock the pure limits and a mix.

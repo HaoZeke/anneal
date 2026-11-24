@@ -85,9 +85,11 @@ pub fn install_cluster_kernels(kernels: ClusterKernels) {
     let _ = CLUSTER_KERNELS.set(kernels);
 }
 
-/// The installed kernels, if any. The crate's own tests take `rgpot_pair`.
+/// The installed kernels, if any. The crate's own tests take `rgpot_pair`
+/// when present in the manifest; `cargo package` strips git-only
+/// dev-dependencies from the `.crate` manifest.
 pub fn cluster_kernels() -> Option<&'static ClusterKernels> {
-    #[cfg(test)]
+    #[cfg(all(test, not(anneal_packaged_without_rgpot_pair)))]
     install_cluster_kernels(ClusterKernels::new(
         rgpot_pair::cluster_lj,
         rgpot_pair::cambridge_morse,
@@ -97,18 +99,28 @@ pub fn cluster_kernels() -> Option<&'static ClusterKernels> {
     CLUSTER_KERNELS.get()
 }
 
-/// Install the `rgpot_pair` kernels. The calling crate depends on
-/// `rgpot_pair`.
+/// Install the `rgpot_pair` kernels when `rgpot_pair` is linked. In an
+/// unpacked `.crate`, `cargo package` omits the unpublished git
+/// dev-dependency so targets fall back to the built-in pair loops.
+#[cfg(not(anneal_packaged_without_rgpot_pair))]
 #[macro_export]
 macro_rules! install_rgpot_kernels {
-    () => {
+    () => {{
         $crate::potentials::install_cluster_kernels($crate::potentials::ClusterKernels::new(
             ::rgpot_pair::cluster_lj,
             ::rgpot_pair::cambridge_morse,
             ::rgpot_pair::gupta,
             ::rgpot_pair::binary_lj,
-        ))
-    };
+        ));
+    }};
+}
+
+/// Leave kernel installation empty when the unpublished dependency is absent
+/// from an unpacked crates.io package.
+#[cfg(anneal_packaged_without_rgpot_pair)]
+#[macro_export]
+macro_rules! install_rgpot_kernels {
+    () => {{}};
 }
 
 /// A pairwise cluster potential over `n` free points in three dimensions.

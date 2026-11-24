@@ -76,6 +76,12 @@ fn a_labeled_metal_keeps_the_absolute_floor() {
 /// reaches it.
 #[test]
 fn labeled_metal_dimers_reach_their_gupta_minimum() {
+    if cfg!(anneal_packaged_without_rgpot_pair) && crate::potentials::cluster_kernels().is_none() {
+        use std::io::Write;
+        let msg = "warning: skipped methods::cluster_search::call_wall_tests::labeled_metal_dimers_reach_their_gupta_minimum: rgpot-pair is an unpublished git dev-dependency omitted from the packaged .crate\n";
+        let _ = std::io::stderr().write_all(msg.as_bytes());
+        return;
+    }
     for species in [vec![29, 29], vec![29, 79], vec![79, 79]] {
         let gupta = Gupta::elements(&species);
         let r0 = Gupta::homonuclear_r0(species[0]).expect("tabulated");

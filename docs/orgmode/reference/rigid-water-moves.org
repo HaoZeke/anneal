@@ -18,6 +18,10 @@ The first =3 n= are the centres.
 The last =3 n= are rotation vectors, one per body.
 =Config::rigid_body_geometry= gives the site positions in the body frame and the atomic number of each site.
 It must be the body frame of the objective.
+=RigidBodyGeometry::new_bonded= also declares the bonds inside one body.
+The anchor is the most-connected site, and a tie takes the lowest site index.
+A bond list in which no site is joined to two others is refused.
+An empty bond list is still a body: a water then takes its oxygen and its two hydrogens from the atomic numbers.
 =Config::for_tip4p= installs the frame of =Tip4pCluster=.
 For =GminTip4p=, set it to =gmin_water_geometry()=, as =examples/h2h_seed= does.
 
@@ -38,7 +42,8 @@ For =GminTip4p=, set it to =gmin_water_geometry()=, as =examples/h2h_seed= does.
      - ``rotate_step``, 0.40 rad in ``for_tip4p``.
    * - ``rcycle``
      - Reverse one directed cycle of hydrogen bonds.
-       Each body on the cycle turns about its oxygen.
+       Each body on the cycle turns about its anchor.
+       The stalled archive walk uses the same bonds, and a stem donor inside the derived window can close onto that cycle.
      - ``reverse_cycles``, on in ``for_tip4p``.
    * - ``rorient``
      - Compose one orientation step onto every body.
@@ -53,6 +58,10 @@ For =GminTip4p=, set it to =gmin_water_geometry()=, as =examples/h2h_seed= does.
 - =rotate_step= :: largest =rrot= increment per component, or the cap of the =rorient= angle, in radians.
 - =local= :: =true= offers =rorient= in place of =rtrans= and =rrot=.
 - =reverse_cycles= :: =true= adds =rcycle=.
+  The archive walk still reverses a chain from the declared bonds when that arm is absent.
+  A quench from that walk, or from the shell walk, can lower the published minimum.
+  It does not reset the main chain's stall clock, it does not pay the move allocator, and a stall escape returns to a minimum the main chain quenched.
+  A rigid search prints nothing. It returns the shell entries, the archive entries, and the auxiliary records kept or withheld in =Outcome::rigid_path=, and the Python =cluster_search= puts them in its =rigid_path= dict.
 
 * Presets
 
@@ -61,13 +70,17 @@ For =GminTip4p=, set it to =gmin_water_geometry()=, as =examples/h2h_seed= does.
 
 The Python =cluster_search= with =water_sites= uses these three TIP4P presets on the caller's sites.
 It labels the three sites 8, 1 and 1, so =rcycle= is on there too.
+=bonds= replaces the two default O-H contacts of that custom body.
 
 * =rcycle= rules
 
 - The geometry must have exactly one site of atomic number 8 and two of atomic number 1.
   Otherwise the library does not offer =rcycle=.
-- A hydrogen bond is an O to H distance under 2.5 angstroms between two different molecules.
+- A hydrogen bond is a donor site within the body's contact of another body's anchor.
+  That contact is the longest anchor-to-donor bond plus the widest donor-donor separation, and it is not tighter than the cycle move's own threshold of 2.5 angstroms.
+  The TIP4P span is the O-H length plus the H-H length, about 2.47 angstroms, so the shared contact on that frame is 2.5 angstroms.
   The donor is the molecule of the hydrogen.
+  A stem donor whose anchor lies inside one further bond length of the closing body can join the cycle on the archive walk.
 - A walk from a random donor follows a random donated bond at each step.
   It never steps straight back to the molecule it came from.
   It stops at the first molecule it has visited.

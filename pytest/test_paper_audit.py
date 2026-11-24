@@ -64,6 +64,7 @@ CHECKS = (
     audit_mod.manuscript_followups,
     audit_mod.manuscript_au55,
     audit_mod.cover_letter,
+    audit_mod.cap_turn_campaign,
     audit_mod.rerun_check,
     audit_mod.append_only_rows,
     audit_mod.bibliography_keys,
@@ -2599,3 +2600,127 @@ def test_the_sutton_chen_helpers_import_without_numpy():
     run = subprocess.run([sys.executable, "-c", code, str(ROOT / "scripts")],
                          cwd=ROOT, capture_output=True, text=True, check=False)
     assert run.returncode == 0, run.stderr[-2000:]
+
+
+def _cap_turn_copies():
+    audit = audit_mod.Audit()
+    rows = [dict(row) for row in audit.rows(audit_mod.CAP_TURN_ROWS)]
+    off = [dict(row) for row in audit.rows(audit_mod.CAP_TURN_FLAG_OFF)]
+    return rows, off
+
+
+def test_cap_turn_record_matches_its_rows():
+    audit = audit_mod.Audit()
+    audit_mod.cap_turn_campaign(audit)
+    drift = audit.drifts()
+    assert not drift, "\n".join(f"{label} shown={shown} computed={value}" for _, _, label, shown, value in drift)
+    assert audit_mod.withdrawn_pooled_spelling(audit.text(audit_mod.CAP_TURN_README).split("## 2. The cap turn", 1)[1]) is None
+
+
+def test_a_mcnemar_column_in_the_cap_turn_rows_is_reported():
+    audit = audit_mod.Audit()
+    rows, _off = _cap_turn_copies()
+    for row in rows:
+        row["McNemar_p"] = "2.10e-2"
+    audit.read[audit_mod.CAP_TURN_ROWS] = rows
+    audit_mod.cap_turn_campaign(audit)
+    labels = {row[2] for row in audit.drifts()}
+    assert "the cap-turn rows have no McNemar column" in labels
+    assert "the cap-turn record states no McNemar p" in labels
+    assert "3.2e-5" not in "".join(row["McNemar_p"] for row in rows)
+
+
+def test_a_mcnemar_column_in_the_cap_turn_summary_is_reported():
+    audit = audit_mod.Audit()
+    text = audit.text(audit_mod.CAP_TURN_README)
+    extra = "\n| cell | MCNEMAR_P |\n| --- | --- |\n| lj38 | 1.000 |\n"
+    assert "3.2e-5" not in extra
+    audit.text_cache[audit_mod.CAP_TURN_README] = text + extra
+    audit_mod.cap_turn_campaign(audit)
+    labels = {row[2] for row in audit.drifts()}
+    assert "the cap-turn summary has no McNemar column" in labels
+    p = [row for row in audit.drifts() if row[2] == "the cap-turn record states no McNemar p"]
+    assert p and p[0][4] == "1.000"
+    assert not any("outside/call" in row[2] for row in audit.drifts())
+
+
+def test_a_mcnemar_p_written_beside_its_name_is_reported():
+    audit = audit_mod.Audit()
+    text = audit.text(audit_mod.CAP_TURN_README)
+    audit.text_cache[audit_mod.CAP_TURN_README] = text + "\nThe McNemar p was 2.1e-2.\n"
+    audit_mod.cap_turn_campaign(audit)
+    labels = {row[2] for row in audit.drifts()}
+    assert "the cap-turn record states no McNemar p" in labels
+    assert "the cap-turn summary has no McNemar column" not in labels
+    assert "the cap-turn rows have no McNemar column" not in labels
+
+
+@pytest.mark.parametrize("spelling", ["0.000032", "3.20e-05", "3.2 \\times 10^{-5}", "3.2 × 10^{-5}"])
+def test_a_reformatted_pooled_mcnemar_p_is_reported(spelling):
+    audit = audit_mod.Audit()
+    text = audit.text(audit_mod.CAP_TURN_README)
+    assert "3.2e-5" not in text
+    audit.text_cache[audit_mod.CAP_TURN_README] = text + f"\nWithdrawn pooled value {spelling}.\n"
+    audit_mod.cap_turn_campaign(audit)
+    drift = [row for row in audit.drifts() if row[2] == "the withdrawn pooled McNemar p is absent"]
+    assert len(drift) == 1
+    assert drift[0][4] == spelling
+    assert "3.2e-5" not in drift[0][4]
+
+
+def test_a_cap_turn_ratio_that_disagrees_with_the_rows_is_reported():
+    audit = audit_mod.Audit()
+    rows, _off = _cap_turn_copies()
+    for row in rows:
+        if row["cell"] == "lj38" and row["arm"] == "base":
+            row["wall_s"] = str(float(row["pot_s"]) + 10.0 * float(row["charged"]))
+    audit.read[audit_mod.CAP_TURN_ROWS] = rows
+    audit_mod.cap_turn_campaign(audit)
+    drift = [row for row in audit.drifts() if row[2] == "lj38 outside/call ratio matches the rows"]
+    assert len(drift) == 1
+    assert drift[0][3] == "0.998"
+    assert drift[0][4] != "0.998"
+
+
+def _flag_off_drift(mutate):
+    audit = audit_mod.Audit()
+    rows, off = _cap_turn_copies()
+    mutate(rows, off)
+    audit.read[audit_mod.CAP_TURN_ROWS] = rows
+    audit.read[audit_mod.CAP_TURN_FLAG_OFF] = off
+    audit_mod.cap_turn_campaign(audit)
+    drift = [row for row in audit.drifts() if row[2] == "flag-off rows match the base rows"]
+    assert len(drift) == 1
+    return drift[0][4]
+
+
+def test_a_flag_off_hit_that_differs_from_base_is_reported():
+    def mutate(_rows, off):
+        off[0]["hit"] = "false" if off[0]["hit"].strip().lower() == "true" else "true"
+
+    assert "hit" in _flag_off_drift(mutate)
+
+
+def test_a_flag_off_charged_count_that_differs_from_base_is_reported():
+    def mutate(_rows, off):
+        off[0]["charged"] = str(int(off[0]["charged"]) + 1)
+
+    assert "charged" in _flag_off_drift(mutate)
+
+
+def test_a_flag_off_energy_that_differs_from_base_is_reported():
+    def mutate(_rows, off):
+        best = off[0]["best"]
+        off[0]["best"] = best[:-1] + ("0" if best[-1] != "0" else "1")
+
+    assert "energy" in _flag_off_drift(mutate)
+
+
+def test_a_flag_off_hash_that_differs_from_base_is_reported():
+    def mutate(rows, off):
+        base = next(row for row in rows if row["arm"] == "base" and row["cell"] == off[0]["cell"]
+                    and row["seed"] == off[0]["seed"])
+        bits = base["best_bits"]
+        off[0]["best_bits"] = bits[:-1] + ("0" if bits[-1] != "0" else "1")
+
+    assert "hash" in _flag_off_drift(mutate)

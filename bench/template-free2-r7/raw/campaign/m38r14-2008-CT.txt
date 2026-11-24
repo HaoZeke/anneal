@@ -1,0 +1,12 @@
+rc=0
+--- stdout ---
+system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,pot_s,outside_s
+m38r14,anneal,2008,400000,true,377296,377296,3.079309,-144.32105392,2.250864,0.828445
+arm single draws 820 accepts 190 best -142.697690
+arm surface draws 469 accepts 160 best -142.629358
+arm sym draws 311 accepts 65 best -142.653360
+arm burst draws 839 accepts 151 best -142.629475
+arm soap draws 261 accepts 31 best -142.653360
+arm dls-kernel draws 1199 accepts 802 best -142.697898
+
+--- stderr ---
