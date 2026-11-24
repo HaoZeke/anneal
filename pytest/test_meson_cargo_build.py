@@ -565,11 +565,10 @@ def test_stamping_shim_is_cleared_only_on_the_shipped_archive(
     monkeypatch.setenv("ANNEAL_TEST_AR_LOG", str(log))
     monkeypatch.delenv("AR", raising=False)
     obj = tmp_path / "foo.o"
-    subprocess.check_call(
-        "echo '.globl foo; foo: ret' | as -o foo.o",
-        shell=True,
-        cwd=tmp_path,
-    )
+    source = tmp_path / "foo.s"
+    source.write_text(".globl foo\nfoo:\nret\n", encoding="utf-8")
+    # Apple's `as` is clang and does not read assembly from stdin.
+    subprocess.check_call(["as", "-o", str(obj), str(source)], cwd=tmp_path)
     out = tmp_path / "lib.a"
     MODULE._AR_SUPPORTS_D.clear()
     MODULE.pack_deterministic_archive(str(shim_dir / "ar"), str(out), [str(obj)])

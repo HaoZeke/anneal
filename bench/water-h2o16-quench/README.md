@@ -4,8 +4,9 @@ The full panel below is the original record on `e2865427`, which was
 `fix/rigid-thread-local`, not develop. One serial session used hostname
 `bench`, working directory `/work`, and one thread. The comparison arm was
 `e2865427` (`/work/bin/anneal-e286`). The quench arm was `169924a6`
-(`/work/bin/anneal-quench`): the xtb gradient is stored as an rgpot force, and
-a molecular quench takes a capped Lindh step. CREST 3.0.2 is
+(`/work/bin/anneal-quench`): it negated the engine buffer in `xtb_callback`
+before passing it to rgpot as a force, and a molecular quench takes a
+capped Lindh step. CREST 3.0.2 is
 `crest start.xyz --gfn2 -T 1 --legacy -xnam /tmp/crest-env/bin/xtb -len 0.2`
 on the same starts. xtb is conda-forge 6.7.1. Seeds 15000–15005 ran at 4000
 and 28000 charged calls, and seed 16001 ran at 28000. Arm order is in the
@@ -33,15 +34,43 @@ minima. Neither rerun hits the vtight threshold.
 | 16001 | −81.387703963668 | −2214.6722482295 | 853.066 | 808.150 | 44.916 | 353 | 13 | 79.32 |
 | 15000 | −81.388961921640 | −2214.7064790098 | 861.531 | 815.176 | 46.354 | 315 | 11 | 88.89 |
 
-The callback sign fix remains necessary on `0ae5bfe0`: that tree publishes
-the xtb gradient as an rgpot force while rgpot negates forces to make its
-objective gradient.
+In that `0ae5bfe0` session, `f0bac79b` still carried the callback negation
+against the same unrecorded `/work` engine binary. Against the pinned rgpot
+source (`8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e` in `Cargo.toml`,
+`Cargo.lock`, and `RGPOT_XTB_ENGINE_REV`), that negation is not necessary:
+`XTBPot::forceImpl` already returns a force (−∂E/∂x), and `f6f7ccb69`
+removed `src/xtb_gradient.rs` so `xtb_callback` publishes the engine
+buffer unchanged.
 
 ## What the gradient does
 
-The bench engine stores xtb's ∂E/∂x. On a stretched O–H with the hydrogen at 1.20 Å the engine component is 4.89482241 eV/Å and the finite difference is 4.89513530 eV/Å. rgpot then sets the objective gradient to minus the force buffer. Develop `e2865427` publishes that buffer unchanged, so the objective gradient is minus the true slope and L-BFGS walks uphill. That negation is in develop itself. The earlier double negation lived only in a replay onto the rolled-back `fbd21fed` session, which already stored forces; it is not on this branch and not on `e2865427`.
+The pinned rgpot source (`8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e`, and
+`04aceaa79e2336060269bc4ee988397e102f74f1` on `e2865427`) stores forces in
+the engine buffer: `XTBPot::forceImpl` (`CppCore/rgpot/XTBPot/XTBPot.cc`)
+multiplies `xtb_getGradient` by `NEG_GRAD_TO_FORCE`
+(`-HARTREE_BOHR_TO_EV_ANGSTROM`, `CppCore/rgpot/units.hpp`), and
+`rgpot_xtb_force` (`CppCore/rgpot/XTBPot/XTBEngineAbi.cc`) copies that force
+(−∂E/∂x in eV/Å) out unchanged. `NEG_GRAD_TO_FORCE` has been in
+`XTBPot::forceImpl` since its initial commit (`26e3363795`) and in
+`XTBEngineAbi.cc` since `2645b8aefa`. `rgpot-core` (3.5.1) negates
+`out.forces` to form the objective gradient ∂E/∂x, and `xtb_callback`
+(`examples/common/rgpot_eindir.rs`) publishes the engine buffer unchanged
+(`f6f7ccb69` removed `src/xtb_gradient.rs`; `tests/rgpot_xtb_gradient.rs`
+checks that sign against central finite differences).
 
-`3477545e` flips the buffer before rgpot negates it. The two tests in `xtb_gradient` lock the finite-difference slope and the callback. With that sign, the Lindh quench converges. Develop converges none.
+Neither `results.csv`, `port-results.csv`, nor this record gives an rgpot
+commit SHA, library path, or sha256 for the `libxtb_engine.so` loaded on
+hostname `bench` during the session below (and `169924a6`, `f0bac79b`, and
+`3477545e` are unpushed local commits absent from this repository). In that
+session, the stretched O–H check (hydrogen at 1.20 Å) against the `/work`
+engine binary gave `+4.89482241` eV/Å against a finite difference of
+`4.89513530` eV/Å, `e2865427` without callback negation converged 0 quenches,
+and `169924a6` and `f0bac79b` with callback negation (`3477545e` /
+`xtb_gradient`) converged. Those rows therefore record an unpinned `/work`
+engine build returning ∂E/∂x, not the pinned rgpot `8efdd246` (or
+`04aceaa79e`) engine, where negating in the callback double-negates the
+gradient. (The rolled-back `fbd21fed` session already had an engine
+returning forces, so replaying a callback negation onto it double-negated.)
 
 ## 4000 calls
 

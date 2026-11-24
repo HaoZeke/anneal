@@ -40,8 +40,10 @@
 use crate::structure::Template;
 use ndarray::{Array1, ArrayView1};
 use rand::Rng;
-use std::cmp::{Ordering, Reverse};
-use std::collections::{BinaryHeap, HashMap, HashSet};
+#[cfg(test)]
+use std::collections::HashSet;
+use std::collections::hash_map::Entry;
+use std::collections::{BinaryHeap, HashMap};
 use std::f64::consts::PI;
 
 /// Where the local order to grow comes from.
@@ -505,91 +507,32 @@ fn distance2(a: &[f64; 3], b: &[f64; 3]) -> f64 {
 /// that `k` lies inside the sphere with `ij` as its diameter.
 fn observed_contact_graph(x: ArrayView1<f64>) -> Vec<Vec<usize>> {
     let n = x.len() / 3;
-    let mut graph = vec![Vec::new(); n];
-    if n <= 1 {
-        return graph;
-    }
-    let points: Vec<[f64; 3]> = (0..n)
-        .map(|i| [x[3 * i], x[3 * i + 1], x[3 * i + 2]])
-        .collect();
     let mut distances = vec![0.0; n * n];
     for i in 0..n {
+        let a = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
         for j in (i + 1)..n {
-            let d2 = distance2(&points[i], &points[j]);
+            let b = [x[3 * j], x[3 * j + 1], x[3 * j + 2]];
+            let d2 = distance2(&a, &b);
             distances[i * n + j] = d2;
             distances[j * n + i] = d2;
         }
     }
-    let k = 16.min(n - 1);
-    let mut lo = points[0];
-    let mut hi = points[0];
-    for point in &points[1..] {
-        for axis in 0..3 {
-            lo[axis] = lo[axis].min(point[axis]);
-            hi[axis] = hi[axis].max(point[axis]);
-        }
-    }
-    let max_span = (0..3)
-        .map(|axis| hi[axis] - lo[axis])
-        .fold(0.0_f64, f64::max);
-    let side = 4.0 * max_span;
-    let near = if max_span > 0.0 && side.is_finite() {
-        let shifted: Vec<[f64; 3]> = points
-            .iter()
-            .map(|point| std::array::from_fn(|axis| (point[axis] - lo[axis]) + 0.25 * side))
-            .collect();
-        let hint = (max_span / (n as f64).cbrt().max(1.0)).max(side * 1.0e-2);
-        linkcell::Cell::ortho(side, side, side)
-            .ok()
-            .and_then(|cell| linkcell::knearest(&shifted, &cell, k, None, Some(hint)).ok())
-    } else {
-        None
-    };
-    let blocked_in = |i: usize, j: usize, edge: f64, candidates: &[usize]| {
-        candidates
-            .iter()
-            .copied()
-            .any(|m| m != i && m != j && distances[i * n + m] + distances[j * n + m] < edge)
-    };
+    let mut graph = vec![Vec::new(); n];
     for i in 0..n {
+        let row_i = &distances[i * n..(i + 1) * n];
         for j in (i + 1)..n {
-            let edge = distances[i * n + j];
-            if !(edge > 0.0 && edge.is_finite()) {
-                continue;
-            }
-            if let Some(rows) = near.as_ref() {
-                if blocked_in(i, j, edge, &rows[i].indices)
-                    || blocked_in(i, j, edge, &rows[j].indices)
-                {
-                    continue;
-                }
-                if rows[i].indices.len() == n - 1 {
+            let edge = row_i[j];
+            if edge > 0.0 {
+                let row_j = &distances[j * n..(j + 1) * n];
+                let blocked = (0..n).any(|k| k != i && k != j && row_i[k] + row_j[k] < edge);
+                if !blocked {
                     graph[i].push(j);
                     graph[j].push(i);
-                    continue;
                 }
-            }
-            if !(0..n)
-                .any(|m| m != i && m != j && distances[i * n + m] + distances[j * n + m] < edge)
-            {
-                graph[i].push(j);
-                graph[j].push(i);
             }
         }
     }
     graph
-}
-
-fn cross3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
-}
-
-fn dot3(a: [f64; 3], b: [f64; 3]) -> f64 {
-    a.into_iter().zip(b).map(|(u, v)| u * v).sum()
 }
 
 fn basis_is_well_conditioned(basis: &[[f64; 3]; 3]) -> bool {
@@ -625,45 +568,6 @@ fn lattice_point(site: [i32; 3], basis: &[[f64; 3]; 3]) -> [f64; 3] {
     })
 }
 
-fn lattice_neighbours_checked(site: [i32; 3]) -> Option<[[i32; 3]; 6]> {
-    Some([
-        [site[0].checked_sub(1)?, site[1], site[2]],
-        [site[0].checked_add(1)?, site[1], site[2]],
-        [site[0], site[1].checked_sub(1)?, site[2]],
-        [site[0], site[1].checked_add(1)?, site[2]],
-        [site[0], site[1], site[2].checked_sub(1)?],
-        [site[0], site[1], site[2].checked_add(1)?],
-    ])
-}
-
-#[derive(Clone, Copy)]
-struct FrontierSite {
-    radius2: f64,
-    site: [i32; 3],
-}
-
-impl PartialEq for FrontierSite {
-    fn eq(&self, other: &Self) -> bool {
-        self.cmp(other) == Ordering::Equal
-    }
-}
-
-impl Eq for FrontierSite {}
-
-impl PartialOrd for FrontierSite {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for FrontierSite {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.radius2
-            .total_cmp(&other.radius2)
-            .then_with(|| self.site.cmp(&other.site))
-    }
-}
-
 #[cfg(test)]
 fn lattice_neighbours(site: [i32; 3]) -> impl Iterator<Item = [i32; 3]> {
     (0..3).flat_map(move |axis| {
@@ -673,6 +577,115 @@ fn lattice_neighbours(site: [i32; 3]) -> impl Iterator<Item = [i32; 3]> {
             neighbour
         })
     })
+}
+
+const NEIGHBOUR_OFFSETS: [[i32; 3]; 6] = [
+    [-1, 0, 0],
+    [1, 0, 0],
+    [0, -1, 0],
+    [0, 1, 0],
+    [0, 0, -1],
+    [0, 0, 1],
+];
+
+const IN_FRONTIER: u32 = u32::MAX;
+
+#[derive(Default)]
+struct SiteHasher(u64);
+
+impl std::hash::Hasher for SiteHasher {
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) {
+        for &byte in bytes {
+            self.0 = (self.0.rotate_left(5) ^ u64::from(byte)).wrapping_mul(0x517c_c1b7_2722_0a95);
+        }
+    }
+
+    #[inline]
+    fn write_u64(&mut self, i: u64) {
+        self.0 = (self.0.rotate_left(5) ^ i).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
+
+    #[inline]
+    fn write_usize(&mut self, i: usize) {
+        self.write_u64(i as u64);
+    }
+
+    #[inline]
+    fn write_i32(&mut self, i: i32) {
+        self.write_u64(i as u32 as u64);
+    }
+}
+
+type SiteMap = HashMap<[i32; 3], u32, std::hash::BuildHasherDefault<SiteHasher>>;
+
+#[derive(Clone, Copy)]
+struct FrontierSite {
+    radius: f64,
+    site: [i32; 3],
+}
+
+impl PartialEq for FrontierSite {
+    fn eq(&self, other: &Self) -> bool {
+        self.radius.to_bits() == other.radius.to_bits() && self.site == other.site
+    }
+}
+
+impl Eq for FrontierSite {}
+
+impl PartialOrd for FrontierSite {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for FrontierSite {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        other
+            .radius
+            .total_cmp(&self.radius)
+            .then_with(|| other.site.cmp(&self.site))
+    }
+}
+
+#[derive(Clone, Copy)]
+struct PeelSite {
+    coordination: u8,
+    radius: f64,
+    site: [i32; 3],
+    id: u32,
+}
+
+impl PartialEq for PeelSite {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.coordination == other.coordination
+            && self.radius.to_bits() == other.radius.to_bits()
+            && self.site == other.site
+    }
+}
+
+impl Eq for PeelSite {}
+
+impl PartialOrd for PeelSite {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for PeelSite {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        other
+            .coordination
+            .cmp(&self.coordination)
+            .then_with(|| self.radius.total_cmp(&other.radius))
+            .then_with(|| other.site.cmp(&self.site))
+    }
 }
 
 /// Distinct 4-point frames on `n` points, `C(n, 4)`.
@@ -696,19 +709,34 @@ fn candidate_from_basis(basis: &[[f64; 3]; 3], centre: [f64; 3], n: usize) -> Op
     if n == 0 {
         return Some(Array1::zeros(0));
     }
+    // The finished body holds `C(n, 4)` distinct 4-point frames. One frame
+    // cannot hold a second site, and a flat basis would otherwise keep the
+    // frontier moving without ever enclosing one.
+    let frames = four_point_frames(n);
+    if frames <= 1 {
+        return (n <= 1).then(|| Array1::zeros(3 * n));
+    }
     if !basis_is_well_conditioned(basis) || centre.iter().any(|value| !value.is_finite()) {
         return None;
     }
+    let cross = |a: [f64; 3], b: [f64; 3]| {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
+    let dot = |a: [f64; 3], b: [f64; 3]| a.into_iter().zip(b).map(|(u, v)| u * v).sum::<f64>();
     let reciprocal = [
-        cross3(basis[1], basis[2]),
-        cross3(basis[2], basis[0]),
-        cross3(basis[0], basis[1]),
+        cross(basis[1], basis[2]),
+        cross(basis[2], basis[0]),
+        cross(basis[0], basis[1]),
     ];
-    let determinant = dot3(basis[0], reciprocal[0]);
+    let determinant = dot(basis[0], reciprocal[0]);
     if !determinant.is_finite() || determinant == 0.0 {
         return None;
     }
-    let fractional = [0, 1, 2].map(|axis| dot3(centre, reciprocal[axis]) / determinant);
+    let fractional = [0, 1, 2].map(|component| dot(centre, reciprocal[component]) / determinant);
     if fractional.iter().any(|value| !value.is_finite()) {
         return None;
     }
@@ -716,9 +744,9 @@ fn candidate_from_basis(basis: &[[f64; 3]; 3], centre: [f64; 3], n: usize) -> Op
     if seed.iter().any(|value| !value.is_finite()) {
         return None;
     }
-    let shift: [f64; 3] = [0, 1, 2].map(|axis| {
+    let shift: [f64; 3] = [0, 1, 2].map(|component| {
         (0..3)
-            .map(|vector| seed[vector] * basis[vector][axis])
+            .map(|vector| seed[vector] * basis[vector][component])
             .sum()
     });
     if shift.iter().any(|value| !value.is_finite()) {
@@ -726,7 +754,8 @@ fn candidate_from_basis(basis: &[[f64; 3]; 3], centre: [f64; 3], n: usize) -> Op
     }
     for vector in basis {
         let step2 = distance2(vector, &[0.0; 3]);
-        let roundtrip = [0, 1, 2].map(|axis| (shift[axis] + vector[axis]) - shift[axis]);
+        let roundtrip =
+            [0, 1, 2].map(|component| (shift[component] + vector[component]) - shift[component]);
         if !step2.is_finite()
             || step2 == 0.0
             || distance2(&roundtrip, vector) > f64::EPSILON * step2
@@ -734,124 +763,155 @@ fn candidate_from_basis(basis: &[[f64; 3]; 3], centre: [f64; 3], n: usize) -> Op
             return None;
         }
     }
+    // A zero seed keeps the caller's centre bits, so a near-origin centre
+    // still matches the unshifted reference cloud.
     let local_centre = if seed == [0.0; 3] {
         centre
     } else {
-        [0, 1, 2].map(|axis| {
+        [0, 1, 2].map(|component| {
             (0..3)
-                .map(|vector| (fractional[vector] - seed[vector]) * basis[vector][axis])
+                .map(|vector| (fractional[vector] - seed[vector]) * basis[vector][component])
                 .sum()
         })
     };
     if local_centre.iter().any(|value| !value.is_finite()) {
         return None;
     }
-    let seed_radius2 = distance2(&[0.0; 3], &local_centre);
-    if !seed_radius2.is_finite() {
+    // C(n, 4) names every 4-point frame. The proportional site cap stops
+    // growth when that count is large. Either bound, once hit before n
+    // interior sites exist, returns no body.
+    let max_sites = 64usize.saturating_mul(n.saturating_add(4));
+    let cap = frames.min(max_sites);
+
+    let mut sites = vec![[0; 3]];
+    let mut radii = vec![distance2(&lattice_point([0; 3], basis), &local_centre)];
+    let mut coordination = vec![0u8];
+    let mut neighbors = vec![[IN_FRONTIER; 6]];
+    let mut site_state = SiteMap::default();
+    site_state.insert([0; 3], 0);
+    let mut frontier = BinaryHeap::new();
+    for offset in NEIGHBOUR_OFFSETS {
+        site_state.insert(offset, IN_FRONTIER);
+        frontier.push(FrontierSite {
+            radius: distance2(&lattice_point(offset, basis), &local_centre),
+            site: offset,
+        });
+    }
+    let mut interior = 0usize;
+
+    while sites.len() < cap && interior < n {
+        let Some(FrontierSite { radius, site: next }) = frontier.pop() else {
+            break;
+        };
+        let Ok(next_id) = u32::try_from(sites.len()) else {
+            return None;
+        };
+        if next_id == IN_FRONTIER {
+            return None;
+        }
+        let next_idx = next_id as usize;
+        sites.push(next);
+        radii.push(radius);
+        coordination.push(0);
+        neighbors.push([IN_FRONTIER; 6]);
+        site_state.insert(next, next_id);
+
+        for (dir, offset) in NEIGHBOUR_OFFSETS.iter().enumerate() {
+            let neighbour = [
+                next[0] + offset[0],
+                next[1] + offset[1],
+                next[2] + offset[2],
+            ];
+            match site_state.entry(neighbour) {
+                Entry::Occupied(entry) => {
+                    let state = *entry.get();
+                    if state != IN_FRONTIER {
+                        let nb_idx = state as usize;
+                        neighbors[next_idx][dir] = state;
+                        neighbors[nb_idx][dir ^ 1] = next_id;
+                        coordination[next_idx] += 1;
+                        if coordination[next_idx] == 6 {
+                            interior += 1;
+                        }
+                        coordination[nb_idx] += 1;
+                        if coordination[nb_idx] == 6 {
+                            interior += 1;
+                        }
+                    }
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(IN_FRONTIER);
+                    frontier.push(FrontierSite {
+                        radius: distance2(&lattice_point(neighbour, basis), &local_centre),
+                        site: neighbour,
+                    });
+                }
+            }
+        }
+    }
+    // The cap was reached before n interior sites existed, so there is no
+    // body to peel.
+    if interior < n {
         return None;
     }
-    let max_sites = 64usize.saturating_mul(n.saturating_add(4));
-    // C(n, 4) names every 4-point frame in the body. The cloud cannot contain
-    // more sites than the body has distinct frames, and the proportional site
-    // cap prevents excessive growth when that combinatorial bound is large.
-    let frames = four_point_frames(n);
-    let cap = frames.min(max_sites);
-    let mut sites = vec![[0; 3]];
-    let mut radii = vec![seed_radius2];
-    let mut index_of: HashMap<[i32; 3], usize> = HashMap::from([([0; 3], 0)]);
-    let mut queued: HashSet<[i32; 3]> = HashSet::from([[0; 3]]);
-    let mut frontier: BinaryHeap<Reverse<FrontierSite>> = BinaryHeap::new();
-    for neighbour in lattice_neighbours_checked([0; 3])? {
-        let radius2 = distance2(&lattice_point(neighbour, basis), &local_centre);
-        if !radius2.is_finite() {
-            return None;
-        }
-        queued.insert(neighbour);
-        frontier.push(Reverse(FrontierSite {
-            radius2,
-            site: neighbour,
-        }));
-    }
-    let mut degree: Vec<u8> = vec![0];
-    let mut interior = 0usize;
-    while interior < n {
-        if sites.len() >= cap {
-            return None;
-        }
-        let Reverse(next) = frontier.pop()?;
-        let slot = sites.len();
-        sites.push(next.site);
-        radii.push(next.radius2);
-        index_of.insert(next.site, slot);
-        let mut here_degree = 0u8;
-        for neighbour in lattice_neighbours_checked(next.site)? {
-            if let Some(&other) = index_of.get(&neighbour) {
-                here_degree += 1;
-                degree[other] += 1;
-                if degree[other] == 6 {
-                    interior += 1;
+
+    let mut alive = vec![true; sites.len()];
+    let mut alive_count = sites.len();
+    if alive_count > n {
+        let mut peel = BinaryHeap::from(
+            (0..sites.len())
+                .map(|id| PeelSite {
+                    coordination: coordination[id],
+                    radius: radii[id],
+                    site: sites[id],
+                    id: id as u32,
+                })
+                .collect::<Vec<_>>(),
+        );
+        while alive_count > n {
+            let entry = peel.pop().expect("a live site remains while peeling");
+            let idx = entry.id as usize;
+            if !alive[idx] || coordination[idx] != entry.coordination {
+                continue;
+            }
+            alive[idx] = false;
+            alive_count -= 1;
+            for nb in neighbors[idx] {
+                if nb != IN_FRONTIER {
+                    let nb_idx = nb as usize;
+                    if alive[nb_idx] {
+                        coordination[nb_idx] -= 1;
+                        peel.push(PeelSite {
+                            coordination: coordination[nb_idx],
+                            radius: radii[nb_idx],
+                            site: sites[nb_idx],
+                            id: nb,
+                        });
+                    }
                 }
-            } else if queued.insert(neighbour) {
-                let radius2 = distance2(&lattice_point(neighbour, basis), &local_centre);
-                if !radius2.is_finite() {
-                    return None;
-                }
-                frontier.push(Reverse(FrontierSite {
-                    radius2,
-                    site: neighbour,
-                }));
-            }
-        }
-        degree.push(here_degree);
-        if here_degree == 6 {
-            interior += 1;
-        }
-    }
-    let m = sites.len();
-    let mut neighbours_of: Vec<Vec<usize>> = vec![Vec::new(); m];
-    for (i, &site) in sites.iter().enumerate() {
-        for neighbour in lattice_neighbours_checked(site)? {
-            if let Some(&j) = index_of.get(&neighbour) {
-                neighbours_of[i].push(j);
             }
         }
     }
-    let mut live_degree: Vec<usize> = neighbours_of.iter().map(Vec::len).collect();
-    let mut alive = vec![true; m];
-    let mut live = m;
-    while live > n {
-        let worst = (0..m).filter(|&i| alive[i]).min_by(|&i, &j| {
-            live_degree[i]
-                .cmp(&live_degree[j])
-                .then_with(|| radii[j].total_cmp(&radii[i]))
-                .then_with(|| sites[i].cmp(&sites[j]))
-        })?;
-        alive[worst] = false;
-        live -= 1;
-        for &j in &neighbours_of[worst] {
-            if alive[j] {
-                live_degree[j] -= 1;
-            }
-        }
-    }
+
     let mut out = Array1::zeros(3 * n);
-    for (i, (_, site)) in sites
-        .into_iter()
+    for (i, &site) in sites
+        .iter()
         .enumerate()
-        .filter(|(idx, _)| alive[*idx])
+        .filter(|(id, _)| alive[*id])
+        .map(|(_, site)| site)
         .enumerate()
     {
         let point = lattice_point(site, basis);
-        for axis in 0..3 {
-            let coord = if seed == [0.0; 3] {
-                point[axis]
+        for component in 0..3 {
+            let placed = if seed == [0.0; 3] {
+                point[component]
             } else {
-                shift[axis] + point[axis]
+                shift[component] + point[component]
             };
-            if !coord.is_finite() {
+            if !placed.is_finite() {
                 return None;
             }
-            out[3 * i + axis] = coord;
+            out[3 * i + component] = placed;
         }
     }
     Some(out)
@@ -873,25 +933,11 @@ pub fn observed_basis_candidate(
         return None;
     }
     let graph = observed_contact_graph(x);
-    let centre = (0..n).max_by_key(|&i| (graph[i].len(), Reverse(i)))?;
+    let centre = (0..n).max_by_key(|&i| (graph[i].len(), std::cmp::Reverse(i)))?;
     let shell = &graph[centre];
     let origin = [x[3 * centre], x[3 * centre + 1], x[3 * centre + 2]];
-    let body_centre = [0, 1, 2].map(|axis| {
-        let sum: f64 = x.iter().skip(axis).step_by(3).sum();
-        let mean = if sum.is_finite() {
-            sum / n as f64
-        } else {
-            x.iter()
-                .skip(axis)
-                .step_by(3)
-                .map(|value| *value / n as f64)
-                .sum()
-        };
-        mean - origin[axis]
-    });
-    if body_centre.iter().any(|value| !value.is_finite()) {
-        return None;
-    }
+    let body_centre =
+        [0, 1, 2].map(|axis| x.iter().skip(axis).step_by(3).sum::<f64>() / n as f64 - origin[axis]);
     let mut best = None;
     for i in 0..shell.len() {
         for j in (i + 1)..shell.len() {
@@ -905,8 +951,17 @@ pub fn observed_basis_candidate(
                 if !basis_is_well_conditioned(&basis) {
                     continue;
                 }
-                let cross = cross3(basis[1], basis[2]);
-                let volume = dot3(basis[0], cross).abs();
+                let cross = [
+                    basis[1][1] * basis[2][2] - basis[1][2] * basis[2][1],
+                    basis[1][2] * basis[2][0] - basis[1][0] * basis[2][2],
+                    basis[1][0] * basis[2][1] - basis[1][1] * basis[2][0],
+                ];
+                let volume = basis[0]
+                    .iter()
+                    .zip(cross)
+                    .map(|(component, cofactor)| component * cofactor)
+                    .sum::<f64>()
+                    .abs();
                 let points =
                     [a, b, c].map(|point| [x[3 * point], x[3 * point + 1], x[3 * point + 2]]);
                 let edges = [
@@ -917,15 +972,8 @@ pub fn observed_basis_candidate(
                     distance2(&points[0], &points[2]),
                     distance2(&points[1], &points[2]),
                 ];
-                let total = edges.iter().sum::<f64>();
-                if !volume.is_finite()
-                    || !(volume > 0.0)
-                    || !total.is_finite()
-                    || edges.iter().any(|edge| !edge.is_finite())
-                {
-                    continue;
-                }
                 let longest = edges.iter().copied().max_by(f64::total_cmp)?;
+                let total = edges.iter().sum::<f64>();
                 if best
                     .as_ref()
                     .is_none_or(|(best_longest, best_total, best_volume, _)| {
@@ -941,7 +989,7 @@ pub fn observed_basis_candidate(
             }
         }
     }
-    let (_, _, _, basis) = best?;
+    let (_, _, volume, basis) = best?;
     let contact_lengths = graph.iter().enumerate().flat_map(|(i, neighbours)| {
         neighbours
             .iter()
@@ -957,75 +1005,59 @@ pub fn observed_basis_candidate(
         (f64::INFINITY, f64::NEG_INFINITY),
         |(shortest, longest), length| (shortest.min(length), longest.max(length)),
     );
-    if !shortest.is_finite() || !longest.is_finite() || !(longest > 0.0) {
-        return None;
-    }
     let contact_spread = longest - shortest;
-    if !contact_spread.is_finite() {
-        return None;
-    }
+    let cross = |a: [f64; 3], b: [f64; 3]| {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
+    let dot = |a: [f64; 3], b: [f64; 3]| a.into_iter().zip(b).map(|(u, v)| u * v).sum::<f64>();
     let reciprocal = [
-        cross3(basis[1], basis[2]),
-        cross3(basis[2], basis[0]),
-        cross3(basis[0], basis[1]),
+        cross(basis[1], basis[2]),
+        cross(basis[2], basis[0]),
+        cross(basis[0], basis[1]),
     ];
-    let determinant = dot3(basis[0], reciprocal[0]);
-    if !determinant.is_finite() || determinant == 0.0 {
-        return None;
-    }
-    let mut residuals = Vec::with_capacity(n);
-    for point in 0..n {
-        let offset = [0, 1, 2].map(|axis| x[3 * point + axis] - origin[axis]);
-        if offset.iter().any(|value| !value.is_finite()) {
-            return None;
-        }
-        let nearest = [0, 1, 2].map(|axis| (dot3(offset, reciprocal[axis]) / determinant).round());
-        if nearest.iter().any(|value| !value.is_finite()) {
-            return None;
-        }
-        let fitted: [f64; 3] = [0, 1, 2].map(|axis| {
-            (0..3)
-                .map(|vector| nearest[vector] * basis[vector][axis])
-                .sum()
-        });
-        if fitted.iter().any(|value| !value.is_finite()) {
-            return None;
-        }
-        let residual = distance2(&offset, &fitted).sqrt();
-        if !residual.is_finite() {
-            return None;
-        }
-        residuals.push(residual);
-    }
+    let determinant = dot(basis[0], reciprocal[0]);
+    let residuals: Vec<f64> = (0..n)
+        .map(|point| {
+            let offset = [0, 1, 2].map(|axis| x[3 * point + axis] - origin[axis]);
+            let nearest =
+                [0, 1, 2].map(|axis| (dot(offset, reciprocal[axis]) / determinant).round());
+            let fitted = [0, 1, 2].map(|axis| {
+                (0..3)
+                    .map(|vector| nearest[vector] * basis[vector][axis])
+                    .sum()
+            });
+            distance2(&offset, &fitted).sqrt()
+        })
+        .collect();
     let max_degree = graph.iter().map(Vec::len).max()?;
-    let residual_floor = f64::EPSILON.sqrt() * longest;
-    let core_tolerance = contact_spread.max(residual_floor);
     let registered_core = residuals
         .iter()
         .enumerate()
         .filter(|(point, _)| graph[*point].len() == max_degree)
-        .all(|(_, residual)| *residual <= core_tolerance);
-    let mut ordered = residuals;
+        .all(|(_, residual)| *residual <= contact_spread);
+    let mut ordered = residuals.clone();
     ordered.sort_by(f64::total_cmp);
     let span = ordered.last()? - ordered.first()?;
-    if !span.is_finite() {
-        return None;
-    }
     let mut gaps: Vec<f64> = ordered.windows(2).map(|pair| pair[1] - pair[0]).collect();
     gaps.sort_by(f64::total_cmp);
     let median_gap = gaps[gaps.len() / 2];
     let largest_gap = *gaps.last()?;
     // A lattice gap must exceed the spread expected if every adjacent residual
     // had the observed median gap; the point count supplies that expectation.
-    // An exact crystal whose residuals differ only by floating-point roundoff
-    // has no defect gap to separate; the half-significand floor bounds that
-    // roundoff on the observed contact scale.
-    let quantized = span <= residual_floor || largest_gap > gaps.len() as f64 * median_gap;
+    let quantized = span == 0.0 || largest_gap > gaps.len() as f64 * median_gap;
     let coherent = registered_core && (!require_quantized_residuals || quantized);
     if !coherent {
         return None;
     }
-    candidate_from_basis(&basis, body_centre, n)
+    if volume > 0.0 {
+        candidate_from_basis(&basis, body_centre, n)
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -1033,7 +1065,6 @@ mod tests {
     use super::*;
     use rand::SeedableRng;
     use rand::rngs::StdRng;
-    use std::collections::HashSet;
 
     fn rng() -> StdRng {
         StdRng::seed_from_u64(11)
@@ -1135,6 +1166,35 @@ mod tests {
                 candidate_from_basis(&basis, centre, n),
                 reference_candidate_from_basis(&basis, centre, n)
             );
+        }
+    }
+
+    #[test]
+    fn candidate_from_basis_matches_reference_at_cluster_sizes_and_ties() {
+        let fcc = [
+            [1.0, 0.0, 0.0],
+            [0.5, 3.0_f64.sqrt() / 2.0, 0.0],
+            [0.5, 3.0_f64.sqrt() / 6.0, (2.0_f64 / 3.0).sqrt()],
+        ];
+        let cubic = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        for basis in [fcc, cubic] {
+            for (centre, n) in [
+                ([0.0, 0.0, 0.0], 4),
+                ([0.0, 0.0, 0.0], 13),
+                ([0.0, 0.0, 0.0], 38),
+                ([0.19, -0.27, 0.11], 26),
+                ([0.19, -0.27, 0.11], 38),
+            ] {
+                let actual = candidate_from_basis(&basis, centre, n);
+                let expected = reference_candidate_from_basis(&basis, centre, n);
+                let actual_bits = actual
+                    .as_ref()
+                    .map(|arr| arr.iter().map(|v| v.to_bits()).collect::<Vec<_>>());
+                let expected_bits = expected
+                    .as_ref()
+                    .map(|arr| arr.iter().map(|v| v.to_bits()).collect::<Vec<_>>());
+                assert_eq!(actual_bits, expected_bits, "centre={centre:?} n={n}");
+            }
         }
     }
 
@@ -1420,24 +1480,14 @@ mod tests {
                 }
             }
         }
-        let grid = Array1::from_vec(coords);
-        let narrow = observed_basis_candidate(grid.view(), true).expect("observed basis");
-        let wide = observed_basis_candidate(grid.mapv(|value| 2.0 * value).view(), true)
+        let x = Array1::from_vec(coords);
+        let narrow = observed_basis_candidate(x.view(), true).expect("observed basis");
+        let wide = observed_basis_candidate(x.mapv(|value| 2.0 * value).view(), true)
             .expect("scaled basis");
-        assert_eq!(narrow.len(), grid.len());
+        assert_eq!(narrow.len(), x.len());
+        assert!(narrow.iter().any(|value| *value != 0.0));
         assert!(narrow.iter().all(|value| value.is_finite()));
         for (narrow, wide) in narrow.iter().zip(wide) {
-            assert_eq!(wide, 2.0 * narrow);
-        }
-        assert!(narrow.iter().any(|value| *value != 0.0));
-
-        let grid_narrow = observed_basis_candidate(grid.view(), true).expect("grid basis");
-        let grid_wide = observed_basis_candidate(grid.mapv(|value| 2.0 * value).view(), true)
-            .expect("scaled grid");
-        assert_eq!(grid_narrow.len(), grid.len());
-        assert!(grid_narrow.iter().any(|value| *value != 0.0));
-        assert!(grid_narrow.iter().all(|value| value.is_finite()));
-        for (narrow, wide) in grid_narrow.iter().zip(grid_wide) {
             assert_eq!(wide, 2.0 * narrow);
         }
     }
@@ -1493,130 +1543,69 @@ mod tests {
 
     #[test]
     fn observed_contacts_match_a_brute_force_gabriel_graph() {
-        let mut r = rng();
-        let small = vec![
+        let points = [
             [0.0, 0.0, 0.0],
             [1.0, 0.0, 0.0],
             [0.2, 0.9, 0.1],
             [0.8, 0.7, 0.6],
             [-0.4, 0.3, 0.8],
         ];
-        let large: Vec<[f64; 3]> = (0..60)
-            .map(|_| [r.random::<f64>(), r.random::<f64>(), r.random::<f64>()])
-            .collect();
-        for points in [small, large] {
-            let x = Array1::from_iter(points.iter().copied().flatten());
-            let actual = observed_contact_graph(x.view());
-            let mut expected = vec![Vec::new(); points.len()];
-            for i in 0..points.len() {
-                for j in (i + 1)..points.len() {
-                    let edge = distance2(&points[i], &points[j]);
-                    let blocked = edge <= 0.0
-                        || !edge.is_finite()
-                        || (0..points.len()).filter(|&k| k != i && k != j).any(|k| {
-                            distance2(&points[i], &points[k]) + distance2(&points[j], &points[k])
-                                < edge
-                        });
-                    if !blocked {
-                        expected[i].push(j);
-                        expected[j].push(i);
-                    }
-                }
-            }
-            assert_eq!(actual, expected);
-        }
-    }
-
-    #[test]
-    fn observed_growth_accepts_an_exact_multishell_crystal() {
-        // Integer face-centred cubic sites have identical contact lengths
-        // (`sqrt(2)`), so `contact_spread` is zero while multi-shell
-        // fractional projections carry floating-point roundoff.
-        let mut sites = Vec::new();
-        for x in -2i32..=2 {
-            for y in -2i32..=2 {
-                for z in -2i32..=2 {
-                    if (x + y + z).rem_euclid(2) == 0 && x * x + y * y + z * z <= 6 {
-                        sites.push([f64::from(x), f64::from(y), f64::from(z)]);
-                    }
+        let x = Array1::from_iter(points.into_iter().flatten());
+        let actual = observed_contact_graph(x.view());
+        let mut expected = vec![Vec::new(); points.len()];
+        for i in 0..points.len() {
+            for j in (i + 1)..points.len() {
+                let midpoint = [0, 1, 2].map(|axis| (points[i][axis] + points[j][axis]) / 2.0);
+                let radius2 = distance2(&points[i], &points[j]) / 4.0;
+                let blocked = points
+                    .iter()
+                    .enumerate()
+                    .filter(|(k, _)| *k != i && *k != j)
+                    .any(|(_, point)| distance2(point, &midpoint) < radius2);
+                if !blocked {
+                    expected[i].push(j);
+                    expected[j].push(i);
                 }
             }
         }
-        let n = sites.len();
-        assert!(n >= 40);
-        let exact = Array1::from_iter(sites.iter().copied().flatten());
-        let rebuilt = observed_basis_candidate(exact.view(), true)
-            .expect("an exact crystal with zero contact spread must reconstruct");
-        assert_eq!(rebuilt.len(), 3 * n);
-        assert!(rebuilt.iter().all(|value| value.is_finite()));
-
-        let mut r = rng();
-        let rot = random_rotation(&mut r);
-        let rotated = Array1::from_iter(sites.iter().flat_map(|site| {
-            [0, 1, 2].map(|axis| (0..3).map(|k| rot[axis][k] * site[k]).sum::<f64>() + 3.7)
-        }));
-        let rotated_rebuilt = observed_basis_candidate(rotated.view(), true)
-            .expect("rigid motion roundoff must not disqualify an exact crystal");
-        assert_eq!(rotated_rebuilt.len(), 3 * n);
-        assert!((nearest_neighbour_scale(rotated_rebuilt.view()) - 2.0_f64.sqrt()).abs() < 1.0e-6);
+        assert_eq!(actual, expected);
     }
 
     #[test]
-    fn observed_growth_seeds_near_an_outlier_shifted_centroid() {
-        let basis = [
-            [1.0, 0.0, 0.0],
-            [0.5, 3.0_f64.sqrt() / 2.0, 0.0],
-            [0.5, 3.0_f64.sqrt() / 6.0, (2.0_f64 / 3.0).sqrt()],
-        ];
-        let local = candidate_from_basis(&basis, [0.1, -0.2, 0.15], 19).expect("local seed");
-        let far_centre = [
-            10_000.0 * basis[0][0] + 0.1,
-            10_000.0 * basis[0][1] - 0.2,
-            10_000.0 * basis[0][2] + 0.15,
-        ];
-        let shifted = candidate_from_basis(&basis, far_centre, 19).expect("shifted seed");
-        assert_eq!(shifted.len(), local.len());
-        let shifted_mean =
-            [0, 1, 2].map(|axis| shifted.iter().skip(axis).step_by(3).sum::<f64>() / 19.0);
-        assert!((shifted_mean[0] - far_centre[0]).abs() < 2.0);
-        for (a, b) in spectrum(local.view(), 19)
-            .into_iter()
-            .zip(spectrum(shifted.view(), 19))
-        {
-            assert!((a - b).abs() < 1.0e-9);
+    fn frame_count_is_monotone_from_four_through_eight() {
+        // Literal C(n, 4) for n = 4, 5, 6, 7, 8. Each is below 64(n+4),
+        // so the bound is that count, and the counts rise with n.
+        let expected = [1usize, 5, 15, 35, 70];
+        let mut previous = 0usize;
+        for (slot, n) in (4usize..=8).enumerate() {
+            let frames = four_point_frames(n);
+            let proportional = 64usize.saturating_mul(n.saturating_add(4));
+            let bound = frames.min(proportional);
+            assert_eq!(frames, expected[slot], "n={n}");
+            assert_eq!(bound, expected[slot], "n={n}");
+            assert!(proportional > expected[slot], "n={n}");
+            assert!(bound >= previous, "n={n}");
+            previous = bound;
         }
-        assert!(
-            candidate_from_basis(&basis, [1.0e20, 0.0, 0.0], 19).is_none(),
-            "a shift that erases the basis spacing must be refused"
-        );
-
-        let mut with_outlier = packed(38);
-        let tail = with_outlier.len() - 3;
-        with_outlier[tail] = 50_000.0;
-        let candidate = observed_basis_candidate(with_outlier.view(), false)
-            .expect("registered core with an outlier shifts its seed without runaway growth");
-        assert_eq!(candidate.len(), with_outlier.len());
-        assert!(candidate.iter().all(|value| value.is_finite()));
     }
 
     #[test]
-    fn observed_growth_rejects_overflowing_scales_and_skewed_growth() {
-        let base = packed(19);
-        for scale in [1.0e200, 1.0e307] {
-            let huge = base.mapv(|value| value * scale);
-            assert!(
-                huge.iter().all(|value| value.is_finite()),
-                "fixture coordinates at {scale:e} must stay finite"
-            );
-            assert!(observed_basis_candidate(huge.view(), false).is_none());
-            assert!(observed_basis_candidate(huge.view(), true).is_none());
-        }
+    fn frame_cap_stops_indexed_growth_before_a_body() {
+        let cubic = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        // C(5, 4) = 5 is above the one-frame early return, so the indexed
+        // cloud is what stops. Five sites cannot enclose five interior sites.
+        assert_eq!(four_point_frames(5), 5);
+        assert!(5 < 64 * (5 + 4));
+        assert!(candidate_from_basis(&cubic, [0.0; 3], 5).is_none());
+        assert!(candidate_from_basis(&cubic, [0.0; 3], 8).is_some());
 
-        // Orthogonal vectors with extreme aspect ratio have unit normalized
-        // determinant, while Euclidean sphere growth floods the short plane
-        // before reaching +/-basis[2]; the site cap stops that runaway growth.
+        // The long third vector is still well conditioned. C(13, 4) = 715
+        // is tighter than 64(13+4) and is hit while the short plane is full
+        // and the interior count is still zero.
         let anisotropic = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0e4]];
         assert!(basis_is_well_conditioned(&anisotropic));
+        assert_eq!(four_point_frames(13), 715);
+        assert!(715 < 64 * (13 + 4));
         assert!(candidate_from_basis(&anisotropic, [0.0; 3], 13).is_none());
     }
 }
