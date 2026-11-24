@@ -2493,6 +2493,28 @@ fn closes_run(ledger: &Ledger, energy: f64) -> bool {
     ledger.below_target(energy) || ledger.stopped()
 }
 
+/// Whether a quench may be stored as the run's answer.
+///
+/// A closed run keeps the point whether or not a certifying gradient was
+/// charged, including a partial descent: nothing is left to finish it.
+/// An open run keeps a full quench only, and only when no gradient is
+/// required or the one that was charged has converged. Auxiliary quenches
+/// and the main hop both use this, so a caller stop cannot record in one
+/// path and drop the same point in the other.
+fn answer_is_recordable(
+    cfg: &Config,
+    ledger: &Ledger,
+    energy: f64,
+    state: ArrayView1<f64>,
+    unquenched: bool,
+    gradient_required: bool,
+    gradient_ok: bool,
+) -> bool {
+    !state.is_empty()
+        && quench_is_sane(cfg, energy, state)
+        && (closes_run(ledger, energy) || (!unquenched && (!gradient_required || gradient_ok)))
+}
+
 /// Records an auxiliary quench without restricting exploratory adoption.
 fn record_quenched_answer(
     cfg: &Config,
@@ -2512,7 +2534,15 @@ fn record_quenched_answer(
     } else {
         None
     };
-    if sane && (closes_run(ledger, energy) || !required || gradient.is_some()) {
+    if answer_is_recordable(
+        cfg,
+        ledger,
+        energy,
+        state,
+        false,
+        required,
+        gradient.is_some(),
+    ) {
         ledger.record(energy, state);
     } else {
         *unresolved += 1;
@@ -4363,10 +4393,15 @@ where
             })
         });
         initial_validation_gradient = nested.flatten();
-        initial_recordable = initial_sane
-            && (ledger.below_target(e)
-                || !gradient_required
-                || initial_validation_gradient.is_some());
+        initial_recordable = answer_is_recordable(
+            cfg,
+            ledger,
+            e,
+            x.view(),
+            false,
+            gradient_required,
+            initial_validation_gradient.is_some(),
+        );
         break;
     }
     if !e.is_finite() {
@@ -5327,7 +5362,15 @@ where
                     gradient(ledger, found_state.view())
                         .filter(|values| answer_gradient_ok(cfg, values.view(), found_state.len()))
                 });
-                if !gradient_required || found_gradient.is_some() {
+                if answer_is_recordable(
+                    cfg,
+                    ledger,
+                    found_energy,
+                    found_state.view(),
+                    false,
+                    gradient_required,
+                    found_gradient.is_some(),
+                ) {
                     let improved = found_energy < ledger.best - 1e-10;
                     ledger.record(found_energy, found_state.view());
                     if improved && improvements.len() < 512 {
@@ -6489,8 +6532,15 @@ where
                     })
                 });
                 let candidate_gradient = candidate_gradient.flatten();
-                let recordable =
-                    candidate_sane && (!gradient_required || candidate_gradient.is_some());
+                let recordable = answer_is_recordable(
+                    cfg,
+                    ledger,
+                    candidate_energy,
+                    candidate.view(),
+                    false,
+                    gradient_required,
+                    candidate_gradient.is_some(),
+                );
                 let improved = recordable && candidate_energy < ledger.best - STRICT_IMPROVEMENT;
                 if recordable {
                     ledger.record(candidate_energy, candidate.view());
@@ -7520,8 +7570,8 @@ where
         if ledger.stopped() {
             // The caller already stopped. This screen paid for `e_screen`,
             // and dropping it returns an older minimum above an energy the
-            // run computed.
-            if e_screen.is_finite() {
+            // run computed. The same predicate records an auxiliary quench.
+            if answer_is_recordable(cfg, ledger, e_screen, x_screen.view(), true, true, false) {
                 ledger.record(e_screen, x_screen.view());
             }
             break HopStop::of_closed(ledger);
@@ -7708,7 +7758,9 @@ where
             out
         };
         if ledger.stopped() {
-            if e_new.is_finite() {
+            // Same closed-run rule as an auxiliary quench: the point this
+            // hop quench returned is the answer, gradient or not.
+            if answer_is_recordable(cfg, ledger, e_new, x_new.view(), false, true, false) {
                 ledger.record(e_new, x_new.view());
             }
             break HopStop::of_closed(ledger);
@@ -7777,8 +7829,9 @@ where
         // Both are guarded here rather than at either branch, so a path added
         // later inherits the guarantee. Anything not converged still moves the
         // chain and still deposits bias; it is only barred from being recorded
-        // as an answer, which is the one thing it cannot be.
-        let hit_target = ledger.below_target(e_new);
+        // as an answer, which is the one thing it cannot be. A caller stop is
+        // the exception, shared with the auxiliary quenches: the run is over,
+        // so this point is the answer even without a converged gradient.
         let gradient_required = grad.is_some();
         let quenched_gradient = if unquenched {
             None
@@ -7797,8 +7850,15 @@ where
         }
         let validation_gradient =
             quenched_gradient.filter(|values| answer_gradient_ok(cfg, values.view(), x_new.len()));
-        let recordable =
-            hit_target || (!unquenched && (!gradient_required || validation_gradient.is_some()));
+        let recordable = answer_is_recordable(
+            cfg,
+            ledger,
+            e_new,
+            x_new.view(),
+            unquenched,
+            gradient_required,
+            validation_gradient.is_some(),
+        );
         // Every certified quench is reported, adopted or not: the history's
         // membership policy decides what counts, not the chain.
         let history_report = match (history.as_deref_mut(), validation_gradient.as_ref()) {
@@ -9345,8 +9405,15 @@ where
                     last_polish_spent = last_polish_spent.saturating_add(cost);
                     next_reoccupy = next_reoccupy.saturating_add(cost);
                     reorder_wait = reorder_wait.saturating_add(cost);
-                    let recordable = sane
-                        && (closes_run(ledger, basis_energy) || !required || gradient.is_some());
+                    let recordable = answer_is_recordable(
+                        cfg,
+                        ledger,
+                        basis_energy,
+                        basis_state.view(),
+                        false,
+                        required,
+                        gradient.is_some(),
+                    );
                     if !recordable {
                         unconverged_records += 1;
                     } else if ledger.below_target(basis_energy) {
