@@ -101,3 +101,46 @@ is PASS or PASS-BAND.
 The harness has no build-only path counter. The lazy basin probe
 reaches B and A alike through develop, so the default-preset cells and
 the molecular cells are the evidence that B moved nothing.
+
+## Addendum (before data)
+
+1. Environment and build deviations from README steps 3-4:
+   - `rustup toolchain install 1.88.0 --profile minimal` was run
+     because only Rust 1.83.0 was pre-installed.
+   - `scripts/openconf_h2h/setup_env.sh` defaults `MAMBA_EXE` and
+     `MAMBA_ROOT_PREFIX` to `/work/...`, which is not writable on
+     this host; `MAMBA_EXE` and `MAMBA_ROOT_PREFIX` were pointed to a
+     writable scratch directory alongside `OPENCONF_H2H_ENV`.
+   - `maturin` is installed inside `$OPENCONF_H2H_ENV/bin`, so step 4
+     runs with `$OPENCONF_H2H_ENV/bin` prepended to `PATH`.
+   - `rdff_count.c` compiled cleanly with `gcc -O2 -shared -fPIC ... -ldl`.
+2. Arm tree checks:
+   - Each arm checkout has `anneal-186-restack-harness.mbox` applied
+     on top of its base (`HEAD^{tree}` on B is `a839b9a9...` with
+     `HEAD~1^{tree}` = `184736e2...`; `HEAD~1^{tree}` on A/A2 is
+     `9b65fda3^{tree}`). `run_gate.py` verifies both the underlying
+     arm tree and the harness-applied tree, and tracks `PROTOCOL.md`
+     in `HARNESS_FILES`.
+   - `guard_trace.rs` from the updated harness is copied into
+     `examples/guard_trace.rs` of each arm before its release build.
+3. Peak in-process `RssAnon` (`peak_rss_anon_kb`):
+   - `guard_trace.rs` samples `/proc/self/status` `RssAnon:` at search
+     start, every 1024 potential calls (outside `PesClock`), and at
+     search end while `outcome` is alive, emitting both `rss_anon_kb`
+     and `peak_rss_anon_kb`.
+   - The molecular worker wraps `anneal.cluster_search` to sample
+     `RssAnon:` at search start, every 256 energy calls, and at search
+     end, recording both `rss_anon_kb` and `peak_rss_anon_kb`.
+   - The one-sided memory gate (`lower > max(1.10, A2/A upper)`) is
+     evaluated on both `rss_anon_kb` and `peak_rss_anon_kb`.
+4. Nonzero path counter for B's conf-miss code path:
+   - The restacked B payload adds the `ledger` breakdown dict to
+     `anneal.cluster_search` in `src/python.rs` (absent on A and A2).
+   - The molecular worker records `b_path_fired` (`1` when `ledger` is
+     returned with `spent > 0`, `0` otherwise), `b_path_quenches`, and
+     `b_path_spent`. `analyze.py` reports the per-cell count and flags
+     any molecular cell with zero count as testing timing only.
+5. Default-preset parity reporting:
+   - `analyze.py` also records `max_abs_dE` from `energy_bits` between
+     B and A alongside the bit-level `identical` check.
+

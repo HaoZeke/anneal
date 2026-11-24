@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import csv
 import math
+import struct
 import sys
 from pathlib import Path
 
@@ -63,6 +64,15 @@ def total_outside(row: dict) -> float:
 
 def rss(row: dict) -> float:
     return float(row["rss_anon_kb"])
+
+
+def peak_rss(row: dict) -> float:
+    val = row.get("peak_rss_anon_kb")
+    return float(val) if val not in (None, "") else float(row["rss_anon_kb"])
+
+
+def bits_to_float(text: str) -> float:
+    return struct.unpack("<d", int(text, 16).to_bytes(8, "little"))[0]
 
 
 def calls_scored(row: dict) -> float:
@@ -122,7 +132,18 @@ def judge(rows: list[dict], cell: str) -> dict:
     res["rss_ratio"], res["rss_lo"], res["rss_hi"] = gb
     res["rss_aa_hi"] = ga[2]
     res["rss_strict"] = gb[2] <= CAP
+    res["rss_band"] = gb[2] <= max(CAP, ga[2])
     res["rss_fail"] = gb[1] > max(CAP, ga[2])
+    prb_, pra_ = paired_ratio(b, a, peak_rss), paired_ratio(a2, a, peak_rss)
+    pgb, pga = geomean_ci(prb_), geomean_ci(pra_)
+    res["peak_rss_ratio"], res["peak_rss_lo"], res["peak_rss_hi"] = pgb
+    res["peak_rss_aa_hi"] = pga[2]
+    res["peak_rss_strict"] = pgb[2] <= CAP
+    res["peak_rss_band"] = pgb[2] <= max(CAP, pga[2])
+    res["peak_rss_fail"] = pgb[1] > max(CAP, pga[2])
+    res["b_path_hits"] = sum(1 for r in b.values() if int(r.get("b_path_fired") or 0) > 0)
+    res["b_path_quenches_sum"] = sum(int(r.get("b_path_quenches") or 0) for r in b.values())
+    res["b_path_spent_sum"] = sum(int(r.get("b_path_spent") or 0) for r in b.values())
     early = [r for r in list(a.values()) + list(b.values()) if int(r["hit"]) and float(r["calls"]) < float(r["budget"])]
     res["early_stop_runs"] = len(early)
     res["calls_ratio"] = geomean_ci(paired_ratio(b, a, lambda r: float(r["calls"])))[0]
@@ -132,10 +153,19 @@ def judge(rows: list[dict], cell: str) -> dict:
         notes.append("per-call and total outside time disagree")
     if res["calls_ratio"] and abs(res["calls_ratio"] - 1.0) > 0.02:
         notes.append("calls differ between A and B")
-    if a and next(iter(a.values()))["kind"] == "guard":
+    kind = next(iter(a.values()))["kind"] if a else ""
+    if kind == "molecule" and res["b_path_hits"] == 0:
+        notes.append("B path count is 0: cell only tests timing")
+    if kind == "guard":
         ok, bad = identical(a, b)
         res["identical"] = ok
         res["mismatch"] = " ".join(map(str, bad))
+        diffs = [
+            abs(bits_to_float(b[s]["energy_bits"]) - bits_to_float(a[s]["energy_bits"]))
+            for s in sorted(a)
+            if a[s].get("energy_bits") and b.get(s, {}).get("energy_bits")
+        ]
+        res["max_abs_dE"] = max(diffs) if diffs else None
         if not ok:
             notes.append("default-parity fields differ on seeds " + res["mismatch"])
     failures = []
@@ -143,7 +173,7 @@ def judge(rows: list[dict], cell: str) -> dict:
         failures.append("hit loss")
     if res["opc_regression"] or not res["opc_band"]:
         failures.append("outside time (per call)")
-    if res["rss_fail"]:
+    if res["rss_fail"] or res["peak_rss_fail"]:
         failures.append("memory")
     if res.get("identical") is False:
         failures.append("default parity")
@@ -151,7 +181,7 @@ def judge(rows: list[dict], cell: str) -> dict:
     res["notes"] = "; ".join(notes)
     if failures:
         res["verdict"] = "FIX"
-    elif res["opc_strict"] and res["rss_strict"]:
+    elif res["opc_strict"] and res["rss_strict"] and res["peak_rss_strict"]:
         res["verdict"] = "PASS"
     else:
         res["verdict"] = "PASS-BAND"
@@ -160,8 +190,12 @@ def judge(rows: list[dict], cell: str) -> dict:
 
 FIELDS = [
     "cell", "n", "verdict", "failures", "notes", "hits_a", "hits_b", "hits_a2", "p_fisher", "p_mwu",
-    "opc_ratio", "opc_lo", "opc_hi", "opc_aa_hi", "tot_ratio", "tot_lo", "tot_hi", "tot_aa_hi",
-    "rss_ratio", "rss_lo", "rss_hi", "rss_aa_hi", "calls_ratio", "early_stop_runs", "identical", "mismatch",
+    "opc_ratio", "opc_lo", "opc_hi", "opc_aa_hi", "opc_strict", "opc_band", "opc_regression",
+    "tot_ratio", "tot_lo", "tot_hi", "tot_aa_hi", "tot_strict", "tot_band", "tot_regression",
+    "rss_ratio", "rss_lo", "rss_hi", "rss_aa_hi", "rss_strict", "rss_fail",
+    "peak_rss_ratio", "peak_rss_lo", "peak_rss_hi", "peak_rss_aa_hi", "peak_rss_strict", "peak_rss_fail",
+    "b_path_hits", "b_path_quenches_sum", "b_path_spent_sum",
+    "calls_ratio", "early_stop_runs", "identical", "max_abs_dE", "mismatch",
 ]
 
 
@@ -184,19 +218,22 @@ def main() -> int:
         writer.writeheader()
         writer.writerows(results)
     lines = [
-        "| cell | n | verdict | hits A/B/A2 | p Fisher | p MWU | out/call B/A [lo,hi] | A2/A hi | out total B/A hi | RSS B/A [lo,hi] | notes |",
-        "|---|---|---|---|---|---|---|---|---|---|---|",
+        "| cell | n | verdict | hits A/B/A2 | p Fisher | p MWU | out/call B/A [lo,hi] | A2/A hi | out total B/A [lo,hi] | end RSS B/A [lo,hi] | peak RSS B/A [lo,hi] | B path | notes |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in results:
         if not r["complete"]:
-            lines.append(f"| {r['cell']} | {r['n']} | {r['verdict']} | | | | | | | | {r['notes']} |")
+            lines.append(f"| {r['cell']} | {r['n']} | {r['verdict']} | | | | | | | | | | {r['notes']} |")
             continue
+        bpath = f"{r['b_path_hits']}/{r['n']}"
         lines.append(
             f"| {r['cell']} | {r['n']} | {r['verdict']} | {r['hits_a']}/{r['hits_b']}/{r['hits_a2']} "
             f"| {fmt(r['p_fisher'])} | {fmt(r['p_mwu'])} "
             f"| {fmt(r['opc_ratio'])} [{fmt(r['opc_lo'])},{fmt(r['opc_hi'])}] | {fmt(r['opc_aa_hi'])} "
-            f"| {fmt(r['tot_ratio'])} {fmt(r['tot_hi'])} "
-            f"| {fmt(r['rss_ratio'])} [{fmt(r['rss_lo'])},{fmt(r['rss_hi'])}] | {r['failures'] or r['notes']} |"
+            f"| {fmt(r['tot_ratio'])} [{fmt(r['tot_lo'])},{fmt(r['tot_hi'])}] "
+            f"| {fmt(r['rss_ratio'])} [{fmt(r['rss_lo'])},{fmt(r['rss_hi'])}] "
+            f"| {fmt(r['peak_rss_ratio'])} [{fmt(r['peak_rss_lo'])},{fmt(r['peak_rss_hi'])}] "
+            f"| {bpath} | {r['failures'] or r['notes']} |"
         )
     worst = "FIX" if any(r["verdict"] in ("FIX", "INCONCLUSIVE") for r in results) else "PASS"
     lines.append("")

@@ -38,6 +38,41 @@ struct Done {
     best_bits: String,
     trajectory: String,
     rss_anon_kb: u64,
+    peak_rss_anon_kb: u64,
+}
+
+const RSS_SAMPLE_MASK: u64 = 1023;
+
+struct RssSampler {
+    calls: AtomicU64,
+    peak_kb: AtomicU64,
+}
+
+impl RssSampler {
+    fn new() -> Self {
+        Self {
+            calls: AtomicU64::new(0),
+            peak_kb: AtomicU64::new(rss_anon_kb()),
+        }
+    }
+
+    fn record(&self, kb: u64) {
+        self.peak_kb.fetch_max(kb, Ordering::Relaxed);
+    }
+
+    fn sample_now(&self) {
+        self.record(rss_anon_kb());
+    }
+
+    fn maybe_sample(&self) {
+        if (self.calls.fetch_add(1, Ordering::Relaxed) & RSS_SAMPLE_MASK) == 0 {
+            self.sample_now();
+        }
+    }
+
+    fn peak(&self) -> u64 {
+        self.peak_kb.load(Ordering::Relaxed)
+    }
 }
 
 /// Nanoseconds inside potential energy and gradient calls.
@@ -69,6 +104,7 @@ impl PesClock {
 struct TimedPes<'a, P> {
     inner: &'a P,
     clock: &'a PesClock,
+    rss: &'a RssSampler,
 }
 
 impl<P> Objective<f64> for TimedPes<'_, P>
@@ -84,6 +120,7 @@ where
     }
 
     fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        self.rss.maybe_sample();
         self.clock.time(|| self.inner.eval(x))
     }
 }
@@ -93,6 +130,7 @@ where
     P: Gradient<f64>,
 {
     fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        self.rss.maybe_sample();
         self.clock.time(|| self.inner.grad(x))
     }
 
@@ -106,6 +144,7 @@ where
     P: DifferentiableObjective<f64>,
 {
     fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        self.rss.maybe_sample();
         self.clock.time(|| self.inner.value_and_gradient(x))
     }
 }
@@ -148,7 +187,7 @@ fn main() {
         }
     };
     println!(
-        "GATE system={system} seed={seed} budget={} hit={} calls={} charged={} wall_s={:.9} inside_s={:.9} best_bits={} trajectory={} rss_anon_kb={} core={core}",
+        "GATE system={system} seed={seed} budget={} hit={} calls={} charged={} wall_s={:.9} inside_s={:.9} best_bits={} trajectory={} rss_anon_kb={} peak_rss_anon_kb={} core={core}",
         done.budget,
         u8::from(done.hit),
         done.calls,
@@ -158,6 +197,7 @@ fn main() {
         done.best_bits,
         done.trajectory,
         done.rss_anon_kb,
+        done.peak_rss_anon_kb,
     );
 }
 
@@ -215,12 +255,14 @@ where
     ledger.stop_below(reference + HIT_TOL);
     let mut optimiser = WarmLbfgs::default();
     let clock = PesClock::new();
+    let rss = RssSampler::new();
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
         optimiser.forget();
         let (value, relaxed, _) = optimiser.minimize(x, iterations, |point| {
             if !led.charge() {
                 return None;
             }
+            rss.maybe_sample();
             Some(clock.time(|| potential.value_and_gradient(point)))
         });
         (value, relaxed)
@@ -229,6 +271,7 @@ where
         if !led.charge() {
             return None;
         }
+        rss.maybe_sample();
         Some(clock.time(|| potential.value_and_gradient(point)).1)
     };
     let mut rng = StdRng::seed_from_u64(seed);
@@ -242,7 +285,7 @@ where
         &mut rng,
     )
     .expect("finite start");
-    finish(budget, reference, started, clock.seconds(), outcome)
+    finish(budget, reference, started, clock.seconds(), &rss, outcome)
 }
 
 fn run_hexamer(seed: u64) -> Done {
@@ -255,16 +298,18 @@ fn run_hexamer(seed: u64) -> Done {
     let start = random_tip4p_cluster(n, &mut rng);
     let potential = GminTip4p::new(n);
     let clock = PesClock::new();
+    let rss = RssSampler::new();
     let timed = TimedPes {
         inner: &potential,
         clock: &clock,
+        rss: &rss,
     };
     let mut ledger = Ledger::new(budget);
     ledger.stop_below(reference + HIT_TOL);
     let started = Instant::now();
     let (outcome, _) =
         search_from(&timed, &cfg, &mut ledger, start.view(), seed).expect("finite start");
-    finish(budget, reference, started, clock.seconds(), outcome)
+    finish(budget, reference, started, clock.seconds(), &rss, outcome)
 }
 
 fn finish(
@@ -272,9 +317,12 @@ fn finish(
     reference: f64,
     started: Instant,
     inside_s: f64,
+    rss: &RssSampler,
     outcome: Outcome,
 ) -> Done {
     let wall_s = started.elapsed().as_secs_f64();
+    let end_rss = rss_anon_kb();
+    rss.record(end_rss);
     let hit = anneal_core::energy_hits(outcome.best, reference, HIT_TOL);
     let at_hit = outcome
         .improvements
@@ -295,7 +343,8 @@ fn finish(
         inside_s,
         best_bits: format!("{:016x}", outcome.best.to_bits()),
         trajectory: trajectory_hash(&outcome),
-        rss_anon_kb: rss_anon_kb(),
+        rss_anon_kb: end_rss,
+        peak_rss_anon_kb: rss.peak(),
     }
 }
 

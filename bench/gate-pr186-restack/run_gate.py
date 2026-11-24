@@ -35,6 +35,7 @@ from h2h_score import Molecule  # noqa: E402
 BASE_REF = "9b65fda3972fd8c014bce886a3ea5c05956d64af"
 B_COMMIT = "c8581d69319a2f960c25ecb5f0261feb34a739b3"
 B_TREE = "184736e2f596126ef71baca23d0ecdf756aaf77c"
+B_HARNESS_TREE = "a839b9a99afb155d3ebb0e3e2a42fa086f9c72ba"
 N_SEEDS = 12
 SEEDS = list(range(2000, 2000 + N_SEEDS))
 MOLECULES = ["rq3", "915", "xld", "fluvastatin", "z34", "amprenavir", "lopinavir", "lorlatinib"]
@@ -50,13 +51,16 @@ GUARD_BUDGET = {
     "hexamer": 500_000,
 }
 HARNESS_FILES = (
+    "bench/gate-pr186-restack/PROTOCOL.md",
     "bench/gate-pr186-restack/run_gate.py",
     "bench/gate-pr186-restack/guard_trace.rs",
     "bench/gate-pr186-restack/analyze.py",
 )
 ROW_FIELDS = [
     "cell", "kind", "seed", "arm", "slot", "core", "hit", "budget", "calls", "charged",
-    "wall_s", "inside_s", "outside_per_call_s", "rss_anon_kb", "energy", "energy_bits", "trajectory",
+    "wall_s", "inside_s", "outside_per_call_s", "rss_anon_kb", "peak_rss_anon_kb",
+    "b_path_fired", "b_path_quenches", "b_path_spent",
+    "energy", "energy_bits", "trajectory",
     "machine_id", "base_ref", "base_tree", "harness_blobs", "error",
 ]
 
@@ -332,6 +336,11 @@ def run_molecule(args, job: dict, budget: int, ident: str, journal: Path) -> Non
                 "grad_calls": 0,
                 "wall_s": elapsed,
                 "inside_s": 0.0,
+                "rss_anon_kb": 0,
+                "peak_rss_anon_kb": 0,
+                "b_path_fired": 0,
+                "b_path_quenches": 0,
+                "b_path_spent": 0,
                 "error": classify_error(proc.stderr) or "run failed",
                 "returncode": proc.returncode,
             },
@@ -355,6 +364,7 @@ def rss_anon_kb() -> int:
 
 def worker_molecule(args) -> int:
     require_core()
+    import anneal
     import h2h_job
 
     row = hc.molecules()[args.cell]
@@ -363,12 +373,51 @@ def worker_molecule(args) -> int:
     started = time.perf_counter()
     error = ""
     info: dict = {}
+    peak_rss = [rss_anon_kb()]
+    captured: dict = {}
+    orig_cluster_search = anneal.cluster_search
+
+    def wrapped_cluster_search(energy_fn, grad_fn, *cs_args, **cs_kwargs):
+        sample_n = [0]
+
+        def sampled_energy(x):
+            n = sample_n[0]
+            sample_n[0] = n + 1
+            if (n & 255) == 0:
+                val = rss_anon_kb()
+                if val > peak_rss[0]:
+                    peak_rss[0] = val
+            return energy_fn(x)
+
+        val0 = rss_anon_kb()
+        if val0 > peak_rss[0]:
+            peak_rss[0] = val0
+        res = orig_cluster_search(sampled_energy, grad_fn, *cs_args, **cs_kwargs)
+        val1 = rss_anon_kb()
+        if val1 > peak_rss[0]:
+            peak_rss[0] = val1
+        captured["result"] = res
+        return res
+
+    anneal.cluster_search = wrapped_cluster_search
     try:
         info = h2h_job.run_anneal(row, args.seed, args.budget, out)
     except Exception as err:
         print(f"{type(err).__name__}: {err}", file=sys.stderr)
         error = classify_error(str(err)) or "run failed"
         info = {"wall_s": time.perf_counter() - started, "energy_calls": 0, "grad_calls": 0, "error": error}
+    finally:
+        anneal.cluster_search = orig_cluster_search
+    end_rss = rss_anon_kb()
+    if end_rss > peak_rss[0]:
+        peak_rss[0] = end_rss
+    cs_res = captured.get("result") or {}
+    ledger = cs_res.get("ledger") if isinstance(cs_res, dict) else None
+    if not isinstance(ledger, dict):
+        ledger = info.get("ledger") if isinstance(info.get("ledger"), dict) else None
+    b_path_spent = int(ledger.get("spent") or 0) if isinstance(ledger, dict) else 0
+    b_path_quenches = int(ledger.get("quenches") or 0) if isinstance(ledger, dict) else 0
+    b_path_fired = 1 if (isinstance(ledger, dict) and b_path_spent > 0) else 0
     calls = int(info.get("energy_calls") or 0) + int(info.get("grad_calls") or 0)
     raw_error = info.get("error") or error or ""
     if raw_error and not error:
@@ -395,7 +444,11 @@ def worker_molecule(args) -> int:
         "inside_s": inside,
         "best_kcal": None if info.get("best_kcal") is None else float(info["best_kcal"]),
         "candidates": None if info.get("candidates") is None else int(info["candidates"]),
-        "rss_anon_kb": rss_anon_kb(),
+        "rss_anon_kb": end_rss,
+        "peak_rss_anon_kb": peak_rss[0],
+        "b_path_fired": b_path_fired,
+        "b_path_quenches": b_path_quenches,
+        "b_path_spent": b_path_spent,
         "error": classify_error(str(raw_error)) if raw_error else "",
     }
     if payload["core"] != "0":
@@ -439,6 +492,11 @@ def run_guard(args, job: dict, binary: Path, ident: str, journal: Path) -> None:
                 "charged": 0,
                 "wall_s": 0.0,
                 "inside_s": 0.0,
+                "rss_anon_kb": 0,
+                "peak_rss_anon_kb": 0,
+                "b_path_fired": 0,
+                "b_path_quenches": 0,
+                "b_path_spent": 0,
                 "energy_bits": "",
                 "trajectory": "",
                 "error": classify_error(proc.stderr) or "run failed",
@@ -466,6 +524,10 @@ def run_guard(args, job: dict, binary: Path, ident: str, journal: Path) -> None:
                 "wall_s": float(gate["wall_s"]),
                 "inside_s": float(gate["inside_s"]),
                 "rss_anon_kb": int(gate["rss_anon_kb"]),
+                "peak_rss_anon_kb": int(gate.get("peak_rss_anon_kb") or gate["rss_anon_kb"]),
+                "b_path_fired": 0,
+                "b_path_quenches": 0,
+                "b_path_spent": 0,
                 "energy_bits": gate["best_bits"],
                 "trajectory": gate["trajectory"],
                 "error": "",
@@ -547,6 +609,10 @@ def score_molecules(run_dir: Path, jobs: list[dict]) -> dict[tuple, dict]:
                 "outside_per_call_s": outside_per_call(wall, inside, calls),
                 "budget": int(info.get("budget") or 0),
                 "rss_anon_kb": int(info.get("rss_anon_kb") or 0),
+                "peak_rss_anon_kb": int(info.get("peak_rss_anon_kb") or info.get("rss_anon_kb") or 0),
+                "b_path_fired": int(info.get("b_path_fired") or 0),
+                "b_path_quenches": int(info.get("b_path_quenches") or 0),
+                "b_path_spent": int(info.get("b_path_spent") or 0),
                 "error": info.get("error") or "",
                 "core": info.get("core") or "",
                 "energy_bits": "",
@@ -607,6 +673,10 @@ def assemble_records(run_dir: Path, jobs: list[dict], scored: dict, prov: dict, 
             core = extra["core"]
             budget = extra["budget"]
             rss = extra["rss_anon_kb"]
+            peak_rss = extra["peak_rss_anon_kb"]
+            b_path_fired = extra["b_path_fired"]
+            b_path_quenches = extra["b_path_quenches"]
+            b_path_spent = extra["b_path_spent"]
         else:
             hit = int(info.get("hit") or 0)
             calls = int(info.get("calls") or 0)
@@ -620,6 +690,10 @@ def assemble_records(run_dir: Path, jobs: list[dict], scored: dict, prov: dict, 
             core = info.get("core") or ""
             budget = int(info.get("budget") or 0)
             rss = int(info.get("rss_anon_kb") or 0)
+            peak_rss = int(info.get("peak_rss_anon_kb") or rss)
+            b_path_fired = int(info.get("b_path_fired") or 0)
+            b_path_quenches = int(info.get("b_path_quenches") or 0)
+            b_path_spent = int(info.get("b_path_spent") or 0)
         outside = outside_per_call(wall, inside, calls)
         records.append(
             {
@@ -638,6 +712,10 @@ def assemble_records(run_dir: Path, jobs: list[dict], scored: dict, prov: dict, 
                 "inside_s": f"{inside:.9f}",
                 "outside_per_call_s": f"{outside:.9e}",
                 "rss_anon_kb": rss,
+                "peak_rss_anon_kb": peak_rss,
+                "b_path_fired": b_path_fired,
+                "b_path_quenches": b_path_quenches,
+                "b_path_spent": b_path_spent,
                 "energy": energy,
                 "energy_bits": bits,
                 "trajectory": trajectory,
@@ -653,6 +731,17 @@ def assemble_records(run_dir: Path, jobs: list[dict], scored: dict, prov: dict, 
 
 def write_csv(path: Path, records: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_file():
+        with path.open(newline="") as handle:
+            existing = {(r["cell"], str(r["seed"]), r["arm"]) for r in csv.DictReader(handle)}
+        new_rows = [r for r in records if (r["cell"], str(r["seed"]), r["arm"]) not in existing]
+        if not new_rows:
+            return
+        with path.open("a", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS, lineterminator="\n", extrasaction="ignore")
+            for row in new_rows:
+                writer.writerow(row)
+        return
     with path.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS, lineterminator="\n", extrasaction="ignore")
         writer.writeheader()
@@ -679,12 +768,19 @@ def write_sessions(path: Path, rows: list[tuple[str, str]]) -> None:
 def run(args) -> int:
     require_core()
     self_check()
-    b_tree = git_text(args.src_b, "rev-parse", "HEAD^{tree}")
+    b_head_tree = git_text(args.src_b, "rev-parse", "HEAD^{tree}")
+    if b_head_tree == B_HARNESS_TREE:
+        b_tree = git_text(args.src_b, "rev-parse", "HEAD~1^{tree}")
+    else:
+        b_tree = b_head_tree
     if b_tree != B_TREE:
         raise SystemExit("B tree does not match")
-    a_tree = git_text(args.src_a, "rev-parse", "HEAD^{tree}")
-    ap_tree = git_text(args.src_ap, "rev-parse", "HEAD^{tree}")
-    if a_tree != ap_tree or a_tree != git_text(args.repo, "rev-parse", f"{BASE_REF}^{{tree}}"):
+    base_tree = git_text(args.repo, "rev-parse", f"{BASE_REF}^{{tree}}")
+    a_head_tree = git_text(args.src_a, "rev-parse", "HEAD^{tree}")
+    ap_head_tree = git_text(args.src_ap, "rev-parse", "HEAD^{tree}")
+    a_tree = a_head_tree if a_head_tree == base_tree else git_text(args.src_a, "rev-parse", "HEAD~1^{tree}")
+    ap_tree = ap_head_tree if ap_head_tree == base_tree else git_text(args.src_ap, "rev-parse", "HEAD~1^{tree}")
+    if a_head_tree != ap_head_tree or a_tree != base_tree or ap_tree != base_tree:
         raise SystemExit("A and A2 are not the develop tree")
     prov = provenance(args.repo)
     machine = machine_id()
@@ -712,6 +808,7 @@ def run(args) -> int:
         ("base_tree", prov["base_tree"]),
         ("b_commit", B_COMMIT),
         ("b_tree", B_TREE),
+        ("b_harness_tree", b_head_tree),
         ("harness_blobs", prov["harness_blobs"]),
         ("machine_id", machine),
         ("seeds", f"{SEEDS[0]}-{SEEDS[-1]}"),
