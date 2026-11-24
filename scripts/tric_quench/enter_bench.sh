@@ -32,7 +32,7 @@ mkdir -p "$WORK/home" "$WORK/tmp"
 cat > "$WORK/inside.sh" << EOF
 #!/bin/bash
 set -eu
-[ "\$(hostname)" = bench ] || { echo "hostname is \$(hostname), not bench" >&2; exit 1; }
+[ "\$(python3 $ROOT/scripts/machine_provenance.py host-label)" = bench ] || { echo "hostname is \$(python3 $ROOT/scripts/machine_provenance.py host-label), not bench" >&2; exit 1; }
 export HOME=$WORK/home
 export TMPDIR=$WORK/tmp
 export PATH=$PREFIX/bin:$BASE/bin:/usr/bin:/bin

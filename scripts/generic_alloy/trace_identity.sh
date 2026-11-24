@@ -56,7 +56,7 @@ one() {
 }
 export -f seed_hash row_hash one
 
-printf '# code_revision develop=%s branch=%s host=%s\n' "$develop_rev" "$branch_rev" "$(uname -n)"
+printf '# code_revision develop=%s branch=%s host=%s\n' "$develop_rev" "$branch_rev" "$(python3 "$(dirname "$0")/../machine_provenance.py" host-label)"
 {
     for seed in 2000 2001 2002; do
         for n in 38 55 75 76 77 98 102 103 104 150; do

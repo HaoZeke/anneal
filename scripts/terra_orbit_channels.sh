@@ -68,7 +68,7 @@ run() {
   [[ $anneal_index == "$anneal_task" ]]
   anneal_stem="$anneal_n/${anneal_arm}_$anneal_seed"
   printf 'task=%s host=%s slurm_job=%s cpus=%s\n' \
-    "$anneal_task" "$(hostname)" "$SLURM_JOB_ID" "${SLURM_CPUS_PER_TASK:?}" \
+    "$anneal_task" "$(python3 "$(dirname "$0")/machine_provenance.py" host-label)" "$SLURM_JOB_ID" "${SLURM_CPUS_PER_TASK:?}" \
     > "$anneal_stem.meta"
   printf 'n=%s budget=%s seed=%s arm=%s mechanisms=thompson,rscreen,orbit\n' \
     "$anneal_n" "$anneal_budget" "$anneal_seed" "$anneal_arm" >> "$anneal_stem.meta"

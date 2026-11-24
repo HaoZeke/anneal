@@ -258,7 +258,7 @@ calibration_sha256=$(sha256sum "$CALIBRATION" | awk '{print $1}')
   printf 'qualifier_sha256=%s\n' "$qualifier_sha256"
   printf 'calibration_sha256=%s\n' "$calibration_sha256"
   printf 'slurm_job_id=%s\n' "$SLURM_JOB_ID"
-  printf 'host=%s\n' "$(hostname)"
+  printf 'host=%s\n' "$(python3 "$ROOT/scripts/machine_provenance.py" host-label)"
   if [[ $ARM == shared ]]; then
     printf 'server_sha256=%s\n' "$(sha256sum "$SERVER" | awk '{print $1}')"
   fi

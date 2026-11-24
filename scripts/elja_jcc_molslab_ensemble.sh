@@ -361,7 +361,7 @@ peek_sha256=$(sha256sum "$PEEK" | awk '{print $1}')
   printf 'server_sha256=%s\n' "$server_sha256"
   printf 'peek_sha256=%s\n' "$peek_sha256"
   printf 'slurm_job_id=%s\n' "$SLURM_JOB_ID"
-  printf 'host=%s\n' "$(hostname)"
+  printf 'host=%s\n' "$(python3 "$ROOT/scripts/machine_provenance.py" host-label)"
   if [[ $SYSTEM == cuh2 ]]; then
     printf 'input_sha256=%s\n' "$(sha256sum "$CON" | awk '{print $1}')"
   fi

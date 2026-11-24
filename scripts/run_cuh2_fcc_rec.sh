@@ -36,7 +36,7 @@ capture() {
   printf 'script\n'
   printf 'scripts/run_cuh2_fcc_rec.sh\n'
   printf 'host\n'
-  hostname
+  python3 scripts/machine_provenance.py host-label
   printf 'boot_id\n'
   cat /proc/sys/kernel/random/boot_id
   printf 'uptime\n'

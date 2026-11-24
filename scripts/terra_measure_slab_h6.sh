@@ -83,7 +83,7 @@ mkdir -p "$OUT"
 {
   source_commit=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)
   printf 'source=%s\n' "${source_commit:-unknown}"
-  printf 'host=%s\n' "$(hostname)"
+  printf 'host=%s\n' "$(python3 "$ROOT/scripts/machine_provenance.py" host-label)"
   printf 'job=%s\n' "$SLURM_JOB_ID"
   printf 'con=%s\n' "$CON"
   printf 'budget=%s\n' "$SLAB_BUDGET"

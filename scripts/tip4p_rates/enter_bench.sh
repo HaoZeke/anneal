@@ -72,7 +72,7 @@ prefix=\$7
 stop=\$(python3 -c 'import sys; print(repr(float(sys.argv[1]) + float(sys.argv[2])))' "\$ref" "\$tol")
 cd /work
 {
-  printf 'hostname=%s\n' "\$(hostname)"
+  printf 'hostname=%s\n' "\$(python3 $ROOT/scripts/machine_provenance.py host-label)"
   printf 'cwd=%s\n' "\$(pwd)"
   printf 'boot_id=%s\n' "\$(cat /proc/sys/kernel/random/boot_id)"
   printf 'uptime=%s\n' "\$(cat /proc/uptime)"

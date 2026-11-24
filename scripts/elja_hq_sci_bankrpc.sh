@@ -18,7 +18,7 @@ BASE=${LJ_OUT:-$HOME/ljwork/hq-sci-n}
 ONE=$ROOT/scripts/elja_hq_one.sh
 BIN=${LJ_BIN:-$ROOT/target/release/examples/lj_cluster_search}
 SRV=$ROOT/target/release/examples/bank_server
-HOST=${BANK_HOST:-$(hostname)}
+HOST=${BANK_HOST:-$(python3 "$ROOT/scripts/machine_provenance.py" host-label)}
 CAP=${BANK_CAPACITY:-30}
 
 if [[ ! -x $SRV ]]; then

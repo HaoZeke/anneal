@@ -4,7 +4,7 @@
 # Does not link MKL. Requires SLURM_JOB_ID.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then
-  echo "terra_rebuild_ira.sh: run under srun, not on $(hostname)" >&2
+  echo "terra_rebuild_ira.sh: run under srun, not directly" >&2
   exit 1
 fi
 IRA=${IRA_ROOT:-$HOME/ira}
@@ -12,7 +12,7 @@ if [[ ! -d $IRA/src ]]; then
   echo "missing $IRA/src" >&2
   exit 1
 fi
-echo "host=$(hostname) job=$SLURM_JOB_ID"
+echo "host=$(python3 "$(dirname "$0")/machine_provenance.py" host-label) job=$SLURM_JOB_ID"
 gfortran --version | awk 'NR == 1 { print }'
 rm -rf "$IRA/src/Obj"
 mkdir -p "$IRA/src/Obj" "$IRA/include" "$IRA/lib"

@@ -80,7 +80,7 @@ timed() {
     cd "$dir"
     set +e
     sudo -n unshare --uts sh -c \
-      'hostname bench; . "$1"; cd "$2"; hostname > hostname.txt; shift 2; exec taskset -c 0 "$@" > stdout.txt 2> stderr.txt' \
+      'hostname bench; . "$1"; cd "$2"; python3 '"$ROOT"'/scripts/machine_provenance.py host-label > hostname.txt; shift 2; exec taskset -c 0 "$@" > stdout.txt 2> stderr.txt' \
       timed-sh "$WORK/bench-env.sh" "$dir" "$@"
     echo $? > exit.code
   )

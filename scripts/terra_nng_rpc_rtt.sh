@@ -22,7 +22,7 @@ cleanup_tcp_test() {
   fi
 }
 trap cleanup_tcp_test EXIT
-echo "host=$(hostname) job=$SLURM_JOB_ID"
+echo "host=$(python3 "$(dirname "$0")/machine_provenance.py" host-label) job=$SLURM_JOB_ID"
 
 echo "=== nng pair vs tcp loopback (same binary) ==="
 export CARGO_TARGET_DIR="$NNG_TARGET"

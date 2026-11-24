@@ -36,7 +36,7 @@ if [[ "${1:-}" == "--build" ]]; then
   exit 0
 fi
 
-if [[ "$(hostname)" != "bench" ]]; then
+if [[ "$(python3 "$ROOT/scripts/machine_provenance.py" host-label)" != "bench" ]]; then
   build_binary
   if ! grep -Eq '(^|[[:space:]])bench([[:space:]]|$)' /etc/hosts; then
     echo '127.0.0.1 bench' | sudo -n tee -a /etc/hosts >/dev/null

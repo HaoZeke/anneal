@@ -4,7 +4,7 @@
 # already-staged xtb engine; does not touch ~/anneal-build.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then
-  echo "elja_hexamer_build.sh: run under srun/sbatch, not on $(hostname)" >&2
+  echo "elja_hexamer_build.sh: run under srun/sbatch, not directly" >&2
   exit 1
 fi
 ROOT=${ANNEAL_ROOT:-$HOME/build/anneal-hunt}
@@ -29,7 +29,7 @@ export RUSTFLAGS="${RUSTFLAGS:-} -C linker=${GCC}/bin/gcc -C link-arg=-B${SYS} -
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
 export CARGO_NET_OFFLINE=true
 cd "$ROOT"
-echo "host=$(hostname) job=$SLURM_JOB_ID"
+echo "host=$(python3 "$ROOT/scripts/machine_provenance.py" host-label) job=$SLURM_JOB_ID"
 cargo build --offline --locked --release --features rgpot-ex,featomic,bank-rpc \
   --example molecular_cluster
 BIN=$CARGO_TARGET_DIR/release/examples/molecular_cluster

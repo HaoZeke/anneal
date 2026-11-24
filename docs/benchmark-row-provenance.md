@@ -15,8 +15,13 @@ these provenance columns:
   the key is computed), and `binary_sha256=`.  Saved GMIN rows are reused only when both
   `code_revision` and `gmin_build_key` match the current build; any mismatch
   is rejected naming the mismatched field.
-- `host` remains the UTS hostname for compatibility.  Bench runs normally
-  record `bench`; it is not a physical-machine identity.
+- `host` is written through `host_label` in `scripts/machine_provenance.py`.
+  The UTS name `bench`, which every bench run sets and which is not a
+  physical-machine identity, is recorded as is.  Any other hostname is
+  recorded as `host-` and the first sixteen hexadecimal digits of the
+  SHA-256 of the public salt `anneal-bench-host-label-v1\0` followed by
+  the name.  No script records a raw hostname, and a test fails when one
+  reads it another way.
 - `machine_id` is lowercase hexadecimal SHA-256 of the public salt
   `anneal-bench-machine-id-v1\0` followed by the machine's identifier.
   On Linux the identifier is the stripped contents of `/etc/machine-id`;

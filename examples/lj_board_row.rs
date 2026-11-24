@@ -13,6 +13,9 @@
 //! absolute gradient component at or below `0.0514221`, and a call
 //! count inside the budget. The process requires `RAYON_NUM_THREADS=1`.
 
+#[path = "common/host_label.rs"]
+mod host_label;
+
 use std::io::{Write, stdout};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -108,12 +111,12 @@ fn read_trimmed(path: &str) -> String {
 
 /// Hostname and boot id, read when the run starts.
 fn announce_host() {
-    let hostname = read_trimmed("/proc/sys/kernel/hostname");
+    let hostname = host_label::host_label(&read_trimmed("/proc/sys/kernel/hostname"));
     let boot_id = read_trimmed("/proc/sys/kernel/random/boot_id");
-    if hostname.is_empty() || boot_id.is_empty() {
+    let Some(hostname) = hostname.filter(|_| !boot_id.is_empty()) else {
         eprintln!("host identity unread");
         std::process::exit(2);
-    }
+    };
     emit(&format!("hostname={hostname}"));
     emit(&format!("boot_id={boot_id}"));
     emit("boot_id_path=/proc/sys/kernel/random/boot_id");

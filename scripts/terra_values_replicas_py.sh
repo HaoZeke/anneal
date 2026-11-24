@@ -3,7 +3,7 @@
 # Build the python extension on terra and probe ChemFit jac=False replicas.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then
-  echo "terra_values_replicas_py.sh: run under srun/sbatch, not on $(hostname)" >&2
+  echo "terra_values_replicas_py.sh: run under srun/sbatch, not directly" >&2
   exit 1
 fi
 ROOT=${ANNEAL_ROOT:-$HOME/build/anneal-values/src}
@@ -14,7 +14,7 @@ export PATH="${VERIFY}/bin:${HOME}/.cargo/bin:/usr/bin:${PATH}"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/build/anneal-values/target}"
 export VIRTUAL_ENV="$VERIFY"
 cd "$ROOT"
-echo "host=$(hostname) job=$SLURM_JOB_ID"
+echo "host=$(python3 "$ROOT/scripts/machine_provenance.py" host-label) job=$SLURM_JOB_ID"
 echo "maturin=$(maturin --version)"
 mkdir -p "$ROOT/wheels"
 maturin build --release --features python --out "$ROOT/wheels"

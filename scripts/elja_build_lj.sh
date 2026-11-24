@@ -4,7 +4,7 @@
 # rustup lives in ~/.cargo/bin and is off the non-interactive PATH.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then
-  echo "elja_build_lj.sh: run under srun, not on $(hostname)" >&2
+  echo "elja_build_lj.sh: run under srun, not directly" >&2
   exit 1
 fi
 ROOT=${LJ_ROOT:-$HOME/anneal-build}
@@ -50,7 +50,7 @@ test -x /usr/bin/ld
 ln -sfn /usr/bin/ld "$SYS/bin/ld"
 export RUSTFLAGS="${RUSTFLAGS:-} -C linker=${GCC}/bin/gcc -C link-arg=-B${SYS} -C link-arg=-B${SYS}/bin -L ${SYS}"
 cd "$ROOT"
-echo "host=$(hostname) job=$SLURM_JOB_ID"
+echo "host=$(python3 "$ROOT/scripts/machine_provenance.py" host-label) job=$SLURM_JOB_ID"
 lscpu | grep -E "Model name|Vendor ID" || true
 BIN=target/release/examples/lj_cluster_search
 mkdir -p target/release/examples

@@ -12,6 +12,9 @@
 //!
 //! Usage: `lj_lean_relax_budget <n> <relaxations> <seed> <reference>`
 
+#[path = "common/host_label.rs"]
+mod host_label;
+
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -36,7 +39,7 @@ fn hostname() -> String {
 
 fn main() {
     anneal_core::install_rgpot_kernels!();
-    if hostname() != "bench" {
+    if host_label::host_label(&hostname()).as_deref() != Some("bench") {
         eprintln!("uts hostname is not bench");
         std::process::exit(2);
     }
