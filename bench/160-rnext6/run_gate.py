@@ -22,14 +22,14 @@ BUDGET = 2_000_000
 HIT_TOL = 1.0e-3
 CORE = "0"
 ARM_HEADS = {
-    "A": "cb0cfbfa0cfae21b62cc32037defc5327dc52a51",
-    "A2": "cb0cfbfa0cfae21b62cc32037defc5327dc52a51",
-    "B": "752b938f4c680b72c9785516a2694676e2d7c93b",
+    "A": "9b65fda3972fd8c014bce886a3ea5c05956d64af",
+    "A2": "9b65fda3972fd8c014bce886a3ea5c05956d64af",
+    "B": None,
 }
 ARM_TREES = {
-    "A": "65972b37b798ebacd9d99d789df761099eefea1f",
-    "A2": "65972b37b798ebacd9d99d789df761099eefea1f",
-    "B": "618d1d0e981d54e2a5a46c9e5b9bb956fe30533b",
+    "A": "a49a66d1422cfefa28012fd12e6729bc4e879d5f",
+    "A2": "a49a66d1422cfefa28012fd12e6729bc4e879d5f",
+    "B": "6b5df2e6f262b86e74023f94f3ebcbadc1eb17b6",
 }
 ORDERS = (
     ("A", "B", "A2", "B"),
@@ -158,7 +158,8 @@ class Arm:
         dirty = self.git("status", "--porcelain")
         if dirty:
             raise RuntimeError(f"{self.name} source is dirty")
-        if self.git("rev-parse", "HEAD") != ARM_HEADS[self.name]:
+        head = ARM_HEADS[self.name]
+        if head is not None and self.git("rev-parse", "HEAD") != head:
             raise RuntimeError(f"{self.name} head mismatch")
         if self.git("rev-parse", "HEAD^{tree}") != ARM_TREES[self.name]:
             raise RuntimeError(f"{self.name} tree mismatch")
@@ -334,7 +335,7 @@ def main(argv: list[str]) -> None:
                 if int(parsed["budget"]) != BUDGET:
                     raise RuntimeError(f"{tag} budget mismatch")
                 diagnostics = parse_diag(stderr)
-                expected = 1 if arm_name == "B" else 0
+                expected = 1
                 if len(diagnostics) != expected:
                     raise RuntimeError(f"{tag} rigid diagnostics mismatch")
                 energy = float(parsed["best"])

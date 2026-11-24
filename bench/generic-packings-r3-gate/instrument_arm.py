@@ -153,11 +153,14 @@ def instrument(source: Path, layout: int, generic: bool) -> None:
             "            let probe_spent = probe.spent().saturating_sub(probe_offset);\n"
             "            gate_packing_probe_calls = probe_spent;\n",
         )
+        record = "                        ledger.record(cut_energy, cut_state.view());\n"
+        opener = "                    if hit_target {\n"
+        if text.count(opener + record) != 1:
+            opener = "                    {\n"
         text = replace_once(
             text,
-            "                    {\n                        ledger.record(cut_energy, cut_state.view());\n",
-            "                    {\n                        gate_packing_hit = true;\n"
-            "                        ledger.record(cut_energy, cut_state.view());\n",
+            opener + record,
+            opener + "                        gate_packing_hit = true;\n" + record,
         )
     outcome = text.rfind("    Ok(Outcome {\n")
     if outcome < 0:
