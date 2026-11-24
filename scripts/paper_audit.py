@@ -1713,8 +1713,9 @@ def count_gates(audit: Audit, lj_rev: str) -> None:
                  "present", "present")
     bodies = re.search(r"const RIGID_HOT_BODIES: usize = (\d+);", hop)
     audit.cell("src/methods/cluster_hopping.rs", "rigid body-count gate", "10", float(bodies.group(1)) if bodies else None)
-    for fragment in ("cfg.move_library.is_rigid_body() && cfg.n_points > RIGID_HOT_BODIES",
-                     "&& cfg.n_points <= RIGID_HOT_BODIES"):
+    for fragment in ("if cfg.move_library.is_rigid_body() {\n        run_search::<R, H, true>(",
+                     "if RIGID && cfg.n_points > RIGID_HOT_BODIES {",
+                     "if RIGID && cfg.n_points <= RIGID_HOT_BODIES &&"):
         audit.record(fragment in hop, "src/methods/cluster_hopping.rs", "the rigid gate reads the body count",
                      fragment, "present" if fragment in hop else "absent")
     assignment = audit.text("src/assignment.rs")
