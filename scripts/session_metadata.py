@@ -25,6 +25,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from machine_provenance import machine_columns  # noqa: E402
+
 COMPILERS = {
     "rustc": ["rustc", "-V"],
     "cargo": ["cargo", "-V"],
@@ -175,12 +178,9 @@ def repro_checkout(path: Path | None) -> dict[str, str | None] | None:
 
 def cpu_model() -> str | None:
     try:
-        for line in Path("/proc/cpuinfo").read_text().splitlines():
-            if line.startswith("model name"):
-                return line.partition(":")[2].strip()
-    except OSError:
-        pass
-    return platform.processor() or None
+        return machine_columns()["cpu_model"]
+    except (OSError, RuntimeError):
+        return platform.processor() or None
 
 
 def cpu_affinity() -> list[int]:

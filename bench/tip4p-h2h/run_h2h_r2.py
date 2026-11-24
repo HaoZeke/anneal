@@ -14,9 +14,13 @@ import os
 import platform
 import socket
 import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+from machine_provenance import machine_columns  # noqa: E402
 
 
 TIP4P_REFERENCES_KJ_MOL = {
@@ -45,29 +49,6 @@ def type7(values: list[float], p: float = 0.5) -> float:
     if frac == 0.0:
         return ordered[i]
     return ordered[i] * (1.0 - frac) + ordered[i + 1] * frac
-
-
-def read_cpu_model() -> str:
-    for line in Path("/proc/cpuinfo").read_text().splitlines():
-        if line.startswith("model name"):
-            return line.split(":", 1)[1].strip()
-    return "unknown"
-
-
-def read_mem_total_kb() -> str:
-    for line in Path("/proc/meminfo").read_text().splitlines():
-        if line.startswith("MemTotal:"):
-            return line.split()[1]
-    return "0"
-
-
-def read_boot_id() -> str:
-    return Path("/proc/sys/kernel/random/boot_id").read_text().strip()
-
-
-def machine_id() -> str:
-    payload = f"{read_cpu_model()}|{read_mem_total_kb()}|{read_boot_id()}".encode()
-    return hashlib.sha256(payload).hexdigest()
 
 
 def parse_kv(line: str) -> dict[str, str]:
@@ -372,9 +353,10 @@ def run_command(args: argparse.Namespace) -> int:
     sizes = parse_list(args.sizes)
     seeds = parse_list(args.seeds)
     affinity_source = f"taskset -c {args.core}"
-    machine = machine_id()
+    machine_fields = machine_columns()
+    machine = machine_fields["machine_id"]
     hostname = socket.gethostname()
-    cpu_model = read_cpu_model()
+    cpu_model = machine_fields["cpu_model"]
     arch = platform.machine()
     logical_cpus = os.cpu_count() or 0
     references = TIP4P_REFERENCES_KJ_MOL

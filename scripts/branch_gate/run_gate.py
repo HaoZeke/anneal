@@ -36,6 +36,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from machine_provenance import machine_columns  # noqa: E402
+
 SEEDS = tuple(range(2000, 2012))
 PAPER_BUDGETS = {
     "lj38": 400_000,
@@ -139,10 +142,7 @@ def is_hit(text: str) -> bool:
 
 
 def cpu_model() -> str:
-    for line in Path("/proc/cpuinfo").read_text().splitlines():
-        if line.startswith("model name"):
-            return line.split(":", 1)[1].strip().replace(",", " ")
-    return ""
+    return machine_columns()["cpu_model"].replace(",", " ")
 
 
 def single_thread_env(arm: str) -> dict[str, str]:

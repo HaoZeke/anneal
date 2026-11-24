@@ -404,13 +404,6 @@ def summarise(
     return out
 
 
-def cpu_model() -> str:
-    for line in Path("/proc/cpuinfo").read_text().splitlines():
-        if line.startswith("model name"):
-            return line.split(":", 1)[1].strip()
-    return ""
-
-
 def identity_rows(binaries: dict[str, Path], python: Path, arm: Path, work: Path) -> list[dict]:
     """Both codes' energy of one anneal start, before any timed run."""
     out = []
@@ -511,7 +504,7 @@ UNCAPPED_FIELDS = SEED_FIELDS + [
 def uncapped(args) -> int:
     source = load_source(args.source)
     head = args.head_file.read_text().strip()
-    cpu = cpu_model()
+    cpu = machine_columns()["cpu_model"]
     arm_script = Path(__file__).resolve().parent / "growpal_arm.py"
     names = [name for name, *_ in SYSTEMS]
     systems = tuple(args.system) if args.system else tuple(names)
@@ -612,7 +605,7 @@ def main(argv: list[str]) -> int:
             raise SystemExit(f"{system} budget {args.budget} != {PAPER_BUDGETS[system]}")
     source = load_source(args.source)
     head = args.head_file.read_text().strip()
-    cpu = cpu_model()
+    cpu = machine_columns()["cpu_model"]
     arm_script = Path(__file__).resolve().parent / "growpal_arm.py"
     binaries = {
         "h2h_gmin_proof": args.bin_dir / "h2h_gmin_proof",

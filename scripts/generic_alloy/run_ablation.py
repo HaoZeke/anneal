@@ -277,13 +277,6 @@ def schedule(
     return order
 
 
-def cpu_model() -> str:
-    for line in Path("/proc/cpuinfo").read_text().splitlines():
-        if line.startswith("model name"):
-            return line.split(":", 1)[1].strip()
-    return ""
-
-
 def single_thread_env() -> dict[str, str]:
     env = os.environ.copy()
     for key in (
@@ -629,8 +622,8 @@ def main(argv: list[str]) -> int:
         name: (build, priors, homotop, extra) for name, build, priors, homotop, extra in spec["arms"]
     }
     host = os.uname().nodename
-    cpu = cpu_model()
     machine = machine_columns()
+    cpu = machine["cpu_model"]
     args.rows.parent.mkdir(parents=True, exist_ok=True)
     args.logs.mkdir(parents=True, exist_ok=True)
     done = {

@@ -32,7 +32,8 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 from machine_provenance import (  # noqa: E402
-    machine_provenance,
+    machine_columns,
+    machine_provenance,  # noqa: F401
     read_built_gmin_source,
     require_gmin_build_key,
     validate_saved_gmin_provenance,
@@ -692,7 +693,8 @@ def main(argv: list[str]) -> int:
     except ValueError as error:
         raise SystemExit(str(error)) from error
     head = args.head_file.read_text().strip()
-    machine_id, cpu_model = machine_provenance()
+    machine = machine_columns()
+    machine_id, cpu_model = machine["machine_id"], machine["cpu_model"]
     progress = args.runs.parent / "progress.txt"
     progress.parent.mkdir(parents=True, exist_ok=True)
     order = schedule(sizes, seeds, arms, SCHEDULE_SEED)

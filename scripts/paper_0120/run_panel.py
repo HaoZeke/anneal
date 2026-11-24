@@ -38,6 +38,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
     if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
         sys.path.insert(0, str(_candidate))
         break
+from machine_provenance import machine_columns  # noqa: E402
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 
 SEEDS = tuple(range(2000, 2012))
@@ -225,10 +226,7 @@ def is_hit(text: str) -> bool:
 
 
 def cpu_model() -> str:
-    for line in Path("/proc/cpuinfo").read_text().splitlines():
-        if line.startswith("model name"):
-            return line.split(":", 1)[1].strip().replace(",", " ")
-    return ""
+    return machine_columns()["cpu_model"].replace(",", " ")
 
 
 def single_thread_env() -> dict[str, str]:

@@ -31,7 +31,7 @@ export OMP_DYNAMIC=false
 head_sha=$(git rev-parse HEAD)
 tree_sha=$(git rev-parse 'HEAD^{tree}')
 host=$(hostname)
-cpu=$(awk -F: '/^model name/ {gsub(/^[ \t]+/, "", $2); print $2; exit}' /proc/cpuinfo)
+cpu=$(PYTHONPATH="$root/scripts${PYTHONPATH:+:$PYTHONPATH}" python3 -c 'from machine_provenance import machine_columns; print(machine_columns()["cpu_model"])')
 flags=$(awk -F: '/^flags/ {gsub(/^[ \t]+/, "", $2); print $2; exit}' /proc/cpuinfo)
 
 mkdir -p "$out/$system" "$out/logs/$system"

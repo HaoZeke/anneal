@@ -75,13 +75,6 @@ FIELDS = [
 ]
 
 
-def cpu_model() -> str:
-    for line in Path("/proc/cpuinfo").read_text().splitlines():
-        if line.startswith("model name"):
-            return line.split(":", 1)[1].strip()
-    return ""
-
-
 def sha1(path: Path) -> str:
     return hashlib.sha1(path.read_bytes()).hexdigest()
 
@@ -257,8 +250,8 @@ def main() -> int:
     write_gm_blocks(args.repo, args.gm_dir)
     verify(args.point, args.gmin, args.verify_data, args.gm_dir, args.verify_out, args.work)
 
-    host, cpu = socket.gethostname(), cpu_model()
     machine = machine_columns()
+    host, cpu = socket.gethostname(), machine["cpu_model"]
     require_csv_schema(args.rows, FIELDS)
     stored = read_rows(args.rows)
     sizes = (args.size,) if args.size else SIZES
