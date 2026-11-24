@@ -17,6 +17,7 @@ import math
 import os
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
@@ -24,6 +25,15 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+from machine_provenance import (  # noqa: E402
+    aggregate_machine_columns,
+    machine_columns,
+    machine_fieldnames,
+    read_built_gmin_provenance,
+    require_csv_schema,
+    require_gmin_build_key,
+    validate_saved_gmin_provenance,
+)
 
 SYSTEMS = {
     "m55r14": {"n": 55, "rho": 14.0, "budget": 1_000_000, "reference": -220.646208},
@@ -44,7 +54,29 @@ SEED_FIELDS = [
     "pot_s",
     "outside_s",
 ]
-ROW_FIELDS = SEED_FIELDS + ["code_revision", "host"]
+ROW_FIELDS = machine_fieldnames(
+    SEED_FIELDS + ["code_revision", "gmin_build_key", "host"]
+)
+SUMMARY_BASE_FIELDS = [
+    "system",
+    "anneal_hits",
+    "anneal_n",
+    "gmin_hits",
+    "gmin_n",
+    "gmin_reused",
+    "fisher_p",
+    "mannwhitney_p_evals",
+    "mannwhitney_p_wall",
+    "anneal_evals_median",
+    "gmin_evals_median",
+    "anneal_wall_median_s",
+    "gmin_wall_median_s",
+    "anneal_pot_median_s",
+    "anneal_outside_median_s",
+    "gmin_pot_median_s",
+    "gmin_outside_median_s",
+]
+SUMMARY_FIELDS = machine_fieldnames(SUMMARY_BASE_FIELDS)
 
 
 def type7(ordered: list[float], p: float) -> float:
@@ -93,11 +125,42 @@ def fisher_two_sided(hits_a: int, n_a: int, hits_b: int, n_b: int) -> float:
 
 
 def mann_whitney(left: list[float], right: list[float]) -> float:
-    from scipy.stats import mannwhitneyu
-
     if not left or not right:
         return float("nan")
-    return float(mannwhitneyu(left, right, alternative="two-sided", method="asymptotic", use_continuity=True).pvalue)
+    try:
+        from scipy.stats import mannwhitneyu
+    except ModuleNotFoundError:
+        mannwhitneyu = None
+    if mannwhitneyu is not None:
+        return float(
+            mannwhitneyu(
+                left,
+                right,
+                alternative="two-sided",
+                method="asymptotic",
+                use_continuity=True,
+            ).pvalue
+        )
+    n1, n2 = len(left), len(right)
+    pooled = sorted(left + right)
+    n = n1 + n2
+    rank: dict[float, float] = {}
+    ties = 0.0
+    i = 0
+    while i < n:
+        j = i
+        while j + 1 < n and pooled[j + 1] == pooled[i]:
+            j += 1
+        rank[pooled[i]] = (i + j + 2) / 2.0
+        t = j - i + 1
+        ties += t**3 - t
+        i = j + 1
+    u = sum(rank[v] for v in left) - n1 * (n1 + 1) / 2.0
+    var = n1 * n2 / 12.0 * ((n + 1) - ties / (n * (n - 1)))
+    if var <= 0.0:
+        return 1.0
+    dev = max(abs(u - n1 * n2 / 2.0) - 0.5, 0.0)
+    return min(1.0, math.erfc(dev / math.sqrt(var) / math.sqrt(2.0)))
 
 
 def binary_path(root: Path) -> Path:
@@ -111,7 +174,43 @@ def binary_path(root: Path) -> Path:
     raise SystemExit("h2h_morse release binary is not built")
 
 
-def load_gmin(archive: Path) -> dict[tuple[str, int], dict[str, str]]:
+def _resolve_gmin_provenance(
+    svnrev: Path | None = None, gmin_source: Path | None = None
+) -> tuple[str, str]:
+    svnrev_path = svnrev or Path(
+        os.environ.get(
+            "GMIN_SVNREV_FILE", "/work/gmin-h2h/src/wales/GMIN/source/SVNREV"
+        )
+    )
+    source_path = gmin_source or Path(
+        os.environ.get("GMIN_SOURCE_FILE", "/work/gmin-h2h/gmin-source.txt")
+    )
+    return read_built_gmin_provenance(svnrev_path, source_path)
+
+
+def _validate_caller_gmin_provenance(
+    gmin_revision: str | None, gmin_build_key: str | None
+) -> tuple[str, str]:
+    if not isinstance(gmin_revision, str) or not gmin_revision.strip():
+        raise ValueError("missing expected GMIN revision")
+    return (
+        gmin_revision.strip(),
+        require_gmin_build_key(gmin_build_key, "expected gmin_build_key"),
+    )
+
+
+def load_gmin(
+    archive: Path,
+    *,
+    gmin_revision: str | None = None,
+    gmin_build_key: str | None = None,
+) -> dict[tuple[str, int], dict[str, str]]:
+    if gmin_revision is None and gmin_build_key is None:
+        gmin_revision, gmin_build_key = _resolve_gmin_provenance()
+    else:
+        gmin_revision, gmin_build_key = _validate_caller_gmin_provenance(
+            gmin_revision, gmin_build_key
+        )
     rows = {}
     with archive.open() as handle:
         for row in csv.DictReader(handle):
@@ -122,6 +221,12 @@ def load_gmin(archive: Path) -> dict[tuple[str, int], dict[str, str]]:
                 continue
             if int(row["budget"]) != SYSTEMS[system]["budget"]:
                 continue
+            validate_saved_gmin_provenance(
+                row,
+                path=archive,
+                revision=gmin_revision,
+                build_key=gmin_build_key,
+            )
             rows[(system, int(row["seed"]))] = row
     return rows
 
@@ -178,34 +283,27 @@ def gmin_row(stored: dict[str, str]) -> dict[str, str]:
     return {field: stored.get(field, "") for field in ROW_FIELDS}
 
 
-def write_rows(path: Path, rows: list[dict[str, str]]) -> None:
+def write_rows(
+    path: Path,
+    rows: list[dict[str, str]],
+    *,
+    overwrite_legacy: bool = False,
+) -> None:
+    if not overwrite_legacy:
+        require_csv_schema(path, ROW_FIELDS)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS)
+        writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
 
 
-def summarise(rows: list[dict[str, str]], path: Path) -> None:
-    fields = [
-        "system",
-        "anneal_hits",
-        "anneal_n",
-        "gmin_hits",
-        "gmin_n",
-        "gmin_reused",
-        "fisher_p",
-        "mannwhitney_p_evals",
-        "mannwhitney_p_wall",
-        "anneal_evals_median",
-        "gmin_evals_median",
-        "anneal_wall_median_s",
-        "gmin_wall_median_s",
-        "anneal_pot_median_s",
-        "anneal_outside_median_s",
-        "gmin_pot_median_s",
-        "gmin_outside_median_s",
-    ]
+def summarise(
+    rows: list[dict[str, str]],
+    path: Path,
+    *,
+    overwrite_legacy: bool = False,
+) -> None:
     lines = []
     for system in SYSTEMS:
         anneal = [row for row in rows if row["system"] == system and row["code"] == "anneal"]
@@ -220,6 +318,7 @@ def summarise(rows: list[dict[str, str]], path: Path) -> None:
         def column(group: list[dict[str, str]], name: str) -> list[float]:
             return [float(row[name]) for row in group]
 
+        both = anneal + gmin
         lines.append(
             {
                 "system": system,
@@ -228,9 +327,9 @@ def summarise(rows: list[dict[str, str]], path: Path) -> None:
                 "gmin_hits": str(hits(gmin_shared)),
                 "gmin_n": str(len(gmin_shared)),
                 "gmin_reused": " ".join(str(seed) for seed in shared),
-                "fisher_p": f"{fisher_two_sided(hits(anneal_shared), len(anneal_shared), hits(gmin_shared), len(gmin_shared)):.6g}",
-                "mannwhitney_p_evals": f"{mann_whitney(column(anneal_shared, 'evals_to_hit'), column(gmin_shared, 'evals_to_hit')):.6g}",
-                "mannwhitney_p_wall": f"{mann_whitney(column(anneal_shared, 'wall_s'), column(gmin_shared, 'wall_s')):.6g}",
+                "fisher_p": f"{fisher_two_sided(hits(anneal_shared), len(anneal_shared), hits(gmin_shared), len(gmin_shared)):.6g}" if shared else "",
+                "mannwhitney_p_evals": f"{mann_whitney(column(anneal_shared, 'evals_to_hit'), column(gmin_shared, 'evals_to_hit')):.6g}" if shared else "",
+                "mannwhitney_p_wall": f"{mann_whitney(column(anneal_shared, 'wall_s'), column(gmin_shared, 'wall_s')):.6g}" if shared else "",
                 "anneal_evals_median": f"{median(column(anneal, 'evals_to_hit')):.6f}",
                 "gmin_evals_median": f"{median(column(gmin, 'evals_to_hit')):.6f}" if gmin else "",
                 "anneal_wall_median_s": f"{median(column(anneal, 'wall_s')):.6f}",
@@ -239,25 +338,53 @@ def summarise(rows: list[dict[str, str]], path: Path) -> None:
                 "anneal_outside_median_s": f"{median(column(anneal, 'outside_s')):.6f}",
                 "gmin_pot_median_s": f"{median(column(gmin, 'pot_s')):.6f}" if gmin else "",
                 "gmin_outside_median_s": f"{median(column(gmin, 'outside_s')):.6f}" if gmin else "",
+                **aggregate_machine_columns(both),
             }
         )
+    fields = (
+        SUMMARY_FIELDS
+        if lines and "machine_id" in lines[0]
+        else SUMMARY_BASE_FIELDS
+    )
+    if not overwrite_legacy:
+        require_csv_schema(path, fields)
+    path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
         writer.writeheader()
         writer.writerows(lines)
 
 
-def panel(root: Path) -> list[dict[str, str]]:
-    archive = load_gmin(root / "bench" / "morse-h2h" / "seeds.csv")
+def panel(
+    root: Path,
+    *,
+    svnrev: Path | None = None,
+    gmin_source: Path | None = None,
+) -> list[dict[str, str]]:
+    gmin_revision, gmin_build_key = _resolve_gmin_provenance(svnrev, gmin_source)
+    archive = load_gmin(
+        root / "bench" / "morse-h2h" / "seeds.csv",
+        gmin_revision=gmin_revision,
+        gmin_build_key=gmin_build_key,
+    )
     binary = binary_path(root)
     head = subprocess.run(
         ["git", "-C", str(root), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
     ).stdout.strip()
+    host = os.uname().nodename
+    machine = machine_columns()
     rows: list[dict[str, str]] = []
     for system in SYSTEMS:
         for seed in SEEDS:
             anneal = run_anneal(binary, system, seed)
-            anneal.update({"code_revision": head, "host": os.uname().nodename})
+            anneal.update(
+                {
+                    "code_revision": head,
+                    "gmin_build_key": "",
+                    "host": host,
+                    **machine,
+                }
+            )
             print(",".join(anneal[field] for field in SEED_FIELDS), flush=True)
             rows.append(anneal)
             stored = archive.get((system, seed))
@@ -268,9 +395,22 @@ def panel(root: Path) -> list[dict[str, str]]:
     return rows
 
 
-def one(root: Path, system: str, seed: int, arm: str) -> None:
+def one(
+    root: Path,
+    system: str,
+    seed: int,
+    arm: str,
+    *,
+    svnrev: Path | None = None,
+    gmin_source: Path | None = None,
+) -> None:
     if arm == "gmin":
-        stored = load_gmin(root / "bench" / "morse-h2h" / "seeds.csv").get((system, seed))
+        gmin_revision, gmin_build_key = _resolve_gmin_provenance(svnrev, gmin_source)
+        stored = load_gmin(
+            root / "bench" / "morse-h2h" / "seeds.csv",
+            gmin_revision=gmin_revision,
+            gmin_build_key=gmin_build_key,
+        ).get((system, seed))
         if stored is None:
             raise SystemExit(
                 f"no stored GMIN row for {system} seed {seed} at budget {SYSTEMS[system]['budget']}"
@@ -282,23 +422,72 @@ def one(root: Path, system: str, seed: int, arm: str) -> None:
     print(",".join(run_anneal(binary_path(root), system, seed)[field] for field in SEED_FIELDS))
 
 
-def main() -> int:
+def _parse_argv(argv: Sequence[str] | None) -> list[str] | None:
+    if argv is None:
+        return None
+    items = list(argv)
+    if items and not items[0].startswith("-"):
+        return items[1:]
+    return items
+
+
+def run_panel(
+    root: Path,
+    *,
+    out_dir: Path | None = None,
+    svnrev: Path | None = None,
+    gmin_source: Path | None = None,
+    overwrite_legacy: bool = False,
+) -> tuple[Path, Path]:
+    root = root.resolve()
+    out = (out_dir or (root / "bench" / "morse14-h2h")).resolve()
+    seeds_path = out / "seeds.csv"
+    summary_path = out / "summary.csv"
+    if not overwrite_legacy:
+        require_csv_schema(seeds_path, ROW_FIELDS)
+        require_csv_schema(summary_path, SUMMARY_FIELDS)
+    rows = panel(root, svnrev=svnrev, gmin_source=gmin_source)
+    write_rows(seeds_path, rows, overwrite_legacy=overwrite_legacy)
+    summarise(rows, summary_path, overwrite_legacy=overwrite_legacy)
+    return seeds_path, summary_path
+
+
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    out_dir: Path | None = None,
+    overwrite_legacy: bool = False,
+) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--out", type=Path)
+    parser.add_argument("--overwrite-legacy", action="store_true")
     parser.add_argument("--system")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--arm")
-    args = parser.parse_args()
+    parser.add_argument("--svnrev", type=Path)
+    parser.add_argument("--gmin-source", type=Path)
+    args = parser.parse_args(_parse_argv(argv))
     root = args.root.resolve()
     if args.system or args.seed or args.arm:
         if not (args.system and args.seed is not None and args.arm):
             raise SystemExit("one job needs --system, --seed and --arm")
-        one(root, args.system, args.seed, args.arm)
+        one(
+            root,
+            args.system,
+            args.seed,
+            args.arm,
+            svnrev=args.svnrev,
+            gmin_source=args.gmin_source,
+        )
         return 0
-    out = root / "bench" / "morse14-h2h"
-    rows = panel(root)
-    write_rows(out / "seeds.csv", rows)
-    summarise(rows, out / "summary.csv")
+    run_panel(
+        root,
+        out_dir=out_dir if out_dir is not None else args.out,
+        svnrev=args.svnrev,
+        gmin_source=args.gmin_source,
+        overwrite_legacy=bool(overwrite_legacy or args.overwrite_legacy),
+    )
     return 0
 
 

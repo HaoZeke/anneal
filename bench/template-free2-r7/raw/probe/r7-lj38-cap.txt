@@ -1,0 +1,8 @@
+lj38-2000/latch-000.xyz incumbent -169.7604 best -169.8298 hits 0
+lj38-2002/latch-000.xyz incumbent -171.2993 best -171.3573 hits 0
+lj38-2003/latch-000.xyz incumbent -169.7605 best -170.9899 hits 0
+lj38-2004/latch-000.xyz incumbent -172.2981 best -173.1343 hits 0
+lj38-2008/latch-000.xyz incumbent -170.4043 best -170.4273 hits 0
+lj38-2009/latch-000.xyz incumbent -169.8822 best -171.3573 hits 0
+lj38-2010/latch-000.xyz incumbent -167.9821 best -170.8416 hits 0
+SUMMARY generator cap draws 700 gm_hits 0 below_incumbent 342 best -173.13432 ref -173.928427

@@ -192,16 +192,24 @@ fn ritz(alphas: &[f64], betas: &[f64]) -> Option<(Vec<f64>, ndarray::Array2<f64>
     if m < 2 {
         return None;
     }
-    let mut t = ndarray::Array2::<f64>::zeros((m, m));
-    for i in 0..m {
-        t[[i, i]] = alphas[i];
-        if i + 1 < m {
-            t[[i, i + 1]] = betas[i];
-            t[[i + 1, i]] = betas[i];
-        }
+    Some(crate::spectral::tridiagonal_jacobi(
+        alphas,
+        &betas[..m - 1],
+        128,
+    ))
+}
+
+/// Eigenvalues of a Lanczos tridiagonal, ascending.
+fn ritz_values(alphas: &[f64], betas: &[f64]) -> Option<Vec<f64>> {
+    let m = alphas.len();
+    if m < 2 {
+        return None;
     }
-    let (vals, vecs) = crate::spectral::symmetric_eigen(t.view(), 128);
-    Some((vals.to_vec(), vecs))
+    Some(crate::spectral::tridiagonal_jacobi_values(
+        alphas,
+        &betas[..m - 1],
+        128,
+    ))
 }
 
 /// Lanczos with full reorthogonalisation on an arbitrary symmetric operator.
@@ -209,6 +217,7 @@ fn ritz(alphas: &[f64], betas: &[f64]) -> Option<(Vec<f64>, ndarray::Array2<f64>
 /// Returns the diagonal, the off-diagonal and the basis. Split out because the
 /// low end of a spectrum is reached by running this twice, once on the operator
 /// and once on a shift of it.
+#[cfg(test)]
 fn lanczos_tridiag<F, P>(
     start: &Array1<f64>,
     steps: usize,
@@ -219,22 +228,46 @@ where
     F: FnMut(&Array1<f64>) -> Option<Array1<f64>>,
     P: Fn(&mut Array1<f64>),
 {
+    lanczos_tridiag_into(
+        start,
+        steps,
+        &mut |q, out| {
+            let w = op(q)?;
+            out.assign(&w);
+            Some(())
+        },
+        project,
+    )
+}
+
+fn lanczos_tridiag_into<F, P>(
+    start: &Array1<f64>,
+    steps: usize,
+    op: &mut F,
+    project: &P,
+) -> Option<(Vec<f64>, Vec<f64>, Vec<Array1<f64>>)>
+where
+    F: FnMut(&Array1<f64>, &mut Array1<f64>) -> Option<()>,
+    P: Fn(&mut Array1<f64>),
+{
     let dim = start.len();
     let mut q = start.clone();
-    let mut alphas: Vec<f64> = Vec::new();
-    let mut betas: Vec<f64> = Vec::new();
-    let mut q_prev: Option<Array1<f64>> = None;
-    let mut basis: Vec<Array1<f64>> = Vec::new();
+    let mut w = Array1::<f64>::zeros(dim);
+    let mut alphas: Vec<f64> = Vec::with_capacity(steps);
+    let mut betas: Vec<f64> = Vec::with_capacity(steps);
+    let mut has_prev = false;
+    let mut basis: Vec<Array1<f64>> = Vec::with_capacity(steps);
 
     for _ in 0..steps {
         basis.push(q.clone());
-        let mut w = op(&q)?;
+        op(&q, &mut w)?;
         let alpha: f64 = w.iter().zip(q.iter()).map(|(a, b)| a * b).sum();
         alphas.push(alpha);
         for i in 0..dim {
             w[i] -= alpha * q[i];
         }
-        if let (Some(prev), Some(beta)) = (q_prev.as_ref(), betas.last()) {
+        if has_prev && let Some(&beta) = betas.last() {
+            let prev = &basis[basis.len() - 2];
             for i in 0..dim {
                 w[i] -= beta * prev[i];
             }
@@ -280,20 +313,76 @@ where
                 .flatten();
             if let Some(restart) = restart {
                 betas.push(0.0);
-                q_prev = None;
+                has_prev = false;
                 q = restart;
                 continue;
             }
             break;
         }
         betas.push(beta);
-        q_prev = Some(q.clone());
-        q = w / beta;
+        has_prev = true;
+        for value in &mut w {
+            *value /= beta;
+        }
+        std::mem::swap(&mut q, &mut w);
     }
     if alphas.len() < 2 {
         return None;
     }
     Some((alphas, betas, basis))
+}
+
+struct CurvatureScratch {
+    d: Array1<f64>,
+    xp: Array1<f64>,
+    xm: Array1<f64>,
+    vp: Array1<f64>,
+    hv_out: Array1<f64>,
+}
+
+impl CurvatureScratch {
+    fn new(dim: usize) -> Self {
+        Self {
+            d: Array1::zeros(dim),
+            xp: Array1::zeros(dim),
+            xm: Array1::zeros(dim),
+            vp: Array1::zeros(dim),
+            hv_out: Array1::zeros(dim),
+        }
+    }
+}
+
+fn hessian_vector_into<G>(
+    x: ArrayView1<f64>,
+    v: &Array1<f64>,
+    rigid: &[Array1<f64>],
+    epsilon: f64,
+    grad: &mut G,
+    d: &mut Array1<f64>,
+    xp: &mut Array1<f64>,
+    xm: &mut Array1<f64>,
+    out: &mut Array1<f64>,
+    evaluations: &mut usize,
+) -> Option<()>
+where
+    G: FnMut(ArrayView1<f64>) -> Option<Array1<f64>>,
+{
+    let dim = x.len();
+    d.assign(v);
+    project_rigid_with(d, rigid);
+    for i in 0..dim {
+        let step = epsilon * d[i];
+        xp[i] = x[i] + step;
+        xm[i] = x[i] - step;
+    }
+    let gp = grad(xp.view())?;
+    let gm = grad(xm.view())?;
+    *evaluations += 2;
+    for i in 0..dim {
+        out[i] = (gp[i] - gm[i]) / (2.0 * epsilon);
+    }
+    project_rigid_with(out, rigid);
+    Some(())
 }
 
 /// Estimates the lowest non-rigid curvature modes and their spectral gap.
@@ -317,29 +406,7 @@ where
     // Built once: it depends only on `x`, and rebuilding it inside every
     // matrix-vector product would dominate the cheap part of this routine.
     let rigid = rigid_basis(x);
-
-    // Hessian-vector product by central difference of the gradient, with the
-    // rigid directions projected out on the way in and on the way out so the
-    // operator acts on the non-rigid subspace only.
-    let mut hv = |v: &Array1<f64>, evaluations: &mut usize| -> Option<Array1<f64>> {
-        let mut d = v.clone();
-        project_rigid_with(&mut d, &rigid);
-        let mut xp = x.to_owned();
-        let mut xm = x.to_owned();
-        for i in 0..dim {
-            xp[i] += epsilon * d[i];
-            xm[i] -= epsilon * d[i];
-        }
-        let gp = grad(xp.view())?;
-        let gm = grad(xm.view())?;
-        *evaluations += 2;
-        let mut out = Array1::zeros(dim);
-        for i in 0..dim {
-            out[i] = (gp[i] - gm[i]) / (2.0 * epsilon);
-        }
-        project_rigid_with(&mut out, &rigid);
-        Some(out)
-    };
+    let mut scratch = CurvatureScratch::new(dim);
 
     // Deterministic start, spread over all coordinates so it is unlikely to be
     // orthogonal to the softest mode.
@@ -366,27 +433,54 @@ where
     // the smallest of `H` and which Lanczos therefore resolves quickly. The
     // cost is two passes rather than one.
     let project = |w: &mut Array1<f64>| project_rigid_with(w, &rigid);
-    let (alphas, betas, _) =
-        lanczos_tridiag(&q0, steps, &mut |v| hv(v, &mut evaluations), &project)?;
-    let (top, _) = ritz(&alphas, &betas)?;
-    let sigma = top[top.len() - 1] * 1.05 + 1.0;
-
-    let (alphas, betas, basis) = lanczos_tridiag(
+    let (alphas, betas, _) = lanczos_tridiag_into(
         &q0,
         steps,
-        &mut |v| {
+        &mut |v, out| {
+            hessian_vector_into(
+                x,
+                v,
+                &rigid,
+                epsilon,
+                &mut grad,
+                &mut scratch.d,
+                &mut scratch.xp,
+                &mut scratch.xm,
+                out,
+                &mut evaluations,
+            )
+        },
+        &project,
+    )?;
+    let top = ritz_values(&alphas, &betas)?;
+    let sigma = top[top.len() - 1] * 1.05 + 1.0;
+
+    let (alphas, betas, basis) = lanczos_tridiag_into(
+        &q0,
+        steps,
+        &mut |v, out| {
             // Both terms are formed on the projected vector, so the shifted
             // operator maps the constrained subspace into itself and the
             // removed directions never acquire the eigenvalue `sigma`.
-            let mut vp = v.clone();
-            project_rigid_with(&mut vp, &rigid);
-            let h = hv(&vp, &mut evaluations)?;
-            let mut out = Array1::zeros(dim);
+            scratch.vp.assign(v);
+            project_rigid_with(&mut scratch.vp, &rigid);
+            hessian_vector_into(
+                x,
+                &scratch.vp,
+                &rigid,
+                epsilon,
+                &mut grad,
+                &mut scratch.d,
+                &mut scratch.xp,
+                &mut scratch.xm,
+                &mut scratch.hv_out,
+                &mut evaluations,
+            )?;
             for i in 0..dim {
-                out[i] = sigma * vp[i] - h[i];
+                out[i] = sigma * scratch.vp[i] - scratch.hv_out[i];
             }
-            project_rigid_with(&mut out, &rigid);
-            Some(out)
+            project_rigid_with(out, &rigid);
+            Some(())
         },
         &project,
     )?;
@@ -461,25 +555,7 @@ where
     }
     let mut evaluations = 0usize;
     let rigid = rigid_basis(x);
-    let mut hv = |v: &Array1<f64>, evaluations: &mut usize| -> Option<Array1<f64>> {
-        let mut d = v.clone();
-        project_rigid_with(&mut d, &rigid);
-        let mut xp = x.to_owned();
-        let mut xm = x.to_owned();
-        for i in 0..dim {
-            xp[i] += epsilon * d[i];
-            xm[i] -= epsilon * d[i];
-        }
-        let gp = grad(xp.view())?;
-        let gm = grad(xm.view())?;
-        *evaluations += 2;
-        let mut out = Array1::zeros(dim);
-        for i in 0..dim {
-            out[i] = (gp[i] - gm[i]) / (2.0 * epsilon);
-        }
-        project_rigid_with(&mut out, &rigid);
-        Some(out)
-    };
+    let mut scratch = CurvatureScratch::new(dim);
     let mut q0 = Array1::from_shape_fn(dim, |i| ((i % 7) as f64 - 3.0) + 0.5);
     project_rigid_with(&mut q0, &rigid);
     let n0: f64 = q0.iter().map(|z| z * z).sum::<f64>().sqrt();
@@ -488,23 +564,50 @@ where
     }
     q0 /= n0;
     let project = |w: &mut Array1<f64>| project_rigid_with(w, &rigid);
-    let (alphas, betas, _) =
-        lanczos_tridiag(&q0, steps, &mut |v| hv(v, &mut evaluations), &project)?;
-    let (top, _) = ritz(&alphas, &betas)?;
-    let sigma = top[top.len() - 1] * 1.05 + 1.0;
-    let (alphas, betas, basis) = lanczos_tridiag(
+    let (alphas, betas, _) = lanczos_tridiag_into(
         &q0,
         steps,
-        &mut |v| {
-            let mut vp = v.clone();
-            project_rigid_with(&mut vp, &rigid);
-            let h = hv(&vp, &mut evaluations)?;
-            let mut out = Array1::zeros(dim);
+        &mut |v, out| {
+            hessian_vector_into(
+                x,
+                v,
+                &rigid,
+                epsilon,
+                &mut grad,
+                &mut scratch.d,
+                &mut scratch.xp,
+                &mut scratch.xm,
+                out,
+                &mut evaluations,
+            )
+        },
+        &project,
+    )?;
+    let top = ritz_values(&alphas, &betas)?;
+    let sigma = top[top.len() - 1] * 1.05 + 1.0;
+    let (alphas, betas, basis) = lanczos_tridiag_into(
+        &q0,
+        steps,
+        &mut |v, out| {
+            scratch.vp.assign(v);
+            project_rigid_with(&mut scratch.vp, &rigid);
+            hessian_vector_into(
+                x,
+                &scratch.vp,
+                &rigid,
+                epsilon,
+                &mut grad,
+                &mut scratch.d,
+                &mut scratch.xp,
+                &mut scratch.xm,
+                &mut scratch.hv_out,
+                &mut evaluations,
+            )?;
             for i in 0..dim {
-                out[i] = sigma * vp[i] - h[i];
+                out[i] = sigma * scratch.vp[i] - scratch.hv_out[i];
             }
-            project_rigid_with(&mut out, &rigid);
-            Some(out)
+            project_rigid_with(out, &rigid);
+            Some(())
         },
         &project,
     )?;
@@ -564,24 +667,8 @@ where
         return None;
     }
     let rigid = rigid_basis(x);
-    let mut hv = |v: &Array1<f64>| -> Option<Array1<f64>> {
-        let mut d = v.clone();
-        project_rigid_with(&mut d, &rigid);
-        let mut xp = x.to_owned();
-        let mut xm = x.to_owned();
-        for i in 0..dim {
-            xp[i] += epsilon * d[i];
-            xm[i] -= epsilon * d[i];
-        }
-        let gp = grad(xp.view())?;
-        let gm = grad(xm.view())?;
-        let mut out = Array1::<f64>::zeros(dim);
-        for i in 0..dim {
-            out[i] = (gp[i] - gm[i]) / (2.0 * epsilon);
-        }
-        project_rigid_with(&mut out, &rigid);
-        Some(out)
-    };
+    let mut scratch = CurvatureScratch::new(dim);
+    let mut dummy_evals = 0usize;
     let mut q0 = seed.to_owned();
     project_rigid_with(&mut q0, &rigid);
     let n0 = q0.iter().map(|z| z * z).sum::<f64>().sqrt();
@@ -589,11 +676,43 @@ where
         return None;
     }
     q0 /= n0;
-    let Some((alphas, betas, basis)) = lanczos_tridiag(&q0, steps.max(2), &mut hv, &|v| {
-        project_rigid_with(v, &rigid)
-    }) else {
-        let w = hv(&q0)?;
-        let lambda: f64 = w.iter().zip(q0.iter()).map(|(a, b)| a * b).sum();
+    let Some((alphas, betas, basis)) = lanczos_tridiag_into(
+        &q0,
+        steps.max(2),
+        &mut |v, out| {
+            hessian_vector_into(
+                x,
+                v,
+                &rigid,
+                epsilon,
+                &mut grad,
+                &mut scratch.d,
+                &mut scratch.xp,
+                &mut scratch.xm,
+                out,
+                &mut dummy_evals,
+            )
+        },
+        &|v| project_rigid_with(v, &rigid),
+    ) else {
+        hessian_vector_into(
+            x,
+            &q0,
+            &rigid,
+            epsilon,
+            &mut grad,
+            &mut scratch.d,
+            &mut scratch.xp,
+            &mut scratch.xm,
+            &mut scratch.hv_out,
+            &mut dummy_evals,
+        )?;
+        let lambda: f64 = scratch
+            .hv_out
+            .iter()
+            .zip(q0.iter())
+            .map(|(a, b)| a * b)
+            .sum();
         return lambda.is_finite().then_some((lambda, q0));
     };
     let (vals, vecs) = ritz(&alphas, &betas)?;

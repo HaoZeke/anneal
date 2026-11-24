@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+from machine_provenance import csv_fields  # noqa: E402
 
 SEEDS = tuple(range(2000, 2012))
 ARMS = ("anneal", "recommended", "ase_bh", "ase_mh")
@@ -62,6 +63,7 @@ RERUN_ROW_FIELDS = (
     *ROW_FIELDS,
     "harness_blob", "ase_version", "session",
 )
+CURRENT_ROW_FIELDS = (*ROW_FIELDS, "machine_id", "cpu_model")
 ROWS_FILE = "rows-61fa67cf.csv"
 
 
@@ -99,15 +101,33 @@ def load(system: str) -> dict[str, list[dict[str, str]]]:
     directory = ROOT / "bench" / f"ase-{system}"
     rerun_path = directory / ROWS_FILE
     is_rerun = rerun_path.exists()
-    path = rerun_path if is_rerun else directory / "rows.csv"
-    expected_fields = RERUN_ROW_FIELDS if is_rerun else ROW_FIELDS
-    if b"\r" in path.read_bytes():
-        raise SystemExit(f"{path} contains CR")
-    with path.open(newline="") as handle:
-        reader = csv.DictReader(handle)
-        if tuple(reader.fieldnames or ()) != expected_fields:
-            raise SystemExit(f"{path}: unexpected columns {reader.fieldnames}")
-        rows = list(reader)
+    if is_rerun:
+        if b"\r" in rerun_path.read_bytes():
+            raise SystemExit(f"{rerun_path} contains CR")
+        with rerun_path.open(newline="") as handle:
+            reader = csv.DictReader(handle)
+            if tuple(reader.fieldnames or ()) not in (
+                RERUN_ROW_FIELDS,
+                (*RERUN_ROW_FIELDS, "machine_id", "cpu_model"),
+            ):
+                raise SystemExit(f"{rerun_path}: unexpected columns {reader.fieldnames}")
+            rows = list(reader)
+    else:
+        paths = [directory / "rows.csv"]
+        if system == "au55":
+            paths.append(directory / "rows-for-cluster.csv")
+        rows = []
+        for path in paths:
+            with path.open(newline="") as handle:
+                reader = csv.DictReader(handle)
+                if tuple(reader.fieldnames or ()) not in (ROW_FIELDS, CURRENT_ROW_FIELDS):
+                    raise SystemExit(f"{path}: unexpected columns {reader.fieldnames}")
+                for row in reader:
+                    if system != "au55" or (
+                        (path.name == "rows.csv" and row["arm"] == "recommended")
+                        or (path.name == "rows-for-cluster.csv" and row["arm"] != "recommended")
+                    ):
+                        rows.append(row)
     _, budget, reference, _ = SYSTEMS[system]
     grouped = {arm: [] for arm in ARMS}
     by_arm: dict[str, list[tuple[int, dict[str, str]]]] = {arm: [] for arm in ARMS}
@@ -394,6 +414,7 @@ AGGREGATE_HEADER = (
     "median_outside_s,fisher_p_bh,mann_whitney_U_bh,mann_whitney_p_bh,"
     "fisher_p_mh,mann_whitney_U_mh,mann_whitney_p_mh,wall_cap_s,code_revision,host"
 )
+CURRENT_AGGREGATE_HEADER = AGGREGATE_HEADER + ",machine_id,cpu_model"
 
 
 def aggregate_rows(system: str, summary: str) -> list[str]:
@@ -406,11 +427,35 @@ def aggregate_rows(system: str, summary: str) -> list[str]:
     loaded = load(system)
     revisions = {arm: {row["code_revision"] for row in rows} for arm, rows in loaded.items()}
     hosts = {arm: ";".join(sorted({row["host"] for row in rows})) for arm, rows in loaded.items()}
+    provenance = {
+        arm: (
+            ";".join(sorted({row.get("machine_id", "") for row in rows if row.get("machine_id")})),
+            ";".join(sorted({row.get("cpu_model", "") for row in rows if row.get("cpu_model")})),
+        )
+        for arm, rows in loaded.items()
+    }
     out = []
     for row in csv.DictReader(summary.splitlines()):
         found = ";".join(sorted(revisions[row["arm"]]))
-        out.append(",".join([system, *(row[field] for field in fields), found, hosts[row["arm"]]]))
+        values = [system, *(row[field] for field in fields), found, hosts[row["arm"]]]
+        if all(provenance[row["arm"]]):
+            values.extend(provenance[row["arm"]])
+        out.append(csv_fields(values))
     return out
+
+
+def aggregate_header(rows: list[str]) -> str:
+    """Choose the aggregate schema from CSV-decoded row widths."""
+    widths = {len(next(csv.reader([row]))) for row in rows}
+    if len(widths) != 1:
+        raise SystemExit("cannot mix legacy and machine-provenance aggregate rows")
+    current_width = len(next(csv.reader([CURRENT_AGGREGATE_HEADER])))
+    legacy_width = len(next(csv.reader([AGGREGATE_HEADER])))
+    if widths == {current_width}:
+        return CURRENT_AGGREGATE_HEADER
+    if widths == {legacy_width}:
+        return AGGREGATE_HEADER
+    raise SystemExit(f"unexpected aggregate row width {next(iter(widths))}")
 
 
 def show_p(p: float) -> str:
@@ -528,7 +573,7 @@ def main() -> None:
     if "--tex" in flags and selected != list(SYSTEMS):
         raise SystemExit("--tex needs --all")
     outputs = {}
-    aggregate = [AGGREGATE_HEADER]
+    aggregate = []
     for system in selected:
         summary, report = render(system)
         directory = ROOT / "bench" / f"ase-{system}"
@@ -536,6 +581,7 @@ def main() -> None:
         outputs[directory / "README.md"] = report
         aggregate.extend(aggregate_rows(system, summary))
     if selected == list(SYSTEMS):
+        aggregate.insert(0, aggregate_header(aggregate))
         outputs[ROOT / "bench" / "ase-recommended" / "summary.csv"] = (
             "\n".join(aggregate) + "\n"
         )

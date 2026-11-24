@@ -1,0 +1,16 @@
+An auxiliary rigid quench is recorded only when it is finite, sane,
+stationary and clear of a centre clash, and a walk that has reached its
+target spends no further evaluations. That record does not move the
+main chain's stall clock, its escape target, or the reward paid to its
+move allocator. A rigid contact is the
+body's span, and not tighter than the cycle move's own threshold, so
+on TIP4P it stays 2.5 angstroms. A failed chain reversal is not a move,
+and a custom body can declare its bonds.
+The archive walk no longer indexes past its kernels when every arm
+reverses a chain, and it ends when it has no proposer.
+A rigid search restores its separate chain incumbent on a ledger that
+an atomic search had cleared.
+The rigid search no longer prints a rigid_diag line to stderr. Its
+side-walk counts are returned in the outcome as rigid_path, and the
+Python cluster_search carries them as a rigid_path dict for a rigid
+body. A test checks that a rigid search writes nothing to stderr.

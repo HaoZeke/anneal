@@ -92,7 +92,7 @@ The [[file:../../../src/methods/portfolio/ensemble.rs][portfolio ensemble]]
 keeps one uninterrupted multi-arm controller per replica. Its bandit,
 populations, occupied states, local archive and random stream remain private.
 Replica count splits one aggregate objective-plus-gradient allowance; it does
-not restart the controller at every exchange. =coverage.shared=false= is the
+not restart the controller at every exchange. ~coverage.shared=false~ is the
 communication-off control with the same starts, seeds and per-replica budgets.
 
 Rust scalar clients use =portfolio_values_ensemble_optimize= with an
@@ -277,7 +277,7 @@ it once. The box hop paths preserve fixed axes directly.
 The generic Rust result and Python dictionary retain =n_evals=, =n_grads=,
 =charged=, =hops=, =history_observations= and the coverage diagnostics.
 The convenience result names objective calls =nfev= and gradient calls
-=njev=, with =charged = nfev + njev=. No callback is added to construct
+=njev=, with ~charged = nfev + njev~. No callback is added to construct
 these diagnostics. Minimum counts cannot substitute for any of those work
 or coverage counters.
 

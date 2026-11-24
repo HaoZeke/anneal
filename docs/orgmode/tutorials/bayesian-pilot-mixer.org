@@ -59,7 +59,7 @@ With a small budget we watch the per-chain Beta posteriors evolve.
 
 The mixer starts:
 
-- =n_chains= = min(=max_proposals=/64, sqrt(5)) clamped -> 2
+- =n_chains= = min(=max_proposals= / 64, sqrt(5)) clamped -> 2
 - =improve_alpha= = [4.0, 1.0], =improve_beta= = [1.0, 4.0] (chain 0 receives a head-start Beta prior)
 - Every step: Thompson-sample a chain by drawing from its current Beta(alpha, beta)
 - If the chosen chain produces a new global best: alpha += 1 else beta += 1
