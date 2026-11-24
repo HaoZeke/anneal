@@ -815,13 +815,18 @@ cell. Anneal ran through engine `04aceaa7`, whose sha256 the rows give.
 Both codes ran seeds 2000-2011 on C20 and 2000-2005 on Si13, serial on
 core 0 with hostname `bench`.
 
-The recorded Si13 GFN2 hit results are void because the engine reused
-the previous wavefunction. `gfn2/rows.csv` keeps them: 6
-`anneal-general` rows and 6 `crest` rows, on seeds 2000-2005.
-`gfn2/rescore.csv` gives the `crest` rows 0 hits in 6 runs against
--624.70446339 eV. `REFERENCE` in `scripts/covalent_h2h/gfn2_crest.py`
-has no Si13 entry, so Si13 has no valid reference yet. A fresh run
-follows an SCC-rejection fix.
+The recorded Si13 GFN2 hit results are void. `gfn2/rows.csv` keeps
+them: 6 `anneal-general` rows and 6 `crest` rows on seeds 2000-2005,
+all at `c1c02d16`. Their hits count against -599.34546694 eV, the Si13
+reference those runs used: anneal seeds 2000, 2001, 2002 and 2004 end
+on it, `crest` seeds 2001-2004 within 1e-3 eV of it, and anneal seeds
+2005 and 2003 below it, at -617.18016907 and -624.70446339 eV. Seed
+2003 ends 25.36 eV below that reference, and xtb gives its structure
+-624.70443593 eV (`gfn2/minima.csv`). `gfn2/rescore.csv` rescores the
+`crest` rows against seed 2003's energy and finds 0 hits in 6 runs.
+That target is the best anneal energy on one seed. `REFERENCE` in
+`scripts/covalent_h2h/gfn2_crest.py` has no Si13 entry, so Si13 has no
+valid reference yet.
 
 - The C20 reference, -1148.85383633 eV, is a cage with every atom
   three-coordinated and bonds from 1.449 Å. One run found it: anneal
