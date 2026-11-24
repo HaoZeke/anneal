@@ -826,6 +826,82 @@ pub(crate) mod tests {
         x
     }
 
+    fn base_reverse_cycle<R: Rng + ?Sized>(
+        geometry: &RigidBodyGeometry,
+        n: usize,
+        x: &mut Array1<f64>,
+        rng: &mut R,
+    ) -> bool {
+        let Some((o, h)) = water_sites(geometry) else {
+            return false;
+        };
+        let Some(definition) = cycle_geometry(geometry) else {
+            return false;
+        };
+        if n < 2 || x.len() != 6 * n {
+            return false;
+        }
+        let sites = lab_sites(geometry, n, x.view());
+        let donated = donations(&sites, o, h, definition.donation_cutoff);
+        let donors: Vec<usize> = (0..n).filter(|&i| !donated[i].is_empty()).collect();
+        if donors.is_empty() {
+            return false;
+        }
+        let mut path: Vec<(usize, usize)> = Vec::new();
+        let mut at = donors[rng.random_range(0..donors.len())];
+        let cycle = loop {
+            let back = path.last().map(|&(m, _)| m);
+            let out: Vec<(usize, usize)> = donated[at]
+                .iter()
+                .copied()
+                .filter(|&(j, _)| Some(j) != back)
+                .collect();
+            if out.is_empty() || path.len() > n {
+                return false;
+            }
+            let (next, which) = out[rng.random_range(0..out.len())];
+            path.push((at, which));
+            if let Some(start) = path.iter().position(|&(m, _)| m == next) {
+                break path.split_off(start);
+            }
+            at = next;
+        };
+        let mut turns = Vec::with_capacity(cycle.len());
+        for (s, &(body, which)) in cycle.iter().enumerate() {
+            let previous = cycle[(s + cycle.len() - 1) % cycle.len()].0;
+            let anchor = sites[body][o];
+            let Some(bonded) = direction(sub(sites[body][h[which]], anchor)) else {
+                return false;
+            };
+            let Some(other) = direction(sub(sites[body][h[1 - which]], anchor)) else {
+                return false;
+            };
+            let Some(target) = direction(sub(sites[previous][o], anchor)) else {
+                return false;
+            };
+            if !spans(bonded, other) || !spans(target, other) {
+                return false;
+            }
+            turns.push((
+                body,
+                anchor,
+                frame_rotation((bonded, other), (target, other)),
+            ));
+        }
+        for (body, anchor, turn) in turns {
+            let centre = [x[3 * body], x[3 * body + 1], x[3 * body + 2]];
+            let moved = add(anchor, mat_vec(turn, sub(centre, anchor)));
+            let base = 3 * n + 3 * body;
+            let rotation =
+                crate::potentials::compose_rotation(turn, [x[base], x[base + 1], x[base + 2]]);
+            for axis in 0..3 {
+                x[3 * body + axis] = moved[axis];
+                x[base + axis] = rotation[axis];
+            }
+        }
+        true
+    }
+
     #[test]
     fn reversing_a_ring_keeps_the_network_and_flips_every_bond() {
         let n = 5;
@@ -1491,39 +1567,6 @@ pub(crate) mod tests {
 
     #[test]
     fn reverse_cycle_on_undeclared_water_matches_base_proposals() {
-        const BASE_BITS_5_4: [u64; 30] = [
-            4612501513048963138,
-            13810045615770823530,
-            4586391713669229993,
-            4605137106667018243,
-            4612209731907745825,
-            4586391713669229998,
-            13834537703091775865,
-            4609096443601732875,
-            4586391713669229997,
-            13834776959531386145,
-            13832139172218672790,
-            4586391713669230001,
-            4604362856564384805,
-            13835644661039560622,
-            4586391713669229998,
-            4605204277043608752,
-            4604619484753536695,
-            13835363449230012855,
-            4595544629711641860,
-            4606021038723677084,
-            13830393548981388402,
-            13823413319544387332,
-            4605158942161370655,
-            4596209843066129354,
-            13828818353332100794,
-            4601894269403234797,
-            4608843487552114293,
-            13831240174501017832,
-            13817280839482979189,
-            4612820526212942367,
-        ];
-
         let water = geometry();
         let undeclared = RigidBodyGeometry::new(water.sites().to_vec(), water.species().to_vec())
             .expect("water");
@@ -1531,34 +1574,35 @@ pub(crate) mod tests {
 
         let n = 5;
         let mut x_undeclared = ring(n);
+        let mut x_base = x_undeclared.clone();
         let mut rng_undeclared = StdRng::seed_from_u64(4);
-        assert!(reverse_cycle(
-            &undeclared,
-            n,
-            &mut x_undeclared,
-            &mut rng_undeclared
-        ));
-        let actual_bits: Vec<u64> = x_undeclared.iter().map(|v| v.to_bits()).collect();
-        assert_eq!(actual_bits, BASE_BITS_5_4);
+        let mut rng_base = StdRng::seed_from_u64(4);
+        assert_eq!(
+            reverse_cycle(&undeclared, n, &mut x_undeclared, &mut rng_undeclared),
+            base_reverse_cycle(&undeclared, n, &mut x_base, &mut rng_base)
+        );
+        assert_eq!(x_undeclared, x_base);
 
         let mut x_declared = ring(n);
         let mut rng_declared = StdRng::seed_from_u64(4);
         assert!(reverse_cycle(&water, n, &mut x_declared, &mut rng_declared));
-        let declared_bits: Vec<u64> = x_declared.iter().map(|v| v.to_bits()).collect();
-        assert_eq!(actual_bits, declared_bits);
+        assert_eq!(x_undeclared, x_declared);
 
         let start4 = ring(4);
         for seed in 0..16 {
             let mut a = start4.clone();
             let mut b = start4.clone();
+            let mut base = start4.clone();
             let mut rng_a = StdRng::seed_from_u64(seed);
             let mut rng_b = StdRng::seed_from_u64(seed);
-            assert_eq!(
-                reverse_cycle(&undeclared, 4, &mut a, &mut rng_a),
-                reverse_cycle(&water, 4, &mut b, &mut rng_b),
-                "seed {seed}"
-            );
+            let mut rng_base = StdRng::seed_from_u64(seed);
+            let result_a = reverse_cycle(&undeclared, 4, &mut a, &mut rng_a);
+            let result_b = reverse_cycle(&water, 4, &mut b, &mut rng_b);
+            let result_base = base_reverse_cycle(&undeclared, 4, &mut base, &mut rng_base);
+            assert_eq!(result_a, result_b, "seed {seed}");
+            assert_eq!(result_a, result_base, "seed {seed}");
             assert_eq!(a, b, "seed {seed}");
+            assert_eq!(a, base, "seed {seed}");
         }
     }
 }
