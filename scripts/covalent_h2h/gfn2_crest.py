@@ -73,6 +73,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+from machine_provenance import machine_columns  # noqa: E402
 
 SYSTEMS = ("si10", "c10", "si13", "c20", "si20")
 CODES = ("anneal-general", "crest")
@@ -125,6 +126,8 @@ ROW_FIELDS = [
 PROVENANCE_FIELDS = [
     "code_revision",
     "host",
+    "machine_id",
+    "cpu_model",
     "date",
     "crest_sha256",
     "xtb_sha256",
@@ -148,6 +151,8 @@ SUMMARY_FIELDS = [
     "mannwhitney_p",
     "code_revision",
     "host",
+    "machine_id",
+    "cpu_model",
     "date",
 ]
 
@@ -386,6 +391,7 @@ def main() -> None:
     pins = {
         "code_revision": revision,
         "host": host,
+        **machine_columns(),
         "crest_sha256": sha256(args.crest),
         "xtb_sha256": sha256(args.xtb),
         "engine_sha256": sha256(args.engine),
@@ -569,6 +575,7 @@ def summarise(
                 "mannwhitney_p": "",
                 "code_revision": revision,
                 "host": host,
+                **machine_columns(),
                 "date": date,
             }
             if code != "anneal-general" and anneal:
@@ -593,6 +600,8 @@ RESCORE_FIELDS = [
     "seeds",
     "code_revision",
     "host",
+    "machine_id",
+    "cpu_model",
     "date",
 ]
 
@@ -631,6 +640,7 @@ def rescore(
         "seeds": " ".join(str(seed) for seed in sorted(int(r["seed"]) for r in runs)),
         "code_revision": revision,
         "host": host,
+        **machine_columns(),
         "date": datetime.date.today().isoformat(),
     }
     append_rows(rescored, RESCORE_FIELDS, [line])
