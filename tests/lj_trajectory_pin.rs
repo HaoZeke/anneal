@@ -100,9 +100,9 @@ fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }
 
-/// Offered before the first hop, the probe's calls and the held packing
-/// change the walk. This is the hash the branch pinned when the probe ran at
-/// hop 0. A stall branch keeps the lattice move and skips a second
+/// Offered at the first pass of the hop loop, the probe's calls and the
+/// held packing change the walk. This is the hash the branch pinned when
+/// the probe ran at hop 0. A stall branch keeps the lattice move and skips a second
 /// catalogue, so this is not the hash of a branch that dropped the lattice
 /// move.
 #[test]

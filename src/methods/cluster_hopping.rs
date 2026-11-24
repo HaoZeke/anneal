@@ -6666,8 +6666,12 @@ where
     let mut held_seat: Option<usize> = None;
     let mut held_count: usize = 0;
     let mut packings_offered = false;
-    // Held until the walk finishes unless a candidate already hits the stop
-    // target, so a deep wrong-funnel packing does not trap the walk at hop 0.
+    // The probe runs at the top of the hop loop once the walk has made
+    // `packing_offer_hops` hops: 36 by default, fewer when `max_hops` caps
+    // the walk, and zero when `packing_deferral` is zero. A candidate that
+    // beats the incumbent is held until the walk finishes unless it already
+    // hits the stop target, so a deep wrong-funnel packing does not trap
+    // the walk at the hop where it was found.
     // Energy, geometry, and the parent spend at the find. The catalogue's
     // charge is already on the ledger; adoption only has to record it.
     let mut pending_packing: Option<(f64, Array1<f64>, usize)> = None;

@@ -1413,24 +1413,28 @@ pub struct Config {
     ///
     /// The flag also enables the generic packing probe. When it is set, an
     /// atomic, non-rigid, non-frozen search measures the pair minimum and
-    /// quenches the generic packings once, after
-    /// [`Config::packing_deferral`] hops for each structure it quenches.
+    /// quenches the generic packings once, at the top of the hop loop after
+    /// [`Config::packing_deferral`] times nine hops: hop 36 by default, and
+    /// at most one hop below [`Config::max_hops`] when the walk is capped.
     /// Every call of the probe is charged to the ledger. Turning the flag off
     /// removes the lattice arm and the probe together. Set
     /// [`Config::suppress_generic_packings`] to keep the arm without the
     /// probe.
     pub energy_lattice: bool,
-    /// Hops the walk makes for each structure the generic packing probe
-    /// quenches before the probe is offered.
+    /// Hops the walk makes for each unit of the generic packing probe
+    /// before the probe is offered.
     ///
     /// The probe quenches eight structures, seven and the axial one, about
     /// one hop each. It first measures the pair minimum, which is counted as
-    /// one more hop-sized unit, so the offer comes after this many hops times
-    /// nine. At the default of four the walk has spent about four times the
-    /// probe's cost when it is offered, so a walk that hits earlier never
-    /// pays for it and one that runs on pays about a quarter more at most. A
-    /// capped walk offers the probe at its last hop at the latest. Zero
-    /// offers it before the first hop. The rule reads no atom count,
+    /// one more hop-sized unit. The probe is offered at the top of the hop
+    /// loop once the walk has made this many hops times nine, which is hop
+    /// 36 at the default of four. It is not run before the walk. At the
+    /// default the walk has spent about four times the probe's cost when it
+    /// is offered, so a walk that hits earlier never pays for it and one
+    /// that runs on pays about a quarter more at most. A capped walk offers
+    /// the probe at hop `max_hops - 1` at the latest, so it is offered in a
+    /// walk that makes that many hops. Zero offers it at the first pass of
+    /// the hop loop, before the first hop. The rule reads no atom count,
     /// potential or structure.
     ///
     /// The probe is a known per-run cost on a walk that passes the offer

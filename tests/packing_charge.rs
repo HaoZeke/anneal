@@ -4,9 +4,9 @@
 //!
 //! develop `983f6f69ea1555e51a71874870410966ac726616` has no probe. It hits
 //! Lennard-Jones 26, seed 2000, at 502 charged calls. The probe is offered
-//! after `Config::packing_deferral` hops for each structure it quenches, 36
-//! hops by default, and the walk's hit comes after two hops. The default
-//! walk is therefore develop's walk and charges 502.
+//! at the top of the hop loop after `Config::packing_deferral` times nine
+//! hops, 36 hops by default, and the walk's hit comes after two hops. The
+//! default walk is therefore develop's walk and charges 502.
 //!
 //! With `packing_deferral = 0` the probe runs before the first hop and
 //! spends 931 potential calls. The same hit is then charged at
