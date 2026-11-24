@@ -3030,20 +3030,41 @@ fn redraw_idle_stall_arm<R: Rng + ?Sized>(
     bandit: bool,
     rng: &mut R,
 ) -> Option<usize> {
-    if !bandit {
-        return drawn;
+    if !bandit || arms.len() > u64::BITS as usize {
+        if !bandit {
+            return drawn;
+        }
+        let mut closed = vec![false; arms.len()];
+        let mut arm = drawn;
+        while let Some(index) = arm {
+            if stall_arm_ready(arms[index], entry_recorded) {
+                return Some(index);
+            }
+            closed[index] = true;
+            if closed.iter().all(|shut| *shut) {
+                return None;
+            }
+            arm = Some(allocator.select_where(rng, |candidate| !closed[candidate]));
+        }
+        return None;
     }
-    let mut closed = vec![false; arms.len()];
+    let full_mask = if arms.len() == u64::BITS as usize {
+        u64::MAX
+    } else {
+        (1u64 << arms.len()) - 1
+    };
+    let mut closed_mask = 0u64;
     let mut arm = drawn;
     while let Some(index) = arm {
         if stall_arm_ready(arms[index], entry_recorded) {
             return Some(index);
         }
-        closed[index] = true;
-        if closed.iter().all(|shut| *shut) {
+        closed_mask |= 1u64 << index;
+        if closed_mask == full_mask {
             return None;
         }
-        arm = Some(allocator.select_where(rng, |candidate| !closed[candidate]));
+        arm =
+            Some(allocator.select_where(rng, |candidate| (closed_mask & (1u64 << candidate)) == 0));
     }
     None
 }

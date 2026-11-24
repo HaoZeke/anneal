@@ -42,6 +42,65 @@ use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 
 use crate::bias::{Bias, Fingerprint};
 
+fn jacobi_flat(m: &mut [f64], n: usize, max_sweeps: usize, mut v_t: Option<&mut [f64]>) {
+    for _ in 0..max_sweeps {
+        // Off-diagonal Frobenius norm; the sweep stops when it is negligible
+        // against the diagonal rather than at a fixed iteration count.
+        let mut off = 0.0;
+        for i in 0..n {
+            let row = &m[i * n..(i + 1) * n];
+            for &val in &row[(i + 1)..n] {
+                off += val * val;
+            }
+        }
+        let mut diag_sum = 0.0;
+        for i in 0..n {
+            diag_sum += m[i * n + i].abs();
+        }
+        if off.sqrt() <= 1e-14 * (1.0 + diag_sum) {
+            break;
+        }
+        for p in 0..n {
+            for q in (p + 1)..n {
+                let apq = m[p * n + q];
+                if apq.abs() < 1e-300 {
+                    continue;
+                }
+                let theta = (m[q * n + q] - m[p * n + p]) / (2.0 * apq);
+                let t = theta.signum() / (theta.abs() + (theta * theta + 1.0).sqrt());
+                let c = 1.0 / (t * t + 1.0).sqrt();
+                let s = t * c;
+                for row in m.chunks_exact_mut(n) {
+                    let akp = row[p];
+                    let akq = row[q];
+                    row[p] = c * akp - s * akq;
+                    row[q] = s * akp + c * akq;
+                }
+                let (top, bot) = m.split_at_mut(q * n);
+                let row_p = &mut top[p * n..p * n + n];
+                let row_q = &mut bot[..n];
+                for k in 0..n {
+                    let apk = row_p[k];
+                    let aqk = row_q[k];
+                    row_p[k] = c * apk - s * aqk;
+                    row_q[k] = s * apk + c * aqk;
+                }
+                if let Some(vt) = v_t.as_deref_mut() {
+                    let (top, bot) = vt.split_at_mut(q * n);
+                    let col_p = &mut top[p * n..p * n + n];
+                    let col_q = &mut bot[..n];
+                    for k in 0..n {
+                        let vkp = col_p[k];
+                        let vkq = col_q[k];
+                        col_p[k] = c * vkp - s * vkq;
+                        col_q[k] = s * vkp + c * vkq;
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Eigenvalues and eigenvectors of a symmetric matrix, ascending.
 ///
 /// Cyclic Jacobi: repeatedly annihilate the largest off-diagonal entry by a
@@ -52,61 +111,33 @@ use crate::bias::{Bias, Fingerprint};
 pub fn symmetric_eigen(a: ArrayView2<f64>, max_sweeps: usize) -> (Array1<f64>, Array2<f64>) {
     let n = a.nrows();
     assert_eq!(n, a.ncols(), "symmetric_eigen needs a square matrix");
-    let mut m = a.to_owned();
-    let mut v = Array2::<f64>::eye(n);
-
-    for _ in 0..max_sweeps {
-        // Off-diagonal Frobenius norm; the sweep stops when it is negligible
-        // against the diagonal rather than at a fixed iteration count.
-        let mut off = 0.0;
+    let mut m = Vec::with_capacity(n * n);
+    if let Some(slice) = a.as_slice() {
+        m.extend_from_slice(slice);
+    } else {
         for i in 0..n {
-            for j in (i + 1)..n {
-                off += m[[i, j]] * m[[i, j]];
-            }
-        }
-        if off.sqrt() <= 1e-14 * (1.0 + m.diag().iter().map(|d| d.abs()).sum::<f64>()) {
-            break;
-        }
-        for p in 0..n {
-            for q in (p + 1)..n {
-                let apq = m[[p, q]];
-                if apq.abs() < 1e-300 {
-                    continue;
-                }
-                let theta = (m[[q, q]] - m[[p, p]]) / (2.0 * apq);
-                let t = theta.signum() / (theta.abs() + (theta * theta + 1.0).sqrt());
-                let c = 1.0 / (t * t + 1.0).sqrt();
-                let s = t * c;
-                for k in 0..n {
-                    let akp = m[[k, p]];
-                    let akq = m[[k, q]];
-                    m[[k, p]] = c * akp - s * akq;
-                    m[[k, q]] = s * akp + c * akq;
-                }
-                for k in 0..n {
-                    let apk = m[[p, k]];
-                    let aqk = m[[q, k]];
-                    m[[p, k]] = c * apk - s * aqk;
-                    m[[q, k]] = s * apk + c * aqk;
-                }
-                for k in 0..n {
-                    let vkp = v[[k, p]];
-                    let vkq = v[[k, q]];
-                    v[[k, p]] = c * vkp - s * vkq;
-                    v[[k, q]] = s * vkp + c * vkq;
-                }
+            for j in 0..n {
+                m.push(a[[i, j]]);
             }
         }
     }
+    let mut v_t = vec![0.0_f64; n * n];
+    for i in 0..n {
+        v_t[i * n + i] = 1.0;
+    }
 
-    let mut vals: Vec<(f64, usize)> = (0..n).map(|i| (m[[i, i]], i)).collect();
+    jacobi_flat(&mut m, n, max_sweeps, Some(&mut v_t));
+
+    let mut vals: Vec<(f64, usize)> = (0..n).map(|i| (m[i * n + i], i)).collect();
     vals.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
     let mut out_vals = Array1::zeros(n);
     let mut out_vecs = Array2::zeros((n, n));
+    let out_slice = out_vecs.as_slice_mut().unwrap();
     for (new, (val, old)) in vals.into_iter().enumerate() {
         out_vals[new] = val;
+        let col = &v_t[old * n..old * n + n];
         for k in 0..n {
-            out_vecs[[k, new]] = v[[k, old]];
+            out_slice[k * n + new] = col[k];
         }
     }
     (out_vals, out_vecs)
@@ -241,6 +272,74 @@ fn hypot2(a: f64, b: f64) -> f64 {
     } else {
         y * (1.0 + (x / y) * (x / y)).sqrt()
     }
+}
+
+/// Eigenvalues of a real symmetric tridiagonal matrix with diagonal `diag`
+/// and off-diagonal `subdiag`, sorted ascending, via Jacobi sweeps.
+pub fn tridiagonal_jacobi_values(diag: &[f64], subdiag: &[f64], max_sweeps: usize) -> Vec<f64> {
+    let n = diag.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    assert!(
+        subdiag.len() + 1 >= n,
+        "tridiagonal_jacobi_values needs at least n - 1 off-diagonal entries"
+    );
+    let mut m = vec![0.0_f64; n * n];
+    for i in 0..n {
+        m[i * n + i] = diag[i];
+        if i + 1 < n {
+            m[i * n + i + 1] = subdiag[i];
+            m[(i + 1) * n + i] = subdiag[i];
+        }
+    }
+    jacobi_flat(&mut m, n, max_sweeps, None);
+    let mut out: Vec<f64> = (0..n).map(|i| m[i * n + i]).collect();
+    out.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    out
+}
+
+/// Eigenvalues and eigenvectors of a real symmetric tridiagonal matrix with
+/// diagonal `diag` and off-diagonal `subdiag`, sorted ascending, via Jacobi sweeps.
+///
+/// Returns `(values, vectors)` with eigenvector `k` in column `k`.
+pub fn tridiagonal_jacobi(
+    diag: &[f64],
+    subdiag: &[f64],
+    max_sweeps: usize,
+) -> (Vec<f64>, Array2<f64>) {
+    let n = diag.len();
+    if n == 0 {
+        return (Vec::new(), Array2::zeros((0, 0)));
+    }
+    assert!(
+        subdiag.len() + 1 >= n,
+        "tridiagonal_jacobi needs at least n - 1 off-diagonal entries"
+    );
+    let mut m = vec![0.0_f64; n * n];
+    let mut v_t = vec![0.0_f64; n * n];
+    for i in 0..n {
+        m[i * n + i] = diag[i];
+        v_t[i * n + i] = 1.0;
+        if i + 1 < n {
+            m[i * n + i + 1] = subdiag[i];
+            m[(i + 1) * n + i] = subdiag[i];
+        }
+    }
+    jacobi_flat(&mut m, n, max_sweeps, Some(&mut v_t));
+    let mut vals: Vec<(f64, usize)> = (0..n).map(|i| (m[i * n + i], i)).collect();
+    vals.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    let mut out_vals = Vec::with_capacity(n);
+    let mut out_vecs = Array2::zeros((n, n));
+    let out_slice = out_vecs.as_slice_mut().unwrap();
+    for (new, (val, old)) in vals.into_iter().enumerate() {
+        out_vals.push(val);
+        let col = &v_t[old * n..old * n + n];
+        for k in 0..n {
+            out_slice[k * n + new] = col[k];
+        }
+    }
+    (out_vals, out_vecs)
 }
 
 /// QL iteration with implicit shifts on the tridiagonal `(d, e)`, in place.
@@ -1047,5 +1146,31 @@ mod diffusion_tests {
             c > lo && c < hi,
             "held-out point at {c} not between its neighbours [{lo}, {hi}]"
         );
+    }
+
+    #[test]
+    fn tridiagonal_jacobi_matches_symmetric_eigen_bitwise() {
+        let diag = vec![4.2, -1.5, 0.3, 7.1, 2.0, -3.4, 5.5, 0.0];
+        let subdiag = vec![1.1, 0.0, 2.3, -0.8, 1.4, -1.9, 0.6];
+        let n = diag.len();
+        let mut dense = Array2::<f64>::zeros((n, n));
+        for i in 0..n {
+            dense[[i, i]] = diag[i];
+            if i + 1 < n {
+                dense[[i, i + 1]] = subdiag[i];
+                dense[[i + 1, i]] = subdiag[i];
+            }
+        }
+        let (ref_vals, ref_vecs) = symmetric_eigen(dense.view(), 128);
+        let vals_only = tridiagonal_jacobi_values(&diag, &subdiag, 128);
+        let (vals, vecs) = tridiagonal_jacobi(&diag, &subdiag, 128);
+        assert_eq!(vals_only.len(), n);
+        for i in 0..n {
+            assert_eq!(vals_only[i].to_bits(), ref_vals[i].to_bits());
+            assert_eq!(vals[i].to_bits(), ref_vals[i].to_bits());
+            for row in 0..n {
+                assert_eq!(vecs[[row, i]].to_bits(), ref_vecs[[row, i]].to_bits());
+            }
+        }
     }
 }
