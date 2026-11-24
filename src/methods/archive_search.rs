@@ -89,8 +89,10 @@ pub struct ArchiveOutcome {
     pub events: usize,
     /// ARTn / stall-symmetry escapes attempted.
     pub artn: usize,
-    /// Charged evaluations spent (copied from the ledger).
+    /// Charged evaluations: every settled call, [`Ledger::charged`].
     pub charged: usize,
+    /// The part of [`ArchiveOutcome::charged`] that passed the budget.
+    pub settled_beyond_cap: usize,
     /// Ledger spend when `best` last improved.
     pub best_at: usize,
     /// A requested constant-energy (NVE) escape stopped a hop.
@@ -611,6 +613,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                 events: archive.catalog.event_count(),
                 artn: acc.artn,
                 charged: ledger.charged(),
+                settled_beyond_cap: ledger.settled_beyond_cap(),
                 best_at: acc.best_at,
                 nve_unavailable: acc.nve_unavailable,
             };
@@ -654,6 +657,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             events: archive.catalog.event_count(),
             artn: acc.artn,
             charged: ledger.charged(),
+            settled_beyond_cap: ledger.settled_beyond_cap(),
             best_at: acc.best_at,
             nve_unavailable: acc.nve_unavailable,
         };
@@ -754,6 +758,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         events: archive.catalog.event_count(),
         artn: acc.artn,
         charged: ledger.charged(),
+        settled_beyond_cap: ledger.settled_beyond_cap(),
         best_at: acc.best_at,
         nve_unavailable: acc.nve_unavailable,
     }

@@ -756,6 +756,8 @@ fn main() {
                     // Carried, or the encounter time censors every run of this
                     // arm including the ones that found the answer.
                     improvements: b.improvements.clone(),
+                    charged: b.charged,
+                    settled_beyond_cap: b.settled_beyond_cap,
                     ..Default::default()
                 },
                 anneal_core::methods::cluster_search::RelaxStats::default(),

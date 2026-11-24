@@ -1447,13 +1447,11 @@ pub fn polish_recorded_answer_until<O, A>(
         },
     );
     if !reported_geometry_ok(cfg, state.view()) {
-        outcome.charged = ledger.charged();
-        outcome.settled_beyond_cap = ledger.settled_beyond_cap();
+        outcome.carry_charge(ledger);
         return;
     }
     if !ledger.charge() {
-        outcome.charged = ledger.charged();
-        outcome.settled_beyond_cap = ledger.settled_beyond_cap();
+        outcome.carry_charge(ledger);
         return;
     }
     stats.check_charged += 1;
@@ -1470,8 +1468,7 @@ pub fn polish_recorded_answer_until<O, A>(
             stats.converged += 1;
         }
     }
-    outcome.charged = ledger.charged();
-    outcome.settled_beyond_cap = ledger.settled_beyond_cap();
+    outcome.carry_charge(ledger);
 }
 
 fn reported_geometry_ok(cfg: &Config, state: ArrayView1<f64>) -> bool {
@@ -1730,8 +1727,7 @@ fn finish_molecular_answers<O>(
         outcome.best = best_energy;
         outcome.best_state = Some(state);
     }
-    outcome.charged = ledger.charged();
-    outcome.settled_beyond_cap = ledger.settled_beyond_cap();
+    outcome.carry_charge(ledger);
 }
 
 /// [`polish_answer`] that refuses a compressed contact before the potential.
@@ -2422,7 +2418,7 @@ where
                         best = energy;
                         best_state = Some(x.clone());
                         if improvements.len() < 512 {
-                            improvements.push((hops, ledger.spent(), bias.n_basins(), energy));
+                            improvements.push((hops, ledger.charged(), bias.n_basins(), energy));
                         }
                         start = x;
                     }
@@ -2480,7 +2476,12 @@ where
                             best = energy;
                             best_state = Some(x.clone());
                             if improvements.len() < 512 {
-                                improvements.push((hops, ledger.spent(), bias.n_basins(), energy));
+                                improvements.push((
+                                    hops,
+                                    ledger.charged(),
+                                    bias.n_basins(),
+                                    energy,
+                                ));
                             }
                         }
                         start = x;
@@ -2497,7 +2498,7 @@ where
             null_starts += 1;
             start = leave_known_packing(start.view(), cfg, &wells, ledger, &mut relax, &mut rng);
         }
-        let charged_before = ledger.spent();
+        let charged_before = ledger.charged();
         let hops_before = hops;
         let mut slice_led = ledger.slice(slice.min(ledger.remaining()));
         let out = run_with_bias(

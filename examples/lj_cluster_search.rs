@@ -2572,6 +2572,8 @@ fn main() {
                     basins: b.basins,
                     screened_out: b.screened_out,
                     returned: b.returned,
+                    charged: b.charged,
+                    settled_beyond_cap: b.settled_beyond_cap,
                     ..Outcome::default()
                 }
             }
@@ -7592,6 +7594,8 @@ fn run_capnp_bank(
         basins,
         screened_out,
         returned,
+        charged: ledger.charged(),
+        settled_beyond_cap: ledger.settled_beyond_cap(),
         ..Outcome::default()
     }
 }

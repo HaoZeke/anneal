@@ -1059,7 +1059,7 @@ impl Ledger {
             self.best = value;
             self.best_state = Some(state.to_owned());
             if self.encounters.len() < IMPROVEMENT_CAP {
-                self.encounters.push((self.spent, value));
+                self.encounters.push((self.charged(), value));
             }
         }
         if self.answer_limit > 0 {
@@ -5366,6 +5366,36 @@ fn improvements_from_encounters(
     out
 }
 
+/// A ledger that already carries a nested overrun, for the tests of every
+/// path that reports a charge. A slice of ten settles ten calls and forty
+/// more past its own cap onto a parent of thirty, so the parent holds thirty
+/// spent, twenty past the budget and no room left.
+#[cfg(test)]
+pub(crate) fn ledger_with_nested_overrun() -> Ledger {
+    let mut parent = Ledger::new(30);
+    let mut child = parent.slice(10);
+    assert!(child.charge_many(10));
+    assert!(!child.charge_many(40));
+    parent.settle_child(&child, 0);
+    assert_eq!(parent.spent(), 30);
+    assert_eq!(parent.settled_beyond_cap(), 20);
+    assert_eq!(parent.remaining(), 0);
+    parent
+}
+
+impl Outcome {
+    /// Sets the reported charge from `ledger`.
+    ///
+    /// [`Outcome::charged`] is every settled call, [`Ledger::spent`] plus the
+    /// part that passed the budget, and [`Outcome::settled_beyond_cap`] is
+    /// that part. Every path that reports a ledger's charge goes through here,
+    /// so none drops an overrun.
+    pub fn carry_charge(&mut self, ledger: &Ledger) {
+        self.charged = ledger.charged();
+        self.settled_beyond_cap = ledger.settled_beyond_cap();
+    }
+}
+
 /// A caller stop during the opening quench is not a refused potential.
 ///
 /// The ledger may hold no finite minimum yet. The search still returns
@@ -7602,7 +7632,7 @@ where
                     best_energy: ledger.best,
                     quench_boundaries: &ledger.quench_boundaries[checkpoint_quench_start..],
                     accepted_transitions: &accepted_transitions[checkpoint_transition_start..],
-                    charged: ledger.spent(),
+                    charged: ledger.charged(),
                     remaining: ledger.remaining(),
                     hops,
                     bias: Some(&bias),
@@ -12823,6 +12853,28 @@ mod tests {
         assert!(!dry.charge_many(4));
         assert_eq!(dry.spent(), 3);
         assert_eq!(dry.settled_beyond_cap(), 6);
+    }
+
+    #[test]
+    fn the_walk_reports_an_overrun_that_the_ledger_already_carries() {
+        let n = 6;
+        let cfg = Config::for_cluster(n);
+        let mut ledger = ledger_with_nested_overrun();
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+            let _ = led.charge();
+            (x.iter().map(|v| v * v).sum(), x.to_owned())
+        };
+        let start = Array1::from_iter((0..3 * n).map(|index| 0.3 * index as f64));
+        let mut rng = StdRng::seed_from_u64(3);
+        let outcome =
+            run_with_gradient(&cfg, start.view(), &mut ledger, &mut relax, None, &mut rng)
+                .expect("start");
+        assert_eq!(outcome.settled_beyond_cap, 20);
+        assert_eq!(
+            outcome.charged,
+            ledger.spent() + ledger.settled_beyond_cap()
+        );
+        assert_eq!(outcome.charged, 50);
     }
 
     #[test]

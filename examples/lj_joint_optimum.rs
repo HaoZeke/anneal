@@ -584,6 +584,7 @@ fn run_minima_hopping_with_history<'a>(
                 final_state: Some(state),
                 final_energy: energy,
                 charged: ledger.charged(),
+                settled_beyond_cap: ledger.settled_beyond_cap(),
                 unconverged_records: 1,
                 ..Outcome::default()
             },

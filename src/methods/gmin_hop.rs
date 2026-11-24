@@ -296,6 +296,7 @@ where
 
     let Some((mut energy, mut x)) = quench(objective, cfg, ledger, &mut lbfgs, start.to_owned())
     else {
+        out.carry_charge(ledger);
         return out;
     };
     note(&mut out, ledger, &mut basins, cfg.pool_tol, energy, &x, 0);
@@ -374,8 +375,7 @@ where
     }
     out.hops = hops;
     out.basins = basins.len();
-    out.charged = ledger.charged();
-    out.settled_beyond_cap = ledger.settled_beyond_cap();
+    out.carry_charge(ledger);
     out.final_energy = energy;
     out.final_state = Some(x);
     out
@@ -406,7 +406,7 @@ fn note(
         out.best_state = Some(x.clone());
         if out.improvements.len() < 10_000 {
             out.improvements
-                .push((hop, ledger.spent(), basins.len(), energy));
+                .push((hop, ledger.charged(), basins.len(), energy));
         }
     }
 }
