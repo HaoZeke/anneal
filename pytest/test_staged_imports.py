@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Every staged campaign script finds the local modules it imports.
 
 The enter_*.sh wrappers copy a script into a scratch directory and run it

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Complete a staged directory of Python scripts with their local imports.
 
 The enter_*.sh wrappers copy a campaign script into a scratch directory and
