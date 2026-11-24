@@ -43,8 +43,10 @@ and before a hit, the row is censored.
 | gfn2-c10 | GFN2-xTB | 100000 | -571.32273783 eV |
 | slab | CuH2 | 1 and 2 | accounting only |
 
-Execution order is slab, then gfn2-si10 (seed 2000 first), then sw10,
-sw13, tc10, sw20, tc20, then gfn2-c10, then gfn2-si13.
+Execution order is the slab accounting cell, then gfn2-si10 seed
+2000, then sw10, sw13, tc10, sw20 and tc20, then the remaining
+gfn2-si10 seeds, then gfn2-c10, then gfn2-si13. The 1500 s GFN2 wall
+would otherwise hold the classical panel behind a censored seed.
 
 A hit is a recorded energy no more than 0.001 above the reference.
 A completed miss scores as budget plus one in the rank test. A

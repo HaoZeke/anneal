@@ -466,9 +466,25 @@ def finish_physical(row: dict[str, str], kind: str) -> None:
     row["physical_hit"] = "true" if ok else "false"
 
 
-def run_search(args: argparse.Namespace, arms: dict[str, Arm], sigma: float, seen: set[tuple[str, str, str, str]]) -> None:
-    for cell, kind, system, atomic_number, budget, reference in CELLS:
+def search_jobs() -> list[tuple[tuple[str, str, str, int, int, float], int]]:
+    by_name = {cell[0]: cell for cell in CELLS}
+    jobs: list[tuple[tuple[str, str, str, int, int, float], int]] = [
+        (by_name["gfn2-si10"], 2000)
+    ]
+    for name in ("sw10", "sw13", "tc10", "sw20", "tc20"):
         for seed in SEEDS:
+            jobs.append((by_name[name], seed))
+    for seed in SEEDS:
+        if seed != 2000:
+            jobs.append((by_name["gfn2-si10"], seed))
+    for name in ("gfn2-c10", "gfn2-si13"):
+        for seed in SEEDS:
+            jobs.append((by_name[name], seed))
+    return jobs
+
+
+def run_search(args: argparse.Namespace, arms: dict[str, Arm], sigma: float, seen: set[tuple[str, str, str, str]]) -> None:
+    for (cell, kind, system, atomic_number, budget, reference), seed in search_jobs():
             order = ORDERS[seed % 2]
             for position, name in enumerate(order, start=1):
                 key = (cell, "", name, str(seed))
