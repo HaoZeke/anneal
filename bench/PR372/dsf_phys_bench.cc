@@ -145,7 +145,7 @@ int main(int argc, char **argv) {
   }
   std::cout << "arm,round,method,natoms,threads,repeat,wall_us,energy_eV,"
                "force_norm\n";
-  for (const int n : {128, 256, 512}) {
+  for (const int n : {128, 256, 512, 1024}) {
     for (const int threads : {1, 2, 4, 8}) {
       time_cell(arm, round, n, threads, repeats);
     }
