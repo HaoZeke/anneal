@@ -737,12 +737,17 @@ impl Cloud {
         self.nearest_squared_scalar(image)
     }
 
+    /// Candidate axes with exact repeats removed.
+    ///
+    /// Near-parallel directions all stay. Each is scored by the same
+    /// exchange residual, and [`detect_dominant`] keeps the lowest of a
+    /// near-parallel set, so the walk order cannot drop a better fit.
     fn candidate_axes_unique(&self, x: ArrayView1<f64>, n: usize) -> Vec<[f64; 3]> {
         let mut unique: Vec<[f64; 3]> = Vec::new();
         for axis in candidate_axes(x, n) {
             if unique.iter().any(|u| {
                 let dot = u[0] * axis[0] + u[1] * axis[1] + u[2] * axis[2];
-                dot.abs() > 0.998
+                dot.abs() > 1.0 - 1e-12
             }) {
                 continue;
             }
@@ -1518,27 +1523,6 @@ fn detect_dominant(
 
         let mut top3_proper: Vec<Candidate> = Vec::new();
         let mut top3_plane: Vec<Candidate> = Vec::new();
-        let update_top3 = |top3: &mut Vec<Candidate>, cand: Candidate| {
-            if let Some(pos) = top3.iter().position(|g| {
-                let dot =
-                    g.axis[0] * cand.axis[0] + g.axis[1] * cand.axis[1] + g.axis[2] * cand.axis[2];
-                dot.abs() > PARALLEL_COSINE
-            }) {
-                if cand.deviation < top3[pos].deviation {
-                    top3[pos] = cand;
-                }
-            } else {
-                top3.push(cand);
-            }
-            top3.sort_by(|a, b| {
-                a.deviation
-                    .partial_cmp(&b.deviation)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
-            if top3.len() > 3 {
-                top3.truncate(3);
-            }
-        };
 
         vx.resize(n, 0.0);
         vy.resize(n, 0.0);
@@ -1630,7 +1614,7 @@ fn detect_dominant(
             if let Some(d) = plane_d
                 && d < plane_cap
             {
-                update_top3(
+                merge_top3(
                     &mut top3_plane,
                     Candidate {
                         axis,
@@ -1667,7 +1651,7 @@ fn detect_dominant(
                 tolerance,
                 non_axial_idx,
             ) {
-                update_top3(&mut top3_proper, best);
+                merge_top3(&mut top3_proper, best);
             }
         }
         if split < turns.len() {
@@ -1822,7 +1806,7 @@ fn detect_dominant(
                     tolerance,
                     non_axial_idx,
                 ) {
-                    update_top3(&mut top3_proper, best);
+                    merge_top3(&mut top3_proper, best);
                 }
             }
         }
@@ -2701,6 +2685,56 @@ pub(crate) fn orders_held(n: usize) -> Vec<usize> {
 }
 /// Cosine above which two detected operations' directions count as one, so only the first is kept.
 const PARALLEL_COSINE: f64 = 0.995;
+
+/// Direction with the sign that makes its largest-magnitude component positive.
+fn signed_direction(axis: [f64; 3]) -> [f64; 3] {
+    let lead = (0..3).fold(0, |best, k| {
+        if axis[k].abs() > axis[best].abs() {
+            k
+        } else {
+            best
+        }
+    });
+    if axis[lead] < 0.0 {
+        [-axis[0], -axis[1], -axis[2]]
+    } else {
+        axis
+    }
+}
+
+/// Lower residual first. Equal residuals fall back to the signed direction,
+/// then the order and the kind, none of which depends on atom labels.
+fn fit_order(a: &Candidate, b: &Candidate) -> std::cmp::Ordering {
+    let (da, db) = (signed_direction(a.axis), signed_direction(b.axis));
+    a.deviation
+        .total_cmp(&b.deviation)
+        .then_with(|| da[0].total_cmp(&db[0]))
+        .then_with(|| da[1].total_cmp(&db[1]))
+        .then_with(|| da[2].total_cmp(&db[2]))
+        .then_with(|| a.order.cmp(&b.order))
+        .then_with(|| a.improper.cmp(&b.improper))
+}
+
+/// Adds `cand` to the three best-fitting non-parallel candidates.
+///
+/// A candidate near-parallel to a kept one replaces it only when it fits
+/// better under [`fit_order`].
+fn merge_top3(top3: &mut Vec<Candidate>, cand: Candidate) {
+    if let Some(pos) = top3.iter().position(|g| {
+        let dot = g.axis[0] * cand.axis[0] + g.axis[1] * cand.axis[1] + g.axis[2] * cand.axis[2];
+        dot.abs() > PARALLEL_COSINE
+    }) {
+        if fit_order(&cand, &top3[pos]).is_lt() {
+            top3[pos] = cand;
+        }
+    } else {
+        top3.push(cand);
+    }
+    top3.sort_by(fit_order);
+    if top3.len() > 3 {
+        top3.truncate(3);
+    }
+}
 
 fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
     ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
@@ -4346,40 +4380,178 @@ mod shell_tests {
         );
     }
 
+    /// The proper residual [`detect_dominant`] assigns to one axis.
+    fn axis_score(
+        x: ArrayView1<f64>,
+        n: usize,
+        axis: [f64; 3],
+        orders: &[usize],
+        tolerance: f64,
+    ) -> Option<Candidate> {
+        let cloud = Cloud::from_view(x, n);
+        let visit = cloud.visit_outer_first();
+        let gaps = cloud.gaps();
+        let (mut vx, mut vy, mut vz, mut vgap4) = (vec![], vec![], vec![], vec![]);
+        let (mut z, mut v_perp) = (vec![], vec![]);
+        let mut min_ratio = 1.0_f64;
+        for &idx in &visit {
+            let p = cloud.point(idx);
+            let g = gaps[idx];
+            let g4 = if g.is_finite() && g > 0.0 {
+                g * 0.25
+            } else {
+                f64::INFINITY
+            };
+            let dot = p[0] * axis[0] + p[1] * axis[1] + p[2] * axis[2];
+            let psq = (p[0] * p[0] + p[1] * p[1] + p[2] * p[2] - dot * dot).max(0.0);
+            let g16 = if g.is_finite() && g > 0.0 {
+                g * 0.0625
+            } else {
+                f64::INFINITY
+            };
+            if g16 < min_ratio * psq {
+                min_ratio = g16 / psq;
+            }
+            vx.push(p[0]);
+            vy.push(p[1]);
+            vz.push(p[2]);
+            vgap4.push(g4);
+            z.push(dot);
+            v_perp.push(psq);
+        }
+        let highest = if min_ratio < 1.0 {
+            (std::f64::consts::PI / libm::asin(min_ratio.sqrt())).floor() as usize
+        } else {
+            1
+        };
+        let turns: Vec<(usize, Turn, f64)> = orders.iter().map(|&o| CACHED_TURNS[o - 2]).collect();
+        cloud.exchange_residual_axis_range(
+            axis,
+            &vx,
+            &vy,
+            &vz,
+            &vgap4,
+            &z,
+            &v_perp,
+            &turns,
+            highest,
+            tolerance,
+            tolerance,
+            &mut Vec::new(),
+        )
+    }
+
     #[test]
-    fn candidate_axes_unique_preserves_the_first_near_parallel_direction() {
-        // Place an exact C4 square in the xy-plane plus an off-axis point near
-        // z so the inertia eigenvector tilts ~2 deg (|dot| > 0.998) away from
-        // the exact z vertex line; deduplication must preserve whichever
-        // representative the deterministic candidate walk produced first.
+    fn detect_dominant_keeps_the_best_fitting_near_parallel_direction() {
+        // An exact C4 square in the xy-plane plus an off-axis point near z
+        // tilts the inertia eigenvector about 2 deg (|dot| > 0.998) away from
+        // the exact z vertex line. The walk meets the tilted direction first;
+        // the kept rotation must be the lowest residual of the set.
         let coords = vec![
             1.2, 0.0, 0.0, -1.2, 0.0, 0.0, 0.0, 1.2, 0.0, 0.0, -1.2, 0.0, 0.0, 0.0, 2.0, 0.10, 0.0,
             -2.0,
         ];
         let n = coords.len() / 3;
         let x = Array1::from(coords);
-        let cloud = Cloud::from_view(x.view(), n);
+        let orders = [2, 3, 4];
         let raw = candidate_axes(x.view(), n);
         let inertia_z = raw
             .iter()
             .copied()
             .find(|u| u[2].abs() > 0.998 && u[2].abs() < 1.0 - 1e-6)
             .expect("tilted inertia direction");
-        let first = raw
+        let near: Vec<[f64; 3]> = raw
             .iter()
             .copied()
-            .find(|u| {
+            .filter(|u| {
                 (u[0] * inertia_z[0] + u[1] * inertia_z[1] + u[2] * inertia_z[2]).abs() > 0.998
             })
-            .expect("near-parallel direction");
-        let unique = cloud.candidate_axes_unique(x.view(), n);
-        let kept = unique
+            .collect();
+        assert!(near.len() >= 2, "{near:?}");
+        let scores: Vec<Candidate> = near
+            .iter()
+            .filter_map(|&axis| axis_score(x.view(), n, axis, &orders, 0.25))
+            .collect();
+        let best = scores
             .iter()
             .copied()
-            .find(|u| {
-                (u[0] * inertia_z[0] + u[1] * inertia_z[1] + u[2] * inertia_z[2]).abs() > 0.998
+            .min_by(fit_order)
+            .expect("a scored direction");
+        let first = axis_score(x.view(), n, near[0], &orders, 0.25).expect("first direction");
+        assert!(
+            best.deviation < first.deviation,
+            "the first direction already fits best: {first:?} vs {best:?}"
+        );
+        let det = detect_dominant(x.view(), n, &orders, 0.25);
+        let kept = det
+            .iter()
+            .find(|c| {
+                !c.improper
+                    && (c.axis[0] * inertia_z[0]
+                        + c.axis[1] * inertia_z[1]
+                        + c.axis[2] * inertia_z[2])
+                        .abs()
+                        > PARALLEL_COSINE
             })
-            .expect("merged near-parallel direction");
-        assert_eq!(kept, first);
+            .expect("a rotation about the near-z set");
+        assert_eq!(kept.axis, best.axis);
+        assert_eq!(kept.order, best.order);
+        assert_eq!(kept.deviation.to_bits(), best.deviation.to_bits());
+    }
+
+    #[test]
+    fn merged_candidates_do_not_depend_on_arrival_order() {
+        let tilt = |a: f64| [a.sin(), 0.0, a.cos()];
+        let cand = |axis: [f64; 3], order: usize, deviation: f64| Candidate {
+            axis,
+            order,
+            improper: false,
+            deviation,
+        };
+        let pool = [
+            cand(tilt(0.0), 2, 0.033_770),
+            cand(tilt(0.03), 2, 0.030_351),
+            cand(tilt(-0.03), 2, 0.030_351),
+            cand([-0.0, 0.0, -1.0], 2, 0.030_351),
+            cand([1.0, 0.0, 0.0], 2, 0.05),
+            cand([0.0, 1.0, 0.0], 2, 0.05),
+            cand([0.0, -1.0, 0.0], 2, 0.05),
+            cand([0.6, 0.8, 0.0], 3, 0.2),
+        ];
+        let mut reference: Option<Vec<Candidate>> = None;
+        let mut order: Vec<usize> = (0..pool.len()).collect();
+        // Heap's algorithm over every arrival order.
+        let mut c = vec![0usize; pool.len()];
+        let mut visit = |order: &[usize]| {
+            let mut top3 = Vec::new();
+            for &k in order {
+                merge_top3(&mut top3, pool[k]);
+            }
+            match &reference {
+                None => reference = Some(top3),
+                Some(want) => assert_eq!(&top3, want, "arrival order {order:?}"),
+            }
+        };
+        visit(&order);
+        let mut i = 0;
+        while i < pool.len() {
+            if c[i] < i {
+                if i % 2 == 0 {
+                    order.swap(0, i);
+                } else {
+                    order.swap(c[i], i);
+                }
+                visit(&order);
+                c[i] += 1;
+                i = 0;
+            } else {
+                c[i] = 0;
+                i += 1;
+            }
+        }
+        let top3 = reference.expect("merged");
+        assert_eq!(top3.len(), 3);
+        assert!(top3[0].deviation == 0.030_351);
+        assert!(top3.iter().all(|c| c.deviation != 0.033_770));
     }
 }
