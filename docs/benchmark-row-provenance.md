@@ -18,10 +18,22 @@ these provenance columns:
 - `host` remains the UTS hostname for compatibility.  Bench runs normally
   record `bench`; it is not a physical-machine identity.
 - `machine_id` is lowercase hexadecimal SHA-256 of the public salt
-  `anneal-bench-machine-id-v1\0` followed by `/etc/machine-id`.  The DMI
-  `product_uuid` is used only when `/etc/machine-id` is unavailable.
-- `cpu_model` is the first available CPU model string from `/proc/cpuinfo`,
-  with whitespace normalized.
+  `anneal-bench-machine-id-v1\0` followed by the machine's identifier.
+  On Linux the identifier is the stripped contents of `/etc/machine-id`;
+  the stripped DMI `product_uuid` is used only when `/etc/machine-id` is
+  absent or empty.  On macOS neither file exists, so the identifier is the
+  hardware UUID (`IOPlatformUUID`) that `ioreg -rd1 -c
+  IOPlatformExpertDevice` prints.  A machine that offers none of these
+  raises an error; a row never records an invented identifier.
+- `cpu_model` is the first available CPU model string, with whitespace
+  normalized.  On Linux it is the first of the `model name`, `Model`,
+  `Processor` and `Hardware` entries of `/proc/cpuinfo` that is not empty.
+  On macOS, where there is no `/proc/cpuinfo`, it is the brand string of
+  `sysctl -n machdep.cpu.brand_string`.  A machine with neither raises an
+  error.
+- A process started by a campaign may inherit both values through
+  `ANNEAL_MACHINE_ID` and `ANNEAL_CPU_MODEL`.  Setting only one of the two
+  is an error.
 
 The machine fields describe the physical machine that ran the measured row.
 Summaries preserve the distinct source values, separated by semicolons.

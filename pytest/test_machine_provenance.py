@@ -2994,3 +2994,26 @@ def test_morse_panel_and_morse_gmin_regenerate_from_committed_legacy_csvs(
         writer.writerows(mg_rows)
     with pytest.raises(ValueError, match="gmin_build_key"):
         morse_gmin.main([*mg_base, "--overwrite-legacy"])
+
+
+def test_the_provenance_docs_describe_what_the_code_reads_on_each_system():
+    source = (ROOT / "scripts" / "machine_provenance.py").read_text()
+    docs = {
+        name: " ".join((ROOT / name).read_text().split())
+        for name in ("docs/benchmark-row-provenance.md", "bench/gmin-h2h/README.md")
+    }
+    for name, text in docs.items():
+        for phrase in ("/etc/machine-id", "product_uuid", "IOPlatformUUID", "ioreg", "/proc/cpuinfo",
+                       "sysctl -n machdep.cpu.brand_string"):
+            assert phrase in text, (name, phrase)
+    for phrase in ('"IOPlatformUUID"', '"ioreg"', '"machdep.cpu.brand_string"', "/etc/machine-id",
+                   "/sys/class/dmi/id/product_uuid", "/proc/cpuinfo"):
+        assert phrase in source, phrase
+    text = docs["docs/benchmark-row-provenance.md"]
+    assert "ioreg -rd1 -c IOPlatformExpertDevice" in text
+    assert '"ioreg", "-rd1", "-c", "IOPlatformExpertDevice"' in source
+    for variable in ("ANNEAL_MACHINE_ID", "ANNEAL_CPU_MODEL"):
+        assert variable in text and variable in source
+    for key in ("model name", "Model", "Processor", "Hardware"):
+        assert key in text and f'"{key}"' in source
+    assert "only when `/etc/machine-id` is" in text
