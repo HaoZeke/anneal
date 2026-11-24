@@ -2463,3 +2463,37 @@ def test_tuned_gmin_tampered_harness_or_blob_fails(tmp_path, monkeypatch):
         audit_mod.printed_harnesses(audit)
         assert any(row[1] == "tab:gmin-tuned" for row in audit.drifts())
 
+
+NUMPY_BLOCK = """
+import importlib.abc, importlib.util, sys
+
+class NoNumpy(importlib.abc.MetaPathFinder):
+    def find_spec(self, name, path=None, target=None):
+        if name.split(".")[0] in ("numpy", "scipy", "matplotlib"):
+            raise ImportError(f"{name} is not installed")
+
+sys.meta_path.insert(0, NoNumpy())
+spec = importlib.util.spec_from_file_location("paper_audit", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+audit = module.Audit()
+module.sutton_chen(audit)
+assert not audit.drifts(), audit.drifts()
+assert not any(name.split(".")[0] == "numpy" for name in sys.modules)
+"""
+
+
+def test_the_audit_runs_without_numpy():
+    run = subprocess.run([sys.executable, "-c", NUMPY_BLOCK, str(ROOT / "scripts" / "paper_audit.py")],
+                         cwd=ROOT, capture_output=True, text=True, check=False)
+    assert run.returncode == 0, run.stderr[-2000:]
+
+
+def test_the_sutton_chen_helpers_import_without_numpy():
+    code = NUMPY_BLOCK.split("spec = ")[0] + (
+        "sys.path.insert(0, sys.argv[1])\n"
+        "import sc96_78_common, sc96_78_hits\n"
+        "assert 'numpy' not in sys.modules\n")
+    run = subprocess.run([sys.executable, "-c", code, str(ROOT / "scripts")],
+                         cwd=ROOT, capture_output=True, text=True, check=False)
+    assert run.returncode == 0, run.stderr[-2000:]
