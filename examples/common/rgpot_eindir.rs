@@ -129,11 +129,11 @@ struct XtbConfig {
 }
 
 type XtbCreate = unsafe extern "C" fn(*const XtbConfig, *mut u8, usize) -> *mut c_void;
-type XtbDestroy = unsafe extern "C" fn(*mut c_void);
-type XtbReset = unsafe extern "C" fn(*mut c_void);
+pub(crate) type XtbDestroy = unsafe extern "C" fn(*mut c_void);
+pub(crate) type XtbReset = unsafe extern "C" fn(*mut c_void);
 type XtbSetWarmMove = unsafe extern "C" fn(*mut c_void, f64);
 type XtbWarmMove = unsafe extern "C" fn(*const c_void) -> f64;
-type XtbForce = unsafe extern "C" fn(
+pub(crate) type XtbForce = unsafe extern "C" fn(
     *mut c_void,
     i64,
     *const f64,
@@ -408,11 +408,9 @@ impl XtbWorker {
 }
 
 struct XtbKernel {
-    _lib: Library,
+    _lib: Option<Library>,
     pot: *mut c_void,
-    force: Symbol<'static, XtbForce>,
-    reset: Symbol<'static, XtbReset>,
-    destroy: Symbol<'static, XtbDestroy>,
+    destroy: XtbDestroy,
     worker: XtbWorker,
     evaluations: usize,
     /// Calls with a pair at or inside this distance are refused before xtb.
@@ -715,22 +713,40 @@ impl RgpotObjective {
                 "rgpot_xtb_set_warm_move"
             );
         }
-        let force =
-            unsafe { std::mem::transmute::<Symbol<XtbForce>, Symbol<'static, XtbForce>>(force) };
-        let reset =
-            unsafe { std::mem::transmute::<Symbol<XtbReset>, Symbol<'static, XtbReset>>(reset) };
-        let destroy = unsafe {
-            std::mem::transmute::<Symbol<XtbDestroy>, Symbol<'static, XtbDestroy>>(destroy)
-        };
         let force_fn: XtbForce = *force;
         let reset_fn: XtbReset = *reset;
+        let destroy_fn: XtbDestroy = *destroy;
+        let handle = Self::xtb_from_symbols(
+            atmnrs,
+            box_,
+            overlap_limit_a,
+            Some(lib),
+            pot,
+            force_fn,
+            reset_fn,
+            destroy_fn,
+        );
+        println!("  eindir objective from rgpot xtb ({})", path.display());
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+        handle
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn xtb_from_symbols(
+        atmnrs: &[i32],
+        box_: [f64; 9],
+        overlap_limit_a: f64,
+        lib: Option<Library>,
+        pot: *mut c_void,
+        force_fn: XtbForce,
+        reset_fn: XtbReset,
+        destroy_fn: XtbDestroy,
+    ) -> Self {
         let worker = XtbWorker::spawn(force_fn, reset_fn, pot);
         let kernel = Box::new(XtbKernel {
             _lib: lib,
             pot,
-            force,
-            reset,
-            destroy,
+            destroy: destroy_fn,
             worker,
             evaluations: 0,
             overlap_limit_a,
@@ -753,8 +769,6 @@ impl RgpotObjective {
             )
         };
         assert!(!handle.is_null(), "rgpot_potential_new_eindir xtb");
-        println!("  eindir objective from rgpot xtb ({})", path.display());
-        let _ = std::io::Write::flush(&mut std::io::stdout());
         Self {
             pot: handle,
             xtb: kernel_ptr,
