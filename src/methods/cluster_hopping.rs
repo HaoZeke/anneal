@@ -12732,7 +12732,7 @@ mod tests {
                 1 => (10.0, Array1::zeros(state.len())),
                 2 | 3 => (5.0, state.to_owned()),
                 6 => (f64::INFINITY, state.to_owned()),
-                _ if quenches % 3 == 0 => (6.0, state.to_owned()),
+                _ if quenches.is_multiple_of(3) => (6.0, state.to_owned()),
                 _ => (100.0, state.to_owned()),
             }
         };
