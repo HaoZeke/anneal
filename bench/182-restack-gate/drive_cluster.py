@@ -50,12 +50,12 @@ def main(argv: list[str]) -> int:
 
     def append_csv(path: Path, fields: list[str], row: dict[str, str]) -> None:
         original(path, fields, row)
-        target = Path(path)
-        if target.name != "rows.csv":
+        if "rss_anon_self_peak_kb" not in row:
             return
-        journal = target.with_suffix(".jsonl")
+        journal = Path(path).with_suffix(".jsonl")
+        payload = {key: row[key] for key in fields}
         with journal.open("a", encoding="utf-8", newline="\n") as handle:
-            handle.write(json.dumps(row, separators=(",", ":")) + "\n")
+            handle.write(json.dumps(payload, separators=(",", ":")) + "\n")
             handle.flush()
             os.fsync(handle.fileno())
 
