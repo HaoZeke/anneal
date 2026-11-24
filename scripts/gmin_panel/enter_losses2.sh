@@ -67,7 +67,7 @@ GMIN_PANEL_WORK=$OUT bash "$HERE/build_gmin.sh"
 cp -f "$OUT/bin/GMIN" "$OUT/base-bin/GMIN"
 cp -f "$HERE/run_losses2.py" "$HERE/run_panel.py" \
   "$ROOT/scripts/target_tol.py" "$ROOT/scripts/gmin_pin.py" \
-  "$ROOT/scripts/machine_provenance.py" "$OUT/"
+  "$ROOT/scripts/machine_provenance.py" "$ROOT/scripts/revision_reach.py" "$OUT/"
 cp -f "$ROOT/examples/h2h_gmin_lj.data" "$ROOT/examples/h2h_gmin_morse.data" "$OUT/"
 user_site=$(python3 -c 'import site; print(site.getusersitepackages())')
 

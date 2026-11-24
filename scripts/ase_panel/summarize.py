@@ -20,6 +20,7 @@ if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 from machine_provenance import csv_fields  # noqa: E402
+import revision_reach  # noqa: E402
 
 SEEDS = tuple(range(2000, 2012))
 ARMS = ("anneal", "recommended", "ase_bh", "ase_mh")
@@ -440,13 +441,8 @@ def show_cap(cap: str) -> str:
 
 
 def commit_held(revision: str) -> bool:
-    """The revision is a commit object in this repository."""
-    if not revision or revision in {"unknown", "latest"}:
-        return False
-    return subprocess.run(
-        ["git", "cat-file", "-e", f"{revision}^{{commit}}"],
-        cwd=ROOT, capture_output=True,
-    ).returncode == 0
+    """The revision is an ancestor of HEAD, as the audit and the ingest of a record count it."""
+    return revision_reach.commit_held(revision, ROOT)
 
 
 def series(items) -> str:

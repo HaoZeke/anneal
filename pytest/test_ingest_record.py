@@ -267,3 +267,218 @@ def test_tab_ase_expected_failure_stays_until_the_table_is_present():
     source = (ROOT / "scripts" / "paper_audit.py").read_text()
     assert 'audit.expect(SI, "tab:ase expected failure"' in source
     assert "bool(panel.tex_table())" in source
+
+
+TUNED = "bench/gmin-tuned/rows-shard2.csv"
+
+
+@pytest.fixture
+def side_commit(tmp_path: Path, monkeypatch) -> str:
+    """A commit that is in the object store of this checkout and is not an ancestor of HEAD.
+
+    It is written to a temporary object directory that git is told to read
+    through, so the checkout itself gains nothing.
+    """
+    objects = tmp_path / "objects"
+    objects.mkdir()
+    main_objects = subprocess.run(
+        ["git", "rev-parse", "--path-format=absolute", "--git-path", "objects"],
+        cwd=ROOT, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    env = {
+        **__import__("os").environ,
+        "GIT_OBJECT_DIRECTORY": str(objects),
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES": main_objects,
+        "GIT_AUTHOR_NAME": "Fixture", "GIT_AUTHOR_EMAIL": "fixture@example.com",
+        "GIT_COMMITTER_NAME": "Fixture", "GIT_COMMITTER_EMAIL": "fixture@example.com",
+    }
+    sha = subprocess.run(
+        ["git", "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "unmerged side commit"],
+        cwd=ROOT, check=True, capture_output=True, text=True, env=env,
+    ).stdout.strip()
+    monkeypatch.setenv("GIT_ALTERNATE_OBJECT_DIRECTORIES", str(objects))
+    present = subprocess.run(["git", "cat-file", "-e", f"{sha}^{{commit}}"], cwd=ROOT, capture_output=True)
+    assert present.returncode == 0
+    ancestor = subprocess.run(["git", "merge-base", "--is-ancestor", sha, "HEAD"], cwd=ROOT, capture_output=True)
+    assert ancestor.returncode != 0
+    return sha
+
+
+def test_a_commit_that_is_present_but_not_an_ancestor_is_held_by_no_reader(side_commit: str):
+    shared = load("revision_reach_test", "scripts/revision_reach.py")
+    audit = load("paper_audit_reach", "scripts/paper_audit.py")
+    ase = load("ase_panel_reach", "scripts/ase_panel/summarize.py")
+    tables = load("h2h_tables_reach", "paper/jctc/scripts/h2h_tables.py")
+    panel = load("gmin_panel_reach", "scripts/gmin_panel/run_panel.py")
+    module = ingest()
+    readers = {
+        "revision_reach": lambda rev: shared.commit_held(rev, ROOT),
+        "paper_audit.commit_held": audit.commit_held,
+        "paper_audit.harness_reachable": audit.harness_reachable,
+        "ase summarize": ase.commit_held,
+        "h2h_tables": tables.commit_held,
+        "gmin run_panel": panel._commit_held,
+        "ingest_record": lambda rev: module.harness_reachable(rev, ROOT),
+    }
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=ROOT, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    held = {name: read(head) for name, read in readers.items()}
+    unheld = {name: read(side_commit) for name, read in readers.items()}
+    assert held == dict.fromkeys(readers, True)
+    assert unheld == dict.fromkeys(readers, False)
+
+
+def test_tab_ase_is_held_only_for_an_ancestor_by_the_table_and_the_audit(side_commit: str, monkeypatch):
+    ase = load("ase_panel_held", "scripts/ase_panel/summarize.py")
+    module = ingest()
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=ROOT, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+
+    def rows_at(revision: str):
+        row = {"code_revision": revision, "hit": "1", "stop": "wall"}
+        return {arm: [dict(row)] for arm in ("recommended", *ase.ASE_ARMS)}
+
+    monkeypatch.setattr(ase, "load", lambda system: rows_at(side_commit))
+    assert ase.quoted_campaigns() == {}
+    assert ase.held_prose() == ""
+    monkeypatch.setattr(ase, "load", lambda system: rows_at(head))
+    assert set(ase.quoted_campaigns()) == set(ase.SYSTEMS)
+    assert module.harness_reachable(side_commit, ROOT) is False
+    assert module.harness_reachable(head, ROOT) is True
+
+
+def test_a_record_naming_a_present_but_unmerged_commit_is_refused(side_commit: str):
+    module = ingest()
+    blob = f"system,harness_revision,code_revision\nfixture,{HELD},{side_commit}\n".encode()
+    with pytest.raises(SystemExit, match=f"harness {side_commit} is not reachable"):
+        module.require_reachable({ROW: blob}, ROOT)
+
+
+def record_blob(header: str, *rows: str) -> bytes:
+    return (header + "\n" + "\n".join(rows) + "\n").encode()
+
+
+HEADER = "system,harness_revision,code_revision"
+
+
+@pytest.mark.parametrize(
+    ("row", "field", "why"),
+    [
+        (f"fixture,{HELD},", "code_revision", "blank"),
+        (f"fixture,{HELD},unknown", "code_revision", "unknown"),
+        (f"fixture,{HELD},Unknown", "code_revision", "unknown"),
+        (f"fixture,{HELD},latest", "code_revision", "not a commit"),
+        (f"fixture,{HELD},not-a-commit", "code_revision", "not a commit"),
+        (f"fixture,{HELD},1234", "code_revision", "not a commit"),
+        (f"fixture,{HELD},{HELD.upper()}", "code_revision", "not a commit"),
+        (f"fixture,{HELD},{HELD} zzz", "code_revision", "not a commit"),
+        (f"fixture,{HELD},{HELD};unknown", "code_revision", "unknown"),
+        (f"fixture,,{HELD}", "harness_revision", "blank"),
+        (f"fixture,unknown,{HELD}", "harness_revision", "unknown"),
+        (f"fixture,zzzzzzz,{HELD}", "harness_revision", "not a commit"),
+        (f"fixture,{HELD}", "code_revision", "blank"),
+    ],
+)
+def test_a_malformed_revision_field_is_refused_beside_a_valid_commit(row: str, field: str, why: str):
+    module = ingest()
+    with pytest.raises(SystemExit, match=f"row 1 {field} is {why}"):
+        module.require_reachable({ROW: record_blob(HEADER, row)}, ROOT)
+
+
+def test_a_malformed_revision_field_in_a_later_row_is_refused():
+    module = ingest()
+    good = f"fixture,{HELD},{HELD}"
+    bad = f"fixture,{HELD},unknown"
+    with pytest.raises(SystemExit, match="row 3 code_revision is unknown"):
+        module.require_reachable({ROW: record_blob(HEADER, good, good, bad, good)}, ROOT)
+
+
+def test_a_malformed_field_is_refused_in_each_revision_column_the_audit_reads():
+    module = ingest()
+    for field in module.REVISION_FIELDS:
+        header = f"system,harness_revision,{field}" if field != "harness_revision" else "system,harness_revision,head"
+        column = field if field != "harness_revision" else "head"
+        for value, why in (("", "blank"), ("unknown", "unknown"), ("g1", "not a commit")):
+            with pytest.raises(SystemExit, match=f"{column} is {why}"):
+                module.require_reachable({ROW: record_blob(header, f"fixture,{HELD},{value}")}, ROOT)
+
+
+def test_a_record_with_every_revision_field_well_formed_and_reachable_is_accepted():
+    module = ingest()
+    pin = module.EXTERNAL_REVISIONS[0]
+    external = "https://example.org/team/code.git@" + "a" * 40
+    rows = (
+        f"fixture,{HELD},{HELD}",
+        f"fixture,{HELD};{pin},{pin}",
+        f"fixture,{HELD} {external},{external}",
+    )
+    module.require_reachable({ROW: record_blob(HEADER, *rows)}, ROOT)
+    for blob in (record_blob("system,host", "fixture,here"), record_blob(HEADER)):
+        with pytest.raises(SystemExit, match="no harness commit"):
+            module.require_reachable({ROW: blob}, ROOT)
+
+
+def tuned_rows():
+    import csv
+    return list(csv.DictReader((ROOT / TUNED).read_text().splitlines()))
+
+
+def test_a_committed_tuned_record_is_accepted_as_the_audit_accepts_it():
+    module = ingest()
+    audit = load("paper_audit_tuned", "scripts/paper_audit.py")
+    rows = tuned_rows()
+    audited = [row for row in rows if row["system"] in audit.TUNED_SYSTEMS and row["code"] in audit.TUNED_CODES]
+    controls = [row for row in rows if row not in audited]
+    assert audited and controls
+    assert all(not audit.harness_reachable(row["harness_commit"]) for row in audited), \
+        "the fixture names a harness that is not an ancestor, as a tuned side commit does"
+    module.require_reachable({TUNED: (ROOT / TUNED).read_bytes()}, ROOT)
+    assert all(module.tuned_verified(row, ROOT) for row in audited)
+    assert all(audit.tuned_gmin_harness_verified(row) for row in audited)
+    assert not any(audit.tuned_gmin_harness_verified(row) for row in controls)
+    old = module.harness_reachable
+    assert not any(old(row["harness_commit"], ROOT) for row in rows)
+
+
+def test_a_control_row_the_audit_does_not_read_needs_a_verified_row_with_its_harness_and_data(tmp_path: Path):
+    module = ingest()
+    lines = (ROOT / TUNED).read_text().splitlines()
+    header = lines[0]
+    only_controls = [lines[0], *[line for line in lines[1:] if line.startswith("lj98aa,")]]
+    assert len(only_controls) > 1
+    with pytest.raises(SystemExit, match="verified tuned-GMIN side commit"):
+        module.require_reachable({TUNED: ("\n".join(only_controls) + "\n").encode()}, ROOT)
+    audited = [line for line in lines[1:] if line.startswith(("lj98,", "lj104,"))]
+    module.require_reachable({TUNED: ("\n".join([header, *audited, only_controls[1]]) + "\n").encode()}, ROOT)
+    other = only_controls[1]
+    fields = header.split(",")
+    columns = other.split(",")
+    columns[fields.index("data_blob")] = "0" * 40
+    with pytest.raises(SystemExit, match="verified tuned-GMIN side commit"):
+        module.require_reachable({TUNED: ("\n".join([header, *audited, ",".join(columns)]) + "\n").encode()}, ROOT)
+
+
+def test_a_tuned_record_is_refused_when_the_audit_would_refuse_a_row():
+    module = ingest()
+    audit = load("paper_audit_tuned_bad", "scripts/paper_audit.py")
+    text = (ROOT / TUNED).read_text()
+    rows = tuned_rows()
+    row = next(row for row in rows if row["system"] in audit.TUNED_SYSTEMS and row["code"] in audit.TUNED_CODES)
+    for field, value in (("data_blob", "0" * 40), ("harness_commit", "b" * 40)):
+        broken = text.replace(row[field], value, 1)
+        assert broken != text
+        changed = {**row, field: value}
+        assert audit.tuned_gmin_harness_verified(changed) is False
+        with pytest.raises(SystemExit, match="verified tuned-GMIN side commit|not reachable"):
+            module.require_reachable({TUNED: broken.encode()}, ROOT)
+
+
+def test_a_tuned_record_is_judged_against_the_repository_it_lands_in(tmp_path: Path):
+    module = ingest()
+    other = tmp_path / "other"
+    other.mkdir()
+    git_repo(other)
+    with pytest.raises(SystemExit, match="not reachable"):
+        module.require_reachable({TUNED: (ROOT / TUNED).read_bytes()}, other)

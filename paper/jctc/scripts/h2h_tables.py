@@ -30,6 +30,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "scripts" / "tip4p_h2h"))
 sys.path.insert(0, str(ROOT / "bench" / "tip4p-h2h"))
 from run_h2h_r2 import mann_whitney_u_two_sided_exact  # noqa: E402
+import revision_reach  # noqa: E402
 
 MANUSCRIPT = ROOT / "paper" / "jctc" / "manuscript.tex"
 SI = ROOT / "paper" / "jctc" / "si.tex"
@@ -84,13 +85,8 @@ TIP4P_LABEL = {"tip4p8": "(H\\(_2\\)O)\\(_8\\)", "tip4p15": "(H\\(_2\\)O)\\(_{15
 
 
 def commit_held(revision: str) -> bool:
-    """The revision is an ancestor of HEAD."""
-    if not revision or revision in {"unknown", "latest"}:
-        return False
-    return subprocess.run(
-        ["git", "merge-base", "--is-ancestor", revision, "HEAD"],
-        cwd=ROOT, capture_output=True,
-    ).returncode == 0
+    """The revision is an ancestor of HEAD, as the audit and the ingest of a record count it."""
+    return revision_reach.commit_held(revision, ROOT)
 
 
 # Pins of other projects. They are not commits of this repository.

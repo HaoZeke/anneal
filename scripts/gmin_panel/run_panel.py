@@ -65,6 +65,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         break
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 from gmin_pin import TARBALL_SHA256, read_built_revision, read_svnrev  # noqa: E402
+import revision_reach  # noqa: E402
 from machine_provenance import (  # noqa: E402
     aggregate_machine_columns,
     gmin_row_key,
@@ -777,14 +778,8 @@ HEADER = ["System", "Budget", "Arm", "Hits", "Median calls", "IQR", "Wall (s)", 
 
 
 def _commit_held(revision: str) -> bool:
-    """The revision is an ancestor of HEAD."""
-    if not revision or revision == "latest":
-        return False
-    root = Path(__file__).resolve().parents[2]
-    return subprocess.run(
-        ["git", "merge-base", "--is-ancestor", revision, "HEAD"],
-        cwd=root, capture_output=True,
-    ).returncode == 0
+    """The revision is an ancestor of HEAD, as the audit and the ingest of a record count it."""
+    return revision_reach.commit_held(revision, Path(__file__).resolve().parents[2])
 
 
 def quoted_summary(summary: list[dict[str, str]]) -> list[dict[str, str]]:

@@ -58,6 +58,7 @@ if str(ROOT / "scripts") not in sys.path:
 from codata2018 import BOLTZMANN_EV_PER_K, KJ_PER_KCAL  # noqa: E402
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 from gmin_pin import REVISION as GMIN_PIN_REVISION  # noqa: E402
+import revision_reach  # noqa: E402
 
 TEX = "paper/jctc/manuscript.tex"
 SI = "paper/jctc/si.tex"
@@ -239,9 +240,9 @@ _EXTERNAL_FORM = re.compile(r"^https://[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+\.git
 
 
 def commit_held(rev: str) -> bool:
-    """The revision is an ancestor of HEAD."""
+    """The revision is an ancestor of HEAD, by the definition the generators and the ingest share."""
     if rev not in _COMMIT_HELD:
-        _COMMIT_HELD[rev] = git("merge-base", "--is-ancestor", rev, "HEAD").returncode == 0
+        _COMMIT_HELD[rev] = revision_reach.commit_held(rev, ROOT)
     return _COMMIT_HELD[rev]
 
 
@@ -263,34 +264,52 @@ def harness_reachable(rev: str) -> bool:
     return external_form(rev) or external_pin(rev) or commit_held(rev)
 
 
-def tuned_gmin_harness_verified(row: dict[str, str]) -> bool:
-    """Verify a tuned-GMIN row: reachable code_revision, exact data_blob and tuned.py in HEAD."""
+TUNED_SYSTEMS = frozenset({"lj98", "lj104"})
+TUNED_CODES = frozenset({"anneal", "gmin"})
+
+
+def tuned_gmin_harness_verified(row: dict[str, str], repo: Path = ROOT) -> bool:
+    """Verify a tuned-GMIN row: reachable code_revision, exact data_blob and tuned.py in HEAD.
+
+    ``repo`` is the repository whose HEAD holds the harness; the audit checks
+    its own, and the ingest of a record checks the one it installs into.
+    """
+
+    def run(*args: str, stdin: str | None = None) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", "-C", str(repo), *args], input=stdin, capture_output=True, text=True, check=False)
+
+    def reachable(rev: str) -> bool:
+        return external_form(rev) or external_pin(rev) or revision_reach.commit_held(rev, repo)
+
     system = (row.get("system") or "").strip()
     data_blob = (row.get("data_blob") or "").strip()
     harness = (row.get("harness_commit") or "").strip()
     code_rev = (row.get("code_revision") or "").strip()
-    if system not in {"lj98", "lj104"} or not data_blob or not harness:
+    if system not in TUNED_SYSTEMS or not data_blob or not harness:
         return False
-    if not harness_reachable(code_rev):
+    if not reachable(code_rev):
         return False
-    if harness_reachable(harness):
+    if reachable(harness):
         return True
-    head_data = git("rev-parse", f"HEAD:bench/gmin-tuned/inputs/{system}.data")
-    head_tuned = git("rev-parse", "HEAD:scripts/gmin_panel/tuned.py")
+    head_data = run("rev-parse", f"HEAD:bench/gmin-tuned/inputs/{system}.data")
+    head_tuned = run("rev-parse", "HEAD:scripts/gmin_panel/tuned.py")
     if head_data.returncode != 0 or head_data.stdout.strip() != data_blob or head_tuned.returncode != 0:
         return False
-    if not commit_exists(harness):
+    if harness.startswith("-"):
         return False
-    ref_data = git("rev-parse", f"{harness}:bench/gmin-tuned/inputs/{system}.data")
-    ref_tuned = git("rev-parse", f"{harness}:scripts/gmin_panel/tuned.py")
+    held = run("cat-file", "--batch-check", stdin=f"{harness}^{{commit}}\n").stdout.split()
+    if held[1:2] != ["commit"]:
+        return False
+    ref_data = run("rev-parse", f"{harness}:bench/gmin-tuned/inputs/{system}.data")
+    ref_tuned = run("rev-parse", f"{harness}:scripts/gmin_panel/tuned.py")
     if ref_data.returncode != 0 or ref_data.stdout.strip() != data_blob:
         return False
     if ref_tuned.returncode != 0 or ref_tuned.stdout.strip() != head_tuned.stdout.strip():
         return False
-    base = git("merge-base", "HEAD", harness)
+    base = run("merge-base", "HEAD", harness)
     if base.returncode != 0 or not base.stdout.strip():
         return False
-    diff = git("diff", "--name-only", base.stdout.strip(), harness)
+    diff = run("diff", "--name-only", base.stdout.strip(), harness)
     if diff.returncode != 0:
         return False
     if any(
@@ -6204,7 +6223,7 @@ def printed_harnesses(audit: Audit) -> None:
     if h2h.tuned_gmin_block() or "\\label{tab:gmin-tuned}" in audit.text(SI):
         tuned_rows = [
             row for row in h2h.read(h2h.GMIN_TUNED)
-            if row["system"] in {"lj98", "lj104"} and row["code"] in {"anneal", "gmin"}
+            if row["system"] in TUNED_SYSTEMS and row["code"] in TUNED_CODES
         ]
     if h2h.abcluster_block():
         groups.append(("tab:abcluster", h2h.abcluster_block(), h2h.read(h2h.ABCLUSTER)))

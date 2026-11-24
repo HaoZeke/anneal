@@ -6,11 +6,14 @@
 
 The branch is fetched into a temporary ref and that ref is deleted. The
 script does not merge, does not check out a branch, and does not push.
-Rows are written only when every harness commit in them is an ancestor
-of HEAD, an external pin, or a repository URL at a full SHA. The fetch
-lands in a scratch repository when it would otherwise land in the
-repository whose HEAD the check uses. The generators then rewrite the
-marked tables.
+Rows are written only when every revision field of every row is a
+commit and every harness commit in them is an ancestor of HEAD, an
+external pin, or a repository URL at a full SHA. A blank, "unknown" or
+non-hex revision field refuses the record. A tuned-GMIN row is accepted
+when the paper audit accepts it, so its side commit is checked against
+the data and tuned.py of HEAD. The fetch lands in a scratch repository
+when it would otherwise land in the repository whose HEAD the check
+uses. The generators then rewrite the marked tables.
 """
 from __future__ import annotations
 
@@ -27,6 +30,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import revision_reach  # noqa: E402
 HARNESS_FIELDS = (
     "harness_revision", "harness_commit", "code_revision", "head", "anneal_sha", "anneal_head",
     "anneal_revision", "gmin_revision",
@@ -92,36 +97,118 @@ def harness_reachable(rev: str, repo: Path = REPO) -> bool:
     """An ancestor of HEAD, an external pin, or a repository URL at a full SHA."""
     if external_form(rev) or external_pin(rev):
         return True
-    return _git(repo, "merge-base", "--is-ancestor", rev, "HEAD").returncode == 0
+    return revision_reach.commit_held(rev, repo)
 
 
-def harness_tokens(blob: bytes) -> list[str]:
-    """Hex harness commits named by the row fields the audit scans."""
+REVISION_FIELDS = (*HARNESS_FIELDS, "release_revision")
+_SEPARATORS = re.compile(r"[;\s]+")
+
+
+def revision_tokens(value: str | None) -> list[str]:
+    """The revisions one field names. A field may list several, apart by a semicolon or a space."""
+    return [token for token in _SEPARATORS.split((value or "").strip()) if token]
+
+
+def malformed_revision(value: str | None) -> str | None:
+    """Why a revision field cannot name a commit, or None when it can.
+
+    A field is well formed when it holds one or more lowercase hex commits of
+    seven to forty characters, or a repository URL at a full SHA. Blank,
+    "unknown" and anything else is refused, as the paper audit counts a blank
+    or "unknown" revision as unrecorded.
+    """
+    tokens = revision_tokens(value)
+    if not tokens:
+        return "blank"
+    for token in tokens:
+        if token.lower() == "unknown":
+            return "unknown"
+        if not (HEX.fullmatch(token) or external_form(token)):
+            return f"not a commit ({token!r})"
+    return None
+
+
+def tuned_row(row: dict[str, str | None]) -> bool:
+    """A tuned-GMIN row names its harness by a commit and the data it ran on."""
+    return bool((row.get("harness_commit") or "").strip() and (row.get("data_blob") or "").strip())
+
+
+def tuned_verified(row: dict[str, str | None], repo: Path) -> bool:
+    """The check paper_audit makes of a tuned-GMIN row, so a record lands exactly when the audit accepts it."""
+    audit = _module("paper_audit_ingest", "scripts/paper_audit.py")
+    return bool(audit.tuned_gmin_harness_verified({k: v or "" for k, v in row.items() if k}, repo))
+
+
+def tuned_pairs(rows: list[dict[str, str | None]], repo: Path) -> set[tuple[str, str]]:
+    """The (harness commit, data blob) pairs of the rows the audit verifies, for those that pass."""
+    audit = _module("paper_audit_ingest", "scripts/paper_audit.py")
+    return {
+        ((row.get("harness_commit") or "").strip(), (row.get("data_blob") or "").strip())
+        for row in rows
+        if tuned_row(row)
+        and (row.get("system") or "").strip() in audit.TUNED_SYSTEMS
+        and (row.get("code") or "").strip() in audit.TUNED_CODES
+        and tuned_verified(row, repo)
+    }
+
+
+def tuned_accepted(row: dict[str, str | None], pairs: set[tuple[str, str]], repo: Path) -> bool:
+    """A tuned row passes when the audit verifies it, or, for a control row the audit does not read, when
+    a row the audit does verify names the same harness commit and data blob."""
+    pair = ((row.get("harness_commit") or "").strip(), (row.get("data_blob") or "").strip())
+    audit = _module("paper_audit_ingest", "scripts/paper_audit.py")
+    if (row.get("system") or "").strip() in audit.TUNED_SYSTEMS and (row.get("code") or "").strip() in audit.TUNED_CODES:
+        return tuned_verified(row, repo)
+    return pair in pairs and harness_reachable((row.get("code_revision") or "").strip(), repo)
+
+
+def parse_rows(path: str, blob: bytes) -> tuple[list[str], list[dict[str, str | None]]]:
     try:
         text = blob.decode()
     except UnicodeError as exc:
-        raise SystemExit("a record row file is not text") from exc
+        raise SystemExit(f"{path}: a record row file is not text") from exc
     reader = csv.DictReader(io.StringIO(text))
-    found: list[str] = []
-    for row in reader:
-        for field in HARNESS_FIELDS:
-            for token in (row.get(field) or "").split():
-                if HEX.fullmatch(token):
-                    found.append(token)
-    return found
+    rows = list(reader)
+    return list(reader.fieldnames or []), rows
 
 
 def require_reachable(blobs: dict[str, bytes], repo: Path = REPO) -> None:
-    """Refuse the record when any harness commit is not reachable. Write nothing."""
+    """Refuse the record unless every revision field of every row is well formed and reachable. Write nothing.
+
+    Each revision column of each row is judged on its own: a blank, "unknown"
+    or non-hex field is refused whatever else the row holds. A tuned-GMIN row
+    names its harness by a side commit; it is accepted when the paper audit
+    accepts it, which checks the commit against the data and tuned.py of HEAD.
+    """
     saw = False
     for path, blob in blobs.items():
-        tokens = harness_tokens(blob)
-        if not tokens:
+        header, rows = parse_rows(path, blob)
+        columns = [field for field in REVISION_FIELDS if field in header]
+        if not any(field in header for field in HARNESS_FIELDS) or not rows:
             raise SystemExit(f"{path}: no harness commit")
-        for token in tokens:
-            saw = True
-            if not harness_reachable(token, repo):
-                raise SystemExit(f"{path}: harness {token} is not reachable")
+        pairs = tuned_pairs(rows, repo) if any(tuned_row(row) for row in rows) else set()
+        for number, row in enumerate(rows, start=1):
+            if None in row:
+                raise SystemExit(f"{path}: row {number} has more fields than the header")
+            tuned = tuned_row(row)
+            for field in columns:
+                value = row.get(field)
+                why = malformed_revision(value)
+                if why:
+                    raise SystemExit(f"{path}: row {number} {field} is {why}")
+                if field == "release_revision" or (tuned and field in {"harness_commit", "code_revision"}):
+                    continue
+                for token in revision_tokens(value):
+                    saw = True
+                    if not harness_reachable(token, repo):
+                        raise SystemExit(f"{path}: harness {token} is not reachable")
+            if tuned:
+                saw = True
+                if not tuned_accepted(row, pairs, repo):
+                    raise SystemExit(
+                        f"{path}: row {number} harness {row.get('harness_commit')} is not reachable "
+                        "and is not a verified tuned-GMIN side commit"
+                    )
     if not saw:
         raise SystemExit("no harness commit")
 
