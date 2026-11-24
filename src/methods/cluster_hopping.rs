@@ -608,6 +608,9 @@ pub struct Ledger {
     /// Fractional debt accumulated by partial-system evaluations, settled
     /// into whole charged units as it crosses one.
     fract: f64,
+    /// Whole units that settled through [`Ledger::charge_frac`]. They price
+    /// work that made no call into the objective.
+    priced: usize,
     /// Lowest objective value seen.
     pub best: f64,
     /// State attaining [`Ledger::best`].
@@ -692,6 +695,7 @@ impl Ledger {
             budget,
             spent: 0,
             fract: 0.0,
+            priced: 0,
             best: f64::INFINITY,
             best_state: None,
             walker_best: f64::INFINITY,
@@ -919,8 +923,20 @@ impl Ledger {
             if !self.charge() {
                 return false;
             }
+            self.priced += 1;
         }
         !self.stopped() && self.spent < self.budget
+    }
+
+    /// Whole units charged through [`Ledger::charge_frac`].
+    ///
+    /// That is work priced as a fraction of one evaluation, such as the
+    /// energy-lattice arm's pair sums over vacant sites. It made no call into
+    /// the objective. Every other unit on [`Ledger::spent`] is one call the
+    /// caller's relaxation or gradient made, so a caller that counts those
+    /// calls finds `calls + priced == spent` at the end of a run.
+    pub fn priced(&self) -> usize {
+        self.priced
     }
 
     /// Charges `n` completed evaluations, returning `false` when they do not
