@@ -971,6 +971,21 @@ impl NativePotential {
         }
         Ok(None)
     }
+
+    pub(crate) fn is_rigid_body(&self) -> bool {
+        matches!(self, Self::Tip4p(_) | Self::GminTip4p(_))
+    }
+
+    pub(crate) fn n_points(&self) -> usize {
+        match self {
+            Self::Pair(p) => p.n_points,
+            Self::BinaryLj(p) => p.n_points(),
+            Self::SuttonChen(p) => p.n_points,
+            Self::Gupta(p) => p.n_points(),
+            Self::Tip4p(p) => p.n_molecules,
+            Self::GminTip4p(p) => p.n_molecules(),
+        }
+    }
 }
 
 impl Objective<f64> for NativePotential {

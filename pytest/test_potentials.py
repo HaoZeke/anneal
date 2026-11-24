@@ -377,3 +377,69 @@ def test_potential_calculator_free_energy_and_reset():
     assert calc.atoms is None
     assert calc.results == {}
     assert float(calc.get_potential_energy(atoms)) == pytest.approx(e, rel=0, abs=1e-12)
+
+
+def test_native_potential_chart_compatibility():
+    lj4 = anneal.PairPotential.lennard_jones(4)
+    blj4 = anneal.BinaryLennardJones(2, 2)
+    sc4 = anneal.SuttonChen.sc_12_6(4)
+    gupta4 = anneal.Gupta.zinc(4)
+    tip2 = anneal.Tip4pCluster(2)
+    gtip2 = anneal.GminTip4p(2)
+    water_sites = anneal.gmin_tip4p_sites()[:3].ravel()
+
+    # Atomic-chart potentials (n=4, dim=12) paired with rigid-body searches (n=2, dim=12).
+    for atomic_pot in (lj4, blj4, sc4, gupta4):
+        with pytest.raises(ValueError, match="atomic chart"):
+            anneal.cluster_search(atomic_pot, None, 2, 20, seed=0, rigid=True)
+
+    with pytest.raises(ValueError, match="atomic chart"):
+        anneal.cluster_search(
+            lj4, None, 2, 20, seed=0, config=anneal.Config.for_tip4p(2)
+        )
+    with pytest.raises(ValueError, match="atomic chart"):
+        anneal.cluster_search(
+            lj4,
+            None,
+            2,
+            20,
+            seed=0,
+            start=np.zeros(12, dtype=np.float64),
+            water_sites=water_sites,
+            bonds=[[0, 1], [0, 2]],
+        )
+
+    # Rigid-body potentials (n=2, dim=12) paired with atomic searches (n=4, dim=12).
+    for rigid_pot in (tip2, gtip2):
+        with pytest.raises(ValueError, match="rigid-body chart"):
+            anneal.cluster_search(rigid_pot, None, 4, 20, seed=0)
+        with pytest.raises(ValueError, match="rigid-body chart"):
+            anneal.cluster_search(
+                rigid_pot, None, 4, 20, seed=0, config=anneal.Config.recommended(4)
+            )
+        with pytest.raises(ValueError, match="atomic potential"):
+            anneal.quench(
+                rigid_pot,
+                np.zeros(12, dtype=np.float64),
+                1e-4,
+                method="tric",
+                species=[1, 1, 1, 1],
+            )
+
+    # Count mismatches on matching charts.
+    with pytest.raises(ValueError, match="atoms"):
+        anneal.cluster_search(lj4, None, 5, 20, seed=0)
+    with pytest.raises(ValueError, match="bodies"):
+        anneal.cluster_search(gtip2, None, 3, 20, seed=0, rigid=True)
+
+    # Matching chart and count cases succeed.
+    atomic_out = anneal.cluster_search(lj4, None, 4, 120, seed=0)
+    assert math.isfinite(atomic_out["best_energy"])
+
+    rigid_out = anneal.cluster_search(gtip2, None, 2, 160, seed=0, rigid=True)
+    assert math.isfinite(rigid_out["best_energy"])
+
+    rigid_cfg_out = anneal.cluster_search(
+        tip2, None, 2, 160, seed=0, config=anneal.Config.for_tip4p(2)
+    )
+    assert math.isfinite(rigid_cfg_out["best_energy"])

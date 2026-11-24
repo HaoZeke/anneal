@@ -4587,6 +4587,24 @@ fn cluster_search(
                 "grad_fn is required unless obj_fn is a native cluster potential",
             ));
         };
+        let pot_rigid = pot.is_rigid_body();
+        if pot_rigid != rigid_chart {
+            let expected = if pot_rigid { "rigid-body" } else { "atomic" };
+            let actual = if rigid_chart { "rigid-body" } else { "atomic" };
+            let pot_unit = if pot_rigid { "bodies" } else { "atoms" };
+            let actual_unit = if rigid_chart { "bodies" } else { "atoms" };
+            return Err(PyValueError::new_err(format!(
+                "potential uses a {expected} chart ({} {pot_unit}), which does not match {actual} search ({n} {actual_unit})",
+                pot.n_points()
+            )));
+        }
+        if pot.n_points() != n {
+            let unit = if pot_rigid { "bodies" } else { "atoms" };
+            return Err(PyValueError::new_err(format!(
+                "potential expects {} {unit}, which does not match n = {n}",
+                pot.n_points()
+            )));
+        }
         if Objective::dim(&pot) != dim {
             return Err(PyValueError::new_err(format!(
                 "potential dimension {} does not match state dimension {dim}",
@@ -4876,6 +4894,11 @@ fn quench(
     let mut calls = 0usize;
     let (energy, x) = if let Some(pot) = potentials::NativePotential::extract_bound(fg_fn.bind(py))?
     {
+        if tric.is_some() && pot.is_rigid_body() {
+            return Err(PyValueError::new_err(
+                "method=\"tric\" requires an atomic potential, not a rigid-body potential",
+            ));
+        }
         if Objective::dim(&pot) != dim {
             return Err(PyValueError::new_err(format!(
                 "potential dimension {} does not match x0 length {dim}",
