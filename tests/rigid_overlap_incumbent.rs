@@ -114,8 +114,8 @@ fn tetra_centres() -> Array1<f64> {
         [-1.0, -1.0, 1.0],
     ];
     let mut edge = 0.0_f64;
-    for k in 0..3 {
-        let delta = raw[0][k] - raw[1][k];
+    for (left, right) in raw[0].iter().zip(raw[1]) {
+        let delta = left - right;
         edge += delta * delta;
     }
     let scale = 2.8 / edge.sqrt();
