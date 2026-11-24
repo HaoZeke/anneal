@@ -41,6 +41,7 @@ FIELDS = (
     "b_trail_redraws",
     "short_seeds",
     "short_identical",
+    "coverage",
     "hit_clause",
     "time_clause",
     "memory_clause",
@@ -227,6 +228,8 @@ def summarize_cell(
     adjusted_limit = max(1.10, time_a2_high)
     memory_limit = max(1.10, rss_a2_high)
     memory_clause = not (rss_b_low > memory_limit)
+    redraws = sum(int(row["trail_redraws"]) for row in groups["B"])
+    covered = redraws > 0
     verdict = hit_clause and time_clause and memory_clause
     summary = {
         "cell": cell,
@@ -259,25 +262,33 @@ def summarize_cell(
         "b_stall_triggers": str(
             sum(int(row["stall_triggers"]) for row in groups["B"])
         ),
-        "b_trail_redraws": str(
-            sum(int(row["trail_redraws"]) for row in groups["B"])
-        ),
+        "b_trail_redraws": str(redraws),
         "short_seeds": str(len(short_rows)),
         "short_identical": "PASS" if short_identical else "FAIL",
+        "coverage": "PASS" if covered else "NOT EXERCISED",
         "hit_clause": "PASS" if hit_clause else "FAIL",
         "time_clause": "PASS" if time_clause else "FAIL",
         "memory_clause": "PASS" if memory_clause else "FAIL",
-        "verdict": "PASS" if verdict else "FAIL",
+        "verdict": (
+            "PASS" if verdict else "FAIL"
+        ) if covered else "NO VERDICT",
     }
     return summary, short_rows
 
 
 def write_report(summaries: list[dict[str, str]]) -> None:
-    overall = all(row["verdict"] == "PASS" for row in summaries)
+    covered = all(row["coverage"] == "PASS" for row in summaries)
+    overall = covered and all(row["verdict"] == "PASS" for row in summaries)
+    outcome = "PASS" if overall else "FAIL" if covered else "PARTIAL"
     lines = [
         "# Trail-arm gate summary",
         "",
-        f"Overall verdict: **{'PASS' if overall else 'FAIL'}**.",
+        f"Outcome: **{outcome}**.",
+        "",
+        (
+            "No verdict is issued because B recorded zero idle trail-arm "
+            "redraws."
+        ) if not covered else f"Overall verdict: **{outcome}**.",
         "",
         "| Cell | Hits A/B | Fisher | MW calls | Time B/A CI | "
         "A2/A high | RSS B/A CI | RSS limit | Redraws | "
@@ -317,7 +328,7 @@ def write_report(summaries: list[dict[str, str]]) -> None:
         "",
     ]
     (HERE / "SUMMARY.md").write_text("\n".join(lines))
-    print("PASS" if overall else "FAIL")
+    print(outcome)
 
 
 def main() -> None:
