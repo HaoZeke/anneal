@@ -1527,3 +1527,13 @@ Unglert, Serafini, Carrete, and Madsen, arXiv:2611.24088 (18 November 2026), int
 The same 22 November 2026 verification pass confirmed the QVib article already filed as `suarezDouQvib2026` and the finite-temperature crystal-structure-prediction article already filed as `poletaevSschaCsp2026`; neither record is duplicated here. The primary-record URLs, author lists, titles, dates, and retrieval date are recorded in `paper/related-work-watch-queries-2026-11-22b.txt`.
 
 Cite `chenDynamicCluster2026` and `unglertJaxrens2026` with the dynamic-cluster and nested-sampling discussions, respectively.
+
+## 2026-11-24 — FastCREST
+
+Dey, Kariyawasam, and Chowdhury, arXiv:2611.28599 (21 November 2026), introduce `FastCREST`, a hardware-accelerated execution of the CREST 3.0.2 conformer-search algorithm. The code moves the self-consistent-charge eigenproblem and three-body dispersion of the metadynamics and molecular-dynamics trajectories to a GPU. Batches of geometry optimisations run as Slurm arrays on CPU nodes. The abstract reports that energies agree with CREST 3.0.2 within \(1.01\times10^{-10}\) Eh and gradients within \(8.2\times10^{-11}\) Eh/bohr; controlled molecular-dynamics trajectories pass a prespecified equivalence test. The complete example also lifts the 200-cycle optimisation cap of CREST 3, so that run changes a default stopping condition as well as the hardware.
+
+This does not contradict the manuscript's CREST 3.0.2 water-hexamer motif count, energy-and-gradient counters, polished gaps, or statement that CREST 3.0.2 exposes no seed. It does contradict any blanket reading that those CREST wall times describe the cost of the algorithm independently of hardware and execution strategy; the manuscript already pins its wall times to one processor and one thread. No new water-hexamer head-to-head is needed for the current evaluation-budget comparison. A future FastCREST comparison must keep the same GFN2-xTB surface and energy-and-gradient budget, state whether the 200-cycle cap is lifted, and distinguish throughput from search quality.
+
+The 24 November release-API check found no new numbered release: CREST remains `v3.0.2`, AGOX remains tagged at `v3.11.1`, ASE remains tagged at `3.29.0`, and pele remains `v0.1.2`. The former `ksags/GOFEE` release and tag endpoints still return 404; repository searches found no official standalone release repository for GOFEE, de Souza's GOAT, or GMIN.
+
+Cite `deyFastcrest2026` beside the CREST implementation discussion.
