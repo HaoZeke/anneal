@@ -12,7 +12,6 @@ import json
 import math
 import os
 import platform
-import socket
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -218,6 +217,121 @@ def write_once(path: Path, text: str) -> None:
         handle.write(text)
 
 
+ROW_FIELDS = [
+    "system",
+    "molecules",
+    "arm",
+    "seed",
+    "start_id",
+    "best_energy",
+    "hit",
+    "calls",
+    "wall_s",
+    "anneal_sha",
+    "gmin_revision",
+    "run_order_index",
+    "arm_order",
+    "machine_id",
+    "core",
+    "affinity_source",
+    "affinity_seen",
+    "start_ts",
+    "end_ts",
+    "cpu_model",
+    "arch",
+    "logical_cpus",
+]
+HOST_FIELDS = ["molecules", "seed", "arm", "machine_id", "core", "affinity_source"]
+
+
+def row_record(
+    r: ArmRun,
+    machine: dict[str, str],
+    arch: str,
+    logical_cpus: int,
+    anneal_sha: str,
+    gmin_revision: str,
+) -> dict[str, object]:
+    return {
+        "system": "tip4p",
+        "molecules": r.molecules,
+        "arm": r.arm,
+        "seed": r.seed,
+        "start_id": r.start_id,
+        "best_energy": f"{r.best_energy:.10f}",
+        "hit": r.hit,
+        "calls": r.calls,
+        "wall_s": f"{r.wall_s:.6f}",
+        "anneal_sha": anneal_sha,
+        "gmin_revision": gmin_revision,
+        "run_order_index": r.run_order_index,
+        "arm_order": r.arm_order,
+        "machine_id": machine["machine_id"],
+        "core": r.core,
+        "affinity_source": r.affinity_source,
+        "affinity_seen": r.affinity_seen,
+        "start_ts": r.start_ts,
+        "end_ts": r.end_ts,
+        "cpu_model": machine["cpu_model"],
+        "arch": arch,
+        "logical_cpus": logical_cpus,
+    }
+
+
+def session_payload(
+    pair: list[ArmRun],
+    machine: dict[str, str],
+    arch: str,
+    logical_cpus: int,
+    affinity_source: str,
+    hit_tol: float,
+    anneal_sha: str,
+    gmin_revision: str,
+) -> dict[str, object]:
+    return {
+        "system": "tip4p",
+        "molecules": pair[0].molecules,
+        "seed": pair[0].seed,
+        "start_id": pair[0].start_id,
+        "arm_order": pair[0].arm_order.split(","),
+        "machine_id": machine["machine_id"],
+        "cpu_model": machine["cpu_model"],
+        "arch": arch,
+        "logical_cpus": logical_cpus,
+        "affinity_source": affinity_source,
+        "hit_tol": hit_tol,
+        "hit_tol_unit": "kJ/mol",
+        "arms": [
+            {
+                "arm": r.arm,
+                "hit": r.hit,
+                "calls": r.calls,
+                "wall_s": r.wall_s,
+                "best_energy": r.best_energy,
+                "core": r.core,
+                "affinity_seen": r.affinity_seen,
+                "run_order_index": r.run_order_index,
+                "start_ts": r.start_ts,
+                "end_ts": r.end_ts,
+            }
+            for r in pair
+        ],
+        "anneal_sha": anneal_sha,
+        "gmin_revision": gmin_revision,
+    }
+
+
+def host_record(r: ArmRun, machine: dict[str, str]) -> dict[str, object]:
+    return {
+        "molecules": r.molecules,
+        "seed": r.seed,
+        "arm": r.arm,
+        "machine_id": machine["machine_id"],
+        "core": r.core,
+        "affinity_source": r.affinity_source,
+    }
+
+
 def csv_text(fieldnames: list[str], rows: list[dict[str, object]]) -> str:
     buffer = io.StringIO()
     writer = csv.DictWriter(buffer, fieldnames=fieldnames, lineterminator="\n")
@@ -354,9 +468,6 @@ def run_command(args: argparse.Namespace) -> int:
     seeds = parse_list(args.seeds)
     affinity_source = f"taskset -c {args.core}"
     machine_fields = machine_columns()
-    machine = machine_fields["machine_id"]
-    hostname = socket.gethostname()
-    cpu_model = machine_fields["cpu_model"]
     arch = platform.machine()
     logical_cpus = os.cpu_count() or 0
     references = TIP4P_REFERENCES_KJ_MOL
@@ -504,61 +615,9 @@ def run_command(args: argparse.Namespace) -> int:
 
     rows.sort(key=lambda r: (r.molecules, r.seed, 0 if r.arm == "anneal" else 1))
 
-    row_fields = [
-        "system",
-        "molecules",
-        "arm",
-        "seed",
-        "start_id",
-        "best_energy",
-        "hit",
-        "calls",
-        "wall_s",
-        "anneal_sha",
-        "gmin_revision",
-        "run_order_index",
-        "arm_order",
-        "machine_id",
-        "core",
-        "affinity_source",
-        "affinity_seen",
-        "start_ts",
-        "end_ts",
-        "cpu_model",
-        "arch",
-        "logical_cpus",
-        "hostname",
-    ]
     rows_text = csv_text(
-        row_fields,
-        [
-            {
-                "system": "tip4p",
-                "molecules": r.molecules,
-                "arm": r.arm,
-                "seed": r.seed,
-                "start_id": r.start_id,
-                "best_energy": f"{r.best_energy:.10f}",
-                "hit": r.hit,
-                "calls": r.calls,
-                "wall_s": f"{r.wall_s:.6f}",
-                "anneal_sha": args.anneal_sha,
-                "gmin_revision": args.gmin_revision,
-                "run_order_index": r.run_order_index,
-                "arm_order": r.arm_order,
-                "machine_id": machine,
-                "core": r.core,
-                "affinity_source": r.affinity_source,
-                "affinity_seen": r.affinity_seen,
-                "start_ts": r.start_ts,
-                "end_ts": r.end_ts,
-                "cpu_model": cpu_model,
-                "arch": arch,
-                "logical_cpus": logical_cpus,
-                "hostname": hostname,
-            }
-            for r in rows
-        ],
+        ROW_FIELDS,
+        [row_record(r, machine_fields, arch, logical_cpus, args.anneal_sha, args.gmin_revision) for r in rows],
     )
 
     session_lines = []
@@ -566,55 +625,13 @@ def run_command(args: argparse.Namespace) -> int:
         for seed in seeds:
             pair = [r for r in rows if r.molecules == n and r.seed == seed]
             pair.sort(key=lambda r: 0 if r.arm == "anneal" else 1)
-            payload = {
-                "system": "tip4p",
-                "molecules": n,
-                "seed": seed,
-                "start_id": pair[0].start_id,
-                "arm_order": pair[0].arm_order.split(","),
-                "machine_id": machine,
-                "hostname": hostname,
-                "cpu_model": cpu_model,
-                "arch": arch,
-                "logical_cpus": logical_cpus,
-                "affinity_source": affinity_source,
-                "hit_tol": args.hit_tol,
-                "hit_tol_unit": "kJ/mol",
-                "arms": [
-                    {
-                        "arm": r.arm,
-                        "hit": r.hit,
-                        "calls": r.calls,
-                        "wall_s": r.wall_s,
-                        "best_energy": r.best_energy,
-                        "core": r.core,
-                        "affinity_seen": r.affinity_seen,
-                        "run_order_index": r.run_order_index,
-                        "start_ts": r.start_ts,
-                        "end_ts": r.end_ts,
-                    }
-                    for r in pair
-                ],
-                "anneal_sha": args.anneal_sha,
-                "gmin_revision": args.gmin_revision,
-            }
+            payload = session_payload(
+                pair, machine_fields, arch, logical_cpus, affinity_source,
+                args.hit_tol, args.anneal_sha, args.gmin_revision,
+            )
             session_lines.append(json.dumps(payload, separators=(",", ":")) + "\n")
 
-    hosts_text = csv_text(
-        ["molecules", "seed", "arm", "machine_id", "hostname", "core", "affinity_source"],
-        [
-            {
-                "molecules": r.molecules,
-                "seed": r.seed,
-                "arm": r.arm,
-                "machine_id": machine,
-                "hostname": hostname,
-                "core": r.core,
-                "affinity_source": r.affinity_source,
-            }
-            for r in rows
-        ],
-    )
+    hosts_text = csv_text(HOST_FIELDS, [host_record(r, machine_fields) for r in rows])
 
     write_once(args.rows_out, rows_text)
     write_once(args.sessions_out, "".join(session_lines))
