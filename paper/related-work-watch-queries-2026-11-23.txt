@@ -454,7 +454,7 @@ GET https://api.github.com/users/rosenbrockc/events?per_page=10
 
 Result: 17 verified records from #216 remained new after stacking:
 fornagielLonkit2026, lazzariSeeker2026, zhengPeace2026, gautamNucleobases2026, tsvetaevSpectralMc2026, hessmannGpff2026, claussMecobi2026, kryvonosEightPoints2026, xieThomson2026, zarcoRiesz2026, collignonCoWater2026, patkarMixedClusters2026, ramosEmbeddedWater2026, kirovSurfaceWater2026, qiaoPxrdCsp2026, tangWrongGroundState2026, ellisDorts9k2026. The unglertJaxrens2026, suarezDouQvib2026, matoMolscrub2026,
-shangOdorant2026, hernandezGlycineSspr2026, huangDegauss2026,
-caoCrystalformerCsp2026, sparrowConstrainedCsp2026, and
-woodOverprediction2026 records were already represented on stack-214 and
+shangFodorant2026, hernandezGlycineSsph2026, huangDegauss3p2026,
+caoCrystalFormerCsp2026, sparrowConstrainedCsp2026, and
+woodOverpredictionCsp2026 records were already on develop and
 were not duplicated. No manuscript wording or numeric claim changed.
