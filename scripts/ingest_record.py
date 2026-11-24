@@ -13,7 +13,10 @@ non-hex revision field refuses the record. A tuned-GMIN row is accepted
 when the paper audit accepts it, so its side commit is checked against
 the data and tuned.py of HEAD. The fetch lands in a scratch repository
 when it would otherwise land in the repository whose HEAD the check
-uses. The generators then rewrite the marked tables.
+uses. The row files are staged beside their destinations and moved into
+place with os.replace, and the generators then rewrite the marked tables.
+When a generator fails, every file the ingest may have touched is put
+back as it was.
 """
 from __future__ import annotations
 
@@ -21,6 +24,7 @@ import argparse
 import csv
 import importlib.util
 import io
+import os
 import re
 import subprocess
 import sys
@@ -32,6 +36,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import revision_reach  # noqa: E402
+from atomic_write import stage, write_atomic  # noqa: E402
 HARNESS_FIELDS = (
     "harness_revision", "harness_commit", "code_revision", "head", "anneal_sha", "anneal_head",
     "anneal_revision", "gmin_revision",
@@ -222,7 +227,7 @@ def refresh_ase(root: Path) -> None:
     _same_repo(root)
     ase = _module("ase_panel_refresh", "scripts/ase_panel/summarize.py")
     document = root / "paper/jctc/si.tex"
-    document.write_text(ase.apply_document(document.read_text()))
+    write_atomic(document, ase.apply_document(document.read_text()))
 
 
 def refresh_gmin(root: Path) -> None:
@@ -355,13 +360,55 @@ def rewrite_withheld(root: Path) -> None:
         return
     clear_withheld_cache()
     text = path.read_text()
-    path.write_text(splice_marked(text, WITHHELD_MARKS, withheld_block().rstrip("\n")))
+    write_atomic(path, splice_marked(text, WITHHELD_MARKS, withheld_block().rstrip("\n")))
 
 
 def refresh_labels(root: Path) -> None:
     script = root / "paper/jctc/scripts/cross_labels.py"
     if script.is_file():
         subprocess.run([sys.executable, str(script)], cwd=root, check=True)
+
+
+GENERATED_PATHSPECS = ("paper/jctc/*.tex", "paper/jctc/*.md", "bench/gmin-panel/*")
+
+
+def touched_files(root: Path, record: Record) -> list[Path]:
+    """Files an ingest may rewrite: the record's rows and, for this repository, the tables built from them."""
+    names = list(record.paths)
+    if root.resolve() == REPO.resolve():
+        listed = _git(root, "ls-files", "-z", "--", *GENERATED_PATHSPECS)
+        if listed.returncode == 0:
+            names.extend(name for name in listed.stdout.decode().split("\0") if name)
+    return [root / name for name in dict.fromkeys(names)]
+
+
+def snapshot(paths: list[Path]) -> dict[Path, bytes | None]:
+    return {path: path.read_bytes() if path.is_file() else None for path in paths}
+
+
+def restore(saved: dict[Path, bytes | None]) -> None:
+    """Put back every file as it was: its old bytes, or no file where there was none."""
+    for path, data in saved.items():
+        if data is None:
+            path.unlink(missing_ok=True)
+        elif not path.is_file() or path.read_bytes() != data:
+            write_atomic(path, data)
+
+
+def install_rows(root: Path, blobs: dict[str, bytes]) -> None:
+    """Stage every row file beside its destination, then move them into place."""
+    staged: list[tuple[Path, Path]] = []
+    try:
+        for name, data in blobs.items():
+            dest = root / name
+            staged.append((stage(dest, data), dest))
+        while staged:
+            temporary, dest = staged[0]
+            os.replace(temporary, dest)
+            staged.pop(0)
+    finally:
+        for temporary, _dest in staged:
+            temporary.unlink(missing_ok=True)
 
 
 def _check_name(branch: str, sha: str) -> None:
@@ -432,13 +479,16 @@ def ingest(
                 raise SystemExit(f"{branch} has no {path}")
             blobs[path] = shown.stdout
         require_reachable(blobs, reachable_repo)
-        for path, data in blobs.items():
-            dest = root / path
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(data)
-        record.refresh(root)
-        rewrite_withheld(root)
-        refresh_labels(root)
+        saved = snapshot(touched_files(root, record))
+        try:
+            install_rows(root, blobs)
+            record.refresh(root)
+            rewrite_withheld(root)
+            refresh_labels(root)
+        except BaseException:
+            restore(saved)
+            clear_withheld_cache()
+            raise
     finally:
         _git(fetch_into, "update-ref", "-d", ref)
         if scratch is not None:

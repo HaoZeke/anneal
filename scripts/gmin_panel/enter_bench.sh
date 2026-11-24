@@ -85,7 +85,7 @@ cp -f "$WORK/gmin-source.txt" "$OUT/gmin-source.txt"
 (cd "$WORK/bin" && sha256sum -- *) > "$OUT/bin-sha256.txt"
 cp -f "$HERE/run_panel.py" "$ROOT/scripts/target_tol.py" \
   "$ROOT/scripts/gmin_pin.py" "$ROOT/scripts/machine_provenance.py" \
-  "$ROOT/scripts/revision_reach.py" "$WORK/"
+  "$ROOT/scripts/revision_reach.py" "$ROOT/scripts/atomic_write.py" "$WORK/"
 cp -f "$ROOT/examples/h2h_gmin_lj.data" "$ROOT/examples/h2h_gmin_morse.data" "$WORK/"
 # Captured before HOME moves.
 user_site=$(python3 -c 'import site; print(site.getusersitepackages())')

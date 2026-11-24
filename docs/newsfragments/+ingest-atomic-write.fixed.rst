@@ -1,0 +1,1 @@
+``scripts/ingest_record.py`` stages each row file beside its destination and moves it into place with ``os.replace``, and puts every file it may have touched back as it was when a generator fails. The table generators of the ASE panel, the paper and the GMIN panel write through ``scripts/atomic_write.py``, so a failed write leaves the old file and no temporary file.

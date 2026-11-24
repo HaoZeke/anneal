@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import math
 import os
 import socket
@@ -66,6 +67,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 from gmin_pin import TARBALL_SHA256, read_built_revision, read_svnrev  # noqa: E402
 import revision_reach  # noqa: E402
+from atomic_write import write_atomic  # noqa: E402
 from machine_provenance import (  # noqa: E402
     aggregate_machine_columns,
     gmin_row_key,
@@ -932,15 +934,15 @@ def splice(path: Path, marks: tuple[str, str], block: str) -> None:
         raise SystemExit(f"{path} needs one '{start}' and one '{end}'")
     head, rest = text.split(start, 1)
     _old, tail = rest.split(end, 1)
-    path.write_text(f"{head}{start}\n{block}\n{end}{tail}")
+    write_atomic(path, f"{head}{start}\n{block}\n{end}{tail}")
 
 
 def write_csv(path: Path, fields: list[str], rows: list[dict[str, str]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
-        writer.writeheader()
-        writer.writerows(rows)
+    stream = io.StringIO()
+    writer = csv.DictWriter(stream, fieldnames=fields, lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    write_atomic(path, stream.getvalue())
 
 
 def prepared(source: Path, dest: Path) -> Path:

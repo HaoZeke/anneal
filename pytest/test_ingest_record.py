@@ -482,3 +482,130 @@ def test_a_tuned_record_is_judged_against_the_repository_it_lands_in(tmp_path: P
     git_repo(other)
     with pytest.raises(SystemExit, match="not reachable"):
         module.require_reachable({TUNED: (ROOT / TUNED).read_bytes()}, other)
+
+
+def two_file_record(remote: Path, first: str, second: str) -> str:
+    subprocess.run(["git", "init", "-b", BRANCH], cwd=remote, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "fixture@example.com"], cwd=remote, check=True)
+    subprocess.run(["git", "config", "user.name", "Fixture"], cwd=remote, check=True)
+    for name, body in ((ROW, first), (ROW.replace("rows", "more"), second)):
+        path = remote / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body)
+        subprocess.run(["git", "add", name], cwd=remote, check=True)
+    subprocess.run(["git", "commit", "-m", "two rows"], cwd=remote, check=True, capture_output=True)
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=remote, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+
+
+MORE = ROW.replace("rows", "more")
+
+
+def two_file_catalog(module, refresh):
+    return {BRANCH: module.Record(key="fixture-never-print", paths=(ROW, MORE), reason="rerun pending", refresh=refresh)}
+
+
+def test_a_failed_regeneration_leaves_every_original_row_file_intact(tmp_path: Path):
+    module = ingest()
+    remote = tmp_path / "remote"
+    remote.mkdir()
+    body = f"system,host,code_revision\nfixture,{TOKEN},{HELD}\n"
+    sha = two_file_record(remote, body, body)
+    root = tmp_path / "tree"
+    root.mkdir()
+    git_repo(root)
+    (root / ROW).parent.mkdir(parents=True)
+    (root / ROW).write_text("old rows\n")
+    (root / ROW).chmod(0o640)
+
+    def failing(_root):
+        assert (root / ROW).read_text() == body
+        raise RuntimeError("the generator failed")
+
+    with pytest.raises(RuntimeError, match="generator failed"):
+        module.ingest(
+            BRANCH, sha, remote=str(remote), root=root, git_dir=root,
+            catalog=two_file_catalog(module, failing), reachable_repo=ROOT,
+        )
+    assert (root / ROW).read_text() == "old rows\n"
+    assert (root / ROW).stat().st_mode & 0o777 == 0o640
+    assert not (root / MORE).exists()
+    assert sorted(path.name for path in (root / ROW).parent.iterdir()) == ["rows.csv"]
+
+
+def test_a_failure_while_moving_a_row_file_into_place_leaves_the_originals(tmp_path: Path, monkeypatch):
+    module = ingest()
+    remote = tmp_path / "remote"
+    remote.mkdir()
+    body = f"system,host,code_revision\nfixture,{TOKEN},{HELD}\n"
+    sha = two_file_record(remote, body, body)
+    root = tmp_path / "tree"
+    root.mkdir()
+    git_repo(root)
+    (root / ROW).parent.mkdir(parents=True)
+    (root / ROW).write_text("old rows\n")
+    (root / MORE).write_text("old more\n")
+    real = __import__("os").replace
+    calls = []
+
+    def second_move_fails(source, target):
+        calls.append(target)
+        if len(calls) == 2:
+            raise OSError("disk full")
+        return real(source, target)
+
+    monkeypatch.setattr(module.os, "replace", second_move_fails)
+    refreshed = []
+    with pytest.raises(OSError, match="disk full"):
+        module.ingest(
+            BRANCH, sha, remote=str(remote), root=root, git_dir=root,
+            catalog=two_file_catalog(module, refreshed.append), reachable_repo=ROOT,
+        )
+    assert refreshed == []
+    assert (root / ROW).read_text() == "old rows\n"
+    assert (root / MORE).read_text() == "old more\n"
+    assert sorted(path.name for path in (root / ROW).parent.iterdir()) == ["more.csv", "rows.csv"]
+
+
+def test_a_write_that_fails_keeps_the_old_file_and_leaves_no_temporary_file(tmp_path: Path, monkeypatch):
+    atomic = load("atomic_write_test", "scripts/atomic_write.py")
+    target = tmp_path / "table.csv"
+    target.write_text("old\n")
+    atomic.write_atomic(target, "new\n")
+    assert target.read_text() == "new\n"
+    assert [path.name for path in tmp_path.iterdir()] == ["table.csv"]
+
+    def refuse(*_args):
+        raise OSError("refused")
+
+    monkeypatch.setattr(atomic.os, "replace", refuse)
+    with pytest.raises(OSError, match="refused"):
+        atomic.write_atomic(target, "newer\n")
+    assert target.read_text() == "new\n"
+    assert [path.name for path in tmp_path.iterdir()] == ["table.csv"]
+    monkeypatch.undo()
+    monkeypatch.setattr(atomic.os, "fsync", refuse)
+    with pytest.raises(OSError, match="refused"):
+        atomic.write_atomic(target, "newest\n")
+    assert target.read_text() == "new\n"
+    assert [path.name for path in tmp_path.iterdir()] == ["table.csv"]
+
+
+def test_the_generators_write_their_tables_atomically(tmp_path: Path, monkeypatch):
+    panel = load("gmin_panel_atomic", "scripts/gmin_panel/run_panel.py")
+    table = tmp_path / "summary.csv"
+    table.write_text("old\n")
+    document = tmp_path / "doc.md"
+    document.write_text("a\n<!-- s -->\nold\n<!-- e -->\nz\n")
+    monkeypatch.setattr(panel.os, "replace", lambda *_a: (_ for _ in ()).throw(OSError("refused")))
+    with pytest.raises(OSError, match="refused"):
+        panel.write_csv(table, ["a"], [{"a": "1"}])
+    with pytest.raises(OSError, match="refused"):
+        panel.splice(document, ("<!-- s -->", "<!-- e -->"), "new")
+    assert table.read_text() == "old\n"
+    assert document.read_text() == "a\n<!-- s -->\nold\n<!-- e -->\nz\n"
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["doc.md", "summary.csv"]
+    monkeypatch.undo()
+    panel.write_csv(table, ["a"], [{"a": "1"}])
+    assert table.read_text() == "a\n1\n"

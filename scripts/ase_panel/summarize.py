@@ -21,6 +21,7 @@ if str(ROOT / "scripts") not in sys.path:
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 from machine_provenance import csv_fields  # noqa: E402
 import revision_reach  # noqa: E402
+from atomic_write import write_atomic  # noqa: E402
 
 SEEDS = tuple(range(2000, 2012))
 ARMS = ("anneal", "recommended", "ase_bh", "ase_mh")
@@ -710,8 +711,7 @@ def main() -> None:
         if present:
             raise SystemExit("refusing to overwrite " + ", ".join(present))
         for path, text in outputs.items():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text)
+            write_atomic(path, text)
 
 
 if __name__ == "__main__":

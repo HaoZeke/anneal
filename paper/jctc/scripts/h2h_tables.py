@@ -31,6 +31,7 @@ sys.path.insert(0, str(ROOT / "scripts" / "tip4p_h2h"))
 sys.path.insert(0, str(ROOT / "bench" / "tip4p-h2h"))
 from run_h2h_r2 import mann_whitney_u_two_sided_exact  # noqa: E402
 import revision_reach  # noqa: E402
+from atomic_write import write_atomic  # noqa: E402
 
 MANUSCRIPT = ROOT / "paper" / "jctc" / "manuscript.tex"
 SI = ROOT / "paper" / "jctc" / "si.tex"
@@ -1112,7 +1113,7 @@ def refresh(names: tuple[str, ...]) -> None:
         text = texts.get(path, path.read_text())
         texts[path] = splice(text, MARKS[name], make())
     for path, text in texts.items():
-        path.write_text(text)
+        write_atomic(path, text)
 
 
 def main(argv: list[str]) -> int:
