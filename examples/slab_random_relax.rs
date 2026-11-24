@@ -138,7 +138,7 @@ fn main() {
         "distinct_minima {} (tol={ENERGY_TOL} eV)  accepted {}  charged {}",
         clusters.len(),
         energies.len(),
-        ledger.spent()
+        ledger.charged()
     );
     if let Some(energy) = lowest {
         println!(
@@ -158,7 +158,7 @@ fn main() {
             .unwrap_or_else(|| "nan".into()),
         hits,
         energies.len(),
-        ledger.spent(),
+        ledger.charged(),
         energies.len()
     );
 }

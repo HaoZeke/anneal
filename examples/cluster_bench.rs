@@ -853,11 +853,11 @@ fn main() {
                 &out,
                 r,
                 anneal_core::SEARCH_HIT_TOL,
-                ledger.spent(),
+                ledger.charged(),
             ));
         }
         deepest = deepest.min(out.best);
-        total_charged += ledger.spent();
+        total_charged += ledger.charged();
         total_hops += out.hops;
         // Transport, on every seed. A ladder can improve mixing and still not
         // find the minimum, and a solve count reports neither half.

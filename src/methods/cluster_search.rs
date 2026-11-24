@@ -2566,7 +2566,8 @@ where
         basins,
         screened_out,
         returned,
-        charged: ledger.spent(),
+        charged: ledger.charged(),
+        settled_beyond_cap: ledger.settled_beyond_cap(),
         improvements,
         rigid_path,
         ..Outcome::default()
@@ -2760,6 +2761,67 @@ mod tests {
     use super::*;
     use crate::potentials::PairPotential;
     use ndarray::Array1;
+
+    /// The bank walk settles slices onto the caller's ledger and builds its
+    /// own outcome. With the default answer gradient the polish returns before
+    /// it touches the charge, so the outcome has to carry the whole count
+    /// itself, including settled calls that passed the budget.
+    #[cfg(feature = "bank-rpc")]
+    #[test]
+    fn a_bank_search_reports_a_nested_overrun_in_its_charge() {
+        use crate::bank_rpc::BankClient;
+        let n = 6;
+        let potential = PairPotential::lennard_jones(n);
+        let cfg = Config::recommended(n);
+        assert!(
+            !(cfg.answer_gradient > 0.0),
+            "the default polish must be off so that it returns early"
+        );
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .expect("a free port")
+            .local_addr()
+            .expect("its address")
+            .port();
+        let sock = format!("127.0.0.1:{port}");
+        let served = sock.clone();
+        std::thread::spawn(move || {
+            let _ = crate::bank_rpc::serve(served, 8);
+        });
+        let mut up = false;
+        for _ in 0..100 {
+            if let Ok(mut probe) = BankClient::connect(&sock)
+                && probe.snapshot().is_ok()
+            {
+                up = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(up, "the bank did not come up on {sock}");
+
+        let mut ledger = Ledger::new(30);
+        let mut child = ledger.slice(10);
+        assert!(child.charge_many(10));
+        assert!(!child.charge_many(40));
+        assert_eq!((child.spent(), child.settled_beyond_cap()), (10, 40));
+        ledger.settle_child(&child, 0);
+        assert_eq!(ledger.spent(), 30);
+        assert_eq!(ledger.settled_beyond_cap(), 20);
+        assert_eq!(ledger.remaining(), 0);
+
+        let mut rng = rand::rngs::StdRng::seed_from_u64(11);
+        let start =
+            crate::methods::cluster_hopping::random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+        let (outcome, _) = search_from_bank(&potential, &cfg, &mut ledger, start.view(), 7, &sock)
+            .expect("the walk runs");
+        assert_eq!(outcome.settled_beyond_cap, 20);
+        assert_eq!(
+            outcome.charged,
+            ledger.spent() + ledger.settled_beyond_cap(),
+            "the bank outcome dropped the settled overrun"
+        );
+        assert_eq!(outcome.charged, 50);
+    }
 
     #[test]
     fn quench_watch_rejects_negative_infinity() {

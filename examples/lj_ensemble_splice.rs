@@ -1293,7 +1293,8 @@ fn run_chain(
             final_energy: energy,
             accepted_transitions,
             hops,
-            charged: ledger.spent(),
+            charged: ledger.charged(),
+            settled_beyond_cap: ledger.settled_beyond_cap(),
             improvements,
             ..Outcome::default()
         }
@@ -1331,7 +1332,7 @@ fn run_chain(
             .is_some_and(|t| t.action == "splice" || t.action == "pbh" || t.action == "reoccupy")
     });
     ChainReport {
-        charged: ledger.spent(),
+        charged: ledger.charged(),
         outcome,
         tally,
         first_hit,

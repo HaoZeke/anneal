@@ -759,7 +759,7 @@ fn main() {
     log.trace.lock().expect("trace").flush().expect("trace");
 
     let calls = log.calls.load(Ordering::SeqCst);
-    let charged: usize = reports.iter().map(|r| r.ledger.spent()).sum::<usize>() + tail.spent();
+    let charged: usize = reports.iter().map(|r| r.ledger.charged()).sum::<usize>() + tail.charged();
     let reported = match (searched, settled.as_ref()) {
         (Some(a), Some(b)) if b.energy < a.0 => Some((b.energy, &b.state)),
         (Some(a), _) => Some(a),
@@ -780,7 +780,7 @@ fn main() {
              history_refusals {} history_s {:.3}",
             r.seed,
             r.budget,
-            r.ledger.spent(),
+            r.ledger.charged(),
             r.outcome.hops,
             r.outcome.basins,
             r.outcome.best,
@@ -812,7 +812,7 @@ fn main() {
     }
     println!(
         "settle reserve {reserve} charged {} settled_eV {:.8} settled_gradient {:.3e}",
-        tail.spent(),
+        tail.charged(),
         settled.as_ref().map_or(f64::NAN, |s| s.energy),
         settled.as_ref().map_or(f64::NAN, |s| s.gradient),
     );

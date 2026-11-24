@@ -521,7 +521,7 @@ fn main() {
     // Search ledger, including the polish it charged. Each charge is one
     // value_and_gradient. The reported-geometry evaluation below is not
     // part of this sum.
-    let spent = ledger.spent();
+    let spent = ledger.charged();
     let objective_calls = OBJECTIVE_CALLS.load(Ordering::Relaxed);
     let first_hit_call = FIRST_HIT_CALL.load(Ordering::Relaxed);
     let potential_s = POTENTIAL_NS.load(Ordering::Relaxed) as f64 / 1e9;

@@ -158,7 +158,7 @@ fn main() {
             "  seed {seed}: best {:.6} eV  hops {}  charged {}  basins {}  converged {}/{}  arm {}  search {search}",
             out.best,
             out.hops,
-            ledger.spent(),
+            ledger.charged(),
             out.basins,
             stats.converged,
             stats.total(),
@@ -175,7 +175,7 @@ fn main() {
         if let Some((e, g)) = checked {
             println!("    verify e={e:.6} |g|_mobile={g:.3e}");
         }
-        report_trace(&out, ledger.spent());
+        report_trace(&out, ledger.charged());
         if let Some(bx) = out.best_state {
             let path = format!("best_slab_eindir_s{seed}.xyz");
             let mut f = std::fs::File::create(&path).expect("xyz");

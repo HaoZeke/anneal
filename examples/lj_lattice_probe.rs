@@ -91,7 +91,7 @@ fn main() {
                 Probe {
                     start: first.energy,
                     end,
-                    charged: ledger.spent(),
+                    charged: ledger.charged(),
                     first_calls: first.calls,
                     searches: stats.searches,
                     f555: cna[0],

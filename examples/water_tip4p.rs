@@ -108,7 +108,7 @@ fn main() {
         });
         deepest = deepest.min(out.best);
         total_hops += out.hops;
-        total_charged += ledger.spent();
+        total_charged += ledger.charged();
         println!(
             "  seed {seed}: best {:.6} kJ/mol  wales-hodges {}  first_hit {}  hops {}  charged {}{}",
             out.best,
@@ -117,7 +117,7 @@ fn main() {
                 .map(|v| v.to_string())
                 .unwrap_or_else(|| "-".into()),
             out.hops,
-            ledger.spent(),
+            ledger.charged(),
             if hit { "  SOLVED" } else { "" }
         );
         println!(
@@ -125,7 +125,7 @@ fn main() {
             usize::from(hit),
             out.best,
             out.hops as f64,
-            ledger.spent() as f64 / out.hops.max(1) as f64
+            ledger.charged() as f64 / out.hops.max(1) as f64
         );
         let _ = io::stdout().flush();
     }

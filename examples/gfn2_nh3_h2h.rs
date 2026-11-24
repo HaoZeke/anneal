@@ -418,7 +418,7 @@ fn main() {
         .unwrap_or(f64::NAN);
     let polish_calls = ledger.answer_polish_calls();
     let wall_s = wall.elapsed().as_secs_f64();
-    let spent = ledger.spent();
+    let spent = ledger.charged();
     let pot_s = pot_ns.load(Ordering::Relaxed) as f64 / 1.0e9;
     let calls_timed = timed_calls.load(Ordering::Relaxed);
     let outside_s = (wall_s - pot_s).max(0.0);

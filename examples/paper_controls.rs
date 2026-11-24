@@ -343,7 +343,7 @@ fn run_population(
     );
     (
         report.clone(),
-        ledger.spent(),
+        ledger.charged(),
         started.elapsed().as_secs_f64(),
         first_hit,
         report.generations,
