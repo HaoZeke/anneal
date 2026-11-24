@@ -1,6 +1,6 @@
 // Copyright (c) anneal developers
 //! One seed of `Config::recommended` on a Lennard-Jones size, with switches
-//! for the symmetry completion.
+//! for the symmetry completion and the observed-basis probe.
 //!
 //! ```text
 //! anneal_lj_run run <system> <seed>
@@ -11,12 +11,13 @@
 //! does, and prints the same row. It stops at the first quenched energy at
 //! or below the reference plus 0.001 unless `H2H_NOSTOP` is set, which runs
 //! the whole budget so two builds can be compared call for call after a hit.
-//! `H2H_BUDGET` replaces the budget. `H2H_COMPLETION=off` runs without
-//! the symmetry completion of a new basin, `once` completes each basin
-//! once per chain, `framework` reads the group from the positions alone
-//! and `fitted` adds the refinements of that reading. `BITS` on stderr
-//! gives the bits of the best energy, the charged count and the
-//! completions quenched, so two builds can be compared exactly.
+//! `H2H_BUDGET` replaces the budget. `H2H_COMPLETION=off` runs without the
+//! symmetry completion of a new basin, `once` completes each basin once per
+//! chain, `framework` reads the group from the positions alone and `fitted`
+//! adds the refinements of that reading. `H2H_PROBE=off` turns the
+//! observed-basis probe of a stalled walk off. `BITS` on stderr gives the
+//! bits of the best energy, the charged count and the completions
+//! quenched, so two builds can be compared exactly.
 
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, Outcome, random_cluster_in_radius, run_with_gradient,
@@ -60,6 +61,9 @@ fn switch(cfg: &mut Config) {
         Ok("framework") => cfg.symmetry_completion_framework = true,
         Ok("fitted") => cfg.symmetry_completion_fitted = true,
         _ => {}
+    }
+    if std::env::var("H2H_PROBE").as_deref() == Ok("off") {
+        cfg.observed_basis_probe = false;
     }
 }
 
