@@ -46,6 +46,7 @@ def test_config_recommended_and_for_cluster():
     assert not rec.symmetry_completion_once
     assert not rec.symmetry_completion_framework
     assert not rec.symmetry_completion_fitted
+    assert rec.observed_basis_probe
     assert rec.calibrated_screen
     assert rec.finish_improving
     assert base.finish_improving
