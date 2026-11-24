@@ -200,6 +200,19 @@ fn cmd_run(args: &[String]) -> i32 {
     if std::env::var("H2H_CAP_TWIST").is_ok_and(|value| value == "1") {
         cfg.cap_twist = true;
     }
+    // `off` turns the symmetry completion of a new basin off, `fitted` reads
+    // the group of the positions alone with the refinements. Unset leaves
+    // the preset.
+    match std::env::var("H2H_COMPLETION").as_deref() {
+        Ok("off") => cfg.symmetry_completion_on_new = false,
+        Ok("framework") => cfg.symmetry_completion_framework = true,
+        Ok("fitted") => cfg.symmetry_completion_fitted = true,
+        _ => {}
+    }
+    // `off` turns the observed-basis probe of a stalled walk off.
+    if std::env::var("H2H_PROBE").as_deref() == Ok("off") {
+        cfg.observed_basis_probe = false;
+    }
     let start = if let Some(path) = args.get(3) {
         match read_coords(path) {
             Ok(coords) if coords.len() == 3 * spec.n => coords,

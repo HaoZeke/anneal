@@ -63,7 +63,8 @@ fn main() {
 /// a run can be compared with and without it, and `once` completes each
 /// basin once per chain, `framework` reads the group of the positions
 /// alone, and `fitted` adds the refinements of that reading. Unset leaves the
-/// preset.
+/// preset. `H2H_PROBE=off` turns the observed-basis probe of a stalled walk
+/// off.
 fn switch_completion(cfg: &mut Config) {
     match std::env::var("H2H_COMPLETION").as_deref() {
         Ok("off") => cfg.symmetry_completion_on_new = false,
@@ -71,6 +72,9 @@ fn switch_completion(cfg: &mut Config) {
         Ok("framework") => cfg.symmetry_completion_framework = true,
         Ok("fitted") => cfg.symmetry_completion_fitted = true,
         _ => {}
+    }
+    if std::env::var("H2H_PROBE").as_deref() == Ok("off") {
+        cfg.observed_basis_probe = false;
     }
 }
 
