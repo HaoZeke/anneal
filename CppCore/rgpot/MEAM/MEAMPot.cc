@@ -363,6 +363,9 @@ void MEAMPot::forceImpl(const ForceInput &in, ForceOut *out) const {
   if (out == nullptr) {
     bad("null output buffer");
   }
+  if (in.nAtoms > 0 && out->F == nullptr) {
+    bad("null force buffer");
+  }
   out->energy = 0.0;
   out->variance = 0.0;
   out->has_stress = 0;
