@@ -1757,7 +1757,7 @@ mod tests {
                         .collect::<Vec<_>>()
                 );
             }
-            let proposed = propose(x.view(), &classes).expect("propose");
+            let proposed = propose_templates(x.view(), &classes).expect("propose");
             let ungated = ungated_projection(x.view(), &classes).expect("ungated");
             assert_eq!(proposed.group, ungated.group);
             assert_eq!(proposed.measure.to_bits(), ungated.measure.to_bits());
