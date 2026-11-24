@@ -1567,6 +1567,7 @@ pub(crate) mod tests {
 
     #[test]
     fn reverse_cycle_on_undeclared_water_matches_base_proposals() {
+        let bits = |x: &Array1<f64>| x.iter().map(|value| value.to_bits()).collect::<Vec<_>>();
         let water = geometry();
         let undeclared = RigidBodyGeometry::new(water.sites().to_vec(), water.species().to_vec())
             .expect("water");
@@ -1577,16 +1578,24 @@ pub(crate) mod tests {
         let mut x_base = x_undeclared.clone();
         let mut rng_undeclared = StdRng::seed_from_u64(4);
         let mut rng_base = StdRng::seed_from_u64(4);
-        assert_eq!(
-            reverse_cycle(&undeclared, n, &mut x_undeclared, &mut rng_undeclared),
-            base_reverse_cycle(&undeclared, n, &mut x_base, &mut rng_base)
-        );
-        assert_eq!(x_undeclared, x_base);
+        assert!(reverse_cycle(
+            &undeclared,
+            n,
+            &mut x_undeclared,
+            &mut rng_undeclared
+        ));
+        assert!(base_reverse_cycle(
+            &undeclared,
+            n,
+            &mut x_base,
+            &mut rng_base
+        ));
+        assert_eq!(bits(&x_undeclared), bits(&x_base));
 
         let mut x_declared = ring(n);
         let mut rng_declared = StdRng::seed_from_u64(4);
         assert!(reverse_cycle(&water, n, &mut x_declared, &mut rng_declared));
-        assert_eq!(x_undeclared, x_declared);
+        assert_eq!(bits(&x_undeclared), bits(&x_declared));
 
         let start4 = ring(4);
         for seed in 0..16 {
@@ -1601,8 +1610,8 @@ pub(crate) mod tests {
             let result_base = base_reverse_cycle(&undeclared, 4, &mut base, &mut rng_base);
             assert_eq!(result_a, result_b, "seed {seed}");
             assert_eq!(result_a, result_base, "seed {seed}");
-            assert_eq!(a, b, "seed {seed}");
-            assert_eq!(a, base, "seed {seed}");
+            assert_eq!(bits(&a), bits(&b), "seed {seed}");
+            assert_eq!(bits(&a), bits(&base), "seed {seed}");
         }
     }
 }
