@@ -1,0 +1,5 @@
+cell,seed,solve_shortest_paths_loop_avx2,kuhn_munkres_loop_avx2,augment_tight_avx2,csm_recall_op,candidate_from_basis,check
+lj38,2000,78,12,2946,138,1,identical_to_B
+lj38,2001,342,52,17450,414,1,identical_to_B
+m38r14d,2000,332,124,66696,552,1,identical_to_B
+total,,752,188,87092,1104,3,

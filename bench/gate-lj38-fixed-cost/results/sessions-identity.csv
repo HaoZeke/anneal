@@ -1,0 +1,24 @@
+key,value
+base_ref,9b65fda3972fd8c014bce886a3ea5c05956d64af
+base_tree,a49a66d1422cfefa28012fd12e6729bc4e879d5f
+b_commit,f9bbb5e86a67b7bbfaa629ac7378306f1f22cd1d
+b_tree,510c087e8c6e4c9aeedae202204a7919cee95a60
+harness_blobs,run_gate.py:bd66f48b60309d58dd418698ed3dcad47ef82376 guard_trace.rs:c8aa9cc83ca6e0f2477376ae84c169fe72bb37b9 analyze.py:75cb3e530d0cfd12f7ae062a8cba3ea6a591214e
+machine_id,3b11c160088e7af5c4f7ebd9da95e0bfe019a34698416701bb057c15fea10873
+seeds_lj38,2000-2023
+seeds_others,2000-2011
+n,"{""sc126-38"": 12, ""tip4p6"": 12}"
+panel,identity
+cpu_model,Intel(R) Xeon(R) Processor
+cpu_flags,fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc pebs bts rep_good nopl xtopology nonstop_tsc cpuid tsc_known_freq pni pclmulqdq dtes64 vmx ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch cpuid_fault ssbd ibrs ibpb stibp ibrs_enhanced tpr_shadow flexpriority ept vpid ept_ad fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves avx_vnni avx512_bf16 wbnoinvd arat vnmi avx512vbmi umip pku ospke avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq rdpid bus_lock_detect cldemote movdiri movdir64b fsrm md_clear serialize tsxldtrk amx_bf16 avx512_fp16 amx_tile amx_int8 flush_l1d arch_capabilities
+avx2,true
+core,0
+threads,1
+schedule,95ba0c27615eb1010a5ce5661fbc00494becb9a368d7c63d6076875994b1a66d
+build_a,d79d0a660335d7e075d5c68f781f1c4307512ecdb9f3ef91df3af4332bb30a5a
+build_b,cff14b1bf548edf3973f26bfbf65be1c9900dbe023ac17ea4c673d93dfc51bce
+build_a2,49e33fa0554d98c1504b0cf1ba3f87150fceed2da041ee4b3b88a19aa2653a41
+balance_tip4p6,0:A=6 1:B=6 2:Ap=6 3:Ap=6 4:B=6 5:A=6
+balance_sc126-38,0:A=6 1:B=6 2:Ap=6 3:Ap=6 4:B=6 5:A=6
+budget_tip4p6,500000
+budget_sc126-38,400000
