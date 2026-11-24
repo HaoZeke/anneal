@@ -13,8 +13,8 @@
 //! (`81d6bffc`). Linking IRA no longer changes this walk, so the
 //! feature build keeps the Hungarian record.
 //!
-//! Removing structure-specific proposals changes the LJ38 pin. LJ98's
-//! short trajectory is unchanged.
+//! Removing the fixed fivefold openings and changing the general symmetry
+//! order distribution move both short records.
 
 use anneal_core::methods::cluster_hopping::{Config, Ledger};
 use anneal_core::methods::cluster_search::search;
@@ -25,8 +25,8 @@ fn lj38_and_lj98_short_searches_stay_put() {
     anneal_core::install_rgpot_kernels!();
     // (n, seed, budget, best, hops, converged, capped)
     let cases: &[(usize, u64, usize, f64, usize, usize, usize)] = &[
-        (38, 1, 2500, -170.711_308_119_462_44, 21, 14, 19),
-        (98, 7, 2500, -520.107_879_491_539_2, 10, 9, 9),
+        (38, 1, 2500, -172.237_562_724_757_7, 40, 37, 31),
+        (98, 7, 2500, -523.435_499_220_274, 16, 14, 17),
     ];
     let mut records = Vec::new();
     for (n, seed, budget, best, hops, converged, capped) in cases {
@@ -61,7 +61,7 @@ fn lj38_and_lj98_short_searches_stay_put() {
         assert_eq!(stats.capped, *capped);
     }
     let expected = "\
-LJ38 -170.7113081194624442 21 14 19 2500
-LJ98 -520.1078794915391654 10 9 9 2500";
+LJ38 -172.2375627247577086 40 37 31 2500
+LJ98 -523.4354992202739822 16 14 17 2500";
     assert_eq!(records.join("\n"), expected);
 }

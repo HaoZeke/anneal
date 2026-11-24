@@ -35,7 +35,7 @@ use std::sync::{Arc, Mutex};
 
 use anneal_core::bias::BasinBias;
 use anneal_core::coreclass::{CoreClassTable, CoreVerdict};
-use anneal_core::corekey::motif_class;
+use anneal_core::corekey::descriptor_class;
 use anneal_core::diversity::DiversityAnnealer;
 use anneal_core::methods::bank::{Admission, Bank};
 use anneal_core::methods::cluster_hopping::{
@@ -952,7 +952,7 @@ fn run_chain(
             return CheckpointAction::ExternalWork { external_calls };
         }
         if let Some(cores) = cores.as_ref() {
-            let class = motif_class(snapshot.current_state()).index();
+            let class = descriptor_class(snapshot.current_state()).index();
             let mut table = cores.lock().expect("core table");
             let verdict = table.report(chain, class, snapshot.current_energy(), snapshot.charged());
             if verdict == CoreVerdict::Continue {

@@ -532,7 +532,7 @@ fn solve_shortest_paths(
     // scan into a shift per column. The scratch is reused across calls on
     // this thread. One solve does not call another.
     #[cfg(target_arch = "x86_64")]
-    let use_avx2 = std::is_x86_feature_detected!("avx2");
+    let use_avx2 = crate::avx2_available();
     PATH_SCRATCH.with(|cell| {
         let scratch = &mut *cell.borrow_mut();
         let width = n + 1;
@@ -1015,7 +1015,7 @@ std::thread_local! {
 
 fn kuhn_munkres(costs: &[f64], n: usize) -> Option<Vec<usize>> {
     #[cfg(target_arch = "x86_64")]
-    let use_avx2 = std::is_x86_feature_detected!("avx2");
+    let use_avx2 = crate::avx2_available();
     KM_SCRATCH.with(|cell| {
         let scratch = &mut *cell.borrow_mut();
         let nn = n * n;
@@ -1882,7 +1882,7 @@ mod tests {
     fn the_vector_slack_has_the_scalar_bits() {
         #[cfg(target_arch = "x86_64")]
         {
-            if !std::is_x86_feature_detected!("avx2") {
+            if !crate::avx2_available() {
                 return;
             }
             let mut state = 0x51ed_u64;

@@ -1682,7 +1682,7 @@ impl ClusterMove {
             ClusterMove::ShellRotate(ShellRotate { n_points: n }),
             ClusterMove::Symmetrise(Symmetrise {
                 n_points: n,
-                orders: vec![2, 3, 4, 5, 6],
+                orders: crate::symmetrise::orders_held(n),
                 pair_cutoff: symmetrise_cutoff,
             }),
         ]
@@ -1748,7 +1748,7 @@ impl ClusterMove {
             }),
             ClusterMove::Symmetrise(Symmetrise {
                 n_points: n,
-                orders: vec![2, 3, 4, 5, 6],
+                orders: crate::symmetrise::orders_held(n),
                 pair_cutoff: symmetrise_cutoff,
             }),
         ]
@@ -2242,7 +2242,8 @@ impl ClusterMove {
             } => {
                 let n = *n_points;
                 if n >= 3 {
-                    let cands = crate::symmetrise::detect_all(x, n, &[2, 3, 4, 5, 6], *tolerance);
+                    let orders = crate::symmetrise::orders_held(n);
+                    let cands = crate::symmetrise::detect_all(x, n, &orders, *tolerance);
                     if !cands.is_empty() {
                         // One generator per distinct axis, lowest deviation
                         // first, at most three: two generate every axial and
