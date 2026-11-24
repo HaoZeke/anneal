@@ -195,7 +195,7 @@ def test_panel_reproduce_commands_and_session_metadata(tmp_path):
     command = ["snakemake", "-s", "workflow/Snakefile", "tip4p_h2h", "--cores", "1", "--force"]
     proc = subprocess.run(
         [
-            "python3",
+            sys.executable,
             str(ROOT / "scripts/session_metadata.py"),
             "--output",
             str(out),
@@ -723,14 +723,16 @@ def test_an_unpushed_revision_needs_a_reason(tmp_path, monkeypatch):
 
 
 def remote_tip(cwd=ROOT):
-    """The tip of an audited remote branch: develop, then main, then the rest of the audited set.
+    """The tip of a branch in the audit's own remote set, develop first and then main where the set has it.
 
     A clone holds every branch of origin, and the audit counts a revision as
-    pushed only when one of its audited branches contains it; the first ref
-    in refs/remotes order is therefore not a tip the audit knows."""
-    audited = (*audit_mod.AUDIT_REMOTE_BRANCHES, *audit_mod.AUDIT_OPTIONAL_REMOTES)
-    for branch in dict.fromkeys(("develop", "main", *audited)):
-        found = subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}^{{commit}}"],
+    pushed only when a ref of audit_remote_refs() contains it; the first ref
+    in refs/remotes order, or the newest, is therefore not a tip the audit
+    knows."""
+    refs = audit_mod.audit_remote_refs()
+    preferred = [ref for ref in ("refs/remotes/origin/develop", "refs/remotes/origin/main") if ref in refs]
+    for ref in dict.fromkeys((*preferred, *refs)):
+        found = subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
                                cwd=cwd, capture_output=True, text=True, check=False)
         if found.returncode == 0:
             return found.stdout.strip()
@@ -739,7 +741,9 @@ def remote_tip(cwd=ROOT):
 
 
 def remote_layout(path, *branches):
-    """A repository whose refs/remotes hold one empty-tree commit for each named origin branch."""
+    """A repository whose refs/remotes hold one empty-tree commit for each named origin branch.
+
+    A branch named later has the later commit date, so the last one is the newest ref."""
     env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.org",
            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.org"}
 
@@ -752,6 +756,7 @@ def remote_layout(path, *branches):
     tree = run("hash-object", "-t", "tree", "-w", "--stdin", stdin="")
     tips = {}
     for number, branch in enumerate(branches):
+        env["GIT_COMMITTER_DATE"] = env["GIT_AUTHOR_DATE"] = f"@{1_000_000 + 100 * number} +0000"
         tips[branch] = run("commit-tree", tree, "-m", f"tip of {branch} {number}")
         run("update-ref", f"refs/remotes/origin/{branch}", tips[branch])
     return tips
@@ -765,6 +770,45 @@ def test_the_remote_tip_is_an_audited_branch_whatever_sorts_first(tmp_path):
     assert remote_tip(tmp_path / "no-develop") == tips["main"]
     tips = remote_layout(tmp_path / "audited-only", "anneal-gmin-pin-followup3", "fix/gmin-sc2", "bench/gmin-sc3")
     assert remote_tip(tmp_path / "audited-only") == tips["bench/gmin-sc3"]
+
+
+def newest_remote(path):
+    return subprocess.run(["git", "for-each-ref", "--sort=-committerdate", "--count=1", "--format=%(refname)",
+                           "refs/remotes"], cwd=path, capture_output=True, text=True, check=True).stdout.strip()
+
+
+def test_the_remote_tip_is_never_chosen_for_being_the_newest_ref(tmp_path):
+    tips = remote_layout(tmp_path / "newest-main", "develop", "bench/crest-gaps", "zzz-unaudited", "main")
+    assert newest_remote(tmp_path / "newest-main") == "refs/remotes/origin/main"
+    assert remote_tip(tmp_path / "newest-main") == tips["develop"]
+    tips = remote_layout(tmp_path / "newest-foreign", "develop", "main", "zzz-unaudited")
+    assert newest_remote(tmp_path / "newest-foreign") == "refs/remotes/origin/zzz-unaudited"
+    assert remote_tip(tmp_path / "newest-foreign") == tips["develop"]
+
+
+def test_the_remote_tip_takes_main_only_while_the_audit_counts_it(tmp_path, monkeypatch):
+    tips = remote_layout(tmp_path / "set", "bench/crest-gaps", "main")
+    assert newest_remote(tmp_path / "set") == "refs/remotes/origin/main"
+    assert "refs/remotes/origin/main" in audit_mod.audit_remote_refs()
+    assert remote_tip(tmp_path / "set") == tips["main"]
+    monkeypatch.setattr(audit_mod, "AUDIT_OPTIONAL_REMOTES",
+                        tuple(b for b in audit_mod.AUDIT_OPTIONAL_REMOTES if b != "main"))
+    assert "refs/remotes/origin/main" not in audit_mod.audit_remote_refs()
+    assert remote_tip(tmp_path / "set") == tips["bench/crest-gaps"]
+    remote_layout(tmp_path / "only-main", "main")
+    with pytest.raises(pytest.fail.Exception, match="no audited remote branch is present"):
+        remote_tip(tmp_path / "only-main")
+
+
+def test_the_revision_index_and_the_remote_tip_read_one_remote_set(monkeypatch):
+    seen = []
+    real = audit_mod.audit_remote_refs
+    monkeypatch.setattr(audit_mod, "audit_remote_refs", lambda: seen.append(1) or real())
+    audit_mod.RevisionIndex((), (), (), ())
+    assert seen
+    refs = audit_mod.audit_remote_refs()
+    assert len(refs) == len(set(refs))
+    assert {f"refs/remotes/origin/{b}" for b in audit_mod.AUDIT_REMOTE_BRANCHES} <= set(refs)
 
 
 def test_the_remote_tip_fails_clearly_when_no_audited_branch_is_present(tmp_path):
@@ -1853,7 +1897,7 @@ def test_session_metadata_records_the_anneal_repro_checkout(tmp_path):
     out = tmp_path / "sessions.jsonl"
     env = dict(__import__("os").environ, OMP_NUM_THREADS="3")
     proc = subprocess.run(
-        ["python3", str(ROOT / "scripts/session_metadata.py"), "--output", str(out), "--campaign", "water-crest-fair-n192",
+        [sys.executable, str(ROOT / "scripts/session_metadata.py"), "--output", str(out), "--campaign", "water-crest-fair-n192",
          "--root", str(ROOT), "--anneal-repro", str(repro), "--", "snakemake", "water_crest_fair"],
         cwd=ROOT, check=False, capture_output=True, text=True, env=env,
     )
@@ -2250,7 +2294,7 @@ def test_tblite_receipt_reads_package_metadata(tmp_path):
     output = tmp_path / "toolchain.json"
     subprocess.run(
         [
-            "python3",
+            sys.executable,
             str(ROOT / "paper/jctc/scripts/tblite_receipt.py"),
             "--metadata",
             str(metadata),
@@ -2273,12 +2317,16 @@ def test_tblite_receipt_falls_back_to_tomli_without_tomllib(tmp_path):
     metadata = tmp_path / "fpm.toml"
     metadata.write_text('name = "tblite"\nversion = "0.7.0"\n')
     code = (
-        "import importlib.abc, importlib.util, sys, types, tomllib\n"
+        "import importlib.abc, importlib.util, sys, types\n"
+        "try:\n"
+        "    import tomllib as parser\n"
+        "except ImportError:\n"
+        "    import tomli as parser\n"
         "tomli = types.ModuleType('tomli')\n"
-        "tomli.loads = tomllib.loads\n"
+        "tomli.loads = parser.loads\n"
         "tomli.loaded_as = 'tomli'\n"
         "sys.modules['tomli'] = tomli\n"
-        "sys.modules.pop('tomllib')\n"
+        "sys.modules.pop('tomllib', None)\n"
         "class NoTomllib(importlib.abc.MetaPathFinder):\n"
         "    def find_spec(self, name, path=None, target=None):\n"
         "        if name == 'tomllib':\n"
@@ -2586,10 +2634,69 @@ assert not any(name.split(".")[0] == "numpy" for name in sys.modules)
 """
 
 
-def test_the_audit_runs_without_numpy():
+def test_the_sutton_chen_check_runs_without_numpy():
     run = subprocess.run([sys.executable, "-c", NUMPY_BLOCK, str(ROOT / "scripts" / "paper_audit.py")],
                          cwd=ROOT, capture_output=True, text=True, check=False)
     assert run.returncode == 0, run.stderr[-2000:]
+
+
+FULL_AUDIT_WITHOUT_NUMPY = """
+import importlib.abc, runpy, sys
+
+BLOCKED = ("numpy", "scipy", "matplotlib")
+attempts = []
+
+class NoNumpy(importlib.abc.MetaPathFinder):
+    def find_spec(self, name, path=None, target=None):
+        if name.split(".")[0] in BLOCKED:
+            attempts.append(name)
+            raise ImportError(f"{name} is not installed")
+
+for name in list(sys.modules):
+    if name.split(".")[0] in BLOCKED:
+        del sys.modules[name]
+sys.meta_path.insert(0, NoNumpy())
+script = sys.argv[1]
+sys.argv = [script, *sys.argv[2:]]
+status = 0
+try:
+    runpy.run_path(script, run_name="__main__")
+except SystemExit as stop:
+    status = stop.code if isinstance(stop.code, int) else 1
+loaded = sorted(name for name in sys.modules if name.split(".")[0] in BLOCKED)
+print("blocked imports tried:", attempts, "loaded:", loaded)
+sys.exit(status or (3 if attempts or loaded else 0))
+"""
+
+
+def full_audit_without_numpy(script, *args):
+    return subprocess.run([sys.executable, "-c", FULL_AUDIT_WITHOUT_NUMPY, str(script), *args],
+                          cwd=ROOT, capture_output=True, text=True, check=False)
+
+
+def test_the_audit_runs_without_numpy():
+    run = full_audit_without_numpy(ROOT / "scripts" / "paper_audit.py")
+    assert run.returncode == 0, (run.stdout[-1500:], run.stderr[-1500:])
+    assert "blocked imports tried: [] loaded: []" in run.stdout
+    assert " 0 drifted" in run.stdout
+
+
+def test_the_numpy_free_audit_run_fails_when_a_path_imports_numpy(tmp_path):
+    caught = tmp_path / "caught.py"
+    caught.write_text("import numpy\n")
+    run = full_audit_without_numpy(caught)
+    assert run.returncode != 0
+    assert "ImportError" in run.stderr or "numpy" in run.stderr
+
+    swallowed = tmp_path / "swallowed.py"
+    swallowed.write_text("try:\n    import numpy\nexcept ImportError:\n    pass\n")
+    run = full_audit_without_numpy(swallowed)
+    assert run.returncode == 3
+    assert "blocked imports tried: ['numpy']" in run.stdout
+
+    lazy = tmp_path / "lazy.py"
+    lazy.write_text("def helper():\n    import numpy\nhelper()\n")
+    assert full_audit_without_numpy(lazy).returncode != 0
 
 
 def test_the_sutton_chen_helpers_import_without_numpy():

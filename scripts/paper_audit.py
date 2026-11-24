@@ -99,6 +99,16 @@ AUDIT_OPTIONAL_REMOTES = (
     "fix/sc-shelf-waypoint",
     "main",
 )
+
+
+def audit_remote_refs() -> list[str]:
+    """The remote refs whose closure counts a revision as pushed.
+
+    The revision index and the tests that need a pushed commit both read this
+    list, so a tip a test picks is one the audit knows."""
+    return [f"refs/remotes/origin/{branch}" for branch in (*AUDIT_REMOTE_BRANCHES, *AUDIT_OPTIONAL_REMOTES)]
+
+
 # Cited revisions that no remote ref contains, no verified alias covers and no
 # recorded code_tree resolves, each with the reason. The file only explains an
 # unresolved revision: reachability decides which revisions are unresolved.
@@ -4130,8 +4140,7 @@ class RevisionIndex:
         asked = sorted({n for n in names + tips + patched if n})
         out = git("cat-file", "--batch-check", stdin="".join(f"{n}^{{commit}}\n" for n in asked)).stdout.splitlines()
         self.commit = {n: line.split()[0] for n, line in zip(asked, out) if line.split()[1:2] == ["commit"]}
-        remote_refs = [f"refs/remotes/origin/{branch}" for branch in
-                       (*AUDIT_REMOTE_BRANCHES, *AUDIT_OPTIONAL_REMOTES)]
+        remote_refs = audit_remote_refs()
         audited_refs = ["HEAD", *(ref for ref in remote_refs
                                    if git("show-ref", "--verify", "--quiet", ref).returncode == 0),
                         *git("for-each-ref", "--format=%(refname)", "refs/tags").stdout.split()]
