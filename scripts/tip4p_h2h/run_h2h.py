@@ -39,6 +39,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         break
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 from machine_provenance import (  # noqa: E402
+    default_gmin_source_metadata,
     machine_columns,
     read_built_gmin_provenance,
     require_csv_schema,
@@ -343,11 +344,16 @@ def main() -> int:
         print(f"cwd is {Path.cwd()}, not /work", file=sys.stderr)
         return 2
     args.work.mkdir(parents=True, exist_ok=True)
+    env_source = os.environ.get("GMIN_SOURCE_FILE", "").strip()
+    source_path = args.gmin_source or (
+        Path(env_source)
+        if env_source
+        else default_gmin_source_metadata(args.svnrev)
+    )
     head, _recorded_revision = read_provenance(
         args.head_file,
-        args.gmin_source,
+        source_path,
     )
-    source_path = args.gmin_source or (args.svnrev.parents[3] / "gmin-source.txt")
     revision, gmin_build_key = read_built_gmin_provenance(args.svnrev, source_path)
     host = os.uname().nodename
     machine = machine_columns()

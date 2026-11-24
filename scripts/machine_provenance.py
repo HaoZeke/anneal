@@ -243,6 +243,11 @@ def _gmin_pin_module():
     return gmin_pin
 
 
+def default_gmin_source_metadata(svnrev: Path) -> Path:
+    """Derive `<work>/gmin-source.txt` from `<work>/<src>/wales/GMIN/source/SVNREV`."""
+    return _gmin_pin_module().default_source_metadata(svnrev)
+
+
 def read_built_gmin_provenance(svnrev: Path, metadata: Path) -> tuple[str, str]:
     """Return the verified `(revision, build_key)` pair for a built GMIN binary."""
     return _gmin_pin_module().read_built_provenance(svnrev, metadata)

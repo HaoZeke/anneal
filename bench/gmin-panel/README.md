@@ -14,7 +14,20 @@ A hit is a quenched energy at or below the Cambridge Cluster Database
 energy plus 0.001: the Lennard-Jones table, pure gold at 55 in the Cu-Au
 Gupta archive, and the Doye-Wales Morse table. A miss is entered at the
 budget. Both arms start from the geometry the anneal example writes with
-`coords` for that seed, and both count one call per energy and gradient.
+`coords` for that seed. Under the current in-tree
+`bench/lj104-lattice/v2/h2h-gmin.patch`
+(`3bf5d49a0a1cb0512a228212482e76e98195946096ceae3b54e88ca4a43b7189`),
+both codes count one call per energy and gradient (`GRADT=true`
+`gradient_passes` in GMIN, with `GRADT=false` `energy_only_entries`
+reported separately without consuming the cap); in the pre-correction rows
+in `rows.csv` — recorded in `63ee803397a625cb4b51218f5467f4baa2e6da6a` (on
+anneal `c2de652dca0bc75e2b0cb4afffac91fd656404e4`),
+`ac5cfc3fd39c2b29cb71ed53ca1b34b39d33f4c2` and
+`1c1b12384683485cf820d3a244151b48973dc0f7` using the pre-correction
+`h2h-gmin.patch` from `465e583be21e9b82befc94ff01cf931a13f8f0a9`
+(`a31221a67883d20032a029e34e3d81bd62c5bcb786c97fff02a9c234adc34553`) —
+anneal counted one call per energy and gradient while the GMIN cap counted
+every entry to `POTENTIAL` (`GRADT=true` and `GRADT=false` alike).
 anneal runs `Config::recommended` through `h2h_gmin_proof` (Lennard-Jones),
 `h2h_metal` (Au55, with the gold species label and `basin_stride = 8`) and
 `h2h_morse` (Morse, which quenches one Mackay cap before the walk when the
@@ -74,10 +87,20 @@ is already omitted as censored, and `hit` and `evals_to_hit` are unaffected.
   `host` is the UTS hostname and `session` the start of the runner process.
 - `gmin-source.txt`: the GMIN tarball, SVNREV, patches, CMake flags,
   compiler, linked BLAS and LAPACK and binary hash.
-  This committed file is historical evidence for the provisional rows and
-  retains their `aac1548a` label and old tarball digest. Current builders
-  share the verified `9cbec1a4` pin in `scripts/gmin_pin.py`; new source
-  notes and rows record the built `SVNREV` instead of rewriting this data.
+  `patch=bench/lj104-lattice/v2/h2h-gmin.patch` records the current
+  in-tree patch digest
+  (`3bf5d49a0a1cb0512a228212482e76e98195946096ceae3b54e88ca4a43b7189`),
+  while `rows_patch` records the pre-correction patch from
+  `465e583be21e9b82befc94ff01cf931a13f8f0a9`
+  (`a31221a67883d20032a029e34e3d81bd62c5bcb786c97fff02a9c234adc34553`)
+  that built the GMIN binaries for the provisional rows in `rows.csv`
+  (`63ee803397a625cb4b51218f5467f4baa2e6da6a`,
+  `ac5cfc3fd39c2b29cb71ed53ca1b34b39d33f4c2` and
+  `1c1b12384683485cf820d3a244151b48973dc0f7`).
+  This committed file retains their `aac1548a` label and old tarball
+  digest. Current builders share the verified `9cbec1a4` pin in
+  `scripts/gmin_pin.py`; new source notes and rows record the built
+  `SVNREV` and `build_key` instead of rewriting this data.
   `bin-sha256.txt`: the five binaries (`4f772314...` for GMIN in session
   `20261117T035457Z`, `4665badc...` in `20261117T152941Z`; the four Rust
   binaries are bit-identical across both sessions).
