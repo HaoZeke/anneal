@@ -129,8 +129,13 @@ def instrument(source: Path, layout: int, generic: bool) -> None:
     hopping = source / "src/methods/cluster_hopping.rs"
     text = hopping.read_text()
     text = replace_once(text, "\nfn run_full<'g, R, H>(", MEMORY_CODE + "\nfn run_full<'g, R, H>(")
+    # Develop keeps the walk in `run_search`. `run_full` only dispatches,
+    # so the sampler has to start in the function that returns the outcome.
     marker = ") -> Result<Outcome, SearchError>\nwhere\n"
-    start = text.index("fn run_full<'g, R, H>(")
+    owner = "fn run_search<'g, R, H, const RIGID: bool>("
+    if owner not in text:
+        owner = "fn run_full<'g, R, H>("
+    start = text.index(owner)
     signature = text.index(marker, start)
     body = text.index("{", signature + len(marker))
     text = (
