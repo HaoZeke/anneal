@@ -887,6 +887,26 @@ def test_a_cap_turn_ratio_that_disagrees_with_the_rows_is_reported():
     assert drift[0][4] != "0.998"
 
 
+def test_cap_turn_ratio_rounds_once_from_full_precision():
+    assert audit_mod.cap_turn_ratio_text(0.992484) == "0.992"
+    assert audit_mod.cap_turn_ratio_text(1.002459) == "1.002"
+    assert audit_mod.cap_turn_ratio_text(0.993487) == "0.993"
+    assert audit_mod.cap_turn_ratio_text(0.9925) == "0.993"
+
+    audit = audit_mod.Audit()
+    text = audit.text(audit_mod.CAP_TURN_README)
+    audit.text_cache[audit_mod.CAP_TURN_README] = text.replace(
+        "| m55r14 | 18/24 | 18/24 | 1 | 5 | 5 | 0.992 |",
+        "| m55r14 | 18/24 | 18/24 | 1 | 5 | 5 | 0.993 |",
+        1,
+    )
+    audit_mod.cap_turn_campaign(audit)
+    drift = [row for row in audit.drifts() if row[2] == "m55r14 outside/call ratio matches the rows"]
+    assert len(drift) == 1
+    assert drift[0][3] == "0.993"
+    assert drift[0][4] == "0.992"
+
+
 def _flag_off_drift(mutate):
     audit = audit_mod.Audit()
     rows, off = _cap_turn_copies()
