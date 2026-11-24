@@ -69,6 +69,10 @@ EXEMPT = {
         'emit("boot_id_path=/proc/sys/kernel/random/boot_id");',
     ): "names the file the boot label stands for and reads nothing",
     (
+        "scripts/elja_hq_sci_bankrpc.sh",
+        "HOST=${BANK_HOST:-$(hostname)}",
+    ): "the address the compute jobs dial, kept in their environment; the log line prints its host label",
+    (
         "scripts/elja_hq_sci_molslab_bank.sh",
         "HOST=${BANK_HOST:-$(hostname)}",
     ): "the address the compute jobs dial, kept in their environment; every log line prints its host label",
@@ -194,3 +198,30 @@ def test_the_board_examples_use_the_digest_rule_of_the_python_label():
     for example in ("lj_board_row", "lj55_board_arm", "lj_lean_relax_budget"):
         text = (ROOT / "examples" / f"{example}.rs").read_text()
         assert '#[path = "common/host_label.rs"]' in text, example
+
+
+LABEL_ASSIGN = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=.*host-label")
+ADDRESS_USE = re.compile(r"_RPC=|\bssh\b|\bscp\b|\brsync\b|tcp://|\bnc\b|--host\b|--address\b")
+
+
+def test_a_host_label_is_never_used_as_a_network_address():
+    """A label names no machine, so a job that dials it dials nothing."""
+    found = []
+    for relative, lines in guarded_lines():
+        if not relative.endswith(".sh"):
+            continue
+        names = {m.group(1) for line in lines if (m := LABEL_ASSIGN.match(line))}
+        for number, line in enumerate(lines, start=1):
+            if line.lstrip().startswith("#"):
+                continue
+            for name in names:
+                var = rf"\$\{{?{name}\}}?"
+                if re.search(var + r":[0-9$]", line) or (re.search(var, line) and ADDRESS_USE.search(line)):
+                    found.append(f"{relative}:{number}: {line.strip()}")
+    assert not found, "a host label is used as an address:\n" + "\n".join(found)
+
+
+def test_the_address_check_flags_a_label_used_to_dial():
+    assert LABEL_ASSIGN.match('HOST=${BANK_HOST:-$(python3 "$ROOT/scripts/machine_provenance.py" host-label)}')
+    assert not LABEL_ASSIGN.match("HOST=${BANK_HOST:-$(hostname)}")
+    assert ADDRESS_USE.search('export BANK_RPC=${HOST}:${port}')

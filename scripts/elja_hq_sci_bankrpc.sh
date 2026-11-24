@@ -18,7 +18,7 @@ BASE=${LJ_OUT:-$HOME/ljwork/hq-sci-n}
 ONE=$ROOT/scripts/elja_hq_one.sh
 BIN=${LJ_BIN:-$ROOT/target/release/examples/lj_cluster_search}
 SRV=$ROOT/target/release/examples/bank_server
-HOST=${BANK_HOST:-$(python3 "$ROOT/scripts/machine_provenance.py" host-label)}
+HOST=${BANK_HOST:-$(hostname)}
 CAP=${BANK_CAPACITY:-30}
 
 if [[ ! -x $SRV ]]; then
@@ -60,7 +60,7 @@ submit_arm() {
   local last=$((seeds - 1))
   mkdir -p "$out"
   : >"$out/hq_submit.log"
-  echo "BANK_RPC=${HOST}:${port} n=${n}" | tee -a "$out/hq_submit.log"
+  echo "BANK_RPC=$(python3 "$ROOT/scripts/machine_provenance.py" host-label "$HOST"):${port} n=${n}" | tee -a "$out/hq_submit.log"
   hq submit \
     --name "n${n}-lj${n}-rec" \
     --array="0-${last}" \
