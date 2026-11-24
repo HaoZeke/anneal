@@ -25,7 +25,7 @@ The preregistered cells are:
 * `m38r14d`: Morse 38 at rho 14, budget 400000, stop -144.320054,
   seeds 2000 through 2011.
 * `lj38`: Lennard-Jones 38 panel cell, budget 400000, stop
-  -173.928427, seeds 2000 through 2011.
+  -173.927427, seeds 2000 through 2011.
 * `lj75`: Lennard-Jones 75 panel cell, budget 4000000, stop
   -397.491331, seeds 2000 through 2011.
 * `lj98`: Lennard-Jones 98 panel cell, budget 4000000, stop

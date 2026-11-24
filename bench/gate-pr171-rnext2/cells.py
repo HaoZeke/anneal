@@ -33,7 +33,7 @@ class Cell:
 
 CELLS = (
     Cell("m38r14d", "h2h_seed", "morse", 38, 14.0, 400_000, -144.321054),
-    Cell("lj38", "h2h_gmin_proof", "panel", 38, 0.0, 400_000, -173.929427),
+    Cell("lj38", "h2h_gmin_proof", "panel", 38, 0.0, 400_000, -173.928427),
     Cell("lj75", "h2h_gmin_proof", "panel", 75, 0.0, 4_000_000, -397.492331),
     Cell("lj98", "h2h_gmin_proof", "panel", 98, 0.0, 4_000_000, -543.665361),
     Cell(
