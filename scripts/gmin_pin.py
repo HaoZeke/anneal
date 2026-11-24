@@ -16,6 +16,7 @@ URL = "http://www-wales.ch.cam.ac.uk/svn.tar.bz2"
 REVISION = "9cbec1a446352bc9ef064bd2b1a5767194655919"
 TARBALL_SHA256 = "ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776"
 BUILD_KEY_RE = re.compile(r"[0-9a-f]{64}")
+EXTRACTED_SVNREV_SUFFIX = ("wales", "GMIN", "source", "SVNREV")
 
 
 def sha256(path: Path) -> str:
@@ -43,6 +44,22 @@ def read_svnrev(path: Path) -> str:
     if actual != REVISION:
         raise ValueError(f"GMIN SVNREV is {actual}, expected {REVISION}")
     return actual
+
+
+def default_source_metadata(svnrev: Path) -> Path:
+    """Derive `<work>/gmin-source.txt` from `<work>/<src>/wales/GMIN/source/SVNREV`."""
+    path = Path(svnrev)
+    parts = path.parts
+    suffix_len = len(EXTRACTED_SVNREV_SUFFIX)
+    if len(parts) < suffix_len + 2 or parts[-suffix_len:] != EXTRACTED_SVNREV_SUFFIX:
+        raise ValueError(
+            f"cannot derive gmin-source.txt from {svnrev}; "
+            "expected <work>/<src>/wales/GMIN/source/SVNREV or pass --gmin-source"
+        )
+    extract_dir = path
+    for _ in range(suffix_len):
+        extract_dir = extract_dir.parent
+    return extract_dir.parent / "gmin-source.txt"
 
 
 def compute_build_key(

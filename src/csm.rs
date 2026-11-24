@@ -9,10 +9,64 @@
 //! draws no random number.
 
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
 use ndarray::{Array1, ArrayView1};
 
-use crate::assignment::{Certificate, certified_assignment, certifies};
+use crate::assignment::{Certificate, certified_assignment, certifies_duals};
+
+struct ClassBlocks {
+    blocks: Vec<Vec<usize>>,
+    local_index: Vec<usize>,
+}
+
+impl ClassBlocks {
+    fn from_classes(classes: &[u32]) -> Self {
+        let n = classes.len();
+        if let Some(&first) = classes.first()
+            && classes.iter().all(|&class| class == first)
+        {
+            return Self {
+                blocks: vec![(0..n).collect()],
+                local_index: (0..n).collect(),
+            };
+        }
+        let mut by_class: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
+        for (atom, &class) in classes.iter().enumerate() {
+            by_class.entry(class).or_default().push(atom);
+        }
+        let mut local_index = vec![0usize; n];
+        let mut blocks = Vec::with_capacity(by_class.len());
+        for atoms in by_class.into_values() {
+            for (local, &atom) in atoms.iter().enumerate() {
+                local_index[atom] = local;
+            }
+            blocks.push(atoms);
+        }
+        Self {
+            blocks,
+            local_index,
+        }
+    }
+}
+
+struct MatchScratch {
+    images: Vec<[f64; 3]>,
+    costs: Vec<f64>,
+    local: Vec<usize>,
+    inv_assignment: Vec<usize>,
+}
+
+impl MatchScratch {
+    fn new() -> Self {
+        Self {
+            images: Vec::new(),
+            costs: Vec::new(),
+            local: Vec::new(),
+            inv_assignment: Vec::new(),
+        }
+    }
+}
 
 /// Projects `x` onto `ops` at the best of `orientations`.
 ///
@@ -46,10 +100,29 @@ fn project_verified(
         return None;
     }
     let (centred, centroid, scale) = centre_and_scale(x, n)?;
+    project_centred(&centred, centroid, scale, classes, ops, orientations)
+}
+
+fn project_centred(
+    centred: &[[f64; 3]],
+    centroid: [f64; 3],
+    scale: f64,
+    classes: &[u32],
+    ops: &[[[f64; 3]; 3]],
+    orientations: &[[[f64; 3]; 3]],
+) -> Option<(Array1<f64>, f64)> {
+    let n = classes.len();
+    let blocks = ClassBlocks::from_classes(classes);
+    let mut scratch = MatchScratch::new();
+    let mut y = vec![[0.0; 3]; n];
+    let mut y_bits = vec![0u64; 3 * n];
+    let mut hat = vec![[0.0; 3]; n];
     let mut best: Option<(f64, [[f64; 3]; 3], Vec<[f64; 3]>)> = None;
     let mut solved: Vec<Vec<Matched>> = Vec::with_capacity(orientations.len());
     for (index, rotation) in orientations.iter().enumerate() {
-        let y = apply_all(rotation, &centred);
+        apply_all_into(rotation, centred, &mut y);
+        fill_coordinate_bits(&y, &mut y_bits);
+        let y_hash = hash_u64s(&y_bits);
         // An orientation that is an earlier one turned by an operation of
         // the group poses each operation's problem as the earlier one posed
         // the operation conjugated by that turn. A transposed operation
@@ -61,7 +134,7 @@ fn project_verified(
                 .map(|turn| (earlier, *turn))
         });
         let mut here: Vec<Matched> = Vec::with_capacity(ops.len());
-        let mut hat = vec![[0.0; 3]; n];
+        hat.fill([0.0; 3]);
         for (op_index, op) in ops.iter().enumerate() {
             let conjugate = turn.and_then(|(earlier, turn)| {
                 let conjugate = matmul(matmul(transpose(turn), *op), turn);
@@ -82,7 +155,16 @@ fn project_verified(
                         transposed: true,
                     })
             });
-            let matched = match_operated(&y, classes, op, hint)?;
+            let matched = match_operated(
+                &y,
+                &y_bits,
+                y_hash,
+                classes,
+                &blocks,
+                op,
+                hint,
+                &mut scratch,
+            )?;
             for atom in 0..n {
                 let image = mul_vec(op, y[matched.assignment[atom]]);
                 for axis in 0..3 {
@@ -111,7 +193,7 @@ fn project_verified(
             .as_ref()
             .is_none_or(|(incumbent, _, _)| measure < *incumbent)
         {
-            best = Some((measure, *rotation, hat));
+            best = Some((measure, *rotation, hat.clone()));
         }
     }
     let (measure, rotation, hat) = best?;
@@ -142,6 +224,21 @@ pub struct GroupProjection {
     pub measure: f64,
     /// Projection family label.
     pub group: &'static str,
+}
+
+fn d5h_ops_ref() -> &'static [[[f64; 3]; 3]] {
+    static OPS: OnceLock<Vec<[[f64; 3]; 3]>> = OnceLock::new();
+    OPS.get_or_init(d5h_ops)
+}
+
+fn c5_ops_ref() -> &'static [[[f64; 3]; 3]] {
+    static OPS: OnceLock<Vec<[[f64; 3]; 3]>> = OnceLock::new();
+    OPS.get_or_init(|| cyclic_about_z(5))
+}
+
+fn inversion_ops_ref() -> &'static [[[f64; 3]; 3]] {
+    static OPS: OnceLock<Vec<[[f64; 3]; 3]>> = OnceLock::new();
+    OPS.get_or_init(inversion_ops)
 }
 
 /// Projects onto a detected operation set with the lowest measure.
@@ -327,17 +424,24 @@ pub(crate) fn propose_templates(
     if let Some(cached) = cached_template_propose(x, classes) {
         return cached;
     }
-    let orientations = inertia_orientations_with(x, classes.len(), std::f64::consts::TAU / 5.0)?;
+    let n = classes.len();
+    if n == 0 || x.len() != n.checked_mul(3)? || x.iter().any(|value| !value.is_finite()) {
+        return None;
+    }
+    let (centred, centroid, scale) = centre_and_scale(x, n)?;
+    let orientations = inertia_orientations_centred(&centred, std::f64::consts::TAU / 5.0)?;
+    // D_5h contains every C_5 turn, so it is solved first and those
+    // permutations are reused. Equal measures keep the earlier group
+    // in the published order C_i, C_5, D_5h.
     clear_op_cache();
     let mut best: Option<(usize, GroupProjection)> = None;
     for (rank, name, ops) in [
-        (2, "D_5h", d5h_ops()),
-        (1, "C_5", cyclic_about_z(5)),
-        (0, "C_i", inversion_ops()),
+        (2, "D_5h", d5h_ops_ref()),
+        (1, "C_5", c5_ops_ref()),
+        (0, "C_i", inversion_ops_ref()),
     ] {
         if name == "C_i"
             && let Some((_, incumbent)) = &best
-            && let Some((centred, _, _)) = centre_and_scale(x, classes.len())
         {
             let bound = inversion_lower_measure(&centred, &orientations);
             let margin = 1.0e-6 * (1.0 + incumbent.measure);
@@ -345,7 +449,9 @@ pub(crate) fn propose_templates(
                 continue;
             }
         }
-        let Some((coordinates, measure)) = project_verified(x, classes, &ops, &orientations) else {
+        let Some((coordinates, measure)) =
+            project_centred(&centred, centroid, scale, classes, ops, &orientations)
+        else {
             continue;
         };
         if closest_pair(&coordinates) < SINGULAR_PAIR {
@@ -470,11 +576,19 @@ fn d5h_ops() -> Vec<[[f64; 3]; 3]> {
     ops
 }
 
+/// Lower bound on the inversion measure in every orientation.
+///
+/// The group is the identity and the central inversion. The residual is
+/// half the matched distance, so the measure is the assignment cost
+/// divided by four times the squared norm. Each atom's nearest inverse
+/// image is at most that assignment cost, whether or not the nearest
+/// images form a bijection.
 fn inversion_lower_measure(centred: &[[f64; 3]], orientations: &[[[f64; 3]; 3]]) -> f64 {
+    let n = centred.len();
+    let mut y = vec![[0.0; 3]; n];
     let mut best = f64::INFINITY;
     for rotation in orientations {
-        let y = apply_all(rotation, centred);
-        let n = y.len();
+        apply_all_into(rotation, centred, &mut y);
         let mut nearest = 0.0;
         let mut norm = 0.0;
         for atom in 0..n {
@@ -547,6 +661,7 @@ fn is_identity(op: &[[f64; 3]; 3]) -> bool {
 }
 
 struct SolvedOp {
+    y_hash: u64,
     y: Vec<u64>,
     classes: Vec<u32>,
     op: [[f64; 3]; 3],
@@ -591,8 +706,18 @@ fn clear_op_cache() {
     OP_CACHE.with(|slot| slot.borrow_mut().clear());
 }
 
-fn coordinate_bits(y: &[[f64; 3]]) -> Vec<u64> {
-    y.iter().flatten().map(|value| value.to_bits()).collect()
+fn fill_coordinate_bits(y: &[[f64; 3]], out: &mut [u64]) {
+    for (slot, value) in out.iter_mut().zip(y.iter().flatten()) {
+        *slot = value.to_bits();
+    }
+}
+
+fn hash_u64s(values: &[u64]) -> u64 {
+    let mut hash = 0x9e37_79b9_7f4a_7c15_u64;
+    for &value in values {
+        hash = (hash.rotate_left(5) ^ value).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
+    hash
 }
 
 fn same_matrix(left: &[[f64; 3]; 3], right: &[[f64; 3]; 3]) -> bool {
@@ -617,13 +742,12 @@ fn invert_perm(perm: &[usize]) -> Vec<usize> {
     inverse
 }
 
-fn recall_op(y: &[[f64; 3]], classes: &[u32], op: &[[f64; 3]; 3]) -> Option<Matched> {
-    let bits = coordinate_bits(y);
+fn recall_op(y_bits: &[u64], y_hash: u64, classes: &[u32], op: &[[f64; 3]; 3]) -> Option<Matched> {
     let transposed = transpose(*op);
     OP_CACHE.with(|slot| {
         let slot = slot.borrow();
         for saved in slot.iter().rev() {
-            if saved.y != bits || saved.classes != classes {
+            if saved.y_hash != y_hash || saved.classes != classes || saved.y != y_bits {
                 continue;
             }
             if same_matrix(&saved.op, op) {
@@ -638,7 +762,8 @@ fn recall_op(y: &[[f64; 3]], classes: &[u32], op: &[[f64; 3]; 3]) -> Option<Matc
 }
 
 fn remember_op(
-    y: &[[f64; 3]],
+    y_bits: &[u64],
+    y_hash: u64,
     classes: &[u32],
     op: &[[f64; 3]; 3],
     matched: &Matched,
@@ -650,7 +775,8 @@ fn remember_op(
             slot.clear();
         }
         slot.push(SolvedOp {
-            y: coordinate_bits(y),
+            y_hash,
+            y: y_bits.to_vec(),
             classes: classes.to_vec(),
             op: *op,
             matched: matched.clone(),
@@ -659,69 +785,86 @@ fn remember_op(
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn match_operated(
     y: &[[f64; 3]],
+    y_bits: &[u64],
+    y_hash: u64,
     classes: &[u32],
+    class_blocks: &ClassBlocks,
     op: &[[f64; 3]; 3],
     hint: Option<Hint<'_>>,
+    scratch: &mut MatchScratch,
 ) -> Option<Matched> {
     let n = classes.len();
-    let mut blocks: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
-    for (atom, &class) in classes.iter().enumerate() {
-        blocks.entry(class).or_default().push(atom);
-    }
     // The identity sends every atom to itself, so the diagonal is a minimum
     // of cost zero and the assignment problem is unnecessary.
     if is_identity(op) {
         return Some(Matched {
             assignment: (0..n).collect(),
-            blocks: vec![None; blocks.len()],
+            blocks: vec![None; class_blocks.blocks.len()],
         });
     }
-    if let Some(saved) = recall_op(y, classes, op) {
+    if let Some(saved) = recall_op(y_bits, y_hash, classes, op) {
         return Some(saved);
     }
-    let images: Vec<[f64; 3]> = y.iter().map(|point| mul_vec(op, *point)).collect();
-    let hinted = hint.map(|hint| {
-        if hint.transposed {
-            hint.matched.inverse()
-        } else {
-            hint.matched.clone()
-        }
-    });
-    let mut local_index = vec![0usize; n];
-    for atoms in blocks.values() {
-        for (local, &atom) in atoms.iter().enumerate() {
-            local_index[atom] = local;
+    scratch.images.resize(n, [0.0; 3]);
+    for (slot, point) in scratch.images.iter_mut().zip(y.iter()) {
+        *slot = mul_vec(op, *point);
+    }
+    if let Some(hint) = hint
+        && hint.transposed
+    {
+        scratch.inv_assignment.resize(n, 0);
+        for (row, &column) in hint.matched.assignment.iter().enumerate() {
+            scratch.inv_assignment[column] = row;
         }
     }
     let mut assignment = vec![usize::MAX; n];
-    let mut certificates = Vec::with_capacity(blocks.len());
+    let mut certificates = Vec::with_capacity(class_blocks.blocks.len());
     let mut unique = true;
-    for (block, atoms) in blocks.values().enumerate() {
+    for (block, atoms) in class_blocks.blocks.iter().enumerate() {
         let width = atoms.len();
-        let mut costs = vec![0.0; width * width];
+        scratch.costs.resize(width * width, 0.0);
+        let costs = &mut scratch.costs[..width * width];
         for (row_i, &row) in atoms.iter().enumerate() {
+            let p = y[row];
+            let row_base = row_i * width;
             for (col_i, &col) in atoms.iter().enumerate() {
-                let mut squared = 0.0;
-                for axis in 0..3 {
-                    let delta = y[row][axis] - images[col][axis];
-                    squared += delta * delta;
-                }
-                costs[row_i * width + col_i] = squared;
+                let q = scratch.images[col];
+                let dx = p[0] - q[0];
+                let dy = p[1] - q[1];
+                let dz = p[2] - q[2];
+                costs[row_base + col_i] = dx * dx + dy * dy + dz * dz;
             }
         }
-        let proved = hinted.as_ref().and_then(|hinted| {
-            let certificate = hinted.blocks.get(block)?.as_ref()?;
-            let local: Vec<usize> = atoms
-                .iter()
-                .map(|&atom| local_index[hinted.assignment[atom]])
-                .collect();
-            certifies(&costs, width, &local, certificate).then(|| (local, certificate.clone()))
+        let proved = hint.and_then(|hint| {
+            let certificate = hint.matched.blocks.get(block)?.as_ref()?;
+            scratch.local.clear();
+            scratch.local.reserve(width);
+            let source_assignment = if hint.transposed {
+                &scratch.inv_assignment[..n]
+            } else {
+                &hint.matched.assignment
+            };
+            for &atom in atoms {
+                scratch
+                    .local
+                    .push(class_blocks.local_index[source_assignment[atom]]);
+            }
+            let (row_pot, col_pot) = certificate.duals(hint.transposed);
+            certifies_duals(costs, width, &scratch.local, row_pot, col_pot).then(|| {
+                let cert = if hint.transposed {
+                    certificate.transposed()
+                } else {
+                    certificate.clone()
+                };
+                (scratch.local.clone(), cert)
+            })
         });
         let (local, certificate) = match proved {
             Some((local, certificate)) => (local, Some(certificate)),
-            None => certified_assignment(&costs, width)?,
+            None => certified_assignment(costs, width)?,
         };
         // Below 98 atoms the recorded permutation is Kuhn-Munkres. Its
         // tie break is not the inverse of the transposed problem, so the
@@ -740,7 +883,7 @@ fn match_operated(
         assignment,
         blocks: certificates,
     };
-    remember_op(y, classes, op, &matched, unique);
+    remember_op(y_bits, y_hash, classes, op, &matched, unique);
     Some(matched)
 }
 
@@ -764,22 +907,22 @@ fn mul_vec(matrix: &[[f64; 3]; 3], vector: [f64; 3]) -> [f64; 3] {
     ]
 }
 
+fn apply_all_into(matrix: &[[f64; 3]; 3], points: &[[f64; 3]], out: &mut [[f64; 3]]) {
+    for (slot, point) in out.iter_mut().zip(points.iter()) {
+        *slot = mul_vec(matrix, *point);
+    }
+}
+
+#[cfg(test)]
 fn apply_all(matrix: &[[f64; 3]; 3], points: &[[f64; 3]]) -> Vec<[f64; 3]> {
     points.iter().map(|point| mul_vec(matrix, *point)).collect()
 }
 
-#[cfg(test)]
-fn inertia_orientations(x: ArrayView1<'_, f64>, n: usize) -> Option<Vec<[[f64; 3]; 3]>> {
-    inertia_orientations_with(x, n, std::f64::consts::PI)
-}
-
-fn inertia_orientations_with(
-    x: ArrayView1<'_, f64>,
-    n: usize,
+fn inertia_orientations_centred(
+    centred: &[[f64; 3]],
     extra_turn: f64,
 ) -> Option<Vec<[[f64; 3]; 3]>> {
-    let (centred, _, _) = centre_and_scale(x, n)?;
-    let axes = jacobi(inertia(&centred));
+    let axes = jacobi(inertia(centred));
     let mut orientations = Vec::with_capacity(6);
     for axis in 0..3 {
         let z_axis = normalize(column(axes, axis))?;
@@ -794,6 +937,21 @@ fn inertia_orientations_with(
         orientations.push(matmul(rot_z(extra_turn), aligned));
     }
     Some(orientations)
+}
+
+#[cfg(test)]
+fn inertia_orientations(x: ArrayView1<'_, f64>, n: usize) -> Option<Vec<[[f64; 3]; 3]>> {
+    inertia_orientations_with(x, n, std::f64::consts::PI)
+}
+
+#[cfg(test)]
+fn inertia_orientations_with(
+    x: ArrayView1<'_, f64>,
+    n: usize,
+    extra_turn: f64,
+) -> Option<Vec<[[f64; 3]; 3]>> {
+    let (centred, _, _) = centre_and_scale(x, n)?;
+    inertia_orientations_centred(&centred, extra_turn)
 }
 
 fn closest_pair(x: &Array1<f64>) -> f64 {
@@ -1571,6 +1729,50 @@ mod tests {
                     assert!((gram[row][col] - want).abs() < 1e-10);
                 }
             }
+        }
+    }
+
+    #[test]
+    fn propose_and_project_match_walked_reference_across_classes() {
+        let mut x = bipyramid();
+        x[2] += 0.17;
+        x[6] -= 0.09;
+        let orientations = inertia_orientations(x.view(), 7).expect("axes");
+        for classes in [vec![0u32; 7], vec![0, 1, 0, 1, 0, 2, 2]] {
+            clear_op_cache();
+            for ops in [d5h_ops(), cyclic_about_z(5), inversion_ops()] {
+                let (actual_coords, actual_measure) =
+                    project(x.view(), &classes, &ops, &orientations).expect("project");
+                let (walked_coords, walked_measure) =
+                    walked_projection(x.view(), &classes, &ops, &orientations);
+                assert_eq!(actual_measure.to_bits(), walked_measure.to_bits());
+                assert_eq!(
+                    actual_coords
+                        .iter()
+                        .map(|v| v.to_bits())
+                        .collect::<Vec<_>>(),
+                    walked_coords
+                        .iter()
+                        .map(|v| v.to_bits())
+                        .collect::<Vec<_>>()
+                );
+            }
+            let proposed = propose(x.view(), &classes).expect("propose");
+            let ungated = ungated_projection(x.view(), &classes).expect("ungated");
+            assert_eq!(proposed.group, ungated.group);
+            assert_eq!(proposed.measure.to_bits(), ungated.measure.to_bits());
+            assert_eq!(
+                proposed
+                    .coordinates
+                    .iter()
+                    .map(|v| v.to_bits())
+                    .collect::<Vec<_>>(),
+                ungated
+                    .coordinates
+                    .iter()
+                    .map(|v| v.to_bits())
+                    .collect::<Vec<_>>()
+            );
         }
     }
 }
