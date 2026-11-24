@@ -42,8 +42,8 @@ class Harvest:
 
     A quench ends where its gradient first stays under the record gate; the
     next evaluation above the gate is a new proposal or a new quench.
-    ``found`` holds, per minimum, the energy plus gradient calls made up to
-    and including the gradient call that recorded it.
+    ``found`` holds, per minimum, the charged value-and-gradient calls made
+    up to and including the gradient call that recorded it.
     """
 
     def __init__(self, gate: float) -> None:
@@ -51,6 +51,7 @@ class Harvest:
         self.minima: list[tuple[np.ndarray, float]] = []
         self.found: list[int] = []
         self.calls = 0
+        self.charged_calls = 0
         self._run: tuple[np.ndarray, float, int] | None = None
         self._last: tuple[bytes, float] | None = None
 
@@ -60,12 +61,13 @@ class Harvest:
 
     def gradient(self, x: np.ndarray, g: np.ndarray) -> None:
         self.calls += 1
+        self.charged_calls += 1
         if self._last is None or self._last[0] != x.tobytes():
             return
         e = self._last[1]
         if np.max(np.abs(g)) < self.gate:
             if self._run is None or e < self._run[1]:
-                self._run = (x.copy(), e, self.calls)
+                self._run = (x.copy(), e, self.charged_calls)
         else:
             self.close()
 
@@ -137,7 +139,7 @@ def run_anneal(row: dict, seed: int, budget: int, out: Path, local_step: str | N
     found = list(harvest.found)
     if error is None:
         frames.append((np.asarray(result["best"]), float(result["best_energy"]) * hc.KCAL_PER_EV))
-        found.append(harvest.calls)
+        found.append(harvest.charged_calls)
     hc.write_xyz(out / "candidates.xyz", hc.symbols(mol), frames)
     write_trace(out / "trace.xyz", hc.symbols(mol), [(x, e, c) for (x, e), c in zip(frames, found, strict=True)])
     return {

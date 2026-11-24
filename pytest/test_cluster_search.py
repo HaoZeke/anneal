@@ -499,7 +499,7 @@ def test_cluster_search_reports_where_the_budget_went():
     split = out["ledger"]
     assert set(split) == {
         "spent", "screen", "full", "check", "quenches", "converged", "capped", "screened_out", "returned",
-        "overlap_rejected", "basins",
+        "branch_draws", "branch_spent", "overlap_rejected", "basins",
     }
     for key in split:
         assert f"``{key}``" in (cluster_search.__doc__ or "")

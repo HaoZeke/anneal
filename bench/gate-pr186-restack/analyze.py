@@ -77,7 +77,7 @@ def bits_to_float(text: str) -> float:
 
 def calls_scored(row: dict) -> float:
     hit = int(row["hit"])
-    return float(row["calls"]) if hit else float(row["budget"]) + 1.0
+    return float(row["calls_to_hit"]) if hit else float(row["budget"]) + 1.0
 
 
 def hit_tests(a: dict[int, dict], b: dict[int, dict]) -> tuple[float, float, int, int]:
@@ -99,7 +99,20 @@ def identical(a: dict[int, dict], b: dict[int, dict]) -> tuple[bool, list[int]]:
     bad = []
     for seed in sorted(a):
         ra, rb = a[seed], b.get(seed)
-        if rb is None or any(ra[k] != rb[k] for k in ("trajectory", "energy_bits", "calls", "charged")) or ra["trajectory"] == "":
+        if (
+            rb is None
+            or any(
+                ra[k] != rb[k]
+                for k in (
+                    "trajectory",
+                    "energy_bits",
+                    "callback_calls",
+                    "calls_to_hit",
+                    "charged",
+                )
+            )
+            or ra["trajectory"] == ""
+        ):
             bad.append(seed)
     return (not bad), bad
 
@@ -113,6 +126,24 @@ def judge(rows: list[dict], cell: str) -> dict:
     if not res["complete"]:
         res["verdict"] = "INCONCLUSIVE"
         res["notes"] = f"incomplete or error rows: {len(errors)}"
+        return res
+    over_budget = [
+        r
+        for r in list(a.values()) + list(b.values()) + list(a2.values())
+        if float(r["charged"]) > float(r["budget"])
+        or (int(r["hit"]) and r["calls_to_hit"] == "")
+        or (
+            r["calls_to_hit"] != ""
+            and (
+                float(r["calls_to_hit"]) > float(r["budget"])
+                or float(r["calls_to_hit"]) > float(r["charged"])
+            )
+        )
+    ]
+    if over_budget:
+        res["verdict"] = "FIX"
+        res["failures"] = "call count exceeds budget"
+        res["notes"] = f"invalid call counts: {len(over_budget)}"
         return res
     p_f, p_m, ha, hb = hit_tests(a, b)
     p_f2, p_m2, _, ha2 = hit_tests(a, a2)
@@ -141,12 +172,23 @@ def judge(rows: list[dict], cell: str) -> dict:
     res["peak_rss_strict"] = pgb[2] <= CAP
     res["peak_rss_band"] = pgb[2] <= max(CAP, pga[2])
     res["peak_rss_fail"] = pgb[1] > max(CAP, pga[2])
-    res["b_path_hits"] = sum(1 for r in b.values() if int(r.get("b_path_fired") or 0) > 0)
-    res["b_path_quenches_sum"] = sum(int(r.get("b_path_quenches") or 0) for r in b.values())
+    res["b_path_hits"] = sum(
+        1
+        for r in b.values()
+        if int(r.get("b_path_draws") or 0) > 0
+        and int(r.get("b_path_spent") or 0) > 0
+    )
+    res["b_path_draws_sum"] = sum(int(r.get("b_path_draws") or 0) for r in b.values())
     res["b_path_spent_sum"] = sum(int(r.get("b_path_spent") or 0) for r in b.values())
-    early = [r for r in list(a.values()) + list(b.values()) if int(r["hit"]) and float(r["calls"]) < float(r["budget"])]
+    early = [
+        r
+        for r in list(a.values()) + list(b.values())
+        if int(r["hit"]) and float(r["calls_to_hit"]) < float(r["budget"])
+    ]
     res["early_stop_runs"] = len(early)
-    res["calls_ratio"] = geomean_ci(paired_ratio(b, a, lambda r: float(r["calls"])))[0]
+    res["calls_ratio"] = geomean_ci(
+        paired_ratio(b, a, lambda r: float(r["callback_calls"]))
+    )[0]
     if early:
         notes.append("early-stop per-call artifact possible: read totals beside per-call")
     if (res["opc_band"] != res["tot_band"]) or (res["opc_strict"] != res["tot_strict"]):
@@ -154,8 +196,8 @@ def judge(rows: list[dict], cell: str) -> dict:
     if res["calls_ratio"] and abs(res["calls_ratio"] - 1.0) > 0.02:
         notes.append("calls differ between A and B")
     kind = next(iter(a.values()))["kind"] if a else ""
-    if kind == "molecule" and res["b_path_hits"] == 0:
-        notes.append("B path count is 0: cell only tests timing")
+    if kind == "molecule" and res["b_path_hits"] != res["n"]:
+        notes.append("B conf-miss path did not run in every seed")
     if kind == "guard":
         ok, bad = identical(a, b)
         res["identical"] = ok
@@ -177,6 +219,8 @@ def judge(rows: list[dict], cell: str) -> dict:
         failures.append("memory")
     if res.get("identical") is False:
         failures.append("default parity")
+    if kind == "molecule" and res["b_path_hits"] != res["n"]:
+        failures.append("conf-miss path")
     res["failures"] = "; ".join(failures)
     res["notes"] = "; ".join(notes)
     if failures:
@@ -194,7 +238,7 @@ FIELDS = [
     "tot_ratio", "tot_lo", "tot_hi", "tot_aa_hi", "tot_strict", "tot_band", "tot_regression",
     "rss_ratio", "rss_lo", "rss_hi", "rss_aa_hi", "rss_strict", "rss_fail",
     "peak_rss_ratio", "peak_rss_lo", "peak_rss_hi", "peak_rss_aa_hi", "peak_rss_strict", "peak_rss_fail",
-    "b_path_hits", "b_path_quenches_sum", "b_path_spent_sum",
+    "b_path_hits", "b_path_draws_sum", "b_path_spent_sum",
     "calls_ratio", "early_stop_runs", "identical", "max_abs_dE", "mismatch",
 ]
 

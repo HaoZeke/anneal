@@ -10,9 +10,9 @@ run:
 
 - ``hit``: one of the run's reported conformers is the lowest reference
   conformer (heavy-atom RMSD under 0.25 Å, energy within 0.5 kcal/mol)
-- ``calls_to_hit``: energy plus gradient calls spent when the run's trace
-  first held a minimum that polishes to that conformer; the run's total
-  when only its final output does
+- ``calls_to_hit``: charged value-and-gradient calls spent when the run's
+  trace first held a minimum that polishes to that conformer; the run's
+  charged total when only its final output does
 - ``n_3kcal``: distinct conformers within 3 kcal/mol of E_ref
 - ``error``: the exception a run raised; it is scored on what it harvested
 

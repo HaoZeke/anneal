@@ -30,12 +30,10 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts" / "openconf_h2h"))
 sys.path.insert(0, str(ROOT / "scripts"))
 import h2h_common as hc  # noqa: E402
+from bench_host import host_label  # noqa: E402
 from h2h_score import Molecule  # noqa: E402
+from machine_provenance import machine_provenance, require_csv_schema  # noqa: E402
 
-BASE_REF = "9b65fda3972fd8c014bce886a3ea5c05956d64af"
-B_COMMIT = "c8581d69319a2f960c25ecb5f0261feb34a739b3"
-B_TREE = "184736e2f596126ef71baca23d0ecdf756aaf77c"
-B_HARNESS_TREE = "a839b9a99afb155d3ebb0e3e2a42fa086f9c72ba"
 N_SEEDS = 12
 SEEDS = list(range(2000, 2000 + N_SEEDS))
 MOLECULES = ["rq3", "915", "xld", "fluvastatin", "z34", "amprenavir", "lopinavir", "lorlatinib"]
@@ -57,12 +55,14 @@ HARNESS_FILES = (
     "bench/gate-pr186-restack/analyze.py",
 )
 ROW_FIELDS = [
-    "cell", "kind", "seed", "arm", "slot", "core", "hit", "budget", "calls", "charged",
+    "cell", "kind", "seed", "arm", "slot", "core", "hit", "budget",
+    "callback_calls", "calls_to_hit", "charged",
     "wall_s", "inside_s", "outside_per_call_s", "rss_anon_kb", "peak_rss_anon_kb",
-    "b_path_fired", "b_path_quenches", "b_path_spent",
+    "b_path_draws", "b_path_spent",
     "energy", "energy_bits", "trajectory",
     "arm_revision", "arm_tree", "arm_binary", "arm_binary_sha256",
-    "machine_id", "base_ref", "base_tree", "harness_blobs", "error",
+    "host", "machine_id", "cpu_model", "a_ref", "a_tree", "b_ref", "b_tree",
+    "harness_revision", "harness_tree", "harness_blobs", "error",
 ]
 
 
@@ -230,16 +230,32 @@ def require_object(repo: Path, obj: str) -> None:
         raise SystemExit(f"git object missing: {obj}")
 
 
-def provenance(repo: Path) -> dict[str, str]:
-    require_object(repo, BASE_REF)
-    base_tree = git_text(repo, "rev-parse", f"{BASE_REF}^{{tree}}")
-    require_object(repo, base_tree)
+def resolve_ref(repo: Path, ref: str) -> tuple[str, str]:
+    revision = git_text(repo, "rev-parse", f"{ref}^{{commit}}")
+    tree = git_text(repo, "rev-parse", f"{revision}^{{tree}}")
+    require_object(repo, revision)
+    require_object(repo, tree)
+    return revision, tree
+
+
+def provenance(repo: Path, a_ref: str, b_ref: str) -> dict[str, str]:
+    a_revision, a_tree = resolve_ref(repo, a_ref)
+    b_revision, b_tree = resolve_ref(repo, b_ref)
+    harness_revision, harness_tree = resolve_ref(repo, "HEAD")
     blobs = []
     for rel in HARNESS_FILES:
         digest = git_text(repo, "hash-object", rel)
         require_object(repo, digest)
         blobs.append(f"{Path(rel).name}:{digest}")
-    return {"base_ref": BASE_REF, "base_tree": base_tree, "harness_blobs": " ".join(blobs)}
+    return {
+        "a_ref": a_revision,
+        "a_tree": a_tree,
+        "b_ref": b_revision,
+        "b_tree": b_tree,
+        "harness_revision": harness_revision,
+        "harness_tree": harness_tree,
+        "harness_blobs": " ".join(blobs),
+    }
 
 
 def ext_binary(py_dir: Path) -> Path:
@@ -259,9 +275,9 @@ def arm_source_meta(src: Path, expected_tree: str) -> tuple[str, str]:
     raise SystemExit(f"arm source tree {head_tree} / {parent_tree} does not match {expected_tree}")
 
 
-def build_arm_provenance(args, base_tree: str) -> dict[str, dict[str, str]]:
+def build_arm_provenance(args, prov: dict[str, str]) -> dict[str, dict[str, str]]:
     sources = {"A": args.src_a, "B": args.src_b, "Ap": args.src_ap}
-    expected = {"A": base_tree, "B": B_TREE, "Ap": base_tree}
+    expected = {"A": prov["a_tree"], "B": prov["b_tree"], "Ap": prov["a_tree"]}
     out: dict[str, dict[str, str]] = {}
     for arm in ("A", "B", "Ap"):
         rev, tree = arm_source_meta(sources[arm], expected[arm])
@@ -276,13 +292,6 @@ def build_arm_provenance(args, base_tree: str) -> dict[str, dict[str, str]]:
             "ext_sha256": sha256_file(ext_bin),
         }
     return out
-
-
-def machine_id() -> str:
-    for candidate in (Path("/etc/machine-id"), Path("/sys/class/dmi/id/product_uuid")):
-        if candidate.is_file():
-            return hashlib.sha256(candidate.read_bytes().strip()).hexdigest()
-    raise SystemExit("machine id is unavailable")
 
 
 def job_dir(run_dir: Path, job: dict) -> Path:
@@ -372,15 +381,16 @@ def run_molecule(args, job: dict, budget: int, ident: str, journal: Path, arm_me
                 "index": job["index"],
                 "core": affinity(),
                 "budget": budget,
-                "calls": 0,
+                "callback_calls": 0,
+                "calls_to_hit": None,
+                "charged": 0,
                 "energy_calls": 0,
                 "grad_calls": 0,
                 "wall_s": elapsed,
                 "inside_s": 0.0,
                 "rss_anon_kb": 0,
                 "peak_rss_anon_kb": 0,
-                "b_path_fired": 0,
-                "b_path_quenches": 0,
+                "b_path_draws": 0,
                 "b_path_spent": 0,
                 "trajectory": hash_trace(out),
                 "arm_revision": arm_meta["arm_revision"],
@@ -461,10 +471,16 @@ def worker_molecule(args) -> int:
     ledger = cs_res.get("ledger") if isinstance(cs_res, dict) else None
     if not isinstance(ledger, dict):
         ledger = info.get("ledger") if isinstance(info.get("ledger"), dict) else None
-    b_path_spent = int(ledger.get("spent") or 0) if isinstance(ledger, dict) else 0
-    b_path_quenches = int(ledger.get("quenches") or 0) if isinstance(ledger, dict) else 0
-    b_path_fired = 1 if (isinstance(ledger, dict) and b_path_spent > 0) else 0
-    calls = int(info.get("energy_calls") or 0) + int(info.get("grad_calls") or 0)
+    energy_calls = int(info.get("energy_calls") or 0)
+    grad_calls = int(info.get("grad_calls") or 0)
+    charged = (
+        int(ledger.get("spent") or 0)
+        if isinstance(ledger, dict)
+        else max(energy_calls, grad_calls)
+    )
+    b_path_draws = int(ledger.get("branch_draws") or 0) if isinstance(ledger, dict) else 0
+    b_path_spent = int(ledger.get("branch_spent") or 0) if isinstance(ledger, dict) else 0
+    callback_calls = energy_calls + grad_calls
     raw_error = info.get("error") or error or ""
     if raw_error and not error:
         print(str(raw_error), file=sys.stderr)
@@ -483,17 +499,18 @@ def worker_molecule(args) -> int:
         "index": args.index,
         "core": affinity(),
         "budget": args.budget,
-        "calls": calls,
-        "energy_calls": int(info.get("energy_calls") or 0),
-        "grad_calls": int(info.get("grad_calls") or 0),
+        "callback_calls": callback_calls,
+        "calls_to_hit": None,
+        "charged": charged,
+        "energy_calls": energy_calls,
+        "grad_calls": grad_calls,
         "wall_s": float(info.get("wall_s") or 0.0),
         "inside_s": inside,
         "best_kcal": None if info.get("best_kcal") is None else float(info["best_kcal"]),
         "candidates": None if info.get("candidates") is None else int(info["candidates"]),
         "rss_anon_kb": end_rss,
         "peak_rss_anon_kb": peak_rss[0],
-        "b_path_fired": b_path_fired,
-        "b_path_quenches": b_path_quenches,
+        "b_path_draws": b_path_draws,
         "b_path_spent": b_path_spent,
         "trajectory": hash_trace(out),
         "arm_revision": args.arm_revision,
@@ -523,7 +540,20 @@ def run_guard(args, job: dict, binary: Path, ident: str, journal: Path, arm_meta
     if proc.stderr:
         journal_raw(journal, proc.stderr)
     gate = parse_gate(proc.stdout)
-    if gate is None or gate.get("core") != "0" or int(gate.get("budget", "0")) != GUARD_BUDGET[job["cell"]]:
+    invalid_counts = (
+        gate is not None
+        and (
+            int(gate.get("charged", "0")) > GUARD_BUDGET[job["cell"]]
+            or int(gate.get("calls", "0")) > GUARD_BUDGET[job["cell"]]
+            or int(gate.get("calls", "0")) > int(gate.get("charged", "0"))
+        )
+    )
+    if (
+        gate is None
+        or gate.get("core") != "0"
+        or int(gate.get("budget", "0")) != GUARD_BUDGET[job["cell"]]
+        or invalid_counts
+    ):
         write_result(
             dest,
             {
@@ -539,14 +569,14 @@ def run_guard(args, job: dict, binary: Path, ident: str, journal: Path, arm_meta
                 "core": gate.get("core") if gate else "",
                 "budget": GUARD_BUDGET[job["cell"]],
                 "hit": 0,
-                "calls": 0,
+                "callback_calls": 0,
+                "calls_to_hit": None,
                 "charged": 0,
                 "wall_s": 0.0,
                 "inside_s": 0.0,
                 "rss_anon_kb": 0,
                 "peak_rss_anon_kb": 0,
-                "b_path_fired": 0,
-                "b_path_quenches": 0,
+                "b_path_draws": 0,
                 "b_path_spent": 0,
                 "energy_bits": "",
                 "trajectory": "",
@@ -574,14 +604,14 @@ def run_guard(args, job: dict, binary: Path, ident: str, journal: Path, arm_meta
                 "core": gate["core"],
                 "budget": int(gate["budget"]),
                 "hit": int(gate["hit"]),
-                "calls": int(gate["calls"]),
+                "callback_calls": int(gate["charged"]),
+                "calls_to_hit": int(gate["calls"]) if int(gate["hit"]) else None,
                 "charged": int(gate["charged"]),
                 "wall_s": float(gate["wall_s"]),
                 "inside_s": float(gate["inside_s"]),
                 "rss_anon_kb": int(gate["rss_anon_kb"]),
                 "peak_rss_anon_kb": int(gate.get("peak_rss_anon_kb") or gate["rss_anon_kb"]),
-                "b_path_fired": 0,
-                "b_path_quenches": 0,
+                "b_path_draws": 0,
                 "b_path_spent": 0,
                 "energy_bits": gate["best_bits"],
                 "trajectory": gate["trajectory"],
@@ -633,6 +663,27 @@ def polish_frames(mol: Molecule, directory: Path):
     return xs_arr, es_arr, ok_arr
 
 
+def first_hit_calls(
+    mol: Molecule,
+    directory: Path,
+    polished: tuple[np.ndarray, np.ndarray, np.ndarray],
+    lowest: tuple[np.ndarray, float],
+) -> int | None:
+    """Return the charged call at which the matching minimum first appeared."""
+    path = directory / "trace.xyz"
+    if not path.is_file():
+        return None
+    trace = hc.read_xyz(path)
+    xs, es, ok = polished
+    if len(trace) != len(xs):
+        raise ValueError(f"{path}: trace and candidate frame counts differ")
+    for (_, _, comment), px, pe, valid in zip(trace, xs, es, ok, strict=True):
+        if not valid or not mol.same(lowest, (px, float(pe))):
+            continue
+        return int(comment.split()[0])
+    return None
+
+
 def score_molecules(run_dir: Path, jobs: list[dict]) -> dict[tuple, dict]:
     rows = hc.molecules()
     scored = {}
@@ -641,6 +692,7 @@ def score_molecules(run_dir: Path, jobs: list[dict]) -> dict[tuple, dict]:
         mine = [j for j in jobs if j["cell"] == cell]
         kept = {}
         raw = {}
+        polished = {}
         for job in mine:
             directory = job_dir(run_dir, job)
             info = json.loads((directory / "result.json").read_text())
@@ -649,28 +701,47 @@ def score_molecules(run_dir: Path, jobs: list[dict]) -> dict[tuple, dict]:
             key = (job["arm"], job["seed"])
             kept[key] = mol.dedupe(valid)
             raw[key] = info
+            polished[key] = (xs, es, ok)
         pool = [item for items in kept.values() for item in items]
         lowest = min(pool, key=lambda item: item[1]) if pool else None
         for key, items in kept.items():
             info = raw[key]
             hit = bool(lowest is not None and any(mol.same(lowest, item) for item in items))
             energy = min((e for _, e in items), default=None)
-            calls = int(info.get("calls") or 0)
+            callback_calls = int(info.get("callback_calls") or 0)
+            charged = int(info.get("charged") or 0)
+            calls_to_hit = (
+                first_hit_calls(mol, job_dir(run_dir, {
+                    "phase": "session", "cell": cell, "seed": key[1], "arm": key[0],
+                }), polished[key], lowest)
+                if hit and lowest is not None
+                else None
+            )
+            budget = int(info.get("budget") or 0)
+            if charged > budget:
+                raise ValueError(f"{cell} {key}: charged {charged} exceeds budget {budget}")
+            if hit and calls_to_hit is None:
+                raise ValueError(f"{cell} {key}: hit has no first-hit trace call")
+            if calls_to_hit is not None and calls_to_hit > min(charged, budget):
+                raise ValueError(
+                    f"{cell} {key}: calls to hit {calls_to_hit} exceeds "
+                    f"charged {charged} or budget {budget}"
+                )
             wall = float(info.get("wall_s") or 0.0)
             inside = float(info.get("inside_s") or 0.0)
             scored[(cell, key[0], key[1])] = {
                 "hit": int(hit),
                 "energy": energy,
-                "calls": calls,
-                "charged": calls,
+                "callback_calls": callback_calls,
+                "calls_to_hit": calls_to_hit,
+                "charged": charged,
                 "wall_s": wall,
                 "inside_s": inside,
-                "outside_per_call_s": outside_per_call(wall, inside, calls),
-                "budget": int(info.get("budget") or 0),
+                "outside_per_call_s": outside_per_call(wall, inside, callback_calls),
+                "budget": budget,
                 "rss_anon_kb": int(info.get("rss_anon_kb") or 0),
                 "peak_rss_anon_kb": int(info.get("peak_rss_anon_kb") or info.get("rss_anon_kb") or 0),
-                "b_path_fired": int(info.get("b_path_fired") or 0),
-                "b_path_quenches": int(info.get("b_path_quenches") or 0),
+                "b_path_draws": int(info.get("b_path_draws") or 0),
                 "b_path_spent": int(info.get("b_path_spent") or 0),
                 "error": info.get("error") or "",
                 "core": info.get("core") or "",
@@ -702,7 +773,8 @@ def identical_pair(records: list[dict], cell: str, arm: str, seed: int, phase_b:
         and a["trajectory"] != ""
         and a["energy_bits"] == b["energy_bits"]
         and int(float(a["charged"])) == int(float(b["charged"]))
-        and int(float(a["calls"])) == int(float(b["calls"]))
+        and int(float(a["callback_calls"])) == int(float(b["callback_calls"]))
+        and a["calls_to_hit"] == b["calls_to_hit"]
     )
 
 
@@ -720,7 +792,7 @@ def assemble_records(
     scored: dict,
     prov: dict,
     arm_prov: dict[str, dict[str, str]],
-    machine: str,
+    machine: dict[str, str],
 ) -> list[dict]:
     records = []
     for job in jobs:
@@ -729,7 +801,8 @@ def assemble_records(
         if job["kind"] == "molecule" and job["phase"] == "session":
             extra = scored[(job["cell"], job["arm"], job["seed"])]
             hit = extra["hit"]
-            calls = extra["calls"]
+            callback_calls = extra["callback_calls"]
+            calls_to_hit = extra["calls_to_hit"]
             charged = extra["charged"]
             wall = extra["wall_s"]
             inside = extra["inside_s"]
@@ -741,14 +814,14 @@ def assemble_records(
             budget = extra["budget"]
             rss = extra["rss_anon_kb"]
             peak_rss = extra["peak_rss_anon_kb"]
-            b_path_fired = extra["b_path_fired"]
-            b_path_quenches = extra["b_path_quenches"]
+            b_path_draws = extra["b_path_draws"]
             b_path_spent = extra["b_path_spent"]
             arm_binary = info.get("arm_binary") or meta["ext_binary"]
             arm_binary_sha256 = info.get("arm_binary_sha256") or meta["ext_sha256"]
         else:
             hit = int(info.get("hit") or 0)
-            calls = int(info.get("calls") or 0)
+            callback_calls = int(info.get("callback_calls") or 0)
+            calls_to_hit = info.get("calls_to_hit")
             charged = int(info.get("charged") or 0)
             wall = float(info.get("wall_s") or 0.0)
             inside = float(info.get("inside_s") or 0.0)
@@ -760,12 +833,11 @@ def assemble_records(
             budget = int(info.get("budget") or 0)
             rss = int(info.get("rss_anon_kb") or 0)
             peak_rss = int(info.get("peak_rss_anon_kb") or rss)
-            b_path_fired = int(info.get("b_path_fired") or 0)
-            b_path_quenches = int(info.get("b_path_quenches") or 0)
+            b_path_draws = int(info.get("b_path_draws") or 0)
             b_path_spent = int(info.get("b_path_spent") or 0)
             arm_binary = info.get("arm_binary") or meta["guard_binary"]
             arm_binary_sha256 = info.get("arm_binary_sha256") or meta["guard_sha256"]
-        outside = outside_per_call(wall, inside, calls)
+        outside = outside_per_call(wall, inside, callback_calls)
         records.append(
             {
                 "cell": job["cell"],
@@ -777,15 +849,15 @@ def assemble_records(
                 "core": core,
                 "hit": hit,
                 "budget": budget,
-                "calls": calls,
+                "callback_calls": callback_calls,
+                "calls_to_hit": "" if calls_to_hit is None else calls_to_hit,
                 "charged": charged,
                 "wall_s": f"{wall:.9f}",
                 "inside_s": f"{inside:.9f}",
                 "outside_per_call_s": f"{outside:.9e}",
                 "rss_anon_kb": rss,
                 "peak_rss_anon_kb": peak_rss,
-                "b_path_fired": b_path_fired,
-                "b_path_quenches": b_path_quenches,
+                "b_path_draws": b_path_draws,
                 "b_path_spent": b_path_spent,
                 "energy": energy,
                 "energy_bits": bits,
@@ -794,9 +866,15 @@ def assemble_records(
                 "arm_tree": info.get("arm_tree") or meta["arm_tree"],
                 "arm_binary": arm_binary,
                 "arm_binary_sha256": arm_binary_sha256,
-                "machine_id": machine,
-                "base_ref": prov["base_ref"],
-                "base_tree": prov["base_tree"],
+                "host": host_label(),
+                "machine_id": machine["machine_id"],
+                "cpu_model": machine["cpu_model"],
+                "a_ref": prov["a_ref"],
+                "a_tree": prov["a_tree"],
+                "b_ref": prov["b_ref"],
+                "b_tree": prov["b_tree"],
+                "harness_revision": prov["harness_revision"],
+                "harness_tree": prov["harness_tree"],
                 "harness_blobs": prov["harness_blobs"],
                 "error": error,
             }
@@ -807,6 +885,7 @@ def assemble_records(
 def write_csv(path: Path, records: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.is_file():
+        require_csv_schema(path, ROW_FIELDS)
         with path.open(newline="") as handle:
             existing = {(r["cell"], str(r["seed"]), r["arm"]) for r in csv.DictReader(handle)}
         new_rows = [r for r in records if (r["cell"], str(r["seed"]), r["arm"]) not in existing]
@@ -843,10 +922,11 @@ def write_sessions(path: Path, rows: list[tuple[str, str]]) -> None:
 def run(args) -> int:
     require_core()
     self_check()
-    prov = provenance(args.repo)
-    arm_prov = build_arm_provenance(args, prov["base_tree"])
+    prov = provenance(args.repo, args.a_ref, args.b_ref)
+    arm_prov = build_arm_provenance(args, prov)
     b_head_tree = git_text(args.src_b, "rev-parse", "HEAD^{tree}")
-    machine = machine_id()
+    machine_id, cpu_model = machine_provenance()
+    machine = {"machine_id": machine_id, "cpu_model": cpu_model}
     jobs = schedule()
     balances = check_balance(jobs)
     ident = schedule_id(jobs)
@@ -867,13 +947,17 @@ def run(args) -> int:
     scored = score_molecules(args.run_dir, jobs)
     records = assemble_records(args.run_dir, jobs, scored, prov, arm_prov, machine)
     sessions = [
-        ("base_ref", prov["base_ref"]),
-        ("base_tree", prov["base_tree"]),
-        ("b_commit", B_COMMIT),
-        ("b_tree", B_TREE),
+        ("a_ref", prov["a_ref"]),
+        ("a_tree", prov["a_tree"]),
+        ("b_ref", prov["b_ref"]),
+        ("b_tree", prov["b_tree"]),
         ("b_harness_tree", b_head_tree),
+        ("harness_revision", prov["harness_revision"]),
+        ("harness_tree", prov["harness_tree"]),
         ("harness_blobs", prov["harness_blobs"]),
-        ("machine_id", machine),
+        ("host", host_label()),
+        ("machine_id", machine["machine_id"]),
+        ("cpu_model", machine["cpu_model"]),
         ("seeds", f"{SEEDS[0]}-{SEEDS[-1]}"),
         ("n", str(N_SEEDS)),
         ("core", "0"),
@@ -912,6 +996,8 @@ def main() -> int:
 
     run_p = sub.add_parser("run")
     run_p.add_argument("--repo", type=Path, required=True)
+    run_p.add_argument("--a-ref", required=True)
+    run_p.add_argument("--b-ref", required=True)
     run_p.add_argument("--run-dir", type=Path, required=True)
     run_p.add_argument("--src-a", type=Path, required=True)
     run_p.add_argument("--src-b", type=Path, required=True)

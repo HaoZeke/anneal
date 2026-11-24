@@ -1201,6 +1201,10 @@ pub struct Outcome {
     pub overlap_rejected: usize,
     /// Trials abandoned because their partial relaxation was going home.
     pub returned: usize,
+    /// Fresh-start branches actually run by [`Config::branch_on_stall`].
+    pub branch_draws: u64,
+    /// Charged evaluations spent inside fresh-start branches.
+    pub branch_spent: usize,
     /// Escape scale at the end of the run, when the controller is used.
     pub escape_scale: f64,
     /// Acceptance threshold at the end of the run.
@@ -11009,6 +11013,8 @@ where
         charged: ledger.spent(),
         overlap_rejected: proposal_overlaps,
         returned,
+        branch_draws,
+        branch_spent,
         escape_scale: feedback.escape(),
         escape_threshold: feedback.threshold(),
         visit_counts: (feedback.n_same, feedback.n_known, feedback.n_new),

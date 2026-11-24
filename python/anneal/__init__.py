@@ -365,6 +365,8 @@ def cluster_search(
     - ``screened_out``: trials the screening pass dropped before a full
       relaxation. ``returned``: trials abandoned because their partial
       relaxation was going home, back to the basin the hop left.
+    - ``branch_draws``: fresh-start branches actually run by the conformer
+      miss path. ``branch_spent``: charged evaluations spent in those branches.
     - ``overlap_rejected``: line-search geometries within a relaxation that
       were closer than the overlap rule. Each was refused before the potential
       was called and is not counted in ``spent``.

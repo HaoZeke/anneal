@@ -3932,6 +3932,8 @@ fn cluster_search(
     ledger_split.set_item("capped", stats.capped)?;
     ledger_split.set_item("screened_out", out.screened_out)?;
     ledger_split.set_item("returned", out.returned)?;
+    ledger_split.set_item("branch_draws", out.branch_draws)?;
+    ledger_split.set_item("branch_spent", out.branch_spent)?;
     ledger_split.set_item("overlap_rejected", stats.overlap_rejected)?;
     ledger_split.set_item("basins", out.basins)?;
     dict.set_item("ledger", ledger_split)?;

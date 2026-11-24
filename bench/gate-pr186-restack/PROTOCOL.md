@@ -1,16 +1,14 @@
 # PR 186 restack same-session gate protocol
 
-Written before any data. Nothing here changes after the first run.
+The harness defines the measurement. BenchBot supplies the two revisions
+and records the data; this directory contains no committed measurements.
 
 ## Subjects
 
-A is develop `9b65fda3972fd8c014bce886a3ea5c05956d64af`, tree
-`9b65fda3^{tree}`.
-
-B is `c8581d69319a2f960c25ecb5f0261feb34a739b3`, tree
-`184736e2f596126ef71baca23d0ecdf756aaf77c`. It is the merge of the
-PR head `9e126b9ed90b504b64accce2fb64d5550f6da737` with A. B is
-built from a squash commit on A with exactly that tree.
+A is the live develop revision passed as `--a-ref`. B is the final
+payload passed as `--b-ref`. `run_gate.py` resolves both to commits and
+trees before checking the independent source checkouts. It does not carry
+fallback revisions.
 
 A2 is a second, independent release build of A. In the row files it is
 the arm `Ap`.
@@ -50,11 +48,19 @@ Default-preset cells (stop at published minimum plus 0.001):
 
 ## Measurements
 
-Every row records the hit, the budget, the calls to the hit (or the
-whole budget on a miss), wall seconds, seconds inside potential
-calls, outside seconds per call, and `RssAnon` in kB read in-process
-while the search state is alive. Rows are append-only. A failed row is
-kept and makes its cell INCONCLUSIVE. There are no replacement runs.
+Every row records the hit, charged budget units, full-run potential
+callback calls, calls to the first hit, wall seconds, seconds inside
+potential calls, outside seconds per callback, and `RssAnon` in kB read
+in-process while the search state is alive. A molecular first-hit count
+comes from the first matching trace minimum and uses paired
+energy/gradient calls as one charged unit. A hit without a trace count,
+or a charged or first-hit count above budget, fails the gate.
+
+Rows are append-only. A failed row is kept and makes its cell
+INCONCLUSIVE. There are no replacement runs. Each row carries the A and
+B revisions and trees, harness revision, tree and blob identities, arm
+revision, tree and binary digest, host label, salted machine identity and
+CPU model.
 
 Outside time per call is (wall minus inside) divided by calls. Outside
 time in total is wall minus inside. Both are reported for every cell.
@@ -96,50 +102,20 @@ memory bound is missed but the band version holds, otherwise PASS. A
 FIX is never relabelled as a PASS. The gate is PASS only if every cell
 is PASS or PASS-BAND.
 
-## Known gaps
+## Conf-miss path requirement
 
-The harness has no build-only path counter. The lazy basin probe
-reaches B and A alike through develop, so the default-preset cells and
-the molecular cells are the evidence that B moved nothing.
+The payload reports `branch_draws` and `branch_spent` from
+`Config::branch_on_stall` itself. Every B molecular seed must report both
+as nonzero. Generic ledger activity does not satisfy this requirement.
+The analyzer returns FIX when the path is disabled or does not run.
 
-## Addendum (before data)
+## Invocation
 
-1. Environment and build deviations from README steps 3-4:
-   - `rustup toolchain install 1.88.0 --profile minimal` was run
-     because only Rust 1.83.0 was pre-installed.
-   - `scripts/openconf_h2h/setup_env.sh` defaults `MAMBA_EXE` and
-     `MAMBA_ROOT_PREFIX` to a non-writable system prefix, so both were
-     pointed to a writable scratch directory alongside
-     `OPENCONF_H2H_ENV`.
-   - `maturin` is installed inside `$OPENCONF_H2H_ENV/bin`, so step 4
-     runs with `$OPENCONF_H2H_ENV/bin` prepended to `PATH`.
-   - `rdff_count.c` compiled cleanly with `gcc -O2 -shared -fPIC ... -ldl`.
-2. Arm tree checks:
-   - Each arm checkout has `anneal-186-restack-harness.mbox` applied
-     on top of its base (`HEAD^{tree}` on B is `a839b9a9...` with
-     `HEAD~1^{tree}` = `184736e2...`; `HEAD~1^{tree}` on A/A2 is
-     `9b65fda3^{tree}`). `run_gate.py` verifies both the underlying
-     arm tree and the harness-applied tree, and tracks `PROTOCOL.md`
-     in `HARNESS_FILES`.
-   - `guard_trace.rs` from the updated harness is copied into
-     `examples/guard_trace.rs` of each arm before its release build.
-3. Peak in-process `RssAnon` (`peak_rss_anon_kb`):
-   - `guard_trace.rs` samples procfs self status `RssAnon:` at search
-     start, every 1024 potential calls (outside `PesClock`), and at
-     search end while `outcome` is alive, emitting both `rss_anon_kb`
-     and `peak_rss_anon_kb`.
-   - The molecular worker wraps `anneal.cluster_search` to sample
-     `RssAnon:` at search start, every 256 energy calls, and at search
-     end, recording both `rss_anon_kb` and `peak_rss_anon_kb`.
-   - The one-sided memory gate (`lower > max(1.10, A2/A upper)`) is
-     evaluated on both `rss_anon_kb` and `peak_rss_anon_kb`.
-4. Nonzero path counter for B's conf-miss code path:
-   - The restacked B payload adds the `ledger` breakdown dict to
-     `anneal.cluster_search` in `src/python.rs` (absent on A and A2).
-   - The molecular worker records `b_path_fired` (`1` when `ledger` is
-     returned with `spent > 0`, `0` otherwise), `b_path_quenches`, and
-     `b_path_spent`. `analyze.py` reports the per-cell count and flags
-     any molecular cell with zero count as testing timing only.
-5. Default-preset parity reporting:
-   - `analyze.py` also records `max_abs_dE` from `energy_bits` between
-     B and A alongside the bit-level `identical` check.
+The runner requires explicit subjects:
+
+```text
+run_gate.py run --repo REPO --a-ref LIVE_DEVELOP --b-ref FINAL_PAYLOAD ...
+```
+
+The remaining source, binary, Python environment, counter, output and
+session arguments are required as shown by `run_gate.py run --help`.
