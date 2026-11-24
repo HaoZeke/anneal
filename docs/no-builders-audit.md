@@ -90,3 +90,11 @@ checks; two-/three-/four-point geometric validity checks; sample, visit,
 optimizer, and archive counters named `n`; physical-potential constants; and
 motif words confined to comments or `#[cfg(test)]` fixture modules. No source
 path owned by the SOAP fivefold cleanup or the surface-mode size-gate removal was edited.
+
+## Status after the series
+
+`src/lattice.rs` no longer holds named templates, the decahedral cut or
+the library of sources. It keeps `observed_basis_candidate`, which reads
+the contact graph of the current geometry and builds a body from a
+tetrahedron found in it, and `nearest_neighbour_scale`. The
+`tests/no_motif_constants.rs` guard holds no entry for the file.

@@ -25,8 +25,7 @@ fn expected_matches(entry: &Allow) -> usize {
         ("src/soap.rs", "n > 13" | "n <= 13") => 2,
         ("src/methods/activation.rs", "pentagon") => 5,
         ("src/methods/activation.rs", "fivefold") => 6,
-        ("src/lattice.rs", "Template::FaceCentredCubic" | "Template::Icosahedral") => 2,
-        ("src/csm.rs", "d5h") => 4,
+        ("src/csm.rs", "d5h") => 2,
         ("src/csm.rs", "cyclic_about_z(5)") => 2,
         ("src/twin.rs", "if n < 8") => 2,
         ("src/structure.rs", "Template::Icosahedral" | "Template::FaceCentredCubic") => 4,
@@ -161,21 +160,6 @@ const ALLOW: &[Allow] = &[
         path: "src/methods/activation.rs",
         needle: "fivefold",
         reason: "existing fivefold opening builder; replacement is audited",
-    },
-    Allow {
-        path: "src/lattice.rs",
-        needle: "Template::FaceCentredCubic",
-        reason: "develop's lattice sources; only observed_basis_candidate is reached from the search",
-    },
-    Allow {
-        path: "src/lattice.rs",
-        needle: "Template::Icosahedral",
-        reason: "develop's lattice sources; only observed_basis_candidate is reached from the search",
-    },
-    Allow {
-        path: "src/lattice.rs",
-        needle: "decahedral_cut",
-        reason: "develop's lattice cut, called from no search path; replacement is audited",
     },
     Allow {
         path: "src/csm.rs",
