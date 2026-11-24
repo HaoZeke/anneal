@@ -103,7 +103,8 @@ GET https://www-wales.ch.cam.ac.uk/CCD.html
 GET https://www.faccts.de/orca/
 GET https://www.faccts.de/news/
 
-Result: five verified records added (`unglertJaxrens2026`, `heSrtio3Gcmc2026`,
-`wenWaterHessian2026`, `huangDegauss2026`, `matoMolscrub2026`). No numbered
+Result: one verified record added (`heSrtio3Gcmc2026`). The other four
+verified records were already on develop (`unglertJaxrens2026`,
+`wenWaterHessian2026`, `huangDegauss3p2026`, `matoMolscrub2026`). No numbered
 release changed: CREST remains v3.0.2, xtb v6.8.0, AGOX v3.11.1, ASE 3.29.0,
 pele v0.1.2, ORCA 6.1.1, and GMIN/OPTIM pages remain dated 17 March 2022.
