@@ -33,6 +33,7 @@ fn trajectory_hash() -> String {
     // is the path every target can run.
     let _ = rgmin::vecops::force_simd_path("scalar");
     let cfg = Config::recommended(ATOMS);
+    assert!(!cfg.cap_twist, "the pinned base trajectory is flag-off");
     let potential = PairPotential::lennard_jones(ATOMS);
     let mut rng = StdRng::seed_from_u64(SEED);
     let start = random_cluster_in_radius(ATOMS, cfg.start_radius(), cfg.min_separation, &mut rng);
