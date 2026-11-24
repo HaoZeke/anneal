@@ -970,11 +970,18 @@ impl Ledger {
     /// own overrun is settled with its spend, so a call that passed a
     /// sub-ledger's cap is still counted here and reaches [`Ledger::charged`]
     /// at the top of the run.
+    ///
+    /// The units the child priced through [`Ledger::charge_frac`] are part of
+    /// its spend, and are settled onto [`Ledger::priced`] with it, so that a
+    /// caller who counts calls still finds `calls + priced == spent` for a
+    /// run that settled children. A side probe starts with none priced, so
+    /// its offset never holds any.
     pub fn settle_child(&mut self, child: &Ledger, offset: usize) -> bool {
         let calls = child
             .spent
             .saturating_sub(offset)
             .saturating_add(child.settled_beyond_cap);
+        self.priced = self.priced.saturating_add(child.priced);
         self.charge_many(calls)
     }
 
@@ -12920,6 +12927,48 @@ mod tests {
         assert!(!dry.charge_many(4));
         assert_eq!(dry.spent(), 3);
         assert_eq!(dry.settled_beyond_cap(), 6);
+    }
+
+    #[test]
+    fn settling_a_child_carries_the_units_it_priced() {
+        let mut parent = Ledger::new(100);
+        let mut child = parent.slice(40);
+        assert!(child.charge_frac(2.5));
+        assert!(child.charge_many(5));
+        assert_eq!((child.spent(), child.priced()), (7, 2));
+        assert!(parent.settle_child(&child, 0));
+        assert_eq!((parent.spent(), parent.priced()), (7, 2));
+        assert_eq!(parent.charged(), 7);
+
+        let mut inner = parent.slice(20);
+        assert!(inner.charge_frac(3.0));
+        let mut middle = parent.slice(30);
+        assert!(middle.charge_frac(1.0));
+        assert!(middle.settle_child(&inner, 0));
+        assert_eq!(middle.priced(), 4, "a grandchild's units reach the middle");
+        assert!(parent.settle_child(&middle, 0));
+        assert_eq!(parent.priced(), 6, "and then the top");
+        assert_eq!(parent.spent(), 11);
+
+        let (probe, offset) = parent.side_probe(40);
+        let mut probe = probe;
+        assert!(probe.charge_frac(2.0));
+        assert!(parent.settle_child(&probe, offset));
+        assert_eq!(parent.priced(), 8, "a side probe prices from none");
+        assert_eq!(parent.spent(), 13);
+    }
+
+    #[test]
+    fn units_priced_in_a_child_stay_priced_when_the_parent_overruns() {
+        let mut parent = Ledger::new(5);
+        let mut child = parent.slice(10);
+        assert!(child.charge_frac(4.0));
+        assert!(child.charge_many(4));
+        assert!(!parent.settle_child(&child, 0));
+        assert_eq!(parent.spent(), 5);
+        assert_eq!(parent.settled_beyond_cap(), 3);
+        assert_eq!(parent.charged(), 8);
+        assert_eq!(parent.priced(), 4);
     }
 
     #[test]

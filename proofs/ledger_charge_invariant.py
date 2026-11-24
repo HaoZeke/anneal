@@ -10,6 +10,7 @@ class Ledger:
         self.budget = budget
         self.spent = 0
         self.settled_beyond_cap = 0
+        self.priced = 0
         self.best = float("inf")
         self._stopped = False
 
@@ -38,13 +39,22 @@ class Ledger:
         self.settled_beyond_cap += n - paid
         return n <= open_room
 
+    def charge_priced(self, units: int) -> None:
+        # Whole units that settled through charge_frac: each is one
+        # charge, and it is counted as priced only when it was paid.
+        for _ in range(units):
+            if self.charge():
+                self.priced += 1
+
     def charged(self) -> int:
         # The count a benchmark reads: every settled call.
         return self.spent + self.settled_beyond_cap
 
     def settle_child(self, child: "Ledger", offset: int = 0) -> bool:
         # The child's own overrun is settled with its spend, so an
-        # evaluation past a sub-ledger's cap still reaches the parent.
+        # evaluation past a sub-ledger's cap still reaches the parent. The
+        # units it priced are part of that spend and settle with it.
+        self.priced += child.priced
         return self.charge_many(max(child.spent - offset, 0) + child.settled_beyond_cap)
 
     def remaining(self) -> int:
@@ -198,6 +208,34 @@ def test_child_overrun_reaches_the_parent() -> bool:
     return True
 
 
+def test_priced_is_summed_over_children() -> bool:
+    for parent_budget in range(0, 12):
+        for plan in ([(2, 3)], [(1, 0), (4, 2)], [(0, 5), (3, 3), (2, 0)]):
+            parent = Ledger(parent_budget)
+            expected = 0
+            for units, raw in plan:
+                child = Ledger(10)
+                child.charge_priced(units)
+                child.charge_many(raw)
+                expected += child.priced
+                parent.settle_child(child)
+            if parent.priced != expected:
+                return False
+            if parent.priced > parent.charged():
+                return False
+            # A grandchild's units reach the top through the middle.
+            middle = Ledger(10)
+            inner = Ledger(10)
+            inner.charge_priced(3)
+            middle.charge_priced(1)
+            middle.settle_child(inner)
+            top = Ledger(parent_budget)
+            top.settle_child(middle)
+            if middle.priced != 4 or top.priced != 4:
+                return False
+    return True
+
+
 def all_checks() -> list[tuple[str, bool]]:
     return [
         ("I1 through charge to exhaustion", test_i1_through_charges()),
@@ -209,6 +247,7 @@ def all_checks() -> list[tuple[str, bool]]:
         ("overrun is recorded apart", test_overrun_is_recorded_apart()),
         ("every settled call is on one field", test_every_settled_call_is_on_one_field()),
         ("a child's overrun reaches the parent", test_child_overrun_reaches_the_parent()),
+        ("priced units are summed over children", test_priced_is_summed_over_children()),
     ]
 
 
