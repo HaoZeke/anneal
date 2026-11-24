@@ -130,6 +130,7 @@ def test_with_scales_defaults_match_rust_config_exactly():
     assert cfg.anneal_diversity is False
     assert cfg.prior_soap is True
     assert cfg.general_collective is False
+    assert cfg.cap_twist is False
     assert cfg.homotop_descent is True
     assert cfg.homotop_ranked is True
     assert cfg.homotop_window is True

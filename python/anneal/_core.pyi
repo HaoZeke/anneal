@@ -502,6 +502,7 @@ class Config:
     homotop_window: bool
     homotop_reorder: bool
     general_collective: bool
+    cap_twist: bool
     soft_perturb: bool
     soft_modes: int
     soft_steps: int

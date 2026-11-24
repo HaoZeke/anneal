@@ -1974,6 +1974,16 @@ impl PyClusterConfig {
     }
 
     #[getter]
+    fn cap_twist(&self) -> bool {
+        self.inner.cap_twist
+    }
+
+    #[setter]
+    fn set_cap_twist(&mut self, value: bool) {
+        self.inner.cap_twist = value;
+    }
+
+    #[getter]
     fn soft_perturb(&self) -> bool {
         self.inner.soft_perturb
     }
