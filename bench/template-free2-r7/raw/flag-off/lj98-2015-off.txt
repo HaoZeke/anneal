@@ -1,0 +1,2 @@
+system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,head,tree,cpu,pins,pot_s
+lj98,anneal,2015,4000000,true,3180386,3180386,77.034635,-543.66536077,unknown,unknown,Intel(R) Xeon(R) Processor,7,48.354789

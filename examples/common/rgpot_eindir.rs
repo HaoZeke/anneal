@@ -215,6 +215,10 @@ mod tests {
         }
     }
 
+    // The registry release has no SCC status. This assertion is the git pin,
+    // which the `rgpot-ex` builds use. The packaged crate resolves the
+    // registry and does not compile this test.
+    #[cfg(feature = "rgpot-ex")]
     #[test]
     fn an_unconverged_scc_is_its_own_status_and_other_failures_are_not() {
         for (name, force, expected) in [
@@ -409,11 +413,11 @@ struct XtbConfig {
 }
 
 type XtbCreate = unsafe extern "C" fn(*const XtbConfig, *mut u8, usize) -> *mut c_void;
-type XtbDestroy = unsafe extern "C" fn(*mut c_void);
-type XtbReset = unsafe extern "C" fn(*mut c_void);
+pub(crate) type XtbDestroy = unsafe extern "C" fn(*mut c_void);
+pub(crate) type XtbReset = unsafe extern "C" fn(*mut c_void);
 type XtbSetWarmMove = unsafe extern "C" fn(*mut c_void, f64);
 type XtbWarmMove = unsafe extern "C" fn(*const c_void) -> f64;
-type XtbForce = unsafe extern "C" fn(
+pub(crate) type XtbForce = unsafe extern "C" fn(
     *mut c_void,
     i64,
     *const f64,
@@ -693,11 +697,9 @@ impl XtbWorker {
 }
 
 struct XtbKernel {
-    _lib: Library,
+    _lib: Option<Library>,
     pot: *mut c_void,
-    force: Symbol<'static, XtbForce>,
-    reset: Symbol<'static, XtbReset>,
-    destroy: Symbol<'static, XtbDestroy>,
+    destroy: XtbDestroy,
     worker: XtbWorker,
     evaluations: usize,
     scc_rejected: usize,
@@ -765,13 +767,29 @@ fn first_existing(cands: &[PathBuf]) -> PathBuf {
         .unwrap_or_else(|| cands[cands.len() - 1].clone())
 }
 
+/// Status of an unconverged SCC.
+///
+/// `RGPOT_SCC_NOT_CONVERGED` is on the git pin and not in the registry
+/// release `cargo package` resolves. The registry build reports
+/// `RGPOT_INTERNAL_ERROR` for the same failure.
+fn scc_failure_status() -> rgpot_status_t {
+    #[cfg(feature = "rgpot-ex")]
+    {
+        rgpot_status_t::RGPOT_SCC_NOT_CONVERGED
+    }
+    #[cfg(not(feature = "rgpot-ex"))]
+    {
+        rgpot_status_t::RGPOT_INTERNAL_ERROR
+    }
+}
+
 /// The worker's answer, or the status of an evaluation that gave no energy.
 ///
 /// An unconverged SCC, a rejected answer and a dead worker are the same to
 /// the search: the call was charged and returned nothing, so each is counted
 /// as an SCC rejection and leaves no force behind. Only the status differs.
-/// An unconverged SCC is `RGPOT_SCC_NOT_CONVERGED`, so a caller of rgpot can
-/// tell it from a fault; the other two are `RGPOT_INTERNAL_ERROR`.
+/// An unconverged SCC is [`scc_failure_status`]; the other two are
+/// `RGPOT_INTERNAL_ERROR`.
 fn answer_or_reject(
     evaluation: Result<(f64, f64), WorkerFail>,
     scratch: &mut [f64],
@@ -784,7 +802,7 @@ fn answer_or_reject(
             note_scc_rejected(scc_rejected, min_pair_a);
             scratch.fill(f64::NAN);
             Err(match failure {
-                WorkerFail::SccNotConverged => rgpot_status_t::RGPOT_SCC_NOT_CONVERGED,
+                WorkerFail::SccNotConverged => scc_failure_status(),
                 WorkerFail::Dead | WorkerFail::Rejected => rgpot_status_t::RGPOT_INTERNAL_ERROR,
             })
         }
@@ -1050,22 +1068,40 @@ impl RgpotObjective {
                 "rgpot_xtb_set_warm_move"
             );
         }
-        let force =
-            unsafe { std::mem::transmute::<Symbol<XtbForce>, Symbol<'static, XtbForce>>(force) };
-        let reset =
-            unsafe { std::mem::transmute::<Symbol<XtbReset>, Symbol<'static, XtbReset>>(reset) };
-        let destroy = unsafe {
-            std::mem::transmute::<Symbol<XtbDestroy>, Symbol<'static, XtbDestroy>>(destroy)
-        };
         let force_fn: XtbForce = *force;
         let reset_fn: XtbReset = *reset;
+        let destroy_fn: XtbDestroy = *destroy;
+        let handle = Self::xtb_from_symbols(
+            atmnrs,
+            box_,
+            overlap_limit_a,
+            Some(lib),
+            pot,
+            force_fn,
+            reset_fn,
+            destroy_fn,
+        );
+        println!("  eindir objective from rgpot xtb ({})", path.display());
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+        handle
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn xtb_from_symbols(
+        atmnrs: &[i32],
+        box_: [f64; 9],
+        overlap_limit_a: f64,
+        lib: Option<Library>,
+        pot: *mut c_void,
+        force_fn: XtbForce,
+        reset_fn: XtbReset,
+        destroy_fn: XtbDestroy,
+    ) -> Self {
         let worker = XtbWorker::spawn(force_fn, reset_fn, pot);
         let kernel = Box::new(XtbKernel {
             _lib: lib,
             pot,
-            force,
-            reset,
-            destroy,
+            destroy: destroy_fn,
             worker,
             evaluations: 0,
             scc_rejected: 0,
@@ -1090,8 +1126,6 @@ impl RgpotObjective {
             )
         };
         assert!(!handle.is_null(), "rgpot_potential_new_eindir xtb");
-        println!("  eindir objective from rgpot xtb ({})", path.display());
-        let _ = std::io::Write::flush(&mut std::io::stdout());
         Self {
             pot: handle,
             xtb: kernel_ptr,

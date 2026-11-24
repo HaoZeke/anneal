@@ -1,0 +1,8 @@
+system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,pot_s,outside_s
+m38r14,anneal,2021,400000,true,78402,78402,0.713300,-144.32105392,0.552145,0.161155
+arm single draws 32 accepts 13 best -139.531146
+arm surface draws 45 accepts 24 best -139.646497
+arm sym draws 42 accepts 21 best -140.471638
+arm burst draws 27 accepts 13 best -139.652178
+arm soap draws 24 accepts 13 best -140.471638
+arm dls-kernel draws 66 accepts 48 best -140.471637
