@@ -359,6 +359,10 @@ private:
                               const Spec &spec, bool same_cell,
                               bool &wrapped) const;
   void fold(double &dx, double &dy, double &dz) const;
+  /// Periodic orthorhombic coordinate folded into `[0, len)`. An open axis,
+  /// or a non-finite value, is returned unchanged. Sheared cells do not bin
+  /// with this helper.
+  [[nodiscard]] double foldedAxis(double x, int axis) const;
 
   template <typename Fn>
   void walkStored(std::int64_t begin, std::int64_t end, Fn &fn,
@@ -495,6 +499,24 @@ private:
     if (!streaming_ || allPairs() || use_general_ ||
         (image_ != Image::Round && image_ != Image::Half) || n_ < 2) {
       return false;
+    }
+    // The tiled walk subtracts one cell shift from the stored coordinates.
+    // That matches the minimum image only while every atom already sits in
+    // the box. An atom outside uses the scattered walk, which folds the raw
+    // separation, on bins that hold the folded coordinate.
+    if (xyz_ != nullptr) {
+      for (std::size_t a = 0; a < n_; ++a) {
+        const std::size_t u = a * 3;
+        for (int k = 0; k < 3; ++k) {
+          if (!periodic_[k]) {
+            continue;
+          }
+          const double x = xyz_[u + static_cast<std::size_t>(k)];
+          if (!(x >= 0.0) || !(x < len_[k])) {
+            return false;
+          }
+        }
+      }
     }
     // One stencil. A 27-slot entry per cell is reused while the coordinates
     // are unchanged. When that array is larger than the pair index, the same
@@ -676,7 +698,8 @@ private:
         for (std::size_t q = 0; q < n_; ++q) {
           const auto j = cell_atoms_[q];
           const auto u = static_cast<std::size_t>(j) * 3;
-          cache.tile[q] = Tile{xyz_[u], xyz_[u + 1], xyz_[u + 2], j};
+          cache.tile[q] = Tile{foldedAxis(xyz_[u], 0), foldedAxis(xyz_[u + 1], 1),
+                               foldedAxis(xyz_[u + 2], 2), j};
         }
       }
     } else {
@@ -760,7 +783,8 @@ private:
     for (std::size_t q = 0; q < n_; ++q) {
       const auto j = cell_atoms_[q];
       const auto u = static_cast<std::size_t>(j) * 3;
-      tile[q] = Tile{xyz_[u], xyz_[u + 1], xyz_[u + 2], j};
+      tile[q] = Tile{foldedAxis(xyz_[u], 0), foldedAxis(xyz_[u + 1], 1),
+                     foldedAxis(xyz_[u + 2], 2), j};
     }
     }
     if (streaming_) {
@@ -991,6 +1015,27 @@ private:
   std::uint64_t builds_ = 0;
   const double *xyz_ = nullptr;
 };
+
+inline double Neighbours::foldedAxis(double x, int axis) const {
+  if (!periodic_[axis] || !(inv_[axis] > 0.0) || !std::isfinite(x)) {
+    return x;
+  }
+  const double len = len_[axis];
+  // Inside the cell the coordinate stays bit-exact. The reciprocal fold would
+  // move it by an ulp and change a stiff pair force.
+  if (x >= 0.0 && x < len) {
+    return x;
+  }
+  const double t = x * inv_[axis];
+  if (!std::isfinite(t)) {
+    return x;
+  }
+  double wrapped = t - std::floor(t);
+  if (!(wrapped >= 0.0) || !(wrapped < 1.0)) {
+    wrapped = 0.0;
+  }
+  return wrapped * len;
+}
 
 inline void Neighbours::fold(double &dx, double &dy, double &dz) const {
   if (use_general_) {

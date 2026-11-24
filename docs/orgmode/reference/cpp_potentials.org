@@ -821,8 +821,11 @@ explicit MorsePot(const MorseConfig &c);
   cell: a diagonal cell wraps each axis whose diagonal entry (=box[0]=,
   =box[4]=, =box[8]=) is positive and leaves non-positive axes free, while any
   non-zero off-diagonal entry uses =nlist::MinimumImage= across the 3x3 cell.
-  Each distinct atom pair contributes at most one minimum image, and a cutoff of
-  0 or less gives zero energy and forces.
+  Each distinct atom pair contributes at most one minimum image.
+  That is every image inside the cutoff only while the smallest perpendicular
+  face height is at least twice the cutoff.
+  A narrower cell lists every image through =nlist::build=.
+  A cutoff of 0 or less gives zero energy and forces.
   Atomic numbers are not read.
   The force call writes the stress.
 - Errors :: the errors of =rgpot::MorseConfig=.

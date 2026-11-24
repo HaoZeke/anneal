@@ -238,10 +238,19 @@ void Neighbours::buildCells(const double *xyz, std::size_t n) {
     }
     return i;
   };
+  // A periodic axis is folded into the cell before the Cartesian bin. An
+  // atom several cells outside then shares a bin with its image inside,
+  // and the walk still takes the minimum image of the coordinates as given.
+  auto placed = [&](double x, int axis) {
+    if (periodic_[axis]) {
+      return foldedAxis(x, axis);
+    }
+    return x - origin[axis];
+  };
   for (std::size_t a = 0; a < n; ++a) {
-    const int ix = bin(xyz[3 * a] - origin[0], span[0], nx_);
-    const int iy = bin(xyz[3 * a + 1] - origin[1], span[1], ny_);
-    const int iz = bin(xyz[3 * a + 2] - origin[2], span[2], nz_);
+    const int ix = bin(placed(xyz[3 * a], 0), span[0], nx_);
+    const int iy = bin(placed(xyz[3 * a + 1], 1), span[1], ny_);
+    const int iz = bin(placed(xyz[3 * a + 2], 2), span[2], nz_);
     const int id = (ix * ny_ + iy) * nz_ + iz;
     cell_of_[a] = id;
     ++cell_start_[static_cast<std::size_t>(id) + 1];

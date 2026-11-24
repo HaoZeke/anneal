@@ -131,7 +131,76 @@ std::vector<double> fractional_positions(const double box[9], std::size_t n) {
   return pos;
 }
 
+void require_image_sum(const std::vector<double> &pos, const double *box,
+                       double cutoff, bool full,
+                       const std::array<bool, 3> &periodic) {
+  rgpot::nlist::Query query;
+  query.cutoff = cutoff;
+  query.shape = rgpot::nlist::Pairs{full ? rgpot::nlist::Shell::Full
+                                         : rgpot::nlist::Shell::Half};
+  query.cut = rgpot::nlist::Cut::Strict;
+  query.periodic = periodic;
+  rgpot::nlist::Table table;
+  rgpot::nlist::build(table, pos.data(), pos.size() / 3, box, query);
+  const auto ref = brute(pos, box, cutoff, full, true, periodic);
+  REQUIRE(table.size() == ref.size());
+  REQUIRE(from_table(table) == ref);
+  for (std::size_t p = 0; p < table.size(); ++p) {
+    const std::size_t i = static_cast<std::size_t>(table.first[p]);
+    const std::size_t j = static_cast<std::size_t>(table.second[p]);
+    const int sa = table.shift[3 * p];
+    const int sb = table.shift[3 * p + 1];
+    const int sc = table.shift[3 * p + 2];
+    const double vx =
+        pos[3 * j] - pos[3 * i] + sa * box[0] + sb * box[3] + sc * box[6];
+    const double vy = pos[3 * j + 1] - pos[3 * i + 1] + sa * box[1] +
+                      sb * box[4] + sc * box[7];
+    const double vz = pos[3 * j + 2] - pos[3 * i + 2] + sa * box[2] +
+                      sb * box[5] + sc * box[8];
+    REQUIRE(table.distance[p] ==
+            Catch::Approx(std::sqrt(vx * vx + vy * vy + vz * vz)).margin(1e-12));
+  }
+}
+
 } // namespace
+
+TEST_CASE("small periodic cells enumerate every image", "[nlist][api]") {
+  const std::array<bool, 3> periodic{{true, true, true}};
+
+  SECTION("one atom in a cubic cell") {
+    const double box[9] = {2, 0, 0, 0, 2, 0, 0, 0, 2};
+    const std::vector<double> pos{0.2, 0.3, 0.4};
+    for (bool full : {false, true}) {
+      require_image_sum(pos, box, 3.0, full, periodic);
+      rgpot::nlist::Query query;
+      query.cutoff = 3.0;
+      query.shape = rgpot::nlist::Pairs{full ? rgpot::nlist::Shell::Full
+                                             : rgpot::nlist::Shell::Half};
+      rgpot::nlist::Table table;
+      rgpot::nlist::build(table, pos.data(), 1, box, query);
+      REQUIRE(table.size() == (full ? 18 : 9));
+    }
+  }
+
+  SECTION("one atom in a triclinic cell") {
+    const double box[9] = {2.0, 0, 0, 0.6, 1.9, 0, 0.2, 0.4, 2.1};
+    const std::vector<double> pos{0.2, 0.3, 0.4};
+    for (bool full : {false, true}) {
+      require_image_sum(pos, box, 3.0, full, periodic);
+    }
+  }
+
+  SECTION("two atoms across image-count thresholds") {
+    const double box[9] = {4, 0, 0, 0, 4, 0, 0, 0, 4};
+    const std::vector<double> pos{0.2, 0.3, 0.4, 1.3, 1.1, 0.9};
+    for (double ratio : {0.49, 0.51, 0.99, 1.01, 1.49, 1.51}) {
+      for (bool full : {false, true}) {
+        CAPTURE(ratio, full);
+        require_image_sum(pos, box, ratio * 4.0, full, periodic);
+      }
+    }
+  }
+}
 
 TEST_CASE("neighbour query matches a triclinic brute force", "[nlist][api]") {
   const double box[9] = {4.0, 0.2, 0.1, 0.3, 4.5, -0.2, 0.05, 0.15, 4.2};

@@ -92,7 +92,11 @@ atoms. Every thread count stores the same pairs and shifts. The results
 are concatenated in slice order, so a cluster list keeps the one-thread
 order; a pair list may store its rows in a different order. Vesin merges
 per-thread lists without promising an order. Below 512 atoms a pair list
-is a direct loop over atom pairs, without cells.
+is a direct loop over atom pairs, without cells. The loop includes a
+cell that holds one atom, and so does the image stencil on a larger
+cell, so that atom's periodic images inside the cutoff are listed. A
+cell narrower than twice the search radius lists every image of a pair
+inside the cutoff, not only the nearest.
 
 Matscipy's `neighbour_list` returns whichever of pairs, distances and
 vectors the caller names in a string
@@ -163,6 +167,10 @@ the skin.
 is one correction about the half-box, which is what EAM uses after
 wrapping coordinates into the cell. `General`, and any sheared cell,
 calls `MinimumImage`.
+A periodic orthorhombic axis folds each coordinate into the cell before
+binning, so an atom outside the box shares a bin with its image inside.
+The pair vector remains the minimum image of the coordinates as given.
+Sheared cells stay on the fractional grid.
 
 `Mode::Stored` keeps a Verlet list and reuses it while every atom has moved by at most half the skin.
 The list holds partner indices and each walk takes the image from the current coordinates, so the move is measured to the nearest periodic image of the reference position: an atom that the caller wraps back through a face of the cell has moved by its step, not by a cell vector, and keeps the list.
