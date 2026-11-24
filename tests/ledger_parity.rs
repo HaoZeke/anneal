@@ -115,12 +115,26 @@ fn assert_parity(label: &str, tally: &Tally) {
     );
 }
 
+/// The default offers the packing probe after 36 hops. Zero offers it before
+/// the first hop. Both settle the probe's side ledger onto the main one.
+const DEFERRALS: [Option<usize>; 2] = [None, Some(0)];
+
+fn recommended(n: usize, deferral: Option<usize>) -> Config {
+    let mut cfg = Config::recommended(n);
+    if let Some(hops) = deferral {
+        cfg.packing_deferral = hops;
+    }
+    cfg
+}
+
 #[test]
 fn every_potential_call_is_on_the_ledger_for_lj26_and_lj38() {
     for n in [26usize, 38] {
         for seed in [2000u64, 2001, 2002] {
-            let tally = walk(&Config::recommended(n), n, seed, 60_000, true);
-            assert_parity(&format!("LJ{n} seed {seed}"), &tally);
+            for deferral in DEFERRALS {
+                let tally = walk(&recommended(n, deferral), n, seed, 60_000, true);
+                assert_parity(&format!("LJ{n} seed {seed} deferral {deferral:?}"), &tally);
+            }
         }
     }
 }
@@ -129,8 +143,10 @@ fn every_potential_call_is_on_the_ledger_for_lj26_and_lj38() {
 fn every_potential_call_is_on_the_ledger_for_lj75_and_lj98() {
     for n in [75usize, 98] {
         for seed in [2000u64, 2001, 2002] {
-            let tally = walk(&Config::recommended(n), n, seed, 40_000, true);
-            assert_parity(&format!("LJ{n} seed {seed}"), &tally);
+            for deferral in DEFERRALS {
+                let tally = walk(&recommended(n, deferral), n, seed, 40_000, true);
+                assert_parity(&format!("LJ{n} seed {seed} deferral {deferral:?}"), &tally);
+            }
         }
     }
 }

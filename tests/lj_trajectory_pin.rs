@@ -28,12 +28,15 @@ const SEED: u64 = 2000;
 const ATOMS: usize = 98;
 const BUDGET: usize = 5_000;
 
-fn trajectory_hash() -> String {
+fn trajectory_hash(packing_deferral: Option<usize>) -> String {
     // AVX2, AVX-512 and NEON dots are not the same quench. Scalar `mul_add`
     // is the path every target can run.
     let _ = rgmin::vecops::force_simd_path("scalar");
-    let cfg = Config::recommended(ATOMS);
+    let mut cfg = Config::recommended(ATOMS);
     assert!(!cfg.cap_twist, "the pinned base trajectory is flag-off");
+    if let Some(deferral) = packing_deferral {
+        cfg.packing_deferral = deferral;
+    }
     let potential = PairPotential::lennard_jones(ATOMS);
     let mut rng = StdRng::seed_from_u64(SEED);
     let start = random_cluster_in_radius(ATOMS, cfg.start_radius(), cfg.min_separation, &mut rng);
@@ -86,14 +89,26 @@ fn trajectory_hash() -> String {
     format!("{:x}", hasher.finalize())
 }
 
+/// The generic packing probe is offered after 36 hops, and this 5_000-call
+/// walk ends first. It is develop's flag-off walk, so the hash is the one
+/// develop pins.
 #[test]
 fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     anneal_core::install_rgpot_kernels!();
-    let hash = trajectory_hash();
-    // The general move library with generic packing candidates is deterministic
-    // on every build. A stall branch keeps the lattice move and skips a
-    // second catalogue, so this is not the hash of a branch that dropped
-    // the lattice move.
+    let hash = trajectory_hash(None);
+    let expected = "5cd9c95765eadc45efa5879002be9a7430a81b9d82d5bf19509dcabc5578b65c";
+    assert_eq!(hash, expected, "trajectory hash changed: {hash}");
+}
+
+/// Offered before the first hop, the probe's calls and the held packing
+/// change the walk. This is the hash the branch pinned when the probe ran at
+/// hop 0. A stall branch keeps the lattice move and skips a second
+/// catalogue, so this is not the hash of a branch that dropped the lattice
+/// move.
+#[test]
+fn recommended_lj98_seed_2000_with_the_probe_at_hop_zero_keeps_its_trajectory() {
+    anneal_core::install_rgpot_kernels!();
+    let hash = trajectory_hash(Some(0));
     let expected = "c9b6d7d6535f5add591d14ad49f6a6400e5cc0c98a1b858e989bb61746b54ba5";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }

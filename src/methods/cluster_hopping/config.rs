@@ -1411,14 +1411,26 @@ pub struct Config {
     /// current geometry and ranks them by pair energy. It does not move
     /// the least-coordinated atom onto a random surface point.
     ///
-    /// The flag also enables the hop-0 generic packing probe. When it is
-    /// set, an atomic, non-rigid, non-frozen search measures the pair
-    /// minimum and quenches the generic packings once, before the first
-    /// hop. Every call of that probe is charged to the ledger. Turning the
-    /// flag off removes the lattice arm and the probe together. Set
+    /// The flag also enables the generic packing probe. When it is set, an
+    /// atomic, non-rigid, non-frozen search measures the pair minimum and
+    /// quenches the generic packings once, after
+    /// [`Config::packing_deferral`] hops for each structure it quenches.
+    /// Every call of the probe is charged to the ledger. Turning the flag off
+    /// removes the lattice arm and the probe together. Set
     /// [`Config::suppress_generic_packings`] to keep the arm without the
     /// probe.
     pub energy_lattice: bool,
+    /// Hops the walk makes for each structure the generic packing probe
+    /// quenches before the probe is offered.
+    ///
+    /// The probe quenches nine structures, about one hop each. At the default
+    /// of four the walk has spent about four times the probe's cost when it
+    /// is offered, so a walk that hits earlier never pays for it and one that
+    /// runs on pays about a quarter more at most. A capped walk offers the
+    /// probe at its last hop at the latest. Zero offers it before the first
+    /// hop. The rule reads no atom count, potential or structure.
+    #[serde(skip)]
+    pub packing_deferral: usize,
     /// The parent search already quenched the generic packing catalogue.
     /// A stall branch keeps the lattice move and does not quench it again.
     #[serde(skip)]
@@ -2295,6 +2307,7 @@ impl Config {
             reoccupy_interval: 5_000,
             energy_lattice: false,
             suppress_generic_packings: false,
+            packing_deferral: 4,
             surfaces: Vec::new(),
             // Calibrated against published minima: the largest atomic distance
             // from the centre of mass divides by N^(1/3) to between 0.46 and

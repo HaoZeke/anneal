@@ -132,6 +132,13 @@ fn lattice_exchange_follows_the_plateau() {
         "heat * cfg.temperature"
     );
 
+    // Measured: moving the offer from hop 36 to before the first hop leaves
+    // both fingerprints where they are in this walk.
+    cfg.packing_deferral = 0;
+    let (cold, hot) = pair(&cfg, 30_000, 2000);
+    assert_eq!(fingerprint(&cold), 0x100885ac118293e1, "probe at hop 0");
+    assert_eq!(fingerprint(&hot), 0x1a623a8e37ad1d43, "probe at hop 0");
+
     cfg.suppress_generic_packings = true;
     let (cold, hot) = pair(&cfg, 30_000, 2000);
     assert_eq!(
@@ -160,11 +167,14 @@ fn a_new_lowest_returns_the_walk_to_the_preset() {
     assert_eq!(fingerprint(&hot), 0x87b7ee9f3579cc7e, "heat = 1.0");
 }
 
-/// Both pins are the branch's walk. The generic packing probe is the only
-/// difference from develop (cold `0x3f6e77c9980269b9`, hot
-/// `0xc711fc71269b412d`): with the probe suppressed the walk is develop's,
-/// asserted below. The observed-basis probe does not fire in this
-/// 6_000-call walk, so develop's changes to it do not touch these.
+/// The walk makes fewer than 36 hops in 6_000 calls, so at the default the
+/// generic packing probe is never offered and both pins are develop's (cold
+/// `0x3f6e77c9980269b9`, hot `0xc711fc71269b412d`), the same as with the
+/// probe suppressed. With `packing_deferral = 0` the probe runs before the
+/// first hop and the walk is the one the branch pinned until the offer was
+/// deferred (cold `0xdd5b3f896df84eb7`, hot `0x4f443a96ed586f29`). The
+/// observed-basis probe does not fire in this walk, so develop's changes to
+/// it do not touch these.
 #[test]
 fn a_same_iteration_record_returns_to_the_preset() {
     let mut cfg = Config::recommended(ATOMS);
@@ -172,12 +182,31 @@ fn a_same_iteration_record_returns_to_the_preset() {
     cfg.relax_steps = 40;
     cfg.general_collective = true;
     cfg.continuous_symmetry = ContinuousSymmetry::Measure { interval: 1 };
+
     let (cold, hot) = pair(&cfg, 6_000, 10);
-    assert_eq!(fingerprint(&cold), 0xdd5b3f896df84eb7, "preset walk");
+    assert!(cold.hops < 36 && hot.hops < 36, "the probe is not offered");
+    assert_eq!(
+        fingerprint(&cold),
+        0x3f6e77c9980269b9,
+        "preset walk, probe not offered"
+    );
+    assert_eq!(
+        fingerprint(&hot),
+        0xc711fc71269b412d,
+        "same-iteration heat = 1.0, probe not offered"
+    );
+
+    cfg.packing_deferral = 0;
+    let (cold, hot) = pair(&cfg, 6_000, 10);
+    assert_eq!(
+        fingerprint(&cold),
+        0xdd5b3f896df84eb7,
+        "preset walk, probe at hop 0"
+    );
     assert_eq!(
         fingerprint(&hot),
         0x4f443a96ed586f29,
-        "same-iteration heat = 1.0"
+        "same-iteration heat = 1.0, probe at hop 0"
     );
 
     cfg.suppress_generic_packings = true;

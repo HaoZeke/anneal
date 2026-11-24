@@ -5338,6 +5338,20 @@ where
     }
 }
 
+/// Candidates the generic packing catalogue quenches, besides the axial one.
+const PACKING_CANDIDATES: usize = 8;
+
+/// Hops the walk makes before the generic packing catalogue is offered.
+///
+/// The catalogue quenches `PACKING_CANDIDATES + 1` structures, about one hop
+/// each, and [`Config::packing_deferral`] sets the hops per structure. A capped
+/// walk offers it at its last hop at the latest.
+fn packing_offer_hops(cfg: &Config) -> usize {
+    let wanted = cfg.packing_deferral.saturating_mul(PACKING_CANDIDATES + 1);
+    cfg.max_hops
+        .map_or(wanted, |cap| wanted.min(cap.saturating_sub(1)))
+}
+
 fn generic_packings_apply(cfg: &Config, n: usize, dim: usize) -> bool {
     cfg.energy_lattice
         && !cfg.suppress_generic_packings
@@ -5362,7 +5376,7 @@ where
     if n < 2 || cfg.move_library.is_molecular() || cfg.move_library.is_rigid_body() {
         return None;
     }
-    let candidate_count = 8usize;
+    let candidate_count = PACKING_CANDIDATES;
     if ledger.remaining() <= candidate_count || ledger.stopped() {
         return None;
     }
@@ -6428,6 +6442,7 @@ where
             && !escape_refused
             && generic_packings_apply(cfg, n, x.len())
             && ledger.remaining() > 0
+            && hops >= packing_offer_hops(cfg)
         {
             packings_offered = true;
             let room = ledger.remaining().div_ceil(2);
@@ -12062,6 +12077,26 @@ mod tests {
     }
 
     #[test]
+    fn the_packing_offer_waits_four_hops_per_structure_and_never_past_the_last_hop() {
+        let mut cfg = Config::recommended(26);
+        assert_eq!(cfg.packing_deferral, 4);
+        assert_eq!(packing_offer_hops(&cfg), 4 * (PACKING_CANDIDATES + 1));
+        cfg.max_hops = Some(10);
+        assert_eq!(packing_offer_hops(&cfg), 9, "the last hop at the latest");
+        cfg.max_hops = Some(1);
+        assert_eq!(packing_offer_hops(&cfg), 0);
+        cfg.max_hops = Some(0);
+        assert_eq!(packing_offer_hops(&cfg), 0);
+        cfg.max_hops = None;
+        cfg.packing_deferral = 0;
+        assert_eq!(
+            packing_offer_hops(&cfg),
+            0,
+            "zero offers before the first hop"
+        );
+    }
+
+    #[test]
     fn a_non_finite_pair_probe_is_counted_and_charged() {
         const PROBE_LIMIT: usize = 7;
         let mut ledger = Ledger::new(1_000);
@@ -12406,6 +12441,8 @@ mod tests {
             let mut cfg = Config::recommended(ATOMS);
             cfg.restart_patience = 2_000;
             cfg.displacement_only = true;
+            // Offered at hop 0 so both probes sit in the same short walk.
+            cfg.packing_deferral = 0;
             let potential = PairPotential::lennard_jones(ATOMS);
             let evaluations = AtomicUsize::new(0);
             let far = 0.5 * f64::EPSILON.sqrt().recip();
@@ -12603,6 +12640,7 @@ mod tests {
         let n = 8usize;
         let mut cfg = Config::for_cluster(n);
         cfg.energy_lattice = true;
+        cfg.packing_deferral = 0;
         cfg.max_hops = Some(2);
         cfg.relax_steps = 4;
         cfg.record_gradient = 1.0e-6;
@@ -12661,6 +12699,9 @@ mod tests {
             let n = 8usize;
             let mut cfg = Config::for_cluster(n);
             cfg.energy_lattice = true;
+            // The parent probe is offered at hop 0 so that it runs before
+            // the stall branch spends the walk's budget.
+            cfg.packing_deferral = 0;
             // The lattice move charges outside the relaxation. Displacement
             // keeps every charge on the closure so the ledger can be matched
             // to it, and the packing probe still runs.

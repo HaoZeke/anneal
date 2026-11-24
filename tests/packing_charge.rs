@@ -1,44 +1,55 @@
 // Copyright (c) anneal developers
-//! The generic packing probe's potential calls are all on the ledger.
+//! The generic packing probe's potential calls are all on the ledger, and a
+//! walk that hits before the probe is offered does not pay for it.
 //!
-//! Lennard-Jones 26, seed 2000, budget 30_000, stops at -108.315616.
-//! The probe spends 931 potential calls before the walk. develop
-//! `983f6f69ea1555e51a71874870410966ac726616` has no probe and charges 502
-//! at the hit. With the probe the same geometry is hit at 502 + 931 = 1433,
-//! and the ledger, the improvement row and `outcome.charged` all say so.
+//! develop `983f6f69ea1555e51a71874870410966ac726616` has no probe. It hits
+//! Lennard-Jones 26, seed 2000, at 502 charged calls. The probe is offered
+//! after `Config::packing_deferral` hops for each structure it quenches, 36
+//! hops by default, and the walk's hit comes after two hops. The default
+//! walk is therefore develop's walk and charges 502.
+//!
+//! With `packing_deferral = 0` the probe runs before the first hop and
+//! spends 931 potential calls. The same hit is then charged at
+//! 502 + 931 = 1433, and the ledger, the improvement row and
+//! `outcome.charged` all say so.
+//!
+//! Lennard-Jones 38, seed 2000, is a walk that runs past the offer. The
+//! probe runs once, reaches the target and its calls are on the ledger.
 
-use anneal_core::methods::cluster_hopping::{Config, Ledger, run_with_gradient};
+use anneal_core::methods::cluster_hopping::{
+    Config, Ledger, Outcome, random_cluster_in_radius, run_with_gradient,
+};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-const ATOMS: usize = 26;
 const SEED: u64 = 2000;
 const BUDGET: usize = 30_000;
-const REFERENCE: f64 = -108.315616;
 
 /// The energy-lattice arm charges its site scans straight to the ledger,
-/// with no potential call. This walk is charged four calls that way. develop
-/// shows the same four: 498 potential calls against 502 charged.
+/// with no potential call. The Lennard-Jones 26 walk is charged four calls
+/// that way. develop shows the same four: 498 potential calls against 502
+/// charged.
 const SITE_SCAN_CHARGE: usize = 4;
 
-#[test]
-fn a_walk_hit_is_charged_for_every_potential_call_including_the_packing_probe() {
+struct Walk {
+    outcome: Outcome,
+    spent: usize,
+    priced: usize,
+    evaluations: usize,
+    at_hit: Option<usize>,
+}
+
+fn walk(cfg: &Config, atoms: usize, reference: f64) -> Walk {
     anneal_core::install_rgpot_kernels!();
-    let cfg = Config::recommended(ATOMS);
-    let potential = PairPotential::lennard_jones(ATOMS);
+    let potential = PairPotential::lennard_jones(atoms);
     let mut rng = StdRng::seed_from_u64(SEED);
-    let start = anneal_core::methods::cluster_hopping::random_cluster_in_radius(
-        ATOMS,
-        cfg.start_radius(),
-        cfg.min_separation,
-        &mut rng,
-    );
+    let start = random_cluster_in_radius(atoms, cfg.start_radius(), cfg.min_separation, &mut rng);
     let evaluations = AtomicUsize::new(0);
     let mut ledger = Ledger::new(BUDGET);
-    ledger.stop_below(REFERENCE + anneal_core::DEFAULT_HIT_TOL);
+    ledger.stop_below(reference + anneal_core::DEFAULT_HIT_TOL);
     let mut optimiser = WarmLbfgs::default();
     let mut relax = |led: &mut Ledger, x: ndarray::ArrayView1<f64>, iterations: usize| {
         optimiser.forget();
@@ -60,7 +71,7 @@ fn a_walk_hit_is_charged_for_every_potential_call_including_the_packing_probe() 
     };
     let mut rng = StdRng::seed_from_u64(SEED);
     let outcome = run_with_gradient(
-        &cfg,
+        cfg,
         start.view(),
         &mut ledger,
         &mut relax,
@@ -71,19 +82,64 @@ fn a_walk_hit_is_charged_for_every_potential_call_including_the_packing_probe() 
     let at_hit = outcome
         .improvements
         .iter()
-        .find(|row| anneal_core::energy_hits(row.3, REFERENCE, anneal_core::DEFAULT_HIT_TOL))
+        .find(|row| anneal_core::energy_hits(row.3, reference, anneal_core::DEFAULT_HIT_TOL))
         .map(|row| row.1);
     assert!(
-        anneal_core::energy_hits(outcome.best, REFERENCE, anneal_core::DEFAULT_HIT_TOL),
+        anneal_core::energy_hits(outcome.best, reference, anneal_core::DEFAULT_HIT_TOL),
         "best {:.6}",
         outcome.best
     );
-    assert_eq!(at_hit, Some(1433), "hit spend");
-    assert_eq!(outcome.charged, 1433, "charged calls");
-    assert_eq!(outcome.charged, ledger.spent(), "outcome and ledger agree");
+    Walk {
+        spent: ledger.spent(),
+        priced: ledger.priced(),
+        evaluations: evaluations.load(Ordering::Relaxed),
+        at_hit,
+        outcome,
+    }
+}
+
+#[test]
+fn a_walk_hit_is_charged_for_every_potential_call_including_the_packing_probe() {
+    let mut cfg = Config::recommended(26);
+    cfg.packing_deferral = 0;
+    let walk = walk(&cfg, 26, -108.315616);
+    assert_eq!(walk.at_hit, Some(1433), "hit spend");
+    assert_eq!(walk.outcome.charged, 1433, "charged calls");
+    assert_eq!(walk.outcome.charged, walk.spent, "outcome and ledger agree");
     assert_eq!(
-        evaluations.load(Ordering::Relaxed) + SITE_SCAN_CHARGE,
-        ledger.spent(),
+        walk.evaluations + SITE_SCAN_CHARGE,
+        walk.spent,
         "every potential call is charged"
     );
+    assert_eq!(walk.evaluations + walk.priced, walk.spent);
+}
+
+#[test]
+fn a_walk_that_hits_before_the_offer_is_develops_walk_and_pays_nothing_for_the_probe() {
+    let cfg = Config::recommended(26);
+    assert_eq!(cfg.packing_deferral, 4);
+    let walk = walk(&cfg, 26, -108.315616);
+    assert_eq!(walk.at_hit, Some(502), "develop's hit spend");
+    assert_eq!(walk.outcome.charged, 502, "develop's charged calls");
+    assert!(walk.outcome.hops < 36, "the hit came before the offer");
+    assert_eq!(walk.evaluations + SITE_SCAN_CHARGE, walk.spent);
+}
+
+#[test]
+fn a_walk_past_the_offer_runs_the_probe_once_and_charges_it() {
+    let cfg = Config::recommended(38);
+    let walk = walk(&cfg, 38, -173.928427);
+    assert_eq!(
+        walk.outcome.hops, 36,
+        "offered at hop 36, hit inside the probe"
+    );
+    assert_eq!(walk.at_hit, Some(3864), "hit spend, develop's is 5527");
+    assert_eq!(walk.outcome.charged, 3865, "charged calls");
+    assert_eq!(walk.outcome.charged, walk.spent, "outcome and ledger agree");
+    assert_eq!(walk.evaluations, 3789, "potential calls");
+    assert_eq!(
+        walk.priced, 76,
+        "lattice site scans priced, no potential call"
+    );
+    assert_eq!(walk.evaluations + walk.priced, walk.spent);
 }

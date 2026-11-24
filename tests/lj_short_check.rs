@@ -13,24 +13,72 @@
 //! (`81d6bffc`). Linking IRA no longer changes this walk, so the
 //! feature build keeps the Hungarian record.
 //!
-//! Wiring the constant-free generic packing candidates into `run_full`
-//! updates both pins under the same 2500-call budget.
+//! The constant-free generic packing candidates are offered after 36 hops,
+//! and these 2500-call walks end first, so the default pins are develop's.
+//! With `packing_deferral = 0` the candidates are offered before the first
+//! hop and both walks move to the pins below.
 
 use anneal_core::methods::cluster_hopping::{Config, Ledger};
 use anneal_core::methods::cluster_search::search;
 use anneal_core::potentials::PairPotential;
 
+struct Case {
+    n: usize,
+    seed: u64,
+    budget: usize,
+    packing_deferral: Option<usize>,
+    best: f64,
+    hops: usize,
+    converged: usize,
+    capped: usize,
+}
+
+const fn case(
+    n: usize,
+    seed: u64,
+    packing_deferral: Option<usize>,
+    best: f64,
+    walk: (usize, usize, usize),
+) -> Case {
+    Case {
+        n,
+        seed,
+        budget: 2500,
+        packing_deferral,
+        best,
+        hops: walk.0,
+        converged: walk.1,
+        capped: walk.2,
+    }
+}
+
 #[test]
 fn lj38_and_lj98_short_searches_stay_put() {
-    anneal_core::install_rgpot_kernels!();
-    // (n, seed, budget, best, hops, converged, capped)
-    let cases: &[(usize, u64, usize, f64, usize, usize, usize)] = &[
-        (38, 1, 2500, -173.928_426_584_850_03, 10, 18, 8),
-        (98, 7, 2500, -531.883_176_996_307_8, 5, 13, 4),
+    // develop's walks, then the same walks with the probe at hop 0.
+    // The walk is (hops, converged, capped).
+    let cases = [
+        case(38, 1, None, -170.711_308_119_462_44, (21, 14, 19)),
+        case(98, 7, None, -520.107_879_491_539_2, (10, 9, 9)),
+        case(38, 1, Some(0), -173.928_426_584_850_03, (10, 18, 8)),
+        case(98, 7, Some(0), -531.883_176_996_307_8, (5, 13, 4)),
     ];
+    anneal_core::install_rgpot_kernels!();
     let mut records = Vec::new();
-    for (n, seed, budget, best, hops, converged, capped) in cases {
-        let cfg = Config::recommended(*n);
+    for Case {
+        n,
+        seed,
+        budget,
+        packing_deferral: deferral,
+        best,
+        hops,
+        converged,
+        capped,
+    } in &cases
+    {
+        let mut cfg = Config::recommended(*n);
+        if let Some(deferral) = deferral {
+            cfg.packing_deferral = *deferral;
+        }
         assert!(cfg.target_energy.is_none());
         assert!(cfg.species.is_none());
         assert_ne!(
@@ -41,7 +89,7 @@ fn lj38_and_lj98_short_searches_stay_put() {
         let mut ledger = Ledger::new(*budget);
         let (out, stats) = search(&pot, &cfg, &mut ledger, *seed).expect("finite");
         records.push(format!(
-            "LJ{n} {:.16} {} {} {} {}",
+            "LJ{n} {deferral:?} {:.16} {} {} {} {}",
             out.best,
             out.hops,
             stats.converged,
@@ -50,7 +98,7 @@ fn lj38_and_lj98_short_searches_stay_put() {
         ));
         assert!(
             (out.best - best).abs() < 1e-9,
-            "LJ{n} {:.16} hops {} conv {} cap {}",
+            "LJ{n} {deferral:?} {:.16} hops {} conv {} cap {}",
             out.best,
             out.hops,
             stats.converged,
@@ -61,7 +109,9 @@ fn lj38_and_lj98_short_searches_stay_put() {
         assert_eq!(stats.capped, *capped);
     }
     let expected = "\
-LJ38 -173.9284265848500297 10 18 8 2500
-LJ98 -531.8831769963078386 5 13 4 2500";
+LJ38 None -170.7113081194624442 21 14 19 2500
+LJ98 None -520.1078794915391654 10 9 9 2500
+LJ38 Some(0) -173.9284265848500297 10 18 8 2500
+LJ98 Some(0) -531.8831769963078386 5 13 4 2500";
     assert_eq!(records.join("\n"), expected);
 }
