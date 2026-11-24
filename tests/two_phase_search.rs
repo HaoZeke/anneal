@@ -49,13 +49,17 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
     const SEEDS: u64 = 16;
     let budget = 30_000;
     let mut plain = Config::recommended(38);
-    // The surface comparison is the LeanBurst walk. Stall exits and the
-    // energy-lattice packing probe are different measurements, and this
-    // walk does not grow a named template. The 30_000-call bars above
-    // were measured at a 200-step quench.
+    // The surface comparison is the LeanBurst walk. Stall exits are a
+    // different measurement, and this walk does not grow a named template.
+    // The 30_000-call bars above were measured at a 200-step quench.
     plain.relax_steps = 200;
     plain.move_library = MoveLibrary::LeanBurst;
-    plain.energy_lattice = false;
+    // The generic packing probe quenches a catalogue of packings before the
+    // walk starts. On LJ38 it reaches the octahedron on all 16 seeds for
+    // either arm (mask 0xffff), so it would hide the surface effect this
+    // test compares. It is suppressed for both arms. The lattice move
+    // stays on, which keeps the walk develop measured.
+    plain.suppress_generic_packings = true;
     plain.trail_on_stall = false;
     plain.escape_on_stall = false;
     plain.restart_on_stall = false;
@@ -81,10 +85,9 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
             plain_mask |= 1 << seed;
         }
     }
-    // Without `energy_lattice` (which also gates the generic packing
-    // probe in `run_full`), the walk is deterministic: cutoff 0xffff,
-    // plain 0x2000 (1 seed), with and without IRA.
-    let plain_exact = 0x2000;
+    // The template-free walk is deterministic: cutoff 0xffff, plain
+    // 0x240d (5 seeds), with and without IRA.
+    let plain_exact = 0x240d;
     assert_eq!(
         compact_mask, 0xffff,
         "the cutoff walk reached the octahedron on {compact_hits} of {SEEDS} seeds (mask {compact_mask:#06x})"
