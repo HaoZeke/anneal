@@ -5193,20 +5193,25 @@ fn isolated_pair(n: usize, distance: f64) -> Array1<f64> {
     point
 }
 
-fn pair_probe<F>(ledger: &mut Ledger, relax: &mut F, n: usize, distance: f64) -> Option<f64>
+/// One isolated-pair evaluation.
+///
+/// The flag reports whether the potential was evaluated, which is when the
+/// ledger advanced. A non-finite energy is still an evaluation and still
+/// spent budget, so the caller must count it.
+fn pair_probe<F>(ledger: &mut Ledger, relax: &mut F, n: usize, distance: f64) -> (bool, Option<f64>)
 where
     F: FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + ?Sized,
 {
     if !(distance.is_finite() && distance > 0.0) || ledger.remaining() == 0 {
-        return None;
+        return (false, None);
     }
     let before = ledger.spent();
     let (energy, _) = relax(ledger, isolated_pair(n, distance).view(), 0);
-    if ledger.spent() == before || !energy.is_finite() {
-        None
-    } else {
-        Some(energy)
-    }
+    let evaluated = ledger.spent() != before;
+    (
+        evaluated,
+        (evaluated && energy.is_finite()).then_some(energy),
+    )
 }
 
 /// Measure the potential's isolated-pair minimum under the caller's ledger.
@@ -5231,8 +5236,8 @@ where
         if used.get() >= probe_limit {
             return None;
         }
-        let value = pair_probe(ledger, relax, n, distance);
-        if value.is_some() {
+        let (evaluated, value) = pair_probe(ledger, relax, n, distance);
+        if evaluated {
             used.set(used.get() + 1);
         }
         value
@@ -12038,6 +12043,53 @@ mod tests {
             ledger.spent() - before
         );
         assert_eq!(calls, ledger.spent());
+    }
+
+    #[test]
+    fn a_non_finite_pair_probe_is_counted_and_charged() {
+        const PROBE_LIMIT: usize = 7;
+        let mut ledger = Ledger::new(1_000);
+        let mut calls = 0usize;
+        let mut non_finite = 0usize;
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _iterations: usize| {
+            if !led.charge() {
+                return (f64::NAN, x.to_owned());
+            }
+            calls += 1;
+            let distance = (x[3] - x[0]).abs();
+            if (distance - 0.5).abs() < 1.0e-12 {
+                non_finite += 1;
+                return (f64::NAN, x.to_owned());
+            }
+            ((distance - 2.3).powi(2), x.to_owned())
+        };
+        let measured = measured_pair_minimum(&mut ledger, &mut relax, 12, PROBE_LIMIT);
+        assert!(
+            measured.is_some(),
+            "the finite probes still bracket a minimum"
+        );
+        assert_eq!(
+            non_finite, 1,
+            "the potential returned non-finite on one pair"
+        );
+        assert_eq!(
+            calls, PROBE_LIMIT,
+            "the non-finite call must count toward the probe limit"
+        );
+        assert_eq!(ledger.spent(), calls, "every pair evaluation is charged");
+
+        let mut ledger = Ledger::new(1_000);
+        let mut calls = 0usize;
+        let mut all_bad = |led: &mut Ledger, x: ArrayView1<f64>, _iterations: usize| {
+            if !led.charge() {
+                return (f64::NAN, x.to_owned());
+            }
+            calls += 1;
+            (f64::NAN, x.to_owned())
+        };
+        assert!(measured_pair_minimum(&mut ledger, &mut all_bad, 12, PROBE_LIMIT).is_none());
+        assert_eq!(calls, 1);
+        assert_eq!(ledger.spent(), calls);
     }
 
     #[test]
