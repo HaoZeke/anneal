@@ -12149,6 +12149,7 @@ mod tests {
         cfg.return_screen = false;
         cfg.bayes_screen = false;
         cfg.energy_lattice = false;
+        cfg.symmetry_completion_on_new = false;
         cfg.continuous_symmetry = ContinuousSymmetry::Off;
         cfg.soap_mode = SoapProposalMode::Off;
         cfg.prior_soap = false;
