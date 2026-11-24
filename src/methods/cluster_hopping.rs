@@ -88,7 +88,6 @@ mod exchange;
 pub mod fingerprint;
 mod general;
 mod moves;
-mod packing_bank;
 mod preset;
 mod stall_bridge;
 mod torsion;
@@ -922,10 +921,15 @@ impl Ledger {
     /// alternative, handing the real ledger to the inner run, makes any budget
     /// arithmetic inside it see the whole campaign's budget rather than the
     /// slice it was given.
+    ///
+    /// The calls were made before this settles, so a caller stop raised while
+    /// they ran does not void them: the debt is paid up to the budget, and
+    /// only the return value reports the closed ledger.
     pub fn charge_many(&mut self, n: usize) -> bool {
-        let room = self.remaining();
-        self.spent += n.min(room);
-        n <= room
+        let open_room = self.remaining();
+        let owed_room = self.budget.saturating_sub(self.spent);
+        self.spent += n.min(owed_room);
+        n <= open_room
     }
 
     /// Records a value and its state when it improves the incumbent.
@@ -2581,6 +2585,39 @@ fn answer_gradient_ok(cfg: &Config, gradient: ArrayView1<f64>, dimensions: usize
     }
 }
 
+/// Whether a quench that returned `energy` ends the run.
+///
+/// A target reached or a caller stop raised inside a quench cuts it short.
+/// The point it returns is the lowest the potential answered, paid for, and
+/// the run's answer, whether or not it is a minimum: nothing is left to
+/// descend it further or to charge a certifying gradient. The same rule
+/// takes the walk's own target hits in [`run_full`].
+fn closes_run(ledger: &Ledger, energy: f64) -> bool {
+    ledger.below_target(energy) || ledger.stopped()
+}
+
+/// Whether a quench may be stored as the run's answer.
+///
+/// A closed run keeps the point whether or not a certifying gradient was
+/// charged, including a partial descent: nothing is left to finish it.
+/// An open run keeps a full quench only, and only when no gradient is
+/// required or the one that was charged has converged. Auxiliary quenches
+/// and the main hop both use this, so a caller stop cannot record in one
+/// path and drop the same point in the other.
+fn answer_is_recordable(
+    cfg: &Config,
+    ledger: &Ledger,
+    energy: f64,
+    state: ArrayView1<f64>,
+    unquenched: bool,
+    gradient_required: bool,
+    gradient_ok: bool,
+) -> bool {
+    !state.is_empty()
+        && quench_is_sane(cfg, energy, state)
+        && (closes_run(ledger, energy) || (!unquenched && (!gradient_required || gradient_ok)))
+}
+
 /// Records an auxiliary quench without restricting exploratory adoption.
 fn record_quenched_answer(
     cfg: &Config,
@@ -2600,7 +2637,15 @@ fn record_quenched_answer(
     } else {
         None
     };
-    if sane && (!required || gradient.is_some()) {
+    if answer_is_recordable(
+        cfg,
+        ledger,
+        energy,
+        state,
+        false,
+        required,
+        gradient.is_some(),
+    ) {
         ledger.record(energy, state);
     } else {
         *unresolved += 1;
@@ -3116,6 +3161,15 @@ fn directed_stall_source(
         .flatten()
 }
 
+/// A side call may start only while this run is still taking charges.
+///
+/// The target and the caller stop close the run even when the original
+/// allocation has not been spent. [`Ledger::budget`] ignores both, so a
+/// side path that consults it keeps evaluating after the walk has stopped.
+fn side_call_allowed(ledger: &Ledger) -> bool {
+    !ledger.target_reached() && !ledger.stopped() && ledger.remaining() > 0
+}
+
 fn claim_observed_basis_probe(
     cfg: &Config,
     ledger: &Ledger,
@@ -3124,8 +3178,10 @@ fn claim_observed_basis_probe(
     seen: &mut std::collections::HashSet<usize>,
 ) -> bool {
     !cfg.move_library.is_rigid_body()
+        && !cfg.move_library.is_molecular()
         && cfg.active_region.is_none()
         && cfg.frozen.is_none()
+        && side_call_allowed(ledger)
         && ledger.remaining() >= evidence
         && seen.insert(basin())
 }
@@ -5373,10 +5429,15 @@ where
             })
         });
         initial_validation_gradient = nested.flatten();
-        initial_recordable = initial_sane
-            && (ledger.below_target(e)
-                || !gradient_required
-                || initial_validation_gradient.is_some());
+        initial_recordable = answer_is_recordable(
+            cfg,
+            ledger,
+            e,
+            x.view(),
+            false,
+            gradient_required,
+            initial_validation_gradient.is_some(),
+        );
         break;
     }
     if !e.is_finite() {
@@ -5682,6 +5743,8 @@ where
     // the road instead of one chain's private progress.
     let frontier_exchange =
         std::env::var("CATALOG_FRONTIER_EXCHANGE").is_ok_and(|value| value == "1");
+    let acc_trace = std::env::var_os("ANNEAL_ACC_TRACE").is_some();
+    let curve_path = std::env::var_os("ANNEAL_CURVE");
     let mut screen_bank: Vec<(Array1<f64>, f64, Array1<f64>)> = Vec::new();
     // Destinations a binary plateau has already taken. The population step
     // skips these so two seats do not trade places on every patience window.
@@ -5892,7 +5955,7 @@ where
                 }
             }
             if let Some(action) = action {
-                if std::env::var("ANNEAL_ACC_TRACE").is_ok() {
+                if acc_trace {
                     eprintln!(
                         "ACCTRACE hop {} e {:.6} arm {action} ord 0/0/0",
                         $hop, destination.energy
@@ -6033,8 +6096,9 @@ where
     // A side reconstruction may win the answer without becoming the walk's
     // incumbent. It is merged only after the walk has finished.
     let mut observed_basis_best: Option<(f64, Array1<f64>)> = None;
-    // Calls charged by side reconstructions, hidden from the walk's stall
-    // clocks and settled back onto the caller's ledger when the walk ends.
+    // Calls charged by side reconstructions, carried so `branch_on_stall`
+    // measures the walk's own progress while the stall clocks advance by the
+    // same cost.
     let mut observed_basis_spent = 0usize;
     // Multiple of the preset temperature the walk hops at. It stays one
     // unless `plateau_heat` is on.
@@ -6058,9 +6122,6 @@ where
     let basis_evidence = (0..4).fold(1usize, |count, chosen| {
         count.saturating_mul(n.saturating_sub(chosen)) / (chosen + 1)
     });
-    // CNA labels are collected for diagnostics only and never read by search.
-    let mut packing = packing_bank::PackingBank::new();
-    let packing_cutoff = 1.2 * cfg.length_scale;
     // Hops elapsed when the ledger last recorded a lower minimum.
     // A rigid stall measures 1000 hops from that hop count.
     let mut hops_at_lowest = 0usize;
@@ -6362,7 +6423,15 @@ where
                     gradient(ledger, found_state.view())
                         .filter(|values| answer_gradient_ok(cfg, values.view(), found_state.len()))
                 });
-                if !gradient_required || found_gradient.is_some() {
+                if answer_is_recordable(
+                    cfg,
+                    ledger,
+                    found_energy,
+                    found_state.view(),
+                    false,
+                    gradient_required,
+                    found_gradient.is_some(),
+                ) {
                     let improved = found_energy < ledger.best - 1e-10;
                     ledger.record(found_energy, found_state.view());
                     if improved && improvements.len() < 512 {
@@ -6712,7 +6781,10 @@ where
                 .is_some_and(|target| crate::energy_hits(ledger.best, target, 1e-3))
             && !ledger.target_reached()
         {
-            let walked = ledger.spent().saturating_sub(branch_spent);
+            let walked = ledger
+                .spent()
+                .saturating_sub(branch_spent)
+                .saturating_sub(observed_basis_spent);
             if ledger.best < branch_seen - BRANCH_LOWER * ledger.best.abs().max(1.0) {
                 branch_gap = branch_gap.max(walked.saturating_sub(branch_low_at));
                 branch_seen = ledger.best;
@@ -7539,8 +7611,15 @@ where
                     })
                 });
                 let candidate_gradient = candidate_gradient.flatten();
-                let recordable =
-                    candidate_sane && (!gradient_required || candidate_gradient.is_some());
+                let recordable = answer_is_recordable(
+                    cfg,
+                    ledger,
+                    candidate_energy,
+                    candidate.view(),
+                    false,
+                    gradient_required,
+                    candidate_gradient.is_some(),
+                );
                 let improved = recordable && candidate_energy < ledger.best - STRICT_IMPROVEMENT;
                 if recordable {
                     ledger.record(candidate_energy, candidate.view());
@@ -8581,8 +8660,8 @@ where
         if ledger.stopped() {
             // The caller already stopped. This screen paid for `e_screen`,
             // and dropping it returns an older minimum above an energy the
-            // run computed.
-            if e_screen.is_finite() {
+            // run computed. The same predicate records an auxiliary quench.
+            if answer_is_recordable(cfg, ledger, e_screen, x_screen.view(), true, true, false) {
                 ledger.record(e_screen, x_screen.view());
             }
             break HopStop::of_closed(ledger);
@@ -8769,7 +8848,9 @@ where
             out
         };
         if ledger.stopped() {
-            if e_new.is_finite() {
+            // Same closed-run rule as an auxiliary quench: the point this
+            // hop quench returned is the answer, gradient or not.
+            if answer_is_recordable(cfg, ledger, e_new, x_new.view(), false, true, false) {
                 ledger.record(e_new, x_new.view());
             }
             break HopStop::of_closed(ledger);
@@ -8847,8 +8928,9 @@ where
         // Both are guarded here rather than at either branch, so a path added
         // later inherits the guarantee. Anything not converged still moves the
         // chain and still deposits bias; it is only barred from being recorded
-        // as an answer, which is the one thing it cannot be.
-        let hit_target = ledger.below_target(e_new);
+        // as an answer, which is the one thing it cannot be. A caller stop is
+        // the exception, shared with the auxiliary quenches: the run is over,
+        // so this point is the answer even without a converged gradient.
         let gradient_required = grad.is_some();
         let quenched_gradient = if unquenched {
             None
@@ -8867,8 +8949,15 @@ where
         }
         let validation_gradient =
             quenched_gradient.filter(|values| answer_gradient_ok(cfg, values.view(), x_new.len()));
-        let recordable =
-            hit_target || (!unquenched && (!gradient_required || validation_gradient.is_some()));
+        let recordable = answer_is_recordable(
+            cfg,
+            ledger,
+            e_new,
+            x_new.view(),
+            unquenched,
+            gradient_required,
+            validation_gradient.is_some(),
+        );
         // Every certified quench is reported, adopted or not: the history's
         // membership policy decides what counts, not the chain.
         let history_report = match (history.as_deref_mut(), validation_gradient.as_ref()) {
@@ -9648,9 +9737,6 @@ where
             }
         }
         if accept {
-            if !unquenched && cfg.packing_cna_applies() {
-                packing.offer(e_new, x_new.view(), packing_cutoff);
-            }
             if !unquenched && (RIGID || cfg.improvement_rewards) {
                 stall_archive.offer(e_new, x_new.view());
                 cage_archive.offer_cage(
@@ -9698,7 +9784,7 @@ where
             // The chain's own trajectory, not only its record: funnel entry
             // happens through accepted moves that are worse than the best so
             // far, which the improvement trace cannot see.
-            if std::env::var("ANNEAL_ACC_TRACE").is_ok() {
+            if acc_trace {
                 let m = crate::structure::ptm(x_new.view(), n, 0.12);
                 let mut fcc = 0usize;
                 let mut hcp = 0usize;
@@ -9725,12 +9811,12 @@ where
             // Convergence curves: charged evaluations against the accepted
             // energy, one line per accept; the reader takes the running
             // minimum. ANNEAL_CURVE names the file.
-            if let Ok(path) = std::env::var("ANNEAL_CURVE") {
+            if let Some(ref path) = curve_path {
                 use std::io::Write as _;
                 if let Ok(mut fh) = std::fs::OpenOptions::new()
                     .create(true)
                     .append(true)
-                    .open(&path)
+                    .open(path)
                 {
                     let _ = writeln!(fh, "{} {e_new:.8}", ledger.spent());
                 }
@@ -9826,6 +9912,8 @@ where
         if cfg.point_symmetrise_on_new
             && accept
             && hop_room(hops)
+            && !ledger.target_reached()
+            && !ledger.stopped()
             && (moved_basin || cfg.point_symmetrise_every_accept)
             && let Some(y) = crate::symmetrise::symmetrise_core(
                 x.view(),
@@ -9881,6 +9969,8 @@ where
         if cfg.packing_surface().orbit_on_new
             && accept
             && hop_room(hops)
+            && !ledger.target_reached()
+            && !ledger.stopped()
             && (moved_basin || cfg.point_symmetrise_every_accept)
             && history_here
                 .zip(history.as_deref_mut())
@@ -9896,6 +9986,9 @@ where
                 cfg.min_separation,
             );
             for (k, y) in candidates.iter().enumerate() {
+                if ledger.target_reached() || ledger.stopped() {
+                    break;
+                }
                 if candidates[..k]
                     .iter()
                     .any(|earlier| hop_is_identity(earlier.view(), y.view()))
@@ -9998,6 +10091,8 @@ where
         // again and lands on the shelf with the same odds.
         if cfg.jump_on_stall
             && hop_room(hops)
+            && !ledger.target_reached()
+            && !ledger.stopped()
             && cfg.jump_patience > 0
             && quiet >= cfg.jump_patience
             && quiet.is_multiple_of(cfg.jump_patience)
@@ -10071,6 +10166,8 @@ where
         // (Hop.cloning_dominates). The jump replaces the state and its
         // energy and nothing else; Metropolis continues raw.
         if quiet >= seam_patience
+            && !ledger.target_reached()
+            && !ledger.stopped()
             && let Some(bank) = seam.as_ref()
             && let Some((_, frontier_energy, frontier_state)) =
                 bank.restart(0.25, rng.random::<f64>())
@@ -10091,7 +10188,12 @@ where
             restarts += 1;
             continue;
         }
-        if cfg.symmetrise_on_stall && stuck && hop_room(hops) {
+        if cfg.symmetrise_on_stall
+            && stuck
+            && hop_room(hops)
+            && !ledger.target_reached()
+            && !ledger.stopped()
+        {
             let withhold = cfg.active_region.is_some() || cfg.frozen.is_some();
             if withhold {
                 // Withhold Ih-preserving symmetrise on a packing cluster,
@@ -10231,7 +10333,9 @@ where
                     true
                 }
             };
-            if !hop_room(hops) {
+            // A closed run does not start another stall arm. The cap turn
+            // and the climb both stay on the develop side of this choice.
+            if !hop_room(hops) || ledger.target_reached() || ledger.stopped() {
                 None
             } else if directed_leave && leave_arms.len() > 1 {
                 leave_pick = draw_stall_arm(&leave_allocator, rng, |pick, rng| {
@@ -10428,15 +10532,30 @@ where
                 )
                 && let Some(candidate) = crate::lattice::observed_basis_candidate(x.view(), true)
             {
-                let mut side_ledger = Ledger::new(ledger.remaining());
-                side_ledger.stop = ledger.stop.clone();
+                // The slice is the room left on the walk, not its original
+                // allocation. The caller's stop is shared so a flag raised
+                // inside the quench refuses every later charge.
+                let before = ledger.spent();
+                let mut side_ledger = ledger.slice(ledger.remaining());
                 let (basis_energy, basis_state) =
                     relax(&mut side_ledger, candidate.view(), cfg.relax_steps);
                 let sane = !basis_state.is_empty()
                     && quench_is_sane(cfg, basis_energy, basis_state.view());
                 let required = grad.is_some();
-                let gradient = if sane {
+                // The quench may have closed the run. The follow-up
+                // gradient is another side call and does not start.
+                let follow_up = sane
+                    && side_call_allowed(ledger)
+                    && !side_ledger.stopped()
+                    && side_ledger.remaining() > 0;
+                let gradient = if follow_up {
                     grad.as_deref_mut().and_then(|evaluate| {
+                        if !side_call_allowed(ledger)
+                            || side_ledger.stopped()
+                            || side_ledger.remaining() == 0
+                        {
+                            return None;
+                        }
                         evaluate(&mut side_ledger, basis_state.view()).filter(|values| {
                             answer_gradient_ok(cfg, values.view(), basis_state.len())
                         })
@@ -10444,29 +10563,42 @@ where
                 } else {
                     None
                 };
-                let recordable = sane && (!required || gradient.is_some());
+                ledger.charge_many(side_ledger.spent());
+                let cost = ledger.spent().saturating_sub(before);
+                observed_basis_spent = observed_basis_spent.saturating_add(cost);
+                charged_at_best = charged_at_best.saturating_add(cost);
+                last_polish_spent = last_polish_spent.saturating_add(cost);
+                next_reoccupy = next_reoccupy.saturating_add(cost);
+                reorder_wait = reorder_wait.saturating_add(cost);
+                let recordable = answer_is_recordable(
+                    cfg,
+                    ledger,
+                    basis_energy,
+                    basis_state.view(),
+                    false,
+                    required,
+                    gradient.is_some(),
+                );
                 if !recordable {
                     unconverged_records += 1;
-                }
-                let side_spent = side_ledger.spent();
-                ledger.budget = ledger.budget.saturating_sub(side_spent);
-                observed_basis_spent = observed_basis_spent.saturating_add(side_spent);
-                if recordable && ledger.below_target(basis_energy) {
-                    ledger.budget = ledger.budget.saturating_add(observed_basis_spent);
-                    ledger.spent = ledger.spent.saturating_add(observed_basis_spent);
-                    observed_basis_spent = 0;
+                } else if ledger.below_target(basis_energy) {
+                    // Recording settles the quench that already ran. It is
+                    // not another side call, so an empty remainder does not
+                    // drop it.
                     ledger.record(basis_energy, basis_state.view());
-                } else if recordable
-                    && observed_basis_best
-                        .as_ref()
-                        .is_none_or(|(energy, _)| basis_energy < *energy)
+                } else if observed_basis_best
+                    .as_ref()
+                    .is_none_or(|(energy, _)| basis_energy < *energy)
                 {
                     observed_basis_best = Some((basis_energy, basis_state));
+                }
+                if ledger.target_reached() || ledger.stopped() || side_ledger.stopped() {
+                    break HopStop::of_closed(ledger);
                 }
             }
             if stall_outcome.is_none()
                 && hop_room(hops)
-                && !ledger.target_reached()
+                && side_call_allowed(ledger)
                 && let Some(g) = grad.as_deref_mut()
             {
                 let scale = if cfg.minima_hopping {
@@ -10484,12 +10616,28 @@ where
                 };
                 let sign = if rng.random::<bool>() { 1.0 } else { -1.0 };
                 let source = directed_source.as_ref().unwrap_or(&x);
-                if let Some(o) = activate(source.view(), |y| g(ledger, y), &act, sign) {
+                if let Some(o) = activate(
+                    source.view(),
+                    |y| {
+                        if !side_call_allowed(ledger) {
+                            return None;
+                        }
+                        g(ledger, y)
+                    },
+                    &act,
+                    sign,
+                ) {
                     soft_escapes += 1;
                     if o.crossed {
                         soft_crossed += 1;
                     }
                     soft_lambda += o.lambda;
+                    // A spent budget still quenches: the relaxation charges
+                    // nothing and the chain adopts the point already in hand.
+                    // A target or a caller stop does not start that quench.
+                    if ledger.target_reached() || ledger.stopped() {
+                        break HopStop::of_closed(ledger);
+                    }
                     let (ee, xe) = relax(ledger, o.state.view(), cfg.relax_steps);
                     let escape_gradient = record_quenched_answer(
                         cfg,
@@ -10564,6 +10712,8 @@ where
             && ledger.spent().saturating_sub(last_polish_spent)
                 >= cfg.polish_records.saturating_mul(4);
         if cfg.polish_records > 0
+            && !ledger.target_reached()
+            && !ledger.stopped()
             && (improved_record || visit_due)
             && let Some(best_state) = if improved_record {
                 ledger.best_state.clone()
@@ -10585,8 +10735,13 @@ where
                 && quench_is_sane(cfg, polished_energy, polished_state.view())
             {
                 let validated = match grad.as_deref_mut() {
-                    Some(gradient) => gradient(ledger, polished_state.view())
-                        .is_some_and(|g| answer_gradient_ok(cfg, g.view(), polished_state.len())),
+                    Some(gradient) => {
+                        !ledger.target_reached()
+                            && !ledger.stopped()
+                            && gradient(ledger, polished_state.view()).is_some_and(|g| {
+                                answer_gradient_ok(cfg, g.view(), polished_state.len())
+                            })
+                    }
                     None => true,
                 };
                 if validated {
@@ -10598,6 +10753,9 @@ where
                     unconverged_records += 1;
                 }
             }
+        }
+        if ledger.target_reached() || ledger.stopped() {
+            break HopStop::of_closed(ledger);
         }
         // Offered on a period rather than behind the energy stall the other
         // escapes use, because this mechanism carries its own trapping test and
@@ -10908,7 +11066,7 @@ where
                         t.view(),
                         cfg.path_images,
                         |img| {
-                            if ledger.remaining() == 0 {
+                            if !side_call_allowed(ledger) {
                                 return None;
                             }
                             let (ev, xv) = relax(ledger, img, cfg.relax_steps);
@@ -10964,10 +11122,9 @@ where
         }
     };
 
-    ledger.budget = ledger.budget.saturating_add(observed_basis_spent);
-    ledger.spent = ledger.spent.saturating_add(observed_basis_spent);
     if let Some((energy, state)) = observed_basis_best
         && energy < ledger.best
+        && !ledger.target_reached()
     {
         ledger.record(energy, state.view());
     }
@@ -12001,7 +12158,706 @@ mod tests {
             || 3,
             &mut seen
         ));
+
+        let molecular = Config::recommended_molecular(
+            vec![8, 1, 1, 8, 1, 1],
+            vec![vec![0, 1, 2], vec![3, 4, 5]],
+            1.0,
+        );
+        assert!(!claim_observed_basis_probe(
+            &molecular,
+            &ledger,
+            10,
+            || 4,
+            &mut seen
+        ));
+
+        let mut reactive = Config::recommended(6);
+        reactive.move_library = MoveLibrary::Molecular {
+            groups: Vec::new(),
+            reactive: true,
+            reverse_cycles: false,
+        };
+        assert!(!claim_observed_basis_probe(
+            &reactive,
+            &ledger,
+            10,
+            || 5,
+            &mut seen
+        ));
         assert!(seen.is_empty());
+    }
+
+    fn observed_basis_side_calls(cfg: &Config) -> usize {
+        let body = observed_basis_body();
+        let mut ledger = Ledger::new(200);
+        let mut seen_parent = false;
+        let mut side_calls = 0usize;
+        let mut relax = |led: &mut Ledger, _x: ArrayView1<f64>, steps: usize| {
+            let side = led.spent() == 0 && seen_parent;
+            if side {
+                side_calls += 1;
+            } else {
+                seen_parent = true;
+            }
+            for _ in 0..steps {
+                if !led.charge() {
+                    break;
+                }
+            }
+            (0.0, body.clone())
+        };
+        let mut rng = StdRng::seed_from_u64(11);
+        run(cfg, body.view(), &mut ledger, &mut relax, &mut rng).expect("search");
+        side_calls
+    }
+
+    #[test]
+    fn molecular_search_skips_observed_basis_probes() {
+        // The 2x2x2 cell has an observed basis. The same body with the
+        // molecular gate off does call the probe, so a zero count below is
+        // the gate and not an empty candidate.
+        let open_calls = observed_basis_side_calls(&quiet_basis_search(8));
+        assert!(
+            open_calls > 0,
+            "the non-molecular 2x2x2 search made no side calls"
+        );
+
+        let mut molecular = quiet_basis_search(8);
+        molecular.species = Some(vec![6, 1, 1, 1, 6, 1, 1, 1]);
+        molecular.move_library = MoveLibrary::Molecular {
+            groups: vec![vec![0, 1, 2, 3], vec![4, 5, 6, 7]],
+            reactive: false,
+            reverse_cycles: false,
+        };
+        assert_eq!(observed_basis_side_calls(&molecular), 0);
+    }
+
+    #[test]
+    fn an_observed_basis_probe_waits_while_the_target_is_reached() {
+        let cfg = Config::recommended(6);
+        let mut ledger = Ledger::new(20);
+        ledger.stop_below(0.0);
+        ledger.record(-1.0, Array1::zeros(3).view());
+        assert!(ledger.target_reached());
+        let mut seen = std::collections::HashSet::new();
+        let basin_calls = std::cell::Cell::new(0);
+        assert!(!claim_observed_basis_probe(
+            &cfg,
+            &ledger,
+            10,
+            || {
+                basin_calls.set(basin_calls.get() + 1);
+                7
+            },
+            &mut seen
+        ));
+        assert_eq!(
+            basin_calls.get(),
+            0,
+            "a closed run must skip basin identity"
+        );
+        assert!(seen.is_empty(), "a closed run must not consume the basin");
+    }
+
+    fn quiet_basis_search(n: usize) -> Config {
+        let mut cfg = Config::recommended(n);
+        cfg.escape_on_stall = true;
+        cfg.restart_on_stall = false;
+        cfg.trail_on_stall = false;
+        cfg.tabu_on_stall = false;
+        cfg.symmetrise_on_stall = false;
+        cfg.jump_on_stall = false;
+        cfg.path_on_stall = false;
+        cfg.return_screen = false;
+        cfg.bayes_screen = false;
+        cfg.energy_lattice = false;
+        cfg.orbit_complete_on_new = false;
+        cfg.point_symmetrise_on_new = false;
+        cfg.continuous_symmetry = ContinuousSymmetry::Off;
+        cfg.soap_mode = SoapProposalMode::Off;
+        cfg.prior_soap = false;
+        cfg.branch_on_stall = false;
+        cfg.superbasin_escape = false;
+        cfg.polish_records = 0;
+        cfg.restart_patience = 1;
+        cfg.relax_steps = 4;
+        cfg.screen_steps = 1;
+        cfg.max_hops = Some(40);
+        cfg.replicas = 1;
+        cfg.surfaces.clear();
+        cfg.angular_moves = false;
+        cfg.soft_perturb = false;
+        cfg.hmc = None;
+        cfg
+    }
+
+    fn regular_tetrahedron() -> Array1<f64> {
+        Array1::from_vec(vec![
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.5,
+            3.0_f64.sqrt() / 2.0,
+            0.0,
+            0.5,
+            3.0_f64.sqrt() / 6.0,
+            (2.0_f64 / 3.0).sqrt(),
+        ])
+    }
+
+    fn observed_basis_body() -> Array1<f64> {
+        let basis = [
+            [1.0, 0.0, 0.0],
+            [0.5, 3.0_f64.sqrt() / 2.0, 0.0],
+            [0.5, 3.0_f64.sqrt() / 6.0, (2.0_f64 / 3.0).sqrt()],
+        ];
+        Array1::from_iter((0..2).flat_map(|i| {
+            (0..2).flat_map(move |j| {
+                (0..2).flat_map(move |k| {
+                    [0, 1, 2].map(move |axis| {
+                        f64::from(i) * basis[0][axis]
+                            + f64::from(j) * basis[1][axis]
+                            + f64::from(k) * basis[2][axis]
+                    })
+                })
+            })
+        }))
+    }
+
+    #[test]
+    fn a_stop_set_mid_probe_charges_nothing_further() {
+        let cfg = quiet_basis_search(8);
+        let budget = 400;
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut ledger = Ledger::with_stop(budget, stop.clone());
+        let body = observed_basis_body();
+        let mut seen_parent = false;
+        let mut side_charges = 0usize;
+        let charges_after = std::sync::atomic::AtomicUsize::new(0);
+        let gradient_after = std::sync::atomic::AtomicUsize::new(0);
+        let performed = std::sync::atomic::AtomicUsize::new(0);
+        let mut relax = |led: &mut Ledger, _x: ArrayView1<f64>, steps: usize| {
+            let side = led.spent() == 0 && seen_parent;
+            if !side {
+                seen_parent = true;
+            }
+            for _ in 0..steps {
+                if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    if led.charge() {
+                        charges_after.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    continue;
+                }
+                if !led.charge() {
+                    break;
+                }
+                performed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if side {
+                    side_charges += 1;
+                    if side_charges == 2 {
+                        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
+                }
+            }
+            (0.0, body.clone())
+        };
+        let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| {
+            if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                gradient_after.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if led.charge() {
+                    charges_after.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                return None;
+            }
+            let out = led.charge().then(|| Array1::zeros(x.len()));
+            if out.is_some() {
+                performed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            out
+        };
+        let mut rng = StdRng::seed_from_u64(11);
+        let outcome = run_with_gradient(
+            &cfg,
+            body.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut rng,
+        )
+        .expect("search");
+        let performed = performed.load(std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(
+            outcome.charged, performed,
+            "the run reports {} charged calls but the potential ran {performed}",
+            outcome.charged
+        );
+        assert!(
+            side_charges >= 2,
+            "the stall must enter the observed-basis probe"
+        );
+        assert_eq!(
+            charges_after.load(std::sync::atomic::Ordering::Relaxed),
+            0,
+            "a stop raised inside the probe charged further calls"
+        );
+        assert_eq!(
+            gradient_after.load(std::sync::atomic::Ordering::Relaxed),
+            0,
+            "the follow-up gradient ran after the probe had stopped"
+        );
+    }
+
+    #[test]
+    fn a_missed_basis_probe_is_counted_before_later_records() {
+        let mut cfg = quiet_basis_search(8);
+        cfg.calibrated_screen = false;
+        cfg.screen_margin = f64::INFINITY;
+        cfg.finish_improving = false;
+        let budget = 400;
+        let mut ledger = Ledger::new(budget);
+        ledger.stop_below(-10.0);
+        let body = observed_basis_body();
+        let mut probed = false;
+        let mut seen_parent = false;
+        let mut real_charges = 0usize;
+        let mut side_charges = 0usize;
+        let mut post_probe_full = 0usize;
+        let mut walk_improvement_at = 0usize;
+        let mut target_hit_at = 0usize;
+        let mut relax = |led: &mut Ledger, _x: ArrayView1<f64>, steps: usize| {
+            let opening = !seen_parent;
+            let side = led.spent() == 0 && seen_parent;
+            if !side {
+                seen_parent = true;
+            }
+            for _ in 0..steps {
+                if !led.charge() {
+                    break;
+                }
+                real_charges += 1;
+                if side {
+                    side_charges += 1;
+                }
+            }
+            let energy = if opening {
+                -1.0
+            } else if side {
+                probed = true;
+                -2.0
+            } else if probed && steps == cfg.relax_steps {
+                post_probe_full += 1;
+                if post_probe_full == 1 {
+                    walk_improvement_at = real_charges;
+                    -5.0
+                } else {
+                    target_hit_at = real_charges;
+                    -12.0
+                }
+            } else {
+                -1.0
+            };
+            (energy, body.clone())
+        };
+        let mut rng = StdRng::seed_from_u64(11);
+        let outcome = run(&cfg, body.view(), &mut ledger, &mut relax, &mut rng).expect("search");
+        assert!(probed, "the stall must probe a basis before the hit");
+        assert_eq!(side_charges, cfg.relax_steps);
+        assert!(
+            walk_improvement_at > side_charges && target_hit_at > walk_improvement_at,
+            "the walk must record an intermediate minimum and a later target hit after the probe"
+        );
+        let (_, mid_at, _, _) = outcome
+            .improvements
+            .iter()
+            .find(|(_, _, _, energy)| *energy == -5.0)
+            .copied()
+            .expect("the walk records an intermediate improvement after the missed probe");
+        assert_eq!(
+            mid_at, walk_improvement_at,
+            "intermediate improvement at {mid_at} dropped the missed probe's {side_charges} calls"
+        );
+        let (_, hit_at, _, _) = outcome
+            .improvements
+            .iter()
+            .find(|(_, _, _, energy)| *energy <= -10.0)
+            .copied()
+            .expect("the walk reaches the target");
+        assert_eq!(
+            hit_at, target_hit_at,
+            "target hit row at {hit_at} did not match real evaluations {target_hit_at}"
+        );
+        assert_eq!(outcome.charged, real_charges);
+        assert_eq!(ledger.spent(), real_charges);
+        assert_eq!(ledger.budget(), budget);
+        assert_eq!(hit_at, outcome.charged);
+    }
+
+    /// Runs the quiet basis search with a potential that raises the caller
+    /// stop when it returns an energy at or below the target, as a harness
+    /// does. Every evaluation the potential performs is counted here, apart
+    /// from the ledger, so the ledger's clocks are checked against work done.
+    /// `side_energy` is what the first reconstruction after the opening
+    /// quench returns; `walk_hit` makes the walk's own quench reach the
+    /// target after that probe instead.
+    fn run_counting_potential_calls(
+        side_energy: f64,
+        walk_hit: bool,
+    ) -> (Outcome, Ledger, usize, usize) {
+        let cfg = quiet_basis_search(8);
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut ledger = Ledger::with_stop(400, stop.clone());
+        ledger.stop_below(-10.0);
+        let body = observed_basis_body();
+        let mut seen_parent = false;
+        let mut probed = false;
+        let mut potential_calls = 0usize;
+        let mut side_calls = 0usize;
+        let mut relax = |led: &mut Ledger, _x: ArrayView1<f64>, steps: usize| {
+            let side = led.spent() == 0 && seen_parent;
+            if !side {
+                seen_parent = true;
+            }
+            for _ in 0..steps {
+                if !led.charge() {
+                    break;
+                }
+                potential_calls += 1;
+                if side {
+                    side_calls += 1;
+                }
+            }
+            let energy = if side {
+                probed = true;
+                side_energy
+            } else if walk_hit && probed && steps == cfg.relax_steps {
+                -100.0
+            } else {
+                0.0
+            };
+            if energy <= -10.0 {
+                stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            (energy, body.clone())
+        };
+        let mut rng = StdRng::seed_from_u64(11);
+        let outcome = run(&cfg, body.view(), &mut ledger, &mut relax, &mut rng).expect("search");
+        assert!(probed, "the stall must probe a basis");
+        (outcome, ledger, potential_calls, side_calls)
+    }
+
+    #[test]
+    fn a_basis_probe_that_reaches_the_target_keeps_its_calls_on_the_hit_clock() {
+        let (outcome, ledger, potential_calls, side_calls) =
+            run_counting_potential_calls(-100.0, false);
+        assert!(side_calls > 0, "the stall must charge the probe");
+        assert_eq!(outcome.stop, Some(HopStop::Target));
+        assert_eq!(
+            outcome.charged, potential_calls,
+            "the run reports {} charged calls but the potential ran {potential_calls}",
+            outcome.charged
+        );
+        assert_eq!(ledger.spent(), potential_calls);
+        let (_, at, _, energy) = outcome
+            .improvements
+            .iter()
+            .find(|(_, _, _, energy)| *energy <= -10.0)
+            .copied()
+            .expect("the probe reaches the target");
+        assert_eq!(energy, -100.0);
+        assert_eq!(
+            at, potential_calls,
+            "the hit row at {at} dropped part of the {potential_calls} potential calls"
+        );
+    }
+
+    #[test]
+    fn a_missed_probe_stays_charged_when_a_later_walk_target_closes_the_run() {
+        let (outcome, ledger, potential_calls, side_calls) =
+            run_counting_potential_calls(-2.0, true);
+        assert!(side_calls > 0, "the stall must charge the probe");
+        assert_eq!(outcome.stop, Some(HopStop::Target));
+        assert_eq!(outcome.best, -100.0);
+        assert_eq!(
+            outcome.charged, potential_calls,
+            "the run reports {} charged calls but the potential ran {potential_calls}",
+            outcome.charged
+        );
+        assert_eq!(ledger.spent(), potential_calls);
+        let (_, at, _, _) = outcome
+            .improvements
+            .iter()
+            .find(|(_, _, _, energy)| *energy <= -10.0)
+            .copied()
+            .expect("the walk reaches the target");
+        assert_eq!(at, potential_calls);
+    }
+
+    /// The quiet basis search under a potential that tracks the lowest energy
+    /// it ever returned with the geometry, and raises the caller stop when
+    /// that reaches the target. Gradients are zero, so every point the walk
+    /// asks about is a converged minimum except the closed run's last one.
+    fn run_tracking_the_potential_minimum(
+        hit_energy: f64,
+    ) -> (Outcome, (f64, Array1<f64>), Array1<f64>) {
+        let cfg = quiet_basis_search(8);
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut ledger = Ledger::with_stop(400, stop.clone());
+        ledger.stop_below(-10.0);
+        let body = observed_basis_body();
+        let probed_state = body.mapv(|value| 1.25 * value);
+        let mut seen_parent = false;
+        let mut lowest: (f64, Array1<f64>) = (f64::INFINITY, body.clone());
+        let mut relax = |led: &mut Ledger, _x: ArrayView1<f64>, steps: usize| {
+            let side = led.spent() == 0 && seen_parent;
+            if !side {
+                seen_parent = true;
+            }
+            for _ in 0..steps {
+                if !led.charge() {
+                    break;
+                }
+            }
+            let (energy, state) = if side {
+                (hit_energy, probed_state.clone())
+            } else {
+                (0.0, body.clone())
+            };
+            if energy < lowest.0 {
+                lowest = (energy, state.clone());
+            }
+            if energy <= -10.0 {
+                stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            (energy, state)
+        };
+        let mut grad =
+            |led: &mut Ledger, x: ArrayView1<f64>| led.charge().then(|| Array1::zeros(x.len()));
+        let mut rng = StdRng::seed_from_u64(11);
+        let outcome = run_with_gradient(
+            &cfg,
+            body.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut rng,
+        )
+        .expect("search");
+        (outcome, lowest, probed_state)
+    }
+
+    #[test]
+    fn a_probe_that_closes_the_run_reports_the_lowest_energy_the_potential_returned() {
+        let (outcome, (lowest, at), probed_state) = run_tracking_the_potential_minimum(-100.0);
+        assert_eq!(lowest, -100.0, "the stall must probe a basis");
+        assert_eq!(at, probed_state);
+        assert_eq!(outcome.stop, Some(HopStop::Target));
+        assert_eq!(
+            outcome.best, lowest,
+            "the run closed on {lowest} and reported {}",
+            outcome.best
+        );
+        assert_eq!(outcome.best_state.as_ref(), Some(&at));
+    }
+
+    #[test]
+    fn a_closed_run_keeps_a_hit_that_has_no_converged_gradient() {
+        let cfg = quiet_basis_search(4);
+        let state = regular_tetrahedron();
+        let hit = -100.0;
+        for (name, refuses) in [("steep", false), ("refused", true)] {
+            let mut ledger = Ledger::new(100);
+            ledger.stop_below(-10.0);
+            let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| {
+                if refuses {
+                    return None;
+                }
+                led.charge().then(|| Array1::from_elem(x.len(), 1.0))
+            };
+            let mut unresolved = 0usize;
+            let mut evaluate: Option<&mut GradFn<'_>> = Some(&mut grad);
+            record_quenched_answer(
+                &cfg,
+                &mut ledger,
+                &mut evaluate,
+                hit,
+                state.view(),
+                &mut unresolved,
+            );
+            assert_eq!(ledger.best, hit, "{name}: a target hit was dropped");
+            assert_eq!(ledger.best_state.as_ref(), Some(&state), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_quench_cut_by_a_caller_stop_is_recorded_without_a_converged_gradient() {
+        let cfg = quiet_basis_search(4);
+        let state = regular_tetrahedron();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let mut ledger = Ledger::with_stop(100, stop);
+        let mut grad = |led: &mut Ledger, _: ArrayView1<f64>| {
+            led.charge();
+            None
+        };
+        let mut unresolved = 0usize;
+        let mut evaluate: Option<&mut GradFn<'_>> = Some(&mut grad);
+        record_quenched_answer(
+            &cfg,
+            &mut ledger,
+            &mut evaluate,
+            -3.0,
+            state.view(),
+            &mut unresolved,
+        );
+        assert_eq!(ledger.best, -3.0);
+        assert_eq!(ledger.best_state.as_ref(), Some(&state));
+    }
+
+    #[test]
+    fn an_open_run_still_needs_a_converged_gradient_to_record() {
+        let cfg = quiet_basis_search(4);
+        let state = regular_tetrahedron();
+        let mut ledger = Ledger::new(100);
+        ledger.stop_below(-10.0);
+        let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| {
+            led.charge().then(|| Array1::from_elem(x.len(), 1.0))
+        };
+        let mut unresolved = 0usize;
+        let mut evaluate: Option<&mut GradFn<'_>> = Some(&mut grad);
+        record_quenched_answer(
+            &cfg,
+            &mut ledger,
+            &mut evaluate,
+            -3.0,
+            state.view(),
+            &mut unresolved,
+        );
+        assert!(
+            ledger.best.is_infinite(),
+            "an unconverged quench was recorded"
+        );
+        assert_eq!(unresolved, 1);
+    }
+
+    #[test]
+    fn a_target_hit_in_basis_probe_stops_before_tail_stages() {
+        let mut cfg = quiet_basis_search(8);
+        cfg.polish_records = 7;
+        cfg.superbasin_escape = true;
+        cfg.superbasin_period = 1;
+        cfg.replicas = 2;
+        cfg.swap_period = 2;
+        cfg.ladder_pilot = 2;
+        cfg.path_on_stall = true;
+        cfg.max_hops = Some(4);
+        let mut ledger = Ledger::new(400);
+        ledger.stop_below(-10.0);
+        let body = observed_basis_body();
+        let mut seen_parent = false;
+        let mut polish_calls = 0usize;
+        let mut climb_grad_calls = 0usize;
+        let mut hit_probe_done = false;
+        let mut relax = |led: &mut Ledger, _x: ArrayView1<f64>, steps: usize| {
+            if steps == cfg.polish_records {
+                polish_calls += 1;
+            }
+            let side = led.spent() == 0 && seen_parent;
+            if !side {
+                seen_parent = true;
+            }
+            for _ in 0..steps {
+                if !led.charge() {
+                    break;
+                }
+            }
+            let energy = if side { -100.0 } else { 0.0 };
+            (energy, body.clone())
+        };
+        let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| {
+            if hit_probe_done {
+                climb_grad_calls += 1;
+            }
+            let side = led.budget() < 400;
+            let out = led.charge().then(|| Array1::zeros(x.len()));
+            if side {
+                hit_probe_done = true;
+            }
+            out
+        };
+        let mut rng = StdRng::seed_from_u64(11);
+        let outcome = run_with_gradient(
+            &cfg,
+            body.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut rng,
+        )
+        .expect("search");
+        assert!(hit_probe_done, "the observed-basis probe must hit target");
+        assert_eq!(outcome.stop, Some(HopStop::Target));
+        assert_eq!(polish_calls, 0, "polish_records ran after probe target hit");
+        assert_eq!(
+            climb_grad_calls, 0,
+            "stall-climb or tail gradient ran after probe target hit"
+        );
+        assert_eq!(
+            outcome.swaps_tried, 0,
+            "replica swaps ran after target was reached"
+        );
+    }
+
+    #[test]
+    fn a_post_hop_target_hit_skips_polish_swaps_and_tail_stages() {
+        let mut cfg = quiet_basis_search(4);
+        cfg.escape_on_stall = false;
+        cfg.restart_on_stall = true;
+        cfg.stall_patience = 1;
+        cfg.polish_records = 7;
+        cfg.superbasin_escape = true;
+        cfg.superbasin_period = 1;
+        cfg.replicas = 2;
+        cfg.swap_period = 1;
+        cfg.ladder_pilot = 1;
+        cfg.path_on_stall = true;
+        cfg.max_hops = Some(2);
+        let mut ledger = Ledger::new(400);
+        ledger.stop_below(-10.0);
+        let tetra = regular_tetrahedron();
+        let mut calls = 0usize;
+        let mut polish_calls = 0usize;
+        let mut post_target_calls = 0usize;
+        let mut relax = |led: &mut Ledger, _x: ArrayView1<f64>, steps: usize| {
+            if led.target_reached() {
+                post_target_calls += 1;
+            }
+            if steps == cfg.polish_records {
+                polish_calls += 1;
+            }
+            calls += 1;
+            for _ in 0..steps {
+                if !led.charge() {
+                    break;
+                }
+            }
+            // Opening quench (1), rung-1 opening quench (2), hop 1 (3), then
+            // stall-restart (4) hits the target on the final allowed hop.
+            let energy = if calls >= 4 { -20.0 } else { 0.0 };
+            (energy, tetra.clone())
+        };
+        let mut rng = StdRng::seed_from_u64(11);
+        let outcome = run(&cfg, tetra.view(), &mut ledger, &mut relax, &mut rng).expect("search");
+        assert_eq!(outcome.stop, Some(HopStop::Target));
+        assert_eq!(outcome.best, -20.0);
+        assert_eq!(polish_calls, 0, "polish_records ran after target hit");
+        assert_eq!(post_target_calls, 0, "relax ran after target was reached");
+        assert_eq!(
+            outcome.swaps_tried, 0,
+            "replica swaps ran after target was reached"
+        );
     }
 
     #[test]

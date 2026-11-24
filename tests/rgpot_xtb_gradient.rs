@@ -2,10 +2,11 @@
 //!
 //! The engine tests load the rgpot `libxtb_engine.so` named by
 //! `RGPOT_XTB_ENGINE` and compare against a central difference of that
-//! engine's own energy. Without it they return early. The stub test builds a
-//! library with the same C ABI and a pair energy and reruns the objective
-//! tests on it in a child, so the callback sign is checked without xtb.
-#![cfg(all(unix, feature = "rgpot-ex"))]
+//! engine's own energy. Without it they return early. Two deterministic tests
+//! check the identical `XtbWorker` / `xtb_callback` / `rgpot-core` adapter path
+//! in-process on an analytic pair PES without `RGPOT_XTB_ENGINE`, and the
+//! stub test also checks the `dlopen` path via a compiled C library.
+#![cfg(unix)]
 
 #[path = "../examples/common/rgpot_eindir.rs"]
 mod rgpot_eindir;
@@ -314,4 +315,155 @@ fn the_callback_passes_an_engine_force_through_to_an_energy_slope_gradient() {
             "{name} did not load the stub:\n{log}"
         );
     }
+}
+
+fn harmonic_pair_energy_and_forces(n: usize, x: &[f64]) -> (f64, Vec<f64>) {
+    let mut energy = 0.0;
+    let mut forces = vec![0.0; 3 * n];
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mut d = [0.0; 3];
+            let mut r2 = 0.0;
+            for k in 0..3 {
+                d[k] = x[3 * i + k] - x[3 * j + k];
+                r2 += d[k] * d[k];
+            }
+            let r = r2.sqrt();
+            let s = r - 1.5;
+            energy += 0.5 * 3.0 * s * s;
+            for k in 0..3 {
+                let grad = 3.0 * s * d[k] / r;
+                forces[3 * i + k] -= grad;
+                forces[3 * j + k] += grad;
+            }
+        }
+    }
+    (energy, forces)
+}
+
+unsafe extern "C" fn analytic_stub_reset(_pot: *mut c_void) {}
+
+unsafe extern "C" fn analytic_stub_destroy(_pot: *mut c_void) {}
+
+unsafe extern "C" fn analytic_force_engine(
+    _pot: *mut c_void,
+    n_atoms: i64,
+    positions: *const f64,
+    _atomic_numbers: *const i32,
+    forces: *mut f64,
+    energy: *mut f64,
+    variance: *mut f64,
+    _box_matrix: *const f64,
+) -> i32 {
+    let n = n_atoms as usize;
+    let x = unsafe { std::slice::from_raw_parts(positions, 3 * n) };
+    let out_f = unsafe { std::slice::from_raw_parts_mut(forces, 3 * n) };
+    let (e, f) = harmonic_pair_energy_and_forces(n, x);
+    unsafe {
+        *energy = e;
+        *variance = 0.0;
+    }
+    out_f.copy_from_slice(&f);
+    0
+}
+
+unsafe extern "C" fn analytic_flipped_engine(
+    _pot: *mut c_void,
+    n_atoms: i64,
+    positions: *const f64,
+    _atomic_numbers: *const i32,
+    forces: *mut f64,
+    energy: *mut f64,
+    variance: *mut f64,
+    _box_matrix: *const f64,
+) -> i32 {
+    let n = n_atoms as usize;
+    let x = unsafe { std::slice::from_raw_parts(positions, 3 * n) };
+    let out_f = unsafe { std::slice::from_raw_parts_mut(forces, 3 * n) };
+    let (e, f) = harmonic_pair_energy_and_forces(n, x);
+    unsafe {
+        *energy = e;
+        *variance = 0.0;
+    }
+    for (dst, val) in out_f.iter_mut().zip(&f) {
+        *dst = -*val;
+    }
+    0
+}
+
+#[test]
+fn in_process_adapter_matches_finite_difference_without_engine_env() {
+    for (label, (z, x)) in [
+        ("analytic dimer", displaced_dimer()),
+        ("analytic trimer", trimer()),
+    ] {
+        let pot = RgpotObjective::xtb_from_symbols(
+            &z,
+            BOX,
+            rgpot_eindir::OVERLAP_CALL_LIMIT_A,
+            None,
+            std::ptr::null_mut(),
+            analytic_force_engine,
+            analytic_stub_reset,
+            analytic_stub_destroy,
+        );
+        assert_objective_is_the_energy_slope(label, &pot, &x);
+
+        let objective = pot.wrapper();
+        let (_, gradient) = objective.value_and_gradient(ArrayView1::from(&x));
+        let gradient = gradient.to_vec();
+        let fd = central_difference(&mut |y: &[f64]| objective.eval(ArrayView1::from(y)), &x);
+        let minus_fd: Vec<f64> = fd.iter().map(|v| -v).collect();
+        let residual = max_residual(&gradient, &fd);
+        let flipped = max_residual(&gradient, &minus_fd);
+        assert!(
+            residual < 1e-5,
+            "{label}: analytic FD residual {residual:.3e} >= 1e-5"
+        );
+        assert!(
+            flipped > 1.0,
+            "{label}: flipped residual {flipped:.3e} is too small to distinguish sign"
+        );
+    }
+}
+
+#[test]
+fn in_process_adapter_detects_flipped_engine_sign() {
+    let (z, x) = displaced_dimer();
+    let pot = RgpotObjective::xtb_from_symbols(
+        &z,
+        BOX,
+        rgpot_eindir::OVERLAP_CALL_LIMIT_A,
+        None,
+        std::ptr::null_mut(),
+        analytic_flipped_engine,
+        analytic_stub_reset,
+        analytic_stub_destroy,
+    );
+    let objective = pot.wrapper();
+    let (energy, gradient) = objective.value_and_gradient(ArrayView1::from(&x));
+    let gradient = gradient.to_vec();
+    let fd = central_difference(&mut |y: &[f64]| objective.eval(ArrayView1::from(y)), &x);
+    let minus_fd: Vec<f64> = fd.iter().map(|v| -v).collect();
+    let residual = max_residual(&gradient, &fd);
+    let flipped = max_residual(&gradient, &minus_fd);
+    assert!(
+        residual > 1.0,
+        "flipped engine buffer did not trigger FD mismatch (max|g - fd| {residual:.3e})"
+    );
+    assert!(
+        flipped < 1e-5,
+        "flipped engine buffer should produce -dE/dx (max|g + fd| {flipped:.3e})"
+    );
+    let step = 0.01 / norm(&gradient);
+    let climbed: Array1<f64> = x
+        .iter()
+        .zip(&gradient)
+        .map(|(xi, gi)| xi - step * gi)
+        .collect();
+    let raised = objective.eval(climbed.view());
+    assert!(
+        raised > energy,
+        "flipped engine sign should raise E on a descent step ({energy} -> {raised})"
+    );
 }

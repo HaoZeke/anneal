@@ -292,6 +292,20 @@ def test_an_uncharged_gmin_panel_miss_is_reported():
     assert "row invariants" in {r[2] for r in audit.drifts()}
 
 
+def test_a_stale_gmin_panel_source_patch_digest_is_reported():
+    audit = audit_mod.Audit()
+    path = "bench/gmin-panel/gmin-source.txt"
+    audit.text_cache[path] = audit.text(path).replace(
+        "patch=bench/lj104-lattice/v2/h2h-gmin.patch 3bf5d49a0a1cb0512a228212482e76e98195946096ceae3b54e88ca4a43b7189",
+        "patch=bench/lj104-lattice/v2/h2h-gmin.patch a31221a67883d20032a029e34e3d81bd62c5bcb786c97fff02a9c234adc34553",
+    )
+    panel, groups = audit_mod.gmin_panel_groups(audit)
+    audit_mod.gmin_panel_readme(audit, panel, groups)
+    assert [r[2] for r in audit.drifts()] == [
+        "in-tree patch sha256 bench/lj104-lattice/v2/h2h-gmin.patch"
+    ]
+
+
 def test_a_drifted_sutton_chen_howto_cell_is_reported():
     audit = audit_mod.Audit()
     path = audit_mod.SC96_78_HOWTO
@@ -828,6 +842,26 @@ def test_a_cap_turn_ratio_that_disagrees_with_the_rows_is_reported():
     assert len(drift) == 1
     assert drift[0][3] == "0.998"
     assert drift[0][4] != "0.998"
+
+
+def test_cap_turn_ratio_rounds_once_from_full_precision():
+    assert audit_mod.cap_turn_ratio_text(0.992484) == "0.992"
+    assert audit_mod.cap_turn_ratio_text(1.002459) == "1.002"
+    assert audit_mod.cap_turn_ratio_text(0.993487) == "0.993"
+    assert audit_mod.cap_turn_ratio_text(0.9925) == "0.993"
+
+    audit = audit_mod.Audit()
+    text = audit.text(audit_mod.CAP_TURN_README)
+    audit.text_cache[audit_mod.CAP_TURN_README] = text.replace(
+        "| m55r14 | 18/24 | 18/24 | 1 | 5 | 5 | 0.992 |",
+        "| m55r14 | 18/24 | 18/24 | 1 | 5 | 5 | 0.993 |",
+        1,
+    )
+    audit_mod.cap_turn_campaign(audit)
+    drift = [row for row in audit.drifts() if row[2] == "m55r14 outside/call ratio matches the rows"]
+    assert len(drift) == 1
+    assert drift[0][3] == "0.993"
+    assert drift[0][4] == "0.992"
 
 
 def _flag_off_drift(mutate):

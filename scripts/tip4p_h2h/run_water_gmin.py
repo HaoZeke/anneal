@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from machine_provenance import (  # noqa: E402
+    default_gmin_source_metadata,
     machine_columns,
     read_built_gmin_provenance,
     require_csv_schema,
@@ -247,7 +248,7 @@ def main() -> int:
     gmin_source = args.gmin_source or (
         Path(env_source)
         if env_source
-        else args.gmin_svnrev.parents[3] / "gmin-source.txt"
+        else default_gmin_source_metadata(args.gmin_svnrev)
     )
     gmin_revision, gmin_build_key = read_built_gmin_provenance(
         args.gmin_svnrev, gmin_source

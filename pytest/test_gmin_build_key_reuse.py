@@ -2615,3 +2615,319 @@ def test_gmin_h2h_raises_on_provenance_mismatch_and_legacy_row_before_machine_ch
         )
         is None
     )
+
+
+def test_tip4p_runners_resolve_default_gmin_source_from_built_svnrev_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    h2h_mod = _load_module("prov_tip4p_h2h", "scripts/tip4p_h2h/run_h2h.py")
+    budget_mod = _load_module("prov_tip4p_budget", "scripts/tip4p_h2h/run_budget.py")
+    water_mod = _load_module("prov_tip4p_water", "scripts/tip4p_h2h/run_water_gmin.py")
+    _patch_bench_env(monkeypatch, h2h_mod, budget_mod, water_mod)
+    monkeypatch.delenv("GMIN_SOURCE_FILE", raising=False)
+    monkeypatch.setattr(Path, "cwd", staticmethod(lambda: Path("/work")))
+
+    build_work = tmp_path / "gmin-h2h"
+    svnrev = build_work / "src" / "wales" / "GMIN" / "source" / "SVNREV"
+    svnrev.parent.mkdir(parents=True, exist_ok=True)
+    svnrev.write_text(f"{REVISION}\n")
+    gmin_source = build_work / "gmin-source.txt"
+    gmin_source.write_text(
+        f"url=https://example.invalid/gmin.tar.bz2\n"
+        f"revision={REVISION}\n"
+        f"svnrev={REVISION}\n"
+        f"tarball_sha256={TARBALL_SHA256}\n"
+        f"build_key={EXPECTED_KEY}\n"
+    )
+    assert gmin_source.is_file()
+    assert not (svnrev.parents[3] / "gmin-source.txt").exists()
+
+    head_file = tmp_path / "head"
+    head_file.write_text(f"{FAKE_HEAD}\n")
+    dummy = tmp_path / "dummy"
+    dummy.write_text("#!/bin/sh\nexit 99\n")
+
+    # 1. run_h2h.py without --gmin-source or GMIN_SOURCE_FILE.
+    h2h_work = tmp_path / "h2h-work"
+    h2h_rows = tmp_path / "h2h-rows.csv"
+    monkeypatch.setattr(
+        h2h_mod,
+        "run_anneal",
+        lambda *_a, **_k: {
+            "system": "tip4p8",
+            "code": "anneal",
+            "seed": "2000",
+            "budget": "2000000",
+            "hit": "1",
+            "evals_to_hit": "5000",
+            "charged": "5000",
+            "best": "-305.5183221676",
+            "wall_s": "0.300000",
+            "pot_s": "0.200000",
+            "outside_s": "0.100000",
+            "basins": "4",
+        },
+    )
+    monkeypatch.setattr(
+        h2h_mod,
+        "run_gmin",
+        lambda *_a, **_k: {
+            "system": "tip4p8",
+            "code": "gmin",
+            "seed": "2000",
+            "budget": "2000000",
+            "hit": "1",
+            "evals_to_hit": "8000",
+            "charged": "8000",
+            "best": "-305.5183221676",
+            "wall_s": "0.600000",
+            "pot_s": "0.500000",
+            "outside_s": "0.100000",
+            "basins": "6",
+        },
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_h2h.py",
+            "--binary",
+            str(dummy),
+            "--gmin",
+            str(dummy),
+            "--data",
+            str(dummy),
+            "--work",
+            str(h2h_work),
+            "--rows",
+            str(h2h_rows),
+            "--summary",
+            str(tmp_path / "h2h-summary.csv"),
+            "--size",
+            "8",
+            "--seed",
+            "2000",
+            "--head-file",
+            str(head_file),
+            "--svnrev",
+            str(svnrev),
+        ],
+    )
+    assert h2h_mod.main() == 0
+    with h2h_rows.open() as handle:
+        written = list(csv.DictReader(handle))
+    gmin_row = next(r for r in written if r["code"] == "gmin")
+    assert gmin_row["code_revision"] == REVISION
+    assert gmin_row["gmin_build_key"] == EXPECTED_KEY
+
+    # 2. run_budget.py without --gmin-source or GMIN_SOURCE_FILE.
+    start_file = tmp_path / "budget-start.gmin"
+    start_file.write_text("0 0 0\n")
+    monkeypatch.setattr(
+        budget_mod,
+        "run_anneal",
+        lambda *_a, **_k: {
+            "hit": "1",
+            "evals_to_hit": "12000",
+            "charged": "12000",
+            "best": "-916.7074302940",
+            "wall_s": "0.500000",
+            "pot_s": "0.400000",
+            "outside_s": "0.100000",
+            "basins": "10",
+            "start": str(start_file),
+        },
+    )
+    monkeypatch.setattr(
+        budget_mod,
+        "run_gmin",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("matching reused GMIN row should not execute GMIN")
+        ),
+    )
+    prior_csv = tmp_path / "budget-prior.csv"
+    _write_csv_with_fields(
+        prior_csv,
+        [
+            "system",
+            "code",
+            "budget",
+            "seed",
+            "hit",
+            "evals_to_hit",
+            "charged",
+            "best",
+            "wall_s",
+            "pot_s",
+            "outside_s",
+            "basins",
+            "code_revision",
+            "gmin_build_key",
+            "host",
+            "machine_id",
+            "cpu_model",
+        ],
+        [
+            {
+                "system": "tip4p21",
+                "code": "gmin",
+                "budget": "2000000",
+                "seed": "2000",
+                "hit": "1",
+                "evals_to_hit": "25000",
+                "charged": "25000",
+                "best": "-916.7074302940",
+                "wall_s": "1.200000",
+                "pot_s": "1.000000",
+                "outside_s": "0.200000",
+                "basins": "20",
+                "code_revision": REVISION,
+                "gmin_build_key": EXPECTED_KEY,
+                "host": "bench",
+                **FAKE_MACHINE,
+            }
+        ],
+    )
+    budget_rows = tmp_path / "budget-rows.csv"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_budget.py",
+            "--binary",
+            str(dummy),
+            "--gmin",
+            str(dummy),
+            "--data",
+            str(dummy),
+            "--work",
+            str(tmp_path / "budget-work"),
+            "--rows",
+            str(budget_rows),
+            "--summary",
+            str(tmp_path / "budget-summary.csv"),
+            "--gmin-rows",
+            str(prior_csv),
+            "--budget",
+            "2000000",
+            "--seed",
+            "2000",
+            "--head-file",
+            str(head_file),
+            "--svnrev",
+            str(svnrev),
+        ],
+    )
+    assert budget_mod.main() == 0
+    with budget_rows.open() as handle:
+        written_budget = list(csv.DictReader(handle))
+    assert any(
+        r["code"] == "gmin"
+        and r["code_revision"] == REVISION
+        and r["gmin_build_key"] == EXPECTED_KEY
+        for r in written_budget
+    )
+
+    # 3. run_water_gmin.py without --gmin-source or GMIN_SOURCE_FILE.
+    water_work = tmp_path / "water-work"
+    water_work.mkdir(parents=True, exist_ok=True)
+    water_start = water_work / "tip4p8-s2000.start.gmin"
+    water_start.write_text("0.0 0.0 0.0\n")
+    start_hash = water_mod.sha1(water_start)
+    monkeypatch.setattr(water_mod, "write_gm_blocks", lambda *_a, **_k: None)
+    monkeypatch.setattr(water_mod, "verify", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        water_mod,
+        "run_anneal",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("should reuse anneal")),
+    )
+    monkeypatch.setattr(
+        water_mod,
+        "run_gmin",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("should reuse gmin")),
+    )
+    water_rows = tmp_path / "water-rows.csv"
+    _write_csv_with_fields(
+        water_rows,
+        water_mod.FIELDS,
+        [
+            {
+                "system": "tip4p8",
+                "code": "anneal",
+                "seed": "2000",
+                "budget": "2000000",
+                "hit": "1",
+                "evals_to_hit": "5000",
+                "charged": "5000",
+                "best": "-305.5183221676",
+                "wall_s": "0.400000",
+                "pot_s": "0.300000",
+                "outside_s": "0.100000",
+                "basins": "5",
+                "start_sha1": start_hash,
+                "code_revision": FAKE_HEAD,
+                "gmin_build_key": "",
+                "host": "bench",
+                "cpu": FAKE_MACHINE["cpu_model"],
+                **FAKE_MACHINE,
+            },
+            {
+                "system": "tip4p8",
+                "code": "gmin",
+                "seed": "2000",
+                "budget": "2000000",
+                "hit": "1",
+                "evals_to_hit": "8000",
+                "charged": "8000",
+                "best": "-305.5183221676",
+                "wall_s": "0.700000",
+                "pot_s": "0.600000",
+                "outside_s": "0.100000",
+                "basins": "8",
+                "start_sha1": start_hash,
+                "code_revision": REVISION,
+                "gmin_build_key": EXPECTED_KEY,
+                "host": "bench",
+                "cpu": FAKE_MACHINE["cpu_model"],
+                **FAKE_MACHINE,
+            },
+        ],
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_water_gmin.py",
+            "--repo",
+            str(ROOT),
+            "--binary",
+            str(dummy),
+            "--point",
+            str(dummy),
+            "--anneal-revision",
+            FAKE_HEAD,
+            "--gmin",
+            str(dummy),
+            "--gmin-svnrev",
+            str(svnrev),
+            "--data",
+            str(dummy),
+            "--verify-data",
+            str(dummy),
+            "--gm-dir",
+            str(tmp_path / "gm"),
+            "--verify-out",
+            str(tmp_path / "verify.csv"),
+            "--work",
+            str(water_work),
+            "--rows",
+            str(water_rows),
+            "--summary",
+            str(tmp_path / "water-summary.csv"),
+            "--size",
+            "8",
+            "--seed",
+            "2000",
+        ],
+    )
+    assert water_mod.main() == 0
