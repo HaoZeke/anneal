@@ -48,7 +48,8 @@ scratch=$ROOT/build/generic-alloy
 # operator already installed for this user.
 user_site=$(python3 -c 'import site; print(site.getusersitepackages())')
 mkdir -p "$WORK/bin" "$scratch/user" "$scratch/scratch" "$WORK/logs" "$OUT"
-cp -f "$HERE/run_ablation.py" "$ROOT/scripts/target_tol.py" "$WORK/bin/"
+cp -f "$HERE/run_ablation.py" "$ROOT/scripts/target_tol.py" \
+  "$ROOT/scripts/machine_provenance.py" "$WORK/bin/"
 
 cat > "$WORK/bin/inside.sh" << EOF
 #!/bin/bash
