@@ -15,8 +15,8 @@
 //! the symmetry completion of a new basin, `once` completes each basin
 //! once per chain, `framework` reads the group from the positions alone
 //! and `fitted` adds the refinements of that reading. `BITS` on stderr
-//! gives the bits of the best energy and the charged count, so two
-//! builds can be compared exactly.
+//! gives the bits of the best energy, the charged count and the
+//! completions quenched, so two builds can be compared exactly.
 
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, Outcome, random_cluster_in_radius, run_with_gradient,
@@ -100,9 +100,11 @@ fn main() {
         budget
     };
     eprintln!(
-        "BITS best={:016x} charged={}",
+        "BITS best={:016x} charged={} completions={} gain={:.6}",
         outcome.best.to_bits(),
-        outcome.charged
+        outcome.charged,
+        outcome.symmetry_completions.0,
+        outcome.symmetry_completions.1
     );
     println!(
         "system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,head,tree,cpu,pins,pot_s"

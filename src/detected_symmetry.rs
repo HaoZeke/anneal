@@ -15,8 +15,8 @@
 //! instead of one random axis.
 
 use crate::symmetrise::{
-    Candidate, Rot, centroid, class_members, detect_leading_classed, mirror_matrix, mul,
-    operation_deviation, operation_deviation_about, rot_matrix,
+    Candidate, CentredOperationTest, OperationTest, Rot, centroid, class_members,
+    detect_leading_classed, mirror_matrix, mul, rot_matrix,
 };
 use ndarray::{Array1, ArrayView1};
 
@@ -200,8 +200,9 @@ fn read_group(
     let radius = rms_radius(x, n);
     let tolerance_of_words = rounding_closure(radius, cap);
     let group = if symmetric_only {
+        let test = OperationTest::new(x, n, classes);
         close_group_where(&operations, radius, tolerance_of_words, cap, |g| {
-            operation_deviation(x, n, classes, g, tolerance).is_some_and(|d| d < tolerance)
+            test.deviation(g, tolerance).is_some_and(|d| d < tolerance)
         })
     } else {
         close_group(&operations, radius, tolerance_of_words, cap)
@@ -861,12 +862,11 @@ fn fitted_centre(
     whole_centre: [f64; 3],
 ) -> [f64; 3] {
     let misfit = |centre: [f64; 3]| -> f64 {
+        let test = CentredOperationTest::new(x, n, centre);
         group
             .iter()
             .skip(1)
-            .map(|g| {
-                operation_deviation_about(x, n, g, centre, f64::INFINITY).unwrap_or(f64::INFINITY)
-            })
+            .map(|g| test.deviation(g, f64::INFINITY).unwrap_or(f64::INFINITY))
             .sum()
     };
     if misfit(whole_centre) < misfit(core_centre) {
@@ -879,7 +879,7 @@ fn fitted_centre(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::symmetrise::detect_all_classed;
+    use crate::symmetrise::{detect_all_classed, operation_deviation};
     use ndarray::array;
 
     /// Points of the centred icosahedron.
