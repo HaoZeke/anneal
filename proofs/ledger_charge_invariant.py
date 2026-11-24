@@ -38,6 +38,15 @@ class Ledger:
         self.settled_beyond_cap += n - paid
         return n <= open_room
 
+    def charged(self) -> int:
+        # The count a benchmark reads: every settled call.
+        return self.spent + self.settled_beyond_cap
+
+    def settle_child(self, child: "Ledger", offset: int = 0) -> bool:
+        # The child's own overrun is settled with its spend, so an
+        # evaluation past a sub-ledger's cap still reaches the parent.
+        return self.charge_many(max(child.spent - offset, 0) + child.settled_beyond_cap)
+
     def remaining(self) -> int:
         if self.stopped():
             return 0
@@ -169,6 +178,26 @@ def test_every_settled_call_is_on_one_field() -> bool:
     return True
 
 
+def test_child_overrun_reaches_the_parent() -> bool:
+    for parent_budget in range(0, 9):
+        for child_budget in range(1, 6):
+            for batches in ([2], [5, 4], [1, 1, 9], [0, 7]):
+                parent = Ledger(parent_budget)
+                child = Ledger(child_budget)
+                for n in batches:
+                    child.charge_many(n)
+                parent.settle_child(child)
+                if parent.charged() != sum(batches):
+                    return False
+                if parent.spent > parent.budget or child.spent > child.budget:
+                    return False
+                grand = Ledger(parent_budget + 3)
+                grand.settle_child(parent)
+                if grand.charged() != sum(batches):
+                    return False
+    return True
+
+
 def all_checks() -> list[tuple[str, bool]]:
     return [
         ("I1 through charge to exhaustion", test_i1_through_charges()),
@@ -179,6 +208,7 @@ def all_checks() -> list[tuple[str, bool]]:
         ("stopped charge_many pays budget room", test_stopped_charge_many_pays_budget_room()),
         ("overrun is recorded apart", test_overrun_is_recorded_apart()),
         ("every settled call is on one field", test_every_settled_call_is_on_one_field()),
+        ("a child's overrun reaches the parent", test_child_overrun_reaches_the_parent()),
     ]
 
 

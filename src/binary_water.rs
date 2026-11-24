@@ -178,7 +178,7 @@ where
         .unwrap_or_else(|| start.to_vec());
     StockSearch {
         energy: ledger.best,
-        charged: ledger.spent(),
+        charged: ledger.charged(),
         state,
         nve_unavailable: out.nve_unavailable,
     }

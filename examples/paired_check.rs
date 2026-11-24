@@ -6,10 +6,14 @@
 //! paired_check <arm> <n> <seed> <budget>
 //! ```
 //!
-//! The row is `arm,n,seed,budget,hit,evals_to_hit,charged,raw,wall_s,best,head,hops`.
+//! The row is
+//! `arm,n,seed,budget,hit,evals_to_hit,charged,raw,wall_s,best,head,hops,beyond_cap`.
 //! `raw` counts each `value_and_gradient` call the relaxation and the
 //! gradient closures make, so it is independent of the ledger. `charged` is
-//! `Outcome::charged`. The search stops at the published minimum plus
+//! `Outcome::charged`, every settled call. `beyond_cap` is
+//! `Outcome::settled_beyond_cap`, the part of `charged` that passed the
+//! budget, and it is zero unless a side ledger settled more than was left.
+//! The search stops at the published minimum plus
 //! `DEFAULT_HIT_TOL`, or at the budget. A miss reports the budget as its
 //! evaluations. Run the same file against two trees to pair them.
 
@@ -111,10 +115,11 @@ fn main() {
         .map(|text| text.trim().to_string())
         .unwrap_or_default();
     println!(
-        "{arm},{n},{seed},{budget},{hit},{evals},{},{},{wall:.6},{:.8},{head},{}",
+        "{arm},{n},{seed},{budget},{hit},{evals},{},{},{wall:.6},{:.8},{head},{},{}",
         outcome.charged,
         raw.load(Ordering::Relaxed),
         outcome.best,
         outcome.hops,
+        outcome.settled_beyond_cap,
     );
 }

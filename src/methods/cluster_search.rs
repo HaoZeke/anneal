@@ -1447,11 +1447,13 @@ pub fn polish_recorded_answer_until<O, A>(
         },
     );
     if !reported_geometry_ok(cfg, state.view()) {
-        outcome.charged = ledger.spent();
+        outcome.charged = ledger.charged();
+        outcome.settled_beyond_cap = ledger.settled_beyond_cap();
         return;
     }
     if !ledger.charge() {
-        outcome.charged = ledger.spent();
+        outcome.charged = ledger.charged();
+        outcome.settled_beyond_cap = ledger.settled_beyond_cap();
         return;
     }
     stats.check_charged += 1;
@@ -1468,7 +1470,8 @@ pub fn polish_recorded_answer_until<O, A>(
             stats.converged += 1;
         }
     }
-    outcome.charged = ledger.spent();
+    outcome.charged = ledger.charged();
+    outcome.settled_beyond_cap = ledger.settled_beyond_cap();
 }
 
 fn reported_geometry_ok(cfg: &Config, state: ArrayView1<f64>) -> bool {
@@ -1727,7 +1730,8 @@ fn finish_molecular_answers<O>(
         outcome.best = best_energy;
         outcome.best_state = Some(state);
     }
-    outcome.charged = ledger.spent();
+    outcome.charged = ledger.charged();
+    outcome.settled_beyond_cap = ledger.settled_beyond_cap();
 }
 
 /// [`polish_answer`] that refuses a compressed contact before the potential.
@@ -2505,7 +2509,7 @@ where
             &mut bias,
             &mut rng,
         )?;
-        ledger.charge_many(slice_led.spent());
+        ledger.settle_child(&slice_led, 0);
         if let Some(st) = slice_led.best_state.as_ref() {
             ledger.record(slice_led.best, st.view());
         }

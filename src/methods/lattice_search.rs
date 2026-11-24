@@ -734,7 +734,7 @@ pub fn run(cfg: &LatticeSearchConfig, ledger: &mut Ledger, relax: Relax<'_>, see
     outcome.best = ledger.best;
     outcome.best_state = ledger.best_state.clone();
     outcome.hops = constructions;
-    outcome.charged = ledger.spent();
+    outcome.charged = ledger.charged();
     outcome.basins = restarts;
     outcome.returned = improvements;
     if charged_at_best > 0 {

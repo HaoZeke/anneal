@@ -3062,6 +3062,18 @@ impl PyLedger {
         self.inner.spent()
     }
 
+    /// Settled evaluations that passed the budget and are not in `spent`.
+    #[getter]
+    fn settled_beyond_cap(&self) -> usize {
+        self.inner.settled_beyond_cap()
+    }
+
+    /// Every settled evaluation: `spent` plus `settled_beyond_cap`.
+    #[getter]
+    fn charged(&self) -> usize {
+        self.inner.charged()
+    }
+
     /// Charged evaluations remaining.
     #[getter]
     fn remaining(&self) -> usize {

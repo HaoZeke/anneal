@@ -238,7 +238,7 @@ fn slice_run_inner<'g>(
         rng,
     )
     .expect("finite start");
-    ledger.charge_many(slice_ledger.spent());
+    ledger.settle_child(&slice_ledger, 0);
     if let Some(st) = slice_ledger.best_state.as_ref() {
         ledger.record(slice_ledger.best, st.view());
     }
@@ -572,7 +572,7 @@ where
         basins,
         screened_out,
         returned,
-        charged: ledger.spent(),
+        charged: ledger.charged(),
         improved,
         novel: bank.novel,
         duplicates,

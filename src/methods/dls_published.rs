@@ -212,7 +212,7 @@ pub fn run<R: Rng + ?Sized>(
     let mut outcome = Outcome::default();
     if n < 2 || start.len() != 3 * n {
         outcome.best = ledger.best;
-        outcome.charged = ledger.spent();
+        outcome.charged = ledger.charged();
         return outcome;
     }
     let params = table1(n);
@@ -222,7 +222,7 @@ pub fn run<R: Rng + ?Sized>(
     let mut current = match quench.relax(ledger, start) {
         Some(relaxed) => relaxed,
         None => {
-            outcome.charged = ledger.spent();
+            outcome.charged = ledger.charged();
             outcome.best = ledger.best;
             return outcome;
         }
@@ -289,7 +289,7 @@ fn finish(
 ) -> Outcome {
     outcome.best = ledger.best;
     outcome.best_state = ledger.best_state.clone();
-    outcome.charged = ledger.spent();
+    outcome.charged = ledger.charged();
     outcome.hops = generations;
     outcome.basins = restarts;
     outcome.returned = improvements;

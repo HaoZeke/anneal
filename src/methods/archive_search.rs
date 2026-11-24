@@ -249,7 +249,7 @@ fn hops_from_start<'g, R: Rng + ?Sized>(
         let hop = run_with_gradient(cfg, x0.view(), &mut led, relax, grad.as_deref_mut(), rng)
             .expect("finite start");
         let used = led.spent();
-        let _ = ledger.charge_many(used);
+        let _ = ledger.settle_child(&led, 0);
         acc.screens += hop.screened_out;
         acc.full += paid_full_quenches(cfg, take, hop.hops);
         acc.returned += hop.returned;
@@ -455,7 +455,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             let hop1 = run_with_gradient(cfg, start, &mut led1, relax, grad.as_deref_mut(), rng)
                 .expect("finite start");
             let used1 = led1.spent();
-            let _ = ledger.charge_many(used1);
+            let _ = ledger.settle_child(&led1, 0);
             let at1 = hop_best_at(&hop1, used1);
             let rest = ledger.remaining();
             let acc = if rest > 0 {
@@ -473,7 +473,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                     run_with_gradient(&c2, x2.view(), &mut led2, relax, grad.as_deref_mut(), rng)
                         .expect("finite start");
                 let used2 = led2.spent();
-                let _ = ledger.charge_many(used2);
+                let _ = ledger.settle_child(&led2, 0);
                 let at2 = used1.saturating_add(hop_best_at(&hop2, used2));
                 let rest3 = ledger.remaining();
                 let mut nve_unavailable = hop1.nve_unavailable || hop2.nve_unavailable;
@@ -504,7 +504,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                             rng,
                         )
                         .expect("finite start");
-                        let _ = ledger.charge_many(led3.spent());
+                        let _ = ledger.settle_child(&led3, 0);
                         nve_unavailable |= hop3.nve_unavailable;
                         let at3 = used1
                             .saturating_add(used2)
@@ -610,7 +610,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                 floors: archive.floors.len().max(acc.basins),
                 events: archive.catalog.event_count(),
                 artn: acc.artn,
-                charged: ledger.spent(),
+                charged: ledger.charged(),
                 best_at: acc.best_at,
                 nve_unavailable: acc.nve_unavailable,
             };
@@ -653,7 +653,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             floors: archive.floors.len().max(acc.basins),
             events: archive.catalog.event_count(),
             artn: acc.artn,
-            charged: ledger.spent(),
+            charged: ledger.charged(),
             best_at: acc.best_at,
             nve_unavailable: acc.nve_unavailable,
         };
@@ -670,7 +670,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
     let hop1 = run_with_gradient(&c_fast, start, &mut led1, relax, grad.as_deref_mut(), rng)
         .expect("finite start");
     let used1 = led1.spent();
-    let _ = ledger.charge_many(used1);
+    let _ = ledger.settle_child(&led1, 0);
     let at1 = hop_best_at(&hop1, used1);
     if hop1.best.is_finite()
         && let Some(ref x) = hop1.best_state
@@ -715,7 +715,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         if used == 0 {
             break;
         }
-        let _ = ledger.charge_many(used);
+        let _ = ledger.settle_child(&led, 0);
         let at = spent.saturating_add(hop_best_at(&hop, used));
         spent = spent.saturating_add(used);
         if let Some(k) = from_key {
@@ -753,7 +753,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         floors: archive.floors.len(),
         events: archive.catalog.event_count(),
         artn: acc.artn,
-        charged: ledger.spent(),
+        charged: ledger.charged(),
         best_at: acc.best_at,
         nve_unavailable: acc.nve_unavailable,
     }

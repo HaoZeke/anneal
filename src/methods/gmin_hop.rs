@@ -374,7 +374,8 @@ where
     }
     out.hops = hops;
     out.basins = basins.len();
-    out.charged = ledger.spent();
+    out.charged = ledger.charged();
+    out.settled_beyond_cap = ledger.settled_beyond_cap();
     out.final_energy = energy;
     out.final_state = Some(x);
     out

@@ -953,6 +953,31 @@ impl Ledger {
         self.settled_beyond_cap
     }
 
+    /// Every evaluation the run settled: [`Ledger::spent`] plus
+    /// [`Ledger::settled_beyond_cap`].
+    ///
+    /// This is the count a benchmark reads as the run's charge. It equals
+    /// `spent()` unless settled work passed the budget.
+    pub fn charged(&self) -> usize {
+        self.spent.saturating_add(self.settled_beyond_cap)
+    }
+
+    /// Settles a child ledger onto this one, returning `false` when the work
+    /// does not fit or a stop is already raised.
+    ///
+    /// `offset` is the spend the child started with, as returned by
+    /// [`Ledger::side_probe`], and zero for a [`Ledger::slice`]. The child's
+    /// own overrun is settled with its spend, so a call that passed a
+    /// sub-ledger's cap is still counted here and reaches [`Ledger::charged`]
+    /// at the top of the run.
+    pub fn settle_child(&mut self, child: &Ledger, offset: usize) -> bool {
+        let calls = child
+            .spent
+            .saturating_sub(offset)
+            .saturating_add(child.settled_beyond_cap);
+        self.charge_many(calls)
+    }
+
     /// Charges `n` completed evaluations, returning `false` when they do not
     /// fit or a stop is already raised.
     ///
@@ -1252,8 +1277,12 @@ pub struct Outcome {
     pub screened_out: usize,
     /// Distinct basins registered.
     pub basins: usize,
-    /// Charged evaluations spent.
+    /// Charged evaluations: every settled call, that is
+    /// [`Ledger::spent`] plus [`Outcome::settled_beyond_cap`].
     pub charged: usize,
+    /// Settled calls that passed the budget. They are part of
+    /// [`Outcome::charged`], and [`Ledger::spent`] never counts them.
+    pub settled_beyond_cap: usize,
     /// Proposals closer than [`OVERLAP_SEPARATION`] before any energy call.
     ///
     /// Each one was separated, or dropped when separation failed. Neither the
@@ -5208,7 +5237,8 @@ fn outcome_when_start_was_stopped<const RIGID: bool>(
         best_state: ledger.best_state.clone(),
         final_state: Some(x.clone()),
         final_energy: energy,
-        charged: ledger.spent(),
+        charged: ledger.charged(),
+        settled_beyond_cap: ledger.settled_beyond_cap(),
         stop: Some(HopStop::CallerStop),
         rigid_path: RIGID.then(rigid_diag_take),
         ..Outcome::default()
@@ -6538,9 +6568,8 @@ where
                         .filter(|values| answer_gradient_ok(cfg, values.view(), state.len()))
                 })
             });
-            let probe_spent = probe.spent().saturating_sub(probe_offset);
             let charged_before = ledger.spent();
-            ledger.charge_many(probe_spent);
+            ledger.settle_child(&probe, probe_offset);
             charged_at_best =
                 charged_at_best.saturating_add(ledger.spent().saturating_sub(charged_before));
             if let Some((cut_energy, cut_state, cut_at_offset)) = candidate {
@@ -6781,7 +6810,7 @@ where
             };
             let found = binary_geometry::polish(placed, species, &mut walk);
             let found_at = start + walk.low_at;
-            ledger.charge_many(side_ledger.spent());
+            ledger.settle_child(&side_ledger, 0);
             if reorder_from != lowest_at {
                 reorder_from = lowest_at;
                 reorder_misses = 0;
@@ -7254,7 +7283,7 @@ where
                     grad.as_deref_mut(),
                     &mut branch_rng,
                 );
-                ledger.charge_many(branch.spent());
+                ledger.settle_child(&branch, 0);
                 if branch.best.is_finite() && branch_ends.len() < BRANCH_ENDS {
                     branch_ends.push(branch.best);
                 }
@@ -10949,7 +10978,7 @@ where
                 } else {
                     None
                 };
-                ledger.charge_many(side_ledger.spent());
+                ledger.settle_child(&side_ledger, 0);
                 let cost = ledger.spent().saturating_sub(before);
                 observed_basis_spent = observed_basis_spent.saturating_add(cost);
                 charged_at_best = charged_at_best.saturating_add(cost);
@@ -11564,7 +11593,8 @@ where
         hops,
         screened_out,
         basins: n_basins,
-        charged: ledger.spent(),
+        charged: ledger.charged(),
+        settled_beyond_cap: ledger.settled_beyond_cap(),
         overlap_rejected: proposal_overlaps,
         returned,
         escape_scale: feedback.escape(),
@@ -12588,6 +12618,26 @@ mod tests {
         assert!(!dry.charge_many(4));
         assert_eq!(dry.spent(), 3);
         assert_eq!(dry.settled_beyond_cap(), 6);
+    }
+
+    #[test]
+    fn a_side_probe_overrun_is_settled_without_its_offset() {
+        let mut parent = Ledger::new(100);
+        let (mut probe, offset) = parent.side_probe(20);
+        assert_eq!(offset, 80);
+        assert!(probe.charge_many(20));
+        assert!(!probe.charge_many(5));
+        assert_eq!(probe.spent(), 100);
+        assert_eq!(probe.settled_beyond_cap(), 5);
+        assert!(parent.settle_child(&probe, offset));
+        assert_eq!(parent.spent(), 25);
+        assert_eq!(parent.settled_beyond_cap(), 0);
+        let mut tight = Ledger::new(22);
+        let (mut tight_probe, tight_offset) = tight.side_probe(20);
+        assert!(!tight_probe.charge_many(25));
+        assert!(!tight.settle_child(&tight_probe, tight_offset));
+        assert_eq!(tight.spent(), 22);
+        assert_eq!(tight.charged(), 25);
     }
 
     /// The generic packing probe and the observed-basis stall probe both

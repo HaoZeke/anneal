@@ -781,7 +781,7 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
                         replica,
                         seed: replica_seed,
                         outcome,
-                        charged: ledger.spent(),
+                        charged: ledger.charged(),
                         first_target_calls,
                         wall_seconds: replica_started.elapsed().as_secs_f64(),
                         history_cost: hook.as_ref().map_or((0, 0, 0.0), |hook| hook.cost()),
