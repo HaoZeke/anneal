@@ -51,7 +51,8 @@ pub(crate) fn geometry_rejected_count() -> usize {
     GEOMETRY_REJECTED.load(Ordering::Relaxed)
 }
 
-fn note_scc_rejected(min_pair_a: f64) {
+fn note_scc_rejected(instance_count: &mut usize, min_pair_a: f64) {
+    *instance_count += 1;
     let n = SCC_REJECTED.fetch_add(1, Ordering::Relaxed) + 1;
     eprintln!("scc_rejected {n} min_pair_A {min_pair_a:.6}");
     let _ = io::stderr().flush();
@@ -187,7 +188,7 @@ mod tests {
     fn pair_call(force: XtbForce) -> (Result<(f64, f64), rgpot_status_t>, usize, Vec<f64>) {
         let mut worker = XtbWorker::spawn(force, reset_noop, std::ptr::null_mut());
         let mut forces = vec![0.0; 6];
-        let before = scc_rejected_count();
+        let mut counted = 0;
         let evaluation = worker.evaluate(
             2,
             &[0.0, 0.0, 0.0, 2.0, 0.0, 0.0],
@@ -195,8 +196,7 @@ mod tests {
             &[0.0; 9],
             &mut forces,
         );
-        let answer = answer_or_reject(evaluation, &mut forces, 2.0);
-        let counted = scc_rejected_count() - before;
+        let answer = answer_or_reject(evaluation, &mut forces, 2.0, &mut counted);
         worker.shutdown();
         (answer, counted, forces)
     }
@@ -217,18 +217,27 @@ mod tests {
 
     #[test]
     fn an_unconverged_scc_is_its_own_status_and_other_failures_are_not() {
-        assert_eq!(
-            pair_call(scc_failure).0,
-            Err(rgpot_status_t::RGPOT_SCC_NOT_CONVERGED)
-        );
-        assert_eq!(
-            pair_call(engine_rejected).0,
-            Err(rgpot_status_t::RGPOT_INTERNAL_ERROR)
-        );
-        assert_eq!(
-            pair_call(engine_dies).0,
-            Err(rgpot_status_t::RGPOT_INTERNAL_ERROR)
-        );
+        for (name, force, expected) in [
+            (
+                "not converged, rc -4",
+                scc_failure as XtbForce,
+                rgpot_status_t::RGPOT_SCC_NOT_CONVERGED,
+            ),
+            (
+                "rejected, rc -2",
+                engine_rejected as XtbForce,
+                rgpot_status_t::RGPOT_INTERNAL_ERROR,
+            ),
+            (
+                "dead worker",
+                engine_dies as XtbForce,
+                rgpot_status_t::RGPOT_INTERNAL_ERROR,
+            ),
+        ] {
+            let (answer, counted, _) = pair_call(force);
+            assert_eq!(answer, Err(expected), "{name}");
+            assert_eq!(counted, 1, "{name} was not counted in scc_rejected");
+        }
     }
 
     #[test]
@@ -687,6 +696,7 @@ struct XtbKernel {
     destroy: Symbol<'static, XtbDestroy>,
     worker: XtbWorker,
     evaluations: usize,
+    scc_rejected: usize,
     atomic_numbers: Vec<i32>,
     /// Calls with a pair at or inside this distance are refused before xtb.
     overlap_limit_a: f64,
@@ -762,11 +772,12 @@ fn answer_or_reject(
     evaluation: Result<(f64, f64), WorkerFail>,
     scratch: &mut [f64],
     min_pair_a: f64,
+    scc_rejected: &mut usize,
 ) -> Result<(f64, f64), rgpot_status_t> {
     match evaluation {
         Ok(answer) => Ok(answer),
         Err(failure) => {
-            note_scc_rejected(min_pair_a);
+            note_scc_rejected(scc_rejected, min_pair_a);
             scratch.fill(f64::NAN);
             Err(match failure {
                 WorkerFail::SccNotConverged => rgpot_status_t::RGPOT_SCC_NOT_CONVERGED,
@@ -830,7 +841,12 @@ unsafe extern "C" fn xtb_callback(
         kernel
             .worker
             .evaluate(n, positions, atomic_numbers, cell, &mut kernel.scratch);
-    let (energy, var) = match answer_or_reject(evaluation, &mut kernel.scratch, min_pair) {
+    let (energy, var) = match answer_or_reject(
+        evaluation,
+        &mut kernel.scratch,
+        min_pair,
+        &mut kernel.scc_rejected,
+    ) {
         Ok(answer) => answer,
         Err(status) => return status,
     };
@@ -901,6 +917,14 @@ impl Drop for RgpotObjective {
 }
 
 impl RgpotObjective {
+    /// How many xtb calls on this objective failed to return a finite SCC result.
+    pub(crate) fn scc_rejected_count(&self) -> usize {
+        if self.xtb.is_null() {
+            return 0;
+        }
+        unsafe { (*self.xtb).scc_rejected }
+    }
+
     pub(crate) fn refuses_geometry(&self, coordinates: &[f64]) -> bool {
         if self.xtb.is_null() {
             return false;
@@ -1040,6 +1064,7 @@ impl RgpotObjective {
             destroy,
             worker,
             evaluations: 0,
+            scc_rejected: 0,
             atomic_numbers: atmnrs.to_vec(),
             overlap_limit_a,
             scratch: Vec::new(),
