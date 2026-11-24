@@ -3017,3 +3017,70 @@ def test_the_provenance_docs_describe_what_the_code_reads_on_each_system():
     for key in ("model name", "Model", "Processor", "Hardware"):
         assert key in text and f'"{key}"' in source
     assert "only when `/etc/machine-id` is" in text
+
+
+HANDED_OFF_ID = hashlib.sha256(b"a campaign head node").hexdigest()
+GATE_ROW = "c20,anneal-general,2000,100,1,50,50,0,0.1,-1148.85,0.05,0.05,0.001,0.001,0,0"
+
+
+def run_gate_row_write(tmp_path, monkeypatch, **environment):
+    """Write one row through the real covalent floor-gate runner, which stamps it with machine_columns()."""
+    gate = _load_module("gfn2_floor_gate_inherited", "scripts/covalent_h2h/gfn2_floor_gate.py")
+    binary = _write_executable(tmp_path / "gate-binary", f"echo '{GATE_ROW}'\n")
+    rows = tmp_path / "rows.csv"
+    for name in ("ANNEAL_MACHINE_ID", "ANNEAL_CPU_MODEL"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(sys, "argv", [
+        "gfn2_floor_gate", "run", "--arm", f"base={binary}@{'1' * 40}", "--n", "1", "--cores", "1",
+        "--out", str(tmp_path / "out"), "--rows", str(rows),
+    ])
+    try:
+        gate.main()
+    finally:
+        written = list(csv.DictReader(rows.open())) if rows.exists() else []
+    return written
+
+
+def test_a_row_writer_stamps_the_machine_identity_a_campaign_hands_it(tmp_path, monkeypatch):
+    written = run_gate_row_write(
+        tmp_path, monkeypatch, ANNEAL_MACHINE_ID=HANDED_OFF_ID, ANNEAL_CPU_MODEL="  Handed   off CPU ",
+    )
+    assert [(row["machine_id"], row["cpu_model"]) for row in written] == [(HANDED_OFF_ID, "Handed off CPU")]
+
+
+def test_a_row_writer_describes_this_machine_when_nothing_is_handed_off(tmp_path, monkeypatch):
+    from machine_provenance import machine_provenance
+
+    written = run_gate_row_write(tmp_path, monkeypatch, ANNEAL_MACHINE_ID="", ANNEAL_CPU_MODEL="")
+    assert [(row["machine_id"], row["cpu_model"]) for row in written] == [machine_provenance()]
+
+
+@pytest.mark.parametrize(
+    "environment, message",
+    [
+        ({"ANNEAL_MACHINE_ID": HANDED_OFF_ID}, "incomplete ANNEAL_MACHINE_ID/ANNEAL_CPU_MODEL hand-off"),
+        ({"ANNEAL_CPU_MODEL": "Handed off CPU"}, "incomplete ANNEAL_MACHINE_ID/ANNEAL_CPU_MODEL hand-off"),
+        ({"ANNEAL_MACHINE_ID": "x" * 64, "ANNEAL_CPU_MODEL": "CPU"}, "not a salted sha256 digest"),
+        ({"ANNEAL_MACHINE_ID": HANDED_OFF_ID[:40], "ANNEAL_CPU_MODEL": "CPU"}, "not a salted sha256 digest"),
+    ],
+)
+def test_a_row_writer_refuses_an_incomplete_or_malformed_hand_off_and_writes_no_row(
+    tmp_path, monkeypatch, environment, message
+):
+    with pytest.raises(RuntimeError, match=message):
+        run_gate_row_write(tmp_path, monkeypatch, **environment)
+    assert list(csv.DictReader((tmp_path / "rows.csv").open())) == []
+
+
+def test_the_documented_environment_variables_are_read_in_one_place():
+    import machine_provenance
+
+    assert not hasattr(machine_provenance, "environment")
+    source = (ROOT / "scripts" / "machine_provenance.py").read_text()
+    assert source.count('os.environ.get("ANNEAL_MACHINE_ID"') == 1
+    assert source.count('os.environ.get("ANNEAL_CPU_MODEL"') == 1
+    for path in (ROOT / "scripts").rglob("*.py"):
+        if path.name != "machine_provenance.py":
+            assert "ANNEAL_MACHINE_ID" not in path.read_text(), path

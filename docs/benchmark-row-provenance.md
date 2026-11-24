@@ -32,8 +32,13 @@ these provenance columns:
   `sysctl -n machdep.cpu.brand_string`.  A machine with neither raises an
   error.
 - A process started by a campaign may inherit both values through
-  `ANNEAL_MACHINE_ID` and `ANNEAL_CPU_MODEL`.  Setting only one of the two
-  is an error.
+  `ANNEAL_MACHINE_ID` and `ANNEAL_CPU_MODEL`.  Every row writer reads them
+  through `machine_columns()`, the one path that stamps a row.  The
+  inherited `ANNEAL_MACHINE_ID` must be a salted SHA-256 digest like the
+  one this machine computes, and a variable that is empty counts as unset.
+  Setting only one of the two, or an `ANNEAL_MACHINE_ID` that is not a
+  digest, is an error.  With neither variable set the columns describe the
+  machine that runs the row.
 
 The machine fields describe the physical machine that ran the measured row.
 Summaries preserve the distinct source values, separated by semicolons.

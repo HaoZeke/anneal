@@ -99,8 +99,22 @@ def machine_provenance(
 
 
 def machine_columns() -> dict[str, str]:
-    """Return the machine columns for one row."""
-    machine_id, cpu_model = machine_provenance()
+    """Return the machine columns for one row.
+
+    A campaign may hand its identity to the processes it starts through
+    ``ANNEAL_MACHINE_ID`` and ``ANNEAL_CPU_MODEL``. Both must be set, the
+    identity must be a salted SHA-256 digest as ``machine_provenance`` returns
+    it, and a variable that is empty counts as unset. Without either variable
+    the columns describe this machine.
+    """
+    machine_id = os.environ.get("ANNEAL_MACHINE_ID", "")
+    cpu_model = " ".join(os.environ.get("ANNEAL_CPU_MODEL", "").split())
+    if bool(machine_id) != bool(cpu_model):
+        raise RuntimeError("incomplete ANNEAL_MACHINE_ID/ANNEAL_CPU_MODEL hand-off")
+    if not machine_id:
+        machine_id, cpu_model = machine_provenance()
+    elif not re.fullmatch(r"[0-9a-f]{64}", machine_id):
+        raise RuntimeError("ANNEAL_MACHINE_ID is not a salted sha256 digest")
     return {"machine_id": machine_id, "cpu_model": cpu_model}
 
 
@@ -142,17 +156,6 @@ def csv_fields(values: Iterable[object]) -> str:
     stream = io.StringIO()
     csv.writer(stream, lineterminator="").writerow(values)
     return stream.getvalue()
-
-
-def environment() -> dict[str, str]:
-    """Read an inherited identity, falling back to this machine."""
-    machine_id = os.environ.get("ANNEAL_MACHINE_ID", "")
-    cpu_model = os.environ.get("ANNEAL_CPU_MODEL", "")
-    if bool(machine_id) != bool(cpu_model):
-        raise RuntimeError("incomplete ANNEAL_MACHINE_ID/ANNEAL_CPU_MODEL hand-off")
-    if not machine_id:
-        machine_id, cpu_model = machine_provenance()
-    return {"machine_id": machine_id, "cpu_model": cpu_model}
 
 
 def require_csv_schema(path: Path, fieldnames: Iterable[str]) -> None:
