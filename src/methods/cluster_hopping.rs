@@ -1685,10 +1685,10 @@ pub fn clears_call_floor(x: ArrayView1<f64>, floor: f64) -> bool {
 /// blanket 0.90 Å refuses a physical H–H bond at 0.741 Å. An element with
 /// no radius keeps `absolute`.
 pub fn element_call_floor(za: u32, zb: u32, absolute: f64) -> f64 {
-    let sum = moves::covalent_radius(za) + moves::covalent_radius(zb);
-    let from_radii = COVALENT_CALL_FRACTION * sum;
-    if from_radii > 0.0 {
-        from_radii
+    let radius_a = moves::covalent_radius(za);
+    let radius_b = moves::covalent_radius(zb);
+    if radius_a > 0.0 && radius_b > 0.0 {
+        COVALENT_CALL_FRACTION * (radius_a + radius_b)
     } else {
         absolute
     }
@@ -15928,9 +15928,10 @@ mod call_floor_tests {
         for za in 0..=96 {
             for zb in za..=96 {
                 let floor = element_call_floor(za, zb, FLOOR);
-                let sum = super::moves::covalent_radius(za) + super::moves::covalent_radius(zb);
-                if sum > 0.0 {
-                    let from_radii = COVALENT_CALL_FRACTION * sum;
+                let radius_a = super::moves::covalent_radius(za);
+                let radius_b = super::moves::covalent_radius(zb);
+                if radius_a > 0.0 && radius_b > 0.0 {
+                    let from_radii = COVALENT_CALL_FRACTION * (radius_a + radius_b);
                     assert!(
                         (floor - from_radii).abs() < 1.0e-12,
                         "{za}-{zb} floor {floor} was raised above {from_radii}"
