@@ -215,10 +215,10 @@ mod tests {
         }
     }
 
-    // The registry release has no SCC status. This assertion is the git pin,
-    // which the `rgpot-ex` builds use. The packaged crate resolves the
-    // registry and does not compile this test.
-    #[cfg(feature = "rgpot-ex")]
+    // The registry release has no SCC status. This assertion compiles only
+    // while Cargo.toml still pins rgpot-core from git. The published crate
+    // drops that source and does not compile this test.
+    #[cfg(anneal_rgpot_git_scc)]
     #[test]
     fn an_unconverged_scc_is_its_own_status_and_other_failures_are_not() {
         for (name, force, expected) in [
@@ -769,15 +769,15 @@ fn first_existing(cands: &[PathBuf]) -> PathBuf {
 
 /// Status of an unconverged SCC.
 ///
-/// `RGPOT_SCC_NOT_CONVERGED` is on the git pin and not in the registry
-/// release `cargo package` resolves. The registry build reports
+/// The git pin defines `RGPOT_SCC_NOT_CONVERGED`. The registry release
+/// does not, so a build whose manifest has no git source reports
 /// `RGPOT_INTERNAL_ERROR` for the same failure.
 fn scc_failure_status() -> rgpot_status_t {
-    #[cfg(feature = "rgpot-ex")]
+    #[cfg(anneal_rgpot_git_scc)]
     {
         rgpot_status_t::RGPOT_SCC_NOT_CONVERGED
     }
-    #[cfg(not(feature = "rgpot-ex"))]
+    #[cfg(not(anneal_rgpot_git_scc))]
     {
         rgpot_status_t::RGPOT_INTERNAL_ERROR
     }

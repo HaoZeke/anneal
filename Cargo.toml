@@ -157,10 +157,11 @@ capnp-rpc = "0.21"
 futures = "0.3"
 tokio = { version = "1", features = ["macros", "net", "rt", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["compat"] }
-# The git pin is the commit of the GFN2 engine, rgpot 3.7.0 before its
-# release. It adds `RGPOT_SCC_NOT_CONVERGED`, which no registry release has,
-# and depends on eindir-core 0.6.0, the same crate the rest of the workspace
-# uses. `cargo package` drops a git dev-dependency and keeps the version.
+# The workspace pins rgpot at git rev 3aa8f9ca. That tree's version is
+# 3.7.0. crates.io 3.7.0 is the newest release and does not define
+# RGPOT_SCC_NOT_CONVERGED. `cargo package` drops the git source and keeps
+# the version, so the published crate builds against that release.
+# build.rs sets `anneal_rgpot_git_scc` only while the git source remains.
 # A git pin of 3.0.2 packaged as registry 3.0.2, and that release depends on
 # eindir-core 0.5.2.
 # Do not enable rgpot-core/rpc: that needs a host capnp compiler.
