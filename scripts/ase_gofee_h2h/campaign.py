@@ -53,6 +53,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+from machine_provenance import host_label  # noqa: E402
 
 from potential import (
     BudgetReached,
@@ -509,7 +510,7 @@ def run_job(binary, repo, runs, system, seed, arm, head) -> dict:
     if not row.get("head"):
         row["head"] = head
     row["code_revision"] = {"paper": row["head"], "agox_gofee": AGOX_VERSION}.get(arm, ASE_VERSION)
-    row["host"] = os.uname().nodename
+    row["host"] = host_label(os.uname().nodename)
     return row
 
 
@@ -791,7 +792,7 @@ def write_tables(rows: list[dict], output_dir: Path, comparison: str | None) -> 
 
 
 def main() -> int:
-    if os.uname().nodename != "bench":
+    if host_label(os.uname().nodename) != "bench":
         print("uts hostname is not bench", file=sys.stderr)
         return 2
     check_type7()

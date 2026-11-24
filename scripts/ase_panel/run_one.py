@@ -31,7 +31,7 @@ if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 from evaluator import evaluator_spec
-from machine_provenance import machine_columns  # noqa: E402
+from machine_provenance import host_label, machine_columns  # noqa: E402
 import revision_reach  # noqa: E402
 
 sys.path.insert(0, str(ROOT / "scripts" / "ase_gofee_h2h"))
@@ -77,7 +77,7 @@ ASE_VERSION = "3.29.0"
 
 
 def hostname() -> str:
-    return Path("/proc/sys/kernel/hostname").read_text().splitlines()[0].strip()
+    return host_label(Path("/proc/sys/kernel/hostname").read_text().splitlines()[0].strip())
 
 
 def boot_id() -> str:

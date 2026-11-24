@@ -16,8 +16,12 @@ import os
 import shutil
 import socket
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
+from machine_provenance import host_label  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DATA = ROOT / "paper/jctc/data/landfold_maps_v7"
@@ -168,7 +172,7 @@ def main() -> None:
     receipt = {
         "code_revision": commit,
         "code_tree": tree,
-        "host": socket.gethostname(),
+        "host": host_label(socket.gethostname()),
         "campaigns": [campaign.__dict__ for campaign in CAMPAIGNS],
     }
     for campaign in CAMPAIGNS:
@@ -179,7 +183,7 @@ def main() -> None:
             for name in ("landscape.ld", "fes.csv"):
                 shutil.copyfile(src / name, dest / name)
     (args.publish / "current-rerun.json").write_text(json.dumps(receipt, indent=2) + "\n")
-    (args.work / "complete.stamp").write_text(f"{commit} {tree} {socket.gethostname()}\n")
+    (args.work / "complete.stamp").write_text(f"{commit} {tree} {host_label(socket.gethostname())}\n")
 
 
 if __name__ == "__main__":

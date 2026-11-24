@@ -10,6 +10,7 @@ import io
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 from collections.abc import Iterable, Mapping, Sequence
@@ -20,6 +21,8 @@ MACHINE_ID_PATH = Path("/etc/machine-id")
 PRODUCT_UUID_PATH = Path("/sys/class/dmi/id/product_uuid")
 CPUINFO_PATH = Path("/proc/cpuinfo")
 MACHINE_FIELDS = ("machine_id", "cpu_model")
+HOST_LABEL_SALT = b"anneal-bench-host-label-v1\0"
+SANDBOX_HOSTNAME = "bench"
 GMIN_BUILD_KEY_RE = re.compile(r"[0-9a-f]{64}")
 
 
@@ -116,6 +119,23 @@ def machine_columns() -> dict[str, str]:
     elif not re.fullmatch(r"[0-9a-f]{64}", machine_id):
         raise RuntimeError("ANNEAL_MACHINE_ID is not a salted sha256 digest")
     return {"machine_id": machine_id, "cpu_model": cpu_model}
+
+
+def host_label(hostname: str | None = None) -> str:
+    """The host column of a row or report: ``bench`` as is, any other hostname as a salted digest.
+
+    The benchmark sandbox names itself ``bench``, which says nothing about the
+    machine. Any other name is host identity and is recorded as
+    ``host-`` and the first sixteen digits of its salted SHA-256, never raw.
+    The default reads this machine's name; a caller that reads the name
+    itself passes it in, so the raw name never leaves this function.
+    """
+    name = socket.gethostname() if hostname is None else hostname
+    if name == SANDBOX_HOSTNAME:
+        return name
+    if not name:
+        raise RuntimeError("the hostname is empty")
+    return "host-" + hashlib.sha256(HOST_LABEL_SALT + name.encode()).hexdigest()[:16]
 
 
 def with_machine_provenance(row: Mapping[str, object]) -> dict[str, object]:
@@ -400,3 +420,16 @@ def validate_gmin_group_provenance(
             raise ValueError(
                 f"{prefix}{build_key_field} mismatch: got {actual!r}, expected {wanted!r}"
             )
+
+
+def main(argv: list[str]) -> int:
+    """``host-label`` prints this machine's host label for the shell scripts that report it."""
+    if argv != ["host-label"]:
+        print("usage: machine_provenance.py host-label", file=sys.stderr)
+        return 2
+    print(host_label())
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

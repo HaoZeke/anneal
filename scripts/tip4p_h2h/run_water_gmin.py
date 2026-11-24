@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from machine_provenance import (  # noqa: E402
     default_gmin_source_metadata,
+    host_label,
     machine_columns,
     read_built_gmin_provenance,
     require_csv_schema,
@@ -230,8 +231,8 @@ def main() -> int:
     parser.add_argument("--size", type=int, choices=SIZES)
     parser.add_argument("--seed", type=int)
     args = parser.parse_args()
-    if socket.gethostname() != "bench":
-        print(f"hostname is {socket.gethostname()}, not bench", file=sys.stderr)
+    if host_label(socket.gethostname()) != "bench":
+        print(f"hostname is {host_label(socket.gethostname())}, not bench", file=sys.stderr)
         return 2
     if Path.cwd() != Path("/work"):
         print(f"cwd is {Path.cwd()}, not /work", file=sys.stderr)
@@ -251,7 +252,7 @@ def main() -> int:
     verify(args.point, args.gmin, args.verify_data, args.gm_dir, args.verify_out, args.work)
 
     machine = machine_columns()
-    host, cpu = socket.gethostname(), machine["cpu_model"]
+    host, cpu = host_label(socket.gethostname()), machine["cpu_model"]
     require_csv_schema(args.rows, FIELDS)
     stored = read_rows(args.rows)
     sizes = (args.size,) if args.size else SIZES

@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
-from machine_provenance import machine_columns  # noqa: E402
+from machine_provenance import host_label, machine_columns  # noqa: E402
 sys.path.insert(0, str(ROOT / "scripts" / "ase_gofee_h2h"))
 from potential import BudgetReached, CapReached, HitReached  # noqa: E402
 
@@ -57,7 +57,7 @@ AGREEMENT_TOL = 1.0e-8
 
 
 def hostname() -> str:
-    return Path("/proc/sys/kernel/hostname").read_text().splitlines()[0].strip()
+    return host_label(Path("/proc/sys/kernel/hostname").read_text().splitlines()[0].strip())
 
 
 def boot_id() -> str:

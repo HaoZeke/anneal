@@ -71,6 +71,7 @@ from atomic_write import write_atomic  # noqa: E402
 from machine_provenance import (  # noqa: E402
     aggregate_machine_columns,
     gmin_row_key,
+    host_label,
     machine_columns,
     machine_fieldnames,
     read_built_gmin_provenance,
@@ -1121,8 +1122,8 @@ def main(argv: list[str]) -> int:
         write_tables(args.root, read_rows(args.rows), args.revision, args.tex, args.summary,
                      args.readme, args.manuscript)
         return 0
-    if socket.gethostname() != "bench":
-        print(f"uts hostname is {socket.gethostname()}, expected bench", file=sys.stderr)
+    if host_label(socket.gethostname()) != "bench":
+        print(f"uts hostname is {host_label(socket.gethostname())}, expected bench", file=sys.stderr)
         return 2
     if os.sched_getaffinity(0) != {0}:
         print(f"pinned to {sorted(os.sched_getaffinity(0))}, expected core 0", file=sys.stderr)
@@ -1160,7 +1161,7 @@ def main(argv: list[str]) -> int:
     morse_data = args.morse_data.read_text()
     lj_data += "" if lj_data.endswith("\n") else "\n"
     morse_data += "" if morse_data.endswith("\n") else "\n"
-    host = socket.gethostname()
+    host = host_label(socket.gethostname())
     machine = machine_columns()
     session = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     seeds = tuple(args.seed) if args.seed else SEEDS

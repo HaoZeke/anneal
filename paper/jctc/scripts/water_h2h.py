@@ -30,12 +30,16 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 import time
 from pathlib import Path
 
 from crest_engrad import require_split
 from paper_data import fetch_paper_data
 from water_census import HBOND_OO_A, label_free_rmsd, molecules, read_xyz
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
+from machine_provenance import host_label  # noqa: E402
 
 ROOT = Path("paper/jctc")
 LOGS = Path(os.environ.get("H2H_LOG_DIR", "paper/jctc/logs/water"))
@@ -486,7 +490,7 @@ def write_host_topology():
     machine = subprocess.check_output(["uname", "-m"], text=True).strip()
     text = "\n".join(
         [
-            f"host={socket.gethostname()}",
+            f"host={host_label(socket.gethostname())}",
             f"machine={machine}",
             f"cores={host}",
             f"cpu={cpu_description()}",

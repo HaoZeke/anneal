@@ -31,6 +31,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import h2h_common as hc  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from machine_provenance import host_label  # noqa: E402
 
 # A recorded minimum of a molecular search is at 5e-2 eV/Å.
 RECORD_GRADIENT = 5.0e-2
@@ -335,7 +337,7 @@ def main() -> int:
         arm=args.arm,
         molecule=args.molecule,
         seed=args.seed,
-        hostname=os.uname().nodename,
+        hostname=host_label(os.uname().nodename),
     )
     if info.get("pot_s") is not None:
         info["outside_s"] = max(info["wall_s"] - info["pot_s"], 0.0)

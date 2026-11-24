@@ -41,6 +41,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 from machine_provenance import (  # noqa: E402
     aggregate_machine_columns,
+    host_label,
     machine_columns,
     validate_saved_row_identity,
 )
@@ -397,7 +398,7 @@ def summarise(
                 "anneal_head": head,
                 "cpu": cpu,
                 "code_revision": head if arm == "anneal" else source["growpal_commit"],
-                "host": os.uname().nodename,
+                "host": host_label(os.uname().nodename),
                 **aggregate_machine_columns(group),
             }
         )
@@ -530,7 +531,7 @@ def uncapped(args) -> int:
                 "anneal_head": head,
                 "cpu": cpu,
                 "code_revision": source["growpal_commit"],
-                "host": os.uname().nodename,
+                "host": host_label(os.uname().nodename),
                 **machine_columns(),
             }
         )
@@ -575,7 +576,7 @@ def main(argv: list[str]) -> int:
     if len(argv) == 2 and argv[1] == "--self-test":
         self_test()
         return 0
-    if os.uname().nodename != "bench":
+    if host_label(os.uname().nodename) != "bench":
         print("uts hostname is not bench", file=sys.stderr)
         return 2
     parser = argparse.ArgumentParser()
@@ -643,7 +644,7 @@ def main(argv: list[str]) -> int:
             else:
                 row = run_growpal(args.python, arm_script, system, seed, budget, args.seeds_xyz, log)
             row["code_revision"] = head if arm == "anneal" else source["growpal_commit"]
-            row["host"] = os.uname().nodename
+            row["host"] = host_label(os.uname().nodename)
             row.update(machine_columns())
             write_once(saved, SEED_FIELDS, row)
             note(

@@ -72,6 +72,8 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 from codata2018 import HARTREE_EV  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from machine_provenance import host_label  # noqa: E402
 
 SYSTEM = "h2o6"
 MOLECULES = 6
@@ -759,7 +761,7 @@ def main() -> None:
     for name in ("anneal", "driver", "crest", "xtb", "engine", "sessions"):
         if getattr(args, name) is None:
             raise SystemExit(f"--{name} is required")
-    if socket.gethostname() != "bench":
+    if host_label(socket.gethostname()) != "bench":
         raise SystemExit("hostname is not bench")
     threads()
     os.environ["RGPOT_XTB_ENGINE"] = str(args.engine)
@@ -767,7 +769,7 @@ def main() -> None:
     record_session(args.sessions, args.core, [sys.argv[0], *sys.argv[1:]])
     revision = revision_of(args.head_file)
     rgpot_revision = rgpot_revision_of(args.engine, args.rgpot_revision)
-    host = socket.gethostname()
+    host = host_label(socket.gethostname())
     seeds = tuple(args.seed) if args.seed else SEEDS
     arms = tuple(args.arm) if args.arm else ARMS
     with tempfile.TemporaryDirectory(prefix="crest-equal-") as scratch:

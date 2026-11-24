@@ -25,6 +25,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+from machine_provenance import host_label  # noqa: E402
 
 # run_campaign.py scores 15 and 20 at the (H2O)20 paper ceiling. 4 and 8 are
 # not in that map and use the same ceiling; a hit stops the run.
@@ -194,8 +195,8 @@ def summarise(rows: list[dict[str, str]]) -> list[dict[str, str]]:
 
 
 def main() -> int:
-    if socket.gethostname() != "bench":
-        print(f"hostname is {socket.gethostname()}, not bench", file=sys.stderr)
+    if host_label(socket.gethostname()) != "bench":
+        print(f"hostname is {host_label(socket.gethostname())}, not bench", file=sys.stderr)
         return 2
     if Path.cwd() != Path("/work"):
         print(f"cwd is {Path.cwd()}, not /work", file=sys.stderr)

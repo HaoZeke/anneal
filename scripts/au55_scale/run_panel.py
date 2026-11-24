@@ -25,6 +25,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         break
 from machine_provenance import (  # noqa: E402
     aggregate_machine_columns,
+    host_label,
     machine_columns,
     machine_fieldnames,
     read_built_gmin_provenance,
@@ -311,7 +312,7 @@ def run_panel(
         capture_output=True,
         text=True,
     ).stdout.strip()
-    host = os.uname().nodename
+    host = host_label(os.uname().nodename)
     machine = machine_columns()
     anneal = [
         {

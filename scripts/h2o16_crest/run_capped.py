@@ -57,6 +57,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         break
 from codata2018 import HARTREE_EV  # noqa: E402
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+from machine_provenance import host_label  # noqa: E402
 
 MOLECULES = 16
 BUDGET = 280305
@@ -498,12 +499,12 @@ def main() -> None:
     ):
         if getattr(args, name) is None:
             raise SystemExit(f"--{name.replace('_', '-')} is required")
-    if socket.gethostname() != "bench":
+    if host_label(socket.gethostname()) != "bench":
         raise SystemExit("hostname is not bench")
     os.environ["OMP_NUM_THREADS"] = "1"
     os.environ["RGPOT_XTB_ENGINE"] = str(args.engine)
     revision = args.head_file.read_text().strip()
-    host = socket.gethostname()
+    host = host_label(socket.gethostname())
     seeds = tuple(args.seed) if args.seed else SEEDS
     arms = tuple(args.arm) if args.arm else ARMS
     pins = {

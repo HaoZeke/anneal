@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import run_sc as sc  # noqa: E402
 import run_sc_n12 as n12  # noqa: E402
 from machine_provenance import (  # noqa: E402
+    host_label,
     machine_columns,
     read_built_gmin_provenance,
     validate_saved_gmin_provenance,
@@ -87,7 +88,7 @@ def run_panel(
         {
             "code_revision": revision,
             "gmin_build_key": gmin_build_key,
-            "host": os.uname().nodename,
+            "host": host_label(os.uname().nodename),
             "harness_revision": head,
             **machine_columns(),
         }
@@ -114,7 +115,7 @@ def run_n78(
         "reference": reference,
         "code_revision": revision,
         "gmin_build_key": gmin_build_key,
-        "host": os.uname().nodename,
+        "host": host_label(os.uname().nodename),
         "harness_revision": head,
         **machine_columns(),
         "wall_s": f"{float(row['wall_s']):.6f}",
@@ -140,7 +141,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--no-n78", action="store_true")
     args = parser.parse_args(argv)
     systems = tuple(args.panel_system) if args.panel_system else ("sc96-38",)
-    if os.uname().nodename != "bench":
+    if host_label(os.uname().nodename) != "bench":
         print("uts hostname is not bench", file=sys.stderr)
         return 2
     if Path.cwd() != Path("/work"):

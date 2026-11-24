@@ -77,7 +77,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         break
 from codata2018 import HARTREE_EV  # noqa: E402
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
-from machine_provenance import machine_columns  # noqa: E402
+from machine_provenance import host_label, machine_columns  # noqa: E402
 
 SYSTEMS = ("si10", "c10", "si13", "c20", "si20")
 CODES = ("anneal-general", "crest")
@@ -375,7 +375,7 @@ def main() -> None:
         return
     if args.rows is None:
         raise SystemExit("--rows is required")
-    host = socket.gethostname()
+    host = host_label(socket.gethostname())
     revision = args.head_file.read_text().strip() if args.head_file else ""
     if args.rescore is not None:
         if args.rescored is None:

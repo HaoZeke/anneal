@@ -36,6 +36,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from paper_data import fetch_paper_data
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
+from machine_provenance import host_label  # noqa: E402
 
 SEEDS = range(6)
 ARMS = ("crest", "fair", "paper4000")
@@ -53,8 +55,8 @@ def fail(message: str) -> None:
 
 
 def require_bench(work: Path) -> None:
-    if socket.gethostname() != "bench":
-        fail(f"hostname is {socket.gethostname()}, want bench")
+    if host_label(socket.gethostname()) != "bench":
+        fail(f"hostname is {host_label(socket.gethostname())}, want bench")
     if not str(work).startswith("/work/") and work != Path("/work"):
         fail(f"work directory {work} is not under /work")
 
@@ -278,7 +280,7 @@ def main() -> None:
     logs = paper / "logs" / "water"
     code_revision = resolve_code_revision(here.parents[3], args.code_revision)
     rgpot_rev = resolve_rgpot_revision(logs, args.rgpot_revision)
-    host = socket.gethostname()
+    host = host_label(socket.gethostname())
     numbers = logs / "NUMBERS.tsv"
     if not numbers.is_file():
         fail(f"missing {numbers}")

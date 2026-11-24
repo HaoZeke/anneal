@@ -27,6 +27,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+from machine_provenance import host_label  # noqa: E402
 
 DEFAULT_OUT = ROOT / "bench" / "au55-funnel2" / "seeds.csv"
 DEFAULT_LOGS = ROOT / "bench" / "au55-funnel2" / "logs"
@@ -64,7 +65,7 @@ FIELDS = (
 
 
 def require_bench() -> str:
-    host = os.uname().nodename
+    host = host_label(os.uname().nodename)
     if host != "bench":
         print("uts hostname is not bench", file=sys.stderr)
         return ""

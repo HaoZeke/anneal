@@ -37,7 +37,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from machine_provenance import machine_columns  # noqa: E402
+from machine_provenance import host_label, machine_columns  # noqa: E402
 
 SEEDS = tuple(range(2000, 2012))
 PAPER_BUDGETS = {
@@ -369,8 +369,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--summarize", action="store_true")
     args = parser.parse_args(argv[1:])
     if not args.summarize:
-        if socket.gethostname() != "bench":
-            print(f"uts hostname is {socket.gethostname()}, expected bench", file=sys.stderr)
+        if host_label(socket.gethostname()) != "bench":
+            print(f"uts hostname is {host_label(socket.gethostname())}, expected bench", file=sys.stderr)
             return 2
         needed = (args.develop_bin, args.branch_bin, args.develop_tree, args.branch_tree, args.logs)
         if any(value is None for value in needed):
@@ -385,7 +385,7 @@ def main(argv: list[str]) -> int:
             if head != revision:
                 raise SystemExit(f"{tree} is at {head}, not {revision}")
             trees[arm] = git_text(tree, "rev-parse", "HEAD^{tree}")
-        host = socket.gethostname()
+        host = host_label(socket.gethostname())
         cpu = cpu_model()
         stored = read_rows(args.rows)
         done = {(r["system"], r["arm"], r["seed"], r["code_revision"]) for r in stored}

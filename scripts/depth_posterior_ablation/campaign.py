@@ -28,6 +28,8 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from machine_provenance import host_label  # noqa: E402
 
 SIZES = (38, 55, 75, 98, 104)
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
@@ -106,7 +108,7 @@ def stage_line(path: Path, line: str) -> Path:
 
 
 def run_held_out(binary: Path, log_dir: Path, results: Path, provenance: Path, revision: str) -> None:
-    host = socket.gethostname()
+    host = host_label(socket.gethostname())
     done = held_out_done(provenance, revision)
     jobs = held_out_schedule()
     for order, (size, seed, arm) in enumerate(jobs, start=1):
@@ -183,7 +185,7 @@ def run_job(binary: Path, log_dir: Path, order: int, size: int, seed: int, arm: 
         text=True,
     )
     log_path.write_text(
-        f"hostname={socket.gethostname()}\norder={order}\nsize={size}\nseed={seed}\narm={arm}\n"
+        f"hostname={host_label(socket.gethostname())}\norder={order}\nsize={size}\nseed={seed}\narm={arm}\n"
         f"exit={proc.returncode}\n--- stdout ---\n{proc.stdout}\n--- stderr ---\n{proc.stderr}\n",
         encoding="utf-8",
     )
@@ -233,8 +235,8 @@ def report(rows: list[dict[str, str]]) -> None:
 
 
 def main() -> None:
-    if socket.gethostname() != "bench":
-        raise SystemExit(f"hostname is {socket.gethostname()}, expected bench")
+    if host_label(socket.gethostname()) != "bench":
+        raise SystemExit(f"hostname is {host_label(socket.gethostname())}, expected bench")
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--log-dir", type=Path, required=True)

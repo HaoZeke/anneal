@@ -41,6 +41,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         break
 import revision_reach  # noqa: E402
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+from machine_provenance import host_label  # noqa: E402
 
 PAPER_BUDGETS = {38: 400_000}
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
@@ -559,7 +560,7 @@ def run_rpqa(
         "stop": stop,
         "reached": str(n),
         "code_revision": code_revision,
-        "host": os.uname().nodename,
+        "host": host_label(os.uname().nodename),
         "_pins": str(n_pins),
     }
     rated = with_rates(row)
@@ -633,7 +634,7 @@ def summarise(rows: list[dict[str, str]], seeds: tuple[int, ...], source: dict[s
                 "anneal_head": head,
                 "code_revision": head if arm == "anneal" else source["rpqa_commit"],
                 "schedule": "",
-                "host": os.uname().nodename,
+                "host": host_label(os.uname().nodename),
             }
         )
     return out
@@ -813,7 +814,7 @@ def summarise_paper(
             "anneal_head": anneal_head,
             "code_revision": source["rpqa_commit"],
             "schedule": schedule,
-            "host": os.uname().nodename,
+            "host": host_label(os.uname().nodename),
         }
     ]
 
@@ -1193,7 +1194,7 @@ def main(argv: list[str]) -> int:
     if len(argv) == 2 and argv[1] == "--self-test":
         self_test()
         return 0
-    if os.uname().nodename != "bench":
+    if host_label(os.uname().nodename) != "bench":
         print("uts hostname is not bench", file=sys.stderr)
         return 2
     parser = argparse.ArgumentParser()

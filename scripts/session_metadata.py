@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from machine_provenance import machine_columns  # noqa: E402
+from machine_provenance import host_label, machine_columns  # noqa: E402
 
 COMPILERS = {
     "rustc": ["rustc", "-V"],
@@ -197,7 +197,7 @@ def record(campaign: str, command: list[str], root: Path, anneal_repro: Path | N
         "campaign": campaign,
         "session_utc": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
         "boot_id": read_text(Path("/proc/sys/kernel/random/boot_id")),
-        "hostname": socket.gethostname(),
+        "hostname": host_label(socket.gethostname()),
         "kernel": platform.release(),
         "cpu_model": cpu_model(),
         "cpu_affinity": affinity,
