@@ -94,9 +94,9 @@ fn metropolis_heat_follows_the_plateau() {
     let (cold, hot) = pair(&cfg, 30_000, 2000);
     let cold_fp = fingerprint(&cold);
     let hot_fp = fingerprint(&hot);
-    assert_eq!(cold_fp, 0x591b90f19e108d22, "preset walk");
+    assert_eq!(cold_fp, 0x1d62a9e5df4f4b8d, "preset walk");
     assert_ne!(hot_fp, cold_fp, "temperature *= heat");
-    assert_eq!(hot_fp, 0xcc52927bd44ce8cd, "PLATEAU_HEAT_CAP");
+    assert_eq!(hot_fp, 0x17a537d1a72bf728, "PLATEAU_HEAT_CAP");
 }
 
 #[test]
@@ -104,10 +104,10 @@ fn lattice_exchange_follows_the_plateau() {
     let mut cfg = Config::recommended(ATOMS);
     cfg.restart_patience = 2_000;
     let (cold, hot) = pair(&cfg, 30_000, 2000);
-    assert_eq!(fingerprint(&cold), 0x3ff8cae9e1db3250, "preset walk");
+    assert_eq!(fingerprint(&cold), 0x3e50329f198f2017, "preset walk");
     assert_eq!(
         fingerprint(&hot),
-        0x646125fdc01bbce5,
+        0xfd29583fc6615ca4,
         "heat * cfg.temperature"
     );
 }
@@ -123,8 +123,8 @@ fn a_new_lowest_returns_the_walk_to_the_preset() {
     cfg.energy_lattice = false;
     let (cold, hot) = pair(&cfg, 8_000, 2);
     assert_ne!(fingerprint(&hot), fingerprint(&cold), "heat moves the walk");
-    assert_eq!(fingerprint(&cold), 0x67dfd8926ffa47e4, "preset walk");
-    assert_eq!(fingerprint(&hot), 0x58c3add9272c2e7c, "heat = 1.0");
+    assert_eq!(fingerprint(&cold), 0x77daf5dac189d7fc, "preset walk");
+    assert_eq!(fingerprint(&hot), 0xf733c29fe0e936a0, "heat = 1.0");
 }
 
 /// Seed 76 lowers the best from a quench after the loop head, with the heat
@@ -138,10 +138,55 @@ fn a_same_iteration_record_returns_to_the_preset() {
     cfg.continuous_symmetry = ContinuousSymmetry::Measure { interval: 1 };
     let (cold, hot) = pair(&cfg, 6_000, 76);
     assert_ne!(fingerprint(&hot), fingerprint(&cold), "heat moves the walk");
-    assert_eq!(fingerprint(&cold), 0x9bd7d3d2d7aaebb1, "preset walk");
+    assert_eq!(fingerprint(&cold), 0x4e21f286e8d17063, "preset walk");
     assert_eq!(
         fingerprint(&hot),
-        0x56c6889030605323,
+        0x3ae26ce650b0fc5c,
         "same-iteration heat = 1.0"
     );
+}
+
+/// With the completion of a new basin off, the four walks above are the ones
+/// the series started from with its orbit completion and stall
+/// symmetrisation off, bit for bit. The completion is the only thing that
+/// moves them.
+#[test]
+fn without_completion_the_preset_walks_are_the_ones_the_series_started_from() {
+    let off = |mut cfg: Config| {
+        cfg.symmetry_completion_on_new = false;
+        cfg
+    };
+    let mut cfg = off(Config::recommended(ATOMS));
+    cfg.restart_patience = 2_000;
+    cfg.energy_lattice = false;
+    let (cold, hot) = pair(&cfg, 30_000, 2000);
+    assert_eq!(fingerprint(&cold), 0x8b789f0315c5c3cd, "metropolis preset");
+    assert_eq!(fingerprint(&hot), 0x55fe439f5a3e1199, "metropolis heat");
+
+    let mut cfg = off(Config::recommended(ATOMS));
+    cfg.restart_patience = 2_000;
+    let (cold, hot) = pair(&cfg, 30_000, 2000);
+    assert_eq!(fingerprint(&cold), 0xc2b78b4125cd6ac8, "lattice preset");
+    assert_eq!(fingerprint(&hot), 0xc66d2790bd5aa789, "lattice heat");
+
+    let mut cfg = off(Config::recommended(ATOMS));
+    cfg.restart_patience = 80;
+    cfg.relax_steps = 20;
+    cfg.energy_lattice = false;
+    let (cold, hot) = pair(&cfg, 8_000, 2);
+    assert_eq!(fingerprint(&cold), 0x1405c408decc805c, "new lowest preset");
+    assert_eq!(fingerprint(&hot), 0x836fddcbf51fd563, "new lowest heat");
+
+    let mut cfg = off(Config::recommended(ATOMS));
+    cfg.restart_patience = 60;
+    cfg.relax_steps = 40;
+    cfg.general_collective = true;
+    cfg.continuous_symmetry = ContinuousSymmetry::Measure { interval: 1 };
+    let (cold, hot) = pair(&cfg, 6_000, 76);
+    assert_eq!(
+        fingerprint(&cold),
+        0x46a5c7a48102f029,
+        "same iteration preset"
+    );
+    assert_eq!(fingerprint(&hot), 0x16e375f012558c31, "same iteration heat");
 }

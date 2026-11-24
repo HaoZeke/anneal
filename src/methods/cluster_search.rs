@@ -4758,12 +4758,12 @@ mod tests {
         );
     }
 
-    /// The record of a Recommended LJ13 run, seed 2000, energy lattice off,
-    /// budget 1500: best, hops, charged calls, final energy, best geometry,
-    /// accepted transitions, and improvements.
-    fn recorded_search_hash(cfg: &Config) -> u64 {
+    /// The record of a Recommended LJ13 run, seed 2000, energy lattice off:
+    /// best, hops, charged calls, final energy, best geometry, accepted
+    /// transitions, and improvements, and the completions it quenched.
+    fn recorded_search_hash(cfg: &Config, budget: usize) -> (u64, usize) {
         let potential = PairPotential::lennard_jones(13);
-        let mut ledger = Ledger::new(1_500);
+        let mut ledger = Ledger::new(budget);
         let (out, _) = search_lennard_jones(&potential, cfg, &mut ledger, 2000).expect("search");
         let mut state = 0xcbf29ce484222325u64;
         let mut mix = |bytes: &[u8]| {
@@ -4791,29 +4791,41 @@ mod tests {
             mix(&(*spent as u64).to_le_bytes());
             mix(&energy.to_bits().to_le_bytes());
         }
-        state
+        (state, out.symmetry_completions.0)
     }
 
     /// An unstopped run is unchanged by recording a stopped quench.
     ///
     /// The symmetry completion of a new basin is the one default that moves
     /// this walk, so it is off here and the hash is the one the search had
-    /// before completion existed.
+    /// before completion existed. With it on, the 1500 calls quench no
+    /// completion, so the walk is the same walk.
     #[test]
     fn an_unstopped_run_matches_the_recorded_search() {
         let mut cfg = Config::recommended(13);
         cfg.energy_lattice = false;
         cfg.symmetry_completion_on_new = false;
-        assert_eq!(recorded_search_hash(&cfg), 0x8ecb3cb05e092433);
+        let (hash, completions) = recorded_search_hash(&cfg, 1_500);
+        assert_eq!((hash, completions), (0x8ecb3cb05e092433, 0));
+        cfg.symmetry_completion_on_new = true;
+        let (hash, completions) = recorded_search_hash(&cfg, 1_500);
+        assert_eq!((hash, completions), (0x8ecb3cb05e092433, 0));
     }
 
     /// The same run under the preset as shipped, with the completion of
-    /// each new basin on. Its hash is the walk that completion changes.
+    /// each new basin on, at a budget that reaches basins it completes.
+    /// Its hash is the walk that completion changes.
     #[test]
     fn an_unstopped_run_with_completion_matches_its_recorded_search() {
         let mut cfg = Config::recommended(13);
         cfg.energy_lattice = false;
         assert!(cfg.symmetry_completion_on_new);
-        assert_eq!(recorded_search_hash(&cfg), 0x3ef5f78cd6297cb0);
+        let (hash, completions) = recorded_search_hash(&cfg, 6_000);
+        assert!(completions > 0);
+        cfg.symmetry_completion_on_new = false;
+        let (plain, none) = recorded_search_hash(&cfg, 6_000);
+        assert_eq!(none, 0);
+        assert_ne!(hash, plain);
+        assert_eq!(hash, 0x01a3_d970_5cea_3e36);
     }
 }

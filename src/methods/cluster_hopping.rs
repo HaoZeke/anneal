@@ -15729,8 +15729,11 @@ mod tests {
 
     /// A structure whose positions are an octahedron and whose species are
     /// all different has no operation that keeps every point on a point of
-    /// its own species, so the species completion has nothing to do on it,
-    /// and the framework reading completes it. The walk is scripted as in
+    /// its own species. The species reading finds no group on it (asserted
+    /// in `detected_symmetry`), so the default completion reads the group
+    /// from the positions and the species are seated back on the sites, and
+    /// the framework reading completes it too. Off, nothing is completed.
+    /// The walk is scripted as in
     /// [`a_basin_is_completed_once_per_chain_when_asked`].
     #[test]
     fn a_decorated_framework_is_completed_when_its_group_is_read_from_the_points() {
@@ -15774,13 +15777,14 @@ mod tests {
                 cfg.min_separation,
             )
         };
-        assert!(basins.iter().all(|b| complete(false, b).is_none()));
+        assert!(basins.iter().all(|b| complete(false, b).is_some()));
         let products: Vec<Array1<f64>> = basins
             .iter()
             .map(|b| complete(true, b).expect("the framework of a jittered octahedron completes"))
             .collect();
-        let completions = |framework: bool| {
+        let completions = |framework: bool, on: bool| {
             let mut cfg = cfg.clone();
+            cfg.symmetry_completion_on_new = on;
             cfg.symmetry_completion_framework = framework;
             let at = std::sync::atomic::AtomicUsize::new(0);
             let near = |state: ArrayView1<f64>, of: &Array1<f64>| {
@@ -15824,14 +15828,17 @@ mod tests {
             .symmetry_completions
             .0
         };
-        assert_eq!(completions(false), 0);
-        assert!(completions(true) >= 1);
+        assert_eq!(completions(false, false), 0);
+        assert_eq!(completions(true, false), 0);
+        assert!(completions(false, true) >= 1);
+        assert!(completions(true, true) >= 1);
     }
 
     /// The fitted reading of the structure of
     /// [`a_decorated_framework_is_completed_when_its_group_is_read_from_the_points`]
-    /// is taken from the configuration too: off, the species completion has
-    /// nothing to do, and on, the walk completes the basins.
+    /// is taken from the configuration too: with completion off the walk
+    /// completes nothing, and with it on, the default and the fitted reading
+    /// both complete the basins.
     #[test]
     fn a_fitted_framework_is_completed_when_asked_for_in_the_configuration() {
         let n = 6;
@@ -15874,15 +15881,16 @@ mod tests {
                 cfg.min_separation,
             )
         };
-        assert!(basins.iter().all(|b| complete(false, b).is_none()));
+        assert!(basins.iter().all(|b| complete(false, b).is_some()));
         let products: Vec<Array1<f64>> = basins
             .iter()
             .map(|b| {
                 complete(true, b).expect("the fitted reading of a jittered octahedron completes")
             })
             .collect();
-        let completions = |framework: bool| {
+        let completions = |framework: bool, on: bool| {
             let mut cfg = cfg.clone();
+            cfg.symmetry_completion_on_new = on;
             cfg.symmetry_completion_fitted = framework;
             let at = std::sync::atomic::AtomicUsize::new(0);
             let near = |state: ArrayView1<f64>, of: &Array1<f64>| {
@@ -15926,8 +15934,10 @@ mod tests {
             .symmetry_completions
             .0
         };
-        assert_eq!(completions(false), 0);
-        assert!(completions(true) >= 1);
+        assert_eq!(completions(false, false), 0);
+        assert_eq!(completions(true, false), 0);
+        assert!(completions(false, true) >= 1);
+        assert!(completions(true, true) >= 1);
     }
 }
 

@@ -34,23 +34,6 @@ const GENERATORS: usize = 3;
 /// a point group.
 const LARGEST_POLYHEDRAL_GROUP: usize = 120;
 
-/// Largest distance by which two products of detected operations may move a
-/// point at the structure's radius and still be one element of the closure.
-///
-/// A product of up to `cap` matrices, each with entries of order one, carries
-/// a rounding error of at most `cap` units in the last place per entry, so the
-/// same element reached by two words differs by no more than `cap` times
-/// the machine epsilon, scaled to `radius`. Measured on the closures of
-/// Lennard-Jones 38, 83 and 98 walks, the distance from a product to the
-/// nearest element already in the group has two separate populations: below
-/// 1e-14, which is rounding, and above 1e-12, which is a different matrix
-/// (the detected operations are only approximately operations, so words that
-/// should coincide do not). Nothing in between occurs, and this bound at
-/// the radii of those structures falls between the two.
-fn rounding_closure(radius: f64, cap: usize) -> f64 {
-    cap as f64 * f64::EPSILON * radius
-}
-
 /// Distance of a point from the centroid of `x`, in root-mean-square.
 fn rms_radius(x: ArrayView1<f64>, n: usize) -> f64 {
     if n == 0 {
@@ -123,23 +106,18 @@ pub fn order_bound(x: ArrayView1<f64>, n: usize) -> usize {
 ///
 /// Orders run from 2 to [`order_bound`]. At most [`GENERATORS`] detected
 /// operations with distinct axes generate the group, taking the least
-/// deviant first.
-///
-/// The detected operations are only approximately operations, so their
-/// products drift and the closure of a loosely symmetric core does not stop.
-/// Two products are one element only when they are the same matrix up to
-/// the rounding of a word of at most `cap` factors ([`rounding_closure`]).
-/// Identifying products within the detection `tolerance` instead makes
-/// every element the cut keeps a distinct operation, a hundred and twenty
-/// words whose drift has taken them apart, and a completion applies all of
-/// them. The classification of the finite subgroups of O(3) bounds the
-/// elements of a real group of the highest order among the generators, and
-/// the closure is cut at that bound. What it keeps are the operations
-/// reached first, each a short word in the detected ones: the detected
-/// operations and their near-repeats. A structure whose symmetry is
-/// detected only loosely is still pushed onto what was detected, where
-/// refusing it would leave exactly the loosely symmetric structures, the
-/// ones a completion has most to do for, with no candidate.
+/// deviant first. The detected operations are only approximately operations,
+/// so the closure identifies two products that move a point at the
+/// structure's radius by less than `tolerance`, the distance detection
+/// already allowed. Products of operations that are only approximately
+/// operations drift, so a closure can fail to stop. The classification of the
+/// finite subgroups of O(3) bounds the elements of a real group of the
+/// highest order among the generators, and the closure is cut at that bound:
+/// the operations reached first, each a short word in the detected ones, are
+/// kept and applied as they are. A structure whose symmetry is detected only
+/// loosely is still pushed onto what was detected, where refusing it would
+/// leave exactly the loosely symmetric structures, the ones a completion has
+/// most to do for, with no candidate.
 pub fn detected_group(x: ArrayView1<f64>, n: usize, tolerance: f64) -> Option<Vec<Rot>> {
     detected_group_classed(x, n, None, tolerance)
 }
@@ -198,14 +176,13 @@ fn read_group(
     let cap = (4 * highest).max(LARGEST_POLYHEDRAL_GROUP);
     let operations: Vec<Rot> = generators.iter().map(operation).collect();
     let radius = rms_radius(x, n);
-    let tolerance_of_words = rounding_closure(radius, cap);
     let group = if symmetric_only {
         let test = OperationTest::new(x, n, classes);
-        close_group_where(&operations, radius, tolerance_of_words, cap, |g| {
+        close_group_where(&operations, radius, tolerance, cap, |g| {
             test.deviation(g, tolerance).is_some_and(|d| d < tolerance)
         })
     } else {
-        close_group(&operations, radius, tolerance_of_words, cap)
+        close_group(&operations, radius, tolerance, cap)
     };
     (group.len() >= 2).then_some(group)
 }
@@ -633,10 +610,12 @@ fn seat_classes(
 /// The innermost `core_fraction` of the points by distance from the centroid
 /// are the part of a structure that is ordered first; a disordered surface
 /// would otherwise hide a group the rest of the structure has. The group is
-/// [`detected_group`] of that core at `tolerance`, a group about the centre
-/// of the core, and it is applied to every atom by [`complete_orbits`]
-/// about that centre, the centroid of the core, which a surface on one side
-/// moves away from the centroid of the whole. The fraction is of the points,
+/// [`detected_group`] of that core at `tolerance`, grown only through the
+/// operations the core carries to within `tolerance`, so that the cut of a
+/// loose closure is spent on symmetries and not on words of two loose
+/// operations. It acts about the better of two centres, the centroid of the
+/// core and the centroid of the whole, chosen by [`fitted_centre`], and it is
+/// applied to every atom by [`seat_fitted`]. The fraction is of the points,
 /// not a count.
 pub fn complete_detected(
     x: ArrayView1<f64>,
@@ -660,6 +639,16 @@ pub fn complete_detected(
 /// [`complete_detected`] of a structure whose points have classes (species):
 /// the core's group takes every point onto a point of its own class, and each
 /// class is completed on its own sites.
+///
+/// A structure with two species is a framework of positions with a
+/// decoration on it, and the decoration is not always ordered where the
+/// framework is: a near-icosahedral framework with a random decoration has
+/// no operation that takes every point onto a point of its own class, and the
+/// group read with classes is trivial. When it is, the group is read again
+/// from the positions alone, every point free to take any site, and the
+/// structure is seated on that group's sites. The decoration is then whatever
+/// the images give, which is what the search that follows is for. Without
+/// classes the two readings are one call.
 pub fn complete_detected_classed(
     x: ArrayView1<f64>,
     n: usize,
@@ -669,10 +658,23 @@ pub fn complete_detected_classed(
     core_fraction: f64,
     min_separation: f64,
 ) -> Option<Array1<f64>> {
-    complete_detected_reading(
+    let strict = complete_detected_reading(
         x,
         n,
         classes,
+        Reading::Species,
+        tolerance,
+        merge_radius,
+        core_fraction,
+        min_separation,
+    );
+    if strict.is_some() || classes.is_none() {
+        return strict;
+    }
+    complete_detected_reading(
+        x,
+        n,
+        None,
         Reading::Species,
         tolerance,
         merge_radius,
@@ -722,8 +724,8 @@ pub fn complete_detected_framework(
 ///   words of two loose operations that the core does not carry.
 /// - The group acts about the better of two centres, the centroid of the
 ///   core it was read on and the centroid of the whole structure: the one
-///   whose operations fit the whole structure with the smaller summed
-///   deviation. A group read on the inner points of a structure with a
+///   about which the operations take more points to within the merge radius
+///   of a point. A group read on the inner points of a structure with a
 ///   lopsided surface fits the whole about the second.
 /// - Each class is seated on the sites made of its own images, so no atom is
 ///   put on another class's site and the composition is kept. Only when a
@@ -756,12 +758,14 @@ pub fn complete_detected_fitted(
 /// How the group of a completion is read and applied.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Reading {
-    /// Every operation takes each point onto a point of its own class.
+    /// Every operation takes each point onto a point of its own class, and
+    /// the group is grown through symmetric operations only, acts about the
+    /// better centre and seats by [`seat_fitted`].
     Species,
-    /// The group of the points alone, each class on its own sites.
+    /// The group of the points alone, each class on its own sites, with none
+    /// of those refinements.
     Framework,
-    /// [`Reading::Framework`] with symmetric operations only, the better
-    /// centre, and a seating that falls back to all the sites.
+    /// [`Reading::Framework`] with the refinements of [`Reading::Species`].
     Fitted,
 }
 
@@ -804,14 +808,9 @@ fn complete_detected_reading(
         *v /= m as f64;
     }
     let core_classes = (core_classes.len() == m).then_some(core_classes.as_slice());
-    let group = read_group(
-        core.view(),
-        m,
-        core_classes,
-        tolerance,
-        reading == Reading::Fitted,
-    )?;
-    if reading != Reading::Fitted {
+    let refined = reading != Reading::Framework;
+    let group = read_group(core.view(), m, core_classes, tolerance, refined)?;
+    if !refined {
         return complete_orbits_classed(
             x,
             n,
@@ -822,7 +821,7 @@ fn complete_detected_reading(
             min_separation,
         );
     }
-    let centre = fitted_centre(x, n, &group, centre, c);
+    let centre = fitted_centre(x, n, &group, centre, c, merge_radius);
     seat_fitted(x, n, classes, &group, centre, merge_radius, min_separation)
 }
 
@@ -851,25 +850,25 @@ fn seat_fitted(
 }
 
 /// Of the centroid of the core a group was read on and the centroid of the
-/// whole structure, the one about which the operations of the group fit the
-/// whole structure with the smaller summed deviation; the core's when they
-/// tie.
+/// whole structure, the one about which the operations of the group take the
+/// more points to within `radius` of a point; the core's when they tie.
+///
+/// Points are counted, not distances summed: a disordered surface is far
+/// from every image whichever centre is taken, and a sum of distances would
+/// move the centre to follow it, off the core the group was read on.
 fn fitted_centre(
     x: ArrayView1<f64>,
     n: usize,
     group: &[Rot],
     core_centre: [f64; 3],
     whole_centre: [f64; 3],
+    radius: f64,
 ) -> [f64; 3] {
-    let misfit = |centre: [f64; 3]| -> f64 {
+    let fit = |centre: [f64; 3]| -> usize {
         let test = CentredOperationTest::new(x, n, centre);
-        group
-            .iter()
-            .skip(1)
-            .map(|g| test.deviation(g, f64::INFINITY).unwrap_or(f64::INFINITY))
-            .sum()
+        group.iter().skip(1).map(|g| test.inliers(g, radius)).sum()
     };
-    if misfit(whole_centre) < misfit(core_centre) {
+    if fit(whole_centre) > fit(core_centre) {
         whole_centre
     } else {
         core_centre
@@ -959,16 +958,15 @@ mod tests {
         assert!(group.len() >= 6, "{}", group.len());
     }
 
-    /// The operations detected on a slightly jittered icosahedron are not
-    /// exact, so their exact closure does not stop at the sixty rotations or
-    /// the hundred and twenty elements with the mirrors it approximates: it
-    /// runs to the cap and is cut there, where identifying products within
-    /// the detection tolerance would fold it to the group itself.
+    /// The group of a slightly jittered icosahedron closes to the sixty
+    /// rotations or the hundred and twenty elements with the mirrors, from
+    /// the operations detected on it, though none was given and none is
+    /// exact.
     #[test]
-    fn the_operations_of_a_jittered_icosahedron_close_to_the_cap() {
+    fn a_jittered_icosahedron_closes_to_its_full_group() {
         let x = jitter(&icosahedron(1.05), 0.01);
         let group = detected_group(x.view(), ICOSAHEDRON_POINTS, 0.5).expect("a group");
-        assert_eq!(group.len(), LARGEST_POLYHEDRAL_GROUP);
+        assert!(matches!(group.len(), 60 | 120), "{}", group.len());
     }
 
     /// A closure that does not stop is cut at the cap, with the elements
@@ -976,7 +974,7 @@ mod tests {
     #[test]
     fn a_closure_past_the_classification_is_cut_at_the_cap() {
         let ops = [rotation([0.0, 0.0, 1.0], 7), rotation([1.0, 0.0, 0.0], 5)];
-        let group = close_group(&ops, 1.0, rounding_closure(1.0, 120), 120);
+        let group = close_group(&ops, 1.0, 1e-6, 120);
         assert_eq!(group.len(), 120);
         let identity: Rot = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
         assert_eq!(group[0], identity);
@@ -987,17 +985,14 @@ mod tests {
     #[test]
     fn a_closure_inside_the_cap_is_the_whole_group() {
         let ops = [rotation([0.0, 0.0, 1.0], 4)];
-        assert_eq!(
-            close_group(&ops, 1.0, rounding_closure(1.0, 120), 120).len(),
-            4
-        );
+        assert_eq!(close_group(&ops, 1.0, 1e-6, 120).len(), 4);
     }
 
-    /// Operations that are only nearly a group close, under the detection
-    /// tolerance, to the group they approximate: a five-fold axis and a
-    /// two-fold axis tilted a little off perpendicular to it give the ten
-    /// operations of the dihedral group. Closed to rounding, their products
-    /// never repeat and the closure is cut at the cap.
+    /// Operations that are only nearly a group close, under the tolerance,
+    /// to the group they approximate: a five-fold axis and a two-fold axis
+    /// tilted a little off perpendicular to it give the ten operations of
+    /// the dihedral group. Taken exactly, their products never repeat and
+    /// the closure is cut at the cap.
     #[test]
     fn a_tolerant_closure_stops_at_the_group_the_operations_approximate() {
         let tilt = 0.03_f64;
@@ -1006,28 +1001,7 @@ mod tests {
             rotation([tilt.cos(), 0.0, tilt.sin()], 2),
         ];
         assert_eq!(close_group(&ops, 1.0, 0.1, 120).len(), 10);
-        assert_eq!(
-            close_group(&ops, 1.0, rounding_closure(1.0, 120), 120).len(),
-            120
-        );
-    }
-
-    /// The rounding bound separates a group from a drifting one. A five-fold
-    /// and a two-fold axis exactly perpendicular close to the ten operations
-    /// of the dihedral group, every repeat found within rounding. The same
-    /// axes tilted by a billionth of a radian, far under any detection
-    /// tolerance and far over rounding, do not repeat.
-    #[test]
-    fn the_rounding_bound_separates_a_group_from_a_drifting_one() {
-        let exact = [rotation([0.0, 0.0, 1.0], 5), rotation([1.0, 0.0, 0.0], 2)];
-        let bound = rounding_closure(1.0, 120);
-        assert_eq!(close_group(&exact, 1.0, bound, 120).len(), 10);
-        let tilt = 1.0e-9_f64;
-        let drift = [
-            rotation([0.0, 0.0, 1.0], 5),
-            rotation([tilt.cos(), 0.0, tilt.sin()], 2),
-        ];
-        assert_eq!(close_group(&drift, 1.0, bound, 120).len(), 120);
+        assert_eq!(close_group(&ops, 1.0, 1e-6, 120).len(), 120);
     }
 
     /// A structure with nothing symmetric about it gives no group.
@@ -1126,13 +1100,6 @@ mod tests {
     /// A disordered surface over the core does not hide the core's group:
     /// the innermost fraction is read and the completion closes the core
     /// onto its orbit.
-    ///
-    /// The bound is a quarter of the starting spread, not the tenth it was
-    /// under a tolerant closure. A tolerant closure finds the 60 elements
-    /// of the rotation group of the core and leaves 0.0004 of the spread.
-    /// The exact closure keeps 120 words of the detected operations, whose
-    /// drift is the jitter of the core, so it leaves 0.115. Both pull the
-    /// core onto its orbit; the test asks that, and not how fully.
     #[test]
     fn the_core_group_is_read_through_a_disordered_surface() {
         const SURFACE_POINTS: usize = 10;
@@ -1163,13 +1130,12 @@ mod tests {
             radii.iter().copied().fold(f64::NEG_INFINITY, f64::max)
                 - radii.iter().copied().fold(f64::INFINITY, f64::min)
         };
-        assert!(spread(y.view()) < 0.25 * spread(x.view()));
+        assert!(spread(y.view()) < 0.1 * spread(x.view()));
     }
 
     /// A disordered surface on one side moves the centroid of the whole
     /// off the centre of the core. The core is still read about its own
-    /// centre and the completion closes it onto its orbit. The bound is
-    /// the quarter of the spread the disordered-surface test gives.
+    /// centre and the completion closes it onto its orbit.
     #[test]
     fn the_core_group_is_read_through_a_one_sided_surface() {
         const SURFACE_POINTS: usize = 10;
@@ -1206,7 +1172,7 @@ mod tests {
             radii.iter().copied().fold(f64::NEG_INFINITY, f64::max)
                 - radii.iter().copied().fold(f64::INFINITY, f64::min)
         };
-        assert!(spread(y.view()) < 0.25 * spread(x.view()));
+        assert!(spread(y.view()) < 0.1 * spread(x.view()));
     }
 
     /// Fewer than four points have no group worth reading.
@@ -1566,10 +1532,11 @@ mod tests {
 
     /// A framework whose species are all different has no operation that
     /// keeps every point on a point of its own species, so the group read by
-    /// species is trivial and nothing is completed. Read from the points it
-    /// is the framework's, and each species still has its own sites: every
-    /// atom of a class of one point is seated within the merge radius of an
-    /// image of itself under the group, and no two atoms overlap.
+    /// species is trivial and the species reading completes nothing. Read
+    /// from the points it is the framework's, and each species still has its
+    /// own sites: every atom of a class of one point is seated within the
+    /// merge radius of an image of itself under the group, and no two atoms
+    /// overlap.
     #[test]
     fn the_framework_reading_completes_what_the_species_reading_cannot() {
         for amplitude in [0.02, 0.05] {
@@ -1579,8 +1546,17 @@ mod tests {
             let tolerance = 0.25;
             let merge = 0.3;
             assert!(
-                complete_detected_classed(x.view(), n, Some(&classes), tolerance, merge, 1.0, 0.1)
-                    .is_none()
+                complete_detected_reading(
+                    x.view(),
+                    n,
+                    Some(&classes),
+                    Reading::Species,
+                    tolerance,
+                    merge,
+                    1.0,
+                    0.1,
+                )
+                .is_none()
             );
             let y = complete_detected_framework(
                 x.view(),
@@ -1623,23 +1599,50 @@ mod tests {
         }
     }
 
-    /// The closure of loosely commensurate generators is cut at its cap, and
-    /// some of what it holds are words the core does not carry. The group of
-    /// the fitted reading is grown only through operations the core has:
-    /// every element deviates by less than the tolerance, the identity stays
-    /// first, and a structure that is exactly symmetric keeps the whole group.
+    /// The default reading falls back to the positions alone where the
+    /// species reading finds nothing, and only then: a structure the species
+    /// reading completes is completed by it, and one with no classes has no
+    /// second reading to fall back to.
     #[test]
-    fn the_fitted_group_has_only_operations_the_core_carries() {
+    fn the_default_reading_falls_back_to_the_positions() {
+        let x = jitter(&icosahedron(1.0), 0.05);
+        let n = x.len() / 3;
+        let all_different: Vec<u32> = (0..n as u32).collect();
+        let (tolerance, merge) = (0.25, 0.3);
+        let call = |classes: Option<&[u32]>| {
+            complete_detected_classed(x.view(), n, classes, tolerance, merge, 1.0, 0.1)
+        };
+        let blind = complete_detected_reading(
+            x.view(),
+            n,
+            None,
+            Reading::Species,
+            tolerance,
+            merge,
+            1.0,
+            0.1,
+        )
+        .expect("the positions have a group");
+        assert_eq!(call(Some(&all_different)).expect("the fallback"), blind);
+        assert_eq!(call(None).expect("no classes"), blind);
+        let one_class = vec![0u32; n];
+        assert_eq!(call(Some(&one_class)).expect("one class"), blind);
+    }
+
+    /// The closure of loosely commensurate generators holds words the core
+    /// does not carry. The group of the symmetric reading drops them: every
+    /// element kept deviates by less than the tolerance, the plain group does
+    /// hold words that deviate by no less, the kept group is the smaller, the
+    /// identity stays first, and a structure that is exactly symmetric loses
+    /// nothing.
+    #[test]
+    fn the_symmetric_group_has_only_operations_the_core_carries() {
         for (amplitude, tolerance) in [(0.15, 0.25), (0.3, 0.5)] {
             let x = jitter(&icosahedron(1.0), amplitude);
             let n = x.len() / 3;
             let plain = read_group(x.view(), n, None, tolerance, false).expect("a loose group");
             let kept = read_group(x.view(), n, None, tolerance, true).expect("a symmetric part");
-            assert_eq!(
-                plain.len(),
-                LARGEST_POLYHEDRAL_GROUP,
-                "{amplitude}: the cut"
-            );
+            assert!(kept.len() < plain.len(), "{amplitude}: nothing was dropped");
             assert_eq!(kept[0], plain[0]);
             let deviation =
                 |g: &Rot| operation_deviation(x.view(), n, None, g, f64::INFINITY).expect("no cap");
@@ -1675,10 +1678,19 @@ mod tests {
         let identity: Rot = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
         let group = [identity, quarter, mul(&quarter, &quarter)];
         let whole = centroid(x.view(), 6);
-        assert_eq!(fitted_centre(x.view(), 6, &group, origin, whole), whole);
-        assert_eq!(fitted_centre(x.view(), 6, &group, whole, origin), whole);
-        assert_eq!(fitted_centre(x.view(), 6, &group, whole, whole), whole);
-        assert_eq!(fitted_centre(x.view(), 6, &group, origin, origin), origin);
+        assert_eq!(
+            fitted_centre(x.view(), 6, &group, origin, whole, 0.1),
+            whole
+        );
+        assert_eq!(
+            fitted_centre(x.view(), 6, &group, whole, origin, 0.1),
+            whole
+        );
+        assert_eq!(fitted_centre(x.view(), 6, &group, whole, whole, 0.1), whole);
+        assert_eq!(
+            fitted_centre(x.view(), 6, &group, origin, origin, 0.1),
+            origin
+        );
     }
 
     /// Three points of one class on top of each other have two sites of their

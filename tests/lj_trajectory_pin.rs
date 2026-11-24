@@ -28,11 +28,12 @@ const SEED: u64 = 2000;
 const ATOMS: usize = 98;
 const BUDGET: usize = 5_000;
 
-fn trajectory_hash() -> String {
+fn trajectory_hash(completion: bool) -> String {
     // AVX2, AVX-512 and NEON dots are not the same quench. Scalar `mul_add`
     // is the path every target can run.
     let _ = rgmin::vecops::force_simd_path("scalar");
-    let cfg = Config::recommended(ATOMS);
+    let mut cfg = Config::recommended(ATOMS);
+    cfg.symmetry_completion_on_new = completion;
     assert!(!cfg.cap_twist, "the pinned base trajectory is flag-off");
     let potential = PairPotential::lennard_jones(ATOMS);
     let mut rng = StdRng::seed_from_u64(SEED);
@@ -89,11 +90,22 @@ fn trajectory_hash() -> String {
 #[test]
 fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     anneal_core::install_rgpot_kernels!();
-    let hash = trajectory_hash();
+    let hash = trajectory_hash(true);
     // The general move library is deterministic on every build. The hash
-    // moved when orbit completion and stall symmetrisation left the preset,
-    // when a loosely detected group stopped being refused, and again when
-    // its closure became exact.
-    let expected = "07b11c1a777761f65fece7dbc5b81227210b11eb005429cbaaeebba36f2a1f6e";
+    // moved when the structure builders left the presets and the
+    // completion of a new basin from the group its core carries took the
+    // place of orbit completion and stall symmetrisation.
+    let expected = "02ae65792b19c8b960ec1dc4646f917f69d4ec933ed97234d6c244ac65b2858b";
+    assert_eq!(hash, expected, "trajectory hash changed: {hash}");
+}
+
+/// With the completion of a new basin off the walk is the one the series
+/// started from with its orbit completion and stall symmetrisation off,
+/// bit for bit: the builders left no trace in this trajectory.
+#[test]
+fn the_lj98_trajectory_without_completion_is_the_one_the_series_started_from() {
+    anneal_core::install_rgpot_kernels!();
+    let hash = trajectory_hash(false);
+    let expected = "2edb99fdb15752be0c232473fa7fb58dee6991e06991d2dd76439563b32723c1";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }
