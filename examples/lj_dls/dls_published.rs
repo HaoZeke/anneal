@@ -88,7 +88,7 @@ pub struct Table1 {
 /// The rows of Table 1, read from experiment input.
 ///
 /// The published table keys `Nmov`, `Np`, `Ntry` and `Nbest` to cluster-size
-/// breakpoints. The values live in `experiments/dls_published/table1.csv`
+/// breakpoints. The values live in `data/dls_published/table1.csv`
 /// and are not compiled in, so no size appears in this source.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Table1Rows {
@@ -924,7 +924,7 @@ mod tests {
     use rand::rngs::StdRng;
 
     fn table1(n: usize) -> Table1 {
-        Table1Rows::parse(include_str!("../../experiments/dls_published/table1.csv"))
+        Table1Rows::parse(include_str!("../../data/dls_published/table1.csv"))
             .expect("experiment table parses")
             .row(n)
     }
