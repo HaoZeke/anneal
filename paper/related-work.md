@@ -1544,6 +1544,46 @@ He, Masuda, Schankler, Zhou, and Rappe, arXiv:2611.24097 (18 November 2026), exp
 
 Cite `heSrtio3Gcmc2026`.
 
+## 2026-11-23 — Python local-optima networks
+
+Fornagiel, Achtelik, Ochoa, Guzowski, Smołka, and Mańdziuk, SoftwareX 36, 103209 (published online 16 November 2026), doi:10.1016/j.softx.2026.103209, release `lonkit` (`v0.9.0` on GitHub), a Python package for constructing, analysing, and visualising local optima networks (`LONs`) and compressed monotonic `LONs` (`CMLONs`) on top of `igraph`. Its `BasinHoppingSampler` runs independent chains using uniform coordinate perturbations, step-size calibration against a target escape rate, local minimization through `scipy.optimize.minimize` (default `L-BFGS-B`), non-worsening acceptance (`new_f <= current_f`), and `nfev` accounting. The examples evaluate analytic continuous functions (Sphere, Rastrigin, Ackley, Ackley 4, Griewank, Schwefel 2.26, and clustering benchmarks) and discrete number partitioning rather than free Lennard-Jones or water clusters.
+
+The paper reports no Lennard-Jones 38--150 hit rate, TIP4P energy, `121` of `192`, or `97` of `192`, and does not replace the open `ASE 3.29.0` or `pele v0.1.2` basin-hopping arms on atomic clusters. No manuscript number is contradicted, and no new head-to-head is required on the current cluster tables.
+
+Cite `fornagielLonkit2026`.
+
+## 2026-11-23 — Torsional conformer and energy-landscape methods
+
+Lazzari, Crisci, and Barone, Physical Chemistry Chemical Physics 28, 28080--28090 (published online 4 November 2026; indexed 18 November 2026), doi:10.1039/d6cp03129c, introduce `SEEKER`, an exploration-first intramolecular conformational search rotating declared acyclic torsions via unit quaternions while keeping fixed ring families and retaining candidate diversity through separate energy and interaction objectives before post-search reduction. They evaluate coverage across amino acids, D-glucose, erythrulose, fructose, and thiopronine, including four-seed runs and fixed-budget seed-sensitivity audits on glycine and thiopronine.
+
+Five further conformer, tight-binding, and energy-landscape papers appear in the same window. Zheng and Heid, RSC Advances 16, 68614--68620 (3 November 2026; PMC13730536), doi:10.1039/d6ra08700k, release `PEACE`, combining tautomer enumeration, conformer generation, `g-xTB`, and `GFN2-xTB` solvation calculations while noting `CREST`'s exhaustive protonation/GFN2-xTB ranking as the existing open-source route. Gautam, Chan, and Ramabhadran, The Journal of Physical Chemistry A (18 November 2026), doi:10.1021/acs.jpca.6c05320, benchmark `GFN2-xTB` on complete tautomer ensembles of the five canonical nucleobases (37, 12, 85, 13, and 13 structures) against \(\omega\)B97X-3c, revDSD-PBEP86-D3BJ, and `W1X-2`, showing GFN2-xTB recovers the global minima and extreme energy ordering within chemical accuracy. Tsvetaev and Jacob, Physical Chemistry Chemical Physics (16 November 2026), doi:10.1039/d6cp02481e, introduce Monte Carlo sampling of conformer ensembles constrained by electronic excitation spectra (complementing `vandevenSpices2026`); Hessmann and co-workers, Machine Learning: Science and Technology (16 November 2026), doi:10.1088/2632-2153/aec2a2, propose generative pseudo-force fields (`GPFF`) for QM9 molecular generation; and Clauss, Husbands, Özsan, Abbehausen, and Frei, ChemRxiv (v2, 17 November 2026), doi:10.26434/chemrxiv.15011867/v2, release `MeCoBi` for 3D mononuclear metal-complex structures evaluated with `GFN2-xTB` single points.
+
+None of these papers tests bare water hexamers or Lennard-Jones clusters, none contradicts `121` of `192`, `97` of `192`, the six polished hexamer gaps, or the `CREST 3.0.2` seed-exposure statement, and none warrants a new head-to-head on the current benchmarks.
+
+Cite `lazzariSeeker2026`, `zhengPeace2026`, `gautamNucleobases2026`, `tsvetaevSpectralMc2026`, `hessmannGpff2026`, and `claussMecobi2026`.
+
+## 2026-11-23 — Lean-verified Thomson minimizers
+
+Kryvonos, Liehr, and Taylor, arXiv:2609.22077 (18 September 2026), prove in Lean that the square antiprism is the unique global minimizer for eight points on the unit sphere under logarithmic and Coulomb (`Thomson`) energies and for Riesz \(s\)-energy when \(s\) is sufficiently large. In separate work, Xie, Research Square (19 November 2026), doi:10.21203/rs.3.rs-11723965/v1, introduces residual-tracked rounding of three-point sum-of-squares certificates to obtain computer-assisted Lean 4 proofs that the tricapped trigonal prism (\(N = 9\)) and capped square antiprism (\(N = 10\)) are the unique Thomson minimizers up to congruence and relabeling. Separately, `alejandrozarco`, Zenodo (v2.8, 19 November 2026), doi:10.5281/zenodo.24355941 (concept doi:10.5281/zenodo.24355940), deposits bulk certificates and Lean 4 kernel exports for seven-point Riesz \(s\)-energy (\(1/3 \le s \le 7/4\)), explicitly marked as an AI-produced warrant with no human review as of 19 November 2026.
+
+All three works prove or formalize optimality on the unit sphere (Thomson and Riesz \(s\)-energies) rather than unconstrained three-dimensional Lennard-Jones clusters. Finite 3D Lennard-Jones global-optimality proofs still stop at seven atoms (`shenSevenParticle2026`), leaving \(N \ge 38\) unproved (`lecomteDiameter2026`), and no Cambridge Lennard-Jones target is changed.
+
+Cite `kryvonosEightPoints2026`, `xieThomson2026`, and `zarcoRiesz2026` beside `shenSevenParticle2026` and `shaoThomson2026`.
+
+## 2026-11-23 — Mixed hydrogen-bonded and water clusters
+
+Collignon and co-workers, The Journal of Chemical Physics 165, 194302 (16 November 2026), doi:10.1063/5.0350987, combine infrared/microwave spectroscopy and calculations on (CO)\(_2\)--water trimers, identifying a symmetric global minimum ("Isomer 1") alongside a nearly isoenergetic cyclic isomer. Patkar, ChemRxiv (17 November 2026), doi:10.26434/chemrxiv.15012364/v1, decomposes MP2/aug-cc-pVTZ energies across 20 (NH\(_3\))\(_m\)(H\(_2\)S)\(_n\) (\(m + n = 3\text{--}7\)) clusters, finding that donor/acceptor branching suppresses hydrogen-bond cooperativity. Ramos and Champagne, The Journal of Physical Chemistry A (11 November 2026), doi:10.1021/acs.jpca.6c05875, evaluate how electrostatic and polarizable solvent embeddings affect ML prediction of polarizability and hyperpolarizability tensors on embedded water clusters. Also noted for completeness: Kirov, Chemical Physics 610, 113289, doi:10.1016/j.chemphys.2026.113289, carries a November 2026 cover issue date on the surface structure of water clusters, although the Crossref record was created online on 25 May 2026 and no abstract is exposed on Crossref, OpenAlex, EuropePMC, or Semantic Scholar.
+
+None of these papers conducts a global search on TIP4P water clusters or GFN2-xTB water hexamers, and none contradicts the TIP4P Wales--Hodges targets, `121` of `192`, `97` of `192`, or the six polished hexamer gaps.
+
+Cite `collignonCoWater2026`, `patkarMixedClusters2026`, `ramosEmbeddedWater2026`, and `kirovSurfaceWater2026`.
+
+## 2026-11-23 — CSP and MLIP ordering limits
+
+Qiao and co-workers, ChemRxiv (16 November 2026), doi:10.26434/chemrxiv.15012291/v1, automate sequential PXRD-guided molecular crystal structure prediction across ranked space groups. In MLIP reliability checks extending `liuTopologyHallucinations2026`, Tang and co-workers, Chemistry of Materials (17 November 2026), doi:10.1021/acs.chemmater.6c01853, show that PBE-trained MLIPs including `NequIP-OAM-L` and `MatterSim-v1-5M` wrongly favor \(I4_1/amd\) over experimental \(P2_1/c\) HfO\(_2\) due to PBE's bias toward low-density sixfold phases; and Ellis and co-workers, ChemRxiv (22 November 2026), doi:10.26434/chemrxiv.15012574/v1, benchmark 15--17 pretrained MLIPs against DFT on 9,017 fixed `GFN2-xTB` reaction pathways (`DORTS-9K`), finding `UMA-M OMol` best overall while non-`AIMNet2` models underestimate barriers on the worst CHNO outliers. None reports a cluster global-optimisation hit rate or contradicts any manuscript number.
+
+Cite `qiaoPxrdCsp2026`, `tangWrongGroundState2026`, and `ellisDorts9k2026`.
+
 ## 2026-11-24 — FastCREST
 
 Dey, Kariyawasam, and Chowdhury, arXiv:2611.28599 (21 November 2026), introduce `FastCREST`, a hardware-accelerated execution of the CREST 3.0.2 conformer-search algorithm. The code moves the self-consistent-charge eigenproblem and three-body dispersion of the metadynamics and molecular-dynamics trajectories to a GPU. Batches of geometry optimisations run as Slurm arrays on CPU nodes. The abstract reports that energies agree with CREST 3.0.2 within \(1.01\times10^{-10}\) Eh and gradients within \(8.2\times10^{-11}\) Eh/bohr; controlled molecular-dynamics trajectories pass a prespecified equivalence test. The complete example also lifts the 200-cycle optimisation cap of CREST 3, so that run changes a default stopping condition as well as the hardware.
