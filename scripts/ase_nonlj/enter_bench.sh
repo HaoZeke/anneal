@@ -50,6 +50,18 @@ if [[ -f $ROWS ]] && grep -q "^${SYSTEM},${ARM},${SEED},.*,$REV,bench," "$ROWS";
   echo "keep existing $SYSTEM $ARM seed $SEED"
   exit 0
 fi
+PYTHONPATH="$ROOT/scripts${PYTHONPATH:+:$PYTHONPATH}" python3 - "$ROWS" << 'PY'
+import sys
+from pathlib import Path
+
+from machine_provenance import require_csv_schema
+
+require_csv_schema(
+    Path(sys.argv[1]),
+    "system,arm,seed,budget,hit,evals_to_hit,charged,best,wall_s,inside_s,"
+    "outside_s,code_revision,host,stop,cap_s,machine_id,cpu_model".split(","),
+)
+PY
 
 CAP=""
 if [[ $ARM != for_cluster ]]; then
@@ -104,13 +116,13 @@ from pathlib import Path
 system, arm, seed, stdout_path, rows_path = sys.argv[1:]
 lines = Path(stdout_path).read_text().splitlines()
 row = next(line for line in lines if line.startswith(system + ","))
-fields = row.split(",")
+fields = next(csv.reader([row]))
 if fields[0] != system or fields[1] != arm or fields[2] != seed or fields[12] != "bench":
     raise SystemExit("row does not match the requested seed")
-if len(fields) != 15:
-    raise SystemExit("row is missing stop and cap_s")
+if len(fields) != 17:
+    raise SystemExit("row is missing provenance fields")
 path = Path(rows_path)
-header = "system,arm,seed,budget,hit,evals_to_hit,charged,best,wall_s,inside_s,outside_s,code_revision,host,stop,cap_s"
+header = "system,arm,seed,budget,hit,evals_to_hit,charged,best,wall_s,inside_s,outside_s,code_revision,host,stop,cap_s,machine_id,cpu_model"
 text = path.read_text() if path.exists() else ""
 revision = fields[11]
 if path.exists() and any(
@@ -126,6 +138,8 @@ path.parent.mkdir(parents=True, exist_ok=True)
 if not path.exists() or path.stat().st_size == 0:
     path.write_text(header + "\n" + row + "\n")
 else:
+    if text.splitlines()[0] != header:
+        raise SystemExit(f"{path} has a legacy schema; use a new campaign table")
     with path.open("a") as handle:
         handle.write(row + "\n")
 PY
