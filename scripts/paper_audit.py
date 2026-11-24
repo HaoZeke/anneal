@@ -110,7 +110,13 @@ UNPUSHED = unreachable_reasons()
 KNOWN_GAPS = {
     "data/sc96_78_hits.csv": "code_revision unrecorded on some rows; harness_revision unrecorded on some rows; host "
                              "empty or unknown on some rows",
-    "paper/jctc/data/hosts/3b11c160/hosts.csv": "revision unrecorded (no revision column)",
+    "paper/jctc/data/hosts/3b11c160/hosts.csv": "revision unrecorded (no revision column); cpu_model recorded; no "
+                                                "machine_id column",
+    "paper/jctc/data/gmin_eeec8e2c/c/rows.csv": "revision recorded; machine_id recorded; no cpu_model column",
+    "paper/jctc/data/gmin_eeec8e2c/d/rows.csv": "revision recorded; machine_id recorded; no cpu_model column",
+    "paper/jctc/data/knockouts/move-a/rows.csv": "revision recorded; machine_id recorded; no cpu_model column",
+    "paper/jctc/data/knockouts/pairscale/rows.csv": "revision recorded; machine_id recorded; no cpu_model column",
+    "paper/jctc/data/knockouts/templates/rows.csv": "revision recorded; machine_id recorded; no cpu_model column",
     "paper/jctc/data/system_visuals/references.csv": "revision and host unrecorded (no revision or host column)",
     "paper/jctc/data/outside_perf/rows.csv": "revision recorded; no host column",
     "bench/gad-published/summary.csv": "revision recorded; no host column",
@@ -3850,8 +3856,9 @@ def provenance(audit: Audit) -> dict[str, str]:
         if machines:
             if machines != MACHINE_PROVENANCE_COLUMNS:
                 missing = sorted(MACHINE_PROVENANCE_COLUMNS - machines)
+                lead = "revision recorded; " if revs and not problems else ""
                 problems.append(
-                    f"{' and '.join(sorted(machines))} recorded; "
+                    f"{lead}{' and '.join(sorted(machines))} recorded; "
                     f"no {' or '.join(missing)} column"
                 )
             elif any(not r["cpu_model"].strip() for r in rows):
