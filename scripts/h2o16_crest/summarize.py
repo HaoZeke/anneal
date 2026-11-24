@@ -5,6 +5,7 @@
 The hygienic panel replaces the original seed 15000 row with the rerun.
 The original panel keeps that first row. Neither panel overwrites a row.
 """
+import csv
 import random
 import sys
 from pathlib import Path
@@ -82,19 +83,18 @@ def bootstrap(gaps):
 
 def load():
     rows = []
-    for line in SEEDS.read_text().splitlines()[1:]:
-        if not line.strip():
-            continue
-        seed, row, anneal, crest, awall, cwall, host = line.split(",")
+    with SEEDS.open(newline="") as handle:
+        source = list(csv.DictReader(handle))
+    for item in source:
         rows.append(
             {
-                "seed": int(seed),
-                "row": row,
-                "anneal": float(anneal),
-                "crest": float(crest),
-                "awall": float(awall),
-                "cwall": float(cwall),
-                "host": host,
+                "seed": int(item["seed"]),
+                "row": item["row"],
+                "anneal": float(item["anneal_Eh"]),
+                "crest": float(item["crest_Eh"]),
+                "awall": float(item["anneal_wall_s"]),
+                "cwall": float(item["crest_wall_s"]),
+                "host": item["hostname"],
             }
         )
     return rows

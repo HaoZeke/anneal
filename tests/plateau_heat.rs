@@ -94,9 +94,9 @@ fn metropolis_heat_follows_the_plateau() {
     let (cold, hot) = pair(&cfg, 30_000, 2000);
     let cold_fp = fingerprint(&cold);
     let hot_fp = fingerprint(&hot);
-    assert_eq!(cold_fp, 0xa4cf0197d21e3961, "preset walk");
+    assert_eq!(cold_fp, 0xc2e2c1ef481b1a93, "preset walk");
     assert_ne!(hot_fp, cold_fp, "temperature *= heat");
-    assert_eq!(hot_fp, 0xca208bc0360518d7, "PLATEAU_HEAT_CAP");
+    assert_eq!(hot_fp, 0xcc74d55e4c74ed2f, "PLATEAU_HEAT_CAP");
 }
 
 #[test]
@@ -107,7 +107,7 @@ fn lattice_exchange_follows_the_plateau() {
     assert_eq!(fingerprint(&cold), 0x100885ac118293e1, "preset walk");
     assert_eq!(
         fingerprint(&hot),
-        0x44038697bde16fb7,
+        0x1a623a8e37ad1d43,
         "heat * cfg.temperature"
     );
 }

@@ -65,7 +65,8 @@ pub enum MoveLibrary {
         local: bool,
         /// Offer the reversal of a directed hydrogen-bond cycle as one more
         /// arm. It needs a site geometry with one oxygen and two hydrogens.
-        /// [`Config::for_tip4p`] turns it on.
+        /// [`Config::for_tip4p`] turns it on. With it off, a stalled archive
+        /// walk still reverses contact chains for any bonded rigid body.
         reverse_cycles: bool,
         /// Move one body onto a vacant contact.
         ///
@@ -1917,6 +1918,11 @@ impl ClusterMove {
             source: crate::lattice::Source::Observed,
         });
         v
+    }
+
+    /// True when this arm reverses a directed contact cycle.
+    pub(crate) fn reverses_directed_cycle(&self) -> bool {
+        matches!(self, ClusterMove::RigidReverseCycle { .. })
     }
 
     /// Short name, for per-arm reporting.
