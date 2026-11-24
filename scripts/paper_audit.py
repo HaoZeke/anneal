@@ -624,6 +624,35 @@ def gmin_panel_readme(audit: Audit, panel: object, groups: dict) -> None:
     new_session = groups[("au55", "gmin")][0]["session"]
     audit.said(GMIN_PANEL_README, GMIN_PANEL_REVISION)
     audit.said(GMIN_PANEL_README, gmin_revision(groups))
+    for sha in (
+        "63ee803397a625cb4b51218f5467f4baa2e6da6a",
+        "ac5cfc3fd39c2b29cb71ed53ca1b34b39d33f4c2",
+        "1c1b12384683485cf820d3a244151b48973dc0f7",
+        "465e583be21e9b82befc94ff01cf931a13f8f0a9",
+    ):
+        audit.said(GMIN_PANEL_README, sha)
+    source_note = "bench/gmin-panel/gmin-source.txt"
+    patch_lines = [
+        line.removeprefix("patch=").strip()
+        for line in audit.text(source_note).splitlines()
+        if line.startswith("patch=")
+    ]
+    audit.record(bool(patch_lines), source_note, "patch lines present", str(len(patch_lines)), ">= 1")
+    for entry in patch_lines:
+        rel_patch, _, recorded_sha = entry.partition(" ")
+        actual_sha = hashlib.sha256((ROOT / rel_patch).read_bytes()).hexdigest()
+        audit.record(
+            recorded_sha.strip() == actual_sha,
+            source_note,
+            f"in-tree patch sha256 {rel_patch}",
+            recorded_sha.strip(),
+            actual_sha,
+        )
+    audit.said(
+        source_note,
+        "rows_patch=bench/lj104-lattice/v2/h2h-gmin.patch@465e583be21e9b82befc94ff01cf931a13f8f0a9 "
+        "a31221a67883d20032a029e34e3d81bd62c5bcb786c97fff02a9c234adc34553",
+    )
     audit.said(GMIN_PANEL_README, f"adds the energy {dict((r[0], r[3]) for r in panel.SYSTEMS)['lj103']:.6f}")
     r0 = 2.884
     scale = r0 / 2.0 ** (1.0 / 6.0)

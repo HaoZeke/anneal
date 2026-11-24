@@ -76,6 +76,14 @@ impl Certificate {
         }
     }
 
+    pub(crate) fn duals(&self, transposed: bool) -> (&[f64], &[f64]) {
+        if transposed {
+            (&self.column_potential, &self.row_potential)
+        } else {
+            (&self.row_potential, &self.column_potential)
+        }
+    }
+
     /// One extra column dual, so a test can hand the checker a vector of the
     /// wrong length. The stored optimum is unchanged.
     #[cfg(test)]
@@ -87,22 +95,39 @@ impl Certificate {
 
 /// Whether `certificate` forces `assignment` on `costs`, in which case
 /// [`minimum_cost_assignment`] returns `assignment`.
+#[cfg(test)]
 pub(crate) fn certifies(
     costs: &[f64],
     n: usize,
     assignment: &[usize],
     certificate: &Certificate,
 ) -> bool {
+    certifies_duals(
+        costs,
+        n,
+        assignment,
+        &certificate.row_potential,
+        &certificate.column_potential,
+    )
+}
+
+pub(crate) fn certifies_duals(
+    costs: &[f64],
+    n: usize,
+    assignment: &[usize],
+    row_potential: &[f64],
+    column_potential: &[f64],
+) -> bool {
     if n == 0
         || n >= SHORTEST_PATH_FROM
         || assignment.len() != n
-        || certificate.row_potential.len() != n + 1
-        || certificate.column_potential.len() != n + 1
+        || row_potential.len() != n + 1
+        || column_potential.len() != n + 1
         || !well_formed(costs, n)
     {
         return false;
     }
-    let mut used = vec![false; n];
+    let mut used = [false; SHORTEST_PATH_FROM];
     for &column in assignment {
         if column >= n || std::mem::replace(&mut used[column], true) {
             return false;
@@ -112,8 +137,8 @@ pub(crate) fn certifies(
         costs,
         n,
         assignment,
-        &certificate.row_potential,
-        &certificate.column_potential,
+        row_potential,
+        column_potential,
         Separation::KuhnMunkres,
     )
 }
@@ -122,46 +147,6 @@ pub(crate) fn certifies(
 ///
 /// `row` has one entry per column `1..=row.len()`, and the other slices
 /// are addressable at `0..=row.len()`. `column` is one of those indices.
-#[allow(clippy::too_many_arguments)]
-unsafe fn scan_columns(
-    row: &[f64],
-    row_dual: f64,
-    column_potential: &[f64],
-    min_reduced: &mut [f64],
-    predecessor: &mut [usize],
-    used: &[u8],
-    column: usize,
-) -> (f64, usize) {
-    #[cfg(target_arch = "x86_64")]
-    if std::is_x86_feature_detected!("avx2") {
-        return unsafe {
-            scan_avx2(
-                row,
-                row_dual,
-                column_potential,
-                min_reduced,
-                predecessor,
-                used,
-                column,
-            )
-        };
-    }
-    unsafe {
-        scan_scalar(
-            row,
-            row_dual,
-            column_potential,
-            min_reduced,
-            predecessor,
-            used,
-            column,
-        )
-    }
-}
-
-/// # Safety
-///
-/// Same slice contract as [`scan_columns`].
 #[allow(clippy::too_many_arguments)]
 unsafe fn scan_scalar(
     row: &[f64],
@@ -301,41 +286,6 @@ unsafe fn scan_avx2(
 /// Subtract `delta` from the unused reduced costs, and from the column
 /// dual of every used column. One subtraction per updated lane, matching
 /// the scalar loop.
-fn adjust_reduced(
-    delta: f64,
-    n: usize,
-    used: &[u8],
-    min_reduced: &mut [f64],
-    column_potential: &mut [f64],
-    column_match: &[usize],
-    row_potential: &mut [f64],
-) {
-    #[cfg(target_arch = "x86_64")]
-    if std::is_x86_feature_detected!("avx2") {
-        unsafe {
-            adjust_reduced_avx2(
-                delta,
-                n,
-                used,
-                min_reduced,
-                column_potential,
-                column_match,
-                row_potential,
-            );
-        }
-        return;
-    }
-    adjust_reduced_scalar(
-        delta,
-        n,
-        used,
-        min_reduced,
-        column_potential,
-        column_match,
-        row_potential,
-    );
-}
-
 fn adjust_reduced_scalar(
     delta: f64,
     n: usize,
@@ -530,13 +480,6 @@ enum Separation {
     KuhnMunkres,
 }
 
-fn kuhn_munkres_tolerance(costs: &[f64]) -> f64 {
-    let scale = costs
-        .iter()
-        .fold(1.0_f64, |largest, value| largest.max(value.abs()));
-    scale * 1e-9
-}
-
 /// Whether the last successful dense scan had no other optimal edge.
 ///
 /// A Kuhn-Munkres result reports false: the smaller walks keep that
@@ -561,6 +504,7 @@ struct PathScratch {
     predecessor: Vec<usize>,
     min_reduced: Vec<f64>,
     used: Vec<u8>,
+    seen: Vec<u8>,
 }
 
 std::thread_local! {
@@ -572,6 +516,7 @@ std::thread_local! {
             predecessor: Vec::new(),
             min_reduced: Vec::new(),
             used: Vec::new(),
+            seen: Vec::new(),
         })
     };
 }
@@ -586,6 +531,8 @@ fn solve_shortest_paths(
     // `used` is a byte flag, not `Vec<bool>`: the bit-packed form turns this
     // scan into a shift per column. The scratch is reused across calls on
     // this thread. One solve does not call another.
+    #[cfg(target_arch = "x86_64")]
+    let use_avx2 = std::is_x86_feature_detected!("avx2");
     PATH_SCRATCH.with(|cell| {
         let scratch = &mut *cell.borrow_mut();
         let width = n + 1;
@@ -595,6 +542,7 @@ fn solve_shortest_paths(
         scratch.predecessor.resize(width, 0);
         scratch.min_reduced.resize(width, 0.0);
         scratch.used.resize(width, 0);
+        scratch.seen.resize(n, 0);
         let PathScratch {
             row_potential,
             column_potential,
@@ -602,35 +550,76 @@ fn solve_shortest_paths(
             predecessor,
             min_reduced,
             used,
+            seen,
         } = scratch;
         row_potential[..width].fill(0.0);
         column_potential[..width].fill(0.0);
         column_match[..width].fill(0);
-        solve_shortest_paths_in(
+        let ok = {
+            #[cfg(target_arch = "x86_64")]
+            if use_avx2 {
+                unsafe {
+                    solve_shortest_paths_loop_avx2(
+                        costs,
+                        n,
+                        &mut row_potential[..width],
+                        &mut column_potential[..width],
+                        &mut column_match[..width],
+                        &mut predecessor[..width],
+                        &mut min_reduced[..width],
+                        &mut used[..width],
+                    )
+                }
+            } else {
+                solve_shortest_paths_loop_scalar(
+                    costs,
+                    n,
+                    &mut row_potential[..width],
+                    &mut column_potential[..width],
+                    &mut column_match[..width],
+                    &mut predecessor[..width],
+                    &mut min_reduced[..width],
+                    &mut used[..width],
+                )
+            }
+            #[cfg(not(target_arch = "x86_64"))]
+            solve_shortest_paths_loop_scalar(
+                costs,
+                n,
+                &mut row_potential[..width],
+                &mut column_potential[..width],
+                &mut column_match[..width],
+                &mut predecessor[..width],
+                &mut min_reduced[..width],
+                &mut used[..width],
+            )
+        };
+        if !ok {
+            return None;
+        }
+        finish_shortest_paths(
             costs,
             n,
             separation,
-            &mut row_potential[..width],
-            &mut column_potential[..width],
-            &mut column_match[..width],
-            &mut predecessor[..width],
-            &mut min_reduced[..width],
-            &mut used[..width],
+            &row_potential[..width],
+            &column_potential[..width],
+            &column_match[..width],
+            &mut seen[..n],
         )
     })
 }
 
-fn solve_shortest_paths_in(
+#[allow(clippy::too_many_arguments)]
+fn solve_shortest_paths_loop_scalar(
     costs: &[f64],
     n: usize,
-    separation: Option<Separation>,
     row_potential: &mut [f64],
     column_potential: &mut [f64],
     column_match: &mut [usize],
     predecessor: &mut [usize],
     min_reduced: &mut [f64],
     used: &mut [u8],
-) -> Option<(Vec<usize>, Option<Certificate>)> {
+) -> bool {
     for row in 1..=n {
         column_match[0] = row;
         let mut column = 0usize;
@@ -642,7 +631,7 @@ fn solve_shortest_paths_in(
             let row_base = (matched_row - 1) * n;
             let row_dual = row_potential[matched_row];
             let (delta, next_column) = unsafe {
-                scan_columns(
+                scan_scalar(
                     &costs[row_base..row_base + n],
                     row_dual,
                     column_potential,
@@ -653,9 +642,9 @@ fn solve_shortest_paths_in(
                 )
             };
             if !delta.is_finite() {
-                return None;
+                return false;
             }
-            adjust_reduced(
+            adjust_reduced_scalar(
                 delta,
                 n,
                 used,
@@ -675,19 +664,92 @@ fn solve_shortest_paths_in(
             column = previous;
         }
     }
+    true
+}
 
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[allow(clippy::too_many_arguments)]
+unsafe fn solve_shortest_paths_loop_avx2(
+    costs: &[f64],
+    n: usize,
+    row_potential: &mut [f64],
+    column_potential: &mut [f64],
+    column_match: &mut [usize],
+    predecessor: &mut [usize],
+    min_reduced: &mut [f64],
+    used: &mut [u8],
+) -> bool {
+    for row in 1..=n {
+        column_match[0] = row;
+        let mut column = 0usize;
+        min_reduced.fill(f64::INFINITY);
+        used.fill(0);
+        loop {
+            used[column] = 1;
+            let matched_row = column_match[column];
+            let row_base = (matched_row - 1) * n;
+            let row_dual = row_potential[matched_row];
+            let (delta, next_column) = unsafe {
+                scan_avx2(
+                    &costs[row_base..row_base + n],
+                    row_dual,
+                    column_potential,
+                    min_reduced,
+                    predecessor,
+                    used,
+                    column,
+                )
+            };
+            if !delta.is_finite() {
+                return false;
+            }
+            unsafe {
+                adjust_reduced_avx2(
+                    delta,
+                    n,
+                    used,
+                    min_reduced,
+                    column_potential,
+                    column_match,
+                    row_potential,
+                );
+            }
+            column = next_column;
+            if column_match[column] == 0 {
+                break;
+            }
+        }
+        while column != 0 {
+            let previous = predecessor[column];
+            column_match[column] = column_match[previous];
+            column = previous;
+        }
+    }
+    true
+}
+
+fn finish_shortest_paths(
+    costs: &[f64],
+    n: usize,
+    separation: Option<Separation>,
+    row_potential: &[f64],
+    column_potential: &[f64],
+    column_match: &[usize],
+    seen: &mut [u8],
+) -> Option<(Vec<usize>, Option<Certificate>)> {
     let mut assignment = vec![0usize; n];
-    let mut seen = vec![false; n];
+    seen.fill(0);
     for column in 1..=n {
         let row = column_match[column];
         if row == 0 || row > n {
             return None;
         }
         let slot = row - 1;
-        if seen[slot] {
+        if seen[slot] != 0 {
             return None;
         }
-        seen[slot] = true;
+        seen[slot] = 1;
         assignment[slot] = column - 1;
     }
     let unique = separation.is_some_and(|separation| {
@@ -707,6 +769,26 @@ fn solve_shortest_paths_in(
     Some((assignment, certificate))
 }
 
+struct UniqueScratch {
+    matched_row: Vec<usize>,
+    row_offsets: Vec<usize>,
+    edges: Vec<usize>,
+    color: Vec<u8>,
+    stack: Vec<(usize, usize)>,
+}
+
+std::thread_local! {
+    static UNIQUE_SCRATCH: std::cell::RefCell<UniqueScratch> = const {
+        std::cell::RefCell::new(UniqueScratch {
+            matched_row: Vec::new(),
+            row_offsets: Vec::new(),
+            edges: Vec::new(),
+            color: Vec::new(),
+            stack: Vec::new(),
+        })
+    };
+}
+
 /// Whether no alternating cycle of edges within the separation's slack
 /// of tight leaves the optimum.
 ///
@@ -722,9 +804,6 @@ fn optimum_is_unique(
     column_potential: &[f64],
     separation: Separation,
 ) -> bool {
-    let reduced = |row: usize, column: usize| {
-        costs[row * n + column] - row_potential[row + 1] - column_potential[column + 1]
-    };
     let slack = match separation {
         Separation::Noise => {
             let mut scale = 1.0_f64;
@@ -737,10 +816,16 @@ fn optimum_is_unique(
         }
         Separation::KuhnMunkres => {
             let mut noise = 0.0_f64;
+            let mut scale = 1.0_f64;
             for row in 0..n {
+                let row_pot = row_potential[row + 1];
+                let matched = assignment[row];
+                let base = row * n;
                 for column in 0..n {
-                    let value = reduced(row, column);
-                    noise = noise.max(if column == assignment[row] {
+                    let cost = costs[base + column];
+                    scale = scale.max(cost.abs());
+                    let value = cost - row_pot - column_potential[column + 1];
+                    noise = noise.max(if column == matched {
                         value.abs()
                     } else {
                         -value
@@ -751,90 +836,68 @@ fn optimum_is_unique(
                 return false;
             }
             let width = n as f64;
-            2.0 * (width * kuhn_munkres_tolerance(costs) + 2.0 * width * noise)
+            2.0 * (width * (scale * 1e-9) + 2.0 * width * noise)
         }
     };
-    let mut matched_row = vec![0usize; n];
-    for (row, &column) in assignment.iter().enumerate() {
-        matched_row[column] = row;
-    }
-    let mut outgoing: Vec<Vec<usize>> = vec![Vec::new(); n];
-    for row in 0..n {
-        let matched = assignment[row];
-        for column in 0..n {
-            if column == matched {
+    UNIQUE_SCRATCH.with(|cell| {
+        let scratch = &mut *cell.borrow_mut();
+        scratch.matched_row.resize(n, 0);
+        for (row, &column) in assignment.iter().enumerate() {
+            scratch.matched_row[column] = row;
+        }
+        scratch.row_offsets.clear();
+        scratch.row_offsets.reserve(n + 1);
+        scratch.edges.clear();
+        scratch.row_offsets.push(0);
+        for row in 0..n {
+            let matched = assignment[row];
+            let row_pot = row_potential[row + 1];
+            let base = row * n;
+            for column in 0..n {
+                if column == matched {
+                    continue;
+                }
+                let reduced = costs[base + column] - row_pot - column_potential[column + 1];
+                if reduced <= slack {
+                    scratch.edges.push(scratch.matched_row[column]);
+                }
+            }
+            scratch.row_offsets.push(scratch.edges.len());
+        }
+        scratch.color.resize(n, 0);
+        scratch.color[..n].fill(0);
+        scratch.stack.clear();
+        let mut unique = true;
+        'search: for start in 0..n {
+            if scratch.color[start] != 0 {
                 continue;
             }
-            if reduced(row, column) <= slack {
-                outgoing[row].push(matched_row[column]);
+            scratch.color[start] = 1;
+            scratch.stack.push((start, 0usize));
+            while let Some((node, edge)) = scratch.stack.pop() {
+                let row_start = scratch.row_offsets[node];
+                let degree = scratch.row_offsets[node + 1] - row_start;
+                if edge == degree {
+                    scratch.color[node] = 2;
+                    continue;
+                }
+                scratch.stack.push((node, edge + 1));
+                let next = scratch.edges[row_start + edge];
+                if scratch.color[next] == 1 {
+                    unique = false;
+                    break 'search;
+                }
+                if scratch.color[next] == 0 {
+                    scratch.color[next] = 1;
+                    scratch.stack.push((next, 0));
+                }
             }
         }
-    }
-    let mut color = vec![0u8; n];
-    let mut stack = Vec::new();
-    let mut unique = true;
-    'search: for start in 0..n {
-        if color[start] != 0 {
-            continue;
-        }
-        color[start] = 1;
-        stack.push((start, 0usize));
-        while let Some((node, edge)) = stack.pop() {
-            if edge == outgoing[node].len() {
-                color[node] = 2;
-                continue;
-            }
-            stack.push((node, edge + 1));
-            let next = outgoing[node][edge];
-            if color[next] == 1 {
-                unique = false;
-                break 'search;
-            }
-            if color[next] == 0 {
-                color[next] = 1;
-                stack.push((next, 0));
-            }
-        }
-    }
-    unique
+        unique
+    })
 }
 
-/// Left-to-right minimum slack of the unseen columns of every seen row.
-///
-/// `delta.min(slack)` keeps the bits of a scalar scan: each slack is
-/// `(row potential + column potential) - weight`, and a later equal
-/// value does not replace an earlier one.
-fn phase_delta(
-    n: usize,
-    weights: &[f64],
-    row_potential: &[f64],
-    column_potential: &[f64],
-    rows_seen: &[bool],
-    columns_seen: &[bool],
-) -> f64 {
-    #[cfg(target_arch = "x86_64")]
-    if std::is_x86_feature_detected!("avx2") {
-        return unsafe {
-            phase_delta_avx2(
-                n,
-                weights,
-                row_potential,
-                column_potential,
-                rows_seen,
-                columns_seen,
-            )
-        };
-    }
-    phase_delta_scalar(
-        n,
-        weights,
-        row_potential,
-        column_potential,
-        rows_seen,
-        columns_seen,
-    )
-}
-
+#[cfg(test)]
 fn phase_delta_scalar(
     n: usize,
     weights: &[f64],
@@ -864,7 +927,7 @@ fn phase_delta_scalar(
 ///
 /// AVX2 must be enabled. `weights` holds `n * n` entries and both
 /// potential slices hold `n`.
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(test, target_arch = "x86_64"))]
 #[target_feature(enable = "avx2")]
 unsafe fn phase_delta_avx2(
     n: usize,
@@ -924,128 +987,106 @@ pub(crate) fn kuhn_munkres_walk(costs: &[f64], n: usize) -> Option<Vec<usize>> {
     kuhn_munkres(costs, n)
 }
 
-fn kuhn_munkres(costs: &[f64], n: usize) -> Option<Vec<usize>> {
-    let tight_tolerance = kuhn_munkres_tolerance(costs);
-    let weights: Vec<f64> = costs.iter().map(|cost| -cost).collect();
-    let mut row_potential = vec![f64::NEG_INFINITY; n];
-    for row in 0..n {
-        for column in 0..n {
-            row_potential[row] = row_potential[row].max(weights[row * n + column]);
-        }
-    }
-    let mut column_potential = vec![0.0_f64; n];
-    let mut row_match = vec![usize::MAX; n];
-    let mut column_match = vec![usize::MAX; n];
-    let mut rows_seen = vec![false; n];
-    let mut columns_seen = vec![false; n];
-
-    for root in 0..n {
-        let mut augmented = false;
-        for _ in 0..=n {
-            rows_seen.fill(false);
-            columns_seen.fill(false);
-            if augment_tight(
-                root,
-                n,
-                &weights,
-                &row_potential,
-                &column_potential,
-                tight_tolerance,
-                &mut row_match,
-                &mut column_match,
-                &mut rows_seen,
-                &mut columns_seen,
-            ) {
-                augmented = true;
-                break;
-            }
-
-            let delta = phase_delta(
-                n,
-                &weights,
-                &row_potential,
-                &column_potential,
-                &rows_seen,
-                &columns_seen,
-            );
-            if !(delta > 0.0) || !delta.is_finite() {
-                return None;
-            }
-            for index in 0..n {
-                if rows_seen[index] {
-                    row_potential[index] -= delta;
-                }
-                if columns_seen[index] {
-                    column_potential[index] += delta;
-                }
-            }
-        }
-        if !augmented {
-            return None;
-        }
-    }
-
-    let mut used = vec![false; n];
-    for &column in &row_match {
-        if column == usize::MAX || used[column] {
-            return None;
-        }
-        used[column] = true;
-    }
-    Some(row_match)
+struct KmScratch {
+    weights: Vec<f64>,
+    row_potential: Vec<f64>,
+    column_potential: Vec<f64>,
+    row_match: Vec<usize>,
+    column_match: Vec<usize>,
+    rows_seen: Vec<u8>,
+    columns_seen: Vec<u8>,
+    used: Vec<u8>,
 }
 
-#[allow(clippy::too_many_arguments)]
-fn augment_tight(
-    row: usize,
-    n: usize,
-    weights: &[f64],
-    row_potential: &[f64],
-    column_potential: &[f64],
-    tight_tolerance: f64,
-    row_match: &mut [usize],
-    column_match: &mut [usize],
-    rows_seen: &mut [bool],
-    columns_seen: &mut [bool],
-) -> bool {
-    rows_seen[row] = true;
-    let mut column = 0usize;
-    while column < n {
-        // A group with no tight unseen column cannot change the first
-        // column the scalar walk would enter. The slack bits match that walk.
-        #[cfg(target_arch = "x86_64")]
-        if column + 4 <= n
-            && std::is_x86_feature_detected!("avx2")
-            && unsafe {
-                group_ineligible(
-                    row,
-                    column,
+std::thread_local! {
+    static KM_SCRATCH: std::cell::RefCell<KmScratch> = const {
+        std::cell::RefCell::new(KmScratch {
+            weights: Vec::new(),
+            row_potential: Vec::new(),
+            column_potential: Vec::new(),
+            row_match: Vec::new(),
+            column_match: Vec::new(),
+            rows_seen: Vec::new(),
+            columns_seen: Vec::new(),
+            used: Vec::new(),
+        })
+    };
+}
+
+fn kuhn_munkres(costs: &[f64], n: usize) -> Option<Vec<usize>> {
+    #[cfg(target_arch = "x86_64")]
+    let use_avx2 = std::is_x86_feature_detected!("avx2");
+    KM_SCRATCH.with(|cell| {
+        let scratch = &mut *cell.borrow_mut();
+        let nn = n * n;
+        scratch.weights.resize(nn, 0.0);
+        scratch.row_potential.resize(n, f64::NEG_INFINITY);
+        scratch.column_potential.resize(n, 0.0);
+        scratch.row_match.resize(n, usize::MAX);
+        scratch.column_match.resize(n, usize::MAX);
+        scratch.rows_seen.resize(n, 0);
+        scratch.columns_seen.resize(n, 0);
+        scratch.used.resize(n, 0);
+
+        let mut scale = 1.0_f64;
+        for (slot, &cost) in scratch.weights[..nn].iter_mut().zip(costs.iter()) {
+            scale = scale.max(cost.abs());
+            *slot = -cost;
+        }
+        let tight_tolerance = scale * 1e-9;
+
+        let weights = &scratch.weights[..nn];
+        let row_potential = &mut scratch.row_potential[..n];
+        let column_potential = &mut scratch.column_potential[..n];
+        let row_match = &mut scratch.row_match[..n];
+        let column_match = &mut scratch.column_match[..n];
+        let rows_seen = &mut scratch.rows_seen[..n];
+        let columns_seen = &mut scratch.columns_seen[..n];
+        let used = &mut scratch.used[..n];
+
+        for row in 0..n {
+            let mut best = f64::NEG_INFINITY;
+            let base = row * n;
+            for column in 0..n {
+                best = best.max(weights[base + column]);
+            }
+            row_potential[row] = best;
+        }
+        column_potential.fill(0.0);
+        row_match.fill(usize::MAX);
+        column_match.fill(usize::MAX);
+
+        let ok = {
+            #[cfg(target_arch = "x86_64")]
+            if use_avx2 {
+                unsafe {
+                    kuhn_munkres_loop_avx2(
+                        n,
+                        weights,
+                        row_potential,
+                        column_potential,
+                        tight_tolerance,
+                        row_match,
+                        column_match,
+                        rows_seen,
+                        columns_seen,
+                    )
+                }
+            } else {
+                kuhn_munkres_loop_scalar(
                     n,
                     weights,
                     row_potential,
                     column_potential,
                     tight_tolerance,
+                    row_match,
+                    column_match,
+                    rows_seen,
                     columns_seen,
                 )
             }
-        {
-            column += 4;
-            continue;
-        }
-        if columns_seen[column] {
-            column += 1;
-            continue;
-        }
-        let slack = row_potential[row] + column_potential[column] - weights[row * n + column];
-        if slack.abs() > tight_tolerance {
-            column += 1;
-            continue;
-        }
-        columns_seen[column] = true;
-        let displaced = column_match[column];
-        if displaced == usize::MAX
-            || augment_tight(
-                displaced,
+            #[cfg(not(target_arch = "x86_64"))]
+            kuhn_munkres_loop_scalar(
                 n,
                 weights,
                 row_potential,
@@ -1056,9 +1097,301 @@ fn augment_tight(
                 rows_seen,
                 columns_seen,
             )
-        {
-            row_match[row] = column;
-            column_match[column] = row;
+        };
+        if !ok {
+            return None;
+        }
+
+        used.fill(0);
+        for &column in row_match.iter() {
+            if column == usize::MAX || used[column] != 0 {
+                return None;
+            }
+            used[column] = 1;
+        }
+        Some(row_match.to_vec())
+    })
+}
+
+struct KmCtx {
+    n: usize,
+    tight_tolerance: f64,
+    weights: *const f64,
+    row_potential: *const f64,
+    column_potential: *const f64,
+    row_match: *mut usize,
+    column_match: *mut usize,
+    rows_seen: *mut u8,
+    columns_seen: *mut u8,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn kuhn_munkres_loop_scalar(
+    n: usize,
+    weights: &[f64],
+    row_potential: &mut [f64],
+    column_potential: &mut [f64],
+    tight_tolerance: f64,
+    row_match: &mut [usize],
+    column_match: &mut [usize],
+    rows_seen: &mut [u8],
+    columns_seen: &mut [u8],
+) -> bool {
+    for root in 0..n {
+        let mut augmented = false;
+        for _ in 0..=n {
+            rows_seen.fill(0);
+            columns_seen.fill(0);
+            let mut ctx = KmCtx {
+                n,
+                tight_tolerance,
+                weights: weights.as_ptr(),
+                row_potential: row_potential.as_ptr(),
+                column_potential: column_potential.as_ptr(),
+                row_match: row_match.as_mut_ptr(),
+                column_match: column_match.as_mut_ptr(),
+                rows_seen: rows_seen.as_mut_ptr(),
+                columns_seen: columns_seen.as_mut_ptr(),
+            };
+            if unsafe { augment_tight_scalar(root, &mut ctx) } {
+                augmented = true;
+                break;
+            }
+
+            let mut delta = f64::INFINITY;
+            for row in 0..n {
+                if rows_seen[row] == 0 {
+                    continue;
+                }
+                let base = row * n;
+                let row_pot = row_potential[row];
+                for column in 0..n {
+                    if columns_seen[column] != 0 {
+                        continue;
+                    }
+                    let slack = row_pot + column_potential[column] - weights[base + column];
+                    delta = delta.min(slack);
+                }
+            }
+            if !(delta > 0.0) || !delta.is_finite() {
+                return false;
+            }
+            for index in 0..n {
+                if rows_seen[index] != 0 {
+                    row_potential[index] -= delta;
+                }
+                if columns_seen[index] != 0 {
+                    column_potential[index] += delta;
+                }
+            }
+        }
+        if !augmented {
+            return false;
+        }
+    }
+    true
+}
+
+unsafe fn augment_tight_scalar(row: usize, ctx: &mut KmCtx) -> bool {
+    let n = ctx.n;
+    unsafe { *ctx.rows_seen.add(row) = 1 };
+    let base = row * n;
+    let row_pot = unsafe { *ctx.row_potential.add(row) };
+    for column in 0..n {
+        if unsafe { *ctx.columns_seen.add(column) } != 0 {
+            continue;
+        }
+        let slack = row_pot + unsafe { *ctx.column_potential.add(column) }
+            - unsafe { *ctx.weights.add(base + column) };
+        if slack.abs() > ctx.tight_tolerance {
+            continue;
+        }
+        unsafe { *ctx.columns_seen.add(column) = 1 };
+        let displaced = unsafe { *ctx.column_match.add(column) };
+        if displaced == usize::MAX || unsafe { augment_tight_scalar(displaced, ctx) } {
+            unsafe {
+                *ctx.row_match.add(row) = column;
+                *ctx.column_match.add(column) = row;
+            }
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[allow(clippy::too_many_arguments)]
+unsafe fn kuhn_munkres_loop_avx2(
+    n: usize,
+    weights: &[f64],
+    row_potential: &mut [f64],
+    column_potential: &mut [f64],
+    tight_tolerance: f64,
+    row_match: &mut [usize],
+    column_match: &mut [usize],
+    rows_seen: &mut [u8],
+    columns_seen: &mut [u8],
+) -> bool {
+    use std::arch::x86_64::{
+        _mm_cmpeq_epi8, _mm_cvtsi32_si128, _mm_setzero_si128, _mm256_add_pd, _mm256_blendv_pd,
+        _mm256_castsi256_pd, _mm256_cvtepi8_epi64, _mm256_loadu_pd, _mm256_min_pd, _mm256_set1_pd,
+        _mm256_storeu_pd, _mm256_sub_pd,
+    };
+    let weight_ptr = weights.as_ptr();
+    let col_pot_ptr = column_potential.as_ptr();
+    let cols_seen_ptr = columns_seen.as_ptr();
+    let inf_vec = _mm256_set1_pd(f64::INFINITY);
+    let zero = _mm_setzero_si128();
+    for root in 0..n {
+        let mut augmented = false;
+        for _ in 0..=n {
+            rows_seen.fill(0);
+            columns_seen.fill(0);
+            let mut ctx = KmCtx {
+                n,
+                tight_tolerance,
+                weights: weight_ptr,
+                row_potential: row_potential.as_ptr(),
+                column_potential: col_pot_ptr,
+                row_match: row_match.as_mut_ptr(),
+                column_match: column_match.as_mut_ptr(),
+                rows_seen: rows_seen.as_mut_ptr(),
+                columns_seen: columns_seen.as_mut_ptr(),
+            };
+            if unsafe { augment_tight_avx2(root, &mut ctx) } {
+                augmented = true;
+                break;
+            }
+
+            let mut delta = f64::INFINITY;
+            let mut vec_delta = inf_vec;
+            for row in 0..n {
+                if rows_seen[row] == 0 {
+                    continue;
+                }
+                let base = row * n;
+                let dual = _mm256_set1_pd(row_potential[row]);
+                let mut column = 0usize;
+                while column + 4 <= n {
+                    let seen4 = unsafe {
+                        std::ptr::read_unaligned(cols_seen_ptr.add(column) as *const i32)
+                    };
+                    if seen4 != 0x0101_0101 {
+                        let bytes = _mm_cvtsi32_si128(seen4);
+                        let open =
+                            _mm256_castsi256_pd(_mm256_cvtepi8_epi64(_mm_cmpeq_epi8(bytes, zero)));
+                        unsafe {
+                            let weight = _mm256_loadu_pd(weight_ptr.add(base + column));
+                            let potential = _mm256_loadu_pd(col_pot_ptr.add(column));
+                            let slack = _mm256_sub_pd(_mm256_add_pd(dual, potential), weight);
+                            let masked = _mm256_blendv_pd(inf_vec, slack, open);
+                            vec_delta = _mm256_min_pd(vec_delta, masked);
+                        }
+                    }
+                    column += 4;
+                }
+                while column < n {
+                    if unsafe { *cols_seen_ptr.add(column) } == 0 {
+                        let slack = row_potential[row] + unsafe { *col_pot_ptr.add(column) }
+                            - unsafe { *weight_ptr.add(base + column) };
+                        delta = delta.min(slack);
+                    }
+                    column += 1;
+                }
+            }
+            let mut lanes = [0.0_f64; 4];
+            unsafe { _mm256_storeu_pd(lanes.as_mut_ptr(), vec_delta) };
+            for lane in lanes {
+                delta = delta.min(lane);
+            }
+            if !(delta > 0.0) || !delta.is_finite() {
+                return false;
+            }
+            for index in 0..n {
+                if rows_seen[index] != 0 {
+                    row_potential[index] -= delta;
+                }
+                if columns_seen[index] != 0 {
+                    column_potential[index] += delta;
+                }
+            }
+        }
+        if !augmented {
+            return false;
+        }
+    }
+    true
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn augment_tight_avx2(row: usize, ctx: &mut KmCtx) -> bool {
+    use std::arch::x86_64::{
+        _CMP_NGT_UQ, _mm256_add_pd, _mm256_andnot_pd, _mm256_cmp_pd, _mm256_loadu_pd,
+        _mm256_movemask_pd, _mm256_set1_pd, _mm256_sub_pd,
+    };
+    let n = ctx.n;
+    unsafe { *ctx.rows_seen.add(row) = 1 };
+    let base = row * n;
+    let row_pot = unsafe { *ctx.row_potential.add(row) };
+    let dual = _mm256_set1_pd(row_pot);
+    let sign_mask = _mm256_set1_pd(-0.0);
+    let tol = _mm256_set1_pd(ctx.tight_tolerance);
+    let weight_ptr = ctx.weights;
+    let col_pot_ptr = ctx.column_potential;
+    let cols_seen_ptr = ctx.columns_seen;
+    let mut column = 0usize;
+    while column + 4 <= n {
+        let seen4 = unsafe { std::ptr::read_unaligned(cols_seen_ptr.add(column) as *const u32) };
+        if seen4 != 0x0101_0101 {
+            let mask = unsafe {
+                let weight = _mm256_loadu_pd(weight_ptr.add(base + column));
+                let potential = _mm256_loadu_pd(col_pot_ptr.add(column));
+                let slack = _mm256_sub_pd(_mm256_add_pd(dual, potential), weight);
+                let abs_slack = _mm256_andnot_pd(sign_mask, slack);
+                let tight = _mm256_cmp_pd(abs_slack, tol, _CMP_NGT_UQ);
+                _mm256_movemask_pd(tight) as u32
+            };
+            let mut m = mask;
+            while m != 0 {
+                let offset = m.trailing_zeros() as usize;
+                m &= m - 1;
+                let c = column + offset;
+                if unsafe { *cols_seen_ptr.add(c) } != 0 {
+                    continue;
+                }
+                unsafe { *cols_seen_ptr.add(c) = 1 };
+                let displaced = unsafe { *ctx.column_match.add(c) };
+                if displaced == usize::MAX || unsafe { augment_tight_avx2(displaced, ctx) } {
+                    unsafe {
+                        *ctx.row_match.add(row) = c;
+                        *ctx.column_match.add(c) = row;
+                    }
+                    return true;
+                }
+            }
+        }
+        column += 4;
+    }
+    while column < n {
+        if unsafe { *cols_seen_ptr.add(column) } != 0 {
+            column += 1;
+            continue;
+        }
+        let slack = row_pot + unsafe { *col_pot_ptr.add(column) }
+            - unsafe { *weight_ptr.add(base + column) };
+        if slack.abs() > ctx.tight_tolerance {
+            column += 1;
+            continue;
+        }
+        unsafe { *cols_seen_ptr.add(column) = 1 };
+        let displaced = unsafe { *ctx.column_match.add(column) };
+        if displaced == usize::MAX || unsafe { augment_tight_avx2(displaced, ctx) } {
+            unsafe {
+                *ctx.row_match.add(row) = column;
+                *ctx.column_match.add(column) = row;
+            }
             return true;
         }
         column += 1;
@@ -1071,7 +1404,7 @@ fn augment_tight(
 /// # Safety
 ///
 /// AVX2 must be enabled. `start + 4 <= n`, and the slices cover the row.
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(test, target_arch = "x86_64"))]
 #[target_feature(enable = "avx2")]
 unsafe fn group_ineligible(
     row: usize,
@@ -1700,5 +2033,83 @@ mod tests {
             assignment[slot] = column - 1;
         }
         Some(assignment)
+    }
+
+    #[test]
+    fn avx2_kuhn_munkres_matches_scalar_walk_and_certifies_duals() {
+        let mut state = 0x9e37_79b9_u64;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            state
+        };
+        for n in [1usize, 4, 7, 13, 38] {
+            for trial in 0..4 {
+                let mut costs = vec![0.0; n * n];
+                for entry in &mut costs {
+                    *entry = ((next() % 200) as f64) / 17.0;
+                }
+                if n >= 4 && trial % 2 == 1 {
+                    for row in 0..n {
+                        costs[row * n + ((row + 1) % n)] = costs[row * n + row];
+                    }
+                }
+                let actual = kuhn_munkres(&costs, n).expect("kuhn_munkres");
+                let mut scale = 1.0_f64;
+                let mut weights = vec![0.0; n * n];
+                for (slot, &cost) in weights.iter_mut().zip(costs.iter()) {
+                    scale = scale.max(cost.abs());
+                    *slot = -cost;
+                }
+                let mut row_potential = vec![f64::NEG_INFINITY; n];
+                for row in 0..n {
+                    for column in 0..n {
+                        row_potential[row] = row_potential[row].max(weights[row * n + column]);
+                    }
+                }
+                let mut column_potential = vec![0.0; n];
+                let mut row_match = vec![usize::MAX; n];
+                let mut column_match = vec![usize::MAX; n];
+                let mut rows_seen = vec![0u8; n];
+                let mut columns_seen = vec![0u8; n];
+                assert!(super::kuhn_munkres_loop_scalar(
+                    n,
+                    &weights,
+                    &mut row_potential,
+                    &mut column_potential,
+                    scale * 1e-9,
+                    &mut row_match,
+                    &mut column_match,
+                    &mut rows_seen,
+                    &mut columns_seen,
+                ));
+                assert_eq!(actual, row_match, "n={n} trial={trial}");
+            }
+        }
+        let unique_costs = vec![0.0, 5.0, 3.0, 2.0, 0.0, 4.0, 6.0, 1.0, 0.0];
+        let (assignment, certificate) =
+            super::solve_shortest_paths(&unique_costs, 3, Some(super::Separation::KuhnMunkres))
+                .expect("unique");
+        let certificate = certificate.expect("certificate");
+        let (row_pot, col_pot) = certificate.duals(false);
+        assert!(super::certifies_duals(
+            &unique_costs,
+            3,
+            &assignment,
+            row_pot,
+            col_pot
+        ));
+        let transposed_costs = vec![0.0, 2.0, 6.0, 5.0, 0.0, 1.0, 3.0, 4.0, 0.0];
+        let mut inv = vec![0usize; 3];
+        for (r, &c) in assignment.iter().enumerate() {
+            inv[c] = r;
+        }
+        let (t_row_pot, t_col_pot) = certificate.duals(true);
+        assert!(super::certifies_duals(
+            &transposed_costs,
+            3,
+            &inv,
+            t_row_pot,
+            t_col_pot
+        ));
     }
 }
