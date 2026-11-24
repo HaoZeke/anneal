@@ -33,6 +33,9 @@ struct Done {
     hit: bool,
     calls: usize,
     charged: usize,
+    branch_on_stall: bool,
+    branch_draws: u64,
+    branch_spent: usize,
     wall_s: f64,
     inside_s: f64,
     best_bits: String,
@@ -187,11 +190,14 @@ fn main() {
         }
     };
     println!(
-        "GATE system={system} seed={seed} budget={} hit={} calls={} charged={} wall_s={:.9} inside_s={:.9} best_bits={} trajectory={} rss_anon_kb={} peak_rss_anon_kb={} core={core}",
+        "GATE system={system} seed={seed} budget={} hit={} calls={} charged={} branch_on_stall={} branch_draws={} branch_spent={} wall_s={:.9} inside_s={:.9} best_bits={} trajectory={} rss_anon_kb={} peak_rss_anon_kb={} core={core}",
         done.budget,
         u8::from(done.hit),
         done.calls,
         done.charged,
+        u8::from(done.branch_on_stall),
+        done.branch_draws,
+        done.branch_spent,
         done.wall_s,
         done.inside_s,
         done.best_bits,
@@ -285,7 +291,15 @@ where
         &mut rng,
     )
     .expect("finite start");
-    finish(budget, reference, started, clock.seconds(), &rss, outcome)
+    finish(
+        budget,
+        reference,
+        cfg.branch_on_stall,
+        started,
+        clock.seconds(),
+        &rss,
+        outcome,
+    )
 }
 
 fn run_hexamer(seed: u64) -> Done {
@@ -309,12 +323,21 @@ fn run_hexamer(seed: u64) -> Done {
     let started = Instant::now();
     let (outcome, _) =
         search_from(&timed, &cfg, &mut ledger, start.view(), seed).expect("finite start");
-    finish(budget, reference, started, clock.seconds(), &rss, outcome)
+    finish(
+        budget,
+        reference,
+        cfg.branch_on_stall,
+        started,
+        clock.seconds(),
+        &rss,
+        outcome,
+    )
 }
 
 fn finish(
     budget: usize,
     reference: f64,
+    branch_on_stall: bool,
     started: Instant,
     inside_s: f64,
     rss: &RssSampler,
@@ -339,6 +362,9 @@ fn finish(
         hit,
         calls,
         charged: outcome.charged,
+        branch_on_stall,
+        branch_draws: outcome.branch_draws,
+        branch_spent: outcome.branch_spent,
         wall_s,
         inside_s,
         best_bits: format!("{:016x}", outcome.best.to_bits()),

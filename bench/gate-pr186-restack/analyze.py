@@ -172,12 +172,21 @@ def judge(rows: list[dict], cell: str) -> dict:
     res["peak_rss_strict"] = pgb[2] <= CAP
     res["peak_rss_band"] = pgb[2] <= max(CAP, pga[2])
     res["peak_rss_fail"] = pgb[1] > max(CAP, pga[2])
-    res["b_path_hits"] = sum(
-        1
-        for r in b.values()
-        if int(r.get("b_path_draws") or 0) > 0
-        and int(r.get("b_path_spent") or 0) > 0
-    )
+    path_checks = []
+    path_enabled = 0
+    for row in b.values():
+        flag = row.get("branch_on_stall")
+        draws = int(row.get("b_path_draws") or 0)
+        spent = int(row.get("b_path_spent") or 0)
+        if flag == "1":
+            path_enabled += 1
+            path_checks.append(draws > 0 and spent > 0)
+        elif flag == "0":
+            path_checks.append(draws == 0 and spent == 0)
+        else:
+            path_checks.append(False)
+    res["b_path_matches"] = sum(path_checks)
+    res["b_path_enabled"] = path_enabled
     res["b_path_draws_sum"] = sum(int(r.get("b_path_draws") or 0) for r in b.values())
     res["b_path_spent_sum"] = sum(int(r.get("b_path_spent") or 0) for r in b.values())
     early = [
@@ -196,8 +205,8 @@ def judge(rows: list[dict], cell: str) -> dict:
     if res["calls_ratio"] and abs(res["calls_ratio"] - 1.0) > 0.02:
         notes.append("calls differ between A and B")
     kind = next(iter(a.values()))["kind"] if a else ""
-    if kind == "molecule" and res["b_path_hits"] != res["n"]:
-        notes.append("B conf-miss path did not run in every seed")
+    if res["b_path_matches"] != res["n"]:
+        notes.append("B conf-miss counters disagree with the resolved configuration")
     if kind == "guard":
         ok, bad = identical(a, b)
         res["identical"] = ok
@@ -219,7 +228,7 @@ def judge(rows: list[dict], cell: str) -> dict:
         failures.append("memory")
     if res.get("identical") is False:
         failures.append("default parity")
-    if kind == "molecule" and res["b_path_hits"] != res["n"]:
+    if res["b_path_matches"] != res["n"]:
         failures.append("conf-miss path")
     res["failures"] = "; ".join(failures)
     res["notes"] = "; ".join(notes)
@@ -238,7 +247,7 @@ FIELDS = [
     "tot_ratio", "tot_lo", "tot_hi", "tot_aa_hi", "tot_strict", "tot_band", "tot_regression",
     "rss_ratio", "rss_lo", "rss_hi", "rss_aa_hi", "rss_strict", "rss_fail",
     "peak_rss_ratio", "peak_rss_lo", "peak_rss_hi", "peak_rss_aa_hi", "peak_rss_strict", "peak_rss_fail",
-    "b_path_hits", "b_path_draws_sum", "b_path_spent_sum",
+    "b_path_matches", "b_path_enabled", "b_path_draws_sum", "b_path_spent_sum",
     "calls_ratio", "early_stop_runs", "identical", "max_abs_dE", "mismatch",
 ]
 
@@ -269,7 +278,10 @@ def main() -> int:
         if not r["complete"]:
             lines.append(f"| {r['cell']} | {r['n']} | {r['verdict']} | | | | | | | | | | {r['notes']} |")
             continue
-        bpath = f"{r['b_path_hits']}/{r['n']}"
+        bpath = (
+            f"{r['b_path_matches']}/{r['n']} "
+            f"({r['b_path_enabled']} enabled)"
+        )
         lines.append(
             f"| {r['cell']} | {r['n']} | {r['verdict']} | {r['hits_a']}/{r['hits_b']}/{r['hits_a2']} "
             f"| {fmt(r['p_fisher'])} | {fmt(r['p_mwu'])} "

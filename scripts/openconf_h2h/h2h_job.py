@@ -37,6 +37,18 @@ from bench_host import host_label  # noqa: E402
 RECORD_GRADIENT = 5.0e-2
 
 
+def charged_value_gradient_calls(counts: dict) -> int:
+    """Value-and-gradient call units, matching the paired-run budget."""
+    try:
+        energy = int(counts["energy_calls"])
+        gradient = int(counts["grad_calls"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("energy_calls and grad_calls are required") from error
+    if energy < 0 or gradient < 0:
+        raise ValueError("energy_calls and grad_calls must be non-negative")
+    return gradient
+
+
 class Harvest:
     """Keeps the lowest sub-gate point of each run of sub-gate evaluations.
 
@@ -147,10 +159,12 @@ def run_anneal(row: dict, seed: int, budget: int, out: Path, local_step: str | N
         "error": error,
         "wall_s": wall,
         **counts,
+        "charged_calls": charged_value_gradient_calls(counts),
         "budget": budget,
         "hops": result.get("hops"),
         "accepted": result.get("accepted"),
         "ledger": result.get("ledger"),
+        "branch_on_stall": result.get("branch_on_stall"),
         "best_kcal": float(result["best_energy"]) * hc.KCAL_PER_EV if error is None else None,
         "candidates": len(frames),
         "groups": len(groups),
@@ -201,7 +215,7 @@ def _trace_pool(trace: list[tuple[np.ndarray, float, int]]):
     def traced(self, conf_id, energy, *args, **kwargs):
         counts = hc.counter().read()
         x = self.mol.GetConformer(int(conf_id)).GetPositions()
-        trace.append((x, float(energy), counts["energy_calls"] + counts["grad_calls"]))
+        trace.append((x, float(energy), charged_value_gradient_calls(counts)))
         return insert(self, conf_id, energy, *args, **kwargs)
 
     ConformerPool.insert = traced
@@ -242,6 +256,7 @@ def run_openconf(row: dict, seed: int, out: Path) -> dict:
     return {
         "wall_s": wall,
         **counts,
+        "charged_calls": charged_value_gradient_calls(counts),
         "candidates": len(frames),
         "trace_frames": len(trace),
         "best_kcal": min((e for _, e in frames), default=float("nan")),

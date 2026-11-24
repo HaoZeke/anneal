@@ -373,10 +373,12 @@ def cluster_search(
     - ``basins``: distinct basins registered.
 
     Returns a dict with ``best`` (flat coordinates in the state layout),
-    ``best_energy``, ``hops``, ``accepted``, ``nve_unavailable``, ``ledger``,
-    ``local_step`` and ``quench_seconds``. ``accepted`` counts the hops the
-    acceptance rule took. ``nve_unavailable`` is true when a constant-energy
-    (NVE) escape was requested and that escape is not compiled; the
+    ``best_energy``, ``hops``, ``accepted``, ``nve_unavailable``,
+    ``branch_on_stall``, ``ledger``, ``local_step`` and ``quench_seconds``.
+    ``branch_on_stall`` is the resolved configuration flag. ``accepted``
+    counts the hops the acceptance rule took. ``nve_unavailable`` is true
+    when a constant-energy (NVE) escape was requested and that escape is not
+    compiled; the
     ``python`` feature compiles it. ``quench_seconds`` is ``None`` unless
     ``local_step="auto"`` timed a potential call and a TRIC step, in seconds.
     """

@@ -61,6 +61,8 @@ INCONCLUSIVE. There are no replacement runs. Each row carries the A and
 B revisions and trees, harness revision, tree and blob identities, arm
 revision, tree and binary digest, host label, salted machine identity and
 CPU model.
+The resolved `branch_on_stall` flag is recorded from the actual
+configuration used by each run.
 
 Outside time per call is (wall minus inside) divided by calls. Outside
 time in total is wall minus inside. Both are reported for every cell.
@@ -104,10 +106,16 @@ is PASS or PASS-BAND.
 
 ## Conf-miss path requirement
 
-The payload reports `branch_draws` and `branch_spent` from
-`Config::branch_on_stall` itself. Every B molecular seed must report both
-as nonzero. Generic ledger activity does not satisfy this requirement.
-The analyzer returns FIX when the path is disabled or does not run.
+The payload reports the actual resolved `branch_on_stall` flag alongside
+the path's own `branch_draws` and `branch_spent` counters. When the flag
+is true, both counters must be nonzero. When it is false, both must be
+exactly zero. Generic ledger activity does not satisfy this requirement.
+
+The recommended molecular configuration used by this panel resolves
+`branch_on_stall` to false. Its molecular rows therefore check that the
+disabled path stays inactive; they do not provide enabled-path molecular
+coverage. A molecular coverage claim needs a separately specified subject
+whose resolved configuration enables the path.
 
 ## Invocation
 

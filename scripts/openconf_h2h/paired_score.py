@@ -11,8 +11,8 @@ run:
 - ``hit``: one of the run's reported conformers is the lowest reference
   conformer (heavy-atom RMSD under 0.25 Å, energy within 0.5 kcal/mol)
 - ``calls_to_hit``: charged value-and-gradient calls spent when the run's
-  trace first held a minimum that polishes to that conformer; the run's
-  charged total when only its final output does
+  trace first held a minimum that polishes to that conformer; a hit without
+  that trace count is rejected
 - ``n_3kcal``: distinct conformers within 3 kcal/mol of E_ref
 - ``error``: the exception a run raised; it is scored on what it harvested
 
@@ -102,6 +102,28 @@ def first_hit(name: str, arm: str, job_dir: Path, lowest: tuple[np.ndarray, floa
     return None
 
 
+def required_charged_calls(info: dict) -> int:
+    """Read the producer's value-and-gradient count without guessing."""
+    try:
+        calls = int(info["charged_calls"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("job.json is missing a valid charged_calls") from error
+    if calls < 0:
+        raise ValueError("job.json charged_calls must be non-negative")
+    return calls
+
+
+def required_first_hit(job_dir: Path, calls_to_hit: int | None, calls: int) -> int:
+    """Validate a hit's trace count without substituting its run total."""
+    if calls_to_hit is None:
+        raise ValueError(f"{job_dir}: hit has no first-hit trace count")
+    if calls_to_hit > calls:
+        raise ValueError(
+            f"{job_dir}: calls_to_hit {calls_to_hit} exceeds charged_calls {calls}"
+        )
+    return calls_to_hit
+
+
 def score_runs(runs: Path, rows_path: Path, workers: int) -> None:
     done = set()
     if rows_path.is_file():
@@ -149,13 +171,12 @@ def score_runs(runs: Path, rows_path: Path, workers: int) -> None:
             key = (name, info["arm"], int(info["seed"]))
             if info["molecule"] != name or key in done:
                 continue
-            calls = int(info["energy_calls"]) + int(info["grad_calls"])
+            calls = required_charged_calls(info)
             hit = any(m.same(lowest, item) for item in mine)
             hit_mirror = hit or any(m.same_or_mirror(lowest, item) for item in mine)
             to_hit = None
             if hit:
-                to_hit = trace_hit[job_dir]
-                to_hit = calls if to_hit is None else min(to_hit, calls)
+                to_hit = required_first_hit(job_dir, trace_hit[job_dir], calls)
             window = [item for item in mine if item[1] - e_ref <= WINDOW]
             new.append(
                 {

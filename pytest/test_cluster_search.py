@@ -497,6 +497,7 @@ def test_cluster_search_reports_where_the_budget_went():
     kwargs = dict(start=WATER_DIMER, species=[8, 1, 1] * 2, groups=[[0, 1, 2], [3, 4, 5]], seed=2)
     out = cluster_search(energy, grad, 6, 600, local_step="tric", **kwargs)
     split = out["ledger"]
+    assert out["branch_on_stall"] is False
     assert set(split) == {
         "spent", "screen", "full", "check", "quenches", "converged", "capped", "screened_out", "returned",
         "branch_draws", "branch_spent", "overlap_rejected", "basins",
@@ -504,6 +505,7 @@ def test_cluster_search_reports_where_the_budget_went():
     for key in split:
         assert f"``{key}``" in (cluster_search.__doc__ or "")
     assert "``ledger``" in cluster_search.__doc__.split("Returns a dict with")[1]
+    assert "``branch_on_stall``" in cluster_search.__doc__.split("Returns a dict with")[1]
     assert 0 < split["spent"] <= 600
     quench = split["screen"] + split["full"] + split["check"]
     assert 0 < quench <= split["spent"]

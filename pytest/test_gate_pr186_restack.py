@@ -13,6 +13,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "openconf_h2h"))
 import h2h_job  # noqa: E402
+import paired_score  # noqa: E402
 
 SPEC = importlib.util.spec_from_file_location(
     "pr186_restack_analyze",
@@ -23,7 +24,13 @@ ANALYZE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ANALYZE)
 
 
-def rows(*, path_draws: int = 1, path_spent: int = 10, calls_to_hit: int = 40):
+def rows(
+    *,
+    path_enabled: bool = False,
+    path_draws: int = 0,
+    path_spent: int = 0,
+    calls_to_hit: int = 40,
+):
     out = []
     for arm in ("A", "B", "Ap"):
         out.append(
@@ -42,6 +49,9 @@ def rows(*, path_draws: int = 1, path_spent: int = 10, calls_to_hit: int = 40):
                 "outside_per_call_s": "0.0055555556",
                 "rss_anon_kb": "1000",
                 "peak_rss_anon_kb": "1100",
+                "branch_on_stall": (
+                    str(int(path_enabled)) if arm == "B" else "0"
+                ),
                 "b_path_draws": str(path_draws if arm == "B" else 0),
                 "b_path_spent": str(path_spent if arm == "B" else 0),
                 "trajectory": "same",
@@ -52,8 +62,23 @@ def rows(*, path_draws: int = 1, path_spent: int = 10, calls_to_hit: int = 40):
     return out
 
 
-def test_gate_fails_when_the_conf_miss_path_is_disabled():
+def test_disabled_conf_miss_path_requires_zero_counters():
     result = ANALYZE.judge(rows(path_draws=0, path_spent=0), "rq3")
+    assert result["verdict"] == "PASS"
+    assert result["b_path_matches"] == 1
+    result = ANALYZE.judge(rows(path_draws=1, path_spent=10), "rq3")
+    assert result["verdict"] == "FIX"
+    assert "conf-miss path" in result["failures"]
+
+
+def test_enabled_conf_miss_path_requires_nonzero_counters():
+    result = ANALYZE.judge(
+        rows(path_enabled=True, path_draws=1, path_spent=10),
+        "rq3",
+    )
+    assert result["verdict"] == "PASS"
+    assert result["b_path_enabled"] == 1
+    result = ANALYZE.judge(rows(path_enabled=True), "rq3")
     assert result["verdict"] == "FIX"
     assert "conf-miss path" in result["failures"]
 
@@ -74,3 +99,18 @@ def test_molecular_trace_records_charged_calls_at_first_hit():
     harvest.close()
     assert harvest.calls == 4
     assert harvest.found == [2]
+
+
+def test_paired_calls_use_one_value_and_gradient_unit():
+    counts = {"energy_calls": 7, "grad_calls": 3}
+    assert h2h_job.charged_value_gradient_calls(counts) == 3
+    assert paired_score.required_charged_calls({"charged_calls": 3}) == 3
+
+
+def test_paired_calls_require_the_producer_column():
+    with np.testing.assert_raises_regex(ValueError, "charged_calls"):
+        paired_score.required_charged_calls(
+            {"energy_calls": 7, "grad_calls": 3}
+        )
+    with np.testing.assert_raises_regex(ValueError, "first-hit trace"):
+        paired_score.required_first_hit(Path("job"), None, 5)

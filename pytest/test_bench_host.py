@@ -67,6 +67,7 @@ def test_scoring_a_job_written_before_the_host_label_does_not_raise(tmp_path, mo
     pytest.importorskip("rdkit")
     pytest.importorskip("scipy")
     import h2h_common as hc
+    import h2h_job
     import paired_score
     from h2h_score import Molecule
 
@@ -80,9 +81,15 @@ def test_scoring_a_job_written_before_the_host_label_does_not_raise(tmp_path, mo
     job_dir.mkdir(parents=True)
     old = {
         "molecule": "fccf", "arm": "anneal", "seed": 1, "energy_calls": 10, "grad_calls": 10,
+        "charged_calls": 10,
         "wall_s": 1.0, "pot_s": 0.5, "outside_s": 0.5, "hostname": "workstation-17",
     }
     (job_dir / "job.json").write_text(json.dumps(old))
+    h2h_job.write_trace(
+        job_dir / "trace.xyz",
+        hc.symbols(m.mol),
+        [(x, e, 10)],
+    )
     np.savez(job_dir / "polished.npz", x=x[None], e=np.array([e]), ok=np.array([True]))
     rows = tmp_path / "rows.csv"
     paired_score.score_runs(tmp_path / "runs", rows, 1)

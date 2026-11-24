@@ -3922,6 +3922,7 @@ fn cluster_search(
     dict.set_item("hops", out.hops)?;
     dict.set_item("accepted", out.accepted)?;
     dict.set_item("nve_unavailable", out.nve_unavailable)?;
+    dict.set_item("branch_on_stall", cfg.branch_on_stall)?;
     let ledger_split = PyDict::new(py);
     ledger_split.set_item("spent", ledger.spent())?;
     ledger_split.set_item("screen", stats.screen_charged)?;

@@ -58,7 +58,7 @@ ROW_FIELDS = [
     "cell", "kind", "seed", "arm", "slot", "core", "hit", "budget",
     "callback_calls", "calls_to_hit", "charged",
     "wall_s", "inside_s", "outside_per_call_s", "rss_anon_kb", "peak_rss_anon_kb",
-    "b_path_draws", "b_path_spent",
+    "branch_on_stall", "b_path_draws", "b_path_spent",
     "energy", "energy_bits", "trajectory",
     "arm_revision", "arm_tree", "arm_binary", "arm_binary_sha256",
     "host", "machine_id", "cpu_model", "a_ref", "a_tree", "b_ref", "b_tree",
@@ -390,6 +390,7 @@ def run_molecule(args, job: dict, budget: int, ident: str, journal: Path, arm_me
                 "inside_s": 0.0,
                 "rss_anon_kb": 0,
                 "peak_rss_anon_kb": 0,
+                "branch_on_stall": None,
                 "b_path_draws": 0,
                 "b_path_spent": 0,
                 "trajectory": hash_trace(out),
@@ -480,8 +481,13 @@ def worker_molecule(args) -> int:
     )
     b_path_draws = int(ledger.get("branch_draws") or 0) if isinstance(ledger, dict) else 0
     b_path_spent = int(ledger.get("branch_spent") or 0) if isinstance(ledger, dict) else 0
+    branch_on_stall = cs_res.get("branch_on_stall")
+    if not isinstance(branch_on_stall, bool):
+        branch_on_stall = info.get("branch_on_stall")
     callback_calls = energy_calls + grad_calls
     raw_error = info.get("error") or error or ""
+    if not isinstance(branch_on_stall, bool):
+        raw_error = raw_error or "resolved branch_on_stall unavailable"
     if raw_error and not error:
         print(str(raw_error), file=sys.stderr)
     # Phase 0 of the force-field counter is the search potential. Embedding
@@ -510,6 +516,7 @@ def worker_molecule(args) -> int:
         "candidates": None if info.get("candidates") is None else int(info["candidates"]),
         "rss_anon_kb": end_rss,
         "peak_rss_anon_kb": peak_rss[0],
+        "branch_on_stall": branch_on_stall,
         "b_path_draws": b_path_draws,
         "b_path_spent": b_path_spent,
         "trajectory": hash_trace(out),
@@ -545,7 +552,13 @@ def run_guard(args, job: dict, binary: Path, ident: str, journal: Path, arm_meta
         and (
             int(gate.get("charged", "0")) > GUARD_BUDGET[job["cell"]]
             or int(gate.get("calls", "0")) > GUARD_BUDGET[job["cell"]]
-            or int(gate.get("calls", "0")) > int(gate.get("charged", "0"))
+            or gate.get("branch_on_stall") not in ("0", "1")
+            or gate.get("branch_draws") is None
+            or gate.get("branch_spent") is None
+            or (
+                int(gate.get("hit", "0"))
+                and int(gate.get("calls", "0")) > int(gate.get("charged", "0"))
+            )
         )
     )
     if (
@@ -576,6 +589,7 @@ def run_guard(args, job: dict, binary: Path, ident: str, journal: Path, arm_meta
                 "inside_s": 0.0,
                 "rss_anon_kb": 0,
                 "peak_rss_anon_kb": 0,
+                "branch_on_stall": None,
                 "b_path_draws": 0,
                 "b_path_spent": 0,
                 "energy_bits": "",
@@ -611,8 +625,9 @@ def run_guard(args, job: dict, binary: Path, ident: str, journal: Path, arm_meta
                 "inside_s": float(gate["inside_s"]),
                 "rss_anon_kb": int(gate["rss_anon_kb"]),
                 "peak_rss_anon_kb": int(gate.get("peak_rss_anon_kb") or gate["rss_anon_kb"]),
-                "b_path_draws": 0,
-                "b_path_spent": 0,
+                "branch_on_stall": int(gate["branch_on_stall"]),
+                "b_path_draws": int(gate["branch_draws"]),
+                "b_path_spent": int(gate["branch_spent"]),
                 "energy_bits": gate["best_bits"],
                 "trajectory": gate["trajectory"],
                 "arm_revision": arm_meta["arm_revision"],
@@ -741,6 +756,7 @@ def score_molecules(run_dir: Path, jobs: list[dict]) -> dict[tuple, dict]:
                 "budget": budget,
                 "rss_anon_kb": int(info.get("rss_anon_kb") or 0),
                 "peak_rss_anon_kb": int(info.get("peak_rss_anon_kb") or info.get("rss_anon_kb") or 0),
+                "branch_on_stall": info.get("branch_on_stall"),
                 "b_path_draws": int(info.get("b_path_draws") or 0),
                 "b_path_spent": int(info.get("b_path_spent") or 0),
                 "error": info.get("error") or "",
@@ -814,6 +830,7 @@ def assemble_records(
             budget = extra["budget"]
             rss = extra["rss_anon_kb"]
             peak_rss = extra["peak_rss_anon_kb"]
+            branch_on_stall = extra["branch_on_stall"]
             b_path_draws = extra["b_path_draws"]
             b_path_spent = extra["b_path_spent"]
             arm_binary = info.get("arm_binary") or meta["ext_binary"]
@@ -833,6 +850,7 @@ def assemble_records(
             budget = int(info.get("budget") or 0)
             rss = int(info.get("rss_anon_kb") or 0)
             peak_rss = int(info.get("peak_rss_anon_kb") or rss)
+            branch_on_stall = info.get("branch_on_stall")
             b_path_draws = int(info.get("b_path_draws") or 0)
             b_path_spent = int(info.get("b_path_spent") or 0)
             arm_binary = info.get("arm_binary") or meta["guard_binary"]
@@ -857,6 +875,9 @@ def assemble_records(
                 "outside_per_call_s": f"{outside:.9e}",
                 "rss_anon_kb": rss,
                 "peak_rss_anon_kb": peak_rss,
+                "branch_on_stall": (
+                    "" if branch_on_stall is None else int(branch_on_stall)
+                ),
                 "b_path_draws": b_path_draws,
                 "b_path_spent": b_path_spent,
                 "energy": energy,
@@ -964,7 +985,7 @@ def run(args) -> int:
         ("threads", "1"),
         ("schedule", ident),
         ("a_revision", arm_prov["A"]["arm_revision"]),
-        ("a_tree", arm_prov["A"]["arm_tree"]),
+        ("a_tree_resolved", arm_prov["A"]["arm_tree"]),
         ("b_revision", arm_prov["B"]["arm_revision"]),
         ("b_tree_resolved", arm_prov["B"]["arm_tree"]),
         ("a2_revision", arm_prov["Ap"]["arm_revision"]),
