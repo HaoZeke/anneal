@@ -22,6 +22,7 @@ use crate::methods::cluster_hopping::OVERLAP_SEPARATION;
 use crate::methods::cluster_hopping::declared_group_lost_a_bond;
 use crate::methods::cluster_hopping::inside_molecular_call_wall;
 use crate::methods::cluster_hopping::min_pair_distance;
+use crate::methods::cluster_hopping::quench_is_sane;
 use crate::methods::cluster_hopping::separate_contacts;
 use crate::methods::cluster_hopping::structure_is_sane;
 use crate::methods::cluster_hopping::{CallFloor, molecular_call_floor};
@@ -1472,12 +1473,7 @@ pub fn polish_recorded_answer_until<O, A>(
 }
 
 fn reported_geometry_ok(cfg: &Config, state: ArrayView1<f64>) -> bool {
-    let separation = if cfg.species.is_some() {
-        OVERLAP_SEPARATION
-    } else {
-        0.0
-    };
-    structure_is_sane(state, separation)
+    quench_is_sane(cfg, 0.0, state)
 }
 
 fn finish_search<O>(

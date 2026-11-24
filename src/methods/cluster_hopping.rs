@@ -1660,6 +1660,22 @@ pub fn clears_species_sanity(x: ArrayView1<f64>, elements: &[u32], absolute: f64
         })
 }
 
+/// Whether one covalent cluster remains connected under its atomic radii.
+///
+/// Molecular move libraries may intentionally contain several declared
+/// fragments, so their per-fragment bond checks remain separate. Atomic
+/// covalent searches, however, must not rank a finite energy for a cluster
+/// that has split into disconnected components.
+fn covalent_cluster_is_connected(
+    cfg: &Config,
+    x: ArrayView1<f64>,
+    elements: &[u32],
+) -> bool {
+    matches!(cfg.move_library, MoveLibrary::Molecular { .. })
+        || (x.len() == 3 * elements.len()
+            && connectivity_groups_z(x, elements, cfg.bond_tolerance).len() == 1)
+}
+
 /// Whether every coordinate is finite and every pair lies past `floor`.
 pub fn clears_call_floor(x: ArrayView1<f64>, floor: f64) -> bool {
     x.iter().all(|value| value.is_finite()) && min_pair_distance(x) > floor
@@ -2536,9 +2552,10 @@ pub(crate) fn separate_contacts(
     x.iter().all(|value| value.is_finite()) && min_pair_distance(x.view()) >= min_sep
 }
 
-fn quench_is_sane(cfg: &Config, energy: f64, x: ArrayView1<f64>) -> bool {
+pub(crate) fn quench_is_sane(cfg: &Config, energy: f64, x: ArrayView1<f64>) -> bool {
     if let Some(elements) = cfg.call_floor_elements.as_deref()
-        && !clears_species_sanity(x, elements, cfg.call_floor.unwrap_or(OVERLAP_CALL_LIMIT))
+        && (!clears_species_sanity(x, elements, cfg.call_floor.unwrap_or(OVERLAP_CALL_LIMIT))
+            || !covalent_cluster_is_connected(cfg, x, elements))
     {
         return false;
     }
