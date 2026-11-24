@@ -1400,6 +1400,10 @@ pub struct Config {
     /// current geometry and ranks them by pair energy. It does not move
     /// the least-coordinated atom onto a random surface point.
     pub energy_lattice: bool,
+    /// The parent search already quenched the generic packing catalogue.
+    /// A stall branch keeps the lattice move and does not quench it again.
+    #[serde(skip)]
+    pub suppress_generic_packings: bool,
     /// Learned portfolio of relaxation surfaces: the plain surface plus every
     /// transform listed, one drawn per hop by depth-rewarded Thompson
     /// sampling. Empty leaves the choice to `two_phase`.
@@ -2270,6 +2274,7 @@ impl Config {
             reoccupy: None,
             reoccupy_interval: 5_000,
             energy_lattice: false,
+            suppress_generic_packings: false,
             surfaces: Vec::new(),
             // Calibrated against published minima: the largest atomic distance
             // from the centre of mass divides by N^(1/3) to between 0.46 and

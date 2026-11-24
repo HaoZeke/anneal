@@ -90,7 +90,9 @@ fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     anneal_core::install_rgpot_kernels!();
     let hash = trajectory_hash();
     // The general move library with generic packing candidates is deterministic
-    // on every build.
-    let expected = "acfa9f484856b1dbc6afc8834fc31c2c622c0238fc10250dc5f9c3ada359ae20";
+    // on every build. A stall branch keeps the lattice move and skips a
+    // second catalogue, so this is not the hash of a branch that dropped
+    // the lattice move.
+    let expected = "c9b6d7d6535f5add591d14ad49f6a6400e5cc0c98a1b858e989bb61746b54ba5";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }

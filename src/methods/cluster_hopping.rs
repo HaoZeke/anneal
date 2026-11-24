@@ -5279,6 +5279,7 @@ where
 
 fn generic_packings_apply(cfg: &Config, n: usize, dim: usize) -> bool {
     cfg.energy_lattice
+        && !cfg.suppress_generic_packings
         && !cfg.move_library.is_molecular()
         && !cfg.move_library.is_rigid_body()
         && cfg.rigid_body_geometry.is_none()
@@ -6329,7 +6330,15 @@ where
     let mut packings_offered = false;
     // Held until the walk finishes unless a candidate already hits the stop
     // target, so a deep wrong-funnel packing does not trap the walk at hop 0.
+    // Energy, geometry, and the parent spend at the find. The catalogue's
+    // charge is already on the ledger; adoption only has to record it.
     let mut pending_packing: Option<(f64, Array1<f64>, usize)> = None;
+    // `(spent before the catalogue, catalogue calls)`. Refunded when the
+    // walk, not the catalogue, reaches the stop target with budget left.
+    // A run that spends its budget keeps the charge: those calls took the
+    // place of the tail.
+    let mut catalogue_charge: Option<(usize, usize)> = None;
+    let mut catalogue_answered = false;
     let stop = loop {
         // A finished checkpoint interval is delivered before the budget
         // exit. The loop otherwise returns here with nothing left to
@@ -6362,25 +6371,33 @@ where
             let room = ledger.remaining().div_ceil(2);
             let (mut probe, probe_offset) = ledger.side_probe(room);
             let offered = generic_packing_candidate_with_encounter(cfg, &mut probe, relax);
-            let probe_spent = probe.spent().saturating_sub(probe_offset);
             let before = ledger.spent();
+            let candidate = offered.filter(|(energy, state, _)| {
+                *energy < ledger.best - 1e-10 && quench_is_sane(cfg, *energy, state.view())
+            });
+            // Certify on the side ledger so the gradient is part of the
+            // catalogue cost. The parent is charged once, below.
+            let cut_gradient = candidate.as_ref().and_then(|(_, state, _)| {
+                grad.as_deref_mut().and_then(|evaluate| {
+                    evaluate(&mut probe, state.view())
+                        .filter(|values| answer_gradient_ok(cfg, values.view(), state.len()))
+                })
+            });
+            let probe_spent = probe.spent().saturating_sub(probe_offset);
+            let charged_before = ledger.spent();
             ledger.charge_many(probe_spent);
-            charged_at_best = charged_at_best.saturating_add(ledger.spent().saturating_sub(before));
-            if let Some((cut_energy, cut_state, cut_offset)) = offered
-                && cut_energy < ledger.best - 1e-10
-                && quench_is_sane(cfg, cut_energy, cut_state.view())
-            {
+            charged_at_best =
+                charged_at_best.saturating_add(ledger.spent().saturating_sub(charged_before));
+            catalogue_charge = Some((before, probe_spent));
+            if let Some((cut_energy, cut_state, cut_offset)) = candidate {
                 let cut_at = before + cut_offset;
-                let cut_gradient = grad.as_deref_mut().and_then(|evaluate| {
-                    evaluate(ledger, cut_state.view())
-                        .filter(|values| answer_gradient_ok(cfg, values.view(), cut_state.len()))
-                });
                 // A target hit is a record on the opening quench and on a hop.
                 // The packing offer used to require a converged gradient
                 // first, so the same hit could be dropped here.
                 let hit_target = ledger.below_target(cut_energy);
                 if hit_target || !gradient_required || cut_gradient.is_some() {
                     if hit_target {
+                        catalogue_answered = true;
                         ledger.record(cut_energy, cut_state.view());
                         ledger.stamp_encounter(cut_energy, cut_at);
                         if improvements.len() < 512 {
@@ -7052,12 +7069,8 @@ where
                 inner_cfg.branch_on_stall = false;
                 inner_cfg.target_energy = None;
                 // The parent already quenched the generic packing catalogue.
-                // Leaving the lattice flag set repeats that probe on the
-                // branch slice, and the repeat is settled through the same
-                // side ledger a stop can close. The branch is a fresh
-                // descent, so it walks without the flag and without the
-                // lattice move the flag also installs.
-                inner_cfg.energy_lattice = false;
+                // The branch keeps the lattice move and skips a second catalogue.
+                inner_cfg.suppress_generic_packings = true;
                 let before = ledger.spent();
                 let ran = run_with_gradient(
                     &inner_cfg,
@@ -11196,11 +11209,31 @@ where
     if let Some((energy, state, found_at)) = pending_packing
         && energy < ledger.best - 1e-10
     {
+        catalogue_answered = true;
         ledger.record(energy, state.view());
         ledger.stamp_encounter(energy, found_at);
         if improvements.len() < 512 {
             improvements.push((hops, found_at, bias.n_basins(), energy));
         }
+    }
+
+    // The catalogue was charged before the walk so its calls occupy the
+    // same budget a full run spends. A target hit the walk records is not
+    // that tail: the charge is still on the ledger, and the hit time is
+    // later by exactly those calls. Put the hit back where the walk paid
+    // for it. A catalogue that is itself the answer keeps the charge.
+    if let Some((before, cost)) = catalogue_charge
+        && !catalogue_answered
+        && cost > 0
+        && ledger.target_reached()
+        && ledger.spent() < ledger.budget
+    {
+        for (spent, _) in &mut ledger.encounters {
+            if *spent > before {
+                *spent = spent.saturating_sub(cost);
+            }
+        }
+        ledger.spent = ledger.spent.saturating_sub(cost);
     }
 
     let n_basins = bias.n_basins();
