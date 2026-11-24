@@ -395,7 +395,12 @@ def test_cluster_search_ras_true_uses_archive_outcome():
     assert "floors" in out
     assert "returned" in out
     assert out["charged"] == calls["energy"] + calls["gradient"]
-    assert out["ledger"]["spent"] == out["charged"]
+    assert out["ledger"]["spent"] == calls["energy"] + calls["gradient"]
+    phases = [out["ledger"][name] for name in ("screen", "full", "check")]
+    assert all(isinstance(value, int) and value >= 0 for value in phases)
+    assert sum(phases) <= out["ledger"]["spent"]
+    screened_out = out["ledger"]["screened_out"]
+    assert screened_out is None or 0 <= screened_out <= out["ledger"]["screen"]
     assert out["branch_on_stall"] is False
     assert out["ledger"]["branch_draws"] == 0
     assert out["ledger"]["branch_spent"] == 0

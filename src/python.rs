@@ -3084,6 +3084,87 @@ impl PyLedger {
     }
 }
 
+const CALL_PHASE_OTHER: u8 = 0;
+const CALL_PHASE_SCREEN: u8 = 1;
+const CALL_PHASE_FULL: u8 = 2;
+
+#[derive(Default)]
+struct PythonCallCounts {
+    total: std::sync::atomic::AtomicUsize,
+    phase: std::sync::atomic::AtomicU8,
+    pending_gradient: std::sync::atomic::AtomicU8,
+    screen: std::sync::atomic::AtomicUsize,
+    full: std::sync::atomic::AtomicUsize,
+    check: std::sync::atomic::AtomicUsize,
+}
+
+impl PythonCallCounts {
+    fn begin_relax(&self, screening: bool) {
+        let phase = if screening {
+            CALL_PHASE_SCREEN
+        } else {
+            CALL_PHASE_FULL
+        };
+        self.pending_gradient
+            .store(CALL_PHASE_OTHER, std::sync::atomic::Ordering::Relaxed);
+        self.phase
+            .store(phase, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn end_relax(&self) {
+        self.phase
+            .store(CALL_PHASE_OTHER, std::sync::atomic::Ordering::Relaxed);
+        self.pending_gradient
+            .store(CALL_PHASE_OTHER, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn record_energy(&self) {
+        self.total
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let phase = self.phase.load(std::sync::atomic::Ordering::Relaxed);
+        self.pending_gradient
+            .store(phase, std::sync::atomic::Ordering::Relaxed);
+        self.record_phase(phase);
+    }
+
+    fn record_gradient(&self) {
+        self.total
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let phase = self.phase.load(std::sync::atomic::Ordering::Relaxed);
+        let pending = self
+            .pending_gradient
+            .swap(CALL_PHASE_OTHER, std::sync::atomic::Ordering::Relaxed);
+        if phase != CALL_PHASE_OTHER && pending != phase {
+            self.check
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        } else {
+            self.record_phase(phase);
+        }
+    }
+
+    fn record_other(&self) {
+        self.total
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn record_phase(&self, phase: u8) {
+        match phase {
+            CALL_PHASE_SCREEN => {
+                self.screen
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            CALL_PHASE_FULL => {
+                self.full.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            _ => {}
+        }
+    }
+
+    fn load(counter: &std::sync::atomic::AtomicUsize) -> usize {
+        counter.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
 /// Combined Python energy plus gradient, for the cluster-search driver.
 struct CallableDiffObjective {
     fn_: Py<PyAny>,
@@ -3091,7 +3172,7 @@ struct CallableDiffObjective {
     bounds: Bounds<f64>,
     gradient_scale: f64,
     errors: std::sync::Arc<CallbackErrors>,
-    calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    calls: std::sync::Arc<PythonCallCounts>,
 }
 
 impl Objective<f64> for CallableDiffObjective {
@@ -3107,8 +3188,7 @@ impl Objective<f64> for CallableDiffObjective {
         if self.errors.aborted() {
             return f64::INFINITY;
         }
-        self.calls
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.calls.record_energy();
         Python::attach(|py| {
             let py_arr = py_view1(py, x);
             match self.fn_.call1(py, (py_arr,)) {
@@ -3128,8 +3208,7 @@ impl eindir_core::gradient::Gradient<f64> for CallableDiffObjective {
         if self.errors.aborted() {
             return Array1::zeros(dim);
         }
-        self.calls
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.calls.record_gradient();
         Python::attach(|py| {
             let py_arr = py_view1(py, x);
             match self.grad_fn.call1(py, (py_arr,)) {
@@ -3168,7 +3247,7 @@ fn cluster_gradient_scale(
     seed: u64,
     at: Option<ArrayView1<'_, f64>>,
     errors: &CallbackErrors,
-    calls: &std::sync::atomic::AtomicUsize,
+    calls: &PythonCallCounts,
 ) -> PyResult<f64> {
     use crate::methods::cluster_hopping::random_cluster_in_radius;
 
@@ -3177,7 +3256,7 @@ fn cluster_gradient_scale(
     // gradient, counted in the run's warning; KeyboardInterrupt, SystemExit
     // and a return that is not a number end the call.
     let call = |f: &Py<PyAny>, x: Vec<f64>| -> PyResult<Option<Py<PyAny>>> {
-        calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        calls.record_other();
         match f.call1(py, (PyArray1::from_vec(py, x),)) {
             Ok(value) => Ok(Some(value)),
             Err(err) if err.is_instance_of::<pyo3::exceptions::PyException>(py) => {
@@ -3303,7 +3382,7 @@ fn cluster_archive_search(
     obj: &CallableDiffObjective,
     cfg: &crate::methods::cluster_hopping::Config,
     ledger: &mut crate::methods::cluster_hopping::Ledger,
-    calls: &std::sync::atomic::AtomicUsize,
+    calls: &PythonCallCounts,
     seed: u64,
 ) -> PyResult<Py<PyDict>> {
     use crate::methods::archive_search::{Archive, archive_search};
@@ -3313,40 +3392,54 @@ fn cluster_archive_search(
     use rand::SeedableRng;
 
     let mut stats = RelaxStats::default();
-    let mut relax = warm_relax(obj, cfg, &mut stats, seed);
-    let mut grad = |led: &mut crate::methods::cluster_hopping::Ledger,
-                    x: ArrayView1<f64>|
-     -> Option<Array1<f64>> {
-        if !led.charge() {
-            return None;
-        }
-        Some(Gradient::grad(obj, x))
+    let out = {
+        let mut base_relax = warm_relax(obj, cfg, &mut stats, seed);
+        let mut relax = |led: &mut crate::methods::cluster_hopping::Ledger,
+                         x: ArrayView1<f64>,
+                         iters: usize| {
+            if iters == 0 {
+                calls.end_relax();
+            } else {
+                calls.begin_relax(iters <= cfg.screen_steps);
+            }
+            let answer = base_relax(led, x, iters);
+            calls.end_relax();
+            answer
+        };
+        let mut grad = |led: &mut crate::methods::cluster_hopping::Ledger,
+                        x: ArrayView1<f64>|
+         -> Option<Array1<f64>> {
+            if !led.charge() {
+                return None;
+            }
+            calls.end_relax();
+            Some(Gradient::grad(obj, x))
+        };
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        let start = random_cluster_in_radius(
+            cfg.n_points,
+            cfg.start_radius(),
+            cfg.min_separation,
+            &mut rng,
+        );
+        let mut archive = Archive::new();
+        archive_search(
+            cfg,
+            start.view(),
+            ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut archive,
+            &mut rng,
+        )
     };
-    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-    let start = random_cluster_in_radius(
-        cfg.n_points,
-        cfg.start_radius(),
-        cfg.min_separation,
-        &mut rng,
-    );
-    let mut archive = Archive::new();
-    let out = archive_search(
-        cfg,
-        start.view(),
-        ledger,
-        &mut relax,
-        Some(&mut grad),
-        &mut archive,
-        &mut rng,
-    );
-    drop(relax);
     let dim = 3 * cfg.n_points;
     let best = out
         .best_state
         .map(|a| a.to_vec())
         .unwrap_or_else(|| vec![0.0; dim]);
     let dict = PyDict::new(py);
-    let charged = calls.load(std::sync::atomic::Ordering::Relaxed);
+    let charged = PythonCallCounts::load(&calls.total);
     dict.set_item("best", PyArray1::from_vec(py, best))?;
     dict.set_item("best_energy", out.best)?;
     dict.set_item("hops", out.full)?;
@@ -3358,13 +3451,13 @@ fn cluster_archive_search(
     dict.set_item("branch_on_stall", cfg.branch_on_stall)?;
     let ledger_split = PyDict::new(py);
     ledger_split.set_item("spent", charged)?;
-    ledger_split.set_item("screen", stats.screen_charged.saturating_mul(2))?;
-    ledger_split.set_item("full", stats.full_charged.saturating_mul(2))?;
-    ledger_split.set_item("check", stats.check_charged.saturating_mul(2))?;
+    ledger_split.set_item("screen", PythonCallCounts::load(&calls.screen))?;
+    ledger_split.set_item("full", PythonCallCounts::load(&calls.full))?;
+    ledger_split.set_item("check", PythonCallCounts::load(&calls.check))?;
     ledger_split.set_item("quenches", stats.total())?;
     ledger_split.set_item("converged", stats.converged)?;
     ledger_split.set_item("capped", stats.capped)?;
-    ledger_split.set_item("screened_out", out.returned)?;
+    ledger_split.set_item("screened_out", Option::<usize>::None)?;
     ledger_split.set_item("returned", out.returned)?;
     if cfg.branch_on_stall {
         ledger_split.set_item("branch_draws", Option::<usize>::None)?;
@@ -3385,7 +3478,7 @@ fn cluster_archive_search(
     _obj: &CallableDiffObjective,
     _cfg: &crate::methods::cluster_hopping::Config,
     _ledger: &mut crate::methods::cluster_hopping::Ledger,
-    _calls: &std::sync::atomic::AtomicUsize,
+    _calls: &PythonCallCounts,
     _seed: u64,
 ) -> PyResult<Py<PyDict>> {
     Err(PyValueError::new_err(
@@ -3863,7 +3956,7 @@ fn cluster_search(
         }
         ledger.stop_below(limit);
     }
-    let potential_calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let potential_calls = std::sync::Arc::new(PythonCallCounts::default());
     let gradient_scale = if budget >= 4 {
         let probe_owned = if rigid_chart || molecular {
             Some(match start.as_ref() {
