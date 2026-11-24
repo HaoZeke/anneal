@@ -119,7 +119,12 @@ fn a_basin_stride_is_resolved_only_off_its_default() {
 fn paper_preset_priors_stay_out_of_the_resolved_hash() {
     let cfg = Config::recommended(38);
     let json = cfg.resolved_json().unwrap();
-    for name in ["prior_soap", "homotop_reorder", "general_collective"] {
+    for name in [
+        "prior_soap",
+        "homotop_reorder",
+        "general_collective",
+        "cap_twist",
+    ] {
         assert!(
             !json.contains(name),
             "{name} at the paper preset stays out of the resolved JSON"
@@ -380,4 +385,21 @@ fn pair_scaling_is_general_and_lennard_jones_is_unchanged() {
     assert_eq!(morse.energy_scale, 1.0);
     assert!((morse.length_scale - 2.0_f64.powf(-1.0 / 6.0)).abs() < 1e-15);
     assert!(morse.start_radius() < stock.start_radius());
+}
+
+#[test]
+fn the_cap_turn_enters_the_resolved_hash_only_when_on() {
+    let cfg = Config::recommended(38);
+    let mut turned = cfg.clone();
+    turned.cap_twist = true;
+    assert!(
+        turned
+            .resolved_json()
+            .unwrap()
+            .contains("\"cap_twist\":true")
+    );
+    assert_ne!(
+        turned.resolved_sha256().unwrap(),
+        cfg.resolved_sha256().unwrap()
+    );
 }
