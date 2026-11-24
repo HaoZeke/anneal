@@ -737,90 +737,18 @@ impl Cloud {
         self.nearest_squared_scalar(image)
     }
 
-    /// Minimum mirror/low-order rotational deviation for ranking near-parallel
-    /// candidate directions when deduplicating `candidate_axes`.
-    fn axis_best_deviation(
-        &self,
-        axis: [f64; 3],
-        turns: &[(usize, Turn, f64)],
-        tolerance: f64,
-        visit: &[usize],
-    ) -> f64 {
-        let n = self.xs.len();
-        let mut best = self
-            .plane_deviation_visit(axis, tolerance, visit)
-            .unwrap_or(f64::INFINITY);
-        let highest = self.highest_exchange_order(axis);
-        let check_turns = turns.len().min(5);
-        for &(order, turn, _) in &turns[..check_turns] {
-            if order > highest {
-                continue;
-            }
-            let cap = best.min(tolerance);
-            let cap_sq = if cap.is_finite() {
-                cap * cap * n as f64
-            } else {
-                f64::INFINITY
-            };
-            let mut total = 0.0;
-            let mut pruned = false;
-            for &index in visit {
-                total += self.nearest_one(rotate_by(self.point(index), axis, turn));
-                if total > cap_sq {
-                    let partial = (total / n as f64).sqrt();
-                    if root_is_past_cap(partial, cap, n) {
-                        pruned = true;
-                        break;
-                    }
-                }
-            }
-            if !pruned {
-                let d = (total / n as f64).sqrt();
-                if d < best {
-                    best = d;
-                }
-            }
-        }
-        best
-    }
-
-    fn candidate_axes_unique(
-        &self,
-        x: ArrayView1<f64>,
-        n: usize,
-        turns: &[(usize, Turn, f64)],
-        tolerance: f64,
-        visit: &[usize],
-    ) -> Vec<[f64; 3]> {
-        let mut unique: Vec<([f64; 3], Option<f64>)> = Vec::new();
+    fn candidate_axes_unique(&self, x: ArrayView1<f64>, n: usize) -> Vec<[f64; 3]> {
+        let mut unique: Vec<[f64; 3]> = Vec::new();
         for axis in candidate_axes(x, n) {
-            if let Some(pos) = unique.iter().position(|(u, _)| {
+            if unique.iter().any(|u| {
                 let dot = u[0] * axis[0] + u[1] * axis[1] + u[2] * axis[2];
                 dot.abs() > 0.998
             }) {
-                let dot = unique[pos].0[0] * axis[0]
-                    + unique[pos].0[1] * axis[1]
-                    + unique[pos].0[2] * axis[2];
-                if dot.abs() > 1.0 - 1e-12 {
-                    continue;
-                }
-                let old_fit = match unique[pos].1 {
-                    Some(v) => v,
-                    None => {
-                        let v = self.axis_best_deviation(unique[pos].0, turns, tolerance, visit);
-                        unique[pos].1 = Some(v);
-                        v
-                    }
-                };
-                let new_fit = self.axis_best_deviation(axis, turns, tolerance, visit);
-                if new_fit < old_fit {
-                    unique[pos] = (axis, Some(new_fit));
-                }
-            } else {
-                unique.push((axis, None));
+                continue;
             }
+            unique.push(axis);
         }
-        unique.into_iter().map(|(u, _)| u).collect()
+        unique
     }
 
     fn visit_outer_first(&self) -> Vec<usize> {
@@ -915,6 +843,10 @@ impl Cloud {
             if stop && total > limit && root_is_past_cap((total / n as f64).sqrt(), cap, n) {
                 continue;
             }
+            let local_exchange_limit_sq = exchange_tol.powi(2).min(
+                non_axial_idx.iter().map(|&pos| vgap4[pos]).sum::<f64>()
+                    / (4.0 * total_non_axial as f64),
+            );
             let max_fail = total_non_axial / 4;
             let mut fail = 0usize;
             let mut exch_total = 0.0;
@@ -978,7 +910,16 @@ impl Cloud {
             if exchanged == 0 || exchanged * 4 < total_non_axial * 3 {
                 continue;
             }
-            if exchange_tol.is_finite() && (exch_total / exchanged as f64).sqrt() >= exchange_tol {
+            // Self-mapping points can dilute the full-cloud RMS only when they
+            // exceed the quarter that the exchange proof permits to fail.
+            // In that case compare exchanged points with the tighter of the
+            // caller's tolerance and one quarter of their measured neighbour
+            // gaps. The latter is scale-covariant and keeps a partner well
+            // inside the half-gap nearest-site boundary.
+            if total_non_axial * 4 < n * 3
+                && exchange_tol.is_finite()
+                && exch_total / exchanged as f64 >= local_exchange_limit_sq
+            {
                 continue;
             }
             let d = (total / n as f64).sqrt();
@@ -1528,19 +1469,6 @@ fn detect_dominant(
     let cloud = Cloud::from_view(x, n);
     let visit = cloud.visit_outer_first();
     let gaps = cloud.gaps();
-    let nn = if n >= 2 {
-        gaps.iter().map(|g| g.sqrt()).sum::<f64>() / n as f64
-    } else {
-        1.0
-    };
-    // Scale-invariant tolerance cap relative to nearest-neighbour distance:
-    // 0.24 * nn agrees with unconfined LJ/Au labels up to tol=0.25 while
-    // rejecting unscaled distorted fragments on compact SC cores.
-    let tolerance = if nn > 0.0 && nn.is_finite() {
-        tolerance.min(0.24 * nn)
-    } else {
-        tolerance
-    };
     DOM_SCRATCH.with(|cell| {
         let mut scr = cell.borrow_mut();
         let DomScratch {
@@ -1637,7 +1565,7 @@ fn detect_dominant(
             };
         }
 
-        let axes_list = cloud.candidate_axes_unique(x, n, turns, tolerance, &visit);
+        let axes_list = cloud.candidate_axes_unique(x, n);
         let n_axes = axes_list.len();
         let total_len = n_axes * n;
         z_buf.resize(total_len, 0.0);
@@ -4397,8 +4325,8 @@ mod shell_tests {
     fn detect_dominant_rejects_self_map_diluted_and_unscaled_distortions() {
         // An outer square distorted by 0.14 on a compressed SC-scale cluster
         // (r_nn ~ 0.68) would pass raw tol = 0.25, and adding axial/self-map
-        // points lowers the full-cloud RMS further; scale-aware tolerance
-        // and exchanged-atom RMS both reject it.
+        // points lowers the full-cloud RMS further; the nearest-partner
+        // exchange proof must reject it without changing the caller's scale.
         let mut coords = vec![
             0.48, 0.0, 0.0, -0.48, 0.0, 0.0, 0.0, 0.48, 0.0, 0.0, -0.48, 0.0,
         ];
@@ -4414,15 +4342,16 @@ mod shell_tests {
         let det = detect_dominant(x.view(), n, &(2..=n).collect::<Vec<_>>(), 0.25);
         assert!(
             det.iter().all(|c| c.improper || c.order != 4),
-            "expected scale-aware and exchanged-RMS check to reject C4, got {det:?}"
+            "expected nearest-partner exchange proof to reject C4, got {det:?}"
         );
     }
 
     #[test]
-    fn candidate_axes_unique_prefers_better_fitting_near_parallel_direction() {
+    fn candidate_axes_unique_preserves_the_first_near_parallel_direction() {
         // Place an exact C4 square in the xy-plane plus an off-axis point near
         // z so the inertia eigenvector tilts ~2 deg (|dot| > 0.998) away from
-        // the exact z vertex line; deduplication must keep the z direction.
+        // the exact z vertex line; deduplication must preserve whichever
+        // representative the deterministic candidate walk produced first.
         let coords = vec![
             1.2, 0.0, 0.0, -1.2, 0.0, 0.0, 0.0, 1.2, 0.0, 0.0, -1.2, 0.0, 0.0, 0.0, 2.0, 0.10, 0.0,
             -2.0,
@@ -4430,21 +4359,20 @@ mod shell_tests {
         let n = coords.len() / 3;
         let x = Array1::from(coords);
         let cloud = Cloud::from_view(x.view(), n);
-        let visit = cloud.visit_outer_first();
-        let turns: Vec<(usize, Turn, f64)> = (2..=4)
-            .map(|o| {
-                let turn = Turn::of(std::f64::consts::TAU / o as f64);
-                let sine = libm::sin(std::f64::consts::PI / o as f64);
-                (o, turn, 4.0 * sine * sine)
-            })
-            .collect();
         let raw = candidate_axes(x.view(), n);
         let inertia_z = raw
             .iter()
             .copied()
             .find(|u| u[2].abs() > 0.998 && u[2].abs() < 1.0 - 1e-6)
             .expect("tilted inertia direction");
-        let unique = cloud.candidate_axes_unique(x.view(), n, &turns, 0.25, &visit);
+        let first = raw
+            .iter()
+            .copied()
+            .find(|u| {
+                (u[0] * inertia_z[0] + u[1] * inertia_z[1] + u[2] * inertia_z[2]).abs() > 0.998
+            })
+            .expect("near-parallel direction");
+        let unique = cloud.candidate_axes_unique(x.view(), n);
         let kept = unique
             .iter()
             .copied()
@@ -4452,11 +4380,6 @@ mod shell_tests {
                 (u[0] * inertia_z[0] + u[1] * inertia_z[1] + u[2] * inertia_z[2]).abs() > 0.998
             })
             .expect("merged near-parallel direction");
-        let old_fit = cloud.axis_best_deviation(inertia_z, &turns, 0.25, &visit);
-        let kept_fit = cloud.axis_best_deviation(kept, &turns, 0.25, &visit);
-        assert!(
-            kept_fit < old_fit,
-            "expected deduplication to keep better fit ({kept_fit} < {old_fit})"
-        );
+        assert_eq!(kept, first);
     }
 }
