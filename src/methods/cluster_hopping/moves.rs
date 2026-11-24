@@ -2290,7 +2290,9 @@ impl ClusterMove {
                                 break;
                             }
                         }
-                        if let Some(group) = crate::symmetrise::generate_closed_group(&gens, 48) {
+                        if let Some(group) =
+                            crate::symmetrise::generate_group_for(*detected_symmetry, &gens, 48)
+                        {
                             let y = if group.len() > 1 {
                                 crate::symmetrise::symmetrise_group(x, n, &group, *pair_cutoff)
                             } else {

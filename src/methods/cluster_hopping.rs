@@ -10176,7 +10176,8 @@ where
                             cands.push(c);
                         }
                     }
-                    if let Some(group) = crate::symmetrise::generate_closed_group(&cands, 60)
+                    if let Some(group) =
+                        crate::symmetrise::generate_group_for(cfg.detected_symmetry, &cands, 60)
                         && group.len() > 1
                     {
                         Some(match cfg.species.as_deref() {

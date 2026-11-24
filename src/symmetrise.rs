@@ -1729,6 +1729,26 @@ pub(crate) fn generate_closed_group(cands: &[Candidate], cap: usize) -> Option<V
     }
 }
 
+/// The operation set for a symmetry move.
+///
+/// With detected symmetry on, the set must close, tolerantly if the
+/// generators are approximate, or there is no group. With it off, a
+/// generation that hits the cap keeps the partial set it had collected.
+pub(crate) fn generate_group_for(
+    detected_symmetry: bool,
+    cands: &[Candidate],
+    cap: usize,
+) -> Option<Vec<Rot>> {
+    if detected_symmetry {
+        generate_closed_group(cands, cap)
+    } else {
+        match generate_group(cands, cap) {
+            Ok(group) => Some(group),
+            Err(err) => Some(err.elements),
+        }
+    }
+}
+
 /// Makes `x` symmetric under a whole group, not one rotation.
 ///
 /// Each point's orbit is collected by applying every group element and taking
@@ -1908,7 +1928,7 @@ pub(crate) fn symmetrise_core_for(
             break;
         }
     }
-    let group = generate_closed_group(&gens, 48)?;
+    let group = generate_group_for(detected_symmetry, &gens, 48)?;
     let sym_core = if group.len() > 1 {
         symmetrise_group(core.view(), m, &group, pair_cutoff)
     } else {
@@ -2184,7 +2204,7 @@ fn orbit_complete_core_with_orders(
             break;
         }
     }
-    let group = generate_closed_group(&gens, 48)?;
+    let group = generate_group_for(detected_symmetry, &gens, 48)?;
     if group.len() < 2 {
         return None;
     }
