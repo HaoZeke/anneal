@@ -15,6 +15,7 @@ import os
 import socket
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
@@ -427,11 +428,27 @@ def summarise(rows: list[dict[str, str]], reused: set[tuple[str, int]]) -> list[
     return out
 
 
-def main() -> None:
+def _parse_argv(argv: Sequence[str] | None) -> list[str] | None:
+    if argv is None:
+        return None
+    items = list(argv)
+    if items and not items[0].startswith("-"):
+        return items[1:]
+    return items
+
+
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    out_dir: Path | None = None,
+    overwrite_legacy: bool = False,
+) -> int:
     if socket.gethostname() != "bench":
         raise SystemExit("hostname must be bench")
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--out", type=Path)
+    parser.add_argument("--overwrite-legacy", action="store_true")
     parser.add_argument("--work", type=Path, default=Path("/work/morse-panel"))
     parser.add_argument("--gmin", type=Path, default=Path("/work/morse-h2h/bin/GMIN"))
     parser.add_argument(
@@ -447,10 +464,19 @@ def main() -> None:
     parser.add_argument("--system", action="append")
     parser.add_argument("--seed", type=int, action="append")
     parser.add_argument("--arm", choices=("anneal", "gmin", "both"), default="both")
-    args = parser.parse_args()
+    args = parser.parse_args(_parse_argv(argv))
     systems = [row for row in SYSTEMS if not args.system or row[0] in args.system]
     seeds = tuple(args.seed) if args.seed else SEEDS
     root = args.root
+    resolved_out = (
+        out_dir if out_dir is not None else (args.out or (root / "bench/morse-panel"))
+    ).resolve()
+    allow_overwrite = bool(overwrite_legacy or args.overwrite_legacy)
+    if not args.system and not args.seed and args.arm == "both" and not allow_overwrite:
+        require_csv_schema(resolved_out / "seeds.csv", ROW_FIELDS)
+        require_csv_schema(
+            resolved_out / "summary.csv", machine_fieldnames(SUMMARY_FIELDS)
+        )
     work = args.work
     work.mkdir(parents=True, exist_ok=True)
     seeds_path = work / "seeds.csv"
@@ -567,23 +593,24 @@ def main() -> None:
             f"panel incomplete ({len(summary)}/{len(SYSTEMS)}); bench rows left as they are",
             file=sys.stderr,
         )
-        return
-    out_dir = root / "bench/morse-panel"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    require_csv_schema(out_dir / "seeds.csv", ROW_FIELDS)
+        return 0
     summary_fields = (
         machine_fieldnames(SUMMARY_FIELDS)
         if not summary or "machine_id" in summary[0]
         else SUMMARY_FIELDS
     )
-    require_csv_schema(out_dir / "summary.csv", summary_fields)
-    write_rows(out_dir / "seeds.csv", rows)
-    with (out_dir / "summary.csv").open("w", newline="") as handle:
+    if not allow_overwrite:
+        require_csv_schema(resolved_out / "seeds.csv", ROW_FIELDS)
+        require_csv_schema(resolved_out / "summary.csv", summary_fields)
+    resolved_out.mkdir(parents=True, exist_ok=True)
+    write_rows(resolved_out / "seeds.csv", rows)
+    with (resolved_out / "summary.csv").open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=summary_fields, lineterminator="\n")
         writer.writeheader()
         writer.writerows(summary)
-    print(f"wrote {out_dir / 'summary.csv'}", file=sys.stderr)
+    print(f"wrote {resolved_out / 'summary.csv'}", file=sys.stderr)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
