@@ -85,8 +85,9 @@ Correctness does not change the timing verdict.
 Ratios pair the k-th round and the r-th repetition of B with the same
 indexes of A, and likewise for A2 against A. The reported effect is the
 geometric mean of those ratios. Each cell draws 10,000 bootstrap resamples
-of the paired indexes with a generator reseeded to 20261123, and reports
-the 2.5 and 97.5 percentiles.
+of the paired indexes with NumPy PCG64 reseeded to 20261123, and reports
+the linear (type 7) 2.5 and 97.5 percentiles. The same draw is used for
+the B/A and A2/A intervals of that cell.
 
 A cell is a real regression only when the B/A lower limit is above both
 1 and the A2/A upper limit.
