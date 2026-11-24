@@ -392,8 +392,8 @@ def run_molecule(args, job: dict, budget: int, ident: str, journal: Path, arm_me
                 "rss_anon_kb": 0,
                 "peak_rss_anon_kb": 0,
                 "branch_on_stall": None,
-                "b_path_draws": 0,
-                "b_path_spent": 0,
+                "b_path_draws": None,
+                "b_path_spent": None,
                 "trajectory": hash_trace(out),
                 "arm_revision": arm_meta["arm_revision"],
                 "arm_tree": arm_meta["arm_tree"],
@@ -470,21 +470,14 @@ def worker_molecule(args) -> int:
     if end_rss > peak_rss[0]:
         peak_rss[0] = end_rss
     cs_res = captured.get("result") or {}
-    ledger = cs_res.get("ledger") if isinstance(cs_res, dict) else None
-    if not isinstance(ledger, dict):
-        ledger = info.get("ledger") if isinstance(info.get("ledger"), dict) else None
+    branch_on_stall, b_path_draws, b_path_spent = molecular_path_fields(
+        cs_res, info
+    )
     energy_calls = int(info.get("energy_calls") or 0)
     grad_calls = int(info.get("grad_calls") or 0)
     charged = energy_calls + grad_calls
-    b_path_draws = int(ledger.get("branch_draws") or 0) if isinstance(ledger, dict) else 0
-    b_path_spent = int(ledger.get("branch_spent") or 0) if isinstance(ledger, dict) else 0
-    branch_on_stall = cs_res.get("branch_on_stall")
-    if not isinstance(branch_on_stall, bool):
-        branch_on_stall = info.get("branch_on_stall")
     callback_calls = energy_calls + grad_calls
     raw_error = info.get("error") or error or ""
-    if not isinstance(branch_on_stall, bool):
-        raw_error = raw_error or "resolved branch_on_stall unavailable"
     if raw_error and not error:
         print(str(raw_error), file=sys.stderr)
     # Phase 0 of the force-field counter is the search potential. Embedding
@@ -531,6 +524,26 @@ def worker_molecule(args) -> int:
         return 3
     write_result(out / "result.json", payload)
     return 0 if not payload["error"] else 1
+
+
+def molecular_path_fields(cs_res: dict, info: dict) -> tuple[bool | None, int | None, int | None]:
+    ledger = cs_res.get("ledger") if isinstance(cs_res, dict) else None
+    if not isinstance(ledger, dict):
+        candidate = info.get("ledger")
+        ledger = candidate if isinstance(candidate, dict) else None
+    flag = cs_res.get("branch_on_stall") if isinstance(cs_res, dict) else None
+    if not isinstance(flag, bool):
+        candidate = info.get("branch_on_stall")
+        flag = candidate if isinstance(candidate, bool) else None
+    draws = optional_ledger_count(ledger, "branch_draws")
+    spent = optional_ledger_count(ledger, "branch_spent")
+    return flag, draws, spent
+
+
+def optional_ledger_count(ledger: dict | None, key: str) -> int | None:
+    if ledger is None or key not in ledger or ledger[key] is None:
+        return None
+    return int(ledger[key])
 
 
 def run_guard(args, job: dict, binary: Path, ident: str, journal: Path, arm_meta: dict[str, str]) -> None:
@@ -586,8 +599,8 @@ def run_guard(args, job: dict, binary: Path, ident: str, journal: Path, arm_meta
                 "rss_anon_kb": 0,
                 "peak_rss_anon_kb": 0,
                 "branch_on_stall": None,
-                "b_path_draws": 0,
-                "b_path_spent": 0,
+                "b_path_draws": None,
+                "b_path_spent": None,
                 "energy_bits": "",
                 "trajectory": "",
                 "arm_revision": arm_meta["arm_revision"],
@@ -758,8 +771,8 @@ def score_molecules(run_dir: Path, jobs: list[dict]) -> dict[tuple, dict]:
                 "rss_anon_kb": int(info.get("rss_anon_kb") or 0),
                 "peak_rss_anon_kb": int(info.get("peak_rss_anon_kb") or info.get("rss_anon_kb") or 0),
                 "branch_on_stall": info.get("branch_on_stall"),
-                "b_path_draws": int(info.get("b_path_draws") or 0),
-                "b_path_spent": int(info.get("b_path_spent") or 0),
+                "b_path_draws": info.get("b_path_draws"),
+                "b_path_spent": info.get("b_path_spent"),
                 "error": info.get("error") or "",
                 "core": info.get("core") or "",
                 "energy_bits": "",

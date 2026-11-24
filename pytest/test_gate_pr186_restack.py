@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import csv
 import importlib.util
 import sys
 from pathlib import Path
@@ -22,6 +23,14 @@ SPEC = importlib.util.spec_from_file_location(
 assert SPEC is not None and SPEC.loader is not None
 ANALYZE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ANALYZE)
+
+RUN_SPEC = importlib.util.spec_from_file_location(
+    "pr186_restack_run",
+    ROOT / "bench" / "gate-pr186-restack" / "run_gate.py",
+)
+assert RUN_SPEC is not None and RUN_SPEC.loader is not None
+RUN_GATE = importlib.util.module_from_spec(RUN_SPEC)
+RUN_SPEC.loader.exec_module(RUN_GATE)
 
 
 def rows(
@@ -51,7 +60,8 @@ def rows(
                 "rss_anon_kb": "1000",
                 "peak_rss_anon_kb": "1100",
                 "branch_on_stall": (
-                    str(int(path_enabled)) if arm == "B" else "0"
+                    "" if a_path_absent and arm != "B"
+                    else str(int(path_enabled)) if arm == "B" else "0"
                 ),
                 "b_path_draws": (
                     "" if a_path_absent and arm != "B"
@@ -96,11 +106,42 @@ def test_absent_path_counters_are_not_synthetic_zeros():
     missing = rows()
     for row in missing:
         if row["arm"] == "B":
+            row["branch_on_stall"] = ""
             row["b_path_draws"] = ""
             row["b_path_spent"] = ""
     result = ANALYZE.judge(missing, "rq3")
     assert result["verdict"] == "INCONCLUSIVE"
     assert result["b_path_checkable"] == 0
+
+
+def test_molecular_path_fields_preserve_absence():
+    assert RUN_GATE.molecular_path_fields({}, {}) == (None, None, None)
+    assert RUN_GATE.molecular_path_fields(
+        {
+            "branch_on_stall": False,
+            "ledger": {"branch_draws": 0, "branch_spent": 0},
+        },
+        {},
+    ) == (False, 0, 0)
+
+
+def test_csv_writes_absent_path_fields_as_empty(tmp_path: Path):
+    record = {field: "" for field in RUN_GATE.ROW_FIELDS}
+    record.update(
+        cell="rq3",
+        seed=2000,
+        arm="A",
+        branch_on_stall=None,
+        b_path_draws=None,
+        b_path_spent=None,
+    )
+    path = tmp_path / "rows.csv"
+    RUN_GATE.write_csv(path, [record])
+    with path.open(newline="") as handle:
+        row = next(csv.DictReader(handle))
+    assert row["branch_on_stall"] == ""
+    assert row["b_path_draws"] == ""
+    assert row["b_path_spent"] == ""
 
 
 def test_gate_rejects_calls_to_hit_above_the_budget():

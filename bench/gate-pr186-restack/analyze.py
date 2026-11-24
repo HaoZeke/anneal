@@ -179,7 +179,11 @@ def judge(rows: list[dict], cell: str) -> dict:
         flag = row.get("branch_on_stall")
         draws_text = row.get("b_path_draws")
         spent_text = row.get("b_path_spent")
-        if draws_text in ("", None) or spent_text in ("", None):
+        if (
+            flag not in ("0", "1")
+            or draws_text in ("", None)
+            or spent_text in ("", None)
+        ):
             path_unavailable += 1
             continue
         draws = int(draws_text)
