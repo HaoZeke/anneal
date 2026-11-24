@@ -88,7 +88,6 @@ mod exchange;
 pub mod fingerprint;
 mod general;
 mod moves;
-mod packing_bank;
 mod preset;
 mod stall_bridge;
 mod torsion;
@@ -5948,6 +5947,8 @@ where
     // the road instead of one chain's private progress.
     let frontier_exchange =
         std::env::var("CATALOG_FRONTIER_EXCHANGE").is_ok_and(|value| value == "1");
+    let acc_trace = std::env::var_os("ANNEAL_ACC_TRACE").is_some();
+    let curve_path = std::env::var_os("ANNEAL_CURVE");
     let mut screen_bank: Vec<(Array1<f64>, f64, Array1<f64>)> = Vec::new();
     // Destinations a binary plateau has already taken. The population step
     // skips these so two seats do not trade places on every patience window.
@@ -6158,7 +6159,7 @@ where
                 }
             }
             if let Some(action) = action {
-                if std::env::var("ANNEAL_ACC_TRACE").is_ok() {
+                if acc_trace {
                     eprintln!(
                         "ACCTRACE hop {} e {:.6} arm {action} ord 0/0/0",
                         $hop, destination.energy
@@ -6324,9 +6325,6 @@ where
     let basis_evidence = (0..4).fold(1usize, |count, chosen| {
         count.saturating_mul(n.saturating_sub(chosen)) / (chosen + 1)
     });
-    // CNA labels are collected for diagnostics only and never read by search.
-    let mut packing = packing_bank::PackingBank::new();
-    let packing_cutoff = 1.2 * cfg.length_scale;
     // Hops elapsed when the ledger last recorded a lower minimum.
     // A rigid stall measures 1000 hops from that hop count.
     let mut hops_at_lowest = 0usize;
@@ -9981,9 +9979,6 @@ where
             }
         }
         if accept {
-            if !unquenched && cfg.packing_cna_applies() {
-                packing.offer(e_new, x_new.view(), packing_cutoff);
-            }
             if !unquenched && (RIGID || cfg.improvement_rewards) {
                 stall_archive.offer(e_new, x_new.view());
                 cage_archive.offer_cage(
@@ -10031,7 +10026,7 @@ where
             // The chain's own trajectory, not only its record: funnel entry
             // happens through accepted moves that are worse than the best so
             // far, which the improvement trace cannot see.
-            if std::env::var("ANNEAL_ACC_TRACE").is_ok() {
+            if acc_trace {
                 let m = crate::structure::ptm(x_new.view(), n, 0.12);
                 let mut fcc = 0usize;
                 let mut hcp = 0usize;
@@ -10058,12 +10053,12 @@ where
             // Convergence curves: charged evaluations against the accepted
             // energy, one line per accept; the reader takes the running
             // minimum. ANNEAL_CURVE names the file.
-            if let Ok(path) = std::env::var("ANNEAL_CURVE") {
+            if let Some(ref path) = curve_path {
                 use std::io::Write as _;
                 if let Ok(mut fh) = std::fs::OpenOptions::new()
                     .create(true)
                     .append(true)
-                    .open(&path)
+                    .open(path)
                 {
                     let _ = writeln!(fh, "{} {e_new:.8}", ledger.spent());
                 }
