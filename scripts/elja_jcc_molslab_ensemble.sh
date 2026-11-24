@@ -110,7 +110,7 @@ if [[ ! -f $SOURCE_COMMIT_FILE ]]; then
   exit 1
 fi
 IFS= read -r SOURCE_COMMIT <"$SOURCE_COMMIT_FILE"
-if [[ ! $SOURCE_COMMIT =~ ^[0-9a-f]{40}$ ]]; then
+if ! python3 "$ROOT/scripts/revision_reach.py" full-sha "$SOURCE_COMMIT"; then
   echo "source commit record must contain one full Git object ID" >&2
   exit 1
 fi
@@ -135,7 +135,7 @@ if [[ ! -s $RGPOT_SOURCE_COMMIT_FILE || ! -s $RGPOT_PIXI_LOCK_SHA256_FILE ]]; th
 fi
 IFS= read -r RGPOT_SOURCE_COMMIT <"$RGPOT_SOURCE_COMMIT_FILE"
 IFS= read -r RGPOT_PIXI_LOCK_SHA256 <"$RGPOT_PIXI_LOCK_SHA256_FILE"
-if [[ ! $RGPOT_SOURCE_COMMIT =~ ^[0-9a-f]{40}$ || ! $RGPOT_PIXI_LOCK_SHA256 =~ ^[0-9a-f]{64}$ ]]; then
+if ! python3 "$ROOT/scripts/revision_reach.py" full-sha "$RGPOT_SOURCE_COMMIT" || [[ ! $RGPOT_PIXI_LOCK_SHA256 =~ ^[0-9a-f]{64}$ ]]; then
   echo "invalid rgpot source provenance below $ROOT" >&2
   exit 2
 fi

@@ -6,9 +6,13 @@ from __future__ import annotations
 
 import argparse
 import re
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT / "scripts"))
+import revision_reach  # noqa: E402
+
 MACROS = ROOT / "paper/jctc/macros.tex"
 START = "% generated paper constants: start"
 END = "% generated paper constants: end"
@@ -23,15 +27,17 @@ def values() -> dict[str, str]:
 
     molecular = (ROOT / "src/catalog/molecular.rs").read_text()
     revision_match = re.search(
-        r'pub const RGPOT_XTB_ENGINE_REV: &str = "([0-9a-f]{40})";',
+        r'pub const RGPOT_XTB_ENGINE_REV: &str = "([^"]*)";',
         molecular,
     )
     if not revision_match:
         raise SystemExit("RGPOT_XTB_ENGINE_REV is missing")
     revision = revision_match.group(1)
+    if not revision_reach.is_full_sha(revision):
+        raise SystemExit("RGPOT_XTB_ENGINE_REV is not a full commit id")
     lock = (ROOT / "Cargo.lock").read_text()
     locked = re.search(
-        r'name = "rgpot-pair".*?source = "git\+[^"]+#([0-9a-f]{40})"',
+        r'name = "rgpot-pair".*?source = "git\+[^"]+#([^"]*)"',
         lock,
         re.S,
     )

@@ -236,16 +236,121 @@ def test_a_runner_takes_its_revision_from_the_shared_validator():
         assert "revision_reach.is_full_sha(" in source, relative
 
 
-def test_one_validator_serves_the_python_readers_of_a_revision():
-    """A pattern for forty hex digits appears outside the shared module only where the text read is not a row."""
-    allowed = {
-        "scripts/revision_reach.py",
-        "scripts/paper_audit.py",
-        "paper/jctc/scripts/paper_constants.py",
-    }
-    found = set()
-    for base in ("scripts", "paper"):
-        for path in (ROOT / base).rglob("*.py"):
-            if re.search(r"\[0-9a-f\]\{(?:7|8),?40\}|\[0-9a-f\]\{40\}", path.read_text()):
-                found.add(path.relative_to(ROOT).as_posix())
-    assert found <= allowed, sorted(found - allowed)
+SHA_CHECKS = (
+    re.compile(r"\{40\}|\{\d*,40\}|\{40,\d*\}"),
+    re.compile(r"len\([^)]*\)\s*(?:==|!=|<=|>=|<|>)\s*40\b"),
+    re.compile(r"0123456789abcdef|hexdigits|a-fA-F|\[a-f0-9\]|ABCDEF"),
+)
+MACHINE_CHECKS = (
+    re.compile(
+        r"/etc/machine-id|product_uuid|IOPlatformUUID|\bioreg\b|machdep\.cpu|/proc/cpuinfo"
+        r"|ANNEAL_MACHINE_ID|ANNEAL_CPU_MODEL|MACHINE_ID_SALT"
+    ),
+)
+DIGEST_CHECK = 'if len(first) == 64 and all(c in "0123456789abcdef" for c in first):'
+DIGEST_REASON = "a 64-character sha256 digest of a data file, not a commit id"
+# (file, exact line content) -> why the line is not a commit-id or machine-identity check.
+EXEMPT = {
+    ("paper/jctc/scripts/fig_landfold_maps.py", DIGEST_CHECK): DIGEST_REASON,
+    ("paper/jctc/scripts/lj75_gmin_table.py", DIGEST_CHECK): DIGEST_REASON,
+    ("paper/jctc/scripts/results_jcc.py", DIGEST_CHECK): DIGEST_REASON,
+    ("paper/jctc/scripts/lj_csm_sizes_table.py", DIGEST_CHECK): DIGEST_REASON,
+    ("paper/jctc/scripts/system_visuals.py", DIGEST_CHECK): DIGEST_REASON,
+    (
+        "scripts/h2h_gmin_board.sh",
+        "flags=$(awk -F: '/^flags/ {gsub(/^[ \\t]+/, \"\", $2); print $2; exit}' /proc/cpuinfo)",
+    ): "the CPU feature flags of a log file, not a machine identity",
+    (
+        "scripts/h2h_receipt.sh",
+        "echo \"mhz=$(awk -F': ' '/cpu MHz/{print $2; exit}' /proc/cpuinfo)\"",
+    ): "the clock speed of a receipt, not a machine identity",
+    (
+        "scripts/h2o16_v9_one_bench.sh",
+        "awk '/^cpu MHz/ {print}' /proc/cpuinfo > \"$dest/${when}_mhz.raw\"",
+    ): "raw clock speeds of a run, not a machine identity",
+    (
+        "scripts/run_cuh2_fcc_rec.sh",
+        "awk -F: '/^[Cc]pu MHz/ { gsub(/^[ \\t]+/, \"\", $2); print $2 }' /proc/cpuinfo",
+    ): "clock speeds of a run, not a machine identity",
+    (
+        "scripts/gmin_panel/tuned.py",
+        'for path in (Path("/etc/machine-id"), Path("/proc/sys/kernel/random/boot_id")):',
+    ): "frozen: the committed tuned rows are verified against this file's exact blob, so it moves with their rerun",
+    (
+        "paper/jctc/scripts/water_h2h.py",
+        'for line in Path("/proc/cpuinfo").read_text().splitlines():',
+    ): "a free-text description for a log header (family and model number too), not a row column",
+}
+HOMES = {"scripts/revision_reach.py": SHA_CHECKS, "scripts/machine_provenance.py": MACHINE_CHECKS}
+
+
+def guarded_lines():
+    for base in ("scripts", "bench", "paper/jctc/scripts"):
+        for path in sorted((ROOT / base).rglob("*")):
+            relative = path.relative_to(ROOT).as_posix()
+            if path.suffix not in {".py", ".sh"} or "__pycache__" in path.parts or not path.is_file():
+                continue
+            for number, line in enumerate(path.read_text().splitlines(), start=1):
+                yield relative, number, line.strip()
+
+
+def test_no_local_commit_id_check_or_machine_identity_read_appears_outside_its_home_module():
+    """A commit id is judged by revision_reach and a machine by machine_provenance, whatever the file.
+
+    There is no exemption for a file. A line that is neither is exempt by its exact content and a reason.
+    """
+    found = []
+    used = set()
+    for relative, number, line in guarded_lines():
+        for pattern in (*SHA_CHECKS, *MACHINE_CHECKS):
+            if pattern.search(line) and not any(
+                pattern in checks and relative == home for home, checks in HOMES.items()
+            ):
+                if (relative, line) in EXEMPT:
+                    used.add((relative, line))
+                else:
+                    found.append(f"{relative}:{number}: {line}")
+                break
+    assert not found, "validate commit ids with revision_reach and read the machine through machine_provenance:\n" + "\n".join(found)
+    assert used == set(EXEMPT), sorted(set(EXEMPT) - used)
+    assert all(reason.strip() and "\n" not in reason for reason in EXEMPT.values())
+
+
+def test_the_guard_flags_the_checks_it_exists_for():
+    flagged = (
+        'ok = re.fullmatch(r"[0-9a-f]{40}", rgpot)',
+        "ok = re.fullmatch(r'[0-9a-f]{7,40}', value)",
+        "if len(sha) != 40:",
+        "if [[ ! $REV =~ ^[0-9a-f]{40}$ ]]; then",
+        'return len(name) == 40 and not name.strip("0123456789abcdef")',
+        'text = Path("/etc/machine-id").read_text()',
+        'os.environ.get("ANNEAL_MACHINE_ID")',
+    )
+    for line in flagged:
+        assert any(pattern.search(line) for pattern in (*SHA_CHECKS, *MACHINE_CHECKS)), line
+    for line in ("if len(group) != 12:", 'digest = hashlib.sha256(data).hexdigest()', "r'[0-9a-f]{64}'"):
+        assert not any(pattern.search(line) for pattern in (*SHA_CHECKS, *MACHINE_CHECKS)), line
+
+
+def test_the_shell_check_of_a_full_sha_answers_through_the_shared_validator():
+    import subprocess
+
+    def run(*values: str) -> int:
+        return subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "revision_reach.py"), "full-sha", *values],
+            capture_output=True, check=False,
+        ).returncode
+
+    assert run(HELD) == 0
+    assert run(HELD, HELD) == 0
+    assert run(HELD[:12]) == 1
+    assert run(HELD, HELD.upper()) == 1
+    assert run("") == 1
+    assert run() == 2
+
+
+def test_the_commit_id_pattern_is_the_one_place_that_names_a_prefix_length():
+    assert re.fullmatch(revision_reach.commit_id_pattern(), HELD)
+    assert not re.fullmatch(revision_reach.commit_id_pattern(), HELD[:39])
+    assert re.fullmatch(revision_reach.commit_id_pattern(7), HELD[:7])
+    assert not re.fullmatch(revision_reach.commit_id_pattern(8), HELD[:7])

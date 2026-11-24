@@ -182,7 +182,7 @@ if [[ ! -f $SOURCE_COMMIT_FILE ]]; then
   exit 2
 fi
 IFS= read -r SOURCE_COMMIT <"$SOURCE_COMMIT_FILE"
-if [[ ! $SOURCE_COMMIT =~ ^[0-9a-f]{40}$ ]]; then
+if ! python3 "$ROOT/scripts/revision_reach.py" full-sha "$SOURCE_COMMIT"; then
   echo "source commit record must contain one full Git object ID" >&2
   exit 2
 fi

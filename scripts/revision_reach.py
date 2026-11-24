@@ -51,6 +51,15 @@ def is_abbreviated_sha(value: str | None) -> bool:
     return ABBREVIATED_SHA.fullmatch(value or "") is not None
 
 
+def commit_id_pattern(shortest: int = 40) -> str:
+    """Regex source for a commit id of ``shortest`` to forty lowercase hex characters.
+
+    For text that quotes a commit, which may name a prefix. A row's revision is
+    judged by ``is_full_sha``, never by this pattern.
+    """
+    return "[0-9a-f]{%d,40}" % shortest
+
+
 def external_form(rev: str | None) -> bool:
     """A repository URL and a full SHA, for a commit this repository does not contain."""
     return EXTERNAL_FORM.fullmatch((rev or "").strip()) is not None
@@ -150,3 +159,15 @@ def tuned_gmin_harness_verified(
         name.startswith(("src/", "examples/")) or name in {"Cargo.toml", "Cargo.lock"}
         for name in diff.stdout.splitlines()
     )
+
+
+def main(argv: list[str]) -> int:
+    """``full-sha VALUE...`` exits 0 when every value is a full SHA, for the shell scripts that check one."""
+    if len(argv) < 2 or argv[0] != "full-sha":
+        print("usage: revision_reach.py full-sha VALUE...", file=sys.stderr)
+        return 2
+    return 0 if all(is_full_sha(value) for value in argv[1:]) else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

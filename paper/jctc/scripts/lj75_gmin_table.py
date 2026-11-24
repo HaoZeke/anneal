@@ -60,6 +60,7 @@ if str(REPO_ROOT / "scripts") not in sys.path:
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import results_jcc
+import revision_reach
 from target_tol import energy_hits
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -245,7 +246,7 @@ def _audit(data: Path, keys: dict[str, str], digests: dict[str, str], arms: list
 def load(data: Path = DATA) -> tuple[dict[str, str], tuple[Arm, ...]]:
     keys, digests = provenance(data)
     published = keys.get("anneal_published_commit", "")
-    if len(published) != 40 or set(published) - set("0123456789abcdef"):
+    if not revision_reach.is_full_sha(published):
         die("provenance.txt names no full commit of the published anneal snapshot")
     if keys.get("anneal_published_tree") != "identical to anneal_commit":
         die("provenance.txt does not hold the published snapshot to the tree of anneal_commit")

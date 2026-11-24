@@ -19,6 +19,7 @@ import pytest
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(ROOT / "scripts"))
 
 import check_cuh2_blobs
 import coverage_receipts
@@ -27,6 +28,7 @@ import figure_provenance
 import hexamer_numbers
 import hq_sci_tally
 import lockfile_delta
+import revision_reach
 import replay_v127
 import toc_graphic
 import watch_crest_steps
@@ -182,7 +184,7 @@ def test_figure_records_mark_absence_and_equality(
     pdf = tmp_path / "one.pdf"
     pdf.write_bytes(b"%PDF-1.4\n")
     tip = figure_provenance.blob(pdf)
-    assert len(tip) == 40
+    assert revision_reach.is_full_sha(tip)
 
     def fake_git(*args: str) -> subprocess.CompletedProcess[str]:
         if args[0] == "hash-object":
@@ -696,7 +698,7 @@ def _fetch_data_module():
 def test_fetch_data_pins_a_dataset_commit() -> None:
     fetch = _fetch_data_module()
     if "HF_REVISION" not in os.environ:
-        assert len(fetch.HF_REVISION) == 40 and all(c in "0123456789abcdef" for c in fetch.HF_REVISION)
+        assert revision_reach.is_full_sha(fetch.HF_REVISION)
     if "HF_REPO" not in os.environ:
         assert fetch.HF_REPO == "HaoZeke/anneal-paper-data"
 

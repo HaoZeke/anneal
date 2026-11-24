@@ -935,7 +935,7 @@ def unheld_revision_prefixes(audit: Audit) -> set[str]:
             continue
         for row in rows:
             for column, value in row.items():
-                if column not in _REVISION_COLUMNS or not re.fullmatch(r"[0-9a-f]{8,40}", value or ""):
+                if column not in _REVISION_COLUMNS or not re.fullmatch(revision_reach.commit_id_pattern(8), value or ""):
                     continue
                 if external_pin(value, abbreviated=True):
                     continue
@@ -2842,7 +2842,7 @@ def crest_equal_bench(audit: Audit) -> None:
         if rev == "723b7c23bbb31a076a559e3ac7f4f91be9e36e1e":
             ok, want = rgpot == "", "empty"
         else:
-            ok, want = bool(re.fullmatch(r"[0-9a-f]{40}", rgpot)), "40-hex sha"
+            ok, want = revision_reach.is_full_sha(rgpot), "full commit id"
         audit.record(ok, CREST_EQUAL_RGPOT_SIDECAR,
                      f"{s_row['system']} {s_row['arm']} seed {s_row['seed']} rgpot_revision",
                      want, rgpot or "empty")
@@ -3478,7 +3478,7 @@ def covalent_gfn2(audit: Audit) -> None:
     audit.said(path, "CREST on 4 (Fisher p = 0.0094, Mann-Whitney p = 0.0005)")
 
     paper = md_table(audit, path, header, after=first[-1][0] + 1)
-    revision = re.search(r"`([0-9a-f]{7,40})`", paper[0][1]["code"]).group(1)
+    revision = re.search(f"`({revision_reach.commit_id_pattern(7)})`", paper[0][1]["code"]).group(1)
     recorded = [r for r in pick(rows, system="si10", code="anneal-general") if r["code_revision"].startswith(revision)]
     counted = []
     for r in recorded:
@@ -3579,7 +3579,7 @@ def gfn2_revision_tables(audit: Audit, path: str, header: str, after: int, rows:
             if row["code"] == "CREST":
                 groups[(row["system"], row["code"])] = crest(system)
             else:
-                revision = re.fullmatch(r"anneal G, `([0-9a-f]{7,40})`", row["code"]).group(1)
+                revision = re.fullmatch(f"anneal G, `({revision_reach.commit_id_pattern(7)})`", row["code"]).group(1)
                 groups[(row["system"], row["code"])] = anneal(system, revision)
                 tabled.add((row["system"], revision))
         gfn2_table(audit, path, table, groups, "pooled")
@@ -4040,7 +4040,7 @@ def resolve_revisions(audit: Audit) -> Revisions:
             tree_column = TREE_COLUMNS.get(column)
             for r in rows:
                 for value in r[column].strip().split(";"):
-                    if re.fullmatch(r"[0-9a-f]{7,40}", value) and value not in EXTERNAL_REVISIONS:
+                    if re.fullmatch(revision_reach.commit_id_pattern(7), value) and value not in EXTERNAL_REVISIONS:
                         revisions[value].add(path)
                         if tree_column in r and r[tree_column].strip():
                             trees[value][r[tree_column].strip()].add(path)
@@ -6062,9 +6062,9 @@ def prose_receipt_lines(audit: Audit) -> None:
 
 _CLAIMED_COMMIT = re.compile(
     r"(?:paper at |scripts of |did at |\\CommitShort\{|OLDTIP\s*=\s*\")"
-    r"([0-9a-f]{7,40})"
+    f"({revision_reach.commit_id_pattern(7)})"
 )
-_MACRO_COMMIT = re.compile(r"\\newcommand\{\\([A-Za-z]+)\}\{([0-9a-f]{40})\}")
+_MACRO_COMMIT = re.compile(r"\\newcommand\{\\([A-Za-z]+)\}\{(" + revision_reach.commit_id_pattern() + r")\}")
 
 
 def script_commit_hashes(audit: Audit) -> None:
@@ -6111,7 +6111,7 @@ def _row_shas(row: dict[str, str]) -> set[str]:
     for field in ("harness_revision", "harness_commit", "code_revision", "head", "anneal_sha", "anneal_head",
                   "anneal_revision", "gmin_revision"):
         for token in (row.get(field) or "").split():
-            if re.fullmatch(r"[0-9a-f]{7,40}", token):
+            if re.fullmatch(revision_reach.commit_id_pattern(7), token):
                 found.add(token)
     return found
 

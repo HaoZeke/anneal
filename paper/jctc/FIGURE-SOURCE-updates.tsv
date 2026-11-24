@@ -49,3 +49,4 @@ paper/jctc/scripts/fig_landscapes.py	3d8bc5649ce8dab5849234ead39b3bd68918c381f0b
 paper/jctc/scripts/lj75_gmin_table.py	9d79311438fef5eeaf540318a543f6322042ffed22946d14753a1544da9a1099	script	active	the source names commits this repository holds
 paper/jctc/scripts/sketchmap_landscapes.py	c922e562b347d37a708739e583eaebc8eee0ec88076aadaf42be2dda20752a27	script	active	the source names commits this repository holds
 paper/jctc/scripts/system_visuals.py	52bcda5936a263f62def7a8ddfd71c2478e03cf4b5075e9e03f95152c589b7c2	script	active	the source names commits this repository holds
+paper/jctc/scripts/lj75_gmin_table.py	0901f1c738076a5bae51dd84c0eac81d4a081322279ce4d76b0d7bd0109f93a1	script	active	the source checks a commit id through scripts/revision_reach.py
