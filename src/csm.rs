@@ -215,7 +215,7 @@ pub struct GroupProjection {
     pub group: &'static str,
 }
 
-fn d5h_ops_ref() -> &'static [[[f64; 3]; 3]] {
+fn dihedral_ops_ref() -> &'static [[[f64; 3]; 3]] {
     static OPS: OnceLock<Vec<[[f64; 3]; 3]>> = OnceLock::new();
     OPS.get_or_init(d5h_ops)
 }
@@ -247,7 +247,7 @@ pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjectio
     clear_op_cache();
     let mut best: Option<(usize, GroupProjection)> = None;
     for (rank, name, ops) in [
-        (2, "D_5h", d5h_ops_ref()),
+        (2, "D_5h", dihedral_ops_ref()),
         (1, "C_5", c5_ops_ref()),
         (0, "C_i", inversion_ops_ref()),
     ] {
