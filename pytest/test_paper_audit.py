@@ -1921,8 +1921,157 @@ def test_session_metadata_records_the_anneal_repro_checkout(tmp_path):
     head = subprocess.run(["git", "-C", str(repro), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     assert row["anneal_repro"]["revision"] == head
     assert re.fullmatch(r"[0-9a-f]{40}", row["anneal_repro"]["tree"])
+    assert row["anneal_repro"]["dirty"] is False
     assert row["openmp"]["omp_num_threads"] == "3"
     assert row["openmp"]["settings"]["OMP_NUM_THREADS"] == "3"
+
+
+def checkout_for_dirty_tests(tmp_path):
+    repo = tmp_path / "checkout"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    (repo / "a.txt").write_text("a\n")
+    git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", "-c", "core.hooksPath=/dev/null",
+           "-c", "commit.gpgsign=false"]
+    subprocess.run([*git, "add", "a.txt"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "a"], check=True)
+    return repo
+
+
+def test_session_metadata_records_whether_the_checkout_is_dirty(tmp_path):
+    module = session_metadata_module()
+    repo = checkout_for_dirty_tests(tmp_path)
+    assert module.git_dirty(repo) is False
+    assert module.record("c", ["true"], repo)["dirty"] is False
+    (repo / "a.txt").write_text("changed\n")
+    assert module.git_dirty(repo) is True
+    assert module.record("c", ["true"], repo)["dirty"] is True
+    (repo / "a.txt").write_text("a\n")
+    assert module.git_dirty(repo) is False
+    (repo / "new.txt").write_text("untracked\n")
+    assert module.git_dirty(repo) is True
+    assert module.repro_checkout(repo)["dirty"] is True
+
+
+def test_session_metadata_does_not_guess_when_git_cannot_say(tmp_path, monkeypatch):
+    module = session_metadata_module()
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    bare = tmp_path / "not-a-checkout"
+    bare.mkdir()
+    assert module.git_dirty(bare) is None
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError("git")))
+    assert module.git_dirty(tmp_path) is None
+
+
+def test_the_session_record_of_this_checkout_matches_git_status():
+    status = subprocess.run(["git", "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True, check=True)
+    module = session_metadata_module()
+    assert module.record("c", ["true"], ROOT)["dirty"] == bool(status.stdout.strip())
+
+
+MAPS = """\
+7f0000000000-7f0000020000 r--p 00000000 08:01 11 /usr/lib/x86_64-linux-gnu/libc.so.6
+7f0000100000-7f0000120000 r-xp 00000000 08:01 12 /usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0
+7f0000200000-7f0000220000 r--p 00000000 08:01 12 /usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0
+7f0000300000-7f0000320000 r-xp 00000000 08:01 13 /opt/lib/libomp.so.5 (deleted)
+7f0000400000-7f0000420000 rw-p 00000000 00:00 0
+"""
+
+
+def test_the_openmp_runtime_is_read_from_the_mapped_libraries():
+    module = session_metadata_module()
+    found = module.loaded_openmp(MAPS)
+    assert sorted(found) == ["libgomp", "libomp"]
+    assert found["libgomp"] == "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0"
+    assert module.loaded_openmp("7f00-7f01 r-xp 0 08:01 1 /usr/lib/libc.so.6\n") == {}
+    assert module.openmp_stem("libiomp5.so") == "libiomp5"
+    assert module.openmp_stem("/usr/local/lib/libomp.dylib") == "libomp"
+    assert module.openmp_stem("libgompx.so.1") is None
+    assert module.openmp_stem("libm.so.6") is None
+
+
+def test_the_named_openmp_runtime_is_the_one_in_the_evidence(tmp_path, monkeypatch):
+    module = session_metadata_module()
+    maps = tmp_path / "maps"
+    maps.write_text(MAPS.replace("/opt/lib/libomp.so.5 (deleted)", "/usr/lib/libc.so.6"))
+    loaded = module.identify_openmp(["true"], maps)
+    assert loaded["library"] == "libgomp"
+    assert loaded["path"] == "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0"
+    assert loaded["source"] == "loaded in the recorder process"
+
+    maps.write_text("7f00-7f01 r-xp 0 08:01 1 /usr/lib/libc.so.6\n")
+    monkeypatch.setattr(module, "needed_libraries", lambda executable: ["libm.so.6", "libiomp5.so", "libc.so.6"])
+    named = module.identify_openmp(["./campaign"], maps)
+    assert named["library"] == "libiomp5"
+    assert named["path"] is None
+    assert named["source"] == "dynamic section of ./campaign"
+
+    monkeypatch.setattr(module, "needed_libraries", lambda executable: ["libgomp.so.1", "libomp.so.5"])
+    both = module.identify_openmp(["./campaign"], maps)
+    assert both["library"] == "unknown"
+    assert both["candidates"] == ["libgomp", "libomp"]
+
+
+def test_an_unidentifiable_openmp_runtime_is_unknown_even_where_libraries_are_installed(tmp_path, monkeypatch):
+    module = session_metadata_module()
+    maps = tmp_path / "maps"
+    maps.write_text("7f00-7f01 r-xp 0 08:01 1 /usr/lib/libc.so.6\n")
+    monkeypatch.setattr(module, "needed_libraries", lambda executable: None)
+    shown = module.identify_openmp(["snakemake", "x"], maps)
+    assert shown["library"] == "unknown" and shown["path"] is None
+    assert shown["candidates"] == []
+    absent = module.identify_openmp(None, tmp_path / "no-maps")
+    assert absent["library"] == "unknown"
+    monkeypatch.setattr(module, "needed_libraries", lambda executable: ["libm.so.6"])
+    assert module.identify_openmp(["./campaign"], maps)["library"] == "unknown"
+    monkeypatch.setattr(module.shutil, "which", lambda name: "/bin/" + name if name == "ldconfig" else None)
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(
+        a[0], 0, stdout="\tlibgomp.so.1 (libc6,x86-64) => /usr/lib/libgomp.so.1\n", stderr=""))
+    assert module.openmp_runtime()["libraries"] == {"libgomp": str(Path("/usr/lib/libgomp.so.1").resolve())}
+    assert module.identify_openmp(["./campaign"], maps)["library"] == "unknown"
+
+
+def test_needed_libraries_come_from_the_dynamic_section_without_running_the_file(tmp_path, monkeypatch):
+    module = session_metadata_module()
+    tool = tmp_path / "bin"
+    tool.mkdir()
+    readelf = tool / "readelf"
+    readelf.write_text(
+        "#!/bin/sh\n"
+        'case "$2" in *campaign) ;; *) exit 1 ;; esac\n'
+        'echo " 0x0000000000000001 (NEEDED)             Shared library: [libgomp.so.1]"\n'
+        'echo " 0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]"\n'
+    )
+    readelf.chmod(0o755)
+    campaign = tool / "campaign"
+    campaign.write_text("#!/bin/sh\ntouch ran\n")
+    campaign.chmod(0o755)
+    script = tool / "script"
+    script.write_text("#!/bin/sh\n")
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tool) + os.pathsep + "/usr/bin" + os.pathsep + "/bin")
+    assert module.needed_libraries(str(campaign)) == ["libgomp.so.1", "libc.so.6"]
+    assert module.needed_libraries(str(script)) is None
+    assert module.needed_libraries("absent-command") is None
+    assert not (tmp_path / "ran").exists() and not Path("ran").exists()
+
+
+def test_the_session_record_names_its_openmp_runtime_and_checkout_state(tmp_path):
+    out = tmp_path / "sessions.jsonl"
+    run = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/session_metadata.py"), "--output", str(out), "--campaign", "c",
+         "--root", str(ROOT), "--", "true"],
+        cwd=ROOT, capture_output=True, text=True, check=False)
+    assert run.returncode == 0, run.stderr
+    row = json.loads(out.read_text())
+    assert isinstance(row["dirty"], bool)
+    assert set(row["openmp_in_use"]) >= {"library", "path", "source"}
+    assert row["openmp_in_use"]["library"] in {"libgomp", "libomp", "libiomp5", "unknown"}
+
+
+def test_a_missing_boot_id_is_recorded_as_null(tmp_path):
+    module = session_metadata_module()
+    assert module.read_text(tmp_path / "boot_id") is None
 
 
 def test_a_tip4p_separate_cores_claim_is_reported():

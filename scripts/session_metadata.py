@@ -6,9 +6,10 @@ The caller should run this process under the same ``taskset`` mask as the
 campaign.  The resulting JSON Lines file is append-only: one line identifies
 one invocation, the kernel boot, the effective CPU affinity, the exact
 top-level reproduce command, the compilers and the Python that build and
-drive it, the OpenMP runtime and its thread settings, and, with
-``--anneal-repro``, the revision of that checkout.  A tool that is not
-installed is recorded as null, not omitted.
+drive it, the OpenMP runtime and its thread settings, whether the checkout
+had uncommitted changes, and, with ``--anneal-repro``, the revision of that
+checkout.  A tool that is not installed is recorded as null, not omitted.
+A runtime that cannot be identified is recorded as "unknown".
 """
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ import datetime
 import json
 import os
 import platform
+import re
 import shutil
 import socket
 import subprocess
@@ -50,6 +52,23 @@ def git_revision(root: Path, ref: str = "HEAD") -> str | None:
     return proc.stdout.strip() if proc.returncode == 0 else None
 
 
+def git_dirty(root: Path) -> bool | None:
+    """True when ``git status --porcelain`` lists any change or untracked file, None when git cannot say."""
+    try:
+        proc = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    if proc.returncode != 0:
+        return None
+    return bool(proc.stdout.strip())
+
+
 def first_line(command: list[str]) -> str | None:
     """The first output line of a version command, or None when the tool is absent or fails."""
     if shutil.which(command[0]) is None:
@@ -61,6 +80,66 @@ def first_line(command: list[str]) -> str | None:
 
 def compilers() -> dict[str, str | None]:
     return {name: first_line(command) for name, command in COMPILERS.items()}
+
+
+def openmp_stem(name: str) -> str | None:
+    """The OpenMP runtime a shared library file name belongs to, or None."""
+    stem = Path(name).name.split(".so")[0].split(".dylib")[0]
+    return stem if stem in OPENMP_LIBRARIES else None
+
+
+def loaded_openmp(maps_text: str) -> dict[str, str]:
+    """The OpenMP runtimes mapped into a process, from the text of /proc/PID/maps."""
+    found: dict[str, str] = {}
+    for line in maps_text.splitlines():
+        parts = line.split(None, 5)
+        if len(parts) == 6 and (stem := openmp_stem(parts[5])) and stem not in found:
+            found[stem] = parts[5].strip()
+    return found
+
+
+def needed_libraries(executable: str) -> list[str] | None:
+    """Shared libraries an executable asks the loader for, read without running it.
+
+    readelf reads the dynamic section on Linux and otool the load commands on
+    macOS. None means neither tool could read the file, as for a script.
+    """
+    path = shutil.which(executable)
+    if path is None:
+        return None
+    for command, pattern in (
+        (["readelf", "-d", path], r"\(NEEDED\)\s+Shared library: \[([^\]]+)\]"),
+        (["otool", "-L", path], r"^\s+(\S+) \(compatibility"),
+    ):
+        if shutil.which(command[0]) is None:
+            continue
+        proc = subprocess.run(command, capture_output=True, text=True, check=False)
+        if proc.returncode == 0:
+            return re.findall(pattern, proc.stdout, re.MULTILINE)
+    return None
+
+
+def identify_openmp(command: list[str] | None, maps: Path = Path("/proc/self/maps")) -> dict[str, object]:
+    """Name the OpenMP runtime from evidence, or record "unknown".
+
+    The recorder's own address space is read first: a runtime mapped there is
+    the one this process loaded.  Otherwise the dynamic section of the command's
+    executable names the runtime it will load.  A script, an executable the
+    tools cannot read, and a binary that links no OpenMP runtime give "unknown".
+    Nothing is inferred from which libraries happen to be installed.
+    """
+    text = read_text(maps)
+    candidates = loaded_openmp(text) if text else {}
+    if candidates:
+        source = "loaded in the recorder process"
+    else:
+        names = needed_libraries(command[0]) if command else None
+        candidates = {stem: name for name in (names or []) if (stem := openmp_stem(name))}
+        source = f"dynamic section of {command[0]}" if candidates else "no runtime found in the recorder or the command"
+    if len(candidates) == 1:
+        (library, path), = candidates.items()
+        return {"library": library, "path": path if path.startswith("/") else None, "source": source}
+    return {"library": "unknown", "path": None, "source": source, "candidates": sorted(candidates)}
 
 
 def openmp_runtime() -> dict[str, object]:
@@ -90,6 +169,7 @@ def repro_checkout(path: Path | None) -> dict[str, str | None] | None:
         "path": str(path),
         "revision": git_revision(path),
         "tree": git_revision(path, "HEAD^{tree}"),
+        "dirty": git_dirty(path),
     }
 
 
@@ -125,10 +205,12 @@ def record(campaign: str, command: list[str], root: Path, anneal_repro: Path | N
         "command": command,
         "cwd": str(root),
         "code_revision": git_revision(root),
+        "dirty": git_dirty(root),
         "compilers": compilers(),
         "python": {"version": platform.python_version(), "implementation": platform.python_implementation(),
                    "executable": sys.executable},
         "openmp": openmp_runtime(),
+        "openmp_in_use": identify_openmp(command),
         "anneal_repro": repro_checkout(anneal_repro),
     }
 
