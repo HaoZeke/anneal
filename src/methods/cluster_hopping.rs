@@ -12191,13 +12191,32 @@ mod tests {
         ])
     }
 
+    fn observed_basis_body() -> Array1<f64> {
+        let basis = [
+            [1.0, 0.0, 0.0],
+            [0.5, 3.0_f64.sqrt() / 2.0, 0.0],
+            [0.5, 3.0_f64.sqrt() / 6.0, (2.0_f64 / 3.0).sqrt()],
+        ];
+        Array1::from_iter((0..2).flat_map(|i| {
+            (0..2).flat_map(move |j| {
+                (0..2).flat_map(move |k| {
+                    [0, 1, 2].map(move |axis| {
+                        f64::from(i) * basis[0][axis]
+                            + f64::from(j) * basis[1][axis]
+                            + f64::from(k) * basis[2][axis]
+                    })
+                })
+            })
+        }))
+    }
+
     #[test]
     fn a_stop_set_mid_probe_charges_nothing_further() {
-        let cfg = quiet_basis_search(4);
+        let cfg = quiet_basis_search(8);
         let budget = 400;
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let mut ledger = Ledger::with_stop(budget, stop.clone());
-        let tetra = regular_tetrahedron();
+        let body = observed_basis_body();
         let mut seen_parent = false;
         let mut side_charges = 0usize;
         let charges_after = std::sync::atomic::AtomicUsize::new(0);
@@ -12226,7 +12245,7 @@ mod tests {
                     }
                 }
             }
-            (0.0, tetra.clone())
+            (0.0, body.clone())
         };
         let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| {
             if stop.load(std::sync::atomic::Ordering::Relaxed) {
@@ -12245,7 +12264,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(11);
         let outcome = run_with_gradient(
             &cfg,
-            tetra.view(),
+            body.view(),
             &mut ledger,
             &mut relax,
             Some(&mut grad),
@@ -12276,14 +12295,14 @@ mod tests {
 
     #[test]
     fn a_missed_basis_probe_is_counted_before_later_records() {
-        let mut cfg = quiet_basis_search(4);
+        let mut cfg = quiet_basis_search(8);
         cfg.calibrated_screen = false;
         cfg.screen_margin = f64::INFINITY;
         cfg.finish_improving = false;
         let budget = 400;
         let mut ledger = Ledger::new(budget);
         ledger.stop_below(-10.0);
-        let tetra = regular_tetrahedron();
+        let body = observed_basis_body();
         let mut probed = false;
         let mut seen_parent = false;
         let mut real_charges = 0usize;
@@ -12323,10 +12342,10 @@ mod tests {
             } else {
                 -1.0
             };
-            (energy, tetra.clone())
+            (energy, body.clone())
         };
         let mut rng = StdRng::seed_from_u64(11);
-        let outcome = run(&cfg, tetra.view(), &mut ledger, &mut relax, &mut rng).expect("search");
+        let outcome = run(&cfg, body.view(), &mut ledger, &mut relax, &mut rng).expect("search");
         assert!(probed, "the stall must probe a basis before the hit");
         assert_eq!(side_charges, cfg.relax_steps);
         assert!(
@@ -12370,11 +12389,11 @@ mod tests {
         side_energy: f64,
         walk_hit: bool,
     ) -> (Outcome, Ledger, usize, usize) {
-        let cfg = quiet_basis_search(4);
+        let cfg = quiet_basis_search(8);
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let mut ledger = Ledger::with_stop(400, stop.clone());
         ledger.stop_below(-10.0);
-        let tetra = regular_tetrahedron();
+        let body = observed_basis_body();
         let mut seen_parent = false;
         let mut probed = false;
         let mut potential_calls = 0usize;
@@ -12404,10 +12423,10 @@ mod tests {
             if energy <= -10.0 {
                 stop.store(true, std::sync::atomic::Ordering::Relaxed);
             }
-            (energy, tetra.clone())
+            (energy, body.clone())
         };
         let mut rng = StdRng::seed_from_u64(11);
-        let outcome = run(&cfg, tetra.view(), &mut ledger, &mut relax, &mut rng).expect("search");
+        let outcome = run(&cfg, body.view(), &mut ledger, &mut relax, &mut rng).expect("search");
         assert!(probed, "the stall must probe a basis");
         (outcome, ledger, potential_calls, side_calls)
     }
@@ -12466,14 +12485,14 @@ mod tests {
     fn run_tracking_the_potential_minimum(
         hit_energy: f64,
     ) -> (Outcome, (f64, Array1<f64>), Array1<f64>) {
-        let cfg = quiet_basis_search(4);
+        let cfg = quiet_basis_search(8);
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let mut ledger = Ledger::with_stop(400, stop.clone());
         ledger.stop_below(-10.0);
-        let tetra = regular_tetrahedron();
-        let probed_state = tetra.mapv(|value| 1.25 * value);
+        let body = observed_basis_body();
+        let probed_state = body.mapv(|value| 1.25 * value);
         let mut seen_parent = false;
-        let mut lowest: (f64, Array1<f64>) = (f64::INFINITY, tetra.clone());
+        let mut lowest: (f64, Array1<f64>) = (f64::INFINITY, body.clone());
         let mut relax = |led: &mut Ledger, _x: ArrayView1<f64>, steps: usize| {
             let side = led.spent() == 0 && seen_parent;
             if !side {
@@ -12487,7 +12506,7 @@ mod tests {
             let (energy, state) = if side {
                 (hit_energy, probed_state.clone())
             } else {
-                (0.0, tetra.clone())
+                (0.0, body.clone())
             };
             if energy < lowest.0 {
                 lowest = (energy, state.clone());
@@ -12502,7 +12521,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(11);
         let outcome = run_with_gradient(
             &cfg,
-            tetra.view(),
+            body.view(),
             &mut ledger,
             &mut relax,
             Some(&mut grad),
@@ -12607,7 +12626,7 @@ mod tests {
 
     #[test]
     fn a_target_hit_in_basis_probe_stops_before_tail_stages() {
-        let mut cfg = quiet_basis_search(4);
+        let mut cfg = quiet_basis_search(8);
         cfg.polish_records = 7;
         cfg.superbasin_escape = true;
         cfg.superbasin_period = 1;
@@ -12618,7 +12637,7 @@ mod tests {
         cfg.max_hops = Some(4);
         let mut ledger = Ledger::new(400);
         ledger.stop_below(-10.0);
-        let tetra = regular_tetrahedron();
+        let body = observed_basis_body();
         let mut seen_parent = false;
         let mut polish_calls = 0usize;
         let mut climb_grad_calls = 0usize;
@@ -12637,7 +12656,7 @@ mod tests {
                 }
             }
             let energy = if side { -100.0 } else { 0.0 };
-            (energy, tetra.clone())
+            (energy, body.clone())
         };
         let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| {
             if hit_probe_done {
@@ -12653,7 +12672,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(11);
         let outcome = run_with_gradient(
             &cfg,
-            tetra.view(),
+            body.view(),
             &mut ledger,
             &mut relax,
             Some(&mut grad),
