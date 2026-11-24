@@ -16,8 +16,10 @@ use anneal_core::catalog::FreshEvaluation;
 use anneal_core::catalog::molecular::{GFN2_ACCURACY, GFN2_MAX_ITERATIONS, RGPOT_XTB_ENGINE_REV};
 use anneal_core::compatibility::{AbiStamp, EngineDescriptor, ProtocolVersion};
 use anneal_core::methods::cluster_hopping::{OVERLAP_CALL_LIMIT, element_call_floor};
+use eindir_core::Bounds;
 use eindir_core::ffi::{EindirObjectiveWrapper, eindir_core_abi_compatible, eindir_objective_t};
-use eindir_core::gradient::DifferentiableObjective;
+use eindir_core::gradient::{DifferentiableObjective, Gradient};
+use eindir_core::objective::Objective;
 use libloading::{Library, Symbol};
 use rgpot_core::eindir::{
     rgpot_eindir_abi_stamp, rgpot_potential_free_eindir, rgpot_potential_new_eindir,
@@ -156,6 +158,24 @@ mod tests {
         RGPOT_XTB_RC_SCC_NOT_CONVERGED
     }
 
+    unsafe extern "C" fn scc_failure_with_stale_answer(
+        _pot: *mut c_void,
+        n: i64,
+        _positions: *const f64,
+        _atomic_numbers: *const i32,
+        gradient: *mut f64,
+        energy: *mut f64,
+        variance: *mut f64,
+        _cell: *const f64,
+    ) -> i32 {
+        unsafe {
+            *energy = -475.186;
+            *variance = 0.0;
+            std::slice::from_raw_parts_mut(gradient, 3 * n as usize).fill(0.0);
+        }
+        RGPOT_XTB_RC_SCC_NOT_CONVERGED
+    }
+
     unsafe extern "C" fn reset_noop(_pot: *mut c_void) {}
 
     unsafe extern "C" fn engine_rejected(
@@ -213,6 +233,28 @@ mod tests {
             assert_eq!(counted, 1, "{name} was not counted in scc_rejected");
             assert!(forces.iter().all(|value| value.is_nan()), "{name}");
         }
+    }
+
+    #[test]
+    fn stale_scc_outputs_do_not_cross_the_objective_boundary() {
+        use eindir_core::gradient::DifferentiableObjective;
+
+        let objective = RgpotObjective::xtb_from_symbols(
+            &[14, 14],
+            [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0],
+            OVERLAP_CALL_LIMIT_A,
+            None,
+            std::ptr::null_mut(),
+            scc_failure_with_stale_answer,
+            reset_noop,
+            reset_noop,
+        );
+        let coordinates = ndarray::Array1::from(vec![0.0, 0.0, 0.0, 2.3, 0.0, 0.0]);
+        let (energy, gradient) = objective.wrapper().value_and_gradient(coordinates.view());
+
+        assert!(!energy.is_finite());
+        assert!(gradient.iter().all(|value| !value.is_finite()));
+        assert_eq!(objective.scc_rejected_count(), 1);
     }
 
     // The registry release has no SCC status. This assertion compiles only
@@ -870,7 +912,13 @@ unsafe extern "C" fn xtb_callback(
         &mut kernel.scc_rejected,
     ) {
         Ok(answer) => answer,
-        Err(status) => return status,
+        Err(status) => {
+            out.energy = f64::NAN;
+            out.variance = f64::NAN;
+            out.forces =
+                unsafe { rgpot_tensor_owned_cpu_f64_2d(kernel.scratch.as_ptr(), n as i64, 3) };
+            return status;
+        }
     };
     out.energy = energy;
     out.variance = var;
@@ -932,6 +980,48 @@ pub(crate) struct RgpotObjective {
 // potential Send. Callers serialize evaluation because the handle is not Sync.
 unsafe impl Send for RgpotObjective {}
 
+pub(crate) struct CheckedObjective<'a> {
+    inner: EindirObjectiveWrapper<'a>,
+}
+
+impl Objective<f64> for CheckedObjective<'_> {
+    fn dim(&self) -> usize {
+        Objective::dim(&self.inner)
+    }
+
+    fn bounds(&self) -> &Bounds<f64> {
+        self.inner.bounds()
+    }
+
+    fn eval(&self, x: ndarray::ArrayView1<f64>) -> f64 {
+        self.inner.eval(x)
+    }
+}
+
+impl Gradient<f64> for CheckedObjective<'_> {
+    fn dim(&self) -> usize {
+        Gradient::dim(&self.inner)
+    }
+
+    fn grad(&self, x: ndarray::ArrayView1<f64>) -> ndarray::Array1<f64> {
+        self.value_and_gradient(x).1
+    }
+}
+
+impl DifferentiableObjective<f64> for CheckedObjective<'_> {
+    fn value_and_gradient(&self, x: ndarray::ArrayView1<f64>) -> (f64, ndarray::Array1<f64>) {
+        let energy = self.inner.eval(x);
+        if !energy.is_finite() {
+            return (f64::NAN, ndarray::Array1::from_elem(x.len(), f64::NAN));
+        }
+        let gradient = self.inner.grad(x);
+        if gradient.len() != x.len() || gradient.iter().any(|value| !value.is_finite()) {
+            return (f64::NAN, ndarray::Array1::from_elem(x.len(), f64::NAN));
+        }
+        (energy, gradient)
+    }
+}
+
 impl Drop for RgpotObjective {
     fn drop(&mut self) {
         unsafe { rgpot_potential_free_eindir(self.pot) };
@@ -960,7 +1050,7 @@ impl RgpotObjective {
         refused
     }
 
-    pub(crate) fn wrapper(&self) -> EindirObjectiveWrapper<'_> {
+    pub(crate) fn wrapper(&self) -> CheckedObjective<'_> {
         let stamp = rgpot_eindir_abi_stamp();
         assert_eq!(
             unsafe { eindir_core_abi_compatible(&stamp) },
@@ -968,7 +1058,9 @@ impl RgpotObjective {
             "rgpot/eindir ABI stamp is incompatible with anneal's eindir boundary"
         );
         let obj = unsafe { &*(self.pot as *const eindir_objective_t) };
-        unsafe { EindirObjectiveWrapper::new(obj) }
+        CheckedObjective {
+            inner: unsafe { EindirObjectiveWrapper::new(obj) },
+        }
     }
 
     pub(crate) fn fresh_evaluation(&self, coordinates: &[f64]) -> Result<FreshEvaluation, String> {

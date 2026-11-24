@@ -1666,11 +1666,7 @@ pub fn clears_species_sanity(x: ArrayView1<f64>, elements: &[u32], absolute: f64
 /// fragments, so their per-fragment bond checks remain separate. Atomic
 /// covalent searches, however, must not rank a finite energy for a cluster
 /// that has split into disconnected components.
-fn covalent_cluster_is_connected(
-    cfg: &Config,
-    x: ArrayView1<f64>,
-    elements: &[u32],
-) -> bool {
+fn covalent_cluster_is_connected(cfg: &Config, x: ArrayView1<f64>, elements: &[u32]) -> bool {
     matches!(cfg.move_library, MoveLibrary::Molecular { .. })
         || (x.len() == 3 * elements.len()
             && connectivity_groups_z(x, elements, cfg.bond_tolerance).len() == 1)
@@ -15987,6 +15983,23 @@ mod call_floor_tests {
         let carbon = [6, 6];
         let triple = Array1::from(vec![0.0, 0.0, 0.0, 1.20, 0.0, 0.0]);
         assert!(clears_species_sanity(triple.view(), &carbon, FLOOR));
+    }
+
+    #[test]
+    fn a_detached_covalent_atom_is_not_a_recordable_minimum() {
+        let mut cfg = Config::for_cluster(3);
+        cfg.call_floor = Some(FLOOR);
+        cfg.call_floor_elements = Some(vec![14; 3]);
+        let connected = Array1::from(vec![0.0, 0.0, 0.0, 2.3, 0.0, 0.0, 4.6, 0.0, 0.0]);
+        let detached = Array1::from(vec![0.0, 0.0, 0.0, 2.3, 0.0, 0.0, 6.8, 0.0, 0.0]);
+
+        assert!(quench_is_sane(&cfg, -1.0, connected.view()));
+        assert!(clears_species_sanity(
+            detached.view(),
+            cfg.call_floor_elements.as_deref().unwrap(),
+            FLOOR
+        ));
+        assert!(!quench_is_sane(&cfg, -2.0, detached.view()));
     }
 
     #[test]
