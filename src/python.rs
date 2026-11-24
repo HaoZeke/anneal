@@ -3091,6 +3091,7 @@ struct CallableDiffObjective {
     bounds: Bounds<f64>,
     gradient_scale: f64,
     errors: std::sync::Arc<CallbackErrors>,
+    calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl Objective<f64> for CallableDiffObjective {
@@ -3106,6 +3107,8 @@ impl Objective<f64> for CallableDiffObjective {
         if self.errors.aborted() {
             return f64::INFINITY;
         }
+        self.calls
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Python::attach(|py| {
             let py_arr = py_view1(py, x);
             match self.fn_.call1(py, (py_arr,)) {
@@ -3125,6 +3128,8 @@ impl eindir_core::gradient::Gradient<f64> for CallableDiffObjective {
         if self.errors.aborted() {
             return Array1::zeros(dim);
         }
+        self.calls
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Python::attach(|py| {
             let py_arr = py_view1(py, x);
             match self.grad_fn.call1(py, (py_arr,)) {
@@ -3163,6 +3168,7 @@ fn cluster_gradient_scale(
     seed: u64,
     at: Option<ArrayView1<'_, f64>>,
     errors: &CallbackErrors,
+    calls: &std::sync::atomic::AtomicUsize,
 ) -> PyResult<f64> {
     use crate::methods::cluster_hopping::random_cluster_in_radius;
 
@@ -3171,6 +3177,7 @@ fn cluster_gradient_scale(
     // gradient, counted in the run's warning; KeyboardInterrupt, SystemExit
     // and a return that is not a number end the call.
     let call = |f: &Py<PyAny>, x: Vec<f64>| -> PyResult<Option<Py<PyAny>>> {
+        calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         match f.call1(py, (PyArray1::from_vec(py, x),)) {
             Ok(value) => Ok(Some(value)),
             Err(err) if err.is_instance_of::<pyo3::exceptions::PyException>(py) => {
@@ -3296,6 +3303,7 @@ fn cluster_archive_search(
     obj: &CallableDiffObjective,
     cfg: &crate::methods::cluster_hopping::Config,
     ledger: &mut crate::methods::cluster_hopping::Ledger,
+    calls: &std::sync::atomic::AtomicUsize,
     seed: u64,
 ) -> PyResult<Py<PyDict>> {
     use crate::methods::archive_search::{Archive, archive_search};
@@ -3331,20 +3339,43 @@ fn cluster_archive_search(
         &mut archive,
         &mut rng,
     );
+    drop(relax);
     let dim = 3 * cfg.n_points;
     let best = out
         .best_state
         .map(|a| a.to_vec())
         .unwrap_or_else(|| vec![0.0; dim]);
     let dict = PyDict::new(py);
+    let charged = calls.load(std::sync::atomic::Ordering::Relaxed);
     dict.set_item("best", PyArray1::from_vec(py, best))?;
     dict.set_item("best_energy", out.best)?;
     dict.set_item("hops", out.full)?;
-    dict.set_item("charged", out.charged)?;
+    dict.set_item("charged", charged)?;
     dict.set_item("floors", out.floors)?;
     dict.set_item("returned", out.returned)?;
     dict.set_item("events", out.events)?;
     dict.set_item("nve_unavailable", out.nve_unavailable)?;
+    dict.set_item("branch_on_stall", cfg.branch_on_stall)?;
+    let ledger_split = PyDict::new(py);
+    ledger_split.set_item("spent", charged)?;
+    ledger_split.set_item("screen", stats.screen_charged.saturating_mul(2))?;
+    ledger_split.set_item("full", stats.full_charged.saturating_mul(2))?;
+    ledger_split.set_item("check", stats.check_charged.saturating_mul(2))?;
+    ledger_split.set_item("quenches", stats.total())?;
+    ledger_split.set_item("converged", stats.converged)?;
+    ledger_split.set_item("capped", stats.capped)?;
+    ledger_split.set_item("screened_out", out.returned)?;
+    ledger_split.set_item("returned", out.returned)?;
+    if cfg.branch_on_stall {
+        ledger_split.set_item("branch_draws", Option::<usize>::None)?;
+        ledger_split.set_item("branch_spent", Option::<usize>::None)?;
+    } else {
+        ledger_split.set_item("branch_draws", 0)?;
+        ledger_split.set_item("branch_spent", 0)?;
+    }
+    ledger_split.set_item("overlap_rejected", stats.overlap_rejected)?;
+    ledger_split.set_item("basins", out.floors)?;
+    dict.set_item("ledger", ledger_split)?;
     Ok(dict.into())
 }
 
@@ -3354,6 +3385,7 @@ fn cluster_archive_search(
     _obj: &CallableDiffObjective,
     _cfg: &crate::methods::cluster_hopping::Config,
     _ledger: &mut crate::methods::cluster_hopping::Ledger,
+    _calls: &std::sync::atomic::AtomicUsize,
     _seed: u64,
 ) -> PyResult<Py<PyDict>> {
     Err(PyValueError::new_err(
@@ -3831,6 +3863,7 @@ fn cluster_search(
         }
         ledger.stop_below(limit);
     }
+    let potential_calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let gradient_scale = if budget >= 4 {
         let probe_owned = if rigid_chart || molecular {
             Some(match start.as_ref() {
@@ -3848,6 +3881,7 @@ fn cluster_search(
             seed,
             probe_owned.as_ref().map(|probe| probe.view()),
             &errors,
+            &potential_calls,
         )?;
         for _ in 0..3 {
             assert!(ledger.charge());
@@ -3874,9 +3908,10 @@ fn cluster_search(
         bounds,
         gradient_scale,
         errors: std::sync::Arc::clone(&errors),
+        calls: std::sync::Arc::clone(&potential_calls),
     };
     if ras {
-        let out = cluster_archive_search(py, &obj, &cfg, &mut ledger, seed);
+        let out = cluster_archive_search(py, &obj, &cfg, &mut ledger, &potential_calls, seed);
         errors.finish(py)?;
         return out;
     }

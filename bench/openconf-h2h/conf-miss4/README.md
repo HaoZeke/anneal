@@ -90,10 +90,13 @@ time.
   the reflected geometry keeps the reference stereo key: for a molecule
   with no stereocentre or a meso one, not for a chiral molecule, whose
   reflection is the other enantiomer.
-- `local_step.csv` is read from each anneal and develop `job.json`: the
-  resolved local step and, for this series, the `ledger` that
-  `cluster_search` returns, whose keys are defined in its docstring.
-  Develop has no ledger, so its ledger columns are empty.
+- `local_step.csv` records `local_step`, `spent`, `screen`, `full`,
+  `check`, `quenches`, `converged`, `capped`, `screened_out`, `returned`,
+  `overlap_rejected` and `basins`, followed by the revision and host.
+  Develop has no ledger, so its ledger columns are empty. This CSV
+  predates `branch_draws` and `branch_spent`; the stored files do not
+  contain enough data to derive those counters, so they are neither
+  backfilled nor claimed here.
 
 ## What the series changes
 

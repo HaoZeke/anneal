@@ -81,15 +81,18 @@ def test_a_mirror_match_of_a_meso_molecule_is_a_hit():
     assert m.same_or_mirror(left, right)
 
 
-def test_mirror_hits_stay_blank_for_rows_written_before_the_column(tmp_path):
+def test_legacy_rows_are_readable_but_refused_for_append(tmp_path):
     pytest.importorskip("scipy")
     import csv
 
-    from paired_score import existing_fields, mirror_hits
+    from paired_score import existing_fields, mirror_hits, score_runs
 
     old = tmp_path / "seeds.csv"
     old.write_text("molecule,arm,seed,hit\nz34,anneal,2048,1\n")
-    assert existing_fields(old) == ["molecule", "arm", "seed", "hit"]
+    with pytest.raises(ValueError, match="CSV header mismatch"):
+        existing_fields(old)
+    with pytest.raises(ValueError, match="CSV header mismatch"):
+        score_runs(tmp_path / "runs", old, 1)
     rows = list(csv.DictReader(old.open()))
     assert mirror_hits(rows) == ""
     assert mirror_hits([{"hit_mirror": "1"}, {"hit_mirror": "0"}, {"hit_mirror": "1"}]) == "2/3"

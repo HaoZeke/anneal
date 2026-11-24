@@ -197,6 +197,7 @@ def judge(rows: list[dict], cell: str) -> dict:
             path_checks.append(False)
     res["b_path_matches"] = sum(path_checks)
     res["b_path_checkable"] = len(path_checks)
+    res["b_path_failures"] = res["b_path_checkable"] - res["b_path_matches"]
     res["b_path_enabled"] = path_enabled
     res["b_path_draws_sum"] = sum(
         int(r["b_path_draws"]) for r in b.values()
@@ -222,10 +223,10 @@ def judge(rows: list[dict], cell: str) -> dict:
     if res["calls_ratio"] and abs(res["calls_ratio"] - 1.0) > 0.02:
         notes.append("calls differ between A and B")
     kind = next(iter(a.values()))["kind"] if a else ""
+    if res["b_path_failures"]:
+        notes.append("B conf-miss counters disagree with the resolved configuration")
     if path_unavailable:
         notes.append(f"B conf-miss counters unavailable in {path_unavailable} rows")
-    elif res["b_path_matches"] != res["n"]:
-        notes.append("B conf-miss counters disagree with the resolved configuration")
     if kind == "guard":
         ok, bad = identical(a, b)
         res["identical"] = ok
@@ -247,7 +248,7 @@ def judge(rows: list[dict], cell: str) -> dict:
         failures.append("memory")
     if res.get("identical") is False:
         failures.append("default parity")
-    if not path_unavailable and res["b_path_matches"] != res["n"]:
+    if res["b_path_failures"]:
         failures.append("conf-miss path")
     res["failures"] = "; ".join(failures)
     res["notes"] = "; ".join(notes)
@@ -268,7 +269,8 @@ FIELDS = [
     "tot_ratio", "tot_lo", "tot_hi", "tot_aa_hi", "tot_strict", "tot_band", "tot_regression",
     "rss_ratio", "rss_lo", "rss_hi", "rss_aa_hi", "rss_strict", "rss_fail",
     "peak_rss_ratio", "peak_rss_lo", "peak_rss_hi", "peak_rss_aa_hi", "peak_rss_strict", "peak_rss_fail",
-    "b_path_matches", "b_path_checkable", "b_path_enabled", "b_path_draws_sum", "b_path_spent_sum",
+    "b_path_matches", "b_path_checkable", "b_path_failures", "b_path_enabled",
+    "b_path_draws_sum", "b_path_spent_sum",
     "calls_ratio", "early_stop_runs", "identical", "max_abs_dE", "mismatch",
 ]
 

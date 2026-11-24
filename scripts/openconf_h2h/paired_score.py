@@ -150,6 +150,7 @@ def required_first_hit(job_dir: Path, calls_to_hit: int | None, calls: int) -> i
 def score_runs(runs: Path, rows_path: Path, workers: int) -> None:
     done = set()
     if rows_path.is_file():
+        existing_fields(rows_path)
         with rows_path.open(newline="") as handle:
             done = {(r["molecule"], r["arm"], int(r["seed"])) for r in csv.DictReader(handle)}
     mols = {name: _molecule(name) for name in hc.molecules()}
@@ -247,9 +248,15 @@ def score_runs(runs: Path, rows_path: Path, workers: int) -> None:
 
 
 def existing_fields(rows_path: Path) -> list[str]:
-    """Header of a rows file written before a column was added; rows append to it as it is."""
+    """Return the exact current header or reject an incompatible rows file."""
     with rows_path.open(newline="") as handle:
-        return next(csv.reader(handle))
+        fields = next(csv.reader(handle))
+    if fields != ROW_FIELDS:
+        raise ValueError(
+            f"{rows_path}: CSV header mismatch; "
+            f"expected {','.join(ROW_FIELDS)}, got {','.join(fields)}"
+        )
+    return fields
 
 
 def mirror_hits(group: list[dict]) -> str:

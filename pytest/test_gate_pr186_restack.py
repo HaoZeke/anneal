@@ -114,6 +114,34 @@ def test_absent_path_counters_are_not_synthetic_zeros():
     assert result["b_path_checkable"] == 0
 
 
+def test_checkable_path_failure_wins_over_unavailable_row():
+    mixed = rows() + [{**row, "seed": "2001"} for row in rows()]
+    for row in mixed:
+        if row["arm"] == "B" and row["seed"] == "2000":
+            row["branch_on_stall"] = "1"
+        if row["arm"] == "B" and row["seed"] == "2001":
+            row["branch_on_stall"] = ""
+            row["b_path_draws"] = ""
+            row["b_path_spent"] = ""
+    result = ANALYZE.judge(mixed, "rq3")
+    assert result["verdict"] == "FIX"
+    assert result["b_path_checkable"] == 1
+    assert result["b_path_failures"] == 1
+
+
+def test_unavailable_path_is_inconclusive_when_checkable_rows_pass():
+    mixed = rows() + [{**row, "seed": "2001"} for row in rows()]
+    for row in mixed:
+        if row["arm"] == "B" and row["seed"] == "2001":
+            row["branch_on_stall"] = ""
+            row["b_path_draws"] = ""
+            row["b_path_spent"] = ""
+    result = ANALYZE.judge(mixed, "rq3")
+    assert result["verdict"] == "INCONCLUSIVE"
+    assert result["b_path_checkable"] == 1
+    assert result["b_path_failures"] == 0
+
+
 def test_molecular_path_fields_preserve_absence():
     assert RUN_GATE.molecular_path_fields({}, {}) == (None, None, None)
     assert RUN_GATE.molecular_path_fields(

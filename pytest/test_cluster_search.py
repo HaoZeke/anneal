@@ -374,8 +374,18 @@ def test_cluster_search_species_and_rigid_charts():
 def test_cluster_search_ras_true_uses_archive_outcome():
     from anneal._core import cluster_search as core_cluster_search
 
+    calls = {"energy": 0, "gradient": 0}
+
+    def energy(x):
+        calls["energy"] += 1
+        return lj_energy(x)
+
+    def gradient(x):
+        calls["gradient"] += 1
+        return lj_grad(x)
+
     try:
-        out = core_cluster_search(lj_energy, lj_grad, 4, 800, seed=0, ras=True)
+        out = core_cluster_search(energy, gradient, 4, 800, seed=0, ras=True)
     except ValueError as exc:
         assert "graphkey" in str(exc)
         return
@@ -384,6 +394,11 @@ def test_cluster_search_ras_true_uses_archive_outcome():
     assert "charged" in out
     assert "floors" in out
     assert "returned" in out
+    assert out["charged"] == calls["energy"] + calls["gradient"]
+    assert out["ledger"]["spent"] == out["charged"]
+    assert out["branch_on_stall"] is False
+    assert out["ledger"]["branch_draws"] == 0
+    assert out["ledger"]["branch_spent"] == 0
     assert "events" in out
     assert "nve_unavailable" in out
     assert out["nve_unavailable"] is False
