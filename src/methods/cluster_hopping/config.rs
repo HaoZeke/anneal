@@ -1410,6 +1410,14 @@ pub struct Config {
     /// for a monoatomic cluster. The arm reads vacant sites off the
     /// current geometry and ranks them by pair energy. It does not move
     /// the least-coordinated atom onto a random surface point.
+    ///
+    /// The flag also enables the hop-0 generic packing probe. When it is
+    /// set, an atomic, non-rigid, non-frozen search measures the pair
+    /// minimum and quenches the generic packings once, before the first
+    /// hop. Every call of that probe is charged to the ledger. Turning the
+    /// flag off removes the lattice arm and the probe together. Set
+    /// [`Config::suppress_generic_packings`] to keep the arm without the
+    /// probe.
     pub energy_lattice: bool,
     /// The parent search already quenched the generic packing catalogue.
     /// A stall branch keeps the lattice move and does not quench it again.
