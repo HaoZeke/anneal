@@ -21,6 +21,7 @@ ACTIVE_ROW_WRITERS = (
     "scripts/ase_nonlj/summarize.py",
     "scripts/ase_panel/run_one.py",
     "scripts/ase_panel/summarize.py",
+    "scripts/au55_scale/run_panel.py",
     "scripts/covalent_h2h/gfn2_crest.py",
     "scripts/covalent_h2h/gfn2_floor_gate.py",
     "scripts/covalent_h2h/reference.py",
@@ -45,6 +46,7 @@ ACTIVE_ROW_WRITERS = (
     "scripts/metal_h2h/summarise_sc_pop.py",
     "scripts/metal_h2h/summarise_sc_portfolio.py",
     "scripts/metal_h2h/summarise_sc_restart.py",
+    "scripts/morse14_h2h/run_panel.py",
     "scripts/morse_gmin/run_panel.py",
     "scripts/morse_h2h/run_campaign.py",
     "scripts/morse_panel/run_panel.py",
@@ -1862,3 +1864,1073 @@ def test_native_headerless_and_h2h_row_formats_reject_every_bad_field(tmp_path):
         )
     with pytest.raises(ValueError, match="arm"):
         gad.saved_rerun(kv_path, 38, 2000, "gmin", 400_000, code_revision="svn-1", machine=machine)
+
+
+def test_au55_scale_and_morse14_h2h_write_machine_provenance_rows_and_summaries(
+    tmp_path, monkeypatch
+):
+    import os
+    import subprocess
+    from gmin_pin import REVISION, TARBALL_SHA256
+
+    au55 = _load_module("mp_au55_scale", "scripts/au55_scale/run_panel.py")
+    morse14 = _load_module("mp_morse14_h2h", "scripts/morse14_h2h/run_panel.py")
+
+    for mod in (au55, morse14):
+        assert mod.ROW_FIELDS[-2:] == ["machine_id", "cpu_model"]
+
+    machine_cur = {"machine_id": "a" * 64, "cpu_model": "Current Host CPU"}
+    machine_stored = {"machine_id": "b" * 64, "cpu_model": "Stored GMIN CPU"}
+    build_key = "c" * 64
+
+    real_uname = os.uname()
+    monkeypatch.setattr(
+        os,
+        "uname",
+        lambda: os.uname_result(
+            (
+                real_uname.sysname,
+                "bench",
+                real_uname.release,
+                real_uname.version,
+                real_uname.machine,
+            )
+        ),
+    )
+    monkeypatch.setattr(au55, "machine_columns", lambda: dict(machine_cur))
+    monkeypatch.setattr(
+        au55,
+        "with_machine_provenance",
+        lambda row: {**row, **machine_cur},
+    )
+    monkeypatch.setattr(morse14, "machine_columns", lambda: dict(machine_cur))
+    monkeypatch.setattr(au55, "SEEDS", [2000, 2001])
+    monkeypatch.setattr(morse14, "SEEDS", [2000, 2001])
+
+    fake_root = tmp_path / "repo"
+    fake_root.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=fake_root, check=True)
+    (fake_root / "README").write_text("fixture\n")
+    git_env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "Test",
+        "GIT_AUTHOR_EMAIL": "test@example.invalid",
+        "GIT_COMMITTER_NAME": "Test",
+        "GIT_COMMITTER_EMAIL": "test@example.invalid",
+    }
+    subprocess.run(["git", "add", "README"], cwd=fake_root, env=git_env, check=True)
+    subprocess.run(
+        ["git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"],
+        cwd=fake_root,
+        env=git_env,
+        check=True,
+    )
+    head_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=fake_root, text=True
+    ).strip()
+
+    svnrev = tmp_path / "SVNREV"
+    svnrev.write_text(f"{REVISION}\n")
+    gmin_source = tmp_path / "gmin-source.txt"
+    gmin_source.write_text(
+        f"url=https://example.invalid/gmin.tar.bz2\n"
+        f"revision={REVISION}\n"
+        f"svnrev={REVISION}\n"
+        f"tarball_sha256={TARBALL_SHA256}\n"
+        f"build_key={build_key}\n"
+    )
+
+    # Seed stored GMIN archives for both panels on machine_stored.
+    gupta_dir = fake_root / "bench" / "au55-gupta"
+    gupta_dir.mkdir(parents=True)
+    with (gupta_dir / "seeds.csv").open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=au55.ROW_FIELDS, lineterminator="\n")
+        writer.writeheader()
+        for seed in (2000, 2001):
+            writer.writerow(
+                {
+                    "system": "au55",
+                    "code": "gmin",
+                    "seed": str(seed),
+                    "budget": "1000000",
+                    "hit": "0",
+                    "evals_to_hit": "1000000",
+                    "charged": "1000000",
+                    "wall_s": "2.000000",
+                    "best": "-190.50000000",
+                    "pot_s": "1.800000",
+                    "outside_s": "0.200000",
+                    "code_revision": REVISION,
+                    "gmin_build_key": build_key,
+                    "host": "stored-host",
+                    **machine_stored,
+                }
+            )
+
+    monkeypatch.setattr(
+        au55,
+        "run_anneal",
+        lambda _bin, seed: {
+            "system": "au55",
+            "code": "anneal",
+            "seed": str(seed),
+            "budget": "1000000",
+            "hit": "1",
+            "evals_to_hit": "50000",
+            "charged": "50000",
+            "wall_s": "1.000000",
+            "best": "-191.03085280",
+            "pot_s": "0.800000",
+            "outside_s": "0.200000",
+        },
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_panel.py",
+            "--root",
+            str(fake_root),
+            "--svnrev",
+            str(svnrev),
+            "--gmin-source",
+            str(gmin_source),
+        ],
+    )
+    assert au55.main() == 0
+
+    with (fake_root / "bench" / "au55-scale" / "seeds.csv").open() as handle:
+        au55_reader = csv.DictReader(handle)
+        assert au55_reader.fieldnames == au55.ROW_FIELDS
+        au55_rows = list(au55_reader)
+    anneal_au = [r for r in au55_rows if r["code"] == "anneal"]
+    gmin_au = [r for r in au55_rows if r["code"] == "gmin"]
+    assert all(
+        r["code_revision"] == head_sha
+        and r["machine_id"] == machine_cur["machine_id"]
+        and r["cpu_model"] == machine_cur["cpu_model"]
+        for r in anneal_au
+    )
+    assert all(
+        r["code_revision"] == REVISION
+        and r["machine_id"] == machine_stored["machine_id"]
+        and r["cpu_model"] == machine_stored["cpu_model"]
+        for r in gmin_au
+    )
+    with (fake_root / "bench" / "au55-scale" / "summary.csv").open() as handle:
+        au55_sum = {r["arm"]: r for r in csv.DictReader(handle)}
+    assert au55_sum["anneal"]["machine_id"] == machine_cur["machine_id"]
+    assert au55_sum["gmin"]["machine_id"] == machine_stored["machine_id"]
+
+    # Seed Morse archive and exercise morse14_h2h without SciPy.
+    monkeypatch.setitem(sys.modules, "scipy", None)
+    monkeypatch.setitem(sys.modules, "scipy.stats", None)
+    morse_archive = fake_root / "bench" / "morse-h2h" / "seeds.csv"
+    morse_archive.parent.mkdir(parents=True)
+    with morse_archive.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=morse14.ROW_FIELDS, lineterminator="\n")
+        writer.writeheader()
+        for sys_name, spec in morse14.SYSTEMS.items():
+            for seed in (2000, 2001):
+                writer.writerow(
+                    {
+                        "system": sys_name,
+                        "code": "gmin",
+                        "seed": str(seed),
+                        "budget": str(spec["budget"]),
+                        "hit": "0",
+                        "evals_to_hit": str(spec["budget"]),
+                        "charged": str(spec["budget"]),
+                        "wall_s": "3.000000",
+                        "best": f"{spec['reference'] + 1.0:.6f}",
+                        "pot_s": "2.500000",
+                        "outside_s": "0.500000",
+                        "code_revision": REVISION,
+                        "gmin_build_key": build_key,
+                        "host": "stored-host",
+                        **machine_stored,
+                    }
+                )
+    fake_morse_bin = tmp_path / "h2h_morse"
+    fake_morse_bin.write_text("#!/bin/sh\nexit 99\n")
+    monkeypatch.setattr(morse14, "binary_path", lambda _root: fake_morse_bin)
+    monkeypatch.setattr(
+        morse14,
+        "run_anneal",
+        lambda _bin, sys_name, seed: {
+            "system": sys_name,
+            "code": "anneal",
+            "seed": str(seed),
+            "budget": str(morse14.SYSTEMS[sys_name]["budget"]),
+            "hit": "1",
+            "evals_to_hit": "40000",
+            "charged": "40000",
+            "wall_s": "1.200000",
+            "best": f"{morse14.SYSTEMS[sys_name]['reference']:.6f}",
+            "pot_s": "0.900000",
+            "outside_s": "0.300000",
+        },
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_panel.py",
+            "--root",
+            str(fake_root),
+            "--svnrev",
+            str(svnrev),
+            "--gmin-source",
+            str(gmin_source),
+        ],
+    )
+    assert morse14.main() == 0
+
+    with (fake_root / "bench" / "morse14-h2h" / "seeds.csv").open() as handle:
+        m14_reader = csv.DictReader(handle)
+        assert m14_reader.fieldnames == morse14.ROW_FIELDS
+        m14_rows = list(m14_reader)
+    assert all(
+        r["machine_id"] == machine_cur["machine_id"]
+        and r["cpu_model"] == machine_cur["cpu_model"]
+        for r in m14_rows
+        if r["code"] == "anneal"
+    )
+    assert all(
+        r["machine_id"] == machine_stored["machine_id"]
+        and r["cpu_model"] == machine_stored["cpu_model"]
+        for r in m14_rows
+        if r["code"] == "gmin"
+    )
+    with (fake_root / "bench" / "morse14-h2h" / "summary.csv").open() as handle:
+        m14_sum = list(csv.DictReader(handle))
+    assert all(
+        r["machine_id"] == f"{machine_cur['machine_id']};{machine_stored['machine_id']}"
+        and r["cpu_model"] == f"{machine_cur['cpu_model']};{machine_stored['cpu_model']}"
+        for r in m14_sum
+    )
+
+
+def test_metal_h2h_persists_row_provenance_and_marks_legacy_reused_rows_unknown(
+    tmp_path, monkeypatch
+):
+    from types import SimpleNamespace
+
+    metal = _load_module("metal_h2h_row_prov_mod", "scripts/metal_h2h/run_campaign.py")
+
+    def fake_campaign_run(
+        work: Path,
+        *,
+        head: str,
+        machine: dict[str, str],
+        seeds: tuple[int, ...],
+        summary_path: Path,
+    ) -> list[dict[str, str]]:
+        head_file = work / "anneal-head"
+        head_file.write_text(head + "\n")
+        monkeypatch.setattr(metal, "binary_budget", lambda _bin, _sys: (20000, -10.0))
+
+        def fake_run_arm(
+            _bin, _ga, system, seed, budget, arm, log, _scratch
+        ) -> dict[str, str]:
+            line = (
+                f"{system},{arm},{seed},{budget},1,500,500,"
+                "0.250,-10.0,0.200,0.050,4e-4,1e-4"
+            )
+            log.parent.mkdir(parents=True, exist_ok=True)
+            log.write_text(line + "\n")
+            return metal.parse_row(line)
+
+        monkeypatch.setattr(metal, "run_arm", fake_run_arm)
+        monkeypatch.setattr(metal, "machine_columns", lambda: dict(machine))
+        monkeypatch.setattr(
+            metal.os, "uname", lambda: SimpleNamespace(nodename="bench")
+        )
+        seed_flags: list[str] = []
+        for seed in seeds:
+            seed_flags.extend(["--seed", str(seed)])
+        assert (
+            metal.main(
+                [
+                    "run_campaign.py",
+                    "--binary",
+                    str(work / "h2h_metal"),
+                    "--ga",
+                    str(work / "ase_ga.py"),
+                    "--runs",
+                    str(work / "runs"),
+                    "--logs",
+                    str(work / "logs"),
+                    "--head-file",
+                    str(head_file),
+                    "--summary",
+                    str(summary_path),
+                    "--system",
+                    "zn38",
+                    "--arm",
+                    "anneal",
+                    *seed_flags,
+                ]
+            )
+            == 0
+        )
+        with summary_path.open() as handle:
+            reader = csv.DictReader(handle)
+            assert reader.fieldnames == metal.SUMMARY_FIELDS
+            return list(reader)
+
+    work_measure = tmp_path / "measure"
+    work_measure.mkdir()
+    measured_machine = {"machine_id": "1" * 64, "cpu_model": "Measured CPU"}
+    summary_measured = fake_campaign_run(
+        work_measure,
+        head="rev-measured-111",
+        machine=measured_machine,
+        seeds=(0,),
+        summary_path=work_measure / "summary-initial.csv",
+    )
+
+    saved_seed0 = work_measure / "runs" / "zn38" / "anneal-0.row"
+    with saved_seed0.open() as handle:
+        saved_reader = csv.DictReader(handle)
+        assert saved_reader.fieldnames == metal.ROW_FIELDS
+        saved_rows = list(saved_reader)
+    assert len(saved_rows) == 1
+    assert saved_rows[0]["anneal_head"] == "rev-measured-111"
+    assert saved_rows[0]["code_revision"] == "rev-measured-111"
+    assert saved_rows[0]["host"] == "bench"
+    assert saved_rows[0]["machine_id"] == measured_machine["machine_id"]
+    assert saved_rows[0]["cpu_model"] == measured_machine["cpu_model"]
+    assert summary_measured[0]["anneal_head"] == "rev-measured-111"
+    assert summary_measured[0]["code_revision"] == "rev-measured-111"
+    assert summary_measured[0]["host"] == "bench"
+    assert summary_measured[0]["machine_id"] == measured_machine["machine_id"]
+    assert summary_measured[0]["cpu_model"] == measured_machine["cpu_model"]
+
+    metal.write_saved_row(
+        saved_seed0,
+        saved_rows[0],
+        anneal_head="rev-measured-111",
+        code_revision="rev-measured-111",
+        host="host-measured",
+        machine=measured_machine,
+    )
+    reused_summary = fake_campaign_run(
+        work_measure,
+        head="rev-current-999",
+        machine={"machine_id": "9" * 64, "cpu_model": "Current CPU"},
+        seeds=(0,),
+        summary_path=work_measure / "summary-reused.csv",
+    )
+    assert reused_summary[0]["anneal_head"] == "rev-measured-111"
+    assert reused_summary[0]["code_revision"] == "rev-measured-111"
+    assert reused_summary[0]["host"] == "host-measured"
+    assert reused_summary[0]["machine_id"] == measured_machine["machine_id"]
+    assert reused_summary[0]["cpu_model"] == measured_machine["cpu_model"]
+
+    work_legacy = tmp_path / "legacy"
+    legacy_runs = work_legacy / "runs" / "zn38"
+    legacy_runs.mkdir(parents=True)
+    (legacy_runs / "anneal-0.row").write_text(
+        "zn38,anneal,0,20000,1,400,400,0.200,-10.0,0.150,0.050,3e-4,1e-4\n"
+    )
+    (legacy_runs / "anneal-1.row").write_text(
+        ",".join(metal.CORE_ROW_FIELDS)
+        + "\nzn38,anneal,1,20000,1,600,600,0.300,-10.0,0.250,0.050,4e-4,1e-4\n"
+    )
+    legacy_summary = fake_campaign_run(
+        work_legacy,
+        head="rev-current-999",
+        machine={"machine_id": "9" * 64, "cpu_model": "Current CPU"},
+        seeds=(0, 1),
+        summary_path=work_legacy / "summary-legacy.csv",
+    )
+    assert len(legacy_summary) == 1
+    for field in ("anneal_head", "code_revision", "host", "machine_id", "cpu_model"):
+        assert legacy_summary[0][field] == "unknown"
+
+    mixed_summary = fake_campaign_run(
+        work_legacy,
+        head="rev-fresh-222",
+        machine={"machine_id": "2" * 64, "cpu_model": "Fresh CPU"},
+        seeds=(0, 2),
+        summary_path=work_legacy / "summary-mixed.csv",
+    )
+    assert mixed_summary[0]["anneal_head"] == "rev-fresh-222;unknown"
+    assert mixed_summary[0]["code_revision"] == "rev-fresh-222;unknown"
+    assert mixed_summary[0]["host"] == "bench;unknown"
+    assert mixed_summary[0]["machine_id"] == f"{'2' * 64};unknown"
+    assert mixed_summary[0]["cpu_model"] == "Fresh CPU;unknown"
+
+
+def test_au55_scale_and_morse14_h2h_regenerate_from_committed_legacy_csvs(
+    tmp_path, monkeypatch
+):
+    import os
+    import shutil
+    import subprocess
+    from gmin_pin import REVISION, TARBALL_SHA256
+
+    au55 = _load_module("legacy_au55_scale", "scripts/au55_scale/run_panel.py")
+    morse14 = _load_module("legacy_morse14_h2h", "scripts/morse14_h2h/run_panel.py")
+
+    machine_cur = {"machine_id": "a" * 64, "cpu_model": "Current Host CPU"}
+    machine_stored = {"machine_id": "b" * 64, "cpu_model": "Stored GMIN CPU"}
+    build_key = "c" * 64
+
+    real_uname = os.uname()
+    monkeypatch.setattr(
+        os,
+        "uname",
+        lambda: os.uname_result(
+            (
+                real_uname.sysname,
+                "bench",
+                real_uname.release,
+                real_uname.version,
+                real_uname.machine,
+            )
+        ),
+    )
+    monkeypatch.setattr(au55, "machine_columns", lambda: dict(machine_cur))
+    monkeypatch.setattr(au55, "with_machine_provenance", lambda row: {**row, **machine_cur})
+    monkeypatch.setattr(morse14, "machine_columns", lambda: dict(machine_cur))
+    monkeypatch.setattr(au55, "SEEDS", [2000, 2001])
+    monkeypatch.setattr(morse14, "SEEDS", [2000, 2001])
+    monkeypatch.setitem(sys.modules, "scipy", None)
+    monkeypatch.setitem(sys.modules, "scipy.stats", None)
+
+    fake_root = tmp_path / "repo"
+    fake_root.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=fake_root, check=True)
+    (fake_root / "README").write_text("fixture\n")
+    git_env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "Test",
+        "GIT_AUTHOR_EMAIL": "test@example.invalid",
+        "GIT_COMMITTER_NAME": "Test",
+        "GIT_COMMITTER_EMAIL": "test@example.invalid",
+    }
+    subprocess.run(["git", "add", "README"], cwd=fake_root, env=git_env, check=True)
+    subprocess.run(
+        ["git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"],
+        cwd=fake_root,
+        env=git_env,
+        check=True,
+    )
+    head_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=fake_root, text=True
+    ).strip()
+
+    svnrev = tmp_path / "SVNREV"
+    svnrev.write_text(f"{REVISION}\n")
+    gmin_source = tmp_path / "gmin-source.txt"
+    gmin_source.write_text(
+        f"url=https://example.invalid/gmin.tar.bz2\n"
+        f"revision={REVISION}\n"
+        f"svnrev={REVISION}\n"
+        f"tarball_sha256={TARBALL_SHA256}\n"
+        f"build_key={build_key}\n"
+    )
+
+    # Copy the four real committed legacy CSVs into the test repo root.
+    au55_dir = fake_root / "bench" / "au55-scale"
+    m14_dir = fake_root / "bench" / "morse14-h2h"
+    au55_dir.mkdir(parents=True)
+    m14_dir.mkdir(parents=True)
+    for rel in (
+        Path("bench/au55-scale/seeds.csv"),
+        Path("bench/au55-scale/summary.csv"),
+        Path("bench/morse14-h2h/seeds.csv"),
+        Path("bench/morse14-h2h/summary.csv"),
+    ):
+        shutil.copy2(ROOT / rel, fake_root / rel)
+
+    legacy_au55_seeds = (au55_dir / "seeds.csv").read_text()
+    legacy_au55_summary = (au55_dir / "summary.csv").read_text()
+    legacy_m14_seeds = (m14_dir / "seeds.csv").read_text()
+    legacy_m14_summary = (m14_dir / "summary.csv").read_text()
+
+    # Seed valid current-provenance GMIN archives for reuse.
+    gupta_dir = fake_root / "bench" / "au55-gupta"
+    gupta_dir.mkdir(parents=True)
+    with (gupta_dir / "seeds.csv").open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=au55.ROW_FIELDS, lineterminator="\n")
+        writer.writeheader()
+        for seed in (2000, 2001):
+            writer.writerow(
+                {
+                    "system": "au55",
+                    "code": "gmin",
+                    "seed": str(seed),
+                    "budget": "1000000",
+                    "hit": "0",
+                    "evals_to_hit": "1000000",
+                    "charged": "1000000",
+                    "wall_s": "2.000000",
+                    "best": "-190.50000000",
+                    "pot_s": "1.800000",
+                    "outside_s": "0.200000",
+                    "code_revision": REVISION,
+                    "gmin_build_key": build_key,
+                    "host": "stored-host",
+                    **machine_stored,
+                }
+            )
+
+    morse_archive = fake_root / "bench" / "morse-h2h" / "seeds.csv"
+    morse_archive.parent.mkdir(parents=True)
+    with morse_archive.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=morse14.ROW_FIELDS, lineterminator="\n")
+        writer.writeheader()
+        for sys_name, spec in morse14.SYSTEMS.items():
+            for seed in (2000, 2001):
+                writer.writerow(
+                    {
+                        "system": sys_name,
+                        "code": "gmin",
+                        "seed": str(seed),
+                        "budget": str(spec["budget"]),
+                        "hit": "0",
+                        "evals_to_hit": str(spec["budget"]),
+                        "charged": str(spec["budget"]),
+                        "wall_s": "3.000000",
+                        "best": f"{spec['reference'] + 1.0:.6f}",
+                        "pot_s": "2.500000",
+                        "outside_s": "0.500000",
+                        "code_revision": REVISION,
+                        "gmin_build_key": build_key,
+                        "host": "stored-host",
+                        **machine_stored,
+                    }
+                )
+
+    au55_calls: list[int] = []
+    m14_calls: list[tuple[str, int]] = []
+
+    def _fake_au55_run(_bin, seed):
+        au55_calls.append(seed)
+        return {
+            "system": "au55",
+            "code": "anneal",
+            "seed": str(seed),
+            "budget": "1000000",
+            "hit": "1",
+            "evals_to_hit": "50000",
+            "charged": "50000",
+            "wall_s": "1.000000",
+            "best": "-191.03085280",
+            "pot_s": "0.800000",
+            "outside_s": "0.200000",
+        }
+
+    fake_morse_bin = tmp_path / "h2h_morse"
+    fake_morse_bin.write_text("#!/bin/sh\nexit 99\n")
+    monkeypatch.setattr(au55, "run_anneal", _fake_au55_run)
+    monkeypatch.setattr(morse14, "binary_path", lambda _root: fake_morse_bin)
+
+    def _fake_m14_run(_bin, sys_name, seed):
+        m14_calls.append((sys_name, seed))
+        return {
+            "system": sys_name,
+            "code": "anneal",
+            "seed": str(seed),
+            "budget": str(morse14.SYSTEMS[sys_name]["budget"]),
+            "hit": "1",
+            "evals_to_hit": "40000",
+            "charged": "40000",
+            "wall_s": "1.200000",
+            "best": f"{morse14.SYSTEMS[sys_name]['reference']:.6f}",
+            "pot_s": "0.900000",
+            "outside_s": "0.300000",
+        }
+
+    monkeypatch.setattr(morse14, "run_anneal", _fake_m14_run)
+
+    # Without --out or --overwrite-legacy, both reject legacy headers before running.
+    with pytest.raises(RuntimeError, match="legacy columns"):
+        au55.main(
+            [
+                "run_panel.py",
+                "--root",
+                str(fake_root),
+                "--svnrev",
+                str(svnrev),
+                "--gmin-source",
+                str(gmin_source),
+            ]
+        )
+    assert au55_calls == []
+    assert (au55_dir / "seeds.csv").read_text() == legacy_au55_seeds
+    assert (au55_dir / "summary.csv").read_text() == legacy_au55_summary
+
+    with pytest.raises(RuntimeError, match="legacy columns"):
+        morse14.main(
+            [
+                "run_panel.py",
+                "--root",
+                str(fake_root),
+                "--svnrev",
+                str(svnrev),
+                "--gmin-source",
+                str(gmin_source),
+            ]
+        )
+    assert m14_calls == []
+    assert (m14_dir / "seeds.csv").read_text() == legacy_m14_seeds
+    assert (m14_dir / "summary.csv").read_text() == legacy_m14_summary
+
+    # Alternate output directory via CLI --out and via function out_dir= keeps legacy CSVs intact.
+    alt_au55_cli = tmp_path / "alt-au55-cli"
+    alt_au55_fn = tmp_path / "alt-au55-fn"
+    assert (
+        au55.main(
+            [
+                "run_panel.py",
+                "--root",
+                str(fake_root),
+                "--out",
+                str(alt_au55_cli),
+                "--svnrev",
+                str(svnrev),
+                "--gmin-source",
+                str(gmin_source),
+            ]
+        )
+        == 0
+    )
+    au55.run_panel(
+        fake_root,
+        out_dir=alt_au55_fn,
+        svnrev=svnrev,
+        gmin_source=gmin_source,
+    )
+    for out_path in (alt_au55_cli, alt_au55_fn):
+        with (out_path / "seeds.csv").open() as handle:
+            reader = csv.DictReader(handle)
+            assert reader.fieldnames == au55.ROW_FIELDS
+            rows = list(reader)
+        assert len(rows) == 4
+        assert all(
+            r["code_revision"] == head_sha and r["machine_id"] == machine_cur["machine_id"]
+            for r in rows
+            if r["code"] == "anneal"
+        )
+        assert all(
+            r["gmin_build_key"] == build_key and r["machine_id"] == machine_stored["machine_id"]
+            for r in rows
+            if r["code"] == "gmin"
+        )
+        with (out_path / "summary.csv").open() as handle:
+            s_reader = csv.DictReader(handle)
+            assert s_reader.fieldnames == au55.SUMMARY_FIELDS
+            assert len(list(s_reader)) == 2
+    assert (au55_dir / "seeds.csv").read_text() == legacy_au55_seeds
+    assert (au55_dir / "summary.csv").read_text() == legacy_au55_summary
+
+    alt_m14_cli = tmp_path / "alt-m14-cli"
+    alt_m14_fn = tmp_path / "alt-m14-fn"
+    assert (
+        morse14.main(
+            [
+                "run_panel.py",
+                "--root",
+                str(fake_root),
+                "--out",
+                str(alt_m14_cli),
+                "--svnrev",
+                str(svnrev),
+                "--gmin-source",
+                str(gmin_source),
+            ]
+        )
+        == 0
+    )
+    morse14.run_panel(
+        fake_root,
+        out_dir=alt_m14_fn,
+        svnrev=svnrev,
+        gmin_source=gmin_source,
+    )
+    for out_path in (alt_m14_cli, alt_m14_fn):
+        with (out_path / "seeds.csv").open() as handle:
+            reader = csv.DictReader(handle)
+            assert reader.fieldnames == morse14.ROW_FIELDS
+            rows = list(reader)
+        assert len(rows) == 8
+        assert all(
+            r["code_revision"] == head_sha and r["machine_id"] == machine_cur["machine_id"]
+            for r in rows
+            if r["code"] == "anneal"
+        )
+        assert all(
+            r["gmin_build_key"] == build_key and r["machine_id"] == machine_stored["machine_id"]
+            for r in rows
+            if r["code"] == "gmin"
+        )
+        with (out_path / "summary.csv").open() as handle:
+            s_reader = csv.DictReader(handle)
+            assert s_reader.fieldnames == morse14.SUMMARY_FIELDS
+            assert len(list(s_reader)) == 2
+    assert (m14_dir / "seeds.csv").read_text() == legacy_m14_seeds
+    assert (m14_dir / "summary.csv").read_text() == legacy_m14_summary
+
+    # In-place regenerate succeeds with explicit --overwrite-legacy / overwrite_legacy=True.
+    assert (
+        au55.main(
+            [
+                "run_panel.py",
+                "--root",
+                str(fake_root),
+                "--overwrite-legacy",
+                "--svnrev",
+                str(svnrev),
+                "--gmin-source",
+                str(gmin_source),
+            ]
+        )
+        == 0
+    )
+    with (au55_dir / "seeds.csv").open() as handle:
+        reader = csv.DictReader(handle)
+        assert reader.fieldnames == au55.ROW_FIELDS
+        assert len(list(reader)) == 4
+    with (au55_dir / "summary.csv").open() as handle:
+        s_reader = csv.DictReader(handle)
+        assert s_reader.fieldnames == au55.SUMMARY_FIELDS
+        assert len(list(s_reader)) == 2
+
+    # Restore legacy CSVs and also verify function parameter overwrite_legacy=True.
+    shutil.copy2(ROOT / "bench/au55-scale/seeds.csv", au55_dir / "seeds.csv")
+    shutil.copy2(ROOT / "bench/au55-scale/summary.csv", au55_dir / "summary.csv")
+    au55.run_panel(
+        fake_root,
+        svnrev=svnrev,
+        gmin_source=gmin_source,
+        overwrite_legacy=True,
+    )
+    with (au55_dir / "seeds.csv").open() as handle:
+        assert csv.DictReader(handle).fieldnames == au55.ROW_FIELDS
+
+    assert (
+        morse14.main(
+            [
+                "run_panel.py",
+                "--root",
+                str(fake_root),
+                "--overwrite-legacy",
+                "--svnrev",
+                str(svnrev),
+                "--gmin-source",
+                str(gmin_source),
+            ]
+        )
+        == 0
+    )
+    with (m14_dir / "seeds.csv").open() as handle:
+        reader = csv.DictReader(handle)
+        assert reader.fieldnames == morse14.ROW_FIELDS
+        assert len(list(reader)) == 8
+    with (m14_dir / "summary.csv").open() as handle:
+        s_reader = csv.DictReader(handle)
+        assert s_reader.fieldnames == morse14.SUMMARY_FIELDS
+        assert len(list(s_reader)) == 2
+
+    shutil.copy2(ROOT / "bench/morse14-h2h/seeds.csv", m14_dir / "seeds.csv")
+    shutil.copy2(ROOT / "bench/morse14-h2h/summary.csv", m14_dir / "summary.csv")
+    morse14.run_panel(
+        fake_root,
+        svnrev=svnrev,
+        gmin_source=gmin_source,
+        overwrite_legacy=True,
+    )
+    with (m14_dir / "seeds.csv").open() as handle:
+        assert csv.DictReader(handle).fieldnames == morse14.ROW_FIELDS
+
+
+def test_morse_panel_and_morse_gmin_regenerate_from_committed_legacy_csvs(
+    tmp_path, monkeypatch
+):
+    import shutil
+    import socket
+    import subprocess
+    from gmin_pin import REVISION, TARBALL_SHA256
+
+    morse_panel = _load_module("legacy_morse_panel", "scripts/morse_panel/run_panel.py")
+    morse_gmin = _load_module("legacy_morse_gmin", "scripts/morse_gmin/run_panel.py")
+
+    machine_cur = {"machine_id": "a" * 64, "cpu_model": "Current Host CPU"}
+    build_key = "c" * 64
+    monkeypatch.setattr(socket, "gethostname", lambda: "bench")
+    monkeypatch.setattr(morse_panel, "machine_columns", lambda: dict(machine_cur))
+    monkeypatch.setattr(morse_gmin, "machine_columns", lambda: dict(machine_cur))
+    monkeypatch.setattr(
+        morse_panel,
+        "SYSTEMS",
+        (("m55r6", 55, 6.0, 1_000_000, -250.286609),),
+    )
+    monkeypatch.setattr(morse_gmin, "SEEDS", (2000,))
+    monkeypatch.setattr(
+        morse_gmin,
+        "SYSTEMS",
+        (("m30r6", 30, 6.0, 400_000, -118.432844),),
+    )
+    monkeypatch.setitem(sys.modules, "scipy", None)
+    monkeypatch.setitem(sys.modules, "scipy.stats", None)
+
+    fake_root = tmp_path / "workspace" / "repo"
+    (fake_root / "examples").mkdir(parents=True)
+    (fake_root / "examples" / "h2h_gmin_morse.data").write_text("STEPS 10 1.0\n")
+    binary = fake_root.parent / "tmp" / "anneal-target" / "release" / "examples" / "h2h_morse"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("#!/bin/sh\nexit 99\n")
+    gmin = tmp_path / "GMIN"
+    gmin.write_text("#!/bin/sh\nexit 99\n")
+
+    svnrev = tmp_path / "SVNREV"
+    svnrev.write_text(f"{REVISION}\n")
+    gmin_source = tmp_path / "gmin-source.txt"
+    gmin_source.write_text(
+        f"url=https://example.invalid/gmin.tar.bz2\n"
+        f"revision={REVISION}\n"
+        f"svnrev={REVISION}\n"
+        f"tarball_sha256={TARBALL_SHA256}\n"
+        f"build_key={build_key}\n"
+    )
+
+    real_run = subprocess.run
+
+    def _fake_subprocess_run(cmd, *args, **kwargs):
+        if "build" in cmd and "h2h_morse" in cmd:
+            target = Path(kwargs["env"]["CARGO_TARGET_DIR"]) / "release" / "examples" / "h2h_morse"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("#!/bin/sh\nexit 99\n")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        if "rev-parse" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, "head-rev-123\n", "")
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", _fake_subprocess_run)
+    monkeypatch.setattr(morse_gmin, "git_head", lambda _r: "head-rev-123")
+
+    # Copy real committed legacy CSVs for both sibling panel runners.
+    mp_dir = fake_root / "bench" / "morse-panel"
+    mg_dir = fake_root / "bench" / "morse-gmin"
+    mp_dir.mkdir(parents=True)
+    mg_dir.mkdir(parents=True)
+    for rel in (
+        Path("bench/morse-panel/seeds.csv"),
+        Path("bench/morse-panel/summary.csv"),
+        Path("bench/morse-gmin/seeds.csv"),
+        Path("bench/morse-gmin/summary.csv"),
+    ):
+        shutil.copy2(ROOT / rel, fake_root / rel)
+    legacy_mp_seeds = (mp_dir / "seeds.csv").read_text()
+    legacy_mp_summary = (mp_dir / "summary.csv").read_text()
+    legacy_mg_seeds = (mg_dir / "seeds.csv").read_text()
+    legacy_mg_summary = (mg_dir / "summary.csv").read_text()
+
+    panel_calls: list[str] = []
+    gmin_calls: list[str] = []
+
+    monkeypatch.setattr(
+        morse_panel,
+        "run_anneal",
+        lambda _bin, name, seed, budget: (
+            panel_calls.append(f"anneal:{name}:{seed}"),
+            {
+                "system": name,
+                "code": "anneal",
+                "seed": str(seed),
+                "budget": str(budget),
+                "hit": "1",
+                "evals_to_hit": "30000",
+                "charged": "30000",
+                "wall_s": "1.000000",
+                "best": "-250.286609",
+                "pot_s": "0.800000",
+                "outside_s": "0.200000",
+            },
+        )[1],
+    )
+    monkeypatch.setattr(
+        morse_panel,
+        "run_gmin",
+        lambda _bin, _gmin, _data, name, _rho, seed, budget, target, _work: (
+            panel_calls.append(f"gmin:{name}:{seed}"),
+            {
+                "system": name,
+                "code": "gmin",
+                "seed": str(seed),
+                "budget": str(budget),
+                "hit": "1",
+                "evals_to_hit": "40000",
+                "charged": "40000",
+                "wall_s": "1.200000",
+                "best": f"{target:.6f}",
+                "pot_s": "1.000000",
+                "outside_s": "0.200000",
+            },
+        )[1],
+    )
+    monkeypatch.setattr(
+        morse_gmin,
+        "run_anneal",
+        lambda _bin, name, seed, budget, rev: (
+            gmin_calls.append(f"anneal:{name}:{seed}"),
+            {
+                "system": name,
+                "code": "anneal",
+                "seed": str(seed),
+                "budget": str(budget),
+                "hit": "1",
+                "evals_to_hit": "20000",
+                "charged": "20000",
+                "wall_s": "0.800000",
+                "best": "-118.432844",
+                "pot_s": "0.600000",
+                "outside_s": "0.200000",
+                "code_revision": rev,
+                "gmin_build_key": "",
+                "host": "bench",
+                **machine_cur,
+            },
+        )[1],
+    )
+    monkeypatch.setattr(
+        morse_gmin,
+        "run_gmin",
+        lambda _bin, _gmin, _data, name, _rho, seed, budget, target, _work, rev, bkey: (
+            gmin_calls.append(f"gmin:{name}:{seed}"),
+            {
+                "system": name,
+                "code": "gmin",
+                "seed": str(seed),
+                "budget": str(budget),
+                "hit": "1",
+                "evals_to_hit": "30000",
+                "charged": "30000",
+                "wall_s": "1.100000",
+                "best": f"{target:.6f}",
+                "pot_s": "0.900000",
+                "outside_s": "0.200000",
+                "code_revision": rev,
+                "gmin_build_key": bkey,
+                "host": "bench",
+                **machine_cur,
+            },
+        )[1],
+    )
+
+    mp_base = [
+        "run_panel.py",
+        "--root",
+        str(fake_root),
+        "--work",
+        str(tmp_path / "work-mp"),
+        "--gmin",
+        str(gmin),
+        "--svnrev",
+        str(svnrev),
+        "--gmin-source",
+        str(gmin_source),
+    ]
+    mg_base = [
+        "run_panel.py",
+        "--root",
+        str(fake_root),
+        "--work",
+        str(tmp_path / "work-mg"),
+        "--gmin",
+        str(gmin),
+        "--svnrev",
+        str(svnrev),
+        "--gmin-source",
+        str(gmin_source),
+    ]
+
+    with pytest.raises(RuntimeError, match="legacy columns"):
+        morse_panel.main(mp_base)
+    assert panel_calls == []
+    assert (mp_dir / "seeds.csv").read_text() == legacy_mp_seeds
+    assert (mp_dir / "summary.csv").read_text() == legacy_mp_summary
+
+    with pytest.raises(RuntimeError, match="legacy columns"):
+        morse_gmin.main(mg_base)
+    assert gmin_calls == []
+    assert (mg_dir / "seeds.csv").read_text() == legacy_mg_seeds
+    assert (mg_dir / "summary.csv").read_text() == legacy_mg_summary
+
+    # Alternate output paths via --out and out_dir= succeed and preserve legacy CSVs.
+    alt_mp = tmp_path / "alt-mp"
+    alt_mp_fn = tmp_path / "alt-mp-fn"
+    assert morse_panel.main([*mp_base, "--out", str(alt_mp)]) == 0
+    assert morse_panel.main(mp_base, out_dir=alt_mp_fn) == 0
+    for mp_out in (alt_mp, alt_mp_fn):
+        with (mp_out / "seeds.csv").open() as handle:
+            assert csv.DictReader(handle).fieldnames == morse_panel.ROW_FIELDS
+        with (mp_out / "summary.csv").open() as handle:
+            assert csv.DictReader(handle).fieldnames == [
+                *morse_panel.SUMMARY_FIELDS,
+                "machine_id",
+                "cpu_model",
+            ]
+    assert (mp_dir / "seeds.csv").read_text() == legacy_mp_seeds
+    assert (mp_dir / "summary.csv").read_text() == legacy_mp_summary
+
+    alt_mg = tmp_path / "alt-mg"
+    alt_mg_cli = tmp_path / "alt-mg-cli"
+    assert morse_gmin.main(mg_base, out_dir=alt_mg) == 0
+    assert morse_gmin.main([*mg_base, "--out", str(alt_mg_cli)]) == 0
+    for mg_out in (alt_mg, alt_mg_cli):
+        with (mg_out / "seeds.csv").open() as handle:
+            mg_alt_rows = list(csv.DictReader(handle))
+            assert len(mg_alt_rows) == 2
+            assert all(r["machine_id"] == machine_cur["machine_id"] for r in mg_alt_rows)
+        with (mg_out / "summary.csv").open() as handle:
+            assert csv.DictReader(handle).fieldnames == [
+                *morse_gmin.SUMMARY_FIELDS,
+                "machine_id",
+                "cpu_model",
+            ]
+    assert (mg_dir / "seeds.csv").read_text() == legacy_mg_seeds
+    assert (mg_dir / "summary.csv").read_text() == legacy_mg_summary
+
+    # In-place regenerate succeeds with --overwrite-legacy / overwrite_legacy=True
+    # and never reuses provenance-free rows.
+    assert morse_panel.main([*mp_base, "--overwrite-legacy"]) == 0
+    with (mp_dir / "seeds.csv").open() as handle:
+        mp_rows = list(csv.DictReader(handle))
+        assert len(mp_rows) == 2 * len(morse_panel.SEEDS)
+        assert all(r["machine_id"] == machine_cur["machine_id"] for r in mp_rows)
+
+    shutil.copy2(ROOT / "bench/morse-panel/seeds.csv", mp_dir / "seeds.csv")
+    shutil.copy2(ROOT / "bench/morse-panel/summary.csv", mp_dir / "summary.csv")
+    assert morse_panel.main(mp_base, overwrite_legacy=True) == 0
+    with (mp_dir / "seeds.csv").open() as handle:
+        assert csv.DictReader(handle).fieldnames == morse_panel.ROW_FIELDS
+
+    gmin_calls.clear()
+    assert morse_gmin.main([*mg_base, "--overwrite-legacy"]) == 0
+    assert set(gmin_calls) == {"anneal:m30r6:2000", "gmin:m30r6:2000"}
+    with (mg_dir / "seeds.csv").open() as handle:
+        mg_rows = list(csv.DictReader(handle))
+        assert len(mg_rows) == 2
+        gmin_row = next(r for r in mg_rows if r["code"] == "gmin")
+        assert gmin_row["gmin_build_key"] == build_key
+        assert gmin_row["machine_id"] == machine_cur["machine_id"]
+
+    shutil.copy2(ROOT / "bench/morse-gmin/seeds.csv", mg_dir / "seeds.csv")
+    shutil.copy2(ROOT / "bench/morse-gmin/summary.csv", mg_dir / "summary.csv")
+    gmin_calls.clear()
+    assert morse_gmin.main(mg_base, overwrite_legacy=True) == 0
+    assert set(gmin_calls) == {"anneal:m30r6:2000", "gmin:m30r6:2000"}
+
+    # Current-schema morse-gmin rows still enforce provenance validation even with --overwrite-legacy.
+    gmin_row["gmin_build_key"] = "d" * 64
+    with (mg_dir / "seeds.csv").open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=morse_gmin.FIELDS, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(mg_rows)
+    with pytest.raises(ValueError, match="gmin_build_key"):
+        morse_gmin.main([*mg_base, "--overwrite-legacy"])
