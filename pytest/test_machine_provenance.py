@@ -3044,9 +3044,13 @@ def test_only_the_helper_reads_the_machine_id():
 
 
 def test_lj_board_journal_prints_the_salted_digest(monkeypatch):
-    pytest.importorskip("numba")
     import importlib.util
+    import types
 
+    # host_lines() is pure Python; only the potential is compiled.
+    numba = types.ModuleType("numba")
+    numba.njit = lambda *_args, **_kwargs: (lambda function: function)
+    monkeypatch.setitem(sys.modules, "numba", numba)
     spec = importlib.util.spec_from_file_location(
         "boardlib_machine", ROOT / "scripts" / "lj_board" / "boardlib.py"
     )
