@@ -108,41 +108,39 @@ fn metropolis_heat_follows_the_plateau() {
 
 /// Two code paths meet in this walk, and each pin has a different cause.
 ///
-/// Cold `0x47c7cc96bba7b3ea` is the branch's walk. The generic packing
+/// Cold `0xc99470c0ab8b04d8` is the branch's walk. The generic packing
 /// probe changes it from develop's `0xfb5afaab4e40a443`; the observed-basis
-/// stall probe fires three times here and does not change it. Before the
-/// merge of develop `58d68347` the pin was `0x100885ac118293e1`; the one
-/// edge that differs is the last, a stall climb accepted at hop 213 with
-/// an infinite energy, which develop's check that a stall adoption is
-/// sane now refuses. The walk keeps its other 180 edges, its best and its
-/// charge, and makes one hop fewer.
+/// stall probe fires three times here. With every packing candidate
+/// relaxed in full the pin was `0x47c7cc96bba7b3ea`, and before the merge
+/// of develop `58d68347` it was `0x100885ac118293e1`; the one edge that
+/// differed there was the last, a stall climb accepted at hop 213 with an
+/// infinite energy, which develop's check that a stall adoption is sane
+/// refuses.
 ///
-/// Hot `0x1a623a8e37ad1d43` is in neither parent of the merge that first
-/// pinned it. The branch before that merge pinned `0x44038697bde16fb7`
-/// and develop pinned `0xb2078435e4bed155`. It is the composition: the
-/// packing probe from this branch, and develop's observed-basis probe,
-/// whose side calls come out of the heated walk's budget and cost it one
-/// hop. With the observed-basis probe switched off in a scratch build the
-/// hot walk is `0x44038697bde16fb7` again; with the packing probe
-/// suppressed it is develop's value, asserted below.
+/// Hot `0x44038697bde16fb7`. With every packing candidate relaxed in full
+/// it was `0x1a623a8e37ad1d43`, the composition of the packing probe with
+/// develop's observed-basis probe, whose side calls come out of the heated
+/// walk's budget. Screening the candidates against the walk's best changes
+/// what the packing probe charges, and both walks moved with it. With the
+/// packing probe suppressed both are develop's values, asserted below.
 #[test]
 fn lattice_exchange_follows_the_plateau() {
     let mut cfg = Config::recommended(ATOMS);
     cfg.restart_patience = 2_000;
     let (cold, hot) = pair(&cfg, 30_000, 2000);
-    assert_eq!(fingerprint(&cold), 0x47c7cc96bba7b3ea, "preset walk");
+    assert_eq!(fingerprint(&cold), 0xc99470c0ab8b04d8, "preset walk");
     assert_eq!(
         fingerprint(&hot),
-        0x1a623a8e37ad1d43,
+        0x44038697bde16fb7,
         "heat * cfg.temperature"
     );
 
     // Measured: moving the offer from hop 36 to before the first hop leaves
-    // both fingerprints where they are in this walk.
+    // the cold fingerprint where it is and moves the hot one.
     cfg.packing_deferral = 0;
     let (cold, hot) = pair(&cfg, 30_000, 2000);
-    assert_eq!(fingerprint(&cold), 0x47c7cc96bba7b3ea, "probe at hop 0");
-    assert_eq!(fingerprint(&hot), 0x1a623a8e37ad1d43, "probe at hop 0");
+    assert_eq!(fingerprint(&cold), 0xc99470c0ab8b04d8, "probe at hop 0");
+    assert_eq!(fingerprint(&hot), 0x555f876ee3bdc4dc, "probe at hop 0");
 
     cfg.suppress_generic_packings = true;
     let (cold, hot) = pair(&cfg, 30_000, 2000);

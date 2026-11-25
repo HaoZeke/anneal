@@ -9,8 +9,9 @@
 //! default walk is therefore develop's walk and charges 502.
 //!
 //! With `packing_deferral = 0` the probe runs before the first hop and
-//! spends 931 potential calls. The same hit is then charged at
-//! 502 + 931 = 1433, and the ledger, the improvement row and
+//! spends 325 potential calls, 931 before each candidate was screened
+//! against the walk's best. The same hit is then charged at
+//! 502 + 325 = 827, and the ledger, the improvement row and
 //! `outcome.charged` all say so.
 //!
 //! Lennard-Jones 38, seed 2000, is a walk that runs past the offer. The
@@ -103,8 +104,8 @@ fn a_walk_hit_is_charged_for_every_potential_call_including_the_packing_probe() 
     let mut cfg = Config::recommended(26);
     cfg.packing_deferral = 0;
     let walk = walk(&cfg, 26, -108.315616);
-    assert_eq!(walk.at_hit, Some(1433), "hit spend");
-    assert_eq!(walk.outcome.charged, 1433, "charged calls");
+    assert_eq!(walk.at_hit, Some(827), "hit spend");
+    assert_eq!(walk.outcome.charged, 827, "charged calls");
     assert_eq!(walk.outcome.charged, walk.spent, "outcome and ledger agree");
     assert_eq!(
         walk.evaluations + SITE_SCAN_CHARGE,
@@ -133,10 +134,14 @@ fn a_walk_past_the_offer_runs_the_probe_once_and_charges_it() {
         walk.outcome.hops, 36,
         "offered at hop 36, hit inside the probe"
     );
-    assert_eq!(walk.at_hit, Some(3864), "hit spend, develop's is 5527");
-    assert_eq!(walk.outcome.charged, 3865, "charged calls");
+    assert_eq!(
+        walk.at_hit,
+        Some(3777),
+        "hit spend, develop's is 5527 and the unscreened probe's 3864"
+    );
+    assert_eq!(walk.outcome.charged, 3778, "charged calls");
     assert_eq!(walk.outcome.charged, walk.spent, "outcome and ledger agree");
-    assert_eq!(walk.evaluations, 3789, "potential calls");
+    assert_eq!(walk.evaluations, 3702, "potential calls");
     assert_eq!(
         walk.priced, 76,
         "lattice site scans priced, no potential call"

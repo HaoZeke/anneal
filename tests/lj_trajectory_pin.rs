@@ -101,14 +101,15 @@ fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
 }
 
 /// Offered at the first pass of the hop loop, the probe's calls and the
-/// held packing change the walk. This is the hash the branch pinned when
-/// the probe ran at hop 0. A stall branch keeps the lattice move and skips a second
-/// catalogue, so this is not the hash of a branch that dropped the lattice
-/// move.
+/// held packing change the walk. A stall branch keeps the lattice move and
+/// skips a second catalogue, so this is not the hash of a branch that
+/// dropped the lattice move. Screening each candidate against the walk's
+/// best changes what the probe charges, and so the walk after it: the
+/// unscreened probe pinned `c9b6d7d6…`.
 #[test]
 fn recommended_lj98_seed_2000_with_the_probe_at_hop_zero_keeps_its_trajectory() {
     anneal_core::install_rgpot_kernels!();
     let hash = trajectory_hash(Some(0));
-    let expected = "c9b6d7d6535f5add591d14ad49f6a6400e5cc0c98a1b858e989bb61746b54ba5";
+    let expected = "63c2f410d032a9fb9dcf7af0839541f25d6fc1eaa9e732b7cad718e592289da4";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }
