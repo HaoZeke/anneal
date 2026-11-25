@@ -2881,6 +2881,104 @@ mod tests {
         assert!(led.quench_boundaries().is_empty());
     }
 
+    /// A probe's quenches between the walk's leave the walk's quenches as
+    /// they were. The surface portfolio's block clock and its credit belong
+    /// to the walk; the same probe quenches outside the diagnostic scope
+    /// move them, which is what this pins against.
+    #[test]
+    fn diagnostic_quenches_leave_the_walks_surface_portfolio_alone() {
+        let n = 13;
+        let cfg = Config::recommended(n);
+        assert!(!cfg.surfaces.is_empty());
+        let objective = PairPotential::lennard_jones(n);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(5);
+        let mut draw = || {
+            crate::methods::cluster_hopping::random_cluster(n, 1.2, cfg.min_separation, &mut rng)
+        };
+        let starts: Vec<Array1<f64>> = (0..400).map(|_| draw()).collect();
+        let probes: Vec<Array1<f64>> = (0..60).map(|_| draw()).collect();
+        let walk = |probe: Option<bool>| {
+            let mut stats = RelaxStats::default();
+            let mut relax = warm_relax(&objective, &cfg, &mut stats, 3);
+            let mut led = Ledger::new(1 << 30);
+            let mut side = Ledger::new(1 << 30);
+            let mut quenches = Vec::new();
+            for (hop, start) in starts.iter().enumerate() {
+                if hop == 10
+                    && let Some(diagnostic) = probe
+                {
+                    for point in &probes {
+                        for steps in [cfg.screen_steps, cfg.relax_steps] {
+                            if diagnostic {
+                                let mut scope = side.diagnostic_scope();
+                                relax(&mut scope, point.view(), steps);
+                            } else {
+                                relax(&mut side, point.view(), steps);
+                            }
+                        }
+                    }
+                }
+                let before = led.spent();
+                let (screened, at) = relax(&mut led, start.view(), cfg.screen_steps);
+                let (energy, state) = relax(&mut led, at.view(), cfg.relax_steps);
+                if energy < led.best {
+                    led.record(energy, state.view());
+                }
+                quenches.push((screened.to_bits(), energy.to_bits(), led.spent() - before));
+            }
+            quenches
+        };
+        let alone = walk(None);
+        assert_eq!(
+            walk(Some(true)),
+            alone,
+            "diagnostic quenches moved the walk's quenches"
+        );
+        assert_ne!(
+            walk(Some(false)),
+            alone,
+            "the same quenches outside the scope must reach the portfolio"
+        );
+    }
+
+    /// A diagnostic quench descends on the plain surface: it matches the
+    /// quench of a preset with no portfolio, call for call.
+    #[test]
+    fn a_diagnostic_quench_descends_on_the_plain_surface() {
+        let n = 13;
+        let cfg = Config::recommended(n);
+        assert!(!cfg.surfaces.is_empty());
+        let mut plain_cfg = cfg.clone();
+        plain_cfg.surfaces.clear();
+        let objective = PairPotential::lennard_jones(n);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(9);
+        let mut stats = RelaxStats::default();
+        let mut plain_stats = RelaxStats::default();
+        let mut relax = warm_relax(&objective, &cfg, &mut stats, 3);
+        let mut plain = warm_relax(&objective, &plain_cfg, &mut plain_stats, 3);
+        let mut led = Ledger::new(1 << 30);
+        let mut plain_led = Ledger::new(1 << 30);
+        for _ in 0..8 {
+            let start = crate::methods::cluster_hopping::random_cluster(
+                n,
+                1.2,
+                cfg.min_separation,
+                &mut rng,
+            );
+            for steps in [cfg.screen_steps, cfg.relax_steps] {
+                let before = (led.spent(), plain_led.spent());
+                let (energy, state) = {
+                    let mut scope = led.diagnostic_scope();
+                    relax(&mut scope, start.view(), steps)
+                };
+                let (plain_energy, plain_state) = plain(&mut plain_led, start.view(), steps);
+                assert_eq!(energy.to_bits(), plain_energy.to_bits());
+                assert_eq!(state, plain_state);
+                assert_eq!(led.spent() - before.0, plain_led.spent() - before.1);
+            }
+        }
+    }
+
     #[test]
     fn a_lost_bond_backs_off_toward_the_last_call_without_charging() {
         let species = [8u32, 1, 1];

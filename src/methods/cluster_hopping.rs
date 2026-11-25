@@ -664,7 +664,7 @@ pub struct Ledger {
     encounters: Vec<(usize, f64)>,
 }
 
-struct DiagnosticQuench<'a> {
+pub(crate) struct DiagnosticQuench<'a> {
     ledger: &'a mut Ledger,
     previous: bool,
 }
@@ -885,7 +885,7 @@ impl Ledger {
         self.diagnostic_quench
     }
 
-    fn diagnostic_scope(&mut self) -> DiagnosticQuench<'_> {
+    pub(crate) fn diagnostic_scope(&mut self) -> DiagnosticQuench<'_> {
         let previous = std::mem::replace(&mut self.diagnostic_quench, true);
         DiagnosticQuench {
             ledger: self,
@@ -12883,6 +12883,9 @@ mod tests {
         let mut seen_pair_probes = 0usize;
         let mut seen_packing_counts = vec![0usize; expected_packings.len()];
         let mut seen_packing_screens = vec![0usize; expected_packings.len()];
+        let mut catalogue_outside_scope = 0usize;
+        let mut walk_inside_scope = 0usize;
+        let mut walk_quenches = 0usize;
         let screen_steps = cfg.screen_steps;
         let total_evals = std::sync::atomic::AtomicUsize::new(0);
         let mut ledger = Ledger::new(2_000);
@@ -12891,9 +12894,11 @@ mod tests {
                 return (f64::NAN, x.to_owned());
             }
             total_evals.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let diagnostic = led.is_diagnostic_quench();
             let has_far_spectator = (2..n).any(|atom| x[3 * atom + 1].abs() > far_threshold);
             if steps == 0 && has_far_spectator {
                 seen_pair_probes += 1;
+                catalogue_outside_scope += usize::from(!diagnostic);
                 let distance = (x[3] - x[0]).abs();
                 return ((distance - 2.0).powi(2), x.to_owned());
             }
@@ -12904,6 +12909,7 @@ mod tests {
                     .map(|(a, b)| (a - b).abs())
                     .fold(0.0_f64, f64::max);
                 if max_diff < 1e-4 {
+                    catalogue_outside_scope += usize::from(!diagnostic);
                     if steps == screen_steps {
                         seen_packing_screens[index] += 1;
                     } else {
@@ -12912,6 +12918,8 @@ mod tests {
                     return (-50.0 - index as f64, x.to_owned());
                 }
             }
+            walk_quenches += 1;
+            walk_inside_scope += usize::from(diagnostic);
             (-1.0, x.to_owned())
         };
         let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| {
@@ -12947,6 +12955,13 @@ mod tests {
             vec![1; expected_packings.len()],
             "expected each of the 8 generic packings to be screened once"
         );
+        // The catalogue's quenches are diagnostic and the walk's are not.
+        assert_eq!(
+            catalogue_outside_scope, 0,
+            "catalogue quench outside the scope"
+        );
+        assert!(walk_quenches > 0);
+        assert_eq!(walk_inside_scope, 0, "walk quench inside the scope");
         assert!(
             outcome.best <= -57.0 + 1e-9,
             "expected offered generic packing to beat the opening quench, got {}",
