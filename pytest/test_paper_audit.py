@@ -75,6 +75,7 @@ CHECKS = (
     audit_mod.bibliography_keys,
     audit_mod.conversion_literals,
     audit_mod.own_references,
+    audit_mod.build_receipts,
     audit_mod.selection_tables,
     audit_mod.gmin_panel_drivers,
     audit_mod.prior_switches,
@@ -2403,6 +2404,78 @@ def test_labels_are_numbered_as_achemso_numbers_them():
     numbers = cross_labels().numbers(text, "S")
     assert numbers == {"sec:one": "S1", "eq:a": "S1", "sec:two": "S1.1", "fig:a": "S1", "tab:a": "S1",
                        "fig:b": "S2", "eq:b": "S2", "sec:three": "S2"}
+
+
+def test_the_label_files_and_the_length_receipt_match_the_sources():
+    audit = audit_mod.Audit()
+    audit_mod.build_receipts(audit)
+    assert len(audit.results) == 6
+    assert not audit.drifts(), audit.drifts()
+
+
+def receipt_tree(tmp_path, monkeypatch):
+    """A copy of the paper sources, label files, receipt and their scripts that the audit reads as ROOT."""
+    for name in ("manuscript.tex", "si.tex", "macros.tex", "labels-manuscript.tex", "labels-si.tex",
+                 "logs/pdf-length.txt", "scripts/cross_labels.py", "scripts/pdf_length.py"):
+        dest = tmp_path / "paper/jctc" / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / "paper/jctc" / name, dest)
+    for name in ("cross_labels", "pdf_length"):
+        monkeypatch.delitem(sys.modules, name, raising=False)
+    monkeypatch.setattr(audit_mod, "ROOT", tmp_path)
+    return tmp_path / "paper/jctc"
+
+
+def receipt_drifts():
+    audit = audit_mod.Audit()
+    audit_mod.build_receipts(audit)
+    assert len(audit.results) == 6
+    return [(where, label) for _, where, label, _, _ in audit.drifts()]
+
+
+def test_a_label_file_left_behind_its_source_fails_the_audit(tmp_path, monkeypatch):
+    jctc = receipt_tree(tmp_path, monkeypatch)
+    assert receipt_drifts() == []
+    si = jctc / "si.tex"
+    si.write_text(si.read_text().replace("\\begin{document}", "\\begin{document}\n\\section{Added}\\label{sec:added}", 1))
+    assert receipt_drifts() == [("paper/jctc/labels-si.tex", "cross_labels.py output for si.tex")]
+
+
+def test_a_length_receipt_left_behind_its_source_fails_the_audit(tmp_path, monkeypatch):
+    jctc = receipt_tree(tmp_path, monkeypatch)
+    macros = jctc / "macros.tex"
+    macros.write_text(macros.read_text() + "% edited\n")
+    assert receipt_drifts() == [("paper/jctc/logs/pdf-length.txt", "sha256 of paper/jctc/macros.tex")]
+
+
+def test_a_length_over_the_limit_is_shown_without_failing_the_audit(tmp_path, monkeypatch):
+    jctc = receipt_tree(tmp_path, monkeypatch)
+    receipt = jctc / "logs/pdf-length.txt"
+    text = re.sub(r"(?m)^abstract_words=\d+$", "abstract_words=120", receipt.read_text())
+    text = re.sub(r"(?m)^abstract_numerals=\d+$", "abstract_numerals=4", text)
+    receipt.write_text(re.sub(r"(?m)^body_words=\d+$", "body_words=6000", text))
+    audit = audit_mod.Audit()
+    audit_mod.build_receipts(audit)
+    assert not audit.drifts() and not audit.expected()
+    receipt.write_text(re.sub(r"(?m)^body_words=\d+$", "body_words=7001", receipt.read_text()))
+    audit = audit_mod.Audit()
+    audit_mod.build_receipts(audit)
+    assert not audit.drifts()
+    assert [row[1:] for row in audit.expected()] == [
+        ("paper/jctc/logs/pdf-length.txt", "rendered length within the journal limits", "within",
+         "body has 7001 words, outside 5000-7000")]
+
+
+def test_a_missing_length_receipt_or_count_fails_the_audit(tmp_path, monkeypatch):
+    jctc = receipt_tree(tmp_path, monkeypatch)
+    receipt = jctc / "logs/pdf-length.txt"
+    receipt.write_text(re.sub(r"(?m)^body_words=\d+\n", "", receipt.read_text()))
+    assert receipt_drifts() == [("paper/jctc/logs/pdf-length.txt", "pdf_length.py counts")]
+    receipt.unlink()
+    audit = audit_mod.Audit()
+    audit_mod.build_receipts(audit)
+    assert [row[1:] for row in audit.drifts()] == [
+        ("paper/jctc/logs/pdf-length.txt", "pdf_length.py receipt", "present", "missing")]
 
 
 def test_the_crest_equal_panel_holds_in_the_committed_text():

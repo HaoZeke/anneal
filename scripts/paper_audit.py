@@ -7541,6 +7541,36 @@ def own_references(audit: Audit) -> None:
                      " ".join(loose) or "all defined")
 
 
+def build_receipts(audit: Audit) -> None:
+    """The cross-document label files and the pdf-length receipt match the sources they were written from."""
+    labels = load_script("cross_labels", "paper/jctc/scripts/cross_labels.py")
+    stale = set(labels.stale())
+    for document in labels.DOCUMENTS:
+        name = f"labels-{document}.tex"
+        audit.record(name not in stale, f"paper/jctc/{name}", f"cross_labels.py output for {document}.tex",
+                     "current", "stale" if name in stale else "current")
+    length = load_script("pdf_length", "paper/jctc/scripts/pdf_length.py")
+    receipt = length.RECEIPT.relative_to(length.ROOT).as_posix()
+    if not length.RECEIPT.is_file():
+        audit.record(False, receipt, "pdf_length.py receipt", "present", "missing")
+        return
+    counts, digests = length.read_receipt(length.RECEIPT)
+    current = length.source_digests(length.ROOT)
+    for source in sorted(set(current) | set(digests)):
+        audit.record(digests.get(source) == current.get(source), receipt, f"sha256 of {source}",
+                     digests.get(source, "absent"), current.get(source, "not a source"))
+    missing = sorted({"abstract_words", "abstract_numerals", "body_words"} - set(counts))
+    if missing:
+        audit.record(False, receipt, "pdf_length.py counts", "present", "no " + ", ".join(missing))
+        return
+    # Over-length text is an editorial decision, not a stale receipt; it is shown without failing.
+    found = length.problems(counts)
+    if found:
+        audit.expect(receipt, "rendered length within the journal limits", "within", "; ".join(found))
+    else:
+        audit.record(True, receipt, "rendered length within the journal limits", "within", "within")
+
+
 def selection_tables(audit: Audit) -> None:
     """The arm-selection tables beside the two result files of tab:ablation.
 
@@ -7679,7 +7709,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
         reproduction_records, sutton_chen, crest_equal, crest_equal_bench,
         append_only_rows, tip4p_unscored, tip4p_r2_rows, pending_text, citation_metadata,
                   figure_source_scripts, bibliography_keys, conversion_literals,
-                  own_references, selection_tables, gmin_panel_drivers, prior_switches,
+                  own_references, build_receipts, selection_tables, gmin_panel_drivers, prior_switches,
                   method_definitions, au55_superseded, cap_turn_campaign):
         check(audit)
     if write_map:
