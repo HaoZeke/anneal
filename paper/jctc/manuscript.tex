@@ -100,9 +100,9 @@ Section~\ref{sec:evidence} then organizes the benchmark evidence by claim:
 that the template-free search reaches funnel-trapped minima, that removing
 the former templates costs hits, and that two other adaptations show no
 detectable effect at 12 seeds.
-Comparisons use GMIN and the Atomic Simulation Environment as evidence for
-those claims, not as organizing principles
-\cite{wales1997,larsenAse2017}.
+Comparisons use GMIN, the Atomic Simulation Environment, and CREST as
+evidence for those claims, not as organizing principles
+\cite{wales1997,larsenAse2017,prachtCrestProgramExploration2024}.
 
 \section{The search}
 \label{sec:search}
@@ -895,6 +895,60 @@ M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & 47.552 & 8/12 & 0/12 & 0/12 & 12 
 \end{table}
 % ase-nonlj table: end
 
+\subsection{Tight-binding clusters against CREST}
+\label{sec:crest}
+CREST searches conformer and cluster space by metadynamics on GFN
+tight-binding Hamiltonians \cite{prachtCrestProgramExploration2024}.
+Table~\ref{tab:crest} puts this code against CREST 3.0.2 on GFN2-xTB water,
+ammonia, carbon, and silicon clusters
+\cite{bannwarthGfn2xtbanAccurateBroadly2019}.
+CREST takes no seed, so its runs are not paired with those of this code,
+and the hits are compared with the two-sided Fisher exact test.
+CREST runs to its own end, so a pair is kept only when the budget of this
+code is at least the median calls of the complete CREST runs.
+An aborted CREST run is dropped from its pair.
+CREST hits the water hexamer on 4 of 12 runs and this code on 1 of 12
+(\(p=0.32\)); this code is charged 3021 calls on every seed, and CREST a
+median of 3055.
+Given the calls of each seed's CREST run, this code hits the ammonia octamer
+on none of 6 seeds and CREST on all 6 (\(p=2.2\times 10^{-3}\)).
+This code hits the C\(_{10}\) ring on 11 of 12 seeds and CREST on 4
+(\(p=9.4\times 10^{-3}\)).
+On Si\(_{10}\) the counts are 11 of 12 and 11 of 11 (\(p=1\)), and
+neither code reaches the C\(_{20}\) cage.
+The Supporting Information gives the settings, revisions, and records, and
+the CREST arms that the budget rule removes.
+
+% crest table: start
+\begin{table}
+\caption{This code against CREST 3.0.2 on GFN2-xTB clusters.
+Both arms count GFN2-xTB energy and gradient calls.
+CREST calls is the median calls of the complete CREST runs, and a pair is kept only
+when the budget of this code is at least that median; an aborted CREST run is dropped
+from its pair.
+On (NH\(_3\))\(_8\) the budget of each seed is the calls of its CREST run.
+\(p\) is the two-sided Fisher exact test on the hits.
+The Supporting Information gives the settings, revisions, records, and the arms that
+the budget rule removes.}
+\label{tab:crest}
+\centering
+\footnotesize
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+ & & & \multicolumn{2}{c}{Hits} & \\
+\cmidrule(lr){4-5}
+Cluster & Budget & CREST calls & This work & CREST & \(p\) \\
+\midrule
+(H\(_2\)O)\(_6\) & 4000 & 3055 & 1/12 & 4/12 & 0.32 \\
+(NH\(_3\))\(_8\) & CREST's & 231539.5 & 0/6 & 6/6 & \(2.2\times 10^{-3}\) \\
+C\(_{10}\) & \(1\times 10^{5}\) & 78367 & 11/12 & 4/12 & \(9.4\times 10^{-3}\) \\
+Si\(_{10}\) & \(1\times 10^{5}\) & 98677 & 11/12 & 11/11 & 1 \\
+C\(_{20}\) & \(1\times 10^{5}\) & 78581.5 & 0/12 & 0/12 & 1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+% crest table: end
+
 \section{Conclusions}
 The template-free search combines quenched structural proposals, adaptive
 move allocation, basin memory, and stall exits.
@@ -906,6 +960,9 @@ Under independent starts and shared wall caps, it reaches four of five
 atomic and all four Morse references, while the ASE optimizers reach only
 LJ\(_{55}\), once; these censored arms are descriptive, not equal-work
 tests.
+On GFN2-xTB clusters CREST hits the water hexamer on 4 of 12 runs against
+1 of 12 for this code (\(p=0.32\)) and the ammonia octamer on every run,
+while this code hits the C\(_{10}\) ring more often.
 
 The paired knockouts show that removing the former structure templates
 lowers M\(_{38}\) hits at \(\rho=14\) from 12 of 12 to 4.
@@ -948,8 +1005,9 @@ The authors declare no competing financial interest.
 The Supporting Information gives the reference energies, the GMIN inputs, the
 host and the commands, the revision behind every table, the definitions of
 the operators, the atom-count gates, the former structure priors, the
-protocol of the comparison with the Atomic Simulation Environment, the
-statistical methods, and the searches that report no comparable rate.
+protocols of the comparisons with the Atomic Simulation Environment and with
+CREST, the statistical methods, and the searches that report no comparable
+rate.
 \end{suppinfo}
 
 \section*{Data and software availability}
@@ -966,8 +1024,8 @@ the Zenodo archive does not contain that revision.
 The rows of this code behind every table were recorded at revisions in the
 history of the submitted revision, except the length-unit and move-choice
 knockouts, which ran the submitted search source plus default-off knockout
-switches.
-The Supporting Information gives the exact record location of both
+switches, and Table~\ref{tab:crest}.
+The Supporting Information gives the exact record location of those
 exceptions and names the revision, driver, host, and record of every row.
 
 \bibliography{refs,refs-stats}
