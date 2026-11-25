@@ -13459,6 +13459,142 @@ mod tests {
         assert!(row.1 <= outcome.charged, "found within the charged work");
     }
 
+    /// An audit the budget cuts short in the walk is resumed at a later hop.
+    ///
+    /// Every packing's screening pass ends at -1, above the walk's -10, so
+    /// the screen refuses all eight. A full relaxation pays one call per
+    /// step and lands at `-50 - index`; a relaxation given fewer steps than
+    /// the walk's `relax_steps`, or cut by the budget, lands at -1. The
+    /// audit runs on half the parent's remaining budget, which here holds
+    /// about six full relaxations, so the first audit ends with candidates
+    /// waiting. The walk then hops, and the next audit relaxes the rest from
+    /// their placements. Every one of the eight is relaxed in full exactly
+    /// once, the last refused one is the walk's best, and every call is
+    /// charged.
+    #[test]
+    fn a_budget_cut_packing_audit_is_resumed_at_a_later_hop() {
+        #[derive(Debug, Clone, Copy, PartialEq)]
+        enum Event {
+            Walk,
+            Full(usize),
+            Cut(usize),
+        }
+        let n = 23usize;
+        let mut species = vec![29u32; 11];
+        species.extend(std::iter::repeat_n(79u32, 12));
+        let mut cfg = Config::recommended(n).with_species(species, None);
+        cfg.packing_deferral = 0;
+        cfg.max_hops = Some(40);
+        let full = cfg.relax_steps;
+        let screen_steps = cfg.screen_steps;
+        assert!(screen_steps < full);
+        let mut start_rng = StdRng::seed_from_u64(11);
+        let start =
+            random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, &mut start_rng);
+        let far_threshold = 0.5 * f64::EPSILON.sqrt().recip();
+        let packings = binary_geometry::packing_candidates(n, 2.0);
+        let mut events = Vec::new();
+        let evals = std::sync::atomic::AtomicUsize::new(0);
+        let mut ledger = Ledger::new(12 * full + 2 * f64::MANTISSA_DIGITS as usize);
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            let placed = packings.iter().position(|packing| {
+                x.iter()
+                    .zip(packing.iter())
+                    .all(|(a, b)| (a - b).abs() < 1e-4)
+            });
+            let pays = match placed {
+                Some(_) if steps > screen_steps => steps,
+                _ => 1,
+            };
+            let mut paid = 0usize;
+            while paid < pays && led.charge() {
+                paid += 1;
+            }
+            evals.fetch_add(paid, std::sync::atomic::Ordering::Relaxed);
+            if paid == 0 {
+                return (f64::NAN, x.to_owned());
+            }
+            if steps == 0 && (2..n).any(|atom| x[3 * atom + 1].abs() > far_threshold) {
+                let distance = (x[3] - x[0]).abs();
+                return ((distance - 2.0).powi(2), x.to_owned());
+            }
+            match placed {
+                Some(index) if steps > screen_steps => {
+                    if steps == full && paid == steps {
+                        events.push(Event::Full(index));
+                        (-50.0 - index as f64, x.to_owned())
+                    } else {
+                        events.push(Event::Cut(index));
+                        (-1.0, x.to_owned())
+                    }
+                }
+                Some(_) => (-1.0, x.to_owned()),
+                None => {
+                    events.push(Event::Walk);
+                    (-10.0, x.to_owned())
+                }
+            }
+        };
+        let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| {
+            if !led.charge() {
+                return None;
+            }
+            evals.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Some(Array1::zeros(x.len()))
+        };
+        let mut rng = StdRng::seed_from_u64(11);
+        let outcome = run_with_gradient(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut rng,
+        )
+        .expect("finite start");
+        let evals = evals.load(std::sync::atomic::Ordering::Relaxed);
+        let mut trace = events.clone();
+        trace.dedup_by(|next, last| *next == Event::Walk && *last == Event::Walk);
+        let mut finished = vec![0usize; packings.len()];
+        for event in &events {
+            if let Event::Full(index) = event {
+                finished[*index] += 1;
+            }
+        }
+        assert_eq!(
+            finished,
+            vec![1; packings.len()],
+            "every refusal relaxed in full exactly once: {trace:?}"
+        );
+        let first_full = events
+            .iter()
+            .position(|event| matches!(event, Event::Full(_)))
+            .expect("an audit ran");
+        let first_audit = events[first_full..]
+            .iter()
+            .take_while(|event| !matches!(event, Event::Walk))
+            .filter(|event| matches!(event, Event::Full(_)))
+            .count();
+        assert!(
+            first_audit < packings.len(),
+            "the first audit was not cut by the budget: {trace:?}"
+        );
+        assert!(
+            events[first_full..]
+                .iter()
+                .skip_while(|event| !matches!(event, Event::Walk))
+                .any(|event| matches!(event, Event::Full(_))),
+            "no audit resumed after a hop: {trace:?}"
+        );
+        assert_eq!(
+            outcome.best,
+            -50.0 - (packings.len() - 1) as f64,
+            "the last refused packing was audited"
+        );
+        assert_eq!(outcome.charged, evals, "every call charged");
+        assert_eq!(ledger.spent(), evals);
+    }
+
     #[test]
     fn run_with_gradient_skips_generic_packings_on_molecular_and_rigid_configs() {
         let far_threshold = 0.5 * f64::EPSILON.sqrt().recip();
