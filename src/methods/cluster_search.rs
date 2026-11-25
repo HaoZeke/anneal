@@ -914,10 +914,12 @@ where
         // A start the previous relaxation already certified at or below the
         // stop has nothing left to descend, and the descent's first call
         // would pay again for the energy and gradient on file.
-        let plain = match surfaces {
-            Some(_) => diagnostic,
-            None => !cfg.two_phase.is_some_and(|two| two.is_active()),
-        };
+        //
+        // Every surface transform, the portfolio or a legacy `two_phase`
+        // without one, is chosen through `plain`, so a diagnostic quench
+        // bypasses them all.
+        let plain =
+            diagnostic || (surfaces.is_none() && !cfg.two_phase.is_some_and(|two| two.is_active()));
         if plain
             && let Some(check) = prior.as_ref()
             && largest_component(check.gradient.view()) <= opt.gtol
@@ -945,7 +947,7 @@ where
         // that minimum to the plain relaxation below. Both phases charge.
         let compacted;
         let surface = match surfaces.as_mut() {
-            Some(_) if diagnostic => None,
+            _ if plain => None,
             Some(portfolio) => portfolio.begin(screening),
             None => cfg.two_phase.filter(|two| two.is_active()),
         };
@@ -2977,6 +2979,57 @@ mod tests {
                 assert_eq!(led.spent() - before.0, plain_led.spent() - before.1);
             }
         }
+    }
+
+    /// A legacy `two_phase` with no portfolio reshapes the walk's quenches
+    /// and not a diagnostic one: under the scope the quench matches the
+    /// same preset with `two_phase` off, energy, state and calls.
+    #[test]
+    fn a_diagnostic_quench_skips_a_legacy_two_phase_surface() {
+        let n = 13;
+        let mut plain_cfg = Config::recommended(n);
+        plain_cfg.surfaces.clear();
+        plain_cfg.two_phase = None;
+        let mut cfg = plain_cfg.clone();
+        cfg.two_phase = Some(crate::methods::two_phase::TwoPhase::relative(0.7, 1.0));
+        assert!(cfg.two_phase.is_some_and(|two| two.is_active()));
+        let objective = PairPotential::lennard_jones(n);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(9);
+        let mut stats = RelaxStats::default();
+        let mut plain_stats = RelaxStats::default();
+        let mut relax = warm_relax(&objective, &cfg, &mut stats, 3);
+        let mut plain = warm_relax(&objective, &plain_cfg, &mut plain_stats, 3);
+        let mut led = Ledger::new(1 << 30);
+        let mut walk_led = Ledger::new(1 << 30);
+        let mut plain_led = Ledger::new(1 << 30);
+        let mut reshaped = 0;
+        for _ in 0..8 {
+            let start = crate::methods::cluster_hopping::random_cluster(
+                n,
+                1.2,
+                cfg.min_separation,
+                &mut rng,
+            );
+            for steps in [cfg.screen_steps, cfg.relax_steps] {
+                let before = (led.spent(), plain_led.spent(), walk_led.spent());
+                let (energy, state) = {
+                    let mut scope = led.diagnostic_scope();
+                    relax(&mut scope, start.view(), steps)
+                };
+                let (plain_energy, plain_state) = plain(&mut plain_led, start.view(), steps);
+                assert_eq!(energy.to_bits(), plain_energy.to_bits());
+                assert_eq!(state, plain_state);
+                assert_eq!(led.spent() - before.0, plain_led.spent() - before.1);
+                let (walk_energy, walk_state) = relax(&mut walk_led, start.view(), steps);
+                if walk_energy.to_bits() != plain_energy.to_bits()
+                    || walk_state != plain_state
+                    || walk_led.spent() - before.2 != plain_led.spent() - before.1
+                {
+                    reshaped += 1;
+                }
+            }
+        }
+        assert!(reshaped > 0, "the walk's quenches must see two_phase");
     }
 
     #[test]
