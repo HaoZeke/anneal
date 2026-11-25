@@ -7,6 +7,10 @@ This protocol measures the `lj75` CooperativeRun arm at revision
 `src/` remains unchanged. The release examples are built with the
 `bank-rpc` feature.
 
+The exact Cargo feature set is `bank-rpc ira`. The `ira` feature is
+required by the out-of-process catalog coordinator target; enabling it
+does not change the CooperativeRun arm.
+
 The sole measured arm uses four communicating chains and one
 out-of-process catalog coordinator. The chain configuration is
 `Config::communicating(75)`. Every seed receives the `lj75` entry in
