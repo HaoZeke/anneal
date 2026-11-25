@@ -187,7 +187,7 @@ def test_capped_stop_writes_calls_and_fraction(tmp_path):
     row = ROWS.append_result(
         tmp_path,
         cell,
-        [ROWS.Segment(calls, -532.5, 1.5, 1.75, "cap")],
+        [ROWS.Segment(calls, -532.5, float(PROTOCOL.CPU_CAP_S), float(PROTOCOL.CPU_CAP_S) + 10, "cap")],
         REVISION,
     )
     budget = PROTOCOL.PAPER_BUDGETS["lj98"]
@@ -196,8 +196,8 @@ def test_capped_stop_writes_calls_and_fraction(tmp_path):
     assert row["fraction_of_budget"] == "0.00025"
     assert Decimal(row["fraction_of_budget"]) == Decimal(calls) / Decimal(budget)
     assert row["best_e"] == "-532.50000000"
-    assert row["cpu_s"] == "1.500000"
-    assert row["wall_s"] == "1.750000"
+    assert row["cpu_s"] == "43200.000000"
+    assert row["wall_s"] == "43210.000000"
     assert row["code_revision"] == REVISION
     assert "host" not in ROWS.ROW_FIELDS
 
@@ -259,20 +259,20 @@ def test_resumed_capped_seed_sums_cpu(tmp_path):
         tmp_path,
         cell,
         [
-            ROWS.Segment(100, -10.0, 10.0, 11.0, "checkpoint"),
-            ROWS.Segment(250, -12.5, 3.5, 4.0, "cap"),
+            ROWS.Segment(100, -10.0, 20_000.0, 21_000.0, "checkpoint"),
+            ROWS.Segment(250, -12.5, 23_200.0, 24_000.0, "cap"),
         ],
         REVISION,
     )
     assert row["stop"] == "cap"
     assert row["calls_reached"] == "250"
     assert Decimal(row["fraction_of_budget"]) == Decimal(250) / Decimal(1_000_000)
-    assert row["cpu_s"] == "13.500000"
-    assert row["wall_s"] == "15.000000"
+    assert row["cpu_s"] == "43200.000000"
+    assert row["wall_s"] == "45000.000000"
     assert row["best_e"] == "-12.50000000"
     shape = json.loads(PROTOCOL.shapes_path(tmp_path, "au55").read_text())
     assert shape["segments"] == 2
-    assert shape["cpu_s"] == "13.500000"
+    assert shape["cpu_s"] == "43200.000000"
 
     with PROTOCOL.rows_path(tmp_path, "au55").open(newline="") as handle:
         assert len(list(csv.DictReader(handle))) == 1
@@ -280,7 +280,7 @@ def test_resumed_capped_seed_sums_cpu(tmp_path):
         ROWS.append_result(
             tmp_path,
             cell,
-            [ROWS.Segment(250, -12.5, 1.0, 1.0, "cap")],
+            [ROWS.Segment(250, -12.5, float(PROTOCOL.CPU_CAP_S), float(PROTOCOL.CPU_CAP_S), "cap")],
             REVISION,
         )
 
@@ -308,7 +308,7 @@ def test_torn_tail_is_dropped_before_append(tmp_path):
     row = ROWS.append_result(
         tmp_path,
         cell,
-        [ROWS.Segment(80, -2.0, 0.25, 0.3, "cap")],
+        [ROWS.Segment(80, -2.0, float(PROTOCOL.CPU_CAP_S), float(PROTOCOL.CPU_CAP_S) + 1, "cap")],
         REVISION,
     )
     assert path.read_bytes().endswith(b"\n")
@@ -498,3 +498,166 @@ def test_dry_run_scales_only_the_capped_cell(tmp_path):
     )
     assert refused.returncode != 0
     assert list(ROOT.glob("bench/ase-*/rows-ljfix-budget.csv")) == []
+
+
+def test_calls_to_hit_counts_every_non_hit_as_budget_plus_one():
+    budget = 400_000
+    assert ROWS.calls_to_hit({"stop": "hit", "budget": str(budget), "calls_reached": "120"}) == 120
+    assert ROWS.calls_to_hit({"stop": "cap", "budget": str(budget), "calls_reached": "1000"}) == budget + 1
+    assert ROWS.calls_to_hit(
+        {"stop": "budget", "budget": str(budget), "calls_reached": str(budget)}
+    ) == budget + 1
+    assert ROWS.calls_to_hit({"stop": "wall", "budget": str(budget), "calls_reached": "5"}) == budget + 1
+
+
+def test_readme_states_fisher_mwu_and_censored_calls():
+    text = README.read_text()
+    scoring = text.split("## Scoring", 1)[1].split("## Why the cap is 12 h", 1)[0]
+    assert "Fisher" in scoring
+    assert "MWU" in scoring
+    assert "calls-to-hit" in scoring
+    assert "budget+1" in scoring
+    assert "stop=cap" in scoring
+    assert "stop=hit" in scoring
+
+
+def test_production_cap_stop_requires_the_preregistered_cpu(tmp_path):
+    cell = PROTOCOL.find_cell("lj98", "ase_mh", 2005)
+    calls = 1000
+    with pytest.raises(ValueError):
+        ROWS.append_result(
+            tmp_path,
+            cell,
+            [ROWS.Segment(calls, -1.0, float(PROTOCOL.CPU_CAP_S) - 1, float(PROTOCOL.CPU_CAP_S), "cap")],
+            REVISION,
+        )
+    with pytest.raises(ValueError):
+        ROWS.append_result(
+            tmp_path,
+            cell,
+            [ROWS.Segment(calls, -1.0, float(PROTOCOL.CPU_CAP_S), float(PROTOCOL.CPU_CAP_S) - 1e-3, "cap")],
+            REVISION,
+        )
+    row = ROWS.append_result(
+        tmp_path,
+        cell,
+        [ROWS.Segment(
+            calls,
+            -1.0,
+            float(PROTOCOL.CPU_CAP_S),
+            float(PROTOCOL.CPU_CAP_S) - ROWS.CPU_WALL_TOL_S / 2,
+            "cap",
+        )],
+        REVISION,
+    )
+    assert row["stop"] == "cap"
+    assert float(row["cpu_s"]) >= PROTOCOL.CPU_CAP_S
+    assert float(row["cpu_s"]) <= float(row["wall_s"]) + ROWS.CPU_WALL_TOL_S
+
+
+def test_best_energy_is_the_minimum_over_segments(tmp_path):
+    cell = PROTOCOL.find_cell("lj104", "anneal", 2008)
+    row = ROWS.append_result(
+        tmp_path,
+        cell,
+        [
+            ROWS.Segment(100, -20.0, 20_000.0, 21_000.0, "checkpoint"),
+            ROWS.Segment(250, -12.5, 23_200.0, 24_000.0, "cap"),
+        ],
+        REVISION,
+    )
+    assert row["best_e"] == "-20.00000000"
+    assert row["cpu_s"] == "43200.000000"
+
+
+def test_locked_config_keys_match_case_insensitively():
+    for key in ("CPU_CAP_S", "Cpu_Cap_S", "CPU_CAP", "G2_CPU_CAP_S"):
+        with pytest.raises(ValueError):
+            PROTOCOL.reject_cap_override({key: 1})
+    PROTOCOL.reject_cap_override({"cpu_cap_seconds": 1})
+    PROTOCOL.reject_cap_override({"sizes": "75"})
+
+
+def test_uncapped_dry_run_does_not_need_the_test_cap(tmp_path):
+    env = {key: value for key, value in os.environ.items() if key != TEST_CAP_ENV}
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(DRY_PATH),
+            "--system", "lj55",
+            "--arm", "ase_bh",
+            "--seed", "2004",
+            "--out", str(tmp_path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+    row = next(csv.DictReader(completed.stdout.splitlines()))
+    assert row["stop"] == "budget"
+    assert row["calls_reached"] == "1000000"
+    assert "append_result" not in DRY_PATH.read_text()
+    refused = subprocess.run(
+        [
+            sys.executable,
+            str(DRY_PATH),
+            "--system", "au55",
+            "--arm", "anneal",
+            "--seed", "2004",
+            "--out", str(tmp_path / "capped"),
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+    assert refused.returncode != 0
+    assert not (tmp_path / "capped").exists()
+
+
+def test_kill_between_writes_repairs_the_matching_shape(tmp_path, monkeypatch):
+    cell = PROTOCOL.find_cell("lj38", "ase_bh", 2001)
+    segments = [ROWS.Segment(400_000, -173.9, 2.0, 2.2, "budget")]
+    real_write = ROWS._atomic_write
+    seen = {"n": 0}
+
+    def fail_after_first(path, content):
+        seen["n"] += 1
+        real_write(path, content)
+        if seen["n"] == 1:
+            raise RuntimeError("killed")
+
+    monkeypatch.setattr(ROWS, "_atomic_write", fail_after_first)
+    with pytest.raises(RuntimeError, match="killed"):
+        ROWS.append_result(tmp_path, cell, segments, REVISION)
+    monkeypatch.undo()
+
+    shapes = PROTOCOL.shapes_path(tmp_path, "lj38")
+    rows = PROTOCOL.rows_path(tmp_path, "lj38")
+    assert shapes.is_file()
+    assert json.loads(shapes.read_text())["best_e"] == "-173.90000000"
+    if rows.exists():
+        with rows.open(newline="") as handle:
+            assert list(csv.DictReader(handle)) == []
+
+    with pytest.raises(ValueError):
+        ROWS.append_result(
+            tmp_path,
+            cell,
+            [ROWS.Segment(400_000, -100.0, 3.0, 3.1, "budget")],
+            REVISION,
+        )
+    assert [line for line in shapes.read_text().splitlines() if line]
+    assert len([line for line in shapes.read_text().splitlines() if line]) == 1
+    if rows.exists():
+        with rows.open(newline="") as handle:
+            assert list(csv.DictReader(handle)) == []
+
+    row = ROWS.append_result(tmp_path, cell, segments, REVISION)
+    assert row["best_e"] == "-173.90000000"
+    with rows.open(newline="") as handle:
+        recorded = list(csv.DictReader(handle))
+    assert recorded == [row]
+    assert len([line for line in shapes.read_text().splitlines() if line]) == 1
