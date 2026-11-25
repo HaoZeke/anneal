@@ -26,10 +26,11 @@ The direction reverses on fresh seeds. Neither split is significant,
 so there is no mechanism to fix. Rows in `m55r14-fresh-rows.csv`, logs
 in `raw/m55r14-fresh/`.
 
-795737db3e80a7f00d1b05a47f9532c7ffa38d98 is the tip of the record
-branch `record/template-free2-r4-escape`, eight commits on develop
-61fa67cf380e46876b569da45e7cc091647a775b, so arm `T` resolves once
-that branch is on the remote.
+795737db3e80a7f00d1b05a47f9532c7ffa38d98 was the local tip of the
+record now on origin as `refs/audit/record/template-free2-r4-escape`.
+That ref was pushed at a49bc21e, eight commits on develop
+61fa67cf380e46876b569da45e7cc091647a775b, and does not hold 795737db,
+so arm `T` stays unresolved, as `bench/unreachable-revisions.csv` says.
 
 ## 2. The cap turn
 
