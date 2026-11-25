@@ -1743,6 +1743,18 @@ def test_a_recorded_tree_no_pushed_commit_has_resolves_nothing():
     assert [r[2] for r in audit.drifts()] == [f"unpushed revision {LOST[:8]}"]
 
 
+def test_an_unpushed_revision_needs_a_reason(tmp_path, monkeypatch):
+    unpushed = dict(audit_mod.UNPUSHED)
+    del unpushed["bf09f7a2b7a6bd6359898db675eeafefcd20548b"]
+    unpushed["e09e0487c52b7f4789bc556ee7fe07ead4999824"] = "listed although its alias holds"
+    monkeypatch.setattr(audit_mod, "UNPUSHED", unpushed)
+    audit, _ = aliased_audit(tmp_path, monkeypatch, lambda table: table, (ASE_GOFEE,))
+    assert [(r[2], r[3], r[4]) for r in audit.drifts()] == [
+        ("unpushed revision bf09f7a2", "not listed", "no pushed equivalent"),
+        ("unpushed revision e09e0487", "listed although its alias holds", "resolved"),
+    ]
+
+
 def test_an_unmapped_revision_in_any_benchmark_table_fails(monkeypatch):
     tables = audit_mod.revision_row_tables()
     path = "bench/ase-nonlj/summary.csv"

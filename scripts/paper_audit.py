@@ -4024,10 +4024,31 @@ def sc_reading(anneal: dict[str, dict[str, str]], reruns: dict[str, dict[str, st
 
 
 def summary_against_rows(audit: Audit, summary: str, per_seed: str, arm_key: str, calls_key: str,
-                         continuity: bool, mw_column: str = "mannwhitney_p_evals") -> None:
-    """A summary file derived from per-seed rows must match them."""
+                         continuity: bool, mw_column: str = "mannwhitney_p_evals", first_only: bool = False) -> None:
+    """A summary file derived from per-seed rows must match them.
+
+    With first_only, the first anneal harness of each system and the first
+    line of each (system, arm, harness) are checked here. A later anneal
+    harness and a line that restates a test against it are checked by
+    sutton_chen_pvalues."""
     rows = audit.rows(per_seed)
-    for line in audit.rows(summary):
+    lines = audit.rows(summary)
+    if first_only:
+        first_anneal: dict[str, str] = {}
+        for line in lines:
+            if line["arm"] == "anneal":
+                first_anneal.setdefault(line["system"], line["harness_revision"])
+        rows = [r for r in rows if r[arm_key] != "anneal" or r["harness_revision"] == first_anneal.get(r["system"])]
+        listed: set[tuple[str, str, str]] = set()
+        kept = []
+        for line in lines:
+            key = (line["system"], line["arm"], line["harness_revision"])
+            if key in listed or (line["arm"] == "anneal" and line["harness_revision"] != first_anneal[line["system"]]):
+                continue
+            listed.add(key)
+            kept.append(line)
+        lines = kept
+    for line in lines:
         harness = {"harness_revision": line["harness_revision"]} if "harness_revision" in line else {}
         group = pick(rows, system=line["system"], **{arm_key: line["arm"]}, **harness)
         where = f"{summary} {line['system']} {line['arm']}" + (f" {line['harness_revision'][:8]}" if harness else "")
@@ -4270,6 +4291,8 @@ def sc_develop_table(audit: Audit, path: str, code: str) -> None:
 
 def head_to_head(audit: Audit) -> None:
     summary_against_rows(audit, "bench/morse-h2h/results.csv", "bench/morse-h2h/seeds.csv", "code", "evals_to_hit", True)
+    summary_against_rows(audit, "bench/metal-cluster-h2h/sc-n12/results.csv", "bench/metal-cluster-h2h/sc-n12/seeds.csv",
+                         "arm", "evals_to_hit", True, first_only=True)
     sc_rows = audit.rows("bench/metal-cluster-h2h/sc-n12/seeds.csv")
     sc_summary = audit.rows("bench/metal-cluster-h2h/sc-n12/results.csv")
     anneal = {r["system"]: r for r in sc_summary if r["arm"] == "anneal"}
