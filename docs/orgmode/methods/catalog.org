@@ -199,7 +199,7 @@ coefficients (e.g. ~MERGE_RADIUS = 0.7~, ~TEMPERATURE = 0.8~,
 =Config::recommended= (config.rs) selects =MoveLibrary::LeanBurst=
 with the SOAP arm and Thompson allocation over the arms. Like
 =Config::communicating=, it completes the core's orbit on every new basin
-and, below 98 points, draws between the plain and the two-phase relative
+and, at every size, draws between the plain and the two-phase relative
 0.7 surface.
 A stuck chain can complete into the deposited basin of the lowest structure seen (=stalled=, =returns_to_deposit= and =returns_to_best= in src/methods/cluster_hopping.rs).
 The deposits can then refuse the completion, because it faces the same biased Metropolis test as a hop (=biased_metropolis=).

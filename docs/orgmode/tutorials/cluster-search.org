@@ -63,9 +63,8 @@ A rigid chart uses centre and Rodrigues coordinates.
 ~layout="block"~ stores every centre, then every rotation.
 ~layout="interleaved"~ is centre then rotation vector per body, with the same rotation vectors as the block.
 The orientation step turns every body and leaves the centres where they are.
-On a chart of more than ten bodies the acceptance factor stays at 4.
+A rigid chart accepts at the temperature the preset stores for the potential, at every number of bodies.
 Its orientation amplitude is scaled toward an acceptance ratio of one half.
-A ten-body chart may still climb to 24 and does not scale the amplitude.
 The rigid quench is the same L-BFGS descent as a Cartesian quench.
 It returns when the energy crosses the run target.
 A rigid record accepts the root-mean-square force.

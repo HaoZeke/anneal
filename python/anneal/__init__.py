@@ -293,11 +293,11 @@ def cluster_search(
         A wide diameter ratio also tries one downhill unlike-pair exchange
         beside the escape.
       sigmas: optional diameter per point, same length as ``species``.
-      rigid: hop in centre and Rodrigues rotation coordinates. A chart of
-        more than ten bodies holds the acceptance factor at 4 and scales
-        the orientation amplitude toward an acceptance ratio of one half.
-        Ten bodies or fewer do not. The quench is the same L-BFGS
-        descent, and a rigid record accepts the root-mean-square force.
+      rigid: hop in centre and Rodrigues rotation coordinates. Acceptance
+        uses the temperature stored for that potential, and the orientation
+        amplitude moves toward an acceptance ratio of one half. The quench
+        is the same L-BFGS descent, and a rigid record accepts the
+        root-mean-square force.
         The chain keeps the eight lowest distinct minima of its quenched
         start, accepted quenches and lowest recorded minimum. Each stall
         follows 1000 hops with no new lowest minimum.
