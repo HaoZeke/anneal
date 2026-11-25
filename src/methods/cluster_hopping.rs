@@ -605,6 +605,12 @@ pub struct Ledger {
     id: u64,
     budget: usize,
     spent: usize,
+    /// Calls to [`Ledger::charge`] made after this ledger closed.
+    ///
+    /// A relaxation can use this to distinguish reaching the cap on its
+    /// final evaluation from asking for another evaluation and being cut
+    /// off there.
+    closed_charge_attempts: usize,
     /// Fractional debt accumulated by partial-system evaluations, settled
     /// into whole charged units as it crosses one.
     fract: f64,
@@ -697,6 +703,7 @@ impl Ledger {
             id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             budget,
             spent: 0,
+            closed_charge_attempts: 0,
             fract: 0.0,
             priced: 0,
             settled_beyond_cap: 0,
@@ -896,10 +903,16 @@ impl Ledger {
     /// Charges one unit, returning `false` when the budget is gone.
     pub fn charge(&mut self) -> bool {
         if self.spent >= self.budget || self.stopped() {
+            self.closed_charge_attempts = self.closed_charge_attempts.saturating_add(1);
             return false;
         }
         self.spent += 1;
         true
+    }
+
+    /// Evaluation requests refused because this ledger was closed.
+    fn closed_charge_attempts(&self) -> usize {
+        self.closed_charge_attempts
     }
 
     /// Charges a fraction of one evaluation, for work that touches a subset
@@ -5756,8 +5769,11 @@ where
         let mut candidate = screen.deferred.remove(closest);
         let steps = candidate.steps.min(ledger.remaining());
         let paid_from = ledger.spent();
+        let closed_before = ledger.closed_charge_attempts();
         let (energy, relaxed) = relax(ledger, candidate.point.view(), steps);
-        let cut = steps < candidate.steps && (ledger.stopped() || ledger.remaining() == 0);
+        let closed = ledger.stopped() || ledger.remaining() == 0;
+        let cut =
+            closed && (steps < candidate.steps || ledger.closed_charge_attempts() > closed_before);
         if cut {
             candidate.cut_at = ledger.spent().saturating_sub(paid_from);
             screen.deferred.insert(closest, candidate);
@@ -12987,6 +13003,52 @@ mod tests {
         );
         assert_eq!(resumed.spent(), 50 * waiting.len());
         assert_eq!(calls.get(), first + resumed.spent(), "every call charged");
+    }
+
+    /// Warm L-BFGS can need more objective calls than its iteration limit.
+    /// When the ledger has room for that full limit but closes first, the
+    /// refused call still marks the descent as cut and hands the candidate
+    /// back to the screen.
+    #[test]
+    fn warm_lbfgs_cut_with_full_step_room_hands_candidate_back() {
+        use crate::methods::warm_lbfgs::WarmLbfgs;
+
+        let cfg = Config::recommended(2);
+        let steps = cfg.relax_steps;
+        let point = Array1::zeros(6);
+        let mut screen = packing_screen(cfg.screen_steps, -1.0, 0.0);
+        screen.defer(point.view(), steps, 0.0, 1.0);
+        let mut ledger = Ledger::new(steps);
+        assert!(ledger.remaining() >= steps);
+
+        let mut optimiser = WarmLbfgs::default();
+        optimiser.curvature = 1.0;
+        let mut calls = 0usize;
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
+            optimiser.forget();
+            let (energy, relaxed, _) = optimiser.minimize(x, iterations, |v| {
+                if !led.charge() {
+                    return None;
+                }
+                calls += 1;
+                Some((v.sum(), Array1::ones(v.len())))
+            });
+            (energy, relaxed)
+        };
+
+        let offered =
+            audit_refused_packings(&cfg, &mut ledger, &mut relax, &mut screen, f64::INFINITY);
+        assert!(offered.is_some(), "the paid point was not offered");
+        assert_eq!(ledger.remaining(), 0, "the quench closes the ledger");
+        assert_eq!(calls, steps, "every available evaluation was charged");
+        assert_eq!(screen.audited, 0, "a cut quench was counted as audited");
+        assert_eq!(
+            screen.deferred.len(),
+            1,
+            "the candidate was not handed back"
+        );
+        assert_eq!(screen.deferred[0].point, point);
+        assert_eq!(screen.deferred[0].cut_at, steps);
     }
 
     /// A refusal the budget cut at seven calls is not started again with
