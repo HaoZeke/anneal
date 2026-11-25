@@ -23,6 +23,13 @@
 //! candidates are then audited in full before the next hop, which takes
 //! those calls back: LJ38 makes 10 hops and LJ98 5, at the same best
 //! energies. With the audit never scheduled the walks are 15 and 7 again.
+//!
+//! The LJ98 audit at hop 2 runs out of its half of the remaining budget on
+//! the refusal farthest from the bar, 196 calls into its 777 steps, with
+//! one more refusal waiting. An audit cut short leaves both deferred, and
+//! the walk offers them again at hop 3 with 150 of the 300 calls left. That
+//! relaxation is cut too, so LJ98 runs one more capped relaxation, 14 where
+//! it ran 13, at the same best energy, hops, converged count and spend.
 
 use anneal_core::methods::cluster_hopping::{Config, Ledger};
 use anneal_core::methods::cluster_search::search;
@@ -66,7 +73,7 @@ fn lj38_and_lj98_short_searches_stay_put() {
         case(38, 1, None, -170.711_308_119_462_44, (21, 14, 19)),
         case(98, 7, None, -520.107_879_491_539_2, (10, 9, 9)),
         case(38, 1, Some(0), -173.928_426_584_850_03, (10, 20, 13)),
-        case(98, 7, Some(0), -531.883_176_996_307_8, (5, 11, 13)),
+        case(98, 7, Some(0), -531.883_176_996_307_8, (5, 11, 14)),
     ];
     anneal_core::install_rgpot_kernels!();
     let mut records = Vec::new();
@@ -118,6 +125,6 @@ fn lj38_and_lj98_short_searches_stay_put() {
 LJ38 None -170.7113081194624442 21 14 19 2500
 LJ98 None -520.1078794915391654 10 9 9 2500
 LJ38 Some(0) -173.9284265848500297 10 20 13 2500
-LJ98 Some(0) -531.8831769963078386 5 11 13 2500";
+LJ98 Some(0) -531.8831769963078386 5 11 14 2500";
     assert_eq!(records.join("\n"), expected);
 }
