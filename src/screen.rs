@@ -184,6 +184,16 @@ impl Screen {
     /// reproducible under the caller's seed rather than reaching for its own
     /// randomness.
     pub fn decide(&mut self, x: ArrayView1<f64>, best: f64, u: f64) -> bool {
+        self.decide_above(x, best, u, self.threshold)
+    }
+
+    /// [`Screen::decide`] with the probability of improvement that justifies
+    /// the relaxation supplied by the caller instead of read from
+    /// [`Screen::threshold`]. The threshold of the hop screen is set by the
+    /// cost of a screening pass against a relaxation; a caller whose
+    /// relaxation is bought without a screening pass knows its own
+    /// break-even and passes that.
+    pub fn decide_above(&mut self, x: ArrayView1<f64>, best: f64, u: f64, threshold: f64) -> bool {
         self.decided += 1;
         if u < self.exploration {
             self.explored += 1;
@@ -201,7 +211,7 @@ impl Screen {
                 return true;
             }
         };
-        let go = p >= self.threshold;
+        let go = p >= threshold;
         if go {
             self.relaxed += 1;
         }
@@ -490,6 +500,25 @@ mod tests {
         assert!((student_t_cdf(-2.015_048_373, 5.0) - 0.05).abs() < 1e-8);
         let z = 1.644_853_626_951_472_2;
         assert!((student_t_cdf(z, 1.0e6) - normal_cdf(z)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_supplied_threshold_moves_the_decision_and_nothing_else() {
+        let mut screen = Screen::new(2, 1, 0.0, 0.5);
+        for i in 0..12 {
+            let a = (i as f64) - 6.0;
+            screen.observe(array![1.0, a].view(), a);
+        }
+        let x = array![1.0, 0.25];
+        let (mean, scale2) = screen.predict(x.view()).unwrap();
+        let best = mean - scale2.sqrt();
+        let p = screen.probability_of_improvement(x.view(), best).unwrap();
+        assert!(p > 0.05 && p < 0.45, "{p}");
+        assert!(!screen.decide(x.view(), best, 0.9));
+        assert!(screen.decide_above(x.view(), best, 0.9, 0.5 * p));
+        assert!(!screen.decide_above(x.view(), best, 0.9, 2.0 * p));
+        assert_eq!(screen.decided, 3);
+        assert_eq!(screen.relaxed, 1);
     }
 
     #[test]

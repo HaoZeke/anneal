@@ -4693,6 +4693,12 @@ fn biased_metropolis<R: Rng + ?Sized>(
     d < 0.0 || rng.random::<f64>() < portable_exp(-d)
 }
 
+/// Features of a symmetry completion for the screen that decides whether to
+/// finish its quench: an intercept, the partial descent relative to the
+/// incumbent, how far the partial descent moved in descriptor space, and
+/// their product.
+const COMPLETION_FEATURES: usize = 4;
+
 /// The biases a completion of the incumbent is tested under: the basin
 /// bias, and the spectral one when the run keeps it. The same ones a hop is
 /// tested under, whether or not the chain is stuck.
@@ -5861,6 +5867,23 @@ where
         cfg.bayes_exploration,
         cfg.bayes_threshold,
     );
+    // A completion is quenched like a hop: a short descent first, the
+    // return test, and then the screen below on whether to finish. What a
+    // finished completion reaches is learned from this run's own, relative to
+    // the incumbent. Two readings per coefficient is the least that fits the
+    // design and still leaves the predictive spread honest; the hop screen's
+    // longer warmup is sized for a decision made every hop, and a completion
+    // is made once per new basin.
+    let mut completion_screen = Screen::new(
+        COMPLETION_FEATURES,
+        2 * COMPLETION_FEATURES,
+        cfg.bayes_exploration,
+        cfg.bayes_threshold,
+    );
+    let mut completion_spent = 0usize;
+    let mut completion_tries = 0usize;
+    let mut ordinary_records = 0usize;
+    let mut records_best = f64::INFINITY;
     let mut tabu: Vec<Array1<f64>> = Vec::new();
     let mut tabu_hits = 0usize;
     let mut funnels = crate::funnel_spectral::FunnelSpectrum::new();
@@ -9986,6 +10009,10 @@ where
         // by one chain only, and the product is reported, so other chains
         // recognise it.
         let mut completion_offer = None;
+        if ledger.best < records_best - 1e-9 {
+            ordinary_records += 1;
+            records_best = ledger.best;
+        }
         let complete = if cfg.symmetry_completion_fitted {
             crate::detected_symmetry::complete_detected_fitted
         } else if cfg.symmetry_completion_framework {
@@ -10026,7 +10053,70 @@ where
             None
         };
         if let Some(y) = completed {
-            let (es, xs) = relax(ledger, y.view(), cfg.relax_steps);
+            let spent_before_completion = ledger.spent();
+            let (es, xs) = if cfg.bayes_screen {
+                let (e1, x1) = relax(ledger, y.view(), cfg.screen_steps);
+                if ledger.stopped() {
+                    if answer_is_recordable(cfg, ledger, e1, x1.view(), true, true, false) {
+                        ledger.record(e1, x1.view());
+                    }
+                    (f64::NAN, x1)
+                } else {
+                    let drift: f64 = bias
+                        .cv(x1.view())
+                        .iter()
+                        .zip(bias.cv(x.view()).iter())
+                        .map(|(p, q)| (p - q) * (p - q))
+                        .sum::<f64>()
+                        .sqrt();
+                    let relative = e1 - e;
+                    let features = Array1::from(vec![1.0, relative, drift, relative * drift]);
+                    if cfg.return_screen && drift < cfg.merge_radius {
+                        // Back in the basin it left: nothing the chain does
+                        // not already hold, and the same minimum would
+                        // produce the same completion.
+                        fruitless.insert(e, x.view());
+                        (f64::NAN, x1)
+                    } else {
+                        // A finished completion is worth a record, and a
+                        // record costs an ordinary hop this many calls on
+                        // average, so finishing is worth it when the chance
+                        // of one is above the finishing cost over that cost
+                        // plus the finishing cost, the break-even the hop
+                        // screen derives for a winner worth one hop.
+                        let ordinary_spent =
+                            ledger.spent().saturating_sub(completion_spent).max(1) as f64;
+                        let ordinary_hops = hops.saturating_sub(completion_tries).max(1) as f64;
+                        let finishing = if completion_tries > 0 {
+                            completion_spent as f64 / completion_tries as f64
+                        } else {
+                            ordinary_spent / ordinary_hops
+                        };
+                        let per_record = ordinary_spent / ordinary_records.max(1) as f64;
+                        if completion_screen.decide_above(
+                            features.view(),
+                            ledger.best - e,
+                            rng.random::<f64>(),
+                            finishing / (finishing + per_record),
+                        ) {
+                            let finished = relax(ledger, x1.view(), cfg.relax_steps);
+                            if finished.0.is_finite() {
+                                completion_screen.observe(features.view(), finished.0 - e);
+                            }
+                            finished
+                        } else {
+                            (f64::NAN, x1)
+                        }
+                    }
+                }
+            } else {
+                relax(ledger, y.view(), cfg.relax_steps)
+            };
+            completion_spent += ledger.spent().saturating_sub(spent_before_completion);
+            completion_tries += 1;
+            if es.is_finite() {
+                records_best = records_best.min(ledger.best);
+            }
             if es.is_finite() && xs.len() == x.len() {
                 let completion_gradient = record_quenched_answer(
                     cfg,
