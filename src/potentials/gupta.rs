@@ -238,8 +238,10 @@ impl Gupta {
 
     /// Energy and Cartesian gradient in one pair pass.
     ///
-    /// The walk is the rgpot kernel: every pair, density in label order,
-    /// force from the stored pair derivative. There is no cutoff.
+    /// The walk is every pair, density in label order, force from the
+    /// stored pair derivative. There is no cutoff. A linked kernel is
+    /// used when one is installed; otherwise the same sum in
+    /// [`builtin_gupta`] runs, which is what a packaged crate has.
     pub fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
         let n = self.n_points;
         assert_eq!(x.len(), 3 * n, "Gupta state is 3 coordinates per atom");
@@ -261,9 +263,57 @@ impl Gupta {
         let mut gradient = vec![0.0; 3 * n];
         // `slot` is one species index per atom and the parameter rows are
         // the square table. The kernel writes one energy and 3n forces.
-        let kernels = super::cluster_kernels()
-            .expect("Gupta needs the rgpot kernels: call anneal_core::install_rgpot_kernels!()");
-        (kernels.gupta)(
+        if let Some(kernels) = super::cluster_kernels() {
+            (kernels.gupta)(
+                coordinates,
+                &self.slot,
+                ns,
+                &aa,
+                &xi,
+                &pp,
+                &qq,
+                &r0,
+                &mut energy,
+                &mut gradient,
+            );
+        } else {
+            builtin_gupta(
+                coordinates,
+                &self.slot,
+                ns,
+                &aa,
+                &xi,
+                &pp,
+                &qq,
+                &r0,
+                &mut energy,
+                &mut gradient,
+            );
+        }
+        (energy, Array1::from_vec(gradient))
+    }
+
+    /// Energy and gradient from [`builtin_gupta`], ignoring any installed kernel.
+    #[cfg(test)]
+    fn builtin_value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        let n = self.n_points;
+        let coordinates = x.as_slice().expect("Gupta state is contiguous");
+        let ns = self.n_species;
+        let mut aa = vec![0.0; ns * ns];
+        let mut xi = vec![0.0; ns * ns];
+        let mut pp = vec![0.0; ns * ns];
+        let mut qq = vec![0.0; ns * ns];
+        let mut r0 = vec![0.0; ns * ns];
+        for (index, pair) in self.pairs.iter().enumerate() {
+            aa[index] = pair.a;
+            xi[index] = pair.xi;
+            pp[index] = pair.p;
+            qq[index] = pair.q;
+            r0[index] = pair.r0;
+        }
+        let mut energy = 0.0;
+        let mut gradient = vec![0.0; 3 * n];
+        builtin_gupta(
             coordinates,
             &self.slot,
             ns,
@@ -277,6 +327,90 @@ impl Gupta {
         );
         (energy, Array1::from_vec(gradient))
     }
+}
+
+/// Cleri–Rosato sum used when no linked kernel is installed.
+///
+/// A coincidence (`r^2 <= 0`) is not differentiable: the energy is
+/// infinite and the forces stay at zero. `NaN` is not `<= 0`, so it
+/// falls through and the energy and the forces become `NaN`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn builtin_gupta(
+    coordinates: &[f64],
+    slot: &[u8],
+    n_species: usize,
+    a: &[f64],
+    xi: &[f64],
+    p: &[f64],
+    q: &[f64],
+    r0: &[f64],
+    energy: &mut f64,
+    gradient: &mut [f64],
+) {
+    let n = slot.len();
+    for component in gradient.iter_mut().take(3 * n) {
+        *component = 0.0;
+    }
+    let pairs = if n >= 2 { n * (n - 1) / 2 } else { 0 };
+    let mut rho = vec![0.0; n];
+    let mut pack = vec![0.0; 6 * pairs];
+    let mut total = 0.0;
+    let mut m = 0usize;
+    for i in 0..n {
+        let si = slot[i] as usize;
+        let base_i = 3 * i;
+        for j in (i + 1)..n {
+            let base_j = 3 * j;
+            let d0 = coordinates[base_i] - coordinates[base_j];
+            let d1 = coordinates[base_i + 1] - coordinates[base_j + 1];
+            let d2 = coordinates[base_i + 2] - coordinates[base_j + 2];
+            let r2 = d0 * d0 + d1 * d1 + d2 * d2;
+            if r2 <= 0.0 {
+                *energy = f64::INFINITY;
+                return;
+            }
+            let key = si * n_species + slot[j] as usize;
+            let r = r2.sqrt();
+            let u = r / r0[key] - 1.0;
+            let phi = 2.0 * a[key] * (-p[key] * u).exp();
+            let psi = xi[key] * xi[key] * (-2.0 * q[key] * u).exp();
+            total += phi;
+            rho[i] += psi;
+            rho[j] += psi;
+            pack[6 * m] = d0;
+            pack[6 * m + 1] = d1;
+            pack[6 * m + 2] = d2;
+            pack[6 * m + 3] = r;
+            pack[6 * m + 4] = -(p[key] / r0[key]) * phi;
+            pack[6 * m + 5] = -(2.0 * q[key] / r0[key]) * psi;
+            m += 1;
+        }
+    }
+    for density in &rho {
+        total -= density.sqrt();
+    }
+    m = 0;
+    for i in 0..n {
+        let inv_i = 1.0 / rho[i].sqrt();
+        for j in (i + 1)..n {
+            let d0 = pack[6 * m];
+            let d1 = pack[6 * m + 1];
+            let d2 = pack[6 * m + 2];
+            let r = pack[6 * m + 3];
+            let dphi = pack[6 * m + 4];
+            let dpsi = pack[6 * m + 5];
+            let embed = -0.5 * (inv_i + 1.0 / rho[j].sqrt());
+            let coef = (dphi + embed * dpsi) / r;
+            gradient[3 * i] += coef * d0;
+            gradient[3 * i + 1] += coef * d1;
+            gradient[3 * i + 2] += coef * d2;
+            gradient[3 * j] -= coef * d0;
+            gradient[3 * j + 1] -= coef * d1;
+            gradient[3 * j + 2] -= coef * d2;
+            m += 1;
+        }
+    }
+    *energy = total;
 }
 
 impl Objective<f64> for Gupta {
@@ -312,18 +446,6 @@ impl DifferentiableObjective<f64> for Gupta {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
-
-    fn skip_without_rgpot_kernels(test_name: &str) -> bool {
-        if cfg!(anneal_packaged_without_rgpot_pair) && super::super::cluster_kernels().is_none() {
-            let msg = format!(
-                "warning: skipped potentials::gupta::tests::{test_name}: rgpot-pair is an unpublished git dev-dependency omitted from the packaged .crate\n"
-            );
-            let _ = std::io::stderr().write_all(msg.as_bytes());
-            return true;
-        }
-        false
-    }
 
     fn coordinates(text: &str) -> Array1<f64> {
         let mut values = Vec::new();
@@ -368,9 +490,6 @@ mod tests {
 
     #[test]
     fn a_zinc_dimer_at_r0_is_the_closed_form() {
-        if skip_without_rgpot_kernels("a_zinc_dimer_at_r0_is_the_closed_form") {
-            return;
-        }
         let pot = Gupta::zinc(2);
         let x = Array1::from_vec(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
         let energy = pot.eval(x.view());
@@ -381,11 +500,51 @@ mod tests {
         );
     }
 
+    /// The in-tree sum agrees with the installed kernel, including a
+    /// coincidence, which is infinite rather than a finite energy.
+    #[test]
+    fn builtin_gupta_matches_the_installed_evaluation() {
+        let zinc13 = coordinates(include_str!("../../tests/fixtures/ccd/gupta_zn/13"));
+        let cases = [
+            (
+                Gupta::zinc(4),
+                Array1::from_vec(vec![
+                    0.0, 0.0, 0.0, 1.05, 0.02, 0.0, 0.4, 0.9, -0.1, 0.2, 0.3, 1.1,
+                ]),
+            ),
+            (
+                Gupta::copper_gold(2, 2),
+                Array1::from_vec(vec![
+                    0.0, 0.0, 0.0, 2.6, 0.1, 0.0, 1.2, 2.3, 0.2, 1.3, 0.4, 2.5,
+                ]),
+            ),
+            (Gupta::zinc(13), zinc13),
+        ];
+        for (pot, x) in cases {
+            let (energy, gradient) = pot.value_and_gradient(x.view());
+            let (local, local_gradient) = pot.builtin_value_and_gradient(x.view());
+            let scale = 1.0 + energy.abs();
+            assert!(
+                (energy - local).abs() / scale < 1e-12,
+                "energy {energy} against builtin {local}"
+            );
+            assert_eq!(gradient.len(), local_gradient.len());
+            for (left, right) in gradient.iter().zip(local_gradient.iter()) {
+                let gscale = 1.0 + left.abs();
+                assert!(
+                    (left - right).abs() / gscale < 1e-9,
+                    "{left} against {right}"
+                );
+            }
+        }
+        let stacked = Array1::from_vec(vec![0.2, 0.2, 0.2, 0.2, 0.2, 0.2]);
+        let (energy, gradient) = Gupta::zinc(2).builtin_value_and_gradient(stacked.view());
+        assert!(energy.is_infinite() && energy.is_sign_positive());
+        assert!(gradient.iter().all(|component| *component == 0.0));
+    }
+
     #[test]
     fn a_platinum_dimer_at_r0_has_the_cleri_rosato_energy() {
-        if skip_without_rgpot_kernels("a_platinum_dimer_at_r0_has_the_cleri_rosato_energy") {
-            return;
-        }
         // At r = r0 the Cleri–Rosato sum for one pair is 2A − 2ξ.
         // Platinum: 2×0.2975 − 2×2.695 = −4.795 eV.
         let pot = Gupta::platinum(2);
@@ -409,9 +568,6 @@ mod tests {
 
     #[test]
     fn the_gradient_matches_a_central_difference() {
-        if skip_without_rgpot_kernels("the_gradient_matches_a_central_difference") {
-            return;
-        }
         let pot = Gupta::zinc(4);
         let x = Array1::from_vec(vec![
             0.0, 0.0, 0.0, 1.05, 0.02, 0.0, 0.4, 0.9, -0.1, 0.2, 0.3, 1.1,
@@ -434,9 +590,6 @@ mod tests {
 
     #[test]
     fn trait_methods_match_the_fused_evaluation() {
-        if skip_without_rgpot_kernels("trait_methods_match_the_fused_evaluation") {
-            return;
-        }
         let pot = Gupta::copper_gold(2, 2);
         let x = Array1::from_vec(vec![
             0.0, 0.0, 0.0, 2.6, 0.1, 0.0, 1.2, 2.3, 0.2, 1.3, 0.4, 2.5,
@@ -459,9 +612,6 @@ mod tests {
 
     #[test]
     fn zinc_reproduces_the_cambridge_minima() {
-        if skip_without_rgpot_kernels("zinc_reproduces_the_cambridge_minima") {
-            return;
-        }
         // Doye, Phys. Rev. B 68, 195418 (2003), as listed on the Cambridge
         // Cluster Database Gupta zinc table. The point files are in units of r0.
         let cases = [
@@ -518,9 +668,6 @@ mod tests {
 
     #[test]
     fn copper_gold_reproduces_the_cambridge_archive() {
-        if skip_without_rgpot_kernels("copper_gold_reproduces_the_cambridge_archive") {
-            return;
-        }
         // Cambridge Cluster Database CuAu_38, energies from the file headers.
         // The same Cleri–Rosato table hits every composition in that archive
         // to better than 1e-8; these five lock the pure limits and a mix.

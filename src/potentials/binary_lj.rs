@@ -92,16 +92,6 @@ impl BinaryLennardJones {
         self.n_a + self.n_b
     }
 
-    fn pair_params(&self, i: usize, j: usize) -> (f64, f64) {
-        let a_i = i < self.n_a;
-        let a_j = j < self.n_a;
-        match (a_i, a_j) {
-            (true, true) => (self.epsilon_aa, self.sigma_aa),
-            (false, false) => (self.epsilon_bb, self.sigma_bb),
-            _ => (self.epsilon_ab, self.sigma_ab),
-        }
-    }
-
     /// Energy and Cartesian gradient in one pair pass.
     pub fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
         let n = self.n_points();
@@ -127,34 +117,71 @@ impl BinaryLennardJones {
 
     /// The pair sum used when no kernel is installed.
     fn local_value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
-        let n = self.n_points();
-        let mut energy = 0.0;
-        let mut gradient = Array1::zeros(x.len());
-        for i in 0..n {
-            for j in (i + 1)..n {
-                let d = [
-                    x[3 * i] - x[3 * j],
-                    x[3 * i + 1] - x[3 * j + 1],
-                    x[3 * i + 2] - x[3 * j + 2],
-                ];
-                let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-                if r2 <= 0.0 {
-                    continue;
-                }
-                let (eps, sigma) = self.pair_params(i, j);
-                let a = (sigma * sigma) / r2;
-                let a3 = a * a * a;
-                let a6 = a3 * a3;
-                energy += 4.0 * eps * (a6 - a3);
-                let coef = 4.0 * eps * (-12.0 * a6 + 6.0 * a3) / r2;
-                for k in 0..3 {
-                    gradient[3 * i + k] += coef * d[k];
-                    gradient[3 * j + k] -= coef * d[k];
-                }
+        let positions = x.as_slice().map(Vec::from).unwrap_or_else(|| x.to_vec());
+        let mut gradient = vec![0.0; positions.len()];
+        let energy = builtin_binary_lj(
+            self.n_a,
+            [self.epsilon_aa, self.epsilon_ab, self.epsilon_bb],
+            [self.sigma_aa, self.sigma_ab, self.sigma_bb],
+            0.0,
+            &positions,
+            &mut gradient,
+        );
+        (energy, Array1::from(gradient))
+    }
+}
+
+/// Binary Lennard-Jones kernel used when the linked pair crate is absent.
+///
+/// `eps` and `sig` are AA, AB, BB. A cutoff that is not positive keeps
+/// every pair with a positive squared separation. A coincidence adds
+/// nothing: the separation has no direction, and the same walk is what
+/// the one-component pair loop does.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn builtin_binary_lj(
+    n_a: usize,
+    eps: [f64; 3],
+    sig: [f64; 3],
+    cutoff: f64,
+    positions: &[f64],
+    gradient: &mut [f64],
+) -> f64 {
+    let n = positions.len() / 3;
+    for slot in gradient.iter_mut().take(3 * n) {
+        *slot = 0.0;
+    }
+    let cutoff2 = cutoff * cutoff;
+    let mut energy = 0.0;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let d = [
+                positions[3 * i] - positions[3 * j],
+                positions[3 * i + 1] - positions[3 * j + 1],
+                positions[3 * i + 2] - positions[3 * j + 2],
+            ];
+            let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+            if r2 <= 0.0 || (cutoff > 0.0 && r2 >= cutoff2) {
+                continue;
+            }
+            let index = if i < n_a && j < n_a {
+                0
+            } else if i >= n_a && j >= n_a {
+                2
+            } else {
+                1
+            };
+            let a = (sig[index] * sig[index]) / r2;
+            let a3 = a * a * a;
+            let a6 = a3 * a3;
+            energy += 4.0 * eps[index] * (a6 - a3);
+            let coef = 4.0 * eps[index] * (-12.0 * a6 + 6.0 * a3) / r2;
+            for k in 0..3 {
+                gradient[3 * i + k] += coef * d[k];
+                gradient[3 * j + k] -= coef * d[k];
             }
         }
-        (energy, gradient)
     }
+    energy
 }
 
 impl Objective<f64> for BinaryLennardJones {

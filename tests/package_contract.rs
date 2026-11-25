@@ -382,11 +382,16 @@ fn extracted_crate_runs_its_test_suite() {
         .current_dir(&unpacked)
         .output()
         .expect("cargo test --locked --lib potentials:: in extracted .crate");
+    let lib_stdout = String::from_utf8_lossy(&lib_output.stdout);
+    let lib_stderr = String::from_utf8_lossy(&lib_output.stderr);
     assert!(
         lib_output.status.success(),
-        "extracted .crate lib test harness failed:\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&lib_output.stdout),
-        String::from_utf8_lossy(&lib_output.stderr)
+        "extracted .crate lib test harness failed:\nstdout:\n{lib_stdout}\nstderr:\n{lib_stderr}"
+    );
+    assert!(
+        lib_stdout
+            .contains("potentials::gupta::tests::a_zinc_dimer_at_r0_is_the_closed_form ... ok"),
+        "packaged crate did not run a Gupta energy:\n{lib_stdout}\nstderr:\n{lib_stderr}"
     );
 
     // Linking all ~250 anneal-core test/example binaries at once takes ~20 GiB,
