@@ -52,6 +52,41 @@ const EVIDENCE_ONLY_WORK_KIND: anneal_core::cooperative_search::ledger::ChargeKi
     anneal_core::cooperative_search::ledger::ChargeKind::BasinEscape;
 
 #[cfg(feature = "bank-rpc")]
+fn print_cooperative_ledger(run: &anneal_core::cooperative_search::CooperativeRun) {
+    use anneal_core::cooperative_search::ledger::ChargeKind;
+
+    let kinds = [
+        ("local_proposal", ChargeKind::LocalProposal),
+        ("remote_proposal", ChargeKind::RemoteProposal),
+        ("descriptor_evaluation", ChargeKind::DescriptorEvaluation),
+        ("accepted_quench", ChargeKind::AcceptedQuench),
+        ("rejected_quench", ChargeKind::RejectedQuench),
+        ("fresh_validation", ChargeKind::FreshValidation),
+        ("retry", ChargeKind::Retry),
+        ("rpc_fallback", ChargeKind::RpcFallback),
+        ("auxiliary_evaluation", ChargeKind::AuxiliaryEvaluation),
+        ("basin_escape", ChargeKind::BasinEscape),
+        ("saddle_ride", ChargeKind::SaddleRide),
+    ];
+    let mut named_sum = 0_u64;
+    print!("COOPERATIVE_LEDGER");
+    for (name, kind) in kinds {
+        let summary = run.ledger().charge_summary(kind);
+        named_sum = named_sum
+            .checked_add(summary.charged_calls)
+            .expect("cooperative charge sum must fit u64");
+        print!(
+            " {name}_events={} {name}_calls={}",
+            summary.events, summary.charged_calls
+        );
+    }
+    println!(
+        " named_sum={named_sum} ensemble_total={}",
+        run.ledger().ensemble_total()
+    );
+}
+
+#[cfg(feature = "bank-rpc")]
 fn unsettled_objective_calls(charged: usize, recorded: usize) -> Option<u64> {
     let remainder = charged
         .checked_sub(recorded)
@@ -6701,6 +6736,10 @@ fn run_capnp_catalog(
     if open_epoch != 0 {
         let _ = population_call(cooperative.abstain_population(replica, 0));
     }
+    cooperative
+        .flush(replica)
+        .expect("terminal cooperative ledger flush must succeed");
+    print_cooperative_ledger(&cooperative);
     #[cfg(feature = "bank-rpc")]
     {
         brain_stop.store(true, std::sync::atomic::Ordering::Relaxed);
