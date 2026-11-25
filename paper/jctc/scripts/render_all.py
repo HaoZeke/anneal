@@ -30,7 +30,7 @@ STEPS = (
     ("fig_si_water.py", ("figs/si_water.pdf",)),
     ("fig_landscapes.py", ("figs/landscapes.pdf",)),
     ("fig_disconnectivity.py", ("figs/disconnectivity.pdf",)),
-    ("toc_graphic.py", ("figs/toc_graphic.pdf",)),
+    ("toc_graphic.py", ("figs/toc-graphic.pdf",)),
     ("fig_si_panels.py", ("figs",)),
 )
 
