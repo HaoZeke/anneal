@@ -158,6 +158,8 @@ KNOWN_GAPS = {
     "paper/jctc/data/tip4p_gmin/rows.csv": "revision recorded; no host column",
     "bench/gad-published/summary.csv": "revision recorded; no host column",
     "bench/morse-panel/seeds.csv": "revision and host unrecorded (no revision or host column)",
+    "bench/depth-posterior-ablation/results.csv": "revision unrecorded (no revision column)",
+    "results/size-tiered-selection.csv": "revision and host unrecorded (no revision or host column)",
     "bench/morse-h2h/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "bench/fp-fingerprint/rows.csv": "revision and host unrecorded (no revision or host column)",
     "bench/tip4p-h2h/rows-h2h-r2.csv": "revision recorded; no host column",
@@ -7445,6 +7447,218 @@ def printed_harnesses(audit: Audit) -> None:
                      "ancestor or qualified external revision", "ancestor or qualified external revision")
 
 
+def figure_source_scripts(audit: Audit, root: Path = ROOT) -> None:
+    """Every effective receipt names the sha256 of its current source."""
+    receipt = "paper/jctc/FIGURE-SOURCE.tsv"
+    with (root / receipt).open(newline="") as handle:
+        rows = list(csv.DictReader(handle, delimiter="\t"))
+    updates_path = root / "paper/jctc/FIGURE-SOURCE-updates.tsv"
+    if updates_path.is_file():
+        by_key = {(row["path"], row["kind"]): row for row in rows}
+        with updates_path.open(newline="") as handle:
+            for update in csv.DictReader(handle, delimiter="\t"):
+                key = (update["path"], update["kind"])
+                if update["status"] == "superseded":
+                    by_key.pop(key, None)
+                elif update["status"] == "active":
+                    by_key[key] = {
+                        field: update[field]
+                        for field in ("path", "kind", "source_sha256")
+                    }
+                else:
+                    audit.record(False, str(updates_path.relative_to(root)),
+                                 f"{key} update status", "active or superseded",
+                                 update["status"])
+        rows = list(by_key.values())
+    for row in rows:
+        path = row["path"]
+        source = root / path
+        digest = hashlib.sha256(source.read_bytes()).hexdigest() if source.is_file() else "missing"
+        audit.record(digest == row["source_sha256"], receipt,
+                     f"{path} current source sha256",
+                     row["source_sha256"], digest)
+    if root == ROOT:
+        audit.cell(receipt, "effective figure data rows", "276",
+                   float(sum(row["kind"] == "data" for row in rows)))
+
+
+def bibliography_keys(audit: Audit) -> None:
+    """Require every citation in the JCTC TeX sources to resolve in a bibliography the sources load."""
+    cited: set[str] = set()
+    loaded: set[str] = set()
+    for source in sorted((ROOT / "paper/jctc").glob("*.tex")):
+        path = source.relative_to(ROOT).as_posix()
+        text = re.sub(r"(?m)(?<!\\)%.*$", "", audit.text(path))
+        for names in re.findall(r"\\bibliography\{([^}]*)\}", text):
+            loaded.update(f"paper/jctc/{name.strip()}.bib" for name in names.split(","))
+        for group in re.findall(
+            r"\\(?:[Cc]ite(?:alp|alt|author|num|p|t|yearpar|year)?|nocite)\*?\s*(?:\[[^\]]*\]\s*)*\{([^{}]+)\}",
+            text,
+            re.DOTALL,
+        ):
+            cited.update(
+                key.strip()
+                for key in group.split(",")
+                if key.strip() and key.strip() != "*"
+            )
+
+    available = {
+        key
+        for name in sorted(loaded | {"paper/jctc/refs.bib"})
+        for key in re.findall(r"(?mi)^@\w+\s*\{\s*([^,\s]+)\s*,", audit.text(name))
+    }
+    missing = sorted(cited - available)
+    audit.record(
+        not missing,
+        "paper/jctc/refs.bib",
+        "every \\cite key resolves in the paper bibliography",
+        f"{len(cited)} cited keys resolve",
+        ", ".join(missing) if missing else f"{len(cited)} cited keys resolve",
+    )
+
+
+CONVERSION_LITERAL = re.compile(
+    r"(?<![\d.])(?:27\.211_?[0-9]|0\.529_?1[0-9_]*|1\.889_?7[0-9_]*|4\.184(?![\d]))"
+)
+
+
+def conversion_literals(audit: Audit) -> None:
+    """Hartree, Bohr, and kilocalorie conversions come from a library, never a typed literal."""
+    listed = git("ls-files", "src", "examples", "tests", "scripts").stdout.splitlines()
+    for path in sorted(name for name in listed if name.endswith((".rs", ".py", ".md"))):
+        found = sorted({match.group(0) for match in CONVERSION_LITERAL.finditer(audit.text(path))})
+        audit.record(not found, path, "no typed Hartree, Bohr, or kilocalorie conversion literal",
+                     "none", " ".join(found) or "none")
+
+
+def own_references(audit: Audit) -> None:
+    """Every \\ref of a document names a label of that document."""
+    labels = load_script("cross_labels", "paper/jctc/scripts/cross_labels.py")
+    for path, document in ((TEX, "manuscript"), (SI, "si")):
+        own = labels.labels(document)
+        loose = sorted({m for m in re.findall(r"\\ref\{([^}]*)\}", labels.uncomment(audit.text(path)))
+                        if m not in own})
+        audit.record(not loose, path, "every \\ref names a label of its own document", "all defined",
+                     " ".join(loose) or "all defined")
+
+
+def selection_tables(audit: Audit) -> None:
+    """The arm-selection tables beside the two result files of tab:ablation.
+
+    The depth-posterior README takes the median over hits; the size-tiered
+    table counts a miss as the budget."""
+    budgets = {38: 400000, 55: 1000000, 75: 4000000, 98: 4000000, 104: 4000000}
+    first = audit.rows("bench/depth-posterior-ablation/results.csv")
+    second = audit.rows("results/size-tiered-selection.csv")
+    for path, head, rows, size_key, calls_key, hits_only in (
+            ("bench/depth-posterior-ablation/README.md", "Size | Arm", first, "Size", "force_calls_to_hit", True),
+            ("results/size-tiered-selection.md", "Cluster | Arm", second, "Cluster", "calls_to_hit", False)):
+        for line, row in md_table(audit, path, head):
+            size = int(row[size_key].removeprefix("LJ"))
+            if rows is first:
+                g = pick(rows, system=f"lj{size}", arm=row["Arm"])
+            else:
+                g = pick(rows, n=str(size), arm=row["Arm"])
+            calls = [float(r[calls_key]) if r["hit"] == "1" else float(budgets[size]) for r in g
+                     if r["hit"] == "1" or not hits_only]
+            where = f"{path}:{line} lj{size} {row['Arm']}"
+            audit.cell(where, "hits", row["Hits"], frac(g))
+            audit.cell(where, "median calls", row["Median calls"], median(calls))
+            audit.cell(where, "IQR", row["IQR"], iqr(calls))
+            audit.cell(where, "wall sum", row["Wall sum (s)"], sum(float(r["wall_s"]) for r in g))
+
+def gmin_panel_drivers(audit: Audit) -> None:
+    """The driver settings of the GMIN panel, read from the driver sources."""
+    metal = audit.text("examples/h2h_metal.rs")
+    morse = audit.text("examples/h2h_morse.rs")
+    stride = re.search(r"cfg\.basin_stride = .*?\.unwrap_or\((\d+)\)", metal, re.S)
+    audit.cell("examples/h2h_metal.rs", "basin stride", "8", float(stride.group(1)) if stride else None)
+    copper = re.search(r'"au55" => \(\s*55,\s*[-\d.]+,\s*[\d_]+,\s*Kind::CopperGold \{ n_copper: (\d+) \}', metal)
+    audit.cell("examples/h2h_metal.rs", "Au55 copper atoms", "0", float(copper.group(1)) if copper else None)
+    audit.record("second_neighbour_energy() <" not in morse, "examples/h2h_morse.rs",
+                 "long-ranged threshold gate is removed", "absent",
+                 "absent" if "second_neighbour_energy() <" not in morse else "present")
+
+TEMPLATE_SWITCHES = ("prior_reseed", "prior_growth", "prior_core", "prior_motif")
+
+
+def reads_switch(revision: str, name: str) -> bool:
+    """Some file under src at the revision reads ``cfg.<name>`` as a whole word.
+
+    git grep -E leaves the word boundary to the platform regex library, and
+    the BSD one has no \\b. The pattern is fixed text and the match is made here."""
+    hits = git_bytes("grep", "-a", "-h", "-F", f"cfg.{name}", revision, "--", "src").decode(errors="replace")
+    word = re.compile(rf"cfg\.{name}\b")
+    return any(word.search(line) for line in hits.splitlines())
+
+def prior_switches(audit: Audit) -> None:
+    """The current method exposes only prior_soap and rejects retired controls."""
+    pattern = "|".join(rf"cfg\.{name}\b" for name in TEMPLATE_SWITCHES)
+    current = [str(path.relative_to(ROOT)) for path in (ROOT / "src").rglob("*.rs")
+               if re.search(pattern, path.read_text(encoding="utf-8"))]
+    audit.record(not current, "src", "no current source reads the four template switches", "none",
+                 " ".join(current) or "none")
+    config = audit.text("src/methods/cluster_hopping/config.rs")
+    for name in TEMPLATE_SWITCHES:
+        audit.record(f'"{name}"' in config, "src/methods/cluster_hopping/config.rs",
+                     f"Config rejects retired {name}", name,
+                     name if f'"{name}"' in config else "absent")
+    removed = git("merge-base", "--is-ancestor", "1c1b1238", "HEAD").returncode == 0
+    audit.record(removed, PAPER, "the template removal is in this history", "1c1b1238", "1c1b1238" if removed else "absent")
+    for revision in ("c2de652d", "e3ed7dad", "9a30f319", "beb89163"):
+        found = sorted({name for name in TEMPLATE_SWITCHES if reads_switch(revision, name)})
+        audit.record(len(found) == len(TEMPLATE_SWITCHES), PAPER, f"revision {revision} reads the template switches",
+                     " ".join(sorted(TEMPLATE_SWITCHES)), " ".join(found) or "none")
+    has = git("grep", "-q", "prior_core", "a24ba760", "--", "src").returncode == 0
+    audit.record(not has, PAPER, "revision a24ba760 predates the switches", "none", "prior_core" if has else "none")
+
+def method_definitions(audit: Audit) -> None:
+    """The constants of the quench, the climb, and the descriptor moves, as the source sets them."""
+    sources = {
+        "src/methods/warm_lbfgs.rs": ("max_pairs: 8,", "gtol: 1e-6,", "armijo: 1e-4,", "curvature: 0.9,",
+                                      "max_line_evals: 20,", "self.inner.norm = GradNorm::Infinity;"),
+        "src/methods/cluster_hopping/config.rs": ("screen_steps: 25,", "cfg.relax_steps = 1000;",
+                                                 "escape_lanczos_steps: 16,", "escape_overshoot: 1.5,",
+                                                 "escape_max_climb: 24,", "escape_stall_patience: 5_000,"),
+        "src/methods/activation.rs": ("perp_steps: 3,", "perp_rate: 0.02,", "refresh: 3,"),
+        "src/methods/cluster_hopping.rs": ("const FINISH_ROUNDS: usize = 8;", "const STEEP_WELL_PER_ATOM: f64 = 64.0;",
+                                           "factor.sqrt().clamp(1.0, 16.0)", "1e-10 * (1.0 + out.0.abs())"),
+        "src/soap.rs": ("const FIVEFOLD_AXIS: f64 = 1.40;", "const FIVEFOLD_GATE: f64 = 1.15;",
+                        "const FIVEFOLD_MIN_AXES: usize = 2;", "const PENTAGON_CAP: f64 = 0.75;",
+                        "const RECON_LO: f64 = 0.89;", "const RECON_HI: f64 = 1.00;", "const NU3_DEFECT: f64 = 0.05;",
+                        "concentrate_residual(&mut dr, 5);", "tikhonov_jtj(&j, dp.view(), 1e-3)",
+                        "0.5 * (1.0 + libm::cos(PI * r / rcut))", "libm::exp(-0.5 * (r / (rcut / 3.0)).powi(2))"),
+        "src/methods/cluster_hopping/moves.rs": ("n_max: 3,\n                    l_max: 6,",
+                                                "crate::soap::step_away_fivefold(x, *rmsd, rng)",
+                                                "crate::soap::step_away_fivefold_measured(x, *rmsd)"),
+    }
+    for path, fragments in sources.items():
+        text = audit.text(path)
+        for fragment in fragments:
+            found = fragment.replace("\\n", "\n") in text
+            audit.record(found, path, "a constant of the method definitions", fragment, fragment if found else "absent")
+    soap = audit.text("src/soap.rs")
+    far = re.search(r"for &\(_, v\) in far\.iter\(\)\.take\((\d+)\.min\(n\)\)", soap)
+    audit.cell("src/soap.rs", "farthest atoms that seed fivefold axes", "12", float(far.group(1)) if far else float("nan"))
+
+def au55_superseded(audit: Audit) -> None:
+    """Each row of rows.csv that rows-for-cluster.csv replaces is listed, and no other row is."""
+    old = audit.rows("bench/ase-au55/rows.csv")
+    new = {
+        (r["arm"], r["seed"]): r
+        for r in audit.rows("bench/ase-au55/rows-for-cluster.csv")
+        if r["code_revision"].startswith("fc1af066")
+    }
+    listed = audit.rows("bench/ase-au55/superseded.csv")
+    want = {(r["system"], r["arm"], r["seed"], r["code_revision"], "bench/ase-au55/rows-for-cluster.csv",
+             new[(r["arm"], r["seed"])]["code_revision"]) for r in old
+            if r["arm"] != "recommended" and not r["code_revision"].startswith("1ce3ab64")}
+    got = {(r["system"], r["arm"], r["seed"], r["code_revision"], r["superseded_by_file"], r["superseded_by_revision"])
+           for r in listed if r["host"] == "bench"}
+    audit.record(got == want, "bench/ase-au55/superseded.csv", "the superseded rows are the replaced ones",
+                 f"{len(want)} rows", f"{len(got)} rows")
+
+
 def run(report: bool = False, write_map: bool = False, pre_submission: bool = False) -> int:
     problems = unauditable()
     if problems:
@@ -7465,7 +7679,9 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
         g3_session, no_move_choice_claim,
         reproduction_records, sutton_chen, crest_equal, crest_equal_bench,
         append_only_rows, tip4p_unscored, tip4p_r2_rows, pending_text, citation_metadata,
-                  cap_turn_campaign):
+                  figure_source_scripts, bibliography_keys, conversion_literals,
+                  own_references, selection_tables, gmin_panel_drivers, prior_switches,
+                  method_definitions, au55_superseded, cap_turn_campaign):
         check(audit)
     if write_map:
         (ROOT / REVISION_MAP).write_text(revision_map_text(revision_map_rows(audit)))

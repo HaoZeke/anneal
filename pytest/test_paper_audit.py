@@ -71,6 +71,15 @@ CHECKS = (
     audit_mod.append_only_rows,
     audit_mod.pending_text,
     audit_mod.citation_metadata,
+    audit_mod.figure_source_scripts,
+    audit_mod.bibliography_keys,
+    audit_mod.conversion_literals,
+    audit_mod.own_references,
+    audit_mod.selection_tables,
+    audit_mod.gmin_panel_drivers,
+    audit_mod.prior_switches,
+    audit_mod.method_definitions,
+    audit_mod.au55_superseded,
     audit_mod.tip4p_unscored,
     audit_mod.tip4p_r2_rows,
     audit_mod.rerun_claims,
@@ -1413,7 +1422,8 @@ def test_an_sc_n12_gmin_rerun_without_its_seed_rows_is_reported():
     audit_mod.head_to_head(audit)
     readme = "bench/metal-cluster-h2h/sc-n12/README.md"
     assert sorted((r[1], r[2], r[3], r[4]) for r in audit.drifts()) == sorted([
-        ("bench/metal-cluster-h2h/sc-n12/pvalues.csv sc96-55", "per-seed rows", "12", "12 0"),
+        ("bench/metal-cluster-h2h/sc-n12/results.csv sc96-55 gmin 00000000", "per-seed rows", "12", "0"),
+            ("bench/metal-cluster-h2h/sc-n12/pvalues.csv sc96-55", "per-seed rows", "12", "12 0"),
         (f"{readme}:131 sc96-55 a50f4b02", "latest GMIN harness", "a50f4b02", "00000000"),
         (f"{readme}:131 sc96-55 a50f4b02", "Calls ahead", "anneal, n.s.", "tie"),
         (f"{readme}:131 sc96-55 a50f4b02", "Wall ahead", "GMIN", "tie"),
@@ -2982,6 +2992,80 @@ def test_withholding_narration_in_manuscript_or_si_fails():
         audit.text_cache[doc] = audit.text(doc) + "\nThese hit counts are not quoted.\n"
         audit_mod.sutton_chen(audit)
         assert any(row[1] == doc and "withholding narration" in row[2] for row in audit.drifts())
+
+
+def test_a_cite_key_missing_from_every_loaded_bibliography_fails():
+    audit = audit_mod.Audit()
+    audit.text_cache[audit_mod.TEX] = audit.text(audit_mod.TEX) + "\n\\cite{noSuchKey2026}\n"
+    audit_mod.bibliography_keys(audit)
+    assert [row for row in audit.drifts() if "noSuchKey2026" in row[4]]
+
+
+def test_a_cite_key_of_the_second_loaded_bibliography_resolves():
+    audit = audit_mod.Audit()
+    audit_mod.bibliography_keys(audit)
+    assert not audit.drifts()
+
+
+def test_a_changed_figure_source_fails_its_receipt(tmp_path):
+    (tmp_path / "paper/jctc").mkdir(parents=True)
+    (tmp_path / "paper/jctc/fig.py").write_text("print(1)\n")
+    (tmp_path / "paper/jctc/FIGURE-SOURCE.tsv").write_text(
+        "path\tsource_sha256\tkind\npaper/jctc/fig.py\t" + "0" * 64 + "\tscript\n")
+    audit = audit_mod.Audit()
+    audit_mod.figure_source_scripts(audit, tmp_path)
+    assert [row for row in audit.drifts() if "paper/jctc/fig.py" in row[2]]
+
+
+def test_an_update_row_replaces_the_receipt_hash_of_a_figure_source(tmp_path):
+    source = "print(1)\n"
+    digest = audit_mod.hashlib.sha256(source.encode()).hexdigest()
+    (tmp_path / "paper/jctc").mkdir(parents=True)
+    (tmp_path / "paper/jctc/fig.py").write_text(source)
+    (tmp_path / "paper/jctc/FIGURE-SOURCE.tsv").write_text(
+        "path\tsource_sha256\tkind\npaper/jctc/fig.py\t" + "0" * 64 + "\tscript\n")
+    (tmp_path / "paper/jctc/FIGURE-SOURCE-updates.tsv").write_text(
+        "path\tsource_sha256\tkind\tstatus\tupdate_reason\n"
+        f"paper/jctc/fig.py\t{digest}\tscript\tactive\tnew source\n")
+    audit = audit_mod.Audit()
+    audit_mod.figure_source_scripts(audit, tmp_path)
+    assert not audit.drifts()
+
+
+def test_a_typed_hartree_literal_in_source_fails():
+    audit = audit_mod.Audit()
+    path = "scripts/paired_stats.py"
+    audit.text_cache[path] = audit.text(path) + "\nHARTREE = 27.2114\n"
+    audit_mod.conversion_literals(audit)
+    assert [row for row in audit.drifts() if row[1] == path]
+
+
+def test_a_selection_table_cell_that_differs_from_its_rows_fails():
+    audit = audit_mod.Audit()
+    path = "bench/depth-posterior-ablation/README.md"
+    text = audit.text(path)
+    row = next(line for line in text.splitlines() if line.startswith("| LJ"))
+    cells = row.split("|")
+    cells[3] = " 999/999 "
+    audit.text_cache[path] = text.replace(row, "|".join(cells))
+    audit_mod.selection_tables(audit)
+    assert [r for r in audit.drifts() if r[1].startswith(path)]
+
+
+def test_a_superseded_list_that_loses_a_row_fails():
+    audit = audit_mod.Audit()
+    rows = audit.rows("bench/ase-au55/superseded.csv")
+    audit.read["bench/ase-au55/superseded.csv"] = rows[1:]
+    audit_mod.au55_superseded(audit)
+    assert audit.drifts()
+
+
+def test_a_retired_switch_that_config_stops_rejecting_fails():
+    audit = audit_mod.Audit()
+    path = "src/methods/cluster_hopping/config.rs"
+    audit.text_cache[path] = audit.text(path).replace('"prior_core"', '"prior_x"')
+    audit_mod.prior_switches(audit)
+    assert [row for row in audit.drifts() if "prior_core" in row[2]]
 
 
 NUMPY_BLOCK = """

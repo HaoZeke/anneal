@@ -50,3 +50,10 @@ paper/jctc/scripts/lj75_gmin_table.py	9d79311438fef5eeaf540318a543f6322042ffed22
 paper/jctc/scripts/sketchmap_landscapes.py	c922e562b347d37a708739e583eaebc8eee0ec88076aadaf42be2dda20752a27	script	active	the source names commits this repository holds
 paper/jctc/scripts/system_visuals.py	52bcda5936a263f62def7a8ddfd71c2478e03cf4b5075e9e03f95152c589b7c2	script	active	the source names commits this repository holds
 paper/jctc/scripts/lj75_gmin_table.py	0901f1c738076a5bae51dd84c0eac81d4a081322279ce4d76b0d7bd0109f93a1	script	active	the source checks a commit id through scripts/revision_reach.py
+paper/jctc/scripts/fig_algorithm_stack.py	2b0e300d20594c83b086f046d1cd13b952492ab2065068536a6298774b2a2b35	script	active	supersedes the source hash after the merge of develop
+paper/jctc/scripts/fig_rec_arms.py	9f409e09cc882a77dd22d15dfba2e17f8159e3c2404010630286a597bf2ded51	script	active	supersedes the source hash after the merge of develop
+paper/jctc/scripts/fig_si_water.py	5b0ff57f152421c9dfa99a6a919b86db6ed85b5a2d9f04d0d05f5c6bf19d31cb	script	active	supersedes the source hash after the merge of develop
+paper/jctc/scripts/fig_systems.py	56f74d1842a9bf4ce7a01da54dd601b363b0643fcdfc503121f025f3ccdedf54	script	active	supersedes the source hash after the merge of develop
+paper/jctc/scripts/lj75_gmin_table.py	76e10548ecc0251bad39e87f1c519f965a10a44e8e118a8a54ac6851f0c5e2dd	script	active	supersedes the source hash after the merge of develop
+paper/jctc/scripts/system_visuals.py	002a9b5a30f54c69c686cce94460a205f062340eec56d3076a5835a90f47878b	script	active	supersedes the source hash after the merge of develop
+paper/jctc/data/system_visuals/provenance.txt	040ba82d15c30580568992e860842827ca65301c7dad73a5dfa9d81ac1891a69	data	active	supersedes the source hash after the merge of develop
