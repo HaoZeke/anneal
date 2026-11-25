@@ -27,9 +27,10 @@
 //! The LJ98 audit at hop 2 runs out of its half of the remaining budget on
 //! the refusal farthest from the bar, 196 calls into its 777 steps, with
 //! one more refusal waiting. An audit cut short leaves both deferred, and
-//! the walk offers them again at hop 3 with 150 of the 300 calls left. That
-//! relaxation is cut too, so LJ98 runs one more capped relaxation, 14 where
-//! it ran 13, at the same best energy, hops, converged count and spend.
+//! the walk offers them again at hop 3 with 150 of the 300 calls left. The
+//! cut one waits for more than its 196 calls, so the other is relaxed and
+//! cut at 150. LJ98 runs one more capped relaxation, 14 where it ran 13,
+//! at the same best energy, hops, converged count and spend.
 
 use anneal_core::methods::cluster_hopping::{Config, Ledger};
 use anneal_core::methods::cluster_search::search;
