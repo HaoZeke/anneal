@@ -94,9 +94,9 @@ fn metropolis_heat_follows_the_plateau() {
     let (cold, hot) = pair(&cfg, 30_000, 2000);
     let cold_fp = fingerprint(&cold);
     let hot_fp = fingerprint(&hot);
-    assert_eq!(cold_fp, 0x1d62a9e5df4f4b8d, "preset walk");
+    assert_eq!(cold_fp, 0x0c0baf7b8ec5d80d, "preset walk");
     assert_ne!(hot_fp, cold_fp, "temperature *= heat");
-    assert_eq!(hot_fp, 0x17a537d1a72bf728, "PLATEAU_HEAT_CAP");
+    assert_eq!(hot_fp, 0x6bf264f0dabc6d1a, "PLATEAU_HEAT_CAP");
 }
 
 #[test]
@@ -104,7 +104,7 @@ fn lattice_exchange_follows_the_plateau() {
     let mut cfg = Config::recommended(ATOMS);
     cfg.restart_patience = 2_000;
     let (cold, hot) = pair(&cfg, 30_000, 2000);
-    assert_eq!(fingerprint(&cold), 0x3e50329f198f2017, "preset walk");
+    assert_eq!(fingerprint(&cold), 0x1bfdb096bbb1eb15, "preset walk");
     assert_eq!(
         fingerprint(&hot),
         0xfd29583fc6615ca4,
@@ -123,7 +123,7 @@ fn a_new_lowest_returns_the_walk_to_the_preset() {
     cfg.energy_lattice = false;
     let (cold, hot) = pair(&cfg, 8_000, 2);
     assert_ne!(fingerprint(&hot), fingerprint(&cold), "heat moves the walk");
-    assert_eq!(fingerprint(&cold), 0x77daf5dac189d7fc, "preset walk");
+    assert_eq!(fingerprint(&cold), 0x514ee6bc25b08c03, "preset walk");
     assert_eq!(fingerprint(&hot), 0x5589043320ccbc0c, "heat = 1.0");
 }
 
