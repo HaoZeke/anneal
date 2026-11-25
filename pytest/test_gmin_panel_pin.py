@@ -652,4 +652,3 @@ def test_gmin_builders_work_without_gnu_sha256sum_or_nproc(
         cmd.append(str(lib))
     subprocess.run(cmd, cwd=repo, env=env, check=True)
     assert any((work / "bin").iterdir())
-

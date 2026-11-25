@@ -2969,4 +2969,3 @@ def test_machine_provenance_darwin_fallback(tmp_path, monkeypatch):
     # Explicit non-default missing paths still fail instead of querying the host.
     with pytest.raises(RuntimeError, match="machine-id"):
         mp.machine_provenance(tmp_path / "other-id", tmp_path / "other-uuid", tmp_path / "other-cpu")
-
