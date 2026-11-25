@@ -188,7 +188,7 @@ fn read_closed(
     let radius = rms_radius(x, n);
     let closed = if symmetric_only {
         let test = OperationTest::new(x, n, classes);
-        closed_group(&operations, radius, tolerance, cap, |g| {
+        closed_group_pairwise(&operations, radius, tolerance, cap, |g| {
             test.deviation(g, tolerance).is_some_and(|d| d < tolerance)
         })
     } else {
@@ -326,6 +326,176 @@ fn closed_group(
         t *= 2.0;
     }
     None
+}
+
+/// [`closed_group`] for a set that is to be closed under products and
+/// inverses of its own elements, and not only under multiplication by the
+/// generators.
+///
+/// The set `keep` grows through is closed under the generators and not
+/// under its own products: a product of two elements that each deviate by
+/// less than the tolerance can deviate by more, and one that lands between
+/// elements is neither an element nor refused. At each tolerance the closure
+/// is tried at, the largest group that the operations of any of the
+/// generators generate and that [`grow`] closes without a product `keep`
+/// refuses is kept. When no such group exists the whole closure is grown and
+/// then reduced by [`reduce_to_group`] with nothing refused, so that what is
+/// left closes among itself. A closure that passes `cap` when grown is
+/// treated as one that passed it.
+fn closed_group_pairwise(
+    generators: &[Rot],
+    radius: f64,
+    tolerance: f64,
+    cap: usize,
+    mut keep: impl FnMut(&Rot) -> bool,
+) -> Option<(Vec<Rot>, f64)> {
+    let widest = 2.0 * radius;
+    let mut t = tolerance;
+    loop {
+        let mut tested: Vec<(Rot, bool)> = Vec::new();
+        let mut asked = |p: &Rot| {
+            if let Some((_, held)) = tested
+                .iter()
+                .find(|(q, _)| operation_gap(q, p, radius) <= t)
+            {
+                return *held;
+            }
+            let held = keep(p);
+            tested.push((*p, held));
+            held
+        };
+        if let Some(found) = close_group_where(generators, radius, t, cap, &mut asked) {
+            let k = generators.len();
+            let mut best: Option<Vec<Rot>> = None;
+            for mask in (1usize..(1 << k)).rev() {
+                let subset: Vec<Rot> = (0..k)
+                    .filter(|i| mask >> i & 1 == 1)
+                    .map(|i| generators[i])
+                    .collect();
+                let grown = if mask == (1 << k) - 1 {
+                    Some(found.clone())
+                } else {
+                    close_group_where(&subset, radius, t, cap, &mut asked)
+                };
+                if let Some((set, false)) =
+                    grown.and_then(|set| grow(set, radius, t, cap, &mut asked))
+                    && best.as_ref().is_none_or(|b| set.len() > b.len())
+                {
+                    best = Some(set);
+                }
+            }
+            let settled = match best {
+                Some(set) => Some(set),
+                None => {
+                    let whole = if t > tolerance {
+                        reduce_to_group(found, radius, t, &mut asked)
+                    } else {
+                        found
+                    };
+                    settle(whole, radius, t, cap, &mut asked)
+                }
+            };
+            if let Some(set) = settled {
+                return Some((set, t));
+            }
+        }
+        if tolerance <= 0.0 {
+            return None;
+        }
+        t = if t == tolerance {
+            2.0 * tolerance
+        } else {
+            2.0 * t
+        };
+        if t > widest {
+            return None;
+        }
+    }
+}
+
+/// `set` with every product and inverse of its elements that `keep` accepts
+/// added, until nothing is added; `None` when that passes `cap` elements.
+/// The flag is whether the grown set is open: some product of two elements
+/// is not within twice `tolerance` of an element, or some inverse not within
+/// `tolerance`. Every such product is one `keep` refuses, since an accepted
+/// one was added.
+fn grow(
+    mut set: Vec<Rot>,
+    radius: f64,
+    tolerance: f64,
+    cap: usize,
+    keep: &mut impl FnMut(&Rot) -> bool,
+) -> Option<(Vec<Rot>, bool)> {
+    loop {
+        let mut added = false;
+        let mut open = false;
+        let mut i = 0;
+        while i < set.len() {
+            let mut j = 0;
+            while j <= i {
+                for p in [mul(&set[i], &set[j]), mul(&set[j], &set[i])] {
+                    if set
+                        .iter()
+                        .any(|q| operation_gap(q, &p, radius) <= tolerance)
+                    {
+                        continue;
+                    }
+                    if keep(&p) {
+                        if set.len() >= cap {
+                            return None;
+                        }
+                        set.push(p);
+                        added = true;
+                    } else if !set
+                        .iter()
+                        .any(|q| operation_gap(q, &p, radius) <= 2.0 * tolerance)
+                    {
+                        open = true;
+                    }
+                }
+                j += 1;
+            }
+            let inverse = transpose(&set[i]);
+            if !set
+                .iter()
+                .any(|q| operation_gap(q, &inverse, radius) <= tolerance)
+            {
+                if keep(&inverse) {
+                    if set.len() >= cap {
+                        return None;
+                    }
+                    set.push(inverse);
+                    added = true;
+                } else {
+                    open = true;
+                }
+            }
+            i += 1;
+        }
+        if !added {
+            return Some((set, open));
+        }
+    }
+}
+
+/// `set` (identity first) made a group to within `tolerance`, with no
+/// product or inverse left to the operation test: every inverse is within
+/// `tolerance` of an element, and every product of two elements within
+/// twice `tolerance` of one. What [`grow`] cannot close is removed by
+/// [`reduce_to_group`] with nothing refused, so that the survivors close
+/// among themselves.
+fn settle(
+    set: Vec<Rot>,
+    radius: f64,
+    tolerance: f64,
+    cap: usize,
+    keep: &mut impl FnMut(&Rot) -> bool,
+) -> Option<Vec<Rot>> {
+    let (set, open) = grow(set, radius, tolerance, cap, keep)?;
+    if !open {
+        return Some(set);
+    }
+    Some(reduce_to_group(set, radius, tolerance, &mut |_| true))
 }
 
 /// The part of `set` (identity first) that is a group to within `tolerance`:
@@ -1862,6 +2032,18 @@ mod tests {
                     plain.iter().any(|g| deviation(g) >= tolerance),
                     "{amplitude}: the plain closure has only symmetries"
                 );
+            } else {
+                // At 0.3 the plain closure is past the cap at 0.5 and is
+                // closed again at twice that, where it is reduced to a
+                // group. What it keeps there is the elements that agree
+                // with one another, and all three of them are ones the core
+                // carries, so the plain reading has no word left for the
+                // symmetric one to drop. The symmetric reading keeps a group
+                // of five, every element carried. "Smaller than the plain
+                // group, which holds a word the core does not carry" cannot
+                // hold of a plain reading that is itself reduced.
+                assert!(plain.iter().all(|g| deviation(g) < tolerance));
+                assert!(kept.len() >= 2, "{amplitude}");
             }
             for g in &kept {
                 assert!(deviation(g) < tolerance, "{amplitude}: {}", deviation(g));
@@ -1932,6 +2114,90 @@ mod tests {
             }
         }
         assert!(fine > 0 && coarse > 0, "{fine} fine, {coarse} coarse");
+    }
+
+    /// `set` is open where two of its elements, or one and its inverse, give
+    /// an operation the core carries that is not within `2 t` of an element.
+    fn is_open(set: &[Rot], radius: f64, t: f64, carried: impl Fn(&Rot) -> bool) -> bool {
+        let near = |p: &Rot, within: f64| set.iter().any(|q| operation_gap(q, p, radius) <= within);
+        set.iter().any(|a| {
+            (!near(&transpose(a), t) && carried(&transpose(a)))
+                || set.iter().any(|b| {
+                    let p = mul(a, b);
+                    !near(&p, 2.0 * t) && carried(&p)
+                })
+        })
+    }
+
+    /// What the symmetric reading keeps is closed under its own products
+    /// and inverses, with nothing left to "the core does not carry it": a
+    /// product of two kept elements is within twice the tolerance of a kept
+    /// element, and the inverse of each is within the tolerance of one.
+    /// Grown through the generators alone, the same operations leave sets
+    /// that are open, some of them by a product the core does carry, and
+    /// the settled set is closed on the structures where they are.
+    #[test]
+    fn the_symmetric_reading_is_closed_under_its_own_products_and_inverses() {
+        let (mut total, mut open_before, mut checked) = (0, 0, 0);
+        for (amplitude, tolerance) in [
+            (0.05, 0.15),
+            (0.1, 0.2),
+            (0.15, 0.25),
+            (0.2, 0.3),
+            (0.25, 0.4),
+            (0.3, 0.5),
+        ] {
+            for seed in 0..12u64 {
+                let x = jitter_seeded(&icosahedron(1.0), amplitude, seed);
+                let n = x.len() / 3;
+                let radius = rms_radius(x.view(), n);
+                let Some((elements, t, generators)) =
+                    read_closed(x.view(), n, None, tolerance, true)
+                else {
+                    continue;
+                };
+                total += 1;
+                let test = OperationTest::new(x.view(), n, None);
+                let carried = |g: &Rot| test.deviation(g, tolerance).is_some_and(|d| d < tolerance);
+                assert_eq!(
+                    elements[0],
+                    [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+                );
+                assert!(elements.len() <= LARGEST_POLYHEDRAL_GROUP);
+                assert!(!is_open(&elements, radius, t, |_| true));
+                assert_group(&elements, radius, t, |_| true);
+                checked += elements.len();
+                let cap = (4 * generators.len()).max(LARGEST_POLYHEDRAL_GROUP);
+                let by_generators = close_group_where(&generators, radius, tolerance, cap, carried);
+                if let Some(old) = by_generators
+                    && is_open(&old, radius, tolerance, carried)
+                {
+                    open_before += 1;
+                }
+            }
+        }
+        assert!(
+            total > 0 && checked > total,
+            "{total} sets, {checked} elements"
+        );
+        assert!(
+            open_before > 0,
+            "no structure left a generator closure open"
+        );
+    }
+
+    /// A product the core does not carry leaves the largest group the
+    /// operations make that is closed without it, and not a smaller set:
+    /// a four-fold turn about z and a two-fold turn about x, where the core
+    /// carries only turns about z, are the four turns about z, closed.
+    #[test]
+    fn a_refused_product_leaves_the_largest_closed_group() {
+        let ops = [rotation([0.0, 0.0, 1.0], 4), rotation([1.0, 0.0, 0.0], 2)];
+        let about_z = |p: &Rot| (p[2][2] - 1.0).abs() < 1e-9;
+        let (set, t) = closed_group_pairwise(&ops, 1.0, 1e-6, 120, about_z).expect("closes");
+        assert_eq!(set.len(), 4);
+        assert_group(&set, 1.0, t, |_| true);
+        assert!(!is_open(&set, 1.0, t, |_| true));
     }
 
     /// A group read about a point the structure is not symmetric about acts
