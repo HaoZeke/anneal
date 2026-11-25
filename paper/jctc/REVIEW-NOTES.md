@@ -63,10 +63,11 @@ The push plan names one branch.
 The branch is `refs/heads/paper-integration-v1.28`.
 
 v1.19 27279cbb against v1.20 7d20cca2 differs in six paths.
-Those paths are `FIGURES.md` and `NOTES.md`.
+Those paths are `FIGURES.md` and the former working-notes file.
 They also include `REPLAY.txt` and `REPORT.md`.
 The other two are `REPRODUCE.md` and `si.tex`.
 
 ```
-a2ca5d9a and archive v1.20 7d20cca2 differ only in paper/jctc/NOTES.md and REPLAY.txt.
+a2ca5d9a and archive v1.20 7d20cca2 differ only in the former
+working-notes file and REPLAY.txt.
 ```
