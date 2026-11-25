@@ -478,8 +478,11 @@ def worker_molecule(args) -> int:
     )
     energy_calls = int(info.get("energy_calls") or 0)
     grad_calls = int(info.get("grad_calls") or 0)
-    charged = energy_calls + grad_calls
-    callback_calls = energy_calls + grad_calls
+    ledger = info.get("ledger") or {}
+    # One unit: a together energy-and-gradient return is one charge.
+    # The raw callback total stays in callback_calls.
+    charged = int(ledger.get("spent") or info.get("oracle_calls") or 0)
+    callback_calls = int(info.get("callback_calls") or (energy_calls + grad_calls))
     raw_error = info.get("error") or error or ""
     if raw_error and not error:
         print(str(raw_error), file=sys.stderr)
@@ -615,6 +618,17 @@ def run_guard(args, job: dict, binary: Path, ident: str, journal: Path, arm_meta
             },
         )
     else:
+        charge_names = (
+            "screen", "full", "check", "closure", "quench", "settle", "lattice", "reoccupy", "probe",
+        )
+        if "screen" in gate:
+            named = sum(int(gate[name]) for name in charge_names)
+            charged = int(gate["charged"])
+            if named != charged:
+                raise ValueError(
+                    f"{job['cell']} seed {job['seed']}: charged {charged} "
+                    f"is not the sum of the named counters {named}"
+                )
         write_result(
             dest,
             {

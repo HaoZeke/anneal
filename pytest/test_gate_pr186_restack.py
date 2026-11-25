@@ -192,8 +192,14 @@ def test_molecular_trace_records_charged_calls_at_first_hit():
     harvest.energy(point, -2.0)
     harvest.gradient(point, np.zeros(3))
     harvest.close()
-    assert harvest.calls == 4
-    assert harvest.found == [4]
+    assert harvest.calls == 2
+    assert harvest.callbacks == 4
+    assert harvest.found == [2]
+    separate = h2h_job.Harvest(0.1)
+    separate.energy(point, -1.0)
+    separate.gradient(point + 1.0, np.zeros(3))
+    assert separate.calls == 2
+    assert separate.callbacks == 2
 
 
 def test_paired_calls_charge_every_energy_and_gradient_evaluation():
@@ -203,6 +209,7 @@ def test_paired_calls_charge_every_energy_and_gradient_evaluation():
     assert paired_score.required_charged_calls(
         {**counts, "charged_calls": 3}
     ) == 10
+    assert paired_score.required_charged_calls({**counts, "oracle_calls": 4}) == 4
     assert paired_score.call_budget({"budget": 5}, 10) == 10
     assert paired_score.call_budget({}, 10) == 10
 

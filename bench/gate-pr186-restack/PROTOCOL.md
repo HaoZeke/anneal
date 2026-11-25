@@ -48,16 +48,19 @@ Default-preset cells (stop at published minimum plus 0.001):
 
 ## Measurements
 
-Every row records the hit, charged budget units, full-run potential
-callback calls, calls to the first hit, wall seconds, seconds inside
-potential calls, outside seconds per callback, and `RssAnon` in kB read
-in-process while the search state is alive. Every molecular energy and
-gradient evaluation is one charged potential call. The anneal driver
-receives half that potential-call allowance as its internal search-point
-budget because one point normally calls both callbacks. A molecular
-first-hit count comes from the first matching trace minimum in the same
-potential-call unit. A hit without a trace count, or a charged or
-first-hit count above the potential-call budget, fails the gate.
+Every row records the hit, charged budget units, full-run callback
+calls, calls to the first hit, wall seconds, seconds inside potential
+calls, outside seconds per callback, and `RssAnon` in kB read in-process
+while the search state is alive. One charge is one oracle evaluation.
+An energy and a gradient returned together count as one. Separate
+energy and gradient calls count as two. `charged` is the sum of the
+named counters: screen, full, check, closure, quench, settle, lattice,
+reoccupy and probe. The anneal driver still receives the search-point
+budget. The recorded budget column stays twice that figure, which is
+the older callback allowance. A molecular first-hit count comes from
+the first matching trace minimum in this same charge unit. A hit
+without a trace count, or a charged or first-hit count above the
+recorded budget, fails the gate.
 
 Rows are append-only. A failed row is kept and makes its cell
 INCONCLUSIVE. There are no replacement runs. Each row carries the A and

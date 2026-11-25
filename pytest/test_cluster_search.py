@@ -6,6 +6,19 @@ import pytest
 
 from anneal import Config, Ledger, cluster_search
 
+CHARGE_KEYS = (
+    "screen", "full", "check", "closure", "quench", "settle", "lattice", "reoccupy", "probe",
+)
+
+
+def _named_charges(split: dict) -> int:
+    return sum(split[key] for key in CHARGE_KEYS)
+
+
+def _internal_charges(split: dict) -> int:
+    """Charges that do not enter the Python objective."""
+    return split["lattice"] + split["reoccupy"] + split["quench"] + split["settle"]
+
 
 def lj_energy(x: np.ndarray) -> float:
     p = np.asarray(x, dtype=np.float64).reshape(-1, 3)
@@ -394,11 +407,13 @@ def test_cluster_search_ras_true_uses_archive_outcome():
     assert "charged" in out
     assert "floors" in out
     assert "returned" in out
-    assert out["charged"] == calls["energy"] + calls["gradient"]
-    assert out["ledger"]["spent"] == calls["energy"] + calls["gradient"]
-    phases = [out["ledger"][name] for name in ("screen", "full", "check")]
-    assert all(isinstance(value, int) and value >= 0 for value in phases)
-    assert sum(phases) <= out["ledger"]["spent"]
+    split = out["ledger"]
+    callbacks = calls["energy"] + calls["gradient"]
+    assert out["charged"] == split["spent"]
+    assert _named_charges(split) == split["spent"]
+    assert split["callbacks"] == callbacks
+    assert callbacks + _internal_charges(split) == split["spent"] + split["split_extras"]
+    assert split["split_extras"] > 0
     screened_out = out["ledger"]["screened_out"]
     assert (
         isinstance(screened_out, int)
@@ -431,9 +446,10 @@ def test_cluster_search_ras_true_uses_archive_outcome():
     polished = core_cluster_search(lj_energy, lj_grad, 3, 50_000, seed=0, ras=True)
     polished_split = polished["ledger"]
     assert polished_split["full"] > 0
+    assert _named_charges(polished_split) == polished_split["spent"]
     assert (
-        polished_split["screen"] + polished_split["full"] + polished_split["check"]
-        <= polished_split["spent"]
+        polished_split["callbacks"] + _internal_charges(polished_split)
+        == polished_split["spent"] + polished_split["split_extras"]
     )
 
 
@@ -576,16 +592,17 @@ def test_cluster_search_reports_where_the_budget_went():
     split = out["ledger"]
     assert out["branch_on_stall"] is False
     assert set(split) == {
-        "spent", "screen", "full", "check", "quenches", "converged", "capped", "screened_out", "returned",
-        "branch_draws", "branch_spent", "overlap_rejected", "basins",
+        "spent", "screen", "full", "check", "closure", "quench", "settle", "lattice",
+        "reoccupy", "probe", "callbacks", "split_extras", "quenches", "converged", "capped",
+        "screened_out", "returned", "branch_draws", "branch_spent", "overlap_rejected", "basins",
     }
     for key in split:
         assert f"``{key}``" in (cluster_search.__doc__ or "")
     assert "``ledger``" in cluster_search.__doc__.split("Returns a dict with")[1]
     assert "``branch_on_stall``" in cluster_search.__doc__.split("Returns a dict with")[1]
     assert 0 < split["spent"] <= 600
-    quench = split["screen"] + split["full"] + split["check"]
-    assert 0 < quench <= split["spent"]
+    assert _named_charges(split) == split["spent"]
+    assert split["callbacks"] + _internal_charges(split) == split["spent"] + split["split_extras"]
     assert split["quenches"] == split["converged"] + split["capped"] > 0
     assert split["basins"] >= 1
     assert out["hops"] >= split["screened_out"] + split["returned"]

@@ -238,7 +238,7 @@ fn slice_run_inner<'g>(
         rng,
     )
     .expect("finite start");
-    ledger.charge_many(slice_ledger.spent());
+    ledger.absorb_charges(&slice_ledger);
     if let Some(st) = slice_ledger.best_state.as_ref() {
         ledger.record(slice_ledger.best, st.view());
     }

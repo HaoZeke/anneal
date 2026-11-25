@@ -10,9 +10,10 @@ run:
 
 - ``hit``: one of the run's reported conformers is the lowest reference
   conformer (heavy-atom RMSD under 0.25 Å, energy within 0.5 kcal/mol)
-- ``calls_to_hit``: energy plus gradient evaluations spent when the run's
-  trace first held a minimum that polishes to that conformer; a hit without
-  that trace count is rejected
+- ``calls_to_hit``: oracle evaluations spent when the run's trace first
+  held a minimum that polishes to that conformer. A together return
+  counts once. Separate energy and gradient calls each count. A hit
+  without that trace count is rejected
 - ``n_3kcal``: distinct conformers within 3 kcal/mol of E_ref
 - ``error``: the exception a run raised; it is scored on what it harvested
 
@@ -23,10 +24,14 @@ Fisher's exact test on hits and the Mann-Whitney U test on calls to hit
 sample size), both two-sided, anneal against openconf in ``--stats`` and
 anneal against develop in ``--versus-develop``.
 
-``calls`` always means ``energy_calls + grad_calls``. ``budget`` retains
-the anneal driver's search-point budget for old rows; ``call_budget`` is
-the comparable potential-call allowance and is twice that search budget.
-Legacy ``job.json`` files need no ``charged_calls`` field to be rescored.
+``calls`` is one count for both codes. An energy and a gradient returned
+together are one evaluation. Separate energy and gradient calls are two.
+An anneal job records that count as ``oracle_calls``. Openconf requests
+energy and gradient separately, so its count stays ``energy_calls +
+grad_calls``. ``budget`` retains the anneal driver's search-point budget
+for old rows; ``call_budget`` is twice that search budget. A legacy
+``job.json`` with no ``oracle_calls`` is still scored as ``energy_calls +
+grad_calls``. A ``charged_calls`` field is not that count.
 """
 
 from __future__ import annotations
@@ -128,7 +133,16 @@ def required_charged_calls(info: dict) -> int:
         ) from error
     if energy < 0 or gradient < 0:
         raise ValueError("job.json energy_calls and grad_calls must be non-negative")
-    return energy + gradient
+    oracle = info.get("oracle_calls")
+    if oracle is None:
+        return energy + gradient
+    try:
+        oracle = int(oracle)
+    except (TypeError, ValueError) as error:
+        raise ValueError("job.json oracle_calls must be an integer") from error
+    if oracle < 0:
+        raise ValueError("job.json oracle_calls must be non-negative")
+    return oracle
 
 
 def call_budget(info: dict, calls: int) -> int:

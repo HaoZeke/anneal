@@ -53,8 +53,10 @@ class Harvest:
 
     A quench ends where its gradient first stays under the record gate; the
     next evaluation above the gate is a new proposal or a new quench.
-    ``found`` holds, per minimum, every energy and gradient call made up to
-    and including the gradient call that recorded it.
+    ``found`` holds, per minimum, the oracle evaluations up to and including
+    the gradient that recorded it. An energy and a gradient on the same
+    point are one evaluation. A gradient with no matching energy, or an
+    energy with no matching gradient, is its own evaluation.
     """
 
     def __init__(self, gate: float) -> None:
@@ -62,15 +64,24 @@ class Harvest:
         self.minima: list[tuple[np.ndarray, float]] = []
         self.found: list[int] = []
         self.calls = 0
+        self.callbacks = 0
         self._run: tuple[np.ndarray, float, int] | None = None
         self._last: tuple[bytes, float] | None = None
+        self._pair_open = False
 
     def energy(self, x: np.ndarray, e: float) -> None:
+        self.callbacks += 1
         self.calls += 1
+        self._pair_open = True
         self._last = (x.tobytes(), e)
 
     def gradient(self, x: np.ndarray, g: np.ndarray) -> None:
-        self.calls += 1
+        self.callbacks += 1
+        if self._pair_open and self._last is not None and self._last[0] == x.tobytes():
+            self._pair_open = False
+        else:
+            self.calls += 1
+            self._pair_open = False
         if self._last is None or self._last[0] != x.tobytes():
             return
         e = self._last[1]
@@ -153,7 +164,8 @@ def run_anneal(row: dict, seed: int, budget: int, out: Path, local_step: str | N
     hc.write_xyz(out / "candidates.xyz", hc.symbols(mol), frames)
     write_trace(out / "trace.xyz", hc.symbols(mol), [(x, e, c) for (x, e), c in zip(frames, found, strict=True)])
     return {
-        "callback_calls": harvest.calls,
+        "callback_calls": harvest.callbacks,
+        "oracle_calls": None if error else int(result["ledger"]["spent"]),
         "error": error,
         "wall_s": wall,
         **counts,

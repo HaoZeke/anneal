@@ -9,7 +9,7 @@
 //! the paper budget. Nothing else is changed.
 
 use anneal_core::methods::cluster_hopping::{
-    Config, Ledger, Outcome, random_cluster_in_radius, run_with_gradient,
+    ChargeName, ChargeSplit, Config, Ledger, Outcome, random_cluster_in_radius, run_with_gradient,
 };
 use anneal_core::methods::cluster_search::search_from;
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
@@ -42,6 +42,7 @@ struct Done {
     trajectory: String,
     rss_anon_kb: u64,
     peak_rss_anon_kb: u64,
+    charges: ChargeSplit,
 }
 
 const RSS_SAMPLE_MASK: u64 = 1023;
@@ -190,7 +191,7 @@ fn main() {
         }
     };
     println!(
-        "GATE system={system} seed={seed} budget={} hit={} calls={} charged={} branch_on_stall={} branch_draws={} branch_spent={} wall_s={:.9} inside_s={:.9} best_bits={} trajectory={} rss_anon_kb={} peak_rss_anon_kb={} core={core}",
+        "GATE system={system} seed={seed} budget={} hit={} calls={} charged={} branch_on_stall={} branch_draws={} branch_spent={} wall_s={:.9} inside_s={:.9} best_bits={} trajectory={} rss_anon_kb={} peak_rss_anon_kb={} core={core} screen={} full={} check={} closure={} quench={} settle={} lattice={} reoccupy={} probe={}",
         done.budget,
         u8::from(done.hit),
         done.calls,
@@ -204,6 +205,15 @@ fn main() {
         done.trajectory,
         done.rss_anon_kb,
         done.peak_rss_anon_kb,
+        done.charges.screen,
+        done.charges.full,
+        done.charges.check,
+        done.charges.closure,
+        done.charges.quench,
+        done.charges.settle,
+        done.charges.lattice,
+        done.charges.reoccupy,
+        done.charges.probe,
     );
 }
 
@@ -278,7 +288,7 @@ where
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
         optimiser.forget();
         let (value, relaxed, _) = optimiser.minimize(x, iterations, |point| {
-            if !led.charge() {
+            if !led.with_charge_name(ChargeName::Quench, |led| led.charge()) {
                 return None;
             }
             rss.maybe_sample();
@@ -287,7 +297,7 @@ where
         (value, relaxed)
     };
     let mut grad = |led: &mut Ledger, point: ArrayView1<f64>| {
-        if !led.charge() {
+        if !led.with_charge_name(ChargeName::Check, |led| led.charge()) {
             return None;
         }
         rss.maybe_sample();
@@ -311,6 +321,7 @@ where
         started,
         clock.seconds(),
         &rss,
+        &ledger,
         outcome,
     )
 }
@@ -343,6 +354,7 @@ fn run_hexamer(seed: u64) -> Done {
         started,
         clock.seconds(),
         &rss,
+        &ledger,
         outcome,
     )
 }
@@ -354,8 +366,10 @@ fn finish(
     started: Instant,
     inside_s: f64,
     rss: &RssSampler,
+    ledger: &Ledger,
     outcome: Outcome,
 ) -> Done {
+    ledger.assert_named_charges();
     let wall_s = started.elapsed().as_secs_f64();
     let end_rss = rss_anon_kb();
     rss.record(end_rss);
@@ -385,6 +399,7 @@ fn finish(
         trajectory: trajectory_hash(&outcome),
         rss_anon_kb: end_rss,
         peak_rss_anon_kb: rss.peak(),
+        charges: ledger.charges(),
     }
 }
 

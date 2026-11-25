@@ -66,9 +66,13 @@ time.
   the openconf arm ran first; anneal and develop then ran in the order
   selected by the paired runner's seeded coin flip, each given the
   search budget `(energy_calls + grad_calls) // 2` of that openconf run.
-  One anneal search-budget unit covers a point at which the wrapper calls
-  both energy and gradient, so its potential-call allowance is twice the
-  search budget.
+  Openconf requests energy and gradient separately
+  (`openconf/relax.py` `MMFFOptimizeMoleculeConfs` and
+  `openconf/constraints.py` `Minimize`, then a separate `CalcEnergy`;
+  low-mode scans call `CalcGrad` and `CalcEnergy` on their own), so each
+  of those calls is one evaluation. Anneal's search requests the pair
+  together, so that return is one charge. The integer passed to anneal
+  stays half of openconf's separate-call total.
   Develop ran first on 98 of the 192 pairs and anneal on 94. This is
   derived by replaying `PAIRED_SCHEDULE_SEED` over the molecule and
   seed pairs present in `rows.csv`, including the runner's preceding
@@ -80,9 +84,12 @@ time.
   not the potential-call unit used by `calls`; for 915/openconf/2048 it
   is 20066 while the paired allowance is 40132 potential calls. Current
   rescoring adds `call_budget` and derives it as twice the search budget
-  from old `job.json` files. It derives `calls` directly as
-  `energy_calls + grad_calls`, so old files need no `charged_calls`
-  migration.
+  from old `job.json` files. A file with no `oracle_calls` is still
+  scored as `energy_calls + grad_calls`. A new anneal job records
+  `oracle_calls` from the ledger, one per oracle evaluation, and that
+  value is the score.
+  `charged_calls` is not used. The committed `calls` and `calls_to_hit`
+  columns were not rewritten.
 - `rows.csv` was scored by `scripts/openconf_h2h/paired_score.py` after
   every candidate was polished; `hit` is its strict test (heavy-atom
   RMSD below 0.25 A and energy within 0.5 kcal/mol of the reference)

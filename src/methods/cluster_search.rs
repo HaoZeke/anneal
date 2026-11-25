@@ -26,8 +26,8 @@ use crate::methods::cluster_hopping::separate_contacts;
 use crate::methods::cluster_hopping::structure_is_sane;
 use crate::methods::cluster_hopping::{CallFloor, molecular_call_floor};
 use crate::methods::cluster_hopping::{
-    ChainCheckpoint, CheckpointAction, Config, Ledger, MoveLibrary, Outcome, SearchError,
-    optimize_with_energy_gradient, run_with_energy_gradient_at_checkpoints,
+    ChainCheckpoint, ChargeName, CheckpointAction, Config, Ledger, MoveLibrary, Outcome,
+    SearchError, optimize_with_energy_gradient, run_with_energy_gradient_at_checkpoints,
 };
 use crate::methods::minima_hopping::HistoryHook;
 use crate::methods::warm_lbfgs::WarmLbfgs;
@@ -67,7 +67,7 @@ fn remember_search_phase(phase: SearchPhase) {
     LAST_SEARCH_PHASE.with(|cell| cell.set(phase));
 }
 
-#[cfg(any(feature = "python", test))]
+#[cfg(test)]
 pub(crate) fn in_confirm_gradient() -> bool {
     IN_CONFIRM_GRADIENT.with(Cell::get)
 }
@@ -266,7 +266,7 @@ where
         if led.gradient_reuse_only() {
             return None;
         }
-        if !led.charge() {
+        if !led.with_charge_name(ChargeName::Closure, |led| led.charge()) {
             return None;
         }
         // `grad` on the test double-counts because it calls
@@ -871,143 +871,200 @@ where
         failure.take();
         opt.forget();
         if iters == 0 {
-            // A raw energy, not a quench. An exchange scan and a surrogate's
-            // first stage ask for the energy of the point they pass. Counting
-            // that read as a screen opened a surface-portfolio hop on every
-            // read and, where a two-phase surface is installed, also charged
-            // a penalty evaluation whose energy the caller never sees.
-            let certified = paid
-                .lock()
-                .expect("paid check")
-                .clone()
-                .filter(|check| check.at == x)
-                .filter(|check| {
-                    largest_component(check.gradient.view()) <= opt.gtol
-                        && gradient_is_converged(check.gradient.view(), opt.gtol)
-                });
-            if let Some(check) = certified {
-                return (check.energy, x.to_owned());
-            }
-            let wall = CallWall::of(cfg);
-            let refuse_overlap = cfg.species.is_some();
-            let mut anchor = None;
-            let answered = charge_rejecting_repeat_failure(
-                objective,
-                led,
-                stats,
-                x,
-                &mut anchor,
-                refuse_overlap,
-                wall,
-                &HeldHands::default(),
-                &mut failure,
-            );
-            return match answered {
-                Some((energy, _, _)) if energy.is_finite() => (energy, x.to_owned()),
-                _ => (f64::INFINITY, x.to_owned()),
-            };
-        }
-        // The descent keeps the hands its start holds. The centres are read
-        // from the first start, the caller's geometry.
-        if centres.is_none()
-            && cfg.hold_stereocentres
-            && let (
-                Some(species),
-                MoveLibrary::Molecular {
-                    groups,
-                    reactive: false,
-                    ..
-                },
-            ) = (cfg.species.as_deref(), &cfg.move_library)
-        {
-            centres = Some(HeldHands::of(x, species, groups, cfg.bond_tolerance));
-        }
-        let held = centres
-            .as_ref()
-            .map_or_else(HeldHands::default, |centres| centres.at(x));
-        let screening = led.is_screening_relax();
-        let polishing =
-            polish_iters > 0 && iters == polish_iters && iters != cfg.relax_steps && !screening;
-        opt.gtol = if polishing { settled } else { stop };
-        let prior = paid
-            .lock()
-            .expect("paid check")
-            .take()
-            .filter(|check| check.at == x);
-        let before = led.spent();
-        // A rigid chart uses this same descent. A line-search-free capped
-        // step reached a different basin, and the small-cluster walk then
-        // took more hops at the same cost per quench.
-        //
-        // A start the previous relaxation already certified at or below the
-        // stop has nothing left to descend, and the descent's first call
-        // would pay again for the energy and gradient on file.
-        let plain = surfaces.is_none() && !cfg.two_phase.is_some_and(|two| two.is_active());
-        if plain
-            && let Some(check) = prior.as_ref()
-            && largest_component(check.gradient.view()) <= opt.gtol
-            && gradient_is_converged(check.gradient.view(), opt.gtol)
-        {
-            if gradient_is_converged(check.gradient.view(), cfg.record_gradient) {
-                stats.converged += 1;
-            } else {
-                stats.capped += 1;
-            }
-            let energy = check.energy;
-            *paid.lock().expect("paid check") = prior;
-            return (energy, x.to_owned());
-        }
-        // The screening pass stops when its own trajectory says the question is
-        // settled; the full relaxation runs to its tolerance, because there the
-        // answer is the structure and not a verdict about it.
-        let mut pred = QuenchPredictor::new();
-        pred.warmup = cfg.quench_warmup;
-        pred.confidence = cfg.quench_confidence;
-        let mut early = false;
-        let mut probe_at: Option<(usize, f64)> = None;
-        let target = led.best;
-        // Phase one, when configured: relax on the compacted surface and hand
-        // that minimum to the plain relaxation below. Both phases charge.
-        let compacted;
-        let surface = match surfaces.as_mut() {
-            Some(portfolio) => portfolio.begin(screening),
-            None => cfg.two_phase.filter(|two| two.is_active()),
-        };
-        // The last physical point the descent paid for, kept so the
-        // convergence check below does not pay for it again. A synthetic
-        // uphill rejection is not that point.
-        let last: RefCell<Option<Check>> = RefCell::new(None);
-        // Lowest physical energy this descent paid for. A caller stop can
-        // cut the line search after that point and before the solver
-        // accepts it, and the run would otherwise return the previous
-        // minimum.
-        let best_physical: RefCell<Option<(f64, Array1<f64>)>> = RefCell::new(None);
-        let remember =
-            |point: ArrayView1<f64>, energy: f64, gradient: &Array1<f64>, physical: bool| {
-                if physical {
-                    *last.borrow_mut() = Some(Check {
-                        at: point.to_owned(),
-                        energy,
-                        gradient: gradient.clone(),
+            return led.with_charge_name(ChargeName::Closure, |led| {
+                // A raw energy, not a quench. An exchange scan and a surrogate's
+                // first stage ask for the energy of the point they pass. Counting
+                // that read as a screen opened a surface-portfolio hop on every
+                // read and, where a two-phase surface is installed, also charged
+                // a penalty evaluation whose energy the caller never sees.
+                let certified = paid
+                    .lock()
+                    .expect("paid check")
+                    .clone()
+                    .filter(|check| check.at == x)
+                    .filter(|check| {
+                        largest_component(check.gradient.view()) <= opt.gtol
+                            && gradient_is_converged(check.gradient.view(), opt.gtol)
                     });
-                    if energy.is_finite()
-                        && best_physical
-                            .borrow()
-                            .as_ref()
-                            .is_none_or(|(held, _)| energy < *held)
-                    {
-                        *best_physical.borrow_mut() = Some((energy, point.to_owned()));
-                    }
-                } else {
-                    *last.borrow_mut() = None;
+                if let Some(check) = certified {
+                    return (check.energy, x.to_owned());
                 }
-            };
-        let x = match surface {
-            Some(two) => {
-                let cutoff = two.cutoff_for(x);
-                let shape = two.shape_for(x);
-                let (_, phase_one, _) = opt.minimize(x, iters, |v| {
-                    let (e, g, physical) = charge_rejecting_repeat_failure(
+                let wall = CallWall::of(cfg);
+                let refuse_overlap = cfg.species.is_some();
+                let mut anchor = None;
+                let answered = charge_rejecting_repeat_failure(
+                    objective,
+                    led,
+                    stats,
+                    x,
+                    &mut anchor,
+                    refuse_overlap,
+                    wall,
+                    &HeldHands::default(),
+                    &mut failure,
+                );
+                match answered {
+                    Some((energy, _, _)) if energy.is_finite() => (energy, x.to_owned()),
+                    _ => (f64::INFINITY, x.to_owned()),
+                }
+            });
+        }
+        led.with_charge_name(
+            if led.is_screening_relax() {
+                ChargeName::Screen
+            } else {
+                ChargeName::Full
+            },
+            |led| {
+                // The descent keeps the hands its start holds. The centres are read
+                // from the first start, the caller's geometry.
+                if centres.is_none()
+                    && cfg.hold_stereocentres
+                    && let (
+                        Some(species),
+                        MoveLibrary::Molecular {
+                            groups,
+                            reactive: false,
+                            ..
+                        },
+                    ) = (cfg.species.as_deref(), &cfg.move_library)
+                {
+                    centres = Some(HeldHands::of(x, species, groups, cfg.bond_tolerance));
+                }
+                let held = centres
+                    .as_ref()
+                    .map_or_else(HeldHands::default, |centres| centres.at(x));
+                let screening = led.is_screening_relax();
+                let polishing = polish_iters > 0
+                    && iters == polish_iters
+                    && iters != cfg.relax_steps
+                    && !screening;
+                opt.gtol = if polishing { settled } else { stop };
+                let prior = paid
+                    .lock()
+                    .expect("paid check")
+                    .take()
+                    .filter(|check| check.at == x);
+                let before = led.spent();
+                // A rigid chart uses this same descent. A line-search-free capped
+                // step reached a different basin, and the small-cluster walk then
+                // took more hops at the same cost per quench.
+                //
+                // A start the previous relaxation already certified at or below the
+                // stop has nothing left to descend, and the descent's first call
+                // would pay again for the energy and gradient on file.
+                let plain = surfaces.is_none() && !cfg.two_phase.is_some_and(|two| two.is_active());
+                if plain
+                    && let Some(check) = prior.as_ref()
+                    && largest_component(check.gradient.view()) <= opt.gtol
+                    && gradient_is_converged(check.gradient.view(), opt.gtol)
+                {
+                    if gradient_is_converged(check.gradient.view(), cfg.record_gradient) {
+                        stats.converged += 1;
+                    } else {
+                        stats.capped += 1;
+                    }
+                    let energy = check.energy;
+                    *paid.lock().expect("paid check") = prior;
+                    return (energy, x.to_owned());
+                }
+                // The screening pass stops when its own trajectory says the question is
+                // settled; the full relaxation runs to its tolerance, because there the
+                // answer is the structure and not a verdict about it.
+                let mut pred = QuenchPredictor::new();
+                pred.warmup = cfg.quench_warmup;
+                pred.confidence = cfg.quench_confidence;
+                let mut early = false;
+                let mut probe_at: Option<(usize, f64)> = None;
+                let target = led.best;
+                // Phase one, when configured: relax on the compacted surface and hand
+                // that minimum to the plain relaxation below. Both phases charge.
+                let compacted;
+                let surface = match surfaces.as_mut() {
+                    Some(portfolio) => portfolio.begin(screening),
+                    None => cfg.two_phase.filter(|two| two.is_active()),
+                };
+                // The last physical point the descent paid for, kept so the
+                // convergence check below does not pay for it again. A synthetic
+                // uphill rejection is not that point.
+                let last: RefCell<Option<Check>> = RefCell::new(None);
+                // Lowest physical energy this descent paid for. A caller stop can
+                // cut the line search after that point and before the solver
+                // accepts it, and the run would otherwise return the previous
+                // minimum.
+                let best_physical: RefCell<Option<(f64, Array1<f64>)>> = RefCell::new(None);
+                let remember = |point: ArrayView1<f64>,
+                                energy: f64,
+                                gradient: &Array1<f64>,
+                                physical: bool| {
+                    if physical {
+                        *last.borrow_mut() = Some(Check {
+                            at: point.to_owned(),
+                            energy,
+                            gradient: gradient.clone(),
+                        });
+                        if energy.is_finite()
+                            && best_physical
+                                .borrow()
+                                .as_ref()
+                                .is_none_or(|(held, _)| energy < *held)
+                        {
+                            *best_physical.borrow_mut() = Some((energy, point.to_owned()));
+                        }
+                    } else {
+                        *last.borrow_mut() = None;
+                    }
+                };
+                let x = match surface {
+                    Some(two) => {
+                        let cutoff = two.cutoff_for(x);
+                        let shape = two.shape_for(x);
+                        let (_, phase_one, _) = opt.minimize(x, iters, |v| {
+                            let (e, g, physical) = charge_rejecting_repeat_failure(
+                                objective,
+                                led,
+                                stats,
+                                v,
+                                &mut anchor,
+                                refuse_overlap,
+                                wall,
+                                &held,
+                                &mut failure,
+                            )?;
+                            remember(v, e, &g, physical);
+                            if !physical {
+                                return Some((e, g));
+                            }
+                            let (pe, pg) = two_phase_penalty(
+                                v,
+                                cfg.move_library.declared_groups(),
+                                cutoff,
+                                two.beta,
+                                two.mu,
+                                shape.as_ref(),
+                            );
+                            Some((e + pe, g + pg))
+                        });
+                        opt.forget();
+                        compacted = phase_one;
+                        compacted.view()
+                    }
+                    None => x,
+                };
+                // A descent from where the previous one ended, the full pass after
+                // a screen among them, opens by asking for an answer already paid.
+                let stop_energy = led.target();
+                let mut opening = prior.clone();
+                let mut call_seconds = 0.0_f64;
+                let mut timed_calls = 0usize;
+                let mut evaluate = |v: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+                    if let Some(check) = opening.take_if(|check| check.at == v) {
+                        let answer = (check.energy, check.gradient.clone());
+                        *last.borrow_mut() = Some(check);
+                        return Some(answer);
+                    }
+                    let clock = deciding.then(|| (led.spent(), std::time::Instant::now()));
+                    let answered = charge_rejecting_repeat_failure(
                         objective,
                         led,
                         stats,
@@ -1017,355 +1074,324 @@ where
                         wall,
                         &held,
                         &mut failure,
-                    )?;
-                    remember(v, e, &g, physical);
-                    if !physical {
-                        return Some((e, g));
+                    );
+                    if let Some((spent, started)) = clock
+                        && led.spent() > spent
+                    {
+                        call_seconds += started.elapsed().as_secs_f64();
+                        timed_calls += led.spent() - spent;
                     }
-                    let (pe, pg) = two_phase_penalty(
-                        v,
-                        cfg.move_library.declared_groups(),
-                        cutoff,
-                        two.beta,
-                        two.mu,
-                        shape.as_ref(),
-                    );
-                    Some((e + pe, g + pg))
-                });
-                opt.forget();
-                compacted = phase_one;
-                compacted.view()
-            }
-            None => x,
-        };
-        // A descent from where the previous one ended, the full pass after
-        // a screen among them, opens by asking for an answer already paid.
-        let stop_energy = led.target();
-        let mut opening = prior.clone();
-        let mut call_seconds = 0.0_f64;
-        let mut timed_calls = 0usize;
-        let mut evaluate = |v: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
-            if let Some(check) = opening.take_if(|check| check.at == v) {
-                let answer = (check.energy, check.gradient.clone());
-                *last.borrow_mut() = Some(check);
-                return Some(answer);
-            }
-            let clock = deciding.then(|| (led.spent(), std::time::Instant::now()));
-            let answered = charge_rejecting_repeat_failure(
-                objective,
-                led,
-                stats,
-                v,
-                &mut anchor,
-                refuse_overlap,
-                wall,
-                &held,
-                &mut failure,
-            );
-            if let Some((spent, started)) = clock
-                && led.spent() > spent
-            {
-                call_seconds += started.elapsed().as_secs_f64();
-                timed_calls += led.spent() - spent;
-            }
-            let (energy, gradient, physical) = answered?;
-            remember(v, energy, &gradient, physical);
-            Some((energy, gradient))
-        };
-        let mut watch = |_: usize, fv: f64| {
-            if !quench_watch_continues(stop_energy, fv) {
-                return false;
-            }
-            if screening && probe {
-                // Never stops. Records where a stop would have happened and
-                // what it would have claimed, so the claim can be scored
-                // against the value the full pass actually reaches.
-                pred.observe(fv);
-                if probe_at.is_none() && pred.verdict(target) == Verdict::Hopeless {
-                    probe_at = pred.predict().map(|p| (pred.len(), p.limit));
-                }
-                return true;
-            }
-            if !(screening && adaptive) {
-                return true;
-            }
-            pred.observe(fv);
-            // Only the hopeless verdict stops the descent. A promising one
-            // is followed by the full relaxation anyway, so cutting its
-            // screen short saves at most the tail of a pass that 2 per cent
-            // of trials reach, and it hands the return screen an
-            // extrapolated energy below the incumbent attached to a
-            // structure that was never relaxed.
-            if pred.verdict(target) != Verdict::Hopeless {
-                return true;
-            }
-            early = true;
-            false
-        };
-        let preconditioner = species.and_then(|z| BondPreconditioner::new(x, z));
-        let quench_tric = tric
-            .as_mut()
-            .filter(|tric| use_tric && tric.atoms() * 3 == x.len());
-        let (f, xr) = if molecular_anc {
-            let (f, xr, _) = crate::methods::anc_quench::anc_minimize_watched(
-                x,
-                &atomic_numbers,
-                iters,
-                cfg.record_gradient,
-                &mut evaluate,
-                &mut watch,
-            );
-            (f, xr)
-        } else {
-            match (quench_tric, preconditioner) {
-                (Some(tric), _) => {
-                    tric.gtol = opt.gtol;
-                    let (f, xr, _) = tric.minimize_watched(x, iters, &mut evaluate, &mut watch);
-                    (f, xr)
-                }
-                (None, None) => {
-                    let (f, xr, _) = opt.minimize_watched(x, iters, &mut evaluate, &mut watch);
-                    (f, xr)
-                }
-                (None, Some(pre)) => {
-                    // The reduced gradient has other units, so the solver's own
-                    // test is off and the stop reads the Cartesian one.
-                    let origin = x.to_owned();
-                    let gtol = opt.gtol;
-                    opt.gtol = 0.0;
-                    let (f, zr, _) = opt.minimize_watched(
-                        Array1::zeros(x.len()).view(),
-                        iters,
-                        |z| {
-                            let v = pre.expand(origin.view(), z);
-                            evaluate(v.view()).map(|(e, g)| (e, pre.reduce(g.view())))
-                        },
-                        |it, fv| {
-                            let settled = last
-                                .borrow()
-                                .as_ref()
-                                .is_some_and(|c| largest_component(c.gradient.view()) <= gtol);
-                            !settled && watch(it, fv)
-                        },
-                    );
-                    opt.gtol = gtol;
-                    (f, pre.expand(origin.view(), zr.view()))
-                }
-            }
-        };
-        // A quench of a few calls times the start, not the potential.
-        if !molecular_anc
-            && deciding
-            && timed_calls >= 3
-            && let Some(tric) = tric.as_ref()
-            && let Some(check) = last.borrow().as_ref()
-            && check.at.len() == 3 * tric.atoms()
-        {
-            let per_call = call_seconds / timed_calls as f64;
-            let per_step = tric.step_seconds(check.at.view(), check.energy, check.gradient.view());
-            use_tric = per_call > per_step;
-            deciding = false;
-            stats.quench_seconds = Some((per_call, per_step));
-            stats.local_step = if use_tric {
-                LocalStep::Tric
-            } else {
-                LocalStep::Lbfgs
-            };
-        }
-        stats.refused = opt.refused();
-        if let Some((at, claim)) = probe_at {
-            stats.probe_stops += 1;
-            stats.probe_steps += at;
-            stats.probe_error += (claim - f).abs();
-        }
-        let cost = led.spent() - before;
-        if screening {
-            stats.screen_charged += cost;
-            stats.screen_steps_taken += pred.len();
-            stats.screens += 1;
-        } else {
-            stats.full_charged += cost;
-        }
-        // The energy the caller sees is the extrapolated limit, not the value
-        // at the point where the descent stopped.
-        //
-        // This is the whole of it. Stopping a screening quench after five steps
-        // instead of twenty-five cut the cost of a hop from 31 charged
-        // evaluations to 8 and quadrupled the hops, and solved nothing in three
-        // seeds where the fixed-length screen solved three: the value at step
-        // five is not the quenched energy, and a chain that accepts on it is
-        // walking on the raw landscape rather than the transformed one that
-        // basin hopping exists to walk on. The predictor already says where the
-        // descent was going; the estimate is what the chain should move on.
-        //
-        // The floor in `stopped_energy` is what keeps a cut-short descent from
-        // being reported as the run's answer. It is enforced there rather than
-        // inferred from the verdict here.
-        let f = if early {
-            pred.stopped_energy(target, f)
-        } else {
-            f
-        };
-        // The call that raises the stop has already been paid. If it is
-        // below the solver's accepted point, that point is the best state
-        // the run found. Applied again after the convergence check, which
-        // can be the call that raises the stop.
-        let (f, xr, _) = lowest_stopped_answer(led, f, xr, &best_physical);
-        if let Some(portfolio) = surfaces.as_mut() {
-            portfolio.observe(screening, f, target);
-        }
-        // A descent stopped on a verdict is known not to be converged, so
-        // asking is spending an evaluation on an answer already in hand. The
-        // check stays on every other path, where the answer is not known.
-        if early {
-            stats.capped += 1;
-            // The water census reads these boundaries. A screened descent is
-            // not a minimum, so it is recorded without a validation gradient.
-            led.record_quench_boundary(before, f, xr.clone(), None);
-            // `f` is the extrapolated energy, so the stored check is the
-            // descent's own evaluation at `xr`.
-            *paid.lock().expect("paid check") =
-                last.borrow().clone().filter(|check| check.at == xr);
-            return (f, xr);
-        }
-        // Charged like any other evaluation: asking whether a relaxation
-        // converged is asking the potential a question, and a protocol that
-        // counts evaluations has to count this one.
-        // A descent that never left a certified start already has its answer,
-        // and so does one whose last paid evaluation is where it stopped.
-        let mut f = f;
-        let mut xr = xr;
-        let stored_gradient = |point: &Array1<f64>| -> Option<Array1<f64>> {
-            last.borrow()
-                .clone()
-                .filter(|check| check.at == *point)
-                .or_else(|| prior.clone().filter(|check| check.at == *point))
-                .map(|check| check.gradient)
-        };
-        let mut validated = None;
-        let confirm = |led: &mut Ledger,
-                       stats: &mut RelaxStats,
-                       energy: f64,
-                       point: ArrayView1<f64>|
-         -> Option<Array1<f64>> {
-            if refuse_overlap && (wall.refuses(point) || wall.lost_a_bond(point)) {
-                stats.overlap_rejected += 1;
-                return None;
-            }
-            if !energy.is_finite() {
-                return None;
-            }
-            if reuse_confirm_gradient && let Some(gradient) = stored_gradient(&point.to_owned()) {
-                return gradient_is_converged(gradient.view(), cfg.record_gradient)
-                    .then_some(gradient);
-            }
-            if !led.charge() {
-                return None;
-            }
-            stats.check_charged += 1;
-            let _confirm = ConfirmGradient::enter();
-            finite_gradient(objective, point)
-                .filter(|gradient| gradient_is_converged(gradient.view(), cfg.record_gradient))
-        };
-        let mut converged = match confirm(led, stats, f, xr.view()) {
-            Some(gradient) => {
-                validated = Some(gradient);
-                true
-            }
-            None => false,
-        };
-        // A capped descent is not a minimum the ledger may keep. One more
-        // pass is enough for a binary quench. A molecular potential, whose
-        // line search otherwise stops inside an overlap, is continued until
-        // the same record gradient is met or the budget ends. Screening
-        // passes stay short, and the tolerance is the preset's own.
-        let continuation_rounds = if screening || molecular_anc {
-            0
-        } else if cfg.species.is_some() && cfg.species_sigma.is_none() {
-            8
-        } else if cfg.species_sigma.is_some() {
-            1
-        } else {
-            0
-        };
-        for _ in 0..continuation_rounds {
-            if converged
-                || led.remaining() == 0
-                || failure.as_ref().is_some_and(|failed| failed.closed)
-            {
-                break;
-            }
-            if refuse_overlap
-                && let Some((energy, walked)) =
-                    retreat_from_overlap_wall(objective, led, stats, &mut anchor, cfg, xr.view())
-            {
-                xr = walked;
-                if best_physical
-                    .borrow()
-                    .as_ref()
-                    .is_none_or(|(held, _)| energy < *held)
-                {
-                    *best_physical.borrow_mut() = Some((energy, xr.clone()));
-                }
-            }
-            let spent_at = led.spent();
-            let (f2, xr2, _) = opt.minimize(xr.view(), iters, |v| {
-                let (energy, gradient, physical) = charge_rejecting_repeat_failure(
-                    objective,
-                    led,
-                    stats,
-                    v,
-                    &mut anchor,
-                    refuse_overlap,
-                    wall,
-                    &held,
-                    &mut failure,
-                )?;
-                remember(v, energy, &gradient, physical);
-                Some((energy, gradient))
-            });
-            stats.refused = opt.refused();
-            let extra = led.spent() - spent_at;
-            if extra > 0 {
-                stats.full_charged += extra;
-            }
-            f = f2;
-            xr = xr2;
-            converged = match confirm(led, stats, f, xr.view()) {
-                Some(gradient) => {
-                    validated = Some(gradient);
-                    true
-                }
-                None => {
-                    validated = None;
+                    let (energy, gradient, physical) = answered?;
+                    remember(v, energy, &gradient, physical);
+                    Some((energy, gradient))
+                };
+                let mut watch = |_: usize, fv: f64| {
+                    if !quench_watch_continues(stop_energy, fv) {
+                        return false;
+                    }
+                    if screening && probe {
+                        // Never stops. Records where a stop would have happened and
+                        // what it would have claimed, so the claim can be scored
+                        // against the value the full pass actually reaches.
+                        pred.observe(fv);
+                        if probe_at.is_none() && pred.verdict(target) == Verdict::Hopeless {
+                            probe_at = pred.predict().map(|p| (pred.len(), p.limit));
+                        }
+                        return true;
+                    }
+                    if !(screening && adaptive) {
+                        return true;
+                    }
+                    pred.observe(fv);
+                    // Only the hopeless verdict stops the descent. A promising one
+                    // is followed by the full relaxation anyway, so cutting its
+                    // screen short saves at most the tail of a pass that 2 per cent
+                    // of trials reach, and it hands the return screen an
+                    // extrapolated energy below the incumbent attached to a
+                    // structure that was never relaxed.
+                    if pred.verdict(target) != Verdict::Hopeless {
+                        return true;
+                    }
+                    early = true;
                     false
+                };
+                let preconditioner = species.and_then(|z| BondPreconditioner::new(x, z));
+                let quench_tric = tric
+                    .as_mut()
+                    .filter(|tric| use_tric && tric.atoms() * 3 == x.len());
+                let (f, xr) = if molecular_anc {
+                    let (f, xr, _) = crate::methods::anc_quench::anc_minimize_watched(
+                        x,
+                        &atomic_numbers,
+                        iters,
+                        cfg.record_gradient,
+                        &mut evaluate,
+                        &mut watch,
+                    );
+                    (f, xr)
+                } else {
+                    match (quench_tric, preconditioner) {
+                        (Some(tric), _) => {
+                            tric.gtol = opt.gtol;
+                            let (f, xr, _) =
+                                tric.minimize_watched(x, iters, &mut evaluate, &mut watch);
+                            (f, xr)
+                        }
+                        (None, None) => {
+                            let (f, xr, _) =
+                                opt.minimize_watched(x, iters, &mut evaluate, &mut watch);
+                            (f, xr)
+                        }
+                        (None, Some(pre)) => {
+                            // The reduced gradient has other units, so the solver's own
+                            // test is off and the stop reads the Cartesian one.
+                            let origin = x.to_owned();
+                            let gtol = opt.gtol;
+                            opt.gtol = 0.0;
+                            let (f, zr, _) = opt.minimize_watched(
+                                Array1::zeros(x.len()).view(),
+                                iters,
+                                |z| {
+                                    let v = pre.expand(origin.view(), z);
+                                    evaluate(v.view()).map(|(e, g)| (e, pre.reduce(g.view())))
+                                },
+                                |it, fv| {
+                                    let settled = last.borrow().as_ref().is_some_and(|c| {
+                                        largest_component(c.gradient.view()) <= gtol
+                                    });
+                                    !settled && watch(it, fv)
+                                },
+                            );
+                            opt.gtol = gtol;
+                            (f, pre.expand(origin.view(), zr.view()))
+                        }
+                    }
+                };
+                // A quench of a few calls times the start, not the potential.
+                if !molecular_anc
+                    && deciding
+                    && timed_calls >= 3
+                    && let Some(tric) = tric.as_ref()
+                    && let Some(check) = last.borrow().as_ref()
+                    && check.at.len() == 3 * tric.atoms()
+                {
+                    let per_call = call_seconds / timed_calls as f64;
+                    let per_step =
+                        tric.step_seconds(check.at.view(), check.energy, check.gradient.view());
+                    use_tric = per_call > per_step;
+                    deciding = false;
+                    stats.quench_seconds = Some((per_call, per_step));
+                    stats.local_step = if use_tric {
+                        LocalStep::Tric
+                    } else {
+                        LocalStep::Lbfgs
+                    };
                 }
-            };
-        }
-        if converged {
-            stats.converged += 1;
-        } else {
-            stats.capped += 1;
-            validated = None;
-        }
-        // The convergence check is itself an evaluation and can raise the
-        // stop after the descent has returned. The gradient just computed
-        // belongs to the solver's point, not to the lower one we keep.
-        let (f, xr, kept_lower) = lowest_stopped_answer(led, f, xr, &best_physical);
-        if kept_lower {
-            validated = None;
-        }
-        // Good-Turing retires from the checkpoint's quench list. Leaving this
-        // empty made that stop observe nothing and run out the budget.
-        led.record_quench_boundary(before, f, xr.clone(), validated.clone());
-        *paid.lock().expect("paid check") = validated
-            .map(|gradient| Check {
-                at: xr.clone(),
-                energy: f,
-                gradient,
-            })
-            .or_else(|| last.borrow().clone().filter(|check| check.at == xr));
-        (f, xr)
+                stats.refused = opt.refused();
+                if let Some((at, claim)) = probe_at {
+                    stats.probe_stops += 1;
+                    stats.probe_steps += at;
+                    stats.probe_error += (claim - f).abs();
+                }
+                let cost = led.spent() - before;
+                if screening {
+                    stats.screen_charged += cost;
+                    stats.screen_steps_taken += pred.len();
+                    stats.screens += 1;
+                } else {
+                    stats.full_charged += cost;
+                }
+                // The energy the caller sees is the extrapolated limit, not the value
+                // at the point where the descent stopped.
+                //
+                // This is the whole of it. Stopping a screening quench after five steps
+                // instead of twenty-five cut the cost of a hop from 31 charged
+                // evaluations to 8 and quadrupled the hops, and solved nothing in three
+                // seeds where the fixed-length screen solved three: the value at step
+                // five is not the quenched energy, and a chain that accepts on it is
+                // walking on the raw landscape rather than the transformed one that
+                // basin hopping exists to walk on. The predictor already says where the
+                // descent was going; the estimate is what the chain should move on.
+                //
+                // The floor in `stopped_energy` is what keeps a cut-short descent from
+                // being reported as the run's answer. It is enforced there rather than
+                // inferred from the verdict here.
+                let f = if early {
+                    pred.stopped_energy(target, f)
+                } else {
+                    f
+                };
+                // The call that raises the stop has already been paid. If it is
+                // below the solver's accepted point, that point is the best state
+                // the run found. Applied again after the convergence check, which
+                // can be the call that raises the stop.
+                let (f, xr, _) = lowest_stopped_answer(led, f, xr, &best_physical);
+                if let Some(portfolio) = surfaces.as_mut() {
+                    portfolio.observe(screening, f, target);
+                }
+                // A descent stopped on a verdict is known not to be converged, so
+                // asking is spending an evaluation on an answer already in hand. The
+                // check stays on every other path, where the answer is not known.
+                if early {
+                    stats.capped += 1;
+                    // The water census reads these boundaries. A screened descent is
+                    // not a minimum, so it is recorded without a validation gradient.
+                    led.record_quench_boundary(before, f, xr.clone(), None);
+                    // `f` is the extrapolated energy, so the stored check is the
+                    // descent's own evaluation at `xr`.
+                    *paid.lock().expect("paid check") =
+                        last.borrow().clone().filter(|check| check.at == xr);
+                    return (f, xr);
+                }
+                // Charged like any other evaluation: asking whether a relaxation
+                // converged is asking the potential a question, and a protocol that
+                // counts evaluations has to count this one.
+                // A descent that never left a certified start already has its answer,
+                // and so does one whose last paid evaluation is where it stopped.
+                let mut f = f;
+                let mut xr = xr;
+                let stored_gradient = |point: &Array1<f64>| -> Option<Array1<f64>> {
+                    last.borrow()
+                        .clone()
+                        .filter(|check| check.at == *point)
+                        .or_else(|| prior.clone().filter(|check| check.at == *point))
+                        .map(|check| check.gradient)
+                };
+                let mut validated = None;
+                let confirm = |led: &mut Ledger,
+                               stats: &mut RelaxStats,
+                               energy: f64,
+                               point: ArrayView1<f64>|
+                 -> Option<Array1<f64>> {
+                    if refuse_overlap && (wall.refuses(point) || wall.lost_a_bond(point)) {
+                        stats.overlap_rejected += 1;
+                        return None;
+                    }
+                    if !energy.is_finite() {
+                        return None;
+                    }
+                    if reuse_confirm_gradient
+                        && let Some(gradient) = stored_gradient(&point.to_owned())
+                    {
+                        return gradient_is_converged(gradient.view(), cfg.record_gradient)
+                            .then_some(gradient);
+                    }
+                    if !led.with_charge_name(ChargeName::Check, |led| led.charge()) {
+                        return None;
+                    }
+                    stats.check_charged += 1;
+                    let _confirm = ConfirmGradient::enter();
+                    finite_gradient(objective, point).filter(|gradient| {
+                        gradient_is_converged(gradient.view(), cfg.record_gradient)
+                    })
+                };
+                let mut converged = match confirm(led, stats, f, xr.view()) {
+                    Some(gradient) => {
+                        validated = Some(gradient);
+                        true
+                    }
+                    None => false,
+                };
+                // A capped descent is not a minimum the ledger may keep. One more
+                // pass is enough for a binary quench. A molecular potential, whose
+                // line search otherwise stops inside an overlap, is continued until
+                // the same record gradient is met or the budget ends. Screening
+                // passes stay short, and the tolerance is the preset's own.
+                let continuation_rounds = if screening || molecular_anc {
+                    0
+                } else if cfg.species.is_some() && cfg.species_sigma.is_none() {
+                    8
+                } else if cfg.species_sigma.is_some() {
+                    1
+                } else {
+                    0
+                };
+                for _ in 0..continuation_rounds {
+                    if converged
+                        || led.remaining() == 0
+                        || failure.as_ref().is_some_and(|failed| failed.closed)
+                    {
+                        break;
+                    }
+                    let spent_at = led.spent();
+                    if refuse_overlap
+                        && let Some((energy, walked)) = retreat_from_overlap_wall(
+                            objective,
+                            led,
+                            stats,
+                            &mut anchor,
+                            cfg,
+                            xr.view(),
+                        )
+                    {
+                        xr = walked;
+                        if best_physical
+                            .borrow()
+                            .as_ref()
+                            .is_none_or(|(held, _)| energy < *held)
+                        {
+                            *best_physical.borrow_mut() = Some((energy, xr.clone()));
+                        }
+                    }
+                    let (f2, xr2, _) = opt.minimize(xr.view(), iters, |v| {
+                        let (energy, gradient, physical) = charge_rejecting_repeat_failure(
+                            objective,
+                            led,
+                            stats,
+                            v,
+                            &mut anchor,
+                            refuse_overlap,
+                            wall,
+                            &held,
+                            &mut failure,
+                        )?;
+                        remember(v, energy, &gradient, physical);
+                        Some((energy, gradient))
+                    });
+                    stats.refused = opt.refused();
+                    let extra = led.spent() - spent_at;
+                    if extra > 0 {
+                        stats.full_charged += extra;
+                    }
+                    f = f2;
+                    xr = xr2;
+                    converged = match confirm(led, stats, f, xr.view()) {
+                        Some(gradient) => {
+                            validated = Some(gradient);
+                            true
+                        }
+                        None => {
+                            validated = None;
+                            false
+                        }
+                    };
+                }
+                if converged {
+                    stats.converged += 1;
+                } else {
+                    stats.capped += 1;
+                    validated = None;
+                }
+                // The convergence check is itself an evaluation and can raise the
+                // stop after the descent has returned. The gradient just computed
+                // belongs to the solver's point, not to the lower one we keep.
+                let (f, xr, kept_lower) = lowest_stopped_answer(led, f, xr, &best_physical);
+                if kept_lower {
+                    validated = None;
+                }
+                // Good-Turing retires from the checkpoint's quench list. Leaving this
+                // empty made that stop observe nothing and run out the budget.
+                led.record_quench_boundary(before, f, xr.clone(), validated.clone());
+                *paid.lock().expect("paid check") = validated
+                    .map(|gradient| Check {
+                        at: xr.clone(),
+                        energy: f,
+                        gradient,
+                    })
+                    .or_else(|| last.borrow().clone().filter(|check| check.at == xr));
+                (f, xr)
+            },
+        )
     }
 }
 
@@ -1465,7 +1491,7 @@ pub fn polish_recorded_answer_until<O, A>(
         start.view(),
         ANSWER_POLISH_STEPS,
         |point| {
-            if !ledger.charge() {
+            if !ledger.with_charge_name(ChargeName::Full, |ledger| ledger.charge()) {
                 return None;
             }
             stats.full_charged += 1;
@@ -1484,7 +1510,7 @@ pub fn polish_recorded_answer_until<O, A>(
         outcome.charged = ledger.spent();
         return;
     }
-    if !ledger.charge() {
+    if !ledger.with_charge_name(ChargeName::Check, |ledger| ledger.charge()) {
         outcome.charged = ledger.spent();
         return;
     }
@@ -1535,6 +1561,22 @@ where
         polish_seconds: polish_started.elapsed().as_secs_f64(),
         polish_calls: ledger.spent().saturating_sub(spent),
     });
+    ledger.assert_named_charges();
+    assert_eq!(
+        ledger.charges().screen,
+        stats.screen_charged,
+        "screen charges diverged from the relaxation counter"
+    );
+    assert_eq!(
+        ledger.charges().full,
+        stats.full_charged,
+        "full charges diverged from the relaxation counter"
+    );
+    assert_eq!(
+        ledger.charges().check,
+        stats.check_charged,
+        "check charges diverged from the relaxation counter"
+    );
     (outcome, stats)
 }
 
@@ -1578,7 +1620,7 @@ where
                 if CallWall::of(cfg).refuses(x) {
                     return None;
                 }
-                if !led.charge() {
+                if !led.with_charge_name(ChargeName::Closure, |led| led.charge()) {
                     return None;
                 }
                 evaluated_pair(objective, x, &mut energy_anchor)
@@ -1662,7 +1704,7 @@ where
         let mut energy_anchor = None;
         let mut energy_grad =
             |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
-                if !led.charge() {
+                if !led.with_charge_name(ChargeName::Closure, |led| led.charge()) {
                     return None;
                 }
                 evaluated_pair(objective, x, &mut energy_anchor)
@@ -1783,21 +1825,25 @@ where
     let mut anchor = None;
     let mut failure = None;
     let mut evaluated = false;
-    let (energy, state, _) = opt.minimize(start, max_iter, |point| {
-        let answered = charge_rejecting_repeat_failure(
-            objective,
-            ledger,
-            stats,
-            point,
-            &mut anchor,
-            true,
-            wall,
-            &HeldHands::default(),
-            &mut failure,
-        )?;
-        evaluated = true;
-        Some((answered.0, answered.1))
+    let before = ledger.spent();
+    let (energy, state, _) = ledger.with_charge_name(ChargeName::Full, |ledger| {
+        opt.minimize(start, max_iter, |point| {
+            let answered = charge_rejecting_repeat_failure(
+                objective,
+                ledger,
+                stats,
+                point,
+                &mut anchor,
+                true,
+                wall,
+                &HeldHands::default(),
+                &mut failure,
+            )?;
+            evaluated = true;
+            Some((answered.0, answered.1))
+        })
     });
+    stats.full_charged += ledger.spent().saturating_sub(before);
     (evaluated && energy.is_finite()).then_some((energy, state))
 }
 
@@ -1823,12 +1869,15 @@ where
     opt.gtol = tolerance;
     let mut anchor = None;
     let mut evaluated = false;
-    let (energy, state, _) = opt.minimize(start, max_iter, |v| {
-        if !ledger.charge() {
-            return None;
-        }
-        evaluated = true;
-        evaluated_pair(objective, v, &mut anchor).map(|(energy, gradient, _)| (energy, gradient))
+    let (energy, state, _) = ledger.with_charge_name(ChargeName::Full, |ledger| {
+        opt.minimize(start, max_iter, |v| {
+            if !ledger.charge() {
+                return None;
+            }
+            evaluated = true;
+            evaluated_pair(objective, v, &mut anchor)
+                .map(|(energy, gradient, _)| (energy, gradient))
+        })
     });
     (evaluated && energy.is_finite()).then_some((energy, state))
 }
@@ -1863,7 +1912,7 @@ where
         let mut energy_anchor = None;
         let mut energy_grad =
             |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
-                if !led.charge() {
+                if !led.with_charge_name(ChargeName::Closure, |led| led.charge()) {
                     return None;
                 }
                 evaluated_pair(objective, x, &mut energy_anchor)
@@ -2209,7 +2258,7 @@ where
     if !reported_energy.is_finite() || state.iter().any(|value| !value.is_finite()) {
         return None;
     }
-    if !ledger.charge() {
+    if !ledger.with_charge_name(ChargeName::Check, |ledger| ledger.charge()) {
         return None;
     }
     *charged_validations += 1;
@@ -2541,7 +2590,7 @@ where
             &mut bias,
             &mut rng,
         )?;
-        ledger.charge_many(slice_led.spent());
+        ledger.absorb_charges(&slice_led);
         if let Some(st) = slice_led.best_state.as_ref() {
             ledger.record(slice_led.best, st.view());
         }
@@ -4769,7 +4818,7 @@ mod tests {
         budget: usize,
         stop_after: usize,
         seed: u64,
-    ) -> (usize, usize) {
+    ) -> (usize, usize, crate::methods::cluster_hopping::ChargeSplit) {
         use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
         let mut cfg = Config::recommended(38);
@@ -4783,7 +4832,14 @@ mod tests {
         };
         let mut ledger = Ledger::with_stop(budget, stop);
         search(&objective, &cfg, &mut ledger, seed).expect("finite start");
-        (ledger.spent(), objective.calls.load(Ordering::SeqCst))
+        let charges = ledger.charges();
+        assert_eq!(charges.unnamed, 0, "a search left an unnamed charge");
+        assert_eq!(ledger.spent(), charges.named());
+        (
+            ledger.spent(),
+            objective.calls.load(Ordering::SeqCst),
+            charges,
+        )
     }
 
     /// Every charge is an evaluation unless the energy lattice is on. That
@@ -4793,19 +4849,29 @@ mod tests {
     #[test]
     fn charged_calls_are_potential_evaluations_apart_from_lattice_pair_sums() {
         for seed in [2000, 2001, 2002] {
-            let (spent, calls) = charged_and_evaluated(false, 6_000, usize::MAX, seed);
+            let (spent, calls, charges) = charged_and_evaluated(false, 6_000, usize::MAX, seed);
             assert_eq!(spent, calls, "seed {seed}: budget run");
             assert_eq!(spent, 6_000, "seed {seed}: the budget was not spent");
-            let (spent, calls) = charged_and_evaluated(false, 400_000, 2_500, seed);
+            assert_eq!(charges.lattice, 0);
+            assert_eq!(charges.reoccupy, 0);
+            let (spent, calls, charges) = charged_and_evaluated(false, 400_000, 2_500, seed);
             assert_eq!(spent, calls, "seed {seed}: run closed by a caller stop");
             assert_eq!(spent, 2_500, "seed {seed}: the stop did not close the run");
+            assert_eq!(charges.lattice, 0);
+            assert_eq!(charges.reoccupy, 0);
         }
-        let (spent, calls) = charged_and_evaluated(true, 30_000, usize::MAX, 2001);
+        let (spent, calls, charges) = charged_and_evaluated(true, 30_000, usize::MAX, 2001);
         assert!(
             spent > calls,
             "the lattice kernel's pair sums were not charged: {spent} against {calls}"
         );
         assert_eq!(spent, 30_000);
+        assert_eq!(
+            spent - calls,
+            charges.lattice,
+            "the gap is the lattice counter"
+        );
+        assert_eq!(charges.reoccupy, 0);
     }
 
     /// Potential that counts its own calls, raises a caller stop, and keeps
@@ -4905,7 +4971,8 @@ mod tests {
     /// settlement runs with the caller stop already raised.
     #[test]
     fn a_stop_inside_the_stall_probe_settles_each_side_call_once() {
-        let (spent, calls) = charged_and_evaluated(false, 400_000, 7_350, 2000);
+        let (spent, calls, charges) = charged_and_evaluated(false, 400_000, 7_350, 2000);
+        assert_eq!(charges.lattice, 0);
         assert_eq!(calls, 7_350, "the stop did not close the run");
         assert_eq!(
             spent, calls,

@@ -353,14 +353,23 @@ def cluster_search(
     The best geometry found is kept, and the exception is re-raised here.
 
     The result also carries ``ledger``, a dict of counts that says where the
-    search's budget went. ``spent``, ``screen``, ``full`` and ``check`` are
-    charged evaluations, one per objective or gradient call; the rest count
-    events.
+    search's budget went. One charge is one oracle evaluation. An energy
+    and a gradient returned together are one charge. A separate energy
+    call and a separate gradient call are two. ``spent`` equals ``screen``
+    + ``full`` + ``check`` + ``closure`` + ``quench`` + ``settle`` +
+    ``lattice`` + ``reoccupy`` + ``probe``.
 
     - ``spent``: the evaluations charged in all.
-    - ``screen``, ``full``, ``check``: those spent in screening passes, in full
-      relaxations and in confirming convergence. What ``spent`` leaves over
-      was charged outside the relaxation passes.
+    - ``screen``, ``full``, ``check``: screening passes, full relaxations
+      and confirming convergence.
+    - ``closure``: an energy and gradient returned together outside those
+      three counters.
+    - ``quench``, ``settle``, ``lattice``, ``reoccupy``, ``probe``: the
+      other named charges.
+    - ``callbacks``: raw Python callbacks. ``split_extras``: evaluations
+      that returned energy and gradient together. Each is counted on its
+      own. ``callbacks`` plus the internal charges equals ``spent`` plus
+      ``split_extras``.
     - ``quenches``: relaxations run, equal to ``converged`` plus ``capped``,
       the ones that reached a small gradient and the ones that stopped at their
       step cap.
