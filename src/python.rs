@@ -3450,6 +3450,7 @@ fn cluster_archive_search(
             &mut archive,
             &mut rng,
         )
+        .map_err(search_failure)?
     };
     let dim = 3 * cfg.n_points;
     let best = out
@@ -3690,6 +3691,8 @@ fn rigid_probe(
 /// A callback raising `BaseException` that is not an `Exception`, such as
 /// `KeyboardInterrupt`, stops the search at once. The best state found is
 /// kept, and the exception is raised from this call.
+/// An opening quench that is never finite raises `ValueError`, including
+/// when `ras=True`.
 #[pyfunction]
 #[pyo3(signature = (
     obj_fn,

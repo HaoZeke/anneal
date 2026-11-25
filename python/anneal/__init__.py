@@ -351,6 +351,8 @@ def cluster_search(
     A callback raising a ``BaseException`` that is not an ``Exception``, such
     as ``KeyboardInterrupt`` or a harness stop, ends the search at once.
     The best geometry found is kept, and the exception is re-raised here.
+    An opening quench that is never finite raises ``ValueError``, including
+    when ``ras=True``.
 
     The result also carries ``ledger``, a dict of counts that says where the
     search's budget went. One charge is one oracle evaluation. An energy

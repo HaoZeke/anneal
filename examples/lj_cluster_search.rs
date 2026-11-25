@@ -1653,7 +1653,8 @@ fn main() {
                 Some(&mut grad),
                 &mut archive,
                 &mut rng_ras,
-            );
+            )
+            .expect("finite start");
             let hit = reference
                 .map(|r| anneal_core::energy_hits(out.best, r, anneal_core::SEARCH_HIT_TOL))
                 .unwrap_or(false);
