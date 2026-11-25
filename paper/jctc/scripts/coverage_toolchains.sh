@@ -1,14 +1,25 @@
 #!/bin/sh
 # Copyright (c) anneal developers
-# Line and region coverage uses rustc 1.88.0.
-# Branch coverage uses nightly-2026-11-01.
-# The nightly rustc flag is -Zcoverage-options=branch.
+# Line and region coverage uses PINNED_TOOLCHAIN from coverage_receipts.py.
+# Branch coverage uses NIGHTLY_TOOLCHAIN with BRANCH_FLAG from coverage_receipts.py.
 # This script does not write a toolchain file.
 set -eu
 
-pinned=1.88.0
-nightly=nightly-2026-11-01
-branch_flag=-Zcoverage-options=branch
+here=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+toolchains=$(
+  python3 -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+import coverage_receipts as cr
+print(cr.PINNED_TOOLCHAIN, cr.NIGHTLY_TOOLCHAIN, cr.BRANCH_FLAG)
+' "$here"
+)
+IFS=' ' read -r pinned nightly branch_flag <<EOF
+$toolchains
+EOF
+: "${pinned:?missing PINNED_TOOLCHAIN}"
+: "${nightly:?missing NIGHTLY_TOOLCHAIN}"
+: "${branch_flag:?missing BRANCH_FLAG}"
 
 cd "$(git rev-parse --show-toplevel)"
 

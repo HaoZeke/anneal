@@ -360,6 +360,108 @@ def test_coverage_receipt_writes_both_toolchains(tmp_path: Path) -> None:
         coverage_receipts.main([])
 
 
+def test_coverage_toolchains_reads_receipt_pins(tmp_path: Path) -> None:
+    script = HERE / "coverage_toolchains.sh"
+    body = script.read_text()
+    for token in (
+        coverage_receipts.PINNED_TOOLCHAIN,
+        coverage_receipts.NIGHTLY_TOOLCHAIN,
+        coverage_receipts.BRANCH_FLAG,
+    ):
+        assert token not in body
+
+    stub_bin = tmp_path / "bin"
+    stub_bin.mkdir()
+    log = tmp_path / "calls.log"
+    rustup = stub_bin / "rustup"
+    rustup.write_text(
+        "#!/bin/sh\n"
+        f'printf "rustup %s\\n" "$*" >> "{log}"\n'
+        'printf "stub %s\\n" "$*"\n'
+    )
+    rustup.chmod(0o755)
+    cargo = stub_bin / "cargo"
+    cargo.write_text(
+        "#!/bin/sh\n"
+        f'printf "cargo %s %s\\n" "$RUSTUP_TOOLCHAIN" "$*" >> "{log}"\n'
+    )
+    cargo.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{stub_bin}:{env.get('PATH', '')}"
+
+    out = tmp_path / "cov.json"
+    lines_run = subprocess.run(
+        ["sh", str(script), "lines", str(out), "--lib"],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert f"rustc_188 stub run {coverage_receipts.PINNED_TOOLCHAIN} rustc -V" in lines_run.stdout
+    assert f"rustc_nightly stub run {coverage_receipts.NIGHTLY_TOOLCHAIN} rustc -V" in lines_run.stdout
+
+    branches_run = subprocess.run(
+        ["sh", str(script), "branches", str(out), "--lib"],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert coverage_receipts.BRANCH_FLAG in branches_run.stdout
+
+    bad = subprocess.run(
+        ["sh", str(script), "invalid", str(out)],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert bad.returncode == 2
+    assert "mode is lines or branches" in bad.stderr
+
+    recorded = log.read_text().splitlines()
+    assert (
+        f"rustup run {coverage_receipts.NIGHTLY_TOOLCHAIN} rustc {coverage_receipts.BRANCH_FLAG} -V"
+        in recorded
+    )
+    assert (
+        f"cargo {coverage_receipts.PINNED_TOOLCHAIN} llvm-cov --locked --json --output-path {out} --lib"
+        in recorded
+    )
+    assert (
+        f"cargo {coverage_receipts.NIGHTLY_TOOLCHAIN} llvm-cov --locked --json --output-path {out} --branch --lib"
+        in recorded
+    )
+
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    copied = sandbox / "coverage_toolchains.sh"
+    copied.write_text(body)
+    copied.chmod(0o755)
+    (sandbox / "coverage_receipts.py").write_text(
+        'PINNED_TOOLCHAIN = "1.99.0"\n'
+        'NIGHTLY_TOOLCHAIN = "nightly-2099-01-01"\n'
+        'BRANCH_FLAG = "-Zcoverage-options=probe"\n'
+    )
+    log.write_text("")
+    subprocess.run(
+        ["sh", str(copied), "branches", str(out)],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    sandbox_calls = log.read_text().splitlines()
+    assert "rustup run 1.99.0 rustc -V" in sandbox_calls
+    assert "rustup run nightly-2099-01-01 rustc -Zcoverage-options=probe -V" in sandbox_calls
+    assert f"cargo nightly-2099-01-01 llvm-cov --locked --json --output-path {out} --branch" in sandbox_calls
+
+
 def test_hexamer_numbers_from_a_log_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert hexamer_numbers.type7([3.0], 0.5) == 3.0
     assert hexamer_numbers.median_iqr([1.0, 2.0, 3.0, 4.0])[0] == pytest.approx(2.5)

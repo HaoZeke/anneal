@@ -18,6 +18,7 @@ from pathlib import Path
 PINNED_TOOLCHAIN = "1.88.0"
 NIGHTLY_TOOLCHAIN = "nightly-2026-11-01"
 COVERAGE_TOOLCHAINS = (PINNED_TOOLCHAIN, NIGHTLY_TOOLCHAIN)
+BRANCH_FLAG = "-Zcoverage-options=branch"
 
 
 def version(toolchain: str, tool: str) -> str:
@@ -65,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
         f"cargo_188 {version(PINNED_TOOLCHAIN, 'cargo')}",
         f"rustc_nightly {version(NIGHTLY_TOOLCHAIN, 'rustc')}",
         f"cargo_nightly {version(NIGHTLY_TOOLCHAIN, 'cargo')}",
-        "branch_flag -Zcoverage-options=branch",
+        f"branch_flag {BRANCH_FLAG}",
         f"branch_toolchain {NIGHTLY_TOOLCHAIN}",
     ]
     for name in wanted:
