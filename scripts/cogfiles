@@ -8,6 +8,7 @@ pyproject.toml
 pixi.toml
 meson.build
 CITATION.cff
+crates/anneal-python/Cargo.toml
 include/anneal-version.h
 README.md
 packaging/zenodo.cog
