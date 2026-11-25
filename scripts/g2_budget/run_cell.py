@@ -5,6 +5,7 @@
 The call budget and the process-CPU cap come from the protocol module.
 A seed that already has a row is not run again. A capped seed that
 stopped short of the pre-registered cap continues from its checkpoint.
+An anneal search keeps one worker process across those segments.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ import hashlib
 import importlib.util
 import json
 import math
+import signal
 import subprocess
 import sys
 import time
@@ -36,6 +38,8 @@ PREREG_REVISION = "1308d8678a8912de95ded423291a25430bb073fc"
 _THREAD_LIMIT = None
 _PANEL = None
 _POTENTIAL = None
+_GUPTA = None
+_SCALES = None
 
 
 def _load(name: str, path: Path):
@@ -249,6 +253,12 @@ def _write_checkpoint(root: Path, cell, outcome: dict, segments: list[dict]) -> 
     }
     if outcome.get("rng_state") is not None:
         payload["rng_state"] = outcome["rng_state"]
+    if outcome.get("worker_pid") is not None:
+        payload["worker_pid"] = int(outcome["worker_pid"])
+    if outcome.get("trajectory") is not None:
+        payload["trajectory"] = str(outcome["trajectory"])
+    if outcome.get("segment") is not None:
+        payload["segment"] = int(outcome["segment"])
     path = checkpoint_path(root, cell.system, cell.arm, cell.seed)
     rows._atomic_write(path, (json.dumps(payload) + "\n").encode())
 
@@ -462,51 +472,225 @@ def _classify(exc: BaseException) -> str | None:
     return None
 
 
-def _pair_potential(cell, panel, potential):
-    spec = panel.SYSTEMS[cell.system]
-    if spec["kind"] == "lj":
-        panel.check_lj()
-        potential.warmup()
+def _gupta():
+    global _GUPTA
+    if _GUPTA is None:
+        metal = ROOT / "scripts" / "metal_h2h"
+        entry = str(metal)
+        if entry not in sys.path:
+            sys.path.insert(0, entry)
+        import gupta_calc
 
+        _GUPTA = gupta_calc
+    return _GUPTA
+
+
+def gupta_pair_scales() -> tuple[float, float]:
+    """Panel length and well: r_min / 2^(1/6) and -E at the Gupta minimum."""
+    global _SCALES
+    if _SCALES is None:
+        gupta = _gupta()
+        numbers = np.array([79, 79], dtype=int)
+        best_r = 0.0
+        best_e = math.inf
+        distance = 1.8
+        while distance <= 4.5:
+            xyz = np.zeros((2, 3), dtype=np.float64)
+            xyz[1, 0] = distance
+            energy, _grad = gupta.evaluate(numbers, xyz)
+            if energy < best_e:
+                best_e = float(energy)
+                best_r = float(distance)
+            distance += 0.002
+        length = best_r / 2.0 ** (1.0 / 6.0)
+        well = -best_e
+        if not (math.isfinite(length) and math.isfinite(well) and length > 0.0 and well > 0.0):
+            raise RuntimeError("gupta scales are not positive")
+        _SCALES = (length, well)
+    return _SCALES
+
+
+def au55_scaled_energy_gradient(coordinates):
+    """Gupta energy and gradient in the panel's reduced units.
+
+    The search coordinate ``x`` is evaluated at ``x * length``. Energy is
+    divided by the well and the Cartesian gradient is multiplied by
+    ``length / well``.
+    """
+    length, well = gupta_pair_scales()
+    xyz = np.asarray(coordinates, dtype=np.float64).reshape(-1, 3)
+    if xyz.shape != (55, 3):
+        raise ValueError("au55 coordinates are 55 atoms")
+    energy, grad = _gupta().evaluate(np.full(55, 79, dtype=int), xyz * length)
+    reduced = float(energy) / well
+    reduced_grad = np.asarray(grad, dtype=np.float64).reshape(-1) * (length / well)
+    return reduced, reduced_grad
+
+
+class _Meter:
+    def __init__(self) -> None:
+        self.cpu = 0.0
+        self.wall = 0.0
+        self._mark()
+
+    def _mark(self) -> None:
+        self._cpu = time.process_time()
+        self._wall = time.perf_counter()
+
+    def running_cpu(self) -> float:
+        return self.cpu + (time.process_time() - self._cpu)
+
+    def snapshot_and_reset(self) -> tuple[float, float]:
+        self.cpu += time.process_time() - self._cpu
+        self.wall += time.perf_counter() - self._wall
+        cpu = float(self.cpu)
+        wall = float(self.wall)
+        if wall < cpu:
+            wall = cpu
+        self.cpu = 0.0
+        self.wall = 0.0
+        return cpu, wall
+
+    def restart(self) -> None:
+        self._mark()
+
+
+def _alive(pid: int) -> bool:
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+        return False
+    stat = Path(f"/proc/{pid}/stat")
+    try:
+        text = stat.read_text()
+    except FileNotFoundError:
+        return False
+    end = text.rfind(")")
+    if end < 0 or end + 2 >= len(text):
+        return False
+    return text[end + 2] not in {"Z", "X"}
+
+
+def _reap(pid: int) -> None:
+    try:
+        os.waitpid(pid, os.WNOHANG)
+    except ChildProcessError:
+        return
+
+
+def _tail(path: Path) -> str:
+    if not path.is_file():
+        return ""
+    lines = [line.strip() for line in path.read_text(errors="replace").splitlines() if line.strip()]
+    return " | ".join(lines[-5:])
+
+
+def _read_status(path: Path) -> dict | None:
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return None
+
+
+def _write_status(work: Path, payload: dict) -> None:
+    rows._atomic_write(work / "status.json", (json.dumps(payload) + "\n").encode())
+
+
+def _reduced_pair(kind: str, n: int, potential):
+    if kind == "lj":
         def pair(flat: np.ndarray):
             energy, grad = potential.lj_value_and_gradient(flat)
             return float(energy), np.asarray(grad, dtype=np.float64).reshape(-1)
 
-        return spec, pair, None
-    binary = panel.asg_eval_binary()
-    n_atoms, paper_budget, reference, _length = panel.evaluator_spec(binary, cell.system)
-    if (n_atoms, paper_budget) != (spec["n"], spec["budget"]) or reference != spec["reference"]:
-        raise RuntimeError("asg_eval spec differs from the panel")
-    server = potential.AnnealServer(binary, cell.system)
+        return pair, 1.0, 1.0
+    if kind != "gupta":
+        raise RuntimeError(f"unknown potential {kind}")
+    length, well = gupta_pair_scales()
+    numbers = np.full(int(n), 79, dtype=int)
+    gupta = _gupta()
 
     def pair(flat: np.ndarray):
-        energy, _inside, grad = server.eval(flat)
-        return float(energy), np.asarray(grad, dtype=np.float64).reshape(-1)
+        xyz = np.asarray(flat, dtype=np.float64).reshape(-1, 3) * length
+        energy, grad = gupta.evaluate(numbers, xyz)
+        reduced = float(energy) / well
+        reduced_grad = np.asarray(grad, dtype=np.float64).reshape(-1) * (length / well)
+        return reduced, reduced_grad
 
-    return spec, pair, server
+    return pair, length, well
 
 
-def _run_anneal(cell, cap_s, state) -> dict:
+def _worker_search(work: Path) -> None:
+    job = json.loads((work / "job.json").read_text())
+    _pin()
+    _limit_threads()
     panel, potential = _libraries()
     from anneal import Config, cluster_search
 
-    spec, pair, server = _pair_potential(cell, panel, potential)
-    preset = Config.for_cluster(int(spec["n"]))
-    if int(preset.n_points) != int(spec["n"]):
+    kind = str(job["kind"])
+    n = int(job["n"])
+    if kind == "lj":
+        panel.check_lj()
+        potential.warmup()
+    preset = Config.for_cluster(n)
+    if int(preset.n_points) != n:
         raise RuntimeError("for_cluster built a different system")
-    start_calls = 0 if state is None else int(state["calls"])
+    pair, _length, well = _reduced_pair(kind, n, potential)
+    budget = int(job["budget"])
+    level = (float(job["reference"]) + float(job["hit_tol"])) / well
+    cap = None if job.get("cap_s") is None else float(job["cap_s"])
+    meter = _Meter()
     counter = {
-        "calls": start_calls,
-        "best": math.inf if state is None else float(state["best_e"]),
-        "best_x": None if state is None else np.asarray(state["positions"], dtype=np.float64).reshape(-1).copy(),
+        "calls": 0,
+        "best": math.inf,
+        "best_x": None,
         "x": None,
         "energy": None,
         "grad": None,
     }
-    cpu0 = time.process_time()
-    wall0 = time.perf_counter()
+    hasher = hashlib.sha256()
+    segment = 0
+
+    def publish(phase: str, stop: str) -> None:
+        nonlocal segment
+        segment += 1
+        cpu_s, wall_s = meter.snapshot_and_reset()
+        best_x = counter["best_x"]
+        _write_status(
+            work,
+            {
+                "phase": phase,
+                "stop": stop,
+                "segment": segment,
+                "calls": int(counter["calls"]),
+                "best_e": float(counter["best"] * well),
+                "cpu_s": cpu_s,
+                "wall_s": wall_s,
+                "trajectory": hasher.hexdigest(),
+                "positions": (
+                    []
+                    if best_x is None
+                    else np.asarray(best_x, dtype=np.float64).reshape(-1).tolist()
+                ),
+                "pid": os.getpid(),
+            },
+        )
+
+    def park() -> float | None:
+        publish("paused", "cap")
+        resume = work / "resume"
+        stop_file = work / "stop"
+        while not resume.exists():
+            if stop_file.exists():
+                raise potential.CapReached()
+            time.sleep(0.01)
+        resume.unlink()
+        fresh = json.loads((work / "job.json").read_text())
+        meter.restart()
+        nxt = fresh.get("cap_s")
+        return None if nxt is None else float(nxt)
 
     def evaluate(x) -> None:
+        nonlocal cap
         flat = np.ascontiguousarray(np.asarray(x, dtype=np.float64).reshape(-1))
         if (
             counter["x"] is not None
@@ -514,14 +698,15 @@ def _run_anneal(cell, cap_s, state) -> dict:
             and np.array_equal(flat, counter["x"])
         ):
             return
-        if counter["calls"] >= int(cell.budget):
+        if counter["calls"] >= budget:
             raise potential.BudgetReached()
         if (
-            cap_s is not None
-            and counter["calls"] > start_calls
-            and (time.process_time() - cpu0) >= float(cap_s)
+            cap is not None
+            and counter["calls"] > 0
+            and math.isfinite(counter["best"])
+            and meter.running_cpu() >= cap
         ):
-            raise potential.CapReached()
+            cap = park()
         energy, grad = pair(flat)
         if grad.shape != flat.shape or not math.isfinite(energy) or not np.all(np.isfinite(grad)):
             energy = 1.0e8
@@ -530,6 +715,7 @@ def _run_anneal(cell, cap_s, state) -> dict:
         counter["x"] = flat.copy()
         counter["energy"] = float(energy)
         counter["grad"] = np.ascontiguousarray(grad, dtype=np.float64)
+        hasher.update(np.ascontiguousarray(counter["x"], dtype=np.float64).tobytes())
         if counter["energy"] < counter["best"]:
             counter["best"] = counter["energy"]
             counter["best_x"] = counter["x"].copy()
@@ -542,73 +728,207 @@ def _run_anneal(cell, cap_s, state) -> dict:
         evaluate(x)
         return counter["grad"]
 
-    level = float(spec["reference"]) + float(panel.HIT_TOL)
-    start = None if state is None else np.asarray(state["positions"], dtype=np.float64).reshape(-1)
     stop = None
     try:
-        try:
-            out = cluster_search(
-                energy,
-                grad,
-                int(spec["n"]),
-                int(cell.budget) + 64,
-                seed=int(cell.seed),
-                recommended=False,
-                start=start,
-                target=level,
-            )
-        except BaseException as exc:
-            kind = _classify(exc)
-            if kind is None:
-                elapsed = time.process_time() - cpu0
-                if counter["calls"] >= int(cell.budget):
-                    kind = "budget"
-                elif cap_s is not None and counter["calls"] > start_calls and elapsed >= float(cap_s):
-                    kind = "cap"
-                else:
-                    raise
-            stop = kind
-            out = None
-        else:
-            reported = float(out["best_energy"])
-            if math.isfinite(reported) and reported < counter["best"]:
-                counter["best"] = reported
-                counter["best_x"] = np.asarray(out["best"], dtype=np.float64).reshape(-1).copy()
-            if counter["best"] <= level:
-                stop = "hit"
-            elif counter["calls"] >= int(cell.budget):
-                stop = "budget"
-            elif cap_s is not None and (time.process_time() - cpu0) >= float(cap_s):
-                stop = "cap"
-            else:
-                raise RuntimeError(
-                    f"anneal stopped after {counter['calls']} calls at {counter['best']}"
-                )
-        if counter["best_x"] is None or not math.isfinite(counter["best"]):
-            raise RuntimeError("anneal did not record an energy")
-        calls = int(counter["calls"])
-        if stop == "cap" and calls >= int(cell.budget):
-            stop = "budget"
-        if stop == "budget" and calls != int(cell.budget):
-            raise RuntimeError(f"budget stop recorded {calls} calls")
-        return _outcome(
-            stop,
-            calls,
-            float(counter["best"]),
-            time.process_time() - cpu0,
-            time.perf_counter() - wall0,
-            positions=np.asarray(counter["best_x"], dtype=np.float64).reshape(-1).tolist(),
+        out = cluster_search(
+            energy,
+            grad,
+            n,
+            budget + 64,
+            seed=int(job["seed"]),
+            recommended=False,
+            target=level,
         )
-    finally:
-        if server is not None:
-            server.close()
+    except potential.CapReached:
+        raise
+    except BaseException as exc:
+        kind_stop = _classify(exc)
+        if kind_stop is None:
+            if counter["calls"] >= budget:
+                kind_stop = "budget"
+            else:
+                raise
+        stop = kind_stop
+        out = None
+    else:
+        reported = float(out["best_energy"])
+        if math.isfinite(reported) and reported < counter["best"]:
+            counter["best"] = reported
+            best = out.get("best")
+            if best is not None:
+                counter["best_x"] = np.asarray(best, dtype=np.float64).reshape(-1).copy()
+        if counter["best"] <= level:
+            stop = "hit"
+        elif counter["calls"] >= budget:
+            stop = "budget"
+        else:
+            raise RuntimeError(
+                f"anneal stopped after {counter['calls']} calls at {counter['best']}"
+            )
+    if counter["best_x"] is None or not math.isfinite(counter["best"]):
+        raise RuntimeError("anneal did not record an energy")
+    if stop == "cap" and counter["calls"] >= budget:
+        stop = "budget"
+    if stop == "budget" and counter["calls"] != budget:
+        raise RuntimeError(f"budget stop recorded {counter['calls']} calls")
+    publish("done", stop)
+
+
+def _worker_main(workdir: str) -> int:
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    work = Path(workdir)
+    try:
+        _worker_search(work)
+    except BaseException as exc:
+        if _classify(exc) == "cap":
+            return 0
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            raise
+        try:
+            _write_status(
+                work,
+                {
+                    "phase": "error",
+                    "segment": 1 << 30,
+                    "message": f"{type(exc).__name__}: {exc}",
+                    "pid": os.getpid(),
+                },
+            )
+        except Exception:
+            pass
+        return 1
+    return 0
+
+
+def _publish_job(work: Path, cell, cap_s) -> None:
+    panel, _potential = _libraries()
+    spec = panel.SYSTEMS[cell.system]
+    payload = {
+        "system": cell.system,
+        "seed": int(cell.seed),
+        "budget": int(cell.budget),
+        "cap_s": None if cap_s is None else float(cap_s),
+        "n": int(spec["n"]),
+        "kind": spec["kind"],
+        "reference": float(spec["reference"]),
+        "hit_tol": float(panel.HIT_TOL),
+    }
+    rows._atomic_write(work / "job.json", (json.dumps(payload) + "\n").encode())
+
+
+def _spawn_worker(work: Path) -> int:
+    script = str(Path(__file__).resolve())
+    with (work / "worker.err").open("ab") as err:
+        proc = subprocess.Popen(
+            [sys.executable, script, "--worker", str(work)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=err,
+            start_new_session=True,
+            cwd=str(ROOT),
+        )
+    return int(proc.pid)
+
+
+def _matching_status(status: dict | None, segment: int) -> bool:
+    return (
+        status is not None
+        and int(status.get("segment", 0)) >= int(segment)
+        and status.get("phase") in {"paused", "done", "error"}
+    )
+
+
+def _raise_worker_status(status: dict, pid: int) -> None:
+    if status.get("phase") == "error":
+        message = status.get("message") or f"anneal worker {pid} failed"
+        raise RuntimeError(str(message))
+
+
+def _wait_worker(work: Path, pid: int, segment: int) -> dict:
+    status_path = work / "status.json"
+    while True:
+        status = _read_status(status_path)
+        if _matching_status(status, segment):
+            _raise_worker_status(status, pid)
+            return status
+        if not _alive(pid):
+            status = _read_status(status_path)
+            if _matching_status(status, segment):
+                _raise_worker_status(status, pid)
+                _reap(pid)
+                return status
+            _reap(pid)
+            detail = f"anneal worker {pid} is gone; refusing to reseed"
+            tail = _tail(work / "worker.err")
+            if tail:
+                detail = f"{detail}: {tail}"
+            raise RuntimeError(detail)
+        time.sleep(0.01)
+
+
+def _stop_worker(pid: int, work: Path) -> None:
+    (work / "stop").write_text("\n")
+    for _ in range(500):
+        if not _alive(pid):
+            _reap(pid)
+            return
+        time.sleep(0.01)
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    _reap(pid)
+
+
+def _clear_worker_flags(work: Path) -> None:
+    for name in ("resume", "stop", "status.json"):
+        path = work / name
+        if path.exists():
+            path.unlink()
+
+
+def _run_anneal(cell, root: Path, cap_s, state) -> dict:
+    work = checkpoint_path(root, cell.system, cell.arm, cell.seed).parent
+    work.mkdir(parents=True, exist_ok=True)
+    if state is not None:
+        pid = state.get("worker_pid")
+        if pid is None or not _alive(int(pid)):
+            shown = "missing" if pid is None else int(pid)
+            raise RuntimeError(f"anneal worker {shown} is gone; refusing to reseed")
+        pid = int(pid)
+        _publish_job(work, cell, cap_s)
+        (work / "resume").write_text("\n")
+        status = _wait_worker(work, pid, int(state.get("segment", 1)) + 1)
+    else:
+        _clear_worker_flags(work)
+        _publish_job(work, cell, cap_s)
+        pid = _spawn_worker(work)
+        status = _wait_worker(work, pid, 1)
+    if status.get("phase") == "paused":
+        stop = "cap"
+    elif status.get("phase") == "done":
+        stop = str(status["stop"])
+    else:
+        raise RuntimeError(f"anneal worker {pid} ended in {status.get('phase')}")
+    return _outcome(
+        stop,
+        int(status["calls"]),
+        float(status["best_e"]),
+        float(status["cpu_s"]),
+        float(status["wall_s"]),
+        positions=status["positions"],
+        worker_pid=pid,
+        trajectory=str(status["trajectory"]),
+        segment=int(status["segment"]),
+    )
 
 
 def _finish(root: Path, cell, stamp: Path, state, outcome: dict, cpu: int):
     prior = list(state["prior"]) if state else []
-    summed = math.fsum([float(item["cpu_s"]) for item in prior] + [float(outcome["cpu_s"])])
+    summed_cpu = math.fsum([float(item["cpu_s"]) for item in prior] + [float(outcome["cpu_s"])])
+    summed_wall = math.fsum([float(item["wall_s"]) for item in prior] + [float(outcome["wall_s"])])
     stop = outcome["stop"]
-    terminal = stop in {"hit", "budget"} or (stop == "cap" and summed >= float(protocol.CPU_CAP_S))
+    terminal = stop in {"hit", "budget"} or (stop == "cap" and summed_cpu >= float(protocol.CPU_CAP_S))
     record_stop = stop if terminal else "checkpoint"
     segments = prior + [
         {
@@ -622,6 +942,17 @@ def _finish(root: Path, cell, stamp: Path, state, outcome: dict, cpu: int):
     if not terminal:
         _write_checkpoint(root, cell, outcome, segments)
         return None
+    record = segments
+    if cell.stop_rule != "cap" and len(segments) > 1:
+        record = [
+            {
+                "calls_reached": int(outcome["calls"]),
+                "best_e": min(float(item["best_e"]) for item in segments),
+                "cpu_s": summed_cpu,
+                "wall_s": summed_wall,
+                "stop": record_stop,
+            }
+        ]
     built = [
         rows.Segment(
             int(item["calls_reached"]),
@@ -630,14 +961,19 @@ def _finish(root: Path, cell, stamp: Path, state, outcome: dict, cpu: int):
             float(item["wall_s"]),
             str(item["stop"]),
         )
-        for item in segments
+        for item in record
     ]
+    extra = _shape_extra(cpu)
+    if outcome.get("trajectory") is not None:
+        extra["trajectory_sha256"] = str(outcome["trajectory"])
+    if cell.arm == "anneal":
+        extra["segment_count"] = len(segments)
     row = rows.append_result(
         root,
         cell,
         built,
         PREREG_REVISION,
-        shape_extra=_shape_extra(cpu),
+        shape_extra=extra,
     )
     _write_stamp(cell, stamp)
     return row
@@ -654,26 +990,42 @@ def run_cell(system: str, arm: str, seed: int, root, stamp) -> dict | None:
         _write_stamp(cell, stamp)
         return stored
     cap_s = segment_cap_s(cell)
-    state = _load_checkpoint(root, cell) if cell.stop_rule == "cap" else None
+    if cell.arm == "anneal" or cell.stop_rule == "cap":
+        state = _load_checkpoint(root, cell)
+    else:
+        state = None
     if cell.arm == "ase_bh":
         outcome = _run_bh(cell, cap_s, state)
     elif cell.arm == "ase_mh":
         outcome = _run_mh(cell, root, cap_s, state)
     elif cell.arm == "anneal":
-        outcome = _run_anneal(cell, cap_s, state)
+        outcome = _run_anneal(cell, root, cap_s, state)
     else:
         raise RuntimeError(f"unknown arm {cell.arm}")
-    return _finish(root, cell, stamp, state, outcome, cpu)
+    row = _finish(root, cell, stamp, state, outcome, cpu)
+    if cell.arm == "anneal" and row is not None and outcome.get("worker_pid") is not None:
+        pid = int(outcome["worker_pid"])
+        work = checkpoint_path(root, cell.system, cell.arm, cell.seed).parent
+        if _alive(pid):
+            _stop_worker(pid, work)
+        else:
+            _reap(pid)
+    return row
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run one pre-registered G2 budget-stop cell.")
-    parser.add_argument("--system", required=True)
-    parser.add_argument("--arm", required=True)
-    parser.add_argument("--seed", required=True, type=int)
-    parser.add_argument("--stamp", required=True)
+    parser.add_argument("--system")
+    parser.add_argument("--arm")
+    parser.add_argument("--seed", type=int)
+    parser.add_argument("--stamp")
     parser.add_argument("--root", default=None)
+    parser.add_argument("--worker", default=None)
     args = parser.parse_args(argv)
+    if args.worker:
+        return _worker_main(args.worker)
+    if not args.system or not args.arm or args.seed is None or not args.stamp:
+        parser.error("--system, --arm, --seed and --stamp are required")
     root = Path(args.root) if args.root else ROOT
     run_cell(args.system, args.arm, args.seed, root, Path(args.stamp))
     return 0
