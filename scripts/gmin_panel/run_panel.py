@@ -1030,7 +1030,7 @@ def main(argv: list[str]) -> int:
     if socket.gethostname() != "bench":
         print(f"uts hostname is {socket.gethostname()}, expected bench", file=sys.stderr)
         return 2
-    if os.sched_getaffinity(0) != {0}:
+    if hasattr(os, "sched_getaffinity") and os.sched_getaffinity(0) != {0}:
         print(f"pinned to {sorted(os.sched_getaffinity(0))}, expected core 0", file=sys.stderr)
         return 2
     needed = (
