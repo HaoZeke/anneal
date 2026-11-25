@@ -1,8 +1,8 @@
-# Record refs on origin whose commits printed numbers may rest on. A
-# branch row is record/<name>. A ref that is not a branch names the full
-# ref, refs/audit/record/<name>. A row counts only when origin holds that
-# ref at this SHA, git fetch origin brings it, and the commit has this
-# tree. A row with no tree is expected and fails until the tree is recorded.
+# Record refs on origin whose commits printed numbers may rest on. Each
+# row names the full ref, refs/audit/record/<name>. A row counts only when
+# origin holds that ref at this SHA, git fetch origin brings it, and the
+# commit has this tree. A row with no tree is expected and fails until the
+# tree is recorded.
 ref,sha,tree
 refs/audit/record/ase-nonlj-rerun-20261119,4f852a6802ce61c917e83f7d82da037811d3e816,797c2303b453e615e81714456c08a1fb706a27af
 refs/audit/record/ase-panel-rerun-p1,e6117b33cf039ada290a0bd8834e61ae6ab570cb,1298d5a728882be96edfe087e0e522c7761ebbbb
@@ -16,11 +16,12 @@ refs/audit/record/gmin-rerun-20261119-c,17f1ef6d7104e544bddf20db16db1a415324a483
 refs/audit/record/gmin-rerun-20261119-d,c8e09854297eaa4f6d391174a8a6e13be2572e65,5742404cd8517b7f5afcabc8915303eb1203e530
 refs/audit/record/knockout-move-a,50c532253f3ad11e6457a119bb603f05b4f0be79,abfd85401283d4d3cf63a0e358b3476d2b0c4d7b
 refs/audit/record/knockout-pairscale,5c37c840ed2e9f9a2d881105363b33762b5cca31,7b6c047d6e1033405c86bf40cd55272aeb49f99f
+refs/audit/record/leave-lj75,5847624da218d2748642f51e42f58fc904fecb66,d63a17d46b937283f43ad83e32c0c6bb9372646f
 refs/audit/record/outside-perf3-r2,9178884ee114e60dd597fb5a970edbda648979f8,c6096c4ace7e2075dcde5134242dd53cfc318e5c
 refs/audit/record/rerun-tuned-gmin-r2,679871e41ef15b5b155f293e4bca0030e6d45697,46c85352b4ed3ee2cb4639e97ca3b2d3785ffdae
-record/repro-pin,9a30f3190b3bb7040c675a904f8388eb68224151,4cf101da6fe8f4d1069f5cb472413bd7e232d69c
-record/sc-h2h-harness,d59b0b6cf02fc300ff618f79d65da365128eed5a,16f50956905ca7fc7f51459ef36fb336eebb1d1b
-record/cov-floor2-si13,c1c02d1646a71267e0f6c02cfcfcc07d5b88d9b4,0991c54d8dfbc8bfa2d0ff8847f0a004649f3e9a
+refs/audit/record/repro-pin,9a30f3190b3bb7040c675a904f8388eb68224151,4cf101da6fe8f4d1069f5cb472413bd7e232d69c
+refs/audit/record/sc-h2h-harness,d59b0b6cf02fc300ff618f79d65da365128eed5a,16f50956905ca7fc7f51459ef36fb336eebb1d1b
+refs/audit/record/cov-floor2-si13,c1c02d1646a71267e0f6c02cfcfcc07d5b88d9b4,0991c54d8dfbc8bfa2d0ff8847f0a004649f3e9a
 refs/audit/record/tip4p-h2h-r2,cdae978c748db560fa3ac75eea3f0e0f07039653,f7ee9adc6e520aa9ad1d5c0cb307688254294af7
 refs/audit/record/tip4p-hits-b3-gate,25b2c417f8e89c2ef395d631293e0b24b8a5927c,54a19fdccc2464a3136bbeb1adfe1f9585198d86
 refs/audit/record/gmin-184,e4341de058b73366f2d7b5f17995da283d57bad6,63d1488f465fff1e65ce9b338641ef945fad75a9
