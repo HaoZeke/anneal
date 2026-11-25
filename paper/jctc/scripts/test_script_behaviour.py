@@ -258,15 +258,6 @@ def test_tally_covers_hits_misses_and_missing(tmp_path: Path) -> None:
 
 
 def test_coverage_receipt_writes_both_toolchains(tmp_path: Path) -> None:
-    original = coverage_receipts.version
-    coverage_receipts.version = lambda toolchain, tool: f"{tool} ({toolchain})"
-    try:
-        _coverage_receipt_writes_both_toolchains(tmp_path)
-    finally:
-        coverage_receipts.version = original
-
-
-def _coverage_receipt_writes_both_toolchains(tmp_path: Path) -> None:
     lines = {
         "data": [
             {
@@ -306,8 +297,15 @@ def _coverage_receipt_writes_both_toolchains(tmp_path: Path) -> None:
     assert "lines_188 10/10 100.00" in text
     assert "branches 3/4 75.00" in text
     assert "line_gap_reason" in text
-    assert "rustc_188 rustc (1.88.0)" in text
-    assert "cargo_nightly cargo (nightly-2026-11-01)" in text
+    for key, toolchain, tool in (
+        ("rustc_188", "1.88.0", "rustc"),
+        ("cargo_188", "1.88.0", "cargo"),
+        ("rustc_nightly", "nightly-2026-11-01", "rustc"),
+        ("cargo_nightly", "nightly-2026-11-01", "cargo"),
+    ):
+        reported = subprocess.check_output(["rustup", "run", toolchain, tool, "-V"], text=True).strip()
+        assert f"{key} {reported}" in text.splitlines()
+    assert "rustc_188 rustc 1.88.0 (" in text
     assert (out / "missing.rs.txt").read_text().count("absent") >= 2
     with pytest.raises(SystemExit, match="usage"):
         coverage_receipts.main([])
@@ -537,8 +535,6 @@ def test_redact_main_rewrites_a_home_path(tmp_path: Path) -> None:
 
 
 def test_house_drawers_write_pdfs(tmp_path: Path) -> None:
-    pytest.importorskip("matplotlib")
-    pytest.importorskip("chemparseplot")
     os.environ["PYTHONHASHSEED"] = "0"
     os.environ["SOURCE_DATE_EPOCH"] = "0"
     import fig_algorithm_stack
