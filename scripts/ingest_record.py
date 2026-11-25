@@ -216,16 +216,9 @@ def refresh_gmin(root: Path) -> None:
     panel.write_tables(root, rows, "latest", True)
 
 
-def refresh_sc(root: Path) -> None:
+def refresh_rows_only(root: Path) -> None:
+    """The paper prints no table from these rows, so only paper_audit.py reads them."""
     _same_repo(root)
-    tables = _module("h2h_tables_refresh", "paper/jctc/scripts/h2h_tables.py")
-    tables.refresh(("sc-prose", "sc", "sc-si"))
-
-
-def refresh_tuned(root: Path) -> None:
-    _same_repo(root)
-    tables = _module("h2h_tables_refresh", "paper/jctc/scripts/h2h_tables.py")
-    tables.refresh(("gmin-tuned",))
 
 
 def production_catalog() -> dict[str, Record]:
@@ -259,13 +252,13 @@ def production_catalog() -> dict[str, Record]:
                 "bench/metal-cluster-h2h/sc-n12/pvalues.csv",
             ),
             "harness not reachable",
-            refresh_sc,
+            refresh_rows_only,
         ),
         "record/gmin-tuned": Record(
             "tab:gmin-tuned",
             ("bench/gmin-tuned/rows-shard2.csv",),
             "harness not reachable",
-            refresh_tuned,
+            refresh_rows_only,
         ),
     }
 
@@ -298,7 +291,7 @@ def withheld_items() -> list[tuple[str, str]]:
     tables = _module("h2h_tables_withheld", "paper/jctc/scripts/h2h_tables.py")
     if not tables.sc_gmin_quotable():
         items.append(("tab:sc", "harness not reachable"))
-    if not tables.tuned_gmin_block():
+    if not tables.tuned_gmin_quotable():
         items.append(("tab:gmin-tuned", "harness not reachable"))
     for _name, reason in items:
         if reason not in REASONS:

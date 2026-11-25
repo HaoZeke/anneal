@@ -4,14 +4,17 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import io
 import json
 import os
 import runpy
+import shutil
 import subprocess
 import sys
 import tarfile
 import textwrap
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import pytest
@@ -33,6 +36,42 @@ import replay_v127
 import toc_graphic
 import watch_crest_steps
 import write_figure_provenance_v128
+
+RUSTUP_PROBE_TIMEOUT = 5.0
+
+
+def has_coverage_toolchains() -> bool:
+    rustup = shutil.which("rustup")
+    if rustup is None:
+        return False
+    try:
+        found = [
+            subprocess.run(
+                [rustup, "run", toolchain, "rustc", "-V"],
+                capture_output=True,
+                check=False,
+                timeout=RUSTUP_PROBE_TIMEOUT,
+            ).returncode == 0
+            for toolchain in coverage_receipts.COVERAGE_TOOLCHAINS
+        ]
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return all(found)
+
+
+def has_figure_dependencies() -> bool:
+    try:
+        return (
+            importlib.util.find_spec("matplotlib") is not None
+            and importlib.util.find_spec("chemparseplot") is not None
+            and version("chemparseplot") == "1.11.0"
+        )
+    except PackageNotFoundError:
+        return False
+
+
+HAS_COVERAGE_TOOLCHAINS = has_coverage_toolchains()
+HAS_CHEMPARSEPLOT = has_figure_dependencies()
 
 
 def test_toc_graphic_writes_a_pdf(tmp_path: Path) -> None:
@@ -257,6 +296,13 @@ def test_tally_covers_hits_misses_and_missing(tmp_path: Path) -> None:
         hq_sci_tally.seed_file(empty, "absent", 0)
 
 
+@pytest.mark.skipif(
+    not HAS_COVERAGE_TOOLCHAINS,
+    reason=(
+        "requires rustup toolchains "
+        + ", ".join(coverage_receipts.COVERAGE_TOOLCHAINS)
+    ),
+)
 def test_coverage_receipt_writes_both_toolchains(tmp_path: Path) -> None:
     lines = {
         "data": [
@@ -534,6 +580,10 @@ def test_redact_main_rewrites_a_home_path(tmp_path: Path) -> None:
         sys.argv = old
 
 
+@pytest.mark.skipif(
+    not HAS_CHEMPARSEPLOT,
+    reason="requires chemparseplot",
+)
 def test_house_drawers_write_pdfs(tmp_path: Path) -> None:
     os.environ["PYTHONHASHSEED"] = "0"
     os.environ["SOURCE_DATE_EPOCH"] = "0"

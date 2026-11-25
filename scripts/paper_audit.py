@@ -3235,11 +3235,6 @@ def sutton_chen(audit: Audit) -> None:
         audit.said(COVER, f"On {spelled(len(pairs))} Sutton--Chen clusters, this work has more hits on "
                           f"{spelled(ahead)}, ties GMIN on {spelled(tied)}, and GMIN has the lower median wall on "
                           f"{spelled(gmin_faster)}.")
-    elif h2h.sc_block():
-        audit.said(PAPER, "This setting hits 12 of 12 on the three forms at 38 atoms and on the 12-6 and "
-                          "9-6 forms at 55 atoms.")
-        audit.said(PAPER, "It hits 5 of 12 on the 10-8 form at 55 atoms and on the 12-6 form at 80 atoms, "
-                          "4 of 12 on the 10-8 form at 80 atoms, and 7 of 12 on the 9-6 form at 80 atoms.")
     else:
         for path in (TEX, SI, COVER):
             text = audit.text(path)
