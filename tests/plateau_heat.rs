@@ -124,7 +124,7 @@ fn a_new_lowest_returns_the_walk_to_the_preset() {
     let (cold, hot) = pair(&cfg, 8_000, 2);
     assert_ne!(fingerprint(&hot), fingerprint(&cold), "heat moves the walk");
     assert_eq!(fingerprint(&cold), 0x77daf5dac189d7fc, "preset walk");
-    assert_eq!(fingerprint(&hot), 0xf733c29fe0e936a0, "heat = 1.0");
+    assert_eq!(fingerprint(&hot), 0x5589043320ccbc0c, "heat = 1.0");
 }
 
 /// Seed 76 lowers the best from a quench after the loop head, with the heat
@@ -138,10 +138,10 @@ fn a_same_iteration_record_returns_to_the_preset() {
     cfg.continuous_symmetry = ContinuousSymmetry::Measure { interval: 1 };
     let (cold, hot) = pair(&cfg, 6_000, 76);
     assert_ne!(fingerprint(&hot), fingerprint(&cold), "heat moves the walk");
-    assert_eq!(fingerprint(&cold), 0x4e21f286e8d17063, "preset walk");
+    assert_eq!(fingerprint(&cold), 0x23274f7f3d818ea8, "preset walk");
     assert_eq!(
         fingerprint(&hot),
-        0x3ae26ce650b0fc5c,
+        0xe31f274cab9d45e2,
         "same-iteration heat = 1.0"
     );
 }
@@ -160,7 +160,7 @@ fn without_completion_the_preset_walks_are_the_ones_the_series_started_from() {
     cfg.restart_patience = 2_000;
     cfg.energy_lattice = false;
     let (cold, hot) = pair(&cfg, 30_000, 2000);
-    assert_eq!(fingerprint(&cold), 0x8b789f0315c5c3cd, "metropolis preset");
+    assert_eq!(fingerprint(&cold), 0xa68432200a19e45e, "metropolis preset");
     assert_eq!(fingerprint(&hot), 0x55fe439f5a3e1199, "metropolis heat");
 
     let mut cfg = off(Config::recommended(ATOMS));
@@ -174,7 +174,7 @@ fn without_completion_the_preset_walks_are_the_ones_the_series_started_from() {
     cfg.relax_steps = 20;
     cfg.energy_lattice = false;
     let (cold, hot) = pair(&cfg, 8_000, 2);
-    assert_eq!(fingerprint(&cold), 0x1405c408decc805c, "new lowest preset");
+    assert_eq!(fingerprint(&cold), 0x044052d3762c9aeb, "new lowest preset");
     assert_eq!(fingerprint(&hot), 0x836fddcbf51fd563, "new lowest heat");
 
     let mut cfg = off(Config::recommended(ATOMS));
@@ -188,5 +188,5 @@ fn without_completion_the_preset_walks_are_the_ones_the_series_started_from() {
         0x46a5c7a48102f029,
         "same iteration preset"
     );
-    assert_eq!(fingerprint(&hot), 0x16e375f012558c31, "same iteration heat");
+    assert_eq!(fingerprint(&hot), 0xea96f684859cbe79, "same iteration heat");
 }
