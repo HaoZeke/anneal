@@ -1231,7 +1231,7 @@ mod tests {
         use super::*;
         // Packing histograms that differ in the tenth digit: a plain
         // Cholesky with a noise far below the rounding floor of the
-        // amplitude fails, and the failed fit used to be retried by every
+        // amplitude fails, and the failed fit must not be retried by every
         // prediction of the sweep.
         let mut m = FunnelModel::new(0.15, 20.0, 1e-9);
         for i in 0..40 {

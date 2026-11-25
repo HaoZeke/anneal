@@ -19,7 +19,7 @@
 //!
 //! Collect the triangles into `T_ijk = A_ij A_jk A_ik`, supersymmetric under
 //! all six permutations of its indices, and the total mass of `T` is `tr A^3`.
-//! Relabelling the points by `pi` sends `T` to `T x_1 P x_2 P x_3 P` with the
+//! Relabeling the points by `pi` sends `T` to `T x_1 P x_2 P x_3 P` with the
 //! same permutation matrix `P` in every mode, so every mode-wise spectral
 //! quantity of `T` is a permutation invariant. Rigid motions and reflections
 //! act trivially because `T` is built from distances.
@@ -30,7 +30,7 @@
 //! makes the three unfoldings share their singular values, so there is one
 //! Gram matrix rather than three.
 //!
-//! 1. `G -> P G P^T` under relabelling, so `spec(G)` is exactly invariant, and
+//! 1. `G -> P G P^T` under relabeling, so `spec(G)` is exactly invariant, and
 //!    with it the mode singular values `sqrt(spec(G))`. This is the part that
 //!    can be made into a descriptor; which function of `T` the descriptor
 //!    actually takes is settled below on cost and on measured separation.
@@ -98,7 +98,7 @@
 //!
 //! That ordering is about a fixed radius, and a radius has to be set, so the
 //! measurement below normalises: `z = ||f(X) - f(Y)|| / j(f)` with `j(f)` the
-//! largest response of `f` to a 0.02 displacement plus a relabelling and a
+//! largest response of `f` to a 0.02 displacement plus a relabeling and a
 //! rotation. A merge radius has to sit above `j(f)` and below the closest pair
 //! of distinct minima, so the worst-case `z` over pairs is the width of the
 //! band the radius has to find, and `z` below 1 means there is no band. Both
@@ -196,7 +196,7 @@ const EIGEN_SWEEPS: usize = 30;
 /// `(n, 3)` point set.
 ///
 /// Symmetric with unit diagonal, and a function of the distances alone, so it
-/// is invariant to rigid motions and equivariant to relabelling.
+/// is invariant to rigid motions and equivariant to relabeling.
 ///
 /// Panics if `sigma` is not positive or `x` is not `3 * n_points` long.
 pub fn kernel_matrix(x: ArrayView1<f64>, n_points: usize, sigma: f64) -> Array2<f64> {
@@ -625,7 +625,7 @@ mod tests {
     }
 
     #[test]
-    fn mode_spectrum_is_invariant_under_relabelling_and_rigid_motion() {
+    fn mode_spectrum_is_invariant_under_relabeling_and_rigid_motion() {
         let n = 8;
         let x = random_points(n, 909);
         let y = permute_rotate(&x, n, 4242);
@@ -637,7 +637,7 @@ mod tests {
         for i in 0..n {
             assert!(
                 (la[i] - lb[i]).abs() <= 1e-10 * scale,
-                "mode eigenvalue {i} moved under a relabelling"
+                "mode eigenvalue {i} moved under a relabeling"
             );
         }
     }
@@ -684,7 +684,7 @@ mod tests {
     }
 
     #[test]
-    fn descriptor_is_invariant_under_relabelling_and_rigid_motion() {
+    fn descriptor_is_invariant_under_relabeling_and_rigid_motion() {
         let n = 30;
         let f = TripletSpectrum::new(n);
         let x = random_points(n, 5150);

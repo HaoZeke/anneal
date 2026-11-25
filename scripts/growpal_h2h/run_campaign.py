@@ -31,6 +31,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         break
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 from machine_provenance import (  # noqa: E402
+    host_label,
     machine_columns,
     validate_saved_row_identity,
 )
@@ -331,7 +332,7 @@ def summarise(rows: list[dict[str, str]], seeds: tuple[int, ...], source: dict[s
                     "growpal_source": source["growpal_source"],
                     "anneal_head": head,
                     "code_revision": head if arm == "anneal" else source["growpal_version"],
-                    "host": os.uname().nodename,
+                    "host": host_label(os.uname().nodename),
                     "machine_id": ";".join(
                         sorted({item["machine_id"] for item in group})
                     ),
@@ -443,7 +444,7 @@ def main(argv: list[str]) -> int:
     if len(argv) == 2 and argv[1] == "--self-test":
         self_test()
         return 0
-    if os.uname().nodename != "bench":
+    if host_label(os.uname().nodename) != "bench":
         print("uts hostname is not bench", file=sys.stderr)
         return 2
     parser = argparse.ArgumentParser()
@@ -515,7 +516,7 @@ def main(argv: list[str]) -> int:
         row = {
             **row,
             "code_revision": head if arm == "anneal" else source["growpal_version"],
-            "host": os.uname().nodename,
+            "host": host_label(os.uname().nodename),
             **machine,
         }
         write_seed(saved, row)

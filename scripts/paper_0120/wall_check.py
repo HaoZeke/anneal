@@ -22,6 +22,8 @@ import socket
 import subprocess
 import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from machine_provenance import host_label  # noqa: E402
 
 FIELDS = ["system", "seed", "order", "hit", "evals_to_hit", "charged", "wall_s", "pot_s",
           "outside_s", "code_revision", "host"]
@@ -43,8 +45,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--tree", action="append", required=True)
     parser.add_argument("--run", action="append", required=True)
     args = parser.parse_args(argv[1:])
-    if socket.gethostname() != "bench":
-        print(f"uts hostname is {socket.gethostname()}, expected bench", file=sys.stderr)
+    if host_label(socket.gethostname()) != "bench":
+        print(f"uts hostname is {host_label(socket.gethostname())}, expected bench", file=sys.stderr)
         return 2
     builds = pairs(args.build)
     trees = dict(pairs(args.tree))
@@ -77,7 +79,7 @@ def main(argv: list[str]) -> int:
                         "pot_s": f"{pot:.6f}",
                         "outside_s": f"{wall - pot:.6f}",
                         "code_revision": revision,
-                        "host": socket.gethostname(),
+                        "host": host_label(socket.gethostname()),
                     }
                     writer.writerow(out)
                     handle.flush()

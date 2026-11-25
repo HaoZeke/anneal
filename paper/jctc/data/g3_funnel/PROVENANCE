@@ -1,0 +1,7 @@
+branch record/g3-funnel
+tip e578f267b3826cfd7e0f1737515bc45f1b8a72c6
+commit e578f267b3826cfd7e0f1737515bc45f1b8a72c6
+tree e2637554c423b6d87a6803c12c46f9a99800d8ab
+ancestor 61fa67cf380e46876b569da45e7cc091647a775b
+source bench/g3-funnel/rows.csv
+blob d2d437902c59d94fb9345de6e5797da2401330bb

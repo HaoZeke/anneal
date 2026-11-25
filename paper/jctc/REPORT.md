@@ -10,25 +10,20 @@ b236bd7dd327aed1db3672126c577bf342db0f87b5d6668298cf82ddf44f078a
 
 Every row checked clean.
 
-## Rohit decisions pending
+## Verification for the nits pass
 
-The cover letter still has the open items.
+The retired head-to-head table check passed.
+The paper audit reported 7420 checks, 0 drifted, and 76 row files.
+The paper script behavior suite reported 19 passed and 2 skipped.
+The skips report the absent Rust 1.88.0 toolchain and chemparseplot.
+The manuscript and Supporting Information builds were not run because this
+host has no LaTeX executable.
 
-- cover-letter.tex:11 is the telephone placeholder.
-- cover-letter.tex:55 is three placeholders.
-- manuscript.tex:586 says the disclosure option is not submitted.
-- manuscript.tex:591 is the option line for the tool and the version.
-- manuscript.tex:614 is the identifier placeholder.
-- manuscript.tex:556 adds "In contrast," before the second count.
-- The LJ75 figure now follows the systems figure.
-- That later place follows the order of first citation.
+## Submission text
 
-## Prose
-
-The manuscript patch is applied exactly.
-The data-availability section matches v1.16.
-Paragraph cohesion at patched lines 565 and 607 stays open.
-PROSE-RECEIPT.md lists each patch change and those two hits.
+The cover letter has no submission placeholders.
+The manuscript data and software statement names the submitted revision.
+It states that the Zenodo archive does not contain that revision.
 
 ## Captions
 

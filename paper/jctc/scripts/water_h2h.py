@@ -12,7 +12,7 @@ gradient calls for that same start.
 The start geometry is the anneal rigid repack for that seed.
 A third anneal uses the named paper budget of 4000 evaluations.
 
-Scoring follows the Papers B' bar. Every final, CREST and anneal alike,
+Scoring needs a clean exit, an energy and a force. Every final, CREST and anneal alike,
 is relaxed with the same xtb --opt vtight before the energies are
 compared, and the comparison uses a symmetric 1e-8 Eh window on the
 polished pair. An anneal minimum more than the window below CREST is a
@@ -30,12 +30,16 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 import time
 from pathlib import Path
 
 from crest_engrad import require_split
 from paper_data import fetch_paper_data
 from water_census import HBOND_OO_A, label_free_rmsd, molecules, read_xyz
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
+from machine_provenance import host_label  # noqa: E402
 
 ROOT = Path("paper/jctc")
 LOGS = Path(os.environ.get("H2H_LOG_DIR", "paper/jctc/logs/water"))
@@ -76,6 +80,24 @@ def git_stamp():
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip()
     return head, tree
+
+
+def rgpot_revision(engine=None):
+    rev = os.environ.get("RGPOT_REVISION", "").strip()
+    if rev:
+        return rev
+    if engine:
+        engine_dir = Path(engine).resolve().parent
+        for name in ("RGPOT_SOURCE_COMMIT", "rgpot.sha"):
+            candidate = engine_dir / name
+            if candidate.is_file():
+                text = candidate.read_text().strip()
+                if text:
+                    return text
+    root = os.environ.get("RGPOT_ROOT", "").strip()
+    if root:
+        return subprocess.check_output(["git", "-C", root, "rev-parse", "HEAD"], text=True).strip()
+    raise SystemExit("missing rgpot revision: set RGPOT_REVISION, RGPOT_ROOT, or place rgpot.sha beside RGPOT_XTB_ENGINE")
 
 
 def type7_quantile(values, probability):
@@ -135,11 +157,13 @@ def cpu_description():
 
 SOURCE_HEAD = "unset"
 SOURCE_TREE = "unset"
+RGPOT_REV = "unset"
 
 
-def write_header(handle, command, head=None, tree=None):
+def write_header(handle, command, head=None, tree=None, rgpot=None):
     head = SOURCE_HEAD if head is None else head
     tree = SOURCE_TREE if tree is None else tree
+    rgpot = RGPOT_REV if rgpot is None else rgpot
     host = subprocess.check_output(["nproc", "--all"], text=True).strip()
     machine = subprocess.check_output(["uname", "-m"], text=True).strip()
     date = subprocess.check_output(["date"], text=True).rstrip("\n")
@@ -153,6 +177,7 @@ def write_header(handle, command, head=None, tree=None):
                 "clone=https://github.com/HaoZeke/anneal.git",
                 f"source_commit={head}",
                 f"source_tree={tree}",
+                f"rgpot_revision={rgpot}",
                 "cwd=.",
                 "TMPDIR=paper/jctc/logs/scratch",
                 f"command={command}",
@@ -465,7 +490,7 @@ def write_host_topology():
     machine = subprocess.check_output(["uname", "-m"], text=True).strip()
     text = "\n".join(
         [
-            f"host={socket.gethostname()}",
+            f"host={host_label(socket.gethostname())}",
             f"machine={machine}",
             f"cores={host}",
             f"cpu={cpu_description()}",
@@ -502,6 +527,7 @@ def write_versions():
         f"paper_pin_crest_conda={PAPER_CREST_CONDA}",
         f"xtb_sha256={file_sha256(xtb)}",
         f"engine_sha256={file_sha256(engine)}",
+        f"rgpot_revision={rgpot_revision(engine)}",
         "gfn2_accuracy=0.01",
         "paper_budget=4000",
         "force_bar_eV_per_A=0.0514221",
@@ -524,7 +550,7 @@ def write_versions():
 
 
 def cluster_intact(path):
-    """(intact, farthest nearest-neighbour O...O in angstrom) for an xyz of whole waters.
+    """(intact, farthest nearest-neighbor O...O in angstrom) for an xyz of whole waters.
 
     A cluster is intact when every oxygen keeps two hydrogens inside the
     O-H wall onset and the oxygens form one network under the Luzar and
@@ -724,6 +750,7 @@ HEADER = [
     "rmsd_raw_A",
     "rmsd_label_free_raw_A",
     "objective_best_eV",
+    "rgpot_revision",
     "verdict",
 ]
 
@@ -776,6 +803,7 @@ def arm_row(seed, arm, raw, polished, reference, rule, success, energy_pass, sig
         "rmsd_raw_A": raw.get("rmsd"),
         "rmsd_label_free_raw_A": raw.get("free_rmsd"),
         "objective_best_eV": raw.get("objective"),
+        "rgpot_revision": RGPOT_REV,
         "verdict": verdict,
     }
     return [cell(values[name]) for name in HEADER]
@@ -786,7 +814,7 @@ def write_numbers(rows):
     lines = [
         f"# n={seeds} serial same host no best-of",
         "# quartile=Hyndman-Fan type 7",
-        "# bar=Papers B': success = exit + energy + force; force is the reported answer's maximum force at 0.001 Eh/bohr",
+        "# bar=exit, energy and force: success = exit + energy + force; force is the reported answer's maximum force at 0.001 Eh/bohr",
         "# polish=xtb " + " ".join(POLISH_ARGS) + " on every final, CREST and anneal alike",
         "# score=xtb --gfn 2 --sp --acc 0.01 --iterations 500 on the raw and on the polished final",
         f"# window={WINDOW_EH:g} Eh symmetric on the polished pair; anneal more than the window below CREST polished is a lower minimum found by anneal and passes",
@@ -859,7 +887,7 @@ def crest_verdict(crest, polished, energy_pass, reason):
 
 def main():
     fetch_paper_data()
-    global SOURCE_HEAD, SOURCE_TREE
+    global SOURCE_HEAD, SOURCE_TREE, RGPOT_REV
     SOURCE_HEAD, SOURCE_TREE = git_stamp()
     check_type7()
     assert_paper_budget()
@@ -867,6 +895,7 @@ def main():
     for key in ("CREST_BIN", "XTB_BIN", "RGPOT_XTB_ENGINE", "ANNEAL_WATER_BIN"):
         if key not in os.environ:
             raise SystemExit(f"missing {key}")
+    RGPOT_REV = rgpot_revision(os.environ["RGPOT_XTB_ENGINE"])
     LOGS.mkdir(parents=True, exist_ok=True)
     SCRATCH.mkdir(parents=True, exist_ok=True)
     write_host_topology()
@@ -954,7 +983,7 @@ def main():
             fair = anneal_raw(fair_log, fair_dir / "best.xyz", best_xyz, crest["energy"], LOGS / f"anneal-sp-seed{seed}.txt")
             if not finished_log(paper_log, "FORCE_AUDIT"):
                 status, pwall = anneal_run(binary, seed, PAPER_BUDGET, paper_dir, paper_log, "paper4000")
-                print(f"anneal paper seed {seed} exit {status} budget {PAPER_BUDGET} wall {pwall:.1f}", flush=True)
+                print(f"anneal named-budget seed {seed} exit {status} budget {PAPER_BUDGET} wall {pwall:.1f}", flush=True)
             paper = anneal_raw(
                 paper_log, paper_dir / "best.xyz", best_xyz, crest["energy"], LOGS / f"anneal-paper-sp-seed{seed}.txt"
             )

@@ -8,7 +8,7 @@
 set -eu
 export TZ=America/Chicago
 # sudo drops the environment, so the re-exec is gated on the host name.
-if [[ "$(hostname)" != bench ]]; then
+if [[ "$(python3 "$(dirname "$0")/../../../scripts/machine_provenance.py" host-label)" != bench ]]; then
   exec sudo unshare --uts sh -c 'hostname bench; exec "$@"' _ "$0" "$@"
 fi
 work=$1
@@ -17,9 +17,9 @@ mkdir -p "$work/logs/lowest-index" "$work/logs/uniform" \
   "$work/requench" "$work/receipts"
 if [[ ! -f $work/receipts/T.txt ]]; then
   date '+%Y-%m-%dT%H:%M:%S%z' > "$work/receipts/T.txt"
-  hostname > "$work/receipts/uts.txt"
-  hostname > "$work/receipts/hostname.txt"
-  cat /proc/sys/kernel/random/boot_id > "$work/receipts/boot_id.txt"
+  python3 "$(dirname "$0")/../../../scripts/machine_provenance.py" host-label > "$work/receipts/uts.txt"
+  python3 "$(dirname "$0")/../../../scripts/machine_provenance.py" host-label > "$work/receipts/hostname.txt"
+  python3 "$(dirname "$0")/../../../scripts/machine_provenance.py" boot-label > "$work/receipts/boot_id.txt"
   lscpu > "$work/receipts/lscpu.txt"
   cat /proc/meminfo > "$work/receipts/meminfo.txt"
   nproc > "$work/receipts/nproc.txt"
@@ -34,8 +34,8 @@ if [[ ! -f $work/receipts/T.txt ]]; then
 fi
 header() {
   echo "start=$(date '+%Y-%m-%dT%H:%M:%S%z')"
-  echo "uts=$(hostname)"
-  echo "boot_id=$(cat /proc/sys/kernel/random/boot_id)"
+  echo "uts=$(python3 "$(dirname "$0")/../../../scripts/machine_provenance.py" host-label)"
+  echo "boot_id=$(python3 "$(dirname "$0")/../../../scripts/machine_provenance.py" boot-label)"
   echo "lj_dls_sha256=$(sha256sum "$bin/lj_dls" | awk '{print $1}')"
   echo "lj_requench_sha256=$(sha256sum "$bin/lj_requench" | awk '{print $1}')"
   echo "wrapper=sudo unshare --uts sh -c 'hostname bench; exec <cmd>'"

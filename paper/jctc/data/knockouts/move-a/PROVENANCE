@@ -1,0 +1,7 @@
+branch record/knockout-move-a
+tip 50c532253f3ad11e6457a119bb603f05b4f0be79
+commit 50c532253f3ad11e6457a119bb603f05b4f0be79
+tree abfd85401283d4d3cf63a0e358b3476d2b0c4d7b
+ancestor dd6ff9273be30ab317bfd5508596f4beb19cb3a4
+source paper/jctc/data/knockouts/move-a/rows.csv
+blob b48d3fe58e2181459b7fa1c889bca1dc4fd98728

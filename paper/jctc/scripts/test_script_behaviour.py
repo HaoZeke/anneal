@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""Behaviour tests for the paper scripts that do not need a campaign run."""
+"""Behavior tests for the paper scripts that do not need a campaign run."""
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import io
 import json
 import os
 import runpy
+import shutil
 import subprocess
 import sys
 import tarfile
 import textwrap
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import pytest
@@ -19,6 +22,7 @@ import pytest
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(ROOT / "scripts"))
 
 import check_cuh2_blobs
 import coverage_receipts
@@ -27,15 +31,52 @@ import figure_provenance
 import hexamer_numbers
 import hq_sci_tally
 import lockfile_delta
+import revision_reach
 import replay_v127
 import toc_graphic
 import watch_crest_steps
 import write_figure_provenance_v128
 
+RUSTUP_PROBE_TIMEOUT = 5.0
+
+
+def has_coverage_toolchains() -> bool:
+    rustup = shutil.which("rustup")
+    if rustup is None:
+        return False
+    try:
+        found = [
+            subprocess.run(
+                [rustup, "run", toolchain, "rustc", "-V"],
+                capture_output=True,
+                check=False,
+                timeout=RUSTUP_PROBE_TIMEOUT,
+            ).returncode == 0
+            for toolchain in coverage_receipts.COVERAGE_TOOLCHAINS
+        ]
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return all(found)
+
+
+def has_figure_dependencies() -> bool:
+    try:
+        return (
+            importlib.util.find_spec("matplotlib") is not None
+            and importlib.util.find_spec("chemparseplot") is not None
+            and version("chemparseplot") == "1.11.0"
+        )
+    except PackageNotFoundError:
+        return False
+
+
+HAS_COVERAGE_TOOLCHAINS = has_coverage_toolchains()
+HAS_CHEMPARSEPLOT = has_figure_dependencies()
+
 
 def test_toc_graphic_writes_a_pdf(tmp_path: Path) -> None:
     body = toc_graphic.stream()
-    assert b"potential" in body and b"hop" in body and b"bank" in body
+    assert b"potential" in body and b"hop" in body and b"bank" not in body
     raw = toc_graphic.pdf(body)
     assert raw.startswith(b"%PDF-1.4\n")
     assert b"%%EOF\n" in raw
@@ -182,7 +223,7 @@ def test_figure_records_mark_absence_and_equality(
     pdf = tmp_path / "one.pdf"
     pdf.write_bytes(b"%PDF-1.4\n")
     tip = figure_provenance.blob(pdf)
-    assert len(tip) == 40
+    assert revision_reach.is_full_sha(tip)
 
     def fake_git(*args: str) -> subprocess.CompletedProcess[str]:
         if args[0] == "hash-object":
@@ -255,6 +296,13 @@ def test_tally_covers_hits_misses_and_missing(tmp_path: Path) -> None:
         hq_sci_tally.seed_file(empty, "absent", 0)
 
 
+@pytest.mark.skipif(
+    not HAS_COVERAGE_TOOLCHAINS,
+    reason=(
+        "requires rustup toolchains "
+        + ", ".join(coverage_receipts.COVERAGE_TOOLCHAINS)
+    ),
+)
 def test_coverage_receipt_writes_both_toolchains(tmp_path: Path) -> None:
     lines = {
         "data": [
@@ -295,6 +343,15 @@ def test_coverage_receipt_writes_both_toolchains(tmp_path: Path) -> None:
     assert "lines_188 10/10 100.00" in text
     assert "branches 3/4 75.00" in text
     assert "line_gap_reason" in text
+    for key, toolchain, tool in (
+        ("rustc_188", "1.88.0", "rustc"),
+        ("cargo_188", "1.88.0", "cargo"),
+        ("rustc_nightly", "nightly-2026-11-01", "rustc"),
+        ("cargo_nightly", "nightly-2026-11-01", "cargo"),
+    ):
+        reported = subprocess.check_output(["rustup", "run", toolchain, tool, "-V"], text=True).strip()
+        assert f"{key} {reported}" in text.splitlines()
+    assert "rustc_188 rustc 1.88.0 (" in text
     assert (out / "missing.rs.txt").read_text().count("absent") >= 2
     with pytest.raises(SystemExit, match="usage"):
         coverage_receipts.main([])
@@ -523,6 +580,10 @@ def test_redact_main_rewrites_a_home_path(tmp_path: Path) -> None:
         sys.argv = old
 
 
+@pytest.mark.skipif(
+    not HAS_CHEMPARSEPLOT,
+    reason="requires chemparseplot",
+)
 def test_house_drawers_write_pdfs(tmp_path: Path) -> None:
     os.environ["PYTHONHASHSEED"] = "0"
     os.environ["SOURCE_DATE_EPOCH"] = "0"
@@ -530,6 +591,13 @@ def test_house_drawers_write_pdfs(tmp_path: Path) -> None:
     import fig_rec_arms
     import figstyle
 
+    assert fig_algorithm_stack.RGPOT_POTENTIALS == (
+        "Lennard-Jones", "Morse", "Gupta", "binary LJ",
+    )
+    assert fig_algorithm_stack.NATIVE_POTENTIALS == ("TIP4P", "Sutton-Chen")
+    assert fig_rec_arms.ARMS == (
+        "single", "surface", "sym", "burst", "soap", "dls-kernel",
+    )
     stack = tmp_path / "stack.pdf"
     arms = tmp_path / "arms.pdf"
     fig_algorithm_stack.draw(stack)
@@ -669,3 +737,104 @@ def _git_repo(path: Path, old: str, new: str) -> None:
     lock.write_text(new)
     subprocess.check_call(["git", "add", "Cargo.lock"], cwd=path)
     subprocess.check_call(["git", "commit", "-m", "new\n"], cwd=path)
+
+
+def _fetch_data_module():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("fetch_data_under_test", ROOT / "scripts" / "data" / "fetch_data.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_fetch_data_pins_a_dataset_commit() -> None:
+    fetch = _fetch_data_module()
+    if "HF_REVISION" not in os.environ:
+        assert revision_reach.is_full_sha(fetch.HF_REVISION)
+    if "HF_REPO" not in os.environ:
+        assert fetch.HF_REPO == "HaoZeke/anneal-paper-data"
+
+
+def test_fetch_data_fetches_a_prefix_and_names_absent_rows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fetch = _fetch_data_module()
+    held = b"held\n"
+    manifest = tmp_path / "hf-files.csv"
+    manifest.write_text(
+        "path,size,sha256\n"
+        f"paper/jctc/data/a.txt,{len(held)},{hashlib.sha256(held).hexdigest()}\n"
+        f"bench/x/b.log,4,{'0' * 64}\n"
+    )
+    monkeypatch.setattr(fetch, "MANIFEST", manifest)
+    monkeypatch.setattr(fetch, "CACHE", tmp_path / "cache")
+    asked = []
+
+    def download(path: str, dest: Path) -> bool:
+        asked.append(path)
+        if path.startswith("bench/"):
+            return False
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(held)
+        return True
+
+    monkeypatch.setattr(fetch, "download", download)
+    root = tmp_path / "repo"
+    fetch.ensure(root, ("paper/jctc/",))
+    assert (root / "paper/jctc/data/a.txt").read_bytes() == held
+    assert asked == ["paper/jctc/data/a.txt"]
+    with pytest.raises(SystemExit, match=r"1 file\(s\) of hf-files.csv are not in .*bench/x \(1\)"):
+        fetch.ensure(root)
+
+
+def test_water_h2h_and_repolish_record_rgpot_revision(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import hexamer_xtb680_repolish
+    import water_h2h
+
+    monkeypatch.delenv("RGPOT_REVISION", raising=False)
+    monkeypatch.delenv("RGPOT_ROOT", raising=False)
+    engine = tmp_path / "libxtb_engine.so"
+    engine.write_text("so\n")
+    with pytest.raises(SystemExit, match="missing rgpot revision"):
+        water_h2h.rgpot_revision(engine)
+    (tmp_path / "rgpot.sha").write_text("8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e\n")
+    rev = water_h2h.rgpot_revision(engine)
+    assert rev == "8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e"
+
+    log = tmp_path / "run.log"
+    with log.open("w") as handle:
+        water_h2h.write_header(handle, "gfn2_water_h2h 6 4000 0 out", head="a" * 40, tree="b" * 40, rgpot=rev)
+    assert f"rgpot_revision={rev}" in log.read_text()
+
+    logs = tmp_path / "water_logs"
+    logs.mkdir()
+    assert hexamer_xtb680_repolish.resolve_rgpot_revision(logs, None) == "unrecorded"
+    (logs / "VERSIONS").write_text(f"rgpot_revision={rev}\n")
+    assert hexamer_xtb680_repolish.resolve_rgpot_revision(logs, None) == rev
+    csv_out = tmp_path / "repolish.csv"
+    hexamer_xtb680_repolish.write_csv(csv_out, [["crest", 0, "-30.49", "-30.49", "0.0", "c" * 40, rev, "bench"]])
+    lines = csv_out.read_text().splitlines()
+    assert lines[0] == "structure,seed,old_energy_Eh,new_energy_Eh,gap_Eh,code_revision,rgpot_revision,host"
+    assert rev in lines[1]
+
+
+def test_cross_labels_counts_longtable_in_table_sequence() -> None:
+    import cross_labels
+
+    tex = (
+        "\\setcounter{secnumdepth}{1}\n"
+        "\\section{Provenance}\n"
+        "\\subsection{Detail}\n"
+        "\\label{sec:detail}\n"
+        "\\begin{longtable}{ll}\n"
+        "\\caption{First.}\n"
+        "\\label{tab:first}\\\\\n"
+        "\\end{longtable}\n"
+        "\\begin{table}\n"
+        "\\caption{Second.}\n"
+        "\\label{tab:second}\n"
+        "\\end{table}\n"
+    )
+    got = cross_labels.numbers(tex, "S")
+    assert got["sec:detail"] == "S1"
+    assert got["tab:first"] == "S1"
+    assert got["tab:second"] == "S2"

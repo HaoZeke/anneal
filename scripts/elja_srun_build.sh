@@ -19,7 +19,7 @@ if [[ -n ${SLURM_JOB_ID:-} ]]; then
     echo "SMOKE_EXISTING $BIN"
     ldd "$BIN"
     "$BIN" 13 200 1 rec
-    echo "SMOKE_OK host=$(hostname) job=$SLURM_JOB_ID"
+    echo "SMOKE_OK host=$(python3 "$ROOT/scripts/machine_provenance.py" host-label) job=$SLURM_JOB_ID"
     exit 0
   fi
   bash "$ROOT/scripts/elja_build_lj.sh"

@@ -137,4 +137,4 @@ if [[ -z $source_commit && -s $ROOT/SOURCE_COMMIT ]]; then
   source_commit=$(cat "$ROOT/SOURCE_COMMIT")
 fi
 printf 'TERRA_MOLSLAB_DEV_BUILD_OK source=%s host=%s job=%s\n' \
-  "${source_commit:-unknown}" "$(hostname)" "$SLURM_JOB_ID"
+  "${source_commit:-unknown}" "$(python3 "$ROOT/scripts/machine_provenance.py" host-label)" "$SLURM_JOB_ID"

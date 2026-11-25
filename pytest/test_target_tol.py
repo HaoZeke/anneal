@@ -377,19 +377,21 @@ def test_ase_summarizers_reject_nan_hit_rows(tmp_path: Path, monkeypatch):
     with pytest.raises(SystemExit, match="hit above threshold"):
         ase_panel.load("lj38")
 
-    ase_nonlj = _load_module("test_ase_nonlj_nan_mod", "scripts/ase_nonlj/summarize.py")
-    nonlj_dir = tmp_path / "bench" / "ase-nonlj"
-    nonlj_dir.mkdir(parents=True)
-    (nonlj_dir / "rows.csv").write_text(
-        ",".join(ase_nonlj.ROW_FIELDS)
-        + "\n"
-        + "m38r6,recommended,2000,400000,1,100,100,nan,1.0,0.5,0.5,"
-        + ase_nonlj.REVISION
-        + ",bench,hit,\n"
-    )
-    monkeypatch.setattr(ase_nonlj, "ROOT", tmp_path)
-    with pytest.raises(SystemExit, match="hit above threshold"):
-        ase_nonlj.load_rows()
+    for script, subdir in (("summarize.py", ""), ("summarize_rerun.py", "rerun-20261119")):
+        ase_nonlj = _load_module(f"test_ase_nonlj_nan_{script[:-3]}", f"scripts/ase_nonlj/{script}")
+        root = tmp_path / script[:-3]
+        nonlj_dir = root / "bench" / "ase-nonlj" / subdir
+        nonlj_dir.mkdir(parents=True)
+        (nonlj_dir / "rows.csv").write_text(
+            ",".join(ase_nonlj.ROW_FIELDS)
+            + "\n"
+            + "m38r6,recommended,2000,400000,1,100,100,nan,1.0,0.5,0.5,"
+            + ase_nonlj.REVISION
+            + ",bench,hit,\n"
+        )
+        monkeypatch.setattr(ase_nonlj, "ROOT", root)
+        with pytest.raises(SystemExit, match="hit above threshold"):
+            ase_nonlj.load_rows()
 
 
 from target_tol_lint_rules import (  # noqa: E402

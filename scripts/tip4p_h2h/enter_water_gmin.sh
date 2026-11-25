@@ -9,7 +9,7 @@ set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 WORK=/work/water-gmin
-OUT=$ROOT/bench/water-gmin
+OUT=${WATER_GMIN_OUT:-/work/water-gmin/output}
 
 if [[ -n $(git -C "$ROOT" status --porcelain -- src examples Cargo.toml Cargo.lock build.rs) ]]; then
   echo "anneal sources differ from HEAD; code_revision would not name the binary" >&2
@@ -23,6 +23,7 @@ mkdir -p "$WORK/bin" "$WORK/user" "$WORK/scratch" "$WORK/runs" "$WORK/gm" "$OUT"
 cp -a "$HERE/run_water_gmin.py" "$HERE/run_h2h.py" \
   "$HERE/gm_radius.py" "$ROOT/scripts/target_tol.py" \
   "$ROOT/scripts/gmin_pin.py" "$ROOT/scripts/machine_provenance.py" "$WORK/bin/"
+python3 "$ROOT/scripts/stage_python.py" "$WORK/bin/" --from "$HERE" --from "$ROOT/scripts"
 cp -a "$ROOT/examples/h2h_gmin_tip4p.data" "$WORK/bin/h2h_gmin_tip4p.data"
 { sed 's/^STEPS .*/STEPS 0 1.0/' "$ROOT/examples/h2h_gmin_tip4p.data"; echo "CHECKD 0"; } \
   > "$WORK/bin/h2h_gmin_tip4p_verify.data"

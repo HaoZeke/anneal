@@ -128,7 +128,7 @@ def canvas(fig, rect=(0.0, 0.0, 1.0, 1.0)):
 
 
 def box(ax, x, y, w, h, text="", fill="white", edge=BLACK, size=SMALLEST, weight="normal", **kwargs):
-    """A rounded box with its lower left at (x, y), and its text centred in it."""
+    """A rounded box with its lower left at (x, y), and its text centered in it."""
     from matplotlib.patches import FancyBboxPatch
 
     ax.add_patch(

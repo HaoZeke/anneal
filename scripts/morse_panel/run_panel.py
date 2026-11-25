@@ -27,6 +27,7 @@ from gmin_pin import read_svnrev  # noqa: E402
 from machine_provenance import (  # noqa: E402
     aggregate_machine_columns,
     gmin_row_key,
+    host_label,
     machine_columns,
     machine_fieldnames,
     read_built_gmin_provenance,
@@ -443,7 +444,7 @@ def main(
     out_dir: Path | None = None,
     overwrite_legacy: bool = False,
 ) -> int:
-    if socket.gethostname() != "bench":
+    if host_label(socket.gethostname()) != "bench":
         raise SystemExit("hostname must be bench")
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
@@ -539,7 +540,7 @@ def main(
     head = subprocess.run(
         ["git", "-C", str(root), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
     ).stdout.strip()
-    host = socket.gethostname()
+    host = host_label(socket.gethostname())
     machine = machine_columns()
     for name, _n, rho, budget, ref in systems:
         for seed in seeds:

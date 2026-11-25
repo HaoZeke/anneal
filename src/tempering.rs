@@ -716,7 +716,7 @@ impl Ladder {
     /// cumulative rejection up to rung `k`, monotone increasing as `beta`
     /// decreases. The new rungs are the inverse-interpolated solutions of
     /// `Lambda(beta) = (k / (N-1)) Lambda`. Statistics are cleared, since they
-    /// were measured on a ladder that no longer exists.
+    /// were measured on the ladder being replaced.
     ///
     /// Returns the barrier the move was computed from.
     pub fn equalise(&mut self) -> f64 {

@@ -4,10 +4,10 @@
 
 The radius is the largest oxygen distance from the oxygen centroid of the
 Wales-Hodges global minimum, plus 3 angstrom, the same rule at every size.
-GMIN tests molecular centres of mass against the origin (takestep.f90), so
+GMIN tests molecular centers of mass against the origin (takestep.f90), so
 the centre-of-mass extent is printed beside it.
 
-``--gmin DIR`` also writes each minimum as the NEWTIP centre and angle-axis
+``--gmin DIR`` also writes each minimum as the NEWTIP center and angle-axis
 block, ``DIR/tip4p<n>.gm.gmin``, so GMIN can quench its own reference.
 """
 
@@ -90,7 +90,7 @@ def main() -> int:
         o_extent = float(np.linalg.norm(oxygens - oxygens.mean(axis=0), axis=1).max())
         coms = molecules.transpose(0, 2, 1) @ MASSES / MASSES.sum()
         com_extent = float(np.linalg.norm(coms - coms.mean(axis=0), axis=1).max())
-        # io1.f90 with RADIUS unset; NATOMS counts centre and angle-axis rows.
+        # io1.f90 with RADIUS unset; NATOMS counts center and angle-axis rows.
         lj_default = (2.0 + (3.0 * 2 * n / 17.77153175) ** (1.0 / 3.0)) * 2.0 ** (1.0 / 6.0)
         radius = o_extent + MARGIN
         print(f"{n},{energy:.10f},{o_extent:.4f},{com_extent:.4f},{radius:.4f},{lj_default:.4f}")

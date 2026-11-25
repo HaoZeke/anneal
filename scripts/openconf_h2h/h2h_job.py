@@ -31,6 +31,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import h2h_common as hc  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from machine_provenance import host_label  # noqa: E402
 
 # A recorded minimum of a molecular search is at 5e-2 eV/Å.
 RECORD_GRADIENT = 5.0e-2
@@ -279,7 +281,7 @@ def run_crest(row: dict, seed: int, out: Path, crest: str) -> dict:
         for sym, x, comment in hc.read_xyz(ensemble):
             if sym != want:
                 raise RuntimeError("CREST reordered atoms")
-            frames.append((x, float(comment.split()[0]) * 627.509474))
+            frames.append((x, float(comment.split()[0]) * hc.HARTREE_KCAL))
         hc.write_xyz(out / "candidates.xyz", want, frames)
     for name in ("MDFILES", "crest_dynamics.trj", "crest_rotamers_0.xyz", "crest_rotamers_1.xyz"):
         path = out / name
@@ -335,7 +337,7 @@ def main() -> int:
         arm=args.arm,
         molecule=args.molecule,
         seed=args.seed,
-        hostname=os.uname().nodename,
+        hostname=host_label(os.uname().nodename),
     )
     if info.get("pot_s") is not None:
         info["outside_s"] = max(info["wall_s"] - info["pot_s"], 0.0)

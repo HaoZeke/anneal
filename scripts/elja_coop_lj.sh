@@ -104,7 +104,7 @@ fi
   printf 'source_commit=%s\nbinary_sha256=%s\nserver_sha256=%s\nslurm_job_id=%s\nhost=%s\n' \
     "$(cat "$SOURCE_COMMIT_FILE" 2>/dev/null || echo unknown)" \
     "$(sha256sum "$BIN" | awk '{print $1}')" "$(sha256sum "$SERVER" | awk '{print $1}')" \
-    "$SLURM_JOB_ID" "$(hostname)"
+    "$SLURM_JOB_ID" "$(python3 "$ROOT/scripts/machine_provenance.py" host-label)"
   env | grep -E '^(CENSUS_BUS|GOSSIP|CATALOG_)' | sort
 } >"$OUT/run.manifest"
 pids=()

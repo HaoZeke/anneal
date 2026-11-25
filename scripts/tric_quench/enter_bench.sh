@@ -3,7 +3,7 @@
 # Gradients per quench on GFN2-xTB: anneal L-BFGS, anneal TRIC, geomeTRIC
 # TRIC and Cartesian. One UTS namespace, hostname bench, working directory
 # /work, one core.
-#   enter_bench.sh [run options]   replay the quenches, then summarise
+#   enter_bench.sh [run options]   replay the quenches, then summarize
 #                                  (TRIC_QUENCH_ROWS, TRIC_QUENCH_SUMMARY)
 #   enter_bench.sh search          whole searches with each anneal quench
 set -euo pipefail
@@ -32,7 +32,7 @@ mkdir -p "$WORK/home" "$WORK/tmp"
 cat > "$WORK/inside.sh" << EOF
 #!/bin/bash
 set -eu
-[ "\$(hostname)" = bench ] || { echo "hostname is \$(hostname), not bench" >&2; exit 1; }
+[ "\$(python3 $ROOT/scripts/machine_provenance.py host-label)" = bench ] || { echo "hostname is \$(python3 $ROOT/scripts/machine_provenance.py host-label), not bench" >&2; exit 1; }
 export HOME=$WORK/home
 export TMPDIR=$WORK/tmp
 export PATH=$PREFIX/bin:$BASE/bin:/usr/bin:/bin

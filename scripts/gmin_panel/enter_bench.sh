@@ -19,7 +19,23 @@ cargo_home=${CARGO_HOME:-$HOME/.cargo}
 
 if [[ ${1:-} == --summarize ]]; then
   shift
-  exec python3 "$HERE/run_panel.py" --summarize --root "$ROOT" --rows "$OUT/rows.csv" --revision "$REV" "$@"
+  prev=
+  for arg in "$@"; do
+    case $prev in
+      --summary|--readme|--manuscript)
+        if [[ -e $arg ]]; then
+          echo "refusing to overwrite $arg" >&2
+          exit 1
+        fi
+        ;;
+    esac
+    prev=$arg
+  done
+  exec python3 "$HERE/run_panel.py" --summarize --root "$ROOT" --rows "$OUT/rows.csv" --revision "${GMIN_PANEL_REV:-latest}" "$@"
+fi
+if [[ -e $OUT/rows.csv ]]; then
+  echo "refusing to overwrite $OUT/rows.csv" >&2
+  exit 1
 fi
 
 tree() {
@@ -68,7 +84,10 @@ sha256sum "$WORK"/bin/* > "$WORK/bin-sha256.txt"
 cp -f "$WORK/gmin-source.txt" "$OUT/gmin-source.txt"
 (cd "$WORK/bin" && sha256sum -- *) > "$OUT/bin-sha256.txt"
 cp -f "$HERE/run_panel.py" "$ROOT/scripts/target_tol.py" \
-  "$ROOT/scripts/gmin_pin.py" "$ROOT/scripts/machine_provenance.py" "$WORK/"
+  "$ROOT/scripts/gmin_pin.py" "$ROOT/scripts/machine_provenance.py" \
+  "$ROOT/scripts/paired_stats.py" "$ROOT/scripts/revision_reach.py" \
+  "$ROOT/scripts/atomic_write.py" "$WORK/"
+python3 "$ROOT/scripts/stage_python.py" "$WORK/" --from "$HERE" --from "$ROOT/scripts"
 cp -f "$ROOT/examples/h2h_gmin_lj.data" "$ROOT/examples/h2h_gmin_morse.data" "$WORK/"
 # Captured before HOME moves.
 user_site=$(python3 -c 'import site; print(site.getusersitepackages())')

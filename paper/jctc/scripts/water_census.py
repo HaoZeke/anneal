@@ -10,8 +10,8 @@ Usage:
 The hop mode reads the HOPTRACE lines that ANNEAL_HOP_TRACE=1 writes,
 one per hop with the quenched geometry, and says for every hop how far
 the geometry is from the CREST minimum. The distance is the all-atom
-RMSD minimised over rotations, reflections, the 720 relabellings of
-the six molecules and the two labellings of each pair of hydrogens.
+RMSD minimized over rotations, reflections, the 720 relabelings of
+the six molecules and the two labelings of each pair of hydrogens.
 A mirror image is the same minimum on a non-chiral potential.
 
 Two structures are one minimum when they pass the census radius the
@@ -30,13 +30,17 @@ import math
 import re
 import sys
 from collections import Counter
+from pathlib import Path
 
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
+from codata2018 import HARTREE_EV  # noqa: E402
 
 CENSUS_RADIUS_A = 0.1
 HBOND_OO_A = 3.5
 HBOND_ANGLE_DEG = 30.0
-EV_PER_HARTREE = 27.211386245988
+EV_PER_HARTREE = HARTREE_EV
 PERMUTATIONS = np.array(list(itertools.permutations(range(6))))
 
 
@@ -109,7 +113,7 @@ def _kabsch_batch(trial, reference, proper):
 
 
 def perm_rmsd(reference, trial):
-    """All-atom RMSD minimised over molecule order, hydrogen order, rotation and reflection."""
+    """All-atom RMSD minimized over molecule order, hydrogen order, rotation and reflection."""
     ref = reference.reshape(-1, 3) - reference.reshape(-1, 3).mean(axis=0)
     ref = ref.reshape(reference.shape)
     best = math.inf

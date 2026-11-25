@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from machine_provenance import (  # noqa: E402
     MACHINE_ID_SALT,
     SavedRowProvenanceMismatch,
+    host_label,
 )
 
 RUNNER = ROOT / "scripts" / "gmin_h2h" / "run_campaign.py"
@@ -76,7 +77,8 @@ def test_summary_keeps_host_and_adds_physical_machine_provenance():
         "Example CPU",
     )
 
-    assert summary[0]["host"] == os.uname().nodename
+    assert summary[0]["host"] == host_label(os.uname().nodename)
+    assert summary[0]["host"] == "bench" or summary[0]["host"] != os.uname().nodename
     assert summary[0]["machine_id"] == "a" * 64
     assert summary[0]["cpu_model"] == "Example CPU"
     assert tuple(summary[0]) == tuple(campaign.SUMMARY_FIELDS)

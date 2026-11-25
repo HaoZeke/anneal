@@ -31,7 +31,7 @@ import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from machine_provenance import machine_columns, require_csv_schema  # noqa: E402
+from machine_provenance import host_label, machine_columns, require_csv_schema  # noqa: E402
 
 REFERENCE = {"c20": -1148.85383633}
 REFERENCE_SOURCE = {
@@ -85,7 +85,7 @@ def run(args):
         order = arms if seed % 2 == 0 else arms[::-1]
         for name, binary, revision in order:
             jobs.put((system, seed, name, binary, revision))
-    host = socket.gethostname()
+    host = host_label(socket.gethostname())
     machine = machine_columns()
     lock = threading.Lock()
 

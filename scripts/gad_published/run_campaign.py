@@ -39,6 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from read_deposit import HIT_TOL, REFERENCES, ZENODO_DOI, read_zip  # noqa: E402
 from machine_provenance import (  # noqa: E402
     aggregate_machine_columns,
+    host_label,
     machine_columns,
     read_built_gmin_provenance,
     require_csv_schema,
@@ -721,7 +722,7 @@ def main(argv: list[str]) -> int:
     if len(argv) == 2 and argv[1] == "--self-test":
         self_test()
         return 0
-    if os.uname().nodename != "bench":
+    if host_label(os.uname().nodename) != "bench":
         print("uts hostname is not bench", file=sys.stderr)
         return 2
     parser = argparse.ArgumentParser()
@@ -756,7 +757,7 @@ def main(argv: list[str]) -> int:
     if "gad" in arms and args.condevo is None:
         raise SystemExit("the gad arm needs --condevo")
     head = args.head_file.read_text().strip()
-    host = socket.gethostname()
+    host = host_label(socket.gethostname())
     machine = machine_columns()
     revision, gmin_build_key = read_built_gmin_provenance(args.svnrev, args.source)
     if args.summary:

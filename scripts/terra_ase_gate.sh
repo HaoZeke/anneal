@@ -3,7 +3,7 @@
 # Rebuild the python extension and run the ASE / cluster_search tests.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then
-  echo "terra_ase_gate.sh: run under srun/sbatch, not on $(hostname)" >&2
+  echo "terra_ase_gate.sh: run under srun/sbatch, not directly" >&2
   exit 1
 fi
 ROOT=${ANNEAL_ROOT:-$HOME/Git/Github/Rust/anneal}
@@ -28,7 +28,7 @@ git-fetch-with-cli = true
 EOF
 export CARGO_HOME
 cd "$ROOT"
-echo "host=$(hostname) job=$SLURM_JOB_ID"
+echo "host=$(python3 "$ROOT/scripts/machine_provenance.py" host-label) job=$SLURM_JOB_ID"
 echo "source=$(git rev-parse HEAD 2>/dev/null || echo unpinned)"
 VERIFY="${ANNEAL_VERIFY:-$ROOT/.pixi/envs/verify}"
 if [[ ! -x $VERIFY/bin/maturin || ! -x $VERIFY/bin/pytest ]]; then

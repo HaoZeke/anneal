@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from machine_provenance import (  # noqa: E402
     aggregate_machine_columns,
     gmin_row_key,
+    host_label,
     machine_columns,
     read_built_gmin_provenance,
     require_csv_schema,
@@ -371,7 +372,7 @@ def summarise(rows: list[dict[str, str]], head: str, revision: str) -> list[dict
             "anneal_head": harness,
             "gmin_revision": gmin_code,
             "code_revision": code,
-            "host": first.get("host") or os.uname().nodename,
+            "host": first.get("host") or host_label(os.uname().nodename),
             "harness_revision": harness,
             **aggregate_machine_columns(group),
         }
@@ -452,7 +453,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--head-file", type=Path, required=True)
     parser.add_argument("--only", nargs=3, metavar=("SYSTEM", "SEED", "ARM"))
     args = parser.parse_args(argv)
-    if os.uname().nodename != "bench":
+    if host_label(os.uname().nodename) != "bench":
         print("uts hostname is not bench", file=sys.stderr)
         return 2
     if Path.cwd() != Path("/work"):
@@ -490,7 +491,7 @@ def main(argv: list[str]) -> int:
             **seed_row,
             "code_revision": head if seed_row["arm"] == "anneal" else revision,
             "gmin_build_key": "" if seed_row["arm"] == "anneal" else gmin_build_key,
-            "host": os.uname().nodename,
+            "host": host_label(os.uname().nodename),
             "harness_revision": head,
             **machine,
         }

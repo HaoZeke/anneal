@@ -282,25 +282,35 @@ jobs:
           fi
 
       # scripts/paper_audit.py recomputes every paper and bench-table number
-      # from the committed rows and checks the revision each row cites,
-      # through bench/revision-aliases.csv for the ones rebuilt on push. It
-      # needs the full history and every branch the alias table names. A
-      # branch that cannot be fetched fails here; the audit itself refuses a
-      # shallow clone or a missing alias commit with exit status 2, and any
-      # drift or unlisted unpushed revision with exit status 1.
+      # from the committed rows and checks the revision each row cites. A
+      # revision is resolved when a fetched remote ref contains it, when
+      # bench/revision-aliases.csv verifies it, or when the recorded
+      # code_tree matches a fetched tree. bench/unreachable-revisions.csv
+      # gives the reason for each revision that stays unresolved. Every branch of origin is fetched, and a branch
+      # the alias table names that cannot be fetched fails here. The audit
+      # exits 2 when the checkout is shallow or an alias target is absent,
+      # and exits 1 on drift or an unresolved revision with no reason.
+      # Record branches are fetched only with --fetch-records, into
+      # refs/audit/record/fetched. refs/audit/record/gmin-184 is a ref,
+      # and that one is fetched by its name.
       - name: Paper audit
         if: ${{ !cancelled() }}
         run: |
+          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+            git fetch --no-tags --unshallow origin '+refs/heads/*:refs/remotes/origin/*'
+          else
+            git fetch --no-tags origin '+refs/heads/*:refs/remotes/origin/*'
+          fi
           branches=$(python3 -c 'import csv
           rows = csv.DictReader(l for l in open("bench/revision-aliases.csv") if not l.startswith("#"))
           print("\n".join(sorted({r["branch"] for r in rows if r["branch"]})))')
           for branch in $branches; do
-            git fetch --no-tags origin "+refs/heads/$branch:refs/remotes/origin/$branch" || {
+            git rev-parse --verify --quiet "refs/remotes/origin/$branch" >/dev/null || {
               echo "::error::bench/revision-aliases.csv names $branch, which cannot be fetched from origin"
               exit 1
             }
           done
-          python3 scripts/paper_audit.py
+          python3 scripts/paper_audit.py --fetch-records
 
   test:
     name: Test (${{ matrix.os }}, py ${{ matrix.python-version }})
@@ -434,7 +444,7 @@ jobs:
       - name: Install maturin + pytest + array-api-strict
         run: |
           .venv/bin/python -m pip install --upgrade pip
-          .venv/bin/python -m pip install "maturin>=1.5,<2" pytest numpy array-api-strict
+          .venv/bin/python -m pip install "maturin>=1.5,<2" pytest numpy scipy sympy array-api-strict "tomli>=2; python_version < '3.11'"
           .venv/bin/python -c "import array_api_strict"
 
       - name: maturin develop
@@ -549,8 +559,7 @@ jobs:
       - name: pytest against the installed sdist
         shell: bash
         run: |
-          test "$(.sdist-venv/bin/python -c 'import anneal, os; print(os.path.relpath(anneal.__file__))')" \
-            != python/anneal/__init__.py
+          .sdist-venv/bin/python scripts/check_installed_anneal.py .sdist-venv
           .sdist-venv/bin/python -m pytest pytest/test_cluster_search.py
 
   ffi-smoke:

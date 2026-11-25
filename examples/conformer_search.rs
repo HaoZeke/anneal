@@ -48,7 +48,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex};
 use std::time::Instant;
 
-use anneal_core::catalog::molecular::{WaterSearchArm, configure_water_arm};
+use anneal_core::catalog::molecular::{WaterSearchArm, configure_water_arm, hartree_ev};
 use anneal_core::catalog::{DescriptorSignature, EngineSignature, SystemSignature};
 use anneal_core::descriptor_space::{
     DescriptorGeometry, DescriptorSpace, universal_descriptor_space,
@@ -69,7 +69,6 @@ use pipe_engine::PipeEngine;
 use readcon_core::helpers::symbol_to_atomic_number;
 use sha2::{Digest, Sha256};
 
-const HARTREE_EV: f64 = 27.211386245988;
 /// Gradient component, in eV/angstrom, a settled minimum ends below: a
 /// fiftieth of the molecular record gate.
 const SETTLE_GRADIENT: f64 = 1e-3;
@@ -829,7 +828,7 @@ fn main() {
         );
     }
     println!("best_eV {best:.8}");
-    println!("best_Eh {:.10}", best / HARTREE_EV);
+    println!("best_Eh {:.10}", best / hartree_ev());
     println!("calls {calls}");
     println!("charged {charged}");
     println!(

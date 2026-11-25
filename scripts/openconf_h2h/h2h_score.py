@@ -6,7 +6,7 @@ Each candidate geometry is polished on MMFF94 (RDKit, dielectric one) until
 RDKit's minimiser reports convergence. A polished geometry whose
 stereocentres or double bonds differ from the input SMILES is invalid and
 dropped. Two valid geometries are the same conformer when their heavy-atom
-RMSD, minimised over graph automorphisms after a Kabsch fit, is below
+RMSD, minimized over graph automorphisms after a Kabsch fit, is below
 0.25 Å and their energies differ by less than 0.5 kcal/mol; the lower one
 is kept.
 
@@ -88,7 +88,7 @@ class Molecule:
         return pos, energy, bool(valid and status == 0)
 
     def rmsd(self, a: np.ndarray, b: np.ndarray) -> float:
-        """Heavy-atom RMSD of b onto a, minimised over automorphisms."""
+        """Heavy-atom RMSD of b onto a, minimized over automorphisms."""
         ha = a[self.heavy]
         ha = ha - ha.mean(axis=0)
         hb_all = b[self.heavy]

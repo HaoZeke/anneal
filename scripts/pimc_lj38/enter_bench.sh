@@ -21,6 +21,7 @@ mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs" \
   "$ROOT/bench/pimc-lj38/rows"
 cp -a "$HERE/run_campaign.py" "$HERE/rpqa_driver.py" "$HERE/rpqa_ipi.py" \
   "$HERE/lj_potential.py" "$HERE/meter.py" "$ROOT/scripts/target_tol.py" "$WORK/bin/"
+python3 "$ROOT/scripts/stage_python.py" "$WORK/bin/" --from "$HERE" --from "$ROOT/scripts"
 chmod +x "$WORK/bin/h2h_gmin_proof"
 
 cat > "$WORK/bin/inside.sh" << EOF

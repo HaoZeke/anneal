@@ -23,7 +23,7 @@
 //! size budgets from the Lennard-Jones paper map, 400000 and 1000000 calls.
 
 use anneal_core::methods::cluster_hopping::{
-    Config, Ledger, Outcome, random_cluster_in_radius, run_with_gradient,
+    Config, Knockouts, Ledger, Outcome, random_cluster_in_radius, run_with_gradient,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::Gupta;
@@ -276,7 +276,7 @@ fn try_config(
             cfg.soap_mode = anneal_core::methods::cluster_hopping::SoapProposalMode::Off;
         }
     }
-    // Empty leaves the labelled-cluster search on. `0` turns its three
+    // Empty leaves the labeled-cluster search on. `0` turns its three
     // parts off. A comma list turns off the named ones: descent, ranked,
     // window. A one-species cluster never uses them.
     if let Ok(text) = std::env::var("H2H_HOMOTOP") {
@@ -309,6 +309,11 @@ fn try_config(
     // `1` heats the walk on each call plateau. Unset leaves the preset.
     if std::env::var("H2H_PLATEAU_HEAT").is_ok_and(|value| value == "1") {
         cfg.plateau_heat = true;
+    }
+    // A comma list of parts to switch off, `Knockouts::parse`. Unset or
+    // empty leaves the preset.
+    if let Ok(text) = std::env::var("H2H_KNOCKOUT") {
+        cfg.apply_knockouts(Knockouts::parse(&text)?);
     }
     Ok(cfg)
 }

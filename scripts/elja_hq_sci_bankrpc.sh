@@ -60,7 +60,7 @@ submit_arm() {
   local last=$((seeds - 1))
   mkdir -p "$out"
   : >"$out/hq_submit.log"
-  echo "BANK_RPC=${HOST}:${port} n=${n}" | tee -a "$out/hq_submit.log"
+  echo "BANK_RPC=$(python3 "${JCC_SOURCE_ROOT:-$ROOT}/scripts/machine_provenance.py" endpoint-label "${HOST}:${port}") n=${n}" | tee -a "$out/hq_submit.log"
   hq submit \
     --name "n${n}-lj${n}-rec" \
     --array="0-${last}" \

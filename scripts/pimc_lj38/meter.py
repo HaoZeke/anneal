@@ -2,7 +2,7 @@
 """Shared counter for RPQA force calls.
 
 The driver and the i-PI process map the same file. A completed local
-optimisation reads the count after the driver has returned the last force
+optimization reads the count after the driver has returned the last force
 of that relax. Writes are native little-endian integers, one cache line.
 """
 

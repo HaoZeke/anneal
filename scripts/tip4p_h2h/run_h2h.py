@@ -2,7 +2,7 @@
 # Copyright (c) anneal developers
 """Serial TIP4P head-to-head, anneal against GMIN, one core, twelve seeds.
 
-Both arms open the same molecular centres: ``h2h_seed`` writes the start it
+Both arms open the same molecular centers: ``h2h_seed`` writes the start it
 draws for a seed, and GMIN reads it as its ``coords``. Each run is capped at
 2_000_000 charged gradient evaluations: one ``value_and_gradient`` pass in
 anneal and one ``GRADT=true`` entry to ``POTENTIAL`` (``gradient_passes``) in
@@ -40,6 +40,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 from machine_provenance import (  # noqa: E402
     default_gmin_source_metadata,
+    host_label,
     machine_columns,
     read_built_gmin_provenance,
     require_csv_schema,
@@ -337,8 +338,8 @@ def main() -> int:
     parser.add_argument("--gmin-source", type=Path)
     parser.add_argument("--svnrev", type=Path, required=True)
     args = parser.parse_args()
-    if socket.gethostname() != "bench":
-        print(f"hostname is {socket.gethostname()}, not bench", file=sys.stderr)
+    if host_label(socket.gethostname()) != "bench":
+        print(f"hostname is {host_label(socket.gethostname())}, not bench", file=sys.stderr)
         return 2
     if Path.cwd() != Path("/work"):
         print(f"cwd is {Path.cwd()}, not /work", file=sys.stderr)
@@ -355,16 +356,15 @@ def main() -> int:
         source_path,
     )
     revision, gmin_build_key = read_built_gmin_provenance(args.svnrev, source_path)
-    host = os.uname().nodename
+    host = host_label(os.uname().nodename)
     machine = machine_columns()
     whole = args.size is None and args.seed is None
     if whole and args.point and args.verify_data and args.gm_dir and args.verify_out:
         verify(args.point, args.gmin, args.verify_data, args.gm_dir, args.verify_out, args.work)
     sizes = (args.size,) if args.size else SIZES
     seeds = (args.seed,) if args.seed is not None else SEEDS
+    # The rows file is append-only; the summary reads this session's rows only.
     rows: list[dict[str, str]] = []
-    if args.rows.is_file() and whole:
-        args.rows.unlink()
     for n in sizes:
         for seed in seeds:
             print(f"anneal n={n} seed={seed}", flush=True)

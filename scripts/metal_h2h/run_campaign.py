@@ -28,6 +28,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 from machine_provenance import (  # noqa: E402
+    host_label,
     machine_columns,
     machine_fieldnames,
     require_csv_schema,
@@ -453,7 +454,7 @@ def main(argv: list[str]) -> int:
     if len(argv) == 2 and argv[1] == "--self-test":
         self_test()
         return 0
-    if os.uname().nodename != "bench":
+    if host_label(os.uname().nodename) != "bench":
         print("uts hostname is not bench", file=sys.stderr)
         return 2
     parser = argparse.ArgumentParser()
@@ -474,7 +475,7 @@ def main(argv: list[str]) -> int:
         if system not in SYSTEMS:
             raise SystemExit(f"unknown system {system}")
     head = args.head_file.read_text().strip()
-    host = os.uname().nodename
+    host = host_label(os.uname().nodename)
     current_machine: dict[str, str] | None = None
     progress = args.runs.parent / "progress.txt"
     progress.parent.mkdir(parents=True, exist_ok=True)

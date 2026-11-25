@@ -18,6 +18,10 @@ import os
 import socket
 import subprocess
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+from machine_provenance import host_label  # noqa: E402
 
 FIELDS = (
     "system",
@@ -233,7 +237,7 @@ def main():
         return
     if not args.binary or not args.revision or not args.priors or not args.out:
         parser.error("--binary, --revision, --priors and --out are required")
-    host = args.host or socket.gethostname()
+    host = args.host or host_label(socket.gethostname())
     written = []
     for seed in seeds_of(args.seeds):
         hit, calls, wall, pot, outside = run_one(args.binary, seed, args.priors)

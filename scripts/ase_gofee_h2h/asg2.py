@@ -14,6 +14,7 @@ import os
 import random
 import shutil
 import subprocess
+import sys
 import time
 import traceback
 from pathlib import Path
@@ -37,6 +38,9 @@ from campaign import (
     require_versions,
 )
 from potential import AnnealCalculator, AnnealServer, BudgetReached, CapReached, HitReached
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from machine_provenance import host_label  # noqa: E402
 
 WALL_CAP_S = 7200.0
 SYSTEMS = ("au55", "cu38", "cu12au26", "sw10", "tc10", "tip4p8")
@@ -426,7 +430,7 @@ def run_job(binary, runs, specs, system, seed, arm, head) -> dict:
     if not row.get("head"):
         row["head"] = head
     row["code_revision"] = {"agox_gofee": AGOX_VERSION}.get(arm, ASE_VERSION)
-    row["host"] = os.uname().nodename
+    row["host"] = host_label(os.uname().nodename)
     return row
 
 
@@ -542,7 +546,7 @@ def losses(rows: list[dict]) -> list[str]:
 
 
 def main(args) -> int:
-    if os.uname().nodename != "bench":
+    if host_label(os.uname().nodename) != "bench":
         print("uts hostname is not bench", file=__import__("sys").stderr)
         return 2
     require_versions()

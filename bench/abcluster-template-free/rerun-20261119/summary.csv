@@ -1,0 +1,4 @@
+system,arm,n,hits,median_calls_to_hit,median_calls_to_hit_hits_only,median_time_to_hit_s,median_time_to_hit_hits_only_s,median_wall_s,median_pot_s,median_outside_s,fisher_p,mwu_calls_p,mwu_time_p
+au55,abcluster,12,0,1000000.0,,63.150867,,63.150867,55.780968,7.431072,,,
+au55,anneal-recommended,12,4,1000000.0,96178.5,36.862014,3.284863,36.862014,26.976066,9.885949,0.0931677,0.0366874,3.65846e-05
+au55,anneal-cluster,12,0,1000000.0,,32.612009,,32.612009,28.130316,4.407808,1,1,3.65846e-05

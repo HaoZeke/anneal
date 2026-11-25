@@ -31,6 +31,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 from machine_provenance import (  # noqa: E402
+    host_label,
     machine_columns,
     read_built_gmin_provenance,
     require_gmin_build_key,
@@ -515,7 +516,7 @@ def summarise(rows: list[dict], head: str, revision: str) -> list[dict[str, str]
                     "anneal_head": head,
                     "gmin_revision": revision,
                     "code_revision": head if arm == "anneal" else revision,
-                    "host": os.uname().nodename,
+                    "host": host_label(os.uname().nodename),
                     **machine_columns(),
                 }
             )
@@ -542,7 +543,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--head-file", type=Path, required=True)
     parser.add_argument("--only", nargs=3, metavar=("SYSTEM", "SEED", "ARM"))
     args = parser.parse_args(argv)
-    if os.uname().nodename != "bench":
+    if host_label(os.uname().nodename) != "bench":
         print("uts hostname is not bench", file=sys.stderr)
         return 2
     if Path.cwd() != Path("/work"):
@@ -552,7 +553,7 @@ def main(argv: list[str]) -> int:
         raise SystemExit("budgets and references differ")
     head = args.head_file.read_text().strip()
     revision, gmin_build_key = read_built_gmin_provenance(args.svnrev, args.source)
-    host = os.uname().nodename
+    host = host_label(os.uname().nodename)
     machine = machine_columns()
     check_potentials(args.binary, args.gmin, args.fixtures, args.runs)
     jobs = schedule()

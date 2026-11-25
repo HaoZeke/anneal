@@ -1412,7 +1412,7 @@ fn atom_w555(x: ArrayView1<f64>, spec: SoapSpec) -> Vec<f64> {
     let fr = crate::structure::atom_triplet_fracs(x, n_at, contact_cutoff(spec));
     for i in 0..n_at {
         // Hard 555 membership. Soft SOAP weights leak surface atoms into
-        // the ico class and the same-class mean no longer vanishes.
+        // the ico class and the same-class mean does not vanish.
         if fr[i][0] > 0.8 {
             w[i] = 1.0;
         } else {
