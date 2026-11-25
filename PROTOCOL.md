@@ -11,9 +11,21 @@ The exact Cargo feature set is `bank-rpc ira`. The `ira` feature is
 required by the out-of-process catalog coordinator target; enabling it
 does not change the CooperativeRun arm.
 
+IRA is built outside this repository from
+`https://github.com/mammasmias/IterativeRotationsAssignments` at
+`f395c83a7cfc4c5858f60bcee9b02ce30bd42a61`. The compiler is
+`GNU Fortran (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0`.
+The SHA-256 digests are:
+
+- `libira.so`:
+  `17d08d412418128ff5a345501b2e671c03694913ee5c1d5e6b7de8014babbd90`
+- `libira.a`:
+  `076fdd3ec4d8a875dabe88d9222701312a9edad5e4edf19ba6e891db72a06191`
+
 The sole measured arm uses four communicating chains and one
 out-of-process catalog coordinator. The chain configuration is
-`Config::communicating(75)`. Every seed receives the `lj75` entry in
+`Config::communicating(75)` with `shape_keyed` explicitly enabled by
+the `shape` run option. Every seed receives the `lj75` entry in
 `PAPER_BUDGETS` as one aggregate oracle-call budget, divided equally
 between the four chains. The shared coordinator receives the same
 aggregate budget.
