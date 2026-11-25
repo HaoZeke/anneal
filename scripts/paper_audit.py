@@ -164,6 +164,8 @@ KNOWN_GAPS = {
     "bench/fp-fingerprint/rows.csv": "revision and host unrecorded (no revision or host column)",
     "bench/tip4p-h2h/rows-h2h-r2.csv": "revision recorded; no host column",
     "bench/gmin-tuned/rows-shard2.csv": "revision recorded; no host column; machine_id recorded; no cpu_model column",
+    "bench/abcluster-template-free/rerun-20261119/summary.csv": "revision and host unrecorded (no revision or host column)",
+    "bench/morse-panel/rerun-20261119/summary.csv": "revision and host unrecorded (no revision or host column)",
     "bench/covalent-h2h/before/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "bench/covalent-h2h/after/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "bench/covalent-h2h/v2/seeds.csv": "revision and host unrecorded (no revision or host column)",
@@ -6672,6 +6674,36 @@ def morse_m70_pair(audit: Audit) -> None:
     audit.cell(path, "GMIN hits at rho 10 and 14", "0 0", f"{hit[(10, 'gmin')]} {hit[(14, 'gmin')]}")
 
 
+def rerun_summaries(audit: Audit) -> None:
+    """The summary files of the 2026-11-19 reruns and the extra sc96-55 seeds, each against its rows."""
+    for summary, per_seed, arm in (
+            ("bench/abcluster-template-free/rerun-20261119/summary.csv",
+             "bench/abcluster-template-free/rerun-20261119/rows.csv", "arm"),
+            ("bench/ase-nonlj/rerun-20261119/summary.csv", "bench/ase-nonlj/rerun-20261119/rows.csv", "arm")):
+        rows = audit.rows(per_seed)
+        for line in audit.rows(summary):
+            group = pick(rows, system=line["system"], **{arm: line["arm"]})
+            audit.cell(f"{summary} {line['system']} {line['arm']}", "hits", f"{line['hits']}/{line['n']}", frac(group))
+    summary = "bench/morse-panel/rerun-20261119/summary.csv"
+    rows = audit.rows("bench/morse-panel/rerun-20261119/rows.csv")
+    stored = audit.rows("bench/morse-panel/seeds.csv")
+    for line in audit.rows(summary):
+        audit.cell(f"{summary} {line['system']}", "anneal hits", f"{line['anneal_hits']}/{line['anneal_n']}",
+                   frac(pick(rows, system=line["system"], code="anneal")))
+        audit.cell(f"{summary} {line['system']}", "stored GMIN hits", f"{line['gmin_hits']}/{line['gmin_n']}",
+                   frac(pick(stored, system=line["system"], code="gmin")))
+    path = "bench/metal-cluster-h2h/sc-n12/sc96-55-seeds.csv"
+    rows = audit.rows(path)
+    builds = {rev: [r for r in rows if r["code_revision"].startswith(rev)] for rev in ("e3ed7dad", "c89653df")}
+    for rev, group in builds.items():
+        audit.cell(path, f"{rev} hits on seeds 2012-2059", "48/48", frac(group))
+    calls = {rev: {r["seed"]: float(r["calls"]) for r in group} for rev, group in builds.items()}
+    audit.cell(path, "e3ed7dad median calls", "24011.5", median(list(calls["e3ed7dad"].values())))
+    audit.cell(path, "c89653df median calls", "23506.5", median(list(calls["c89653df"].values())))
+    more = sum(calls["c89653df"][seed] > calls["e3ed7dad"][seed] for seed in calls["e3ed7dad"])
+    audit.cell(path, "seeds on which c89653df charges more calls", "19", float(more))
+
+
 def manuscript_followups(audit: Audit) -> None:
     """The cluster-preset hits, the wall-cap reconciliation, the GMIN settings, and the M55 disclosures."""
     audit.said(SI, "The Lennard-Jones rows run the Wales-group LJ\\(_{38}\\) introduction file at every Lennard-Jones size,")
@@ -7791,7 +7823,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
         hexamer_provenance, template_era, outside_session, morse_g1, gmin_sources,
         g3_session, no_move_choice_claim,
         reproduction_records, sutton_chen, crest_equal, crest_equal_bench, crest_table, gmin_tuned,
-        morse_m70_pair,
+        morse_m70_pair, rerun_summaries,
         append_only_rows, tip4p_unscored, tip4p_r2_rows, pending_text, citation_metadata,
                   figure_source_scripts, bibliography_keys, conversion_literals,
                   own_references, build_receipts, selection_tables, gmin_panel_drivers, prior_switches,
