@@ -9,7 +9,6 @@ import hashlib
 import io
 import os
 import re
-import shutil
 import socket
 import subprocess
 import sys
@@ -32,30 +31,48 @@ class SavedRowProvenanceMismatch(ValueError):
     """Raised when a saved row disagrees with expected producer provenance."""
 
 
-def _probe(*command: str) -> str:
-    """The first line a platform tool prints, or an empty string when the tool is absent or fails."""
-    if shutil.which(command[0]) is None:
+def _darwin_machine_id() -> str:
+    try:
+        result = subprocess.run(
+            ["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
         return ""
-    run = subprocess.run(command, capture_output=True, text=True, check=False)
-    lines = run.stdout.strip().splitlines() if run.returncode == 0 else []
-    return lines[0].strip() if lines else ""
+    if result.returncode != 0:
+        return ""
+    match = re.search(r'"IOPlatformUUID"\s*=\s*"([^"]+)"', result.stdout)
+    return match.group(1).strip() if match else ""
+
+
+def _darwin_cpu_model() -> str:
+    for key in ("machdep.cpu.brand_string", "hw.model"):
+        try:
+            result = subprocess.run(
+                ["sysctl", "-n", key],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError:
+            return ""
+        if result.returncode == 0:
+            value = " ".join(result.stdout.split())
+            if value:
+                return value
+    return ""
 
 
 def macos_machine_id() -> str:
     """IOPlatformUUID, the hardware UUID macOS has in place of /etc/machine-id."""
-    if sys.platform != "darwin":
-        return ""
-    out = subprocess.run(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
-                         capture_output=True, text=True, check=False).stdout if shutil.which("ioreg") else ""
-    found = re.search(r'"IOPlatformUUID"\s*=\s*"([^"]+)"', out)
-    return found.group(1) if found else ""
+    return _darwin_machine_id() if sys.platform == "darwin" else ""
 
 
 def macos_cpu_model() -> str:
     """The brand string macOS reports where there is no /proc/cpuinfo."""
-    if sys.platform != "darwin":
-        return ""
-    return " ".join(_probe("sysctl", "-n", "machdep.cpu.brand_string").split())
+    return _darwin_cpu_model() if sys.platform == "darwin" else ""
 
 
 def machine_provenance(
@@ -67,8 +84,10 @@ def machine_provenance(
 
     Linux reads /etc/machine-id, then the DMI product_uuid, and
     /proc/cpuinfo. macOS has none of them and reads the hardware UUID and the
-    CPU brand string from ioreg and sysctl instead. A machine that offers no
-    identifier or no model still raises: a row never records an invented one.
+    CPU brand string from ioreg and sysctl instead, and only for the default
+    paths: an explicit path that names nothing still raises. A machine that
+    offers no identifier or no model raises: a row never records an invented
+    one.
     """
     identifier = ""
     for path in (machine_id_path, product_uuid_path):
@@ -76,7 +95,12 @@ def machine_provenance(
             identifier = path.read_text().strip()
             if identifier:
                 break
-    if not identifier:
+    if (
+        not identifier
+        and sys.platform == "darwin"
+        and machine_id_path == MACHINE_ID_PATH
+        and product_uuid_path == PRODUCT_UUID_PATH
+    ):
         identifier = macos_machine_id()
     if not identifier:
         raise RuntimeError(
@@ -94,7 +118,7 @@ def machine_provenance(
             if fields.get(key):
                 cpu_model = fields[key]
                 break
-    if not cpu_model:
+    if not cpu_model and sys.platform == "darwin" and cpuinfo_path == CPUINFO_PATH:
         cpu_model = macos_cpu_model()
     if not cpu_model:
         raise RuntimeError("neither /proc/cpuinfo nor sysctl has a CPU model string")

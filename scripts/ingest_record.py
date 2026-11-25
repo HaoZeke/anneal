@@ -97,9 +97,10 @@ def malformed_revision(value: str | None) -> str | None:
     """Why a revision field cannot name a commit, or None when it can.
 
     A field is well formed when it holds one or more full lowercase SHAs of
-    forty characters, or a repository URL at a full SHA. Blank, "unknown", an
-    abbreviated SHA and anything else is refused, as the paper audit counts a
-    blank or "unknown" revision as unrecorded.
+    forty characters, a repository URL at a full SHA, or the sha256 of a
+    recorded external tarball. Blank, "unknown", an abbreviated SHA and
+    anything else is refused, as the paper audit counts a blank or "unknown"
+    revision as unrecorded.
     """
     tokens = revision_tokens(value)
     if not tokens:
@@ -109,7 +110,7 @@ def malformed_revision(value: str | None) -> str | None:
             return "unknown"
         if revision_reach.is_abbreviated_sha(token):
             return f"abbreviated SHA ({token!r}); a full 40-character SHA is required"
-        if not (revision_reach.is_full_sha(token) or external_form(token)):
+        if not (revision_reach.is_full_sha(token) or external_form(token) or revision_reach.FULL_PIN_DIGEST.fullmatch(token) and external_pin(token)):
             return f"not a commit ({token!r})"
     return None
 

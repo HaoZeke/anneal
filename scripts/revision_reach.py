@@ -28,6 +28,7 @@ from gmin_pin import REVISION as GMIN_PIN_REVISION  # noqa: E402
 UNRECORDED = frozenset({"", "unknown", "latest"})
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
 ABBREVIATED_SHA = re.compile(r"[0-9a-f]{7,39}")
+FULL_PIN_DIGEST = re.compile(r"[0-9a-f]{64}")
 EXTERNAL_FORM = re.compile(r"^https://[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+\.git@[0-9a-f]{40}$")
 # Revisions of other codes. The GMIN build scripts refuse a tarball whose SVNREV differs.
 EXTERNAL_REVISIONS = {
@@ -36,6 +37,7 @@ EXTERNAL_REVISIONS = {
     "8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e": "rgpot pin",
     "71185263eb6a8130d1262fd76d90109f5fabdcf5": "Hugging Face dataset revision",
     "fa8a4416e8fe093d0075bc10ac875494c2a449a9": "tblite commit",
+    "0d9917600ecda72b2176253d0e838bcb58ec6e38902ef7d0affc7e7e7eba8f39": "GMIN 2026-11-21T03:01:22Z tarball sha256",
 }
 TUNED_SYSTEMS = frozenset({"lj98", "lj104"})
 TUNED_CODES = frozenset({"anneal", "gmin"})
@@ -72,7 +74,7 @@ def external_pin(rev: str | None, *, abbreviated: bool = False) -> bool:
     eight characters. A row never cites a prefix.
     """
     rev = (rev or "").strip()
-    if is_full_sha(rev):
+    if is_full_sha(rev) or FULL_PIN_DIGEST.fullmatch(rev):
         return rev in EXTERNAL_REVISIONS
     if abbreviated and is_abbreviated_sha(rev):
         return any(pin.startswith(rev) for pin in EXTERNAL_REVISIONS)

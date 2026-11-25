@@ -1,14 +1,20 @@
 # anneal against GMIN on the paper panel
 
-Both arms of each cluster in one session on one host: anneal develop
-`c2de652dca0bc75e2b0cb4afffac91fd656404e4`, built with Rust 1.88.0,
-`--release --locked`, and GMIN at Wales revision
+Both arms of each cluster in one session on one host: on Lennard-Jones,
+anneal develop `c2de652dca0bc75e2b0cb4afffac91fd656404e4`, built with
+Rust 1.88.0, `--release --locked`, and GMIN at Wales revision
 `aac1548a8aec13b53ad12a8d6904625081685d2e`.
 `snakemake -s workflow/Snakefile gmin_panel`: seeds 2000-2011, the paper
 call budgets (`PAPER_BUDGETS` in `scripts/gmin_panel/run_panel.py`), one
 process on core 0 (`taskset -c 0`, one thread, every other process moved
 to cores 1-7), `sudo unshare --uts` with hostname `bench`. For each
-system the seeds run in order, anneal then GMIN on the same seed.
+Lennard-Jones system the seeds run in order, anneal then GMIN on the
+same seed. On Au55, M55 (ρ=6, 14) and M80 (ρ=6, 14), session
+`20261121T133601Z` (directory `record/gmin-184/`) ran anneal develop
+`9837358ae1027067ff654fac8b48969020853452` against the
+`2026-11-21T03:01:22Z` GMIN tarball (sha256
+`0d9917600ecda72b2176253d0e838bcb58ec6e38902ef7d0affc7e7e7eba8f39`) in
+one serial session on core 0 in ABBA order across seeds 2000-2011.
 
 A hit is a quenched energy at or below the Cambridge Cluster Database
 energy plus 0.001: the Lennard-Jones table, pure gold at 55 in the Cu-Au
@@ -30,9 +36,7 @@ anneal counted one call per energy and gradient while the GMIN cap counted
 every entry to `POTENTIAL` (`GRADT=true` and `GRADT=false` alike).
 anneal runs `Config::recommended` through `h2h_gmin_proof` (Lennard-Jones),
 `h2h_metal` (Au55, with the gold species label and `basin_stride = 8`) and
-`h2h_morse` (Morse, which quenches one Mackay cap before the walk when the
-fcc second neighbour lies below -0.05, as at ρ=6, and leaves ρ=14
-unchanged). At `c2de652d` (before `503470a0`), `h2h_gmin_proof` has no
+`h2h_morse` (Morse). At `c2de652d` (before `503470a0`), `h2h_gmin_proof` has no
 LJ103 entry, so LJ103 runs on a second build of the same revision with
 `bench/paper-0120/lj103-table.patch`, which adds the energy -575.766131
 and the 4e6 budget and nothing else; those rows have driver
@@ -57,7 +61,7 @@ The earlier Au55 rows of session `20261117T035457Z` ran the alloy block of
 `scripts/metal_h2h/enter_gold.sh` (`RADIUS 50.0`, `TEMPERATURE 1.0`,
 `STEP 0.40 0.51` and `NEWRESTART 40` without `AVOID ... F`), which left
 `AVOIDRESEEDT` true, reseeded into a 57.7 Å cube after 40 stagnant steps,
-and hit 0/12; those rows stay in `rows.csv`, and session `20261117T181140Z`
+and hit 0/12; those rows stay in `rows.csv`, and session `20261121T133601Z`
 reran both arms of Au55 under the Gupta input above (4/12 against 1/12).
 
 Wall is the search wall each code reports. Inside is `pot_s`, the time
@@ -82,9 +86,10 @@ is already omitted as censored, and `hit` and `evals_to_hit` are unaffected.
 
 - `rows.csv`: one row per run, appended and never rewritten; `--summarize`
   scores the latest stored row of each seed. `code_revision` is the anneal
-  commit on anneal rows and the GMIN SVNREV on GMIN rows;
+  commit on anneal rows and the GMIN SVNREV or tarball sha256 on GMIN rows;
   `harness_revision` is the anneal commit whose examples wrote the starts;
-  `host` is the UTS hostname and `session` the start of the runner process.
+  `host` is the UTS hostname or machine-id sha256 and `session` the
+  campaign stamp.
 - `gmin-source.txt`: the GMIN tarball, SVNREV, patches, CMake flags,
   compiler, linked BLAS and LAPACK and binary hash.
   `patch=bench/lj104-lattice/v2/h2h-gmin.patch` records the current
@@ -107,6 +112,15 @@ is already omitted as censored, and `hit` and `evals_to_hit` are unaffected.
 - `summary.csv`, the table below and table `tab:gmin` in
   `paper/jctc/manuscript.tex` are written from `rows.csv` by
   `bash scripts/gmin_panel/enter_bench.sh --summarize --tex`.
+- Session `20261121T133601Z` is recorded at
+  `e4341de058b73366f2d7b5f17995da283d57bad6`, tree
+  `63d1488f465fff1e65ce9b338641ef945fad75a9`. The record is the ref
+  `refs/audit/record/gmin-184`. That commit holds `enter.sh`,
+  `apply_patches.py` and `run_record.py`.
+  Its parent is `b8190ce61a64ff6cb61ee6bfc656b0657d78494d`. The rows
+  keep `harness_revision`
+  `9837358ae1027067ff654fac8b48969020853452`, the anneal commit the
+  session ran. That commit is an ancestor of the record commit.
 
 <!-- gmin-panel table: start -->
 | System | Budget | Arm | Hits | Median calls | IQR | Wall (s) | Inside (s) | Outside (s) | Fisher p | MW p calls | MW p wall |
@@ -127,14 +141,14 @@ is already omitted as censored, and `hit` and `evals_to_hit` are unaffected.
 |  |  | GMIN | 6/12 | 3696118 | 1285122.25 | 193.6 | 173.6 | 20.007 |  |  |  |
 | LJ150 | 4000000 | anneal | 5/12 | 4000000 | 1477851 | 237.2 | 139.7 | 96.075 | 0.21 | 0.17 | - |
 |  |  | GMIN | 9/12 | 3129518.5 | 3240050.5 | 326.1 | 302.1 | 23.955 |  |  |  |
-| Au55 | 1000000 | anneal | 4/12 | 1000000 | 736743.75 | 38.043 | 28.083 | 9.966 | 0.32 | 0.21 | - |
-|  |  | GMIN | 1/12 | 1000000 | 0 | 59.573 | 56.427 | 3.152 |  |  |  |
-| M55 ρ=6 | 1000000 | anneal | 12/12 | 22596 | 51763.75 | 0.424 | 0.298 | 0.123 | 1 | 0.93 | 0.47 |
-|  |  | GMIN | 12/12 | 37047.5 | 37358.75 | 0.751 | 0.637 | 0.115 |  |  |  |
-| M55 ρ=14 | 1000000 | anneal | 9/12 | 451561.5 | 773925.5 | 7.719 | 5.899 | 1.819 | 3.4e-4 | 3.8e-4 | - |
-|  |  | GMIN | 0/12 | 1000000 | 0 | 18.898 | 16.322 | 2.577 |  |  |  |
-| M80 ρ=6 | 4000000 | anneal | 12/12 | 62677 | 575467.75 | 2.322 | 1.704 | 0.619 | 1 | 0.26 | 0.26 |
-|  |  | GMIN | 12/12 | 268934 | 268091.5 | 10.691 | 9.582 | 1.109 |  |  |  |
-| M80 ρ=14 | 4000000 | anneal | 6/12 | 3901429 | 1446773 | 144.7 | 106.0 | 36.513 | 0.014 | 7.1e-3 | - |
-|  |  | GMIN | 0/12 | 4000000 | 0 | 152.7 | 138.3 | 14.430 |  |  |  |
+| Au55 | 1000000 | anneal | 4/12 | 1000000 | 736743.75 | 35.723 | 26.395 | 9.241 | 0.32 | 0.21 | - |
+|  |  | GMIN | 1/12 | 1000000 | 0 | 59.384 | 56.245 | 3.135 |  |  |  |
+| M55 ρ=6 | 1000000 | anneal | 12/12 | 22596 | 51763.75 | 0.406 | 0.285 | 0.121 | 1 | 0.93 | 0.84 |
+|  |  | GMIN | 12/12 | 37047.5 | 37358.75 | 0.667 | 0.566 | 0.101 |  |  |  |
+| M55 ρ=14 | 1000000 | anneal | 9/12 | 451561.5 | 773925.5 | 7.377 | 5.656 | 1.721 | 3.4e-4 | 3.8e-4 | - |
+|  |  | GMIN | 0/12 | 1000000 | 0 | 17.661 | 15.244 | 2.403 |  |  |  |
+| M80 ρ=6 | 4000000 | anneal | 12/12 | 62677 | 575467.75 | 2.265 | 1.663 | 0.602 | 1 | 0.26 | 0.29 |
+|  |  | GMIN | 12/12 | 268934 | 268091.5 | 9.666 | 8.660 | 1.005 |  |  |  |
+| M80 ρ=14 | 4000000 | anneal | 6/12 | 3901429 | 1446773 | 136.9 | 102.2 | 34.159 | 0.014 | 7.1e-3 | - |
+|  |  | GMIN | 0/12 | 4000000 | 0 | 141.6 | 128.3 | 13.346 |  |  |  |
 <!-- gmin-panel table: end -->

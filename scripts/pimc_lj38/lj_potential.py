@@ -2,7 +2,9 @@
 """Lennard-Jones potential used by the i-PI driver in the RPQA LJ example.
 
 The pair formula, the sharp cutoff, and the volume tail are the ones in
-``drivers/f90/LJ.f90`` at afiorent/i-pi ``4e86f5fd``. Positions and ``sigma``
+``drivers/f90/LJ.f90`` at
+``https://github.com/afiorent/i-pi.git@4e86f5fdc1583ef21f105fc2bed96a279b2430c1``.
+Positions and ``sigma``
 are in bohr, energies in hartree. The tail is the Martyna-Hughes correction
 that ``LJ_getall`` adds after the pair sum.
 """

@@ -612,8 +612,10 @@ through ten molecules.
 \cite{giriAimnetClusters2025,zhangGmmlp2026}
 An artificial bee colony on TIP4P has been reoptimized at HCTH.
 \cite{bhattWaterClusters2024}
-Random-phase-approximation forces reorder larger water clusters, and the same
-preprint says the hexamer does not show that reordering.
+Random-phase-approximation forces reorder larger water clusters; the
+published journal abstract reports basis-set dependence in that ordering,
+while the earlier preprint abstract states that the hexamer does not show that
+reordering.
 \cite{tahirRpaWater2024}
 One argon atom, and hydrophobic guests, reorder six-molecule water
 topologies on electronic-structure surfaces.
@@ -658,6 +660,42 @@ in \(C_6\) and \(C_{12}\).
 A rounded well depth and a rounded \(\sigma\) give the anneal pair
 \(C_6 = 2551.8252\) and \(C_{12} = 2510336.2\).
 These two coefficients are the TIP4P pair in the log.
+
+\section{GMIN panel sessions and revisions}
+\path{bench/gmin-panel/rows.csv} stores the GMIN panel of the main text.
+For each of the 13 clusters, both arms ran in one serial session on one
+core (\texttt{taskset -c 0}, one thread) across seeds 2000--2011 from
+the start that this code writes for the seed, and each cluster's median
+wall compares the two arms within its own session.
+The table reads the latest stored row of each seed and combines two
+sessions and two \texttt{anneal} revisions.
+The eight Lennard-Jones clusters (LJ\(_{38}\), LJ\(_{55}\), LJ\(_{75}\),
+LJ\(_{98}\), LJ\(_{102}\), LJ\(_{103}\), LJ\(_{104}\), and LJ\(_{150}\))
+come from session \texttt{20261117T035457Z} (2026-11-17) on host
+\texttt{bench}, running \texttt{anneal} commit
+\texttt{\seqsplit{c2de652dca0bc75e2b0cb4afffac91fd656404e4}}
+(\texttt{h2h\_gmin\_proof}, with \path{bench/paper-0120/lj103-table.patch}
+adding the LJ\(_{103}\) reference energy and \(4\times 10^{6}\) budget
+as \texttt{h2h\_gmin\_proof+lj103}) against GMIN at Wales revision
+\texttt{\seqsplit{aac1548a8aec13b53ad12a8d6904625081685d2e}} (tarball
+SHA-256
+\texttt{\seqsplit{a972c29b081a74235286bf3e8755c8811da2f7e2a4faab81ffb41570d6d2fe05}}),
+ordered \texttt{anneal} then GMIN on each seed.
+Au\(_{55}\) and the four Morse clusters (M\(_{55}\) and M\(_{80}\) at
+\(\rho=6\) and \(14\)) come from session \texttt{20261121T133601Z}
+(2026-11-21, \path{record/gmin-184/rows.csv}) on machine ID SHA-256
+\texttt{\seqsplit{3b11c160088e7af5c4f7ebd9da95e0bfe019a34698416701bb057c15fea10873}},
+running \texttt{anneal} commit
+\texttt{\seqsplit{9837358ae1027067ff654fac8b48969020853452}} (tree
+\texttt{\seqsplit{15032ef401fb681e230d27c7b315d89f7ac53e4e}}, examples
+\texttt{h2h\_metal} and \texttt{h2h\_morse}) against the
+\texttt{2026-11-21T03:01:22Z} GMIN source tarball (SHA-256
+\texttt{\seqsplit{0d9917600ecda72b2176253d0e838bcb58ec6e38902ef7d0affc7e7e7eba8f39}}),
+ordered ABBA across seeds 2000--2011.
+Earlier 2026-11-17 Au\(_{55}\) and Morse rows from sessions
+\texttt{20261117T035457Z} and \texttt{20261117T152941Z} remain in
+\path{bench/gmin-panel/rows.csv} and are superseded by session
+\texttt{20261121T133601Z}.
 
 \section{Host and commands}
 \label{sec:host}
@@ -895,7 +933,12 @@ seeds 6400--6405 at the end of Section~\msref{sec:ablation}.
 They are the baseline in Section~\ref{sec:cross-field}.
 They are not a new comparison with GMIN.
 
+At M\(_{55}\) and \(\rho=6\), this setting hits 12 of 12 and the 12 hits
+come at 5808 to 104221 evaluations.
+GMIN hits the same cluster in 4594 to 103829 calls.
 The ASE panel's 12 hits at M\(_{55}\) and \(\rho=6\) come at 2266 to 34953 calls.
+At M\(_{80}\) and \(\rho=6\), both arms hit 12 of 12, at 7052 to 1461617
+evaluations for this setting and 59837 to 1298809 calls for GMIN.
 
 The panel uses three GMIN inputs.
 The Lennard-Jones rows run the Wales-group LJ\(_{38}\) introduction file at every Lennard-Jones size, with \(T=1.0\), \texttt{NEWRESTART 40}, and an energy difference of 0.003, with no symmetrization keyword, from the start that this code writes for the seed.
@@ -995,9 +1038,56 @@ The runs are one at a time on core 0 of one host.
 \section{The Atomic Simulation Environment}
 \label{sec:ase}
 % ase-panel prose: start
+This work is anneal \texttt{61fa67cf380e46876b569da45e7cc091647a775b}.
+Minima hopping stopped at the cap on all 72 runs of Table~\ref{tab:ase}, and basin hopping on 35: 12 on LJ\(_{38}\), 11 on LJ\(_{55}\), and 12 on Au\(_{55}\).
+On LJ\(_{98}\), LJ\(_{104}\), and LJ\(_{150}\) basin hopping spent the full \(4\times 10^{6}\) calls on every seed.
+This setting hits LJ\(_{38}\) and LJ\(_{55}\) on 12 of 12, LJ\(_{98}\) on 7 of 12, LJ\(_{104}\) on 5 of 12, and LJ\(_{150}\) on 8 of 12.
+Basin hopping hits LJ\(_{55}\) on 1 of 12 and no other cluster, and minima hopping hits none.
+Fisher's test against each ASE arm is below 0.05 on all 5 Lennard-Jones clusters.
+No arm hits Au\(_{55}\).
+There the median best energy lies 0.051~eV above the reference for this setting, 1.232~eV for basin hopping, and 0.737~eV for minima hopping.
 % ase-panel prose: end
 % ase-panel table: start
+\begin{table}
+\caption{\raggedright This work against the basin hopping (BH) and minima hopping
+(MH) of ASE 3.29.0 at its constructor defaults.
+This work is anneal \texttt{61fa67cf380e46876b569da45e7cc091647a775b}.
+Seeds 2000--2011, one core, budget in force calls.
+Cap is the wall in seconds at which a BH or MH run stops, three times
+the slowest wall of the cluster-preset arm of the panel.
+Stops counts the BH and MH runs that ended at the cap; those runs
+are misses with fewer calls than the budget.
+No run of this work ended at a cap.
+Wall is the median over the 12 runs of the seconds each run took;
+a BH or MH run that ended at the cap is counted at its wall.
+\(p_\mathrm{BH}\) and \(p_\mathrm{MH}\) are the two-sided Fisher
+exact test on hits against each ASE arm.}
+\label{tab:ase}
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lrrrrrrrrrrrr@{}}
+\toprule
+ & & & \multicolumn{3}{c}{Hits} & \multicolumn{2}{c}{Stops} & \multicolumn{3}{c}{Wall (s)} & & \\
+\cmidrule(lr){4-6}\cmidrule(lr){7-8}\cmidrule(lr){9-11}
+Cluster & Budget & Cap & This work & BH & MH & BH & MH & This work & BH & MH & \(p_\mathrm{BH}\) & \(p_\mathrm{MH}\) \\
+\midrule
+LJ\(_{38}\) & \(4\times 10^{5}\) & 4.645 & 12/12 & 0/12 & 0/12 & 12 & 12 & 0.605 & 4.645 & 4.858 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
+LJ\(_{55}\) & \(1\times 10^{6}\) & 4.220 & 12/12 & 1/12 & 0/12 & 11 & 12 & 0.051 & 4.220 & 4.442 & \(9.6\times 10^{-6}\) & \(7.4\times 10^{-7}\) \\
+LJ\(_{98}\) & \(4\times 10^{6}\) & 289.0 & 7/12 & 0/12 & 0/12 & 0 & 12 & 78.919 & 123.0 & 299.2 & \(4.6\times 10^{-3}\) & \(4.6\times 10^{-3}\) \\
+LJ\(_{104}\) & \(4\times 10^{6}\) & 291.0 & 5/12 & 0/12 & 0/12 & 0 & 12 & 101.7 & 128.5 & 305.2 & 0.037 & 0.037 \\
+LJ\(_{150}\) & \(4\times 10^{6}\) & 667.2 & 8/12 & 0/12 & 0/12 & 0 & 12 & 59.386 & 216.1 & 712.5 & \(1.3\times 10^{-3}\) & \(1.3\times 10^{-3}\) \\
+Au\(_{55}\) & \(1\times 10^{6}\) & 107.9 & 0/12 & 0/12 & 0/12 & 12 & 12 & 36.000 & 107.9 & 110.3 & 1 & 1 \\
+\bottomrule
+\end{tabular}
+\end{table}
 % ase-panel table: end
+The active ASE panel rows in \texttt{rows-61fa67cf.csv} come from revision
+\texttt{61fa67cf} in this repository; the retained earlier ASE rows come from
+builds whose commits are not in it, and they stay in \path{rows.csv} and
+\path{rows-for-cluster.csv} as history.
+On LJ\(_{38}\) the median wall of this setting is 0.605~s, and every ASE run
+stops at the cap of 4.645~s.
 Table~\ref{tab:ase-morse} puts this setting against
 the basin hopping and the minima hopping of the Atomic Simulation
 Environment 3.29.0 at its constructor defaults, on seeds 2000--2011,
@@ -1022,6 +1112,8 @@ The cap of the basin-hopping and minima-hopping runs is three times
 the slowest wall of the panel's cluster-preset arm on that cluster.
 That arm is not the setting of this article, and the table leaves it
 out.
+Its hits are 10, 12, 4, 0, 0, and 0 of 12 on LJ\(_{38}\), LJ\(_{55}\),
+LJ\(_{98}\), LJ\(_{104}\), LJ\(_{150}\), and Au\(_{55}\).
 No run of this setting reached its cap.
 A run stopped at the cap is a miss with fewer calls than the budget, so
 its calls to the minimum are censored.
@@ -1036,6 +1128,8 @@ at \(\rho=14\) on 8 of 12.
 Both ASE arms hit 0 of 12 on all 4.
 Fisher's \(p\) against each ASE arm is \(7.4\times 10^{-7}\),
 \(3.4\times 10^{-4}\), \(7.4\times 10^{-7}\), and 0.0013 in table order.
+Under Holm's correction for those 10 tests, LJ\(_{104}\), at \(p=0.037\) against each arm,
+does not stay below 0.05.
 All 8 comparisons stay below 0.05 under Holm's correction.
 
 % ase-nonlj table: start
@@ -1132,6 +1226,10 @@ LJ\(_{98}\) & 2008 \\
 \end{tabular}
 \end{table}
 % gofee table: end
+
+Table~\ref{tab:ase} shows ASE minima hopping on 0 of 12 seeds at
+LJ\(_{38}\) and LJ\(_{55}\), because its runs stop at wall caps of
+4.645 and 4.220~s.
 
 \section{Structure plates, sketch-maps, and landfold}
 Reference plates: \ref{fig:si-structures} and \ref{fig:si-water}.

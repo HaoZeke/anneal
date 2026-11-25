@@ -1876,28 +1876,29 @@ IOREG_OUTPUT = """+-o Root  <class IORegistryEntry, id 0x100000100, retain 36>
 """
 
 
-def fake_macos(monkeypatch, tools):
-    """A host with no /etc/machine-id, DMI table or /proc/cpuinfo whose ioreg and sysctl answer from ``tools``."""
+def fake_macos(monkeypatch, tools, missing):
+    """A host with no /etc/machine-id, DMI table or /proc/cpuinfo whose ioreg and sysctl answer from ``tools``.
+
+    ``missing`` is the absent path the host names for all three files, so the macOS reads apply to it as to the defaults.
+    """
     import types
 
     import machine_provenance as mp
-
-    def which(name):
-        return f"/usr/bin/{name}" if name in tools else None
 
     def run(command, **kwargs):
         text = tools[command[0]]
         return types.SimpleNamespace(returncode=0, stdout=text, stderr="")
 
     monkeypatch.setattr(mp.sys, "platform", "darwin")
-    monkeypatch.setattr(mp, "shutil", types.SimpleNamespace(which=which))
     monkeypatch.setattr(mp, "subprocess", types.SimpleNamespace(run=run))
+    for name in ("MACHINE_ID_PATH", "PRODUCT_UUID_PATH", "CPUINFO_PATH"):
+        monkeypatch.setattr(mp, name, missing)
     return mp
 
 
 def test_machine_provenance_reads_the_hardware_uuid_and_brand_string_on_macos(tmp_path, monkeypatch):
-    mp = fake_macos(monkeypatch, {"ioreg": IOREG_OUTPUT, "sysctl": "Apple  M2 Pro\n"})
     missing = tmp_path / "missing"
+    mp = fake_macos(monkeypatch, {"ioreg": IOREG_OUTPUT, "sysctl": "Apple  M2 Pro\n"}, missing)
     digest, cpu = mp.machine_provenance(missing, missing, missing)
     assert digest == hashlib.sha256(mp.MACHINE_ID_SALT + b"11111111-2222-3333-4444-555555555555").hexdigest()
     assert cpu == "Apple M2 Pro"
@@ -1906,10 +1907,10 @@ def test_machine_provenance_reads_the_hardware_uuid_and_brand_string_on_macos(tm
 
 def test_machine_provenance_still_refuses_a_macos_host_that_names_nothing(tmp_path, monkeypatch):
     missing = tmp_path / "missing"
-    mp = fake_macos(monkeypatch, {"ioreg": "no uuid here\n", "sysctl": "Apple M2 Pro\n"})
+    mp = fake_macos(monkeypatch, {"ioreg": "no uuid here\n", "sysctl": "Apple M2 Pro\n"}, missing)
     with pytest.raises(RuntimeError, match="hardware UUID"):
         mp.machine_provenance(missing, missing, missing)
-    mp = fake_macos(monkeypatch, {"ioreg": IOREG_OUTPUT, "sysctl": "\n"})
+    mp = fake_macos(monkeypatch, {"ioreg": IOREG_OUTPUT, "sysctl": "\n"}, missing)
     with pytest.raises(RuntimeError, match="CPU model"):
         mp.machine_provenance(missing, missing, missing)
 
@@ -1921,8 +1922,14 @@ def test_machine_provenance_does_not_ask_macos_tools_on_other_systems(tmp_path, 
     missing = tmp_path / "missing"
     with pytest.raises(RuntimeError, match="hardware UUID"):
         mp.machine_provenance(missing, missing, missing)
-    monkeypatch.setattr(mp, "macos_machine_id", lambda: "unused")
-    with pytest.raises(RuntimeError, match="CPU model"):
+    for name in ("MACHINE_ID_PATH", "PRODUCT_UUID_PATH", "CPUINFO_PATH"):
+        monkeypatch.setattr(mp, name, missing)
+
+    def refuse(*_args, **_kwargs):
+        raise AssertionError("a macOS tool was asked on a Linux host")
+
+    monkeypatch.setattr(mp.subprocess, "run", refuse)
+    with pytest.raises(RuntimeError, match="hardware UUID"):
         mp.machine_provenance(missing, missing, missing)
 
 
@@ -3084,3 +3091,38 @@ def test_the_documented_environment_variables_are_read_in_one_place():
     for path in (ROOT / "scripts").rglob("*.py"):
         if path.name != "machine_provenance.py":
             assert "ANNEAL_MACHINE_ID" not in path.read_text(), path
+
+
+def test_machine_provenance_darwin_fallback(tmp_path, monkeypatch):
+    import hashlib
+    import subprocess
+    import machine_provenance as mp
+
+    missing = tmp_path / "missing"
+    monkeypatch.setattr(mp, "MACHINE_ID_PATH", missing / "machine-id")
+    monkeypatch.setattr(mp, "PRODUCT_UUID_PATH", missing / "product_uuid")
+    monkeypatch.setattr(mp, "CPUINFO_PATH", missing / "cpuinfo")
+    monkeypatch.setattr(mp.sys, "platform", "darwin")
+
+    def fake_run(cmd, **_kwargs):
+        if cmd[0] == "ioreg":
+            return subprocess.CompletedProcess(
+                cmd, 0, '    "IOPlatformUUID" = "11111111-2222-3333-4444-555555555555"\n', ""
+            )
+        if cmd[:2] == ["sysctl", "-n"] and cmd[2] == "machdep.cpu.brand_string":
+            return subprocess.CompletedProcess(cmd, 0, "Apple M2 Pro\n", "")
+        return subprocess.CompletedProcess(cmd, 1, "", "")
+
+    monkeypatch.setattr(mp.subprocess, "run", fake_run)
+    digest, cpu = mp.machine_provenance(
+        mp.MACHINE_ID_PATH, mp.PRODUCT_UUID_PATH, mp.CPUINFO_PATH
+    )
+    expected = hashlib.sha256(
+        mp.MACHINE_ID_SALT + b"11111111-2222-3333-4444-555555555555"
+    ).hexdigest()
+    assert digest == expected
+    assert cpu == "Apple M2 Pro"
+
+    # Explicit non-default missing paths still fail instead of querying the host.
+    with pytest.raises(RuntimeError, match="machine-id"):
+        mp.machine_provenance(tmp_path / "other-id", tmp_path / "other-uuid", tmp_path / "other-cpu")

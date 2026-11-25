@@ -8,7 +8,9 @@ a salted digest. The boot id is read in two files only,
 ``examples/common/host_label.rs`` for Rust. A Python script may read the host
 name, but only as the argument of ``host_label``; shell goes through
 ``machine_provenance.py``; Rust reads it only in ``host_label.rs``. A bank or
-catalog endpoint is written as ``endpoint_label``. Python, shell, batch
+catalog endpoint is written as ``endpoint_label``. The machine id is read
+in ``scripts/machine_provenance.py``, and the one other read, in the
+Sutton-Chen rerun, is exempt because the next line hashes it. Python, shell, batch
 scripts (``.sbatch``) and Rust are all scanned, ``experiments/`` too. A line
 that reads the host any other way fails, with no exemption for a file. A line
 that must read it raw is exempt by its exact text and a reason.
@@ -41,6 +43,7 @@ READS = (
     re.compile(r"\$\(\s*hostname\b|`\s*hostname\s*`|\bhostname\s*[>|]|^\s*hostname\s*$|uname\s+-[a-z]*[na]\b"),
     re.compile(r"hostnamectl|\bhostid\b|SLURMD_NODENAME|SLURM_(?:JOB_)?NODELIST|SLURM_SUBMIT_HOST"),
     re.compile(r"random/boot_id|\bboot_id\s*=\s*\$\(\s*cat\b"),
+    re.compile(r"/etc/machine-id|dbus/machine-id|product_uuid|IOPlatformUUID"),
 )
 WRAPPED = (
     re.compile(r"host_label\(\s*(?:socket\.gethostname\(\)|os\.uname\(\)\.nodename|platform\.node\(\))\s*\)"),
@@ -62,6 +65,10 @@ EXEMPT = {
         "scripts/gmin_panel/tuned.py",
         'for path in (Path("/etc/machine-id"), Path("/proc/sys/kernel/random/boot_id")):',
     ): TUNED_REASON + ", and both ids only feed a digest",
+    (
+        "scripts/paper_rerun/sc_h2h.py",
+        'raw = Path("/etc/machine-id").read_bytes().strip()',
+    ): "the id is read to be hashed by the next line, and only the sha256 reaches a row",
     (
         "scripts/elja_hq_sci_bankrpc.sh",
         "HOST=${BANK_HOST:-$(hostname)}",
@@ -142,6 +149,9 @@ def test_the_guard_flags_the_reads_it_exists_for():
         "hostnamectl --static",
         'echo "node=$SLURMD_NODENAME"',
         "echo $(uname -srvmn)",
+        'raw = Path("/etc/machine-id").read_bytes().strip()',
+        "cat /etc/machine-id > receipts/id.txt",
+        'let id = read_trimmed("/var/lib/dbus/machine-id");',
     ):
         assert flagged(line), line
     for line in (

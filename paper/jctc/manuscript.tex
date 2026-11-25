@@ -54,7 +54,7 @@ On the Lennard-Jones pair potential the number of minima grows quickly with the 
 Here, we keep one fixed setting across all sizes, with a move library that does not change with the atom count and a reduced temperature of \(0.8\), the value Wales and Doye used \cite{wales1997}.
 Below 98 atoms the quench chooses between the plain potential and one diameter penalty, and at 98 atoms and above the penalty is absent.
 At every size, a stall does not replace the walker with a random cluster.
-Section~\ref{sec:results} runs this setting against GMIN on 8 Lennard-Jones clusters, and against the basin hopping and the minima hopping of the Atomic Simulation Environment on 4 Morse clusters \cite{wales1997,larsenAse2017,goedecker2004}.
+Section~\ref{sec:results} runs this setting against GMIN on 13 Lennard-Jones, Gupta, and Morse clusters, and against the basin hopping and the minima hopping of the Atomic Simulation Environment on 5 Lennard-Jones clusters, Gupta Au\(_{55}\), and 4 Morse clusters \cite{wales1997,larsenAse2017,goedecker2004}.
 GMIN hits more seeds on 1 of the 8, LJ\(_{150}\).
 GMIN used the Wales-group LJ\(_{38}\) data file at every Lennard-Jones size.
 
@@ -72,7 +72,7 @@ against the basin hopping and the minima hopping of the Atomic Simulation
 Environment, and against AGOX GOFEE, on Lennard-Jones, Morse, gold, and
 TIP4P clusters.
 The searches of Section~\ref{sec:related} do not report that comparison.
-The report includes the clusters on which GMIN does better.
+The report includes the cluster on which GMIN does better.
 The claim does not extend to the structure priors.
 One of the six moves, the fivefold hop that \texttt{prior\_soap} adds, and
 the four other switches of Section~\ref{sec:priors} build structures from
@@ -483,8 +483,12 @@ LJ\(_{104}\) & \(4\times 10^{6}\) & 5/12 & 6/12 & 1 \\
 \subsection{GMIN on the paper panel}
 \label{sec:gmin}
 Table~\ref{tab:gmin} puts this work against GMIN on eight
-Lennard-Jones systems, with both arms of each cluster
-in one session on one core of one host.
+Lennard-Jones sizes, Gupta Au\(_{55}\), and Morse M\(_{55}\) and
+M\(_{80}\) at \(\rho=6\) and \(14\), with both arms of each cluster
+run in one session on one core of one host; the Lennard-Jones rows and
+the Au\(_{55}\) and Morse rows come from two sessions and two anneal
+revisions, \texttt{c2de652d} and \texttt{9837358a}, detailed in the
+Supporting Information.
 Both arms use seeds 2000--2011, the budget in the table and the start
 this code writes for the seed.
 GMIN uses the Wales-group LJ\(_{38}\) data file at every Lennard-Jones size, and the Supporting Information gives its
@@ -539,17 +543,15 @@ The median wall is 237.2~s against 326.1~s, the median time inside the potential
 Fisher's exact \(p\) on the hits is 0.21, and the Mann--Whitney \(p\) on calls is 0.17.
 
 % gmin-panel table: start
-The Morse anneal rows use revision \texttt{eeec8e2c}, on seeds 2000--2011.
-A miss is charged the full budget, and the median and the interquartile range
-below count that full budget as the calls of a miss.
-On M\(_{55}\) at \(\rho=6\) the budget is \(1\times 10^{6}\) calls and this setting hits 12 of 12. The median calls are 22596, and the interquartile range of those calls is 51763.75. On the hits the calls run from 5808 to 104221. The median wall is 0.424~s, the median time inside the potential is 0.298~s, and the median time outside the potential is 0.123~s. The best energy is -250.286609 against the reference -250.286609.
-On M\(_{55}\) at \(\rho=14\) the budget is \(1\times 10^{6}\) calls and this setting hits 9 of 12. The median calls are 451561.5, and the interquartile range of those calls is 773925.5. On the hits the calls run from 55240 to 932023. The median wall is 7.719~s, the median time inside the potential is 5.899~s, and the median time outside the potential is 1.819~s. The best energy is -220.646208 against the reference -220.646208.
-On M\(_{80}\) at \(\rho=6\) the budget is \(4\times 10^{6}\) calls and this setting hits 12 of 12. The median calls are 62677, and the interquartile range of those calls is 575467.75. On the hits the calls run from 7052 to 1461617. The median wall is 2.322~s, the median time inside the potential is 1.704~s, and the median time outside the potential is 0.619~s. The best energy is -378.333471 against the reference -378.333471.
-On M\(_{80}\) at \(\rho=14\) the budget is \(4\times 10^{6}\) calls and this setting hits 6 of 12. The median calls are 3901429, and the interquartile range of those calls is 1446773. On the hits the calls run from 529680 to 3802858. The median wall is 144.7~s, the median time inside the potential is 106.0~s, and the median time outside the potential is 36.513~s. The best energy is -340.811371 against the reference -340.811371.
+On the four Morse rows, this work and GMIN both hit 12 of 12 at
+\(\rho=6\) for M\(_{55}\) and M\(_{80}\).
+At \(\rho=14\), this work hits 9 of 12 against GMIN's 0 of 12 on M\(_{55}\), and 6 of 12 against 0 of 12 on M\(_{80}\).
+The corresponding two-sided Fisher values are \(3.4\times 10^{-4}\) and 0.014, respectively.
 
 \begin{table}
-\caption{This work against GMIN, both arms of each cluster on one host in one session.
-Revisions: anneal \texttt{c2de652d} on LJ\(_{38}\), LJ\(_{55}\), LJ\(_{75}\), LJ\(_{98}\), LJ\(_{102}\), LJ\(_{103}\), LJ\(_{104}\), and LJ\(_{150}\), GMIN \texttt{aac1548a}.
+\caption{This work against GMIN, both arms of each cluster run in one session on one host.
+The eight Lennard-Jones rows come from session \texttt{20261117T035457Z} (2026-11-17; anneal \texttt{c2de652d}, GMIN \texttt{aac1548a}).
+Au\(_{55}\) and the four Morse rows come from session \texttt{20261121T133601Z} (2026-11-21; anneal \texttt{9837358a}, GMIN tarball SHA-256 \texttt{0d991760}; see Supporting Information).
 Seeds 2000--2011, one core, budget in force calls.
 Calls and IQR are the median and the interquartile range of the
 calls to the minimum, with a miss at the full budget.
@@ -585,6 +587,16 @@ LJ\(_{104}\) & \(4\times 10^{6}\) & this work & 9/12 & 2328723 & 2947098 & 69.30
  &  & GMIN & 6/12 & 3696118 & 1285122.25 & 193.6 & 173.6 & 20.007 &  &  &  \\
 LJ\(_{150}\) & \(4\times 10^{6}\) & this work & 5/12 & 4000000 & 1477851 & 237.2 & 139.7 & 96.075 & 0.21 & 0.17 & -- \\
  &  & GMIN & 9/12 & 3129518.5 & 3240050.5 & 326.1 & 302.1 & 23.955 &  &  &  \\
+Au\(_{55}\) & \(1\times 10^{6}\) & this work & 4/12 & 1000000 & 736743.75 & 35.723 & 26.395 & 9.241 & 0.32 & 0.21 & -- \\
+ &  & GMIN & 1/12 & 1000000 & 0 & 59.384 & 56.245 & 3.135 &  &  &  \\
+M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & this work & 12/12 & 22596 & 51763.75 & 0.406 & 0.285 & 0.121 & 1 & 0.93 & 0.84 \\
+ &  & GMIN & 12/12 & 37047.5 & 37358.75 & 0.667 & 0.566 & 0.101 &  &  &  \\
+M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & this work & 9/12 & 451561.5 & 773925.5 & 7.377 & 5.656 & 1.721 & \(3.4\times 10^{-4}\) & \(3.8\times 10^{-4}\) & -- \\
+ &  & GMIN & 0/12 & 1000000 & 0 & 17.661 & 15.244 & 2.403 &  &  &  \\
+M\(_{80}\), \(\rho=6\) & \(4\times 10^{6}\) & this work & 12/12 & 62677 & 575467.75 & 2.265 & 1.663 & 0.602 & 1 & 0.26 & 0.29 \\
+ &  & GMIN & 12/12 & 268934 & 268091.5 & 9.666 & 8.660 & 1.005 &  &  &  \\
+M\(_{80}\), \(\rho=14\) & \(4\times 10^{6}\) & this work & 6/12 & 3901429 & 1446773 & 136.9 & 102.2 & 34.159 & 0.014 & \(7.1\times 10^{-3}\) & -- \\
+ &  & GMIN & 0/12 & 4000000 & 0 & 141.6 & 128.3 & 13.346 &  &  &  \\
 \bottomrule
 \end{tabular}
 }
@@ -613,6 +625,10 @@ It also compares this setting with per-cluster tuned GMIN on LJ\(_{98}\) and LJ\
 and tuned GMIN hits 10 of 12 against 5 of 12 on LJ\(_{104}\), an observed GMIN advantage that
 is not significant at corrected \(p=0.18\)).
 On Au\(_{55}\) it compares this setting with ABCluster (Table~\siref{tab:abcluster}).
+No arm of the ASE panel hits Au\(_{55}\); in the GMIN panel, on another
+revision, this setting hits it on 4 of 12 and GMIN on 1 of 12.
+On Morse clusters of 38 and 55 atoms at \(\rho=6\) and \(\rho=14\) it
+hits 12, 9, 12, and 8 of 12, and both ASE arms hit 0 of 12.
 
 
 \section{Discussion}
@@ -638,6 +654,13 @@ is 35.730266~s.  GMIN's corresponding values are
 The comparisons with the Atomic Simulation Environment count hits only.
 Every basin-hopping and minima-hopping run of Table~\siref{tab:ase-morse}
 stopped at the cap.
+Minima hopping reached its cap on every run, and basin hopping on every
+run of LJ\(_{38}\), Au\(_{55}\), and the Morse clusters and on 11 of 12
+on LJ\(_{55}\).
+Those runs did not receive the budget, so their calls to the minimum
+and their wall are not completed observations.
+On LJ\(_{98}\), LJ\(_{104}\), and LJ\(_{150}\) basin hopping spent the
+budget before the cap and missed on every seed.
 
 The moves, the temperature, and the stall rules of
 Section~\ref{sec:search} were set on Lennard-Jones clusters.
@@ -650,8 +673,20 @@ Against the Atomic Simulation Environment this setting hits M\(_{38}\)
 at \(\rho=6\) on 12 of 12 and at \(\rho=14\) on 9 of 12, and
 M\(_{55}\) at \(\rho=6\) on 12 of 12 and at \(\rho=14\) on 8 of 12,
 where neither ASE arm hits.
+M\(_{55}\) at \(\rho=14\) is in both panels: 8 of 12 on revision
+\texttt{5eb79cdc} and 9 of 12 on \texttt{9837358a}.
 The ASE panel scales the preset to the Morse pair, and the driver
 \path{examples/h2h_morse.rs} of this repository runs the preset unscaled.
+The two panels differ in that scaling, and no run separates the two, so
+we do not assign the difference to it.
+On Au\(_{55}\) this setting hits 4 of 12 in the GMIN panel, where GMIN
+hits 1 of 12 and Fisher's \(p\) is 0.32.
+On Au\(_{55}\) the ASE panel hits 0 of 12 for this setting, as do both ASE arms,
+and the median best energy of this setting lies 0.051~eV above the reference.
+Those two Au\(_{55}\) counts come from revision \texttt{9837358a} with
+the gold driver of Section~\ref{sec:gmin} and from revision
+\texttt{61fa67cf} with the preset scaled to the Gupta length and well
+depth.
 
 \section{Conclusions}
 We have evaluated one basin-hopping setting, with the moves of Section~\ref{sec:moves} and \(T=0.8\), across the clusters reported here.
@@ -665,8 +700,9 @@ Against GMIN on seeds 2000--2011, this setting hits more seeds on 6 of
 GMIN used the Wales-group LJ\(_{38}\) data file at every Lennard-Jones size.
 Against the basin hopping and the minima hopping of the Atomic
 Simulation Environment, scored by Fisher's test on hits, this setting
-hits more seeds on all 4 Morse clusters, and
-against GMIN on TIP4P this setting hits \((\mathrm{H_2O})_{15}\) on 7 of 12
+hits more seeds on all 5 Lennard-Jones clusters and all 4 Morse
+clusters, and no arm hits Au\(_{55}\).
+For water, against GMIN on TIP4P this setting hits \((\mathrm{H_2O})_{15}\) on 7 of 12
 and GMIN on 0 of 12.
 In the 120-run ABBA comparison on one machine pinned to core 0,
 its median walls are 0.022 versus 1.952~s at 8 molecules, 11.667 versus
@@ -714,7 +750,7 @@ for the content of the publication.
 The Supporting Information gives the reference energies used in
 equations~\ref{eq:hit} and~\ref{eq:tip4p-hit}, the operators of the search,
 the structure priors, the population mode, the related searches, the host and
-the commands, the rows behind the ablation, the GMIN inputs, a plain walk
+the commands, the sessions and revisions of Table~\ref{tab:gmin}, the rows behind the ablation, the GMIN inputs, a plain walk
 without stall exits, the published costs of symmetrized searches, the TIP4P
 pair constants, the Sutton--Chen protocol, the ASE, GOFEE, and TIP4P panels,
 two opt-in stall-exit arms,

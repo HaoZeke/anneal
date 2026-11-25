@@ -376,6 +376,8 @@ def main() -> None:
         "Four Cambridge Morse systems across two sizes and two ranges: M38 and M55 at rho = 6 and rho = 14.",
         "Seeds 2000-2011, host bench, serial one core (`taskset -c 0`).",
         f"code_revision {', '.join(revisions)}.",
+        "The rows of these tables are `rerun-20261119/rows.csv` and its summary is `rerun-20261119/summary.csv`.",
+        "The earlier rows of `rows.csv` and `summary.csv` stay as history and are not tables here.",
         "Potential: untruncated Morse (`epsilon = 1`, `r0 = 1`, `rho0 = rho`).",
         "Anneal evaluates `PairPotential::morse` (`rgpot_pair::cambridge_morse`).",
         "ASE evaluates `ase.calculators.morse.MorsePotential` with `rcut1 = 1e6`, `rcut2 = 2e6`.",

@@ -141,13 +141,11 @@ def test_withheld_block_is_not_written():
     assert module.withheld_block([]) == ""
 
 
-def test_the_si_does_not_narrate_unquoted_comparisons():
+def test_the_si_does_not_narrate_unquoted_comparisons(monkeypatch):
     module = ingest()
     ase = load("ase_panel_empty", "scripts/ase_panel/summarize.py")
     items = module.withheld_items()
-    assert [name for name, _reason in items] == [
-        "tab:ase", "Morse against GMIN", "tab:sc",
-    ]
+    assert [name for name, _reason in items] == ["tab:sc"]
     assert {reason for _name, reason in items} <= {"harness not reachable", "rerun pending"}
     text = (ROOT / "paper" / "jctc" / "si.tex").read_text()
     assert "Withheld results" not in text
@@ -155,8 +153,28 @@ def test_the_si_does_not_narrate_unquoted_comparisons():
     assert "\\label{tab:gmin-tuned}" in text
     assert module.WITHHELD_MARKS[0] not in text
     assert module.withheld_block() == ""
+    assert ase.tex_table() and ase.tex_table() in text
+    assert ase.held_prose() and ase.held_prose() in text
+    monkeypatch.setattr(ase, "commit_held", lambda revision: False)
     assert ase.held_prose() == ""
     assert ase.tex_table() == ""
+
+
+def test_a_withheld_ase_table_and_morse_panel_are_named_and_not_narrated(monkeypatch):
+    module = ingest()
+    ase = module._module("ase_panel_withheld", "scripts/ase_panel/summarize.py")
+    panel = module._module("gmin_panel_withheld", "scripts/gmin_panel/run_panel.py")
+    monkeypatch.setattr(ase, "commit_held", lambda revision: False)
+    monkeypatch.setattr(panel, "_commit_held", lambda revision: not revision.startswith("9837358a"))
+    monkeypatch.setattr(module, "_ITEMS", None)
+    monkeypatch.setattr(module, "_module", lambda name, path: {
+        "ase_panel_withheld": ase, "gmin_panel_withheld": panel,
+    }.get(name) or load(name, path))
+    items = module.withheld_items()
+    assert [name for name, _reason in items][:2] == ["tab:ase", "Morse against GMIN"]
+    assert {reason for _name, reason in items} <= {"harness not reachable", "rerun pending"}
+    assert module.withheld_block(items) == ""
+    monkeypatch.setattr(module, "_ITEMS", None)
 
 
 def test_a_fetch_into_the_same_repo_does_not_hold_a_side_commit(tmp_path: Path):

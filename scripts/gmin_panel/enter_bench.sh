@@ -31,7 +31,7 @@ if [[ ${1:-} == --summarize ]]; then
     esac
     prev=$arg
   done
-  exec python3 "$HERE/run_panel.py" --summarize --root "$ROOT" --rows "$OUT/rows.csv" --revision "$REV" "$@"
+  exec python3 "$HERE/run_panel.py" --summarize --root "$ROOT" --rows "$OUT/rows.csv" --revision "${GMIN_PANEL_REV:-latest}" "$@"
 fi
 if [[ -e $OUT/rows.csv ]]; then
   echo "refusing to overwrite $OUT/rows.csv" >&2

@@ -9,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ROWS = ROOT / "bench" / "gmin-panel" / "rows.csv"
+ABSENT = "9837358a"
 
 
 def panel():
@@ -18,8 +19,9 @@ def panel():
     return module
 
 
-def test_quoted_summary_drops_a_system_whose_commit_is_absent(tmp_path):
+def test_quoted_summary_drops_a_system_whose_commit_is_absent(tmp_path, monkeypatch):
     module = panel()
+    monkeypatch.setattr(module, "_commit_held", lambda revision: not revision.startswith(ABSENT))
     before = hashlib.sha256(ROWS.read_bytes()).hexdigest()
     rows = module.read_rows(ROWS)
     summary = module.summarise(rows, "latest")
