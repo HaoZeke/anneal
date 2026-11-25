@@ -59,6 +59,12 @@ tarball date and file hash, and the hashed machine id. A row is
 kept only when the call count is positive and the stop reason
 is set.
 
+The `machine_id` column here is the plain SHA-256 of
+`/etc/machine-id`, with no salt: `run_record.py` on the record
+commit hashes the file alone. It is not the salted `machine_id`
+of `docs/benchmark-row-provenance.md`. It equals the `host` of
+the matching rows in `bench/gmin-panel/rows.csv`.
+
 ```
 bash record/gmin-184/enter.sh --tarball TARBALL
 ```
