@@ -19,7 +19,7 @@ cargo_home=${CARGO_HOME:-$HOME/.cargo}
 
 if [[ ${1:-} == --summarize ]]; then
   shift
-  exec python3 "$HERE/run_panel.py" --summarize --root "$ROOT" --rows "$OUT/rows.csv" --revision "$REV" "$@"
+  exec python3 "$HERE/run_panel.py" --summarize --root "$ROOT" --rows "$OUT/rows.csv" --revision "${GMIN_PANEL_REV:-latest}" "$@"
 fi
 
 tree() {

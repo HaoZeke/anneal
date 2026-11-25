@@ -3,8 +3,9 @@
 """Serial RPQA against the paper preset on LJ38.
 
 The RPQA arm is Fiorentino and Marzari's published LJ input
-(``examples/features/quantum_annealing/RPQA/LJ_cluster`` in afiorent/i-pi
-``4e86f5fd``): 16 beads, 50 K, a 1 fs Langevin step, ``lambdaqkin`` from 19
+(``examples/features/quantum_annealing/RPQA/LJ_cluster`` in
+``https://github.com/afiorent/i-pi.git@4e86f5fdc1583ef21f105fc2bed96a279b2430c1``):
+16 beads, 50 K, a 1 fs Langevin step, ``lambdaqkin`` from 19
 to 0.01 on the square-root ramp, and an LBFGS relax of every bead every
 5000 steps after a 5000-step delocalisation. The cluster has 38 atoms. The
 start is the geometry ``h2h_gmin_proof coords`` writes for the same seed,

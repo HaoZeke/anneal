@@ -9,6 +9,23 @@
 #   build_gmin_tersoff.sh [--tarball PATH] <librgpot_covalent.so>
 set -euo pipefail
 
+if ! command -v sha256sum >/dev/null 2>&1; then
+  sha256sum() {
+    if command -v shasum >/dev/null 2>&1; then
+      shasum -a 256 "$@"
+    else
+      python3 -c 'import hashlib, pathlib, sys
+for p in sys.argv[1:]:
+    print(f"{hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()}  {p}")' "$@"
+    fi
+  }
+fi
+if ! command -v nproc >/dev/null 2>&1; then
+  nproc() {
+    sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1
+  }
+fi
+
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 PIN=$ROOT/scripts/gmin_pin.py

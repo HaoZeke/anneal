@@ -9,6 +9,7 @@ import hashlib
 import io
 import os
 import re
+import subprocess
 import sys
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
@@ -25,6 +26,40 @@ class SavedRowProvenanceMismatch(ValueError):
     """Raised when a saved row disagrees with expected producer provenance."""
 
 
+def _darwin_machine_id() -> str:
+    try:
+        result = subprocess.run(
+            ["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return ""
+    if result.returncode != 0:
+        return ""
+    match = re.search(r'"IOPlatformUUID"\s*=\s*"([^"]+)"', result.stdout)
+    return match.group(1).strip() if match else ""
+
+
+def _darwin_cpu_model() -> str:
+    for key in ("machdep.cpu.brand_string", "hw.model"):
+        try:
+            result = subprocess.run(
+                ["sysctl", "-n", key],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError:
+            return ""
+        if result.returncode == 0:
+            value = " ".join(result.stdout.split())
+            if value:
+                return value
+    return ""
+
+
 def machine_provenance(
     machine_id_path: Path = MACHINE_ID_PATH,
     product_uuid_path: Path = PRODUCT_UUID_PATH,
@@ -37,6 +72,13 @@ def machine_provenance(
             identifier = path.read_text().strip()
             if identifier:
                 break
+    if (
+        not identifier
+        and sys.platform == "darwin"
+        and machine_id_path == MACHINE_ID_PATH
+        and product_uuid_path == PRODUCT_UUID_PATH
+    ):
+        identifier = _darwin_machine_id()
     if not identifier:
         raise RuntimeError(
             "neither /etc/machine-id nor the DMI product_uuid is available"
@@ -53,6 +95,8 @@ def machine_provenance(
             if fields.get(key):
                 cpu_model = fields[key]
                 break
+    if not cpu_model and sys.platform == "darwin" and cpuinfo_path == CPUINFO_PATH:
+        cpu_model = _darwin_cpu_model()
     if not cpu_model:
         raise RuntimeError("/proc/cpuinfo has no CPU model string")
 
