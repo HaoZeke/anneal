@@ -198,7 +198,7 @@ atoms, and, above 13 atoms, moves the five atoms that carry the largest
 residual, as equation~\ref{eq:soap-step} defines.
 Their root-mean-square displacement is \(0.75\) in reduced units.
 
-Below 98 atoms the quench chooses a surface and holds it for 100 hops.
+At every size the quench chooses a surface and holds it for 100 hops.
 The two surfaces are the plain potential and the plain potential plus
 the diameter penalty
 \begin{equation}
@@ -211,8 +211,12 @@ V_{\mathrm{pen}}(x) &= \sum_{i<j}
 \end{equation}
 The penalty acts only on the pairs that are farther apart than \(D\), in the
 spirit of the compression of Doye \cite{doye2000}.
-At 98 atoms and above the penalty is absent and every quench uses the
-plain potential.
+A quench on the penalty surface is two relaxations in sequence: the first on
+the penalized potential, the second on the plain potential from where the first
+ended, and the chain walks the minimum of the second.
+The same proposal is also relaxed on the plain potential alone, and that
+minimum replaces the first only when it is below the incumbent, the lowest
+energy found so far.
 
 \subsection{Mechanism and design rationale}
 \label{sec:mechanism}
@@ -430,6 +434,14 @@ a large scale \(s_k\), so it is tried.
 The quench surface of equation~\ref{eq:penalty} is chosen by the same rule,
 and the reward for a block of 100 hops is the best energy at the start of the
 block minus the lowest energy the block reached.
+A block on the penalty surface whose reward is zero or less is followed by
+blocks on the plain potential, and the chain returns to where it stood at the
+start of the block that found the incumbent.
+The plain blocks end when the plain walk reaches a minimum below that
+incumbent, or when they outnumber the blocks the run had settled before they
+began.
+The next block then goes back to the penalty arm, from where the chain now
+stands.
 With the move choice switched off (Section~\ref{sec:knockouts}) the chain
 draws
 \begin{equation}
@@ -439,7 +451,7 @@ k^{\star} \sim \mathrm{Uniform}\{0,\ldots,n_{\mathrm{moves}}-1\}
 and does not consult equation~\ref{eq:thompson}; the library, the screen, and
 the acceptance rule stay the same.
 
-\subsection{Units and atom-count gates}
+\subsection{Units and size dependence}
 \label{sec:units}
 The temperature \(0.8\) is the value Wales and Doye used for Lennard-Jones
 basin hopping \cite{wales1997}, and every length and energy above is in the
@@ -450,16 +462,24 @@ minimum of their potential.
 No row of Table~\ref{tab:gmin} rescales those lengths to the Morse pair
 minimum; the Morse rows of Table~\ref{tab:ase-morse} run
 \texttt{Config::recommended\_with\_scales} at that length scale.
-For atomic clusters the preset has one atom-count gate: the diameter penalty
-of equation~\ref{eq:penalty} is used only below 98 atoms.
-The revisions with the structure priors on had a second, the growth hold of
-equation~\ref{eq:hold}.
-A rigid-body run has a gate of its own: at 10 molecules or fewer a factor on
-its acceptance temperature starts at 24 and moves between 1 and 24 with the
-share of hops that reach a new minimum, and above 10 that factor stays at 4
-and its orientation step follows the acceptance rate.
-The exact assignment inside the symmetry projections also changes algorithm
-at 98 atoms, and both algorithms return an assignment of the optimal cost.
+The search tests neither the atom count nor the body count.
+The diameter penalty of equation~\ref{eq:penalty} is offered at every size,
+and the choice between the two surfaces is the rule of
+Section~\ref{sec:posterior}.
+The revisions with the structure priors on had one test of the atom count,
+the growth hold of equation~\ref{eq:hold}.
+A rigid-body run accepts at the temperature that its preset stores for the
+potential, 2~kJ/mol for TIP4P, at every number of molecules.
+Its orientation step is the preset step times a scale that is multiplied by
+1.05 when the acceptance rate over 50 decisions exceeds one half and divided
+by 1.05 when it falls below, and that stays between \(10^{-3}\) and 1.
+Before the revision that removed these tests, the preset offered the penalty
+surface below 98 atoms only, and a rigid-body run multiplied its acceptance
+temperature by a factor chosen from the body count.
+The Supporting Information names the revision that produced each row.
+The one size-dependent choice that remains is the exact assignment inside the
+symmetry projections, which changes algorithm at 98 atoms; both algorithms
+return an assignment of the optimal cost.
 No constant was refitted for a size.
 
 \subsection{Structure priors and templates}
