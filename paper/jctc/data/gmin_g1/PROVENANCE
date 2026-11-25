@@ -1,0 +1,7 @@
+branch record/g1-develop-stock
+tip 4256269394435f77787d2bfdbead2321e08340a6
+commit 4256269394435f77787d2bfdbead2321e08340a6
+tree b3ce4162aa42928d2021cbc5b38e4b5f461d6c5d
+ancestor 61fa67cf380e46876b569da45e7cc091647a775b
+source bench/g1-develop-stock/anneal-rows.csv
+blob c902047fd7f7834ace15ec7e34d7207af0282ead
