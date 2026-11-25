@@ -1522,24 +1522,6 @@ fn the_sdist_packs_explicit_bench_and_example_targets() {
     );
 }
 
-/// The text of one top-level job in a workflow, up to the next job.
-fn workflow_job<'a>(workflow: &'a str, name: &str) -> &'a str {
-    let start = workflow
-        .find(&format!("\n  {name}:\n"))
-        .unwrap_or_else(|| panic!("job {name}"))
-        + 1;
-    let rest = &workflow[start..];
-    let end = rest
-        .match_indices("\n  ")
-        .map(|(offset, _)| offset)
-        .find(|&offset| {
-            let line = rest[offset + 3..].lines().next().unwrap_or_default();
-            !line.starts_with(' ') && !line.starts_with('#') && line.ends_with(':')
-        })
-        .unwrap_or(rest.len());
-    &rest[..end]
-}
-
 // cluster_search(ras=True) is compiled only with graphkey. A wheel feature
 // list without it publishes a module that refuses the documented search.
 #[test]
@@ -1562,8 +1544,8 @@ fn every_wheel_build_enables_graphkey() {
 
     // A `--features` list on the command line is checked as well, in case it
     // replaces the pyproject list.
-    let release = include_str!("../.github/workflows/release.yml");
-    let wheels = workflow_job(release, "wheels");
+    let workflow = release();
+    let wheels = serde_yaml_ng::to_string(job(&workflow, "wheels")).expect("wheels job as YAML");
     assert!(wheels.contains("PyO3/maturin-action"));
     // nauty's bindings need libclang inside the manylinux containers.
     assert!(wheels.contains("before-script-linux:"));
