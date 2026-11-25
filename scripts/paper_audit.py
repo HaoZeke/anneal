@@ -2403,7 +2403,8 @@ def g3_session(audit: Audit) -> None:
                    "its archived rows, and a replay of each run gives the same record of accepted\n"
                    "minima and the same lowest energy.\n"
                    "All 60 seeds are rows of this code printed in the GMIN table.")
-    audit.said(SI, "Commit \\texttt{\\seqsplit{e578f267b3826cfd7e0f1737515bc45f1b8a72c6}} of \\path{refs/audit/record/g3-funnel}")
+    audit.said(SI, "The record \\path{refs/audit/record/g3-funnel}, at commit "
+                   "\\texttt{\\seqsplit{e578f267b3826cfd7e0f1737515bc45f1b8a72c6}}, runs this code on")
     audit.said(SI, "removes no line of \\path{src}, and runs with the record on.")
 
 
