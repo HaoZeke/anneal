@@ -10,6 +10,15 @@ b236bd7dd327aed1db3672126c577bf342db0f87b5d6668298cf82ddf44f078a
 
 Every row checked clean.
 
+## Verification for the nits pass
+
+The retired head-to-head table check passed.
+The paper audit reported 7420 checks, 0 drifted, and 76 row files.
+The paper script behavior suite reported 19 passed and 2 skipped.
+The skips report the absent Rust 1.88.0 toolchain and chemparseplot.
+The manuscript and Supporting Information builds were not run because this
+host has no LaTeX executable.
+
 ## Submission text
 
 The cover letter has no submission placeholders.
