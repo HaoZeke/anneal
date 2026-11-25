@@ -8,10 +8,20 @@ System `au55`. Arm `cooperative`. One ensemble seed runs four chains
 at once. The chains are threads in one process. A second process is
 the catalog server, reached over a loopback ephemeral TCP port. The
 release build is `--features "bank-rpc ira"`. `src/` is unchanged.
+The linked shape library is commit
+`f395c83a7cfc4c5858f60bcee9b02ce30bd42a61` of
+`https://github.com/mammasmias/IterativeRotationsAssignments`,
+compiled with GNU Fortran 13.3.0. `libira.so` sha256
+`e0ffd8ed18611827056ce7d0e54a884cf5fdd88d2b32db7def6fa3a89631c6b9`.
+`libira.a` sha256
+`99b9343cce5195f04759055a7be665b70d004d10bafb657730f57f03108eb099`.
 
 The search preset is `Config::communicating(55)` with Gupta
-`copper_gold(0, 55)` species and no diameter rescaling. The replica
-count on that preset is held at 1. The four chains are four threads,
+`copper_gold(0, 55)` species and no diameter rescaling. The run
+then sets `shape_keyed` to true. That field is public and the
+preset leaves it false; `keying` stays `Distances`, so the flag
+selects shape keying. The replica count on that preset is held at
+1. The four chains are four threads,
 each running that single-replica preset, rather than one internal
 ladder.
 `basin_stride` is 8, because the Gupta surface does not read the
@@ -136,8 +146,17 @@ auxiliary_evaluation_events,auxiliary_evaluation_calls,
 basin_escape_events,basin_escape_calls,
 saddle_ride_events,saddle_ride_calls,
 charge_sum,ensemble_total,server_aggregate,terms_match,
+binary,features,shape_keyed,libira_sha256,
 revision,nproc,cpu_model
 ```
+
+`binary` is `arch_cooperative`. `features` is `bank-rpc ira`.
+`shape_keyed` is `true`. `libira_sha256` is the sha256 of the
+linked `libira.so`.
+
+`rows-bankrpc-only.csv` keeps twelve Au55 rows from a `bank-rpc`
+build with `shape_keyed` false. That file is not a paper cell.
+Its values are unchanged.
 
 ## Comparison
 
