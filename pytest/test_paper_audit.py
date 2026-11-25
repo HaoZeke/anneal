@@ -2224,6 +2224,23 @@ def test_a_water_rate_hit_flag_outside_its_printed_tolerance_is_rejected(path):
     assert [row for row in audit.drifts() if row[1] == path]
 
 
+def test_the_length_receipt_refresh_is_the_only_write_the_notes_allow():
+    path = "paper/jctc/REPRODUCE.md"
+    audit = audit_mod.Audit()
+    audit_mod.reproduction_records(audit)
+    assert not [
+        row for row in audit.drifts()
+        if row[1] == path and "never write tracked records" in row[2]
+    ]
+    audit = audit_mod.Audit()
+    audit.text_cache[path] = audit.text(path) + "\n    python3 other.py --write\n"
+    audit_mod.reproduction_records(audit)
+    assert [
+        row for row in audit.drifts()
+        if row[1] == path and "never write tracked records" in row[2]
+    ]
+
+
 @pytest.mark.parametrize("output", [
     "bench/tip4p-h2h/wall-r2.csv",
     "paper/jctc/logs/cuh2-hardware-receipt.txt",

@@ -4971,13 +4971,20 @@ def reproduction_records(audit: Audit) -> None:
             or path.startswith("paper/jctc/logs/")
         )
     )
+    # pdf_length.py --write refreshes the tracked length receipt. Every
+    # other --write, and any command that names a tracked row file, is rejected.
+    other_lines = [
+        line for line in text.splitlines()
+        if not ("pdf_length.py" in line and "--write" in line)
+    ]
+    other_text = "\n".join(other_lines)
     audit.record(
-        not unsafe_outputs and "--write" not in text,
+        not unsafe_outputs and "--write" not in other_text,
         reproduce,
         "REPRODUCE commands never write tracked records",
         "fresh outputs only",
         " ".join(unsafe_outputs) or (
-            "--write" if "--write" in text else "fresh outputs only"
+            "--write" if "--write" in other_text else "fresh outputs only"
         ),
     )
     campaign_outputs = {

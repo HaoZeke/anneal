@@ -13,12 +13,21 @@ in `data/hf-files.csv` from that commit and checks each sha256.
 
 The manuscript and the Supporting Information are built apart, so each reads
 the other's label numbers from `paper/jctc/labels-manuscript.tex` and
-`paper/jctc/labels-si.tex`.  After a label moves or a float is added, rewrite
-both files, build the manuscript, and measure the rendered text:
+`paper/jctc/labels-si.tex`.  After a label moves or a float is added, refresh
+the tracked files, build the manuscript, then verify:
 
-    python3 paper/jctc/scripts/cross_labels.py --output /tmp/jctc-labels
+    python3 paper/jctc/scripts/cross_labels.py
     (cd paper/jctc && latexmk -pdf -outdir=/tmp/jctc manuscript.tex)
+    python3 paper/jctc/scripts/pdf_length.py --pdf /tmp/jctc/manuscript.pdf --write
+    python3 paper/jctc/scripts/cross_labels.py --check
     python3 paper/jctc/scripts/pdf_length.py --pdf /tmp/jctc/manuscript.pdf --check
+
+`cross_labels.py` with no flags rewrites `labels-manuscript.tex` and
+`labels-si.tex` in place.  `cross_labels.py --output` writes those files in
+another directory and leaves the tracked copies unchanged.
+`pdf_length.py --write` rewrites the receipt `paper/jctc/logs/pdf-length.txt`.
+`cross_labels.py --check` and `pdf_length.py --check` only verify: a stale
+label file or a count outside its limit fails, and neither rewrites a file.
 
 `scripts/paper_audit.py` fails on a stale label file or a stale
 `paper/jctc/logs/pdf-length.txt`; that receipt is tracked although `logs/` is
