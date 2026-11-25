@@ -17,6 +17,7 @@ import shlex
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -370,6 +371,43 @@ def git_blob(path: Path) -> str:
     ).stdout.strip()
 
 
+def blob_of_bytes(root: Path, data: bytes) -> str:
+    return subprocess.run(
+        ["git", "hash-object", "--no-filters", "--stdin"], cwd=root, input=data, check=True, capture_output=True
+    ).stdout.decode().strip()
+
+
+def head_blob(root: Path, relative: str) -> str:
+    proc = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", f"HEAD:{relative}"],
+        cwd=root, check=False, capture_output=True, text=True,
+    )
+    return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
+def harness_sources(root: Path) -> list[Path]:
+    """tuned.py and every module it has loaded from ``scripts/``, the files ``harness_commit`` stands for."""
+    scripts = (root / "scripts").resolve()
+    found = {Path(__file__).resolve()}
+    for module in list(sys.modules.values()):
+        name = getattr(module, "__file__", None)
+        if name and Path(name).resolve().is_relative_to(scripts):
+            found.add(Path(name).resolve())
+    return sorted(found)
+
+
+def require_committed(root: Path, paths: list[Path]) -> None:
+    """Refuse a run whose code differs from HEAD, as its rows record HEAD as the harness."""
+    top = root.resolve()
+    for path in paths:
+        try:
+            relative = path.resolve().relative_to(top).as_posix()
+        except ValueError:
+            raise SystemExit(f"{path} is outside {root}, so HEAD does not hold it") from None
+        if blob_of_bytes(root, path.read_bytes()) != head_blob(root, relative):
+            raise SystemExit(f"{relative} differs from HEAD; commit or restore it before a run")
+
+
 def read_rows(path: Path) -> list[dict[str, str]]:
     if not path.is_file():
         return []
@@ -452,15 +490,17 @@ def measured_from(fields: dict[str, str], reference: float, budget: int, label: 
     }
 
 
-def run_shell(command: str, log: Path) -> subprocess.CompletedProcess[str]:
+def run_shell(command: str, log: Path, overrides: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     """Run a command this module built. Never pass it text read from a row."""
     env = os.environ.copy()
     for key in list(env):
         if key.startswith("H2H_") or key.startswith("ANNEAL_"):
             del env[key]
+    env.update(overrides or {})
     proc = subprocess.run(["bash", "-c", command], env=env, capture_output=True, text=True, check=False)
     log.parent.mkdir(parents=True, exist_ok=True)
-    log.write_text(command + f"\nexit={proc.returncode}\n" + proc.stdout[-20000:] + proc.stderr[-8000:])
+    shown = "".join(f"{key}={value}\n" for key, value in sorted((overrides or {}).items()))
+    log.write_text(shown + command + f"\nexit={proc.returncode}\n" + proc.stdout[-20000:] + proc.stderr[-8000:])
     return proc
 
 
@@ -599,6 +639,30 @@ def check_binary(path: Path, digest: str) -> None:
         raise SystemExit(f"{path.name} sha256 {got} is not {digest}")
 
 
+EXAMPLES = ("h2h_gmin_proof", "h2h_morse", "h2h_metal", "h2h_seed")
+
+
+def check_binaries(bin_dir: Path, build: dict[str, str]) -> None:
+    """Every binary a command may run is the one the build record names, checked before each run."""
+    check_binary(bin_dir / "GMIN", build["gmin_binary_sha256"])
+    for example in EXAMPLES:
+        check_binary(bin_dir / example, build[f"example_{example}"])
+
+
+def check_anneal_tree(anneal: Path | None, commit: str) -> None:
+    """The anneal arm runs in ``$ANNEAL``, so it must be the clean checkout of the recorded commit."""
+    if anneal is None:
+        raise SystemExit("the anneal arm needs --anneal")
+
+    def git(*args: str) -> str:
+        return subprocess.run(["git", *args], cwd=anneal, check=True, capture_output=True, text=True).stdout.strip()
+
+    if git("rev-parse", "HEAD") != commit:
+        raise SystemExit(f"{anneal} is not at anneal_commit {commit}")
+    if git("status", "--porcelain", "--untracked-files=no"):
+        raise SystemExit(f"{anneal} has changes against anneal_commit {commit}")
+
+
 def require_pin() -> None:
     if socket.gethostname() != "bench":
         raise SystemExit(f"uts name is {socket.gethostname()}")
@@ -636,6 +700,7 @@ def tune(args: argparse.Namespace, table: dict[str, Cell], build: dict[str, str]
                     print(f"skip tune {cell.name} {point.index} {seed}", flush=True)
                     continue
                 command = gmin_command(cell, seed, budget, data_shell_text(text, seed))
+                check_binaries(args.bin, build)
                 print(f"tune {cell.name} point {point.index} seed {seed}", flush=True)
                 proc = run_shell(command, args.logs / "tune" / cell.name / f"{point.index}-{seed}.log")
                 result = finish_gmin(proc, args.work, cell.reference, budget, f"tune {cell.name} {point.index} {seed}")
@@ -679,14 +744,25 @@ def tune(args: argparse.Namespace, table: dict[str, Cell], build: dict[str, str]
         )
 
 
-def data_blob(root: Path, name: str) -> str:
-    path = root / "bench" / "gmin-tuned" / "inputs" / f"{name}.data"
+def stage_input(root: Path, name: str, stage: Path) -> str:
+    """Copy the tuned input under ``stage`` as ``$ROOT`` lays it out and return the blob of those bytes.
+
+    The command copies the input from ``$ROOT``, and a run points ``$ROOT`` at
+    ``stage``, so the blob a row records is that of the bytes GMIN read. An
+    input that differs from HEAD is refused, as the row also records HEAD.
+    """
+    relative = f"bench/gmin-tuned/inputs/{name}.data"
+    path = root / relative
     if not path.is_file():
         raise SystemExit(f"missing tuned input {path.name}")
-    return subprocess.run(
-        ["git", "rev-parse", f"HEAD:bench/gmin-tuned/inputs/{name}.data"],
-        cwd=root, check=True, capture_output=True, text=True,
-    ).stdout.strip()
+    data = path.read_bytes()
+    blob = blob_of_bytes(root, data)
+    if blob != head_blob(root, relative):
+        raise SystemExit(f"{relative} differs from HEAD; commit or restore it before a run")
+    staged = stage / relative
+    staged.parent.mkdir(parents=True, exist_ok=True)
+    staged.write_bytes(data)
+    return blob
 
 
 def job_command(table: dict[str, Cell], name: str, code: str, seed: int) -> tuple[Cell, str, str]:
@@ -720,6 +796,7 @@ def evaluate(args: argparse.Namespace, table: dict[str, Cell], build: dict[str, 
     stored = read_rows(rows_path)
     done = {(row["system"], row["code"], row["seed"]) for row in stored}
     session = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    require_committed(args.root, harness_sources(args.root))
     head = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=args.root, check=True, capture_output=True, text=True
     ).stdout.strip()
@@ -748,14 +825,18 @@ def evaluate(args: argparse.Namespace, table: dict[str, Cell], build: dict[str, 
             continue
         cell, data_name, command = job_command(table, name, code, job.seed)
         budget = cell.budget
+        check_binaries(args.bin, build)
         if code == "anneal":
+            check_anneal_tree(args.anneal, build["anneal_commit"])
             binary = build[f"example_{cell.binary}"]
             revision = build["anneal_commit"]
         else:
             binary = build["gmin_binary_sha256"]
             revision = build["gmin_svnrev"]
         print(f"start {name} {code} {job.seed} slot {job.slot} {job.block}", flush=True)
-        proc = run_shell(command, args.logs / "eval" / name / f"{code}-{job.seed}.log")
+        with tempfile.TemporaryDirectory(prefix="tuned-root-") as stage:
+            blob = stage_input(args.root, data_name, Path(stage))
+            proc = run_shell(command, args.logs / "eval" / name / f"{code}-{job.seed}.log", {"ROOT": stage})
         if code == "anneal":
             result = finish_anneal(proc, cell, job.seed, budget)
         else:
@@ -772,7 +853,7 @@ def evaluate(args: argparse.Namespace, table: dict[str, Cell], build: dict[str, 
             **stamp(build, binary),
             "code_revision": revision,
             "harness_commit": head,
-            "data_blob": data_blob(args.root, data_name),
+            "data_blob": blob,
             "session": session,
             "command": command,
         }
@@ -1064,16 +1145,16 @@ def report(args: argparse.Namespace, table: dict[str, Cell]) -> None:
     print(f"summary cells {len(summary)} choices {len(choices)} aa {len(aa_rows)}", flush=True)
 
 
-def verify(args: argparse.Namespace, table: dict[str, Cell]) -> None:
+def verify(args: argparse.Namespace, table: dict[str, Cell], build: dict[str, str]) -> None:
     """Rerun one stored row with the command this module builds for it.
 
     The row's ``command`` text is never run. It must equal the rebuilt one, and
-    its ``budget`` must be the cell's.
+    its ``budget`` and ``data_blob`` must match what the rerun uses.
     """
     if not args.system or len(args.system) != 1 or args.code is None or args.seed is None:
         raise SystemExit("verify needs one --system, --code and --seed")
     system = args.system[0]
-    cell, _data_name, command = job_command(table, system, args.code, args.seed)
+    cell, data_name, command = job_command(table, system, args.code, args.seed)
     rows = read_rows(args.rows)
     matches = [
         row for row in rows
@@ -1086,7 +1167,15 @@ def verify(args: argparse.Namespace, table: dict[str, Cell]) -> None:
         raise SystemExit(f"stored command of {system} {args.code} {args.seed} is not the one tuned.py builds")
     if row["budget"] != str(cell.budget):
         raise SystemExit(f"stored budget {row['budget']} is not {cell.budget}")
-    proc = run_shell(command, args.logs / "verify" / f"{system}-{args.code}-{args.seed}.log")
+    check_binaries(args.bin, build)
+    if args.code == "anneal":
+        check_anneal_tree(args.anneal, build["anneal_commit"])
+    log = args.logs / "verify" / f"{system}-{args.code}-{args.seed}.log"
+    with tempfile.TemporaryDirectory(prefix="tuned-root-") as stage:
+        blob = stage_input(args.root, data_name, Path(stage))
+        if blob != row["data_blob"]:
+            raise SystemExit(f"{data_name}.data is blob {blob}, the row recorded {row['data_blob']}")
+        proc = run_shell(command, log, {"ROOT": stage})
     if args.code == "anneal":
         fresh = finish_anneal(proc, cell, args.seed, cell.budget)
     else:
@@ -1248,18 +1337,15 @@ def main(argv: list[str]) -> int:
         if args.build is None or args.bin is None or args.work is None or args.logs is None:
             parser.error("--build, --bin, --work and --logs are required")
         build = load_build(args.build)
-        check_binary(args.bin / "GMIN", build["gmin_binary_sha256"])
-        for example in ("h2h_gmin_proof", "h2h_morse", "h2h_metal", "h2h_seed"):
-            check_binary(args.bin / example, build[f"example_{example}"])
+        check_binaries(args.bin, build)
         os.environ["BIN"] = str(args.bin)
         os.environ["WORK"] = str(args.work)
-        os.environ["ROOT"] = str(args.root)
         if args.anneal is not None:
             os.environ["ANNEAL"] = str(args.anneal)
         if args.verify:
             if args.rows is None:
                 args.rows = args.root / "bench" / "gmin-tuned" / "rows.csv"
-            verify(args, table)
+            verify(args, table, build)
             return 0
         if args.tune:
             tune(args, table, build)

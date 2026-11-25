@@ -45,13 +45,14 @@ TUNED_CODES = frozenset({"anneal", "gmin"})
 # quoted path inside an f-string replacement field, which Python 3.10 and 3.11
 # reject. The file of HEAD builds the path in a variable first, and its
 # --verify rebuilds a row's command from the row's system, code and seed rather
-# than running the stored text. Both give the same command text for every
-# committed row, so the one rewrite is accepted: old blob to new blob, and
-# only for that harness commit, whose SHA fixes every file tuned.py imports.
+# than running the stored text. It also points $ROOT at a copy of the input
+# whose blob it records. Both give the same command text for every committed
+# row, so the one rewrite is accepted: old blob to new blob, and only for that
+# harness commit, whose SHA fixes every file tuned.py imports.
 TUNED_SOURCE_REWRITES = {
     "3d71865c78e5ff19866bae2616251929fd08e453": (
         "9b8e4c3a12291fa33804fa35a2c09a6142316233",
-        "df9c5198b21ef38cd674e462e41899de0e8fcf12",
+        "9221af2660e263dfbf7c650e11b454fcaec59e58",
     ),
 }
 TUNED_SOURCE = "scripts/gmin_panel/tuned.py"

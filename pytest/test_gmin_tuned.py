@@ -73,7 +73,7 @@ def bench(tmp_path: Path, repo: Path, monkeypatch) -> argparse.Namespace:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     build = {}
-    for name in ("GMIN", "h2h_gmin_proof", "h2h_morse", "h2h_metal", "h2h_seed"):
+    for name in ("GMIN", *tuned.EXAMPLES):
         (bin_dir / name).write_bytes(name.encode())
         key = "gmin_binary_sha256" if name == "GMIN" else f"example_{name}"
         build[key] = hashlib.sha256(name.encode()).hexdigest()
@@ -98,6 +98,26 @@ def write_rows(path: Path, rows: list[dict[str, str]]) -> None:
 
 def gmin_row() -> dict[str, str]:
     return next(row for row in committed_rows() if row["system"] == "lj98" and row["code"] == "gmin")
+
+
+def fake_gmin(args: argparse.Namespace, seen: list[tuple[str, dict[str, str], bytes]], row: dict[str, str] | None = None):
+    """Stand in for bash: record the command and the bytes ``$ROOT`` offers, and write GMIN's row file."""
+
+    def run(command: str, log: Path, overrides: dict[str, str] | None = None):
+        overrides = dict(overrides or {})
+        data = (Path(overrides["ROOT"]) / INPUT).read_bytes()
+        seen.append((command, overrides, data))
+        if row is None:
+            fields = "best=-543.665361 hit=1 evals_to_hit=10 charged=10 wall_s=1.0 pot_s=0.5"
+        else:
+            fields = (
+                f"best={row['best']} hit={row['hit']} evals_to_hit={row['calls_to_hit']} "
+                f"charged={row['calls']} wall_s={row['wall_s']} pot_s={row['inside_s']}"
+            )
+        (args.work / "row.txt").write_text(f"h2h_row system=lj98 {fields}\n")
+        return subprocess.CompletedProcess(["bash", "-c", command], 0, "", "")
+
+    return run
 
 
 def test_every_committed_row_holds_the_command_tuned_builds_from_its_fields():
@@ -126,8 +146,113 @@ def test_verify_never_runs_the_command_a_row_holds(bench, forged):
     write_rows(bench.rows, [row])
     bench.system, bench.code, bench.seed = ["lj98"], "gmin", int(row["seed"])
     with pytest.raises(SystemExit, match="is not the one tuned.py builds"):
-        tuned.verify(bench, tuned.cell_map(bench.root))
+        tuned.verify(bench, tuned.cell_map(bench.root), bench.build)
     assert not marker.exists()
+
+
+def test_verify_runs_the_rebuilt_command_on_the_bytes_it_hashed(bench, monkeypatch):
+    row = gmin_row()
+    write_rows(bench.rows, [row])
+    seen: list = []
+    monkeypatch.setattr(tuned, "run_shell", fake_gmin(bench, seen, row))
+    bench.system, bench.code, bench.seed = ["lj98"], "gmin", int(row["seed"])
+    tuned.verify(bench, tuned.cell_map(bench.root), bench.build)
+    [(command, overrides, data)] = seen
+    assert command == row["command"]
+    assert Path(overrides["ROOT"]) != bench.root
+    assert data == (bench.root / INPUT).read_bytes()
+    assert tuned.blob_of_bytes(bench.root, data) == row["data_blob"]
+
+
+def test_verify_refuses_a_row_whose_data_blob_is_not_the_input(bench, monkeypatch):
+    row = {**gmin_row(), "data_blob": "0" * 40}
+    write_rows(bench.rows, [row])
+    seen: list = []
+    monkeypatch.setattr(tuned, "run_shell", fake_gmin(bench, seen, row))
+    bench.system, bench.code, bench.seed = ["lj98"], "gmin", int(row["seed"])
+    with pytest.raises(SystemExit, match="the row recorded"):
+        tuned.verify(bench, tuned.cell_map(bench.root), bench.build)
+    assert not seen
+
+
+def test_a_run_refuses_an_input_that_differs_from_head(bench, monkeypatch, tmp_path):
+    (bench.root / INPUT).write_text((bench.root / INPUT).read_text() + "STEPS 1 1.0\n")
+    with pytest.raises(SystemExit, match="differs from HEAD"):
+        tuned.stage_input(bench.root, "lj98", tmp_path / "stage")
+    seen: list = []
+    monkeypatch.setattr(tuned, "run_shell", fake_gmin(bench, seen))
+    monkeypatch.setattr(tuned, "harness_sources", lambda root: [])
+    bench.system, bench.aa = ["lj98"], True
+    with pytest.raises(SystemExit, match="differs from HEAD"):
+        tuned.evaluate(bench, tuned.cell_map(bench.root), bench.build)
+    assert not seen
+    row = gmin_row()
+    write_rows(bench.rows, [row])
+    bench.code, bench.seed = "gmin", int(row["seed"])
+    with pytest.raises(SystemExit, match="differs from HEAD"):
+        tuned.verify(bench, tuned.cell_map(bench.root), bench.build)
+    assert not seen
+
+
+def test_an_evaluation_row_records_the_blob_of_the_bytes_that_ran(bench, monkeypatch):
+    seen: list = []
+    monkeypatch.setattr(tuned, "run_shell", fake_gmin(bench, seen))
+    monkeypatch.setattr(tuned, "harness_sources", lambda root: [root / "scripts" / "harness.py"])
+    bench.system, bench.aa = ["lj98"], True
+    tuned.evaluate(bench, tuned.cell_map(bench.root), bench.build)
+    rows = tuned.read_rows(bench.rows)
+    assert len(rows) == len(seen) == 2 * len(tuned.EVAL_SEEDS)
+    head = git(bench.root, "rev-parse", "HEAD")
+    for row, (command, overrides, data) in zip(rows, seen, strict=True):
+        assert row["command"] == command
+        assert 'cp "$ROOT/bench/gmin-tuned/inputs/lj98.data" data' in command
+        assert row["data_blob"] == tuned.blob_of_bytes(bench.root, data) == git(bench.root, "rev-parse", f"HEAD:{INPUT}")
+        assert row["harness_commit"] == head
+        assert Path(overrides["ROOT"]) != bench.root and not Path(overrides["ROOT"]).exists()
+
+
+def test_an_evaluation_refuses_a_harness_source_that_differs_from_head(bench, monkeypatch):
+    seen: list = []
+    monkeypatch.setattr(tuned, "run_shell", fake_gmin(bench, seen))
+    script = bench.root / "scripts" / "harness.py"
+    monkeypatch.setattr(tuned, "harness_sources", lambda root: [script])
+    script.write_text("STEP = 999\n")
+    bench.system, bench.aa = ["lj98"], True
+    with pytest.raises(SystemExit, match="scripts/harness.py differs from HEAD"):
+        tuned.evaluate(bench, tuned.cell_map(bench.root), bench.build)
+    monkeypatch.setattr(tuned, "harness_sources", lambda root: [ROOT / "scripts" / "gmin_panel" / "tuned.py"])
+    with pytest.raises(SystemExit, match="outside"):
+        tuned.evaluate(bench, tuned.cell_map(bench.root), bench.build)
+    assert not seen
+
+
+def test_the_harness_sources_are_tuned_and_the_modules_it_imports():
+    names = {path.relative_to(ROOT).as_posix() for path in tuned.harness_sources(ROOT)}
+    assert {"scripts/gmin_panel/tuned.py", "scripts/gmin_panel/run_panel.py", "scripts/target_tol.py"} <= names
+    assert all(name.startswith("scripts/") for name in names)
+
+
+def test_a_binary_swapped_after_the_start_is_refused_before_the_next_run(bench, monkeypatch):
+    seen: list = []
+    monkeypatch.setattr(tuned, "run_shell", fake_gmin(bench, seen))
+    monkeypatch.setattr(tuned, "harness_sources", lambda root: [])
+    (bench.bin / "GMIN").write_bytes(b"other")
+    bench.system, bench.aa = ["lj98"], True
+    with pytest.raises(SystemExit, match="GMIN sha256"):
+        tuned.evaluate(bench, tuned.cell_map(bench.root), bench.build)
+    assert not seen
+
+
+def test_the_anneal_arm_needs_the_clean_recorded_checkout(repo):
+    commit = git(repo, "rev-parse", "HEAD")
+    tuned.check_anneal_tree(repo, commit)
+    with pytest.raises(SystemExit, match="is not at"):
+        tuned.check_anneal_tree(repo, "0" * 40)
+    (repo / INPUT).write_text("changed\n")
+    with pytest.raises(SystemExit, match="has changes"):
+        tuned.check_anneal_tree(repo, commit)
+    with pytest.raises(SystemExit, match="needs --anneal"):
+        tuned.check_anneal_tree(None, commit)
 
 
 def test_verify_takes_a_noise_label_and_rejects_an_unknown_code():
