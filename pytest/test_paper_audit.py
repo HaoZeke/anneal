@@ -237,7 +237,8 @@ def test_script_exits_zero():
 
 
 def test_paper_audit_has_no_drift(capsys):
-    assert audit_mod.UNTRACED == []
+    assert [(path, why) for path, _fragment, why in audit_mod.UNTRACED] == [
+        ("bench/water-h2o20-goat/README.md", "the seed 16001 rows were not committed")]
     assert audit_mod.run() == 0
     drifted = [line for line in capsys.readouterr().err.splitlines() if line.startswith("DRIFT")]
     assert drifted == []

@@ -177,7 +177,10 @@ KNOWN_GAPS = {
     "paper/jctc/data/literature.tsv": "revision and host unrecorded (no revision or host column)",
 }
 
-UNTRACED = []
+UNTRACED = [
+    ("bench/water-h2o20-goat/README.md", "Seed 16001, 28000 calls, same wrapper as the table above, scored −2214.506788 eV",
+     "the seed 16001 rows were not committed"),
+]
 
 
 # README rows that print numbers from a commit no ref, kit, bundle or mbox
