@@ -4842,12 +4842,14 @@ def manuscript_new(audit: Audit) -> None:
     audit.said("src/methods/cluster_hopping.rs",
                "e_screen >= ledger.best\n"
                "                && !screen.decide(feats.view(), ledger.best, rng.random::<f64>())")
-    audit.said("src/methods/cluster_hopping.rs",
-               "let withhold = cfg.active_region.is_some() || cfg.frozen.is_some();")
+    audit.record("let withhold = cfg.active_region.is_some() || cfg.frozen.is_some();" not in hop,
+                 "src/methods/cluster_hopping.rs", "stall symmetrisation branch is removed", "absent",
+                 "absent" if "let withhold = cfg.active_region.is_some() || cfg.frozen.is_some();" not in hop
+                 else "present")
     screen = "src/screen.rs"
     audit.said(screen, "if self.n < self.warmup {")
     audit.said(screen, "if u < self.exploration {")
-    audit.said(screen, "let go = p >= self.threshold;")
+    audit.said(screen, "let go = p >= threshold;")
     moves = "src/methods/cluster_hopping/moves.rs"
     audit.said(moves, "let drawn = crate::soap::step_away_fivefold(x, *rmsd, rng);")
     audit.said(moves, "crate::soap::step_away_fivefold_measured(x, *rmsd)")
