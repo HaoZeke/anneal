@@ -44,10 +44,15 @@ TUNED_CODES = frozenset({"anneal", "gmin"})
 # scripts/gmin_panel/tuned.py of the harness commit the recorded rows name has a
 # quoted path inside an f-string replacement field, which Python 3.10 and 3.11
 # reject. The file of HEAD builds the path in a variable first. Both give the
-# same command text, so the one rewrite is accepted: old blob to new blob.
+# same command text, so the one rewrite is accepted: old blob to new blob, and
+# only for that harness commit, whose SHA fixes every file tuned.py imports.
 TUNED_SOURCE_REWRITES = {
-    "9b8e4c3a12291fa33804fa35a2c09a6142316233": "78b5aae0f4d22fa4f8237a2bb68aded3f5f3d197",
+    "3d71865c78e5ff19866bae2616251929fd08e453": (
+        "9b8e4c3a12291fa33804fa35a2c09a6142316233",
+        "78b5aae0f4d22fa4f8237a2bb68aded3f5f3d197",
+    ),
 }
+TUNED_SOURCE = "scripts/gmin_panel/tuned.py"
 
 
 def is_full_sha(value: str | None) -> bool:
@@ -126,8 +131,10 @@ def tuned_gmin_harness_verified(
     A harness commit that is an ancestor of HEAD is accepted. Otherwise it must
     be a commit of ``repo`` whose ``bench/gmin-tuned/inputs/<system>.data`` is
     the recorded blob, whose ``scripts/gmin_panel/tuned.py`` is the one of HEAD
-    or the blob that ``TUNED_SOURCE_REWRITES`` lists for it, and that changed
-    no ``src/``, ``examples/`` or Cargo file since the merge base with HEAD.
+    or, for the harness ``TUNED_SOURCE_REWRITES`` names, its listed old blob,
+    and that changed no ``src/``, ``examples/`` or Cargo file and no Python
+    file under ``scripts/`` but tuned.py since the merge base with HEAD, so the
+    modules tuned.py imports are ones HEAD's history holds.
     """
 
     def run(*args: str, stdin: str | None = None) -> subprocess.CompletedProcess:
@@ -146,18 +153,18 @@ def tuned_gmin_harness_verified(
     if not is_full_sha(harness):
         return False
     head_data = run("rev-parse", f"HEAD:bench/gmin-tuned/inputs/{system}.data")
-    head_tuned = run("rev-parse", "HEAD:scripts/gmin_panel/tuned.py")
+    head_tuned = run("rev-parse", f"HEAD:{TUNED_SOURCE}")
     if head_data.returncode != 0 or head_data.stdout.strip() != data_blob or head_tuned.returncode != 0:
         return False
     present = run("cat-file", "--batch-check", stdin=f"{harness}^{{commit}}\n").stdout.split()
     if present[1:2] != ["commit"]:
         return False
     ref_data = run("rev-parse", f"{harness}:bench/gmin-tuned/inputs/{system}.data")
-    ref_tuned = run("rev-parse", f"{harness}:scripts/gmin_panel/tuned.py")
+    ref_tuned = run("rev-parse", f"{harness}:{TUNED_SOURCE}")
     if ref_data.returncode != 0 or ref_data.stdout.strip() != data_blob:
         return False
     ref_blob, head_blob = ref_tuned.stdout.strip(), head_tuned.stdout.strip()
-    if ref_tuned.returncode != 0 or (ref_blob != head_blob and TUNED_SOURCE_REWRITES.get(ref_blob) != head_blob):
+    if ref_tuned.returncode != 0 or (ref_blob != head_blob and TUNED_SOURCE_REWRITES.get(harness) != (ref_blob, head_blob)):
         return False
     base = run("merge-base", "HEAD", harness)
     if base.returncode != 0 or not base.stdout.strip():
@@ -167,6 +174,7 @@ def tuned_gmin_harness_verified(
         return False
     return not any(
         name.startswith(("src/", "examples/")) or name in {"Cargo.toml", "Cargo.lock"}
+        or (name.startswith("scripts/") and name.endswith(".py") and name != TUNED_SOURCE)
         for name in diff.stdout.splitlines()
     )
 

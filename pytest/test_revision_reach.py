@@ -12,6 +12,7 @@ import csv
 import importlib.util
 import inspect
 import io
+import os
 import re
 import shutil
 import subprocess
@@ -376,12 +377,62 @@ def test_the_listed_tuned_rewrite_is_what_accepts_the_committed_rows(monkeypatch
     harness = audited_row()["harness_commit"]
     old = git_text("rev-parse", f"{harness}:scripts/gmin_panel/tuned.py")
     assert old != head
-    assert revision_reach.TUNED_SOURCE_REWRITES == {old: head}
+    assert revision_reach.TUNED_SOURCE_REWRITES == {harness: (old, head)}
     assert revision_reach.tuned_gmin_harness_verified(audited_row())
     monkeypatch.setattr(revision_reach, "TUNED_SOURCE_REWRITES", {})
     assert not revision_reach.tuned_gmin_harness_verified(audited_row())
-    monkeypatch.setattr(revision_reach, "TUNED_SOURCE_REWRITES", {old: "0" * 40})
+    monkeypatch.setattr(revision_reach, "TUNED_SOURCE_REWRITES", {harness: (old, "0" * 40)})
     assert not revision_reach.tuned_gmin_harness_verified(audited_row())
+    monkeypatch.setattr(revision_reach, "TUNED_SOURCE_REWRITES", {HELD: (old, head)})
+    assert not revision_reach.tuned_gmin_harness_verified(audited_row())
+
+
+def side_commit(repo: Path, parent: str, files: dict[str, str]) -> str:
+    """A commit on ``parent`` in ``repo`` with ``files`` replaced, made without a ref or a checkout."""
+    env = {
+        "GIT_INDEX_FILE": str(repo / "side.index"),
+        "GIT_AUTHOR_NAME": "fixture", "GIT_AUTHOR_EMAIL": "fixture@example.org",
+        "GIT_COMMITTER_NAME": "fixture", "GIT_COMMITTER_EMAIL": "fixture@example.org",
+    }
+
+    def git(*args: str, stdin: str | None = None) -> str:
+        return subprocess.run(
+            ["git", "-C", str(repo), *args], input=stdin, capture_output=True, text=True, check=True,
+            env={**os.environ, **env},
+        ).stdout.strip()
+
+    git("read-tree", parent)
+    for path, text in files.items():
+        blob = git("hash-object", "-w", "--stdin", stdin=text)
+        git("update-index", "--add", "--cacheinfo", f"100644,{blob},{path}")
+    return git("commit-tree", git("write-tree"), "-p", parent, "-m", "side commit")
+
+
+@pytest.fixture()
+def shared_clone(tmp_path: Path) -> Path:
+    clone = tmp_path / "clone"
+    subprocess.run(["git", "clone", "--quiet", "--shared", "--no-checkout", str(ROOT), str(clone)], check=True)
+    subprocess.run(["git", "-C", str(clone), "checkout", "--quiet", "--detach", git_text("rev-parse", "HEAD")], check=True)
+    return clone
+
+
+def test_a_side_commit_that_keeps_the_tuned_source_but_changes_what_it_imports_is_refused(shared_clone):
+    row = audited_row()
+    harness = row["harness_commit"]
+    panel = "scripts/gmin_panel/run_panel.py"
+    recorded = git_text("show", f"{harness}:{panel}")
+    assert "\nLJ_STEP = 0.40\n" in recorded
+    stepped = recorded.replace("\nLJ_STEP = 0.40\n", "\nLJ_STEP = 999.0\n")
+    head_tuned = git_text("show", "HEAD:scripts/gmin_panel/tuned.py") + "\n"
+    assert revision_reach.tuned_gmin_harness_verified(row, shared_clone)
+    for label, files in (
+        ("the recorded tuned.py", {panel: stepped}),
+        ("the tuned.py of HEAD", {panel: stepped, "scripts/gmin_panel/tuned.py": head_tuned}),
+        ("the recorded tree under another commit", {}),
+    ):
+        side = side_commit(shared_clone, harness, files)
+        assert side != harness
+        assert not revision_reach.tuned_gmin_harness_verified({**row, "harness_commit": side}, shared_clone), label
 
 
 @pytest.mark.skipif(sys.version_info < (3, 12), reason="the recorded tuned.py needs Python 3.12 to run")
