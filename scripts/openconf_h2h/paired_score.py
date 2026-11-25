@@ -39,14 +39,15 @@ import statistics
 import sys
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
-from scipy.stats import fisher_exact, mannwhitneyu
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bench_host import run_host  # noqa: E402
-import h2h_common as hc  # noqa: E402
-from h2h_score import WINDOW, Molecule, _fmt  # noqa: E402
+
+if TYPE_CHECKING:
+    from h2h_score import Molecule
 
 ARMS = ("anneal", "openconf", "develop")
 ROW_FIELDS = [
@@ -62,6 +63,9 @@ _MOLS: dict[str, Molecule] = {}
 
 def _molecule(name: str) -> Molecule:
     if name not in _MOLS:
+        import h2h_common as hc
+        from h2h_score import Molecule
+
         _MOLS[name] = Molecule(hc.molecules()[name])
     return _MOLS[name]
 
@@ -71,6 +75,8 @@ def polished_frames(name: str, job_dir: Path) -> tuple[np.ndarray, np.ndarray, n
     if cache.is_file():
         data = np.load(cache)
         return data["x"], data["e"], data["ok"]
+    import h2h_common as hc
+
     m = _molecule(name)
     path = job_dir / "candidates.xyz"
     frames = hc.read_xyz(path) if path.is_file() else []
@@ -92,6 +98,8 @@ def first_hit(name: str, arm: str, job_dir: Path, lowest: tuple[np.ndarray, floa
     An anneal arm's trace holds the same frames as its candidates, so their
     polished geometries are reused.
     """
+    import h2h_common as hc
+
     m = _molecule(name)
     path = job_dir / "trace.xyz"
     if not path.is_file():
@@ -153,6 +161,9 @@ def score_runs(runs: Path, rows_path: Path, workers: int) -> None:
         existing_fields(rows_path)
         with rows_path.open(newline="") as handle:
             done = {(r["molecule"], r["arm"], int(r["seed"])) for r in csv.DictReader(handle)}
+    import h2h_common as hc
+    from h2h_score import WINDOW, _fmt
+
     mols = {name: _molecule(name) for name in hc.molecules()}
     infos = [(path.parent, json.loads(path.read_text())) for path in sorted(runs.glob("*/*/*/job.json"))]
     infos = [(job_dir, info) for job_dir, info in infos if info["arm"] in ARMS]
@@ -272,6 +283,9 @@ def _num(value: str) -> float | None:
 
 
 def summarise(rows_path: Path, summary_path: Path, stats_path: Path, versus_path: Path | None = None) -> None:
+    import h2h_common as hc
+    from h2h_score import _fmt
+
     with rows_path.open(newline="") as handle:
         rows = list(csv.DictReader(handle))
     order = [name for name in hc.molecules() if any(r["molecule"] == name for r in rows)]
@@ -322,6 +336,9 @@ def summarise(rows_path: Path, summary_path: Path, stats_path: Path, versus_path
 
 
 def write_stats(path: Path, order: list[str], by: dict, other: str) -> None:
+    from scipy.stats import fisher_exact, mannwhitneyu
+    from h2h_score import _fmt
+
     fields = [
         "molecule", "hits_anneal", f"hits_{other}", "fisher_odds_ratio", "fisher_p",
         "hit_runs_anneal", f"hit_runs_{other}", "mannwhitney_u", "mannwhitney_p",

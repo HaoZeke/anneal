@@ -23,16 +23,18 @@ import sys
 import time
 from collections import Counter
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts" / "openconf_h2h"))
 sys.path.insert(0, str(ROOT / "scripts"))
-import h2h_common as hc  # noqa: E402
 from bench_host import host_label  # noqa: E402
-from h2h_score import Molecule  # noqa: E402
 from machine_provenance import machine_provenance, require_csv_schema  # noqa: E402
+
+if TYPE_CHECKING:
+    from h2h_score import Molecule
 
 N_SEEDS = 12
 SEEDS = list(range(2000, 2000 + N_SEEDS))
@@ -423,6 +425,7 @@ def rss_anon_kb() -> int:
 def worker_molecule(args) -> int:
     require_core()
     import anneal
+    import h2h_common as hc
     import h2h_job
 
     row = hc.molecules()[args.cell]
@@ -673,6 +676,8 @@ def bits_to_float(text: str) -> float:
 
 
 def polish_frames(mol: Molecule, directory: Path):
+    import h2h_common as hc
+
     cache = directory / "polished.npz"
     if cache.is_file():
         data = np.load(cache)
@@ -699,6 +704,8 @@ def first_hit_calls(
     lowest: tuple[np.ndarray, float],
 ) -> int | None:
     """Return the charged call at which the matching minimum first appeared."""
+    import h2h_common as hc
+
     path = directory / "trace.xyz"
     if not path.is_file():
         return None
@@ -714,6 +721,9 @@ def first_hit_calls(
 
 
 def score_molecules(run_dir: Path, jobs: list[dict]) -> dict[tuple, dict]:
+    import h2h_common as hc
+    from h2h_score import Molecule
+
     rows = hc.molecules()
     scored = {}
     for cell in MOLECULES:

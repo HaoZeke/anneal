@@ -16,7 +16,6 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from scipy.stats import fisher_exact, mannwhitneyu
 
 BOOT_SEED = 20261123
 BOOT_DRAWS = 10_000
@@ -81,6 +80,8 @@ def calls_scored(row: dict) -> float:
 
 
 def hit_tests(a: dict[int, dict], b: dict[int, dict]) -> tuple[float, float, int, int]:
+    from scipy.stats import fisher_exact, mannwhitneyu
+
     seeds = sorted(set(a) & set(b))
     ha = sum(int(a[s]["hit"]) for s in seeds)
     hb = sum(int(b[s]["hit"]) for s in seeds)

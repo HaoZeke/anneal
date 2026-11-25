@@ -30,7 +30,6 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import h2h_common as hc  # noqa: E402
 from bench_host import host_label  # noqa: E402
 
 # A recorded minimum of a molecular search is at 5e-2 eV/Å.
@@ -102,6 +101,7 @@ def write_trace(path: Path, symbols: list[str], frames: list[tuple[np.ndarray, f
 
 def run_anneal(row: dict, seed: int, budget: int, out: Path, local_step: str | None = None) -> dict:
     import anneal
+    import h2h_common as hc
 
     mol = hc.build_mol(row["smiles"])
     z = [atom.GetAtomicNum() for atom in mol.GetAtoms()]
@@ -193,6 +193,7 @@ def _pin_mmff94():
 
 
 def _phase_embedding():
+    import h2h_common as hc
     from rdkit.Chem import AllChem
 
     for name in ("EmbedMultipleConfs", "EmbedMolecule"):
@@ -207,6 +208,7 @@ def _phase_embedding():
 
 def _trace_pool(trace: list[tuple[np.ndarray, float, int]]):
     """Record every conformer offered to openconf's pool, with the calls spent so far."""
+    import h2h_common as hc
     from openconf.pool import ConformerPool
 
     insert = ConformerPool.insert
@@ -221,6 +223,8 @@ def _trace_pool(trace: list[tuple[np.ndarray, float, int]]):
 
 
 def run_openconf(row: dict, seed: int, out: Path) -> dict:
+    import h2h_common as hc
+
     _pin_mmff94()
     _phase_embedding()
     trace: list[tuple[np.ndarray, float, int]] = []
@@ -270,6 +274,8 @@ _RUNTIME = re.compile(r"CREST runtime \(total\)\s+(\d+) d,\s+(\d+) h,\s+(\d+) mi
 
 
 def run_crest(row: dict, seed: int, out: Path, crest: str) -> dict:
+    import h2h_common as hc
+
     mol = hc.build_mol(row["smiles"])
     x0 = hc.embed(mol, seed)
     hc.write_xyz(out / "start.xyz", hc.symbols(mol), [(x0, 0.0)])
@@ -332,6 +338,8 @@ def main() -> int:
     parser.add_argument("--local-step", choices=["lbfgs", "tric", "auto"], help="anneal quench; default the preset's")
     parser.add_argument("--anneal-path", type=Path, help="import anneal from this directory first (the develop arm)")
     args = parser.parse_args()
+    import h2h_common as hc
+
     row = hc.molecules()[args.molecule]
     args.out.mkdir(parents=True, exist_ok=True)
     if args.arm == "develop" and args.anneal_path is None:

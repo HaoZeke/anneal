@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -80,6 +81,7 @@ def rows(
 
 
 def test_disabled_conf_miss_path_requires_zero_counters():
+    pytest.importorskip("scipy.stats")
     result = ANALYZE.judge(rows(path_draws=0, path_spent=0), "rq3")
     assert result["verdict"] == "PASS"
     assert result["b_path_matches"] == 1
@@ -89,6 +91,7 @@ def test_disabled_conf_miss_path_requires_zero_counters():
 
 
 def test_enabled_conf_miss_path_requires_nonzero_counters():
+    pytest.importorskip("scipy.stats")
     result = ANALYZE.judge(
         rows(path_enabled=True, path_draws=1, path_spent=10),
         "rq3",
@@ -101,6 +104,7 @@ def test_enabled_conf_miss_path_requires_nonzero_counters():
 
 
 def test_absent_path_counters_are_not_synthetic_zeros():
+    pytest.importorskip("scipy.stats")
     result = ANALYZE.judge(rows(a_path_absent=True), "rq3")
     assert result["verdict"] == "PASS"
     missing = rows()
@@ -115,6 +119,7 @@ def test_absent_path_counters_are_not_synthetic_zeros():
 
 
 def test_checkable_path_failure_wins_over_unavailable_row():
+    pytest.importorskip("scipy.stats")
     mixed = rows() + [{**row, "seed": "2001"} for row in rows()]
     for row in mixed:
         if row["arm"] == "B" and row["seed"] == "2000":
@@ -130,6 +135,7 @@ def test_checkable_path_failure_wins_over_unavailable_row():
 
 
 def test_unavailable_path_is_inconclusive_when_checkable_rows_pass():
+    pytest.importorskip("scipy.stats")
     mixed = rows() + [{**row, "seed": "2001"} for row in rows()]
     for row in mixed:
         if row["arm"] == "B" and row["seed"] == "2001":
