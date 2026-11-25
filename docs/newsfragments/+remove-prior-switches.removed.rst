@@ -14,12 +14,16 @@ names them no longer compiles. Set ``prior_soap`` to ``false`` or use
 ``Knockouts`` with ``Config::apply_knockouts`` to turn the SOAP proposal off.
 A saved JSON or TOML configuration must drop the keys ``prior_reseed``,
 ``prior_growth``, ``prior_core``, ``prior_handover``, ``prior_motif`` and
-``reseed_hops`` (also as ``continuous_symmetry.reseed_hops``). Deserialising
-``ContinuousSymmetry::Measure`` with ``reseed_hops`` now fails with a
-``RemovedConfigKeyError``. ``Config::validate_json_keys``,
-``Config::validate_toml_keys`` and the Python
-``Config.validate_json`` / ``Config.validate_toml`` reject the removed keys
-with an explicit error. The list is ``REMOVED_PRIOR_KEYS``.
+``reseed_hops`` (also as ``continuous_symmetry.reseed_hops``). TOML that
+sets one of those ``prior_*`` keys or ``reseed_hops`` is now rejected.
+``Config::validate_toml_keys`` walks the document and returns
+``RemovedConfigKeyError``. ``CampaignConfig::parse`` runs that check
+before it decodes the file, so a campaign file with those keys is
+rejected too. Deserialising ``ContinuousSymmetry::Measure`` with
+``reseed_hops`` fails with the same error. ``Config::validate_json_keys``
+and the Python ``Config.validate_json`` / ``Config.validate_toml`` reject
+the removed keys as well. The list is ``REMOVED_PRIOR_KEYS``.
+``prior_soap`` is not on that list.
 The ``H2H_HANDOVER`` environment toggle of ``h2h_metal`` is gone, and
 setting it to a non-empty value now fails, so unset it. ``H2H_PRIORS``
 accepts only ``soap``, ``0``, ``none`` or ``1``. Use
