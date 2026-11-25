@@ -618,7 +618,7 @@ def test_a_modal_hedge_fails_both_audits():
     for strict in (False, True):
         audit = audit_mod.Audit()
         tex = audit.text(audit_mod.TEX)
-        old = "and both algorithms return an assignment of the optimal cost."
+        old = "return an assignment of the optimal cost."
         assert tex.count(old) == 1
         audit.text_cache[audit_mod.TEX] = tex.replace(old, old + "\nA tie may break differently.")
         audit_mod.todo_check(audit, pre_submission=strict)
@@ -2515,16 +2515,93 @@ def test_a_stray_gmin_patch_line_is_reported():
     assert [r[2] for r in audit.drifts()] == ["added GMIN lines outside the cap and timers"]
 
 
-def test_a_second_gate_claim_is_reported():
+LJ_REVISION = "c2de652dca0bc75e2b0cb4afffac91fd656404e4"
+
+
+def test_the_current_source_and_text_pass_the_size_checks():
+    audit = audit_mod.Audit()
+    audit_mod.count_gates(audit, LJ_REVISION)
+    assert not audit.drifts()
+    assert len(audit.results) > 40
+
+
+def test_a_restored_atom_count_claim_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "For atomic clusters the preset has one atom-count gate:"
+    old = "The search tests neither the atom count nor the body count."
     assert old in audit_mod.collapse(tex)
     audit.text_cache[audit_mod.TEX] = replace_collapsed(
         tex,
-        old, "For atomic clusters the preset has two atom-count gates, both at 98 atoms:")
-    audit_mod.count_gates(audit, "c2de652dca0bc75e2b0cb4afffac91fd656404e4")
-    assert sorted(r[2] for r in audit.drifts()) == ["prose", "retired gate wording stays out: two atom-count gates"]
+        old, "For atomic clusters the preset has one atom-count gate: the diameter penalty of "
+        "equation~\\ref{eq:penalty} is used only below 98 atoms.")
+    audit_mod.count_gates(audit, LJ_REVISION)
+    assert sorted(r[2] for r in audit.drifts()) == [
+        "prose",
+        "retired gate wording stays out: For atomic clusters the preset has one atom-count gate",
+    ]
+
+
+def test_a_restored_rigid_gate_claim_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "Before the revision that removed these tests,"
+    assert old in audit_mod.collapse(tex)
+    audit.text_cache[audit_mod.TEX] = replace_collapsed(
+        tex, old, "A rigid-body run has a gate of its own: at 10 molecules or fewer a factor on its acceptance "
+        "temperature starts at 24. Before the revision that removed these tests,")
+    audit_mod.count_gates(audit, LJ_REVISION)
+    labels = sorted(r[2] for r in audit.drifts())
+    assert "retired gate wording stays out: A rigid-body run has a gate of its own" in labels
+    assert "retired gate wording stays out: at 10 molecules or fewer a factor on its acceptance temperature" in labels
+    assert len(labels) == 2
+
+
+def test_a_restored_size_test_in_the_presets_is_reported():
+    audit = audit_mod.Audit()
+    config = audit.text(audit_mod.PRIOR_CONFIG)
+    fragment = "cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];"
+    assert config.count(fragment) == 1
+    audit.text_cache[audit_mod.PRIOR_CONFIG] = config.replace(
+        fragment, "if n_points < 98 {\n            " + fragment + "\n        }", 1)
+    audit_mod.count_gates(audit, LJ_REVISION)
+    labels = [r[2] for r in audit.drifts()]
+    assert sorted(labels) == [
+        "the communicating preset offers the penalty surface at every size",
+        "the presets have no atom-count test",
+    ]
+
+
+def test_a_restored_rigid_factor_in_the_source_is_reported():
+    audit = audit_mod.Audit()
+    path = "src/methods/cluster_hopping.rs"
+    hop = audit.text(path)
+    audit.text_cache[path] = hop + "\nconst RIGID_HOT_BODIES: usize = 10;\nfn rigid_factor_cap() {}\n"
+    audit_mod.count_gates(audit, LJ_REVISION)
+    drifts = audit.drifts()
+    assert {r[2] for r in drifts} == {"no body-count test or rigid temperature factor remains"}
+    assert sorted(r[3] for r in drifts) == ["RIGID_HOT_BODIES", "rigid_factor", "rigid_factor_cap"]
+
+
+def test_a_changed_rigid_acceptance_rule_in_the_source_is_reported():
+    audit = audit_mod.Audit()
+    path = "src/methods/cluster_hopping.rs"
+    hop = audit.text(path)
+    rule = "let rise = (e_new - e) / cfg.temperature.max(1e-12);"
+    assert hop.count(rule) == 1
+    audit.text_cache[path] = hop.replace(rule, "let rise = (e_new - e) / (cfg.temperature * 4.0).max(1e-12);", 1)
+    audit_mod.count_gates(audit, LJ_REVISION)
+    assert [r[2] for r in audit.drifts()] == ["a rigid chain accepts at the stored temperature"]
+
+
+def test_a_changed_plain_hold_rule_in_the_source_is_reported():
+    audit = audit_mod.Audit()
+    path = "src/methods/two_phase.rs"
+    portfolio = audit.text(path)
+    rule = "let stalled = self.held_blocks > self.held_after;"
+    assert portfolio.count(rule) == 1
+    audit.text_cache[path] = portfolio.replace(rule, "let stalled = self.held_blocks > 3;", 1)
+    audit_mod.count_gates(audit, LJ_REVISION)
+    assert [r[2] for r in audit.drifts()] == ["a plain hold ends at a lower minimum or when it outnumbers the settled blocks"]
 
 
 def test_a_withdrawn_benchmark_in_the_text_is_reported():

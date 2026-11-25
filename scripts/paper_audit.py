@@ -1898,16 +1898,37 @@ def manuscript_priors(audit: Audit) -> None:
     count_gates(audit, lj_rev)
 
 
-def count_gates(audit: Audit, lj_rev: str) -> None:
-    """The atom- and body-count gates the methods name, read from the current source and from c2de652d."""
+# The develop commit before the revision that removed the atom-count and body-count tests. Its source is
+# the reference for what those tests were, so the claims about their removal read both sides.
+SIZE_TESTS_BEFORE = "f5b8a4b8175a13888d1a326595dd611d54479f5d"
+
+
+def count_gates(audit: Audit, lj_rev: str, before: str = SIZE_TESTS_BEFORE) -> None:
+    """The atom- and body-count tests the methods name, read from the current source and from earlier revisions.
+
+    The preset has none: the penalty surface is offered at every size and a rigid chain accepts at the
+    stored temperature. The source at `before` and at c2de652d shows the tests that were removed.
+    """
     config = audit.text(PRIOR_CONFIG)
     tests = re.findall(r"if n_points\s*(<|<=|>|>=|==)\s*(\d+)\s*\{([^}]*)\}", config)
     shown = " ".join(f"{op} {n} {'surfaces' if 'cfg.surfaces = ' in body else 'other'}" for op, n, body in tests)
-    audit.cell(PRIOR_CONFIG, "the atom-count tests of the presets", "< 98 surfaces < 98 surfaces", shown)
+    audit.record(not tests, PRIOR_CONFIG, "the presets have no atom-count test", "none", shown or "none")
     audit.cell(PRIOR_CONFIG, "every n_points test is one of those", str(len(tests)),
                float(len(re.findall(r"(?<!self\.)\bn_points\s*(?:<|<=|>|>=|==)\s*\d", config))))
     audit.record("self.n_points >= 2," in config, PRIOR_CONFIG, "the other n_points test is the validation of the size",
                  "present", "present" if "self.n_points >= 2," in config else "absent")
+    for label, fragment in (
+        ("the recommended preset offers the penalty surface at every size",
+         "cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, beta)];"),
+        ("the communicating preset offers the penalty surface at every size",
+         "cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];"),
+    ):
+        audit.record(fragment in config and f"if n_points < 98 {{\n{' ' * 12}" + fragment not in config, PRIOR_CONFIG,
+                     label, fragment, "present" if fragment in config else "absent")
+    before_config = git("show", f"{before}:{PRIOR_CONFIG}").stdout
+    audit.record(before_config.count("if n_points < 98 {") == 2, f"{before[:8]}:{PRIOR_CONFIG}",
+                 "before the removal both presets installed the penalty surface below 98 points", "2",
+                 before_config.count("if n_points < 98 {"))
     hop = audit.text("src/methods/cluster_hopping.rs")
     audit.record("n_points < 98" not in hop, "src/methods/cluster_hopping.rs", "the growth hold gate is gone",
                  "absent", "absent" if "n_points < 98" not in hop else "present")
@@ -1915,44 +1936,107 @@ def count_gates(audit: Audit, lj_rev: str) -> None:
     audit.record("stall_growth_waits(held, incumbent) && (n_points < 98 || skipped < GROWTH_RETRY_LEAVES)" in old,
                  f"{lj_rev[:8]}:src/methods/cluster_hopping.rs", "the prior-on growth hold releases at 98 atoms",
                  "present", "present")
-    bodies = re.search(r"const RIGID_HOT_BODIES: usize = (\d+);", hop)
-    audit.cell("src/methods/cluster_hopping.rs", "rigid body-count gate", "10", float(bodies.group(1)) if bodies else None)
+    path = "src/methods/cluster_hopping.rs"
+    before_hop = git("show", f"{before}:{path}").stdout
+    bodies = re.search(r"const RIGID_HOT_BODIES: usize = (\d+);", before_hop)
+    audit.cell(f"{before[:8]}:{path}", "rigid body-count gate before the removal", "10",
+               float(bodies.group(1)) if bodies else None)
+    small = re.search(r"fn rigid_factor_cap\(n_bodies: usize\) -> f64 \{\s*if n_bodies > RIGID_HOT_BODIES \{\s*"
+                      r"RIGID_FACTOR_CAP_LARGE\s*\} else \{\s*([0-9.]+)\s*\}", before_hop)
+    audit.cell(f"{before[:8]}:{path}", "rigid factor cap at 10 bodies or fewer before the removal", "24",
+               float(small.group(1)) if small else None)
+    large = re.search(r"const RIGID_FACTOR_CAP_LARGE: f64 = ([0-9.]+);", before_hop)
+    audit.cell(f"{before[:8]}:{path}", "rigid factor cap above 10 bodies before the removal", "4",
+               float(large.group(1)) if large else None)
+    for fragment in ("if RIGID && cfg.n_points > RIGID_HOT_BODIES {",
+                     "if RIGID && cfg.n_points <= RIGID_HOT_BODIES &&",
+                     "rigid_factor_cap(cfg.n_points)\n    } else {\n        1.0",
+                     "rigid_factor = (rigid_factor / 1.5).max(1.0);"):
+        audit.record(fragment in before_hop, f"{before[:8]}:{path}",
+                     "the rigid factor tests the body count before the removal", fragment,
+                     "present" if fragment in before_hop else "absent")
+    for fragment in ("RIGID_HOT_BODIES", "RIGID_FACTOR_CAP_LARGE", "rigid_factor_cap", "rigid_factor",
+                     "temperature *= rigid_factor;"):
+        audit.record(fragment not in hop, path, "no body-count test or rigid temperature factor remains", fragment,
+                     "absent" if fragment not in hop else "present")
     for fragment in ("if cfg.move_library.is_rigid_body() {\n        run_search::<R, H, true>(",
-                     "if RIGID && cfg.n_points > RIGID_HOT_BODIES {",
-                     "if RIGID && cfg.n_points <= RIGID_HOT_BODIES &&"):
-        audit.record(fragment in hop, "src/methods/cluster_hopping.rs", "the rigid gate reads the body count",
-                     fragment, "present" if fragment in hop else "absent")
+                     "let rise = (e_new - e) / cfg.temperature.max(1e-12);"):
+        audit.record(fragment in hop, path, "a rigid chain accepts at the stored temperature", fragment,
+                     "present" if fragment in hop else "absent")
+    for label, pattern, shown in (
+        ("rigid orientation block", r"const RIGID_ACCEPT_BLOCK: usize = (\d+);", "50"),
+        ("rigid orientation step factor", r"const RIGID_STEP_FACTOR: f64 = ([0-9.]+);", "1.05"),
+        ("rigid orientation acceptance target", r"const RIGID_ACCEPT_TARGET: f64 = ([0-9.]+);", "0.5"),
+    ):
+        found = re.search(pattern, hop)
+        audit.cell(path, label, shown, float(found.group(1)) if found else None)
+    clamp = re.search(r"next\.clamp\(([0-9.e-]+), ([0-9.]+)\)", hop)
+    audit.cell(path, "rigid orientation scale floor", "0.001", float(clamp.group(1)) if clamp else None)
+    audit.cell(path, "rigid orientation scale ceiling", "1", float(clamp.group(2)) if clamp else None)
+    tip4p = re.search(r"pub fn for_tip4p\(.*?cfg\.temperature = ([0-9.]+);", config, re.DOTALL)
+    audit.cell(PRIOR_CONFIG, "the TIP4P preset temperature in kJ/mol", "2", float(tip4p.group(1)) if tip4p else None)
+    portfolio = audit.text("src/methods/two_phase.rs")
+    search = audit.text("src/methods/cluster_search.rs")
+    for where, text, label, fragment in (
+        ("src/methods/two_phase.rs", portfolio, "a penalty block that earns nothing sets a plain hold",
+         "&& reward <= 0.0"),
+        ("src/methods/two_phase.rs", portfolio, "a plain hold ends at a lower minimum or when it outnumbers the settled blocks",
+         "let stalled = self.held_blocks > self.held_after;"),
+        ("src/methods/two_phase.rs", portfolio, "the block after a hold goes back to the arm that failed",
+         "returned = self.held_against.take();"),
+        ("src/methods/cluster_search.rs", search, "a failed penalty block returns the chain",
+         "led.revert_unrestrained = true;"),
+        ("src/methods/cluster_search.rs", search, "the plain minimum of a penalty hop replaces it only below the incumbent",
+         "let plain_lowers = f2 < target && f2 < restrained_energy;"),
+        (path, hop, "the chain returns to the start of the block that found the incumbent",
+         "ledger.before_gain = Some(origin);"),
+    ):
+        audit.record(fragment in text, where, label, fragment, "present" if fragment in text else "absent")
     assignment = audit.text("src/assignment.rs")
     audit.record("const SHORTEST_PATH_FROM: usize = 98;" in assignment and "the same optimum" in assignment,
                  "src/assignment.rs", "the assignment switches algorithm at 98 for the same optimum", "98", "98")
     audit.record("minimum_cost_assignment" in audit.text("src/continuous_symmetry.rs"), "src/continuous_symmetry.rs",
                  "the symmetry projections use that assignment", "used", "used")
-    audit.said(TEX, "For atomic clusters the preset has one atom-count gate: the diameter penalty of "
-                    "equation~\\ref{eq:penalty} is used only below 98 atoms.")
-    audit.said(TEX, "The revisions with the structure priors on had a second, the growth hold of "
+    audit.said(TEX, "\\subsection{Units and size dependence}")
+    audit.said(TEX, "The search tests neither the atom count nor the body count. "
+                    "The diameter penalty of equation~\\ref{eq:penalty} is offered at every size, "
+                    "and the choice between the two surfaces is the rule of Section~\\ref{sec:posterior}.")
+    audit.said(TEX, "The revisions with the structure priors on had one test of the atom count, the growth hold of "
                     "equation~\\ref{eq:hold}.")
-    small = re.search(r"fn rigid_factor_cap\(n_bodies: usize\) -> f64 \{\s*if n_bodies > RIGID_HOT_BODIES \{\s*"
-                      r"RIGID_FACTOR_CAP_LARGE\s*\} else \{\s*([0-9.]+)\s*\}", hop)
-    audit.cell("src/methods/cluster_hopping.rs", "rigid factor cap at 10 bodies or fewer", "24",
-               float(small.group(1)) if small else None)
-    large = re.search(r"const RIGID_FACTOR_CAP_LARGE: f64 = ([0-9.]+);", hop)
-    audit.cell("src/methods/cluster_hopping.rs", "rigid factor cap above 10 bodies", "4",
-               float(large.group(1)) if large else None)
-    for fragment in ("rigid_factor_cap(cfg.n_points)\n    } else {\n        1.0",
-                     "rigid_factor = (rigid_factor / 1.5).max(1.0);"):
-        audit.record(fragment in hop, "src/methods/cluster_hopping.rs",
-                     "the rigid factor starts at its cap and falls no lower than 1", fragment,
-                     "present" if fragment in hop else "absent")
-    audit.said(TEX, "A rigid-body run has a gate of its own: at 10 molecules or fewer a factor on its acceptance "
-                    "temperature starts at 24 and moves between 1 and 24 with the share of hops that reach a new "
-                    "minimum, and above 10 that factor stays at 4 and its orientation step follows the acceptance rate.")
-    audit.said(TEX, "The exact assignment inside the symmetry projections also changes algorithm at 98 atoms, and both "
-                    "algorithms return an assignment of the optimal cost.")
+    audit.said(TEX, "A rigid-body run accepts at the temperature that its preset stores for the potential, "
+                    "2~kJ/mol for TIP4P, at every number of molecules. "
+                    "Its orientation step is the preset step times a scale that is multiplied by 1.05 when the "
+                    "acceptance rate over 50 decisions exceeds one half and divided by 1.05 when it falls below, "
+                    "and that stays between \\(10^{-3}\\) and 1.")
+    audit.said(TEX, "Before the revision that removed these tests, the preset offered the penalty surface below 98 "
+                    "atoms only, and a rigid-body run multiplied its acceptance temperature by a factor chosen "
+                    "from the body count. The Supporting Information names the revision that produced each row.")
+    audit.said(TEX, "At every size the quench chooses a surface and holds it for 100 hops.")
+    audit.said(TEX, "A quench on the penalty surface is two relaxations in sequence: the first on the penalized "
+                    "potential, the second on the plain potential from where the first ended, and the chain walks "
+                    "the minimum of the second. The same proposal is also relaxed on the plain potential alone, "
+                    "and that minimum replaces the first only when it is below the incumbent, the lowest energy "
+                    "found so far.")
+    audit.said(TEX, "A block on the penalty surface whose reward is zero or less is followed by blocks on the plain "
+                    "potential, and the chain returns to where it stood at the start of the block that found the "
+                    "incumbent. The plain blocks end when the plain walk reaches a minimum below that incumbent, "
+                    "or when they outnumber the blocks the run had settled before they began. The next block then "
+                    "goes back to the penalty arm, from where the chain now stands.")
+    audit.said(TEX, "The one size-dependent choice that remains is the exact assignment inside the symmetry "
+                    "projections, which changes algorithm at 98 atoms; both algorithms return an assignment of the "
+                    "optimal cost.")
     audit.said(TEX, "In the revisions with the structure priors on, lattice growth on a plateau is held when it has "
                     "already failed at the current energy.")
-    for phrase in ("two atom-count gates", "Apart from those gates no move reads the atom count"):
-        audit.record(phrase not in collapse(audit.text(TEX)), TEX, f"retired gate wording stays out: {phrase}",
-                     "absent", "absent" if phrase not in collapse(audit.text(TEX)) else "present")
+    visible = collapse(tex_without_comments(audit.text(TEX)))
+    for phrase in ("two atom-count gates", "Apart from those gates no move reads the atom count",
+                   "For atomic clusters the preset has one atom-count gate",
+                   "Units and atom-count gates",
+                   "Below 98 atoms the quench chooses a surface",
+                   "At 98 atoms and above the penalty is absent",
+                   "A rigid-body run has a gate of its own",
+                   "at 10 molecules or fewer a factor on its acceptance temperature"):
+        audit.record(phrase not in visible, TEX, f"retired gate wording stays out: {phrase}",
+                     "absent", "absent" if phrase not in visible else "present")
 
 
 def rigid_stall(audit: Audit) -> None:
