@@ -305,7 +305,7 @@ fn measure(
     let pinned = pin_cores(&requested)?;
     let oversubscribed = workers > ctx.nproc;
     let species = Gupta::copper_gold_species(0, ctx.n_atoms);
-    let mut cfg = Config::communicating(ctx.n_atoms).with_species(species.clone(), None);
+    let cfg = Config::communicating(ctx.n_atoms).with_species(species.clone(), None);
     if cfg.replicas != 1 {
         return Err("communicating preset is not a single-rung chain".into());
     }
@@ -320,7 +320,7 @@ fn measure(
         checkpoint_interval: 1,
         target: Some(ctx.reference + anneal_core::DEFAULT_HIT_TOL),
     };
-    let geometry = DescriptorGeometry::finite(cfg.length_scale)?;
+    let geometry = DescriptorGeometry::finite(cfg.length_scale).map_err(|err| err.to_string())?;
     let descriptor = universal_descriptor_space(geometry);
     let context = StructureContext::new(Some(species), None, Some("au55".into()));
     let witness = SerializedWitness(Mutex::new(same_geometry));
@@ -857,10 +857,4 @@ unsafe extern "C" {
     fn sysconf(name: i32) -> i64;
     fn sched_setaffinity(pid: i32, cpusetsize: usize, mask: *const u8) -> i32;
     fn sched_getaffinity(pid: i32, cpusetsize: usize, mask: *mut u8) -> i32;
-}
-
-impl From<anneal_core::descriptor_space::DescriptorError> for String {
-    fn from(err: anneal_core::descriptor_space::DescriptorError) -> Self {
-        err.to_string()
-    }
 }
