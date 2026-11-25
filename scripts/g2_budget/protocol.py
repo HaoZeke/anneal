@@ -133,7 +133,8 @@ def is_scope1_rows(path: Path) -> bool:
 
 
 def reject_cap_override(config) -> None:
-    present = [key for key in LOCKED_CONFIG_KEYS if key in config]
+    locked = {key.lower() for key in LOCKED_CONFIG_KEYS}
+    present = [str(key) for key in config if str(key).lower() in locked]
     if present:
         names = ", ".join(present)
         raise ValueError(

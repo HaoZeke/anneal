@@ -36,13 +36,21 @@ On lj98, lj104, and au55 the pair is `ase_mh` with `anneal`. Both arms use the C
 
 ## Rows
 
-A seed that reaches the reference writes `stop=hit`. A seed that spends the call budget writes `stop=budget`. A seed that hits the CPU cap before the budget is a censored miss at the cap. That row writes `stop=cap`, `calls_reached`, `fraction_of_budget` equal to `calls_reached/budget`, the best energy, CPU seconds, wall seconds, and the revision.
+A seed that reaches the reference writes `stop=hit`. A seed that spends the call budget writes `stop=budget`. A seed that hits the CPU cap before the budget is a censored miss at the cap. That row writes `stop=cap`, `calls_reached`, `fraction_of_budget` equal to `calls_reached/budget`, the best energy, CPU seconds, wall seconds, and the revision. The best energy is the lowest energy among the seed's segments.
+
+A production `stop=cap` row records summed CPU of at least 43200 s. That CPU is at most the summed wall, with a tolerance of a millionth of a second.
 
 Checkpoint and resume are allowed only for capped seeds. CPU seconds are the sum of the process CPU across segments. Wall seconds are the sum of the segment walls. A budget-stopped seed has one segment.
 
 Long seeds run one per VM. Rule `g2_budget_cell` is one seed.
 
-Rows are appended to `bench/ase-<system>/rows-ljfix-budget.csv`. Shapes are appended to `bench/ase-<system>/shapes-ljfix-budget.jsonl`. These files are separate from the scope-1 `rows-ljfix*.csv` tables.
+Rows are appended to `bench/ase-<system>/rows-ljfix-budget.csv`. Shapes are appended to `bench/ase-<system>/shapes-ljfix-budget.jsonl`. The shape is written first. A later attempt that finds the shape and not the row writes the row when it is the same record. These files are separate from the scope-1 `rows-ljfix*.csv` tables.
+
+## Scoring
+
+Fisher is the two-sided exact test on hits. MWU is the two-sided Mann-Whitney U test on calls-to-hit, with the tie correction and the continuity correction.
+
+A `stop=hit` row contributes `calls_reached` to the calls-to-hit statistic. A `stop=cap` row, and any other non-hit, contributes `budget+1`.
 
 ## Why the cap is 12 h
 

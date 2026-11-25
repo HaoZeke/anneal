@@ -102,8 +102,8 @@ def _revision() -> str:
 
 def run_cell(system: str, arm: str, seed: int, out: Path) -> dict[str, str]:
     cell = protocol.find_cell(system, arm, seed)
-    cap = _test_cap()
     if cell.stop_rule == "cap":
+        cap = _test_cap()
         half = cap / 2
         calls, stop, best, cpu_s, wall_s = _burn(cell.budget, half, 0)
         if stop != "cap":
@@ -118,7 +118,7 @@ def run_cell(system: str, arm: str, seed: int, out: Path) -> dict[str, str]:
         if stop != "budget" or calls != cell.budget:
             raise SystemExit("budget dry run did not spend the paper budget")
         segments = [rows.Segment(calls, best, cpu_s, wall_s, "budget")]
-    return rows.append_result(_scratch(out), cell, segments, _revision())
+    return rows.record_dry_run(_scratch(out), cell, segments, _revision())
 
 
 def main(argv: list[str] | None = None) -> int:
