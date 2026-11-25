@@ -10,6 +10,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -137,6 +138,10 @@ def test_budget_arms_run_the_real_searches(tmp_path, monkeypatch):
         assert shape["core_affinity"] == next(iter(pinned))
         assert "host" not in shape
         assert "hostname" not in shape
+        assert float(shape["child_cpu_s"]) == 0.0
+        assert abs(
+            float(shape["parent_cpu_s"]) + float(shape["child_cpu_s"]) - float(shape["cpu_s"])
+        ) <= 1e-6
     blob = (PROTOCOL.shapes_path(tmp_path, "lj38").read_text()
             + PROTOCOL.rows_path(tmp_path, "lj38").read_text())
     assert Path("/etc/machine-id").read_text().strip() not in blob
@@ -211,6 +216,10 @@ def test_capped_resume_sums_time_and_continues_rng(tmp_path, monkeypatch):
     assert shapes[0]["runner_revision"] == head()
     assert shapes[0]["cpu_s"] == row["cpu_s"]
     assert shapes[0]["wall_s"] == row["wall_s"]
+    assert float(shapes[0]["child_cpu_s"]) == 0.0
+    assert abs(
+        float(shapes[0]["parent_cpu_s"]) + float(shapes[0]["child_cpu_s"]) - float(shapes[0]["cpu_s"])
+    ) <= 1e-6
     assert stamp.is_file()
 
     mod.run_cell("lj98", "ase_mh", 2000, tmp_path, tmp_path / "rerun.json")
@@ -336,6 +345,12 @@ def test_anneal_cap_resume_matches_an_uncapped_run(tmp_path, monkeypatch):
         assert shapes[0]["trajectory_sha256"] == full_hash
         assert shapes[0]["segment_count"] == 2
         assert shapes[0]["code_revision"] == PREREG
+        assert float(shapes[0]["child_cpu_s"]) == 0.0
+        assert abs(
+            float(shapes[0]["parent_cpu_s"])
+            + float(shapes[0]["child_cpu_s"])
+            - float(shapes[0]["cpu_s"])
+        ) <= 1e-6
         assert not process_alive(pid)
 
         mod.run_cell("lj38", "anneal", 2000, capped_root, capped_root / "rerun.json")
@@ -358,3 +373,92 @@ def test_anneal_cap_resume_matches_an_uncapped_run(tmp_path, monkeypatch):
                 os.kill(pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+
+
+def _stat_cpu(pid: int) -> float:
+    text = Path(f"/proc/{pid}/stat").read_text()
+    end = text.rfind(")")
+    fields = text[end + 2:].split()
+    ticks = int(fields[11]) + int(fields[12])
+    return ticks / os.sysconf("SC_CLK_TCK")
+
+
+def test_capped_au55_ase_cell_under_counts_child_cpu(tmp_path, monkeypatch):
+    """A capped Au55 minima-hopping cell must include evaluator CPU.
+
+    The parent process clock is the ASE optimizer. Gupta runs in the
+    asg_eval child. Recording only the parent leaves that child out.
+    """
+    binary = panel_binary()
+    monkeypatch.setenv("ASG_EVAL", str(binary))
+    mod = runner()
+    _panel, potential = mod._libraries()
+    seen = {}
+    real_eval = potential.AnnealServer.eval
+
+    def eval_and_sample(self, coords):
+        if "cpu0" not in seen:
+            seen["cpu0"] = _stat_cpu(self.proc.pid)
+        result = real_eval(self, coords)
+        seen["cpu1"] = _stat_cpu(self.proc.pid)
+        seen["calls"] = seen.get("calls", 0) + 1
+        return result
+
+    monkeypatch.setattr(potential.AnnealServer, "eval", eval_and_sample)
+    samples = []
+    real_process_time = time.process_time
+
+    def sampling_process_time():
+        value = real_process_time()
+        samples.append(value)
+        return value
+
+    monkeypatch.setattr(mod.time, "process_time", sampling_process_time)
+    monkeypatch.setattr(PROTOCOL, "CPU_CAP_S", 0)
+    monkeypatch.setattr(mod, "segment_cap_s", lambda cell: 2.0)
+    row = mod.run_cell("au55", "ase_mh", 2000, tmp_path, tmp_path / "stamp.json")
+    assert row is not None
+    assert row["stop"] == "cap"
+    assert int(row["calls_reached"]) < PROTOCOL.PAPER_BUDGETS["au55"]
+    child = seen["cpu1"] - seen["cpu0"]
+    parent = samples[-1] - samples[0]
+    recorded = float(row["cpu_s"])
+    assert seen["calls"] > 100
+    assert child >= 0.05
+    assert recorded + 1e-6 >= parent + child - 0.02, (
+        f"recorded {recorded:.6f} parent {parent:.6f} child {child:.6f}"
+    )
+    _recorded, shapes = rows_and_shapes(tmp_path, "au55")
+    shape = shapes[0]
+    assert abs(float(shape["parent_cpu_s"]) + float(shape["child_cpu_s"]) - recorded) <= 1e-6
+    assert abs(float(shape["child_cpu_s"]) - child) <= 0.04
+    assert abs(float(shape["parent_cpu_s"]) - parent) <= 0.02
+
+
+def test_au55_cap_trips_on_parent_plus_child(tmp_path, monkeypatch):
+    """The cap trips while the parent clock is held still.
+
+    Only the evaluator child accumulates CPU. A parent-only meter
+    never reaches the cap and spends the call budget instead.
+    """
+    binary = panel_binary()
+    monkeypatch.setenv("ASG_EVAL", str(binary))
+    mod = runner()
+    frozen = time.process_time()
+    monkeypatch.setattr(mod.time, "process_time", lambda: frozen)
+    budgets = dict(PROTOCOL.PAPER_BUDGETS)
+    budgets["au55"] = 8000
+    monkeypatch.setattr(PROTOCOL, "PAPER_BUDGETS", budgets)
+    monkeypatch.setattr(PROTOCOL, "CPU_CAP_S", 0)
+    cap = 0.05
+    monkeypatch.setattr(mod, "segment_cap_s", lambda cell: cap)
+    row = mod.run_cell("au55", "ase_mh", 2001, tmp_path, tmp_path / "stamp.json")
+    assert row["stop"] == "cap"
+    assert int(row["calls_reached"]) < budgets["au55"]
+    _recorded, shapes = rows_and_shapes(tmp_path, "au55")
+    parent = float(shapes[0]["parent_cpu_s"])
+    child = float(shapes[0]["child_cpu_s"])
+    assert parent < cap
+    assert parent + child + 1e-9 >= cap
+    assert abs(parent + child - float(row["cpu_s"])) <= 1e-6
+    assert child > parent
