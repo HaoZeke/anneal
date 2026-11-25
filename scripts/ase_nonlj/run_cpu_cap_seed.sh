@@ -47,11 +47,20 @@ fi
 
 if $PY - "$ROWS" "$SHAPE_ROWS" "$SYSTEM" "$SEED" "$REV" "$CPU_CAP" <<'PY'
 import csv
+import io
 import sys
 from pathlib import Path
 
+
+def complete_text(path: Path) -> str:
+    content = path.read_bytes() if path.exists() else b""
+    if content and not content.endswith(b"\n"):
+        content = content[:content.rfind(b"\n") + 1]
+    return content.decode()
+
+
 path, shape_path, system, seed, revision, cpu_cap = sys.argv[1:]
-with open(path, newline="") as handle:
+with io.StringIO(complete_text(Path(path)), newline="") as handle:
     performance_found = any(
         row["system"] == system
         and row["arm"] == "ase_mh"
@@ -61,16 +70,14 @@ with open(path, newline="") as handle:
         and float(row["cap_s"]) == float(cpu_cap)
         for row in csv.DictReader(handle)
     )
-shape_found = False
-if Path(shape_path).exists():
-    with open(shape_path, newline="") as handle:
-        shape_found = any(
-            row["system"] == system
-            and row["arm"] == "ase_mh"
-            and row["seed"] == seed
-            and row["code_revision"] == revision
-            for row in csv.DictReader(handle)
-        )
+with io.StringIO(complete_text(Path(shape_path)), newline="") as handle:
+    shape_found = any(
+        row["system"] == system
+        and row["arm"] == "ase_mh"
+        and row["seed"] == seed
+        and row["code_revision"] == revision
+        for row in csv.DictReader(handle)
+    )
 raise SystemExit(0 if performance_found and shape_found else 1)
 PY
 then
@@ -143,10 +150,15 @@ if (
     raise SystemExit("shape row does not match the performance row")
 
 
-def append_row(path: Path, header: str, line: str) -> None:
+def complete_text(path: Path) -> str:
     content = path.read_bytes() if path.exists() else b""
     if content and not content.endswith(b"\n"):
         content = content[:content.rfind(b"\n") + 1]
+    return content.decode()
+
+
+def append_row(path: Path, header: str, line: str) -> None:
+    content = complete_text(path).encode()
     if not content:
         content = (header + "\n").encode()
     content += (line + "\n").encode()
@@ -177,16 +189,14 @@ columns = [
 ]
 shape_rows = Path(shape_path)
 shape_rows.parent.mkdir(parents=True, exist_ok=True)
-shape_found = False
-if shape_rows.exists():
-    with shape_rows.open(newline="") as handle:
-        shape_found = any(
-            item["system"] == system
-            and item["arm"] == "ase_mh"
-            and item["seed"] == seed
-            and item["code_revision"] == revision
-            for item in csv.DictReader(handle)
-        )
+with io.StringIO(complete_text(shape_rows), newline="") as handle:
+    shape_found = any(
+        item["system"] == system
+        and item["arm"] == "ase_mh"
+        and item["seed"] == seed
+        and item["code_revision"] == revision
+        for item in csv.DictReader(handle)
+    )
 if not shape_found:
     output = io.StringIO(newline="")
     writer = csv.DictWriter(output, fieldnames=columns, lineterminator="\n")
@@ -197,7 +207,7 @@ if not shape_found:
 
 rows = Path(rows_path)
 rows.parent.mkdir(parents=True, exist_ok=True)
-with rows.open(newline="") as handle:
+with io.StringIO(complete_text(rows), newline="") as handle:
     performance_found = any(
         item["system"] == system
         and item["arm"] == "ase_mh"
