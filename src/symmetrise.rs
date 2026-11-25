@@ -2462,6 +2462,19 @@ pub(crate) fn close_group_checked(gens: &[Rot], closure: f64, cap: usize) -> Opt
 /// describes. `None` when no core of at most `spec.max_points` points has
 /// an operation.
 pub fn shell_core_group(x: ArrayView1<f64>, n: usize, spec: &ShellCore) -> Option<CoreGroup> {
+    shell_core_group_for(false, x, n, spec)
+}
+
+/// [`shell_core_group`] with detected symmetry on or off.
+///
+/// Off scans the orders `[2, 3, 4, 5, 6]` with the crystallographic scan.
+/// On scans every order the core can hold with [`detect_all`].
+pub(crate) fn shell_core_group_for(
+    detected_symmetry: bool,
+    x: ArrayView1<f64>,
+    n: usize,
+    spec: &ShellCore,
+) -> Option<CoreGroup> {
     if n < MIN_CORE_POINTS {
         return None;
     }
@@ -2525,8 +2538,11 @@ pub fn shell_core_group(x: ArrayView1<f64>, n: usize, spec: &ShellCore) -> Optio
                 cx[3 * k + d] = p[d];
             }
         }
-        let orders = orders_held(m);
-        let cands = detect_all(cx.view(), m, &orders, spec.tolerance);
+        let cands = if detected_symmetry {
+            detect_all(cx.view(), m, &orders_held(m), spec.tolerance)
+        } else {
+            detect_all_crystallographic(cx.view(), m, &ROTATION_ORDERS, spec.tolerance)
+        };
         if cands.is_empty() {
             continue;
         }
@@ -2566,7 +2582,18 @@ pub fn orbit_complete_shells(
     pair_cutoff: f64,
     min_separation: f64,
 ) -> Option<Array1<f64>> {
-    let core = shell_core_group(x, n, spec)?;
+    orbit_complete_shells_for(false, x, n, spec, pair_cutoff, min_separation)
+}
+
+pub(crate) fn orbit_complete_shells_for(
+    detected_symmetry: bool,
+    x: ArrayView1<f64>,
+    n: usize,
+    spec: &ShellCore,
+    pair_cutoff: f64,
+    min_separation: f64,
+) -> Option<Array1<f64>> {
+    let core = shell_core_group_for(detected_symmetry, x, n, spec)?;
     complete_orbits_about(x, n, &core.group, core.centre, pair_cutoff, min_separation)
 }
 

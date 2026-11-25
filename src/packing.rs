@@ -119,7 +119,14 @@ pub(crate) fn orbit_candidates_for(
         )
     };
     let shells = |spec: &crate::symmetrise::ShellCore| {
-        crate::symmetrise::orbit_complete_shells(x, n_points, spec, merge_radius, min_separation)
+        crate::symmetrise::orbit_complete_shells_for(
+            detected_symmetry,
+            x,
+            n_points,
+            spec,
+            merge_radius,
+            min_separation,
+        )
     };
     match core {
         OrbitCore::Fraction => fraction().into_iter().collect(),
