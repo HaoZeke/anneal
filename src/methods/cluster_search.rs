@@ -805,10 +805,8 @@ where
     // solver's own default.
     let settled = opt.gtol;
     let stop = cfg.record_gradient;
-    // The driver calls the screening pass with `screen_steps`, the full one
-    // with `relax_steps` and a record polish with `polish_records`, so the
-    // iteration count identifies which is which.
-    let screen_iters = cfg.screen_steps;
+    // The driver marks the screening pass on the ledger. Iteration counts do
+    // not identify the phase when `relax_steps <= screen_steps`.
     let polish_iters = cfg.polish_records;
     let adaptive = cfg.adaptive_screen;
     let probe = cfg.probe_screen;
@@ -900,10 +898,9 @@ where
         let held = centres
             .as_ref()
             .map_or_else(HeldHands::default, |centres| centres.at(x));
-        let polishing = polish_iters > 0
-            && iters == polish_iters
-            && iters != cfg.relax_steps
-            && iters > screen_iters;
+        let screening = led.is_screening_relax();
+        let polishing =
+            polish_iters > 0 && iters == polish_iters && iters != cfg.relax_steps && !screening;
         opt.gtol = if polishing { settled } else { stop };
         let prior = paid
             .lock()
@@ -911,7 +908,6 @@ where
             .take()
             .filter(|check| check.at == x);
         let before = led.spent();
-        let screening = iters <= screen_iters;
         // A rigid chart uses this same descent. A line-search-free capped
         // step reached a different basin, and the small-cluster walk then
         // took more hops at the same cost per quench.
@@ -2816,6 +2812,35 @@ mod tests {
         }
         assert_eq!(stats.screens, 0);
         assert!(led.quench_boundaries().is_empty());
+    }
+
+    #[test]
+    fn relaxation_phase_does_not_follow_the_iteration_count() {
+        let mut cfg = Config::for_cluster(3);
+        cfg.screen_steps = 25;
+        cfg.relax_steps = 5;
+        let objective = PairPotential::lennard_jones(3);
+        let x = Array1::from_vec(vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0, 0.0, 1.2, 0.0]);
+        let mut stats = RelaxStats::default();
+        let mut led = Ledger::new(64);
+        {
+            let mut relax = warm_relax(&objective, &cfg, &mut stats, 1);
+            let _ = relax(&mut led, x.view(), cfg.relax_steps);
+        }
+        assert_eq!(stats.screens, 0);
+        assert_eq!(stats.screen_charged, 0);
+        assert!(stats.full_charged > 0);
+
+        let mut screen_stats = RelaxStats::default();
+        let mut screen_led = Ledger::new(64);
+        screen_led.set_screening_relax(true);
+        {
+            let mut relax = warm_relax(&objective, &cfg, &mut screen_stats, 1);
+            let _ = relax(&mut screen_led, x.view(), cfg.screen_steps);
+        }
+        assert_eq!(screen_stats.screens, 1);
+        assert!(screen_stats.screen_charged > 0);
+        assert_eq!(screen_stats.full_charged, 0);
     }
 
     #[test]

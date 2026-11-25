@@ -628,6 +628,11 @@ pub struct Ledger {
     /// When set, a gradient check may reuse a value the relaxation already
     /// paid for and must not charge another evaluation.
     gradient_reuse_only: bool,
+    /// Whether the current relaxation is the screening prefix of a hop.
+    ///
+    /// The iteration cap cannot identify this phase when a caller chooses
+    /// `relax_steps <= screen_steps`.
+    screening_relax: bool,
     quench_boundaries: Vec<QuenchBoundary>,
     diagnostic_quench: bool,
     /// Energy at or below which the hop may stop.
@@ -698,6 +703,7 @@ impl Ledger {
             walker_state: None,
             chain_is_separate: true,
             gradient_reuse_only: false,
+            screening_relax: false,
             quench_boundaries: Vec::new(),
             diagnostic_quench: false,
             target: None,
@@ -978,6 +984,14 @@ impl Ledger {
 
     pub(crate) fn gradient_reuse_only(&self) -> bool {
         self.gradient_reuse_only
+    }
+
+    pub(crate) fn set_screening_relax(&mut self, screening: bool) {
+        self.screening_relax = screening;
+    }
+
+    pub(crate) fn is_screening_relax(&self) -> bool {
+        self.screening_relax
     }
 
     fn record_published(&mut self, value: f64, state: ArrayView1<f64>) {
@@ -8571,6 +8585,7 @@ where
         // screen of that point falls back into the well it left, and the
         // return test then skips the quench. Relax it once, in full.
         let quenched_in_place = rigid_quench || species_escape_trial || cfg.quench_once;
+        ledger.set_screening_relax(!quenched_in_place);
         let (e_screen, x_screen) = relax(
             ledger,
             trial.view(),
@@ -8580,6 +8595,7 @@ where
                 cfg.screen_steps
             },
         );
+        ledger.set_screening_relax(false);
         if ledger.stopped() {
             // The caller already stopped. This screen paid for `e_screen`,
             // and dropping it returns an older minimum above an energy the

@@ -89,6 +89,10 @@ pub struct ArchiveOutcome {
     pub events: usize,
     /// ARTn / stall-symmetry escapes attempted.
     pub artn: usize,
+    /// Fresh-start branches actually run by `branch_on_stall`.
+    pub branch_draws: u64,
+    /// Charged evaluations spent inside fresh-start branches.
+    pub branch_spent: usize,
     /// Charged evaluations spent (copied from the ledger).
     pub charged: usize,
     /// Ledger spend when `best` last improved.
@@ -117,6 +121,8 @@ struct HopAcc {
     full: usize,
     returned: usize,
     artn: usize,
+    branch_draws: u64,
+    branch_spent: usize,
     basins: usize,
     nve_unavailable: bool,
 }
@@ -230,6 +236,8 @@ fn hops_from_start<'g, R: Rng + ?Sized>(
         full: 0,
         returned: 0,
         artn: 0,
+        branch_draws: 0,
+        branch_spent: 0,
         basins: 0,
         nve_unavailable: false,
     };
@@ -255,6 +263,8 @@ fn hops_from_start<'g, R: Rng + ?Sized>(
         acc.returned += hop.returned;
         acc.nve_unavailable |= hop.nve_unavailable;
         acc.artn += hop.symmetrised.0 + hop.stall_escapes;
+        acc.branch_draws += hop.branch_draws;
+        acc.branch_spent += hop.branch_spent;
         acc.basins = acc.basins.max(hop.basins);
         if hop.best.is_finite() {
             let at = spent_before.saturating_add(hop_best_at(&hop, used));
@@ -410,6 +420,8 @@ fn fold_hop(
     acc.returned += hop.returned;
     acc.nve_unavailable |= hop.nve_unavailable;
     acc.artn += hop.symmetrised.0 + hop.stall_escapes;
+    acc.branch_draws += hop.branch_draws;
+    acc.branch_spent += hop.branch_spent;
     acc.basins = acc.basins.max(hop.basins);
     if hop.best.is_finite() && hop.best < acc.best - 1e-12 {
         acc.best = hop.best;
@@ -477,6 +489,8 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                 let at2 = used1.saturating_add(hop_best_at(&hop2, used2));
                 let rest3 = ledger.remaining();
                 let mut nve_unavailable = hop1.nve_unavailable || hop2.nve_unavailable;
+                let mut branch_draws = hop1.branch_draws + hop2.branch_draws;
+                let mut branch_spent = hop1.branch_spent + hop2.branch_spent;
                 let (best, best_state, best_at, basins, screens, full, returned, artn) =
                     if rest3 > 0 && hop2.best < hop1.best - 0.015 && hop2.best_state.is_some() {
                         let mut c3 = c2.clone();
@@ -506,6 +520,8 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                         .expect("finite start");
                         let _ = ledger.charge_many(led3.spent());
                         nve_unavailable |= hop3.nve_unavailable;
+                        branch_draws += hop3.branch_draws;
+                        branch_spent += hop3.branch_spent;
                         let at3 = used1
                             .saturating_add(used2)
                             .saturating_add(hop_best_at(&hop3, led3.spent()));
@@ -579,6 +595,8 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                     full,
                     returned,
                     artn,
+                    branch_draws,
+                    branch_spent,
                     basins,
                     nve_unavailable,
                 }
@@ -591,6 +609,8 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                     full: paid_full_quenches(cfg, p1, hop1.hops),
                     returned: hop1.returned,
                     artn: hop1.symmetrised.0 + hop1.stall_escapes + hop1.restarts,
+                    branch_draws: hop1.branch_draws,
+                    branch_spent: hop1.branch_spent,
                     basins: hop1.basins,
                     nve_unavailable: hop1.nve_unavailable,
                 }
@@ -610,6 +630,8 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                 floors: archive.floors.len().max(acc.basins),
                 events: archive.catalog.event_count(),
                 artn: acc.artn,
+                branch_draws: acc.branch_draws,
+                branch_spent: acc.branch_spent,
                 charged: ledger.spent(),
                 best_at: acc.best_at,
                 nve_unavailable: acc.nve_unavailable,
@@ -653,6 +675,8 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             floors: archive.floors.len().max(acc.basins),
             events: archive.catalog.event_count(),
             artn: acc.artn,
+            branch_draws: acc.branch_draws,
+            branch_spent: acc.branch_spent,
             charged: ledger.spent(),
             best_at: acc.best_at,
             nve_unavailable: acc.nve_unavailable,
@@ -694,6 +718,8 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         full: paid_full_quenches(cfg, explore, hop1.hops),
         returned: hop1.returned,
         artn: hop1.symmetrised.0 + hop1.stall_escapes,
+        branch_draws: hop1.branch_draws,
+        branch_spent: hop1.branch_spent,
         basins: hop1.basins,
         nve_unavailable: hop1.nve_unavailable,
     };
@@ -753,6 +779,8 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         floors: archive.floors.len(),
         events: archive.catalog.event_count(),
         artn: acc.artn,
+        branch_draws: acc.branch_draws,
+        branch_spent: acc.branch_spent,
         charged: ledger.spent(),
         best_at: acc.best_at,
         nve_unavailable: acc.nve_unavailable,
@@ -841,6 +869,34 @@ mod tests {
             e = lj(y.view());
         }
         (e, y)
+    }
+
+    #[test]
+    fn archive_accumulator_keeps_screen_and_branch_counts() {
+        let cfg = Config::for_cluster(3);
+        let hop = crate::methods::cluster_hopping::Outcome {
+            screened_out: 4,
+            branch_draws: 2,
+            branch_spent: 17,
+            ..Default::default()
+        };
+        let mut acc = HopAcc {
+            best: f64::INFINITY,
+            best_state: None,
+            best_at: 0,
+            screens: 0,
+            full: 0,
+            returned: 0,
+            artn: 0,
+            branch_draws: 0,
+            branch_spent: 0,
+            basins: 0,
+            nve_unavailable: false,
+        };
+        fold_hop(&mut acc, &cfg, 0, &hop, 0);
+        assert_eq!(acc.screens, 4);
+        assert_eq!(acc.branch_draws, 2);
+        assert_eq!(acc.branch_spent, 17);
     }
 
     /// A caller that raises the parent stop during a slice must get the

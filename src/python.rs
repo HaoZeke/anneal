@@ -3389,7 +3389,7 @@ fn cluster_archive_search(
             if iters == 0 {
                 calls.end_relax();
             } else {
-                calls.begin_relax(iters <= cfg.screen_steps);
+                calls.begin_relax(led.is_screening_relax());
             }
             let answer = base_relax(led, x, iters);
             calls.end_relax();
@@ -3446,15 +3446,10 @@ fn cluster_archive_search(
     ledger_split.set_item("quenches", stats.total())?;
     ledger_split.set_item("converged", stats.converged)?;
     ledger_split.set_item("capped", stats.capped)?;
-    ledger_split.set_item("screened_out", Option::<usize>::None)?;
+    ledger_split.set_item("screened_out", out.screens)?;
     ledger_split.set_item("returned", out.returned)?;
-    if cfg.branch_on_stall {
-        ledger_split.set_item("branch_draws", Option::<usize>::None)?;
-        ledger_split.set_item("branch_spent", Option::<usize>::None)?;
-    } else {
-        ledger_split.set_item("branch_draws", 0)?;
-        ledger_split.set_item("branch_spent", 0)?;
-    }
+    ledger_split.set_item("branch_draws", out.branch_draws)?;
+    ledger_split.set_item("branch_spent", out.branch_spent)?;
     ledger_split.set_item("overlap_rejected", stats.overlap_rejected)?;
     ledger_split.set_item("basins", out.floors)?;
     dict.set_item("ledger", ledger_split)?;
