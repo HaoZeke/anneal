@@ -5720,10 +5720,13 @@ where
 /// it goes first, the earlier refusal first on a tie, so a budget that ends
 /// the audit has spent it on the refusals the screen was least sure of.
 ///
-/// Each deferred candidate is audited once and leaves the screen. Every
-/// call is charged to `ledger`; one that runs out of budget or meets a
-/// caller stop ends the audit, and the candidates after it stay deferred.
-/// The spend at the find is counted from the ledger's spend on entry.
+/// A candidate relaxed to its full step count is audited and leaves the
+/// screen. Every call is charged to `ledger`. A relaxation that the budget
+/// or a caller stop cut short of its step count ends the audit; that
+/// candidate stays deferred with every one after it, in its place, so a
+/// later audit relaxes it in full from its placement. Its paid point is
+/// still offered like any other. The spend at the find is counted from the
+/// ledger's spend on entry.
 fn audit_refused_packings<F>(
     cfg: &Config,
     ledger: &mut Ledger,
@@ -5741,11 +5744,15 @@ where
             .min_by(|&a, &b| screen.deferred[a].gap.total_cmp(&screen.deferred[b].gap))
             .expect("a deferred candidate");
         let candidate = screen.deferred.remove(closest);
-        let left = screen.deferred.len();
-        let steps = candidate.steps.min(ledger.remaining().saturating_sub(left));
+        let steps = candidate.steps.min(ledger.remaining());
         let (energy, relaxed) = relax(ledger, candidate.point.view(), steps);
-        screen.audited += 1;
-        screen.descent.observe(candidate.partial - energy);
+        let cut = steps < candidate.steps && (ledger.stopped() || ledger.remaining() == 0);
+        if cut {
+            screen.deferred.insert(closest, candidate);
+        } else {
+            screen.audited += 1;
+            screen.descent.observe(candidate.partial - energy);
+        }
         let bar = screen
             .bar
             .min(held)
@@ -6904,7 +6911,9 @@ where
     let mut held_seat: Option<usize> = None;
     let mut held_count: usize = 0;
     // The hop the catalogue was offered at, and the screen that holds the
-    // candidates it refused with the hop their audit is offered at.
+    // candidates it refused and no audit has finished, with the hop their
+    // audit is offered at. An audit the budget cuts short hands the screen
+    // back, due one deferral later.
     let mut packings_offered: Option<usize> = None;
     let mut packing_audit: Option<(PackingScreen, usize)> = None;
     // The probe runs at the top of the hop loop once the walk has made
@@ -6964,7 +6973,11 @@ where
                 let mut scope = probe.diagnostic_scope();
                 if let Some((mut screen, _)) = packing_audit.take() {
                     screen.bar = ledger.best;
-                    audit_refused_packings(cfg, &mut scope, relax, &mut screen, held)
+                    let audited = audit_refused_packings(cfg, &mut scope, relax, &mut screen, held);
+                    if !screen.deferred.is_empty() {
+                        packing_audit = Some((screen, packing_offer_due(cfg, hops)));
+                    }
+                    audited
                 } else {
                     packings_offered = Some(hops);
                     let mut screen =
@@ -12899,9 +12912,12 @@ mod tests {
     }
 
     /// An audit that runs out of budget ends there, charged, after the
-    /// refusals closest to the bar; the farther ones stay deferred. Each
-    /// audit reserves one call for every candidate still waiting, so with
-    /// two calls left for four refusals the two closest take one each.
+    /// refusals closest to the bar. With room for one full relaxation and
+    /// seven calls more, the closest is audited and the next closest is cut
+    /// at seven calls. The cut one stays deferred in its place with the two
+    /// farther ones, and its truncated descent is not fed to the window. A
+    /// second audit relaxes the three in full from their placements, the
+    /// cut one first.
     #[test]
     fn an_audit_out_of_budget_spends_it_on_the_closest_refusals() {
         let cfg = Config::recommended(2);
@@ -12909,7 +12925,7 @@ mod tests {
         let calls = std::cell::Cell::new(0usize);
         let finished = std::cell::RefCell::new(Vec::new());
         let mut relax = placed_relax(&starts, -6.0, 5, &calls, &finished);
-        let mut ledger = Ledger::new(5 * starts.len() + 2);
+        let mut ledger = Ledger::new(5 * starts.len() + 50 + 7);
         let mut screen = packing_screen(5, -10.0, 2.0);
         for index in 0..starts.len() {
             let point = pair_placement(index);
@@ -12930,14 +12946,35 @@ mod tests {
         assert!(kept.is_none(), "a candidate above the bar was kept");
         assert_eq!(ledger.remaining(), 0);
         assert_eq!(calls.get(), ledger.spent());
-        assert_eq!(screen.audited, 2, "one call each for the two closest");
-        assert!(finished.borrow().is_empty(), "no audit had room to finish");
+        assert_eq!(screen.audited, 1, "only the closest relaxed in full");
+        assert_eq!(screen.descent.drops.len(), 1, "a cut descent is not fed");
+        assert_eq!(
+            *finished.borrow(),
+            vec![pair_placement(1), pair_placement(2)],
+            "the start 0 finished, the start 3 was cut"
+        );
         let waiting: Vec<f64> = screen.deferred.iter().map(|held| held.point[3]).collect();
         assert_eq!(
             waiting,
-            vec![1.0, 4.0],
-            "the starts 6 and 9 wait, farthest from the bar"
+            vec![1.0, 3.0, 4.0],
+            "the cut start 3 waits in its place with the starts 6 and 9"
         );
+
+        let first = ledger.spent();
+        let mut resumed = Ledger::new(50 * waiting.len());
+        let kept =
+            audit_refused_packings(&cfg, &mut resumed, &mut relax, &mut screen, f64::INFINITY);
+        assert!(kept.is_none(), "a candidate above the bar was kept");
+        assert!(screen.deferred.is_empty(), "the second audit finished all");
+        assert_eq!(screen.audited, starts.len());
+        assert_eq!(screen.descent.drops.len(), starts.len());
+        assert_eq!(
+            *finished.borrow(),
+            [1, 2, 2, 0, 3].map(pair_placement).to_vec(),
+            "the cut refusal is relaxed again from its placement, first"
+        );
+        assert_eq!(resumed.spent(), 50 * waiting.len());
+        assert_eq!(calls.get(), first + resumed.spent(), "every call charged");
     }
 
     /// A candidate whose full relaxation stays above the bar is refused
