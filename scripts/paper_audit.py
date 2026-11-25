@@ -780,19 +780,6 @@ def gmin_panel_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[
     return panel, groups
 
 
-def gmin_revision(groups: dict[tuple[str, str], list[dict[str, str]]]) -> str:
-    """Return the revision actually recorded by the selected GMIN rows."""
-    revisions = {
-        row["code_revision"]
-        for (_system, arm), rows in groups.items()
-        if arm == "gmin"
-        for row in rows
-    }
-    if len(revisions) != 1:
-        raise RuntimeError(f"GMIN panel has mixed revisions: {sorted(revisions)}")
-    return next(iter(revisions))
-
-
 def gmin_panel_summary(audit: Audit, panel: object, groups: dict) -> None:
     summary = audit.rows("bench/gmin-panel/summary.csv")
     references = {row[0]: row[3] for row in panel.SYSTEMS}
