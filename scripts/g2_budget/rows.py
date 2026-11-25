@@ -223,7 +223,18 @@ def _key(record: dict) -> tuple[str, str, str]:
     return (str(record["system"]), str(record["arm"]), str(record["seed"]))
 
 
-def _commit(root: Path, cell, row: dict[str, str], segments: int) -> None:
+def _shape_body(row: dict[str, str], segments: int, shape_extra) -> dict:
+    shape = dict(row)
+    shape["segments"] = segments
+    if shape_extra:
+        overlap = set(shape_extra).intersection(ROW_FIELDS)
+        if overlap or "segments" in shape_extra:
+            raise ValueError("shape metadata collides with the row")
+        shape.update(shape_extra)
+    return shape
+
+
+def _commit(root: Path, cell, row: dict[str, str], segments: int, shape_extra=None) -> None:
     """Write the shape first and the row second.
 
     A retry that finds the shape and not the row writes the row when the
@@ -260,21 +271,25 @@ def _commit(root: Path, cell, row: dict[str, str], segments: int) -> None:
     if old_row is not None and old_shape is None:
         if not row_matches:
             raise ValueError("row does not match the shape")
-        shape = dict(row)
-        shape["segments"] = segments
+        shape = _shape_body(row, segments, shape_extra)
         _atomic_write(shapes_path, (shapes_text + json.dumps(shape, sort_keys=True) + "\n").encode())
         return
     if not rows_text:
         rows_text = ",".join(ROW_FIELDS) + "\n"
-    shape = dict(row)
-    shape["segments"] = segments
+    shape = _shape_body(row, segments, shape_extra)
     _atomic_write(shapes_path, (shapes_text + json.dumps(shape, sort_keys=True) + "\n").encode())
     _atomic_write(rows_path, (rows_text + _encode_row(row)).encode())
 
 
-def append_result(root: Path, cell, segments: list[Segment], revision: str) -> dict[str, str]:
+def append_result(
+    root: Path,
+    cell,
+    segments: list[Segment],
+    revision: str,
+    shape_extra=None,
+) -> dict[str, str]:
     row = build_row(cell, segments, revision, production=True)
-    _commit(root, cell, row, len(segments))
+    _commit(root, cell, row, len(segments), shape_extra)
     return row
 
 

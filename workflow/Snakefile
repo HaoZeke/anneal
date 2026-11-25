@@ -1100,7 +1100,7 @@ rule agox_gofee_lj_large:
 # is CPU_CAP_S in scripts/g2_budget/protocol.py. A Snakemake config
 # value is rejected. Rows append to
 # bench/ase-<system>/rows-ljfix-budget.csv and shapes to
-# shapes-ljfix-budget.jsonl. No seed has been run.
+# shapes-ljfix-budget.jsonl. Each cell runs that one seed.
 #   snakemake -s workflow/Snakefile g2_budget
 import importlib.util
 import sys
@@ -1133,7 +1133,7 @@ rule g2_budget_cell:
     shell:
         """
         set -euo pipefail
-        python3 scripts/g2_budget/record_rule.py \
+        python3 scripts/g2_budget/run_cell.py \
             --system {wildcards.system} \
             --arm {wildcards.arm} \
             --seed {wildcards.seed} \

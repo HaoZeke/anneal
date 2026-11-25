@@ -101,6 +101,10 @@ def place(n: int, seed: int, length: float) -> np.ndarray:
     return np.vstack(points)
 
 
+def asg_eval_binary() -> str:
+    return os.environ.get("ASG_EVAL", "/work/target-panel/release/examples/asg_eval")
+
+
 def run_ase(
     system: str,
     arm: str,
@@ -121,7 +125,7 @@ def run_ase(
     work.mkdir(parents=True, exist_ok=True)
     os.chdir(work)
     symbol = spec.get("symbol", "Ar")
-    binary = os.environ.get("ASG_EVAL", "/work/target-panel/release/examples/asg_eval")
+    binary = asg_eval_binary()
     if spec["kind"] == "gupta":
         n_atoms, paper_budget, reference, length = evaluator_spec(binary, system)
         if (n_atoms, paper_budget) != (spec["n"], spec["budget"]) or reference != spec["reference"]:
