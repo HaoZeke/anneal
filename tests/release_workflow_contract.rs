@@ -696,6 +696,13 @@ fn every_publish_job_waits_for_the_artifacts_it_publishes() {
             "{irreversible} does not wait for the native libraries, the sdist and every wheel"
         );
     }
+    // Building the sdist and the wheels is not the PyPI upload. The crate
+    // job's `if` names no status function, so the default success() check
+    // still applies: a failed or skipped publish-pypi skips this job.
+    assert!(
+        needs(job(&workflow, "publish-crate")).contains("publish-pypi"),
+        "publish-crate does not need publish-pypi"
+    );
     for publish in ["publish-pypi", "publish-crate", "github-release"] {
         assert_eq!(
             job(&workflow, publish)["if"].as_str(),

@@ -1,3 +1,4 @@
-The release workflow publishes ``anneal-core`` to crates.io only after the
-sdist and every wheel are built. A tag that cannot reach PyPI no longer
-leaves a crates.io release that cannot be undone.
+The release workflow publishes ``anneal-core`` to crates.io only after
+the PyPI publish job has succeeded. Building the sdist and the wheels
+is not enough: a failed PyPI upload no longer leaves a crates.io
+release that cannot be undone.

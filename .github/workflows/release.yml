@@ -239,9 +239,10 @@ jobs:
 
   publish-crate:
     name: Publish anneal-core to crates.io
-    # A crates.io upload cannot be undone. It waits for the Python artifacts
-    # so that no release publishes there while PyPI cannot.
-    needs: [native-libs, sdist, wheels]
+    # A crates.io upload cannot be undone. It runs only after the PyPI
+    # publish job has succeeded. Built sdists and wheels are not enough:
+    # a failed upload must not leave a crate release.
+    needs: [native-libs, sdist, wheels, publish-pypi]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
