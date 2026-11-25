@@ -83,8 +83,9 @@ def calls(row: dict[str, str]) -> float:
     return float(int(row["budget"]) + 1)
 
 
-def wall_censored(rows: list[dict[str, str]]) -> bool:
-    return any(row["stop"] == "wall" and row["hit"] == "0" for row in rows)
+def censored(rows: list[dict[str, str]]) -> bool:
+    stops = {"wall", "cap reached (12 h CPU)"}
+    return any(row["stop"] in stops and row["hit"] == "0" for row in rows)
 
 
 def load(system: str) -> dict[str, list[dict[str, str]]]:
@@ -137,6 +138,9 @@ def load(system: str) -> dict[str, list[dict[str, str]]]:
         elif row["stop"] == "wall":
             if charged >= budget or not row["cap_s"]:
                 raise SystemExit(f"invalid wall stop {row}")
+        elif row["stop"] == "cap reached (12 h CPU)":
+            if charged >= budget or not row["cap_s"] or float(row["cap_s"]) != 43_200.0:
+                raise SystemExit(f"invalid CPU-cap stop {row}")
         else:
             raise SystemExit(f"invalid miss stop {row}")
         grouped[row["arm"]].append(row)
@@ -235,6 +239,8 @@ def comparison(
     left_hits = sum(row["hit"] == "1" for row in left)
     right_hits = sum(row["hit"] == "1" for row in right)
     fisher_text = f"{fisher(left_hits, right_hits):.6g}"
+    if censored(left) or censored(right):
+        return fisher_text, "", ""
     left_calls = [calls(row) for row in left]
     right_calls = [calls(row) for row in right]
     if any(math.isnan(value) for value in left_calls + right_calls):

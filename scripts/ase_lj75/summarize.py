@@ -53,10 +53,26 @@ def load() -> dict[str, list[dict[str, str]]]:
             raise SystemExit(f"unexpected row {row}")
         grouped[row["arm"]].append(row)
     for arm in ARMS:
-        seeds = tuple(sorted(int(row["seed"]) for row in grouped[arm]))
+        by_seed: dict[str, list[dict[str, str]]] = {}
+        for row in grouped[arm]:
+            by_seed.setdefault(row["seed"], []).append(row)
+        seeds = tuple(sorted(int(seed) for seed in by_seed))
         if seeds != SEEDS:
             raise SystemExit(f"{arm} seeds {seeds}")
-        grouped[arm].sort(key=lambda row: int(row["seed"]))
+        selected = []
+        for seed in map(str, SEEDS):
+            rows_for_seed = by_seed[seed]
+            cpu_capped = [
+                row for row in rows_for_seed
+                if row["cap_s"] and float(row["cap_s"]) == 43_200.0
+            ]
+            if cpu_capped:
+                selected.append(cpu_capped[-1])
+            elif len(rows_for_seed) == 1:
+                selected.append(rows_for_seed[0])
+            else:
+                raise SystemExit(f"{arm} seed {seed} has duplicate rows")
+        grouped[arm] = selected
     return grouped
 
 
