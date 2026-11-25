@@ -325,7 +325,7 @@ impl MoveLibrary {
                 }
                 if *reverse_cycles
                     && let Some(geometry) = cfg.rigid_body_geometry.as_ref()
-                    && super::cycles::water_sites(geometry).is_some()
+                    && super::cycles::has_contact_cycles(geometry)
                 {
                     kernels.push(ClusterMove::RigidReverseCycle {
                         n_molecules: *n_molecules,
@@ -740,15 +740,15 @@ pub enum ClusterMove {
         /// Maximum angle of the draw, in radians.
         step: f64,
     },
-    /// Reverse a directed cycle of hydrogen bonds between rigid waters.
+    /// Reverse a directed cycle of contact bonds between rigid bodies.
     ///
-    /// Each molecule on the cycle turns about its oxygen, so the cycle
-    /// points the other way and the oxygen network stays. A cluster with no
-    /// cycle comes back unchanged.
+    /// Each body on the cycle turns about its declared anchor, or about oxygen
+    /// when no bond graph is declared, so the cycle points the other way and
+    /// the anchor network stays. A cluster with no cycle comes back unchanged.
     RigidReverseCycle {
         /// Rigid bodies in the state.
         n_molecules: usize,
-        /// Site geometry of one water: one oxygen, two hydrogens.
+        /// Site geometry and optional intrabody bonds of one rigid body.
         geometry: crate::rigid_body::RigidBodyGeometry,
     },
     /// Reverse a directed H-bond cycle in Cartesian water coordinates.
@@ -4497,5 +4497,71 @@ mod torsion_tests {
         assert!(names(&held).iter().any(|name| name == "soap"));
         let declared = Config::recommended_molecular(vec![6; 6], vec![(0..6).collect()], 0.05);
         assert!(names(&declared).iter().any(|name| name == "soap"));
+    }
+
+    #[test]
+    fn rigid_library_offers_rcycle_for_custom_bond_graphs_and_keeps_undeclared_water() {
+        let tip4p = crate::potentials::Tip4pCluster::new(5).rigid_geometry();
+
+        let non_water = crate::rigid_body::RigidBodyGeometry::new_bonded(
+            tip4p.sites().to_vec(),
+            vec![16, 9, 9],
+            tip4p.bonds().to_vec(),
+        )
+        .expect("bonded non-water");
+        let mut cfg_non_water = Config::for_tip4p(5);
+        cfg_non_water.rigid_body_geometry = Some(non_water);
+        let names: Vec<String> = cfg_non_water
+            .move_library
+            .kernels(&cfg_non_water)
+            .iter()
+            .map(ClusterMove::name)
+            .collect();
+        assert!(names.iter().any(|name| name == "rcycle"), "{names:?}");
+
+        let custom_anchor = crate::rigid_body::RigidBodyGeometry::new_bonded(
+            tip4p.sites().to_vec(),
+            vec![8, 1, 1],
+            vec![[0, 1], [1, 2]],
+        )
+        .expect("bonded custom anchor");
+        let mut cfg_anchor = Config::for_tip4p(5);
+        cfg_anchor.rigid_body_geometry = Some(custom_anchor.clone());
+        let rcycle = cfg_anchor
+            .move_library
+            .kernels(&cfg_anchor)
+            .into_iter()
+            .find(|kernel| kernel.name() == "rcycle")
+            .expect("rcycle kernel");
+        assert!(rcycle.reverses_directed_cycle());
+
+        let undeclared = crate::rigid_body::RigidBodyGeometry::new(
+            tip4p.sites().to_vec(),
+            tip4p.species().to_vec(),
+        )
+        .expect("undeclared water");
+        let mut cfg_undeclared = Config::for_tip4p(5);
+        cfg_undeclared.rigid_body_geometry = Some(undeclared);
+        let undeclared_rcycle = cfg_undeclared
+            .move_library
+            .kernels(&cfg_undeclared)
+            .into_iter()
+            .find(|kernel| kernel.name() == "rcycle")
+            .expect("undeclared water rcycle kernel");
+        let tip4p_cfg = Config::for_tip4p(5);
+        let tip4p_rcycle = tip4p_cfg
+            .move_library
+            .kernels(&tip4p_cfg)
+            .into_iter()
+            .find(|kernel| kernel.name() == "rcycle")
+            .expect("tip4p rcycle kernel");
+
+        let x = super::cycles::tests::ring(5);
+        let mut rng_a = StdRng::seed_from_u64(4);
+        let mut rng_b = StdRng::seed_from_u64(4);
+        let proposed_undeclared = undeclared_rcycle.propose(x.view(), 2.0, &mut rng_a);
+        let proposed_tip4p = tip4p_rcycle.propose(x.view(), 2.0, &mut rng_b);
+        assert_ne!(proposed_undeclared, x);
+        assert_eq!(proposed_undeclared, proposed_tip4p);
     }
 }

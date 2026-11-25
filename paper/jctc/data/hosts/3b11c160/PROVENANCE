@@ -1,0 +1,5 @@
+branch record/tip4p-hits-b3-gate
+tip 25b2c417f8e89c2ef395d631293e0b24b8a5927c
+commit 7c27ecb73a3acea7b21ce6fffb98f365e8bb2698
+source bench/tip4p-hits-b3-gate/hosts.csv
+blob 4f492fab4ed95fe1630c38530d2297c8cbc3f1ad

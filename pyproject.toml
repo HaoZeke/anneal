@@ -36,7 +36,8 @@ dependencies = [
     "numpy>=1.24.1",
 ]
 
-# Python 3.10 has no tomllib. scripts/anneal_version.py falls back to tomli.
+# Python 3.10 has no tomllib. load_toml uses tomli from this group.
+# package_version also runs when neither library is installed.
 # https://peps.python.org/pep-0735/
 [dependency-groups]
 dev = ["tomli>=2; python_version < '3.11'"]
@@ -66,9 +67,14 @@ features      = ["python"]
 module-name   = "anneal._core"
 python-source = "python"
 # cargo resolves every path in the root manifest for any build: the
-# [patch.crates-io] target and the optional nng crates the wheel does not
-# enable. maturin packs neither.
+# [patch.crates-io] target, the optional nng crates the wheel does not
+# enable, and the explicit [[bench]] and [[example]] targets that
+# anneal-core's [package].include omits from the crates.io .crate
+# (cargo package strips those tables from the .crate manifest, whereas
+# maturin sdist copies Cargo.toml verbatim).
 include       = [
+    { path = "benches/**/*.rs", format = "sdist" },
+    { path = "examples/**/*.rs", format = "sdist" },
     { path = "vendor/metatensor-sys/**/*", format = "sdist" },
     { path = "vendor/nng/**/*", format = "sdist" },
     { path = "vendor/nng-sys/**/*", format = "sdist" },

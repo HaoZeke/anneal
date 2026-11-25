@@ -3,7 +3,8 @@
 """Unix-socket LJ client for one RPQA run.
 
 The framing is the single-structure path in ``drivers/py/driver.py`` of
-afiorent/i-pi ``4e86f5fd``. Each POSDATA is one force evaluation, which is
+``https://github.com/afiorent/i-pi.git@4e86f5fdc1583ef21f105fc2bed96a279b2430c1``.
+Each POSDATA is one force evaluation, which is
 how that client is called for a bead during dynamics and during the
 ``rpqa`` local optimisation. The call that reaches the budget is evaluated
 and counted, then the socket is closed without a reply.

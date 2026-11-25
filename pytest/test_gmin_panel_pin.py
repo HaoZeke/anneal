@@ -23,7 +23,9 @@ from gmin_pin import (  # noqa: E402
     TARBALL_SHA256,
     URL,
     compute_build_key,
+    default_source_metadata,
     read_build_key,
+    read_built_provenance,
     read_built_revision,
     read_svnrev,
     shell_assignments,
@@ -263,9 +265,12 @@ def _make_builder_sandbox(tmp_path: Path) -> tuple[Path, Path, dict[str, str], P
         f"gmin.write_text('#!/usr/bin/env bash\\n# build=' + str(n) + ' sig=' + h + '\\n')\n"
         f"gmin.chmod(0o755)\n"
     )
+    fake_blas = stubs / "libopenblas.so.0"
+    fake_blas.write_bytes(b"fake-openblas-v1\n")
     (stubs / "ldd").write_text(
         "#!/usr/bin/env bash\n"
-        "echo '\tlibopenblas.so.0 => /usr/lib/libopenblas.so.0 (0x0)'\n"
+        f'blas="${{FAKE_BLAS_LIB:-{fake_blas}}}"\n'
+        "printf '\\tlibopenblas.so.0 => %s (0x0)\\n' \"$blas\"\n"
     )
     for tool in ("gfortran", "patch", "cmake", "make", "ldd"):
         (stubs / tool).chmod(0o755)
@@ -447,3 +452,203 @@ def test_gmin_panel_entry_scripts_pass_extracted_gmin_src_svnrev(tmp_path: Path)
         resolved = Path(raw_arg.replace(var_name, str(work), 1))
         assert resolved.is_file(), f"{script_name} points at missing {resolved}"
         assert read_svnrev(resolved) == REVISION
+
+
+def test_default_source_metadata_resolves_to_existing_file_across_built_trees(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import gmin_pin
+
+    repo, tarball, base_env, _counter = _make_builder_sandbox(tmp_path)
+    monkeypatch.setattr(
+        gmin_pin,
+        "TARBALL_SHA256",
+        hashlib.sha256(tarball.read_bytes()).hexdigest(),
+    )
+    h2h_work = tmp_path / "gmin-h2h"
+    panel_work = tmp_path / "gmin-panel"
+    subprocess.run(
+        ["bash", str(repo / "scripts/gmin_h2h/build_gmin.sh")],
+        cwd=repo,
+        env=dict(base_env, GMIN_H2H_WORK=str(h2h_work)),
+        check=True,
+    )
+    subprocess.run(
+        ["bash", str(repo / "scripts/gmin_panel/build_gmin.sh")],
+        cwd=repo,
+        env=dict(base_env, GMIN_PANEL_WORK=str(panel_work)),
+        check=True,
+    )
+
+    for work, extract_dir in ((h2h_work, "src"), (panel_work, "gmin-src")):
+        svnrev = work / extract_dir / "wales" / "GMIN" / "source" / "SVNREV"
+        assert svnrev.is_file()
+        resolved = default_source_metadata(svnrev)
+        assert resolved == work / "gmin-source.txt"
+        assert resolved.is_file()
+        rev, key = read_built_provenance(svnrev, resolved)
+        assert rev == REVISION
+        assert len(key) == 64
+
+    with pytest.raises(ValueError, match="cannot derive gmin-source\\.txt"):
+        default_source_metadata(tmp_path / "flat" / "SVNREV")
+
+
+def test_build_gmin_sc_records_cap_patches_compilers_flags_and_binary_sha256(
+    tmp_path: Path,
+) -> None:
+    repo, _tarball, base_env, _counter = _make_builder_sandbox(tmp_path)
+    sc_work = tmp_path / "sc-work"
+    darby_work = tmp_path / "darby-work"
+    env = dict(
+        base_env,
+        GMIN_SC_WORK=str(sc_work),
+        GMIN_DARBY_WORK=str(darby_work),
+        CC="clang-stub",
+        CXX="clang++-stub",
+        FFLAGS="-O3",
+        FCFLAGS="-ffree-line-length-none",
+        CFLAGS="-O2",
+        CXXFLAGS="-O2 -fno-rtti",
+        CPPFLAGS="-DNDEBUG",
+        LDFLAGS="-Wl,--as-needed",
+    )
+    subprocess.run(
+        ["bash", str(repo / "scripts/metal_h2h/build_gmin_sc.sh")],
+        cwd=repo,
+        env=env,
+        check=True,
+    )
+    note_lines = (sc_work / "gmin-source.txt").read_text().splitlines()
+    for rel_key, rel_path in (
+        ("cap", "bench/lj104-lattice/v2/h2h_cap.f90"),
+        ("patch", "bench/lj104-lattice/v2/h2h-gmin.patch"),
+        ("patch", "bench/metal-cluster-h2h/gmin-bgupta.patch"),
+        ("patch", "bench/metal-cluster-h2h/gmin-sc-time.patch"),
+    ):
+        digest = hashlib.sha256((repo / rel_path).read_bytes()).hexdigest()
+        assert f"{rel_key}={rel_path} {digest}" in note_lines
+
+    bin_digest = hashlib.sha256((sc_work / "bin" / "GMIN").read_bytes()).hexdigest()
+    for expected_line in (
+        "fc=gfortran",
+        "cc=clang-stub",
+        "cxx=clang++-stub",
+        "fflags=-O3",
+        "fcflags=-ffree-line-length-none",
+        "cflags=-O2",
+        "cxxflags=-O2 -fno-rtti",
+        "cppflags=-DNDEBUG",
+        "ldflags=-Wl,--as-needed",
+        f"binary_sha256={bin_digest}",
+    ):
+        assert expected_line in note_lines
+
+
+def test_build_gmin_sc_key_follows_the_discovered_blas(tmp_path: Path) -> None:
+    repo, _tarball, base_env, counter = _make_builder_sandbox(tmp_path)
+    script = repo / "scripts/metal_h2h/build_gmin_sc.sh"
+    blas_a = tmp_path / "blas-a" / "libopenblas.so.0"
+    blas_b = tmp_path / "blas-b" / "libopenblas.so.0"
+    blas_a_new = tmp_path / "blas-a-new" / "libopenblas.so.0"
+    for path, content in (
+        (blas_a, b"openblas-0.3.26\n"),
+        (blas_b, b"openblas-0.3.26\n"),
+        (blas_a_new, b"openblas-0.3.27\n"),
+    ):
+        path.parent.mkdir()
+        path.write_bytes(content)
+
+    def build(work: Path, blas: Path) -> str:
+        env = dict(
+            base_env,
+            GMIN_SC_WORK=str(work),
+            GMIN_DARBY_WORK=str(tmp_path / "darby-work"),
+            FAKE_BLAS_LIB=str(blas),
+        )
+        subprocess.run(["bash", str(script)], cwd=repo, env=env, check=True)
+        key = read_build_key(work / "gmin-source.txt", work / "gmin-build-key")
+        assert key
+        return key
+
+    key_a = build(tmp_path / "work-a", blas_a)
+    assert build(tmp_path / "work-a-again", blas_a) == key_a
+
+    # A different library path with identical bytes is a different BLAS.
+    assert build(tmp_path / "work-b", blas_b) != key_a
+
+    # Another library at the same path is a different BLAS too.
+    work = tmp_path / "work-shared"
+    shared = tmp_path / "shared" / "libopenblas.so.0"
+    shared.parent.mkdir()
+    shared.write_bytes(blas_a.read_bytes())
+    shared_key = build(work, shared)
+    rebuilds = int(counter.read_text().strip())
+    assert build(work, shared) == shared_key
+    assert int(counter.read_text().strip()) == rebuilds
+    shared.write_bytes(blas_a_new.read_bytes())
+    assert build(work, shared) != shared_key
+    assert int(counter.read_text().strip()) > rebuilds
+
+    note = (work / "gmin-source.txt").read_text().splitlines()
+    new_sha = hashlib.sha256(blas_a_new.read_bytes()).hexdigest()
+    assert f"blas={shared}" in note
+    assert f"blas_sha256={new_sha}" in note
+
+
+@pytest.mark.parametrize(
+    ("script_rel", "work_var", "needs_lib"),
+    [
+        ("scripts/gmin_panel/build_gmin.sh", "GMIN_PANEL_WORK", False),
+        ("scripts/gmin_h2h/build_gmin.sh", "GMIN_H2H_WORK", False),
+        ("scripts/metal_h2h/build_gmin_darby.sh", "GMIN_DARBY_WORK", False),
+        ("scripts/metal_h2h/build_gmin_sc.sh", "GMIN_SC_WORK", False),
+        ("scripts/covalent_h2h/build_gmin_tersoff.sh", "GMIN_H2H_WORK", True),
+    ],
+)
+def test_gmin_builders_work_without_gnu_sha256sum_or_nproc(
+    tmp_path: Path, script_rel: str, work_var: str, needs_lib: bool
+) -> None:
+    repo, _tarball, base_env, _counter = _make_builder_sandbox(tmp_path)
+    # Build a PATH without sha256sum or nproc to exercise the macOS fallbacks.
+    filtered = tmp_path / "no-gnu-bin"
+    filtered.mkdir()
+    stubs_dir = Path(base_env["PATH"].split(os.pathsep)[0])
+    for name in (
+        "awk",
+        "bash",
+        "bzip2",
+        "chmod",
+        "cp",
+        "dirname",
+        "getconf",
+        "grep",
+        "mkdir",
+        "mktemp",
+        "mv",
+        "paste",
+        "python3",
+        "readlink",
+        "realpath",
+        "rm",
+        "sh",
+        "shasum",
+        "sysctl",
+        "tar",
+    ):
+        found = shutil.which(name)
+        if found is not None:
+            (filtered / name).symlink_to(found)
+    env = dict(base_env)
+    env["PATH"] = f"{stubs_dir}{os.pathsep}{filtered}"
+    work = tmp_path / "work"
+    env[work_var] = str(work)
+    if script_rel == "scripts/metal_h2h/build_gmin_sc.sh":
+        env["GMIN_DARBY_WORK"] = str(tmp_path / "darby-work")
+    cmd = ["bash", str(repo / script_rel)]
+    if needs_lib:
+        lib = tmp_path / "librgpot_covalent.so"
+        lib.write_bytes(b"fake-rgpot\n")
+        cmd.append(str(lib))
+    subprocess.run(cmd, cwd=repo, env=env, check=True)
+    assert any((work / "bin").iterdir())

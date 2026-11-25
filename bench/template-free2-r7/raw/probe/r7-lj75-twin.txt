@@ -1,0 +1,20 @@
+lj75-2000/latch-000.xyz incumbent -392.4204 best -393.3740 hits 0
+lj75-2000/latch-001.xyz incumbent -394.7862 best -396.0611 hits 0
+lj75-2001/latch-000.xyz incumbent -389.8400 best -391.7451 hits 0
+lj75-2001/latch-001.xyz incumbent -394.0235 best -393.3522 hits 0
+lj75-2002/latch-000.xyz incumbent -396.0053 best -396.0372 hits 0
+lj75-2003/latch-000.xyz incumbent -393.0483 best -392.8593 hits 0
+lj75-2003/latch-001.xyz incumbent -394.9644 best -394.9644 hits 0
+lj75-2004/latch-000.xyz incumbent -393.6752 best -392.3011 hits 0
+lj75-2004/latch-001.xyz incumbent -393.5708 best -396.0372 hits 0
+lj75-2005/latch-000.xyz incumbent -387.4446 best -388.1818 hits 0
+lj75-2005/latch-001.xyz incumbent -393.1693 best -393.2309 hits 0
+lj75-2005/latch-002.xyz incumbent -396.0372 best -396.0372 hits 0
+lj75-2006/latch-000.xyz incumbent -393.8506 best -394.2763 hits 0
+lj75-2007/latch-000.xyz incumbent -393.4708 best -395.0318 hits 0
+lj75-2008/latch-000.xyz incumbent -396.0042 best -396.0372 hits 0
+lj75-2009/latch-000.xyz incumbent -392.8801 best -396.2385 hits 0
+lj75-2010/latch-000.xyz incumbent -391.4723 best -393.2074 hits 0
+lj75-2010/latch-001.xyz incumbent -386.1430 best -393.5494 hits 0
+lj75-2011/latch-000.xyz incumbent -393.2690 best -391.1684 hits 0
+SUMMARY generator twin draws 1900 gm_hits 0 below_incumbent 191 best -396.23851 ref -397.492331

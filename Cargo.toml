@@ -25,9 +25,40 @@ description = "Simulated annealing components built on the eindir typed primitiv
 repository = "https://github.com/HaoZeke/anneal"
 categories = ["science", "mathematics"]
 keywords = ["optimization", "simulated-annealing", "metaheuristic"]
-# Development pins and the out-of-tree target directory. The published
-# crate resolves registry versions.
-exclude = [".cargo/config.toml"]
+# Publish from an explicit allowlist so crate sources, headers, embedded
+# data, benchmarks, examples, integration tests, and the small repository
+# inputs those tests read ship together while bulk paper and benchmark
+# campaign artifacts stay out.
+include = [
+    "/.github/workflows/**",
+    "/.zenodo.json",
+    "/CHANGELOG.md",
+    "/CITATION.cff",
+    "/CMakeLists.txt",
+    "/Cargo.lock",
+    "/Cargo.toml",
+    "/LICENSE.txt",
+    "/README.md",
+    "/bench/lj104-lattice/v2/h2h_cap.f90",
+    "/benches/**",
+    "/build.rs",
+    "/cbindgen.toml",
+    "/data/**",
+    "/docs/source/conf.py",
+    "/examples/**",
+    "/include/**",
+    "/meson.build",
+    "/paper/seeds.toml",
+    "/pixi.toml",
+    "/profiles/**",
+    "/pyproject.toml",
+    "/scripts/**",
+    "!**/__pycache__/**",
+    "!**/*.pyc",
+    "/src/**",
+    "/tests/**",
+    "/towncrier.toml",
+]
 
 [lib]
 name = "anneal_core"
@@ -132,6 +163,8 @@ tokio-util = { version = "0.7", features = ["compat"] }
 # Do not enable rgpot-core/rpc: that needs a host capnp compiler.
 rgpot-core = { version = "=3.5.1" }
 libloading = "0.8"
+# The workflow contract tests parse .github/workflows/release.yml and ci.yml.
+serde_yaml_ng = "0.10"
 
 [build-dependencies]
 cc = "1"

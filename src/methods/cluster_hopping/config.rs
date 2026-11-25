@@ -278,6 +278,15 @@ impl RemovedConfigKeyError {
         }
     }
 
+    pub(crate) fn unknown_knockout(token: &str) -> Self {
+        Self {
+            key: token.to_string(),
+            message: format!(
+                "unknown knockout `{token}`; expected a comma list of `prior_soap` and `move_choice`"
+            ),
+        }
+    }
+
     pub(crate) fn removed_env(var: &str) -> Self {
         Self {
             key: var.to_string(),
@@ -303,6 +312,49 @@ pub struct PriorSwitches {
     pub soap: bool,
     /// `0` or `none` was passed, disabling all structure-prior hooks.
     pub all_off: bool,
+}
+
+/// Parts of a preset that a knockout run switches off.
+///
+/// Every field is `false` by default, and [`Config::apply_knockouts`] with
+/// the default changes no field, so a run without a knockout draws the same
+/// calls as the preset. Each knockout sets keys the configuration already
+/// has; none adds a search path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Knockouts {
+    /// Turn off the fivefold SOAP proposal: [`Config::prior_soap`] off and
+    /// [`Config::soap_mode`] at [`SoapProposalMode::Off`].
+    pub prior_soap: bool,
+    /// Draw the move arm uniformly: [`Config::arm_selection`] at
+    /// [`ArmSelection::Uniform`].
+    pub move_choice: bool,
+}
+
+impl Knockouts {
+    /// Parse a comma list of knockout names, as the head-to-head drivers
+    /// read it from `H2H_KNOCKOUT`.
+    ///
+    /// An empty list is no knockout. An unknown name is an error, so a
+    /// misspelt name cannot run the preset under a knockout label.
+    ///
+    /// ```
+    /// use anneal_core::methods::cluster_hopping::Knockouts;
+    /// assert_eq!(Knockouts::parse("").unwrap(), Knockouts::default());
+    /// assert!(Knockouts::parse("prior_soap, move_choice").unwrap().move_choice);
+    /// assert!(Knockouts::parse("templates").is_err());
+    /// ```
+    pub fn parse(spec: &str) -> Result<Self, RemovedConfigKeyError> {
+        let mut knockouts = Self::default();
+        for raw in spec.split(',') {
+            match raw.trim() {
+                "" => {}
+                "prior_soap" => knockouts.prior_soap = true,
+                "move_choice" => knockouts.move_choice = true,
+                other => return Err(RemovedConfigKeyError::unknown_knockout(other)),
+            }
+        }
+        Ok(knockouts)
+    }
 }
 
 /// Which core orbit completion ([`Config::orbit_complete_on_new`]) reads
@@ -591,8 +643,8 @@ pub struct Config {
     /// is an evaluated waypoint of the descent, partway down from the ridge.
     /// Restarting from it with an outward push costs only the requench,
     /// against 637 evaluations for a Lanczos climb, and starts from a point
-    /// the landscape has already priced. The climb remains the fallback when
-    /// no entry is on record.
+    /// the landscape has already priced. Without a recorded entry the trail
+    /// arm is a no-op; the climb is a separate arm of the stall allocator.
     pub trail_on_stall: bool,
     /// Smallest number of hops without improvement before a climb is
     /// triggered.
@@ -1110,6 +1162,17 @@ pub struct Config {
     /// The move does not name a packing or a composition.
     #[serde(skip_serializing_if = "is_false")]
     pub general_collective: bool,
+    /// A cap turn about a local symmetry axis as one more stall response.
+    ///
+    /// On a stall the learned stall allocator can draw it beside the trail,
+    /// the climb and the restart, and on a call-plateau leave a second
+    /// allocator draws it against the climb. The incumbent's cap is turned,
+    /// quenched and taken whatever its energy. The axis, its order and the cap
+    /// come from the structure, see [`crate::cap_twist`]. Off in the paper
+    /// preset, so a default chain draws the same calls. Unlabelled atomic
+    /// chains only.
+    #[serde(skip_serializing_if = "is_false")]
+    pub cap_twist: bool,
     /// Exchange descent after every full quench of a labelled cluster.
     ///
     /// Unlike pairs are exchanged on the quenched geometry in a drawn
@@ -1669,6 +1732,26 @@ impl Config {
             }
         }
         visit_toml("", &value)
+    }
+
+    /// Switch off the parts that `knockouts` names and leave every other
+    /// field as it is.
+    ///
+    /// ```
+    /// use anneal_core::methods::cluster_hopping::{ArmSelection, Config, Knockouts};
+    /// let mut cfg = Config::recommended(38);
+    /// cfg.apply_knockouts(Knockouts { move_choice: true, ..Knockouts::default() });
+    /// assert_eq!(cfg.arm_selection, ArmSelection::Uniform);
+    /// assert!(cfg.prior_soap);
+    /// ```
+    pub fn apply_knockouts(&mut self, knockouts: Knockouts) {
+        if knockouts.prior_soap {
+            self.prior_soap = false;
+            self.soap_mode = SoapProposalMode::Off;
+        }
+        if knockouts.move_choice {
+            self.arm_selection = ArmSelection::Uniform;
+        }
     }
 
     /// Parse a `H2H_PRIORS` specification, rejecting removed prior names
@@ -2232,6 +2315,7 @@ impl Config {
             anneal_diversity: false,
             prior_soap: true,
             general_collective: false,
+            cap_twist: false,
             homotop_descent: true,
             homotop_ranked: true,
             homotop_window: true,

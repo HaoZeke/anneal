@@ -26,7 +26,7 @@ const SEED: u64 = 2000;
 const ATOMS: usize = 13;
 const BUDGET: usize = 30_000;
 const INTERVAL: usize = 2_000;
-const PINNED: &str = "84b46e7459a62de47b7b7eb417f464d85e82578760f8478296c012edf2256683";
+const PINNED: &str = "b4c30260dec80005f510fb890dcc0386957dfb1a754a103d90e41d70ebb68c24";
 
 #[derive(Clone, Copy)]
 enum Keep {

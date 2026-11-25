@@ -33,6 +33,7 @@ fn trajectory_hash() -> String {
     // is the path every target can run.
     let _ = rgmin::vecops::force_simd_path("scalar");
     let cfg = Config::recommended(ATOMS);
+    assert!(!cfg.cap_twist, "the pinned base trajectory is flag-off");
     let potential = PairPotential::lennard_jones(ATOMS);
     let mut rng = StdRng::seed_from_u64(SEED);
     let start = random_cluster_in_radius(ATOMS, cfg.start_radius(), cfg.min_separation, &mut rng);
@@ -90,7 +91,7 @@ fn trajectory_hash() -> String {
 fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     anneal_core::install_rgpot_kernels!();
     let hash = trajectory_hash();
-    // The general move library is deterministic on every build.
+    // The flag-off trajectory from the base is deterministic on every build.
     let expected = "5cd9c95765eadc45efa5879002be9a7430a81b9d82d5bf19509dcabc5578b65c";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }

@@ -5,7 +5,7 @@
 After every completed ``rpqa`` relaxation the best bead energy is recorded.
 A bead at or below the Cambridge minimum plus 0.001, in the driver's
 epsilon, ends the process. The dynamics and the optimiser are the ones in
-afiorent/i-pi ``4e86f5fd``.
+``https://github.com/afiorent/i-pi.git@4e86f5fdc1583ef21f105fc2bed96a279b2430c1``.
 """
 
 from __future__ import annotations

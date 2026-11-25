@@ -4,6 +4,23 @@
 # The binary Gupta build is left where it is. This one is separate.
 set -euo pipefail
 
+if ! command -v sha256sum >/dev/null 2>&1; then
+  sha256sum() {
+    if command -v shasum >/dev/null 2>&1; then
+      shasum -a 256 "$@"
+    else
+      python3 -c 'import hashlib, pathlib, sys
+for p in sys.argv[1:]:
+    print(f"{hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()}  {p}")' "$@"
+    fi
+  }
+fi
+if ! command -v nproc >/dev/null 2>&1; then
+  nproc() {
+    sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1
+  }
+fi
+
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 PIN=$ROOT/scripts/gmin_pin.py
 eval "$(python3 "$PIN" shell)"
@@ -62,18 +79,43 @@ KEY_ARGS=(
 for flag in "${CMAKE_FLAGS[@]}"; do
   KEY_ARGS+=("--option=$flag")
 done
-BUILD_KEY=$(python3 "$PIN" build-key "${KEY_ARGS[@]}")
-OLD_BUILD_KEY=$(
-  python3 "$PIN" read-build-key \
-    --metadata "$WORK/gmin-source.txt" \
-    --key-file "$BUILD_KEY_FILE"
-)
 
 # Basin-hopping is chaotic in the last bit, so the BLAS GMIN links is part of
 # the run: reference BLAS and OpenBLAS end the same seed on different minima.
 # The sc-n12 GMIN rows reproduce with OpenBLAS.
+# The BLAS is the one the binary loads, so it is found from the binary and
+# folded into the build key before the key is compared or recorded.
+discover_blas() {
+  local found
+  found=$(ldd "$1" 2>/dev/null | awk '/libopenblas/ && !seen++ {print $3}')
+  [[ -n $found ]] || return 1
+  BLAS=$(readlink -f "$found")
+  [[ -f $BLAS ]] || return 1
+  BLAS_SHA256=$(sha256sum "$BLAS" | awk '{print $1}')
+}
+compute_build_key() {
+  python3 "$PIN" build-key "${KEY_ARGS[@]}" \
+    "--option=blas=$BLAS" \
+    "--option=blas_sha256=$BLAS_SHA256"
+}
+
 mkdir -p "$WORK/bin"
-if [[ $OLD_BUILD_KEY != "$BUILD_KEY" || ! -x $WORK/bin/GMIN ]]; then
+BLAS=
+BLAS_SHA256=
+BUILD_KEY=
+need_rebuild=1
+if [[ -x $WORK/bin/GMIN ]] && discover_blas "$WORK/bin/GMIN"; then
+  BUILD_KEY=$(compute_build_key)
+  OLD_BUILD_KEY=$(
+    python3 "$PIN" read-build-key \
+      --metadata "$WORK/gmin-source.txt" \
+      --key-file "$BUILD_KEY_FILE"
+  )
+  if [[ $OLD_BUILD_KEY == "$BUILD_KEY" ]]; then
+    need_rebuild=0
+  fi
+fi
+if (( need_rebuild )); then
   rm -rf "$SRC"
   rm -f "$WORK/bin/GMIN" "$BUILD_KEY_FILE"
   mkdir -p "$SRC"
@@ -93,26 +135,37 @@ if [[ $OLD_BUILD_KEY != "$BUILD_KEY" || ! -x $WORK/bin/GMIN ]]; then
   )
   cp -a "$build/GMIN" "$WORK/bin/GMIN"
   chmod +x "$WORK/bin/GMIN"
+  if ! discover_blas "$WORK/bin/GMIN"; then
+    echo "GMIN is not linked against OpenBLAS" >&2
+    exit 1
+  fi
+  BUILD_KEY=$(compute_build_key)
   printf '%s\n' "$BUILD_KEY" > "$BUILD_KEY_FILE"
 fi
-blas=$(ldd "$WORK/bin/GMIN" | awk '/libopenblas/ {print $3}')
-if [[ -z $blas ]]; then
-  echo "GMIN is not linked against OpenBLAS" >&2
-  exit 1
-fi
-cat > "$WORK/gmin-source.txt" << EOF
-url=$GMIN_PIN_URL
-revision=$revision
-svnrev=$revision
-tarball_sha256=$tarball_sha256
-build_key=$BUILD_KEY
-potential=SC
-cmake=${CMAKE_FLAGS[*]}
-gfortran=$GFORTRAN_VER
-fflags=$FFLAGS_VAL
-cflags=$CFLAGS_VAL
-cxxflags=$CXXFLAGS_VAL
-ldflags=$LDFLAGS_VAL
-blas=$(readlink -f "$blas")
-EOF
+{
+  echo "url=$GMIN_PIN_URL"
+  echo "revision=$revision"
+  echo "svnrev=$revision"
+  echo "tarball_sha256=$tarball_sha256"
+  echo "build_key=$BUILD_KEY"
+  echo "potential=SC"
+  echo "cap=${CAP_SOURCE#"$ROOT"/} $(sha256sum "$CAP_SOURCE" | awk '{print $1}')"
+  echo "patch=${CAP#"$ROOT"/} $(sha256sum "$CAP" | awk '{print $1}')"
+  echo "patch=${DARBY_TIME#"$ROOT"/} $(sha256sum "$DARBY_TIME" | awk '{print $1}')"
+  echo "patch=${TIME#"$ROOT"/} $(sha256sum "$TIME" | awk '{print $1}')"
+  echo "cmake=${CMAKE_FLAGS[*]}"
+  echo "fc=$FC_BIN"
+  echo "cc=$CC_BIN"
+  echo "cxx=$CXX_BIN"
+  echo "gfortran=$GFORTRAN_VER"
+  echo "fflags=$FFLAGS_VAL"
+  echo "fcflags=$FCFLAGS_VAL"
+  echo "cflags=$CFLAGS_VAL"
+  echo "cxxflags=$CXXFLAGS_VAL"
+  echo "cppflags=$CPPFLAGS_VAL"
+  echo "ldflags=$LDFLAGS_VAL"
+  echo "blas=$BLAS"
+  echo "blas_sha256=$BLAS_SHA256"
+  echo "binary_sha256=$(sha256sum "$WORK/bin/GMIN" | awk '{print $1}')"
+} > "$WORK/gmin-source.txt"
 echo "gmin build_key=$BUILD_KEY binary=$WORK/bin/GMIN"

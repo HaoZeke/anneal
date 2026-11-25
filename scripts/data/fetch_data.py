@@ -27,8 +27,9 @@ sha256. The dataset layout is those same paths. Groups:
 - ``bench/depth-posterior-ablation/logs/`` raw depth-posterior ablation logs
 
 Small summary CSVs, ``tests/fixtures``, rendered figures, and source
-stay in git. This script checks every manifest row. When the working
-tree already matches, it does not contact the hub. A miss is filled
+stay in git. This script checks every manifest row, or only the rows
+whose paths it is given. When those files already match, it does not
+contact the hub. A miss is filled
 with ``huggingface_hub.snapshot_download`` at ``HF_REVISION``, then
 checked again. The call does not authenticate.
 """
@@ -97,9 +98,15 @@ def matches(path: Path, size: str, digest: str) -> bool:
     return sha256(path) == digest
 
 
-def ensure(root: Path = ROOT) -> None:
-    """Make every manifest file present at its repository path."""
+def ensure(root: Path = ROOT, paths: list[str] | None = None) -> None:
+    """Make every manifest file, or the named ones, present at its repository path."""
     rows = read_manifest()
+    if paths is not None:
+        listed = {row["path"] for row in rows}
+        unknown = sorted(set(paths) - listed)
+        if unknown:
+            raise SystemExit(f"{unknown[0]} is not in {MANIFEST.name}")
+        rows = [row for row in rows if row["path"] in set(paths)]
     missing = [
         row
         for row in rows
@@ -150,8 +157,9 @@ def ensure(root: Path = ROOT) -> None:
         raise SystemExit(f"still missing {still[0]}")
 
 
-def main() -> int:
-    ensure()
+def main(argv: list[str] | None = None) -> int:
+    paths = sys.argv[1:] if argv is None else argv
+    ensure(paths=paths or None)
     return 0
 
 
