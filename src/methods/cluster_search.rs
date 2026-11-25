@@ -2982,8 +2982,12 @@ mod tests {
     }
 
     /// A legacy `two_phase` with no portfolio reshapes the walk's quenches
-    /// and not a diagnostic one: under the scope the quench matches the
-    /// same preset with `two_phase` off, energy, state and calls.
+    /// and not a diagnostic one. The walk's and the diagnostic quenches go
+    /// through one relaxer and are charged to one ledger. Under the scope a
+    /// quench matches the same preset with `two_phase` off, energy, state
+    /// and calls; outside it, the same relaxer matches a relaxer that only
+    /// ever sees the walk's quenches, so `two_phase` still holds there and
+    /// the diagnostic quenches between them leave it alone.
     #[test]
     fn a_diagnostic_quench_skips_a_legacy_two_phase_surface() {
         let n = 13;
@@ -2997,12 +3001,15 @@ mod tests {
         let mut rng = rand::rngs::StdRng::seed_from_u64(9);
         let mut stats = RelaxStats::default();
         let mut plain_stats = RelaxStats::default();
+        let mut walk_stats = RelaxStats::default();
         let mut relax = warm_relax(&objective, &cfg, &mut stats, 3);
         let mut plain = warm_relax(&objective, &plain_cfg, &mut plain_stats, 3);
+        let mut walk_alone = warm_relax(&objective, &cfg, &mut walk_stats, 3);
         let mut led = Ledger::new(1 << 30);
-        let mut walk_led = Ledger::new(1 << 30);
         let mut plain_led = Ledger::new(1 << 30);
+        let mut walk_led = Ledger::new(1 << 30);
         let mut reshaped = 0;
+        let mut charged = 0;
         for _ in 0..8 {
             let start = crate::methods::cluster_hopping::random_cluster(
                 n,
@@ -3011,25 +3018,36 @@ mod tests {
                 &mut rng,
             );
             for steps in [cfg.screen_steps, cfg.relax_steps] {
-                let before = (led.spent(), plain_led.spent(), walk_led.spent());
+                let before = (led.spent(), plain_led.spent());
                 let (energy, state) = {
                     let mut scope = led.diagnostic_scope();
                     relax(&mut scope, start.view(), steps)
                 };
                 let (plain_energy, plain_state) = plain(&mut plain_led, start.view(), steps);
+                let diagnostic_calls = led.spent() - before.0;
                 assert_eq!(energy.to_bits(), plain_energy.to_bits());
                 assert_eq!(state, plain_state);
-                assert_eq!(led.spent() - before.0, plain_led.spent() - before.1);
-                let (walk_energy, walk_state) = relax(&mut walk_led, start.view(), steps);
+                assert_eq!(diagnostic_calls, plain_led.spent() - before.1);
+                assert!(diagnostic_calls > 0, "a diagnostic quench is charged");
+
+                let before = (led.spent(), walk_led.spent());
+                let (walk_energy, walk_state) = relax(&mut led, start.view(), steps);
+                let (alone_energy, alone_state) = walk_alone(&mut walk_led, start.view(), steps);
+                let walk_calls = led.spent() - before.0;
+                assert_eq!(walk_energy.to_bits(), alone_energy.to_bits());
+                assert_eq!(walk_state, alone_state);
+                assert_eq!(walk_calls, walk_led.spent() - before.1);
                 if walk_energy.to_bits() != plain_energy.to_bits()
                     || walk_state != plain_state
-                    || walk_led.spent() - before.2 != plain_led.spent() - before.1
+                    || walk_calls != diagnostic_calls
                 {
                     reshaped += 1;
                 }
+                charged += diagnostic_calls + walk_calls;
             }
         }
         assert!(reshaped > 0, "the walk's quenches must see two_phase");
+        assert_eq!(led.spent(), charged, "both kinds charged to the one ledger");
     }
 
     #[test]
