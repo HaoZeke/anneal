@@ -129,6 +129,10 @@ pub struct RelaxStats {
     pub plain_holds: usize,
     /// Holds lifted again, on a lower minimum or a stall.
     pub hold_lifts: usize,
+    /// Unrestrained quenches run beside a restrained relaxation.
+    pub plain_quenches: usize,
+    /// Of those, the ones whose minimum the chain walked.
+    pub plain_walks: usize,
 }
 
 impl RelaxStats {
@@ -834,6 +838,9 @@ where
         stats.local_step = LocalStep::Tric;
     }
     let mut centres: Option<HeldHands> = None;
+    // Where the last restraint screen ended, and whether it walked the
+    // unrestrained minimum of its proposal.
+    let mut screened_restraint: Option<(Array1<f64>, bool)> = None;
     move |led, x, iters| {
         // A new quench. A failure closed the previous descent; this
         // proposal is a different trial.
@@ -876,6 +883,9 @@ where
                 _ => (f64::INFINITY, x.to_owned()),
             };
         }
+        let screen_kept_restraint = screened_restraint
+            .take()
+            .is_some_and(|(at, walked)| !walked && at == x);
         // The descent keeps the hands its start holds. The centres are read
         // from the first start, the caller's geometry.
         if centres.is_none()
@@ -1203,8 +1213,15 @@ where
         // what leaves the path that still reaches the global minimum, and
         // what walks a chain back onto an incumbent the restraint could
         // not beat.
+        //
+        // The unrestrained quench is screened with its proposal. A full
+        // pass from a restraint screen that kept the restraint starts on
+        // the restraint's answer, not on the proposal, and the proposal's
+        // unrestrained minimum was already measured against the incumbent
+        // and set aside, as a screened trial is.
         let restrained_energy = f;
-        if surface.is_some() {
+        let mut walked_plain = false;
+        if surface.is_some() && !screen_kept_restraint {
             let kept_early = early;
             let kept_last = last.borrow().clone();
             let kept_best = best_physical.borrow().clone();
@@ -1365,6 +1382,9 @@ where
             // `target` is the incumbent before either quench of this hop.
             let plain_lowers = f2 < target && f2 < restrained_energy;
             drop(suspended);
+            walked_plain = plain_lowers;
+            stats.plain_quenches += 1;
+            stats.plain_walks += usize::from(plain_lowers);
             if plain_lowers {
                 led.record(f2, xr2.view());
                 f = f2;
@@ -1396,6 +1416,9 @@ where
             // descent's own evaluation at `xr`.
             *paid.lock().expect("paid check") =
                 last.borrow().clone().filter(|check| check.at == xr);
+            if screening && surface.is_some() {
+                screened_restraint = Some((xr.clone(), walked_plain));
+            }
             return (f, xr);
         }
         // Charged like any other evaluation: asking whether a relaxation
@@ -1532,6 +1555,9 @@ where
                 gradient,
             })
             .or_else(|| last.borrow().clone().filter(|check| check.at == xr));
+        if screening && surface.is_some() {
+            screened_restraint = Some((xr.clone(), walked_plain));
+        }
         (f, xr)
     }
 }
@@ -3003,6 +3029,56 @@ mod tests {
         }
         assert_eq!(stats.screens, 0);
         assert!(led.quench_boundaries().is_empty());
+    }
+
+    #[test]
+    fn a_full_pass_from_a_kept_restraint_screen_runs_no_unrestrained_quench() {
+        use crate::methods::cluster_hopping::random_cluster_in_radius;
+        use crate::methods::two_phase::SurfacePortfolio;
+        use rand::SeedableRng;
+        use rand::rngs::StdRng;
+
+        let cfg = Config::recommended(13);
+        let objective = PairPotential::lennard_jones(13);
+        let mut rng = StdRng::seed_from_u64(7);
+        let mut kept = 0;
+        for seed in 0..32u64 {
+            if SurfacePortfolio::new(&cfg.surfaces, seed)
+                .begin(true)
+                .is_none()
+            {
+                continue;
+            }
+            let start =
+                random_cluster_in_radius(13, cfg.start_radius(), cfg.min_separation, &mut rng);
+            let mut hop = RelaxStats::default();
+            let screened = {
+                let mut relax = warm_relax(&objective, &cfg, &mut hop, seed);
+                let mut led = Ledger::new(100_000);
+                let (_, screened) = relax(&mut led, start.view(), cfg.screen_steps);
+                let _ = relax(&mut led, screened.view(), cfg.relax_steps);
+                screened
+            };
+            if hop.plain_walks > 0 {
+                continue;
+            }
+            kept += 1;
+            assert_eq!(
+                hop.plain_quenches, 1,
+                "seed {seed}: the full pass repeated the screened unrestrained quench"
+            );
+            let mut fresh = RelaxStats::default();
+            {
+                let mut relax = warm_relax(&objective, &cfg, &mut fresh, seed);
+                let mut led = Ledger::new(100_000);
+                let _ = relax(&mut led, screened.view(), cfg.relax_steps);
+            }
+            assert_eq!(
+                fresh.plain_quenches, 1,
+                "seed {seed}: a full pass with no screen before it skipped the unrestrained quench"
+            );
+        }
+        assert!(kept > 0, "no seed drew a restraint screen that kept it");
     }
 
     #[test]
@@ -4999,6 +5075,6 @@ mod tests {
             mix(&(*spent as u64).to_le_bytes());
             mix(&energy.to_bits().to_le_bytes());
         }
-        assert_eq!(state, 0x46cfbbda05bcf9ea);
+        assert_eq!(state, 0x856618d9af466fd5);
     }
 }
