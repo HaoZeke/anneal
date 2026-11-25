@@ -1840,12 +1840,11 @@ def knockout_move_a(audit: Audit, cells: dict[str, dict]) -> None:
     audit.said(TEX, f"Pooled over the eight clusters, the preset hits {pooled[0] + pooled[1]} of {n} seeds and the "
                     f"uniform draw {pooled[0] + pooled[2]} (pooled McNemar \\(p={pp(pooled_p)}\\), interval "
                     f"{show_signed(low)} to {show_signed(high)}).")
-    audit.said(TEX, "At 12 seeds, neither rescaling the preset lengths nor replacing adaptive\n"
+    audit.said(TEX, "At twelve seeds, neither rescaling the preset lengths nor replacing adaptive\n"
                     "move choice by a uniform draw produces a detectable hit-rate change in the\n"
                     "tested panels.")
-    audit.said(COVER, "At 12 seeds, neither rescaling the preset lengths nor replacing adaptive\n"
-                      "move choice by a uniform draw produces a detectable hit-rate change in the\n"
-                      "tested panels.")
+    audit.said(COVER, "Neither rescaling the preset lengths nor replacing adaptive move choice by a\n"
+                      "uniform draw produces a detectable hit-rate change.")
     audit.said(SI, "\\texttt{\\seqsplit{50c532253f3ad11e6457a119bb603f05b4f0be79}} of \\path{record/knockout-move-a}, on "
                    "the same develop commit.")
     audit.said(SI, "even seeds run the preset first and odd seeds the uniform draw first.")
@@ -1991,16 +1990,14 @@ def manuscript_knockouts(audit: Audit) -> None:
                " ".join(str(x) for s in ("m38r6", "sc126-38") for x in fall(tem[s])))
     below = [s for s, c in tem.items() if c["p"] < 0.05]
     audit.cell(TEX, "the one cluster of the template run below 0.05", "m38r14", " ".join(below))
-    audit.said(TEX, f"Removing the former structure templates lowers M\\(_{{38}}\\) hits at\n"
-                    f"\\(\\rho=14\\) from {fall(m38)[0]} to {fall(m38)[1]} of 12")
+    audit.said(TEX, "Removing the former structure templates costs hits on a short-ranged Morse\ncluster.")
     audit.said(TEX, f"The paired knockouts show that removing the former structure templates\n"
                     f"lowers M\\(_{{38}}\\) hits at \\(\\rho=14\\) from {fall(m38)[0]} of 12 to {fall(m38)[1]}.")
     audit.said(SI, "\\texttt{\\seqsplit{628773d6837ea2d959a27256ff4163b21162fd4d}} (structure templates since "
                    "removed in \\texttt{1c1b1238}), and the child "
                    "\\texttt{\\seqsplit{1c1b12384683485cf820d3a244151b48973dc0f7}}, both ancestors of the submitted "
                    "revision, even seeds parent first and odd seeds child first.")
-    audit.said(COVER, f"Removing the former structure templates lowers M\\(_{{38}}\\) hits at\n"
-                      f"\\(\\rho=14\\) from {fall(m38)[0]} to {fall(m38)[1]} of 12")
+    audit.said(COVER, "Removing the former structure templates costs hits on a short-ranged Morse\ncluster.")
 
     # The switches the drivers read, and the length unit of the Morse and gold drivers.
     config = audit.text(PRIOR_CONFIG)
@@ -2482,8 +2479,6 @@ def template_era(audit: Audit) -> None:
                     "\\((p=4.9\\times 10^{-4})\\).")
     audit.said(TEX, "That comparison spans every code change between the two revisions, so it\n"
                     "supports a change across revisions rather than an isolated template effect.")
-    audit.said(COVER, "across every intervening code change, LJ\\(_{75}\\)\n"
-                      "hits fall from 12 to 5 of 12.")
     audit.said(TEX, "this code reports a median of 127839.5 combined energy-and-gradient passes to the minimum, while "
                     "GMIN reports 389399 \\texttt{POTENTIAL} entries; these are not the same operation.")
     for path_ in (TEX, SI, COVER):
@@ -5772,9 +5767,9 @@ def cover_letter(audit: Audit) -> None:
         found = sentence in manuscript
         audit.record(found, COVER, "a cover-letter sentence with a number is a sentence of the abstract",
                      sentence[:70], sentence[:70] if found else "not in the manuscript")
-    audit.record(checked == len(COVER_OTHER) + 2, COVER,
-                 "the numbered cover-letter claims match the two abstract claims",
-                 str(len(COVER_OTHER) + 2), str(checked))
+    audit.record(checked == len(COVER_OTHER) + 1, COVER,
+                 "the numbered cover-letter claim matches the one numbered abstract claim",
+                 str(len(COVER_OTHER) + 1), str(checked))
     for word in ("\\rerun", "Zenodo", "DOI", "pending", "being run", "rerun"):
         audit.record(word not in audit.text(COVER), COVER, f"the cover letter carries no process note ({word})",
                      "absent", "absent" if word not in audit.text(COVER) else "present")
@@ -6888,6 +6883,10 @@ def crest_table(audit: Audit) -> None:
                     f"{hits_of(anneal)} of {len(anneal)} (\\(p={p:.2f}\\)); this code is charged {charged[0]} calls on "
                     f"every seed, and CREST a median of {middle:g}.")
     audit.cell(TEX, "the hexamer charges one count", "1", float(len(charged)))
+    for path in (TEX, COVER):
+        audit.said(path, f"On tight-binding clusters the search loses to CREST on the water hexamer, {hits_of(anneal)} "
+                         f"of {len(anneal)} runs against {hits_of(crest)} of {len(crest)} \\((p={p:.2f})\\), and on the "
+                         "ammonia octamer, and wins on the ten-atom carbon ring.")
     audit.said(TEX, f"On GFN2-xTB clusters CREST hits the water hexamer on {hits_of(crest)} of {len(crest)} runs "
                     f"against {hits_of(anneal)} of {len(anneal)} for this code (\\(p={p:.2f}\\)) and the ammonia octamer "
                     "on every run, while this code hits the C\\(_{10}\\) ring more often.")

@@ -41,23 +41,20 @@ Each proposal is quenched; displacement, shell, lattice, fivefold-residual, and
 symmetry moves are chosen from their observed quench depths; a
 well-tempered basin bias and tabu list discourage repeated basins; and
 separate climb and trail responses leave stalled regions.
-At arm-specific work definitions, the search reaches minima that trap a
-reference basin-hopping program: 7 of 12 seeds on LJ\(_{98}\), 9 of 12 on
-M\(_{55}\) at \(\rho=14\), and 6 of 12 on M\(_{80}\) at \(\rho=14\),
-against 0 of 12 in each reference arm.
-On rigid TIP4P water it reaches the published minima on 7 of 12 seeds at
-15 molecules and 6 of 12 at 20 molecules, against 0 of 12 in each
-reference arm.
-Removing the former structure templates lowers M\(_{38}\) hits at
-\(\rho=14\) from 12 to 4 of 12
-\((p=7.8\times 10^{-3})\); across every intervening code change, LJ\(_{75}\)
-hits fall from 12 to 5 of 12.
-At 12 seeds, neither rescaling the preset lengths nor replacing adaptive
+At arm-specific work definitions, the search reaches minima of large
+Lennard-Jones, short-ranged Morse, and rigid water clusters on which a
+reference basin-hopping program at one documented input hits no seed.
+Removing the former structure templates costs hits on a short-ranged Morse
+cluster.
+At twelve seeds, neither rescaling the preset lengths nor replacing adaptive
 move choice by a uniform draw produces a detectable hit-rate change in the
 tested panels.
 Under independent starts and shared wall caps, the search reaches four of
 five atomic and all four Morse references, while the two Atomic Simulation
-Environment optimizers reach only LJ\(_{55}\), once.
+Environment optimizers reach one Lennard-Jones minimum, once.
+On tight-binding clusters the search loses to CREST on the water hexamer,
+1 of 12 runs against 4 of 12 \((p=0.32)\), and on the ammonia octamer,
+and wins on the ten-atom carbon ring.
 \end{abstract}
 
 \section{Introduction}

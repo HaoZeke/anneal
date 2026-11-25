@@ -842,7 +842,7 @@ def test_a_cover_sentence_off_the_abstract_is_reported():
     audit_mod.cover_letter(audit)
     assert [r[2] for r in audit.drifts()] == [
         "a cover-letter sentence with a number is a sentence of the abstract",
-        "the numbered cover-letter claims match the two abstract claims"]
+        "the numbered cover-letter claim matches the one numbered abstract claim"]
 
 
 def test_a_drifted_gmin_panel_summary_cell_is_reported():
