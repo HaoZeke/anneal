@@ -132,8 +132,11 @@ def gofee_si_block() -> str:
 
 
 BLOCKS = {
-    "gofee": (MANUSCRIPT, gofee_block),
-    "gofee-si": (SI, gofee_si_block),
+}
+
+RETIRED = {
+    "gofee": (MANUSCRIPT, (*MARKS["gofee"], "\\label{tab:gofee}")),
+    "gofee-si": (SI, (*MARKS["gofee-si"], "\\label{tab:gofee-si}")),
 }
 
 
@@ -148,6 +151,11 @@ def splice(text: str, marks: tuple[str, str], block: str) -> str:
 
 def main(argv: list[str]) -> int:
     stale = False
+    for name, (path, tokens) in RETIRED.items():
+        text = path.read_text()
+        if any(token in text for token in tokens):
+            print(f"the retired {name} table remains in {path.name}", file=sys.stderr)
+            stale = True
     for name, (path, make) in BLOCKS.items():
         text = path.read_text()
         updated = splice(text, MARKS[name], make())
