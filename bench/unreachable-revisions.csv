@@ -72,6 +72,36 @@ revision,why,row_file,system,arm,revision_column,rows,seed_min,seed_max
 4e86f5fdc1583ef21f105fc2bed96a279b2430c1,RPQA i-PI upstream commit pinned in scripts/pimc_lj38/install_rpqa.sh and cited on rpqa rows by adc74aa1 and 22e78c86; external repository,bench/pimc-lj38/results.csv,lj38,rpqa_paper,code_revision,1,,
 4e86f5fdc1583ef21f105fc2bed96a279b2430c1,RPQA i-PI upstream commit pinned in scripts/pimc_lj38/install_rpqa.sh and cited on rpqa rows by adc74aa1 and 22e78c86; external repository,bench/pimc-lj38/seeds.csv,lj38,rpqa,code_revision,6,2000,2005
 4e86f5fdc1583ef21f105fc2bed96a279b2430c1,RPQA i-PI upstream commit pinned in scripts/pimc_lj38/install_rpqa.sh and cited on rpqa rows by adc74aa1 and 22e78c86; external repository,bench/pimc-lj38/seeds.csv,lj38,rpqa_paper,code_revision,6,2000,2005
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj102,H,code_revision,12,2000,2011
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj102,X1,code_revision,12,2000,2011
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj102,X128,code_revision,12,2000,2011
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj102,X129,code_revision,12,2000,2011
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj102,X256,code_revision,12,2000,2011
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj102,X32,code_revision,12,2000,2011
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj102,X33,code_revision,12,2000,2011
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj102,X4,code_revision,12,2000,2011
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj102,X40,code_revision,12,2000,2011
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj102,X8,code_revision,12,2000,2011
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj75,H,code_revision,24,2000,2023
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj75,X1,code_revision,24,2000,2023
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj75,X128,code_revision,24,2000,2023
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj75,X129,code_revision,24,2000,2023
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj75,X256,code_revision,24,2000,2023
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj75,X32,code_revision,24,2000,2023
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj75,X33,code_revision,24,2000,2023
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj75,X4,code_revision,24,2000,2023
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj75,X40,code_revision,24,2000,2023
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj75,X8,code_revision,24,2000,2023
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj98,H,code_revision,12,2000,2011
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj98,X1,code_revision,12,2000,2011
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj98,X128,code_revision,12,2000,2011
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj98,X129,code_revision,12,2000,2011
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj98,X256,code_revision,12,2000,2011
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj98,X32,code_revision,12,2000,2011
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj98,X33,code_revision,12,2000,2011
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj98,X4,code_revision,12,2000,2011
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj98,X40,code_revision,12,2000,2011
+52af8e47488d,"the 168-walklen series tip, sent as a format-patch for box-verify; no pushed branch holds it yet",bench/168-walklen2/rows.csv,lj98,X8,code_revision,12,2000,2011
 5351f272370dc8c0d18b06149753effc99aeabd5,"eae26977 with the call floor and the C20 example, a local build head of the GFN2 C20 rows; b4ddad0d on bench/covalent-cov6b has its tree",bench/covalent-h2h/gfn2/rows.csv,c20,anneal-general,code_revision,12,2000,2011
 5351f272370dc8c0d18b06149753effc99aeabd5,"eae26977 with the call floor and the C20 example, a local build head of the GFN2 C20 rows; b4ddad0d on bench/covalent-cov6b has its tree",bench/covalent-h2h/gfn2/rows.csv,c20,crest,code_revision,12,2000,2011
 5445c4f7d6333792dc792482f9a2a082970b9685,"the cap-turn arm of the template-free2 r7 campaign, first cited by aa10a14c; no pushed branch or audit ref holds it, and aa10a14c's parent 403c3d00 is on another base",bench/template-free2-r7/flag-off-rows.csv,,,code_revision,138,2000,2023

@@ -1,0 +1,176 @@
+diff --git a/src/methods/cluster_search.rs b/src/methods/cluster_search.rs
+index 76d1cfa2d..b1a2ddb16 100644
+--- a/src/methods/cluster_search.rs
++++ b/src/methods/cluster_search.rs
+@@ -841,6 +841,11 @@ where
+     // Where the last restraint screen ended, and whether it walked the
+     // unrestrained minimum of its proposal.
+     let mut screened_restraint: Option<(Array1<f64>, bool)> = None;
++    let rule = std::env::var("ANNEAL_RULE").ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
++    let no_bare = rule & 32;
++    let mut bare_calls = 0usize;
++    let mut bare_walks = 0usize;
++    let mut walks = 0usize;
+     move |led, x, iters| {
+         // A new quench. A failure closed the previous descent; this
+         // proposal is a different trial.
+@@ -916,6 +921,7 @@ where
+             .filter(|check| check.at == x);
+         let before = led.spent();
+         let screening = iters <= screen_iters;
++        walks += usize::from(screening);
+         // A rigid chart uses this same descent. A line-search-free capped
+         // step reached a different basin, and the small-cluster walk then
+         // took more hops at the same cost per quench.
+@@ -952,6 +958,7 @@ where
+         let compacted;
+         let surface = match surfaces.as_mut() {
+             Some(portfolio) => {
++                portfolio.charge(led.spent());
+                 let chosen = portfolio.begin_holding_failed_restraint(screening);
+                 if portfolio.take_block_opened() {
+                     led.block_opened = true;
+@@ -1221,7 +1228,12 @@ where
+         // and set aside, as a screened trial is.
+         let restrained_energy = f;
+         let mut walked_plain = false;
+-        if surface.is_some() && !screen_kept_restraint {
++        let stalled_once = rule & 256 == 0 || stats.plain_holds > 0;
++        let pays = stalled_once
++            && (rule & 128 == 0
++                || bare_calls as f64
++                    <= (bare_walks + 1) as f64 * led.spent() as f64 / walks.max(1) as f64);
++        if surface.is_some() && !screen_kept_restraint && no_bare == 0 && pays {
+             let kept_early = early;
+             let kept_last = last.borrow().clone();
+             let kept_best = best_physical.borrow().clone();
+@@ -1381,6 +1393,8 @@ where
+             let (f2, xr2, _) = lowest_stopped_answer(&mut suspended, f2, xr2, &best_physical);
+             // `target` is the incumbent before either quench of this hop.
+             let plain_lowers = f2 < target && f2 < restrained_energy;
++            bare_calls += suspended.spent() - spent_at;
++            bare_walks += usize::from(plain_lowers);
+             drop(suspended);
+             walked_plain = plain_lowers;
+             stats.plain_quenches += 1;
+@@ -1402,6 +1416,7 @@ where
+             } else {
+                 f
+             };
++            portfolio.charge(led.spent());
+             portfolio.observe(screening, reached, target);
+         }
+         // A descent stopped on a verdict is known not to be converged, so
+diff --git a/src/methods/two_phase.rs b/src/methods/two_phase.rs
+index 3b2efbde8..c135048dd 100644
+--- a/src/methods/two_phase.rs
++++ b/src/methods/two_phase.rs
+@@ -618,6 +618,15 @@ pub struct SurfacePortfolio {
+     /// The call to [`Self::begin`] that opened the block now held.
+     just_opened: bool,
+     rng: StdRng,
++    rule: u8,
++    spent: usize,
++    opened_at: usize,
++    plain_calls: usize,
++    plain_hops: usize,
++    other_calls: usize,
++    other_hops: usize,
++    best_at: usize,
++    eligible: bool,
+ }
+ 
+ /// Whether `energy` is a minimum below `incumbent`, not a requench of it.
+@@ -693,6 +702,15 @@ impl SurfacePortfolio {
+             lifts: 0,
+             just_opened: false,
+             rng: StdRng::seed_from_u64(seed ^ 0x5a2f_ace5),
++            rule: std::env::var("ANNEAL_RULE").ok().and_then(|v| v.parse().ok()).unwrap_or(0),
++            spent: 0,
++            opened_at: 0,
++            plain_calls: 0,
++            plain_hops: 0,
++            other_calls: 0,
++            other_hops: 0,
++            best_at: 0,
++            eligible: false,
+         }
+     }
+ 
+@@ -874,6 +892,26 @@ impl SurfacePortfolio {
+     /// A screening relaxation opens a hop; the block's arm is redrawn once
+     /// the block is spent, with the finished block's improvement credited
+     /// to the arm that walked it.
++    pub fn charge(&mut self, spent: usize) {
++        self.spent = spent;
++    }
++
++    fn stalled(&self) -> bool {
++        self.latest_best.is_finite() && self.spent >= 2 * self.best_at.max(1)
++    }
++
++    fn block_spent(&self) -> bool {
++        if self.rule & 1 != 0 && self.plain_hops > 0 && self.held.is_some_and(|a| a != 0) {
++            let per_hop = self.plain_calls as f64 / self.plain_hops as f64;
++            (self.spent - self.opened_at) as f64 >= self.block as f64 * per_hop
++        } else if self.rule & 8 != 0 && self.other_hops > 0 && self.held == Some(0) {
++            let per_hop = self.other_calls as f64 / self.other_hops as f64;
++            (self.spent - self.opened_at) as f64 >= self.block as f64 * per_hop
++        } else {
++            self.hops_in_block >= self.block
++        }
++    }
++
+     pub fn begin(&mut self, screening: bool) -> Option<TwoPhase> {
+         self.begin_with_plain_hold(screening, false)
+     }
+@@ -882,7 +920,7 @@ impl SurfacePortfolio {
+     /// plain hold when `hold_failed` is set.
+     fn begin_with_plain_hold(&mut self, screening: bool, hold_failed: bool) -> Option<TwoPhase> {
+         if screening {
+-            if self.hops_in_block >= self.block {
++            if self.block_spent() {
+                 let failed_restraint = self.settle_block();
+                 if failed_restraint && hold_failed {
+                     self.hold_plain();
+@@ -905,7 +943,16 @@ impl SurfacePortfolio {
+             }
+             self.block_source = self.occupied.clone();
+             self.just_opened = true;
+-            self.held = Some(if self.plain_only {
++            if self.rule & 2 != 0 && !self.eligible && self.stalled() {
++                self.eligible = true;
++            }
++            let gated = match self.rule & 6 {
++                2 => !self.eligible,
++                4 => !self.stalled(),
++                _ => false,
++            };
++            self.opened_at = self.spent;
++            self.held = Some(if self.plain_only || gated {
+                 0
+             } else if let Some(arm) = returned {
+                 arm
+@@ -933,12 +980,22 @@ impl SurfacePortfolio {
+         }
+         let best = best.min(reached);
+         if best.is_finite() {
++            if lower_minimum(best, self.latest_best) {
++                self.best_at = self.spent;
++            }
+             self.latest_best = self.latest_best.min(best);
+         }
+     }
+ 
+     fn settle_block(&mut self) -> bool {
+         let mut failed_restraint = false;
++        if self.held == Some(0) {
++            self.plain_calls += self.spent - self.opened_at;
++            self.plain_hops += self.hops_in_block;
++        } else if self.held.is_some() {
++            self.other_calls += self.spent - self.opened_at;
++            self.other_hops += self.hops_in_block;
++        }
+         if let Some(arm) = self.held.take() {
+             // The signed gap between the run's best when the block opened
+             // and the lowest structure the block relaxed to: positive by the
