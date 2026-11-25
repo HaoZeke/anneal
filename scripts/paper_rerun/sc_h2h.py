@@ -26,7 +26,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "scripts" / "metal_h2h"))
 
 import run_sc as sc  # noqa: E402
-from machine_provenance import machine_digest  # noqa: E402
+from machine_provenance import machine_digest, require_lf  # noqa: E402
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
 CODE_REVISION = "61fa67cf380e46876b569da45e7cc091647a775b"
@@ -162,6 +162,7 @@ def thread_env() -> dict[str, str]:
 def load_done(path: Path) -> set[tuple[str, str, str]]:
     if not path.is_file():
         return set()
+    require_lf(path)
     with path.open(newline="") as handle:
         return {(row["system"], row["arm"], row["seed"]) for row in csv.DictReader(handle)}
 

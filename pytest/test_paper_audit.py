@@ -1755,3 +1755,21 @@ def test_a_flag_off_hash_that_differs_from_base_is_reported():
         off[0]["best_bits"] = bits[:-1] + ("0" if bits[-1] != "0" else "1")
 
     assert "hash" in _flag_off_drift(mutate)
+
+
+def test_row_files_with_carriage_returns_are_refused(tmp_path, monkeypatch):
+    monkeypatch.setattr(audit_mod, "ROOT", tmp_path)
+    (tmp_path / "legacy").mkdir()
+    (tmp_path / "legacy" / "rows.csv").write_bytes(b"system,code_revision,host\r\nau55,abc,bench\r\n")
+    (tmp_path / "legacy" / "record.csv").write_bytes(b"arm,anneal_commit,machine_id\r\ngmin,abc,def\r\n")
+    (tmp_path / "legacy" / "scores.csv").write_bytes(b"board,hits\r\nlj75,3\r\n")
+    (tmp_path / "legacy" / "clean.csv").write_bytes(b"system,code_revision,host\nau55,abc,bench\n")
+
+    audit = audit_mod.Audit()
+    with pytest.raises(SystemExit, match="contains CR"):
+        audit.rows("legacy/rows.csv")
+    assert "legacy/rows.csv" not in audit.read
+    with pytest.raises(SystemExit, match="contains CR"):
+        audit_mod.side_rows(audit, "legacy/record.csv")
+    assert audit.rows("legacy/scores.csv") == [{"board": "lj75", "hits": "3"}]
+    assert audit.rows("legacy/clean.csv") == [{"system": "au55", "code_revision": "abc", "host": "bench"}]
