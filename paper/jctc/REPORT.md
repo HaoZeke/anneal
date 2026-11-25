@@ -10,24 +10,11 @@ b236bd7dd327aed1db3672126c577bf342db0f87b5d6668298cf82ddf44f078a
 
 Every row checked clean.
 
-## Rohit decisions pending
+## Submission text
 
-The cover letter still has the open items.
-
-- cover-letter.tex:11 is the telephone placeholder.
-- cover-letter.tex:55 is three placeholders.
-- manuscript.tex:586 says the disclosure option is not submitted.
-- manuscript.tex:591 is the option line for the tool and the version.
-- manuscript.tex:614 is the identifier placeholder.
-- manuscript.tex:556 adds "In contrast," before the second count.
-- The LJ75 figure now follows the systems figure.
-- That later place follows the order of first citation.
-
-## Prose
-
-The manuscript patch is applied exactly.
-The data-availability section matches v1.16.
-Paragraph cohesion at patched lines 565 and 607 stays open.
+The cover letter has no submission placeholders.
+The manuscript data and software statement names the submitted revision.
+It states that the Zenodo archive does not contain that revision.
 
 ## Captions
 
