@@ -5,3 +5,9 @@ settled when it began. The next block then goes back to the restraint
 that failed. Before, one failed block held the plain surface for the
 rest of the run, so a ``cluster_search`` chain left on the icosahedral
 shelf at 75 points never drew the restraint again.
+
+The unrestrained quench beside a restrained relaxation is screened with
+its proposal. A full pass that starts where a restraint screen kept the
+restraint no longer repeats it from the restraint's answer.
+``RelaxStats::plain_quenches`` and ``RelaxStats::plain_walks`` count
+those quenches and the ones whose minimum the chain walked.
