@@ -14,7 +14,9 @@ import inspect
 import io
 import re
 import shutil
+import subprocess
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -363,3 +365,48 @@ def test_the_commit_id_pattern_is_the_one_place_that_names_a_prefix_length():
     assert not re.fullmatch(revision_reach.commit_id_pattern(), HELD[:39])
     assert re.fullmatch(revision_reach.commit_id_pattern(7), HELD[:7])
     assert not re.fullmatch(revision_reach.commit_id_pattern(8), HELD[:7])
+
+
+def git_text(*args: str) -> str:
+    return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, check=True).stdout.strip()
+
+
+def test_the_listed_tuned_rewrite_is_what_accepts_the_committed_rows(monkeypatch):
+    head = git_text("rev-parse", "HEAD:scripts/gmin_panel/tuned.py")
+    harness = audited_row()["harness_commit"]
+    old = git_text("rev-parse", f"{harness}:scripts/gmin_panel/tuned.py")
+    assert old != head
+    assert revision_reach.TUNED_SOURCE_REWRITES == {old: head}
+    assert revision_reach.tuned_gmin_harness_verified(audited_row())
+    monkeypatch.setattr(revision_reach, "TUNED_SOURCE_REWRITES", {})
+    assert not revision_reach.tuned_gmin_harness_verified(audited_row())
+    monkeypatch.setattr(revision_reach, "TUNED_SOURCE_REWRITES", {old: "0" * 40})
+    assert not revision_reach.tuned_gmin_harness_verified(audited_row())
+
+
+@pytest.mark.skipif(sys.version_info < (3, 12), reason="the recorded tuned.py needs Python 3.12 to run")
+def test_the_rewritten_tuned_source_builds_the_same_commands(monkeypatch):
+    harness = audited_row()["harness_commit"]
+    real = ROOT / "scripts/gmin_panel/tuned.py"
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    monkeypatch.syspath_prepend(str(ROOT / "scripts/gmin_panel"))
+
+    def run_source(name: str, source: str):
+        module = types.ModuleType(name)
+        module.__file__ = str(real)
+        monkeypatch.setitem(sys.modules, name, module)
+        exec(compile(source, str(real), "exec"), module.__dict__)
+        return module
+
+    recorded = run_source("tuned_recorded", git_text("show", f"{harness}:scripts/gmin_panel/tuned.py"))
+    current = run_source("tuned_current", real.read_text())
+    for name, kind, n, reference, rho, binary in (
+        ("lj98", "lj", 98, -543.665361, 0.0, "h2h_gmin_proof"),
+        ("lj104", "lj", 104, -582.086642, 0.0, "h2h_gmin_proof"),
+        ("m80r6", "morse", 80, -378.333471, 6.0, "h2h_morse"),
+    ):
+        commands = [
+            module.gmin_command(module.Cell(name, kind, n, reference, rho, 4_000_000, binary), 2000, 4_000_000, "DATA")
+            for module in (recorded, current)
+        ]
+        assert commands[0] == commands[1] and '"$BIN/GMIN"' in commands[0], name

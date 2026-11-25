@@ -41,6 +41,13 @@ EXTERNAL_REVISIONS = {
 }
 TUNED_SYSTEMS = frozenset({"lj98", "lj104"})
 TUNED_CODES = frozenset({"anneal", "gmin"})
+# scripts/gmin_panel/tuned.py of the harness commit the recorded rows name has a
+# quoted path inside an f-string replacement field, which Python 3.10 and 3.11
+# reject. The file of HEAD builds the path in a variable first. Both give the
+# same command text, so the one rewrite is accepted: old blob to new blob.
+TUNED_SOURCE_REWRITES = {
+    "9b8e4c3a12291fa33804fa35a2c09a6142316233": "78b5aae0f4d22fa4f8237a2bb68aded3f5f3d197",
+}
 
 
 def is_full_sha(value: str | None) -> bool:
@@ -118,9 +125,9 @@ def tuned_gmin_harness_verified(
 
     A harness commit that is an ancestor of HEAD is accepted. Otherwise it must
     be a commit of ``repo`` whose ``bench/gmin-tuned/inputs/<system>.data`` is
-    the recorded blob, whose ``scripts/gmin_panel/tuned.py`` is the one of HEAD,
-    and that changed no ``src/``, ``examples/`` or Cargo file since the merge
-    base with HEAD.
+    the recorded blob, whose ``scripts/gmin_panel/tuned.py`` is the one of HEAD
+    or the blob that ``TUNED_SOURCE_REWRITES`` lists for it, and that changed
+    no ``src/``, ``examples/`` or Cargo file since the merge base with HEAD.
     """
 
     def run(*args: str, stdin: str | None = None) -> subprocess.CompletedProcess:
@@ -149,7 +156,8 @@ def tuned_gmin_harness_verified(
     ref_tuned = run("rev-parse", f"{harness}:scripts/gmin_panel/tuned.py")
     if ref_data.returncode != 0 or ref_data.stdout.strip() != data_blob:
         return False
-    if ref_tuned.returncode != 0 or ref_tuned.stdout.strip() != head_tuned.stdout.strip():
+    ref_blob, head_blob = ref_tuned.stdout.strip(), head_tuned.stdout.strip()
+    if ref_tuned.returncode != 0 or (ref_blob != head_blob and TUNED_SOURCE_REWRITES.get(ref_blob) != head_blob):
         return False
     base = run("merge-base", "HEAD", harness)
     if base.returncode != 0 or not base.stdout.strip():

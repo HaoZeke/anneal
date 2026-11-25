@@ -6751,12 +6751,13 @@ def tip4p_r2_rows(audit: Audit) -> None:
     sizes = ('8', '15', '20', '21', '25')
     groups = {(size, arm): pick(tip_rows, molecules=size, arm=arm) for size in sizes for arm in ('anneal', 'gmin')}
     audit.cell(PAPER, 'TIP4P rows per size and arm', '12', float(min((len(group) for group in groups.values()))))
-    audit.cell(PAPER, 'TIP4P seed range', '2000 2011', f'{min((int(row['seed']) for row in tip_rows))} {max((int(row['seed']) for row in tip_rows))}')
+    seed_values = [int(row['seed']) for row in tip_rows]
+    audit.cell(PAPER, 'TIP4P seed range', '2000 2011', f'{min(seed_values)} {max(seed_values)}')
     same_starts = all(({row['seed']: row['start_id'] for row in groups[size, 'anneal']} == {row['seed']: row['start_id'] for row in groups[size, 'gmin']} for size in sizes))
     audit.record(same_starts, tip_rows_path, 'both TIP4P arms use the same start identifier at each seed', 'same', 'same' if same_starts else 'different')
     machine_ids = {row['machine_id'] for row in tip_rows}
     cores = {row['core'] for row in tip_rows}
-    audit.record(len(machine_ids) == 1 and cores == {'0'}, tip_rows_path, 'TIP4P r2 uses one machine pinned to core 0', 'one machine core 0', f'{len(machine_ids)} machines cores {' '.join(sorted(cores))}')
+    audit.record(len(machine_ids) == 1 and cores == {'0'}, tip_rows_path, 'TIP4P r2 uses one machine pinned to core 0', 'one machine core 0', f"{len(machine_ids)} machines cores {' '.join(sorted(cores))}")
     abba = all(([next((row['arm_order'] for row in groups[size, 'anneal'] if row['seed'] == seed)) for seed in sorted((row['seed'] for row in groups[size, 'anneal']))] == ['anneal,gmin' if index % 2 == 0 else 'gmin,anneal' for index in range(12)] for size in sizes))
     audit.record(abba, tip_rows_path, 'TIP4P r2 uses ABBA arm order', 'ABBA', 'ABBA' if abba else 'other')
     hit_counts = {key: sum((int(row['hit']) for row in group)) for key, group in groups.items()}
@@ -6773,8 +6774,8 @@ def tip4p_r2_rows(audit: Audit) -> None:
         audit.cell(wall_path, f'TIP4P {size} r2 anneal n', summary['anneal_n'], len(anneal_walls))
         audit.cell(wall_path, f'TIP4P {size} r2 GMIN n', summary['gmin_n'], len(gmin_walls))
         expected_hits = 'unscored' if size == '25' else None
-        audit.cell(wall_path, f'TIP4P {size} r2 anneal hits', summary['anneal_hits_n'], expected_hits or f'{hit_counts[size, 'anneal']}/12')
-        audit.cell(wall_path, f'TIP4P {size} r2 GMIN hits', summary['gmin_hits_n'], expected_hits or f'{hit_counts[size, 'gmin']}/12')
+        audit.cell(wall_path, f'TIP4P {size} r2 anneal hits', summary['anneal_hits_n'], expected_hits or f"{hit_counts[size, 'anneal']}/12")
+        audit.cell(wall_path, f'TIP4P {size} r2 GMIN hits', summary['gmin_hits_n'], expected_hits or f"{hit_counts[size, 'gmin']}/12")
         for arm, walls in (('anneal', anneal_walls), ('gmin', gmin_walls)):
             calls = [float(row['calls']) for row in groups[size, arm]]
             energies = [float(row['best_energy']) for row in groups[size, arm]]

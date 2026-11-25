@@ -294,9 +294,10 @@ def gmin_command(cell: Cell, seed: int, budget: int, data_shell: str, system: st
             'H2H_ROW="$WORK/row.txt"',
         ]
     )
+    gmin_binary = '"$BIN/GMIN"'
     command = (
         'cd "$WORK" && rm -f coords data row.txt start.start.gmin && '
-        f"{coords_shell(cell, seed)} && {data_shell} && {pinned('\"$BIN/GMIN\"', extra)}"
+        f"{coords_shell(cell, seed)} && {data_shell} && {pinned(gmin_binary, extra)}"
     )
     assert_clean(command)
     return command
