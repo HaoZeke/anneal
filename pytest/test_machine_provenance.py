@@ -3060,3 +3060,16 @@ def test_lj_board_journal_prints_the_salted_digest(monkeypatch):
 
     monkeypatch.setattr(boardlib, "machine_digest", unavailable)
     assert "machine_id=absent" in boardlib.host_lines()
+
+
+def test_require_lf_rejects_carriage_returns(tmp_path):
+    import machine_provenance as mp
+
+    lf = tmp_path / "lf.csv"
+    lf.write_bytes(b"code_revision,host\nabc,bench\n")
+    mp.require_lf(lf)
+    for body in (b"code_revision,host\r\nabc,bench\r\n", b"code_revision,host\nabc,be\rnch\n"):
+        crlf = tmp_path / "cr.csv"
+        crlf.write_bytes(body)
+        with pytest.raises(SystemExit, match="contains CR"):
+            mp.require_lf(crlf)

@@ -167,6 +167,12 @@ def environment() -> dict[str, str]:
     return {"machine_id": machine_id, "cpu_model": cpu_model}
 
 
+def require_lf(path: Path) -> None:
+    """Refuse a row file that holds a carriage return."""
+    if b"\r" in Path(path).read_bytes():
+        raise SystemExit(f"{path} contains CR")
+
+
 def require_csv_schema(path: Path, fieldnames: Iterable[str]) -> None:
     """Refuse to append a new-schema row beneath a legacy CSV header."""
     if not path.is_file() or path.stat().st_size == 0:
