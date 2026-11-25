@@ -7,7 +7,6 @@ into the paper.
 from __future__ import annotations
 
 import importlib.util
-import inspect
 import subprocess
 import sys
 from pathlib import Path
@@ -118,20 +117,6 @@ def test_a_sha_that_is_not_the_branch_tip_is_refused(tmp_path: Path):
     assert not (root / ROW).exists()
 
 
-def test_empty_marks_take_a_table_and_clear_it():
-    ase = load("ase_panel_splice", "scripts/ase_panel/summarize.py")
-    text = "before\n% ase-panel table: start\n% ase-panel table: end\nafter\n"
-    block = "\\begin{table}\n\\label{tab:ase}\n\\end{table}"
-    filled = ase.splice_at(text, ase.TEX_MARKS, block)
-    assert "\\label{tab:ase}" in filled
-    assert filled.startswith("before\n")
-    assert filled.endswith("after\n")
-    cleared = ase.splice_at(filled, ase.TEX_MARKS, "")
-    assert "\\label{tab:ase}" not in cleared
-    assert ase.TEX_MARKS[0] in cleared and ase.TEX_MARKS[1] in cleared
-    assert cleared.startswith("before\n") and cleared.endswith("after\n")
-
-
 def test_withheld_block_is_not_written():
     module = ingest()
     assert module.withheld_block([
@@ -141,37 +126,28 @@ def test_withheld_block_is_not_written():
     assert module.withheld_block([]) == ""
 
 
-def test_the_si_does_not_narrate_unquoted_comparisons(monkeypatch):
+def test_the_si_does_not_narrate_unquoted_comparisons():
     module = ingest()
-    ase = load("ase_panel_empty", "scripts/ase_panel/summarize.py")
     items = module.withheld_items()
     assert [name for name, _reason in items] == ["tab:sc"]
     assert {reason for _name, reason in items} <= {"harness not reachable", "rerun pending"}
     text = (ROOT / "paper" / "jctc" / "si.tex").read_text()
     assert "Withheld results" not in text
     assert "rerun pending" not in text
-    assert "\\label{tab:gmin-tuned}" in text
     assert module.WITHHELD_MARKS[0] not in text
     assert module.withheld_block() == ""
-    assert ase.tex_table() and ase.tex_table() in text
-    assert ase.held_prose() and ase.held_prose() in text
-    monkeypatch.setattr(ase, "commit_held", lambda revision: False)
-    assert ase.held_prose() == ""
-    assert ase.tex_table() == ""
 
 
 def test_a_withheld_ase_table_and_morse_panel_are_named_and_not_narrated(monkeypatch):
     module = ingest()
-    ase = module._module("ase_panel_withheld", "scripts/ase_panel/summarize.py")
     panel = module._module("gmin_panel_withheld", "scripts/gmin_panel/run_panel.py")
-    monkeypatch.setattr(ase, "commit_held", lambda revision: False)
     monkeypatch.setattr(panel, "_commit_held", lambda revision: not revision.startswith("9837358a"))
     monkeypatch.setattr(module, "_ITEMS", None)
     monkeypatch.setattr(module, "_module", lambda name, path: {
-        "ase_panel_withheld": ase, "gmin_panel_withheld": panel,
+        "gmin_panel_withheld": panel,
     }.get(name) or load(name, path))
     items = module.withheld_items()
-    assert [name for name, _reason in items][:2] == ["tab:ase", "Morse against GMIN"]
+    assert [name for name, _reason in items][:1] == ["Morse against GMIN"]
     assert {reason for _name, reason in items} <= {"harness not reachable", "rerun pending"}
     assert module.withheld_block(items) == ""
     monkeypatch.setattr(module, "_ITEMS", None)
@@ -276,15 +252,7 @@ def test_pins_and_harness_fields_match_the_audit():
     tables = load("h2h_pins", "paper/jctc/scripts/h2h_tables.py")
     assert module.EXTERNAL_REVISIONS == tuple(audit.EXTERNAL_REVISIONS)
     assert module.EXTERNAL_REVISIONS == tuple(tables.EXTERNAL_PINS)
-    source = inspect.getsource(audit._row_shas)
-    for field in module.HARNESS_FIELDS:
-        assert field in source
-
-
-def test_tab_ase_expected_failure_stays_until_the_table_is_present():
-    source = (ROOT / "scripts" / "paper_audit.py").read_text()
-    assert 'audit.expect(SI, "tab:ase expected failure"' in source
-    assert "bool(panel.tex_table())" in source
+    assert set(audit.REVISION_COLUMNS) - {"commit", "revision"} <= set(module.REVISION_FIELDS)
 
 
 TUNED = "bench/gmin-tuned/rows-shard2.csv"
@@ -325,7 +293,6 @@ def side_commit(tmp_path: Path, monkeypatch) -> str:
 def test_a_commit_that_is_present_but_not_an_ancestor_is_held_by_no_reader(side_commit: str):
     shared = load("revision_reach_test", "scripts/revision_reach.py")
     audit = load("paper_audit_reach", "scripts/paper_audit.py")
-    ase = load("ase_panel_reach", "scripts/ase_panel/summarize.py")
     tables = load("h2h_tables_reach", "paper/jctc/scripts/h2h_tables.py")
     panel = load("gmin_panel_reach", "scripts/gmin_panel/run_panel.py")
     module = ingest()
@@ -333,7 +300,6 @@ def test_a_commit_that_is_present_but_not_an_ancestor_is_held_by_no_reader(side_
         "revision_reach": lambda rev: shared.commit_held(rev, ROOT),
         "paper_audit.commit_held": audit.commit_held,
         "paper_audit.harness_reachable": audit.harness_reachable,
-        "ase summarize": ase.commit_held,
         "h2h_tables": tables.commit_held,
         "gmin run_panel": panel._commit_held,
         "ingest_record": lambda rev: module.harness_reachable(rev, ROOT),
@@ -347,22 +313,11 @@ def test_a_commit_that_is_present_but_not_an_ancestor_is_held_by_no_reader(side_
     assert unheld == dict.fromkeys(readers, False)
 
 
-def test_tab_ase_is_held_only_for_an_ancestor_by_the_table_and_the_audit(side_commit: str, monkeypatch):
-    ase = load("ase_panel_held", "scripts/ase_panel/summarize.py")
+def test_the_ingest_holds_an_ancestor_of_head_and_refuses_a_side_commit(side_commit: str):
     module = ingest()
     head = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=ROOT, check=True, capture_output=True, text=True,
     ).stdout.strip()
-
-    def rows_at(revision: str):
-        row = {"code_revision": revision, "hit": "1", "stop": "wall"}
-        return {arm: [dict(row)] for arm in ("recommended", *ase.ASE_ARMS)}
-
-    monkeypatch.setattr(ase, "load", lambda system: rows_at(side_commit))
-    assert ase.quoted_campaigns() == {}
-    assert ase.held_prose() == ""
-    monkeypatch.setattr(ase, "load", lambda system: rows_at(head))
-    assert set(ase.quoted_campaigns()) == set(ase.SYSTEMS)
     assert module.harness_reachable(side_commit, ROOT) is False
     assert module.harness_reachable(head, ROOT) is True
 

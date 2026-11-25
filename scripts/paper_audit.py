@@ -2373,7 +2373,7 @@ def hexamer_provenance(audit: Audit) -> None:
         audit.record(key not in keys, f"{VISUALS}/provenance.txt", f"no {key} key names a commit for every file",
                      "absent", "absent" if key not in keys else "present")
     landfold_commit = keys.get("landfold_book_commit", "")
-    audit.record(bool(re.fullmatch(r"[0-9a-f]{40}", landfold_commit)),
+    audit.record(revision_reach.is_full_sha(landfold_commit),
                  f"{VISUALS}/provenance.txt", "landfold source identifier is recorded",
                  "40 hexadecimal digits", landfold_commit)
     audit.said(f"{VISUALS}/provenance.txt",
@@ -5142,7 +5142,7 @@ def provenance(audit: Audit) -> dict[str, str]:
                 for value in r[column].strip().split(";"):
                     if value in RECORD_TREES:
                         trees.add(value)
-                    elif re.fullmatch(r"[0-9a-f]{7,40}", value) and value not in EXTERNAL_REVISIONS:
+                    elif re.fullmatch(revision_reach.commit_id_pattern(7), value) and value not in EXTERNAL_REVISIONS:
                         revisions[value].add(path)
         for value in sorted(trees):
             held = git("rev-parse", f"{RECORD_TREES[value]}^^{{tree}}").stdout.strip()

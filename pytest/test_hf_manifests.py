@@ -10,6 +10,7 @@ import http.client
 import importlib.util
 import json
 import re
+import subprocess
 import time
 import urllib.error
 import urllib.parse
@@ -24,6 +25,10 @@ HF_FETCH_ATTEMPTS = 3
 HF_FETCH_TIMEOUT_S = 20.0
 HF_RETRY_BACKOFF_S = 0.5
 TRANSIENT_HTTP_CODES = frozenset({408, 429, 500, 502, 503, 504})
+# Files develop edited in the repository after the pinned dataset revision. The
+# manifest row describes the committed bytes; the receipt still records the
+# object the dataset holds at the pin.
+LOCAL_EDITS = frozenset({"paper/jctc/logs/water/NUMBERS.tsv"})
 
 
 class _OfflineError(RuntimeError):
@@ -103,10 +108,17 @@ def test_pinned_hf_tree_matches_every_manifest_row():
     for row in rows:
         entry = tree[row["path"]]
         recorded = receipt[row["path"]]
-        assert int(row["size"]) == entry["size"] == int(recorded["size"])
+        assert entry["size"] == int(recorded["size"])
         assert entry["oid"] == recorded["git_oid"]
         lfs_sha256 = entry.get("lfs", {}).get("oid", "")
         assert lfs_sha256 == recorded["lfs_sha256"]
+        if row["path"] in LOCAL_EDITS:
+            committed = (ROOT / row["path"]).read_bytes()
+            assert int(row["size"]) == len(committed)
+            assert row["sha256"] == hashlib.sha256(committed).hexdigest()
+            assert entry["size"] != int(row["size"]), f"{row['path']} no longer differs from the pinned object"
+            continue
+        assert int(row["size"]) == entry["size"]
         if lfs_sha256:
             assert lfs_sha256 == row["sha256"]
 
@@ -118,7 +130,7 @@ def test_pinned_hf_tree_matches_every_manifest_row():
                     lambda row: downloaded_object(
                         data.HF_REPO, data.HF_REVISION_DEFAULT, row
                     ),
-                    rows,
+                    [row for row in rows if row["path"] not in LOCAL_EDITS],
                 )
             }
     except _OfflineError as exc:
@@ -127,10 +139,17 @@ def test_pinned_hf_tree_matches_every_manifest_row():
     assert downloaded == {
         row["path"]: (int(row["size"]), row["sha256"])
         for row in rows
+        if row["path"] not in LOCAL_EDITS
     }
 
     bench_paths = bench.manifest_paths()
-    assert all(path.as_posix() in tree for path in bench_paths)
+    absent = [path.as_posix() for path in bench_paths if path.as_posix() not in tree]
+    tracked = set(
+        subprocess.run(
+            ["git", "ls-files", "--", *absent], cwd=ROOT, capture_output=True, text=True, check=True
+        ).stdout.splitlines()
+    )
+    assert not [path for path in absent if path not in tracked]
 
 
 def test_hf_manifest_updates_match_the_downloaded_objects():

@@ -211,12 +211,16 @@ def test_the_ase_refresh_refuses_an_abbreviated_revision_and_reads_the_full_one(
         ase.load("lj38")
 
 
-def test_the_nonlj_refresh_refuses_an_abbreviated_revision(tmp_path, monkeypatch):
-    nonlj = load("ase_nonlj_summary_shared", "scripts/ase_nonlj/summarize.py")
-    source = ROOT / "bench" / "ase-nonlj" / "rerun-20261119" / "rows.csv"
+@pytest.mark.parametrize(("script", "subdir"), (
+    ("summarize.py", ""),
+    ("summarize_rerun.py", "rerun-20261119"),
+))
+def test_the_nonlj_refresh_refuses_an_abbreviated_revision(tmp_path, monkeypatch, script, subdir):
+    nonlj = load(f"ase_nonlj_summary_shared_{script[:-3]}", f"scripts/ase_nonlj/{script}")
+    source = ROOT / "bench" / "ase-nonlj" / subdir / "rows.csv"
     rows = list(csv.DictReader(source.open(newline="")))
     for label, shorten in (("short", True), ("full", False)):
-        target = tmp_path / label / "bench" / "ase-nonlj" / "rerun-20261119"
+        target = tmp_path / label / "bench" / "ase-nonlj" / subdir
         target.mkdir(parents=True)
         with (target / "rows.csv").open("w", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=list(rows[0]), lineterminator="\n")
@@ -231,7 +235,8 @@ def test_the_nonlj_refresh_refuses_an_abbreviated_revision(tmp_path, monkeypatch
 
 
 def test_a_runner_takes_its_revision_from_the_shared_validator():
-    for relative in ("scripts/ase_panel/run_one.py", "scripts/ase_panel/summarize.py", "scripts/ase_nonlj/summarize.py"):
+    for relative in ("scripts/ase_panel/run_one.py", "scripts/ase_panel/summarize.py", "scripts/ase_nonlj/summarize.py",
+                     "scripts/ase_nonlj/summarize_rerun.py"):
         source = (ROOT / relative).read_text()
         assert "revision_reach.is_full_sha(" in source, relative
 

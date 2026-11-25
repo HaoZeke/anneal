@@ -290,9 +290,6 @@ def withheld_items() -> list[tuple[str, str]]:
     if _ITEMS is not None:
         return list(_ITEMS)
     items: list[tuple[str, str]] = []
-    ase = _module("ase_panel_withheld", "scripts/ase_panel/summarize.py")
-    if not ase.tex_table():
-        items.append(("tab:ase", "rerun pending"))
     panel = _module("gmin_panel_withheld", "scripts/gmin_panel/run_panel.py")
     rows = panel.read_rows(REPO / "bench/gmin-panel/rows.csv")
     quoted = {item["system"] for item in panel.quoted_summary(panel.summarise(rows, "latest"))}
