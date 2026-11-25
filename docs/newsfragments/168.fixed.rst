@@ -1,13 +1,13 @@
-After a failed restraint block, the plain-surface hold in
-``SurfacePortfolio`` now ends. It lifts when the plain walk reaches a
-lower minimum, or once the hold has lasted more blocks than the run had
-settled when it began. The next block then goes back to the restraint
-that failed. Before, one failed block held the plain surface for the
-rest of the run, so a ``cluster_search`` chain left on the icosahedral
-shelf at 75 points never drew the restraint again.
+A restraint block that does not beat the incumbent it opened on holds
+the plain surface. The chain stands again where it stood when that
+incumbent was found. The first such hold ends when the plain walk
+reaches a lower minimum, or once the hold has lasted more blocks than
+the run had settled when it began. That one lift tries the failed
+restraint again. A later failure stays on the plain surface until the
+chain has been quiet for longer than its own longest quiet stretch,
+and that stall tries the restraint once.
 
-The unrestrained quench beside a restrained relaxation is screened with
-its proposal. A full pass that starts where a restraint screen kept the
-restraint no longer repeats it from the restraint's answer.
-``RelaxStats::plain_quenches`` and ``RelaxStats::plain_walks`` count
-those quenches and the ones whose minimum the chain walked.
+The unrestrained quench beside a restrained relaxation runs on that
+same stall. A hop that is still moving does not pay for it. A full pass
+that starts where a restraint screen kept the restraint does not repeat
+it. RelaxStats counts those quenches and the ones the chain walks.

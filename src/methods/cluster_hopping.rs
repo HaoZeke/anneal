@@ -798,6 +798,9 @@ pub struct Ledger {
     before_gain: Option<(f64, Array1<f64>)>,
     /// Speculative quenches must not publish a minimum the chain does not walk.
     pub(crate) suspend_record: bool,
+    /// The chain has been quiet longer than its own longest quiet stretch.
+    /// The unrestrained quench beside a restraint runs only then.
+    pub(crate) run_plain_quench: bool,
 }
 
 struct DiagnosticQuench<'a> {
@@ -885,6 +888,7 @@ impl Ledger {
             block_chain: None,
             before_gain: None,
             suspend_record: false,
+            run_plain_quench: false,
         }
     }
 
@@ -6632,6 +6636,9 @@ where
             ledger.best
         };
         let hop_origin = (e, x.clone());
+        // The extra unrestrained quench is an escape, not a step of every
+        // restrained hop. Quiet is the hops since the last new minimum.
+        ledger.run_plain_quench = stalled(cfg, quiet, longest_quiet);
         if chain_best < best_seen - new_lowest {
             if let Some(origin) = ledger.block_chain.clone() {
                 ledger.before_gain = Some(origin);
