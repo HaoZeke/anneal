@@ -5,7 +5,9 @@ The clock is the same serial arm the Snakemake rule ``tip4p_h2h`` runs,
 inside ``sudo unshare --uts`` with hostname bench and ``taskset -c 0``. One
 call runs anneal and GMIN from the same start at a 2_000_000-evaluation cap,
 the paper ceiling for (H2O)20. The Cambridge database lists the reference for
-every size below except 25.
+every size below except 25. Takeuchi, J. Chem. Inf. Model. 2008,
+doi:10.1021/ci800238w, reports a new TIP4P global minimum at n = 25.
+This timing does not use that energy.
 """
 
 import subprocess

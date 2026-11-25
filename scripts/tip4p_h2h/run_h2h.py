@@ -13,8 +13,11 @@ A hit is a quenched energy at or below the reference plus 0.001 kJ/mol.
 The references are the Cambridge Cluster Database TIP4P headers, which the
 database lists for n <= 21. (H2O)25 is not in the database, so its hit is
 scored against the lowest energy either arm reached in the session and no
-early stop is armed. Before the campaign both codes are checked to reproduce
-the Cambridge header at the published minimum (``--verify``).
+early stop is armed. Takeuchi, J. Chem. Inf. Model. 2008
+(doi:10.1021/ci800238w), reports new TIP4P global minima at n = 25, 28, 29,
+and 30. This scorer does not use that energy. Before the campaign both
+codes are checked to reproduce the Cambridge header at the published
+minimum (``--verify``).
 
 Medians are Hyndman-Fan type 7. ``pot_s`` is time inside the potential and
 ``outside_s`` is the rest of the wall. ``fisher_p`` is the two-sided Fisher

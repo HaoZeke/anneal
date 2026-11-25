@@ -802,9 +802,15 @@ The budget counts combined energy-and-gradient passes for this code and
 The hit counts for this code and GMIN are 12 and 8 on
 (H\(_2\)O)\(_8\), 7 and 0 on (H\(_2\)O)\(_{15}\), 6 and 0 on
 (H\(_2\)O)\(_{20}\), and 0 and 0 on (H\(_2\)O)\(_{21}\).
-(H\(_2\)O)\(_{25}\) has no independent reference and is not scored; the
-lowest energy of this code there is \(-1113.035\)~kJ/mol and that of GMIN
+(H\(_2\)O)\(_{25}\) is outside the Wales--Hodges TIP4P set used as the
+reference here, which stops at \(n \le 21\), and it is not scored
+\cite{walesGlobalMinimaWater1998}.
+Takeuchi applied a geometry optimization method to TIP3P and TIP4P
+clusters for \(n \le 30\) and reports new TIP4P global minima at
+\(n = 25\), 28, 29, and 30 \cite{takeuchiWaterClusters2008}.
+The lowest energy of this code there is \(-1113.035\)~kJ/mol and that of GMIN
 \(-1087.334\)~kJ/mol.
+Those values are not compared with that published minimum.
 
 % tip4p-gmin table: start
 \begin{table}
@@ -818,8 +824,12 @@ The budget of this code counts one call per combined energy and gradient pass, a
 every \texttt{POTENTIAL} entry, including \texttt{GRADT=false}.
 The numeric ceiling is applied separately in each arm's unit and is not an equal-work budget;
 no cross-arm hit, work, or wall test is reported.
-(H\(_2\)O)\(_{25}\) has no independent reference and is not scored; its row gives the lowest and
-the median best energy of each arm in kJ/mol. The Supporting Information gives the input, revision,
+(H\(_2\)O)\(_{25}\) is outside the Wales--Hodges set (\(n \le 21\)) and is not scored.
+Takeuchi reports new TIP4P global minima at \(n = 25\), 28, 29, and 30
+\cite{takeuchiWaterClusters2008}.
+The row gives the lowest and the median best energy of each arm in kJ/mol
+and is not a comparison with that published minimum.
+The Supporting Information gives the input, revision,
 host, driver, and row record.}
 \label{tab:tip4p-gmin}
 \centering

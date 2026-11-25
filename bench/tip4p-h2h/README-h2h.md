@@ -27,6 +27,9 @@ below the reference plus 0.001 kJ/mol. The references are the Cambridge
 Cluster Database TIP4P headers, which the database lists for n ≤ 21; (H₂O)₂₅
 is not in the database, so its hit is scored against the lowest energy either
 arm reached in the session and no early stop is armed.
+Takeuchi, J. Chem. Inf. Model. 48, 2226–2233 (2008),
+doi:10.1021/ci800238w, reports new TIP4P global minima at n = 25, 28, 29,
+and 30. The energies in this file are not compared with that minimum.
 
 GMIN is built from source by `scripts/gmin_h2h/build_gmin.sh` at revision
 `aac1548a`, gfortran 13.3.0, reference BLAS/LAPACK, with NEWTIP, TIPID 4,
