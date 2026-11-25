@@ -13,6 +13,8 @@ ROWS = HERE / "lj75/rows.csv"
 REPORT = HERE / "lj75/REPORT.md"
 RESAMPLES = 10_000
 BOOTSTRAP_SEED = 20_261_123
+EXPECTED_SEEDS = 12
+SECOND_SEED_LOWER_BOUND_S = 1_826.0
 
 
 def percentile(values: list[float], probability: float) -> float:
@@ -67,10 +69,23 @@ def main() -> None:
         )
     ]
     mismatch_text = "none" if not mismatches else ", ".join(mismatches)
+    completed = len(rows)
+    noun = "seed" if completed == 1 else "seeds"
+    projection = ""
+    if completed < EXPECTED_SEEDS:
+        projected_hours = (
+            (walls[0] + SECOND_SEED_LOWER_BOUND_S) / 2 * EXPECTED_SEEDS / 3600
+        )
+        projection = f"""
+Seed 2001 remained active after {SECOND_SEED_LOWER_BOUND_S:.0f} seconds.
+Together with seed 2000, that gives a full-panel lower-bound projection
+of {projected_hours:.2f} hours. The four-hour rule stopped the incomplete
+seed; seeds 2001 through 2011 remain unmeasured.
+"""
     report = f"""# CooperativeRun LJ75 report
 
-The arm completed {len(rows)} seeds and hit the target on
-{sum(int(value) for value in hits)} seeds. Misses enter calls-to-hit as
+The arm completed {completed} {noun} and hit the target on
+{sum(int(value) for value in hits)} {noun}. Misses enter calls-to-hit as
 {budget + 1}. Intervals are percentile bootstrap 95% confidence
 intervals from {RESAMPLES} resamples with seed {BOOTSTRAP_SEED}.
 
@@ -83,6 +98,7 @@ intervals from {RESAMPLES} resamples with seed {BOOTSTRAP_SEED}.
 
 Named-term, worker-total, coordinator-total, and budget mismatches:
 {mismatch_text}.
+{projection}
 
 Fisher's exact test and the Mann-Whitney U test are unavailable because
 the requested data contain one arm and no comparison arm.
