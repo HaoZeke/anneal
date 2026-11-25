@@ -1078,7 +1078,7 @@ def gmin_rows_patch(audit: Audit) -> tuple[str, str, str]:
 
 
 def imported(audit: Audit, folder: str, name: str = "rows.csv", keys: tuple[str, str] = ("source", "blob")) -> str:
-    """An imported row file is the blob its PROVENANCE names, at that path of a commit on that record branch."""
+    """An imported row file is the blob its PROVENANCE names, at that path of a commit on that record ref."""
     fields = dict(line.split(" ", 1) for line in audit.text(f"{folder}/PROVENANCE").splitlines())
     path = f"{folder}/{name}"
     source, blob = fields[keys[0]], fields[keys[1]]
@@ -1086,7 +1086,7 @@ def imported(audit: Audit, folder: str, name: str = "rows.csv", keys: tuple[str,
     audit.cell(path, "blob of the copy", blob, local)
     audit.cell(path, "blob at the record commit", blob, git("rev-parse", f"{fields['commit']}:{source}").stdout.strip())
     on_branch = _commit_on_audit_ref(fields["branch"], fields["commit"])
-    audit.record(on_branch, path, "the record commit is on the record branch of origin", fields["branch"],
+    audit.record(on_branch, path, "the record commit is on the record ref of origin", fields["branch"],
                  "on it" if on_branch else "not on it")
     return path
 
@@ -1306,7 +1306,7 @@ def gmin_develop_data(audit: Audit, panel: object) -> None:
                    "revision, which only sets the number of parallel build jobs,")
     audit.said(SI, f"The rows of this code in the second block are the submitted revision "
                    f"\\texttt{{\\seqsplit{{{SUBMITTED}}}}}, session {GMIN_DEVELOP_SESSION} of "
-                   "\\path{paper/jctc/data/gmin_develop}, copied from the record branch its \\texttt{PROVENANCE} file "
+                   "\\path{paper/jctc/data/gmin_develop}, copied from the record ref its \\texttt{PROVENANCE} file "
                    "names.")
     audit.said(SI, "The GMIN tables of the main text use four GMIN inputs.")
 
@@ -1581,7 +1581,7 @@ def knockout_move_a(audit: Audit, cells: dict[str, dict]) -> None:
     audit.said(COVER, "At 12 seeds, neither rescaling the preset lengths nor replacing adaptive\n"
                       "move choice by a uniform draw produces a detectable hit-rate change in the\n"
                       "tested panels.")
-    audit.said(SI, "\\texttt{\\seqsplit{50c532253f3ad11e6457a119bb603f05b4f0be79}} of \\path{record/knockout-move-a}, on "
+    audit.said(SI, "\\texttt{\\seqsplit{50c532253f3ad11e6457a119bb603f05b4f0be79}} of \\path{refs/audit/record/knockout-move-a}, on "
                    "the same develop commit.")
     audit.said(SI, "even seeds run the preset first and odd seeds the uniform draw first.")
     audit.record("the choice among the moves, the" not in collapse(audit.text(TEX)), TEX,
@@ -1647,7 +1647,7 @@ def knockout_pairscale(audit: Audit, cells: dict[str, dict]) -> None:
     audit.said(TEX, "Table~\\ref{tab:knockouts} gives three paired on/off tests: the former\n"
                     "structure templates, the preset length unit, and adaptive move choice.")
     audit.said(SI, "\\texttt{\\seqsplit{5c37c840ed2e9f9a2d881105363b33762b5cca31}} of "
-                   "\\path{record/knockout-pairscale}, on develop "
+                   "\\path{refs/audit/record/knockout-pairscale}, on develop "
                    "\\texttt{\\seqsplit{dd6ff9273be30ab317bfd5508596f4beb19cb3a4}}.")
     audit.said(SI, "even seeds run the Lennard-Jones diameter first and odd seeds the Morse minimum first.")
     audit.record("the length unit, the" not in collapse(audit.text(TEX)), TEX,
@@ -2232,7 +2232,7 @@ OUTSIDE_DATA = "paper/jctc/data/outside_perf"
 
 
 def outside_session(audit: Audit) -> None:
-    """tab:si-outside is the two builds of 61fa67cf in record/outside-perf3-r2, recomputed from its per-seed rows."""
+    """tab:si-outside is the two builds of 61fa67cf in refs/audit/record/outside-perf3-r2, recomputed from its per-seed rows."""
     fields = dict(line.split(" ", 1) for line in audit.text(f"{OUTSIDE_DATA}/PROVENANCE").splitlines())
     path = f"{OUTSIDE_DATA}/rows.csv"
     source = git("show", f"{fields['commit']}:{fields['source']}").stdout
@@ -2250,7 +2250,7 @@ def outside_session(audit: Audit) -> None:
                git("hash-object", str(ROOT / path)).stdout.strip())
     audit.cell(path, "selection from the record source", "arms develop,develop_prime", fields["selection"])
     on_branch = _commit_on_audit_ref(fields["branch"], fields["commit"])
-    audit.record(on_branch, path, "the record commit is on the record branch of origin",
+    audit.record(on_branch, path, "the record commit is on the record ref of origin",
                  fields["branch"], "on it" if on_branch else "not on it")
     audit.cell(f"{OUTSIDE_DATA}/PROVENANCE", "tree of the record commit", fields["tree"],
                git("rev-parse", f"{fields['commit']}^{{tree}}").stdout.strip())
@@ -2287,7 +2287,7 @@ G1_STORED = ("bench/morse-gmin/seeds.csv", "bench/morse-panel/seeds.csv")
 
 
 def morse_g1(audit: Audit) -> None:
-    """tab:si-morse-g1 is the anneal rows of record/g1-develop-stock, checked row by row and recomputed."""
+    """tab:si-morse-g1 is the anneal rows of refs/audit/record/g1-develop-stock, checked row by row and recomputed."""
     path = imported(audit, G1_DATA)
     fields = dict(line.split(" ", 1) for line in audit.text(f"{G1_DATA}/PROVENANCE").splitlines())
     commit = fields["commit"]
@@ -2345,7 +2345,7 @@ def morse_g1(audit: Audit) -> None:
     audit.said(SI, "The record pairs these rows with stored GMIN rows of earlier sessions, which name no machine for "
                    "any cluster and no GMIN revision for five of the ten, so the article prints this code alone here.")
     audit.said(SI, "The rows are copied from commit \\texttt{\\seqsplit{4256269394435f77787d2bfdbead2321e08340a6}} "
-                   "of \\path{record/g1-develop-stock}")
+                   "of \\path{refs/audit/record/g1-develop-stock}")
     audit.said(TEX, "The Supporting Information runs the submitted revision alone on ten more Morse clusters, of 30, "
                     "38, 70 and 80 atoms at \\(\\rho\\) from 3 to 14, where it hits from 4 to 12 of 12 seeds.")
     audit.cell(f"{G1_DATA}/PROVENANCE", "the cited record commit", "4256269394435f77787d2bfdbead2321e08340a6", commit)
@@ -2357,7 +2357,7 @@ G3_TRACE_FILES = ("examples/h2h_gmin_proof.rs", "examples/h2h_morse.rs", "src/me
 
 
 def g3_session(audit: Audit) -> None:
-    """The traced session of record/g3-funnel reproduces the rows of this code in the GMIN table seed by seed."""
+    """The traced session of refs/audit/record/g3-funnel reproduces the rows of this code in the GMIN table seed by seed."""
     path = imported(audit, G3_DATA)
     fields = dict(line.split(" ", 1) for line in audit.text(f"{G3_DATA}/PROVENANCE").splitlines())
     commit = fields["commit"]
@@ -2403,7 +2403,7 @@ def g3_session(audit: Audit) -> None:
                    "its archived rows, and a replay of each run gives the same record of accepted\n"
                    "minima and the same lowest energy.\n"
                    "All 60 seeds are rows of this code printed in the GMIN table.")
-    audit.said(SI, "Commit \\texttt{\\seqsplit{e578f267b3826cfd7e0f1737515bc45f1b8a72c6}} of \\path{record/g3-funnel}")
+    audit.said(SI, "Commit \\texttt{\\seqsplit{e578f267b3826cfd7e0f1737515bc45f1b8a72c6}} of \\path{refs/audit/record/g3-funnel}")
     audit.said(SI, "removes no line of \\path{src}, and runs with the record on.")
 
 

@@ -100,7 +100,7 @@ def table() -> str:
         [
             "\\begin{table}",
             "\\caption{Outside time of the submitted revision \\texttt{61fa67cf} in one session of",
-            "\\texttt{record/outside-perf3-r2} (commit \\texttt{9178884e}): the arms \\texttt{develop} and",
+            "\\texttt{refs/\\allowbreak{}audit/\\allowbreak{}record/\\allowbreak{}outside-perf3-r2} (commit \\texttt{9178884e}): the arms \\texttt{develop} and",
             "\\texttt{develop\\_prime} are two builds of that source, with the same binary digest, run on",
             "seeds 2000--2011 on core 0.",
             "Both arms take the same calls to the same minimum on every seed.",
