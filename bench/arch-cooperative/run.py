@@ -71,6 +71,17 @@ def paper_budget() -> int:
     return budget
 
 
+def cargo_target_directory() -> Path:
+    output = subprocess.run(
+        ["cargo", "metadata", "--format-version", "1", "--no-deps"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return Path(json.loads(output.stdout)["target_directory"])
+
+
 def expanded_seed(seed: int, replica: int) -> int:
     return (seed + replica * 0x9E3779B97F4A7C15) & ((1 << 64) - 1)
 
@@ -219,8 +230,9 @@ def append_row(row: dict[str, object]) -> None:
 def run_seed(seed: int) -> dict[str, object]:
     budget = paper_budget()
     per_replica = budget // REPLICAS
-    binary = ROOT / "target/release/examples/lj_cluster_search"
-    server_binary = ROOT / "target/release/examples/catalog_server"
+    examples = cargo_target_directory() / "release/examples"
+    binary = examples / "lj_cluster_search"
+    server_binary = examples / "catalog_server"
     for executable in (binary, server_binary):
         if not executable.is_file():
             raise RuntimeError(f"missing release executable {executable.name}")
