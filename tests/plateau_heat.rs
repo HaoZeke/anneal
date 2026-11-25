@@ -108,7 +108,7 @@ fn metropolis_heat_follows_the_plateau() {
 
 /// Two code paths meet in this walk, and each pin has a different cause.
 ///
-/// Cold `0xc99470c0ab8b04d8` is the branch's walk. The generic packing
+/// Cold `0x7a432c4eea7a978a` is the branch's walk. The generic packing
 /// probe changes it from develop's `0xfb5afaab4e40a443`; the observed-basis
 /// stall probe fires three times here. With every packing candidate
 /// relaxed in full the pin was `0x47c7cc96bba7b3ea`, and before the merge
@@ -116,6 +116,11 @@ fn metropolis_heat_follows_the_plateau() {
 /// differed there was the last, a stall climb accepted at hop 213 with an
 /// infinite energy, which develop's check that a stall adoption is sane
 /// refuses.
+///
+/// Before refused packing candidates took the walk's audit escape the
+/// cold pin was `0xc99470c0ab8b04d8` at both deferrals and the hot pin at
+/// hop 0 `0x555f876ee3bdc4dc`; with the audit switched off in a scratch
+/// build the test returns those values.
 ///
 /// Hot `0x44038697bde16fb7`. With every packing candidate relaxed in full
 /// it was `0x1a623a8e37ad1d43`, the composition of the packing probe with
@@ -128,7 +133,7 @@ fn lattice_exchange_follows_the_plateau() {
     let mut cfg = Config::recommended(ATOMS);
     cfg.restart_patience = 2_000;
     let (cold, hot) = pair(&cfg, 30_000, 2000);
-    assert_eq!(fingerprint(&cold), 0xc99470c0ab8b04d8, "preset walk");
+    assert_eq!(fingerprint(&cold), 0x7a432c4eea7a978a, "preset walk");
     assert_eq!(
         fingerprint(&hot),
         0x44038697bde16fb7,
@@ -139,8 +144,8 @@ fn lattice_exchange_follows_the_plateau() {
     // the cold fingerprint where it is and moves the hot one.
     cfg.packing_deferral = 0;
     let (cold, hot) = pair(&cfg, 30_000, 2000);
-    assert_eq!(fingerprint(&cold), 0xc99470c0ab8b04d8, "probe at hop 0");
-    assert_eq!(fingerprint(&hot), 0x555f876ee3bdc4dc, "probe at hop 0");
+    assert_eq!(fingerprint(&cold), 0x7a432c4eea7a978a, "probe at hop 0");
+    assert_eq!(fingerprint(&hot), 0x677e80e2449d85e0, "probe at hop 0");
 
     cfg.suppress_generic_packings = true;
     let (cold, hot) = pair(&cfg, 30_000, 2000);
