@@ -7512,12 +7512,8 @@ where
                         None
                     } else {
                         new_incumbent = false;
-                        if cfg.detected_symmetry {
-                            crate::csm::propose(x.view(), classes)
-                        } else {
-                            crate::csm::propose_templates(x.view(), classes)
-                        }
-                        .map(|projected| projected.coordinates)
+                        crate::csm::propose_for(cfg.detected_symmetry, x.view(), classes)
+                            .map(|projected| projected.coordinates)
                     }
                 }
                 ContinuousSymmetry::Off => None,

@@ -4,9 +4,12 @@
 //! Section 3.3, and GMIN `SYMMETRYCSM`. The structure is centred and scaled
 //! so its largest radius is 1. For each operation, a class-blocked assignment
 //! matches the operated image to the original, and the proposed geometry is
-//! the mean of those operated, permuted images. [`crate::csm::propose`] takes its
-//! orientations from the inertia tensor plus one fixed half turn, and
-//! draws no random number.
+//! the mean of those operated, permuted images. [`crate::csm::propose`]
+//! projects onto the `D_5h`, `C_5` and `C_i` templates at orientations from
+//! the inertia tensor plus one fixed one-fifth turn.
+//! [`crate::csm::propose_for`] with detected symmetry on instead projects,
+//! in the input frame, onto the operations detected on the structure that
+//! keep every atom within its class. Neither draws a random number.
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -241,8 +244,32 @@ fn inversion_ops_ref() -> &'static [[[f64; 3]; 3]] {
     OPS.get_or_init(inversion_ops)
 }
 
-/// Projects onto a detected operation set with the lowest measure.
+/// Projects onto `D_5h`, `C_5`, or `C_i`, returning the group with the lowest
+/// measure. This is [`propose_for`] with detected symmetry off.
 pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjection> {
+    propose_for(false, x, classes)
+}
+
+/// The lowest-measure projection, onto operations detected on `x` when
+/// `detected_symmetry` is on and onto the `D_5h`, `C_5` and `C_i` templates
+/// when it is off.
+///
+/// A detected projection keeps only operations that carry every atom onto
+/// the atoms of its own class, and its [`GroupProjection::group`] is
+/// `"detected"`.
+pub fn propose_for(
+    detected_symmetry: bool,
+    x: ArrayView1<'_, f64>,
+    classes: &[u32],
+) -> Option<GroupProjection> {
+    if detected_symmetry {
+        propose_detected(x, classes)
+    } else {
+        propose_templates(x, classes)
+    }
+}
+
+fn propose_detected(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjection> {
     if let Some(cached) = cached_propose(x, classes) {
         return cached;
     }
@@ -254,7 +281,7 @@ pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjectio
     // Detected operations are already in the input frame, so projecting
     // once at the identity avoids repeating the same assignment across
     // inertia orientations and lets the op cache reuse solved inverses.
-    let best = detected_ops(x)
+    let best = detected_ops(x, classes)
         .and_then(|ops| project_verified(x, classes, &ops, &[identity()]))
         .and_then(|(coordinates, measure)| {
             (closest_pair(&coordinates) >= SINGULAR_PAIR).then_some(GroupProjection {
@@ -276,9 +303,14 @@ fn conjugate_ops(ops: &[[[f64; 3]; 3]], rotation: &[[f64; 3]; 3]) -> Vec<[[f64; 
         .collect()
 }
 
-fn detected_ops(x: ArrayView1<'_, f64>) -> Option<Vec<[[f64; 3]; 3]>> {
+/// Largest deviation, on unit-radius coordinates, of a detected operation.
+const DETECTION_TOLERANCE: f64 = 0.25;
+
+/// The closed operation set detected on `x` whose every element carries each
+/// atom onto the atoms of its own class.
+fn detected_ops(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<Vec<[[f64; 3]; 3]>> {
     let n = x.len() / 3;
-    if n < 2 {
+    if n < 2 || classes.len() != n {
         return None;
     }
     let (centred, _, _) = centre_and_scale(x, n)?;
@@ -291,7 +323,17 @@ fn detected_ops(x: ArrayView1<'_, f64>) -> Option<Vec<[[f64; 3]; 3]>> {
     let orders: Vec<usize> = (2..=n).collect();
     // Detection runs on unit-radius centred coordinates so it matches the
     // scale normalisation inside `project`.
-    let candidates = crate::symmetrise::detect_all(scaled.view(), n, &orders, 0.25);
+    let mut candidates =
+        crate::symmetrise::detect_all(scaled.view(), n, &orders, DETECTION_TOLERANCE);
+    let one_class = classes.iter().all(|&class| class == classes[0]);
+    if !one_class {
+        // The scan matches each image to the nearest atom of any class, so
+        // an operation that swaps species passes it. Projection matches
+        // within each class and cannot use one.
+        candidates.retain(|cand| {
+            preserves_classes(&crate::symmetrise::candidate_op(cand), &centred, classes)
+        });
+    }
     let generators = select_generators(&candidates);
     if generators.is_empty() {
         return None;
@@ -300,7 +342,36 @@ fn detected_ops(x: ArrayView1<'_, f64>) -> Option<Vec<[[f64; 3]; 3]>> {
         .iter()
         .map(crate::symmetrise::candidate_op)
         .collect();
-    close_detected_ops(&ops)
+    let group = close_detected_ops(&ops)?;
+    (one_class
+        || group
+            .iter()
+            .all(|op| preserves_classes(op, &centred, classes)))
+    .then_some(group)
+}
+
+/// Whether `op` carries `centred` onto itself class by class: the RMS
+/// distance from each operated atom to the nearest atom of its class is
+/// under [`DETECTION_TOLERANCE`], the measure the detector applies to the
+/// whole cloud.
+fn preserves_classes(op: &[[f64; 3]; 3], centred: &[[f64; 3]], classes: &[u32]) -> bool {
+    let n = centred.len();
+    let mut total = 0.0;
+    for (atom, &point) in centred.iter().enumerate() {
+        let image = mul_vec(op, point);
+        let nearest = centred
+            .iter()
+            .zip(classes)
+            .filter(|&(_, &class)| class == classes[atom])
+            .map(|(other, _)| {
+                (0..3)
+                    .map(|axis| (image[axis] - other[axis]).powi(2))
+                    .sum::<f64>()
+            })
+            .fold(f64::INFINITY, f64::min);
+        total += nearest;
+    }
+    (total / n as f64).sqrt() < DETECTION_TOLERANCE
 }
 
 const CSM_CLOSURE: f64 = 0.27;
@@ -1130,7 +1201,7 @@ mod tests {
         let (_, noisy) =
             project(shifted.view(), &classes, &inversion_ops(), &[identity()]).unwrap();
         assert!(noisy > 1e-3, "{noisy}");
-        let chosen = propose(octahedron.view(), &classes).expect("projection");
+        let chosen = propose_detected(octahedron.view(), &classes).expect("projection");
         assert_eq!(chosen.group, "detected");
         assert!(chosen.measure < 1e-8, "{}", chosen.measure);
     }
@@ -1145,18 +1216,18 @@ mod tests {
         coords.extend([0.0, 0.0, 1.2, 0.0, 0.0, -1.2]);
         let x = Array1::from_vec(coords);
         let classes = vec![0; 7];
-        let projection = propose(x.view(), &classes).expect("projection");
+        let projection = propose_detected(x.view(), &classes).expect("projection");
         let mut reversed = Array1::zeros(x.len());
         for atom in 0..7 {
             for axis in 0..3 {
                 reversed[3 * atom + axis] = x[3 * (6 - atom) + axis];
             }
         }
-        let flipped = propose(reversed.view(), &classes).expect("relabelled");
+        let flipped = propose_detected(reversed.view(), &classes).expect("relabelled");
         assert!((flipped.measure - projection.measure).abs() < 1e-8);
         let mut noisy = x.clone();
         noisy[2] += 0.25;
-        let shifted = propose(noisy.view(), &classes).expect("noisy");
+        let shifted = propose_detected(noisy.view(), &classes).expect("noisy");
         assert!(shifted.measure > 1e-3, "{}", shifted.measure);
     }
 
@@ -1333,7 +1404,7 @@ mod tests {
     #[test]
     fn a_pair_inside_the_singular_distance_is_not_proposed() {
         let x = Array1::from_vec(vec![0.0, 0.0, 0.0, 0.005, 0.0, 0.0]);
-        assert!(propose(x.view(), &[0, 0]).is_none());
+        assert!(propose_detected(x.view(), &[0, 0]).is_none());
     }
 
     fn rotation_from(axis: [f64; 3], angle: f64) -> [[f64; 3]; 3] {
@@ -1411,9 +1482,9 @@ mod tests {
         let mut measures = Vec::new();
         for structure in [symmetric, distorted] {
             let classes = vec![0u32; structure.len() / 3];
-            let plain = propose(structure.view(), &classes).expect("projection");
+            let plain = propose_detected(structure.view(), &classes).expect("projection");
             let turned = apply_rotation(&structure, rotation);
-            let spun = propose(turned.view(), &classes).expect("rotated");
+            let spun = propose_detected(turned.view(), &classes).expect("rotated");
             let gap = (plain.measure - spun.measure).abs();
             assert!(
                 gap < 1e-4,
@@ -1436,7 +1507,7 @@ mod tests {
         let x = Array1::from_vec(vec![
             0.2, -0.5, 0.1, 1.1, 0.3, -0.4, -0.6, 0.8, 0.7, 0.4, -0.2, 1.3,
         ]);
-        assert!(propose(x.view(), &[0, 0, 0, 0]).is_none());
+        assert!(propose_detected(x.view(), &[0, 0, 0, 0]).is_none());
     }
 
     #[test]
@@ -1469,11 +1540,11 @@ mod tests {
         // operations.
         x[2] += 0.25;
         let classes = vec![0u32; 7];
-        let base = propose(x.view(), &classes).expect("base scale projection");
+        let base = propose_detected(x.view(), &classes).expect("base scale projection");
         for scale in [0.1_f64, 0.25, 4.0, 25.0] {
             let scaled = x.mapv(|v| v * scale);
             clear_op_cache();
-            let got = propose(scaled.view(), &classes).expect("scaled projection");
+            let got = propose_detected(scaled.view(), &classes).expect("scaled projection");
             assert!(
                 (got.measure - base.measure).abs() < 1e-10,
                 "scale={scale} measure {} vs {}",
@@ -1494,9 +1565,9 @@ mod tests {
     fn propose_admits_icosahedral_group_and_closes_approximate_generators() {
         let ico = icosahedron();
         let classes = vec![0u32; 12];
-        let ih = detected_ops(ico.view()).expect("icosahedral group");
+        let ih = detected_ops(ico.view(), &classes).expect("icosahedral group");
         assert_eq!(ih.len(), 120, "Ih must have 120 operations");
-        let ico_proj = propose(ico.view(), &classes).expect("icosahedral projection");
+        let ico_proj = propose_detected(ico.view(), &classes).expect("icosahedral projection");
         assert!(ico_proj.measure < 1e-8, "{}", ico_proj.measure);
 
         // Perturb the icosahedron slightly: exact 1e-6 generate_group runs to
@@ -1519,14 +1590,15 @@ mod tests {
             crate::symmetrise::generate_group(&gens, 120).is_err(),
             "exact 1e-6 closure should fail on approximate generators"
         );
-        let approx_ops = detected_ops(approx.view()).expect("approximate closure");
+        let approx_ops = detected_ops(approx.view(), &classes).expect("approximate closure");
         assert_eq!(
             approx_ops.len(),
             60,
             "approximate icosahedron closes to I (60)"
         );
         assert!(is_closed_within(&approx_ops, CSM_CLOSURE));
-        let approx_proj = propose(approx.view(), &classes).expect("approximate projection");
+        let approx_proj =
+            propose_detected(approx.view(), &classes).expect("approximate projection");
         assert!(approx_proj.measure > 1e-5);
     }
 
@@ -1557,20 +1629,67 @@ mod tests {
         );
     }
 
+    /// An octahedron whose axial pair is a second species has `O_h` as a
+    /// point set and `D_4h` as a labelled structure. The eight-fold larger
+    /// set carries axial atoms onto equatorial sites, and projecting onto it
+    /// pulls the structure off itself.
+    #[test]
+    fn detected_ops_exclude_class_swapping_operations() {
+        let octahedron = Array1::from_vec(vec![
+            1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+            -1.0,
+        ]);
+        let blind = detected_ops(octahedron.view(), &[0; 6]).expect("O_h");
+        assert_eq!(blind.len(), 48);
+        let classes = [0, 0, 0, 0, 1, 1];
+        let (centred, _, _) = centre_and_scale(octahedron.view(), 6).expect("scale");
+        let nearest = |image: [f64; 3]| {
+            (0..6)
+                .min_by(|&left, &right| {
+                    let gap = |atom: usize| {
+                        (0..3)
+                            .map(|axis| (image[axis] - centred[atom][axis]).powi(2))
+                            .sum::<f64>()
+                    };
+                    gap(left).total_cmp(&gap(right))
+                })
+                .expect("atoms")
+        };
+        let swaps = |op: &[[f64; 3]; 3]| {
+            (0..6).any(|atom| classes[nearest(mul_vec(op, centred[atom]))] != classes[atom])
+        };
+        assert_eq!(blind.iter().filter(|op| swaps(op)).count(), 32);
+
+        let aware = detected_ops(octahedron.view(), &classes).expect("D_4h");
+        assert_eq!(aware.len(), 16);
+        assert!(aware.iter().all(|op| !swaps(op)));
+        assert!(is_closed_ops(&aware));
+
+        let (_, blind_measure) =
+            project(octahedron.view(), &classes, &blind, &[identity()]).expect("blind");
+        assert!(blind_measure > 1e-2, "{blind_measure}");
+        let projection = propose_detected(octahedron.view(), &classes).expect("D_4h projection");
+        assert_eq!(projection.group, "detected");
+        assert!(projection.measure < 1e-12, "{}", projection.measure);
+        for (got, want) in projection.coordinates.iter().zip(octahedron.iter()) {
+            assert!((got - want).abs() < 1e-9, "{got} vs {want}");
+        }
+    }
+
     #[test]
     fn propose_projects_once_and_reuses_op_cache() {
         let ico = icosahedron();
         let classes = vec![0u32; 12];
-        let ih = detected_ops(ico.view()).expect("Ih");
+        let ih = detected_ops(ico.view(), &classes).expect("Ih");
         assert_eq!(ih.len(), 120);
-        let first = propose(ico.view(), &classes).expect("first projection");
+        let first = propose_detected(ico.view(), &classes).expect("first projection");
         let cached_ops = OP_CACHE.with(|slot| slot.borrow().len());
         assert!(
             cached_ops > 0 && cached_ops < ih.len(),
             "expected single-orientation op cache reuse, got {cached_ops} entries for {} ops",
             ih.len()
         );
-        let second = propose(ico.view(), &classes).expect("cached projection");
+        let second = propose_detected(ico.view(), &classes).expect("cached projection");
         assert_eq!(first, second);
     }
 

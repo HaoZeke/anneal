@@ -450,9 +450,12 @@ fn detected_propose_matches_each_class_separately() {
         }
     }
     let coordinates = ndarray::Array1::from_vec(coordinates);
-    let projection =
-        anneal_core::csm::propose(coordinates.view(), &classes).expect("multi-class projection");
+    let projection = anneal_core::csm::propose_for(true, coordinates.view(), &classes)
+        .expect("multi-class projection");
     assert_eq!(projection.group, "detected");
+    let templates =
+        anneal_core::csm::propose(coordinates.view(), &classes).expect("template projection");
+    assert_ne!(templates.group, "detected");
     assert!(projection.measure < 1.0e-12, "{}", projection.measure);
     assert_eq!(projection.coordinates.len(), coordinates.len());
 }
