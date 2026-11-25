@@ -420,6 +420,53 @@ def test_workspace_version_ahead_of_the_newest_tag_stays_auditable(monkeypatch):
     assert not [p for p in audit_mod.unauditable() if "release tag" in p]
 
 
+def test_a_tag_on_a_descendant_is_not_the_cited_release(monkeypatch):
+    """Tagging a descendant of the submitted revision does not move the citation.
+
+    The manuscript says that revision postdates the newest released tag.
+    v0.13.0 cut on HEAD does not predate the submitted revision, so the
+    citation stays on v0.12.0 before and after that tag exists.
+    """
+    real_git = audit_mod.git
+    head = real_git("rev-parse", "--verify", "HEAD^{commit}").stdout.strip()
+    previous = real_git("rev-parse", "--verify", "v0.12.0^{commit}").stdout.strip()
+
+    def listed(*args, stdin=None):
+        if args == ("tag", "--list", "v*"):
+            return subprocess.CompletedProcess(["git", *args], 0, "", "")
+        if args == ("ls-remote", "--tags", "origin"):
+            text = (
+                f"{previous}\trefs/tags/v0.12.0\n"
+                f"{previous}\trefs/tags/v0.12.0^{{}}\n"
+                f"{head}\trefs/tags/v0.13.0\n"
+                f"{head}\trefs/tags/v0.13.0^{{}}\n"
+            )
+            return subprocess.CompletedProcess(["git", *args], 0, text, "")
+        return real_git(*args, stdin=stdin)
+
+    monkeypatch.setattr(audit_mod, "git", listed)
+    assert head != real_git("rev-parse", "--verify", f"{audit_mod.SUBMITTED}^{{commit}}").stdout.strip()
+    assert audit_mod.cited_release_tag() == "v0.12.0"
+
+
+def test_a_local_tag_on_head_is_not_the_cited_release(monkeypatch):
+    """A local v0.13.0 tag on HEAD leaves the manuscript's tag at v0.12.0."""
+    real_git = audit_mod.git
+    head = real_git("rev-parse", "--verify", "HEAD^{commit}").stdout.strip()
+
+    def listed(*args, stdin=None):
+        if args == ("tag", "--list", "v*"):
+            return subprocess.CompletedProcess(["git", *args], 0, "v0.12.0\nv0.13.0\n", "")
+        if args == ("ls-remote", "--tags", "origin"):
+            return subprocess.CompletedProcess(["git", *args], 0, "", "")
+        if args == ("rev-parse", "--verify", "--quiet", "v0.13.0^{commit}"):
+            return subprocess.CompletedProcess(["git", *args], 0, head + "\n", "")
+        return real_git(*args, stdin=stdin)
+
+    monkeypatch.setattr(audit_mod, "git", listed)
+    assert audit_mod.cited_release_tag() == "v0.12.0"
+
+
 @pytest.mark.parametrize(
     ("branch", "revision"),
     [

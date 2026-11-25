@@ -5447,37 +5447,96 @@ def release_tag_available(tag: str) -> bool:
 _RELEASE_TAG = re.compile(r"v(\d+)\.(\d+)\.(\d+)\Z")
 
 
+def _version_key(name: str) -> tuple[int, int, int]:
+    return tuple(int(part) for part in name[1:].split("."))
+
+
+def _commit_known(sha: str) -> bool:
+    return bool(sha) and git("cat-file", "-e", f"{sha}^{{commit}}").returncode == 0
+
+
+def _scan_release_tags() -> tuple[list[str], dict[str, str]]:
+    """vX.Y.Z tags, oldest first, and the commits this clone can see.
+
+    A local tag resolves with rev-parse. An advertised tag uses the peeled
+    commit from ls-remote: the ``^{}`` line of an annotated tag, or the tag
+    line of a lightweight tag. A tag whose commit is not in this clone stays
+    in the name list and out of the commit map.
+    """
+    names: set[str] = set()
+    commits: dict[str, str] = {}
+    for name in git("tag", "--list", "v*").stdout.split():
+        if not _RELEASE_TAG.fullmatch(name):
+            continue
+        names.add(name)
+        peeled = git("rev-parse", "--verify", "--quiet", f"{name}^{{commit}}")
+        if peeled.returncode == 0 and peeled.stdout.strip():
+            commits[name] = peeled.stdout.strip()
+    advertised: dict[str, str] = {}
+    peeled_remote: dict[str, str] = {}
+    for line in git("ls-remote", "--tags", "origin").stdout.splitlines():
+        parts = line.split()
+        if len(parts) < 2 or not parts[1].startswith("refs/tags/"):
+            continue
+        sha = parts[0]
+        name = parts[1].removeprefix("refs/tags/")
+        if name.endswith("^{}"):
+            base = name[:-3]
+            if _RELEASE_TAG.fullmatch(base):
+                peeled_remote[base] = sha
+            continue
+        if _RELEASE_TAG.fullmatch(name):
+            advertised[name] = sha
+    for name, sha in advertised.items():
+        names.add(name)
+        commit = peeled_remote.get(name, sha)
+        if name not in commits and _commit_known(commit):
+            commits[name] = commit
+    for name, sha in peeled_remote.items():
+        names.add(name)
+        if name not in commits and _commit_known(sha):
+            commits[name] = sha
+    return sorted(names, key=_version_key), commits
+
+
 def release_tag_names() -> list[str]:
     """vX.Y.Z tags present locally or advertised by origin, oldest first.
 
     The workspace version can move ahead of the newest of these before
-    that version is tagged. The manuscript names the newest tag, not
-    the workspace version.
+    that version is tagged. The manuscript does not name that untagged
+    version. ``cited_release_tag`` names the tag the submitted revision
+    postdates, which stays put when a later tag is cut on a descendant.
     """
-    names: set[str] = set()
-    for name in git("tag", "--list", "v*").stdout.split():
-        if _RELEASE_TAG.fullmatch(name):
-            names.add(name)
-    remote = git("ls-remote", "--tags", "origin")
-    for line in remote.stdout.splitlines():
-        parts = line.split()
-        if len(parts) < 2 or not parts[1].startswith("refs/tags/"):
-            continue
-        name = parts[1].removeprefix("refs/tags/")
-        if name.endswith("^{}"):
-            name = name[:-3]
-        if _RELEASE_TAG.fullmatch(name):
-            names.add(name)
-    return sorted(names, key=lambda name: tuple(int(part) for part in name[1:].split(".")))
+    names, _commits = _scan_release_tags()
+    return names
 
 
 def cited_release_tag() -> str:
-    """The newest released tag, or the workspace version when no tag exists."""
-    names = release_tag_names()
-    if names:
-        return names[-1]
-    version = re.search(r'^version = "([^"]+)"', (ROOT / "Cargo.toml").read_text(), re.M).group(1)
-    return f"v{version}"
+    """The newest release tag the submitted revision postdates.
+
+    The manuscript says that revision postdates the newest released tag.
+    A tag cut later, including the workspace version once it is tagged on
+    a descendant of the submitted revision, is not a tag that revision
+    postdates. Selecting it would report drift. When no seen tag is an
+    ancestor of the submitted revision, the newest tag name is used. When
+    no tag exists, the workspace version is used.
+    """
+    names, commits = _scan_release_tags()
+    if not names:
+        version = re.search(r'^version = "([^"]+)"', (ROOT / "Cargo.toml").read_text(), re.M).group(1)
+        return f"v{version}"
+    submitted = git("rev-parse", "--verify", "--quiet", f"{SUBMITTED}^{{commit}}").stdout.strip()
+    older = []
+    if submitted:
+        for name in names:
+            commit = commits.get(name)
+            if not commit or commit == submitted:
+                continue
+            if git("merge-base", "--is-ancestor", commit, submitted).returncode == 0:
+                older.append(name)
+    if older:
+        return older[-1]
+    return names[-1]
 
 
 def unauditable() -> list[str]:
@@ -6023,7 +6082,7 @@ def manuscript_new(audit: Audit) -> None:
                     "knockouts, which ran the submitted search source plus default-off knockout\n"
                     "switches.")
     audit.said(TEX, "The described submitted revision postdates the newest released tag,\n"
-                    "v0.12.0, and is available at\n"
+                    f"{cited_release_tag()}, and is available at\n"
                     "\\url{https://github.com/HaoZeke/anneal/commit/"
                     "61fa67cf380e46876b569da45e7cc091647a775b};\n"
                     "the Zenodo archive does not contain that revision.")
