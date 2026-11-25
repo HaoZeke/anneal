@@ -252,7 +252,7 @@ Cite `zhangGmmlp2026` beside `giriAimnetClusters2025`.
 
 ## 2026-11-11 — One argon atom on the water hexamer isomers
 
-Rock, Clothier, and Tschumper, ACS Physical Chemistry Au (2026), doi:10.1021/acsphyschemau.6c00129, optimise Ar(H2O)6. The water topologies are prism, cage, two books, bag, glove, ring, and two boats. Geometry and frequencies are MP2, and the relative energies are compared at CCSD(T). At every level they report, one argon atom changes the spacing of those topologies, and the harmonic zero-point correction is nearly the same with and without the argon, so the reordering is electronic. The record has no volume or pages yet.
+Rock, Clothier, and Tschumper, ACS Physical Chemistry Au 6(6), 1576--1586 (published online 20 October 2026; print 25 November 2026), doi:10.1021/acsphyschemau.6c00129, optimise Ar(H2O)6. The water topologies are prism, cage, two books, bag, glove, ring, and two boats. Geometry and frequencies are MP2, and the relative energies are compared at CCSD(T). At every level they report, one argon atom changes the spacing of those topologies, and the harmonic zero-point correction is nearly the same with and without the argon, so the reordering is electronic.
 
 The manuscript scores bare GFN2-xTB motif hits, and it keeps a separate TIP4P reference. This paper does not report 121 of 192 or 97 of 192. An argon-tagged MP2 order is a different surface from GFN2-xTB.
 
@@ -260,7 +260,7 @@ Cite `rockArgonHexamer2026` beside the water section. Leave the CREST table on t
 
 ## 2026-11-11 — Hydrophobic guests around six water molecules
 
-Baruah, ACS Omega (2026), doi:10.1021/acsomega.6c10192, optimises assemblies of six water molecules at ωB97X with the def2-TZV basis, with hydrophobic guests present. The guests stabilise an open book, a closed bag, a prism, and a double envelope. Weak contacts, including C-H···O, O-H···π, and O-H···F-C, move the hydrogen-bond pattern. The record has no volume or pages yet. This is a guest-stabilised density-functional assembly, not a bare-cluster global optimisation.
+Baruah, ACS Omega 11(45), 71532--71546 (published online 5 November 2026; print 17 November 2026), doi:10.1021/acsomega.6c10192, optimises assemblies of six water molecules at ωB97X with the def2-TZV basis, with hydrophobic guests present. The guests stabilise an open book, a closed bag, a prism, and a double envelope. Weak contacts, including C-H···O, O-H···π, and O-H···F-C, move the hydrogen-bond pattern. This is a guest-stabilised density-functional assembly, not a bare-cluster global optimisation.
 
 It does not contradict 121 of 192, 97 of 192, or the Wales-Hodges TIP4P geometries.
 
@@ -458,7 +458,7 @@ Cite `moshchenkovCrestEntropy2026`, `masysGoatNanodiamond2026`, and `lewisAtwell
 
 ## 2026-11-12 — Structure searches that are not the cluster preset
 
-Song, Shi, She, Sun, Cao, and Xuan, Crystal Growth and Design (5 November 2026), doi:10.1021/acs.cgd.6c00574, also arXiv:2604.08972, release selective random structure search. The record has no volume or pages yet. Symmetry-constrained random crystals are filtered for diversity and relaxed with universal machine-learning potentials. The tests are SiC, BaPtAs, layered NbSe2, and GaN nanotubes. They recover known ground states and report further polymorphs. The search is a crystal, not a Lennard-Jones cluster and not a water cluster.
+Song, Shi, She, Sun, Cao, and Xuan, Crystal Growth and Design 26(22), 9234--9244 (published online 5 November 2026; print 18 November 2026), doi:10.1021/acs.cgd.6c00574, also arXiv:2604.08972, release selective random structure search. Symmetry-constrained random crystals are filtered for diversity and relaxed with universal machine-learning potentials. The tests are SiC, BaPtAs, layered NbSe2, and GaN nanotubes. They recover known ground states and report further polymorphs. The search is a crystal, not a Lennard-Jones cluster and not a water cluster.
 
 Agada, Wang, and Biswas, arXiv:2609.20592 (17 September 2026), use the name CrystalMO-TuRBO for multi-objective trust-region Bayesian optimisation of a joint X-ray and neutron crystal refinement. The test is single-crystal Ho2Ti2O7. The objective is a diffraction residual. The manuscript's trust-region arm is the local Bayesian optimiser measured on the hop and not kept. This preprint does not run that arm, and it does not report a Lennard-Jones hit rate.
 
@@ -606,7 +606,7 @@ Cite `rahmatizadGold2026`.
 
 ## 2026-11-13 — A charge-state search of NaPb12
 
-Guevara-Vela, Rodríguez-Kessler, Muñoz-Castro, and Rocha-Rinza, The Journal of Physical Chemistry A (8 November 2026), doi:10.1021/acs.jpca.6c05536, search NaPb12. The abstract says a global structure search, followed by a density-functional refinement, puts a crown on the neutral cluster, an endohedral sodium on the monoanion, and an exohedral sodium on the dianion. The record has no volume or pages yet.
+Guevara-Vela, Rodríguez-Kessler, Muñoz-Castro, and Rocha-Rinza, The Journal of Physical Chemistry A 130(46), 9294--9303 (published online 8 November 2026; print 19 November 2026), doi:10.1021/acs.jpca.6c05536, search NaPb12. The abstract says a global structure search, followed by a density-functional refinement, puts a crown on the neutral cluster, an endohedral sodium on the monoanion, and an exohedral sodium on the dianion.
 
 Rodríguez-Kessler and Muñoz-Castro are authors of the adaptive basin hop filed as `carmonaAbhDft2026` and of the boron-cluster preprints. This paper does not name that hop, and it does not name LJ38 through LJ104 or the water hexamer. It does not contradict those counts. A head-to-head would be NaPb12 on one shared surface. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST table.
 
@@ -900,7 +900,7 @@ Cite `kirovMulticage2026` and `gudkovskikhBilayer2026`.
 
 ## 2026-11-14 — CREST samples a side chain apart from the core
 
-Rindt and Pracht, Journal of Chemical Theory and Computation (3 November 2026), doi:10.1021/acs.jctc.6c01611, detach flexible side chains from the molecular core, sample the pieces, and rebuild an approximate ensemble. A limiting variant leaves the side chains in extended reference conformations. The abstract says folded alkyl chains become competitive only past well-defined lengths, and that the method is implemented within CREST. The record has no volume or pages yet.
+Rindt and Pracht, Journal of Chemical Theory and Computation 22(22), 12324--12338 (published online 2 November 2026; print 24 November 2026), doi:10.1021/acs.jctc.6c01611, detach flexible side chains from the molecular core, sample the pieces, and rebuild an approximate ensemble. A limiting variant leaves the side chains in extended reference conformations. The abstract says folded alkyl chains become competitive only past well-defined lengths, and that the method is implemented within CREST.
 
 The hexamer comparison is a bare cluster at GFN2-xTB in xtb 6.7.1, against CREST 3.0.2. A water hexamer has no alkyl substituent, so this sampler does not run on that table. The abstract does not report 121 of 192, 97 of 192, or a user seed. The sentence that CREST 3.0.2 exposes no seed still stands. Leave the CREST table on 3.0.2. It does not warrant a head-to-head on that table.
 
@@ -1268,11 +1268,11 @@ Cite `prachtXtbHessian2026` and `prachtDcGxtb2026`. Keep the 2.5 microhartree pe
 
 Antal and Höltzl, ACS Omega (13 November 2026), doi:10.1021/acsomega.6c05381, report geometries and carbon-dioxide paths for small gallium--nickel clusters. The abstract names Ni\(_4\), Ga\(_2\)Ni\(_3\), and Ga\(_4\)Ni\(_2\), and it says Ga\(_2\)Ni\(_3\) lets products leave more readily. The record has no volume or pages yet. Four, five, and six metal atoms all sit outside 38, 55, 75, 98, and 104.
 
-Nguyen and co-workers, ACS Omega (12 November 2026), doi:10.1021/acsomega.6c11744, compute hydrogen dissociation on anionic aluminium--scandium clusters of 13 atoms. The abstract names Al\(_9\)Sc\(_4^-\) as the case with a submerged barrier. The record has no volume or pages yet. Thirteen atoms sits outside the manuscript sizes.
+Nguyen and co-workers, ACS Omega 11(46), 73141--73155 (published online 12 November 2026; print 24 November 2026), doi:10.1021/acsomega.6c11744, compute hydrogen dissociation on anionic aluminium--scandium clusters of 13 atoms. The abstract names Al\(_9\)Sc\(_4^-\) as the case with a submerged barrier. Thirteen atoms sits outside the manuscript sizes.
 
 Haakansson, Rubli, Vesty, Lushchikova, Bakker, and Mackenzie, ChemPhysChem 27, e70623 (10 November 2026), doi:10.1002/cphc.70623, assign carbon dioxide bound to Au\(_n^+\) for \(n\) from 4 to 11. Infrared spectra from a free-electron laser are matched to quantum-chemical structures. The record gives issue 21. The abstract says the carbon dioxide stays linear, binds through one oxygen to one gold atom, and that further carbon dioxide molecules bind in the same way. Eleven gold atoms sits outside the manuscript sizes. Bare gold anions are already filed as `aguadoGoldAnions2026` and `anGoldAnions2026`. This paper is a carbon-dioxide complex of a cation.
 
-Wu, Jia, and co-workers, ACS Catalysis (29 October 2026), doi:10.1021/acscatal.6c06280, release ARCADE. The record has no volume or pages yet. The abstract says an iterative search builds irregular multielement nanoparticles in place of a full enumeration, then scores sites for carbon-dioxide reduction. The particles are catalyst models.
+Wu, Jia, and co-workers, ACS Catalysis 16(22), 22888--22902 (published online 29 October 2026; print 20 November 2026), doi:10.1021/acscatal.6c06280, release ARCADE. The abstract says an iterative search builds irregular multielement nanoparticles in place of a full enumeration, then scores sites for carbon-dioxide reduction. The particles are catalyst models.
 
 None of the four quotes a Cambridge Lennard-Jones energy or a hexamer hit rate, so none contradicts the hit targets, 121 of 192, or 97 of 192. None fills the open ASE, AGOX, and GMIN kit. A head-to-head would be Ga\(_2\)Ni\(_3\), Al\(_9\)Sc\(_4^-\), Au\(_n^+\) with carbon dioxide, or one ARCADE nanoparticle, each on the surface used in that paper. None warrants a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
 
@@ -1780,3 +1780,17 @@ All numbered releases remain unchanged: `crest-lab/crest` `v3.0.2` (master `cfdc
 The pass-4 queries run on 25 November 2026 are recorded in `paper/related-work-watch-queries-2026-11-25c.txt`.
 
 Cite `joosConformerDiversity2026`, `takeuchiWaterClusters2008`, `kazachenkoWaterClusters2009`, `kazachenkoWaterNanodroplets2013`, `hermanWaterAssessment2023`, `learyTetrahedral1999`, `deavenLennardJones1996`, `locatelliLargeScaleLj2003`, `xiangLatticeGa2004`, `zhanMulticanonical2004`, `takeuchiCleverLj2006`, `heilesGlobalOptReview2013`, `shangTsallisBh2014`, `paleicoFlexibleGrid2020`, `huangBhgaPtco2020`, `goodridgeBhs2022`, `onoLjMetastability2022`, `kiesslingManyBody2024`, `canizoDiscreteMinimizers2024`, `skipperDipolarGmin2024`, `kaappaBeacon2021`, `kaappaIceBeacon2021`, `bisboGofee2022`, `ronneLocalSurrogate2022`, `vilhelmsenAseGa2014`, `zhaoTgmin2017`, `chenTgmin22019`, `lvCalypsoClusters2012`, `zhangNwpesse2020`, `woodleyKlmc2013`, `amslerFlame2020`, and `prachtCrest2020`.
+
+## 2026-11-25 (pass 5) — Print pages for seven records
+
+Crossref works records read on 25 November 2026 assign volume, issue, and pages to seven notes that still said those fields were absent. The sentences above, and the matching entries in `related-work.bib`, now carry those fields. `refs.bib` is updated for `rockArgonHexamer2026` and `baruahWaterSix2026`, the two of the seven that the Supporting Information cites. The online and print dates are the `published-online` and `published-print` fields.
+
+- Rock, Clothier, and Tschumper, ACS Physical Chemistry Au 6(6), 1576--1586 (online 20 October 2026; print 25 November 2026), doi:10.1021/acsphyschemau.6c00129.
+- Baruah, ACS Omega 11(45), 71532--71546 (online 5 November 2026; print 17 November 2026), doi:10.1021/acsomega.6c10192.
+- Song, Shi, She, Sun, Cao, and Xuan, Crystal Growth and Design 26(22), 9234--9244 (online 5 November 2026; print 18 November 2026), doi:10.1021/acs.cgd.6c00574.
+- Guevara-Vela, Rodríguez-Kessler, Muñoz-Castro, and Rocha-Rinza, The Journal of Physical Chemistry A 130(46), 9294--9303 (online 8 November 2026; print 19 November 2026), doi:10.1021/acs.jpca.6c05536.
+- Rindt and Pracht, Journal of Chemical Theory and Computation 22(22), 12324--12338 (online 2 November 2026; print 24 November 2026), doi:10.1021/acs.jctc.6c01611. The earlier note dated the online record 3 November; the Crossref `published-online` field is 2 November.
+- Nguyen and co-workers, ACS Omega 11(46), 73141--73155 (online 12 November 2026; print 24 November 2026), doi:10.1021/acsomega.6c11744.
+- Wu, Jia, and co-workers, ACS Catalysis 16(22), 22888--22902 (online 29 October 2026; print 20 November 2026), doi:10.1021/acscatal.6c06280.
+
+None of these page assignments changes a Cambridge energy, a Wales--Hodges TIP4P energy, `121` of `192`, `97` of `192`, or a polished hexamer gap, and none calls for a new head-to-head. The same pass found no arXiv or Crossref record, from 18 November 2026 through 25 November 2026, on cluster global optimisation, basin hopping, Lennard-Jones cluster benchmarks, TIP4P water clusters, or conformer search that is not already filed. Numbered releases are unchanged: CREST `v3.0.2` (master `cfdc301f`), AGOX `v3.11.1`, ASE `3.29.0` (no commits since 18 November 2026 in `ase/optimize/basin.py` or `ase/optimize/minimahopping.py`), pele `v0.1.2`, and `ksags/GOFEE` still returns HTTP 404. Cambridge `GMIN/` and `OPTIM/` stay `Last-Modified` 17 March 2022. GitHub repository search found no GOAT release repository. The FACCTs news list still leads with the 16 November 2026 GPU item already filed, and it shows no newer numbered ORCA release.
