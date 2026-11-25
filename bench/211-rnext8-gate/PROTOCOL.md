@@ -4,13 +4,14 @@ This protocol was fixed before any gate row was generated.
 
 ## Arms
 
-- A is revision `bd73f89d2879eeff2fb1323ce2eec8ac13d70ce3`,
-  tree `fb5ae7cc254401140f67bfc9188078fe07f110ca`.
+- A is revision `9ef92a6b4c56ed630167b040652cc83414a12246`,
+  tree `727408b7e275ce5df2936d8ac8a79ef5d6f61b72`.
 - B is that same revision with the r-next8 payload applied.
   `git apply --index` must produce tree
-  `210f9611263fa07119ef78e3ccbc23cd3c2c0f4d`.
+  `b968e8aa58ac148d6161d0e496dfb2531f00f8f8`.
   A different tree stops the gate. The payload commit is not part of
   the delivered series.
+- Rows measured on the previous base are not part of this series.
 - A2 is a second release build of A, from an empty target directory.
 - B2 is a second release build of B, from an empty target directory.
 

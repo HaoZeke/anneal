@@ -363,12 +363,27 @@ def markdown(payload: dict[str, object]) -> str:
     lines.extend(["", "Hit losses, expected non-physical rejections, and B hits that are not physical:", ""])
     for cell in payload["cells"]:
         lines.append(
-            f"- {cell['cell']}: losses {cell['hit_losses'] or 'none'}; "
+            f"- {cell['cell']}: censored rows {cell['n_censored_rows']}; "
+            f"losses {cell['hit_losses'] or 'none'}; "
             f"expected rejections {cell['expected_rejections'] or 'none'}; "
             f"B non-physical {cell['b_nonphysical'] or 'none'}; "
             f"energy agree {cell['energy_agree']}/{cell['energy_compared']}; "
             f"B2 hit or energy mismatches {cell['b2_call_or_hit_mismatch'] or 'none'}; "
             f"B2 same-energy call differences {cell['b2_same_energy_call_difference'] or 'none'}"
+        )
+        if cell["time_exceeds_1_10"] and not cell["time_real_regression"]:
+            lines.append(
+                f"  {cell['cell']} outside-time lower bound is above 1.10. "
+                "It is not a time failure: that bound does not also exceed the A2/A upper bound on at least six pairs."
+            )
+    missing = [
+        cell["cell"]
+        for cell in payload["cells"]
+        if cell["n_complete_pairs"] == 0 and cell["n_censored_rows"] == 0
+    ]
+    if missing:
+        lines.append(
+            "No rows were recorded for " + ", ".join(missing) + ". Those cells were not started."
         )
     slab = payload["slab"]
     lines.extend(
@@ -377,6 +392,14 @@ def markdown(payload: dict[str, object]) -> str:
             "## Slab call accounting",
             "",
             f"Verdict: {slab['verdict']}. Ledger pattern 1 then 2: {slab['ledger_ok']}.",
+            "Grad-only engine calls are the budget-2 total minus the combined total.",
+            "The calls column is the engine count.",
+            (
+                "Grad-only counts are A {A}, B {B}, B2 {B2}, A2 {A2}.".format(
+                    **slab["grad_only_engine"]
+                )
+            ),
+            "The FIX rule requires B's grad-only count to be strictly greater than A's.",
             "",
             "| Arm | Combined engine calls | Budget-2 engine calls | Grad-only engine calls |",
             "| --- | ---: | ---: | ---: |",
@@ -405,6 +428,21 @@ def markdown(payload: dict[str, object]) -> str:
         )
         if by_arm["A"]["best"] != by_arm["B"]["best"]:
             lines.append("The arms recorded different best energies, so B did not keep A's geometry.")
+
+        def matches_prior(row: dict[str, str]) -> bool:
+            energy = as_float(row["best"])
+            separation = as_float(row["nn_max_A"])
+            energy_hit = energy is not None and abs(energy - (-475.186)) <= 0.01
+            separation_hit = separation is not None and abs(separation - 4.43) <= 0.05
+            return energy_hit or separation_hit
+
+        lines.append(
+            "The earlier false hit to compare is -475.186 eV with a 4.43 A separation. "
+            "Arm A matches that point: {a}. Arm B matches that point: {b}.".format(
+                a=matches_prior(by_arm["A"]),
+                b=matches_prior(by_arm["B"]),
+            )
+        )
         lines.append("")
     if not detail:
         lines.append("No GFN2 row has been recorded.")

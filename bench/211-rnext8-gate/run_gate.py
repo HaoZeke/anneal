@@ -18,9 +18,9 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-BASE_REV = "bd73f89d2879eeff2fb1323ce2eec8ac13d70ce3"
-BASE_TREE = "fb5ae7cc254401140f67bfc9188078fe07f110ca"
-PAYLOAD_TREE = "210f9611263fa07119ef78e3ccbc23cd3c2c0f4d"
+BASE_REV = "9ef92a6b4c56ed630167b040652cc83414a12246"
+BASE_TREE = "727408b7e275ce5df2936d8ac8a79ef5d6f61b72"
+PAYLOAD_TREE = "b968e8aa58ac148d6161d0e496dfb2531f00f8f8"
 SEEDS = tuple(range(2000, 2012))
 GFN2_WALL_S = 1500.0
 GFN2_BUDGET = 100_000
