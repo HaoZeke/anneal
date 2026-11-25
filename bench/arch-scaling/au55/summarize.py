@@ -127,14 +127,17 @@ def walls(rows: list[dict[str, str]]) -> list[float | None]:
     return out
 
 
-def fmt(value: float, digits: int = 4) -> str:
+def fmt_num(value: float) -> str:
     if math.isnan(value):
         return "na"
-    return f"{value:.{digits}g}"
+    rounded = round(value)
+    if abs(value - rounded) < 1e-6:
+        return str(int(rounded))
+    return f"{value:.3f}"
 
 
-def interval(lo: float, hi: float, digits: int = 4) -> str:
-    return f"[{fmt(lo, digits)}, {fmt(hi, digits)}]"
+def interval(lo: float, hi: float) -> str:
+    return f"[{fmt_num(lo)}, {fmt_num(hi)}]"
 
 
 def write_report(groups: dict[int, list[dict[str, str]]]) -> None:
@@ -239,9 +242,11 @@ def write_report(groups: dict[int, list[dict[str, str]]]) -> None:
         "",
         "Wall time to hit is the median over hits. Calls to hit enter a",
         "miss as budget + 1. Efficiency is T1/(p Tp) from the wall-to-hit",
-        "medians and is omitted when oversubscribed is true. Intervals are",
-        "bootstrap 95% percentiles, 10000 resamples, seed 20261123.",
-        "Fisher and Mann-Whitney compare each rung with 1 worker.",
+        "medians. It is undefined when a rung has no hit, and it is omitted",
+        "when oversubscribed is true. Intervals are bootstrap 95%",
+        "percentiles, 10000 resamples, seed 20261123. A single hit makes",
+        "that interval a point. Fisher and Mann-Whitney compare each rung",
+        "with 1 worker.",
         "",
         "| workers | hits | hit CI | calls median | calls CI | wall median s | wall CI | efficiency | efficiency CI | Fisher p | MWU p | oversubscribed |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
@@ -250,22 +255,25 @@ def write_report(groups: dict[int, list[dict[str, str]]]) -> None:
         if item["workers"] == 1 and not item["over"]:
             eff = "1"
             eff_ci = ""
+        elif item["over"]:
+            eff = "omitted"
+            eff_ci = ""
         elif math.isnan(item["eff"]):
-            eff = ""
+            eff = "undefined"
             eff_ci = ""
         else:
-            eff = fmt(item["eff"])
-            eff_ci = interval(item["eff_lo"], item["eff_hi"])
-        wall = "" if math.isnan(item["wall_med"]) else fmt(item["wall_med"])
+            eff = f"{item['eff']:.4f}"
+            eff_ci = f"[{item['eff_lo']:.4f}, {item['eff_hi']:.4f}]"
+        wall = "" if math.isnan(item["wall_med"]) else fmt_num(item["wall_med"])
         wall_ci = "" if math.isnan(item["wall_lo"]) else interval(item["wall_lo"], item["wall_hi"])
         lines.append(
             "| {workers} | {hits}/{n} | {hit_ci} | {calls} | {call_ci} | {wall} | {wall_ci} | {eff} | {eff_ci} | {fisher} | {mwu} | {over} |".format(
                 workers=item["workers"],
                 hits=item["hits"],
                 n=item["n"],
-                hit_ci=interval(item["hit_lo"], item["hit_hi"], 3),
-                calls=fmt(item["call_med"], 6),
-                call_ci=interval(item["call_lo"], item["call_hi"], 6),
+                hit_ci=interval(item["hit_lo"], item["hit_hi"]),
+                calls=fmt_num(item["call_med"]),
+                call_ci=interval(item["call_lo"], item["call_hi"]),
                 wall=wall,
                 wall_ci=wall_ci,
                 eff=eff,
