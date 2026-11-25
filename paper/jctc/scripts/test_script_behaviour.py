@@ -3,6 +3,7 @@
 """Behaviour tests for the paper scripts that do not need a campaign run."""
 from __future__ import annotations
 
+import ast
 import hashlib
 import importlib.util
 import io
@@ -31,6 +32,7 @@ import hexamer_numbers
 import hq_sci_tally
 import lockfile_delta
 import replay_v127
+import system_visuals
 import toc_graphic
 import watch_crest_steps
 import write_figure_provenance_v128
@@ -57,19 +59,31 @@ def has_coverage_toolchains() -> bool:
     return all(found)
 
 
-def has_figure_dependencies() -> bool:
-    try:
-        return (
-            importlib.util.find_spec("matplotlib") is not None
-            and importlib.util.find_spec("chemparseplot") is not None
-            and version("chemparseplot") == "1.11.0"
-        )
-    except PackageNotFoundError:
-        return False
+def figure_dependencies_skip_reason() -> str | None:
+    missing: list[str] = []
+    if importlib.util.find_spec("matplotlib") is None:
+        missing.append("matplotlib")
+    if importlib.util.find_spec("chemparseplot") is None:
+        missing.append(f"chemparseplot=={system_visuals.CHEMPARSEPLOT}")
+    else:
+        try:
+            installed = version("chemparseplot")
+        except PackageNotFoundError:
+            missing.append(
+                f"chemparseplot=={system_visuals.CHEMPARSEPLOT} (metadata missing)"
+            )
+        else:
+            if installed != system_visuals.CHEMPARSEPLOT:
+                missing.append(
+                    f"chemparseplot=={system_visuals.CHEMPARSEPLOT} (found {installed})"
+                )
+    if not missing:
+        return None
+    return "requires " + " and ".join(missing)
 
 
 HAS_COVERAGE_TOOLCHAINS = has_coverage_toolchains()
-HAS_CHEMPARSEPLOT = has_figure_dependencies()
+FIGURE_DEPENDENCIES_SKIP_REASON = figure_dependencies_skip_reason()
 
 
 def test_toc_graphic_writes_a_pdf(tmp_path: Path) -> None:
@@ -346,6 +360,108 @@ def test_coverage_receipt_writes_both_toolchains(tmp_path: Path) -> None:
         coverage_receipts.main([])
 
 
+def test_coverage_toolchains_reads_receipt_pins(tmp_path: Path) -> None:
+    script = HERE / "coverage_toolchains.sh"
+    body = script.read_text()
+    for token in (
+        coverage_receipts.PINNED_TOOLCHAIN,
+        coverage_receipts.NIGHTLY_TOOLCHAIN,
+        coverage_receipts.BRANCH_FLAG,
+    ):
+        assert token not in body
+
+    stub_bin = tmp_path / "bin"
+    stub_bin.mkdir()
+    log = tmp_path / "calls.log"
+    rustup = stub_bin / "rustup"
+    rustup.write_text(
+        "#!/bin/sh\n"
+        f'printf "rustup %s\\n" "$*" >> "{log}"\n'
+        'printf "stub %s\\n" "$*"\n'
+    )
+    rustup.chmod(0o755)
+    cargo = stub_bin / "cargo"
+    cargo.write_text(
+        "#!/bin/sh\n"
+        f'printf "cargo %s %s\\n" "$RUSTUP_TOOLCHAIN" "$*" >> "{log}"\n'
+    )
+    cargo.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{stub_bin}:{env.get('PATH', '')}"
+
+    out = tmp_path / "cov.json"
+    lines_run = subprocess.run(
+        ["sh", str(script), "lines", str(out), "--lib"],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert f"rustc_188 stub run {coverage_receipts.PINNED_TOOLCHAIN} rustc -V" in lines_run.stdout
+    assert f"rustc_nightly stub run {coverage_receipts.NIGHTLY_TOOLCHAIN} rustc -V" in lines_run.stdout
+
+    branches_run = subprocess.run(
+        ["sh", str(script), "branches", str(out), "--lib"],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert coverage_receipts.BRANCH_FLAG in branches_run.stdout
+
+    bad = subprocess.run(
+        ["sh", str(script), "invalid", str(out)],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert bad.returncode == 2
+    assert "mode is lines or branches" in bad.stderr
+
+    recorded = log.read_text().splitlines()
+    assert (
+        f"rustup run {coverage_receipts.NIGHTLY_TOOLCHAIN} rustc {coverage_receipts.BRANCH_FLAG} -V"
+        in recorded
+    )
+    assert (
+        f"cargo {coverage_receipts.PINNED_TOOLCHAIN} llvm-cov --locked --json --output-path {out} --lib"
+        in recorded
+    )
+    assert (
+        f"cargo {coverage_receipts.NIGHTLY_TOOLCHAIN} llvm-cov --locked --json --output-path {out} --branch --lib"
+        in recorded
+    )
+
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    copied = sandbox / "coverage_toolchains.sh"
+    copied.write_text(body)
+    copied.chmod(0o755)
+    (sandbox / "coverage_receipts.py").write_text(
+        'PINNED_TOOLCHAIN = "1.99.0"\n'
+        'NIGHTLY_TOOLCHAIN = "nightly-2099-01-01"\n'
+        'BRANCH_FLAG = "-Zcoverage-options=probe"\n'
+    )
+    log.write_text("")
+    subprocess.run(
+        ["sh", str(copied), "branches", str(out)],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    sandbox_calls = log.read_text().splitlines()
+    assert "rustup run 1.99.0 rustc -V" in sandbox_calls
+    assert "rustup run nightly-2099-01-01 rustc -Zcoverage-options=probe -V" in sandbox_calls
+    assert f"cargo nightly-2099-01-01 llvm-cov --locked --json --output-path {out} --branch" in sandbox_calls
+
+
 def test_hexamer_numbers_from_a_log_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert hexamer_numbers.type7([3.0], 0.5) == 3.0
     assert hexamer_numbers.median_iqr([1.0, 2.0, 3.0, 4.0])[0] == pytest.approx(2.5)
@@ -570,8 +686,8 @@ def test_redact_main_rewrites_a_home_path(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(
-    not HAS_CHEMPARSEPLOT,
-    reason="requires chemparseplot",
+    FIGURE_DEPENDENCIES_SKIP_REASON is not None,
+    reason=FIGURE_DEPENDENCIES_SKIP_REASON or "",
 )
 def test_house_drawers_write_pdfs(tmp_path: Path) -> None:
     os.environ["PYTHONHASHSEED"] = "0"
@@ -597,6 +713,71 @@ def test_house_drawers_write_pdfs(tmp_path: Path) -> None:
     assert figstyle.plain(0.5) == "0.5"
     assert "500" in figstyle.plain(1500)
     runpy.run_path(str(HERE / "tip4p_constants.py"), run_name="__main__")
+
+
+def test_chemparseplot_version_defined_once() -> None:
+    pinned = system_visuals.CHEMPARSEPLOT
+    assert pinned
+    literal_holders = [
+        path.name
+        for path in sorted(HERE.glob("*.py"))
+        if any(
+            isinstance(node, ast.Constant) and node.value == pinned
+            for node in ast.walk(ast.parse(path.read_text()))
+        )
+    ]
+    assert literal_holders == ["system_visuals.py"]
+    for name in ("figstyle.py", "sketchmap_landscapes.py"):
+        tree = ast.parse((HERE / name).read_text())
+        assert any(
+            isinstance(node, ast.ImportFrom)
+            and node.module == "system_visuals"
+            and any(alias.name == "CHEMPARSEPLOT" for alias in node.names)
+            for node in ast.walk(tree)
+        ), f"{name} must import CHEMPARSEPLOT from system_visuals"
+
+
+def test_figure_dependencies_skip_reason_reports_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pinned = system_visuals.CHEMPARSEPLOT
+
+    def set_env(specs: dict[str, object | None], cpp_version: str | None) -> None:
+        monkeypatch.setattr(importlib.util, "find_spec", lambda name: specs.get(name))
+
+        def fake_version(name: str) -> str:
+            if name != "chemparseplot" or cpp_version is None:
+                raise PackageNotFoundError(name)
+            return cpp_version
+
+        monkeypatch.setattr(sys.modules[__name__], "version", fake_version)
+
+    set_env({"matplotlib": None, "chemparseplot": None}, None)
+    assert (
+        figure_dependencies_skip_reason()
+        == f"requires matplotlib and chemparseplot=={pinned}"
+    )
+
+    set_env({"matplotlib": None, "chemparseplot": object()}, pinned)
+    assert figure_dependencies_skip_reason() == "requires matplotlib"
+
+    set_env({"matplotlib": object(), "chemparseplot": None}, None)
+    assert figure_dependencies_skip_reason() == f"requires chemparseplot=={pinned}"
+
+    set_env({"matplotlib": object(), "chemparseplot": object()}, "0.0.0")
+    assert (
+        figure_dependencies_skip_reason()
+        == f"requires chemparseplot=={pinned} (found 0.0.0)"
+    )
+
+    set_env({"matplotlib": object(), "chemparseplot": object()}, None)
+    assert (
+        figure_dependencies_skip_reason()
+        == f"requires chemparseplot=={pinned} (metadata missing)"
+    )
+
+    set_env({"matplotlib": object(), "chemparseplot": object()}, pinned)
+    assert figure_dependencies_skip_reason() is None
 
 
 def test_modules_run_as_main(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
