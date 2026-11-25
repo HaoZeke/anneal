@@ -778,12 +778,12 @@ def test_a_move_choice_success_claim_is_reported():
 def test_a_modal_hedge_fails_both_audits():
     for strict in (False, True):
         audit = audit_mod.Audit()
-        tex = audit.text(audit_mod.TEX)
+        si = audit.text(audit_mod.SI)
         old = "and both algorithms return an assignment of the optimal cost."
-        assert tex.count(old) == 1
-        audit.text_cache[audit_mod.TEX] = tex.replace(old, old + "\nA tie may break differently.")
+        assert si.count(old) == 1
+        audit.text_cache[audit_mod.SI] = si.replace(old, old + "\nA tie may break differently.")
         audit_mod.todo_check(audit, pre_submission=strict)
-        assert [(r[1], r[2], r[4]) for r in audit.drifts()] == [(audit_mod.TEX, "no modal hedge", "may")]
+        assert [(r[1], r[2], r[4]) for r in audit.drifts()] == [(audit_mod.SI, "no modal hedge", "may")]
 
 
 def test_a_rendered_rerun_fails_both_audits():
@@ -3993,7 +3993,7 @@ def test_default_screen_cannot_be_described_as_the_margin_path():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
     old = ("For every other proposal, the preset uses the Bayesian screen of\n"
-           "equation~\\ref{eq:bayes-screen}.")
+           "equation~\\sieqref{eq:bayes-screen}.")
     assert old in tex
     audit.text_cache[audit_mod.TEX] = tex.replace(
         old, "For every other proposal, the preset uses the margin screen.")
@@ -4075,11 +4075,11 @@ def test_a_stray_gmin_patch_line_is_reported():
 
 def test_a_second_gate_claim_is_reported():
     audit = audit_mod.Audit()
-    tex = audit.text(audit_mod.TEX)
+    si = audit.text(audit_mod.SI)
     old = "For atomic clusters the preset has one atom-count gate:"
-    assert old in audit_mod.collapse(tex)
-    audit.text_cache[audit_mod.TEX] = replace_collapsed(
-        tex,
+    assert old in audit_mod.collapse(si)
+    audit.text_cache[audit_mod.SI] = replace_collapsed(
+        si,
         old, "For atomic clusters the preset has two atom-count gates, both at 98 atoms:")
     audit_mod.count_gates(audit, "c2de652dca0bc75e2b0cb4afffac91fd656404e4")
     assert sorted(r[2] for r in audit.drifts()) == ["prose", "retired gate wording stays out: two atom-count gates"]

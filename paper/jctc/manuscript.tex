@@ -5,6 +5,8 @@
 \graphicspath{{figs/}}
 
 \input{macros}
+\input{labels-si}
+\newcommand{\siref}[1]{\csname si@#1\endcsname}
 
 \title{Template-free basin hopping with adaptive moves for funnelled
 cluster landscapes}
@@ -121,7 +123,7 @@ templates; the one run with them is the With arm of the knockout in
 Section~\ref{sec:knockouts}.
 Three parts of the search have a run with and without them, and
 Section~\ref{sec:knockouts} reports all three: the structure templates
-(Section~\ref{sec:priors}), at two revisions in the history of the submitted
+(Section~\siref{sec:priors}), at two revisions in the history of the submitted
 revision, and the length unit and the choice among the moves, on the search
 source of the submitted revision.
 
@@ -185,7 +187,7 @@ the empty set is \(0\).
 
 The lattice move reads a lattice from the current geometry and moves one
 poorly coordinated atom onto a vacant site, as
-equation~\ref{eq:lattice-weight} defines, in the manner of dynamic lattice
+equation~\sieqref{eq:lattice-weight} defines, in the manner of dynamic lattice
 searching \cite{shaoChengCai2004}.
 The site is drawn with Boltzmann weights at the reduced temperature
 \(0.8\).
@@ -195,7 +197,7 @@ The arm named \texttt{soap} in the implementation is a fivefold-residual
 move.
 It compares the cluster with a copy rotated through \(2\pi/5\), matches the
 atoms, and, above 13 atoms, moves the five atoms that carry the largest
-residual, as equation~\ref{eq:soap-step} defines.
+residual, as equation~\sieqref{eq:soap-step} defines.
 Their root-mean-square displacement is \(0.75\) in reduced units.
 
 Below 98 atoms the quench chooses a surface and holds it for 100 hops.
@@ -250,14 +252,14 @@ The preset proposes symmetry in three ways.
 A symmetrization move looks for axes of order \(2, 3, 4, 5,\) and \(6\)
 inside a pair cutoff of \(2.5\), projects the cluster onto the group
 those axes generate, and quenches the image.
-Equation~\ref{eq:symmetrize} defines the projection.
+Equation~\sieqref{eq:symmetrize} defines the projection.
 If the projection leaves the coordinates unchanged, the move falls back
 to equation~\ref{eq:single}.
 When the accepted minimum is a new basin, the chain quenches the images
 of a symmetric core and offers the lowest image to
 equation~\ref{eq:metropolis}.
 A continuous-symmetry projection onto \(C_i\), \(C_5\), or \(D_{5h}\), as
-equation~\ref{eq:csm} defines, runs every ten quenches.
+equation~\sieqref{eq:csm} defines, runs every ten quenches.
 \cite{oakley2013}
 
 \subsection{Stall rules}
@@ -338,7 +340,7 @@ vacant contact, unless a new lowest minimum comes first.
 \subsection{Basin bias, tabu, and screens}
 \label{sec:accept}
 The preset remembers basins, as regions of a descriptor space
-(equation~\ref{eq:descriptor}).
+(equation~\sieqref{eq:descriptor}).
 Let \(y\) be the quenched proposal and let \(V\) be any basin bias that
 has been deposited.
 The rise that the acceptance test sees is
@@ -357,21 +359,21 @@ where \(U\) is uniform on \((0,1)\).
 This is the Metropolis rule at one temperature.
 \cite{wales1997}
 When no bias has been deposited, \(V=0\) and \(\Delta=E(y)-E(x)\).
-The bias grows by the well-tempered rule of equation~\ref{eq:deposit}, in
+The bias grows by the well-tempered rule of equation~\sieqref{eq:deposit}, in
 which the height of each deposit shrinks as the deposits in a region grow
 \cite{Barducci_Bussi_Parrinello_2008}.
-The tabu list of equation~\ref{eq:tabu} refuses a return to a basin the walk
+The tabu list of equation~\sieqref{eq:tabu} refuses a return to a basin the walk
 has failed to leave.
 Both act on regions of the descriptor space around the minima the quench
 reaches, and two structures whose distance multisets nearly coincide share a
-region (Appendix~\ref{sec:definitions}).
+region (Section~\siref{sec:definitions}).
 
 Two checks can withhold the full quench.
 A proposal whose descriptor distance from \(x\) is below the merge
 radius \(0.7\) is treated as a return to the occupied basin, and the
 partial relaxation is what enters equation~\ref{eq:metropolis}.
 For every other proposal, the preset uses the Bayesian screen of
-equation~\ref{eq:bayes-screen}.
+equation~\sieqref{eq:bayes-screen}.
 A linear model learns the fully quenched energy from the partial energy,
 the descriptor displacement, and their product.
 It finishes every partial relaxation that already beats the stored best,
@@ -438,52 +440,6 @@ k^{\star} \sim \mathrm{Uniform}\{0,\ldots,n_{\mathrm{moves}}-1\}
 \end{equation}
 and does not consult equation~\ref{eq:thompson}; the library, the screen, and
 the acceptance rule stay the same.
-
-\subsection{Units and atom-count gates}
-\label{sec:units}
-The temperature \(0.8\) is the value Wales and Doye used for Lennard-Jones
-basin hopping \cite{wales1997}, and every length and energy above is in the
-reduced units of the Lennard-Jones pair.
-The Morse and gold drivers of Table~\ref{tab:gmin} run
-\texttt{Config::recommended} without rescaling its lengths to the pair
-minimum of their potential.
-No row of Table~\ref{tab:gmin} rescales those lengths to the Morse pair
-minimum; the Morse rows of Table~\ref{tab:ase-morse} run
-\texttt{Config::recommended\_with\_scales} at that length scale.
-For atomic clusters the preset has one atom-count gate: the diameter penalty
-of equation~\ref{eq:penalty} is used only below 98 atoms.
-The revisions with the structure priors on had a second, the growth hold of
-equation~\ref{eq:hold}.
-A rigid-body run has a gate of its own: at 10 molecules or fewer a factor on
-its acceptance temperature starts at 24 and moves between 1 and 24 with the
-share of hops that reach a new minimum, and above 10 that factor stays at 4
-and its orientation step follows the acceptance rate.
-The exact assignment inside the symmetry projections also changes algorithm
-at 98 atoms, and both algorithms return an assignment of the optimal cost.
-No constant was refitted for a size.
-
-\subsection{Structure priors and templates}
-\label{sec:priors}
-The earlier template-assisted preset carried six switches that use the
-structure of close-packed clusters, all on.
-\texttt{prior\_soap} adds a fivefold proposal in the smooth overlap of atomic
-positions, and it remains in the code.
-\texttt{prior\_reseed} drew a fresh random cluster while the walker stood on
-a structure of icosahedral order, at most once every five hops, closed its
-core orbits, and adopted the quench as the walker.
-\texttt{prior\_growth} regrew the structure on a stall from a lattice order.
-\texttt{prior\_core} quenched the sites of a face-centered cubic lattice, two
-interpenetrating icosahedra, and a Mackay icosahedron for a run whose atoms
-carry species labels, and \texttt{prior\_handover} stopped those cuts once
-they stalled and continued from the best of them.
-\texttt{prior\_motif} grew the best structure on a face-centered cubic,
-pentagonal, or icosahedral lattice when a run had gone half its budget without
-improvement.
-The template-free revision removed the structure templates, the builders of
-face-centered cubic, polyicosahedral, Mackay, and axial-spine cuts behind the
-last five priors; the builders are parameterized by the atom count and a
-nearest-neighbor length and hold no coordinate table for one cluster.
-Section~\ref{sec:knockouts} tests the removal.
 
 \subsection{The hit}
 \label{sec:hit}
@@ -960,187 +916,6 @@ At 12 seeds, rescaling the preset lengths and replacing adaptive move choice
 with a uniform draw produce no detectable hit-rate change in their tested
 panels.
 
-\appendix
-\section{Definitions}
-\label{sec:definitions}
-This appendix defines the operators that the text names.
-A configuration is \(x=(x_1,\ldots,x_N)\) with \(x_i\in\mathbf{R}^3\), and
-every constant is that of the preset in reduced units.
-
-\emph{Descriptor.}
-Let \(r_{ij}=\lVert x_i-x_j\rVert\), and let \(d(x)\) hold the
-\(N(N-1)/2\) distances \(r_{ij}\), \(i<j\), in ascending order.
-The descriptor distance is
-\begin{equation}
-\delta(x,x') = \lVert d(x)-d(x')\rVert_2 .
-\label{eq:descriptor}
-\end{equation}
-It is unchanged by translation, rotation, reflection, and relabeling of the
-atoms.
-A multiset of distances does not fix a structure, so two homometric sets have
-\(\delta=0\) without being congruent.
-Two configurations lie in one region when \(\delta<\rho_m\), with the merge
-radius \(\rho_m=0.7\).
-For a selected fivefold axis \(a\), let \(R_a\) rotate by \(2\pi/5\), and
-let \(\pi\) be the minimum-cost atom assignment between the original and
-rotated coordinates.
-The residual is
-\begin{equation}
-r_i=x_i-\bigl[R_a x\bigr]_{\pi(i)},\qquad
-y_i =
-\begin{cases}
-x_i+c\,r_i,&i\in A,\\
-x_i,&i\notin A,
-\end{cases}
-\quad
-c=\frac{b_N}{\sqrt{|A|^{-1}\sum_{j\in A}\lVert r_j\rVert^2}},
-\qquad
-b_N=\begin{cases}0.75,&N>13,\\0.35,&N\leq13.\end{cases}
-\label{eq:soap-step}
-\end{equation}
-For \(N>13\), \(A\) contains the five atoms with the largest
-\(\lVert r_i\rVert\).
-The move requires two eligible fivefold axes and draws between the axes
-nearest the two reconstructable shell openings.
-For \(N\leq13\), \(A\) contains every atom and the best axis is
-used.
-An exactly fivefold residual instead uses a pentagon-breaking displacement
-over all atoms at the same root-mean-square amplitude.
-If the drawn-axis proposal does not move, the arm tries the measured
-best-axis residual: when its fivefold gate passes, it moves all atoms with
-root-mean-square displacement \(0.35\); otherwise it leaves \(x\) unchanged.
-
-\emph{Screen and merge.}
-Let \(\tilde y\) be a proposal after the partial relaxation and let
-\(E^\star\) be the stored best.
-The recommended preset forms
-\begin{equation}
-\begin{aligned}
-z(\tilde y)&=\bigl(1,E(\tilde y),\delta(\tilde y,x),
-E(\tilde y)\delta(\tilde y,x)\bigr),\\
-p(\tilde y)&=\Pr\!\left(E(y)<E^\star\mid z(\tilde y),\mathcal D\right),
-\qquad p(\tilde y)\geq\frac{7}{15},
-\end{aligned}
-\label{eq:bayes-screen}
-\end{equation}
-where the posterior predictive distribution is Student-\(t\) and
-\(\mathcal D\) contains the feature vector and fully quenched energy of each
-finished proposal.
-The inequality is the rule for finishing a proposal after 300 observations;
-a fraction \(0.1\) is finished independently of it, and
-\(E(\tilde y)<E^\star\) always finishes.
-
-The non-default calibrated-margin path, which the recommended preset
-bypasses because it enables the Bayesian screen, instead withholds the full
-quench when
-\begin{equation}
-E(\tilde y)-a>E^\star+\Delta_s,\qquad \Delta_s=2 ,
-\label{eq:screen}
-\end{equation}
-where \(a\ge 0\) is the upper decile of the energy that the last 256
-partial relaxations left undone, and \(a=0\) until 8 full relaxations have
-been seen.
-The merge test calls \(\tilde y\) a return to the occupied basin when
-\(\delta(\tilde y,x)<\rho_m\).
-In both cases the partial relaxation is what enters
-equation~\ref{eq:metropolis}.
-
-\emph{Basin bias.}
-Regions \(b=1,2,\ldots\) open on a deposit.
-Region \(b\) has a center \(c_b=d(x_b)\), the descriptor of the first
-configuration deposited in it, and a height \(V_b\) that is zero before that
-deposit.
-The bias of equation~\ref{eq:delta} is
-\begin{equation}
-V(x) =
-\begin{cases}
-V_{b(x)} & \text{if } \delta\bigl(x,x_{b(x)}\bigr) < \rho_m,\\
-0 & \text{otherwise,}
-\end{cases}
-\label{eq:bias}
-\end{equation}
-where \(b(x)\) is the latest region opened with
-\(\delta(x,x_b)<\rho_m\).
-A deposit in region \(b\) at temperature \(T\) raises its height by
-\begin{equation}
-V_b \leftarrow V_b + w_0\exp\!\Bigl(-\frac{V_b}{(\gamma-1)\,T}\Bigr),
-\qquad w_0 = 0.25,\quad \gamma = 5 .
-\label{eq:deposit}
-\end{equation}
-This is the well-tempered rule applied to regions in place of a continuous
-variable.
-\cite{Barducci_Bussi_Parrinello_2008}
-
-\emph{Tabu.}
-Let \(\mathcal{T}\) hold at most 8 descriptors.
-A proposal that equation~\ref{eq:metropolis} accepts is refused when
-\begin{equation}
-\min_{t\in\mathcal{T}}\ \delta(y,t) \le \rho_m .
-\label{eq:tabu}
-\end{equation}
-While equation~\ref{eq:stuck} holds, \(d(x)\) joins \(\mathcal{T}\) unless a
-member is within \(\rho_m\), and the oldest member leaves when \(\mathcal{T}\)
-is full.
-
-\emph{Symmetrization.}
-Let \(c\) be the centroid, let \(a\) be a unit axis through \(c\), let
-\(m\in\{2,\ldots,6\}\), and let \(R\) turn by \(2\pi/m\) about \(a\).
-For atom \(i\) set \(i_0=i\) and let \(i_{k+1}\) be the atom nearest to
-\(c+R(x_{i_k}-c)\).
-The orbit of \(i\) closes when every such nearest distance is at most
-\(2.5\) and \(i_m=i_0\).
-The projection replaces each member of a closed orbit by
-\begin{equation}
-y_{i_k} = c + R^{k}\,\bar u_i,
-\qquad
-\bar u_i = \frac1m\sum_{l=0}^{m-1} R^{-l}\,(x_{i_l}-c),
-\label{eq:symmetrize}
-\end{equation}
-and leaves an atom whose orbit does not close where it is.
-The move applies this to the trial axis whose atoms have the smallest
-root-mean-square distance to their images.
-\cite{oakley2013}
-
-\emph{Continuous-symmetry projection.}
-Let \(s=\max_i\lVert x_i-c\rVert\) and \(y_i=(x_i-c)/s\).
-Let \(Q\) range over the orthogonal matrices built from the axes of inertia
-and one fixed one-fifth turn, and let \(G\) be one of \(C_i\), \(C_5\), and
-\(D_{5h}\).
-For each \(g\in G\), let \(\pi_g\) be the assignment, within atoms of one
-species, that best matches \(g\,Qy\) to \(Qy\).
-Then
-\begin{equation}
-\hat y_i = \frac1{|G|}\sum_{g\in G} g\,Qy_{\pi_g(i)},
-\qquad
-S(G,Q) = \frac{\sum_i\lVert Qy_i-\hat y_i\rVert^2}{\sum_i\lVert y_i\rVert^2},
-\label{eq:csm}
-\end{equation}
-and the projection returns the \(\hat y\) of lowest \(S\), turned back and
-rescaled by \(s\).
-\(S=0\) is exact symmetry, and the projection draws no random number.
-It runs every ten quenches.
-\cite{oakley2013}
-
-\emph{Lattice.}
-Let \(\ell\) be the median nearest-neighbor length of \(x\).
-The vacant sites \(\mathcal{S}(x)\) are the points at distance \(\ell\) from the
-three atoms of every triangle whose sides are at most \(1.47\,\ell\), kept when
-no atom lies within \(0.85\,\ell\), with near-coincident sites merged.
-Let \(M\) be the atoms with fewer than 12 neighbors within the bond cutoff, and
-let \(\Delta_{is}\) be the unrelaxed energy rise of moving \(i\in M\) to
-\(s\in\mathcal{S}(x)\).
-The move draws one of the offers \((i,s)\) of smallest rise with weight
-\begin{equation}
-w_{is} \propto \exp\!\bigl(-\Delta_{is}/T\bigr),
-\label{eq:lattice-weight}
-\end{equation}
-and the quench decides whether it stays.
-\cite{shaoChengCai2004}
-The crossing growth of equation~\ref{eq:hold} reads the shell of the atom of
-highest coordination, \(O=\{x_j-x_{i_0}: \lVert x_j-x_{i_0}\rVert<1.6\}\), and
-places copies of \(O\) around placed sites, breadth first, dropping a site that
-lies within half a spacing of one already placed.
-
 \section*{Author contributions}
 Author contributions follow the CRediT taxonomy.
 Rohit Goswami contributed conceptualization, methodology, software,
@@ -1171,9 +946,10 @@ The authors declare no competing financial interest.
 
 \begin{suppinfo}
 The Supporting Information gives the reference energies, the GMIN inputs, the
-host and the commands, the revision behind every table, the protocol of the
-comparison with the Atomic Simulation Environment, the statistical methods,
-and the searches that report no comparable rate.
+host and the commands, the revision behind every table, the definitions of
+the operators, the atom-count gates, the former structure priors, the
+protocol of the comparison with the Atomic Simulation Environment, the
+statistical methods, and the searches that report no comparable rate.
 \end{suppinfo}
 
 \section*{Data and software availability}

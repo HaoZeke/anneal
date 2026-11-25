@@ -2027,7 +2027,7 @@ def manuscript_knockouts(audit: Audit) -> None:
     runner = audit.text("scripts/gmin_panel/run_panel.py")
     audit.record("H2H_PAIR_SCALE" not in runner, "scripts/gmin_panel/run_panel.py",
                  "the GMIN panel does not set H2H_PAIR_SCALE", "unset", "checked")
-    audit.said(TEX, "The Morse and gold drivers of Table~\\ref{tab:gmin} run \\texttt{Config::recommended} without "
+    audit.said(SI, "The Morse and gold drivers of Table~\\msref{tab:gmin} run \\texttt{Config::recommended} without "
                     "rescaling its lengths to the pair minimum of their potential.")
     audit.record("scaled to that potential's pair minimum" not in audit.text(TEX), TEX,
                  "the preset is not said to be scaled to the pair minimum", "absent", "checked")
@@ -2142,17 +2142,17 @@ def manuscript_priors(audit: Audit) -> None:
             f"{removal} removes the {switch} code path", "removed", "removed")
     on = priors_on(f"{removal}^") or []
     audit.cell(TEX, "the six priors are on in the parent of the removal", " ".join(PRIORS), " ".join(on))
-    audit.said(TEX, "The earlier template-assisted preset carried six switches that use the\n"
+    audit.said(SI, "The earlier template-assisted preset carried six switches that use the\n"
                     "structure of close-packed clusters, all on.")
     config = git("show", f"{removal}^:{PRIOR_CONFIG}").stdout
     audit.record("reseed_hops: 5," in config, TEX, "the reseed interval is five hops before the removal", "5",
                  "5" if "reseed_hops: 5," in config else "other")
-    audit.said(TEX, "at most once every five hops, closed its core orbits, and adopted the quench as the walker.")
+    audit.said(SI, "at most once every five hops, closed its core orbits, and adopted the quench as the walker.")
     current = audit.text(PRIOR_CONFIG)
     audit.record("prior_soap" in current, PRIOR_CONFIG, "prior_soap remains in the code", "present",
                  "present" if "prior_soap" in current else "absent")
-    audit.said(TEX, "positions, and it remains in the code.")
-    audit.said(TEX, "The template-free revision removed the structure templates, the builders of\n"
+    audit.said(SI, "positions, and it remains in the code.")
+    audit.said(SI, "The template-free revision removed the structure templates, the builders of\n"
                     "face-centered cubic, polyicosahedral, Mackay, and axial-spine cuts behind the\n"
                     "last five priors;")
     count_gates(audit, lj_rev)
@@ -2187,10 +2187,10 @@ def count_gates(audit: Audit, lj_rev: str) -> None:
                  "src/assignment.rs", "the assignment switches algorithm at 98 for the same optimum", "98", "98")
     audit.record("minimum_cost_assignment" in audit.text("src/continuous_symmetry.rs"), "src/continuous_symmetry.rs",
                  "the symmetry projections use that assignment", "used", "used")
-    audit.said(TEX, "For atomic clusters the preset has one atom-count gate: the diameter penalty of "
-                    "equation~\\ref{eq:penalty} is used only below 98 atoms.")
-    audit.said(TEX, "The revisions with the structure priors on had a second, the growth hold of "
-                    "equation~\\ref{eq:hold}.")
+    audit.said(SI, "For atomic clusters the preset has one atom-count gate: the diameter penalty of "
+                   "equation~\\msref{eq:penalty} is used only below 98 atoms.")
+    audit.said(SI, "The revisions with the structure priors on had a second, the growth hold of "
+                   "equation~\\msref{eq:hold}.")
     small = re.search(r"fn rigid_factor_cap\(n_bodies: usize\) -> f64 \{\s*if n_bodies > RIGID_HOT_BODIES \{\s*"
                       r"RIGID_FACTOR_CAP_LARGE\s*\} else \{\s*([0-9.]+)\s*\}", hop)
     audit.cell("src/methods/cluster_hopping.rs", "rigid factor cap at 10 bodies or fewer", "24",
@@ -2203,16 +2203,17 @@ def count_gates(audit: Audit, lj_rev: str) -> None:
         audit.record(fragment in hop, "src/methods/cluster_hopping.rs",
                      "the rigid factor starts at its cap and falls no lower than 1", fragment,
                      "present" if fragment in hop else "absent")
-    audit.said(TEX, "A rigid-body run has a gate of its own: at 10 molecules or fewer a factor on its acceptance "
+    audit.said(SI, "A rigid-body run has a gate of its own: at 10 molecules or fewer a factor on its acceptance "
                     "temperature starts at 24 and moves between 1 and 24 with the share of hops that reach a new "
                     "minimum, and above 10 that factor stays at 4 and its orientation step follows the acceptance rate.")
-    audit.said(TEX, "The exact assignment inside the symmetry projections also changes algorithm at 98 atoms, and both "
+    audit.said(SI, "The exact assignment inside the symmetry projections also changes algorithm at 98 atoms, and both "
                     "algorithms return an assignment of the optimal cost.")
     audit.said(TEX, "In the revisions with the structure priors on, lattice growth on a plateau is held when it has "
                     "already failed at the current energy.")
-    for phrase in ("two atom-count gates", "Apart from those gates no move reads the atom count"):
-        audit.record(phrase not in collapse(audit.text(TEX)), TEX, f"retired gate wording stays out: {phrase}",
-                     "absent", "absent" if phrase not in collapse(audit.text(TEX)) else "present")
+    for path in (TEX, SI):
+        for phrase in ("two atom-count gates", "Apart from those gates no move reads the atom count"):
+            audit.record(phrase not in collapse(audit.text(path)), path, f"retired gate wording stays out: {phrase}",
+                         "absent", "absent" if phrase not in collapse(audit.text(path)) else "present")
 
 
 def rigid_stall(audit: Audit) -> None:
@@ -5869,7 +5870,7 @@ def science_claims(audit: Audit) -> None:
             audit.record(found is None, path, f"the text does not say {word}", "absent",
                          "absent" if found is None else "present")
     audit.said(TEX, "Three parts of the search have a run with and without them, and Section~\\ref{sec:knockouts} "
-                    "reports all three: the structure templates (Section~\\ref{sec:priors}), at two revisions in the "
+                    "reports all three: the structure templates (Section~\\siref{sec:priors}), at two revisions in the "
                     "history of the submitted revision, and the length unit and the choice among the moves, on the "
                     "search source of the submitted revision.")
     audit.said(TEX, "\\subsection{Mechanism and design rationale}")
@@ -5888,15 +5889,15 @@ def science_claims(audit: Audit) -> None:
                     "the climb is a separate choice of the same draw, not a fallback.")
     audit.said(SI, "Those presets enable both the trail and climb responses to a stuck chain.")
     audit.said(TEX, "For every other proposal, the preset uses the Bayesian screen of\n"
-                    "equation~\\ref{eq:bayes-screen}.")
+                    "equation~\\sieqref{eq:bayes-screen}.")
     audit.said(TEX, "Otherwise it finishes when the Student-\\(t\\) posterior assigns probability\n"
                     "at least \\(7/15\\) to beating the best.")
-    audit.said(TEX, "The non-default calibrated-margin path, which the recommended preset\n"
+    audit.said(SI, "The non-default calibrated-margin path, which the recommended preset\n"
                     "bypasses because it enables the Bayesian screen")
     audit.said(TEX, "The arm named \\texttt{soap} in the implementation is a fivefold-residual\n"
                     "move.")
     audit.said(TEX, "Their root-mean-square displacement is \\(0.75\\) in reduced units.")
-    audit.said(TEX, "If the drawn-axis proposal does not move, the arm tries the measured\n"
+    audit.said(SI, "If the drawn-axis proposal does not move, the arm tries the measured\n"
                     "best-axis residual")
     audit.said(TEX, "The branch is withheld only for a calculation with an active region or\n"
                     "frozen atoms.")
