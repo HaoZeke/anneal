@@ -7,7 +7,7 @@ This file is the measurement protocol. It is committed before any row.
 System `au55`. Arm `cooperative`. One ensemble seed runs four chains
 at once. The chains are threads in one process. A second process is
 the catalog server, reached over a loopback ephemeral TCP port. The
-build is release with the `bank-rpc` feature. `src/` is unchanged.
+release build is `--features "bank-rpc ira"`. `src/` is unchanged.
 
 The search preset is `Config::communicating(55)` with Gupta
 `copper_gold(0, 55)` species and no diameter rescaling. The replica
@@ -79,11 +79,10 @@ atoms on a line at 3 angstrom spacing, minimum separation 1,
 maximum gradient norm `1e-3`, matching the search record gradient.
 Catalog capacity is 64 and the census radius is 0.35. No state
 directory, clock, quorum, or halving. The coordinator refuses a
-scientific state that has no exact structure witness. The shape
-witness module is not part of the `bank-rpc` feature, so the server
-passes the `ExactStructureWitness` function implementation: two
-coordinate vectors match when every component differs by at most
-`1e-4`.
+scientific state that has no exact structure witness. The feature
+set is `bank-rpc` and `ira`. The server passes the
+`ExactStructureWitness` function implementation: two coordinate
+vectors match when every component differs by at most `1e-4`.
 
 Checkpoint interval is 500 charged calls. A validated boundary with
 a finite energy and gradient norm at most `1e-3` is offered. Each
