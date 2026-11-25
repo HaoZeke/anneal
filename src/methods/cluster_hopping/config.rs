@@ -180,7 +180,8 @@ pub enum ContinuousSymmetry {
         /// Divisor of the basin-hopping quench count.
         interval: usize,
     },
-    /// Project onto symmetry operations detected on the incumbent and quench
+    /// Project onto `C_i`, `C_5`, and `D_5h`, or onto the operations detected
+    /// on the incumbent when [`Config::detected_symmetry`] is on, and quench
     /// the lowest continuous symmetry measure. GMIN's `NSYMINTERVAL` default
     /// is the same ten quenches (`keywords.f90`).
     Measure {
@@ -732,10 +733,13 @@ pub struct Config {
     /// This is distinct from [`Config::symmetrise_on_stall`]. The
     /// continuous-symmetry construction solves a global atom assignment for
     /// each group image and quenches the averaged geometry on a fixed
-    /// schedule. [`ContinuousSymmetry::Measure`] is the continuous symmetry
-    /// measure over operations detected on the incumbent. Orientations come
-    /// from the inertia tensor. A detected inversion is one of those
-    /// operations and has no separate orientation search.
+    /// schedule. `C_i` has no orientation search. [`ContinuousSymmetry::Measure`]
+    /// is the Oakley, Johnston and Wales continuous symmetry measure over
+    /// `C_i`, `C_5`, and `D_5h`, with orientations taken from the inertia
+    /// tensor. With [`Config::detected_symmetry`] on, it is the measure over
+    /// the operations detected on the incumbent that keep every atom within
+    /// its equivalence class, projected in the input frame
+    /// ([`crate::csm::propose_for`]).
     pub continuous_symmetry: ContinuousSymmetry,
     /// Project onto detected symmetry operations rather than the fixed
     /// fivefold/inversion template library, and scan all orders the point
