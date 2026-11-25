@@ -174,3 +174,95 @@ def test_rerun_repairs_truncated_output_rows(tmp_path):
     assert shape[0]["system"] == "lj75"
     assert shape[0]["seed"] == "2000"
     assert shape[0]["cpu_s"] == "1.0"
+
+
+@pytest.mark.parametrize("torn_file", ["shape", "performance"])
+def test_rerun_repairs_tail_torn_after_revision(tmp_path, torn_file):
+    plan = CPU_CAP.build_plan(ROOT, "lj75", 2000)
+    with plan.rows.open(newline="") as handle:
+        source = next(
+            row for row in csv.DictReader(handle)
+            if row["arm"] == "ase_mh" and row["seed"] == "2000"
+        )
+    source["stop"] = "cap reached (12 h CPU)"
+    source["cap_s"] = "43200.000000"
+    source["code_revision"] = plan.revision
+
+    rows = tmp_path / "rows.csv"
+    rows_header = ",".join(source) + "\n"
+    rows.write_text(rows_header)
+    shape_rows = tmp_path / "run-shape.csv"
+    shape_header = (
+        "system,arm,seed,code_revision,nproc,model_name,memory_bytes,"
+        "core_affinity,cpu_s,wall_s,cpu_wall_ratio,vm_stayed_live\n"
+    )
+    shape_rows.write_text(shape_header)
+    if torn_file == "shape":
+        shape_rows.write_text(
+            shape_header + f"lj75,ase_mh,2000,{plan.revision},1,gen"
+        )
+    else:
+        values = [source[column] for column in source]
+        revision_index = list(source).index("code_revision")
+        rows.write_text(
+            rows_header + ",".join(values[: revision_index + 1]) + ",partial"
+        )
+
+    work = tmp_path / "work"
+    stdout = work / "runs" / "lj75-ase_mh-2000.stdout"
+    stdout.parent.mkdir(parents=True)
+    with stdout.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=source)
+        writer.writerow(source)
+        handle.write("shape_json=" + json.dumps({
+            "system": "lj75",
+            "arm": "ase_mh",
+            "seed": 2000,
+            "code_revision": plan.revision,
+            "nproc": 1,
+            "model_name": "generic",
+            "memory_bytes": 1,
+            "core_affinity": "0",
+            "cpu_s": 1.0,
+            "wall_s": 1.0,
+            "cpu_wall_ratio": 1.0,
+            "vm_stayed_live": True,
+        }) + "\n")
+
+    env = {
+        **os.environ,
+        "PYTHON": sys.executable,
+        "ASE_NONLJ_CPU_WORK": str(work),
+        "ASE_CPU_CAP_ROWS": str(rows),
+        "ASE_CPU_CAP_SHAPE_ROWS": str(shape_rows),
+    }
+    subprocess.run(
+        ["bash", str(SCRIPT), "lj75", "2000"],
+        cwd=ROOT,
+        env=env,
+        check=True,
+    )
+
+    rows_bytes = rows.read_bytes()
+    shape_bytes = shape_rows.read_bytes()
+    assert rows_bytes.endswith(b"\n")
+    assert shape_bytes.endswith(b"\n")
+    with rows.open(newline="") as handle:
+        recorded = list(csv.DictReader(handle))
+    with shape_rows.open(newline="") as handle:
+        shapes = list(csv.DictReader(handle))
+    assert recorded == [source]
+    assert shapes == [{
+        "system": "lj75",
+        "arm": "ase_mh",
+        "seed": "2000",
+        "code_revision": plan.revision,
+        "nproc": "1",
+        "model_name": "generic",
+        "memory_bytes": "1",
+        "core_affinity": "0",
+        "cpu_s": "1.0",
+        "wall_s": "1.0",
+        "cpu_wall_ratio": "1.0",
+        "vm_stayed_live": "true",
+    }]
