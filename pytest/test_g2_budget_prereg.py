@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ast
 import csv
 import importlib.util
 import json
@@ -12,6 +13,7 @@ import subprocess
 import sys
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -55,10 +57,17 @@ ROWS = load("g2_budget_rows", ROWS_PATH)
 
 
 def panel_module():
-    spec = importlib.util.spec_from_file_location("ase_panel_budgets", PANEL_PATH)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    """Read the panel budgets without importing the ASE runner."""
+    namespace = {"__builtins__": {}}
+    for node in ast.parse(PANEL_PATH.read_text()).body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not all(isinstance(target, ast.Name) and target.id.isupper() for target in node.targets):
+            continue
+        if any(target.id in {"PAPER_BUDGETS", "SYSTEMS"} for target in node.targets):
+            code = compile(ast.Module(body=[node], type_ignores=[]), str(PANEL_PATH), "exec")
+            exec(code, namespace)  # noqa: S102
+    return SimpleNamespace(**namespace)
 
 
 def g2_snakefile() -> str:
@@ -447,7 +456,7 @@ def _dry(tmp_path: Path, system: str, arm: str, seed: str):
         env=env,
         timeout=30,
     )
-    return next(csv.DictReader([completed.stdout.strip()]))
+    return next(csv.DictReader(completed.stdout.splitlines()))
 
 
 def test_dry_run_scales_only_the_capped_cell(tmp_path):
