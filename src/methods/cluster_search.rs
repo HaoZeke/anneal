@@ -4826,6 +4826,6 @@ mod tests {
         let (plain, none) = recorded_search_hash(&cfg, 6_000);
         assert_eq!(none, 0);
         assert_ne!(hash, plain);
-        assert_eq!(hash, 0x6fa5_beca_31a8_0106);
+        assert_eq!(hash, 0x680b_731d_e410_5af2);
     }
 }

@@ -96,8 +96,10 @@ fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     // completion of a new basin from the group its core carries took the
     // place of orbit completion and stall symmetrisation, and again when
     // that completion began to screen its quenches and to carry only a set
-    // closed under its own products and inverses.
-    let expected = "c7e583f8e5b4ee321b50e1cec7c67046f18844cfc3f081d2d6a091a18d108707";
+    // closed under its own products and inverses. It moved once more when
+    // a completion the screen would refuse began to be finished while this
+    // run's completions land downhill at the break-even rate.
+    let expected = "62deb515b74183139739a9269d6e857fb30a2826c1fc1f826d0172eb6641180e";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }
 
