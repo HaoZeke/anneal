@@ -30,9 +30,9 @@ repeated. Rows are appended after every run and never
 rewritten; without ``--rerun``, a row already stored for the same system,
 code, seed, code revision and harness revision is kept and its run
 skipped, while ``--summarize`` reads the latest stored row of each seed.
-``code_revision`` is the anneal commit on anneal rows and the GMIN SVNREV
-on GMIN rows; ``harness_revision`` is the anneal commit whose examples
-wrote the starts.
+``code_revision`` is the anneal commit on anneal rows and the dated public
+tarball identifier on new GMIN rows; ``harness_revision`` is the anneal
+commit whose examples wrote the starts.
 
 ``--summarize`` reads the rows and writes ``summary.csv`` and the table in
 ``bench/gmin-panel/README.md``; with ``--tex`` also table ``tab:gmin``
@@ -64,7 +64,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
-from gmin_pin import TARBALL_SHA256, read_built_revision, read_svnrev  # noqa: E402
+from gmin_pin import SNAPSHOT, TARBALL_SHA256, read_built_revision, read_svnrev  # noqa: E402
 from machine_provenance import (  # noqa: E402
     aggregate_machine_columns,
     gmin_row_key,
@@ -75,9 +75,17 @@ from machine_provenance import (  # noqa: E402
     validate_gmin_group_provenance,
     validate_saved_gmin_provenance,
 )
+import paired_stats  # noqa: E402
 
 SEEDS = tuple(range(2000, 2012))
 HIT_TOL = DEFAULT_HIT_TOL
+# Historical SVNREV of the Lennard-Jones rows behind bench/gmin-panel/rows.csv.
+GMIN_REV = "aac1548a8aec13b53ad12a8d6904625081685d2e"
+# 2026-11-21T03:01:22Z tarball sha256 behind record/gmin-184/rows.csv.
+GMIN_RERUN_TARBALL_SHA256 = "0d9917600ecda72b2176253d0e838bcb58ec6e38902ef7d0affc7e7e7eba8f39"
+# Public tarball pin used by scripts/gmin_panel/build_gmin.sh.
+GMIN_TARBALL_DATE = SNAPSHOT
+GMIN_TARBALL_SHA256 = TARBALL_SHA256
 PAPER_BUDGETS = {
     "lj38": 400_000,
     "lj55": 1_000_000,
@@ -522,14 +530,20 @@ def row_key(row: dict[str, str]) -> tuple[str, str, str, str, str, str]:
     )
 
 
-def panel_groups(rows: list[dict[str, str]], revision: str) -> dict[tuple[str, str], list[dict[str, str]]]:
-    """The latest stored row per seed of each system and code at this revision."""
+def panel_groups(rows: list[dict[str, str]], revision: str,
+                 harness: str | None = None) -> dict[tuple[str, str], list[dict[str, str]]]:
+    """The latest stored row per seed of each system and code at this revision, run by the harness of
+    that revision unless another is named."""
+    wanted = {"anneal": revision, "gmin": GMIN_REV}
+    harness = harness or revision
     groups: dict[tuple[str, str], dict[int, dict[str, str]]] = {}
     for row in rows:
-        if revision != "latest" and row["harness_revision"] != revision:
-            continue
-        if row["code"] == "anneal" and revision != "latest" and row["code_revision"] != revision:
-            continue
+        if revision == "latest":
+            if row["code"] == "gmin" and row["code_revision"] != GMIN_REV:
+                continue
+        else:
+            if row["harness_revision"] != harness or wanted.get(row["code"]) != row["code_revision"]:
+                continue
         groups.setdefault((row["system"], row["code"]), {})[int(row["seed"])] = row
     out: dict[tuple[str, str], list[dict[str, str]]] = {}
     for key, group in groups.items():
@@ -607,9 +621,9 @@ def ranked_wall(left: list[dict[str, str]], right: list[dict[str, str]]) -> tupl
     )
 
 
-def summarise(rows: list[dict[str, str]], revision: str) -> list[dict[str, str]]:
+def summarise(rows: list[dict[str, str]], revision: str, harness: str | None = None) -> list[dict[str, str]]:
     out = []
-    groups = panel_groups(rows, revision)
+    groups = panel_groups(rows, revision, harness)
     for system, _kind, _n, reference, _rho, _driver, _binary in SYSTEMS:
         anneal = groups.get((system, "anneal"), [])
         gmin = groups.get((system, "gmin"), [])
@@ -679,6 +693,41 @@ def summarise(rows: list[dict[str, str]], revision: str) -> list[dict[str, str]]
     return out
 
 
+def paired_summary(rows: list[dict[str, str]], revision: str,
+                   harness: str | None = None) -> dict[str, dict[str, object]]:
+    """Per system, the two arms paired by seed: outcome table, McNemar, and Wilcoxon on calls and wall."""
+    groups = panel_groups(rows, revision, harness)
+    out: dict[str, dict[str, object]] = {}
+    for system in PAPER_BUDGETS:
+        anneal, gmin = groups.get((system, "anneal"), []), groups.get((system, "gmin"), [])
+        if not anneal or not gmin:
+            continue
+        if [r["seed"] for r in anneal] != [r["seed"] for r in gmin]:
+            raise RuntimeError(f"{system}: the arms do not share seeds")
+        table = paired_stats.outcome_table(
+            [r["hit"] == "1" for r in anneal],
+            [r["hit"] == "1" for r in gmin],
+        )
+        calls = [float(a["evals_to_hit"]) - float(g["evals_to_hit"]) for a, g in zip(anneal, gmin)]
+        wall = [float(a["wall_s"]) - float(g["wall_s"]) for a, g in zip(anneal, gmin)]
+        out[system] = {
+            "table": table,
+            "mcnemar_p": paired_stats.mcnemar_exact(table[1], table[2]),
+            "newcombe": paired_stats.newcombe_paired(*table),
+            "wilcoxon_calls": paired_stats.wilcoxon_exact(calls),
+            "wilcoxon_wall": paired_stats.wilcoxon_exact(wall),
+        }
+    return out
+
+
+def show_exact_p(p: float, tex: bool) -> str:
+    """An exact test's p when four decimal places hold it."""
+    four = f"{p:.4f}".rstrip("0")
+    if 0.01 <= p < 1.0 and abs(float(four) - p) < 1e-12:
+        return four
+    return show_p(p, tex)
+
+
 def show_p(p: float, tex: bool) -> str:
     """Two significant figures; 1 only when p is exactly 1."""
     if p >= 1.0:
@@ -718,6 +767,20 @@ def show_s(value: float) -> str:
     return f"{value:.3f}" if value < 100.0 else f"{value:.1f}"
 
 
+CONFIGURATIONS = {
+    "c2de652dca0bc75e2b0cb4afffac91fd656404e4": "prior-on",
+    "1ce3ab64493196afd25e8690648e21157d91b882": "template-free",
+}
+
+
+def arm_label(line: dict[str, str], arm: str, tex: bool) -> str:
+    if not tex:
+        return "anneal" if arm == "anneal" else "GMIN"
+    if arm == "anneal":
+        return CONFIGURATIONS.get(line["anneal_revision"], "this work")
+    return "GMIN"
+
+
 def table_lines(summary: list[dict[str, str]], tex: bool) -> list[list[str]]:
     """One line per system and arm. Fisher and Mann-Whitney sit on the anneal line."""
     out = []
@@ -755,6 +818,78 @@ def readme_table(summary: list[dict[str, str]]) -> str:
     return "\n".join(rows)
 
 
+def show_interval(low: float, high: float) -> str:
+    def one(value: float) -> str:
+        text = f"{value:.2f}"
+        return "0.00" if text == "-0.00" else text.replace("-", "\\(-\\)")
+
+    return f"{one(low)} to {one(high)}"
+
+
+def paired_lines(summary: list[dict[str, str]], paired: dict[str, dict[str, object]]) -> list[list[str]]:
+    """Render paired outcomes with tests on this work's line."""
+    out = []
+    for line in summary:
+        system = line["system"]
+        stats = paired[system]
+        both, only_anneal, only_gmin, neither = stats["table"]
+        for arm, only in (("anneal", only_anneal), ("gmin", only_gmin)):
+            first = arm == "anneal"
+            out.append(
+                [
+                    LABELS[system][1] if first else "",
+                    show_budget(int(line["budget"]), True) if first else "",
+                    arm_label(line, arm, True),
+                    f"{line[f'{arm}_hits']}/{line[f'{arm}_n']}",
+                    str(only),
+                    str(both) if first else "",
+                    str(neither) if first else "",
+                    show_calls(float(line[f"{arm}_evals_median"])),
+                    show_calls(float(line[f"{arm}_evals_iqr"])),
+                    show_s(float(line[f"{arm}_wall_median_s"])),
+                    show_s(float(line[f"{arm}_pot_median_s"])),
+                    show_s(float(line[f"{arm}_outside_median_s"])),
+                    show_exact_p(stats["mcnemar_p"], True) if first else "",
+                    show_interval(*stats["newcombe"]) if first else "",
+                    show_p(stats["wilcoxon_calls"][2], True) if first else "",
+                    show_p(stats["wilcoxon_wall"][2], True) if first else "",
+                ]
+            )
+    return out
+
+
+def session_date(stamp: str) -> str:
+    return f"{stamp[:4]}-{stamp[4:6]}-{stamp[6:8]}" if len(stamp) >= 8 and stamp[:8].isdigit() else stamp
+
+
+def gmin_label(rev: str) -> str:
+    return f"GMIN tarball SHA-256 \\texttt{{{rev[:8]}}}" if len(rev) == 64 else f"GMIN \\texttt{{{rev[:8]}}}"
+
+
+def caption_revisions(summary: list[dict[str, str]], revision: str) -> list[str]:
+    lj = [line for line in summary if line["system"].startswith("lj")]
+    nonlj = [line for line in summary if not line["system"].startswith("lj")]
+    lj_a = sorted({r for line in lj for r in line["anneal_revision"].split()})
+    lj_g = sorted({r for line in lj for r in line["gmin_revision"].split()})
+    lj_s = sorted({s for line in lj for s in line["sessions"].split()})
+    nl_a = sorted({r for line in nonlj for r in line["anneal_revision"].split()})
+    nl_g = sorted({r for line in nonlj for r in line["gmin_revision"].split()})
+    nl_s = sorted({s for line in nonlj for s in line["sessions"].split()})
+    if revision != "latest" or not lj or not nonlj or (lj_a == nl_a and lj_g == nl_g and lj_s == nl_s):
+        all_a = sorted({r for line in summary for r in line["anneal_revision"].split()})
+        all_g = sorted({r for line in summary for r in line["gmin_revision"].split()})
+        shown_rev = revision[:8] if revision != "latest" else (all_a[0][:8] if len(all_a) == 1 else "mixed")
+        shown_gmin = " ".join(value[:8] for value in all_g) or "unknown"
+        return [f"Revisions: anneal \\texttt{{{shown_rev}}}, GMIN \\texttt{{{shown_gmin}}}."]
+    return [
+        f"The eight Lennard-Jones rows come from session \\texttt{{{lj_s[0]}}} "
+        f"({session_date(lj_s[0])}; anneal \\texttt{{{lj_a[0][:8]}}}, {gmin_label(lj_g[0])}).",
+        f"Au\\(_{{55}}\\) and the four Morse rows come from session \\texttt{{{nl_s[0]}}} "
+        f"({session_date(nl_s[0])}; anneal \\texttt{{{nl_a[0][:8]}}}, {gmin_label(nl_g[0])}; "
+        "see Supporting Information).",
+    ]
+
+
 def tex_table(summary: list[dict[str, str]], revision: str) -> str:
     lines = table_lines(summary, tex=True)
     for index, cells in enumerate(lines):
@@ -762,17 +897,12 @@ def tex_table(summary: list[dict[str, str]], revision: str) -> str:
         arm = "anneal" if index % 2 == 0 else "gmin"
         if arm == "gmin" and system in ("lj75", "lj98"):
             cells[3] += "~\\rerun{5}"
-    shown_revision = revision[:8] if revision != "latest" else "mixed"
-    gmin_revisions = sorted(
-        {value for row in summary for value in row["gmin_revision"].split()}
-    )
-    shown_gmin = " ".join(value[:8] for value in gmin_revisions) or "unknown"
     body = [" & ".join(cells) + " \\\\" for cells in lines]
     return "\n".join(
         [
             "\\begin{table}",
-            "\\caption{This work against GMIN, both arms of each cluster on one host in one session.",
-            f"Revisions: anneal \\texttt{{{shown_revision}}}, GMIN \\texttt{{{shown_gmin}}}.",
+            "\\caption{This work against GMIN, both arms of each cluster run in one session on one host.",
+            *caption_revisions(summary, revision),
             "Seeds 2000--2011, one core, budget in force calls.",
             "Calls and IQR are the median and the interquartile range of the",
             "calls to the minimum, with a miss at the full budget.",
@@ -922,6 +1052,25 @@ def self_test() -> None:
                 raise SystemExit(f"abba balance {slot} {arm} {pairs}")
     if len(pairs) != len(SEEDS) * 2:
         raise SystemExit("abba length")
+    mixed_cap = caption_revisions(
+        [
+            {
+                "system": "lj38",
+                "anneal_revision": "c2de652dca0bc75e2b0cb4afffac91fd656404e4",
+                "gmin_revision": GMIN_REV,
+                "sessions": "20261117T035457Z",
+            },
+            {
+                "system": "au55",
+                "anneal_revision": "9837358ae1027067ff654fac8b48969020853452",
+                "gmin_revision": GMIN_RERUN_TARBALL_SHA256,
+                "sessions": "20261121T133601Z",
+            },
+        ],
+        "latest",
+    )
+    if len(mixed_cap) != 2 or "c2de652d" not in mixed_cap[0] or "9837358a" not in mixed_cap[1]:
+        raise SystemExit(f"mixed caption {mixed_cap}")
     print("ok")
 
 
@@ -980,7 +1129,7 @@ def main(argv: list[str]) -> int:
     if socket.gethostname() != "bench":
         print(f"uts hostname is {socket.gethostname()}, expected bench", file=sys.stderr)
         return 2
-    if os.sched_getaffinity(0) != {0}:
+    if hasattr(os, "sched_getaffinity") and os.sched_getaffinity(0) != {0}:
         print(f"pinned to {sorted(os.sched_getaffinity(0))}, expected core 0", file=sys.stderr)
         return 2
     needed = (

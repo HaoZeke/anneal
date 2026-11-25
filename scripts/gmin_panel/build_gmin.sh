@@ -12,6 +12,23 @@
 # public URL is fetched and refused unless the sha256 matches.
 set -euo pipefail
 
+if ! command -v sha256sum >/dev/null 2>&1; then
+  sha256sum() {
+    if command -v shasum >/dev/null 2>&1; then
+      shasum -a 256 "$@"
+    else
+      python3 -c 'import hashlib, pathlib, sys
+for p in sys.argv[1:]:
+    print(f"{hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()}  {p}")' "$@"
+    fi
+  }
+fi
+if ! command -v nproc >/dev/null 2>&1; then
+  nproc() {
+    sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1
+  }
+fi
+
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 PIN=$ROOT/scripts/gmin_pin.py
 eval "$(python3 "$PIN" shell)"
@@ -203,7 +220,7 @@ fi
   echo "cflags=$CFLAGS_VAL"
   echo "cxxflags=$CXXFLAGS_VAL"
   echo "ldflags=$LDFLAGS_VAL"
-  echo "linked=$(ldd "$WORK/bin/GMIN" 2>/dev/null | awk '/blas|lapack/ {print $3}' | xargs -r readlink -f | paste -sd' ' - || true)"
+  echo "linked=$(ldd "$WORK/bin/GMIN" 2>/dev/null | awk '/blas|lapack/ {print $3}' | while IFS= read -r lib; do [[ -n $lib ]] && readlink -f "$lib"; done | paste -sd' ' - || true)"
   echo "binary_sha256=$(sha256sum "$WORK/bin/GMIN" | awk '{print $1}')"
 } > "$WORK/gmin-source.txt"
 echo "gmin snapshot=$SNAPSHOT revision=$REV build_key=$BUILD_KEY binary=$WORK/bin/GMIN"

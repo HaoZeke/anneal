@@ -988,7 +988,7 @@ rule ase_recommended:
     shell:
         """
         set -euo pipefail
-        python3 scripts/ase_panel/summarize.py --all --tex
+        python3 scripts/ase_panel/summarize.py --all
         """
 
 
@@ -1009,7 +1009,7 @@ rule ase_nonlj:
         """
         set -euo pipefail
         bash scripts/ase_nonlj/enter_bench.sh
-        python3 scripts/ase_nonlj/summarize.py --tex
+        python3 scripts/ase_nonlj/summarize.py
         """
 
 

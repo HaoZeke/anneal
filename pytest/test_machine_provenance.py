@@ -301,10 +301,23 @@ def test_gmin_panel_rejects_mixed_gmin_revisions_and_emits_machine_columns(tmp_p
         )
         for seed in panel.SEEDS
     ]
-    with pytest.raises(RuntimeError, match="mixed code_revision"):
-        panel.panel_groups(mixed_rows, "head-rev")
+    grouped = panel.panel_groups(mixed_rows, "head-rev")
+    assert set(grouped) == {("lj38", "anneal")}
     with pytest.raises(RuntimeError, match="mixed code_revision"):
         losses2.selected(mixed_rows, "lj38", "gmin", "head-rev", "base-rev")
+
+    mixed_anneal_rows = [
+        make_row(
+            "anneal",
+            seed,
+            "head-rev" if seed != panel.SEEDS[-1] else "other-rev",
+            "a" * 64,
+            "CPU A",
+        )
+        for seed in panel.SEEDS
+    ]
+    with pytest.raises(RuntimeError, match="mixed code_revision"):
+        panel.panel_groups(mixed_anneal_rows, "latest")
 
     mixed_key_rows = [
         make_row("anneal", seed, "head-rev", "a" * 64, "CPU A") for seed in panel.SEEDS
@@ -312,7 +325,7 @@ def test_gmin_panel_rejects_mixed_gmin_revisions_and_emits_machine_columns(tmp_p
         make_row(
             "gmin",
             seed,
-            "svn-100",
+            panel.GMIN_REV,
             "b" * 64,
             "CPU B",
             gmin_build_key="c" * 64 if seed != panel.SEEDS[-1] else "d" * 64,
@@ -327,7 +340,7 @@ def test_gmin_panel_rejects_mixed_gmin_revisions_and_emits_machine_columns(tmp_p
     clean_rows = [
         make_row("anneal", seed, "head-rev", "a" * 64, "CPU A") for seed in panel.SEEDS
     ] + [
-        make_row("gmin", seed, "svn-100", "b" * 64, "CPU B") for seed in panel.SEEDS
+        make_row("gmin", seed, panel.GMIN_REV, "b" * 64, "CPU B") for seed in panel.SEEDS
     ]
     rows_csv = tmp_path / "rows.csv"
     for row in clean_rows:
@@ -2934,3 +2947,38 @@ def test_morse_panel_and_morse_gmin_regenerate_from_committed_legacy_csvs(
         writer.writerows(mg_rows)
     with pytest.raises(ValueError, match="gmin_build_key"):
         morse_gmin.main([*mg_base, "--overwrite-legacy"])
+
+
+def test_machine_provenance_darwin_fallback(tmp_path, monkeypatch):
+    import hashlib
+    import subprocess
+    import machine_provenance as mp
+
+    missing = tmp_path / "missing"
+    monkeypatch.setattr(mp, "MACHINE_ID_PATH", missing / "machine-id")
+    monkeypatch.setattr(mp, "PRODUCT_UUID_PATH", missing / "product_uuid")
+    monkeypatch.setattr(mp, "CPUINFO_PATH", missing / "cpuinfo")
+    monkeypatch.setattr(mp.sys, "platform", "darwin")
+
+    def fake_run(cmd, **_kwargs):
+        if cmd[0] == "ioreg":
+            return subprocess.CompletedProcess(
+                cmd, 0, '    "IOPlatformUUID" = "11111111-2222-3333-4444-555555555555"\n', ""
+            )
+        if cmd[:2] == ["sysctl", "-n"] and cmd[2] == "machdep.cpu.brand_string":
+            return subprocess.CompletedProcess(cmd, 0, "Apple M2 Pro\n", "")
+        return subprocess.CompletedProcess(cmd, 1, "", "")
+
+    monkeypatch.setattr(mp.subprocess, "run", fake_run)
+    digest, cpu = mp.machine_provenance(
+        mp.MACHINE_ID_PATH, mp.PRODUCT_UUID_PATH, mp.CPUINFO_PATH
+    )
+    expected = hashlib.sha256(
+        mp.MACHINE_ID_SALT + b"11111111-2222-3333-4444-555555555555"
+    ).hexdigest()
+    assert digest == expected
+    assert cpu == "Apple M2 Pro"
+
+    # Explicit non-default missing paths still fail instead of querying the host.
+    with pytest.raises(RuntimeError, match="machine-id"):
+        mp.machine_provenance(tmp_path / "other-id", tmp_path / "other-uuid", tmp_path / "other-cpu")
