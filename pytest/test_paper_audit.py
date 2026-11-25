@@ -62,6 +62,8 @@ CHECKS = (
     audit_mod.crest_equal,
     audit_mod.crest_equal_bench,
     audit_mod.crest_table,
+    audit_mod.gmin_tuned,
+    audit_mod.morse_m70_pair,
     audit_mod.outside_session,
     audit_mod.g3_session,
     audit_mod.manuscript_new,

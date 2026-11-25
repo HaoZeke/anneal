@@ -671,6 +671,10 @@ and 4 and 1 on Au\(_{55}\).
 Both arms hit M\(_{55}\) and M\(_{80}\) at \(\rho=6\) on every seed, and on
 M\(_{80}\) at \(\rho=6\) this code takes the same median of 62677 combined
 energy-and-gradient passes at both revisions.
+With GMIN inputs tuned per cluster by one procedure, at the same ceilings,
+GMIN hits LJ\(_{98}\) on 1 of 12 seeds and LJ\(_{104}\) on 10 of 12,
+against 7 and 5 for an ancestor of the submitted revision in the same
+session.
 The Supporting Information runs the submitted revision alone on ten more Morse
 clusters, of 30, 38, 70 and 80 atoms at \(\rho\) from 3 to 14, where it hits
 from 4 to 12 of 12 seeds.
@@ -952,7 +956,7 @@ move allocation, basin memory, and stall exits.
 At arm-specific work definitions it reaches funnel-trapped references on
 LJ\(_{98}\), M\(_{55}\) and M\(_{80}\) at \(\rho=14\), and rigid
 (H\(_2\)O)\(_{15}\) and (H\(_2\)O)\(_{20}\), where the corresponding GMIN
-arms hit no seed.
+arms at one documented input hit no seed.
 Under independent starts and shared wall caps, it reaches four of five
 atomic and all four Morse references, while the ASE optimizers reach only
 LJ\(_{55}\), once; these censored arms are descriptive, not equal-work

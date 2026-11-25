@@ -127,6 +127,18 @@ The GMIN harness removes every \texttt{H2H\_*} and \texttt{ANNEAL\_*}
 variable before it starts this code, so the printed rows used the preset
 value of \texttt{trail\_on\_stall}.
 
+The tuned GMIN counts of the main text are the rows of
+\path{bench/gmin-tuned/rows-shard2.csv}, one session on seeds 2000--2011
+at \(4\times 10^{6}\) in each arm's unit, both arms from the start this code
+writes for the seed.
+GMIN runs \path{bench/gmin-tuned/inputs/lj98.data} and
+\path{lj104.data}, tuned per cluster by one procedure from the documented
+defaults, built from the same pinned tarball with the panel patches, as
+\path{bench/gmin-tuned/build.txt} records.
+This code runs untuned at revision \texttt{5eb79cdc}.
+Two more GMIN arms on LJ\(_{98}\), with the same binary and input, hit 1 of
+12 seeds each.
+
 \section{Host and commands}
 \label{sec:host}
 Each cell of the GMIN table ran both arms in alternating order by seed:
@@ -349,6 +361,12 @@ fewest of the ten.
 The record pairs these rows with stored GMIN rows of earlier sessions, which
 name no machine for any cluster and no GMIN revision for five of the ten, so
 the article prints this code alone here.
+On M\(_{70}\) that earlier record is \path{bench/morse-panel/seeds.csv},
+whose rows name no revision or host: at \(\rho=3\) and 6 GMIN hits 12 and
+11 of 12 seeds and this code 11 and 9, and at \(\rho=10\) and 14 this code
+hits 2 and 3 and GMIN none.
+This session has no GMIN arm, so on M\(_{70}\) at \(\rho=6\) the paired
+comparison remains GMIN ahead.
 The rows are copied from commit \texttt{\seqsplit{4256269394435f77787d2bfdbead2321e08340a6}}
 of \path{record/g1-develop-stock}, as \path{paper/jctc/data/gmin_g1/PROVENANCE}
 names, and \path{paper/jctc/scripts/morse_g1_table.py} writes the table.
