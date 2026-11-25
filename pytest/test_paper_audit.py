@@ -149,6 +149,16 @@ def test_script_exits_zero():
     assert audit_mod.run() == 0
 
 
+def test_tex_prose_checks_ignore_comments():
+    fragment = "Required visible sentence."
+    audit = audit_mod.Audit()
+    audit.text_cache["sample.tex"] = f"% {fragment}\n   % {fragment}\nVisible text.\n"
+
+    audit.said("sample.tex", fragment)
+
+    assert [result[2] for result in audit.drifts()] == ["prose"]
+
+
 def workspace_version():
     """The crate version, read the same way ``unauditable`` reads it."""
     return re.search(r'^version = "([^"]+)"', (ROOT / "Cargo.toml").read_text(), re.M).group(1)

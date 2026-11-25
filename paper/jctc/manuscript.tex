@@ -135,7 +135,6 @@ The depth in equation~\ref{eq:depth} updates the arm that played.
 The lower band separates the rgpot Lennard-Jones, Morse, Gupta, and binary
 Lennard-Jones kernels from the native TIP4P and Sutton--Chen implementations;
 offline reference relaxations are not part of the search stack.}
-\label{fig:stack}
 \end{figure}
 
 \begin{figure}
@@ -145,7 +144,6 @@ offline reference relaxations are not part of the search stack.}
 equation~\ref{eq:burst}.
 Whichever move is drawn, its proposal is quenched once and meets
 equation~\ref{eq:metropolis}.}
-\label{fig:rec-arms}
 \end{figure}
 
 \subsection{Moves}
@@ -710,9 +708,8 @@ energy-and-gradient passes to the minimum, while GMIN reports 389399
 On LJ\(_{102}\), LJ\(_{103}\), LJ\(_{104}\), and LJ\(_{150}\), the hit
 counts are 6 against 5, 6 against 3, 5 against 6, and 8 against 9.
 Both arms hit LJ\(_{55}\) and M\(_{80}\) at \(\rho=6\) on every seed.
-The median wall of a run is lower for this code on all nine clusters, from
-0.640~s against 3.427~s on LJ\(_{38}\) to 66.725~s against 341.6~s on
-LJ\(_{150}\).
+The median wall of a run is lower for this code on all nine clusters, ranging
+from 0.052~s on LJ\(_{55}\) to 107.1~s on LJ\(_{104}\).
 These arm-specific wall medians are descriptive and are not tested across
 arms.
 At the submitted revision, the hit counts for this code and GMIN are 9 and
@@ -1056,12 +1053,13 @@ The bias of equation~\ref{eq:delta} is
 \begin{equation}
 V(x) =
 \begin{cases}
-V_{b(x)} & \text{if } \delta\bigl(x,c_{b(x)}\bigr) < \rho_m,\\
+V_{b(x)} & \text{if } \delta\bigl(x,x_{b(x)}\bigr) < \rho_m,\\
 0 & \text{otherwise,}
 \end{cases}
 \label{eq:bias}
 \end{equation}
-where \(b(x)\) is the latest region opened with \(\delta(x,c_b)<\rho_m\).
+where \(b(x)\) is the latest region opened with
+\(\delta(x,x_b)<\rho_m\).
 A deposit in region \(b\) at temperature \(T\) raises its height by
 \begin{equation}
 V_b \leftarrow V_b + w_0\exp\!\Bigl(-\frac{V_b}{(\gamma-1)\,T}\Bigr),

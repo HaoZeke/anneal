@@ -176,7 +176,10 @@ class Audit:
         self.record(agrees(shown, value), where, label, shown, value)
 
     def said(self, path: str, fragment: str) -> None:
-        self.record(collapse(fragment) in collapse(self.text(path)), path, "prose", fragment, "present")
+        text = self.text(path)
+        if path.endswith(".tex"):
+            text = tex_without_comments(text)
+        self.record(collapse(fragment) in collapse(text), path, "prose", fragment, "present")
 
     def drifts(self) -> list[tuple[str, str, str, str, str]]:
         return [r for r in self.results if r[0] != "OK"]
@@ -184,6 +187,13 @@ class Audit:
 
 def collapse(text: str) -> str:
     return " ".join(text.split())
+
+
+def tex_without_comments(text: str) -> str:
+    """Remove lines that TeX treats only as comments."""
+    if "\n" not in text:
+        return text
+    return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("%"))
 
 
 def type7(values: list[float], p: float) -> float:
@@ -1199,10 +1209,11 @@ def gmin_rerun(audit: Audit) -> None:
     lower = [s for s in GMIN_RERUN_SYSTEMS if walls(s, "anneal") < walls(s, "gmin")]
     audit.cell(TEX, "printed clusters where the median wall of this code is lower", str(len(GMIN_RERUN_SYSTEMS)),
                float(len(lower)))
-    audit.said(TEX, f"The median wall of a run is lower for this code on all {NUMBER_WORDS[len(lower)]} clusters, from "
-                    f"{panel.show_s(walls('lj38', 'anneal'))}~s against {panel.show_s(walls('lj38', 'gmin'))}~s on "
-                    f"LJ\\(_{{38}}\\) to {panel.show_s(walls('lj150', 'anneal'))}~s against "
-                    f"{panel.show_s(walls('lj150', 'gmin'))}~s on LJ\\(_{{150}}\\).")
+    low_wall, low_system = min((walls(s, "anneal"), s) for s in GMIN_RERUN_SYSTEMS)
+    high_wall, high_system = max((walls(s, "anneal"), s) for s in GMIN_RERUN_SYSTEMS)
+    audit.said(TEX, f"The median wall of a run is lower for this code on all {NUMBER_WORDS[len(lower)]} clusters, "
+                    f"ranging from {panel.show_s(low_wall)}~s on {panel.LABELS[low_system][1]} to "
+                    f"{panel.show_s(high_wall)}~s on {panel.LABELS[high_system][1]}.")
     audit.said(TEX, "These arm-specific wall medians are descriptive and are not tested across\n"
                     "arms.")
     lj_data = audit.text("examples/h2h_gmin_lj.data")
@@ -2833,7 +2844,7 @@ def supporting_numbers(audit: Audit) -> None:
     audit.cell(SI, "temperature at preset.rs:8", "0.8",
                float(re.fullmatch(r"\s*pub\(super\) const TEMPERATURE: f64 = ([\d.]+);", line_of(audit, preset, 8)).group(1)))
     audit.said(SI, "The temperature is \\(0.8\\), the value Wales and Doye used for Lennard-Jones basin hopping and the "
-                   "value stored at \\texttt{preset.rs:8}.")
+                   "value stored at \\path{src/methods/cluster_hopping/preset.rs}, line 8.")
     audit.said("examples/lj_cluster_search.rs", "random_cluster(n, 0.7, cfg.min_separation, &mut rng)")
     audit.said(SI, "The start density passed to \\texttt{random\\_cluster} is \\(0.7\\).")
     audit.said("src/methods/cluster_hopping.rs", "/// Seeds a non-overlapping configuration at liquid-like density.")

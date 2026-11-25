@@ -40,13 +40,14 @@ The references, in reduced units, are \(-173.928427\) for LJ\(_{38}\),
 LJ\(_{98}\) uses \(-543.665361\), and LJ\(_{104}\) uses \(-582.086642\).
 The temperature is \(0.8\), the value Wales and Doye used for
 Lennard-Jones basin hopping and the value stored at
-\texttt{preset.rs:8}.
+\path{src/methods/cluster_hopping/preset.rs}, line 8.
 \cite{wales1997} The start density passed to \texttt{random\_cluster} is
 \(0.7\).
 The function comment calls the draw liquid-like.
 
 \section{Published symmetrized costs}
-\path{data/literature.tsv} quotes Oakley, Johnston and Wales, Table 1.
+\path{paper/jctc/data/literature.tsv} quotes Oakley, Johnston and Wales,
+Table 1.
 \cite{oakley2013} The continuous-symmetry basin-hopping mean at 38 atoms
 is 4369 evaluations over 100 successful runs.
 The Table 2 rows of that source are genetic-algorithm means at 75 and
@@ -54,8 +55,8 @@ The Table 2 rows of that source are genetic-algorithm means at 75 and
 It has no genetic-algorithm row at 104 atoms.
 
 \section{TIP4P pair constants}
-\path{logs/tip4p_constants.txt} records Jorgensen's \(A = 2510400\)
-and \(C = 2552.24\).
+\path{paper/jctc/logs/tip4p_constants.txt} records Jorgensen's
+\(A = 2510400\) and \(C = 2552.24\).
 \cite{jorgensen1983} The units are kJ \AA\(^{12}\) mol\(^{-1}\) and kJ
 \AA\(^{6}\) mol\(^{-1}\).
 The Wales-group basin-hopping program (GMIN) matches those two numbers
