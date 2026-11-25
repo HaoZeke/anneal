@@ -425,6 +425,14 @@ def test_cluster_search_ras_true_uses_archive_outcome():
     )
     assert confirmed["ledger"]["check"] > 0
 
+    polished = core_cluster_search(lj_energy, lj_grad, 3, 50_000, seed=0, ras=True)
+    polished_split = polished["ledger"]
+    assert polished_split["full"] > 0
+    assert (
+        polished_split["screen"] + polished_split["full"] + polished_split["check"]
+        <= polished_split["spent"]
+    )
+
 
 def flexible_water(x: np.ndarray, molecules: int):
     """Harmonic O-H and H-H springs and an O-O Lennard-Jones term, in eV and angstrom."""

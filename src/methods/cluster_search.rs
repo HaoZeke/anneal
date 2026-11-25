@@ -1467,6 +1467,7 @@ pub fn polish_recorded_answer_until<O, A>(
         return;
     }
     stats.check_charged += 1;
+    let _confirm = ConfirmGradient::enter();
     let (fresh, gradient) = objective.value_and_gradient(state.view());
     let converged = fresh.is_finite()
         && gradient.len() == state.len()
@@ -2171,7 +2172,7 @@ fn packing_is_known(x: ArrayView1<f64>, cfg: &Config, wells: &[Array1<f64>]) -> 
 }
 
 /// Recompute a bank member on the receiving engine before it can affect the walk.
-#[cfg(feature = "bank-rpc")]
+#[cfg(any(feature = "bank-rpc", test))]
 fn validate_bank_sample<O>(
     objective: &O,
     cfg: &Config,
@@ -2190,6 +2191,7 @@ where
         return None;
     }
     *charged_validations += 1;
+    let _confirm = ConfirmGradient::enter();
     let (fresh_energy, gradient) = objective.value_and_gradient(state);
     if !fresh_energy.is_finite()
         || gradient.len() != state.len()
@@ -4249,7 +4251,10 @@ mod tests {
         }
         impl DifferentiableObjective<f64> for CountConfirm<'_> {
             fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
-                self.inner.value_and_gradient(x)
+                (
+                    eindir_core::Objective::eval(self, x),
+                    eindir_core::gradient::Gradient::grad(self, x),
+                )
             }
         }
 
@@ -4262,12 +4267,47 @@ mod tests {
         let mut stats = RelaxStats::default();
         let mut led = Ledger::new(20_000);
         let mut relax = warm_relax_impl(&counted, &cfg, &mut stats, 0, PaidCheck::default(), false);
-        relax(&mut led, chain.start().view(), cfg.relax_steps);
+        let (energy, state) = relax(&mut led, chain.start().view(), cfg.relax_steps);
         drop(relax);
 
-        let observed = counted.confirm.load(std::sync::atomic::Ordering::Relaxed);
-        assert!(observed > 0);
-        assert_eq!(stats.check_charged, observed);
+        let after_relax = counted.confirm.load(std::sync::atomic::Ordering::Relaxed);
+        assert!(after_relax > 0);
+        assert_eq!(stats.check_charged, after_relax);
+
+        let mut polish_cfg = cfg.clone();
+        polish_cfg.answer_gradient = polish_cfg.record_gradient / 10.0;
+        let mut outcome = Outcome {
+            best: energy,
+            best_state: Some(state),
+            ..Outcome::default()
+        };
+        let mut polish_stats = RelaxStats::default();
+        let mut polish_ledger = Ledger::new(20_000);
+        polish_recorded_answer(
+            &counted,
+            &polish_cfg,
+            &mut polish_ledger,
+            &mut outcome,
+            &mut polish_stats,
+        );
+        let after_polish = counted.confirm.load(std::sync::atomic::Ordering::Relaxed);
+        assert!(after_polish > after_relax);
+        assert_eq!(polish_stats.check_charged, after_polish - after_relax);
+
+        let mut bank_ledger = Ledger::new(1);
+        let mut bank_checks = 0;
+        let accepted = validate_bank_sample(
+            &counted,
+            &polish_cfg,
+            &mut bank_ledger,
+            &mut bank_checks,
+            outcome.best,
+            outcome.best_state.as_ref().unwrap().view(),
+        );
+        let after_bank = counted.confirm.load(std::sync::atomic::Ordering::Relaxed);
+        assert!(accepted.is_some());
+        assert_eq!(bank_checks, after_bank - after_polish);
+        assert_eq!(bank_checks, 1);
     }
 
     /// An incumbent far below the chain's floor makes every screen hopeless.
