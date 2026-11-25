@@ -435,6 +435,21 @@ def test_a_side_commit_that_keeps_the_tuned_source_but_changes_what_it_imports_i
         assert not revision_reach.tuned_gmin_harness_verified({**row, "harness_commit": side}, shared_clone), label
 
 
+def test_a_forged_row_naming_an_ancestor_or_url_harness_still_needs_the_recorded_data_and_tuned_source(paths):
+    row = audited_row()
+    head = git_text("rev-parse", "HEAD")
+    assert revision_reach.commit_held(head, ROOT) and revision_reach.commit_held(HELD, ROOT)
+    assert {name: bool(check({**row, "harness_commit": head})) for name, check in paths.items()} == dict.fromkeys(paths, True)
+    for label, forged in (
+        ("HEAD with a bogus data blob", {**row, "harness_commit": head, "data_blob": "0" * 40}),
+        ("an ancestor without the tuned harness", {**row, "harness_commit": HELD}),
+        ("an ancestor without the tuned harness and a bogus data blob", {**row, "harness_commit": HELD, "data_blob": "0" * 40}),
+        ("a URL at HEAD with a bogus data blob", {**row, "harness_commit": URL + head, "data_blob": "0" * 40}),
+        ("a URL at a commit this repository lacks", {**row, "harness_commit": URL + "a" * 40}),
+    ):
+        assert {name: bool(check(forged)) for name, check in paths.items()} == dict.fromkeys(paths, False), label
+
+
 @pytest.mark.skipif(sys.version_info < (3, 12), reason="the recorded tuned.py needs Python 3.12 to run")
 def test_the_rewritten_tuned_source_builds_the_same_commands(monkeypatch):
     harness = audited_row()["harness_commit"]

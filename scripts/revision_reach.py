@@ -128,13 +128,14 @@ def tuned_gmin_harness_verified(
 ) -> bool:
     """Verify a tuned-GMIN row: reachable code_revision, exact data_blob and tuned.py in HEAD.
 
-    A harness commit that is an ancestor of HEAD is accepted. Otherwise it must
-    be a commit of ``repo`` whose ``bench/gmin-tuned/inputs/<system>.data`` is
-    the recorded blob, whose ``scripts/gmin_panel/tuned.py`` is the one of HEAD
-    or, for the harness ``TUNED_SOURCE_REWRITES`` names, its listed old blob,
-    and that changed no ``src/``, ``examples/`` or Cargo file and no Python
-    file under ``scripts/`` but tuned.py since the merge base with HEAD, so the
-    modules tuned.py imports are ones HEAD's history holds.
+    The harness, whether an ancestor of HEAD, a side commit or a repository URL
+    at a full SHA, must be a commit of ``repo`` whose
+    ``bench/gmin-tuned/inputs/<system>.data`` is the recorded blob and the one
+    of HEAD, and whose ``scripts/gmin_panel/tuned.py`` is the one of HEAD or,
+    for the harness ``TUNED_SOURCE_REWRITES`` names, its listed old blob. Since
+    the merge base with HEAD it may change no ``src/``, ``examples/`` or Cargo
+    file and no Python file under ``scripts/`` but tuned.py, so the modules
+    tuned.py imports are ones HEAD's history holds.
     """
 
     def run(*args: str, stdin: str | None = None) -> subprocess.CompletedProcess:
@@ -148,8 +149,8 @@ def tuned_gmin_harness_verified(
         return False
     if not revision_reachable(code_rev, repo, held):
         return False
-    if revision_reachable(harness, repo, held):
-        return True
+    if external_form(harness):
+        harness = harness.rpartition("@")[2]
     if not is_full_sha(harness):
         return False
     head_data = run("rev-parse", f"HEAD:bench/gmin-tuned/inputs/{system}.data")

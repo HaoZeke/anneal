@@ -1,0 +1,1 @@
+A tuned-GMIN row is now refused when its harness commit, even an ancestor of HEAD or a repository URL form, lacks the recorded data blob or the tuned.py of HEAD. The one accepted tuned.py rewrite applies only to the recorded harness commit, and a side commit may no longer change a Python file under ``scripts/`` that tuned.py can import.
