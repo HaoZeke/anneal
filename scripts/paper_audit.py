@@ -5709,6 +5709,89 @@ def record_ref_checks(audit: Audit) -> None:
             audit.record(ok, RECORD_REFS, label, shown, value)
 
 
+# The record/<name> branches are gone from origin, so a record is cited by its
+# full audit ref. The prefix group tells refs/audit/record/<name> from the
+# record/<name>, origin/record/<name> and refs/heads/record/<name> branch forms,
+# and from a path such as paper/data/record/<name>, which is not a ref.
+_RECORD_CITATION = re.compile(r"(?<![A-Za-z0-9_.-])((?:[A-Za-z0-9_.-]+/)*)record/([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)")
+_RECORD_BRANCH_PREFIXES = ("", "origin/", "refs/heads/", "refs/remotes/origin/")
+# Test inputs and vendored trees may hold the branch form on purpose.
+_RECORD_CITATION_EXEMPT = ("pytest/", "tests/", "vendor/")
+# Audit record refs cited only as where removed rows are kept. Printed numbers
+# may not rest on them, so they have no RECORD_REFS row, which would make their
+# commits reachable; origin must still hold each at this SHA.
+ARCHIVE_RECORD_REFS = {
+    "refs/audit/record/bench-sc-h2h-n12": (
+        "182a334afbb6aea1db0a8c15482653f6c357b5a1",
+        "Sutton-Chen head-to-head rows removed because their revisions are not reachable",
+    ),
+}
+
+
+def record_citation_sources() -> list[str]:
+    """Tracked files that cite records: the paper, PROVENANCE files, READMEs and docs."""
+    paths = []
+    for path in git("ls-files", "-z").stdout.split("\0"):
+        if not path or path.startswith(_RECORD_CITATION_EXEMPT):
+            continue
+        name = path.rsplit("/", 1)[-1]
+        if (name.upper().startswith(("README", "PROVENANCE")) or name.lower().endswith("provenance.txt")
+                or name.endswith((".md", ".rst", ".tex"))):
+            paths.append(path)
+    return paths
+
+
+def record_citations(path: str, text: str) -> list[tuple[int, str, bool]]:
+    """Each record cited in text, as (line, citation, is the audit ref form).
+
+    TeX break hints between the parts of a ref are dropped first. A bare
+    record/<name>/ that names a directory of this tree is a path and is skipped.
+    """
+    if path.endswith(".tex"):
+        text = re.sub(r"\\allowbreak(\{\})?\s*", "", text).replace("\\_", "_")
+    out = []
+    for number, line in enumerate(text.splitlines(), 1):
+        for match in _RECORD_CITATION.finditer(line):
+            prefix, name = match.groups()
+            if prefix == "refs/audit/":
+                out.append((number, f"refs/audit/record/{name}", True))
+            elif prefix in _RECORD_BRANCH_PREFIXES:
+                if not prefix and line[match.end():].startswith("/") and (ROOT / "record" / name).is_dir():
+                    continue
+                out.append((number, match.group(0), False))
+    return out
+
+
+def record_citation_checks(audit: Audit) -> None:
+    """Every record cited in the paper, a PROVENANCE file, a README or a doc is a registered audit ref.
+
+    A ref in ``ARCHIVE_RECORD_REFS`` passes instead when origin holds it at its listed SHA, which is only
+    read under --fetch-records.
+    """
+    registered = {ref for ref, _sha, _checks in record_ref_status(RECORD_REFS)}
+    heads = origin_audit_record_refs() if _FETCH_RECORDS else {}
+    cited = 0
+    for path in record_citation_sources():
+        try:
+            text = audit.text(path)
+        except (OSError, UnicodeDecodeError):
+            continue
+        for number, citation, audit_form in record_citations(path, text):
+            cited += 1
+            where = f"{path}:{number}"
+            if not audit_form:
+                audit.record(False, where, "a record is cited by its refs/audit/record ref", citation,
+                             f"refs/audit/{citation[citation.index('record/'):]}")
+            elif citation in ARCHIVE_RECORD_REFS and citation not in registered:
+                sha, _why = ARCHIVE_RECORD_REFS[citation]
+                audit.record(heads.get(citation) == sha, where, "the cited archive record ref is on origin",
+                             f"{citation} {sha[:8]}", heads.get(citation, "absent"))
+            else:
+                audit.record(citation in registered, where, f"the cited record ref has a {RECORD_REFS} row",
+                             citation, "registered" if citation in registered else "not registered")
+    audit.record(cited > 0, "paper", "the record citations are found", cited, "at least one")
+
+
 @functools.cache
 def _on_record_ref(commit: str, refs: tuple[str, ...]) -> bool:
     return any(git("merge-base", "--is-ancestor", commit, sha).returncode == 0 for sha in refs)
@@ -6081,7 +6164,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
         paired_statistics, manuscript_gmin, withdrawn_benchmarks,
         supporting_information, release, paper_0120,
         gad_published, openconf, head_to_head, sc96_78_howto, stale_claims,
-        tip4p_panel, covalent_panels, covalent_gfn2, printed_harnesses, ase_gofee,
+        tip4p_panel, covalent_panels, covalent_gfn2, printed_harnesses, record_citation_checks, ase_gofee,
         lj_large, bench_prose, manuscript_ase, manuscript_knockouts,
         manuscript_priors, panel_references, generated_tables,
         supporting_numbers, manuscript_new, manuscript_followups, cover_letter,
