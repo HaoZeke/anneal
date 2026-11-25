@@ -29,11 +29,16 @@ import matplotlib
 matplotlib.use("pdf")
 import matplotlib.pyplot as plt
 
+_HERE = str(Path(__file__).resolve().parent)
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+
+from system_visuals import CHEMPARSEPLOT
+
 SINGLE = 3.35
 DOUBLE = 6.46
 SMALLEST = 7.0
 BASE = 8.0
-CHEMPARSEPLOT = "1.11.0"
 
 
 def _ruhi() -> dict[str, str]:

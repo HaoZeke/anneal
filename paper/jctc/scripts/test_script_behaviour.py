@@ -3,6 +3,7 @@
 """Behaviour tests for the paper scripts that do not need a campaign run."""
 from __future__ import annotations
 
+import ast
 import hashlib
 import importlib.util
 import io
@@ -31,6 +32,7 @@ import hexamer_numbers
 import hq_sci_tally
 import lockfile_delta
 import replay_v127
+import system_visuals
 import toc_graphic
 import watch_crest_steps
 import write_figure_provenance_v128
@@ -62,7 +64,7 @@ def has_figure_dependencies() -> bool:
         return (
             importlib.util.find_spec("matplotlib") is not None
             and importlib.util.find_spec("chemparseplot") is not None
-            and version("chemparseplot") == "1.11.0"
+            and version("chemparseplot") == system_visuals.CHEMPARSEPLOT
         )
     except PackageNotFoundError:
         return False
@@ -597,6 +599,28 @@ def test_house_drawers_write_pdfs(tmp_path: Path) -> None:
     assert figstyle.plain(0.5) == "0.5"
     assert "500" in figstyle.plain(1500)
     runpy.run_path(str(HERE / "tip4p_constants.py"), run_name="__main__")
+
+
+def test_chemparseplot_version_defined_once() -> None:
+    pinned = system_visuals.CHEMPARSEPLOT
+    assert pinned
+    literal_holders = [
+        path.name
+        for path in sorted(HERE.glob("*.py"))
+        if any(
+            isinstance(node, ast.Constant) and node.value == pinned
+            for node in ast.walk(ast.parse(path.read_text()))
+        )
+    ]
+    assert literal_holders == ["system_visuals.py"]
+    for name in ("figstyle.py", "sketchmap_landscapes.py"):
+        tree = ast.parse((HERE / name).read_text())
+        assert any(
+            isinstance(node, ast.ImportFrom)
+            and node.module == "system_visuals"
+            and any(alias.name == "CHEMPARSEPLOT" for alias in node.names)
+            for node in ast.walk(tree)
+        ), f"{name} must import CHEMPARSEPLOT from system_visuals"
 
 
 def test_modules_run_as_main(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

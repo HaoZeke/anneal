@@ -30,6 +30,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from paper_data import fetch_paper_data
+from system_visuals import CHEMPARSEPLOT
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
@@ -38,7 +39,6 @@ LANDMARKS = 600
 SEED = 7
 CN_CUTOFF = 1.5
 SIGMA_SAMPLE = 400
-CHEMPARSEPLOT = "1.11.0"
 RUNS = "landscapes_7695255"
 REFS = "system_visuals/sketchmap"
 # The arms and pinned references of the three figures of record, in the order the script
