@@ -45,21 +45,33 @@ if [[ ! -e "$ROWS" ]]; then
     >"$ROWS"
 fi
 
-if $PY - "$ROWS" "$SYSTEM" "$SEED" "$REV" "$CPU_CAP" <<'PY'
+if $PY - "$ROWS" "$SHAPE_ROWS" "$SYSTEM" "$SEED" "$REV" "$CPU_CAP" <<'PY'
 import csv
 import sys
+from pathlib import Path
 
-path, system, seed, revision, cpu_cap = sys.argv[1:]
+path, shape_path, system, seed, revision, cpu_cap = sys.argv[1:]
 with open(path, newline="") as handle:
-    found = any(
+    performance_found = any(
         row["system"] == system
         and row["arm"] == "ase_mh"
         and row["seed"] == seed
         and row["code_revision"] == revision
+        and row["cap_s"]
         and float(row["cap_s"]) == float(cpu_cap)
         for row in csv.DictReader(handle)
     )
-raise SystemExit(0 if found else 1)
+shape_found = False
+if Path(shape_path).exists():
+    with open(shape_path, newline="") as handle:
+        shape_found = any(
+            row["system"] == system
+            and row["arm"] == "ase_mh"
+            and row["seed"] == seed
+            and row["code_revision"] == revision
+            for row in csv.DictReader(handle)
+        )
+raise SystemExit(0 if performance_found and shape_found else 1)
 PY
 then
   echo "keep existing CPU-capped $SYSTEM ase_mh seed $SEED"
@@ -127,11 +139,6 @@ if (
 ):
     raise SystemExit("shape row does not match the performance row")
 
-rows = Path(rows_path)
-rows.parent.mkdir(parents=True, exist_ok=True)
-with rows.open("a") as handle:
-    handle.write(row + "\n")
-
 columns = [
     "system", "arm", "seed", "code_revision", "nproc", "model_name",
     "memory_bytes", "core_affinity", "cpu_s", "wall_s",
@@ -139,11 +146,38 @@ columns = [
 ]
 shape_rows = Path(shape_path)
 shape_rows.parent.mkdir(parents=True, exist_ok=True)
-with shape_rows.open("a", newline="") as handle:
-    if shape_rows.stat().st_size == 0:
-        handle.write(",".join(columns) + "\n")
-    writer = csv.DictWriter(handle, fieldnames=columns, lineterminator="\n")
-    record = {key: shape[key] for key in columns}
-    record["vm_stayed_live"] = str(record["vm_stayed_live"]).lower()
-    writer.writerow(record)
+shape_found = False
+if shape_rows.exists():
+    with shape_rows.open(newline="") as handle:
+        shape_found = any(
+            item["system"] == system
+            and item["arm"] == "ase_mh"
+            and item["seed"] == seed
+            and item["code_revision"] == revision
+            for item in csv.DictReader(handle)
+        )
+if not shape_found:
+    with shape_rows.open("a", newline="") as handle:
+        if shape_rows.stat().st_size == 0:
+            handle.write(",".join(columns) + "\n")
+        writer = csv.DictWriter(handle, fieldnames=columns, lineterminator="\n")
+        record = {key: shape[key] for key in columns}
+        record["vm_stayed_live"] = str(record["vm_stayed_live"]).lower()
+        writer.writerow(record)
+
+rows = Path(rows_path)
+rows.parent.mkdir(parents=True, exist_ok=True)
+with rows.open(newline="") as handle:
+    performance_found = any(
+        item["system"] == system
+        and item["arm"] == "ase_mh"
+        and item["seed"] == seed
+        and item["code_revision"] == revision
+        and item["cap_s"]
+        and float(item["cap_s"]) == float(cpu_cap)
+        for item in csv.DictReader(handle)
+    )
+if not performance_found:
+    with rows.open("a") as handle:
+        handle.write(row + "\n")
 PY

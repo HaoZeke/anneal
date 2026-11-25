@@ -87,11 +87,12 @@ class LjCalculator(Calculator):
         self.best_quenched = 1.0e300
 
     def calculate(self, atoms=None, properties=None, system_changes=None):
+        Calculator.calculate(self, atoms, properties, system_changes)
         if self.deadline is not None and time.perf_counter() >= self.deadline:
             raise CapReached()
         if self.calls >= self.budget:
             raise BudgetReached()
-        positions = np.ascontiguousarray(atoms.positions.ravel(), dtype=np.float64)
+        positions = np.ascontiguousarray(self.atoms.positions.ravel(), dtype=np.float64)
         started = time.perf_counter()
         reduced_energy, grad = lj_value_and_gradient(positions / self.sigma)
         self.inside_s += time.perf_counter() - started

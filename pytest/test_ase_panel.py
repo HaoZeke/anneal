@@ -3,10 +3,11 @@
 
 from __future__ import annotations
 
+import csv
 import importlib.util
 import subprocess
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -61,6 +62,31 @@ def test_wall_censored_arms_have_no_mann_whitney_claim():
         "7.39602e-07 | not estimated | not estimated | "
     ) in report
     assert "manufacture observations that were never run" in report
+
+
+def test_cpu_cap_miss_is_valid(monkeypatch, tmp_path):
+    source = ROOT / "bench" / "ase-lj98" / "rows.csv"
+    with source.open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    row = next(
+        row for row in rows
+        if row["arm"] == "ase_mh" and row["seed"] == "2000"
+    )
+    row["stop"] = "cap reached (12 h CPU)"
+    row["cap_s"] = "43200.000000"
+
+    target = tmp_path / "bench" / "ase-lj98" / "rows.csv"
+    target.parent.mkdir(parents=True)
+    with target.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=SUMMARY.ROW_FIELDS)
+        writer.writeheader()
+        writer.writerows(rows)
+    monkeypatch.setattr(SUMMARY, "ROOT", tmp_path)
+    monkeypatch.setattr(SUMMARY, "panel_on_call_budget", lambda: True)
+
+    grouped = SUMMARY.load("lj98")
+    selected = next(row for row in grouped["ase_mh"] if row["seed"] == "2000")
+    assert selected["stop"] == "cap reached (12 h CPU)"
 
 
 def test_runner_refuses_implicit_or_mismatched_provenance():

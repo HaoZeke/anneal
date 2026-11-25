@@ -137,6 +137,9 @@ def load(system: str) -> dict[str, list[dict[str, str]]]:
         elif row["stop"] == "wall":
             if charged >= budget or not row["cap_s"]:
                 raise SystemExit(f"invalid wall stop {row}")
+        elif row["stop"] == "cap reached (12 h CPU)":
+            if charged >= budget or float(row["cap_s"]) != 43_200.0:
+                raise SystemExit(f"invalid CPU-cap stop {row}")
         else:
             raise SystemExit(f"invalid miss stop {row}")
         grouped[row["arm"]].append(row)
