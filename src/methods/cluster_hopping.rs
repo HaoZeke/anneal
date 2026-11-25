@@ -4699,6 +4699,26 @@ fn biased_metropolis<R: Rng + ?Sized>(
 /// their product.
 const COMPLETION_FEATURES: usize = 4;
 
+/// Whether this run's completions pay for finishing without a screen.
+///
+/// A finished completion that lands below the chain's own energy is a hop
+/// the chain takes. An ordinary hop costs `per_downhill` calls for each
+/// such step on this run's record, so finishing a completion that costs
+/// `finishing` is worth it when its chance of landing downhill is above the
+/// finishing cost over that cost plus `per_downhill`, the break-even the
+/// record screen uses. The chance is the posterior mean of the `down`
+/// finished completions out of `finished` under a uniform prior, and
+/// refusing needs more than the mean to fall short: the standard deviation
+/// of the posterior is added, because a completion refused is not tried
+/// again from that basin and one finished costs calls only. With nothing
+/// finished it pays.
+fn completions_pay(down: usize, finished: usize, finishing: f64, per_downhill: f64) -> bool {
+    let n = finished as f64;
+    let rate = (1.0 + down as f64) / (2.0 + n);
+    let spread = (rate * (1.0 - rate) / (3.0 + n)).sqrt();
+    rate + spread >= finishing / (finishing + per_downhill)
+}
+
 /// The biases a completion of the incumbent is tested under: the basin
 /// bias, and the spectral one when the run keeps it. The same ones a hop is
 /// tested under, whether or not the chain is stuck.
@@ -5883,6 +5903,9 @@ where
     let mut completion_spent = 0usize;
     let mut completion_tries = 0usize;
     let mut ordinary_records = 0usize;
+    let mut ordinary_downhill = 0usize;
+    let mut completion_down = 0usize;
+    let mut completion_finished = 0usize;
     let mut records_best = f64::INFINITY;
     let mut tabu: Vec<Array1<f64>> = Vec::new();
     let mut tabu_hits = 0usize;
@@ -9322,6 +9345,7 @@ where
         };
         let v_old = v_old_held + spectral_old;
         let v_new = v_new_held + spectral_new;
+        let e_hop_start = e;
         let delta = (e_new + v_new + pave_new) - (e + v_old + pave_old);
         // Unquenched trials are not answers. They still face Metropolis,
         // which is how the measured LJ38 run discovers basins from a
@@ -10009,6 +10033,9 @@ where
         // by one chain only, and the product is reported, so other chains
         // recognise it.
         let mut completion_offer = None;
+        if accept && e < e_hop_start - 1e-9 {
+            ordinary_downhill += 1;
+        }
         if ledger.best < records_best - 1e-9 {
             ordinary_records += 1;
             records_best = ledger.best;
@@ -10078,12 +10105,15 @@ where
                         fruitless.insert(e, x.view());
                         (f64::NAN, x1)
                     } else {
-                        // A finished completion is worth a record, and a
-                        // record costs an ordinary hop this many calls on
-                        // average, so finishing is worth it when the chance
-                        // of one is above the finishing cost over that cost
-                        // plus the finishing cost, the break-even the hop
-                        // screen derives for a winner worth one hop.
+                        // When this run's completions land downhill often
+                        // enough to pay for finishing (`completions_pay`),
+                        // none is refused. Otherwise a finished completion
+                        // is worth a record, and a record costs an ordinary
+                        // hop this many calls on average, so finishing is
+                        // worth it when the chance of one is above the
+                        // finishing cost over that cost plus the finishing
+                        // cost, the break-even the hop screen derives for a
+                        // winner worth one hop.
                         let ordinary_spent =
                             ledger.spent().saturating_sub(completion_spent).max(1) as f64;
                         let ordinary_hops = hops.saturating_sub(completion_tries).max(1) as f64;
@@ -10093,7 +10123,13 @@ where
                             ordinary_spent / ordinary_hops
                         };
                         let per_record = ordinary_spent / ordinary_records.max(1) as f64;
-                        if completion_screen.decide_above(
+                        let per_downhill = ordinary_spent / ordinary_downhill.max(1) as f64;
+                        if completions_pay(
+                            completion_down,
+                            completion_finished,
+                            finishing,
+                            per_downhill,
+                        ) || completion_screen.decide_above(
                             features.view(),
                             ledger.best - e,
                             rng.random::<f64>(),
@@ -10101,6 +10137,10 @@ where
                         ) {
                             let finished = relax(ledger, x1.view(), cfg.relax_steps);
                             if finished.0.is_finite() {
+                                completion_finished += 1;
+                                if finished.0 < e - 1e-9 {
+                                    completion_down += 1;
+                                }
                                 completion_screen.observe(features.view(), finished.0 - e);
                             }
                             finished
@@ -16744,5 +16784,28 @@ mod call_floor_tests {
         assert!((distance(&x, 0, 1) - target).abs() < 1.0e-12);
         assert!(floor.clears(x.view()));
         assert!(distance(&x, 0, 2) > floor.pair(0, 2));
+    }
+
+    /// Finishing a completion is refused only when this run's completions
+    /// land downhill clearly less often than the break-even, which is the
+    /// finishing cost over that cost plus the calls an ordinary hop spends
+    /// per downhill step.
+    #[test]
+    fn completions_pay_unless_their_downhill_rate_is_clearly_below_break_even() {
+        let (finishing, per_downhill) = (200.0_f64, 500.0_f64);
+        let break_even = finishing / (finishing + per_downhill);
+        assert!((break_even - 2.0 / 7.0).abs() < 1e-12);
+        assert!(completions_pay(0, 0, finishing, per_downhill));
+        assert!(completions_pay(12, 20, finishing, per_downhill));
+        assert!(!completions_pay(2, 100, finishing, per_downhill));
+        assert!(!completions_pay(20, 100, finishing, per_downhill));
+        assert!(
+            completions_pay(5, 20, finishing, per_downhill),
+            "a rate below break-even by less than the spread still pays"
+        );
+        assert!(completions_pay(20, 100, 100.0, per_downhill));
+        assert!(!completions_pay(20, 100, 400.0, per_downhill));
+        let rate = |down, finished| (1.0 + down as f64) / (2.0 + finished as f64);
+        assert!(rate(20, 100) < break_even && rate(5, 20) < break_even);
     }
 }
