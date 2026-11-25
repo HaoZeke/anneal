@@ -19,9 +19,25 @@ these provenance columns:
   record `bench`; it is not a physical-machine identity.
 - `machine_id` is lowercase hexadecimal SHA-256 of the public salt
   `anneal-bench-machine-id-v1\0` followed by `/etc/machine-id`.  The DMI
-  `product_uuid` is used only when `/etc/machine-id` is unavailable.
+  `product_uuid` is used only when `/etc/machine-id` is unavailable.  On
+  macOS, where neither file exists, the `IOPlatformUUID` that
+  `ioreg -rd1 -c IOPlatformExpertDevice` prints takes their place under the
+  same salt.  `machine_digest()` in `scripts/machine_provenance.py` is the
+  one place that computes this digest; a harness that records a machine
+  identity, in `machine_id` or in `host`, calls it.
 - `cpu_model` is the first available CPU model string from `/proc/cpuinfo`,
   with whitespace normalized.
+
+Rows written before that helper existed may hold the plain, unsalted
+SHA-256 of `/etc/machine-id`.  The 64-hex `host` value
+`3b11c160088e7af5c4f7ebd9da95e0bfe019a34698416701bb057c15fea10873` in the
+committed bench tables is that unsalted digest, and so is every value in
+the `machine_id` column of `record/gmin-184/rows.csv`, which that record's
+`run_record.py` wrote without the salt.  The `host` label
+`machine-9eb296774121518f` in `bench/template-free2-r7` is the first 16 hex
+digits of the unsalted SHA-256 of the raw `/etc/machine-id` bytes.  These
+stored values are kept as written; they are not comparable with salted
+digests.
 
 The machine fields describe the physical machine that ran the measured row.
 Summaries preserve the distinct source values, separated by semicolons.

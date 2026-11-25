@@ -1755,3 +1755,54 @@ def test_a_flag_off_hash_that_differs_from_base_is_reported():
         off[0]["best_bits"] = bits[:-1] + ("0" if bits[-1] != "0" else "1")
 
     assert "hash" in _flag_off_drift(mutate)
+
+
+def test_row_files_with_carriage_returns_are_refused(tmp_path, monkeypatch):
+    monkeypatch.setattr(audit_mod, "ROOT", tmp_path)
+    (tmp_path / "legacy").mkdir()
+    (tmp_path / "legacy" / "rows.csv").write_bytes(b"system,code_revision,host\r\nau55,abc,bench\r\n")
+    (tmp_path / "legacy" / "record.csv").write_bytes(b"arm,anneal_commit,machine_id\r\ngmin,abc,def\r\n")
+    (tmp_path / "legacy" / "scores.csv").write_bytes(b"board,hits\r\nlj75,3\r\n")
+    (tmp_path / "legacy" / "clean.csv").write_bytes(b"system,code_revision,host\nau55,abc,bench\n")
+
+    audit = audit_mod.Audit()
+    with pytest.raises(SystemExit, match="contains CR"):
+        audit.rows("legacy/rows.csv")
+    assert "legacy/rows.csv" not in audit.read
+    with pytest.raises(SystemExit, match="contains CR"):
+        audit_mod.side_rows(audit, "legacy/record.csv")
+    assert audit.rows("legacy/scores.csv") == [{"board": "lj75", "hits": "3"}]
+    assert audit.rows("legacy/clean.csv") == [{"system": "au55", "code_revision": "abc", "host": "bench"}]
+
+
+def test_revision_table_scan_refuses_carriage_returns(tmp_path, monkeypatch):
+    monkeypatch.setattr(audit_mod, "ROOT", tmp_path)
+    rows = tmp_path / "bench" / "panel" / "rows.csv"
+    rows.parent.mkdir(parents=True)
+    rows.write_bytes(b"system,code_revision,host\r\nau55,abc,bench\r\n")
+    scores = tmp_path / "paper" / "jctc" / "data" / "scores.csv"
+    scores.parent.mkdir(parents=True)
+    scores.write_bytes(b"board,hits\r\nlj75,3\r\n")
+    with pytest.raises(SystemExit, match="contains CR"):
+        audit_mod.revision_row_tables()
+    rows.write_bytes(b"system,code_revision,host\nau55,abc,bench\n")
+    assert audit_mod.revision_row_tables() == [
+        ("bench/panel/rows.csv", [{"system": "au55", "code_revision": "abc", "host": "bench"}])
+    ]
+
+
+def test_csv_backed_tables_refuse_carriage_returns(tmp_path, monkeypatch):
+    monkeypatch.setattr(audit_mod, "ROOT", tmp_path)
+    readme = tmp_path / "bench" / "panel" / "README.md"
+    readme.parent.mkdir(parents=True)
+    text = "Rows are in rows.csv.\n"
+    readme.write_text(text)
+    rows = readme.parent / "rows.csv"
+    rows.write_bytes(b"system,hits,code_revision\r\nau55,3,abc\r\n")
+    header = ["System", "Hits"]
+    with pytest.raises(SystemExit, match="contains CR"):
+        audit_mod._csv_backed_flags("bench/panel/README.md", text, header, [], text)
+    rows.write_bytes(b"system,hits,code_revision\nau55,3,abc\n")
+    assert audit_mod._csv_backed_flags("bench/panel/README.md", text, header, [], text) == []
+    rows.write_bytes(b"system,hits\r\nau55,3\r\n")
+    assert audit_mod._csv_backed_flags("bench/panel/README.md", text, header, [], text) == []

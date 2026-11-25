@@ -56,6 +56,7 @@ if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 from gmin_pin import REVISION as GMIN_PIN_REVISION  # noqa: E402
+from machine_provenance import require_lf  # noqa: E402
 
 TEX = "paper/jctc/manuscript.tex"
 SI = "paper/jctc/si.tex"
@@ -445,6 +446,12 @@ UNVERIFIABLE = [
 ]
 
 
+def require_row_lf(path: Path, fieldnames: object) -> None:
+    """A table with a revision, host or machine column is a row file and must not hold CR."""
+    if {*ALL_REVISION_COLUMNS, *HOST_COLUMNS, *MACHINE_PROVENANCE_COLUMNS} & set(fieldnames or ()):
+        require_lf(path)
+
+
 class Audit:
     def __init__(self) -> None:
         self.results: list[tuple[str, str, str, str, str]] = []
@@ -458,7 +465,10 @@ class Audit:
         if path not in self.read:
             with (ROOT / path).open(newline="") as handle:
                 lines = [line for line in handle if line.strip() and not line.startswith("#")]
-            self.read[path] = list(csv.DictReader(lines, delimiter=delimiter))
+            reader = csv.DictReader(lines, delimiter=delimiter)
+            rows = list(reader)
+            require_row_lf(ROOT / path, reader.fieldnames)
+            self.read[path] = rows
         return self.read[path]
 
     def text(self, path: str) -> str:
@@ -2266,7 +2276,10 @@ def side_rows(audit: Audit, path: str) -> list[dict[str, str]]:
     if cached is not None:
         return cached
     with (ROOT / path).open(newline="") as handle:
-        return list(csv.DictReader(handle))
+        reader = csv.DictReader(handle)
+        rows = list(reader)
+    require_row_lf(ROOT / path, reader.fieldnames)
+    return rows
 
 
 def sc_rerun_summary(audit: Audit) -> list[dict[str, str]]:
@@ -3637,7 +3650,9 @@ def revision_row_tables() -> list[tuple[str, list[dict[str, str]]]]:
                 lines = [line for line in handle if line.strip() and not line.lstrip().startswith("#")]
             if not lines:
                 continue
-            rows = list(csv.DictReader(lines, delimiter=delimiter))
+            reader = csv.DictReader(lines, delimiter=delimiter)
+            rows = list(reader)
+            require_row_lf(absolute, reader.fieldnames)
             if rows and set(rows[0]).intersection(ALL_REVISION_COLUMNS):
                 tables.append((path, rows))
     return tables
@@ -4467,7 +4482,9 @@ def _csv_backed_flags(rel: str, text: str, header: list[str], rows: list[tuple[i
     flagged = []
     for csv_path, beside in _backing_csvs(rel, text, section):
         with csv_path.open(newline="") as handle:
-            data = list(csv.DictReader(line for line in handle if line.strip() and not line.startswith("#")))
+            reader = csv.DictReader(line for line in handle if line.strip() and not line.startswith("#"))
+            data = list(reader)
+        require_row_lf(csv_path, reader.fieldnames)
         if not data:
             continue
         fields = [name for name in _REVISION_FIELDS if name in data[0]]

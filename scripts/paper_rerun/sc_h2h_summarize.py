@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "scripts" / "metal_h2h"))
 
 import run_sc as sc  # noqa: E402
+from machine_provenance import require_lf  # noqa: E402
 
 ROWS = ROOT / "bench" / "paper-rerun" / "sc-h2h" / "rows.csv"
 SUMMARY = ROOT / "bench" / "paper-rerun" / "sc-h2h" / "summary.csv"
@@ -124,6 +125,7 @@ def ranked(group: list[dict[str, str]]) -> list[float]:
 
 
 def load(path: Path) -> list[dict[str, str]]:
+    require_lf(path)
     with path.open(newline="") as handle:
         return list(csv.DictReader(handle))
 

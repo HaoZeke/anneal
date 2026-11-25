@@ -60,12 +60,11 @@ def _darwin_cpu_model() -> str:
     return ""
 
 
-def machine_provenance(
+def machine_digest(
     machine_id_path: Path = MACHINE_ID_PATH,
     product_uuid_path: Path = PRODUCT_UUID_PATH,
-    cpuinfo_path: Path = CPUINFO_PATH,
-) -> tuple[str, str]:
-    """Return a salted machine digest and the normalized CPU model."""
+) -> str:
+    """Return the salted SHA-256 of this machine's identifier."""
     identifier = ""
     for path in (machine_id_path, product_uuid_path):
         if path.is_file():
@@ -83,7 +82,16 @@ def machine_provenance(
         raise RuntimeError(
             "neither /etc/machine-id nor the DMI product_uuid is available"
         )
+    return hashlib.sha256(MACHINE_ID_SALT + identifier.encode()).hexdigest()
 
+
+def machine_provenance(
+    machine_id_path: Path = MACHINE_ID_PATH,
+    product_uuid_path: Path = PRODUCT_UUID_PATH,
+    cpuinfo_path: Path = CPUINFO_PATH,
+) -> tuple[str, str]:
+    """Return a salted machine digest and the normalized CPU model."""
+    digest = machine_digest(machine_id_path, product_uuid_path)
     cpu_model = ""
     if cpuinfo_path.is_file():
         fields: dict[str, str] = {}
@@ -99,8 +107,6 @@ def machine_provenance(
         cpu_model = _darwin_cpu_model()
     if not cpu_model:
         raise RuntimeError("/proc/cpuinfo has no CPU model string")
-
-    digest = hashlib.sha256(MACHINE_ID_SALT + identifier.encode()).hexdigest()
     return digest, cpu_model
 
 
@@ -159,6 +165,12 @@ def environment() -> dict[str, str]:
     if not machine_id:
         machine_id, cpu_model = machine_provenance()
     return {"machine_id": machine_id, "cpu_model": cpu_model}
+
+
+def require_lf(path: Path) -> None:
+    """Refuse a row file that holds a carriage return."""
+    if b"\r" in Path(path).read_bytes():
+        raise SystemExit(f"{path} contains CR")
 
 
 def require_csv_schema(path: Path, fieldnames: Iterable[str]) -> None:
