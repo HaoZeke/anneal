@@ -94,8 +94,10 @@ fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     // The general move library is deterministic on every build. The hash
     // moved when the structure builders left the presets and the
     // completion of a new basin from the group its core carries took the
-    // place of orbit completion and stall symmetrisation.
-    let expected = "02ae65792b19c8b960ec1dc4646f917f69d4ec933ed97234d6c244ac65b2858b";
+    // place of orbit completion and stall symmetrisation, and again when
+    // that completion began to screen its quenches and to carry only a set
+    // closed under its own products and inverses.
+    let expected = "c7e583f8e5b4ee321b50e1cec7c67046f18844cfc3f081d2d6a091a18d108707";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }
 

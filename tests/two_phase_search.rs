@@ -79,17 +79,19 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
             plain_mask |= 1 << seed;
         }
     }
-    // The walk is deterministic: cutoff 0xffff, plain 0x3132 (6 seeds:
-    // 1, 4, 5, 8, 12, 13). The mask is a trajectory fingerprint of 16
+    // The walk is deterministic: cutoff 0xffff, plain 0x3c10 (5 seeds:
+    // 4, 10, 11, 12, 13). The mask is a trajectory fingerprint of 16
     // seeds, not a rate. Over seeds 0..1024 this walk reaches the
-    // octahedron on 277 seeds and the builder-era search (0x240d here,
+    // octahedron on 255 seeds and the builder-era search (0x240d here,
     // seeds 0, 2, 3, 10, 13) on 238; over the first 256 seeds the counts
-    // are 69 and 71, and the two walks share 78 hits of 1024. A walk
+    // are 58 and 71, and the two walks share 68 hits of 1024. A walk
     // leaves the other at its first completed basin, so which 16 seeds
-    // hit is not a quantity the two searches share. With the completion
-    // off the walk is the builder-era one with its builders off, and it
-    // reaches the octahedron on 132 of 1024 seeds.
-    let plain_exact = 0x3132;
+    // hit is not a quantity the two searches share: seeds 10 and 13 hit
+    // under both, and seeds 0, 2 and 3 leave the builder-era walk at
+    // hops 6, 5 and 37. With the completion off the walk is the
+    // builder-era one with its builders off, and it reaches the octahedron
+    // on 132 of 1024 seeds.
+    let plain_exact = 0x3c10;
     assert_eq!(
         compact_mask, 0xffff,
         "the cutoff walk reached the octahedron on {compact_hits} of {SEEDS} seeds (mask {compact_mask:#06x})"

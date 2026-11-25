@@ -48,8 +48,8 @@ fn lj38_and_lj98_short_searches_stay_put() {
         capped,
     };
     let cases = [
-        case(38, 1, true, -172.237_562_735_773_4, 40, 29, 33),
-        case(98, 7, true, -520.107_879_491_539_2, 15, 9, 14),
+        case(38, 1, true, -173.252_378_380_498_36, 28, 22, 30),
+        case(98, 7, true, -536.417_639_347_010_7, 17, 19, 17),
         case(38, 1, false, -171.499_842_453_860_6, 46, 27, 46),
         case(98, 7, false, -531.623_165_861_692_3, 20, 13, 21),
     ];
@@ -88,17 +88,16 @@ fn lj38_and_lj98_short_searches_stay_put() {
         assert_eq!(stats.capped, c.capped);
     }
     let expected = "\
-LJ38 true -172.2375627357733947 40 29 33 2500
-LJ98 true -520.1078794915391654 15 9 14 2500
+LJ38 true -173.2523783804983566 28 22 30 2500
+LJ98 true -536.4176393470106632 17 19 17 2500
 LJ38 false -171.4998424538606514 46 27 46 2500
 LJ98 false -531.6231658616923141 20 13 21 2500";
     assert_eq!(records.join("\n"), expected);
 }
 
-/// The seed-7 pin above ends worse with the completion on than off. That
-/// is one seed of a walk that diverges at the first completed basin; the
-/// mean over sixteen seeds at the same budget is what the completion is
-/// asked to keep.
+/// The seed-7 pin above diverges at the first completed basin, so one seed
+/// says little about the completion. The mean over sixteen seeds at the
+/// same budget is what the completion is asked to keep.
 #[test]
 fn the_completion_does_not_lower_the_lj98_mean_over_sixteen_seeds() {
     anneal_core::install_rgpot_kernels!();
