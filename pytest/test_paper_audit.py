@@ -2311,11 +2311,11 @@ def test_committed_record_refs_use_only_audit_refs():
 def test_provenance_record_check_uses_verified_audit_refs(tmp_path, monkeypatch):
     need_origin()
     commit = "9178884ee114e60dd597fb5a970edbda648979f8"
-    assert audit_mod._commit_on_provenance_ref("record/outside-perf3-r2", commit)
-    assert audit_mod._commit_on_provenance_ref("refs/audit/record/leave-lj75", "666591a0")
+    assert audit_mod._commit_on_audit_ref("record/outside-perf3-r2", commit)
+    assert audit_mod._commit_on_audit_ref("refs/audit/record/leave-lj75", "666591a0")
     registry(tmp_path, monkeypatch, [])
-    assert not audit_mod._commit_on_provenance_ref("record/outside-perf3-r2", commit)
-    assert not audit_mod._commit_on_provenance_ref("refs/audit/record/leave-lj75", "666591a0")
+    assert not audit_mod._commit_on_audit_ref("record/outside-perf3-r2", commit)
+    assert not audit_mod._commit_on_audit_ref("refs/audit/record/leave-lj75", "666591a0")
 
 
 def test_a_registry_row_that_is_not_a_record_ref_is_flagged(tmp_path, monkeypatch):

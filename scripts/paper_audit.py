@@ -1085,7 +1085,7 @@ def imported(audit: Audit, folder: str, name: str = "rows.csv", keys: tuple[str,
     local = git("hash-object", str(ROOT / path)).stdout.strip()
     audit.cell(path, "blob of the copy", blob, local)
     audit.cell(path, "blob at the record commit", blob, git("rev-parse", f"{fields['commit']}:{source}").stdout.strip())
-    on_branch = _commit_on_provenance_ref(fields["branch"], fields["commit"])
+    on_branch = _commit_on_audit_ref(fields["branch"], fields["commit"])
     audit.record(on_branch, path, "the record commit is on the record branch of origin", fields["branch"],
                  "on it" if on_branch else "not on it")
     return path
@@ -2249,7 +2249,7 @@ def outside_session(audit: Audit) -> None:
     audit.cell(path, "blob of the committed projection", fields["blob"],
                git("hash-object", str(ROOT / path)).stdout.strip())
     audit.cell(path, "selection from the record source", "arms develop,develop_prime", fields["selection"])
-    on_branch = _commit_on_provenance_ref(fields["branch"], fields["commit"])
+    on_branch = _commit_on_audit_ref(fields["branch"], fields["commit"])
     audit.record(on_branch, path, "the record commit is on the record branch of origin",
                  fields["branch"], "on it" if on_branch else "not on it")
     audit.cell(f"{OUTSIDE_DATA}/PROVENANCE", "tree of the record commit", fields["tree"],
@@ -4726,7 +4726,7 @@ def science_claims(audit: Audit) -> None:
     audit.said(SI, "A fingerprint bias during local optimization is reported on LJ\\(_{38}\\)\n"
                    "and LJ\\(_{75}\\).")
     trail = "666591a0"
-    trail_on_origin = _commit_on_provenance_ref("refs/audit/record/leave-lj75", trail)
+    trail_on_origin = _commit_on_audit_ref("refs/audit/record/leave-lj75", trail)
     audit.record(bool(commit_of(trail)) and git("merge-base", "--is-ancestor", trail, SUBMITTED).returncode != 0, TEX,
                  "the trail record is outside the history of the submitted revision", "outside", "checked")
     audit.record(trail_on_origin, TEX, "the trail record is on origin", "present", "checked")
@@ -5689,7 +5689,7 @@ def _verified_record_ref_tips() -> dict[str, str]:
     return {ref: sha for ref, sha, checks in record_ref_status(RECORD_REFS) if all(ok for _, ok, _, _ in checks)}
 
 
-def _commit_on_provenance_ref(branch: str, commit: str) -> bool:
+def _commit_on_audit_ref(branch: str, commit: str) -> bool:
     """True when commit is an ancestor of the verified audit ref for a record ref, or of origin/<branch>."""
     if branch.startswith(("record/", "refs/audit/record/")):
         ref = branch if branch.startswith("refs/audit/record/") else f"refs/audit/{branch}"
