@@ -5589,10 +5589,86 @@ where
     energy.is_finite().then_some(distance)
 }
 
+/// The energy screen a packing candidate passes before its full relaxation.
+///
+/// The test is the walk's own: a relaxation of [`Config::screen_steps`]
+/// and the descent the walk measured such a pass to leave undone,
+/// `ScreenDescent::allowance`. A candidate whose partial energy less that
+/// credit cannot come below `bar` is not finished. `bar` is the lower of
+/// the walk's incumbent and the best candidate already held, since a
+/// candidate above either is discarded after its full relaxation anyway.
+#[derive(Debug, Clone, Copy)]
+struct PackingScreen {
+    steps: usize,
+    bar: f64,
+    allowance: f64,
+}
+
+impl PackingScreen {
+    /// No screen: every candidate is relaxed in full, in one pass.
+    #[cfg(test)]
+    const OPEN: Self = Self {
+        steps: 0,
+        bar: f64::INFINITY,
+        allowance: 0.0,
+    };
+
+    fn below(self, held: f64) -> Self {
+        Self {
+            bar: self.bar.min(held),
+            ..self
+        }
+    }
+
+    fn splits(self, steps: usize) -> bool {
+        self.bar.is_finite() && self.steps > 0 && self.steps < steps
+    }
+
+    fn refuses(self, partial: f64) -> bool {
+        !(partial - self.allowance < self.bar - PACKING_IMPROVEMENT)
+    }
+}
+
+/// How far below the incumbent an adopted packing must land.
+const PACKING_IMPROVEMENT: f64 = 1e-10;
+
+/// Relax one packing candidate to `steps`, or stop after the screening pass.
+///
+/// `None` is a candidate the screen refused. Its screening pass is charged
+/// like every other call. A pass that ends the budget or meets a caller
+/// stop returns its point, as an unscreened relaxation would. A passed
+/// candidate is relaxed again from its placement: continuing from the
+/// partial point restarts the relaxer's curvature memory, and on LJ75 that
+/// ended two of the eight candidates 9 and 10 epsilon above their one-pass
+/// minima.
+fn screened_relax<F>(
+    ledger: &mut Ledger,
+    relax: &mut F,
+    point: ArrayView1<f64>,
+    steps: usize,
+    screen: PackingScreen,
+) -> Option<(f64, Array1<f64>)>
+where
+    F: FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + ?Sized,
+{
+    if !screen.splits(steps) {
+        return Some(relax(ledger, point, steps));
+    }
+    let (partial, at) = relax(ledger, point, screen.steps);
+    if ledger.stopped() || ledger.remaining() == 0 {
+        return Some((partial, at));
+    }
+    if screen.refuses(partial) {
+        return None;
+    }
+    Some(relax(ledger, point, steps))
+}
+
 struct GenericPackingProbe<'a, F: ?Sized> {
     ledger: &'a mut Ledger,
     relax: &'a mut F,
     steps: usize,
+    screen: PackingScreen,
 }
 
 impl<F> binary_geometry::QuenchProbe for GenericPackingProbe<'_, F>
@@ -5611,7 +5687,7 @@ where
         if self.ledger.remaining() == 0 || self.ledger.stopped() {
             return None;
         }
-        let result = (self.relax)(self.ledger, point, self.steps);
+        let result = screened_relax(self.ledger, self.relax, point, self.steps, self.screen)?;
         result.0.is_finite().then_some(result)
     }
 }
@@ -5650,6 +5726,7 @@ fn generic_packing_candidate_with_encounter<F>(
     cfg: &Config,
     ledger: &mut Ledger,
     relax: &mut F,
+    screen: PackingScreen,
 ) -> Option<(f64, Array1<f64>, usize)>
 where
     F: FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + ?Sized,
@@ -5678,7 +5755,12 @@ where
         let steps = cfg
             .relax_steps
             .min(ledger.remaining().saturating_sub(candidates_left));
-        let (energy, relaxed) = relax(ledger, candidate.view(), steps);
+        let held = best.as_ref().map_or(f64::INFINITY, |(held, _, _)| *held);
+        let Some((energy, relaxed)) =
+            screened_relax(ledger, relax, candidate.view(), steps, screen.below(held))
+        else {
+            continue;
+        };
         if energy.is_finite()
             && quench_is_sane(cfg, energy, relaxed.view())
             && best.as_ref().is_none_or(|(held, _, _)| energy < *held)
@@ -5696,10 +5778,12 @@ where
     }
     if !hit_target && !ledger.stopped() && ledger.remaining() > 0 {
         let steps = cfg.relax_steps.min(ledger.remaining());
+        let held = best.as_ref().map_or(f64::INFINITY, |(held, _, _)| *held);
         let mut probe = GenericPackingProbe {
             ledger,
             relax,
             steps,
+            screen: screen.below(held),
         };
         if let Some((energy, relaxed)) = binary_geometry::quench_as_placed(axial, &mut probe)
             && quench_is_sane(cfg, energy, relaxed.view())
@@ -5729,7 +5813,7 @@ pub(crate) fn generic_packing_candidate<F>(
 where
     F: FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + ?Sized,
 {
-    generic_packing_candidate_with_encounter(cfg, ledger, relax)
+    generic_packing_candidate_with_encounter(cfg, ledger, relax, PackingScreen::OPEN)
         .map(|(energy, state, _)| (energy, state))
 }
 
@@ -6748,10 +6832,16 @@ where
             packings_offered = true;
             let room = ledger.remaining().div_ceil(2);
             let (mut probe, probe_offset) = ledger.side_probe(room);
-            let offered = generic_packing_candidate_with_encounter(cfg, &mut probe, relax);
+            let screen = PackingScreen {
+                steps: cfg.screen_steps,
+                bar: ledger.best,
+                allowance: descent.allowance(),
+            };
+            let offered = generic_packing_candidate_with_encounter(cfg, &mut probe, relax, screen);
             let before = ledger.spent();
             let candidate = offered.filter(|(energy, state, _)| {
-                *energy < ledger.best - 1e-10 && quench_is_sane(cfg, *energy, state.view())
+                *energy < ledger.best - PACKING_IMPROVEMENT
+                    && quench_is_sane(cfg, *energy, state.view())
             });
             // Certify on the side ledger so the gradient is part of the
             // catalogue cost. The parent is charged once, below.
@@ -12620,6 +12710,8 @@ mod tests {
         let expected_packings = binary_geometry::packing_candidates(n, 2.0);
         let mut seen_pair_probes = 0usize;
         let mut seen_packing_counts = vec![0usize; expected_packings.len()];
+        let mut seen_packing_screens = vec![0usize; expected_packings.len()];
+        let screen_steps = cfg.screen_steps;
         let total_evals = std::sync::atomic::AtomicUsize::new(0);
         let mut ledger = Ledger::new(2_000);
         let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
@@ -12640,7 +12732,11 @@ mod tests {
                     .map(|(a, b)| (a - b).abs())
                     .fold(0.0_f64, f64::max);
                 if max_diff < 1e-4 {
-                    seen_packing_counts[index] += 1;
+                    if steps == screen_steps {
+                        seen_packing_screens[index] += 1;
+                    } else {
+                        seen_packing_counts[index] += 1;
+                    }
                     return (-50.0 - index as f64, x.to_owned());
                 }
             }
@@ -12671,6 +12767,13 @@ mod tests {
             seen_packing_counts,
             vec![1; expected_packings.len()],
             "expected each of the 8 generic packings to be offered once through run_full"
+        );
+        // Each packing here lands lower than the last, so each passes its
+        // screening pass and is relaxed in full.
+        assert_eq!(
+            seen_packing_screens,
+            vec![1; expected_packings.len()],
+            "expected each of the 8 generic packings to be screened once"
         );
         assert!(
             outcome.best <= -57.0 + 1e-9,
