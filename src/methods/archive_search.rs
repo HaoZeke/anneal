@@ -1052,6 +1052,88 @@ mod tests {
         assert!(ledger.spent() <= rec.relax_steps + 8);
     }
 
+    /// Near-misses for [`symmetry_polish`]: a noisy icosahedron, a noisy
+    /// seven-ring about a centre, a noisy square antiprism, a chain close
+    /// to one axis, so that turns about it move no atom onto another, and a
+    /// random cluster.
+    fn polish_inputs() -> Vec<Array1<f64>> {
+        let mut rng = StdRng::seed_from_u64(179);
+        let noisy = |coords: Vec<f64>, noise: f64, rng: &mut StdRng| {
+            Array1::from_iter(
+                coords
+                    .into_iter()
+                    .map(|value| value + noise * (2.0 * rng.random::<f64>() - 1.0)),
+            )
+        };
+        let ring = |order: usize, radius: f64, height: f64, phase: f64| {
+            (0..order).flat_map(move |step| {
+                let angle = std::f64::consts::TAU * step as f64 / order as f64 + phase;
+                [radius * angle.cos(), radius * angle.sin(), height]
+            })
+        };
+        let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
+        let mut ico = vec![0.0; 3];
+        for s1 in [-1.0, 1.0] {
+            for s2 in [-1.0, 1.0] {
+                ico.extend([0.0, 0.53 * s1, 0.53 * s2 * phi]);
+                ico.extend([0.53 * s1, 0.53 * s2 * phi, 0.0]);
+                ico.extend([0.53 * s2 * phi, 0.0, 0.53 * s1]);
+            }
+        }
+        let mut seven = vec![0.0; 3];
+        seven.extend(ring(7, 1.12, 0.0, 0.0));
+        let mut antiprism: Vec<f64> = ring(4, 0.9, -0.45, 0.0).collect();
+        antiprism.extend(ring(4, 0.9, 0.45, std::f64::consts::FRAC_PI_4));
+        let chain: Vec<f64> = (0..6)
+            .flat_map(|atom| [0.0, 0.0, 1.1 * atom as f64])
+            .collect();
+        let mut out = vec![
+            noisy(ico, 0.03, &mut rng),
+            noisy(seven, 0.03, &mut rng),
+            noisy(antiprism, 0.03, &mut rng),
+            noisy(chain, 0.05, &mut rng),
+        ];
+        out.push(random_cluster(7, 0.7, 0.7, &mut rng));
+        out
+    }
+
+    /// With detected symmetry off, [`symmetry_polish`] gives the geometries
+    /// it gave on develop at `91fa4bbc`, where the hash was recorded. The
+    /// quench returns its start, so the hash is of the polished geometry.
+    #[test]
+    fn flag_off_symmetry_polish_matches_develop() {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        let mut polished = 0;
+        for x in polish_inputs() {
+            let n = x.len() / 3;
+            let cfg = Config::recommended(n);
+            assert!(!cfg.detected_symmetry);
+            let mut ledger = Ledger::new(cfg.relax_steps + 1);
+            let mut relax = |led: &mut Ledger, y: ArrayView1<f64>, _: usize| {
+                led.charge();
+                (lj(y), y.to_owned())
+            };
+            match symmetry_polish(&cfg, x.view(), &mut ledger, &mut relax) {
+                Some((e, y)) => {
+                    polished += 1;
+                    hasher.update([1]);
+                    hasher.update(e.to_le_bytes());
+                    for value in y.iter() {
+                        hasher.update(value.to_le_bytes());
+                    }
+                }
+                None => hasher.update([0]),
+            }
+        }
+        let hash = format!("{:x}", hasher.finalize());
+        assert!(polished > 0, "nothing was polished");
+        assert_eq!(
+            hash, "2ffa2268252fa149d597daa3f92bcb804d30ce3e41146d199b29b9e69be6e3cc",
+            "polished geometries moved: {hash} ({polished})"
+        );
+    }
+
     #[test]
     fn a_tiny_run_does_not_starve_full_quenches() {
         let mut rng = StdRng::seed_from_u64(2);
