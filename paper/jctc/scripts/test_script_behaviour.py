@@ -59,19 +59,31 @@ def has_coverage_toolchains() -> bool:
     return all(found)
 
 
-def has_figure_dependencies() -> bool:
-    try:
-        return (
-            importlib.util.find_spec("matplotlib") is not None
-            and importlib.util.find_spec("chemparseplot") is not None
-            and version("chemparseplot") == system_visuals.CHEMPARSEPLOT
-        )
-    except PackageNotFoundError:
-        return False
+def figure_dependencies_skip_reason() -> str | None:
+    missing: list[str] = []
+    if importlib.util.find_spec("matplotlib") is None:
+        missing.append("matplotlib")
+    if importlib.util.find_spec("chemparseplot") is None:
+        missing.append(f"chemparseplot=={system_visuals.CHEMPARSEPLOT}")
+    else:
+        try:
+            installed = version("chemparseplot")
+        except PackageNotFoundError:
+            missing.append(
+                f"chemparseplot=={system_visuals.CHEMPARSEPLOT} (metadata missing)"
+            )
+        else:
+            if installed != system_visuals.CHEMPARSEPLOT:
+                missing.append(
+                    f"chemparseplot=={system_visuals.CHEMPARSEPLOT} (found {installed})"
+                )
+    if not missing:
+        return None
+    return "requires " + " and ".join(missing)
 
 
 HAS_COVERAGE_TOOLCHAINS = has_coverage_toolchains()
-HAS_CHEMPARSEPLOT = has_figure_dependencies()
+FIGURE_DEPENDENCIES_SKIP_REASON = figure_dependencies_skip_reason()
 
 
 def test_toc_graphic_writes_a_pdf(tmp_path: Path) -> None:
@@ -572,8 +584,8 @@ def test_redact_main_rewrites_a_home_path(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(
-    not HAS_CHEMPARSEPLOT,
-    reason="requires chemparseplot",
+    FIGURE_DEPENDENCIES_SKIP_REASON is not None,
+    reason=FIGURE_DEPENDENCIES_SKIP_REASON or "",
 )
 def test_house_drawers_write_pdfs(tmp_path: Path) -> None:
     os.environ["PYTHONHASHSEED"] = "0"
@@ -621,6 +633,49 @@ def test_chemparseplot_version_defined_once() -> None:
             and any(alias.name == "CHEMPARSEPLOT" for alias in node.names)
             for node in ast.walk(tree)
         ), f"{name} must import CHEMPARSEPLOT from system_visuals"
+
+
+def test_figure_dependencies_skip_reason_reports_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pinned = system_visuals.CHEMPARSEPLOT
+
+    def set_env(specs: dict[str, object | None], cpp_version: str | None) -> None:
+        monkeypatch.setattr(importlib.util, "find_spec", lambda name: specs.get(name))
+
+        def fake_version(name: str) -> str:
+            if name != "chemparseplot" or cpp_version is None:
+                raise PackageNotFoundError(name)
+            return cpp_version
+
+        monkeypatch.setattr(sys.modules[__name__], "version", fake_version)
+
+    set_env({"matplotlib": None, "chemparseplot": None}, None)
+    assert (
+        figure_dependencies_skip_reason()
+        == f"requires matplotlib and chemparseplot=={pinned}"
+    )
+
+    set_env({"matplotlib": None, "chemparseplot": object()}, pinned)
+    assert figure_dependencies_skip_reason() == "requires matplotlib"
+
+    set_env({"matplotlib": object(), "chemparseplot": None}, None)
+    assert figure_dependencies_skip_reason() == f"requires chemparseplot=={pinned}"
+
+    set_env({"matplotlib": object(), "chemparseplot": object()}, "0.0.0")
+    assert (
+        figure_dependencies_skip_reason()
+        == f"requires chemparseplot=={pinned} (found 0.0.0)"
+    )
+
+    set_env({"matplotlib": object(), "chemparseplot": object()}, None)
+    assert (
+        figure_dependencies_skip_reason()
+        == f"requires chemparseplot=={pinned} (metadata missing)"
+    )
+
+    set_env({"matplotlib": object(), "chemparseplot": object()}, pinned)
+    assert figure_dependencies_skip_reason() is None
 
 
 def test_modules_run_as_main(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
