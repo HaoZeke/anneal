@@ -113,15 +113,16 @@ def summarize_scaling(path: Path) -> None:
         for r in by_workers.get(1, [])
         if r["hit"] == "1" and r["wall_to_hit_s"]
     ]
-    base_rung = max(by_workers) if 1 not in by_workers else 1
+    base_rung = min(by_workers) if 1 not in by_workers else 1
     base_rows = by_workers[base_rung]
     base_hits = sum(r["hit"] == "1" for r in base_rows)
     base_calls = [float(r["calls_to_hit"]) for r in base_rows]
+    base_wall = [float(r["wall_s"]) for r in base_rows]
 
     print(
         f"workers,n,hits,hit_rate,hit_ci95,wall_to_hit_med_s,wall_to_hit_ci95,"
         f"calls_to_hit_med,calls_to_hit_ci95,wall_med_s,cpu_med_s,peak_rss_med_kib,"
-        f"efficiency,efficiency_ci95,fisher_p_vs_p{base_rung},mwu_p_vs_p{base_rung},oversubscribed"
+        f"efficiency,efficiency_ci95,rel_eff_vs_p{base_rung},fisher_p_vs_p{base_rung},mwu_p_vs_p{base_rung},oversubscribed"
     )
     for w in sorted(by_workers):
         grp = by_workers[w]
@@ -139,7 +140,7 @@ def summarize_scaling(path: Path) -> None:
         if wall_hit_vec:
             wh_est, wh_lo, wh_hi = bootstrap_ci(wall_hit_vec, statistics.median)
             wh_str = f"{wh_est:.3f}"
-            wh_ci = f"[{wh_lo:.3f}, {wh_hi:.3f}]"
+            wh_ci = f"[{wh_lo:.3f}; {wh_hi:.3f}]"
         else:
             wh_str, wh_ci = "NA", "NA"
 
@@ -150,18 +151,26 @@ def summarize_scaling(path: Path) -> None:
             eff = bootstrap_ratio_ci(t1_hits_wall, wall_hit_vec, w)
             assert eff is not None
             eff_str = f"{eff[0]:.3f}"
-            eff_ci = f"[{eff[1]:.3f}, {eff[2]:.3f}]"
+            eff_ci = f"[{eff[1]:.3f}; {eff[2]:.3f}]"
+
+        wall_vec = [float(r["wall_s"]) for r in grp]
+        rel_eff = bootstrap_ratio_ci(base_wall, wall_vec, w)
+        rel_eff_str = (
+            "NA"
+            if over == "true" or rel_eff is None
+            else f"{base_rung * rel_eff[0]:.3f}"
+        )
 
         fp = paired_stats.fisher_exact(hits, n, base_hits, len(base_rows))
         _, mp = mann_whitney_u(calls_vec, base_calls)
-        wall_med = statistics.median(float(r["wall_s"]) for r in grp)
+        wall_med = statistics.median(wall_vec)
         cpu_med = statistics.median(float(r["cpu_s"]) for r in grp)
         rss_med = statistics.median(float(r["peak_rss_anon_kib"]) for r in grp)
         print(
             f"{w},{n},{hits}/{n},{hr_est:.3f},[{hr_lo:.3f}; {hr_hi:.3f}],"
             f"{wh_str},{wh_ci},{c_est:.0f},[{c_lo:.0f}; {c_hi:.0f}],"
             f"{wall_med:.3f},{cpu_med:.2f},{rss_med:.0f},{eff_str},{eff_ci},"
-            f"{fp:.6g},{mp:.6g},{over}"
+            f"{rel_eff_str},{fp:.6g},{mp:.6g},{over}"
         )
 
 
